@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>文字PVメーカー（仮）</title>
+<meta name="description" content="歌詞と曲から文字PVを作るブラウザアプリ（準備中）">
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #f6f5f2;
+  --panel: #ffffff;
+  --text: #1b1b1f;
+  --muted: #6b6870;
+  --line: #dedbd5;
+  --accent: #c77c00;
+  --stage: #0c0c0e;
+  --stage-text: #f4efe8;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f0f12;
+    --panel: #17171b;
+    --text: #ece7e1;
+    --muted: #8e8a94;
+    --line: #2a2a31;
+    --accent: #f5a50c;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Hiragino Sans", "Yu Gothic UI", "Meiryo", system-ui, sans-serif;
+  line-height: 1.7;
+}
+main { max-width: 720px; margin: 0 auto; padding: 48px 16px 64px; }
+h1 { font-size: 1.8rem; margin: 0; }
+.badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 0 10px;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  color: var(--accent);
+  font-size: .8rem;
+  vertical-align: middle;
+}
+.lead { color: var(--muted); margin: 8px 0 32px; }
+.stage {
+  aspect-ratio: 16 / 9;
+  background: var(--stage);
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  padding: 16px;
+}
+.stage span {
+  color: var(--stage-text);
+  font-weight: 900;
+  font-size: clamp(1.4rem, 6vw, 3rem);
+  text-align: center;
+  animation: pop .9s ease-out both;
+}
+@keyframes pop {
+  from { opacity: 0; transform: translateY(14px) scale(.96); letter-spacing: .4em; filter: blur(6px); }
+  to   { opacity: 1; transform: none; letter-spacing: .05em; filter: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .stage span { animation: none; }
+}
+label { display: block; margin: 20px 0 6px; font-size: .9rem; color: var(--muted); }
+input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+}
+input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+h2 { font-size: 1rem; margin: 40px 0 8px; }
+ul { margin: 0; padding-left: 1.2em; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <h1>文字PVメーカー<span class="badge">準備中</span></h1>
+  <p class="lead">歌詞と曲から文字PV（リリックモーション）を作るブラウザアプリです。いまは準備中で、このページは公開の確認用です。</p>
+
+  <div class="stage" aria-live="polite"><span id="line">ここから始める</span></div>
+
+  <label for="text">試しに1行入れてみてください</label>
+  <input id="text" type="text" value="ここから始める" maxlength="40" autocomplete="off">
+
+  <h2>予定している機能</h2>
+  <ul>
+    <li>歌詞の取り込み（テキスト・LRC・SRT）</li>
+    <li>曲に合わせた時刻合わせ</li>
+    <li>AI による演出の提案</li>
+    <li>MP4 の書き出し</li>
+  </ul>
+</main>
+<script>
+const input = document.getElementById('text');
+const stage = document.querySelector('.stage');
+let timer;
+input.addEventListener('input', () => {
+  clearTimeout(timer);
+  timer = setTimeout(() => {
+    const span = document.createElement('span');
+    span.id = 'line';
+    span.textContent = input.value.trim() || '　';
+    stage.replaceChildren(span);
+  }, 250);
+});
+</script>
+</body>
+</html>
