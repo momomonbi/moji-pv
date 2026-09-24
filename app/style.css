@@ -248,7 +248,7 @@ dialog.terms a { color: var(--cyan); word-break: break-all; }
 .terms-oss summary { cursor: pointer; }
 .terms-oss p { font-size: 12px !important; margin-top: 6px; }
 .terms-license { font: 10px/1.5 var(--mono); white-space: pre-wrap; background: var(--raised); border: 1px solid var(--line); border-radius: var(--r); padding: 8px 10px; max-height: 180px; overflow: auto; margin: 4px 0 0; }
-.terms-foot { display: flex; justify-content: space-between; align-items: center; gap: 12px; border-top: 1px solid var(--line); padding-top: 12px; }
+.terms-foot { display: flex; justify-content: flex-end; align-items: center; gap: 12px; border-top: 1px solid var(--line); padding-top: 12px; }
 
 /* ---------- responsive ---------- */
 @media (max-width: 1180px) {

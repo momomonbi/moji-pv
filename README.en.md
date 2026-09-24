@@ -1,7 +1,6 @@
 # Moji PV Maker (working title)
 
 A browser app that turns lyrics and a song into a lyric motion video.
-Based on JIZURA (© 2026 hakoniwa, MIT).
 
 **▶ Open the app: <https://momomonbi.github.io/moji-pv/en/>**
 
@@ -40,4 +39,4 @@ use and an approximate cost.
 ## Development and license
 
 Build with `python3 build.py`; tests and CI are listed in [README.md](README.md#開発).
-[MIT License](LICENSE), based on JIZURA (© 2026 hakoniwa). Third-party software: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+[MIT License](LICENSE). Third-party software: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

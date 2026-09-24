@@ -11,9 +11,9 @@ read = lambda p: open(p, encoding='utf-8').read()
 SITE = 'https://momomonbi.github.io/moji-pv/'
 APP = {
     'ja': {'title': '文字PVメーカー', 'word': 'MOJI PV MAKER',
-           'description': '歌詞と曲から文字PV（リリックモーション）を作って MP4 に書き出すブラウザアプリ。JIZURA（© 2026 hakoniwa, MIT）をもとにしています'},
+           'description': '歌詞と曲から文字PV（リリックモーション）を作って MP4 に書き出すブラウザアプリ'},
     'en': {'title': 'Moji PV Maker — Lyric Motion Video Maker', 'word': 'MOJI PV MAKER',
-           'description': 'Turn lyrics into animated lyric videos in your browser and export MP4. Based on JIZURA (© 2026 hakoniwa, MIT).'},
+           'description': 'Turn lyrics into animated lyric videos in your browser and export MP4.'},
 }
 
 # Content-Security-Policy (<meta>). Inline scripts are allowed only by their SHA-256 hash, so any script that is

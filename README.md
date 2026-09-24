@@ -1,12 +1,11 @@
 # 文字PVメーカー（仮）
 
 歌詞と曲から、文字PV（リリックモーション）を作るブラウザアプリです。
-JIZURA（© 2026 hakoniwa, MIT）をもとにしています。
 
 **▶ ブラウザで使う：<https://momomonbi.github.io/moji-pv/>**（English：<https://momomonbi.github.io/moji-pv/en/>）
 
 - インストールは要りません。歌詞・曲・書き出しは、すべてブラウザの中で処理します。
-- AIAPI を使わなくても、すべての機能が使えます。
+- AI を使わなくても、すべての機能が使えます。
 
 ## できること
 
@@ -75,7 +74,7 @@ python3 dev/ai_probe.py         # 実際の API に、ダミーのキーで CORS
 
 ## ライセンス
 
-[MIT License](LICENSE)。JIZURA（© 2026 hakoniwa）をもとにしています。
+[MIT License](LICENSE)。
 同梱しているサードパーティのソフトウェアは [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) を見てください。
 
 このツールで作った動画や画像の権利は、作った人（と、その歌詞・曲の権利者）にあります。

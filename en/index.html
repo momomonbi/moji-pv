@@ -5,13 +5,13 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-Z5ZD1YxiscaALgq4YmPgX/39Y7YGy9Z6aCx6cgMkhE4=' 'sha256-5EzytiGrjFEJwrIaH8sUu6x5ZCHG7SFCYwyGHilikD0=' 'sha256-M/Ni01cfOt3NMl81LRc58n7H9W3GK7zbqzlxl3Gj6Kk='; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' blob:; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; base-uri 'none'; form-action 'none'; object-src 'none'">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Moji PV Maker — Lyric Motion Video Maker</title>
-<meta name="description" content="Turn lyrics into animated lyric videos in your browser and export MP4. Based on JIZURA (© 2026 hakoniwa, MIT).">
+<meta name="description" content="Turn lyrics into animated lyric videos in your browser and export MP4.">
 <link rel="canonical" href="https://momomonbi.github.io/moji-pv/en/">
 <link rel="alternate" hreflang="ja" href="https://momomonbi.github.io/moji-pv/">
 <link rel="alternate" hreflang="en" href="https://momomonbi.github.io/moji-pv/en/">
 <meta property="og:type" content="website">
 <meta property="og:title" content="Moji PV Maker — Lyric Motion Video Maker">
-<meta property="og:description" content="Turn lyrics into animated lyric videos in your browser and export MP4. Based on JIZURA (© 2026 hakoniwa, MIT).">
+<meta property="og:description" content="Turn lyrics into animated lyric videos in your browser and export MP4.">
 <meta property="og:url" content="https://momomonbi.github.io/moji-pv/en/">
 <meta name="twitter:card" content="summary">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -267,7 +267,7 @@ dialog.terms a { color: var(--cyan); word-break: break-all; }
 .terms-oss summary { cursor: pointer; }
 .terms-oss p { font-size: 12px !important; margin-top: 6px; }
 .terms-license { font: 10px/1.5 var(--mono); white-space: pre-wrap; background: var(--raised); border: 1px solid var(--line); border-radius: var(--r); padding: 8px 10px; max-height: 180px; overflow: auto; margin: 4px 0 0; }
-.terms-foot { display: flex; justify-content: space-between; align-items: center; gap: 12px; border-top: 1px solid var(--line); padding-top: 12px; }
+.terms-foot { display: flex; justify-content: flex-end; align-items: center; gap: 12px; border-top: 1px solid var(--line); padding-top: 12px; }
 
 /* ---------- responsive ---------- */
 @media (max-width: 1180px) {
@@ -644,11 +644,10 @@ html[lang=en] #app.ai-open .work { grid-template-columns: minmax(300px, 350px) m
       <p class="terms-sub">Lyrics and music remain the property of their respective rights holders.</p>
     </div>
     <p>The tool is released under the <strong>MIT license</strong>. The full license text is under Open source software below.</p>
-    <p class="terms-base">Based on JIZURA (© 2026 hakoniwa, MIT).</p>
     <p class="muted terms-note">Your lyrics and audio are processed in this browser and are not sent to a server. Only when you use an AI feature, the lyric text and numbers are sent to the AI service you chose. The song audio is sent to Google Gemini only when you agree and use an AI Use the song feature.</p>
     <details class="terms-oss"><summary>Open source software</summary>
       <p>MP4 export: mp4-muxer（MIT License）<br>API client: @anthropic-ai/sdk（MIT License）<br>Fonts: Google Fonts typefaces（SIL Open Font License 1.1）</p>
-      <p>JIZURA license:</p>
+      <p>License of the software this tool is based on:</p>
       <pre class="terms-license">MIT License
 
 Copyright (c) 2026 hakoniwa
@@ -671,7 +670,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.</pre>
     </details>
-    <div class="terms-foot"><span class="muted mono">JIZURA © 2026 hakoniwa · MIT</span><button value="close" class="primary" autofocus>Close</button></div>
+    <div class="terms-foot"><button value="close" class="primary" autofocus>Close</button></div>
   </form>
 </dialog>
 

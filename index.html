@@ -5,13 +5,13 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-Z5ZD1YxiscaALgq4YmPgX/39Y7YGy9Z6aCx6cgMkhE4=' 'sha256-5EzytiGrjFEJwrIaH8sUu6x5ZCHG7SFCYwyGHilikD0=' 'sha256-nDld2gvGxOG+y0dzHxoVd11m6t4ItKoon/TByVW2vvg='; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' blob:; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; base-uri 'none'; form-action 'none'; object-src 'none'">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>文字PVメーカー</title>
-<meta name="description" content="歌詞と曲から文字PV（リリックモーション）を作って MP4 に書き出すブラウザアプリ。JIZURA（© 2026 hakoniwa, MIT）をもとにしています">
+<meta name="description" content="歌詞と曲から文字PV（リリックモーション）を作って MP4 に書き出すブラウザアプリ">
 <link rel="canonical" href="https://momomonbi.github.io/moji-pv/">
 <link rel="alternate" hreflang="ja" href="https://momomonbi.github.io/moji-pv/">
 <link rel="alternate" hreflang="en" href="https://momomonbi.github.io/moji-pv/en/">
 <meta property="og:type" content="website">
 <meta property="og:title" content="文字PVメーカー">
-<meta property="og:description" content="歌詞と曲から文字PV（リリックモーション）を作って MP4 に書き出すブラウザアプリ。JIZURA（© 2026 hakoniwa, MIT）をもとにしています">
+<meta property="og:description" content="歌詞と曲から文字PV（リリックモーション）を作って MP4 に書き出すブラウザアプリ">
 <meta property="og:url" content="https://momomonbi.github.io/moji-pv/">
 <meta name="twitter:card" content="summary">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -267,7 +267,7 @@ dialog.terms a { color: var(--cyan); word-break: break-all; }
 .terms-oss summary { cursor: pointer; }
 .terms-oss p { font-size: 12px !important; margin-top: 6px; }
 .terms-license { font: 10px/1.5 var(--mono); white-space: pre-wrap; background: var(--raised); border: 1px solid var(--line); border-radius: var(--r); padding: 8px 10px; max-height: 180px; overflow: auto; margin: 4px 0 0; }
-.terms-foot { display: flex; justify-content: space-between; align-items: center; gap: 12px; border-top: 1px solid var(--line); padding-top: 12px; }
+.terms-foot { display: flex; justify-content: flex-end; align-items: center; gap: 12px; border-top: 1px solid var(--line); padding-top: 12px; }
 
 /* ---------- responsive ---------- */
 @media (max-width: 1180px) {
@@ -644,11 +644,10 @@ html[lang=en] #app.ai-open .work { grid-template-columns: minmax(300px, 350px) m
       <p class="terms-sub">※ 使った歌詞や曲の権利は、それぞれの権利者に帰属します。</p>
     </div>
     <p>ツール本体は <strong>MIT ライセンス</strong>で公開しています。ライセンスの全文は、下の「使用しているオープンソース」にあります。</p>
-    <p class="terms-base">JIZURA（© 2026 hakoniwa, MIT）をもとにしています。</p>
     <p class="muted terms-note">入力した歌詞や曲は、このブラウザの中だけで処理され、サーバーには送信されません。AI 機能を使ったときだけ、歌詞のテキストと数値を、選んだ AI サービスに送ります。曲の音声は、AI の「曲を使う」機能を同意のうえで使ったときだけ、Google Gemini に送ります。</p>
     <details class="terms-oss"><summary>使用しているオープンソース</summary>
       <p>MP4 書き出し：mp4-muxer（MIT License）<br>API との通信：@anthropic-ai/sdk（MIT License）<br>フォント：Google Fonts 配布の各書体（SIL Open Font License 1.1）</p>
-      <p>JIZURA のライセンス：</p>
+      <p>もとにしたソフトウェアのライセンス：</p>
       <pre class="terms-license">MIT License
 
 Copyright (c) 2026 hakoniwa
@@ -671,7 +670,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.</pre>
     </details>
-    <div class="terms-foot"><span class="muted mono">JIZURA © 2026 hakoniwa · MIT</span><button value="close" class="primary" autofocus>閉じる</button></div>
+    <div class="terms-foot"><button value="close" class="primary" autofocus>閉じる</button></div>
   </form>
 </dialog>
 
