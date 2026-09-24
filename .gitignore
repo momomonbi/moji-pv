@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+dev/www/
+dev/node_modules/
+build/
+dist/
+node_modules/
+.env

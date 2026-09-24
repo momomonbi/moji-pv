@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Build, snapshots, English glossary
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Built pages are up to date
+        run: |
+          python3 build.py
+          git diff --exit-code -- index.html en/index.html || { echo "::error::index.html / en/index.html are stale. Run python3 build.py and commit."; exit 1; }
+      - name: Snapshot tests (parseLyrics / computeTiming / plan / omakase)
+        run: node dev/snapshot_test.js
+      - name: AI core unit tests (providers faked, no key)
+        run: |
+          node dev/ai_test.js
+          node dev/ai_audio_test.js
+      - name: English glossary covers every UI string
+        run: |
+          (cd dev && npm ci)
+          python3 dev/check_english.py
+
+  browser:
+    name: Smoke (all 707 parts) and CSP in Chrome
+    runs-on: ubuntu-latest
+    env:
+      PW_CHANNEL: chrome        # Playwright drives the Google Chrome that ships with the runner
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Playwright (Python)
+        run: pip install playwright==1.63.0
+      - name: Smoke test every expression part
+        run: |
+          python3 dev/build_test.py all --all-packs
+          (cd dev/www && python3 -m http.server 8765 --bind 127.0.0.1 &)
+          sleep 1
+          python3 dev/smoke_all.py
+      - name: CSP has no violations and fonts load
+        run: python3 dev/csp_check.py --strict-fonts
+      - name: AI panel end to end (Gemini answers faked)
+        run: python3 dev/ai_ui_check.py
