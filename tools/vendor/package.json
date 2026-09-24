@@ -1,0 +1,14 @@
+{
+  "name": "moji-pv-vendor",
+  "private": true,
+  "description": "Builds vendor/ai-sdk.min.js (the second AI service's official SDK bundled for the browser). Run: cd tools/vendor && npm ci && npm run build",
+  "scripts": {
+    "build": "esbuild entry.js --bundle --minify --format=iife --platform=browser --target=es2020 --legal-comments=none --banner:js=\"/*! @anthropic-ai/sdk 0.128.0 | MIT License | (c) 2023 Anthropic, PBC | see THIRD_PARTY_NOTICES.md */\" --outfile=../../vendor/ai-sdk.min.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "0.128.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}

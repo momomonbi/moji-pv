@@ -1,0 +1,7 @@
+# Japanese text that stays as it is in the English edition (exact text, one per line).
+# brand mark (a logo, aria-hidden)
+文字
+# language names are written in their own language
+日本語
+繁體中文
+简体中文

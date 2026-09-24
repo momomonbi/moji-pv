@@ -1,0 +1,1450 @@
+{
+ "generatedBy": "node dev/diversity.js",
+ "seeds": 40,
+ "configs": {
+  "summer.default": {
+   "seeds": 40,
+   "cuts": {
+    "mean": 35,
+    "p10": 35,
+    "p90": 35
+   },
+   "entropy": {
+    "mean": 0.928,
+    "p10": 0.9,
+    "p90": 0.955
+   },
+   "offSeason": {
+    "mean": 0.7,
+    "p10": 0,
+    "p90": 1
+   },
+   "distinct.layout": {
+    "mean": 28.8,
+    "p10": 26,
+    "p90": 31
+   },
+   "distinct.enter": {
+    "mean": 26.425,
+    "p10": 24,
+    "p90": 28
+   },
+   "distinct.hold": {
+    "mean": 19.7,
+    "p10": 17,
+    "p90": 22
+   },
+   "distinct.exit": {
+    "mean": 25.7,
+    "p10": 23,
+    "p90": 28
+   },
+   "distinct.decor": {
+    "mean": 28.3,
+    "p10": 25,
+    "p90": 31
+   },
+   "distinct.treat": {
+    "mean": 10.125,
+    "p10": 6,
+    "p90": 13
+   },
+   "distinct.bg": {
+    "mean": 5.65,
+    "p10": 4,
+    "p90": 7
+   },
+   "distinct.cam": {
+    "mean": 14.625,
+    "p10": 13,
+    "p90": 16
+   },
+   "distinct.trans": {
+    "mean": 0,
+    "p10": 0,
+    "p90": 0
+   },
+   "repeat.layout": {
+    "mean": 0.003,
+    "p10": 0,
+    "p90": 0
+   },
+   "repeat.enter": {
+    "mean": 0.002,
+    "p10": 0,
+    "p90": 0
+   },
+   "repeat.exit": {
+    "mean": 0.007,
+    "p10": 0,
+    "p90": 0.029
+   },
+   "coverage": {
+    "layout": 1,
+    "enter": 1,
+    "hold": 1,
+    "exit": 1,
+    "decor": 1,
+    "treat": 1,
+    "bg": 1,
+    "cam": 1,
+    "trans": 0
+   },
+   "eligible": {
+    "layout": 72,
+    "enter": 53,
+    "hold": 26,
+    "exit": 47,
+    "decor": 60,
+    "treat": 24,
+    "bg": 24,
+    "cam": 15,
+    "trans": 0
+   }
+  },
+  "summer.extra": {
+   "seeds": 40,
+   "cuts": {
+    "mean": 35,
+    "p10": 35,
+    "p90": 35
+   },
+   "entropy": {
+    "mean": 0.961,
+    "p10": 0.944,
+    "p90": 0.989
+   },
+   "offSeason": {
+    "mean": 0.675,
+    "p10": 0,
+    "p90": 1
+   },
+   "distinct.layout": {
+    "mean": 31.575,
+    "p10": 30,
+    "p90": 34
+   },
+   "distinct.enter": {
+    "mean": 24.425,
+    "p10": 21,
+    "p90": 27
+   },
+   "distinct.hold": {
+    "mean": 23.65,
+    "p10": 21,
+    "p90": 26
+   },
+   "distinct.exit": {
+    "mean": 23.525,
+    "p10": 20,
+    "p90": 26
+   },
+   "distinct.decor": {
+    "mean": 33.625,
+    "p10": 31,
+    "p90": 36
+   },
+   "distinct.treat": {
+    "mean": 10.75,
+    "p10": 8,
+    "p90": 13
+   },
+   "distinct.bg": {
+    "mean": 5.9,
+    "p10": 3,
+    "p90": 8
+   },
+   "distinct.cam": {
+    "mean": 19.85,
+    "p10": 18,
+    "p90": 22
+   },
+   "distinct.trans": {
+    "mean": 7.075,
+    "p10": 5,
+    "p90": 10
+   },
+   "repeat.layout": {
+    "mean": 0,
+    "p10": 0,
+    "p90": 0
+   },
+   "repeat.enter": {
+    "mean": 0.068,
+    "p10": 0,
+    "p90": 0.118
+   },
+   "repeat.exit": {
+    "mean": 0.073,
+    "p10": 0,
+    "p90": 0.118
+   },
+   "coverage": {
+    "layout": 1,
+    "enter": 1,
+    "hold": 1,
+    "exit": 1,
+    "decor": 1,
+    "treat": 1,
+    "bg": 0.951,
+    "cam": 1,
+    "trans": 1
+   },
+   "eligible": {
+    "layout": 140,
+    "enter": 100,
+    "hold": 38,
+    "exit": 86,
+    "decor": 115,
+    "treat": 51,
+    "bg": 61,
+    "cam": 27,
+    "trans": 20
+   }
+  },
+  "summer.omakase": {
+   "seeds": 40,
+   "cuts": {
+    "mean": 33.525,
+    "p10": 29,
+    "p90": 37
+   },
+   "entropy": {
+    "mean": 0.876,
+    "p10": 0.811,
+    "p90": 0.931
+   },
+   "offSeason": {
+    "mean": 0.45,
+    "p10": 0,
+    "p90": 1
+   },
+   "distinct.layout": {
+    "mean": 23.675,
+    "p10": 21,
+    "p90": 27
+   },
+   "distinct.enter": {
+    "mean": 20.675,
+    "p10": 17,
+    "p90": 24
+   },
+   "distinct.hold": {
+    "mean": 12.575,
+    "p10": 9,
+    "p90": 15
+   },
+   "distinct.exit": {
+    "mean": 19.025,
+    "p10": 16,
+    "p90": 22
+   },
+   "distinct.decor": {
+    "mean": 24.725,
+    "p10": 17,
+    "p90": 34
+   },
+   "distinct.treat": {
+    "mean": 8.75,
+    "p10": 6,
+    "p90": 12
+   },
+   "distinct.bg": {
+    "mean": 6.15,
+    "p10": 4,
+    "p90": 9
+   },
+   "distinct.cam": {
+    "mean": 9.925,
+    "p10": 8,
+    "p90": 12
+   },
+   "distinct.trans": {
+    "mean": 0,
+    "p10": 0,
+    "p90": 0
+   },
+   "repeat.layout": {
+    "mean": 0.007,
+    "p10": 0,
+    "p90": 0.029
+   },
+   "repeat.enter": {
+    "mean": 0.011,
+    "p10": 0,
+    "p90": 0.029
+   },
+   "repeat.exit": {
+    "mean": 0.011,
+    "p10": 0,
+    "p90": 0.036
+   },
+   "coverage": {
+    "layout": 1,
+    "enter": 1,
+    "hold": 1,
+    "exit": 1,
+    "decor": 1,
+    "treat": 1,
+    "bg": 1,
+    "cam": 1,
+    "trans": 0
+   },
+   "eligible": {
+    "layout": 32,
+    "enter": 19,
+    "hold": 11,
+    "exit": 25,
+    "decor": 25,
+    "treat": 8,
+    "bg": 9,
+    "cam": 9,
+    "trans": 0
+   },
+   "styles": {
+    "distinct": 10,
+    "entropy": 0.579
+   },
+   "moods": {
+    "distinct": 7,
+    "entropy": 0.51
+   }
+  },
+  "summer.omakase_extra": {
+   "seeds": 40,
+   "cuts": {
+    "mean": 33.525,
+    "p10": 29,
+    "p90": 37
+   },
+   "entropy": {
+    "mean": 0.929,
+    "p10": 0.884,
+    "p90": 0.963
+   },
+   "offSeason": {
+    "mean": 0.5,
+    "p10": 0,
+    "p90": 1
+   },
+   "distinct.layout": {
+    "mean": 27.725,
+    "p10": 25,
+    "p90": 32
+   },
+   "distinct.enter": {
+    "mean": 21.825,
+    "p10": 20,
+    "p90": 25
+   },
+   "distinct.hold": {
+    "mean": 15.925,
+    "p10": 13,
+    "p90": 18
+   },
+   "distinct.exit": {
+    "mean": 20.1,
+    "p10": 18,
+    "p90": 23
+   },
+   "distinct.decor": {
+    "mean": 30.85,
+    "p10": 22,
+    "p90": 44
+   },
+   "distinct.treat": {
+    "mean": 10.325,
+    "p10": 6,
+    "p90": 15
+   },
+   "distinct.bg": {
+    "mean": 6.55,
+    "p10": 4,
+    "p90": 9
+   },
+   "distinct.cam": {
+    "mean": 14.475,
+    "p10": 12,
+    "p90": 17
+   },
+   "distinct.trans": {
+    "mean": 5.55,
+    "p10": 4,
+    "p90": 7
+   },
+   "repeat.layout": {
+    "mean": 0.002,
+    "p10": 0,
+    "p90": 0
+   },
+   "repeat.enter": {
+    "mean": 0.053,
+    "p10": 0,
+    "p90": 0.111
+   },
+   "repeat.exit": {
+    "mean": 0.066,
+    "p10": 0,
+    "p90": 0.129
+   },
+   "coverage": {
+    "layout": 1,
+    "enter": 1,
+    "hold": 1,
+    "exit": 0.971,
+    "decor": 1,
+    "treat": 1,
+    "bg": 1,
+    "cam": 1,
+    "trans": 1
+   },
+   "eligible": {
+    "layout": 49,
+    "enter": 46,
+    "hold": 17,
+    "exit": 35,
+    "decor": 46,
+    "treat": 19,
+    "bg": 22,
+    "cam": 13,
+    "trans": 13
+   },
+   "styles": {
+    "distinct": 19,
+    "entropy": 0.776
+   },
+   "moods": {
+    "distinct": 7,
+    "entropy": 0.51
+   }
+  },
+  "summer.omakase_extra_season": {
+   "seeds": 40,
+   "cuts": {
+    "mean": 33.525,
+    "p10": 29,
+    "p90": 37
+   },
+   "entropy": {
+    "mean": 0.931,
+    "p10": 0.891,
+    "p90": 0.957
+   },
+   "offSeason": {
+    "mean": 0,
+    "p10": 0,
+    "p90": 0
+   },
+   "distinct.layout": {
+    "mean": 27.85,
+    "p10": 25,
+    "p90": 31
+   },
+   "distinct.enter": {
+    "mean": 21.825,
+    "p10": 19,
+    "p90": 25
+   },
+   "distinct.hold": {
+    "mean": 16.2,
+    "p10": 13,
+    "p90": 20
+   },
+   "distinct.exit": {
+    "mean": 19.825,
+    "p10": 17,
+    "p90": 23
+   },
+   "distinct.decor": {
+    "mean": 31.4,
+    "p10": 22,
+    "p90": 46
+   },
+   "distinct.treat": {
+    "mean": 9.575,
+    "p10": 6,
+    "p90": 13
+   },
+   "distinct.bg": {
+    "mean": 6.25,
+    "p10": 4,
+    "p90": 9
+   },
+   "distinct.cam": {
+    "mean": 14.05,
+    "p10": 12,
+    "p90": 16
+   },
+   "distinct.trans": {
+    "mean": 5.65,
+    "p10": 3,
+    "p90": 9
+   },
+   "repeat.layout": {
+    "mean": 0.004,
+    "p10": 0,
+    "p90": 0.028
+   },
+   "repeat.enter": {
+    "mean": 0.059,
+    "p10": 0,
+    "p90": 0.139
+   },
+   "repeat.exit": {
+    "mean": 0.072,
+    "p10": 0,
+    "p90": 0.167
+   },
+   "coverage": {
+    "layout": 1,
+    "enter": 1,
+    "hold": 1,
+    "exit": 1,
+    "decor": 1,
+    "treat": 1,
+    "bg": 1,
+    "cam": 1,
+    "trans": 1
+   },
+   "eligible": {
+    "layout": 49,
+    "enter": 46,
+    "hold": 17,
+    "exit": 35,
+    "decor": 45,
+    "treat": 19,
+    "bg": 23,
+    "cam": 13,
+    "trans": 13
+   },
+   "styles": {
+    "distinct": 18,
+    "entropy": 0.763
+   },
+   "moods": {
+    "distinct": 7,
+    "entropy": 0.51
+   }
+  },
+  "winter.default": {
+   "seeds": 40,
+   "cuts": {
+    "mean": 30,
+    "p10": 30,
+    "p90": 30
+   },
+   "entropy": {
+    "mean": 0.933,
+    "p10": 0.905,
+    "p90": 0.959
+   },
+   "offSeason": {
+    "mean": 0.5,
+    "p10": 0,
+    "p90": 1
+   },
+   "distinct.layout": {
+    "mean": 25.225,
+    "p10": 23,
+    "p90": 27
+   },
+   "distinct.enter": {
+    "mean": 23.8,
+    "p10": 22,
+    "p90": 26
+   },
+   "distinct.hold": {
+    "mean": 18.55,
+    "p10": 17,
+    "p90": 21
+   },
+   "distinct.exit": {
+    "mean": 23.5,
+    "p10": 21,
+    "p90": 26
+   },
+   "distinct.decor": {
+    "mean": 26.075,
+    "p10": 24,
+    "p90": 28
+   },
+   "distinct.treat": {
+    "mean": 8.975,
+    "p10": 6,
+    "p90": 12
+   },
+   "distinct.bg": {
+    "mean": 4.8,
+    "p10": 3,
+    "p90": 7
+   },
+   "distinct.cam": {
+    "mean": 13.9,
+    "p10": 13,
+    "p90": 15
+   },
+   "distinct.trans": {
+    "mean": 0,
+    "p10": 0,
+    "p90": 0
+   },
+   "repeat.layout": {
+    "mean": 0.004,
+    "p10": 0,
+    "p90": 0.034
+   },
+   "repeat.enter": {
+    "mean": 0.003,
+    "p10": 0,
+    "p90": 0
+   },
+   "repeat.exit": {
+    "mean": 0.003,
+    "p10": 0,
+    "p90": 0
+   },
+   "coverage": {
+    "layout": 1,
+    "enter": 1,
+    "hold": 1,
+    "exit": 1,
+    "decor": 1,
+    "treat": 1,
+    "bg": 1,
+    "cam": 1,
+    "trans": 0
+   },
+   "eligible": {
+    "layout": 72,
+    "enter": 53,
+    "hold": 26,
+    "exit": 47,
+    "decor": 60,
+    "treat": 24,
+    "bg": 24,
+    "cam": 15,
+    "trans": 0
+   }
+  },
+  "winter.extra": {
+   "seeds": 40,
+   "cuts": {
+    "mean": 30,
+    "p10": 30,
+    "p90": 30
+   },
+   "entropy": {
+    "mean": 0.96,
+    "p10": 0.927,
+    "p90": 0.986
+   },
+   "offSeason": {
+    "mean": 0.825,
+    "p10": 0,
+    "p90": 1
+   },
+   "distinct.layout": {
+    "mean": 27.125,
+    "p10": 25,
+    "p90": 29
+   },
+   "distinct.enter": {
+    "mean": 21.325,
+    "p10": 19,
+    "p90": 24
+   },
+   "distinct.hold": {
+    "mean": 21.475,
+    "p10": 20,
+    "p90": 23
+   },
+   "distinct.exit": {
+    "mean": 20.25,
+    "p10": 17,
+    "p90": 23
+   },
+   "distinct.decor": {
+    "mean": 29.325,
+    "p10": 27,
+    "p90": 32
+   },
+   "distinct.treat": {
+    "mean": 10.125,
+    "p10": 8,
+    "p90": 13
+   },
+   "distinct.bg": {
+    "mean": 4.625,
+    "p10": 3,
+    "p90": 6
+   },
+   "distinct.cam": {
+    "mean": 18.55,
+    "p10": 17,
+    "p90": 20
+   },
+   "distinct.trans": {
+    "mean": 6.6,
+    "p10": 4,
+    "p90": 8
+   },
+   "repeat.layout": {
+    "mean": 0.002,
+    "p10": 0,
+    "p90": 0
+   },
+   "repeat.enter": {
+    "mean": 0.07,
+    "p10": 0,
+    "p90": 0.138
+   },
+   "repeat.exit": {
+    "mean": 0.08,
+    "p10": 0,
+    "p90": 0.138
+   },
+   "coverage": {
+    "layout": 0.993,
+    "enter": 1,
+    "hold": 1,
+    "exit": 1,
+    "decor": 1,
+    "treat": 1,
+    "bg": 0.918,
+    "cam": 1,
+    "trans": 1
+   },
+   "eligible": {
+    "layout": 140,
+    "enter": 100,
+    "hold": 38,
+    "exit": 86,
+    "decor": 115,
+    "treat": 51,
+    "bg": 61,
+    "cam": 27,
+    "trans": 20
+   }
+  },
+  "winter.omakase": {
+   "seeds": 40,
+   "cuts": {
+    "mean": 28.725,
+    "p10": 25,
+    "p90": 30
+   },
+   "entropy": {
+    "mean": 0.892,
+    "p10": 0.859,
+    "p90": 0.931
+   },
+   "offSeason": {
+    "mean": 0.325,
+    "p10": 0,
+    "p90": 1
+   },
+   "distinct.layout": {
+    "mean": 21.6,
+    "p10": 19,
+    "p90": 24
+   },
+   "distinct.enter": {
+    "mean": 18.875,
+    "p10": 16,
+    "p90": 22
+   },
+   "distinct.hold": {
+    "mean": 12.075,
+    "p10": 9,
+    "p90": 15
+   },
+   "distinct.exit": {
+    "mean": 17.3,
+    "p10": 14,
+    "p90": 20
+   },
+   "distinct.decor": {
+    "mean": 22.975,
+    "p10": 16,
+    "p90": 32
+   },
+   "distinct.treat": {
+    "mean": 7.975,
+    "p10": 5,
+    "p90": 12
+   },
+   "distinct.bg": {
+    "mean": 5.85,
+    "p10": 3,
+    "p90": 8
+   },
+   "distinct.cam": {
+    "mean": 9.675,
+    "p10": 8,
+    "p90": 12
+   },
+   "distinct.trans": {
+    "mean": 0,
+    "p10": 0,
+    "p90": 0
+   },
+   "repeat.layout": {
+    "mean": 0.003,
+    "p10": 0,
+    "p90": 0
+   },
+   "repeat.enter": {
+    "mean": 0.014,
+    "p10": 0,
+    "p90": 0.042
+   },
+   "repeat.exit": {
+    "mean": 0.006,
+    "p10": 0,
+    "p90": 0.034
+   },
+   "coverage": {
+    "layout": 1,
+    "enter": 1,
+    "hold": 1,
+    "exit": 1,
+    "decor": 1,
+    "treat": 1,
+    "bg": 1,
+    "cam": 1,
+    "trans": 0
+   },
+   "eligible": {
+    "layout": 32,
+    "enter": 19,
+    "hold": 11,
+    "exit": 25,
+    "decor": 25,
+    "treat": 8,
+    "bg": 9,
+    "cam": 9,
+    "trans": 0
+   },
+   "styles": {
+    "distinct": 10,
+    "entropy": 0.579
+   },
+   "moods": {
+    "distinct": 7,
+    "entropy": 0.51
+   }
+  },
+  "winter.omakase_extra": {
+   "seeds": 40,
+   "cuts": {
+    "mean": 28.725,
+    "p10": 25,
+    "p90": 30
+   },
+   "entropy": {
+    "mean": 0.945,
+    "p10": 0.905,
+    "p90": 0.973
+   },
+   "offSeason": {
+    "mean": 0.7,
+    "p10": 0,
+    "p90": 1
+   },
+   "distinct.layout": {
+    "mean": 25.05,
+    "p10": 21,
+    "p90": 28
+   },
+   "distinct.enter": {
+    "mean": 19.6,
+    "p10": 17,
+    "p90": 23
+   },
+   "distinct.hold": {
+    "mean": 15,
+    "p10": 13,
+    "p90": 18
+   },
+   "distinct.exit": {
+    "mean": 18.3,
+    "p10": 16,
+    "p90": 22
+   },
+   "distinct.decor": {
+    "mean": 28.575,
+    "p10": 20,
+    "p90": 41
+   },
+   "distinct.treat": {
+    "mean": 9,
+    "p10": 6,
+    "p90": 12
+   },
+   "distinct.bg": {
+    "mean": 5.575,
+    "p10": 3,
+    "p90": 8
+   },
+   "distinct.cam": {
+    "mean": 13.7,
+    "p10": 11,
+    "p90": 17
+   },
+   "distinct.trans": {
+    "mean": 5.125,
+    "p10": 2,
+    "p90": 8
+   },
+   "repeat.layout": {
+    "mean": 0.002,
+    "p10": 0,
+    "p90": 0
+   },
+   "repeat.enter": {
+    "mean": 0.057,
+    "p10": 0,
+    "p90": 0.138
+   },
+   "repeat.exit": {
+    "mean": 0.075,
+    "p10": 0,
+    "p90": 0.172
+   },
+   "coverage": {
+    "layout": 1,
+    "enter": 1,
+    "hold": 1,
+    "exit": 0.971,
+    "decor": 1,
+    "treat": 1,
+    "bg": 1,
+    "cam": 1,
+    "trans": 1
+   },
+   "eligible": {
+    "layout": 49,
+    "enter": 46,
+    "hold": 17,
+    "exit": 35,
+    "decor": 46,
+    "treat": 19,
+    "bg": 22,
+    "cam": 13,
+    "trans": 13
+   },
+   "styles": {
+    "distinct": 19,
+    "entropy": 0.776
+   },
+   "moods": {
+    "distinct": 7,
+    "entropy": 0.51
+   }
+  },
+  "winter.omakase_extra_season": {
+   "seeds": 40,
+   "cuts": {
+    "mean": 28.725,
+    "p10": 25,
+    "p90": 30
+   },
+   "entropy": {
+    "mean": 0.938,
+    "p10": 0.905,
+    "p90": 0.973
+   },
+   "offSeason": {
+    "mean": 0,
+    "p10": 0,
+    "p90": 0
+   },
+   "distinct.layout": {
+    "mean": 24.525,
+    "p10": 21,
+    "p90": 27
+   },
+   "distinct.enter": {
+    "mean": 20.05,
+    "p10": 17,
+    "p90": 23
+   },
+   "distinct.hold": {
+    "mean": 15.5,
+    "p10": 13,
+    "p90": 18
+   },
+   "distinct.exit": {
+    "mean": 18.6,
+    "p10": 15,
+    "p90": 22
+   },
+   "distinct.decor": {
+    "mean": 28.6,
+    "p10": 20,
+    "p90": 40
+   },
+   "distinct.treat": {
+    "mean": 8.975,
+    "p10": 6,
+    "p90": 14
+   },
+   "distinct.bg": {
+    "mean": 5,
+    "p10": 3,
+    "p90": 7
+   },
+   "distinct.cam": {
+    "mean": 14.175,
+    "p10": 12,
+    "p90": 17
+   },
+   "distinct.trans": {
+    "mean": 5,
+    "p10": 3,
+    "p90": 7
+   },
+   "repeat.layout": {
+    "mean": 0.001,
+    "p10": 0,
+    "p90": 0
+   },
+   "repeat.enter": {
+    "mean": 0.055,
+    "p10": 0,
+    "p90": 0.138
+   },
+   "repeat.exit": {
+    "mean": 0.069,
+    "p10": 0,
+    "p90": 0.138
+   },
+   "coverage": {
+    "layout": 1,
+    "enter": 1,
+    "hold": 1,
+    "exit": 1,
+    "decor": 1,
+    "treat": 1,
+    "bg": 1,
+    "cam": 1,
+    "trans": 1
+   },
+   "eligible": {
+    "layout": 49,
+    "enter": 45,
+    "hold": 17,
+    "exit": 35,
+    "decor": 44,
+    "treat": 19,
+    "bg": 23,
+    "cam": 13,
+    "trans": 13
+   },
+   "styles": {
+    "distinct": 18,
+    "entropy": 0.763
+   },
+   "moods": {
+    "distinct": 7,
+    "entropy": 0.51
+   }
+  },
+  "neutral.default": {
+   "seeds": 40,
+   "cuts": {
+    "mean": 31,
+    "p10": 31,
+    "p90": 31
+   },
+   "entropy": {
+    "mean": 0.933,
+    "p10": 0.904,
+    "p90": 0.961
+   },
+   "distinct.layout": {
+    "mean": 26.05,
+    "p10": 24,
+    "p90": 28
+   },
+   "distinct.enter": {
+    "mean": 24.775,
+    "p10": 23,
+    "p90": 27
+   },
+   "distinct.hold": {
+    "mean": 18.65,
+    "p10": 17,
+    "p90": 21
+   },
+   "distinct.exit": {
+    "mean": 23.65,
+    "p10": 22,
+    "p90": 26
+   },
+   "distinct.decor": {
+    "mean": 26.525,
+    "p10": 25,
+    "p90": 28
+   },
+   "distinct.treat": {
+    "mean": 9.35,
+    "p10": 7,
+    "p90": 12
+   },
+   "distinct.bg": {
+    "mean": 4.875,
+    "p10": 3,
+    "p90": 7
+   },
+   "distinct.cam": {
+    "mean": 14.15,
+    "p10": 13,
+    "p90": 15
+   },
+   "distinct.trans": {
+    "mean": 0,
+    "p10": 0,
+    "p90": 0
+   },
+   "repeat.layout": {
+    "mean": 0.002,
+    "p10": 0,
+    "p90": 0
+   },
+   "repeat.enter": {
+    "mean": 0.002,
+    "p10": 0,
+    "p90": 0
+   },
+   "repeat.exit": {
+    "mean": 0.003,
+    "p10": 0,
+    "p90": 0
+   },
+   "coverage": {
+    "layout": 1,
+    "enter": 1,
+    "hold": 1,
+    "exit": 1,
+    "decor": 1,
+    "treat": 1,
+    "bg": 1,
+    "cam": 1,
+    "trans": 0
+   },
+   "eligible": {
+    "layout": 72,
+    "enter": 53,
+    "hold": 26,
+    "exit": 47,
+    "decor": 60,
+    "treat": 24,
+    "bg": 24,
+    "cam": 15,
+    "trans": 0
+   }
+  },
+  "neutral.extra": {
+   "seeds": 40,
+   "cuts": {
+    "mean": 31,
+    "p10": 31,
+    "p90": 31
+   },
+   "entropy": {
+    "mean": 0.967,
+    "p10": 0.948,
+    "p90": 0.987
+   },
+   "distinct.layout": {
+    "mean": 28.525,
+    "p10": 27,
+    "p90": 30
+   },
+   "distinct.enter": {
+    "mean": 22.1,
+    "p10": 19,
+    "p90": 25
+   },
+   "distinct.hold": {
+    "mean": 21.95,
+    "p10": 20,
+    "p90": 24
+   },
+   "distinct.exit": {
+    "mean": 21.125,
+    "p10": 19,
+    "p90": 24
+   },
+   "distinct.decor": {
+    "mean": 30.35,
+    "p10": 27,
+    "p90": 33
+   },
+   "distinct.treat": {
+    "mean": 9.65,
+    "p10": 7,
+    "p90": 12
+   },
+   "distinct.bg": {
+    "mean": 5.025,
+    "p10": 3,
+    "p90": 7
+   },
+   "distinct.cam": {
+    "mean": 18.725,
+    "p10": 17,
+    "p90": 20
+   },
+   "distinct.trans": {
+    "mean": 6.925,
+    "p10": 5,
+    "p90": 9
+   },
+   "repeat.layout": {
+    "mean": 0.003,
+    "p10": 0,
+    "p90": 0
+   },
+   "repeat.enter": {
+    "mean": 0.064,
+    "p10": 0,
+    "p90": 0.133
+   },
+   "repeat.exit": {
+    "mean": 0.073,
+    "p10": 0,
+    "p90": 0.133
+   },
+   "coverage": {
+    "layout": 1,
+    "enter": 1,
+    "hold": 1,
+    "exit": 1,
+    "decor": 1,
+    "treat": 1,
+    "bg": 0.934,
+    "cam": 1,
+    "trans": 1
+   },
+   "eligible": {
+    "layout": 140,
+    "enter": 100,
+    "hold": 38,
+    "exit": 86,
+    "decor": 115,
+    "treat": 51,
+    "bg": 61,
+    "cam": 27,
+    "trans": 20
+   }
+  },
+  "neutral.omakase": {
+   "seeds": 40,
+   "cuts": {
+    "mean": 31.075,
+    "p10": 28,
+    "p90": 33
+   },
+   "entropy": {
+    "mean": 0.896,
+    "p10": 0.847,
+    "p90": 0.946
+   },
+   "distinct.layout": {
+    "mean": 23.5,
+    "p10": 21,
+    "p90": 27
+   },
+   "distinct.enter": {
+    "mean": 19.6,
+    "p10": 16,
+    "p90": 23
+   },
+   "distinct.hold": {
+    "mean": 12.275,
+    "p10": 9,
+    "p90": 15
+   },
+   "distinct.exit": {
+    "mean": 18.75,
+    "p10": 16,
+    "p90": 21
+   },
+   "distinct.decor": {
+    "mean": 23.625,
+    "p10": 17,
+    "p90": 33
+   },
+   "distinct.treat": {
+    "mean": 8.5,
+    "p10": 5,
+    "p90": 13
+   },
+   "distinct.bg": {
+    "mean": 5.575,
+    "p10": 4,
+    "p90": 8
+   },
+   "distinct.cam": {
+    "mean": 9.65,
+    "p10": 8,
+    "p90": 11
+   },
+   "distinct.trans": {
+    "mean": 0,
+    "p10": 0,
+    "p90": 0
+   },
+   "repeat.layout": {
+    "mean": 0.004,
+    "p10": 0,
+    "p90": 0
+   },
+   "repeat.enter": {
+    "mean": 0.012,
+    "p10": 0,
+    "p90": 0.036
+   },
+   "repeat.exit": {
+    "mean": 0.013,
+    "p10": 0,
+    "p90": 0.037
+   },
+   "coverage": {
+    "layout": 1,
+    "enter": 1,
+    "hold": 1,
+    "exit": 1,
+    "decor": 1,
+    "treat": 1,
+    "bg": 1,
+    "cam": 1,
+    "trans": 0
+   },
+   "eligible": {
+    "layout": 32,
+    "enter": 19,
+    "hold": 11,
+    "exit": 25,
+    "decor": 25,
+    "treat": 8,
+    "bg": 9,
+    "cam": 9,
+    "trans": 0
+   },
+   "styles": {
+    "distinct": 10,
+    "entropy": 0.579
+   },
+   "moods": {
+    "distinct": 7,
+    "entropy": 0.51
+   }
+  },
+  "neutral.omakase_extra": {
+   "seeds": 40,
+   "cuts": {
+    "mean": 31.075,
+    "p10": 28,
+    "p90": 33
+   },
+   "entropy": {
+    "mean": 0.939,
+    "p10": 0.899,
+    "p90": 0.974
+   },
+   "distinct.layout": {
+    "mean": 26.475,
+    "p10": 24,
+    "p90": 29
+   },
+   "distinct.enter": {
+    "mean": 20.475,
+    "p10": 17,
+    "p90": 25
+   },
+   "distinct.hold": {
+    "mean": 15.975,
+    "p10": 13,
+    "p90": 20
+   },
+   "distinct.exit": {
+    "mean": 18.975,
+    "p10": 16,
+    "p90": 23
+   },
+   "distinct.decor": {
+    "mean": 29.775,
+    "p10": 21,
+    "p90": 41
+   },
+   "distinct.treat": {
+    "mean": 9.675,
+    "p10": 6,
+    "p90": 13
+   },
+   "distinct.bg": {
+    "mean": 5.7,
+    "p10": 3,
+    "p90": 9
+   },
+   "distinct.cam": {
+    "mean": 14.175,
+    "p10": 11,
+    "p90": 17
+   },
+   "distinct.trans": {
+    "mean": 5.625,
+    "p10": 3,
+    "p90": 8
+   },
+   "repeat.layout": {
+    "mean": 0.002,
+    "p10": 0,
+    "p90": 0
+   },
+   "repeat.enter": {
+    "mean": 0.062,
+    "p10": 0,
+    "p90": 0.156
+   },
+   "repeat.exit": {
+    "mean": 0.08,
+    "p10": 0,
+    "p90": 0.161
+   },
+   "coverage": {
+    "layout": 1,
+    "enter": 1,
+    "hold": 1,
+    "exit": 1,
+    "decor": 1,
+    "treat": 1,
+    "bg": 1,
+    "cam": 1,
+    "trans": 1
+   },
+   "eligible": {
+    "layout": 49,
+    "enter": 46,
+    "hold": 17,
+    "exit": 35,
+    "decor": 46,
+    "treat": 19,
+    "bg": 22,
+    "cam": 13,
+    "trans": 13
+   },
+   "styles": {
+    "distinct": 19,
+    "entropy": 0.776
+   },
+   "moods": {
+    "distinct": 7,
+    "entropy": 0.51
+   }
+  }
+ }
+}
