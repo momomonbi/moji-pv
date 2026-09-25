@@ -5974,3 +5974,16 @@ ids kept for pruning, `fileState().opened`), `ui/step_export` (the jump button's
   (§13.5, `ALPHA_SHARE` 1), `DirSink.file(name)` returning a Promise (§13.11) and webm_check's statistical alpha bounds
   (§13.12). §11.3.7's `mediaAt` item shape and §11.4.3 are left to the media-row work, which edits the same sections.
 
+
+## Lead: registryFor after G.3
+
+CI's Node run failed `mix.test.js`'s budget "registryFor with 64 materials and 200 assets ≤ 4 ms": 4.13–4.47 ms in
+all 16 batches of two runs. Bisected locally: 1.9 ms up to H.2, 3.9 ms from G.3. G.3's `photoPan` spec is larger, and
+`core/registry.extend` checked, listed and hashed every added definition again on every call, although `parts/mix`
+hands it the same deep-frozen objects for every entry an edit did not touch (the 20 media grounds took 2.9 ms, half of it
+`metaHash`). `extend` now keeps, per frozen definition (the definition and its `params` frozen), the result of
+`checkDef(def, { mine: true })`, its param list and its signature entry; an unfrozen definition is still checked and
+hashed on every call. The versions are unchanged (same signature). Measured here: 64 materials 1.55 → 0.35 ms, with 200
+assets 3.9 → 0.42 ms. `registry.test.js` covers the re-use (the same param list object; a bad frozen definition keeps
+its problem) and the unfrozen case (an edit changes the version and the checks); mutants that never re-use or that
+re-use unfrozen definitions both fail it.

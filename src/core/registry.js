@@ -458,6 +458,21 @@ MV.def('core/registry', ['core/schema', 'core/color', 'core/hash'], (S, C, H) =>
   // caller's own `opts.problems`), or thrown as a RegistryError when strict. The base is never mutated and its maps are
   // reused. Added members: base, baseVersion, version (base version + the added defs and what the planner reads of
   // them), extra ({ [key]: def.mine }) and mine(kind) (the added keys of a kind, sorted).
+  // What extend works out for one added definition (its checks, param list and meta hash) depends on that definition
+  // alone. The makers (parts/mix) deep-freeze and cache their definitions, so an edit that re-composes the registry
+  // re-uses the work for every definition it did not touch: a frozen definition's results are kept here.
+  const addedInfo = new WeakMap();
+
+  function infoOf(def) {
+    const frozen = isObject(def) && Object.isFrozen(def) && (def.params === undefined || Object.isFrozen(def.params));
+    let info = frozen ? addedInfo.get(def) : undefined;
+    if (!info) {
+      info = { errs: Object.freeze(checkDef(def, { mine: true })), params: null, meta: null };
+      if (frozen) addedInfo.set(def, info);
+    }
+    return info;
+  }
+
   function extend(base, defs, opts) {
     const strict = !!(opts && opts.strict === true);
     if (!base || typeof base.get !== 'function' || typeof base.keys !== 'function') {
@@ -467,7 +482,7 @@ MV.def('core/registry', ['core/schema', 'core/color', 'core/hash'], (S, C, H) =>
     const own = [];
     const added = new Map(KINDS.map((k) => [k, new Map()]));
     for (const def of Array.isArray(defs) ? defs : []) {
-      const errs = checkDef(def, { mine: true });
+      const errs = infoOf(def).errs.slice();
       const tag = (isObject(def) && typeof def.kind === 'string' ? def.kind : '?') + '/' +
         (isObject(def) && typeof def.key === 'string' ? def.key : '?');
       if (!errs.length && def.fallback === true) errs.push('an added definition cannot be the fallback');
@@ -498,8 +513,13 @@ MV.def('core/registry', ['core/schema', 'core/color', 'core/hash'], (S, C, H) =>
       mineOf.set(kind, Object.freeze(mineKeys));
       for (const key of mineKeys) {
         const def = more.get(key);
-        params.set(kind + '/' + key, paramListOf(def));
-        signature.push([kind, key, Object.keys(def.params || {}).sort(compare), metaHash(def)]);
+        const info = infoOf(def);
+        if (!info.params) {
+          info.params = paramListOf(def);
+          info.meta = [Object.keys(def.params || {}).sort(compare), metaHash(def)];
+        }
+        params.set(kind + '/' + key, info.params);
+        signature.push([kind, key, info.meta[0], info.meta[1]]);
         extra[key] = def.mine;
       }
     }

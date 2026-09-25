@@ -412,3 +412,28 @@ test('extend: version = base version + added keys, param names and what the plan
   const ext = R.extend(base, [mat('ornament', 'myMat3')]);
   assert.equal(R.extend(ext, [mat('arrive', 'myMat4')]).baseVersion, base.version, 'extending an extension keeps the base version');
 });
+
+// parts/mix re-composes the registry on every material edit; the untouched definitions are the same frozen objects.
+test('extend: a frozen definition is checked and hashed once; an unfrozen one again on every call', () => {
+  const base = corpus.stubRegistry(MV);
+  const frozenMat = (kind, key, patch) => {
+    const d = mat(kind, key, patch);
+    if (d.params) d.params = Object.freeze(JSON.parse(JSON.stringify(d.params)));
+    return Object.freeze(d);
+  };
+  const frozen = frozenMat('ornament', 'myMat3');
+  const a = R.extend(base, [frozen]);
+  const b = R.extend(base, [frozen, mat('arrive', 'myMat4')]);
+  assert.equal(a.params('ornament', 'myMat3'), b.params('ornament', 'myMat3'), 'the param list is re-used');
+  assert.equal(a.version, R.extend(base, [mat('ornament', 'myMat3')]).version, 'the same version as an unfrozen copy');
+  const bad = frozenMat('ornament', 'myMat5', { mine: undefined });
+  for (let i = 0; i < 2; i++) assert.match(R.extend(base, [bad]).problems.join('\n'), /ornament\/myMat5: mine must be an object/);
+  // an unfrozen definition may change between calls, so it is checked and hashed again
+  const open = mat('ornament', 'myMat6');
+  const first = R.extend(base, [open]);
+  assert.deepEqual(first.problems, []);
+  open.tags = ['soft'];
+  assert.notEqual(R.extend(base, [open]).version, first.version, 'an edited unfrozen definition changes the version');
+  open.mine = undefined;
+  assert.match(R.extend(base, [open]).problems.join('\n'), /ornament\/myMat6: mine must be an object/);
+});
