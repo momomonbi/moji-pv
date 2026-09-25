@@ -1461,6 +1461,24 @@ async def flow_playback(f, lang):
     gaps = [y - x for x, y in zip(at, at[1:]) if y - x > 0.5]      # (a seek's debounced prepare may land just after play)
     f.check(bool(gaps) and max(gaps) <= 1.75 and min(gaps) >= 1.4, 'a prepare about every 1.5 s of playback: %r' % at)
     f.check(len(at) <= 8, 'not one prepare per frame (%d calls)' % len(at))
+    # Played to the end, ▶ reads 最初から再生 and starts again from 0:00; ⏮ 最初に戻る goes back to 0:00 and stops.
+    label = "() => document.querySelector('.pbtn.play').getAttribute('aria-label')"
+    t = lambda k: page.evaluate('(k) => window.__mv.t(k)', k)
+    end = await page.evaluate('() => window.__mv.clockEnd()')
+    await page.evaluate('(e) => { window.__mv.seek(e - 0.4); window.__mv.play(); }', end)
+    ended = await f.until("(e) => !window.__mv.view.state.playing && window.__mv.view.state.time >= e - 0.05", 'playback stops at the end', end, timeout=5000)
+    f.check(ended and await page.evaluate(label) == await t('play.replay'), 'at the end, ▶ is 最初から再生: %r' % await page.evaluate(label))
+    await page.click('.pbtn.play')
+    await f.until('() => window.__mv.view.state.playing', 'playing again')
+    now = await page.evaluate('() => window.__mv.time()')
+    f.check(now < 1.0, 'it plays from the start again (%.2f s)' % now)
+    f.check(await page.evaluate(label) == await t('play.pause'), 'while playing, the button is 一時停止')
+    await page.click('.pbtn.to-start')
+    st = await page.evaluate('() => [window.__mv.view.state.playing, window.__mv.view.state.time]')
+    f.check(st == [False, 0], '⏮ 最初に戻る stops at 0:00: %r' % st)
+    f.check(await page.evaluate(label) == await t('play.play'), 'at 0:00 the button is 再生 again')
+    f.check(await page.evaluate("() => document.querySelector('.pbtn.to-start').getAttribute('aria-label')") == await t('play.toStart'),
+            '⏮ has its name')
     await f.undo_all(done0, doc0)
 
 

@@ -1,6 +1,6 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-ztmmSmsO35Netadxx4KnaP3T8RhHN0GLw8xZvR7fO+k='; style-src 'sha256-C7f+4dHVZFSrPADTL/+9MwqvHeCG8qOUP1K4ARo7x3A=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-Unv6wkXu1zeOa3Zczpj6qrzayhhHRLEvJgxGHUJ1gY4='; style-src 'sha256-C7f+4dHVZFSrPADTL/+9MwqvHeCG8qOUP1K4ARo7x3A=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
 <title>Moji PV Maker</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -11812,6 +11812,8 @@ MV.def('i18n/strings', [], () => ({
   // play bar
   'play.play': ['再生', 'Play'],
   'play.pause': ['一時停止', 'Pause'],
+  'play.replay': ['最初から再生', 'Play from the start'],
+  'play.toStart': ['最初に戻る', 'Back to the start'],
   'play.lane': ['タイムライン（クリックで移動・ダブルクリックで行を選ぶ）', 'Timeline (click to seek, double-click to select a line)'],
   'play.timeTip': ['クリックして時刻を入力', 'Click to type a time'],
   'play.timeInput': ['移動する時刻', 'Time to go to'],
@@ -51187,6 +51189,8 @@ MV.def('ui/icons', ['ui/dom'], (dom) => {
     prev: [P('M15 6l-6 6 6 6')],
     next: [P('M9 6l6 6-6 6')],
     first: [P('M17 6l-6 6 6 6M7 6v12')],
+    toStart: [P('M6.5 6v12'), SOLID('M18 6.6v10.8a.8.8 0 0 1-1.26.65L9.4 12.65a.8.8 0 0 1 0-1.3l7.34-5.4A.8.8 0 0 1 18 6.6z')],
+    replay: [P('M5.5 12a6.5 6.5 0 1 0 1.9-4.6'), P('M5 4.5V8h3.5')],
     fold: [P('M13 6l-6 6 6 6M19 6l-6 6 6 6')],
     unfold: [P('M11 6l6 6-6 6M5 6l6 6-6 6')],
     undo: [P('M9 7L4.5 11.5 9 16'), P('M5 11.5h9a5 5 0 0 1 0 10h-2')],
@@ -64368,12 +64372,14 @@ MV.def('ui/playbar', ['ui/dom', 'ui/icons', 'ui/looks', 'ui/selection', 'ui/time
   function mount(app, stageEl) {
     const t = app.t;
     const lane = h('canvas', { class: 'lane-canvas' });
-    const laneBox = h('div', { class: 'lane', role: 'slider', tabindex: '0', 'aria-label': t('play.lane'), 'aria-valuemin': '0' }, lane);
+    const laneBox = h('div', { class: 'lane', role: 'slider', tabindex: '0', 'aria-label': t('play.lane'), title: t('play.lane'), 'aria-valuemin': '0' }, lane);
     const stripText = h('span', { class: 'strip-text', role: 'status' });
     const stripActs = h('span', { class: 'strip-acts' });
     const strip = h('div', { class: 'mode-strip', hidden: true }, stripText, stripActs);
     const laneRow = h('div', { class: 'lane-row' }, laneBox, strip);
 
+    // 最初に戻る (⏮, the Home key's seek.edge): the way back to 0:00 a beginner can see, next to 再生
+    const startBtn = h('button', { class: 'pbtn to-start', type: 'button', 'data-ctl': 'toStart' });
     const playBtn = h('button', { class: 'pbtn play', type: 'button', 'data-act': 'play.toggle' });
     const timeBtn = h('button', { class: 'time-readout', type: 'button', title: t('play.timeTip') });
     const timeInput = h('input', { class: 'time-input', type: 'text', hidden: true, 'aria-label': t('play.timeInput'), spellcheck: false });
@@ -64386,7 +64392,7 @@ MV.def('ui/playbar', ['ui/dom', 'ui/icons', 'ui/looks', 'ui/selection', 'ui/time
     const tlBtn = h('button', { class: 'pbtn', type: 'button', 'data-act': 'timeline.toggle', 'aria-pressed': 'false',
       title: t('cmd.timeline.toggle') + ' (Shift+T)', 'aria-label': t('cmd.timeline.toggle') }, I.icon('timeline'));
     const controls = h('div', { class: 'controls', role: 'toolbar', 'aria-label': t('play.toolbar') },
-      h('div', { class: 'ctl-group' }, playBtn, timeBtn, timeInput),
+      h('div', { class: 'ctl-group' }, startBtn, playBtn, timeBtn, timeInput),
       h('span', { class: 'grow' }),
       h('div', { class: 'ctl-group hist' }, prevBtn, histBtn, nextBtn),
       omakase,
@@ -64402,6 +64408,7 @@ MV.def('ui/playbar', ['ui/dom', 'ui/icons', 'ui/looks', 'ui/selection', 'ui/time
     let flashing = null;
 
     dom.on(controls, 'click', '[data-act]', (ev, b) => app.actions.run(b.dataset.act, { from: 'playbar' }));
+    startBtn.addEventListener('click', () => app.actions.run('seek.edge', { to: 'start', from: 'playbar' }));
     timeBtn.addEventListener('click', () => {
       timeInput.value = T.fmtTime(app.time());
       timeBtn.hidden = true;
@@ -64599,6 +64606,18 @@ MV.def('ui/playbar', ['ui/dom', 'ui/icons', 'ui/looks', 'ui/selection', 'ui/time
       button.title = extraTitle ? label + ' (' + extraTitle + ')' : label;
     }
 
+    // 再生 / 一時停止, and 最初から再生 (↻) once the playhead stands at the end: ▶ there starts again from 0:00. Redrawn
+    // only when that state changes (onTime runs every frame while playing).
+    let playKey = '';
+    function updatePlay() {
+      const vs = app.view.state;
+      const end = typeof app.clockEnd === 'function' ? app.clockEnd() : 0;
+      const state = vs.playing ? 'pause' : end > 0 && vs.time >= end - 0.05 ? 'replay' : 'play';
+      if (state === playKey) return;
+      playKey = state;
+      setIconLabel(playBtn, state, t('play.' + state), t('key.space'));
+    }
+
     function updateTime() {
       const d = app.plan ? app.plan.duration : 0;
       timeBtn.textContent = '';
@@ -64609,7 +64628,10 @@ MV.def('ui/playbar', ['ui/dom', 'ui/icons', 'ui/looks', 'ui/selection', 'ui/time
     function updateControls() {
       const vs = app.view.state;
       const hasLines = !!(app.plan && app.plan.lines.length);
-      setIconLabel(playBtn, vs.playing ? 'pause' : 'play', vs.playing ? t('play.pause') : t('play.play'), t('key.space'));
+      playKey = '';
+      updatePlay();
+      setIconLabel(startBtn, 'toStart', t('play.toStart'), 'Home');
+      startBtn.disabled = !hasLines;
       playBtn.disabled = !hasLines;
       if (!hasLines) playBtn.title = t('play.needLyrics');
       updateTime();
@@ -64657,7 +64679,7 @@ MV.def('ui/playbar', ['ui/dom', 'ui/icons', 'ui/looks', 'ui/selection', 'ui/time
       updateStrip();
     }
 
-    function onTime() { updateTime(); drawLane(); }
+    function onTime() { updateTime(); updatePlay(); drawLane(); }
 
     app.bus.on('time', onTime);
     app.bus.on('plan', () => { drawLane(); updateControls(); });

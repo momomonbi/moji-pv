@@ -413,6 +413,8 @@ MV.def('i18n/strings', [], () => ({
   // play bar
   'play.play': ['再生', 'Play'],
   'play.pause': ['一時停止', 'Pause'],
+  'play.replay': ['最初から再生', 'Play from the start'],
+  'play.toStart': ['最初に戻る', 'Back to the start'],
   'play.lane': ['タイムライン（クリックで移動・ダブルクリックで行を選ぶ）', 'Timeline (click to seek, double-click to select a line)'],
   'play.timeTip': ['クリックして時刻を入力', 'Click to type a time'],
   'play.timeInput': ['移動する時刻', 'Time to go to'],

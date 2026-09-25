@@ -7144,3 +7144,18 @@ modules; goldens unchanged.
 **Open:** the Filmora set's export sometimes froze a headless Linux Chromium with the web fonts blocked; the frozen
 renderers waited on a synchronous font lookup of the system font service during `fillText`. The Windows and macOS
 browsers Filmora runs on do not use that service; FG10 (the manual Filmora check) confirms it there.
+
+## Lead: going back to the start
+
+The owner asked how to get back to the start after the song has played to the end. ▶ already started again from 0:00
+there (`app.play` from the end), the lane took a click or a drag, and Home went to 0:00, but nothing on screen said
+so. The play bar now shows it:
+
+- **⏮ 最初に戻る** (`.pbtn.to-start`, the Home key's `seek.edge`) stands left of ▶: it stops and goes to 0:00.
+- **▶ reads 最初から再生 (↻)** while the playhead stands at the end, so the button says what it will do. The icon is
+  redrawn only when the state changes (`updatePlay`; the time listener runs every frame while playing).
+- The lane has its hint as a tooltip too (「タイムライン（クリックで移動・ダブルクリックで行を選ぶ）」).
+
+ui_flows' playback flow plays to the end, checks 最初から再生, plays again from under 1 s, and checks that ⏮ stops at
+0:00; a mutant that never shows 最初から再生 fails it. ui_layout: all 488 layouts fit with the extra button (390 px:
+⏮ ↻ time ‹ › おまかせ ▭ in one row).
