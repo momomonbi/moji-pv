@@ -5266,3 +5266,177 @@ every test green alone; together, D's automatic camerawork is drawn by B's engin
      through `mixShare`, the passes of a stack) and report its frame times, or fail on p50 only;
   3. fill only the slots the plan has (the row now creates a filter slot on every cut, which the planner never does for
      this mood): −1.5 to 2 ms, not enough for CI on its own.
+## v2.1-H.2
+
+H.2 of DESIGN_2_1 §8.8: editor-ready output. New `export/host/webm` (透過動画（WebM）, §13.5) and `export/host/kit` (the
+Filmora kit, §13.9); changed `export/host/mp4` (the export job's `backdrop`, `layers`, `assets` and `replan` options, the
+MP4 output reused by the kit, `probe().vp9Codec`), `export/schedule` (`FORMATS`, `pickVp9`, `alphaBitrate`,
+`estimateWebmBytes`, `backdropFor` for `webmAlpha`, `kitOptions`, `kitBase`, `kitFolder`, `kitFiles`, `layerDiffs`, the
+§13.10 pre-flight codes), `export/host/sink` (`openDirectory`, `createDirSink`, `canDirectory`, the WebM save type),
+`audio/wav` (`encodePcm16`, `pcm16Header`, `pcm16Data`; the export down-mix moved here), `ui/project_io` (`lrcText` is
+`export/subtitles.lrc(app.plan, app.doc)`). Tests: `tests/node/export_kit.test.js` (new: both hosts and the folder sinks
+with fake WebCodecs), `export_math.test.js` (+9), browser `webm_check.py` and `kit_check.py` (new) with the harnesses
+`tests/www/webm_check.js` and `tests/www/kit_check.js`. The shipped pages are rebuilt (they contain the new modules);
+no golden changed. The lead decisions are followed: LRC in song times, SRT relative to the export range.
+
+### What was built
+
+- **exportWebm** `({ engine, doc, audio, sink, signal, onProgress, canvas?, codecs? })` → `{ bytes, frames, ms, name,
+  blob?, codec, audio, audioCodec }`. The job renders with the backdrop `clear` (`backdropFor('webmAlpha', …)`). The song
+  (音声を入れる on) is encoded to Opus first, all of `[t0, t1)` (`audioFrames(N)` samples, 5 s per step with a cancel
+  check), and its packets go to `createWebm` before any frame, with the encoder's OpusHead as `codecPrivate` (H.1's
+  request); `audio: null` otherwise. Per frame: `job.ready(i)` (B's media wait; a store failure is `ExportError('media')`),
+  render, one `getImageData` readback, the colour frame (`RGBA`, the straight bytes; the encoder discards alpha) and the
+  alpha frame (I420: Y = the alpha bytes, U = V = 128, full range; one reused buffer), both at `ts(i)`/`frameDur(i)`, key
+  frames forced on both every 2·fps, each encoder waited on at the queue limit. The chunks are paired by timestamp in
+  the output callbacks (either encoder may lag) and written as one BlockGroup each; `key = colour.type === 'key' &&
+  alpha.type === 'key'`. Codecs: the first of `pickVp9(w, h, fps)` that encodes (VP9 profile 0 at the level of
+  `media/samples.vp9Level`, then VP8); none → `ExportError('no-vp9')`. Out-of-step streams → `ExportError('encode')`.
+- **exportKit** `({ engine, doc, audio, dir, signal, onProgress, assets?, canvas?, lib?, codecs? })` → `{ files: [{ name,
+  kind, bytes }], ms, audio: 'aac' | 'wav' | 'none', frames, bytes, folder, codec, overlayCodec, name?, blob? }`.
+  - The files and their names are `kitFiles(doc, plan, env)` (one source for the UI's summary and the export): the
+    main MP4, `_overlay.webm`, `_bg.mp4`, `_green.mp4`, `.srt`, `.lrc`, `.wav`, `README_Filmora.txt`, in §13.9's order.
+  - One pass: job A (the document) and, with the green screen, job G (`look.set backdrop chroma` through
+    `core/commands.reduce`, `replan`). Both forks get one `assets.fork()` when the caller passes its AssetStore (disposed
+    at the end). Per frame: both jobs' media waits, then main (doc backdrop), overlay (`clear`), background
+    (`layers: 'ground'`, the main MP4's encoder config), green (job G, quality `max`) — each its own surface, encoder and
+    queue limit. Then the WAV (no AAC), SRT (`SUB.BOM` + `srt(plan, { t0, t1 })`), LRC (`lrc(plan, doc)`), README.
+  - Audio: the main MP4 tries AAC only (`codecs.audioList` in tests, Opus always filtered out: the kit never relies on
+    Opus in MP4, §13.4); without AAC the MP4 is silent and `<base>.wav` holds exactly `audioFrames(N)` frames from `t0`.
+  - `dir` (a DirSink) gets one file sink per file; `dir: null` makes memory sinks and one store-only ZIP
+    `<base>_filmora.zip` (`zip.addBlob`, the CRC read from each Blob in 8 MB slices; entries at the root, local time
+    stamp); the caller downloads `blob` as `name`, like `exportVideo`'s memory result.
+  - Progress `{ i, N, eta, phase }`: once per frame with `phase: 'video'`, then `'files'`, then `'zip'` (memory only).
+  - Cancel or any failure closes every encoder and aborts every sink; a DirSink made by `openDirectory` removes its
+    folder with everything in it.
+- **Sinks.** `openDirectory({ name, id = 'mojipv-kit' })` → DirSink | null: `showDirectoryPicker({ mode: 'readwrite', id })`
+  (call it straight from the click), then a new folder `name` — or `name (2)` … `name (99)` when the name is taken by a
+  file or folder, so nothing the user has is written into or removed; null when the picker is closed; `ExportError('sink')`
+  where `canDirectory()` is false. `createDirSink(dirHandle, { parent?, name? })` → `{ kind: 'dir', name, files,
+  file(name) → Promise<Sink>, close(), abort() }`: `close()` closes the sinks still open and lists every file; `abort()`
+  aborts each file sink, then `parent.removeEntry(name, { recursive: true })` (without a parent: each file it made).
+  `openSink` also takes `kind: 'webm'`.
+- **Pre-flight** (`preflight(doc, plan, env)`, env + `vp9Codec`, `dirAccess` (default `fsAccess`), `registry`):
+  - kit: the H.264 blocks as for MP4; `no-vp9` (block) while the overlay is on; `kit-wav` (info, `{ name: base }`) when
+    the probed audio codec is not AAC (never `opus-audio` or `no-audio-codec`); `kit-fps` (info, `{ fps, w, h }`,
+    always); `kit-size` (info, `{ short }`, 720p and 1440p); `layers-approx` (info, `{ keys, seams }`, only with both the
+    overlay and the background); `kit-memory` (`{ bytes }` = Σ kitFiles estimates) without folder access.
+  - webmAlpha: `no-webcodecs`, `no-vp9`; its sound is Opus (no `opus-audio`; `no-audio-codec` only when no audio codec
+    encodes at all); `memory` by `estimateWebmBytes`. `clear-mp4` stays MP4-only.
+  - `layerDiffs(doc, plan, registry?)`: the accent filters of the cuts on screen in the range that run under the kit's
+    backdrop (the background keeps the texture only), plus the texture when it is not alphaSafe (the overlay leaves it
+    out), sorted; and the world seams whose window meets the range.
+- **encodePcm16(channels, rate, start, frames)** → a complete WAV: RIFF/PCM 16-bit stereo, `frames` frames from source
+  sample `start`, zeros outside the song, mixed down with the §4.21 `fillPlanar`, samples `round(v · 32767)` clamped to
+  ±32767 (NaN is silence). `pcm16Header` and `pcm16Data` write it in pieces (the kit: 4 MB steps); consecutive pieces
+  equal one call.
+- **README_Filmora.txt**: `kit.readme.head`, every file with its `exp.kit.*` label, the numbered `kit.help.*` steps that
+  apply (overlay, green with #00B140, SRT, WAV) with the real names, size and frame rate — Japanese, a rule, English.
+  UTF-8 with a BOM and CRLF, so Windows Notepad shows it right. `KIT.readme(files, { w, h, fps })` is exported for the
+  in-app guide; `KIT.KEY_COLOUR` = `#00B140`.
+
+### Decisions where the design was silent
+
+- **The down-mix moved to `audio/wav`.** §13.4 says the WAV writer mixes down with `export/schedule.fillPlanar`, but
+  `audio/*` (L1) may not depend on `export/*` (L5). `mixMatrix` and `fillPlanar` now live in `audio/wav`, and
+  `export/schedule` re-exports the same functions (tested identical), so there is still one down-mix.
+- **`kit-memory` level:** `warn` below 1.5 GiB and `confirm` above — the D§4.21 memory rule applied to the kit's total
+  (§13.9: "the memory confirmation of D§4.21 applies to the total"), rather than a confirmation for every kit.
+- **The WebM's Duration** equals `ts(N)`: the Opus packets are handed over as plain bytes, so the last packet (which
+  starts before `ts(N)`) does not lengthen it.
+- **The green job must match:** job G plans the chroma document; its N and t0 must equal job A's (else `encode`).
+- **`probe().vp9Codec`** is checked at the export size at quality `high`, like the AVC probe.
+- **Colour.** Chrome encodes canvas frames as BT.601 (`smpte170m`) and tags the stream so (`decoderConfig.colorSpace`,
+  the MP4's colour box). Decoded in the declared space, #00B140 comes back as (0, 176, 61); a decoder that ignores the
+  tag and assumes BT.709 shows (0, 152, 61) — Chrome's own `<video>` does that for VP9 in MP4 (the local fallback only;
+  the product's MP4 is H.264). The overlay WebM plays with the right colours in Chrome. Whether Filmora honours the tag
+  is a manual-checklist item (below).
+
+### Deviations (with reasons)
+
+- **Alpha bitrate = the colour bitrate (`ALPHA_SHARE` 1), not 25 %.** Measured on project_basic, 720p30, 3 s from the
+  first lyric cut (Chrome's VP9, `latencyMode: 'quality'`), decoded by `<video>` against the transparent PNG frames:
+
+  | Alpha bitrate | alpha / colour bytes | ≥ 4 px from any content: max α (frames 0 17 45 59 60 89) | cores ≥ 3 px inside: min α | mean \|Δα\| |
+  |---|---|---|---|---|
+  | 25 % | 209 / 905 KB | 14 23 22 98 12 31 | 218–255 | 0.15–1.01 |
+  | 100 % | 707 / 905 KB | 4 12 6 16 6 9 | 246–255 | 0.06–0.29 |
+  | fixed quantizer 4 (`bitrateMode: 'quantizer'`) | 1728 / 905 KB | 1 7 8 8 2 8 | 252–255 | 0.03–0.11 |
+
+  At 25 % the alpha falls behind moving text by the end of a key-frame interval: frame 59 shows α 98 where the frame is
+  clear (a ghost trail over the user's footage), and §13.12's own bounds fail. At the colour's bitrate the variable-rate
+  encoder uses what the alpha needs (0.8 of the colour here); a fixed quantizer is sharper but twice the size and not
+  supported everywhere. `estimateWebmBytes` follows `ALPHA_SHARE`.
+- **§13.12's alpha bounds, read statistically.** Even at a fixed quantizer VP9 leaves isolated one-pixel spikes (α up to
+  27 where the PNG is 0 around), so "±6/255", "clear ≤ 3" and "cores ≥ 250" cannot hold for every pixel. webm_check
+  asserts: within ±6 for ≥ 99 % of the pixels and mean |Δα| ≤ 1; "fully clear" (no PNG α > 0 within 4 px) ≤ 3 and
+  "cores" (PNG α = 255 within 3 px) ≥ 250 for ≥ 99.9 % of their pixels, with no spike beyond 24 / below 232; each alpha
+  step ±6. Measured: 99.4–99.99 %, 1–219 clear pixels above 3 per frame (max 16), cores min 246. At 25 % the test fails.
+- **The test pattern is drawn by the test engine**, not by a cut: the harness wraps the engine so that every frame
+  (except the background layer) also shows the §11.8.1 counter code and five alpha steps. A test part cannot be
+  registered in the shipped registry, and G.3's media parts are not in this tree.
+- **Key frames:** kit_check asserts a key frame at every 2·fps and none further apart; an encoder may add one at a scene
+  change (Chrome's VP9 did at frame 22/23 of project_basic), and WebCodecs cannot turn that off.
+- **`DirSink.file(name)` returns a Promise** (file handles are made asynchronously); §13.11 writes `→ Sink`.
+- **`exportKit` takes `assets`** (the AssetStore to share): the facade has no getter for its store, so the caller passes
+  it; without it each fork makes its own store fork (a video ground is then decoded twice when the green screen is on).
+- **`ui/project_io`** drops its now unused `core/lyrics` dependency; its exported `lrcTag` stays.
+
+### Measured (this machine: 4 shared CPUs, load 3–5 from the other packages' tests; headless Chromium 141)
+
+- **Transparent WebM, project_basic with the real engine, Opus included:** 1080p30 **18–25 fps** (180 frames; rendering
+  and the readback alone run at 54 fps, so the two VP9 encoders set the pace); 720p30 **34–49 fps**. §13.5's estimate
+  (25–45 fps at 1080p30 on a mid-range laptop) is plausible on an idle machine. 1080p30: 7.9 MB for 6 s; 720p30: 1.2 MB
+  for 3 s.
+- **The kit, 1080p30, all four videos** (here the three MP4s are VP9 in MP4 — no H.264 encoder): 5.3–8.9 timeline
+  frames/s (21–36 encoded output frames/s) over four runs. With H.264 for the MP4s (Chrome) it should be faster.
+- Node: 1481 tests pass (`--test-concurrency=1`, about 4 min). Mutation check: 29 hand-made mutants of the new and
+  changed code (pairing key rule, alpha plane source, audio before video and its packets, the Opus list, the green
+  re-plan, the kit's AAC-only list, the overlay backdrop, both media waits, SRT BOM, WAV start, abort on failure, the
+  job's `layers`/`assets`, `vp9Codec`, the folder removal and free-name rule, closing open files, five pre-flight
+  rules, pickVp9's VP8, `backdropFor`, the int16 scale and clamp, the lrcText delegation), all caught by the Node tests;
+  the two that survived the first round (the audio packets, the job's `layers`) led to two more tests. In the browser,
+  `ALPHA_SHARE` 0.25 fails webm_check and a job without `layers` fails kit_check's composite.
+
+### Requests to other packages
+
+- **H.3 (step ④, menus):**
+  - `app.exportStart` for `kit`: call `SINK.canDirectory() ? SINK.openDirectory({ name: S.kitFolder(doc) }) : null`
+    straight from the click (null from the picker = cancelled); the `confirm` item is `kit-memory`; then
+    `exporter.kit.exportKit({ engine: source, doc, audio, dir, assets, signal, onProgress })`; a memory result is
+    `SINK.downloadBlob(result.blob, result.name)`; the done state lists `result.files` (and `result.folder`).
+  - `webmAlpha`: `openSink({ name: S.fileName(doc, 'webm'), kind: 'webm' })` and `exporter.webm.exportWebm(…)`.
+  - `ui/boot` services: `exporter.webm = MV.use('export/host/webm')`, `exporter.kit = MV.use('export/host/kit')`;
+    `defaultFileName` by `S.FORMATS[format].ext` (the kit's folder is `S.kitFolder(doc)`).
+  - `app.exportChecks`: pass `vp9Codec: probe.vp9Codec`, `dirAccess: SINK.canDirectory()` and `registry: app.reg`
+    (the effective registry) to `preflight`; build `layers-approx`'s `{what}` from `params.keys` (`t.part('filter', k)`)
+    and `params.seams`. The summary line: `S.kitFiles(doc, plan, { audioCodec, songReady })` (names, estimates).
+  - `ui/output.ERROR_KEYS`: `'no-vp9' → 'exp.pre.no-vp9'`.
+  - ≡ › ファイル › 字幕（.srt）: `SUB.BOM + SUB.srt(app.plan)` (the whole video), saved as `S.kitBase(doc) + '.srt'`.
+  - The guide (`ui/filmora_help`) can use `S.kitFiles` names, `KIT.KEY_COLOUR` and `KIT.readme` (the same steps).
+  - Progress phases: `video` (all videos per frame), `files`, `zip`.
+- **G.4 / B:** the kit shares one AssetStore fork between its two engine forks only when the caller passes the store
+  (`assets`). Either G.4 hands `app`'s store to H.3, or the facade gets an `assets` getter (then the kit can fork it
+  itself).
+- **Lead:** DESIGN_2_1 §13.5 (alpha bitrate = colour bitrate), §13.11 (`file(name)` → Promise), §13.12 (the alpha
+  bounds as above) and §13.4 (the down-mix in `audio/wav`) could be updated. CI runs `webm_check.py` and `kit_check.py`
+  with the other browser tests; with `MV_REQUIRE_H264=1` kit_check requires the kit's MP4s to be H.264 (the profile
+  pickAvc got — High first). Not verified here: Chrome's H.264 in the kit, AAC (Google Chrome on Linux has none, so CI
+  checks the WAV path too).
+
+### Strings wanted (key, ja, en)
+
+- `exp.kit.wav`: 「曲（WAV）」 / "Song (WAV)" — the WAV's label (the README and the done state list it by name only).
+- `exp.kit.readme`: 「使い方（README）」 / "How to use (README)".
+- `exp.kit.what.video`: 「動画」 / "the videos"; `exp.kit.what.files`: 「曲・字幕・説明」 / "the song, subtitles and notes";
+  `exp.kit.what.zip`: 「ZIP」 / "the ZIP" — `{what}` of `exp.kit.phase` for the three progress phases.
+- `exp.pre.layers.seams`: 「場面の切り替わり（{n}か所）」 / "scene changes ({n})" — for `layers-approx`'s `{what}`.
+- `kit.help.bg`: 「背景だけのときは「{bg}」を下のトラックに置き、その上に自分の文字や映像を重ねます。」 / "For the background
+  only, place "{bg}" on a lower track and put your own titles or footage above it." — a README / guide step.
+
+### Open items
+
+- **Filmora check (FG10):** add to the checklist: `_green.mp4` (H.264) — does Filmora's picker read the background as
+  #00B140 (it is tagged BT.601)? If it shows about (0, 152, 61), the MP4s should be fed as our own BT.709 I420 frames.
+  And: does Filmora read VP9 alpha at our alpha bitrate without trails?
+- The kit at 4K60 has not been run here (memory and time); the ZIP path keeps every file in memory until the download.

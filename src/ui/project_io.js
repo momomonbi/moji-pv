@@ -1,7 +1,7 @@
 /* 文字PVメーカー v2 — original work. Project I/O: new / open / save (the .mojipv package, DESIGN_2_1 §12) / light save / .lrc, autosave to IndexedDB (doc + side, songs by sha1, photos and videos by AssetId), drop routing by sniffing, clearing the device. */
-MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/lyrics', 'core/media', 'i18n/t', 'ui/ai_controller',
+MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i18n/t', 'ui/ai_controller',
   'export/package', 'export/unzip', 'export/zip', 'export/host/sink', 'media/sniff', 'media/isobmff', 'media/matroska',
-  'media/host/probe'], (dom, D, M, L, MEDIA, T, AC, PKG, U, Z, SINK, SN, ISO, MKV, PR) => {
+  'media/host/probe', 'export/subtitles'], (dom, D, M, MEDIA, T, AC, PKG, U, Z, SINK, SN, ISO, MKV, PR, SUB) => {
   'use strict';
 
   const DB_NAME = 'mojipv-v2';
@@ -936,25 +936,9 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/lyrics', 'c
       app.toast(t('io.downloaded', { name }) + (note || ''), { kind: 'ok' });
     }
 
-    // 時間つき歌詞（.lrc）: meta rows as written, each lyric row with the effective start of every occurrence.
-    function lrcText() {
-      const plan = app.plan;
-      const byRow = new Map();
-      for (const l of plan ? plan.lines : []) {
-        const row = l.row || l.id;
-        if (!byRow.has(row)) byRow.set(row, []);
-        byRow.get(row).push(l);
-      }
-      const out = [];
-      for (const row of app.doc.sheet.rows) {
-        if (L.isMetaRow(row.src)) { out.push(row.src.trim()); continue; }
-        const lines = byRow.get(row.id);
-        if (!lines) continue;
-        const tags = lines.map((l) => l.t0).sort((a, b) => a - b).map(lrcTag).join('');
-        out.push(tags + lines[0].text);
-      }
-      return out.join('\n') + '\n';
-    }
+    // 時間つき歌詞（.lrc）: meta rows as written, each lyric row with the effective start of every occurrence
+    // (export/subtitles.lrc, which the Filmora kit writes too; DESIGN_2_1 §13.8).
+    function lrcText() { return SUB.lrc(app.plan, app.doc); }
 
     function saveLrc() { return saveText(lrcText(), fileName('.lrc'), 'text/plain'); }
 

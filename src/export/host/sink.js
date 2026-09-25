@@ -1,11 +1,15 @@
-/* 文字PVメーカー v2 — original work. Export sinks: a file on disk (File System Access) or memory with a download (§4.21). */
+/* 文字PVメーカー v2 — original work. Export sinks: a file on disk (File System Access), a folder of files (the Filmora kit), or memory with a download (§4.21; DESIGN_2_1 §13.9). */
 MV.def('export/host/sink', ['export/schedule'], (S) => {
   'use strict';
 
   const TYPES = Object.freeze({
     mp4: { description: 'MP4 video', accept: { 'video/mp4': ['.mp4'] } },
     zip: { description: 'ZIP archive', accept: { 'application/zip': ['.zip'] } },
+    webm: { description: 'WebM video', accept: { 'video/webm': ['.webm'] } },
   });
+  const MIMES = Object.freeze({ mp4: 'video/mp4', zip: 'application/zip', webm: 'video/webm' });
+  const DIRECTORY_ID = 'mojipv-kit';      // the picker remembers the folder chosen last time under this id
+  const MAX_NAME_TRIES = 99;              // '<name>', '<name> (2)' … '<name> (99)'
 
   function sinkError(err) {
     return err && err.code === 'sink' ? err : new S.ExportError('sink', 'writing the file failed: ' + (err && err.message), err);
@@ -126,17 +130,124 @@ MV.def('export/host/sink', ['export/schedule'], (S) => {
 
   function canStream() { return typeof globalThis.showSaveFilePicker === 'function'; }
 
-  // openSink({ name, kind: 'mp4' | 'zip' }) → Sink | null. With File System Access the save dialog opens (call this
-  // directly from the click, before any other await); null means the user closed the dialog. Otherwise a memory sink.
+  // openSink({ name, kind: 'mp4' | 'webm' | 'zip' }) → Sink | null. With File System Access the save dialog opens (call
+  // this directly from the click, before any other await); null means the user closed the dialog. Otherwise a memory sink.
   async function openSink(opts) {
-    const kind = opts.kind === 'zip' ? 'zip' : 'mp4';
-    const type = kind === 'zip' ? 'application/zip' : 'video/mp4';
+    const kind = Object.prototype.hasOwnProperty.call(TYPES, opts.kind) ? opts.kind : 'mp4';
+    const type = MIMES[kind];
     if (!canStream()) return createMemorySink({ name: opts.name, type });
     try {
       const handle = await globalThis.showSaveFilePicker({ suggestedName: opts.name, types: [TYPES[kind]] });
       return createFileSink(handle);
     } catch (err) {
       if (err && err.name === 'AbortError') return null;
+      throw sinkError(err);
+    }
+  }
+
+  // --- folders (the Filmora kit, DESIGN_2_1 §13.9) --------------------------------------------------------------
+
+  // createDirSink(dirHandle, { parent?, name? }) → DirSink = { kind: 'dir', name, file(name) → Promise<Sink>, files,
+  // close() → { files: [{ name, bytes }] }, abort() }. Each file(name) creates the file in the folder and returns its
+  // file sink (createFileSink); a name is used once. close() closes the sinks still open and lists every file written, in
+  // order. abort() aborts every file sink (each removes its file) and then removes the folder itself when its parent is
+  // known (removeEntry(name, { recursive: true })), else every file it created, so a cancelled kit leaves nothing.
+  function createDirSink(dir, opts) {
+    const o = opts || {};
+    const entries = [];                  // [{ name, sink }] in creation order
+    let state = 'open';
+
+    function check() { if (state !== 'open') throw new S.ExportError('sink', 'folder sink is ' + state); }
+
+    return {
+      kind: 'dir',
+      get name() { return o.name || dir.name; },
+      get files() { return entries.map((e) => ({ name: e.name, bytes: e.sink.bytes })); },
+      async file(name) {
+        check();
+        if (entries.some((e) => e.name === name)) throw new S.ExportError('sink', 'folder sink: ' + name + ' is already written');
+        let handle;
+        try {
+          handle = await dir.getFileHandle(name, { create: true });
+        } catch (err) {
+          throw sinkError(err);
+        }
+        const inner = createFileSink(handle);
+        const entry = { name, sink: inner, closed: false };
+        entries.push(entry);
+        return {                         // the file sink, remembering that its writer closed it
+          kind: 'file',
+          get name() { return inner.name; },
+          get bytes() { return inner.bytes; },
+          write: (bytes, position) => inner.write(bytes, position),
+          async close() {
+            const done = await inner.close();
+            entry.closed = true;
+            return done;
+          },
+          abort: () => inner.abort(),
+        };
+      },
+      async close() {
+        check();
+        state = 'closing';
+        try {
+          for (const e of entries) {
+            if (!e.closed) { await e.sink.close(); e.closed = true; }
+          }
+        } catch (err) {
+          state = 'failed';
+          throw sinkError(err);
+        }
+        state = 'closed';
+        return { files: entries.map((e) => ({ name: e.name, bytes: e.sink.bytes })) };
+      },
+      async abort() {
+        if (state === 'aborted' || state === 'closed') return;
+        state = 'aborted';
+        for (const e of entries) await e.sink.abort();
+        if (o.parent && o.name) {
+          try { await o.parent.removeEntry(o.name, { recursive: true }); } catch (err) { /* already gone, or not ours to remove */ }
+          return;
+        }
+        for (const e of entries) {
+          try { await dir.removeEntry(e.name); } catch (err) { /* removed by its sink */ }
+        }
+      },
+    };
+  }
+
+  function canDirectory() { return typeof globalThis.showDirectoryPicker === 'function'; }
+
+  // The names in a folder (files and folders).
+  async function namesIn(dir) {
+    const out = new Set();
+    for await (const key of dir.keys()) out.add(key);
+    return out;
+  }
+
+  // openDirectory({ name, id? }) → DirSink | null. The folder picker opens (showDirectoryPicker, read-write; call this
+  // directly from the click, before any other await); null means the user closed it. In the chosen folder a new folder
+  // `name` is made — or 'name (2)', 'name (3)' … when that name is taken, so nothing the user has is ever written into
+  // or removed. Only where canDirectory() is true; otherwise the kit writes memory sinks and one ZIP.
+  async function openDirectory(opts) {
+    if (!canDirectory()) throw new S.ExportError('sink', 'this browser cannot write into a folder');
+    let parent;
+    try {
+      parent = await globalThis.showDirectoryPicker({ mode: 'readwrite', id: (opts && opts.id) || DIRECTORY_ID });
+    } catch (err) {
+      if (err && err.name === 'AbortError') return null;
+      throw sinkError(err);
+    }
+    try {
+      const taken = await namesIn(parent);
+      let name = opts.name;
+      for (let k = 2; taken.has(name); k++) {
+        if (k > MAX_NAME_TRIES) throw new Error('no free folder name for ' + opts.name);
+        name = opts.name + ' (' + k + ')';
+      }
+      return createDirSink(await parent.getDirectoryHandle(name, { create: true }), { parent, name });
+    } catch (err) {
       throw sinkError(err);
     }
   }
@@ -163,5 +274,5 @@ MV.def('export/host/sink', ['export/schedule'], (S) => {
     }
   }
 
-  return { createFileSink, createMemorySink, canStream, openSink, downloadBlob };
+  return { createFileSink, createMemorySink, createDirSink, canStream, canDirectory, openSink, openDirectory, downloadBlob };
 });
