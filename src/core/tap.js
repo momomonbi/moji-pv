@@ -3,6 +3,10 @@ MV.def('core/tap', [], () => {
   'use strict';
 
   const EVENTS = Object.freeze(['mark', 'end', 'back', 'pause', 'resume']);
+  // core/timing drops a start less than 0.1 s after the start above it (time-order): such a mark would be recorded and
+  // then never used, so it is not taken (as with the frozen clock of stopped playback, where every mark is equal).
+  // A little more than 0.1 s, so that rounding the stored times can never bring two marks under timing's gap.
+  const MIN_GAP = 0.12;
 
   class TapError extends Error {
     constructor(code, message) { super(message || code); this.name = 'TapError'; this.code = code; }
@@ -34,20 +38,27 @@ MV.def('core/tap', [], () => {
     return Math.max(0, ev.t);
   }
 
+  // The latest start marked above the cursor (−Infinity when none).
+  function lastStart(s) {
+    for (let i = s.cursor - 1; i >= 0; i--) if (s.starts[i] !== null) return s.starts[i];
+    return -Infinity;
+  }
+
   function withTime(list, i, t) {
     const out = list.slice();
     out[i] = t;
     return out;
   }
 
-  // mark: start of the next line (and advance) · end: end of the current line · back: forget the last line's marks and
-  // step back one line · pause / resume: marks are ignored while paused. Returns the same state when nothing changes.
+  // mark: start of the next line (and advance); a mark less than MIN_GAP after the last start is ignored · end: end of the
+  // current line · back: forget the last line's marks and step back one line · pause / resume: marks are ignored while
+  // paused. Returns the same state when nothing changes.
   function tapReduce(s, ev) {
     if (!ev || !EVENTS.includes(ev.type)) throw new TapError('bad-event', 'unknown tap event ' + (ev && ev.type));
     switch (ev.type) {
       case 'mark': {
         const t = timeOf(ev);
-        if (s.paused || s.cursor >= s.lineIds.length) return s;
+        if (s.paused || s.cursor >= s.lineIds.length || t < lastStart(s) + MIN_GAP) return s;
         const starts = withTime(s.starts, s.cursor, t);
         return state(s.lineIds, s.cursor + 1, s.cursor, starts, withTime(s.ends, s.cursor, null), false);
       }
@@ -82,5 +93,5 @@ MV.def('core/tap', [], () => {
     return marks.length ? { t: 'time.tap', marks } : null;
   }
 
-  return { tapStart, tapReduce, tapCommand, TapError, EVENTS };
+  return { tapStart, tapReduce, tapCommand, TapError, EVENTS, MIN_GAP };
 });

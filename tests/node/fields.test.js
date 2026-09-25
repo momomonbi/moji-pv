@@ -368,3 +368,77 @@ test('the palette: pins kept exactly, automatic ink and accent fitted, backdrop 
   assert.equal(chroma.ground, '#00B140');
   assert.ok(C.hueDistance(chroma.accent, '#00B140') >= 40, 'accent moved away from the green screen');
 });
+
+// --- v2.1 slots (DESIGN_2_1 §2.3, §3.9 fields) --------------------------------------------------------------------
+
+test('field states of the camera slots, motion speed and the rig: auto, pinned, inherited, derived; labels', () => {
+  const CV = MV.use('core/curve');
+  const SHOT = MV.use('core/shot');
+  const doc = clone(corpus.project('basic').doc);
+  doc.pins = {};
+  const p0 = plan(doc);
+  const line = p0.lines.find((l) => l.cuts.length >= 2);
+  const key = line.cuts[1];
+  const cut0 = p0.cuts.find((c) => c.key === key);
+  // automatic values
+  for (const slot of ['motion.speed', 'cam.shot', 'cam.zoom', 'cam.curve', 'cam.follow', 'rig', 'rig.curve']) {
+    const fs = state(doc, p0, 'cut/' + key + ':' + slot);
+    const d = slot.startsWith('rig') ? p0.rigs[cut0.rig][slot === 'rig' ? 'rig' : 'curve'] : cut0.slots[slot];
+    assert.deepEqual([fs.value, fs.state, fs.pinnedAt], [d.v, 'auto', null], slot);
+    assert.deepEqual(fs.canPinAt, ['cut', 'line', 'work'], slot);
+    assert.equal(fs.schema, MV.use('planner/camera').SLOT_SPECS[slot], slot + ' schema');
+  }
+  assert.deepEqual(state(doc, p0, 'cut/' + key + ':cam.shot').display, SHOT.label(cut0.slots['cam.shot'].v));
+  assert.deepEqual(state(doc, p0, 'cut/' + key + ':cam.curve').display, CV.label(cut0.slots['cam.curve'].v));
+  assert.deepEqual(state(doc, p0, 'cut/' + key + ':rig').display, SHOT.rigLabel(p0.rigs[cut0.rig].rig.v));
+  assert.deepEqual(state(doc, p0, 'cut/' + key + ':arrive.ease').display, CV.label(cut0.slots.arrive.p.ease));
+  // pins at line and work: pinned where they live, inherited below (documents are immutable: new pins, new object)
+  doc.pins = Object.assign({}, doc.pins, { ['line/' + line.id + ':cam.zoom']: user(1.4), 'work:rig': { v: 'slowSwell', by: 'ai' },
+    ['line/' + line.id + ':motion.speed']: user(0.5) });
+  const p = plan(doc);
+  assert.deepEqual([state(doc, p, 'line/' + line.id + ':cam.zoom').state, state(doc, p, 'line/' + line.id + ':cam.zoom').value], ['pinned', 1.4]);
+  assert.deepEqual([state(doc, p, 'cut/' + key + ':cam.zoom').state, state(doc, p, 'cut/' + key + ':cam.zoom').pinnedAt], ['inherited', 'line']);
+  assert.deepEqual([state(doc, p, 'work:rig').state, state(doc, p, 'work:rig').value], ['ai', 'slowSwell']);
+  assert.deepEqual([state(doc, p, 'cut/' + key + ':rig').state, state(doc, p, 'cut/' + key + ':rig').pinnedAt], ['inherited', 'work']);
+  assert.deepEqual(state(doc, p, 'cut/' + key + ':rig.curve').value, 'softEnds', 'the preset\'s curve');
+  // durations scaled by the motion speed are derived (from 'rule'), not automatic
+  assert.equal(state(doc, p, 'cut/' + key + ':arrive.dur').state, 'derived');
+  assert.equal(state(doc, p, 'cut/' + key + ':dwell.speed').state, 'derived');
+  // a rig pinned at one cut: that cut's run holds only it, and the field shows it pinned there
+  doc.pins = Object.assign({}, doc.pins, { ['cut/' + key + ':rig']: user('pullAway', cut0.text) });
+  const q = plan(doc);
+  const cq = q.cuts.find((c) => c.key === key);
+  assert.deepEqual(q.rigs[cq.rig].cuts, [key]);
+  assert.deepEqual([state(doc, q, 'cut/' + key + ':rig').state, state(doc, q, 'cut/' + key + ':rig').value], ['pinned', 'pullAway']);
+  assert.equal(state(doc, q, 'work:rig').state, 'ai', 'the work pin still applies elsewhere');
+  // a line whose cuts sit in runs of different rigs reads mixed
+  const s = state(doc, q, 'line/' + line.id + ':rig', { level: 'line', ids: [line.id] });
+  assert.ok(['mixed', 'inherited'].includes(s.state), s.state);
+});
+
+test('lockPayload freezes the camera slots and motion.speed of a line; locking changes nothing on screen', () => {
+  const doc = clone(corpus.project('long').doc);
+  doc.pins = {};
+  doc.locks = {};
+  const p = plan(doc);
+  for (const line of p.lines.filter((l, i) => i % 9 === 4).slice(0, 5)) {
+    const payload = F.lockPayload(doc, p, line.id, { registry: REGISTRY });
+    for (const key of line.cuts) {
+      const cut = p.cuts.find((c) => c.key === key);
+      for (const slot of ['motion.speed', 'cam.shot', 'cam.zoom', 'cam.curve', 'cam.follow']) {
+        assert.deepEqual(payload.pins['cut/' + key + ':' + slot], { v: cut.slots[slot].v, by: 'lock', sig: cut.text }, key + ' ' + slot);
+      }
+      assert.ok(!Object.keys(payload.pins).some((k) => /:rig/.test(k)), 'rigs are not frozen');
+    }
+    const locked = clone(doc);
+    Object.assign(locked.pins, payload.pins);
+    locked.locks = { [line.id]: { n: 1 } };
+    const q = plan(locked);
+    for (const key of line.cuts) {
+      const a = p.cuts.find((c) => c.key === key), b = q.cuts.find((c) => c.key === key);
+      assert.equal(b.fp, a.fp, key + ' same scene');
+      for (const slot of ['cam.shot', 'cam.zoom']) assert.equal(F.fieldState(locked, q, null, 'cut/' + key + ':' + slot, { registry: REGISTRY }).state, 'locked');
+    }
+    assert.deepEqual(q.rigs, p.rigs, 'the rigs are as before');
+  }
+});

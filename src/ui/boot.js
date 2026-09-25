@@ -2,9 +2,9 @@
 MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom', 'ui/keys', 'ui/actions',
   'ui/selection', 'ui/looks', 'ui/view', 'ui/shell', 'ui/header', 'ui/tap', 'ui/project_io',
   'ui/inspector', 'ui/timeline', 'ui/palette', 'ui/menus', 'ui/dialogs', 'ui/ai_panel', 'ai/providers',
-  'ui/fields', 'ui/output'],             // WP8b views, WP8c AI panel, INT-UI output rules
+  'ui/fields', 'ui/output', 'ui/media_io'],   // WP8b views, WP8c AI panel, INT-UI output rules, v2.1 photos and videos
 (D, ST, T, strings, dom, K, A, S, LK, V, shell, header, tapUi, projectIo, inspector, timeline, palette, menus, dialogs,
-  aiPanel, aiProviders, F, OUT) => {
+  aiPanel, aiProviders, F, OUT, mediaIo) => {
   'use strict';
 
   const TYPING_REPLAN_MS = 120;         // typing never waits on the planner (§7.4)
@@ -36,17 +36,24 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
     const lookPkg = MV.use('planner/look');
     const lyrics = MV.use('core/lyrics');
     const hosts = { fonts: null };                     // the preview's FontBook (its epoch makes frames stale, §4.14)
-    const createEngine = () => {
-      const canvas = canvasHost.createCanvasFactory();
+    const canvas = canvasHost.createCanvasFactory();
+    // The engine draws photos and videos from the AssetStore (DESIGN_2_1 §11.3.6); export forks fork it (software
+    // decoders) and dispose their fork.
+    const createEngine = (assets) => {
       const fonts = fontHost.createFontBook({ document });
       if (!hosts.fonts) hosts.fonts = fonts;
       const measurer = measureHost.createCanvasMeasurer(canvas, fonts);
-      return facade.createEngine({ registry, canvas, measurer, fonts, assets: null });
+      return facade.createEngine({ registry, canvas, measurer, fonts, assets: assets || null });
     };
+    const mediaStore = MV.use('media/host/store');
     return {
       reduce: commands.reduce,
       registry,
       createEngine,
+      canvas,
+      // createAssets({ blobs, entries }) → the real AssetStore over the device store (media/host/store; preview decoders
+      // prefer hardware, its forks software).
+      createAssets: (o) => mediaStore.createMediaStore(Object.assign({ canvas, now: canvas.now, idle: canvas.idle }, o)),
       fonts: () => hosts.fonts,
       createPlayer: MV.use('audio/host/player').createPlayer,
       songs: MV.use('audio/host/decode'),
@@ -94,13 +101,36 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
 
   function createApp(svc) {
     const lang = MV.LANG === 'en' ? 'en' : 'ja';
-    const t = T.createT(lang, strings, svc.registry);
     const view = V.createView({ storage: safeStorage('localStorage') });
     const store = ST.createStore({ doc: D.defaultDoc(), side: D.defaultSide(), reduce: svc.reduce, now: () => Date.now() });
-    const engine = svc.createEngine();
+    // The AssetStore (DESIGN_2_1 §11.3.6): bytes from ui/project_io's device store (IndexedDB, or this tab's memory),
+    // metadata from every library entry this tab has seen. Ids name content, so an entry seen once stays right for the
+    // try-on and undo documents that still hold it.
+    const known = new Map();
+    const learn = (doc) => { for (const e of (doc && doc.media && doc.media.list) || []) known.set(e.id, e); };
+    learn(store.doc);
+    store.on('doc', () => learn(store.doc));
+    const io = () => (app.io ? app.io.mediaBlobs : null);   // ui/project_io is created right after the app
+    const assets = svc.createAssets({
+      entries: (id) => known.get(id) || null,
+      blobs: {
+        get: (id) => (io() ? io().get(id) : Promise.resolve(null)),
+        index: (id) => (io() ? io().index(id) : Promise.resolve(null)),
+        thumbs: (id) => (io() ? io().thumbs(id) : Promise.resolve(null)),
+        putIndex: (id, rec) => (io() ? io().putIndex(id, rec) : Promise.resolve()),
+        putThumbs: (id, rec) => (io() ? io().putThumbs(id, rec) : Promise.resolve()),
+      },
+    });
+    const engine = svc.createEngine(assets);
+    // The effective registry: the base parts plus this project's materials (engine.registry, DESIGN_2_1 §3.10). Part
+    // names read through it (a material's name, §3.7).
+    const regOf = () => engine.registry;
+    const t = T.createT(lang, strings, regOf);
     const bus = createBus();
-    return {
-      t, lang, view, store, engine, bus, reg: svc.registry, svc, actions: null, layout: null, shell: null, io: null, tap: null,
+    const app = {
+      t, lang, view, store, engine, bus, get reg() { return regOf(); }, svc, actions: null, layout: null, shell: null, io: null, tap: null,
+      // the preview's AssetStore (the export and the Filmora kit fork it); app.media: ui/media_io (imports, the library)
+      get assets() { return assets; }, media: null, learnMedia: learn, knownMedia: () => [...known.keys()],
       plan: null, prevDoc: null, exporting: null, popover: null, clipboard: null, peaks: null, tapCore: svc.tapCore,
       get doc() { return store.doc; },
       reduce: (doc, cmd) => svc.reduce(doc, cmd),
@@ -110,6 +140,7 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
       inText: () => dom.targetKind(document.activeElement) === 'text',
       env: () => ({ webcodecs: typeof VideoEncoder === 'function', fsAccess: typeof window.showSaveFilePicker === 'function' }),
     };
+    return app;
   }
 
   // --- dispatching, planning and history ------------------------------------------------------------------------
@@ -136,7 +167,7 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
       const before = app.plan;
       engine.setDoc(store.doc);
       app.plan = engine.plan;
-      const sel = S.validate(view.state.sel, app.plan);
+      const sel = S.validate(view.state.sel, app.plan, store.doc);
       if (!S.equal(sel, view.state.sel)) view.set({ sel });
       if (app.plan && view.state.time > app.plan.duration) view.set({ time: app.plan.duration });
       bus.emit('plan', Object.assign({ before }, e || { kind: 'load', touched: { rows: 'all', look: true } }));
@@ -293,7 +324,7 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
     // select(sel, { from, open, pause, seek: true | false | 'ifPaused' }).
     app.select = (sel, opts) => {
       const o = opts || {};
-      const s = S.validate(sel, app.plan);
+      const s = S.validate(sel, app.plan, app.doc);
       if (o.pause) app.pause();
       view.set({ sel: s });
       const openable = s.level !== 'work' || o.from === 'header' || o.from === 'crumbs';
@@ -323,6 +354,12 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
     };
     app.modeStrip = () => {
       if (app.tap && app.tap.active()) return app.tap.strip();
+      // 使う範囲を調整中: the trim widget's peek at a handle's source frame (DESIGN_2_1 §11.7.7)
+      if (app.shell && app.shell.stage.peeking && app.shell.stage.peeking()) return { kind: 'peek', text: app.t('media.peek'), actions: [] };
+      // 切り抜きを調整中 (§11.7.6): what the mouse does, and [終わる]
+      if (app.shell && app.shell.stage.cropKey && app.shell.stage.cropKey()) {
+        return { kind: 'crop', text: app.t('media.cropMode'), actions: [{ label: app.t('media.cropDone'), run: () => app.shell.stage.crop(null) }] };
+      }
       if (app.shell && app.shell.stage.hasAlt() && !view.state.compare) {
         const ai = app.ai ? app.ai.strip() : null;            // WP8c: 「案Bを試写中 [この案にする] [やめる]」
         if (ai) return ai;
@@ -547,7 +584,9 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
         fontsReady: fontsReady(),
         fsAccess: ex().sink.canStream(), songReady: !app.doc.song || app.songReady(), warnings: app.warnings(),
       });
-      return OUT.mergeFonts(OUT.withFixes(items, app.doc).concat(OUT.checks(app.doc, app.plan, app.reg)));
+      // photos and videos (DESIGN_2_1 §11.7.8): an asset not on this device blocks, with [つなぎ直す]
+      const media = app.media ? app.media.preflight() : [];
+      return OUT.mergeFonts(OUT.withFixes(items, app.doc).concat(OUT.checks(app.doc, app.plan, app.reg), media));
     };
     // The faces the export range draws (§4.14): asked for when step ④ shows, so the export does not wait on them later;
     // the pre-flight says 書体を読み込み中 until they are in (the export itself waits for them, §4.21).
@@ -614,7 +653,7 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
         if (code === 'cancelled' || (abort && abort.signal.aborted)) { set({ phase: 'idle' }); app.toast(t('err.exp.cancelled')); }
         else {
           if (typeof console !== 'undefined') console.error(e);
-          set({ phase: 'error', message: t(OUT.errorKey(code)) });
+          set({ phase: 'error', message: t(OUT.errorKey(code), OUT.errorParams(e)) });
         }
       } finally {
         if (source && typeof source.dispose === 'function') source.dispose();
@@ -740,6 +779,8 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
     def('file.open', () => { app.io.open(); });
     def('file.save', () => { app.io.save(); });
     def('file.saveAs', () => { app.io.saveAs(); });
+    // 軽い保存（画像・動画・曲なし）… (DESIGN_2_1 §12.7): the .json with ids only.
+    def('file.saveLight', () => { app.io.saveLight(); });
     def('file.saveLrc', () => { app.io.saveLrc(); }, { enabled: hasLines });
 
     def('play.fromLine', () => {
@@ -961,8 +1002,19 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
       if (activation) return;
       if (ev.repeat && !REPEATABLE.includes(res.cmd)) { ev.preventDefault(); return; }
       if (!app.actions.has(res.cmd)) return;
+      // Ctrl+V is left to the browser: consuming the key would stop the paste event, which alone knows whether the
+      // clipboard holds pictures (the paste listener below).
+      if (res.cmd === 'look.paste') return;
       const ran = app.actions.run(res.cmd, Object.assign({}, res.args, { timeStamp: ev.timeStamp, from: 'key' }));
       if (ran) ev.preventDefault();
+    });
+    // A paste outside the text fields (DESIGN_2_1 §11.7.2, D§6.8): image or video files are imported (ui/media_io);
+    // anything else pastes the copied look. The palette and the menus run look.paste directly.
+    document.addEventListener('paste', (ev) => {
+      if (app.popover || app.paletteOpen || view.state.mode === 'tap' || dom.targetKind(ev.target) === 'text') return;
+      const files = mediaIo.pastedFiles(ev.clipboardData);
+      if (files.length && app.media) { ev.preventDefault(); app.media.importFiles(files, {}); return; }
+      if (app.actions.has('look.paste') && app.actions.run('look.paste', { from: 'key' })) ev.preventDefault();
     });
     document.addEventListener('keyup', (ev) => { if (ev.key === 'b' || ev.key === 'B') endCompare(); });
     window.addEventListener('blur', endCompare);
@@ -1051,11 +1103,13 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
     defineActions(app);
     app.io = projectIo.create(app);
     app.io.begin();
+    app.media = mediaIo.mount(app);                                           // photos and videos (DESIGN_2_1 §11.7)
     app.tap = tapUi.mount(app);
     app.replan();
     app.shell = shell.mount(app, document.getElementById('app'));
     mountDetails(app);                                                        // WP8b views (UI part 2)
     app.io.installDrop(app.shell.root);
+    app.shell.root.dataset.drop = app.t('media.dropHere');                   // the page's drop overlay (DESIGN_2_1 §11.7.1)
     installKeys(app);
     installPrepare(app);
     app.bus.on('layout', (res) => {

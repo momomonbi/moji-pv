@@ -112,7 +112,7 @@ test('FROZEN lists and constants have their DESIGN values', () => {
     '16:9': [1920, 1080], '9:16': [1080, 1920], '1:1': [1080, 1080], '4:5': [1080, 1350], '4:3': [1440, 1080],
     '3:4': [1080, 1440], '21:9': [2520, 1080],
   });
-  assert.equal(MV.use('core/migrate').CURRENT_SCHEMA, 1);
+  assert.equal(MV.use('core/migrate').CURRENT_SCHEMA, 2, 'DESIGN_2_1 §2.2');
   assert.equal(MV.use('core/num').TAU, 2 * Math.PI);
   assert.equal(MV.use('core/num').DEG, Math.PI / 180);
 });
@@ -135,11 +135,20 @@ test('shared parameters: the FROZEN names of §3.4, each a valid ParamSpec (regi
   const { SHARED } = MV.use('core/registry');
   const schema = MV.use('core/schema');
   const names = Object.fromEntries(Object.entries(SHARED).map(([kind, params]) => [kind, Object.keys(params)]));
+  // v2.1 (DESIGN_2_1 §2.3): flow, dwell.curve, lens.curve and seam.curve; ease is a curve.
   assert.deepEqual(names, {
-    arrange: ['offsetX', 'offsetY'], arrive: ['dur', 'each', 'order', 'ease'], dwell: ['amount', 'speed'],
-    depart: ['dur', 'each', 'order', 'ease'], ground: ['amount'], ornament: ['amount', 'ink'], lens: ['amount'],
-    filter: ['amount', 'when'], seam: ['dur'], theme: [], mood: [],
+    arrange: ['offsetX', 'offsetY'], arrive: ['dur', 'each', 'order', 'ease', 'flow'], dwell: ['amount', 'speed', 'curve'],
+    depart: ['dur', 'each', 'order', 'ease', 'flow'], ground: ['amount'], ornament: ['amount', 'ink'], lens: ['amount', 'curve'],
+    filter: ['amount', 'when'], seam: ['dur', 'curve'], theme: [], mood: [],
   });
+  for (const kind of ['arrive', 'depart']) {
+    assert.equal(SHARED[kind].ease.type, 'curve');
+    assert.deepEqual(SHARED[kind].flow.auto, { value: 'linear' });
+  }
+  for (const [kind, name] of [['dwell', 'curve'], ['lens', 'curve'], ['seam', 'curve']]) {
+    assert.equal(SHARED[kind][name].type, 'curve');
+    assert.deepEqual(SHARED[kind][name].auto, { value: 'linear' }, 'linear: no v2 frame changes');
+  }
   for (const [kind, params] of Object.entries(SHARED)) {
     for (const [name, spec] of Object.entries(params)) {
       assert.deepEqual(schema.validateSpec(name, spec), [], kind + '.' + name);
@@ -189,13 +198,15 @@ test('doc and migrate: touched keys (§4.4) and the four MigrateError codes', ()
   const a = D.defaultDoc();
   const b = { ...a, pins: { 'work:mood': { v: 'quietHush', by: 'user' } } };
   const tch = D.touched(a, b);
-  for (const k of ['rows', 'pins', 'look', 'timing', 'song', 'output', 'filters', 'salts', 'locks']) assert.ok(k in tch, k);
+  for (const k of ['rows', 'pins', 'look', 'timing', 'song', 'output', 'filters', 'salts', 'locks', 'materials', 'media']) {
+    assert.ok(k in tch, k);
+  }
   assert.ok(tch.pins instanceof Set && tch.pins.has('work:mood'));
   const text = D.serialize({ doc: a, side: D.defaultSide() });
   assert.deepEqual(Object.keys(M.parseFile(text)).sort(), ['doc', 'side']);
   throwsCode(() => M.parseFile('{'), 'bad-json');
   throwsCode(() => M.parseFile('{"format":"other"}'), 'not-a-project');
-  throwsCode(() => M.parseFile(text.replace('"schema": 1', '"schema": 2')), 'newer');
+  throwsCode(() => M.parseFile(text.replace('"schema": 2', '"schema": 3')), 'newer');
   throwsCode(() => M.parseFile(text.replace('"aspect": "16:9"', '"aspect": "2:1"')), 'invalid');
 });
 
@@ -326,4 +337,104 @@ test('fake engine implements the §4.20 facade (createEngine, Engine members, Fr
     return r.hash();
   });
   assert.equal(hashes[0], hashes[1], 'a fork renders the same frame');
+});
+
+// ---- v2.1: the FROZEN interfaces of DESIGN_2_1 (package A) -----------------------------------------------------------
+
+const FROZEN_EXPORTS_21 = {
+  // §3.2
+  'core/curve': { PRESETS: 'object', PRESET_KEYS: 'array', RAMP_ENDS: 'array', MAX_KNOTS: 'number', RAMP_W: 'number',
+    isCurve: F, coerce: F, keyOf: F, expand: F, compile: F, fn: F, warp: F, isLinear: F, reverse: F, speedAt: F, sample: F,
+    label: F },
+  // §3.3
+  'core/shot': { SHOTS: 'object', SHOT_KEYS: 'array', RIGS: 'object', RIG_KEYS: 'array', MOVES: 'array', FOCI: 'array',
+    TIMINGS: 'array', LIMITS: 'object', coerceShot: F, coerceRig: F, isCustom: F, expandShot: F, lastFraming: F, maxFill: F,
+    expandRig: F, fromMove: F, usesBeats: F, label: F, rigLabel: F },
+  // §3.4
+  'core/recipe': { RECIPE_V: 'number', MAT_KINDS: 'array', COMPOSITE_KINDS: 'array', PRIMS: 'array', SHAPES: 'array',
+    GLYPHS: 'array', ANCHORS: 'array', LAYERS: 'object', WAVES: 'array', MOVE_WHAT: 'array', APPEAR_AT: 'array', DRAWS: 'array',
+    FRAME_STYLES: 'array', PATTERNS: 'array', BURSTS: 'array', MOTION_COLS: 'array', OSC_COLS_DWELL: 'array',
+    OSC_COLS_LENS: 'array', PHASES: 'array', KNOB_WHATS: 'array', LIMITS: 'object', normalize: F, problems: F,
+    entryProblems: F, hash: F, cost: F, knobSpecs: F, withKnobs: F, upgrade: F },
+  // §3.6
+  'core/registry': { extend: F, SHARED: 'object' },
+  // §3.8
+  'planner/areas': { AREA_KINDS: 'array', keyOf: F, areasOf: F, resolve: F, inArea: F, ofLines: F, bands: F, sameRef: F },
+  // §3.12 (the stub signatures)
+  'parts/mix': { SHAPE_LIB: 'object', derive: F, registryFor: F, materialHash: F, sampleDefs: F },
+  // §11.3.2
+  'core/media': { PROBE_V: 'number', INDEX_V: 'number', KINDS: 'array', FITS: 'array', EDGES: 'array', MOVES: 'array',
+    LOOPS: 'array', CLOCKS: 'array', LIMITS: 'object', ID: 'object', isId: F, keyOf: F, idOfKey: F, entryProblems: F,
+    normalizeEntry: F, refsOf: F, metaOf: F, timeSpec: F, mapTime: F, fitRect: F, tier: F },
+};
+
+test('v2.1: every FROZEN export of DESIGN_2_1 §3.2–§3.8, §3.12 and §11.3.2 exists with the right kind', () => {
+  const gaps = [];
+  for (const [id, expected] of Object.entries(FROZEN_EXPORTS_21)) {
+    assert.ok(MV.has(id), 'module ' + id + ' is defined');
+    for (const miss of missingMembers(MV.use(id), expected)) gaps.push(id + '.' + miss);
+  }
+  assert.deepEqual(gaps, []);
+  const CV = MV.use('core/curve');
+  assert.deepEqual([...CV.PRESET_KEYS], ['dashStop', 'fadeBrake', 'holdThenDash', 'hushRushHush', 'slowBloom', 'snapSettle', 'softEnds']);
+  assert.deepEqual([...CV.RAMP_ENDS], ['both', 'start', 'end']);
+  assert.equal(CV.MAX_KNOTS, 8);
+  assert.equal(CV.RAMP_W, 0.06);
+  const SHOT = MV.use('core/shot');
+  assert.deepEqual([...SHOT.SHOT_KEYS], ['driftOff', 'pullReveal', 'pushWord', 'readAlong', 'settle', 'snapZoom', 'sweepAcross',
+    'tiltHold', 'wideHold']);
+  assert.deepEqual([...SHOT.RIG_KEYS], ['climbRise', 'driftSide', 'leanTilt', 'pullAway', 'slowSwell']);
+  assert.deepEqual([...SHOT.MOVES], ['drift', 'follow', 'panDown', 'panLeft', 'panRight', 'panUp', 'pullOut', 'punch', 'pushIn', 'tilt']);
+  assert.deepEqual([...SHOT.FOCI], ['center', 'emphasis', 'first', 'last', 'text']);
+  assert.deepEqual([...SHOT.TIMINGS], ['arrive', 'depart', 'hold', 'whole']);
+  const R = MV.use('core/recipe');
+  assert.equal(R.RECIPE_V, 1);
+  assert.deepEqual([...R.MAT_KINDS], ['arrange', 'arrive', 'depart', 'dwell', 'filter', 'ground', 'lens', 'ornament', 'seam']);
+  assert.deepEqual([...R.COMPOSITE_KINDS], ['arrive', 'depart', 'dwell', 'filter', 'ground', 'lens', 'ornament']);
+  assert.deepEqual([...R.SHAPES], ['rect', 'roundRect', 'ellipse', 'ring', 'star', 'petal', 'leaf', 'flake', 'drop', 'heart',
+    'diamond', 'triangle', 'cross', 'dot', 'bar', 'arc', 'wave', 'spark']);
+  assert.deepEqual([...R.GLYPHS].join(''), '♪♫★☆♡❄✿❀☀☂☁✦✧〇△□◇');
+  assert.deepEqual([...R.ANCHORS], ['frame', 'focus', 'around', 'under', 'behind', 'corners', 'edges', 'free']);
+  assert.deepEqual([...R.WAVES], ['sine', 'tri', 'saw', 'noise', 'beat', 'ramp']);
+  assert.deepEqual([...R.MOVE_WHAT], ['x', 'y', 'rot', 'scale', 'alpha']);
+  assert.deepEqual([...R.PHASES], ['same', 'index', 'rnd']);
+  assert.deepEqual([...R.APPEAR_AT], ['start', 'arrive', 'rest', 'beat', 'impact']);
+  assert.deepEqual([...R.DRAWS], ['fade', 'grow', 'wipe', 'none']);
+  assert.deepEqual([...R.BURSTS], ['none', 'beat', 'impact', 'arrive']);
+  assert.deepEqual([...R.KNOB_WHATS], ['count', 'size', 'speed', 'alpha', 'amp']);
+  assert.deepEqual([...MV.use('planner/areas').AREA_KINDS], ['work', 'song', 'songKind', 'head', 'para', 'lines', 'cut']);
+  const MEDIA = MV.use('core/media');
+  assert.deepEqual([MEDIA.PROBE_V, MEDIA.INDEX_V], [1, 1]);
+  assert.deepEqual([...MEDIA.FITS], ['cover', 'contain', 'soft']);
+  assert.deepEqual([...MEDIA.EDGES], ['mirror', 'zoom', 'plain']);
+  assert.deepEqual([...MEDIA.MOVES], ['auto', 'none', 'push', 'pull', 'drift']);
+  assert.deepEqual([...MEDIA.LOOPS], ['loop', 'hold']);
+  assert.deepEqual([...MEDIA.CLOCKS], ['show', 'song']);
+  // §3.5, §11.2.3: the ParamSpec types
+  assert.deepEqual([...MV.use('core/schema').TYPES], ['num', 'int', 'bool', 'enum', 'ease', 'order', 'ink', 'color', 'face', 'text',
+    'curve', 'shot', 'rig', 'partRefs', 'media']);
+});
+
+test('v2.1: registries have the §3.6 members; registryFor returns the base itself without materials', () => {
+  const REG = MV.use('core/registry');
+  const reg = corpus.stubRegistry(MV);
+  assert.equal(reg.base, null);
+  assert.equal(reg.baseVersion, reg.version);
+  assert.deepEqual({ ...reg.extra }, {});
+  assert.deepEqual([...reg.mine('ornament')], []);
+  const ext = REG.extend(reg, []);
+  for (const m of ['get', 'has', 'keys', 'all', 'pool', 'fallback', 'label', 'blurb', 'params', 'traits', 'mine']) {
+    assert.equal(typeof ext[m], F, 'extended Registry.' + m);
+  }
+  assert.equal(ext.base, reg);
+  assert.equal(ext.baseVersion, reg.version);
+  const MIX = MV.use('parts/mix');
+  assert.equal(MIX.registryFor(reg, { next: 1, list: [] }), reg);
+  assert.equal(MIX.registryFor(reg, { next: 1, list: [] }, { list: [] }), reg);
+  // package C replaced A's stub (§3.12): an unreadable entry derives to no definition, with its problems
+  const bad = MIX.derive({}, reg);
+  assert.equal(bad.def, null);
+  assert.ok(Array.isArray(bad.problems) && bad.problems.length > 0);
+  assert.match(MIX.materialHash({}), /^[0-9a-f]{8}$/);
+  assert.ok(MIX.sampleDefs().length > 0 && MIX.sampleDefs().every((d) => d.key.startsWith('myMatS')));
 });

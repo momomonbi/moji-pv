@@ -294,6 +294,67 @@ class Check(unittest.TestCase):
                    'engine/host/c.js': module('engine/host/c', ['engine/facade']), 'engine/facade.js': module('engine/facade', ['planner/p'])}
         self.check(allowed, ok=True)
 
+    def test_parts_mix_is_l3(self):
+        # DESIGN_2_1 §2.3: parts/mix is L3 (like parts/kit): L0, L1 and L3 only; not a part file; no part depends on it.
+        mix = {'parts/mix.js': module('parts/mix', ['core/a', 'i18n/b', 'parts/kit', 'engine/scene/s']),
+               'parts/kit.js': module('parts/kit', ['core/a']), 'core/a.js': module('core/a'),
+               'i18n/b.js': module('i18n/b', ['core/a']), 'engine/scene/s.js': module('engine/scene/s', ['core/a'])}
+        self.check(mix, ok=True)
+        self.check({'parts/mix.js': module('parts/mix', ['planner/p']), 'planner/p.js': module('planner/p')},
+                   r'layer: parts/mix → planner/p')
+        self.check({'parts/mix.js': module('parts/mix', ['engine/facade']), 'engine/facade.js': module('engine/facade')},
+                   r'layer: parts/mix → engine/facade')
+        self.check({'parts/mix.js': module('parts/mix', body='  const r = () => Math.random();\n  return { r };')},
+                   r'src/parts/mix\.js:4: lint Math\.random')
+        self.check({'parts/arrive/soft.js': module('parts/arrive/soft', ['parts/mix']), 'parts/mix.js': module('parts/mix')},
+                   'part files may depend only on parts/kit')
+        self.check({'engine/facade.js': module('engine/facade', ['parts/mix']), 'parts/mix.js': module('parts/mix')}, ok=True)
+
+    def test_media_layers(self):
+        # DESIGN_2_1 §11.3.1: media/* is L1 (core/* and media/* only; pure); media/host/* is L6; the engine never uses media/*.
+        media = {'core/a.js': module('core/a'), 'media/samples.js': module('media/samples', ['core/a']),
+                 'media/isobmff.js': module('media/isobmff', ['core/a', 'media/samples']),
+                 'media/host/probe.js': module('media/host/probe', ['media/isobmff', 'export/unzip', 'core/a'],
+                                               body='  function f() { return document.createElement("canvas").getContext("2d").getImageData(0, 0, 1, 1); }\n  return { f };'),
+                 'export/unzip.js': module('export/unzip', ['core/a']),
+                 'ui/x.js': module('ui/x', ['media/host/probe', 'media/samples']),
+                 # §11.3.4 / §11.4.6: media/yuv (the pure YUV → RGBA copy, L1) and media/host/bake (its host glue: ctx.filter,
+                 # putImageData, L6) under the same prefix rules
+                 'media/yuv.js': module('media/yuv', ['core/a']),
+                 'media/host/bake.js': module('media/host/bake', ['media/yuv'],
+                                              body='  function f(g, d) { g.putImageData(d, 0, 0); g.filter = "blur(1px)"; return performance.now(); }\n  return { f };')}
+        self.check(media, ok=True)
+        cases = [
+            ({'media/sniff.js': module('media/sniff', ['i18n/b']), 'i18n/b.js': module('i18n/b')}, r'layer: media/sniff → i18n/b'),
+            ({'media/sniff.js': module('media/sniff', ['audio/d']), 'audio/d.js': module('audio/d')}, r'layer: media/sniff → audio/d'),
+            ({'media/sniff.js': module('media/sniff', ['media/host/probe']), 'media/host/probe.js': module('media/host/probe')},
+             r'layer: media/sniff → media/host/probe'),
+            ({'audio/d.js': module('audio/d', ['media/sniff']), 'media/sniff.js': module('media/sniff')}, r'layer: audio/d → media/sniff'),
+            ({'export/package.js': module('export/package', ['media/host/store']), 'media/host/store.js': module('media/host/store')},
+             r'layer: export/package → media/host/store'),
+            ({'engine/render/shapes.js': module('engine/render/shapes', ['media/samples']), 'media/samples.js': module('media/samples')},
+             r'layer: engine/render/shapes → media/samples \(the engine never depends on media'),
+            ({'engine/facade.js': module('engine/facade', ['media/samples']), 'media/samples.js': module('media/samples')},
+             r'layer: engine/facade → media/samples'),
+            ({'media/host/store.js': module('media/host/store', ['ui/dom']), 'ui/dom.js': module('ui/dom')},
+             'only ui/\\* may depend on ui/\\*'),
+            ({'media/palette.js': module('media/palette', body='  const r = () => Math.random();\n  return { r };')},
+             r'src/media/palette\.js:4: lint Math\.random \(L0–L5\)'),
+            ({'media/sniff.js': module('media/sniff', body='  const f = () => document.title;\n  return { f };')},
+             r'src/media/sniff\.js:4: lint document \(L0–L5\)'),
+            ({'media/samples.js': module('media/samples', body='  const f = (g) => setTimeout(g, 1);\n  return { f };')},
+             r'lint setTimeout \(L0–L5\)'),
+            ({'media/yuv.js': module('media/yuv', ['media/host/bake']), 'media/host/bake.js': module('media/host/bake')},
+             r'layer: media/yuv → media/host/bake'),
+            ({'engine/render/shapes.js': module('engine/render/shapes', ['media/yuv']), 'media/yuv.js': module('media/yuv')},
+             r'layer: engine/render/shapes → media/yuv \(the engine never depends on media'),
+            ({'media/yuv.js': module('media/yuv', body='  const f = () => performance.now();\n  return { f };')},
+             r'src/media/yuv\.js:4: lint performance\.now \(L0–L5\)'),
+        ]
+        for files, fragment in cases:
+            with self.subTest(fragment=fragment):
+                self.check(files, fragment)
+
     def test_part_file_rules(self):
         kit = module('parts/kit')
 

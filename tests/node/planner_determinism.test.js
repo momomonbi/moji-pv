@@ -144,9 +144,11 @@ test('plan() memoizes by document identity and registry', () => {
 // --- Plan shape (§3.12) ------------------------------------------------------------------------------------------
 
 const CUT_FIELDS = ['key', 'line', 'role', 'text', 'emph', 'impact', 'note', 't0', 't1', 'a', 'b', 'repT', 'lang', 'feat',
-  'fp', 'slots', 'els', 'ground', 'seamIn'];
+  'fp', 'slots', 'els', 'ground', 'rig', 'seamIn'];
 const FEAT_FIELDS = ['cells', 'graphemes', 'script', 'latin', 'orients', 'words', 'units', 'emph', 'impact', 'dur', 'cps',
-  'energy', 'beat', 'onBeat', 'section', 'repeatOf', 'pos', 'role'];
+  'energy', 'beat', 'onBeat', 'section', 'sectionStart', 'repeatOf', 'pos', 'role'];
+// Plan v2 (DESIGN_2_1 §2.7): every cut holds the camera slots; runs, zoomed segments and the media map are listed.
+const CAMERA_SLOTS = ['motion.speed', 'cam.shot', 'cam.zoom', 'cam.curve', 'cam.follow'];
 
 // The window the cutter gives a cut (§3.12 a/b) before a transition out of it ends it early (§4.16.6).
 function cutterEnd(plan, i, tail) {
@@ -157,10 +159,16 @@ function cutterEnd(plan, i, tail) {
 
 function checkShape(name, plan, reg, doc) {
   const tail = doc ? doc.timing.tail : 0.25;
-  assert.equal(plan.v, 1);
+  assert.equal(plan.v, 2);
   assert.match(plan.hash, /^[0-9a-f]{8}$/);
   assert.deepEqual(Object.keys(plan).sort(), ['beats', 'cuts', 'design', 'duration', 'grounds', 'hash', 'impulses', 'lines',
-    'look', 'seams', 'v', 'warnings'].sort(), name);
+    'look', 'media', 'rigs', 'seams', 'v', 'warnings'].sort(), name);
+  assert.ok(plan.rigs.length >= 1, name + ' rigs');
+  for (const g of plan.grounds) assert.equal(typeof g.zoomed, 'boolean', name + ' zoomed');
+  for (const c of plan.cuts) {
+    assert.ok(Number.isInteger(c.rig) && plan.rigs[c.rig].cuts.includes(c.key), name + ' ' + c.key + ' rig');
+    for (const s of CAMERA_SLOTS) assert.ok(c.slots[s] && c.slots[s].v !== undefined, name + ' ' + c.key + ' ' + s);
+  }
   const L = plan.look;
   for (const k of ['mood', 'theme', 'season', 'amounts', 'amountsFrom', 'palette', 'faces', 'texture', 'backdrop']) assert.ok(k in L, name + ' look.' + k);
   assert.ok(reg.has('mood', L.mood.v) && reg.has('theme', L.theme.v));
@@ -262,6 +270,9 @@ test('edge documents: empty, title only, one grapheme', () => {
   assert.equal(empty.cuts.length, 0);
   assert.equal(empty.grounds.length, 1, 'an empty video still has its background');
   assert.deepEqual([empty.grounds[0].key, empty.grounds[0].t0, empty.grounds[0].t1], ['g', 0, empty.duration]);
+  assert.deepEqual(empty.rigs, [{ blend: null, cuts: [], curve: { from: 'auto', v: 'linear' }, key: 'k', rig: { from: 'auto', v: 'none' },
+    t0: 0, t1: empty.duration }], 'and one still rig run');
+  assert.deepEqual([empty.grounds[0].zoomed, empty.media], [false, {}]);
   const titled = Object.assign(D.defaultDoc(), { sheet: { next: 3, rows: [{ id: 'r1', src: '[ti:題名]' }, { id: 'r2', src: '# memo' }] } });
   const t = PL.run(titled, STUB, null);
   assert.deepEqual(t.cuts.map((c) => [c.key, c.t0, c.t1]), [['title', 0, t.duration]]);

@@ -257,7 +257,7 @@ MV.def('parts/arrange/scatter', ['parts/kit'], (K) => {
     key: 'confettiWords',
     label: L('散らし', 'Confetti words'),
     blurb: L('語を少しずつ回して散らし、重ならないように置く', 'Words scattered at seeded positions and small turns, never overlapping'),
-    tags: ['playful', 'busy'], family: 'scatter',
+    tags: ['playful', 'busy'], family: 'scatter', cam: 'gentle',
     traits: { cells: [3, 30], energy: [0.3, 1] },
     fits: (f) => (f.words >= 3 ? 1.2 : f.words === 2 ? 0.8 : 0.3),
     params: {
@@ -467,7 +467,7 @@ MV.def('parts/arrange/scatter', ['parts/kit'], (K) => {
     key: 'hangingTags',
     label: L('吊り札', 'Hanging tags'),
     blurb: L('語が細い糸で上から吊られ、高さを少しずつ違えて並ぶ', 'Words hang from the top edge on thin threads at staggered heights'),
-    tags: ['playful', 'organic'], family: 'scatter',
+    tags: ['playful', 'organic'], family: 'scatter', cam: 'gentle',
     traits: { cells: [2, 24] },
     fits: (f) => (f.words >= 2 ? 1 : 0.5),
     params: {
@@ -578,7 +578,7 @@ MV.def('parts/arrange/scatter', ['parts/kit'], (K) => {
     key: 'haloRing',
     label: L('円環', 'Halo ring'),
     blurb: L('文字を円や弧に沿って並べる。正立でも接線向きでも', 'Glyphs placed along a circle or an arc around the centre, upright or tangent'),
-    tags: ['airy', 'playful'], family: 'pattern',
+    tags: ['airy', 'playful'], family: 'pattern', cam: 'gentle',
     traits: { orient: ['h'], cells: [3, 28] },
     params: {
       sweep: { type: 'num', min: 90, max: 360, step: 5, unit: 'deg', label: L('弧の広さ', 'Sweep'),
@@ -762,7 +762,7 @@ MV.def('parts/arrange/scatter', ['parts/kit'], (K) => {
     key: 'gridMosaic',
     label: L('升目', 'Grid mosaic'),
     blurb: L('原稿用紙のような正方形の升目に一字ずつ収める', 'Glyphs in a strict grid of square cells, like manuscript paper'),
-    tags: ['literary', 'retro'], family: 'pattern',
+    tags: ['literary', 'retro'], family: 'pattern', cam: 'none',
     traits: { cells: [2, 32], scripts: ['ja', 'zhHant', 'zhHans', 'ko'] },
     params: {
       pad: { type: 'int', min: 0, max: 2, label: L('余白の升', 'Margin cells'), auto: { pick: [1, 0, 2], weights: [3, 2, 1] } },

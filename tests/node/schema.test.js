@@ -1,4 +1,4 @@
-/* 文字PVメーカー v2 — original work. Tests: core/schema — coerce, AutoSpec forms, sources, describeAuto, validateSpec. */
+/* 文字PVメーカー v2 — original work. Tests: core/schema — coerce, AutoSpec forms, sources, describeAuto, validateSpec (v2.1 types too). */
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -24,7 +24,8 @@ function ax(extra = {}) {
 test('ORDERS and the other vocabularies', () => {
   assert.deepEqual([...S.ORDERS], ['lead', 'tail', 'core', 'rim', 'scatter', 'word', 'line', 'sweepX', 'sweepY', 'radial',
     'emphFirst', 'sung']);
-  assert.deepEqual([...S.TYPES], ['num', 'int', 'bool', 'enum', 'ease', 'order', 'ink', 'color', 'face', 'text']);
+  assert.deepEqual([...S.TYPES], ['num', 'int', 'bool', 'enum', 'ease', 'order', 'ink', 'color', 'face', 'text', 'curve', 'shot',
+    'rig', 'partRefs', 'media']);
   assert.equal(S.AMOUNT_KEYS.length, 11);
   assert.equal(S.TAGS.length, 17);
 });
@@ -268,4 +269,90 @@ test('validateSpec reports each broken rule, naming the param', () => {
     assert.ok(errors.some((e) => rule.test(e)), rule + ' in ' + JSON.stringify(errors));
     for (const e of errors) assert.ok(e.startsWith('amount: '), e);
   }
+});
+
+// --- v2.1 types (DESIGN_2_1 §3.5, §11.2.3) --------------------------------------------------------------------------
+
+test('v2.1 coerce: curve, shot and rig delegate to core/curve and core/shot', () => {
+  const CV = MV.use('core/curve');
+  const SHOT = MV.use('core/shot');
+  const curve = { type: 'curve' };
+  assert.equal(S.coerce(curve, 'expoOut'), 'expoOut');
+  assert.equal(S.coerce(curve, 'holdThenDash'), 'holdThenDash');
+  assert.deepEqual(S.coerce(curve, { bz: [0.7, 0, 0.2, 1] }), CV.coerce({ bz: [0.7, 0, 0.2, 1] }));
+  assert.ok(Object.isFrozen(S.coerce(curve, { ramp: { edge: 0.1, ends: 'both', peak: 6 } })));
+  for (const bad of ['expoout', 3, null, { bz: [2, 0, 0, 1] }, { sp: [[0, 0], [1, 0]] }]) assert.equal(S.coerce(curve, bad), undefined);
+  assert.equal(S.coerce({ type: 'shot' }, 'pushWord'), 'pushWord');
+  assert.equal(S.coerce({ type: 'shot' }, 'none'), 'none');
+  assert.equal(S.coerce({ type: 'shot' }, 'slowSwell'), undefined, 'a rig preset is not a shot');
+  const shot = { keys: [{ at: 'a', aim: 'block' }, { at: 'b', aim: 'emph', fill: 0.9 }] };
+  assert.deepEqual(S.coerce({ type: 'shot' }, shot), SHOT.coerceShot(shot));
+  assert.equal(S.coerce({ type: 'rig' }, 'slowSwell'), 'slowSwell');
+  assert.equal(S.coerce({ type: 'rig' }, 'pushWord'), undefined);
+  assert.deepEqual(S.coerce({ type: 'rig' }, { keys: [{ u: 0 }, { u: 1, zoom: 1.1 }] }), { keys: [{ u: 0 }, { u: 1, zoom: 1.1 }] });
+});
+
+test('v2.1 coerce: partRefs are sorted, unique "kind.key" items, at most 24', () => {
+  const refs = { type: 'partRefs' };
+  assert.deepEqual(S.coerce(refs, ['ornament.sakuraDrift', 'filter.sliceGlitch', 'ornament.sakuraDrift', 'bad', 'mood.quietHush',
+    'arrive.x', 7, 'lens.myMat3']), ['filter.sliceGlitch', 'lens.myMat3', 'ornament.sakuraDrift']);
+  assert.deepEqual(S.coerce(refs, []), []);
+  assert.equal(S.coerce(refs, 'filter.sliceGlitch'), undefined);
+  const many = Array.from({ length: 30 }, (_, i) => 'filter.fx' + String(i).padStart(2, '0'));
+  assert.equal(S.coerce(refs, many).length, 24);
+  assert.ok(Object.isFrozen(S.coerce(refs, ['filter.sliceGlitch'])));
+});
+
+test('v2.1 coerce: media is an asset id or empty', () => {
+  const media = { type: 'media', accept: 'image', auto: { value: '' } };
+  assert.equal(S.coerce(media, ''), '');
+  assert.equal(S.coerce(media, 'a3f9c2d17b0e4a5c6d7e8f901'), 'a3f9c2d17b0e4a5c6d7e8f901');
+  for (const bad of ['a3f9c2d17b0e4a5c6d7e8f90', 'A3F9C2D17B0E4A5C6D7E8F901', 'b3f9c2d17b0e4a5c6d7e8f901', null, 3]) {
+    assert.equal(S.coerce(media, bad), undefined, String(bad));
+  }
+});
+
+test('v2.1 autoValue: base values of the new types (curve linear, shot/rig none, partRefs [], media empty)', () => {
+  const broken = (type, extra) => Object.assign({ type, label, auto: { fn: () => 'junk!', why: label } }, extra || {});
+  assert.equal(S.autoValue(broken('curve'), ax()), 'linear');
+  assert.equal(S.autoValue(broken('shot'), ax()), 'none');
+  assert.equal(S.autoValue(broken('rig'), ax()), 'none');
+  assert.deepEqual(S.autoValue(broken('partRefs'), ax()), []);
+  assert.equal(S.autoValue(broken('media'), ax()), '');
+  assert.equal(S.autoValue({ type: 'curve', auto: { pick: ['expoOut', 'holdThenDash'], weights: [0, 1] } }, ax()), 'holdThenDash');
+});
+
+test('v2.1 validateSpec: curve picks, media rules', () => {
+  assert.deepEqual(S.validateSpec('ease', { type: 'curve', label, auto: { pick: ['expoOut', 'holdThenDash'] } }), []);
+  assert.deepEqual(S.validateSpec('c', { type: 'curve', label, auto: { value: { ramp: { edge: 0.1, ends: 'both', peak: 6 } } } }), []);
+  assert.ok(S.validateSpec('c', { type: 'curve', label, auto: { value: 'wobble' } }).some((e) => /not a valid curve/.test(e)));
+  assert.ok(S.validateSpec('c', { type: 'curve', label, auto: { range: [0, 1] } }).some((e) => /num or int/.test(e)));
+  assert.deepEqual(S.validateSpec('s', { type: 'shot', label, auto: { pick: ['none', 'settle', 'pushWord'] } }), []);
+  assert.deepEqual(S.validateSpec('r', { type: 'rig', label, auto: { value: 'none' } }), []);
+  assert.deepEqual(S.validateSpec('a', { type: 'partRefs', label, auto: { value: [] } }), []);
+  assert.deepEqual(S.validateSpec('src', { type: 'media', accept: 'any', label, auto: { value: '' } }), []);
+  assert.deepEqual(S.validateSpec('image', { type: 'media', accept: 'image', label, auto: { value: 'a3f9c2d17b0e4a5c6d7e8f901' } }), []);
+  assert.ok(S.validateSpec('src', { type: 'media', accept: 'audio', label, auto: { value: '' } }).some((e) => /accept/.test(e)));
+  assert.ok(S.validateSpec('src', { type: 'media', label, auto: { pick: [''] } }).some((e) => /constant \{ value \}/.test(e)));
+  assert.ok(S.validateSpec('src', { type: 'media', label, auto: { value: 'photo.png' } }).some((e) => /not a valid media/.test(e)));
+});
+
+test('v2.1 describeAuto: object values show as the curve key or custom; media as none / photo or video', () => {
+  const CV = MV.use('core/curve');
+  const ramp = { ramp: { edge: 0.1, ends: 'both', peak: 6 } };
+  assert.equal(S.describeAuto({ type: 'curve', auto: { value: ramp } }, 'en'), 'always ' + CV.keyOf(ramp));
+  assert.equal(S.describeAuto({ type: 'curve', auto: { pick: ['expoOut', ramp] } }, 'en'), 'one of expoOut / rp:both,0.1,6');
+  assert.equal(S.describeAuto({ type: 'shot', auto: { value: { keys: [{ at: 'a', aim: 'block' }, { at: 'b', aim: 'frame' }] } } }, 'en'),
+    'always custom');
+  assert.equal(S.describeAuto({ type: 'media', auto: { value: '' } }, 'ja'), 'なし');
+  assert.equal(S.describeAuto({ type: 'media', auto: { value: '' } }, 'en'), 'none');
+  assert.equal(S.describeAuto({ type: 'media', auto: { value: 'a3f9c2d17b0e4a5c6d7e8f901' } }, 'en'), 'photo or video');
+  assert.equal(S.describeAuto({ type: 'partRefs', auto: { value: [] } }, 'en'), 'always none');
+});
+
+test('validateSpec: optKey names an enum\'s own label group (opt.<optKey>.<value>), and only on an enum', () => {
+  const enumSpec = { type: 'enum', of: ['auto', 'back'], optKey: 'depth', label: { ja: '奥行き', en: 'Depth' }, auto: { value: 'auto' } };
+  assert.deepEqual(S.validateSpec('depth', enumSpec), []);
+  assert.equal(S.validateSpec('depth', Object.assign({}, enumSpec, { optKey: 'Bad-Key' })).length, 1);
+  assert.equal(S.validateSpec('n', { type: 'num', min: 0, max: 1, optKey: 'x', label: { ja: 'x', en: 'x' }, auto: { value: 0 } }).length, 1);
 });

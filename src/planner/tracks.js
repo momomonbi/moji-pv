@@ -1,14 +1,16 @@
-/* 文字PVメーカー v2 — original work. Tracks: background segments, seams (decided after grounds), rule overrides, impulses (DESIGN §4.16.6). */
-MV.def('planner/tracks', ['core/rng', 'core/num', 'planner/choose', 'planner/params', 'planner/cast'],
-  (R, N, CH, PA, CA) => {
+/* 文字PVメーカー v2 — original work. Tracks: background segments, seams (decided after grounds), rule overrides, impulses (DESIGN §4.16.6; DESIGN_2_1 §4.9, §11.2.6, §11.5.9). */
+MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose', 'planner/params', 'planner/cast',
+  'planner/camera'], (R, N, P, CH, PA, CA, CAM) => {
     'use strict';
 
     const SPECIAL = new Set(['title', 'interlude', 'outro']);
     const WORLD_CHANCE = 0.7;
     const ATMOS_CHANCE = 0.6;
+    const LINE_SEASON_ATMOS = 0.85;  // at least this atmos chance where a line pins its own season (DESIGN_2_1 §4.9)
     const SEAM_SHARE = 0.4;         // a seam takes at most 40 % of the shorter of its two cuts
     const WORLD_MAX = 0.8;          // world seams are clamped to 0.8 s (§7.4)
     const GAP_BREAK = 1.5;
+    const MEDIA_MIN_SEGMENT = 3;    // seconds: shorter segments never take a derived media ground (§11.5.9)
 
     function atOf(cut) { return { cutKey: cut.key, pinCutKey: cut.pinKey, lineId: cut.line }; }
 
@@ -52,10 +54,11 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'planner/choose', 'planner/par
       return { v: d.v, base: (got && got.base) || d.v, ref: (got && got.ref) || d.v, win: (got && got.win) || d.v };
     }
 
-    function params(ctx, def, slotKind, at, seed, feat, partKind) {
+    // coverage: the segment's text coverage, for the depth of a background photo (PA.textCoverage, §11.9.2).
+    function params(ctx, def, slotKind, at, seed, feat, partKind, coverage) {
       return PA.resolveParams(def, slotKind, null, at, ctx.ix, {
         registry: ctx.registry, seed, salts: ctx.salts, warn: ctx.warn, f: feat, look: CA.lookAx(ctx),
-        partKind: partKind || slotKind,
+        partKind: partKind || slotKind, media: ctx.media, coverage: coverage || 0,
       });
     }
 
@@ -103,7 +106,11 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'planner/choose', 'planner/par
 
     // Segments of consecutive cuts. The resolved ground pin (gp) and atmos pin (ap) of each cut split them like
     // §4.16.6 says for the ground: a new segment starts where either differs from the previous cut's, so a pin on any
-    // cut (or line) applies to exactly the cuts it covers; with neither pinned, breakScore decides.
+    // cut (or line) applies to exactly the cuts it covers; with neither pinned, breakScore decides. DESIGN_2_1 adds
+    // two more breaks: where the effective season of the cut differs from the previous cut's (only line season pins
+    // make them differ, §4.9), and where the resolved value of a media param of the pinned ground or atmos part
+    // changes (compared by string, §11.2.6), so two lines pinned to one photo part with different photos each show
+    // their own.
     function splitSegments(ctx, cuts) {
       const L = Math.round(N.lerp(8, 1, ctx.look.amounts.groundSwitch));
       const segs = [];
@@ -112,12 +119,47 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'planner/choose', 'planner/par
         const pin = groundPin(ctx, cut, ctx.warn);
         const apin = atmosPin(ctx, cut, ctx.warn);
         const gp = pin ? pin.v : null, ap = apin ? apin.v : null;
-        const fresh = !cur || gp !== cur.gp || ap !== cur.ap ||
+        const season = CA.lineCond(ctx, cut.line).season;
+        const src = gp === null && ap === null ? '' : mediaSource(ctx, cut, 'ground', gp) + '|' + mediaSource(ctx, cut, 'atmos', ap);
+        const fresh = !cur || gp !== cur.gp || ap !== cur.ap || season !== cur.season || src !== cur.src ||
           (gp === null && breakScore(ctx, cuts[j - 1], cut, L) >= 1);
-        if (fresh) { cur = { gp, ap, pin, apin, idx: [] }; segs.push(cur); }
+        if (fresh) { cur = { gp, ap, pin, apin, season, src, idx: [] }; segs.push(cur); }
         cur.idx.push(j);
       });
       return segs;
+    }
+
+    // The media params of a part as [{ name, spec, slot }] (slot paths at `slotKind`), made once per definition.
+    const mediaParamCache = new WeakMap();
+    function mediaParams(ctx, slotKind, key) {
+      const partKind = slotKind === 'atmos' ? 'ornament' : slotKind;
+      const def = ctx.registry.get(partKind, key);
+      if (!def) return NO_PARAMS;
+      let byKind = mediaParamCache.get(def);
+      if (!byKind) { byKind = new Map(); mediaParamCache.set(def, byKind); }
+      let list = byKind.get(slotKind);
+      if (!list) {
+        list = (ctx.registry.params(partKind, key) || []).filter((x) => x.spec && x.spec.type === 'media')
+          .map((x) => ({ name: x.name, spec: x.spec, slot: P.slotParamPath(slotKind, null, key, x.name, x.shared),
+            accept: PA.acceptSpec(x.spec) }));
+        byKind.set(slotKind, list);
+      }
+      return list;
+    }
+    const NO_PARAMS = Object.freeze([]);
+
+    // The resolved values of the media params of the pinned part `key` at a cut, as one string ('' without any).
+    function mediaSource(ctx, cut, slotKind, key) {
+      if (key === null || key === 'none') return '';
+      const list = mediaParams(ctx, slotKind, key);
+      if (!list.length) return '';
+      let out = '';
+      for (const x of list) {
+        const pin = PA.resolvePin(ctx.ix, atOf(cut), x.slot, x.accept, null);
+        const v = pin ? pin.v : x.spec.auto && typeof x.spec.auto.value === 'string' ? x.spec.auto.value : '';
+        out += x.name + '=' + v + ';';
+      }
+      return out;
     }
 
     // A decision of the chooser for a segment or boundary: { decision, entry } (entry = its history entry).
@@ -149,42 +191,49 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'planner/choose', 'planner/par
       return last && last.win !== free ? last.win : null;
     }
 
-    function decideGround(ctx, seg, first, seed, history) {
+    // A segment's ground. The segment reads its first cut's line conditions (season and avoid list, DESIGN_2_1 §4.9);
+    // noMedia: derived grounds of the user's media weigh 0 here (§11.5.9); seg.coverage: its text coverage (§11.9.2).
+    function decideGround(ctx, seg, first, seed, history, noMedia) {
       const trace = tracing(ctx, first.key, 'ground');
       const rec = recentOf(ctx, 'ground', history);
+      const cond = CA.lineCond(ctx, first.line);
       const req = { kind: 'ground', slot: 'ground', path: 'cut/' + first.key + ':ground', feat: first.feat, chosen: {}, seed,
-        recent: rec.recent, ref: rec.ref, echo: null, cutKey: first.key, avoid: avoidOf(history, null) };
+        recent: rec.recent, ref: rec.ref, echo: null, cutKey: first.key, avoid: avoidOf(history, null), cond, noMedia };
       let out;
       if (seg.pin) {
-        CA.pinWarnings(ctx, 'ground', seg.pin.v, seg.pin);
+        CA.pinWarnings(ctx, 'ground', seg.pin.v, seg.pin, cond);
         out = fixed(pinDecision(seg.pin));
         if (trace) shadow(ctx, req, trace, { kind: 'ground', stage: 'pin', pin: seg.pin, recent: rec.recent, echo: null });
       } else {
-        if (trace) Object.assign(trace, { kind: 'ground', recent: rec.recent, echo: null });
+        if (trace) Object.assign(trace, { kind: 'ground', recent: rec.recent, echo: null, noMedia });
         out = chosen(ctx, req, trace);
       }
       const d = out.decision = withParams(out.decision, params(ctx, ctx.registry.get('ground', out.decision.v), 'ground',
-        atOf(first), seed, first.feat));
+        atOf(first), seed, first.feat, 'ground', seg.coverage));
       if (trace) trace.decision = d;
       return out;
     }
 
     // atmos: its pin (the segment's, see splitSegments), else with probability 0.6·amount.ornament the chooser over
-    // ornaments with scope 'run' (nothing eligible → 'none'), else 'none'.
+    // ornaments with scope 'run' (nothing eligible → 'none'), else 'none'. Where the first cut's line pins its own
+    // season the chance is at least 0.85, and run ornaments of that season weigh ×2.5 (the chooser's line season).
     function decideAtmos(ctx, seg, first, seed, history) {
       const trace = tracing(ctx, first.key, 'atmos');
       const pin = seg.apin;
+      const cond = CA.lineCond(ctx, first.line);
+      const chance = cond.pinned ? Math.max(ATMOS_CHANCE * ctx.look.amounts.ornament, LINE_SEASON_ATMOS)
+        : ATMOS_CHANCE * ctx.look.amounts.ornament;
       let out;
       if (pin) {
-        CA.pinWarnings(ctx, 'ornament', pin.v, pin);
+        CA.pinWarnings(ctx, 'ornament', pin.v, pin, cond);
         out = fixed(pinDecision(pin));
         if (trace) Object.assign(trace, { kind: 'ornament', stage: 'pin', pin });
-      } else if (R.stream(seed, 'chance').next() < ATMOS_CHANCE * ctx.look.amounts.ornament) {
+      } else if (R.stream(seed, 'chance').next() < chance) {
         const rec = recentOf(ctx, 'ornament', history);
         if (trace) Object.assign(trace, { kind: 'ornament', recent: rec.recent, echo: null });
         out = chosen(ctx, { kind: 'ornament', slot: 'atmos', path: 'cut/' + first.key + ':atmos', feat: first.feat,
           chosen: {}, seed, scope: 'run', recent: rec.recent, ref: rec.ref, echo: null, orNone: true, cutKey: first.key,
-          avoid: avoidOf(history, 'none') }, trace);
+          avoid: avoidOf(history, 'none'), cond }, trace);
       } else {
         out = fixed({ from: 'auto', v: 'none' });
         if (trace) Object.assign(trace, { kind: 'ornament', stage: 'rule', rule: 'chance' });
@@ -218,11 +267,14 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'planner/choose', 'planner/par
     // A segment's ground and atmos: { ground, atmos } (each { decision, entry }). They are a function of the first
     // cut's cast inputs (its pins, which also give the segment's pins, seeds, features, look) and the history entries
     // they read, so they are kept on that cut's cast entry (planner/cast) and reused while those are the same.
-    function segmentOf(ctx, seg, first, groundsSoFar, atmosSoFar) {
+    // noMedia and the text coverage are part of the memo: they depend on the segment's length and cuts, which the
+    // first cut's cast does not fix.
+    function segmentOf(ctx, seg, first, groundsSoFar, atmosSoFar, noMedia) {
       const gRead = groundsSoFar.slice(Math.max(0, groundsSoFar.length - 4));
       const aRead = atmosSoFar.slice(Math.max(0, atmosSoFar.length - 4));
       const memo = first.cast ? first.cast.segment : null;
-      if (memo && sameEntries(memo.gRead, gRead) && sameEntries(memo.aRead, aRead)) {
+      if (memo && memo.noMedia === noMedia && memo.coverage === seg.coverage && sameEntries(memo.gRead, gRead) &&
+          sameEntries(memo.aRead, aRead)) {
         for (const w of memo.warnings) ctx.warn(w);
         return memo;
       }
@@ -232,13 +284,13 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'planner/choose', 'planner/par
       try {
         const segSeed = CH.segSeed(ctx.doc.look.seed, first.key, ctx.salts);
         const ground = decideGround(ctx, seg, first, CH.slotSeed(segSeed, first.key, first.line, 'ground', ctx.salts),
-          groundsSoFar);
+          groundsSoFar, noMedia);
         const atmos = decideAtmos(ctx, seg, first, CH.slotSeed(segSeed, first.key, first.line, 'atmos', ctx.salts),
           atmosSoFar);
         if (first.cast) {
           CA.deepFreeze(ground.decision);
           CA.deepFreeze(atmos.decision);
-          first.cast.segment = { gRead, aRead, warnings, ground, atmos };
+          first.cast.segment = { gRead, aRead, noMedia, coverage: seg.coverage, warnings, ground, atmos };
         }
         return { ground, atmos };
       } finally {
@@ -246,22 +298,40 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'planner/choose', 'planner/par
       }
     }
 
-    // grounds(ctx, cuts, duration) → Plan.grounds; sets cut.ground (index).
+    // Whether the registry has derived grounds of the user's media (registry.extra[key].media, §11.5.9).
+    const mediaGroundCache = new WeakMap();
+    function hasMediaGrounds(registry) {
+      let hit = mediaGroundCache.get(registry);
+      if (hit === undefined) {
+        const extra = registry.extra || {};
+        hit = (registry.mine ? registry.mine('ground') : []).some((key) => !!(extra[key] && extra[key].media === true));
+        mediaGroundCache.set(registry, hit);
+      }
+      return hit;
+    }
+
+    // grounds(ctx, cuts, duration) → Plan.grounds; sets cut.ground (index). A segment spans [t0, t1): t0 = its first
+    // cut's a (0 for the first segment), t1 = the next segment's t0 (the duration for the last). A derived media ground
+    // is never chosen for a segment shorter than 3 s or for the title card (§11.5.9).
     function grounds(ctx, cuts, duration) {
       if (!cuts.length) return emptyGround(ctx, duration);
       const segs = splitSegments(ctx, cuts);
+      const starts = segs.map((seg, k) => (k === 0 ? 0 : N.q6(Math.max(0, cuts[seg.idx[0]].a))));
+      const media = hasMediaGrounds(ctx.registry);
       const out = [];
       const groundsSoFar = [], atmosSoFar = [];
       segs.forEach((seg, k) => {
         const first = cuts[seg.idx[0]];
-        const { ground, atmos } = segmentOf(ctx, seg, first, groundsSoFar, atmosSoFar);
+        const t1 = k + 1 < segs.length ? starts[k + 1] : N.q6(Math.max(duration, starts[k]));
+        const noMedia = media && (t1 - starts[k] < MEDIA_MIN_SEGMENT || first.role === 'title');
+        seg.coverage = PA.textCoverage(seg.idx.map((j) => cuts[j]));
+        const { ground, atmos } = segmentOf(ctx, seg, first, groundsSoFar, atmosSoFar, noMedia);
         groundsSoFar.push(ground.entry);
         atmosSoFar.push(atmos.entry);
         for (const j of seg.idx) cuts[j].ground = k;
         out.push({ atmos: atmos.decision, cuts: seg.idx.map((j) => cuts[j].key), fp: '', ground: ground.decision,
-          key: 'g' + first.key, t0: k === 0 ? 0 : N.q6(Math.max(0, first.a)), t1: 0 });
+          key: 'g' + first.key, t0: starts[k], t1 });
       });
-      out.forEach((g, k) => { g.t1 = k + 1 < out.length ? out[k + 1].t0 : N.q6(Math.max(duration, g.t0)); });
       return out;
     }
 
@@ -270,7 +340,7 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'planner/choose', 'planner/par
     function isPinned(d) { return !!d && typeof d.from === 'string' && d.from.startsWith('pin'); }
 
     // A seam that replaces an exit (entrance) turns the other cut's unpinned depart (arrive) into the kind's fallback,
-    // from 'rule' (§4.16.6).
+    // from 'rule' (§4.16.6). Its parameters follow the cut's motion speed like any motion's (DESIGN_2_1 §4.3).
     function replaceMotion(ctx, cut, kind) {
       const old = cut.slots[kind];
       if (isPinned(old)) return;
@@ -278,8 +348,10 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'planner/choose', 'planner/par
         const key = ctx.registry.fallback(kind);
         const seed = CH.slotSeed(CH.cutSeed(ctx.doc.look.seed, cut.key, cut.line, ctx.salts), cut.key, cut.line, kind,
           ctx.salts);
-        return withParams({ v: key, from: 'rule' }, PA.resolveParams(ctx.registry.get(kind, key), kind, null, atOf(cut),
-          ctx.ix, { registry: ctx.registry, seed, salts: ctx.salts, warn: null, f: cut.feat, look: CA.lookAx(ctx) }));
+        const got = PA.resolveParams(ctx.registry.get(kind, key), kind, null, atOf(cut), ctx.ix,
+          { registry: ctx.registry, seed, salts: ctx.salts, warn: null, f: cut.feat, look: CA.lookAx(ctx) });
+        const scaled = CAM.applySpeed({ ctx, slots: cut.slots }, kind, { v: key, p: got.p, pfrom: got.pfrom || undefined });
+        return withParams({ v: key, from: 'rule' }, { p: scaled.p, pfrom: scaled.pfrom || null });
       };
       // The same cast gives the same decision, kept on the cast's cache entry and reused with it across plans.
       let d;
@@ -303,15 +375,17 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'planner/choose', 'planner/par
       const world = A.ground !== B.ground;
       const pin = PA.resolvePin(ctx.ix, at, 'seam', CA.acceptPart(ctx, 'seam', null, { checkRole: false }), ctx.warn);
       const rec = recentOf(ctx, 'seam', history);
+      // The receiving cut's line conditions (season, avoid list; DESIGN_2_1 §4.9).
+      const cond = CA.lineCond(ctx, B.line);
       // A transition does not repeat the one into the previous cut while another candidate weighs > 0 (avoidOf; the
       // runner-up may be the hard cut). Hard cuts repeat freely.
       const req = { kind: 'seam', slot: 'seam', path: 'cut/' + B.key + ':seam', feat: B.feat, chosen: {}, seed,
         scope: world ? 'world' : 'text', recent: rec.recent, ref: rec.ref, echo: null, cutKey: B.key,
-        avoid: avoidOf(history, hard) };
+        avoid: avoidOf(history, hard), cond };
       let out;
       if (trace) trace.world = world;
       if (pin) {
-        CA.pinWarnings(ctx, 'seam', pin.v, pin);
+        CA.pinWarnings(ctx, 'seam', pin.v, pin, cond);
         out = fixed(pinDecision(pin));
         if (trace) shadow(ctx, req, trace, { kind: 'seam', stage: 'pin', pin, recent: rec.recent, echo: null });
       } else {

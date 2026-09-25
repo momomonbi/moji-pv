@@ -11,6 +11,11 @@ MV.def('parts/lens/kick', ['parts/kit'], (K) => {
   // Same scale as parts/lens/glide: amount 0.5 is the move as authored.
   function strength(p) { return 0.5 + p.amount; }
 
+  // The beat and impact cameras are locked to the beat grid and the sung start, so the lens curve does not warp their
+  // clock (`warp: false`) and their curve row is an advanced one the AI does not set (DESIGN_2_1 §3.11). handHeld is a
+  // wander and keeps the kit's time warp.
+  const LOCKED_CURVE = Object.freeze({ curve: { ui: 'advanced', ai: false } });
+
   function cameraBehaviour(env, cam, run, fields) {
     return Object.assign({ phase: K.PH.LENS, live: 'always', from: cam, to: cam + 1, t0: env.times.a, t1: env.times.b, run },
       fields);
@@ -86,7 +91,7 @@ MV.def('parts/lens/kick', ['parts/kit'], (K) => {
     key: 'beatZoom',
     label: L('拍ズーム', 'Beat zoom'),
     blurb: L('拍ごとに少し寄ってすぐ戻る', 'A small punch-in on every beat'),
-    tags: ['fast', 'bold'], family: 'beat', needs: ['beats'],
+    tags: ['fast', 'bold'], family: 'beat', needs: ['beats'], warp: false, shared: LOCKED_CURVE,
     fits: (f) => (f.beat ? 1.3 : 0),
     traits: { energy: [0.35, 1], roles: ['lyric', 'focus', 'interlude'] },
     params: {
@@ -112,7 +117,7 @@ MV.def('parts/lens/kick', ['parts/kit'], (K) => {
     key: 'impactKick',
     label: L('衝撃', 'Impact kick'),
     blurb: L('歌い出しで鋭く寄り、画面が揺れて収まる', 'A sharp punch-in and a shake right at the sung start'),
-    tags: ['hard', 'bold'], family: 'shake',
+    tags: ['hard', 'bold'], family: 'shake', warp: false, shared: LOCKED_CURVE,
     traits: { energy: [0.35, 1], impact: true },
     fits: (f) => (f.impact ? 1 : 0.25),                   // mostly for `!` lines (×6 there); rare on plain ones
     params: {

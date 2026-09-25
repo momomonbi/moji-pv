@@ -87,7 +87,8 @@ test('part-qualified FieldSpec paths name parameters of the catalog (when it is 
 
 test('slotScopes follows the §3.4 catalogue', () => {
   const cases = {
-    mood: ['work'], theme: ['work'], season: ['work'], 'color.accent': ['work'], 'color.nope': [], 'face.display.ja': ['work'],
+    // v2.1 (DESIGN_2_1 §2.3): the line season is a line value that may also be pinned for the whole video.
+    mood: ['work'], theme: ['work'], season: ['work', 'line'], 'color.accent': ['work'], 'color.nope': [], 'face.display.ja': ['work'],
     'face.serif.weight': ['work'], 'face.body.cyrillic': [], 'amount.glitch': ['work'], 'amount.nope': [], texture: ['work'],
     'texture.amount': [], bpm: ['work'], readRate: ['work'], titleCard: ['work'],
     start: ['line'], end: ['line'], split: ['line'], lang: ['line'], t0: ['cut'],
@@ -100,6 +101,136 @@ test('slotScopes follows the §3.4 catalogue', () => {
     'el.filter#0.hide': [], 'Bad slot': [],
   };
   for (const [slot, want] of Object.entries(cases)) assert.deepEqual(F.slotScopes(slot), want, slot);
+});
+
+// --- v2.1 (package F): the scope table, widgets and pages of DESIGN_2_1 §2.3, §3.14, §6.5 ------------------------------
+
+test('v2.1 slots: the scope table of DESIGN_2_1 §2.3 (camerawork, speed, section camera, line season, avoid, curve params)', () => {
+  const ALL = ['work', 'line', 'cut'];
+  const cases = {
+    'motion.speed': ALL, 'cam.shot': ALL, 'cam.zoom': ALL, 'cam.curve': ALL, 'cam.follow': ALL, rig: ALL, 'rig.curve': ALL,
+    season: ['work', 'line'], avoid: ['line'], 'arrive.flow': ALL, 'depart.flow': ALL, 'dwell.curve': ALL, 'lens.curve': ALL,
+    'seam.curve': ALL, 'arrive.ease': ALL, 'cam.bogus': [], 'rig.bogus': [], 'motion.bogus': [],
+  };
+  for (const [slot, want] of Object.entries(cases)) assert.deepEqual(F.slotScopes(slot), want, slot);
+  // The scope rules of core/commands agree (a refused path would make a row that cannot be written).
+  const CMD = MV.use('core/commands');
+  const D0 = MV.use('core/doc').defaultDoc();
+  const ok = (path, v) => {
+    const cmd = { t: 'pin.set', path, v, by: 'user' };
+    if (path.startsWith('cut/')) cmd.sig = 's';
+    try { CMD.reduce(D0, cmd); return true; } catch (e) { return false; }
+  };
+  assert.equal(ok('line/r1:season', 'spring'), true);
+  assert.equal(ok('cut/r1~0:season', 'spring'), false, 'no season at cut scope');
+  assert.equal(ok('work:avoid', ['arrive.inkRise']), false, 'avoid is a line value');
+  assert.equal(ok('cut/r1~0:cam.shot', 'pushWord'), true);
+});
+
+test('v2.1 widgets: curve, shot, rig and partRefs specs map to their widgets; every new field has one', () => {
+  assert.equal(F.widgetFor({ type: 'curve' }), 'curve');
+  assert.equal(F.widgetFor({ type: 'shot' }), 'shot');
+  assert.equal(F.widgetFor({ type: 'rig' }), 'rig');
+  assert.equal(F.widgetFor({ type: 'partRefs' }), 'partRefs');
+  for (const w of ['curve', 'shot', 'rig', 'partRefs']) assert.ok(F.WIDGETS.includes(w), w);
+  const W = MV.use('ui/widgets');
+  for (const w of F.WIDGETS) assert.ok(W.names().includes(w), 'ui/widgets makes ' + w);
+  // Every shared curve param of the registry is edited by the curve widget (the line page's 緩急, 出方の緩急, …).
+  const R = MV.use('core/registry');
+  for (const kind of Object.keys(R.SHARED)) {
+    for (const [name, spec] of Object.entries(R.SHARED[kind])) {
+      if (spec.type === 'curve') assert.equal(F.widgetFor(spec), 'curve', kind + '.' + name);
+    }
+  }
+});
+
+test('v2.1 pages: 行 › 演出, カット › 動き, 要素 › カメラ and the area page carry the DESIGN_2_1 §6.5 rows', () => {
+  const line = PLAN.lines.find((l) => l.cuts.length > 1) || PLAN.lines[0];
+  const rowsOf = (sel, doc) => F.sectionsFor(sel, PLAN, REG, doc);
+  const byPath = (secs) => new Map(secs.flatMap((s) => s.fields.map((f) => [f.path, Object.assign({ section: s.id }, f)])));
+  const lp = byPath(rowsOf({ level: 'line', ids: [line.id] }));
+  assert.equal(lp.get('arrive.ease').widget, 'curve');
+  assert.equal(lp.get('arrive.ease').label, 'fld.speedCurve', '緩急 (was なめらかさ)');
+  assert.equal(lp.get('depart.ease').widget, 'curve');
+  assert.equal(lp.get('motion.speed').widget, 'number');
+  assert.equal(lp.get('motion.speed').scale, 100, '×100 %');
+  assert.equal(lp.get('cam.shot').widget, 'shot');
+  assert.equal(lp.get('arrive.flow').basic, false, '出方の緩急 is advanced');
+  assert.equal(lp.get('season').basic, false);
+  assert.equal(lp.get('season').label, 'fld.lineSeason');
+  assert.deepEqual(lp.get('season').options.map((o) => o.v), ['any', 'none', 'spring', 'summer', 'autumn', 'winter']);
+  assert.equal(lp.get('avoid').widget, 'partRefs');
+  const cut = PLAN.cuts.find((c) => c.line && PLAN.lines.find((l) => l.id === c.line).cuts.length > 1);
+  if (cut) {
+    const cp = byPath(rowsOf({ level: 'cut', key: cut.key }));
+    assert.equal(cp.get('motion.speed').section, 'motion', 'カット › 動き + 動きの速さ');
+  }
+  const cam = rowsOf({ level: 'el', scope: 'line/' + line.id, el: 'lens' });
+  assert.deepEqual(cam.map((s) => s.id), ['camwork', 'camtexture', 'rig']);
+  assert.equal(cam[0].custom, 'camKeys', '[キーフレームを編集…]');
+  assert.equal(cam[2].open, false, '区画のカメラ is folded');
+  const cp2 = byPath(cam);
+  assert.equal(cp2.get('cam.shot').widget, 'shot');
+  assert.equal(cp2.get('cam.zoom').scale, 100);
+  assert.equal(cp2.get('cam.curve').widget, 'curve');
+  assert.equal(cp2.get('cam.follow').basic, false);
+  assert.equal(cp2.get('lens.curve').basic, false, '動きの緩急 (advanced)');
+  assert.equal(cp2.get('rig').widget, 'rig');
+  assert.equal(cp2.get('rig.curve').widget, 'curve');
+  // Every field path of the new rows is valid at its scopes (the catalogue test covers FIELDS; the work camera page too).
+  const work = rowsOf({ level: 'el', scope: 'work', el: 'lens' });
+  assert.ok(byPath(work).has('cam.shot'), '作品全体 › 要素の既定 › カメラ is the same page at work scope');
+  // The area page: an area selection shows the several-lines page with its section camera.
+  const ids = PLAN.lines.slice(0, 2).map((l) => l.id);
+  assert.equal(F.pageOf({ level: 'line', ids: [ids[0]], area: { kind: 'lines', ids: [ids[0]] } }, PLAN), 'lines');
+  const plain = rowsOf({ level: 'line', ids }).map((s) => s.id);
+  const area = rowsOf({ level: 'line', ids, area: { kind: 'lines', ids } }).map((s) => s.id);
+  assert.ok(!plain.includes('rig') && area.includes('rig'), 'the 区画のカメラ section only with an area: ' + area);
+  // 作品全体 › マイ素材 only when the project has materials.
+  const work0 = rowsOf({ level: 'work' }, { materials: { next: 1, list: [] } }).map((s) => s.id);
+  const work1 = rowsOf({ level: 'work' }, { materials: { next: 2, list: [{ id: 'm1' }] } }).map((s) => s.id);
+  assert.ok(!work0.includes('materials') && work1.includes('materials'));
+});
+
+test('DESIGN_2_1 §11.9.6: the depth strings (動きと重なり) exist with the design texts', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const { SRC } = require('../helpers/load.js');
+  const lines = fs.readFileSync(path.join(SRC, '..', 'docs', 'DESIGN_2_1.md'), 'utf8').split('\n');
+  const at = lines.findIndex((l) => /^#### 11\.9\.6 /.test(l));
+  assert.ok(at >= 0, 'the §11.9.6 table is in the design');
+  const pairs = [];
+  for (let i = at + 1; i < lines.length && !/^#/.test(lines[i]); i++) {
+    const cells = lines[i].trim().split('|').slice(1, -1).map((c) => c.trim());
+    if (cells.length !== 3 || !cells[0].startsWith('`')) continue;
+    const toks = [...cells[0].matchAll(/`([^`]+)`/g)].map((m) => m[1]);
+    const ja = cells[1].split(' / '), en = cells[2].split(' / ');
+    let prefix = '';
+    toks.forEach((tok, k) => {
+      const key = tok.startsWith('.') ? prefix + tok : tok;
+      if (!tok.startsWith('.')) prefix = tok.slice(0, tok.lastIndexOf('.'));
+      pairs.push([key, toks.length > 1 ? ja[k] : cells[1], toks.length > 1 ? en[k] : cells[2]]);
+    });
+  }
+  assert.ok(pairs.length >= 13, 'every key of the table is read (' + pairs.length + ')');
+  for (const [key, ja, en] of pairs) assert.deepEqual(STRINGS[key], [ja, en], key);
+});
+
+test('v2.1 areaLabel / areaTitle read song kinds through songSec and count the lines', () => {
+  const T2 = MV.use('i18n/t');
+  const ja = T2.createT('ja', STRINGS, REG, { strict: true });
+  const en = T2.createT('en', STRINGS, REG, { strict: true });
+  const song = { kind: 'song', n: 5, label: ['area.song', { kind: 'chorus', n: 1 }] };
+  assert.equal(F.areaLabel(ja, song), 'サビ1');
+  assert.equal(F.areaLabel(en, song), 'Chorus 1');
+  assert.equal(F.areaTitle(ja, song), 'サビ1（5行）');
+  assert.equal(F.areaTitle(en, song), 'Chorus 1 (5 lines)');
+  assert.equal(F.areaTitle(en, Object.assign({}, song, { n: 1 })), 'Chorus 1 (1 line)');
+  assert.equal(F.areaTitle(ja, { kind: 'work', n: 9, label: ['area.work', {}] }), '作品全体');
+  assert.equal(F.areaTitle(ja, { kind: 'lines', n: 1, label: ['area.linesOne', { a: 4 }] }), '4行', 'one line names no count');
+  assert.equal(F.areaTitle(ja, { kind: 'lines', n: 3, label: ['area.lines', { a: 4, b: 6 }] }), '4–6行（3行）');
+  assert.equal(F.areaLabel(ja, { label: ['area.lines', { a: 3, b: 5 }] }), '3–5行');
+  assert.equal(F.areaLabel(ja, null), '');
 });
 
 test('every registry param maps to a widget and a valid slot path', () => {
@@ -130,7 +261,8 @@ function fieldPaths(sel, sectionId, plan = PLAN) {
 
 test('sectionsFor: 作品全体 has its §6.4.5 sections with 見た目 and 強さ open', () => {
   const sections = F.sectionsFor({ level: 'work' }, PLAN, REG);
-  assert.deepEqual(sections.map((s) => s.id), ['look', 'colors', 'type', 'energy', 'parts', 'title', 'timing', 'lines', 'looks',
+  // 写真・動画 (DESIGN_2_1 §11.7.3) follows 見た目; it opens once the library holds something.
+  assert.deepEqual(sections.map((s) => s.id), ['look', 'media', 'colors', 'type', 'energy', 'parts', 'title', 'timing', 'lines', 'looks',
     'defaults', 'other']);
   assert.deepEqual(sections.filter((s) => s.open).map((s) => s.id), ['look', 'energy']);
   assert.deepEqual(sections[0].label, ['sec.look', {}]);
@@ -196,7 +328,7 @@ test('sectionsFor: 要素 pages follow the element and the list index', () => {
 
 test('sectionsFor: several lines, no plan, and ids unique within a page', () => {
   assert.deepEqual(sectionIds({ level: 'line', ids: ['r4', 'r5'] }), ['multi', 'direction', 'colortype', 'shift']);
-  assert.deepEqual(sectionIds({ level: 'work' }, null).slice(0, 2), ['look', 'colors'], 'works before there are lyrics');
+  assert.deepEqual(sectionIds({ level: 'work' }, null).slice(0, 3), ['look', 'media', 'colors'], 'works before there are lyrics');
   const sels = [{ level: 'work' }, { level: 'line', ids: ['r4'] }, { level: 'cut', key: 'r4~0' },
     { level: 'el', scope: 'cut/r4~0', el: 'text' }, { level: 'el', scope: 'work', el: 'filter', idx: 2 }];
   for (const sel of sels) {
@@ -375,7 +507,8 @@ test('WP8b views keep UI text in the string table: no Japanese in string literal
   const TOKEN = /\/\*[\s\S]*?\*\/|\/\/[^\n]*|'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|[^`\\])*`/g;
   const JAPANESE = /[぀-ヿ㐀-䶿一-鿿]/;
   const found = [];
-  for (const name of ['fields', 'inspector', 'widgets', 'part_browser', 'palette', 'menus', 'dialogs', 'timeline']) {
+  for (const name of ['fields', 'inspector', 'widgets', 'part_browser', 'palette', 'menus', 'dialogs', 'timeline',
+    'curve_widget', 'shot_editor', 'material_page', 'ai_board', 'ai_panel', 'ai_review', 'stage', 'lyric_editor']) {
     const text = fs.readFileSync(path.join(SRC, 'ui', name + '.js'), 'utf8');
     for (const m of text.matchAll(TOKEN)) if (!m[0].startsWith('/') && JAPANESE.test(m[0])) found.push(name + ': ' + m[0]);
   }
@@ -730,8 +863,11 @@ test('spec-5: なぜ turns planner ids into words (rules, families, cuts), in ja
   const PL = MV.use('planner/plan');
   const EX = MV.use('planner/explain');
   const ts = { ja: T.createT('ja', STRINGS, reg), en: T.createT('en', STRINGS, reg) };
-  // Latin letters in the Japanese text other than LRC, or code-shaped words (camelCase, dotted, kebab, cut keys) in both.
+  // Latin letters in the Japanese text other than LRC and the song-section names (Aメロ, Bメロ and Cメロ are Japanese;
+  // D's camera reasons name the section), or code-shaped words (camelCase, dotted, kebab, cut keys) in both.
   const CODE = /\b(?:r[0-9a-z]*~\d+|gap\/|[a-z]+[A-Z][A-Za-z]*|[a-z]+\.[a-z]+|[a-z]+-[a-z]+|[a-z]+#\d)/;
+  const JA_WORDS = ['LRC'].concat(Object.keys(STRINGS).filter((k) => k.startsWith('songSec.')).map((k) => STRINGS[k][0]));
+  const latinIn = (text) => /[A-Za-z]/.test(JA_WORDS.reduce((s, w) => s.split(w).join(''), text));
   const bad = [];
   const rules = new Set();
   let n = 0;
@@ -757,13 +893,21 @@ test('spec-5: なぜ turns planner ids into words (rules, families, cuts), in ja
         const parts = F.whyParts(ex, path, ts[lang], plan);
         n += parts.length;
         for (const text of parts) {
-          if (CODE.test(text) || (lang === 'ja' && /[A-Za-z]/.test(text.replace(/LRC/g, '')))) bad.push(lang + ' ' + path + ': ' + text);
+          if (CODE.test(text) || (lang === 'ja' && latinIn(text))) bad.push(lang + ' ' + path + ': ' + text);
         }
       }
     }
   }
   assert.ok(n > 200, 'the corpus explains many values (' + n + ')');
   assert.deepEqual(bad, []);
+  // D's section, season and part keys in the camera and line reasons read as words (NOTES v2.1-D)
+  const said = (code, params, path) => F.whyParts({ why: [{ code, params }] }, path, ts.ja, corpus.planBasic())[0];
+  assert.equal(said('cam.section', { section: 'chorus' }, 'work:cam.shot'), '「サビ」の動き');
+  assert.equal(said('rig.section', { section: 'verse' }, 'work:rig'), '「Aメロ」のカメラ');
+  assert.equal(said('season.line', { season: 'spring' }, 'line/r4:ornament'), 'この行の季節（春）');
+  assert.equal(said('cam.lens', { key: 'slowPush' }, 'work:cam.shot'), 'カメラの動き「' + ts.ja.part('lens', 'slowPush') + '」と重ならないように');
+  assert.equal(said('cam.arrange', { key: 'edgeBleed' }, 'work:cam.shot'), '構図「' + ts.ja.part('arrange', 'edgeBleed') + '」に合わせて控えめに');
+  assert.equal(said('cam.section', { section: 'nowhere' }, 'work:cam.shot'), undefined, 'an unknown section is left out');
   assert.deepEqual([...rules].filter((k) => !(k in STRINGS)).sort(), [], 'every rule the planner names has its own words');
 
   // The params the old view printed raw: a cut key, a family id, a rule id.
@@ -805,4 +949,334 @@ test('ux-16: style.css states each shared rule once', () => {
     assert.ok(!css.includes(run), 'style.css repeats ' + run);
   }
   assert.equal(css.split('text-overflow:ellipsis').length - 1, 2, 'one shared one-line rule (plus .next-btn span)');
+});
+
+// --- v2.1 (package F): the curve widget's pure helpers (DESIGN_2_1 §6.6) ---------------------------------------------
+
+test('v2.1 curve widget: the choices, what each pins, and the select value of every curve form', () => {
+  const CW = MV.use('ui/curve_widget');
+  const CV = MV.use('core/curve');
+  const E = MV.use('core/ease');
+  assert.deepEqual(CW.CHOICES.slice(0, 8), ['auto', 'softEnds', 'hushRushHush', 'holdThenDash', 'dashStop', 'slowBloom',
+    'fadeBrake', 'snapSettle'], '自動, then the 7 presets in the §4.1 order');
+  assert.deepEqual(CW.CHOICES.slice(-2), ['simple', 'custom'], 'かんたん and カスタム last');
+  assert.deepEqual([...CW.PRESET_ORDER].sort(), CV.PRESET_KEYS.slice().sort(), 'every preset is offered');
+  for (const e of E.EASES) assert.ok(CW.CHOICES.includes(e), 'the ease ' + e);
+  assert.equal(new Set(CW.CHOICES).size, CW.CHOICES.length);
+  for (const c of CW.CHOICES) {
+    const v = CW.valueForChoice(c, 'linear');
+    if (c === 'auto') { assert.equal(v, null, '自動 unpins'); continue; }
+    assert.ok(CV.coerce(v) !== undefined, c + ' pins a valid curve');
+    assert.equal(CW.choiceOf(v, false), c, c + ' reads back as itself');
+  }
+  assert.deepEqual(CW.valueForChoice('simple', 'linear'), { ramp: CW.DEFAULT_RAMP }, 'かんたん starts at the default ramp');
+  const ramp = { ramp: { edge: 0.2, ends: 'start', peak: 3 } };
+  assert.deepEqual(CW.valueForChoice('simple', ramp), CV.coerce(ramp), 'かんたん keeps a ramp it already has');
+  assert.deepEqual(CW.valueForChoice('custom', 'softEnds'), { bz: [0.6, 0, 0.4, 1] }, 'a preset turns custom as its data');
+  assert.deepEqual(CW.valueForChoice('custom', 'hushRushHush'), CV.expand('hushRushHush'));
+  const sp = { sp: [[0, 1], [0.5, 3], [1, 1]] };
+  assert.deepEqual(CW.valueForChoice('custom', sp), CV.coerce(sp), 'カスタム keeps a custom curve');
+  assert.equal(CW.choiceOf('softEnds', true), 'auto', 'unpinned reads 自動 whatever the planner chose');
+  assert.deepEqual(['softEnds', 'quadOut', ramp, sp, { bz: [0.2, 0.1, 0.3, 1] }, 'nope'].map((v) => CW.formOf(v)),
+    ['preset', 'ease', 'simple', 'sp', 'bz', 'ease']);
+  assert.equal(CW.choiceOf('nope', false), 'linear', 'an unreadable value shows as 一定');
+  assert.equal(CW.valueForChoice('bogus', 'linear'), null);
+});
+
+test('v2.1 curve widget: presets, eases and ramps turn into custom data; bz ↔ sp keep the end speeds', () => {
+  const CW = MV.use('ui/curve_widget');
+  const CV = MV.use('core/curve');
+  for (const p of CW.PRESET_ORDER) assert.deepEqual(CW.toCustom(p), CV.expand(p), p);
+  assert.deepEqual(CW.toCustom('quadOut'), { bz: CW.EASE_BZ.quadOut });
+  assert.deepEqual(CW.toCustom({ ramp: CW.DEFAULT_RAMP }), CV.expand(CV.coerce({ ramp: CW.DEFAULT_RAMP })), 'a ramp as its steps');
+  for (const e of Object.keys(CW.EASE_BZ)) assert.ok(CV.coerce({ bz: CW.EASE_BZ[e] }), e + ' has a valid stand-in');
+  // bz → sp: seven even knots at the Bézier's speeds; sp → bz: handles whose end slopes are the end speeds.
+  const sp = CW.toCustom('quadOut', 'sp');
+  assert.equal(sp.sp.length, 7);
+  assert.ok(Math.abs(sp.sp[0][1] - CV.speedAt({ bz: CW.EASE_BZ.quadOut }, 0)) < 0.01 && sp.sp[6][1] === 0);
+  const steps = { sp: [[0, 1], [0.5, 3], [1, 0]] };
+  const bz = CW.spToBz(steps.sp);
+  assert.deepEqual(bz, { bz: [0.333, 0.19, 0.667, 1] }, 'the start speed 1 / 1.75 (speeds are relative to the mean)');
+  assert.ok(Math.abs(CV.speedAt(bz, 0) - CV.speedAt(steps, 0)) < 0.02 && Math.abs(CV.speedAt(bz, 1)) < 0.02);
+  assert.deepEqual(CW.toCustom('softEnds', 'sp').sp.length, 7, 'a preset Bézier as steps');
+  assert.deepEqual(CW.toCustom('hushRushHush', 'bz').bz.length, 4, 'preset steps as a Bézier');
+  assert.deepEqual(CW.bzToSp([0.5, 0, 0.5, 0]).sp.length, 7);
+});
+
+test('v2.1 curve widget: handles move within their limits; knots are added and removed; ramps clamp', () => {
+  const CW = MV.use('ui/curve_widget');
+  const CV = MV.use('core/curve');
+  assert.deepEqual(CW.handlesOf('softEnds'), [{ i: 0, kind: 'bz', x: 0.6, y: 0 }, { i: 1, kind: 'bz', x: 0.4, y: 1 }]);
+  const hs = CW.handlesOf('hushRushHush');
+  assert.equal(hs.length, 6);
+  assert.deepEqual(hs.map((x) => x.fixedX), [true, false, false, false, false, true], 'the first and last knot stay in time');
+  // Bézier: x 0–1, y −0.5–1.5.
+  assert.deepEqual(CW.moveHandle('softEnds', 0, 2, -3), { bz: [1, -0.5, 0.4, 1] });
+  assert.deepEqual(CW.moveHandle('softEnds', 1, 0.25, 0.75), { bz: [0.6, 0, 0.25, 0.75] });
+  // Speed steps: an interior knot stays between its neighbours; the ends keep their time; speed 0–8.
+  const h1 = CW.moveHandle('hushRushHush', 1, 0.9, 20).sp[1];
+  assert.deepEqual(h1, [0.22, 8]);
+  assert.deepEqual(CW.moveHandle('hushRushHush', 0, 0.5, 0.5).sp[0], [0, 0.5]);
+  assert.deepEqual(CW.moveHandle('hushRushHush', 5, 0.5, 1).sp[5], [1, 1]);
+  assert.deepEqual(CW.moveHandle('hushRushHush', 9, 0.5, 1), CV.expand('hushRushHush'), 'no such knot');
+  // A move the grammar refuses (no area left) keeps the curve.
+  const flat = { sp: [[0, 0], [1, 1]] };
+  assert.deepEqual(CW.moveHandle(flat, 1, 1, 0), CV.coerce(flat));
+  // Arrow keys step by 0.01 (Shift 0.1 is the caller's).
+  assert.deepEqual(CW.nudgeHandle('softEnds', 0, 0.01, 0.1), { bz: [0.61, 0.1, 0.4, 1] });
+  // Knots: Enter adds one halfway to the next; at most 8; Delete removes interior knots only; two stay.
+  const two = { sp: [[0, 1], [1, 1]] };
+  let c = CW.addKnot(two, 0);
+  assert.deepEqual(c, { sp: [[0, 1], [0.5, 1], [1, 1]] });
+  for (let i = 0; i < 10; i++) c = CW.addKnot(c, 0);
+  assert.equal(c.sp.length, CV.MAX_KNOTS);
+  assert.deepEqual(CW.addKnotAt(two, 0.25, 2), { sp: [[0, 1], [0.25, 2], [1, 1]] });
+  assert.deepEqual(CW.addKnotAt(two, 1, 2), CV.coerce(two), 'not at an end');
+  assert.deepEqual(CW.removeKnot(c, 0).sp.length, CV.MAX_KNOTS, 'the first knot stays');
+  assert.deepEqual(CW.removeKnot(c, c.sp.length - 1).sp.length, CV.MAX_KNOTS, 'the last knot stays');
+  assert.deepEqual(CW.removeKnot(c, 3), { sp: c.sp.filter((k, j) => j !== 3) }, 'Delete removes that knot');
+  assert.deepEqual(CW.removeKnot(two, 1), CV.coerce(two), 'two knots stay');
+  assert.ok(CW.addKnot('softEnds', 0).bz, 'a Bézier has no knots to add');
+  // かんたん: edge 0–0.4, peak 0.125–8; any other curve starts from the default ramp.
+  assert.deepEqual(CW.rampOf('linear'), CW.DEFAULT_RAMP);
+  assert.deepEqual(CW.withRamp('linear', { edge: 0.9, peak: 99 }).ramp, { edge: 0.4, ends: 'both', peak: 8 });
+  assert.deepEqual(CW.withRamp({ ramp: { edge: 0.2, ends: 'end', peak: 2 } }, { peak: 0.01 }).ramp, { edge: 0.2, ends: 'end', peak: 0.125 });
+});
+
+test('v2.1 curve widget: 位置の動きだけ on time-warp fields; ranges fit overshoots; the canvas maps both ways', () => {
+  const CW = MV.use('ui/curve_widget');
+  assert.equal(CW.positionOnly('arrive.flow', 'backOut'), true);
+  assert.equal(CW.positionOnly('arrive@inkRise.flow', 'snapSettle'), true);
+  assert.equal(CW.positionOnly('dwell.curve', { bz: [0.2, 0.9, 0.3, 1.2] }), true);
+  assert.equal(CW.positionOnly('seam.curve', 'elasticOut'), true);
+  assert.equal(CW.positionOnly('arrive.ease', 'backOut'), false, 'a position curve shows its overshoot');
+  assert.equal(CW.positionOnly('arrive.flow', 'softEnds'), false);
+  assert.equal(CW.positionOnly('lens.curve', 'backOut'), false);
+  const r = CW.rangesOf('backOut');
+  assert.ok(r.lo < 0 && r.hi > 1.4, 'the overshoot is inside the plot: ' + JSON.stringify(r));
+  assert.deepEqual(CW.rangesOf('linear'), { lo: -0.06, hi: 1.06, smax: 2 });
+  assert.ok(CW.rangesOf({ sp: [[0, 0.1], [0.5, 7], [1, 0.1]] }).smax >= 7);
+  // Speed steps are drawn in their knot units: the fill runs through the handles.
+  const steps = { sp: [[0, 1], [0.1, 1], [0.16, 6], [0.84, 6], [0.9, 1], [1, 1]] };
+  const k = CW.speedScale(steps);
+  for (const hd of CW.handlesOf(steps)) assert.ok(Math.abs(MV.use('core/curve').speedAt(steps, hd.x) * k - hd.y) < 0.02, JSON.stringify(hd));
+  assert.equal(CW.speedScale('softEnds'), 1, 'a Bézier as it is');
+  const g = CW.geometry(300, 96, CW.rangesOf('softEnds'));
+  for (const u of [0, 0.3, 1]) assert.ok(Math.abs(g.u(g.px(u)) - u) < 1e-9);
+  for (const v of [-0.2, 0.7, 1.1]) assert.ok(Math.abs(g.pos(g.posY(v)) - v) < 1e-9);
+  for (const s of [0, 1.5]) assert.ok(Math.abs(g.speed(g.speedY(s)) - s) < 1e-9);
+  assert.ok(g.posY(1) < g.posY(0), 'up is further along');
+});
+
+test('v2.1 curve widget: the select states every choice in words, in ja and en', () => {
+  const CW = MV.use('ui/curve_widget');
+  const T = MV.use('i18n/t');
+  for (const lang of ['ja', 'en']) {
+    const t = T.createT(lang, STRINGS, REG, { strict: true });
+    const texts = CW.CHOICES.map((c) => CW.choiceText(t, c, 'linear', false));
+    assert.equal(new Set(texts).size, texts.length, lang + ': distinct choice texts');
+    assert.ok(texts.every((x) => x && !/[a-z]+\.[a-z]+[A-Z.]/.test(x) && !/opt\.|curve\./.test(x)), lang + ': no raw keys: ' + texts.join(' | '));
+    assert.equal(CW.choiceText(t, 'sineIn', 'linear', false), t('opt.ease', { family: t('opt.ease.sine'), dir: t('opt.easeDir.In') }));
+    assert.equal(CW.choiceText(t, 'auto', 'softEnds', true), t('curve.autoOf', { name: t('curve.softEnds') }), '自動（両端ゆっくり）');
+    assert.equal(CW.choiceText(t, 'custom', { sp: [[0, 1], [0.5, 2], [1, 1]] }, false), t('curve.sp', { n: 3 }));
+  }
+});
+
+// --- v2.1 (package F): the keyframe editor's pure helpers (DESIGN_2_1 §6.7) ------------------------------------------
+
+test('v2.1 keyframes: the rows read and write とき, ねらい, 位置 and 大きさ; keys are added and removed within limits', () => {
+  const KE = MV.use('ui/shot_editor');
+  const SHOT = MV.use('core/shot');
+  const none = KE.shotKeys('none');
+  assert.deepEqual(none.keys, SHOT.SHOTS.settle.keys, 'なし starts the editor from 落ち着く');
+  const push = KE.shotKeys('pushWord');
+  push.keys[0].fill = 0.99;
+  assert.notEqual(SHOT.SHOTS.pushWord.keys[0].fill, 0.99, 'a copy');
+  // とき.
+  assert.deepEqual(KE.whenOf({ at: 'rest' }), { choice: 'rest', n: null });
+  assert.deepEqual(KE.whenOf({ at: 'word:2' }), { choice: 'word', n: 3 }, '3語目');
+  assert.deepEqual(KE.whenOf({ at: 'word:-1' }), { choice: 'word', n: -1 }, 'the last word');
+  assert.deepEqual(KE.whenOf({ at: 0.25 }), { choice: 'frac', n: 25 });
+  for (const [c, n] of [['word', 3], ['word', -1], ['beat', 2], ['frac', 25], ['mid', null], ['emph', null]]) {
+    assert.deepEqual(KE.whenOf({ at: KE.atFrom(c, n) }), { choice: c, n }, c + ' ' + n);
+  }
+  assert.equal(KE.atFrom('frac', 250), 1, 'clamped');
+  assert.equal(KE.atFrom('word', 99), 'word:40');
+  assert.equal(KE.atFrom('beat', null), 'beat:0');
+  // ねらい.
+  for (const [c, n] of [['word', 2], ['word', -1], ['line', 1], ['glyph', 5], ['block', null], ['frame', null]]) {
+    assert.deepEqual(KE.aimOf({ aim: KE.aimFrom(c, n) }), { choice: c, n }, c);
+  }
+  // 位置: thirds are ±0.167; そのまま has no offsets.
+  for (const p of KE.POS) assert.equal(KE.posOf(KE.withPos({ aim: 'block', at: 'a', ox: 0.3, oy: 0.1 }, p)), p === 'free' ? 'free' : p, p);
+  assert.deepEqual(KE.withPos({ aim: 'block', at: 'a', ox: 0.3 }, 'keep'), { aim: 'block', at: 'a' });
+  assert.deepEqual(KE.withPos({ aim: 'block', at: 'a' }, 'left'), { aim: 'block', at: 'a', ox: -KE.THIRD });
+  // 大きさ: fill for text aims, zoom for the frame.
+  assert.deepEqual(KE.sizeOf({ aim: 'block' }), { kind: 'fill', v: 0.6, range: SHOT.LIMITS.fill });
+  assert.deepEqual(KE.sizeOf({ aim: 'frame', zoom: 1.1 }), { kind: 'zoom', v: 1.1, range: SHOT.LIMITS.zoom });
+  // Edits pin a whole, valid Shot; the aim swaps fill and zoom.
+  const st = KE.shotKeys('pushWord');
+  const framed = KE.editKey(st, 0, { aim: 'frame', zoom: 1.1 });
+  assert.equal(SHOT.coerceShot(framed) !== undefined, true);
+  assert.equal(framed.keys[0].fill, undefined, 'the frame has no fill');
+  assert.equal(KE.editKey(st, 0, { roll: null }).keys[0].roll, undefined, 'null removes');
+  let s = { keys: st.keys, follow: 0 };
+  for (let i = 0; i < 8; i++) s = KE.shotKeys(KE.addKey(s));
+  assert.equal(s.keys.length, SHOT.LIMITS.keys[1], 'at most 6 keys');
+  for (let i = 0; i < 8; i++) s = KE.shotKeys(KE.removeKey(s, 0));
+  assert.equal(s.keys.length, SHOT.LIMITS.keys[0], 'at least 2 keys');
+  assert.ok(KE.addKey({ keys: st.keys, follow: 0.5 }).follow === 0.5, 'follow is kept');
+});
+
+test('v2.1 keyframes: times, the timeline diamonds and the preview markers (with the fake engine\'s shotTrack)', () => {
+  const KE = MV.use('ui/shot_editor');
+  const fake = require('../helpers/fake_engine.js');
+  const cut = { key: 'r1~0', a: 10, b: 14, t0: 11, t1: 13 };
+  assert.equal(KE.approxTime(cut, { at: 'a' }), 10);
+  assert.equal(KE.approxTime(cut, { at: 'b' }), 14);
+  assert.equal(KE.approxTime(cut, { at: 0.25 }), 11);
+  assert.equal(KE.approxTime(cut, { at: 'sung' }), 11);
+  assert.equal(KE.approxTime(cut, { at: 'end' }), 13);
+  assert.equal(KE.approxTime(cut, { at: 'mid' }), 12);
+  assert.equal(KE.approxTime(cut, { at: 'b', dt: 5 }), 14, 'clamped to the cut');
+  assert.equal(KE.approxTime(cut, { at: 'beat:1' }, { beats: { bpm: 60, offset: 0 } }), 12, 'the second beat from the sung start');
+  assert.equal(KE.atOfTime(cut, 11), 0.25);
+  assert.equal(KE.atOfTime(cut, 20), 1);
+  // The track's keys are sorted by time; data keys match them by their estimated order.
+  const track = { a: 10, b: 14, keys: [{ t: 10.5, id: 'x' }, { t: 12, id: 'y' }] };
+  const keys = [{ at: 'mid' }, { at: 'a' }];
+  assert.deepEqual(KE.trackKeys(cut, keys, null, track).map((k) => k.id), ['y', 'x']);
+  assert.deepEqual(KE.keyTimes(cut, keys, null, track), [{ i: 0, t: 12 }, { i: 1, t: 10.5 }]);
+  assert.equal(KE.trackKeys(cut, keys.concat([{ at: 'b' }]), null, track), null, 'another number of keys');
+  assert.deepEqual(KE.keyTimes(cut, keys, null, null), [{ i: 0, t: 12 }, { i: 1, t: 10 }], 'estimates without a track');
+  // Markers: where each key puts its aim on screen (the §4.19 view).
+  const design = { w: 1920, h: 1080 };
+  const aim = { x: 1000, y: 500, w: 200, h: 100 };
+  assert.deepEqual(KE.markerAt({ x: 0, y: 0, zoom: 1, roll: 0, aim }, design), { x: 1100, y: 550 });
+  assert.deepEqual(KE.markerAt({ x: 140, y: 10, zoom: 2, roll: 0, aim }, design), { x: 960, y: 540 }, 'the camera centres the aim');
+  const rolled = KE.markerAt({ x: 0, y: 0, zoom: 1, roll: Math.PI / 2, aim }, design);
+  assert.ok(Math.abs(rolled.x - 970) < 1e-6 && Math.abs(rolled.y - 400) < 1e-6, JSON.stringify(rolled));
+  assert.deepEqual(KE.offsetOfPoint({ x: 1920, y: 540 }, design), { ox: 0.4, oy: 0 }, 'clamped to ±0.4');
+  // The fake engine (package B's facade until it lands) gives a push-in: the markers sit on the cut's text.
+  const engine = fake.createEngine({ registry: REG });
+  engine.setDoc(corpus.project('basic').doc);
+  const c = engine.plan.cuts.find((x) => x.line);
+  const tr = engine.shotTrack(c.key);
+  assert.equal(tr.keys.length, 2);
+  assert.equal(engine.shotTrack('nope'), null);
+  const ks = [{ at: 'a', aim: 'block' }, { at: 'b', aim: 'block' }];
+  const marks = KE.trackKeys(c, ks, engine.plan, tr).map((k) => KE.markerAt(k, engine.plan.design));
+  for (const m of marks) {
+    assert.ok(m.x >= tr.keys[0].aim.x && m.x <= tr.keys[0].aim.x + tr.keys[0].aim.w, 'on the text: ' + JSON.stringify(m));
+  }
+  assert.equal(engine.registry, REG, 'the effective registry');
+});
+
+test('v2.1 keyframes: a stage drag is inverted through engine.viewAt, so the text stays under the pointer', () => {
+  const KE = MV.use('ui/shot_editor');
+  const fake = require('../helpers/fake_engine.js');
+  const view = (zoom, roll) => fake.createEngine({ view: { zoom, roll } }).viewAt(0);
+  assert.deepEqual(fake.createEngine({}).viewAt(3), { x: 0, y: 0, zoom: 1, roll: 0 });
+  assert.deepEqual(KE.screenToWorld(30, -12, view(1, 0)), { dx: 30, dy: -12 }, 'the identity view');
+  assert.deepEqual(KE.screenToWorld(30, -12, null), { dx: 30, dy: -12 }, 'no view yet');
+  // Forward: a world move d shows on screen as zoom · R(−roll) · d; the inverse brings it back.
+  for (const [zoom, roll] of [[2, 0], [1.25, 0.2], [0.9, -0.26], [3, Math.PI / 2]]) {
+    const d = { x: 17, y: -9 };
+    const r = -roll;
+    const s = { x: zoom * (d.x * Math.cos(r) - d.y * Math.sin(r)), y: zoom * (d.x * Math.sin(r) + d.y * Math.cos(r)) };
+    const back = KE.screenToWorld(s.x, s.y, view(zoom, roll));
+    assert.ok(Math.abs(back.dx - d.x) < 1e-9 && Math.abs(back.dy - d.y) < 1e-9, zoom + ' ' + roll + ' ' + JSON.stringify(back));
+  }
+});
+
+// --- v2.1 (package F): マイ素材 (DESIGN_2_1 §6.9) ----------------------------------------------------------------------
+
+test('v2.1 materials: ids ↔ keys, uses, places, weight, duplicate and the recipe check', () => {
+  const MP = MV.use('ui/material_page');
+  const M = MV.use('core/migrate');
+  const CMD = MV.use('core/commands');
+  const doc = M.parseFile(corpus.projectText('v21')).doc;
+  assert.equal(MP.keyOfId('m1'), 'myMat1');
+  assert.equal(MP.idOfKey('myMat1a'), 'm1a');
+  assert.equal(MP.idOfKey('inkRise'), null);
+  assert.equal(MP.entryOf(doc, 'm3').name.ja, '桜吹雪');
+  assert.equal(MP.entryOf(doc, 'm9'), null);
+  // Uses: the value, part-qualified slots and avoid lists that name it.
+  assert.deepEqual(MP.usesOf(doc, 'myMat3'), ['line/rb:atmos', 'line/rb:atmos@myMat3.count']);
+  const withAvoid = Object.assign({}, doc, { pins: Object.assign({}, doc.pins, { 'line/r4:avoid': { v: ['arrive.myMat1'], by: 'user' } }) });
+  assert.deepEqual(MP.usesOf(withAvoid, 'myMat1'), ['line/r4:avoid', 'line/r7:arrive']);
+  assert.deepEqual(MP.usesOf(doc, 'myMat9'), []);
+  // Places: the lines of one named area together, else one by one.
+  const plan = MV.use('planner/plan').plan(doc, { registry: MV.use('parts/catalog').defaultRegistry() });
+  assert.deepEqual(MP.usePlaces(doc, plan, 'myMat1').map((p) => p.sel), [{ level: 'line', ids: ['r7'] }]);
+  const both = Object.assign({}, doc, { pins: Object.assign({}, doc.pins, { 'line/r8:arrive': { v: 'myMat1', by: 'user' }, 'work:arrive': { v: 'myMat1', by: 'user' } }) });
+  const places = MP.usePlaces(both, plan, 'myMat1');
+  assert.equal(places[0].sel.level, 'line');
+  assert.deepEqual(places[0].sel.ids, ['r7', 'r8'], 'r7 and r8 are one block');
+  assert.ok(places[0].area && places[0].sel.area, 'named as its area');
+  assert.deepEqual(places[places.length - 1], { sel: S_WORK(), work: true }, 'the whole video last');
+  // Weight: bars 1–5 against the scene budget of the kind (a run ornament: 1.5 ms).
+  const w = MP.weightOf(MP.entryOf(doc, 'm3'));
+  assert.equal(w.max, 1.5);
+  assert.ok(w.bars >= 1 && w.bars <= 5 && ['light', 'normal', 'heavy'].includes(w.word));
+  assert.equal(MP.weightOf({ kind: 'ground', recipe: {} }).max, 2.0);
+  // 複製: a user copy under the next id that core/commands accepts.
+  const dup = MP.duplicateCmd(doc, MP.entryOf(doc, 'm3'));
+  assert.equal(dup.id, 'm4');
+  assert.equal(dup.by, 'user');
+  const after = CMD.reduce(doc, dup);
+  assert.equal(after.materials.list.length, 4);
+  assert.deepEqual(after.materials.list[3].recipe, MP.entryOf(doc, 'm3').recipe);
+  const put = MP.putCmd(MP.entryOf(doc, 'm2'), MP.entryOf(doc, 'm2').recipe);
+  assert.equal(CMD.reduce(doc, put).materials.list.length, 3, 'the same id replaces');
+  // The recipe textarea: JSON first, then core/recipe (nothing is executed).
+  assert.deepEqual(MP.checkRecipe('ornament', '{'), { recipe: null, problems: [], bad: 'json' });
+  const empty = MP.checkRecipe('ornament', '{}');
+  assert.equal(empty.bad, null);
+  assert.ok(empty.problems.length > 0, 'an empty recipe is a problem');
+  const ok = MP.checkRecipe('ornament', JSON.stringify(MP.entryOf(doc, 'm3').recipe));
+  assert.deepEqual(ok.problems, []);
+  // With parts/mix.derive (package C): a variant of a part that does not exist names it; texts for every code.
+  const T = MV.use('i18n/t');
+  const cat = MV.use('parts/catalog').defaultRegistry();
+  const app = { reg: cat, doc };
+  const m1 = MP.entryOf(doc, 'm1');
+  const bad = MP.checkRecipe('arrive', JSON.stringify(Object.assign({}, m1.recipe, { base: 'nope' })),
+    (recipe) => MV.use('parts/mix').derive(Object.assign({}, m1, { recipe }), cat, { list: doc.materials.list }).problems);
+  assert.ok(bad.problems.length > 0, JSON.stringify(bad.problems));
+  assert.equal(MP.usable(app, m1, bad.recipe), false, 'a recipe without its base makes no part');
+  assert.equal(MP.usable(app, m1, m1.recipe), true);
+  for (const lang of ['ja', 'en']) {
+    const t = T.createT(lang, STRINGS, cat, { strict: true });
+    for (const p of bad.problems) assert.ok(!/mat\.why/.test(MP.problemText(t, p)), MP.problemText(t, p));
+    const codes = ['no-base', 'flash-base', 'part-missing', 'part-flash', 'part-scope', 'part-frames', 'part-param', 'part-mirror',
+      'param', 'mirror-missing', 'kit', 'def', 'media-key'];
+    for (const code of codes) assert.ok(t.has('mat.why.' + code), 'NOTES v2.1-C strings wanted: mat.why.' + code);
+    assert.equal(MP.problemText(t, { path: 'x', code: 'weird', params: {} }), t('mat.problem', { path: 'x', what: 'weird' }));
+    assert.equal(MP.problemText(t, { path: 'parts[0]', code: 'part-missing', params: { key: 'nope' } }),
+      t('mat.problem', { path: 'parts[0]', what: t('mat.why.part-missing', { key: 'nope' }) }), 'a code in words, with its params');
+  }
+});
+
+function S_WORK() { return MV.use('ui/selection').WORK; }
+
+test('v2.1 part browser マイ素材: materials of the kind, never the grounds derived from pooled photos (NOTES v2.1-C)', () => {
+  const PB = MV.use('ui/part_browser');
+  const defs = { myMat1: { scope: 'cut' }, myMat2: { scope: 'run' }, myMed0a1b2c3d4e: {}, inkRise: {} };
+  const reg = {
+    keys: () => Object.keys(defs), get: (kind, key) => defs[key], mine: () => ['myMat1', 'myMat2', 'myMed0a1b2c3d4e'],
+    extra: { myMat1: { media: ['a1'] }, myMat2: { media: [] }, myMed0a1b2c3d4e: { media: true } },
+  };
+  assert.deepEqual(PB.mineFor(reg, 'ground', {}), ['myMat1', 'myMat2'], 'a material that uses a photo stays; a pooled photo goes');
+  assert.deepEqual(PB.mineFor(reg, 'ornament', { run: true }), ['myMat2'], 'the atmosphere row: run ornaments only');
+  assert.deepEqual(PB.mineFor({ keys: () => [], get: () => null }, 'ground', {}), [], 'a registry without materials');
+});
+
+test('an enum with optKey labels its options from its own key group (depth: back is 後ろに下げる, not 逆方向)', () => {
+  const reg = catalogRegistry();
+  const field = F.paramFields('ground', undefined, 'photoPan', reg).find((f) => f.param.name === 'depth');
+  assert.deepEqual(field.options.map((o) => o.label), ['opt.depth.auto', 'opt.depth.anim', 'opt.depth.front', 'opt.depth.back', 'opt.depth.still']);
+  const t = T.createT('ja', STRINGS);
+  const W = MV.use('ui/widgets');
+  assert.equal(W.optionText(t, field.options.find((o) => o.v === 'back')), '後ろに下げる');
 });

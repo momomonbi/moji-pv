@@ -15,8 +15,14 @@ checked (DESIGN §4.19.4, SPEC §6 background modes, §7 transparent PNG sequenc
   黒（白文字）   the corners are exactly #000000, the glyphs exactly #FFFFFF and nothing in the frame has a colour
 
 To keep the pixels about transparency only, the document pins what could reach the corners or tint the glyphs: no
-decorations, screen effects, texture or atmosphere, the fallback composition and motions, no flash or shake, a large
+other decorations, screen effects, texture or atmosphere, the fallback composition and motions, no flash or shake, a large
 text size and (except for the black check) one ink for every glyph. It also asserts no page errors and no CSP violations.
+
+DESIGN_2_1 §11.8.3 (+): the project also holds a photo frame (photoFrame, shape free: the picture's own alpha) of a PNG
+with alpha (tests/helpers/media_gen.js stills: opaque on the left, a half-transparent square, cleared elsewhere), in the
+lower right corner. The glyph checks above leave its rect out, and the 透過PNG frames keep its alpha exactly as the PNG
+has it (opaque 255, the square 128 ± 3, cleared 0), as PNG glyphs keep theirs; over the green screen and black it is
+drawn too (§11.4.10). The export's engine is a fork of the app's, with a fork of the app's AssetStore (ui/boot).
 Google Fonts are blocked, so the glyphs come from the system fonts: without a Japanese font the test stops at once with
 one message saying so (dev/browser.py japanese_font_missing).
 
@@ -29,6 +35,7 @@ import functools
 import http.server
 import io
 import json
+import math
 import struct
 import subprocess
 import sys
@@ -44,6 +51,11 @@ from browser import launch, new_page, japanese_font_missing  # noqa: E402  (dev/
 from playwright.async_api import async_playwright  # noqa: E402
 
 FONT_HOSTS = ('https://fonts.googleapis.com/**', 'https://fonts.gstatic.com/**')
+HELPERS = ('tests/helpers/exif_write.js', 'tests/helpers/media_gen.js', 'tests/www/media_parts.js')
+PNG_SIZE = (96, 64)                  # the photo frame's PNG (media_gen.js stills): its probes in its own pixels
+PNG_OPAQUE = ((30, 25), (5, 5), (50, 55))
+PNG_HALF = ((75, 35), (68, 28), (82, 42))
+PNG_CLEAR = ((93, 5), (93, 58), (65, 58))
 # Records CSP violations; hides File System Access so the export goes to a memory sink (no save dialog in a test).
 INIT = """
 window.__csp = [];
@@ -215,12 +227,37 @@ def dilate(rows, r, width):
     return [functools.reduce(lambda a, b: a | b, wide[max(0, y - r):min(h, y + r + 1)], 0) for y in range(h)]
 
 
-def ring_errors(frame, ink):
-    """For every pixel with MIN_RING_ALPHA ≤ a < 255: (alpha, max channel distance of its straight colour to the ink)."""
+# --- the photo frame (DESIGN_2_1 §11.8.3): its rect in output px, left out of the glyph checks -----------------------------
+
+FRAME_PAD = 4                        # px around the photo frame's rect that the glyph checks also leave out
+
+
+def frame_mask(rect, width, height, pad=FRAME_PAD):
+    """Per row, an int with the bits of the photo frame's rect (grown by pad) set (bit 0 = the first pixel)."""
+    if not rect:
+        return [0] * height
+    x0, x1 = max(0, int(rect['x']) - pad), min(width, int(math.ceil(rect['x'] + rect['w'])) + pad)
+    y0, y1 = max(0, int(rect['y']) - pad), min(height, int(math.ceil(rect['y'] + rect['h'])) + pad)
+    bits = ((1 << max(0, x1 - x0)) - 1) << x0
+    return [bits if y0 <= y < y1 else 0 for y in range(height)]
+
+
+def in_frame(mask, frame, i):
+    return (mask[i // frame.w] >> (i % frame.w)) & 1
+
+
+def png_point(rect, x, y):
+    """The output pixel of a pixel of the photo frame's PNG (the picture fills the rect: its box has the PNG's aspect)."""
+    return int(rect['x'] + (x + 0.5) * rect['w'] / PNG_SIZE[0]), int(rect['y'] + (y + 0.5) * rect['h'] / PNG_SIZE[1])
+
+
+def ring_errors(frame, ink, mask=None):
+    """For every pixel with MIN_RING_ALPHA ≤ a < 255 outside the mask: (alpha, max channel distance of its straight colour
+    to the ink)."""
     out = []
     a_all = frame.alpha
     for i, a in enumerate(a_all):
-        if MIN_RING_ALPHA <= a < 255:
+        if MIN_RING_ALPHA <= a < 255 and not (mask and in_frame(mask, frame, i)):
             j = 4 * i
             out.append((a, max(abs(frame.px[j] - ink[0]), abs(frame.px[j + 1] - ink[1]), abs(frame.px[j + 2] - ink[2])), i))
     return out
@@ -233,15 +270,20 @@ def ring_tolerance(a):
 
 # --- the page side -------------------------------------------------------------------------------------------------------
 
-SETUP = """(project) => {
+SETUP = """([project, frame]) => {
   const a = window.__mv;
   a.view.setPref('autoplay', false);
   const file = JSON.parse(project);
   const reg = a.reg;
   const fb = (kind) => reg.fallback(kind);
   const pin = (v) => ({ v, by: 'user' });
-  file.doc.pins = Object.assign({}, file.doc.pins, {
-    'work:ornament.count': pin(0), 'work:filter.count': pin(0), 'work:atmos': pin('none'), 'work:texture': pin('none'),
+  // the photo frame (DESIGN_2_1 §11.8.3): a PNG with alpha, its own alpha as the cut-out, still in the lower right corner
+  file.doc.media = { list: [frame] };
+  const pf = (k, v) => ['work:ornament#0@photoFrame.' + k, pin(v)];
+  file.doc.pins = Object.assign({}, file.doc.pins, Object.fromEntries([['work:ornament#0', pin('photoFrame')], pf('src', frame.id),
+    pf('place', 'corner'), pf('shape', 'free'), pf('size', 0.3), pf('depth', 'still'), pf('appear', 'none'), pf('move', 'none'),
+    pf('tilt', 0)]), {
+    'work:ornament.count': pin(1), 'work:filter.count': pin(0), 'work:atmos': pin('none'), 'work:texture': pin('none'),
     'work:arrange': pin(fb('arrange')), 'work:arrive': pin(fb('arrive')), 'work:dwell': pin(fb('dwell')),
     'work:depart': pin(fb('depart')), 'work:lens': pin(fb('lens')), 'work:seam': pin(fb('seam')),
     'work:amount.flash': pin(0), 'work:amount.shake': pin(0), 'work:text.style': pin('plain'), 'work:text.scale': pin(1.6),
@@ -320,16 +362,17 @@ async def export(page, checks, label, keep):
     return frames, res
 
 
-def check_clear(checks, frames):
+def check_clear(checks, frames, rect):
     rows_of = []
     for f in frames:
         checks.ok(f.ctype == 6 and (f.w, f.h) == (1280, 720), '%s: RGBA %dx%d (colour type %d)' % (f.name, f.w, f.h, f.ctype))
         checks.ok(all(p[3] == 0 for p in f.corners()), '%s: the frame corners have alpha 0' % f.name)
-        rows = f.opaque_rows()
+        mask = frame_mask(rect, f.w, f.h)
+        rows = [r & ~m for r, m in zip(f.opaque_rows(), mask)]
         rows_of.append(rows)
         inside = f.interior(rows)
         checks.ok(inside >= 200, '%s: the interior of the glyphs has alpha 255 (%d pixels 2 px inside an edge)' % (f.name, inside))
-        ring = ring_errors(f, INK)
+        ring = ring_errors(f, INK, mask)
         bad = [r for r in ring if r[1] > ring_tolerance(r[0])]
         worst = max(ring, key=lambda r: r[1] - ring_tolerance(r[0])) if ring else None
         checks.ok(len(ring) >= 200 and not bad,
@@ -340,13 +383,14 @@ def check_clear(checks, frames):
     return rows_of
 
 
-def check_glow(checks, frames, plain_rows):
+def check_glow(checks, frames, plain_rows, rect):
     for f, rows in zip(frames, plain_rows):
         checks.ok(all(p[3] == 0 for p in f.corners()), '%s (glow): the corners stay transparent' % f.name)
         near, far = dilate(rows, 2, f.w), dilate(rows, 8, f.w)
+        mask = frame_mask(rect, f.w, f.h)
         band = partial = solid = 0
         for y in range(f.h):
-            m = far[y] & ~near[y]
+            m = far[y] & ~near[y] & ~mask[y]
             if not m:
                 continue
             base = y * f.w
@@ -375,15 +419,32 @@ def check_chroma(checks, frames):
                   % (f.name, 100 * greens // (f.w * f.h)))
 
 
-def check_black(checks, frames):
+def check_black(checks, frames, rect):
     for f in frames:
         corners = f.corners()
         checks.ok(all(p == (0, 0, 0, 255) for p in corners), '%s (black): the corners are exactly #000000 (%r)' % (f.name, corners[0]))
         r, g, b = f.px[0::4], f.px[1::4], f.px[2::4]
-        coloured = 0 if r == g == b else sum(1 for i in range(len(r)) if not (r[i] == g[i] == b[i]))
+        mask = frame_mask(rect, f.w, f.h)
+        coloured = 0 if r == g == b else sum(1 for i in range(len(r)) if not (r[i] == g[i] == b[i]) and not in_frame(mask, f, i))
         checks.ok(coloured == 0, '%s (black): nothing in the frame has a colour (%d coloured pixels)' % (f.name, coloured))
         white = r.count(255)
         checks.ok(white >= 500, '%s (black): the glyphs are white #FFFFFF (%d pixels)' % (f.name, white))
+
+
+def check_frame(checks, frames, rect, label):
+    """The photo frame keeps its PNG's alpha in a transparent export (opaque 255, the half-transparent square 128 ± 3,
+    cleared 0); over the green screen and black it is drawn, opaque, in its own colours."""
+    for f in frames:
+        at = lambda xy: f.at(*png_point(rect, *xy))  # noqa: E731
+        if label == 'clear':
+            got = ([at(p)[3] for p in PNG_OPAQUE], [at(p)[3] for p in PNG_HALF], [at(p)[3] for p in PNG_CLEAR])
+            checks.ok(got[0] == [255] * 3 and all(abs(v - 128) <= 3 for v in got[1]) and got[2] == [0] * 3,
+                      '%s: the photo frame keeps the PNG\'s alpha exactly (opaque %r, half %r, cleared %r)' % (f.name, *got))
+        else:
+            back = CHROMA if label == 'chroma' else (0, 0, 0)
+            px = [at(p) for p in PNG_OPAQUE]
+            checks.ok(all(p[3] == 255 and p[:3] != back for p in px),
+                      '%s (%s): the photo frame is drawn over the backdrop (%r)' % (f.name, label, px))
 
 
 async def run(root, keep):
@@ -404,11 +465,18 @@ async def run(root, keep):
                 await page.evaluate('async () => { await window.__mv.ready; }')
                 if await japanese_font_missing(page, 'transparent_check.py'):
                     return ['no system font draws Japanese (see above)']
+                for rel in HELPERS:
+                    await page.evaluate((ROOT / rel).read_text(encoding='utf-8'))
+                frame = await page.evaluate('() => window.__mediaParts.importPng()')
                 project = (ROOT / 'tests' / 'fixtures' / 'project_basic.json').read_text(encoding='utf-8')
-                info = await page.evaluate(SETUP, project)
+                info = await page.evaluate(SETUP, [project, frame])
                 if not checks.ok(info is not None, 'a lyric cut that is alone on screen for %d frames' % FRAMES):
                     return checks.failures
                 print('cut %s 「%s」 at %.3f s, %d frames at %dp%d' % (info['cut'], info['text'], info['t0'], FRAMES, SHORT, FPS))
+                rect = await page.evaluate('(t) => window.__mediaParts.boxOf("ornament#0", t, 1280)', info['t0'] + 0.5 / FPS)
+                checks.ok(bool(rect) and rect['w'] > 100 and rect['x'] + rect['w'] <= 1280 and rect['y'] + rect['h'] <= 720,
+                          'the photo frame is on screen (%r)' % rect)
+                rect = rect or {'x': 0, 'y': 0, 'w': 0, 'h': 0}
 
                 # 透過PNG, chosen in step ④: the backdrop follows (透明).
                 await page.click('[data-seg="format"] [data-v="pngAlpha"]')
@@ -417,13 +485,15 @@ async def run(root, keep):
                 preview = await page.evaluate("() => document.querySelector('.canvas-wrap').dataset.backdrop")
                 checks.ok(preview == 'clear', 'the preview shows the transparent frame over the checkerboard (%r)' % preview)
                 frames, _ = await export(page, checks, 'clear', keep)
-                plain_rows = check_clear(checks, frames) if frames else None
+                plain_rows = check_clear(checks, frames, rect) if frames else None
+                if frames:
+                    check_frame(checks, frames, rect, 'clear')
 
                 # Glow: partial alpha around the text.
                 await page.evaluate("() => window.__mv.dispatch({ t: 'pin.set', path: 'work:text.style', v: 'glow', by: 'user' })")
                 frames, _ = await export(page, checks, 'glow', keep)
                 if frames and plain_rows:
-                    check_glow(checks, frames, plain_rows)
+                    check_glow(checks, frames, plain_rows, rect)
                 await page.evaluate("() => window.__mv.dispatch({ t: 'pin.set', path: 'work:text.style', v: 'plain', by: 'user' })")
 
                 # グリーンバック from step ④'s background control: a PNG sequence stays, opaque now.
@@ -433,13 +503,15 @@ async def run(root, keep):
                 frames, _ = await export(page, checks, 'chroma', keep)
                 if frames:
                     check_chroma(checks, frames)
+                    check_frame(checks, frames, rect, 'chroma')
 
                 # 黒（白文字） without the ink pin: white text only.
                 await page.evaluate("() => window.__mv.dispatch({ t: 'pin.clear', path: 'work:el.text.fill' })")
                 await page.select_option('[data-ctl="backdrop"] select', 'black')
                 frames, _ = await export(page, checks, 'black', keep)
                 if frames:
-                    check_black(checks, frames)
+                    check_black(checks, frames, rect)
+                    check_frame(checks, frames, rect, 'black')
 
                 # Google Fonts are blocked, so every face fell back to the system fonts: step ④ says so (the existing
                 # font-fallback line). Without a Japanese system font a mincho fallback draws nothing, and this line is

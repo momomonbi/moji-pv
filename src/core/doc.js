@@ -1,10 +1,10 @@
-/* 文字PVメーカー v2 — original work. The document: defaults, validation, normalization, change sets, saving (DESIGN §3.1, §4.4). */
-MV.def('core/doc', ['core/paths'], (paths) => {
+/* 文字PVメーカー v2 — original work. The document: defaults, validation, normalization, change sets, saving (DESIGN §3.1, §4.4; DESIGN_2_1 §2.1, §2.2). */
+MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (paths, H, R, MEDIA) => {
   'use strict';
 
-  const APP_VERSION = '2.0.0';
+  const APP_VERSION = '2.1.0';
   const FORMAT = 'mojipv.project';
-  const CURRENT_SCHEMA = 1;
+  const CURRENT_SCHEMA = 2;                    // v2.1: doc.materials, doc.media, output.kit (DESIGN_2_1 §2.1)
   const DESIGN_SIZE = Object.freeze({
     '16:9': Object.freeze([1920, 1080]), '9:16': Object.freeze([1080, 1920]), '1:1': Object.freeze([1080, 1080]),
     '4:5': Object.freeze([1080, 1350]), '4:3': Object.freeze([1440, 1080]), '3:4': Object.freeze([1080, 1440]),
@@ -18,9 +18,15 @@ MV.def('core/doc', ['core/paths'], (paths) => {
   const FILTER_KINDS = Object.freeze(['arrange', 'arrive', 'dwell', 'depart', 'ground', 'ornament', 'lens', 'filter',
     'seam', 'theme']);
   const OUTPUT_CHOICES = Object.freeze({
-    format: ['mp4', 'png', 'pngAlpha'], short: [720, 1080, 1440, 2160], fps: [24, 30, 60],
+    format: ['mp4', 'kit', 'webmAlpha', 'png', 'pngAlpha'], short: [720, 1080, 1440, 2160], fps: [24, 30, 60],
     quality: ['standard', 'high', 'max'],
   });
+  // output.kit: the optional files of the Filmora set (§13.3); the main MP4 is always written.
+  const KIT_KEYS = Object.freeze(['overlay', 'bg', 'green', 'srt', 'lrc']);
+  const KIT_DEFAULT = Object.freeze({ overlay: true, bg: false, green: false, srt: true, lrc: false });
+  const MATERIAL_ID = /^m[0-9a-z]+$/;
+  const ASKS_MAX = 40;                         // side.asks: board drafts (§2.1)
+  const ASK_TEXT_MAX = 120;
   const TIMING_NUMBERS = Object.freeze(['lead', 'tail', 'leadIn', 'outro', 'tapLatency']);
   // Section kinds of the AI song analysis (doc.song.info.sections[].kind, §4.22.4); ai/song builds its schema from it.
   const SECTION_KINDS = Object.freeze(['intro', 'verse', 'prechorus', 'chorus', 'bridge', 'interlude', 'solo', 'outro',
@@ -31,7 +37,7 @@ MV.def('core/doc', ['core/paths'], (paths) => {
   // Key order of the saved file (§3.1). Keys not listed here are kept after the listed ones.
   const ORDER = {
     file: ['format', 'schema', 'doc', 'side'],
-    doc: ['meta', 'sheet', 'timing', 'song', 'look', 'pins', 'salts', 'locks', 'filters', 'output'],
+    doc: ['meta', 'sheet', 'timing', 'song', 'look', 'pins', 'salts', 'locks', 'filters', 'materials', 'media', 'output'],
     meta: ['app', 'lang'],
     sheet: ['next', 'rows'],
     row: ['id', 'src'],
@@ -42,9 +48,17 @@ MV.def('core/doc', ['core/paths'], (paths) => {
     pin: ['v', 'by', 'sig'],
     lock: ['n'],
     filter: ['only', 'deny'],
-    output: ['format', 'short', 'fps', 'quality', 'audio', 'range', 'name'],
+    output: ['format', 'short', 'fps', 'quality', 'audio', 'range', 'name', 'kit'],
     range: ['t0', 't1'],
-    side: ['looks', 'aiLog'],
+    kit: KIT_KEYS,
+    materials: ['next', 'list'],
+    material: ['id', 'kind', 'by', 'name', 'blurb', 'tags', 'season', 'pool', 'rv', 'recipe'],
+    text2: ['ja', 'en'],
+    media: ['list'],
+    asset: MEDIA.ORDER,
+    assetAi: MEDIA.AI_ORDER,
+    side: ['looks', 'aiLog', 'asks'],
+    ask: ['text', 'at'],
     looks: ['list', 'cap'],
     look_entry: ['n', 'seed', 'moodSeed', 'salts', 'scope', 'label', 'star'],
   };
@@ -65,12 +79,15 @@ MV.def('core/doc', ['core/paths'], (paths) => {
       salts: {},
       locks: {},
       filters: {},
-      output: { format: 'mp4', short: 1080, fps: 30, quality: 'high', audio: true, range: null, name: null },
+      materials: { next: 1, list: [] },
+      media: { list: [] },
+      output: { format: 'mp4', short: 1080, fps: 30, quality: 'high', audio: true, range: null, name: null,
+        kit: Object.assign({}, KIT_DEFAULT) },
     };
   }
 
   function defaultSide() {
-    return { looks: { list: [], cap: LOOKS_CAP }, aiLog: [] };
+    return { looks: { list: [], cap: LOOKS_CAP }, aiLog: [], asks: {} };
   }
 
   // --- small predicates --------------------------------------------------------------------------------------
@@ -96,6 +113,8 @@ MV.def('core/doc', ['core/paths'], (paths) => {
     checkSalts(doc.salts, bad);
     checkLocks(doc.locks, bad);
     checkFilters(doc.filters, bad);
+    if (doc.materials !== undefined) checkMaterials(doc.materials, bad);
+    if (doc.media !== undefined) checkMedia(doc.media, bad);
     checkOutput(doc.output, bad);
     return out;
   }
@@ -227,6 +246,62 @@ MV.def('core/doc', ['core/paths'], (paths) => {
     }
   }
 
+  // doc.materials (v2.1): structure only (§2.2). Recipe semantics are not checked here: a recipe core/recipe cannot
+  // use (for example one of a newer rv) keeps the file openable; the registry skips it and the planner warns.
+  function checkMaterials(materials, bad) {
+    if (!isObject(materials)) { bad('materials', 'must be { next, list }'); return; }
+    const next = materials.next;
+    if (!Number.isInteger(next) || next < 1) bad('materials.next', 'must be an integer ≥ 1');
+    if (!Array.isArray(materials.list)) { bad('materials.list', 'must be an array'); return; }
+    if (materials.list.length > R.LIMITS.materials) bad('materials.list', 'at most ' + R.LIMITS.materials + ' materials');
+    const seen = new Set();
+    materials.list.forEach((m, i) => {
+      const where = 'materials.list[' + i + ']';
+      if (!isObject(m)) { bad(where, 'must be an object'); return; }
+      if (typeof m.id !== 'string' || !MATERIAL_ID.test(m.id)) bad(where + '.id', 'must look like m<base36>');
+      else {
+        if (seen.has(m.id)) bad(where + '.id', 'duplicate id ' + m.id);
+        seen.add(m.id);
+        if (Number.isInteger(next) && parseInt(m.id.slice(1), 36) >= next) bad('materials.next', 'must be greater than ' + m.id);
+      }
+      if (!R.MAT_KINDS.includes(m.kind)) bad(where + '.kind', 'must be one of ' + R.MAT_KINDS.join(' '));
+      if (m.by !== 'ai' && m.by !== 'user') bad(where + '.by', 'must be ai or user');
+      if (!isObject(m.name) || typeof m.name.ja !== 'string' || m.name.ja.trim() === '') bad(where + '.name', 'needs a non-empty ja');
+      if (!isObject(m.recipe)) bad(where + '.recipe', 'must be an object');
+      else if (utf8Length(H.canonical(m.recipe)) > R.LIMITS.recipeBytes) bad(where + '.recipe', 'larger than ' + R.LIMITS.recipeBytes + ' bytes');
+    });
+    if (utf8Length(H.canonical(materials)) > R.LIMITS.materialsBytes) bad('materials', 'larger than ' + R.LIMITS.materialsBytes + ' bytes');
+  }
+
+  // doc.media (v2.1, §11.2.2): every entry passes core/media.entryProblems; unique ids; the caps hold.
+  function checkMedia(media, bad) {
+    if (!isObject(media)) { bad('media', 'must be { list }'); return; }
+    if (!Array.isArray(media.list)) { bad('media.list', 'must be an array'); return; }
+    if (media.list.length > MEDIA.LIMITS.library) bad('media.list', 'at most ' + MEDIA.LIMITS.library + ' entries');
+    const seen = new Set();
+    media.list.forEach((e, i) => {
+      const where = 'media.list[' + i + ']';
+      for (const p of MEDIA.entryProblems(e)) bad(where, p);
+      if (isObject(e) && typeof e.id === 'string') {
+        if (seen.has(e.id)) bad(where + '.id', 'duplicate id ' + e.id);
+        seen.add(e.id);
+      }
+    });
+    if (utf8Length(H.canonical(media)) > MEDIA.LIMITS.libraryBytes) bad('media', 'larger than ' + MEDIA.LIMITS.libraryBytes + ' bytes');
+  }
+
+  function utf8Length(s) {
+    let n = 0;
+    for (let i = 0; i < s.length; i++) {
+      const c = s.charCodeAt(i);
+      if (c < 0x80) n += 1;
+      else if (c < 0x800) n += 2;
+      else if (c >= 0xd800 && c <= 0xdbff) { n += 4; i++; }
+      else n += 3;
+    }
+    return n;
+  }
+
   function checkOutput(output, bad) {
     if (!isObject(output)) { bad('output', 'must be an object'); return; }
     for (const k of Object.keys(OUTPUT_CHOICES)) {
@@ -238,6 +313,11 @@ MV.def('core/doc', ['core/paths'], (paths) => {
       bad('output.range', 'must be { t0, t1 } with 0 ≤ t0 < t1, or null');
     }
     if (output.name !== null && typeof output.name !== 'string') bad('output.name', 'must be a string or null');
+    const kit = output.kit;
+    if (kit !== undefined && !(isObject(kit) && Object.keys(kit).length === KIT_KEYS.length &&
+        KIT_KEYS.every((k) => typeof kit[k] === 'boolean'))) {
+      bad('output.kit', 'must be { ' + KIT_KEYS.join(', ') + ' } booleans');
+    }
   }
 
   // --- normalize ---------------------------------------------------------------------------------------------
@@ -269,9 +349,27 @@ MV.def('core/doc', ['core/paths'], (paths) => {
       if (v === undefined) put(k, k === 'sheet' ? sheetDefaults(doc) : base[k]);
       else if (k === 'sheet' && isObject(v)) put(k, fillMissing(v, sheetDefaults(doc)));
       else if (k === 'song' && isObject(v)) put(k, fillMissing(v, SONG_DEFAULTS));
+      else if (k === 'materials' && isObject(v)) put(k, fillMissing(v, materialDefaults(v)));
+      else if (k === 'output' && isObject(v)) put(k, withKit(fillMissing(v, base.output)));
       else if (isObject(v) && isObject(base[k])) put(k, fillMissing(v, base[k]));
     }
     return out;
+  }
+
+  // output with every missing kit flag filled (the object itself when none is missing).
+  function withKit(output) {
+    if (!isObject(output.kit)) return output;
+    const kit = fillMissing(output.kit, KIT_DEFAULT);
+    return kit === output.kit ? output : Object.assign({}, output, { kit });
+  }
+
+  // Material defaults; `next` is one past the highest material id so ids are never reused.
+  function materialDefaults(materials) {
+    let next = 1;
+    for (const m of Array.isArray(materials.list) ? materials.list : []) {
+      if (isObject(m) && typeof m.id === 'string' && MATERIAL_ID.test(m.id)) next = Math.max(next, parseInt(m.id.slice(1), 36) + 1);
+    }
+    return { next, list: [] };
   }
 
   // Sheet defaults; `next` is one past the highest row id so ids are never reused.
@@ -314,7 +412,26 @@ MV.def('core/doc', ['core/paths'], (paths) => {
     });
     const cap = Number.isInteger(looks.cap) && looks.cap >= 1 && looks.cap <= LOOKS_CAP_MAX ? looks.cap : LOOKS_CAP;
     const aiLog = (Array.isArray(src.aiLog) ? src.aiLog : []).filter(isAiLogEntry);
-    return { looks: { list, cap }, aiLog };
+    return { looks: { list, cap }, aiLog, asks: sanitizeAsks(src.asks) };
+  }
+
+  // side.asks (v2.1): { [areaKey]: { text, at } } board drafts. An entry is kept when its key is a non-empty string,
+  // `text` a string (cut to 120 characters, line breaks become spaces) and `at` an integer ≥ 0; at most 40 entries
+  // (the first in key order). Kept entries are the same objects unless their text had to be cut.
+  function sanitizeAsks(asks) {
+    const out = {};
+    if (!isObject(asks)) return out;
+    let n = 0;
+    for (const key of Object.keys(asks).sort()) {
+      const a = asks[key];
+      if (n >= ASKS_MAX || key === '' || key.length > 200 || !isObject(a) || typeof a.text !== 'string' ||
+          !Number.isInteger(a.at) || a.at < 0) continue;
+      const flat = a.text.replace(/[\r\n]+/g, ' ');
+      const text = Array.from(flat).length > ASK_TEXT_MAX ? Array.from(flat).slice(0, ASK_TEXT_MAX).join('') : flat;
+      out[key] = text === a.text && Object.keys(a).length === 2 ? a : { text, at: a.at };
+      n++;
+    }
+    return out;
   }
 
   function isLookEntry(e) {
@@ -353,6 +470,8 @@ MV.def('core/doc', ['core/paths'], (paths) => {
       filters: a.filters !== b.filters,
       salts: a.salts !== b.salts,
       locks: a.locks !== b.locks,
+      materials: a.materials !== b.materials,
+      media: a.media !== b.media,
     };
   }
 
@@ -416,17 +535,42 @@ MV.def('core/doc', ['core/paths'], (paths) => {
         case 'salts': return sortedMap(v);
         case 'locks': return sortedMap(v, (lock) => ordered(lock, ORDER.lock));
         case 'filters': return sortedMap(v, (f) => ordered(f, ORDER.filter));
-        case 'output': return ordered(v, ORDER.output, (ok, ov) => (ok === 'range' ? ordered(ov, ORDER.range) : ov));
+        case 'output': return ordered(v, ORDER.output, (ok, ov) => (ok === 'range' ? ordered(ov, ORDER.range)
+          : ok === 'kit' ? ordered(ov, ORDER.kit) : ov));
+        case 'materials': return ordered(v, ORDER.materials, (mk, mv) => (mk === 'list' && Array.isArray(mv)
+          ? mv.map((m) => ordered(m, ORDER.material, orderMaterialField)) : mv));
+        case 'media': return ordered(v, ORDER.media, (mk, mv) => (mk === 'list' && Array.isArray(mv)
+          ? mv.map((e) => ordered(e, ORDER.asset, (ek, ev) => (ek === 'ai' ? orderAssetAi(ev) : ev))) : mv));
         default: return v;
       }
     });
+  }
+
+  function orderMaterialField(k, v) {
+    if (k === 'name' || k === 'blurb') return ordered(v, ORDER.text2);
+    if (k === 'recipe') return sortedDeep(v);
+    return v;
+  }
+
+  function orderAssetAi(ai) {
+    return ordered(ai, ORDER.assetAi, (k, v) => (k === 'caption' ? ordered(v, ORDER.text2)
+      : k === 'subject' || k === 'text' ? ordered(v, ['x', 'y', 'w', 'h']) : v));
+  }
+
+  // Recipes are stored normalized (sorted keys); sorting again keeps a hand-made file canonical too.
+  function sortedDeep(v) {
+    if (Array.isArray(v)) return v.map(sortedDeep);
+    if (!isObject(v)) return v;
+    const out = {};
+    for (const k of Object.keys(v).sort()) out[k] = sortedDeep(v[k]);
+    return out;
   }
 
   function orderSide(side) {
     return ordered(side, ORDER.side, (k, v) => (k === 'looks'
       ? ordered(v, ORDER.looks, (lk, lv) => (lk === 'list' && Array.isArray(lv)
         ? lv.map((e) => ordered(e, ORDER.look_entry, (ek, ev) => (ek === 'salts' ? sortedMap(ev) : ev))) : lv))
-      : v));
+      : k === 'asks' ? sortedMap(v, (a) => ordered(a, ORDER.ask)) : v));
   }
 
   // The project file text: JSON with a 1-space indent and the key order of §3.1, ending with a newline.
@@ -437,6 +581,8 @@ MV.def('core/doc', ['core/paths'], (paths) => {
 
   return {
     APP_VERSION, FORMAT, CURRENT_SCHEMA, DESIGN_SIZE, ASPECTS, LANGS, BACKDROPS, PIN_BY, FILTER_KINDS, SECTION_KINDS,
-    defaultDoc, defaultSide, validate, songInfoProblems, normalize, normalizeSide, sanitizeSide, touched, serialize,
+    OUTPUT_CHOICES, KIT_KEYS, KIT_DEFAULT, ORDER,
+    defaultDoc, defaultSide, validate, songInfoProblems, normalize, normalizeSide, sanitizeSide, sanitizeAsks, touched,
+    serialize,
   };
 });

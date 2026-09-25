@@ -3,7 +3,11 @@
 
 Both built pages are opened from a local http.server and walked through the screens a user meets: the empty first run,
 lyrics in, the four steps (④ with 詳しく open), 詳細 at every level (作品全体 → 行 → カット → 要素), the part browser, the
-AI tab, the timeline drawer, the ≡ menu, the command palette, the shortcut sheet, the syntax help and the About page.
+AI tab, the timeline drawer, the ≡ menu, the command palette, the shortcut sheet, the syntax help and the About page;
+v2.1 adds the area page, the curve widget, マイ素材 (list, page, the 「AIで作る」 form), the keyframe editor, the AI area list
+and the board (a material's name is user data: the en page shows its English name); the photo and video screens (the
+drop label, the library and a row's menu, the asset page, the media rows with the trim row, the crop overlay and the
+picker; asset names are user data) come last.
 On every screen the visible text and the accessible names (aria-label, title, placeholder, alt) are read and checked:
 
   en page   no Japanese text (kana or kanji) outside the product name 文字PVメーカー and user data (the lyrics here are
@@ -41,6 +45,7 @@ JAPANESE = re.compile(r'[぀-ヿ㐀-䶿一-鿿豈-﫿ｦ-ﾟ]')
 RAW_KEY = re.compile(r'^[a-z][A-Za-z0-9]*(?:\.[A-Za-z][A-Za-z0-9-]*)+$')
 WORD = re.compile(r'[A-Za-z][A-Za-z0-9\'’.-]*[A-Za-z0-9]|[A-Za-z]')
 VERSION = re.compile(r'^v?\d+(\.\d+)+$')
+HEX = re.compile(r'#[0-9A-Fa-f]{6}\b')          # a colour code (the colour rows and a photo's swatches) is not a word
 BROKEN = re.compile(r'\[object \w+\]|\bundefined\b|\bNaN\b|\{[A-Za-z0-9_]+\}')
 # English words a Japanese UI legitimately shows: formats and codecs, units, key names, services and model names,
 # the lab-free product parts that are names (not prose). Font families and part keys are added from the page.
@@ -181,7 +186,7 @@ def check_screen(walk, name, items, table, families):
         else:
             if it['license']:
                 continue
-            rest = text
+            rest = HEX.sub(' ', text)
             for proper in JA_NAMES:
                 rest = rest.replace(proper, ' ')
             words = [w for w in english_words(rest) if w.lower() not in JA_WORDS and w not in families and not VERSION.match(w)]
@@ -196,6 +201,132 @@ async def screen(walk, name, table, families):
     check_screen(walk, name, items, table, families)
     if walk.shots:
         await walk.page.screenshot(path=str(Path(walk.shots) / ('i18n_%s_%02d_%s.png' % (walk.lang, walk.screens, name))))
+
+
+# v2.1 (package F, DESIGN_2_1 §7.4): the new screens. A material with a name in both languages (user data: the en page
+# shows its English name), a ramp curve and a custom shot on line 1, then: the area page of # Chorus, the 緩急 row with
+# かんたん, the keyframe editor, 全体 › マイ素材 and the material page, 入り › マイ素材 with the 「AIで作る」 form, the AI
+# tab's area list and the board.
+V21_SETUP = """() => { const a = window.__mv, id = a.plan.lines[0].id;
+  a.batch({ label: ['undo.paste', {}] }, [
+    { t: 'material.put', id: 'm' + a.doc.materials.next.toString(36), kind: 'ornament', by: 'ai', name: { ja: '桜吹雪', en: 'Cherry flurry' },
+      blurb: { ja: '花びらが舞う', en: 'Petals drift' }, tags: ['soft'], season: 'spring', pool: false,
+      recipe: { scope: 'run', knobs: [{ what: 'count' }], layers: [{ prim: 'particles', shape: 'petal', count: 40, inks: ['accent'] }] } },
+    { t: 'pin.set', path: 'line/' + id + ':arrive.ease', v: { ramp: { edge: 0.1, ends: 'both', peak: 6 } }, by: 'user' }]);
+  return id; }"""
+
+
+async def v21_screens(w, table, families):
+    page = w.page
+    lid = await w.run(V21_SETUP)
+    await w.act('panel.details')
+    await w.run("""() => { const a = window.__mv, AR = MV.use('planner/areas'), S = MV.use('ui/selection');
+      const heads = AR.areasOf(a.doc, a.plan).heads; a.select(S.areaSel(heads[heads.length - 1]), { from: 'crumbs', open: true }); }""")
+    await screen(w, 'v21-area', table, families)
+    await w.run("(id) => window.__mv.select({ level: 'line', ids: [id] }, { from: 'crumbs', open: true })", lid)
+    await w.settle(4)
+    await w.run("() => { const r = document.querySelector('.frow[data-slot=\"arrive.ease\"]'); if (r) r.scrollIntoView({ block: 'center' }); }")
+    await screen(w, 'v21-curve', table, families)
+    await page.click('[data-mount="inspector"] .frow[data-slot="arrive"] .w-part')
+    await page.wait_for_function("() => !!document.querySelector('.pb-tabs [data-tab=\"mine\"]')")
+    await page.click('.pb-tabs [data-tab="mine"]')
+    await page.click('.pb-tile.pb-make')
+    await screen(w, 'v21-mine-make', table, families)
+    await w.escape()
+    await w.run("() => { const a = window.__mv; a.select({ level: 'el', scope: 'cut/' + a.plan.lines[0].cuts[0], el: 'lens' }, { from: 'crumbs', open: true }); }")
+    await w.settle(4)
+    await screen(w, 'v21-camera', table, families)
+    await page.click('[data-custom="camKeys"] button')
+    await page.wait_for_function("() => document.querySelectorAll('.ke-page .ke-row').length > 1")
+    await screen(w, 'v21-keyframes', table, families)
+    await w.escape()
+    await w.run("() => window.__mv.select({ level: 'work' }, { from: 'crumbs', open: true })")
+    await w.settle(4)
+    await w.run("() => window.__mv.inspector.openSection('materials')")
+    await screen(w, 'v21-materials', table, families)
+    await page.click('.mat-row .insp-item')
+    await page.wait_for_function("() => !!document.querySelector('.mat-page .mat-name')")
+    await screen(w, 'v21-material-page', table, families)
+    await w.escape()
+    await w.act('panel.ai')
+    await page.click('.ai-direct [data-target="area"]')
+    await screen(w, 'v21-ai-areas', table, families)
+    await page.click('.ai-board-link')
+    await page.wait_for_function("() => !!document.querySelector('.ai-board .ai-board-row')")
+    await screen(w, 'v21-board', table, families)
+    await w.act('panel.close')
+
+
+# v2.1 photos and videos (package G.4, DESIGN_2_1 §11.8.3): a still and a video imported here (names are user data: the en
+# page gets English names), the video as line 2's background, the still as line 1's overlay footage, and a third photo
+# whose bytes are not on this device. Screens: the preview's drop label, 全体 › 写真・動画, a row's ⋯ menu, the asset page,
+# a missing asset's page, 重ねる映像 with its 重ね方, the element page with its media rows and the trim row, the crop
+# overlay (with its strip) and the picker.
+MEDIA_HELPERS = ('tests/helpers/exif_write.js', 'tests/helpers/media_gen.js')
+MEDIA_NAMES = {'ja': ['空の写真.png', '海辺.mp4', '夜景.png'], 'en': ['Blue Sky.png', 'Seaside Walk.mp4', 'Night View.png']}
+MEDIA_SETUP = """async (names) => {
+  const a = window.__mv, G = window.MVMediaGen;
+  const st = await G.stills();
+  const v = await G.encodeCounter({ container: 'mp4', fps: 30, frames: 45 });
+  const got = await a.media.importFiles([new File([st.png], names[0], { type: 'image/png' }), new File([v.bytes], names[1], { type: 'video/mp4' })], {});
+  const line = a.plan.lines[1].id;
+  a.media.place(got[1].id, 'ground', { kind: 'lines', scopes: ['line/' + line], lineIds: [line], area: null });
+  // the photo as overlay footage on line 1, and a third photo whose bytes are not on this device
+  const first = a.plan.lines[0].id;
+  a.media.place(got[0].id, 'overlay', { kind: 'lines', scopes: ['line/' + first], lineIds: [first], area: null });
+  const ghost = Object.assign({}, got[0], { id: 'a' + 'e'.repeat(24), name: names[2] });
+  a.dispatch({ t: 'media.put', entry: ghost }, { label: ['undo.media.put', {}] });
+  await a.assets.check([ghost.id]);
+  return { line, first, video: got[1].id, ghost: ghost.id };
+}"""
+DRAG_OVER = """(leave) => { const w = document.querySelector('.canvas-wrap'), dt = new DataTransfer();
+  dt.items.add(new File(['x'], 'x.png', { type: 'image/png' }));
+  w.dispatchEvent(new DragEvent(leave ? 'dragleave' : 'dragenter', { bubbles: true, dataTransfer: dt })); }"""
+
+
+async def media_screens(w, table, families):
+    page = w.page
+    for helper in MEDIA_HELPERS:
+        await page.evaluate((ROOT / helper).read_text(encoding='utf-8'))
+    got = await w.run(MEDIA_SETUP, MEDIA_NAMES[w.lang])
+    await w.run(DRAG_OVER, False)
+    await screen(w, 'media-drop', table, families)
+    await w.run(DRAG_OVER, True)
+    await w.act('panel.details')
+    await w.run("() => window.__mv.select({ level: 'work' }, { from: 'crumbs', open: true })")
+    await w.settle(4)
+    await w.run("() => window.__mv.inspector.openSection('media')")
+    await page.wait_for_function("() => document.querySelectorAll('.med-row').length === 3")
+    await screen(w, 'media-library', table, families)
+    await page.click('.med-row[data-id="%s"] .med-more' % got['video'])
+    await screen(w, 'media-row-menu', table, families)
+    await w.escape()
+    await w.run("(id) => window.__mv.media.openAsset(id)", got['video'])
+    await page.wait_for_function("() => !!document.querySelector('.med-page .med-title')")
+    await screen(w, 'media-asset', table, families)
+    await w.escape()
+    await w.run("() => window.__mv.view.setPref('ai', true)")
+    await w.run("(id) => window.__mv.media.openAsset(id)", got['ghost'])
+    await page.wait_for_function("() => !!document.querySelector('.med-page .med-missing')")
+    await screen(w, 'media-asset-missing', table, families)
+    await w.escape()
+    await w.run("""(line) => window.__mv.select({ level: 'el', scope: 'line/' + line, el: 'ground' }, { from: 'crumbs', open: true })""", got['first'])
+    await page.wait_for_function("() => !!document.querySelector('.frow[data-slot=\"atmos@mediaLayer.blend\"]')")
+    await w.run("() => document.querySelector('.frow[data-slot=\"atmos@mediaLayer.blend\"]').scrollIntoView({ block: 'center' })")
+    await screen(w, 'media-overlay', table, families)
+    await w.run("""(line) => window.__mv.select({ level: 'el', scope: 'line/' + line, el: 'ground' }, { from: 'crumbs', open: true })""", got['line'])
+    await page.wait_for_function("() => !!document.querySelector('.w-trim')")
+    await screen(w, 'media-element', table, families)
+    await w.run("() => document.querySelector('.w-trim').scrollIntoView({ block: 'center' })")
+    await screen(w, 'media-trim', table, families)
+    await page.click('.frow[data-slot="ground@photoPan.cropZoom"] .w-crop-edit')
+    await screen(w, 'media-crop', table, families)
+    await w.escape()
+    await page.click('.frow[data-slot="ground@photoPan.image"] .w-media')
+    await page.wait_for_function("() => document.querySelectorAll('.med-picker .pb-tile').length >= 3")
+    await screen(w, 'media-picker', table, families)
+    await w.escape()
+    await w.act('panel.close')
 
 
 async def walk_page(browser, base, lang, shots):
@@ -274,6 +405,8 @@ async def walk_page(browser, base, lang, shots):
     await w.act('help.about')
     await screen(w, 'about', table, families)
     await w.escape()
+    await v21_screens(w, table, families)
+    await media_screens(w, table, families)
 
     used = await w.run('() => [...window.__i18nUsed]')
     for key in sorted(used):

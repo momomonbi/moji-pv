@@ -18,7 +18,8 @@ MV.def('ui/step_look', ['ui/dom', 'ui/icons', 'core/doc'], (dom, I, D) => {
       I.icon('ai', { size: 15 }), t('look.ai3'));
     const root = h('div', { class: 'step step-look' },
       h('div', { class: 'step-head' }, h('h2', { class: 'step-title', text: t('step.short.look') })),
-      h('p', { class: 'note', text: t('look.hint') }),
+      // DESIGN_2_1 §11.7.1: one more sentence, text only (step ③ keeps its five controls)
+      h('p', { class: 'note', text: t('look.hint') + ' ' + t('media.lookHint') }),
       h('div', { class: 'field' }, h('div', { class: 'field-label', text: t('kind.mood') }), moods,
         h('div', { class: 'legend', text: t('look.autoMark') })),
       h('div', { class: 'field' }, h('div', { class: 'field-label', text: t('kind.theme') }), themes),

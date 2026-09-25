@@ -1,5 +1,6 @@
-/* 文字PVメーカー v2 — original work. Non-text draw paths: shapes, paints (with the static raster cache), particles and images (DESIGN §4.19.6). */
-MV.def('engine/render/shapes', ['engine/scene/table', 'engine/scene/builder', 'engine/render/sprites'], (T, B, SP) => {
+/* 文字PVメーカー v2 — original work. Non-text draw paths: shapes, paints (with the static raster cache), particles, images and media (DESIGN §4.19.6; DESIGN_2_1 §11.5.4–§11.5.5). */
+MV.def('engine/render/shapes', ['core/color', 'core/media', 'engine/scene/table', 'engine/scene/builder', 'engine/render/sprites'],
+(C, MEDIA, T, B, SP) => {
   'use strict';
 
   const NO_DASH = Object.freeze([]);
@@ -151,5 +152,235 @@ MV.def('engine/render/shapes', ['engine/scene/table', 'engine/scene/builder', 'e
     return true;
   }
 
-  return { setMatrix, scaleOf, drawShape, drawPaint, createPaintCache, drawParticles, drawImage };
+  // --- media (DESIGN_2_1 §11.5.4–§11.5.5) --------------------------------------------------------------------------
+
+  const COMP_OP = Object.freeze({ over: 'source-over', atop: 'source-atop', screen: 'screen', multiply: 'multiply',
+    overlay: 'overlay' });
+  const PLACEHOLDER_CELL = 48;          // du: the checkerboard a missing picture shows in the preview (§11.7.8)
+  const WANT = { px: 0, blur: 0, exact: false, thumb: false };     // pooled request of drawMedia (one call at a time)
+  const RM = new Float32Array(6);
+  const SRC = { x: 0, y: 0, w: 0, h: 0 };
+  const CORNER = new Float32Array(2);
+
+  function inkHex(pal, ink) {
+    if (typeof ink === 'string' && pal && pal[ink]) return pal[ink];
+    return typeof ink === 'string' && /^#[0-9A-Fa-f]{6}$/.test(ink) ? ink : (pal && pal.ink) || '#000000';
+  }
+
+  // The source rectangle of a fit (displayed px of the asset) in the delivered image's coded px: scaled from the
+  // asset's displayed size to the frame's (a still's tier), then turned back through the frame's rotation (§11.5.5):
+  //   90: (sx, sy, sw, sh) → (sy, W − sx − sw, sh, sw);  180: (W − sx − sw, H − sy − sh, sw, sh);  270: (H − sy − sh, sx, sh, sw)
+  function codedRect(fit, meta, f, out) {
+    const kx = f.w / Math.max(1, meta.w), ky = f.h / Math.max(1, meta.h);
+    const sx = fit.sx * kx, sy = fit.sy * ky, sw = fit.sw * kx, sh = fit.sh * ky, W = f.w, H = f.h;
+    if (f.rot === 90) { out.x = sy; out.y = W - sx - sw; out.w = sh; out.h = sw; }
+    else if (f.rot === 180) { out.x = W - sx - sw; out.y = H - sy - sh; out.w = sw; out.h = sh; }
+    else if (f.rot === 270) { out.x = H - sy - sh; out.y = sx; out.w = sh; out.h = sw; }
+    else { out.x = sx; out.y = sy; out.w = sw; out.h = sh; }
+    return out;
+  }
+
+  // The transform that draws a picture of rotation `rot` upright into the dest rect (dx, dy, dw, dh), flipped by
+  // (fx, fy) = ±1 about the rect's centre: M · T(centre) · S(fx, fy) · R(rot). Its local rect is centred on 0.
+  function placeInto(g, M, dx, dy, dw, dh, rot, fx, fy) {
+    const cx = dx + dw / 2, cy = dy + dh / 2;
+    const a = (rot * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a);
+    // R(rot) then S(fx, fy) then T(cx, cy), all under M
+    const m0 = fx * c, m1 = fy * s, m2 = -fx * s, m3 = fy * c;
+    RM[0] = M[0] * m0 + M[2] * m1; RM[1] = M[1] * m0 + M[3] * m1;
+    RM[2] = M[0] * m2 + M[2] * m3; RM[3] = M[1] * m2 + M[3] * m3;
+    RM[4] = M[0] * cx + M[2] * cy + M[4]; RM[5] = M[1] * cx + M[3] * cy + M[5];
+    setMatrix(g, RM);
+  }
+
+  // An upright, unflipped picture is one drawImage(image, source rect, dest rect) under the node's transform (the op the
+  // recorder logs as drawImage('media:<id>@<m>#<index>', sx, sy, sw, sh, dx, dy, dw, dh)); a turned or mirrored one is
+  // drawn about the dest centre.
+  function drawPicture(g, f, src, M, dx, dy, dw, dh, fx, fy) {
+    const rot = f.rot || 0;
+    if (rot === 0 && fx === 1 && fy === 1) {
+      setMatrix(g, M);
+      g.drawImage(f.image, src.x, src.y, src.w, src.h, dx, dy, dw, dh);
+      return;
+    }
+    const turned = rot === 90 || rot === 270;
+    const w = turned ? dh : dw, h = turned ? dw : dh;
+    placeInto(g, M, dx, dy, dw, dh, rot, fx, fy);
+    g.drawImage(f.image, src.x, src.y, src.w, src.h, -w / 2, -h / 2, w, h);
+  }
+
+  // Whether the rect (du, under M) reaches into the device rect [x0, x1] × [y0, y1].
+  function visible(M, x, y, w, h, vis) {
+    let lx = Infinity, ly = Infinity, hx = -Infinity, hy = -Infinity;
+    for (let k = 0; k < 4; k++) {
+      const px = k & 1 ? x + w : x, py = k & 2 ? y + h : y;
+      CORNER[0] = M[0] * px + M[2] * py + M[4]; CORNER[1] = M[1] * px + M[3] * py + M[5];
+      if (CORNER[0] < lx) lx = CORNER[0]; if (CORNER[0] > hx) hx = CORNER[0];
+      if (CORNER[1] < ly) ly = CORNER[1]; if (CORNER[1] > hy) hy = CORNER[1];
+    }
+    return hx > vis[0] && lx < vis[2] && hy > vis[1] && ly < vis[3];
+  }
+
+  // The picture of one fit into its dest, plus (edge 'mirror') the flipped neighbours that reach into the visible
+  // device rect, usually none or two (§11.5.2). → draws made.
+  function drawFit(g, f, fit, meta, M, mirror, vis) {
+    if (!(fit.dw > 0 && fit.dh > 0 && fit.sw > 0 && fit.sh > 0)) return 0;
+    const src = codedRect(fit, meta, f, SRC);
+    drawPicture(g, f, src, M, fit.dx, fit.dy, fit.dw, fit.dh, 1, 1);
+    let n = 1;
+    if (!mirror) return n;
+    for (let j = -1; j <= 1; j++) {
+      for (let i = -1; i <= 1; i++) {
+        if (!i && !j) continue;
+        const x = fit.dx + i * fit.dw, y = fit.dy + j * fit.dh;
+        if (!visible(M, x, y, fit.dw, fit.dh, vis)) continue;
+        drawPicture(g, f, src, M, x, y, fit.dw, fit.dh, i ? -1 : 1, j ? -1 : 1);
+        n++;
+      }
+    }
+    return n;
+  }
+
+  // A fill over the picture: its dest, or with mirrored edges the dest and its eight neighbours.
+  function fillRect(g, M, fit, mirror, style, alpha, op) {
+    setMatrix(g, M);
+    g.globalAlpha = alpha;
+    g.globalCompositeOperation = op;
+    g.fillStyle = style;
+    if (mirror) g.fillRect(fit.dx - fit.dw, fit.dy - fit.dh, 3 * fit.dw, 3 * fit.dh);
+    else g.fillRect(fit.dx, fit.dy, fit.dw, fit.dh);
+  }
+
+  // Veil (a fill of the veil ink over the picture) and tint (the tint ink blended as 'color'); drawn straight over an
+  // opaque picture, or 'source-atop' inside the isolated surface, so only the picture's pixels change.
+  function lookOf(g, rec, fit, M, alpha, pal, veil, atop, mirror) {
+    if (veil && veil.a > 0) {
+      fillRect(g, M, fit, mirror, C.rgba(inkHex(pal, veil.ink), veil.a), alpha, atop ? 'source-atop' : 'source-over');
+    }
+    if (rec.tint && rec.tint.a > 0) {
+      fillRect(g, M, fit, mirror, inkHex(pal, rec.tint.ink), alpha * rec.tint.a, atop ? 'source-atop' : 'color');
+    }
+  }
+
+  // The preview's stand-in for a picture that is not on this device: a checkerboard of muted / ground2 over the dest.
+  function drawPlaceholder(g, rec, M, alpha, pal) {
+    const r = rec.rect;
+    if (!(r.dw > 0 && r.dh > 0)) return;
+    g.save();
+    setMatrix(g, M);
+    g.globalAlpha = alpha;
+    g.beginPath();
+    g.rect(r.dx, r.dy, r.dw, r.dh);
+    g.clip();
+    g.fillStyle = inkHex(pal, 'ground2');
+    g.fillRect(r.dx, r.dy, r.dw, r.dh);
+    g.fillStyle = inkHex(pal, 'muted');
+    const s = PLACEHOLDER_CELL;
+    for (let y = 0, row = 0; y < r.dh; y += s, row++) {
+      for (let x = (row & 1) * s; x < r.dw; x += 2 * s) g.fillRect(r.dx + x, r.dy + y, Math.min(s, r.dw - x), Math.min(s, r.dh - y));
+    }
+    g.restore();
+  }
+
+  // One frame of the media: frame() for the source at media time m. Returns the MediaFrame (valid until the next call
+  // for the same id) or null; counts a missing or provisional frame, and in export quality records the error the
+  // facade raises (EngineError 'media-missing' / 'media-not-ready') instead of drawing a substitute. want.blur is asked
+  // for every medium: the store bakes it into stills (§11.4.6) and into video and animation frames once per source
+  // frame (MediaFrame.blur > 0), so the draw applies no blur of its own then.
+  function frameFor(dc, rec, m, blur) {
+    const store = dc.assets;
+    WANT.px = Math.max(rec.box.w, rec.box.h) * dc.scale * rec.headroom;
+    WANT.blur = blur * dc.scale;
+    WANT.thumb = dc.thumb === true;
+    WANT.exact = dc.quality === 'export' && !WANT.thumb;     // a thumbnail shows the poster, never waits for a frame
+    const f = store && typeof store.frame === 'function' ? store.frame(rec.src, m, WANT) : null;
+    if (!f) {
+      if (WANT.exact) dc.mediaError = dc.mediaError || { code: 'media-missing', id: rec.src };
+      else dc.mediaWaiting++;
+      return null;
+    }
+    if (!f.exact) {
+      if (WANT.exact) { dc.mediaError = dc.mediaError || { code: 'media-not-ready', id: rec.src }; return null; }
+      dc.mediaWaiting++;
+    }
+    return f;
+  }
+
+  // drawMedia(g, rec, M, alpha, dc, tl) → boolean (§11.5.5): one media node. Its media time is closed-form (clock
+  // 'song': the frame's absolute time dc.t; 'show': the scene-local tl); the store picks the source frame. An opaque
+  // picture without blur is drawn straight (veil and tint over it), and so is a blurred one whose frame comes with its
+  // blur baked (MediaFrame.blur > 0: stills always, videos and animations once the store has baked that frame); a
+  // picture with alpha, a text fill ('atop') or a blurred video frame that came without its blur goes through a pooled
+  // full-frame surface (veil and tint 'source-atop', then the per-frame blur, counted as dc.counts.mediaFallback),
+  // composited with `comp`. 'soft' draws the blurred cover copy first. The mask (a K.shape in box coordinates) clips.
+  // Allocation-free.
+  function drawMedia(g, rec, M, alpha, dc, tl) {
+    const T0 = rec.time;
+    const m = T0 ? MEDIA.mapTime(T0, T0.clock === 'song' ? dc.t : tl) : 0;
+    const pal = dc.pal;
+    const vis = dc.visible;
+    const mirror = rec.edge === 'mirror' && rec.bleed > 0;
+    let drew = false;
+    if (rec.soft) {
+      const f = frameFor(dc, rec, m, rec.softBlur);
+      if (f) {
+        drawLayered(g, rec, f, rec.soft, M, alpha, dc, vis, mirror, rec.softVeil, frameBlur(dc, T0, f, rec.softBlur), 'over');
+        drew = true;
+      }
+    }
+    const f = frameFor(dc, rec, m, rec.blur);
+    if (!f) {
+      if (dc.quality !== 'export' && !drew) drawPlaceholder(g, rec, M, alpha, pal);
+      return drew;
+    }
+    drawLayered(g, rec, f, rec.rect, M, alpha, dc, vis, mirror, rec.veil, frameBlur(dc, T0, f, rec.blur), rec.comp);
+    dc.counts.media++;
+    return true;
+  }
+
+  // The blur (du) the draw itself must apply to a frame: none for a still (the store blurs it) or a frame whose blur came
+  // baked (f.blur > 0); a timed frame without it gets the per-frame blur of the isolated path, counted as a fallback.
+  function frameBlur(dc, T0, f, blur) {
+    if (!T0 || !(blur > 0) || f.blur > 0) return 0;
+    dc.counts.mediaFallback++;
+    return blur;
+  }
+
+  function drawLayered(g, rec, f, fit, M, alpha, dc, vis, mirror, veil, videoBlur, comp) {
+    const looks = (veil && veil.a > 0) || (rec.tint && rec.tint.a > 0);
+    const isolated = rec.meta.alpha || comp === 'atop' || videoBlur > 0 || (comp !== 'over' && looks);
+    if (!isolated) {
+      g.save();
+      if (rec.mask) { setMatrix(g, M); B.replayShape(g, rec.mask); g.clip(); }
+      g.globalAlpha = alpha;
+      g.globalCompositeOperation = COMP_OP[comp] || 'source-over';
+      drawFit(g, f, fit, rec.meta, M, mirror, vis);
+      g.globalCompositeOperation = 'source-over';
+      lookOf(g, rec, fit, M, alpha, dc.pal, veil, false, mirror);
+      g.restore();
+      return;
+    }
+    const S = dc.pool.take();
+    const s = S.ctx;
+    s.globalAlpha = 1;
+    drawFit(s, f, fit, rec.meta, M, mirror, vis);
+    lookOf(s, rec, fit, M, 1, dc.pal, veil, true, mirror);
+    s.globalCompositeOperation = 'source-over';
+    let out = S;
+    if (videoBlur > 0) { out = dc.blurred(S, videoBlur * dc.scale); dc.pool.give(S); }
+    g.save();
+    if (rec.mask) { setMatrix(g, M); B.replayShape(g, rec.mask); g.clip(); }
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.globalAlpha = alpha;
+    g.globalCompositeOperation = COMP_OP[comp] || 'source-over';
+    g.drawImage(out.canvas, 0, 0);
+    g.restore();
+    dc.pool.give(out);
+  }
+
+  // The dest quad of a media record (for picks and bounds): its fitted dest rect.
+  function mediaDest(rec) { return rec.rect; }
+
+  return { setMatrix, scaleOf, drawShape, drawPaint, createPaintCache, drawParticles, drawImage, drawMedia, mediaDest, codedRect,
+    COMP_OP };
 });

@@ -1,4 +1,4 @@
-/* 文字PVメーカー v2 — original work. Tests for core/commands: every reducer, identity, remaps, and undo/replay properties. */
+/* 文字PVメーカー v2 — original work. Tests for core/commands: every reducer, identity, remaps, undo/replay properties, v2.1 scope rules. */
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -26,6 +26,9 @@ const MAY_CHANGE = {
   'look.restore': ['look', 'salts'], 'look.set': ['look'], 'lock.set': ['pins', 'locks'], 'lock.clear': ['pins', 'locks'],
   'filter.set': ['filters'], 'time.shift': ['pins'], 'time.tap': ['pins'], 'timing.set': ['timing'], 'song.set': ['song'],
   'song.clear': ['song'], 'song.info': ['song'], 'output.set': ['output'],
+  'material.put': ['materials'], 'material.meta': ['materials'], 'material.remove': ['materials', 'pins'],
+  'media.put': ['media'], 'media.meta': ['media'], 'media.move': ['media'], 'media.remove': ['media', 'pins'],
+  'media.relink': ['media', 'pins', 'materials'],
 };
 
 function checkSharing(before, after, cmd) {
@@ -344,7 +347,9 @@ test('batch applies in order', () => {
 test('effectiveTimes reads start and end from the plan', () => {
   const plan = corpus.planBasic();
   assert.deepEqual(C.effectiveTimes(plan, ['r5', 'ra', 'zz']), { r5: { start: 8.25, end: 12 }, ra: { start: 22.25, end: 27 } });
-  assert.deepEqual(C.COMMANDS.length, 25);
+  assert.deepEqual(C.COMMANDS.length, 33);
+  for (const t of ['material.put', 'material.meta', 'material.remove', 'media.put', 'media.meta', 'media.move', 'media.remove',
+    'media.relink']) assert.ok(C.COMMANDS.includes(t), t);
 });
 
 // ---- the property test ----------------------------------------------------------------------------------------------
@@ -468,4 +473,77 @@ test('property: 500 random command sequences — undo all restores the start, re
     assert.equal(store.doc, end);
   }
   assert.ok(commands > 3000, 'enough commands were exercised: ' + commands);
+});
+
+// ---- v2.1 (DESIGN_2_1 §2.3, §2.6, §3.7, §13.3): scope refusals, promote and copy rules, output.kit ---------------------
+
+test('v2.1 pin.set refuses cut/…:season, cut/…:avoid and work:avoid; line and work season are fine', () => {
+  const doc = fresh('basic');
+  throwsCode(() => reduce(doc, { t: 'pin.set', path: 'cut/r4~0:season', v: 'spring', by: 'ai', sig: '始発の' }), 'payload');
+  throwsCode(() => reduce(doc, { t: 'pin.set', path: 'cut/r4~0:avoid', v: ['filter.sliceGlitch'], by: 'ai', sig: '始発の' }), 'payload');
+  throwsCode(() => reduce(doc, { t: 'pin.set', path: 'work:avoid', v: ['filter.sliceGlitch'], by: 'user' }), 'payload');
+  const ok = reduce(reduce(reduce(doc, { t: 'pin.set', path: 'line/r4:season', v: 'spring', by: 'ai' }),
+    { t: 'pin.set', path: 'line/r4:avoid', v: ['filter.sliceGlitch'], by: 'ai' }), { t: 'pin.set', path: 'work:season', v: 'winter', by: 'user' });
+  assert.deepEqual([ok.pins['line/r4:season'].v, ok.pins['line/r4:avoid'].v, ok.pins['work:season'].v],
+    ['spring', ['filter.sliceGlitch'], 'winter']);
+  for (const path of ['cut/r4~0:motion.speed', 'cut/r4~0:cam.shot', 'cut/r4~0:rig', 'cut/r4~0:rig.curve', 'line/r4:cam.zoom',
+    'work:cam.curve', 'work:seam.curve', 'cut/r4~0:arrive.flow', 'line/r4:dwell.curve', 'work:lens.curve']) {
+    assert.ok(reduce(doc, { t: 'pin.set', path, v: 1, by: 'user', sig: '始発の' }).pins[path], path + ' is pinnable');
+  }
+  throwsCode(() => reduce(doc, { t: 'lock.set', lineId: 'r4', pins: { 'cut/r4~0:season': { v: 'spring', by: 'lock', sig: '始発の' } } }),
+    'payload');
+});
+
+test('v2.1 pin.promote: season may move line → work; avoid never moves', () => {
+  let doc = fresh('basic');
+  doc = reduce(doc, { t: 'pin.set', path: 'line/r4:season', v: 'spring', by: 'ai' });
+  doc = reduce(doc, { t: 'pin.set', path: 'line/r4:avoid', v: ['filter.sliceGlitch'], by: 'ai' });
+  const up = reduce(doc, { t: 'pin.promote', path: 'line/r4:season', to: 'work' });
+  assert.deepEqual(up.pins['work:season'], { v: 'spring', by: 'ai' });
+  assert.equal(up.pins['line/r4:season'], undefined);
+  throwsCode(() => reduce(doc, { t: 'pin.promote', path: 'line/r4:avoid', to: 'work' }), 'payload');
+  const stray = Object.assign({}, doc, { pins: Object.assign({}, doc.pins, { 'cut/r4~0:avoid': { v: [], by: 'user', sig: '始発の' },
+    'cut/r4~0:season': { v: 'summer', by: 'user', sig: '始発の' } }) });
+  throwsCode(() => reduce(stray, { t: 'pin.promote', path: 'cut/r4~0:avoid', to: 'line' }), 'payload');
+  throwsCode(() => reduce(stray, { t: 'pin.promote', path: 'cut/r4~0:season', to: 'line' }), 'payload');
+  const cam = reduce(reduce(doc, { t: 'pin.set', path: 'cut/r4~0:cam.shot', v: 'pushWord', by: 'user', sig: '始発の' }),
+    { t: 'pin.promote', path: 'cut/r4~0:cam.shot', to: 'line' });
+  assert.deepEqual(cam.pins['line/r4:cam.shot'], { v: 'pushWord', by: 'user' });
+});
+
+test('v2.1 pin.copy copies motion.speed and cam.*, not rig*, season or avoid', () => {
+  let doc = fresh('basic');
+  const shot = { keys: [{ at: 'a', aim: 'block' }, { at: 'b', aim: 'emph', fill: 0.9 }] };
+  for (const [slot, v] of [['motion.speed', 0.5], ['cam.shot', shot], ['cam.zoom', 1.2], ['cam.curve', 'holdThenDash'],
+    ['cam.follow', 0.3], ['rig', 'slowSwell'], ['rig.curve', 'softEnds'], ['season', 'spring'], ['avoid', ['lens.handHeld']],
+    ['arrive.flow', 'softEnds']]) {
+    doc = reduce(doc, { t: 'pin.set', path: 'line/r4:' + slot, v, by: 'ai' });
+  }
+  const out = reduce(doc, { t: 'pin.copy', from: 'line/r4', to: ['line/r5', 'cut/r6~0'], sigs: { 'r6~0': 'x' } });
+  for (const slot of ['motion.speed', 'cam.shot', 'cam.zoom', 'cam.curve', 'cam.follow', 'arrive.flow']) {
+    assert.deepEqual(out.pins['line/r5:' + slot], { v: doc.pins['line/r4:' + slot].v, by: 'user' }, slot);
+    assert.ok(out.pins['cut/r6~0:' + slot], slot + ' at cut scope');
+  }
+  for (const slot of ['rig', 'rig.curve', 'season', 'avoid']) {
+    assert.equal(out.pins['line/r5:' + slot], undefined, slot + ' is area-level');
+    assert.equal(out.pins['cut/r6~0:' + slot], undefined, slot + ' is area-level');
+  }
+});
+
+test('v2.1 output: formats kit and webmAlpha; output.set kit takes the whole object of five booleans', () => {
+  const doc = D.normalize(fresh('basic'));
+  assert.deepEqual(doc.output.kit, { overlay: true, bg: false, green: false, srt: true, lrc: false });
+  for (const v of ['kit', 'webmAlpha', 'mp4', 'png', 'pngAlpha']) assert.equal(reduce(doc, { t: 'output.set', key: 'format', v }).output.format, v);
+  throwsCode(() => reduce(doc, { t: 'output.set', key: 'format', v: 'mov' }), 'payload');
+  const kit = { overlay: false, bg: true, green: true, srt: false, lrc: true };
+  const out = reduce(doc, { t: 'output.set', key: 'kit', v: kit });
+  assert.deepEqual(out.output.kit, kit);
+  assert.equal(reduce(out, { t: 'output.set', key: 'kit', v: kit }), out, 'unchanged → the same doc');
+  for (const bad of [{ overlay: true }, Object.assign({}, kit, { lrc: 'yes' }), Object.assign({}, kit, { extra: true }), null, true]) {
+    throwsCode(() => reduce(doc, { t: 'output.set', key: 'kit', v: bad }), 'payload');
+  }
+  const raw = fresh('basic');
+  assert.equal(raw.output.kit, undefined, 'a schema-1 document has no kit');
+  assert.deepEqual(D.validate(raw), [], 'and still validates (normalize fills it)');
+  assert.deepEqual(reduce(raw, { t: 'output.set', key: 'kit', v: kit }).output.kit, kit);
 });

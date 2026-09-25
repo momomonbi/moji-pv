@@ -90,3 +90,17 @@ test('the reducer never mutates its input', () => {
   assert.deepEqual(s.starts, [null, null, null, null, null]);
   assert.deepEqual(next.starts, [1, null, null, null, null]);
 });
+
+test('a mark less than MIN_GAP after the last start is not taken (timing would drop it with time-order)', () => {
+  assert.ok(T.MIN_GAP > 0.1, 'more than timing\'s 0.1 s anchor gap');
+  const s = run('r3', [['mark', 2]]);
+  assert.equal(T.tapReduce(s, { type: 'mark', t: 2 }), s, 'the frozen clock of stopped playback: the same time again');
+  assert.equal(T.tapReduce(s, { type: 'mark', t: 1.5 }), s, 'earlier than the last start');
+  assert.equal(T.tapReduce(s, { type: 'mark', t: 2 + T.MIN_GAP - 0.01 }), s, 'just under the gap');
+  const ok = T.tapReduce(s, { type: 'mark', t: 2 + T.MIN_GAP });
+  assert.deepEqual(T.tapCommand(ok).marks.map((m) => m.start), [2, 2 + T.MIN_GAP], 'at the gap');
+  const back = T.tapReduce(ok, { type: 'back', t: 3 });
+  assert.notEqual(T.tapReduce(back, { type: 'mark', t: 2.5 }), back, 'after back, the gap is measured from the line above');
+  const first = T.tapStart(LINES, 'r4');
+  assert.notEqual(T.tapReduce(first, { type: 'mark', t: 0 }), first, 'nothing above the first mark of a session');
+});

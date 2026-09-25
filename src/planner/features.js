@@ -87,7 +87,8 @@ MV.def('planner/features', ['core/script', 'core/num', 'engine/text/breaker', 'e
   }
 
   // cutFeatures(cut, fx) → CutFeatures (§4.16.7). cut = { key, role, text, emph, impact, t0, t1, lang };
-  // fx = { duration, env|null, grid|null, info (song.info)|null, section (heading-derived)|null, repeatOf, repeats }.
+  // fx = { duration, env|null, grid|null, info (song.info)|null, section (heading-derived)|null, repeatOf, repeats,
+  // sectionStart (DESIGN_2_1 §2.7: the first cut, or its section differs from the previous cut's; planner/plan) }.
   function cutFeatures(cut, fx) {
     const text = cut.text;
     const gs = S.graphemes(text);
@@ -113,9 +114,12 @@ MV.def('planner/features', ['core/script', 'core/num', 'engine/text/breaker', 'e
       beat: beat ? r3(beat) : 0, cells, cps: r3(cells / dur), dur: r3(dur), emph: cut.emph.length > 0,
       energy: r3(N.clamp(energy)), graphemes: gs.length, impact: !!cut.impact, latin: r3(latinShare(gs)), onBeat,
       orients: orientsOf(text, script), pos, repeatOf: fx.repeatOf || null, role: cut.role, script,
-      section: songSection(fx.info, cut.t0) || fx.section || null, units: { glyph: glyphs, line: 1, word: words }, words,
+      section: sectionOf(cut, fx), sectionStart: !!fx.sectionStart, units: { glyph: glyphs, line: 1, word: words }, words,
     };
   }
 
-  return { cutFeatures, sectionOfHeading, songSection, meanLevel, percentile, orientsOf };
+  // The section of a cut: the song.info section at its t0, else the heading above its line, else null.
+  function sectionOf(cut, fx) { return songSection(fx.info, cut.t0) || fx.section || null; }
+
+  return { cutFeatures, sectionOf, sectionOfHeading, songSection, meanLevel, percentile, orientsOf };
 });

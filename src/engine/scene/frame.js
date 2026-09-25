@@ -1,7 +1,7 @@
-/* 文字PVメーカー v2 — original work. frameAt(plan, t) → FrameGraph, scene evaluation and closed-form time lookups (DESIGN §4.19). */
-MV.def('engine/scene/frame', ['core/num', 'core/hash', 'core/noise', 'core/mat', 'core/beats', 'audio/digest',
-  'engine/scene/table', 'engine/scene/behave'],
-(N, H, NZ, MAT, BEATS, DIG, T, BH) => {
+/* 文字PVメーカー v2 — original work. frameAt(plan, t) → FrameGraph, scene evaluation, cameras and rigs, closed-form time lookups (DESIGN §4.19; DESIGN_2_1 §4.4, §4.6). */
+MV.def('engine/scene/frame', ['core/num', 'core/hash', 'core/noise', 'core/mat', 'core/beats', 'core/curve', 'core/shot',
+  'audio/digest', 'engine/scene/table', 'engine/scene/behave', 'engine/scene/shot'],
+(N, H, NZ, MAT, BEATS, CV, SHOT, DIG, T, BH, SS) => {
   'use strict';
 
   // Everything here is a pure function of its arguments. Per-plan indexes are derived data cached by plan identity
@@ -45,7 +45,80 @@ MV.def('engine/scene/frame', ['core/num', 'core/hash', 'core/noise', 'core/mat',
     for (const k of Object.keys(impulses)) impT[k] = Float64Array.from(impulses[k], (x) => x.t);
     const beats = plan.beats ? BEATS.grid(plan.beats) : null;
     const env = plan.env ? envelopeOf(plan.env) : null;
-    return { byA, aSorted, span, cutIndex, seams, impulses, impT, beats, env };
+    return { byA, aSorted, span, cutIndex, seams, impulses, impT, beats, env, rigs: rigIndex(plan) };
+  }
+
+  // --- rigs (DESIGN_2_1 §4.6): the area camera, a pure lookup ------------------------------------------------------
+
+  // Per run: its window, blend and keys as typed arrays (u, ln zoom, x and y in du, roll in radians) with the curve
+  // INTO each key compiled once. A run whose rig is 'none' (or unreadable) has no keys and poses the identity.
+  function rigIndex(plan) {
+    const list = Array.isArray(plan.rigs) ? plan.rigs : [];
+    const W = plan.design ? plan.design.w : 0, Hh = plan.design ? plan.design.h : 0;
+    const runs = list.map((r) => {
+      const rig = SHOT.expandRig(r.rig ? r.rig.v : 'none', {
+        amp: r.rig && r.rig.p && Number.isFinite(r.rig.p.amp) ? r.rig.p.amp : 1,
+        curve: r.curve && r.curve.v !== undefined ? r.curve.v : null });
+      const keys = rig ? rig.keys : [];
+      const n = keys.length;
+      const run = { t0: r.t0, t1: r.t1, n, blend: r.blend && r.blend.t1 > r.blend.t0 ? { t0: r.blend.t0, t1: r.blend.t1 } : null,
+        u: new Float64Array(n), lz: new Float64Array(n), x: new Float64Array(n), y: new Float64Array(n), roll: new Float64Array(n),
+        curve: keys.map((k) => CV.fn(k.curve)) };
+      keys.forEach((k, i) => {
+        run.u[i] = k.u; run.lz[i] = Math.log(k.zoom); run.x[i] = k.x * W; run.y[i] = k.y * Hh; run.roll[i] = k.roll * N.DEG;
+      });
+      return run;
+    });
+    return { runs, t0: Float64Array.from(runs, (r) => r.t0) };
+  }
+
+  const RIG_A = { x: 0, y: 0, zoom: 1, roll: 0 }, RIG_B = { x: 0, y: 0, zoom: 1, roll: 0 };
+
+  // The pose of one run at t into out: keys interpolated in run-normalized time with the curve into each key; zoom in
+  // log space. Held before the first key and after the last; equal u = a jump. Returns out with zoom as ln zoom.
+  function runPose(run, t, out) {
+    out.x = 0; out.y = 0; out.zoom = 0; out.roll = 0;
+    if (run.n === 0) return out;
+    const u = run.t1 > run.t0 ? N.clamp((t - run.t0) / (run.t1 - run.t0)) : 1;
+    let i = 0;
+    while (i < run.n - 1 && run.u[i + 1] <= u) i++;
+    if (i >= run.n - 1 || u <= run.u[0]) {
+      const k = u <= run.u[0] ? 0 : run.n - 1;
+      out.x = run.x[k]; out.y = run.y[k]; out.zoom = run.lz[k]; out.roll = run.roll[k];
+      return out;
+    }
+    const span = run.u[i + 1] - run.u[i];
+    const f = span > 0 ? run.curve[i + 1]((u - run.u[i]) / span) : 1;
+    out.x = run.x[i] + (run.x[i + 1] - run.x[i]) * f;
+    out.y = run.y[i] + (run.y[i + 1] - run.y[i]) * f;
+    out.zoom = run.lz[i] + (run.lz[i + 1] - run.lz[i]) * f;
+    out.roll = run.roll[i] + (run.roll[i + 1] - run.roll[i]) * f;
+    return out;
+  }
+
+  // rigAt(plan, t, out) → out { x, y (du), zoom, roll (radians) }: the rig of the run holding t (binary search on t0;
+  // before the first run the first, after the last the last). Inside a run's blend window (a non-hard seam into it) the
+  // previous run's pose eases into this one's with smoothstep, zoom in log space; the window may start before the run.
+  // Identity without rigs. Pure; the index is cached by plan identity.
+  function rigAt(plan, t, out) {
+    const o = out || { x: 0, y: 0, zoom: 1, roll: 0 };
+    const rx = indexOf(plan).rigs;
+    const runs = rx.runs;
+    if (runs.length === 0) { o.x = 0; o.y = 0; o.zoom = 1; o.roll = 0; return o; }
+    let k = Math.max(0, lastAtOrBefore(rx.t0, t));
+    const next = runs[k + 1];
+    if (next && next.blend && t >= next.blend.t0 && t < next.blend.t1) k++;
+    const run = runs[k];
+    const cur = runPose(run, t, RIG_A);
+    const bl = run.blend;
+    if (k > 0 && bl && t >= bl.t0 && t < bl.t1) {
+      const prev = runPose(runs[k - 1], Math.min(t, runs[k - 1].t1), RIG_B);
+      const w = N.smooth((t - bl.t0) / (bl.t1 - bl.t0)), v = 1 - w;
+      cur.x = prev.x * v + cur.x * w; cur.y = prev.y * v + cur.y * w;
+      cur.zoom = prev.zoom * v + cur.zoom * w; cur.roll = prev.roll * v + cur.roll * w;
+    }
+    o.x = cur.x; o.y = cur.y; o.zoom = Math.exp(cur.zoom); o.roll = cur.roll;
+    return o;
   }
 
   function envelopeOf(e) {
@@ -259,27 +332,87 @@ MV.def('engine/scene/frame', ['core/num', 'core/hash', 'core/noise', 'core/mat',
 
   // --- evaluating a scene -----------------------------------------------------------------------------------------
 
-  // evaluate(scene, tl) → scene.table with the live pose of local time tl solved (reset → behaviours → world).
-  // Pure in (scene, tl): nothing survives from an earlier call.
+  // evaluate(scene, tl) → scene.table with the live pose of local time tl solved (reset → behaviours → world → the
+  // shot's follow lean on the camera, DESIGN_2_1 §4.5.6). Pure in (scene, tl): nothing survives from an earlier call.
   function evaluate(scene, tl) {
     const table = scene.table;
     T.resetLive(table);
     BH.runBehaviours(table.live, scene.behaviours, tl);
     T.solve(table);
+    if (scene.lean) SS.leanInto(scene);
     return table;
   }
 
-  // The camera of an evaluated scene plus the plan's impulses at absolute time t (§4.19.3):
-  // { x, y, zoom, roll, shakeX, shakeY } into `out`.
-  function cameraAt(scene, plan, t, out) {
-    const o = out || { x: 0, y: 0, zoom: 1, roll: 0, shakeX: 0, shakeY: 0 };
+  // --- cameras (§4.19.3; DESIGN_2_1 §4.4) ----------------------------------------------------------------------------
+
+  // cutCamera(scene, out) → out { x, y, zoom, roll, jx, jy, fz }: the camera node of an evaluated scene (lens ∘ shot ∘
+  // lean) before the rig and the impulses; fz = the shot's own zoom at this evaluation (1 without a shot).
+  function cutCamera(scene, out) {
+    const o = out || { x: 0, y: 0, zoom: 1, roll: 0, jx: 0, jy: 0, fz: 1 };
     const P = scene.table.live, c = scene.cam;
+    o.x = P.x[c]; o.y = P.y[c]; o.zoom = P.sx[c]; o.roll = P.rot[c]; o.jx = P.jx[c]; o.jy = P.jy[c];
+    o.fz = scene.shot ? scene.shot.live.zoom : 1;
+    return o;
+  }
+
+  const NO_CUT = Object.freeze({ x: 0, y: 0, zoom: 1, roll: 0, jx: 0, jy: 0, fz: 1 });
+
+  // composeCamera(cut, rig, plan, t, out) → CamPose { x, y, zoom, roll, shakeX, shakeY, fz }: the rig (outer) composed
+  // with a cut camera (inner), then the impulses at absolute time t (§4.4 step 4):
+  //   zoom = Zc · Zr · (1 + PUNCH · punch);  x = Xc + Xr / Zc;  y = Yc + Yr / Zc;  roll = Rc + Rr
+  //   shake = the camera's own jitter + the shake impulse / (framing zoom · Zr)
+  // With roll 0 this is exactly the product of the two view transforms. The impulse shake is kept screen-constant under
+  // the framing zoom (the shot's and the rig's); like the lens deltas it is not rescaled by the lens's own zoom, so a
+  // plan without shots and rigs gives the v2 camera exactly. fz = the framing zoom (shot · rig).
+  function composeCamera(k, r, plan, t, out) {
+    const o = out || { x: 0, y: 0, zoom: 1, roll: 0, shakeX: 0, shakeY: 0, fz: 1 };
     const shake = impulseAt(plan, 'shake', t);
     const punch = impulseAt(plan, 'punch', t);
-    o.x = P.x[c]; o.y = P.y[c]; o.roll = P.rot[c];
-    o.zoom = P.sx[c] * (1 + PUNCH * punch);
-    o.shakeX = P.jx[c] + (shake ? shake * (NZ.noise2(SHAKE_SEED, t * SHAKE_RATE, 0) - 0.5) * SHAKE_DU : 0);
-    o.shakeY = P.jy[c] + (shake ? shake * (NZ.noise2(SHAKE_SEED, t * SHAKE_RATE, 1) - 0.5) * SHAKE_DU : 0);
+    const fz = k.fz * r.zoom;
+    o.x = k.x + r.x / k.zoom; o.y = k.y + r.y / k.zoom; o.roll = k.roll + r.roll;
+    o.zoom = k.zoom * r.zoom * (1 + PUNCH * punch);
+    o.shakeX = k.jx + (shake ? (shake * (NZ.noise2(SHAKE_SEED, t * SHAKE_RATE, 0) - 0.5) * SHAKE_DU) / fz : 0);
+    o.shakeY = k.jy + (shake ? (shake * (NZ.noise2(SHAKE_SEED, t * SHAKE_RATE, 1) - 0.5) * SHAKE_DU) / fz : 0);
+    o.fz = fz;
+    return o;
+  }
+
+  const CUT_TMP = { x: 0, y: 0, zoom: 1, roll: 0, jx: 0, jy: 0, fz: 1 };
+  const RIG_TMP = { x: 0, y: 0, zoom: 1, roll: 0 };
+
+  // cameraAt(scene, plan, t, out) → CamPose: the camera of an evaluated scene composed with the plan's rig and impulses
+  // at absolute time t, { x, y, zoom, roll, shakeX, shakeY, fz } into `out`.
+  function cameraAt(scene, plan, t, out) {
+    return composeCamera(cutCamera(scene, CUT_TMP), rigAt(plan, t, RIG_TMP), plan, t, out);
+  }
+
+  // rigCamera(plan, t, out) → CamPose: the rig plus the impulses, for grounds while no cut is on screen, so the area move
+  // continues through interludes and the ground never jumps.
+  function rigCamera(plan, t, out) {
+    return composeCamera(NO_CUT, rigAt(plan, t, RIG_TMP), plan, t, out);
+  }
+
+  // depthCam(cam, f, out) → CamPose: the camera a photo or video at camera factor f sees (DESIGN_2_1 §11.9.3; the kit
+  // exports it as K.depthCam): x, y, roll and the shakes times f, zoom' = exp(f · ln zoom) (the framing zoom alike).
+  // f = 1 is the camera itself (exactly), f = 0 no camera at all; a factor above 1 is lowered so the zoom stays ≤ 4.
+  const DEPTH_ZOOM_MAX = 4;
+  function depthCam(cam, f, out) {
+    const o = out || { x: 0, y: 0, zoom: 1, roll: 0, shakeX: 0, shakeY: 0, fz: 1 };
+    const fz = cam.fz === undefined ? 1 : cam.fz;
+    if (f === 1) {
+      o.x = cam.x; o.y = cam.y; o.zoom = cam.zoom; o.roll = cam.roll; o.shakeX = cam.shakeX; o.shakeY = cam.shakeY; o.fz = fz;
+      return o;
+    }
+    if (!(f > 0)) {
+      o.x = 0; o.y = 0; o.zoom = 1; o.roll = 0; o.shakeX = 0; o.shakeY = 0; o.fz = 1;
+      return o;
+    }
+    let k = f;
+    if (k > 1 && cam.zoom > 1) k = Math.min(k, Math.log(DEPTH_ZOOM_MAX) / Math.log(cam.zoom));
+    o.x = k * cam.x; o.y = k * cam.y; o.roll = k * cam.roll;
+    o.zoom = Math.exp(k * Math.log(cam.zoom));
+    o.shakeX = k * cam.shakeX; o.shakeY = k * cam.shakeY;
+    o.fz = Math.exp(k * Math.log(fz));
     return o;
   }
 
@@ -325,5 +458,6 @@ MV.def('engine/scene/frame', ['core/num', 'core/hash', 'core/noise', 'core/mat',
     IMPULSE_WINDOW, IMPULSE_TERMS, SHAKE_DU, PUNCH, FILTER_STAGES,
     frameAt, currentCut, evaluate, cameraAt, viewMatrix, impulseAt, beatAt, gridAt, levelAt, tick, noiseAt,
     paletteFor, backdropFill, groundVisible, filterAllowed, segmentAt,
+    rigAt, rigCamera, cutCamera, composeCamera, depthCam, DEPTH_ZOOM_MAX,
   };
 });

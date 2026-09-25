@@ -565,7 +565,7 @@ MV.def('parts/arrange/core', ['parts/kit'], (K) => {
     key: 'edgeBleed',
     label: L('はみ出し', 'Edge bleed'),
     blurb: L('画面の端で切れるほど大きな文字。抜き文字にもなる', 'Text so large the frame edges crop it, optionally knocked out of a solid slab'),
-    tags: ['bold', 'hard'], family: 'big',
+    tags: ['bold', 'hard'], family: 'big', cam: 'none',
     traits: { cells: [1, 12], energy: [0.35, 1], impact: true },
     params: {
       overflow: { type: 'num', min: 1.05, max: 1.8, step: 0.01, unit: 'x', label: L('はみ出し量', 'Overflow'),

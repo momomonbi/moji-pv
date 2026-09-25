@@ -12,6 +12,20 @@ The windows cover entrances, exits, a seam and the texture filter. Two targeted 
    frame, gives the same pixels (what a filter leaves transparent shows the backdrop, never the caller's old pixels).
 5. Blurred glyph sprites: the same grapheme at several em sizes (emphasis, text.scale), rendered by a fresh engine and
    by a fresh engine that first drew the text at another output size or text.scale (±4 %, ±8 %), gives the same pixels.
+6. DESIGN_2_1 camerawork: shots (reading and pushing ones with a follow lean) and rigs on the sample cut: frame N
+   directly equals frame N after 0 … N−1, and the 30- and 60-step runs agree at their shared times. Project v21 (a
+   project with materials: an entrance, a hold and an atmosphere of its own, and shot pins) runs checks 1–3 over the
+   materials' lines.
+7. DESIGN_2_1 §11.8.3 (media, in the built app page with the real AssetStore: tests/www/media_parts.js): a project with
+   a video ground (the VP9 counter of media_gen.js, clock song), a photo frame of the alpha WebM (clock show) and a still
+   photo frame, the automatic camerawork on, in export quality (each frame awaited with mediaReady): frame N of a fresh
+   engine and store equals frame N after 0..N−1 (pixel hashes, and the same source frames), and the 60-fps run equals
+   the 30-fps run at their shared times. The paused preview (the root store, hardware preferred) after a scrub, redrawn
+   until it is exact, shows the export's source frames (MediaFrame.index, seen through the store's frame calls) with
+   pixels within MAE ≤ 2/255. The video ground is at its automatic depth (back: blurred), so its frames come with the
+   blur baked by the store (DESIGN_2_1 §11.4.6): every export frame of it must be baked (MediaFrame.blur > 0), no draw
+   may fall back to the per-frame blur (FrameStats.media.fallback 0), and the paused preview ends on the baked look too.
+   --no-media skips it.
 Registries: the catalog (what ships) and the examples, when the page has them; --parts picks one.
 Google Fonts are blocked (fallback faces).
 Run: PW_EXECUTABLE=/opt/pw-browsers/chromium python3 tests/browser/determinism.py [--parts catalog] [--projects basic,lrc]
@@ -23,9 +37,18 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from contact_sheet import launch, open_lab, csp_violations, japanese_font_missing  # noqa: E402  (lab-page helpers)
+from media_page import open_media_page  # noqa: E402  (the built app page with tests/www/media_parts.js)
 from playwright.async_api import async_playwright  # noqa: E402
 
 WINDOW = (2.6, 4.6)          # seconds: the first lyric cuts, a seam and their filters in the fixture projects
+WINDOWS = {'v21': (13.6, 15.6)}   # v21: line r7 enters with material myMat1, r8 holds with myMat2
+# Presets that keep moving over the sample cut. (pushWord and snapZoom reach the 3× framing limit on its short
+# emphasized word and then hold; settle and driftOff sit at the 0.9 floor on its wide line: neither would show a history
+# leak.)
+CAMERA = (('shot', 'readAlong', {'follow': 0.6}), ('shot', 'tiltHold', {'follow': 0.5}), ('shot', 'sweepAcross', None),
+          ('shot', 'wideHold', {'follow': 0.3}), ('rig', 'climbRise', None), ('rig', 'leanTilt', {'amp': 1.5}))
+CAMERA_STEPS = 30
+CAMERA_PROBES = (7, 19, 29)
 FPS = 30
 PROBES = (7, 31, 59)
 MIXED_TEXT = 'あいあい'
@@ -49,7 +72,7 @@ async def render(page, **o):
 
 
 async def check_project(page, src, project, failures):
-    t0, t1 = WINDOW
+    t0, t1 = WINDOWS.get(project, WINDOW)
     at30 = times_at(FPS, t0, t1)
     at60 = times_at(2 * FPS, t0, t1)
     seq30 = await frames(page, parts=src, project=project, times=at30, fresh=True)
@@ -116,6 +139,78 @@ async def check_mixed_em(page, src, failures):
         'FAIL' if bad else 'ok  ', src, len(MIXED_BLURS) * len(MIXED_BEFORE)))
 
 
+async def sequence(page, **o):
+    return [x['hash'] for x in await page.evaluate('(o) => window.__lab.sequence(o)', o)]
+
+
+async def check_camera(page, src, failures):
+    """Check 6: a camera preset's frame N does not depend on the frames before it; 30 and 60 steps agree."""
+    bad = 0
+    for kind, key, params in CAMERA:
+        base = {'parts': src, 'kind': kind, 'key': key, 'params': params, 'w': 480, 'h': 270, 'quality': 'export'}
+        seq = await sequence(page, steps=[{'u': i / CAMERA_STEPS} for i in range(CAMERA_STEPS)], **base)
+        seq60 = await sequence(page, steps=[{'u': i / (2 * CAMERA_STEPS)} for i in range(2 * CAMERA_STEPS)], **base)
+        where = '%s %s/%s%s' % (src, kind, key, (' ' + repr(params)) if params else '')
+        for n in CAMERA_PROBES:
+            alone = await sequence(page, steps=[{'u': n / CAMERA_STEPS}], **base)
+            if alone[0] != seq[n]:
+                failures.append('%s: step %d alone differs from the same step after 0..%d' % (where, n, n - 1))
+                bad += 1
+        if any(seq60[2 * i] != seq[i] for i in range(CAMERA_STEPS)):
+            failures.append('%s: the 30- and 60-step runs differ at a shared time' % where)
+            bad += 1
+        if len(set(seq)) < 5:
+            failures.append('%s: only %d distinct frames (does the camera move?)' % (where, len(set(seq))))
+            bad += 1
+    print('%s %s: %d camera presets (shots with follow, rigs): frame N alone = after 0..N−1, 30 = 60 steps' % (
+        'FAIL' if bad else 'ok  ', src, len(CAMERA)))
+
+
+MEDIA_MAE = 2 / 255      # the paused preview against the export, mean absolute error per channel
+
+
+async def check_media(browser, failures):
+    """Check 7: photos and videos, in the built app page with the real AssetStore (DESIGN_2_1 §11.8.3)."""
+    mp = await open_media_page(browser)
+    try:
+        r = await mp.page.evaluate('(o) => window.__mediaParts.determinism(o)', {'fps': FPS, 'seconds': 2, 'probes': list(PROBES)})
+        csp = await mp.csp()
+    finally:
+        await mp.close()
+    bad = []
+    if max(r['media']) < 3 or min(r['media']) < 1:
+        bad.append('the media are not all drawn (per frame %d–%d)' % (min(r['media']), max(r['media'])))
+    if r['distinct'] < 5:
+        bad.append('only %d distinct frames in %d (the video does not play?)' % (r['distinct'], r['n']))
+    for x in r['alone']:
+        if not x['same'] or x['index'] != x['seqIndex']:
+            bad.append('frame %d alone differs from the same frame after 0..%d (source frames %r / %r)' % (x['k'], x['k'] - 1, x['index'], x['seqIndex']))
+    if r['rate'] != 'same':
+        bad.append('the 30- and 60-fps runs differ at shared times: %s' % r['rate'])
+    if any(r['fallback']):
+        bad.append('export frames fell back to the per-frame blur: %r' % r['fallback'])
+    if not all(r['videoBaked']):
+        bad.append('export frames of the blurred video ground came without their baked blur: %r' % r['videoBaked'])
+    for x in r['preview']:
+        if not x['first']:
+            bad.append('preview at frame %d: the first frame after the scrub was not provisional (nothing was decoding?)' % x['k'])
+        if x['provisional']:
+            bad.append('preview at frame %d: still provisional after %d redraws' % (x['k'], x['tries']))
+        elif x['index'] != x['exportIndex']:
+            bad.append('preview at frame %d shows source frames %r, the export %r' % (x['k'], x['index'], x['exportIndex']))
+        elif x['mae'] > MEDIA_MAE:
+            bad.append('preview at frame %d: pixels differ from the export by MAE %.4f (> %.4f)' % (x['k'], x['mae'], MEDIA_MAE))
+    if csp:
+        bad.append('CSP violations: %r' % csp[:3])
+    if mp.errors:
+        bad.append('page errors: %r' % mp.errors[:3])
+    failures.extend('media: ' + b for b in bad)
+    print('%s media: video ground + alpha WebM frame + still frame, %d frames at %d fps (%d distinct): alone = in order, 30 = 60 fps; '
+          'the paused preview = the export (source frames %s, MAE ≤ %.4f)' % (
+              'FAIL' if bad else 'ok  ', r['n'], FPS, r['distinct'], [x['index'] == x['exportIndex'] for x in r['preview']],
+              max([x['mae'] for x in r['preview']] or [0])))
+
+
 def sources_of(info, wanted):
     if wanted:
         return [wanted]
@@ -141,11 +236,15 @@ async def run(args):
                     await check_project(page, src, project, failures)
                 await check_prefill(page, src, info, failures)
                 await check_mixed_em(page, src, failures)
+                if src == 'catalog':
+                    await check_camera(page, src, failures)
             violations = await csp_violations(page)
             if violations:
                 failures.append('CSP violations: %r' % violations)
             if page.lab_errors:
                 failures.append('page errors: %r' % page.lab_errors[:10])
+            if args.media:
+                await check_media(browser, failures)
         finally:
             await browser.close()
     for msg in failures:
@@ -157,7 +256,8 @@ async def run(args):
 def main():
     ap = argparse.ArgumentParser(description='Frame determinism on the lab page.')
     ap.add_argument('--parts', default='', help='registry: catalog | examples | stub (default: catalog, then examples)')
-    ap.add_argument('--projects', default='basic,vertical,lrc', help='fixture projects, comma-separated')
+    ap.add_argument('--projects', default='basic,vertical,lrc,v21', help='fixture projects, comma-separated')
+    ap.add_argument('--no-media', dest='media', action='store_false', help='skip check 7 (photos and videos, DESIGN_2_1 §11.8.3)')
     return asyncio.run(run(ap.parse_args()))
 
 

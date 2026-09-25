@@ -121,11 +121,21 @@ MV.def('ui/output', ['export/schedule', 'engine/scene/frame'], (S, F) => {
   const ERROR_KEYS = Object.freeze({
     cancelled: 'err.exp.cancelled', sink: 'err.exp.sink', 'range-empty': 'exp.pre.range-empty',
     'no-webcodecs': 'exp.pre.no-webcodecs', 'no-codec': 'err.exp.codec', codec: 'err.exp.codec', 'no-plan': 'err.exp.noPlan',
+    media: 'err.exp.media',
   });
   function errorKey(code) { return ERROR_KEYS[code] || 'err.exp.encode'; }
 
+  // errorParams(err) → the params of that message: for a photo or video the export could not read
+  // (ExportError('media'), detail { id, name, code }, DESIGN_2_1 §11.4.4), the asset's name ('—' when the library no
+  // longer names it).
+  function errorParams(err) {
+    if (!err || err.code !== 'media') return {};
+    const name = err.detail && typeof err.detail.name === 'string' ? err.detail.name.trim() : '';
+    return { name: name || '—' };
+  }
+
   return {
     FORMATS, BACKDROPS, ERROR_KEYS, formatCmds, backdropCmds, effectiveBackdrop, consistent, skipOf, usedFilters,
-    skippedFilters, checks, withFixes, mergeFonts, errorKey,
+    skippedFilters, checks, withFixes, mergeFonts, errorKey, errorParams,
   };
 });

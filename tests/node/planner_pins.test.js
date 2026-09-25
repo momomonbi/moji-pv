@@ -298,11 +298,18 @@ test('locks: a locked line is immune to seeds, salts, work pins and line pins', 
     const strip = (list) => list.map((x) => ({ key: x.key, seam: x.seam, slots: Object.fromEntries(Object.entries(x.slots)
       .map(([k, d]) => [k, { v: d.v, p: d.p }])) }));
     assert.deepEqual(strip(before), strip(snapshot(p)), name + ': locking changes nothing');
+    // Parameters a rule derives from frozen values are derived again, not frozen (DESIGN_2_1 §3.9 fields: the carry of
+    // cam.shot, §4.5.7; durations scaled by motion.speed, §4.3).
+    const DERIVED = { 'cam.shot': ['carry'], arrive: ['dur', 'each'], depart: ['dur', 'each'], dwell: ['speed'] };
     for (const c of plan(locked).cuts.filter((x) => x.line === line.id)) {
       for (const [slot, d] of Object.entries(c.slots)) {
         assert.equal(d.from, 'pin:cut', name + ' ' + c.key + ' ' + slot);
         assert.equal(d.by, 'lock');
-        for (const k of Object.keys(d.p || {})) assert.equal((d.pfrom || {})[k], 'pin:cut', c.key + ' ' + slot + '.' + k);
+        for (const k of Object.keys(d.p || {})) {
+          const from = (d.pfrom || {})[k];
+          if (from === 'rule') assert.ok((DERIVED[slot] || []).includes(k), c.key + ' ' + slot + '.' + k + ' derived');
+          else assert.equal(from, 'pin:cut', c.key + ' ' + slot + '.' + k);
+        }
       }
     }
     const variants = [
@@ -828,4 +835,115 @@ test('stepped parameters: the kept coercion answers are core/schema.coerce\'s', 
       assert.ok(Object.is(PA.coerceStepped(spec, v), S.coerce(spec, v)), JSON.stringify(spec) + ' ' + String(v));
     }
   }
+});
+
+// --- v2.1 slots (DESIGN_2_1 §2.3, §3.9) --------------------------------------------------------------------------
+
+// Random values for the v2.1 cut slots and the curve params, some of them given raw (unsorted keys, numbers to clamp):
+// the planner coerces them with core/schema, like the inspector and the AI.
+const SHOT_ = MV.use('core/shot');
+const CAM_SPECS = MV.use('planner/camera').SLOT_SPECS;
+function newSlotValue(rng, slot) {
+  const curve = () => rng.pick(['softEnds', 'hushRushHush', 'dashStop', 'expoOut', 'linear', { bz: [0.7, 0, 0.2, 1] },
+    { ramp: { peak: 6, ends: 'both', edge: 0.1 } }, { sp: [[0, 1], [0.5, 3], [1, 0.5]] }]);
+  switch (slot) {
+    case 'motion.speed': return rng.pick([0.25, 0.5, 0.6, 1.5, 2, 4]);
+    case 'cam.shot': return rng.pick(SHOT_.SHOT_KEYS.concat(['none', { follow: 0.3, keys: [{ aim: 'block', at: 'a', fill: 0.5 },
+      { at: 'word:1', aim: 'word:1', curve: 'holdThenDash', fill: 0.9, ox: 0.1 }] }]));
+    case 'cam.zoom': return rng.pick([0.5, 0.8, 1.2, 1.75, 2]);
+    case 'cam.follow': return rng.pick([0, 0.2, 0.55, 1]);
+    case 'rig': return rng.pick(SHOT_.RIG_KEYS.concat(['none', { keys: [{ u: 0, zoom: 1.02 }, { u: 1, zoom: 1.1, roll: 2 }] }]));
+    default: return curve();                                  // cam.curve, rig.curve, arrive.ease/flow, dwell.curve, lens.curve
+  }
+}
+const NEW_SLOTS = ['motion.speed', 'cam.shot', 'cam.zoom', 'cam.curve', 'cam.follow', 'rig', 'rig.curve', 'arrive.ease',
+  'arrive.flow', 'depart.ease', 'dwell.curve', 'lens.curve', 'seam.curve'];
+const CURVE_SPEC = { type: 'curve' };
+function specOf(slot) { return CAM_SPECS[slot] || CURVE_SPEC; }
+
+test('fuzz: random pins of the v2.1 slots and curve parameters are always honoured, with the cut > line > work cascade', () => {
+  let checked = 0;
+  for (const name of ['basic', 'vertical', 'lrc']) {
+    const doc = corpus.project(name).doc;
+    doc.pins = {};
+    doc.locks = {};
+    const base = plan(doc);
+    for (let i = 0; i < 30; i++) {
+      const rng = R.stream('pins-fuzz-v21', name, i);
+      const pinned = clone(doc);
+      const cuts = lyricCuts(base);
+      for (let n = rng.int(3, 10); n > 0; n--) {
+        const slot = rng.pick(NEW_SLOTS);
+        const r = rng.next();
+        const c = rng.pick(cuts);
+        const where = r < 0.4 ? 'cut/' + c.key : r < 0.8 ? 'line/' + rng.pick(base.lines).id : 'work';
+        pinned.pins[where + ':' + slot] = Object.assign({ v: newSlotValue(rng, slot), by: rng.pick(['user', 'ai']) },
+          where.startsWith('cut/') ? { sig: c.text } : {});
+      }
+      const p = plan(pinned);
+      assert.ok(!p.warnings.some((w) => w.code === 'pin-bad-value' || w.code === 'pin-not-applicable'), name + '#' + i);
+      for (const cut of lyricCuts(p)) {
+        const run = p.rigs[cut.rig];
+        const first = p.cuts.find((x) => x.key === run.cuts[0]);
+        for (const slot of NEW_SLOTS) {
+          const at = slot === 'rig.curve' ? first : cut;           // rig.curve is read at the run's first cut
+          const want = expectedAt(pinned.pins, at, slot);
+          if (want === undefined) continue;
+          const where = name + '#' + i + ' ' + cut.key + ' ' + slot;
+          const coerced = S.coerce(specOf(slot), want);
+          let got;
+          if (slot === 'rig') got = run.rig.v;
+          else if (slot === 'rig.curve') got = run.curve.v;
+          else if (CAM_SPECS[slot]) got = cut.slots[slot].v;
+          else if (slot === 'seam.curve') {
+            if (cut.seamIn < 0) continue;                           // a hard cut has no parameters
+            got = p.seams[cut.seamIn].slot.p.curve;
+          } else {
+            const [kind, param] = slot.split('.');
+            got = cut.slots[kind].p[param];
+          }
+          assert.deepEqual(got, coerced, where);
+          checked++;
+        }
+      }
+    }
+  }
+  assert.ok(checked > 1000, 'checked ' + checked);
+});
+
+test('locks freeze motion.speed and the cam.* slots of a line, not its rig; derived parameters stay derived', () => {
+  const doc = clone(corpus.project('basic').doc);
+  doc.pins = { 'work:motion.speed': { v: 0.5, by: 'ai' } };
+  doc.locks = {};
+  const p = plan(doc);
+  const line = p.lines[3];
+  const payload = F.lockPayload(doc, p, line.id, { registry: SYN });
+  for (const key of line.cuts) {
+    const cut = p.cuts.find((c) => c.key === key);
+    for (const s of ['cam.shot', 'cam.zoom', 'cam.curve', 'cam.follow']) {
+      assert.deepEqual(payload.pins['cut/' + key + ':' + s], { v: cut.slots[s].v, by: 'lock', sig: cut.text }, key + ' ' + s);
+    }
+    assert.equal(payload.pins['cut/' + key + ':motion.speed'], undefined, 'a speed that is already a pin is not frozen');
+    for (const path of Object.keys(payload.pins)) assert.ok(!/:(rig|rig\.curve|cam\.shot\.carry)$/.test(path), path);
+    for (const s of ['arrive', 'depart']) {
+      for (const n of ['dur', 'each']) assert.equal(payload.pins['cut/' + key + ':' + s + '.' + n], undefined, key + ' ' + s + '.' + n + ' scaled, not frozen');
+    }
+  }
+  const unpinned = clone(doc);
+  unpinned.pins = {};
+  const pu = plan(unpinned);
+  const pay = F.lockPayload(unpinned, pu, line.id, { registry: SYN });
+  for (const key of line.cuts) assert.deepEqual(pay.pins['cut/' + key + ':motion.speed'], { v: 1, by: 'lock', sig: pu.cuts.find((c) => c.key === key).text });
+  const locked = clone(doc);
+  Object.assign(locked.pins, payload.pins);
+  locked.locks = { [line.id]: { n: 1 } };
+  const q = plan(locked);
+  for (const key of line.cuts) {
+    const a = p.cuts.find((c) => c.key === key), b = q.cuts.find((c) => c.key === key);
+    for (const s of Object.keys(a.slots)) assert.deepEqual([b.slots[s].v, b.slots[s].p], [a.slots[s].v, a.slots[s].p], key + ' ' + s);
+  }
+  // The rig is not frozen: a work rig pin reaches the locked line's run.
+  locked.pins['work:rig'] = { v: 'leanTilt', by: 'user' };
+  const r = plan(locked);
+  for (const key of line.cuts) assert.equal(r.rigs[r.cuts.find((c) => c.key === key).rig].rig.v, 'leanTilt');
 });

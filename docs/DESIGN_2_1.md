@@ -2,14 +2,14 @@
 
 Status: **contract for v2.1**, to be read together with `docs/DESIGN.md` (the v2 build contract). Builders read only
 DESIGN.md and this file. Where this file changes a rule of DESIGN.md it says so, and this file wins. Everything else in
-DESIGN.md stays binding: layers, lint, determinism, budgets and the testing plan.
+DESIGN.md stays binding: clean-room rules, layers, lint, determinism, budgets and the testing plan.
 
 Items marked **FROZEN** change only through the D§9.4 process. This file is itself the D§9.4 change record for v2.1: §9
 lists every FROZEN contract it touches.
 
 Notation:
 - "D§4.16.4" is a section of DESIGN.md. "§4.3" is a section of this file.
-- Paths are relative to `src/` unless they start with a top-level directory.
+- Paths are relative to `src/` unless they start with a top-level directory (`tests/`, `docs/`, `vendor/`) or name a root file (`build.py`).
 
 ---
 
@@ -25,12 +25,23 @@ Notation:
 | カメラワーク / Camerawork (one cut) | **shot** (slot `cam.shot`) | |
 | 区画のカメラ / Section camera | **rig** (slot `rig`) | |
 | 動きの速さ / Motion speed | slot `motion.speed` | |
+| 写真・動画 / Photos and videos | **media**; one file = an **asset** (`AssetId`, `doc.media`) | `image` is taken: node type 4 (`sb.image`) and D§4.20's `AssetStore` |
+| 作品ファイル / Project file (package) | **package** (`.mojipv`) | |
+| Filmora用セット / Set for Filmora | **kit** (`output.format: 'kit'`) | |
 
 **Inputs.** This file merges two proposals:
 - the "camera + curves" proposal (text-aimed camerawork, a unified curve model, automatic camerawork);
 - the "AI sections + materials" proposal (area-scoped AI instructions, recipe-based materials).
 
 §1.4 lists every point where they disagreed and what was decided.
+
+**Later additions** (the owner's requests after §1–§10 were written):
+- §11: images and videos (写真・動画).
+- §12: the single-file project package (`.mojipv`).
+- §13: Filmora support.
+
+Their work is in packages **G** and **H** (§8.7, §8.8), plus marked items in packages A–E. §9 lists the FROZEN contracts
+they touch.
 
 **Code facts this file relies on** (read from the tree, v2 HEAD):
 - `core/registry` `version` hashes only (kind, key, *part* param names). Shared params are not in it.
@@ -41,6 +52,24 @@ Notation:
 - `planner/cast` keys its cast cache by registry identity.
 - `ai/catalog` lists only `registry.pool(...)`, which leaves out `pool: false` parts.
 - `build.py` gives no layer to an unknown `parts/*` module.
+
+**Code facts that §11–§13 rely on** (v2 HEAD):
+- **Images.** `photoPan` (`parts/ground/photo.js`) already draws `sb.image({ asset: p.image, fit: 'cover' })` with a
+  closed-form pan and zoom. `engine/render/shapes.drawImage` calls `assets.get(id)`. `ui/boot` passes `assets: null`,
+  so no image has ever rendered.
+- **Segments.** `planner/tracks.splitSegments` starts a new segment only when the pinned ground or atmos **key**
+  changes. Pinned params are read from the segment's first cut.
+- **Audio and export.** `audio/host/decode` decodes every song at 48 kHz (`DECODE_RATE`). `export/host/mp4.audioConfig`
+  returns `null` when AAC does not encode, and the MP4 is then silent. `export/muxer.MUX_CODECS` already maps `opus`,
+  and the vendored mp4-muxer supports `["aac","opus"]`.
+- **ZIP and sinks.** `export/zip` writes store-only ZIP64, but takes whole `Uint8Array`s only. The sinks accept
+  positional writes.
+- **Storage and routing.** `ui/project_io` opens IndexedDB `mojipv-v2` version 1 with the stores `works` and `songs`.
+  Its `AUDIO_EXT` includes `.webm`, so a WebM video is routed to the song today.
+- **Step budgets.** Step ③ has 5 `[data-ctl]` controls (mood, theme, shape, 詳しく, AI) and step ④ has 5 (format,
+  size, fps, backdrop, 詳しく). Neither can take a new control.
+- **CSP.** `script-src` hashes only (no `'wasm-unsafe-eval'`); `img-src data: blob:`; `media-src blob:`; `worker-src
+  'none'`; `connect-src` only for the two AI hosts.
 
 ---
 
@@ -72,6 +101,17 @@ Notation:
    - Materials are stored in the project, validated, and registered as parts.
    - They show up under マイ素材 in the part browser.
    - The AI can fit a new material into the area it was asked about.
+5. **Your own photos and videos (写真・動画; §11).** Drop images (PNG, JPEG, WebP, AVIF, GIF) or videos (MP4, MOV,
+   WebM) anywhere.
+   - Use them as the background of the whole video, an area, a line or a cut; as a photo frame or cut-out near the
+     words; inside the letters; or as overlay footage.
+   - Controls: fit, crop, Ken Burns motion, blur, veil and tint. For video also: trim, speed, loop and the clock.
+   - Video is frame-exact in export. The AI can place them, and おまかせ can use them when allowed.
+6. **One file holds everything (§12).** The project file `.mojipv` contains the photos, the videos and the song, and it
+   is the default save. The light `.json` save stays.
+7. **Filmora-ready output (§13).** 「Filmora用」 in step ④ writes a set of files into one folder: an MP4, a transparent
+   WebM overlay, a background MP4, a green-screen MP4, SRT subtitles and a how-to. It also adds a standalone transparent
+   video format (WebM with VP9 alpha).
 
 ### 1.2 Principles kept from v2 (all binding)
 
@@ -171,7 +211,8 @@ Notation:
 
 ### 2.1 The saved file (schema 2, FROZEN shape)
 
-The layout is the same as D§3.1, plus `doc.materials`. The keys are shown in serialize order.
+The layout is the same as D§3.1, plus `doc.materials`, `doc.media` (§11.2.2) and the `output` additions of §13.3. The
+keys are shown in serialize order.
 
 ```json
 {
@@ -194,7 +235,9 @@ The layout is the same as D§3.1, plus `doc.materials`. The keys are shown in se
       "line/r7:atmos":        { "v": "myMat3", "by": "ai" },
       "line/r7:avoid":        { "v": ["filter.sliceGlitch"], "by": "ai" },
       "line/r7:rig":          { "v": "climbRise", "by": "ai" },
-      "work:seam.curve":      { "v": "dashStop", "by": "user" }
+      "work:seam.curve":      { "v": "dashStop", "by": "user" },
+      "work:ground":          { "v": "photoPan", "by": "user" },
+      "work:ground@photoPan.image": { "v": "a3f9c2d17b0e4a5c6d7e8f901", "by": "user" }
     },
     "salts": {}, "locks": {}, "filters": {},
     "materials": {
@@ -208,7 +251,14 @@ The layout is the same as D§3.1, plus `doc.materials`. The keys are shown in se
                       "scope": "run", "seed": 7 } }
       ]
     },
-    "output": { "…": "…" }
+    "media": {
+      "list": [
+        { "id": "a3f9c2d17b0e4a5c6d7e8f901", "kind": "video", "name": "海辺.mp4", "mime": "video/mp4", "bytes": 48213344,
+          "w": 1920, "h": 1080, "dur": 12.512, "fps": 29.97, "frames": 375, "rot": 0, "alpha": false, "anim": false,
+          "audio": true, "codec": "avc1.640028", "color": "bt709", "hdr": false, "pv": 1, "pool": false, "ai": null }
+      ]
+    },
+    "output": { "…": "…", "format": "kit", "kit": { "overlay": true, "bg": false, "green": false, "srt": true, "lrc": false } }
   },
   "side": { "looks": { "list": [], "cap": 50 }, "aiLog": [], "asks": {} }
 }
@@ -220,6 +270,11 @@ The layout is the same as D§3.1, plus `doc.materials`. The keys are shown in se
 - The canonical JSON of `doc.materials` is ≤ 160 KB and each recipe is ≤ 6 KB.
 - Ids are `'m' + n.toString(36)` with `n < next` and are **never reused** (like row ids).
 
+**`doc.media`** = `{ list }`: the asset library (§11.2.1–§11.2.2). It holds metadata only; the bytes are in IndexedDB
+and in the `.mojipv` package (§12). There are at most 200 entries, and the ids are content hashes.
+
+**`output`** gains the formats `kit` and `webmAlpha` and the object `output.kit` (§13.3).
+
 **`side.asks`** = `{ [areaKey]: { text, at } }`:
 - These are board drafts (§6.3). They are not undoable.
 - Caps: 40 entries, `text` ≤ 120 characters.
@@ -228,27 +283,32 @@ The layout is the same as D§3.1, plus `doc.materials`. The keys are shown in se
 ### 2.2 Migration and validation
 
 - `core/doc.CURRENT_SCHEMA = 2`.
-- `core/migrate.MIGRATIONS[1] = (file) => ({ ...file, schema: 2, doc: { ...file.doc, materials: { next: 1, list: [] } } })`.
+- `core/migrate.MIGRATIONS[1] = (file) => ({ ...file, schema: 2, doc: { ...file.doc, materials: { next: 1, list: [] },
+  media: { list: [] } } })`. `doc.media` is part of schema 2, so there is no schema 3 (§11.2.2).
   - It is pure and touches nothing else.
   - Schema-1 files and autosaves open unchanged, and so does every existing pin.
   - Files with schema > 2 are refused as today (「新しいバージョンで作られた作品です」). v2.0 refuses schema-2 files the
     same way, which is intended.
 - `core/doc` additions:
-  - `ORDER.doc` puts `materials` between `filters` and `output`.
+  - `ORDER.doc` puts `materials` and then `media` between `filters` and `output`. `ORDER.media`, `ORDER.asset` and
+    `ORDER.assetAi` are given in §11.2.2. `ORDER.output` adds `'kit'` and `ORDER.kit` is new (§13.3).
   - `ORDER.materials = ['next', 'list']`.
   - `ORDER.material = ['id','kind','by','name','blurb','tags','season','pool','rv','recipe']`.
   - `ORDER.side` adds `'asks'`.
   - Recipes are serialized with sorted keys (they are stored normalized, §5.7).
   - `defaultDoc().materials = { next: 1, list: [] }` and `meta.app = '2.1.0'`.
-  - `normalize` fills a missing `materials`. `sanitizeSide` keeps a valid `asks` and drops anything else.
+  - `normalize` fills a missing `materials`, `media` and `output.kit`. `sanitizeSide` keeps a valid `asks` and drops
+    anything else.
 - `validate(doc)` adds **structural** checks only:
   - `materials` is an object, `next` is an integer ≥ 1, and ids match `^m[0-9a-z]+$`, are unique and are < `next`;
   - `kind ∈ MAT_KINDS`, `by ∈ ai|user`, `name.ja` is non-empty, `recipe` is an object;
-  - the size caps hold.
+  - the size caps hold;
+  - every `doc.media` entry passes `core/media.entryProblems`, the ids are unique, and the caps hold (§11.2.2);
+  - `output.format` is one of the §13.3 values, and `output.kit` holds 5 booleans.
 
   Recipe semantics are **not** checked here. A recipe that `core/recipe` rejects (for example one from a newer `rv`) keeps
   the file openable. The registry skips it, and the planner warns `material-bad` (§5.9).
-- `touched(a, b)` gains `materials: a.materials !== b.materials`.
+- `touched(a, b)` gains `materials: a.materials !== b.materials` and `media: a.media !== b.media`.
 
 ### 2.3 New and changed slots
 
@@ -364,6 +424,9 @@ Modules that must learn the new names are listed in §3. In short:
 
 The reducers stay pure. `material.*` reducers call only `core/recipe`, which is L0.
 
+**Media commands** (`media.put`, `media.meta`, `media.move`, `media.remove`, `media.relink`) are in §11.2.5.
+`output.set` accepts the key `kit` (§13.3).
+
 ### 2.7 Plan additions (`plan.v` 1 → 2; FROZEN shape, additive)
 
 ```json
@@ -398,10 +461,12 @@ The reducers stay pure. `material.*` reducers call only `core/recipe`, which is 
   static ground rasters (§4.8).
 - `feat.sectionStart` (additive to D§4.16.7) is `true` for the first cut and for every cut whose `feat.section` differs
   from the previous cut's in time order.
+- `media` = `{ [AssetId]: MediaMeta }` for every asset the decisions use (§11.2.6). It is covered by the plan hash, and
+  scenes read it at build.
 
 **Fingerprints and hash** (D§3.12 amended):
 - The cut `fp` covers `slots` (all new slots and `p.carry` included) and, new, `matTerms` = sorted
-  `[[slot, key, rhash]]` of the chosen parts whose def has `mine` (§5.9).
+  `[[slot, key, rhash]]` of the chosen parts whose def has `mine` (§5.9), plus `mediaTerms` (§11.2.6).
 - The shared look term uses `registry.baseVersion` instead of `registry.version`.
 - `cut.rig` and `rigs` are **not** in any `fp`, because scenes never read the rig. They are in the plan hash
   (`encode.cutPieces` prints `rig` next to `ground`; `planHash` covers `rigs`).
@@ -437,6 +502,9 @@ The reducers stay pure. `material.*` reducers call only `core/recipe`, which is 
 
 **Rule names:** `carry`, `speed`, `gentle`, `none-camera` (amount < 0.1), `role`.
 
+**Media codes:** the warnings `media-missing` and `media-kind`, and the why codes `media.pool` and `media.pin`
+(§11.2.6).
+
 ---
 
 ## 3. Modules and interfaces
@@ -458,6 +526,9 @@ The code blocks below are the exact public exports. **FROZEN** marks interfaces 
 - The facade (L5) composes the effective registry with `parts/mix` (L3).
 - Lint rules of D§2.4 apply unchanged. `parts/mix` is not a part file, so it follows the L0–L5 rules. It must not keep
   module-level mutable state except the documented memo caches (`WeakMap`s).
+- The media, package and Filmora modules (`core/media`, `core/sha256`, `media/*` L1, `media/host/*` L6,
+  `export/webm|unzip|package|subtitles`, `export/host/webm|kit`, `ui/media_*`, `ui/filmora_help`) and the new
+  `build.py.layer_of` rules are in §11.3.1.
 
 ### 3.2 `core/curve` (new, L0; FROZEN)
 
@@ -539,7 +610,7 @@ validator cannot drift apart (§5.10).
 
 ### 3.5 `core/schema` (D§4.2 additions; FROZEN)
 
-- `TYPES` gains `'curve'`, `'shot'`, `'rig'` and `'partRefs'`.
+- `TYPES` gains `'curve'`, `'shot'`, `'rig'` and `'partRefs'`, and `'media'` (package A.3; §11.2.3).
 - `coerce` delegates to `CV.coerce`, `SHOT.coerceShot` and `SHOT.coerceRig`. For `partRefs` it checks the format,
   sorts, dedupes and caps the list at 24.
 - `baseValue`: curve `'linear'`, shot `'none'`, rig `'none'`, partRefs `[]`.
@@ -567,8 +638,9 @@ validator cannot drift apart (§5.10).
   - arrange `cam: 'any' | 'gentle' | 'none'` (default `'any'`);
   - `mine: object`, allowed only on defs added through `extend`.
 - **Key rule:**
-  - `createRegistry` refuses keys starting with `myMat`.
-  - `extend` accepts only keys matching `^myMat[0-9a-z]+$`, which also satisfy KEY and PARTKEY.
+  - `createRegistry` refuses keys starting with `myMat` or `myMed`.
+  - `extend` accepts only keys matching `^myMat[0-9a-z]+$` (materials) or `^myMed[0-9a-f]{10}$` (the user's media
+    offered to おまかせ, §11.5.9). Both also satisfy KEY and PARTKEY.
 - **`extend(base, defs, { strict = false } = {}) → Registry`:**
   - It validates only `defs`, with `checkDef` plus the key rule and a required `mine`.
   - It reuses the base maps and never mutates `base`. An invalid def is skipped and listed in `problems`.
@@ -580,8 +652,8 @@ validator cannot drift apart (§5.10).
   version,                    // hashJSON([baseVersion, [kind, key, sorted part param names, metaHash] per added def])
                               // metaHash = hashJSON of what the planner reads: tags, season, weight, traits, pool, family,
                               // gate, scope, follow, frames, cam, param specs (without functions)
-  extra,                      // frozen { [key]: def.mine }
-  mine(kind) → string[],      // material keys of a kind, sorted
+  extra,                      // frozen { [key]: def.mine }; media-derived defs have mine.media = true (§11.5.9)
+  mine(kind) → string[],      // material and media keys of a kind, sorted
   ```
 
   A base registry gets `base = null`, `baseVersion = version`, `extra = {}` and `mine = () => []`, which is additive.
@@ -740,6 +812,8 @@ engine.thumb({ kind: 'shot' | 'rig', key }, surface, opts)   // canned sample cu
 - `fork()` keeps `current`, so export renders with the same parts.
 - The thumbnail renderer uses `current`.
 - `samplePlan` accepts the shot and rig kinds and material keys.
+- Media additions (B.3): `mediaAt`, `mediaReady`, `fork({ assets })`, `FrameStats.media`, the `layers: 'ground'`
+  render option and `EngineError('media-not-ready')`. They are in §11.3.7.
 
 ### 3.11 Kit and parts (L3/L4; owned by package B)
 
@@ -790,7 +864,8 @@ MV.def('parts/mix', ['core/num', 'core/hash', 'core/rng', 'core/noise', 'core/cu
   'parts/kit', 'engine/scene/behave'], (…) => ({
   SHAPE_LIB,                           // frozen unit ShapeSpecs per SHAPES name (made once at module level)
   derive(entry, base) → { def | null, problems },          // §5.9.1
-  registryFor(base, materials) → Registry,                 // §5.9.2; base itself when materials is absent or its list empty
+  registryFor(base, materials, media?) → Registry,         // §5.9.2; base itself when both lists are absent or empty;
+                                                           // media = doc.media: derived myMed grounds (§11.5.9)
   materialHash(entry) → 'xxxxxxxx',                        // hashJSON of the whole normalized entry (stale checks)
   sampleDefs() → def[],                                    // one composite material per COMPOSITE_KIND, plus one run ornament
                                                            // (conformance, lab); keys 'myMatS…', never in a registry
@@ -798,7 +873,7 @@ MV.def('parts/mix', ['core/num', 'core/hash', 'core/rng', 'core/noise', 'core/cu
 ```
 
 **A's stub** exports the same names:
-- `registryFor(base) → base`;
+- `registryFor(base) → base` (any arguments);
 - `derive → { def: null, problems: [] }`;
 - `materialHash → '00000000'`;
 - `sampleDefs → []`.
@@ -835,6 +910,7 @@ MV.def('parts/mix', ['core/num', 'core/hash', 'core/rng', 'core/noise', 'core/cu
 | `ui/lyric_editor` | the heading gutter click also sets `sel.area` |
 | `ui/boot` | `app.reg` becomes a getter over `engine.registry`; `createT` receives `() => app.reg` |
 | `ui/style.css` | styles for the new controls |
+| media, package and Filmora UI | packages G and H: `ui/media_io`, `ui/media_page`, `ui/media_widgets`, `ui/filmora_help`, and the handover edits of §8.7–§8.8 (§11.7, §12.7, §13.10) |
 
 ---
 
@@ -1006,7 +1082,7 @@ Given a key with aim box `B = {x, y, w, h}`, its centre `c`, frame centre `C = (
 5. **Bleed-safe clamp:**
    `|X| ≤ LX(Z) = W · min over k ∈ {0.5, 1.2} of (0.6 − 0.5 / (1 + (Z − 1)·k)) / k`, and the same for `Y` with `H`.
    - 0.6 = the 0.5 half frame plus 0.1 of the 0.15 ground/particle bleed. 0.05 is left for the rig and lens.
-   - At Z = 1 this allows ±0.083 W; at Z = 1.5 it allows ±0.28 W.
+   - At Z = 1 this allows ±0.083 W; at Z = 1.5 it allows ±0.24 W (the k = 1.2 term is the smaller one).
 
 **Interpolation between keys i → j**, for `t ∈ [t_i, t_j)`:
 ```
@@ -2213,6 +2289,11 @@ The en page shows no Japanese except the product name and user data, such as mat
    `(doc, base registry)`.
 5. **Scene seeds.** `slotSeed` hashes object values with `hashJSON`, so a custom shot seeds the same everywhere.
 6. **Export** uses `engine.fork()`, which keeps the effective registry. Frame times are unchanged (D§4.21).
+7. **Media** (§11.5.11):
+   - media time is closed-form in `t`;
+   - the source frame is chosen by pure arithmetic;
+   - export draws exact frames only;
+   - still tiers are fixed per scene and output scale.
 
 ### 7.2 Performance (against D§7.4)
 
@@ -2230,6 +2311,7 @@ The en page shows no Japanese except the product name and user data, such as mat
 | Draw | ≤ 400 particles guaranteed by `mixShare`; filter stacks ≤ 6 passes; the adaptive preview is unchanged; export never degrades |
 | Static ground raster | ×1.25 only for `zoomed` segments; still ≤ the 24 MB cap at 1080p; 4K draws live (existing rule) |
 | `direct` request build and validation | O(area lines), < 2 ms for 100 lines; prompt ≈ 1.5–5 k tokens (primitives text only with materials allowed) |
+| Media (drawing, decoding, import, export overhead) | §11.5.12 |
 
 ### 7.3 Node tests (`tests/node`)
 
@@ -2264,6 +2346,8 @@ The en page shows no Japanese except the product name and user data, such as mat
 | `ui_layout.py` (+) | F | curve widget, keyframe editor, board and material page fit 288–352 px; control budgets unchanged; nothing covers the preview |
 | `csp.py`, `i18n_pages.py` (+) | F | the new flows cause no CSP violations; the en page has no Japanese UI text (material names excepted) |
 
+Tests of the later additions: media §11.8, package §12.8, Filmora §13.12.
+
 ### 7.5 Goldens
 
 Goldens land in two steps. Only the lead regenerates them (`tests/update_golden.js`).
@@ -2280,6 +2364,13 @@ Goldens land in two steps. Only the lead regenerates them (`tests/update_golden.
 - Tune the §4.7 constants if needed, then regenerate `frame_hashes.json` on purpose. The NOTES entry lists the tuned
   values.
 
+**Step (c): media parts** (after G.3 lands `photoFrame`, `textFill` and `mediaLayer`).
+- The base registry's version changes, so every plan hash changes. Regenerate `plan_hashes.json`.
+- The frame op hashes of fixtures without media must stay equal, which is asserted first. `photoPan` is pool-only, so no
+  automatic choice changes.
+- New goldens: `project_media.json` (the A.3 fixture), which holds a still background, a `photoFrame`, a `textFill` and a
+  video background. It renders with `fake_media.js`, and its op hashes include media times (§11.3.7).
+
 ---
 
 ## 8. Work packages
@@ -2291,15 +2382,30 @@ A (contracts) ──► B (engine) ──┐
             ├──► D (planner) ──┼──► integration: goldens (a), (b), visual QA
             ├──► E (AI) ───────┤
             └──► F (UI; starts on A, consumes B–E interfaces as they land) ──┘
+
+Media, package, Filmora (§11–§13):
+A.3 (media contracts) ──► G.1 (pure media + host decode/store + IndexedDB + package) ──┐
+                     ├──► B.3 (engine media hooks, `layers` option) + B.4 (AAC → Opus) ──┼──► G.3 (parts) ──► G.4 (UI, after F)
+                     ├──► C, D, E media items (§8.3–§8.5) ─────────────────────────────┘
+                     └──► H.1 (WebM writer, subtitles: pure; any time after A.3)
+G.1 + B.3 + B.4 ──► H.2 (WebM alpha, kit, sinks) ──► H.3 (step ④ UI, after G.4) ──► integration: goldens (c), Filmora check
 ```
 
 **Shared-file rules:**
 - `docs/NOTES.md` is append-only. Each package appends one `## v2.1-<letter>` section.
 - `tests/golden/*` is regenerated by the lead only.
-- `i18n/strings.js` is written by **A** (every key of §6.11). After A lands, it passes to **F**. Other packages request
-  additions under "strings wanted" in NOTES.
+- `i18n/strings.js` is written by **A**: every key of §6.11, and the keys of §11.7.11, §12.7 and §13.10 (all in A.1).
+  After A.1 lands, it passes to **F**. Other packages request additions under "strings wanted" in NOTES.
 - Files that A touches for compatibility and that belong to other packages later (`ui/fields.js`, `ui/widgets.js`,
   `parts/mix.js`) are handed over only after A has merged. Ownership never overlaps in time.
+- **Handovers for §11–§13** (each happens only after the previous owner has merged):
+  - F's UI files (`ui/fields.js`, `widgets.js`, `inspector.js`, `part_browser.js`, `stage.js`, `boot.js`, `palette.js`)
+    go to G for G.4.
+  - `ui/menus.js` goes to G (G.4), then to H (H.3, the SRT item only).
+  - `export/host/mp4.js`, `export/host/png.js` and `export/schedule.js` go from B (B.3, B.4) to H (H.2).
+  - `export/zip.js` goes from G (G.1, `addBlob`) to H (read-only use).
+  - `ai/direct.js` and `ai/recipe.js` stay with E, which implements their media fields from §11.6.
+- Every PR ends with the clean-room line of D§1.4.
 
 ### 8.1 Package A — shared contracts: curves, shots, recipes, areas, data model, migration (≈ 2,400 LOC incl. tests)
 
@@ -2329,6 +2435,29 @@ A (contracts) ──► B (engine) ──┐
 **Early drop.** A.1 lands first: curve, shot, schema, registry SHARED, doc, migrate, commands, areas, stub, strings.
 A.2 follows: `core/recipe` complete. B, D and F start on A.1; C and E need A.2.
 
+**Media additions (§11–§13; ≈ +700 LOC incl. tests):**
+- **In A.1,** so that schema 2 ships once:
+  - `doc.media` (default, `ORDER`, `normalize`, structural `validate`, `touched`) and the `MIGRATIONS[1]` line (§11.2.2);
+  - `output.format` `kit` and `webmAlpha`, and `output.kit` (§13.3);
+  - every string of §11.7.11, §12.7 and §13.10, written together with the §6.11 keys, because `strings.js` passes to F
+    after A.1.
+- **A.3** (after A.2; G and the media items of B–E start on it):
+  - new `src/core/media.js` (§11.3.2);
+  - `core/schema` type `media` (§11.2.3);
+  - `core/commands` `media.put`, `media.meta`, `media.move`, `media.remove`, `media.relink`, and `output.set kit`
+    (§11.2.5, §13.3);
+  - `core/registry` key rule `myMed` (§3.6);
+  - `core/recipe` layer `prim: 'media'` with its limits and cost (§11.5.8);
+  - `core/types` typedefs for AssetEntry, MediaMeta, TimeSpec, FitRect, AssetStore and MediaFrame;
+  - tests `media_core.test.js`, `media_doc.test.js` and additions to `schema`, `registry`, `commands`, `doc`,
+    `recipe` and `i18n`;
+  - fixture `tests/fixtures/project_media.json` (schema 2: four assets (a PNG with alpha, a JPEG, an MP4, a WebM with
+    alpha), `photoPan` and `photoFrame` pins, one pooled asset, `output.kit`).
+- **Acceptance:**
+  - schema-1 fixtures migrate with `media: { list: [] }`, and their pins are byte-identical;
+  - every media reducer is undo-exact over 500 random sequences;
+  - `i18n.test.js` covers every new key.
+
 ### 8.2 Package B — engine: shots, rigs, curve application, renderer, facade, kit, lens and arrange metadata (≈ 1,600 LOC)
 
 **Files owned:**
@@ -2352,6 +2481,46 @@ A.2 follows: `core/recipe` complete. B, D and F start on A.1; C and E need A.2.
 - Export parity holds (determinism.py).
 - The lab renders every shot preset in 7 aspects.
 
+**B.3 — media engine hooks (§11.3.7; after A.3; ≈ +900 LOC incl. tests):**
+- **Files:**
+  - `engine/scene/builder.js` (`sb.media`) and `build.js` (`svc.media`, `env.media`, `scene.media`);
+  - `engine/render/shapes.js` (`drawMedia`), `draw.js`, `renderer.js` (`dc.t`, `dc.backdrop`, `layers: 'ground'`,
+    `mediaAt`, `FrameStats.media`) and `record.js` (media ops);
+  - `engine/facade.js` (`mediaAt`, `mediaReady`, `fork({ assets })`, the export exactness throw, poster-only thumbs);
+  - `parts/kit.js` (`K.media`, `K.mediaParams`, `K.MEDIA`, `runKenBurns`);
+  - `export/host/mp4.js` and `export/host/png.js`: the frame loops await `e.mediaReady(t)`. B owns these files through
+    B.4, then hands them to H;
+  - `ui/lab.js` (`#media:` mode);
+  - new `tests/helpers/fake_media.js`: an AssetStore with synthetic stills (coloured checkerboards), synthetic sample
+    tables (any fps, VFR) and a sample index in `MediaFrame.index`, so op hashes show the chosen source frame;
+  - new `tests/node/media_engine.test.js`; `parts_gallery.py` media mode.
+- **Interfaces used:** A.3 `core/media`.
+- **Interfaces provided:** §11.3.6 (the AssetStore contract), §11.3.7, §11.5.1–§11.5.6.
+- **Acceptance:**
+  - `media_engine.test.js` passes;
+  - frame op hashes of the fixtures without media are unchanged;
+  - `mediaAt` costs ≤ 0.05 ms on project_long;
+  - the export exactness throw is covered.
+
+**B.4 — the MP4 must not be silent without AAC (§13.4; ≈ 80 LOC plus tests):**
+- **Files:** `export/host/mp4.js` and `export/schedule.js`, owned by B for this item only and handed to H afterwards;
+  `tests/node/export_math.test.js` (+); `tests/browser/export_check.py` (+).
+- **Change:** `audioConfig` tries AAC-LC (`mp4a.40.2`, 192 kbps), then Opus (`{ codec: 'opus', sampleRate, numberOfChannels: 2,
+  bitrate: 160000 }`, where `sampleRate` is the song buffer's rate). Songs are always decoded at 48 kHz
+  (`audio/host/decode.DECODE_RATE`), so that rate is 48000 and no resampling is needed; a buffer at another rate is never
+  fed at the wrong speed.
+  - `muxCodec('opus') → 'opus'`, which mp4-muxer supports (its `Opus` sample entry with `dOps`).
+  - `probe()` returns `audioCodec: 'mp4a.40.2' | 'opus' | null`. `Result.audioCodec` is added.
+  - `preflight` adds `opus-audio` (info) when the MP4 has sound and the codec is Opus. `no-audio-codec` is reported only
+    when neither codec encodes.
+  - Step ④ shows the note through the existing preflight list, with the string `exp.pre.opus-audio` (A.3). No step ④
+    code changes.
+  - `codecs.audioList` (tests only) overrides the order.
+- **Test** (`export_check.py` and `export_math.test.js`; the §13.12 row):
+  - with AAC unavailable (forced, and by default on local Chromium), the export has an Opus track;
+  - `decodeAudioData` of the MP4 lasts N / fps ± 25 ms and is not silent;
+  - the preflight shows `opus-audio`.
+
 ### 8.3 Package C — materials runtime (≈ 1,500 LOC)
 
 **Files owned:** `src/parts/mix.js` (replaces A's stub); `tests/node/mix.test.js`; `tests/browser/materials_gallery.py`.
@@ -2369,6 +2538,14 @@ A.2 follows: `core/recipe` complete. B, D and F start on A.1; C and E need A.2.
 - `materials_gallery.py` passes.
 - A cherry-petal run-ornament recipe (the §2.1 example completed) renders ≤ 1.5 ms static cost at 720p.
 - `registryFor` with 64 materials takes ≤ 3 ms.
+
+**Media additions (§11.5.8–§11.5.9; after A.3; ≈ +250 LOC):**
+- `registryFor(base, materials, media)`: the derived `myMed` grounds for pooled assets, in the same `REG.extend` call,
+  with the memo keyed by both lists.
+- The interpreter of `prim: 'media'` layers through `K.media` when the kit exports it; otherwise the layer is skipped.
+- `mine.media` lists the asset ids of a material.
+- **Tests:** `mix.test.js` (+).
+- **Acceptance:** `registryFor` with 64 materials and 200 assets (20 pooled) takes ≤ 4 ms.
 
 ### 8.4 Package D — planner: automatic camerawork, motion speed, line season and avoid, material fingerprints (≈ 1,500 LOC)
 
@@ -2390,6 +2567,15 @@ A.2 follows: `core/recipe` complete. B, D and F start on A.1; C and E need A.2.
 - `plan()` of project_long: ≤ 10 ms cold, re-plan ≤ 5 ms warm.
 - Explain agrees with the plan for 500 random new-slot paths.
 
+**Media additions (§11.2.6, §11.5.9; after A.3; ≈ +300 LOC):**
+- `plan.media`; `mediaTerms` in the cut `fp` and in `groundFp`.
+- `splitSegments` breaks on a changed media source.
+- Media param resolution with the `media-missing` and `media-kind` warnings.
+- The derived-media rules: never for segments < 3 s or for `title`; why `media.pool`.
+- `explain` and `fields` for media params (`why.media.pin`).
+- **Tests:** `planner_media.test.js`.
+- **Acceptance:** documents without media keep every plan value except the registry-version terms (goldens step (c)).
+
 ### 8.5 Package E — AI: direct tool, recipe AI, catalog, changes (≈ 1,700 LOC)
 
 **Files owned:**
@@ -2410,6 +2596,15 @@ A.2 follows: `core/recipe` complete. B, D and F start on A.1; C and E need A.2.
 - Its tests pass. Every mapping row is covered.
 - One review applies as one undo step. Selective revert works per path and per material.
 - The existing `ai_*` tests stay green.
+
+**Media additions (§11.6; after A.3; ≈ +450 LOC):**
+- `ai/direct`: the `media` schema variant, the `[media]` list, the system paragraph and the mapping rows.
+- `ai/recipe`: `AI_LAYER.media`.
+- New `src/ai/vision.js`: `visionRequest`, `visionChanges` and `VISION_SCHEMA`.
+- `ai/changes`: the Change kind `media` (→ `media.meta`), with revert.
+- **Tests:** `ai_direct.test.js` (+), new `ai_vision.test.js`, and the portability list (+).
+- **Acceptance:** every media mapping row is covered, and no request carries pixels except `visionRequest`'s image
+  parts.
 
 ### 8.6 Package F — UI (≈ 2,600 LOC + CSS)
 
@@ -2435,7 +2630,75 @@ Until B, D and E land, F uses `fake_engine.js` extensions and faked AI answers.
 - Every §7.4 flow passes, mouse and keyboard-only.
 - 0 CSP violations. axe-core has no serious findings on the new pages.
 
-### 8.7 Integration (lead, not a package)
+**Media note:** F builds no media UI. After F merges, the files listed in the handover rule pass to G (G.4) for the
+edits of §11.7. F keeps the ownership of `i18n/strings.js` from A, and adds the string requests of G and H under
+"strings wanted".
+
+### 8.7 Package G — images and videos, the project package (≈ 7,000 LOC incl. tests; 2 engineers: G-runtime, G-UI)
+
+**Files owned:**
+
+| Drop | Kind | Files |
+|---|---|---|
+| **G.1** (after A.3) | New | `src/core/sha256.js`; `src/media/{sniff,isobmff,matroska,samples,palette}.js`; `src/media/host/{probe,session,store}.js`; `src/export/unzip.js`, `src/export/package.js`; `tests/helpers/{media_gen,exif_write}.js`; `tests/fixtures/media/*` (with `MAKE.txt`); `tests/node/{sha256,media_demux,media_samples,media_palette,unzip,package}.test.js`; `tests/browser/{media_import,package_io}.py` (a test page assembled like `export_check.py`; the preview-frame check of `package_io.py` is enabled in G.3) |
+| G.1 | Changed | `src/export/zip.js` (`addBlob`, `Blob` parts); `src/export/host/sink.js` (`write` accepts `Blob`; shared with H after G.1); `src/ui/project_io.js` (IndexedDB v2 stores, `putMedia`/`getMedia`/…, prune, persist, `clearDevice`, `savePackage`, `saveLight`, `openPackage`, sniff-based routing); `build.py` (`media/` → L1, `media/host/` → L6, `l1_group`); `tests/node/zip.test.js` (+); `tests/build_test.py` (+ layer rules) |
+| **G.3** (after B.3) | Changed / New | `src/parts/ground/photo.js` (`photoPan` upgraded); new `src/parts/ornament/media.js`; `tests/browser/{media_exact,media_alpha}.py`; `determinism.py`, `perf.py`, `transparent_check.py` (+ media); inputs for goldens step (c) (the lead regenerates) |
+| **G.4** (after F merges) | New | `src/ui/media_io.js`, `src/ui/media_page.js`, `src/ui/media_widgets.js`; `tests/node/ui_media.test.js` |
+| G.4 | Changed (handover) | `src/ui/fields.js` (`media` and `trim` widgets, `sec.media`, the element page rows, `when` for the video rows), `widgets.js`, `inspector.js` (asset page, picker sub-pages), `part_browser.js` (`media` tab; derived keys hidden), `stage.js` (drop target, crop overlay, want/ready, placeholder), `boot.js` (media store → engine; `app.media`), `palette.js` (`>写真` actions), `menus.js` (≡ › ファイル, §12.7), `step_look.js` (hint text only), `style.css`; browser `ui_flows.py`, `ui_layout.py`, `csp.py`, `i18n_pages.py` (+) |
+
+**Interfaces used:**
+- A.3: `core/media`, the type `media`, `media.*` commands, and the strings.
+- B.3: `sb.media`, `K.media`, `K.mediaParams`, the facade media members, `fake_media.js`.
+- C: `registryFor(…, media)`, needed for おまかせ; before C, pooled assets are simply not offered.
+- D: `plan.media`; before D, G's tests build plans by hand.
+- E: `visionRequest` and the direct media field; the UI hides them until E lands.
+- H.1: `export/webm`, used by the WebM fixtures and the round-trip tests. H.1 is small and pure, and lands before
+  G.1's WebM tests.
+
+**Interfaces provided:** §11.3.3–§11.3.6 (the real AssetStore), §11.4, §11.7, §12.
+
+**Acceptance:**
+- Every §11.8 and §12.8 test is green.
+- **`media_exact.py`:** every output frame shows the expected source frame at 24, 30 and 60 fps, for VP9 MP4, WebM,
+  H.264 (Chrome CI) and VFR.
+- `determinism.py` with media passes.
+- The perf rows of §11.5.12 are met on the reference laptop, and the measured figures are in NOTES.
+- A package round trip with a PNG, a WebM, an MP4 and a WAV is byte-exact.
+- A corrupted package opens with the damaged asset missing.
+- v2.0 `.json` files open.
+- 0 CSP violations.
+- The top-level control budgets are unchanged.
+
+### 8.8 Package H — editor-ready output: transparent WebM, the Filmora kit, subtitles (≈ 2,800 LOC incl. tests)
+
+**Files owned:**
+
+| Drop | Kind | Files |
+|---|---|---|
+| **H.1** (after A.3) | New | `src/export/webm.js`, `src/export/subtitles.js`; `tests/node/{webm,subtitles}.test.js` |
+| **H.2** (after G.1, B.3, B.4) | New | `src/export/host/webm.js`, `src/export/host/kit.js`; `tests/browser/{webm_check,kit_check}.py` |
+| H.2 | Changed | `src/export/host/mp4.js` (after B.4: the `layers` and backdrop options through `openJob`, reuse by the kit), `src/export/schedule.js` (after B.4: `pickVp9`, `kitFiles`, the §13.10 preflight codes, `FORMATS`, `backdropFor`), `src/export/host/sink.js` (`openDirectory`, `createDirSink`), `src/audio/wav.js` (`encodePcm16`), `src/ui/project_io.js` → `lrcText` delegates to `export/subtitles.lrc` (after G.1); `tests/node/export_math.test.js` (+) |
+| **H.3** (after G.4) | New | `src/ui/filmora_help.js`; `docs/FILMORA.md` |
+| H.3 | Changed | `src/ui/output.js` (`FORMATS`, the coupling rules of §13.3), `src/ui/step_export.js` (the 形式 control, the kit contents, summary, done state, guide link), `src/ui/menus.js` (`file.saveSrt`); browser `ui_flows.py`, `ui_layout.py`, `csp.py` (+) |
+
+**Interfaces used:**
+- A: `output` additions, strings.
+- B.3: `layers: 'ground'`, `mediaReady`, `fork({ assets })`.
+- B.4: `audioConfig` and `probe` with Opus.
+- G.1: `addBlob`, `Blob` sinks, `media/matroska` (the round trip test).
+
+**Interfaces provided:** §13.3–§13.11 (`createWebm` FROZEN for the tests' fixture generator, §11.8.1).
+
+**Acceptance:**
+- Every §13.12 test is green.
+- The WebM decodes with alpha in Chrome, and our demuxer reads it back exactly.
+- A kit of project_basic writes every file, with the MP4 checked at CFR, key frames and AAC (Chrome CI) or the WAV
+  fallback.
+- Step ④ keeps ≤ 5 controls.
+- The manual Filmora checklist (§13.12) is done, and its results are in NOTES; ✗ rows are fixed or documented in
+  `FILMORA.md`.
+
+### 8.9 Integration (lead, not a package)
 
 1. Wire the full stack and run every Node and browser test.
 2. Goldens step (a).
@@ -2444,7 +2707,15 @@ Until B, D and E land, F uses `fake_engine.js` extensions and faked AI answers.
    - 「サビだけ桜で、カメラはゆっくり寄る」 via 区画▾ → apply → undo;
    - 「Aメロは動きをスローに」 via the board;
    - 「最初と最後は一瞬遅く、途中はすごく速い」 on a line's entrance and camera via the curve widget's かんたん form.
-5. Add a one-line pointer at the top of DESIGN.md: 「v2.1 additions: see DESIGN_2_1.md」.
+5. Goldens step (c) (media parts). Then walk the media stories by hand:
+   - drop a phone video (HEVC or H.264, rotated) on the preview → background → trim → export 1080p60 → check in a
+     player that it moves with the song;
+   - サビだけ写真の背景 via the asset page's 選択中 button with an area selected;
+   - a transparent PNG as a 写真の枠 cut-out;
+   - 文字の中に with a video;
+   - save a package, clear the device, open the package;
+   - the Filmora kit into Filmora (the §13.12 checklist).
+6. Add a one-line pointer at the top of DESIGN.md: 「v2.1 additions: see DESIGN_2_1.md」.
 
 ---
 
@@ -2471,10 +2742,27 @@ Until B, D and E land, F uses `fake_engine.js` extensions and faked AI answers.
 | §4.23 | `Sel.area` (optional) | WP8 |
 | §4.24 | `createT` registry getter | WP0, WP8 |
 | §6.4 | placements and widgets of §6 | WP8 |
+| §2.1, §2.3, §2.6 | new directories `src/media/` (L1) and `src/media/host/` (L6); layers of `core/media`, `core/sha256`, `export/webm`, `export/unzip`, `export/package`, `export/subtitles`, `export/host/webm`, `export/host/kit`; `build.py.layer_of` and `l1_group` rules (§11.3.1). The CSP is **unchanged** (§11.4.11). | lead, WP0 |
+| §3.1–§3.2 | `doc.media` in schema 2 (no schema 3); `output.format` `kit` and `webmAlpha`; `output.kit` (§11.2.2, §13.3) | WP0, WP1, WP6, WP8 |
+| §3.9 | commands `media.put`, `media.meta`, `media.move`, `media.remove`, `media.relink`; `output.set kit` (§11.2.5) | WP1, WP7, WP8 |
+| §3.12 | `plan.media`; `mediaTerms` in the cut `fp` and `groundFp`; segment break on a changed media source (§11.2.6) | WP3, WP4 |
+| §3.13 | warnings `media-missing`, `media-kind`; why `media.pool`, `media.pin` | WP3, WP8 |
+| §4.2 | ParamSpec type `media` (§11.2.3) | WP0, WP3, WP5, WP8 |
+| §4.6 | the `myMed<10 hex>` key rule; `extra[key].media` (§11.5.9) | WP0, WP3, WP5 |
+| §4.17.3, §4.17.5 | `sb.media` and its record; `env.media`; `scene.media` (§11.5.1) | WP4, WP5 |
+| §4.18.1–§4.18.3 | kit exports `media`, `mediaParams`, `MEDIA`; needs value `'media'`; `photoPan` params and label (§11.5.6–§11.5.7) | WP4, WP5 |
+| §4.19.2, §4.19.4 | `renderFrame` options `layers: 'ground'`; `dc.t`; `sceneOnly` media per backdrop (§11.4.10) | WP4, WP6 |
+| §4.20 | `AssetStore` contract (`frame`, `want`, `ready`, `has`, `info`, `on`, `fork`, …); facade `mediaAt`, `mediaReady`, `fork({ assets })`, `FrameStats.media`, `EngineError('media-not-ready')` (§11.3.6–§11.3.7) | WP4, WP6, WP8 |
+| §4.21 | export frame loops await `mediaReady`; AAC → Opus fallback in MP4 (`probe().audioCodec`, `opus-audio`); formats `webmAlpha` and `kit`; `pickVp9`; sinks take `Blob` parts and directories; `zip.addBlob` (§13) | WP6, WP8 |
+| §4.22 | `direct` media schema variant and mapping; tool `vision`; Change kind `media` (§11.6) | WP7, WP8 |
+| §4.22.6 | the vision consent (images only, Gemini only, per asset and project) | WP7, WP8 |
+| §6.4.3, §6.4.12, §6.14 | step ③ hint text; step ④ 形式 control (a segmented pair plus a select) and the kit contents; ≡ › ファイル items; IndexedDB v2 stores (§11.7, §12.7, §13.10) | WP8 |
+| SPEC §7 | the project file is a package (`.mojipv`) by default; the light `.json` save is kept (§12) | owner (decided) |
 
 Everything is additive or widened: no existing path, pin or command changes meaning. Documents without the new pins or
 materials produce the same part choices as v2. Their plan hashes differ only by the new default params and slots, and
-their frames differ only by automatic camerawork (goldens step (b)).
+their frames differ only by automatic camerawork (goldens step (b)). Documents without media pins also keep every
+frame; their plan hashes change only through the registry version (goldens step (c)).
 
 ---
 
@@ -2486,3 +2774,2247 @@ their frames differ only by automatic camerawork (goldens step (b)).
 - AI-written raw keyframes: the AI uses presets or `fromMove`, and raw keys are a UI feature.
 - A preview-only 「カメラの動きを抑える」 setting (≡ › 表示, like 点滅を抑える): scaling shot and rig deltas by 0.3 in
   preview only, never in export. It is a comfort option to consider after visual QA.
+- **Media, later:**
+  - seek-friendly proxies: re-encoding long-GOP or 4K clips to intra-heavy 1080p at import, with `VideoEncoder`;
+  - reverse and ping-pong playback of video;
+  - frame interpolation for slow motion;
+  - mixing the video's own audio with the song;
+  - HEIC decoding;
+  - vision with the second AI service;
+  - SVG kept as vector;
+  - per-cut media keyframes (a crop that moves by keys);
+  - a cross-project media library.
+- **Output, later:**
+  - ProRes 4444 MOV, which needs an encoder that browsers do not have;
+  - JPEG sequences for Filmora's image-sequence import;
+  - an FCPXML or EDL timeline for the kit;
+  - HDR export.
+
+---
+
+## 11. Images and videos (写真・動画)
+
+The owner's request (verbatim): 「次のバージョンで画像・動画読込で扱える版を作成してください」. This section is the design for
+that request. §12 adds the single-file project package, and §13 adds editor-ready output (Filmora). The new work is in
+**package G** (§8.7) and **package H** (§8.8), plus media items in packages A–E (§8.1–§8.5).
+
+### 11.0 Decisions at a glance
+
+1. **Assets are addressed by their content.** An `AssetId` is `'a'` followed by the first 24 hex digits of the SHA-256 of
+   the file's bytes. The document stores metadata only (`doc.media`, part of schema 2). The bytes live in IndexedDB, as
+   songs do, and in the `.mojipv` package (§12).
+2. **Using an asset means choosing a part and setting a part param of the new ParamSpec type `media`.** There is no new
+   slot kind and the path grammar does not change.
+   - Backgrounds use the ground slot through `photoPan`, which is upgraded.
+   - Frames, text fills and overlay footage are three new ornament parts.
+   - All of these can be pinned at work, area (line) and cut scope. They can be undone, copied, set by the AI and
+     explained, like any other part.
+3. **Frame-exact video comes from WebCodecs `VideoDecoder`, fed by demuxers we write ourselves.** The demuxers cover
+   MP4, MOV and fragmented MP4, plus WebM and Matroska. They are pure L1 modules. Rendering never uses a `<video>`
+   element.
+   - Media time is closed-form in `t`.
+   - The source frame is picked by pure arithmetic on the sample table.
+   - Export waits for the exact decoded frame before it draws.
+4. **Preview and export take the same path.** While the exact frame is still decoding, the preview may show the nearest
+   decoded frame. That frame is marked provisional and drawn again once the exact one arrives. Export never does this:
+   the facade throws if it is asked to draw a frame that is not exact.
+5. **Stills become `ImageBitmap`s** in fixed size tiers. EXIF orientation is applied and colour is converted to sRGB.
+   Animated GIF, WebP and APNG files go through `ImageDecoder` and play like small silent videos.
+6. **The CSP does not change.** No Worker ships, and no third-party code is added (§11.4.12).
+7. **おまかせ uses the user's photos and videos as backgrounds only when the user allows it,** by ticking
+   おまかせでも使う on that asset. Such an asset is registered as a derived ground part through `REG.extend`, the same
+   way materials are (§5.9).
+8. **AI** (all optional):
+   - The `direct` tool can place an asset from the list it is given.
+   - An optional Gemini vision request describes images and picks colours. It needs consent per asset and sends only a
+     downscaled JPEG.
+   - A local palette extractor matches colours without any AI.
+9. **UI:** no new top-level control.
+   - Files can be dropped anywhere. Dropping on the preview uses the file as the background at the selected scope.
+   - New places for media: the 作品全体 › 写真・動画 library, an asset page, a media widget, a crop overlay on the stage
+     and a trim widget.
+
+### 11.1 What users can do
+
+#### 11.1.1 Accepted files
+
+| Kind | Formats | Decoded by | Notes |
+|---|---|---|---|
+| Still image | PNG, JPEG, WebP, AVIF | `createImageBitmap` | EXIF orientation applied. ICC or other colour converted to sRGB. Alpha kept. |
+| Animated image | GIF, animated WebP, APNG | `ImageDecoder` | ≤ 600 frames, long side ≤ 2048 px. Plays like a silent video; looping is the default. Without `ImageDecoder`, only the first frame is used and a note says so. |
+| SVG | rasterized once at import | `<img src=blob:>` drawn to a canvas at 4096 px on the long side | The rasterized PNG becomes the asset; the SVG is not kept. An image-mode SVG runs no script and loads nothing. If the canvas becomes tainted, the file is refused. |
+| Video | MP4, M4V, MOV (ISO BMFF) with H.264, HEVC, VP9 or AV1; WebM or MKV with VP8, VP9 or AV1 | our demuxer + `VideoDecoder` | HEVC is accepted only where this browser decodes it; the asset gets a portability badge (「一部のパソコンでは読めない形式です」). WebM VP8 and VP9 with alpha are supported (§11.4.10). |
+
+**Refused files.** The message always says what to do instead.
+- HEIC and HEIF photos: 「HEIC は読めません。JPEG に変換してから読み込んでください（iPhone: 設定 › カメラ › フォーマット ›
+  互換性優先）」.
+- Any video codec that `VideoDecoder.isConfigSupported` rejects, such as ProRes, DNxHD or MPEG-2. The message names the
+  codec.
+- Files over the limits (§11.2.8).
+- Files whose type the sniffer does not recognise.
+
+**The video's own audio** is ignored, so the song stays the only audio. One explicit action, 「この動画の音を曲にする」, loads
+the video file through the existing song path (D§4.13 `loadSong`; `decodeAudioData` reads the audio of MP4 and WebM
+files). It is offered only when the file has an audio track (`entry.audio`).
+
+#### 11.1.2 Uses
+
+| Use (ja / en) | Part (kind) | How it is pinned (any scope: `work`, every line of an area, `line/<id>`, `cut/<key>`) | Notes |
+|---|---|---|---|
+| 背景 / Background | `photoPan` (ground, upgraded) | `…:ground = photoPan` and `…:ground@photoPan.image = <id>` | Continuous across its segment. A segment breaks where the source changes (§11.2.6). |
+| 写真の枠 / Photo frame | `photoFrame` (ornament, scope `cut`) | `…:ornament#i = photoFrame` and `…:ornament#i@photoFrame.src = <id>` | Rectangle, rounded, circle or arch mask, or the image's own alpha (a cut-out). Border, stepped shadow and tilt. |
+| 文字の中に / Inside the text | `textFill` (ornament, scope `cut`) | `…:ornament#i = textFill` and `…@textFill.src` | The media shows through the glyphs: the text works as a window. |
+| 重ねる映像 / Overlay footage | `mediaLayer` (ornament, scope `run` = atmos) | `…:atmos = mediaLayer` and `…:atmos@mediaLayer.src` | Blend modes screen, multiply, overlay and normal. Above or behind the text. Drawn only with the normal backdrop. |
+| 素材の中 / In a material | recipe layer `prim: 'media'` | inside `doc.materials` (§11.5.8) | A reusable frame style that works with any photo. |
+| おまかせの背景 / Auto background | derived ground `myMed<10 hex>` | the planner picks it (§11.5.9) | Only assets with おまかせでも使う ticked. |
+| 色を写真に合わせる / Match colours | — | palette pins (`work:color.accent`, `shiftA`, `shiftB`) | Local extraction, no AI (§11.6.3). |
+| 曲にする / Use as the song | — | `song.set` | Only videos with an audio track. |
+
+An **area** (§3.8) is placed by pinning every line of the area, which is the same rule the AI uses (§5.5 "Target of
+`all`"). The asset page and the AI can do that in one batch.
+
+#### 11.1.3 Controls
+
+Every control is a part param (the table is in §11.5.6), so it gets a widget, a pin, undo and "why" for free.
+- **Framing:**
+  - fit: 覆う (cover) / 全体を映す (contain) / 全体＋ぼかし余白 (contain with a blurred cover copy behind);
+  - crop: a zoom plus a focus point, adjusted on the stage;
+  - edges: how the bleed area around the frame is filled.
+- **Motion (Ken Burns):** push in, pull out or drift, with an amount and a direction.
+- **Look:** blur; veil (薄幕), whose colour can be the ground colour, black (this is "dim"), white or any colour; tint
+  (色味) with its own colour.
+- **Video and animation only:**
+  - the range used (in and out, set with the trim widget);
+  - speed ×0.25–4;
+  - what happens at the end: loop, or hold the last frame;
+  - the clock: 表示したときから (restarts each time the element appears) or 曲に合わせる (continuous with the song).
+
+### 11.2 Data model
+
+#### 11.2.1 Asset entry (FROZEN)
+
+```json
+{ "id": "a3f9c2d17b0e4a5c6d7e8f901", "kind": "video", "name": "海辺.mp4", "mime": "video/mp4", "bytes": 48213344,
+  "w": 1920, "h": 1080, "dur": 12.512, "fps": 29.97, "frames": 375, "rot": 0, "alpha": false, "anim": false,
+  "audio": true, "codec": "avc1.640028", "color": "bt709", "hdr": false, "pv": 1, "pool": false, "ai": null }
+```
+
+| Field | Meaning and rule |
+|---|---|
+| `id` | `^a[0-9a-f]{24}$`: the first 12 bytes of the SHA-256 of the stored bytes, as hex. For an SVG, the stored bytes are the rasterized PNG. |
+| `kind` | `image` or `video`. An animated image has `kind: 'image'` and `anim: true`. |
+| `name` | Display name, initially the file name. 1–80 characters with no control characters. User data, so the en page may show Japanese. |
+| `mime` | The sniffed type (§11.3.4), not the browser's guess. |
+| `bytes` | Size of the stored bytes. |
+| `w`, `h` | Displayed size in px **after** orientation: EXIF for images, the track matrix for videos. |
+| `dur`, `fps`, `frames` | Video and animation only (`null` for stills). `dur` is the presentation duration in seconds (q3). `fps` is the nominal rate, 1 / median frame duration (q3). `frames` is the sample count. |
+| `rot` | 0, 90, 180 or 270. Video only: the track-matrix rotation that drawing applies. Images are decoded already upright, so their `rot` is 0. |
+| `alpha` | `true` when some pixel can be transparent (§11.4.10). |
+| `anim` | `true` for animated images. |
+| `audio` | `true` when a video file also has an audio track. |
+| `codec` | WebCodecs codec string for videos; `null` otherwise. |
+| `color` | One of `srgb`, `bt709`, `bt601`, `bt2020`, `p3`, `other`. |
+| `hdr` | `true` for PQ or HLG transfer. |
+| `pv` | Probe version, `core/media.PROBE_V` (1). A newer probe may re-read metadata; §11.2.9 says when. |
+| `pool` | おまかせでも使う: the planner may pick it as a background (§11.5.9). Default `false`. |
+| `ai` | `null`, or the result of the vision tool (§11.6.2): `{ caption: { ja, en }, tags: [tag], colors: ['#RRGGBB' ≤ 5], subject: Box01 \| null, text: Box01 \| null }`. `Box01 = { x, y, w, h }` as fractions of the displayed image. |
+
+Metadata is derived from the content, and the id names the content. So two documents that share an id share the same
+metadata for the same `pv`.
+
+**No poster in the JSON.** Posters and filmstrips live in the `thumbs` store (§11.2.7) and in the package (§12.2). This
+keeps the document, and therefore every autosave, small.
+
+#### 11.2.2 `doc.media` (schema 2; coordinated with §2.1–§2.2)
+
+- `doc.media = { list: AssetEntry[] }`, in library order (the order of import; the user can move entries).
+  - At most 200 entries.
+  - The canonical JSON is at most 96 KB.
+  - Ids are unique.
+- **No new schema number.** `doc.media` is part of schema 2, so v2.1 ships one bump.
+  - `MIGRATIONS[1]` also adds `media: { list: [] }`, next to `materials`.
+  - If A.1 has already merged schema 2 without `media` when this lands, `normalize` fills a missing `media`. A schema-2
+    file without `media` then opens, and there is no schema 3.
+- **`core/doc` additions:**
+  - `ORDER.doc` becomes `…, 'filters', 'materials', 'media', 'output'`.
+  - `ORDER.media = ['list']`.
+  - `ORDER.asset` is the field order of §11.2.1.
+  - `ORDER.assetAi = ['caption', 'tags', 'colors', 'subject', 'text']`.
+  - `defaultDoc().media = { list: [] }`.
+- **`validate` adds structural checks only:**
+  - `media` is an object and `list` an array;
+  - every entry passes `core/media.entryProblems` (types, ranges, the id pattern, unique ids);
+  - the caps hold.
+
+  Unknown `pv` values are kept.
+- `touched(a, b)` gains `media: a.media !== b.media`.
+- The `output` additions of §13 (`format` values `webmAlpha` and `kit`, and `output.kit`) are also schema 2. They are
+  listed in §13.3.
+
+#### 11.2.3 ParamSpec type `media` (D§4.2 addition; FROZEN)
+
+```js
+ParamSpec += { type: 'media', accept: 'image' | 'video' | 'any' /* default 'any' */, auto: { value: '' } }
+```
+
+- `coerce(spec, v)` returns `''` for `''`, returns `v` for a string matching `^a[0-9a-f]{24}$`, and returns `undefined`
+  for anything else.
+- `baseValue` is `''`.
+- `validateSpec` requires `auto` to be a constant `{ value }` whose value coerces: `''` in catalog parts; an AssetId in
+  the derived `myMed` parts, which set it through `K.variant` (§11.5.9). A media param is never picked or ranged.
+  `accept` must be one of the three values.
+- `describeAuto` gives `なし` / `none`.
+- Media params are `ai: false` in the catalog. The AI reaches them through the `direct` tool's `media` field (§11.6.1).
+- `TYPES` gains `'media'`.
+- `ui/fields.widgetFor` maps `media` to the `media` widget (§11.7.5).
+
+#### 11.2.4 References
+
+An asset is referenced in exactly three ways:
+1. **A pin whose value is the id,** on a param of type `media`. Examples: `work:ground@photoPan.image`,
+   `line/r7:ornament#1@photoFrame.src`.
+2. **The derived key `myMed<id[1..10]>`,** for assets with `pool: true`:
+   - as a pin value (`line/r7:ground = "myMed3f9c2d17b0"`);
+   - as the `@key` of a part-qualified pin (`work:ground@myMed3f9c2d17b0.blur`);
+   - in an avoid list (`"ground.myMed3f9c2d17b0"`).
+3. **A `src` inside a material recipe layer** with `prim: 'media'` (§11.5.8).
+
+`core/media.refsOf(doc, id)` returns `{ pins: path[], materials: materialId[] }`. It compares strings only and needs no
+registry. The reducers, the library's 使用 n count and the delete dialog all use it.
+
+#### 11.2.5 Commands (FROZEN payloads; D§3.9 additions)
+
+| Command | Payload | Effect |
+|---|---|---|
+| `media.put` | `entry` | Adds the entry at the end of the list. If the id exists, it replaces the metadata (`kind` must match). Refused (`CommandError('payload')`) when `entryProblems` reports a problem or a cap would be exceeded. An unchanged entry returns the same doc. |
+| `media.meta` | `id, name?, pool?, ai?` | Updates only these fields, with the same validation. `ai: null` clears the vision result. |
+| `media.move` | `id, before` (`null` = end) | Changes the library order. |
+| `media.remove` | `id` | Removes the entry. It also removes every pin whose value is the id, every pin whose value is its derived key, every pin that is part-qualified `@myMed<…>` with that key, and the matching avoid items (an avoid list that becomes empty removes its pin). Material recipes are left unchanged: their media layers then draw nothing, and the planner warns `media-missing`. |
+| `media.relink` | `from, entry` (`entry.id` = `to`) | Replaces one asset with another in one undo step. Adds `entry` if it is absent. Rewrites every pin value `from` → `to`. Rewrites every derived key and `@key` path of `from` to the key of `to`. Rewrites material recipe `src` values (each changed material is re-normalized, so its `rhash` changes). Then removes `from`. Refused when the kinds differ. |
+
+- The reducers are pure. They call only `core/media` (L0), and `core/recipe` for recipes.
+- The UI's 削除 action dispatches one `store.batch`: `media.remove` followed by `pin.clear` for every part pin whose
+  media param has become empty (for example `work:ground = photoPan` with no image left). The UI knows the registry and
+  the reducer does not. The confirmation says 「使っている{n}か所は元の見た目に戻ります」.
+- Undo labels: `undo.media.put` / `.meta` / `.move` / `.remove` / `.relink`.
+
+#### 11.2.6 Plan additions (D§3.12; additive to §2.7)
+
+- **`plan.media = { [id]: MediaMeta }`**, where `MediaMeta = { kind, w, h, dur, fps, frames, rot, alpha, anim }`.
+  - It holds every id referenced by a decision param of type `media` (cut slots, `grounds[].ground` and `.atmos`) or by
+    a chosen material (`registry.extra[key].media`).
+  - It is covered by the plan hash.
+  - Scenes read it at build (`svc.media`), so a scene is a pure function of its plan and needs no host.
+- **Fingerprints:**
+  - The cut `fp` and `groundFp` add `mediaTerms` = sorted `[[id, H.hashJSON(meta)]]` for the ids their decisions use.
+  - Ids are content hashes, so terms change only when `pv` re-probing changes the metadata.
+- **Segments** (`planner/tracks.splitSegments`, D§4.16.6 amended):
+  - Today a new segment starts where the pinned ground or atmos **key** changes. It now also starts where the resolved
+    value of any `media`-typed param of the pinned ground or atmos part changes, compared by string.
+  - Without this, two lines pinned to `photoPan` with different photos would share one segment and show the first
+    photo.
+  - Documents without media pins are unchanged.
+- **Resolution:** a media param value goes through `coerce`, and then:
+  - an id missing from `doc.media` gives warning `media-missing` (`detail: { id }`), and the value becomes `''`;
+  - an entry whose kind does not fit `accept` gives warning `media-kind`, and the value becomes `''`.
+
+  An empty `photoPan` is the plain ground. An empty `photoFrame`, `textFill` or `mediaLayer` builds nothing.
+- **New warning codes** (D§3.13): `media-missing`, `media-kind`.
+- **New why codes:**
+  - `media.pool {name}`: おまかせで使うマイ写真;
+  - `media.pin {name}`: the source of the inspector's media row.
+- **Missing bytes are not a plan matter.** An entry whose blob is not on this device is a host state (§11.3.6
+  `info(id)`), reported by the stage placeholder and the export preflight (§11.7.9).
+
+#### 11.2.7 Storage on the device (IndexedDB; `ui/project_io`, D§6.14)
+
+`DB_VERSION` goes 1 → 2. `onupgradeneeded` adds three stores and keeps `works` and `songs` as they are.
+
+| Store | Key | Value | Notes |
+|---|---|---|---|
+| `media` | AssetId | `{ blob, mime, bytes, crc, name }` | `crc` is the ZIP CRC-32, computed at import in the same pass as the hash, so a package save needs no extra read (§12.3). |
+| `mediaIndex` | AssetId | `{ v: INDEX_V, table: SampleTableData, track: TrackInfo }` | Video and animation only. It is a cache of the demuxer's work and can be rebuilt from `media`. |
+| `thumbs` | AssetId | `{ v, poster: Blob (WebP, 320 px long side), strip: Blob (WebP sprite, 12 frames × 160 px) }` | Library tiles, preview placeholders and the trim filmstrip. Rebuilt when missing. |
+
+- **Pruning** (extends `prune`):
+  - An asset's blob, index and thumbs stay while any of these still references the id: the newest `RECENT` works, the
+    current document, or this tab's `usedMedia` set (ids stored or read since the last load, because undo can bring
+    them back).
+  - Everything else is deleted, like songs.
+- **Persistence:** the first media import calls `navigator.storage.persist()` once, so Chrome does not evict large
+  assets. Its answer is not required.
+- **Quota:**
+  - `navigator.storage.estimate()` runs after each import. Above 80 % of the quota, a warning names the usage.
+  - `QuotaExceededError` gives `media.err.quota`. The asset then stays **in memory for this session only** (the
+    `media` store keeps a `Map` fallback), and the user is told to save a package (§12).
+- **Without IndexedDB,** the in-memory fallback is used and the same notice is shown.
+- **`clearDevice`** (≡ › 設定) also clears `media`, `mediaIndex` and `thumbs`. Its label becomes
+  「この端末に保存した作品・曲・写真・動画を消す」.
+
+#### 11.2.8 Limits and warnings
+
+| What | Limit | When exceeded |
+|---|---|---|
+| Still image file | ≤ 60 MB and ≤ 40 MP (from header dimensions, checked before decoding) | refused: `media.err.tooBig` |
+| Animated image | ≤ 600 frames and ≤ 2048 px long side | refused: `media.err.animTooBig` |
+| Video file | ≤ 4 GB | refused |
+| Video frame | long side ≤ 4096 and ≤ 8.9 MP (4096×2176) | refused: `media.err.tooLarge` |
+| Video length | ≤ 60 min | refused |
+| Video frame rate | ≤ 120 fps | refused |
+| Alpha video | ≤ 1920×1080 | alpha ignored: the asset plays opaque, with a note (§11.4.10) |
+| Library | ≤ 200 entries | `media.full` |
+| Library total on this device | warning above 2 GB (`media.warn.big`) | — |
+| One import | warning above 1 GB (`media.warn.bigFile`: slow to hash, large packages) | — |
+| Long GOP (mean keyframe gap > 5 s) | badge 「位置合わせに時間がかかる動画です」 | scrubbing is slow; export is unaffected |
+| HEVC | badge 「一部のパソコンでは読めない形式です」 | — |
+| HDR | badge 「HDR の色は近い色で表示されます」 | — |
+
+#### 11.2.9 Save, open and relink
+
+- **The default save is the package** `.mojipv` (§12). It holds the project, every asset and the song.
+- **The light save** (`.json`, 軽い保存) holds ids only. On open, each id is looked up in the `media` store.
+- **Missing assets.** An entry whose blob is not on this device is **missing**:
+  - its library row shows [つなぎ直す];
+  - the preview draws a placeholder (§11.7.8);
+  - export is blocked by the preflight item `media-missing`, with a jump to the library.
+- **Relinking** (つなぎ直す). The user picks one or more files, and each is hashed.
+  - A file whose id equals a missing id is stored under that id, and nothing in the document changes.
+  - Otherwise, a file of the same kind with the same displayed size (images) or the same duration ±0.05 s (videos) is
+    offered for one missing entry: 「別のファイルですが、この写真の代わりに使いますか？」. Accepting dispatches
+    `media.relink`.
+  - A content-addressed id never names other bytes. This is unlike songs, whose relink stores the new file under the old
+    sha1 (D§6.11). The package's integrity check (§12.4) depends on this rule.
+- **Re-probing.** When an entry's `pv` is lower than `PROBE_V` and its bytes are on this device, the probe runs again
+  when the project opens. The corrected entries are applied to the document before `store.load`, so no undo entry
+  appears. The next save stores them.
+
+### 11.3 Modules and interfaces
+
+#### 11.3.1 Layers and `build.py` (D§2.1, D§2.3 amended; FROZEN)
+
+| Module | Layer | May depend on | Owner |
+|---|---|---|---|
+| `core/media`, `core/sha256` | L0 | L0 | A (`core/media`), G (`core/sha256`) |
+| `media/sniff`, `media/isobmff`, `media/matroska`, `media/samples`, `media/palette`, `media/yuv` | **L1** (new directory `src/media/`) | L0, and L1 inside `media/` | G |
+| `media/host/probe`, `media/host/session`, `media/host/store`, `media/host/bake` | **L6** (new directory `src/media/host/`) | L0–L5 | G |
+| `export/webm`, `export/unzip`, `export/package`, `export/subtitles` | L5 (pure) | L0–L4 | H (`webm`, `subtitles`), G (`unzip`, `package`) |
+| `export/host/webm`, `export/host/kit` | L6 | L0–L5 | H |
+| `ui/media_io`, `ui/media_page`, `ui/media_widgets` | L7 | everything | G |
+| `ui/filmora_help` | L7 | everything | H |
+
+- `build.py.layer_of` gains two rules: `mid.startswith('media/host/')` → 6 and `mid.startswith('media/')` → 1.
+- `l1_group` gains `'media/'`, so `media/*` may use `core/*` and `media/*` only. The engine never depends on `media/*`:
+  the time map and the fit math it needs are in `core/media` (L0).
+- The D§2.4 lint applies unchanged, with two notes:
+  - `media/host/*` may use `getImageData`, `putImageData` and `ctx.filter`. They are banned only in `engine/render/*`
+    and the parts, and the host needs them for the alpha merge, alpha detection and still blur.
+  - `media/*` (L1) is pure. It gets no DOM and no timers, and receives file bytes through an injected
+    `read(offset, length) → Promise<Uint8Array>`.
+- The D§2.1 tree gains `src/media/` and `src/media/host/`. The D§9.4 record is §9.
+
+#### 11.3.2 `core/media` (new, L0; FROZEN; package A)
+
+```js
+MV.def('core/media', ['core/num', 'core/hash'], (N, H) => ({
+  PROBE_V: 1, INDEX_V: 1,
+  KINDS: ['image', 'video'],
+  FITS: ['cover', 'contain', 'soft'], EDGES: ['mirror', 'zoom', 'plain'], MOVES: ['auto', 'none', 'push', 'pull', 'drift'],
+  LOOPS: ['loop', 'hold'], CLOCKS: ['show', 'song'],
+  LIMITS,                                   // §11.2.8 numbers and the param ranges of §11.5.6
+  ID: /^a[0-9a-f]{24}$/,
+  isId(v) → boolean,
+  keyOf(id) → 'myMed' + id.slice(1, 11),    // the derived part key (§11.5.9)
+  idOfKey(key, doc) → id | null,            // reverse lookup through doc.media
+  entryProblems(entry) → string[],          // §11.2.1 rules; [] when valid
+  normalizeEntry(entry) → entry,            // q3 numbers, field order, frozen
+  refsOf(doc, id) → { pins: string[], materials: string[] },
+  metaOf(entry) → MediaMeta,                // the plan subset (§11.2.6)
+  timeSpec(meta, p, origin) → TimeSpec | null,     // null for stills; p = resolved media params (§11.5.6)
+  mapTime(T, tau) → m,                      // §11.4.2 (pure, closed form)
+  fitRect(meta, box, fit, zoom, fx, fy, out?) → FitRect,  // §11.5.2 (pure)
+  tier(needPx, meta) → px,                  // §11.4.6 still size tier
+}));
+TimeSpec = { clock: 'show' | 'song', origin, clipIn, end, speed, loop, frame }   // seconds; frame = 1 / fps
+FitRect  = { sx, sy, sw, sh,  dx, dy, dw, dh,  bx, by, bw, bh }   // source rect (displayed px), dest rect (du), box (du)
+```
+
+#### 11.3.3 `core/sha256` (new, L0; package G)
+
+```js
+createSha256() → { update(bytes: Uint8Array) → this, digest() → Uint8Array(32) }   // FIPS 180-4, streaming
+hex(bytes) → string
+```
+
+- Fixed test vectors (NIST short and long messages), and chunk-boundary independence.
+- The host uses `crypto.subtle.digest` for files up to 256 MB (one buffer). Above that it uses this streaming
+  implementation, so a 4 GB video never sits in memory. Both give the same digest (tested).
+
+#### 11.3.4 Pure media modules (L1; package G)
+
+```js
+// media/sniff — magic bytes and header dimensions (the first 64 KB of a file)
+sniff(head: Uint8Array) → { kind: 'image' | 'video' | 'svg' | 'heic' | 'unknown', container, mime, w?, h?, anim?, alphaHint? }
+   // PNG (IHDR, acTL → APNG), JPEG (SOFn), GIF (NETSCAPE loop / >1 image → anim), WebP (VP8 / VP8L / VP8X flags: alpha,
+   // animation), AVIF (ftyp avif/avis, ispe), HEIC (ftyp heic/heix/mif1 without avif → 'heic'), ISO BMFF video (ftyp
+   // isom/iso2/mp41/mp42/avc1/qt  /M4V ), EBML (1A45DFA3; DocType webm/matroska), SVG (<svg within the first 1 KB of text)
+
+// media/isobmff — MP4 / MOV / fragmented MP4 demuxer
+parse(read, size) → Promise<Movie>
+Movie = { brand, duration, tracks: Track[] }
+Track = { id, kind: 'video' | 'audio' | 'other', codec, description: Uint8Array | null, codedW, codedH, w, h, rot,
+          timescale, color: ColorInfo | null, table: SampleTable, alpha: false }
+
+// media/matroska — WebM / MKV demuxer
+parse(read, size, { onProgress }) → Promise<Movie>          // same shape; Track.alpha = AlphaMode 1; table.aoff/asize
+
+// media/samples — the sample table and its pure operations
+SampleTable = {
+  n, duration, fps, vfr, key: Uint8Array,                    // key[d]: sample d (decode order) is a key frame
+  pts: Float64Array, dur: Float64Array, dec: Int32Array,     // PRESENTATION order: time (s, first shown = 0), duration, decode index
+  off: Float64Array, size: Uint32Array, ts: Float64Array,    // DECODE order: byte offset, size, chunk timestamp (µs)
+  aoff: Float64Array | null, asize: Uint32Array | null,      // DECODE order: WebM alpha (BlockAdditional id 1) ranges
+}
+sampleAt(table, m) → i                     // presentation index: the largest i with pts[i] ≤ m + EPS_MEDIA (1e-4 s), else 0
+keyAtOrBefore(table, d) → d0               // decode index of the key frame that starts d's GOP
+runFor(table, i) → { from: d0, to: d }     // the decode-order samples that must be fed to show presentation sample i
+toData(table) / fromData(data)             // IndexedDB form (ArrayBuffers)
+codecString(track) → string                // avc1 / hvc1 / vp09 / av01 / vp8 strings (§11.4.3)
+stats(table) → { gopMean, gopMax, vfr }
+
+// media/yuv — the reduced RGBA copy of an 8-bit 4:2:0 video frame that the store blurs (§11.4.6; deterministic)
+supports(format, colorSpace) → boolean        // 'I420' | 'NV12', matrix bt709 | bt470bg | smpte170m, not PQ / HLG / BT.2020
+factorFor(long, px, blur) → b ∈ {1, 2, 4, 8}  // the largest power of two ≤ 8 with long / b ≥ px / 4 (px / 8 when blur ≥ 8)
+sigmaFor(blur, long, b, px) → σ               // blur (device px) × copy px per device px, in 1/32 copy px, > 0
+padFor(σ, cw, ch) → ceil(3σ)                  // at most the copy's shorter side
+toRgba({ format, data, layout, w, h }, { b, matrix, full, pad, out? }) → { data: Uint8ClampedArray, w, h, cw, ch, pad }
+   // the planes of the visible rect (VideoFrame.copyTo); each copy pixel averages its b × b block of Y and its
+   // (b/2) × (b/2) block of U and V, converted in fixed point with the matrix and range of VideoFrame.colorSpace; a
+   // mirrored border of `pad` px (pixel −1 − k shows pixel k)
+
+// media/palette — dominant colours (deterministic)
+dominant(rgba: Uint8ClampedArray, w, h, { k = 5 }) → ['#RRGGBB', …]   // 64×64 input; OKLab k-means++ seeded by hash32 of
+                                                                         // the bytes; 8 iterations; sorted by weight
+```
+
+The demuxers never allocate per sample beyond the typed arrays, and never read sample payloads, only box and element
+headers. The rules for each format are in §11.4.3.
+
+#### 11.3.5 Host modules (L6; package G)
+
+```js
+// media/host/probe
+importFile(file: File | Blob, { name, signal, onProgress, store }) →
+  Promise<{ entry: AssetEntry, fresh: boolean /* false: the id was already stored */ }>
+   // §11.4.13 steps; errors: MediaError(code) with the codes of §11.7.9
+rasterizeSvg(blob, { signal }) → Promise<Blob /* PNG */>
+posterOf(id) / stripOf(id) → Promise<ImageBitmap | null>        // from the thumbs store, rebuilt when missing
+
+// media/host/session
+createVideoSession({ track, read, prefer: 'software' | 'hardware', alpha }) → VideoSession      // §11.4.4
+createAnimSession({ blob, mime, table }) → AnimSession                                           // ImageDecoder frames
+
+// media/host/store
+createMediaStore({ blobs: { get(id) → Promise<Blob | null>, index…, thumbs… }, canvas: CanvasFactory, now, idle })
+  → AssetStore (§11.3.6)
+
+// media/host/bake (one per store fork; used by the store only)
+createBaker({ canvas, now }) → { variant(long, px, blur) → { b, sigma, blur, key } | null,
+                                 bake(held, variant, { alpha }) → Promise<{ bitmap, w, h, index, blur, bytes, route }>,
+                                 stats() → { prepMs, baked, yuv, canvas }, dispose() }       // §11.4.6
+```
+
+#### 11.3.6 AssetStore (D§4.20 `AssetStore` amended; FROZEN)
+
+```js
+AssetStore = {
+  get(id) → CanvasImageSource | null,          // v2.0 member, kept: a still at its largest cached tier (lab, old callers)
+  frame(id, m, want) → MediaFrame | null,      // m: media seconds (ignored for stills);
+                                               // want: { px /* needed device px, long side */, blur /* device px, 0;
+                                               //         every medium: stills, videos and animations */,
+                                               //         exact: boolean /* export */, thumb: boolean /* posters only */ }
+  want(list: [{ id, m, px?, blur? }]) → void,  // look-ahead: start decoding soon (no promise); with a blur, bake the
+                                               // listed frames as they are held (§11.4.6)
+  ready(list: [{ id, m, px?, blur? }], { signal }) → Promise<void>,   // resolves when every exact frame of the list is
+                                               // held, and (timed media with blur > 0) its baked copy too (§11.4.6)
+  has(id) → boolean,                           // bytes on this device (or in the session fallback)
+  info(id) → { state: 'ok' | 'missing' | 'loading' | 'error', code?: string },
+  on(event: 'ready' | 'state', fn) → off,      // 'ready': new frames are held (the stage redraws a provisional frame)
+  fork() → AssetStore,                         // own video and animation sessions; shared still cache and blobs
+  stats() → { stillBytes, sessions, sessionPixels, held, decodeMs, prepMs /* additive: time in bakes */, … },
+  dispose(),
+}
+MediaFrame = { image: CanvasImageSource, w, h /* displayed px */, rot, exact: boolean, index: int,
+               blur /* additive: device px of blur already applied to image; 0 = none */ }
+            // pooled per store: valid until the next frame() call for the same id
+```
+
+`engine/facade` takes it as before, through `createEngine({ assets })`. `ui/boot` passes the real store. Node tests and
+the lab pass `tests/helpers/fake_media.js` (package B).
+
+- The store keys a prepared frame (a still tier, a baked video frame) only by the values of the request itself (`px`,
+  `blur` of the `ready()` / `want()` item or of `want`), never by sizes learned from earlier `frame()` calls, so frame N
+  rendered directly equals frame N after 0..N−1 (determinism check 7).
+- `MediaFrame.blur > 0` tells the engine that the blur is already in the image: it draws a blurred video frame then on
+  the plain path. With `blur` 0 for a node that has a blur, the engine blurs the frame itself (§11.5.4) and counts it in
+  `FrameStats.media.fallback`.
+- **Contract changes of the media-row work (perf: media row; not additive; signed off by the lead, NOTES "## Lead: integrating the media-row work").** They change
+  the behaviour of this FROZEN interface and of §11.4.5:
+  1. In the preview, `frame()` returns `exact: false` for a held frame of a blurred video or animation (`want.blur > 0`)
+     until its baked copy exists. Before, a held frame was always exact. It keeps the stage redrawing a paused frame
+     until it shows the baked look, which is the export's.
+  2. The provisional frame of a blurred timed medium (§11.4.5 step 2) is the baked copy of the frame that order
+     picks, when there is one. When the exact frame is held but not yet baked, a baked copy of one of the
+     `NEAR_BAKED = 2` frames before it may stand in (playback: the frame shown a moment ago). Otherwise the exact
+     frame is returned unbaked.
+  3. `ready()` also bakes: for timed media with `blur > 0` it resolves once the baked copy is held, or once its bake
+     has failed.
+  4. `want.blur` is now sent for videos and animations too (it was sent for stills only). A store that applies
+     `want.blur` to every frame but does not report it in `MediaFrame.blur` would have that frame blurred twice. The
+     stores in this tree (`media/host/store`, `tests/helpers/fake_media.js`) report it.
+  5. `want()` bakes every listed frame of a blurred timed medium as the session gets it. The engine's `mediaReady`
+     lists every output frame of its look-ahead, not only the last one (§11.3.7).
+
+#### 11.3.7 Engine and kit (D§4.17–§4.20 additive; package B)
+
+| Module | Change |
+|---|---|
+| `engine/scene/builder` | New `sb.media(o) → node`: an `image` node (type 4) whose record has `media: true` and the fields of §11.5.1. It checks every field. It refuses a `static` layer cache on a layer that holds a timed media node. `sb.image` is unchanged. |
+| `engine/scene/build` | `svc.media` (= `plan.media`) becomes `env.media`, a frozen read-only lookup. The scene gains `media: [{ node, id, time: TimeSpec \| null }]`, collected at commit. |
+| `engine/render/shapes` | New `drawMedia(g, rec, M, alpha, dc, tl) → boolean` (§11.5.5). |
+| `engine/render/draw` | `drawLayer` sends records with `media: true` to `drawMedia`, and counts `dc.counts.media` and `dc.mediaWaiting`. It skips `sceneOnly` records when `dc.backdrop !== 'scene'`. |
+| `engine/render/renderer` | Sets `dc.t` (the absolute frame time, for `clock: 'song'`) and `dc.backdrop`. New option `opts.layers: 'all' \| 'ground'` (`'ground'`: only the ground layer of every item plus the backdrop fill, used by §13.7). New `mediaAt(plan, source, t, out) → out` (the media nodes of the active scenes and their media times; no behaviours run). FrameStats gains `media: { drawn, waiting, fallback }` (`fallback`, additive: blurred timed nodes drawn with the per-frame blur because their frame came unbaked; export fixtures assert 0), and `provisional` becomes true when `waiting > 0`. |
+| `engine/render/record` | Media records are logged as `drawImage('media:<id>@<q6(m)>#<index>', sx, sy, sw, sh, dx, dy, dw, dh)`, with the index from the injected store. Op hashes therefore cover media timing. |
+| `engine/facade` | New `mediaAt(t, { scale }?) → [{ id, m, px?, blur? }]`, sorted and deduplicated; with an output scale (given, or the last frame's) every medium carries the `px` and `blur` its draw asks the store for, the products of `shapes.frameFor` in its order (stills: their tier; videos and animations: their baked blur, §11.4.6). New `mediaReady(t, { signal, ahead = 3 / fps }) → Promise` (= `assets.ready(mediaAt(t))` plus `assets.want` of `mediaAt` at every output frame after `t` up to `t + ahead`, at most 8. A look-ahead that named only `t + ahead` let the session close the frames before it as they passed, and each one was then decoded again from its key frame when it was asked for. Measured: a 600-frame 1080p export with a pause between frames, as an encoder's awaits make, fed 4425 chunks and made 127 seeks, where 601 chunks and 11 seeks suffice. Signed off by the lead: §11.3.6 item 5). `fork({ assets? } = {})` (additive option) uses `assets` when given, else `assets.fork ? assets.fork() : assets`, and disposes a store it forked. `renderFrame(…, { quality: 'export' })` throws `EngineError('media-not-ready')` when `assets.frame(…).exact` is false, which is a programming error: exporters await `mediaReady` first. `thumb()` asks for posters only (`want.thumb`). |
+| `parts/kit` | New exports `media(env, o)`, `mediaParams(o)` and `MEDIA` (§11.5.6). |
+| `export/host/mp4`, `export/host/png` | The frame loop awaits `e.mediaReady(t)` before each `renderFrame` (D§4.21 steps amended, §9). |
+
+#### 11.3.8 Other packages
+
+- **Parts** (package G): `parts/ground/photo.js` (`photoPan` upgraded) and `parts/ornament/media.js` (`photoFrame`,
+  `textFill`, `mediaLayer`). §11.5.7.
+- **`parts/mix`** (package C): the third argument of `registryFor(base, materials, media)` (§11.5.9) and the recipe
+  layer `prim: 'media'` (§11.5.8).
+- **Planner** (package D): §11.2.6 and §11.5.9.
+- **AI** (package E): `media` in the `direct` schema, `ai/vision` and the recipe AI field. §11.6.
+- **UI** (package G): §11.7.
+
+### 11.4 Decoding and frame-exact rendering
+
+#### 11.4.1 Why WebCodecs with our own demuxers, not `HTMLVideoElement`
+
+| Need | `<video>` + seek + `drawImage(video)` | Own demuxer + `VideoDecoder` (chosen) |
+|---|---|---|
+| Which source frame appears at time `t` | Chosen by the browser. It depends on seek rounding, B-frame reordering, edit lists and how VFR is handled. We cannot compute it, and it differs between browsers. | Chosen by us: `sampleAt(table, m)` is pure arithmetic over the sample table (§11.4.2). It is identical in Node tests and in every browser. |
+| Knowing the frame is ready | `seeked` and `requestVideoFrameCallback` do not guarantee that `drawImage` returns the new frame (Safari does not). | The `VideoDecoder` output callback hands over the exact frame, with the timestamp we gave its chunk. |
+| Export speed | One asynchronous seek per output frame (20–150 ms each), which cannot be pipelined. | Sequential decode in decode order, pipelined up to 8 chunks, so each source frame is decoded once. |
+| Scrubbing | Fast (native seeking) but approximate. | Decode from the previous key frame. Its cost is bounded by the GOP length (§11.4.4), and a poster or the nearest frame is shown meanwhile. |
+| Alpha (WebM) | Chrome only. | Our own merge of the alpha stream, the same in every browser that has WebCodecs (§11.4.10). |
+| OffscreenCanvas, and no DOM below `ui/` | Needs DOM elements. | Works in the engine's OffscreenCanvas; the pure parts run in Node. |
+| CSP | `media-src blob:`, which is allowed. | Nothing: blobs are read with `Blob.slice().arrayBuffer()`, which is not a fetch, so `connect-src` is untouched. |
+
+WebCodecs is already required for MP4 export (D§4.21). A browser without `VideoDecoder` can still use images; its video
+imports are refused with `media.err.noWebCodecs`.
+
+#### 11.4.2 The time model (FROZEN math; `core/media.mapTime`, `media/samples.sampleAt`)
+
+For a media node at frame time `t` (absolute seconds; export frame `i` is at `t0 + i/fps`, D§4.21):
+
+1. **Element time** `τ`:
+   - clock `show`: `τ = tl − T.origin`, where `tl` is the scene-local time. `origin` is 0 for ground scenes (segment
+     time) and `times.a` for cut scenes, so the clip starts when the cut appears.
+   - clock `song`: `τ = t`. The clip runs continuously with the song, and at song time 0 it shows `clipIn`.
+2. **Media time** `m = mapTime(T, τ)`, with `end = clipOut > clipIn ? min(clipOut, dur) : dur`,
+   `span = max(T.frame, end − clipIn)` and `x = max(0, τ) · speed`:
+   ```
+   loop:  m = clipIn + (x − span · Math.floor(x / span))
+   hold:  m = clipIn + Math.min(x, span − 0.001)          // clamped 1 ms before the end: the last frame stays on screen
+   ```
+3. **Source frame** `i = sampleAt(table, m)`: the largest presentation index with `pts[i] ≤ m + 1e-4`, found by binary
+   search, or 0 when there is none.
+   - Why `EPS_MEDIA = 1e-4`: at a 30-fps source, `m = 7/30` may evaluate to `0.23333…32`, just below the exact frame
+     start, and without the tolerance the previous frame would show.
+   - 0.1 ms is far below any frame duration the app accepts (8.3 ms at 120 fps), so the rule is "sample and hold, with
+     frame starts rounded toward the later frame", and it is the same everywhere.
+4. **Timestamps:**
+   - `pts` values are float64 seconds, computed once by the demuxer from integer ticks as `(cts − shift) / timescale`.
+   - The chunk timestamp given to the decoder is `ts[d] = Math.round(pts · 1e6)` µs, which is unique for every sample
+     and is the key used to match decoder output to samples.
+
+Everything above is closed-form in `t`. So frame N rendered directly equals frame N rendered after frames 0..N−1
+(§7.1.3, D§7.1.4). Preview frames at any rate and export frames at 24, 30 or 60 fps pick their source frames by the same
+function. Export at any output size picks the same source frames: size affects only the still tier (§11.4.6).
+
+#### 11.4.3 Demuxing (package G; pure, Node-tested)
+
+**ISO BMFF (MP4, M4V, MOV, fragmented MP4)** — `media/isobmff`:
+- **Box walk.** It reads 8/16-byte box headers from the top level and seeks over `mdat` and unknown boxes. `moov` is
+  read whole (it is normally < 10 MB; the parser refuses one over 64 MB). For fragmented files, every `moof` (`mfhd`,
+  `traf`/`tfhd`/`tfdt`/`trun`) is read the same way, skipping each `mdat`. `mvex`/`trex` supply the defaults.
+- **Video track.** It is the first `trak` whose `hdlr` is `vide` and whose sample entry is `avc1`/`avc3`, `hvc1`/`hev1`,
+  `vp09`, `av01` or `vp08`. The configuration boxes `avcC`, `hvcC`, `vpcC` and `av1C` become `description`. Other sample
+  entries (`apch`, `ap4h`, `mp4v`, …) become `codec: '<fourcc>'` and are refused later by `isConfigSupported`.
+- **Codec strings:**
+  - `avc1.` followed by the hex of the profile, constraint and level bytes of `avcC`;
+  - `hvc1.`/`hev1.` following ISO/IEC 14496-15 Annex E (profile space and idc, reversed compatibility flags, tier and
+    level, constraint bytes with trailing zero bytes dropped);
+  - `vp09.PP.LL.DD` from `vpcC`;
+  - `av01.P.LLT.DD` from `av1C`.
+- **Sample table.**
+  - Decode order comes from `stts` (durations), `ctts` (composition offsets, version 0 or 1), `stsz`/`stz2`, `stsc` and
+    `stco`/`co64` (offsets), and `stss` (key frames; all samples are key frames when it is absent).
+  - Presentation times are `cts = dts + ctts`. Edit lists: the first non-empty edit's `media_time` shifts presentation
+    time, and samples whose presentation falls before it are pre-roll (fed to the decoder, never shown). Initial empty
+    edits are ignored: the clip starts with its first shown frame.
+  - After the shift, `pts` is sorted ascending and made to start at 0.
+- **Rotation.** The `tkhd` matrix is recognised as 0, 90, 180 or 270 degrees. Any other matrix gives `rot: 0` and a
+  probe warning. Displayed `w`/`h` are the coded size, swapped for 90 and 270.
+- **Colour.** `colr` of type `nclx` gives primaries, transfer, matrix and full range, and becomes the
+  `VideoDecoderConfig.colorSpace` and `entry.color`/`hdr`. `nclc` (MOV) is read the same way.
+
+**Matroska / WebM** — `media/matroska`:
+- **EBML parse.** It reads variable-length element ids and sizes. The unknown size is accepted only for `Segment` and
+  `Cluster`.
+- **Header elements:** `Info/TimestampScale` (default 1,000,000 ns) and `Duration`. From `Tracks/TrackEntry`: `CodecID`
+  (`V_VP8`, `V_VP9`, `V_AV1`), `CodecPrivate` (AV1: `av1C`), `Video/PixelWidth` and `PixelHeight`, `Video/AlphaMode`,
+  `Video/Colour` (range, primaries, transfer, matrix), `DefaultDuration`.
+- **Frames.**
+  - The parser scans every `Cluster` sequentially in 4 MB windows. Only element headers are parsed; the data inside a
+    window is skipped, but the window is still read.
+  - From each `SimpleBlock`, and each `BlockGroup` with its `Block`, `ReferenceBlock` and
+    `BlockAdditions/BlockMore(BlockAddID 1)/BlockAdditional`, it records the frame's byte range, the key flag and the
+    alpha payload range.
+  - Frame time = `(ClusterTimestamp + relative) · TimestampScale / 1e9` seconds.
+- **Laced video blocks** are refused (`media.err.container`).
+- **Codec strings:**
+  - VP9: `vp09.PP.LL.DD`. The profile and bit depth come from the first key frame's uncompressed header (frame marker,
+    profile bits, and for profile ≥ 2 the bit-depth flag). The level comes from the D§4.21-style table of size and rate:
+    `10, 11, 20, 21, 30, 31, 40, 41, 50, 51`.
+  - VP8: `vp8`.
+  - AV1: the string built from `CodecPrivate`'s `av1C`.
+- **Cues** are not needed: the sample table is complete, so no seek index is required.
+
+Parsing a 1 GB WebM reads the whole file once, at disk speed (≈ 1–3 s), during import only. The result is cached in
+`mediaIndex`, so opening a project never scans again.
+
+#### 11.4.4 Decode sessions (package G; `media/host/session`)
+
+A session owns one `VideoDecoder`, plus a second one for WebM alpha, for one asset in one store fork.
+
+- **Configuration:**
+  - `{ codec, description, codedWidth, codedHeight, colorSpace, optimizeForLatency: false, hardwareAcceleration }`.
+  - **Export** forks use `prefer-software` when `isConfigSupported` accepts it, else `no-preference`. Software decoders
+    (ffmpeg's H.264, libvpx, dav1d) are bit-exact for conformant streams, so the same browser build gives identical
+    export pixels on any machine, which is D§7.1.8 extended to media.
+  - The **preview** uses `no-preference` (hardware when available).
+- **`request(i)`** (the presentation index) returns a Promise that resolves to the held frame:
+  1. If the frame whose chunk timestamp is `ts[dec[i]]` is held, resolve at once.
+  2. `{ from, to } = runFor(table, i)`. `c` is the decode cursor, the next sample to feed.
+     - If the target was fed (`c > to`) since the last reset but has not been output yet, wait for it.
+     - Else, if `c ≤ to` and `to − c ≤ AHEAD_MAX` (240 samples), keep feeding forward from `c`. This includes `c <
+       from`: the run then passes through the key frame at `from`.
+     - Otherwise **seek**: `decoder.reset()`, `configure(config)`, set `c = from` and drop the held frames.
+  3. Feed the decode-order samples `c, c + 1, …` as `EncodedVideoChunk({ type: key[c] ? 'key' : 'delta', timestamp:
+     ts[c], duration, data })`. Keep `decodeQueueSize ≤ 8`, waiting on the `dequeue` event.
+     - Stop feeding as soon as the target frame has been output. With B-frames, the decoder outputs it only after a
+       few later samples (in decode order) have been fed.
+     - At the end of the table, call `flush()` to drain. A flush forces the next chunk to be a key frame, so the session
+       then treats the next request as a seek.
+  4. **Output callback.** Each output frame is matched to its sample by its timestamp.
+     - Frames at or after the smallest outstanding target are **held**. At most `HOLD = 3` frames per session are
+       held, plus the last frame shown; the oldest is closed first.
+     - Every other frame is `close()`d at once. Holding a decoded frame too long stalls hardware decoders.
+- **Look-ahead hints** (`hint(list)`, from `want()`) never send the decoder back: a hinted frame behind the decode
+  position (output since the last seek, or in a GOP before the one the decoder started from) is decoded when it is
+  requested. Otherwise the look-ahead of a loop's first frame resets the decoder under the frames about to be drawn, and
+  they are decoded again from their key frame (measured: ≈ 150 ms at every loop of a 1080p one-GOP clip).
+- **Hints never close a frame about to be shown** (the stage hints 8 frames; `HOLD` is 3). The first two rules are
+  needed. Without the first, without the second, or with the first counting frames by index alone, real-time preview
+  playback (media_exact.py) fell to 34–138 of 127–150 frames shown right and baked, or made more seeks than the clip
+  has loops.
+  - A hint is decoded only while at most `HOLD` frames still to be shown are held. That count includes the last frame
+    decoded, and it covers the frames after the shown one and the hinted ones: a loop's start comes after its end. The
+    hints resume on `show()`.
+  - Past a hinted target, the next chunk is fed only once the decoder has made no progress for `SETTLE_MS` (20 ms): it
+    needs more input, as reordered frames do. A request (a waited-for target) still takes the next chunk as soon as the
+    decoder has taken the previous ones. Every frame output past the target is held. Once more than `HOLD` are held,
+    `evict()` closes the oldest, which in playback is the next frame to be shown.
+  - A request preempts a hinted target at once. No fixture here exercises this: it is meant for decoders that output a
+    frame only after more input (reordered H.264, frame-threaded software decoders). Such a decoder gets each hinted
+    frame only after `SETTLE_MS` per extra chunk, so its look-ahead lags and requests take over. That is not measured
+    here: this Chromium has no H.264 encoder to make the fixture, and the CI Chrome encodes baseline H.264, which has no
+    reordered frames.
+- **Frame hooks** (additive, for the store): `onHeld(i)` when frame `i` becomes held (the store bakes a hinted frame
+  then), `onDrop(i)` when a held frame is closed by eviction (the store closes that frame's baked copies with it).
+- **Reads.** Payloads are read with `read(off, size)` and coalesced into windows of at most 4 MB of consecutive samples,
+  from `Blob.slice().arrayBuffer()`. Nothing is read twice while the cursor moves forward.
+- **Errors.** A decoder `error` resets the session once and retries from the previous key frame. A second error sets
+  `info(id)` to `{ state: 'error', code: 'decode' }`. The preview then shows the placeholder, and export fails with
+  `ExportError('media', { name })`.
+- **Animated images** (`AnimSession`) use `ImageDecoder({ data: blob.stream(), type: mime })` and
+  `decode({ frameIndex: i })`. They are random access, so there is no seeking cost. Decoded frames are cached as
+  `ImageBitmap`s in an LRU capped at 64 MB per asset.
+
+#### 11.4.5 Preview and export
+
+- **Preview** (`ui/stage` render loop):
+  1. Before each frame: `assets.want(engine.mediaAt(t))`. While playing, it also asks for `engine.mediaAt(t + k / 30)`
+     for k = 1…8, which is 0.27 s of look-ahead.
+  2. `drawMedia` calls `frame(id, m, { exact: false })`. The store returns the exact frame when it is held. Otherwise it
+     returns, in this order: the nearest held frame at or before the target, the last frame shown for that id, the
+     nearest filmstrip frame, the poster. That result has `exact: false` and `dc.mediaWaiting` is counted.
+     - A blurred video or animation (`want.blur > 0`) is exact only with its baked copy (§11.4.6; a contract change,
+       §11.3.6). While that bakes, the provisional result depends on whether the exact frame is held. If it is held,
+       the result is the baked copy of one of the `NEAR_BAKED = 2` frames before it (playback: the frame shown a moment
+       ago), else the exact frame unbaked (`blur` 0: the engine blurs it itself and counts a fallback). If it is not
+       held, the result is the frame the order above picks, as its baked copy when there is one, else unbaked. All of
+       these have `exact: false`, and the `ready` event follows the bake.
+  3. `FrameStats.provisional` is then true, and the stage already redraws paused provisional frames (`retrySoon`,
+     `PROVISIONAL_RETRY_MS`). It also redraws on the store's `ready` event.
+  - There is no spinner over the preview. When media frames have been pending for more than 400 ms, the play bar's time
+    readout shows a small dot, with the tooltip 「映像を準備中」.
+- **Export** (D§4.21 amended; `export/host/mp4`, `png`, `webm`, `kit`):
+  1. `prepare(t0, t1, { export: true })` also runs `assets.ready(stills used in [t0, t1])`, which decodes every still at
+     its export tier while it fits the still budget.
+  2. For each frame `i`, before `renderFrame`: `await e.mediaReady(t0 + i / fps, { signal })`. For a blurred video or
+     animation, `ready()` resolves only once the baked copy of that frame is held (§11.4.6), so export frames draw it;
+     a bake that fails leaves the exact unbaked frame, which the engine blurs itself (counted as a fallback).
+  3. Export frames are therefore always exact. If the store cannot deliver a frame (a decode error or missing bytes), the
+     export stops with an `ExportError` that names the asset; it never renders a substitute.
+- **Time cost.** Export decodes each needed source frame once. At speed `s` it decodes about `s × source fps` frames per
+  output second, and the preflight notes a heavy clip when `s · fps > 240`. A 1080p30 H.264 background adds about
+  1–3 ms per frame with software decoding on a mid-range laptop. Package G measures and records the real figure in
+  NOTES.
+
+#### 11.4.6 Stills and animated images
+
+- **Decoding:**
+  - `createImageBitmap(blob, { imageOrientation: 'from-image', colorSpaceConversion: 'default', premultiplyAlpha:
+    'default', resizeWidth, resizeHeight, resizeQuality: 'high' })`.
+  - EXIF orientation is applied by the decoder, so `entry.w`/`h` are the upright size and nothing else needs rotating.
+- **Tiers.** A still is decoded at the smallest tier `≥ need`, capped at the source long side and at 24 MP.
+  - Tiers are `512, 1024, 2048, 4096, 6144, 8192` px on the long side.
+  - `need = ceil(longest side of the node's box in du × output device px per du × headroom)`. `headroom =
+    cropZoom × (1 + Ken Burns zoom) × 1.15`, fixed at build (§11.5.1), where 1.15 is the camera allowance. The tier is
+    therefore a function of the scene and the output scale, never of the frame. There is no switching between frames,
+    so there is no flicker and determinism holds.
+  - The preview and the export may use different tiers, like the DPR: resampling may differ slightly, but the source
+    rect is the same.
+- **Blur of a still** is made by the store: a copy downscaled by `max(1, blurPx / 4)`, filtered with `ctx.filter = 'blur(…)'`
+  in the host, and cached with the key `(id, tier, blur level)`. Blur levels are quantized to `0, 2, 4, 8, 16, 32, 64` du,
+  the sprite rule of D§4.19.5 with one more step. A blur between two levels crossfades the two cached copies.
+- **Animated images** use the video path: their table comes from the frame durations read at import, and they loop by
+  default.
+- **Blur of a video or animation frame** is made by the store too, once per source frame, never per output frame:
+  - **Key:** `(id, index, b, σ)`. The copy is `1/b` of the frame, with `b` the largest power of two ≤ 8 whose copy keeps
+    a long side ≥ `px / 4` (`px / 8` when `blur` ≥ 8 device px), so the copy's long side lies in `[px/4, px/2)`: 480×270
+    from a 1080p source in the 720p preview, 960×540 in a 1080p export. `σ` in copy px = `blur × copyLong / px` (the
+    still rule, headroom included), rounded to 1/32 px. The blur is not snapped to the still levels (a 1080p export's
+    3 px would become 2 px). `px` and `blur` are the request's own (`ready()`/`want()` item, `want`), so the copy is a
+    function of the frame and the request only.
+  - **The factor for a small blur (signed off by the lead).** The rule applies to every blur > 0, including the
+    2 device px of a `back` ground in the 720p preview. That copy is 480×270, ≈ 1/3 of the drawn 1472 px. The
+    principle's premise ("a large blur is visually identical at 1/2–1/4 scale") holds only loosely there: the engine's
+    own per-frame blur works at 1/2 of the output below 8 px (`engine/render/post.blurred`). A copy of at least half the
+    drawn size (`b = 2`, 960×540) costs 13.2–13.6 ms per source frame in software. That is the JS conversion 6.3 ms
+    and `ctx.filter` at that size 7.2 ms, against 3.2 ms at `b = 4`, and the media row then fails: p50 24.1–25.3 ms.
+    The look difference at `b = 4` is under **Look**.
+  - **Pixels** (`media/host/bake`): a `VideoFrame` whose format is 8-bit I420 or NV12, with a known matrix
+    (`media/yuv.supports`) and `b ≥ 2`, is copied out (`copyTo`, the visible rect) and reduced in JS (`media/yuv.toRgba`:
+    a box average, the matrix and range of `VideoFrame.colorSpace`, fixed point). That includes a GPU-backed frame that
+    reports one of these formats: `copyTo` reads it back. Nothing tells how a frame is backed, and the readback's cost
+    on a GPU machine is not measured (no GPU here). Any other frame takes the canvas route: format `null` (an opaque GPU
+    frame can have it), 10-bit or alpha formats, an unknown matrix, the alpha-merged or animation `ImageBitmap`, or
+    `b = 1`. The browser draws it into a copy-sized canvas. The route depends on the frame's own properties only, never
+    on history.
+  - **Blur:** `ctx.filter = blur(σ)` from a copy padded by `ceil(3σ)`: mirrored for opaque media (the frame edges stay
+    opaque, as the mirrored neighbours of §11.5.2 continue them), transparent for media with alpha. Without
+    `ctx.filter`, a smaller copy scaled back up stands in. The result is an `ImageBitmap` (`transferToImageBitmap`).
+  - **When:** in `ready()` (export: the frame of the list), and for the preview in idle slices, at most one per slice:
+    the frame on screen first, then the frames of the latest `want()` list in list order, each as soon as the session
+    holds it (the session's `onHeld` starts the queue). Never in the decoder's output callback, never frames skipped at
+    speed. Measured with the stage's 8-frame look-ahead, playing in real time at 30 fps (media_exact.py; NOTES "Perf:
+    media row", review round 2). After the first second, 264–285 of 269–285 frames showed their exact baked frame in
+    10-s runs, with one bake per source frame. Before this rule it was 5 of 300 in the probe, and 69 of 300 in the
+    reviewer's.
+  - **Look (signed off by the lead):** close to the per-frame blur it replaces, and without the darker fringe the
+    per-frame blur of the whole frame left at the frame edges. `media_exact.py` asserts MAE ≤ 3 of 255 inside the frame
+    on a hard-edged pattern, and ≤ 3 inside flat colour, where only the colour conversion shows. Measured: MAE 2.21 at
+    720p (the largest difference 65 of 255, 4.6 % of the pixels off by more than 16) and 1.30 at 1080p (the largest 20).
+    σ is ≈ 0.87 × the per-frame blur's at camera zoom 1, because px includes the 1.15 camera headroom, as the still
+    rule does. The JS colour conversion follows the standard BT.709 / BT.601 coefficients. This Chromium's libyuv
+    differs from them by up to 13 of 255 in blue at an extreme U. Export pixels of a blurred video therefore change,
+    deterministically. `tests/golden/project_media.json` was regenerated for it (frame hashes only), signed off by
+    the lead (§7.5). A bake that fails in an export leaves that one frame with the per-frame look (the edge fringe)
+    among baked frames. It is counted in `FrameStats.media.fallback`, which the export fixtures assert to be 0.
+
+#### 11.4.7 Caches and memory bounds (D§7.3 additions)
+
+| Cache | Key | Bound |
+|---|---|---|
+| Still bitmaps (per page, shared by forks) | (id, tier) | 320 MB LRU; ≤ 24 MP per bitmap; export waits and evicts instead of failing |
+| Blurred stills | (id, tier, blur level) | inside the 320 MB |
+| Held video frames | per session | `HOLD = 3` + the last frame shown |
+| Baked video and animation frames (§11.4.6) | per session: (variant, frame) | one per held frame and variant, at `1/b` size, closed when the session closes its source frame (`onDrop`) or with the session; so at most HOLD + shown + pinned + the frame being decoded (measured: ≤ 5 in a 600-frame 1080p export and while playing, never more than the frames held) |
+| Video sessions (per store fork) | asset | Σ coded pixels of open sessions ≤ 16.6 MP (two 4K, or eight 1080p). The least recently used session closes first and reopens with a seek. |
+| Decoder queue | per session | ≤ 8 chunks in flight |
+| Read windows | per session | ≤ 4 MB |
+| Animation frames | (id, frame) | 64 MB per asset |
+| Posters, filmstrips | id | IndexedDB `thumbs`; in memory, the UI thumbnail LRU of D§7.3 (200 entries) |
+| Sample tables | id | IndexedDB `mediaIndex`; in memory, while a session or the library needs them |
+
+At 4K, a decoder may keep up to 16 reference frames in its own memory. The pixel bound above keeps the worst case of the
+preview and one export fork running together at about 1 GB of decoder memory.
+
+#### 11.4.8 4K
+
+- A 4K source into 2160p output is fully supported. With software decoding, export runs at roughly 20–40 fps of 4K
+  H.264 on a mid-range laptop. The ETA shows it.
+- A 4K source in the 720p preview is decoded by hardware when available. If decoding falls behind playback, the preview
+  shows the nearest frames: playback never waits, and the frame is exact when paused.
+- An 8K source is refused (§11.2.8).
+- A still is never decoded above 8192 px or 24 MP. A 2160p cover background needs about 4400 px on the long side with
+  the default mirror edges (3840 × the 1.15 camera allowance), or about 5700 px with edge `zoom` (× 1.3 bleed). Both
+  fit the 6144 tier, within 24 MP for a 3:2 or wider photo.
+
+#### 11.4.9 Colour
+
+- The canvas is sRGB; the engine never asks for `display-p3`.
+- **Stills:** `colorSpaceConversion: 'default'` converts ICC-tagged and wide-gamut images to sRGB. Out-of-gamut colours
+  clip.
+- **Video:** the decoder config carries the container's colour description (`colr` or `Colour`). The browser converts
+  YUV to sRGB when a `VideoFrame` is drawn (BT.601, BT.709 or BT.2020 matrix; limited or full range). HDR (PQ, HLG) is
+  tone-mapped by the browser. That is not guaranteed to be the same across machines, so HDR assets carry the `hdr` badge
+  and a preflight info item.
+- **Export encoding** is unchanged (D§4.21). A video background goes YUV → sRGB (canvas) → YUV (encoder), and colours
+  stay within ±2/255 of the preview's.
+
+#### 11.4.10 Alpha
+
+- **PNG, WebP, AVIF, GIF and APNG** keep their alpha in the `ImageBitmap`, and drawing composites with it.
+  - `entry.alpha` comes from a 64×64 decode at import: `getImageData` in the host, and true if any alpha < 255. This is
+    reliable for every format, so no header parsing is needed.
+- **WebM VP8/VP9 with alpha** (`AlphaMode = 1`, with the alpha frames in `BlockAdditional` id 1):
+  1. The session runs a **second `VideoDecoder`** on the alpha payloads, which are ordinary VP8/VP9 frames whose luma is
+     the alpha. Each alpha payload gets the same timestamp as its colour frame.
+  2. For each timestamp pair (colour `C`, alpha `A`), the host merges in `media/host/session`:
+     - `A.copyTo(buf)` in I420 layout; the Y plane gives the alpha bytes (0–255, used as is, the way Chrome's own WebM
+       player does).
+     - `putImageData` of an `ImageData` with `a = Y` and rgb 0 into a mask canvas.
+     - `drawImage(C)` into an output canvas, then `globalCompositeOperation = 'destination-in'` and `drawImage(mask)`.
+     - `transferToImageBitmap()`; the result is held like a frame. `C` and `A` are closed.
+  3. Cost: ≈ 4–7 ms per 1080p frame. Alpha videos above 1920×1080 are refused as alpha (they play opaque, with a note).
+- **HEVC with alpha** (Apple MOV) and ProRes 4444 are not decodable by WebCodecs: the video plays opaque, or is refused
+  for ProRes.
+- **Transparent and keyed backdrops** (D§4.19.4 extended):
+
+  | Backdrop | `photoPan` (ground layer) | `photoFrame`, `textFill` (far, mid and text layers) | `mediaLayer` (`sceneOnly`) |
+  |---|---|---|---|
+  | `scene` | drawn | drawn | drawn |
+  | `chroma` (green screen) | not drawn: the ground layer is off | drawn | skipped |
+  | `black` | not drawn | drawn | skipped |
+  | `clear` (透過PNG, 透過WebM) | not drawn | drawn with its own alpha | skipped |
+
+  - When a ground or overlay medium is skipped, the export preflight adds the info item `media-skipped` (§11.7.9), and
+    the inspector marks those rows 「この背景の種類では書き出されません」.
+  - A transparent export with cut media keeps their alpha exactly, as PNG glyphs do (`transparent_check.py` extended,
+    §11.8).
+
+#### 11.4.11 CSP and browser APIs
+
+The CSP of D§2.6 does not change:
+- `media-src blob:` is not used by rendering. The SVG rasterizer uses `<img src=blob:>`, which falls under `img-src
+  blob:`. The UI shows posters as `<canvas>` or `<img src=blob:>`, also under `img-src blob:`.
+- No `fetch`: `connect-src` is unchanged, and the vision request goes to the Gemini host, which is already allowed.
+- `worker-src 'none'` stays, because decoding needs no Worker.
+- WebCodecs, `ImageDecoder`, `createImageBitmap`, IndexedDB and the File System Access API need no CSP source.
+- Object URLs are revoked right after use.
+- `csp.py` runs the import, placement, playback, export, package and vision flows (§11.8.3) and asserts 0 violations.
+
+#### 11.4.12 Third-party code: none
+
+Our own demuxers are ≈ 1,100 LOC with tests. The candidates considered were rejected:
+- `mp4box.js` (BSD-3-Clause, ≈ 190 KB minified): MP4 only; a WebM demuxer would still be needed.
+- Mediabunny (MPL-2.0, ≈ 100–150 KB minified for demuxing): it would add a second licence family and a second adapter.
+- WASM demuxers such as web-demuxer (ffmpeg based): they need `'wasm-unsafe-eval'` in `script-src`, which changes the
+  CSP.
+
+If G's demuxer slips, the fallback is Mediabunny, unmodified, at `vendor/mediabunny.min.js`, behind one adapter
+(`media/demux_vendor.js`), with its notice in `THIRD_PARTY_NOTICES.md` and the About page (D§1.4). Using the fallback
+needs a D§9.4 decision by the lead.
+
+#### 11.4.13 Import steps (`media/host/probe.importFile`)
+
+1. **Sniff** the first 64 KB (§11.3.4). HEIC, unknown types and over-limit header dimensions are refused before
+   anything else is read.
+2. **Hash.** Read the file in 8 MB slices, computing SHA-256 and CRC-32 in one pass (§11.3.3). Progress goes to
+   `onProgress`, and the `signal` cancels. The work yields through `idle` between slices.
+3. **Deduplicate.** The id is `'a' + hex24`.
+   - If `doc.media` already has it, the result is `fresh: false` and the UI selects that entry.
+   - If the `media` store already has the blob, the bytes are not stored again.
+4. **Probe:**
+   - **Image:** decode at full size (≤ 40 MP, checked in step 1) to get the upright `w`/`h`. Make the poster from that
+     decode; make the alpha test from a 64×64 decode. Close the bitmaps.
+   - **SVG:** rasterize to PNG (§11.1.1) and restart at step 2 with the PNG.
+   - **Animation:** use `ImageDecoder`. Read `tracks.selectedTrack.animated` and `frameCount`, decode every frame once
+     to read its `duration`, build the table, and make the poster and the filmstrip.
+   - **Video:** demux and pick the first video track. Check `isConfigSupported` with software, then hardware. Decode the
+     first frame for the poster and 12 key frames spread evenly for the filmstrip. Read colour, HDR and audio presence,
+     compute `stats` (GOP), and build the entry.
+5. **Store** in one IndexedDB transaction per store: the blob, the `crc` and the name in `media`; the table in
+   `mediaIndex`; the poster and filmstrip in `thumbs`.
+6. **Return** the entry. The UI dispatches `media.put`, which is the undoable step. Undo leaves the blob stored, and
+   pruning removes it later.
+
+**Import time** on a mid-range laptop: hashing ≥ 150 MB/s, so a 1 GB video takes ≈ 7 s. An MP4 probe takes < 0.3 s; a
+WebM scan runs at disk speed. Imports run one at a time in a queue, and each can be cancelled.
+
+### 11.5 Engine, kit and parts
+
+#### 11.5.1 The media node (`sb.media`; FROZEN record)
+
+```js
+sb.media({ parent?, layer, owner?, x = 0, y = 0, rot = 0, sx = 1, sy = 1, alpha = 1,
+           src,                        // AssetId; the builder refuses '' (K.media returns -1 before calling it)
+           box: { x, y, w, h },        // du: the rect the media is fitted into, in the node's frame
+           fit: 'cover' | 'contain' | 'soft', crop: { zoom, x, y },   // zoom ≥ 1; x, y = focus point 0..1 of the source
+           edge: 'mirror' | 'zoom' | 'plain',                          // how the bleed around `box` is filled (grounds)
+           bleed: 0 | 0.15,            // the bleed share around box covered by the edge rule
+           mask: ShapeSpec | null,     // clip in box coordinates (K.shape data); null = none (the image's own alpha)
+           comp: 'over' | 'atop' | 'screen' | 'multiply' | 'overlay',
+           blur: du, veil: { ink, a } | null, tint: { ink, a } | null,
+           time: TimeSpec | null,      // from core/media.timeSpec; null for stills
+           headroom,                   // §11.4.6 tier headroom (fixed at build)
+           sceneOnly: boolean })       // skipped unless the backdrop is 'scene' (mediaLayer)
+  → node
+```
+
+- The builder stores `FitRect = core/media.fitRect(env.media[src], box, fit, crop.zoom, crop.x, crop.y)` at build, so
+  nothing about framing is computed per frame.
+- Pose columns apply as they do for an `image` node: position, rotation, scale and alpha. Behaviours such as Ken Burns
+  and appear animations move the node.
+- The node is pickable (D§4.19.7). Picking returns the owner (`ground`, `ornament#i` or `atmos`), so clicking a photo on
+  the preview selects 要素 › 背景 or 装飾.
+
+#### 11.5.2 Fit, crop and edges (FROZEN math; `core/media.fitRect`)
+
+The source is `S = (W, H)` in displayed px (after `rot`). The box is `B = (bx, by, bw, bh)` in du. The focus point is
+`(fx, fy)` ∈ [0, 1]² and the crop zoom is `z ≥ 1`.
+
+```
+cover:    s  = z · max(bw / W, bh / H)                     // du per source px
+          sw = bw / s,  sh = bh / s                        // visible source rect size
+          sx = clamp(fx · W − sw/2, 0, W − sw),  sy = clamp(fy · H − sh/2, 0, H − sh)
+          dest = B
+contain:  s  = z · min(bw / W, bh / H)
+          dw = W · s,  dh = H · s                          // the displayed image, before clipping to B
+          dx = bx + (bw − dw) · fx',  dy = by + (bh − dh) · fy'    // fx' = fx when dw > bw, else 0.5 (centred); fy' alike
+          dest = D ∩ B, source = the preimage of dest (clipped to S)
+soft:     contain as above, drawn over a cover copy of the same source with zoom 1.08, blur 24 du and veil { ground, 0.25 }
+```
+
+- **The focus point is also the crop.** The stage crop overlay (§11.7.6) moves `(fx, fy)` and changes `z`. A
+  non-uniform crop cannot be expressed; in practice, the box's aspect is the crop's aspect.
+- **Edges (grounds only).** A ground must cover the frame plus the 15 % bleed (D§4.19.3) while the camera moves. Fitting
+  the media to the frame exactly and then enlarging it by the bleed would crop the user's picture by 30 %. The rule
+  `edge` decides:
+  - `mirror` (default): fit to the **frame**. The bleed ring is filled by the same source rect, flipped horizontally
+    and/or vertically: the 8 neighbours of `dest`. Only neighbours that intersect the target's visible device rect are
+    drawn, usually 0–2 draws. At camera rest, the frame shows exactly the chosen crop.
+  - `zoom`: fit to the bleed rect (frame × 1.3). This was v2's `photoPan` behaviour: the picture is enlarged, and edges
+    never show.
+  - `plain`: fit to the frame. The ground colour shows in the bleed (the `photoPan` base paint).
+- **Ornaments** use their own box. `edge` does not apply to them.
+
+#### 11.5.3 Motion (Ken Burns)
+
+- The motion is one behaviour, `runKenBurns`: a module-level function in `parts/kit` with phase ORNAMENT and live
+  `always`, like `photoPan`'s `panZoom` today.
+- It is closed-form in the segment or cut-local time over the element's window `[w0, w1]`, with `u = clamp((tl − w0) /
+  (w1 − w0))`:
+  - `push`: scale `1 → 1 + zoom`;
+  - `pull`: scale `1 + zoom → 1`;
+  - `drift`: scale `1 + zoom/2`, with the translation moving along `pan` over `travel = 0.04 · short` (the v2 amount).
+  - `auto` means `push` plus the drift, which is v2's `photoPan`, for stills; for videos and animations it means `none`.
+- The scale pivot is the box centre (`px`, `py`).
+- `u` is linear, as in v2. The shared `lens.curve` idea is not applied, so v2 frames stay equal.
+
+#### 11.5.4 Effects, masks and blending
+
+- **Opaque media, no blur:**
+  - `veil`: `fillRect` of `q.rgba(ink, a)` over `dest` with source-over.
+  - `tint`: `fillRect` of the tint ink with `globalCompositeOperation = 'color'` at alpha `a`, clipped to `dest`.
+  - Both touch only the media's pixels, because the media is opaque inside `dest`.
+- **Media with alpha, or `comp: 'atop'`, or a video blur the frame did not bring baked** use the **isolated path**:
+  1. Draw into a pooled full-frame surface (`pool.take()`).
+  2. Apply veil and tint with `source-atop`.
+  3. Apply blur with `PO.blurred(pool, S, blurPx)`.
+  4. Composite onto the target with `comp`.
+  - This costs one extra surface, within the D§7.2 pool limits.
+- **Still blur** comes pre-made from the store (§11.4.6); no per-frame blur.
+- **Video and animation blur** comes pre-made from the store as well (§11.4.6: baked once per source frame,
+  `MediaFrame.blur > 0`), so a blurred opaque video takes the plain path: one draw of the small copy (and its mirrored
+  neighbours) plus the veil. The per-frame `PO.blurred` of the isolated path remains only as the fallback when a node with
+  a blur gets a frame with `blur` 0 (a provisional preview frame, a bake that failed); it is counted in
+  `FrameStats.media.fallback`.
+- **Mask:** `save(); setMatrix(M); B.replayShape(g, mask); clip(); … restore()`. The shapes come from `K.shape`, so all
+  geometry is ours. Clips are anti-aliased by the canvas.
+- **`comp`** sets `globalCompositeOperation` for the node's draw only, then restores `source-over`.
+- **`atop`** (text fill) needs the node's layer to be isolated. `textFill` sets `sb.layer('text', { isolate: true })`.
+  The media node is added after the text is committed, so its index is after the glyphs', and it paints only where
+  glyphs are, glow and shadow styles included.
+
+#### 11.5.5 `drawMedia` (engine/render/shapes; per frame, allocation-free)
+
+```
+1  m = rec.time ? MEDIA.mapTime(rec.time, rec.time.clock === 'song' ? dc.t : tl) : 0
+2  f = dc.assets ? dc.assets.frame(rec.src, m, want) : null        // want is a pooled object:
+     want.px = max(rec.box.w, rec.box.h) · dc.scale · rec.headroom;  want.blur = rec.blur · dc.scale (every medium);
+     want.exact = dc.quality === 'export'
+3  f null → preview: draw the placeholder (§11.7.8), dc.mediaWaiting++; export: throw EngineError('media-missing')
+   !f.exact → dc.mediaWaiting++ (export: throw 'media-not-ready')
+4  choose the plain path or the isolated path (§11.5.4; a timed frame's own blur only when f.blur is 0: the fallback,
+   dc.counts.mediaFallback++); set the transform M · R(rot) (rot about dest centre, 90° steps)
+5  drawImage(f.image, source rect mapped to coded px, dest rect); edge neighbours (mirror) when visible;
+   soft: the blurred cover copy first
+6  veil, tint, comp, mask, restore; dc.counts.media++; pick the dest quad
+```
+
+The source rect of step 5 is converted from displayed px to coded px through `rot`:
+- 90: `(sx, sy, sw, sh) → (sy, W − sx − sw, sh, sw)`;
+- 180 and 270 alike.
+
+The destination is drawn with the matching rotation. Tests cover all four angles against a rotated fixture.
+
+#### 11.5.6 `K.media` and `K.mediaParams` (parts/kit; FROZEN exports, additive to D§4.18.3)
+
+```js
+K.media(env, { parent?, layer, owner?, src, box, p, use: 'ground' | 'frame' | 'fill' | 'layer',
+               mask?, comp?, alpha?, window?: [w0, w1] }) → node | -1
+     // -1 when src is '' or env.media has no entry; reads env.media[src]; installs runKenBurns when the move is not none;
+     // sets sceneOnly for use 'layer'; time origin = 0 (ground scenes) or env.times.a (cut scenes)
+K.mediaParams({ src = 'src', accept = 'any', use, only?, autos? }) → { [name]: ParamSpec }    // the table below
+K.MEDIA = { FITS, EDGES, MOVES, LOOPS, CLOCKS, SHAPES: ['rect', 'round', 'circle', 'arch', 'free'],
+            PLACES: ['behind', 'side', 'corner', 'free'], BLENDS: ['screen', 'multiply', 'overlay', 'normal'] }
+```
+
+**Media params** (labels are `{ ja, en }` in the kit; every param is `ai: false`; `ui` is `basic` unless noted):
+
+| Name | Type and range | Auto | ja / en | Notes |
+|---|---|---|---|---|
+| `src` (`photoPan`: `image`) | `media`, accept per part | `''` | 写真・動画 / Photo or video | the source |
+| `fit` | enum `cover contain soft` | `cover` (frames: `cover`) | 収め方 / Fit | |
+| `cropZoom` | num 1–4, step 0.01, `x` | 1 | 拡大 / Zoom | the crop (§11.5.2) |
+| `cropX`, `cropY` | num 0–1, step 0.005, `frac` | 0.5 | 中心 横 / 縦 (Focus X / Y) | advanced; set by the stage overlay |
+| `edge` | enum `mirror zoom plain` | `mirror` | 端の処理 / Edges | grounds only, advanced |
+| `move` | enum `auto none push pull drift` | `auto` | 動き / Motion | Ken Burns |
+| `zoom` | num 0–0.4, step 0.01, `x` | range 0.06–0.14 | 動きの強さ / Motion amount | `photoPan`'s existing param |
+| `pan` | num −180–180, `deg` | range −180–180 | 動く向き / Direction | `photoPan`'s existing param |
+| `blur` | num 0–60, `du` | 0 | ぼかし / Blur | |
+| `veil` | num 0–0.9, step 0.01 | `photoPan` range 0.3–0.45; others 0 | 薄幕 / Veil | |
+| `veilInk` | ink | `ground` | 薄幕の色 / Veil colour | 黒 = dim |
+| `tint` | num 0–1, step 0.01 | 0 | 色味 / Tint | advanced |
+| `tintInk` | ink | `accent` | 色味の色 / Tint colour | advanced |
+| `clipIn` | num 0–3600, step 0.01, `s` | 0 | 使う範囲（始め） / Start at | video and animation |
+| `clipOut` | num 0–3600, step 0.01, `s` (0 = to the end) | 0 | 使う範囲（終わり） / End at | video and animation |
+| `speed` | num 0.25–4, step 0.05, `x` | 1 | 速さ / Speed | video and animation |
+| `loop` | enum `loop hold` | `loop` | 終わったら / At the end | video and animation |
+| `clock` | enum `show song` | `show` (auto-picked videos: `song`) | 時間の基準 / Clock | video and animation, advanced |
+
+- The inspector shows the video rows only when the chosen source is a video or animation. The field `when` reads
+  `plan.media[id].kind`.
+- The rows for `clipIn` and `clipOut` are drawn by the trim widget (§11.7.7).
+
+#### 11.5.7 Parts (package G)
+
+`parts/ground/photo.js`: **`photoPan`, upgraded in place.**
+- Keys are forever (D§7.1.9), and v2.0 shipped no asset store, so no v2.0 document holds a working image id (D§10.4).
+- Its label becomes 写真・動画 / Photo or video. Its blurb becomes 「写真や動画を背景にする（選んだときだけ）」 / "Your photo or
+  video as the background (only when chosen)".
+- It stays `pool: false`.
+- Params: `image` (type `media`, accept `any`), and `zoom`, `pan` and `veil` (names and ranges kept), plus the other
+  media params with `use: 'ground'`.
+- **Build:**
+  1. The base paint, as in v2.
+  2. `K.media(env, { layer: 'ground', box: frame, use: 'ground', src: p.image, p })`.
+  3. The veil moves into the node: the `veil`/`veilInk` params replace the v2 veil paint. The strength is
+     `veil · (0.6 + 0.4 · amount)`, as in v2.
+
+`parts/ornament/media.js` (new; every part `pool: false`; tags `['soft']` unless noted):
+
+| Key | ja / en | Scope, follow | Params (plus `K.mediaParams` with `use`) | Picture |
+|---|---|---|---|---|
+| `photoFrame` | 写真の枠 / Photo frame | cut, text | `place` (enum behind/side/corner/free; auto `side`), `size` (0.15–1 × short side; auto 0.42), `shape` (enum rect/round/circle/arch/free; auto `round`), `border` (0–40 du; auto 10), `borderInk` (ink; auto `ground`), `shadow` (0–1; auto 0.4), `tilt` (−15–15°; auto range −4–4), `appear` (enum fade/grow/slide/none; auto `grow`) | A photo or clip near the words. `behind` is centred on `hints.focus` in the far layer. `side` goes in the largest `hints.free` box, in the mid layer. `corner` goes in the lower right of the safe area. `free` is placed by `el.ornament#i.nudge`. The border is a stroked `K.shape` node. The shadow is 4 stepped offset shapes with alpha 0.08 each, with no filter. `appear` runs over `[a, rest]`; the exit is the automatic `follow: 'text'` envelope. |
+| `textFill` | 文字の中に / Inside the text | cut, text | `place` (enum frame/text: the media fitted to the frame, or to `hints.focus` enlarged 10 %; auto `frame`) | The media in the text layer with `comp: 'atop'`; the text layer is isolated. `amount` → media alpha `0.4 + 0.6 · amount` (auto `{ value: 1 }`). |
+| `mediaLayer` | 重ねる映像 / Overlay footage | run (atmos), own | `blend` (enum screen/multiply/overlay/normal; auto `screen`), `over` (enum text/behind: near layer or far layer; auto `text`) | Overlay footage such as light leaks, dust or rain over the scene. `amount` → alpha `0.2 + 0.8 · amount`. `sceneOnly`. |
+
+- Each of these parts declares `needs: ['media']`, which is additive to the D§4.18.1 needs vocabulary.
+- The lab (`ui/lab.js`, package B) gains `#media:<kind>/<key>@<aspect>&asset=fixture:<name>&t=…`, using the fake store's
+  fixtures.
+
+#### 11.5.8 Materials: the recipe layer `prim: 'media'` (§5.7.4 addition; `core/recipe`, package A; interpreter, package C)
+
+```json
+{ "prim": "media", "src": "", "fit": "cover", "place": { "anchor": "focus", "x": 0, "y": 0, "spread": 1 },
+  "size": [0.4, 0.4], "shape": "round", "border": 8, "inks": ["ground"], "alpha": 1, "layer": "mid",
+  "comp": "over", "time": { "clipIn": 0, "clipOut": 0, "speed": 1, "loop": "loop" },
+  "move": [], "appear": { "at": "arrive", "draw": "grow", "dur": 0.5 } }
+```
+
+- `src` is `''` or an AssetId.
+  - With `''`, the derived part gets a part param `src` (type `media`), a knob-like param that is always present. The
+    user or the AI then swaps the picture without editing the recipe. This makes a material a reusable frame style.
+  - With an id, that asset is fixed. The material's `mine.media` lists the ids, and the planner adds them to
+    `plan.media`.
+- **Limits:** ≤ 2 media layers per recipe, and ≤ 1 of them may be a video. Media layers are allowed only in ornament
+  and ground recipes.
+- **Static cost:** 0.4 ms per media layer, plus 1.5 ms with blur or alpha (`core/recipe.cost`).
+- **Flash rule:** a media layer's alpha may not be modulated by `beat` or `impact` with `dur < 0.15`, which is the §5.8
+  flash rule with `cover = size²`.
+- **C's interpreter** draws the layer with `K.media` when the kit exports it, and skips the layer otherwise (the C-alone
+  rule of §8.3). G's acceptance tests the complete path.
+- **AI materials:** `AI_LAYER` (§5.10) gains `media: STR`: `''` means the part param; `'asset:<n>'` means an asset from
+  the request's `[media]` list. Media layers are accepted only when the request allowed media (§11.6.1).
+
+#### 11.5.9 おまかせ with the user's media (planner and `parts/mix`)
+
+- **`registryFor(base, materials, media)`** (§5.9.2; the third argument is new):
+  - For every entry of `media.list` with `pool: true`, it derives a ground def:
+    `K.variant(photoPan, { key: MEDIA.keyOf(id), label: { ja: name, en: name }, blurb: { ja: 'マイ素材の写真・動画',
+    en: 'Your photo or video' }, tags: ['soft'], pool: true, weight: 1.5, params: { image: { auto: { value: id } } },
+    shared: {} })`, plus `mine: { id, rhash: id, cost: 0.4, by: 'user', media: true }`.
+  - For a video it also sets `clock: { auto: { value: 'song' } }` and `move: { auto: { value: 'none' } }`.
+  - The derived defs go through the same `REG.extend` call as the materials.
+  - Memo key: `(base, materials, media)` identity.
+- **`REG.extend` key rule** (§3.6 amended): keys match `^myMat[0-9a-z]+$` or `^myMed[0-9a-f]{10}$`, and `createRegistry`
+  refuses both prefixes.
+  - If two assets would get the same derived key (a 40-bit collision), the later one is skipped, and
+    `registry.problems` gets `media-key`.
+- **Chooser:** the derived defs join the ground pool like any part. They pass every season gate (no season), and filters
+  may include or deny them. The existing recency and runner-up rules keep one photo from repeating in neighbouring
+  segments.
+- **Planner rules** (package D):
+  1. A derived media ground is never chosen for a segment shorter than 3 s, and never for the `title` role; the weight
+     is 0 there.
+  2. `amount.groundSwitch` works unchanged.
+  3. The why code is `media.pool {name}`.
+- **UI:**
+  - The part browser hides derived keys (`registry.extra[key].media`) from the 背景 tiles. Its 写真・動画 tab shows the
+    assets themselves (§11.7.5).
+  - The filter page (D§6.4.5 部品) lists them with the asset name, so 「これだけ使う」 can mean "only my photos".
+
+#### 11.5.10 Fingerprints and caches
+
+- A scene's `fp` covers its decisions, which include the media ids, plus `mediaTerms` (§11.2.6). Changing the photo,
+  its crop or its range rebuilds only the scenes that use it.
+- Media nodes are never rasterized into static layer caches. Stills are drawn live with `drawImage`, which is cheap
+  because the bitmap is already decoded.
+- The UI thumbnail cache key (D§7.3) adds the asset ids of the part being shown. Thumbnails of media parts draw posters
+  only.
+
+#### 11.5.11 Determinism rules (additions to D§7.1 and §7.1)
+
+1. **Media time is closed-form in `t`** (§11.4.2). The source frame index is a pure function of the plan, `t` and the
+   sample table. Node tests assert it through the recorder op hash.
+2. **The export draws exact frames only** (the facade throws otherwise). The preview may draw provisional frames, and
+   they are marked.
+3. **Pixels of a decoded frame** are a function of (file, sample, browser build, decoder). Export forks prefer software
+   decoders, so identical exports hold across machines with the same browser build for H.264, VP8, VP9 and AV1. HEVC
+   and HDR are hardware or browser dependent and are labelled so.
+4. **The still tier is fixed per scene and output scale,** never chosen per frame.
+5. **No clock and no randomness** enter media code below L6. Hosts get time only through the injected `now` and `idle`.
+6. **Frame N rendered directly equals frame N rendered after frames 0..N−1,** with media (`determinism.py`, §11.8.3).
+
+#### 11.5.12 Performance budgets (against D§7.4; 720p preview, mid-range laptop, Chrome)
+
+| Work | Budget |
+|---|---|
+| `drawMedia`, still, full frame | ≤ 0.3 ms |
+| `drawMedia`, video frame, full frame (a hardware frame upload) | ≤ 0.8 ms |
+| Isolated path (alpha, atop, video blur) | ≤ +1.2 ms per node |
+| Mirror edges | ≤ 2 extra draws, usually 0 |
+| WebM alpha merge | ≤ 7 ms per 1080p frame (preview: ≤ one such asset on screen for the 10 ms target) |
+| `mediaAt(t)` | ≤ 0.05 ms (no behaviours; scene lists only) |
+| Frame total with one video ground and one still frame | the D§7.4 frame total: ≤ 10 ms target, 16.7 ms hard (`perf.py`) |
+| Scrub to a new time, GOP ≤ 2 s, 1080p, hardware | ≤ 250 ms to the exact frame (a poster or the nearest frame is shown first) |
+| Export overhead of one 1080p30 H.264 background at 1080p30 | ≤ +35 % of the same project's export time without it |
+| Import | hashing ≥ 150 MB/s; MP4 probe ≤ 300 ms; poster ≤ 200 ms |
+| Re-plan with media pins | unchanged (media resolution is O(pins)) |
+
+- The per-call `drawMedia` rows (still 0.3 ms, video 0.8 ms) assume a GPU: a frame upload and a scaled draw on the GPU.
+  With software raster (the GitHub CI runner, headless browsers without a GPU), every scaled full-frame draw of any
+  medium costs ≈ 2.6–3.5 ms per call, whatever the source size (measured with 480×270, 1472×828 and 1920×1080 bitmaps:
+  2.6–3.0 ms; an unscaled blit 0.3 ms). The software figures are recorded in NOTES ("Perf: media row"). The figures of
+  the reference laptop (§8.7) are still to be measured there.
+- An unblurred video (depth `anim` or `still`) is drawn from its `VideoFrame`. With software raster, each such draw
+  converts the whole 1080p frame (≈ 9.1–9.6 ms), and so does each mirrored neighbour. No way of preparing the frame ahead
+  of the draw is cheaper per frame here (NOTES). The frame total of such a project therefore stays near or above twice
+  the target in software. The prepared-frame principle ("draw a frame prepared ahead, at the size it is drawn") is
+  applied to blurred video and animation only. Whether and how to apply it to unblurred video is open for the lead.
+- The frame total of a media row is the whole iteration an exporter or a player runs: `await mediaReady(t)` (the
+  store's main-thread work for that frame: decoder output, the blur bake) plus `renderFrame` (§11.8.3).
+
+### 11.6 AI (package E; everything optional)
+
+#### 11.6.1 The `direct` tool places media (§5.2–§5.5 additions)
+
+- **When media is offered.** A request offers media only when `opts.media` is true. The UI sets it when the library has
+  at least one asset whose bytes are on this device and the checkbox 「写真・動画をAIが使ってよい」 (under 詳しく, on by
+  default) is ticked.
+- **Schema variant:** `directSchema({ mode, allowMaterials, media })` (§5.4) adds one property to `EDIT_PROPS`:
+
+  ```js
+  const MEDIA_AI = closed({ use: STR, as: en(['ground', 'frame', 'fill', 'overlay']), fit: en(['', 'cover', 'contain', 'soft']),
+                            blur: NUM, veil: NUM, from: NUM, speed: NUM });
+     // use: '' keep | 'none' (remove media the AI placed in the area) | 'asset:<n>' (the request's [media] list)
+     // blur 0–60 du, veil 0–0.9, from = the clip's start (s), speed 0.25–4: −1 keep
+  EDIT_PROPS += { media: MEDIA_AI }            // AREA_EDIT and LINE_EDIT; not CUT_EDIT; not the camera schema
+  ```
+
+  The portability test covers the variant.
+- **What is sent.** A `[media]` list is added after the part lists. It holds no pixels, ever:
+  ```
+  [media] the user's own photos and videos (use only these, as "asset:<n>")
+  asset:0 image 4032×3024 landscape "海辺.jpg" — 夕方の海、オレンジの空 · colours #F2A65A #3D5A80 · text area: upper third
+  asset:1 video 0:12 1920×1080 "街.mp4" — (no description)
+  ```
+  The description, colours and text area come from `entry.ai` (§11.6.2) when present. The limit is 40 assets, taken in
+  library order.
+- **System prompt paragraph** (English; added only with media):
+  「Media: the user's photos and videos are listed as asset:<n>. Use one only when the instruction asks for a photo or
+  video, or when it clearly fits the area. as = ground (background of the area), frame (a framed photo near the words),
+  fill (inside the letters), overlay (footage over the scene). Prefer ground for wide scenic pictures, frame for people
+  and objects, fill for textures. Never invent assets.」
+- **Mapping** (§5.5 table additions; every pin is `by: 'ai'`, in area lines or at `work` scope):
+
+  | Answer | Changes | Kind |
+  |---|---|---|
+  | `media.use = 'asset:n'`, `as: 'ground'` | `ground = photoPan`, `ground@photoPan.image = id`, and `fit`, `blur`, `veil`, `clipIn` (`from`), `speed` when not `''` or −1 | `part` + `value` (agg per slot) |
+  | `as: 'frame'` | `ornament#<first free idx> = photoFrame` and `…@photoFrame.src = id` (plus the same params) | `part` + `value` |
+  | `as: 'fill'` | `ornament#<first free idx> = textFill` and `…@textFill.src = id` | `part` + `value` |
+  | `as: 'overlay'` | `atmos = mediaLayer` and `atmos@mediaLayer.src = id` | `part` + `value` |
+  | `use: 'none'` | clears pins `by: 'ai'` in the area whose value is a media part (`photoPan`, `photoFrame`, `textFill`, `mediaLayer`) or an AssetId | `value` |
+
+- **Checks:**
+  - `n` must be in the sent list, else `ai.warn.mediaUnknown`.
+  - The kind must fit the part's `accept`.
+  - A video with `from ≥ dur` is clamped to 0.
+  - Every other §5.5 rule applies unchanged: locked lines, the area guarantee, the free-index rule.
+- **Review rows** read 「背景: 自動 → 写真「海辺.jpg」（5行）」 and show the poster as a 32 px thumbnail.
+
+#### 11.6.2 Vision: 「AIに説明してもらう」 (new module `ai/vision`; Gemini only)
+
+- **Why it exists:** a caption, tags, colours, a subject box and a calm text area make the `direct` answers better.
+  Nothing else uses them.
+- **Consent.**
+  - Before anything is sent, a consent card appears. It works like the audio card (D§4.22.6): per asset, for this
+    project only, and not saved. `ui/ai_controller` keeps `visionConsented: Set<id>`, which is cleared on a new or
+    opened project.
+  - Wording: 「選んだ写真を小さくして（長い辺 768px の JPEG、1枚 約{kb}KB）Google Gemini に送ります。この作品ではこのときだけ。」
+    / "The selected photos will be sent to Google Gemini, downscaled (JPEG, 768 px long side, about {kb} KB each), this
+    time only."
+- **What is sent:**
+  - **Photos:** one JPEG at quality 0.8, 768 px on the long side. The host makes it from the decoded still with
+    `canvas.convertToBlob`, and EXIF is not included.
+  - **Videos:** 3 JPEGs, at 10 %, 50 % and 90 % of the used range.
+  - At most 8 assets per request.
+  - The only text is the prompt below: no lyrics, and no file names beyond the list index.
+- **API:**
+
+  ```js
+  VISION_SCHEMA = closed({ items: arr(closed({ n: INT, caption: STR, captionEn: STR, tags: STRS, colors: STRS,
+    subject: closed({ x: NUM, y: NUM, w: NUM, h: NUM }), text: closed({ x: NUM, y: NUM, w: NUM, h: NUM }),
+    use: en(['ground', 'frame', 'fill', 'overlay']) })) })
+  visionRequest(doc, items: [{ id, parts: [{ inline_data: { mime_type: 'image/jpeg', data: base64 } }] }], { uiLang })
+    → { system, prompt, schema: VISION_SCHEMA, effort: 'low', media: parts }      // parts precede the prompt (D§4.22.1)
+  visionChanges(doc, json, sent) → { changes: Change[], warnings }                // kind 'media' → media.meta { id, ai }
+  ```
+
+- **Validation:**
+  - captions are trimmed to 60 characters, and syntax and control characters are removed;
+  - `tags` ⊂ the D§4.18.1 vocabulary;
+  - `colors` are `#RRGGBB`, at most 5;
+  - boxes are clamped to [0, 1];
+  - `use` is advisory: it is shown, and not applied.
+- **Review.** Each change row shows the caption and swatches. Applying runs one `store.batch`. The AI log keeps the
+  previous `ai` for selective revert. `Change.kind` gains `media`.
+- **The second AI service.** The tool is disabled with 「写真の説明は Google Gemini のときだけ使えます」. Vision with that service is out of scope
+  (§10).
+
+#### 11.6.3 Local colour matching (no AI)
+
+- The asset page's [この色に合わせる]:
+  1. The host decodes the still (or the poster, for a video) at 64×64 and reads it with `getImageData`.
+  2. `media/palette.dominant` returns up to 5 colours.
+  3. The UI proposes `accent` (the most saturated colour with contrast ≥ 3:1 against the resolved ground, using
+     `C.fitContrast`), plus `shiftA` and `shiftB` (the next two).
+- It is dispatched as one batch of `work:color.*` pins, labelled 「色を写真に合わせる」.
+- The same colours feed the `[media]` list when `entry.ai` has none.
+
+#### 11.6.4 Privacy (D§4.22.6, restated)
+
+- Media bytes leave the device only through the vision tool, only to Gemini, and only after consent.
+- The `direct` tool sends names, sizes and the vision text.
+- The always-visible notice gains 「写真は『AIに説明してもらう』のときだけ（小さくして）送ります」.
+
+### 11.7 UI (package G; D§6 additions)
+
+#### 11.7.1 Top level: unchanged
+
+- The header, the play bar and the step bodies keep their control budgets (`ui_layout.py` unchanged). Step ③ keeps
+  its 5 controls.
+- Step ③'s help line gains one sentence, which is text, not a control:
+  「写真や動画はプレビューにドロップすると背景になります（詳しく… › 写真・動画）」 / "Drop a photo or video on the preview
+  to use it as the background (Options… › Photos and videos)."
+- **Drop overlay** (the existing `is-dropping` state):
+  - the page overlay reads 「ここにドロップ: 歌詞・曲・作品・写真・動画」;
+  - while the pointer is over the stage, the stage outline reads 「背景にする（{scope}）」.
+- **Nothing covers the preview.** Progress and choices appear in the toast host (D§6.4.11) and the detail column.
+
+#### 11.7.2 Import flows (`ui/media_io`)
+
+| Where | What happens |
+|---|---|
+| **Drop on the stage** | Each file is imported (§11.4.13). The **first** image or video is then placed as the background at the current scope: 作品全体 when nothing, the root or a work page is selected; the selected lines (every line of a multi-line or area selection); the selected cut. This is one `store.batch`: `media.put`, `pin.set …:ground photoPan`, `pin.set …:ground@photoPan.image id`. Toast: 「背景を写真にしました（{scope}） [元に戻す] [ほかの使い方…]」. |
+| **Drop elsewhere, ≡ › ファイル › 写真・動画を読み込む…, the library's [＋ 読み込む], the picker's ＋ tile** | Import only (`media.put`). Toast 「{n}件を読み込みました [使い方を選ぶ]」, which opens the asset page (§11.7.3). From a picker (§11.7.5), the imported asset is also picked. |
+| **Paste** (a `paste` event carrying image files, outside text fields) | Import only. Without files, Ctrl+V keeps pasting the look (D§6.8). |
+| **Step ② drop of a video with audio** | Routed to media, as everywhere else. The toast adds [この動画の音を曲にする]. |
+
+- **Routing** (`openFiles`, D§6.14 `project_io`):
+  - the sniffer decides, not the extension;
+  - an MP4, MOV or WebM with a video track goes to media;
+  - audio-only MP4/M4A/WebM, and the audio extensions, go to the song;
+  - `.mojipv` and `.json` go to open project (§12);
+  - `.txt` and `.lrc` go to lyrics.
+- **Progress.** A single toast row reads 「読み込み中: 海辺.mp4 45%」 with [中止]. Imports run one at a time. The queue
+  count shows as 「（あと2件）」.
+- **Duplicates.** A file whose id is already in `doc.media` gives 「もう入っています: 海辺.mp4」, selects it, and places
+  it when it was dropped on the stage.
+
+#### 11.7.3 The library and the asset page
+
+**作品全体 › 写真・動画** (`sec.media`; open when the library is not empty; placed after 見た目):
+
+```
+▾ 写真・動画  4                                              [＋ 読み込む]
+  [▦ 64×36] 海辺.mp4      動画 0:12 · 1920×1080     使用 2   ◉ おまかせ   ⋯
+  [▦ 64×36] 空.jpg        写真 4032×3024            使用 1   ○            ⋯
+  [▦ 64×36] ロゴ.png      写真 透明 · 800×800        使用 0   ○            ⋯
+  [ ？    ] 夜景.mov      この端末にありません                      [つなぎ直す]
+  1.4 GB（この端末の空き 38 GB）
+```
+
+- A click on a row opens the asset page.
+- The おまかせ toggle dispatches `media.meta { pool }`.
+- ⋯ offers: 開く · 名前を変える · 上へ / 下へ (`media.move`) · 置き換える… (`media.relink`) · この写真を使わない (the pins,
+  in one batch) · 削除.
+- Rows are a listbox (D§6.12): Del removes after confirmation, and Enter opens.
+
+**Asset page** (`ui/media_page`; crumb 「全体 › 写真・動画 › 海辺.mp4」):
+
+```
+海辺.mp4  ✎                                  動画 · 1920×1080 · 0:12.5 · 29.97fps · 48 MB
+[ poster at column width; hover or focus scrubs the filmstrip ]
+使う
+  [作品全体の背景] [選択中の12行の背景] [このカットの背景]
+  [文字の中に] [写真の枠として] [重ねる映像]
+おまかせでも背景に使う  [ ]
+使っている場所 3  › 作品全体（背景） · 12–16行（枠） · サビ1（文字の中）      ← click = select that scope and element
+色  ■ ■ ■ ■ ■   [この色に合わせる]
+AI  [AIに説明してもらう…]   夕方の海、オレンジの空（AIの説明）
+[この動画の音を曲にする]                                          ← only when entry.audio
+[置き換える…]  [削除]   「使っている3か所は元の見た目に戻ります」
+```
+
+- **Placement buttons** pin at a scope in one batch.
+  - 選択中 buttons use the current selection, or the area when `sel.area` is set (every line of the area). They are
+    hidden when nothing fits.
+  - 文字の中に and 写真の枠として use the first free ornament index (the §5.5 rule) at that scope.
+  - After placing, the page jumps to the element page that holds the new rows.
+- **The badges** of §11.2.8 appear under the title.
+
+#### 11.7.4 Element pages with media
+
+**要素 › 背景** (D§6.4.8; any scope; the rows appear when the ground part has a `media` param):
+
+```
+全体 › 要素 › 背景
+▾ 背景
+  種類   [▶ thumb] 写真・動画                 ›
+  写真・動画 [▦] 海辺.mp4                     ›      ← media widget → picker (§11.7.5)
+  収め方 [覆う | 全体 | 全体＋ぼかし]
+  切り抜き [画面で調整]  拡大 ──●── 100%            ← toggles the stage overlay (§11.7.6)
+  動き [自動 v]   強さ ──●── 10%   向き ──●── 30°
+  ぼかし ──●── 0    薄幕 ──●── 35%  [■ 背景色 v]
+  色味 ──●── 0  [■ アクセント v]                     (詳細)
+▾ 動画                                               ← video and animation only
+  使う範囲 [▮━━━━━━━━━━▮ filmstrip]  0:02.10 – 0:09.50  ← trim widget (§11.7.7)
+  速さ ──●── 100%   終わったら [くり返す | 止める]   時間 [表示から | 曲に合わせる] (詳細)
+▸ 空気（粒子）…
+```
+
+- **要素 › 文字** (D§6.4.8) gains the row 「文字の中に写真・動画」. It is a shortcut that manages the first `textFill`
+  ornament slot at the page's scope: a media widget, plus the fit and crop rows.
+- **要素 › 装飾:** a slot whose part is `photoFrame` or `mediaLayer` shows the media rows under the part row.
+
+#### 11.7.5 The media widget, its picker and the part browser tab
+
+- **The `media` widget** (for every param of type `media`) shows a 64×36 poster, the name and badges (動画 0:12, 透明,
+  GIF), then ›. Clicking it opens the **media picker page**, an inspector sub-page:
+  - tiles are 144×81 posters (animated on hover or focus only, respecting reduced motion);
+  - the first tile is [＋ 読み込む], the second なし;
+  - assets whose kind does not fit `accept` are hidden;
+  - hover or focus = try-on of that asset in the main preview (250 ms delay, D§6.7);
+  - Enter or click pins it.
+- **Part browser:** the kinds `ground`, `ornament` and `atmos` gain a tab 「写真・動画 {n}」 (`pb.tab.media`), shown when
+  the library is not empty. Its tiles are assets.
+  - Clicking one pins the kind's media part and its source in one batch:
+    - `ground` → `photoPan`;
+    - `ornament` → `photoFrame`;
+    - `atmos` → `mediaLayer`.
+  - The first tile is [＋ 読み込む].
+
+#### 11.7.6 The crop overlay on the stage (`ui/stage`)
+
+- It is active while 切り抜き [画面で調整] is pressed, for the selected element's media node (from `engine.boxes()` and
+  the node's `FitRect`).
+- **It shows:** the source rect's frame on the stage overlay canvas; everything outside the chosen crop dimmed at 40 %;
+  and a centre cross at the focus.
+- **Mouse:** dragging moves the focus (`cropX`, `cropY`), and the wheel zooms (`cropZoom`, ×1.05 per notch). Both are
+  one `store.gesture` each. A double-click resets both (`pin.clear` of the three). Alt disables snapping to centre and
+  thirds.
+- **Keyboard** (the stage has focus): arrow keys move the focus by 1 % (Shift 10 %), `+` and `−` zoom, `0` resets, and
+  Esc leaves.
+- The overlay draws on the overlay canvas only, never on the preview canvas.
+
+#### 11.7.7 The trim widget (`ui/media_widgets`, registered as `trim`)
+
+```
+使う範囲  ▮▯▯▯▯▯▯▯▯▯▯▯▮   0:02.10 – 0:09.50   (7.40 秒)   [▶ 範囲を見る]
+          ↑ in           ↑ out   filmstrip: the thumbs store, 12 frames
+```
+
+- **Dragging a handle** writes `clipIn` or `clipOut` as one gesture. While a handle is dragged, the stage shows a
+  **peek**, the source frame at the handle time fitted to the preview. It is a try-on-style temporary view, with the mode
+  strip 「使う範囲を調整中」, and it ends on release.
+- **Keyboard:** the handles are buttons. ←/→ move one source frame (from the sample table), Shift+←/→ move 1 s, and
+  Home/End jump to the ends.
+- **[▶ 範囲を見る]** seeks the playhead to the element's next appearance and plays.
+
+#### 11.7.8 Missing media and placeholders
+
+- **Preview placeholder** for a missing asset: a checkerboard of `muted`/`ground2` at the element's `dest` rect, plus
+  the text 「写真がありません: {name}」, drawn by `drawMedia` in the preview only.
+- **Export:** the preflight item `media-missing` (level `block`) with [つなぎ直す] jumps to the library.
+- **Open with missing media:** a toast 「{n}件の写真・動画がこの端末にありません [つなぎ直す]」.
+
+#### 11.7.9 Error and warning states
+
+| Situation | What the user sees |
+|---|---|
+| Unknown file type | toast `media.err.type` |
+| HEIC | toast `media.err.heic` |
+| Codec not decodable here (ProRes, HEVC on this PC, …) | toast `media.err.codec` naming the codec |
+| No WebCodecs (video) | toast `media.err.noWebCodecs` |
+| Too big (§11.2.8) | toast `media.err.tooBig` / `.tooLarge` / `.tooLong` / `.animTooBig` |
+| Broken file (demux or decode fails) | toast `media.err.broken` |
+| SVG that taints the canvas | toast `media.err.svg` |
+| Storage full | toast `media.err.quota` with [ファイルに保存] (§12) |
+| No IndexedDB | toast `media.warn.memoryOnly` |
+| Decode error during preview | placeholder with 「この動画を再生できませんでした」; library row badge |
+| Preflight: `media-missing` (block) | 「写真・動画がこの端末にありません: {name}」 [つなぎ直す] |
+| Preflight: `media-skipped` (info) | 「背景の写真・動画は『{bg}』では書き出されません」 |
+| Preflight: `media-hdr` (info) | 「HDR の動画は近い色で書き出されます: {name}」 |
+| Preflight: `media-heavy` (info) | 「速さ×{s} の動画は書き出しに時間がかかります: {name}」 |
+| Planner `media-missing` / `media-kind` warnings | inspector field warnings (D§6.6) |
+
+#### 11.7.10 Keyboard and accessibility
+
+- **No new global single keys.** The keymap of D§6.8 is unchanged; the crop keys work only while the overlay is active
+  and the stage has focus.
+- **Screen readers:**
+  - library rows, picker tiles and the trim handles have `aria-label`s (`media.a11y.row`, `.tile`, `.in`, `.out`);
+  - import progress is announced through the polite live region at most once every 5 s;
+  - the drop target is announced when files enter the stage.
+- **Reduced motion:** posters are still until focused, and the filmstrip does not autoplay.
+
+#### 11.7.11 Strings (`i18n/strings.js`, pairs [ja, en]; package A writes them all)
+
+| Key | ja | en |
+|---|---|---|
+| `sec.media` | 写真・動画 | Photos and videos |
+| `media.import` / `media.importMenu` | ＋ 読み込む / 写真・動画を読み込む… | + Import / Import photos and videos… |
+| `media.kind.image` / `.video` / `.anim` | 写真 / 動画 / アニメ | Photo / Video / Animation |
+| `media.badge.alpha` / `.gif` / `.hevc` / `.hdr` / `.gop` | 透明 / GIF / 一部のパソコンでは読めない形式です / HDR の色は近い色で表示されます / 位置合わせに時間がかかる動画です | Transparent / GIF / Some computers cannot read this format / HDR colours are approximated / Seeking in this video is slow |
+| `media.used` / `media.pool` | 使用 {n} / おまかせでも背景に使う | Used {n} / Use as a background in New look |
+| `media.missing` / `media.relink` | この端末にありません / つなぎ直す | Not on this device / Relink |
+| `media.relinkAsk` | 別のファイルですが、この{kind}の代わりに使いますか？（{name}） | This is a different file. Use it instead of this {kind}? ({name}) |
+| `media.total` | {size}（この端末の空き {free}） | {size} ({free} free on this device) |
+| `media.use.work` / `.lines` / `.cut` | 作品全体の背景 / 選択中の{n}行の背景 / このカットの背景 | Background of the whole video / Background of the {n} selected lines / Background of this cut |
+| `media.use.fill` / `.frame` / `.overlay` | 文字の中に / 写真の枠として / 重ねる映像 | Inside the text / As a photo frame / As overlay footage |
+| `media.usedAt` | 使っている場所 {n} | Used in {n} places |
+| `media.colors` / `media.matchColors` | 色 / この色に合わせる | Colours / Match these colours |
+| `media.askAi` / `media.aiCaption` | AIに説明してもらう… / {caption}（AIの説明） | Ask AI to describe… / {caption} (AI description) |
+| `media.useAudio` | この動画の音を曲にする | Use this video's sound as the song |
+| `media.replace` / `media.rename` / `media.notUse` / `media.delete` | 置き換える… / 名前を変える / この写真を使わない / 削除 | Replace… / Rename / Stop using this / Delete |
+| `media.deleteNote` | 使っている{n}か所は元の見た目に戻ります | The {n} places that use it go back to their previous look |
+| `media.progress` / `media.queue` | 読み込み中: {name} {p}% / （あと{n}件） | Importing {name} {p}% / ({n} more) |
+| `media.done` / `media.chooseUse` | {n}件を読み込みました / 使い方を選ぶ | Imported {n} / Choose how to use it |
+| `media.placed` / `media.otherUses` | 背景を写真にしました（{scope}） / ほかの使い方… | The background is now your photo ({scope}) / Other uses… |
+| `media.dup` | もう入っています: {name} | Already in the library: {name} |
+| `media.dropHere` / `media.dropStage` | ここにドロップ: 歌詞・曲・作品・写真・動画 / 背景にする（{scope}） | Drop here: lyrics, song, project, photos, videos / Use as background ({scope}) |
+| `media.lookHint` | 写真や動画はプレビューにドロップすると背景になります（詳しく… › 写真・動画） | Drop a photo or video on the preview to use it as the background (Options… › Photos and videos) |
+| `media.placeholder` / `media.cannotPlay` | 写真がありません: {name} / この動画を再生できませんでした | Photo missing: {name} / This video could not be played |
+| `media.preparing` | 映像を準備中 | Preparing video |
+| `media.missingOpen` | {n}件の写真・動画がこの端末にありません | {n} photos or videos are not on this device |
+| `media.full` | 写真・動画は200件までです | Up to 200 photos and videos |
+| `media.warn.big` / `.bigFile` / `.memoryOnly` | 写真・動画が {size} あります。作品ファイルが大きくなります / 大きなファイルです（{size}）。読み込みに時間がかかります / この端末に保存できないため、写真・動画はこのタブを閉じると消えます。作品ファイルに保存してください | Your photos and videos take {size}; project files get large / Large file ({size}); importing takes a while / Photos and videos cannot be stored on this device and disappear when this tab closes. Save a project file. |
+| `media.err.type` / `.heic` | 読めない種類のファイルです: {name} / HEIC は読めません。JPEG に変換してから読み込んでください（iPhone: 設定 › カメラ › フォーマット › 互換性優先） | Cannot read this kind of file: {name} / HEIC cannot be read. Convert it to JPEG first (iPhone: Settings › Camera › Formats › Most Compatible) |
+| `media.err.codec` | この動画の形式（{codec}）はこのブラウザでは読めません。H.264 の MP4 か WebM に変換してください | This video's format ({codec}) cannot be read in this browser. Convert it to an H.264 MP4 or a WebM |
+| `media.err.noWebCodecs` | このブラウザでは動画を読めません。PC の Chrome か Edge を使ってください | This browser cannot read videos. Use Chrome or Edge on a computer |
+| `media.err.tooBig` / `.tooLarge` / `.tooLong` / `.animTooBig` | 大きすぎる画像です（4000万画素・60MBまで） / 4K より大きい動画は読めません / 60分より長い動画は読めません / 長すぎるアニメです（600コマ・2048pxまで） | Image too large (up to 40 MP, 60 MB) / Videos larger than 4K cannot be read / Videos longer than 60 minutes cannot be read / Animation too long (up to 600 frames, 2048 px) |
+| `media.err.broken` / `.svg` / `.quota` | 壊れているか、途中までのファイルです: {name} / この SVG は安全に取り込めません / 保存容量がいっぱいです。作品ファイルに保存してください | The file is damaged or incomplete: {name} / This SVG cannot be imported safely / Storage is full. Save a project file |
+| `exp.pre.media-missing` / `.media-skipped` / `.media-hdr` / `.media-heavy` | §11.7.9 | §11.7.9, in English |
+| `fld.media` / `fld.fit` / `fld.crop` / `fld.cropZoom` / `fld.cropX` / `fld.cropY` | 写真・動画 / 収め方 / 切り抜き / 拡大 / 中心 横 / 中心 縦 | Photo or video / Fit / Crop / Zoom / Focus X / Focus Y |
+| `fld.cropEdit` / `fld.edge` / `fld.move` / `fld.moveAmount` / `fld.moveDir` | 画面で調整 / 端の処理 / 動き / 動きの強さ / 動く向き | Adjust on the preview / Edges / Motion / Motion amount / Direction |
+| `fld.blur` / `fld.veil` / `fld.veilInk` / `fld.tint` / `fld.tintInk` | ぼかし / 薄幕 / 薄幕の色 / 色味 / 色味の色 | Blur / Veil / Veil colour / Tint / Tint colour |
+| `fld.trim` / `fld.speed` / `fld.loop` / `fld.clock` / `fld.trimPlay` | 使う範囲 / 速さ / 終わったら / 時間の基準 / 範囲を見る | Range / Speed / At the end / Clock / Play the range |
+| `fld.textMedia` / `sec.video` | 文字の中に写真・動画 / 動画 | Photo or video inside the text / Video |
+| `opt.cover` / `.contain` / `.soft` | 覆う / 全体 / 全体＋ぼかし | Fill / Whole / Whole + blur |
+| `opt.mirror` / `.zoom` / `.plain` | 映り込み / 拡大 / 背景色 | Mirror / Enlarge / Plain |
+| `opt.push` / `.pull` / `.drift` | 寄る / 引く / 流す | Push in / Pull out / Drift |
+| `opt.loop` / `.hold` / `.show` / `.song` | くり返す / 止める / 表示から / 曲に合わせる | Loop / Hold / From when shown / With the song |
+| `opt.behind` / `.side` / `.corner` / `.free` / `.frame` / `.text` | 文字の後ろ / 空いている所 / 角 / 自由 / 画面全体 / 文字のまわり | Behind the text / In the free space / Corner / Free / Whole frame / Around the text |
+| `opt.rect` / `.round` / `.circle` / `.arch` | 四角 / 角丸 / 円 / アーチ | Rectangle / Rounded / Circle / Arch |
+| `opt.screen` / `.multiply` / `.overlay` / `.normal` | スクリーン / 乗算 / オーバーレイ / 通常 | Screen / Multiply / Overlay / Normal |
+| `opt.fade` / `.grow` / `.slide` | ふわっと / 大きく / すべる | Fade / Grow / Slide |
+| `pb.tab.media` / `pb.importTile` | 写真・動画 {n} / ＋ 読み込む | Photos and videos {n} / + Import |
+| `media.peek` | 使う範囲を調整中 | Adjusting the range |
+| `media.a11y.row` / `.tile` / `.in` / `.out` | {name}、{kind}、{info} / {name}（{kind}） / 始め {time} / 終わり {time} | {name}, {kind}, {info} / {name} ({kind}) / Start {time} / End {time} |
+| `ai.direct.allowMedia` / `ai.warn.mediaUnknown` | 写真・動画をAIが使ってよい / 「{name}」という写真・動画はありません | AI may use photos and videos / There is no photo or video "{name}" |
+| `ai.tool.vision` / `ai.visionConsent` / `ai.visionOnlyGemini` | 写真の説明 / 選んだ写真を小さくして（長い辺 768px の JPEG、1枚 約{kb}KB）Google Gemini に送ります。この作品ではこのときだけ。 / 写真の説明は Google Gemini のときだけ使えます | Describe photos / The selected photos will be sent to Google Gemini, downscaled (JPEG, 768 px long side, about {kb} KB each), this time only. / Photo descriptions work only with Google Gemini |
+| `ai.sendsMedia` | 写真は『AIに説明してもらう』のときだけ（小さくして）送ります | Photos are sent (downscaled) only when you ask AI to describe them |
+| `ai.ch.media` | 写真「{name}」の説明: {caption} | Description of "{name}": {caption} |
+| `undo.media.put` / `.meta` / `.move` / `.remove` / `.relink` / `.place` / `.colors` | 写真・動画を追加 / 写真・動画の設定 / 写真・動画の並べ替え / 写真・動画を削除 / 写真・動画を置き換え / 写真・動画を使う（{scope}） / 色を写真に合わせる | Add photo or video / Photo or video settings / Reorder photos and videos / Delete photo or video / Replace photo or video / Use photo or video ({scope}) / Match colours to the photo |
+| `warn.media-missing` / `warn.media-kind` | 写真・動画が見つかりません（{detail}） / この場所には使えない種類です（{detail}） | A photo or video is missing ({detail}) / This kind cannot be used here ({detail}) |
+| `why.media.pool` / `why.media.pin` | おまかせでマイ写真「{name}」 / 選んだ写真・動画「{name}」 | Your photo "{name}" picked by New look / Your chosen photo or video "{name}" |
+| `part.ground.photoPan` (changed) | 写真・動画 | Photo or video |
+| `menu.clearDevice` (changed) | この端末に保存した作品・曲・写真・動画を消す | Clear projects, songs, photos and videos stored on this device |
+
+Part labels and blurbs of `photoFrame`, `textFill` and `mediaLayer` live in their definitions (D§4.18.1), as the
+§11.5.7 table gives them.
+
+### 11.8 Tests
+
+#### 11.8.1 Fixtures
+
+- **Generated at test time**, in the browser, so there are no binary files for the main flows (`tests/helpers/media_gen.js`,
+  package G):
+  - **The counter video.** Frame `i` shows `i` as a 12-bit code of 8×8-px black and white cells, plus a guard frame, at
+    192×108. It is encoded with `VideoEncoder`: VP9 always; H.264 when the browser can encode it (Chrome CI).
+  - **Containers:** MP4 through mp4-muxer; WebM through the `export/webm` writer (§13.5).
+  - **Rates:** 24, 25, 30, 30000/1001 and 60 fps. A **VFR** variant has frames 0–29 at 30 fps and frames 30–44 at
+    15 fps.
+  - **Alpha:** a VP9 **alpha** WebM through §13.5's two-encoder path, with a half-transparent square that moves.
+  - **Stills:** PNG with alpha, JPEG and WebP from `convertToBlob`. A JPEG gets **EXIF orientation 6** by inserting an
+    APP1 segment made by `tests/helpers/exif_write.js`.
+  - **Animation:** an APNG or animated WebP of 10 frames, where the browser encodes them; otherwise it is skipped with a
+    note.
+- **Committed**, tiny, for demuxer edge cases the browser cannot produce (`tests/fixtures/media/`; each file < 24 KB;
+  made once with the ffmpeg command lines recorded in `tests/fixtures/media/MAKE.txt`, so anyone can regenerate them):
+
+  | File | What it tests |
+  |---|---|
+  | `bframes.mp4` | H.264 with B-frames, `ctts` and an edit list: `-c:v libx264 -bf 2 -g 10` |
+  | `frag.mp4` | fragmented MP4: `-movflags +frag_keyframe+empty_moov` |
+  | `rot90.mp4` | a rotation matrix: `-metadata:s:v rotate=90` |
+  | `clip.mov` | QuickTime brand |
+  | `vp9.webm` | VP9 in WebM: `-c:v libvpx-vp9 -g 10` |
+  | `alpha_vp8.webm` | VP8 with alpha: `-c:v libvpx -auto-alt-ref 0 -pix_fmt yuva420p` |
+  | `av1.webm` | AV1: `-c:v libaom-av1 -cpu-used 8` |
+  | `laced.mkv` | Xiph lacing on an audio track plus a video track |
+  | `anim.gif` | 10 frames |
+  | `prores.mov` | `-c:v prores_ks -profile:v 4444`: a refusal test |
+  | `heic.heic` | a 1×1 HEIC header only: a refusal test |
+
+  Every clip is 1 s of `testsrc2` at 64×36. The Node demuxer tests assert their tables against the values recorded in
+  `MAKE.txt`, as dumped by `ffprobe -show_packets`.
+- **Node tests** also build synthetic files: mp4-muxer runs in Node under `vm` with fake chunks, and `export/webm` writes
+  WebM. The demuxers must return exactly the table that was written.
+
+#### 11.8.2 Node tests (`tests/node`)
+
+| File | Owner | Asserts |
+|---|---|---|
+| `media_core.test.js` (new) | A | `entryProblems` for every field rule; `normalizeEntry` idempotent; `mapTime` loop, hold, speed and clock over 10k random cases against a numeric reference; `fitRect` cover, contain and soft invariants (dest inside the box; source inside the image; the focus stays centred when it can; zoom 1 cover fills exactly); `tier` monotone; `refsOf`; `keyOf`/`idOfKey` |
+| `media_doc.test.js` (new) | A | schema 1 → 2 adds `media`; a schema-2 file without `media` is normalized; `serialize` order; `media.put`/`.meta`/`.move`/`.remove`/`.relink` reducers (pins, derived keys, `@key` paths, avoid items and recipes rewritten; identity when unchanged; caps); 500 random command sequences with media undo to the start; `schema.coerce` for `media` |
+| `sha256.test.js` (new) | G | NIST vectors; 1-byte to 1-MB chunking gives the same digest; equals `crypto.subtle` (Node `webcrypto`) on 200 random buffers |
+| `media_demux.test.js` (new) | G | `sniff` on every fixture, including refusals; `isobmff` on synthetic mp4-muxer files (the table equals what was written: pts, dts, key, off, size) and on committed fixtures (`bframes`: presentation order, pre-roll excluded; `frag`; `rot90` → `rot 90`, `w`/`h` swapped; `clip.mov`; codec strings); `matroska` on `export/webm` output and the committed WebM files (alpha ranges, VP9 profile and bit depth, AV1 string, laced audio skipped); refusals (`prores` codec string kept and later refused; truncated files → `MediaError('broken')`); reading only headers (a counting `read` asserts that no payload byte is read for MP4, and ≤ 1 pass for WebM) |
+| `media_samples.test.js` (new) | G | `sampleAt` at every frame boundary of 24, 25, 29.97, 30, 60 fps and VFR tables (the EPS rule: `m = k / fps` picks frame k, with no off-by-one over 100k boundaries); `runFor` with B-frames; `keyAtOrBefore`; `toData`/`fromData` round trip; `stats` |
+| `media_palette.test.js` (new) | G | deterministic output; 5 colours of a synthetic 5-band image recovered within ΔE < 2 |
+| `schema.test.js`, `registry.test.js`, `commands.test.js`, `doc.test.js`, `i18n.test.js` (+) | A | type `media`; `extend` accepts `myMed<10 hex>` and `createRegistry` refuses it; the new commands; string pairs |
+| `media_engine.test.js` (new) | B | with `fake_media.js`: `sb.media` checks; `K.media` for every `use`; the recorder op hash covers media time, and the source index equals `sampleAt` at 24, 30 and 60 fps output times (60 s of frames); mirror edge neighbours only when visible; rotation 0/90/180/270; `soft` draws the blurred copy first; `sceneOnly` skipped for chroma, black and clear; the `layers: 'ground'` option; `mediaAt` equals the drawn list; export quality throws `media-not-ready` on a non-exact frame; frame N direct equals N after 0..N−1; conformance of `photoPan`, `photoFrame`, `textFill` and `mediaLayer` (no NaN, balanced save/restore, same op hash twice) × 7 aspects × 24 times |
+| `planner_media.test.js` (new) | D | `plan.media` holds exactly the referenced ids; `mediaTerms` change only the fps of the cuts that use them; segment break on a changed source (and not without media pins: goldens equal); `media-missing` and `media-kind` warnings fall back to `''`; derived `myMed` grounds chosen only when `pool`; never for segments < 3 s or `title`; filters include and deny them; explain `media.pool` |
+| `mix.test.js` (+) | C | `registryFor(base, materials, media)`: derived defs per pooled asset, memoized, `version` changes on the `pool` toggle only; recipe `prim: 'media'` normalize, limits, cost and flash rule; interpreter via `K.media` |
+| `ai_direct.test.js` (+), `ai_vision.test.js` (new) | E | the media schema variant is portable; every mapping row; an unknown asset warns; kind mismatch; `none`; the `[media]` list holds no data beyond names, sizes and vision text; vision request (image parts first, ≤ 8 assets, JPEG only); `visionChanges` clamps and filters; revert |
+| `ui_media.test.js` (new) | G | routing by sniff (a WebM with video goes to media; audio-only WebM goes to the song); placement batches per scope (work, lines, area, cut) equal the specified commands; the library order; delete batches clear part pins whose media param emptied; `media_widgets` FieldSpecs map `media` → `media` and `clipIn`/`clipOut` → `trim`; the video rows' `when` |
+
+#### 11.8.3 Browser tests (`tests/browser`)
+
+| File | Owner | Asserts |
+|---|---|---|
+| `media_import.py` (new) | G | Every generated and committed fixture through `importFile`: the entry fields (EXIF-6 JPEG → `w`/`h` swapped and the upright pixel at the top-left; PNG alpha → `alpha: true`; VFR → `vfr`, `fps` median); refusals give the right `media.err.*`; dedupe; the IndexedDB round trip (blob, index, thumbs) and prune; the quota fallback (a faked `QuotaExceededError`) |
+| `media_exact.py` (new; **frame exactness**) | G | For each counter video (VP9 MP4, VP9 WebM, H.264 MP4 when available, VFR) as the work background (`fit: cover`, `move: none`, `clock: song`): a PNG export at 24, 30 and 60 fps, 1280×720 and 1920×1080. **Every** output frame's code equals the expected source index, computed from the fixture's known frame times (not from `sampleAt`). Then `speed` 0.5 and 2, `clipIn` 0.5, `loop` wrap and `hold`, and `clock: show` in a cut. A 3-s MP4 export decodes back to the same codes (H.264 when available, else VP9 in MP4). |
+| `determinism.py` (+) | G | a project with a video ground, an alpha WebM frame and a still: in export quality, frame N directly equals frame N after 0..N−1 (pixel hash). The paused preview after scrubbing, redrawn until exact, shows the same source frame indices as the export (`MediaFrame.index`, reported through the test hook), with pixels within MAE ≤ 2/255: the preview may decode in hardware. |
+| `media_alpha.py` (new) | G | the alpha WebM fixture as a `photoFrame`: the alpha of the merged frame at 5 times is within ±4/255 of the generated truth; a transparent PNG export keeps the frame's alpha; `photoPan` absent in `clear`, `chroma` and `black`; `mediaLayer` skipped there |
+| `transparent_check.py` (+) | G | the existing checks with a `photoFrame` (PNG with alpha) in the project |
+| `perf.py` (+) | G | project_basic with a 1080p30 video ground plus a still `photoFrame`: frame ≤ 10 ms p50 at 720p; `drawMedia` ≤ 1 ms p50. The timed frame is the whole iteration (`await mediaReady(t)` + `renderFrame` + a 1-px read), because the store's main-thread work belongs to the frame; the ready / render split is printed. `drawMedia` is gated per medium, the video calls and the still calls each. Pooled, the photo frame's calls outnumber the video's and would set the median alone. It is timed unflushed, which measures the call's own main-thread work: recording, plus any synchronous work such as a `VideoFrame`'s colour conversion (≈ 9 ms at 1080p) or a forced raster. The raster itself is inside the frame total. A separate flushed pass (a 1-px read of the call's target before and after it) reports the per-call cost with raster, per medium, with its draws per call, and marks it OVER above twice the budget. With software raster any scaled full-frame draw costs ≈ 2.6–3 ms, so that pass is not gated. Whether it becomes the gate, and on which hardware, is the lead's decision. The ground stays at its automatic depth (`back`: blurred); the row asserts that its frames come baked and that `FrameStats.media.fallback` is 0. |
+| `ui_flows.py` (+) | G | **flow "media"**: drop a PNG on the stage → the background is set at work scope in one undo step → the crop overlay drag equals one gesture → drop an MP4 while 12行 is selected → the line background → trim with the keyboard → export 2 s 720p MP4 → undo all equals the start. **Flow "library"**: import 3 files → toggle おまかせ → おまかせ picks a photo ground at least once in 20 seeds → delete with confirmation clears the pins. **Flow "missing"**: a light-saved project opened with an empty IndexedDB → placeholder → export blocked → relink by the same file → export enabled. Keyboard-only variant. |
+| `ui_layout.py` (+) | G | the asset page, picker, trim widget and library fit 288–352 px; control budgets unchanged; the crop overlay never covers the preview canvas (overlay only) |
+| `csp.py`, `i18n_pages.py` (+) | G | 0 CSP violations across import (incl. SVG), playback, scrub, export, vision (faked provider) and package flows; no Japanese UI text on the en page (asset names excepted) |
+| `parts_gallery.py` (+) | B | the media parts × aspects with the fake store's fixtures: not blank, no console errors |
+
+---
+
+### 11.9 Depth: how a photo or video takes part in the animation (動きと重なり; FROZEN)
+
+This is a later request from the owner. For every background photo or video, the user can choose whether it:
+- moves with the animation;
+- comes in front of the text;
+- is pushed back;
+- stays out of the animation altogether.
+
+おまかせ decides it too. When the AI has looked at the picture, its suggestion is used. All of it works without AI.
+
+#### 11.9.1 The param `depth` (`K.mediaParams`, package B; parts, package G.3)
+
+| Name | Type | Auto | ja / en | Notes |
+|---|---|---|---|---|
+| `depth` | enum `auto anim front back still` | `auto` | 動きと重なり / Motion and layering | `ai: true` (the only media param the AI may set); `ui: basic`; for `use` `ground`, `frame` and `layer` (not `fill`: inside the text is its own place) |
+
+The options, in this order:
+
+| Value | ja | en |
+|---|---|---|
+| `auto` | おまかせ | Auto |
+| `anim` | 演出と一緒に動かす | Move with the animation |
+| `front` | 文字の前に出す | In front of the text |
+| `back` | 後ろに下げる | Push back |
+| `still` | 動かさない | Keep still |
+
+The strings are `opt.depth.*` and `param.depth` (package F). `mediaLayer` loses its `over` param: `depth` replaces it.
+`front` is its old `over: text`, and `back` its old `over: behind`. v2.1 has not shipped, so no document holds `over`.
+
+#### 11.9.2 Resolution of `auto` (planner, package D; deterministic)
+
+The effective value goes into the plan: the decision's `p.depth`, never `'auto'`. The `why` code is given in brackets.
+The first rule that applies wins:
+1. A pin wins (`user`, `ai`, `lock`), as for every param.
+2. The asset's AI suggestion, `doc.media` entry `ai.depth`, when it is set (§11.9.4) (`why.media.depth.ai`).
+3. `use: 'layer'` (`mediaLayer`): `front` (`why.media.depth.overlay`).
+4. `use: 'frame'` (`photoFrame`): `anim` (`why.media.depth.frame`).
+5. `use: 'ground'`:
+   - a video, or an animation that runs for 2 s or more: `back` (`why.media.depth.video`; its own motion is enough);
+   - a still photo in a segment whose text covers ≥ 35 % of the frame (from `hints.focus` boxes): `back`
+     (`why.media.depth.busy`);
+   - otherwise: `anim` (`why.media.depth.still`).
+
+`explain` and `fields` report the rule. The `depth` term joins the cut `fp` and the `groundFp`, so a change re-plans
+only the scenes that use the media.
+
+#### 11.9.3 Engine meaning (package B; `K.media` reads `p.depth`)
+
+| Effective | Layer | Camera | Seams | Ken Burns | Look |
+|---|---|---|---|---|---|
+| `anim` | as placed: `ground` for grounds, the cut's layer for frames, far for layers | factor 1: the cut camera, shots, rigs and shakes, as in §4.4 | takes part | as `move` says | frames and layers also take the cut's entrance and exit: alpha follows the arrive envelope's first 0.3 s and the depart envelope's last 0.3 s |
+| `front` | near: above the text | factor 1.15 (parallax: nearer things move more) | takes part | as `move` says | readability guard: a media that covers ≥ 40 % of the frame is capped at alpha 0.45, with `comp: 'screen'` unless a blend is pinned; a `photoFrame` keeps full alpha, and the planner never places it `behind` (auto `place` becomes `side`) |
+| `back` | far (grounds: `ground`) | factor 0.5 | takes part | `zoom` capped at 0.06 | depth cue: `blur + 3 du` and `veil + 0.15` (both clamped to their ranges) |
+| `still` | as `anim` | factor 0: no camera, rig or shake | none: the media stays in place through transitions; it is drawn outside the seam composite, like the hud, and under the text for grounds | none (`move` is treated as `none`) | a video still plays |
+
+- **Camera factor `f`** (`K.depthCam(cam, f)`, a new FROZEN kit export): `x' = f·x`, `y' = f·y`, `roll' = f·roll`,
+  `zoom' = exp(f · ln zoom)`, shakes `· f`.
+  - `f = 1` is the identity on the camera. So documents without media, and media at `anim`, keep every frame hash.
+  - `f = 1.15` is clamped so that the zoom stays ≤ 4.
+- **Export:** the choice changes pixels only, so it has no effect on media exactness (§11.4). `mediaAt` still lists
+  every drawn media.
+
+#### 11.9.4 AI (package E; everything optional)
+
+- **Vision** (`ai/vision`): `VISION_SCHEMA` gains `depth` per asset: enum `anim front back still` plus `reason` (≤ 60
+  chars).
+  - The prompt says: `front` only for see-through or overlay footage (light leaks, particles, rain); `back` for busy or
+    detailed pictures and videos with strong motion; `still` for pictures that must stay readable (a logo, text in the
+    picture); `anim` otherwise.
+  - `visionChanges` writes it to the asset: `media.meta { id, ai: { …, depth } }`. `ORDER.assetAi` becomes
+    `['caption', 'tags', 'colors', 'subject', 'text', 'depth', 'reason']`, and `core/media.normalizeEntry` keeps
+    `ai.depth` only when it is one of the four values. It keeps `ai.reason` (≤ 60 characters) only with a kept depth, so
+    the asset page can show why. Package E may edit `core/media` for these fields; A is merged.
+  - Reverting the vision change clears it.
+- **The direct tool** (`ai/direct`): the media variant of the answer schema gains `depth` (enum `keep anim front back
+  still`).
+  - Mapping row: an instruction such as 「背景を後ろに下げて」, 「写真を前に出して」, 「背景は動かさないで」 or 「背景も一緒に
+    動かして」 becomes a pin of `@<mediaKey>.depth` (or `…:ground@photoPan.depth`) at the answer's scope (work, area,
+    lines or cut), `by: 'ai'`, one Change each, reviewable and revertible.
+  - `keep` makes no change.
+
+#### 11.9.5 UI (package G.4; strings package F)
+
+- **The element page** of a media part (背景, 写真の枠, 重ねる映像) shows 「動きと重なり」 as a segmented control of the
+  five options, right under the source row.
+  - While it is auto, the tag reads 「自動: 後ろに下げる」 and the ⓘ shows the `why` text.
+- **The asset page** shows the AI's suggestion when there is one: 「AIのおすすめ: 後ろに下げる」, plus the reason.
+- **Keyboard:** the segmented control is a radiogroup. The top-level control budgets are unchanged, because this row
+  lives in 詳細.
+
+#### 11.9.6 Strings (package F adds them; pairs [ja, en])
+
+| Key | ja | en |
+|---|---|---|
+| `param.depth` | 動きと重なり | Motion and layering |
+| `opt.depth.auto` / `.anim` / `.front` / `.back` / `.still` | おまかせ / 演出と一緒に動かす / 文字の前に出す / 後ろに下げる / 動かさない | Auto / Move with the animation / In front of the text / Push back / Keep still |
+| `why.media.depth.ai` | 写真の内容からのAIのおすすめ | The AI's suggestion from the picture |
+| `why.media.depth.overlay` | 重ねる映像は文字の前に出します | Overlay footage goes in front of the text |
+| `why.media.depth.frame` | 写真の枠は演出と一緒に動かします | A photo frame moves with the animation |
+| `why.media.depth.video` | 動画は自分で動くため、後ろに下げました | A video moves on its own, so it is pushed back |
+| `why.media.depth.busy` | 文字が多い場面なので、後ろに下げました | The text fills much of the frame, so it is pushed back |
+| `why.media.depth.still` | 写真なので、演出と一緒に動かします | A still photo moves with the animation |
+| `media.ai.depth` | AIのおすすめ: {v} | AI suggests: {v} |
+
+#### 11.9.7 Tests
+
+| Package | Asserts |
+|---|---|
+| B | `media_engine.test.js` (+): `K.depthCam` identity at 1, zero at 0, the clamp at 1.15; each effective value's layer, seam rule, Ken Burns and look (op hashes); the readability guard (≥ 40 % → alpha ≤ 0.45); `still` equal across a seam; frame hashes of media-free fixtures unchanged |
+| D | `planner_media.test.js` (+): every rule of §11.9.2 in order; pins win; `ai.depth` wins over the heuristics; the fp terms; explain for each why code |
+| E | `ai_vision.test.js` / `ai_direct.test.js` (+): the schema is portable; `visionChanges` writes and reverts `ai.depth`; every depth phrase maps to one pin at the right scope; `keep` makes no change |
+| G | the element page's radiogroup; `ui_flows.py` flow "media": set 後ろに下げる, then undo; a `mediaLayer` with 文字の前に出す draws above the text (pixel probe) |
+
+## 12. The project package (`.mojipv`): one file holds everything
+
+The owner's decision: the project file itself must be able to hold everything (images, videos and the song) in **one
+file**, and this is the **default** save. The light JSON save stays as a secondary option. This section is owned by
+**package G** (§8.7). It extends D§3.2, D§6.4.12 and D§6.14 `project_io`, and SPEC §7 "Project file".
+
+### 12.1 Decisions at a glance
+
+1. **A `.mojipv` is a store-only ZIP**, written by the existing `export/zip` writer (ZIP64 when needed). Its layout is
+   `mimetype`, `manifest.json`, `media/<id>.<ext>`, `song/<sha1>.<ext>`, `thumbs/<id>.webp` and `project.json`.
+   - `project.json` is byte-identical to the light `.json` save.
+2. **Streaming both ways:**
+   - **Writing:** with the File System Access API, `Blob`s are streamed straight from IndexedDB into the file, so a
+     large video never sits in JS memory. Without it, one `Blob` is assembled from `Blob` parts (zero copy) and
+     downloaded, with a size warning.
+   - **Reading:** random access through `Blob.slice`. Assets are slices of the package file, and each is verified
+     (CRC-32, and SHA-256 = id for media) and stored into IndexedDB with deduplication.
+3. **Saving:**
+   - 保存 / Save (Ctrl+S) and 名前を付けて保存 / Save as write a package by default.
+   - 軽い保存（画像・動画・曲なし） / Light save writes the `.json`.
+   - Autosave stays in IndexedDB and never rewrites a package.
+4. **Opening:**
+   - `.mojipv`, v2.1 `.json` and v2.0 `.json` (schema 1) all open.
+   - A damaged asset does not stop the project from opening: that asset is reported missing (§11.2.9).
+   - A damaged `project.json` or directory is refused with a clear message.
+
+### 12.2 Format (FROZEN; `export/package`)
+
+```
+<name>.mojipv                          ZIP, store-only, UTF-8 names, fixed DOS date 1980-01-01 (reproducible)
+  mimetype                             "application/vnd.mojipv+zip" — the FIRST entry, stored, no extra field, so its text
+                                       sits at byte offset 38 and a file can be recognised by its first 64 bytes
+  manifest.json                        the manifest below
+  media/<id>.<ext>                     one per doc.media entry whose bytes are on this device (ext from the mime:
+                                       png jpg webp avif gif mp4 mov m4v webm mkv)
+  song/<sha1>.<ext>                    the song, when doc.song is set and its bytes are on this device
+  thumbs/<id>.webp                     optional: the posters (so the library shows at once after open)
+  project.json                         serialize({ doc, side }) — exactly the light save's text
+```
+
+```json
+{ "format": "mojipv.package", "v": 1, "app": "2.1.0", "project": "project.json",
+  "files": [
+    { "path": "media/a3f9c2d17b0e4a5c6d7e8f901.mp4", "role": "media", "id": "a3f9c2d17b0e4a5c6d7e8f901", "bytes": 48213344, "crc": 3735928559, "mime": "video/mp4" },
+    { "path": "song/3f2a9c…e1.m4a", "role": "song", "sha1": "3f2a9c…e1", "bytes": 7340032, "crc": 12345678, "mime": "audio/mp4" },
+    { "path": "thumbs/a3f9c2d17b0e4a5c6d7e8f901.webp", "role": "thumb", "id": "a3f9c2d17b0e4a5c6d7e8f901", "bytes": 9120, "crc": 87654321 }
+  ],
+  "missing": ["a0b1c2d3e4f5a6b7c8d9e0f1a"] }
+```
+
+- **`v`** is the package version (1). A newer `v` is refused with `pkg.err.newer`. `project.json` carries its own
+  `schema`, which D§4.4 `migrate` handles.
+- **`files`** lists every entry except `mimetype`, `manifest.json` and `project.json`, in file order.
+  - `bytes` and `crc` must equal the ZIP directory's.
+  - `role` is `media`, `song` or `thumb`.
+  - `missing` lists the media ids that the document references but this device did not have when saving.
+- **Entry order** (FROZEN): mimetype, manifest, media in library order, song, thumbs, project.json. `project.json` goes
+  last, so a reader can show "project readable" only after every asset is known.
+- **Names** are only the patterns above. The reader ignores any other entry, and refuses names containing `..`, a
+  leading `/`, `\`, NUL or drive letters.
+- **Caps:** ≤ 1,000 entries; `manifest.json` ≤ 1 MB; `project.json` ≤ 32 MB.
+- **Entries are stored uncompressed.** Media is already compressed, and store-only keeps offsets simple, so a slice
+  equals the asset.
+
+### 12.3 Writing
+
+- **`export/zip` gains `addBlob(name, blob, { crc })`** (additive; package G).
+  - It writes the local header with the given CRC and size (ZIP64 when the size is ≥ 4 GiB), then hands the `Blob` to
+    `write`.
+  - `write(part)` now receives `Uint8Array | Blob`. The file sink writes a `Blob` with `writable.write({ type: 'write',
+    position, data: blob })`, which the browser streams from IndexedDB's backing store. The memory sink keeps the part
+    by reference.
+  - Offsets advance by `part.size`, and the central directory and the ZIP64 records are unchanged.
+- **CRC sources:**
+  - media: the `media` store record's `crc` (§11.2.7);
+  - thumbs: computed on the small blob;
+  - song: computed by a streaming pass at save time and cached in memory for the session (songs are ≤ 200 MB, so this
+    is ≤ 1 s).
+- **Steps** (`ui/project_io.savePackage(handle | null)`):
+  1. Snapshot: `text = serialize({ doc, side })` and the list of referenced ids. Editing may continue during the save,
+     as with export (D§4.21 `fork`).
+  2. Collect the blobs from IndexedDB. Absent ids go into `manifest.missing`, with a warning toast
+     `pkg.warn.missingIn`.
+  3. Estimate the size (Σ bytes plus headers). Above **2 GB**, show `pkg.warn.big` (a confirmation, with the size and
+     the destination's free space when `navigator.storage` can tell; FAT32 users are warned about the 4 GB limit).
+  4. **With File System Access:** `showSaveFilePicker({ suggestedName: <title>.mojipv, types: [pkg, json] })`, then a
+     file sink (D§4.21 sinks), then `createZip(write)`, then `add('mimetype')`, `add('manifest.json')`, `addBlob` for
+     each asset, and `add('project.json')`, then `finish()` and `close()`.
+     - **Without it:** a memory sink with `Blob` parts gives one `Blob`, which goes to `downloadBlob`. Above 1.5 GB this
+       asks for confirmation first (`pkg.warn.memory`: 「ブラウザが一時的に{size}の領域を使います」).
+  5. Progress goes to the header save state (「ファイルに保存中… 42%」). [中止] in the toast calls `sink.abort()`, which
+     removes the partial file (D§4.21 sink rules).
+  6. When done: `io.savedPkg`, e.g. 「保存しました: 夜明け.mojipv（1.2 GB・写真3・動画1・曲）」.
+- **Ctrl+S (保存)** writes the same kind as the current file handle: a `.mojipv` handle gets a package, a `.json`
+  handle a light save. Without a handle it acts as 名前を付けて保存 with the package type preselected.
+  - The package is **always rewritten in full**. The assets stream from disk at copy speed, and a partial in-place
+    update would need the browser's swap-file copy anyway.
+- **Light save** (`io.saveLight`) = today's `saveAs` of `.json`. Its toast adds 「写真・動画と曲は入っていません（この端末に
+  あるものは開くとつながります）」 when the work has assets or a song.
+- **The lock and writer token rules** of D§6.14 are unchanged. They concern the IndexedDB works store, not files.
+
+### 12.4 Opening
+
+`ui/project_io.openPackage(file)` works on the `File` from the picker or a drop, and reads by random access:
+1. **Directory.** `export/unzip.openZip(read, size)`:
+   - find the end record in the last 65,557 bytes, then the ZIP64 locator and record when present, then the central
+     directory;
+   - refuse: no end record (`pkg.err.truncated`: 「ファイルが途中までしか保存されていないか、壊れています」); multi-disk
+     archives, encryption or compressed entries (`pkg.err.unsupported`); a first entry that is not `mimetype` with the
+     right text (`pkg.err.notPackage`).
+2. **Manifest.** Read and check with `package.manifestProblems`: the format, `v`, the paths and roles, and bytes and CRC
+   equal to the directory's. A bad manifest is `pkg.err.invalid`.
+3. **Project.** Read `project.json`, verify its CRC, then `M.parseFile` (D§4.4). Any failure refuses the whole package
+   with the D§6.11 messages: newer schema, invalid.
+4. **Assets.** For each `files` entry in order, with progress (bytes done / total) and a [中止] button:
+   - **Dedupe:** if the `media` store already has the id (or `songs` has the sha1), skip it without reading.
+   - **Otherwise:** `slice = file.slice(dataStart, dataStart + bytes)`. One streaming pass computes CRC-32, plus
+     SHA-256 for media. For media the digest must equal the id; for a song the CRC is enough, because a relinked song
+     may be stored under another sha1 (D§6.11).
+   - **On success:** store the `slice` itself (a `Blob`) with its `crc`, and build `mediaIndex` and `thumbs` lazily on
+     first use. `thumbs/` entries are stored as given once their CRC checks.
+   - **On a mismatch:** skip the asset and count it for `pkg.warn.damaged` (「{n}件の写真・動画が壊れていたため読み込めません
+     でした」). The project still opens, and those assets are missing (§11.2.9 relink).
+5. **Load.** `loadFile({ doc, side })` (D§6.14): the history is cleared, and autosave takes the work into the `works`
+   store as today. The file handle is kept, so Ctrl+S writes the package back.
+6. **Cancel** at any step leaves the current work untouched. Assets already stored stay (they are content-addressed)
+   and are removed by pruning later if nothing uses them.
+
+**Other files:**
+- `.json` (schema 1 or 2) opens as today. Media ids are looked up in the `media` store, and missing ones are relinked.
+- Dropping a `.mojipv` anywhere opens it (after the D§6.10 unsaved-change rule: the previous work stays in autosave).
+
+### 12.5 Autosave and the device store
+
+- Autosave writes only the `works` store (the doc and side JSON), as today.
+- Assets are written to `media` and `songs` once, at import or package open. They are never rewritten by autosave.
+- 最近の作品 (D§6.4.12) opens works from IndexedDB. Their assets are on the device unless they were pruned or cleared.
+- The header save state gains a file line in its tooltip: 「ファイル: 夜明け.mojipv（12:30 に保存）」 or 「ファイルに未保存の変更
+  があります」. It is text only, with no new control.
+
+### 12.6 Modules (package G)
+
+```js
+// export/unzip (L5, pure): random-access ZIP reader for store-only archives
+openZip(read: (offset, length) → Promise<Uint8Array>, size) → Promise<{ entries: Map<name, Entry>, zip64 }>
+Entry = { name, crc, bytes, localOffset, method }
+dataStart(read, entry) → Promise<offset>        // reads the local header (name and extra lengths)
+ZipReadError codes: 'not-zip' | 'truncated' | 'unsupported' | 'bad-entry'
+
+// export/package (L5, pure)
+PACKAGE_V = 1, MIME = 'application/vnd.mojipv+zip', EXT = '.mojipv'
+layout(doc, side, have) → { manifest, order: [{ name, role, id?, sha1?, bytes, crc, mime? }], missing }
+     // have = { media: Map<id, { bytes, crc, mime }>, song: { sha1, bytes, crc, mime } | null, thumbs: Map<id, …> }
+extOf(mime) → 'png' | 'jpg' | … ;  pathOf(role, key, mime) → 'media/<id>.<ext>'
+manifestProblems(json, entries) → string[]
+readPlan(manifest, entries) → { project: Entry, media: [{ id, entry }], song: { sha1, entry } | null, thumbs: [...] }
+
+// ui/project_io (additions)
+savePackage(handle?) · saveLight(handle?) · openPackage(file, { signal, onProgress }) · putMedia · getMedia · putIndex ·
+getIndex · putThumbs · getThumbs · usedMedia (Set) · storageInfo() → { usage, quota, persisted }
+```
+
+### 12.7 UI and wording
+
+**≡ › ファイル** (D§6.4.12, replacing the ファイル group):
+
+| Item | ja | en |
+|---|---|---|
+| New | 新しく作る | New |
+| Open | 開く… (Ctrl+O) | Open… |
+| Save | 保存 (Ctrl+S) | Save |
+| Save as | 名前を付けて保存… (Ctrl+Shift+S) | Save as… |
+| Light save | 軽い保存（画像・動画・曲なし）… | Light save (without images, videos or song)… |
+| Import media | 写真・動画を読み込む… | Import photos and videos… |
+| Recent | 最近の作品 ▸ | Recent ▸ |
+| LRC | 時間つき歌詞（.lrc）を保存 | Save timed lyrics (.lrc) |
+| SRT | 字幕（.srt）を保存 (§13.8; the action belongs to package H) | Save subtitles (.srt) |
+| Bake times | 時刻を歌詞に書き込む | Write times into the lyrics |
+
+- **Picker types:**
+  - The save picker offers 「作品ファイル（写真・動画・曲も入る）(.mojipv)」 first, then 「軽い作品ファイル (.json)」.
+  - The open picker accepts `.mojipv`, `.json`, `.txt`, `.lrc`, audio, images and videos. Its description is
+    `io.fileTypes`: 「作品・歌詞・曲・写真・動画」.
+- **Progress** (the toast host, D§6.4.11): 「開いています: 夜明け.mojipv 38%（写真・動画 3/5）」 [中止]. While saving, the
+  header state reads 「ファイルに保存中… 42%」.
+
+**Strings** (package A writes them):
+
+| Key | ja | en |
+|---|---|---|
+| `io.save` / `io.saveAs` / `io.saveLight` | 保存 / 名前を付けて保存… / 軽い保存（画像・動画・曲なし）… | Save / Save as… / Light save (without images, videos or song)… |
+| `io.typePkg` / `io.typeJson` | 作品ファイル（写真・動画・曲も入る） / 軽い作品ファイル | Project file (with photos, videos and song) / Light project file |
+| `io.fileTypes` (changed) | 作品・歌詞・曲・写真・動画 | Projects, lyrics, songs, photos, videos |
+| `io.savedPkg` | 保存しました: {name}（{size}・{what}） | Saved: {name} ({size}, {what}) |
+| `io.savedWhat` | 写真{p}・動画{v}・曲 | {p} photos, {v} videos, song |
+| `io.savedLight` | 写真・動画と曲は入っていません（この端末にあるものは開くとつながります） | Photos, videos and the song are not included (files on this device relink when opened) |
+| `io.savingPkg` / `io.openingPkg` | ファイルに保存中… {p}% / 開いています: {name} {p}%（写真・動画 {i}/{n}） | Saving to file… {p}% / Opening {name} {p}% (photos and videos {i}/{n}) |
+| `io.fileState.saved` / `.dirty` | ファイル: {name}（{time} に保存） / ファイルに未保存の変更があります | File: {name} (saved at {time}) / Unsaved changes since the file was saved |
+| `pkg.warn.big` | 大きなファイルになります（{size}）。保存先の空き容量を確かめてください。FAT32 のドライブには 4 GB を超えるファイルを保存できません | This file will be large ({size}). Check the free space where you save it. FAT32 drives cannot hold files over 4 GB |
+| `pkg.warn.memory` | このブラウザでは一度メモリに作ってから保存します（{size}）。続けますか？ | This browser builds the file in memory before saving ({size}). Continue? |
+| `pkg.warn.missingIn` | {n}件の写真・動画はこの端末にないため、ファイルに入っていません | {n} photos or videos are not on this device, so they are not in the file |
+| `pkg.warn.damaged` | {n}件の写真・動画が壊れていたため読み込めませんでした | {n} photos or videos were damaged and could not be loaded |
+| `pkg.err.truncated` | ファイルが途中までしか保存されていないか、壊れています | The file is incomplete or damaged |
+| `pkg.err.notPackage` / `pkg.err.unsupported` / `pkg.err.invalid` | 文字PVメーカーの作品ファイルではありません / この形式の ZIP は開けません / 作品ファイルの中身が正しくありません | This is not a Moji PV Maker project file / This kind of ZIP cannot be opened / The project file's contents are not valid |
+| `pkg.err.newer` | 新しいバージョンで作られた作品です。このバージョンでは開けません。 | This project was made with a newer version and cannot be opened here. |
+
+### 12.8 Tests
+
+| File | Owner | Asserts |
+|---|---|---|
+| `zip.test.js` (+) | G | `addBlob` (Node `Blob`) gives the same bytes as `add` with the same data; ZIP64 forced; `write` receives `Blob` parts |
+| `unzip.test.js` (new) | G | round trip with `createZip` (store-only, ZIP64 on and off, 0–3 entries, a UTF-8 name at the limit); only headers are read (a counting `read`); errors: truncated end record, wrong central size, compressed entry, bad names, a 1,001-entry archive |
+| `package.test.js` (new) | G | `layout` order, names and exts; `missing`; `manifestProblems` for every rule; `readPlan`; the manifest's bytes and CRC equal the directory's; the project entry comes last |
+| `package_io.py` (new, browser) | G | **Round trip:** a project with a PNG (alpha), a 2-s WebM (VP9), a 2-s MP4 (VP9 in MP4; H.264 when available) and a WAV song → save a package with a memory sink and with an OPFS file sink → clear IndexedDB (`clearDevice`) → open → assets restored (ids and bytes equal), `doc` deep-equal, the song relinked, a frame of the preview identical to before. **Dedupe:** open again, no asset re-read (a counting `File.slice`). **Corrupt:** one flipped byte in the MP4 entry → the project opens, `pkg.warn.damaged` n = 1, that asset missing, the others fine; a truncated file → `pkg.err.truncated`, the current work untouched; `project.json` corrupt → refused. **Old files:** a v2.0 `.json` (schema 1 fixture) and a v2.1 light `.json` with assets already in IndexedDB open and link. **Cancel** mid-open leaves the work unchanged. **Size:** a synthetic 4.1 GB package via a generated sparse `Blob` (OPFS) is written with ZIP64 and read back by the reader (header checks only; run with `--long`). |
+| `ui_flows.py` (+) | G | ≡ › 保存 writes `.mojipv` (OPFS handle faked through the test hook); 軽い保存 writes `.json`; Ctrl+S keeps the kind; the header file state; the progress toast and cancel |
+| `csp.py` (+) | G | 0 violations for save and open |
+
+---
+
+## 13. Filmora 対応: output that drops cleanly into Filmora
+
+The owner's goal: whatever this app outputs must go into Wondershare Filmora without friction. The same outputs also
+suit Premiere Pro, DaVinci Resolve and CapCut. This is **package H** (§8.8), plus B's AAC-fallback item (§8.2).
+
+### 13.1 What we know about Filmora (research; ✔ = documented by Filmora or a standard, ? = to verify in Filmora)
+
+| # | Finding | Status | Consequence here |
+|---|---|---|---|
+| R1 | MP4 with H.264 video and AAC audio imports and edits normally | ✔ | the main deliverable |
+| R2 | Transparent video imports as **WebM (VP8/VP9 with alpha)** or **MOV (ProRes 4444)**; HEVC with alpha is not supported | ✔ (Filmora help), ? for the exact versions | WebM VP9 alpha is our transparent video. ProRes cannot be encoded in a browser. |
+| R3 | 「Import as Image Sequence」 reportedly accepts **JPEG/JPG sequences only** | ? | the transparent PNG ZIP is **not** a smooth path into Filmora; it stays for other editors |
+| R4 | Built-in **chroma key** (green screen): pick the key colour with a picker, then adjust tolerance | ✔ (menu names ?) | green-screen MP4 with an exact, documented key colour |
+| R5 | Imports **SRT** subtitle files onto the timeline | ✔; ? for UTF-8 with or without BOM and for CRLF | SRT export: UTF-8 **with BOM**, CRLF, which is the most compatible form |
+| R6 | **Opus audio inside MP4** may not import (the audio track is missing or silent) | ? (likely) | the kit never relies on Opus in MP4 (§13.4) |
+| R7 | WAV (PCM 16-bit, 48 kHz) imports | ✔ | the audio fallback of the kit |
+| R8 | The project frame rate should match the clips (24, 30, 60 CFR); MP4 files with timescale = fps read as exact CFR | ? | the MP4 video time scale is already `fps` (NOTES WP6); the README states the project settings |
+| R9 | Chrome's `VideoEncoder` rejects alpha (「Alpha encoding is not currently supported」, verified in Chromium 141) | ✔ | two VP9 encoders plus our own WebM writer with BlockAdditions (§13.5) |
+| R10 | Chrome decodes VP9 alpha in WebM (`AlphaMode = 1`, BlockAdditional id 1) | ✔ | the browser test decodes our WebM back and checks alpha |
+
+Every **?** line becomes a row of the manual checklist (§13.12).
+
+### 13.2 Goals (each testable)
+
+| Id | Goal | Test |
+|---|---|---|
+| **FG1** | A **Filmora用** preset in step ④: one choice that writes a ready-to-edit set of files | `ui_flows.py` flow "kit"; `kit_check.py` |
+| **FG2** | Main MP4: H.264 High, yuv420p, **CFR** at the project fps (24, 30, 60), key frame every 2 s, AAC-LC 48 kHz stereo; 1080p or 4K | `kit_check.py`: demux with `media/isobmff`; codec strings, `stss` every 2·fps, all `stts` deltas = 1 tick at timescale fps, AAC present (Chrome CI) |
+| **FG3** | Without AAC (Chrome on Linux): the kit's MP4 has no audio track, plus `<base>.wav`, which is sample-exact (`audioFrames(N)`), starts at 0 and is 16-bit 48 kHz stereo. The plain MP4 falls back to Opus in MP4 with a note (B's item). | `kit_check.py` with AAC disabled; WAV header, length and RMS |
+| **FG4** | **透過WebM** (VP9 alpha): a standalone format and the kit's overlay; frame-exact, CFR (`DefaultDuration`), seekable (Cues), decodable with alpha by Chrome, readable by our demuxer | `webm_check.py` |
+| **FG5** | **グリーンバック MP4**: backdrop `chroma` with the key colour **#00B140**; decoded background pixels within ±4 per channel; a one-line how-to for the key | `kit_check.py` |
+| **FG6** | **Layer outputs:** 文字と装飾（透過WebM） plus 背景だけ（MP4), with the same N, timestamps and size; their composite equals the full render (MAE ≤ 2/255) for projects without world seams or non-`alphaSafe` screen effects | `kit_check.py` |
+| **FG7** | **SRT and LRC** from the lyric timing, relative to the export range | `subtitles.test.js`; `kit_check.py` parses them |
+| **FG8** | **File names** are predictable ASCII suffixes after the title (§13.9), and a `README_Filmora.txt` (ja + en) is in the set | `kit_check.py` |
+| **FG9** | **In-app guide** 「Filmoraで使うには」 (ja/en) from step ④, plus `docs/FILMORA.md` | `i18n.test.js` keys; `ui_flows.py` opens it |
+| **FG10** | **Manual verification** in Filmora (Windows and macOS, the current major version): every ? row of §13.1, recorded in NOTES | the checklist of §13.12 |
+| **FG11** | **Top level stays simple:** step ④ keeps ≤ 5 controls; the kit is one choice of 形式 | `ui_layout.py` budgets |
+
+### 13.3 Output settings (schema 2; `core/doc`, package A)
+
+- **`output.format`** ∈ `mp4`, `kit`, `webmAlpha`, `png`, `pngAlpha` (`OUTPUT_CHOICES` gains `kit` and `webmAlpha`).
+- **`output.kit`** = `{ overlay: true, bg: false, green: false, srt: true, lrc: false }`: the kit's optional files. The
+  main MP4 is always written. `ORDER.output` adds `'kit'` at the end, `ORDER.kit` is the key order above, and
+  `normalize` fills it.
+- **`output.set`** accepts the key `kit` with a whole object: five booleans, with a `payload` error otherwise.
+- **Format and backdrop coupling** (`ui/output`, D§6.4.3):
+
+  | Choice | Result |
+  |---|---|
+  | `webmAlpha` or `pngAlpha` | backdrop `clear` |
+  | `mp4`, `kit` or `png` while the backdrop is `clear` | backdrop becomes `scene` |
+  | backdrop `clear` while the format is opaque | format becomes `webmAlpha` (the primary transparent path) |
+  | another backdrop while the format is `webmAlpha` / `pngAlpha` | format becomes `mp4` / `png` (the latter as today) |
+
+  `backdropFor(format, backdrop)`: `webmAlpha` → `clear`; `kit` → the document's backdrop, with `clear` read as
+  `scene`.
+
+### 13.4 AAC and audio policy
+
+| Output | AAC encoder available | No AAC encoder (Chrome on Linux, Chromium builds) |
+|---|---|---|
+| MP4 (形式 MP4) | AAC-LC 192 kbps | **Opus in MP4** (160 kbps), with the preflight note `opus-audio` (B's item, §8.2) |
+| Kit: main MP4 | AAC-LC | **No audio track**, plus `<base>.wav` (PCM 16-bit, 48 kHz stereo, exactly `audioFrames(N, fps, 48000)` samples from `t0`), plus the kit note `kit-wav` |
+| Kit: `_bg.mp4`, `_green.mp4` | no audio (the main MP4 or the WAV carries the song) | same |
+| 透過WebM, kit `_overlay.webm` | Opus in WebM, the WebM standard (standalone: when 音声を入れる is on; overlay: never) | same |
+
+- The WAV writer is `audio/wav.encodePcm16(channels, rate, start, frames) → Uint8Array` (additive; package H). It mixes
+  down with the D§4.21 down-mix and writes a RIFF header. The down-mix (`mixMatrix`, `fillPlanar`) lives in `audio/wav`,
+  because `audio/*` (L1) may not depend on `export/*` (L5); `export/schedule` re-exports the same functions.
+- A WAV over 4 GB (≈ 6 h 12 min at 48 kHz) is impossible within the 60-min cap.
+
+### 13.5 Transparent WebM (`export/host/webm`, `export/webm`; package H)
+
+**Encoding** (per frame `i`; after `await e.mediaReady(t)`):
+1. `renderFrame(surface, t, { quality: 'export', backdrop: 'clear', scale })`. The surface is an `OffscreenCanvas` with
+   alpha.
+2. `img = surface.ctx.getImageData(0, 0, w, h)` gives straight (not premultiplied) RGBA. `getImageData` is allowed in
+   `export/host/*` (D§2.4 bans it only in `engine/render` and the parts). This is one readback per frame.
+3. **Colour frame:** `new VideoFrame(img.data, { format: 'RGBA', codedWidth: w, codedHeight: h, timestamp: ts(i),
+   duration: frameDur(i) })` goes to encoder **C** (`alpha: 'discard'`, the default).
+4. **Alpha frame:** an I420 buffer whose **Y plane = the alpha bytes** and whose U and V planes are 128. It becomes
+   `new VideoFrame(buf, { format: 'I420', …, colorSpace: { fullRange: true } })` and goes to encoder **A**.
+   - Building I420 directly avoids the RGB→YUV limited-range mapping: alpha 0 stays 0 and 255 stays 255 before
+     compression.
+5. Both encoders use the same config:
+   - codec: the first supported of `pickVp9(w, h, fps)` = `vp09.00.<level>.08` (level from the size and rate table),
+     then `vp8`;
+   - bitrate: C = `bitrate(w, h, fps, quality)`, A = the same (`ALPHA_SHARE` 1). At 25 % the alpha fell behind moving
+     text within a key-frame interval (a ghost trail over the user's footage; measured in NOTES "## v2.1-H.2"); the
+     variable-rate encoder uses only what the alpha needs;
+   - `latencyMode: 'quality'`;
+   - key frames forced on both at `i % (2·fps) === 0`.
+6. The muxer pairs C and A chunks by timestamp and writes one `BlockGroup` per frame:
+   - `Block` = the C frame;
+   - `BlockAdditions/BlockMore(BlockAddID 1)/BlockAdditional` = the A frame;
+   - `ReferenceBlock` when C is not a key frame.
+   - Spontaneous extra key frames in one encoder are harmless: the forced ones align.
+7. **Audio** (standalone, when the song is on): `AudioEncoder` Opus, 48 kHz, 2 channels, 160 kbps, in 1024-frame chunks
+   covering `[t0, t1)`, trimmed or padded to `audioFrames(N)` (the D§4.21 rules), as `SimpleBlock`s on track 2.
+
+**The writer** `export/webm.createWebm({ write, w, h, fps, video: { codec: 'V_VP9' | 'V_VP8', alpha: true },
+audio: { rate, channels, codecPrivate } | null })` → `{ video(colour, alpha, key, ts), audio(chunk, ts), finish() }`:
+- **Pure.** It uses `write(bytes, position?)`, the D§4.21 sink contract. Positional writes patch the placeholders.
+- **Elements** (Matroska/WebM, `DocType` `webm`, `DocTypeVersion` 4, `DocTypeReadVersion` 2):
+
+  | Element (id) | Content |
+  |---|---|
+  | EBML (1A45DFA3) | EBMLVersion 1, ReadVersion 1, MaxIDLength 4, MaxSizeLength 8, DocType `webm`, DocTypeVersion 4, DocTypeReadVersion 2 |
+  | Segment (18538067) | size written as 8 bytes, patched at `finish` |
+  | SeekHead (114D9B74) | Seek (4DBB) entries for Info, Tracks and Cues; Cues' position patched; padded with Void (EC) |
+  | Info (1549A966) | TimestampScale (2AD7B1) = 1,000,000 ns; Duration (4489, float) patched; MuxingApp (4D80) and WritingApp (5741) = `mojipv 2.1` |
+  | Tracks (1654AE6B) / TrackEntry (AE) 1 | TrackNumber (D7) 1, TrackUID (73C5), TrackType (83) 1, FlagLacing (9C) 0, CodecID (86) `V_VP9` or `V_VP8`, DefaultDuration (23E383) = `round(1e9 / fps)` ns, MaxBlockAdditionID (55EE) 1, BlockAdditionMapping (41E4) { BlockAddIDValue (41F0) 1, BlockAddIDType (41E7) 0 }, Video (E0) { PixelWidth (B0), PixelHeight (BA), AlphaMode (53C0) 1 } |
+  | TrackEntry 2 (audio) | TrackType 2, CodecID `A_OPUS`, CodecPrivate (63A2) = OpusHead (from the encoder's `decoderConfig.description`, else built: version 1, 2 channels, pre-skip 312, 48000, gain 0, mapping 0), CodecDelay (56AA) = pre-skip in ns, SeekPreRoll (56BB) = 80 ms, Audio (E1) { SamplingFrequency (B5) 48000.0, Channels (9F) 2 } |
+  | Cluster (1F43B675) | one per video key frame (every 2 s): Timestamp (E7) in ms; BlockGroup (A0) { Block (A1), BlockAdditions (75A1) { BlockMore (A6) { BlockAddID (EE) 1, BlockAdditional (A5) } }, ReferenceBlock (FB) }; audio SimpleBlock (A3) |
+  | Cues (1C53BB6B) | CuePoint (BB) { CueTime (B3), CueTrackPositions (B7) { CueTrack (F7) 1, CueClusterPosition (F1) } } per cluster |
+
+- **Timestamps:** block times are `round(ts(i) / 1000)` ms relative to the cluster (int16), and a cluster never spans
+  more than 32.7 s. `DefaultDuration` marks CFR for editors.
+- The same writer serves the tests' fixtures (§11.8.1). `media/matroska` reads its output back exactly, which is the
+  round trip test.
+
+**Why our own writer:** vendoring webm-muxer (MIT) would also work. Our own writer (≈ 450 LOC) keeps third-party code
+at the two existing vendor files, and it doubles as the generator of the tests' WebM fixtures (§11.8.1).
+
+**Throughput:** one readback plus two VP9 encodes per frame. 1080p30 runs at about 25–45 fps on a mid-range laptop;
+package H records the real figure in NOTES.
+
+### 13.6 Green-screen MP4
+
+- The backdrop is `chroma`: the frame is filled `#00B140`, the palette is adjusted and only `alphaSafe`/`shape` filters
+  run (D§4.19.4).
+- Encoding is the ordinary MP4 path. Chroma subsampling blurs colour edges, so the kit's green MP4 always uses quality
+  `max` (0.18 bpp).
+- **How-to line** (step ④ and the README, ? for the menu names): 「Filmoraで上のトラックに置き、クロマキー（緑幕）をオン
+  にして色 #00B140 を選び、許容範囲を少し上げます。」
+
+### 13.7 Layer outputs (overlay + background)
+
+- **Overlay** (`_overlay.webm`): the §13.5 transparent WebM, with backdrop `clear`. It draws every layer except the
+  ground layer, with `alphaSafe` screen effects only (D§4.19.4).
+- **Background** (`_bg.mp4`): `renderFrame(…, { layers: 'ground' })` (B's option, §11.3.7). It draws the backdrop fill
+  and only the ground layer of every item, with the post stack limited to the work texture.
+- **Composition rule:** background under overlay = the full render, **except** that:
+  - world seams mix each output separately;
+  - non-`alphaSafe` screen effects are absent from the overlay;
+  - accent screen effects are absent from the background.
+- When any of these apply, the preflight adds `layers-approx` (info), naming the effects or the number of world seams.
+
+### 13.8 Subtitles (`export/subtitles`; package H; pure)
+
+```js
+srt(plan, { t0 = 0, t1 = plan.duration, per = 'line' | 'cut' }) → string     // UTF-8 text; the caller adds the BOM
+lrc(plan, doc) → string                                                        // moved here from ui/project_io.lrcText (same bytes)
+```
+
+- **One cue per sung line** (`plan.lines`, time order), or per cut when `per` is `cut`:
+  - `start = max(0, line.t0 − t0)`, `end = min(line.t1, t1) − t0`;
+  - a cue ending after the next cue's start is cut back to it;
+  - a cue shorter than 0.1 s is dropped;
+  - lines outside `[t0, t1)` are dropped.
+- **Text** is the line's plain text, with marks removed (D§3.11).
+- **Format:** `n`, then `HH:MM:SS,mmm --> HH:MM:SS,mmm` (milliseconds rounded half up), then the text, then an empty
+  line, with CRLF line endings. The file is written with a UTF-8 BOM.
+- **≡ › ファイル › 字幕（.srt）を保存** writes the whole video. The kit writes the export range.
+
+### 13.9 The Filmora kit (`export/host/kit`; package H)
+
+**Files** (`base` = `S.fileName(doc, …)` without its extension):
+
+| File | When | Content |
+|---|---|---|
+| `<base>.mp4` | always | the main MP4 (§13.4, FG2) |
+| `<base>_overlay.webm` | `kit.overlay` | 文字と装飾 (transparent WebM) |
+| `<base>_bg.mp4` | `kit.bg` | 背景だけ |
+| `<base>_green.mp4` | `kit.green` | グリーンバック |
+| `<base>.srt` / `<base>.lrc` | `kit.srt` / `kit.lrc` | subtitles and timed lyrics |
+| `<base>.wav` | when AAC is unavailable | the song, sample-exact |
+| `README_Filmora.txt` | always | how to use the files (ja, then en), with the real names, fps, size and key colour |
+
+**Destination:**
+- With File System Access: `showDirectoryPicker({ mode: 'readwrite', id: 'mojipv-kit' })`, then a new folder
+  `<base>_filmora`, with one file sink per file. Cancel or failure removes the created files and the folder
+  (`removeEntry(…, { recursive: true })`).
+- Without it: memory sinks, then one store-only ZIP `<base>_filmora.zip` assembled from `Blob` parts (§12.3 `addBlob`),
+  then `downloadBlob`. The memory confirmation of D§4.21 applies to the total.
+
+**One pass over the timeline:**
+1. `eA = engine.fork()`: the document as it is.
+2. `eG = engine.fork({ assets: eA's store })` with `setDoc(reduce(doc, look.set backdrop 'chroma'))`: its plan has the
+   chroma palette, and it shares the media sessions, so each source frame is decoded once.
+3. For each frame `i`, `await eA.mediaReady(t)`, then render and encode in this order: main (`eA`, doc backdrop), overlay
+   (`eA`, `clear`), background (`eA`, `layers: 'ground'`), green (`eG`).
+   - Each output has its own encoder, and each encoder has its queue limit (D§4.21).
+   - All outputs use the same `ts(i)` and `frameDur(i)`, so they line up exactly in Filmora.
+4. After the video: the audio (AAC in the main MP4, or the WAV), SRT, LRC and README.
+5. Progress is per frame over all outputs, with a label per phase (「動画」「文字（透過）」…) and one ETA.
+
+**Result:** `{ files: [{ name, bytes }], ms, audio: 'aac' | 'wav' | 'none' }`. The done state of step ④ lists the files,
+plus 「Filmoraで使うには」.
+
+### 13.10 Step ④ UI (package H; D§6.4.3 amended; still ≤ 5 controls)
+
+```
+形式  [MP4] [Filmora用] [その他 ▾]         ← one control: a segmented pair plus a select (透過動画（WebM）/ PNG連番 / 透過PNG),
+                                              the pattern of step ③'s 画面の形
+大きさ [1080p 1920×1080 v]   なめらかさ [24|30|60]   背景 [通常 v]   ▸ 詳しく
+```
+
+- **詳しく for Filmora用:** 範囲 · 画質 · 音声を入れる · ファイル名, then the set's contents, then the guide link:
+  ```
+  セットに入れるもの
+   ☑ 完成動画（MP4）           (always; disabled)
+   ☑ 文字と装飾だけ（透過WebM）
+   ☐ 背景だけ（MP4）
+   ☐ グリーンバック（MP4）
+   ☑ 字幕（SRT）   ☐ 時間つき歌詞（LRC）
+  Filmoraで使うには ›
+  ```
+- **The summary line** for the kit: 「Filmora用セット: 4ファイル・約 820 MB（フォルダに保存）」, or …（ZIPでダウンロード）
+  without File System Access.
+- **Preflight items** (`export/schedule.preflight`, pure; package H):
+
+  | Code | Level | Text key |
+  |---|---|---|
+  | `kit-wav` | info | `exp.pre.kit-wav` |
+  | `kit-fps` | info | `exp.pre.kit-fps` |
+  | `kit-size` | info | `exp.pre.kit-size` (720p or 1440p chosen) |
+  | `layers-approx` | info | `exp.pre.layers-approx` |
+  | `no-vp9` | block | `exp.pre.no-vp9` (neither VP9 nor VP8 encodes: 透過WebM and the overlay are impossible) |
+  | `kit-memory` | confirm | `exp.pre.kit-memory` |
+
+  The media items of §11.7.9 also apply. `probe()` gains `vp9Codec` (the first supported VP9 or VP8 string).
+- **「Filmoraで使うには」** opens a help sheet (`ui/filmora_help`, a `<dialog>` like the shortcut sheet, D§6.4.12) with
+  the numbered steps of the README, using the real names and settings.
+- **The existing alpha note** `exp.alphaNote` is replaced by `exp.alphaNote2`:
+  「透明にするときは『透過動画（WebM）』がおすすめです（Filmora・Premiere・DaVinci・ブラウザで使えます）。PNG連番は
+  After Effects などに。」
+
+**Strings** (package A writes them):
+
+| Key | ja | en |
+|---|---|---|
+| `exp.fmt.kit` / `exp.fmt.webmAlpha` / `exp.fmt.other` | Filmora用 / 透過動画（WebM） / その他 | For Filmora / Transparent video (WebM) / Other |
+| `exp.kit.title` | セットに入れるもの | Files in the set |
+| `exp.kit.main` / `.overlay` / `.bg` / `.green` / `.srt` / `.lrc` | 完成動画（MP4） / 文字と装飾だけ（透過WebM） / 背景だけ（MP4） / グリーンバック（MP4） / 字幕（SRT） / 時間つき歌詞（LRC） | Finished video (MP4) / Words and decorations only (transparent WebM) / Background only (MP4) / Green screen (MP4) / Subtitles (SRT) / Timed lyrics (LRC) |
+| `exp.kit.summary` | Filmora用セット: {n}ファイル・約 {size}（{where}） | Set for Filmora: {n} files, about {size} ({where}) |
+| `exp.kit.toFolder` / `exp.kit.toZip` | フォルダに保存 / ZIPでダウンロード | saved to a folder / downloaded as a ZIP |
+| `exp.kit.phase` | {what} を書き出し中 | Writing {what} |
+| `exp.kit.done` | {n}ファイルを書き出しました: {folder} | Wrote {n} files: {folder} |
+| `exp.kit.howTo` | Filmoraで使うには | How to use in Filmora |
+| `exp.pre.opus-audio` (B) | このブラウザでは AAC で書き出せないため、音声は Opus で入ります。ブラウザ・YouTube・VLC では再生できます。編集ソフト（Filmora など）で音が出ないときは「Filmora用」で書き出してください。 | This browser cannot write AAC, so the sound is Opus. Browsers, YouTube and VLC play it. If an editor (such as Filmora) has no sound, export with "For Filmora". |
+| `exp.pre.kit-wav` | このブラウザでは AAC が使えないため、曲は別のファイル（{name}.wav）になります。Filmoraでは 0:00 に置いてください。 | This browser cannot write AAC, so the song is a separate file ({name}.wav). Place it at 0:00 in Filmora. |
+| `exp.pre.kit-fps` | Filmoraのプロジェクトも {fps}fps・{w}×{h} にしてください | Set the Filmora project to {fps} fps, {w}×{h} too |
+| `exp.pre.kit-size` | Filmoraでは 1080p か 4K が扱いやすいです | 1080p or 4K is easiest in Filmora |
+| `exp.pre.layers-approx` | 重ねたとき、{what} は少し違って見えます | When layered, {what} look slightly different |
+| `exp.pre.no-vp9` | このブラウザは透過動画（VP9）を書き出せません。PC の Chrome か Edge を使ってください | This browser cannot write transparent video (VP9). Use Chrome or Edge on a computer |
+| `exp.pre.kit-memory` | このブラウザではセットをメモリで作ってから ZIP で保存します（約 {size}） | This browser builds the set in memory and saves it as a ZIP (about {size}) |
+| `exp.alphaNote2` | 透明にするときは「透過動画（WebM）」がおすすめです（Filmora・Premiere・DaVinci・ブラウザで使えます）。PNG連番は After Effects などに。 | For transparency, "Transparent video (WebM)" is recommended (Filmora, Premiere, DaVinci, browsers). PNG sequences suit After Effects and similar. |
+| `kit.help.title` | Filmoraで使うには | Using the files in Filmora |
+| `kit.help.1` | Filmoraで新しいプロジェクトを作り、{w}×{h}・{fps}fps にします。 | Create a new Filmora project at {w}×{h}, {fps} fps. |
+| `kit.help.2` | 「{main}」を読み込み、タイムラインの 0:00 に置きます。 | Import "{main}" and place it at 0:00 on the timeline. |
+| `kit.help.3` | 自分の映像に文字だけ重ねるときは、「{overlay}」を上のトラックの 0:00 に置きます（透過WebM）。 | To put only the words over your own footage, place "{overlay}" on an upper track at 0:00 (transparent WebM). |
+| `kit.help.4` | グリーンバックのときは「{green}」を上のトラックに置き、クロマキーで色 #00B140 を選びます。 | For the green screen, place "{green}" on an upper track and pick #00B140 with the chroma key. |
+| `kit.help.5` | 字幕は「{srt}」を読み込みます。 | For subtitles, import "{srt}". |
+| `kit.help.6` | 音が入っていないときは「{wav}」を 0:00 に置きます。 | If there is no sound, place "{wav}" at 0:00. |
+| `kit.readme.head` | 文字PVメーカーの書き出しファイル（Filmora用） | Files exported by Moji PV Maker (for Filmora) |
+| `menu.saveSrt` | 字幕（.srt）を保存 | Save subtitles (.srt) |
+
+### 13.11 Modules (package H)
+
+| Module | Kind | Exports |
+|---|---|---|
+| `export/webm` (new, L5) | pure | `createWebm(o)` (§13.5), `IDS` (element ids), `ebmlSize(n)`, `ebmlId(id)` |
+| `export/subtitles` (new, L5) | pure | `srt`, `lrc` (§13.8) |
+| `export/schedule` (+) | pure | `pickVp9`, `kitFiles(doc, plan, env) → [{ name, kind, est }]`, the new preflight codes, `FORMATS` |
+| `export/host/webm` (new, L6) | host | `exportWebm({ engine, doc, audio, sink, signal, onProgress })` → Result (§13.5) |
+| `export/host/kit` (new, L6) | host | `exportKit({ engine, doc, audio, dir \| null, signal, onProgress })` → `{ files, ms, audio }` |
+| `export/host/sink` (+) | host | `openDirectory({ name })`, `createDirSink(dirHandle)` → `{ file(name) → Promise<Sink>, abort(), close() }` (file handles are made asynchronously); `write` accepts `Blob` (§12.3) |
+| `export/host/mp4` (+) | host | the `layers` and `backdrop` options through `openJob`; reuse by the kit. The `mediaReady` await (B.3) and the Opus fallback (B.4) are B's items. |
+| `audio/wav` (+) | pure | `encodePcm16(channels, rate, start, frames)` |
+| `ui/output` (+), `ui/step_export` (+), `ui/filmora_help` (new), `ui/menus` (+ `file.saveSrt`) | UI | §13.10 |
+| `docs/FILMORA.md` (new) | doc | the guide (ja and en): what each file is, the steps, the key colour, what to check, and the §13.1 facts with their status |
+
+### 13.12 Tests
+
+| File | Owner | Asserts |
+|---|---|---|
+| `webm.test.js` (new) | H | EBML ids and sizes; the Segment and Duration patches through positional writes; clusters at key frames; BlockGroup with the alpha BlockAdditional; ReferenceBlock on delta frames; Cues point at clusters; audio SimpleBlocks; **round trip through `media/matroska`** (the table, alpha ranges and codec equal the input) |
+| `subtitles.test.js` (new) | H | the SRT grammar (a small parser); CRLF; the BOM added by the caller; rounding; overlap trimming; range clipping; per-cut mode; `lrc` bytes equal the previous `lrcText` over the fixtures |
+| `export_math.test.js` (+) | H, B | `pickVp9` levels; `kitFiles` names and estimates; preflight `kit-wav`, `kit-fps`, `layers-approx`, `no-vp9`, `opus-audio` (B) and `no-audio-codec` only when there is no codec at all |
+| `doc.test.js`, `commands.test.js` (+) | A | `output.format` `kit` and `webmAlpha`; `output.kit` normalize and validate; `output.set kit` |
+| `webm_check.py` (new, browser) | H | A 3-s 720p30 transparent WebM of project_basic with an alpha test pattern cut. **Decoded by Chrome** (`<video src=blob:>` + `requestVideoFrameCallback` + draw + `getImageData`) at 6 frame times: alpha within ±6/255 of the transparent PNG export of the same frames for ≥ 99 % of the pixels, mean \|Δα\| ≤ 1; fully clear areas (no PNG α > 0 within 4 px) ≤ 3 and glyph cores (PNG α = 255 within 3 px) ≥ 250 for ≥ 99.9 % of their pixels, with no spike beyond 24 or below 232 (VP9 leaves isolated one-pixel spikes even at a fixed quantizer). **Decoded by WebCodecs** through `media/matroska`: N frames, both streams, key frames aligned every 60. **Frame-exact:** the §11.8.1 counter pattern drawn by a cut, and each decoded frame's code equals `i`. Cues, Duration and DefaultDuration present. With the song: the Opus track length equals `audioFrames(N)` ± one packet. |
+| `kit_check.py` (new, browser) | H | A kit of project_basic plus a still background, 2 s, 1080p30, to OPFS through `createDirSink`. It checks: file names; MP4 codec (`avc1.64…` when H.264 encodes, else the VP9 fallback of `export_check.py`) with CFR `stts`, `stss` every 60 and AAC present (Chrome CI) or `<base>.wav` present with the right length (AAC off); overlay WebM alpha present; `_bg.mp4` has N frames; **composite** `_bg` + `_overlay` (from the PNG exports of the same frames, to avoid codec loss) vs the full render MAE ≤ 2/255 on a project without world seams; `_green.mp4` decoded background ±4 of #00B140; SRT parses and its times equal `plan.lines`; README holds the real names. **ZIP path** (no File System Access, faked): one store-only ZIP with the same files. **Cancel** removes the folder. |
+| `export_check.py` (+) | B | **AAC fallback:** with AAC disabled (`codecs: { audioList: ['bogus.aac', 'opus'] }`), and by default on local Chromium, `exportVideo` returns `audio: true`, `audioCodec: 'opus'`; the MP4's `stsd` has `Opus` with a `dOps` box; `decodeAudioData` of the file gives a duration = N / fps (± 25 ms) and RMS > 0.01 for the test song; the preflight lists `opus-audio`, not `no-audio-codec` |
+| `ui_flows.py` (+) | H | **flow "kit":** choose Filmora用 → the contents checkboxes → 書き出す → the files listed in the done state → 「Filmoraで使うには」 opens and closes; **flow "webm":** その他 › 透過動画 sets backdrop 透明; keyboard-only variant |
+| `ui_layout.py` (+) | H | step ④ ≤ 5 controls with every format; the kit contents fit 288–352 px |
+| `csp.py` (+) | H | 0 violations for the WebM, kit (folder and ZIP) and SRT flows |
+
+**Manual checklist (FG10; recorded under `## v2.1-H Filmora check` in NOTES)**, using Filmora's current major version
+on Windows 11 and macOS:
+- import every kit file;
+- MP4: frame rate and resolution recognised, sound present (AAC);
+- `_overlay.webm`: transparency visible over footage;
+- `_green.mp4` with the chroma key at #00B140: clean edges at 1080p `max`;
+- SRT: Japanese text shows correctly, with and without the BOM;
+- the WAV lines up at 0:00;
+- the plain Opus MP4: record whether its sound imports (R6);
+- a 4K MP4 imports;
+- a PNG sequence: record Filmora's behaviour (R3).
+
+Each ? row of §13.1 is then set to ✔ or ✗, and the README text is fixed if needed.

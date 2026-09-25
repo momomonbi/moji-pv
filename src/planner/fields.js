@@ -1,20 +1,24 @@
-/* 文字PVメーカー v2 — original work. Inspector field states, lock payloads and plan-value readers (DESIGN §4.16.8, §3.13, §3.6). */
+/* 文字PVメーカー v2 — original work. Inspector field states, lock payloads and plan-value readers (DESIGN §4.16.8, §3.13, §3.6; DESIGN_2_1 §3.9). */
 MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyrics', 'core/schema', 'core/timing',
-  'planner/cast', 'planner/look', 'planner/segment', 'planner/plan'], (P, PINS, REG, LY, S, TM, CA, LK, SG, PL) => {
+  'core/curve', 'core/shot', 'planner/params', 'planner/cast', 'planner/look', 'planner/segment', 'planner/plan'],
+(P, PINS, REG, LY, S, TM, CV, SHOT, PA, CA, LK, SG, PL) => {
   'use strict';
 
   const LOOK_NAMES = new Set(['mood', 'theme', 'season', 'bpm', 'beatOffset', 'readRate', 'length', 'titleCard']);
   const LOOK_PREFIX = /^(color|amount|face)\./;
-  const LINE_NAMES = new Set(['start', 'end', 'split', 'lang']);
+  const LINE_NAMES = new Set(['start', 'end', 'split', 'lang', 'avoid']);
+  const RIG_SLOTS = new Set(['rig', 'rig.curve']);
   const TRACK_KINDS = new Set(['ground', 'atmos', 'seam']);
   const EL_DEFAULT = Object.freeze({ nudge: Object.freeze({ dx: 0, dy: 0, rot: 0, s: 1 }), fill: null, hide: false });
 
   // --- what a path addresses ---------------------------------------------------------------------------------
 
-  // 'look' (work-scope slots), 'line' (start/end/split/lang), 't0', 'el', 'count', 'part', 'param' or 'value'
-  // (orient, text.*).
+  // 'look' (work-scope slots), 'line' (start/end/split/lang; since v2.1 also avoid, and season at line or cut scope,
+  // which is a line value while work:season stays the look's), 't0', 'el', 'count', 'part', 'param' or 'value'
+  // (orient, text.*, motion.speed, cam.*, rig, rig.curve).
   function categoryOf(parsed) {
     const slot = parsed.slot;
+    if (slot === 'season' && parsed.scope.kind !== 'work') return 'line';
     if (LOOK_NAMES.has(slot) || LOOK_PREFIX.test(slot) || (parsed.part && parsed.part.kind === 'texture')) return 'look';
     if (LINE_NAMES.has(slot)) return 'line';
     if (slot === 't0') return 't0';
@@ -64,10 +68,14 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
     return plan.cuts.slice();
   }
 
-  // The Decision a cut holds for a part/value/count slot (seams: the boundary into the cut; grounds: its segment).
-  // A boundary without a seam entry is the hard cut (registry.fallback('seam')).
+  // The Decision a cut holds for a part/value/count slot (seams: the boundary into the cut; grounds: its segment;
+  // rig and rig.curve: its rig run). A boundary without a seam entry is the hard cut (registry.fallback('seam')).
   function decisionAt(plan, cut, parsed, registry) {
     const part = parsed.part;
+    if (RIG_SLOTS.has(parsed.slot)) {
+      const run = plan.rigs && cut.rig !== undefined ? plan.rigs[cut.rig] : null;
+      return run ? (parsed.slot === 'rig' ? run.rig : run.curve) : null;
+    }
     if (part && part.kind === 'ground') return plan.grounds[cut.ground] ? plan.grounds[cut.ground].ground : null;
     if (part && part.kind === 'atmos') return plan.grounds[cut.ground] ? plan.grounds[cut.ground].atmos : null;
     if (part && part.kind === 'seam') {
@@ -76,6 +84,26 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
     }
     const slot = part ? (part.param === 'count' && part.idx === null ? part.kind + '.count' : choiceSlot(part)) : parsed.slot;
     return (cut.slots && cut.slots[slot]) || null;
+  }
+
+  // The rule behind the automatic depth of a media part at a cut (DESIGN_2_1 §11.9.2): 'ai' | 'overlay' | 'frame' |
+  // 'video' | 'busy' | 'still' (the why code media.depth.<rule>), or null when the path is not an automatic depth.
+  // The same inputs as the planner: the part's use, its source asset, and for a background its segment's text.
+  function depthRuleAt(doc, plan, cut, parsed, registry) {
+    if (!cut || !registry || !parsed.part || parsed.part.param !== 'depth') return null;
+    const d = decisionAt(plan, cut, parsed, registry);
+    if (!d || typeof d.v !== 'string' || d.v === 'none' || !d.p || (d.pfrom && d.pfrom.depth)) return null;
+    if (parsed.part.key && parsed.part.key !== d.v) return null;
+    const kind = partKindOf(parsed.part.kind);
+    const def = registry.get(kind, d.v);
+    const info = def ? PA.paramInfo(registry, kind, def) : null;
+    if (!info || !info.depth || !info.media) return null;
+    const use = PA.useOf(def, kind, info.depthSpec);
+    const list = doc && doc.media && Array.isArray(doc.media.list) ? doc.media.list : [];
+    const entries = new Map(list.filter((e) => e && typeof e.id === 'string').map((e) => [e.id, e]));
+    const seg = use === 'ground' ? plan.grounds[cut.ground] : null;
+    const coverage = seg ? PA.textCoverage(seg.cuts.map((k) => cutOf(plan, k))) : 0;
+    return PA.depthRule(use, d.p[info.media], entries, coverage).rule;
   }
 
   // A work pin's value coerced through the slot's spec, or undefined (no pin, or one the planner ignores).
@@ -131,22 +159,43 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
     return f ? (f.ja || f.latin).weight : undefined;
   }
 
-  function lineValue(plan, parsed, lineId) {
+  function lineValue(plan, parsed, lineId, ix) {
     const line = cutIndex(plan).lines.get(lineId);
     if (!line) return undefined;
     if (parsed.slot === 'start') return line.t0;
     if (parsed.slot === 'end') return line.t1;
     if (parsed.slot === 'lang') return line.lang;
+    if (parsed.slot === 'season') return lineSeason(plan, lineId, ix);
+    if (parsed.slot === 'avoid') return lineAvoid(lineId, ix);
     return line.cuts.map((k) => P.cutOffset(k));        // split
   }
 
+  // A line's effective season (DESIGN_2_1 §4.9): its own pin, else the work's season (the look's value, which is the
+  // work pin or the lyrics' season).
+  function lineSeason(plan, lineId, ix) {
+    const hit = ix ? PINS.lookup(ix, { cutKey: null, pinCutKey: null, lineId }, 'season') : null;
+    if (hit && hit.from === 'pin:line') {
+      const v = S.coerce(SG.LINE_SPECS.season, hit.v);
+      if (v !== undefined) return v;
+    }
+    return plan.look.season.v;
+  }
+
+  // A line's avoid list: its pin, coerced (sorted, unique, ≤ 24), else [].
+  function lineAvoid(lineId, ix) {
+    const hit = ix ? PINS.lookup(ix, { cutKey: null, pinCutKey: null, lineId }, 'avoid') : null;
+    const v = hit && hit.from === 'pin:line' ? S.coerce(SG.LINE_SPECS.avoid, hit.v) : undefined;
+    return v === undefined ? NO_REFS : v;
+  }
+  const NO_REFS = Object.freeze([]);
+
   // valueAt(plan, cut, parsed, registry, ix?) → the value a path shows at one cut (cut may be null for work/line
   // slots). ix = the document's pin index, for the look values that are requests rather than Plan values (weights,
-  // the reading rate).
+  // the reading rate) and the line slots season and avoid.
   function valueAt(plan, cut, parsed, registry, ix) {
     const cat = categoryOf(parsed);
     if (cat === 'look') return lookValue(plan, parsed, registry, ix);
-    if (cat === 'line') return lineValue(plan, parsed, cut ? cut.line : parsed.scope.lineId);
+    if (cat === 'line') return lineValue(plan, parsed, cut ? cut.line : parsed.scope.lineId, ix);
     if (!cut) return undefined;
     if (cat === 't0') return cut.t0;
     if (cat === 'el') {
@@ -223,7 +272,7 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
   function canPinAt(parsed) {
     const cat = categoryOf(parsed);
     if (cat === 'look') return ['work'];
-    if (cat === 'line') return ['line'];
+    if (cat === 'line') return parsed.slot === 'season' ? ['line', 'work'] : ['line'];
     if (cat === 't0') return ['cut'];
     const kind = parsed.scope.kind;
     if (kind === 'work') return ['work'];
@@ -257,8 +306,11 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
     const src = { from: d.from, by: d.by };
     if (d.from && d.from.startsWith('pin')) {
       const slot = decisionSlot(parsed);
-      const probe = parsed.part && TRACK_KINDS.has(parsed.part.kind) && parsed.part.kind !== 'seam' && plan.grounds[cut.ground]
-        ? cutOf(plan, plan.grounds[cut.ground].cuts[0]) : cut;
+      // Segments and rig runs read their pins at their first cut.
+      const run = RIG_SLOTS.has(parsed.slot) && plan.rigs ? plan.rigs[cut.rig] : null;
+      const probe = run && run.cuts.length ? cutOf(plan, run.cuts[0])
+        : parsed.part && TRACK_KINDS.has(parsed.part.kind) && parsed.part.kind !== 'seam' && plan.grounds[cut.ground]
+          ? cutOf(plan, plan.grounds[cut.ground].cuts[0]) : cut;
       const pat = { cutKey: probe.key, pinCutKey: probe.pinKey || probe.key, lineId: probe.line };
       const hit = PINS.lookup(ix, pat, slot);
       if (hit) src.at = hit.at;
@@ -298,9 +350,14 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
     return hit ? { from: hit.from, by: hit.by, at: hit.at } : { from: 'auto' };
   }
 
+  // A line value's source. A line season cascades like a cut slot (line pin, else the work season: its pin or auto).
   function lineSource(doc, plan, parsed, lineId, ix) {
     const hit = lineId ? PINS.lookup(ix, { cutKey: null, pinCutKey: null, lineId }, parsed.slot) : null;
     if (hit && hit.from === 'pin:line') return { from: hit.from, by: hit.by, at: hit.at };
+    if (parsed.slot === 'season') {
+      const L = plan.look.season;
+      return L.from === 'pin:work' ? { from: L.from, by: L.by, at: 'work:season' } : { from: 'auto' };
+    }
     const line = cutIndex(plan).lines.get(lineId);
     if (parsed.slot === 'start' && line && line.by && line.by.start === 'lrc') return { from: 'mark' };
     if (parsed.slot === 'split' && line) {
@@ -310,8 +367,20 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
     return { from: 'auto' };
   }
 
-  function displayOf(parsed, value, registry, cat) {
+  // The display of a value: [stringKey, params] or text. Curves, shots and rigs by core/curve.label, core/shot.label
+  // and core/shot.rigLabel; an avoid list by its size; a photo or video by the asset's name (user data).
+  function displayOf(parsed, value, registry, cat, schema, doc) {
     if (value === undefined || value === null) return ['val.none', {}];
+    const type = schema ? schema.type : null;
+    if (type === 'curve') return CV.label(value);
+    if (type === 'shot') return SHOT.label(value);
+    if (type === 'rig') return SHOT.rigLabel(value);
+    if (type === 'partRefs') return Array.isArray(value) && value.length ? ['val.refs', { n: value.length }] : ['val.none', {}];
+    if (type === 'media') {
+      const list = doc && doc.media && Array.isArray(doc.media.list) ? doc.media.list : [];
+      const entry = value ? list.find((e) => e && e.id === value) : null;
+      return entry ? String(entry.name) : ['val.none', {}];
+    }
     if (cat === 'part' || (cat === 'look' && (parsed.slot === 'mood' || parsed.slot === 'theme' ||
         (parsed.part && parsed.part.kind === 'texture' && !parsed.part.param)))) {
       if (value === 'none') return ['val.none', {}];
@@ -380,7 +449,12 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
     } else if (sources.length && sources.every((s) => s.from === 'mark')) fs.state = 'mark';
     else if (sources.length && sources.every((s) => s.from === 'rule')) fs.state = 'derived';
     else if (sources.some((s) => s.from.startsWith('pin'))) fs.state = 'mixed';
-    fs.display = fs.state === 'mixed' ? ['state.mixed', {}] : displayOf(parsed, fs.value, registry, cat);
+    fs.display = fs.state === 'mixed' ? ['state.mixed', {}] : displayOf(parsed, fs.value, registry, cat, fs.schema, doc);
+    // An automatic depth of a photo or video names its rule (DESIGN_2_1 §11.9.2, §11.9.5 「自動: …」).
+    if (cat === 'param' && fs.state === 'auto' && cuts.length) {
+      const rule = depthRuleAt(doc, plan, cuts[0], parsed, registry);
+      if (rule) fs.autoText = ['why.media.depth.' + rule, {}];
+    }
     fs.pinAt = own ? own.path : null;
     return fs;
   }
@@ -481,6 +555,6 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
 
   return {
     fieldState, fieldStates, lockPayload, pinSig: PL.pinSig, valueAt, decisionAt, categoryOf, cutsFor, cutOf, choiceSlot,
-    schemaOf, canPinAt,
+    schemaOf, canPinAt, depthRuleAt,
   };
 });

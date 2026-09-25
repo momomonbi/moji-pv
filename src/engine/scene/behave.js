@@ -1,6 +1,6 @@
-/* 文字PVメーカー v2 — original work. Behaviours: the scheduler, the dwell envelope and the kit's motion adapters (DESIGN §4.17.4, §4.18.3). */
-MV.def('engine/scene/behave', ['core/num', 'core/ease', 'core/rng', 'core/motion', 'core/schema', 'engine/scene/stagger'],
-(N, E, RNG, MO, SCH, STG) => {
+/* 文字PVメーカー v2 — original work. Behaviours: the scheduler, the dwell envelope, time warps and the kit's motion adapters (DESIGN §4.17.4, §4.18.3; DESIGN_2_1 §3.10, §4.2). */
+MV.def('engine/scene/behave', ['core/num', 'core/curve', 'core/rng', 'core/motion', 'core/schema', 'engine/scene/stagger'],
+(N, CV, RNG, MO, SCH, STG) => {
   'use strict';
 
   const PH = Object.freeze({ REST: 0, MOTION: 1, ORNAMENT: 2, LENS: 3, STYLE: 4 });
@@ -90,6 +90,27 @@ MV.def('engine/scene/behave', ['core/num', 'core/ease', 'core/rng', 'core/motion
   function runFollow(P, t, b) {
     const k = followWeight(t, b.times);
     for (let r = 0; r < b.roots.length; r++) P.alpha[b.roots[r]] *= k;
+  }
+
+  // --- time warps (DESIGN_2_1 §3.10) --------------------------------------------------------------------------
+
+  // A warped behaviour runs its inner function on a warped clock inside [w0, w0 + span]: s = (t − w0)/span, and the
+  // inner function sees w0 + span·warp(s). Outside the window (and at its ends) the clock is unchanged, so a warp never
+  // moves the pose a behaviour shows before or after its window.
+  function runWarped(P, t, b) {
+    const s = (t - b.w0) / b.span;
+    b.inner(P, s <= 0 || s >= 1 ? t : b.w0 + b.span * b.warp(s), b);
+  }
+
+  // A behaviour that is already warped keeps its own fields: the new warp runs it whole (warps nest).
+  function runOf(P, t, b) { b.of.run(P, t, b.of); }
+
+  // warped(beh, curve, w0, w1) → a copy of the behaviour whose clock is warped by the curve over [w0, w1]. Made at build
+  // (the kit's lens wrapper, dwell holds), never per frame; a linear curve or an empty window gives the behaviour back.
+  function warped(beh, curve, w0, w1) {
+    if (CV.isLinear(curve) || !(w1 > w0)) return beh;
+    const inner = beh.run === runWarped ? { inner: runOf, of: beh } : { inner: beh.run };
+    return Object.assign({}, beh, inner, { run: runWarped, warp: CV.warp(curve), w0, span: w1 - w0 });
   }
 
   // --- beat lookups without allocation ----------------------------------------------------------------------
@@ -192,7 +213,8 @@ MV.def('engine/scene/behave', ['core/num', 'core/ease', 'core/rng', 'core/motion
   function identityOf(col) { return MUL.includes(col) ? 1 : 0; }
 
   // compileMoves({ unit, tracks, curve?, expose? }) → the normalized motion spec (used by make and K.mirror):
-  // { unit, tracks: { col: { from, to, unit } }, curve: { col: easeName }, expose: [col], dir: 'arrive'|'depart'|null }
+  // { unit, tracks: { col: { from, to, unit } }, curve: { col: Curve }, expose: [col], dir: 'arrive'|'depart'|null }
+  // A column curve is any Curve (an ease name, a preset, { bz }, { sp }, { ramp }), kept in its canonical form.
   function compileMoves(spec) {
     const bad = (m) => { throw new BehaviourError('bad-moves', m); };
     if (!spec || typeof spec !== 'object' || !spec.tracks || typeof spec.tracks !== 'object') bad('K.moves needs { tracks }');
@@ -211,7 +233,9 @@ MV.def('engine/scene/behave', ['core/num', 'core/ease', 'core/rng', 'core/motion
     const curve = Object.assign({}, spec.curve || {});
     for (const col of Object.keys(curve)) {
       if (!tracks[col]) bad('curve names a column without a track: ' + col);
-      E.get(curve[col]);
+      const c = CV.coerce(curve[col]);
+      if (c === undefined) bad('curve of ' + col + ' is not a speed curve: ' + JSON.stringify(curve[col]));
+      curve[col] = c;
     }
     const expose = (spec.expose || []).slice();
     for (const col of expose) if (!tracks[col]) bad('expose names a column without a track: ' + col);
@@ -249,8 +273,15 @@ MV.def('engine/scene/behave', ['core/num', 'core/ease', 'core/rng', 'core/motion
     }
     const fit = MO.fitMotion({ dur: p.dur, each: p.each, count: R.count, window: span, share });
     const delay = new Float64Array(R.rank.length);
+    // flow (DESIGN_2_1 §2.3) spreads the stagger: delay_j = W(rank_j / maxRank) · maxRank · each. W(1) = 1, so the last
+    // unit leaves when it did and the fitted total is unchanged; linear is the identity (the v2 delays, bit for bit).
+    const maxRank = R.count - 1;
+    const W = maxRank > 0 && !CV.isLinear(p.flow) ? CV.warp(p.flow) : null;
     let last = 0;
-    for (let j = 0; j < delay.length; j++) { delay[j] = R.rank[j] * fit.each; if (delay[j] > last) last = delay[j]; }
+    for (let j = 0; j < delay.length; j++) {
+      delay[j] = W ? W(R.rank[j] / maxRank) * maxRank * fit.each : R.rank[j] * fit.each;
+      if (delay[j] > last) last = delay[j];
+    }
     return { rank: R.rank, delay, dur: fit.dur, total: Math.max(fit.total, last + fit.dur) };
   }
 
@@ -277,7 +308,8 @@ MV.def('engine/scene/behave', ['core/num', 'core/ease', 'core/rng', 'core/motion
       beat: { index: 0, phase: 0, since: 0, bar: 0 }, level: typeof env.level === 'function' ? env.level : null };
   }
 
-  function easeOf(name) { return E.get(E.EASES.includes(name) ? name : 'linear'); }
+  // The per-glyph progress curve of an `ease` param: any Curve (an unreadable value is linear, never an error).
+  function easeOf(v) { return CV.fn(v); }
 
   // make for arrive/depart parts built by K.perGlyph(fn) or K.moves(spec). kind = 'arrive' | 'depart'.
   function glyphMotionMaker(kind, source) {
@@ -313,21 +345,24 @@ MV.def('engine/scene/behave', ['core/num', 'core/ease', 'core/rng', 'core/motion
       out.from[q] = from * k; out.to[q] = to * k;
       out.scale[q] = tr.unit === 'em' ? 1 : 0;
       out.mul[q] = MUL.includes(c) ? 1 : 0;
-      out.curve[q] = motion.curve[c] ? E.get(motion.curve[c]) : null;
+      out.curve[q] = motion.curve[c] ? CV.fn(motion.curve[c]) : null;
     });
     return out;
   }
 
-  // make for dwell parts built by K.perGlyphHold(fn).
+  // make for dwell parts built by K.perGlyphHold(fn). A `curve` param that is not linear warps the hold clock over
+  // [rest, out] (DESIGN_2_1 §2.3 dwell.curve).
   function holdMaker(fn) {
     return function make(env, target, p) {
       if (!target || target.to <= target.from) return [];
       const n = target.to - target.from;
+      const params = p || {};
       const arrived = target.arrived || new Float32Array(n).fill(env.times.rest);
-      return [Object.assign(baseFields(env, target, p || {}), {
+      const hold = Object.assign(baseFields(env, target, params), {
         phase: PH.REST, live: 'during', from: target.from, to: target.to, t0: env.times.rest, t1: env.times.out,
         run: runHold, fn, rest: env.times.rest, out: env.times.out, arrived, rank: identityRanks(n),
-      })];
+      });
+      return [warped(hold, params.curve, env.times.rest, env.times.out)];
     };
   }
 
@@ -340,8 +375,8 @@ MV.def('engine/scene/behave', ['core/num', 'core/ease', 'core/rng', 'core/motion
   return {
     PH, LIVE, DELTA, BehaviourError, RAMP_IN, RAMP_OUT,
     check, sortBehaviours, isActive, runBehaviours, envelopeWeight, followWeight, beatInto,
-    runDrift, runFollow, runGlyphMotion, runHold,
-    compileMoves, directionOf, exposedName, identityOf, motionTiming, motionTotal, glyphMotionMaker, holdMaker,
+    runDrift, runFollow, runGlyphMotion, runHold, runWarped, warped,
+    compileMoves, directionOf, exposedName, identityOf, motionTiming, motionTotal, glyphMotionMaker, holdMaker, easeOf,
     TRACK_UNITS,
   };
 });

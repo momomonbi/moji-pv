@@ -1,0 +1,196 @@
+文字PVメーカー v2 — original work. The committed demuxer fixtures of DESIGN_2_1 §11.8.1.
+
+MADE BY: node tests/helpers/make_media_fixtures.js --write   (it writes every file below and this MAKE.txt)
+
+Why not ffmpeg: the environment that made them has no ffmpeg. The generator writes the container structures
+byte by byte (ISO BMFF boxes, EBML elements, GIF blocks); codec payloads are placeholder bytes wherever the demuxers
+do not decode them (a VP9 key frame starts with a real uncompressed header, and anim.gif is a real, decodable GIF).
+So the H.264, VP8, VP9 and AV1 clips here demux exactly but do not decode: real decoding is tested in the browser
+with the counter videos of tests/helpers/media_gen.js. Each file may later be replaced by its "ffmpeg" line; the
+tables below then have to be dumped again (ffprobe -show_packets) and the test updated with them.
+
+Tables: "pres" rows are in presentation order (pts, dur in seconds, dec = decode index); the other rows are in
+decode order (key, off = byte offset in the file, size, ts = the chunk timestamp in µs, aoff/asize = WebM alpha).
+Pre-roll samples are in the decode rows only. tests/node/media_demux.test.js reads this file.
+
+[bframes.mp4]
+what      H.264 (avc1, High) with B-frames (I P B B, GOP 10), ctts version 0, an edit list with an empty edit and then media_time 1536 (frame 0 is pre-roll: fed, never shown), moov after mdat, 5 samples per chunk
+ffmpeg    ffmpeg -f lavfi -i testsrc2=size=64x36:rate=25 -t 1 -c:v libx264 -bf 2 -g 10 bframes.mp4
+bytes     2536
+sniff     video mp4 video/mp4
+brand     "isom"
+tracks    video
+video     codec=avc1.64000A w=64 h=36 codedW=64 codedH=36 rot=0 alpha=false description=avcC
+n         24
+duration  0.96
+pres.pts  0 0.04 0.08 0.12 0.16 0.2 0.24 0.28 0.32 0.36 0.4 0.44 0.48 0.52 0.56 0.6 0.64 0.68 0.72 0.76 0.8 0.84 0.88 0.92
+pres.dur  0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04
+pres.dec  2 3 1 5 6 4 8 9 7 10 12 13 11 15 16 14 18 19 17 20 22 23 21 24
+dec.key   1 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 1 0 0 0 0
+dec.off   40 88 144 208 280 331 390 457 532 586 648 718 767 824 889 962 1014 1074 1142 1218 1273 1336 1407 1457 1515
+dec.size  48 56 64 72 51 59 67 75 54 62 70 49 57 65 73 52 60 68 76 55 63 71 50 58 66
+dec.ts    -40000 80000 0 40000 200000 120000 160000 320000 240000 280000 360000 480000 400000 440000 600000 520000 560000 720000 640000 680000 760000 880000 800000 840000 920000
+
+[frag.mp4]
+what      fragmented MP4: an empty moov with mvex/trex, one moof (tfhd default-base-is-moof, tfdt version 1, trun version 1 with signed composition offsets and first_sample_flags) plus mdat per GOP of 10, B-frames
+ffmpeg    ffmpeg -f lavfi -i testsrc2=size=64x36:rate=25 -t 1 -c:v libx264 -bf 2 -g 10 -movflags +frag_keyframe+empty_moov frag.mp4
+bytes     2700
+sniff     video mp4 video/mp4
+brand     "iso5"
+tracks    video
+video     codec=avc1.4D400D w=64 h=36 codedW=64 codedH=36 rot=0 alpha=false description=avcC
+n         25
+duration  1
+pres.pts  0 0.04 0.08 0.12 0.16 0.2 0.24 0.28 0.32 0.36 0.4 0.44 0.48 0.52 0.56 0.6 0.64 0.68 0.72 0.76 0.8 0.84 0.88 0.92 0.96
+pres.dur  0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04
+pres.dec  0 2 3 1 5 6 4 8 9 7 10 12 13 11 15 16 14 18 19 17 20 22 23 21 24
+dec.key   1 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 1 0 0 0 0
+dec.off   831 879 935 999 1071 1122 1181 1248 1323 1377 1623 1693 1742 1799 1864 1937 1989 2049 2117 2193 2392 2455 2526 2576 2634
+dec.size  48 56 64 72 51 59 67 75 54 62 70 49 57 65 73 52 60 68 76 55 63 71 50 58 66
+dec.ts    0 120000 40000 80000 240000 160000 200000 360000 280000 320000 400000 520000 440000 480000 640000 560000 600000 760000 680000 720000 800000 920000 840000 880000 960000
+
+[rot90.mp4]
+what      a 90° track matrix (displayed 36×64), colr nclx BT.709 limited range, co64 chunk offsets, moov before mdat, key frames every 10
+ffmpeg    ffmpeg -f lavfi -i testsrc2=size=64x36:rate=25 -t 1 -c:v libx264 -bf 0 -g 10 -metadata:s:v rotate=90 -movflags +faststart rot90.mp4
+bytes     2335
+sniff     video mp4 video/mp4
+brand     "isom"
+tracks    video
+video     codec=avc1.42C00A w=36 h=64 codedW=64 codedH=36 rot=90 alpha=false description=avcC
+color     primaries=1 transfer=1 matrix=1 fullRange=false
+n         25
+duration  1
+pres.pts  0 0.04 0.08 0.12 0.16 0.2 0.24 0.28 0.32 0.36 0.4 0.44 0.48 0.52 0.56 0.6 0.64 0.68 0.72 0.76 0.8 0.84 0.88 0.92 0.96
+pres.dur  0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04
+pres.dec  0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24
+dec.key   1 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 1 0 0 0 0
+dec.off   794 842 898 962 1034 1085 1144 1211 1286 1340 1402 1472 1521 1578 1643 1716 1768 1828 1896 1972 2027 2090 2161 2211 2269
+dec.size  48 56 64 72 51 59 67 75 54 62 70 49 57 65 73 52 60 68 76 55 63 71 50 58 66
+dec.ts    0 40000 80000 120000 160000 200000 240000 280000 320000 360000 400000 440000 480000 520000 560000 600000 640000 680000 720000 760000 800000 840000 880000 920000 960000
+
+[clip.mov]
+what      QuickTime: ftyp 'qt  ', a 'wide' box, colr nclc, a constant sample size (stsz), no stss (every frame a key frame), an edit with media_time 0, and a sound track ('sowt'); moov at the end
+ffmpeg    ffmpeg -f lavfi -i testsrc2=size=64x36:rate=25 -f lavfi -i sine=r=48000 -t 1 -c:v libx264 -g 1 -c:a pcm_s16le clip.mov
+bytes     2810
+sniff     video mov video/quicktime
+brand     "qt  "
+tracks    video audio
+video     codec=avc1.4D4015 w=64 h=36 codedW=64 codedH=36 rot=0 alpha=false description=avcC
+color     primaries=1 transfer=1 matrix=1 fullRange=null
+n         25
+duration  1
+pres.pts  0 0.04 0.08 0.12 0.16 0.2 0.24 0.28 0.32 0.36 0.4 0.44 0.48 0.52 0.56 0.6 0.64 0.68 0.72 0.76 0.8 0.84 0.88 0.92 0.96
+pres.dur  0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04
+pres.dec  0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24
+dec.key   1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1
+dec.off   36 100 164 228 292 356 420 484 548 612 676 740 804 868 932 996 1060 1124 1188 1252 1316 1380 1444 1508 1572
+dec.size  64 64 64 64 64 64 64 64 64 64 64 64 64 64 64 64 64 64 64 64 64 64 64 64 64
+dec.ts    0 40000 80000 120000 160000 200000 240000 280000 320000 360000 400000 440000 480000 520000 560000 600000 640000 680000 720000 760000 800000 840000 880000 920000 960000
+
+[vp9.webm]
+what      VP9 in WebM (profile 0, 8 bit, read from the first key frame's uncompressed header), SimpleBlocks, a Cluster per key frame (GOP 10), DefaultDuration, Colour BT.709, Cues
+ffmpeg    ffmpeg -f lavfi -i testsrc2=size=64x36:rate=25 -t 1 -c:v libvpx-vp9 -g 10 vp9.webm
+bytes     1961
+sniff     video webm video/webm
+brand     "webm"
+tracks    video
+video     codec=vp09.00.10.08 w=64 h=36 codedW=64 codedH=36 rot=0 alpha=false description=none
+color     primaries=1 transfer=1 matrix=1 fullRange=false
+n         25
+duration  1
+pres.pts  0 0.04 0.08 0.12 0.16 0.2 0.24 0.28 0.32 0.36 0.4 0.44 0.48 0.52 0.56 0.6 0.64 0.68 0.72 0.76 0.8 0.84 0.88 0.92 0.96
+pres.dur  0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04
+pres.dec  0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24
+dec.key   1 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 1 0 0 0 0
+dec.off   208 262 324 394 472 529 594 667 748 808 886 962 1017 1080 1151 1230 1288 1354 1428 1510 1581 1650 1727 1783 1847
+dec.size  48 56 64 72 51 59 67 75 54 62 70 49 57 65 73 52 60 68 76 55 63 71 50 58 66
+dec.ts    0 40000 80000 120000 160000 200000 240000 280000 320000 360000 400000 440000 480000 520000 560000 600000 640000 680000 720000 760000 800000 840000 880000 920000 960000
+
+[alpha_vp8.webm]
+what      VP8 with alpha: AlphaMode 1, MaxBlockAdditionID 1, a BlockGroup per frame (Block, BlockAdditions/BlockMore/BlockAddID 1/BlockAdditional, ReferenceBlock on delta frames); one key frame
+ffmpeg    ffmpeg -f lavfi -i testsrc2=size=64x36:rate=25,format=yuva420p -t 1 -c:v libvpx -auto-alt-ref 0 alpha_vp8.webm
+bytes     2921
+sniff     video webm video/webm
+brand     "webm"
+tracks    video
+video     codec=vp8 w=64 h=36 codedW=64 codedH=36 rot=0 alpha=true description=none
+n         25
+duration  1
+pres.pts  0 0.04 0.08 0.12 0.16 0.2 0.24 0.28 0.32 0.36 0.4 0.44 0.48 0.52 0.56 0.6 0.64 0.68 0.72 0.76 0.8 0.84 0.88 0.92 0.96
+pres.dur  0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04
+pres.dec  0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24
+dec.key   1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+dec.off   199 285 388 504 622 724 828 945 1064 1167 1272 1390 1481 1585 1702 1821 1924 2029 2147 2267 2371 2477 2596 2688 2793
+dec.size  48 56 64 72 51 59 67 75 54 62 70 49 57 65 73 52 60 68 76 55 63 71 50 58 66
+dec.ts    0 40000 80000 120000 160000 200000 240000 280000 320000 360000 400000 440000 480000 520000 560000 600000 640000 680000 720000 760000 800000 840000 880000 920000 960000
+dec.aoff  257 351 462 586 683 793 905 1030 1128 1239 1352 1449 1548 1660 1785 1883 1994 2107 2233 2332 2444 2558 2656 2756 2869
+dec.asize 20 25 30 24 29 23 28 22 27 21 26 20 25 30 24 29 23 28 22 27 21 26 20 25 30
+
+[av1.webm]
+what      AV1 in WebM: CodecPrivate = av1C (profile 0, level 2.0, main tier, 8 bit), a Segment and Clusters of unknown size (as a live recorder writes them), key frames at 0, 12 and 24
+ffmpeg    ffmpeg -f lavfi -i testsrc2=size=64x36:rate=25 -t 1 -c:v libaom-av1 -cpu-used 8 -g 12 -live 1 av1.webm
+bytes     1938
+sniff     video webm video/webm
+brand     "webm"
+tracks    video
+video     codec=av01.0.00M.08 w=64 h=36 codedW=64 codedH=36 rot=0 alpha=false description=CodecPrivate
+n         25
+duration  1
+pres.pts  0 0.04 0.08 0.12 0.16 0.2 0.24 0.28 0.32 0.36 0.4 0.44 0.48 0.52 0.56 0.6 0.64 0.68 0.72 0.76 0.8 0.84 0.88 0.92 0.96
+pres.dur  0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04
+pres.dec  0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24
+dec.key   1 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 1
+dec.off   221 275 337 407 485 542 607 680 761 821 889 965 1036 1099 1170 1249 1307 1373 1447 1529 1590 1659 1736 1792 1872
+dec.size  48 56 64 72 51 59 67 75 54 62 70 49 57 65 73 52 60 68 76 55 63 71 50 58 66
+dec.ts    0 40000 80000 120000 160000 200000 240000 280000 320000 360000 400000 440000 480000 520000 560000 600000 640000 680000 720000 760000 800000 840000 880000 920000 960000
+
+[laced.mkv]
+what      Matroska (DocType matroska): an H.264 video track (V_MPEG4/ISO/AVC, no DefaultDuration; the last frame is a BlockGroup with BlockDuration 40) and an Opus track whose SimpleBlocks use Xiph lacing (skipped by the demuxer)
+ffmpeg    ffmpeg -f lavfi -i testsrc2=size=64x36:rate=25 -f lavfi -i sine=r=48000 -t 1 -c:v libx264 -g 10 -c:a libvorbis laced.mkv
+bytes     3842
+sniff     video matroska video/x-matroska
+brand     "matroska"
+tracks    video audio
+video     codec=avc1.42C00A w=64 h=36 codedW=64 codedH=36 rot=0 alpha=false description=CodecPrivate
+n         25
+duration  1
+pres.pts  0 0.04 0.08 0.12 0.16 0.2 0.24 0.28 0.32 0.36 0.4 0.44 0.48 0.52 0.56 0.6 0.64 0.68 0.72 0.76 0.8 0.84 0.88 0.92 0.96
+pres.dur  0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04
+pres.dec  0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24
+dec.key   1 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 1 0 0 0 0
+dec.off   288 342 404 474 920 977 1042 1115 1564 1624 1702 1778 1833 1896 2335 2414 2472 2538 2980 3062 3133 3202 3279 3335 3769
+dec.size  48 56 64 72 51 59 67 75 54 62 70 49 57 65 73 52 60 68 76 55 63 71 50 58 66
+dec.ts    0 40000 80000 120000 160000 200000 240000 280000 320000 360000 400000 440000 480000 520000 560000 600000 640000 680000 720000 760000 800000 840000 880000 920000 960000
+
+[anim.gif]
+what      an animated GIF89a: 10 frames of 64×36 (4 colours, real LZW data), NETSCAPE2.0 loop, delays 0.1 s (the last 0.2 s)
+ffmpeg    ffmpeg -f lavfi -i testsrc2=size=64x36:rate=10 -frames:v 10 anim.gif
+bytes     1907
+sniff     image gif image/gif
+image     w=64 h=36 anim=true frames=10
+delays    10 10 10 10 10 10 10 10 10 20
+
+[prores.mov]
+what      ProRes 4444-style sample entry 'apch' (placeholder frames): the demuxer keeps the codec string, and the import refuses it (media.err.codec)
+ffmpeg    ffmpeg -f lavfi -i testsrc2=size=64x36:rate=25 -t 1 -c:v prores_ks -profile:v 4444 prores.mov
+bytes     2733
+sniff     video mov video/quicktime
+brand     "qt  "
+tracks    video
+video     codec=apch w=64 h=36 codedW=64 codedH=36 rot=0 alpha=false description=none
+warning   codec:apch
+n         25
+duration  1
+pres.pts  0 0.04 0.08 0.12 0.16 0.2 0.24 0.28 0.32 0.36 0.4 0.44 0.48 0.52 0.56 0.6 0.64 0.68 0.72 0.76 0.8 0.84 0.88 0.92 0.96
+pres.dur  0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04 0.04
+pres.dec  0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24
+dec.key   1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1
+dec.off   28 108 189 271 354 438 518 599 681 764 848 928 1009 1091 1174 1258 1338 1419 1501 1584 1668 1748 1829 1911 1994
+dec.size  80 81 82 83 84 80 81 82 83 84 80 81 82 83 84 80 81 82 83 84 80 81 82 83 84
+dec.ts    0 40000 80000 120000 160000 200000 240000 280000 320000 360000 400000 440000 480000 520000 560000 600000 640000 680000 720000 760000 800000 840000 880000 920000 960000
+
+[heic.heic]
+what      a HEIC header only (ftyp heic with mif1, a meta box with ispe 1×1): the import refuses it with media.err.heic
+ffmpeg    (no ffmpeg recipe: take any 1×1 HEIC photo and keep its first 200 bytes)
+bytes     119
+sniff     heic heif image/heic

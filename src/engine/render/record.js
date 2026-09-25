@@ -1,7 +1,7 @@
-/* 文字PVメーカー v2 — original work. Recording backend: a logging Ctx2D (CanvasFactory), a recording FxContext and reference drawing (DESIGN §4.19.8). */
-MV.def('engine/render/record', ['core/hash', 'core/rng', 'core/noise', 'core/color', 'core/mat', 'engine/scene/table',
-  'engine/scene/builder', 'engine/scene/frame'],
-(H, RNG, NZ, C, MAT, T, B, F) => {
+/* 文字PVメーカー v2 — original work. Recording backend: a logging Ctx2D (CanvasFactory), a recording FxContext and reference drawing (DESIGN §4.19.8; DESIGN_2_1 §11.3.7). */
+MV.def('engine/render/record', ['core/hash', 'core/rng', 'core/noise', 'core/color', 'core/mat', 'core/media',
+  'engine/scene/table', 'engine/scene/builder', 'engine/scene/frame'],
+(H, RNG, NZ, C, MAT, MEDIA, T, B, F) => {
   'use strict';
 
   // --- the recording context -------------------------------------------------------------------------------------
@@ -117,6 +117,19 @@ MV.def('engine/render/record', ['core/hash', 'core/rng', 'core/noise', 'core/col
     const s = factory.create(w, h, { alpha: alpha !== false });
     return { canvas: s.canvas, ctx: s.ctx, w, h };
   }
+
+  // --- media in recordings (DESIGN_2_1 §11.3.7) --------------------------------------------------------------------
+
+  // A decoded media frame appears in the op log by this name, 'media:<id>@<q6(m)>#<index>': the asset, the media time
+  // and the source frame the store chose. A test store names its images with it (tests/helpers/fake_media.js), so the op
+  // hashes cover media timing: a frame showing another source frame hashes differently.
+  function mediaTag(id, m, index) {
+    const q = Math.round(m * 1e6) / 1e6;
+    return 'media:' + id + '@' + (q === 0 ? 0 : q) + '#' + index;
+  }
+
+  // mediaImage(id, m, index, w, h) → a stand-in CanvasImageSource for recordings: { id: mediaTag(…), width, height }.
+  function mediaImage(id, m, index, w, h) { return { id: mediaTag(id, m, index), width: w, height: h }; }
 
   // --- a recording FxContext (§4.18.11) for filters and seams in Node ---------------------------------------------
 
@@ -261,11 +274,30 @@ MV.def('engine/render/record', ['core/hash', 'core/rng', 'core/noise', 'core/col
     else if (type === T.TYPE.shape) drawShape(g, rec, pal, alpha);
     else if (type === T.TYPE.paint) drawPaint(g, rec, alpha, q, o);
     else if (type === T.TYPE.particles) drawParticles(g, rec, pal, alpha, o.tl || 0);
+    else if (type === T.TYPE.image && rec.media) drawMediaRef(g, rec, alpha, o);
     else if (type === T.TYPE.image && rec.asset) {
       setMatrix(g, WORLD);
       g.globalAlpha = alpha;
       g.drawImage(rec.asset, rec.box.x, rec.box.y, rec.box.w, rec.box.h);
     }
+  }
+
+  const WANT = { px: 0, blur: 0, exact: true, thumb: false };
+
+  // A media record in the reference drawing (opts.assets; opts.t = the absolute time for the song clock): the fitted
+  // source rect into the dest rect, upright (no edges, looks or masks: those are the renderer's). Skipped without a store.
+  function drawMediaRef(g, rec, alpha, o) {
+    const store = o.assets;
+    if (!store || typeof store.frame !== 'function') return;
+    const tm = rec.time;
+    const m = tm ? MEDIA.mapTime(tm, tm.clock === 'song' ? (o.t || 0) : (o.tl || 0)) : 0;
+    WANT.px = Math.max(rec.box.w, rec.box.h) * (o.scale || 1) * rec.headroom;
+    const f = store.frame(rec.src, m, WANT);
+    if (!f) return;
+    const r = rec.rect, kx = f.w / Math.max(1, rec.meta.w), ky = f.h / Math.max(1, rec.meta.h);
+    setMatrix(g, WORLD);
+    g.globalAlpha = alpha;
+    g.drawImage(f.image, r.sx * kx, r.sy * ky, r.sw * kx, r.sh * ky, r.dx, r.dy, r.dw, r.dh);
   }
 
   function drawGlyph(g, rec, pal, alpha, tint) {
@@ -328,5 +360,5 @@ MV.def('engine/render/record', ['core/hash', 'core/rng', 'core/noise', 'core/col
     }
   }
 
-  return { METHODS, PROPS, createRecorder, surfaceOf, createRecordingFx, FxError, drawScene, inkOf };
+  return { METHODS, PROPS, createRecorder, surfaceOf, createRecordingFx, FxError, drawScene, inkOf, mediaTag, mediaImage };
 });

@@ -1,4 +1,4 @@
-/* 文字PVメーカー v2 — original work. Tests for core/doc and core/migrate: defaults, validation, touched, files. */
+/* 文字PVメーカー v2 — original work. Tests for core/doc and core/migrate: defaults, validation, touched, files (schema 2 since v2.1). */
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -28,9 +28,13 @@ test('defaultDoc and defaultSide follow §4.4 and validate', () => {
   assert.equal(doc.song, null);
   assert.deepEqual(doc.look, { seed: 1, moodSeed: 1, aspect: '16:9', backdrop: 'scene' });
   assert.deepEqual([doc.pins, doc.salts, doc.locks, doc.filters], [{}, {}, {}, {}]);
-  assert.deepEqual(doc.output, { format: 'mp4', short: 1080, fps: 30, quality: 'high', audio: true, range: null, name: null });
+  assert.deepEqual(doc.output, { format: 'mp4', short: 1080, fps: 30, quality: 'high', audio: true, range: null, name: null,
+    kit: { overlay: true, bg: false, green: false, srt: true, lrc: false } });
+  assert.deepEqual(doc.materials, { next: 1, list: [] });
+  assert.deepEqual(doc.media, { list: [] });
   assert.deepEqual(doc.meta, { app: D.APP_VERSION, lang: 'auto' });
-  assert.deepEqual(D.defaultSide(), { looks: { list: [], cap: 50 }, aiLog: [] });
+  assert.equal(D.APP_VERSION, '2.1.0');
+  assert.deepEqual(D.defaultSide(), { looks: { list: [], cap: 50 }, aiLog: [], asks: {} });
   assert.notEqual(D.defaultDoc(), D.defaultDoc(), 'fresh objects every call');
 });
 
@@ -40,12 +44,18 @@ test('DESIGN_SIZE has the seven aspects with a short side of 1080', () => {
   assert.deepEqual(D.DESIGN_SIZE['21:9'], [2520, 1080]);
 });
 
+// The v2.0 fixtures are schema-1 files: opening one migrates it (DESIGN_2_1 §2.2) and changes nothing else.
+function migrated(doc) {
+  return D.normalize(Object.assign({}, doc, { materials: { next: 1, list: [] }, media: { list: [] } }));
+}
+
 test('every fixture project validates and parses', () => {
   for (const { name, doc, side } of corpus.projects()) {
     assert.deepEqual(D.validate(doc), [], name);
     const file = M.parseFile(corpus.projectText(name));
-    assert.deepEqual(file.doc, doc, name);
-    assert.deepEqual(file.side, side, name);
+    assert.deepEqual(file.doc, migrated(doc), name);
+    assert.deepEqual(file.doc.pins, doc.pins, name + ': pins unchanged');
+    assert.deepEqual(file.side, D.sanitizeSide(side), name);
   }
   assert.equal(corpus.project('long').doc.sheet.rows.filter((r) => r.src && !r.src.startsWith('#') && !r.src.startsWith('[')).length, 120);
   const song = corpus.songDigest();
@@ -116,13 +126,13 @@ test('normalize fills missing defaults and never changes present values', () => 
   assert.equal(partial.meta.lang, undefined, 'the input is not mutated');
   assert.deepEqual(D.normalize('x'), D.defaultDoc());
   assert.deepEqual(D.normalizeSide(undefined), D.defaultSide());
-  assert.deepEqual(D.normalizeSide({ looks: { list: [{ n: 1 }] } }), { looks: { list: [{ n: 1 }], cap: 50 }, aiLog: [] });
+  assert.deepEqual(D.normalizeSide({ looks: { list: [{ n: 1 }] } }), { looks: { list: [{ n: 1 }], cap: 50 }, aiLog: [], asks: {} });
 });
 
 test('touched reports what changed, by reference', () => {
   const a = corpus.project('basic').doc;
   assert.deepEqual(D.touched(a, a), { rows: new Set(), pins: new Set(), meta: false, look: false, timing: false, song: false,
-    output: false, filters: false, salts: false, locks: false });
+    output: false, filters: false, salts: false, locks: false, materials: false, media: false });
   const rows = a.sheet.rows.slice();
   rows[3] = { id: rows[3].id, src: rows[3].src + '!' };
   rows.push({ id: 'rz', src: '新しい行' });
@@ -165,16 +175,26 @@ test('parseFile errors: bad JSON, not a project, newer schema, invalid', () => {
   const sparse = M.parseFile(JSON.stringify({ format: 'mojipv.project', schema: 1, doc: { sheet: { rows: [{ id: 'r1', src: 'a' }] } } }));
   assert.equal(sparse.doc.sheet.next, 2);
   assert.deepEqual(sparse.side, D.defaultSide());
-  assert.equal(M.CURRENT_SCHEMA, 1);
-  assert.deepEqual(Object.keys(M.MIGRATIONS), []);
+  assert.equal(M.CURRENT_SCHEMA, 2);
+  assert.deepEqual(Object.keys(M.MIGRATIONS), ['1']);
 });
 
+// The "pins" block of a saved file, as text (it is followed by "salts" in the §3.1 key order).
+function pinsText(text) {
+  const start = text.indexOf('\n  "pins": ');
+  assert.ok(start > 0);
+  return text.slice(start, text.indexOf('\n  "salts": ', start));
+}
+
 test('serialize: round trip, §3.1 key order, sorted maps, unknown keys kept', () => {
-  for (const { name, doc, side } of corpus.projects()) {
-    const text = D.serialize({ doc, side });
-    assert.deepEqual(M.parseFile(text), { doc, side }, name);
-    assert.equal(text, corpus.projectText(name), name + ' fixture is stored in canonical form');
+  for (const { name } of corpus.projects()) {
+    const old = corpus.projectText(name);
+    const opened = M.parseFile(old);
+    const text = D.serialize(opened);
+    assert.deepEqual(M.parseFile(text), opened, name);
     assert.equal(D.serialize(M.parseFile(text)), text, name + ' is stable');
+    assert.equal(pinsText(text), pinsText(old), name + ': the migrated file keeps its pins byte-identical');
+    assert.ok(text.startsWith('{\n "format": "mojipv.project",\n "schema": 2,'), name + ' is saved as schema 2');
   }
   const doc = Object.assign({ zeta: 1 }, D.defaultDoc(), { alpha: { x: 1 } });
   doc.pins = { 'work:theme': { by: 'ai', v: 'sumiWashi' }, 'line/r1:arrange': { sig: undefined, v: 'stubBlock', by: 'user' } };
@@ -183,15 +203,16 @@ test('serialize: round trip, §3.1 key order, sorted maps, unknown keys kept', (
   const file = JSON.parse(text);
   assert.deepEqual(Object.keys(file), ['format', 'schema', 'doc', 'side']);
   assert.equal(file.format, 'mojipv.project');
-  assert.equal(file.schema, 1);
+  assert.equal(file.schema, 2);
   assert.deepEqual(Object.keys(file.doc), ['meta', 'sheet', 'timing', 'song', 'look', 'pins', 'salts', 'locks', 'filters',
-    'output', 'zeta', 'alpha']);
+    'materials', 'media', 'output', 'zeta', 'alpha']);
   assert.deepEqual(Object.keys(file.doc.pins), ['line/r1:arrange', 'work:theme']);
   assert.deepEqual(Object.keys(file.doc.pins['work:theme']), ['v', 'by']);
-  assert.deepEqual(Object.keys(file.doc.output), ['format', 'short', 'fps', 'quality', 'audio', 'range', 'name']);
+  assert.deepEqual(Object.keys(file.doc.output), ['format', 'short', 'fps', 'quality', 'audio', 'range', 'name', 'kit']);
+  assert.deepEqual(Object.keys(file.doc.output.kit), ['overlay', 'bg', 'green', 'srt', 'lrc']);
   assert.deepEqual(Object.keys(file.doc.output.range), ['t0', 't1']);
   assert.deepEqual(file.side, D.defaultSide());
-  assert.ok(text.startsWith('{\n "format": "mojipv.project",\n "schema": 1,'), 'one-space indent');
+  assert.ok(text.startsWith('{\n "format": "mojipv.project",\n "schema": 2,'), 'one-space indent');
   assert.ok(text.endsWith('}\n'));
 });
 
@@ -214,7 +235,7 @@ test('parseFile cleans a malformed side instead of passing it to the UI', () => 
     assert.deepEqual(sideOf(bad), empty, JSON.stringify(bad));
   }
   const good = sideOf({ looks: { list: [entry], cap: 20 }, aiLog: [logEntry] });
-  assert.deepEqual(good, { looks: { list: [entry], cap: 20 }, aiLog: [logEntry] }, 'a valid side is kept as it is');
+  assert.deepEqual(good, { looks: { list: [entry], cap: 20 }, aiLog: [logEntry], asks: {} }, 'a valid side is kept as it is');
   const mixed = sideOf({ looks: { list: [null, entry, Object.assign({}, entry, { seed: 2 }), 'x'], cap: 50 }, aiLog: [null, logEntry] });
   assert.deepEqual(mixed.looks.list, [entry], 'bad entries and a second entry with the same n are dropped');
   assert.deepEqual(mixed.aiLog, [logEntry]);
@@ -235,7 +256,7 @@ test('parseFile cleans a malformed side instead of passing it to the UI', () => 
   for (const [cap, want] of [[0, 50], [-3, 50], [2.5, 50], ['9', 50], [501, 50], [1, 1], [500, 500]]) {
     assert.equal(sideOf({ looks: { list: [], cap } }).looks.cap, want, 'cap ' + cap);
   }
-  assert.deepEqual(Object.keys(sideOf({ looks: { list: [] }, aiLog: [], extra: { a: 1 } })), ['looks', 'aiLog'], 'other keys go');
+  assert.deepEqual(Object.keys(sideOf({ looks: { list: [] }, aiLog: [], extra: { a: 1 } })), ['looks', 'aiLog', 'asks'], 'other keys go');
   // what the UI does with the side right after an open must not throw
   const side = sideOf({ looks: { list: 'abc', cap: 50 }, aiLog: [null] });
   assert.equal(side.looks.list.some((e) => e.star), false);

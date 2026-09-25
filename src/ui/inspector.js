@@ -1,7 +1,8 @@
-/* 文字PVメーカー v2 — original work. The inspector (詳細): crumbs, level header, sections from FIELDS, field rows, sub-pages (DESIGN §6.4.4–§6.4.9, §6.6). */
+/* 文字PVメーカー v2 — original work. The inspector (詳細): crumbs, level header, sections from FIELDS, field rows, sub-pages (DESIGN §6.4.4–§6.4.9, §6.6; DESIGN_2_1 §6.5–§6.9). */
 MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/part_browser', 'ui/selection', 'ui/looks',
-  'ui/output', 'i18n/t', 'core/paths', 'core/pins'],
-(dom, I, F, W, PB, S, LK, OUT, T, P, PINS) => {
+  'ui/output', 'i18n/t', 'core/paths', 'core/pins', 'core/shot', 'planner/areas', 'ui/shot_editor', 'ui/material_page',
+  'ui/media_page', 'ui/media_widgets', 'ui/media_io'],
+(dom, I, F, W, PB, S, LK, OUT, T, P, PINS, SHOT, AREAS, KE, MP, MPG, MW, MI) => {
   'use strict';
 
   const { h } = dom;
@@ -10,11 +11,16 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
   const LINES_BOX_PX = 300;
   const STATE_ICON = { auto: 'ring', pinned: 'pin', inherited: 'ring', ai: 'pin', locked: 'lock', mark: 'mark', derived: 'info',
     inactive: 'close', mixed: 'more' };
-  const DICE_WIDGETS = new Set(['part', 'number', 'choice']);
-  const NO_DICE = /^(mood|theme|season|texture|start|end|split|lang|t0|titleCard|bpm|beatOffset|readRate|length|color\.|amount\.|face\.|el\.)/;
+  const DICE_WIDGETS = new Set(['part', 'number', 'choice', 'shot', 'curve']);
+  // No [d] where a reroll changes nothing: fixed values, formulas (closeness, follow, motion speed) and the section
+  // camera (its seed is the run's first cut, DESIGN_2_1 §4.6).
+  const NO_DICE = /^(mood|theme|season|texture|start|end|split|lang|t0|titleCard|bpm|beatOffset|readRate|length|color\.|amount\.|face\.|el\.|avoid|motion\.speed|cam\.zoom|cam\.follow|rig)/;
+  const REF_KINDS = ['arrange', 'arrive', 'dwell', 'depart', 'ornament', 'ground', 'lens', 'filter', 'seam'];
   const ELEMENTS = ['text', 'ornament', 'ground', 'lens', 'filter', 'seam'];
   // Custom sections redrawn even while they hold focus (their buttons change state); focus is put back (§6.12).
-  const REDRAW_FOCUSED = new Set(['looks', 'colorsReset', 'amountsReset', 'lockPartial', 'multi']);
+  const REDRAW_FOCUSED = new Set(['looks', 'colorsReset', 'amountsReset', 'lockPartial', 'multi', 'media']);
+  // Part rows whose browser offers the 写真・動画 tab (DESIGN_2_1 §11.7.5): the kind's media part and its source param.
+  const MEDIA_TAB = Object.freeze({ ground: 'ground', ornament: 'frame', atmos: 'overlay' });
 
   function tryUse(id) { return MV.has(id) ? MV.use(id) : null; }
 
@@ -90,7 +96,8 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       const withPath = rows.filter((r) => r.path);
       if (!withPath.length) return new Map();
       const readPaths = (r) => (r.field.firstCut && r.paths.length > 1 ? r.paths : [r.path]);
-      const all = [...new Set(withPath.flatMap(readPaths))];
+      // a trim row also reads its out handle (clipOut), kept in row.fsOut
+      const all = [...new Set(withPath.flatMap(readPaths).concat(withPath.filter((r) => r.outPath).map((r) => r.outPath)))];
       let list = null;
       try { list = app.svc.fieldStates(doc(), plan(), ctx.sel, all, { registry: app.reg }); } catch (e) {
         if (typeof console !== 'undefined') console.error(e);
@@ -98,7 +105,10 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       const byPath = new Map();
       all.forEach((p, i) => byPath.set(p, list && list[i] ? list[i] : { path: p, value: null, state: 'auto', pinnedAt: null, by: null }));
       const out = new Map();
-      for (const r of withPath) out.set(r.path, mergeStates(readPaths(r).map((p) => byPath.get(p))));
+      for (const r of withPath) {
+        out.set(r.path, mergeStates(readPaths(r).map((p) => byPath.get(p))));
+        if (r.outPath) r.fsOut = byPath.get(r.outPath) || null;
+      }
       return out;
     }
 
@@ -216,8 +226,13 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       return out;
     }
 
-    function extraFor(field, fs, ctx) {
+    function extraFor(field, fs, ctx, row) {
       const p = plan();
+      if (field.widget === 'trim') {
+        const id = MW.sourcesOf(ctx, field.media)[0] || null;
+        return { out: row && row.fsOut ? row.fsOut.value : 0, entry: id ? MI.entryOf(doc(), id) : null };
+      }
+      if (field.widget === 'crop') return { canCrop: MW.sourcesOf(ctx, field.media).length > 0 && !!(app.shell && app.shell.stage.crop) };
       if (field.widget === 'color') return { palette: p ? p.look.palette : {} };
       if (field.widget === 'font') return { families: familiesFor(field), sample: ctx.line ? ctx.line.text : p && p.lines[0] ? p.lines[0].text : '' };
       if (field.path && field.path.startsWith('amount.')) {
@@ -258,16 +273,143 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
 
     function skipText(backdrop) { return t('fld.fxSkipped', { bg: t('exp.bg.' + backdrop) }); }
 
+    // --- photos and videos (DESIGN_2_1 §11.7) ------------------------------------------------------------------------
+
+    // The media picker of a media row: its pick is committed like any value (so the 文字の中に shortcut also pins textFill).
+    function openMediaPicker(row) {
+      const field = row.field;
+      const ctx = page.ctx;
+      const tryDoc = (id) => {
+        let cmds;
+        if (field.textFill !== undefined) cmds = textFillCmds(row, id);
+        else if (id === '' && field.spec && field.spec.auto && field.spec.auto.value === '') cmds = removablePaths(row.clearPaths).map((path) => ({ t: 'pin.clear', path }));
+        else cmds = pathsOf(field, ctx).map((path) => pinCmd(path, id));
+        let d = doc();
+        try { for (const cmd of cmds) d = app.reduce(d, cmd); } catch (e) { return null; }
+        return d;
+      };
+      const value = row.fs && row.fs.state !== 'mixed' && typeof row.fs.value === 'string' ? row.fs.value : '';
+      const pg = Object.assign(MPG.pickerPage(app, { label: labelOf(field), accept: field.spec && field.spec.accept ? field.spec.accept : 'any',
+        value, path: row.path, tryDoc, onPick: (id) => { pop(); commit(row, id); },
+        // ＋ 読み込む ends later: the file goes where the picker was opened, and only while this picker is still shown
+        onImported: (id) => { if (!onTop(pg)) return false; pop(); commit(row, id); return true; } }),
+      { returnTo: () => { const r = findRow(field.path); if (r) r.widget.focus(); } });
+      push(pg);
+    }
+
+    // Whether a sub-page is the one shown: a selection change clears the stack, so the page it was opened for is still
+    // the one under it.
+    function onTop(pg) { return stack[stack.length - 1] === pg; }
+
+    // The asset page (作品全体 › 写真・動画 › 海辺.mp4) on the sub-page stack.
+    function openAsset(id, opts) {
+      clearStack();
+      push(Object.assign(MPG.assetPage(app, { id, rename: !!(opts && opts.rename),
+        onSelect: (sel) => { clearStack(); app.select(sel, { from: 'crumbs' }); }, onGone: () => pop(),
+        onLibrary: () => { if (app.media) app.media.openLibrary(); } }), {
+        returnTo: () => { const r = bodyEl.querySelector('.med-row[data-id="' + id + '"]'); if (r) dom.focus(r); },
+      }));
+    }
+
+    // The part browser's 写真・動画 tab (§11.7.5): a tile pins the kind's media part and its source in one batch, at the
+    // paths of the page the browser was opened from (an import finishing later still lands there, or nowhere).
+    function mediaTab(row, kind) {
+      const use = kind === 'ornament' && row.field.run ? 'overlay' : MEDIA_TAB[kind === 'ground' ? 'ground' : 'ornament'];
+      if (row.field.texture || !use || !row.path) return null;
+      const u = MI.USES[use];
+      const ctx = page.ctx;
+      const paths = pathsOf(row.field, ctx);
+      const scope = scopeLabel(ctx);
+      const cmdsFor = (id) => paths.flatMap((path) => [pinCmd(path, u.key), pinCmd(path + '@' + u.key + '.' + u.param, id)]);
+      const place = (id) => { pop(); run(cmdsFor(id), { label: ['undo.media.place', { scope }] }); };
+      const tab = {
+        tryDoc: (id) => { let d = doc(); try { for (const c of cmdsFor(id)) d = app.reduce(d, c); } catch (e) { return null; } return d; },
+        onPick: place,
+        onImported: (id) => { if (!tab.page || !onTop(tab.page)) return false; place(id); return true; },
+        page: null,
+      };
+      return tab;
+    }
+
+    // The crop overlay on the stage (§11.7.6) for a crop row: the part's source, its focus (cropX, cropY) and zoom.
+    function cropTarget(row) {
+      const field = row.field;
+      const ctx = page.ctx;
+      const id = MW.sourcesOf(ctx, field.media)[0];
+      const meta = id && plan() && plan().media ? plan().media[id] : null;
+      if (!meta) return null;
+      const base = field.path.slice(0, field.path.lastIndexOf('.'));
+      const read = (name) => {
+        const path = pathsOf(Object.assign({}, field, { path: base + '.' + name }), ctx)[0];
+        try { const st = app.svc.fieldStates(doc(), plan(), ctx.sel, [path], { registry: app.reg })[0]; return st ? st.value : null; } catch (e) { return null; }
+      };
+      const m = field.media;
+      return {
+        key: field.id + '|' + ctx.scope, fieldId: field.id, id, meta, cutKeys: ctx.cutKeys.slice(), scope: ctx.scope,
+        owner: m.slot === 'ground' ? 'ground' : m.slot === 'atmos' ? 'atmos' : m.slot,
+        value: read,
+        gesture: (name) => siblingOf(row, base + '.' + name).gesture(),
+        // several params in one gesture (the overlay's drag moves cropX and cropY together: one undo entry)
+        gestureOf: () => {
+          const key = 'gesture:crop:' + field.id + '|' + ctx.scope;
+          const g = app.store.gesture(key);
+          const meta = { label: ['undo.pin', { field: t('fld.crop'), scope: scopeLabel(ctx) }], where: { scope: ctx.scope, field: field.path },
+            mergeKey: key };
+          return {
+            set: (values) => run(Object.keys(values).flatMap((name) => siblingOf(row, base + '.' + name).cmds(values[name])), meta),
+            end: () => g.end(),
+          };
+        },
+        set: (name, v, o) => siblingOf(row, base + '.' + name).commit(v, o),
+        reset: () => {
+          const cmds = ['cropX', 'cropY', 'cropZoom'].flatMap((name) => siblingOf(row, base + '.' + name).clear());
+          if (cmds.length) run(cmds, { label: ['undo.unpinField', { field: t('fld.crop') }] });
+        },
+      };
+    }
+
+    function cropOn(row) {
+      const st = app.shell && app.shell.stage.cropKey ? app.shell.stage.cropKey() : null;
+      return !!st && st === row.field.id + '|' + page.ctx.scope;
+    }
+
+    function toggleCrop(row, on) {
+      if (!app.shell || !app.shell.stage.crop) return;
+      if (!on) { app.shell.stage.crop(null); return; }
+      const target = cropTarget(row);
+      if (!target) return;
+      if (app.view.state.playing) app.pause();
+      // the playhead goes where the picture shows, so the overlay frames it
+      const ctx = page.ctx;
+      const at = app.plan ? app.plan.cuts.find((c) => c.a <= app.time() && app.time() < c.b) : null;
+      if (ctx.scopeKind !== 'work' && (!at || !ctx.cutKeys.includes(at.key))) {
+        const tt = S.seekTime(ctx.sel.level === 'el' ? { level: 'cut', key: ctx.cutKeys[0] } : ctx.sel, app.plan);
+        if (tt !== null) app.seek(tt);
+      }
+      app.shell.stage.crop(target, row.widget.el.querySelector('.w-crop-edit'));
+      app.shell.stage.focus();
+    }
+
+    // [▶ 範囲を見る]: the playhead to the element's next appearance, then play.
+    function playRange(row) {
+      const cuts = page.ctx.cuts.slice().sort((a, b) => a.t0 - b.t0);
+      if (!cuts.length) return;
+      const now = app.time();
+      const next = cuts.find((c) => c.t0 > now + 0.05) || cuts[0];
+      app.seek(next.t0);
+      app.play();
+    }
+
     function stateOf(row, fs, ctx) {
       const f = row.field;
       if (f.cmd) {
         const v = cmdValue(f, ctx);
         const mixed = !!(v && v.mixed);
-        return { value: mixed ? null : v, mixed, auto: false, readOnly: false, extra: extraFor(f, null, ctx) };
+        return { value: mixed ? null : v, mixed, auto: false, readOnly: false, extra: extraFor(f, null, ctx, row) };
       }
-      if (!f.path) return { value: derivedValue(f, ctx), mixed: false, auto: false, readOnly: true, extra: extraFor(f, null, ctx) };
+      if (!f.path) return { value: derivedValue(f, ctx), mixed: false, auto: false, readOnly: true, extra: extraFor(f, null, ctx, row) };
       return { value: fs ? fs.value : null, mixed: !!fs && fs.state === 'mixed', auto: !fs || fs.state === 'auto' || fs.state === 'mark',
-        readOnly: !!f.readOnly || (!!fs && fs.state === 'derived'), extra: extraFor(f, fs, ctx) };
+        readOnly: !!f.readOnly || (!!fs && fs.state === 'derived'), extra: extraFor(f, fs, ctx, row) };
     }
 
     // --- writing -------------------------------------------------------------------------------------------------
@@ -332,7 +474,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       }
       if (field.path === 'split') return Array.isArray(v) && v.length <= 1 ? 'none' : v;
       const spec = field.spec;
-      if (spec && ['num', 'int', 'enum', 'ease', 'order', 'ink', 'color', 'face', 'text'].includes(spec.type)) {
+      if (spec && ['num', 'int', 'enum', 'ease', 'order', 'ink', 'color', 'face', 'text', 'curve', 'shot', 'rig', 'partRefs', 'media'].includes(spec.type)) {
         const coerced = MV.use('core/schema').coerce(spec, v);
         return coerced === undefined ? (fs ? fs.value : v) : coerced;
       }
@@ -343,6 +485,9 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       const ctx = page.ctx;
       const field = row.field;
       if (field.cmd) { commitCmd(field, v, ctx); return; }
+      if (field.textFill !== undefined) { run(textFillCmds(row, v), { label: ['undo.pin', { field: labelOf(field), scope: scopeLabel(ctx) }] }); return; }
+      // なし on a source whose automatic value is none is 自動 (photoPan without a picture is the plain ground)
+      if (field.widget === 'media' && v === '' && field.spec && field.spec.auto && field.spec.auto.value === '') { unpin(row); return; }
       const value = valueFor(field, v, row.fs);
       if (value === W.AUTO) { unpin(row); return; }
       const o = opts || {};
@@ -351,6 +496,44 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       else if (o.merge) meta.mergeKey = 'field:' + row.path;
       run(pathsOf(field, ctx).map((path) => pinCmd(path, value)), meta);
       reportShadowed(row, ctx);
+    }
+
+    // 文字の中に写真・動画 (DESIGN_2_1 §11.7.4): a picture pins the textFill part on the row's slot too; なし clears the
+    // picture and the textFill pin this row made.
+    function textFillCmds(row, v) {
+      const slot = 'ornament#' + row.field.textFill;
+      const cmds = [];
+      for (const path of pathsOf(row.field, page.ctx)) {
+        const partPath = P.scopeKey(path) + ':' + slot;
+        const part = doc().pins[F.writePath(partPath, plan())];
+        if (v === '' || v === null) {
+          cmds.push(...removablePaths([F.writePath(path, plan())]).map((x) => ({ t: 'pin.clear', path: x })));
+          if (part && part.v === 'textFill' && part.by !== 'lock') cmds.push({ t: 'pin.clear', path: F.writePath(partPath, plan()) });
+        } else {
+          if (!part || part.v !== 'textFill') cmds.push(pinCmd(partPath, 'textFill'));
+          cmds.push(pinCmd(path, v));
+        }
+      }
+      return cmds;
+    }
+
+    // siblingOf(row, slot) → { commit(v, o), gesture(), cmds(v), clear() } of another param of the same part at the row's
+    // scope(s): the trim widget's out handle, the crop overlay's focus and zoom. Its value is read against that param's
+    // own spec (MW.paramSpec), never the row's.
+    function siblingOf(row, slot) {
+      const name = slot.slice(slot.lastIndexOf('.') + 1);
+      const field = Object.assign({}, row.field, { path: slot, key: slot, id: row.field.id + '/' + slot, textFill: undefined,
+        widget: 'number', spec: MW.paramSpec(app.reg, row.field.media, name), trimOut: undefined });
+      const ctx = page.ctx;
+      const paths = pathsOf(field, ctx);
+      const sib = { field, path: paths[0] || null, paths, clearPaths: F.clearPathsFor(field, ctx), fs: null, hereKinds: [] };
+      return {
+        paths,
+        commit: (v, o) => commit(sib, v, o),
+        gesture: () => gestureFor(sib),
+        cmds: (v) => paths.map((path) => pinCmd(path, v)),
+        clear: () => removablePaths(sib.clearPaths).map((path) => ({ t: 'pin.clear', path })),
+      };
     }
 
     function unpin(row) {
@@ -379,7 +562,10 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
 
     // --- field rows ----------------------------------------------------------------------------------------------
 
+    // A media part's rows reroll only where their automatic value is drawn (a range or a pick: 動きの強さ, 動く向き, 薄幕);
+    // the source, 動きと重なり and the crop are chosen, never drawn (DESIGN_2_1 §11.5.6).
     function rerollable(field) {
+      if (field.media && !(field.spec && field.spec.auto && (Array.isArray(field.spec.auto.range) || Array.isArray(field.spec.auto.pick)))) return false;
       return !!field.path && DICE_WIDGETS.has(field.widget) && !NO_DICE.test(field.path) && !field.cmd && !field.path.includes('@breathMark');
     }
 
@@ -388,26 +574,34 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       const clearPaths = F.clearPathsFor(field, ctx);
       const path = paths.length ? paths[0] : null;
       const label = labelOf(field);
-      const row = { field, path, paths, clearPaths, hereKinds: [...new Set(clearPaths.map(scopeKindOf))], fs: null, whyKind: null };
+      const row = { field, path, paths, clearPaths, hereKinds: [...new Set(clearPaths.map(scopeKindOf))], fs: null, whyKind: null,
+        outPath: field.trimOut ? pathsOf(Object.assign({}, field, { path: field.trimOut }), ctx)[0] || null : null, fsOut: null };
       const tag = h('button', { class: 'state-tag', type: 'button', 'aria-live': 'off' });
       const lab = h('span', { class: 'fr-label', text: label });
       const dice = rerollable(field) ? iconBtn('dice', t('act.rerollField', { field: label }), () => reroll(row), { 'data-role': 'dice' }) : null;
       const x = path ? iconBtn('close', t('act.unpinField', { field: label }), () => unpin(row), { 'data-role': 'unpin' }) : null;
       const more = path ? iconBtn('more', t('fld.more', { field: label }), (ev) => openFieldMenu(row, ev.currentTarget),
         { 'aria-haspopup': 'menu' }) : null;
+      // 動きと重なり: ⓘ says why the automatic choice is what it is (DESIGN_2_1 §11.9.5)
+      const info = field.depth ? iconBtn('info', t('media.depthWhy'), () => showWhy(row, false), { 'data-role': 'why' }) : null;
       const why = h('div', { class: 'fr-why', hidden: true, role: 'note' });
       const env = {
         app, t, label, field,
         commit: (v, o) => commit(row, v, o),
         gesture: () => gestureFor(row),
         unpin: () => unpin(row),
-        open: () => openPicker(row),
+        open: () => (field.widget === 'shot' ? openShots(row) : field.widget === 'partRefs' ? openRefKinds(row)
+          : field.widget === 'media' ? openMediaPicker(row) : openPicker(row)),
+        other: (slot) => siblingOf(row, slot),
+        cropEdit: (on) => toggleCrop(row, on),
+        cropActive: () => cropOn(row),
+        playRange: field.widget === 'trim' ? () => playRange(row) : null,
         thumb: (canvas, key) => app.thumbs.draw(canvas, key ? { kind: field.partKind || field.kind, key } : null),
         slot: (action, i) => slotAction(field.kind, action, i),
       };
       const widget = W.make(field, env);
       const el = h('div', { class: 'frow', 'data-widget': field.widget, 'data-slot': field.path || field.key, 'data-field': field.id },
-        h('div', { class: 'fr-top' }, lab, tag, h('span', { class: 'grow' }), dice, x, more), widget.el, why);
+        h('div', { class: 'fr-top' }, lab, tag, h('span', { class: 'grow' }), info, dice, x, more), widget.el, why);
       Object.assign(row, { el, tag, dice, x, more, why, widget, lab });
       // Del / Backspace unpin the focused field (§6.8): the row publishes the paths it may clear while it has focus;
       // ui/boot's pin.clearField removes the ones that hold a pin (never a lock pin).
@@ -466,7 +660,10 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       row.lab.addEventListener('pointercancel', end);
     }
 
-    function updateRow(row, fs, ctx) {
+    function updateRow(row, fs0, ctx) {
+      // 文字の中に写真・動画 aims at a slot that shows no textFill yet: nothing is set there (なし), which is not 無効
+      const fs = row.field.textFill !== undefined && fs0 && fs0.state === 'inactive' && !row.clearPaths.some((p) => doc().pins[p])
+        ? Object.assign({}, fs0, { state: 'auto', value: '', inactiveReason: undefined }) : fs0;
       row.fs = fs;
       const st = stateOf(row, fs, ctx);
       row.widget.update(st);
@@ -474,7 +671,10 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       const state = fs ? fs.state : 'auto';
       row.tag.hidden = false;
       row.tag.dataset.state = state;
-      dom.replace(row.tag, I.icon(STATE_ICON[state] || 'ring', { size: 12 }), tagOf(fs || { state: 'auto' }, row));
+      // 動きと重なり while automatic: 「自動: 後ろに下げる」 (the planner's choice, DESIGN_2_1 §11.9.5)
+      const depthAuto = row.field.depth && state === 'auto' && fs && typeof fs.value === 'string' && t.has('opt.depth.' + fs.value);
+      dom.replace(row.tag, I.icon(STATE_ICON[state] || 'ring', { size: 12 }),
+        depthAuto ? t('media.depthAuto', { v: t('opt.depth.' + fs.value) }) : tagOf(fs || { state: 'auto' }, row));
       const here = pinnedHere(fs, row);
       row.tag.title = here ? t('act.unpin') : state === 'inherited' ? t('fld.goOwner') : '';
       row.tag.disabled = !(here || state === 'inherited');
@@ -483,6 +683,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       row.el.dataset.state = state;
       showInactive(row, fs);
       showSkip(row, fs);
+      if (row.whyKind === 'explain' && !row.why.hidden) row.why.textContent = explainText(row);   // follows the value
     }
 
     // A screen-effect row whose part the backdrop mode leaves out (§4.19.4) says so under the row (§6.4.8).
@@ -573,17 +774,22 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       requestAnimationFrame(() => flashField(row.field.path));
     }
 
-    // なぜ: the explanation of the value (auto values; lazy, §4.16.8), in words (F.whyParts: no planner ids).
+    // なぜ: the explanation of the value (auto values; lazy, §4.16.8), in words (F.whyParts: no planner ids). Without
+    // force it toggles (動きと重なり's ⓘ); while shown it follows the value (updateRow).
     function showWhy(row, force) {
       if (!row || !row.path) return;
-      if (!row.why.hidden && !force) { row.why.hidden = true; return; }
-      let ex = null;
-      try { ex = app.svc.explain(doc(), plan(), row.path, { registry: app.reg }); } catch (e) { ex = null; }
+      if (!row.why.hidden && row.whyKind === 'explain' && !force) { row.why.hidden = true; row.whyKind = null; return; }
       lastRow = row;
-      const parts = F.whyParts(ex, row.path, t, plan());
-      row.why.textContent = t('fld.whyPrefix', { why: parts.length ? listText(parts) : t('fld.whyNone') });
+      row.why.textContent = explainText(row);
       row.why.hidden = false;
       row.whyKind = 'explain';
+    }
+
+    function explainText(row) {
+      let ex = null;
+      try { ex = app.svc.explain(doc(), plan(), row.path, { registry: app.reg }); } catch (e) { ex = null; }
+      const parts = F.whyParts(ex, row.path, t, plan());
+      return t('fld.whyPrefix', { why: parts.length ? listText(parts) : t('fld.whyNone') });
     }
 
     // --- sub-pages -----------------------------------------------------------------------------------------------
@@ -622,9 +828,10 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       bodyEl.hidden = !!top;
       headEl.hidden = !!top;
       if (top) {
+        // a page whose crumbs already name it (the asset page: 写真・動画 › 森.jpg) shows only 戻る above it
         dom.replace(subEl, h('div', { class: 'sub-head' },
           h('button', { class: 'btn small', type: 'button', on: { click: () => pop() } }, I.icon('prev', { size: 14 }), t('sub.back')),
-          h('h3', { class: 'sub-title', text: t.label(top.crumb) })), top.el);
+          top.bare ? null : h('h3', { class: 'sub-title', text: t.label(top.crumb) })), top.el);
       } else dom.clear(subEl);
       renderCrumbs();
     }
@@ -642,7 +849,8 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
         try { for (const cmd of cmds) d = app.reduce(d, cmd); } catch (e) { return null; }
         return d;
       };
-      push(Object.assign(PB.pickerPage(app, {
+      const media = MEDIA_TAB[kind] || (kind === 'ornament' && field.run) ? mediaTab(row, kind) : null;
+      const pg = Object.assign(PB.pickerPage(app, {
         kind, path: row.path, label: labelOf(field), value: row.fs && row.fs.state !== 'mixed' ? row.fs.value : null,
         allowNone: !!field.noneOk, texture: !!field.texture, run: kind === 'ornament' ? !!field.run : undefined, tryDoc,
         alts: () => { const ex = app.svc.explain(doc(), plan(), row.path, { registry: app.reg }); return ex ? ex.alts : null; },
@@ -650,7 +858,87 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
           pop();
           if (key === null) unpin(row); else commit(row, key);
         },
+        // マイ素材 (DESIGN_2_1 §6.9): the tab's 「AIで作る」 form, fitted into this row when 作ったら…に使う is on, and
+        // the material tiles' own menu.
+        make: field.texture ? null : makeFor(row, kind, ctx),
+        menuFor: (key) => MP.menuItems(app, key, openMaterial),
+        media,
+      }), { returnTo: () => { const r = findRow(field.path); if (r) r.widget.focus(); } });
+      if (media) media.page = pg;
+      push(pg);
+    }
+
+    // The part browser's 「AIで素材を作る」 (the standalone material tool): made for this kind, used on this row's scope.
+    function makeFor(row, kind, ctx) {
+      const word = ctx.scopeKind === 'cut' ? 'pb.scope.cut' : ctx.page === 'lines' ? 'pb.scope.lines' : ctx.scopeKind === 'line'
+        ? 'pb.scope.line' : 'pb.scope.work';
+      return {
+        scopeWord: t(word),
+        blocked: () => (app.ai ? app.ai.blocked('material') : 'boot.soon'),
+        run: ({ description, use }) => {
+          if (!app.ai) return;
+          const useAt = use && row.paths.length ? { scope: P.scopeKey(row.paths[0]), slot: row.field.path, paths: row.paths.slice() } : null;
+          clearStack();
+          app.openPanel('ai', 'ai');
+          app.ai.run('material', { description, kind: kind === 'atmos' ? 'ornament' : kind, useAt });
+        },
+      };
+    }
+
+    // カメラワーク (the shot widget): tiles of 自動 / 動かさない / the 9 presets, try-on on hover or focus (DESIGN_2_1 §6.5).
+    function openShots(row) {
+      const field = row.field;
+      const paths = pathsOf(field, page.ctx);
+      const tryDoc = (key) => {
+        const cmds = key === null ? removablePaths(row.clearPaths).map((path) => ({ t: 'pin.clear', path }))
+          : paths.map((path) => pinCmd(path, key));
+        let d = doc();
+        try { for (const cmd of cmds) d = app.reduce(d, cmd); } catch (e) { return null; }
+        return d;
+      };
+      const value = row.fs && row.fs.state !== 'mixed' && typeof row.fs.value === 'string' ? row.fs.value : null;
+      push(Object.assign(PB.pickerPage(app, {
+        kind: 'shot', path: row.path, label: labelOf(field), value, tryDoc,
+        keys: ['none'].concat(SHOT.SHOT_KEYS),
+        info: (k) => ({ text: t('shot.' + k), blurb: k === 'none' ? t('shot.none') : t('shot.blurb.' + k),
+          tags: k === 'none' ? [] : SHOT.SHOTS[k].tags.slice() }),
+        onPick: (key) => { pop(); if (key === null) unpin(row); else commit(row, key); },
       }), { returnTo: () => { const r = findRow(field.path); if (r) r.widget.focus(); } }));
+    }
+
+    // この行で使わない部品 [+]: a kind, then the part browser in pick mode; the pick joins the list (DESIGN_2_1 §6.5).
+    function openRefKinds(row) {
+      const field = row.field;
+      const list = h('div', { class: 'insp-list' }, REF_KINDS.map((kind) => h('button', { class: 'insp-item', type: 'button', 'data-kind': kind,
+        on: { click: () => openRefParts(row, kind) } }, h('span', { class: 'grow', text: t('kind.' + kind) }), I.icon('next', { size: 14 }))));
+      push({ id: 'refs:' + row.path, crumb: ['w.refs.kind', {}], el: list, focus: () => dom.focus(list.querySelector('button')),
+        destroy() {}, returnTo: () => { const r = findRow(field.path); if (r) r.widget.focus(); } });
+    }
+
+    function openRefParts(row, kind) {
+      const current = row.fs && Array.isArray(row.fs.value) ? row.fs.value : [];
+      push(PB.pickerPage(app, {
+        kind, path: row.path + ':' + kind, label: t('kind.' + kind), value: null, tryDoc: () => null,
+        onPick: (key) => {
+          pop();
+          pop();
+          if (key !== null && key !== 'none') commit(row, W.refsWith(current, kind + '.' + key));
+        },
+      }));
+    }
+
+    // マイ素材 › a material: its page on the sub-page stack (DESIGN_2_1 §6.9).
+    function openMaterial(id, opts) {
+      clearStack();
+      push(Object.assign(MP.page(app, { id, remake: !!(opts && opts.remake),
+        onSelect: (sel) => { clearStack(); app.select(sel, { from: 'crumbs' }); }, onGone: () => pop() }), {}));
+    }
+
+    // キーフレームを編集…: the keyframe sub-page of the page scope (DESIGN_2_1 §6.7).
+    function openKeys(ctx) {
+      push(Object.assign(KE.page(app, { scope: ctx.scope, ctx }), {
+        returnTo: () => dom.focus(bodyEl.querySelector('[data-custom="camKeys"] button')),
+      }));
     }
 
     function openFilter(kind) {
@@ -702,8 +990,16 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
           on: { click: () => { clearStack(); app.select(c.sel, { from: 'crumbs' }); } } }, t.label(c.label)));
       });
       for (const pg of stack) {
-        kids.push(h('span', { class: 'sep', 'aria-hidden': 'true', text: '›' }));
-        kids.push(h('span', { class: 'crumb is-sub', 'aria-current': pg === stack[stack.length - 1] ? 'location' : null, text: t.label(pg.crumb) }));
+        const top = pg === stack[stack.length - 1];
+        // a sub-page may name its own path: 写真・動画 (a button back to the library) › 森.jpg
+        const parts = typeof pg.crumbs === 'function' ? pg.crumbs() : [{ label: pg.crumb }];
+        parts.forEach((c, i) => {
+          kids.push(h('span', { class: 'sep', 'aria-hidden': 'true', text: '›' }));
+          const text = typeof c.label === 'string' ? c.label : t.label(c.label);
+          const last = top && i === parts.length - 1;
+          kids.push(c.run && !last ? h('button', { class: 'crumb is-sub', type: 'button', on: { click: c.run } }, text)
+            : h('span', { class: 'crumb is-sub', 'aria-current': last ? 'location' : null, text }));
+        });
       }
       dom.replace(crumbsEl, kids);
     }
@@ -736,8 +1032,11 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
         sub.textContent = p && p.lines.length ? [t('count.lines', { n: p.lines.length }), T.fmtTime(p.duration)].join(' · ') : t('lh.empty');
         buttons.push(headButton('dice', t('act.reroll'), () => app.actions.run('look.reroll'), { title: t('lh.rerollWork') }));
       } else if (ctx.page === 'lines') {
-        title.textContent = t('crumb.lines', { n: ctx.lineIds.length });
+        // An area selection names its area: 「サビ1（5行）」 (DESIGN_2_1 §6.5); both ask the AI about these lines.
+        const area = ctx.area ? AREAS.resolve(doc(), p, ctx.area) : null;
+        title.textContent = area ? F.areaTitle(t, area) : t('crumb.lines', { n: ctx.lineIds.length });
         sub.textContent = t('lh.multi');
+        buttons.push(askButton(ctx.area || AREAS.ofLines(doc(), p, ctx.lineIds), 'insp.askArea'));
       } else {
         const line = ctx.line || (ctx.cut && ctx.cut.line ? p.lines.find((l) => l.id === ctx.cut.line) : null);
         if (line && (ctx.page === 'line' || ctx.el === 'text')) kids.push(lineInput(line));
@@ -882,13 +1181,26 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
             c ? h('span', { class: 'muted mono', text: T.fmtTime(c.t0) }) : null, I.icon('next', { size: 14 }));
         }));
       },
+      // [この行をAIに頼む…] (line page) / [このカットをAIに頼む…] (cut page): the AI panel's instruction box with that
+      // target (DESIGN_2_1 §6.2).
       ai(ctx) {
-        return h('button', { class: 'chip-btn', type: 'button', disabled: !app.view.state.prefs.ai, on: { click: () => {
-          app.aiTarget = { lines: ctx.lineIds.slice() };
-          app.openPanel('ai', 'ai');
-          app.bus.emit('ai.tool', 'edit');
-        } } }, I.icon('ai', { size: 14 }), t('insp.askAi'));
+        const cut = ctx.page === 'cut' && ctx.cut;
+        const ref = cut ? { kind: 'cut', key: ctx.cut.key } : AREAS.ofLines(doc(), plan(), ctx.lineIds);
+        return askButton(ref, cut ? 'insp.askCut' : 'insp.askAi');
       },
+      // 要素 › カメラ: [キーフレームを編集…] (DESIGN_2_1 §6.7).
+      camKeys(ctx) {
+        return h('button', { class: 'chip-btn', type: 'button', on: { click: () => openKeys(ctx) } }, t('fld.camKeys'));
+      },
+      // 区画のカメラ: the rig run this page's cut belongs to (「サビ1（5行）で続くカメラ」), from plan.rigs.
+      rigRun(ctx) {
+        const text = rigRunText(ctx);
+        return text ? h('p', { class: 'note subtle', text }) : null;
+      },
+      // 作品全体 › マイ素材 (DESIGN_2_1 §6.9).
+      materials() { return MP.listRows(app, openMaterial); },
+      // 作品全体 › 写真・動画 (DESIGN_2_1 §11.7.3).
+      media() { return MPG.libraryRows(app, { open: (id, o) => openAsset(id, o) }); },
       multi(ctx) {
         const allLocked = ctx.lineIds.every((id) => doc().locks[id]);
         const a = (id, icon, label, off) => h('button', { class: 'btn small', type: 'button',
@@ -961,6 +1273,34 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
     };
 
     function allWarnings() { return (plan() ? plan().warnings : []).concat(app.warnings()); }
+
+    function askAi(ref) {
+      app.aiTarget = { ref };
+      app.openPanel('ai', 'ai');
+      app.bus.emit('ai.tool', 'direct');
+    }
+
+    function askButton(ref, label) {
+      return h('button', { class: 'chip-btn', type: 'button', disabled: !app.view.state.prefs.ai, 'data-ask': label,
+        on: { click: () => askAi(ref) } }, I.icon('ai', { size: 14 }), t(label));
+    }
+
+    // 「サビ1（12–16行）で続くカメラ」: the rig run of the page's first cut (plan.rigs, DESIGN_2_1 §2.7); null before the
+    // planner makes runs.
+    function rigRunText(ctx) {
+      const p = plan();
+      const cut = ctx.cuts[0];
+      const run = p && Array.isArray(p.rigs) && cut && Number.isInteger(cut.rig) ? p.rigs[cut.rig] : null;
+      if (!run || !Array.isArray(run.cuts)) return null;
+      const lineIds = [...new Set(run.cuts.map((k) => { const c = p.cuts.find((x) => x.key === k); return c ? c.line : null; }).filter(Boolean))];
+      if (!lineIds.length) return null;
+      const nums = lineIds.map((id) => { const l = p.lines.find((x) => x.id === id); return l ? l.index + 1 : 0; }).filter(Boolean);
+      const a = Math.min(...nums), b = Math.max(...nums);
+      const lines = a === b ? t('area.linesOne', { a }) : t('area.lines', { a, b });
+      const ref = AREAS.ofLines(doc(), p, lineIds);
+      const area = ref.kind !== 'lines' ? AREAS.resolve(doc(), p, ref) : null;
+      return t('insp.rigRun', { area: area ? F.areaLabel(t, area) : lines, lines: area ? lines : t('count.lines', { n: lineIds.length }) });
+    }
 
     function resetButton(prefix, label, undoLabel) {
       const paths = removablePaths(Object.keys(doc().pins).filter((p) => p.startsWith(prefix)));
@@ -1165,9 +1505,22 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       refresh();
     }
 
+    // 作品全体 › 写真・動画 is open while the library is not empty (DESIGN_2_1 §11.7.3): it follows the library until the
+    // user opens or closes it.
+    function followOpen(c, ctx) {
+      if (c.id !== 'media') return;
+      const m = openState.get(ctx.page);
+      if (m && m.has('media')) return;
+      const want = MI.libraryOf(app.doc).length > 0;
+      if (c.body.hidden !== want) return;
+      c.body.hidden = !want;
+      c.head.setAttribute('aria-expanded', String(want));
+    }
+
     function refreshCustoms() {
       const ctx = page.ctx;
       for (const c of page.customs) {
+        followOpen(c, ctx);
         if (c.body.hidden) continue;
         const active = c.el.contains(document.activeElement) ? document.activeElement : null;
         if (active && !REDRAW_FOCUSED.has(c.id)) continue;
@@ -1179,8 +1532,13 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
         dom.replace(c.el, el);
         const vl = c.el.querySelector('.vl');
         if (vl && scroll) { vl.scrollTop = scroll; vl.dispatchEvent(new Event('scroll')); }
+        const row = active && active.closest('[data-id]') ? active.closest('[data-id]').dataset.id : null;
         if (keep) dom.focus(c.el.querySelector('[data-n="' + keep.n + '"] .' + keep.cls) || c.el.querySelector('[data-n="' + keep.n + '"] button'));
-        else if (active) dom.focus(c.el.querySelector('button:not(:disabled)') || c.head);
+        else if (row !== null) {
+          // a library row keeps the focus (or the first row takes it when it went away)
+          const again = c.el.querySelector('[data-id="' + row + '"]') || c.el.querySelector('[role="option"]');
+          if (again) { again.tabIndex = 0; dom.focus(again); } else dom.focus(c.el.querySelector('button:not(:disabled)') || c.head);
+        } else if (active) dom.focus(c.el.querySelector('button:not(:disabled)') || c.head);
       }
     }
 
@@ -1189,6 +1547,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       refreshCustoms();
       const fsMap = statesFor(page.rows, ctx);
       for (const row of page.rows) updateRow(row, row.path ? fsMap.get(row.path) : null, ctx);
+      for (const pg of stack) if (pg.id && pg.id.startsWith('media:') && pg.refresh) pg.refresh();
     }
 
     function findRow(slot) { return page ? page.rows.find((r) => r.field.path === slot || r.field.key === slot) : null; }
@@ -1204,10 +1563,10 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
     function render() {
       if (!visible()) { dirty = true; return; }
       dirty = false;
-      const sel = S.validate(app.view.state.sel, plan());
-      const ctx = F.contextOf(sel, plan(), app.reg);
+      const sel = S.validate(app.view.state.sel, plan(), doc());
+      const ctx = F.contextOf(sel, plan(), app.reg, doc());
       // Pinned parameters of parts that are no longer chosen stay listed (無効), never hidden (§3.4).
-      const sections = F.withPinnedParams(F.sectionsFor(sel, plan(), app.reg), ctx, F.pinnedSlots(ctx, doc().pins));
+      const sections = F.withPinnedParams(F.sectionsFor(sel, plan(), app.reg, doc()), ctx, F.pinnedSlots(ctx, doc().pins));
       const sig = JSON.stringify(sel) + '|' + sections.map((s) => s.id + ':' + s.fields.map((f) => f.id).join(',')).join(';');
       renderCrumbs();
       renderHead(ctx);
@@ -1246,8 +1605,10 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
     }
 
     const def = (id, fn) => { if (!app.actions.has(id)) app.actions.defineAction({ id, label: 'cmd.' + id, run: fn }); };
-    def('picker.move', (c, a) => (inPicker() ? stack[stack.length - 1].move(a ? a.dx : 0, a ? a.dy : 0) !== false : false));
-    def('picker.pick', () => (inPicker() ? stack[stack.length - 1].pick() : false));
+    // Sub-pages without a grid (キーフレーム, マイ素材, 使わない部品's kinds) leave the arrows and Enter to their controls.
+    const topHas = (fn) => inPicker() && typeof stack[stack.length - 1][fn] === 'function';
+    def('picker.move', (c, a) => (topHas('move') ? stack[stack.length - 1].move(a ? a.dx : 0, a ? a.dy : 0) !== false : false));
+    def('picker.pick', () => (topHas('pick') ? stack[stack.length - 1].pick() : false));
     def('picker.back', () => (inPicker() ? pop() : false));
 
     // Opens one section of the current page and scrolls to it (e.g. 試した見た目 from the play bar's n/m).
@@ -1263,8 +1624,13 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
     }
 
     render();
+    // A library change (another tab's import, the device store's answers) redraws the page and the asset page; the crop
+    // overlay's state shows on its button.
+    app.bus.on('media', () => soon('media'));
+    app.bus.on('crop', () => soon('crop'));
+
     return {
-      render, push, pop, clearStack, openFilter, openSection, showWhy: () => showWhy(lastRow, true), flashField,
+      render, push, pop, clearStack, openFilter, openSection, showWhy: () => showWhy(lastRow, true), flashField, openAsset,
       rows: () => (page ? page.rows.map((r) => ({ id: r.field.id, path: r.path, paths: r.paths.slice(), state: r.fs ? r.fs.state : null,
         unpin: !!r.x && !r.x.hidden, why: r.why.hidden ? null : r.why.textContent })) : []),
       stackSize: () => stack.length,

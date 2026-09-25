@@ -3926,3 +3926,2539 @@ A pinned 切り替え「なし」 (the seam fallback, the hard cut) is applied b
 (not-applicable). `sourceAt` now reports the winning pin when a later cut has no seam and that pin is the hard cut
 (`hardCutSource`); a seam pin on the very first cut still reads as not applicable. This made ui_flows' `values` flow
 fail whenever its tile pick happened to be the hard cut. Test: fields.test.js 'a pinned hard cut … reads as pinned'.
+
+## v2.1 package A
+
+A.1, A.2 and A.3 of DESIGN_2_1 §8.1, delivered together: curves, shots and rigs, the recipe validator, areas, schema 2
+(materials, media, `output.kit`, `side.asks`) with the 1 → 2 migration, the material and media commands, `core/media`,
+the ParamSpec types `curve`, `shot`, `rig`, `partRefs` and `media`, the registry's shared params and `extend`, the
+`parts/mix` stub, and every string of §6.11, §11.7.11, §12.7 and §13.10.
+
+- **New modules:** `core/curve`, `core/shot`, `core/recipe`, `core/media` (L0), `planner/areas` (L2), `parts/mix` (L3,
+  stub: `derive` → `{ def: null }`, `registryFor(base)` → `base`, `materialHash` → `'00000000'`, `sampleDefs` → `[]`).
+  `build.py.layer_of` maps `parts/mix` to L3 (build_test `test_parts_mix_is_l3`).
+- **Changed:** `core/schema`, `core/registry`, `core/doc`, `core/migrate`, `core/commands` (33 commands), `core/types`,
+  `i18n/t` (the registry argument may be a function that returns the current, effective registry), `i18n/strings`,
+  `ui/fields` (one-time compatibility, below).
+- **Fixtures:** `project_v21.json` and `project_media.json` (schema 2, stored exactly as `serialize` writes them);
+  `corpus.V21_PROJECTS`, `ALL_PROJECTS` and `projects(names)`. The v2.0 corpus (`corpus()`) is unchanged, so every
+  existing golden keeps its inputs.
+
+**Frames and goldens.** `node tests/update_golden.js --check` reported `frame_hashes.json: matches` and
+`plan_hashes.json: DIFFERS`. The plan golden was regenerated (all 240 entries). Every arrive and depart decision now
+carries `p.flow = 'linear'`, and every dwell and lens decision carries `p.curve = 'linear'` (seams alike). These are
+constant autos with no random draw, so every pick and every frame is the same; the regenerated `frame_hashes.json` is
+byte-identical. The base registry version stays `1e6ef40c`: its signature is the kinds, the keys and each definition's
+own param names, and shared params are not part of it.
+
+**Decisions and deviations**
+
+- **String keys that already existed with another meaning:**
+  - `keys.title` is the keyboard help heading (キーボード操作), so §6.11's keyframe heading is `keys.heading` (キーフレーム /
+    Keyframes). `keys.item` is as designed.
+  - `opt.start` / `opt.end` are 行頭 / 行末 for the arrange `anchor` enum and stay that way. The curve editor's ends use
+    `curve.both` / `curve.start` / `curve.end`, which have the texts that §6.11 gives for `opt.*`. `opt.both` is new.
+  - `whyRule.role` existed; it now has the §6.11 text.
+  - `menu.clearDevice` (changed) is the existing key `cmd.file.clearDevice`, and its text is updated.
+  - `part.ground.photoPan` (changed): part labels live in their definitions (D§4.18.1). The new label 写真・動画 / Photo
+    or video comes with the photoPan upgrade in package G.3, which owns `parts/ground/photo.js`.
+  - "colour" in five en texts of §11.7.11 is written "color" (the ux-16 test asks for American spelling).
+  - `i18n.test.js` reads the four string tables from DESIGN_2_1.md at test time. It checks that every key exists and
+    that each single-key row has the design text. The two renamed keys are listed in the test (`DESIGN_KEY_HOME`).
+- **`ui/fields` compatibility:** `curve` → `choice` with presets and ease names (as §8.1 says). `ui_fields.test.js` asks
+  that every `SC.TYPES` entry has a widget, so `shot` and `rig` → `choice` (none and the presets), and `partRefs` and
+  `media` → `text`. Packages F and G replace these with their widgets.
+- **Recipe media cost:** "plus 1.5 ms with blur or alpha" (§11.5.8) is read as: the layer's `blur > 0`, or the asset has
+  alpha (its `doc.media` entry, passed as `ctx.media`). The layer's own `alpha` param does not count, because every layer
+  has one. Without a media list, only blur counts.
+  - **Design tension:** 0.4 + 1.5 = 1.9 ms is over the ornament budgets (1.2 ms per cut, 1.5 ms per run). So a blurred
+    or transparent-video media layer fits only in a ground material (2 ms), and the media fixture's ornament material
+    uses the MP4. If transparent overlays in ornaments are wanted, the budget or `mediaHeavy` needs a new number (C, E
+    or the lead); nothing else depends on it.
+- **Recipe normalize:**
+  - A composite kind whose `base` is not a valid part key is treated as a composite, and the base is reported `dropped`.
+  - `cost()` normalizes its input first, so raw input never throws.
+  - A particle field `dir` is rounded before and after the wrap, and 360 becomes 0. The fuzz test found that 359.9999999
+    normalized to 360 and then to 0; `normalize` is now idempotent there too.
+- **Media reducers** (the details §11.2.5 leaves open):
+  - `media.relink` to an asset that is already in the library keeps that entry and its place (the payload's metadata is
+    not applied) and removes `from`.
+  - A rewritten `@key` path replaces a pin already at the new path.
+  - Avoid lists rewritten by a relink are de-duplicated and sorted.
+  - `media.remove` leaves material recipes unchanged, as designed. `refsOf` still lists them, so the library can count
+    them.
+  - `entryProblems` returns `'field: what'` strings. `validate` adds the unique-id check.
+- **Files:** a file without a `doc` object is refused (`not-a-project`) before any migration step runs. `normalize`
+  fills a missing `materials.next` with one past the highest id.
+- **NOTES heading:** this section uses the lead's name, "v2.1 package A". §8 of DESIGN_2_1 suggests `## v2.1-<letter>`.
+
+**Until the other packages land.** `registryFor` returns the base registry, so pins with material or media keys
+(`myMat…`, `myMed…`) and the parts G adds (`photoFrame`) plan with `pin-bad-value`. `cam.*`, `rig*`, `motion.speed`,
+line `season` and `avoid` pins are stored, validated and scope-checked, but the planner does not read them yet (D).
+Shared `flow` and `curve` params are resolved into the plan but not applied by the engine yet (B). Linear is the
+identity, so this cannot change a frame. An `ease` pinned to a curve preset or a custom curve plays as linear until
+then (`behave.easeOf` falls back for names it does not know).
+
+## Tap-sync with the mouse and touch
+
+A user found that tapping did not seem to take effect. Probing the page like a mouse user showed why:
+- Tap mode had no on-screen control to tap with; only Space and Enter marked a line.
+- A click on the preview (the natural "tap") ran the normal preview click. It selected a line, paused playback and opened
+  詳細, which folds the step column and hid the tap panel.
+- While playback was stopped, Space still marked lines at the frozen clock, so every line got the same time.
+  `core/timing` then dropped all but the first with `time-order`, while the toast still said 「3行のタイミングを記録しました」.
+
+Fixes:
+- `core/tap`: a mark less than `MIN_GAP` (0.12 s) after the last start is not taken.
+- `ui/tap`:
+  - a big 「タップ」 button (pointerdown, at the press's time);
+  - no mark while playback is stopped, with the hint `tap.stopped`, and `tap.tooSoon` for a rejected mark;
+  - the announced time is the recorded one;
+  - starting unfolds the step column;
+  - finishing seeks 2 s before the first marked line, with a toast action 「再生して確認」 (`tap.check`);
+  - `tap.doneSome` when the timing cannot use some marks (a mark earlier than a pin or LRC time above the session).
+- `ui/stage`: in tap mode, a press on the preview is a tap and never selects or pauses.
+
+Tests:
+- `tap.test.js`: a new gap test.
+- `ui_flows.py` `tap`: the mouse sub-flow.
+- Both were mutation-checked: each fails when its fix is removed.
+
+## AI thinking animation
+
+The owner asked for a near-future thinking animation while the AI works (timing, prep, looks and the other tools).
+- New module `ui/ai_thinking` (L7), with two exports:
+  - `orb(large)`: the orb that replaces the small spinner of the AI panel's running line;
+  - `mountHud(app, ctl, host)`: the HUD over the preview, mounted by `ui/ai_panel` on `app.shell.stage.element`.
+- The HUD and the glow are driven by the controller's state (`ctl.on`). They show exactly while `state.run` exists.
+- Colors are `--ai-a` (cyan) and `--ai-b` (violet). The HUD is `pointer-events: none` and sits over the canvas, so
+  exports and hit tests are unaffected.
+- Tests: `ui_flows.py` `ai_prep` checks the HUD during a text tool (shown, stage text equal to the running line, no audio
+  steps, glow, orb, pointer passes through). `ai_align` checks the four steps up to 考え中, and that the HUD and the glow
+  go away with the answer.
+
+## v2.1-H.1
+
+H.1 of DESIGN_2_1 §8.8: the WebM writer `export/webm` (§13.5) and the subtitles `export/subtitles` (§13.8), both pure
+(L5, Node-tested), with `tests/node/webm.test.js` (19 tests) and `tests/node/subtitles.test.js` (11 tests). No other
+source file changed; `build.py` already gives `export/*` layer 5. The shipped pages are rebuilt because they now contain
+the two modules. Goldens unchanged (`update_golden.js --check`: both match).
+
+Base: this worktree's branch started at `origin/main`, which does not have §11–§13 or package A. It was fast-forwarded
+to the package-A commit (the base of the other v2.1 packages) before any work; no merge commit.
+
+**`createWebm` as frozen, and what the design left open**
+
+- **Calls.** `video(colour, alpha, key, ts)` and `audio(chunk, ts)` take `ts` in µs (the chunk timestamp, `ts(i)`).
+  Block times are `round(ts / 1000)` ms. Frames and packets may be a `Uint8Array`, an `ArrayBuffer` or view, or an
+  encoded chunk (anything with `byteLength` and `copyTo`, e.g. `EncodedVideoChunk`); they are copied, so the caller may
+  reuse its buffers. `alpha` may be `null` for a frame (a BlockGroup without BlockAdditions).
+- **`key` means "decoding can start here".** With alpha, the host passes `colour.type === 'key' && alpha.type === 'key'`.
+  §13.5 calls spontaneous key frames in one encoder harmless; that holds for playing straight through, but a cluster and
+  cue at a colour-only key frame would make a seek there start the alpha decoder on a delta frame.
+- **Checks** (`ExportError` codes): `args` (options, empty or non-byte frames, an alpha frame on an opaque track, audio
+  without an audio track, a bad OpusHead), `order` (the first video frame is not a key frame; video times not strictly
+  increasing in whole ms; audio times not strictly increasing), `finished`, `sink`.
+- **Return values.** `video()` and `audio()` return a promise that resolves once the bytes they completed are written. It
+  never rejects, so an ignored promise cannot become an unhandled rejection; a failed write makes the next call throw
+  `sink`, and `finish()` rejects. `finish()` → `{ bytes, frames, packets, clusters, cues, duration (s) }`.
+- **Opaque WebM** (`video.alpha` not `true`): the frames are SimpleBlocks with the key flag, and the track has no
+  MaxBlockAdditionID, BlockAdditionMapping or AlphaMode. G's counter fixtures (§11.8.1) need this. With alpha, every
+  frame is a BlockGroup (`ReferenceBlock` = previous frame's ms − this frame's ms on delta frames).
+- **Clusters.** A cluster starts at every key frame. It holds the video up to the next key frame and the audio packets
+  timed before it, in time order (video first at equal ms). It is assembled in memory and appended in one write once it
+  is complete: when the next key frame has arrived and, with audio, a packet at or after the cluster's end has too. The
+  output depends only on each track's own sequence, not on how the calls interleave (tested with random interleavings).
+  A group longer than 32 767 ms is split at the first block past that. Only the part that holds the key frame gets a
+  CuePoint. There is one CuePoint per key frame, at the cluster that holds it; that equals "one per cluster" of §13.5
+  whenever key frames come at least every 32.7 s.
+- **Placeholders.** The Segment is written with the unknown size (`01 FF…FF`, 8 bytes), so a file cut short still
+  parses. The SeekHead lives in a fixed 96-byte area (SeekHead + Void). `finish()` appends the Cues, then makes exactly
+  three positional writes: the Segment size, the Duration (8-byte float, in ms), and the whole SeekHead area, now with
+  the Cues entry. A file without video frames has no Cues (a Cues element needs a CuePoint) and no Cues entry.
+- **Duration** = the latest end of any frame or packet, rounded to the µs. A frame ends at `ts` plus the chunk's own
+  `duration` when it carries one, else plus 1/fps. A packet ends at `ts` plus its chunk `duration`, else at `ts`. With
+  `EncodedVideoChunk`s made from `frameDur(i)`, the Duration is exactly `ts(N)`.
+- **Determinism.** Identical input → identical bytes. TrackUID = the track number, and there is no SegmentUID or DateUTC.
+- **Audio entry** as in §13.5, plus `FlagLacing 0` (as on the video entry; we never lace). CodecPrivate is the encoder's
+  OpusHead as given, checked for its magic, its length (≥ 19) and a channel count equal to `audio.channels`; CodecDelay
+  comes from its pre-skip. Without one, the head is built from the options (§13.5's values when the host passes 2 and
+  48000); more than 2 channels without a head are refused (mapping family 0). SamplingFrequency is `audio.rate`.
+- Additive exports beyond §13.11: `ebmlSize(n, width?)` takes an optional fixed width (the Segment size uses 8).
+
+**Subtitles**
+
+- `srt` works in whole µs (`Math.round(t · 1e6)`), then milliseconds with halves up. So `0.5005` s is `,501`, although
+  `0.5005 · 1e6` is 500499.99999999994 in binary, and `4.2 − 1.1` gives `,100`.
+- The 0.1 s rule is checked on the written milliseconds, after the overlap cut-back. Lines with empty text (after
+  trimming) are left out before that, so they never cut back the cue before them. Line breaks in a text (CR, LF,
+  U+2028/9) become spaces: a blank line would end the cue.
+- Cues are sorted by start (stable, so equal starts keep plan order). `per: 'cut'` uses the cuts that have a `line`
+  (roles `lyric` and `focus`); title, intro, gap and outro cuts are left out.
+- `srt` throws `ExportError('args')` for an unknown `per` or a non-numeric `t0`/`t1`. An empty or reversed range gives
+  `''`. The design names no furigana or line-break rules, so none are applied.
+- `BOM` (`'﻿'`) is exported so that the kit and the menu item add the same one.
+- `lrc(plan, doc)` is `lrcText`'s algorithm. The test keeps a verbatim copy of the previous `lrcText` as the reference and
+  also compares with the live `ui/project_io.lrcText` on all six fixture projects.
+
+**Checks.** Mutation check: 35 hand-made mutants of the two modules; 33 are caught. The two survivors are equivalent:
+a line that ends exactly at `t0`, or starts exactly at `t1`, becomes a zero-length cue, which is dropped anyway and cannot
+cut back another cue.
+
+**Browser probe** (not committed; Playwright with the bundled Chromium 141.0.7390.37, headless). `VideoEncoder` VP9
+`vp09.00.10.08`, or VP8 at 24 fps, encoded 72–90 frames, key frames forced every 2 s. The alpha encoder got an I420 frame
+whose Y plane is the alpha and whose U and V are 128. `createWebm` wrote the chunks; `<video src=blob:>` played the file,
+seeking to 6 frame times, drawing to a canvas and reading pixels:
+- opaque VP9 192×108@30: loads, duration 3 s, colours within ±2 of the source;
+- VP9 alpha 192×108@30: alpha 128 on the half-transparent square and 0 outside at every sample, colour within ±2
+  (±4 in the case below);
+- VP9 alpha 320×180@30 + Opus (`AudioEncoder`, its OpusHead passed as `codecPrivate`, pre-skip 312):
+  `decodeAudioData` gives 144 648 samples for `audioFrames` 144 000 (less than one 960-sample packet over), RMS 0.21
+  for a 0.3 sine;
+- VP8 alpha 192×108@24: same results as VP9 alpha.
+
+So Chrome accepts `MaxBlockAdditionID` and `BlockAdditionMapping` and reads the alpha from BlockAdditional id 1. H.2's
+`webm_check.py` repeats this properly.
+
+**Requests to other packages**
+
+- **H.2 (host WebM and kit):**
+  - The Tracks element, and with it the OpusHead, is written when `createWebm` is called. So encode the audio before
+    the video, and pass the first output's `decoderConfig.description` as `codecPrivate`. This also avoids a memory trap:
+    while audio lags behind the video, the writer holds the video clusters in memory. 60 min of Opus at 160 kbps is
+    about 70 MB. Pass `audio: null` when there is no song.
+  - Pass `key` as described above.
+  - The encoded chunks can be passed as they are (their durations are used).
+  - Add `SUB.BOM` before the SRT text.
+  - `lrc(plan, doc)` has no range. FG7 says "SRT and LRC … relative to the export range", but §13.8 freezes
+    `lrc(plan, doc)` with the same bytes as today. If the kit's LRC must be relative to the export range, that needs a
+    lead decision (for example an optional `{ t0, t1 }` that keeps today's bytes when absent).
+  - `ui/project_io.lrcText` → `export/subtitles.lrc(app.plan, app.doc)` (§8.8 H.2).
+- **G.1 (`media/matroska`, `media/samples`):**
+  - WebM times are whole milliseconds (TimestampScale 1 ms, frozen). At 24, 30, 30000/1001 and 60 fps, frame k starts up
+    to 0.5 ms after k/fps. For example, frame 2 of a 30-fps file is at 0.067 s, not 0.0667 s. With `EPS_MEDIA` = 0.1 ms,
+    `sampleAt(table, k / fps)` then returns k − 1 for a third of the frames at 24, 30 and 60 fps. This holds for our
+    own WebM and for ffmpeg's alike.
+  - A possible rule: when a track has `DefaultDuration` and every block time is within 0.5 ms of `i · DefaultDuration`,
+    take `pts = i · DefaultDuration`. Otherwise the frame-exactness expectations of §11.8.3 for WebM sources must be
+    computed from the ms times. G and the lead should decide.
+  - The round trip through `media/matroska` named in §13.12 is not in `webm.test.js`, because the module is not in this
+    tree. At integration, add it there: `writeFile`, `makeFrames` and `readFile` in the test already produce the
+    expected table, including the alpha ranges. Alternatively, confirm that G's `media_demux.test.js` "matroska on
+    `export/webm` output" covers it.
+- **Strings wanted:** none.
+
+## Lead decisions (v2.1 integration)
+
+- **LRC times are always song times.** `export/subtitles.lrc(plan, doc)` has no range: an LRC file travels with the song,
+  so its times count from the song's start, whatever the export range. SRT follows the export range
+  (`srt(plan, { t0, t1 })`, times relative to `t0`), because it sits next to the exported clip. H.2 and H.3 follow this.
+- **WebM frame times are snapped to the frame grid.** WebM stores whole milliseconds, so at 24, 30 and 60 fps some
+  frames start up to 0.5 ms after `k / fps`, and `sampleAt(k / fps)` would pick frame k − 1. `media/matroska` therefore
+  sets `pts = i · DefaultDuration` (i = the presentation index) when a track has a DefaultDuration and every block time is
+  within 0.5 ms of that grid. Otherwise it keeps the stored times (VFR). The frame-exactness tests of §11.8.3 then hold for
+  our WebM files and for ffmpeg's alike.
+
+## CI: Node tests one file at a time
+
+On PR #4 one CI run failed `planning speed: re-planning project_long after an edit`, with batches of 10.1–16.2 ms against
+the 10 ms budget (the best of eight must stay within it). The other run on the same commit passed. The speed tests
+(planner_determinism, conformance, …) shared the runner's cores with the other test files, which `node --test` runs side
+by side; the H.1 property tests had just added CPU-heavy files. The budgets are unchanged. Instead, CI now runs
+`node --test --test-concurrency=1`, so each file has the CPU to itself. Locally that takes about 3 minutes (1215 tests),
+and the re-plan measures 5.8 ms. Run the Node tests the same way on a busy machine.
+
+
+## v2.1-C
+
+Package C, the materials runtime (DESIGN_2_1 §8.3 with its media additions): `src/parts/mix.js` replaces A's stub, with
+`tests/node/mix.test.js` and `tests/browser/materials_gallery.py`.
+
+**What it does**
+- `derive(entry, base, ctx?)` turns a MaterialEntry into a part definition:
+  - a variant goes through `K.variant` (§5.7.2): params are coerced through the base's specs, shared values through
+    the kind's shared specs as the base narrows them;
+  - a composite goes through `K.<kind>`, with its build / make / apply bound to the normalized recipe in one closure
+    per material version;
+  - every definition carries `mine: { id, rhash, cost, by, media }`.
+- The interpreters. Every run and draw function is defined once, at module level:
+
+  | Recipe part | Built as |
+  |---|---|
+  | layer `shape` | one `sb.shape` per item; the SHAPE_LIB path is scaled by the item's size |
+  | layer `frame` | `sb.shape` nodes around `hints.focus` (the safe area in grounds) |
+  | layer `fill`, `pattern` | one `sb.paint` each (`drawFill`, `drawPattern`), still unless a behaviour moves it |
+  | layers `particles`, `lines`, `glyphs` | one `sb.paint` each (`drawFlow`), closed form in t |
+  | layer `media` | `K.media` when the kit exports it; skipped otherwise |
+  | movers and appear | one `runItems` behaviour per node layer; per item inside `drawFlow` |
+  | arrive / depart motion | `BH.glyphMotionMaker(kind, { unit, fn: glyphTracks })`, made once per kind and unit |
+  | dwell osc | `BH.holdMaker(oscHold)` |
+  | lens osc | a `runLensOsc` behaviour on the camera node |
+  | filter stack | the inner filters' `apply`, chained |
+
+- `registryFor(base, materials, media)`, `materialHash(entry)`, `sampleDefs(base?)` and `SHAPE_LIB` (18 unit shapes).
+
+**Decisions where the design was silent**
+- **Flow layers draw through a paint, not `sb.particles`.** `sb.particles` starts every particle at a random angle,
+  sways only along x, fades every particle by its life cycle and has a single ink. Recipes need more than that:
+  - lines that lie along `dir`, upright glyphs and the `rot` range;
+  - movers per item with their phases, appear per item (a wipe), several inks.
+
+  `drawFlow` batches its items into one path per ink and alpha step of 1/16. The §2.1 cherry flurry (90 petals, two
+  inks) draws with at most 32 fills; the test asserts exactly one fill per used step.
+- **Units.** Sizes and mover `x`/`y` amplitudes are shares of the short side; `place.x`/`y` are shares of the frame.
+- **Regions per anchor:**
+  - `frame`: the frame plus the 15 % bleed;
+  - `focus`: the text block, or the safe area in scenes without text;
+  - `around`: the block grown by 0.08 short. Shapes sit on an ellipse, and particles fade out inside the block;
+  - `under`: a 0.08 short band under the block;
+  - `behind`: the block × 1.25, always in the far layer;
+  - `corners`: four 0.14 short squares of the safe area;
+  - `edges`: four 0.07 short bands;
+  - `free`: `hints.free`, or the safe area.
+
+  `spread` scales every region. Items are spread over several regions in proportion to their areas.
+- **Frame and pattern fields:**
+  - `frame`: `size[0]` is the gap to the text and `size[1]` the arm of brackets and ticks; ticks are two per side;
+  - `pattern`: `size[1]` is the mark and `rot[0]` the pattern's angle. It is clipped to its region. A moving pattern
+    draws at most 2,500 marks per frame (a finer one is coarsened); a still one is rasterized once;
+  - `lines`: 6 % of the longest line wide (1–8 du);
+  - `glyphs`: drawn in the page's sans-serif;
+  - a ground's fill always covers the bleed.
+- **Fields.** The velocity is `speed · short` along `dir` (0 = right, 90 = down), × 0.7–1.3 per item. The sway is
+  perpendicular to `dir`, and the spin is × ±0.5–1.5 per item. Items wrap inside their region grown by their size.
+  Regions other than `frame` fade items near their edges. `life [0, 0]` means no life cycle.
+- **Bursts:**
+  - `beat` fires on every beat; `arrive` fires once at the sung start (the start of a ground or atmosphere);
+  - `impact` fires at the sung start too, and does so on lines that are not impacts as well;
+  - particles fly out from the region's centre at `speed · (0.5–1.5)` and are pulled along `dir` at `1.2 · speed` per
+    second;
+  - they fade out over their life (1 s when unset, and under 0.95 of the beat period for `beat`).
+- **Appear times:**
+  - `start` is the window start, `arrive` the sung start (the cut-local 0) and `rest` the end of the entrance;
+  - `impact` is the sung start (arrive on other lines), and `beat` restarts on every beat;
+  - grounds and atmospheres start at 0.
+- **Movers.** The value is `amp · wave(hz · t + φ)`:
+  - `beat` is `exp(−since / 0.2 s)`, with half-second pulses when there is no grid;
+  - `ramp` is the seconds since the window start, or the window length shaped by its curve;
+  - the phases are `index` = j / n and `rnd` = seeded;
+  - an alpha mover keeps the alpha between 1 − |amp| and 1, full at the wave's peak when amp > 0; a ramp fades in
+    (amp > 0) or out;
+  - `scale` scales items about their centre.
+- **Oscillators:**
+  - dwell `sx` scales uniformly (sx and sy); `glow` and `tint` are unipolar;
+  - the phases are `index` / `word` × `step`, and `rnd` = the glyph's random;
+  - lens times run from the window start.
+- **Knobs and shared params:**
+  - the `amp` knob of arrive/depart scales every track's distance from the identity;
+  - the amount factors follow §5.7.4.
+- **Inner parts:**
+  - their params are the fixed recipe params, then the material's shared values, then autos seeded by the scene;
+  - entrance and exit parts share the material's `dur` / `each` / `order` / `ease`, so they fill the same window;
+  - a composite entrance without motion takes its first part's shared overrides and unit;
+  - filter stacks resolve their inner params once per material version (neutral features, seeded by `rhash`). Each
+    inner filter runs at `min(1, amount × mix)` with `when: 'always'`, because the renderer weighs `when` once;
+  - the stack's `gate` is the first inner gate.
+- **`mirrorOf` works by data,** with K.mirror's rule:
+  - tracks swap ends; column curves and the ease reverse through `CV.reverse`; `dur` and `each` carry over, `order`
+    does not;
+  - the arrive's inner parts go through `K.mirror`;
+  - the depart's `rhash` covers the arrive's.
+
+  K.mirror itself would drop the per-build knob wrapper. The arrive must come earlier in the list, so `derive` without
+  the list gives `mirror-missing`.
+- **`derive` problems** use A's Problem shape `{ path, code, params }`:
+  - Fatal: entry problems, `rv-newer`, every `core/recipe` limit problem, `no-base`, `flash-base`, `mirror-missing`,
+    `kit` and `def`.
+  - Dropped with a problem: normalization codes, `part-missing`, `part-flash`, `part-scope`, `part-frames`,
+    `part-param`, `part-mirror` and `param`.
+  - `derive` runs `REG.checkDef`. `registryFor` leaves that to `REG.extend`.
+- **`registry.problems`**, which D turns into `material-bad`:
+  - a failed material gives `'<kind>/<key>: <first fatal code>'`, for example `ornament/myMatb: cost`;
+  - a 40-bit media key collision gives `'ground/<myMed key>: media-key'`.
+- **Pooled media grounds:**
+  - `mine.cost` is a cost object `{ ms: 0.4, particles: 0, … }`. §11.5.9 writes `0.4`; the object lets §5.9.4 sum
+    `mine.cost.particles` over any definition;
+  - `mine.media` is `true` for them and an id array for materials (§8.3);
+  - `clock` and `move` autos are set only when `photoPan` has those params (G.3).
+- **Memo caches (WeakMaps only):**
+  - registries: per base, the last 4 (materials, media) pairs;
+  - per material entry: its last derivation, reused while the base, the media list (only for recipes with media
+    layers) and the mirrored arrive entry are the same objects. An edit re-derives one entry;
+  - per asset: its ground definition;
+  - per filter-stack version: the params object of each decision → its inner params objects.
+- **Media layers** call `K.media` with:
+  - `use` = `ground` (grounds), `layer` (anchor `frame`) or `frame`;
+  - a mask from `shape`, and `p` holding the layer's fit, time and blur plus `depth: 'anim'`. The recipe places the
+    picture itself, which is what §11.9.3 means by `anim`.
+
+  The border is a stroked shape. A group node carries the movers and the appear. An empty `src` (the part param) builds
+  nothing.
+- **`sampleDefs(base?)`:**
+  - with a base, 8 definitions: one composite per COMPOSITE_KIND and the §2.1 cherry-petal atmosphere;
+  - without one, 7: a filter stack needs inner filters;
+  - the keys are `myMatSornament`, `myMatSatmos` and so on. Tests and the gallery re-key them to `myMatz…`.
+
+**Design tension (A's note on media cost vs the ornament budgets): decided — the budget stays hard.** `core/recipe` is
+the only judge of a recipe. A fixed picture with transparency or blur costs 0.4 + 1.5 = 1.9 ms, so it fits only a
+ground material (2.0 ms), exactly as A implemented. The reasons, in §5.8's spirit:
+- The ornament budgets bound three cut ornaments and an atmosphere per frame within D§7.4's draw budget, and the
+  isolated path is the expensive part of a media node (§11.5.12).
+- Transparent pictures near the words and overlay footage are what G's `photoFrame` and `mediaLayer` are for, when
+  pinned.
+- A material whose picture is the `src` param (a reusable frame style) is costed without its picture, like a pinned
+  `photoFrame`; the interpreter draws whatever picture is chosen.
+
+If the owner wants fixed transparent pictures in ornament materials, the lever is `core/recipe.LIMITS` (A), not
+`parts/mix`.
+
+The flash rule stays hard at derive (`core/recipe.problems`) and again at build:
+- a large layer (cover > 0.25 at knob maximum, computed as `core/recipe` does) never changes with the beat more than
+  3 times a second: beat appears and beat bursts use every n-th beat at fast tempos;
+- burst particles of large layers fade in over at least 0.15 s;
+- no particle life cycle is shorter than 1/3 s;
+- media layers use the same rule with cover = size².
+
+**Deviations**
+- Flow layers use `sb.paint` instead of `sb.particles`; the reasons are above. `FrameStats.drawn.particles` counts only
+  `sb.particles`, so material particles are not in it. The §5.9.4 budget still holds by construction through
+  `env.mixShare`.
+- The ornament count knob is the param `quantity` while `core/registry` reserves `count` on ornaments (D§3.4,
+  `RESERVED_PARAMS`). `REG.extend` refuses a `count` param, which would drop every ornament material with a count knob,
+  the §2.1 flurry among them. A probe at module creation picks `count` as soon as the registry accepts it. Until then
+  project_v21's pin `atmos@myMat3.count` has no effect.
+- Additive signatures: `derive(entry, base, ctx?)` takes `ctx = { list, media }` (for `mirrorOf` and the media list),
+  and `sampleDefs(base?)` takes the base its filter stack needs.
+- New dependencies of `parts/mix`: `core/schema`, `core/media` and `engine/scene/builder` (L0 and L3, within §3.1).
+- `tests/node/contract.test.js` (A's file): three assertions that checked the stub's placeholder answers were replaced
+  by the real contract, since §3.12 says C replaces the stub:
+  - `derive({})` has problems;
+  - `materialHash` gives 8 hex digits;
+  - `sampleDefs()` is non-empty with `myMatS…` keys.
+
+  `registryFor` still returns the base itself.
+
+**Measured** (this shared container; Node 22, headless Chromium)
+- `registryFor` after an edit (a new `doc.materials` with one changed entry), best of 8 batches of 5:
+  - 64 materials: 1.39 ms (budget 3 ms);
+  - 64 materials and 200 assets, 20 pooled: 1.82 ms (budget 4 ms).
+- The first composition of 64 new materials takes 8.0–9.6 ms, once when a document opens. About 120 µs per material
+  goes to `core/recipe` `normalize`, `problems` and `cost`, each of which normalizes again, plus the recipe hash. A cold
+  `REG.extend` of 64 definitions takes 1.1–2 ms.
+- The §2.1 cherry-petal atmosphere:
+  - static cost 0.54 ms (budget 1.5 ms);
+  - at 720p, 0.90 ms per frame with it and 0.60 ms without: 0.30 ms.
+- Scene build per material scene: 0.14–0.67 ms (budget 4 ms). behave + solve: ≤ 0.023 ms.
+- `mix.test.js` runs in about 13 s. It has 24 tests, including the harness: 8 samples and 40 generated recipes × 7
+  aspects × 24 times.
+- Fifteen mutations were checked, and each fails its test:
+  - registryFor always extends; mixShare ignored; no beat skipping; minimum life dropped;
+  - an arrive that does not end at identity; rhash that ignores the recipe; a mirror that keeps its direction;
+  - K.media never called; the media depth left out; a filter stack that leaks a surface;
+  - the per-entry memo off; particles filled one by one; paint state leaking between frames;
+  - a flash base accepted; the count knob ignored.
+
+**Requests to other packages**
+- **A (or the lead), `core/registry`:** exempt definitions added through `extend` from `RESERVED_PARAMS`. In
+  `checkParams`, use `const reserved = mine ? [] : RESERVED_PARAMS[def.kind] || []`. §5.7.6's knob `count` is always
+  part-qualified (`@myMat3.count`), so it cannot be confused with the slot `ornament.count`. `parts/mix` switches to
+  `count` by itself.
+- **A (optional), `core/recipe`:** `problems` and `cost` normalize their input again; a fast path for recipes that
+  `normalize` produced would cut the first composition by about half.
+- **B:**
+  - `build.js`: `env.mixShare` per §5.9.4, summing `def.mine.cost.particles`. Every `mine.cost` is an object; media
+    grounds have particles 0.
+  - `perf.py`: material particles are drawn by paints, so budget checks should use the `mine.cost` sum, not
+    `FrameStats.drawn.particles`.
+  - `facade.setDoc`: `MIX.registryFor(base, doc.materials, doc.media)`.
+  - The lab: re-key `sampleDefs(base)` as the tests do (`myMatS…` → `myMatz` + lowercase).
+  - `K.media`: C passes `p.depth: 'anim'` and skips its border when `K.media` returns −1.
+- **D:**
+  - the `registry.problems` format above;
+  - `extra[key].media` is an id array for materials (for `plan.media`) and `true` for pooled-media grounds, whose asset
+    id is `mine.id` (and the `image` auto).
+- **E:** the derive problem codes above, for review texts and `fromAi` warnings. `materialHash` hashes the whole
+  normalized entry: id, kind, by, name, blurb, tags, season, pool, rv and recipe.
+- **F / G:**
+  - hide derived media grounds with `registry.extra[key].media === true`, not a truthy test, because materials carry an
+    id array;
+  - `mat.problem` needs texts for the codes (strings wanted below).
+
+**Strings wanted** (package F; `mat.problem`'s `{what}` for C's codes)
+
+| Key | ja | en |
+|---|---|---|
+| `mat.why.no-base` | 元にする部品が見つかりません | The base part was not found |
+| `mat.why.flash-base` | 点滅する部品は元にできません | A flashing part cannot be the base |
+| `mat.why.part-missing` | 部品「{key}」が見つかりません | The part "{key}" was not found |
+| `mat.why.part-flash` | 点滅する部品は使えません（{key}） | Flashing parts cannot be used ({key}) |
+| `mat.why.part-scope` | 「{key}」は使える範囲が違います | "{key}" works in a different scope |
+| `mat.why.part-frames` | 寄り引きのカメラは1つまでです（{key}） | Only one framing camera move ({key}) |
+| `mat.why.part-param` | 「{key}」の設定「{name}」が読めません | The setting "{name}" of "{key}" could not be read |
+| `mat.why.part-mirror` | 「{key}」は逆向きにできません | "{key}" cannot be reversed |
+| `mat.why.param` | 設定「{name}」が読めません | The setting "{name}" could not be read |
+| `mat.why.mirror-missing` | 逆向きにする入りの素材が見つかりません | The entrance material to reverse was not found |
+| `mat.why.kit` | 素材を部品にできませんでした | The material could not be made into a part |
+| `mat.why.def` | 素材の定義に問題があります | The material definition has a problem |
+| `mat.why.media-key` | おまかせで使えない写真・動画があります | A photo or video cannot be used in automatic picks |
+
+## Lead: materials may name their count knob `count`
+
+Package C asked for this (NOTES v2.1-C). `core/registry.checkParams` keeps `count` reserved on catalog ornaments and
+filters, where it would clash with the list slot's count. A definition added through `extend` (a material) is exempt,
+because its paths always carry its key (`atmos@myMat3.count`). `parts/mix` detects this when the module loads, so the
+ornament count knob is now `count`, as the §2.1 example writes it. Test: `registry.test.js`, "a material may name its
+ornament count knob `count`".
+## v2.1-E
+
+Package E of DESIGN_2_1 §8.5, with its media additions (§11.6) and the depth request (§11.9.4): the `direct` tool, AI
+materials, vision, and the v2.1 parts of `ai/changes`, `ai/catalog` and `ai/looks`.
+
+- **New modules** (L5): `ai/direct` (requests, the FROZEN answer schema in five frozen variants, answer → changes),
+  `ai/recipe` (`AI_MATERIAL`, `fromAi`, `toAi`, the standalone material tool, the `[media]` list), `ai/vision`
+  (`VISION_SCHEMA`, `visionRequest`, `visionChanges`).
+- **Changed:** `ai/changes` (kinds `value`, `material`, `media`; groups; the new Change fields; `markStale` with
+  `staleWhy` and `resolveArea`; `toCommands` in the §5.6 order with `requires` and the apply-time area check; material
+  and media log items and revert; review text), `ai/catalog` (`atmos`, `materialsText`, `cameraText`, `recipeText`),
+  `ai/looks` (the `helpers` export only), `core/media` (§11.9.4: `ai.depth`, `DEPTHS`).
+- **Tests:** `ai_direct` (32), `ai_recipe` (14), `ai_vision` (5) are new; `ai_providers` walks every new schema variant;
+  `ai_looks` checks the helpers and pins the hashes of the two look schemas; `media_core` and `media_doc` cover
+  `ai.depth`.
+- **Mutation check:** 21 mutants of the key rules; 20 fail a test. They cover `requires`, the stale reasons, revert while
+  the user uses a material, the free index, lines over all, the speed epsilon, the area guarantee and its cut-in-line
+  rule, depth `keep`, locks, the recipe drift guard, the flash fix, budget scaling, toAi curve names, vision boxes and
+  JPEG-only parts, and `ai.depth` in `normalizeEntry`. The survivor is equivalent: an unknown depth written by
+  `visionChanges` is also dropped by `normalizeEntry`, whose own mutant fails.
+
+**Decisions where the design is silent**
+
+- **Material hash.** Stale checks and revert compare `CH.entryHash(entry)` = `hashJSON` of the stored entry.
+  `material.put` stores entries normalized, so this is the §3.12 definition of `parts/mix.materialHash`. E does not
+  call the stub, whose constant `'00000000'` would make every material look unchanged.
+- **Areas and targets.**
+  - `lines[i]` wins over `all` field by field, even when the line's value cannot be used: that line gets neither.
+    `camera` is merged slot by slot.
+  - A cut area merges `all`, `lines[0]` and `cuts[0,0]` onto the cut; `season` and `avoid` are never cut pins.
+  - Cut pins are written under the plan cut's `pinKey`, as `ui/fields.writePath` does. Area checks use the cut key.
+  - A special cut (title, intro, outro, gap) is sent as line 0 with `lineId: null`.
+  - In a whole-video brief, `all.avoid` turns the parts off (the existing kind `avoid`, a filter), because
+    `work:avoid` is refused. `all.season` and `work.season` make one work season change.
+  - Windows: a line area applies `all` to the lines of each window. A whole-video brief split into windows applies
+    its work pins only in the first part (the prompt says so). Ids are `w<k>:s<s>:<path>`, materials `w<k>:mat:<i>`.
+- **Values.** Parts are "no change" only when the target's own pin holds them (as in `looks`). Values compare with
+  what the target shows (its pin, else the plan). `from` is the target's pin, else the first cut the line pin reaches.
+  `ornaments: ['none']` / `filters: ['none']` pin the count 0. A run-scope ornament named among `ornaments` is taken
+  as the atmosphere.
+- **Materials.**
+  - `use.slot` other than `none` places the material where its kind goes (§5.11 table); the given slot word is not
+    trusted further. `use.s = −1` means every understood brief of the window.
+  - The season fix is added when the season in effect is a specific season other than the material's (not under
+    `any`), unless the answer set one. It is skipped in cut areas, where it would leave the area.
+  - A remake keeps the id, kind, name and おまかせ setting; `by` becomes `ai`.
+  - `fromAi` details: the seed is `hash32('material', name)`; particles and glyphs spin from any angle (`rot [0, 360]`);
+    `appear: 'always'` is `{ start, none, 0 }`, other appears last 0.5 s; `index`/`word` oscillators step 0.3; a
+    composite's `dur`/`each` become `[d, d]` (−1: the kind's default range); a variant's `dur`, `each`, `curve` (its
+    `ease`) and `order` become shared autos, and a param named like a shared param is one too; a media layer's border
+    is `stroke × 1000` du and its shape maps roundRect → round, ellipse/ring/dot → circle, arc → arch, else round; a
+    ground without a leading fill gets its first fill moved to the front, or a default fill.
+  - Fitting order: the flash fix first (alpha movers off `beat`/`ramp` to `sine` ≤ 1 Hz, hz ≤ 3 / speed knob max,
+    amp ≤ 0.35 / amp knob max, appear ≥ 0.15 s), then counts × 0.9 (at least 1) until the recipe fits, then the last
+    layer, then the last part. Anything still wrong gives `null` and `ai.warn.matEmpty`.
+- **Curves.** `curveFromAi` lives in `ai/recipe` (materials need it; `ai/direct` re-exports it). It reads the §1.4 #1
+  names too: slowFastSlow / fastSlowFast (ramps), easeIn / easeOut / easeInOut (cubic), hold (holdThenDash), snap
+  (dashStop). A ramp without numbers takes edge 0.1 and peak 4. `cameraFromAi` also accepts a move word as `shot`.
+- **Media.**
+  - `opts.media` is `true` (the library) or a list of asset ids (the ones whose bytes are on this device).
+  - The accept rule reads the part's `media` spec; a param that is not of type `media` yet (today's
+    `photoPan.image`) accepts any. Params the part does not have are skipped.
+  - A kind mismatch warns with the planner's existing string `warn.media-kind` (`{ detail: name }`).
+  - `use: 'none'` clears exactly the pins §11.6.1 names; the AI's param pins of those parts (a blur) stay, unused.
+  - `depth` with `use: ''` pins the depth of the media part the target shows as `as` (the ground's `photoPan` or a
+    pooled `myMed…` ground, the atmosphere's `mediaLayer`, every `photoFrame`); `fill` has none; `keep` does nothing.
+- **Vision.** Image parts are passed through as given, in either JSON spelling (`inline_data`/`mime_type` or
+  `inlineData`/`mimeType`); only inline JPEG parts count. The prompt lists `n=k: photo | video (frames)` and the tag
+  vocabulary. `use` and the depth `reason` stay on the change for the review; neither is stored (`ORDER.assetAi` has no
+  field for them).
+- **Review text.** Direct rows use `ai.ch.value` with `where` as a label tuple; `CH.describeAgg(list, t)` gives the
+  aggregate row; `null` reads 自動 and a `none` part なし. `logEntry` records a material's hash as stored after the put.
+- **Cost.** Area membership is checked with `CH.inArea`, the rule of `planner/areas.inArea` with the area's scopes in a
+  Set, so a large review stays linear (the per-scope `paths.isUnder` loop took 3/4 of the time). `toCommands` and
+  `markStale` resolve each area key once per call. Measured on 100 area lines (a loaded machine): the request builds
+  in about 1.4 ms; validation costs about 10 µs per change it produces (an answer that sets 11 settings on 100 lines
+  gives 1,100 changes in about 12 ms; three settings, about 3–4 ms). §7.2's "< 2 ms for 100 lines" holds for the
+  request and for answers that change a few settings; nothing here runs per frame.
+
+**Deviations**
+
+- `CH.GROUPS` keeps its four v2 groups; the §5.6 groups are `CH.AREA_GROUPS` (`materials`, `area`, `cuts`,
+  `outside`). `ui_ai.test.js` (F) asserts that every `GROUPS` key has a heading in `ui/ai_controller` `GROUP_ORDER`,
+  which F owns. `groupOf` returns the new groups already.
+- `ai/looks.helpers` also holds `flashChange` (the direct tool's `work.flash`) and `PALETTE_SCHEMA` (§5.4 names
+  `LOOKS.PALETTE_SCHEMA`); keeping it inside `helpers` leaves the other exports unchanged.
+- A gone area marks its rows `left` (区画から外れました), not `gone`, whose text is about cuts.
+- Additive exports beyond §3.13: `ai/direct.MEDIA_USES`; `ai/recipe` `AI_MATERIAL_MEDIA`, `MATERIAL_SCHEMA_MEDIA`,
+  `USE_SLOTS`, `curveToAi`, `materialChange`, `slotFor`, `freeIndex`, `whereOf`, `assetOf`, `mediaSent`, `mediaText`,
+  `MAX_MEDIA`; `ai/changes` `AREA_GROUPS`, `STALE_WHY`, `describeAgg`, `entryHash`, `keyInUse`, `inArea`; `ai/vision` `MAX_ITEMS`,
+  `MAX_FRAMES`, `USES`, `DEPTHS`; `core/media.DEPTHS`; `ai/catalog.catalog` takes an optional fifth argument
+  `{ mine, cutOrnaments }` (defaults keep v2's lists).
+- `ai_looks.test.js`: the drift guard that lists every change kind now names `value`, `material` and `media` as covered
+  by `ai_direct` and `ai_vision`.
+
+**Requests to other packages**
+
+- **F** (`ui/ai_controller`, `ui/ai_review`, `ui_ai.test.js`):
+  - add `materials`, `area`, `cuts`, `outside` to `GROUP_ORDER` with their headings (`ai.grp.*`), then fold
+    `CH.AREA_GROUPS` into `CH.GROUPS` (one line in `ai/changes`), or let the test read both;
+  - `itemKey` of the new log items: `{ material: id }` → `'m:' + id`, `{ media: id }` → `'a:' + id`;
+  - pass `resolveArea(areaKey)` (the sent brief's ref through `AREAS.resolve`) to `markStale`, `toCommands` and
+    `apply`; dispatch with `['undo.aiArea', { area, n }]` (`['undo.ai', …]` for the whole video); give `logEntry` the
+    `areas` and `instructions`;
+  - run the windows of one request in order and merge them into one review; on `bad_request` retry once with
+    `allowMaterials: false` and show `ai.materialsFailed`;
+  - aggregate rows through `CH.describeAgg`; a material's dependents (`requires`) disabled while it is unchecked;
+  - vision rows: `change.depth`, `change.reason` and `change.use` next to the caption (`media.ai.depth`).
+- **C:** keep `materialHash(entry)` equal to `hashJSON` of the stored (normalized) entry, so it agrees with
+  `CH.entryHash`.
+- **B / G:** the direct tool pins only the media params a part has: `fit`, `blur`, `veil`, `clipIn`, `speed` (§11.5.6)
+  and `depth` (§11.9.1, an enum with `auto`).
+- **Lead:** the vision `reason` has no field in `doc.media`. If the asset page should show it after the review, the
+  entry format needs `ai.reason` (≤ 60).
+
+**Strings wanted**
+
+None new. `param.depth` and `opt.depth.*` (§11.9.6, package F) are read through `t.has` and fall back to the key until
+F adds them.
+
+## Lead: the AI's depth reason is stored
+
+Package E kept the vision `reason` on the review change only. §11.9.5 shows it on the asset page, so it is now stored:
+- `core/media.AI_ORDER` ends with `'depth', 'reason'`.
+- `normalizeEntry` keeps `ai.reason` only as text next to a valid depth.
+- `entryProblems` refuses a reason over 60 characters or one with control characters.
+- `ai/vision.aiOf` writes the cleaned reason with the depth.
+
+Tests: `media_core.test.js` (normalize and problems) and `ai_vision.test.js` (stored with the depth, dropped with an
+unknown depth, field order).
+
+## v2.1-G.1
+
+G.1 of DESIGN_2_1 §8.7: images and videos at runtime, and the single-file project package. Pure: `core/sha256` (L0),
+`media/sniff`, `media/isobmff`, `media/matroska`, `media/samples`, `media/palette` (L1), `export/unzip`,
+`export/package` (L5). Host: `media/host/probe`, `media/host/session`, `media/host/store` (L6). Changed:
+`export/zip` (`addBlob`, Blob parts, a faster CRC-32), `export/host/sink` (`write` takes a Blob), `ui/project_io`
+(IndexedDB v2, the device media store, pruning, the package save and open, routing by sniffing), `build.py` and
+`tests/build_test.py` (layers). H.1's four files (`export/webm`, `export/subtitles` and their tests) were checked out
+from the lead branch unchanged, as the lead asked (no merge).
+
+**What works now.** A photo, animation or video imports (sniff, SHA-256 + CRC-32 in one pass, probe, poster and
+12-tile filmstrip, IndexedDB) and is added to `doc.media`. The AssetStore gives frame-exact video frames (WebCodecs
+fed from our own sample tables) and still tiers; the engine does not draw media yet (B.3, G.3), and `ui/boot` passes
+`assets: null` until G.4 wires the store in. 保存 / 名前を付けて保存 write a `.mojipv` holding the project, every asset,
+the posters and the song; opening one restores all of it, the song included (it is stored again by its sha1, so
+`ui/boot` re-links it as usual).
+
+**Tests.** Node: `sha256`, `media_demux`, `media_samples`, `media_palette`, `unzip`, `package`, `zip` (+),
+`project_io_media` (new: the pure parts of the project_io additions). Browser: `media_import.py`, `package_io.py` (both
+in the built app page, under its CSP, through the app's own `ui/project_io`). Frame exactness is checked in G.1
+already, through the real AssetStore: every frame of the counter videos (VP9 WebM 30 and 60 fps, VP9 MP4 25 fps,
+VFR, rotated; H.264 where the browser encodes it), in order, shuffled, and in a software export fork, shows its own
+code. Mutation checks: 20 mutants across the pure modules and the build rules, and one of the store (it hands out the
+previous frame), all caught; two tests were strengthened on the way (the EPS rule is now tested directly, and pixels
+counting by their alpha in the palette).
+
+**Measured** (this machine: 4 shared CPUs, load 5–12; headless Chromium):
+- Hashing plus CRC-32 of a 64 MB file in the page: 127 MB/s through `crypto.subtle` (files ≤ 256 MB) and 109 MB/s
+  streaming (our SHA-256), under that load. CRC-32 alone went from 358 to 674 MB/s with slicing-by-8; our SHA-256
+  alone runs at ~120 MB/s in Node. The §11.5.12 "≥ 150 MB/s" row is plausible for files up to 256 MB on an idle
+  mid-range laptop, but the streaming path (> 256 MB) is bound by our SHA-256; see open items.
+- Exact frames through the store: 135 decodes (three passes of 45 frames, 192×108 VP9) in 170–220 ms, 270 at 60 fps
+  in about 410 ms, including every seek of the shuffled pass.
+
+### Decisions where the design was silent
+
+- **Committed fixtures without ffmpeg** (the constraint of this run): `tests/helpers/make_media_fixtures.js` writes
+  them byte by byte: ISO BMFF boxes, EBML elements and GIF blocks are real; codec payloads are placeholders except a
+  VP9 key frame's uncompressed header, and `anim.gif` is a real GIF (LZW data) that browsers decode. `MAKE.txt` holds
+  the generator line, the ffmpeg recipe each file could be replaced with, and the expected tables (computed by the
+  generator from what it wrote, not by the demuxer). `media_demux.test.js` rebuilds everything in memory and fails if a
+  committed byte differs. In the browser the placeholder clips are refused as `media.err.codec` (no decoder for the
+  codec here) or `media.err.broken` (a decoder, bad data); `media_import.py` asserts exactly that.
+  - Contents beyond §11.8.1's list: `bframes.mp4` also has an empty edit and one pre-roll frame; `frag.mp4` uses trun
+    version 1 with negative composition offsets; `rot90.mp4` uses `co64` and `colr nclx`; `clip.mov` has a `wide` box,
+    `colr nclc`, a constant `stsz` and a sound track; `laced.mkv` is H.264 + Opus with a last frame in a BlockGroup
+    with BlockDuration; `av1.webm` has a Segment and Clusters of unknown size.
+- **SampleTable.** `n` counts shown frames; the decode-order arrays may be longer (pre-roll: fed, never shown).
+  Equal presentation times get distinct chunk timestamps (+1 µs in presentation order), so decoder output always maps
+  back to one sample. The last frame's duration is its own sample duration, else the median. `vfr` ignores the last
+  frame and allows 1.5 ms or 5 % around the median (so 33/34 ms WebM steps are constant rate). `runFor` steps back one
+  GOP for a leading picture of an open GOP (shown before its key frame).
+- **MediaError** lives in `media/samples` (both demuxers and the host use it). Its codes are the §11.7.9 ones plus
+  `container` (§11.4.3 laced video, and Matroska content encodings), `tooBigVideo` (> 4 GB), `tooFast` (> 120 fps) and
+  `audioOnly` (a file with sound only: `ui/project_io` sends it to the song).
+- **Demuxers.** `Movie.warnings` is added (`rotation` for a matrix that is not a quarter turn; `codec:<fourcc>`).
+  VP8/VP9 tracks get no `description` (vpcC is not decoder input; the §11.4.3 wording lists it). ctts and trun
+  composition offsets are read signed in both versions, as writers use them. Matroska also accepts H.264 and HEVC
+  tracks (`V_MPEG4/ISO/AVC`, `V_MPEGH/ISO/HEVC`, CodecPrivate as description); any element that runs past the end of
+  the file is `broken` (a cut download), and `parse(…, { tracksOnly })` stops after Tracks for routing. The VP9 level
+  table goes to level 52 (4K60), one step past the §11.4.3 list.
+- **Matroska times (lead decision):** when a track has a DefaultDuration and every block time is within 0.5 ms of
+  i · DefaultDuration (i counted from the first frame, in presentation order), the frames start exactly there;
+  otherwise the stored milliseconds stay (VFR). Tested at 24, 29.97, 30 and 60 fps over 40 s of frames and on
+  `export/webm` output (no off-by-one), and on a VFR file (times kept).
+- **sniff** returns three more kinds for routing: `audio` (WAV, MP3, AAC, FLAC, Ogg, M4A), `package` (a ZIP whose
+  first entry is the package mimetype) and `zip`.
+- **Probe.** Posters are drawn upright (`rot` applied), WebP, 320 px on the long side; the filmstrip is one WebP sprite
+  of 12 tiles, 160 px on the long side each, key frames spread evenly (frames, for animations). The thumbs record is
+  `{ v: 1, poster, strip, tiles }` (tiles added). The mediaIndex track record holds codec, description, coded and
+  displayed size, rot, colour, alpha, audio, container and mime, so a stored video's entry is rebuilt without a second
+  scan. Import results carry `notes` (`animFirstFrame`, `alphaIgnored`, `bigFile`, `quota`, `memoryOnly`) and `crc`.
+  An SVG keeps its file name as the entry name; the stored bytes and mime are the PNG.
+- **AssetStore** (`createMediaStore`): it takes `entries(id)` (the document's metadata; w, h, kind and anim come from
+  it) besides the §11.3.5 options, and adds `check(ids)` (load presence so `has`/`info` answer at once) and
+  `forget(id)` (drop caches after a relink or a clear). `ready()` items may carry `{ px, blur }` for stills (see the
+  request to B). `MediaFrame.w`/`h` are the displayed size of the image returned (a tier, a poster, a video frame), and
+  posters and stills have `rot` 0. Blur is quantized to 0, 2, 4, … 128 device px; the crossfade between two levels is
+  left to the drawer. `fork()` prefers software decoders. A missing or failed asset gives `null` (the placeholder).
+- **Sessions.** Up to the target the queue holds 8 chunks; after the target, one chunk at a time once the decoder has
+  taken the previous ones, so frames after the target are not output (and closed) before they are asked for: with
+  HOLD = 3 an overshoot would force a seek. Frames at or after the frame being decoded are kept; `pin()` keeps an
+  export batch, `hint()` is the preview look-ahead. No decoder progress for 10 s counts as a decode error (the §11.4.4
+  retry rule then applies).
+- **project_io.** DB v2 adds `media`, `mediaIndex`, `thumbs`; `putMedia` returns `{ stored, reason }`, and a failure
+  (no IndexedDB, or `QuotaExceededError`) keeps the record in a per-tab Map. `persist()` is asked once, at the first
+  media put. Pruning keeps an asset used by a kept work, the current document or this tab's `usedMedia`. `clearDevice`
+  clears the three stores and the Map. `save()` follows the file handle's kind, `saveAs()` writes a package (the picker
+  offers the light .json second, and choosing it writes the light save), `saveLight()` is new; `fileState()` gives
+  the header tooltip data. `openFiles` routes by `routeOf` (text formats by extension, the rest by bytes, containers by
+  their tracks). Until G.4 sets `app.media.importFiles`, `openFiles` imports media itself (`importMedia`: one undo
+  step, `media.dup`, `media.full`, the `media.err.*` toasts). Opening a light .json or a package shows
+  `media.missingOpen` when assets are not on this device. A package's song is stored as a File named after
+  `doc.song.name`, so the existing relink path decodes it.
+- **Package.** `layout()` returns every entry in the FROZEN order (text entries carry their text), the manifest and
+  the exact file size (`archiveSize` mirrors `export/zip`). Thumbs are packed only for the media that are packed; the
+  song only when its sha1 is the document's and is 40 hex digits. `manifestProblems` returns `'code: detail'` strings
+  (`newer` → `pkg.err.newer`, others → `pkg.err.invalid`) and also checks file order and that project.json comes last.
+  `mimetypeProblem` checks the first entry by its CRC and size (plus a sniff of the first 64 bytes when opening).
+- **Unzip.** The end record is read from the last 22 bytes when there is no comment (so only headers are read), else
+  from the 65,557-byte tail. An unsafe name refuses the whole archive (`bad-entry` → `pkg.err.invalid`); bytes that are
+  no ZIP at all → `pkg.err.notPackage`; a cut file → `pkg.err.truncated`. `Entry.limit` (the directory start) is added.
+- **Memory sink** keeps Blob parts by reference and accepts them only as appends (overwriting inside a Blob part
+  throws; nothing writes that way).
+- **build.py**: besides the §11.3.1 rules, `engine/*` may not depend on `media/*` (the design says it never does).
+
+### Deviations (with reasons)
+
+- **Fixtures** are generated, not made with ffmpeg (no ffmpeg here; see above). The ffmpeg recipes are in MAKE.txt.
+- **`tests/browser/ui_flows.py`** (package F's file): its IndexedDB helper opened `mojipv-v2` at version 1, which throws
+  VersionError once G.1 upgrades the database to 2. One edit: it now opens the current version. No check changed.
+- **`package_io.py`**: "a frame of the preview identical to before" is skipped until G.3 (the engine draws no media
+  yet), as §8.7 says. The 4.1 GiB run (`--long`) needs 8.5 GB of OPFS; the local headless profile's quota is 969 MB,
+  so it reports a skip there. ZIP64 sizes are also checked in Node with a fake 4.1 GiB Blob (`zip`, `package` tests).
+- **No APNG / animated WebP is generated** in the browser (canvases cannot encode them); `anim.gif` covers animation
+  decoding, the ImageDecoder table and the store.
+- **Re-probing** (§11.2.9, `pv < PROBE_V`) is not implemented: PROBE_V is 1 and `entryProblems` refuses pv < 1, so no
+  entry can need it yet. It is one call to `importFile` on the stored blob when PROBE_V moves.
+- **The 80 % quota warning** and a package toast without a song have no string yet (below); `quotaNote()` exists, and a
+  package without a song reports with `io.saved`.
+
+### Requests to other packages
+
+- **B (B.3):** (1) `mediaAt` items for still nodes should carry `px` (the node's `want.px` at that output scale) and
+  `blur`, so `mediaReady` → `assets.ready()` decodes exactly the tier the export draw asks for; without them the store
+  decodes the largest tier any `frame()` asked for, else full size. (2) `MediaFrame.w`/`h` are the returned image's
+  displayed size: scale FitRect by `w / meta.w`. Posters and stills are upright (`rot` 0); video frames come in coded
+  orientation with the track's `rot`. (3) `frame()` returns `null` for a missing or failed asset (placeholder in the
+  preview; the export throws). (4) The store does not crossfade blur levels.
+- **G.4:** set `app.media.importFiles` (the §11.7.2 flow) — `project_io` defers to it; create the store in `ui/boot`
+  with `createMediaStore({ blobs: app.io.mediaBlobs, entries: (id) => entry of app.doc.media, canvas })` and call
+  `check(ids)` on load and `forget(id)` after a relink or clear; show `quotaNote(await io.storageInfo())`; progress
+  toasts from the `onProgress` of `savePackage`/`openPackage` (and an AbortController for [中止]); the header file
+  line from `io.fileState()`; ≡ › ファイル › 軽い保存 → `app.io.saveLight()`; the import notes as toasts.
+- **F:** the strings below; the one-line `ui_flows.py` edit above.
+- **H (H.2):** `sink.write` takes a Blob; `zip.addBlob(name, blob, { crc })`; a memory sink keeps Blob parts append-only.
+- **Lead:** `build.py` has the extra engine → media rule; DESIGN §11.4.3 could list VP9 level 52 and the Matroska
+  snap rule.
+
+### Strings wanted (key, ja, en)
+
+- `media.err.container`: 「この動画の入れ物（コンテナ）の形式には対応していません: {name}」 / "This video's container layout is not supported: {name}"
+- `media.err.tooBigVideo`: 「4GBより大きい動画は読めません」 / "Videos larger than 4 GB cannot be read"
+- `media.err.tooFast`: 「120fpsを超える動画は読めません」 / "Videos above 120 fps cannot be read"
+- `media.warn.storage`: 「この端末の保存容量の{p}%を使っています（{size}）。作品ファイルに保存してください」 / "{p}% of this device's storage is in use ({size}). Save a project file"
+- `io.savedWhatNoSong`: 「写真{p}・動画{v}」 / "{p} photos, {v} videos"
+- `media.note.animFirstFrame`: 「このブラウザではアニメの最初のコマだけを使います」 / "This browser uses only the first frame of the animation"
+- `media.note.alphaIgnored`: 「1920×1080 より大きい透明動画は、透明なしで再生します」 / "Transparent videos larger than 1920×1080 play without transparency"
+
+### Open items
+
+- The streaming hash path (files over 256 MB) runs at about 100–120 MB/s here, below the 150 MB/s row. A faster
+  streaming SHA-256 (unrolled rounds) would close it; `crypto.subtle` cannot stream, and a tree hash instead of the
+  plain SHA-256 would change the AssetId, which needs a D§9.4 decision.
+- H.264 counter videos and H.264 decoding are exercised only where the browser encodes H.264 (Chrome CI:
+  `MV_REQUIRE_H264=1` fails the run without it).
+## v2.1-D
+
+Package D, the planner (DESIGN_2_1 §8.4), with the media additions of §11.2.6 and §11.5.9 and the depth resolution of
+§11.9.2. Plan v2 (§2.7): `v: 2`, the camera slots of every cut, `cut.rig`, `rigs`, `grounds[].zoomed`,
+`feat.sectionStart` and `media`.
+
+- **New:** `planner/camera` (L2): the `motion.speed` slot and its scaling of motion parameters (§4.3), the automatic
+  shot, zoom, curve and follow of every cut (§4.7), carry between the cuts of one line (§4.5.7), and the rig runs with
+  `rig` and `rig.curve` (§4.6). Tests: `camera_planner`, `planner_areas_season`, `planner_materials`, `planner_media`.
+- **Changed:**
+  - `cast`: the FROZEN slot order with `motion.speed` after `text.*` and the four `cam.*` slots after `lens`, each on
+    its own slot stream, so no part choice moves. Line conditions (§4.9): the effective season (line pin, else the
+    look's) and the line's avoid list feed the pools, which are cached per condition. The cast cache is keyed by
+    `registry.base ?? registry`, then by `registry.version` (the last 4).
+  - `choose`: a part of the line's own season weighs `SECTION_SEASON` ×2.5; the look-only factors are cached per season;
+    `noMedia` gives derived media grounds the weight 0.
+  - `params`: media params are checked against `doc.media` (`media-missing`, `media-kind`, the value falls back to
+    `''`); `depth: 'auto'` is resolved (`depthRule`, `textCoverage`); a frame in front never sits `behind` (an
+    automatic `place: 'behind'` becomes `side`, §11.9.3).
+  - `tracks`: segments also break where the effective season changes and where the media source of a pinned ground or
+    atmosphere changes; grounds, atmospheres and seams read their line's conditions; a line with its own season has an
+    atmosphere chance of at least 0.85; derived media grounds never go to a segment under 3 s or to the title card;
+    motions replaced by a seam follow the cut's speed.
+  - `plan`: `sharedText` uses `registry.baseVersion ?? registry.version`; `matTerms` and `mediaTerms` go into the cut
+    fingerprint, the encoding key and `groundFp`; `plan.media`; `material-bad`; `grounds[].zoomed`.
+  - `features` (`sectionStart`, `sectionOf`), `segment` (the specs of the line slots `season` and `avoid`), `encode`
+    (`rig` in the cut; canonical curve and shot objects print as plain decisions), `explain` and `fields` (every new
+    slot, its why codes and alternatives, `media.pin`, `media.pool`, `why.media.depth.<rule>` as the auto text of a
+    depth field).
+
+**Goldens.** `node tests/update_golden.js --check` reported `plan_hashes.json: DIFFERS` and `frame_hashes.json:
+matches`. The plan golden was regenerated: all 240 entries change because every plan now has the Plan v2 fields (`v: 2`,
+five camera slots per cut, `cut.rig`, `rigs`, `grounds[].zoomed`, `feat.sectionStart`, `media: {}`). The registry
+version stays `1e6ef40c`. No part choice changed:
+- `camera_planner` checks a digest of every v2 choice (parts, their parameters and sources, cut windows, grounds,
+  atmospheres, seams, warnings) over corpus(4) with the stub and the synthetic registry against the digest of the
+  planner before v2.1;
+- before regenerating, 720 plans (corpus(20) × stub, synthetic and catalog) were compared value by value with the old
+  planner: every v2 value was identical.
+
+The regenerated `frame_hashes.json` is byte-identical.
+
+**Decisions where the design was silent**
+
+- A pin wins over `amount.camera` 0, as pins win elsewhere. `amount.camera` below 0.1 turns off the automatic shot,
+  and below 0.15 the automatic rig; pinned shots and rigs still apply.
+- Carry is skipped when there is nothing to carry (A's shot ends on the frame, as `wideHold` does) or nothing to carry it
+  into (B's shot opens on the frame). It needs A and B on one line, across a hard cut or a text-scope transition, and B
+  on a preset shot.
+- A pinned rig still gets `amp = q2(0.4 + 0.6·A)`, with ×1.25 (≤ 1.3) on the last chorus. `rig.curve` is read at a
+  run's first cut.
+- Rig runs also split around each title, interlude and outro cut and where the resolved rig pin changes. A title reads
+  the intro row. An interlude or outro cut reads its own row, unless its section is intro, interlude or outro. The last
+  chorus is the last run of lyric cuts in a chorus section. An empty document has one run `k` with rig `none`,
+  `[0, duration]`.
+- The previous run's winner (before its own runner-up rule) is avoided, as the grounds do (D§4.16.6). `none` is exempt.
+- `cam.shot` recency reads the previous cut's final shot (×0.1) and the natural shots of the 3 cuts before (×0.4); only
+  preset strings count as choices (a custom shot object is not one).
+- Line `season` is a line value that cascades (line pin, else the work's season). `work:season` stays the look's. A
+  line `avoid` list is the line's pin, else `[]`. A pinned part on the avoid list is used without a warning.
+- `material-bad` reads `registry.problems` in the format of `## v2.1-C`: `'<kind>/myMat<x>: <code>'` gives
+  `{ id: 'm<x>', code }`; `'<kind>/?: <code>'` gives id `''`. `REG.extend`'s own `'<kind>/<key>: <message>'` gives the
+  code `def`. `'ground/<myMed key>: media-key'` is not about a material and gives nothing.
+- A derived ground of a pooled asset (`mine.media === true`) adds its asset `mine.id` to `plan.media` and to the
+  fingerprints. A material adds the ids in `mine.media`. An id the library does not hold warns `media-missing`.
+- **Depth:**
+  - How a media part uses its picture comes from `spec.use` when a spec names it. Otherwise a ground is `ground`, a
+    run ornament is `layer`, and a cut ornament is `frame`.
+  - A pin of `depth: 'auto'` is no pin.
+  - The AI's suggestion is read from `doc.media` entry `ai.depth`, only when it is one of anim, front, back or still.
+  - The cast cache key of the media library includes each entry's id, kind, anim, dur and `ai.depth`.
+- `motion.speed` scales only unpinned parameters, each coerced through its part's own spec, with `pfrom: 'rule'`.
+  Explain names this with the rule `speed`.
+
+**Deviations**
+
+- **hints.focus → text coverage.** §11.9.2 rule 5 reads the text boxes of `hints.focus`. Those come from layout,
+  which the planner does not have (fonts and measuring belong to the engine). `PA.textCoverage` estimates them
+  instead: a lyric cut's text covers about 1.5 / cells of the frame, times the square of its `text.scale`. A segment's
+  coverage is the duration-weighted mean over its lyric cuts. A busy still photo is one with coverage ≥ 0.35.
+- **§7.3 targets for shots.** The FROZEN weights of §4.7 give less than §7.3 asks, measured over corpus(8):
+  - impact cuts → `snapZoom`: 54 % with the catalog, 52 % with the synthetic registry (target ≥ 60 %);
+  - framing lens → `none`: 62 % and 62 % (target ≥ 70 %);
+  - repeated lines sharing their shot: 34 % and 30 %, against 25 % and 18 % for unrelated cuts (target ≥ 80 %).
+
+  The tests hold the direction and size of each effect. The constants are for the lead's tuning, step (b) of §7.5.
+- **Shot stability.** §4.7 says inserting a line changes ≤ 4 other cuts' shots, and a reroll ≤ 3. Because a shot
+  weighs ×0.1 against the previous cut's *final* shot, a change can occasionally travel down a run of cuts that
+  alternate between two presets. Measured with line starts pinned:
+  - catalog: 1 of 108 insertions changed more than 4 other cuts (worst 5);
+  - synthetic: 3 of 108 (worst 7);
+  - rerolls: 1 of 249 changed more than 3 (worst 5).
+
+  `planner_stability` holds these bounds (≤ 5 % of insertions, worst 7; with automatic timing ≤ 15 %, worst 9; rerolls
+  ≤ 2 %, worst 5).
+- **Planning speed** (below): the §8.4 targets (cold ≤ 10 ms, re-plan ≤ 5 ms) are not met. The planner before v2.1
+  did not meet them either on this machine. v2.1 adds 10–20 % to a cold plan and up to about 15 % to a re-plan.
+
+**Measured** (`project_long`, best of several runs, on a shared machine that other work was also using; the planner
+before v2.1 on the same machine in brackets; ms):
+
+| registry | cold plan | re-plan after an edit |
+|---|---|---|
+| stub | 28–30 (23–26) | 6.7–7.2 (5.6–5.9) |
+| catalog | 41–44 (36–40) | 6.8–7.5 (6.1–6.8) |
+
+`planner_determinism`'s own speed test, run alone, measured a re-plan of 5.9 ms and a cold plan of 27.5 ms (budgets 10
+and 60 ms). Most of the added time is encoding and hashing (`encodeCut`, `feed`, `planHash`), which grows with the
+number of slots (five more per cut). The camera itself (`decideCamera`, `carry`, `rigs`) takes about 3 %. Two fixes
+brought v2.1 down to these numbers:
+- `plan` now declares every `ctx` field that is filled late or on first use, so `ctx` keeps one shape while the cuts
+  are cast. Before, the first plans of a session were up to twice as slow;
+- `cast.decideValue` no longer `delete`s the trace-only fields of a decision, which left the object slow for encoding.
+
+Before these fixes, with the machine under heavy load, the cold test measured 55–80 ms against its 60 ms budget; the
+planner before v2.1 measured 35–37 ms at the same time. After the fixes it measures 27–37 ms. CI runs the Node tests
+one file at a time.
+
+**Requests to other packages**
+
+- **B (engine):**
+  - read `plan.rigs` (an empty document has one run `k`, rig `none`);
+  - read `p.depth` (never `'auto'` in a plan);
+  - read `p.carry` on `cam.shot` and `grounds[].zoomed`.
+  - A media part may name its use in its spec (`use: 'ground' | 'layer' | 'frame'`) when kind and scope do not tell.
+- **C (materials):** keep the `registry.problems` format above; `material-bad` parses it.
+- **F (UI and strings):**
+  - add the strings below;
+  - `whyParts` could translate the section and season params of `cam.section`, `rig.section` and `season.line`, which
+    are key names today.
+- **Lead:**
+  - tune the §4.7 constants (above);
+  - the `diff` view has no readout for the camera slots yet.
+
+**Strings wanted** (key, ja, en)
+
+- `whyRule.motion.speed`: いつもの速さ / The usual speed
+- `whyRule.cam.curve`: カットの勢いと雰囲気から / From the energy of the cut and the mood
+- `whyRule.cam.follow`: カメラワークと動きの量から / From the camerawork and the motion amount
+- `whyRule.rig.curve`: 区画のカメラの標準 / The section camera's own curve
+- `val.refs`: {n}件 / {n} parts
+
+## Lead: integrating D after E
+
+With D's planner, the plan resolves rig, motion.speed and media depth, where E's tests had assumed null or auto. By §5.5
+("a change that equals the current value is not made"), an instruction that asks for the value a line already has makes
+no change. `ai_direct.test.js` therefore asks for values the fixture plan does not hold: rig `leanTilt`, where rc's
+automatic rig is `slowSwell`, and depth `still`, where the video ground's automatic depth is `back`. A new assertion covers
+the equal-value rule for a rig. The review text of a planned speed now reads the number
+(「動きの速さ: 100% → 50%（2行）」) where it used to read 自動.
+
+## v2.1-B
+
+Package B of DESIGN_2_1 §8.2: the engine side of camerawork and curves, the media engine hooks (B.3), sound in MP4
+without an AAC encoder (B.4), and the engine part of §11.9 depth (added by the owner during the run).
+
+### What was built
+
+- **Curves in the engine** (§3.11, §4.1–§4.3). `engine/scene/behave`: `ease` takes any curve (`CV.fn`); the shared
+  `flow` spreads the stagger as `W(rank / maxRank) · maxRank · each` when it is not linear; `dwell.curve` warps the hold
+  over `[rest, out]` through `BH.warped` (a behaviour wrapper that is the behaviour itself for a linear curve).
+  `engine/render/seam`: `seam.curve` warps `u` before `mix`. `parts/kit`: a lens without `warp: false` has every
+  behaviour it makes warped by `lens.curve` over `[a, b]`; the framing lenses of `parts/lens/glide` read `p.curve` as
+  their move's own ease (`warp: false`, and each part's `curve` auto is the ease it had in v2); `beatZoom` and
+  `impactKick` are locked to the beat and the sung start (`warp: false`, the curve row `advanced`, not for the AI).
+  New kit exports: `K.curve`, `K.warp`, `K.warped`, `K.CURVES`, `K.aimBox`, `K.frameBox`.
+- **Shots** (§3.10, §4.4–§4.5): new `engine/scene/shot` (L3): aims (`frame`, `point`, `block`, `reading`, `emph`,
+  `first`, `last`, `word:k`, `line:k`, `glyph:k`, every text box floored at 0.06 × short), anchors (`a rest out b sung
+  mid end emph word:k beat:n`, numbers, `dt`), framing with the safe and bleed clamps, the reading path, key tracks
+  (zoom in log space, the curve of the key moved into, jumps for keys < 1/120 s apart), `runShot` in the LENS phase
+  after the lens (lens deltas stay screen-constant: `x = X + x_lens / Z`), and the follow lean as a post-solve pass.
+  `build.js` resolves the shot before the lens, so lenses see `env.target` and `env.shot` (the track).
+- **Rigs** (§4.6): `frame.rigIndex` / `rigAt` (cached by plan identity; binary search; the blend window of a non-hard
+  seam may start before the run), `cutCamera`, `composeCamera`, `cameraAt` (cut camera inside, rig outside, then the
+  impulses), `rigCamera` (grounds between cuts keep moving), `depthCam`.
+- **Renderer**: the gap camera, the text-seam camera blend, ×1.25 oversampling of zoomed static ground rasters (and of
+  still paint rasters on zoomed grounds), `FrameStats` `fz` in the camera. **Facade**: `registry` getter and the
+  effective registry (`MIX.registryFor(base, doc.materials, doc.media)`; forks keep it), `shotTrack(cutKey)`,
+  `viewAt(t)`, sample plans and thumbnails of kind `shot` / `rig`. Arrange parts got their `cam` field (§3.11 table).
+- **Media (B.3, §11.3.6–§11.3.7, §11.5.1–§11.5.6)**: `sb.media` (every field checked, FitRect at build, a timed node
+  refuses a static layer cache), `svc.media` → `env.media`, `scene.media`; `shapes.drawMedia` (plain and isolated
+  paths, mirror neighbours only when they show, the soft copy first, rotation turned back into coded pixels, veil and
+  tint, mask, placeholder in the preview); the recorder logs `drawImage('media:<id>@<m>#<index>', …)` so op hashes
+  show the source frame; renderer `layers: 'ground'`, `dc.t`, `dc.backdrop` (overlay footage is `sceneOnly`),
+  `FrameStats.media { drawn, waiting }`; facade `mediaAt`, `mediaReady`, `fork({ assets })`, the export exactness throw
+  (`EngineError('media-not-ready' | 'media-missing')`), thumbnails ask for posters only; kit `K.media`,
+  `K.mediaParams`, `K.MEDIA`, `K.runKenBurns`. New `tests/helpers/fake_media.js` (the AssetStore contract with synthetic
+  stills, sample tables at any fps, VFR and rotations; `MediaFrame.index` in the op hash; `testParts(K)`: one test part
+  per `use`, for the tests and the lab until G.3's parts land).
+- **Depth (§11.9.1, §11.9.3)**: `depth` in `K.mediaParams` (enum `auto anim front back still`, `ai: true`, for `use`
+  ground, frame and layer), its meaning in `K.media` (layer, camera factor 1 / 1.15 / 0.5 / 0, Ken Burns, blur + 3 and
+  veil + 0.15 for `back`, the front readability guard, `still` drawn outside the seam composite), the per-node view
+  through `depthCam` in `draw.js`, and the FROZEN `K.depthCam(cam, f)`.
+- **B.4 (§13.4)**: `export/host/mp4` tries AAC-LC 192 kbps, then Opus 160 kbps in MP4; `probe().audioCodec` and
+  `Result.audioCodec`; `codecs.audioList` (tests) overrides the order; `schedule.preflight` notes `opus-audio` (info)
+  and reports `no-audio-codec` only when neither encodes. Both export loops (`mp4`, `png`) await
+  `e.mediaReady(t0 + i / fps, { signal, fps, scale })` through `job.ready(i, signal)`; a store that cannot deliver
+  stops the export with `ExportError('media', …, { id, name, code })`.
+- **Lab** (`ui/lab.js`): `#shot:<key>@<aspect>&t=…`, `#rig:<key>@<aspect>&t=…`, `#media:<kind>/<key>@<aspect>&asset=
+  fixture:<name>&t=…` (fake store, test pages only), a `materials` source (C's `sampleDefs` re-keyed `myMatS…` →
+  `myMatz` + lower case; `info()` lists only the materials there), `__lab.thumb`, and `perf({ camera, materials })`.
+- **Tests**: new `shot_engine.test.js` (15), `media_engine.test.js` (23); additions to `frame`, `lens_filter_seam`,
+  `conformance` (every shot and rig × 7 aspects × h/v × 6 texts × 24 times), `facade`, `export_math`; browser
+  `determinism.py` (camera presets; project v21 with materials), `perf.py` (camerawork + materials row),
+  `parts_gallery.py` (camera presets and their tiles in every aspect; the media mode), `contact_sheet.py`
+  (`--kind shot|rig`, self-check sheets), `export_check.py` (Opus track, its length and level, the pre-flight note,
+  the media wait and the `media` error in both loops). Key tests were mutation-checked (composeCamera's rig offset,
+  the blend window, the dwell warp, the lens warp wrapper, the zoom clamp, the Opus order, the pre-flight note, the
+  export loop's wait): each mutant failed its test.
+
+### Goldens
+
+`frame_hashes.json` is byte-identical. `plan_hashes.json` was regenerated (`node tests/update_golden.js`): all 240
+corpus plans changed because the glide lenses' shared `curve` auto is now their v2 ease (§3.11) instead of `linear`.
+Checked: with those five `shared` lines removed, the old plan hashes match exactly, and the frames with them are the
+v2 frames. The registry version is unchanged (1e6ef40c): shared autos are not in its signature.
+
+### Decisions where the design was silent
+
+- **Impulse shake and the seam camera use the framing zoom.** `composeCamera` divides the shake impulse by the framing
+  zoom `fz` = shot zoom · rig zoom (not by the full zoom, which includes the lens's own zoom), and the text-seam camera
+  blend log-lerps only `fz` (the rest linear). Both reduce exactly to v2 without shots and rigs, which the frame
+  goldens require (a full-zoom division changed v2 frames with punch lenses).
+- **Zoom clamp while interpolating.** `poseAt` keeps Z in [0.9, 3] between keys too, not only at keys.
+- **Near jumps.** Keys less than 1/120 s apart jump (§4.5); a segment shorter than 0.1 s (pushWord's `emph` key right
+  after `a` on a line that starts with its emphasis) is a near jump; the continuity test allows it only within 0.15 s of
+  `a`.
+- **`auto` depth without the planner.** The plan should always hold the resolved value (§11.9.2). If `'auto'` reaches
+  the engine, `K.media` uses layer → front, frame → anim, a video ground → back, a still ground → anim.
+- **The front guard** (§11.9.3): a ground or overlay at `front` that covers ≥ 40 % of the frame gets alpha ≤ 0.45 and
+  `comp: 'screen'`, unless the part passes a comp other than `over` itself (then it is kept); photo frames are exempt.
+- **`still` across seams.** A still medium is drawn once on the target, outside the composite, when it belongs to the
+  ground both sides share; a text seam leaves grounds under the composite anyway.
+- **`mediaAt` items for stills carry `px` and `blur`** (G.1's request): `mediaAt(t, { scale })` adds the long side and
+  blur (device px) the draw will ask the store for (else the last frame's scale; none before a first frame). The
+  media lists are remembered per scene fingerprint (`renderer.mediaEntries`), so `mediaAt` never keeps or rebuilds a
+  scene after its first build. Blur is fixed per node, so the store's blur levels need no crossfade.
+- **Opus rate.** The Opus config uses the song's `sampleRate`: songs are decoded at 48 kHz (DECODE_RATE), so this is
+  the design's 48000, and a buffer at another rate cannot be fed at the wrong speed. `codecs.audio` (one codec) still
+  works next to `codecs.audioList`.
+- **`ExportError('media')` detail** is `{ id, name, code }` (the store's `err.id`, the entry's name, the store's code).
+- **Placeholder**: the engine draws the checkerboard only; any text on it is the UI's.
+- **Additive fields**: `poseAt` also returns the aim centre `ax`/`ay`; `sb.media` takes `cam` (0..2) and `still`;
+  `K.MEDIA.DEPTHS` (with `auto`; `core/media.DEPTHS` is E's list without it); `viewAt` includes the shake in x/y;
+  `shotTrack` times are absolute; `FrameStats.mediaError` is internal (the facade turns it into the throw);
+  `renderer.lastScale()`.
+
+### Deviations (with reasons)
+
+- **§4.5.4 check line**: the bleed limit formula gives 0.24 W at Z = 1.5, not the "± 0.28 W" the text states. The formula
+  is implemented; the number in the text is an arithmetic slip.
+- **Reading comfort**: readAlong's hops on fast singing move the aim faster than 1.5 frame widths/s. The continuity test
+  holds them to 6 W/s (no jumps); how they read is a visual-QA item.
+- **Files outside §8.2** (all as the lead asked or to keep the suite green): checked out unchanged from the lead branch:
+  `docs/DESIGN_2_1.md`, `src/parts/mix.js`, `src/core/registry.js`, `tests/node/{mix,registry,contract}.test.js`,
+  `src/media/`, `src/core/sha256.js`, `src/export/zip.js`, `src/export/host/sink.js`, `build.py`,
+  `tests/build_test.py`. One edit in C's `tests/node/mix.test.js`: its second module world installed the recording
+  `K.media` only when the kit had none, so with B's kit it recorded nothing; it now always installs the recorder
+  (no check changed). `tests/www/export_check.js` (harness): the VP9 fallback no longer forces Opus, so the default
+  AAC → Opus order is what the MP4 checks exercise. `tests/browser/contact_sheet.py` loads `project_v21.json` and
+  `fake_media.js` into the lab page.
+- **perf.py camerawork row** uses a stand-in until D's planner makes camerawork: a shot preset per cut in turn and a
+  rig run per 4 cuts (blended ±0.25 s), plus C's sample material of each kind in every slot it fits.
+
+### Measured (this machine: 4 shared CPUs, load 3–5 from the other packages' tests; headless Chromium)
+
+- `mediaAt` on project_long (Node): 0.06 µs per call without plan media, 1.9 µs with plan media and no media nodes,
+  2.2 µs with a video ground on every segment and a photo frame on every cut (budget 50 µs; the test asserts it).
+- perf.py at 720p (best of 2 runs): basic p50 11.2 / p95 22.3 ms, vertical 13.4 / 22.3, lrc 4.7 / 15.3, long
+  12.1 / 25.0. project_long with camerawork: p50 12.3 / p95 27.8 (behave 0.10 ms, draw +0.25 ms). With camerawork and
+  the materials: **behave + solve p50 0.10 ms** (≤ 0.8), frame p50 17.1–18.7 ms, p95 32.1–39.6 ms over five perf.py
+  runs (the best of 2–3 fresh engines each; the limit is 33.4 ms: one run passed, four failed). The materials alone
+  take p50 17.0 / p95 32.4; most of it is post (+3.9 ms mean): the filter-stack material (4 passes) on every cut.
+- Export check (local Chromium, no H.264, no AAC): the default export and the forced one carry an Opus track (`dOps`,
+  stereo, 48 kHz, pre-skip 312); decoded length 2.5135 s for 2.5 s (± 25 ms); RMS 0.212.
+
+### Requests to other packages
+
+- **D**: the §2.7 plan fields as the engine reads them: `cut.slots['cam.shot' | 'cam.zoom' | 'cam.curve' |
+  'cam.follow']`, `plan.v = 2`, `plan.rigs[]` (`t0`, `t1`, `rig`, `curve`, `blend` window or null), `cut.rig`,
+  `grounds[].zoomed`, `plan.media`, and the media parts' `p.depth` resolved (never `'auto'`). Observation for the
+  pools: on a wide one-line layout (centerAnchor at 16:9, the block ≈ 0.74 W) `settle` (fill .58 → .66) and
+  `driftOff` (.50 → .52) sit at the 0.9 zoom floor, and `pushWord` / `snapZoom` reach the 3× limit on a short emphasized
+  word. When the planner makes camerawork, perf.py's stand-in (lab `perf({ camera: true })`) can use the planned plan.
+- **C**: `env.mixShare` = min(1, 400 / Σ `mine.cost.particles`) per cut scene (300 for grounds), as asked. `K.media`
+  returns −1 for a `src` that is not in `plan.media`, so fixed-src media layers need their ids in `plan.media` (D's
+  `extra[key].media`). The mix.test.js edit above. The filter-stack sample material costs about 4 ms of post per frame
+  here when it is on every cut.
+- **G.3**: build the media parts on `K.media` / `K.mediaParams` / `K.MEDIA` / `K.runKenBurns` / `K.depthCam`; the lab's
+  media mode and parts_gallery.py pick up every part with a param of type `media` (photoPan's `image` must become one).
+  The four test parts can stay in `fake_media.js` for the tests. **G.1/G.4 (store)**: `ready()` gets
+  `{ id, m, px?, blur? }`; a rejection should carry `code` and `id` (used in `ExportError('media')`). The stage calls
+  `engine.mediaAt(t)` (tiers at the last frame's scale) for `assets.want`.
+- **F**: `ui/output.ERROR_KEYS` gains `media: 'err.exp.media'` (string below).
+- **H (H.2)**: the WebM and kit loops call `job.ready(i, signal)` (or `e.mediaReady(t, { signal, fps, scale })`) before
+  each frame, as mp4 and png do; `Result.audioCodec` is available.
+- **Lead**: DESIGN_2_1 §4.5.4's check line (0.24 W), §11.3.7's `mediaAt` item shape (`px`, `blur` for stills) and
+  §13.4's Opus `sampleRate` could be updated to match.
+
+### Strings wanted (package F)
+
+| Key | ja | en |
+|---|---|---|
+| `err.exp.media` | 写真・動画「{name}」を読めないため、書き出しを止めました。つなぎ直してからもう一度書き出してください。 | The export stopped: the photo or video "{name}" could not be read. Relink it and export again. |
+
+### Open items
+
+- perf.py's camerawork + materials row is borderline here: behave + solve is far within budget (0.10 ms), but the frame
+  p95 (32.1–39.6 ms) straddles twice the 16.7 ms hard limit on this loaded machine, driven by the materials' post cost
+  (the same project without materials: p95 25–29 ms). To be re-measured on CI (Chrome).
+- Visual QA: readAlong's fast hops; the zoom floor and ceiling cases above.
+- Only the fake store has driven the media engine so far; the real store (G.1) and the catalog media parts (G.3) meet
+  it in G.3 / G.4.
+
+## v2.1-F
+
+Package F of DESIGN_2_1 §8.6: the UI of §6 (the instruction block, the board, the area review, the inspector rows, the
+curve widget, the keyframe editor, areas, マイ素材, keys and accessibility) and the §7.4 browser flows. F now holds
+`i18n/strings.js`.
+
+**Built**
+- **New modules** (L7): `ui/curve_widget` (選択肢, the plot with its handles, かんたん, カスタム), `ui/shot_editor` (キーフレーム:
+  rows, markers, ◆, the drag inversion helpers), `ui/material_page` (the material page, the マイ素材 rows and menus),
+  `ui/ai_board` (区画ごとに指示).
+- **Changed:**
+  - `ui/fields`: the §2.3 scope table (camerawork, speed, rig, line season, avoid, curve params); the curve, shot, rig
+    and partRefs widgets; the pages of §6.5 (行 › 演出 and 区画のカメラ, カット › 動き and AI, 要素 › カメラ, 全体 ›
+    マイ素材); `areaLabel` / `areaTitle`.
+  - `ui/widgets` (shot, rig, partRefs; curve from `ui/curve_widget`) and `ui/inspector` (the rows, the shot and part-ref
+    pickers, キーフレーム, the material page, この区画 / この行をAIに頼む…, the area header).
+  - `ui/part_browser`: the マイ素材 tab with ＋ AIで作る and its inline form, material menus, and the thumbnail key with
+    `rhash`.
+  - `ui/ai_panel`, `ui/ai_review` and `ui/ai_controller`: the direct and material tools; targets, groups, aggregates,
+    dependencies, windows, the bad_request retry and board drafts.
+  - `ui/selection` (`sel.area`, `areaSel`), `ui/timeline` (area bands, band options in the listbox, ◆), `ui/stage`
+    (markers, drag inversion through `engine.viewAt`), `ui/palette` (`%`), `ui/lyric_editor` (§ selects the heading's
+    area), `ui/boot` (the registry comes from `engine.registry` when the engine has it), `ui/style.css` (one v2.1 block
+    at the end) and `i18n/strings`.
+- **Tests:**
+  - Node: `ui_fields` (+15), `ui_ai` (+8, two of them against the real `ai/direct`, `ai/recipe` and `parts/mix`),
+    `ui_selection` (+3). `tests/helpers/fake_engine.js` gains `registry`, `shotTrack` and `viewAt`.
+  - Browser: `ui_flows` gains six flows (curve, keyframes, areas, ai_area, ai_board, materials) and `ai_edit` moves to
+    the instruction block. `ui_layout` checks the new pages at every viewport and in a 288 px panel. `csp` and
+    `i18n_pages` walk the new screens.
+- **Mutation check:** 25 mutants of the key rules, and every one fails a test. They cover:
+  - selection: the area check and `areaSel`;
+  - the controller: the dependency cascade, disabled rows at apply, the drafts cap, the bad_request retry, 反映済み,
+    log item keys, `boot.soon` and the material request's `sent`;
+  - keyframes: the drag inversion and the key-to-track order;
+  - the curve widget: knob bounds, Delete, 位置の動きだけ, ease names in words and the speed scale;
+  - マイ素材: uses, problem texts, derive problems and the strict media test; the one-line area title.
+
+  Four tests were made stronger on the way: a superset area, a missing material, the exact knob removed and the problem
+  text.
+
+**Decisions where the design is silent**
+- **Selections and areas:**
+  - An area selection is `{ level: 'line', ids, area }` and opens the 行 page with the area header, even for one
+    line. `S.validate(sel, plan, doc?)` keeps `area` only while the area still has exactly those lines. Without
+    `doc`, a well-formed line-level ref is kept.
+  - `view.highlight` may be a list of line ids (an area); the stage and the drawer read both forms.
+  - Area titles are 「サビ1（5行）」. The whole video, a cut and a one-line set (「4行」) name no count.
+  - The board's rows are the song sections (else the headings, else the blocks), then added and drafted areas. Sections
+    without lines (イントロ, 間奏) are rows too, since their special cuts are in the area.
+  - A board draft is a one-line textarea that wraps and grows, so 120 characters show whole. Enter never adds a line
+    break.
+- **Curves and keyframes:**
+  - Dragging a preset, an ease or a ramp turns it into its data within the same gesture. A speed-step curve draws its
+    speed fill in knot units, through the handles.
+  - A keyframe edit pins the whole Shot at the page scope. Editing from なし starts from 落ち着く's keys.
+  - Markers use `engine.shotTrack`. Its keys (in time order) are matched to the data keys by their estimated times.
+- **マイ素材:**
+  - The knobs (量 …) bake their multipliers into the recipe with `core/recipe.withKnobs`, over the recipe as the page
+    opened. One drag is one undo entry.
+  - この素材を使わない is the kind's filter deny list, like この部品を使わない.
+  - [確かめる] lists `parts/mix.derive`'s problems in words (`mat.why.<code>`). [反映] needs a recipe that derives into a
+    part.
+  - The マイ素材 tab hides grounds derived from pooled photos with `extra[key].media === true`.
+- **Keys and the AI tab:**
+  - Sub-pages without a tile grid (キーフレーム, マイ素材, 使わない部品's kinds) leave the arrows and Enter to their controls:
+    `picker.move` / `picker.pick` run only when the top page has them. ＋ AIで作る is never picked or tried on.
+  - Arrowing onto 対象 › 区画 without an area opens the list with the focus on its first area.
+  - A question of the direct tool shows under the instruction box, per area, not in the message line.
+  - The controller has no stand-in for `ai/direct` / `ai/recipe`: a build without them says `boot.soon`.
+  - `GROUP_ORDER` adds `materials`, `area`, `cuts` and `outside`. Their headings are the design's `ai.grp.*` keys;
+    `ai.group.*` stay for the v2 groups.
+  - The resolver given to `markStale` / `toCommands` / `apply` returns `undefined` for a key it cannot read, so no
+    area check is made for it.
+- **Two fixes found by the new checks:**
+  - The lyric gutter was built with every entry at the top when the editor was hidden (another step) and not rebuilt
+    when it showed again. A render while hidden now waits until the editor shows.
+  - `.w-seg` now includes its border in its width. The 向き control stuck out 2 px on line pages.
+
+**Deviations**
+- The §7.4 "area direct" flow wants "preview renders the material" and "マイ素材 tile exists". Both need B's
+  `engine.registry`. `ui_flows` checks them when the engine has it and otherwise checks 全体 › マイ素材 (from the
+  document).
+- The §6.8 bands in the play bar's lane are not drawn: `ui/playbar` is not F's (request below). The drawer's 曲 row has
+  them.
+- The layouts give panels of 312, 320 and 352 px. The 288 px end of §7.4 is checked by narrowing the open panel through
+  the CSSOM in `ui_layout`.
+- `validate(sel, plan)` has an optional third argument.
+- axe-core is not available. Roles, names and focus order are checked in the flows instead:
+  - radiogroups with roving tabindex, the area listbox and the timeline's band options;
+  - tri-state aggregate checkboxes (`aria-checked="mixed"`) and `aria-describedby` on stale and needs-material rows;
+  - focus return from sub-pages, and the keyboard-only paths of every new flow.
+
+**Requests to other packages**
+- **Lead (`ui/playbar`):** draw the area bands in the lane, and accept a list in `view.highlight`.
+- **E:** fold `CH.AREA_GROUPS` into `CH.GROUPS`. `ui_ai.test.js` reads both until then.
+- **B:** `engine.registry`, `shotTrack(cutKey)` and `viewAt(t)` are read when present (`ui/boot`, `ui/shot_editor`,
+  `ui/stage`). `fake_engine.js` has their shapes. `ui_flows`' `FAKE_TRACK` steps aside by itself when the engine has
+  `shotTrack`.
+- **G.4:** the G.1 strings wanted are in `strings.js`. `mineFor` already hides pooled media grounds.
+
+**Integration notes**
+- From the lead branch, by path and without a merge:
+  - `docs/DESIGN_2_1.md` (§11.9);
+  - C and E: `src/parts/mix.js`, `src/ai/`, `src/core/media.js`, `src/core/registry.js` and their tests (`mix`,
+    `ai_direct`, `ai_recipe`, `ai_vision`, `ai_looks`, `ai_providers`, `media_core`, `media_doc`, `registry`,
+    `contract`).
+  - `ai_panel` injects `ai/direct` and `ai/recipe` through `MV.has`, so the direct and material tools run against E's
+    modules. The Node tests use them with faked answers in E's schema.
+- **G.1:** its one-line `ui_flows.py` change (IndexedDB opened without a version) is applied by hand.
+- **Fakes to replace:**
+  - `tests/helpers/fake_engine.js` (`registry`, `shotTrack`, `viewAt`) and `ui_flows`' `FAKE_TRACK`;
+  - `ui_flows`' `ai_board` / `ai_area` answers, which follow E's frozen schema.
+- **Strings added:**
+  - the F block (curves, keyframes, areas, the instruction block, the board, the area review, マイ素材);
+  - §11.9.6 (`param.depth`, `opt.depth.*`, `why.media.depth.*`, `media.ai.depth`);
+  - `mat.why.*` (C's derive codes and core/recipe's codes);
+  - G.1's `media.err.container` / `tooBigVideo` / `tooFast`, `media.warn.storage`, `media.note.animFirstFrame` /
+    `alphaIgnored` and `io.savedWhatNoSong`.
+
+## Lead integration: B and F
+
+### B with D's planner: the five failing Node tests
+
+B (engine) was applied from its worktree commit onto the lead branch, which already had D (planner). Each package kept
+every test green alone; together, D's automatic camerawork is drawn by B's engine for the first time.
+
+- **`ai_direct` "camera mode"** — the code is right, the test asked for a value the plan already holds. B gave the
+  arranges their `cam` field (§3.11): rb~8's layout `slantBand` is `'gentle'`, so D caps its automatic closeness at
+  0.7 / maxFill(pushWord) = 0.7 / 0.88, which is 0.8 in steps of 0.01 (§4.7). The answer's `closer: 0.8` equals it, and
+  §5.5 says "a change that equals the current value is not made". The test now asks for 0.9 and asserts that 0.8 gives
+  no zoom change (the rule the lead already applied for rigs, `## Lead: integrating D after E`).
+- **Golden frames, and B's two tests that compared with the v2 frames.** With the camerawork on, the frames change by
+  design (§7.5 step (b), §9: documents without new pins differ from v2 only by the automatic camerawork). The checks
+  keep their meaning by comparing like with like:
+  - New golden `tests/golden/frame_hashes_v2.json`: the v2 frames, a byte copy of `frame_hashes.json` before this
+    regeneration. It is frozen: `update_golden.js` renders the corpus projects with the camerawork pinned off, compares,
+    and in a plain run writes nothing at all when they differ (§7.5: the frames that must stay equal are asserted before
+    the goldens are regenerated); `--v2` rewrites it on purpose.
+  - The switch is `corpus.withoutCamerawork(doc)`: the pins `work:cam.shot` and `work:rig` = `'none'` (§2.3 scopes, a pin
+    wins, D's decision). `amount.camera = 0` is not the same thing: in v2 it already sets the lens amplitudes (beatZoom's
+    follow) and the punch impulses; with it, only 3–25 of the 40 frames per project stayed equal.
+  - `frame.test.js`: new test "with the camerawork pinned off, every corpus project renders the v2 frames" (all four
+    projects, and the plan really has no shot and no rig). B's "default lens.curve, seam.curve, dwell.curve and flow give
+    the v2 op hashes exactly" runs on the camerawork-off document against `frame_hashes_v2.json`, and additionally
+    checks that the same defaults with the camerawork on give `frame_hashes.json`.
+  - `media_engine.test.js` "frame hashes of the media-free fixtures are unchanged": with an asset store and no media,
+    basic and vertical give the golden frames, and with the camerawork pinned off the v2 frames.
+  - Mutation check: a `withoutCamerawork` that pins only `cam.shot` (the rigs stay on) fails all three tests; a changed
+    hash in `frame_hashes_v2.json` makes `update_golden.js` stop without writing and `--check` report DIFFERS.
+- **Goldens regenerated** (`node tests/update_golden.js`; registry `catalog 1e6ef40c`, unchanged; `frame_hashes_v2.json:
+  matches` first). Why they changed:
+  - `plan_hashes.json`, all 240 plans. Compared value by value with the planner before B (the lead branch without B)
+    over corpus(20) × 3 aspects (18,556 cut decisions): no part choice and no other slot moved; only `cam.shot` (8,742
+    cuts), `cam.follow` (6,467), `cam.zoom` (1,963), `cam.shot`'s `p.carry` (1,349), `lens.p.curve` (8,491) and
+    `grounds[].zoomed` (143 plans). The causes are B's metadata that D's planner reads: the glide lenses' `curve` auto
+    is their v2 ease (§3.11, was `linear`), lens `frames: true` (the `none` weight + 4, §4.7) and the arranges' `cam`
+    ('none' pools, the 'gentle' pool and zoom cap).
+  - `frame_hashes.json`: basic 40, vertical 40, lrc 39 and long 32 of 40 frames differ, all by the camerawork (the
+    camerawork-off test above renders every one of the old frames).
+  - **Provisional.** §7.5 step (b) — the visual QA of the automatic camerawork and rigs with `contact_sheet.py` (12 seeds
+    × 8 moods × 3 aspects) and the tuning of the §4.7 constants, D's open numbers included — comes after this
+    integration. These two goldens are regenerated now so that CI checks the integrated engine, and will be regenerated
+    again, on purpose, after that tuning.
+
+### F (UI) applied
+
+- F's worktree commit was applied with `git apply --3way` from its base, without the files F had copied unchanged from
+  the lead branch (DESIGN_2_1.md, `parts/mix`, `ai/*`, `core/media`, `core/registry`, their tests, the two pages).
+  F's section `## v2.1-F` is placed before this one.
+- **One conflict**, the module header of `ui/ai_panel`: both sides kept — F's new dependencies (`ui/ai_board`,
+  `planner/areas`, `ui/fields`, `ui/selection`, `i18n/t`) and the lead's `ui/ai_thinking` (the running line's orb
+  `AT.orb` and the preview HUD `AT.mountHud`; no `.ai-spin` element is left). The other overlaps merged cleanly and were
+  checked by hand: `ui/stage` (tap mode returns from pointerdown before F's marker drag, and the click returns early),
+  `i18n/strings` (the tap keys and the new `tap.ready` text next to F's block), `ui/style.css` (the tap pad, `--ai-a` /
+  `--ai-b`, the orb and HUD block and `.ai-hud-text` in the shared ellipsis rule, next to F's v2.1 block; ux-16's
+  one-rule test passes), `tests/browser/ui_flows.py` (the tap mouse sub-flow, the HUD checks of ai_prep and ai_align,
+  G.1's `indexedDB.open` without a version, F's own `FLOWS +=` line, `flow_ai_edit` on the instruction block and no
+  `edit_answer` helper). F did not touch `ui/tap`.
+- **The real interfaces now that B landed:** `ui/boot` reads `app.reg` from `engine.registry`, `ui/shot_editor` calls
+  `engine.shotTrack(cutKey)` and `ui/stage` inverts drags with `engine.viewAt(t)`, all without presence checks.
+  `tests/helpers/fake_engine.js` keeps the three for the Node tests. In `ui_flows`: `FAKE_TRACK` stands aside and the
+  keyframes flow requires the engine's own track; the area-direct flow requires `engine.registry`, finds the material
+  in `registry.mine('ornament')`, waits until the plan puts it in the area's atmosphere and checks that a frame in the
+  area draws more paints with it than after the undo (§7.4 "preview renders the material"); the materials flow requires
+  the マイ素材 tile. All 32 flows pass.
+
+### Requests closed
+
+- **E → `CH.GROUPS`.** `AREA_GROUPS` is folded into `ai/changes` `GROUPS` (`materials: ['material']`, `area`, `cuts`,
+  `outside`, §5.6 "GROUPS +="); `groupOf` reads one table. `ui_ai.test.js` asserts that `GROUP_ORDER` and the groups
+  are the same set, that the four area groups are groups, that `AREA_GROUPS` is gone, and two `groupOf` answers.
+- **F → the play bar.** `ui/playbar` draws the area bands (`planner/areas.bands`, the timeline's memo rule) in the
+  strip above the cut blocks, the selected area's band in the selection ink; a double-click on the strip selects that
+  area (`S.areaSel`, 詳細 opens), as the drawer's band does; `view.highlight` may be an array (an area's lines) through
+  the timeline's `highlighted`. `ui_flows` `areas` reads the lane's pixels (the selected band, the other band, the cuts
+  of a highlighted area) and double-clicks a band; both checks fail when their drawing is removed.
+- **B → export errors.** `ui/output.ERROR_KEYS.media = 'err.exp.media'`, plus `errorParams(err)`: the asset's name from
+  `ExportError('media').detail` ('—' when the library no longer names it). `ui/boot` passes it. String `err.exp.media`
+  as requested. `ui_output.test.js` checks the key, the words with a name, the fallback and other codes.
+- **D → strings and なぜ.** `whyRule.motion.speed`, `.cam.curve`, `.cam.follow` and `.rig.curve` now have D's texts
+  (F had written placeholders under the same keys); `val.refs` is new (`{n}件` / `{n} part|{n} parts`). `ui/fields
+  whyParts` turns D's params into words: `section` through `songSec.*`, `season` through `fld.season.*`, the `key` of
+  `cam.lens` / `cam.arrange` through the part label, and a shot or rig key through its preset name. spec-5's check
+  that Japanese text has no Latin letters now allows the song-section names (Aメロ, Bメロ, Cメロ are Japanese); new
+  assertions cover each translation, and removing any one of them fails the test.
+- **Strings wanted** in the sections of A to G.1 were checked one by one against `i18n/strings` (39 keys: C's
+  `mat.why.*`, G.1's media and storage texts, D's, B's, and §11.9.6): all present with the requested words, except that
+  `val.refs` is written with the English plural.
+
+### perf.py "long+camera+materials": the real cause, and what is left open
+
+- **The stand-in camerawork is gone.** B's row gave every cut a shot and every 4 cuts a rig until D's planner made
+  camerawork. It now uses the planner's automatic camerawork of project_long (5 shots in the window) under a pinned rig
+  (`slowSwell`: the project's own two rig runs draw none), as §7.4 says ("auto camerawork"). A first version pinned
+  `amount.camera` to 1 as well; that also raises v2's punch impulses and beatZoom amplitude (the only thing it adds) and
+  cost about 1.5 ms of p95, so the project keeps its own amount.
+- **Where the time goes** (local Chromium, 720p, the p95 of the per-frame minimum over three fresh-engine runs; taking one
+  sample material out at a time; the plan and the rest unchanged):
+
+  | Row | p50 | p95 |
+  |---|---|---|
+  | every sample material | 16.4–16.6 | 31.9–32.8 |
+  | without the arrive material (blur track 0.1 em) | 15.6–16.0 | 25.5–26.0 |
+  | without the dwell material (a `glow` beat oscillator) | 13.7–13.8 | 28.2 |
+  | without the filter stack (grainFilm + edgeShade, 4 passes) | 12.8–13.2 | 27.5–29.1 |
+  | without the ornament and the atmosphere | 15.3 | 31.5 |
+  | the catalog alone | 11.9 | 23.9 |
+
+  - The filter stack costs what its two filters cost as two separate filter slots (post mean +3.4 ms against +2.9 ms;
+    grainFilm alone +1.3–1.6, edgeShade alone +0.1–0.6): its chain has no extra pass or copy to remove. It adds a flat
+    ~3.5 ms to every frame of every cut, because the row gives every cut a filter slot with `when: 'always'`.
+  - The frames that set the p95 are glyph frames: cut re~8 (`edgeBleed`, six glyphs of about 480 px em at 720p). The
+    arrive material's blur and the dwell material's glow put each glyph on the sprite path (D§4.19.5: the path follows
+    the pose), whose quads are 746–775 px here (the 1.6 em box plus the blur reach, rasterized at most 512 px and drawn
+    scaled): its entrance frames cost 37–53 ms (14 ms without the arrive material) and its hold 31–58 ms (13–27 ms
+    without the dwell material). A filtered draw of such a quad costs about 1.3 ms on this software canvas (an
+    unfiltered 1:1 blit 0.27 ms); `willReadFrequently`, ImageBitmap sprites, an opaque target and the prepare following
+    the playhead made no difference. The catalog does the same (inkRise on every cut is heavier than the arrive
+    material; taking the depart material out makes the row slower, because the catalog departs there blur).
+  - Measured at preview quality with the adaptive preview, the p95 stays the same: its levels (half-resolution filters,
+    draft paints, DPR only above 720p) do not touch glyph sprites.
+- **Before / after** (p95; limit 33.4 ms): B's stand-in 32.1–39.6 ms here (B); the lead branch 4163b5b (camerawork at
+  amount 1) 32.6 here, 36.7 on CI (Google Chrome); now 33.1–35.0 here over five perf.py runs (each the best of three
+  fresh engines; 33.6 in the last complete CI sequence), with another agent's browser tests sharing the CPUs part of the
+  time. **Still over the limit, so nothing after 4163b5b is pushed.**
+- **Open, for the lead (a design decision):** §7.4 asks this row for "frame ≤ 2× budget" with the heaviest allowed
+  material in every slot, and §5.8 allows exactly what costs the time (glyph blur up to 0.6 em, glow up to 1, stacks of
+  6 passes); on a software canvas the frozen glyph path cannot draw that on giant text within 33.4 ms. Nothing here is
+  raised, skipped or loosened. Options, none taken:
+  1. change the glyph path (D§4.19.5): draw the body of a glowing glyph on the direct path, as the text style `glow`
+     already does (measured −1.5 ms p95), and draw blurred sprites with their quad trimmed to the ink plus the blur reach
+     (not measured; about half the area). Both change v2 frames with those poses, so the v2 goldens move;
+  2. give this row a budget that says what §7.2 guarantees for materials (behave + solve ≤ 0.8 ms p50, the particles
+     through `mixShare`, the passes of a stack) and report its frame times, or fail on p50 only;
+  3. fill only the slots the plan has (the row now creates a filter slot on every cut, which the planner never does for
+     this mood): −1.5 to 2 ms, not enough for CI on its own.
+## v2.1-H.2
+
+H.2 of DESIGN_2_1 §8.8: editor-ready output. New `export/host/webm` (透過動画（WebM）, §13.5) and `export/host/kit` (the
+Filmora kit, §13.9); changed `export/host/mp4` (the export job's `backdrop`, `layers`, `assets` and `replan` options, the
+MP4 output reused by the kit, `probe().vp9Codec`), `export/schedule` (`FORMATS`, `pickVp9`, `alphaBitrate`,
+`estimateWebmBytes`, `backdropFor` for `webmAlpha`, `kitOptions`, `kitBase`, `kitFolder`, `kitFiles`, `layerDiffs`, the
+§13.10 pre-flight codes), `export/host/sink` (`openDirectory`, `createDirSink`, `canDirectory`, the WebM save type),
+`audio/wav` (`encodePcm16`, `pcm16Header`, `pcm16Data`; the export down-mix moved here), `ui/project_io` (`lrcText` is
+`export/subtitles.lrc(app.plan, app.doc)`). Tests: `tests/node/export_kit.test.js` (new: both hosts and the folder sinks
+with fake WebCodecs), `export_math.test.js` (+9), browser `webm_check.py` and `kit_check.py` (new) with the harnesses
+`tests/www/webm_check.js` and `tests/www/kit_check.js`. The shipped pages are rebuilt (they contain the new modules);
+no golden changed. The lead decisions are followed: LRC in song times, SRT relative to the export range.
+
+### What was built
+
+- **exportWebm** `({ engine, doc, audio, sink, signal, onProgress, canvas?, codecs? })` → `{ bytes, frames, ms, name,
+  blob?, codec, audio, audioCodec }`. The job renders with the backdrop `clear` (`backdropFor('webmAlpha', …)`). The song
+  (音声を入れる on) is encoded to Opus first, all of `[t0, t1)` (`audioFrames(N)` samples, 5 s per step with a cancel
+  check), and its packets go to `createWebm` before any frame, with the encoder's OpusHead as `codecPrivate` (H.1's
+  request); `audio: null` otherwise. Per frame: `job.ready(i)` (B's media wait; a store failure is `ExportError('media')`),
+  render, one `getImageData` readback, the colour frame (`RGBA`, the straight bytes; the encoder discards alpha) and the
+  alpha frame (I420: Y = the alpha bytes, U = V = 128, full range; one reused buffer), both at `ts(i)`/`frameDur(i)`, key
+  frames forced on both every 2·fps, each encoder waited on at the queue limit. The chunks are paired by timestamp in
+  the output callbacks (either encoder may lag) and written as one BlockGroup each; `key = colour.type === 'key' &&
+  alpha.type === 'key'`. Codecs: the first of `pickVp9(w, h, fps)` that encodes (VP9 profile 0 at the level of
+  `media/samples.vp9Level`, then VP8); none → `ExportError('no-vp9')`. Out-of-step streams → `ExportError('encode')`.
+- **exportKit** `({ engine, doc, audio, dir, signal, onProgress, assets?, canvas?, lib?, codecs? })` → `{ files: [{ name,
+  kind, bytes }], ms, audio: 'aac' | 'wav' | 'none', frames, bytes, folder, codec, overlayCodec, name?, blob? }`.
+  - The files and their names are `kitFiles(doc, plan, env)` (one source for the UI's summary and the export): the
+    main MP4, `_overlay.webm`, `_bg.mp4`, `_green.mp4`, `.srt`, `.lrc`, `.wav`, `README_Filmora.txt`, in §13.9's order.
+  - One pass: job A (the document) and, with the green screen, job G (`look.set backdrop chroma` through
+    `core/commands.reduce`, `replan`). Both forks get one `assets.fork()` when the caller passes its AssetStore (disposed
+    at the end). Per frame: both jobs' media waits, then main (doc backdrop), overlay (`clear`), background
+    (`layers: 'ground'`, the main MP4's encoder config), green (job G, quality `max`) — each its own surface, encoder and
+    queue limit. Then the WAV (no AAC), SRT (`SUB.BOM` + `srt(plan, { t0, t1 })`), LRC (`lrc(plan, doc)`), README.
+  - Audio: the main MP4 tries AAC only (`codecs.audioList` in tests, Opus always filtered out: the kit never relies on
+    Opus in MP4, §13.4); without AAC the MP4 is silent and `<base>.wav` holds exactly `audioFrames(N)` frames from `t0`.
+  - `dir` (a DirSink) gets one file sink per file; `dir: null` makes memory sinks and one store-only ZIP
+    `<base>_filmora.zip` (`zip.addBlob`, the CRC read from each Blob in 8 MB slices; entries at the root, local time
+    stamp); the caller downloads `blob` as `name`, like `exportVideo`'s memory result.
+  - Progress `{ i, N, eta, phase }`: once per frame with `phase: 'video'`, then `'files'`, then `'zip'` (memory only).
+  - Cancel or any failure closes every encoder and aborts every sink; a DirSink made by `openDirectory` removes its
+    folder with everything in it.
+- **Sinks.** `openDirectory({ name, id = 'mojipv-kit' })` → DirSink | null: `showDirectoryPicker({ mode: 'readwrite', id })`
+  (call it straight from the click), then a new folder `name` — or `name (2)` … `name (99)` when the name is taken by a
+  file or folder, so nothing the user has is written into or removed; null when the picker is closed; `ExportError('sink')`
+  where `canDirectory()` is false. `createDirSink(dirHandle, { parent?, name? })` → `{ kind: 'dir', name, files,
+  file(name) → Promise<Sink>, close(), abort() }`: `close()` closes the sinks still open and lists every file; `abort()`
+  aborts each file sink, then `parent.removeEntry(name, { recursive: true })` (without a parent: each file it made).
+  `openSink` also takes `kind: 'webm'`.
+- **Pre-flight** (`preflight(doc, plan, env)`, env + `vp9Codec`, `dirAccess` (default `fsAccess`), `registry`):
+  - kit: the H.264 blocks as for MP4; `no-vp9` (block) while the overlay is on; `kit-wav` (info, `{ name: base }`) when
+    the probed audio codec is not AAC (never `opus-audio` or `no-audio-codec`); `kit-fps` (info, `{ fps, w, h }`,
+    always); `kit-size` (info, `{ short }`, 720p and 1440p); `layers-approx` (info, `{ keys, seams }`, only with both the
+    overlay and the background); `kit-memory` (`{ bytes }` = Σ kitFiles estimates) without folder access.
+  - webmAlpha: `no-webcodecs`, `no-vp9`; its sound is Opus (no `opus-audio`; `no-audio-codec` only when no audio codec
+    encodes at all); `memory` by `estimateWebmBytes`. `clear-mp4` stays MP4-only.
+  - `layerDiffs(doc, plan, registry?)`: the accent filters of the cuts on screen in the range that run under the kit's
+    backdrop (the background keeps the texture only), plus the texture when it is not alphaSafe (the overlay leaves it
+    out), sorted; and the world seams whose window meets the range.
+- **encodePcm16(channels, rate, start, frames)** → a complete WAV: RIFF/PCM 16-bit stereo, `frames` frames from source
+  sample `start`, zeros outside the song, mixed down with the §4.21 `fillPlanar`, samples `round(v · 32767)` clamped to
+  ±32767 (NaN is silence). `pcm16Header` and `pcm16Data` write it in pieces (the kit: 4 MB steps); consecutive pieces
+  equal one call.
+- **README_Filmora.txt**: `kit.readme.head`, every file with its `exp.kit.*` label, the numbered `kit.help.*` steps that
+  apply (overlay, green with #00B140, SRT, WAV) with the real names, size and frame rate — Japanese, a rule, English.
+  UTF-8 with a BOM and CRLF, so Windows Notepad shows it right. `KIT.readme(files, { w, h, fps })` is exported for the
+  in-app guide; `KIT.KEY_COLOUR` = `#00B140`.
+
+### Decisions where the design was silent
+
+- **The down-mix moved to `audio/wav`.** §13.4 says the WAV writer mixes down with `export/schedule.fillPlanar`, but
+  `audio/*` (L1) may not depend on `export/*` (L5). `mixMatrix` and `fillPlanar` now live in `audio/wav`, and
+  `export/schedule` re-exports the same functions (tested identical), so there is still one down-mix.
+- **`kit-memory` level:** `warn` below 1.5 GiB and `confirm` above — the D§4.21 memory rule applied to the kit's total
+  (§13.9: "the memory confirmation of D§4.21 applies to the total"), rather than a confirmation for every kit.
+- **The WebM's Duration** equals `ts(N)`: the Opus packets are handed over as plain bytes, so the last packet (which
+  starts before `ts(N)`) does not lengthen it.
+- **The green job must match:** job G plans the chroma document; its N and t0 must equal job A's (else `encode`).
+- **`probe().vp9Codec`** is checked at the export size at quality `high`, like the AVC probe.
+- **Colour.** Chrome encodes canvas frames as BT.601 (`smpte170m`) and tags the stream so (`decoderConfig.colorSpace`,
+  the MP4's colour box). Decoded in the declared space, #00B140 comes back as (0, 176, 61); a decoder that ignores the
+  tag and assumes BT.709 shows (0, 152, 61) — Chrome's own `<video>` does that for VP9 in MP4 (the local fallback only;
+  the product's MP4 is H.264). The overlay WebM plays with the right colours in Chrome. Whether Filmora honours the tag
+  is a manual-checklist item (below).
+
+### Deviations (with reasons)
+
+- **Alpha bitrate = the colour bitrate (`ALPHA_SHARE` 1), not 25 %.** Measured on project_basic, 720p30, 3 s from the
+  first lyric cut (Chrome's VP9, `latencyMode: 'quality'`), decoded by `<video>` against the transparent PNG frames:
+
+  | Alpha bitrate | alpha / colour bytes | ≥ 4 px from any content: max α (frames 0 17 45 59 60 89) | cores ≥ 3 px inside: min α | mean \|Δα\| |
+  |---|---|---|---|---|
+  | 25 % | 209 / 905 KB | 14 23 22 98 12 31 | 218–255 | 0.15–1.01 |
+  | 100 % | 707 / 905 KB | 4 12 6 16 6 9 | 246–255 | 0.06–0.29 |
+  | fixed quantizer 4 (`bitrateMode: 'quantizer'`) | 1728 / 905 KB | 1 7 8 8 2 8 | 252–255 | 0.03–0.11 |
+
+  At 25 % the alpha falls behind moving text by the end of a key-frame interval: frame 59 shows α 98 where the frame is
+  clear (a ghost trail over the user's footage), and §13.12's own bounds fail. At the colour's bitrate the variable-rate
+  encoder uses what the alpha needs (0.8 of the colour here); a fixed quantizer is sharper but twice the size and not
+  supported everywhere. `estimateWebmBytes` follows `ALPHA_SHARE`.
+- **§13.12's alpha bounds, read statistically.** Even at a fixed quantizer VP9 leaves isolated one-pixel spikes (α up to
+  27 where the PNG is 0 around), so "±6/255", "clear ≤ 3" and "cores ≥ 250" cannot hold for every pixel. webm_check
+  asserts: within ±6 for ≥ 99 % of the pixels and mean |Δα| ≤ 1; "fully clear" (no PNG α > 0 within 4 px) ≤ 3 and
+  "cores" (PNG α = 255 within 3 px) ≥ 250 for ≥ 99.9 % of their pixels, with no spike beyond 24 / below 232; each alpha
+  step ±6. Measured: 99.4–99.99 %, 1–219 clear pixels above 3 per frame (max 16), cores min 246. At 25 % the test fails.
+- **The test pattern is drawn by the test engine**, not by a cut: the harness wraps the engine so that every frame
+  (except the background layer) also shows the §11.8.1 counter code and five alpha steps. A test part cannot be
+  registered in the shipped registry, and G.3's media parts are not in this tree.
+- **Key frames:** kit_check asserts a key frame at every 2·fps and none further apart; an encoder may add one at a scene
+  change (Chrome's VP9 did at frame 22/23 of project_basic), and WebCodecs cannot turn that off.
+- **`DirSink.file(name)` returns a Promise** (file handles are made asynchronously); §13.11 writes `→ Sink`.
+- **`exportKit` takes `assets`** (the AssetStore to share): the facade has no getter for its store, so the caller passes
+  it; without it each fork makes its own store fork (a video ground is then decoded twice when the green screen is on).
+- **`ui/project_io`** drops its now unused `core/lyrics` dependency; its exported `lrcTag` stays.
+
+### Measured (this machine: 4 shared CPUs, load 3–5 from the other packages' tests; headless Chromium 141)
+
+- **Transparent WebM, project_basic with the real engine, Opus included:** 1080p30 **18–25 fps** (180 frames; rendering
+  and the readback alone run at 54 fps, so the two VP9 encoders set the pace); 720p30 **34–49 fps**. §13.5's estimate
+  (25–45 fps at 1080p30 on a mid-range laptop) is plausible on an idle machine. 1080p30: 7.9 MB for 6 s; 720p30: 1.2 MB
+  for 3 s.
+- **The kit, 1080p30, all four videos** (here the three MP4s are VP9 in MP4 — no H.264 encoder): 5.3–8.9 timeline
+  frames/s (21–36 encoded output frames/s) over four runs. With H.264 for the MP4s (Chrome) it should be faster.
+- Node: 1481 tests pass (`--test-concurrency=1`, about 4 min). Mutation check: 29 hand-made mutants of the new and
+  changed code (pairing key rule, alpha plane source, audio before video and its packets, the Opus list, the green
+  re-plan, the kit's AAC-only list, the overlay backdrop, both media waits, SRT BOM, WAV start, abort on failure, the
+  job's `layers`/`assets`, `vp9Codec`, the folder removal and free-name rule, closing open files, five pre-flight
+  rules, pickVp9's VP8, `backdropFor`, the int16 scale and clamp, the lrcText delegation), all caught by the Node tests;
+  the two that survived the first round (the audio packets, the job's `layers`) led to two more tests. In the browser,
+  `ALPHA_SHARE` 0.25 fails webm_check and a job without `layers` fails kit_check's composite.
+
+### Requests to other packages
+
+- **H.3 (step ④, menus):**
+  - `app.exportStart` for `kit`: call `SINK.canDirectory() ? SINK.openDirectory({ name: S.kitFolder(doc) }) : null`
+    straight from the click (null from the picker = cancelled); the `confirm` item is `kit-memory`; then
+    `exporter.kit.exportKit({ engine: source, doc, audio, dir, assets, signal, onProgress })`; a memory result is
+    `SINK.downloadBlob(result.blob, result.name)`; the done state lists `result.files` (and `result.folder`).
+  - `webmAlpha`: `openSink({ name: S.fileName(doc, 'webm'), kind: 'webm' })` and `exporter.webm.exportWebm(…)`.
+  - `ui/boot` services: `exporter.webm = MV.use('export/host/webm')`, `exporter.kit = MV.use('export/host/kit')`;
+    `defaultFileName` by `S.FORMATS[format].ext` (the kit's folder is `S.kitFolder(doc)`).
+  - `app.exportChecks`: pass `vp9Codec: probe.vp9Codec`, `dirAccess: SINK.canDirectory()` and `registry: app.reg`
+    (the effective registry) to `preflight`; build `layers-approx`'s `{what}` from `params.keys` (`t.part('filter', k)`)
+    and `params.seams`. The summary line: `S.kitFiles(doc, plan, { audioCodec, songReady })` (names, estimates).
+  - `ui/output.ERROR_KEYS`: `'no-vp9' → 'exp.pre.no-vp9'`.
+  - ≡ › ファイル › 字幕（.srt）: `SUB.BOM + SUB.srt(app.plan)` (the whole video), saved as `S.kitBase(doc) + '.srt'`.
+  - The guide (`ui/filmora_help`) can use `S.kitFiles` names, `KIT.KEY_COLOUR` and `KIT.readme` (the same steps).
+  - Progress phases: `video` (all videos per frame), `files`, `zip`.
+- **G.4 / B:** the kit shares one AssetStore fork between its two engine forks only when the caller passes the store
+  (`assets`). Either G.4 hands `app`'s store to H.3, or the facade gets an `assets` getter (then the kit can fork it
+  itself).
+- **Lead:** DESIGN_2_1 §13.5 (alpha bitrate = colour bitrate), §13.11 (`file(name)` → Promise), §13.12 (the alpha
+  bounds as above) and §13.4 (the down-mix in `audio/wav`) could be updated. CI runs `webm_check.py` and `kit_check.py`
+  with the other browser tests; with `MV_REQUIRE_H264=1` kit_check requires the kit's MP4s to be H.264 (the profile
+  pickAvc got — High first). Not verified here: Chrome's H.264 in the kit, AAC (Google Chrome on Linux has none, so CI
+  checks the WAV path too).
+
+### Strings wanted (key, ja, en)
+
+- `exp.kit.wav`: 「曲（WAV）」 / "Song (WAV)" — the WAV's label (the README and the done state list it by name only).
+- `exp.kit.readme`: 「使い方（README）」 / "How to use (README)".
+- `exp.kit.what.video`: 「動画」 / "the videos"; `exp.kit.what.files`: 「曲・字幕・説明」 / "the song, subtitles and notes";
+  `exp.kit.what.zip`: 「ZIP」 / "the ZIP" — `{what}` of `exp.kit.phase` for the three progress phases.
+- `exp.pre.layers.seams`: 「場面の切り替わり（{n}か所）」 / "scene changes ({n})" — for `layers-approx`'s `{what}`.
+- `kit.help.bg`: 「背景だけのときは「{bg}」を下のトラックに置き、その上に自分の文字や映像を重ねます。」 / "For the background
+  only, place "{bg}" on a lower track and put your own titles or footage above it." — a README / guide step.
+
+### Open items
+
+- **Filmora check (FG10):** add to the checklist: `_green.mp4` (H.264) — does Filmora's picker read the background as
+  #00B140 (it is tagged BT.601)? If it shows about (0, 152, 61), the MP4s should be fed as our own BT.709 I420 frames.
+  And: does Filmora read VP9 alpha at our alpha bitrate without trails?
+- The kit at 4K60 has not been run here (memory and time); the ZIP path keeps every file in memory until the download.
+## v2.1-G.3
+
+G.3 of DESIGN_2_1 §8.7: the media parts (§11.5.7, with §11.9 depth) on B's kit (`K.media`, `K.mediaParams`, `K.MEDIA`,
+`K.runKenBurns`), their tests, and goldens step (c) of §7.5.
+
+### What was built
+
+- **`parts/ground/photo.js`: `photoPan`, upgraded in place.** Key, `pool: false` and tags kept; label 写真・動画 / Photo or
+  video and the §11.5.7 blurb; `needs: ['media']`. Params: `K.mediaParams({ src: 'image', use: 'ground', autos: { veil:
+  range 0.3–0.45 } })`: `image` (type `media`, accept `any`), `depth`, `fit`, `cropZoom`/`cropX`/`cropY`, `edge`,
+  `move`, `zoom`, `pan`, `blur`, `veil`, `veilInk`, `tint`, `tintInk`, `clipIn`, `clipOut`, `speed`, `loop`, `clock`;
+  `zoom`, `pan` and `veil` keep their v2 names, ranges, steps, units and autos. Build: the v2 base paint (the ground
+  colour over the frame and its bleed), then `K.media(use 'ground', box = the frame)`; the veil is now the node's own,
+  at v2's strength `veil · (0.6 + 0.4 · amount)`. No picture (none chosen, or an id the plan does not hold): the base
+  paint only, as v2 drew without an image.
+- **New `parts/ornament/media.js`**: `photoFrame`, `textFill`, `mediaLayer`, each `pool: false`, `needs: ['media']`, tags
+  `['soft']`, labels and blurbs in the definitions. Params: the source and the depth first (the element page shows the
+  depth under the source row, §11.9.5), then the part's own (the §11.5.7 table), then the other media params of its use.
+  A part without a picture builds nothing.
+  - `photoFrame` (cut, follow text; roles lyric, focus, title and outro, like the other text-bound frames): a group at
+    its place, turned by `tilt`, holding the stepped shadow (4 fills of the outline, `#000000`, alpha 0.08 each, step
+    `0.015 · short · shadow` down and right, no filter), the picture (`K.media`, use `frame`, the outline as its mask)
+    and the border (the mask stroked, `borderInk`, `border` du). Box: the long side is `size · short`; a circle is
+    square, an arch upright (width ≤ 0.85 of the height), the other shapes take the picture's aspect (within 1:2 and
+    2:1), so the default cover fit shows the whole picture. `free` is the picture's own alpha: no mask, border or shadow.
+    Places: `behind` on the text block's centre in the far layer; `side` in the free band where it fits largest (a
+    margin of 0.03 short from the text and the band's edges; a band that takes less than 0.12 short sends it to the
+    corner); `corner` the lower right of the safe area, scaled into that quarter; `free` the middle, moved by the
+    element's nudge. The border and the shadow share the picture's layer (the §11.9.3 table: front → near, back → far)
+    and, through one behaviour after K.media's, its pose: its Ken Burns and its depth fade, so the frame moves as one.
+    `appear` over the text's entrance (at least 0.3 s): grow from 0.8, slide in over 0.06 short from its outer side
+    (away from the text; from below when not `side`), fade (a bloom 0.4 s longer than the entrance), none; the exit is
+    the automatic follow-text envelope.
+  - `textFill` (cut, follow text): `K.media` use `fill` (comp `atop`) in the text layer after the glyphs, the text layer
+    isolated only when a picture is built; alpha `0.4 + 0.6 · amount` with `amount` auto 1; `place` frame (the whole
+    frame) or text (the text block grown by 10 %; the frame when the block is empty). No depth (§11.9.1).
+  - `mediaLayer` (run, follow own): `blend` (screen, multiply, overlay; normal = comp `over`), no `over` (depth replaces
+    it); `K.media` use `layer` on the far layer (the kit moves front to near and sets `sceneOnly`), the box the frame plus
+    the 15 % bleed so camera moves never show an edge; alpha `0.2 + 0.8 · amount`.
+- **Registration:** nothing to change. `parts/catalog` gathers every module under `parts/<kind>/`, `build.py` collects
+  `src/` and gives `parts/ornament/*` layer 4 with the part-file lint; `build.py --check`: 200 modules OK. The base
+  registry version goes `1e6ef40c` → `83c7523d`.
+
+### Tests
+
+- `media_engine.test.js` (+14): photoPan (label, the media params, v2's three params, base paint + one node, the veil
+  strength, depth and params through K.media, no picture); photoFrame (group, shadow, picture, border on the layer of
+  every depth; border strokes the mask; shadow steps; sizes and shapes; the four placements and the corner fallback;
+  border and shadow keep the picture's pose at 49 times with Ken Burns and the anim depth fade; the four entrances);
+  textFill (after every glyph, isolated text layer, `source-atop` onto the glyphs' surface, alpha, the two places);
+  mediaLayer (bleed box, blend → comp, alpha, front/back layers, drawn after the glyphs in front and before them
+  behind: the op order); backdrops (mediaLayer skipped for chroma, black, clear; photoFrame and textFill drawn);
+  **conformance** of the four parts: 154 cases (every depth × every aspect, with fit, edge, move, clock, blur, shape,
+  place, appear, tilt, blend and still, video, VFR, rotated and animated sources varied) × 24 times × 2 runs: no NaN,
+  balanced save/restore, no alpha out of range, no part-error, the medium drawn, the same op hashes twice; the derived
+  おまかせ ground of a pooled video (C's `registryFor`) now gets `clock: song` and `move: none`; the media golden.
+- `parts_world.test.js`: the §5.5/§5.6 tables also read DESIGN_2_1 §11.5.7 (photoPan's new label; the three media
+  ornaments' keys, labels, scope, follow, tags, pool, needs); the v2 photoPan test now uses an asset of the plan's media
+  (a v2 text value such as `asset:test` is no id and gives the plain ground) and still checks "pans and zooms
+  closed-form and always covers the frame" with the edge rule `zoom` (v2's behaviour). No check removed.
+- New `tests/browser/media_exact.py`, `media_alpha.py`, the shared page helper `media_page.py`, the harness
+  `tests/www/media_parts.js` (everything in the built app page under its CSP, the real AssetStore):
+  - `media_exact.py`: the counter videos of media_gen.js (VP9 WebM 30 fps, VP9 MP4 25 fps, VFR; H.264 where it encodes,
+    `MV_REQUIRE_H264=1` for CI) as the background in PNG exports at 24, 30 and 60 fps, 1280×720 and 1920×1080, 2.4 s
+    (a loop wrap): every frame's code equals the frame expected from the times the clip was made with (Python, not
+    `sampleAt`); speed 0.5 and 2, clipIn 0.5, clipIn–clipOut, hold past the end; clock `show` in a cut (a photo frame,
+    read inside it); a 3-s MP4 export decodes back to the same codes. About 2,500 frames, all exact here (VP9; ≈ 70 s).
+  - `media_alpha.py`: the alpha WebM's merged frames at 5 times (128 and 0 exactly here, ±4 allowed); as a free-shape
+    photoFrame in a 透過PNG export the alpha is kept (128 / 0 / nothing outside); photoPan and mediaLayer drawn over the
+    scene backdrop and absent from green, black and clear frames (those frames are exactly the backdrop); the §11.9.7
+    probe: a mediaLayer at 文字の前に出す turns every glyph pixel bluer (8,077 of 8,077), at anim and back every glyph pixel
+    keeps the ink.
+- `determinism.py` (+ check 7, `--no-media`): video ground + alpha WebM frame + still frame, camerawork on, export
+  quality: frame N of a fresh engine and store = frame N after 0..N−1 (pixels and source frames), 30 = 60 fps; the
+  paused preview after a scrub starts provisional and, redrawn until exact, shows the export's source frames with MAE 0
+  here (≤ 2/255 allowed).
+- `perf.py` (+ media row, `--no-media`, `--media-rows`), `transparent_check.py` (+ a free-shape photoFrame of a PNG with
+  alpha in every export: its rect left out of the glyph checks; in 透過PNG its alpha is the PNG's, opaque 255, half 128,
+  cleared 0; drawn over green and black), `package_io.py` (the preview-frame check G.1 left: the WebM as the
+  background and the PNG in a photo frame, identical pixel for pixel before the save and after clear + open;
+  `media_check.js` `previewFrame`), `parts_gallery.py` (the media mode must list the four catalog media parts; it
+  shows 8 parts: those and B's four test parts).
+- **Mutation checks:** 16 mutants of the parts against the Node tests (the pose tracking's scale and alpha, the frame
+  layer, textFill's isolation and alpha, mediaLayer's normal blend, alpha and bleed, `behind` in mid, the side margin,
+  the shadow strength, fade, slide direction, circle, photoPan's veil strength and auto): all caught. Browser: no
+  0.1-ms rule in `sampleAt` (5 VFR frames wrong), a scaled loop time, an overlay never in front, a frame at alpha 0.98
+  (transparent_check), a behaviour with history (determinism check 7): all caught. (A first history mutant was
+  equivalent: two frames made its counter even at every evaluation.)
+
+### Goldens (§7.5 step (c))
+
+Asserted before regenerating: `node tests/update_golden.js --check` gave `frame_hashes_v2.json: matches`; the 160
+frames of `frame_hashes.json` (4 projects × 40) rendered with the new catalog were compared hash by hash: 0 differ;
+`media_engine.test.js` "frame hashes of the media-free fixtures are unchanged" passed with the new registry. And the 240
+corpus plans, with their hashes and fingerprints left out, are byte-identical to the plans of the catalog before G.3
+(no part choice, param, window or slot moved: photoPan stays pool-only and the new parts are `pool: false`). Then
+`node tests/update_golden.js`:
+- `frame_hashes_v2.json`: matches (unchanged);
+- `plan_hashes.json`: all 240 plans (+ the registry line), because the base registry version enters every plan hash
+  through `sharedText`; nothing else changed;
+- `frame_hashes.json`: only its registry version line changed; the frames are byte-identical;
+- new `project_media.json` (plan hash and 40 frame hashes): the v2.1 media fixture plus a text fill on r5
+  (`fake_media.js goldenDoc`; A.3's fixture has the video background, the pooled still background, the photo frame and
+  a material, but no text fill), planned with its effective registry and rendered with the fake store, so its op hashes
+  include the media times. `media_engine.test.js` checks it; `update_golden.js` writes it.
+
+### Decisions where the design was silent
+
+- The param order (source, depth, own, other media params); the photoFrame geometry, shadow step and ink, round radius
+  (0.12 of the shorter side), placement rules and entrance numbers above; `free` has no border or shadow (there is no
+  outline to draw); textFill isolates the text layer only when it draws; mediaLayer's bleed box; `photoPan` also
+  declares `needs: ['media']` (the vocabulary word; it only feeds the song terms of `needs`, so nothing changes).
+- None of the parts names `use` in its specs: the planner's rule (ground → ground, run ornament → layer, cut ornament →
+  frame) is right for all four, and textFill has no depth.
+
+### Deviations (with reasons)
+
+- **Entrance window.** §11.5.7 says `appear` runs over `[a, rest]`. It runs over at least 0.3 s (an instant text
+  entrance would otherwise show no entrance at all), and `fade` 0.4 s longer: the follow-text envelope already fades the
+  frame over `[a, rest]`, so `fade` and `none` would otherwise look the same.
+- **Border and shadow at depth front, back and still.** They share the picture's layer and pose, but only media nodes
+  carry a camera factor (`sb.media` `cam`/`still`), so at those depths they see the layer's own camera while the picture
+  sees `depthCam(f)`; under camera motion (and, for `still`, through a seam) the picture then slides inside its border.
+  At anim (the automatic depth of a frame) they match exactly. Request to B below.
+- **Files outside §8.7's G.3 list:** `tests/node/parts_world.test.js` (the photoPan upgrade changes its v2 label and
+  param type, which that file checks against DESIGN.md §5.5; it now also reads DESIGN_2_1 §11.5.7);
+  `tests/helpers/fake_media.js` (`goldenDoc`, the golden's document, shared by `update_golden.js` and the test);
+  `tests/update_golden.js` (the `project_media.json` job); `tests/www/media_check.js` (`previewFrame` for package_io);
+  `tests/browser/package_io.py` also waits up to 10 s for its two download events before reading them (it read them at
+  once, and one run on the loaded machine reported none; no check changed).
+- **The app's engine has no AssetStore until G.4** (ui/boot passes `assets: null`): the tests fork it with a store
+  (`engine.fork({ assets })`), and transparent_check's step-④ exports go through `wireExport`, which makes
+  `app.engine.fork()` pass one, as ui/boot will.
+
+### Measured (this machine: 4 shared CPUs, other packages' tests running; headless Chromium 141, software raster)
+
+| §11.5.12 row | here |
+|---|---|
+| `drawMedia`, still, full frame | p50 ≤ 0.1 ms per call (the timer's resolution); frame p50 13.0–14.5 ms vs 12.0 without (budget ≤ 0.3 ms) |
+| `drawMedia`, video, full frame | p50 11.3–13.0 ms per call for a 1080p VP9 frame drawn at 720p (budget ≤ 0.8 ms, "a hardware frame upload") |
+| Isolated path (a PNG with alpha as the ground) | +2.8–3.0 ms per call (budget ≤ +1.2 ms) |
+| WebM alpha merge, 1080p | 45–51 ms per frame through the store, decoding both 1080p streams in software included (budget ≤ 7 ms merge) |
+| Frame with one video ground and one still frame (perf.py row) | p50 34.7–43.5 ms, p95 100–160 ms at 720p (budget ≤ 10 ms target, 16.7 ms hard) |
+| Scrub, 1080p, GOP 2 s | 33–120 ms to the exact frame (budget ≤ 250 ms) |
+| Export overhead of a 1080p30 background at 1080p30 | +43 % to +61 % (VP9 export here: no H.264 encoder; budget ≤ +35 % for H.264) |
+| `mediaAt(t)` | B's figure: 2.2 µs with media everywhere (budget 50 µs) |
+| Import (hashing, probe, poster) | G.1's figures |
+| Re-plan with media pins | unchanged: the 240 corpus plans hold the same values; `planner_determinism` passes |
+
+Where the time goes, measured in the page: `drawImage` of a 1080p `VideoFrame` costs 8–17 ms **every** time here (YUV →
+RGB on the CPU, not cached between draws of the same frame); `createImageBitmap(frame)` takes 6–9 ms once (async), and
+drawing that bitmap 3 ms. A video ground at its automatic depth (back) adds the per-frame video blur of the isolated
+path (+≈ 12 ms). With the store's video frames turned into bitmaps (an experiment, not committed) the perf.py row went
+from p50 29.7 to 23.4 ms. The budgets are written for a GPU laptop; this machine cannot show them.
+
+### Requests to other packages
+
+- **G.4 / F (`ui/fields`, strings):** `ui_fields.test.js` "spec-4: every string value of every registered enum parameter
+  has an opt.<value> label" fails now that the catalog has media parts: `depth` (auto, anim, front, still) and
+  `move`'s `auto` have no `opt.<value>` string, and `opt.back` exists with another meaning (逆方向). §11.9.6 names the
+  depth labels `opt.depth.*` (F adds them): `ui/fields` should label the `depth` enum `'opt.depth.' + v`, and `move`'s
+  `auto` needs a string (below). Until then this one Node test is red in this tree.
+- **B:** let `sb.shape` (and `sb.group`) take `cam` and `still` as `sb.media` does, and give parts the effective depth of
+  a picture (for example `K.media` returning it, or a `K.depthOf(p, use, meta)` export), so a photo frame's border and
+  shadow can share its camera factor and seam pass. Performance: the per-frame blur of a `back` video (the isolated
+  path) is the largest item in the perf.py media row here.
+- **G.1 (`media/host/session`, `store`):** hand out video frames as `ImageBitmap`s made once when they are held
+  (`createImageBitmap` in the output path, off the main thread) instead of drawing the `VideoFrame` each time: here a
+  draw drops from ≈ 10 ms to ≈ 3 ms (and mirror neighbours draw the same frame again). Worth measuring on a GPU first:
+  there a `VideoFrame` draw is a texture upload.
+- **G.4 (ui/boot):** create the AssetStore and pass it to `createEngine`; then `wireExport` and the `engine.fork({ assets
+  })` calls of the harnesses can go.
+- **E:** `ai/direct`'s comment "a param that is not of type media yet (today's photoPan.image)" is outdated: it is one
+  now.
+- **Lead:** DESIGN_2_1 §11.5.7's table still lists mediaLayer's `over` (§11.9.1 replaced it by `depth`). The perf.py
+  media row (and B's camerawork + materials row) cannot meet their budgets on a software-rendered runner; they need a
+  GPU reference machine or a decision about CI.
+
+### Strings wanted (key, ja, en)
+
+- `opt.auto`: おまかせ / Auto (`move`'s `auto`; photoPan, photoFrame, textFill, mediaLayer)
+- the `depth` options through `opt.depth.auto` / `.anim` / `.front` / `.back` / `.still` (§11.9.6; F has them) once
+  `ui/fields` maps the depth enum to them.
+
+### Open items
+
+- `ui_fields.test.js` spec-4 is red until the request above lands; the perf.py media row fails here (numbers above).
+- H.264 exactness runs only where the browser encodes H.264 (Chrome CI with `MV_REQUIRE_H264=1`).
+- Visual QA of the photo frame's placements and entrances in every aspect (the Node tests check their geometry).
+
+## Lead: integrating G.3
+
+- G.3's diff was applied onto the integration branch after F and H.2. The goldens were then regenerated. Beforehand,
+  `update_golden --check` showed `frame_hashes_v2.json` unchanged, and the only key that changed in `frame_hashes.json`
+  was `registry.version` (1e6ef40c → 83c7523d): no media-free frame moved. `project_media.json` is G.3's new golden.
+- spec-4 (option labels): an enum spec may name its own label group with `optKey`. Its options are then labelled
+  `opt.<optKey>.<value>`. The reason: `depth`'s `back` means 後ろに下げる, not the shared `opt.back` 逆方向.
+  `core/schema.validateSpec` accepts `optKey` only on an enum and only as an identifier. `K.mediaParams`' depth sets
+  `optKey: 'depth'`. `opt.auto` おまかせ / Auto is added for `move: auto`. Tests: `schema.test.js` and `ui_fields.test.js`.
+- Open: perf.py's new media row (a 1080p30 video ground and a still photo frame) fails here and on CI, which have no
+  GPU: a 1080p VideoFrame costs 8–17 ms to draw in software. This is handled next, together with the
+  camerawork + materials row.
+## Lyric editor: iOS drift
+
+Seen by the owner on iOS Safari: in step ① the caret and selection crept away from the coloured text, more with every
+row further down. A bug, not a design choice. The editor is a transparent `<textarea>` (caret, selection) over a
+mirror `<div>` of coloured rows (the gutter follows the mirror), so any row laid out differently in the two layers
+moves every row below it.
+
+- **Why.** The line height, `15px/1.7` = 25.5px. WebKit's line layout makes line boxes whole px: 25px in the release
+  branches read (safari-7616 to 7624; only 7625 turns subpixel inline layout on). That happens in both layers, but
+  each mirror row also had `min-height: 1.7em`, which a block keeps at 25.5px, so every single-line or blank row was
+  0.5px taller in the mirror: half a line after 30 rows. Blink keeps 25.5px lines, so the Chromium tests never saw it.
+  Found in WebKit's source as further ways to differ (not seen on a device): iOS's built-in textarea style adds
+  `-webkit-nbsp-mode: space` and `line-break: after-white-space`, which a div lacks; WebKit does not kern across the
+  mirror's token `<span>`s, and decides a break at a text node boundary from the two characters before it in the
+  previous node only (`TextUtil::mayBreakInBetween`), so a UAX #14 rule that needs more context (digits around a '/'
+  cut mark) could wrap a mirror row where the textarea's one run of text does not; text autosizing (iPad's idempotent
+  mode) can enlarge the mirror's rows but never the textarea's text, and skips an element only for
+  `text-size-adjust: none` (`Style::Adjuster::adjustmentForTextAutosizing`). And `renderMirror` set the textarea
+  height before it left the empty state (14px left padding), so text arriving in one step into the empty editor
+  (サンプルで試す, a paste, opening a file) left the textarea shorter than its text until the next edit; a caret reveal
+  then scrolled the textarea inside itself by that much, and clicks on the last rows missed. In Chromium at 1440×900
+  with the old build: 187px on the first keystroke at the end of the sample lyrics, 357px after Ctrl+End with the
+  longer text of the test below; the longer the text, the more.
+- **What changed.**
+  - `style.css`: one rule sets every text-layout property on both `.le-mirror` and `.le-text` (font `16px/var(--le-lh)`
+    with `--le-lh: 26px`, border 0, kerning and ligatures off, spacing, indent, white-space, word-break, overflow-wrap,
+    hyphens, `line-break` and `-webkit-nbsp-mode` at the iOS textarea's values, hanging punctuation, autospace, spacing
+    trim, `text-size-adjust: none`, `appearance: none`); an engine drops what it does not know, on both layers alike.
+    The gutter's `.le-g` uses the same `--le-lh`. 16px (was 15px) also stops iPhone Safari zooming in on focus; rows
+    wrap a little sooner.
+  - `.le-row` has no `min-height`; a blank row (empty or white space only) ends with `<br>`, as the textarea's line
+    ends with `\n`. Every row's height then comes from its own line boxes, whatever an engine or page zoom does to the
+    line height (a 26px min-height would fix 100% only: at 110% Safari zoom a 28.6px block sits over 28px lines).
+  - A mirror row holds its text as one text node, like the textarea's line, and the token colours are CSS Custom
+    Highlights over it (`.le-row::highlight(tok-…)`, one `Highlight` per token class, `StaticRange`s), so the line
+    breaker reads the same text in both layers. Only the rows in and near the viewport (the gutter's rows, ±240px) hold
+    ranges: WebKit's paint of each line of text walks every registered range of every highlight
+    (`MarkedText::collectForHighlights`), so their number stays a screenful's however long the lyrics are. Without
+    Custom Highlights (Safari before 17.2) the tokens stay spans, with plain text next to plain text merged.
+  - `lyric_editor.js`, `syncHeight()`: the textarea is as tall as the mirror and the editor's viewport, or as its own
+    text where an engine lays that out taller. The reads come first and one write follows, if the height changes;
+    only a shorter textarea is measured again (its text may overflow it now). A caret reveal runs before `input`, so
+    when the new text outgrew the textarea (a typed character wrapping the last row, Enter at the end, a paste) it
+    scrolled the textarea inside itself and the editor that much less, which left the caret up to 12px below the
+    editor's bottom (the old build did the same): that inner scroll is now handed to the editor. One ResizeObserver on
+    the mirror and the editor acts only on a height `syncHeight` has not seen: the mirror's (a web font of the stack
+    loading re-wraps both layers) or the editor's (a taller or shorter window with the same width, which used to leave
+    the textarea, the gutter and now the ink as they were). The textarea's `scroll` listener is gone: with the height
+    rule and the hand-off it had nothing left to undo. Measured in Chromium (CDP LayoutCount, 1260 rows), the layouts
+    per keystroke hardly change (Enter 4.07 → 4.00, a character 3.07 → 3.07): Chromium skips an unchanged inline
+    height, and after a changed one the gutter's frame reads layout anyway.
+  - Tests. `tests/browser/editor_metrics.py`, a file of its own (CI runs every `tests/browser/*.py`), on the sample
+    lyrics plus hard rows (wrapping kana, Latin with marks, a URL, digits around cut marks, no-break and full-width
+    spaces, emoji, a stamp, blank rows), at five sizes down to phones: both layers compute the same ~45 layout
+    properties; the line height (the gutter's too) is whole px; rows are whole lines, add up to the mirror and end
+    where a hidden textarea of rows 0..i ends, also with 25, 25.5 and 28.6px lines; a click on each row puts the caret
+    in it; each row is one text node whose highlight ranges equal `segments()`, held near the viewport only (also in
+    344 rows scrolled through); typing at the end until the row wraps and Enter leave the caret inside the editor; one
+    paste into the empty editor, text taller than the mirror (simulated with padding, then a deletion, then a shorter
+    editor) and a height-only resize never let the textarea scroll inside itself or stop short of the editor's bottom.
+    Then, with `Highlight` removed before the app starts, the spans pass the same row checks and every token in view
+    has its colour in both pictures. Against the old build and the previous fix it fails (the latter on the one text
+    node, the 11px caret and the height-only resize); mutations of the new code (no re-measure after a shrink, no
+    reveal hand-off, spans only, every row inked, the editor's height not observed, a `::highlight` rule removed) each
+    fail it.
+    `tests/node/ui_selection.test.js` checks the stylesheet itself, since Chromium drops the WebKit-only values: the
+    shared rule and its iOS values, a whole-px `--le-lh`, no text-layout property on one layer only, tokens set colour
+    only.
+- **Not verified here.** No WebKit in this environment: the fix is by construction and untried on an iPhone, and which
+  Safari release ships which WebKit branch was not checked. The browser test proves Chromium's structure: it cannot
+  reproduce WebKit's whole-px line boxes (`floorf` of the line height, ascent and descent rounded apart), its break
+  context at node boundaries, or its highlight painting cost (bounded by the viewport window, not measured). WebKit's
+  own editing may split the textarea's text into several nodes (not checked); only the mirror side is one node by
+  construction. Desktop Safari uses the same line layout, so it is a cheap place to confirm the fix.
+- **Merging.** `tests/browser/ui_flows.py` is untouched and the test is a file of its own, so another package's flows
+  file stays as it is; `src/ui/lyric_editor.js`, `src/ui/style.css` and `tests/node/ui_selection.test.js` apply with
+  `git apply` to the pending UI package's copies (checked). This section is appended to NOTES.md, as other packages'
+  are: keep both. Rebuild `index.html` and `en/index.html` with `build.py` rather than merging them.
+
+## v2.1-G.4
+
+G.4 of DESIGN_2_1 §8.7: the photo and video UI (§11.7, §11.9.5, §12.7) on G.1's device store and import, B's facade,
+C's `registryFor`, D's `plan.media`, E's `ai/vision`, F's inspector and G.3's parts. Built in two rounds: the package,
+then the fixes of its review (41 findings, all fixed; see "Review fixes").
+
+### What was built
+
+- **`ui/boot`: the AssetStore.** One `media/host/store` per app over `app.io.mediaBlobs` (IndexedDB, or this tab's memory
+  when it is full or missing); the metadata comes from every library entry the store has seen (ids name content, so an
+  entry seen once stays right for try-on and undo documents). The preview engine gets it (`createEngine(assets)`); every
+  `engine.fork()` (the export, the Filmora kit, the test harness) forks it and disposes the fork. `app.assets` (getter,
+  H.2's request), `app.knownMedia()` (every id seen), `app.media` (`ui/media_io`), the action `file.saveLight`, the page's
+  drop label, the mode strips 「使う範囲を調整中」 (trim peek) and 「切り抜きを調整中 — …」 with [終わる] (crop overlay), and
+  the one document `paste` listener (below).
+- **Paste (§11.7.2).** Ctrl+V outside the text fields is left to the browser (the key handler does not consume it), so
+  the `paste` event always comes: image or video files are imported (`media_io.pastedFiles`), anything else runs
+  `look.paste`. The palette and the menus run `look.paste` directly.
+- **New `ui/media_io`**: the import queue (drop, paste, ≡ › ファイル › 写真・動画を読み込む…, the library's ＋ 読み込む, the
+  picker's ＋ tile): one file at a time, a sticky progress row 「読み込み中: {name} {p}%（あと n件）」 with [中止], which
+  stops the file and every file waiting; the live region hears it at most once every 5 s (a `quiet` toast when it is
+  made again); closed with ×, the row comes back with the next file. Imports belong to the work they started in: a work
+  loaded meanwhile (`plan` event `load`) stops them and they place nothing. An audio-only MP4/WebM goes to the song; a
+  duplicate says so; errors are `media.err.*`. A file dropped on the preview becomes the background where the selection
+  is (作品全体, the selected lines, the cut) with `media.put` in the same undo step; its toast offers [元に戻す]
+  [ほかの使い方…], and on step ② [この動画の音を曲にする] for a video with sound (then kept until used or closed; the
+  duplicate toast too). A video dropped on step ②'s song box also gives the song its sound (see Decisions). The end
+  toast [使い方を選ぶ]; the storage warnings (2 GB, `quotaNote`). Placement (`placeCmds`: the part and its media param
+  per scope, ornaments at `freeIndex`, cut pins written where the cut lives with its sig), delete (`media.remove` plus
+  `pin.clear` of every part pin whose media param emptied; lock pins stay), この写真を使わない (この動画を使わない for a
+  video), 上へ/下へ, 使っている場所, relink (same id: stored, `forget`; another file of the same kind and size or length:
+  asked, `media.relink`; a file that fits no missing entry is refused with [代わりにこのファイルを使う] when one entry of
+  its kind could take it), 置き換える…, colour matching (one batch 「色を写真に合わせる」 and a toast with [元に戻す]),
+  posters, filmstrips, sample tables and GOP stats from the device store (nothing is cached for an asset that gave
+  nothing, and a relink, a replace, a load that finds it missing and ≡ › 設定 › 消す drop what is cached, bitmaps
+  closed), the file progress rows of G.1 (`fileProgress`), step ④'s items (`preflight`), and the pictures of 写真の説明
+  (`visionParts`: a still decoded upright at the size it is sent at, 768 px on the long side, JPEG 0.8, the bitmap closed;
+  a video or an animation as three frames of the range it is used in (`usedRange`: its first use's clipIn…clipOut) at
+  10 %, 50 % and 90 %, decoded exactly by a fork of the AssetStore at 768 px). ≡ › 設定 › 消す forgets every id the tab
+  has seen (`app.knownMedia`), not only the empty work's. `scopeWords`: 作品全体 / 3行目 / サビ1 / 3–5行 / 3行目のカット2.
+- **New `ui/media_widgets`**: `mediaRows(gen)` turns a part's generated rows into the element page's media rows: the
+  source first (widget `media`: poster, name, short badges, ？ when missing, 再生できません when the preview could not
+  decode it, › the picker; its accessible name says the badges too); 動きと重なり right under it as a radiogroup of its
+  five options whose おまかせ is 自動 (unpins; the tag 「自動: 後ろに下げる」, ⓘ toggles why, and the why follows the
+  value); 拡大 as 切り抜き [画面で調整] with the zoom in %; 動きの強さ, 薄幕, 色味 and 速さ in %, ぼかし without a unit;
+  a background's shared 強さ (which only strengthens its 薄幕 in photoPan) as 薄幕の強さ right after 薄幕; 重ね方 as
+  明るく重ねる / 暗く重ねる / くっきり重ねる / そのまま重ねる; 使う範囲 (clipIn and clipOut) as one `trim` row; the video
+  rows marked `video` with a `when`. `paramSpec(registry, media, name)`: another param's own spec (the crop overlay's
+  focus and zoom, the trim's end). The widgets: `media`, `crop`, `trim` (filmstrip, two handles that are 24 px buttons
+  with the slider role and their time as `aria-valuetext`, drag = one gesture with a peek, ← → one source frame, Shift
+  one second, Home/End, [▶ 範囲を見る]).
+- **New `ui/media_page`**: 作品全体 › 写真・動画 (a listbox of two-line rows: the whole name, then the facts or
+  この端末にありません, 再生できません, 使用 n, おまかせ, ⋯, [つなぎ直す]; one tab stop; the row's name says the kind
+  once), the asset page (crumbs 全体 › 写真・動画 › name, where 写真・動画 opens the library, and no second copy of the
+  path above it; rename ✎; facts, badges, the missing banner; a poster that is a picture for a still and a focusable
+  picture that scrubs its filmstrip for a video; 使う buttons that name where they place: 作品全体の背景, 「2行目の背景」,
+  「文字の中に（2行目）」…, disabled with 「つなぎ直すと使えます」 while the file is missing; おまかせでも背景に使う;
+  使っている場所 (「3行目（枠）」); colours with [この色に合わせる] and what it does; the AI row, whose
+  [AIに説明してもらう…] waits for the file; [この動画の音を曲にする]; [置き換える…] [削除]). The page is drawn again
+  only when what it shows changes, and the focus stays on the same control (✎ after a rename). The picker sub-page (＋
+  読み込む, なし, the assets its param accepts; try-on after 250 ms; a tile's name says この端末にありません).
+- **`ui/fields`**: widgets `media`, `trim`, `crop`; `sec.media` after 見た目; the media rows of every part page; the text
+  page's 文字の中に写真・動画; `freeIndex` (see Decisions); the video rows in a section of their own right after the
+  part's (`video` after 背景, `video.atmos` after 重ねる映像: each keeps its own open state); 空気（粒子） that shows
+  a mediaLayer reads 重ねる映像; a pinned clipOut stays inside the trim row.
+- **`ui/widgets`**: `choice` with `radio` and `autoValue`; the three makers.
+- **`ui/inspector`**: the asset page and picker sub-pages (a page may name its own crumbs and have no title bar), the part
+  browser's 写真・動画 tab, the crop target of a row, `siblingOf` (with the sibling's own spec), textFill commits (the
+  picture pins the part too; なし clears both; the row reads 自動 / なし, not 無効, until its slot holds textFill), the
+  picker and the tab place an import that ends later only while they are still shown, and asset pages refresh on media
+  events.
+- **`ui/part_browser`**: the 写真・動画 tab; derived `myMed…` grounds left out of the lists by `extra[key].media === true`.
+- **`ui/stage`**: the drop target; the crop overlay (drag, wheel, arrows 1 % / Shift 10 %, + −, 0 or a double-click
+  resets, Esc leaves and gives the focus back to [画面で調整]; entering it says the keys in the live region and the play
+  bar's strip says what the mouse does); want/ready; the placeholder plates 「写真がありません: {name}」 /
+  「動画がありません: {name}」 / 「この動画を再生できませんでした」 where each picture is drawn (a frame's in its box,
+  text fill's on the text, a background's in the middle); 映像を準備中 only while a picture this device has is still on
+  its way; the trim peek.
+- **`ui/menus`** (≡ › ファイル as §12.7), **`ui/palette`** (romaji aliases; the command that clears the device comes
+  last and 写真 / 動画 find 読み込む… first), **`ui/step_look`** (the hint), **`style.css`**, **`strings`** (the keys the
+  screens needed that A had not written).
+- **写真の説明 (§11.6.2).** `ui/ai_controller` gains the tool `vision` (Gemini only; no lyrics needed); `describeMedia`
+  asks the consent per asset, sends the JPEGs before the prompt, opens the review in the AI tab, and says
+  「写真・動画がこの端末にないため、説明を頼めません…」 when none of the pictures is on this device.
+- **G.1's requests:** `app.media.importFiles`; the store in boot over `app.io.mediaBlobs`; `check` on load and `forget`
+  after relink and 消す; `quotaNote(storageInfo())` once; the progress rows through `fileProgress`; the header's file
+  line from `io.fileState()` (「ファイル: 作品.mojipv（10:20 に開きました）」 until the first save to it); ≡ › 軽い保存 →
+  `io.saveLight()`. **G.3's:** boot wires the store (`tests/www/media_parts.js` no longer patches `engine.fork`). **H.2's:**
+  `app.assets`.
+
+### Decisions
+
+- **freeIndex (文字の中に, 写真の枠として).** Never a slot a user or lock pin holds; of the others, the one where the
+  fewest cuts of the scope change: a cut changes when the slot shows an automatic decoration there (it would be replaced)
+  or when its count is below the slot (the planner raises the count to reach a pinned slot and fills the slots in
+  between); ties go to the slot that replaces fewer, then the lower one. The review asked for the first slot no cut
+  uses; measured on the sample lyrics (50 cuts: #0 in all, #1 in 15), pinning #2 adds a decoration to 35 cuts and the
+  planner's variety rule then changes 13 of the 50 first decorations, while #1 replaces the 15 second ones and keeps 48
+  of 50 first ones. A slot is "full" only when pins hold all three.
+- **The asset page's scope.** 選択中 is gone: every scoped button names its scope. While the page shows 作品全体, the
+  other scope is the latest line or cut selected since the work was loaded (「2行目の背景」); with none, every button says
+  作品全体.
+- **Step ②'s song box** (a deviation from §11.7.2's table, which routes a video with sound to media only): a video with
+  sound dropped on the song box (「曲を選ぶ（ここにドロップも可）」) still joins 写真・動画, and its sound becomes the song
+  at once; a video dropped anywhere else on step ② keeps the toast's [この動画の音を曲にする], now until used or closed.
+- **Saving without everything on this device (§12.7).** The package's result toast carries what is not in the file:
+  「保存しました: …。ただし写真・動画1件と曲はこの端末にないため入っていません [つなぎ直す]」 (a warning that stays until
+  closed); the song counts too. The separate `pkg.warn.missingIn` toast before the save is not shown (the toast host
+  evicted it); `ui/toasts` now drops an ok or info note before a warning when more than two are shown.
+- **Plain words** (the owner's rule): 重ね方's options are 明るく重ねる / 暗く重ねる / くっきり重ねる / そのまま重ねる
+  (`opt.blend.*`) instead of §11.7.11's スクリーン / 乗算 / オーバーレイ / 通常 (those keys stay for other uses);
+  a single line is 「3行目」 in every placement and 使っている場所 text; a video is 動画 in its toast, plate and ⋯ menu.
+- **Step ④'s [つなぎ直す]** opens the library (§11.7.8) with the focus on the first missing row; its [つなぎ直す] (or
+  Enter, then the asset page's [つなぎ直す]) opens the file dialog.
+- The crop drag writes cropX and cropY as one batch per move inside one store gesture; the crop keys write through the
+  row's commit with one merge key (one undo entry per burst).
+- The trim keys move exactly one source frame although clipIn and clipOut have a 0.01 s step (the value still means
+  that frame).
+- Step ④'s media items cover every asset the plan draws (`plan.media`: decision params and materials); media-skipped
+  follows the backdrop the export renders (`ui/output.effectiveBackdrop`).
+- The vision consent is the app's question dialog; its 約{kb}KB is the size of one sent picture, which is now true for
+  videos too (768-px frames).
+
+### Review fixes
+
+- **G4UX-1, G4-R1, a11y-1** (crop keys pinned cropX = 1): `siblingOf` read the value against the 切り抜き row's spec;
+  now `MW.paramSpec`. Node: `paramSpec`; flow media: → ↑ ← + − (1 %, one entry), Shift+← (10 %), the wheel, 0, double-click.
+- **G4-S1, G4-R8** (paste after copying a look): see Paste. Flow media: a real clipboard picture after Ctrl+C →
+  `media.put`, no `pin.copy`; text on the clipboard → the look.
+- **G4-S2, G4-R4, G4-S4, G4-S8** (step ④): see Decisions. Node: a material-only missing asset blocks, HDR through a
+  material, webmAlpha skips, an MP4 with an old 透明 does not, the jump; flow missing: the library opens on the missing row.
+- **G4-S3** (untested behaviours): flows media, library, missing, and the new package, media_device and media_song (below).
+- **G4-S5** 再生できません on the row, the asset page and the media widget (flow library, a stubbed state).
+- **G4-S6** video section ids (Node). **G4-S7** the audio action on the placed and the duplicate toasts (flow media_song).
+- **G4-S9** plates where the picture is (flow missing: the frame's plate in its corner box, the background's centred).
+- **G4-S10** progress: announcements rate-limited, × then the next file shows a row again, [中止] stops the queue (flow
+  library: three quick files are announced once; × comes back; 中止 imports none).
+- **G4-S11, G4-R9** vision pictures (Node `usedRange`; flow library: the 1280×720 photo is sent at 768×432, a video's
+  three frames are 18, 30 and 42 of its clipIn 0.5 s range, read back from the JPEGs).
+- **G4-S12** the keyboard-only variant is Tab, Space and Enter from step ④ to the file dialog (step ④'s format buttons
+  are plain buttons: Tab and Space; they have no arrow keys, and step ④ is H.3's).
+- **G4-S13** overlay footage from the asset page, そのまま重ねる, then 後ろに下げる and 文字の前に出す: black glyphs stay
+  black behind it and take its colour in front (the readability guard screens it at 45 %, §11.9.3) (flow media).
+- **G4UX-2** see freeIndex; the text-fill row reads 自動 / なし (flow library: the first decorations stay, なし clears).
+- **G4UX-3** see Saving (flow missing: the result toast after Ctrl+S names the three pictures and keeps [つなぎ直す]).
+- **G4UX-4** see the asset page's scope (flow library, with and without a remembered line). **G4UX-5** see the song box.
+- **G4UX-6** 映像を準備中 (flow missing: one picture back, one still missing, the badge does not stay).
+- **G4UX-7** ⓘ toggles and the why follows the pin (flow media). **G4UX-8** the missing page (flow missing).
+- **G4UX-9, a11y-5** the crop strip, the live region and Esc (flow media). **G4UX-10** units (Node and flow media).
+- **G4UX-11** words by kind (flows media and missing: 背景を動画にしました, 動画がありません: 海.mp4, この動画を使わない;
+  Node: 「3行目」; 重ねる映像 as the section title). **G4UX-12, a11y-7** two-line rows (ui_layout: names and statuses
+  whole at 288 px and at the real width; flow library: the row's name).
+- **G4UX-13** この色に合わせる (flow library). **G4UX-14** the palette (Node `order`; flow library: 一覧 → focus on a row).
+- **G4UX-15** opened time (flow package). **G4UX-16** the stand-in (flow missing). **G4UX-17** crumbs (flow library).
+- **G4-R2** imports stopped by a load (flow media_device: a file whose reader finishes anyway after another work
+  opened places nothing there). **G4-R3** `project_io.loadFile` keeps the loaded work's asset ids in `usedMedia` (flow
+  media_device: a picture only in 写真・動画, which nothing reads after the work is reopened, deleted, autosaved, undone:
+  the bytes are still here).
+- **G4-R5** 消す forgets all (flow media_device: the reopened light file shows its pictures missing, the one the preview
+  never drew too, and step ④ blocks).
+- **G4-R6** captured picker and tab (flow library: a picker import finishing after another line was selected, and a
+  part-browser import finishing after it was closed, place nothing). **G4-R7** caches (flow missing: the relinked row
+  shows its poster; flow media_device: a poster that gave nothing is asked again once the bytes are back).
+- **a11y-2** the asset page keeps the focus (flow library: ✎, the switch with Space). **a11y-3** badges in names (flows
+  library and missing). **a11y-4** trim handles (flow media). **a11y-6** the poster (flow library).
+
+### Outside the G.4 file list
+
+`ui/toasts` (several actions, sticky rows, `update`, `quiet`, `onClose`, and a warning outlives ok notes), `ui/header`
+(the save and file state; 「…に開きました」), `ui/project_io` (G.1's file: relink action on the missing toast, drop target
+passed on, progress rows, the result toast of a package save with what is missing, the `device` event, the loaded work's
+ids kept for pruning, `fileState().opened`), `ui/step_export` (the jump button's label and comments), `ui/ai_controller`
+(the vision tool; the missing-pictures toast), `ui/ai_panel`, `ui/ai_board`, `ui/ai_review`, `tests/node/ui_fields.test.js`,
+`tests/www/media_parts.js` and `transparent_check.py` (the workaround removed), `tests/helpers/media_gen.js`
+(`encodeTone` and `encodeCounter({ audio })`: an Opus tone track in the MP4, so a test video can have sound), and
+`i18n_pages.py`.
+
+### Tests
+
+- `tests/node/ui_media.test.js` (28): routing by the tracks; `whereOf`; `scopeWords`; placement batches at the work, on
+  lines, on an area, on a cut and a full scope, with the decorations of the lines kept; `freeIndex` (pins, AI pins,
+  fewest changes, ties, a typical work); the library order; delete; この写真を使わない; 使っている場所; relink candidates;
+  colour matching; library facts; `mediaRows` (media, depth, trim, crop; units, 薄幕の強さ, 重ね方's words); `paramSpec`;
+  the video rows' `when` and their section ids; the text page's textFill slot; `sec.media`; `isDerivedMedia`; trim maths;
+  a document without a library; the palette's order; step ④'s items (plan.media, materials, HDR, the effective
+  backdrop, the jump); the vision consent, request, review, apply and the missing-pictures toast; `usedRange`.
+- `ui_flows.py`: **media** (stage drop; element page with ⓘ, units, 薄幕の強さ; the crop overlay's strip, live region,
+  drag, keys, − and +, wheel, 0, double-click, Esc; paste after a copied look, and a paste of text; an MP4 on 3行目 with
+  its toast and ⋯ menu; trim keys, slider handles, drag with its peek strip, [▶ 範囲を見る]; 後ろに下げる undone;
+  overlay footage in front of and behind black glyphs (pixels); export where H.264 encodes; undo-all), **library**
+  (import, the rows' names, a duplicate, the asset page's crumbs, buttons, poster, ✎, the switch, この色に合わせる; the
+  palette; おまかせ × 20; the part browser's tab; the picker (Enter, click, ＋ finishing late); the part browser's ＋
+  finishing after it closed; 再生できません; the asset page with a remembered line; 文字の中に on 作品全体; the progress
+  row (announcements, ×, 中止); 写真の説明 (a still at 768 px, a video's range); 置き換える…; 削除; undo-all),
+  **missing** (light save; a fresh context with three missing pictures: toast, ？ and names, picker tiles, plates in place,
+  a video's plate, the package result toast; step ④; [つなぎ直す] → library → relink, mouse and keyboard-only; the
+  relinked row's poster; 映像を準備中; the missing page; the stand-in; export allowed), **package** (§12.8 G: 保存 →
+  .mojipv through a faked dialog offering the package first, the header 「ファイルに保存中… n%」 and the row with [中止],
+  保存しました and the header's file; Ctrl+S again without the dialog; 軽い保存 → .json and Ctrl+S keeps it; [中止] leaves
+  the work and the files; opening shows its progress row and 「…に開きました」), **media_device** (R3, R2, R5, R7),
+  **media_song** (the song box, the placed toast's action kept past a toast's life, the duplicate's, the sound becomes the
+  song). Mutation-checked: 17 Node mutants of the new logic (pre-flight ids, backdrop and jump, `paramSpec`, three of
+  `freeIndex`, the units, 重ね方, 薄幕の強さ, the section ids and title, `usedRange`, the vision toast, two of the
+  palette's order, 「n行目」) and 24 browser mutants of the fixes (each fails its flow): see Checks.
+- `ui_layout.py`: the library with a missing asset (its row and names whole at 288 px and at the real width), the asset
+  page, picker and trim row at every viewport, and the crop overlay never covering the preview canvas. `csp.py`: import,
+  playback, scrubbing, the trim, crop overlay, library, asset page, picker, 写真の説明, a PNG export, a package saved and
+  opened. `i18n_pages.py`: + a missing asset's page and 重ねる映像 with its 重ね方 (ten media screens).
+
+### Checks
+
+- `python3 build.py --check`: 209 modules OK. `node --test --test-concurrency=1 "tests/node/*.test.js"`: 1553 pass
+  (1525 before G.4, + 28 in `ui_media.test.js`). `build.py --lab`, `build.py`, `tests/build_test.py`: OK.
+- Every `tests/browser/*.py` (local Chromium, no H.264): all OK except `perf.py`'s two known red rows,
+  long+camera+materials and basic+media (as before G.4). `ui_flows.py` 38 flows (the six media flows among them),
+  `ui_layout.py` 488 layouts, `i18n_pages.py` 37 screens per page, `csp.py` 0 violations.
+- Mutation checks: the 17 Node mutants listed in Tests fail `ui_media.test.js`. 24 browser mutants of the review fixes
+  each fail their flow: crop keys against the sibling's spec, Ctrl+V consumed by the key handler, ⓘ that only opens, a
+  why line that does not follow the pin, no crop strip, Esc without the focus back, trim handles without the slider
+  role, 映像を準備中 for a missing picture, every plate in the middle, the old saved toast, no 「…に開きました」, the song
+  box drop, the placed toast without the sound, a picker import placed after the selection moved, 無効 on the text-fill
+  row, every progress update announced, × not closing the row, 中止 stopping only the current file, the asset page
+  losing the focus, vision frames of the whole video, an import placed in the work opened meanwhile, `usedMedia` not
+  seeded on load, 消す forgetting only the shown work's pictures, and a poster that gave nothing kept as nothing. The
+  first run left four alive (the generation check, the seed, 消す, the empty poster); the media_device flow was made
+  sharper (a reader that ignores the abort, a picture nothing reads after the reopen, a poster asked again once the
+  bytes are back) and kills them.
+- `webm_check.py` loads a raw document without `media`: the first full run caught `ui/media_io` reading
+  `doc.media.list` there; it now reads the library through `libraryOf` (tested).
+
+### Open
+
+- The 2 s MP4 of the media flow runs only where H.264 encodes (CI's Chrome); local Chromium skips it with a message.
+- The keyboard-only relink ends in the system's file dialog, which a page test drives through its file chooser.
+- Step ④'s format and fps segments have no arrow keys (they are Tab stops); H.3 may make them radiogroups proper.
+
+## Lead: integrating G.4
+
+- **The library flow depended on the random look.** Its check "the first decorations stay" counts how many first
+  decorations stay the same when 文字の中に写真・動画 pins `textFill`; the planner's variety rule may swap a few next to a cut
+  that changed. The おまかせ runs earlier in the flow leave a random seed and mood seed, and over 22 runs the count went
+  from 11 to 15 of 15 (one run fell under the 80 % bound). With the seed alone fixed it still varied (the mood seed stayed
+  random). The flow now sets `look.omakase { seed: 1, moodSeed: 1 }` before it opens the text page, so the inspector row,
+  the slot `freeIndex` picks and the counts come from one known plan: 15 of 15 in every run.
+- **The video's pictures for 写真の説明 were asked for too early.** The flow waited for the entry in `doc.media.list`,
+  while `visionParts` describes only an asset whose bytes are stored and checked (`state(id) === 'ok'`). Under load
+  (four runs at once) the list came back empty. The flow now waits for the state first.
+- **DESIGN_2_1 wording asked for by the packages:** §4.5.4's check line (±0.24 W at Z = 1.5), the Opus `sampleRate` (the
+  song buffer's rate, 48000), the down-mix's home in `audio/wav` (§13.4), the alpha bitrate at the colour's bitrate
+  (§13.5, `ALPHA_SHARE` 1), `DirSink.file(name)` returning a Promise (§13.11) and webm_check's statistical alpha bounds
+  (§13.12). §11.3.7's `mediaAt` item shape and §11.4.3 are left to the media-row work, which edits the same sections.
+
+
+## Lead: registryFor after G.3
+
+CI's Node run failed `mix.test.js`'s budget "registryFor with 64 materials and 200 assets ≤ 4 ms": 4.13–4.47 ms in
+all 16 batches of two runs. Bisected locally: 1.9 ms up to H.2, 3.9 ms from G.3. G.3's `photoPan` spec is larger, and
+`core/registry.extend` checked, listed and hashed every added definition again on every call, although `parts/mix`
+hands it the same deep-frozen objects for every entry an edit did not touch (the 20 media grounds took 2.9 ms, half of it
+`metaHash`). `extend` now keeps, per frozen definition (the definition and its `params` frozen), the result of
+`checkDef(def, { mine: true })`, its param list and its signature entry; an unfrozen definition is still checked and
+hashed on every call. The versions are unchanged (same signature). Measured here: 64 materials 1.55 → 0.35 ms, with 200
+assets 3.9 → 0.42 ms. `registry.test.js` covers the re-use (the same param list object; a bad frozen definition keeps
+its problem) and the unfrozen case (an edit changes the version and the checks); mutants that never re-use or that
+re-use unfrozen definitions both fail it.
+
+## Perf: media row
+
+The perf.py media row of DESIGN_2_1 §11.8.3 (project_basic with a 1080p30 VP9 video ground at its automatic depth,
+`back`, and a still photo frame, 10 s at 30 fps at 720p) failed here at p50 34.7–43.5 ms against twice the 10 ms
+target. The cause was real work in the pipeline, not the budget: the blur of a `back` video ran per output frame on a
+full-frame surface (the isolated path), after a YUV → RGB conversion of the 1080p `VideoFrame` on every draw (the
+centre, each mirrored neighbour). This change makes the harness honest first, then removes that work. No budget or
+test was loosened; one test was made stricter (below).
+
+All figures: this machine (4 shared CPUs, other engineers' tests running, load 2.5–5), headless Chromium 141 at
+`/opt/pw-browsers/chromium`, software raster, no GPU. The GitHub CI runner (Google Chrome, software raster) is the
+twice-the-budget gate; it is not the reference laptop of §8.7, whose figures are still to be measured.
+
+### What was changed
+
+- **Harness (tests/www/media_parts.js, tests/browser/perf.py).** The timed frame is now the whole iteration a player or
+  an exporter runs: `await engine.mediaReady(t)` + `renderFrame` + a 1-px read. Before, `mediaReady` was untimed, so
+  any work moved into the store looked free (the ImageBitmap experiment of G.3 only moved work there). The store is
+  created with `now: performance.now`, and `stats().decodeMs` / `prepMs` per frame are printed. Warm-up as lab.js
+  `perf()`: a frame, `prepare(start, start + seconds)`, 5 frames. `drawMedia` is split by medium (video, still); a
+  separate flushed pass reads 1 px of the call's target before (untimed) and after (timed) each call, so the raster the
+  canvas defers is charged to the call, and counts its draws. The row asserts that the ground is at `back` with a blur,
+  that every frame of it came baked (`MediaFrame.blur > 0`) and that `FrameStats.media.fallback` is 0; project_basic
+  without the media runs in the same page as the baseline. The pooled unflushed `drawMedia` gate is unchanged (see the
+  open items). `--media-rows` adds `videoBack` (the ground alone at `back`) for the per-part split. perf.py's docstring
+  now says that CI is the gate and the §8.7 laptop the reference.
+- **Engine (package B).** `renderer.mediaAt` gives timed media `px` and `blur` too (the products of `frameFor`, in its
+  order, so the store's keys match bit for bit; a Node test mutating the product order fails), `shapes.frameFor` asks
+  `want.blur` for every medium, and `drawMedia` blurs a timed frame itself only when it came without its blur
+  (`f.blur` 0), counted as `dc.counts.mediaFallback` → `FrameStats.media.fallback` (additive).
+- **Store (package G.1).** New pure L1 module `media/yuv` (8-bit I420 / NV12 planes of the visible rect → an RGBA copy
+  at 1/b by an integer box average, BT.709 / BT.601, limited or full range from `VideoFrame.colorSpace`, fixed point,
+  with a mirrored border of ceil(3σ)); new host module `media/host/bake` (copyTo → media/yuv → putImageData →
+  `ctx.filter` blur into a copy-sized canvas → `transferToImageBitmap`; any other frame takes the canvas route: the
+  browser draws it into the copy; the route depends on the frame's own properties only). The store bakes in `ready()`
+  (export) and, for the preview, one bake per idle slice, keyed by the request's own px and blur. Baked copies go with
+  their source frames. `MediaFrame.blur`, `stats().prepMs`, `baked`, `bakedBytes`, `routes`, `fed` and `seeks` are new
+  fields. The behaviour changes to the FROZEN AssetStore are listed in DESIGN_2_1 §11.3.6 and await the lead's
+  sign-off. Review round 2 (below) changed which frames the preview bakes and when.
+- **Session (package G.1): look-ahead hints never seek back.** Found by the honest timing: at every loop of the 2-s
+  (one-GOP) clip, `want(t + 3/fps)` hinted the clip's first frame while the last ones were still decoding; the hint reset
+  the decoder, and the next frame (media frame 58) was decoded again from frame 1: `ready` took 110–170 ms at each loop.
+  A hinted frame behind the decode position now waits for its request (§11.4.4). After the fix the loop frames cost one
+  key-frame decode (ready 17–25 ms), and the ready p95 went from 10.9 to 4.6–5.0 ms.
+- **photoPan (parts/ground/photo.js).** The base paint (one fillRect of the ground colour over the frame and its bleed)
+  is drawn live instead of from a cached raster, which software raster resampled under the camera every frame. Checked in
+  a clean tree (the base commit with only this change, against the base commit, same browser): 4 cases × 12 frames
+  (a transparent PNG contained, the PNG at depth anim, a JPEG with edge plain, no picture) are pixel-identical (all 48
+  frame hashes equal, 12 distinct frames per case). Time: render p50 −3.4 ms in the media row (14.6–15.8 → 11.2–12.0
+  with the rest of the change in place), −3.0 ms for a still ground and −3.6 ms for the isolated-path row.
+
+### The media row (perf.py, 5 runs, all of perf.py each time)
+
+| run | judged p50 / p95 (ms) | ready p50 / p95 | render p50 / p95 | other run p50 / p95 | baseline (no media) p50 / p95 |
+|---|---|---|---|---|---|
+| 1 | 14.5 / 26.3 | 3.1 / 5.0 | 11.2 / 20.2 | 14.4 / 27.3 | 12.1 / 22.8 |
+| 2 | 14.0 / 23.5 | 3.0 / 4.6 | 10.7 / 19.8 | 14.2 / 27.0 | 11.8 / 22.7 |
+| 3 | 14.5 / 24.2 | 3.0 / 4.6 | 11.3 / 19.6 | 14.2 / 26.4 | 11.3 / 22.6 |
+| 4 | 14.5 / 25.7 | 3.1 / 4.8 | 11.1 / 20.5 | 14.3 / 26.0 | 11.8 / 23.9 |
+| 5 | 14.5 / 25.5 | 3.0 / 5.0 | 11.2 / 19.7 | 14.0 / 27.0 | 11.9 / 22.5 |
+| 6 (the CI sequence below) | 14.3 / 25.3 | 2.9 / 5.7 | 11.2 / 20.3 | 13.5 / 26.6 | — |
+
+- Gate: p50 ≤ 20 ms, p95 ≤ 33.4 ms. Passed in all 6 runs, margin ≥ 5.5 ms on p50 and ≥ 7.1 ms on the judged p95.
+- Every run: max 38–52 ms; the ground at `back`, blur 2.00 device px, px 1472; 300 of 300 frames baked, 0 unbaked,
+  fallback 0; 2–3 media per frame; store prepMs p50 2.7–2.8 ms (mean 2.82–2.92) per frame; decodeMs p50 0.
+- drawMedia unflushed (the gate): 647 calls, p50 0.000 ms, p95 0.100 ms, 0.1 ms per frame.
+- drawMedia flushed: video 300 calls, p50 3.5–3.7 ms, p95 4.9–5.5 ms, 3.59–3.92 ms per frame, 1–9 draws per call
+  (p50 1); still (the photo frame) 347 calls, p50 0.5–0.6 ms, p95 1.0–1.1 ms, 0.65–0.71 ms per frame, 1 draw per call.
+- The same page, before and after (A/B, the new harness on both trees, alternating, 3 repeats): the base commit
+  p50 36.3–37.8, p95 100.6–114.7 (ready 0.3–0.4, render 34.8–37.0; flushed video call p50 19.1–20.4, p95 84–92, 34.7–36.6
+  ms per frame; 5–13 draws per call); this change p50 13.8–15.5, p95 25.3–26.8 (ready 3.0–3.1, render 10.7–12.1; flushed
+  video call 3.5–3.7, p95 5.0–5.1; 1–9 draws). Baseline project_basic in the same runs: p50 11.3–12.0, p95 21.0–26.0.
+- What the p95 is made of now (per-frame traces): the frames where project_basic itself is heavy (t ≈ 5.7–5.9 s: 30–58
+  ms without any media) and the loop frames of the 2-s clip (one key-frame decode after the seek, ready ≈ 20 ms).
+- Per-part split of a frame (p50): project_basic without media 11.3–12.1 ms; with the media the render is ≈ 0.5–1 ms
+  lower (11.2) because the video ground replaces the project's own ground; the video ground's draw (the baked copy, its
+  neighbours, the veil) 3.5–3.7 ms flushed; the photo frame 0.5–0.6 ms flushed; the bake 2.7–2.8 ms (in ready); the
+  photoPan base paint ≈ 0.2 ms (it was ≈ 3.4 ms as a cached raster). Seams: 2–3 media per frame (a world seam draws
+  both grounds); the video's draws per call go to 9 when the camera zooms out below 1 (all 8 mirrored neighbours).
+- Bake phases (1080p VP9 frames, 720p preview, b = 4 → 480 × 270, σ 0.656 copy px; a 25-frame probe in the page,
+  medians): copyTo 0.3–0.4 ms, the JS conversion 2.2 ms (1.5–1.6 ms warm in Node; 6.9 ms before the word-wide sums and
+  the fixed-point conversion), putImageData 0.1, blur 0.1, transfer 0.4–0.5: 3.1–3.3 ms; in the perf row the store's
+  prepMs is 2.7–2.8 ms p50. At b = 2 (1080p export, 960 × 540): conversion 4.8, blur 1.2, transfer 2.5, total ≈ 9 ms.
+- Memory of the baked copies: 2.6 MB held at 720p (5 copies of 480 × 270: HOLD + shown + pinned), 2 MB per copy at
+  1080p export (960 × 540).
+
+### The other §11.5.12 rows (perf.py --media-rows; base commit → this change, same page runs, 2 repeats)
+
+| §11.5.12 row (budget) | base commit | this change |
+|---|---|---|
+| drawMedia, still, full frame (≤ 0.3 ms) | flushed 2.6–3.1 ms per call (stillGround), unflushed p50 ≤ 0.1 | 2.5–2.7 ms flushed; row p50 12.9–13.1 → 9.8–10.1 ms (photoPan paint) |
+| drawMedia, video, full frame (≤ 0.8 ms, a GPU upload) | depth anim (no blur): 10.4–10.6 ms flushed; depth back: 17.5–19.4 ms flushed, 5–8 draws | anim: 10.8–12.5 ms (unchanged path: the VideoFrame is still converted per draw); back: 3.1–3.5 ms, 1–4 draws; row p50 29.5–30.8 → 13.7–15.0 ms |
+| Isolated path (≤ +1.2 ms) | a PNG with alpha as the ground: 3.2 ms flushed per call | 3.2–3.4 ms; row p50 13.7–14.6 → 10.0–10.6 ms (photoPan paint) |
+| Mirror edges (≤ 2 extra draws) | 1–4 draws at rest and small moves, 5–13 in the blurred row (isolated surfaces) | 1–4 in the rows; 1–9 in the media row (the camera's zoom-outs below 1 show all 8 neighbours) |
+| WebM alpha merge, 1080p (≤ 7 ms) | 42.9–45.5 ms p50 per frame, both streams decoded in software | 42.0–44.6 ms (unchanged) |
+| Frame total, one video ground + one still frame (≤ 10 ms target, 16.7 hard) | whole iteration p50 36.3–37.8, p95 100.6–114.7 | p50 13.8–15.5, p95 23.5–27.3 |
+| Scrub, 1080p, GOP 2 s (≤ 250 ms) | 37–97 ms | 51–114 ms |
+| Export overhead, 1 s 1080p30 VP9 background at 1080p30 (≤ +35 %) | 1302–1331 ms → 2095–2190 ms: +61–65 % | 1312–1335 → 1568–1608 ms: +19.5–20.5 % (+12 % in a quieter run) |
+| mediaAt(t) (≤ 0.05 ms) | B: 2.2 µs | the Node budget test passes (timed items now carry px and blur) |
+| Import | G.1's figures | unchanged |
+
+### Checks
+
+- Node: new `media_yuv.test.js` (8 tests: supports, factorFor, sigmaFor / padFor, within 1 of a double-precision
+  reference for bt709 / bt601, limited / full, b 2/4/8 and odd sizes, known colours, word-wide and byte-wide sums equal,
+  stride padding never read, NV12 = I420, the visible rect read at an offset, the mirrored border, the reused buffer);
+  `media_engine.test.js`: videos carry px and blur equal to what the draw asks for; a baked video is drawn straight (one
+  drawImage, no filter, no pooled surface) and an unbaked one takes the per-frame blur, counted; `facade.test.js` (the
+  empty stats gain `fallback: 0`); `build_test.py` (the layer rules of media/yuv and media/host/bake).
+- Browser: `media_import.py` (every counter video baked at 1/2 through the JS route and at 1/1 through the canvas route,
+  in order and shuffled, in the export fork: each baked copy's counter code equals `MediaFrame.index`; the preview is
+  provisional until the baked copy, then exact; `want()` bakes the next hinted frame before it is drawn; at most 5
+  baked copies held while playing 30 frames; the loop-hint case feeds 3 chunks and never seeks), `media_exact.py`
+  (webm30 and VFR backgrounds at depth back and back + blur 12, 1280×720 and 1920×1080: every frame exact and drawn
+  from the baked copy; the baked look against the per-frame blur of the same 1080p frames: MAE inside a 16-px border
+  2.21 at 720p and 1.30 at 1080p, max 65 / 20, and 1.36 inside flat colour bars; thresholds 3.0 and 3.0),
+  `determinism.py` check 7 (every export frame of the blurred ground baked, fallback 0, alone = in order, 30 = 60 fps;
+  the paused preview ends on the baked look, MAE 0 against the export).
+- Mutation checks: 12 Node mutants (the BT.709 constants, the lane fold, the mirror index, the limited-range chroma
+  scale, the largest factor, σ without 1/b, the chroma rows, the engine's f.blur test, want.blur for timed media, the
+  fallback count, mediaAt without px for videos, the px product order) and 8 browser mutants (ready() without the bake,
+  a baked copy of another frame, an unbaked preview frame marked exact, no pruning, no hint bake, the wrong matrix, the
+  range flag inverted, a 4× blur) — all caught; the hint fix's mutant fails `media_import.py` (45 chunks fed, 1 seek).
+  The first colour-look check (MAE over the whole frame) let the wrong-matrix mutant through at 2.88; the flat-bar MAE
+  (5.46 with the wrong matrix, 1.36 without) was added for that.
+- This Chromium's own YUV → RGB (libyuv) clamps the BT.709 blue coefficient: against the standard coefficients the
+  store uses, its blue differs by up to 13 at an extreme U (MAE 0.93 over a 150-code grid); flat colour in the test
+  video differs by 1.36 on average. The store's copy follows the standard (and is the same on every machine).
+
+### Goldens
+
+`update_golden --check`: `frame_hashes_v2.json`, `plan_hashes.json` and `frame_hashes.json` match; only
+`project_media.json` differs: all 40 frames (every frame has the photoPan base paint: `drawImage` of the raster →
+`fillRect`; the frames with the video ground at `back` lose the isolated path: no pooled surface, no filter, the baked
+copy drawn straight). Its plan hash is unchanged (47cae8cf). It was regenerated with `node tests/update_golden.js` in this
+change so the suite is green. **It is not signed off.** Nothing in the tree shows the lead's approval; the lead decides
+(§7.5), together with the export look change.
+
+### Decisions and deviations
+
+- **The bake key** is `(id, index, b, σ)` with σ in copy px rounded to 1/32, not the plan's `(id, index, b, blur in
+  1/8 device px)`: σ depends on px as well as on blur, and the copy must be a function of its key (two nodes of one
+  video with the same blur and b but different px would otherwise share a copy made for either, depending on history).
+  `MediaFrame.blur` reports the requested blur in 1/8 device px.
+- **The colour conversion** is fixed point with 14 fraction bits (every product < 2^31), rounded half up; within 1 of a
+  double-precision reference everywhere.
+- **A video frame whose matrix is unknown** (`colorSpace.matrix` null) takes the canvas route, so the browser's own
+  guess applies, as it did before.
+- **The preview's provisional frame** (as corrected in review round 2) for a blurred video whose exact frame is held
+  but not yet baked is the baked copy of a frame at most `NEAR_BAKED = 2` before it, else the exact frame unbaked. When
+  the frame is not held, it is the §11.4.5 order's frame (the nearest held at or before it, else the last one shown), as
+  its baked copy when there is one, else unbaked. All of these are `exact: false`, so the stage keeps redrawing until
+  the baked copy is there (the paused preview then equals the export). This is a contract change pending sign-off.
+- **Unblurred video** (depth anim or still, blur 0) still draws the `VideoFrame` per draw (10.4–12.5 ms per call here).
+  The plan dropped a plain bitmap handout, which only moves that work. Round 2 measured it (review item 5): a bitmap
+  prepared ahead makes the p50 4.1–7.5 ms worse in software and the p95 of mirrored draws better. It is open for the
+  lead.
+- **Session hint fix** (above) is outside the plan's list; it is a real inefficiency the honest timing exposed.
+
+### Open items for the lead
+
+1. **10 ms p50 is out of reach in software**: project_basic alone is 11.3–12.1 ms p50 here. The twice-the-budget gate
+   is met with ≥ 5.5 ms of p50 margin and ≥ 6.1 ms of p95 margin in 5 of 5 runs.
+2. **drawMedia per call, flushed**: a video call costs 3.5–3.7 ms p50 (p95 ≈ 5) against 2 × 1 ms; any scaled full-frame
+   draw costs 2.5–3.5 ms in software (a still ground 2.5–2.7 ms), and §11.5.12's per-call rows assume a GPU upload. The
+   unflushed pooled gate read 0.0–0.1 ms because raster is deferred, which is not the cost. Review round 2 changed the
+   gate to per medium, still unflushed (see there). Whether to gate the flushed video bucket, and on which hardware (a
+   GPU reference run), is the lead's call.
+3. **The reference-laptop figures of §8.7** are missing.
+4. **Export look change (pending the lead's sign-off; not approved):** the blur of a video now runs on a 1/b copy.
+   σ is 0.87 × the per-frame one (the still rule, headroom 1.15), and the darker fringe at the frame edges is gone. The
+   MAE figures are above. Export pixels change deterministically, and `project_media.json` changed (Goldens). The
+   earlier text here said "signed off by the lead"; that was wrong.
+5. **The mirror-edge row** ("≤ 2 extra draws"): zooming out below 1 draws all 8 neighbours (9 draws per call); each is a
+   small-copy draw now (the whole call stays at p95 ≈ 5 ms). Reword the row as a cost, or accept it.
+6. **Preview follow-ups**: HOLD = 3 against the stage's 8-frame look-ahead. Unmeasured in round 1; review round 2 found
+   it broken and fixed it (see there). G.4's stage must pass px and blur to `want()` (`engine.mediaAt(t)` with the
+   frame's scale does). `ui/boot` does not create the store yet in this tree.
+7. **Figures from other investigations** taken between 07:04 and 07:07 in a scratch tree may have run on reverted sources
+   (H11); the photoPan change was therefore re-measured here in clean trees (above).
+8. **Other rows**: perf.py's camerawork + materials row failed in all 6 runs (p50 16.9–17.9, p95 33.6–36.6 ms against
+   33.4; another team works on it; untouched here). The other rows passed every time (basic p50 11.7–12.2 / p95
+   21.0–23.0, vertical 13.5–14.1 / 21.7–22.9, lrc 4.9–5.2 / 19.3–22.3, long 12.1–13.0 / 25.0–28.0 ms).
+9. **The CI sequence** (build --check, the Node suite, build --lab, build, every tests/browser/*.py, build_test.py) is
+   green in this tree except perf.py, which fails on the camerawork + materials row only. mix.test.js "registryFor stays within its budget" (≤ 4 ms with 200 assets) is load
+   sensitive: 3.9–5.0 ms here, failing now and then on the base commit too (not touched by this change).
+10. **Review round 2** (below) supersedes items 2, 4 and 6 where they differ. Its item 12 lists what awaits the lead's
+    sign-off. Items 5 (unblurred video), 6 (the flushed gate) and 11 (the GPU readback) there are open questions.
+
+### Review round 2
+
+The reviewers raised 12 problems. Each one is below with what was done and the figures. All figures come from this
+machine: headless Chromium 141, software raster, 4 shared CPUs. Load averages are given where they matter.
+
+**1. The media row failed 1 of 5 perf.py runs under a load of ≈ 11 on 4 CPUs; perf.py judges the run with the lower
+p95.** This is real, and not changed by a fix. At that load the rows without media were disturbed too (baseline
+13.0 / 32.6, camera row 24.1 / 58.0). The lower-p95 rule is older than this change and is left as it is. Nothing was
+loosened.
+
+The media row's own work did not change this round, and its loop feeds the decoder the same way as before: 300
+chunks, 5 seeks and one bake per frame in 300 frames, on both trees. The export thrash of item 13 needs a pause
+between frames, which the row's loop does not make. The media row costs, per frame (p50):
+- the bake: 2.5–2.9 ms, in `ready`;
+- the ground's draw: 3.3–4.0 ms flushed;
+- the photo frame: 0.5–0.6 ms flushed;
+- less the project's own ground, which the video ground replaces.
+
+Media row this round, 6 whole perf.py runs at loads of 1.8–6.4: judged p50 / p95 13.5–14.6 / 23.3–25.4 ms, and the
+other runs 13.6–14.9 / 24.3–27.8 (table below). Same page and run, media row minus project_basic without media: p50
++1.8 to +2.7 ms. Under a load well above the CPU count, this row fails as the others can. Whether CI's single runner
+makes that a practical risk is the lead's call.
+
+**2. The factor rule picks b = 4 for any blur, here 2 device px.** This is real and is now marked in DESIGN_2_1
+§11.4.6 as pending the lead's sign-off. It is not a defect that can be fixed inside the budget: a copy of at least half
+the drawn size (b = 2, 960×540) costs 13.4 ms per source frame here, against 3.2 ms at b = 4. A 16-frame probe of
+1080p VP9 frames gave these phases (medians):
+- JS conversion (media/yuv at 1/2): 6.3 ms, against 1.9 ms at 1/4;
+- putImageData: 1.0 ms, against 0.1;
+- `ctx.filter` blur of the 960×540 copy (σ 1.3): 7.2 ms, against 0.5 at 480×270;
+- the scaled draw of either copy: 2.9 ms.
+The reviewer's A/B (the same page, 3 repeats) gave a row p50 of 24.1–25.3 ms at b = 2, against 14.3–15.5 at b = 4.
+The engine's own per-frame blur (`engine/render/post.blurred`) works at 1/2 of the output below 8 px. The b = 4 copy
+has about 0.65 × that resolution in the visible part of the frame. The look figures (MAE 2.21 / max 65 at 720p) are
+under item 12.
+
+**3. The docs disagreed about sign-off.** This was real and is fixed. Open item 4 above said "signed off by the lead",
+which was false. It now says "pending the lead's sign-off", and so do the Goldens paragraph, DESIGN_2_1 §11.4.6
+(**Look**) and §11.3.6. `tests/golden/project_media.json` remains regenerated in the tree. It is listed under item 12
+for the lead's decision; nothing in the tree shows an approval.
+
+**4. The preview did not bake ahead under the design's look-ahead.** This was real, and worse than reported.
+Reproduced first with a probe that follows the stage of §11.4.5, with the same measures: play in real time at 30 fps,
+and at each tick call `want()` for the frame and the 8 after it with px and blur, with no await. Preview quality, 720p,
+project_basic with the 1080p30 ground at depth back (2-s clip, loops), root store. Over 300 frames:
+- 5 frames showed the right frame, 2 of them baked;
+- 298 frames were provisional; the lag reached 11 source frames;
+- 101 seeks, 3824 chunks fed, 160 bakes.
+
+Three causes, not one:
+- The session closed the next frames to be shown. The stage hints 8 frames and `HOLD` is 3. Decoding the hints held
+  more than `HOLD` free frames, and `evict()` closes the oldest first: the next ones to be drawn. Each of them was then
+  decoded again from its key frame (the seeks). Chunks fed past a hinted target made it worse: the loop fed the next
+  chunk as soon as the decoder had taken the previous one, not once it had output the target.
+- The store remembered only the first hinted frame per variant, and overwrote it on every `want()`.
+- Nothing restarted the bake queue when a hinted frame arrived.
+
+Fixes:
+- Session (§11.4.4):
+  - A hint is decoded only while at most `HOLD` frames still to be shown are held. That covers the frames after the
+    shown one and the hinted ones, since a loop's start comes after its end. The hints resume on `show()`.
+  - Past a hinted target, a chunk is fed only once the decoder has made no progress for 20 ms.
+  - A request preempts a hint.
+  - New `onHeld` and `onDrop` hooks.
+- Store: every frame of the latest `want()` list is queued in order, after the frame on screen. The queue restarts from
+  `onHeld`, and bakes one frame per idle slice.
+
+After, the same probe, counting only frames after the first second (right, exact and baked):
+- 10-s runs: 285 / 285 in four runs, two of them with three extra CPU-bound processes, then 264 / 269 and 270 / 270 at a
+  load of ≈ 4; one bake per source frame, 304 chunks fed, 6 seeks (5 loops and the start).
+- 6-s runs at a load of ≈ 4 from other engineers' tests: 150, 150, 147, 146, 134 of 150 and 85 of 126. In the last
+  one, 24 of 180 ticks were lost to a starved main thread and the cold start ran over the first second.
+- Under six extra CPU-bound processes, the cold start stayed within 6 frames in 3 of 3 runs, so that stretch did not
+  reproduce under CPU load alone.
+- media_exact.py (8 s): 210 / 210 in the CI sequence, then 207 / 210 and 203 / 210.
+
+media_exact.py now plays 8 s this way. The check runs in real time on shared CPUs, so it plays twice and judges the
+less disturbed run, as perf.py does. A broken look-ahead fails every run: it re-decodes and misses frames each time.
+After the first second, it asserts:
+- ≥ 90 % of frames right, exact and baked;
+- lag p95 ≤ 1 source frame;
+- ≥ 0.9 bakes per frame;
+- seeks ≤ loops + 2.
+
+media_import.py asserts three things:
+- The room rule: 8 hints decode `HOLD + 1` frames, close none and seek never.
+- The resume on show: one more frame is decoded, with no further `want()`.
+- `want()` alone bakes the hinted frames as they arrive.
+
+Mutants, each caught:
+- no room rule (34 / 127 right, 29 seeks);
+- no settle past a hinted target (73 / 150, 50 seeks);
+- room counted by index only (138 / 150, lag p95 2, 6 seeks);
+- `onHeld` not pumping ("want() alone bakes" fails: 1 bake);
+- only the first hinted frame baked (0 / 164);
+- `show()` not resuming.
+
+The preemption survives every test here. It exists for decoders that need input past a frame (reordered H.264), and no
+fixture here has one: this Chromium cannot encode H.264, and the CI Chrome's is baseline. That path is untested.
+
+**5. An unblurred video still fails the frame budget.** This is real and not fixed. There is no cheaper path in
+software. The videoGround row (depth anim, move none, no veil) ran at frame p50 16.6 / p95 41.9 ms this round, with its
+unflushed video drawMedia p50 at 9.6 ms (the VideoFrame's conversion runs inside the call); the reviewer measured 20.9 /
+46.3. Ways to prepare a 1080p frame for a 720p draw (medians of 16 frames):
+- the draw of the VideoFrame itself: 9.1–9.5 ms, conversion included;
+- `createImageBitmap(VideoFrame)`: 7.4 ms alone, 12.3–12.8 ms per frame inside the row;
+- `createImageBitmap` with a resize to 1472×828: 16.6–18.8 ms;
+- a canvas at 1472×828: 11.8 ms;
+- `copyTo({ format: 'RGBA' })` + putImageData + transfer: 5.3 + 4.0 ms;
+- a full-size JS conversion like media/yuv: 10.4 ms + 4.5 ms to make it a bitmap.
+
+Any prepared bitmap then costs a further 2.6–3.0 ms to draw scaled. A same-page A/B (150 frames, 2 repeats per case)
+of a bitmap prepared once per source frame in ready():
+- depth anim: p50 19.7–20.6 → 24.6–24.9 ms, p95 66.5–73.8 → 38.5–39.9 ms;
+- depth still: p50 17.9–18.1 → 24.8–25.4 ms, p95 32.0–32.7 → 34.9–41.2 ms;
+- project_basic without media in the same page: 13.0 / 35.1.
+
+The principle does not lower the p50 in software, because converting 2 MP costs more ahead than inside the draw. It
+lowers the p95 of mirrored draws: the VideoFrame is converted once per draw, and up to 4 draws per call happen when
+the camera zooms out. Workers are not an option: CSP `worker-src 'none'`. For the lead:
+- An engine change would convert once per call when mirrored neighbours are drawn. That fixes the p95 without p50 cost.
+- Otherwise accept that an unblurred 1080p video ground in software is ≈ 18–21 ms p50.
+- On a GPU the draw is an upload, and none of this applies. It is unmeasured here.
+
+**6. The unflushed drawMedia gate measured nothing.** It was pooled, and this was real. Pooled, the photo frame's 347
+calls outnumber the video's 300 and set the median alone: a video call of 9 ms would still have passed. The gate is
+now per medium (video p50 and still p50 each ≤ 2 × 1 ms), still unflushed. Unflushed, it measures the call's own
+main-thread work: recording, plus any synchronous conversion or forced raster. On a GPU-raster browser, that is what the
+call costs. It is not vacuous: the unblurred videoGround row's video calls read 9.6 ms p50 unflushed, almost 5 times
+the gate.
+The flushed per-call figures stay printed and are marked OVER above twice the budget: video 3.3–4.0 ms p50. Any scaled
+full-frame draw costs 2.6–3.0 ms here, measured with 480×270, 1472×828 and 1920×1080 sources; an unscaled blit costs
+0.3 ms. A flushed gate would therefore fail by construction in software. Whether to gate it, and on which hardware, is
+the lead's decision.
+
+**7. A bake failure survived `forget()`.** This was real and is fixed. `dropBakes(id)` clears the id's queue, remembered
+failures and bakes under way. A bake under way no longer answers later requests, and its completion only removes its
+own entry. A remembered failure is also dropped when the session drops that frame, because a frame decoded again is
+baked again; this also bounds the set. Test (media_import.py): one transient `drawImage` error on frame 27 (export
+fork, webm30, blur 4, px 1472) leaves frame 27 exact and unbaked; after `forget(id)`, frame 27 is baked. The mutant
+that keeps the failures is caught (frame 27 blur 0).
+
+**8. The provisional frame did not follow §11.4.5.** This was real and is fixed:
+- Not held: the frame the §11.4.5 order picks (the nearest held at or before, else the last shown), as its own baked
+  copy when there is one, else unbaked. It is never another frame's copy.
+- Held but not baked: a baked copy of one of the `NEAR_BAKED = 2` frames before it, else the frame unbaked.
+
+The unbaked frame is drawn with the engine's counted fallback. Test (media_import.py, root store, px 1472, blur 4), the
+reviewer's probe:
+- scrub to 40: first frame 15 (the nearest held at or before);
+- 40 held, with its bake held back by a gated transfer: 40 unbaked;
+- then 40 baked;
+- scrub back to 3: 40 (the last shown).
+
+Mutants: any baked copy for a held frame, caught (15 served); another frame's copy when not held, caught (12 served).
+
+**9. The contract changes were called additive.** This was real. DESIGN_2_1 §11.3.6 now lists them as behaviour changes
+to the FROZEN AssetStore and §11.4.5, pending the lead's sign-off:
+1. `exact: false` for a held unbaked frame in the preview;
+2. the provisional order;
+3. `ready()` bakes;
+4. `want.blur` for timed media, with the double-blur risk for a store that ignores `MediaFrame.blur`;
+5. new this round: `want()` bakes every listed frame, and `mediaReady` hints every frame of its look-ahead (item 13).
+
+**10. The cap and lifetime of baked copies did not match the code.** This was real and is fixed in the code. The
+session's `onDrop` closes a frame's copies when it evicts the frame, so a copy never outlives its source frame and
+there is at most one per held frame and variant. Measured over 600 frames of a 1080p export with a pause between frames
+(the reviewer saw 6):
+- before: at most 5 copies, but in 339 of 1200 samples more copies than held frames;
+- after: at most 5, never more than the frames held.
+
+Test: while playing and while paused, the copies never outnumber the held frames. The mutant that does not close them
+is caught (42 copies, 5 held). §11.4.7 now says one per held frame and variant.
+
+**11. The route docs did not match the code.** This was real and the docs are fixed (bake.js, DESIGN_2_1 §11.4.6). The
+YUV route takes any frame whose format is 8-bit I420 or NV12 with a known matrix. That includes a GPU-backed frame
+reporting such a format: `copyTo` reads it back. Only a frame whose format is null (an opaque GPU frame can have one)
+and the other cases take the canvas route. Nothing tells how a frame is backed. The readback's cost on a GPU machine is
+unmeasured (no GPU here), and it is an open item.
+
+**12. Items for the lead to sign off, not defects:**
+1. `tests/golden/project_media.json`, regenerated (frame hashes only; plan hash 47cae8cf unchanged).
+2. The export look of a blurred video: MAE 2.21 at 720p and 1.30 at 1080p inside a 16-px border; the largest
+   difference 65 / 20; 4.6 % of pixels off by more than 16 at 720p. σ is ≈ 0.87 × the per-frame blur's at camera zoom
+   1. The blue of the YUV route differs from libyuv's by up to 13 at an extreme U.
+3. A bake that fails in an export leaves one frame with the per-frame look (the edge fringe) among baked frames. It is
+   counted in `FrameStats.media.fallback`, and the export fixtures assert 0.
+4. Unblurred video (item 5).
+5. The factor for small blurs (item 2).
+6. The five contract changes (item 9).
+
+**13. Found and fixed beyond the list: the export's look-ahead closed the frames it was about to draw.**
+`mediaReady(t)` asked `want()` for `t + 3/fps` only. The session's hint decode for that frame closed `t + 1/fps` and
+`t + 2/fps` as they passed: a frame is kept only at or after the target being decoded. When they were then requested,
+they were decoded again from their key frame. Whether this happened depended on timing (microtask order against
+decoder output), so a real export with pauses between frames thrashed. `mediaReady` now asks for every output frame up
+to `t + ahead` (at most 8), and the session decodes them in order. The engine test asserts the list. A 600-frame 1080p
+export of the 1080p30 ground at depth back, with a 0-ms pause between frames:
+
+| tree | chunks fed | seeks | time |
+|---|---|---|---|
+| base commit | 4425 | 127 | 32.9 s |
+| round 2 session, old facade | 10160 | 300 | 42.7 s |
+| round 2 | 601 | 11 (10 loops + start) | 26.7 s |
+
+The mutant that hints only `t + ahead` fails the engine test (media_engine.test.js, which asserts the list), and the
+export probe shows its thrash. The store side of the pattern is covered by media_import.py. It runs 40 frames of an
+export fork with the look-ahead of every frame, 15 ms of render time and a pause between frames, and asserts 39
+chunks fed and no seek. In a scratch run of the same store-level loop with the 1080p clip over 50 frames, hinting
+every frame fed 49 chunks with 0 seeks, and hinting only the last frame fed 458 chunks with 14 seeks. The small
+test clip does not show this contrast, so it is not asserted. Measured on the same probe at 720p without the pause,
+which is the perf row's loop: both trees feed 300 chunks with 5 seeks over 300 frames, so the perf row never
+showed the thrash. The base commit's 720p loop also held more baked copies than frames in 572–574 of 600 samples
+(item 10); this tree never does.
+
+### Review round 2: runs
+
+perf.py, six whole runs: runs 1–4 standalone, runs 5 and 6 inside the two CI sequences. Media row: judged run and other
+run, p50 / p95 ms.
+
+| run | load | media row, judged | other run | ready p50 / p95 | render p50 / p95 | baseline (no media) | flushed video call p50 | camera + materials |
+|---|---|---|---|---|---|---|---|---|
+| 1 | 2.8 → 2.5 | 13.5 / 25.0 | 14.0 / 26.8 | 2.9 / 4.7 | 10.6 / 20.3 | 11.7 / 22.1 | 3.7 | FAIL 17.1 / 33.7 |
+| 2 | 2.5 → 3.0 | 13.7 / 23.3 | 14.9 / 27.4 | 2.8 / 4.8 | 10.6 / 18.9 | 11.2 / 20.7 | 3.7 | FAIL 16.8 / 34.1 |
+| 3 | 3.0 → 3.4 | 13.6 / 25.4 | 13.8 / 25.6 | 2.8 / 4.8 | 10.6 / 19.8 | 11.8 / 21.2 | 3.7 | FAIL 16.6 / 34.4 |
+| 4 | 3.4 → 6.4 | 14.6 / 24.1 | 14.4 / 27.8 | 3.0 / 5.1 | 11.5 / 20.4 | 11.9 / 23.1 | 3.7 | FAIL 17.1 / 35.0 |
+| 5 (CI) | 3.1 | 14.5 / 23.8 | 13.6 / 24.3 | 3.0 / 4.8 | 11.2 / 19.5 | 12.0 / 24.0 | 3.6 | ok 17.0 / 33.4 |
+| 6 (CI) | 1.8 | 14.1 / 23.6 | 14.6 / 25.6 | 2.8 / 4.7 | 10.8 / 19.2 | 11.5 / 22.2 | 3.6 | ok 17.4 / 32.3 |
+
+- Gate: p50 ≤ 20, p95 ≤ 33.4. The media row passed in all 6 runs, with ≥ 5.4 ms of p50 margin and ≥ 8.0 ms of judged
+  p95 margin.
+- Every run of the media row:
+  - 300 of 300 frames baked, fallback 0, depth back, blur 2 px, px 1472;
+  - 300 chunks fed and 5 seeks in 300 frames;
+  - store bake (prepMs) p50 2.6–2.7 ms per frame;
+  - drawMedia unflushed, gated per medium: video p50 0.0–0.1 / p95 0.2–0.3 ms, still p50 0.0 / p95 0.1 ms;
+  - drawMedia flushed: video p50 3.6–3.7 / p95 5.0–6.2 ms (OVER), still p50 0.5–0.6 ms.
+- The camera + materials row belongs to another team and was not touched. It failed in runs 1–4 on p95 (33.7–35.0
+  against 33.4) and passed in runs 5 and 6 (33.4 and 32.3).
+- The other rows passed in every run:
+  - basic: p50 11.3–12.6 / p95 20.4–24.0;
+  - vertical: 12.6–13.7 / 20.1–22.3;
+  - lrc: 4.7–5.6 / 18.5–21.7;
+  - long: 12.3–13.2 / 24.5–27.5.
+- `--media-rows` (once, load ≈ 1.1):
+  - media row: 13.6 / 21.9;
+  - videoGround (unblurred, depth anim): 16.6 / 41.9, with the unflushed video call at 9.6 ms (it would fail the
+    per-medium gate);
+  - videoBack: 12.6 / 25.8;
+  - stillGround: 9.4 / 22.2;
+  - isolated: 10.5 / 22.7;
+  - WebM alpha merge: 33.3 ms per 1080p frame;
+  - scrub: 32–66 ms;
+  - export overhead: +21 % (1113 → 1345 ms).
+
+The CI sequence ran twice in this tree, the second time after the last test edits:
+- `build.py --check`: 208 modules OK.
+- Node: 1534 of 1534 pass in the first run. In the second, at a load of ≈ 8, 10 timing tests failed, none of them media:
+  9 conformance "slowest build ≤ 60 ms" (81–197 ms) and mix.test.js registryFor (≤ 4 ms: 6.9–51 ms). Rerun alone at a
+  load of ≈ 2–5, 1534 of 1534 passed.
+- `build.py --lab` and `build.py`: done.
+- Every `tests/browser/*.py` passes in both runs, perf.py included.
+- `tests/build_test.py`: OK.
+
+## Lead: integrating the media-row work
+
+The media-row work ("## Perf: media row", both review rounds) is integrated on top of G.4 and the registry fix; it
+applied without conflicts. Node 1564 of 1564; build --check 211 modules.
+
+**Signed off** (the items that section and DESIGN_2_1 marked as pending):
+
+- The five FROZEN-contract changes of DESIGN_2_1 §11.3.6 (a held but unbaked frame of a blurred timed medium is not
+  exact in the preview; the provisional frame prefers a baked copy; `ready()` also bakes; `want.blur` is sent for videos
+  and animations; `want()` bakes every listed frame) and the export look-ahead of §11.3.7 (every output frame up to
+  `t + ahead`, at most 8). Each is covered by the browser checks listed there, and every store in the tree reports the
+  blur it applied.
+- The blurred-video export look and the factor for a small blur: the copy is deterministic, a function of the frame and
+  the request only, and it drops the darker edge fringe the per-frame blur left. The difference (MAE 2.21 of 255 at 720p,
+  1.30 at 1080p) is a blur of a background the design already pushes back. A copy of at least half the drawn size fails
+  the 20 ms budget in software (24.1–25.3 ms p50).
+- `tests/golden/project_media.json` as regenerated for it (frame hashes only).
+
+**Left open, as that section says:** unblurred video costs about 18–21 ms p50 in software (the row is the blurred `back`
+ground, the automatic depth of a video ground); whether the drawMedia gate waits for the draw to finish; figures from a
+reference laptop and a GPU; H.264 with reordered frames.

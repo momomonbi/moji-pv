@@ -12,7 +12,10 @@
   const DIGEST = MV.use('audio/digest');
   const docs = MV.use('core/doc');
 
-  const FALLBACK = { video: 'vp09.00.10.08', audio: 'opus' };   // only when this browser cannot encode H.264
+  // Only when this browser cannot encode H.264. The audio takes the default order (AAC, else Opus: DESIGN_2_1 §13.4).
+  const FALLBACK = { video: 'vp09.00.10.08' };
+  const NO_AAC = ['bogus.aac', 'opus'];     // codecs.audioList that forces the Opus fallback where AAC would encode
+  const CLIP = 'a3f9c2d17b0e4a5c6d7e8f901';
   const MP4_SECONDS = 2.5;   // 75 frames at 30 fps: longer than one 2·fps key-frame interval, so frame 60 must be a key
 
   function testDoc({ seconds = 2, fps = 30, short = 720, format = 'mp4', backdrop = 'scene', t0 = 0, title = '書き出しテスト' } = {}) {
@@ -81,6 +84,19 @@
     const stsd = child(v, stbl, 'stsd');
     const entry = boxes(v, stsd.body + 8, stsd.end).next().value;
     const track = { kind, timescale, duration, format: entry.type, samples: [] };
+    if (kind === 'soun') {
+      // AudioSampleEntry: 28 bytes of fields after the box header, then its boxes (esds for AAC, dOps for Opus)
+      track.channels = v.getUint16(entry.start + 24);
+      track.rate = v.getUint32(entry.start + 32) / 65536;
+      track.boxes = [];
+      for (const b of boxes(v, entry.start + 36, entry.end)) {
+        track.boxes.push(b.type);
+        if (b.type === 'dOps') {
+          track.dOps = { version: v.getUint8(b.body), channels: v.getUint8(b.body + 1), preSkip: v.getUint16(b.body + 2),
+            rate: v.getUint32(b.body + 4) };
+        }
+      }
+    }
     if (kind === 'vide') {
       track.width = v.getUint16(entry.start + 32);
       track.height = v.getUint16(entry.start + 34);
@@ -163,8 +179,113 @@
         keyIndices: video.samples.map((x, i) => (x.key ? i : -1)).filter((i) => i >= 0),
         seconds: video.duration / video.timescale, sampleSeconds: video.sampleSum / video.timescale, firstDts: video.samples[0].dts,
         decoded: decoded.count, decodeError: decoded.error, codec: decoded.codec },
-      audio: audio ? { format: audio.format, seconds: audio.duration / audio.timescale, rate: audio.timescale } : null,
+      audio: audio ? { format: audio.format, seconds: audio.duration / audio.timescale, rate: audio.timescale, channels: audio.channels,
+        boxes: audio.boxes, dOps: audio.dOps || null, samples: audio.samples.length } : null,
     };
+  }
+
+  function rmsOf(buffers) {
+    let sum = 0, n = 0;
+    for (const x of buffers) for (let i = 0; i < x.length; i++) { sum += x[i] * x[i]; n++; }
+    return n ? Math.sqrt(sum / n) : 0;
+  }
+
+  // The sound of an MP4: decodeAudioData of the whole file; where this browser's media stack cannot open the MP4
+  // container (a Chromium build without proprietary codecs), an AudioDecoder over the file's own sample table.
+  async function decodeSound(bytes) {
+    try {
+      const ctx = new OfflineAudioContext(2, 48000, 48000);
+      const buffer = await ctx.decodeAudioData(bytes.slice().buffer);
+      const planes = [];
+      for (let c = 0; c < buffer.numberOfChannels; c++) planes.push(buffer.getChannelData(c));
+      return { via: 'decodeAudioData', seconds: buffer.duration, rms: rmsOf(planes), channels: buffer.numberOfChannels };
+    } catch (err) {
+      const reason = String(err && err.message);
+      const mp4 = parseMp4(bytes);
+      const track = mp4.tracks.find((t) => t.kind === 'soun');
+      if (!track) return { via: 'none', seconds: 0, rms: 0, channels: 0, reason };
+      const planes = [];
+      let frames = 0, error = null;
+      const decoder = new AudioDecoder({
+        output: (d) => {
+          const plane = new Float32Array(d.numberOfFrames);
+          d.copyTo(plane, { planeIndex: 0, format: 'f32-planar' });
+          planes.push(plane);
+          frames += d.numberOfFrames;
+          d.close();
+        },
+        error: (e) => { error = String(e); },
+      });
+      decoder.configure({ codec: track.format === 'Opus' ? 'opus' : 'mp4a.40.2', sampleRate: track.rate, numberOfChannels: track.channels });
+      for (const s of track.samples) {
+        decoder.decode(new EncodedAudioChunk({ type: 'key', timestamp: Math.round((s.dts * 1e6) / track.timescale),
+          data: bytes.subarray(s.offset, s.offset + s.size) }));
+      }
+      await decoder.flush();
+      decoder.close();
+      return { via: 'AudioDecoder (' + reason + ')', seconds: frames / track.rate, rms: rmsOf(planes), channels: track.channels, error };
+    }
+  }
+
+  // Opus in MP4 (DESIGN_2_1 §13.4): AAC forced unavailable with codecs.audioList, a 2.5 s export with a tone.
+  async function opusCheck(fallback) {
+    const codecs = Object.assign(fallback ? { video: FALLBACK.video } : {}, { audioList: NO_AAC });
+    const size = S.outputSize('16:9', 720);
+    const probe = await MP4.probe({ w: size.w, h: size.h, fps: 30, codecs });
+    if (probe.audioCodec !== 'opus') return { probeAudio: probe.audioCodec };
+    const doc = testDoc({ seconds: MP4_SECONDS });
+    doc.song = { name: 'tone.wav', sha1: '0'.repeat(40), seconds: 3, bpm: null, offset: 0, meter: 4, bpmConfidence: null, digest: null, info: null };
+    const engine = engineFor(doc);
+    const result = await MP4.exportVideo({ engine, doc, audio: toneBuffer(3, 48000), sink: SINK.createMemorySink({ type: 'video/mp4' }), codecs });
+    const bytes = new Uint8Array(await result.blob.arrayBuffer());
+    const pre = S.preflight(doc, engine.plan, { webcodecs: true, codec: probe.codec, anyCodec: probe.anyCodec, audioCodec: probe.audioCodec,
+      fontsReady: true, fsAccess: true, warnings: [] });
+    return { probeAudio: probe.audioCodec, result: { frames: result.frames, audio: result.audio, audioCodec: result.audioCodec },
+      file: await summarize(bytes, codecs), sound: await decodeSound(bytes), preflight: pre.map((x) => x.code) };
+  }
+
+  // An engine whose forks have a mediaReady that records the times it is asked for (and fails on the 5th when `fail`).
+  function readyEngine(doc, fail) {
+    const engine = engineFor(doc);
+    const calls = [];
+    const fork = engine.fork;
+    engine.fork = () => {
+      const e = fork.call(engine);
+      e.mediaReady = (t, o) => {
+        calls.push({ t, fps: o && o.fps, signal: !!(o && 'signal' in o) });
+        if (fail && calls.length === 5) {
+          return Promise.reject(Object.assign(new Error('media not on this device: ' + CLIP), { code: 'media-missing', id: CLIP }));
+        }
+        return Promise.resolve();
+      };
+      return e;
+    };
+    return { engine, calls };
+  }
+
+  // The export loops await engine.mediaReady(t0 + i / fps) before every frame (DESIGN_2_1 §11.4.5); a store failure
+  // stops the export with ExportError('media') naming the asset, and nothing is kept.
+  async function mediaWaitChecks(codecs) {
+    const out = {};
+    const doc = testDoc({ seconds: 0.5, t0: 0.4 });
+    doc.media = { list: [{ id: CLIP, name: '海辺.mp4' }] };
+    const m = readyEngine(doc, false);
+    await MP4.exportVideo({ engine: m.engine, doc, audio: null, sink: SINK.createMemorySink(), codecs });
+    out.mp4 = m.calls;
+    const pngDoc = testDoc({ format: 'png', seconds: 0.5, t0: 0.4 });
+    const p = readyEngine(pngDoc, false);
+    await PNG.exportPngs({ engine: p.engine, doc: pngDoc, alpha: false, sink: SINK.createMemorySink() });
+    out.png = p.calls;
+    const bad = readyEngine(doc, true);
+    const sink = SINK.createMemorySink();
+    const failed = await captureDetail(MP4.exportVideo({ engine: bad.engine, doc, audio: null, sink, codecs }));
+    out.fail = Object.assign(failed, { bytesLeft: sink.bytes, asked: bad.calls.length });
+    const badPng = readyEngine(pngDoc, true);
+    pngDoc.media = doc.media;
+    const pngSink = SINK.createMemorySink();
+    const failedPng = await captureDetail(PNG.exportPngs({ engine: badPng.engine, doc: pngDoc, alpha: false, sink: pngSink }));
+    out.failPng = Object.assign(failedPng, { bytesLeft: pngSink.bytes });
+    return out;
   }
 
   // --- OPFS file handles (a real File System Access sink without a dialog) ----------------------------------------
@@ -177,6 +298,12 @@
   async function opfsHas(dir, name) {
     for await (const key of dir.keys()) if (key === name) return true;
     return false;
+  }
+
+  async function captureDetail(promise) {
+    try { await promise; return { ok: true }; } catch (e) {
+      return { ok: false, code: e && e.code, message: String(e && e.message), detail: (e && e.detail) || null };
+    }
   }
 
   async function capture(promise) {
@@ -253,7 +380,7 @@
       onProgress: (p) => progress.push(p) });
     const fileBytes = new Uint8Array(await (await file.handle.getFile()).arrayBuffer());
     out.stream = Object.assign({ result: { frames: streamed.frames, bytes: streamed.bytes, codec: streamed.codec, audio: streamed.audio,
-      name: streamed.name } }, await summarize(fileBytes, codecs));
+      audioCodec: streamed.audioCodec, name: streamed.name } }, await summarize(fileBytes, codecs));
     out.progress = { calls: progress.length, last: progress[progress.length - 1], etaNumbers: progress.slice(1).every((p) => typeof p.eta === 'number') };
     await file.dir.removeEntry('export_check.mp4');
 
@@ -268,6 +395,8 @@
       signal: controller.signal, onProgress: (p) => { if (p.i === 5) controller.abort(); } }));
     out.cancel = { ok: cancel.ok, code: cancel.code, fileLeft: await opfsHas(gone.dir, 'export_cancel.mp4') };
     out.surround = await surroundCheck(codecs);
+    out.opus = await opusCheck(fallback);
+    out.wait = await mediaWaitChecks(codecs);
     return out;
   }
 

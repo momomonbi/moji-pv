@@ -1,14 +1,28 @@
-/* 文字PVメーカー v2 — original work. AI controller: keys in session/local storage, key check, runs with stages and abort, audio consent, reviews, apply and selective revert (DESIGN §4.22, §6.4.10). */
-MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'ai/changes', 'i18n/t', 'ui/looks', 'ui/selection'],
-  (PR, PREP, LOOKS, SONG, CH, T, LK, S) => {
+/* 文字PVメーカー v2 — original work. AI controller: keys in session/local storage, key check, runs with stages and abort, audio consent, reviews, apply and selective revert; the area instructions and materials (DESIGN §4.22, §6.4.10; DESIGN_2_1 §5.2–§5.6, §6.2–§6.4). */
+MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'ai/changes', 'i18n/t', 'ui/looks', 'ui/selection',
+  'planner/areas'],
+  (PR, PREP, LOOKS, SONG, CH, T, LK, S, AREAS) => {
     'use strict';
 
-    const TOOLS = Object.freeze(['prep', 'looks', 'edit', 'transcribe', 'align', 'analyze']);
+    // v2.1: 'direct' (指示: area instructions, one brief from the panel, up to 8 from the board, or camera mode),
+    // 'material' (素材づくり) and 'vision' (写真の説明, DESIGN_2_1 §11.6.2). Their request builders and validators are
+    // ai/direct, ai/recipe and ai/vision, injected (deps.direct, deps.recipe, deps.vision) so the Node tests can fake the
+    // answers.
+    const TOOLS = Object.freeze(['prep', 'looks', 'edit', 'transcribe', 'align', 'analyze', 'direct', 'material', 'vision']);
     const SONG_TOOLS = Object.freeze(['transcribe', 'align', 'analyze']);
-    const GROUP_ORDER = Object.freeze(['lyrics', 'work', 'lines', 'time']);     // 歌詞 / 全体 / 行ごと / 時間 (§6.4.10.5)
+    // 歌詞 / 全体 / 行ごと / 時間 (§6.4.10.5), then the groups of area instructions (DESIGN_2_1 §5.6; the last four of
+    // ai/changes GROUPS): 素材 / 区画 / カット / 区画の外.
+    const AREA_GROUP_ORDER = Object.freeze(['materials', 'area', 'cuts', 'outside']);   // headings ai.grp.*
+    const GROUP_ORDER = Object.freeze(['lyrics', 'work', 'lines', 'time'].concat(AREA_GROUP_ORDER));
+    // The review of an area instruction (DESIGN_2_1 §6.4): 素材, then one 区画 group per area, カット, and the rest;
+    // 区画の外 last (unchecked by default).
+    const DIRECT_ORDER = Object.freeze(['materials', 'area', 'cuts', 'lyrics', 'lines', 'time', 'work', 'outside']);
+    const MAX_BRIEFS = 8;                 // ai/direct.MAX_BRIEFS (§5.2)
+    const ASK_MAX = 120;                  // a board draft (side.asks, §2.1)
+    const ASKS_CAP = 40;
     // The running line (§6.4.10.4): 音声を準備中 → アップロード中 → 処理中 (Files API only, from ai/song) → 考え中.
     const STAGES = Object.freeze(['prepare', 'upload', 'process', 'think']);
-    const GUIDE_TOPICS = Object.freeze(['prep', 'looks', 'edit', 'song', 'review', 'key']);   // AIでできること (ai.guide.*)
+    const GUIDE_TOPICS = Object.freeze(['prep', 'looks', 'direct', 'material', 'song', 'review', 'key']);   // AIでできること (ai.guide.*)
     const LYRIC_EDIT_KINDS = Object.freeze(['cut', 'note', 'emphasis', 'impact', 'remove']);
     const MAX_INSTRUCTION = 300;          // the ひとこと field (§6.4.10.3); ai/looks cuts the prompt at the same length
     const LOG_CAP = 50;                   // side.aiLog entries kept, like side.looks.cap, so autosaves stay small
@@ -176,6 +190,8 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
 
     // A log item's target (the item shapes of ai/changes.logEntry).
     function itemKey(item) {
+      if (item.material) return 'm:' + item.material;
+      if (item.media) return 'a:' + item.media;
       if (item.path) return 'p:' + item.path;
       if (item.filter) return 'f:' + item.filter;
       if (item.rowId) return 'r:' + item.rowId;
@@ -193,7 +209,7 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
       return changes.map((c) => {
         let keys;
         if (LYRIC_EDIT_KINDS.includes(c.kind)) keys = [wholeSheet ? 'rows' : 'r:' + c.rowId];
-        else if ((c.kind === 'part' || c.kind === 'time') && c.path) keys = ['p:' + c.path];
+        else if ((c.kind === 'part' || c.kind === 'time' || c.kind === 'value') && c.path) keys = ['p:' + c.path];
         else keys = CH.logEntry(doc, CH.toCommands(doc, plan, [c]), {}).applied.map(itemKey);
         return [...new Set(keys)].filter((k) => at.has(k)).map((k) => at.get(k));
       });
@@ -248,6 +264,149 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
       return sameList(next, review.changes) ? review : Object.assign({}, review, { changes: next });
     }
 
+    // ---- area instructions: targets, groups, aggregates, dependencies, the board (DESIGN_2_1 §5.2, §6.2–§6.4) ----------
+
+    // targetRef(target, sel, doc, plan) → the AreaRef the instruction box sends: 全体 → work; 選択中 → the named area with
+    // exactly the selected lines (or those lines), or the selected cut; 区画 → the picked area. null when 選択中 has no
+    // selection or the picked area is gone.
+    function targetRef(target, sel, doc, plan) {
+      const tg = target || { mode: 'work' };
+      if (tg.mode === 'area') return tg.ref && plan && AREAS.resolve(doc, plan, tg.ref) ? tg.ref : null;
+      if (tg.mode !== 'sel') return { kind: 'work' };
+      if (!plan) return null;
+      const s = S.validate(sel, plan, doc);
+      if (s.level === 'cut' && !S.lineOfSel(s)) return { kind: 'cut', key: s.key };
+      if (s.level === 'cut') {
+        const line = plan.lines.find((l) => l.id === S.lineOfSel(s));
+        if (line && line.cuts.length > 1) return { kind: 'cut', key: s.key };
+      }
+      if (s.level === 'line' && s.area) return s.area;
+      const ids = selectedLines(s, plan);
+      return ids.length ? AREAS.ofLines(doc, plan, ids) : null;
+    }
+
+    // The group a change of an area review is shown in: E's `group` (materials | area | cuts | lyrics | outside | work |
+    // lines | time), or the v2 group of its kind.
+    function groupOfChange(c) { return c.group && DIRECT_ORDER.includes(c.group) ? c.group : CH.groupOf(c); }
+
+    // directGroups(changes, areaKeys) → [{ group, areaKey?, changes }] in review order: 素材, one 区画 group per area (in
+    // the order the briefs named them), カット, …, 区画の外.
+    function directGroups(changes, areaKeys) {
+      const keys = (areaKeys || []).slice();
+      for (const c of changes) if (groupOfChange(c) === 'area' && c.areaKey && !keys.includes(c.areaKey)) keys.push(c.areaKey);
+      const out = [];
+      for (const group of DIRECT_ORDER) {
+        if (group === 'area') {
+          for (const key of keys) {
+            const list = changes.filter((c) => groupOfChange(c) === 'area' && c.areaKey === key);
+            if (list.length) out.push({ group, areaKey: key, changes: list });
+          }
+          const loose = changes.filter((c) => groupOfChange(c) === 'area' && !c.areaKey);
+          if (loose.length) out.push({ group, areaKey: null, changes: loose });
+          continue;
+        }
+        const list = changes.filter((c) => groupOfChange(c) === group);
+        if (list.length) out.push({ group, changes: list });
+      }
+      return out;
+    }
+
+    // aggRows(changes) → [{ agg, changes }] (one aggregate row per `agg`, at its first member) or [{ change }].
+    function aggRows(changes) {
+      const out = [];
+      const at = new Map();
+      for (const c of changes) {
+        if (c.agg) {
+          if (at.has(c.agg)) { at.get(c.agg).changes.push(c); continue; }
+          const row = { agg: c.agg, changes: [c] };
+          at.set(c.agg, row);
+          out.push(row);
+        } else out.push({ change: c });
+      }
+      // An aggregate of one line reads as that line's own row.
+      return out.map((r) => (r.agg && r.changes.length === 1 ? { change: r.changes[0] } : r));
+    }
+
+    // The tri-state of an aggregate row (role="checkbox", aria-checked mixed, §6.10).
+    function aggState(list) {
+      const on = list.filter(isChecked).length;
+      return on === 0 ? 'false' : on === list.length ? 'true' : 'mixed';
+    }
+
+    // A change is disabled while a change it requires (its new material) is unchecked (§6.4 dependencies).
+    function isDisabled(c, list) {
+      if (!Array.isArray(c.requires) || !c.requires.length) return false;
+      return c.requires.some((id) => { const r = list.find((x) => x.id === id); return !r || !isChecked(r); });
+    }
+
+    // withToggle(changes, id, on) → the list with the row checked or not. Unchecking a material unchecks every change that
+    // requires it; checking it again leaves them unchecked (they are re-enabled). A disabled row cannot be checked.
+    function withToggle(changes, id, on) {
+      const target = changes.find((c) => c.id === id);
+      if (!target || (on && isDisabled(target, changes))) return changes;
+      let next = withChecked(changes, id, on);
+      if (!on) {
+        const dropped = new Set([id]);
+        let grew = true;
+        while (grew) {
+          grew = false;
+          for (const c of next) {
+            if (!dropped.has(c.id) && Array.isArray(c.requires) && c.requires.some((r) => dropped.has(r))) { dropped.add(c.id); grew = true; }
+          }
+        }
+        next = next.map((c) => (dropped.has(c.id) && isChecked(c) ? Object.assign({}, c, { checked: false }) : c));
+      }
+      return next;
+    }
+
+    // withAggToggle(changes, agg, on) → every member of the aggregate checked or not (disabled members stay unchecked).
+    function withAggToggle(changes, agg, on) {
+      let next = changes;
+      for (const c of changes) if (c.agg === agg) next = withToggle(next, c.id, on);
+      return next;
+    }
+
+    // withAsk(side, key, text, rev) → side.asks with the board draft of an area (≤ 120 characters, at most 40 drafts:
+    // the oldest go first); an empty text removes the draft. Drafts are not undoable (§2.1).
+    function withAsk(side, key, text, rev) {
+      const asks = Object.assign({}, side && side.asks && typeof side.asks === 'object' ? side.asks : {});
+      const v = String(text || '').replace(/[\r\n]+/g, ' ').slice(0, ASK_MAX);
+      if (!v.trim()) delete asks[key]; else asks[key] = { text: v, at: Number.isInteger(rev) ? rev : 0 };
+      const keys = Object.keys(asks);
+      if (keys.length > ASKS_CAP) {
+        keys.sort((a, b) => asks[a].at - asks[b].at || (a < b ? -1 : 1));
+        for (const k of keys.slice(0, keys.length - ASKS_CAP)) delete asks[k];
+      }
+      return Object.assign({}, side, { asks });
+    }
+
+    // boardBriefs(rows, asks) → the briefs of the board's rows that have a draft ([{ ref, instruction }], in row order),
+    // and whether more than MAX_BRIEFS would go (then 送る is off, ai.board.max).
+    function boardBriefs(rows, asks) {
+      const briefs = [];
+      for (const r of rows) {
+        const a = asks && asks[r.key];
+        if (a && typeof a.text === 'string' && a.text.trim()) briefs.push({ ref: r.ref, instruction: a.text.trim() });
+      }
+      return { briefs: briefs.slice(0, MAX_BRIEFS), over: briefs.length > MAX_BRIEFS, count: briefs.length };
+    }
+
+    // refOfKey(key) → the AreaRef of an area key (a board draft of an added area), or null.
+    function refOfKey(key) {
+      const k = String(key || '');
+      if (k === 'work') return { kind: 'work' };
+      let m = /^song:(\d+)@([0-9.]+)-([0-9.]+)$/.exec(k);
+      if (m) return { kind: 'song', n: Number(m[1]), t0: Number(m[2]), t1: Number(m[3]) };
+      m = /^(head|para):(.+)$/.exec(k);
+      if (m) return { kind: m[1], rowId: m[2] };
+      m = /^kind:(.+)$/.exec(k);
+      if (m) return { kind: 'songKind', of: m[1] };
+      m = /^lines:(.+)$/.exec(k);
+      if (m) return { kind: 'lines', ids: m[1].split(',') };
+      m = /^cut:(.+)$/.exec(k);
+      return m ? { kind: 'cut', key: m[1] } : null;
+    }
+
     // ---- the controller ------------------------------------------------------------------------------------------------
 
     // createController(host, deps) → the AI panel's state and verbs.
@@ -262,6 +421,11 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
       const settings = readSettings(d.local || null);
       const listeners = [];
       const consented = new Set();        // song sha1s the user agreed to send, for this project only (§4.22.6)
+      // ai/direct and ai/recipe (package E), injected by ui/ai_panel; a build without them says boot.soon.
+      const DIRECT = d.direct || null;
+      const RECIPE = d.recipe || null;
+      const VISION = d.vision || null;
+      const visionConsented = new Set();  // asset ids the user agreed to send to Gemini, for this project only (§11.6.2)
       let seq = 0;
       let checking = null;                // the AbortController of a running key check
       let state = initialState();
@@ -274,6 +438,7 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
           provider, model, remember: settings.remember || k.remembered, key: k.key, okModel: k.ok,
           keyStatus: keyStatus(provider, k.key, k.ok, model), keyName: null, keyError: null,
           run: null, review: null, error: null, notice: null, tryOn: null,
+          applied: [],                    // the area keys of the last applied area review (the board's 反映済み)
         };
       }
 
@@ -398,12 +563,22 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
         return !!song && consented.has(song.sha1);
       }
 
+      // Why 写真の説明 cannot be used, ignoring consent: pictures go to Google Gemini only (the service that takes media
+      // parts, as it takes the song's audio); null when it can.
+      function visionBlocked() {
+        if (!VISION) return 'boot.soon';
+        return PR.PROVIDERS[state.provider].audio ? null : 'ai.visionOnlyGemini';
+      }
+
       // Why a tool cannot run now (the disabled reason, a string key), or null.
       function blocked(tool) {
         if (!TOOLS.includes(tool)) return 'ai.needLines';
         if (state.run) return 'ai.needIdle';
         if (state.review) return 'ai.needReview';
         if (!state.key) return 'ai.needKey';
+        if (tool === 'vision') return visionBlocked();          // pictures, not lines: it works before the lyrics too
+        if (tool === 'material' && !RECIPE) return 'boot.soon';
+        if (tool === 'direct' && !DIRECT) return 'boot.soon';
         if (SONG_TOOLS.includes(tool)) {
           const why = songBlocked();
           if (why) return why;
@@ -445,11 +620,78 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
         return SONG.audioPart({ audio, apiKey: conn.key, signal, fetchImpl: d.fetchImpl, onStage: (s) => setStage(id, s) });
       }
 
+      // 指示: one request per window of ≤ 200 area lines (ai/direct.directRequests), run in sequence and merged into one
+      // review (ai/direct gives window k's change ids the prefix 'w<k>:'). A service that refuses the full schema
+      // (bad_request) is asked once more without materials (ai.materialsFailed).
+      async function askDirect(conn, sent, o, signal) {
+        const reg = host.registry;
+        let allow = !!o.allowMaterials;
+        // o.media: the asset ids the AI may place (DESIGN_2_1 §11.6.1: bytes on this device, 写真・動画をAIが使ってよい)
+        const make = () => DIRECT.directRequests(sent.doc, sent.plan, reg, { briefs: o.briefs, uiLang: host.lang, mode: o.mode || 'all',
+          allowMaterials: allow, media: Array.isArray(o.media) && o.media.length ? o.media.slice() : false });
+        let reqs = make();
+        let failed = false;
+        let outs = [];
+        const usage = { input: 0, output: 0 };
+        let model = null;
+        for (let k = 0; k < reqs.length; k++) {
+          let res;
+          try {
+            res = await call(conn, reqs[k], signal);
+          } catch (e) {
+            if (!(allow && !failed && codeOf(e) === 'bad_request')) throw e;
+            failed = true;
+            allow = false;
+            reqs = make();
+            outs = [];
+            usage.input = usage.output = 0;
+            k = -1;
+            continue;
+          }
+          if (res.usage) { usage.input += Number(res.usage.input) || 0; usage.output += Number(res.usage.output) || 0; }
+          model = res.model || model;
+          // ai/direct prefixes the ids of window k with 'w<k>:' itself (its `sent.window`).
+          outs.push(DIRECT.directChanges(sent.doc, sent.plan, reg, res.json, { rev: sent.rev, sent: reqs[k].sent, allowMaterials: allow }));
+        }
+        const merged = { results: [], changes: [], warnings: [] };
+        for (const out of outs) {
+          merged.results.push(...(out.results || []));
+          merged.changes.push(...(out.changes || []));
+          merged.warnings.push(...(out.warnings || []));
+        }
+        return { res: { usage, model }, out: merged, materialsFailed: failed };
+      }
+
+      // The briefs as the review names them: { key, ref, label, n, instruction } from the document they were sent from.
+      function briefsOf(briefs, doc, plan) {
+        return briefs.map((b) => {
+          const area = AREAS.resolve(doc, plan, b.ref);
+          return { key: AREAS.keyOf(b.ref), ref: b.ref, label: area ? area.label : ['area.work', {}], n: area ? area.n : 0,
+            instruction: String(b.instruction || '') };
+        });
+      }
+
       // Sends one request and validates the answer against what was sent (`sent`: the doc, plan and rev at the start).
       async function ask(tool, conn, sent, opts, song, signal, id) {
         const lang = host.lang;
         const reg = host.registry;
         const valid = { rev: sent.rev };
+        if (tool === 'direct') return askDirect(conn, sent, opts, signal);
+        if (tool === 'vision') {
+          // the host makes the JPEGs (a still: one at 768 px; a video: three frames); only they and the prompt are sent
+          const items = await host.visionParts(opts.ids);
+          if (signal.aborted) throw new PR.AIError('aborted');
+          const req = VISION.visionRequest(sent.doc, items, { uiLang: lang });
+          if (!req.sent.items.length) return { res: {}, out: { changes: [], warnings: [['ai.warn.empty', {}]] } };
+          const res = await call(conn, req, signal, req.media);
+          return { res, out: VISION.visionChanges(sent.doc, res.json, req.sent, valid) };
+        }
+        if (tool === 'material') {
+          const req = RECIPE.materialRequest(sent.doc, sent.plan, reg, Object.assign({ description: String(opts.description || '').slice(0, MAX_INSTRUCTION),
+            kind: opts.kind, uiLang: lang }, opts.current ? { current: opts.current } : {}));
+          const res = await call(conn, req, signal);
+          return { res, out: RECIPE.materialChanges(sent.doc, sent.plan, reg, res.json, Object.assign(valid, { sent: req.sent }, opts.useAt ? { useAt: opts.useAt } : {})) };
+        }
         if (tool === 'prep') {
           const req = PREP.request(sent.doc, lang);
           const res = await call(conn, req, signal);
@@ -482,12 +724,34 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
         return { res, out: SONG.analyzeChanges(sent.doc, res.json, song.seconds, valid) };
       }
 
+      // An area review (指示, 素材づくり): the questions per area, a summary, the changes grouped by area (DESIGN_2_1 §6.4).
+      function directResult(tool, base, got, o, sent) {
+        const out = got.out || {};
+        const changes = Array.isArray(out) ? out : out.changes || [];
+        const results = Array.isArray(out.results) ? out.results
+          : [{ s: 0, areaKey: null, understood: out.understood !== false, summary: out.summary || '', question: out.question || '' }];
+        const briefs = tool === 'direct' ? briefsOf(o.briefs, sent.doc, sent.plan) : [];
+        const questions = results.filter((r) => r && r.understood === false)
+          .map((r) => ({ areaKey: r.areaKey || null, text: r.question || r.summary || '' }));
+        const summary = results.filter((r) => r && r.understood !== false && r.summary).map((r) => r.summary).join(' ');
+        const extra = { briefs, mode: o.mode || 'all', materialsFailed: !!got.materialsFailed };
+        if (!changes.length) {
+          if (questions.length) {
+            return { notice: Object.assign({ kind: 'question', tool, text: questions.map((q) => q.text).filter(Boolean).join(' '), questions,
+              warnings: base.warnings }, extra) };
+          }
+          return { notice: Object.assign({ kind: 'nothing', tool, text: summary, warnings: base.warnings }, extra) };
+        }
+        return { review: Object.assign(base, extra, { kind: 'direct', summary, questions, changes }) };
+      }
+
       // The answer → { review } (something to choose from) or { notice } (a question, or nothing to change).
-      function resultOf(tool, id, conn, got) {
+      function resultOf(tool, id, conn, got, o, sent) {
         const { res, out } = got;
         const base = { id, tool, usage: res.usage || null, provider: conn.provider, model: res.model || conn.model,
-          warnings: out.warnings || [] };
+          warnings: (out && out.warnings) || [] };
         const nothing = (text) => ({ notice: { kind: 'nothing', tool, text: text || '', warnings: base.warnings } });
+        if (tool === 'direct' || tool === 'material') return directResult(tool, base, got, o || {}, sent);
         if (tool === 'edit' && !out.understood) {
           return { notice: { kind: 'question', tool, text: out.question || out.summary || '', warnings: base.warnings } };
         }
@@ -506,14 +770,30 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
         return { review: Object.assign(base, { kind: 'list', summary, changes: out.changes }) };
       }
 
-      // run(tool, opts) → true when a review or a notice came back. opts (edit): { instruction, lineIds }.
+      // run(tool, opts) → true when a review or a notice came back. opts (edit): { instruction, lineIds }; (direct):
+      // { briefs: [{ ref, instruction }], mode: 'all' | 'camera', allowMaterials }; (material): { description, kind,
+      // current?, useAt? }.
       async function run(tool, opts) {
-        const why = blocked(tool);
+        const o0 = opts || {};
+        const why = blocked(tool, o0);
         if (why) {
           if (why === 'ai.needKey') set({ error: { code: 'no_key', tool } });
           return false;
         }
-        const o = opts || {};
+        let o = o0;
+        if (tool === 'direct') {
+          const camera = o.mode === 'camera';
+          const briefs = (Array.isArray(o.briefs) ? o.briefs : []).filter((b) => b && b.ref && (camera || String(b.instruction || '').trim()))
+            .slice(0, MAX_BRIEFS).map((b) => ({ ref: b.ref, instruction: String(b.instruction || '').replace(/[\r\n]+/g, ' ').trim().slice(0, MAX_INSTRUCTION) }));
+          if (!briefs.length) return false;
+          o = Object.assign({}, o, { briefs });
+        }
+        if (tool === 'material' && !String(o.description || '').trim()) return false;
+        if (tool === 'vision') {
+          const ids = (Array.isArray(o.ids) ? o.ids : []).filter((x) => visionConsented.has(x));
+          if (!ids.length) return false;
+          o = Object.assign({}, o, { ids });
+        }
         if (tool === 'edit' && !String(o.instruction || '').trim()) return false;
         const ac = new AbortController();
         seq += 1;
@@ -538,18 +818,35 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
         if (!isCurrent(id)) return false;
         let result;
         try {
-          result = resultOf(tool, id, conn, got);
+          result = resultOf(tool, id, conn, got, o, sent);
         } catch (e) {
           if (typeof console !== 'undefined') console.error(e);
           set({ run: null, error: { code: 'internal', tool } });
           return false;
         }
         confirmKey(conn.provider, conn.model, conn.key, null);
+        if (got.materialsFailed) host.toast(t('ai.materialsFailed'), { kind: 'warn' });
         if (result.notice) { set({ run: null, notice: result.notice }); return true; }
-        const review = mapChanges(result.review, (list) => CH.markStale(host.doc, host.plan, list));
+        const review = mapChanges(result.review, (list) => stale(result.review, list));
         host.setReviewOpen(true);
         set({ run: null, review });
         return true;
+      }
+
+      // The areas of an area review, resolved now (stale 'left' rows, the area check of toCommands, §5.6). The resolver
+      // takes an area key or an AreaRef → the Area, null when it is gone, undefined for a key it cannot read (then
+      // ai/changes makes no area check).
+      function resolverOf(review) {
+        const briefs = (review && review.briefs) || [];
+        return (x) => {
+          const ref = typeof x === 'string' ? ((briefs.find((b) => b.key === x) || {}).ref || refOfKey(x)) : x;
+          return ref ? AREAS.resolve(host.doc, host.plan, ref) : undefined;
+        };
+      }
+
+      function stale(review, list) {
+        if (review && review.kind === 'direct') return CH.markStale(host.doc, host.plan, list, { resolveArea: resolverOf(review) });
+        return CH.markStale(host.doc, host.plan, list);
       }
 
       // [中止]: the request is cancelled (fetch and upload polling stop on the signal).
@@ -572,7 +869,16 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
       function toggle(id, onOff, index) {
         const r = state.review;
         if (!r) return;
-        updateReview(mapChanges(r, (list, p) => (p === null || r.proposals.indexOf(p) === index ? withChecked(list, id, onOff) : list)));
+        // An area review keeps its dependencies: a material unchecked unchecks the rows that need it (§6.4).
+        const flip = r.kind === 'direct' ? withToggle : withChecked;
+        updateReview(mapChanges(r, (list, p) => (p === null || r.proposals.indexOf(p) === index ? flip(list, id, onOff) : list)));
+      }
+
+      // An aggregate row (one change per area line, `agg`): every member at once.
+      function toggleAgg(agg, onOff) {
+        const r = state.review;
+        if (!r || r.kind !== 'direct') return;
+        updateReview(mapChanges(r, (list) => withAggToggle(list, agg, onOff)));
       }
 
       function toggleAll(onOff, index) {
@@ -592,7 +898,7 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
         if (state.tryOn && !host.altShown()) next = Object.assign({}, next, { tryOn: null });   // an edit ended the try-on
         const r = state.review;
         if (r) {
-          const review = mapChanges(r, (list) => CH.markStale(host.doc, host.plan, list));
+          const review = mapChanges(r, (list) => stale(r, list));
           if (review !== r) next = Object.assign({}, next, { review });
         }
         if (next !== state) { state = next; emit(); }
@@ -602,6 +908,7 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
       function projectChanged() {
         if (state.run) state.run.abort.abort();
         consented.clear();
+        visionConsented.clear();
         const hadReview = !!state.review;
         endTryOn();
         state = Object.assign({}, state, { run: null, review: null, error: null, notice: null });
@@ -621,9 +928,21 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
 
       // The review comes back after the store refused its commands (the store reports why).
       function reopen(review) {
-        state = Object.assign({}, state, { review: mapChanges(review, (list) => CH.markStale(host.doc, host.plan, list)) });
+        state = Object.assign({}, state, { review: mapChanges(review, (list) => stale(review, list)) });
         host.setReviewOpen(true);
         emit();
+      }
+
+      // The undo label of an area review: 「AI: サビ1（5件）」, the whole video as 「AI: 指示（5件）」 (§5.6).
+      function areaUndoLabel(review, n) {
+        const briefs = review.briefs || [];
+        if (!briefs.length || briefs.every((b) => b.ref && b.ref.kind === 'work')) return ['undo.ai', { tool: t('ai.name.' + review.tool), n }];
+        const names = briefs.map((b) => {
+          const p = Object.assign({}, b.label[1] || {});
+          if (typeof p.kind === 'string' && t.has('songSec.' + p.kind)) p.kind = t('songSec.' + p.kind);
+          return t(b.label[0], p);
+        });
+        return ['undo.aiArea', { area: names.join(t('list.sep')), n }];
       }
 
       // Dispatches the chosen changes as one undo step (store.batch), then logs them for selective revert. When nothing
@@ -631,14 +950,23 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
       function commit(review, checked, lookTitle) {
         const doc = host.doc;
         const plan = host.plan;
-        const cmds = checked.length ? CH.toCommands(doc, plan, checked) : [];
+        const area = review.kind === 'direct';
+        const opts = area ? { resolveArea: resolverOf(review) } : undefined;
+        const cmds = checked.length ? CH.toCommands(doc, plan, checked, opts) : [];
         if (!cmds.length) { host.toast(t('ai.review.nothingApplied'), { kind: 'warn' }); return 0; }
         const n = review.kind === 'transcript' ? review.result.lines.length : checked.length;
-        const entry = Object.assign(CH.logEntry(doc, cmds, { runId: review.id, tool: review.tool, n }), { at: host.now() });
+        const meta = { runId: review.id, tool: review.tool, n };
+        if (area) {
+          meta.areas = (review.briefs || []).map((b) => ({ key: b.key, label: b.label }));
+          meta.instructions = (review.briefs || []).map((b) => b.instruction.slice(0, MAX_INSTRUCTION));
+        }
+        const entry = Object.assign(CH.logEntry(doc, cmds, meta), { at: host.now() });
+        if (area && !entry.areas) Object.assign(entry, { areas: meta.areas, instructions: meta.instructions });
         entry.groups = changeGroups(doc, plan, checked, entry.applied);
         close();
-        host.batch({ label: ['undo.ai', { tool: t('ai.name.' + review.tool), n }] }, cmds);
+        host.batch({ label: area ? areaUndoLabel(review, n) : ['undo.ai', { tool: t('ai.name.' + review.tool), n }] }, cmds);
         if (host.doc === doc) { reopen(review); return 0; }
+        if (area) set({ applied: (review.briefs || []).map((b) => b.key) });
         host.setSide((side) => withLog(side, entry));
         // §3.7: この案にする appends to the look history; entries hold seeds and salts only, so this adds one only
         // when the current look is not already the newest entry.
@@ -654,7 +982,9 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
         if (!r || r.kind === 'transcript') return 0;
         const idx = r.kind === 'looks' ? index : -1;
         if (r.kind === 'looks' && !r.proposals[idx]) return 0;
-        const checked = CH.markStale(host.doc, host.plan, changesOf(r, idx)).filter(isChecked);
+        // A row whose material is unchecked is left out (it could not apply, §6.4).
+        const now = stale(r, changesOf(r, idx));
+        const checked = now.filter((c) => isChecked(c) && !isDisabled(c, now));
         const title = r.kind === 'looks' ? (r.proposals[idx].title || t('ai.looks.letter', { k: letter(idx) })) : null;
         return commit(r, checked, title);
       }
@@ -672,13 +1002,14 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
       // The stage shows plan(apply(doc, checked changes)) without committing anything. index: the proposal (3案) or -1.
       function tryOn(index) {
         const r = state.review;
-        if (!r || !(r.kind === 'looks' || r.kind === 'list')) return;
+        if (!r || !(r.kind === 'looks' || r.kind === 'list' || r.kind === 'direct')) return;
         const idx = r.kind === 'looks' ? index : -1;
         if (r.kind === 'looks' && !r.proposals[idx]) return;
-        const list = changesOf(r, idx).filter(isChecked);
+        const all = changesOf(r, idx);
+        const list = all.filter((c) => isChecked(c) && !isDisabled(c, all));
         let doc = host.doc;
         try {
-          if (list.length) doc = CH.apply(host.doc, host.plan, list);
+          if (list.length) doc = CH.apply(host.doc, host.plan, list, r.kind === 'direct' ? { resolveArea: resolverOf(r) } : undefined);
         } catch (e) {
           if (typeof console !== 'undefined') console.error(e);
           set({ error: { code: 'internal', tool: r.tool } });
@@ -737,6 +1068,25 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
         return { n, kept };
       }
 
+      // 「AIに説明してもらう」 (DESIGN_2_1 §11.6.2): the assets on this device (at most 8), a consent first for those not
+      // agreed yet (per asset, this project only, not saved), then the vision tool; its review opens in the AI tab.
+      // → Promise<boolean>: true when a review or a notice came back.
+      async function describeMedia(ids) {
+        const list = [...new Set(Array.isArray(ids) ? ids : [])].filter((x) => host.mediaHere(x)).slice(0, VISION ? VISION.MAX_ITEMS : 0);
+        const why = blocked('vision');
+        if (why === 'ai.needKey') { host.openAi(); set({ error: { code: 'no_key', tool: 'vision' } }); return false; }
+        if (why) { host.toast(t(why), { kind: 'warn' }); return false; }
+        // the pictures asked about are not on this device: say so (nothing would be sent)
+        if (!list.length) { if (Array.isArray(ids) && ids.length) host.toast(t('ai.visionMissing'), { kind: 'warn' }); return false; }
+        if (!list.every((x) => visionConsented.has(x))) {
+          const ok = await host.confirm({ title: t('ai.tool.vision'), text: t('ai.visionConsent', { kb: host.visionKb(list) }), ok: t('ai.visionSend') });
+          if (!ok) return false;
+          for (const x of list) visionConsented.add(x);
+        }
+        host.openAi();
+        return run('vision', { ids: list });
+      }
+
       // 「AIが決めた固定 n [すべて自動に戻す]」: every pin by 'ai', one undo step.
       function clearAiPins() {
         if (!aiPinCount(host.doc)) return false;
@@ -747,15 +1097,22 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
       return {
         get state() { return state; },
         on, setProvider, setModel, setKey, setRemember, forgetKey, forgetKeys, checkKey, blocked, songBlocked, hasConsent, consent,
-        run, abort, dismiss, toggle, toggleAll, setTranscriptTimes, apply, applyTranscript, discard, tryOn, endTryOn,
+        visionBlocked, describeMedia, hasVisionConsent: (id) => visionConsented.has(id),
+        run, abort, dismiss, toggle, toggleAgg, toggleAll, setTranscriptTimes, apply, applyTranscript, discard, tryOn, endTryOn,
         tryOnReplaced, strip, docChanged, projectChanged, revert, clearAiPins, logEntries,
         keyPrefix: () => KEY_PREFIX[state.provider] || '',
+        hasDirect: () => !!DIRECT,
+        hasRecipe: () => !!RECIPE,
+        hasVision: () => !!VISION,
       };
     }
 
     return {
-      TOOLS, SONG_TOOLS, GROUP_ORDER, STAGES, GUIDE_TOPICS, MAX_INSTRUCTION, LOG_CAP, KEY_PREFIX, SETTINGS_KEY,
+      TOOLS, SONG_TOOLS, GROUP_ORDER, AREA_GROUP_ORDER, DIRECT_ORDER, STAGES, GUIDE_TOPICS, MAX_INSTRUCTION, MAX_BRIEFS,
+      ASK_MAX, ASKS_CAP, LOG_CAP, KEY_PREFIX, SETTINGS_KEY,
       readSettings, createKeyStore, keyStatus, statusOfError, costText, consentFacts, selectedLines, withChecked, withAll,
       grouped, counts, withLog, revertable, changeGroups, revertTally, aiPinCount, changesOf, letter, createController,
+      targetRef, groupOfChange, directGroups, aggRows, aggState, isDisabled, withToggle, withAggToggle, withAsk,
+      boardBriefs, refOfKey, itemKey,
     };
   });

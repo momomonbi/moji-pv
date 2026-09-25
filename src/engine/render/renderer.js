@@ -1,8 +1,8 @@
-/* 文字PVメーカー v2 — original work. The renderer: one frame of a Plan — evaluate, draw the layers per world, seams, post, picks (DESIGN §4.19.2–4, §7.4). */
-MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'engine/scene/table', 'engine/scene/frame',
+/* 文字PVメーカー v2 — original work. The renderer: one frame of a Plan — evaluate, draw the layers per world, seams, post, picks (DESIGN §4.19.2–4, §7.4; DESIGN_2_1 §4.4, §4.8, §11.3.7). */
+MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/media', 'engine/scene/table', 'engine/scene/frame',
   'engine/render/surface', 'engine/render/sprites', 'engine/render/shapes', 'engine/render/draw', 'engine/render/post',
   'engine/render/seam', 'engine/render/pick'],
-(H, C, N, T, F, SF, SP, SH, DR, PO, SE, PK) => {
+(H, C, N, MEDIA, T, F, SF, SP, SH, DR, PO, SE, PK) => {
   'use strict';
 
   const L = T.LAYER_INDEX;
@@ -16,17 +16,35 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'engine
   const REDUCED_FLASH = 0.3;
   const STATIC_MAX = 8;
   const STATIC_BUDGET = 48 * 1024 * 1024;
-  const IDENTITY = Object.freeze({ x: 0, y: 0, zoom: 1, roll: 0, shakeX: 0, shakeY: 0 });
+  const IDENTITY = Object.freeze({ x: 0, y: 0, zoom: 1, roll: 0, shakeX: 0, shakeY: 0, fz: 1 });
   const NO_FEATURES = Object.freeze({});
+  const OVERSAMPLE = 1.25;         // static ground rasters of a segment the shots zoom into (DESIGN_2_1 §4.8)
+
+  // mediaEntries(scene) → frozen [{ id, time, size, headroom, blur, softBlur }]: a scene's media nodes as mediaAt needs
+  // them — size = the box's long side (design units; size × output scale × headroom = the px its draw asks for), blur
+  // and the soft copy's blur (−1 without one) in design units. Small, so the facade keeps them by fingerprint.
+  const NO_MEDIA_ENTRIES = Object.freeze([]);
+  function mediaEntries(scene) {
+    const ms = scene && scene.media;
+    if (!ms || ms.length === 0) return NO_MEDIA_ENTRIES;
+    return Object.freeze(ms.map((e) => {
+      const rec = scene.stores.image[scene.table.payload[e.node]];
+      return Object.freeze({ id: e.id, time: e.time, size: Math.max(rec.box.w, rec.box.h), headroom: rec.headroom, blur: rec.blur,
+        softBlur: rec.soft ? rec.softBlur : -1 });
+    }));
+  }
 
   // createRenderer({ canvas: CanvasFactory, registry, assets, now?, strict?, spriteBudget? }) → Renderer
   //   render(surface, plan, t, opts, source) → FrameStats   source = { cut(i), ground(i), fresh(kind, i), fontKey, face }
   //   warmAt(plan, source, t) · beginWarm() · warmBytes() · lastTime() · hitTest(x, y) · boxes() · stats() · level
   //   · setSpriteBudget(bytes) · clear() · dispose()
+  //   (DESIGN_2_1, additive) setRegistry(registry) · mediaAt(plan, source, t, out, scale) (source.media(kind, i)
+  //   optional) · lastScale() · opts.layers 'all' | 'ground' · opts.thumb (posters only) · FrameStats.media
+  //   { drawn, waiting } and mediaError (export quality)
   // `now` (ms clock) comes from the host; without it frame times read 0 and the adaptive preview stays at level 0.
   function createRenderer(o) {
     const factory = o.canvas;
-    const registry = o.registry;
+    let registry = o.registry;
     const now = typeof o.now === 'function' ? o.now : null;
     const pool = SF.createPool(factory);
     const sprites = SP.createSpriteCache(factory, { budget: o.spriteBudget });
@@ -34,7 +52,7 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'engine
     const tiles = PO.createTileBank(factory);
     const ctl = PO.createFx({ pool, tiles });
     const scratch = SF.surfaceOf(factory, SP.MAX_SIDE, SP.MAX_SIDE, true);
-    const dc = DR.createDrawContext({ sprites, paints, scratch });
+    const dc = DR.createDrawContext({ sprites, paints, scratch, pool, blurred: (src, px) => PO.blurred(pool, src, px, ctl.caps) });
     const picks = PK.createPickList();
     const statics = new Map();                     // static layers: scene → [raster per layer] (LRU)
     const errors = [];
@@ -62,16 +80,20 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'engine
       backdrop: 'scene' };
     const cams = [];
     const used = [];
-    const seamCam = { x: 0, y: 0, zoom: 1, roll: 0, shakeX: 0, shakeY: 0 };   // the grounds' camera in a text seam
+    const seamCam = { x: 0, y: 0, zoom: 1, roll: 0, shakeX: 0, shakeY: 0, fz: 1 };   // the grounds' camera in a text seam
+    const gapCam = { x: 0, y: 0, zoom: 1, roll: 0, shakeX: 0, shakeY: 0, fz: 1 };    // … and while no cut is on screen
+    let framePlan = null;                          // the plan of the frame being drawn (zoomed grounds)
 
     function clock() { return now ? now() : 0; }
 
-    // The key of cached paint and static-layer rasters: output scale, palette and draft mode (recomputed on change only).
-    const paintKeyState = { scale: NaN, pal: 0, draft: false, key: 0 };
+    // The key of cached paint and static-layer rasters: output scale, palette and draft mode (recomputed on change only);
+    // `over` is the key of the same rasters oversampled for a zoomed ground (dc.overKey).
+    const paintKeyState = { scale: NaN, pal: 0, draft: false, key: 0, over: 0 };
     function paintKeyOf(scale, pal, draft) {
       const s = paintKeyState;
       if (s.scale !== scale || s.pal !== pal || s.draft !== draft) {
         s.scale = scale; s.pal = pal; s.draft = draft; s.key = H.hash32(scale, pal, draft ? 1 : 0);
+        s.over = H.hash32(s.key, 'over', OVERSAMPLE);
       }
       return s.key;
     }
@@ -89,9 +111,9 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'engine
       return id;
     }
 
-    function camOut(k) { return cams[k] || (cams[k] = { x: 0, y: 0, zoom: 1, roll: 0, shakeX: 0, shakeY: 0 }); }
+    function camOut(k) { return cams[k] || (cams[k] = { x: 0, y: 0, zoom: 1, roll: 0, shakeX: 0, shakeY: 0, fz: 1 }); }
 
-    function item(k) { return items[k] || (items[k] = { scene: null, tl: 0, cut: -1, ground: -1, cam: IDENTITY, side: 0 }); }
+    function item(k) { return items[k] || (items[k] = { scene: null, tl: 0, cut: -1, ground: -1, cam: IDENTITY, side: 0, skip: false }); }
 
     // --- gathering the active scenes -------------------------------------------------------------------------------
 
@@ -130,31 +152,39 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'engine
       for (const e of fg.grounds) addGround(plan, source, e.i, t, split ? (e.i === seam.aGround ? 1 : e.i === seam.bGround ? 2 : 0) : 0);
       // grounds follow the camera of the current cut; during a world seam, of their side's own cut (A or B); during a
       // text seam, a blend that moves from A's camera to B's over the window (switching at u = 0.5 made the ground jump
-      // by the difference of two moving cameras in one frame)
+      // by the difference of two moving cameras in one frame); while no cut is on screen, the rig alone (DESIGN_2_1 §4.4)
       const cur = F.currentCut(plan, t, fg);
       const blend = seam && seam.scope !== 'world' ? textSeamCam(seam) : null;
+      let gap = null;
       for (let k = 0; k < nItems; k++) {
         const it = items[k];
         if (it.ground < 0) continue;
         if (blend && !it.side) { it.cam = blend; continue; }
         const want = it.side === 1 && seam ? lastOf(seam.aCuts) : it.side === 2 && seam ? seam.bCuts[0] : cur;
-        it.cam = camOfCut(want);
+        it.cam = camOfCut(want) || gap || (gap = F.rigCamera(plan, t, gapCam));
       }
     }
 
     function camOfCut(i) {
       for (let j = 0; j < nItems; j++) if (items[j].ground < 0 && items[j].cut === i) return items[j].cam;
-      return IDENTITY;
+      return null;
     }
 
     // A's camera (the last cut before the seam) eased into B's (the first after it): smoothstep in u, so the ground
-    // leaves A's motion and joins B's without a jump or a kink. Null when either cut is not on screen.
+    // leaves A's motion and joins B's without a jump or a kink. The framing zoom (shot and rig, fz) blends in log space
+    // (DESIGN_2_1 §4.4); the rest of the zoom (the lens, the punch) and everything else linearly, as in v2, so a plan
+    // without shots and rigs blends exactly as before. Null when either cut is not on screen.
     function textSeamCam(seam) {
       const a = lastOf(seam.aCuts), b = seam.bCuts.length ? seam.bCuts[0] : -1;
       if (a < 0 || b < 0) return null;
-      const A = camOfCut(a), B = camOfCut(b), w = N.smooth(seam.u), v = 1 - w, c = seamCam;
+      const A = camOfCut(a), B = camOfCut(b);
+      if (!A || !B) return null;
+      const w = N.smooth(seam.u), v = 1 - w, c = seamCam;
+      const fz = Math.exp(Math.log(A.fz) * v + Math.log(B.fz) * w);
       c.x = A.x * v + B.x * w; c.y = A.y * v + B.y * w; c.roll = A.roll * v + B.roll * w;
-      c.zoom = A.zoom * v + B.zoom * w; c.shakeX = A.shakeX * v + B.shakeX * w; c.shakeY = A.shakeY * v + B.shakeY * w;
+      c.zoom = fz * ((A.zoom / A.fz) * v + (B.zoom / B.fz) * w);
+      c.shakeX = A.shakeX * v + B.shakeX * w; c.shakeY = A.shakeY * v + B.shakeY * w;
+      c.fz = fz;
       return c;
     }
 
@@ -167,19 +197,32 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'engine
 
     const VIEW = new Float32Array(6);
 
+    // The camera view of a layer; the draw context keeps the camera and the parallax, so a medium at another camera factor
+    // (DESIGN_2_1 §11.9.3) can take its own view of the same camera.
     function view(cam, Lk) {
+      dc.cam = cam; dc.layerK = T.LAYERS[Lk].parallax;
       return F.viewMatrix(VIEW, cam, T.LAYERS[Lk].parallax, dc.W, dc.H);
     }
 
-    // The raster of a static layer (cache: 'static'): drawn once per (scene, layer, scale, palette) without the camera,
-    // then placed with the view like a paint (§4.19.6).
+    // The oversampling of an item's still rasters: ×1.25 for a ground whose segment the shots zoom into (plan
+    // grounds[i].zoomed, DESIGN_2_1 §4.8), so the magnified ground stays sharp; a function of the plan only.
+    function overOf(it) {
+      const seg = it.ground >= 0 && framePlan && framePlan.grounds ? framePlan.grounds[it.ground] : null;
+      return seg && seg.zoomed === true ? OVERSAMPLE : 1;
+    }
+
+    // The raster of a static layer (cache: 'static'): drawn once per (scene, layer, scale, palette, oversampling) without
+    // the camera, then placed with the view like a paint (§4.19.6).
     function staticRaster(scene, Lk, it) {
       const key = scene;
       let byL = statics.get(key);
       const stamp = dc.paintKey;
-      if (byL && byL[Lk] && byL[Lk].stamp === stamp) { statics.delete(key); statics.set(key, byL); return byL[Lk]; }
+      const over = overOf(it);
+      if (byL && byL[Lk] && byL[Lk].stamp === stamp && byL[Lk].over === over) {
+        statics.delete(key); statics.set(key, byL); return byL[Lk];
+      }
       const pad = 0.15;
-      const s = dc.scale;
+      const s = dc.scale * over;
       const padX = Math.ceil(pad * dc.W * s), padY = Math.ceil(pad * dc.H * s);
       const w = Math.ceil(dc.W * s) + 2 * padX, h = Math.ceil(dc.H * s) + 2 * padY;
       if (w * h * 4 > STATIC_BUDGET / 2 || w > 8192 || h > 8192) return null;
@@ -191,7 +234,7 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'engine
       F.viewMatrix(VIEW, IDENTITY, 1, dc.W, dc.H);
       DR.drawLayer(dc, scene, Lk, VIEW, it.tl, it.cut);
       dc.g = g0; dc.D.set(D0); dc.pick = pick;
-      const r = { stamp, canvas: made.canvas, x: -padX / s, y: -padY / s, w: w / s, h: h / s };
+      const r = { stamp, over, canvas: made.canvas, x: -padX / s, y: -padY / s, w: w / s, h: h / s };
       if (!byL) byL = [];
       byL[Lk] = r;
       statics.set(key, byL);
@@ -199,7 +242,7 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'engine
     }
 
     function drawIsolated(g, it, Lk, spec) {
-      if (spec.cache === 'static' && !spec.mask && !spec.filter) {
+      if (spec.cache === 'static' && !spec.mask && !spec.filter && !DR.hasMedia(it.scene, Lk)) {
         const r = staticRaster(it.scene, Lk, it);
         if (r) {
           const V = view(it.cam, Lk);
@@ -244,10 +287,14 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'engine
 
     function drawItemLayer(g, it, Lk) {
       if (!DR.hasLayer(it.scene, Lk)) return;
+      dc.over = overOf(it);
       const spec = it.scene.layers[Lk];
-      if (spec && T.isIsolated(spec)) { drawIsolated(g, it, Lk, spec); return; }
-      dc.g = g;
-      DR.drawLayer(dc, it.scene, Lk, view(it.cam, Lk), it.tl, pickCut(it));
+      if (spec && T.isIsolated(spec)) drawIsolated(g, it, Lk, spec);
+      else {
+        dc.g = g;
+        DR.drawLayer(dc, it.scene, Lk, view(it.cam, Lk), it.tl, pickCut(it));
+      }
+      dc.over = 1;
     }
 
     // Picks of ground scenes belong to the current cut (the one the camera follows).
@@ -257,13 +304,20 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'engine
     // Every item on `side` (0 = all) for one layer: grounds first, then cuts in `a` order.
     function drawSideLayer(g, Lk, side, groundsToo, cutsToo) {
       if (Lk === L.ground && !dc.groundOn) return;
+      if (dc.groundOnly && Lk !== L.ground) return;          // opts.layers 'ground' (DESIGN_2_1 §13.7)
+      // the ground layer's `still` media leave a world seam only through a shared ground (drawWorldSeam); elsewhere
+      // they take part like any node
+      const mode = dc.stillMode;
+      if (Lk === L.ground && mode === 1) dc.stillMode = 0;
       for (let pass = 0; pass < 2; pass++) {
         if (pass === 0 ? !groundsToo : !cutsToo) continue;
         for (let k = 0; k < nItems; k++) {
           const it = items[k];
+          if (it.skip && Lk === L.ground) continue;
           if ((it.ground >= 0) === (pass === 0) && onSide(it, side)) drawItemLayer(g, it, Lk);
         }
       }
+      dc.stillMode = mode;
     }
 
     // The target is reset first (the caller's surface keeps whatever state the last frame left on it).
@@ -283,12 +337,16 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'engine
     }
 
     // No seam, or a text seam: the ground and the far layers once; A's and B's text/near layers mixed by the seam part.
+    // `still` media of the mixed layers (DESIGN_2_1 §11.9.3) stay out of the mix and are drawn after it, like the hud.
     function drawTextSeam(g, w, h, backdrop, part, u) {
       fillBackdrop(g, w, h, backdrop, dc.pal);
       for (const Lk of BASE_LAYERS) drawSideLayer(g, Lk, 0, true, true);
       drawSideLayer(g, L.text, 0, true, false);
+      const still = anyStill(SE.TEXT_LAYERS, false);
       const a = pool.take(), b = pool.take();
+      if (still) dc.stillMode = 1;
       for (const Lk of SE.TEXT_LAYERS) { drawSideLayer(a.ctx, Lk, 1, false, true); drawSideLayer(b.ctx, Lk, 2, false, true); }
+      dc.stillMode = 0;
       const out = SE.mix(ctl, pool, part, a, b, u, onPartError);
       g.setTransform(1, 0, 0, 1, 0, 0);
       g.globalAlpha = 1;
@@ -296,19 +354,65 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'engine
       if (out !== a && out !== b) pool.give(out);
       pool.give(a); pool.give(b);
       dc.g = g;
+      if (still) stillPass(g, SE.TEXT_LAYERS, false);
       drawSideLayer(g, L.near, 0, true, false);
       drawSideLayer(g, L.hud, 0, true, true);
     }
 
+    // Whether an item on screen holds a `still` medium in one of these layers (grounds too when asked).
+    function anyStill(layers, grounds) {
+      for (let k = 0; k < nItems; k++) {
+        const it = items[k];
+        if (it.ground >= 0 && !grounds) continue;
+        for (const Lk of layers) if (DR.hasStill(it.scene, Lk)) return true;
+      }
+      return false;
+    }
+
+    // Only the `still` media of these layers, every side, on the target (after the composite).
+    function stillPass(g, layers, grounds) {
+      dc.stillMode = 2;
+      for (const Lk of layers) drawSideLayer(g, Lk, 0, grounds, true);
+      dc.stillMode = 0;
+    }
+
+    // A world seam: two complete worlds mixed. A `still` medium stays out of the mix (DESIGN_2_1 §11.9.3): a shared
+    // ground holding one is drawn once under the composite (its whole ground layer, so the medium keeps its place and
+    // stays under the text), the worlds are drawn on clear surfaces without it, and the `still` media of the other
+    // layers come after the composite. Without still media this is the v2 path.
+    const NON_GROUND = Object.freeze([L.far, L.mid, L.text, L.near]);
+
     function drawWorldSeam(g, w, h, backdrop, part, u) {
+      const under = sharedStillGround();
+      const still = anyStill(NON_GROUND, true);
       const a = pool.take(), b = pool.take();
-      drawWorld(a.ctx, w, h, 1, backdrop);
-      drawWorld(b.ctx, w, h, 2, backdrop);
+      if (still) dc.stillMode = 1;
+      if (under) under.skip = true;
+      drawWorld(a.ctx, w, h, 1, under ? 'clear' : backdrop);
+      drawWorld(b.ctx, w, h, 2, under ? 'clear' : backdrop);
+      if (under) under.skip = false;
+      dc.stillMode = 0;
       const out = SE.mix(ctl, pool, part, a, b, u, onPartError);
       fillBackdrop(g, w, h, backdrop, dc.pal);        // whatever the mix leaves transparent shows the backdrop
+      if (under) {
+        dc.g = g;
+        if (dc.groundOn) drawItemLayer(g, under, L.ground);
+        g.setTransform(1, 0, 0, 1, 0, 0);
+        g.globalAlpha = 1;
+      }
       g.drawImage(out.canvas, 0, 0);
       if (out !== a && out !== b) pool.give(out);
       pool.give(a); pool.give(b);
+      if (still) { dc.g = g; stillPass(g, NON_GROUND, true); }
+    }
+
+    // The ground item both worlds share (side 0) when its ground layer holds a `still` medium, else null.
+    function sharedStillGround() {
+      for (let k = 0; k < nItems; k++) {
+        const it = items[k];
+        if (it.ground >= 0 && !it.side && DR.hasStill(it.scene, L.ground)) return it;
+      }
+      return null;
     }
 
     function onPartError(part, err) {
@@ -345,6 +449,7 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'engine
         }
       }
       for (const acc of fg.post.accents) {
+        if (dc.groundOnly) break;                            // the ground layers alone keep the work texture only
         const cut = plan.cuts[acc.cut];
         const d = cut.slots[acc.slot];
         const def = d ? registry.get('filter', d.v) : null;
@@ -415,6 +520,7 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'engine
       if (source.fontKey !== fontKey) { if (fontKey !== null) sprites.clear(); fontKey = source.fontKey; }
 
       fg = F.frameAt(plan, t, fg);
+      framePlan = plan;
       gather(plan, source, t);
       currentCut = F.currentCut(plan, t, fg);
       const tBehave = clock();
@@ -423,6 +529,8 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'engine
       const pal = paletteOf(plan.look.palette, backdrop);
       dc.pal = pal; dc.W = W; dc.H = Hd; dc.scale = scale * dpr; dc.assets = o.assets || null; dc.face = source.face || null;
       dc.groundOn = F.groundVisible(backdrop);
+      dc.groundOnly = ro.layers === 'ground';
+      dc.t = t; dc.backdrop = backdrop; dc.quality = quality; dc.thumb = ro.thumb === true;
       dc.glyphPath = !exporting && (ro.glyphPath === 'sprite' || ro.glyphPath === 'direct') ? ro.glyphPath : 'auto';
       dc.probe = !exporting && ro.probe ? ro.probe : null;
       q.draft = quality === 'draft' || (!exporting && level >= 2);
@@ -430,9 +538,12 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'engine
       lastLook.t = t; lastLook.scale = dc.scale; lastLook.backdrop = backdrop;
       lastLook.glyphPath = dc.glyphPath; lastLook.probe = dc.probe;
       dc.paintKey = paintKeyOf(dc.scale, palId(pal), q.draft);
+      dc.overKey = paintKeyState.over;
       DR.resetCounts(dc);
       const ox = (sw - W * scale) / 2, oy = (sh - Hd * scale) / 2;
       dc.D[0] = scale * dpr; dc.D[1] = 0; dc.D[2] = 0; dc.D[3] = scale * dpr; dc.D[4] = ox * dpr; dc.D[5] = oy * dpr;
+      const vis = dc.visible;                        // the frame on the device (media edges draw only what shows)
+      vis[0] = dc.D[4]; vis[1] = dc.D[5]; vis[2] = dc.D[4] + W * dc.D[0]; vis[3] = dc.D[5] + Hd * dc.D[3];
       const fw = dpr === 1 ? sw : Math.max(1, Math.round(sw * dpr)), fh = dpr === 1 ? sh : Math.max(1, Math.round(sh * dpr));
       pool.frame(fw, fh);
       pool.begin();
@@ -450,11 +561,11 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'engine
       dc.g = g;
 
       const seam = fg.seam;
-      if (seam) {
+      if (seam && (seam.scope === 'world' || !dc.groundOnly)) {
         const part = SE.seamPart(plan, registry, seam.i);
         if (seam.scope === 'world') drawWorldSeam(g, fw, fh, backdrop, part, seam.u);
         else drawTextSeam(g, fw, fh, backdrop, part, seam.u);
-      } else drawWorld(g, fw, fh, 0, backdrop);
+      } else drawWorld(g, fw, fh, 0, backdrop);     // (a text seam mixes only text layers: none with layers 'ground')
       const tDraw = clock();
 
       let passes = 0;
@@ -476,13 +587,48 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'engine
       pool.end();
       const end = clock();
 
-      let provisional = false;
+      let provisional = dc.mediaWaiting > 0;         // a media frame still decoding is provisional too (§11.4.5)
       for (let k = 0; k < nItems; k++) if (items[k].scene.provisional) provisional = true;
       last.ms = end - start; last.behave = tBehave - start; last.draw = tDraw - tBehave; last.post = end - tDraw; last.passes = passes;
       if (quality === 'preview' && now) adaptTo(last.ms);
       const c = dc.counts;
-      return { ms: last.ms, drawn: { glyphs: c.glyphs, shapes: c.shapes, paints: c.paints, particles: c.particles }, passes,
-        provisional, level };
+      const stats = { ms: last.ms, drawn: { glyphs: c.glyphs, shapes: c.shapes, paints: c.paints, particles: c.particles }, passes,
+        provisional, level, media: { drawn: c.media, waiting: dc.mediaWaiting, fallback: c.mediaFallback } };
+      // export quality never draws a substitute: the facade turns this into EngineError('media-not-ready' | 'media-missing')
+      if (dc.mediaError) stats.mediaError = dc.mediaError;
+      return stats;
+    }
+
+    // mediaAt(plan, source, t, out, scale) → out: [{ id, m }] of the media nodes of the scenes active at absolute time
+    // t, with their media times (closed form, the drawing's own rule); no behaviour runs. Unsorted; the facade sorts.
+    // With an output scale, every medium also carries the px and blur its draw will ask the store for (shapes.frameFor:
+    // the box's long side × scale × headroom, blur × scale; a 'soft' fit adds its blurred copy), so the store readies
+    // exactly that still tier, and bakes exactly that blur of a video or animation frame (DESIGN_2_1 §11.4.6). The
+    // products are shapes.frameFor's, in its order, so the store's keys match bit for bit. The media of a scene come
+    // from source.media(kind, i) (the facade's memo by fingerprint, so no scene is kept or rebuilt for this) when the
+    // source has it, else from the built scene (mediaEntries).
+    const mediaGraph = { fg: null };
+    function mediaAt(plan, source, t, out, scale) {
+      const list = out || [];
+      list.length = 0;
+      if (!plan) return list;
+      const g = mediaGraph.fg = F.frameAt(plan, t, mediaGraph.fg);
+      const entries = (kind, i) => (source.media ? source.media(kind, i) : mediaEntries(kind === 'cut' ? source.cut(i) : source.ground(i)));
+      const add = (ms, tl) => {
+        for (const e of ms) {
+          const m = e.time ? MEDIA.mapTime(e.time, e.time.clock === 'song' ? t : tl) : 0;
+          if (!(scale > 0)) { list.push({ id: e.id, m }); continue; }
+          const px = e.size * scale * e.headroom;                    // shapes.frameFor's product, in its order
+          list.push({ id: e.id, m, px, blur: e.blur * scale });
+          if (e.softBlur >= 0) list.push({ id: e.id, m, px, blur: e.softBlur * scale });
+        }
+      };
+      const seen = new Set();
+      const cut = (i) => { if (!seen.has(i)) { seen.add(i); add(entries('cut', i), t - plan.cuts[i].t0); } };
+      for (const c of g.cuts) cut(c.i);
+      if (g.seam) { for (const i of g.seam.aCuts) cut(i); for (const i of g.seam.bCuts) cut(i); }
+      for (const e of g.grounds) add(entries('ground', e.i), t - plan.grounds[e.i].t0);
+      return list;
     }
 
     // warmAt(plan, source, t) → glyphs visited: makes the glyph sprites the frame at t will draw, at the output scale,
@@ -525,12 +671,16 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'engine
     }
 
     return {
-      render, warmAt,
+      render, warmAt, mediaAt,
+      // setRegistry(registry) (DESIGN_2_1 §3.10): the registry filters and seams are looked up in (the effective one)
+      setRegistry(next) { if (next && typeof next.get === 'function') registry = next; },
+      get registry() { return registry; },
       // beginWarm() starts counting the sprite working set; warmBytes() → { used, budget }: the bytes of the distinct
       // sprites found or made since (frames drawn meanwhile count too) and the sprite budget.
       beginWarm() { sprites.beginSpan(); },
       warmBytes: () => ({ used: sprites.spanBytes, budget: sprites.budget }),
       lastTime: () => (Number.isFinite(lastLook.t) ? lastLook.t : null),
+      lastScale: () => lastLook.scale,
       hitTest: (x, y) => picks.hitTest(x, y),
       boxes: () => picks.boxes(),
       stats: () => ({ frameMs: last.ms, stageMs: { behave: last.behave, draw: last.draw, post: last.post },
@@ -546,5 +696,5 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'engine
     };
   }
 
-  return { createRenderer, WORLD_LAYERS };
+  return { createRenderer, mediaEntries, WORLD_LAYERS };
 });

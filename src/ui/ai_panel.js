@@ -1,10 +1,47 @@
-/* 文字PVメーカー v2 — original work. The AI panel (tab AI of the detail column): connection, what is sent, guide, tools, running, review, log (DESIGN §6.4.10). */
-MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/ai_controller', 'ui/ai_review'],
-  (dom, I, PR, CH, AC, AR) => {
+/* 文字PVメーカー v2 — original work. The AI panel (tab AI of the detail column): connection, what is sent, guide, tools with the instruction block, the board, running, review, log (DESIGN §6.4.10; DESIGN_2_1 §6.2–§6.4). */
+MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/ai_controller', 'ui/ai_review', 'ui/ai_thinking',
+  'ui/ai_board', 'planner/areas', 'ui/fields', 'ui/selection', 'i18n/t'],
+  (dom, I, PR, CH, AC, AR, AT, BOARD, AREAS, F, S, T) => {
     'use strict';
 
     const { h } = dom;
     const TICK_MS = 1000;                 // the elapsed time of a running request
+    const CHIPS = Object.freeze(['season', 'slow', 'ramp', 'push', 'material']);   // ai.chip.* → ai.chipText.*
+    const TARGETS = Object.freeze(['work', 'sel', 'area']);
+
+    // The areas the 区画▾ list offers (DESIGN_2_1 §6.2): song sections, all sections of a kind, headings, blocks, and the
+    // selected cut. → [{ group, items: [{ ref, area }] }], empty groups left out.
+    function areaGroups(doc, plan, sel) {
+      if (!plan) return [];
+      const all = AREAS.areasOf(doc, plan);
+      const out = [];
+      const song = all.song.concat(all.kinds);
+      if (song.length) out.push({ group: 'song', items: song.map((area) => ({ ref: area.ref, area })) });
+      if (all.heads.length) out.push({ group: 'head', items: all.heads.map((area) => ({ ref: area.ref, area })) });
+      if (all.paras.length) out.push({ group: 'para', items: all.paras.map((area) => ({ ref: area.ref, area })) });
+      const s = S.validate(sel, plan, doc);
+      if (s.level === 'cut') {
+        const area = AREAS.resolve(doc, plan, { kind: 'cut', key: s.key });
+        if (area) out.push({ group: 'sel', items: [{ ref: area.ref, area }] });
+      }
+      return out;
+    }
+
+    // 「サビ1 · 0:41–1:02 · 5行」: the target chip and the list rows.
+    function areaLine(t, area) {
+      const time = (x) => T.fmtTime(x).replace(/\.\d+$/, '');
+      const parts = [F.areaLabel(t, area)];
+      if (area.kind !== 'work') parts.push(time(area.t0) + '–' + time(area.t1));
+      parts.push(area.n ? t('count.lines', { n: area.n }) : '—');
+      return parts.join(' · ');
+    }
+
+    // The library's assets whose bytes are on this device: the ones the direct tool may offer (DESIGN_2_1 §11.6.1).
+    function mediaOnDevice(app) {
+      const list = app.doc.media && Array.isArray(app.doc.media.list) ? app.doc.media.list : [];
+      const here = list.filter((e) => !app.media || app.media.state(e.id) !== 'missing').map((e) => e.id);
+      return here.length ? here : false;
+    }
 
     function storageOf(kind) {
       try { const s = window[kind]; s.getItem('mojipv.probe'); return s; } catch (e) { return null; }
@@ -28,6 +65,12 @@ MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/a
         song: () => songOf(app),
         now: () => Date.now(),
         nextFrame: () => new Promise((resolve) => requestAnimationFrame(() => resolve())),
+        // 写真の説明 (DESIGN_2_1 §11.6.2): the pictures come from ui/media_io, the consent is a question
+        confirm: (o) => (app.confirm ? app.confirm(o) : Promise.resolve(false)),
+        openAi: () => app.openPanel('ai', 'ai'),
+        mediaHere: (id) => !!app.media && !!app.media.entry(id) && app.media.state(id) === 'ok',
+        visionParts: (ids) => (app.media ? app.media.visionParts(ids) : Promise.resolve([])),
+        visionKb: (ids) => (app.media ? app.media.visionKb(ids) : 0),
       };
     }
 
@@ -153,8 +196,10 @@ MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/a
         more.hidden = !more.hidden;
         btn.setAttribute('aria-expanded', String(!more.hidden));
       });
+      // photos leave the device only when the user asks 「AIに説明してもらう」 (DESIGN_2_1 §11.6.4)
       return h('div', { class: 'ai-sends', role: 'note' },
-        h('div', { class: 'ai-sends-line' }, I.icon('info', { size: 15 }), h('span', { class: 'grow', text: t('ai.sends') }), btn), more);
+        h('div', { class: 'ai-sends-line' }, I.icon('info', { size: 15 }), h('span', { class: 'grow', text: t('ai.sends') }), btn),
+        h('p', { class: 'note subtle', text: t('ai.sendsMedia') }), more);
     }
 
     function guideBlock(t) {
@@ -170,24 +215,206 @@ MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/a
         hint ? h('span', { class: 'btn-hint', text: t(hint) }) : null);
     }
 
-    function toolsBlock(app, ctl) {
+    // 指示 (DESIGN_2_1 §6.2; it replaces ひとこと修正): 対象 [全体|選択中|区画▾] with the target chip, the instruction
+    // (300 characters, Enter sends), phrase chips, ▸ 詳しく (新しい素材を作ってもよい), [カメラワークをAIに任せる], [送る],
+    // and 区画ごとに頼む… (the board).
+    function directBlock(app, ctl, openBoard) {
+      const t = app.t;
+      let target = { mode: 'work', ref: null };
+      let listOpen = false;
+      const segs = TARGETS.map((m) => h('button', { class: 'seg', type: 'button', role: 'radio', 'data-target': m, tabindex: '-1',
+        'aria-checked': 'false' }, m === 'area' ? [t('ai.direct.area'), h('span', { 'aria-hidden': 'true', text: ' ▾' })] : t('ai.direct.' + m)));
+      const seg = h('div', { class: 'segmented ai-targets', role: 'radiogroup', 'aria-label': t('ai.direct.target') }, segs);
+      const list = h('div', { class: 'ai-area-list', role: 'listbox', id: 'ai-area-list', 'aria-label': t('ai.direct.area'), hidden: true });
+      const chipText = h('span', { class: 'grow ell ai-chip-text' });
+      const chipX = h('button', { class: 'icon-btn small', type: 'button', title: t('ai.direct.clearTarget'), 'aria-label': t('ai.direct.clearTarget') },
+        I.icon('close', { size: 12 }));
+      const chip = h('div', { class: 'ai-target-chip', hidden: true, role: 'status' }, h('span', { class: 'ai-diamond', 'aria-hidden': 'true', text: '◆' }),
+        chipText, chipX);
+      const text = h('textarea', { class: 'ai-text', id: 'ai-direct-text', rows: '2', maxlength: String(AC.MAX_INSTRUCTION),
+        placeholder: t('ai.direct.placeholder'), 'aria-describedby': 'ai-direct-hint', 'aria-label': t('ai.tool.direct') });
+      const counter = h('span', { class: 'ai-count muted' });
+      const chips = h('div', { class: 'chips ai-chips', role: 'group', 'aria-label': t('ai.direct.phrases') },
+        CHIPS.map((c) => h('button', { class: 'chip', type: 'button', 'data-chip': c, text: t('ai.chip.' + c) })));
+      const allow = h('input', { type: 'checkbox', 'data-ctl': 'allowMaterials' });
+      // 写真・動画をAIが使ってよい (DESIGN_2_1 §11.6.1): on by default, offered while the library has a picture on this device
+      const allowMedia = h('input', { type: 'checkbox', checked: true, 'data-ctl': 'allowMedia' });
+      const mediaRow = h('label', { class: 'check-row', hidden: true }, allowMedia, h('span', { text: t('ai.direct.allowMedia') }));
+      const more = h('details', { class: 'ai-direct-more' }, h('summary', { text: t('ai.direct.more') }),
+        h('label', { class: 'check-row' }, allow, h('span', { text: t('ai.direct.allowMaterials') })), mediaRow);
+      const camera = h('button', { class: 'btn small', type: 'button', 'data-tool': 'camera', text: t('ai.camera.run') });
+      const send = h('button', { class: 'btn small primary', type: 'button', 'data-tool': 'direct', text: t('ai.direct.send') });
+      const board = h('button', { class: 'link ai-board-link', type: 'button', text: t('ai.board.open') });
+      const questions = h('div', { class: 'ai-questions', role: 'status' });
+      const root = h('div', { class: 'ai-edit ai-direct' },
+        h('div', { class: 'ai-edit-row' }, h('span', { class: 'field-label', text: t('ai.direct.target') }), seg),
+        list, chip,
+        h('label', { class: 'field-label', htmlFor: 'ai-direct-text', text: t('ai.tool.direct') }), text,
+        h('div', { class: 'ai-edit-row' }, h('span', { class: 'muted small', id: 'ai-direct-hint', text: t('ai.edit.enterHint') }),
+          h('span', { class: 'grow' }), counter),
+        chips, more,
+        h('div', { class: 'ai-edit-row' }, camera, h('span', { class: 'grow' }), send),
+        questions, board);
+
+      // The AreaRef the box sends now (null: nothing to send to).
+      const ref = () => AC.targetRef(target, app.view.state.sel, app.doc, app.plan);
+      const areaOf = (r) => (r && app.plan ? AREAS.resolve(app.doc, app.plan, r) : null);
+
+      function setTarget(mode, r) {
+        target = { mode: TARGETS.includes(mode) ? mode : 'work', ref: mode === 'area' ? r || target.ref : null };
+        listOpen = mode === 'area' && !r;
+        update();
+        if (listOpen) dom.focus(list.querySelector('[role="option"]') || segs[2]);
+      }
+
+      function highlight(r) {
+        const area = areaOf(r);
+        app.view.set({ highlight: area && area.kind !== 'work' ? area.lineIds.slice() : null });
+      }
+
+      segs.forEach((b) => b.addEventListener('click', () => {
+        if (b.dataset.target === 'area') { target = { mode: 'area', ref: target.mode === 'area' ? target.ref : null }; listOpen = !listOpen; update();
+          if (listOpen) dom.focus(list.querySelector('[role="option"]') || b); return; }
+        setTarget(b.dataset.target);
+      }));
+      seg.addEventListener('keydown', (ev) => {
+        if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(ev.key)) return;
+        ev.preventDefault();
+        ev.stopPropagation();
+        const at = TARGETS.indexOf(target.mode);
+        const next = TARGETS[(at + (ev.key === 'ArrowRight' || ev.key === 'ArrowDown' ? 1 : TARGETS.length - 1)) % TARGETS.length];
+        target = { mode: next, ref: next === 'area' ? target.ref : null };
+        listOpen = next === 'area' && !target.ref;
+        update();
+        // 区画 without an area yet: the list opens with the focus on its first area (Esc goes back to the radio).
+        dom.focus((listOpen && list.querySelector('[role="option"]')) || segs[TARGETS.indexOf(next)]);
+      });
+      list.addEventListener('keydown', (ev) => {
+        const opts = [...list.querySelectorAll('[role="option"]')];
+        const at = opts.indexOf(document.activeElement);
+        if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+          ev.preventDefault();
+          ev.stopPropagation();
+          const to = Math.max(0, Math.min(opts.length - 1, at + (ev.key === 'ArrowDown' ? 1 : -1)));
+          if (opts[to]) dom.focus(opts[to]);
+        } else if (ev.key === 'Escape') {
+          ev.preventDefault();
+          ev.stopPropagation();
+          listOpen = false;
+          update();
+          dom.focus(segs[2]);
+        }
+      });
+      chipX.addEventListener('click', () => { setTarget('work'); dom.focus(segs[0]); });
+      chip.addEventListener('pointerenter', () => highlight(ref()));
+      chip.addEventListener('pointerleave', () => highlight(null));
+      chips.addEventListener('click', (ev) => {
+        const b = ev.target.closest('[data-chip]');
+        if (!b) return;
+        const phrase = t('ai.chipText.' + b.dataset.chip);
+        const cur = text.value.trim();
+        text.value = (cur ? cur + t('ai.chipJoin') : '') + phrase;
+        text.value = text.value.slice(0, AC.MAX_INSTRUCTION);
+        if (b.dataset.chip === 'material') { allow.checked = true; more.open = true; }
+        update();
+        dom.focus(text);
+      });
+      text.addEventListener('input', () => update());
+      text.addEventListener('keydown', (ev) => {
+        if (ev.key !== 'Enter' || ev.shiftKey || ev.ctrlKey || ev.metaKey || ev.altKey || ev.isComposing || ev.keyCode === 229) return;
+        ev.preventDefault();
+        if (!send.disabled) sendNow('all');
+      });
+      send.addEventListener('click', () => sendNow('all'));
+      camera.addEventListener('click', () => sendNow('camera'));
+      board.addEventListener('click', () => openBoard());
+
+      function sendNow(mode) {
+        const r = ref();
+        const instruction = text.value.trim();
+        if (!r || (mode !== 'camera' && !instruction)) { dom.focus(text); return; }
+        ctl.run('direct', { briefs: [{ ref: r, instruction }], mode, allowMaterials: mode === 'camera' ? false : allow.checked,
+          media: mode === 'camera' || !allowMedia.checked ? false : mediaOnDevice(app) });
+      }
+
+      function renderList() {
+        const groups = areaGroups(app.doc, app.plan, app.view.state.sel);
+        const cur = target.ref ? AREAS.keyOf(target.ref) : null;
+        const kids = [];
+        const hasSong = groups.some((g) => g.group === 'song');
+        for (const g of groups) {
+          kids.push(h('div', { class: 'ai-area-group', role: 'presentation', text: t('area.group.' + g.group) }));
+          for (const it of g.items) {
+            const key = AREAS.keyOf(it.ref);
+            const opt = h('button', { class: ['ai-area-opt', key === cur ? 'is-current' : null], type: 'button', role: 'option',
+              'aria-selected': String(key === cur), 'data-area': key, text: areaLine(t, it.area) });
+            opt.addEventListener('click', () => { setTarget('area', it.ref); dom.focus(text); });
+            opt.addEventListener('pointerenter', () => highlight(it.ref));
+            opt.addEventListener('pointerleave', () => highlight(null));
+            kids.push(opt);
+          }
+        }
+        if (!hasSong) {
+          kids.push(h('p', { class: 'note subtle ai-need-song' }, t('area.needSong'), ' ',
+            h('button', { class: 'link', type: 'button', text: t('ai.song.title'), on: { click: () => app.bus.emit('ai.tool', 'analyze') } })));
+        }
+        dom.replace(list, kids);
+      }
+
+      function update() {
+        const st = ctl.state;
+        segs.forEach((b) => {
+          const on = b.dataset.target === target.mode;
+          b.setAttribute('aria-checked', String(on));
+          b.tabIndex = on ? 0 : -1;
+          b.disabled = !!st.run;
+        });
+        segs[2].setAttribute('aria-expanded', String(listOpen));
+        segs[2].setAttribute('aria-controls', 'ai-area-list');
+        const focusedInList = list.contains(document.activeElement) ? document.activeElement.dataset.area : null;
+        list.hidden = !listOpen;
+        if (listOpen) {
+          renderList();
+          if (focusedInList) { const again = list.querySelector('[data-area="' + CSS.escape(focusedInList) + '"]'); if (again) dom.focus(again); }
+        }
+        const r = ref();
+        const area = target.mode === 'work' ? null : areaOf(r);
+        chip.hidden = !area;
+        chipText.textContent = area ? areaLine(t, area) : '';
+        counter.textContent = t('ai.edit.count', { n: text.value.length, max: AC.MAX_INSTRUCTION });
+        mediaRow.hidden = !mediaOnDevice(app);
+        const why = !r ? (target.mode === 'sel' ? 'ai.edit.noLine' : 'ai.direct.pickArea') : ctl.blocked('direct');
+        send.disabled = !!why || !text.value.trim();
+        send.title = why ? t(why) : '';
+        camera.disabled = !!why;
+        camera.title = why ? t(why) : '';
+        text.disabled = !!st.run;
+        board.disabled = !!st.run || !!st.review;
+        // A question from the AI, under the box and per area (DESIGN_2_1 §6.2).
+        const n = st.notice && st.notice.kind === 'question' && st.notice.tool === 'direct' ? st.notice : null;
+        dom.replace(questions, n ? (n.questions || [{ areaKey: null, text: n.text }]).map((q) => {
+          const b = (n.briefs || []).find((x) => x.key === q.areaKey);
+          const area2 = b ? areaOf(b.ref) : null;
+          return h('p', { class: 'ai-question', text: area2 ? t('ai.review.question', { area: F.areaLabel(t, area2), q: q.text }) : t('ai.edit.question', { q: q.text }) });
+        }) : []);
+      }
+
+      // Opened for 「この行 / この区画 / このカットをAIに頼む…」: that target, the text focused.
+      function preset(r) {
+        if (!r || r.kind === 'work') setTarget('work');
+        else setTarget('area', r);
+      }
+
+      return { root, update, text, preset, highlight };
+    }
+
+    function toolsBlock(app, ctl, openBoard) {
       const t = app.t;
       const reason = h('p', { class: 'ai-reason', role: 'status' });
       const prep = toolButton(t, 'prep', 'lyrics', 'ai.hint.prep');
       const looks = toolButton(t, 'looks', 'look', 'ai.hint.looks');
-      const text = h('textarea', { class: 'ai-text', id: 'ai-edit-text', rows: '2', maxlength: String(AC.MAX_INSTRUCTION),
-        placeholder: t('ai.edit.placeholder'), 'aria-describedby': 'ai-edit-hint' });
-      const counter = h('span', { class: 'ai-count muted' });
-      const tWork = h('button', { class: 'seg', type: 'button', role: 'radio', 'data-target': 'work', text: t('ai.edit.work') });
-      const tLines = h('button', { class: 'seg', type: 'button', role: 'radio', 'data-target': 'lines' });
-      const send = h('button', { class: 'btn small primary', type: 'button', 'data-tool': 'edit', text: t('ai.edit.send') });
-      const edit = h('div', { class: 'ai-edit' },
-        h('label', { class: 'field-label', htmlFor: 'ai-edit-text', text: t('ai.tool.edit') }), text,
-        h('div', { class: 'ai-edit-row' }, h('span', { class: 'muted small', id: 'ai-edit-hint', text: t('ai.edit.enterHint') }),
-          h('span', { class: 'grow' }), counter),
-        h('div', { class: 'ai-edit-row' }, h('span', { class: 'field-label', text: t('ai.edit.target') }),
-          h('div', { class: 'segmented', role: 'radiogroup', 'aria-label': t('ai.edit.target') }, tWork, tLines),
-          h('span', { class: 'grow' }), send));
+      const direct = directBlock(app, ctl, openBoard);
+      const edit = direct.root;
       const songReason = h('p', { class: 'ai-reason' });
       const consentText = h('p', { class: 'note' });
       const agree = h('input', { type: 'checkbox', 'data-ctl': 'consent' });
@@ -199,38 +426,11 @@ MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/a
         songReason, consentCard, h('div', { class: 'row-actions' }, songTools));
       const root = h('section', { class: 'ai-sec ai-tools', 'aria-label': t('ai.tools') },
         h('h3', { class: 'ai-h', text: t('ai.tools') }), reason, prep, looks, edit, song);
-      let target = 'work';
 
-      const lineIds = () => AC.selectedLines(app.view.state.sel, app.plan);
-      function sendEdit() {
-        const instruction = text.value.trim();
-        if (!instruction) { dom.focus(text); return; }
-        const ids = target === 'lines' ? lineIds() : [];
-        ctl.run('edit', { instruction, lineIds: ids });
-      }
       dom.on(root, 'click', '[data-tool]', (ev, b) => {
-        if (b.dataset.tool === 'edit') sendEdit(); else ctl.run(b.dataset.tool);
-      });
-      dom.on(root, 'click', '[data-target]', (ev, b) => { setTarget(b.dataset.target); });
-      edit.querySelector('.segmented').addEventListener('keydown', (ev) => {
-        if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(ev.key)) return;
-        const next = target === 'work' && !tLines.disabled ? 'lines' : 'work';
-        setTarget(next);
-        dom.focus(next === 'work' ? tWork : tLines);
-        ev.preventDefault();
-      });
-      text.addEventListener('input', () => update(ctl.state));
-      text.addEventListener('keydown', (ev) => {
-        if (ev.key !== 'Enter' || ev.shiftKey || ev.ctrlKey || ev.metaKey || ev.altKey || ev.isComposing || ev.keyCode === 229) return;
-        ev.preventDefault();
-        if (!send.disabled) sendEdit();
+        if (b.dataset.tool !== 'direct' && b.dataset.tool !== 'camera') ctl.run(b.dataset.tool);
       });
       agree.addEventListener('change', () => ctl.consent(agree.checked));
-
-      function setTarget(v) {
-        target = v === 'lines' ? 'lines' : 'work';
-        update(ctl.state);
-      }
 
       function setDisabled(btn, why) {
         btn.disabled = !!why;
@@ -243,21 +443,7 @@ MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/a
         reason.hidden = !common;
         setDisabled(prep, ctl.blocked('prep'));
         setDisabled(looks, ctl.blocked('looks'));
-        const ids = lineIds();
-        tLines.disabled = !ids.length;
-        tLines.title = ids.length ? '' : t('ai.edit.noLine');
-        tLines.textContent = ids.length > 1 ? t('ai.edit.lines', { n: ids.length }) : t('ai.edit.line');
-        const tgt = target === 'lines' && ids.length ? 'lines' : 'work';
-        for (const b of [tWork, tLines]) {
-          const onOff = b.dataset.target === tgt;
-          b.setAttribute('aria-checked', String(onOff));
-          b.tabIndex = onOff ? 0 : -1;
-        }
-        counter.textContent = t('ai.edit.count', { n: text.value.length, max: AC.MAX_INSTRUCTION });
-        const editWhy = ctl.blocked('edit');
-        setDisabled(send, editWhy);
-        if (!text.value.trim()) send.disabled = true;
-        text.disabled = !!st.run;
+        direct.update();
         const songWhy = ctl.songBlocked();
         songReason.textContent = songWhy ? t(songWhy) : '';
         songReason.hidden = !songWhy;
@@ -271,10 +457,17 @@ MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/a
         for (const b of songTools) setDisabled(b, songWhy ? songWhy : ctl.blocked(b.dataset.tool));
       }
 
-      // Opened for a tool (AIで整える, AIに3案, AIでタイミング, この行をAIに頼む…): scroll to it and focus it.
+      // Opened for a tool (AIで整える, AIに3案, AIでタイミング, この行 / この区画 / このカットをAIに頼む…): scroll to it
+      // and focus it; an instruction target comes preselected (app.aiTarget, DESIGN_2_1 §6.2).
       function focusTool(tool) {
-        if (tool === 'edit') { if (app.aiTarget && app.aiTarget.lines && app.aiTarget.lines.length) setTarget('lines'); }
-        const el = tool === 'edit' ? text : tool === 'align' ? (agree.checked || consentCard.hidden ? songTools[1] : agree)
+        const instruct = tool === 'direct' || tool === 'edit';
+        if (instruct && app.aiTarget) {
+          const r = app.aiTarget.ref || (app.aiTarget.lines && app.aiTarget.lines.length && app.plan
+            ? AREAS.ofLines(app.doc, app.plan, app.aiTarget.lines) : null);
+          direct.preset(r);
+          app.aiTarget = null;
+        }
+        const el = instruct ? direct.text : tool === 'align' ? (agree.checked || consentCard.hidden ? songTools[1] : agree)
           : root.querySelector('[data-tool="' + tool + '"]');
         if (!el) return;
         el.scrollIntoView({ block: 'nearest' });
@@ -284,30 +477,55 @@ MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/a
         el.classList.add('is-called');
       }
 
-      return { root, update, focusTool };
+      return { root, update, focusTool, direct };
     }
 
     // ---- mount ------------------------------------------------------------------------------------------------------------
 
+    // ai/direct and ai/recipe (package E) when they are in the build; without them the tools say boot.soon.
+    const optional = (id) => (MV.has(id) ? MV.use(id) : null);
+
     function mount(app, el) {
       const t = app.t;
-      const ctl = AC.createController(hostOf(app), { session: storageOf('sessionStorage'), local: storageOf('localStorage') });
+      const ctl = AC.createController(hostOf(app), { session: storageOf('sessionStorage'), local: storageOf('localStorage'),
+        direct: optional('ai/direct'), recipe: optional('ai/recipe'), vision: optional('ai/vision') });
       const conn = connectionCard(app, ctl);
-      const tools = toolsBlock(app, ctl);
+      // 区画ごとに指示 (the board): a sub-page of the AI tab; it takes the place of the tools while it is open.
+      let board = null;
+      let boardWanted = false;
+      const boardHost = h('div', { class: 'ai-board-host', hidden: true });
+      function openBoard() {
+        if (!board) board = BOARD.mount(app, ctl, { onBack: closeBoard });
+        dom.replace(boardHost, board.el);
+        boardWanted = true;
+        boardHost.hidden = !!ctl.state.review;
+        tools.root.hidden = true;
+        board.update();
+        board.focus();
+      }
+      function closeBoard() {
+        if (board) board.destroy();
+        boardWanted = false;
+        boardHost.hidden = true;
+        tools.root.hidden = !!ctl.state.review;
+        dom.focus(tools.root.querySelector('.ai-board-link'));
+      }
+      const tools = toolsBlock(app, ctl, openBoard);
       // The stage is a polite live region; the elapsed seconds next to it are not announced (they change every second).
-      const runText = h('span', { class: 'ai-run-stage', role: 'status', 'aria-live': 'polite' });
+      const runText = h('span', { class: 'ai-run-stage ai-shimmer', role: 'status', 'aria-live': 'polite' });
       const runTime = h('span', { class: 'ai-run-time muted', 'aria-hidden': 'true' });
       const stop = h('button', { class: 'btn small', type: 'button', 'data-ctl': 'stop', text: t('ai.stop') });
-      const runLine = h('div', { class: 'ai-run' }, h('span', { class: 'ai-spin', 'aria-hidden': 'true' }), runText, runTime,
+      const runLine = h('div', { class: 'ai-run' }, AT.orb(false), runText, runTime,
         h('span', { class: 'grow' }), stop);
       const message = h('div', { class: 'ai-message', hidden: true });
       const review = h('section', { class: 'ai-sec ai-review' });
       const log = h('section', { class: 'ai-sec ai-log', 'aria-label': t('ai.log.title') });
       const root = h('div', { class: 'ai-panel', role: 'region', 'aria-label': t('ai.region') },
-        conn.root, noticeBlock(t), guideBlock(t), runLine, message, tools.root, review, log);
+        conn.root, noticeBlock(t), guideBlock(t), runLine, message, tools.root, boardHost, review, log);
       dom.replace(el, root);
 
       const openCards = new Set();
+      const openAggs = new Set();         // aggregate rows expanded to their lines (an area review, DESIGN_2_1 §6.4)
       const shown = { error: null, notice: null };
       let shownReview = null;
       let shownTryOn = null;
@@ -315,25 +533,31 @@ MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/a
       let lastStatus = ctl.state.keyStatus;
 
       stop.addEventListener('click', () => ctl.abort());
+      // The thinking animation over the preview, wherever the request was started from (step ①/②, Ctrl+K or this tab).
+      if (app.shell && app.shell.stage && app.shell.stage.element) AT.mountHud(app, ctl, app.shell.stage.element);
 
       // Hovering (or focusing) a review row highlights its line on the lane and the timeline and scrolls the lyric
-      // editor to it (§6.4.10.6).
+      // editor to it (§6.4.10.6); an aggregate row highlights all of its lines (view.highlight is then an array).
       function hover(lineId) {
         app.view.set({ highlight: lineId || null });
         if (!lineId) return;
-        const line = app.plan ? app.plan.lines.find((l) => l.id === lineId) : null;
-        const rowId = line ? line.row : lineId;
+        const first = Array.isArray(lineId) ? lineId[0] : lineId;
+        const line = app.plan ? app.plan.lines.find((l) => l.id === first) : null;
+        const rowId = line ? line.row : first;
         const row = app.doc.sheet.rows.findIndex((r) => r.id === rowId);
         const body = app.shell && app.shell.steps && app.shell.steps.bodies.lyrics;
         if (row >= 0 && body && body.editor) body.editor.scrollToRow(row);
       }
       const rowLine = (target) => {
-        const row = target instanceof Element ? target.closest('[data-line]') : null;
-        return row && review.contains(row) ? row.dataset.line : null;
+        const row = target instanceof Element ? target.closest('[data-line], [data-lines]') : null;
+        if (!row || !review.contains(row)) return null;
+        if (row.dataset.lines) { const ids = row.dataset.lines.split(',').filter(Boolean); return ids.length ? ids : null; }
+        return row.dataset.line || null;
       };
+      const sameHover = (a, b) => (Array.isArray(a) && Array.isArray(b) ? a.join(',') === b.join(',') : a === b);
       review.addEventListener('mouseover', (ev) => {
         const id = rowLine(ev.target);
-        if (id !== app.view.state.highlight) hover(id);
+        if (!sameHover(id, app.view.state.highlight)) hover(id);
       });
       review.addEventListener('mouseleave', () => hover(null));
       review.addEventListener('focusin', (ev) => { const id = rowLine(ev.target); if (id) hover(id); });
@@ -366,7 +590,8 @@ MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/a
             I.icon('warn', { size: 16 }), h('span', { class: 'grow', text }),
             h('button', { class: 'btn small', type: 'button', text: t('ai.dismiss'), on: { click: () => ctl.dismiss() } })));
         }
-        if (st.notice) {
+        // A question of the instruction box is shown under the box, per area (DESIGN_2_1 §6.2).
+        if (st.notice && !(st.notice.kind === 'question' && st.notice.tool === 'direct')) {
           const n = st.notice;
           const main = n.kind === 'question'
             ? (n.text ? t('ai.edit.question', { q: n.text }) : t('ai.edit.unclear'))
@@ -397,9 +622,12 @@ MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/a
         const active = document.activeElement;
         const fkey = active && review.contains(active) && active.dataset ? active.dataset.fkey : null;
         review.hidden = !r;
-        tools.root.hidden = !!r;
-        if (!r) { dom.clear(review); return; }
-        const ctx = { t, app, ctl, state: st, openCards, setCardOpen };
+        // The review takes the place of the tools and the board; the board comes back after it (its rows then say 反映済み).
+        tools.root.hidden = !!r || boardWanted;
+        boardHost.hidden = !!r || !boardWanted;
+        if (!r) { dom.clear(review); openAggs.clear(); return; }
+        if (reopened) openAggs.clear();
+        const ctx = { t, app, ctl, state: st, openCards, setCardOpen, openAggs, setAggOpen };
         if (force || !AR.patchReview(ctx, review, prev, r)) dom.replace(review, AR.renderReview(ctx, r));
         if (review.contains(document.activeElement)) return;
         const again = fkey ? review.querySelector('[data-fkey="' + CSS.escape(fkey) + '"]') : null;
@@ -410,6 +638,12 @@ MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/a
       function setCardOpen(i, open) {
         if (openCards.has(i) === !!open) return;
         if (open) openCards.add(i); else openCards.delete(i);
+        updateReview(ctl.state, true);
+      }
+
+      function setAggOpen(agg, open) {
+        if (openAggs.has(agg) === !!open) return;
+        if (open) openAggs.add(agg); else openAggs.delete(agg);
         updateReview(ctl.state, true);
       }
 
@@ -431,6 +665,7 @@ MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/a
         updateRun(st);
         updateMessage(st);
         tools.update(st);
+        if (board && boardWanted) board.update();
         updateReview(st, parts.has('doc') && !!st.review && st.review.kind === 'transcript');   // [後ろに足す] needs lyrics
         if (parts.has('doc') || parts.has('log') || parts.has('all')) updateLog();
         if (app.shell) app.shell.playbar.updateStrip();
@@ -439,7 +674,10 @@ MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/a
       ctl.on(() => render('state'));
       app.bus.on('plan', () => { ctl.docChanged(); render('doc'); });
       app.bus.on('side', () => render('log'));
-      app.bus.on('ai.tool', (tool) => requestAnimationFrame(() => tools.focusTool(tool)));
+      app.bus.on('ai.tool', (tool) => requestAnimationFrame(() => {
+        if (boardWanted) closeBoard();
+        tools.focusTool(tool);
+      }));
       app.store.on('doc', (e) => { if (e.kind === 'load') ctl.projectChanged(); });
       app.view.on((changed) => {
         if (changed.includes('sel')) render('sel');
@@ -451,8 +689,8 @@ MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/a
         }
       });
       render('all');
-      return { root, ctl, render };
+      return { root, ctl, render, openBoard, closeBoard };
     }
 
-    return { mount, hostOf, songOf };
+    return { mount, hostOf, songOf, areaGroups, areaLine, CHIPS, TARGETS };
   });

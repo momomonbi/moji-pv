@@ -1,0 +1,436 @@
+{
+ "format": "mojipv.project",
+ "schema": 2,
+ "doc": {
+  "meta": {
+   "app": "2.1.0",
+   "lang": "auto"
+  },
+  "sheet": {
+   "next": 15,
+   "rows": [
+    {
+     "id": "r1",
+     "src": "[ti:春を待つうた]"
+    },
+    {
+     "id": "r2",
+     "src": "[ar:サンプル楽団]"
+    },
+    {
+     "id": "r3",
+     "src": "# Aメロ"
+    },
+    {
+     "id": "r4",
+     "src": "[00:04.00]始発のホームに/白い息"
+    },
+    {
+     "id": "r5",
+     "src": "改札の向こうで/朝がほどける"
+    },
+    {
+     "id": "r6",
+     "src": ""
+    },
+    {
+     "id": "r7",
+     "src": "[00:14.00]ポケットの*切符*を/そっと握って"
+    },
+    {
+     "id": "r8",
+     "src": "まだ名前のない/今日へ行く"
+    },
+    {
+     "id": "r9",
+     "src": ""
+    },
+    {
+     "id": "ra",
+     "src": "# サビ"
+    },
+    {
+     "id": "rb",
+     "src": "[00:24.00][00:46.00]飛ばせ/*紙ひこうき*/空の果てまで"
+    },
+    {
+     "id": "rc",
+     "src": "[00:30.00]折り目の数だけ/強くなれる"
+    },
+    {
+     "id": "rd",
+     "src": "向かい風でも/かまわないさ"
+    },
+    {
+     "id": "re",
+     "src": "Fly high/どこまでも!"
+    }
+   ]
+  },
+  "timing": {
+   "snap": "off",
+   "lead": 0.12,
+   "tail": 0.25,
+   "leadIn": 1,
+   "outro": 2,
+   "tapLatency": 0.06
+  },
+  "song": {
+   "name": "demo.m4a",
+   "sha1": "3ba2b676a9cf4b58e189e02b2be90aa72fa56761",
+   "seconds": 60,
+   "bpm": 120,
+   "offset": 0.25,
+   "meter": 4,
+   "bpmConfidence": 0.82,
+   "digest": {
+    "hz": 20,
+    "loud": "KSIlLic2KyooMigvKiwyNDU0Mzg6OTk4Mj4+PEAzOjVANz5HRj1EPDxGPEA/U0FCTEJFRUNHSVhXSUZHT0xMU1RaXVRRWVtRW1ZbX1VWVF1+fHN1dpKKf3h8c3p1d3ePgXlwcHNyc3Bqi4J4bGhraGNlYpN4bG9vb2FjY2yRgHRmb29sbGNkiXxqZm5kZGZjZ5GAa2ZoaWxvamiHeHVuam1qc21vjoB+cXhzdHRwd42AfHV0eHl8cnSbjX+Ben10dnZ/nIqBenx5gXt1eJ2KhHx7en6Be3mci4OIgIOIf395oZaNi4OBeXuBhqiVhoKDf3qAgHWelIeFg4R8dHl8oIWFgYF9cnl8dpSCfH50bWtud2uOgn94a3Rpamt0l3xvdXJvZHBjbol5d3FyamFoa26Jd3BnZmRrZ2phh35tamNsZ2VjbZKCbWZoaGhjcGOQdXhyZnFxZWZrjINzdHdtamtrcZV+gn15fHp4dXqfkIF1eXV7fnV2n5WCfIODgYB7fJmOhH6DgoR7hIOdk4WEfEdGUVBHdmVWUU1IVU1ISG5hXFNVS1FHU1FuXVxLVlVRT1BKdFlQV1Ctqqysq9bGs7iut7axrLDUwrKzq7avrqyv27++vq61s7Grtt7Ev7ayvLmvtLvTwsW4wbK1s7q41svHvMbCt764xOTUz8m6wLvEurzp08jJxsTBv8G+6dbU0MrNwcjAzezU0M3Ky9DHz8fq2djN1czP0MfQ9uTQ0tHN1NPTz/ff1dLK0dTGysn04NTWyc3LxsjJ8dfbyMfPy87GwfPX18jIxsHBy8Hs08fGzsXGwr3C6dbHxca/wbrCuenPwr7Gv7fAvLnY0sjGtL+9tLOx08TCtb28r7yvsNLJu7y1sauzqq7TvLaysbSrs7Cu18a8tLCpsa2wtM/Av7K0taevs6bXxr62uKmzq7Kz18e0uK6yrrWzsdXGwL61rbi4tLfWwra0uLO0tbC108vEwLK6t7W3wNnTzMO7wsK9vLnm1cvBwrq6xse63c7OwsjHwMa+y+vbz9HPe3t5gnqCiIaBe4SAe3d6gYR/gHt5fH1/eIOCeIF7cHN4cHaBe3t1e3VxdHl4hHp6cXFtdG1tdIB2c25sbHVrdG92bmpudG50a2VlcWlsdGlqaGNtbGtqcGVtaWRpaGJuZG5gYmBial1jc2loZ2BcZV9dZ2ZkXlxjWWFiWFtpaF9cYlZjXlldamJjX2FcXVZSUmVgXV5WWltTV1NlVFdXUldaUVpPYFNQTlhXS05LS1ZdVldSUE1TVUdRUU1PVE9NT0tEXFNSU0ZHUUZPRlVPTkZBQUNHTUdWREZAS0ZFTEhIVUJBSz5AQjpIRUtLRzxCRkY5OEFCQTxEQzpEOUM7Sj45PjQzNz46Oj9DNj43Pjk5Ozg6OTM7MjU2NzU1PjU9Lis4LjUzNDwvMyszMjMrKTU/NTU1LCkmJikqNzgqLyssLykrLjcnKi0wKyMfLCkrJicnISkiKCgkMS4qKyIoHCIfHSckJRoZIRsZHSMiJxwfGCEeHSMdISAgGBUTIR0cEiEYExQYGxETFhkfFR8dFQ8PFxYOIxMTGxIVGBUODx0RFBMK"
+   },
+   "info": {
+    "summary": "春を待つ朝の歌",
+    "mood": "bright",
+    "bpm": 120,
+    "duration": 60,
+    "sections": [
+     {
+      "kind": "intro",
+      "start": 0,
+      "end": 4
+     },
+     {
+      "kind": "verse",
+      "start": 4,
+      "end": 24
+     },
+     {
+      "kind": "chorus",
+      "start": 24,
+      "end": 40
+     },
+     {
+      "kind": "interlude",
+      "start": 40,
+      "end": 46
+     },
+     {
+      "kind": "chorus",
+      "start": 46,
+      "end": 60
+     }
+    ],
+    "highlights": [
+     {
+      "time": 24,
+      "what": "サビの入り"
+     }
+    ]
+   }
+  },
+  "look": {
+   "seed": 20260925,
+   "moodSeed": 314159,
+   "aspect": "16:9",
+   "backdrop": "scene"
+  },
+  "pins": {
+   "cut/rb~3:cam.shot": {
+    "v": {
+     "follow": 0.2,
+     "keys": [
+      {
+       "aim": "block",
+       "at": "a"
+      },
+      {
+       "aim": "word:1",
+       "at": "word:1",
+       "curve": "holdThenDash",
+       "fill": 0.9,
+       "ox": 0.1
+      },
+      {
+       "aim": "word:1",
+       "at": "b",
+       "curve": "linear",
+       "fill": 0.95,
+       "ox": 0.1
+      }
+     ]
+    },
+    "by": "user",
+    "sig": "紙ひこうき"
+   },
+   "line/r4:arrive.ease": {
+    "v": {
+     "bz": [
+      0.7,
+      0,
+      0.2,
+      1
+     ]
+    },
+    "by": "user"
+   },
+   "line/r4:motion.speed": {
+    "v": 0.6,
+    "by": "ai"
+   },
+   "line/r7:arrive": {
+    "v": "myMat1",
+    "by": "user"
+   },
+   "line/r8:dwell": {
+    "v": "myMat2",
+    "by": "ai"
+   },
+   "line/rb:atmos": {
+    "v": "myMat3",
+    "by": "ai"
+   },
+   "line/rb:atmos@myMat3.count": {
+    "v": 1.2,
+    "by": "ai"
+   },
+   "line/rb:avoid": {
+    "v": [
+     "filter.sliceGlitch"
+    ],
+    "by": "ai"
+   },
+   "line/rb:cam.curve": {
+    "v": {
+     "ramp": {
+      "edge": 0.1,
+      "ends": "both",
+      "peak": 6
+     }
+    },
+    "by": "ai"
+   },
+   "line/rb:cam.shot": {
+    "v": "pushWord",
+    "by": "ai"
+   },
+   "line/rb:rig": {
+    "v": "climbRise",
+    "by": "ai"
+   },
+   "line/rb:season": {
+    "v": "spring",
+    "by": "ai"
+   },
+   "line/rc:cam.zoom": {
+    "v": 1.2,
+    "by": "user"
+   },
+   "work:lens.curve": {
+    "v": "softEnds",
+    "by": "user"
+   },
+   "work:seam.curve": {
+    "v": "dashStop",
+    "by": "user"
+   }
+  },
+  "salts": {},
+  "locks": {},
+  "filters": {},
+  "materials": {
+   "next": 4,
+   "list": [
+    {
+     "id": "m1",
+     "kind": "arrive",
+     "by": "user",
+     "name": {
+      "ja": "ふわり着地",
+      "en": "Soft landing"
+     },
+     "blurb": null,
+     "tags": [
+      "soft"
+     ],
+     "season": null,
+     "pool": true,
+     "rv": 1,
+     "recipe": {
+      "base": "inkRise",
+      "params": {
+       "yFrom": 1.2
+      },
+      "shared": {
+       "dur": {
+        "value": 1.1
+       },
+       "ease": {
+        "value": "softEnds"
+       }
+      }
+     }
+    },
+    {
+     "id": "m2",
+     "kind": "dwell",
+     "by": "ai",
+     "name": {
+      "ja": "ゆらぎ",
+      "en": ""
+     },
+     "blurb": {
+      "ja": "文字がゆっくり上下にゆれる",
+      "en": "Letters sway up and down"
+     },
+     "tags": [
+      "soft",
+      "slow"
+     ],
+     "season": null,
+     "pool": false,
+     "rv": 1,
+     "recipe": {
+      "knobs": [
+       {
+        "what": "amp"
+       }
+      ],
+      "osc": [
+       {
+        "amp": 0.06,
+        "col": "y",
+        "hz": 0.5,
+        "phase": "index",
+        "step": 0.6,
+        "wave": "sine"
+       }
+      ],
+      "parts": []
+     }
+    },
+    {
+     "id": "m3",
+     "kind": "ornament",
+     "by": "ai",
+     "name": {
+      "ja": "桜吹雪",
+      "en": "Cherry flurry"
+     },
+     "blurb": {
+      "ja": "花びらが斜めに舞い、拍でふわっと増える",
+      "en": "Petals drift across and swell on the beat"
+     },
+     "tags": [
+      "organic",
+      "soft"
+     ],
+     "season": "spring",
+     "pool": false,
+     "rv": 1,
+     "recipe": {
+      "follow": "own",
+      "knobs": [
+       {
+        "what": "count"
+       }
+      ],
+      "layers": [
+       {
+        "alpha": 0.85,
+        "appear": {
+         "at": "start",
+         "draw": "fade",
+         "dur": 0.6
+        },
+        "count": 90,
+        "field": {
+         "burst": "none",
+         "dir": 115,
+         "life": [
+          0,
+          0
+         ],
+         "speed": 0.09,
+         "spin": 60,
+         "sway": 26,
+         "swayHz": 0.35
+        },
+        "fill": null,
+        "gap": 0,
+        "glyph": "",
+        "inks": [
+         "#F4B4C6",
+         "accent"
+        ],
+        "layer": "near",
+        "move": [
+         {
+          "amp": 0.15,
+          "curve": null,
+          "hz": 0,
+          "phase": "rnd",
+          "wave": "beat",
+          "what": "scale"
+         }
+        ],
+        "pattern": "",
+        "place": {
+         "anchor": "frame",
+         "spread": 1.15,
+         "x": 0,
+         "y": 0
+        },
+        "prim": "particles",
+        "rot": [
+         0,
+         360
+        ],
+        "shape": "petal",
+        "size": [
+         0.012,
+         0.022
+        ],
+        "stroke": 0,
+        "style": ""
+       }
+      ],
+      "parts": [],
+      "scope": "run",
+      "seed": 7
+     }
+    }
+   ]
+  },
+  "media": {
+   "list": []
+  },
+  "output": {
+   "format": "mp4",
+   "short": 1080,
+   "fps": 30,
+   "quality": "high",
+   "audio": true,
+   "range": null,
+   "name": null,
+   "kit": {
+    "overlay": true,
+    "bg": false,
+    "green": false,
+    "srt": true,
+    "lrc": false
+   }
+  }
+ },
+ "side": {
+  "looks": {
+   "list": [],
+   "cap": 50
+  },
+  "aiLog": [],
+  "asks": {
+   "song:2@24-40": {
+    "text": "季節感を足して、カメラはゆっくり寄る",
+    "at": 3
+   }
+  }
+ }
+}

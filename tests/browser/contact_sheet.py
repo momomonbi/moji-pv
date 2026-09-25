@@ -5,12 +5,15 @@
         [--times 0.1,0.3,0.6,0.9] [--text はじまりの朝] [--theme sumiWashi] [--orient h|v] [--parts catalog|examples|stub]
         [--backdrop scene] [--cell 320] [--fonts] [--params '{"amount":0.55,"when":"impact"}'] [--impact]
         [--impulses flash@0.6,shake@1.2:0.8] --out /tmp/sheet.png
+    python3 tests/browser/contact_sheet.py --kind shot [--keys pushWord,readAlong] …   # camera presets (also --kind rig)
     python3 tests/browser/contact_sheet.py --list          # the parts each registry has
     python3 tests/browser/contact_sheet.py                 # self-check (CI): one small sheet per kind, nothing written
 
 One row per part, one column per time. A time u (0..1) is normalized over the part's own window: arrive → its entrance,
 depart → its exit, dwell → the hold between them, seam → the transition, every other kind → the whole visible cut.
-Each cell is the canned sample cut of engine/facade.samplePlan (the part in its slot, fallback parts elsewhere).
+Each cell is the canned sample cut of engine/facade.samplePlan (the part in its slot, fallback parts elsewhere). The kinds
+shot and rig show the camera presets of core/shot (a shot on the cut, or a rig over the whole sample plan; --params sets
+zoom, curve and follow, or amp and curve).
 --params sets the part's params (JSON; the rest stay auto). --impact makes the sample cut an impact (「!」) cut with the
 impulses the planner gives one (flash, shake, slip at its sung start; amounts from the mood, at least 0.6 / 0.5 / 0.3 so
 the sheet shows them). --impulses adds impulses kind@seconds[:amp] (flash shake slip punch) to the sample plan.
@@ -20,7 +23,7 @@ Parts come from parts/catalog when it exists, else from the test fixtures (tests
 stub_parts.js). Google Fonts are blocked unless --fonts is given, so the sheet is fast and uses fallback faces.
 Open the PNG with any image viewer (or the Read tool). Exit status 1 when a cell failed to render.
 Without --kind (CI runs every browser test with its default arguments) it checks itself instead: for every kind of the
-default registry, a sheet of two of that kind's parts at two times, kept in memory; it fails when a
+default registry, and for the shot and rig presets, a sheet of two of that kind's parts at two times, kept in memory; it fails when a
 cell fails, the page reports an error or a CSP violation, or a sheet comes back empty.
 
 This file also holds the lab-page helpers the other engine browser tests import (parts_gallery.py, glyph_parity.py,
@@ -43,7 +46,7 @@ sys.path.insert(0, str(ROOT / 'dev'))
 from browser import launch, new_page, japanese_font_missing  # noqa: E402,F401  (dev/browser.py, the shared launcher)
 
 FIXTURES = ROOT / 'tests' / 'fixtures'
-PROJECTS = ('basic', 'vertical', 'lrc', 'long')
+PROJECTS = ('basic', 'vertical', 'lrc', 'long', 'v21')     # v21: DESIGN_2_1 (materials, shot pins)
 FONT_HOSTS = ('https://fonts.googleapis.com/**', 'https://fonts.gstatic.com/**')
 LAB_URL = 'http://mv-lab.test/lab.html'
 RECORD_VIOLATIONS = """
@@ -75,7 +78,9 @@ def fixtures_script():
     projects = {}
     for name in PROJECTS:
         projects[name] = json.loads((FIXTURES / ('project_%s.json' % name)).read_text(encoding='utf-8'))['doc']
+    # the fake AssetStore and its test media parts (the lab's #media: mode, parts_gallery.py)
     return (commonjs('stub', FIXTURES / 'stub_parts.js') + commonjs('examples', FIXTURES / 'example_parts.js')
+            + commonjs('media', ROOT / 'tests' / 'helpers' / 'fake_media.js')
             + '(globalThis.MVLabFixtures || (globalThis.MVLabFixtures = {})).projects = '
             + json.dumps(projects, ensure_ascii=False) + ';\n')
 
@@ -134,6 +139,8 @@ async def csp_violations(page):
 SHEET_JS = r"""async (o) => {
   const FAC = MV.use('engine/facade'), HC = MV.use('engine/host/canvas'), HM = MV.use('engine/host/measure');
   const HF = MV.use('engine/host/fonts'), DOC = MV.use('core/doc'), REG = MV.use('core/registry'), K = MV.use('parts/kit');
+  const SHOT = MV.use('core/shot');
+  const camera = o.kind === 'shot' || o.kind === 'rig';          // camera presets: a shot on the cut, a rig over the plan
   const fx = globalThis.MVLabFixtures || {};
   const registryOf = (source) => {
     if (source === 'catalog') return MV.use('parts/catalog').defaultRegistry();
@@ -142,7 +149,8 @@ SHEET_JS = r"""async (o) => {
     return REG.createRegistry(fx.examples.exampleParts(K).concat(fallbacks));
   };
   const reg = registryOf(o.parts);
-  const keys = (o.keys && o.keys.length ? o.keys : reg.keys(o.kind)).filter((k) => !!k);
+  const all = camera ? (o.kind === 'shot' ? SHOT.SHOT_KEYS : SHOT.RIG_KEYS).slice() : reg.keys(o.kind);
+  const keys = (o.keys && o.keys.length ? o.keys : all).filter((k) => !!k);
   const times = o.times && o.times.length ? o.times : [0.1, 0.3, 0.6, 0.9];
   const aspect = DOC.DESIGN_SIZE[o.aspect] ? o.aspect : '16:9';
   const [dw, dh] = DOC.DESIGN_SIZE[aspect];
@@ -190,7 +198,8 @@ SHEET_JS = r"""async (o) => {
   };
   for (let r = 0; r < keys.length; r++) {
     means.push([]);
-    const key = keys[r], def = reg.get(o.kind, key), y = headH + r * (cellH + capH + gap);
+    const key = keys[r], y = headH + r * (cellH + capH + gap);
+    const def = camera ? (all.includes(key) ? { label: { ja: o.kind, en: o.kind } } : null) : reg.get(o.kind, key);
     g.fillStyle = '#e8e8e8'; g.font = '600 13px system-ui, sans-serif';
     g.fillText(key, gap, y + 4);
     g.font = '12px system-ui, sans-serif'; g.fillStyle = '#aaa';
@@ -327,6 +336,17 @@ async def self_check(page, info):
         if result['covered']:
             failures.append('%s: %d cells have something drawn over their bottom-left corner' % (kind, result['covered']))
         failures.extend('%s: %s' % (kind, msg) for msg in result['errors'])
+    for kind in ('shot', 'rig'):
+        keys = info['camera'][kind]
+        pick = [keys[0], keys[len(keys) // 2]]
+        opts = {'kind': kind, 'keys': pick, 'aspect': '9:16' if kind == 'shot' else '16:9', 'times': [0.3, 0.7], 'text': None,
+                'theme': None, 'orient': None, 'parts': source, 'backdrop': 'scene', 'cell': 160, 'fonts': False,
+                'params': None, 'impact': False, 'impulses': []}
+        result = await render_sheet(page, opts)
+        sheets += 1
+        if result['cells'] != len(pick) * 2 or not result['png'].startswith('data:image/png'):
+            failures.append('%s: %d cells for %d presets × 2 times' % (kind, result['cells'], len(pick)))
+        failures.extend('%s: %s' % (kind, msg) for msg in result['errors'])
     failures.extend(await check_options(page, info, source))
     failures.extend(page.lab_errors + await csp_violations(page))
     for msg in failures:
@@ -360,9 +380,9 @@ async def check_options(page, info, source):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description='Render a contact sheet of parts through the lab page.')
-    ap.add_argument('--kind', help='part kind: arrange arrive dwell depart ground ornament lens filter seam theme mood '
-                    '(without it: the self-check)')
-    ap.add_argument('--keys', default='', help='comma-separated part keys (default: every part of the kind)')
+    ap.add_argument('--kind', help='part kind: arrange arrive dwell depart ground ornament lens filter seam theme mood, '
+                    'or the camera presets shot and rig (without it: the self-check)')
+    ap.add_argument('--keys', default='', help='comma-separated part keys (default: every part or preset of the kind)')
     ap.add_argument('--aspect', default='16:9')
     ap.add_argument('--times', default='0.1,0.3,0.6,0.9', help='normalized times, comma-separated')
     ap.add_argument('--text', default='', help='the sample line (default: はじまりの朝)')

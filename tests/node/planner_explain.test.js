@@ -272,6 +272,136 @@ test('look and line slots: mood, theme and season alternatives and sources', () 
   assert.equal(split.from, 'mark', "the row's '/' marks");
 });
 
+// --- the v2.1 slots (DESIGN_2_1 §2.3, §2.8, §3.9) -----------------------------------------------------------------
+
+const NEW_WHY = new Set([...WHY, 'cam.emph', 'cam.impact', 'cam.words', 'cam.long', 'cam.short', 'cam.section', 'cam.sectionStart',
+  'cam.lens', 'cam.arrange', 'cam.amount', 'rig.section', 'rig.lastChorus', 'season.line', 'avoid']);
+const VALUE_SLOTS = ['motion.speed', 'cam.shot', 'cam.zoom', 'cam.curve', 'cam.follow', 'rig', 'rig.curve'];
+const CURVE_PARAMS = ['arrive.ease', 'arrive.flow', 'depart.ease', 'depart.flow', 'dwell.curve', 'lens.curve', 'seam.curve'];
+
+// Documents with v2.1 pins of every kind, on the synthetic registry with two framing lenses and camera-less layouts.
+const SYN21 = REG.createRegistry(SYN.all().map((d) => {
+  if (d.kind === 'lens' && /0[01]$/.test(d.key)) return Object.assign({}, d, { frames: true });
+  if (d.kind === 'arrange' && /0[45]$/.test(d.key)) return Object.assign({}, d, { cam: 'none' });
+  if (d.kind === 'arrange' && /0[67]$/.test(d.key)) return Object.assign({}, d, { cam: 'gentle' });
+  return d;
+}));
+function newPinsDoc(name, k) {
+  const doc = clone(corpus.project(name).doc);
+  const p = PL.run(doc, SYN21, null);
+  const L = p.lines, cuts = p.cuts.filter((c) => c.role === 'lyric');
+  const at = (i) => cuts[(i * 7 + k) % cuts.length];
+  Object.assign(doc.pins, {
+    ['line/' + L[(1 + k) % L.length].id + ':cam.shot']: { v: 'pushWord', by: 'ai' },
+    ['cut/' + at(1).key + ':cam.shot']: { v: { keys: [{ at: 'a', aim: 'block' }, { at: 'b', aim: 'last', fill: 0.9 }] }, by: 'user', sig: at(1).text },
+    ['line/' + L[(2 + k) % L.length].id + ':cam.zoom']: { v: 1.3, by: 'user' },
+    'work:cam.curve': { v: { ramp: { edge: 0.1, ends: 'both', peak: 4 } }, by: 'ai' },
+    ['line/' + L[(3 + k) % L.length].id + ':motion.speed']: { v: 0.5, by: 'ai' },
+    ['line/' + L[(4 + k) % L.length].id + ':rig']: { v: 'climbRise', by: 'ai' },
+    ['line/' + L[(5 + k) % L.length].id + ':season']: { v: 'winter', by: 'ai' },
+    ['line/' + L[(6 + k) % L.length].id + ':avoid']: { v: ['arrive.synArrive01', 'lens.synLens02'], by: 'ai' },
+    ['cut/' + at(2).key + ':arrive.ease']: { v: 'hushRushHush', by: 'user', sig: at(2).text },
+    'work:seam.curve': { v: 'dashStop', by: 'user' },
+  });
+  return doc;
+}
+
+// The Plan's own value of a v2.1 path at a cut (independent of planner/fields).
+function newPlanValue(doc, plan, cut, slot) {
+  if (slot === 'rig') return plan.rigs[cut.rig].rig.v;
+  if (slot === 'rig.curve') return plan.rigs[cut.rig].curve.v;
+  if (VALUE_SLOTS.includes(slot)) return cut.slots[slot].v;
+  if (slot === 'season') {
+    const pin = doc.pins['line/' + cut.line + ':season'];
+    return pin ? pin.v : plan.look.season.v;
+  }
+  if (slot === 'avoid') {
+    const pin = doc.pins['line/' + cut.line + ':avoid'];
+    return pin ? pin.v : [];
+  }
+  const [kind, param] = slot.split('.');
+  if (kind === 'seam') return cut.seamIn >= 0 ? plan.seams[cut.seamIn].slot.p[param] : undefined;
+  return cut.slots[kind].p[param];
+}
+
+test('explain() gives the Plan\'s value and source for 500 random paths of the v2.1 slots at every scope', () => {
+  const docs = [newPinsDoc('basic', 0), newPinsDoc('long', 3), newPinsDoc('vertical', 1)]
+    .concat(corpus.corpus(1, ['16:9', '9:16']).map((c) => c.doc).slice(0, 3));
+  let n = 0;
+  const seen = new Set();
+  for (let i = 0; n < 500; i++) {
+    const rng = R.stream('explain-v21', i);
+    const doc = docs[i % docs.length];
+    const plan = PL.plan(doc, { registry: SYN21 });
+    const slot = rng.pick(VALUE_SLOTS.concat(VALUE_SLOTS, CURVE_PARAMS, ['season', 'avoid']));
+    const scope = slot === 'avoid' || slot === 'season' ? rng.pick(['line', 'line', 'cut']) : rng.pick(['cut', 'cut', 'line', 'work']);
+    const lyric = plan.cuts.filter((c) => c.role === 'lyric' || c.role === 'focus');
+    let cut = rng.pick(scope === 'cut' ? plan.cuts : lyric);
+    let path;
+    if (scope === 'work') { cut = lyric[0]; path = 'work:' + slot; }
+    else if (scope === 'line') {
+      const line = plan.lines.find((l) => l.id === cut.line);
+      cut = plan.cuts.find((c) => c.key === line.cuts[0]);
+      path = 'line/' + line.id + ':' + slot;
+    } else path = 'cut/' + cut.key + ':' + slot;
+    if ((slot === 'season' || slot === 'avoid') && !cut.line) continue;
+    const e = EX.explain(doc, plan, path, { registry: SYN21 });
+    assert.deepEqual(e.value, newPlanValue(doc, plan, cut, slot), path);
+    if (VALUE_SLOTS.includes(slot)) {
+      const d = slot === 'rig' ? plan.rigs[cut.rig].rig : slot === 'rig.curve' ? plan.rigs[cut.rig].curve : cut.slots[slot];
+      assert.equal(e.from, d.from, path + ' from');
+    }
+    for (const w of e.why) assert.ok(NEW_WHY.has(w.code), path + ': why code ' + w.code);
+    if (slot === 'cam.shot' || slot === 'rig') {
+      assert.equal(e.alts.length, slot === 'rig' ? 6 : 10, path + ' alternatives');
+      for (let k = 1; k < e.alts.length; k++) assert.ok(e.alts[k - 1].w >= e.alts[k].w, path + ' sorted');
+    }
+    seen.add(slot + '@' + scope);
+    n++;
+  }
+  assert.ok(seen.size > 25, [...seen].join(' '));
+});
+
+test('explain: why codes of the camera slots', () => {
+  const doc = clone(corpus.project('basic').doc);
+  doc.pins['work:amount.camera'] = { v: 0.05, by: 'user' };
+  const p = PL.plan(doc, { registry: SYN21 });
+  const c = p.cuts.find((x) => x.role === 'lyric');
+  const e = EX.explain(doc, p, 'cut/' + c.key + ':cam.shot', { registry: SYN21 });
+  assert.deepEqual([e.value, e.from, e.why], ['none', 'auto', [{ code: 'rule', params: { rule: 'none-camera' } },
+    { code: 'cam.amount', params: { x: 0.05 } }]]);
+  assert.ok(e.alts.every((a) => a.w === 0));
+  const r = EX.explain(doc, p, 'cut/' + c.key + ':rig', { registry: SYN21 });
+  assert.deepEqual([r.value, r.why], ['none', [{ code: 'cam.amount', params: { x: 0.05 } }]]);
+  // A layout without camerawork forces 'none' (from rule).
+  const off = clone(corpus.project('basic').doc);
+  off.pins['work:arrange'] = { v: 'synArrange04', by: 'user' };
+  const q = PL.plan(off, { registry: SYN21 });
+  const cut = q.cuts.find((x) => x.role === 'lyric' && x.slots.arrange.v === 'synArrange04');
+  const x = EX.explain(off, q, 'cut/' + cut.key + ':cam.shot', { registry: SYN21 });
+  assert.deepEqual([x.value, x.from, x.why], ['none', 'rule', [{ code: 'cam.arrange', params: { key: 'synArrange04' } }]]);
+  const z = EX.explain(off, q, 'cut/' + cut.key + ':cam.zoom', { registry: SYN21 });
+  assert.equal(z.why[0].code, 'cam.amount');
+  for (const slot of ['cam.curve', 'cam.follow', 'motion.speed']) {
+    const w = EX.explain(off, q, 'cut/' + cut.key + ':' + slot, { registry: SYN21 }).why;
+    assert.ok(w.every((y) => y.code === 'rule' || y.code === 'cam.impact'), slot);
+  }
+  // An impact cut's zoom and curve name the impact; other cuts' zoom only the amount.
+  let impacts = 0;
+  for (const { doc: d } of corpus.corpus(1)) {
+    const plan = PL.plan(d, { registry: SYN21 });
+    const lyric = plan.cuts.filter((y) => y.role === 'lyric');
+    for (const k of lyric.filter((y) => y.feat.impact).slice(0, 4).concat(lyric.filter((y) => !y.feat.impact).slice(0, 3))) {
+      const zw = EX.explain(d, plan, 'cut/' + k.key + ':cam.zoom', { registry: SYN21 }).why.map((y) => y.code);
+      const cw = EX.explain(d, plan, 'cut/' + k.key + ':cam.curve', { registry: SYN21 }).why.map((y) => y.code);
+      assert.equal(zw.includes('cam.impact'), !!k.feat.impact, k.key + ' zoom why ' + zw);
+      assert.equal(cw.includes('cam.impact'), !!k.feat.impact, k.key + ' curve why ' + cw);
+      if (k.feat.impact) impacts++;
+    }
+  }
+  assert.ok(impacts >= 3, 'impact cuts ' + impacts);
+});
+
 test('the batched Gumbel noise of the chooser equals core/rng.gumbel', () => {
   for (let i = 0; i < 300; i++) {
     const seed = R.stream('g', i).int(0, 0xffffffff);

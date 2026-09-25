@@ -1,5 +1,5 @@
 /* 文字PVメーカー v2 — original work. The selection: one Sel for the whole app, drill up/down, crumbs, preview picks (DESIGN §6.5, §4.23). */
-MV.def('ui/selection', ['core/paths'], (P) => {
+MV.def('ui/selection', ['core/paths', 'planner/areas'], (P, AREAS) => {
   'use strict';
 
   const WORK = Object.freeze({ level: 'work' });
@@ -92,7 +92,10 @@ MV.def('ui/selection', ['core/paths'], (P) => {
   // --- validate -----------------------------------------------------------------------------------------------
 
   // Keeps the selection when everything it names still exists; otherwise climbs to the nearest surviving ancestor.
-  function validate(sel, plan) {
+  // A line selection may carry `area` (an AreaRef, DESIGN_2_1 §5.1): it is kept while the area still has exactly these
+  // lines, else dropped (the ids stay). Without `doc` the area can only be checked against the ids it came with, so
+  // callers that hold the document (boot after every plan) pass it.
+  function validate(sel, plan, doc) {
     const ix = indexOf(plan);
     if (!sel || typeof sel !== 'object') return WORK;
     switch (sel.level) {
@@ -100,12 +103,36 @@ MV.def('ui/selection', ['core/paths'], (P) => {
       case 'line': {
         const ids = Array.isArray(sel.ids) ? sel.ids.filter((id) => ix.lineById.has(id)) : [];
         if (!ids.length) return WORK;
-        return ids.length === sel.ids.length ? sel : { level: 'line', ids };
+        if (ids.length !== sel.ids.length) return { level: 'line', ids };
+        if (sel.area !== undefined && !areaHolds(sel, plan, doc)) return { level: 'line', ids: sel.ids.slice() };
+        return sel;
       }
       case 'cut': return validCut(ix, sel.key, sel);
       case 'el': return validEl(ix, sel);
       default: return WORK;
     }
+  }
+
+  const LINE_AREAS = Object.freeze(['song', 'songKind', 'head', 'para', 'lines']);
+
+  // Whether a line selection's area still names exactly its lines (with the document), or at least is a well-formed
+  // line-level AreaRef (without it).
+  function areaHolds(sel, plan, doc) {
+    const ref = sel.area;
+    if (!ref || typeof ref !== 'object' || !LINE_AREAS.includes(ref.kind) || !AREAS.keyOf(ref)) return false;
+    if (!doc) return true;
+    const area = AREAS.resolve(doc, plan, ref);
+    if (!area || area.lineIds.length !== sel.ids.length) return false;
+    const want = new Set(sel.ids);
+    return area.lineIds.every((id) => want.has(id));
+  }
+
+  // areaSel(area) → the selection of a resolved Area: its lines with the area, one cut, or the whole video.
+  function areaSel(area) {
+    if (!area || area.kind === 'work') return WORK;
+    if (area.kind === 'cut') return cutSel(area.cutKeys[0]);
+    if (!area.lineIds.length) return WORK;
+    return { level: 'line', ids: area.lineIds.slice(), area: area.ref };
   }
 
   function validCut(ix, key, keep) {
@@ -328,6 +355,6 @@ MV.def('ui/selection', ['core/paths'], (P) => {
 
   return {
     WORK, ELS, down, up, validate, crumbs, onPreviewClick, lineOfSel, cutsOf, nextLine, nextCut, seekTime, scopeOf,
-    equal, withLine,
+    equal, withLine, areaSel,
   };
 });

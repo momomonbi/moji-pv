@@ -13,13 +13,16 @@ MV.def('planner/segment', ['core/script', 'core/num', 'core/pins', 'core/rng', '
   const INTRO_ROOM = 3, OUTRO_ROOM = 3, GAP_MIN = 2.8;
   const SPECIAL_ROLES = new Set(['title', 'interlude', 'outro']);
 
-  // Specs of the line- and cut-scope timing slots (§3.4.2, §3.4.3), shown by planner/fields.
+  // Specs of the line- and cut-scope timing slots (§3.4.2, §3.4.3) and the v2.1 line slots season and avoid
+  // (DESIGN_2_1 §2.3), shown by planner/fields.
   const LINE_SPECS = Object.freeze({
     start: { type: 'num', min: 0, max: 36000, step: 0.001, unit: 's' },
     end: { type: 'num', min: 0, max: 36000, step: 0.001, unit: 's' },
     t0: { type: 'num', min: 0, max: 36000, step: 0.001, unit: 's' },
     lang: { type: 'enum', of: ['ja', 'en', 'zhHant', 'zhHans', 'ko'] },
     split: { type: 'split' },
+    season: { type: 'enum', of: ['any', 'none', 'spring', 'summer', 'autumn', 'winter'] },
+    avoid: { type: 'partRefs' },
   });
 
   const q6 = N.q6;

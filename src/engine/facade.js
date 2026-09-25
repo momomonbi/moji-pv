@@ -1,8 +1,8 @@
-/* 文字PVメーカー v2 — original work. Engine facade: plan + scenes + renderer behind the FROZEN §4.20 API, plus sample plans for thumbnails and the lab. */
-MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 'core/doc', 'core/pins', 'engine/text/service',
-  'engine/text/faces', 'engine/scene/build', 'engine/scene/cache', 'engine/render/renderer', 'engine/render/sprites',
-  'planner/plan', 'planner/look'],
-(H, RNG, SCH, S, DOC, PINS, TS, FACES, BUILD, CACHE, R, SP, PL, LOOK) => {
+/* 文字PVメーカー v2 — original work. Engine facade: plan + scenes + renderer behind the FROZEN §4.20 API, plus sample plans for thumbnails and the lab (DESIGN_2_1 §3.10, §11.3.7 additions). */
+MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 'core/doc', 'core/pins', 'core/shot',
+  'engine/text/service', 'engine/text/faces', 'engine/scene/build', 'engine/scene/cache', 'engine/scene/frame',
+  'engine/render/renderer', 'engine/render/sprites', 'parts/mix', 'planner/plan', 'planner/look'],
+(H, RNG, SCH, S, DOC, PINS, SHOT, TS, FACES, BUILD, CACHE, F, R, SP, MIX, PL, LOOK) => {
   'use strict';
 
   const SCENE_MAX = 16;             // §7.3
@@ -15,6 +15,7 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
   const WARM_SHARE = 0.9;           // …but no further than a working set of this share of the sprite budget: more would
                                     // evict (LRU) the sprites it made first, for the frames needed soonest
   const THUMB_PLANS = 8;
+  const MEDIA_MEMO = 4096;          // scenes whose media lists mediaAt remembers (tiny entries; cleared when full)
   const SAMPLE_TEXT = 'はじまりの朝';
   const SAMPLE_TEXT_B = '光のなかへ';
 
@@ -71,9 +72,14 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
   // and every other slot holds its kind's fallback. ref = { kind, key, params? }; opts = { text, textB, theme, mood,
   // aspect, orient, backdrop, palette, faces, textScale }. Deterministic. A seam gets two cuts with the transition between
   // them; the second shows textB (else SAMPLE_TEXT_B), so a page in another language can pass both lines.
+  // DESIGN_2_1 (additive): kind 'shot' puts a shot preset (key; params { zoom, curve, follow } = cam.zoom, cam.curve,
+  // cam.follow) on the cut, kind 'rig' a rig preset (params { amp, curve }) on one run over the whole plan (plan v 2);
+  // material keys of an extended registry work like any part key.
   function samplePlan(registry, ref, opts) {
+    const kind = ref && ref.kind;
+    if (kind === 'shot' || kind === 'rig') return cameraSamplePlan(registry, ref, opts);
     const o = opts || {};
-    const kind = ref && ref.kind, key = ref && ref.key;
+    const key = ref && ref.key;
     const def = kind && key ? registry.get(kind, key) : null;
     const aspect = DOC.DESIGN_SIZE[o.aspect] ? o.aspect : '16:9';
     const [w, h] = DOC.DESIGN_SIZE[aspect];
@@ -168,6 +174,37 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
     return cut;
   }
 
+  // The canned cut with a shot or a rig (picker tiles, the lab, contact sheets): the fallback parts, plus cam.* slots or
+  // one rig run covering the plan. An unknown key shows as 'none'.
+  function cameraSamplePlan(registry, ref, opts) {
+    const base = samplePlan(registry, {}, opts);
+    const p = (ref && ref.params) || {};
+    const plan = Object.assign({}, base, { v: 2 });
+    const cut = Object.assign({}, base.cuts[0]);
+    if (ref.kind === 'shot') {
+      const shot = SHOT.coerceShot(ref.key);
+      const slots = Object.assign({}, cut.slots, { 'cam.shot': { v: shot === undefined ? 'none' : shot, from: 'auto' },
+        'cam.zoom': { v: Number.isFinite(p.zoom) ? p.zoom : 1, from: 'auto' } });
+      if (p.curve !== undefined) slots['cam.curve'] = { v: p.curve, from: 'auto' };
+      if (Number.isFinite(p.follow)) slots['cam.follow'] = { v: p.follow, from: 'auto' };
+      cut.slots = slots;
+      cut.fp = H.hashJSON({ base: base.cuts[0].fp, shot: slots['cam.shot'].v, zoom: slots['cam.zoom'].v, curve: p.curve || null,
+        follow: Number.isFinite(p.follow) ? p.follow : null });
+    }
+    cut.rig = 0;
+    plan.cuts = [cut];
+    const rig = ref.kind === 'rig' ? SHOT.coerceRig(ref.key) : 'none';
+    const preset = typeof rig === 'string' && SHOT.RIGS[rig] ? SHOT.RIGS[rig] : null;
+    plan.rigs = [{ blend: null, cuts: [cut.key], curve: { from: 'auto', v: p.curve !== undefined ? p.curve : preset ? preset.curve : 'linear' },
+      key: 'k' + cut.key, rig: { from: 'auto', p: { amp: Number.isFinite(p.amp) ? p.amp : 1 }, v: rig === undefined ? 'none' : rig },
+      t0: 0, t1: base.duration }];
+    plan.grounds = base.grounds.map((g) => Object.assign({}, g, { zoomed: ref.kind === 'shot' && cut.slots['cam.shot'].v !== 'none' }));
+    plan.hash = '';
+    plan.hash = H.hashJSON(plan);
+    Object.defineProperty(plan, 'env', { enumerable: false, value: base.env });
+    return plan;
+  }
+
   // The time a thumbnail shows when none is given: the hero frame, or the middle of the transition.
   function sampleTime(plan, kind) {
     if (kind === 'seam' && plan.seams.length) return plan.seams[0].at;
@@ -260,16 +297,22 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
   // when absent — and `strict` (tests: part errors throw instead of falling back). Additive members: setPlan(plan),
   // scene(kind, i), fontUsage(t0, t1), setLevel(n). `spriteBudget` (bytes; tests and the lab) replaces the preview's
   // §7.3 sprite budget.
+  // DESIGN_2_1 additive members: registry (getter: the effective registry, parts/mix registryFor of the base registry
+  // and the document's materials and media), shotTrack(cutKey), viewAt(t), mediaAt(t), mediaReady(t, opts),
+  // fork({ assets }); thumb() also takes the kinds 'shot' and 'rig'. Internal options: `effective` (a fork's registry)
+  // and `ownAssets` (the fork made its asset store and disposes it).
   function createEngine(opts) {
     const o = opts || {};
-    const registry = o.registry;
-    if (!registry || typeof registry.get !== 'function') throw new EngineError('bad-args', 'createEngine needs { registry }');
+    const base = o.registry;
+    if (!base || typeof base.get !== 'function') throw new EngineError('bad-args', 'createEngine needs { registry }');
     if (!o.canvas || typeof o.canvas.create !== 'function') throw new EngineError('bad-args', 'createEngine needs { canvas: CanvasFactory }');
     if (!o.measurer || typeof o.measurer.width !== 'function') throw new EngineError('bad-args', 'createEngine needs { measurer }');
     const factory = o.canvas, measurer = o.measurer, fonts = o.fonts || null, assets = o.assets || null;
     const now = typeof o.now === 'function' ? o.now : typeof factory.now === 'function' ? factory.now : null;
     const idle = typeof o.idle === 'function' ? o.idle : typeof factory.idle === 'function' ? factory.idle : null;
     const sceneMax = Number.isInteger(o.sceneMax) && o.sceneMax > 0 ? o.sceneMax : SCENE_MAX;
+    // the effective registry: the base plus the document's materials (and pooled media); the base until a document
+    let registry = o.effective && typeof o.effective.get === 'function' ? o.effective : base;
     const renderer = R.createRenderer({ canvas: factory, registry, assets, now, strict: !!o.strict, spriteBudget: o.spriteBudget });
     const cache = CACHE.createSceneCache({ max: sceneMax });
     const found = new Map();                         // cut / segment key → { fp, list } of scene warnings
@@ -328,7 +371,7 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
 
     function build(item, kind) {
       const svc = { registry, text: textService(), assets, pal: plan.look.palette, faces: plan.look.faces, strict: !!o.strict,
-        provisional: provisionalFor(item, kind) };
+        provisional: provisionalFor(item, kind), media: plan.media || null };
       const scene = kind === 'cut' ? BUILD.buildCut(item, plan, svc) : BUILD.buildGround(item, plan, svc);
       found.set(item.key, { fp: item.fp, list: scene.warnings || [] });
       scanned.add(item.fp);
@@ -359,9 +402,28 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
       return scene ? settle(scene, item.fp) : cache.put(build(item, kind));
     }
 
+    // The media of each scene by fingerprint and measurer key (renderer.mediaEntries), so mediaAt reads them in O(1)
+    // without keeping or rebuilding scenes: a scene is built (through the cache) only the first time. Bounded.
+    const mediaMemo = new Map();
+    function mediaOf(kind, i) {
+      const item = kind === 'cut' ? plan.cuts[i] : plan.grounds[i];
+      if (!item) return R.mediaEntries(null);
+      const key = item.fp + '|' + measurer.key;
+      let list = mediaMemo.get(key);
+      if (!list) {
+        const scene = sceneFor(kind, i);
+        list = R.mediaEntries(scene);
+        if (scene && scene.provisional) return list;           // rebuilt once the faces arrive: not remembered yet
+        if (mediaMemo.size >= MEDIA_MEMO) mediaMemo.clear();
+        mediaMemo.set(key, list);
+      }
+      return list;
+    }
+
     const source = {
       cut: (i) => sceneFor('cut', i),
       ground: (i) => sceneFor('ground', i),
+      media: mediaOf,
       fresh: (kind, i) => build(kind === 'cut' ? plan.cuts[i] : plan.grounds[i], kind),
       get fontKey() { return measurer.key; },
       get face() { return face; },
@@ -378,9 +440,21 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
 
     // --- FROZEN API ---
 
+    // The effective registry of a document (DESIGN_2_1 §3.10, §5.9.2): parts/mix derives the materials and the pooled
+    // media over the base registry (memoized there by identity; the base itself when there are none). The renderer
+    // looks filters and seams up in it, and thumbnails draw with it.
+    function adoptRegistry(doc) {
+      const next = MIX.registryFor(base, doc && doc.materials, doc && doc.media) || base;
+      if (next === registry) return;
+      registry = next;
+      renderer.setRegistry(next);
+      if (thumbs) { thumbs.renderer.setRegistry(next); thumbs.plans.clear(); }
+    }
+
     function setDoc(doc) {
       alive();
       if (doc === lastDoc && lastResult) return lastResult;
+      adoptRegistry(doc);
       const next = PL.plan(doc, { registry });
       lastResult = { plan: next, changedCuts: changedKeys(plan && plan.cuts, next.cuts),
         changedGrounds: changedKeys(plan && plan.grounds, next.grounds) };
@@ -531,15 +605,119 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
       else await preparePreview(lo, hi);
     }
 
+    // renderFrame(surface, t, opts) → FrameStats (§4.19.2). Additive options (DESIGN_2_1 §11.3.7): layers 'all' |
+    // 'ground'. FrameStats gains media { drawn, waiting }. In export quality a media frame that is not exact (or not on
+    // this device) is a programming error: exporters await mediaReady(t) first, so this throws EngineError
+    // ('media-not-ready' | 'media-missing') instead of letting a substitute frame be encoded.
     function renderFrame(surface, t, ropts) {
       alive();
-      if (!plan) return { ms: 0, drawn: { glyphs: 0, shapes: 0, paints: 0, particles: 0 }, passes: 0, provisional: false };
-      if (ropts && ropts.quality === 'export') {
+      if (!plan) {
+        return { ms: 0, drawn: { glyphs: 0, shapes: 0, paints: 0, particles: 0 }, passes: 0, provisional: false,
+          media: { drawn: 0, waiting: 0, fallback: 0 } };
+      }
+      const exporting = !!ropts && ropts.quality === 'export';
+      if (exporting) {
         // an export at 1440p and above shares the machine with the preview: half the sprite budget (§4.19.5)
         const short = Math.min(surface.w || surface.canvas.width, surface.h || surface.canvas.height);
         renderer.setSpriteBudget(short >= 1440 ? SP.BUDGET_SHARED : SP.BUDGET);
       }
-      return renderer.render(surface, plan, t, ropts, source);
+      const stats = renderer.render(surface, plan, t, ropts, source);
+      if (stats.mediaError) {
+        const err = stats.mediaError;
+        delete stats.mediaError;
+        if (exporting) {
+          throw new EngineError(err.code, (err.code === 'media-missing' ? 'media not on this device: ' : 'media frame not ready: ')
+            + err.id + ' at t = ' + t);
+        }
+      }
+      return stats;
+    }
+
+    // --- media (DESIGN_2_1 §11.3.7) ---
+
+    // mediaAt(t, { scale }?) → [{ id, m, px?, blur? }]: the media the frame at t draws, with their media times (seconds),
+    // sorted by id, m, px, blur and deduplicated. No behaviour runs; without plan media it is empty at once. Every
+    // medium (stills, videos and animations) also carries the px (long side, device px) and blur its draw asks the store
+    // for at the output scale (`scale`, else the last frame's), so assets.ready() decodes exactly that still tier and
+    // bakes exactly that blur of a video frame (DESIGN_2_1 §11.4.6); none before a first frame without a scale.
+    const mediaScratch = [];
+    const byMedia = (a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : a.m - b.m || (a.px || 0) - (b.px || 0) || (a.blur || 0) - (b.blur || 0));
+    function mediaAt(t, mopts) {
+      alive();
+      if (!plan || !plan.media || Object.keys(plan.media).length === 0) return [];
+      const scale = mopts && mopts.scale > 0 ? mopts.scale : renderer.lastScale();
+      renderer.mediaAt(plan, source, t, mediaScratch, scale);
+      mediaScratch.sort(byMedia);
+      const out = [];
+      for (const e of mediaScratch) {
+        const prev = out[out.length - 1];
+        if (prev && prev.id === e.id && prev.m === e.m && prev.px === e.px && prev.blur === e.blur) continue;
+        out.push(e.px === undefined ? { id: e.id, m: e.m } : { id: e.id, m: e.m, px: e.px, blur: e.blur });
+      }
+      return out;
+    }
+
+    // mediaReady(t, { signal, ahead = 3 / fps, fps, scale }) → Promise: resolves when the store holds every exact frame
+    // the frame at t draws at that output scale (assets.ready of mediaAt), and asks it to start on the frames of the
+    // next `ahead` seconds (assets.want of mediaAt at every output frame after t up to t + ahead: a look-ahead that
+    // named only the last one would let the session close the frames before it as they pass, to be decoded again from
+    // their key frame when they are asked for). Resolved at once without a store or media.
+    function mediaReady(t, ropts) {
+      alive();
+      const q = ropts || {};
+      if (!assets || !plan) return Promise.resolve();
+      const fps = Number.isFinite(q.fps) && q.fps > 0 ? q.fps : lastDoc && lastDoc.output ? lastDoc.output.fps : 30;
+      const ahead = Number.isFinite(q.ahead) ? q.ahead : 3 / fps;
+      const at = { scale: q.scale };
+      const list = mediaAt(t, at);
+      if (typeof assets.want === 'function' && ahead > 0) {
+        const steps = Math.max(1, Math.min(8, Math.round(ahead * fps)));
+        const next = [];
+        for (let k = 1; k <= steps; k++) for (const x of mediaAt(t + (ahead * k) / steps, at)) next.push(x);
+        if (next.length) assets.want(next);
+      }
+      if (list.length === 0 || typeof assets.ready !== 'function') return Promise.resolve();
+      return assets.ready(list, { signal: q.signal });
+    }
+
+    // --- shots (DESIGN_2_1 §3.10) ---
+
+    function cutIndexOf(key) {
+      if (!plan) return -1;
+      for (let i = 0; i < plan.cuts.length; i++) if (plan.cuts[i].key === key) return i;
+      return -1;
+    }
+
+    // shotTrack(cutKey) → { a, b, keys: [{ t, x, y, zoom, roll, aim: Box | null }] } | null: the cut's resolved shot from
+    // its built scene (times absolute; x, y the camera offset in du; roll in radians; aim the aimed rest box), for the
+    // stage overlay and the timeline. null without a shot.
+    function shotTrack(cutKey) {
+      alive();
+      const i = cutIndexOf(cutKey);
+      if (i < 0) return null;
+      const scene = sceneFor('cut', i);
+      const tr = scene && scene.shot;
+      if (!tr) return null;
+      const t0 = plan.cuts[i].t0;
+      return { a: t0 + tr.a, b: t0 + tr.b,
+        keys: tr.keys.map((k) => ({ t: t0 + k.t, x: k.X, y: k.Y, zoom: k.Z, roll: k.R, aim: k.box })) };
+    }
+
+    // viewAt(t) → { x, y, zoom, roll }: the text layer's camera at t — the current cut's camera composed with the rig
+    // (and the impulses, as drawn; x/y include the shake) — or the rig alone while no cut is on screen. The stage inverts
+    // drags with it.
+    function viewAt(t) {
+      alive();
+      if (!plan) return { x: 0, y: 0, zoom: 1, roll: 0 };
+      const fg = F.frameAt(plan, t);
+      const i = F.currentCut(plan, t, fg);
+      let cam;
+      if (i >= 0) {
+        const scene = sceneFor('cut', i);
+        F.evaluate(scene, t - plan.cuts[i].t0);
+        cam = F.cameraAt(scene, plan, t);
+      } else cam = F.rigCamera(plan, t);
+      return { x: cam.x + cam.shakeX, y: cam.y + cam.shakeY, zoom: cam.zoom, roll: cam.roll };
     }
 
     // Every face the plan uses: the estimate plus the faces its built scenes draw.
@@ -582,7 +760,7 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
       if (!entry) {
         const sp = samplePlan(registry, ref, { text: to.text, textB: to.textB, theme, aspect });
         const svc = { registry, text: textService().withFaces(sp.look.faces), assets, pal: sp.look.palette, faces: sp.look.faces,
-          strict: !!o.strict, provisional: false };
+          strict: !!o.strict, provisional: false, media: sp.media || null };
         const scenes = { cut: [], ground: [] };
         entry = {
           plan: sp, fontKey: measurer.key,
@@ -600,14 +778,22 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
       const t = Number.isFinite(to.t) ? to.t : sampleTime(entry.plan, ref.kind);
       const sw = surface.w || surface.canvas.width, sh = surface.h || surface.canvas.height;
       const d = entry.plan.design;
-      return thumbs.renderer.render(surface, entry.plan, t, { quality: 'export', pick: false, scale: Math.min(sw / d.w, sh / d.h) },
-        entry.source);
+      // thumbnails ask the asset store for posters only (DESIGN_2_1 §11.3.7), so a tile never waits on a decoder
+      const stats = thumbs.renderer.render(surface, entry.plan, t, { quality: 'export', pick: false,
+        scale: Math.min(sw / d.w, sh / d.h), thumb: true }, entry.source);
+      delete stats.mediaError;
+      return stats;
     }
 
-    function fork() {
+    // fork({ assets } = {}) → a frozen snapshot for export: the same plan and effective registry (materials included),
+    // caches of its own. Its asset store is `assets` when given, else the store's own fork (assets.fork()) — disposed with
+    // the forked engine — else the same store.
+    function fork(fopts) {
       alive();
-      const e = createEngine({ registry, canvas: factory, measurer, fonts, assets, now, idle, strict: o.strict, sceneMax, usage: used,
-        spriteBudget: o.spriteBudget });
+      const given = fopts && fopts.assets ? fopts.assets : null;
+      const store = given || (assets && typeof assets.fork === 'function' ? assets.fork() : assets);
+      const e = createEngine({ registry: base, effective: registry, canvas: factory, measurer, fonts, assets: store, now, idle,
+        strict: o.strict, sceneMax, usage: used, spriteBudget: o.spriteBudget, ownAssets: !given && store !== assets });
       if (plan) e.setPlan(plan);
       e.adoptDoc(lastDoc, lastResult);
       return e;
@@ -623,6 +809,7 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
       if (disposed) return;
       renderer.dispose();
       if (thumbs) thumbs.renderer.dispose();
+      if (o.ownAssets && assets && typeof assets.dispose === 'function') assets.dispose();
       cache.clear();
       found.clear();
       scanned.clear();
@@ -636,6 +823,8 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
       hitTest: (x, y) => renderer.hitTest(x, y),
       boxes: () => renderer.boxes(),
       thumb, warnings, fork, stats, dispose,
+      get registry() { return registry; },
+      shotTrack, viewAt, mediaAt, mediaReady,
       setPlan, fontUsage,
       scene: (kind, i) => (plan ? sceneFor(kind, i) : null),
       setLevel: (v) => renderer.setLevel(v),

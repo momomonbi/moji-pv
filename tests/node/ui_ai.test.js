@@ -13,6 +13,8 @@ const CH = MV.use('ai/changes');
 const LOOKS = MV.use('ai/looks');
 const REG = MV.use('core/registry');
 const AR = MV.use('ui/ai_review');
+const AP = MV.use('ui/ai_panel');
+const AB = MV.use('ui/ai_board');
 const PR = MV.use('ai/providers');
 const SONG = MV.use('ai/song');
 const CMD = MV.use('core/commands');
@@ -188,8 +190,10 @@ test('every key the AI modules and the AI panel use exists: ai.ch.*, ai.warn.* a
     'ai.ch.flash.': ['on', 'off'], 'ai.ch.impact.': ['on', 'off'], 'ai.ch.rows.': ['replace', 'append'],
     'ai.key.': ['unset', 'shape', 'set', 'checking', 'ok', 'bad', 'model', 'offline'],
     'ai.guide.': AC.GUIDE_TOPICS, 'ai.tool.': AC.TOOLS, 'ai.name.': AC.TOOLS, 'ai.stage.': AC.STAGES,
-    'ai.group.': AC.GROUP_ORDER, 'songSec.': SONG.SECTION_KINDS, 'fld.season.': LOOKS.SEASON_ENUM,
+    'ai.group.': AC.GROUP_ORDER.filter((g) => !AC.AREA_GROUP_ORDER.includes(g)), 'ai.grp.': AC.AREA_GROUP_ORDER.filter((g) => g !== 'area'), 'songSec.': SONG.SECTION_KINDS, 'fld.season.': LOOKS.SEASON_ENUM,
     'fld.amount.': LOOKS.AI_AMOUNTS, 'kind.': REG.PART_KINDS,
+    // v2.1 (DESIGN_2_1 §6.2, §6.3, §6.4): the instruction block, the board and the review's group headings.
+    'ai.chip.': AP.CHIPS, 'ai.chipText.': AP.CHIPS, 'ai.direct.': AP.TARGETS, 'ai.board.state.': AB.STATES,
   };
   const sources = aiSources();
   assert.ok(sources.length >= 10, 'ai/* and ui/ai_* are scanned');
@@ -214,7 +218,13 @@ test('every key the AI modules and the AI panel use exists: ai.ch.*, ai.warn.* a
   for (const kind of CH.KINDS) {
     assert.ok(('ai.ch.' + kind) in STRINGS || Object.keys(STRINGS).some((k) => k.startsWith('ai.ch.' + kind + '.')), kind);
   }
-  assert.deepEqual(Object.keys(CH.GROUPS).filter((g) => !AC.GROUP_ORDER.includes(g)), [], 'every change group has a heading');
+  // Every change group has a heading, in the review's order, and each heading is a group: the v2 groups and the groups
+  // of area instructions (DESIGN_2_1 §5.6 GROUPS +=, folded into ai/changes GROUPS).
+  assert.deepEqual([...AC.GROUP_ORDER].sort(), Object.keys(CH.GROUPS).sort(), 'every change group has a heading');
+  for (const g of AC.AREA_GROUP_ORDER) assert.ok(Object.prototype.hasOwnProperty.call(CH.GROUPS, g), g + ' is a change group');
+  assert.equal(CH.AREA_GROUPS, undefined, 'no second list of groups');
+  assert.equal(CH.groupOf({ kind: 'material' }), 'materials');
+  assert.equal(CH.groupOf({ kind: 'value', path: 'line/r1:motion.speed', group: 'outside' }), 'outside');
   const stages = new Set();
   for (const { text } of sources) for (const m of text.matchAll(/(?:onStage|setStage)\((?:id, )?'([a-z]+)'\)/g)) stages.add(m[1]);
   assert.ok(stages.has('upload') && stages.has('think'));
@@ -643,4 +653,391 @@ test('an edit that ends the try-on on the stage is noticed on the next document 
   ctl.docChanged();
   assert.equal(ctl.state.tryOn, null);
   assert.equal(ctl.strip(), null);
+});
+
+// ---- v2.1 (package F): area instructions, the board and the area review (DESIGN_2_1 §5.2, §6.2–§6.4) ------------------
+
+const AREAS = MV.use('planner/areas');
+
+function v21() {
+  const doc = MV.use('core/migrate').parseFile(corpus.projectText('v21')).doc;
+  return { doc, plan: MV.use('planner/plan').plan(doc, { registry: MV.use('parts/catalog').defaultRegistry() }) };
+}
+
+test('v2.1 targets: 全体, 選択中 (the named area of the selected lines, a cut of a split line) and 区画', () => {
+  const { doc, plan } = v21();
+  const all = AREAS.areasOf(doc, plan);
+  const verse = all.song.find((a) => a.n > 1);
+  assert.deepEqual(AC.targetRef({ mode: 'work' }, null, doc, plan), { kind: 'work' });
+  assert.deepEqual(AC.targetRef(null, null, doc, plan), { kind: 'work' });
+  // 選択中: the lines of a song section read as that section; a subset as those lines.
+  assert.deepEqual(AC.targetRef({ mode: 'sel' }, { level: 'line', ids: verse.lineIds.slice() }, doc, plan), verse.ref);
+  const two = verse.lineIds.slice(0, 1);
+  assert.deepEqual(AC.targetRef({ mode: 'sel' }, { level: 'line', ids: two }, doc, plan), AREAS.ofLines(doc, plan, two));
+  const head = all.heads[0];
+  assert.deepEqual(AC.targetRef({ mode: 'sel' }, { level: 'line', ids: head.lineIds.slice(), area: head.ref }, doc, plan), head.ref,
+    'a selection that names its area keeps it');
+  assert.equal(AC.targetRef({ mode: 'sel' }, { level: 'work' }, doc, plan), null, 'nothing selected');
+  const split = plan.lines.find((l) => l.cuts.length > 1);
+  if (split) {
+    assert.deepEqual(AC.targetRef({ mode: 'sel' }, { level: 'cut', key: split.cuts[1] }, doc, plan), { kind: 'cut', key: split.cuts[1] });
+  }
+  const single = plan.lines.find((l) => l.cuts.length === 1);
+  if (single) {
+    assert.deepEqual(AC.targetRef({ mode: 'sel' }, { level: 'cut', key: single.cuts[0] }, doc, plan), AREAS.ofLines(doc, plan, [single.id]),
+      'the only cut of a line is the line');
+  }
+  // 区画: the picked area while it resolves.
+  assert.deepEqual(AC.targetRef({ mode: 'area', ref: head.ref }, null, doc, plan), head.ref);
+  assert.equal(AC.targetRef({ mode: 'area', ref: { kind: 'head', rowId: 'gone' } }, null, doc, plan), null);
+  // refOfKey reads every key planner/areas makes back into its ref.
+  for (const list of Object.values(all)) for (const a of list) assert.equal(AREAS.keyOf(AC.refOfKey(a.key)), a.key, a.key);
+  assert.equal(AREAS.keyOf(AC.refOfKey('cut:r4~0')), 'cut:r4~0');
+  assert.equal(AC.refOfKey('bogus'), null);
+});
+
+test('v2.1 board: rows are the song sections, then added areas and drafts; drafts are capped and sanitised', () => {
+  const AB = MV.use('ui/ai_board');
+  const { doc, plan } = v21();
+  const all = AREAS.areasOf(doc, plan);
+  const rows = AB.rowsOf(doc, plan, {}, []);
+  assert.deepEqual(rows.map((r) => r.key), all.song.map((a) => a.key), 'song sections first');
+  const lines = AREAS.keyOf({ kind: 'lines', ids: ['r4', 'r7'] });
+  const rows2 = AB.rowsOf(doc, plan, { [lines]: { text: 'x', at: 1 }, 'head:gone': { text: 'y', at: 2 } }, [all.heads[0].key]);
+  assert.deepEqual(rows2.slice(all.song.length).map((r) => r.key), [all.heads[0].key, lines], 'added, then drafts; a gone area is left out');
+  assert.equal(AB.rowsOf(doc, plan, { [all.song[1].key]: { text: 'x', at: 1 } }, []).length, all.song.length, 'each area once');
+  assert.deepEqual(AB.rowsOf(doc, null, {}, []), []);
+  assert.equal(AB.stateOf('a', ['a']), 'done');
+  assert.equal(AB.stateOf('a', null), 'new');
+  const t = T.createT('ja', STRINGS, reg, { strict: true });
+  assert.equal(AB.linesText(t, plan, all.song[1]), t('area.lines', { a: 1, b: 4 }));
+  // Drafts (side.asks): one line, ≤ 120 characters, at most 40 (the oldest go), an empty text removes.
+  let side = D.defaultSide();
+  side = AC.withAsk(side, 'song:1@4-24', 'ゆっくり\nふわっと', 3);
+  assert.deepEqual(side.asks['song:1@4-24'], { text: 'ゆっくり ふわっと', at: 3 });
+  assert.equal(AC.withAsk(side, 'k', 'あ'.repeat(200), 1).asks.k.text.length, 120);
+  assert.equal(AC.withAsk(side, 'song:1@4-24', '   ', 4).asks['song:1@4-24'], undefined);
+  for (let i = 0; i < 45; i++) side = AC.withAsk(side, 'lines:r' + i, 'x', 10 + i);
+  assert.equal(Object.keys(side.asks).length, 40);
+  assert.ok(!('song:1@4-24' in side.asks) && !('lines:r0' in side.asks), 'the oldest drafts go first');
+  // まとめて送る: the rows with a draft, in row order, at most 8.
+  const many = Array.from({ length: 10 }, (_, i) => ({ key: 'k' + i, ref: { kind: 'lines', ids: ['r' + i] } }));
+  const asks = Object.fromEntries(many.map((r, i) => [r.key, { text: i === 2 ? '  ' : ' 指示' + i + ' ', at: i }]));
+  const b = AC.boardBriefs(many, asks);
+  assert.equal(b.count, 9);
+  assert.equal(b.over, true);
+  assert.equal(b.briefs.length, 8);
+  assert.deepEqual(b.briefs[0], { ref: many[0].ref, instruction: '指示0' });
+  assert.ok(!b.briefs.some((x) => x.ref === many[2].ref), 'an empty draft is not sent');
+  assert.equal(AC.boardBriefs(many.slice(0, 3), asks).over, false);
+});
+
+test('v2.1 review: groups in review order, aggregate rows, tri-state and dependencies', () => {
+  const ch = (id, extra) => Object.assign({ id, kind: 'part', checked: true, stale: false }, extra);
+  const list = [
+    ch('b1', { group: 'area', areaKey: 'B', agg: 'arrive' }), ch('m', { group: 'materials' }), ch('o', { group: 'outside' }),
+    ch('a1', { group: 'area', areaKey: 'A', requires: ['m'] }), ch('b2', { group: 'area', areaKey: 'B', agg: 'arrive' }),
+    ch('c', { group: 'cuts' }), ch('t', { kind: 'theme' }), ch('solo', { group: 'area', areaKey: 'A', agg: 'depart' }),
+  ];
+  const groups = AC.directGroups(list, ['A', 'B']);
+  assert.deepEqual(groups.map((g) => g.group + (g.areaKey ? ':' + g.areaKey : '')), ['materials', 'area:A', 'area:B', 'cuts', 'work', 'outside']);
+  assert.deepEqual(groups[1].changes.map((c) => c.id), ['a1', 'solo']);
+  assert.deepEqual(AC.directGroups(list, []).map((g) => g.areaKey || null).slice(1, 3), ['B', 'A'], 'areas in answer order without briefs');
+  // Aggregates: one row per `agg`; a one-member aggregate is that change's own row.
+  const rowsB = AC.aggRows(groups[2].changes);
+  assert.equal(rowsB.length, 1);
+  assert.deepEqual(rowsB[0].changes.map((c) => c.id), ['b1', 'b2']);
+  assert.deepEqual(AC.aggRows(groups[1].changes).map((r) => (r.change ? r.change.id : r.agg)), ['a1', 'solo']);
+  assert.equal(AC.aggState(rowsB[0].changes), 'true');
+  let next = AC.withAggToggle(list, 'arrive', false);
+  assert.equal(AC.aggState(next.filter((c) => c.agg === 'arrive')), 'false');
+  next = AC.withToggle(next, 'b2', true);
+  assert.equal(AC.aggState(next.filter((c) => c.agg === 'arrive')), 'mixed');
+  // Dependencies: unchecking the material unchecks and disables what requires it; checking it again re-enables them.
+  next = AC.withToggle(list, 'm', false);
+  const a1 = () => next.find((c) => c.id === 'a1');
+  assert.equal(a1().checked, false);
+  assert.equal(AC.isDisabled(a1(), next), true);
+  assert.equal(AC.withToggle(next, 'a1', true), next, 'a disabled row cannot be checked');
+  next = AC.withToggle(next, 'm', true);
+  assert.equal(AC.isDisabled(a1(), next), false);
+  assert.equal(a1().checked, false, 'it stays unchecked until checked again');
+  next = AC.withToggle(next, 'a1', true);
+  assert.equal(a1().checked, true);
+  const chain = [ch('m'), ch('x', { requires: ['m'] }), ch('y', { requires: ['x'] })];
+  assert.deepEqual(AC.withToggle(chain, 'm', false).map((c) => c.checked), [false, false, false], 'transitively');
+  assert.equal(AC.isDisabled(ch('z', { requires: ['nope'] }), chain), true, 'a missing material disables');
+  assert.equal(AC.groupOfChange(ch('q', { group: 'bogus', kind: 'time' })), 'time', 'an unknown group falls back to the v2 group');
+  // The log items of ai/changes.logEntry, material and media included (NOTES v2.1-E).
+  assert.deepEqual([{ material: 'm4' }, { media: 'a1' }, { path: 'work:mood' }, { filter: 'arrive' }, { rowId: 'r1' }, { rows: 'all' },
+    { songInfo: true }, {}].map(AC.itemKey), ['m:m4', 'a:a1', 'p:work:mood', 'f:arrive', 'r:r1', 'rows', 'song', '']);
+});
+
+// A small stand-in for ai/direct (the frozen DESIGN_2_1 §5.2 signatures), so the controller's own rules (windows in
+// sequence, the bad_request retry, dependencies, the undo label) are tested apart from E's answer mapping: one request
+// window per brief; each answer is { summary, question?, rows: [{ id, path, to, group, areaKey?, agg?, requires? }] }
+// turned into part changes, their ids prefixed 'w<k>:' as ai/direct does.
+function fakeDirect(calls) {
+  return {
+    directRequests(doc, plan, registry, o) {
+      calls.push({ briefs: o.briefs, mode: o.mode, allowMaterials: o.allowMaterials, uiLang: o.uiLang });
+      const schema = LOOKS.editRequest(doc, plan, registry, 'x', 'ja').schema;
+      return o.briefs.map((b, k) => ({ system: 'direct', prompt: 'window ' + k + ': ' + b.instruction, schema, effort: 'low',
+        sent: { window: k, key: AREAS.keyOf(b.ref) } }));
+    },
+    directChanges(doc, plan, registry, json, o) {
+      const w = 'w' + o.sent.window + ':';
+      const changes = (json.rows || []).map((r) => {
+        const lineId = r.path.slice(5, r.path.indexOf(':')), kind = r.path.slice(r.path.indexOf(':') + 1);
+        return CH.make(doc, { id: w + r.id, kind: 'part', scope: 'line', lineId, partKind: kind, path: r.path, from: null, to: r.to,
+          group: r.group, areaKey: r.areaKey, agg: r.agg, requires: r.requires ? r.requires.map((x) => w + x) : undefined,
+          label: ['ai.ch.part', { n: 1, kind, from: null, to: r.to }] }, { rev: o.rev });
+      });
+      return { results: [{ s: 0, areaKey: o.sent.key, understood: !json.question, summary: json.summary || '', question: json.question || '' }],
+        changes, warnings: [] };
+    },
+  };
+}
+
+function directSetup(answers) {
+  const seen = [];
+  const calls = [];
+  const host = makeHost('夜明けの街を走る\n君の名前を呼ぶ\n遠くまで届け');
+  const session = memoryStorage();
+  session.setItem('mojipv.ai.key.gemini', KEY);
+  const ctl = AC.createController(host, { session, local: memoryStorage(), fetchImpl: fakeGemini(answers, seen), direct: fakeDirect(calls) });
+  return { host, ctl, seen, calls };
+}
+
+test('v2.1 指示: two areas in one run; a material unchecked disables its rows; one undo step named by the areas', async () => {
+  const host0 = makeHost('夜明けの街を走る\n君の名前を呼ぶ\n遠くまで届け');
+  const ids = host0.plan.lines.map((l) => l.id);
+  assert.equal(ids.length, 3);
+  const A = { kind: 'lines', ids: [ids[0]] }, B = { kind: 'lines', ids: [ids[1], ids[2]] };
+  const kA = AREAS.keyOf(A), kB = AREAS.keyOf(B);
+  const { host, ctl, seen, calls } = directSetup([
+    { summary: 'ふわっと', rows: [{ id: 'm', path: 'line/' + ids[0] + ':depart', to: 'stubFadeOut', group: 'materials' },
+      { id: 'a1', path: 'line/' + ids[0] + ':arrive', to: 'stubFade', group: 'area', areaKey: kA, requires: ['m'] }] },
+    { summary: 'はっきり', rows: [{ id: 'b1', path: 'line/' + ids[1] + ':arrive', to: 'stubFade', group: 'area', areaKey: kB, agg: 'arr' },
+      { id: 'b2', path: 'line/' + ids[2] + ':arrive', to: 'stubFade', group: 'area', areaKey: kB, agg: 'arr' },
+      { id: 'g', path: 'line/' + ids[2] + ':depart', to: 'stubFadeOut', group: 'area', areaKey: kB, requires: ['ghost'] }] },
+  ]);
+  const doc0 = host.doc;
+  const entries0 = host.store.list().length;
+  assert.equal(ctl.blocked('direct'), null, 'with ai/direct the tool runs');
+  const ok = await ctl.run('direct', { briefs: [{ ref: A, instruction: 'ゆっくり\n出して' }, { ref: B, instruction: '派手に' },
+    { ref: B, instruction: '   ' }], mode: 'all', allowMaterials: true });
+  assert.equal(ok, true);
+  assert.deepEqual(calls[0].briefs, [{ ref: A, instruction: 'ゆっくり 出して' }, { ref: B, instruction: '派手に' }], 'empty briefs are dropped, one line each');
+  assert.equal(calls[0].allowMaterials, true);
+  assert.equal(seen.filter((s) => s.init.method === 'POST').length, 2, 'one request per window, in sequence');
+  const r = ctl.state.review;
+  assert.equal(r.kind, 'direct');
+  assert.deepEqual(r.briefs.map((b) => b.key), [kA, kB]);
+  assert.deepEqual(r.changes.map((c) => c.id), ['w0:m', 'w0:a1', 'w1:b1', 'w1:b2', 'w1:g'], 'window ids');
+  assert.equal(AC.isDisabled(r.changes[4], r.changes), true, 'a row whose material is not in the answer is disabled');
+  assert.deepEqual(r.changes[1].requires, ['w0:m']);
+  assert.equal(r.summary, 'ふわっと はっきり');
+  assert.equal(host.doc, doc0, 'nothing applied before 反映');
+  assertTexts(r);
+  // The material unchecked: its row is disabled and unchecked; the aggregate goes as one.
+  ctl.toggle('w0:m', false);
+  const now = () => ctl.state.review.changes;
+  assert.equal(now().find((c) => c.id === 'w0:a1').checked, false);
+  ctl.toggle('w0:a1', true);
+  assert.equal(now().find((c) => c.id === 'w0:a1').checked, false, 'a disabled row stays off');
+  ctl.toggleAgg('arr', false);
+  assert.equal(AC.aggState(now().filter((c) => c.agg === 'arr')), 'false');
+  ctl.toggleAgg('arr', true);
+  ctl.toggle('w0:m', true);
+  ctl.toggle('w0:a1', true);
+  ctl.toggle('w1:b2', false);
+  assert.equal(ctl.apply(), 3);
+  assert.equal(host.store.list().length, entries0 + 1, 'one undo entry');
+  const t = host.t;
+  const names = [kA, kB].map((k) => r.briefs.find((b) => b.key === k).label).map((l) => t(l[0], l[1])).join(t('list.sep'));
+  assert.deepEqual(host.store.peek().undo, ['undo.aiArea', { area: names, n: 3 }]);
+  assert.equal(host.doc.pins['line/' + ids[1] + ':arrive'].v, 'stubFade');
+  assert.equal(host.doc.pins['line/' + ids[2] + ':arrive'], undefined, 'the unchecked member is not applied');
+  assert.equal(host.doc.pins['line/' + ids[2] + ':depart'], undefined, 'a disabled row is left out even while checked');
+  const log = host.side.aiLog[host.side.aiLog.length - 1];
+  assert.equal(log.tool, 'direct');
+  assert.deepEqual(log.areas.map((a) => a.key), [kA, kB]);
+  assert.deepEqual(log.instructions, ['ゆっくり 出して', '派手に']);
+  assert.deepEqual(ctl.state.applied, [kA, kB], 'the board marks both areas 反映済み');
+  host.store.undo();
+  assert.deepEqual(host.doc, doc0);
+});
+
+test('v2.1 指示: a per-area question comes back as a notice; bad_request is retried once without materials', async () => {
+  const host0 = makeHost('夜明けの街を走る\n君の名前を呼ぶ\n遠くまで届け');
+  const A = { kind: 'lines', ids: [host0.plan.lines[0].id] };
+  const q = directSetup([{ question: 'どの行ですか？', rows: [] }]);
+  assert.equal(await q.ctl.run('direct', { briefs: [{ ref: A, instruction: 'もっと' }], mode: 'all' }), true);
+  assert.equal(q.ctl.state.review, null);
+  const n = q.ctl.state.notice;
+  assert.deepEqual([n.kind, n.tool, n.text], ['question', 'direct', 'どの行ですか？']);
+  assert.deepEqual(n.questions, [{ areaKey: AREAS.keyOf(A), text: 'どの行ですか？' }], 'the question is shown under its area');
+  const bad = async () => ({ ok: false, status: 400, json: async () => ({ error: { message: 'schema too large' } }) });
+  const s = directSetup([bad, { summary: 'ok', rows: [{ id: 'a', path: 'line/' + host0.plan.lines[0].id + ':arrive', to: 'stubFade', group: 'area' }] }]);
+  assert.equal(await s.ctl.run('direct', { briefs: [{ ref: A, instruction: 'もっと' }], mode: 'all', allowMaterials: true }), true);
+  assert.deepEqual(s.calls.map((c) => c.allowMaterials), [true, false], 'asked again without materials');
+  assert.equal(s.ctl.state.review.materialsFailed, true);
+  assert.ok(s.host.log.toasts.some((x) => x.text === s.host.t('ai.materialsFailed')), 'the user is told');
+  // camera mode sends briefs without an instruction.
+  const c = directSetup([{ summary: 'cam', rows: [] }]);
+  assert.equal(await c.ctl.run('direct', { briefs: [{ ref: { kind: 'work' }, instruction: '' }], mode: 'camera' }), true);
+  assert.equal(c.calls[0].mode, 'camera');
+  assert.equal(c.ctl.state.notice.kind, 'nothing');
+});
+
+test('v2.1 a build without ai/direct and ai/recipe: 指示 and 素材づくり say boot.soon and send nothing', async () => {
+  const { host, ctl, seen } = setup([]);
+  const id = host.plan.lines[2].id;
+  assert.equal(ctl.blocked('direct'), 'boot.soon');
+  assert.equal(ctl.blocked('material'), 'boot.soon');
+  assert.equal(ctl.hasDirect() || ctl.hasRecipe(), false);
+  assert.equal(await ctl.run('direct', { briefs: [{ ref: { kind: 'lines', ids: [id] }, instruction: 'もっと派手に' }] }), false);
+  assert.equal(await ctl.run('material', { description: '雪', kind: 'ornament' }), false);
+  assert.equal(seen.length, 0);
+});
+
+// ---- v2.1 with package E's ai/direct and ai/recipe and package C's parts/mix (the §7.4 "area direct" story) ------------
+
+// Answers in the frozen ai/direct schema (every property present, as the closed schema asks).
+const CURVE_A = (name, x) => Object.assign({ name, ends: 'both', edge: -1, peak: -1 }, x);
+const CAM_A = (x) => Object.assign({ shot: '', move: 'pushIn', focus: 'text', timing: 'whole', fill: -1, closer: -1, follow: -1, curve: CURVE_A('') }, x);
+const MED_A = { use: '', as: 'ground', fit: '', blur: -1, veil: -1, from: -1, speed: -1, depth: 'keep' };
+const EDIT_A = (x) => Object.assign({ arrange: '', arrive: '', dwell: '', depart: '', lens: '', ground: '', atmos: '', ornaments: [], filters: [],
+  avoid: [], season: '', speed: -1, arriveCurve: CURVE_A(''), departCurve: CURVE_A(''), flow: CURVE_A(''), lensCurve: CURVE_A(''),
+  camera: CAM_A(), impact: 'keep', emphasis: [], media: MED_A }, x);
+const KEEP_A = { motion: -1, glitch: -1, chroma: -1, ornament: -1, density: -1, texture: -1, groundSwitch: -1, camera: -1 };
+const ANSWER_A = (s, all) => ({ s, understood: true, summary: '桜が舞う中、ゆっくり文字へ寄ります', question: '',
+  all: Object.assign({ rig: '', rigCurve: CURVE_A('') }, EDIT_A(all)), lines: [], cuts: [],
+  work: { theme: '', mood: '', season: '', amounts: KEEP_A, flash: 'keep', palette: { accent: '', shiftA: '', shiftB: '' } } });
+const FLURRY = { name: '桜吹雪', nameEn: 'Cherry flurry', kind: 'ornament', scope: 'run', season: 'spring', tags: ['organic', 'soft'],
+  blurb: '花びらが斜めに舞う', base: '', params: [], parts: [], unit: 'glyph', order: 'lead', dur: -1, each: -1, tracks: [],
+  curve: CURVE_A(''), osc: [], knobs: ['count'], use: { slot: 'none', s: 0, lines: [], cuts: [] },
+  layers: [{ prim: 'particles', shape: 'petal', glyph: '', inks: ['#F4B4C6', 'accent'], alpha: 0.85, layer: 'near', anchor: 'frame',
+    x: 0, y: 0, spread: 1.15, sizeMin: 0.012, sizeMax: 0.022, count: 90, stroke: 0, dir: 115, speed: 0.09, sway: 26, swayHz: 0.35,
+    spin: 60, burst: 'none', move: 'none', moveWhat: 'scale', moveAmp: 0, moveHz: 0, appear: 'always', draw: 'fade', style: '',
+    pattern: '', stops: [], angle: 0 }] };
+
+// The app over the v21 fixture with the catalog and the project's materials (parts/mix.registryFor, as the engine composes it).
+function v21Setup(answers) {
+  const seen = [];
+  const base = MV.use('parts/catalog').defaultRegistry();
+  const MIX = MV.use('parts/mix');
+  const doc = MV.use('core/migrate').parseFile(corpus.projectText('v21')).doc;
+  const host = makeHost('x');
+  host.store = ST.createStore({ doc, side: D.defaultSide(), reduce: CMD.reduce });
+  let planned = { doc: null, plan: null, reg: null };
+  const now = () => {
+    if (planned.doc !== host.store.doc) {
+      const reg2 = MIX.registryFor(base, host.store.doc.materials, host.store.doc.media);
+      planned = { doc: host.store.doc, reg: reg2, plan: MV.use('planner/plan').plan(host.store.doc, { registry: reg2 }) };
+    }
+    return planned;
+  };
+  Object.defineProperties(host, {
+    doc: { get: () => host.store.doc }, plan: { get: () => now().plan }, registry: { get: () => now().reg },
+    rev: { get: () => host.store.rev }, side: { get: () => host.store.side },
+  });
+  Object.assign(host, { batch: (meta, cmds) => host.store.batch(meta, cmds), setSide: (fn) => host.store.setSide(fn), undo: () => host.store.undo(),
+    t: T.createT('ja', STRINGS, base, { strict: true }) });
+  const session = memoryStorage();
+  session.setItem('mojipv.ai.key.gemini', KEY);
+  const ctl = AC.createController(host, { session, local: memoryStorage(), fetchImpl: fakeGemini(answers, seen),
+    direct: MV.use('ai/direct'), recipe: MV.use('ai/recipe') });
+  return { host, ctl, seen };
+}
+
+test('v2.1 指示 with ai/direct: サビ1 gets a new material, a speed, a ramp and a custom push-in; one undo step; revert', async () => {
+  const CHORUS = { kind: 'song', n: 2, t0: 24, t1: 40 };
+  const key = AREAS.keyOf(CHORUS);
+  const { host, ctl, seen } = v21Setup([{ answers: [ANSWER_A(0, { atmos: 'mat:桜吹雪', speed: 0.5,
+    arriveCurve: CURVE_A('ramp', { edge: 0.1, peak: 6 }), camera: CAM_A({ shot: 'custom', move: 'pushIn', focus: 'text', timing: 'whole' }) })],
+  materials: [FLURRY] }]);
+  const doc0 = host.doc;
+  const entries0 = host.store.list().length;
+  assert.equal(ctl.hasDirect() && ctl.hasRecipe(), true);
+  assert.equal(await ctl.run('direct', { briefs: [{ ref: CHORUS, instruction: '桜が舞う中、ゆっくり文字へ寄る' }], allowMaterials: true }), true);
+  const post = seen.filter((x) => x.init.method === 'POST');
+  assert.equal(post.length, 1);
+  assert.ok(JSON.stringify(post[0].body).includes('桜が舞う中'), 'the instruction is sent');
+  const r = ctl.state.review;
+  assert.equal(r.kind, 'direct');
+  assert.deepEqual(r.briefs.map((b) => b.key), [key]);
+  assert.ok(r.changes.every((c) => c.id.startsWith('w0:')), 'window ids');
+  assertTexts(r);
+  // 素材, then 区画 サビ1 with aggregate rows (one change per area line).
+  const groups = AC.directGroups(r.changes, [key]);
+  assert.equal(groups[0].group, 'materials');
+  assert.equal(groups[1].group, 'area');
+  assert.equal(groups[1].areaKey, key);
+  const mat = groups[0].changes[0];
+  assert.equal(mat.kind, 'material');
+  const rows = AC.aggRows(groups[1].changes);
+  assert.ok(rows.some((x) => x.agg && x.changes.length === 2), 'the two chorus lines share aggregate rows');
+  const t = host.t;
+  for (const x of rows.filter((y) => y.agg)) assert.ok(CH.describeAgg(x.changes, t).length > 0);
+  const deps = r.changes.filter((c) => (c.requires || []).includes(mat.id));
+  assert.ok(deps.length >= 2, 'the atmosphere rows require the material');
+  // The material unchecked: its rows are unchecked and disabled; checked again, they wait to be checked.
+  ctl.toggle(mat.id, false);
+  const now = () => ctl.state.review.changes;
+  assert.ok(deps.every((d) => { const c = now().find((x) => x.id === d.id); return c.checked === false && AC.isDisabled(c, now()); }));
+  ctl.toggle(mat.id, true);
+  for (const d of deps) ctl.toggle(d.id, true);
+  assert.ok(now().every((c) => c.checked !== false || c.group === 'outside'));
+  // Try-on, then apply: one undo step named by the area; the material and its pins land.
+  ctl.tryOn(-1);
+  assert.ok(host.log.alt && host.log.alt.doc.materials.list.length === 4, 'the try-on holds the new material');
+  const n = ctl.apply();
+  assert.ok(n > 0);
+  assert.equal(host.store.list().length, entries0 + 1, 'one undo entry');
+  const undoLabel = host.store.peek().undo;
+  assert.equal(undoLabel[0], 'undo.aiArea');
+  assert.ok(/サビ/.test(undoLabel[1].area), JSON.stringify(undoLabel));
+  const doc1 = host.doc;
+  assert.equal(doc1.materials.list.length, 4);
+  const newKey = 'myMat' + doc1.materials.list[3].id.slice(1);
+  assert.equal(doc1.pins['line/rb:atmos'].v, newKey);
+  assert.equal(doc1.pins['line/rb:motion.speed'].v, 0.5);
+  assert.ok(doc1.pins['line/rb:arrive.ease'].v.ramp, 'the ramp curve');
+  assert.equal(typeof doc1.pins['line/rb:cam.shot'].v, 'object', 'a custom shot');
+  const log = host.side.aiLog[host.side.aiLog.length - 1];
+  assert.ok(log.applied.some((i) => i.material === doc1.materials.list[3].id), 'the log has the material');
+  assert.deepEqual(log.areas.map((a) => a.key), [key]);
+  assert.deepEqual(ctl.state.applied, [key]);
+  // Undo restores materials and pins; redo; selective revert takes the pins back first, then the material.
+  host.store.undo();
+  assert.deepEqual(host.doc, doc0);
+  host.store.redo();
+  assert.deepEqual(host.doc, doc1);
+  const res = ctl.revert(log.runId);
+  assert.equal(res.kept, 0);
+  assert.equal(host.doc.materials.list.length, 3, 'the created material is removed');
+  assert.equal(host.doc.pins['line/rb:atmos'].v, doc0.pins['line/rb:atmos'].v, 'the pin is back');
+});
+
+test('v2.1 素材づくり with ai/recipe: a material made for a row is used there; a remake keeps the id', async () => {
+  const mat = Object.assign({}, FLURRY, { name: '雪の粒', nameEn: 'Snow grains', season: 'winter' });
+  const { host, ctl } = v21Setup([{ understood: true, question: '', material: mat }, { understood: true, question: '', material: mat }]);
+  assert.equal(await ctl.run('material', { description: '雪が静かに降る', kind: 'ornament', useAt: { scope: 'line/r4', slot: 'atmos' } }), true);
+  const r = ctl.state.review;
+  assert.equal(r.kind, 'direct');
+  assert.equal(r.tool, 'material');
+  assertTexts(r);
+  const m = r.changes.find((c) => c.kind === 'material');
+  const use = r.changes.find((c) => c.path === 'line/r4:atmos');
+  assert.ok(m && use && use.requires.includes(m.id), 'the use requires the material');
+  assert.equal(ctl.apply(), 2);
+  const id = host.doc.materials.list[3].id;
+  assert.equal(host.doc.pins['line/r4:atmos'].v, 'myMat' + id.slice(1));
+  assert.deepEqual(host.store.peek().undo, ['undo.ai', { tool: host.t('ai.name.material'), n: 2 }]);
+  // A remake (the material page's AIで作り直す) keeps the id.
+  assert.equal(await ctl.run('material', { description: 'もっと細かく', kind: 'ornament', current: host.doc.materials.list[3] }), true);
+  const again = ctl.state.review.changes.find((c) => c.kind === 'material');
+  assert.equal(again.materialId, id);
 });

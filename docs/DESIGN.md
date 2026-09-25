@@ -3213,6 +3213,15 @@ batch); 時間: まとめてずらす [−][+] (0.1 s; Shift = 1 frame) → `tim
    「曲の音声を 16kHz モノラルにして Google Gemini に送ります（約 7MB・3:42）。この作品ではこのときだけ。」 +
    [書き起こす] [タイミングを合わせる] [曲を分析する].
 4. **Running**: stage line (音声を準備中 → アップロード中 → 処理中 → 考え中), elapsed time, [中止].
+   The thinking animation (`ui/ai_thinking`) runs while a request is out, wherever it was started from:
+   - The stage line carries an orb: two counter-rotating rings, a pulsing core and orbiting sparks. Its text shimmers,
+     and a light stream runs along its bottom edge.
+   - A HUD sits over the preview. It has corner brackets, a faint grid and a scan beam, plus a card with the orb, the
+     stage text, the elapsed seconds and a thinking wave. A song tool's card also shows its four stage steps.
+   - The HUD is DOM over the canvas, so an export never contains it. It ignores the pointer, and it is not announced
+     (the stage line is the live region).
+   - While a request runs, `<body>` carries `is-ai-thinking`, which makes the AI buttons glow.
+   - All of it is CSS animation, so it costs no script time. It stands still under prefers-reduced-motion.
 5. **Review** (nothing is applied before this): summary; checked list grouped 歌詞 / 全体 / 行ごと / 時間 with scope and
    before → after (「12行 · 入り: 自動 → 花びら」, 「3行 · 区切り: 夜明けの/街を走る」 with a text diff); rows whose target
    changed since the request are unchecked and badged 「この後に変更あり」; [すべて] [なし]; ▸ 使えなかった提案 n件; cost
@@ -3281,6 +3290,13 @@ Space/Enter = start of the next line (and advance); E = end of the current line;
 (its mark is forgotten, playback seeks 2 s before it); ← / → = −3 s / +3 s; P = pause; Esc or T = finish. Times use
 `player.outputTimeOf(event.timeStamp) − timing.tapLatency`. Finishing dispatches one `time.tap` (one undo entry
 「タップで合わせる（12行）」); finishing with no marks records nothing. No other shortcut fires in tap mode.
+For the mouse and touch, a press (pointerdown) on the panel's big 「タップ」 button or on the preview is the same as Space,
+at the press's own time; in tap mode a preview press never selects, pauses or opens 詳細. Starting tap mode unfolds the
+step column, so the panel shows even with 詳細 open. No mark is taken while playback is stopped (the frozen clock would
+give every line the same time; the panel says 「再生が止まっています…」), nor less than 0.12 s after the last start
+(`core/tap.MIN_GAP`: timing drops such a start with `time-order`). Finishing seeks 2 s before the first marked line;
+the toast offers 「再生して確認」, and says how many marks the timing could not use (a mark earlier than a pin or LRC time
+above the session).
 
 ### 6.5 Selection model
 

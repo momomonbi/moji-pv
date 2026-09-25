@@ -1,5 +1,6 @@
-/* 文字PVメーカー v2 — original work. Play bar: transport, time readout, lane, look history, おまかせ, mute, drawer toggle, mode strip (DESIGN §6.4.2). */
-MV.def('ui/playbar', ['ui/dom', 'ui/icons', 'ui/looks', 'ui/selection', 'i18n/t'], (dom, I, LK, S, T) => {
+/* 文字PVメーカー v2 — original work. Play bar: transport, time readout, lane with the area bands, look history, おまかせ, mute, drawer toggle, mode strip (DESIGN §6.4.2; DESIGN_2_1 §6.8). */
+MV.def('ui/playbar', ['ui/dom', 'ui/icons', 'ui/looks', 'ui/selection', 'ui/timeline', 'planner/areas', 'i18n/t'],
+  (dom, I, LK, S, TL, AREAS, T) => {
   'use strict';
 
   const { h } = dom;
@@ -7,6 +8,10 @@ MV.def('ui/playbar', ['ui/dom', 'ui/icons', 'ui/looks', 'ui/selection', 'i18n/t'
   // in the time readout, 3 makes おまかせ icon-only (its name stays for screen readers), 4 tightens the spacing.
   const FIT_MAX = 4;
   const TIME_RE = /^\s*(?:(\d+):)?(\d+(?:\.\d*)?)\s*$/;
+  const CUT_TOP = 0.2;                 // the cut blocks fill the lane from 20 % to 80 % of its height; the area bands (DESIGN_2_1
+  const CUT_BOTTOM = 0.8;              // §6.8) run in the strip above them
+  const BAND_INK = Object.freeze(['rgba(240,182,77,0.55)', 'rgba(124,196,255,0.5)']);
+  const BAND_ON = '#e2553b';
 
   function parseTime(text) {
     const m = TIME_RE.exec(String(text).replace('：', ':'));
@@ -84,7 +89,7 @@ MV.def('ui/playbar', ['ui/dom', 'ui/icons', 'ui/looks', 'ui/selection', 'i18n/t'
       if (document.activeElement === timeInput || !document.activeElement || document.activeElement === document.body) dom.focus(timeBtn);
     }
 
-    // --- lane: click = seek, drag = scrub, double-click = select the line ---------------------------------------
+    // --- lane: click = seek, drag = scrub, double-click = select the line (on the band strip: the area) ------------
 
     function timeAt(ev) {
       const r = lane.getBoundingClientRect();
@@ -103,6 +108,9 @@ MV.def('ui/playbar', ['ui/dom', 'ui/icons', 'ui/looks', 'ui/selection', 'i18n/t'
     laneBox.addEventListener('dblclick', (ev) => {
       const tt = timeAt(ev);
       const plan = app.plan;
+      const r = lane.getBoundingClientRect();
+      const band = ev.clientY - r.top < r.height * CUT_TOP ? TL.bandAt(bands(), tt) : null;
+      if (band) { app.select(S.areaSel(band.area), { from: 'timeline', open: true }); return; }
       const line = plan && plan.lines.find((l) => l.t0 <= tt && tt < l.t1) || plan && plan.lines.slice().reverse().find((l) => l.t0 <= tt);
       if (line) app.select({ level: 'line', ids: [line.id] }, { from: 'timeline', open: true });
     });
@@ -143,6 +151,23 @@ MV.def('ui/playbar', ['ui/dom', 'ui/icons', 'ui/looks', 'ui/selection', 'i18n/t'
     }
 
     // --- lane drawing ------------------------------------------------------------------------------------------
+
+    // The area bands (DESIGN_2_1 §6.8, planner/areas.bands: song sections, else headings, else blocks), each with its
+    // resolved area; remembered per plan, lyric rows and song analysis, as the timeline drawer does.
+    let bandMemo = { plan: null, rows: null, info: null, list: [] };
+    function bands() {
+      const p = app.plan;
+      if (!p || !p.lines || !p.lines.length) return [];
+      const rows = app.doc.sheet.rows, info = app.doc.song ? app.doc.song.info : null;
+      if (bandMemo.plan !== p || bandMemo.rows !== rows || bandMemo.info !== info) {
+        let list = [];
+        try {
+          list = AREAS.bands(app.doc, p).map((b) => Object.assign({}, b, { area: AREAS.resolve(app.doc, p, b.ref) })).filter((b) => b.area);
+        } catch (e) { list = []; }
+        bandMemo = { plan: p, rows, info, list };
+      }
+      return bandMemo.list;
+    }
 
     function digestOf(song) {
       if (!song || !song.digest || typeof song.digest.loud !== 'string') return null;
@@ -198,16 +223,22 @@ MV.def('ui/playbar', ['ui/dom', 'ui/icons', 'ui/looks', 'ui/selection', 'i18n/t'
         }
       }
       if (!plan) return;
-      const sel = S.validate(app.view.state.sel, plan);
+      const sel = S.validate(app.view.state.sel, plan, doc);
       const selCuts = new Set(S.cutsOf(sel, plan));
-      const hl = app.view.state.highlight;
-      const top = Math.round(H * 0.2), bottom = Math.round(H * 0.8);
+      const hl = TL.highlighted(app.view.state.highlight);
+      const top = Math.round(H * CUT_TOP), bottom = Math.round(H * CUT_BOTTOM);
+      const selKey = sel.level === 'line' && sel.area ? AREAS.keyOf(sel.area) : null;
+      bands().forEach((b, i) => {
+        const x0 = x(b.t0), x1 = Math.max(x0 + 1, x(b.t1) - dpr);
+        lctx.fillStyle = b.key === selKey ? BAND_ON : BAND_INK[i % 2];
+        lctx.fillRect(x0, 0, x1 - x0, Math.max(1, top - dpr));
+      });
       const lineOf = new Map(plan.lines.map((l) => [l.id, l]));
       plan.cuts.forEach((c, i) => {
         if (!Number.isFinite(c.t0) || !Number.isFinite(c.t1)) return;
         const x0 = x(c.t0), x1 = Math.max(x0 + 1, x(c.t1) - dpr);
         const special = !c.line;
-        const on = selCuts.has(c.key) || (hl && c.line === hl);
+        const on = selCuts.has(c.key) || hl.has(c.line);
         lctx.fillStyle = special ? 'rgba(255,255,255,0.10)' : on ? '#e2553b' : i % 2 ? '#3b4252' : '#465063';
         lctx.fillRect(x0, top, x1 - x0, bottom - top);
         const line = c.line ? lineOf.get(c.line) : null;

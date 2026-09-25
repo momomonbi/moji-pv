@@ -1,6 +1,7 @@
-/* 文字PVメーカー v2 — original work. Command reducers: the only way the document changes (DESIGN §3.6, §3.9, §4.12). */
-MV.def('core/commands', ['core/doc', 'core/paths', 'core/pins', 'core/lyrics', 'core/reconcile', 'core/num'],
-  (D, P, PINS, L, R, N) => {
+/* 文字PVメーカー v2 — original work. Command reducers: the only way the document changes (DESIGN §3.6, §3.9, §4.12; DESIGN_2_1 §2.6, §11.2.5, §13.3). */
+MV.def('core/commands', ['core/doc', 'core/paths', 'core/pins', 'core/lyrics', 'core/reconcile', 'core/num', 'core/hash',
+  'core/recipe', 'core/media'],
+  (D, P, PINS, L, R, N, H, RC, MEDIA) => {
     'use strict';
 
     class CommandError extends Error {
@@ -207,6 +208,7 @@ MV.def('core/commands', ['core/doc', 'core/paths', 'core/pins', 'core/lyrics', '
 
     function pinSet(doc, cmd) {
       const parsed = parsePath(cmd.path);
+      checkSlotScope(parsed);
       const by = checkBy(cmd.by);
       const pin = makePin(parsed, copyJSON(cmd.v, 'v'), by, cmd.sig);
       const pins = releaseLockedSlot(doc, setPin(doc.pins, cmd.path, pin), parsed, by);
@@ -227,9 +229,19 @@ MV.def('core/commands', ['core/doc', 'core/paths', 'core/pins', 'core/lyrics', '
     }
 
     // Slots that make sense only at one scope (§3.4.1–3.4.3), so they are never promoted or copied.
-    const LINE_ONLY = new Set(['start', 'end', 'split', 'lang']);
+    const LINE_ONLY = new Set(['start', 'end', 'split', 'lang', 'avoid']);
     const CUT_ONLY = new Set(['t0']);
     const TEXT_SLOTS = new Set(['orient', 'text.face', 'text.scale', 'text.ink', 'text.style']);
+    // v2.1 (DESIGN_2_1 §2.3, §3.7): line slots that are area-level, never pinned at a cut; `avoid` is line-only.
+    const NOT_CUT = new Set(['season', 'avoid']);
+    // Cut slots that "paste look" copies besides part slots and text.* (CAM_SLOTS and the motion speed).
+    const COPY_SLOTS = new Set(['motion.speed', 'cam.shot', 'cam.zoom', 'cam.curve', 'cam.follow']);
+
+    // Refuses `cut/…:season`, `cut/…:avoid` and `work:avoid` (payload).
+    function checkSlotScope(parsed) {
+      need(!(parsed.scope.kind === 'cut' && NOT_CUT.has(parsed.slot)), parsed.slot + ' cannot be pinned at cut scope');
+      need(!(parsed.scope.kind === 'work' && parsed.slot === 'avoid'), 'avoid cannot be pinned at work scope');
+    }
 
     function pinPromote(doc, cmd) {
       const parsed = parsePath(cmd.path);
@@ -239,6 +251,8 @@ MV.def('core/commands', ['core/doc', 'core/paths', 'core/pins', 'core/lyrics', '
       need(cmd.to !== 'line' || parsed.scope.lineId !== null, 'special cuts have no line');
       need(!CUT_ONLY.has(parsed.slot) && !(cmd.to === 'work' && LINE_ONLY.has(parsed.slot)),
         parsed.slot + ' cannot be pinned at ' + cmd.to + ' scope');
+      // season may move line → work; avoid never moves (§2.6).
+      need(parsed.slot !== 'avoid' && !(parsed.slot === 'season' && from === 'cut'), parsed.slot + ' cannot be promoted');
       const pin = doc.pins[cmd.path];
       if (!pin) return doc;
       const target = (cmd.to === 'line' ? 'line/' + parsed.scope.lineId : 'work') + ':' + parsed.slot;
@@ -246,9 +260,10 @@ MV.def('core/commands', ['core/doc', 'core/paths', 'core/pins', 'core/lyrics', '
       return put(doc, 'pins', setPin(without(doc.pins, [cmd.path]), target, moved));
     }
 
-    // Slot pins that "paste look" copies: part choices and their params, orient and text.* (not timing, not el.*).
+    // Slot pins that "paste look" copies: part choices and their params, orient, text.*, motion.speed and cam.*
+    // (not timing, not el.*; not rig*, season or avoid, which belong to an area).
     function copyable(parsed) {
-      return parsed.part !== null || TEXT_SLOTS.has(parsed.slot);
+      return parsed.part !== null || TEXT_SLOTS.has(parsed.slot) || COPY_SLOTS.has(parsed.slot);
     }
 
     function pinCopy(doc, cmd) {
@@ -339,6 +354,7 @@ MV.def('core/commands', ['core/doc', 'core/paths', 'core/pins', 'core/lyrics', '
       for (const path of Object.keys(cmd.pins).sort()) {
         const parsed = parsePath(path);
         need(parsed.scope.kind !== 'work' && P.isUnder(path, scope), path + ' is not under ' + scope);
+        checkSlotScope(parsed);
         const given = cmd.pins[path];
         need(isObject(given) && given.by === 'lock', 'lock pins must have by: lock');
         if (pins[path] && pins[path].by !== 'lock') continue;
@@ -418,7 +434,7 @@ MV.def('core/commands', ['core/doc', 'core/paths', 'core/pins', 'core/lyrics', '
     // ---- settings sections: timing, song, output ------------------------------------------------------------------
 
     const TIMING_KEYS = ['snap', 'lead', 'tail', 'leadIn', 'outro', 'tapLatency'];
-    const OUTPUT_KEYS = ['format', 'short', 'fps', 'quality', 'audio', 'range', 'name'];
+    const OUTPUT_KEYS = ['format', 'short', 'fps', 'quality', 'audio', 'range', 'name', 'kit'];
 
     // Sets doc[section][key] = v, validated by core/doc (problems under that section refuse the command).
     function setSetting(doc, section, key, v) {
@@ -460,6 +476,257 @@ MV.def('core/commands', ['core/doc', 'core/paths', 'core/pins', 'core/lyrics', '
       return put(doc, 'song', Object.assign({}, doc.song, { info: copyJSON(cmd.info, 'info') }));
     }
 
+    // ---- materials (DESIGN_2_1 §2.6) -------------------------------------------------------------------------------
+
+    const MATERIAL_ID = /^m[0-9a-z]+$/;
+
+    function materialsOf(doc) { return isObject(doc.materials) ? doc.materials : { next: 1, list: [] }; }
+
+    function utf8Length(s) {
+      let n = 0;
+      for (let i = 0; i < s.length; i++) {
+        const c = s.charCodeAt(i);
+        if (c < 0x80) n += 1;
+        else if (c < 0x800) n += 2;
+        else if (c >= 0xd800 && c <= 0xdbff) { n += 4; i++; }
+        else n += 3;
+      }
+      return n;
+    }
+
+    function problemText(list) { return list.map((p) => (p.path ? p.path + ': ' : '') + p.code).join('; '); }
+
+    // { ja, en } with en '' when absent (derive falls back to ja); null / undefined → null (blurb only).
+    function textPair(v, what) {
+      if (v === undefined || v === null) return null;
+      need(isObject(v), what + ' must be { ja, en }');
+      return { ja: v.ja, en: v.en === undefined || v.en === null ? '' : v.en };
+    }
+
+    // The stored entry: metadata in ORDER.material with defaults, rv = RECIPE_V, the recipe normalized.
+    function materialEntry(src, recipe) {
+      const by = src.by;
+      return {
+        id: src.id, kind: src.kind, by, name: textPair(src.name, 'name'), blurb: textPair(src.blurb, 'blurb'),
+        tags: src.tags === undefined ? [] : copyJSON(src.tags, 'tags'),
+        season: src.season === undefined ? null : src.season,
+        pool: typeof src.pool === 'boolean' ? src.pool : by === 'user',
+        rv: RC.RECIPE_V, recipe,
+      };
+    }
+
+    function checkEntry(doc, entry, index) {
+      const probs = RC.entryProblems(entry).concat(RC.problems(entry.kind, entry.recipe, { media: doc.media }));
+      need(probs.length === 0, 'material ' + entry.id + ': ' + problemText(probs));
+      const mirror = entry.kind === 'depart' && entry.recipe.mirrorOf;
+      if (mirror) {
+        const list = materialsOf(doc).list;
+        const at = list.findIndex((m) => m.id === mirror);
+        need(at >= 0 && at < index && list[at].kind === 'arrive', 'mirrorOf must name an entrance material before this one');
+      }
+    }
+
+    function withMaterials(doc, next, list) {
+      need(list.length <= RC.LIMITS.materials, 'at most ' + RC.LIMITS.materials + ' materials');
+      const out = { next, list };
+      need(utf8Length(H.canonical(out)) <= RC.LIMITS.materialsBytes, 'the materials are larger than ' + RC.LIMITS.materialsBytes + ' bytes');
+      return put(doc, 'materials', out);
+    }
+
+    // material.put: 'm' + next.toString(36) creates an entry and increments next; an existing id replaces its entry
+    // (same kind). The recipe is stored normalized with rv = RECIPE_V.
+    function materialPut(doc, cmd) {
+      const mats = materialsOf(doc);
+      need(typeof cmd.id === 'string' && MATERIAL_ID.test(cmd.id), 'id must look like m<base36>');
+      need(RC.MAT_KINDS.includes(cmd.kind), 'kind must be one of ' + RC.MAT_KINDS.join(' '));
+      const at = mats.list.findIndex((m) => m.id === cmd.id);
+      if (at < 0) need(cmd.id === 'm' + mats.next.toString(36), 'a new material takes the id m' + mats.next.toString(36));
+      else need(mats.list[at].kind === cmd.kind, 'the kind of a material cannot change');
+      const src = copyJSON({ id: cmd.id, kind: cmd.kind, by: cmd.by, name: cmd.name, blurb: cmd.blurb, tags: cmd.tags,
+        season: cmd.season, pool: cmd.pool }, 'payload');
+      const entry = materialEntry(src, RC.normalize(cmd.kind, copyJSON(cmd.recipe, 'recipe')).recipe);
+      checkEntry(doc, entry, at < 0 ? mats.list.length : at);
+      if (at >= 0 && sameJSON(mats.list[at], entry)) return doc;
+      if (at < 0) return withMaterials(doc, mats.next + 1, mats.list.concat([entry]));
+      return withMaterials(doc, mats.next, mats.list.map((m, i) => (i === at ? entry : m)));
+    }
+
+    function materialIndex(doc, id) {
+      need(typeof id === 'string', 'id must be a string');
+      const at = materialsOf(doc).list.findIndex((m) => m.id === id);
+      need(at >= 0, 'unknown material ' + id);
+      return at;
+    }
+
+    // material.meta: name, blurb, tags, season and pool only; the same validation.
+    function materialMeta(doc, cmd) {
+      const mats = materialsOf(doc);
+      const at = materialIndex(doc, cmd.id);
+      const old = mats.list[at];
+      const patch = copyJSON({ name: cmd.name, blurb: cmd.blurb, tags: cmd.tags, season: cmd.season, pool: cmd.pool }, 'payload');
+      const entry = Object.assign({}, old);
+      if (patch.name !== undefined) entry.name = textPair(patch.name, 'name');
+      if (patch.blurb !== undefined) entry.blurb = textPair(patch.blurb, 'blurb');
+      for (const k of ['tags', 'season', 'pool']) if (patch[k] !== undefined) entry[k] = patch[k];
+      const probs = RC.entryProblems(entry);
+      need(probs.length === 0, 'material ' + old.id + ': ' + problemText(probs));
+      if (sameJSON(old, entry)) return doc;
+      return withMaterials(doc, mats.next, mats.list.map((m, i) => (i === at ? entry : m)));
+    }
+
+    // Pins after removing every reference to the part key `key`: pins whose value is the key, pins part-qualified
+    // with it (…@key…), and '<kind>.key' items of avoid pins (a list left empty removes its pin).
+    function withoutKeyRefs(pins, key) {
+      let out = pins;
+      for (const path of Object.keys(pins).sort()) {
+        const pin = pins[path];
+        const parsed = safeParse(path);
+        const qualified = parsed && parsed.part && parsed.part.key === key;
+        if (pin.v === key || qualified) { out = without(out, [path]); continue; }
+        if (parsed && parsed.name === 'avoid' && Array.isArray(pin.v) && pin.v.some((x) => refKey(x) === key)) {
+          const rest = pin.v.filter((x) => refKey(x) !== key);
+          out = rest.length ? Object.assign({}, out === pins ? pins : out, { [path]: Object.assign({}, pin, { v: rest }) })
+            : without(out, [path]);
+        }
+      }
+      return out;
+    }
+
+    function refKey(item) { return typeof item === 'string' && item.indexOf('.') > 0 ? item.slice(item.indexOf('.') + 1) : null; }
+
+    // material.remove: removes the entry and every reference to its key 'myMat' + id.slice(1); next is kept.
+    function materialRemove(doc, cmd) {
+      const mats = materialsOf(doc);
+      const at = materialIndex(doc, cmd.id);
+      const out = put(doc, 'pins', withoutKeyRefs(doc.pins, 'myMat' + cmd.id.slice(1)));
+      return put(out, 'materials', { next: mats.next, list: mats.list.filter((m, i) => i !== at) });
+    }
+
+    // ---- media (DESIGN_2_1 §11.2.5) -------------------------------------------------------------------------------
+
+    function mediaOf(doc) { return isObject(doc.media) ? doc.media : { list: [] }; }
+
+    function mediaEntry(value) {
+      const e = copyJSON(value, 'entry');
+      const probs = MEDIA.entryProblems(e);
+      need(probs.length === 0, 'bad media entry: ' + probs.join('; '));
+      return MEDIA.normalizeEntry(e);
+    }
+
+    function withMedia(doc, list) {
+      need(list.length <= MEDIA.LIMITS.library, 'at most ' + MEDIA.LIMITS.library + ' photos and videos');
+      const out = { list };
+      need(utf8Length(H.canonical(out)) <= MEDIA.LIMITS.libraryBytes, 'the media list is larger than ' + MEDIA.LIMITS.libraryBytes + ' bytes');
+      return put(doc, 'media', out);
+    }
+
+    function mediaIndex(doc, id) {
+      need(typeof id === 'string', 'id must be a string');
+      const at = mediaOf(doc).list.findIndex((e) => e.id === id);
+      need(at >= 0, 'unknown asset ' + id);
+      return at;
+    }
+
+    // media.put: adds the entry at the end, or replaces the metadata of the same id (same kind).
+    function mediaPut(doc, cmd) {
+      need(isObject(cmd.entry), 'entry must be an object');
+      const entry = mediaEntry(cmd.entry);
+      const list = mediaOf(doc).list;
+      const at = list.findIndex((e) => e.id === entry.id);
+      if (at < 0) return withMedia(doc, list.concat([entry]));
+      need(list[at].kind === entry.kind, 'the kind of an asset cannot change');
+      if (sameJSON(list[at], entry)) return doc;
+      return withMedia(doc, list.map((e, i) => (i === at ? entry : e)));
+    }
+
+    // media.meta: name, pool and ai only (ai: null clears the vision result).
+    function mediaMeta(doc, cmd) {
+      const list = mediaOf(doc).list;
+      const at = mediaIndex(doc, cmd.id);
+      const patch = {};
+      for (const k of ['name', 'pool', 'ai']) if (cmd[k] !== undefined) patch[k] = copyJSON(cmd[k], k);
+      const entry = mediaEntry(Object.assign({}, list[at], patch));
+      if (sameJSON(list[at], entry)) return doc;
+      return withMedia(doc, list.map((e, i) => (i === at ? entry : e)));
+    }
+
+    // media.move: the entry goes before `before` (null = the end of the library).
+    function mediaMove(doc, cmd) {
+      const list = mediaOf(doc).list;
+      const at = mediaIndex(doc, cmd.id);
+      const target = cmd.before === undefined ? null : cmd.before;
+      if (target !== null) {
+        mediaIndex(doc, target);
+        if (target === cmd.id) return doc;
+      }
+      const rest = list.filter((e, i) => i !== at);
+      const to = target === null ? rest.length : rest.findIndex((e) => e.id === target);
+      const out = rest.slice(0, to).concat([list[at]], rest.slice(to));
+      if (out.every((e, i) => e === list[i])) return doc;
+      return put(doc, 'media', { list: out });
+    }
+
+    // media.remove: the entry, pins whose value is the id or its derived key, pins part-qualified with the key, and
+    // the key's avoid items. Material recipes keep their src (their media layers then draw nothing).
+    function mediaRemove(doc, cmd) {
+      const list = mediaOf(doc).list;
+      const at = mediaIndex(doc, cmd.id);
+      let pins = withoutKeyRefs(doc.pins, MEDIA.keyOf(cmd.id));
+      pins = without(pins, Object.keys(pins).filter((path) => pins[path].v === cmd.id).sort());
+      return put(put(doc, 'pins', pins), 'media', { list: list.filter((e, i) => i !== at) });
+    }
+
+    // Pins with every reference to asset `from` moved to `to`: values (id and derived key), part-qualified paths and
+    // avoid items. A rewritten path wins over a pin already at the new path.
+    function relinkPins(pins, from, to) {
+      const kf = MEDIA.keyOf(from), kt = MEDIA.keyOf(to);
+      let out = pins;
+      const set = (path, pin) => { out = Object.assign({}, out === pins ? pins : out, { [path]: pin }); };
+      for (const path of Object.keys(pins).sort()) {
+        const pin = pins[path];
+        const parsed = safeParse(path);
+        let v = pin.v;
+        if (v === from) v = to;
+        else if (v === kf) v = kt;
+        else if (parsed && parsed.name === 'avoid' && Array.isArray(v) && v.some((x) => refKey(x) === kf)) {
+          v = [...new Set(v.map((x) => (refKey(x) === kf ? x.slice(0, x.indexOf('.') + 1) + kt : x)))].sort();
+        }
+        const moved = parsed && parsed.part && parsed.part.key === kf;
+        if (!moved && v === pin.v) continue;
+        const next = v === pin.v ? pin : Object.assign({}, pin, { v });
+        if (moved) {
+          out = without(out === pins ? pins : out, [path]);
+          set(path.replace('@' + kf, '@' + kt), next);
+        } else set(path, next);
+      }
+      return out;
+    }
+
+    // media.relink: replaces asset `from` with `entry` (id `to`) in one step: adds the entry where `from` was (when
+    // absent), rewrites pins and material recipes (re-normalized), then removes `from`. The kinds must match.
+    function mediaRelink(doc, cmd) {
+      const list = mediaOf(doc).list;
+      const at = mediaIndex(doc, cmd.from);
+      need(isObject(cmd.entry), 'entry must be an object');
+      const entry = mediaEntry(cmd.entry);
+      const from = cmd.from, to = entry.id;
+      need(to !== from, 'relink needs another asset');
+      need(list[at].kind === entry.kind, 'a photo relinks only to a photo and a video only to a video');
+      const has = list.some((e) => e.id === to);
+      const next = has ? list.filter((e, i) => i !== at) : list.map((e, i) => (i === at ? entry : e));
+      let out = put(doc, 'pins', relinkPins(doc.pins, from, to));
+      const mats = materialsOf(out);
+      let changed = false;
+      const mlist = mats.list.map((m) => {
+        if (!isObject(m.recipe) || !Array.isArray(m.recipe.layers) || !m.recipe.layers.some((l) => l && l.prim === 'media' && l.src === from)) return m;
+        changed = true;
+        const layers = m.recipe.layers.map((l) => (l && l.prim === 'media' && l.src === from ? Object.assign({}, l, { src: to }) : l));
+        return Object.assign({}, m, { recipe: RC.normalize(m.kind, Object.assign({}, m.recipe, { layers })).recipe });
+      });
+      if (changed) out = put(out, 'materials', { next: mats.next, list: mlist });
+      return withMedia(out, next);
+    }
+
     function batch(doc, cmd) {
       need(Array.isArray(cmd.cmds), 'cmds must be a list');
       return cmd.cmds.reduce(reduce, doc);
@@ -474,6 +741,9 @@ MV.def('core/commands', ['core/doc', 'core/paths', 'core/pins', 'core/lyrics', '
       ['look.restore', lookRestore], ['look.set', lookSet], ['lock.set', lockSet], ['lock.clear', lockClear],
       ['filter.set', filterSet], ['time.shift', timeShift], ['time.tap', timeTap], ['timing.set', timingSet],
       ['song.set', songSet], ['song.clear', songClear], ['song.info', songInfo], ['output.set', outputSet],
+      ['material.put', materialPut], ['material.meta', materialMeta], ['material.remove', materialRemove],
+      ['media.put', mediaPut], ['media.meta', mediaMeta], ['media.move', mediaMove], ['media.remove', mediaRemove],
+      ['media.relink', mediaRelink],
       ['batch', batch],
     ]);
     const COMMANDS = Object.freeze([...REDUCERS.keys()]);

@@ -381,8 +381,9 @@ test('every change kind maps to the commands of §4.22.5 and applies as one batc
     { t: 'lyrics.row', rowId, src: '*朝*の光!' },
     { t: 'song.info', info: changes[11].to },
   ]);
-  const covered = new Set(changes.map((c) => c.kind).concat(['cut', 'note', 'remove', 'rows', 'allow']));
-  deepEqual([...covered].sort(), CH.KINDS.slice().sort(), 'the other kinds are covered in ai_lyrics / ai_song');
+  const covered = new Set(changes.map((c) => c.kind).concat(['cut', 'note', 'remove', 'rows', 'allow', 'value', 'material',
+    'media']));
+  deepEqual([...covered].sort(), CH.KINDS.slice().sort(), 'the other kinds are covered in ai_lyrics / ai_song / ai_direct / ai_vision');
   const store = ST.createStore({ doc, reduce: CMD.reduce });
   store.batch({ label: ['undo.ai', { tool: 'edit', n: changes.length }] }, cmds);
   assert.equal(store.list().length, 1);
@@ -624,4 +625,30 @@ test('building the commands stays linear in the number of rows and changes', () 
   CH.logEntry(spied, cmds, { runId: 'r', tool: 'edit' });
   CH.revertCommands(spied, CH.logEntry(doc, cmds, { runId: 'r', tool: 'edit' }));
   assert.equal(finds, 0);
+});
+
+// ---- the helpers export (DESIGN_2_1 §3.13) ------------------------------------------------------------------------
+
+// core/hash.hashJSON of the two look schemas as v2 shipped them (v2.1 adds the helpers export and nothing else here)
+const PROPOSALS_HASH = '9b39b409';
+const EDIT_HASH = '273c02f1';
+
+test('helpers: the validators ai/direct reuses are exported; the look schemas and answers are unchanged', () => {
+  deepEqual(Object.keys(LK.helpers).sort(), ['PALETTE_SCHEMA', 'amountChanges', 'contextOf', 'filterChanges', 'flashChange', 'lineChanges',
+    'lookContext', 'lyricChanges', 'namedChange', 'paletteChange', 'partChange', 'seasonChanges', 'sharedContext'].sort());
+  assert.ok(Object.isFrozen(LK.helpers));
+  assert.equal(LK.helpers.lookContext, LK.lookContext);
+  assert.equal(LK.helpers.PALETTE_SCHEMA, LK.EDIT_SCHEMA.properties.changes.properties.palette);
+  // the schemas of 演出3案 and ひとこと修正 as v2 shipped them (hashes of their canonical JSON)
+  const H = MV.use('core/hash');
+  assert.equal(H.hashJSON(LK.PROPOSALS_SCHEMA), PROPOSALS_HASH);
+  assert.equal(H.hashJSON(LK.EDIT_SCHEMA), EDIT_HASH);
+  // a helper gives the same change as the tool that uses it
+  const doc = docOf(PLAIN_SONG);
+  const plan = planOf(doc);
+  const shared = LK.helpers.sharedContext(doc, plan, {});
+  const out = [];
+  LK.helpers.namedChange(LK.helpers.contextOf(doc, plan, reg, { rev: 1 }, shared, ''), 'mood', 'popFizz', 'any', () => {}, out);
+  const viaEdit = LK.editChanges(doc, plan, reg, edit({ mood: 'popFizz' }), { rev: 1 }).changes.find((c) => c.kind === 'mood');
+  deepEqual(out[0], viaEdit);
 });

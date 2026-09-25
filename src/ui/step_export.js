@@ -10,6 +10,9 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'export/schedule', 
   // The button of a pre-flight item that has a fix, and the undo label of that fix.
   const FIX_LABEL = { 'flash-rate': 'exp.pre.flash-fix', 'clear-mp4': 'exp.pre.makeAlpha', 'clear-png': 'exp.pre.makeAlpha',
     'alpha-backdrop': 'exp.pre.makeClear', 'no-webcodecs': 'exp.pre.makePng', 'no-h264': 'exp.pre.makePng' };
+  // The button of a pre-flight item that jumps (default 見る): a missing photo or video says つなぎ直す and opens the
+  // library, where its row has [つなぎ直す] (DESIGN_2_1 §11.7.8).
+  const JUMP_LABEL = { 'media-missing': 'media.relink' };
   const QUALITIES = ['standard', 'high', 'max'];
   const PROGRESS_ANNOUNCE_MS = 5000;
 
@@ -124,6 +127,7 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'export/schedule', 
     function jumpTo(c) {
       if (c.jump && c.jump.cut) app.select({ level: 'cut', key: c.jump.cut }, { from: 'header', open: true, seek: true });
       else if (c.jump && typeof c.jump.t === 'number') app.seek(c.jump.t);
+      else if (c.jump && c.jump.action) app.actions.run(c.jump.action);           // media-missing: the library
       else if (c.code === 'no-lines') app.goStep('lyrics');
     }
 
@@ -155,7 +159,8 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'export/schedule', 
       const list = app.exportChecks();
       dom.replace(checks, list.filter((c) => c.code !== 'memory' || c.level === 'confirm').map((c) => {
         const actions = [fixButton(c),
-          c.jump || c.code === 'no-lines' ? h('button', { class: 'link', type: 'button', text: t('exp.jump'), on: { click: () => jumpTo(c) } }) : null]
+          c.jump || c.code === 'no-lines' ? h('button', { class: 'link', type: 'button', text: t(JUMP_LABEL[c.code] || 'exp.jump'),
+            on: { click: () => jumpTo(c) } }) : null]
           .filter(Boolean);
         return h('li', { class: 'check check-' + c.level, 'data-code': c.code },
           I.icon(c.level === 'block' ? 'warn' : c.level === 'info' ? 'info' : 'warn', { size: 15 }),
@@ -210,6 +215,7 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'export/schedule', 
     app.bus.on('export', update);
     app.bus.on('song', update);
     app.bus.on('fonts', () => { if (root.isConnected) update(); });
+    app.bus.on('media', () => { if (root.isConnected) update(); });   // an asset found or lost on this device
     return { root, footer, update: () => update(), onShow };
   }
 

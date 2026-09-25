@@ -333,4 +333,16 @@ test('every AI schema is portable (objects closed, all properties required, no n
   walk(SONG.TRANSCRIBE_SCHEMA, 'transcribe');
   walk(SONG.ALIGN_SCHEMA, 'align');
   walk(SONG.ANALYZE_SCHEMA, 'analyze');
+  // v2.1 (DESIGN_2_1 §5.4, §5.10, §11.6, §11.9.4): the direct tool in every variant, the material tool, vision
+  const DI = MV.use('ai/direct'), RECIPE = MV.use('ai/recipe');
+  for (const mode of ['all', 'camera']) {
+    for (const allowMaterials of [false, true]) {
+      for (const media of [false, true]) walk(DI.directSchema({ mode, allowMaterials, media }), 'direct ' + [mode, allowMaterials, media].join('/'));
+    }
+  }
+  walk(RECIPE.MATERIAL_SCHEMA, 'material');
+  walk(RECIPE.MATERIAL_SCHEMA_MEDIA, 'material (media)');
+  walk(MV.use('ai/vision').VISION_SCHEMA, 'vision');
+  const media = DI.directSchema({ mode: 'all', media: true }).properties.answers.items.properties.all.properties.media;
+  assert.ok(media && media.properties.depth.enum.includes('keep'), 'the media variant is walked, depth included');
 });

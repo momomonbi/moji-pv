@@ -286,3 +286,93 @@ test('English UI strings keep the plural form only where a count is passed', () 
     assert.equal(bars, 1, key + ': one | between the singular and the plural');
   }
 });
+
+// ---- v2.1 (DESIGN_2_1 §6.11, §11.7.11, §12.7, §13.10) ------------------------------------------------------------------
+
+// Rows of the "| Key | ja | en |" tables of the four v2.1 string sections, read from the design at test time:
+// [keys, jaCell, enCell]. `.x` continues the previous key's prefix; `a → .x` pairs a chip with its text ('ai.chipText').
+function designStringRows() {
+  const lines = fs.readFileSync(path.join(SRC, '..', 'docs', 'DESIGN_2_1.md'), 'utf8').split('\n');
+  const rows = [];
+  for (const heading of [/^### 6\.11 /, /^#### 11\.7\.11 /, /^### 12\.7 /, /^### 13\.10 /]) {
+    const at = lines.findIndex((l) => heading.test(l));
+    assert.ok(at >= 0, 'section ' + heading);
+    const level = lines[at].match(/^#+/)[0].length;
+    let inTable = false;
+    for (let i = at + 1; i < lines.length; i++) {
+      const h = /^(#+) /.exec(lines[i]);
+      if (h && h[1].length <= level) break;
+      const row = lines[i].trim();
+      if (!row.startsWith('|')) { inTable = false; continue; }
+      if (/^\|\s*Key\s*\|\s*ja\s*\|\s*en\s*\|$/.test(row)) { inTable = true; continue; }
+      if (!inTable || /^\|[-\s|]+\|$/.test(row)) continue;
+      const cells = row.split('|').slice(1, -1).map((c) => c.trim());
+      const keys = [];
+      let prefix = '';
+      for (const m of cells[0].matchAll(/`([^`]+)`/g)) {
+        const tok = m[1];
+        if (!tok.startsWith('.')) { prefix = tok.slice(0, tok.lastIndexOf('.')); keys.push(tok); continue; }
+        keys.push((cells[0].includes('→') ? prefix + 'Text' : prefix) + tok);
+      }
+      if (keys.some((k) => /[<…\s{]/.test(k))) continue;      // ranges such as `shot.<9 presets>` are checked below
+      rows.push([keys, cells[1], cells[2]]);
+    }
+  }
+  return rows;
+}
+
+// Design keys that live elsewhere in this code base (docs/NOTES.md, v2.1 package A).
+const DESIGN_KEY_HOME = { 'keys.title': 'keys.heading', 'menu.clearDevice': 'cmd.file.clearDevice' };
+
+test('every key of the v2.1 string tables exists; single-key rows carry the design text', () => {
+  const rows = designStringRows();
+  const keys = rows.flatMap((r) => r[0]);
+  assert.ok(keys.length > 400, 'the tables are found (' + keys.length + ')');
+  // Part labels live in their definitions (D§4.18.1); photoPan's new label comes with its upgrade (package G.3).
+  const missing = keys.filter((k) => !k.startsWith('part.')).map((k) => DESIGN_KEY_HOME[k] || k).filter((k) => !(k in STRINGS));
+  assert.deepEqual(missing, []);
+  const differ = [];
+  for (const [[key], ja, en] of rows.filter((r) => r[0].length === 1 && !/§|table/.test(r[1] + r[2]))) {
+    const pair = STRINGS[DESIGN_KEY_HOME[key] || key];
+    if (!pair || key in DESIGN_KEY_HOME || pair[1].includes('|')) continue;
+    // the app's English uses American spelling (ux-16), the design sometimes writes "colour"
+    if (pair[0] !== ja || pair[1] !== en.replace(/colour/g, 'color')) differ.push([key, pair, ja, en]);
+  }
+  assert.deepEqual(differ, []);
+});
+
+test('v2.1 preset names and label tuples have strings: curves, shots, rigs, recipe knobs', () => {
+  const CV = MV.use('core/curve'), SH = MV.use('core/shot'), RC = MV.use('core/recipe');
+  const keys = [];
+  for (const name of CV.PRESET_KEYS) keys.push('curve.' + name);
+  for (const name of SH.SHOT_KEYS) keys.push('shot.' + name, 'shot.blurb.' + name);
+  for (const name of SH.RIG_KEYS) keys.push('rig.' + name);
+  const curves = CV.PRESET_KEYS.concat(['linear', 'steps', 'sineInOut', 'backOut', 'expoIn', { bz: [0.2, 0, 0.3, 1] },
+    { sp: [[0, 1], [0.5, 3], [1, 1]] }, { ramp: { ends: 'both', edge: 0.2, peak: 3 } }, { ramp: { ends: 'start', edge: 0.2, peak: 2 } },
+    { ramp: { ends: 'end', edge: 0.2, peak: 2 } }]);
+  for (const c of curves) {
+    const [key, params] = CV.label(c);
+    keys.push(key);
+    for (const v of Object.values(params)) if (typeof v === 'string' && /^opt\./.test(v)) keys.push(v);
+  }
+  for (const s of ['none', ...SH.SHOT_KEYS, { keys: [{ at: 'a' }, { at: 'b' }] }]) keys.push(SH.label(s)[0]);
+  for (const r of ['none', ...SH.RIG_KEYS]) keys.push(SH.rigLabel(r)[0]);
+  assert.deepEqual([...new Set(keys)].filter((k) => !(k in STRINGS)), []);
+  const t = T.createT('en', STRINGS);
+  assert.equal(t(...CV.label({ sp: [[0, 1], [0.5, 3], [1, 1]] })), 'Speed steps (3 points)');
+  assert.equal(t(...CV.label({ ramp: { ends: 'both', edge: 0.2, peak: 3 } })), 'Slow ends, middle ×3');
+  for (const [what, label] of Object.entries(RC.KNOB_LABELS)) {
+    assert.deepEqual(STRINGS['mat.knob.' + what], [label.ja, label.en], 'the recipe knob label equals mat.knob.' + what);
+  }
+});
+
+test('strings.js defines every key once', () => {
+  const src = fs.readFileSync(path.join(SRC, 'i18n', 'strings.js'), 'utf8');
+  const seen = new Map(), dup = [];
+  for (const m of src.matchAll(/^\s*'([^']+)':\s*\[/gm)) {
+    if (seen.has(m[1])) dup.push(m[1]);
+    seen.set(m[1], true);
+  }
+  assert.ok(seen.size === Object.keys(STRINGS).length, 'the scan sees every key (' + seen.size + ' / ' + Object.keys(STRINGS).length + ')');
+  assert.deepEqual(dup, []);
+});

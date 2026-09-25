@@ -1,10 +1,11 @@
-/* 文字PVメーカー v2 — original work. Parameter specs: coercion, AutoSpec evaluation, descriptions and validation (DESIGN §4.2). */
-MV.def('core/schema', ['core/num', 'core/ease', 'core/color'], (N, E, C) => {
+/* 文字PVメーカー v2 — original work. Parameter specs: coercion, AutoSpec evaluation, descriptions and validation (DESIGN §4.2, DESIGN_2_1 §3.5, §11.2.3). */
+MV.def('core/schema', ['core/num', 'core/ease', 'core/color', 'core/curve', 'core/shot'], (N, E, C, CV, SHOT) => {
   'use strict';
 
   const ORDERS = Object.freeze(['lead', 'tail', 'core', 'rim', 'scatter', 'word', 'line', 'sweepX', 'sweepY', 'radial',
     'emphFirst', 'sung']);
-  const TYPES = Object.freeze(['num', 'int', 'bool', 'enum', 'ease', 'order', 'ink', 'color', 'face', 'text']);
+  const TYPES = Object.freeze(['num', 'int', 'bool', 'enum', 'ease', 'order', 'ink', 'color', 'face', 'text', 'curve', 'shot',
+    'rig', 'partRefs', 'media']);
   const UNITS = Object.freeze(['', 's', 'du', 'em', 'deg', 'frac', 'x', 'Hz']);
   const FACES = Object.freeze(['display', 'serif', 'body']);
   const AMOUNT_KEYS = Object.freeze(['motion', 'glitch', 'chroma', 'ornament', 'density', 'texture', 'groundSwitch',
@@ -17,6 +18,12 @@ MV.def('core/schema', ['core/num', 'core/ease', 'core/color'], (N, E, C) => {
   const JITTER = 0.2;
   const NEUTRAL = 0.5;                        // a source whose input is missing reads as the middle of its scale
   const LINE_BREAKS = /\r\n|[\n\r\u0085\u2028\u2029]/g;
+  // partRefs (v2.1): "kind.key" items of these part kinds; sorted, unique, at most 24.
+  const REF_KINDS = Object.freeze(['arrange', 'arrive', 'dwell', 'depart', 'ground', 'ornament', 'lens', 'filter', 'seam']);
+  const PART_REF = /^([a-z]+)\.([a-z][A-Za-z0-9]{2,31})$/;
+  const REFS_MAX = 24;
+  const MEDIA_ID = /^a[0-9a-f]{24}$/;
+  const ACCEPTS = Object.freeze(['image', 'video', 'any']);
 
   class SchemaError extends Error {
     constructor(code, message) { super(message); this.name = 'SchemaError'; this.code = code; }
@@ -37,6 +44,11 @@ MV.def('core/schema', ['core/num', 'core/ease', 'core/color'], (N, E, C) => {
       case 'color': return C.isHex(v) ? v.toUpperCase() : undefined;
       case 'face': return FACES.includes(v) ? v : undefined;
       case 'text': return coerceText(spec, v);
+      case 'curve': return CV.coerce(v);
+      case 'shot': return SHOT.coerceShot(v);
+      case 'rig': return SHOT.coerceRig(v);
+      case 'partRefs': return coerceRefs(v);
+      case 'media': return v === '' || (typeof v === 'string' && MEDIA_ID.test(v)) ? v : undefined;
       default: throw new SchemaError('bad-spec', 'unknown param type ' + (spec && spec.type));
     }
   }
@@ -74,6 +86,16 @@ MV.def('core/schema', ['core/num', 'core/ease', 'core/color'], (N, E, C) => {
     return flat.length <= max ? flat : Array.from(flat).slice(0, max).join('');
   }
 
+  // A sorted, de-duplicated, frozen list of at most 24 "kind.key" refs; items that do not read are dropped.
+  function coerceRefs(v) {
+    if (!Array.isArray(v)) return undefined;
+    const out = [...new Set(v.filter((x) => {
+      const m = typeof x === 'string' ? PART_REF.exec(x) : null;
+      return !!m && REF_KINDS.includes(m[1]);
+    }))].sort();
+    return Object.freeze(out.slice(0, REFS_MAX));
+  }
+
   // A value every spec of this type accepts; used when an auto yields something the type cannot hold.
   function baseValue(spec) {
     switch (spec.type) {
@@ -85,6 +107,9 @@ MV.def('core/schema', ['core/num', 'core/ease', 'core/color'], (N, E, C) => {
       case 'ink': return 'ink';
       case 'color': return '#000000';
       case 'face': return FACES[0];
+      case 'curve': return 'linear';
+      case 'shot': case 'rig': return 'none';
+      case 'partRefs': return Object.freeze([]);
       default: return '';
     }
   }
@@ -195,15 +220,22 @@ MV.def('core/schema', ['core/num', 'core/ease', 'core/color'], (N, E, C) => {
     mood: [(s) => '雰囲気（' + s + '）', (s) => 'mood (' + s + ')'],
     on: [() => 'オン', () => 'on'],
     off: [() => 'オフ', () => 'off'],
+    none: [() => 'なし', () => 'none'],
+    media: [() => '写真・動画', () => 'photo or video'],
   };
 
   // Short human text for an auto: '0.45–0.9 · エネルギーに連動' / '0.45–0.9 · follows energy'; fn autos show spec.why[lang].
   function describeAuto(spec, lang) {
     const li = lang === 'en' ? 1 : 0;
     const auto = isParamSpec(spec) ? spec.auto : spec;
+    const type = isParamSpec(spec) ? spec.type : undefined;
     if (!auto || typeof auto !== 'object') return '';
-    if ('value' in auto) return PHRASES.always[li](showValue(auto.value, li));
-    if (Array.isArray(auto.pick)) return PHRASES.oneOf[li]([...new Set(auto.pick)].map((v) => showValue(v, li)).join(' / '));
+    if (type === 'media' && 'value' in auto) return showValue(auto.value, li, type);
+    if ('value' in auto) return PHRASES.always[li](showValue(auto.value, li, type));
+    if (Array.isArray(auto.pick)) {
+      const shown = [...new Set(auto.pick.map((v) => showValue(v, li, type)))];
+      return PHRASES.oneOf[li](shown.join(' / '));
+    }
     if (Array.isArray(auto.range)) {
       const span = showNumber(auto.range[0]) + '–' + showNumber(auto.range[1]);
       return span + ' · ' + (auto.follow === undefined ? PHRASES.random[li]() : followText(auto.follow, li));
@@ -234,9 +266,14 @@ MV.def('core/schema', ['core/num', 'core/ease', 'core/color'], (N, E, C) => {
     return key;
   }
 
-  function showValue(v, li) {
+  // Object values (custom curves, shots, rigs) show as the curve key or 'custom'; the inspector's display text comes
+  // from core/curve.label and core/shot.label, not from here.
+  function showValue(v, li, type) {
     if (typeof v === 'boolean') return PHRASES[v ? 'on' : 'off'][li]();
     if (typeof v === 'number') return showNumber(v);
+    if (type === 'media') return v === '' ? PHRASES.none[li]() : PHRASES.media[li]();
+    if (Array.isArray(v)) return v.length ? v.join(', ') : PHRASES.none[li]();
+    if (v !== null && typeof v === 'object') return type === 'curve' || CV.isCurve(v) ? CV.keyOf(v) : 'custom';
     return String(v);
   }
 
@@ -256,6 +293,9 @@ MV.def('core/schema', ['core/num', 'core/ease', 'core/color'], (N, E, C) => {
     if (!(opts && opts.label === false) || spec.label !== undefined) checkLabel(spec.label, bad);
     if (spec.ui !== undefined && spec.ui !== 'basic' && spec.ui !== 'advanced') bad("ui must be 'basic' or 'advanced'");
     if (spec.ai !== undefined && typeof spec.ai !== 'boolean') bad('ai must be a boolean');
+    if (spec.optKey !== undefined && !(spec.type === 'enum' && /^[a-z][a-zA-Z0-9]*$/.test(spec.optKey))) {
+      bad('optKey is an identifier, and only for an enum');
+    }
     checkAuto(spec, bad);
     return errors;
   }
@@ -275,6 +315,10 @@ MV.def('core/schema', ['core/num', 'core/ease', 'core/color'], (N, E, C) => {
     }
     if (spec.type === 'text' && spec.max !== undefined && !(Number.isInteger(spec.max) && spec.max > 0)) {
       bad('text max must be a positive integer');
+    }
+    if (spec.type === 'media') {
+      if (spec.accept !== undefined && !ACCEPTS.includes(spec.accept)) bad('media accept must be image, video or any');
+      if (!spec.auto || typeof spec.auto !== 'object' || !('value' in spec.auto)) bad('a media auto must be a constant { value }');
     }
   }
 

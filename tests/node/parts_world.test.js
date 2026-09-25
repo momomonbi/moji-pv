@@ -59,6 +59,18 @@ function tableOf(dir) {
 const GROUNDS = tableOf('ground');
 const ORNAMENTS = tableOf('ornament');
 
+// DESIGN_2_1 §11.5.7 (it wins over DESIGN.md): photoPan's new label, and the media ornaments of parts/ornament/media.js
+// (every one pool: false, tags ['soft']).
+const DESIGN_2_1 = fs.readFileSync(path.join(__dirname, '..', '..', 'docs', 'DESIGN_2_1.md'), 'utf8');
+const MEDIA_PARTS = DESIGN_2_1.slice(DESIGN_2_1.indexOf('#### 11.5.7 '), DESIGN_2_1.indexOf('#### 11.5.8 '));
+const PHOTO_LABEL = (() => { const m = /Its label becomes (\S+) \/ ([^.]+)\./.exec(MEDIA_PARTS); return { ja: m[1], en: m[2] }; })();
+const MEDIA_ORNAMENTS = MEDIA_PARTS.split('\n').filter((l) => l.startsWith('| `')).map((l) => {
+  const c = cells(l);
+  const [ja, en] = c[1].split(' / ');
+  const [scope, follow] = c[2].split(', ');
+  return { key: /`(\w+)`/.exec(c[0])[1], ja, en, scope: scope.split(' ')[0], follow };
+});
+
 function def(kind, key) { return REGISTRY.get(kind, key); }
 
 // --- scenes and frames ------------------------------------------------------------------------------------------------
@@ -115,7 +127,7 @@ test('§5.5 backgrounds: every key, label, tag and season of the table, and noth
   assert.deepEqual(keys, GROUNDS.map((r) => r.key).sort());
   for (const row of GROUNDS) {
     const d = def('ground', row.key);
-    assert.deepEqual(d.label, { ja: row.ja, en: row.en }, row.key + ' label');
+    assert.deepEqual(d.label, row.key === 'photoPan' ? PHOTO_LABEL : { ja: row.ja, en: row.en }, row.key + ' label');
     assert.deepEqual(d.tags.slice().sort(), row.Tags.split(/\s+/).sort(), row.key + ' tags');
     assert.equal(d.season, row.Season || null, row.key + ' season');
     assert.equal(d.fallback, row.note === 'fb', row.key + ' fallback');
@@ -126,7 +138,13 @@ test('§5.5 backgrounds: every key, label, tag and season of the table, and noth
 
 test('§5.6 decorations: every key, label, scope, tag and season of the table, and nothing else', () => {
   assert.equal(ORNAMENTS.length, 22);
-  assert.deepEqual(REGISTRY.keys('ornament'), ORNAMENTS.map((r) => r.key).sort());
+  assert.equal(MEDIA_ORNAMENTS.length, 3);
+  assert.deepEqual(REGISTRY.keys('ornament'), ORNAMENTS.concat(MEDIA_ORNAMENTS).map((r) => r.key).sort());
+  for (const row of MEDIA_ORNAMENTS) {
+    const d = def('ornament', row.key);
+    assert.deepEqual([d.label, d.scope, d.follow, d.tags, d.season, d.fallback, d.pool, d.needs],
+      [{ ja: row.ja, en: row.en }, row.scope, row.follow, ['soft'], null, false, false, ['media']], row.key + ' (DESIGN_2_1 §11.5.7)');
+  }
   for (const row of ORNAMENTS) {
     const d = def('ornament', row.key);
     assert.deepEqual(d.label, { ja: row.ja, en: row.en }, row.key + ' label');
@@ -405,13 +423,21 @@ test('serialMark: the auto number is the line\'s place in the song (two digits);
   assert.equal(serialChars({ number: 'No.7' }), 2, 'what the stroke font cannot draw is left out');
 });
 
+// DESIGN_2_1 §11.5.7: the image is an asset of the plan's media (a v2 text value such as 'asset:test' is no id), and the
+// picture is K.media's node. With the edge rule 'zoom' it covers the bleed as v2's photoPan did; the default 'mirror'
+// fits the frame and fills the bleed with flipped copies (media_engine.test.js).
 test('photoPan: pin only; with an image it pans and zooms closed-form and always covers the frame', () => {
   const d = def('ground', 'photoPan');
   const bare = sceneOf(sample('ground', 'photoPan'), d);
   assert.equal(bare.stores.image.length, 0, 'no image: a plain ground');
-  const plan = sample('ground', 'photoPan', { params: { image: 'asset:test', zoom: 0.2, pan: 30, veil: 0.4 } });
+  const old = sample('ground', 'photoPan', { params: { image: 'asset:test' } });
+  assert.equal(sceneOf(old, d).stores.image.length, 0, 'a v2 text value is no asset id: a plain ground');
+  const id = 'a' + '7'.repeat(24);
+  const plan = sample('ground', 'photoPan', { params: { image: id, zoom: 0.2, pan: 30, veil: 0.4, edge: 'zoom', move: 'auto', depth: 'anim' } });
+  plan.media = { [id]: { kind: 'image', w: 3000, h: 2000, dur: null, fps: null, frames: null, rot: 0, alpha: false, anim: false } };
   const scene = sceneOf(plan, d);
   assert.equal(scene.stores.image.length, 1);
+  assert.equal(scene.stores.image[0].media, true);
   const img = scene.table.type.findIndex((ty) => ty === T.TYPE.image);
   const { w, h } = plan.design;
   let prevScale = 0;

@@ -1,21 +1,36 @@
-/* 文字PVメーカー v2 — original work. AI change sets: stale detection, conversion to commands, log entries and selective revert (DESIGN §4.22.5). */
-MV.def('ai/changes', ['core/commands', 'core/lyrics', 'core/doc', 'ai/lyricio', 'i18n/t'], (CMD, L, D, IO, T) => {
+/* 文字PVメーカー v2 — original work. AI change sets: stale detection, conversion to commands, log entries and selective revert (DESIGN §4.22.5; DESIGN_2_1 §5.6, §11.6). */
+MV.def('ai/changes', ['core/commands', 'core/lyrics', 'core/doc', 'core/hash', 'core/paths', 'core/curve', 'core/shot',
+  'ai/lyricio', 'i18n/t'], (CMD, L, D, H, P, CV, SHOT, IO, T) => {
   'use strict';
 
-  // Change = { id, kind, scope: 'work' | 'line' | 'rows', lineId?, rowId?, path?, from, to,
+  // Change = { id, kind, scope: 'work' | 'line' | 'cut' | 'rows', lineId?, rowId?, path?, from, to,
   //            base: { rev, value?, src? }, label: [stringKey, params], checked: true, stale: false, …kind extras }
+  // v2.1 (DESIGN_2_1 §5.6) adds: group, areaKey, agg, requires: [changeId], staleWhy, field, cutKey, cutSig, matName and
+  // entry, and the kinds `value` (any pin by path; `to: null` clears it), `material` (material.put) and `media`
+  // (media.meta of a vision result, §11.6.2).
   const KINDS = Object.freeze(['theme', 'mood', 'season', 'amount', 'flash', 'palette', 'avoid', 'allow', 'part', 'impact',
-    'emphasis', 'cut', 'note', 'remove', 'time', 'rows', 'songInfo']);
+    'emphasis', 'cut', 'note', 'remove', 'time', 'rows', 'songInfo', 'value', 'material', 'media']);
   const LYRIC_KINDS = Object.freeze(['cut', 'note', 'emphasis', 'impact']);       // also the order they apply in
   const WORK_PIN_KINDS = Object.freeze(['theme', 'mood', 'season', 'amount', 'flash']);
   const PALETTE_TOKENS = Object.freeze(['accent', 'shiftA', 'shiftB']);
   const FLASH_ON = 0.7;
+  // kind → review group (§4.22.5), then the v2.1 groups of area instructions (DESIGN_2_1 §5.6 GROUPS +=). groupOf: a
+  // change's own `group` wins, then material changes ('materials'), cut changes ('cuts') and area changes ('area');
+  // 'outside' is set by ai/direct. Every group has a heading in ui/ai_controller GROUP_ORDER.
   const GROUPS = Object.freeze({
     lyrics: ['cut', 'note', 'emphasis', 'impact', 'remove', 'rows'],
-    work: ['theme', 'mood', 'season', 'amount', 'flash', 'palette', 'avoid', 'allow', 'songInfo'],
-    lines: ['part'],
+    work: ['theme', 'mood', 'season', 'amount', 'flash', 'palette', 'avoid', 'allow', 'songInfo', 'media'],
+    lines: ['part', 'value'],
     time: ['time'],
+    materials: ['material'],
+    area: [],
+    cuts: [],
+    outside: [],
   });
+  const STALE_WHY = Object.freeze(['changed', 'left', 'gone', 'material']);
+  // value slots that are line-level settings (applied before part pins, §5.6 step 3)
+  const LINE_VALUE_SLOTS = Object.freeze(['season', 'avoid']);
+  const MAT_PREFIX = 'mat:';
 
   function sameJSON(a, b) {
     if (a === b) return true;
@@ -47,9 +62,29 @@ MV.def('ai/changes', ['core/commands', 'core/lyrics', 'core/doc', 'ai/lyricio', 
 
   // ---- making changes ------------------------------------------------------------------------------------------------
 
+  // entryHash(entry) → 'xxxxxxxx': the hash of a stored material entry (hashJSON of the whole entry, which material.put
+  // stores normalized: the definition of parts/mix.materialHash, §3.12). null for no entry.
+  function entryHash(entry) { return entry ? H.hashJSON(entry) : null; }
+
+  function materialOf(doc, id) {
+    const list = doc.materials && Array.isArray(doc.materials.list) ? doc.materials.list : [];
+    return id ? list.find((m) => m.id === id) || null : null;
+  }
+
+  function assetOf(doc, id) {
+    const list = doc.media && Array.isArray(doc.media.list) ? doc.media.list : [];
+    return list.find((e) => e.id === id) || null;
+  }
+
   // What the project holds for this change's target now (compared with `base` for stale detection). srcs: rowSrcs(doc).
   function snapshot(doc, c, srcs) {
-    if (WORK_PIN_KINDS.includes(c.kind) || c.kind === 'part') return { value: pinValue(doc, c.path) };
+    if (WORK_PIN_KINDS.includes(c.kind) || c.kind === 'part' || c.kind === 'value') return { value: pinValue(doc, c.path) };
+    // a new material has no entry yet (base null): it is stale once an entry with its planned id exists
+    if (c.kind === 'material') return { value: entryHash(materialOf(doc, c.materialId || c.plannedId)) };
+    if (c.kind === 'media') {
+      const e = assetOf(doc, c.assetId);
+      return { value: e ? e.ai : false };                   // false: the asset is gone
+    }
     if (c.kind === 'palette') {
       const value = {};
       for (const k of PALETTE_TOKENS) value[k] = pinValue(doc, 'work:color.' + k);
@@ -81,13 +116,74 @@ MV.def('ai/changes', ['core/commands', 'core/lyrics', 'core/doc', 'ai/lyricio', 
     return false;
   }
 
+  // ---- areas --------------------------------------------------------------------------------------------------------
+
+  // inArea(area, path): the rule of planner/areas.inArea (paths.isUnder against one of the area's scopes), with the
+  // scopes in a Set so a review of many rows stays linear. The Set is made once per Area object.
+  const scopeSets = new WeakMap();
+  function inArea(area, path) {
+    if (!area || !Array.isArray(area.scopes)) return false;
+    let scopes = scopeSets.get(area);
+    if (!scopes) { scopes = new Set(area.scopes); scopeSets.set(area, scopes); }
+    if (scopes.has('work')) return true;
+    let own;
+    try { own = P.scopeKey(path); } catch (e) { return false; }
+    if (scopes.has(own)) return true;
+    if (!own.startsWith('cut/')) return false;
+    try {
+      const line = P.lineOfCut(own.slice(4));
+      return line !== null && scopes.has('line/' + line);
+    } catch (e) { return false; }
+  }
+
+  // resolveArea called once per area key within one call (the caller may resolve afresh each time).
+  function areaCache(resolveArea) {
+    if (!resolveArea) return null;
+    const seen = new Map();
+    return (key) => {
+      if (!seen.has(key)) seen.set(key, resolveArea(key));
+      return seen.get(key);
+    };
+  }
+
+  // The cuts of a plan: key → text (what cut pins carry as `sig`).
+  function cutTexts(plan) {
+    const out = new Map();
+    for (const cut of plan && Array.isArray(plan.cuts) ? plan.cuts : []) out.set(cut.key, cut.text);
+    return out;
+  }
+
+  // Why a change no longer fits the project: 'gone' (its cut is gone or holds other words), 'changed' (its target holds
+  // another value), 'material' (the material changed), 'left' (with resolveArea: its path left the area, or the area
+  // is gone); null while it still fits.
+  function whyStale(doc, c, srcs, cuts, resolveArea) {
+    if (c.cutKey && cuts && cuts.get(c.cutKey) !== c.cutSig) return 'gone';
+    if (isStale(doc, c, srcs)) return c.kind === 'material' ? 'material' : 'changed';
+    if (resolveArea && c.areaKey && c.path && c.group !== 'outside' && c.kind !== 'material') {
+      const area = resolveArea(c.areaKey);
+      if (area === null) return 'left';
+      if (area && !inArea(area, areaPath(c))) return 'left';
+    }
+    return null;
+  }
+
+  // The path a change is checked against its area with: a cut pin written under an older key (the plan cut's pinKey)
+  // still belongs to the cut it was made for.
+  function areaPath(c) { return c.cutKey ? 'cut/' + c.cutKey + ':' + slotOf(c.path) : c.path; }
+
   // stale = the project no longer holds what it held when the request was made; newly stale rows are unchecked.
-  function markStale(doc, plan, changes) {
+  // staleWhy says why: 'changed' | 'left' | 'gone' | 'material' (null while fresh). opts.resolveArea(areaKey) → the Area
+  // now, null when it is gone, undefined when the caller does not know the key (then no area check).
+  function markStale(doc, plan, changes, opts) {
     const srcs = rowSrcs(doc);
+    const resolveArea = areaCache(opts && typeof opts.resolveArea === 'function' ? opts.resolveArea : null);
+    const cuts = changes.some((c) => c && c.cutKey) && plan && Array.isArray(plan.cuts) ? cutTexts(plan) : null;
     return changes.map((c) => {
-      const stale = isStale(doc, c, srcs);
-      if (stale === c.stale) return c;
-      return Object.assign({}, c, { stale, checked: stale ? false : c.checked });
+      const why = whyStale(doc, c, srcs, cuts, resolveArea);
+      const stale = why !== null;
+      const known = c.staleWhy === undefined ? (stale ? 'changed' : null) : c.staleWhy;
+      if (stale === c.stale && known === why) return c;
+      return Object.assign({}, c, { stale, staleWhy: why, checked: stale && !c.stale ? false : c.checked });
     });
   }
 
@@ -110,6 +206,11 @@ MV.def('ai/changes', ['core/commands', 'core/lyrics', 'core/doc', 'ai/lyricio', 
   }
 
   function groupOf(c) {
+    const own = typeof c.group === 'string' ? c.group : '';
+    if (Object.prototype.hasOwnProperty.call(GROUPS, own)) return own;
+    if (c.kind === 'material') return 'materials';
+    if (c.cutKey && (c.kind === 'part' || c.kind === 'value')) return 'cuts';
+    if (c.areaKey && (c.kind === 'part' || c.kind === 'value')) return 'area';
     for (const g of Object.keys(GROUPS)) if (GROUPS[g].includes(c.kind)) return g;
     return 'work';
   }
@@ -231,16 +332,87 @@ MV.def('ai/changes', ['core/commands', 'core/lyrics', 'core/doc', 'ai/lyricio', 
     return !plan || !Array.isArray(plan.lines) || plan.lines.some((l) => l.id === lineId);
   }
 
-  // The commands for the checked changes (§4.22.5 table), in this order: work pins, palette, filters, line part pins,
-  // start times, lyric edits, a transcript, the song analysis. Dispatch them with one store.batch (one undo step).
-  function toCommands(doc, plan, changes) {
+  // The material.put of an entry under `id`: its metadata and recipe.
+  function materialPut(id, e) {
+    const cmd = { t: 'material.put', id, kind: e.kind, by: e.by, name: e.name, recipe: e.recipe };
+    for (const k of ['blurb', 'tags', 'season', 'pool']) if (e[k] !== undefined) cmd[k] = e[k];
+    return cmd;
+  }
+
+  // Materials first (§5.6 step 1): new ids 'm' + (materials.next + k) in list order, so try-on and apply agree.
+  // → { cmds, keyOf: Map<material change id, part key> }
+  function materialCmds(doc, list) {
+    const next = doc.materials && Number.isInteger(doc.materials.next) ? doc.materials.next : 1;
+    const cmds = [];
+    const keyOf = new Map();
+    let k = 0;
+    for (const c of list) {
+      if (!c.entry) continue;
+      const id = c.materialId || 'm' + (next + k++).toString(36);
+      keyOf.set(c.id, 'myMat' + id.slice(1));
+      cmds.push(materialPut(id, c.entry));
+    }
+    return { cmds, keyOf };
+  }
+
+  // The value a pin gets: a 'mat:<name>' placeholder becomes the key of the material the change requires.
+  function pinValueOf(c, keyOf) {
+    if (typeof c.to === 'string' && c.to.startsWith(MAT_PREFIX)) {
+      for (const id of Array.isArray(c.requires) ? c.requires : []) if (keyOf.has(id)) return keyOf.get(id);
+      return undefined;
+    }
+    return c.to;
+  }
+
+  // The pin command of a part or value change (cut paths carry the cut's text as sig); undefined when it has none.
+  function pinCmd(c, keyOf) {
+    const v = pinValueOf(c, keyOf);
+    if (v === undefined) return undefined;
+    if (v === null) return { t: 'pin.clear', path: c.path };
+    const cmd = { t: 'pin.set', path: c.path, v, by: 'ai' };
+    if (c.path.startsWith('cut/')) cmd.sig = typeof c.cutSig === 'string' ? c.cutSig : '';
+    return cmd;
+  }
+
+  // Whether a checked change may be applied: the changes it requires are checked too, its line and cut still exist,
+  // and (with resolveArea) its path still lies in its area (§5.5 area guarantee, repeated at apply time).
+  function applicable(c, ctx) {
+    if (Array.isArray(c.requires) && !c.requires.every((id) => ctx.checked.has(id))) return false;
+    if (c.lineId && !lineKnown(ctx.plan, c.lineId)) return false;
+    if (c.cutKey && ctx.cuts && !ctx.cuts.has(c.cutKey)) return false;
+    if (ctx.resolveArea && c.areaKey && c.group !== 'outside' && c.path) {
+      const area = ctx.resolveArea(c.areaKey);
+      if (area === null || (area && !inArea(area, areaPath(c)))) return false;
+    }
+    return true;
+  }
+
+  // The commands for the checked changes (§4.22.5 table; DESIGN_2_1 §5.6), in this order: materials, photo and video
+  // descriptions, work pins, palette, filters, line season and avoid, part pins, value pins, start times, lyric edits,
+  // a transcript, the song analysis. A change whose required material is unchecked is dropped. Dispatch them with one
+  // store.batch (one undo step). opts.resolveArea as in markStale.
+  function toCommands(doc, plan, changes, opts) {
     const list = changes.filter((c) => c && c.checked !== false);
     const of = (...kinds) => list.filter((c) => kinds.includes(c.kind));
+    const resolveArea = areaCache(opts && typeof opts.resolveArea === 'function' ? opts.resolveArea : null);
+    const ctx = { plan, resolveArea, checked: new Set(list.map((c) => c.id)),
+      cuts: list.some((c) => c.cutKey) && plan && Array.isArray(plan.cuts) ? cutTexts(plan) : null };
     const cmds = [];
-    for (const c of of(...WORK_PIN_KINDS)) cmds.push(...workPinCmds(c));
+    const mats = materialCmds(doc, of('material'));
+    cmds.push(...mats.cmds);
+    for (const c of of('media')) cmds.push({ t: 'media.meta', id: c.assetId, ai: c.to });
+    for (const c of of(...WORK_PIN_KINDS)) if (applicable(c, ctx)) cmds.push(...workPinCmds(c));
     for (const c of of('palette')) cmds.push(...paletteCmds(c));
     cmds.push(...filterCmds(doc, of('avoid', 'allow')));
-    for (const c of of('part', 'time')) {
+    const pin = (c) => {
+      const cmd = applicable(c, ctx) ? pinCmd(c, mats.keyOf) : undefined;
+      if (cmd) cmds.push(cmd);
+    };
+    const lineValue = (c) => LINE_VALUE_SLOTS.includes(slotOf(c.path));
+    for (const c of of('value')) if (lineValue(c)) pin(c);
+    for (const c of of('part')) pin(c);
+    for (const c of of('value')) if (!lineValue(c)) pin(c);
+    for (const c of of('time')) {
       if (lineKnown(plan, c.lineId)) cmds.push({ t: 'pin.set', path: c.path, v: c.to, by: 'ai' });
     }
     cmds.push(...lyricCmds(doc, of('cut', 'note', 'emphasis', 'impact', 'remove')));
@@ -249,6 +421,11 @@ MV.def('ai/changes', ['core/commands', 'core/lyrics', 'core/doc', 'ai/lyricio', 
       if (doc.song && doc.song.sha1 === c.base.value) cmds.push({ t: 'song.info', info: c.to });
     }
     return dropNoops(doc, cmds);
+  }
+
+  function slotOf(path) {
+    const at = typeof path === 'string' ? path.indexOf(':') : -1;
+    return at < 0 ? '' : path.slice(at + 1);
   }
 
   // Leaves out commands that would change nothing (a pin already holding that value, a clear of a missing pin).
@@ -263,9 +440,10 @@ MV.def('ai/changes', ['core/commands', 'core/lyrics', 'core/doc', 'ai/lyricio', 
     });
   }
 
-  // The document with the checked changes applied (try-on renders plan(apply(…)) without committing).
-  function apply(doc, plan, changes) {
-    const cmds = toCommands(doc, plan, changes);
+  // The document with the checked changes applied (try-on renders plan(apply(…)) without committing; the stage's
+  // alternate engine composes the registry of the tried document, so new materials show).
+  function apply(doc, plan, changes, opts) {
+    const cmds = toCommands(doc, plan, changes, opts);
     return cmds.length ? CMD.reduce(doc, { t: 'batch', cmds }) : doc;
   }
 
@@ -274,12 +452,22 @@ MV.def('ai/changes', ['core/commands', 'core/lyrics', 'core/doc', 'ai/lyricio', 
   // The side.aiLog entry for commands dispatched on `docBefore`: { runId, tool, n, applied: [...] } where each item
   // records the target, the AI's value (`to`) and what was there before (`prev`):
   //   { path, to, prev }  { filter, to, prev }  { rowId, to, prev }  { rows: 'all', to, prev }  { songInfo: true, to, prev }
+  //   { material: id, to: entryHash of the stored entry, prev: entry | null }  { media: id, to: ai, prev: ai }
+  // meta may add `areas` ([{ key, label }]) and `instructions` ([text], each cut to 300 characters) (§5.6).
   function logEntry(docBefore, cmds, meta) {
     const m = meta || {};
     const applied = [];
     const srcs = rowSrcs(docBefore);
+    let run = docBefore;                                   // the materials as stored, one put after the other
     for (const cmd of cmds) {
-      if (cmd.t === 'pin.set') applied.push({ path: cmd.path, to: cmd.v, prev: docBefore.pins[cmd.path] || null });
+      if (cmd.t === 'material.put') {
+        const prev = materialOf(run, cmd.id);
+        try { run = CMD.reduce(run, cmd); } catch (e) { continue; }
+        applied.push({ material: cmd.id, to: entryHash(materialOf(run, cmd.id)), prev: prev || null });
+      } else if (cmd.t === 'media.meta') {
+        const e = assetOf(docBefore, cmd.id);
+        applied.push({ media: cmd.id, to: cmd.ai === undefined ? null : cmd.ai, prev: e ? e.ai : null });
+      } else if (cmd.t === 'pin.set') applied.push({ path: cmd.path, to: cmd.v, prev: docBefore.pins[cmd.path] || null });
       else if (cmd.t === 'pin.clear') applied.push({ path: cmd.path, to: null, prev: docBefore.pins[cmd.path] || null });
       else if (cmd.t === 'filter.set') {
         const to = cmd.only === null && cmd.deny === null ? null : { only: cmd.only, deny: cmd.deny };
@@ -288,10 +476,36 @@ MV.def('ai/changes', ['core/commands', 'core/lyrics', 'core/doc', 'ai/lyricio', 
       else if (cmd.t === 'lyrics.set') applied.push({ rows: 'all', to: cmd.text, prev: IO.sheetText(docBefore) });
       else if (cmd.t === 'song.info') applied.push({ songInfo: true, to: cmd.info, prev: docBefore.song ? docBefore.song.info : null });
     }
-    return { runId: m.runId === undefined ? null : m.runId, tool: m.tool || null, n: m.n === undefined ? applied.length : m.n, applied };
+    const out = { runId: m.runId === undefined ? null : m.runId, tool: m.tool || null, n: m.n === undefined ? applied.length : m.n, applied };
+    if (Array.isArray(m.areas)) out.areas = m.areas.map((a) => ({ key: String(a.key), label: a.label }));
+    if (Array.isArray(m.instructions)) out.instructions = m.instructions.map((x) => Array.from(String(x)).slice(0, 300).join(''));
+    return out;
+  }
+
+  // Whether a pin that is not the AI's refers to the part key (as its value, part-qualified, or in an avoid list).
+  function keyInUse(doc, key) {
+    for (const path of Object.keys(doc.pins)) {
+      const pin = doc.pins[path];
+      if (!pin || pin.by === 'ai') continue;
+      if (pin.v === key || path.includes('@' + key + '.') || path.endsWith('@' + key)) return true;
+      if (Array.isArray(pin.v) && pin.v.some((x) => typeof x === 'string' && x.slice(x.indexOf('.') + 1) === key)) return true;
+    }
+    return false;
   }
 
   function revertOne(doc, item, srcs) {
+    if (item.material) {
+      const cur = materialOf(doc, item.material);
+      if (!cur || entryHash(cur) !== item.to) return null;
+      // kept while pins that are not the AI's use it (the AI pins of the run go back first, §5.6)
+      if (keyInUse(doc, 'myMat' + item.material.slice(1))) return null;
+      return [item.prev ? materialPut(item.prev.id, item.prev) : { t: 'material.remove', id: item.material }];
+    }
+    if (item.media) {
+      const cur = assetOf(doc, item.media);
+      if (!cur || !sameJSON(cur.ai, item.to)) return null;
+      return [{ t: 'media.meta', id: item.media, ai: item.prev === undefined ? null : item.prev }];
+    }
     if (item.path) {
       const cur = doc.pins[item.path];
       const holds = item.to === null ? !cur : !!cur && cur.by === 'ai' && sameJSON(cur.v, item.to);
@@ -313,6 +527,8 @@ MV.def('ai/changes', ['core/commands', 'core/lyrics', 'core/doc', 'ai/lyricio', 
   }
 
   // Selective revert: only where the document still holds the AI's value; `kept` = items changed since (not reverted).
+  // Pins go back first (the log lists materials first and the commands come in reverse order). Pass a one-item entry
+  // ({ applied: [item] }) to revert one path or one material.
   function revertCommands(doc, entry) {
     const cmds = [];
     let kept = 0;
@@ -329,15 +545,56 @@ MV.def('ai/changes', ['core/commands', 'core/lyrics', 'core/doc', 'ai/lyricio', 
 
   const NAMED = Object.freeze({ theme: 'theme', mood: 'mood' });
   const AUTO_LABEL = 'ai.ch.auto';                 // 「自動（{v}）」 around a value the planner chose
+  const CURVE_SLOT = /(^|\.)(ease|flow|curve)$/;
+  const PARAM_OF = /^[a-z]+(?:#[0-9])?@[A-Za-z0-9]+\./;
+
+  // A [stringKey, params] label as text, with the params that name string keys (ease families) resolved.
+  function labelText(t, label) {
+    const p = Object.assign({}, label[1]);
+    for (const k of ['family', 'dir']) if (typeof p[k] === 'string' && t.has(p[k])) p[k] = t(p[k]);
+    return t(label[0], p);
+  }
+
+  // A value of a `value` change as text, by the slot it is pinned to.
+  function valueText(t, c, v) {
+    const slot = c.slot || slotOf(c.path);
+    const param = slot.replace(PARAM_OF, '');
+    if (c.toName && c.to === v) return c.toName;
+    if (slot === 'cam.shot') return labelText(t, SHOT.label(v));
+    if (slot === 'rig') return labelText(t, SHOT.rigLabel(v));
+    if (CURVE_SLOT.test(slot)) return labelText(t, CV.label(v));
+    if (slot === 'motion.speed') return Math.round(v * 100) + '%';
+    if (slot === 'cam.zoom' || (param === 'speed' && slot !== param)) return '×' + v;
+    if (slot === 'season') return t('fld.season.' + v);
+    if (param === 'depth' && slot !== param && t.has('opt.depth.' + v)) return t('opt.depth.' + v);
+    if (slot === 'avoid' && Array.isArray(v)) return v.map((ref) => t.part(ref.split('.')[0], ref.split('.')[1])).join('・');
+    if (typeof v === 'number') return String(Math.round(v * 100) / 100);
+    return String(v);
+  }
+
+  // The label text of a part kind or slot: 'kind.<kind>', 'fld.atmos' for the atmosphere, else the text itself.
+  function kindText(t, kind) {
+    const base = String(kind).replace(/#[0-9]$/, '');
+    if (base === 'atmos') return t('fld.atmos');
+    return t.has('kind.' + base) ? t('kind.' + base) : base;
+  }
 
   function shown(t, c, key, v) {
-    if (v === null || v === undefined) return '';
-    if (c.kind === 'part') return t.part(c.partKind, v);
+    if (v === null || v === undefined) return c.kind === 'value' || c.areaKey || c.cutKey ? t('curve.auto') : '';
+    if (typeof v === 'string' && v.startsWith(MAT_PREFIX) && c.matName) return c.matName;
+    if (c.kind === 'part') return v === 'none' ? t('opt.none') : t.part(c.partKind, v);
+    if (c.kind === 'value') return valueText(t, c, v);
     if (NAMED[c.kind]) return t.part(NAMED[c.kind], v);
     if (c.kind === 'season') return t('fld.season.' + v);
     if (c.kind === 'time') return T.fmtTime(v);
     if (typeof v === 'number') return String(Math.round(v * 100) / 100);
     return String(v);
+  }
+
+  // The field of a value or part change as text: its field key, plus the kind it belongs to ('緩急 · 入り').
+  function fieldText(t, c, field) {
+    const text = t.has(field) ? t(field) : field;
+    return c.fieldKind ? text + ' · ' + kindText(t, c.fieldKind) : text;
   }
 
   // The review row text: t(label key) with part, theme, mood and season names, and times, resolved.
@@ -346,7 +603,15 @@ MV.def('ai/changes', ['core/commands', 'core/lyrics', 'core/doc', 'ai/lyricio', 
     const p = Object.assign({}, params);
     if ('from' in p) p.from = shown(t, c, 'from', p.from);
     if ('to' in p) p.to = shown(t, c, 'to', p.to);
-    if ('kind' in p) p.kind = t('kind.' + p.kind);
+    if (Array.isArray(p.where)) p.where = t(p.where[0], p.where[1]);
+    if (typeof p.field === 'string') p.field = fieldText(t, c, p.field);
+    if (c.kind === 'material') {
+      if ('kind' in p) p.kind = kindText(t, p.kind);
+      if ('season' in p) p.season = t('fld.season.' + (p.season || 'none'));
+      return t(key, p);
+    }
+    if (c.kind === 'media' && p.caption && typeof p.caption === 'object') p.caption = p.caption[t.lang] || p.caption.ja || '';
+    if ('kind' in p) p.kind = kindText(t, p.kind);
     if ('part' in p && c.filterKind) p.part = t.part(c.filterKind, p.part);
     if ('what' in p) p.what = t('fld.amount.' + p.what);
     if (c.fromSource === 'auto' && 'from' in params && params.from !== null) p.from = t(AUTO_LABEL, { v: p.from });
@@ -355,17 +620,30 @@ MV.def('ai/changes', ['core/commands', 'core/lyrics', 'core/doc', 'ai/lyricio', 
     return t(key, p);
   }
 
-  // A validator warning ([stringKey, params]) as text: part kinds and keys become their names.
+  // The text of an aggregate row (the changes sharing one `agg`): 「動きの速さ: 100% → 50%（5行）」; `from` is shown when
+  // every row has the same one, else as auto.
+  function describeAgg(list, t) {
+    const first = list[0];
+    const params = first.label && first.label[1] ? first.label[1] : {};
+    const field = typeof params.field === 'string' ? params.field : 'kind.' + first.partKind;
+    const same = list.every((c) => sameJSON(c.from, first.from));
+    return t('ai.ch.agg', { field: fieldText(t, first, field), from: shown(t, first, 'from', same ? first.from : null),
+      to: shown(t, first, 'to', first.to), n: list.length });
+  }
+
+  // A validator warning ([stringKey, params]) as text: part kinds and keys become their names; a `field` (value
+  // slots) names the setting instead of a kind.
   function warningText(w, t) {
     const [key, params] = w;
     const p = Object.assign({}, params);
-    if (p.kind && p.key) p.key = t.part(p.kind, p.key);
-    if (p.kind) p.kind = t('kind.' + p.kind);
+    if (p.kind && p.key) p.key = t.part(String(p.kind).replace(/#[0-9]$/, '').replace(/^atmos$/, 'ornament'), p.key);
+    if (p.field) p.kind = fieldText(t, {}, p.field);
+    else if (p.kind) p.kind = kindText(t, p.kind);
     return t(key, p);
   }
 
   return {
-    KINDS, GROUPS, FLASH_ON, make, snapshot, rowSrcs, lineResolver, markStale, groupOf, toCommands, apply, logEntry,
-    revertCommands, describe, warningText, sameJSON,
+    KINDS, GROUPS, STALE_WHY, FLASH_ON, make, snapshot, rowSrcs, lineResolver, markStale, groupOf, toCommands, apply,
+    logEntry, revertCommands, describe, describeAgg, warningText, sameJSON, entryHash, keyInUse, inArea,
   };
 });

@@ -3,6 +3,7 @@
 // Usage:
 //   node tests/update_golden.js           recompute and rewrite the golden files that can be computed today
 //   node tests/update_golden.js --check   recompute and compare; exit 1 on a difference; writes nothing
+//   node tests/update_golden.js --v2      also rewrite frame_hashes_v2.json (on purpose only; see below)
 // Plan hashes need planner/plan; frame hashes need engine/facade, engine/render/record and engine/text/fake_measure.
 // A golden whose modules do not exist yet is left as it is (or written as an empty placeholder when missing).
 // Registry: the full catalog (parts/catalog) when it exists, else the stub parts (tests/fixtures/stub_parts.js).
@@ -12,11 +13,21 @@
 //   frame_hashes.json { "registry": … | null, "measurer": "fake",
 //                       "frames": { "<project>": ["<hash of frame i's recorder ops>", … 40] } }
 //   Frames are rendered at a short side of 360 px, at t = duration · (i + 0.5) / 40.
+//   frame_hashes_v2.json  the same format: the same projects with the automatic camerawork pinned off
+//                     (corpus.withoutCamerawork). These are the v2 frames, byte for byte, and they are FROZEN: a plain run
+//                     never writes them. It checks them first and writes nothing when they differ (DESIGN_2_1 §7.5: the
+//                     frames that must stay equal are asserted before the goldens are regenerated). --v2 rewrites them.
+//   project_media.json { "registry": …, "measurer": "fake", "media": "fake", "plan": "<plan.hash>", "frames": [40 hashes] }
+//                     the v2.1 media fixture with a text fill added (tests/helpers/fake_media.js goldenDoc: a still
+//                     background, a photo frame, a text fill and a video background; DESIGN_2_1 §7.5 step (c)), planned
+//                     with its effective registry (materials and pooled media) and rendered like the frames above with
+//                     the fake asset store, so its op hashes include the media times ('media:<id>@<m>#<index>').
 
 const fs = require('node:fs');
 const path = require('node:path');
 const { load } = require('./helpers/load.js');
 const corpus = require('./helpers/corpus.js');
+const FM = require('./helpers/fake_media.js');
 
 const MV = load();
 const H = MV.use('core/hash');
@@ -47,29 +58,37 @@ function outputSize(aspect) {
   return [Math.round(w * k), Math.round(h * k)];
 }
 
-async function frameHashes(reg) {
+// The plan hash and the FRAMES frame hashes of one document (an engine of its own; assets: an AssetStore or null).
+async function renderDoc(reg, doc, assets) {
   const { createEngine } = MV.use('engine/facade');
   const { createRecorder } = MV.use('engine/render/record');
   const { fakeMeasurer } = MV.use('engine/text/fake_measure');
-  const frames = {};
-  for (const { name, doc } of corpus.projects()) {
-    const rec = createRecorder();
-    const engine = createEngine({ registry: reg, canvas: rec.factory, measurer: fakeMeasurer(), fonts: null, assets: null });
-    const { plan } = engine.setDoc(doc);
-    await engine.prepare(0, plan.duration, { export: true });
-    const [w, h] = outputSize(doc.look.aspect);
-    const made = rec.factory.create(w, h, { alpha: false });
-    const surface = { canvas: made.canvas, ctx: made.ctx, w, h };
-    const list = [];
-    for (let i = 0; i < FRAMES; i++) {
-      const before = rec.ops().length;
-      engine.renderFrame(surface, (plan.duration * (i + 0.5)) / FRAMES, { quality: 'export', pick: false, scale: w / plan.design.w });
-      list.push(H.hashJSON(rec.ops().slice(before)));
-    }
-    engine.dispose();
-    frames[name] = list;
+  const rec = createRecorder();
+  const engine = createEngine({ registry: reg, canvas: rec.factory, measurer: fakeMeasurer(), fonts: null, assets });
+  const { plan } = engine.setDoc(doc);
+  await engine.prepare(0, plan.duration, { export: true });
+  const [w, h] = outputSize(doc.look.aspect);
+  const made = rec.factory.create(w, h, { alpha: false });
+  const surface = { canvas: made.canvas, ctx: made.ctx, w, h };
+  const list = [];
+  for (let i = 0; i < FRAMES; i++) {
+    const before = rec.ops().length;
+    engine.renderFrame(surface, (plan.duration * (i + 0.5)) / FRAMES, { quality: 'export', pick: false, scale: w / plan.design.w });
+    list.push(H.hashJSON(rec.ops().slice(before)));
   }
+  engine.dispose();
+  return { plan: plan.hash, frames: list };
+}
+
+async function frameHashes(reg, prepare = (doc) => doc) {
+  const frames = {};
+  for (const { name, doc } of corpus.projects()) frames[name] = (await renderDoc(reg, prepare(doc), null)).frames;
   return frames;
+}
+
+async function mediaGolden(reg, info) {
+  const r = await renderDoc(reg, FM.goldenDoc(corpus.project('media').doc), FM.createFakeMedia(MV));
+  return { registry: info, measurer: 'fake', media: 'fake', plan: r.plan, frames: r.frames };
 }
 
 function readGolden(file) {
@@ -80,13 +99,19 @@ function text(obj) { return JSON.stringify(obj, null, 1) + '\n'; }
 
 async function main() {
   const check = process.argv.includes('--check');
+  const rewriteV2 = process.argv.includes('--v2');
   const { reg, info } = pickRegistry();
+  const ENGINE = ['engine/facade', 'engine/render/record', 'engine/text/fake_measure'];
+  // The frozen job comes first, so a difference there stops a plain run before any file is written.
   const jobs = [
+    { file: 'frame_hashes_v2.json', needs: ENGINE, frozen: !rewriteV2, empty: { registry: null, measurer: 'fake', frames: {} },
+      make: async () => ({ registry: info, measurer: 'fake', frames: await frameHashes(reg, corpus.withoutCamerawork) }) },
     { file: 'plan_hashes.json', needs: ['planner/plan'], empty: { registry: null, plans: {} },
       make: async () => ({ registry: info, plans: planHashes(reg) }) },
-    { file: 'frame_hashes.json', needs: ['engine/facade', 'engine/render/record', 'engine/text/fake_measure'],
-      empty: { registry: null, measurer: 'fake', frames: {} },
+    { file: 'frame_hashes.json', needs: ENGINE, empty: { registry: null, measurer: 'fake', frames: {} },
       make: async () => ({ registry: info, measurer: 'fake', frames: await frameHashes(reg) }) },
+    { file: 'project_media.json', needs: ENGINE.concat(['planner/plan', 'parts/mix']),
+      empty: { registry: null, measurer: 'fake', media: 'fake', plan: null, frames: [] }, make: () => mediaGolden(reg, info) },
   ];
   let failed = false;
   fs.mkdirSync(GOLDEN, { recursive: true });
@@ -99,10 +124,16 @@ async function main() {
       continue;
     }
     const next = await job.make();
-    if (check) {
-      const same = current && text(current) === text(next);
+    // the frames only: the registry may move (a new part) while the frames of these projects must not
+    const same = current && (job.frozen ? text(current.frames) === text(next.frames) : text(current) === text(next));
+    if (check || (job.frozen && current)) {
       console.log(job.file + ': ' + (same ? 'matches' : 'DIFFERS'));
       failed = failed || !same;
+      if (!same && !check) {
+        console.log('The camerawork-off frames are no longer the v2 frames, so nothing was written. Find the cause, or ' +
+          'rewrite them on purpose with --v2.');
+        break;
+      }
     } else {
       fs.writeFileSync(path.join(GOLDEN, job.file), text(next));
       console.log(job.file + ': written (' + info.kind + ' registry ' + info.version + ')');

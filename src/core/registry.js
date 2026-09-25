@@ -1,4 +1,4 @@
-/* 文字PVメーカー v2 — original work. Part registry: validation of part definitions, lookups and auto-pick pools (DESIGN §4.6, §4.18). */
+/* 文字PVメーカー v2 — original work. Part registry: validation of part definitions, lookups, auto-pick pools and extension by materials (DESIGN §4.6, §4.18; DESIGN_2_1 §3.6). */
 MV.def('core/registry', ['core/schema', 'core/color', 'core/hash'], (S, C, H) => {
   'use strict';
 
@@ -10,7 +10,7 @@ MV.def('core/registry', ['core/schema', 'core/color', 'core/hash'], (S, C, H) =>
   const AMOUNT_KEYS = S.AMOUNT_KEYS;
   const SEASONS = Object.freeze(['spring', 'summer', 'autumn', 'winter']);
   const ROLES = Object.freeze(['lyric', 'focus', 'title', 'interlude', 'outro']);
-  const NEEDS = Object.freeze(['blur', 'shard', 'mask', 'depth', 'beats', 'level', 'textAt']);
+  const NEEDS = Object.freeze(['blur', 'shard', 'mask', 'depth', 'beats', 'level', 'textAt', 'media']);
   const STAGES = Object.freeze(['shape', 'tone', 'light', 'optic', 'film']);
   const UNITS = Object.freeze(['glyph', 'word', 'line', 'run']);
   const TEXT_STYLES = Object.freeze(['plain', 'outline', 'shadow', 'glow', 'duo']);
@@ -19,6 +19,10 @@ MV.def('core/registry', ['core/schema', 'core/color', 'core/hash'], (S, C, H) =>
   const ASPECTS = Object.freeze(['16:9', '9:16', '1:1', '4:5', '4:3', '3:4', '21:9']);
   const FIXED_FALLBACK = Object.freeze({ theme: 'sumiWashi', mood: 'quietHush' });
   const KEY = /^[a-z]+[A-Z][A-Za-z0-9]{1,30}$/;
+  // Keys only `extend` may add (v2.1): materials 'myMat<id>' and the user's pooled media 'myMed<10 hex>' (§3.6).
+  const MINE_KEY = /^(?:myMat[0-9a-z]+|myMed[0-9a-f]{10})$/;
+  const MINE_PREFIX = /^my(?:Mat|Med)/;
+  const CAM_VALUES = Object.freeze(['any', 'gentle', 'none']);
   const KEY_MAX = 32;                         // PARTKEY of the slot path grammar (§3.4): a longer key could not be pinned
   const PARAM = /^[a-z][A-Za-z0-9]{0,31}$/;
   const RESERVED_PARAMS = Object.freeze({ ornament: ['count'], filter: ['count'] });
@@ -32,13 +36,18 @@ MV.def('core/registry', ['core/schema', 'core/color', 'core/hash'], (S, C, H) =>
   const L = (ja, en) => Object.freeze({ ja, en });
   const unitAmount = (follow, lo, hi) => ({ type: 'num', min: 0, max: 1, step: 0.01, label: L('強さ', 'Amount'),
     auto: follow ? { range: [lo, hi], follow } : { range: [lo, hi] } });
+  // v2.1 (DESIGN_2_1 §2.3): `ease` is a speed curve (the same picks of ease names, so old ease pins stay valid) and
+  // `flow` spreads the stagger. The linear defaults of flow and the other curve params reproduce v2 motion exactly.
+  const linearCurve = (ja, en, ui) => Object.assign({ type: 'curve', label: L(ja, en), auto: { value: 'linear' } },
+    ui ? { ui } : {});
   const motionShared = (dur, each, orders, eases) => ({
     dur: { type: 'num', min: 0.05, max: 4, step: 0.01, unit: 's', label: L('長さ', 'Duration'),
       auto: { range: dur, follow: '-energy' } },
     each: { type: 'num', min: 0, max: 0.5, step: 0.005, unit: 's', label: L('ずらし', 'Stagger'),
       auto: { range: each, follow: '-density' } },
     order: { type: 'order', label: L('順番', 'Order'), auto: { pick: orders[0], weights: orders[1] } },
-    ease: { type: 'ease', label: L('緩急', 'Easing'), auto: { pick: eases[0], weights: eases[1] } },
+    ease: { type: 'curve', label: L('緩急', 'Speed curve'), auto: { pick: eases[0], weights: eases[1] } },
+    flow: linearCurve('出方の緩急', 'Stagger curve', 'advanced'),
   });
   const SHARED = deepFreeze({
     arrange: {
@@ -52,6 +61,7 @@ MV.def('core/registry', ['core/schema', 'core/color', 'core/hash'], (S, C, H) =>
     dwell: {
       amount: unitAmount('amount.motion', 0.2, 0.7),
       speed: { type: 'num', min: 0.25, max: 4, step: 0.05, unit: 'x', label: L('速さ', 'Speed'), auto: { value: 1 } },
+      curve: linearCurve('見せの緩急', 'Hold curve', 'advanced'),
     },
     depart: motionShared([0.25, 0.6], [0.01, 0.04], [['lead', 'tail'], [3, 1]],
       [['quadIn', 'cubicIn', 'expoIn', 'sineIn'], [3, 2, 2, 1]]),
@@ -60,7 +70,7 @@ MV.def('core/registry', ['core/schema', 'core/color', 'core/hash'], (S, C, H) =>
       amount: unitAmount('amount.ornament', 0.3, 0.9),
       ink: { type: 'ink', label: L('色', 'Color'), auto: { pick: ['accent', 'ink', 'muted'], weights: [3, 1, 2] } },
     },
-    lens: { amount: unitAmount('amount.camera', 0.2, 0.8) },
+    lens: { amount: unitAmount('amount.camera', 0.2, 0.8), curve: linearCurve('動きの緩急', 'Motion curve') },
     filter: {
       amount: unitAmount(null, 0.3, 0.8),
       when: { type: 'enum', of: ['always', 'arrive', 'beat', 'impact', 'depart'], label: L('効くとき', 'When'),
@@ -69,6 +79,7 @@ MV.def('core/registry', ['core/schema', 'core/color', 'core/hash'], (S, C, H) =>
     seam: {
       dur: { type: 'num', min: 0.15, max: 1.2, step: 0.01, unit: 's', label: L('長さ', 'Duration'),
         auto: { range: [0.3, 0.7], follow: '-energy' } },
+      curve: linearCurve('切り替えの緩急', 'Transition curve', 'advanced'),
     },
     theme: {},
     mood: {},
@@ -112,19 +123,26 @@ MV.def('core/registry', ['core/schema', 'core/color', 'core/hash'], (S, C, H) =>
 
   // --- validation of one definition --------------------------------------------------------------------------
 
-  function checkDef(def) {
+  // checkDef(def, { mine }) → messages. Without `mine` (createRegistry) the keys 'myMat…'/'myMed…' and the field
+  // `mine` are refused; with it (extend) the key must match MINE_KEY and `mine` must be an object.
+  function checkDef(def, opts) {
     const errs = [];
     const bad = (msg) => { errs.push(msg); };
+    const mine = !!(opts && opts.mine);
     if (!isObject(def)) { bad('definition must be an object'); return errs; }
     if (!KINDS.includes(def.kind)) { bad('unknown kind ' + JSON.stringify(def.kind)); return errs; }
     if (typeof def.key !== 'string' || !KEY.test(def.key)) bad('key must be camelCase with at least two words');
     else if (def.key.length > KEY_MAX) bad('key must be at most ' + KEY_MAX + ' characters (slot paths, §3.4)');
+    else if (!mine && MINE_PREFIX.test(def.key)) bad('keys starting with myMat or myMed are added only through extend');
+    else if (mine && !MINE_KEY.test(def.key)) bad('an added key must be myMat<id> or myMed<10 hex digits>');
+    if (!mine && def.mine !== undefined) bad('mine is allowed only on definitions added through extend');
+    if (mine && !isObject(def.mine)) bad('mine must be an object');
     if (!isObject(def.label) || !isText(def.label.ja) || !isText(def.label.en)) bad('label needs non-empty ja and en');
     if (PART_KINDS.includes(def.kind) && (!isObject(def.blurb) || !isText(def.blurb.ja) || !isText(def.blurb.en))) {
       bad('blurb needs ja and en');
     }
     checkCommon(def, bad);
-    checkParams(def, bad);
+    checkParams(def, bad, mine);
     KIND_CHECKS[def.kind](def, bad);
     return errs;
   }
@@ -164,7 +182,7 @@ MV.def('core/registry', ['core/schema', 'core/color', 'core/hash'], (S, C, H) =>
     return out;
   }
 
-  function checkParams(def, bad) {
+  function checkParams(def, bad, mine) {
     const shared = SHARED[def.kind];
     if (def.shared !== undefined) {
       if (!isObject(def.shared)) bad('shared must be an object');
@@ -185,7 +203,9 @@ MV.def('core/registry', ['core/schema', 'core/color', 'core/hash'], (S, C, H) =>
     }
     if (def.params === undefined) return;
     if (!isObject(def.params)) { bad('params must be an object'); return; }
-    const reserved = RESERVED_PARAMS[def.kind] || [];
+    // The list slot's `count` is reserved on catalog parts. A definition added through extend (a material) may name its
+    // count knob `count` (DESIGN_2_1 §5.7.6: `atmos@myMat3.count`); its paths always carry the key, so they cannot clash.
+    const reserved = mine ? [] : RESERVED_PARAMS[def.kind] || [];
     for (const name of Object.keys(def.params)) {
       if (!PARAM.test(name)) bad('params.' + name + ': bad param name');
       if (shared[name]) bad('params.' + name + ': clashes with the shared param of ' + def.kind);
@@ -207,6 +227,7 @@ MV.def('core/registry', ['core/schema', 'core/color', 'core/hash'], (S, C, H) =>
     arrange(def, bad) {
       needFn(def, bad, 'build');
       if (def.motion !== undefined && def.motion !== 'own') bad("motion must be 'own' when present");
+      if (def.cam !== undefined && !CAM_VALUES.includes(def.cam)) bad('cam must be one of ' + CAM_VALUES.join(' '));
     },
     arrive(def, bad) { needFn(def, bad, 'make'); oneOf(def, bad, 'unit', UNITS, true); },
     dwell(def, bad) { needFn(def, bad, 'make'); },
@@ -220,7 +241,11 @@ MV.def('core/registry', ['core/schema', 'core/color', 'core/hash'], (S, C, H) =>
       oneOf(def, bad, 'scope', ['cut', 'run']);
       oneOf(def, bad, 'follow', ['text', 'own']);
     },
-    lens(def, bad) { needFn(def, bad, 'make'); },
+    lens(def, bad) {
+      needFn(def, bad, 'make');
+      if (def.frames !== undefined && typeof def.frames !== 'boolean') bad('frames must be a boolean');
+      if (def.warp !== undefined && typeof def.warp !== 'boolean') bad('warp must be a boolean');
+    },
     filter(def, bad) {
       needFn(def, bad, 'apply');
       oneOf(def, bad, 'stage', STAGES);
@@ -343,12 +368,14 @@ MV.def('core/registry', ['core/schema', 'core/color', 'core/hash'], (S, C, H) =>
   }
 
   function buildRegistry(byKind, problems) {
-    const sortedKeys = new Map();
+    const keysOf = new Map();
+    const defsOf = new Map();
     const params = new Map();
     const signature = [];
     for (const kind of KINDS) {
       const keys = [...byKind.get(kind).keys()].sort(compare);
-      sortedKeys.set(kind, Object.freeze(keys));
+      keysOf.set(kind, Object.freeze(keys));
+      defsOf.set(kind, keys.map((key) => byKind.get(kind).get(key)));
       for (const key of keys) {
         const def = byKind.get(kind).get(key);
         params.set(kind + '/' + key, paramListOf(def));
@@ -356,19 +383,28 @@ MV.def('core/registry', ['core/schema', 'core/color', 'core/hash'], (S, C, H) =>
       }
     }
     const version = H.hashJSON(signature);
+    return makeRegistry({
+      keysOf, defsOf, params, version, problems,
+      get: (kind, key) => { const m = byKind.get(kind); return (m && m.get(key)) || null; },
+      baseParams: () => null,
+      extras: { base: null, baseVersion: version, extra: Object.freeze({}), mine: () => NO_KEYS },
+    });
+  }
 
-    function get(kind, key) {
-      const m = byKind.get(kind);
-      return (m && m.get(key)) || null;
-    }
-    function keys(kind) { return sortedKeys.get(kind) || Object.freeze([]); }
+  const NO_KEYS = Object.freeze([]);
+
+  // The Registry object over a key index: `keysOf` kind → sorted keys, `defsOf` kind → the defs in the same order,
+  // `get(kind, key)`, `params` (Map of 'kind/key' → param list) with `baseParams` as the fallback lookup.
+  function makeRegistry(src) {
+    const { keysOf, defsOf, params, get } = src;
+    function keys(kind) { return keysOf.get(kind) || NO_KEYS; }
     // Sorted by (kind, key) as strings, like keys(); registration order never matters.
     function all(kind) {
       const kinds = kind === undefined ? KINDS_SORTED : [kind];
-      return kinds.flatMap((k) => keys(k).map((key) => byKind.get(k).get(key)));
+      return kinds.flatMap((k) => defsOf.get(k) || []);
     }
     function fallback(kind) {
-      for (const key of keys(kind)) if (byKind.get(kind).get(key).fallback === true) return key;
+      for (const def of defsOf.get(kind) || []) if (def.fallback === true) return def.key;
       return null;
     }
     function label(kind, key, lang) {
@@ -387,24 +423,111 @@ MV.def('core/registry', ['core/schema', 'core/color', 'core/hash'], (S, C, H) =>
       const f = o.filters && o.filters[kind];
       const only = f && Array.isArray(f.only) ? f.only : null;
       const deny = f && Array.isArray(f.deny) ? f.deny : null;
-      return keys(kind).filter((key) => {
-        const def = byKind.get(kind).get(key);
-        if (def.pool === false) return false;
-        if (only && !only.includes(key)) return false;
-        if (deny && deny.includes(key)) return false;
-        if (!seasonOk(def.season, o.season)) return false;
-        if (o.texture === true && def.texture !== true) return false;
-        if (o.scope && def.scope !== undefined && def.scope !== o.scope) return false;
-        if (o.amounts && def.gate && !(o.amounts[def.gate] > 0)) return false;
-        return traitsAllow(traitsOf(def), o);
-      });
+      const out = [];
+      for (const def of defsOf.get(kind) || []) {
+        const key = def.key;
+        if (def.pool === false) continue;
+        if (only && !only.includes(key)) continue;
+        if (deny && deny.includes(key)) continue;
+        if (!seasonOk(def.season, o.season)) continue;
+        if (o.texture === true && def.texture !== true) continue;
+        if (o.scope && def.scope !== undefined && def.scope !== o.scope) continue;
+        if (o.amounts && def.gate && !(o.amounts[def.gate] > 0)) continue;
+        if (traitsAllow(traitsOf(def), o)) out.push(key);
+      }
+      return out;
     }
-
-    return Object.freeze({
-      version, problems: Object.freeze(problems.slice()),
+    return Object.freeze(Object.assign({
+      version: src.version, problems: Object.freeze(src.problems.slice()),
       get, has: (kind, key) => get(kind, key) !== null, keys, all, pool, fallback, label, blurb,
-      params: (kind, key) => params.get(kind + '/' + key) || null,
+      params: (kind, key) => params.get(kind + '/' + key) || src.baseParams(kind, key) || null,
       traits: (kind, key) => { const d = get(kind, key); return d ? traitsOf(d) : null; },
+    }, src.extras));
+  }
+
+  // What the planner reads from a definition, so a change to it changes an extended registry's version (§3.6).
+  function metaHash(def) {
+    return H.hashJSON({ tags: def.tags, season: def.season, weight: def.weight, traits: def.traits, pool: def.pool,
+      family: def.family, gate: def.gate, scope: def.scope, follow: def.follow, frames: def.frames, cam: def.cam,
+      params: def.params, shared: def.shared });
+  }
+
+  // extend(base, defs, { strict = false, problems = [] }) → Registry (DESIGN_2_1 §3.6): the base registry plus the
+  // material and media definitions `defs` (keys 'myMat<id>' / 'myMed<10 hex>', each with `mine`). Only `defs` are
+  // validated; an invalid or duplicate definition is skipped and listed in `problems` ('kind/key: message', after the
+  // caller's own `opts.problems`), or thrown as a RegistryError when strict. The base is never mutated and its maps are
+  // reused. Added members: base, baseVersion, version (base version + the added defs and what the planner reads of
+  // them), extra ({ [key]: def.mine }) and mine(kind) (the added keys of a kind, sorted).
+  // What extend works out for one added definition (its checks, param list and meta hash) depends on that definition
+  // alone. The makers (parts/mix) deep-freeze and cache their definitions, so an edit that re-composes the registry
+  // re-uses the work for every definition it did not touch: a frozen definition's results are kept here.
+  const addedInfo = new WeakMap();
+
+  function infoOf(def) {
+    const frozen = isObject(def) && Object.isFrozen(def) && (def.params === undefined || Object.isFrozen(def.params));
+    let info = frozen ? addedInfo.get(def) : undefined;
+    if (!info) {
+      info = { errs: Object.freeze(checkDef(def, { mine: true })), params: null, meta: null };
+      if (frozen) addedInfo.set(def, info);
+    }
+    return info;
+  }
+
+  function extend(base, defs, opts) {
+    const strict = !!(opts && opts.strict === true);
+    if (!base || typeof base.get !== 'function' || typeof base.keys !== 'function') {
+      throw new RegistryError(['extend needs a registry to extend']);
+    }
+    const problems = opts && Array.isArray(opts.problems) ? opts.problems.map(String) : [];
+    const own = [];
+    const added = new Map(KINDS.map((k) => [k, new Map()]));
+    for (const def of Array.isArray(defs) ? defs : []) {
+      const errs = infoOf(def).errs.slice();
+      const tag = (isObject(def) && typeof def.kind === 'string' ? def.kind : '?') + '/' +
+        (isObject(def) && typeof def.key === 'string' ? def.key : '?');
+      if (!errs.length && def.fallback === true) errs.push('an added definition cannot be the fallback');
+      if (!errs.length && (added.get(def.kind).has(def.key) || base.has(def.kind, def.key))) errs.push('duplicate key in ' + def.kind);
+      for (const e of errs) own.push(tag + ': ' + e);
+      if (!errs.length) added.get(def.kind).set(def.key, def);
+    }
+    if (strict && own.length) throw new RegistryError(own);
+    const baseVersion = base.baseVersion || base.version;
+    const keysOf = new Map();
+    const defsOf = new Map();
+    const params = new Map();
+    const signature = [];
+    const extra = {};
+    const mineOf = new Map();
+    for (const kind of KINDS) {
+      const more = added.get(kind);
+      const baseKeys = base.keys(kind);
+      if (!more.size) {
+        keysOf.set(kind, baseKeys);
+        defsOf.set(kind, baseKeys.map((key) => base.get(kind, key)));
+        continue;
+      }
+      const mineKeys = [...more.keys()].sort(compare);
+      const keys = baseKeys.concat(mineKeys).sort(compare);
+      keysOf.set(kind, Object.freeze(keys));
+      defsOf.set(kind, keys.map((key) => more.get(key) || base.get(kind, key)));
+      mineOf.set(kind, Object.freeze(mineKeys));
+      for (const key of mineKeys) {
+        const def = more.get(key);
+        const info = infoOf(def);
+        if (!info.params) {
+          info.params = paramListOf(def);
+          info.meta = [Object.keys(def.params || {}).sort(compare), metaHash(def)];
+        }
+        params.set(kind + '/' + key, info.params);
+        signature.push([kind, key, info.meta[0], info.meta[1]]);
+        extra[key] = def.mine;
+      }
+    }
+    return makeRegistry({
+      keysOf, defsOf, params, version: H.hashJSON([baseVersion, signature]), problems: problems.concat(own),
+      get: (kind, key) => { const m = added.get(kind); return (m && m.get(key)) || base.get(kind, key); },
+      baseParams: (kind, key) => base.params(kind, key),
+      extras: { base, baseVersion, extra: Object.freeze(extra), mine: (kind) => mineOf.get(kind) || NO_KEYS },
     });
   }
 
@@ -420,6 +543,6 @@ MV.def('core/registry', ['core/schema', 'core/color', 'core/hash'], (S, C, H) =>
 
   return {
     KINDS, PART_KINDS, TAGS, AMOUNT_KEYS, SEASONS, ROLES, NEEDS, STAGES, TEXT_STYLES, TRAIT_DEFAULTS, SHARED,
-    RegistryError, createRegistry, checkDef,
+    CAM_VALUES, MINE_KEY, RegistryError, createRegistry, checkDef, extend,
   };
 });
