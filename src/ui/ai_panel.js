@@ -1,6 +1,6 @@
 /* 文字PVメーカー v2 — original work. The AI panel (tab AI of the detail column): connection, what is sent, guide, tools, running, review, log (DESIGN §6.4.10). */
-MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/ai_controller', 'ui/ai_review'],
-  (dom, I, PR, CH, AC, AR) => {
+MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/ai_controller', 'ui/ai_review', 'ui/ai_thinking'],
+  (dom, I, PR, CH, AC, AR, AT) => {
     'use strict';
 
     const { h } = dom;
@@ -295,10 +295,10 @@ MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/a
       const conn = connectionCard(app, ctl);
       const tools = toolsBlock(app, ctl);
       // The stage is a polite live region; the elapsed seconds next to it are not announced (they change every second).
-      const runText = h('span', { class: 'ai-run-stage', role: 'status', 'aria-live': 'polite' });
+      const runText = h('span', { class: 'ai-run-stage ai-shimmer', role: 'status', 'aria-live': 'polite' });
       const runTime = h('span', { class: 'ai-run-time muted', 'aria-hidden': 'true' });
       const stop = h('button', { class: 'btn small', type: 'button', 'data-ctl': 'stop', text: t('ai.stop') });
-      const runLine = h('div', { class: 'ai-run' }, h('span', { class: 'ai-spin', 'aria-hidden': 'true' }), runText, runTime,
+      const runLine = h('div', { class: 'ai-run' }, AT.orb(false), runText, runTime,
         h('span', { class: 'grow' }), stop);
       const message = h('div', { class: 'ai-message', hidden: true });
       const review = h('section', { class: 'ai-sec ai-review' });
@@ -315,6 +315,8 @@ MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/a
       let lastStatus = ctl.state.keyStatus;
 
       stop.addEventListener('click', () => ctl.abort());
+      // The thinking animation over the preview, wherever the request was started from (step ①/②, Ctrl+K or this tab).
+      if (app.shell && app.shell.stage && app.shell.stage.element) AT.mountHud(app, ctl, app.shell.stage.element);
 
       // Hovering (or focusing) a review row highlights its line on the lane and the timeline and scrolls the lyric
       // editor to it (§6.4.10.6).

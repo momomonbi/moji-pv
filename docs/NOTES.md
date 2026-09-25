@@ -3998,3 +3998,42 @@ line `season` and `avoid` pins are stored, validated and scope-checked, but the 
 Shared `flow` and `curve` params are resolved into the plan but not applied by the engine yet (B). Linear is the
 identity, so this cannot change a frame. An `ease` pinned to a curve preset or a custom curve plays as linear until
 then (`behave.easeOf` falls back for names it does not know).
+
+## Tap-sync with the mouse and touch
+
+A user found that tapping did not seem to take effect. Probing the page like a mouse user showed why:
+- Tap mode had no on-screen control to tap with; only Space and Enter marked a line.
+- A click on the preview (the natural "tap") ran the normal preview click. It selected a line, paused playback and opened
+  詳細, which folds the step column and hid the tap panel.
+- While playback was stopped, Space still marked lines at the frozen clock, so every line got the same time.
+  `core/timing` then dropped all but the first with `time-order`, while the toast still said 「3行のタイミングを記録しました」.
+
+Fixes:
+- `core/tap`: a mark less than `MIN_GAP` (0.12 s) after the last start is not taken.
+- `ui/tap`:
+  - a big 「タップ」 button (pointerdown, at the press's time);
+  - no mark while playback is stopped, with the hint `tap.stopped`, and `tap.tooSoon` for a rejected mark;
+  - the announced time is the recorded one;
+  - starting unfolds the step column;
+  - finishing seeks 2 s before the first marked line, with a toast action 「再生して確認」 (`tap.check`);
+  - `tap.doneSome` when the timing cannot use some marks (a mark earlier than a pin or LRC time above the session).
+- `ui/stage`: in tap mode, a press on the preview is a tap and never selects or pauses.
+
+Tests:
+- `tap.test.js`: a new gap test.
+- `ui_flows.py` `tap`: the mouse sub-flow.
+- Both were mutation-checked: each fails when its fix is removed.
+
+## AI thinking animation
+
+The owner asked for a near-future thinking animation while the AI works (timing, prep, looks and the other tools).
+- New module `ui/ai_thinking` (L7), with two exports:
+  - `orb(large)`: the orb that replaces the small spinner of the AI panel's running line;
+  - `mountHud(app, ctl, host)`: the HUD over the preview, mounted by `ui/ai_panel` on `app.shell.stage.element`.
+- The HUD and the glow are driven by the controller's state (`ctl.on`). They show exactly while `state.run` exists.
+- Colors are `--ai-a` (cyan) and `--ai-b` (violet). The HUD is `pointer-events: none` and sits over the canvas, so
+  exports and hit tests are unaffected.
+- Tests: `ui_flows.py` `ai_prep` checks the HUD during a text tool (shown, stage text equal to the running line, no audio
+  steps, glow, orb, pointer passes through). `ai_align` checks the four steps up to 考え中, and that the HUD and the glow
+  go away with the answer.
+

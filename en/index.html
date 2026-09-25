@@ -1,6 +1,6 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-aF+WYqKz/WnN2sPx0EQDcoxwnSbDpONpXhCHX47M0Ow='; style-src 'sha256-RJ+J2jPfQmujoLqduc4mjqSSzNBP7DIWLiYjNX3ebXY=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-UTqQ/tVkJrPsClxIXOCoe6ao0gkvHraz5gRJ6Y+stXE='; style-src 'sha256-4EZv5UN8nyYJe/U95JLfKzkVGoRJa/AFVU4ZB8M0pec=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
 <title>Moji PV Maker</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -18,6 +18,8 @@
   --accent-soft: rgba(232, 87, 63, 0.16);
   --accent-strong: #c63d26;
   --gold: #f0b64d;
+  --ai-a: #5ee7ff;          /* the AI's thinking animation: cyan and violet */
+  --ai-b: #9b8cff;
   --focus: #7cc4ff;
   --ok: #62c59a;
   --error: #ff7a7a;
@@ -52,7 +54,7 @@ kbd {
 /* One line that ends in "…" when it does not fit: every truncated label shares this rule (a flex item also needs
    min-width: 0, set in its own rule). */
 .ell, .doc-title-text, .song-name, .strip-text, .w-part-name, .w-font-name, .w-font-sample, .pb-name, .pal-text, .fr-label,
-.w-slot-skip { white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+.w-slot-skip, .ai-hud-text { white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
 
 /* ---- shell regions (placed in px by ui/shell from computeLayout) ------------------------------------------ */
 
@@ -365,6 +367,8 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent);
 .tap-now { font-size: 16px; font-weight: 700; padding: 10px 12px; border-radius: 10px; background: var(--accent-soft); border: 1px solid rgba(232, 87, 63, 0.4); }
 .tap-next { font-size: 13px; color: var(--text-2); }
 .tap-last { font-size: 12px; color: var(--muted); min-height: 1.2em; font-variant-numeric: tabular-nums; }
+.step-tap .tap-pad { width: 100%; min-height: 64px; flex-direction: column; gap: 2px; font-size: 18px; touch-action: manipulation; }
+.step-tap .tap-pad .btn-hint { flex-basis: auto; padding-left: 0; text-align: center; font-size: 12px; color: rgba(255, 255, 255, 0.85); }
 .tap-keys { display: grid; grid-template-columns: auto 1fr; gap: 6px 10px; margin: 0; font-size: 12.5px; }
 .tap-keys dt { display: flex; gap: 4px; }
 .tap-keys dd { margin: 0; color: var(--text-2); }
@@ -835,9 +839,82 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent);
 /* running and messages */
 .ai-run { display: flex; align-items: center; gap: 9px; padding: 8px 10px; border: 1px solid var(--line-2); border-radius: 9px;
   background: var(--panel-2); font-size: 12.5px; font-variant-numeric: tabular-nums; }
-.ai-spin { width: 14px; height: 14px; flex: none; border-radius: 50%; border: 2px solid var(--line-2); border-top-color: var(--accent);
-  animation: ai-spin 0.9s linear infinite; }
+.ai-run { position: relative; overflow: hidden; border-color: rgba(94, 231, 255, 0.35);
+  background: linear-gradient(90deg, rgba(94, 231, 255, 0.07), rgba(155, 140, 255, 0.07)), var(--panel-2); }
+.ai-run::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2px;
+  background: linear-gradient(90deg, transparent, var(--ai-a), var(--ai-b), transparent); background-size: 50% 100%;
+  background-repeat: no-repeat; animation: ai-stream 1.6s linear infinite; }
+@keyframes ai-stream { from { background-position: -50% 0; } to { background-position: 150% 0; } }
+.ai-shimmer { background: linear-gradient(90deg, var(--text) 0%, var(--text) 40%, var(--ai-a) 50%, var(--text) 60%, var(--text) 100%);
+  background-size: 250% 100%; -webkit-background-clip: text; background-clip: text; color: transparent;
+  animation: ai-shimmer 2.2s linear infinite; }
+@keyframes ai-shimmer { from { background-position: 100% 0; } to { background-position: -150% 0; } }
+
+/* the AI's thinking orb (ui/ai_thinking) */
+.ai-orb { --orb: 18px; position: relative; flex: none; width: var(--orb); height: var(--orb); }
+.ai-orb.is-large { --orb: 34px; }
+.ai-orb-ring { position: absolute; inset: 0; border-radius: 50%; border: 1.5px solid transparent;
+  border-top-color: var(--ai-a); border-right-color: rgba(94, 231, 255, 0.35); animation: ai-spin 1.1s linear infinite;
+  filter: drop-shadow(0 0 3px var(--ai-a)); }
+.ai-orb-ring.is-inner { inset: 22%; border-top-color: var(--ai-b); border-right-color: transparent;
+  border-bottom-color: rgba(155, 140, 255, 0.4); animation-duration: 0.8s; animation-direction: reverse;
+  filter: drop-shadow(0 0 3px var(--ai-b)); }
+.ai-orb-core { position: absolute; inset: 40%; border-radius: 50%; background: #e9fdff;
+  box-shadow: 0 0 6px 2px var(--ai-a), 0 0 12px 4px rgba(155, 140, 255, 0.55); animation: ai-pulse 1.4s ease-in-out infinite; }
+.ai-orb-orbit { position: absolute; inset: -12%; animation: ai-spin 2.6s linear infinite; }
+.ai-orb-orbit i { position: absolute; left: 50%; top: 0; width: 3px; height: 3px; margin-left: -1.5px; border-radius: 50%;
+  background: var(--ai-a); box-shadow: 0 0 4px var(--ai-a); transform-origin: 1.5px calc(var(--orb) * 0.62); }
+.ai-orb-orbit i:nth-child(2) { transform: rotate(120deg); background: var(--ai-b); box-shadow: 0 0 4px var(--ai-b); }
+.ai-orb-orbit i:nth-child(3) { transform: rotate(240deg); opacity: 0.7; }
 @keyframes ai-spin { to { transform: rotate(360deg); } }
+@keyframes ai-pulse { 0%, 100% { transform: scale(0.75); opacity: 0.75; } 50% { transform: scale(1.15); opacity: 1; } }
+
+/* the HUD over the preview while the AI thinks: DOM over the canvas, never in the video; the pointer passes through */
+.ai-hud { position: absolute; inset: 0; z-index: 4; pointer-events: none; overflow: hidden; }
+.ai-hud[hidden] { display: none; }
+.ai-hud-grid { position: absolute; inset: 0; opacity: 0.5; animation: ai-grid 3s ease-in-out infinite;
+  background-image: repeating-linear-gradient(0deg, rgba(94, 231, 255, 0.07) 0 1px, transparent 1px 28px),
+    repeating-linear-gradient(90deg, rgba(94, 231, 255, 0.07) 0 1px, transparent 1px 28px);
+  mask-image: radial-gradient(ellipse at center, #000 30%, transparent 80%); }
+@keyframes ai-grid { 0%, 100% { opacity: 0.25; } 50% { opacity: 0.6; } }
+.ai-hud-scan { position: absolute; left: 0; right: 0; top: 0; height: 22%; animation: ai-scan 2.4s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+  background: linear-gradient(180deg, transparent, rgba(94, 231, 255, 0.10) 70%, rgba(94, 231, 255, 0.55) 99%, transparent);
+  mix-blend-mode: screen; }
+@keyframes ai-scan { from { transform: translateY(-100%); } to { transform: translateY(460%); } }
+.ai-hud-corner { position: absolute; width: 22px; height: 22px; border: 2px solid var(--ai-a); opacity: 0.85;
+  filter: drop-shadow(0 0 4px var(--ai-a)); animation: ai-corner 1.4s ease-in-out infinite; }
+.ai-hud-corner.is-tl { left: 10px; top: 10px; border-right: 0; border-bottom: 0; }
+.ai-hud-corner.is-tr { right: 10px; top: 10px; border-left: 0; border-bottom: 0; }
+.ai-hud-corner.is-bl { left: 10px; bottom: 10px; border-right: 0; border-top: 0; }
+.ai-hud-corner.is-br { right: 10px; bottom: 10px; border-left: 0; border-top: 0; }
+@keyframes ai-corner { 0%, 100% { opacity: 0.45; } 50% { opacity: 1; } }
+.ai-hud-card { position: absolute; left: 40px; top: 18px; display: flex; align-items: center; gap: 10px; max-width: calc(100% - 80px);
+  padding: 8px 14px 8px 10px; border: 1px solid rgba(94, 231, 255, 0.45); border-radius: 12px;
+  background: rgba(8, 14, 22, 0.72); backdrop-filter: blur(6px); box-shadow: 0 0 18px rgba(94, 231, 255, 0.18), inset 0 0 12px rgba(155, 140, 255, 0.12); }
+.ai-hud-lines { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.ai-hud-head { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.ai-hud-text { min-width: 0; font-size: 13px; font-weight: 700; letter-spacing: 0.04em; color: #e9fdff;
+  text-shadow: 0 0 8px rgba(94, 231, 255, 0.6); }
+.ai-hud-time { font: 600 11.5px var(--mono); color: var(--ai-a); font-variant-numeric: tabular-nums; }
+.ai-hud-foot { display: flex; align-items: center; gap: 10px; }
+.ai-hud-steps { display: flex; gap: 4px; }
+.ai-hud-steps[hidden] { display: none; }
+.ai-hud-steps i { width: 16px; height: 3px; border-radius: 2px; background: rgba(94, 231, 255, 0.2); }
+.ai-hud-steps i.is-done { background: var(--ai-a); }
+.ai-hud-steps i.is-now { background: var(--ai-b); box-shadow: 0 0 6px var(--ai-b); animation: ai-corner 0.9s ease-in-out infinite; }
+.ai-hud-wave { display: flex; align-items: flex-end; gap: 2px; height: 10px; }
+.ai-hud-wave i { width: 3px; height: 100%; border-radius: 1px; background: linear-gradient(180deg, var(--ai-a), var(--ai-b));
+  transform-origin: bottom; animation: ai-wave 0.9s ease-in-out infinite; }
+.ai-hud-wave i:nth-child(2) { animation-delay: -0.72s; }
+.ai-hud-wave i:nth-child(3) { animation-delay: -0.54s; }
+.ai-hud-wave i:nth-child(4) { animation-delay: -0.36s; }
+.ai-hud-wave i:nth-child(5) { animation-delay: -0.18s; }
+@keyframes ai-wave { 0%, 100% { transform: scaleY(0.25); } 50% { transform: scaleY(1); } }
+/* while a request runs, the buttons that start AI tools glow */
+.is-ai-thinking [data-ctl="ai"], .is-ai-thinking [data-act="panel.ai"] { box-shadow: 0 0 0 1px rgba(94, 231, 255, 0.6), 0 0 14px rgba(94, 231, 255, 0.35);
+  animation: ai-glow 1.6s ease-in-out infinite; }
+@keyframes ai-glow { 0%, 100% { box-shadow: 0 0 0 1px rgba(94, 231, 255, 0.45), 0 0 8px rgba(94, 231, 255, 0.2); }
+  50% { box-shadow: 0 0 0 1px rgba(155, 140, 255, 0.8), 0 0 18px rgba(155, 140, 255, 0.45); } }
 .ai-message { display: flex; flex-direction: column; gap: 8px; }
 .ai-error.is-quiet { border-color: var(--line-2); background: var(--panel-2); }
 .ai-note { display: flex; align-items: flex-start; gap: 8px; padding: 9px 10px; border: 1px solid var(--line-2); border-radius: 9px;
@@ -7473,6 +7550,10 @@ MV.def('core/tap', [], () => {
   'use strict';
 
   const EVENTS = Object.freeze(['mark', 'end', 'back', 'pause', 'resume']);
+  // core/timing drops a start less than 0.1 s after the start above it (time-order): such a mark would be recorded and
+  // then never used, so it is not taken (as with the frozen clock of stopped playback, where every mark is equal).
+  // A little more than 0.1 s, so that rounding the stored times can never bring two marks under timing's gap.
+  const MIN_GAP = 0.12;
 
   class TapError extends Error {
     constructor(code, message) { super(message || code); this.name = 'TapError'; this.code = code; }
@@ -7504,20 +7585,27 @@ MV.def('core/tap', [], () => {
     return Math.max(0, ev.t);
   }
 
+  // The latest start marked above the cursor (−Infinity when none).
+  function lastStart(s) {
+    for (let i = s.cursor - 1; i >= 0; i--) if (s.starts[i] !== null) return s.starts[i];
+    return -Infinity;
+  }
+
   function withTime(list, i, t) {
     const out = list.slice();
     out[i] = t;
     return out;
   }
 
-  // mark: start of the next line (and advance) · end: end of the current line · back: forget the last line's marks and
-  // step back one line · pause / resume: marks are ignored while paused. Returns the same state when nothing changes.
+  // mark: start of the next line (and advance); a mark less than MIN_GAP after the last start is ignored · end: end of the
+  // current line · back: forget the last line's marks and step back one line · pause / resume: marks are ignored while
+  // paused. Returns the same state when nothing changes.
   function tapReduce(s, ev) {
     if (!ev || !EVENTS.includes(ev.type)) throw new TapError('bad-event', 'unknown tap event ' + (ev && ev.type));
     switch (ev.type) {
       case 'mark': {
         const t = timeOf(ev);
-        if (s.paused || s.cursor >= s.lineIds.length) return s;
+        if (s.paused || s.cursor >= s.lineIds.length || t < lastStart(s) + MIN_GAP) return s;
         const starts = withTime(s.starts, s.cursor, t);
         return state(s.lineIds, s.cursor + 1, s.cursor, starts, withTime(s.ends, s.cursor, null), false);
       }
@@ -7552,7 +7640,7 @@ MV.def('core/tap', [], () => {
     return marks.length ? { t: 'time.tap', marks } : null;
   }
 
-  return { tapStart, tapReduce, tapCommand, TapError, EVENTS };
+  return { tapStart, tapReduce, tapCommand, TapError, EVENTS, MIN_GAP };
 });
 /* 文字PVメーカー v2 — original work. Line timing solver: anchors, fills, snapping, ends, duration (DESIGN §4.11). */
 MV.def('core/timing', ['core/pins', 'core/script', 'core/num', 'core/beats'], (PINS, S, N, B) => {
@@ -11222,7 +11310,7 @@ MV.def('i18n/strings', [], () => ({
   // tap mode
   'tap.title': ['タップで合わせる', 'Tap to sync'],
   'tap.progress': ['{i} / {n}', '{i} / {n}'],
-  'tap.ready': ['スペースかEnterで最初の行の開始を記録', 'Space or Enter marks the first line'],
+  'tap.ready': ['行が始まる瞬間に、スペース・Enter・下のボタン・プレビューのどれかを押す', 'As each line begins, press Space, Enter, the button below or the preview'],
   'tap.nextLine': ['次: {text}', 'Next: {text}'],
   'tap.allMarked': ['すべての行を記録しました', 'Every line is marked'],
   'tap.backBtn': ['1行戻る', 'Back one line'],
@@ -11236,6 +11324,12 @@ MV.def('i18n/strings', [], () => ({
   'tap.keySeek': ['3秒戻る / 進む', 'Back / forward 3 s'],
   'tap.keyPause': ['一時停止 / 再開', 'Pause / resume'],
   'tap.keyFinish': ['終わる（元に戻せます）', 'Finish (can be undone)'],
+  'tap.pad': ['タップ', 'Tap'],
+  'tap.padHint': ['次の行の開始', 'start of the next line'],
+  'tap.stopped': ['再生が止まっています。▶ か P で再開してから押してください', 'Playback is stopped. Resume with ▶ or P, then tap'],
+  'tap.tooSoon': ['前の行の開始に近すぎるため、記録しませんでした', 'Too close to the previous start, so it was not recorded'],
+  'tap.doneSome': ['{n}行のタイミングを記録しました（{m}行は上の行より早いため使われません）', 'Timed {n} line ({m} came before a line above and is not used)|Timed {n} lines ({m} came before a line above and are not used)'],
+  'tap.check': ['再生して確認', 'Play to check'],
 
   // toasts, hints, files
   'toast.close': ['閉じる', 'Close'],
@@ -37247,6 +37341,74 @@ MV.def('ui/dom', [], () => {
     createBatcher, debounce, download, pickFiles, prefersReducedMotion,
   };
 });
+/* 文字PVメーカー v2 — original work. The AI's thinking animation: the orb of the running line and the HUD over the preview while a request runs. */
+MV.def('ui/ai_thinking', ['ui/dom'], (dom) => {
+  'use strict';
+
+  const { h } = dom;
+  const TICK_MS = 1000;
+  const STAGES = Object.freeze(['prepare', 'upload', 'process', 'think']);   // a song tool goes through all four
+  const BARS = 5;                                                              // the thinking wave
+
+  // The orb: two counter-rotating rings, a pulsing core and three orbiting sparks. CSS only, so the animation costs no
+  // script time; under prefers-reduced-motion the global rule stills it.
+  function orb(large) {
+    return h('span', { class: ['ai-orb', large ? 'is-large' : null], 'aria-hidden': 'true' },
+      h('span', { class: 'ai-orb-ring' }), h('span', { class: 'ai-orb-ring is-inner' }), h('span', { class: 'ai-orb-core' }),
+      h('span', { class: 'ai-orb-orbit' }, h('i'), h('i'), h('i')));
+  }
+
+  // The HUD over the preview while a request runs: corner brackets, a faint grid, a scan beam and a card with the orb,
+  // 「タイミング合わせ: 考え中…」, the stage steps of a song tool, a thinking wave and the elapsed seconds. It is DOM over
+  // the canvas (an export never sees it) and ignores the pointer (the preview stays usable). The AI panel's running line
+  // is the live region; the HUD is not announced a second time. While a request runs, <body> carries is-ai-thinking,
+  // which makes the AI buttons glow.
+  function mountHud(app, ctl, host) {
+    const t = app.t;
+    const text = h('span', { class: 'ai-hud-text' });
+    const time = h('span', { class: 'ai-hud-time' });
+    const steps = h('span', { class: 'ai-hud-steps' }, STAGES.map((s) => h('i', { dataset: { stage: s } })));
+    const wave = h('span', { class: 'ai-hud-wave' }, Array.from({ length: BARS }, () => h('i')));
+    const corners = ['tl', 'tr', 'bl', 'br'].map((c) => h('span', { class: 'ai-hud-corner is-' + c }));
+    const root = h('div', { class: 'ai-hud', hidden: true, 'aria-hidden': 'true' },
+      h('span', { class: 'ai-hud-grid' }), h('span', { class: 'ai-hud-scan' }), corners,
+      h('div', { class: 'ai-hud-card' }, orb(true),
+        h('span', { class: 'ai-hud-lines' }, h('span', { class: 'ai-hud-head' }, text, time), h('span', { class: 'ai-hud-foot' }, steps, wave))));
+    host.appendChild(root);
+
+    let runId = null;
+    let audio = false;                     // the run started with the audio stages (a song tool)
+    let ticker = 0;
+
+    const elapsed = (run) => t('ai.runningTime', { sec: Math.max(0, Math.floor((Date.now() - run.started) / 1000)) });
+
+    function update(st) {
+      const run = st.run;
+      root.hidden = !run;
+      if (typeof document !== 'undefined' && document.body) document.body.classList.toggle('is-ai-thinking', !!run);
+      if (!run) {
+        runId = null;
+        if (ticker) { clearInterval(ticker); ticker = 0; }
+        return;
+      }
+      if (run.id !== runId) { runId = run.id; audio = run.stage !== 'think'; }
+      const label = t('ai.runningStage', { tool: t('ai.name.' + run.tool), stage: t('ai.stage.' + run.stage) });
+      if (text.textContent !== label) text.textContent = label;
+      time.textContent = elapsed(run);
+      steps.hidden = !audio;
+      const at = STAGES.indexOf(run.stage);
+      steps.childNodes.forEach((dot, i) => { dot.className = i < at ? 'is-done' : i === at ? 'is-now' : ''; });
+      root.dataset.stage = run.stage;
+      if (!ticker) ticker = setInterval(() => { if (ctl.state.run) time.textContent = elapsed(ctl.state.run); }, TICK_MS);
+    }
+
+    ctl.on(update);
+    update(ctl.state);
+    return { root, update };
+  }
+
+  return { orb, mountHud, STAGES };
+});
 /* 文字PVメーカー v2 — original work. Original line icons drawn with createElementNS (24-unit grid, currentColor strokes). */
 MV.def('ui/icons', ['ui/dom'], (dom) => {
   'use strict';
@@ -41286,8 +41448,8 @@ MV.def('ui/ai_review', ['ui/dom', 'ui/icons', 'ai/changes', 'i18n/t', 'ui/ai_con
   return { textDiff, renderReview, patchReview, renderLog, diffBlock, TRANSCRIPT_SHOWN };
 });
 /* 文字PVメーカー v2 — original work. The AI panel (tab AI of the detail column): connection, what is sent, guide, tools, running, review, log (DESIGN §6.4.10). */
-MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/ai_controller', 'ui/ai_review'],
-  (dom, I, PR, CH, AC, AR) => {
+MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/ai_controller', 'ui/ai_review', 'ui/ai_thinking'],
+  (dom, I, PR, CH, AC, AR, AT) => {
     'use strict';
 
     const { h } = dom;
@@ -41582,10 +41744,10 @@ MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/a
       const conn = connectionCard(app, ctl);
       const tools = toolsBlock(app, ctl);
       // The stage is a polite live region; the elapsed seconds next to it are not announced (they change every second).
-      const runText = h('span', { class: 'ai-run-stage', role: 'status', 'aria-live': 'polite' });
+      const runText = h('span', { class: 'ai-run-stage ai-shimmer', role: 'status', 'aria-live': 'polite' });
       const runTime = h('span', { class: 'ai-run-time muted', 'aria-hidden': 'true' });
       const stop = h('button', { class: 'btn small', type: 'button', 'data-ctl': 'stop', text: t('ai.stop') });
-      const runLine = h('div', { class: 'ai-run' }, h('span', { class: 'ai-spin', 'aria-hidden': 'true' }), runText, runTime,
+      const runLine = h('div', { class: 'ai-run' }, AT.orb(false), runText, runTime,
         h('span', { class: 'grow' }), stop);
       const message = h('div', { class: 'ai-message', hidden: true });
       const review = h('section', { class: 'ai-sec ai-review' });
@@ -41602,6 +41764,8 @@ MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/a
       let lastStatus = ctl.state.keyStatus;
 
       stop.addEventListener('click', () => ctl.abort());
+      // The thinking animation over the preview, wherever the request was started from (step ①/②, Ctrl+K or this tab).
+      if (app.shell && app.shell.stage && app.shell.stage.element) AT.mountHud(app, ctl, app.shell.stage.element);
 
       // Hovering (or focusing) a review row highlights its line on the lane and the timeline and scrolls the lyric
       // editor to it (§6.4.10.6).
@@ -44321,6 +44485,12 @@ MV.def('ui/stage', ['ui/dom', 'ui/selection', 'ui/output', 'i18n/t'], (dom, S, O
     }
 
     wrap.addEventListener('pointerdown', (ev) => {
+      // Tap mode (§6.4.15): a press on the preview is a tap, the start of the next line at the press's own time; it
+      // neither selects nor pauses (a pause would freeze the clock the next taps read).
+      if (app.view.state.mode === 'tap') {
+        if (ev.button === 0 && app.tap) app.tap.mark({ timeStamp: ev.timeStamp });
+        return;
+      }
       if (ev.button !== 0 || alt) return;
       const p = toDesign(ev);
       if (!p) return;
@@ -44407,7 +44577,7 @@ MV.def('ui/stage', ['ui/dom', 'ui/selection', 'ui/output', 'i18n/t'], (dom, S, O
 
     wrap.addEventListener('click', (ev) => {
       if (suppressClick) { suppressClick = false; return; }
-      if (alt) return;
+      if (alt || app.view.state.mode === 'tap') return;
       const p = clickPoint(ev);
       if (!p) return;
       const hits = app.engine.hitTest(p.x, p.y);
@@ -45197,7 +45367,7 @@ MV.def('ui/steps', ['ui/dom', 'ui/icons', 'ui/step_lyrics', 'ui/step_song', 'ui/
 
     return { mount, STEPS, statusOf, LOOK_PIN };
   });
-/* 文字PVメーカー v2 — original work. Tap mode: Space/Enter marks line starts while the song plays; one time.tap on finish (DESIGN §4.11, §6.4.15). */
+/* 文字PVメーカー v2 — original work. Tap mode: Space/Enter, the tap button or a press on the preview marks line starts while the song plays; one time.tap on finish (DESIGN §4.11, §6.4.15). */
 MV.def('ui/tap', ['ui/dom', 'ui/icons', 'ui/keys', 'ui/selection', 'i18n/t'], (dom, I, K, S, T) => {
   'use strict';
 
@@ -45213,12 +45383,17 @@ MV.def('ui/tap', ['ui/dom', 'ui/icons', 'ui/keys', 'ui/selection', 'i18n/t'], (d
     const nowLine = h('div', { class: 'tap-now' });
     const nextLine = h('div', { class: 'tap-next' });
     const last = h('div', { class: 'tap-last', role: 'status', 'aria-live': 'polite' });
+    // For the mouse and touch: a press is a tap at the press's own time (pointerdown, not the later click). Keys never
+    // reach it as a click: in tap mode Space and Enter are the tap.mark shortcut.
+    const pad = h('button', { class: 'btn primary tap-pad', type: 'button',
+      on: { pointerdown: (ev) => { if (ev.button === 0) mark({ timeStamp: ev.timeStamp }); } } },
+    h('span', { class: 'btn-main', text: t('tap.pad') }), h('span', { class: 'btn-hint', text: t('tap.padHint') }));
     const keys = h('dl', { class: 'tap-keys' }, KEY_ROWS.map(([cmd, label]) => [
       h('dt', {}, K.keysFor(cmd, 'tap').map((k) => h('kbd', { text: K.display(k, { space: t('key.space'), enter: 'Enter' }) }))),
       h('dd', { text: t(label) })]));
     const root = h('div', { class: 'step step-tap' },
       h('div', { class: 'step-head' }, h('h2', { class: 'step-title', text: t('tap.title') }), h('span', { class: 'grow' }), count),
-      nowLine, nextLine, last, keys,
+      nowLine, nextLine, pad, last, keys,
       h('div', { class: 'row-actions' },
         h('button', { class: 'btn', type: 'button', text: t('tap.backBtn'), on: { click: () => back() } }),
         h('button', { class: 'btn primary', type: 'button', text: t('tap.finishBtn'), on: { click: () => finish() } })));
@@ -45244,6 +45419,8 @@ MV.def('ui/tap', ['ui/dom', 'ui/icons', 'ui/keys', 'ui/selection', 'i18n/t'], (d
       if (at < 0) at = 0;
       session = { state: app.tapCore.tapStart(ls, ls[at].id), byId: new Map(ls.map((l) => [l.id, l])) };
       app.pause();                   // stopped, the player takes the tap clock's length (open-ended without a song)
+      if (app.goStep) app.goStep(app.view.state.step);   // the step column shows this panel: unfold it
+      last.textContent = '';
       app.view.set({ mode: 'tap' });
       app.seek(Math.max(0, ls[at].t0 - PREROLL));
       app.play();
@@ -45257,15 +45434,27 @@ MV.def('ui/tap', ['ui/dom', 'ui/icons', 'ui/keys', 'ui/selection', 'i18n/t'], (d
       return session.state !== before;
     }
 
+    // While playback is stopped (▶, P, a click elsewhere) the clock stands still: a mark would give every line the same
+    // time, so none is taken and the panel says why.
+    function stopped() {
+      if (app.view.state.playing) return false;
+      last.textContent = t('tap.stopped');
+      return true;
+    }
+
     function mark(args) {
-      if (!session) return;
-      if (reduce('mark', eventTime(args))) announce('tap.marked', lineAt(session.state.current));
+      if (!session || stopped()) return;
+      const s = session.state;
+      const tt = eventTime(args);
+      if (reduce('mark', tt)) announce('tap.marked', lineAt(session.state.current), tt);
+      else if (!s.paused && s.cursor < s.lineIds.length) last.textContent = t('tap.tooSoon');
       update();
     }
 
     function end(args) {
-      if (!session) return;
-      if (reduce('end', eventTime(args))) announce('tap.endMarked', lineAt(session.state.current));
+      if (!session || stopped()) return;
+      const tt = eventTime(args);
+      if (reduce('end', tt)) announce('tap.endMarked', lineAt(session.state.current), tt);
       update();
     }
 
@@ -45300,9 +45489,24 @@ MV.def('ui/tap', ['ui/dom', 'ui/icons', 'ui/keys', 'ui/selection', 'i18n/t'], (d
       if (cmd && n) {
         app.store.seal();
         app.dispatch(cmd, { label: ['undo.tap', { n }] });
-        app.toast(t('tap.done', { n }), { kind: 'ok' });
+        report(cmd);
       }
       if (app.shell) app.shell.playbar.updateStrip();
+    }
+
+    // After the command, from the new plan: how many marked starts the timing really uses (a mark earlier than a pin or
+    // an LRC time above the session is dropped with time-order), and a way to hear the result from the first marked line.
+    function report(cmd) {
+      const lines = new Map((app.plan ? app.plan.lines : []).map((l) => [l.id, l]));
+      const starts = cmd.marks.filter((m) => m.start !== undefined);
+      const unused = starts.filter((m) => { const l = lines.get(m.lineId); return !l || !l.by || l.by.start !== 'pin'; }).length;
+      const first = starts.length ? lines.get(starts[0].lineId) : null;
+      const from = first ? Math.max(0, first.t0 - PREROLL) : null;
+      if (from !== null) app.seek(from);
+      const action = from === null ? null : { label: t('tap.check'), run: () => { app.seek(from); app.play(); } };
+      const n = cmd.marks.length;
+      if (unused) app.toast(t('tap.doneSome', { n: n - unused, m: unused }), { kind: 'warn', action });
+      else app.toast(t('tap.done', { n }), { kind: 'ok', action });
     }
 
     // Ends the session without recording anything (another project is opened, or the lines are replaced): its marks
@@ -45315,8 +45519,9 @@ MV.def('ui/tap', ['ui/dom', 'ui/icons', 'ui/keys', 'ui/selection', 'i18n/t'], (d
       if (app.shell) app.shell.playbar.updateStrip();
     }
 
-    function announce(key, line) {
-      if (line) last.textContent = t(key, { n: line.index + 1, time: T.fmtTime(app.time()) });
+    // Shows the time that was recorded (the clock at the key or press, minus the latency setting).
+    function announce(key, line, time) {
+      if (line) last.textContent = t(key, { n: line.index + 1, time: T.fmtTime(time) });
     }
 
     function position() {
@@ -45331,6 +45536,7 @@ MV.def('ui/tap', ['ui/dom', 'ui/icons', 'ui/keys', 'ui/selection', 'i18n/t'], (d
       const nxt = lineAt(session.state.cursor);
       nowLine.textContent = cur ? cur.text : t('tap.ready');
       nextLine.textContent = nxt ? t('tap.nextLine', { text: nxt.text }) : t('tap.allMarked');
+      pad.disabled = !nxt;
       root.classList.toggle('is-paused', !!session.state.paused);
       if (app.shell) app.shell.playbar.updateStrip();
     }

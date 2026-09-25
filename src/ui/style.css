@@ -15,6 +15,8 @@
   --accent-soft: rgba(232, 87, 63, 0.16);
   --accent-strong: #c63d26;
   --gold: #f0b64d;
+  --ai-a: #5ee7ff;          /* the AI's thinking animation: cyan and violet */
+  --ai-b: #9b8cff;
   --focus: #7cc4ff;
   --ok: #62c59a;
   --error: #ff7a7a;
@@ -49,7 +51,7 @@ kbd {
 /* One line that ends in "…" when it does not fit: every truncated label shares this rule (a flex item also needs
    min-width: 0, set in its own rule). */
 .ell, .doc-title-text, .song-name, .strip-text, .w-part-name, .w-font-name, .w-font-sample, .pb-name, .pal-text, .fr-label,
-.w-slot-skip { white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+.w-slot-skip, .ai-hud-text { white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
 
 /* ---- shell regions (placed in px by ui/shell from computeLayout) ------------------------------------------ */
 
@@ -362,6 +364,8 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent);
 .tap-now { font-size: 16px; font-weight: 700; padding: 10px 12px; border-radius: 10px; background: var(--accent-soft); border: 1px solid rgba(232, 87, 63, 0.4); }
 .tap-next { font-size: 13px; color: var(--text-2); }
 .tap-last { font-size: 12px; color: var(--muted); min-height: 1.2em; font-variant-numeric: tabular-nums; }
+.step-tap .tap-pad { width: 100%; min-height: 64px; flex-direction: column; gap: 2px; font-size: 18px; touch-action: manipulation; }
+.step-tap .tap-pad .btn-hint { flex-basis: auto; padding-left: 0; text-align: center; font-size: 12px; color: rgba(255, 255, 255, 0.85); }
 .tap-keys { display: grid; grid-template-columns: auto 1fr; gap: 6px 10px; margin: 0; font-size: 12.5px; }
 .tap-keys dt { display: flex; gap: 4px; }
 .tap-keys dd { margin: 0; color: var(--text-2); }
@@ -832,9 +836,82 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent);
 /* running and messages */
 .ai-run { display: flex; align-items: center; gap: 9px; padding: 8px 10px; border: 1px solid var(--line-2); border-radius: 9px;
   background: var(--panel-2); font-size: 12.5px; font-variant-numeric: tabular-nums; }
-.ai-spin { width: 14px; height: 14px; flex: none; border-radius: 50%; border: 2px solid var(--line-2); border-top-color: var(--accent);
-  animation: ai-spin 0.9s linear infinite; }
+.ai-run { position: relative; overflow: hidden; border-color: rgba(94, 231, 255, 0.35);
+  background: linear-gradient(90deg, rgba(94, 231, 255, 0.07), rgba(155, 140, 255, 0.07)), var(--panel-2); }
+.ai-run::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2px;
+  background: linear-gradient(90deg, transparent, var(--ai-a), var(--ai-b), transparent); background-size: 50% 100%;
+  background-repeat: no-repeat; animation: ai-stream 1.6s linear infinite; }
+@keyframes ai-stream { from { background-position: -50% 0; } to { background-position: 150% 0; } }
+.ai-shimmer { background: linear-gradient(90deg, var(--text) 0%, var(--text) 40%, var(--ai-a) 50%, var(--text) 60%, var(--text) 100%);
+  background-size: 250% 100%; -webkit-background-clip: text; background-clip: text; color: transparent;
+  animation: ai-shimmer 2.2s linear infinite; }
+@keyframes ai-shimmer { from { background-position: 100% 0; } to { background-position: -150% 0; } }
+
+/* the AI's thinking orb (ui/ai_thinking) */
+.ai-orb { --orb: 18px; position: relative; flex: none; width: var(--orb); height: var(--orb); }
+.ai-orb.is-large { --orb: 34px; }
+.ai-orb-ring { position: absolute; inset: 0; border-radius: 50%; border: 1.5px solid transparent;
+  border-top-color: var(--ai-a); border-right-color: rgba(94, 231, 255, 0.35); animation: ai-spin 1.1s linear infinite;
+  filter: drop-shadow(0 0 3px var(--ai-a)); }
+.ai-orb-ring.is-inner { inset: 22%; border-top-color: var(--ai-b); border-right-color: transparent;
+  border-bottom-color: rgba(155, 140, 255, 0.4); animation-duration: 0.8s; animation-direction: reverse;
+  filter: drop-shadow(0 0 3px var(--ai-b)); }
+.ai-orb-core { position: absolute; inset: 40%; border-radius: 50%; background: #e9fdff;
+  box-shadow: 0 0 6px 2px var(--ai-a), 0 0 12px 4px rgba(155, 140, 255, 0.55); animation: ai-pulse 1.4s ease-in-out infinite; }
+.ai-orb-orbit { position: absolute; inset: -12%; animation: ai-spin 2.6s linear infinite; }
+.ai-orb-orbit i { position: absolute; left: 50%; top: 0; width: 3px; height: 3px; margin-left: -1.5px; border-radius: 50%;
+  background: var(--ai-a); box-shadow: 0 0 4px var(--ai-a); transform-origin: 1.5px calc(var(--orb) * 0.62); }
+.ai-orb-orbit i:nth-child(2) { transform: rotate(120deg); background: var(--ai-b); box-shadow: 0 0 4px var(--ai-b); }
+.ai-orb-orbit i:nth-child(3) { transform: rotate(240deg); opacity: 0.7; }
 @keyframes ai-spin { to { transform: rotate(360deg); } }
+@keyframes ai-pulse { 0%, 100% { transform: scale(0.75); opacity: 0.75; } 50% { transform: scale(1.15); opacity: 1; } }
+
+/* the HUD over the preview while the AI thinks: DOM over the canvas, never in the video; the pointer passes through */
+.ai-hud { position: absolute; inset: 0; z-index: 4; pointer-events: none; overflow: hidden; }
+.ai-hud[hidden] { display: none; }
+.ai-hud-grid { position: absolute; inset: 0; opacity: 0.5; animation: ai-grid 3s ease-in-out infinite;
+  background-image: repeating-linear-gradient(0deg, rgba(94, 231, 255, 0.07) 0 1px, transparent 1px 28px),
+    repeating-linear-gradient(90deg, rgba(94, 231, 255, 0.07) 0 1px, transparent 1px 28px);
+  mask-image: radial-gradient(ellipse at center, #000 30%, transparent 80%); }
+@keyframes ai-grid { 0%, 100% { opacity: 0.25; } 50% { opacity: 0.6; } }
+.ai-hud-scan { position: absolute; left: 0; right: 0; top: 0; height: 22%; animation: ai-scan 2.4s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+  background: linear-gradient(180deg, transparent, rgba(94, 231, 255, 0.10) 70%, rgba(94, 231, 255, 0.55) 99%, transparent);
+  mix-blend-mode: screen; }
+@keyframes ai-scan { from { transform: translateY(-100%); } to { transform: translateY(460%); } }
+.ai-hud-corner { position: absolute; width: 22px; height: 22px; border: 2px solid var(--ai-a); opacity: 0.85;
+  filter: drop-shadow(0 0 4px var(--ai-a)); animation: ai-corner 1.4s ease-in-out infinite; }
+.ai-hud-corner.is-tl { left: 10px; top: 10px; border-right: 0; border-bottom: 0; }
+.ai-hud-corner.is-tr { right: 10px; top: 10px; border-left: 0; border-bottom: 0; }
+.ai-hud-corner.is-bl { left: 10px; bottom: 10px; border-right: 0; border-top: 0; }
+.ai-hud-corner.is-br { right: 10px; bottom: 10px; border-left: 0; border-top: 0; }
+@keyframes ai-corner { 0%, 100% { opacity: 0.45; } 50% { opacity: 1; } }
+.ai-hud-card { position: absolute; left: 40px; top: 18px; display: flex; align-items: center; gap: 10px; max-width: calc(100% - 80px);
+  padding: 8px 14px 8px 10px; border: 1px solid rgba(94, 231, 255, 0.45); border-radius: 12px;
+  background: rgba(8, 14, 22, 0.72); backdrop-filter: blur(6px); box-shadow: 0 0 18px rgba(94, 231, 255, 0.18), inset 0 0 12px rgba(155, 140, 255, 0.12); }
+.ai-hud-lines { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.ai-hud-head { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.ai-hud-text { min-width: 0; font-size: 13px; font-weight: 700; letter-spacing: 0.04em; color: #e9fdff;
+  text-shadow: 0 0 8px rgba(94, 231, 255, 0.6); }
+.ai-hud-time { font: 600 11.5px var(--mono); color: var(--ai-a); font-variant-numeric: tabular-nums; }
+.ai-hud-foot { display: flex; align-items: center; gap: 10px; }
+.ai-hud-steps { display: flex; gap: 4px; }
+.ai-hud-steps[hidden] { display: none; }
+.ai-hud-steps i { width: 16px; height: 3px; border-radius: 2px; background: rgba(94, 231, 255, 0.2); }
+.ai-hud-steps i.is-done { background: var(--ai-a); }
+.ai-hud-steps i.is-now { background: var(--ai-b); box-shadow: 0 0 6px var(--ai-b); animation: ai-corner 0.9s ease-in-out infinite; }
+.ai-hud-wave { display: flex; align-items: flex-end; gap: 2px; height: 10px; }
+.ai-hud-wave i { width: 3px; height: 100%; border-radius: 1px; background: linear-gradient(180deg, var(--ai-a), var(--ai-b));
+  transform-origin: bottom; animation: ai-wave 0.9s ease-in-out infinite; }
+.ai-hud-wave i:nth-child(2) { animation-delay: -0.72s; }
+.ai-hud-wave i:nth-child(3) { animation-delay: -0.54s; }
+.ai-hud-wave i:nth-child(4) { animation-delay: -0.36s; }
+.ai-hud-wave i:nth-child(5) { animation-delay: -0.18s; }
+@keyframes ai-wave { 0%, 100% { transform: scaleY(0.25); } 50% { transform: scaleY(1); } }
+/* while a request runs, the buttons that start AI tools glow */
+.is-ai-thinking [data-ctl="ai"], .is-ai-thinking [data-act="panel.ai"] { box-shadow: 0 0 0 1px rgba(94, 231, 255, 0.6), 0 0 14px rgba(94, 231, 255, 0.35);
+  animation: ai-glow 1.6s ease-in-out infinite; }
+@keyframes ai-glow { 0%, 100% { box-shadow: 0 0 0 1px rgba(94, 231, 255, 0.45), 0 0 8px rgba(94, 231, 255, 0.2); }
+  50% { box-shadow: 0 0 0 1px rgba(155, 140, 255, 0.8), 0 0 18px rgba(155, 140, 255, 0.45); } }
 .ai-message { display: flex; flex-direction: column; gap: 8px; }
 .ai-error.is-quiet { border-color: var(--line-2); background: var(--panel-2); }
 .ai-note { display: flex; align-items: flex-start; gap: 8px; padding: 9px 10px; border: 1px solid var(--line-2); border-radius: 9px;

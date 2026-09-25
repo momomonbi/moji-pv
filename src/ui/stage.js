@@ -315,6 +315,12 @@ MV.def('ui/stage', ['ui/dom', 'ui/selection', 'ui/output', 'i18n/t'], (dom, S, O
     }
 
     wrap.addEventListener('pointerdown', (ev) => {
+      // Tap mode (§6.4.15): a press on the preview is a tap, the start of the next line at the press's own time; it
+      // neither selects nor pauses (a pause would freeze the clock the next taps read).
+      if (app.view.state.mode === 'tap') {
+        if (ev.button === 0 && app.tap) app.tap.mark({ timeStamp: ev.timeStamp });
+        return;
+      }
       if (ev.button !== 0 || alt) return;
       const p = toDesign(ev);
       if (!p) return;
@@ -401,7 +407,7 @@ MV.def('ui/stage', ['ui/dom', 'ui/selection', 'ui/output', 'i18n/t'], (dom, S, O
 
     wrap.addEventListener('click', (ev) => {
       if (suppressClick) { suppressClick = false; return; }
-      if (alt) return;
+      if (alt || app.view.state.mode === 'tap') return;
       const p = clickPoint(ev);
       if (!p) return;
       const hits = app.engine.hitTest(p.x, p.y);

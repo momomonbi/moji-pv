@@ -431,7 +431,7 @@ MV.def('i18n/strings', [], () => ({
   // tap mode
   'tap.title': ['タップで合わせる', 'Tap to sync'],
   'tap.progress': ['{i} / {n}', '{i} / {n}'],
-  'tap.ready': ['スペースかEnterで最初の行の開始を記録', 'Space or Enter marks the first line'],
+  'tap.ready': ['行が始まる瞬間に、スペース・Enter・下のボタン・プレビューのどれかを押す', 'As each line begins, press Space, Enter, the button below or the preview'],
   'tap.nextLine': ['次: {text}', 'Next: {text}'],
   'tap.allMarked': ['すべての行を記録しました', 'Every line is marked'],
   'tap.backBtn': ['1行戻る', 'Back one line'],
@@ -445,6 +445,12 @@ MV.def('i18n/strings', [], () => ({
   'tap.keySeek': ['3秒戻る / 進む', 'Back / forward 3 s'],
   'tap.keyPause': ['一時停止 / 再開', 'Pause / resume'],
   'tap.keyFinish': ['終わる（元に戻せます）', 'Finish (can be undone)'],
+  'tap.pad': ['タップ', 'Tap'],
+  'tap.padHint': ['次の行の開始', 'start of the next line'],
+  'tap.stopped': ['再生が止まっています。▶ か P で再開してから押してください', 'Playback is stopped. Resume with ▶ or P, then tap'],
+  'tap.tooSoon': ['前の行の開始に近すぎるため、記録しませんでした', 'Too close to the previous start, so it was not recorded'],
+  'tap.doneSome': ['{n}行のタイミングを記録しました（{m}行は上の行より早いため使われません）', 'Timed {n} line ({m} came before a line above and is not used)|Timed {n} lines ({m} came before a line above and are not used)'],
+  'tap.check': ['再生して確認', 'Play to check'],
 
   // toasts, hints, files
   'toast.close': ['閉じる', 'Close'],

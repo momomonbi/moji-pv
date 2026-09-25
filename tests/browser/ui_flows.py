@@ -37,6 +37,7 @@ Flows, each on a fresh page (new browser context) and each ending with undo-all 
                              debounce keeps each work's text under its own id; Shift_JIS .lrc; unused song audio removed
   tabs (final fixes)         two tabs of one browser: the second continues in a copy, both tabs' edits survive
   tap (final fixes)          tap-sync of 5 lines with a song (E, Backspace, one undo entry, marks = clock − latency);
+                             the mouse: preview presses and the タップ button mark, a stopped clock records nothing;
                              without a song the silent clock runs past the automatic end; opening a project ends a session
   first_look (final fixes)   typed lyrics: ◀ returns to the first look; Space after clicking おまかせ plays; a fresh
                              Ctrl+K + Enter flips no setting; a tempo pin leaves ③ todo; Esc/× give focus back; ? sheet;
@@ -864,6 +865,15 @@ async def details_during_run(f, click, what):
             'an opening review brings the AI tab up and hides the inspector (%s): %r' % (what, s))
 
 
+# The AI's thinking animation (ui/ai_thinking): the HUD over the preview, the orb of the running line, the glow class.
+HUD = """() => { const d = document.querySelector('.canvas-wrap .ai-hud'), a = window.__mv, r = a.ai.state.run;
+  return { shown: !!d && !d.hidden && d.getBoundingClientRect().width > 0, text: d ? d.querySelector('.ai-hud-text').textContent : null,
+    want: r ? a.t('ai.runningStage', { tool: a.t('ai.name.' + r.tool), stage: a.t('ai.stage.' + r.stage) }) : null,
+    steps: d ? !d.querySelector('.ai-hud-steps').hidden : null, dots: d ? [...d.querySelectorAll('.ai-hud-steps i')].map((i) => i.className) : [],
+    glow: document.body.classList.contains('is-ai-thinking'), orb: !!document.querySelector('.ai-run .ai-orb'),
+    pointer: d ? getComputedStyle(d).pointerEvents : null, running: !!r }; }"""
+
+
 async def flow_ai_prep(f, lang):
     """歌詞の下ごしらえ: stale rows, unchecking, apply as one undo step, selective revert from the log."""
     page = f.page
@@ -875,6 +885,9 @@ async def flow_ai_prep(f, lang):
     await ai_route(f, answers, delay=0.8)
     await ai_open(f)
     await page.click('[data-tool="prep"]')
+    hud = await page.evaluate(HUD)
+    f.check(hud['running'] and hud['shown'] and hud['text'] == hud['want'] and not hud['steps'] and hud['glow'] and hud['orb']
+            and hud['pointer'] == 'none', 'a text tool: the thinking HUD over the preview, no audio steps: %r' % hud)
     await details_during_run(f, '.panel-tabs [data-act="panel.details"]', 'desktop tab')
     if not await f.until("() => document.querySelectorAll('.ai-review .ai-row').length === 4", 'the review lists 4 changes'):
         return
@@ -1102,10 +1115,15 @@ async def flow_ai_align(f, lang):
     await f.until("() => !document.querySelector('[data-tool=\"align\"]').disabled", 'consent enables the song tools')
     await page.click('[data-tool="align"]')
     await f.until("() => { const r = window.__mv.ai.state.run; return !!r && r.stage === 'think'; }", 'the running stage reaches 考え中')
+    hud = await page.evaluate(HUD)
+    f.check(hud['shown'] and hud['text'] == hud['want'] and hud['steps'] and hud['dots'] == ['is-done', 'is-done', 'is-done', 'is-now']
+            and hud['glow'] and hud['orb'], 'a song tool: the HUD shows the audio steps up to 考え中: %r' % hud)
     run_text = await page.inner_text('.ai-run')
     f.check(lang != 'ja' or ('考え中' in run_text and '中止' in run_text), 'the stage line and [中止] are shown: %r' % run_text)
     if not await f.until("() => document.querySelectorAll('.ai-review .ai-row').length > 0", 'the alignment review'):
         return
+    hud = await page.evaluate(HUD)
+    f.check(not hud['shown'] and not hud['glow'], 'the HUD and the glow go away with the answer: %r' % hud)
     ai_requests_ok(f, audio=True)
     parts = [s for s in f.ai_seen if s['method'] == 'POST'][0]['body']['contents'][0]['parts']
     f.check(parts[0].get('inlineData', {}).get('mimeType') == 'audio/wav' and 'text' in parts[1], 'the audio part comes before the prompt')
@@ -1674,6 +1692,57 @@ async def flow_tap(f, lang):
     r2 = await page.evaluate('() => ({ player: window.__mv.player.duration, plan: window.__mv.plan.duration, time: window.__mv.view.state.time })')
     f.check(abs(r2['player'] - r2['plan']) < 1e-6 and r2['time'] <= r2['plan'] + 1e-6, 'finishing restores the normal length: %r' % r2)
     await f.undo_all(done0, doc0)
+
+    # The mouse and touch (a user found that taps did not seem to take effect): with 詳細 open the tap panel still
+    # shows; a press on the preview and on the タップ button mark at the press's time without selecting, pausing or
+    # opening 詳細; while playback is stopped nothing is recorded and the panel says why; finishing seeks 2 s before the
+    # first marked line and the toast offers 再生して確認.
+    ok = await page.evaluate("async () => { await window.__mv.loadSong(window.__wav(30, 'tap.wav')); return window.__mv.songReady(); }")
+    f.check(ok, 'the song is loaded again')
+    await page.evaluate("(id) => { const a = window.__mv; a.pause(); a.select({ level: 'line', ids: [id] }, { from: 'key', seek: false }); a.openPanel('details', 'key'); }", ids[0])
+    sel0 = await page.evaluate('() => JSON.stringify(window.__mv.view.state.sel)')
+    done1 = await page.evaluate(DONE)
+    await page.evaluate("() => window.__mv.actions.run('tap.start', { from: 'test' })")
+    await f.until("() => window.__mv.view.state.mode === 'tap' && window.__mv.view.state.playing", 'tap mode plays')
+    shown = await page.evaluate("() => { const b = document.querySelector('.step-tap .tap-pad'); const r = b && b.getBoundingClientRect(); return !!r && r.width > 0 && r.height > 0 && !b.disabled; }")
+    f.check(shown, 'the タップ button shows although 詳細 was open')
+    mid = await page.evaluate("() => { const r = document.querySelector('.canvas-wrap').getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; }")
+    await page.wait_for_timeout(300)
+    await page.mouse.click(mid[0], mid[1])
+    await page.wait_for_timeout(300)
+    await page.click('.step-tap .tap-pad')
+    r = await page.evaluate("""() => { const a = window.__mv; return { playing: a.view.state.playing, sel: JSON.stringify(a.view.state.sel),
+      mode: a.view.state.mode, last: document.querySelector('.tap-last').textContent }; }""")
+    f.check(r['playing'] and r['mode'] == 'tap' and r['sel'] == sel0, 'presses neither pause nor select: %r' % r)
+    await page.click('[data-act="play.toggle"]')
+    await page.wait_for_timeout(200)
+    await page.keyboard.press('Space')
+    await page.mouse.click(mid[0], mid[1])
+    r = await page.evaluate("(k) => ({ last: document.querySelector('.tap-last').textContent, want: window.__mv.t(k), n: document.querySelector('.tap-count').textContent })", 'tap.stopped')
+    f.check(r['last'] == r['want'], 'a tap while playback is stopped says so: %r' % r)
+    await page.click('[data-act="play.toggle"]')
+    await page.wait_for_timeout(300)
+    await page.keyboard.press('Space')
+    await page.wait_for_timeout(100)
+    await page.click('.step-tap .row-actions .btn.primary')
+    await f.until("() => window.__mv.view.state.mode === 'normal'", 'the 終わる button finishes')
+    r = await page.evaluate("""(ids) => { const a = window.__mv, p = a.doc.pins;
+      const starts = ids.map((id) => (p['line/' + id + ':start'] || {}));
+      const toast = [...document.querySelectorAll('.toast')].pop();
+      return { starts: starts.map((x) => [x.by, x.v]), time: a.time(), t0: a.plan.lines[0].t0, done: a.store.list().filter((e) => e.done).length,
+        toast: toast ? toast.querySelector('.toast-text').textContent : null, act: toast && toast.querySelector('.toast-act') ? toast.querySelector('.toast-act').textContent : null,
+        wantToast: a.t('tap.done', { n: 3 }), wantAct: a.t('tap.check') }; }""", ids[:4])
+    v = [x[1] for x in r['starts'][:3]]
+    f.check(all(x[0] == 'tap' for x in r['starts'][:3]) and v[0] < v[1] < v[2] and r['starts'][3][0] is None,
+            'the preview, the button and Space after resuming mark lines 1-3, nothing while stopped: %r' % r['starts'])
+    f.check(r['done'] == done1 + 1 and r['toast'] == r['wantToast'] and r['act'] == r['wantAct'], 'one undo entry and the toast with 再生して確認: %r' % r)
+    f.check(abs(r['time'] - max(0, r['t0'] - 2)) < 0.05, 'finishing seeks 2 s before the first marked line: %r' % r)
+    await page.click('.toast .toast-act')
+    await f.until('() => window.__mv.view.state.playing', '再生して確認 plays')
+    await page.evaluate('() => window.__mv.pause()')
+    await f.undo_all(done0, doc0)
+    await page.evaluate('() => { const a = window.__mv; a.closePanel(); a.clearSong(); }')
+    await f.settle(2)
 
     # flows-9: opening a project during a session ends it; nothing is recorded into the opened project.
     await page.evaluate(IO_JS)
