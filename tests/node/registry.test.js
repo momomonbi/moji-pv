@@ -329,6 +329,15 @@ function mat(kind, key, patch) {
     mine: { id: 'm' + key.slice(5), rhash: '0000abcd', cost: 0.2, by: 'ai' } }, patch || {});
 }
 
+test('a material may name its ornament count knob `count`; a catalog part may not (the list slot keeps it)', () => {
+  const base = corpus.stubRegistry(MV);
+  const spec = { type: 'int', min: 1, max: 200, auto: { range: [30, 50] }, label: { ja: '数', en: 'Count' } };
+  const ext = R.extend(base, [mat('ornament', 'myMat3', { params: { count: spec } })]);
+  assert.deepEqual(ext.problems, []);
+  assert.ok(ext.has('ornament', 'myMat3'));
+  expectProblem('ornament', 'stubRule', (d) => { d.params = { count: spec }; }, 'reserved name');
+});
+
 test('extend: added defs join the base registry; the base is never mutated', () => {
   const base = corpus.stubRegistry(MV);
   const before = { version: base.version, keys: base.keys('ornament').slice(), all: base.all().length };

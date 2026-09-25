@@ -4168,3 +4168,244 @@ by side; the H.1 property tests had just added CPU-heavy files. The budgets are 
 `node --test --test-concurrency=1`, so each file has the CPU to itself. Locally that takes about 3 minutes (1215 tests),
 and the re-plan measures 5.8 ms. Run the Node tests the same way on a busy machine.
 
+
+## v2.1-C
+
+Package C, the materials runtime (DESIGN_2_1 §8.3 with its media additions): `src/parts/mix.js` replaces A's stub, with
+`tests/node/mix.test.js` and `tests/browser/materials_gallery.py`.
+
+**What it does**
+- `derive(entry, base, ctx?)` turns a MaterialEntry into a part definition:
+  - a variant goes through `K.variant` (§5.7.2): params are coerced through the base's specs, shared values through
+    the kind's shared specs as the base narrows them;
+  - a composite goes through `K.<kind>`, with its build / make / apply bound to the normalized recipe in one closure
+    per material version;
+  - every definition carries `mine: { id, rhash, cost, by, media }`.
+- The interpreters. Every run and draw function is defined once, at module level:
+
+  | Recipe part | Built as |
+  |---|---|
+  | layer `shape` | one `sb.shape` per item; the SHAPE_LIB path is scaled by the item's size |
+  | layer `frame` | `sb.shape` nodes around `hints.focus` (the safe area in grounds) |
+  | layer `fill`, `pattern` | one `sb.paint` each (`drawFill`, `drawPattern`), still unless a behaviour moves it |
+  | layers `particles`, `lines`, `glyphs` | one `sb.paint` each (`drawFlow`), closed form in t |
+  | layer `media` | `K.media` when the kit exports it; skipped otherwise |
+  | movers and appear | one `runItems` behaviour per node layer; per item inside `drawFlow` |
+  | arrive / depart motion | `BH.glyphMotionMaker(kind, { unit, fn: glyphTracks })`, made once per kind and unit |
+  | dwell osc | `BH.holdMaker(oscHold)` |
+  | lens osc | a `runLensOsc` behaviour on the camera node |
+  | filter stack | the inner filters' `apply`, chained |
+
+- `registryFor(base, materials, media)`, `materialHash(entry)`, `sampleDefs(base?)` and `SHAPE_LIB` (18 unit shapes).
+
+**Decisions where the design was silent**
+- **Flow layers draw through a paint, not `sb.particles`.** `sb.particles` starts every particle at a random angle,
+  sways only along x, fades every particle by its life cycle and has a single ink. Recipes need more than that:
+  - lines that lie along `dir`, upright glyphs and the `rot` range;
+  - movers per item with their phases, appear per item (a wipe), several inks.
+
+  `drawFlow` batches its items into one path per ink and alpha step of 1/16. The §2.1 cherry flurry (90 petals, two
+  inks) draws with at most 32 fills; the test asserts exactly one fill per used step.
+- **Units.** Sizes and mover `x`/`y` amplitudes are shares of the short side; `place.x`/`y` are shares of the frame.
+- **Regions per anchor:**
+  - `frame`: the frame plus the 15 % bleed;
+  - `focus`: the text block, or the safe area in scenes without text;
+  - `around`: the block grown by 0.08 short. Shapes sit on an ellipse, and particles fade out inside the block;
+  - `under`: a 0.08 short band under the block;
+  - `behind`: the block × 1.25, always in the far layer;
+  - `corners`: four 0.14 short squares of the safe area;
+  - `edges`: four 0.07 short bands;
+  - `free`: `hints.free`, or the safe area.
+
+  `spread` scales every region. Items are spread over several regions in proportion to their areas.
+- **Frame and pattern fields:**
+  - `frame`: `size[0]` is the gap to the text and `size[1]` the arm of brackets and ticks; ticks are two per side;
+  - `pattern`: `size[1]` is the mark and `rot[0]` the pattern's angle. It is clipped to its region. A moving pattern
+    draws at most 2,500 marks per frame (a finer one is coarsened); a still one is rasterized once;
+  - `lines`: 6 % of the longest line wide (1–8 du);
+  - `glyphs`: drawn in the page's sans-serif;
+  - a ground's fill always covers the bleed.
+- **Fields.** The velocity is `speed · short` along `dir` (0 = right, 90 = down), × 0.7–1.3 per item. The sway is
+  perpendicular to `dir`, and the spin is × ±0.5–1.5 per item. Items wrap inside their region grown by their size.
+  Regions other than `frame` fade items near their edges. `life [0, 0]` means no life cycle.
+- **Bursts:**
+  - `beat` fires on every beat; `arrive` fires once at the sung start (the start of a ground or atmosphere);
+  - `impact` fires at the sung start too, and does so on lines that are not impacts as well;
+  - particles fly out from the region's centre at `speed · (0.5–1.5)` and are pulled along `dir` at `1.2 · speed` per
+    second;
+  - they fade out over their life (1 s when unset, and under 0.95 of the beat period for `beat`).
+- **Appear times:**
+  - `start` is the window start, `arrive` the sung start (the cut-local 0) and `rest` the end of the entrance;
+  - `impact` is the sung start (arrive on other lines), and `beat` restarts on every beat;
+  - grounds and atmospheres start at 0.
+- **Movers.** The value is `amp · wave(hz · t + φ)`:
+  - `beat` is `exp(−since / 0.2 s)`, with half-second pulses when there is no grid;
+  - `ramp` is the seconds since the window start, or the window length shaped by its curve;
+  - the phases are `index` = j / n and `rnd` = seeded;
+  - an alpha mover keeps the alpha between 1 − |amp| and 1, full at the wave's peak when amp > 0; a ramp fades in
+    (amp > 0) or out;
+  - `scale` scales items about their centre.
+- **Oscillators:**
+  - dwell `sx` scales uniformly (sx and sy); `glow` and `tint` are unipolar;
+  - the phases are `index` / `word` × `step`, and `rnd` = the glyph's random;
+  - lens times run from the window start.
+- **Knobs and shared params:**
+  - the `amp` knob of arrive/depart scales every track's distance from the identity;
+  - the amount factors follow §5.7.4.
+- **Inner parts:**
+  - their params are the fixed recipe params, then the material's shared values, then autos seeded by the scene;
+  - entrance and exit parts share the material's `dur` / `each` / `order` / `ease`, so they fill the same window;
+  - a composite entrance without motion takes its first part's shared overrides and unit;
+  - filter stacks resolve their inner params once per material version (neutral features, seeded by `rhash`). Each
+    inner filter runs at `min(1, amount × mix)` with `when: 'always'`, because the renderer weighs `when` once;
+  - the stack's `gate` is the first inner gate.
+- **`mirrorOf` works by data,** with K.mirror's rule:
+  - tracks swap ends; column curves and the ease reverse through `CV.reverse`; `dur` and `each` carry over, `order`
+    does not;
+  - the arrive's inner parts go through `K.mirror`;
+  - the depart's `rhash` covers the arrive's.
+
+  K.mirror itself would drop the per-build knob wrapper. The arrive must come earlier in the list, so `derive` without
+  the list gives `mirror-missing`.
+- **`derive` problems** use A's Problem shape `{ path, code, params }`:
+  - Fatal: entry problems, `rv-newer`, every `core/recipe` limit problem, `no-base`, `flash-base`, `mirror-missing`,
+    `kit` and `def`.
+  - Dropped with a problem: normalization codes, `part-missing`, `part-flash`, `part-scope`, `part-frames`,
+    `part-param`, `part-mirror` and `param`.
+  - `derive` runs `REG.checkDef`. `registryFor` leaves that to `REG.extend`.
+- **`registry.problems`**, which D turns into `material-bad`:
+  - a failed material gives `'<kind>/<key>: <first fatal code>'`, for example `ornament/myMatb: cost`;
+  - a 40-bit media key collision gives `'ground/<myMed key>: media-key'`.
+- **Pooled media grounds:**
+  - `mine.cost` is a cost object `{ ms: 0.4, particles: 0, … }`. §11.5.9 writes `0.4`; the object lets §5.9.4 sum
+    `mine.cost.particles` over any definition;
+  - `mine.media` is `true` for them and an id array for materials (§8.3);
+  - `clock` and `move` autos are set only when `photoPan` has those params (G.3).
+- **Memo caches (WeakMaps only):**
+  - registries: per base, the last 4 (materials, media) pairs;
+  - per material entry: its last derivation, reused while the base, the media list (only for recipes with media
+    layers) and the mirrored arrive entry are the same objects. An edit re-derives one entry;
+  - per asset: its ground definition;
+  - per filter-stack version: the params object of each decision → its inner params objects.
+- **Media layers** call `K.media` with:
+  - `use` = `ground` (grounds), `layer` (anchor `frame`) or `frame`;
+  - a mask from `shape`, and `p` holding the layer's fit, time and blur plus `depth: 'anim'`. The recipe places the
+    picture itself, which is what §11.9.3 means by `anim`.
+
+  The border is a stroked shape. A group node carries the movers and the appear. An empty `src` (the part param) builds
+  nothing.
+- **`sampleDefs(base?)`:**
+  - with a base, 8 definitions: one composite per COMPOSITE_KIND and the §2.1 cherry-petal atmosphere;
+  - without one, 7: a filter stack needs inner filters;
+  - the keys are `myMatSornament`, `myMatSatmos` and so on. Tests and the gallery re-key them to `myMatz…`.
+
+**Design tension (A's note on media cost vs the ornament budgets): decided — the budget stays hard.** `core/recipe` is
+the only judge of a recipe. A fixed picture with transparency or blur costs 0.4 + 1.5 = 1.9 ms, so it fits only a
+ground material (2.0 ms), exactly as A implemented. The reasons, in §5.8's spirit:
+- The ornament budgets bound three cut ornaments and an atmosphere per frame within D§7.4's draw budget, and the
+  isolated path is the expensive part of a media node (§11.5.12).
+- Transparent pictures near the words and overlay footage are what G's `photoFrame` and `mediaLayer` are for, when
+  pinned.
+- A material whose picture is the `src` param (a reusable frame style) is costed without its picture, like a pinned
+  `photoFrame`; the interpreter draws whatever picture is chosen.
+
+If the owner wants fixed transparent pictures in ornament materials, the lever is `core/recipe.LIMITS` (A), not
+`parts/mix`.
+
+The flash rule stays hard at derive (`core/recipe.problems`) and again at build:
+- a large layer (cover > 0.25 at knob maximum, computed as `core/recipe` does) never changes with the beat more than
+  3 times a second: beat appears and beat bursts use every n-th beat at fast tempos;
+- burst particles of large layers fade in over at least 0.15 s;
+- no particle life cycle is shorter than 1/3 s;
+- media layers use the same rule with cover = size².
+
+**Deviations**
+- Flow layers use `sb.paint` instead of `sb.particles`; the reasons are above. `FrameStats.drawn.particles` counts only
+  `sb.particles`, so material particles are not in it. The §5.9.4 budget still holds by construction through
+  `env.mixShare`.
+- The ornament count knob is the param `quantity` while `core/registry` reserves `count` on ornaments (D§3.4,
+  `RESERVED_PARAMS`). `REG.extend` refuses a `count` param, which would drop every ornament material with a count knob,
+  the §2.1 flurry among them. A probe at module creation picks `count` as soon as the registry accepts it. Until then
+  project_v21's pin `atmos@myMat3.count` has no effect.
+- Additive signatures: `derive(entry, base, ctx?)` takes `ctx = { list, media }` (for `mirrorOf` and the media list),
+  and `sampleDefs(base?)` takes the base its filter stack needs.
+- New dependencies of `parts/mix`: `core/schema`, `core/media` and `engine/scene/builder` (L0 and L3, within §3.1).
+- `tests/node/contract.test.js` (A's file): three assertions that checked the stub's placeholder answers were replaced
+  by the real contract, since §3.12 says C replaces the stub:
+  - `derive({})` has problems;
+  - `materialHash` gives 8 hex digits;
+  - `sampleDefs()` is non-empty with `myMatS…` keys.
+
+  `registryFor` still returns the base itself.
+
+**Measured** (this shared container; Node 22, headless Chromium)
+- `registryFor` after an edit (a new `doc.materials` with one changed entry), best of 8 batches of 5:
+  - 64 materials: 1.39 ms (budget 3 ms);
+  - 64 materials and 200 assets, 20 pooled: 1.82 ms (budget 4 ms).
+- The first composition of 64 new materials takes 8.0–9.6 ms, once when a document opens. About 120 µs per material
+  goes to `core/recipe` `normalize`, `problems` and `cost`, each of which normalizes again, plus the recipe hash. A cold
+  `REG.extend` of 64 definitions takes 1.1–2 ms.
+- The §2.1 cherry-petal atmosphere:
+  - static cost 0.54 ms (budget 1.5 ms);
+  - at 720p, 0.90 ms per frame with it and 0.60 ms without: 0.30 ms.
+- Scene build per material scene: 0.14–0.67 ms (budget 4 ms). behave + solve: ≤ 0.023 ms.
+- `mix.test.js` runs in about 13 s. It has 24 tests, including the harness: 8 samples and 40 generated recipes × 7
+  aspects × 24 times.
+- Fifteen mutations were checked, and each fails its test:
+  - registryFor always extends; mixShare ignored; no beat skipping; minimum life dropped;
+  - an arrive that does not end at identity; rhash that ignores the recipe; a mirror that keeps its direction;
+  - K.media never called; the media depth left out; a filter stack that leaks a surface;
+  - the per-entry memo off; particles filled one by one; paint state leaking between frames;
+  - a flash base accepted; the count knob ignored.
+
+**Requests to other packages**
+- **A (or the lead), `core/registry`:** exempt definitions added through `extend` from `RESERVED_PARAMS`. In
+  `checkParams`, use `const reserved = mine ? [] : RESERVED_PARAMS[def.kind] || []`. §5.7.6's knob `count` is always
+  part-qualified (`@myMat3.count`), so it cannot be confused with the slot `ornament.count`. `parts/mix` switches to
+  `count` by itself.
+- **A (optional), `core/recipe`:** `problems` and `cost` normalize their input again; a fast path for recipes that
+  `normalize` produced would cut the first composition by about half.
+- **B:**
+  - `build.js`: `env.mixShare` per §5.9.4, summing `def.mine.cost.particles`. Every `mine.cost` is an object; media
+    grounds have particles 0.
+  - `perf.py`: material particles are drawn by paints, so budget checks should use the `mine.cost` sum, not
+    `FrameStats.drawn.particles`.
+  - `facade.setDoc`: `MIX.registryFor(base, doc.materials, doc.media)`.
+  - The lab: re-key `sampleDefs(base)` as the tests do (`myMatS…` → `myMatz` + lowercase).
+  - `K.media`: C passes `p.depth: 'anim'` and skips its border when `K.media` returns −1.
+- **D:**
+  - the `registry.problems` format above;
+  - `extra[key].media` is an id array for materials (for `plan.media`) and `true` for pooled-media grounds, whose asset
+    id is `mine.id` (and the `image` auto).
+- **E:** the derive problem codes above, for review texts and `fromAi` warnings. `materialHash` hashes the whole
+  normalized entry: id, kind, by, name, blurb, tags, season, pool, rv and recipe.
+- **F / G:**
+  - hide derived media grounds with `registry.extra[key].media === true`, not a truthy test, because materials carry an
+    id array;
+  - `mat.problem` needs texts for the codes (strings wanted below).
+
+**Strings wanted** (package F; `mat.problem`'s `{what}` for C's codes)
+
+| Key | ja | en |
+|---|---|---|
+| `mat.why.no-base` | 元にする部品が見つかりません | The base part was not found |
+| `mat.why.flash-base` | 点滅する部品は元にできません | A flashing part cannot be the base |
+| `mat.why.part-missing` | 部品「{key}」が見つかりません | The part "{key}" was not found |
+| `mat.why.part-flash` | 点滅する部品は使えません（{key}） | Flashing parts cannot be used ({key}) |
+| `mat.why.part-scope` | 「{key}」は使える範囲が違います | "{key}" works in a different scope |
+| `mat.why.part-frames` | 寄り引きのカメラは1つまでです（{key}） | Only one framing camera move ({key}) |
+| `mat.why.part-param` | 「{key}」の設定「{name}」が読めません | The setting "{name}" of "{key}" could not be read |
+| `mat.why.part-mirror` | 「{key}」は逆向きにできません | "{key}" cannot be reversed |
+| `mat.why.param` | 設定「{name}」が読めません | The setting "{name}" could not be read |
+| `mat.why.mirror-missing` | 逆向きにする入りの素材が見つかりません | The entrance material to reverse was not found |
+| `mat.why.kit` | 素材を部品にできませんでした | The material could not be made into a part |
+| `mat.why.def` | 素材の定義に問題があります | The material definition has a problem |
+| `mat.why.media-key` | おまかせで使えない写真・動画があります | A photo or video cannot be used in automatic picks |
+
+## Lead: materials may name their count knob `count`
+
+Package C asked for this (NOTES v2.1-C). `core/registry.checkParams` keeps `count` reserved on catalog ornaments and
+filters, where it would clash with the list slot's count. A definition added through `extend` (a material) is exempt,
+because its paths always carry its key (`atmos@myMat3.count`). `parts/mix` detects this when the module loads, so the
+ornament count knob is now `count`, as the §2.1 example writes it. Test: `registry.test.js`, "a material may name its
+ornament count knob `count`".

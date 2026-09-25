@@ -142,7 +142,7 @@ MV.def('core/registry', ['core/schema', 'core/color', 'core/hash'], (S, C, H) =>
       bad('blurb needs ja and en');
     }
     checkCommon(def, bad);
-    checkParams(def, bad);
+    checkParams(def, bad, mine);
     KIND_CHECKS[def.kind](def, bad);
     return errs;
   }
@@ -182,7 +182,7 @@ MV.def('core/registry', ['core/schema', 'core/color', 'core/hash'], (S, C, H) =>
     return out;
   }
 
-  function checkParams(def, bad) {
+  function checkParams(def, bad, mine) {
     const shared = SHARED[def.kind];
     if (def.shared !== undefined) {
       if (!isObject(def.shared)) bad('shared must be an object');
@@ -203,7 +203,9 @@ MV.def('core/registry', ['core/schema', 'core/color', 'core/hash'], (S, C, H) =>
     }
     if (def.params === undefined) return;
     if (!isObject(def.params)) { bad('params must be an object'); return; }
-    const reserved = RESERVED_PARAMS[def.kind] || [];
+    // The list slot's `count` is reserved on catalog parts. A definition added through extend (a material) may name its
+    // count knob `count` (DESIGN_2_1 §5.7.6: `atmos@myMat3.count`); its paths always carry the key, so they cannot clash.
+    const reserved = mine ? [] : RESERVED_PARAMS[def.kind] || [];
     for (const name of Object.keys(def.params)) {
       if (!PARAM.test(name)) bad('params.' + name + ': bad param name');
       if (shared[name]) bad('params.' + name + ': clashes with the shared param of ' + def.kind);

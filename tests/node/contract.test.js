@@ -415,7 +415,7 @@ test('v2.1: every FROZEN export of DESIGN_2_1 §3.2–§3.8, §3.12 and §11.3.2
     'curve', 'shot', 'rig', 'partRefs', 'media']);
 });
 
-test('v2.1: registries have the §3.6 members; the stub registryFor returns the base itself', () => {
+test('v2.1: registries have the §3.6 members; registryFor returns the base itself without materials', () => {
   const REG = MV.use('core/registry');
   const reg = corpus.stubRegistry(MV);
   assert.equal(reg.base, null);
@@ -430,7 +430,11 @@ test('v2.1: registries have the §3.6 members; the stub registryFor returns the 
   assert.equal(ext.baseVersion, reg.version);
   const MIX = MV.use('parts/mix');
   assert.equal(MIX.registryFor(reg, { next: 1, list: [] }), reg);
-  assert.deepEqual(MIX.derive({}, reg), { def: null, problems: [] });
-  assert.equal(MIX.materialHash({}), '00000000');
-  assert.deepEqual(MIX.sampleDefs(), []);
+  assert.equal(MIX.registryFor(reg, { next: 1, list: [] }, { list: [] }), reg);
+  // package C replaced A's stub (§3.12): an unreadable entry derives to no definition, with its problems
+  const bad = MIX.derive({}, reg);
+  assert.equal(bad.def, null);
+  assert.ok(Array.isArray(bad.problems) && bad.problems.length > 0);
+  assert.match(MIX.materialHash({}), /^[0-9a-f]{8}$/);
+  assert.ok(MIX.sampleDefs().length > 0 && MIX.sampleDefs().every((d) => d.key.startsWith('myMatS')));
 });
