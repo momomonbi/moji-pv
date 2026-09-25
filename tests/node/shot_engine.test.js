@@ -22,6 +22,16 @@ const { fakeMeasurer } = MV.use('engine/text/fake_measure');
 const REG = MV.use('parts/catalog').defaultRegistry();
 const TEXTS = Object.freeze({ short: 'はじまりの朝', three: '夜明けの街を 走る光と 君の声', en: 'Paper planes in the morning light' });
 
+// A part's params at their auto values: the fixed value, else the middle of the range, else the first pick.
+function autoParams(slot, key) {
+  const p = {};
+  for (const { name, spec } of REG.params(slot, key)) {
+    p[name] = spec.auto && 'value' in spec.auto ? spec.auto.value : spec.auto && spec.auto.range
+      ? (spec.auto.range[0] + spec.auto.range[1]) / 2 : spec.auto && spec.auto.pick ? spec.auto.pick[0] : spec.min;
+  }
+  return p;
+}
+
 // A canned cut (engine/facade.samplePlan kind 'shot') with the shot `shot` (a preset key or a Shot) and cam.* params,
 // built strictly. o = { shot, text, aspect, orient, zoom, curve, follow, lens, lensParams, arrive, arriveParams, beats }
 function shotScene(o) {
@@ -29,13 +39,7 @@ function shotScene(o) {
     { text: o.text || TEXTS.short, aspect: o.aspect || '16:9', orient: o.orient });
   const cut = plan.cuts[0];
   const put = (slot, key, params) => {
-    const p = {};
-    for (const { name, spec } of REG.params(slot, key)) p[name] = spec.auto && 'value' in spec.auto ? spec.auto.value : undefined;
-    for (const { name, spec } of REG.params(slot, key)) {
-      if (p[name] === undefined) p[name] = spec.auto && spec.auto.range ? (spec.auto.range[0] + spec.auto.range[1]) / 2
-        : spec.auto && spec.auto.pick ? spec.auto.pick[0] : spec.min;
-    }
-    cut.slots = Object.assign({}, cut.slots, { [slot]: { v: key, p: Object.assign(p, params || {}), from: 'pin' } });
+    cut.slots = Object.assign({}, cut.slots, { [slot]: { v: key, p: Object.assign(autoParams(slot, key), params), from: 'pin' } });
   };
   if (o.lens) put('lens', o.lens, o.lensParams);
   if (o.arrive) put('arrive', o.arrive, o.arriveParams);
@@ -137,9 +141,152 @@ test('aims: block, emph, first, last, word:k, line:k, glyph:k; every text box is
   assert.ok(lines >= 2, 'the sample has two lines');
   assert.notDeepEqual(SS.aimBox(env, t, 'line:0'), SS.aimBox(env, t, 'line:1'));
   assert.deepEqual(SS.aimBox(env, t, 'line:8'), SS.aimBox(env, t, 'line:' + (lines - 1)), 'line:k clamps');
-  // no emphasis → emph aims at the last word
-  const plain = shotScene({ shot: 'settle', text: 'ab' });
-  assert.deepEqual(SS.aimBox(env, plain.scene.target, 'emph'), SS.aimBox(env, plain.scene.target, 'last'));
+  // no emphasis → emph aims at the whole block (not the last word: the words before it would leave the frame)
+  const plain = plainScene({ shot: 'settle', text: TEXTS.three }).scene.target;
+  assert.deepEqual(SS.aimBox(env, plain, 'emph'), SS.aimBox(env, plain, 'block'));
+  assert.notDeepEqual(SS.aimBox(env, plain, 'emph'), SS.aimBox(env, plain, 'last'));
+});
+
+// shotScene without the sample's emphasis (the canned cut emphasizes its first two glyphs), on an arrange of choice.
+function plainScene(o) {
+  const plan = FAC.samplePlan(REG, { kind: 'shot', key: o.shot, params: { zoom: o.zoom } },
+    { text: o.text, aspect: o.aspect || '16:9', orient: o.orient });
+  const cut = plan.cuts[0];
+  const slots = Object.assign({}, cut.slots);
+  if (o.arrange) slots.arrange = { v: o.arrange, p: Object.assign(autoParams('arrange', o.arrange), o.arrangeParams), from: 'pin' };
+  Object.assign(cut, { emph: [], impact: !!o.impact, note: o.note || null, role: o.role || cut.role, slots });
+  cut.fp += ':plain:' + JSON.stringify([o.arrange, o.arrangeParams, o.note, o.role]);
+  const svc = { registry: REG, text: createTextService({ measurer: fakeMeasurer(), faces: plan.look.faces }), strict: true };
+  return { plan, cut, scene: BUILD.buildCut(cut, plan, svc), W: plan.design.w, H: plan.design.h };
+}
+
+// The glyphs of the lyric's main copy: of runs laid out from a span, the first of those that share one (echoStack's
+// fading copies share the main line's span); spaces left out.
+function mainGlyphs(t) {
+  const seen = new Set();
+  const keep = t.runs.map((r) => {
+    const span = r.spec.span ? r.spec.span.join(',') : null;
+    if (span === null || seen.has(span)) return false;
+    seen.add(span);
+    return true;
+  });
+  return [...Array(t.to - t.from).keys()].filter((j) => t.cls[j] !== 'space' && keep[t.unitOf.run[j]]);
+}
+
+// How far glyph box j (x0 y0 x1 y1 at rest) reaches beyond the frame edge under a shot pose (roll 0), in du on screen.
+function beyondFrame(pose, t, j, W, H) {
+  const x0 = pose.zoom * (t.box[j * 4] - W / 2 - pose.x) + W / 2, x1 = pose.zoom * (t.box[j * 4 + 2] - W / 2 - pose.x) + W / 2;
+  const y0 = pose.zoom * (t.box[j * 4 + 1] - H / 2 - pose.y) + H / 2, y1 = pose.zoom * (t.box[j * 4 + 3] - H / 2 - pose.y) + H / 2;
+  return Math.max(-x0, -y0, x1 - W, y1 - H, 0);
+}
+
+// Step (b) of the goldens, round 2 (NOTES "Step (b): automatic camerawork"): snapZoom, now the usual shot of an impact
+// cut, zoomed onto the last word of a line nobody emphasized, and 'Go' of 「Go/まっすぐに!」 was off-frame while it was
+// sung; pushWord did the same on plain lines. Every word of a plain line stays on-frame while it is sung, at the closest
+// cam.zoom (1; an impact cut gets at most 0.95), on the arranges that lay such a line out in one block or around a giant.
+test('snapZoom and pushWord on a line without emphasis keep every word on-frame while it is sung', () => {
+  for (const shot of ['snapZoom', 'pushWord']) {
+    for (const [text, arrange] of [['Go まっすぐに!', null], ['Go まっすぐに!', 'giantWhisper'], [TEXTS.three, null],
+      [TEXTS.three, 'giantWhisper'], [TEXTS.en, 'echoStack']]) {
+      for (const aspect of ['16:9', '9:16', '1:1']) {
+        const { scene, cut, W, H } = plainScene({ shot, text, arrange, aspect, zoom: 1, impact: true });
+        const t = scene.target, span = cut.t1 - cut.t0, name = [shot, text, arrange, aspect].join(' ');
+        const frac = STG.sungFractions({ cut, times: scene.times }, t, 'word');
+        const byWord = new Map();
+        for (const j of mainGlyphs(t)) byWord.set(t.unitOf.word[j], (byWord.get(t.unitOf.word[j]) || []).concat(j));
+        assert.ok(byWord.size >= 2, name + ' has several words');
+        const starts = [...byWord.values()].map((js) => frac[js[0]] * span).sort((a, b) => a - b);
+        for (const js of byWord.values()) {
+          // the word's sung window: from its start to the next word's (the last word: to the line's end), at least 0.2 s
+          const s0 = frac[js[0]] * span, next = starts.find((s) => s > s0 + 1e-9);
+          const s1 = Math.min(scene.times.b, Math.max(next === undefined ? span : next, s0 + 0.2));
+          for (const tl of steps(s0, s1, 12)) {
+            const pose = poseAt(scene, tl);
+            for (const j of js) {
+              assert.ok(beyondFrame(pose, t, j, W, H) < 0.5, name + ': ' + t.ch[j] + ' leaves the frame at ' + tl.toFixed(2));
+            }
+          }
+        }
+      }
+    }
+  }
+});
+
+// An arrange may lay out text of its own beside the lyric (sidebarIndex's index number, a side note). Word, line and
+// glyph aims pick the lyric only: in step (b) of the goldens pushWord and snapZoom aimed at the number '03' as the
+// last word, and the lyric left the frame (NOTES "Step (b): automatic camerawork").
+test("aims never pick an arrange's own text (sidebarIndex's number): word, line and glyph aims stay on the lyric", () => {
+  const plan = FAC.samplePlan(REG, { kind: 'arrange', key: 'sidebarIndex', params: { number: '03', side: 'right', size: 0.3 } },
+    { text: TEXTS.three, aspect: '16:9' });
+  const cut = plan.cuts[0];
+  const svc = { registry: REG, text: createTextService({ measurer: fakeMeasurer(), faces: plan.look.faces }), strict: true };
+  const t = BUILD.buildCut(cut, plan, svc).target;
+  const env = { D: plan.design };
+  const lyric = (j) => !!t.runs[t.unitOf.run[j]].spec.span;
+  const n = t.to - t.from;
+  const number = [], words = [];
+  for (let j = 0; j < n; j++) {
+    if (t.cls[j] === 'space') continue;
+    if (lyric(j)) words.push(j); else number.push(j);
+  }
+  assert.deepEqual(number.map((j) => t.ch[j]), ['0', '3'], 'the index number is a run of its own');
+  const inside = (b, j) => { const cx = (t.box[j * 4] + t.box[j * 4 + 2]) / 2, cy = (t.box[j * 4 + 1] + t.box[j * 4 + 3]) / 2;
+    return cx >= b.x && cx <= b.x + b.w && cy >= b.y && cy <= b.y + b.h; };
+  for (const aim of ['first', 'last', 'emph', 'word:-1', 'word:40', 'line:-1', 'line:8', 'glyph:-1', 'glyph:80']) {
+    const b = SS.aimBox(env, t, aim);
+    assert.ok(words.some((j) => inside(b, j)), aim + ' holds lyric glyphs');
+    assert.ok(!number.some((j) => inside(b, j)), aim + ' leaves the number out');
+  }
+  const lastWord = t.unitOf.word[words[words.length - 1]];
+  const want = words.filter((j) => t.unitOf.word[j] === lastWord);
+  const box = SS.aimBox(env, t, 'last');
+  assert.ok(want.every((j) => inside(box, j)), 'last = the lyric\'s last word');
+  // The block aim keeps the arrange's focus (the whole composition, number included).
+  assert.deepEqual(SS.aimBox(env, t, 'block'), { x: t.focus.x, y: t.focus.y, w: t.focus.w, h: t.focus.h });
+});
+
+// echoStack lays the line out again in fading copies (runs with the main line's span); its focus is the main line.
+// Word, line and glyph aims pick the main copy: pushWord and snapZoom aimed at the last copy's last word, and the main
+// line left the frame (step (b) of the goldens, round 2).
+test('aims on echoStack pick the main line, never a fading copy', () => {
+  for (const aspect of ['16:9', '9:16']) {
+    for (const dir of ['down', 'up', 'split']) {
+      const { scene, plan } = plainScene({ shot: 'settle', text: TEXTS.three, arrange: 'echoStack', arrangeParams: { copies: 4, dir },
+        aspect });
+      const t = scene.target, env = { D: plan.design };
+      const f = t.focus, main = mainGlyphs(t), m = SS.FLOOR * env.D.short;
+      assert.ok(t.runs.filter((r) => r.spec.span).length >= 4, 'the copies are runs with the span');
+      const within = (b) => b.x + b.w / 2 >= f.x - m && b.x + b.w / 2 <= f.x + f.w + m && b.y + b.h / 2 >= f.y - m &&
+        b.y + b.h / 2 <= f.y + f.h + m;
+      for (const aim of ['first', 'last', 'emph', 'word:1', 'word:-1', 'line:-1', 'glyph:-1', 'glyph:0']) {
+        assert.ok(within(SS.aimBox(env, t, aim)), aspect + ' ' + dir + ': ' + aim + ' lies in the main line');
+      }
+      const last = SS.aimBox(env, t, 'last'), lastMain = main[main.length - 1];
+      assert.ok(last.x <= t.box[lastMain * 4] + 1e-6 && last.x + last.w >= t.box[lastMain * 4 + 2] - 1e-6,
+        'last = the main line\'s last word');
+    }
+  }
+});
+
+// spineColumn splits a title with a note (the artist) into two column pieces around it and gives the upper piece as
+// its focus (ornaments frame it). The block aim grows to the whole title, so pullReveal and settle keep its tail
+// (「バス停」) in the frame (step (b) of the goldens, round 2).
+test("the block aim holds every lyric glyph inside the frame, also where the arrange's focus is one piece of it", () => {
+  for (const aspect of ['16:9', '9:16', '1:1']) {
+    const { scene, plan, W, H } = plainScene({ shot: 'settle', text: '夜明けのバス停', arrange: 'spineColumn', orient: 'v',
+      role: 'title', note: 'テスト合唱団', aspect });
+    const t = scene.target, env = { D: plan.design };
+    assert.equal(t.runs.filter((r) => r.spec.span).length, 2, aspect + ': the title is split around its note');
+    const f = t.focus, block = SS.aimBox(env, t, 'block');
+    const inFocus = (j) => t.box[j * 4 + 3] <= f.y + f.h + 1e-6;
+    assert.ok(mainGlyphs(t).some((j) => !inFocus(j)), aspect + ': the focus is the upper piece only');
+    const inBlock = (j) => t.box[j * 4] >= block.x - 1e-6 && t.box[j * 4 + 2] <= block.x + block.w + 1e-6 &&
+      t.box[j * 4 + 1] >= block.y - 1e-6 && t.box[j * 4 + 3] <= block.y + block.h + 1e-6;
+    for (const j of mainGlyphs(t)) assert.ok(inBlock(j), aspect + ': ' + t.ch[j] + ' in the block');
+    // settle's closest key (block .66) keeps every title glyph on-frame
+    const pose = poseAt(scene, scene.times.rest);
+    for (const j of mainGlyphs(t)) assert.ok(beyondFrame(pose, t, j, W, H) < 0.5, aspect + ': ' + t.ch[j] + ' on-frame');
+  }
 });
 
 test('anchors: times.*, sung, mid, end, emph, word:k (sung starts), beat:n (with and without a grid), numbers; dt; clamped', () => {

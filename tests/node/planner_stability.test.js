@@ -255,10 +255,14 @@ for (const [RN, SYN] of REGISTRIES) {
   // cut weighs against (so the two do not repeat); nothing further depends on it, except the runner-up rule of
   // arrange/arrive one cut later.
   // DESIGN_2_1 §4.7 "Stability": inserting a line changes ≤ 4 other cuts' shots, rerolling a cut ≤ 3. A shot weighs
-  // ×0.1 against the previous cut's *final* shot (hist.previous, FROZEN), so a changed shot can, rarely, pass the change
-  // on down a run of cuts whose shots alternate between two presets; the line before an inserted line also gets a
-  // shorter span, so new features (measured with starts pinned: catalog 1 of 108 insertions over 4, worst 5; synthetic
-  // 3 of 108, worst 7; rerolls: 1 of 249 over 3, worst 5; NOTES ## v2.1-D). The bounds hold the rest.
+  // against the previous cut's *final* shot (hist.previous, FROZEN), so a changed shot can, rarely, pass the change on
+  // down a run of cuts; the line before an inserted line also gets a shorter span, so new features. And a line sung
+  // again takes the natural shot of its first sung copy (the echo, §7.3): when an insertion changes the shot of a first
+  // copy, its repeats follow it. Those followers (a changed cut whose feat.repeatOf cut changed too) are the echo at
+  // work; they are counted apart, and the §4.7 bound holds the other changes. With the constants of goldens step (b)
+  // (echo ×40, recency ×0.2 and ×0.5; NOTES "Step (b): automatic camerawork"), insertions with starts pinned over corpus
+  // seeds 3–29 (972 per registry, not the tested sample) change more than 4 other cuts about 1.8 times as often as
+  // before step (b) (echo ×3): 3.1 % against 1.7 %, the followers included; without them as often as before (0.7 %).
   const shotText = (c) => JSON.stringify(c.slots['cam.shot'].v);
   function shotChanges(a, b, skipLine) {
     const before = new Map(a.cuts.map((c) => [c.key, c]));
@@ -266,26 +270,45 @@ for (const [RN, SYN] of REGISTRIES) {
       .map((c) => c.key);
   }
 
+  // The changed cuts that follow their first sung copy: the cut they repeat (feat.repeatOf) changed its shot too.
+  function echoFollowers(b, changed) {
+    const byKey = new Map(b.cuts.map((c) => [c.key, c]));
+    return changed.filter((k) => changed.includes(byKey.get(k).feat.repeatOf));
+  }
+
   // With line starts pinned only the chooser is at work; with automatic timing the moved lines also get new features
-  // (duration, energy), which the §4.7 weights read, so the bound is the one of the part choices above.
-  test(RN + ': inserting a line changes at most 4 other cuts\' shots (a few more in rare relays, or with moved lines)', (t) => {
-    for (const [timing, bound] of [['anchored', { worst: 7, share: 0.05 }], ['auto', { worst: 9, share: 0.15 }]]) {
-      let cases = 0, over = 0, worst = { n: -1 };
+  // (duration, energy), which the §4.7 weights read, so the bound is the one of the part choices above. `all` bounds
+  // every changed cut (as before step (b)); `own` the changes that are not echo followers, set so that every 3-seed
+  // window of corpus seeds 0–29 passes (NOTES "Step (b)").
+  test(RN + ': inserting a line changes at most 4 other cuts\' shots besides the echoes of a changed first copy', (t) => {
+    for (const [timing, bound] of [['anchored', { all: { worst: 7, share: 0.05 }, own: { worst: 6, share: 0.03 } }],
+      ['auto', { all: { worst: 9, share: 0.15 }, own: { worst: 8, share: 0.02 } }]]) {
+      let cases = 0;
+      const all = { over: 0, worst: { n: -1 } }, own = { over: 0, worst: { n: -1 } };
+      const count = (acc, keys, where) => {
+        if (keys.length > 4) acc.over++;
+        if (keys.length > acc.worst.n) acc.worst = { n: keys.length, where: where + ': ' + keys.join(' ') };
+      };
       for (const { name, doc } of corpus.corpus(3)) {
         const base = timing === 'anchored' ? anchored(doc) : JSON.parse(JSON.stringify(doc));
         const a = PL.run(base, SYN, null);
         const rows = lyricRowIndexes(base);
         for (const k of [1, rows.length >> 1, rows.length - 1]) {
           const { doc: edited, id } = insertLine(base, rows[k]);
-          const changed = shotChanges(a, PL.run(edited, SYN, null), id);
+          const b = PL.run(edited, SYN, null);
+          const changed = shotChanges(a, b, id), followers = echoFollowers(b, changed);
+          const where = timing + ' ' + name + ' row ' + rows[k];
           cases++;
-          if (changed.length > 4) over++;
-          if (changed.length > worst.n) worst = { n: changed.length, where: timing + ' ' + name + ' row ' + rows[k] + ': ' + changed.join(' ') };
+          count(all, changed, where);
+          count(own, changed.filter((key) => !followers.includes(key)), where + ' (without the echo followers)');
         }
       }
-      t.diagnostic('shots, ' + timing + ': ' + over + ' of ' + cases + ' insertions changed more than 4 other cuts; worst ' + worst.n);
-      assert.ok(worst.n <= bound.worst, worst.where);
-      assert.ok(over <= cases * bound.share, timing + ': ' + over + ' of ' + cases);
+      t.diagnostic('shots, ' + timing + ': ' + all.over + ' of ' + cases + ' insertions changed more than 4 other cuts (worst ' +
+        all.worst.n + '); without the echo followers ' + own.over + ' (worst ' + own.worst.n + ')');
+      for (const [acc, lim] of [[all, bound.all], [own, bound.own]]) {
+        assert.ok(acc.worst.n <= lim.worst, acc.worst.where);
+        assert.ok(acc.over <= cases * lim.share, timing + ': ' + acc.over + ' of ' + cases);
+      }
     }
   });
 

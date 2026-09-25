@@ -2303,7 +2303,10 @@ async def flow_keyframes(f, lang):
     await f.settle(3)
     st = await page.evaluate(KEYS_STATE, path)
     if f.check(st['marks'] == st['rows'], 'one marker per key: %r' % st):
-        pt = await page.evaluate("""() => { const a = window.__mv, m = a.shotEdit.marks()[1], d = a.plan.design;
+        # pushWord on a line without emphasis aims its keys at the whole text: the preview fans the markers out.
+        shown = await page.evaluate("() => window.__mv.shell.stage.marks().map((m) => [Math.round(m.x), Math.round(m.y)])")
+        f.check(len(shown) == st['marks'] and len(set(map(tuple, shown))) == len(shown), 'each marker can be grabbed: %r' % shown)
+        pt = await page.evaluate("""() => { const a = window.__mv, m = a.shell.stage.marks()[1], d = a.plan.design;
           const r = document.querySelector('.canvas-wrap').getBoundingClientRect();
           return { x: r.left + m.x / d.w * r.width, y: r.top + m.y / d.h * r.height }; }""")
         done = await page.evaluate(DONE)

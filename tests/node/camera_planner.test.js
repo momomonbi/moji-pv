@@ -168,8 +168,8 @@ test('amount.camera 0 gives no shot and no rig; below 0.15 no rig; pins still ap
     pinned.pins['work:rig'] = { v: 'slowSwell', by: 'user' };
     const r = PL.run(pinned, CAT, null);
     assert.ok(r.cuts.every((c) => shotOf(c) === 'settle' && c.slots['cam.shot'].from === 'pin:work'), name + ' a pinned shot wins');
-    // amp at A = 0 is 0.4, and 0.5 on the last chorus (×1.25)
-    assert.ok(r.rigs.every((g) => g.rig.v === 'slowSwell' && [0.4, 0.5].includes(g.rig.p.amp)), name + ' a pinned rig wins');
+    // amp at A = 0 is 0.3, and 0.38 on the last chorus (×1.25)
+    assert.ok(r.rigs.every((g) => g.rig.v === 'slowSwell' && [0.3, 0.38].includes(g.rig.p.amp)), name + ' a pinned rig wins');
   }
 });
 
@@ -211,7 +211,7 @@ test('cam.zoom, cam.curve and cam.follow follow their formulas (§4.7)', () => {
     const mood = CAT.get('mood', p.look.mood.v);
     for (const c of p.cuts) {
       const f = c.feat, shot = shotOf(c);
-      let z = q2(N.lerp(0.85, 1.2, N.clamp(0.5 * A + 0.5 * f.energy)) * (f.impact ? 1.1 : 1));
+      let z = q2(N.lerp(0.8, 0.9, N.clamp(0.5 * A + 0.5 * f.energy)) * (f.impact ? 1.05 : 1));
       if (CAT.get('arrange', c.slots.arrange.v).cam === 'gentle' && SHOT.maxFill(shot) > 0) z = Math.min(z, 0.7 / SHOT.maxFill(shot));
       assert.equal(c.slots['cam.zoom'].v, S.coerce(CAM.SLOT_SPECS['cam.zoom'], z), c.key + ' zoom');
       const curves = f.impact ? ['dashStop', 'holdThenDash'] : f.energy >= 0.65 || (mood.tagBias.fast || 1) > 1.2
@@ -272,13 +272,20 @@ test('motion.speed divides the unpinned durations and staggers of arrive and dep
 });
 
 // §7.3 asks for "impact cuts favour snapZoom (≥ 60 %)", "framing lens → none ≥ 70 %" and "repeated lines share shots
-// (≥ 80 %)". The FROZEN weights of §4.7 give less where the rules leave the shot open (measured over corpus(8): impact →
-// snapZoom 54 % catalog / 52 % synthetic; framing lens → none 62 % / 62 %; repeats sharing 34 % / 30 %, against 25 % /
-// 18 % for unrelated cuts). The lead tunes the constants in goldens step (b) (§7.5); see NOTES ## v2.1-D. These tests
-// hold the direction and size of each effect.
+// (≥ 80 %)", where the rules leave the shot open. With the constants tuned in goldens step (b) (§7.5; NOTES "Step (b):
+// automatic camerawork"), corpus(6) gives: impact → snapZoom 88 % catalog / 88 % synthetic; framing lens → none 80 % /
+// 78 %; repeats sharing their shot 56 % / 53 %, against 30 % / 22 % for unrelated cuts. On independent samples (corpus
+// seeds 20–39, corpus(20), the 8 catalog moods pinned) the catalog gives 68–79 % / 78–79 % / 55–56 %, the synthetic
+// registry 79–83 % / 76–77 % / 54 %; impact → snapZoom varies by mood (46 % in quietHush, 52 % in dreamHaze, the calm
+// moods' bias against 'hard' and 'fast' shots). The last target is out of reach of the constants: 'none' is never an
+// echo (only preset shots are choices, §3.9), and the first copy of about half the repeated cuts is on 'none' (a layout
+// without camerawork, a framing lens, a low camera amount). Where the echo can act (the first copy open to the rules and
+// on a preset) 59–62 % / 64–65 % share it; a stronger echo, or a weaker recency, makes an edit change more cuts
+// (planner_stability) and gives the framing-lens target away. The floors below leave room for those samples.
 test('impact cuts favour snapZoom; framing lenses favour no shot; repeated lines echo their shot', (t) => {
   for (const [rn, reg] of [['catalog', CAT], ['synthetic', SYN]]) {
-    const st = { imp: 0, impSnap: 0, other: 0, otherSnap: 0, fr: 0, frNone: 0, nfr: 0, nfrNone: 0, rep: 0, repSame: 0, ctl: 0, ctlSame: 0 };
+    const st = { imp: 0, impSnap: 0, other: 0, otherSnap: 0, fr: 0, frNone: 0, nfr: 0, nfrNone: 0, rep: 0, repSame: 0, ctl: 0, ctlSame: 0,
+      open: 0, openSame: 0 };
     for (const { doc } of corpus.corpus(6)) {
       const p = PL.run(doc, reg, null);
       const byKey = new Map(p.cuts.map((c) => [c.key, c]));
@@ -288,7 +295,10 @@ test('impact cuts favour snapZoom; framing lenses favour no shot; repeated lines
         if (c.impact) { st.imp++; if (v === 'snapZoom') st.impSnap++; } else { st.other++; if (v === 'snapZoom') st.otherSnap++; }
         if (reg.get('lens', c.slots.lens.v).frames) { st.fr++; if (v === 'none') st.frNone++; } else { st.nfr++; if (v === 'none') st.nfrNone++; }
         const o = c.feat.repeatOf ? byKey.get(c.feat.repeatOf) : null;
-        if (o) { st.rep++; if (text(shotOf(o)) === text(v)) st.repSame++; } else if (i >= 2) {
+        if (o) {
+          st.rep++; if (text(shotOf(o)) === text(v)) st.repSame++;
+          if (free(reg, p, o) && shotOf(o) !== 'none') { st.open++; if (text(shotOf(o)) === text(v)) st.openSame++; }
+        } else if (i >= 2) {
           st.ctl++; if (text(shotOf(p.cuts[i - 2])) === text(v)) st.ctlSame++;
         }
       });
@@ -296,17 +306,51 @@ test('impact cuts favour snapZoom; framing lenses favour no shot; repeated lines
     const share = (a, b) => st[a] / st[b];
     t.diagnostic(rn + ': impact → snapZoom ' + share('impSnap', 'imp').toFixed(2) + ' (' + st.imp + ' cuts), other cuts ' +
       share('otherSnap', 'other').toFixed(3) + '; framing lens → none ' + share('frNone', 'fr').toFixed(2) + ', other lenses ' +
-      share('nfrNone', 'nfr').toFixed(2) + '; repeats share ' + share('repSame', 'rep').toFixed(2) + ', unrelated ' +
-      share('ctlSame', 'ctl').toFixed(2));
-    assert.ok(st.imp > 30 && st.fr > 300 && st.rep > 300, rn + ' enough cases');
-    assert.ok(share('impSnap', 'imp') >= 0.45, rn + ' impact → snapZoom ' + share('impSnap', 'imp'));
+      share('nfrNone', 'nfr').toFixed(2) + '; repeats share ' + share('repSame', 'rep').toFixed(2) + ' (where the echo can act ' +
+      share('openSame', 'open').toFixed(2) + '), unrelated ' + share('ctlSame', 'ctl').toFixed(2));
+    assert.ok(st.imp > 30 && st.fr > 300 && st.rep > 300 && st.open > 300, rn + ' enough cases');
+    assert.ok(share('impSnap', 'imp') >= 0.6, rn + ' impact → snapZoom ' + share('impSnap', 'imp'));
     assert.ok(share('otherSnap', 'other') < 0.02, rn + ' snapZoom is for impacts');
-    assert.ok(share('frNone', 'fr') >= 0.55 && share('frNone', 'fr') >= 2.5 * share('nfrNone', 'nfr'), rn + ' framing lens → none');
-    assert.ok(share('repSame', 'rep') >= 1.2 * share('ctlSame', 'ctl'), rn + ' repeats echo their shot');
+    assert.ok(share('frNone', 'fr') >= 0.7 && share('frNone', 'fr') >= 4 * share('nfrNone', 'nfr'), rn + ' framing lens → none');
+    assert.ok(share('repSame', 'rep') >= 0.5 && share('repSame', 'rep') >= 1.6 * share('ctlSame', 'ctl'), rn + ' repeats echo their shot');
+    assert.ok(share('openSame', 'open') >= 0.55, rn + ' the echo where it can act ' + share('openSame', 'open'));
   }
 });
 
-test('the echo weighs ×3, the previous shot ×0.1 and the three before ×0.4 (shotWeights through explain)', () => {
+// The moving shots of a video vary (step (b), round 2): with the recency of round 1 (×0.4, ×0.7) 'settle' took up to
+// 3/4 of a video's moving shots and ran over 6 cuts in a row in the calm moods. Over corpus(6), for plans with at least 8
+// moving shots: the most common one's share (median ≤ 0.45, over 0.6 in ≤ 5 % of plans), neighbouring cuts on the same
+// moving shot (≤ 7 %; the echo of consecutive repeated lines counts too) and the longest such run (≤ 6 cuts). Now:
+// median 0.40 / 0.40, over 0.6 in 1 / 2 plans, neighbours 3.5 % / 5.9 %, longest 4 / 5 (catalog / synthetic).
+test('the moving shots of a video vary: no preset takes most of them, few neighbours and no long runs share one', (t) => {
+  for (const [rn, reg] of [['catalog', CAT], ['synthetic', SYN]]) {
+    const dominant = [];
+    let pairs = 0, same = 0, longest = 0;
+    for (const { doc } of corpus.corpus(6)) {
+      const shots = PL.run(doc, reg, null).cuts.map((c) => text(shotOf(c)));
+      const moving = shots.filter((v) => v !== text('none'));
+      const count = new Map();
+      for (const v of moving) count.set(v, (count.get(v) || 0) + 1);
+      if (moving.length >= 8) dominant.push(Math.max(...count.values()) / moving.length);
+      let run = 1;
+      for (let i = 1; i < shots.length; i++) {
+        pairs++;
+        if (shots[i] !== text('none') && shots[i] === shots[i - 1]) { same++; run++; longest = Math.max(longest, run); } else run = 1;
+      }
+    }
+    dominant.sort((a, b) => a - b);
+    const median = dominant[dominant.length >> 1], over = dominant.filter((x) => x > 0.6).length;
+    t.diagnostic(rn + ': dominant moving shot median ' + median.toFixed(2) + ', over 0.6 in ' + over + ' of ' + dominant.length +
+      ' plans; neighbours on the same moving shot ' + (100 * same / pairs).toFixed(1) + ' %; longest run ' + longest);
+    assert.ok(dominant.length > 40, rn + ' enough plans');
+    assert.ok(median <= 0.45, rn + ' median ' + median);
+    assert.ok(over <= 0.05 * dominant.length, rn + ' over 0.6: ' + over);
+    assert.ok(same <= 0.07 * pairs, rn + ' neighbours ' + same + ' of ' + pairs);
+    assert.ok(longest <= 6, rn + ' longest run ' + longest);
+  }
+});
+
+test('the echo weighs ×40, the previous shot ×0.2 and the three before ×0.5 (shotWeights through explain)', () => {
   const doc = corpus.project('long').doc;
   const p = PL.plan(doc, { registry: CAT });
   let echoed = 0, recent = 0;
@@ -334,14 +378,18 @@ test('the echo weighs ×3, the previous shot ×0.1 and the three before ×0.4 (s
     chosen: { orient: 'h', arrange: 'centerAnchor', lens: 'fixedFrame' }, natural: false,
     hist: { echo: () => 'settle', previous: () => 'tiltHold', recent: () => ({ near: ['driftOff'] }) } };
   const w = Object.fromEntries(CAM.shotWeights(st).map((x) => [x.key, x.w]));
-  assert.equal(w.settle, N.q6(1.2 * 3), 'settle echoed');
-  assert.equal(w.tiltHold, N.q6(0.6 * 0.1), 'tiltHold was the previous shot');
-  assert.equal(w.driftOff, N.q6(0.7 * 0.4), 'driftOff was among the 3 before');
+  assert.equal(w.settle, N.q6(1.2 * 40), 'settle echoed');
+  assert.equal(w.tiltHold, N.q6(0.6 * 0.2), 'tiltHold was the previous shot');
+  assert.equal(w.driftOff, N.q6(0.7 * 0.5), 'driftOff was among the 3 before');
   assert.equal(w.none, N.q6(3 * 0.49 * 0.6), 'none in a chorus');
-  assert.equal(w.pushWord, N.q6(0.8 * 1.1 * 1.5), 'pushWord in a chorus');
+  assert.equal(w.pushWord, N.q6(0.3 * 1.1 * 1.5), 'pushWord in a chorus');
   assert.equal(w.readAlong, 0, 'readAlong needs 2.2 s');
+  assert.equal(w.sweepAcross, N.q6(0.3 * 1.5), 'sweepAcross in a chorus');
   st.cut.feat = Object.assign({}, st.cut.feat, { impact: true });
-  assert.equal(Object.fromEntries(CAM.shotWeights(st).map((x) => [x.key, x.w])).snapZoom, N.q6(5 * 1.5), 'an impact snap');
+  assert.equal(Object.fromEntries(CAM.shotWeights(st).map((x) => [x.key, x.w])).snapZoom, N.q6(30 * 1.5), 'an impact snap');
+  // A framing lens adds 24 to 'none' (a lens that moves the frame itself takes no shot on top).
+  st.chosen = Object.assign({}, st.chosen, { lens: 'slowPush' });
+  assert.equal(Object.fromEntries(CAM.shotWeights(st).map((x) => [x.key, x.w])).none, N.q6((3 * 0.49 + 24) * 0.6), 'a framing lens');
 });
 
 // --- carry ------------------------------------------------------------------------------------------------------
@@ -433,7 +481,7 @@ test('rig runs: every cut in one run; runs tile the video and follow sections, s
   const p1 = PL.run(doc, CAT, null);
   const run = p1.rigs[p1.cuts.find((c) => c.key === mid.key).rig];
   assert.deepEqual(run.cuts, [mid.key]);
-  assert.deepEqual(run.rig, { by: 'user', from: 'pin:cut', p: { amp: q2(0.4 + 0.6 * p1.look.amounts.camera) }, v: 'pullAway' });
+  assert.deepEqual(run.rig, { by: 'user', from: 'pin:cut', p: { amp: q2(0.3 + 0.4 * p1.look.amounts.camera) }, v: 'pullAway' });
   assert.equal(run.curve.v, 'fadeBrake', 'the preset curve');
 });
 
@@ -461,7 +509,7 @@ test('rig choice: the section rows, the runner-up rule, the last chorus and rig.
           const row = first.role === 'title' ? 'intro' : ['interlude', 'outro'].includes(first.role)
             ? (['intro', 'interlude', 'outro'].includes(sec) ? sec : first.role) : sec === null ? 'verse' : ROWS[sec] ? sec : 'other';
           assert.ok(ROWS[row].includes(r.rig.v), r.key + ' ' + row + ': ' + r.rig.v);
-          const amp = q2(Math.min(1.3, q2(0.4 + 0.6 * A) * (k === last ? 1.25 : 1)));
+          const amp = q2(Math.min(1.3, q2(0.3 + 0.4 * A) * (k === last ? 1.25 : 1)));
           if (r.rig.v !== 'none') assert.equal(r.rig.p.amp, amp, r.key + ' amp');
           const curve = k === last && r.rig.v !== 'none' ? 'slowBloom' : r.rig.v === 'none' ? 'linear' : SHOT.RIGS[r.rig.v].curve;
           assert.deepEqual(r.curve, { from: 'auto', v: curve }, r.key + ' curve');
