@@ -15,7 +15,7 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
     });
     const CAM_SLOTS = Object.freeze(['cam.shot', 'cam.zoom', 'cam.curve', 'cam.follow']);
 
-    // --- §4.7 constants (FROZEN formulas; the lead may tune them after visual QA, §7.5 step (b)) --------------------
+    // --- §4.7 constants (FROZEN formulas; tuned after the visual QA of §7.5 step (b), NOTES "Step (b)") -----------
     const NONE = 'none';
     const SHOT_POOL = Object.freeze(SHOT.SHOT_KEYS.concat([NONE]).sort());
     const AMOUNT_OFF = 0.1;                         // A below this: no automatic shot
@@ -35,7 +35,7 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
       intro: Object.freeze({ pullReveal: 1.5, wideHold: 1.5 }),
       outro: Object.freeze({ pullReveal: 1.5, wideHold: 1.5 }),
     });
-    const SHOT_RECENT = 0.1, SHOT_NEAR = 0.4, SHOT_ECHO = 3;
+    const SHOT_RECENT = 0.2, SHOT_NEAR = 0.5, SHOT_ECHO = 40;
     const RIG_OFF = 0.15;                           // A below this: no automatic rig
     const RIG_WEIGHTS = Object.freeze({
       chorus: Object.freeze({ slowSwell: 3, climbRise: 2, leanTilt: 0.5, none: 1 }),
@@ -158,13 +158,13 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
     // The §4.7 base weight of one shot key (before mood, section, recency and echo).
     function baseWeight(key, f, A, orient, frames) {
       switch (key) {
-        case 'none': return 3 * (1 - A) * (1 - A) + (frames ? 4 : 0);
+        case 'none': return 3 * (1 - A) * (1 - A) + (frames ? 24 : 0);
         case 'settle': return 1.2;
-        case 'pushWord': return (f.emph ? 3 : f.words >= 2 ? 0.8 : 0.2) * (0.6 + f.energy);
+        case 'pushWord': return (f.emph ? 3 : f.words >= 2 ? 0.3 : 0.2) * (0.6 + f.energy);
         case 'readAlong': return (f.words >= 3 && f.dur >= 2.2 ? 1.6 : 0) * (orient === 'v' ? 0.7 : 1);
-        case 'snapZoom': return f.impact ? 5 : (f.energy >= 0.75 && f.onBeat ? 0.5 : 0);
+        case 'snapZoom': return f.impact ? 30 : (f.energy >= 0.75 && f.onBeat ? 0.5 : 0);
         case 'pullReveal': return f.sectionStart ? 2 : 0.4;
-        case 'sweepAcross': return f.words >= 2 && f.cells >= 8 && orient === 'h' ? 0.9 : 0;
+        case 'sweepAcross': return f.words >= 2 && f.cells >= 8 && orient === 'h' ? 0.3 : 0;
         case 'tiltHold': return 0.6 * (f.energy >= 0.4 ? 1 : 0.3);
         case 'driftOff': return f.cells <= 10 ? 0.7 : 0.2;
         case 'wideHold': return f.dur >= 3 && f.energy < 0.45 ? 1 : 0.1;
@@ -248,9 +248,9 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
       return out;
     }
 
-    // The recency and echo a cut's shot reads (§4.7): the previous cut's final shot (×0.1), the natural shots of the
-    // 3 cuts before it (×0.4) and the natural shot of the cut it echoes (×3). The natural pass (st.natural) weighs
-    // without recency, like the part slots.
+    // The recency and echo a cut's shot reads (§4.7): the previous cut's final shot (×SHOT_RECENT), the natural shots of
+    // the 3 cuts before it (×SHOT_NEAR) and the natural shot of the cut it echoes (×SHOT_ECHO). The natural pass
+    // (st.natural) weighs without recency, like the part slots.
     function recencyOf(st) {
       const hist = st.hist;
       const echo = hist.echo(st.cut.feat.repeatOf, 'cam.shot');
@@ -348,7 +348,7 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
       const A = ctx.look.amounts.camera;
       const shot = st.chosen['cam.shot'];
       st.decide(st, 'cam.zoom', SLOT_SPECS['cam.zoom'], (seed, withWhy) => {
-        let z = q2(N.lerp(0.85, 1.2, N.clamp(0.5 * A + 0.5 * f.energy)) * (f.impact ? 1.1 : 1));
+        let z = q2(N.lerp(0.8, 0.9, N.clamp(0.5 * A + 0.5 * f.energy)) * (f.impact ? 1.05 : 1));
         let capped = false;
         if (gentle) {
           const fill = SHOT.maxFill(shot);
@@ -535,7 +535,7 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
 
     // rigs(ctx, cuts, seams, duration) → Plan.rigs; sets cut.rig (the run index). A run's rig and rig.curve come from
     // its first cut (pins cut > line > work; seed hash32('rig', look.seed, first cut key, its cut salt)); amp =
-    // q2(0.4 + 0.6·A); the last chorus run gets amp ×1.25 (≤ 1.3) and, unless rig.curve is pinned, the curve slowBloom;
+    // q2(0.3 + 0.4·A); the last chorus run gets amp ×1.25 (≤ 1.3) and, unless rig.curve is pinned, the curve slowBloom;
     // other runs take the preset's own curve ('linear' for none and custom rigs). blend = the window of a transition
     // (not the hard cut) into the run's first cut, else null. t0 = the first cut's a (0 for the first run), t1 = the
     // next run's t0 (the duration for the last).
@@ -581,7 +581,7 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
           }
         }
         avoid = win && win !== NONE ? win : null;
-        const amp = q2(Math.min(AMP_MAX, q2(0.4 + 0.6 * A) * (chorusEnd ? LAST_CHORUS_AMP : 1)));
+        const amp = q2(Math.min(AMP_MAX, q2(0.3 + 0.4 * A) * (chorusEnd ? LAST_CHORUS_AMP : 1)));
         const rig = withAmp(d, amp);
         if (trace) trace.decision = rig;
         const curve = rigCurve(ctx, first, rig.v, chorusEnd);

@@ -1,6 +1,6 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-Q796/asyIiijd884i7UJf188s4M2P1xpF/vUsPr7kHY='; style-src 'sha256-C7f+4dHVZFSrPADTL/+9MwqvHeCG8qOUP1K4ARo7x3A=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-lfrJThtzeW4KmmmoCMpRvHTdD4KZVqFgsi8Fizbx/3A='; style-src 'sha256-C7f+4dHVZFSrPADTL/+9MwqvHeCG8qOUP1K4ARo7x3A=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
 <title>Moji PV Maker</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -16697,7 +16697,7 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
     });
     const CAM_SLOTS = Object.freeze(['cam.shot', 'cam.zoom', 'cam.curve', 'cam.follow']);
 
-    // --- §4.7 constants (FROZEN formulas; the lead may tune them after visual QA, §7.5 step (b)) --------------------
+    // --- §4.7 constants (FROZEN formulas; tuned after the visual QA of §7.5 step (b), NOTES "Step (b)") -----------
     const NONE = 'none';
     const SHOT_POOL = Object.freeze(SHOT.SHOT_KEYS.concat([NONE]).sort());
     const AMOUNT_OFF = 0.1;                         // A below this: no automatic shot
@@ -16717,7 +16717,7 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
       intro: Object.freeze({ pullReveal: 1.5, wideHold: 1.5 }),
       outro: Object.freeze({ pullReveal: 1.5, wideHold: 1.5 }),
     });
-    const SHOT_RECENT = 0.1, SHOT_NEAR = 0.4, SHOT_ECHO = 3;
+    const SHOT_RECENT = 0.2, SHOT_NEAR = 0.5, SHOT_ECHO = 40;
     const RIG_OFF = 0.15;                           // A below this: no automatic rig
     const RIG_WEIGHTS = Object.freeze({
       chorus: Object.freeze({ slowSwell: 3, climbRise: 2, leanTilt: 0.5, none: 1 }),
@@ -16840,13 +16840,13 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
     // The §4.7 base weight of one shot key (before mood, section, recency and echo).
     function baseWeight(key, f, A, orient, frames) {
       switch (key) {
-        case 'none': return 3 * (1 - A) * (1 - A) + (frames ? 4 : 0);
+        case 'none': return 3 * (1 - A) * (1 - A) + (frames ? 24 : 0);
         case 'settle': return 1.2;
-        case 'pushWord': return (f.emph ? 3 : f.words >= 2 ? 0.8 : 0.2) * (0.6 + f.energy);
+        case 'pushWord': return (f.emph ? 3 : f.words >= 2 ? 0.3 : 0.2) * (0.6 + f.energy);
         case 'readAlong': return (f.words >= 3 && f.dur >= 2.2 ? 1.6 : 0) * (orient === 'v' ? 0.7 : 1);
-        case 'snapZoom': return f.impact ? 5 : (f.energy >= 0.75 && f.onBeat ? 0.5 : 0);
+        case 'snapZoom': return f.impact ? 30 : (f.energy >= 0.75 && f.onBeat ? 0.5 : 0);
         case 'pullReveal': return f.sectionStart ? 2 : 0.4;
-        case 'sweepAcross': return f.words >= 2 && f.cells >= 8 && orient === 'h' ? 0.9 : 0;
+        case 'sweepAcross': return f.words >= 2 && f.cells >= 8 && orient === 'h' ? 0.3 : 0;
         case 'tiltHold': return 0.6 * (f.energy >= 0.4 ? 1 : 0.3);
         case 'driftOff': return f.cells <= 10 ? 0.7 : 0.2;
         case 'wideHold': return f.dur >= 3 && f.energy < 0.45 ? 1 : 0.1;
@@ -16930,9 +16930,9 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
       return out;
     }
 
-    // The recency and echo a cut's shot reads (§4.7): the previous cut's final shot (×0.1), the natural shots of the
-    // 3 cuts before it (×0.4) and the natural shot of the cut it echoes (×3). The natural pass (st.natural) weighs
-    // without recency, like the part slots.
+    // The recency and echo a cut's shot reads (§4.7): the previous cut's final shot (×SHOT_RECENT), the natural shots of
+    // the 3 cuts before it (×SHOT_NEAR) and the natural shot of the cut it echoes (×SHOT_ECHO). The natural pass
+    // (st.natural) weighs without recency, like the part slots.
     function recencyOf(st) {
       const hist = st.hist;
       const echo = hist.echo(st.cut.feat.repeatOf, 'cam.shot');
@@ -17030,7 +17030,7 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
       const A = ctx.look.amounts.camera;
       const shot = st.chosen['cam.shot'];
       st.decide(st, 'cam.zoom', SLOT_SPECS['cam.zoom'], (seed, withWhy) => {
-        let z = q2(N.lerp(0.85, 1.2, N.clamp(0.5 * A + 0.5 * f.energy)) * (f.impact ? 1.1 : 1));
+        let z = q2(N.lerp(0.8, 0.9, N.clamp(0.5 * A + 0.5 * f.energy)) * (f.impact ? 1.05 : 1));
         let capped = false;
         if (gentle) {
           const fill = SHOT.maxFill(shot);
@@ -17217,7 +17217,7 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
 
     // rigs(ctx, cuts, seams, duration) → Plan.rigs; sets cut.rig (the run index). A run's rig and rig.curve come from
     // its first cut (pins cut > line > work; seed hash32('rig', look.seed, first cut key, its cut salt)); amp =
-    // q2(0.4 + 0.6·A); the last chorus run gets amp ×1.25 (≤ 1.3) and, unless rig.curve is pinned, the curve slowBloom;
+    // q2(0.3 + 0.4·A); the last chorus run gets amp ×1.25 (≤ 1.3) and, unless rig.curve is pinned, the curve slowBloom;
     // other runs take the preset's own curve ('linear' for none and custom rigs). blend = the window of a transition
     // (not the hard cut) into the run's first cut, else null. t0 = the first cut's a (0 for the first run), t1 = the
     // next run's t0 (the duration for the last).
@@ -17263,7 +17263,7 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
           }
         }
         avoid = win && win !== NONE ? win : null;
-        const amp = q2(Math.min(AMP_MAX, q2(0.4 + 0.6 * A) * (chorusEnd ? LAST_CHORUS_AMP : 1)));
+        const amp = q2(Math.min(AMP_MAX, q2(0.3 + 0.4 * A) * (chorusEnd ? LAST_CHORUS_AMP : 1)));
         const rig = withAmp(d, amp);
         if (trace) trace.decision = rig;
         const curve = rigCurve(ctx, first, rig.v, chorusEnd);
@@ -23628,6 +23628,34 @@ MV.def('engine/scene/shot', ['core/num', 'core/curve', 'core/shot', 'core/script
 
   function isSpace(target, j) { return target.cls[j] === 'space'; }
 
+  // Which runs word, line and glyph aims may pick: the cut's own lyric (runs laid out from a span of the cut's text),
+  // once. Runs of other text (an arrange's index number or side note) never count, and of several runs laid out from
+  // the same span (echoStack's fading copies, a marquee's repeats) only the first, the main copy, so the camera never
+  // aims at those; null (every run) when no run is left out. Cached per target.
+  const lyricRuns = new WeakMap();
+  function lyricMask(target) {
+    let mask = lyricRuns.get(target);
+    if (mask === undefined) {
+      const seen = new Set();
+      const own = (target.runs || []).map((r) => {
+        const span = r.spec && Array.isArray(r.spec.span) ? r.spec.span.join(',') : null;
+        if (span === null || seen.has(span)) return false;
+        seen.add(span);
+        return true;
+      });
+      mask = own.includes(true) && own.includes(false) ? own : null;
+      lyricRuns.set(target, mask);
+    }
+    return mask;
+  }
+
+  // Whether glyph j can be part of a word, line or glyph aim: not a space, and of the lyric (lyricMask).
+  function aimable(target, j) {
+    if (isSpace(target, j)) return false;
+    const mask = lyricMask(target);
+    return !mask || mask[target.unitOf.run[j]];
+  }
+
   // Union of the rest boxes of glyphs j (target.box: x0 y0 x1 y1 per glyph) for which keep(j) holds; spaces never count.
   function unionOf(target, keep) {
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
@@ -23642,17 +23670,18 @@ MV.def('engine/scene/shot', ['core/num', 'core/curve', 'core/shot', 'core/script
     return x0 <= x1 ? { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } : null;
   }
 
-  // The ordered distinct unit indices ('word' | 'line') of the non-space glyphs.
+  // The ordered distinct unit indices ('word' | 'line') of the aimable glyphs.
   function unitsOf(target, unit) {
     const n = target.to - target.from, of = target.unitOf[unit];
     const seen = [];
-    for (let j = 0; j < n; j++) if (!isSpace(target, j) && !seen.includes(of[j])) seen.push(of[j]);
+    for (let j = 0; j < n; j++) if (aimable(target, j) && !seen.includes(of[j])) seen.push(of[j]);
     return seen.sort((a, b) => a - b);
   }
 
-  function nonSpace(target) {
+  // The aimable glyphs (for glyph aims and the reading path).
+  function aimGlyphs(target) {
     const out = [];
-    for (let j = 0; j < target.to - target.from; j++) if (!isSpace(target, j)) out.push(j);
+    for (let j = 0; j < target.to - target.from; j++) if (aimable(target, j)) out.push(j);
     return out;
   }
 
@@ -23685,9 +23714,24 @@ MV.def('engine/scene/shot', ['core/num', 'core/curve', 'core/shot', 'core/script
     return word === undefined ? null : unionOf(target, (j) => target.unitOf.word[j] === word);
   }
 
+  // The text block: the arrange's focus, grown to hold the aimable glyphs that lie inside the frame (spineColumn's
+  // title split by its note keeps only the upper column as its focus); the union of all glyphs without a focus.
+  function blockBox(D, target) {
+    const f = target.focus;
+    if (!(f && f.w > 0 && f.h > 0)) return unionOf(target, () => true);
+    const b = target.box;
+    const inFrame = (j) => b[j * 4] >= 0 && b[j * 4 + 1] >= 0 && b[j * 4 + 2] <= D.w && b[j * 4 + 3] <= D.h;
+    const lyric = unionOf(target, (j) => aimable(target, j) && inFrame(j));
+    if (!lyric) return f;
+    const x0 = Math.min(f.x, lyric.x), y0 = Math.min(f.y, lyric.y);
+    const x1 = Math.max(f.x + f.w, lyric.x + lyric.w), y1 = Math.max(f.y + f.h, lyric.y + lyric.h);
+    return x0 === f.x && y0 === f.y && x1 === f.x + f.w && y1 === f.y + f.h ? f : { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+  }
+
   // aimBox(env, target, aim, key?) → Box { x, y, w, h } in rest-world du, or null when the aim finds no glyph. Text
   // boxes are floored at 0.06 × short per side. 'frame' is the design frame; 'point' the point (key.px, key.py) of it;
-  // 'reading' (a path, §4.5.5) reports the text block.
+  // 'reading' (a path, §4.5.5) reports the text block. 'emph' without an emphasis is the block: a line nobody marked
+  // is framed whole (aiming at its last word left the words before it off-frame while they were sung).
   function aimBox(env, target, aim, key) {
     const D = env.D, m = FLOOR * D.short;
     if (aim === 'frame') return { x: 0, y: 0, w: D.w, h: D.h };
@@ -23697,12 +23741,10 @@ MV.def('engine/scene/shot', ['core/num', 'core/curve', 'core/shot', 'core/script
     }
     if (!target || target.to <= target.from) return null;
     let box = null;
-    if (aim === 'block' || aim === 'reading') {
-      const f = target.focus;
-      box = f && f.w > 0 && f.h > 0 ? f : unionOf(target, () => true);
-    } else if (aim === 'emph') {
+    if (aim === 'block' || aim === 'reading') box = blockBox(D, target);
+    else if (aim === 'emph') {
       const run = emphRun(target);
-      box = run ? unionOf(target, (j) => j >= run[0] && j <= run[1] && target.emph[j] === 1) : wordBox(target, -1);
+      box = run ? unionOf(target, (j) => j >= run[0] && j <= run[1] && target.emph[j] === 1) : blockBox(D, target);
     } else if (aim === 'first') box = wordBox(target, 0);
     else if (aim === 'last') box = wordBox(target, -1);
     else {
@@ -23714,7 +23756,7 @@ MV.def('engine/scene/shot', ['core/num', 'core/curve', 'core/shot', 'core/script
         const line = pick(unitsOf(target, 'line'), k);
         box = line === undefined ? null : unionOf(target, (j) => target.unitOf.line[j] === line);
       } else {
-        const j = pick(nonSpace(target), k);
+        const j = pick(aimGlyphs(target), k);
         box = j === undefined ? null : unionOf(target, (x) => x === j);
       }
     }
@@ -23820,7 +23862,7 @@ MV.def('engine/scene/shot', ['core/num', 'core/curve', 'core/shot', 'core/script
   // The reading units of a target: words; one word of ≥ 4 glyphs → up to 4 equal chunks in reading order; more than 12
   // words → lines. Each unit: its glyphs' box (floored), its centre and its sung start τ (cut-local).
   function readingUnits(env, target) {
-    const glyphs = nonSpace(target);
+    const glyphs = aimGlyphs(target);
     const words = unitsOf(target, 'word');
     const span = spanOf(env);
     const groups = [];
@@ -62346,10 +62388,21 @@ MV.def('ui/stage', ['ui/dom', 'ui/selection', 'ui/output', 'i18n/t', 'ui/shot_ed
     }
 
     // The keyframe editor's markers ①②③ where each key places its aim (DESIGN_2_1 §6.7), while its page is open and
-    // 「プレビューに印を出す」 is on.
+    // 「プレビューに印を出す」 is on. Markers that fall on one another (keys aimed at the same point: pushWord's keys on a
+    // line without emphasis all frame the whole text) are fanned out to the right, so each can be seen and grabbed.
     function marks() {
       const edit = app.shotEdit;
-      return edit && edit.markers ? edit.marks() : [];
+      const list = edit && edit.markers ? edit.marks() : [];
+      const plan = app.engine.plan;
+      if (list.length < 2 || !plan || !plan.design) return list;
+      const step = 2.2 * MARK_PX * plan.design.w / Math.max(1, css.w);     // a marker's width and a gap, in design units
+      const out = [];
+      for (const m of list) {
+        let x = m.x;
+        while (out.some((o) => Math.hypot(o.x - x, o.y - m.y) < step)) x += step;
+        out.push(Object.assign({}, m, { x }));
+      }
+      return out;
     }
 
     function drawMarks(k, dpr) {
@@ -62375,12 +62428,16 @@ MV.def('ui/stage', ['ui/dom', 'ui/selection', 'ui/output', 'i18n/t', 'ui/shot_ed
       octx.restore();
     }
 
-    // The marker under a point (design units), or null.
+    // The marker under a point (design units), the nearest one when two are in reach, or null.
     function markAt(p) {
       const plan = app.engine.plan;
       if (!plan || !plan.design) return null;
-      const du = MARK_PX * 1.4 * plan.design.w / Math.max(1, css.w);
-      return marks().find((m) => Math.hypot(m.x - p.x, m.y - p.y) <= du) || null;
+      let best = null, reach = MARK_PX * 1.4 * plan.design.w / Math.max(1, css.w);
+      for (const m of marks()) {
+        const d = Math.hypot(m.x - p.x, m.y - p.y);
+        if (d <= reach) { best = m; reach = d; }
+      }
+      return best;
     }
 
     // The line a hovered review row points at (view.highlight, §6.4.10.6): its drawn boxes in their own ink, except
@@ -62961,7 +63018,7 @@ MV.def('ui/stage', ['ui/dom', 'ui/selection', 'ui/output', 'i18n/t', 'ui/shot_ed
     return {
       layout, invalidate, setAlt, fullscreen, focus: () => dom.focus(wrap), element: wrap,
       isDirty: () => dirty, hasAlt: () => !!alt, steppedDown: () => steppedDown,
-      crop: setCrop, cropKey: () => (crop ? crop.target.key : null), peek, peeking: () => !!peekAt,
+      crop: setCrop, cropKey: () => (crop ? crop.target.key : null), peek, peeking: () => !!peekAt, marks,
     };
   }
 

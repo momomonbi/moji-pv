@@ -255,10 +255,21 @@ MV.def('ui/stage', ['ui/dom', 'ui/selection', 'ui/output', 'i18n/t', 'ui/shot_ed
     }
 
     // The keyframe editor's markers ①②③ where each key places its aim (DESIGN_2_1 §6.7), while its page is open and
-    // 「プレビューに印を出す」 is on.
+    // 「プレビューに印を出す」 is on. Markers that fall on one another (keys aimed at the same point: pushWord's keys on a
+    // line without emphasis all frame the whole text) are fanned out to the right, so each can be seen and grabbed.
     function marks() {
       const edit = app.shotEdit;
-      return edit && edit.markers ? edit.marks() : [];
+      const list = edit && edit.markers ? edit.marks() : [];
+      const plan = app.engine.plan;
+      if (list.length < 2 || !plan || !plan.design) return list;
+      const step = 2.2 * MARK_PX * plan.design.w / Math.max(1, css.w);     // a marker's width and a gap, in design units
+      const out = [];
+      for (const m of list) {
+        let x = m.x;
+        while (out.some((o) => Math.hypot(o.x - x, o.y - m.y) < step)) x += step;
+        out.push(Object.assign({}, m, { x }));
+      }
+      return out;
     }
 
     function drawMarks(k, dpr) {
@@ -284,12 +295,16 @@ MV.def('ui/stage', ['ui/dom', 'ui/selection', 'ui/output', 'i18n/t', 'ui/shot_ed
       octx.restore();
     }
 
-    // The marker under a point (design units), or null.
+    // The marker under a point (design units), the nearest one when two are in reach, or null.
     function markAt(p) {
       const plan = app.engine.plan;
       if (!plan || !plan.design) return null;
-      const du = MARK_PX * 1.4 * plan.design.w / Math.max(1, css.w);
-      return marks().find((m) => Math.hypot(m.x - p.x, m.y - p.y) <= du) || null;
+      let best = null, reach = MARK_PX * 1.4 * plan.design.w / Math.max(1, css.w);
+      for (const m of marks()) {
+        const d = Math.hypot(m.x - p.x, m.y - p.y);
+        if (d <= reach) { best = m; reach = d; }
+      }
+      return best;
     }
 
     // The line a hovered review row points at (view.highlight, §6.4.10.6): its drawn boxes in their own ink, except
@@ -870,7 +885,7 @@ MV.def('ui/stage', ['ui/dom', 'ui/selection', 'ui/output', 'i18n/t', 'ui/shot_ed
     return {
       layout, invalidate, setAlt, fullscreen, focus: () => dom.focus(wrap), element: wrap,
       isDirty: () => dirty, hasAlt: () => !!alt, steppedDown: () => steppedDown,
-      crop: setCrop, cropKey: () => (crop ? crop.target.key : null), peek, peeking: () => !!peekAt,
+      crop: setCrop, cropKey: () => (crop ? crop.target.key : null), peek, peeking: () => !!peekAt, marks,
     };
   }
 

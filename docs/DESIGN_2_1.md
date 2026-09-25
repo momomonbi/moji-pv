@@ -1097,12 +1097,16 @@ Times are cut-local, with sung start = 0. `times` are the fitted `{a, rest, out,
 #### 4.5.3 Aims
 
 Boxes are rest-world boxes from `target.box`, after `el.text.nudge`. Spaces are ignored. Every box is floored at
-`m = 0.06·short` per side, so a one-glyph aim cannot zoom without bound.
+`m = 0.06·short` per side, so a one-glyph aim cannot zoom without bound. When an arrange lays out text of its own beside
+the lyric (a run with `text`, such as sidebarIndex's index number or a side note), or lays the lyric out more than once
+(runs with the same `span`, such as echoStack's fading copies), word, line and glyph aims, the `word:k` anchors and the
+reading path take only the lyric's runs (runs with `span`), and of runs with the same `span` only the first (the main
+copy).
 
 | Aim | Box |
 |---|---|
-| `block` | `target.focus` |
-| `emph` | union of the first emphasized run (`hints.emph` / `emphLines`); no emphasis → `last` |
+| `block` | `target.focus`, grown to hold the lyric's glyphs (above) that lie inside the frame, for an arrange whose focus is one piece of the lyric (spineColumn's title split around its note) |
+| `emph` | union of the first emphasized run (`hints.emph` / `emphLines`); no emphasis → `block` (a plain line is framed whole, so no word leaves the frame while it is sung) |
 | `first`, `last`, `word:k` | word unit boxes (`target.unitOf.word`) |
 | `line:k`, `glyph:k` | line and glyph boxes (k clamped) |
 | `frame` | design frame (`c = C`) |
@@ -1256,26 +1260,26 @@ Notation: `A = look.amounts.camera`, `f = cut.feat`, `pool` = shot keys plus `'n
 
 **Weights:**
 ```
-none        3·(1−A)² + (lens def.frames ? 4 : 0)
+none        3·(1−A)² + (lens def.frames ? 24 : 0)
 settle      1.2
-pushWord    (f.emph ? 3 : f.words ≥ 2 ? 0.8 : 0.2) · (0.6 + f.energy)
+pushWord    (f.emph ? 3 : f.words ≥ 2 ? 0.3 : 0.2) · (0.6 + f.energy)
 readAlong   (f.words ≥ 3 && f.dur ≥ 2.2 ? 1.6 : 0) · (orient 'v' ? 0.7 : 1)
-snapZoom    f.impact ? 5 : (f.energy ≥ 0.75 && f.onBeat ? 0.5 : 0)
+snapZoom    f.impact ? 30 : (f.energy ≥ 0.75 && f.onBeat ? 0.5 : 0)
 pullReveal  f.sectionStart ? 2 : 0.4
-sweepAcross (f.words ≥ 2 && f.cells ≥ 8 && orient 'h') ? 0.9 : 0
+sweepAcross (f.words ≥ 2 && f.cells ≥ 8 && orient 'h') ? 0.3 : 0
 tiltHold    0.6 · (f.energy ≥ 0.4 ? 1 : 0.3)
 driftOff    f.cells ≤ 10 ? 0.7 : 0.2
 wideHold    (f.dur ≥ 3 && f.energy < 0.45) ? 1 : 0.1
 × moodBias(preset.tags)          (CH.moodBias; 1 for none)
 × section:  chorus: pushWord, snapZoom, sweepAcross ×1.5, none ×0.6 · verse or null: settle, driftOff, none ×1.3 ·
             bridge: tiltHold, wideHold ×1.5 · intro, outro: pullReveal, wideHold ×1.5
-× recency:  ×0.1 if = the previous cut's final cam.shot (hist.previous); ×0.4 if among the 3 before (hist near set)
-× echo:     ×3 if = the natural cam.shot of feat.repeatOf's cut (hist.echo)
+× recency:  ×0.2 if = the previous cut's final cam.shot (hist.previous); ×0.5 if among the 3 before (hist near set)
+× echo:     ×40 if = the natural cam.shot of feat.repeatOf's cut (hist.echo)
 value = CH.pickWeighted(pool keys sorted, w → q6(w), slotSeed('cam.shot'))     // Gumbel keyed by shot key; ties → smaller key
 ```
 
 **Parameters** (each has its own slot seed):
-- `cam.zoom = coerce(q2(lerp(0.85, 1.2, clamp(0.5·A + 0.5·f.energy)) · (f.impact ? 1.1 : 1)))`. For arrange `gentle`:
+- `cam.zoom = coerce(q2(lerp(0.8, 0.9, clamp(0.5·A + 0.5·f.energy)) · (f.impact ? 1.05 : 1)))`. For arrange `gentle`:
   `min(that, 0.7 / SHOT.maxFill(shot))`.
 - `cam.curve` = `R.fromSeed(seed).weighted(values, weights)` with:
   - impact → `dashStop` 3, `holdThenDash` 2;
@@ -1303,12 +1307,15 @@ value = CH.pickWeighted(pool keys sorted, w → q6(w), slotSeed('cam.shot'))    
   | interlude | driftSide 2, none 1 |
   | solo, other | slowSwell 1, climbRise 1 |
 
-- `amp = q2(0.4 + 0.6·A)`.
+- `amp = q2(0.3 + 0.4·A)`.
 - The **last chorus run** gets amp ×1.25 (clamped to 1.3) and curve `slowBloom` (why `rig.lastChorus`).
 - Other runs use the preset's curve unless `rig.curve` is pinned.
 
 **Stability** (tested, D§4.16.4 targets):
-- Inserting a line changes ≤ 4 other cuts' shots.
+- Inserting a line changes ≤ 4 other cuts' shots. A line sung again follows the natural shot of its first sung copy (the
+  echo), so an insertion next to a first copy that changes its shot also moves that line's repeats; these echo
+  followers are counted apart (with them, more than 4 other cuts change about 1.8 times as often as with the echo ×3 of
+  v2.1-D; NOTES "Step (b): automatic camerawork").
 - Rerolling a cut changes ≤ 3 other cuts.
 - Documents without new pins keep every v2 part choice (the new slots use new streams).
 
@@ -2117,8 +2124,10 @@ Guarantees:
 - 2–6 keys; [+] is disabled at 6.
 
 **While the page is open:**
-- `ui/stage` draws markers ①②③ on its overlay canvas where each key places its aim (from `engine.shotTrack`). Dragging a
-  marker sets `ox`/`oy` (free), and the wheel sets `fill`. The markers disappear when the page closes.
+- `ui/stage` draws markers ①②③ on its overlay canvas where each key places its aim (from `engine.shotTrack`). Markers
+  that fall on one another (keys aimed at the same point, such as pushWord's keys on a line without emphasis) are fanned
+  out to the right so each can be grabbed. Dragging a marker sets `ox`/`oy` (free), and the wheel sets `fill`. The
+  markers disappear when the page closes.
 - The timeline drawer's カット row shows ◆ at key times. Dragging a ◆ sets a numeric `at`.
 
 **Stage drags** of `el.text.nudge` invert `engine.viewAt(t)`, so drags stay under the pointer at any zoom.
@@ -2411,7 +2420,7 @@ The en page shows no Japanese except the product name and user data, such as mat
 | `frame.test.js`, `lens_filter_seam.test.js`, `conformance.test.js`, `facade.test.js` (+) | B | `rigAt` purity, blend continuity, `cameraAt` equals sequential view application (1e-6, roll 0); **default `lens.curve`, `seam.curve`, `dwell.curve` and `flow` reproduce the v2 op hashes exactly**; periodic lenses warp only when not linear; conformance of every shot preset and rig × 7 aspects × h/v × the 6 texts × 24 times (no NaN, zoom within [0.855, 3·1.15·1.04], same op hash twice, build ≤ 20 ms); facade `shotTrack`, `viewAt`, `registry` getter, fork keeps materials |
 | `mix.test.js` (new) | C | `derive` for every kind (variant and composite) gives defs that `REG.extend` accepts; `registryFor` returns `base` for no materials and is memoized; `version` changes on meta edits only; `baseVersion` constant; `sampleDefs()` pass the conformance harness (no NaN, balanced save/restore, identity rule for motion recipes, same op hash twice, particles ≤ budget after `mixShare`) over 40 seeded generated recipes × 7 aspects × 24 times |
 | `budget.test.js`, `sprites.test.js` (new) | B | masked behaviours put back exactly the masked columns of the masked nodes; `glyphCover` takes `drawGlyph`'s path and sprites; the fit: no budget without materials, every material phase within `SHARE` (or fully masked) with the step before over it and the ladder monotone, evaluated directly; the same records and frames from two engines and every output size. Sprites: ink rects of every level, rasters equal to those without `inkBox`, clipped draws that are the unclipped calls inside a clip (`inkClip`: none, all sides, open where rows start), shards and mosaics as before, settle, the sliced warm-up |
-| `camera_planner.test.js` (new) | D | determinism over the corpus; `amount.camera = 0` → all `none` and rigs `none`; impact cuts favour snapZoom (≥ 60 %); echo: repeated lines share shots (≥ 80 %); framing lens → `none` ≥ 70 %; `cam: 'none'` arranges never get auto shots; carry only within lines; rig runs follow sections; last chorus `slowBloom`; stability (insert a line → ≤ 4 other cuts' shots change; reroll a cut → ≤ 3); **documents without new pins keep every v2 part choice** |
+| `camera_planner.test.js` (new) | D | determinism over the corpus; `amount.camera = 0` → all `none` and rigs `none`; impact cuts favour snapZoom (≥ 60 %); echo: repeated lines share shots (≥ 80 %; the §4.7 constants reach about 55 % over the corpus, NOTES "Step (b)"); the moving shots of a video vary (no preset takes most of them, no long runs of one); framing lens → `none` ≥ 70 %; `cam: 'none'` arranges never get auto shots; carry only within lines; rig runs follow sections; last chorus `slowBloom`; stability (insert a line → ≤ 4 other cuts' shots change; reroll a cut → ≤ 3); **documents without new pins keep every v2 part choice** |
 | `planner_areas_season.test.js` (new) | D | line `season` gates pools, ×2.5, starts a segment, raises atmos probability; no `pin-off-season` when it matches; `avoid` excludes, relaxes with `avoid-empty`, pins still win; locks immune; `motion.speed` scales only unpinned dur/each/speed with `pfrom: 'rule'` |
 | `planner_materials.test.js` (new) | D | a pinned material is chosen; `pool: false` never auto-picked; one `pool: true` material keeps ≥ 90 % of choices; a body edit changes only the fp of cuts using it and keeps the cast cache warm; a meta edit changes `version`; a deleted material gives `pin-bad-value` plus a fallback; `material-bad` warning; golden plan hashes unchanged without materials |
 | `planner_pins`, `planner_explain`, `fields`, `planner_determinism` (+) | D | fuzz over the new slots and curve params at all scopes (always honoured); locks freeze `cam.*`/`motion.speed`, not `rig`; explain value equals plan value for the new slots; `fieldState` and `lockPayload` for the new slots; plan goldens regenerated on purpose |

@@ -30,6 +30,34 @@ MV.def('engine/scene/shot', ['core/num', 'core/curve', 'core/shot', 'core/script
 
   function isSpace(target, j) { return target.cls[j] === 'space'; }
 
+  // Which runs word, line and glyph aims may pick: the cut's own lyric (runs laid out from a span of the cut's text),
+  // once. Runs of other text (an arrange's index number or side note) never count, and of several runs laid out from
+  // the same span (echoStack's fading copies, a marquee's repeats) only the first, the main copy, so the camera never
+  // aims at those; null (every run) when no run is left out. Cached per target.
+  const lyricRuns = new WeakMap();
+  function lyricMask(target) {
+    let mask = lyricRuns.get(target);
+    if (mask === undefined) {
+      const seen = new Set();
+      const own = (target.runs || []).map((r) => {
+        const span = r.spec && Array.isArray(r.spec.span) ? r.spec.span.join(',') : null;
+        if (span === null || seen.has(span)) return false;
+        seen.add(span);
+        return true;
+      });
+      mask = own.includes(true) && own.includes(false) ? own : null;
+      lyricRuns.set(target, mask);
+    }
+    return mask;
+  }
+
+  // Whether glyph j can be part of a word, line or glyph aim: not a space, and of the lyric (lyricMask).
+  function aimable(target, j) {
+    if (isSpace(target, j)) return false;
+    const mask = lyricMask(target);
+    return !mask || mask[target.unitOf.run[j]];
+  }
+
   // Union of the rest boxes of glyphs j (target.box: x0 y0 x1 y1 per glyph) for which keep(j) holds; spaces never count.
   function unionOf(target, keep) {
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
@@ -44,17 +72,18 @@ MV.def('engine/scene/shot', ['core/num', 'core/curve', 'core/shot', 'core/script
     return x0 <= x1 ? { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } : null;
   }
 
-  // The ordered distinct unit indices ('word' | 'line') of the non-space glyphs.
+  // The ordered distinct unit indices ('word' | 'line') of the aimable glyphs.
   function unitsOf(target, unit) {
     const n = target.to - target.from, of = target.unitOf[unit];
     const seen = [];
-    for (let j = 0; j < n; j++) if (!isSpace(target, j) && !seen.includes(of[j])) seen.push(of[j]);
+    for (let j = 0; j < n; j++) if (aimable(target, j) && !seen.includes(of[j])) seen.push(of[j]);
     return seen.sort((a, b) => a - b);
   }
 
-  function nonSpace(target) {
+  // The aimable glyphs (for glyph aims and the reading path).
+  function aimGlyphs(target) {
     const out = [];
-    for (let j = 0; j < target.to - target.from; j++) if (!isSpace(target, j)) out.push(j);
+    for (let j = 0; j < target.to - target.from; j++) if (aimable(target, j)) out.push(j);
     return out;
   }
 
@@ -87,9 +116,24 @@ MV.def('engine/scene/shot', ['core/num', 'core/curve', 'core/shot', 'core/script
     return word === undefined ? null : unionOf(target, (j) => target.unitOf.word[j] === word);
   }
 
+  // The text block: the arrange's focus, grown to hold the aimable glyphs that lie inside the frame (spineColumn's
+  // title split by its note keeps only the upper column as its focus); the union of all glyphs without a focus.
+  function blockBox(D, target) {
+    const f = target.focus;
+    if (!(f && f.w > 0 && f.h > 0)) return unionOf(target, () => true);
+    const b = target.box;
+    const inFrame = (j) => b[j * 4] >= 0 && b[j * 4 + 1] >= 0 && b[j * 4 + 2] <= D.w && b[j * 4 + 3] <= D.h;
+    const lyric = unionOf(target, (j) => aimable(target, j) && inFrame(j));
+    if (!lyric) return f;
+    const x0 = Math.min(f.x, lyric.x), y0 = Math.min(f.y, lyric.y);
+    const x1 = Math.max(f.x + f.w, lyric.x + lyric.w), y1 = Math.max(f.y + f.h, lyric.y + lyric.h);
+    return x0 === f.x && y0 === f.y && x1 === f.x + f.w && y1 === f.y + f.h ? f : { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+  }
+
   // aimBox(env, target, aim, key?) → Box { x, y, w, h } in rest-world du, or null when the aim finds no glyph. Text
   // boxes are floored at 0.06 × short per side. 'frame' is the design frame; 'point' the point (key.px, key.py) of it;
-  // 'reading' (a path, §4.5.5) reports the text block.
+  // 'reading' (a path, §4.5.5) reports the text block. 'emph' without an emphasis is the block: a line nobody marked
+  // is framed whole (aiming at its last word left the words before it off-frame while they were sung).
   function aimBox(env, target, aim, key) {
     const D = env.D, m = FLOOR * D.short;
     if (aim === 'frame') return { x: 0, y: 0, w: D.w, h: D.h };
@@ -99,12 +143,10 @@ MV.def('engine/scene/shot', ['core/num', 'core/curve', 'core/shot', 'core/script
     }
     if (!target || target.to <= target.from) return null;
     let box = null;
-    if (aim === 'block' || aim === 'reading') {
-      const f = target.focus;
-      box = f && f.w > 0 && f.h > 0 ? f : unionOf(target, () => true);
-    } else if (aim === 'emph') {
+    if (aim === 'block' || aim === 'reading') box = blockBox(D, target);
+    else if (aim === 'emph') {
       const run = emphRun(target);
-      box = run ? unionOf(target, (j) => j >= run[0] && j <= run[1] && target.emph[j] === 1) : wordBox(target, -1);
+      box = run ? unionOf(target, (j) => j >= run[0] && j <= run[1] && target.emph[j] === 1) : blockBox(D, target);
     } else if (aim === 'first') box = wordBox(target, 0);
     else if (aim === 'last') box = wordBox(target, -1);
     else {
@@ -116,7 +158,7 @@ MV.def('engine/scene/shot', ['core/num', 'core/curve', 'core/shot', 'core/script
         const line = pick(unitsOf(target, 'line'), k);
         box = line === undefined ? null : unionOf(target, (j) => target.unitOf.line[j] === line);
       } else {
-        const j = pick(nonSpace(target), k);
+        const j = pick(aimGlyphs(target), k);
         box = j === undefined ? null : unionOf(target, (x) => x === j);
       }
     }
@@ -222,7 +264,7 @@ MV.def('engine/scene/shot', ['core/num', 'core/curve', 'core/shot', 'core/script
   // The reading units of a target: words; one word of ≥ 4 glyphs → up to 4 equal chunks in reading order; more than 12
   // words → lines. Each unit: its glyphs' box (floored), its centre and its sung start τ (cut-local).
   function readingUnits(env, target) {
-    const glyphs = nonSpace(target);
+    const glyphs = aimGlyphs(target);
     const words = unitsOf(target, 'word');
     const span = spanOf(env);
     const groups = [];

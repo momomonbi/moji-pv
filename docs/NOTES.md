@@ -7742,3 +7742,192 @@ a link to docs/FILMORA.md) and 透過動画（WebM）, and says 透明 means tra
 
 Checks: `build.py --check` (213 modules); goldens unchanged; the whole Node suite (1645 pass); every browser test and
 `build_test.py` (see the PR run).
+
+## Step (b): automatic camerawork
+
+Goldens step (b) of DESIGN_2_1 §7.5: the §7.3 figures of the automatic camerawork measured, the §4.7 constants tuned
+(the formulas are unchanged), a visual QA of whole videos, four aim rules in the engine, and the goldens regenerated on
+purpose. A review of the first round found that the stability claim did not hold on other samples, that the more
+frequent `snapZoom` lost the first word of plain impact lines, and that the weaker recency let `settle` run on; this
+section is the state after that review.
+
+**Tuned constants** (`planner/camera`; DESIGN_2_1 §4.7 updated):
+
+| constant | before | after | why |
+|---|---|---|---|
+| echo (the natural shot of the first sung copy) | ×3 | ×40 | repeated lines take their first copy's shot |
+| recency: the previous cut's final shot | ×0.1 | ×0.2 | lets the echo win over a repeat's neighbour; ×0.4 (first round) let one shot run over 6 cuts |
+| recency: the natural shots of the 3 cuts before | ×0.4 | ×0.5 | the same |
+| `none` with a framing lens (`frames: true`) | +4 | +24 | a lens that moves the frame takes no shot on top |
+| `snapZoom` on an impact cut | 5 | 30 | impact cuts snap |
+| `pushWord` on a line of ≥ 2 words without emphasis | 0.8 | 0.3 | a push on a plain line is a slow `settle`; the push to a word is for emphasized lines |
+| `sweepAcross` | 0.9 | 0.3 | it frames one word at a time (fill .8 of the first, then the last word), so the words in between pass off-frame while they are sung |
+| `cam.zoom` | `lerp(0.85, 1.2, …) · (impact ? 1.1 : 1)` | `lerp(0.8, 0.9, …) · (impact ? 1.05 : 1)` | the closest preset keys (fill .95) stay inside the safe area |
+| rig `amp` | `0.4 + 0.6·A` | `0.3 + 0.4·A` | the rig zooms about the frame centre after the shot's safe clamp |
+
+Unchanged: the other §4.7 weights, the section factors, the rules, the gentle cap (0.7), `cam.curve`, `cam.follow`, the
+rig weights, the last chorus ×1.25 (≤ 1.3). The impact zoom factor below 1 (0.95, 0.85) was tried after the aim fix
+below: it changes little (`snapZoom` cuts with text over 2 % of the short side outside the safe area: 78 → 65 → 64 of
+367), so it stays at 1.05.
+
+**Aims** (`engine/scene/shot`, DESIGN_2_1 §4.5.3 updated; the frames of v2 documents do not use them):
+- An arrange's own text (sidebarIndex's index number, a side note: runs without `span`) is never aimed at; `pushWord`
+  and `snapZoom` zoomed onto the number '03' as the last word (first round).
+- `emph` without an emphasis is the block, not the last word. `snapZoom` (now the usual shot of an impact cut) and
+  `pushWord` zoomed to about 3× onto the last word of a plain line, and 「Go/まっすぐに!」 showed only 「まっすぐに」
+  while 'Go' was sung. A plain line is now framed whole: the snap is a punch-in on the line.
+- Of runs laid out from the same span (echoStack's fading copies, a marquee's repeats) only the first, the main copy,
+  is aimed at; `pushWord` and `snapZoom` aimed at the last copy's last word and the main line left the frame.
+- `block` grows to hold the lyric's glyphs inside the frame: spineColumn gives only the upper piece of a title split
+  around its note as its focus (its ornaments frame that piece, as in v2), and `pullReveal` and `settle` cut 「バス停」
+  off at the bottom. The arrange's focus itself is unchanged, since ornaments, lenses and staggers read it in v2 frames.
+- Tests in `shot_engine`: every word of a plain line stays on-frame while it is sung under `snapZoom` and `pushWord`
+  (3 texts, 3 arranges, 3 aspects); aims on echoStack stay in the main line; the block holds a split spine title. A
+  mutant of each rule fails its test.
+- The keyframe editor's markers (`ui/stage`, DESIGN_2_1 §6.7): pushWord's three keys on a plain line now aim at the same
+  point, so their markers covered one another and a drag took ① when ② was meant (`ui_flows` keyframes failed). Markers
+  that fall on one another are fanned out to the right, and a press takes the nearest marker; the flow checks that each
+  marker can be grabbed (the mutant without the fan fails it).
+
+**§7.3 figures** (where the rules leave the shot open; catalog / synthetic registry; the test's sample is corpus(6)):
+
+| target | before (corpus(8), `## v2.1-D`) | after, corpus(8) | after, independent samples (catalog / synthetic) |
+|---|---|---|---|
+| impact cuts → `snapZoom` ≥ 60 % | 54 % / 56 % | 82 % / 86 % | 68–79 % / 79–83 % |
+| framing lens → `none` ≥ 70 % | 62 % / 62 % (others 20 % / 19 %) | 80 % / 78 % (others 16 % / 14 %) | 78–79 % / 76–77 % |
+| repeated lines share their shot ≥ 80 % | 34 % / 29 % (unrelated 25 % / 19 %) | 56 % / 53 % (unrelated 30 % / 23 %) | 55–56 % / 54 % |
+| … where the echo can act | 32 % / 30 % | 62 % / 65 % | 59–61 % / 64–65 % |
+
+- Independent samples: corpus seeds 20–39 (240 documents), corpus(20), and the 8 catalog moods pinned (288 documents).
+  Impact → `snapZoom` varies by mood: with the moods pinned the calm moods stay under 60 % (quietHush 46 %, dreamHaze
+  52 %, heartAche 64 %; before 23 %, 40 %, 39 %), since their tag bias weighs against 'hard' and 'fast' shots; the
+  aggregate targets hold on every sample.
+- **The echo target (80 %) is not reached, by design of the formulas.** `none` is never an echo (only preset shots are
+  choices, §3.9), and the first copy of about half the repeated cuts (54 % catalog, 42 % synthetic) is on `none`: a
+  layout without camerawork (a rule), a framing lens, a low camera amount. A stronger echo or a weaker recency gains a
+  few points and makes edits change more cuts (below); the first round's recency (×0.4, ×0.7) gave 67 % / 70 % where the
+  echo can act, and `settle` took up to 3/4 of a video's moving shots.
+- **Variety** (review's song below, 288 videos): the most common moving shot's share of a video, median / p90 / max,
+  0.38 / 0.48 / 0.60 before, 0.45 / 0.59 / 0.75 in the first round, 0.42 / 0.54 / 0.68 now (over 0.6: 0, 21, 8
+  videos); neighbouring cuts on the same moving shot 2.2 % → 5.5 % → 3.6 %; longest run 3 → 6 → 4 cuts (quietHush has
+  the highest share: 0.45 → 0.56 → 0.51).
+- **Stability** (probe with planner_stability's own insertion and reroll, the two registries, corpus seeds 3–29: 972
+  insertions per registry and timing, not the tested sample). A line sung again follows the natural shot of its first
+  sung copy, so an insertion next to a first copy that changes its shot now also moves that line's repeats. With them,
+  insertions with starts pinned change more than 4 other cuts about 1.8 times as often as before (3.1 % against 1.7 %
+  of 1,944; worst 15 against 11); without these echo followers (a changed cut whose `repeatOf` cut changed too) as
+  often as before (0.7 % against 0.7 %, worst 6 against 8). With automatic timing: 1.2 % against 0.7 % (followers
+  counted), 0.2 % against 0.4 % (without). Rerolls: more than 3 other cuts in 0.1 % (9 of 6,497) against 0.2 %, worst 7
+  against 5 (a first sung copy rerolled to `none`: its 3 repeats lose their echo and take new shots, and 4 neighbours
+  follow). The first round's claim that insertions became more stable held for its own 108 cases only: counting the
+  followers they change more cuts; without them its weaker recency (×0.4) was a little steadier (0.4 %), and this
+  round's ×0.2 buys the variety above for 0.7 %, the rate before step (b).
+- Tests: `camera_planner` asserts impact ≥ 60 %, framing lens ≥ 70 % and ≥ 4 × the other lenses, repeats ≥ 50 % and
+  ≥ 1.6 × unrelated, ≥ 55 % where the echo can act (floors below every sample above), and a new variety check (the
+  most common moving shot: median ≤ 0.45, over 0.6 in ≤ 5 % of plans; neighbours on the same moving shot ≤ 7 %; runs
+  ≤ 6; the first round's recency fails it). `planner_stability` keeps the insertion bounds of v2.1-D for all changed
+  cuts (starts pinned: worst 7, ≤ 5 %; automatic timing: worst 9, ≤ 15 %) and adds bounds for the changes that are not
+  echo followers (starts pinned: worst 6, ≤ 3 %; automatic timing: worst 8, ≤ 2 %), set so that every 3-seed window of
+  corpus seeds 0–29 passes them.
+
+**Visual QA.** Two scratch tools (not kept) planned and measured whole videos in the lab page, catalog registry,
+fallback fonts, 12 seeds × 8 moods (pinned) × 16:9, 9:16 and 1:1 = 288 videos each:
+1. The sample lyrics with a second サビ (「紙ひこうきの朝」, 20 lines on the `basic` fixture's 60 s song, 12,672 cuts):
+   every shot key's aimed box through the cut's full camera (shot, lens, rig, impulses) against the safe area; every
+   cut sampled at 24 fps for the ground's coverage (the frame corners in the 0.15 bleed of the parallax 0.25 and 0.5
+   layers), the speed of the text centre, the zoom rate and the roll rate; a contact sheet per video for seed 0 (one
+   row per cut, four frames across it, the safe area drawn over each frame).
+2. The review's song (「夜明けのバス停」, 18 lines with two サビ and a 大サビ, other seeds, 10,944 lyric cuts): every
+   lyric glyph of the main copy on screen while its word is sung (a word counts as lost when it is past the frame edge
+   for more than 30 % of its sung window), per-cut speeds, echoStack and spineColumn cases, the variety above; frame
+   strips of the cuts the review named.
+
+| check (288 videos each) | before | first round | now |
+|---|---|---|---|
+| 1: shot keys whose aimed box leaves the safe area (by > 0.5 % of the short side) | 29.5 % | 13.6 % | 12.1 % |
+| 1: … by the shot's own framing (most: tiltHold's −4° roll) | 1,882 | 161 | 161 |
+| 1: … past the frame edge / past it by more than 5 % of the short side | 1,375 / 312 | 144 / 2 | 120 / 3 |
+| 1: ground edge visible (sampled frames) | 0 (least margin 6.3 %) | 0 | 0 (6.3 %) |
+| 1: cuts with a zoom faster than 3 e-folds/s outside `snapZoom` | 269 | 155 | 102 |
+| 1: text centre speed outside `snapZoom`, p99 / max (frame widths/s) | 2.5 / 7.9 | 1.4 / 6.1 | 1.1 / 4.2 |
+| 2: lyric cuts with a word off-frame while it is sung | 853 | 438 | 199 |
+| 2: 「Go/まっすぐに!」 cuts with a word off-frame while it is sung (of 576) | 160 | 182 | 10 |
+| 2: `snapZoom` cuts: zoom p90; text speed p90 / max (frame widths/s) | 3.3; 6.0 / 15.8 | 3.1; 3.9 / 15.7 | 2.3; 1.2 / 3.3 |
+| 2: plain multi-word lines on `pushWord` losing a word | 164 of 180 | 56 of 62 | 0 of 69 |
+| 2: echoStack `pushWord`/`snapZoom` cuts with half the main line or more off-frame | 48 of 124 | 29 of 99 | 12 of 104 |
+| 2: shot keys aimed wholly outside the arrange's focus | 62 | 56 | 0 |
+| 2: spineColumn title cards with title glyphs cut (of 32) | 32 | 24 | 0 |
+| 2: `sweepAcross` cuts (all crop their line) | 29 | 23 | 11 |
+| 2: ground edge visible | 0 | 0 | 0 (least margin 4.9 %) |
+
+What the sheets and strips showed, and what changed:
+- **Plain impact lines keep every word.** 「Go/まっすぐに!」 on 9:16 quietHush: the snap now frames 「Go」 and
+  「まっすぐに」 together from the first frame to the last (before: 「まっすぐに」 alone, 'Go' off the top-left); on
+  sidebarIndex the snap frames 「71 | Fly high どこまでも」 as the arrange laid it out.
+- **Snaps are gentler.** A snap onto the whole line zooms less than one onto a word: zoom p90 2.3 (was 3.1), and no
+  whip (text speed at most 3.3 frame widths/s, was 15.7). giantWhisper's snap onto 'Go' (its words are numbered giant
+  first, so `last` was the whispered 'Go', at zoom 3 and about 8 frame widths/s) is gone with it: 17 cuts → 0.
+- **Echo copies and split titles.** echoStack's `pushWord` on 「Run/run/until the morning light」 frames the main line
+  (was: 'ng light' of the last copy at zoom 3, the main line off the top); the spineColumn title 「夜明けのバス停」 keeps
+  「バス停」 in every frame of `pullReveal`.
+- **Words left the frame** on the closest keys in the sheets before step (b) (`cam.zoom` up to 1.32 multiplied the
+  preset fills: `snapZoom`'s fill .95 became 1.2); with `cam.zoom` ≤ 0.945 every preset key fills ≤ 0.9 of the frame.
+  The shots still move (mean zoom travel of a `settle` cut: 12 % before, 7 % now).
+- **No ground edge** in any sampled frame. The black bars seen at some cut changes are the `shutterSnap` transition, as
+  designed. **No seasick drift**: rig and lens drifts stay slow (roll p99 9.6°/s, from lens sways and the rig's lean
+  at a run change); the lower rig `amp` makes the section moves subtler.
+- **Left as they are**, with the reason:
+  - `pushWord` on an emphasized line still pushes to the emphasized word (fill .88 of it), so the words sung after it
+    are off-frame (75 % of 138 multi-word emphasized lines; a one-glyph emphasis such as 「*鍵*が鳴る」 reaches zoom 3).
+    That is the preset's point, on a word the user marked; its weight is unchanged.
+  - `sweepAcross`, when chosen, still frames one word at a time (FROZEN preset keys); it is rarer (11 cuts in 288
+    videos).
+  - A `snapZoom` on a small corner block (cornerNote) reaches the zoom limit 3, and the bleed clamp (§4.5.4, FROZEN)
+    keeps the camera from centring it: the line stays whole but sits in the corner, partly outside the safe area. Most
+    remaining keys outside the safe area (1,717, all but 161 of them) are pushed there by the lens (beatZoom, handHeld,
+    rollSway, driftFloat, impactKick, the framing lenses) and the rig after the shot has clamped its box; a clamp that
+    accounts for them would be an engine change of §4.5.4.
+  - giantWhisper numbers its words giant first, so `first` and `last` (pullReveal, sweepAcross, readAlong) follow the
+    layout, not the lyric. The stagger's 'sung' order reads the same numbering; changing it changes v2 frames.
+- Sheets kept in `.qa-cam/` (git-ignored): `r0_*` before step (b), `r1_*` the first round, `r2_*` now (contact sheets of
+  seed 0; `r2_review_song_*` pages of the review's song), `strip_*` frame strips of the cuts above, first round over
+  now.
+
+**Goldens.** `node tests/update_golden.js --check` reported `frame_hashes_v2.json: matches` (the corpus with the
+camerawork pinned off renders the v2 frames, asserted before writing) and `plan_hashes.json`, `frame_hashes.json` and
+`project_media.json`: DIFFERS. Regenerated on purpose, against the first round: 151 of 240 plan hashes (the recency and
+`sweepAcross` weights change shots); frames: basic 3, vertical 0, lrc 5 and long 4 of 40; the media fixture's plan is
+unchanged and 1 of its 40 frames changes (an aim). The registry version (`83c7523d`) is unchanged, and no part choice
+moved (`camera_planner`'s v2 digest).
+
+**Checks.** The whole Node suite (`--test-concurrency=1`): 1,593 of 1,593 passed (run before a refactor of the block
+aim that keeps every result; `shot_engine` and `update_golden.js --check`, all four files matching, were run after it).
+`build.py --check` (212 modules), `determinism.py`, `contact_sheet.py` (self-check), `parts_gallery.py`,
+`glyph_parity.py` and `ui_flows.py` (38 flows) pass. `perf.py`, once: long+camera+materials behave p50 0.10 ms, frame
+p50 17.7 / p95 27.7 ms; basic+media p50 13.7 / p95 25.4 ms; OK within the §7.4 budgets.
+
+## Lead: integrating step (b)
+
+Step (b) (9e825e0 on 0a89722, both rounds) applied to main 3dbd494 without conflicts. The goldens were regenerated on
+purpose and came out byte for byte as the step's own (plan_hashes, frame_hashes, project_media); frame_hashes_v2 is
+unchanged, so v2 frames stay as they were. The review fixes merged in between do not touch the camera.
+
+**Decisions asked of the lead:**
+
+- The engine aim rules in `engine/scene/shot.js` (DESIGN_2_1 §4.5.3) are accepted: word, line and glyph aims read only
+  the cut's own lyric runs (not sidebarIndex's number); an `emph` aim on a line without emphasis frames the block;
+  of runs sharing one span only the main copy is aimed at; a `block` aim grows to hold the lyric glyphs inside the
+  frame. They fix a lyric pushed out of the frame, and v2 frames do not change.
+- The echo target of §7.3 (repeats share their shot, 80 %) stays open at about 56 %: 'none' is never an echo (§3.9),
+  and stronger echo weights break the reroll bound and the framing-lens target. The tests pin what is reached.
+- Recency ×0.2 / ×0.5 is accepted: variety over a few tenths of a percent of stability. planner_stability counts echo
+  followers apart; without them the insertion rate is the one from before step (b).
+- `ui/stage.js` fans out keyframe markers that sit on one point (pushWord on a plain line aims its three keys at the
+  same place), so each can still be grabbed.
+
+**Open** (in the step's own section): pushWord still pushes to an emphasized word; sweepAcross frames one word at a
+time (FROZEN keys, now rarer); a snapZoom on a small cornerNote block and keys moved by lenses or the rig after the
+shot's clamp can leave the safe area (§4.5.4 is FROZEN); giantWhisper's first/last order follows its layout.
+
+Checks: `build.py --check` (213 modules); goldens as above; the whole Node suite (1650 pass); every browser test and
+`build_test.py` (see the PR run).
