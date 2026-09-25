@@ -10,6 +10,8 @@ MV.def('engine/render/post', ['core/hash', 'core/rng', 'core/noise', 'core/schem
   const TILE = 128;                    // texture tiles are 128 × 128 px and wrap seamlessly
   const TILE_VARIANTS = 24;
   const TILE_NAMES = Object.freeze(['grain', 'halftone', 'scan', 'dust', 'fiber']);
+  const LAYER_MAX = 4;                 // cached frame-sized layers (fx.layer), least recently used dropped first
+  const LAYER_BUDGET = 64 * 1024 * 1024;   // … and their bytes (one 2160p 21:9 layer is 44 MB)
   const WHEN_FADE = 0.2;               // 'arrive' / 'depart' filters fade over 0.2 s past their window
   const BEAT_DECAY = 0.15;             // 'beat' filters pulse and decay over ~0.15 s
   const IMPACT_DECAY = 0.6;
@@ -82,12 +84,14 @@ MV.def('engine/render/post', ['core/hash', 'core/rng', 'core/noise', 'core/schem
 
   // --- texture tiles -------------------------------------------------------------------------------------------------
 
-  // createTileBank(factory) → { tile(name, seed) → CanvasImageSource }. Each name has one 128 px base tile drawn once
-  // with plain Ctx2D calls from core/noise; a seed selects a wrapped offset of it (LRU of 24 variants), so a tile that
-  // changes on fx.tick costs four drawImage calls, not a new texture.
+  // createTileBank(factory) → { tile(name, seed) → CanvasImageSource, layer(key, w, h, paint), clear() }. Each name has
+  // one 128 px base tile drawn once with plain Ctx2D calls from core/noise; a seed selects a wrapped offset of it (LRU of
+  // 24 variants), so a tile that changes on fx.tick costs four drawImage calls, not a new texture.
   function createTileBank(factory) {
     const bases = new Map();
     const variants = new Map();
+    const layers = new Map();          // 'key\0wxh' → { canvas, bytes }, least recently used first
+    let layerBytes = 0;
 
     function canvas() { return factory.create(TILE, TILE, { alpha: true }); }
 
@@ -187,7 +191,29 @@ MV.def('engine/render/post', ['core/hash', 'core/rng', 'core/noise', 'core/schem
       return v.canvas;
     }
 
-    return { tile, clear() { bases.clear(); variants.clear(); } };
+    // layer(key, w, h, paint) → a w × h CanvasImageSource painted once by paint(ctx, w, h) on a new (clear, default
+    // state) canvas and kept for later calls with the same key and size (LRU, LAYER_MAX layers within LAYER_BUDGET); null
+    // when one layer alone would exceed the budget. The key names everything paint draws besides the size, so a kept
+    // layer and a new one hold the same pixels: the cache only saves time (§7.1).
+    function layer(key, w, h, paint) {
+      const id = key + '\u0000' + w + 'x' + h;
+      const hit = layers.get(id);
+      if (hit) { layers.delete(id); layers.set(id, hit); return hit.canvas; }
+      const bytes = w * h * 4;
+      if (bytes > LAYER_BUDGET) return null;
+      for (const [old, e] of layers) {
+        if (layers.size < LAYER_MAX && layerBytes + bytes <= LAYER_BUDGET) break;
+        layers.delete(old);
+        layerBytes -= e.bytes;
+      }
+      const made = factory.create(w, h, { alpha: true });
+      paint(made.ctx, w, h);
+      layers.set(id, { canvas: made.canvas, bytes });
+      layerBytes += bytes;
+      return made.canvas;
+    }
+
+    return { tile, layer, clear() { bases.clear(); variants.clear(); layers.clear(); layerBytes = 0; } };
   }
 
   // --- the FxContext ---------------------------------------------------------------------------------------------------
@@ -203,7 +229,10 @@ MV.def('engine/render/post', ['core/hash', 'core/rng', 'core/noise', 'core/schem
     // paints draw with (duoTone maps the frame to its ground and accent); `flashScale`, the preview's reduce-flash
     // factor (0.3 with 点滅を抑える, 1 in export), which impulse('flash') already carries and parts apply to the flashes
     // they make themselves (flashPop, invertBlink, whiteFlash); `backdrop`, the frame's backdrop mode ('scene' |
-    // 'chroma' | 'black' | 'clear', §4.19.4), so a part can adapt without testing the ground colour.
+    // 'chroma' | 'black' | 'clear', §4.19.4), so a part can adapt without testing the ground colour; `layer(key, paint)`,
+    // a frame-sized picture that is the same on every frame (edgeShade's vignette) painted once per key and frame size
+    // by paint(ctx, w, h) and kept (tile bank), so a costly full-frame paint becomes one drawImage. Too large to keep, it
+    // is painted into a frame surface that the frame's pool.end() takes back.
     const fx = {
       w: 0, h: 0, unit: 1, quality: 'preview', alpha: false, cut: null, pal: null, flashScale: 1, backdrop: 'scene',
       take: () => pool.take(fx.w, fx.h),
@@ -217,6 +246,13 @@ MV.def('engine/render/post', ['core/hash', 'core/rng', 'core/noise', 'core/schem
       rng: (...labels) => RNG.stream(st.seed, ...labels),
       noise: (x) => NZ.noise1(st.seed, x),
       tile: (name, seed) => tiles.tile(name, seed),
+      layer(key, paint) {
+        const kept = tiles.layer(String(key), fx.w, fx.h, paint);
+        if (kept) return kept;
+        const s = pool.take(fx.w, fx.h);
+        paint(s.ctx, fx.w, fx.h);
+        return s.canvas;
+      },
       textAt(dt) {
         if (!st.allowTextAt) throw new FxError('no-text-at', "fx.textAt needs needs: ['textAt'] on the filter");
         if (++st.textCalls > TEXT_AT_MAX) throw new FxError('text-at-budget', 'fx.textAt may be called at most 3 times per frame');

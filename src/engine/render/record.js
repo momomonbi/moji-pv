@@ -134,6 +134,7 @@ MV.def('engine/render/record', ['core/hash', 'core/rng', 'core/noise', 'core/col
     const w = o.w, h = o.h;
     const pool = [];
     const tiles = new Map();
+    const layers = new Map();
     let out = 0, textCalls = 0;
     const fx = {
       w, h, unit: o.unit || 1, quality: o.quality || 'export', alpha: !!o.alpha, cut: o.cut || null,
@@ -179,6 +180,18 @@ MV.def('engine/render/record', ['core/hash', 'core/rng', 'core/noise', 'core/col
           tiles.set(key, canvas);
         }
         return tiles.get(key);
+      },
+      // A kept layer, as in engine/render/post: painted once per key (its ops are recorded then) on a canvas whose id
+      // names the key and size, so the draws of it show which picture they lay down.
+      layer(key, paint) {
+        const id = 'layer:' + key + ':' + w + 'x' + h;
+        if (!layers.has(id)) {
+          const s = surfaceOf(recorder.factory, w, h, true);
+          paint(s.ctx, w, h);
+          s.canvas.id = id;
+          layers.set(id, s.canvas);
+        }
+        return layers.get(id);
       },
       textAt(dt) {
         if (!o.allowTextAt) throw new FxError('no-text-at', "fx.textAt needs needs: ['textAt'] on the filter");

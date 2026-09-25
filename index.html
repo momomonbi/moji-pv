@@ -1,6 +1,6 @@
 <!doctype html><html lang="ja"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-VylQFtBXxQvcrPLz5tWr8Jk0OYgS97wWg1KknkXbKQc='; style-src 'sha256-RJ+J2jPfQmujoLqduc4mjqSSzNBP7DIWLiYjNX3ebXY=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-YneM1n5LzLqeJzjmV0T9kZrT/C/fSBUt7kXiL/o+uCo='; style-src 'sha256-RJ+J2jPfQmujoLqduc4mjqSSzNBP7DIWLiYjNX3ebXY=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
 <title>文字PVメーカー</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -16874,6 +16874,8 @@ MV.def('engine/render/post', ['core/hash', 'core/rng', 'core/noise', 'core/schem
   const TILE = 128;                    // texture tiles are 128 × 128 px and wrap seamlessly
   const TILE_VARIANTS = 24;
   const TILE_NAMES = Object.freeze(['grain', 'halftone', 'scan', 'dust', 'fiber']);
+  const LAYER_MAX = 4;                 // cached frame-sized layers (fx.layer), least recently used dropped first
+  const LAYER_BUDGET = 64 * 1024 * 1024;   // … and their bytes (one 2160p 21:9 layer is 44 MB)
   const WHEN_FADE = 0.2;               // 'arrive' / 'depart' filters fade over 0.2 s past their window
   const BEAT_DECAY = 0.15;             // 'beat' filters pulse and decay over ~0.15 s
   const IMPACT_DECAY = 0.6;
@@ -16946,12 +16948,14 @@ MV.def('engine/render/post', ['core/hash', 'core/rng', 'core/noise', 'core/schem
 
   // --- texture tiles -------------------------------------------------------------------------------------------------
 
-  // createTileBank(factory) → { tile(name, seed) → CanvasImageSource }. Each name has one 128 px base tile drawn once
-  // with plain Ctx2D calls from core/noise; a seed selects a wrapped offset of it (LRU of 24 variants), so a tile that
-  // changes on fx.tick costs four drawImage calls, not a new texture.
+  // createTileBank(factory) → { tile(name, seed) → CanvasImageSource, layer(key, w, h, paint), clear() }. Each name has
+  // one 128 px base tile drawn once with plain Ctx2D calls from core/noise; a seed selects a wrapped offset of it (LRU of
+  // 24 variants), so a tile that changes on fx.tick costs four drawImage calls, not a new texture.
   function createTileBank(factory) {
     const bases = new Map();
     const variants = new Map();
+    const layers = new Map();          // 'key\0wxh' → { canvas, bytes }, least recently used first
+    let layerBytes = 0;
 
     function canvas() { return factory.create(TILE, TILE, { alpha: true }); }
 
@@ -17051,7 +17055,29 @@ MV.def('engine/render/post', ['core/hash', 'core/rng', 'core/noise', 'core/schem
       return v.canvas;
     }
 
-    return { tile, clear() { bases.clear(); variants.clear(); } };
+    // layer(key, w, h, paint) → a w × h CanvasImageSource painted once by paint(ctx, w, h) on a new (clear, default
+    // state) canvas and kept for later calls with the same key and size (LRU, LAYER_MAX layers within LAYER_BUDGET); null
+    // when one layer alone would exceed the budget. The key names everything paint draws besides the size, so a kept
+    // layer and a new one hold the same pixels: the cache only saves time (§7.1).
+    function layer(key, w, h, paint) {
+      const id = key + '\u0000' + w + 'x' + h;
+      const hit = layers.get(id);
+      if (hit) { layers.delete(id); layers.set(id, hit); return hit.canvas; }
+      const bytes = w * h * 4;
+      if (bytes > LAYER_BUDGET) return null;
+      for (const [old, e] of layers) {
+        if (layers.size < LAYER_MAX && layerBytes + bytes <= LAYER_BUDGET) break;
+        layers.delete(old);
+        layerBytes -= e.bytes;
+      }
+      const made = factory.create(w, h, { alpha: true });
+      paint(made.ctx, w, h);
+      layers.set(id, { canvas: made.canvas, bytes });
+      layerBytes += bytes;
+      return made.canvas;
+    }
+
+    return { tile, layer, clear() { bases.clear(); variants.clear(); layers.clear(); layerBytes = 0; } };
   }
 
   // --- the FxContext ---------------------------------------------------------------------------------------------------
@@ -17067,7 +17093,10 @@ MV.def('engine/render/post', ['core/hash', 'core/rng', 'core/noise', 'core/schem
     // paints draw with (duoTone maps the frame to its ground and accent); `flashScale`, the preview's reduce-flash
     // factor (0.3 with 点滅を抑える, 1 in export), which impulse('flash') already carries and parts apply to the flashes
     // they make themselves (flashPop, invertBlink, whiteFlash); `backdrop`, the frame's backdrop mode ('scene' |
-    // 'chroma' | 'black' | 'clear', §4.19.4), so a part can adapt without testing the ground colour.
+    // 'chroma' | 'black' | 'clear', §4.19.4), so a part can adapt without testing the ground colour; `layer(key, paint)`,
+    // a frame-sized picture that is the same on every frame (edgeShade's vignette) painted once per key and frame size
+    // by paint(ctx, w, h) and kept (tile bank), so a costly full-frame paint becomes one drawImage. Too large to keep, it
+    // is painted into a frame surface that the frame's pool.end() takes back.
     const fx = {
       w: 0, h: 0, unit: 1, quality: 'preview', alpha: false, cut: null, pal: null, flashScale: 1, backdrop: 'scene',
       take: () => pool.take(fx.w, fx.h),
@@ -17081,6 +17110,13 @@ MV.def('engine/render/post', ['core/hash', 'core/rng', 'core/noise', 'core/schem
       rng: (...labels) => RNG.stream(st.seed, ...labels),
       noise: (x) => NZ.noise1(st.seed, x),
       tile: (name, seed) => tiles.tile(name, seed),
+      layer(key, paint) {
+        const kept = tiles.layer(String(key), fx.w, fx.h, paint);
+        if (kept) return kept;
+        const s = pool.take(fx.w, fx.h);
+        paint(s.ctx, fx.w, fx.h);
+        return s.canvas;
+      },
       textAt(dt) {
         if (!st.allowTextAt) throw new FxError('no-text-at', "fx.textAt needs needs: ['textAt'] on the filter");
         if (++st.textCalls > TEXT_AT_MAX) throw new FxError('text-at-budget', 'fx.textAt may be called at most 3 times per frame');
@@ -17357,6 +17393,7 @@ MV.def('engine/render/record', ['core/hash', 'core/rng', 'core/noise', 'core/col
     const w = o.w, h = o.h;
     const pool = [];
     const tiles = new Map();
+    const layers = new Map();
     let out = 0, textCalls = 0;
     const fx = {
       w, h, unit: o.unit || 1, quality: o.quality || 'export', alpha: !!o.alpha, cut: o.cut || null,
@@ -17402,6 +17439,18 @@ MV.def('engine/render/record', ['core/hash', 'core/rng', 'core/noise', 'core/col
           tiles.set(key, canvas);
         }
         return tiles.get(key);
+      },
+      // A kept layer, as in engine/render/post: painted once per key (its ops are recorded then) on a canvas whose id
+      // names the key and size, so the draws of it show which picture they lay down.
+      layer(key, paint) {
+        const id = 'layer:' + key + ':' + w + 'x' + h;
+        if (!layers.has(id)) {
+          const s = surfaceOf(recorder.factory, w, h, true);
+          paint(s.ctx, w, h);
+          s.canvas.id = id;
+          layers.set(id, s.canvas);
+        }
+        return layers.get(id);
       },
       textAt(dt) {
         if (!o.allowTextAt) throw new FxError('no-text-at', "fx.textAt needs needs: ['textAt'] on the filter");
@@ -23979,26 +24028,36 @@ MV.def('parts/filter/frame', ['parts/kit'], (K) => {
 
   // A vignette: an elliptical radial gradient (the frame's own proportions) from clear inside `size` to dark at the
   // corners. The alpha rises with the square of the distance (a few stops approximate it), so there is no visible ring.
+  // The gradient is the same picture on every frame of one size, and filling a whole frame with a radial gradient is
+  // slow on a canvas without a GPU (fx_parts: 20 frame copies at 720p in CI's Chrome, 8 in Chromium), so it is painted once
+  // at full strength (alpha u²) into a kept layer (fx.layer, per `size` and frame size) and laid over the frame at
+  // alpha `dark` (alpha dark·u², as before, within 8-bit rounding): one copy and one draw per frame.
   // Its darkness fades to nothing with amount (the ramp below 0.1), so a `when` other than 'always' fades it in and
   // out instead of switching it.
   const SHADE_STOPS = 4;
   const SHADE_INK = '#120D08';          // a warm near-black: old lenses fall off toward brown, not grey
-  function shade(fx, src, p) {
-    const dark = clamp(0.12 + 0.45 * p.amount) * smooth(p.amount / 0.1);
-    if (!(dark >= 1 / 255)) return src;
-    const out = copyOf(fx, src), g = out.ctx;
-    const w = fx.w, h = fx.h, R = (w / 2) * Math.SQRT2 * 1.02, r0 = R * p.size;
-    g.save();
+  function vignette(g, w, h, size) {
+    const R = (w / 2) * Math.SQRT2 * 1.02, r0 = R * size;
     g.translate(w / 2, h / 2);
     g.scale(1, h / w);
     const grad = g.createRadialGradient(0, 0, r0, 0, 0, R);
     for (let k = 0; k <= SHADE_STOPS; k++) {
       const u = k / SHADE_STOPS;
-      grad.addColorStop(u, K.color.rgba(SHADE_INK, dark * u * u));
+      grad.addColorStop(u, K.color.rgba(SHADE_INK, u * u));
     }
     g.fillStyle = grad;
     g.fillRect(-R, -R, 2 * R, 2 * R);
-    g.restore();
+  }
+
+  function shade(fx, src, p) {
+    const dark = clamp(0.12 + 0.45 * p.amount) * smooth(p.amount / 0.1);
+    if (!(dark >= 1 / 255)) return src;
+    const size = p.size;
+    const layer = fx.layer('edgeShade:' + size, (g, w, h) => vignette(g, w, h, size));
+    const out = copyOf(fx, src), g = out.ctx;
+    g.globalAlpha = dark;
+    g.drawImage(layer, 0, 0);
+    g.globalAlpha = 1;
     return out;
   }
 

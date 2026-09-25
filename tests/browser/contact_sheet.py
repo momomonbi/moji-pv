@@ -26,7 +26,8 @@ cell fails, the page reports an error or a CSP violation, or a sheet comes back 
 This file also holds the lab-page helpers the other engine browser tests import (parts_gallery.py, glyph_parity.py,
 determinism.py, perf.py): lab_html() assembles the lab page in memory from the current sources the way build.py does
 (kernel, modules in topological order, MV.DEV = true, boot 'ui/lab', the build's CSP), with the fixtures in front;
-open_lab() serves it to a Playwright page through a route, so nothing is written to disk.
+open_lab() serves it to a Playwright page through a route, so nothing is written to disk. japanese_font_missing (from
+dev/browser.py) is passed on with them.
 Run: PW_EXECUTABLE=/opt/pw-browsers/chromium python3 tests/browser/contact_sheet.py …   (CI: PW_CHANNEL=chrome)
 """
 import argparse
@@ -39,7 +40,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'dev'))
-from browser import launch, new_page  # noqa: E402  (dev/browser.py, the shared launcher)
+from browser import launch, new_page, japanese_font_missing  # noqa: E402,F401  (dev/browser.py, the shared launcher)
 
 FIXTURES = ROOT / 'tests' / 'fixtures'
 PROJECTS = ('basic', 'vertical', 'lrc', 'long')

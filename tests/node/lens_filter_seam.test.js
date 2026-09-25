@@ -642,16 +642,80 @@ test('duoTone prints the ground in its own colour and the words in the full othe
 });
 
 test('edgeShade fades to nothing with amount instead of switching on at a fixed darkness', () => {
+  // The vignette is a kept layer painted at full strength and laid over the frame at alpha `dark`: the darkest corner is
+  // the largest stop alpha times the alpha the layer is drawn with.
   const darkest = (amount) => {
     const r = runFilter('edgeShade', { amount, size: 0.45 }, 0.5);
     if (r.out === r.src) return 0;
     const stops = r.ops.filter((op) => /\.addColorStop$/.test(op[1])).map((op) => Number(/,\s*([\d.]+)\)$/.exec(op[3])[1]));
-    return Math.max(...stops);
+    let alpha = 1, drawn = 0;
+    for (const op of r.ops) {
+      if (op[0] !== r.out.canvas.id) continue;
+      if (op[1] === 'set:globalAlpha') alpha = op[2];
+      else if (op[1] === 'drawImage' && String(op[2]).startsWith('layer:edgeShade:')) drawn = Math.max(drawn, alpha);
+    }
+    return Math.max(...stops) * drawn;
   };
   const levels = [0.001, 0.011, 0.03, 0.06, 0.1, 0.3, 0.7].map(darkest);
   assert.ok(levels[0] < 0.01 && levels[1] < 0.02, 'nearly nothing just above 0: ' + levels.join(' '));
   for (let k = 1; k < levels.length; k++) assert.ok(levels[k] >= levels[k - 1], 'darker with more amount: ' + levels.join(' '));
   assert.ok(levels[6] > 0.35, 'a real vignette at a typical amount');
+});
+
+test('edgeShade paints its vignette once per size and frame size, then only lays it down (fx.layer)', () => {
+  const rec = R.createRecorder();
+  const src = R.surfaceOf(rec.factory, FX_W, FX_H, true);
+  const fx = R.createRecordingFx(rec, { w: FX_W, h: FX_H, unit: FX_W / 1920, plan: fxPlan(), cut: cutAt(0.5, false), seed: 1 });
+  const d = def('filter', 'edgeShade');
+  const frame = (p) => {
+    fx.begin();
+    const m = rec.mark();
+    const out = d.apply(fx, src, Object.assign(autoParams('filter', 'edgeShade'), { amount: 0.7 }, p), 0.5);
+    fx.give(out);
+    return rec.ops().slice(m);
+  };
+  const painted = (ops) => ops.filter((op) => op[1] === 'createRadialGradient').length;
+  const layerOf = (ops) => ops.filter((op) => op[1] === 'drawImage').map((op) => String(op[2])).find((id) => id.startsWith('layer:'));
+  const first = frame({ size: 0.45 }), again = frame({ size: 0.45 }), other = frame({ size: 0.5 });
+  assert.equal(painted(first), 1, 'the first frame paints the vignette');
+  assert.equal(painted(again), 0, 'the next frame only lays it down');
+  assert.equal(layerOf(again), layerOf(first));
+  assert.equal(painted(other), 1, 'another clear area is another picture');
+  assert.notEqual(layerOf(other), layerOf(first));
+});
+
+test('fx.layer (engine/render/post): kept per key and frame size, least recently used dropped, too large → a frame surface', () => {
+  const SF = MV.use('engine/render/surface');
+  const rec = R.createRecorder();
+  const pool = SF.createPool(rec.factory), tiles = PO.createTileBank(rec.factory), ctl = PO.createFx({ pool, tiles });
+  let paints = 0;
+  const paint = (g, w, h) => { paints++; g.fillStyle = '#123456'; g.fillRect(0, 0, w, h / 2); };
+  const frameAt = (w, h) => { pool.frame(w, h); pool.begin(); ctl.frame({ plan: null, w, h, unit: w / 1920, quality: 'export', alpha: false }); };
+  frameAt(320, 180);
+  const a = ctl.fx.layer('k', paint);
+  assert.equal(ctl.fx.layer('k', paint), a, 'the same key and size: the kept layer');
+  assert.equal(paints, 1);
+  assert.equal(a.width, 320);
+  frameAt(160, 90);                                  // the adaptive preview's half size: a layer of its own
+  const half = ctl.fx.layer('k', paint);
+  assert.notEqual(half, a);
+  assert.equal(half.width, 160);
+  assert.equal(paints, 2);
+  for (const k of ['x1', 'x2', 'x3', 'x4']) ctl.fx.layer(k, paint);
+  const before = paints;
+  frameAt(320, 180);
+  ctl.fx.layer('k', paint);
+  assert.equal(paints, before + 1, 'four newer layers dropped the oldest');
+  tiles.clear();
+  ctl.fx.layer('k', paint);
+  assert.equal(paints, before + 2, 'clear() forgets the layers');
+  frameAt(4200, 4200);                               // 70 MB: above the budget
+  const big = ctl.fx.layer('k', paint), big2 = ctl.fx.layer('k', paint);
+  assert.equal(paints, before + 4, 'painted on every call');
+  assert.notEqual(big, big2);
+  assert.equal(pool.stats().out, 2, 'into frame surfaces, which the frame\'s pool.end() takes back');
+  pool.end();
+  assert.equal(pool.stats().out, 0);
 });
 
 // A cut-local `amount` weighting like the post stack's 'beat' one: exp(−since/0.15) (120 BPM, beat 0 at 0 s).

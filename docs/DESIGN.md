@@ -2070,7 +2070,10 @@ fx = {
   cut: { tl, dur, impact, energy } | null,                 // null for the work-level texture
   textAt(dt) → Surface,                                    // only when def.needs has 'textAt': re-renders the current text layers at t − dt (≤ 3 calls per frame)
   // additive: pal (the frame palette after §4.19.4), flashScale (0.3 with 点滅を抑える in the preview, 1 in export),
-  // backdrop: 'scene' | 'chroma' | 'black' | 'clear' (so a part adapts without testing the key colour)
+  // backdrop: 'scene' | 'chroma' | 'black' | 'clear' (so a part adapts without testing the key colour),
+  // layer(key, paint) → CanvasImageSource: a frame-sized picture that is the same on every frame (a vignette), painted
+  // once by paint(ctx, w, h) per (key, frame size) and kept (LRU, 4 layers within 64 MB); the key names everything
+  // paint draws besides the size, so a kept layer and a new one hold the same pixels (§7.1)
 }
 Surface = { canvas, ctx, w, h }
 ```

@@ -6,7 +6,8 @@ normalized times of its own window, at a small size, through the real Canvas2D r
 no console error, no 'part-error' warning; per part and aspect, a frame that is not blank (luminance variance > EPS) at
 one of the times at least (an exit may rightly have cleared the frame near its end). The whole page must also report 0
 securitypolicyviolation events. Registries: parts/catalog when it exists, the DESIGN §4.18 examples and the
-stub parts (tests/fixtures). Google Fonts are blocked, so fallback faces draw.
+stub parts (tests/fixtures). Google Fonts are blocked, so fallback faces draw: the system needs a Japanese font, or the
+test stops at once with one message saying so (dev/browser.py japanese_font_missing).
 Run: PW_EXECUTABLE=/opt/pw-browsers/chromium python3 tests/browser/parts_gallery.py [--parts examples] [--aspects 16:9,9:16]
 """
 import argparse
@@ -15,7 +16,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from contact_sheet import launch, open_lab, csp_violations  # noqa: E402  (the shared lab-page helpers)
+from contact_sheet import launch, open_lab, csp_violations, japanese_font_missing  # noqa: E402  (lab-page helpers)
 from playwright.async_api import async_playwright  # noqa: E402
 
 EPS = 1.0            # luminance variance (0..255 scale) below this counts as a blank frame
@@ -50,6 +51,8 @@ async def run(args):
         browser = await launch(p)
         try:
             page = await open_lab(browser)
+            if await japanese_font_missing(page, 'parts_gallery.py'):
+                return 1
             info = await page.evaluate('window.__lab.info()')
             sources = [s for s in info['sources'] if not args.parts or s == args.parts]
             if not sources:

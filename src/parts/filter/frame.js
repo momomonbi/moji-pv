@@ -18,26 +18,36 @@ MV.def('parts/filter/frame', ['parts/kit'], (K) => {
 
   // A vignette: an elliptical radial gradient (the frame's own proportions) from clear inside `size` to dark at the
   // corners. The alpha rises with the square of the distance (a few stops approximate it), so there is no visible ring.
+  // The gradient is the same picture on every frame of one size, and filling a whole frame with a radial gradient is
+  // slow on a canvas without a GPU (fx_parts: 20 frame copies at 720p in CI's Chrome, 8 in Chromium), so it is painted once
+  // at full strength (alpha u²) into a kept layer (fx.layer, per `size` and frame size) and laid over the frame at
+  // alpha `dark` (alpha dark·u², as before, within 8-bit rounding): one copy and one draw per frame.
   // Its darkness fades to nothing with amount (the ramp below 0.1), so a `when` other than 'always' fades it in and
   // out instead of switching it.
   const SHADE_STOPS = 4;
   const SHADE_INK = '#120D08';          // a warm near-black: old lenses fall off toward brown, not grey
-  function shade(fx, src, p) {
-    const dark = clamp(0.12 + 0.45 * p.amount) * smooth(p.amount / 0.1);
-    if (!(dark >= 1 / 255)) return src;
-    const out = copyOf(fx, src), g = out.ctx;
-    const w = fx.w, h = fx.h, R = (w / 2) * Math.SQRT2 * 1.02, r0 = R * p.size;
-    g.save();
+  function vignette(g, w, h, size) {
+    const R = (w / 2) * Math.SQRT2 * 1.02, r0 = R * size;
     g.translate(w / 2, h / 2);
     g.scale(1, h / w);
     const grad = g.createRadialGradient(0, 0, r0, 0, 0, R);
     for (let k = 0; k <= SHADE_STOPS; k++) {
       const u = k / SHADE_STOPS;
-      grad.addColorStop(u, K.color.rgba(SHADE_INK, dark * u * u));
+      grad.addColorStop(u, K.color.rgba(SHADE_INK, u * u));
     }
     g.fillStyle = grad;
     g.fillRect(-R, -R, 2 * R, 2 * R);
-    g.restore();
+  }
+
+  function shade(fx, src, p) {
+    const dark = clamp(0.12 + 0.45 * p.amount) * smooth(p.amount / 0.1);
+    if (!(dark >= 1 / 255)) return src;
+    const size = p.size;
+    const layer = fx.layer('edgeShade:' + size, (g, w, h) => vignette(g, w, h, size));
+    const out = copyOf(fx, src), g = out.ctx;
+    g.globalAlpha = dark;
+    g.drawImage(layer, 0, 0);
+    g.globalAlpha = 1;
     return out;
   }
 

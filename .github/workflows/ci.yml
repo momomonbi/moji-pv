@@ -32,6 +32,16 @@ jobs:
       - name: Google Chrome
         run: google-chrome --version
 
+      - name: Japanese and emoji fonts (the system fallback a user's machine has)
+        # The browser tests block Google Fonts, so the text draws with the system fallback. ubuntu-latest has no CJK font:
+        # Chrome's `serif` is Liberation Serif there, whose missing-glyph box is empty, so Japanese in a mincho face drew
+        # nothing at all. The tests fail fast with one message when no font draws Japanese (dev/browser.py).
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends fonts-noto-cjk fonts-noto-color-emoji
+          fc-cache -f
+          fc-list :lang=ja family | sort -u | head -n 5
+
       - name: Lint, layers and module order
         run: python3 build.py --check
 

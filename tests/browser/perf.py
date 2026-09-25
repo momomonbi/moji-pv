@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from contact_sheet import launch, open_lab  # noqa: E402  (the shared lab-page helpers)
+from contact_sheet import launch, open_lab, japanese_font_missing  # noqa: E402  (the shared lab-page helpers)
 from playwright.async_api import async_playwright  # noqa: E402
 
 TARGET_MS, HARD_MS = 10.0, 16.7
@@ -30,6 +30,8 @@ async def run(args):
         browser = await launch(p)
         try:
             page = await open_lab(browser)
+            if await japanese_font_missing(page, 'perf.py'):
+                return 1
             info = await page.evaluate('window.__lab.info()')
             src = args.parts or ('catalog' if 'catalog' in info['sources'] else 'examples')
             print('registry: %s (%s)' % (src, info['notes'].get(src, 'complete')))

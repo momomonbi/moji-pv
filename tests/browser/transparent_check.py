@@ -17,6 +17,8 @@ checked (DESIGN §4.19.4, SPEC §6 background modes, §7 transparent PNG sequenc
 To keep the pixels about transparency only, the document pins what could reach the corners or tint the glyphs: no
 decorations, screen effects, texture or atmosphere, the fallback composition and motions, no flash or shake, a large
 text size and (except for the black check) one ink for every glyph. It also asserts no page errors and no CSP violations.
+Google Fonts are blocked, so the glyphs come from the system fonts: without a Japanese font the test stops at once with
+one message saying so (dev/browser.py japanese_font_missing).
 
 Run: PW_EXECUTABLE=/opt/pw-browsers/chromium python3 tests/browser/transparent_check.py [--root DIR] [--keep DIR]
 """
@@ -38,7 +40,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'dev'))
-from browser import launch, new_page  # noqa: E402  (dev/browser.py, the shared launcher)
+from browser import launch, new_page, japanese_font_missing  # noqa: E402  (dev/browser.py, the shared launcher)
 from playwright.async_api import async_playwright  # noqa: E402
 
 FONT_HOSTS = ('https://fonts.googleapis.com/**', 'https://fonts.gstatic.com/**')
@@ -400,6 +402,8 @@ async def run(root, keep):
                 await page.goto('http://127.0.0.1:%d/index.html?fresh=1&test=1' % server.server_address[1], wait_until='load')
                 await page.wait_for_function('window.__mv && window.__mv.ready')
                 await page.evaluate('async () => { await window.__mv.ready; }')
+                if await japanese_font_missing(page, 'transparent_check.py'):
+                    return ['no system font draws Japanese (see above)']
                 project = (ROOT / 'tests' / 'fixtures' / 'project_basic.json').read_text(encoding='utf-8')
                 info = await page.evaluate(SETUP, project)
                 if not checks.ok(info is not None, 'a lyric cut that is alone on screen for %d frames' % FRAMES):
@@ -436,6 +440,15 @@ async def run(root, keep):
                 frames, _ = await export(page, checks, 'black', keep)
                 if frames:
                     check_black(checks, frames)
+
+                # Google Fonts are blocked, so every face fell back to the system fonts: step ④ says so (the existing
+                # font-fallback line). Without a Japanese system font a mincho fallback draws nothing, and this line is
+                # then the user's only hint.
+                fallback = await page.evaluate("""() => {
+                  const li = document.querySelector('li.check[data-code="font-fallback"]');
+                  return li ? li.textContent : null;
+                }""")
+                checks.ok(bool(fallback), 'step ④ names the typefaces that fell back to system fonts (%r)' % fallback)
 
                 csp = await page.evaluate('() => window.__csp || []')
                 checks.ok(not csp, 'no CSP violations (%r)' % csp[:3])

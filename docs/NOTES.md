@@ -3817,7 +3817,9 @@ here), ui_layout OK (328 layouts) · `build_test.py` OK (21). About 3.5 minutes 
 - **Opaque PNG sequences are RGBA** (Chrome's `convertToBlob`), ≈ 1.7 MB per 1080p frame; the size estimate is on the high
   side for them.
 - **Fonts** come from Google Fonts; offline (or blocked) the preview uses fallback faces and export waits for the real ones.
-  The browser tests block Google Fonts on purpose.
+  The browser tests block Google Fonts on purpose, so they need a Japanese system font (CI installs fonts-noto-cjk; the
+  text tests stop at once without one). A machine with neither draws no Japanese at all in a mincho face (see "CI fonts
+  and edgeShade" below); step ④ then still names the faces that fell back.
 - **Two tabs**: a second tab continues in a copy (Web Locks; a writer token where Web Locks are missing). Clearing the
   device in one tab does not reach another tab's open work, which is stored again at its next change.
 - **AI** is tested only with faked providers (request shapes, keys in headers, errors); real service calls are not part of
@@ -3867,3 +3869,52 @@ here), ui_layout OK (328 layouts) · `build_test.py` OK (21). About 3.5 minutes 
   arrange that moves the text itself (`motion: 'own'`, tickerMarquee), the planner forces that cut's entrance to
   instantShow by rule (DESIGN §4.18.2) and the line pin skips it, as designed. The check now accepts such a forced
   entrance and still requires the pin on every other cut of the line.
+
+## CI fonts and edgeShade
+
+The first CI run of the v2 browser suite (ubuntu-latest, Google Chrome) failed three tests that pass locally.
+
+- **Japanese drew nothing in CI** (`parts_gallery.py`: blank frames for every examples/stub part and for catalog parts on
+  flat grounds; `transparent_check.py`: no glyph pixels at all). ubuntu-latest has DejaVu, Liberation and Noto Color
+  Emoji but no CJK font, and the tests block Google Fonts, so every face falls back to `SYSTEM_FALLBACK`. Chrome's
+  generic `serif` there is Times New Roman → Liberation Serif, whose missing-glyph box is empty (advance 0.78 em, no
+  outline): the mincho, brush and antique stacks draw no ink for any kana or kanji. The sans stacks draw a hollow box
+  (Liberation Sans), the same for every character. Latin text draws, which is why `glyph_parity.py` passed (its text has
+  "Road"; the kana were missing on both paths). Reproduced here with a fontconfig of only those three font directories
+  plus `/etc/fonts/conf.d` (`FONTCONFIG_FILE=…`; dev/browser.py passes the environment to the browser): the catalog
+  failures matched CI's list part for part. (Without `/etc/fonts/conf.d`, `serif` maps to DejaVu, whose box has ink,
+  and both tests pass: the empty box is Liberation Serif's.)
+  - CI installs `fonts-noto-cjk` and `fonts-noto-color-emoji` (and runs `fc-cache -f`) before the browser tests, the
+    system fallback a user's machine has.
+  - `dev/browser.py` `japanese_font_missing(page, test)`: draws 「あ」 and 「い」 in every `SYSTEM_FALLBACK` stack and needs
+    ink and two different shapes. `parts_gallery`, `transparent_check`, `glyph_parity`, `determinism` and `perf` call it
+    first and stop with one message ("no system font draws Japanese … install fonts-noto-cjk") instead of hundreds of
+    blank frames.
+  - Users: only a machine without any CJK font whose browser cannot reach Google Fonts meets this (Windows, macOS,
+    ChromeOS and Android ship Japanese fonts; a minimal Linux may not, and then the UI's own Japanese shows boxes too).
+    The existing `font-fallback` warning does show then: step ④'s pre-flight names every face that fell back (checked
+    in Chromium with the CI font set), and `transparent_check.py` now asserts that line with Google Fonts blocked. Its
+    wording ("a fallback is used") is optimistic for this case; a sharper message would need a probe of the fallback
+    in `engine/host/fonts` and new strings (not done).
+  - With Noto CJK the text tests measure real kana: `glyph_parity.py` examples reads MAE 1.883/255 (limit 2) and a blur
+    switch of 2.321/255 (limit 2.331) with the CI font set (Noto Serif CJK's thin strokes), the same to the digit in
+    Chromium 141 and in a Chromium 156 snapshot; IPAGothic here reads 1.505 and 2.036. The empty `serif` box
+    reproduces in both builds too.
+- **edgeShade cost** (`fx_parts.py`: declared cost 3, measured class 5, 20.2 copies in CI's Chrome; 8.1 here). It filled
+  the whole frame with a radial gradient every frame. The vignette is the same picture on every frame of one size, so it
+  is now painted once at full strength (stop alphas u²) into a kept layer and laid over the frame at alpha `dark`: 2.8–3.0
+  copies in Chromium 141 and in a Chromium 156 snapshot (class 1; CI's Chrome measured the similar flashPop and
+  cinemaBars at about twice their local copies, which would put edgeShade near 5–6). The declared cost stays 3 (the test fails only on a cost more than one class below the
+  measure; lowering it would need a measurement in Chrome). Pixels against the old code: at most 3/255, mean ≤ 0.55/255
+  over 30 cases (1280×720 and 720×1280, amount 0.02–1, size 0.35–0.55): the old stops were rounded to 1/64 alpha by
+  `color.rgba`, the new fade with amount is continuous.
+  - Additive FxContext member `layer(key, paint)` (DESIGN §4.18.11): the tile bank keeps frame-sized layers per (key,
+    frame size), LRU of 4 within 64 MB, cleared with the renderer; a layer larger than that is painted into a frame
+    surface each time. `engine/render/record`'s FxContext has it too (painted once, canvas id `layer:<key>:<w>x<h>`).
+  - Goldens regenerated on purpose (`node tests/update_golden.js`): 39 frame hashes of `lrc` and `long` changed.
+    Compared with the old edgeShade in a scratch copy, with canvas and gradient ids renumbered per frame, only the two
+    frames that draw edgeShade differ (lrc 29, long 9); the other 37 changed because the recorder numbers canvases and
+    gradients with one counter, and the kept layer shifts the ids after it. Plan hashes are unchanged.
+- Seen once while the browser tests ran in parallel with other browser runs here: `ui_flows.py` `values` read the
+  切り替え row as 無効 (`OTHER_TILE` picked a transition that does not apply at that boundary). Four runs of the flow alone,
+  with either font set, passed; it looks like a timing flake in the tile order, not a font effect.

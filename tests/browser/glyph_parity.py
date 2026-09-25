@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from contact_sheet import launch, open_lab, csp_violations  # noqa: E402  (the shared lab-page helpers)
+from contact_sheet import launch, open_lab, csp_violations, japanese_font_missing  # noqa: E402  (lab-page helpers)
 from playwright.async_api import async_playwright  # noqa: E402
 
 PARITY_MAX = 2 / 255
@@ -85,6 +85,8 @@ async def run(args):
         browser = await launch(p)
         try:
             page = await open_lab(browser)
+            if await japanese_font_missing(page, 'glyph_parity.py'):
+                return 1
             info = await page.evaluate('window.__lab.info()')
             srcs = sources_of(info, args.parts)
             if not srcs:
