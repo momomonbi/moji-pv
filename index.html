@@ -1,6 +1,6 @@
 <!doctype html><html lang="ja"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-2LMAazeEy/c8wh3mPglqzAGIF3SOIrkGhogtPsdWCjM='; style-src 'sha256-5fzAAaefP3/rPswsA/S7A187ZSNjQ3JL3IdmoVyWNG0=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-o+YdjbKw84KHO/qB2xCWbCxlL0GCj0knefzLLtswHAQ='; style-src 'sha256-QUUOlD8vnTGFBBCtMIXniC5wJS2zD4afaZTm+SIXEFY=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
 <title>文字PVメーカー</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -252,16 +252,31 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent);
   position: absolute; left: 0; top: 0; bottom: 0; z-index: 1; width: 74px; border-right: 1px solid var(--line);
   background: #0f1216; pointer-events: none;
 }
+/* The two layers must break every row into the same lines, or the caret drifts away from the coloured text further
+   down. So this one rule sets, on both, every property that lays out text, including the ones iOS's built-in textarea
+   style sets and a div does not (-webkit-nbsp-mode: space, line-break: after-white-space).
+   The line height is a whole number of px because Safari rounds line boxes to whole px: with 15px/1.7 (25.5px) the
+   textarea's lines came out at 25px against the mirror rows' 25.5px min-height, 0.5px of drift per row. Rows now take
+   their height from their own line boxes (no min-height), as the textarea's lines do. 16px text also stops iPhone
+   Safari from zooming in when the editor gets focus. text-size-adjust is none, not 100%: WebKit's text autosizing
+   (iPad's idempotent mode) skips an element only for none, and it can enlarge the mirror's rows but never the
+   textarea's text. tests/node/ui_selection.test.js keeps the WebKit-only values here, which Chromium drops. */
+.lyric-editor { --le-lh: 26px; }
 .le-mirror, .le-text {
-  box-sizing: border-box; margin: 0; padding: 10px 12px 14px 84px; font: 15px/1.7 var(--font); letter-spacing: 0;
-  white-space: pre-wrap; overflow-wrap: anywhere; word-break: normal; tab-size: 4;
+  box-sizing: border-box; margin: 0; border: 0; padding: 10px 12px 14px 84px; font: 16px/var(--le-lh) var(--font);
+  font-kerning: none; font-variant-ligatures: none; font-feature-settings: normal; text-rendering: auto;
+  letter-spacing: 0; word-spacing: normal; text-indent: 0; text-transform: none; text-align: start; tab-size: 4;
+  white-space: pre-wrap; word-break: normal; overflow-wrap: break-word; overflow-wrap: anywhere; hyphens: none;
+  line-break: auto; line-break: after-white-space; -webkit-nbsp-mode: space; hanging-punctuation: none;
+  text-autospace: no-autospace; text-spacing-trim: space-all;
+  -webkit-text-size-adjust: none; text-size-adjust: none; -webkit-appearance: none; appearance: none;
 }
 .le-mirror { position: absolute; left: 0; top: 0; right: 0; color: var(--text); pointer-events: none; }
-.le-row { min-height: 1.7em; border-radius: 3px; }
+.le-row { border-radius: 3px; }
 .le-row.is-playing { background: rgba(232, 87, 63, 0.1); text-decoration: underline; text-decoration-color: var(--accent);
   text-decoration-thickness: 2px; text-underline-offset: 5px; }
 .le-text {
-  position: relative; display: block; width: 100%; min-height: 100%; resize: none; overflow: hidden; border: 0;
+  position: relative; display: block; width: 100%; min-height: 100%; resize: none; overflow: hidden;
   background: transparent; color: transparent; caret-color: #fff;
 }
 .le-text:focus, .le-text:focus-visible { outline: none; }
@@ -273,9 +288,18 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent);
 .tok-emphText { color: #ffd98f; }
 .tok-impact { color: var(--error); }
 .tok-note { color: #8fd3c1; }
+/* The same colours as highlights over a row's one text node (lyric_editor.js), where the engine has them. Rules of
+   their own: an engine that does not know ::highlight() drops the whole rule. */
+.le-row::highlight(tok-comment) { color: #7c8596; }
+.le-row::highlight(tok-meta), .le-row::highlight(tok-stamp) { color: #8fc8ff; }
+.le-row::highlight(tok-cut) { color: var(--accent); }
+.le-row::highlight(tok-emph) { color: var(--gold); }
+.le-row::highlight(tok-emphText) { color: #ffd98f; }
+.le-row::highlight(tok-impact) { color: var(--error); }
+.le-row::highlight(tok-note) { color: #8fd3c1; }
 .le-g {
   position: absolute; left: 0; width: 74px; box-sizing: border-box; display: flex; align-items: flex-start; gap: 3px; pointer-events: auto;
-  padding: 0 4px 0 7px; font: 10.5px/25.5px var(--mono); color: var(--muted); cursor: pointer; white-space: nowrap; overflow: hidden;
+  padding: 0 4px 0 7px; font: 10.5px/var(--le-lh) var(--mono); color: var(--muted); cursor: pointer; white-space: nowrap; overflow: hidden;
 }
 .le-g:hover { color: var(--text); background: rgba(255, 255, 255, 0.03); }
 .le-g.is-selected { color: var(--text); background: rgba(124, 196, 255, 0.1); box-shadow: inset 2px 0 0 var(--focus); }
@@ -55454,6 +55478,7 @@ MV.def('ui/lyric_editor', ['ui/dom', 'ui/selection', 'i18n/t', 'core/lyrics', 'p
   const GUTTER_MARGIN_PX = 240;           // gutter entries are built for the visible rows plus this much above and below
   const STAMP = /^\[\d{1,3}:\d{1,2}(?:[.:]\d{1,3})?\]/;
   const WARN_CODES = new Set(['overfull', 'orphan-pin', 'shadowed-pin', 'lock-partial', 'pin-not-applicable', 'time-order']);
+  const TOKENS = ['tok-comment', 'tok-meta', 'tok-stamp', 'tok-cut', 'tok-emph', 'tok-emphText', 'tok-impact', 'tok-note'];
 
   // --- mark tinting (display only; the parser is core/lyrics) --------------------------------------------------
 
@@ -55500,6 +55525,19 @@ MV.def('ui/lyric_editor', ['ui/dom', 'ui/selection', 'i18n/t', 'core/lyrics', 'p
     let j = end - 1;
     while (j >= 0 && /\s/.test(src[j])) j--;
     return j >= 0 && src[j] === '!' && src[j - 1] !== '\\' ? j : -1;
+  }
+
+  // The token colours as CSS Custom Highlights, one per class (style.css paints `.le-row::highlight(tok-…)`), or null
+  // where the engine has none (Safari before 17.2): the mirror then colours with spans.
+  function tokenInks() {
+    const registry = typeof CSS !== 'undefined' ? CSS.highlights : null;
+    if (!registry || typeof Highlight !== 'function' || typeof StaticRange !== 'function') return null;
+    const inks = new Map();
+    for (const cls of TOKENS) {
+      if (!registry.has(cls)) registry.set(cls, new Highlight());
+      inks.set(cls, registry.get(cls));
+    }
+    return inks;
   }
 
   function rowIndexAt(text, offset) {
@@ -55639,19 +55677,87 @@ MV.def('ui/lyric_editor', ['ui/dom', 'ui/selection', 'i18n/t', 'core/lyrics', 'p
 
     // --- mirror and gutter -------------------------------------------------------------------------------------
 
+    const inks = tokenInks();               // token class → Highlight, or null (spans)
+    const inked = new Map();                // mirror row → its highlight ranges, as [class, range]
+
+    // A row is as tall as its own line boxes, like the textarea's line. A blank row ends with <br>, as the textarea's
+    // line ends with '\n', so it still has one line box. The row's text is one text node, as the textarea's line is
+    // one run of text, and the token colours are highlight ranges over it (ink below), so the line breaker reads the
+    // same text in both layers. With a span per token it would not in WebKit, which decides a break at a text node
+    // boundary from the two characters before it in the previous node only (TextUtil::mayBreakInBetween): a rule that
+    // needs more context (digits around a '/') could wrap the row where the textarea does not, moving every row below.
+    // Without Custom Highlights (Safari before 17.2) the tokens are spans.
     function rowElOf(src) {
-      return h('div', { class: 'le-row' }, segments(src).map(([text, cls]) => (cls ? h('span', { class: cls, text }) : text)));
+      const tail = src.trim() ? null : h('br');
+      if (inks) return h('div', { class: 'le-row' }, src || null, tail);
+      const row = h('div', { class: 'le-row' }, segments(src).map(([text, cls]) => (cls ? h('span', { class: cls, text }) : text)), tail);
+      row.normalize();                      // plain text next to plain text (leading space) is one node
+      return row;
     }
 
-    // Rebuilds only the mirror rows that changed (§7.4: typing never waits), keeps the textarea as tall as the mirror
-    // (in the same task, so the textarea never scrolls inside itself), and schedules the gutter.
+    // Highlight ranges only for the rows in and near the editor's viewport (the gutter's rows). WebKit walks every
+    // registered range for each line of text it paints (MarkedText::collectForHighlights), so their number stays that
+    // of a screenful however long the lyrics are.
+    function inkRows(from, to) {
+      if (!inks) return;
+      const keep = new Set(rowEls.slice(from, to));
+      for (const el of inked.keys()) if (!keep.has(el)) unink(el);
+      for (let i = from; i < to; i++) if (!inked.has(rowEls[i])) ink(rowEls[i], rowSrcs[i]);
+    }
+
+    function ink(el, src) {
+      const node = el.firstChild;
+      const ranges = [];
+      let at = 0;
+      for (const [text, cls] of segments(src)) {
+        if (cls && node && node.nodeType === 3) {
+          const range = new StaticRange({ startContainer: node, startOffset: at, endContainer: node, endOffset: at + text.length });
+          inks.get(cls).add(range);
+          ranges.push([cls, range]);
+        }
+        at += text.length;
+      }
+      inked.set(el, ranges);
+    }
+
+    function unink(el) {
+      const ranges = inked.get(el);
+      if (!ranges) return;
+      for (const [cls, range] of ranges) inks.get(cls).delete(range);
+      inked.delete(el);
+    }
+
+    // The textarea is as tall as the mirror and the editor's viewport, or as its own text where an engine lays that
+    // out taller, so it never scrolls inside itself: the editor scrolls instead. The reads come first and one write
+    // follows, if the height changes at all; only a shorter textarea is measured again, as its text may overflow it
+    // now. So typing lays out once here, a deletion that removes a line twice. A caret reveal runs before `input`: when
+    // the new text had outgrown the textarea (a typed character wrapped the last row, Enter at the end, a paste), it
+    // scrolled the textarea inside itself and the editor that much less. That inner scroll goes to the editor, so the
+    // caret stays where the reveal showed it.
+    let mirrorSeen = -1, rootSeen = -1;     // the mirror and editor heights the textarea was last sized for
+    function syncHeight() {
+      const inner = textarea.scrollTop;
+      const had = textarea.offsetHeight;
+      const own = textarea.scrollHeight > textarea.clientHeight ? textarea.scrollHeight : 0;
+      mirrorSeen = mirror.offsetHeight;
+      rootSeen = root.clientHeight;
+      const px = Math.max(mirrorSeen, rootSeen - 2, own);
+      if (px !== had) {
+        textarea.style.height = px + 'px';
+        if (px < had && textarea.scrollHeight > textarea.clientHeight) textarea.style.height = textarea.scrollHeight + 'px';
+      }
+      if (inner) { textarea.scrollTop = 0; root.scrollTop += inner; }
+    }
+
+    // Rebuilds only the mirror rows that changed (§7.4: typing never waits), keeps the textarea's height in step (in
+    // the same task, after the empty state is set, since it changes the padding), and schedules the gutter.
     function renderMirror() {
       const rows = textarea.value.split('\n');
       const d = changedRows(rowSrcs, rows);
       if (d.a < d.oldEnd || d.a < d.newEnd) {
         const fresh = rows.slice(d.a, d.newEnd).map(rowElOf);
         const anchor = rowEls[d.oldEnd] || null;
-        for (let i = d.a; i < d.oldEnd; i++) rowEls[i].remove();
+        for (let i = d.a; i < d.oldEnd; i++) { rowEls[i].remove(); unink(rowEls[i]); }
         const frag = document.createDocumentFragment();
         for (const el of fresh) frag.appendChild(el);
         mirror.insertBefore(frag, anchor);
@@ -55659,9 +55765,9 @@ MV.def('ui/lyric_editor', ['ui/dom', 'ui/selection', 'i18n/t', 'core/lyrics', 'p
         if (d.oldEnd !== d.newEnd || (playingRow >= d.a && playingRow < d.newEnd)) refreshPlaying();
       }
       rowSrcs = rows;
-      textarea.style.height = Math.max(mirror.offsetHeight, root.clientHeight - 2) + 'px';
       placeholder.hidden = textarea.value.length > 0;
       root.classList.toggle('is-empty', !placeholder.hidden);   // no gutter while empty: the placeholder gets the width
+      syncHeight();
       scheduleGutter();
     }
 
@@ -55715,9 +55821,12 @@ MV.def('ui/lyric_editor', ['ui/dom', 'ui/selection', 'i18n/t', 'core/lyrics', 'p
       const frag = document.createDocumentFragment();
       const top = root.scrollTop - GUTTER_MARGIN_PX;
       const bottom = root.scrollTop + root.clientHeight + GUTTER_MARGIN_PX;
-      for (let i = rowAtY(top); i < rowEls.length; i++) {
+      const first = rowAtY(top);
+      let end = first;
+      for (let i = first; i < rowEls.length; i++) {
         const rowEl = rowEls[i];
         if (rowEl.offsetTop > bottom) break;
+        end = i + 1;
         const row = aligned ? doc.sheet.rows[i] : null;
         if (!row) continue;
         const line = lines.get(row.id);
@@ -55732,6 +55841,7 @@ MV.def('ui/lyric_editor', ['ui/dom', 'ui/selection', 'i18n/t', 'core/lyrics', 'p
         frag.appendChild(entry);
       }
       dom.replace(gutter, frag);
+      if (root.clientHeight) inkRows(first, end);     // hidden (another step), rows have no positions: onShow re-renders
     }
 
     function fillEntry(entry, line, doc, pins, warn) {
@@ -55887,6 +55997,17 @@ MV.def('ui/lyric_editor', ['ui/dom', 'ui/selection', 'i18n/t', 'core/lyrics', 'p
     };
     if (typeof ResizeObserver === 'function') {
       new ResizeObserver(() => { if (!measureFrame) measureFrame = requestAnimationFrame(remeasure); }).observe(root);
+    }
+    // Heights that change without an edit: the mirror's (a web font of the stack loads and both layers re-wrap) and the
+    // editor's (a taller or shorter window: the textarea still reaches its bottom, other rows come into view). An edit
+    // has synced in its own task already, so only a height syncHeight has not seen is acted on.
+    if (typeof ResizeObserver === 'function') {
+      const resync = () => {
+        if (root.clientWidth && (mirror.offsetHeight !== mirrorSeen || root.clientHeight !== rootSeen)) { syncHeight(); scheduleGutter(); }
+      };
+      const heights = new ResizeObserver(resync);
+      heights.observe(mirror);
+      heights.observe(root);
     }
     requestAnimationFrame(renderMirror);
     return api;

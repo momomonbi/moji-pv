@@ -5642,3 +5642,81 @@ from p50 29.7 to 23.4 ms. The budgets are written for a GPU laptop; this machine
 - Open: perf.py's new media row (a 1080p30 video ground and a still photo frame) fails here and on CI, which have no
   GPU: a 1080p VideoFrame costs 8–17 ms to draw in software. This is handled next, together with the
   camerawork + materials row.
+## Lyric editor: iOS drift
+
+Seen by the owner on iOS Safari: in step ① the caret and selection crept away from the coloured text, more with every
+row further down. A bug, not a design choice. The editor is a transparent `<textarea>` (caret, selection) over a
+mirror `<div>` of coloured rows (the gutter follows the mirror), so any row laid out differently in the two layers
+moves every row below it.
+
+- **Why.** The line height, `15px/1.7` = 25.5px. WebKit's line layout makes line boxes whole px: 25px in the release
+  branches read (safari-7616 to 7624; only 7625 turns subpixel inline layout on). That happens in both layers, but
+  each mirror row also had `min-height: 1.7em`, which a block keeps at 25.5px, so every single-line or blank row was
+  0.5px taller in the mirror: half a line after 30 rows. Blink keeps 25.5px lines, so the Chromium tests never saw it.
+  Found in WebKit's source as further ways to differ (not seen on a device): iOS's built-in textarea style adds
+  `-webkit-nbsp-mode: space` and `line-break: after-white-space`, which a div lacks; WebKit does not kern across the
+  mirror's token `<span>`s, and decides a break at a text node boundary from the two characters before it in the
+  previous node only (`TextUtil::mayBreakInBetween`), so a UAX #14 rule that needs more context (digits around a '/'
+  cut mark) could wrap a mirror row where the textarea's one run of text does not; text autosizing (iPad's idempotent
+  mode) can enlarge the mirror's rows but never the textarea's text, and skips an element only for
+  `text-size-adjust: none` (`Style::Adjuster::adjustmentForTextAutosizing`). And `renderMirror` set the textarea
+  height before it left the empty state (14px left padding), so text arriving in one step into the empty editor
+  (サンプルで試す, a paste, opening a file) left the textarea shorter than its text until the next edit; a caret reveal
+  then scrolled the textarea inside itself by that much, and clicks on the last rows missed. In Chromium at 1440×900
+  with the old build: 187px on the first keystroke at the end of the sample lyrics, 357px after Ctrl+End with the
+  longer text of the test below; the longer the text, the more.
+- **What changed.**
+  - `style.css`: one rule sets every text-layout property on both `.le-mirror` and `.le-text` (font `16px/var(--le-lh)`
+    with `--le-lh: 26px`, border 0, kerning and ligatures off, spacing, indent, white-space, word-break, overflow-wrap,
+    hyphens, `line-break` and `-webkit-nbsp-mode` at the iOS textarea's values, hanging punctuation, autospace, spacing
+    trim, `text-size-adjust: none`, `appearance: none`); an engine drops what it does not know, on both layers alike.
+    The gutter's `.le-g` uses the same `--le-lh`. 16px (was 15px) also stops iPhone Safari zooming in on focus; rows
+    wrap a little sooner.
+  - `.le-row` has no `min-height`; a blank row (empty or white space only) ends with `<br>`, as the textarea's line
+    ends with `\n`. Every row's height then comes from its own line boxes, whatever an engine or page zoom does to the
+    line height (a 26px min-height would fix 100% only: at 110% Safari zoom a 28.6px block sits over 28px lines).
+  - A mirror row holds its text as one text node, like the textarea's line, and the token colours are CSS Custom
+    Highlights over it (`.le-row::highlight(tok-…)`, one `Highlight` per token class, `StaticRange`s), so the line
+    breaker reads the same text in both layers. Only the rows in and near the viewport (the gutter's rows, ±240px) hold
+    ranges: WebKit's paint of each line of text walks every registered range of every highlight
+    (`MarkedText::collectForHighlights`), so their number stays a screenful's however long the lyrics are. Without
+    Custom Highlights (Safari before 17.2) the tokens stay spans, with plain text next to plain text merged.
+  - `lyric_editor.js`, `syncHeight()`: the textarea is as tall as the mirror and the editor's viewport, or as its own
+    text where an engine lays that out taller. The reads come first and one write follows, if the height changes;
+    only a shorter textarea is measured again (its text may overflow it now). A caret reveal runs before `input`, so
+    when the new text outgrew the textarea (a typed character wrapping the last row, Enter at the end, a paste) it
+    scrolled the textarea inside itself and the editor that much less, which left the caret up to 12px below the
+    editor's bottom (the old build did the same): that inner scroll is now handed to the editor. One ResizeObserver on
+    the mirror and the editor acts only on a height `syncHeight` has not seen: the mirror's (a web font of the stack
+    loading re-wraps both layers) or the editor's (a taller or shorter window with the same width, which used to leave
+    the textarea, the gutter and now the ink as they were). The textarea's `scroll` listener is gone: with the height
+    rule and the hand-off it had nothing left to undo. Measured in Chromium (CDP LayoutCount, 1260 rows), the layouts
+    per keystroke hardly change (Enter 4.07 → 4.00, a character 3.07 → 3.07): Chromium skips an unchanged inline
+    height, and after a changed one the gutter's frame reads layout anyway.
+  - Tests. `tests/browser/editor_metrics.py`, a file of its own (CI runs every `tests/browser/*.py`), on the sample
+    lyrics plus hard rows (wrapping kana, Latin with marks, a URL, digits around cut marks, no-break and full-width
+    spaces, emoji, a stamp, blank rows), at five sizes down to phones: both layers compute the same ~45 layout
+    properties; the line height (the gutter's too) is whole px; rows are whole lines, add up to the mirror and end
+    where a hidden textarea of rows 0..i ends, also with 25, 25.5 and 28.6px lines; a click on each row puts the caret
+    in it; each row is one text node whose highlight ranges equal `segments()`, held near the viewport only (also in
+    344 rows scrolled through); typing at the end until the row wraps and Enter leave the caret inside the editor; one
+    paste into the empty editor, text taller than the mirror (simulated with padding, then a deletion, then a shorter
+    editor) and a height-only resize never let the textarea scroll inside itself or stop short of the editor's bottom.
+    Then, with `Highlight` removed before the app starts, the spans pass the same row checks and every token in view
+    has its colour in both pictures. Against the old build and the previous fix it fails (the latter on the one text
+    node, the 11px caret and the height-only resize); mutations of the new code (no re-measure after a shrink, no
+    reveal hand-off, spans only, every row inked, the editor's height not observed, a `::highlight` rule removed) each
+    fail it.
+    `tests/node/ui_selection.test.js` checks the stylesheet itself, since Chromium drops the WebKit-only values: the
+    shared rule and its iOS values, a whole-px `--le-lh`, no text-layout property on one layer only, tokens set colour
+    only.
+- **Not verified here.** No WebKit in this environment: the fix is by construction and untried on an iPhone, and which
+  Safari release ships which WebKit branch was not checked. The browser test proves Chromium's structure: it cannot
+  reproduce WebKit's whole-px line boxes (`floorf` of the line height, ascent and descent rounded apart), its break
+  context at node boundaries, or its highlight painting cost (bounded by the viewport window, not measured). WebKit's
+  own editing may split the textarea's text into several nodes (not checked); only the mirror side is one node by
+  construction. Desktop Safari uses the same line layout, so it is a cheap place to confirm the fix.
+- **Merging.** `tests/browser/ui_flows.py` is untouched and the test is a file of its own, so another package's flows
+  file stays as it is; `src/ui/lyric_editor.js`, `src/ui/style.css` and `tests/node/ui_selection.test.js` apply with
+  `git apply` to the pending UI package's copies (checked). This section is appended to NOTES.md, as other packages'
+  are: keep both. Rebuild `index.html` and `en/index.html` with `build.py` rather than merging them.

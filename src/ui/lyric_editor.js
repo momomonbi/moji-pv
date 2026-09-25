@@ -8,6 +8,7 @@ MV.def('ui/lyric_editor', ['ui/dom', 'ui/selection', 'i18n/t', 'core/lyrics', 'p
   const GUTTER_MARGIN_PX = 240;           // gutter entries are built for the visible rows plus this much above and below
   const STAMP = /^\[\d{1,3}:\d{1,2}(?:[.:]\d{1,3})?\]/;
   const WARN_CODES = new Set(['overfull', 'orphan-pin', 'shadowed-pin', 'lock-partial', 'pin-not-applicable', 'time-order']);
+  const TOKENS = ['tok-comment', 'tok-meta', 'tok-stamp', 'tok-cut', 'tok-emph', 'tok-emphText', 'tok-impact', 'tok-note'];
 
   // --- mark tinting (display only; the parser is core/lyrics) --------------------------------------------------
 
@@ -54,6 +55,19 @@ MV.def('ui/lyric_editor', ['ui/dom', 'ui/selection', 'i18n/t', 'core/lyrics', 'p
     let j = end - 1;
     while (j >= 0 && /\s/.test(src[j])) j--;
     return j >= 0 && src[j] === '!' && src[j - 1] !== '\\' ? j : -1;
+  }
+
+  // The token colours as CSS Custom Highlights, one per class (style.css paints `.le-row::highlight(tok-…)`), or null
+  // where the engine has none (Safari before 17.2): the mirror then colours with spans.
+  function tokenInks() {
+    const registry = typeof CSS !== 'undefined' ? CSS.highlights : null;
+    if (!registry || typeof Highlight !== 'function' || typeof StaticRange !== 'function') return null;
+    const inks = new Map();
+    for (const cls of TOKENS) {
+      if (!registry.has(cls)) registry.set(cls, new Highlight());
+      inks.set(cls, registry.get(cls));
+    }
+    return inks;
   }
 
   function rowIndexAt(text, offset) {
@@ -193,19 +207,87 @@ MV.def('ui/lyric_editor', ['ui/dom', 'ui/selection', 'i18n/t', 'core/lyrics', 'p
 
     // --- mirror and gutter -------------------------------------------------------------------------------------
 
+    const inks = tokenInks();               // token class → Highlight, or null (spans)
+    const inked = new Map();                // mirror row → its highlight ranges, as [class, range]
+
+    // A row is as tall as its own line boxes, like the textarea's line. A blank row ends with <br>, as the textarea's
+    // line ends with '\n', so it still has one line box. The row's text is one text node, as the textarea's line is
+    // one run of text, and the token colours are highlight ranges over it (ink below), so the line breaker reads the
+    // same text in both layers. With a span per token it would not in WebKit, which decides a break at a text node
+    // boundary from the two characters before it in the previous node only (TextUtil::mayBreakInBetween): a rule that
+    // needs more context (digits around a '/') could wrap the row where the textarea does not, moving every row below.
+    // Without Custom Highlights (Safari before 17.2) the tokens are spans.
     function rowElOf(src) {
-      return h('div', { class: 'le-row' }, segments(src).map(([text, cls]) => (cls ? h('span', { class: cls, text }) : text)));
+      const tail = src.trim() ? null : h('br');
+      if (inks) return h('div', { class: 'le-row' }, src || null, tail);
+      const row = h('div', { class: 'le-row' }, segments(src).map(([text, cls]) => (cls ? h('span', { class: cls, text }) : text)), tail);
+      row.normalize();                      // plain text next to plain text (leading space) is one node
+      return row;
     }
 
-    // Rebuilds only the mirror rows that changed (§7.4: typing never waits), keeps the textarea as tall as the mirror
-    // (in the same task, so the textarea never scrolls inside itself), and schedules the gutter.
+    // Highlight ranges only for the rows in and near the editor's viewport (the gutter's rows). WebKit walks every
+    // registered range for each line of text it paints (MarkedText::collectForHighlights), so their number stays that
+    // of a screenful however long the lyrics are.
+    function inkRows(from, to) {
+      if (!inks) return;
+      const keep = new Set(rowEls.slice(from, to));
+      for (const el of inked.keys()) if (!keep.has(el)) unink(el);
+      for (let i = from; i < to; i++) if (!inked.has(rowEls[i])) ink(rowEls[i], rowSrcs[i]);
+    }
+
+    function ink(el, src) {
+      const node = el.firstChild;
+      const ranges = [];
+      let at = 0;
+      for (const [text, cls] of segments(src)) {
+        if (cls && node && node.nodeType === 3) {
+          const range = new StaticRange({ startContainer: node, startOffset: at, endContainer: node, endOffset: at + text.length });
+          inks.get(cls).add(range);
+          ranges.push([cls, range]);
+        }
+        at += text.length;
+      }
+      inked.set(el, ranges);
+    }
+
+    function unink(el) {
+      const ranges = inked.get(el);
+      if (!ranges) return;
+      for (const [cls, range] of ranges) inks.get(cls).delete(range);
+      inked.delete(el);
+    }
+
+    // The textarea is as tall as the mirror and the editor's viewport, or as its own text where an engine lays that
+    // out taller, so it never scrolls inside itself: the editor scrolls instead. The reads come first and one write
+    // follows, if the height changes at all; only a shorter textarea is measured again, as its text may overflow it
+    // now. So typing lays out once here, a deletion that removes a line twice. A caret reveal runs before `input`: when
+    // the new text had outgrown the textarea (a typed character wrapped the last row, Enter at the end, a paste), it
+    // scrolled the textarea inside itself and the editor that much less. That inner scroll goes to the editor, so the
+    // caret stays where the reveal showed it.
+    let mirrorSeen = -1, rootSeen = -1;     // the mirror and editor heights the textarea was last sized for
+    function syncHeight() {
+      const inner = textarea.scrollTop;
+      const had = textarea.offsetHeight;
+      const own = textarea.scrollHeight > textarea.clientHeight ? textarea.scrollHeight : 0;
+      mirrorSeen = mirror.offsetHeight;
+      rootSeen = root.clientHeight;
+      const px = Math.max(mirrorSeen, rootSeen - 2, own);
+      if (px !== had) {
+        textarea.style.height = px + 'px';
+        if (px < had && textarea.scrollHeight > textarea.clientHeight) textarea.style.height = textarea.scrollHeight + 'px';
+      }
+      if (inner) { textarea.scrollTop = 0; root.scrollTop += inner; }
+    }
+
+    // Rebuilds only the mirror rows that changed (§7.4: typing never waits), keeps the textarea's height in step (in
+    // the same task, after the empty state is set, since it changes the padding), and schedules the gutter.
     function renderMirror() {
       const rows = textarea.value.split('\n');
       const d = changedRows(rowSrcs, rows);
       if (d.a < d.oldEnd || d.a < d.newEnd) {
         const fresh = rows.slice(d.a, d.newEnd).map(rowElOf);
         const anchor = rowEls[d.oldEnd] || null;
-        for (let i = d.a; i < d.oldEnd; i++) rowEls[i].remove();
+        for (let i = d.a; i < d.oldEnd; i++) { rowEls[i].remove(); unink(rowEls[i]); }
         const frag = document.createDocumentFragment();
         for (const el of fresh) frag.appendChild(el);
         mirror.insertBefore(frag, anchor);
@@ -213,9 +295,9 @@ MV.def('ui/lyric_editor', ['ui/dom', 'ui/selection', 'i18n/t', 'core/lyrics', 'p
         if (d.oldEnd !== d.newEnd || (playingRow >= d.a && playingRow < d.newEnd)) refreshPlaying();
       }
       rowSrcs = rows;
-      textarea.style.height = Math.max(mirror.offsetHeight, root.clientHeight - 2) + 'px';
       placeholder.hidden = textarea.value.length > 0;
       root.classList.toggle('is-empty', !placeholder.hidden);   // no gutter while empty: the placeholder gets the width
+      syncHeight();
       scheduleGutter();
     }
 
@@ -269,9 +351,12 @@ MV.def('ui/lyric_editor', ['ui/dom', 'ui/selection', 'i18n/t', 'core/lyrics', 'p
       const frag = document.createDocumentFragment();
       const top = root.scrollTop - GUTTER_MARGIN_PX;
       const bottom = root.scrollTop + root.clientHeight + GUTTER_MARGIN_PX;
-      for (let i = rowAtY(top); i < rowEls.length; i++) {
+      const first = rowAtY(top);
+      let end = first;
+      for (let i = first; i < rowEls.length; i++) {
         const rowEl = rowEls[i];
         if (rowEl.offsetTop > bottom) break;
+        end = i + 1;
         const row = aligned ? doc.sheet.rows[i] : null;
         if (!row) continue;
         const line = lines.get(row.id);
@@ -286,6 +371,7 @@ MV.def('ui/lyric_editor', ['ui/dom', 'ui/selection', 'i18n/t', 'core/lyrics', 'p
         frag.appendChild(entry);
       }
       dom.replace(gutter, frag);
+      if (root.clientHeight) inkRows(first, end);     // hidden (another step), rows have no positions: onShow re-renders
     }
 
     function fillEntry(entry, line, doc, pins, warn) {
@@ -441,6 +527,17 @@ MV.def('ui/lyric_editor', ['ui/dom', 'ui/selection', 'i18n/t', 'core/lyrics', 'p
     };
     if (typeof ResizeObserver === 'function') {
       new ResizeObserver(() => { if (!measureFrame) measureFrame = requestAnimationFrame(remeasure); }).observe(root);
+    }
+    // Heights that change without an edit: the mirror's (a web font of the stack loads and both layers re-wrap) and the
+    // editor's (a taller or shorter window: the textarea still reaches its bottom, other rows come into view). An edit
+    // has synced in its own task already, so only a height syncHeight has not seen is acted on.
+    if (typeof ResizeObserver === 'function') {
+      const resync = () => {
+        if (root.clientWidth && (mirror.offsetHeight !== mirrorSeen || root.clientHeight !== rootSeen)) { syncHeight(); scheduleGutter(); }
+      };
+      const heights = new ResizeObserver(resync);
+      heights.observe(mirror);
+      heights.observe(root);
     }
     requestAnimationFrame(renderMirror);
     return api;

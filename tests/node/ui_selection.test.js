@@ -176,6 +176,41 @@ test('lyric editor: undo puts the caret where the typing burst started; redo aft
   assert.equal(E.changeEnd('one\ntwo\nfour', 'one\nfour'), 4, 'a deleted row: the caret where it was');
 });
 
+// The textarea and its coloured mirror must lay text out alike (docs/NOTES.md, "Lyric editor: iOS drift").
+// tests/browser/editor_metrics.py compares the computed styles, but Chromium drops the WebKit-only declarations, so
+// they are checked here in the source.
+test('lyric editor: one rule lays out the text of both layers, WebKit-only values included', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const { SRC } = require('../helpers/load.js');
+  const css = fs.readFileSync(path.join(SRC, 'ui', 'style.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((m) => ({
+    sels: m[1].trim().split(',').map((s) => s.trim().replace(/\s+/g, ' ')),
+    decls: m[2].split(';').map((d) => d.trim().replace(/\s+/g, ' ')).filter(Boolean),
+  }));
+  const shared = rules.filter((r) => r.sels.join(', ') === '.le-mirror, .le-text');
+  assert.equal(shared.length, 1, 'one rule for both layers');
+  for (const d of ['-webkit-nbsp-mode: space', 'line-break: after-white-space', '-webkit-text-size-adjust: none',
+    'text-size-adjust: none', 'font: 16px/var(--le-lh) var(--font)', 'font-kerning: none', 'font-variant-ligatures: none',
+    'white-space: pre-wrap', 'word-break: normal', 'overflow-wrap: anywhere', 'border: 0', 'box-sizing: border-box']) {
+    assert.ok(shared[0].decls.includes(d), 'the shared rule sets ' + d);
+  }
+  assert.match(css, /\.lyric-editor \{ --le-lh: \d+px; \}/, 'a whole-px line height (Safari rounds line boxes)');
+  // Every other rule on a layer, a row or a token leaves text layout alone, unless it names both layers alike
+  // (.is-empty .le-text with .is-empty .le-mirror); a token only changes the colour.
+  const LAYOUT = /^(font(-.+)?|line-height|letter-spacing|word-spacing|white-space(-collapse)?|word-break|overflow-wrap|word-wrap|line-break|hyphens|tab-size|text-(indent|transform|align|align-last|rendering|autospace|spacing-trim|size-adjust|wrap(-mode|-style)?|justify)|-webkit-(nbsp-mode|text-size-adjust)|hanging-punctuation|padding(-.+)?|margin(-.+)?|border(-(top|right|bottom|left))?(-width)?|box-sizing|writing-mode|direction|unicode-bidi|zoom)$/;
+  for (const r of rules) {
+    if (r === shared[0] || !r.sels.some((s) => /\.le-(text|mirror|row)\b|tok-/.test(s))) continue;
+    const layers = r.sels.map((s) => s.replace(/\.le-(text|mirror)\b/, '.LAYER'));
+    const both = r.sels.every((s, i) => /\.le-(text|mirror)\b/.test(s) && layers.filter((x) => x === layers[i]).length === 2);
+    for (const d of r.decls) {
+      const prop = d.split(':')[0].trim();
+      if (r.sels.some((s) => /tok-/.test(s))) assert.equal(prop, 'color', r.sels.join(', ') + ' only colours: ' + d);
+      else if (!both) assert.ok(!LAYOUT.test(prop), r.sels.join(', ') + ' sets ' + d + ' on one layer only');
+    }
+  }
+});
+
 test('lyric editor: only the changed middle of the rows is rebuilt', () => {
   const E = MV.use('ui/lyric_editor');
   const rows = (n) => Array.from({ length: n }, (_, i) => 'row ' + i);
