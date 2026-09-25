@@ -8,6 +8,10 @@ one of the times at least (an exit may rightly have cleared the frame near its e
 securitypolicyviolation events. Registries: parts/catalog when it exists, the DESIGN §4.18 examples and the
 stub parts (tests/fixtures). Google Fonts are blocked, so fallback faces draw: the system needs a Japanese font, or the
 test stops at once with one message saying so (dev/browser.py japanese_font_missing).
+DESIGN_2_1 additions: every shot and rig preset of core/shot in every aspect, rendered in the canned cut at the same two
+times and as the picker thumbnail (engine.thumb), with the same checks; and the media mode: every part with a media
+param (the fake store's test parts, and the catalog's media parts once they exist) × every aspect × a still and a video
+fixture of tests/helpers/fake_media.js, in export quality (not blank, no errors, the medium drawn).
 Run: PW_EXECUTABLE=/opt/pw-browsers/chromium python3 tests/browser/parts_gallery.py [--parts examples] [--aspects 16:9,9:16]
 """
 import argparse
@@ -22,6 +26,7 @@ from playwright.async_api import async_playwright  # noqa: E402
 EPS = 1.0            # luminance variance (0..255 scale) below this counts as a blank frame
 TIMES = (0.2, 0.7)
 WIDTH = 256
+MEDIA_ASSETS = ('fixture:jpeg', 'fixture:mp4')       # a still and a video; overlay footage takes the video only
 
 # One in-page loop per registry: fewer round trips, same checks.
 RENDER_ALL = """
@@ -32,17 +37,66 @@ async (o) => {
     const size = w >= h ? [o.width, Math.round(o.width * h / w)] : [Math.round(o.width * w / h), o.width];
     for (const u of o.times) {
       try {
-        const r = await window.__lab.render({ parts: o.parts, kind: job.kind, key: job.key, aspect: job.aspect, u, w: size[0], h: size[1] });
+        const r = await window.__lab.render({ parts: o.parts, kind: job.kind, key: job.key, aspect: job.aspect, u, w: size[0], h: size[1],
+          asset: job.asset, quality: job.asset ? 'export' : undefined });
         const bad = r.warnings.filter((w) => w.code === 'part-error').map((w) => w.detail || w.code);
-        out.push({ kind: job.kind, key: job.key, aspect: job.aspect, u, variance: r.variance, glyphs: r.stats.drawn.glyphs, bad });
+        const nan = ['x', 'y', 'zoom', 'roll'].some((k) => !Number.isFinite(r.view[k]));
+        out.push({ kind: job.kind, key: job.key, aspect: job.aspect, asset: job.asset || '', u, variance: r.variance,
+          glyphs: r.stats.drawn.glyphs, media: r.stats.media ? r.stats.media.drawn : 0, listed: r.media.length, nan, bad });
       } catch (e) {
-        out.push({ kind: job.kind, key: job.key, aspect: job.aspect, u, error: String(e && e.stack || e) });
+        out.push({ kind: job.kind, key: job.key, aspect: job.aspect, asset: job.asset || '', u, error: String(e && e.stack || e) });
       }
     }
   }
   return out;
 }
 """
+
+# The picker tiles of the camera presets: engine.thumb with kind 'shot' / 'rig'.
+THUMB_ALL = """
+async (o) => {
+  const out = [];
+  for (const job of o.jobs) {
+    const [w, h] = job.aspect.split(':').map(Number);
+    const size = w >= h ? [o.width, Math.round(o.width * h / w)] : [Math.round(o.width * w / h), o.width];
+    try {
+      const r = window.__lab.thumb({ parts: o.parts, kind: job.kind, key: job.key, aspect: job.aspect, w: size[0], h: size[1] });
+      out.push({ kind: job.kind, key: job.key, aspect: job.aspect, variance: r.variance, glyphs: r.stats.drawn.glyphs });
+    } catch (e) {
+      out.push({ kind: job.kind, key: job.key, aspect: job.aspect, error: String(e && e.stack || e) });
+    }
+  }
+  return out;
+}
+"""
+
+
+def check_results(results, src, failures, media=False):
+    """Per render: no error, no part-error, a finite camera; per case: not blank at one time at least (media: the
+    medium drawn and listed by mediaAt). Returns the number of bad cases."""
+    bad = 0
+    shown = {}
+    for r in results:
+        where = '%s %s/%s %s%s u=%.1f' % (src, r['kind'], r['key'], r['aspect'], (' ' + r['asset']) if r.get('asset') else '', r['u'])
+        case = (r['kind'], r['key'], r['aspect'], r.get('asset', ''))
+        shown.setdefault(case, 0)
+        if 'error' in r:
+            failures.append(where + ': ' + r['error'].splitlines()[0])
+        elif r['bad']:
+            failures.append(where + ': part-error ' + '; '.join(r['bad']))
+        elif r['nan']:
+            failures.append(where + ': the camera is not finite')
+        elif media and (r['media'] < 1 or r['listed'] < 1):
+            failures.append(where + ': the medium is not drawn (%d drawn, %d listed by mediaAt)' % (r['media'], r['listed']))
+        else:
+            shown[case] += 1 if r['variance'] > EPS else 0
+            continue
+        bad += 1
+    for (kind, key, aspect, asset), n in shown.items():
+        if n == 0:
+            failures.append('%s %s/%s %s%s: blank frame at every time' % (src, kind, key, aspect, (' ' + asset) if asset else ''))
+            bad += 1
+    return bad
 
 
 async def run(args):
@@ -65,27 +119,46 @@ async def run(args):
                 jobs = [{'kind': kind, 'key': key, 'aspect': aspect}
                         for kind, keys in info['parts'][src].items() for key in keys for aspect in aspects]
                 results = await page.evaluate(RENDER_ALL, {'jobs': jobs, 'parts': src, 'times': list(TIMES), 'width': WIDTH})
-                bad = 0
-                shown = {}
-                for r in results:
-                    where = '%s %s/%s %s u=%.1f' % (src, r['kind'], r['key'], r['aspect'], r['u'])
-                    case = (r['kind'], r['key'], r['aspect'])
-                    shown.setdefault(case, 0)
-                    if 'error' in r:
-                        failures.append(where + ': ' + r['error'].splitlines()[0])
-                    elif r['bad']:
-                        failures.append(where + ': part-error ' + '; '.join(r['bad']))
-                    else:
-                        shown[case] += 1 if r['variance'] > EPS else 0
-                        continue
-                    bad += 1
-                for (kind, key, aspect), n in shown.items():
-                    if n == 0:
-                        failures.append('%s %s/%s %s: blank frame at every time' % (src, kind, key, aspect))
-                        bad += 1
+                bad = check_results(results, src, failures)
                 parts = sum(len(v) for v in info['parts'][src].values())
                 print('%s %s: %d parts × %d aspects × %d times = %d renders' %
                       ('FAIL' if bad else 'ok  ', src, parts, len(aspects), len(TIMES), len(results)))
+            # the camera presets (DESIGN_2_1 §3.10) with the first registry's fallback parts
+            src = sources[0]
+            cam = [{'kind': kind, 'key': key, 'aspect': aspect}
+                   for kind in ('shot', 'rig') for key in info['camera'][kind] for aspect in aspects]
+            results = await page.evaluate(RENDER_ALL, {'jobs': cam, 'parts': src, 'times': list(TIMES), 'width': WIDTH})
+            bad = check_results(results, src, failures)
+            print('%s %s camera: %d shots + %d rigs × %d aspects × %d times = %d renders' %
+                  ('FAIL' if bad else 'ok  ', src, len(info['camera']['shot']), len(info['camera']['rig']), len(aspects),
+                   len(TIMES), len(results)))
+            thumbs = await page.evaluate(THUMB_ALL, {'jobs': cam, 'parts': src, 'width': 160})
+            bad = 0
+            for r in thumbs:
+                where = '%s %s/%s %s thumb' % (src, r['kind'], r['key'], r['aspect'])
+                if 'error' in r:
+                    failures.append(where + ': ' + r['error'].splitlines()[0])
+                    bad += 1
+                elif not r['variance'] > EPS or r['glyphs'] < 1:
+                    failures.append(where + ': blank tile (variance %.2f, %d glyphs)' % (r['variance'], r['glyphs']))
+                    bad += 1
+            print('%s %s camera thumbnails: %d tiles' % ('FAIL' if bad else 'ok  ', src, len(thumbs)))
+            # the media mode (DESIGN_2_1 §11.8.2): parts with a media param × aspects × a still and a video
+            media = info.get('media')
+            if not media:
+                failures.append('the lab page has no media fixtures (tests/helpers/fake_media.js)')
+            else:
+                found = media['parts'].get(src, [])
+                if not found:
+                    failures.append('%s: no part with a media param (the fake store\'s test parts are missing)' % src)
+                jobs = [{'kind': m['kind'], 'key': m['key'], 'aspect': aspect, 'asset': asset}
+                        for m in found for aspect in aspects for asset in MEDIA_ASSETS
+                        if m['accept'] != 'image' or asset != 'fixture:mp4'
+                        if m['accept'] != 'video' or asset != 'fixture:jpeg']
+                results = await page.evaluate(RENDER_ALL, {'jobs': jobs, 'parts': src, 'times': list(TIMES), 'width': WIDTH})
+                bad = check_results(results, src, failures, media=True)
+                print('%s %s media: %d parts × %d aspects × %d assets × %d times = %d renders' %
+                      ('FAIL' if bad else 'ok  ', src, len(found), len(aspects), len(MEDIA_ASSETS), len(TIMES), len(results)))
             violations = await csp_violations(page)
             if violations:
                 failures.append('CSP violations: %r' % violations)

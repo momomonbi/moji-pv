@@ -40,6 +40,7 @@ MV.def('export/host/png', ['export/schedule', 'export/zip', 'export/host/mp4'], 
       };
       for (let i = 0; i < job.N; i++) {
         J.checkAbort(o.signal);
+        await job.ready(i, o.signal);
         job.render(i);
         inflight.push(encodePng(job.surface.canvas));
         if (inflight.length >= PIPELINE) await drainOne();

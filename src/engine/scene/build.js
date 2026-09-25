@@ -1,12 +1,15 @@
-/* 文字PVメーカー v2 — original work. Scene build: one Plan cut (or ground segment) → node table + behaviours (DESIGN §4.17.5). */
+/* 文字PVメーカー v2 — original work. Scene build: one Plan cut (or ground segment) → node table + behaviours (DESIGN §4.17.5; DESIGN_2_1 §3.10, §5.9.4, §11.3.7). */
 MV.def('engine/scene/build', ['core/hash', 'core/rng', 'core/schema', 'engine/scene/table', 'engine/scene/builder',
-  'engine/scene/behave', 'engine/scene/frame'],
-(H, RNG, SCH, T, B, BH, F) => {
+  'engine/scene/behave', 'engine/scene/frame', 'engine/scene/shot'],
+(H, RNG, SCH, T, B, BH, F, SHOT) => {
   'use strict';
 
   const SAFE = 0.05;              // safe margin: 5% of the short side on every edge
   const PART_SLOTS = Object.freeze(['arrange', 'arrive', 'dwell', 'depart', 'lens']);
   const ORNAMENT_SLOTS = Object.freeze(['ornament#0', 'ornament#1', 'ornament#2']);
+  // Particle budgets of the materials that meet in one scene (DESIGN_2_1 §5.9.4): env.mixShare scales them down.
+  const MIX_BUDGET = Object.freeze({ cut: 400, ground: 300 });
+  const NO_MEDIA = Object.freeze({});
 
   // --- small helpers -------------------------------------------------------------------------------------------
 
@@ -27,10 +30,28 @@ MV.def('engine/scene/build', ['core/hash', 'core/rng', 'core/schema', 'engine/sc
   // depends on the params or on where the value came from (auto, pin, lock), so locking a line, pinning a value to
   // what it already is or moving a slider keeps every per-glyph random, the scatter order and particle layouts.
   // It is a function of what the fingerprint covers, so cuts (and segments) with equal fp may share one cached scene;
-  // segments pass subject '' because a segment's fp covers neither its key nor its cuts' text.
+  // segments pass subject '' because a segment's fp covers neither its key nor its cuts' text. An object value (a custom
+  // shot, rig or curve) is hashed as canonical JSON, so equal objects seed alike everywhere (DESIGN_2_1 §7.1.5).
   function slotSeed(slot, decision, subject) {
     const v = decision && decision.v !== undefined && decision.v !== null ? decision.v : '';
-    return H.hash32('slot', slot, v, subject === undefined ? '' : subject);
+    return H.hash32('slot', slot, v !== null && typeof v === 'object' ? H.hashJSON(v) : v, subject === undefined ? '' : subject);
+  }
+
+  // env.mixShare (DESIGN_2_1 §5.9.4): min(1, budget / Σ particles of the material defs this scene draws). A function of
+  // the chosen defs (their `mine` records), so it is deterministic and covered by the fingerprints.
+  function mixShareOf(defs, budget) {
+    let sum = 0;
+    for (const def of defs) {
+      const cost = def && def.mine ? def.mine.cost : null;
+      if (cost && typeof cost === 'object' && typeof cost.particles === 'number' && cost.particles > 0) sum += cost.particles;
+    }
+    return sum > budget ? budget / sum : 1;
+  }
+
+  // The media metadata a scene may use (DESIGN_2_1 §11.2.6: plan.media, handed in as svc.media): a frozen lookup.
+  function mediaOf(plan, svc) {
+    const m = (svc && svc.media) || plan.media || NO_MEDIA;
+    return Object.isFrozen(m) ? m : Object.freeze(Object.assign({}, m));
   }
 
   function warn(list, w) { list.push(Object.freeze(w)); }
@@ -65,7 +86,9 @@ MV.def('engine/scene/build', ['core/hash', 'core/rng', 'core/schema', 'engine/sc
     return { f: (cut && cut.feat) || {}, look: { amounts: plan.look.amounts || {}, mood: null, bpm: plan.beats ? plan.beats.bpm : null } };
   }
 
-  function baseEnv(plan, svc, sb, D, cut, times, origin) {
+  // Additive (DESIGN_2_1): media (the frozen plan.media lookup), mixShare (the scene's particle share for materials),
+  // and for the lens only, target and shot (below).
+  function baseEnv(plan, svc, sb, D, cut, times, origin, media, mixShare) {
     const slots = cut ? cut.slots : {};
     return {
       D, cut, feat: cut ? cut.feat : null, role: cut ? cut.role : null, times,
@@ -76,15 +99,37 @@ MV.def('engine/scene/build', ['core/hash', 'core/rng', 'core/schema', 'engine/sc
       amounts: plan.look.amounts || {}, grid: F.gridAt(plan, origin),
       level: (tl) => F.levelAt(plan, origin + tl),
       envelope: (tl) => BH.envelopeWeight(tl, times.rest, times.out),
-      hints: null,
+      hints: null, media, mixShare,
     };
   }
 
-  function partEnv(base, builder, def, slot, decision, subject, owner, hints) {
+  // The definition a decision will build (the fallback for an unknown key), without warnings: for the mix share.
+  function defOf(registry, kind, decision) {
+    const key = decision && decision.v;
+    return (key && registry.get(kind, key)) || registry.get(kind, registry.fallback(kind));
+  }
+
+  function cutMixShare(reg, slots) {
+    const defs = PART_SLOTS.map((s) => defOf(reg, s, decisionOf(slots, s)));
+    const count = valueOf(slots, 'ornament.count', 0);
+    ORNAMENT_SLOTS.forEach((slot, k) => {
+      const d = decisionOf(slots, slot);
+      if (k < count && d && d.v && d.v !== 'none') defs.push(defOf(reg, 'ornament', d));
+    });
+    return mixShareOf(defs, MIX_BUDGET.cut);
+  }
+
+  // The shot inputs of a cut (DESIGN_2_1 §3.10): the cam.shot decision and the cam.zoom, cam.curve, cam.follow values.
+  function shotInputs(slots) {
+    return { shot: decisionOf(slots, 'cam.shot'), zoom: valueOf(slots, 'cam.zoom', 1), curve: valueOf(slots, 'cam.curve', null),
+      follow: valueOf(slots, 'cam.follow', null) };
+  }
+
+  function partEnv(base, builder, def, slot, decision, subject, owner, hints, extra) {
     const seed = slotSeed(slot, decision, subject);
     const rng = RNG.stream(seed, 'build', def.key);
     builder.setContext({ owner, rng: rng.fork('sb') });
-    return Object.assign({}, base, { rng, owner, seed, slot, key: def.key, hints: hints || null });
+    return Object.assign({}, base, { rng, owner, seed, slot, key: def.key, hints: hints || null }, extra || null);
   }
 
   // --- targets -----------------------------------------------------------------------------------------------------
@@ -222,6 +267,7 @@ MV.def('engine/scene/build', ['core/hash', 'core/rng', 'core/schema', 'engine/sc
       out[s] = Object.assign({}, slots[s] || {}, { v: registry.fallback(kind), from: 'fallback' });
     }
     for (const s of ORNAMENT_SLOTS) if (out[s]) out[s] = { v: 'none', from: 'fallback' };
+    out['cam.shot'] = { v: 'none', from: 'fallback' };
     return out;
   }
 
@@ -230,12 +276,13 @@ MV.def('engine/scene/build', ['core/hash', 'core/rng', 'core/schema', 'engine/sc
     const D = designEnv(plan.design);
     const where = { cut: cut.key, line: cut.line };
     const els = cut.els || {};
-    const builder = B.createBuilder({ D, text: svc.text, cutText: cut.text, defaults: {
+    const media = mediaOf(plan, svc);
+    const builder = B.createBuilder({ D, text: svc.text, cutText: cut.text, media, defaults: {
       orient: valueOf(slots, 'orient', 'h'), face: valueOf(slots, 'text.face', 'display'),
       ink: valueOf(slots, 'text.ink', 'ink'), style: valueOf(slots, 'text.style', 'plain'), lang: cut.lang, emph: cut.emph } });
     const cam = builder.camera();
     const times = timesOf(cut);
-    const base = baseEnv(plan, svc, builder.sb, D, Object.assign({}, cut, { slots }), times, cut.t0);
+    const base = baseEnv(plan, svc, builder.sb, D, Object.assign({}, cut, { slots }), times, cut.t0, media, cutMixShare(reg, slots));
     const ax = autoContext(plan, cut);
     const part = (kind, slot) => {
       const d = decisionOf(slots, slot);
@@ -275,13 +322,20 @@ MV.def('engine/scene/build', ['core/hash', 'core/rng', 'core/schema', 'engine/sc
     const at = textHints(target);
     const hints = { focus, free, lines: at.lines, emphLines: at.emphLines, emph: at.emph };
     buildOrnaments(builder, base, slots, els, reg, cut, hints, warnings, where, ax);
+    // the camera: the shot is resolved first, so the lens sees the text and the track (read-only); the lens behaviours
+    // run first and the shot's after them, composing with their deltas (DESIGN_2_1 §4.4)
+    const shot = SHOT.makeShot(base, cam, target, shotInputs(slots));
     const lens = part('lens', 'lens');
-    const lensB = lens.def.make(partEnv(base, builder, lens.def, 'lens', lens.d, cut.text, 'lens', hints), cam, lens.p);
+    const lensEnv = partEnv(base, builder, lens.def, 'lens', lens.d, cut.text, 'lens', hints,
+      { target, shot: shot ? shot.track : null });
+    const lensB = lens.def.make(lensEnv, cam, lens.p);
     for (const b of checked(lensB, 'lens/' + lens.def.key)) builder.sb.behave(b);
+    if (shot) for (const b of shot.behaviours) builder.sb.behave(b);
 
     return sceneOf(builder, {
       key: cut.key, fp: cut.fp, kind: 'cut', t0: cut.t0, cam, text: range, span: { a: cut.a, b: cut.b }, times, target,
-      focus, warnings: warnings.concat(overfullOf(builder, cut)), svc,
+      focus, warnings: warnings.concat(overfullOf(builder, cut)), svc, shot: shot ? shot.track : null,
+      lean: shot ? shot.lean : null,
     });
   }
 
@@ -359,11 +413,14 @@ MV.def('engine/scene/build', ['core/hash', 'core/rng', 'core/schema', 'engine/sc
     // INT-PLAN: a ground scene gets no cut (env.cut, env.feat, env.role are null, the text style is the default, the
     // builder has no cut text). A segment's fingerprint covers its decisions, length and look, not its cuts (§3.12 fp,
     // §7.1.5), and the planner has already resolved the segment's parameters from its first cut (§4.16.6).
-    const builder = B.createBuilder({ D, text: svc.text, cutText: '', defaults: {} });
+    const media = mediaOf(plan, svc);
+    const builder = B.createBuilder({ D, text: svc.text, cutText: '', defaults: {}, media });
     const cam = builder.camera();
     const len = Math.max(0, seg.t1 - seg.t0);
     const times = { a: 0, rest: 0, out: len, b: len };
-    const base = baseEnv(plan, svc, builder.sb, D, null, times, seg.t0);
+    const share = mixShareOf([defOf(reg, 'ground', groundD)].concat(atmosD && atmosD.v && atmosD.v !== 'none'
+      ? [defOf(reg, 'ornament', atmosD)] : []), MIX_BUDGET.ground);
+    const base = baseEnv(plan, svc, builder.sb, D, null, times, seg.t0, media, share);
     const ax = autoContext(plan, null);
     const range = builder.commitText();
     const ground = partOf(reg, 'ground', groundD, warnings, where);
@@ -398,6 +455,8 @@ MV.def('engine/scene/build', ['core/hash', 'core/rng', 'core/schema', 'engine/sc
   //   runs[k]          { node, spec, layout, from, to, ink, emphInk, clip }  clip = the box of an overfull run
   //   layers           LayerSpec per LAYERS entry (sb.layer patches); owners[table.owner[i]] = { el, slot }
   //   cam              the camera node (frame.cameraAt reads its live pose)
+  //   shot, lean       (DESIGN_2_1 §3.10) the cut's shot Track and follow Lean, or null
+  //   media            (DESIGN_2_1 §11.3.7) [{ node, id, time: TimeSpec | null }] of the media nodes, in node order
   function sceneOf(builder, o) {
     const behaviours = builder.seal();
     const glyphKeys = new Set();
@@ -411,6 +470,7 @@ MV.def('engine/scene/build', ['core/hash', 'core/rng', 'core/schema', 'engine/sc
       span: o.span, warnings: o.warnings, glyphKeys: [...glyphKeys].sort(), provisional: o.svc.provisional === true,
       stores: builder.stores, times: o.times, target: o.target, focus: o.focus,
       fontKey: o.svc.text ? o.svc.text.key : null,
+      shot: o.shot || null, lean: o.lean || null, media: builder.mediaList(),
     };
   }
 

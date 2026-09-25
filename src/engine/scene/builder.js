@@ -1,6 +1,6 @@
-/* 文字PVメーカー v2 — original work. SceneBuilder: the only way parts create nodes; ShapeSpec codec; particle fields (DESIGN §4.17.3). */
-MV.def('engine/scene/builder', ['core/num', 'core/mat', 'core/script', 'engine/scene/table', 'engine/scene/behave'],
-(N, MAT, S, T, BH) => {
+/* 文字PVメーカー v2 — original work. SceneBuilder: the only way parts create nodes; ShapeSpec codec; particle fields; media nodes (DESIGN §4.17.3; DESIGN_2_1 §11.5.1). */
+MV.def('engine/scene/builder', ['core/num', 'core/mat', 'core/script', 'core/media', 'engine/scene/table', 'engine/scene/behave'],
+(N, MAT, S, MEDIA, T, BH) => {
   'use strict';
 
   class BuildError extends Error {
@@ -174,18 +174,85 @@ MV.def('engine/scene/builder', ['core/num', 'core/mat', 'core/script', 'engine/s
     return out;
   }
 
+  // --- media records (DESIGN_2_1 §11.5.1, FROZEN record) -----------------------------------------------------------
+
+  const COMPS = Object.freeze(['over', 'atop', 'screen', 'multiply', 'overlay']);
+  const SOFT_ZOOM = 1.08;                 // 'soft': the blurred cover copy behind the contained picture (§11.5.2)
+  const SOFT_BLUR = 24;
+  const SOFT_VEIL = Object.freeze({ ink: 'ground', a: 0.25 });
+
+  function isBoxLike(b) { return !!b && [b.x, b.y, b.w, b.h].every(finite) && b.w >= 0 && b.h >= 0; }
+
+  function inkLayer(v, what) {
+    if (v === null || v === undefined) return null;
+    if (!v || typeof v.ink !== 'string' || v.ink === '' || !finite(v.a) || v.a < 0 || v.a > 1) {
+      throw new BuildError('bad-media', what + ' must be null or { ink, a (0..1) }');
+    }
+    return Object.freeze({ ink: v.ink, a: v.a });
+  }
+
+  function timeOf(v) {
+    if (v === null || v === undefined) return null;
+    const ok = v && MEDIA.CLOCKS.includes(v.clock) && MEDIA.LOOPS.includes(v.loop) &&
+      ['origin', 'clipIn', 'end', 'speed', 'frame'].every((k) => finite(v[k])) && v.speed > 0 && v.frame > 0;
+    if (!ok) throw new BuildError('bad-media', 'time must be null or a TimeSpec from core/media.timeSpec');
+    return Object.isFrozen(v) ? v : Object.freeze(Object.assign({}, v));
+  }
+
+  // The checked media record of sb.media(o); meta = the plan's MediaMeta of o.src. The fit rectangles are computed here,
+  // once: nothing about framing is computed per frame.
+  function mediaRecord(o, meta) {
+    const bad = (m) => { throw new BuildError('bad-media', m); };
+    if (!isBoxLike(o.box)) bad('box needs a finite x, y, w, h');
+    const fit = o.fit === undefined ? 'cover' : o.fit;
+    if (!MEDIA.FITS.includes(fit)) bad('fit must be one of ' + MEDIA.FITS.join(' '));
+    const c = o.crop || { zoom: 1, x: 0.5, y: 0.5 };
+    if (!(finite(c.zoom) && c.zoom >= 1 && finite(c.x) && c.x >= 0 && c.x <= 1 && finite(c.y) && c.y >= 0 && c.y <= 1)) {
+      bad('crop must be { zoom ≥ 1, x, y in 0..1 }');
+    }
+    const edge = o.edge === undefined ? 'plain' : o.edge;
+    if (!MEDIA.EDGES.includes(edge)) bad('edge must be one of ' + MEDIA.EDGES.join(' '));
+    const bleed = o.bleed === undefined ? 0 : o.bleed;
+    if (!(finite(bleed) && bleed >= 0 && bleed <= 0.5)) bad('bleed must be a share 0..0.5 (0 or 0.15)');
+    if (o.mask !== undefined && o.mask !== null && !isShape(o.mask)) bad('mask must be null or a ShapeSpec from K.shape');
+    const comp = o.comp === undefined ? 'over' : o.comp;
+    if (!COMPS.includes(comp)) bad('comp must be one of ' + COMPS.join(' '));
+    const blur = o.blur === undefined ? 0 : o.blur;
+    if (!(finite(blur) && blur >= 0)) bad('blur must be a number ≥ 0 (du)');
+    const headroom = o.headroom === undefined ? 1.15 : o.headroom;
+    if (!(finite(headroom) && headroom > 0)) bad('headroom must be a positive number');
+    if (o.sceneOnly !== undefined && typeof o.sceneOnly !== 'boolean') bad('sceneOnly must be a boolean');
+    // depth (DESIGN_2_1 §11.9.3, additive): the camera factor the node sees, and `still` (outside the seam composite)
+    const cam = o.cam === undefined ? 1 : o.cam;
+    if (!(finite(cam) && cam >= 0 && cam <= 2)) bad('cam (the camera factor) must be a number 0..2');
+    if (o.still !== undefined && typeof o.still !== 'boolean') bad('still must be a boolean');
+    const box = Object.freeze({ x: o.box.x, y: o.box.y, w: o.box.w, h: o.box.h });
+    const crop = Object.freeze({ zoom: c.zoom, x: c.x, y: c.y });
+    const m = Object.freeze({ kind: meta.kind, w: meta.w, h: meta.h, rot: meta.rot || 0, alpha: !!meta.alpha, anim: !!meta.anim });
+    return {
+      media: true, src: o.src, box, fit, crop, edge, bleed, mask: o.mask || null, comp, blur,
+      veil: inkLayer(o.veil, 'veil'), tint: inkLayer(o.tint, 'tint'), time: timeOf(o.time), headroom,
+      sceneOnly: o.sceneOnly === true, cam, still: o.still === true, meta: m,
+      rect: Object.freeze(MEDIA.fitRect(m, box, fit, crop.zoom, crop.x, crop.y)),
+      soft: fit === 'soft' ? Object.freeze(MEDIA.fitRect(m, box, 'cover', SOFT_ZOOM, crop.x, crop.y)) : null,
+      softBlur: SOFT_BLUR, softVeil: SOFT_VEIL,
+    };
+  }
+
   // --- the builder ----------------------------------------------------------------------------------------------
 
   const LAYER_KEYS = ['blend', 'opacity', 'isolate', 'filter', 'mask', 'cache'];
   const ELEMENT_SLOT = (el) => (el === 'text' ? 'arrange' : el);
 
-  // createBuilder({ D, text, cutText, defaults }) → { sb, … internal API for engine/scene/build }.
-  // D = design env; text = TextService; cutText = the cut's text; defaults = { orient, face, ink, style, lang, emph }.
+  // createBuilder({ D, text, cutText, defaults, media? }) → { sb, … internal API for engine/scene/build }.
+  // D = design env; text = TextService; cutText = the cut's text; defaults = { orient, face, ink, style, lang, emph };
+  // media = { [AssetId]: MediaMeta } (the plan's media, what sb.media may show).
   function createBuilder(opts) {
     const D = opts.D;
     const service = opts.text;
     const cutText = opts.cutText || '';
     const defaults = opts.defaults || {};
+    const mediaMeta = opts.media || {};
     const table = T.createTable();
     const stores = { glyph: [], shape: [], paint: [], image: [], particles: [] };
     const owners = [];
@@ -311,6 +378,44 @@ MV.def('engine/scene/builder', ['core/num', 'core/mat', 'core/script', 'engine/s
       return i;
     }
 
+    // sb.media(o) → node: an image node (type 4) whose record has media: true and the fields of DESIGN_2_1 §11.5.1, plus
+    // (§11.9.3) cam = the camera factor it sees (default 1) and still (drawn outside the seam composite). src must be an
+    // asset of the plan's media (K.media returns −1 before calling this for '' or an unknown id). A timed node (a video
+    // or an animation) is refused on a layer that is cached as a static raster.
+    function media(o) {
+      if (!o || typeof o !== 'object') throw new BuildError('bad-media', 'sb.media needs options');
+      const meta = MEDIA.isId(o.src) && Object.prototype.hasOwnProperty.call(mediaMeta, o.src) ? mediaMeta[o.src] : null;
+      if (!meta) throw new BuildError('bad-media', 'sb.media: src must be an asset of the plan (got ' + JSON.stringify(o.src) + ')');
+      const rec = mediaRecord(o, meta);
+      const i = node(T.TYPE.image, o, stores.image.length, T.FLAG.pickable);
+      if (rec.time && layers[table.layer[i]].cache === 'static') {
+        throw new BuildError('bad-media', 'a video or animation cannot be on a layer cached as a static raster');
+      }
+      stores.image.push(rec);
+      T.setBase(table, i, poseOf(o));
+      return i;
+    }
+
+    // The media nodes: [{ node, id, time }] in node order (the scene's media list, DESIGN_2_1 §11.3.7).
+    function mediaList() {
+      const out = [];
+      for (let i = 0; i < table.n; i++) {
+        if (table.type[i] !== T.TYPE.image) continue;
+        const rec = stores.image[table.payload[i]];
+        if (rec && rec.media) out.push(Object.freeze({ node: i, id: rec.src, time: rec.time }));
+      }
+      return Object.freeze(out);
+    }
+
+    function timedMediaOn(layerIndex) {
+      for (let i = 0; i < table.n; i++) {
+        if (table.type[i] !== T.TYPE.image || table.layer[i] !== layerIndex) continue;
+        const rec = stores.image[table.payload[i]];
+        if (rec && rec.media && rec.time) return true;
+      }
+      return false;
+    }
+
     function particles(o) {
       if (!o) throw new BuildError('bad-particles', 'sb.particles needs options');
       const rng = ctx.rng ? ctx.rng.fork('particles', ctx.forks++) : null;
@@ -340,6 +445,9 @@ MV.def('engine/scene/builder', ['core/num', 'core/mat', 'core/script', 'engine/s
         if (k === 'filter' && !(v === null || (v && finite(v.blur) && v.blur >= 0))) throw new BuildError('bad-layer', 'filter must be null or { blur }');
         if (k === 'mask' && !(v === null || (v && T.LAYER_INDEX[v.layer] !== undefined))) throw new BuildError('bad-layer', 'mask must name a layer');
         if (k === 'cache' && v !== 'none' && v !== 'static') throw new BuildError('bad-layer', "cache must be 'none' or 'static'");
+        if (k === 'cache' && v === 'static' && timedMediaOn(i)) {
+          throw new BuildError('bad-layer', 'a layer holding a video or animation cannot be cached as a static raster');
+        }
         spec[k] = k === 'filter' && v ? { blur: v.blur } : k === 'mask' && v ? { layer: v.layer, invert: !!v.invert } : v;
       }
     }
@@ -426,7 +534,7 @@ MV.def('engine/scene/builder', ['core/num', 'core/mat', 'core/script', 'engine/s
       return bands.filter((q) => q.w >= 1 && q.h >= 1);
     }
 
-    const sb = Object.freeze({ group, text, shape, paint, image, particles, behave, bounds, freeAround, layer });
+    const sb = Object.freeze({ group, text, shape, paint, image, particles, behave, bounds, freeAround, layer, media });
 
     // --- engine-side API (engine/scene/build) ---
 
@@ -578,7 +686,7 @@ MV.def('engine/scene/builder', ['core/num', 'core/mat', 'core/script', 'engine/s
 
     return {
       sb, table, stores, owners, runs, layers, setContext, ownerOf, camera, commitText, layoutRuns, rootsOf, nodesOf,
-      boundsOf, nudge, fill, hide, seal, behaviours,
+      boundsOf, nudge, fill, hide, seal, behaviours, mediaList,
     };
   }
 
@@ -589,7 +697,7 @@ MV.def('engine/scene/builder', ['core/num', 'core/mat', 'core/script', 'engine/s
   }
 
   return {
-    OP, OP_ARGS, OP_NAMES, MAX_PARTICLES, BuildError,
+    OP, OP_ARGS, OP_NAMES, MAX_PARTICLES, BuildError, COMPS,
     path, rect, ellipse, line, poly, arc, replayShape, shapeBounds, isShape,
     normalizeField, particleData, particleAt, createBuilder, unionBox,
   };

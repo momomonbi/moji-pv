@@ -197,6 +197,27 @@ test('recorded frames: frame N directly equals frame N after 0..N−1, and two b
   assert.equal(new Set(a).size > 20, true, 'frames differ over time');
 });
 
+// The golden-frame render of one document through the facade (update_golden.js does the same): a short side of 360 px,
+// the 40 GOLDEN_TIMES, export quality.
+async function goldenFrames(reg, doc) {
+  const { createEngine } = MV.use('engine/facade');
+  const rec = R.createRecorder();
+  const engine = createEngine({ registry: reg, canvas: rec.factory, measurer: fakeMeasurer(), fonts: null, assets: null });
+  const { plan } = engine.setDoc(doc);
+  await engine.prepare(0, plan.duration, { export: true });
+  const [w, h] = DOC.DESIGN_SIZE[doc.look.aspect];
+  const k = 360 / Math.min(w, h);
+  const made = rec.factory.create(Math.round(w * k), Math.round(h * k), { alpha: false });
+  const surface = { canvas: made.canvas, ctx: made.ctx, w: Math.round(w * k), h: Math.round(h * k) };
+  const got = GOLDEN_TIMES(plan).map((time) => {
+    const m = rec.mark();
+    engine.renderFrame(surface, time, { quality: 'export', pick: false, scale: surface.w / plan.design.w });
+    return rec.hash(m);
+  });
+  engine.dispose();
+  return got;
+}
+
 // Skipped only while there is nothing to compare (no facade, or no goldens written yet). A registry change fails: the
 // goldens are then regenerated on purpose (§2.1), so a render regression cannot hide behind a catalog change.
 test('golden frame hashes (tests/golden/frame_hashes.json) match the engine facade', async (t) => {
@@ -209,23 +230,22 @@ test('golden frame hashes (tests/golden/frame_hashes.json) match the engine faca
   assert.ok(golden.registry.kind === kind && golden.registry.version === reg.version, 'goldens were made with the ' +
     golden.registry.kind + ' registry ' + golden.registry.version + ', the current one is the ' + kind + ' registry ' +
     reg.version + ': check the frames, then run node tests/update_golden.js');
-  const { createEngine } = MV.use('engine/facade');
+  for (const { name, doc } of corpus.projects()) assert.deepEqual(await goldenFrames(reg, doc), golden.frames[name], name);
+});
+
+// DESIGN_2_1 §9: documents without the new pins differ from v2 only by the automatic camerawork. With the camerawork
+// pinned off, every corpus project renders the v2 frames exactly (frame_hashes_v2.json is frozen; update_golden.js
+// checks it before it writes anything). No registry check: a new part may change the registry, never these frames.
+test('with the camerawork pinned off, every corpus project renders the v2 frames (tests/golden/frame_hashes_v2.json)', async () => {
+  const v2 = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'golden', 'frame_hashes_v2.json'), 'utf8')).frames;
+  const reg = MV.use('parts/catalog').defaultRegistry();
+  assert.deepEqual(Object.keys(v2), corpus.PROJECTS.slice());
   for (const { name, doc } of corpus.projects()) {
-    const rec = R.createRecorder();
-    const engine = createEngine({ registry: reg, canvas: rec.factory, measurer: fakeMeasurer(), fonts: null, assets: null });
-    const { plan } = engine.setDoc(doc);
-    await engine.prepare(0, plan.duration, { export: true });
-    const [w, h] = DOC.DESIGN_SIZE[doc.look.aspect];
-    const k = 360 / Math.min(w, h);
-    const made = rec.factory.create(Math.round(w * k), Math.round(h * k), { alpha: false });
-    const surface = { canvas: made.canvas, ctx: made.ctx, w: Math.round(w * k), h: Math.round(h * k) };
-    const got = GOLDEN_TIMES(plan).map((time) => {
-      const m = rec.mark();
-      engine.renderFrame(surface, time, { quality: 'export', pick: false, scale: surface.w / plan.design.w });
-      return rec.hash(m);
-    });
-    engine.dispose();
-    assert.deepEqual(got, golden.frames[name], name);
+    const off = corpus.withoutCamerawork(doc);
+    const plan = MV.use('planner/plan').plan(off, { registry: reg });
+    assert.ok(plan.cuts.every((c) => c.slots['cam.shot'].v === 'none') && plan.rigs.every((r) => r.rig.v === 'none'),
+      name + ': the pins switch the camerawork off');
+    assert.deepEqual(await goldenFrames(reg, off), v2[name], name);
   }
 });
 
@@ -279,7 +299,7 @@ test('camera: identity view without motion, parallax 0 ignores the camera, impul
   const sc = scenes.cuts[0];
   F.evaluate(sc, 1);
   const cam = F.cameraAt(sc, Object.assign({}, PLAN, { impulses: [] }), 1);
-  assert.deepEqual(plain(cam), { x: 0, y: 0, zoom: 1, roll: 0, shakeX: 0, shakeY: 0 });
+  assert.deepEqual(plain(cam), { x: 0, y: 0, zoom: 1, roll: 0, shakeX: 0, shakeY: 0, fz: 1 });
   const V = new Float32Array(6), I = MAT.ident(new Float32Array(6));
   approx(F.viewMatrix(V, cam, 1, 1920, 1080), I, 1e-4);
   const moved = { x: 40, y: -10, zoom: 1.2, roll: 0.1, shakeX: 3, shakeY: 1 };
@@ -803,4 +823,161 @@ test('kit: K.variant with its own make on a K.moves part, K.mirror with shared/p
   assert.equal(K.color.distance('#3E6E8C', '#3E6E8C'), 0);
   assert.ok(K.color.distance('#FF0000', '#FF1000') < 0.05);
   assert.ok(K.color.contrast(K.color.fitContrast('#777777', '#000000', 7), '#000000') >= 7);
+});
+
+// --- camerawork (DESIGN_2_1 §3.10, §4.4, §4.6) -----------------------------------------------------------------------
+
+const FAC = MV.use('engine/facade');
+const catalogReg = () => MV.use('parts/catalog').defaultRegistry();
+
+// A sample plan with rig runs replaced (a new plan object, so the frame index is built for it).
+function withRigs(plan, runs) {
+  const out = Object.assign({}, plan, { v: 2, rigs: runs.map((r, i) => Object.assign({ key: 'k' + i, cuts: [], blend: null,
+    curve: { v: 'linear', from: 'auto' }, rig: { v: 'none', p: { amp: 1 }, from: 'auto' } }, r)) });
+  Object.defineProperty(out, 'env', { enumerable: false, value: plan.env });
+  return out;
+}
+
+const rigRef = (v, amp) => ({ v, p: { amp: amp === undefined ? 1 : amp }, from: 'auto' });
+
+test('rigAt is pure: the same pose for (plan, t) in any order, with or without out, and the plan untouched', () => {
+  const base = FAC.samplePlan(catalogReg(), { kind: 'rig', key: 'climbRise' }, {});
+  const plan = withRigs(base, [
+    { t0: 0, t1: 1.2, rig: rigRef('driftSide') },
+    { t0: 1.2, t1: 2.4, rig: rigRef('leanTilt', 1.5), curve: { v: 'softEnds', from: 'auto' }, blend: { t0: 1.1, t1: 1.5 } },
+    { t0: 2.4, t1: base.duration, rig: rigRef('pullAway'), curve: { v: 'fadeBrake', from: 'auto' } },
+  ]);
+  const before = JSON.stringify(plan);
+  const rng = RNG.stream('rig-purity');
+  const times = Array.from({ length: 200 }, () => rng.range(-1, base.duration + 1));
+  const seq = times.map((t) => Object.assign({}, F.rigAt(plan, t)));
+  const order = rng.shuffle(times.map((_, i) => i));
+  const out = { x: 9, y: 9, zoom: 9, roll: 9 };
+  for (const i of order) {
+    assert.deepEqual(Object.assign({}, F.rigAt(plan, times[i], out)), seq[i], 'rigAt(' + times[i] + ')');
+    assert.deepEqual(Object.assign({}, F.rigAt(plan, times[i])), seq[i]);
+  }
+  assert.equal(JSON.stringify(plan), before, 'the plan is not changed');
+  assert.deepEqual(F.rigAt(withRigs(base, []), 1), { x: 0, y: 0, zoom: 1, roll: 0 }, 'no rigs: the identity');
+  assert.deepEqual(F.rigAt(Object.assign({}, base, { rigs: undefined }), 1), { x: 0, y: 0, zoom: 1, roll: 0 }, 'a v1 plan: the identity');
+  // held before the first run and after the last
+  assert.deepEqual(F.rigAt(plan, -1), F.rigAt(plan, 0));
+  assert.deepEqual(F.rigAt(plan, base.duration + 1), F.rigAt(plan, base.duration));
+});
+
+test('rig blends: continuous through the blend window (which may start before the run); a hard seam jumps', () => {
+  const base = FAC.samplePlan(catalogReg(), { kind: 'rig', key: 'climbRise' }, {});
+  const runs = (blend) => withRigs(base, [
+    { t0: 0, t1: 1.5, rig: rigRef('driftSide') },
+    { t0: 1.5, t1: 3, rig: rigRef('climbRise'), curve: { v: 'softEnds', from: 'auto' }, blend },
+  ]);
+  const smooth = runs({ t0: 1.3, t1: 1.8 }), hard = runs(null);
+  const step = 1 / 1000;
+  let worst = { x: 0, y: 0, lz: 0 };
+  let prev = F.rigAt(smooth, 1.2, {});
+  for (let t = 1.2 + step; t <= 2; t += step) {
+    const cur = F.rigAt(smooth, t, {});
+    worst = { x: Math.max(worst.x, Math.abs(cur.x - prev.x)), y: Math.max(worst.y, Math.abs(cur.y - prev.y)),
+      lz: Math.max(worst.lz, Math.abs(Math.log(cur.zoom / prev.zoom))) };
+    prev = cur;
+  }
+  assert.ok(worst.x < 0.5 && worst.y < 0.5 && worst.lz < 5e-4, 'no step above 0.5 du or 0.05 % zoom per ms: ' + JSON.stringify(worst));
+  // the window starts before run 2: at its start the pose is still run 1's, at its end run 2's
+  approx(F.rigAt(smooth, 1.3).x, F.rigAt(hard, 1.3).x, 1e-9, 'window start = the old run');
+  approx(F.rigAt(smooth, 1.8).y, F.rigAt(hard, 1.8).y, 1e-9, 'window end = the new run');
+  const a = F.rigAt(hard, 1.5 - 1e-6, {}), b = F.rigAt(hard, 1.5, {});
+  assert.ok(Math.abs(a.y - b.y) > 20 || Math.abs(a.x - b.x) > 20, 'a hard seam cuts: ' + JSON.stringify([a, b]));
+});
+
+test('cameraAt equals applying the cut camera, then the rig (roll 0; 1e-6)', () => {
+  const reg = catalogReg();
+  const base = FAC.samplePlan(reg, { kind: 'shot', key: 'pushWord' }, {});
+  const plan = withRigs(base, [{ t0: 0, t1: base.duration, rig: rigRef('driftSide', 2) }]);
+  const svc = { registry: reg, text: createTextService({ measurer: fakeMeasurer(), faces: plan.look.faces }), strict: true };
+  const scene = BUILD.buildCut(plan.cuts[0], plan, svc);
+  assert.ok(scene.shot, 'the shot is resolved');
+  const W = plan.design.w, Hh = plan.design.h, c = [W / 2, Hh / 2];
+  // view(p) = Z · (p − c − X − shake) + c for roll 0 (the §4.19 view matrix), in doubles
+  const view = (cam, p) => [cam.zoom * (p[0] - c[0] - cam.x - cam.shakeX) + c[0], cam.zoom * (p[1] - c[1] - cam.y - cam.shakeY) + c[1]];
+  const points = [[0, 0], [W, 0], [W / 3, Hh], [W, Hh], [712.5, 403.25]];
+  let checked = 0;
+  for (let k = 0; k <= 40; k++) {
+    const tl = scene.times.a + ((scene.times.b - scene.times.a) * k) / 40, t = plan.cuts[0].t0 + tl;
+    F.evaluate(scene, tl);
+    const cut = F.cutCamera(scene, {}), rig = F.rigAt(plan, t, {});
+    assert.equal(cut.roll, 0); assert.equal(rig.roll, 0);
+    const both = F.cameraAt(scene, plan, t, {});
+    const inner = { x: cut.x, y: cut.y, zoom: cut.zoom, shakeX: cut.jx, shakeY: cut.jy };
+    const outer = { x: rig.x, y: rig.y, zoom: rig.zoom, shakeX: 0, shakeY: 0 };
+    for (const p of points) {
+      const seq = view(outer, view(inner, p)), one = view(both, p);
+      assert.ok(Math.abs(seq[0] - one[0]) <= 1e-6 * Math.max(1, Math.abs(seq[0])) &&
+        Math.abs(seq[1] - one[1]) <= 1e-6 * Math.max(1, Math.abs(seq[1])), 'at ' + t + ': ' + seq + ' vs ' + one);
+      checked++;
+    }
+    approx(both.fz, scene.shot.live.zoom * rig.zoom, 1e-12, 'fz = the framing zoom (shot · rig)');
+  }
+  assert.ok(checked > 100);
+  // and the drawn view matrix is that product too (Float32 inside: 1e-3 du)
+  const M = new Float64Array(6), A = new Float64Array(6), Bm = new Float64Array(6), AB = new Float64Array(6);
+  F.evaluate(scene, 1);
+  const t = plan.cuts[0].t0 + 1, cut = F.cutCamera(scene, {}), rig = F.rigAt(plan, t, {});
+  F.viewMatrix(M, F.cameraAt(scene, plan, t, {}), 1, W, Hh);
+  F.viewMatrix(A, { x: rig.x, y: rig.y, zoom: rig.zoom, roll: 0, shakeX: 0, shakeY: 0 }, 1, W, Hh);
+  F.viewMatrix(Bm, { x: cut.x, y: cut.y, zoom: cut.zoom, roll: 0, shakeX: cut.jx, shakeY: cut.jy }, 1, W, Hh);
+  MAT.mul(AB, A, Bm);
+  for (let i = 0; i < 6; i++) approx(M[i], AB[i], 1e-3, 'view matrix [' + i + ']');
+});
+
+// The frames of a corpus project through the facade (the golden-frame setup), with the plan changed by `patch` (a copy).
+// `prepare` may change the document first (corpus.withoutCamerawork).
+function facadeFrames(name, patch, prepare = (doc) => doc) {
+  const doc = prepare(corpus.projects().find((p) => p.name === name).doc);
+  const rec = R.createRecorder();
+  const engine = FAC.createEngine({ registry: catalogReg(), canvas: rec.factory, measurer: fakeMeasurer(), fonts: null, assets: null });
+  const { plan } = engine.setDoc(doc);
+  const next = JSON.parse(JSON.stringify(plan));
+  Object.defineProperty(next, 'env', { enumerable: false, value: plan.env });
+  patch(next, engine.registry);
+  engine.setPlan(next);
+  const [w, h] = DOC.DESIGN_SIZE[doc.look.aspect];
+  const k = 360 / Math.min(w, h);
+  const made = rec.factory.create(Math.round(w * k), Math.round(h * k), { alpha: false });
+  const surface = { canvas: made.canvas, ctx: made.ctx, w: Math.round(w * k), h: Math.round(h * k) };
+  const out = GOLDEN_TIMES(next).map((time) => {
+    const m = rec.mark();
+    engine.renderFrame(surface, time, { quality: 'export', pick: false, scale: surface.w / next.design.w });
+    return rec.hash(m);
+  });
+  engine.dispose();
+  return out;
+}
+
+// The v2 op hashes are the frames of the project with the camerawork pinned off (frame_hashes_v2.json): with the
+// automatic camerawork on, the frames differ from v2 by design (DESIGN_2_1 §7.5 step (b)), whatever the curves.
+test('the default lens.curve, seam.curve, dwell.curve and flow give the v2 op hashes exactly; other curves change them', () => {
+  const read = (file) => JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'golden', file), 'utf8')).frames.basic;
+  const golden = read('frame_hashes_v2.json');
+  // every shared curve at its default: linear, and a glide lens at its own v2 ease (its auto)
+  const defaults = (plan, reg) => {
+    for (const c of plan.cuts) {
+      const own = reg.params('lens', c.slots.lens.v).find((x) => x.name === 'curve');
+      c.slots.lens.p.curve = own && own.spec.auto && own.spec.auto.value !== undefined ? own.spec.auto.value : 'linear';
+      c.slots.dwell.p.curve = 'linear';
+      c.slots.arrive.p.flow = 'linear';
+      c.slots.depart.p.flow = 'linear';
+    }
+    for (const s of plan.seams) s.slot.p.curve = 'linear';
+  };
+  assert.deepEqual(facadeFrames('basic', defaults, corpus.withoutCamerawork), golden, 'defaults: the v2 frames');
+  assert.deepEqual(facadeFrames('basic', defaults), read('frame_hashes.json'), 'with the camerawork: the golden frames');
+  const changed = (patch) => facadeFrames('basic', (plan, reg) => { defaults(plan, reg); patch(plan); }, corpus.withoutCamerawork)
+    .filter((h, i) => h !== golden[i]).length;
+  const n = {
+    dwell: changed((plan) => { for (const c of plan.cuts) c.slots.dwell.p.curve = 'hushRushHush'; }),
+    flow: changed((plan) => { for (const c of plan.cuts) { c.slots.arrive.p.flow = 'slowBloom'; c.slots.depart.p.flow = 'dashStop'; } }),
+    seam: changed((plan) => { for (const s of plan.seams) s.slot.p.curve = 'snapSettle'; }),
+    lens: changed((plan) => { for (const c of plan.cuts) c.slots.lens.p.curve = 'holdThenDash'; }),
+  };
+  for (const [what, count] of Object.entries(n)) assert.ok(count > 0, what + ': a non-linear curve changes frames (' + count + ')');
 });

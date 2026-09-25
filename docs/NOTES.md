@@ -4846,3 +4846,210 @@ no change. `ai_direct.test.js` therefore asks for values the fixture plan does n
 automatic rig is `slowSwell`, and depth `still`, where the video ground's automatic depth is `back`. A new assertion covers
 the equal-value rule for a rig. The review text of a planned speed now reads the number
 (「動きの速さ: 100% → 50%（2行）」) where it used to read 自動.
+## v2.1-B
+
+Package B of DESIGN_2_1 §8.2: the engine side of camerawork and curves, the media engine hooks (B.3), sound in MP4
+without an AAC encoder (B.4), and the engine part of §11.9 depth (added by the owner during the run).
+
+### What was built
+
+- **Curves in the engine** (§3.11, §4.1–§4.3). `engine/scene/behave`: `ease` takes any curve (`CV.fn`); the shared
+  `flow` spreads the stagger as `W(rank / maxRank) · maxRank · each` when it is not linear; `dwell.curve` warps the hold
+  over `[rest, out]` through `BH.warped` (a behaviour wrapper that is the behaviour itself for a linear curve).
+  `engine/render/seam`: `seam.curve` warps `u` before `mix`. `parts/kit`: a lens without `warp: false` has every
+  behaviour it makes warped by `lens.curve` over `[a, b]`; the framing lenses of `parts/lens/glide` read `p.curve` as
+  their move's own ease (`warp: false`, and each part's `curve` auto is the ease it had in v2); `beatZoom` and
+  `impactKick` are locked to the beat and the sung start (`warp: false`, the curve row `advanced`, not for the AI).
+  New kit exports: `K.curve`, `K.warp`, `K.warped`, `K.CURVES`, `K.aimBox`, `K.frameBox`.
+- **Shots** (§3.10, §4.4–§4.5): new `engine/scene/shot` (L3): aims (`frame`, `point`, `block`, `reading`, `emph`,
+  `first`, `last`, `word:k`, `line:k`, `glyph:k`, every text box floored at 0.06 × short), anchors (`a rest out b sung
+  mid end emph word:k beat:n`, numbers, `dt`), framing with the safe and bleed clamps, the reading path, key tracks
+  (zoom in log space, the curve of the key moved into, jumps for keys < 1/120 s apart), `runShot` in the LENS phase
+  after the lens (lens deltas stay screen-constant: `x = X + x_lens / Z`), and the follow lean as a post-solve pass.
+  `build.js` resolves the shot before the lens, so lenses see `env.target` and `env.shot` (the track).
+- **Rigs** (§4.6): `frame.rigIndex` / `rigAt` (cached by plan identity; binary search; the blend window of a non-hard
+  seam may start before the run), `cutCamera`, `composeCamera`, `cameraAt` (cut camera inside, rig outside, then the
+  impulses), `rigCamera` (grounds between cuts keep moving), `depthCam`.
+- **Renderer**: the gap camera, the text-seam camera blend, ×1.25 oversampling of zoomed static ground rasters (and of
+  still paint rasters on zoomed grounds), `FrameStats` `fz` in the camera. **Facade**: `registry` getter and the
+  effective registry (`MIX.registryFor(base, doc.materials, doc.media)`; forks keep it), `shotTrack(cutKey)`,
+  `viewAt(t)`, sample plans and thumbnails of kind `shot` / `rig`. Arrange parts got their `cam` field (§3.11 table).
+- **Media (B.3, §11.3.6–§11.3.7, §11.5.1–§11.5.6)**: `sb.media` (every field checked, FitRect at build, a timed node
+  refuses a static layer cache), `svc.media` → `env.media`, `scene.media`; `shapes.drawMedia` (plain and isolated
+  paths, mirror neighbours only when they show, the soft copy first, rotation turned back into coded pixels, veil and
+  tint, mask, placeholder in the preview); the recorder logs `drawImage('media:<id>@<m>#<index>', …)` so op hashes
+  show the source frame; renderer `layers: 'ground'`, `dc.t`, `dc.backdrop` (overlay footage is `sceneOnly`),
+  `FrameStats.media { drawn, waiting }`; facade `mediaAt`, `mediaReady`, `fork({ assets })`, the export exactness throw
+  (`EngineError('media-not-ready' | 'media-missing')`), thumbnails ask for posters only; kit `K.media`,
+  `K.mediaParams`, `K.MEDIA`, `K.runKenBurns`. New `tests/helpers/fake_media.js` (the AssetStore contract with synthetic
+  stills, sample tables at any fps, VFR and rotations; `MediaFrame.index` in the op hash; `testParts(K)`: one test part
+  per `use`, for the tests and the lab until G.3's parts land).
+- **Depth (§11.9.1, §11.9.3)**: `depth` in `K.mediaParams` (enum `auto anim front back still`, `ai: true`, for `use`
+  ground, frame and layer), its meaning in `K.media` (layer, camera factor 1 / 1.15 / 0.5 / 0, Ken Burns, blur + 3 and
+  veil + 0.15 for `back`, the front readability guard, `still` drawn outside the seam composite), the per-node view
+  through `depthCam` in `draw.js`, and the FROZEN `K.depthCam(cam, f)`.
+- **B.4 (§13.4)**: `export/host/mp4` tries AAC-LC 192 kbps, then Opus 160 kbps in MP4; `probe().audioCodec` and
+  `Result.audioCodec`; `codecs.audioList` (tests) overrides the order; `schedule.preflight` notes `opus-audio` (info)
+  and reports `no-audio-codec` only when neither encodes. Both export loops (`mp4`, `png`) await
+  `e.mediaReady(t0 + i / fps, { signal, fps, scale })` through `job.ready(i, signal)`; a store that cannot deliver
+  stops the export with `ExportError('media', …, { id, name, code })`.
+- **Lab** (`ui/lab.js`): `#shot:<key>@<aspect>&t=…`, `#rig:<key>@<aspect>&t=…`, `#media:<kind>/<key>@<aspect>&asset=
+  fixture:<name>&t=…` (fake store, test pages only), a `materials` source (C's `sampleDefs` re-keyed `myMatS…` →
+  `myMatz` + lower case; `info()` lists only the materials there), `__lab.thumb`, and `perf({ camera, materials })`.
+- **Tests**: new `shot_engine.test.js` (15), `media_engine.test.js` (23); additions to `frame`, `lens_filter_seam`,
+  `conformance` (every shot and rig × 7 aspects × h/v × 6 texts × 24 times), `facade`, `export_math`; browser
+  `determinism.py` (camera presets; project v21 with materials), `perf.py` (camerawork + materials row),
+  `parts_gallery.py` (camera presets and their tiles in every aspect; the media mode), `contact_sheet.py`
+  (`--kind shot|rig`, self-check sheets), `export_check.py` (Opus track, its length and level, the pre-flight note,
+  the media wait and the `media` error in both loops). Key tests were mutation-checked (composeCamera's rig offset,
+  the blend window, the dwell warp, the lens warp wrapper, the zoom clamp, the Opus order, the pre-flight note, the
+  export loop's wait): each mutant failed its test.
+
+### Goldens
+
+`frame_hashes.json` is byte-identical. `plan_hashes.json` was regenerated (`node tests/update_golden.js`): all 240
+corpus plans changed because the glide lenses' shared `curve` auto is now their v2 ease (§3.11) instead of `linear`.
+Checked: with those five `shared` lines removed, the old plan hashes match exactly, and the frames with them are the
+v2 frames. The registry version is unchanged (1e6ef40c): shared autos are not in its signature.
+
+### Decisions where the design was silent
+
+- **Impulse shake and the seam camera use the framing zoom.** `composeCamera` divides the shake impulse by the framing
+  zoom `fz` = shot zoom · rig zoom (not by the full zoom, which includes the lens's own zoom), and the text-seam camera
+  blend log-lerps only `fz` (the rest linear). Both reduce exactly to v2 without shots and rigs, which the frame
+  goldens require (a full-zoom division changed v2 frames with punch lenses).
+- **Zoom clamp while interpolating.** `poseAt` keeps Z in [0.9, 3] between keys too, not only at keys.
+- **Near jumps.** Keys less than 1/120 s apart jump (§4.5); a segment shorter than 0.1 s (pushWord's `emph` key right
+  after `a` on a line that starts with its emphasis) is a near jump; the continuity test allows it only within 0.15 s of
+  `a`.
+- **`auto` depth without the planner.** The plan should always hold the resolved value (§11.9.2). If `'auto'` reaches
+  the engine, `K.media` uses layer → front, frame → anim, a video ground → back, a still ground → anim.
+- **The front guard** (§11.9.3): a ground or overlay at `front` that covers ≥ 40 % of the frame gets alpha ≤ 0.45 and
+  `comp: 'screen'`, unless the part passes a comp other than `over` itself (then it is kept); photo frames are exempt.
+- **`still` across seams.** A still medium is drawn once on the target, outside the composite, when it belongs to the
+  ground both sides share; a text seam leaves grounds under the composite anyway.
+- **`mediaAt` items for stills carry `px` and `blur`** (G.1's request): `mediaAt(t, { scale })` adds the long side and
+  blur (device px) the draw will ask the store for (else the last frame's scale; none before a first frame). The
+  media lists are remembered per scene fingerprint (`renderer.mediaEntries`), so `mediaAt` never keeps or rebuilds a
+  scene after its first build. Blur is fixed per node, so the store's blur levels need no crossfade.
+- **Opus rate.** The Opus config uses the song's `sampleRate`: songs are decoded at 48 kHz (DECODE_RATE), so this is
+  the design's 48000, and a buffer at another rate cannot be fed at the wrong speed. `codecs.audio` (one codec) still
+  works next to `codecs.audioList`.
+- **`ExportError('media')` detail** is `{ id, name, code }` (the store's `err.id`, the entry's name, the store's code).
+- **Placeholder**: the engine draws the checkerboard only; any text on it is the UI's.
+- **Additive fields**: `poseAt` also returns the aim centre `ax`/`ay`; `sb.media` takes `cam` (0..2) and `still`;
+  `K.MEDIA.DEPTHS` (with `auto`; `core/media.DEPTHS` is E's list without it); `viewAt` includes the shake in x/y;
+  `shotTrack` times are absolute; `FrameStats.mediaError` is internal (the facade turns it into the throw);
+  `renderer.lastScale()`.
+
+### Deviations (with reasons)
+
+- **§4.5.4 check line**: the bleed limit formula gives 0.24 W at Z = 1.5, not the "± 0.28 W" the text states. The formula
+  is implemented; the number in the text is an arithmetic slip.
+- **Reading comfort**: readAlong's hops on fast singing move the aim faster than 1.5 frame widths/s. The continuity test
+  holds them to 6 W/s (no jumps); how they read is a visual-QA item.
+- **Files outside §8.2** (all as the lead asked or to keep the suite green): checked out unchanged from the lead branch:
+  `docs/DESIGN_2_1.md`, `src/parts/mix.js`, `src/core/registry.js`, `tests/node/{mix,registry,contract}.test.js`,
+  `src/media/`, `src/core/sha256.js`, `src/export/zip.js`, `src/export/host/sink.js`, `build.py`,
+  `tests/build_test.py`. One edit in C's `tests/node/mix.test.js`: its second module world installed the recording
+  `K.media` only when the kit had none, so with B's kit it recorded nothing; it now always installs the recorder
+  (no check changed). `tests/www/export_check.js` (harness): the VP9 fallback no longer forces Opus, so the default
+  AAC → Opus order is what the MP4 checks exercise. `tests/browser/contact_sheet.py` loads `project_v21.json` and
+  `fake_media.js` into the lab page.
+- **perf.py camerawork row** uses a stand-in until D's planner makes camerawork: a shot preset per cut in turn and a
+  rig run per 4 cuts (blended ±0.25 s), plus C's sample material of each kind in every slot it fits.
+
+### Measured (this machine: 4 shared CPUs, load 3–5 from the other packages' tests; headless Chromium)
+
+- `mediaAt` on project_long (Node): 0.06 µs per call without plan media, 1.9 µs with plan media and no media nodes,
+  2.2 µs with a video ground on every segment and a photo frame on every cut (budget 50 µs; the test asserts it).
+- perf.py at 720p (best of 2 runs): basic p50 11.2 / p95 22.3 ms, vertical 13.4 / 22.3, lrc 4.7 / 15.3, long
+  12.1 / 25.0. project_long with camerawork: p50 12.3 / p95 27.8 (behave 0.10 ms, draw +0.25 ms). With camerawork and
+  the materials: **behave + solve p50 0.10 ms** (≤ 0.8), frame p50 17.1–18.7 ms, p95 32.1–39.6 ms over five perf.py
+  runs (the best of 2–3 fresh engines each; the limit is 33.4 ms: one run passed, four failed). The materials alone
+  take p50 17.0 / p95 32.4; most of it is post (+3.9 ms mean): the filter-stack material (4 passes) on every cut.
+- Export check (local Chromium, no H.264, no AAC): the default export and the forced one carry an Opus track (`dOps`,
+  stereo, 48 kHz, pre-skip 312); decoded length 2.5135 s for 2.5 s (± 25 ms); RMS 0.212.
+
+### Requests to other packages
+
+- **D**: the §2.7 plan fields as the engine reads them: `cut.slots['cam.shot' | 'cam.zoom' | 'cam.curve' |
+  'cam.follow']`, `plan.v = 2`, `plan.rigs[]` (`t0`, `t1`, `rig`, `curve`, `blend` window or null), `cut.rig`,
+  `grounds[].zoomed`, `plan.media`, and the media parts' `p.depth` resolved (never `'auto'`). Observation for the
+  pools: on a wide one-line layout (centerAnchor at 16:9, the block ≈ 0.74 W) `settle` (fill .58 → .66) and
+  `driftOff` (.50 → .52) sit at the 0.9 zoom floor, and `pushWord` / `snapZoom` reach the 3× limit on a short emphasized
+  word. When the planner makes camerawork, perf.py's stand-in (lab `perf({ camera: true })`) can use the planned plan.
+- **C**: `env.mixShare` = min(1, 400 / Σ `mine.cost.particles`) per cut scene (300 for grounds), as asked. `K.media`
+  returns −1 for a `src` that is not in `plan.media`, so fixed-src media layers need their ids in `plan.media` (D's
+  `extra[key].media`). The mix.test.js edit above. The filter-stack sample material costs about 4 ms of post per frame
+  here when it is on every cut.
+- **G.3**: build the media parts on `K.media` / `K.mediaParams` / `K.MEDIA` / `K.runKenBurns` / `K.depthCam`; the lab's
+  media mode and parts_gallery.py pick up every part with a param of type `media` (photoPan's `image` must become one).
+  The four test parts can stay in `fake_media.js` for the tests. **G.1/G.4 (store)**: `ready()` gets
+  `{ id, m, px?, blur? }`; a rejection should carry `code` and `id` (used in `ExportError('media')`). The stage calls
+  `engine.mediaAt(t)` (tiers at the last frame's scale) for `assets.want`.
+- **F**: `ui/output.ERROR_KEYS` gains `media: 'err.exp.media'` (string below).
+- **H (H.2)**: the WebM and kit loops call `job.ready(i, signal)` (or `e.mediaReady(t, { signal, fps, scale })`) before
+  each frame, as mp4 and png do; `Result.audioCodec` is available.
+- **Lead**: DESIGN_2_1 §4.5.4's check line (0.24 W), §11.3.7's `mediaAt` item shape (`px`, `blur` for stills) and
+  §13.4's Opus `sampleRate` could be updated to match.
+
+### Strings wanted (package F)
+
+| Key | ja | en |
+|---|---|---|
+| `err.exp.media` | 写真・動画「{name}」を読めないため、書き出しを止めました。つなぎ直してからもう一度書き出してください。 | The export stopped: the photo or video "{name}" could not be read. Relink it and export again. |
+
+### Open items
+
+- perf.py's camerawork + materials row is borderline here: behave + solve is far within budget (0.10 ms), but the frame
+  p95 (32.1–39.6 ms) straddles twice the 16.7 ms hard limit on this loaded machine, driven by the materials' post cost
+  (the same project without materials: p95 25–29 ms). To be re-measured on CI (Chrome).
+- Visual QA: readAlong's fast hops; the zoom floor and ceiling cases above.
+- Only the fake store has driven the media engine so far; the real store (G.1) and the catalog media parts (G.3) meet
+  it in G.3 / G.4.
+
+## Lead integration: B and F
+
+### B with D's planner: the five failing Node tests
+
+B (engine) was applied from its worktree commit onto the lead branch, which already had D (planner). Each package kept
+every test green alone; together, D's automatic camerawork is drawn by B's engine for the first time.
+
+- **`ai_direct` "camera mode"** — the code is right, the test asked for a value the plan already holds. B gave the
+  arranges their `cam` field (§3.11): rb~8's layout `slantBand` is `'gentle'`, so D caps its automatic closeness at
+  0.7 / maxFill(pushWord) = 0.7 / 0.88, which is 0.8 in steps of 0.01 (§4.7). The answer's `closer: 0.8` equals it, and
+  §5.5 says "a change that equals the current value is not made". The test now asks for 0.9 and asserts that 0.8 gives
+  no zoom change (the rule the lead already applied for rigs, `## Lead: integrating D after E`).
+- **Golden frames, and B's two tests that compared with the v2 frames.** With the camerawork on, the frames change by
+  design (§7.5 step (b), §9: documents without new pins differ from v2 only by the automatic camerawork). The checks
+  keep their meaning by comparing like with like:
+  - New golden `tests/golden/frame_hashes_v2.json`: the v2 frames, a byte copy of `frame_hashes.json` before this
+    regeneration. It is frozen: `update_golden.js` renders the corpus projects with the camerawork pinned off, compares,
+    and in a plain run writes nothing at all when they differ (§7.5: the frames that must stay equal are asserted before
+    the goldens are regenerated); `--v2` rewrites it on purpose.
+  - The switch is `corpus.withoutCamerawork(doc)`: the pins `work:cam.shot` and `work:rig` = `'none'` (§2.3 scopes, a pin
+    wins, D's decision). `amount.camera = 0` is not the same thing: in v2 it already sets the lens amplitudes (beatZoom's
+    follow) and the punch impulses; with it, only 3–25 of the 40 frames per project stayed equal.
+  - `frame.test.js`: new test "with the camerawork pinned off, every corpus project renders the v2 frames" (all four
+    projects, and the plan really has no shot and no rig). B's "default lens.curve, seam.curve, dwell.curve and flow give
+    the v2 op hashes exactly" runs on the camerawork-off document against `frame_hashes_v2.json`, and additionally
+    checks that the same defaults with the camerawork on give `frame_hashes.json`.
+  - `media_engine.test.js` "frame hashes of the media-free fixtures are unchanged": with an asset store and no media,
+    basic and vertical give the golden frames, and with the camerawork pinned off the v2 frames.
+  - Mutation check: a `withoutCamerawork` that pins only `cam.shot` (the rigs stay on) fails all three tests; a changed
+    hash in `frame_hashes_v2.json` makes `update_golden.js` stop without writing and `--check` report DIFFERS.
+- **Goldens regenerated** (`node tests/update_golden.js`; registry `catalog 1e6ef40c`, unchanged; `frame_hashes_v2.json:
+  matches` first). Why they changed:
+  - `plan_hashes.json`, all 240 plans. Compared value by value with the planner before B (the lead branch without B)
+    over corpus(20) × 3 aspects (18,556 cut decisions): no part choice and no other slot moved; only `cam.shot` (8,742
+    cuts), `cam.follow` (6,467), `cam.zoom` (1,963), `cam.shot`'s `p.carry` (1,349), `lens.p.curve` (8,491) and
+    `grounds[].zoomed` (143 plans). The causes are B's metadata that D's planner reads: the glide lenses' `curve` auto
+    is their v2 ease (§3.11, was `linear`), lens `frames: true` (the `none` weight + 4, §4.7) and the arranges' `cam`
+    ('none' pools, the 'gentle' pool and zoom cap).
+  - `frame_hashes.json`: basic 40, vertical 40, lrc 39 and long 32 of 40 frames differ, all by the camerawork (the
+    camerawork-off test above renders every one of the old frames).
+  - **Provisional.** §7.5 step (b) — the visual QA of the automatic camerawork and rigs with `contact_sheet.py` (12 seeds
+    × 8 moods × 3 aspects) and the tuning of the §4.7 constants, D's open numbers included — comes after this
+    integration. These two goldens are regenerated now so that CI checks the integrated engine, and will be regenerated
+    again, on purpose, after that tuning.

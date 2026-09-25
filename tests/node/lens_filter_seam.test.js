@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { load } = require('../helpers/load.js');
 const corpus = require('../helpers/corpus.js');
+const { approx } = require('../helpers/assert_plus.js');
 
 // conformance.test.js runs every part through the §8.2 matrix (no throw, no NaN, balanced drawing, surfaces given
 // back, determinism, budgets). This file checks what that matrix cannot see: the §5 tables and the traits the planner
@@ -190,6 +191,45 @@ test('handHeld wanders smoothly and stays small', () => {
     moved = Math.max(moved, Math.abs(track[k].x), Math.abs(track[k].y));
   }
   assert.ok(moved > 2 && moved < 20, 'visible but small sway (max ' + moved.toFixed(1) + ' du, dt ' + dt.toFixed(3) + ')');
+});
+
+test('lens.curve: a periodic lens warps its clock over [a, b] only when the curve is not linear; framing moves read it as their move curve', () => {
+  const BH = MV.use('engine/scene/behave');
+  const CV = MV.use('core/curve');
+  const PH = MV.use('parts/kit').PH;
+  const lensOf = (scene) => scene.behaviours.filter((b) => b.phase === PH.LENS);
+  const curve = 'hushRushHush', W = CV.warp(curve);
+  for (const [key, p] of [['rollSway', { angle: 3, period: 2, amount: 0.8 }], ['handHeld', { sway: 12, rate: 0.7, amount: 0.8 }]]) {
+    assert.notEqual(def('lens', key).warp, false, key + ': the kit warps it');
+    const lin = cameraTrack(key, [0.5], Object.assign({ curve: 'linear' }, p));
+    assert.ok(lensOf(lin.scene).length > 0 && lensOf(lin.scene).every((b) => b.run !== BH.runWarped), key + ': linear leaves it as it was');
+    const { a, b } = lin.scene.times;
+    const times = steps(a + 0.01, b - 0.01, 30);
+    const got = cameraTrack(key, times, Object.assign({ curve }, p));
+    assert.ok(lensOf(got.scene).every((x) => x.run === BH.runWarped), key + ': a curve wraps every lens behaviour');
+    // the warped camera at t is the linear camera at a + (b − a) · W((t − a) / (b − a))
+    const ref = cameraTrack(key, times.map((tl) => a + (b - a) * W((tl - a) / (b - a))), Object.assign({ curve: 'linear' }, p));
+    const plain = cameraTrack(key, times, Object.assign({ curve: 'linear' }, p));
+    let differs = 0;
+    got.track.forEach((c, i) => {
+      for (const k of ['x', 'y', 'zoom', 'roll']) approx(c[k], ref.track[i][k], 1e-6, key + ' ' + k + ' at ' + c.tl);
+      if (Math.abs(c.roll - plain.track[i].roll) + Math.abs(c.x - plain.track[i].x) > 1e-3) differs++;
+    });
+    assert.ok(differs > 5, key + ': the curve changes the motion (' + differs + ' of ' + times.length + ')');
+  }
+  // the framing moves (warp: false) take the curve as their move's own ease; each part's auto is its v2 ease
+  const autoOf = (key) => REGISTRY.params('lens', key).find((x) => x.name === 'curve').spec.auto.value;
+  assert.deepEqual(['slowPush', 'dollyOut', 'driftFloat', 'panSweep', 'parallaxOrbit'].map(autoOf),
+    ['sineInOut', 'quadOut', 'linear', 'sineInOut', 'sineInOut']);
+  for (const key of ['slowPush', 'dollyOut', 'panSweep', 'beatZoom', 'impactKick']) assert.equal(def('lens', key).warp, false, key);
+  const win = cameraTrack('slowPush', [0], { push: 0.08, amount: 0.5, aim: 1 }).scene.times;
+  const push = (c) => cameraTrack('slowPush', steps(win.a, win.b, 20), { push: 0.08, amount: 0.5, aim: 1, curve: c });
+  const own = push('sineInOut'), other = push('holdThenDash');
+  assert.ok(lensOf(other.scene).every((x) => x.run !== BH.runWarped), 'not a clock warp');
+  approx(own.track[0].zoom, other.track[0].zoom, 1e-6, 'same start');
+  approx(own.track[20].zoom, other.track[20].zoom, 1e-6, 'same end');
+  assert.ok(own.track[20].zoom > own.track[0].zoom + 0.02, 'it pushes in');
+  assert.ok(Math.abs(own.track[8].zoom - other.track[8].zoom) > 1e-3, 'another path between');
 });
 
 test('beatZoom punches in on each beat and settles before the next; without a grid it pulses every half second', () => {

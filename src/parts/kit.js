@@ -1,7 +1,7 @@
-/* 文字PVメーカー v2 — original work. The part kit: definition helpers, motion builders and helpers for part authors (DESIGN §4.18.3). */
-MV.def('parts/kit', ['core/num', 'core/noise', 'core/ease', 'core/color', 'core/schema', 'core/registry', 'engine/scene/behave',
-  'engine/scene/stagger', 'engine/scene/builder'],
-(N, NZ, E, C, SCH, REG, BH, STG, B) => {
+/* 文字PVメーカー v2 — original work. The part kit: definition helpers, motion builders and helpers for part authors (DESIGN §4.18.3; DESIGN_2_1 §3.11, §11.5.6). */
+MV.def('parts/kit', ['core/num', 'core/noise', 'core/ease', 'core/curve', 'core/color', 'core/schema', 'core/registry',
+  'core/media', 'engine/scene/behave', 'engine/scene/stagger', 'engine/scene/builder', 'engine/scene/shot', 'engine/scene/frame'],
+(N, NZ, E, CV, C, SCH, REG, MEDIA, BH, STG, B, SHOT, F) => {
   'use strict';
 
   // Parts depend on this module only. The helpers stamp `kind`, fill defaults and check the essentials; they never
@@ -223,6 +223,25 @@ MV.def('parts/kit', ['core/num', 'core/noise', 'core/ease', 'core/color', 'core/
     };
   }
 
+  // The lens curve (DESIGN_2_1 §3.11): a lens whose `warp` is not false has its behaviours' clock warped by p.curve over
+  // the cut's window [a, b] (periodic lenses slow down and speed up inside the cut; linear leaves them as authored).
+  // The wrapper is made once per definition (a K.variant or a redefinition starts from the unwrapped make), never per
+  // build; a lens with `warp: false` reads p.curve itself (the framing moves of parts/lens/glide).
+  function warpedLens(make) {
+    const wrapped = function make(env, cam, p) {
+      const list = wrapped.unwarped(env, cam, p);
+      if (!Array.isArray(list) || !p || CV.isLinear(p.curve)) return list;
+      return list.map((b) => BH.warped(b, p.curve, env.times.a, env.times.b));
+    };
+    wrapped.unwarped = make;
+    return wrapped;
+  }
+
+  function lensFill(d) {
+    const raw = d.make.unwarped || d.make;
+    d.make = d.warp === false ? raw : warpedLens(raw);
+  }
+
   const KINDS = {
     arrange: plainKind('arrange'),
     arrive: motionKind('arrive'),
@@ -233,7 +252,7 @@ MV.def('parts/kit', ['core/num', 'core/noise', 'core/ease', 'core/color', 'core/
       if (d.scope === undefined) d.scope = 'cut';
       if (d.follow === undefined) d.follow = 'text';
     }),
-    lens: plainKind('lens'),
+    lens: plainKind('lens', lensFill),
     filter: plainKind('filter'),
     seam: plainKind('seam'),
     theme: plainKind('theme', (d) => { if (!isObject(d.swatch)) fail('theme', d, 'swatch is required'); }),
@@ -323,12 +342,13 @@ MV.def('parts/kit', ['core/num', 'core/noise', 'core/ease', 'core/color', 'core/
     for (const col of Object.keys(m.tracks)) {
       const tr = m.tracks[col];
       tracks[col] = { from: tr.to, to: tr.from, unit: tr.unit };
-      if (m.curve[col]) curve[col] = E.reverse(m.curve[col]);
+      if (m.curve[col]) curve[col] = CV.reverse(m.curve[col]);
     }
     return BH.compileMoves({ unit: m.unit, tracks, curve, expose: m.expose });
   }
 
-  // The entrance's shared overrides for the exit: dur and each carry over; the ease auto is reversed (In ↔ Out).
+  // The entrance's shared overrides for the exit: dur and each carry over; the ease auto is time-reversed (In ↔ Out,
+  // presets and custom curves through CV.reverse), and so is a flow override.
   function mirroredShared(shared) {
     const src = shared || {};
     const out = {};
@@ -336,13 +356,14 @@ MV.def('parts/kit', ['core/num', 'core/noise', 'core/ease', 'core/color', 'core/
     if (src.each) out.each = src.each;
     const easeAuto = (src.ease && src.ease.auto) || REG.SHARED.arrive.ease.auto;
     out.ease = Object.assign({}, src.ease || {}, { auto: reversedAuto(easeAuto) });
+    if (src.flow) out.flow = Object.assign({}, src.flow, src.flow.auto ? { auto: reversedAuto(src.flow.auto) } : {});
     return out;
   }
 
   function reversedAuto(auto) {
-    if ('value' in auto) return { value: E.reverse(auto.value) };
+    if ('value' in auto) return { value: CV.reverse(auto.value) };
     if (Array.isArray(auto.pick)) {
-      const pick = auto.pick.map((n) => E.reverse(n));
+      const pick = auto.pick.map((n) => CV.reverse(n));
       return auto.weights ? { pick, weights: auto.weights.slice() } : { pick };
     }
     return auto;
@@ -361,11 +382,221 @@ MV.def('parts/kit', ['core/num', 'core/noise', 'core/ease', 'core/color', 'core/
   function rangeOf(rng, lo, hi) { return rng.range(lo, hi); }
   function ease(name) { return E.get(name); }
 
+  // --- speed curves and framing (DESIGN_2_1 §3.11) -------------------------------------------------------------------
+
+  // curve(value) → (u) => number: the position curve of any Curve (memoized; call it at build or definition time, never
+  // per frame). warp(value) → (u) => [0, 1]: the same clamped, for time warps.
+  function curve(value) { return CV.fn(value); }
+  function warp(value) { return CV.warp(value); }
+
+  // aimBox(env, aim) → Box | null: an aim of the text (block, emph, first, last, word:k, line:k, glyph:k, frame) as a
+  // rest-world box, from the lens env's target.
+  function aimBox(env, aim) { return SHOT.aimBox(env, env.target, aim); }
+
+  // frameBox(env, box, fill, ox, oy) → { zoom, x, y }: the camera that makes `box` fill `fill` of the frame, with its
+  // centre at (ox, oy) frame fractions from the frame centre (absent: kept where it is), inside the safe area and the
+  // bleed (the shot framing math, §4.5.4).
+  function frameBox(env, box, fill, ox, oy) {
+    const f = SHOT.frame(env.D, box, { fill, ox, oy });
+    return { zoom: f.Z, x: f.X, y: f.Y };
+  }
+
+  // --- photos and videos (DESIGN_2_1 §11.5.3, §11.5.6) ------------------------------------------------------------
+
+  const MEDIA_KIT = deepFreeze({
+    FITS: MEDIA.FITS.slice(), EDGES: MEDIA.EDGES.slice(), MOVES: MEDIA.MOVES.slice(), LOOPS: MEDIA.LOOPS.slice(),
+    CLOCKS: MEDIA.CLOCKS.slice(), SHAPES: ['rect', 'round', 'circle', 'arch', 'free'], PLACES: ['behind', 'side', 'corner', 'free'],
+    BLENDS: ['screen', 'multiply', 'overlay', 'normal'],
+    DEPTHS: ['auto', 'anim', 'front', 'back', 'still'],      // §11.9.1 (additive)
+  });
+  const GROUND_BLEED = 0.15;           // a ground covers the frame plus this share on every side (§4.19.3)
+  const KB_TRAVEL = 0.04;              // Ken Burns drift: this share of the short side over the window (v2 photoPan)
+  const CAMERA_ROOM = 1.15;            // the still tier's allowance for the camera (§11.4.6)
+  const KB = Object.freeze({ push: 0, pull: 1, drift: 2, auto: 3 });
+
+  // Depth (§11.9.3, FROZEN): per effective value, the camera factor, and the numbers of the looks.
+  const DEPTH_CAM = Object.freeze({ anim: 1, front: 1.15, back: 0.5, still: 0 });
+  const BACK_ZOOM = 0.06;              // back: the Ken Burns zoom is capped here
+  const BACK_BLUR = 3, BACK_VEIL = 0.15;     // back: the depth cue added to blur (du) and veil
+  const FRONT_COVER = 0.4, FRONT_ALPHA = 0.45;   // front: a medium covering ≥ 40 % of the frame is capped at alpha 0.45
+  const ANIM_FADE = 0.3;               // anim: frames and layers take the first / last 0.3 s of the cut's entrance / exit
+  const ANIM_LONG = 2;                 // auto: an animation running this long counts as a video for a ground
+
+  // The effective depth of a medium. A plan carries the planner's resolution (§11.9.2, never 'auto'); a hand-made or
+  // older plan may still say 'auto', which resolves by the rules the engine can know (the text coverage rule of a
+  // ground needs the planner). 'fill' has no depth: inside the text is its own place.
+  function depthOf(p, use, meta) {
+    if (use === 'fill') return 'anim';
+    const d = MEDIA_KIT.DEPTHS.includes(p.depth) ? p.depth : 'auto';
+    if (d !== 'auto') return d;
+    if (use === 'layer') return 'front';
+    if (use === 'ground' && (meta.kind === 'video' || (meta.anim === true && typeof meta.dur === 'number' && meta.dur >= ANIM_LONG))) {
+      return 'back';
+    }
+    return 'anim';
+  }
+
+  // The layer of a medium at an effective depth: front above the text (near), back pushed back (far; grounds stay on
+  // the ground layer), anim and still as placed (overlay footage: far).
+  function depthLayer(depth, use, layer) {
+    if (depth === 'front') return 'near';
+    if (use === 'ground') return 'ground';
+    if (depth === 'back' || use === 'layer') return 'far';
+    return layer;
+  }
+
+  // anim: the medium fades with the cut's entrance and exit (the first 0.3 s of [a, rest], the last 0.3 s of [out, b]).
+  function runDepthFade(P, t, b) {
+    const fin = b.win > 0 ? N.smooth((t - b.a) / b.win) : 1, fout = b.wout > 0 ? N.smooth((b.b - t) / b.wout) : 1;
+    P.alpha[b.from] *= fin < fout ? fin : fout;
+  }
+
+  // depthCam(cam, f) → the camera a medium at camera factor f sees (§11.9.3; = engine/scene/frame.depthCam).
+  function depthCam(cam, f, out) { return F.depthCam(cam, f, out); }
+
+  // runKenBurns(P, t, b): the media node's slow move over its window [w0, w0 + span], closed form in the scene-local t
+  // with u = clamp((t − w0) / span): push scales 1 → 1 + zoom, pull 1 + zoom → 1, drift holds 1 + zoom/2 and travels
+  // along the pan direction, auto is push plus the drift (v2 photoPan). The pivot is the box centre.
+  function runKenBurns(P, t, b) {
+    const u = b.span > 0 ? N.clamp((t - b.w0) / b.span) : 0;
+    const s = b.mode === KB.pull ? 1 + b.zoom * (1 - u) : b.mode === KB.drift ? 1 + b.zoom / 2 : 1 + b.zoom * u;
+    const i = b.from;
+    P.px[i] = b.cx; P.py[i] = b.cy;
+    P.sx[i] *= s; P.sy[i] *= s;
+    P.x[i] += b.dx * u; P.y[i] += b.dy * u;
+  }
+
+  function mediaNum(v, d) { return typeof v === 'number' && Number.isFinite(v) ? v : d; }
+
+  // media(env, { parent?, layer, owner?, src, box, p, use: 'ground' | 'frame' | 'fill' | 'layer', mask?, comp?, alpha?,
+  //   window?: [w0, w1] }) → node | −1. p = the part's resolved media params (K.mediaParams). −1 when src is '' or not
+  // in the plan's media (env.media). A ground (use 'ground') covers the frame (`box` defaults to it) by its edge rule:
+  // mirror (fit to the frame, flipped copies in the bleed), zoom (fit to the bleed, plus the drift travel) or plain.
+  // A move other than none installs runKenBurns ('auto': push and drift for stills, none for videos and animations).
+  // use 'layer' draws only over the scene backdrop (sceneOnly); use 'fill' defaults to comp 'atop'. The time origin is
+  // 0 in a ground scene and times.a in a cut.
+  // Depth (p.depth, §11.9.3): anim as placed, camera factor 1, fading with the cut's entrance and exit (frames and
+  // layers); front on the near layer at factor 1.15, and a medium covering ≥ 40 % of the frame capped at alpha 0.45 with
+  // comp 'screen' (unless the part asks for another blend; a photo frame keeps its alpha); back on the far layer (grounds:
+  // ground) at factor 0.5, Ken Burns zoom ≤ 0.06, blur + 3 du and veil + 0.15; still as placed, no camera, no Ken Burns,
+  // outside the seam composite. The choice changes pixels only: the media times and mediaAt are the same.
+  function media(env, o) {
+    const q = o || {};
+    const p = q.p || {};
+    const src = q.src;
+    const meta = typeof src === 'string' && src !== '' && env.media && Object.prototype.hasOwnProperty.call(env.media, src)
+      ? env.media[src] : null;
+    if (!meta) return -1;
+    const D = env.D;
+    const depth = depthOf(p, q.use, meta);
+    const timed = meta.kind === 'video' || meta.anim === true;
+    const chosen = MEDIA.MOVES.includes(p.move) ? p.move : 'auto';
+    const move = depth === 'still' ? 'none' : chosen === 'auto' && timed ? 'none' : chosen;
+    const kz0 = move === 'none' ? 0 : Math.max(0, mediaNum(p.zoom, 0));
+    const kz = depth === 'back' ? Math.min(kz0, BACK_ZOOM) : kz0;
+    const drifts = move === 'auto' || move === 'drift';
+    const travel = drifts ? KB_TRAVEL * D.short : 0;
+    let box = q.box || { x: 0, y: 0, w: D.w, h: D.h }, edge = 'plain', bleed = 0;
+    if (q.use === 'ground') {
+      edge = MEDIA.EDGES.includes(p.edge) ? p.edge : 'mirror';
+      if (edge === 'zoom') {
+        const bx = GROUND_BLEED * D.w + travel, by = GROUND_BLEED * D.h + travel;
+        box = { x: box.x - bx, y: box.y - by, w: box.w + 2 * bx, h: box.h + 2 * by };
+      }
+      bleed = edge === 'mirror' ? GROUND_BLEED : 0;
+    }
+    const R0 = MEDIA.LIMITS.params;
+    const fit = MEDIA.FITS.includes(p.fit) ? p.fit : 'cover';
+    const crop = { zoom: Math.max(1, mediaNum(p.cropZoom, 1)), x: N.clamp(mediaNum(p.cropX, 0.5)), y: N.clamp(mediaNum(p.cropY, 0.5)) };
+    const back = depth === 'back';
+    const veilA = N.clamp(mediaNum(p.veil, 0) + (back ? BACK_VEIL : 0), 0, R0.veil[1]);
+    const blur = N.clamp(mediaNum(p.blur, 0) + (back ? BACK_BLUR : 0), 0, R0.blur[1]);
+    const veil = veilA > 0 ? { ink: typeof p.veilInk === 'string' && p.veilInk ? p.veilInk : 'ground', a: veilA } : null;
+    const tint = mediaNum(p.tint, 0) > 0 ? { ink: typeof p.tintInk === 'string' && p.tintInk ? p.tintInk : 'accent', a: N.clamp(p.tint) } : null;
+    let alpha = mediaNum(q.alpha, 1);
+    let comp = q.comp || (q.use === 'fill' ? 'atop' : 'over');
+    if (depth === 'front' && q.use !== 'frame') {
+      const r = MEDIA.fitRect(meta, box, fit, crop.zoom, crop.x, crop.y);
+      if ((r.dw * r.dh) / (D.w * D.h) >= FRONT_COVER) {        // the readability guard
+        alpha = Math.min(alpha, FRONT_ALPHA);
+        if (comp === 'over') comp = 'screen';
+      }
+    }
+    const node = env.sb.media({
+      parent: q.parent, layer: depthLayer(depth, q.use, q.layer), owner: q.owner, alpha, src, box,
+      fit, crop, edge, bleed, mask: q.mask || null, comp, blur, veil, tint,
+      time: MEDIA.timeSpec(meta, p, env.cut ? env.times.a : 0), headroom: crop.zoom * (1 + kz) * CAMERA_ROOM,
+      sceneOnly: q.use === 'layer', cam: DEPTH_CAM[depth], still: depth === 'still',
+    });
+    if (depth === 'anim' && env.cut && (q.use === 'frame' || q.use === 'layer')) {
+      const tm = env.times;
+      env.sb.behave({ phase: BH.PH.ORNAMENT, live: 'always', from: node, to: node + 1, t0: tm.a, t1: tm.b, run: runDepthFade,
+        a: tm.a, b: tm.b, win: Math.min(ANIM_FADE, Math.max(0, tm.rest - tm.a)), wout: Math.min(ANIM_FADE, Math.max(0, tm.b - tm.out)) });
+    }
+    if (move !== 'none' && (kz > 0 || travel > 0)) {
+      const w = Array.isArray(q.window) ? q.window : env.cut ? [env.times.a, env.times.b] : [0, env.times.b];
+      const a = mediaNum(p.pan, 0) * N.DEG;
+      env.sb.behave({ phase: BH.PH.ORNAMENT, live: 'always', from: node, to: node + 1, t0: w[0], t1: w[1], run: runKenBurns,
+        w0: w[0], span: w[1] - w[0], mode: KB[move], zoom: kz, cx: box.x + box.w / 2, cy: box.y + box.h / 2,
+        dx: Math.cos(a) * travel, dy: Math.sin(a) * travel });
+    }
+    return node;
+  }
+
+  const L2 = (ja, en) => ({ ja, en });
+
+  // mediaParams({ src = 'src', accept = 'any', use, only?, autos? }) → { [name]: ParamSpec }: the media params of the
+  // §11.5.6 table in its order, with `depth` (§11.9.1) right after the source for use ground, frame and layer. Every
+  // one is ai: false except depth; `edge` is for grounds only. `src` renames the source param (photoPan: 'image');
+  // `only` keeps the listed names (the source is always kept); `autos` replaces the auto of a param by name.
+  function mediaParams(o) {
+    const q = o || {};
+    const R0 = MEDIA.LIMITS.params;
+    const num = (range, unit, label, auto, ui) => Object.assign({ type: 'num', min: range[0], max: range[1], step: range[2] },
+      unit ? { unit } : {}, { label, auto }, ui ? { ui } : {});
+    const all = {
+      [q.src || 'src']: { type: 'media', accept: ['image', 'video', 'any'].includes(q.accept) ? q.accept : 'any',
+        label: L2('写真・動画', 'Photo or video'), auto: { value: '' } },
+      depth: { type: 'enum', of: MEDIA_KIT.DEPTHS.slice(), label: L2('動きと重なり', 'Motion and layering'), auto: { value: 'auto' } },
+      fit: { type: 'enum', of: MEDIA.FITS.slice(), label: L2('収め方', 'Fit'), auto: { value: 'cover' } },
+      cropZoom: num(R0.cropZoom, 'x', L2('拡大', 'Zoom'), { value: 1 }),
+      cropX: num(R0.cropX, 'frac', L2('中心 横', 'Focus X'), { value: 0.5 }, 'advanced'),
+      cropY: num(R0.cropY, 'frac', L2('中心 縦', 'Focus Y'), { value: 0.5 }, 'advanced'),
+      edge: { type: 'enum', of: MEDIA.EDGES.slice(), label: L2('端の処理', 'Edges'), auto: { value: 'mirror' }, ui: 'advanced' },
+      move: { type: 'enum', of: MEDIA.MOVES.slice(), label: L2('動き', 'Motion'), auto: { value: 'auto' } },
+      zoom: num(R0.zoom, 'x', L2('動きの強さ', 'Motion amount'), { range: [0.06, 0.14] }),
+      pan: num(R0.pan, 'deg', L2('動く向き', 'Direction'), { range: [-180, 180] }),
+      blur: num(R0.blur, 'du', L2('ぼかし', 'Blur'), { value: 0 }),
+      veil: num(R0.veil, '', L2('薄幕', 'Veil'), { value: 0 }),
+      veilInk: { type: 'ink', label: L2('薄幕の色', 'Veil color'), auto: { value: 'ground' } },
+      tint: num(R0.tint, '', L2('色味', 'Tint'), { value: 0 }, 'advanced'),
+      tintInk: { type: 'ink', label: L2('色味の色', 'Tint color'), auto: { value: 'accent' }, ui: 'advanced' },
+      clipIn: num(R0.clipIn, 's', L2('使う範囲（始め）', 'Start at'), { value: 0 }),
+      clipOut: num(R0.clipOut, 's', L2('使う範囲（終わり）', 'End at'), { value: 0 }),
+      speed: num(R0.speed, 'x', L2('速さ', 'Speed'), { value: 1 }),
+      loop: { type: 'enum', of: MEDIA.LOOPS.slice(), label: L2('終わったら', 'At the end'), auto: { value: 'loop' } },
+      clock: { type: 'enum', of: MEDIA.CLOCKS.slice(), label: L2('時間の基準', 'Clock'), auto: { value: 'show' }, ui: 'advanced' },
+    };
+    const out = {};
+    const keep = Array.isArray(q.only) ? q.only : null;
+    for (const name of Object.keys(all)) {
+      if (name === 'edge' && q.use !== 'ground') continue;
+      if (name === 'depth' && !['ground', 'frame', 'layer'].includes(q.use)) continue;
+      if (keep && name !== (q.src || 'src') && !keep.includes(name)) continue;
+      const spec = Object.assign({}, all[name], { ai: name === 'depth' });
+      if (q.autos && q.autos[name]) spec.auto = q.autos[name];
+      out[name] = spec;
+    }
+    return out;
+  }
+
   return {
     arrange: KINDS.arrange, arrive: KINDS.arrive, dwell: KINDS.dwell, depart: KINDS.depart, ground: KINDS.ground,
     ornament: KINDS.ornament, lens: KINDS.lens, filter: KINDS.filter, seam: KINDS.seam, theme: KINDS.theme, mood: KINDS.mood,
     variant, mirror, moves, perGlyph, perGlyphHold,
     PH: BH.PH, ORDERS: SCH.ORDERS, EASES: E.EASES, ease, staggerOf: STG.staggerOf, pivots: STG.pivots,
     shape, math, color, pickOf, rangeOf, KitError,
+    curve, warp, CURVES: CV.PRESET_KEYS, warped: BH.warped, aimBox, frameBox,
+    media, mediaParams, MEDIA: MEDIA_KIT, runKenBurns, depthCam,
   };
 });

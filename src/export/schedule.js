@@ -12,7 +12,8 @@ MV.def('export/schedule', ['core/script'], (script) => {
   }
 
   const QUALITY_BPP = Object.freeze({ standard: 0.08, high: 0.12, max: 0.18 });   // bits per pixel per frame
-  const AUDIO_BITRATE = 192000;
+  const AUDIO_BITRATE = 192000;                     // AAC-LC
+  const OPUS_BITRATE = 160000;                      // Opus in MP4, where the browser has no AAC encoder (DESIGN_2_1 §13.4)
   const AUDIO_CHUNK = 1024;                         // frames per AudioData
   const MUX_OVERHEAD = 1.02;                        // container bytes on top of the streams
   const MEMORY_CONFIRM_BYTES = 1.5 * 1024 ** 3;     // an in-memory export above this asks for confirmation
@@ -307,7 +308,8 @@ MV.def('export/schedule', ['core/script'], (script) => {
   }
 
   // preflight(doc, plan, env) → [{ code, level: 'block'|'confirm'|'warn'|'info', params, jump?, fix? }] (§4.21).
-  // env = { webcodecs, codec (first supported AVC string, null = none, undefined = not checked), audioCodec (same for AAC),
+  // env = { webcodecs, codec (first supported AVC string, null = none, undefined = not checked), audioCodec (the MP4 audio
+  //         codec, probe().audioCodec: 'mp4a.40.2' | 'opus' | null = none | undefined = not checked),
   //         anyCodec (false: no H.264 encoder at any size; undefined: not checked), fontsReady, fsAccess,
   //         songReady (decoded audio available), warnings (engine.warnings(); default plan.warnings) }
   // A browser without any H.264 encoder (a Chromium build without proprietary codecs) gets `no-h264` rather than
@@ -324,7 +326,9 @@ MV.def('export/schedule', ['core/script'], (script) => {
     if (mp4 && !e.webcodecs) items.push({ code: 'no-webcodecs', level: 'block', params: {} });
     else if (mp4 && e.codec === null && e.anyCodec === false) items.push({ code: 'no-h264', level: 'block', params: {} });
     else if (mp4 && e.codec === null) items.push({ code: 'no-codec', level: 'block', params: { w, h, fps: out.fps } });
+    // AAC, else Opus in MP4 with a note (some editors cannot read it), else no sound (DESIGN_2_1 §13.4)
     if (withAudio && e.webcodecs && e.audioCodec === null) items.push({ code: 'no-audio-codec', level: 'warn', params: {} });
+    else if (withAudio && e.webcodecs && e.audioCodec === 'opus') items.push({ code: 'opus-audio', level: 'info', params: {} });
     if (withAudio && e.songReady === false) items.push({ code: 'song-missing', level: 'warn', params: { name: doc.song.name } });
     if (mp4 && doc.look.backdrop === 'clear') items.push({ code: 'clear-mp4', level: 'warn', params: {} });
     if (e.fontsReady === false) items.push({ code: 'fonts-loading', level: 'info', params: {} });
@@ -344,7 +348,7 @@ MV.def('export/schedule', ['core/script'], (script) => {
   }
 
   return {
-    ExportError, QUALITY_BPP, AUDIO_BITRATE, AUDIO_CHUNK, MEMORY_CONFIRM_BYTES, FLASH_PARTS, FLASH_LIMIT, FLASH_SAFE_AMP,
+    ExportError, QUALITY_BPP, AUDIO_BITRATE, OPUS_BITRATE, AUDIO_CHUNK, MEMORY_CONFIRM_BYTES, FLASH_PARTS, FLASH_LIMIT, FLASH_SAFE_AMP,
     frameCount, ts, frameDur, audioFrames, keyInterval, audioChunkCount, audioChunk, fillPlanar, mixMatrix,
     outputSize, bitrate, estimateBytes, estimatePngBytes, eta, pickAvc,
     exportRange, backdropFor, renderScale, fileName, frameName, flashEvents, flashRate, preflight,

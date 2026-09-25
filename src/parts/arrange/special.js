@@ -136,7 +136,7 @@ MV.def('parts/arrange/special', ['parts/kit'], (K) => {
     key: 'titlePlate',
     label: L('タイトル札', 'Title plate'),
     blurb: L('題名を大きく、罫の下にアーティスト名を小さく', 'The title large, the artist small under a rule'),
-    tags: ['serious'], family: 'plate',
+    tags: ['serious'], family: 'plate', cam: 'gentle',
     traits: { cells: [0, 80], roles: ['title'] },
     params: {
       rule: { type: 'enum', of: ['short', 'long', 'double'], label: L('罫', 'Rule'),
@@ -203,7 +203,7 @@ MV.def('parts/arrange/special', ['parts/kit'], (K) => {
     key: 'breathMark',
     label: L('間の印', 'Breath mark'),
     blurb: L('小さな♪か区間の見出しを中央に置き、ゆっくり呼吸させる', 'A small ♪ or the section heading, centred and slowly breathing'),
-    tags: ['minimal', 'slow'], family: 'mark',
+    tags: ['minimal', 'slow'], family: 'mark', cam: 'gentle',
     traits: { cells: [0, 80], roles: ['interlude'] },
     params: {
       label: { type: 'text', max: 40, label: L('表示する文字', 'Text shown'), auto: { value: 'heading' } },
@@ -284,7 +284,7 @@ MV.def('parts/arrange/special', ['parts/kit'], (K) => {
     key: 'creditFold',
     label: L('終わりの札', 'Credit fold'),
     blurb: L('題名とアーティスト名を隅に小さく添える', 'Title and artist as a quiet credit in a corner'),
-    tags: ['minimal'], family: 'credit',
+    tags: ['minimal'], family: 'credit', cam: 'gentle',
     traits: { cells: [0, 80], roles: ['outro'] },
     params: {
       corner: { type: 'enum', of: ['bottomRight', 'bottomLeft'], label: L('隅', 'Corner'),

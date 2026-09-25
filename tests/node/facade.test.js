@@ -79,7 +79,8 @@ test('createEngine checks its services', () => {
   const e = FAC.createEngine({ registry: stubReg, canvas: rec.factory, measurer: fakeMeasurer(), fonts: null, assets: null });
   assert.equal(e.plan, null);
   const s = surfaceOf(rec);
-  assert.deepEqual(e.renderFrame(s, 1, {}), { ms: 0, drawn: { glyphs: 0, shapes: 0, paints: 0, particles: 0 }, passes: 0, provisional: false });
+  assert.deepEqual(e.renderFrame(s, 1, {}), { ms: 0, drawn: { glyphs: 0, shapes: 0, paints: 0, particles: 0 }, passes: 0, provisional: false,
+    media: { drawn: 0, waiting: 0 } });
 });
 
 test('setDoc plans once per document and lists the cuts and segments whose fingerprint changed', () => {
@@ -539,6 +540,111 @@ test('fork is a frozen snapshot with its own caches', () => {
   const s = surfaceOf(rec);
   render(f, s, 10);
   assert.deepEqual(engine.boxes(), [], 'the fork\'s picks are its own');
+});
+
+// --- DESIGN_2_1: the effective registry, shots and the view -------------------------------------------------------
+
+test('registry getter: the base without materials; a document with materials extends it; a fork keeps that registry', () => {
+  const base = MV.use('parts/catalog').defaultRegistry();
+  const { rec, engine } = engineOf(base);
+  assert.equal(engine.registry, base, 'before a document');
+  engine.setDoc(corpus.project('basic').doc);
+  assert.equal(engine.registry, base, 'no materials: the base itself (goldens unchanged)');
+  const doc = corpus.project('v21').doc;
+  const plan = engine.setDoc(doc).plan;
+  const eff = engine.registry;
+  assert.notEqual(eff, base, 'materials extend the registry');
+  assert.ok(eff.get('arrive', 'myMat1') && eff.get('dwell', 'myMat2') && eff.get('ornament', 'myMat3'), 'the materials are parts');
+  assert.ok(plan.cuts.some((c) => c.slots.arrive.v === 'myMat1'), 'the pinned material is planned');
+  const f = engine.fork();
+  assert.equal(f.registry, eff, 'the fork draws with the materials');
+  assert.equal(f.setDoc(doc).plan, plan);
+  const s = surfaceOf(rec);
+  const cut = plan.cuts.find((c) => c.slots.arrive.v === 'myMat1');
+  const stats = render(f, s, cut.t0 + 0.2);
+  assert.ok(stats.drawn.glyphs > 0 && !f.warnings().some((w) => w.code === 'part-error'), 'the material draws in the fork');
+  engine.setDoc(corpus.project('basic').doc);
+  assert.equal(engine.registry, base, 'back to the base');
+  assert.equal(f.registry, eff, 'the fork is a snapshot');
+  // an engine made with an effective registry (as fork does) keeps it until a document says otherwise
+  const ext = REG.extend(base, []);
+  const { engine: e2 } = engineOf(base, { effective: ext });
+  assert.equal(e2.registry, ext);
+});
+
+test('shotTrack(cutKey): the resolved keys in absolute time; null without a shot or for an unknown cut', () => {
+  const reg = MV.use('parts/catalog').defaultRegistry();
+  const { engine } = engineOf(reg);
+  const plan = FAC.samplePlan(reg, { kind: 'shot', key: 'pushWord' }, {});
+  engine.setPlan(plan);
+  const cut = plan.cuts[0];
+  const tr = engine.shotTrack(cut.key);
+  assert.ok(tr && tr.keys.length === 3, 'pushWord has three keys');
+  assert.ok(tr.a <= cut.t0 && tr.b >= cut.t1, 'the window holds the sung span');
+  const scene = engine.scene('cut', 0);
+  tr.keys.forEach((k, i) => {
+    assert.equal(k.t, cut.t0 + scene.shot.keys[i].t, 'absolute time');
+    assert.ok(k.zoom >= 0.9 && k.zoom <= 3 && Number.isFinite(k.x) && Number.isFinite(k.y) && Number.isFinite(k.roll));
+    assert.ok(k.aim && k.aim.w > 0 && k.aim.h > 0, 'a text aim has its box');
+  });
+  assert.ok(tr.keys[1].zoom > tr.keys[0].zoom, 'it pushes in');
+  assert.equal(engine.shotTrack('nope'), null);
+  engine.setPlan(FAC.samplePlan(reg, { kind: 'shot', key: 'none' }, {}));
+  assert.equal(engine.shotTrack(cut.key), null, "'none'");
+  engine.setPlan(FAC.samplePlan(reg, {}, {}));
+  assert.equal(engine.shotTrack(cut.key), null, 'a v1 plan');
+});
+
+test('viewAt(t): the text camera as drawn (cut camera with rig and impulses, shake included); the rig alone between cuts', () => {
+  const reg = MV.use('parts/catalog').defaultRegistry();
+  const { rec, engine } = engineOf(reg);
+  assert.deepEqual(engine.viewAt(1), { x: 0, y: 0, zoom: 1, roll: 0 }, 'no plan');
+  const F = MV.use('engine/scene/frame');
+  const plan = FAC.samplePlan(reg, { kind: 'rig', key: 'climbRise' }, {});
+  plan.impulses = [{ t: 1, kind: 'shake', amp: 1, decay: 0.4 }];
+  engine.setPlan(plan);
+  const cut = plan.cuts[0];
+  for (const t of [cut.a + 0.05, 1.02, 1.5, cut.t1]) {
+    const scene = engine.scene('cut', 0);
+    F.evaluate(scene, t - cut.t0);
+    const cam = F.cameraAt(scene, plan, t);
+    assert.deepEqual(engine.viewAt(t), { x: cam.x + cam.shakeX, y: cam.y + cam.shakeY, zoom: cam.zoom, roll: cam.roll }, 't=' + t);
+  }
+  const shaken = engine.viewAt(1.02), still = F.rigCamera(plan, 1.02);
+  assert.ok(Math.hypot(shaken.x - still.x, shaken.y - still.y) > 0.1, 'the shake is in the view');
+  // after the cut: the rig alone (the ground keeps moving through the interlude)
+  const after = cut.b + 0.1;
+  const rig = F.rigCamera(plan, after);
+  assert.deepEqual(engine.viewAt(after), { x: rig.x + rig.shakeX, y: rig.y + rig.shakeY, zoom: rig.zoom, roll: rig.roll });
+  assert.ok(Math.abs(engine.viewAt(after).y) > 1, 'climbRise moves the rig');
+  // viewAt does not disturb rendering (the frame's calls on the frame-sized canvases, as in the fork tests)
+  const s = surfaceOf(rec);
+  render(engine, s, 1.5);
+  const m = rec.mark();
+  render(engine, s, 1.5);
+  const ops = frameOps(rec, m, W, H);
+  engine.viewAt(0.3);
+  const m2 = rec.mark();
+  render(engine, s, 1.5);
+  assert.deepEqual(frameOps(rec, m2, W, H), ops);
+});
+
+test('thumb() of camera presets: shot and rig tiles are deterministic and differ from the plain sample', () => {
+  const reg = MV.use('parts/catalog').defaultRegistry();
+  const { rec, engine } = engineOf(reg);
+  const s = surfaceOf(rec, 240, 135);
+  const tile = (ref) => {
+    const m = rec.mark();
+    const st = engine.thumb(ref, s, { aspect: '16:9' });
+    assert.ok(st.drawn.glyphs > 0, JSON.stringify(ref));
+    return JSON.stringify(frameOps(rec, m, 240, 135));
+  };
+  const plain = tile({ kind: 'arrange', key: reg.fallback('arrange') });
+  for (const ref of [{ kind: 'shot', key: 'pushWord' }, { kind: 'shot', key: 'sweepAcross' }, { kind: 'rig', key: 'leanTilt' }]) {
+    const a = tile(ref);
+    assert.equal(tile(ref), a, 'deterministic: ' + ref.key);
+    assert.notEqual(a, plain, ref.key + ' shows its camera');
+  }
 });
 
 test('stats and the adaptive preview: slow frames step down one level at a time, export never degrades', () => {

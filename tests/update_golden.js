@@ -3,6 +3,7 @@
 // Usage:
 //   node tests/update_golden.js           recompute and rewrite the golden files that can be computed today
 //   node tests/update_golden.js --check   recompute and compare; exit 1 on a difference; writes nothing
+//   node tests/update_golden.js --v2      also rewrite frame_hashes_v2.json (on purpose only; see below)
 // Plan hashes need planner/plan; frame hashes need engine/facade, engine/render/record and engine/text/fake_measure.
 // A golden whose modules do not exist yet is left as it is (or written as an empty placeholder when missing).
 // Registry: the full catalog (parts/catalog) when it exists, else the stub parts (tests/fixtures/stub_parts.js).
@@ -12,6 +13,10 @@
 //   frame_hashes.json { "registry": … | null, "measurer": "fake",
 //                       "frames": { "<project>": ["<hash of frame i's recorder ops>", … 40] } }
 //   Frames are rendered at a short side of 360 px, at t = duration · (i + 0.5) / 40.
+//   frame_hashes_v2.json  the same format: the same projects with the automatic camerawork pinned off
+//                     (corpus.withoutCamerawork). These are the v2 frames, byte for byte, and they are FROZEN: a plain run
+//                     never writes them. It checks them first and writes nothing when they differ (DESIGN_2_1 §7.5: the
+//                     frames that must stay equal are asserted before the goldens are regenerated). --v2 rewrites them.
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -47,12 +52,13 @@ function outputSize(aspect) {
   return [Math.round(w * k), Math.round(h * k)];
 }
 
-async function frameHashes(reg) {
+async function frameHashes(reg, prepare = (doc) => doc) {
   const { createEngine } = MV.use('engine/facade');
   const { createRecorder } = MV.use('engine/render/record');
   const { fakeMeasurer } = MV.use('engine/text/fake_measure');
   const frames = {};
-  for (const { name, doc } of corpus.projects()) {
+  for (const { name, doc: stored } of corpus.projects()) {
+    const doc = prepare(stored);
     const rec = createRecorder();
     const engine = createEngine({ registry: reg, canvas: rec.factory, measurer: fakeMeasurer(), fonts: null, assets: null });
     const { plan } = engine.setDoc(doc);
@@ -80,12 +86,16 @@ function text(obj) { return JSON.stringify(obj, null, 1) + '\n'; }
 
 async function main() {
   const check = process.argv.includes('--check');
+  const rewriteV2 = process.argv.includes('--v2');
   const { reg, info } = pickRegistry();
+  const ENGINE = ['engine/facade', 'engine/render/record', 'engine/text/fake_measure'];
+  // The frozen job comes first, so a difference there stops a plain run before any file is written.
   const jobs = [
+    { file: 'frame_hashes_v2.json', needs: ENGINE, frozen: !rewriteV2, empty: { registry: null, measurer: 'fake', frames: {} },
+      make: async () => ({ registry: info, measurer: 'fake', frames: await frameHashes(reg, corpus.withoutCamerawork) }) },
     { file: 'plan_hashes.json', needs: ['planner/plan'], empty: { registry: null, plans: {} },
       make: async () => ({ registry: info, plans: planHashes(reg) }) },
-    { file: 'frame_hashes.json', needs: ['engine/facade', 'engine/render/record', 'engine/text/fake_measure'],
-      empty: { registry: null, measurer: 'fake', frames: {} },
+    { file: 'frame_hashes.json', needs: ENGINE, empty: { registry: null, measurer: 'fake', frames: {} },
       make: async () => ({ registry: info, measurer: 'fake', frames: await frameHashes(reg) }) },
   ];
   let failed = false;
@@ -99,10 +109,16 @@ async function main() {
       continue;
     }
     const next = await job.make();
-    if (check) {
-      const same = current && text(current) === text(next);
+    // the frames only: the registry may move (a new part) while the frames of these projects must not
+    const same = current && (job.frozen ? text(current.frames) === text(next.frames) : text(current) === text(next));
+    if (check || (job.frozen && current)) {
       console.log(job.file + ': ' + (same ? 'matches' : 'DIFFERS'));
       failed = failed || !same;
+      if (!same && !check) {
+        console.log('The camerawork-off frames are no longer the v2 frames, so nothing was written. Find the cause, or ' +
+          'rewrite them on purpose with --v2.');
+        break;
+      }
     } else {
       fs.writeFileSync(path.join(GOLDEN, job.file), text(next));
       console.log(job.file + ': written (' + info.kind + ' registry ' + info.version + ')');

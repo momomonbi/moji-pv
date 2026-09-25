@@ -12,6 +12,10 @@ The windows cover entrances, exits, a seam and the texture filter. Two targeted 
    frame, gives the same pixels (what a filter leaves transparent shows the backdrop, never the caller's old pixels).
 5. Blurred glyph sprites: the same grapheme at several em sizes (emphasis, text.scale), rendered by a fresh engine and
    by a fresh engine that first drew the text at another output size or text.scale (±4 %, ±8 %), gives the same pixels.
+6. DESIGN_2_1 camerawork: shots (reading and pushing ones with a follow lean) and rigs on the sample cut: frame N
+   directly equals frame N after 0 … N−1, and the 30- and 60-step runs agree at their shared times. Project v21 (a
+   project with materials: an entrance, a hold and an atmosphere of its own, and shot pins) runs checks 1–3 over the
+   materials' lines.
 Registries: the catalog (what ships) and the examples, when the page has them; --parts picks one.
 Google Fonts are blocked (fallback faces).
 Run: PW_EXECUTABLE=/opt/pw-browsers/chromium python3 tests/browser/determinism.py [--parts catalog] [--projects basic,lrc]
@@ -26,6 +30,14 @@ from contact_sheet import launch, open_lab, csp_violations, japanese_font_missin
 from playwright.async_api import async_playwright  # noqa: E402
 
 WINDOW = (2.6, 4.6)          # seconds: the first lyric cuts, a seam and their filters in the fixture projects
+WINDOWS = {'v21': (13.6, 15.6)}   # v21: line r7 enters with material myMat1, r8 holds with myMat2
+# Presets that keep moving over the sample cut. (pushWord and snapZoom reach the 3× framing limit on its short
+# emphasized word and then hold; settle and driftOff sit at the 0.9 floor on its wide line: neither would show a history
+# leak.)
+CAMERA = (('shot', 'readAlong', {'follow': 0.6}), ('shot', 'tiltHold', {'follow': 0.5}), ('shot', 'sweepAcross', None),
+          ('shot', 'wideHold', {'follow': 0.3}), ('rig', 'climbRise', None), ('rig', 'leanTilt', {'amp': 1.5}))
+CAMERA_STEPS = 30
+CAMERA_PROBES = (7, 19, 29)
 FPS = 30
 PROBES = (7, 31, 59)
 MIXED_TEXT = 'あいあい'
@@ -49,7 +61,7 @@ async def render(page, **o):
 
 
 async def check_project(page, src, project, failures):
-    t0, t1 = WINDOW
+    t0, t1 = WINDOWS.get(project, WINDOW)
     at30 = times_at(FPS, t0, t1)
     at60 = times_at(2 * FPS, t0, t1)
     seq30 = await frames(page, parts=src, project=project, times=at30, fresh=True)
@@ -116,6 +128,33 @@ async def check_mixed_em(page, src, failures):
         'FAIL' if bad else 'ok  ', src, len(MIXED_BLURS) * len(MIXED_BEFORE)))
 
 
+async def sequence(page, **o):
+    return [x['hash'] for x in await page.evaluate('(o) => window.__lab.sequence(o)', o)]
+
+
+async def check_camera(page, src, failures):
+    """Check 6: a camera preset's frame N does not depend on the frames before it; 30 and 60 steps agree."""
+    bad = 0
+    for kind, key, params in CAMERA:
+        base = {'parts': src, 'kind': kind, 'key': key, 'params': params, 'w': 480, 'h': 270, 'quality': 'export'}
+        seq = await sequence(page, steps=[{'u': i / CAMERA_STEPS} for i in range(CAMERA_STEPS)], **base)
+        seq60 = await sequence(page, steps=[{'u': i / (2 * CAMERA_STEPS)} for i in range(2 * CAMERA_STEPS)], **base)
+        where = '%s %s/%s%s' % (src, kind, key, (' ' + repr(params)) if params else '')
+        for n in CAMERA_PROBES:
+            alone = await sequence(page, steps=[{'u': n / CAMERA_STEPS}], **base)
+            if alone[0] != seq[n]:
+                failures.append('%s: step %d alone differs from the same step after 0..%d' % (where, n, n - 1))
+                bad += 1
+        if any(seq60[2 * i] != seq[i] for i in range(CAMERA_STEPS)):
+            failures.append('%s: the 30- and 60-step runs differ at a shared time' % where)
+            bad += 1
+        if len(set(seq)) < 5:
+            failures.append('%s: only %d distinct frames (does the camera move?)' % (where, len(set(seq))))
+            bad += 1
+    print('%s %s: %d camera presets (shots with follow, rigs): frame N alone = after 0..N−1, 30 = 60 steps' % (
+        'FAIL' if bad else 'ok  ', src, len(CAMERA)))
+
+
 def sources_of(info, wanted):
     if wanted:
         return [wanted]
@@ -141,6 +180,8 @@ async def run(args):
                     await check_project(page, src, project, failures)
                 await check_prefill(page, src, info, failures)
                 await check_mixed_em(page, src, failures)
+                if src == 'catalog':
+                    await check_camera(page, src, failures)
             violations = await csp_violations(page)
             if violations:
                 failures.append('CSP violations: %r' % violations)
@@ -157,7 +198,7 @@ async def run(args):
 def main():
     ap = argparse.ArgumentParser(description='Frame determinism on the lab page.')
     ap.add_argument('--parts', default='', help='registry: catalog | examples | stub (default: catalog, then examples)')
-    ap.add_argument('--projects', default='basic,vertical,lrc', help='fixture projects, comma-separated')
+    ap.add_argument('--projects', default='basic,vertical,lrc,v21', help='fixture projects, comma-separated')
     return asyncio.run(run(ap.parse_args()))
 
 

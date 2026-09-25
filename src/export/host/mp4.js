@@ -28,7 +28,18 @@ MV.def('export/host/mp4', ['export/schedule', 'export/muxer'], (S, M) => {
     return { canvas, ctx: canvas.getContext('2d', { alpha }), w, h };
   }
 
-  // openJob({ engine, doc, format, canvas }) → the frozen engine fork, the frame range and a render(i) for frame i.
+  // The asset that a failed store request names, for ExportError('media').detail (DESIGN_2_1 §11.4.4).
+  function mediaDetail(err, doc) {
+    const id = (err && err.id) || null;
+    const list = (doc.media && doc.media.list) || [];
+    const entry = id ? list.find((a) => a.id === id) : null;
+    return { id, name: entry ? entry.name : null, code: (err && err.code) || null };
+  }
+
+  // openJob({ engine, doc, format, canvas }) → the frozen engine fork, the frame range, ready(i, signal) and render(i).
+  // ready(i) awaits the photo and video frames of frame i (engine.mediaReady, DESIGN_2_1 §11.4.5), so export frames are
+  // always exact; a store that cannot deliver one stops the export with ExportError('media') naming the asset. Engines
+  // without mediaReady (no media) resolve at once.
   async function openJob({ engine, doc, format, canvas }) {
     const e = engine.fork();
     try {
@@ -45,6 +56,15 @@ MV.def('export/host/mp4', ['export/schedule', 'export/muxer'], (S, M) => {
       await e.prepare(t0, t1, { export: true });
       return {
         engine: e, plan, t0, t1, fps, N, w, h, surface,
+        async ready(i, signal) {
+          if (typeof e.mediaReady !== 'function') return;
+          try {
+            await e.mediaReady(t0 + i / fps, { signal, fps, scale: ropts.scale });
+          } catch (err) {
+            if (signal && signal.aborted) throw cancelled();
+            throw new S.ExportError('media', 'a photo or video could not be read: ' + ((err && err.message) || err), mediaDetail(err, doc));
+          }
+        },
         render(i) { return e.renderFrame(surface, t0 + i / fps, ropts); },
       };
     } catch (err) {
@@ -87,16 +107,28 @@ MV.def('export/host/mp4', ['export/schedule', 'export/muxer'], (S, M) => {
     throw new S.ExportError('no-codec', 'no supported video codec for ' + job.w + '×' + job.h + '@' + job.fps, list);
   }
 
-  // AAC (or `codecs.audio`) at the song's rate, stereo; null when the browser cannot encode it (export without sound).
+  // The audio codecs tried in order (DESIGN_2_1 §13.4): AAC-LC, then Opus in MP4 where the browser has no AAC encoder
+  // (Chrome on Linux, Chromium builds). `codecs.audioList` (tests) or `codecs.audio` (one codec) override the list.
+  const AUDIO_CODECS = Object.freeze(['mp4a.40.2', 'opus']);
+
+  function audioCodecs(codecs) {
+    if (codecs && Array.isArray(codecs.audioList)) return codecs.audioList;
+    if (codecs && codecs.audio) return [codecs.audio];
+    return AUDIO_CODECS;
+  }
+
+  // The first audio config that encodes, stereo at the song's rate (songs are decoded at 48 kHz, DECODE_RATE, which is
+  // also the Opus rate): AAC at 192 kbps, Opus at 160 kbps. null when none encodes (the MP4 is then silent).
   async function audioConfig(codecs, buffer) {
     if (typeof AudioEncoder !== 'function') return null;
-    const config = { codec: (codecs && codecs.audio) || 'mp4a.40.2', sampleRate: buffer.sampleRate, numberOfChannels: 2,
-      bitrate: S.AUDIO_BITRATE };
-    try {
-      return (await AudioEncoder.isConfigSupported(config)).supported ? config : null;
-    } catch (err) {
-      return null;
+    for (const codec of audioCodecs(codecs)) {
+      const config = { codec, sampleRate: buffer.sampleRate, numberOfChannels: 2,
+        bitrate: codec === 'opus' ? S.OPUS_BITRATE : S.AUDIO_BITRATE };
+      try {
+        if ((await AudioEncoder.isConfigSupported(config)).supported) return config;
+      } catch (err) { /* a malformed or unknown codec string is simply unsupported */ }
     }
+    return null;
   }
 
   function channelsOf(buffer) {
@@ -143,9 +175,9 @@ MV.def('export/host/mp4', ['export/schedule', 'export/muxer'], (S, M) => {
   // --- exportVideo ---------------------------------------------------------------------------------------------------
 
   // exportVideo({ engine, doc, audio: AudioBuffer | null, sink, signal, onProgress, canvas?, lib?, codecs? }) → Result
-  // Result = { bytes, frames, ms, name, blob? (memory sink), codec, audio: boolean }. Steps as FROZEN in §4.21: fork,
-  // prepare, N = frameCount, AVC from pickAvc with a key frame every 2·fps, frame i at t0 + i/fps with ts(i)/frameDur(i),
-  // queue ≤ 6, AAC in 1024-frame chunks. Cancel (signal) or any failure closes the encoders and aborts the sink, so no
+  // Result = { bytes, frames, ms, name, blob? (memory sink), codec, audio: boolean, audioCodec: string | null }. Steps as
+  // FROZEN in §4.21: fork, prepare, N = frameCount, AVC from pickAvc with a key frame every 2·fps, frame i at t0 + i/fps
+  // with ts(i)/frameDur(i) after its media frames are ready, queue ≤ 6, AAC (else Opus) in 1024-frame chunks. Cancel (signal) or any failure closes the encoders and aborts the sink, so no
   // partial file is left; the error is an ExportError ('cancelled', 'no-webcodecs', 'no-codec', 'encode', 'sink', …).
   async function exportVideo(opts) {
     const o = opts || {};
@@ -188,6 +220,7 @@ MV.def('export/host/mp4', ['export/schedule', 'export/muxer'], (S, M) => {
       for (let i = 0; i < job.N; i++) {
         checkAbort(o.signal);
         if (failure) throw failure;
+        await job.ready(i, o.signal);
         job.render(i);
         const frame = new VideoFrame(job.surface.canvas, { timestamp: S.ts(i, job.fps), duration: S.frameDur(i, job.fps) });
         try { video.encode(frame, { keyFrame: i % keyEvery === 0 }); } finally { frame.close(); }
@@ -209,7 +242,7 @@ MV.def('export/host/mp4', ['export/schedule', 'export/muxer'], (S, M) => {
       if (buffer) await sink.write(new Uint8Array(buffer), 0);
       const done = await sink.close();
       return { bytes: done.bytes, frames: job.N, ms: performance.now() - started, name: sink.name || S.fileName(o.doc, 'mp4'),
-        blob: done.blob, codec: vcfg.codec, audio: !!acfg };
+        blob: done.blob, codec: vcfg.codec, audio: !!acfg, audioCodec: acfg ? acfg.codec : null };
     } catch (err) {
       closeQuietly(video);
       closeQuietly(audio);
@@ -222,7 +255,6 @@ MV.def('export/host/mp4', ['export/schedule', 'export/muxer'], (S, M) => {
     }
   }
 
-  // probe({ w, h, fps }) → Promise<{ webcodecs, codec: string | null, audioCodec: string | null }> for the pre-flight.
   async function firstAvc(w, h, fps) {
     for (const c of S.pickAvc(w, h, fps)) {
       const config = { codec: c, width: w, height: h, bitrate: S.bitrate(w, h, fps, 'high'), framerate: fps, avc: { format: 'avc' } };
@@ -231,16 +263,17 @@ MV.def('export/host/mp4', ['export/schedule', 'export/muxer'], (S, M) => {
     return null;
   }
 
-  // probe({ w, h, fps, rate }) → { webcodecs, codec, audioCodec, anyCodec }. codec: the first AVC string this size and
-  // frame rate encode with, else null. anyCodec: whether H.264 encodes at all (checked at 640×360@30 when this size
-  // fails), so the pre-flight can tell "choose a smaller size" from "this browser has no H.264 encoder".
-  async function probe({ w, h, fps, rate = 48000 }) {
+  // probe({ w, h, fps, rate, codecs? }) → { webcodecs, codec, audioCodec, anyCodec } for the pre-flight. codec: the first
+  // AVC string this size and frame rate encode with, else null. anyCodec: whether H.264 encodes at all (checked at
+  // 640×360@30 when this size fails), so the pre-flight can tell "choose a smaller size" from "this browser has no H.264
+  // encoder". audioCodec: 'mp4a.40.2' | 'opus' | null, the codec the MP4 audio would use (`codecs` as in exportVideo).
+  async function probe({ w, h, fps, rate = 48000, codecs = null }) {
     if (typeof VideoEncoder !== 'function') return { webcodecs: false, codec: null, audioCodec: null, anyCodec: false };
     const codec = await firstAvc(w, h, fps);
     const anyCodec = codec !== null || (await firstAvc(640, 360, 30)) !== null;
-    const a = await audioConfig(null, { sampleRate: rate });
+    const a = await audioConfig(codecs, { sampleRate: rate });
     return { webcodecs: true, codec, audioCodec: a ? a.codec : null, anyCodec };
   }
 
-  return { exportVideo, probe, openJob, makeSurface, createProgress, checkAbort };
+  return { AUDIO_CODECS, exportVideo, probe, openJob, makeSurface, createProgress, checkAbort, audioConfig };
 });

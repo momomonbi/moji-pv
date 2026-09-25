@@ -195,8 +195,9 @@ function assertCleanStats(rec, where) {
   assert.equal(s.nan, 0, where + ': NaN or Infinity passed to the context');
 }
 
-// Draws the scene at each local time into a fresh recorder → the op hash per time (and every per-frame check).
-function renderTimes(scene, plan, times, where) {
+// Draws the scene at each local time into a fresh recorder → the op hash per time (and every per-frame check);
+// onCam(cam, where) sees each frame's camera.
+function renderTimes(scene, plan, times, where, onCam) {
   const rec = R.createRecorder();
   const W = plan.design.w, H0 = plan.design.h, scale = 360 / plan.design.short;
   const surf = R.surfaceOf(rec.factory, Math.round(W * scale), Math.round(H0 * scale), false);
@@ -207,6 +208,7 @@ function renderTimes(scene, plan, times, where) {
     assertFinitePose(scene, at);
     const cam = F.cameraAt(scene, plan, scene.t0 + tl);
     for (const k of Object.keys(cam)) assert.ok(Number.isFinite(cam[k]), at + ': camera ' + k);
+    if (onCam) onCam(cam, at);
     const mark = rec.mark();
     R.drawScene(surf.ctx, scene, { scale, cam, W, H: H0, pal: plan.look.palette, tl });
     assertCleanStats(rec, at);
@@ -506,6 +508,71 @@ for (const src of registrySources()) {
     test(src.name + ' registry loads', () => { throw e; });
   }
   if (got) registerRegistry(src.name, got);
+}
+
+// --- camera presets (DESIGN_2_1 §3.10, §8.2): every shot and rig over the fallback parts --------------------------
+
+const SHOT = MV.use('core/shot');
+// shot framing zoom [0.9, 3] × the lens (≤ 1.15) × the rig (≥ 0.95, ≤ 1.04 beyond the framing): DESIGN_2_1 §8.2
+const CAMERA_ZOOM = [0.855, 3 * 1.15 * 1.04];
+
+// makePlan's one-cut plan (fallback parts) with a shot on the cut or a rig run over the whole plan (plan v 2).
+function cameraPlan(reg, kind, key, c) {
+  const plan = makePlan({ reg, def: null, aspect: c.aspect, orient: c.orient, text: c.tc.text });
+  const cut = plan.cuts[0];
+  plan.v = 2;
+  if (kind === 'shot') {
+    cut.slots['cam.shot'] = { v: key, from: 'auto' };
+    cut.slots['cam.zoom'] = { v: 1, from: 'auto' };
+    cut.fp = H.hashJSON({ fp: cut.fp, shot: key });
+  }
+  cut.rig = 0;
+  const rig = kind === 'rig' ? key : 'none';
+  plan.rigs = [{ key: 'k' + cut.key, t0: 0, t1: plan.duration, cuts: [cut.key], blend: null, rig: { v: rig, p: { amp: 1 }, from: 'auto' },
+    curve: { v: kind === 'rig' ? SHOT.RIGS[key].curve : 'linear', from: 'auto' } }];
+  plan.grounds[0].zoomed = kind === 'shot';
+  return plan;
+}
+
+function checkCameraPreset(reg, kind, key, sampled) {
+  const timings = [];
+  const seenAspect = new Set();
+  const cases = matrix({ kind: 'arrange', key, traits: { orient: ['h', 'v'] } }, sampled);
+  const seen = new Set();
+  for (const c of cases) {
+    const where = kind + '/' + key + ' ' + c.aspect + ' ' + c.orient + ' "' + c.tc.name + '"';
+    const plan = cameraPlan(reg, kind, key, c);
+    const scene = buildTimed(() => BUILD.buildCut(plan.cuts[0], plan, svcOf(reg, plan)), timings);
+    assert.ok(!scene.warnings.some((w) => w.code === 'part-error'), where + ': part-error warning');
+    if (kind === 'shot') assert.ok(scene.shot, where + ': the shot is resolved');
+    const { a, rest, out, b } = scene.times;
+    const times = sampleTimes(a, b, [rest, out, 0]);
+    const zoomIn = (cam, at) => {
+      seen.add([cam.x, cam.y, cam.zoom, cam.roll].map((v) => v.toFixed(3)).join(','));
+      assert.ok(cam.zoom >= CAMERA_ZOOM[0] && cam.zoom <= CAMERA_ZOOM[1], at + ': camera zoom ' + cam.zoom);
+    };
+    const hashes = renderTimes(scene, plan, times, where, zoomIn);
+    if (!seenAspect.has(c.aspect)) {
+      seenAspect.add(c.aspect);
+      const again = BUILD.buildCut(plan.cuts[0], plan, svcOf(reg, plan));
+      assert.deepEqual(renderTimes(again, plan, times, where + ' (rebuilt)'), hashes, where + ': op hashes differ between two builds');
+    }
+  }
+  assert.ok(seen.size > 1, kind + '/' + key + ': the camera never moves');
+  const sorted = timings.slice().sort((p, q) => p - q);
+  const median = sorted[Math.floor(sorted.length / 2)];
+  assert.ok(median <= BUILD_MS, kind + '/' + key + ': median build ' + median.toFixed(2) + ' ms > ' + BUILD_MS + ' ms');
+  assert.ok(sorted[sorted.length - 1] <= 3 * BUILD_MS, kind + '/' + key + ': slowest build ' +
+    sorted[sorted.length - 1].toFixed(2) + ' ms > ' + 3 * BUILD_MS + ' ms');
+}
+
+{
+  // the catalog hosts the presets when it is complete; else the stub registry
+  let host = null;
+  try { host = MV.has('parts/catalog') ? MV.use('parts/catalog').defaultRegistry() : null; } catch (e) { host = null; }
+  const reg = host || corpus.stubRegistry(MV);
+  for (const key of SHOT.SHOT_KEYS) test('camera shot/' + key + (QUICK ? ' (quick)' : ''), () => checkCameraPreset(reg, 'shot', key, QUICK));
+  for (const key of SHOT.RIG_KEYS) test('camera rig/' + key + (QUICK ? ' (quick)' : ''), () => checkCameraPreset(reg, 'rig', key, QUICK));
 }
 
 // --- the runner catches broken parts ----------------------------------------------------------------------------

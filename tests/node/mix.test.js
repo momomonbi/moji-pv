@@ -915,15 +915,15 @@ test('a material with every primitive, anchor and appear builds and draws in cut
 
 // --- the media layer through K.media (package B's kit export) ------------------------------------------------------
 
-// A second module world (a vm context) whose parts/kit also exports K.media: a recorder of its calls that returns a
-// group node (or −1 for an empty source), as the FROZEN §11.5.6 signature says. The main world's kit has no K.media
-// until package B lands; there media layers are skipped.
+// A second module world (a vm context) whose parts/kit exports K.media as a recorder of its calls that returns a
+// group node (or −1 for an empty source), as the FROZEN §11.5.6 signature says. It stands in for package B's K.media
+// (which needs the plan's media metadata) whether or not the kit has one; without a K.media, media layers are skipped.
 function mediaWorld() {
   const calls = [];
   const ctx = vm.createContext({ console, __calls: calls });
   vm.runInContext(fs.readFileSync(path.join(SRC, 'core', 'define.js'), 'utf8'), ctx);
   vm.runInContext('MV.DEV = true; MV.LANG = "ja"; const def0 = MV.def; MV.def = (id, deps, factory) => def0(id, deps, id !== "parts/kit" ? factory ' +
-    ': (...a) => { const K = factory(...a); if (typeof K.media === "function") return K; return Object.assign({}, K, { media(env, o) { ' +
+    ': (...a) => { const K = factory(...a); return Object.assign({}, K, { media(env, o) { ' +
     '__calls.push({ src: o.src, use: o.use, layer: o.layer, box: o.box, comp: o.comp, alpha: o.alpha, mask: !!o.mask, window: o.window, ' +
     'fit: o.p.fit, speed: o.p.speed, blur: o.p.blur, depth: o.p.depth }); if (!o.src) return -1; return env.sb.group({ parent: o.parent, layer: o.layer, owner: o.owner }); } }); });', ctx);
   for (const rel of listSources()) if (rel !== 'core/define.js') vm.runInContext(fs.readFileSync(path.join(SRC, rel), 'utf8'), ctx, { filename: rel });

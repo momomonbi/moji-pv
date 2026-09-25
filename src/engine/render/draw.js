@@ -1,6 +1,7 @@
 /* 文字PVメーカー v2 — original work. Drawing an evaluated scene layer: glyphs on the direct or sprite path, shapes, paints, particles, images, picks (DESIGN §4.19.5–7). */
-MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'engine/render/sprites', 'engine/render/shapes'],
-(C, MAT, T, SP, SH) => {
+MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'engine/scene/frame', 'engine/render/sprites',
+  'engine/render/shapes'],
+(C, MAT, T, F, SP, SH) => {
   'use strict';
 
   // The glyph path is chosen from the glyph's pose at this frame only — never from its size or the output scale — so
@@ -61,22 +62,35 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
 
   // --- draw context ------------------------------------------------------------------------------------------------
 
-  // createDrawContext({ sprites, paints, scratch }) → dc, mutated per frame by the renderer:
+  // createDrawContext({ sprites, paints, scratch, pool?, blurred? }) → dc, mutated per frame by the renderer:
   //   g (current target), D (device matrix), pal, W, H, scale (device px per du), q (paint helpers), assets, pick,
   //   glyphPath ('auto' | 'sprite' | 'direct'), probe ({ blur, glow, shard, pixel } added to glyph poses; lab only),
-  //   face (FontRef for glyph particles), counts { glyphs, shapes, paints, particles }
+  //   face (FontRef for glyph particles), counts { glyphs, shapes, paints, particles, media }
+  //   (DESIGN_2_1) t (absolute frame time, for media on the song clock), backdrop, quality, thumb (posters only),
+  //   visible (device rect x0 y0 x1 y1), mediaWaiting, mediaError, pool and blurred (the isolated media path), over and
+  //   overKey (the raster oversampling of paints in a zoomed ground and its cache key), cam and layerK (the camera and
+  //   parallax of the layer being drawn: a medium at another camera factor gets its own view, §11.9.3) and stillMode
+  //   (0 every node, 1 all but `still` media, 2 only `still` media: those are drawn outside a seam composite)
   function createDrawContext(o) {
     return {
       g: null, D: new Float32Array([1, 0, 0, 1, 0, 0]), pal: null, W: 0, H: 0, scale: 1, q: null, assets: null,
       pick: null, glyphPath: 'auto', probe: null, face: null, sprites: o.sprites, paints: o.paints, scratch: o.scratch,
-      counts: { glyphs: 0, shapes: 0, paints: 0, particles: 0 },
+      counts: { glyphs: 0, shapes: 0, paints: 0, particles: 0, media: 0 },
       font: null, pair: { lo: 0, hi: 0, f: 0 },
       VD: new Float32Array(6), VW: new Float32Array(6), M: new Float32Array(6), W6: new Float32Array(6),
       RM: new Float32Array(6), quad: new Float32Array(8),
+      t: 0, backdrop: 'scene', quality: 'preview', thumb: false, visible: new Float32Array(4), mediaWaiting: 0, mediaError: null,
+      pool: o.pool || null, blurred: o.blurred || null, over: 1, overKey: 0,
+      cam: null, layerK: 1, stillMode: 0, depthCam: { x: 0, y: 0, zoom: 1, roll: 0, shakeX: 0, shakeY: 0, fz: 1 },
+      VM: new Float32Array(6),
     };
   }
 
-  function resetCounts(dc) { const c = dc.counts; c.glyphs = 0; c.shapes = 0; c.paints = 0; c.particles = 0; }
+  function resetCounts(dc) {
+    const c = dc.counts;
+    c.glyphs = 0; c.shapes = 0; c.paints = 0; c.particles = 0; c.media = 0;
+    dc.mediaWaiting = 0; dc.mediaError = null;
+  }
 
   function setMatrix(g, M) { g.setTransform(M[0], M[1], M[2], M[3], M[4], M[5]); }
 
@@ -283,6 +297,26 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
 
   function hasLayer(scene, L) { return nodesByLayer(scene)[L].length > 0; }
 
+  // Whether a layer of the scene holds a media node (never baked into a static raster, DESIGN_2_1 §11.5.10).
+  const mediaLayers = new WeakMap();
+  function mediaFlags(scene) {
+    let per = mediaLayers.get(scene);
+    if (!per) {
+      per = new Uint8Array(T.LAYERS.length);
+      for (const m of scene.media || []) {
+        const rec = scene.stores.image[scene.table.payload[m.node]];
+        per[scene.table.layer[m.node]] |= 1 | (rec && rec.still ? 2 : 0);
+      }
+      mediaLayers.set(scene, per);
+    }
+    return per;
+  }
+
+  function hasMedia(scene, L) { return (mediaFlags(scene)[L] & 1) !== 0; }
+
+  // Whether a layer of the scene holds a `still` medium (DESIGN_2_1 §11.9.3).
+  function hasStill(scene, L) { return (mediaFlags(scene)[L] & 2) !== 0; }
+
   function worldInto(out, table, i) {
     const o = i * 6, m = table.m;
     out[0] = m[o]; out[1] = m[o + 1]; out[2] = m[o + 2]; out[3] = m[o + 3]; out[4] = m[o + 4]; out[5] = m[o + 5];
@@ -313,7 +347,17 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
       const i = list[k];
       if (T.isHidden(t, i)) continue;
       const type = t.type[i];
-      const VW = MAT.mul(dc.VW, view, worldInto(dc.W6, t, i));
+      // media depth (DESIGN_2_1 §11.9.3): a `still` medium is drawn on its own pass when a seam is on screen, and a
+      // medium at a camera factor other than 1 sees the layer's camera through K.depthCam
+      let nodeView = view;
+      const media = type === TYPE.image ? stores.image[t.payload[i]] : null;
+      const still = !!media && media.media === true && media.still === true;
+      if (dc.stillMode === 1 && still) continue;
+      if (dc.stillMode === 2 && !still) continue;
+      if (media && media.media && media.cam !== 1 && dc.cam) {
+        nodeView = F.viewMatrix(dc.VM, F.depthCam(dc.cam, media.cam, dc.depthCam), dc.layerK, dc.W, dc.H);
+      }
+      const VW = MAT.mul(dc.VW, nodeView, worldInto(dc.W6, t, i));
       const M = MAT.mul(dc.M, dc.D, VW);
       const alpha = t.wa[i] > 1 ? 1 : t.wa[i];
       if (type === TYPE.glyph) {
@@ -348,7 +392,8 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
       } else if (type === TYPE.paint) {
         const rec = stores.paint[t.payload[i]];
         const still = rec.animated === false && (t.flags[i] & T.FLAG.static) !== 0;
-        if (!still || !dc.paints.draw(g, rec, M, alpha, dc.q, dc.W, dc.H, dc.scale, dc.paintKey)) {
+        // a still paint of a zoomed ground is rasterized oversampled (dc.over, DESIGN_2_1 §4.8)
+        if (!still || !dc.paints.draw(g, rec, M, alpha, dc.q, dc.W, dc.H, dc.scale * dc.over, dc.over === 1 ? dc.paintKey : dc.overKey)) {
           SH.drawPaint(g, rec, M, alpha, rec.animated === false ? 0 : tl, dc.q);
         }
         dc.font = null;
@@ -358,7 +403,15 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
         dc.counts.particles += SH.drawParticles(g, rec, M, alpha, tl, inkOf(pal, rec.ink), dc.sprites, dc.face);
       } else if (type === TYPE.image) {
         const rec = stores.image[t.payload[i]];
-        if (SH.drawImage(g, rec, M, alpha, dc.assets)) {
+        if (rec.media) {
+          // media (DESIGN_2_1 §11.3.7): overlay footage (sceneOnly) is drawn only over the scene backdrop
+          if (rec.sceneOnly && dc.backdrop !== 'scene') continue;
+          if (SH.drawMedia(g, rec, M, alpha, dc, tl)) {
+            const r = rec.rect;
+            pickNode(dc, scene, i, VW, cutIndex, r.dx, r.dy, r.dx + r.dw, r.dy + r.dh);
+          }
+          dc.font = null;
+        } else if (SH.drawImage(g, rec, M, alpha, dc.assets)) {
           const b = rec.box;
           pickNode(dc, scene, i, VW, cutIndex, b.x, b.y, b.x + b.w, b.y + b.h);
         }
@@ -390,6 +443,6 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
     return n;
   }
 
-  return { createDrawContext, resetCounts, drawLayer, warmLayer, drawGlyph, hasLayer, nodesByLayer, inkOf, secondInk, shaded, cssOf,
-    clipReveal, STYLE_GLOW, GLOW_LEVEL };
+  return { createDrawContext, resetCounts, drawLayer, warmLayer, drawGlyph, hasLayer, hasMedia, hasStill, nodesByLayer, inkOf,
+    secondInk, shaded, cssOf, clipReveal, STYLE_GLOW, GLOW_LEVEL };
 });

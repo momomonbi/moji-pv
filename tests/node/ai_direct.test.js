@@ -720,11 +720,16 @@ test('camera mode: low effort, the instruction may be empty, camera lists only; 
   assert.ok(q[0].prompt.includes('[shots] ') && !q[0].prompt.includes('[arrive] ') && !q[0].prompt.includes('[media]'));
   assert.ok(q[0].system.includes('Choose camerawork that serves the lyrics') && !q[0].system.includes('Materials:'));
   deepEqual([q[0].sent.mode, q[0].sent.allowMaterials, q[0].sent.media], ['camera', false, []]);
-  const ans = { s: 0, understood: true, summary: '寄る', question: '', all: { rig: 'pullAway', rigCurve: CURVE(''), camera: CAM({ shot: 'readAlong' }) },
-    lines: [{ i: 1, camera: CAM({ shot: 'none' }) }], cuts: [{ i: 0, j: 2, camera: CAM({ closer: 0.8 }) }] };
-  const r = DI.directChanges(DOC, PLAN, reg, { answers: [ans], materials: [material({})] }, { rev: 1, sent: q[0].sent });
-  deepEqual(r.changes.map((c) => [c.path, c.to]).sort(), [['cut/rb~8:cam.zoom', 0.8], ['line/rb:cam.shot', 'readAlong'], ['line/rb:rig', 'pullAway'],
+  const ans = (closer) => ({ s: 0, understood: true, summary: '寄る', question: '', all: { rig: 'pullAway', rigCurve: CURVE(''), camera: CAM({ shot: 'readAlong' }) },
+    lines: [{ i: 1, camera: CAM({ shot: 'none' }) }], cuts: [{ i: 0, j: 2, camera: CAM({ closer }) }] });
+  const changes = (closer) => DI.directChanges(DOC, PLAN, reg, { answers: [ans(closer)], materials: [material({})] }, { rev: 1, sent: q[0].sent })
+    .changes.map((c) => [c.path, c.to]).sort();
+  deepEqual(changes(0.9), [['cut/rb~8:cam.zoom', 0.9], ['line/rb:cam.shot', 'readAlong'], ['line/rb:rig', 'pullAway'],
     ['line/rc:cam.shot', 'none'], ['line/rc:rig', 'pullAway']]);
+  // a value the plan holds already is no change (§5.5 common rules): rb~8's layout slantBand is `cam: 'gentle'` (§3.11),
+  // so its automatic closeness is capped at 0.7 / maxFill(pushWord) = 0.7 / 0.88, which is 0.8 in steps of 0.01 (§4.7)
+  assert.equal(PLAN.cuts.find((c) => c.key === 'rb~8').slots['cam.zoom'].v, 0.8);
+  deepEqual(changes(0.8), [['line/rb:cam.shot', 'readAlong'], ['line/rb:rig', 'pullAway'], ['line/rc:cam.shot', 'none'], ['line/rc:rig', 'pullAway']]);
 });
 
 // ---- review, apply, stale, log and revert (§5.6) ----------------------------------------------------------------------

@@ -320,6 +320,112 @@ test('preflight: blocking and informational items', () => {
   assert.deepEqual(codes(S.preflight(empty, plan, READY)), ['range-empty']);
 });
 
+test('preflight: Opus in MP4 is an info note; no-audio-codec only when neither AAC nor Opus encodes (DESIGN_2_1 §13.4)', () => {
+  const doc = sampleDoc({ short: 720, fps: 30 });
+  doc.song = { name: 's.mp3', sha1: 'x', seconds: 30, bpm: null, offset: 0, meter: 4, bpmConfidence: null, digest: null, info: null };
+  const plan = samplePlan(doc);
+  const opus = Object.assign({}, READY, { audioCodec: 'opus' });
+  assert.deepEqual(S.preflight(doc, plan, opus), [{ code: 'opus-audio', level: 'info', params: {} }]);
+  assert.deepEqual(codes(S.preflight(doc, plan, Object.assign({}, READY, { audioCodec: null }))), ['no-audio-codec']);
+  assert.deepEqual(S.preflight(doc, plan, READY), [], 'AAC: no note');
+  const silent = sampleDoc({ short: 720, fps: 30, audio: false });
+  silent.song = doc.song;
+  assert.deepEqual(S.preflight(silent, plan, opus), [], 'no sound asked for: no note');
+  assert.deepEqual(S.preflight(sampleDoc({ short: 720, fps: 30 }), plan, opus), [], 'no song: no note');
+  const png = sampleDoc({ format: 'png' });
+  png.song = doc.song;
+  assert.deepEqual(S.preflight(png, plan, opus), [], 'a PNG sequence has no sound');
+  assert.equal(S.OPUS_BITRATE, 160000);
+  assert.equal(S.AUDIO_BITRATE, 192000);
+});
+
+// --- export/host/mp4 in Node: the audio codec order, the media wait (WebCodecs stubbed) ------------------------------
+
+const MP4 = MV.use('export/host/mp4');
+
+// Runs fn with a stub AudioEncoder (and VideoEncoder) whose isConfigSupported accepts only `codecs`; 'throw' codecs throw.
+async function withEncoders(codecs, fn) {
+  const saved = { a: globalThis.AudioEncoder, v: globalThis.VideoEncoder };
+  const asked = [];
+  globalThis.AudioEncoder = class {
+    static async isConfigSupported(config) {
+      asked.push(Object.assign({}, config));
+      if (config.codec.startsWith('throw')) throw new TypeError('bad codec string');
+      return { supported: codecs.includes(config.codec), config };
+    }
+  };
+  globalThis.VideoEncoder = class { static async isConfigSupported(config) { return { supported: config.codec.startsWith('avc1'), config }; } };
+  try { return await fn(asked); } finally {
+    if (saved.a === undefined) delete globalThis.AudioEncoder; else globalThis.AudioEncoder = saved.a;
+    if (saved.v === undefined) delete globalThis.VideoEncoder; else globalThis.VideoEncoder = saved.v;
+  }
+}
+
+test('MP4 audio: AAC-LC at 192 kbps, else Opus at 160 kbps (48 kHz stereo), else none; codecs.audioList overrides', async () => {
+  const song = { sampleRate: 48000 };
+  assert.deepEqual(MP4.AUDIO_CODECS, ['mp4a.40.2', 'opus']);
+  await withEncoders(['mp4a.40.2', 'opus'], async () => {
+    assert.deepEqual(await MP4.audioConfig(null, song), { codec: 'mp4a.40.2', sampleRate: 48000, numberOfChannels: 2, bitrate: 192000 });
+    assert.equal((await MP4.probe({ w: 1280, h: 720, fps: 30 })).audioCodec, 'mp4a.40.2');
+  });
+  await withEncoders(['opus'], async (asked) => {
+    assert.deepEqual(await MP4.audioConfig(null, song), { codec: 'opus', sampleRate: 48000, numberOfChannels: 2, bitrate: 160000 },
+      'no AAC encoder (Chrome on Linux): Opus in MP4');
+    assert.deepEqual(asked.map((c) => c.codec), ['mp4a.40.2', 'opus'], 'AAC is tried first');
+    const pr = await MP4.probe({ w: 1280, h: 720, fps: 30 });
+    assert.deepEqual([pr.webcodecs, pr.audioCodec], [true, 'opus']);
+  });
+  await withEncoders(['mp4a.40.2', 'opus'], async (asked) => {
+    const forced = await MP4.audioConfig({ audioList: ['throw.aac', 'bogus.aac', 'opus'] }, song);
+    assert.equal(forced.codec, 'opus', 'the test override: an unknown or throwing codec is skipped');
+    assert.deepEqual(asked.map((c) => c.codec), ['throw.aac', 'bogus.aac', 'opus']);
+    assert.equal((await MP4.probe({ w: 1280, h: 720, fps: 30, codecs: { audioList: ['bogus.aac', 'opus'] } })).audioCodec, 'opus');
+    assert.equal((await MP4.audioConfig({ audio: 'mp4a.40.2' }, song)).codec, 'mp4a.40.2', 'codecs.audio: that codec only');
+  });
+  await withEncoders([], async () => {
+    assert.equal(await MP4.audioConfig(null, song), null, 'neither encodes: the MP4 is silent');
+    assert.equal((await MP4.probe({ w: 1280, h: 720, fps: 30 })).audioCodec, null);
+  });
+});
+
+test('export jobs await engine.mediaReady(t) before each frame; a store failure stops with ExportError(media) naming the asset', async () => {
+  const REC = MV.use('engine/render/record');
+  const doc = sampleDoc({ short: 360, fps: 30, range: { t0: 1, t1: 2 } });
+  doc.media = { list: [{ id: 'a3f9c2d17b0e4a5c6d7e8f901', name: '海辺.mp4' }] };
+  const log = [];
+  const engineWith = (mediaReady) => ({
+    fork() {
+      const e = { plan: samplePlan(doc), async prepare() {}, renderFrame(s, t) { log.push(['render', t]); }, dispose() { log.push(['dispose']); } };
+      if (mediaReady) e.mediaReady = mediaReady;
+      return e;
+    },
+  });
+  const rec = REC.createRecorder();
+  const signal = new AbortController().signal;
+  const job = await MP4.openJob({ engine: engineWith(async (t, o) => { log.push(['ready', t, o.fps, o.signal === signal, o.scale]); }), doc,
+    format: 'mp4', canvas: rec.factory });
+  for (let i = 0; i < 3; i++) { await job.ready(i, signal); job.render(i); }
+  assert.deepEqual(log.map((x) => x.slice(0, 2)), [['ready', 1], ['render', 1], ['ready', 1 + 1 / 30], ['render', 1 + 1 / 30],
+    ['ready', 1 + 2 / 30], ['render', 1 + 2 / 30]]);
+  assert.ok(log.filter((x) => x[0] === 'ready').every((x) => x[2] === 30 && x[3]), 'with the fps and the signal');
+  const scale = S.renderScale(job.plan.design, job.w, job.h);
+  assert.ok(scale > 0 && log.filter((x) => x[0] === 'ready').every((x) => x[4] === scale), 'and the output scale (the still tiers)');
+  // engines without media (the fake engine) resolve at once
+  const plain = await MP4.openJob({ engine: engineWith(null), doc, format: 'mp4', canvas: rec.factory });
+  await plain.ready(0, signal);
+  // the store cannot deliver: ExportError('media') with the asset's id and name, never a substitute frame
+  const failing = await MP4.openJob({ engine: engineWith(async () => {
+    throw Object.assign(new Error('media not on this device: a3f9c2d17b0e4a5c6d7e8f901'), { code: 'media-missing', id: 'a3f9c2d17b0e4a5c6d7e8f901' });
+  }), doc, format: 'mp4', canvas: rec.factory });
+  await assert.rejects(failing.ready(0, signal), (err) => err instanceof S.ExportError && err.code === 'media' &&
+    err.detail.name === '海辺.mp4' && err.detail.id === 'a3f9c2d17b0e4a5c6d7e8f901' && err.detail.code === 'media-missing');
+  // cancelled while waiting: 'cancelled', not a media error
+  const ctl = new AbortController();
+  const waiting = await MP4.openJob({ engine: engineWith(async () => { ctl.abort(); throw Object.assign(new Error('aborted'), { code: 'aborted' }); }),
+    doc, format: 'mp4', canvas: rec.factory });
+  await assert.rejects(waiting.ready(0, ctl.signal), (err) => err.code === 'cancelled');
+});
+
 test('preflight: overfull (one per line, with a jump) and font-fallback warnings', () => {
   const doc = sampleDoc();
   const plan = samplePlan(doc);

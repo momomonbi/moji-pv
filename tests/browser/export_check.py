@@ -10,9 +10,12 @@ memory sink (in-memory target): sample count, decoded frame count, key frames ex
 video and audio length; cancel leaves no file; a 5.1 song (sound on the centre channel only) reaches the AudioEncoder
 mixed down to stereo; PNG and transparent PNG ZIPs read with zipfile (store-only, names — one cut at the name limit next
 to an emoji —, CRCs, PNG sizes and colour types); decode + analysis of a generated click track; the player clock. When this Chromium cannot encode H.264 (no proprietary codecs), the MP4
-checks run with VP9/Opus in MP4 instead and the H.264 part is reported as skipped; CI uses Google Chrome and sets
-MV_REQUIRE_H264=1, which turns that skip into a failure. AAC is not required: Google Chrome on Linux has no AAC encoder,
-so there the H.264 MP4 is checked without sound (no audio track, and the 5.1 mix-down is skipped).
+checks run with VP9 in MP4 instead and the H.264 part is reported as skipped; CI uses Google Chrome and sets
+MV_REQUIRE_H264=1, which turns that skip into a failure. The MP4 sound is AAC-LC, else Opus in MP4 (DESIGN_2_1 §13.4):
+Google Chrome on Linux and Chromium have no AAC encoder, so there the default export carries an Opus track; a further
+export forces AAC away (codecs.audioList) and checks the Opus track (dOps), its decoded length (N / fps ± 25 ms) and
+level, and the pre-flight note opus-audio. The export loops await engine.mediaReady(t0 + i / fps) before every frame,
+and a store failure stops the export with ExportError('media') naming the asset.
 With --long [SECONDS] it also runs the WP6 acceptance export: project_basic at its own settings (1080p30, with sound),
 SECONDS long (default 180), checking the decoded frame count and the A/V length. It takes minutes, so it is opt-in.
 Run: PW_EXECUTABLE=/opt/pw-browsers/chromium python3 tests/browser/export_check.py   (CI: PW_CHANNEL=chrome)
@@ -161,7 +164,8 @@ def check_mp4(c, label, run, want_audio, h264):
     c.ok(v['format'] == ('avc1' if h264 else 'vp09'), '%s: video sample entry %s' % (label, v['format']))
     if want_audio:
         a = run['audio']
-        c.ok(a is not None and a['format'] == ('mp4a' if h264 else 'Opus'), '%s: audio track %r' % (label, a and a['format']))
+        want = 'mp4a' if run['result'].get('audioCodec') == 'mp4a.40.2' else 'Opus'
+        c.ok(a is not None and a['format'] == want, '%s: audio track %r (%s)' % (label, a and a['format'], run['result'].get('audioCodec')))
         if a:
             c.near(a['seconds'], v['seconds'], 0.05, '%s: audio length = video length' % label)
     else:
@@ -183,6 +187,43 @@ def check_surround(c, s):
         c.near(peak, want if s['channels'] == 6 else s['sourcePeaks'][0], 0.01, '5.1 song: %s channel of the export is not silent' % side)
 
 
+def check_opus(c, o):
+    """Opus in MP4 with AAC forced away: the track, its length and level, and the pre-flight note (DESIGN_2_1 §13.4)."""
+    if o['probeAudio'] != 'opus':
+        c.ok(o['probeAudio'] is None, 'opus: with AAC forced away the probe gives Opus or nothing (%r)' % o['probeAudio'])
+        print('SKIP  Opus in MP4: this browser has no Opus encoder')
+        return
+    frames = MP4_FRAMES
+    r, f, snd = o['result'], o['file'], o['sound']
+    c.ok(r['audio'] and r['audioCodec'] == 'opus', 'opus: Result.audioCodec is opus (%r)' % r['audioCodec'])
+    a = f['audio']
+    c.ok(a is not None and a['format'] == 'Opus' and 'dOps' in a['boxes'], 'opus: an Opus sample entry with dOps (%r)' % (a and a['boxes']))
+    if a and a['dOps']:
+        c.ok(a['dOps']['channels'] == 2 and a['dOps']['rate'] == 48000, 'opus: dOps stereo at 48 kHz (%r)' % a['dOps'])
+    print('info  opus: decoded through %s' % snd['via'])
+    c.near(snd['seconds'], frames / FPS, 0.025, 'opus: decoded sound lasts N / fps')
+    c.ok(snd['rms'] > 0.01, 'opus: the sound is not silent (RMS %.3f)' % snd['rms'])
+    c.ok('opus-audio' in o['preflight'] and 'no-audio-codec' not in o['preflight'],
+         'opus: the pre-flight shows opus-audio, not no-audio-codec (%r)' % o['preflight'])
+
+
+def check_media_wait(c, w):
+    """The export loops await mediaReady(t0 + i / fps) before each frame; a store failure is ExportError('media')."""
+    t0, frames = 0.4, 15
+    want = [t0 + i / FPS for i in range(frames)]
+    for kind in ('mp4', 'png'):
+        got = [x['t'] for x in w[kind]]
+        c.ok(len(got) == frames and all(abs(a - b) < 1e-9 for a, b in zip(got, want)),
+             '%s: mediaReady once per frame at t0 + i / fps, in order (%d calls)' % (kind, len(got)))
+        c.ok(all(x['fps'] == FPS and x['signal'] for x in w[kind]), '%s: mediaReady gets the fps and the signal' % kind)
+    for kind, f in (('mp4', w['fail']), ('png', w['failPng'])):
+        c.ok(not f['ok'] and f['code'] == 'media', "%s: a store failure stops the export with ExportError('media') (%r)" % (kind, f))
+        c.ok((f.get('detail') or {}).get('name') == '海辺.mp4' and (f.get('detail') or {}).get('id') == 'a3f9c2d17b0e4a5c6d7e8f901',
+             '%s: the error names the asset (%r)' % (kind, f.get('detail')))
+        c.ok(f['bytesLeft'] == 0, '%s: nothing is kept after a media failure' % kind)
+    c.ok(w['fail']['asked'] == 5, 'mp4: no frame is rendered after the failed wait (%d asked)' % w['fail']['asked'])
+
+
 def check_long(c, run, seconds, h264, aac):
     frames = seconds * FPS
     v = run['video']
@@ -196,10 +237,10 @@ def check_long(c, run, seconds, h264, aac):
     c.near(v['seconds'], seconds, 1e-9, 'long: video length (s)')
     if run['audio']:
         c.near(run['audio']['seconds'], seconds, 0.05, 'long: audio length (s)')
-    elif h264 and not aac:
-        print('info  long: no AAC encoder in this browser, so the export has no sound')
+    elif not aac:
+        print('info  long: no AAC or Opus encoder in this browser, so the export has no sound')
     else:
-        c.ok(not h264, 'long: an audio track')
+        c.ok(False, 'long: an audio track')
 
 
 async def main(long_seconds=None):
@@ -241,20 +282,23 @@ async def main(long_seconds=None):
     if REQUIRE_H264:
         # CI (Google Chrome) must really run the H.264 branch, not skip it.
         c.ok(h264, 'MV_REQUIRE_H264: this browser encodes H.264 (%r)' % r['probe']['codec'])
-        print('info  AAC encoder: %r (none in Chrome on Linux; the MP4 is then checked without sound)' % r['probe']['audioCodec'])
+        print('info  MP4 audio codec: %r (Chrome on Linux has no AAC encoder: Opus in MP4)' % r['probe']['audioCodec'])
     if h264:
-        print('info  H.264 encoder: %s, AAC: %s' % (r['probe']['codec'], r['probe']['audioCodec']))
+        print('info  H.264 encoder: %s, MP4 audio: %s' % (r['probe']['codec'], r['probe']['audioCodec']))
     else:
         print('SKIP  H.264 MP4 checks: this browser cannot encode H.264 (VideoEncoder.isConfigSupported → false for %s). '
               'Running the same MP4 pipeline with %s instead; CI (Google Chrome) runs the H.264 checks.'
-              % (', '.join(['avc1.640028', 'avc1.4D0028', 'avc1.42E028']), 'VP9/Opus' if r['fallback'] == 'vp9' else 'nothing'))
+              % (', '.join(['avc1.640028', 'avc1.4D0028', 'avc1.42E028']), 'VP9' if r['fallback'] == 'vp9' else 'nothing'))
     m = r['mp4']
     if m is None:
         print('SKIP  MP4 checks: no usable video encoder at all')
     else:
         audio_ok = m['stream']['result']['audio']
-        if h264 and not audio_ok:
-            print('info  AAC encoding is not available: the MP4 has no sound')
+        # the default order: AAC, else Opus; silent only when the probe found neither
+        c.ok(m['stream']['result']['audioCodec'] == r['probe']['audioCodec'],
+             'mp4 stream: the audio codec is the probed one (%r, probe %r)' % (m['stream']['result']['audioCodec'], r['probe']['audioCodec']))
+        if not audio_ok:
+            print('info  neither AAC nor Opus encodes here: the MP4 has no sound')
         check_mp4(c, 'mp4 stream (file sink)', m['stream'], audio_ok, h264)
         c.ok(m['stream']['order'][-1] == 'moov', 'mp4 stream: moov written at the end (fastStart false): %r' % m['stream']['order'])
         check_mp4(c, 'mp4 memory', m['memory'], False, h264)
@@ -266,6 +310,8 @@ async def main(long_seconds=None):
         c.ok(not m['cancel']['ok'] and m['cancel']['code'] == 'cancelled', 'mp4 cancel: ExportError cancelled (%r)' % m['cancel'])
         c.ok(not m['cancel']['fileLeft'], 'mp4 cancel: the partial file is removed')
         check_surround(c, m['surround'])
+        check_opus(c, m['opus'])
+        check_media_wait(c, m['wait'])
 
     g = r['png']
     check_zip(c, 'png', g['plain']['zip'], PNG_FRAMES, SIZE, (2, 6), '書き出しテスト')

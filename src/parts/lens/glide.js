@@ -10,7 +10,12 @@ MV.def('parts/lens/glide', ['parts/kit'], (K) => {
   // rot = roll (radians). Every move runs over the cut's whole visible window [a, b] and is closed-form in t. The
   // shared `amount` scales the move: 0.5 is the move as authored, 0 half of it, 1 one and a half times (like the
   // §4.18.10 example's `0.5 + amount`).
+  // The moves read their speed curve from the shared `curve` param (DESIGN_2_1 §3.11): each part's auto is the ease it
+  // had in v2, so default autos move exactly as before, and it has `warp: false` (the curve is the move's own, not a
+  // time warp of it). rollSway is periodic and keeps the kit's time warp.
   function strength(p) { return 0.5 + p.amount; }
+  function curveOf(p) { return K.curve(p.curve); }
+  const moveCurve = (ease) => ({ curve: { auto: { value: ease } } });
 
   function cameraBehaviour(env, cam, run, fields) {
     const t0 = env.times.a, t1 = env.times.b;
@@ -69,8 +74,9 @@ MV.def('parts/lens/glide', ['parts/kit'], (K) => {
     key: 'slowPush',
     label: L('寄り', 'Slow push'),
     blurb: L('カットのあいだに文字へゆっくり寄っていく', 'A slow push in toward the words over the cut'),
-    tags: ['slow', 'serious'], family: 'push',
+    tags: ['slow', 'serious'], family: 'push', frames: true, warp: false,
     traits: { energy: [0, 0.8], roles: ALL_ROLES },
+    shared: moveCurve('sineInOut'),
     params: {
       push: { type: 'num', min: 0.01, max: 0.3, step: 0.005, unit: 'x', label: L('寄り幅', 'Push'),
         auto: { range: [0.05, 0.1], follow: 'dur' } },
@@ -78,7 +84,7 @@ MV.def('parts/lens/glide', ['parts/kit'], (K) => {
     },
     make(env, cam, p) {
       return [cameraBehaviour(env, cam, zoomTrack, Object.assign({ z0: 0, z1: p.push * strength(p),
-        curve: K.ease('sineInOut') }, aimAt(env, p.aim)))];
+        curve: curveOf(p) }, aimAt(env, p.aim)))];
     },
   });
 
@@ -86,8 +92,9 @@ MV.def('parts/lens/glide', ['parts/kit'], (K) => {
     key: 'dollyOut',
     label: L('引き', 'Dolly out'),
     blurb: L('近くから始まり、ゆっくり引いて全体を見せる', 'Starts close and slowly pulls back to the full frame'),
-    tags: ['slow', 'airy'], family: 'push',
+    tags: ['slow', 'airy'], family: 'push', frames: true, warp: false,
     traits: { energy: [0, 0.8], roles: ALL_ROLES },
+    shared: moveCurve('quadOut'),
     params: {
       pull: { type: 'num', min: 0.01, max: 0.3, step: 0.005, unit: 'x', label: L('引き幅', 'Pull'),
         auto: { range: [0.06, 0.12], follow: 'dur' } },
@@ -95,7 +102,7 @@ MV.def('parts/lens/glide', ['parts/kit'], (K) => {
     },
     make(env, cam, p) {
       return [cameraBehaviour(env, cam, zoomTrack, Object.assign({ z0: p.pull * strength(p), z1: 0,
-        curve: K.ease('quadOut') }, aimAt(env, p.aim)))];
+        curve: curveOf(p) }, aimAt(env, p.aim)))];
     },
   });
 
@@ -105,8 +112,9 @@ MV.def('parts/lens/glide', ['parts/kit'], (K) => {
     key: 'driftFloat',
     label: L('漂い', 'Drift float'),
     blurb: L('カメラが横へゆっくり流れ、わずかに傾く', 'The camera drifts slowly sideways with a slight roll'),
-    tags: ['airy', 'soft'], family: 'drift',
+    tags: ['airy', 'soft'], family: 'drift', warp: false,
     traits: { energy: [0, 0.75], roles: ALL_ROLES },
+    shared: moveCurve('linear'),
     params: {
       dist: { type: 'num', min: 10, max: 300, step: 1, unit: 'du', label: L('流れる距離', 'Distance'),
         auto: { range: [40, 90], follow: 'dur' } },
@@ -117,7 +125,7 @@ MV.def('parts/lens/glide', ['parts/kit'], (K) => {
     make(env, cam, p) {
       const s = strength(p), a = p.angle * DEG;
       return [cameraBehaviour(env, cam, slide, { dx: p.dist * s * Math.cos(a), dy: p.dist * s * Math.sin(a),
-        roll: p.roll * DEG * s * Math.sign(Math.cos(a) || 1), curve: K.ease('linear') })];
+        roll: p.roll * DEG * s * Math.sign(Math.cos(a) || 1), curve: curveOf(p) })];
     },
   });
 
@@ -127,8 +135,9 @@ MV.def('parts/lens/glide', ['parts/kit'], (K) => {
     key: 'panSweep',
     label: L('パン', 'Pan sweep'),
     blurb: L('カットのあいだにカメラが画面を横切ってパンする', 'The camera pans across the frame during the cut'),
-    tags: ['fast'], family: 'drift',
+    tags: ['fast'], family: 'drift', frames: true, warp: false,
     traits: { energy: [0.35, 1] },
+    shared: moveCurve('sineInOut'),
     params: {
       dir: { type: 'enum', of: ['right', 'left', 'down', 'up'], label: L('向き', 'Direction'),
         auto: { pick: ['right', 'left', 'down', 'up'], weights: [3, 3, 1, 1] } },
@@ -139,7 +148,7 @@ MV.def('parts/lens/glide', ['parts/kit'], (K) => {
       const [ux, uy] = PAN[p.dir] || PAN.right;
       const d = p.dist * strength(p);
       return [cameraBehaviour(env, cam, slide, { dx: ux * d * env.D.w, dy: uy * d * env.D.h, roll: 0,
-        curve: K.ease('sineInOut') })];
+        curve: curveOf(p) })];
     },
   });
 
@@ -149,8 +158,9 @@ MV.def('parts/lens/glide', ['parts/kit'], (K) => {
     key: 'parallaxOrbit',
     label: L('回り込み', 'Parallax orbit'),
     blurb: L('カメラが回り込むように動き、奥と手前の層がずれていく', 'The layers slide against each other as if the camera circles the words'),
-    tags: ['airy'], family: 'orbit',
+    tags: ['airy'], family: 'orbit', frames: true, warp: false,
     traits: { energy: [0.1, 0.85], roles: ['lyric', 'focus', 'title', 'outro'] },
+    shared: moveCurve('sineInOut'),
     params: {
       radius: { type: 'num', min: 0.01, max: 0.15, step: 0.005, unit: 'frac', label: L('半径', 'Radius'),
         auto: { range: [0.03, 0.06], follow: 'dur' } },
@@ -161,7 +171,7 @@ MV.def('parts/lens/glide', ['parts/kit'], (K) => {
     make(env, cam, p) {
       const s = strength(p), sign = p.dir === 'ccw' ? -1 : 1, sweep = p.sweep * DEG * sign;
       return [cameraBehaviour(env, cam, orbit, { r: p.radius * env.D.w * s, lift: p.radius * env.D.h * 0.25 * s,
-        th0: -sweep / 2, sweep, roll: 0.9 * DEG * s, zoom: 0.03 * s, curve: K.ease('sineInOut') })];
+        th0: -sweep / 2, sweep, roll: 0.9 * DEG * s, zoom: 0.03 * s, curve: curveOf(p) })];
     },
   });
 

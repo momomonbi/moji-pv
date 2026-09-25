@@ -30,6 +30,15 @@ function project(name) {
 }
 
 function projects(names = PROJECTS) { return names.map((name) => Object.assign({ name }, project(name))); }
+
+// A copy of a document with the automatic camerawork switched off by pins (DESIGN_2_1 §2.3, §4.7: a pin wins, at every
+// scope): `work:cam.shot` and `work:rig` are 'none'. Every other choice keeps its own stream, so such a document renders
+// exactly the v2 frames (tests/golden/frame_hashes_v2.json). `amount.camera = 0` would not: in v2 it already weighs the
+// lens choice, the lens amplitudes and the impulses.
+function withoutCamerawork(doc) {
+  const off = { 'work:cam.shot': { v: 'none', by: 'user' }, 'work:rig': { v: 'none', by: 'user' } };
+  return Object.assign({}, doc, { pins: Object.assign({}, doc.pins, off) });
+}
 function planBasic() { return readJSON('plan_basic.json'); }
 function songDigest() { return readJSON('song_digest.json'); }
 function sampleLyrics() { return readFixture('sample_lyrics.txt'); }
@@ -74,7 +83,7 @@ function stubRegistry(MVorRegistry) {
 }
 
 module.exports = {
-  FIXTURES, PROJECTS, V21_PROJECTS, ALL_PROJECTS, readFixture, projectText, project, projects, planBasic, songDigest, sampleLyrics,
-  seedOf, corpus,
+  FIXTURES, PROJECTS, V21_PROJECTS, ALL_PROJECTS, readFixture, projectText, project, projects, withoutCamerawork, planBasic,
+  songDigest, sampleLyrics, seedOf, corpus,
   minimalFallbacks, stubParts, allStubParts, stubRegistry,
 };

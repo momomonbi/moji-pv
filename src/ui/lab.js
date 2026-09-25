@@ -1,8 +1,8 @@
 /* 文字PVメーカー v2 — original work. Part lab: one part in a canned cut with a pose-column view, contact sheets, a text mode and the browser-test API (DESIGN §6.14, §8.3). */
-MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'engine/facade', 'engine/host/canvas', 'engine/host/fonts',
-  'engine/host/measure', 'engine/text/faces', 'engine/text/service', 'engine/render/sprites', 'parts/kit', 'i18n/t',
-  'i18n/strings'],
-(REG, DOC, S, FAC, HC, HF, HM, FACES, TS, SP, K, I18N, strings) => {
+MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core/schema', 'core/rng', 'engine/facade',
+  'engine/host/canvas', 'engine/host/fonts', 'engine/host/measure', 'engine/text/faces', 'engine/text/service',
+  'engine/render/sprites', 'parts/kit', 'parts/mix', 'i18n/t', 'i18n/strings'],
+(REG, DOC, S, SHOT, SCH, RNG, FAC, HC, HF, HM, FACES, TS, SP, K, MIX, I18N, strings) => {
   'use strict';
 
   // The lab is a developer page (build.py --lab → tests/www/lab.html, MV.DEV = true). It is not shipped, so its control
@@ -12,13 +12,21 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'engine/facade', '
   //   #<kind>:<key>@<aspect>&t=<0..1>&text=…&theme=…&orient=h|v&parts=catalog|examples|stub&backdrop=…&fonts=1
   //   #gallery@<aspect>&parts=…          every part as a thumbnail
   //   #text:<sample>@v                    the sample laid out in every theme face with the real measurer (WP2)
+  //   #shot:<key>@<aspect>&t=…            a shot preset on the canned cut (DESIGN_2_1 §3.10; params zoom, curve, follow)
+  //   #rig:<key>@<aspect>&t=…             a rig preset over the whole sample plan (§3.10; params amp, curve)
+  //   #media:<kind>/<key>@<aspect>&asset=fixture:<name>&t=…   a part with a media param, showing a fixture asset of the
+  //                                       fake store (tests/helpers/fake_media.js; §11.5.7). Test pages only: the store
+  //                                       and its test parts come with the fixtures (MVLabFixtures.media).
   // `t` is normalized over the part's own window: arrive → the entrance, depart → the exit, dwell → the hold between
   // them, seam → the transition, anything else → the whole visible window of the cut.
-  // Registries: parts/catalog when it is built; the test fixtures (stub_parts.js, example_parts.js) when a test page
-  // defines globalThis.MVLabFixtures = { stub, examples, projects }.
+  // Registries: parts/catalog when it is built; 'materials' = the catalog plus the sample materials of parts/mix
+  // (sampleDefs, keyed myMatz<kind> as the tests key them; info() lists only the materials); the test fixtures
+  // (stub_parts.js, example_parts.js) when a test page defines globalThis.MVLabFixtures = { stub, examples, projects, media }.
 
   const ASPECTS = DOC.ASPECTS;
   const KINDS = REG.KINDS;
+  const CAM_KINDS = Object.freeze(['shot', 'rig']);     // camera presets (core/shot), shown like parts
+  const FIXTURE = 'fixture:';
   const VIEW_W = 960, VIEW_H = 540;
   const POSE_COLS = ['x', 'y', 'z', 'rot', 'rx', 'ry', 'sx', 'sy', 'alpha', 'blur', 'reveal', 'tint', 'glow', 'shard', 'echo', 'pixel'];
   const ANGLE_COLS = ['rot', 'rx', 'ry'];
@@ -36,7 +44,28 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'engine/facade', '
     const fx = fixtures();
     if (fx && fx.examples && fx.stub) out.push('examples');
     if (fx && fx.stub) out.push('stub');
+    if (MV.has('parts/catalog') && materialDefs().length) out.push('materials');
     return out;
+  }
+
+  // The sample materials (parts/mix sampleDefs over the catalog), re-keyed 'myMatS<Kind>' → 'myMatz<kind>' (NOTES v2.1-C).
+  const MATERIAL_KEY = 'myMatz';
+  let samples = null;
+  function materialDefs() {
+    if (samples) return samples;
+    samples = [];
+    try {
+      samples = (MIX.sampleDefs(catalogRegistry()) || []).map((d) => Object.freeze(Object.assign({}, d,
+        { key: MATERIAL_KEY + d.key.slice(6).toLowerCase() })));
+    } catch (e) {
+      notes.materials = 'parts/mix sampleDefs failed: ' + (e && e.message);
+    }
+    return samples;
+  }
+
+  // The keys a source shows as its own: every key, or only the materials of the 'materials' source.
+  function ownKeys(source, reg, kind) {
+    return source === 'materials' ? reg.keys(kind).filter((k) => k.startsWith(MATERIAL_KEY)) : reg.keys(kind);
   }
 
   const notes = {};
@@ -62,6 +91,7 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'engine/facade', '
     const fx = fixtures();
     let reg = null;
     if (source === 'catalog' && MV.has('parts/catalog')) reg = catalogRegistry();
+    else if (source === 'materials' && MV.has('parts/catalog')) reg = REG.extend(catalogRegistry(), materialDefs());
     else if (source === 'stub' && fx && fx.stub) reg = REG.createRegistry(fx.stub.allStubParts());
     else if (source === 'examples' && fx && fx.examples && fx.stub) {
       const fallbacks = fx.stub.fallbackParts().filter((d) => d.kind !== 'theme' && d.kind !== 'mood');
@@ -74,18 +104,69 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'engine/facade', '
 
   function defaultSource() { return sources()[0] || null; }
 
+  function cameraKeys(kind) { return kind === 'shot' ? SHOT.SHOT_KEYS : kind === 'rig' ? SHOT.RIG_KEYS : []; }
+
+  // --- media mode: the fake store and its test parts (test pages only) -------------------------------------------------
+
+  function hasMediaFixtures() { const fx = fixtures(); return !!(fx && fx.media); }
+
+  function mediaFixtures() {
+    if (!hasMediaFixtures()) throw new Error('lab: the media mode needs the fake store (tests/helpers/fake_media.js) on the page');
+    return fixtures().media;
+  }
+
+  // The source's parts plus the fake store's test parts (one per media use), for the media mode.
+  function mediaRegistry(source) {
+    const id = 'media|' + source;
+    if (registries.has(id)) return registries.get(id);
+    const base = registryOf(source);
+    const defs = [];
+    for (const kind of KINDS) for (const key of base.keys(kind)) defs.push(base.get(kind, key));
+    const reg = REG.createRegistry(defs.concat(mediaFixtures().testParts(K)), { strict: false });
+    registries.set(id, reg);
+    return reg;
+  }
+
+  // The name of a part's media param (the first of type 'media'), or null.
+  function mediaParamOf(def) {
+    const params = (def && def.params) || {};
+    return Object.keys(params).find((k) => params[k] && params[k].type === 'media') || null;
+  }
+
+  // mediaParts(registry) → [{ kind, key, param, accept }]: every part with a media param.
+  function mediaParts(reg) {
+    const out = [];
+    for (const kind of REG.PART_KINDS) {
+      for (const key of reg.keys(kind)) {
+        const def = reg.get(kind, key), param = mediaParamOf(def);
+        if (param) out.push({ kind, key, param, accept: def.params[param].accept || 'any' });
+      }
+    }
+    return out;
+  }
+
+  // 'fixture:<name>' | '<name>' | '<id>' → the fake store's asset entry.
+  function fixtureAsset(ref) {
+    const name = String(ref || '').startsWith(FIXTURE) ? String(ref).slice(FIXTURE.length) : String(ref || '');
+    const a = mediaFixtures().fixture(name);
+    if (!a) throw new Error('lab: no media fixture ' + name);
+    return a;
+  }
+
   const engines = new Map();
   const factory = HC.createCanvasFactory();
 
-  // One engine per (source, fonts): with fonts the real FontBook (Google Fonts) loads faces; without, faces are never
-  // requested and the fallback stacks draw (fast and deterministic, what the tests use).
-  function engineFor(source, withFonts, fresh) {
-    const id = source + '|' + (withFonts ? 'fonts' : 'plain');
+  // One engine per (source, fonts, media): with fonts the real FontBook (Google Fonts) loads faces; without, faces are
+  // never requested and the fallback stacks draw (fast and deterministic, what the tests use). A media engine has the
+  // fake store (checkerboard stills, bar-coded video frames) and the media registry.
+  function engineFor(source, withFonts, fresh, media) {
+    const id = source + '|' + (withFonts ? 'fonts' : 'plain') + (media ? '|media' : '');
     if (!fresh && engines.has(id)) return engines.get(id);
-    const registry = registryOf(source);
+    const registry = media ? mediaRegistry(source) : registryOf(source);
     const fonts = withFonts ? HF.createFontBook({ document, timeoutMs: 8000 }) : null;
     const measurer = HM.createCanvasMeasurer(factory, fonts);
-    const engine = FAC.createEngine({ registry, canvas: factory, measurer, fonts, assets: null });
+    const assets = media ? mediaFixtures().createFakeMedia(MV, { canvas: factory }) : null;
+    const engine = FAC.createEngine({ registry, canvas: factory, measurer, fonts, assets });
     const rec = { engine, registry, fonts, measurer };
     if (!fresh) engines.set(id, rec);
     return rec;
@@ -132,16 +213,27 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'engine/facade', '
   // renderPart(o) → { plan, t, stats, surface, engine, registry }: o = { parts, kind, key, params, aspect, u, t, text,
   // theme, orient, backdrop, w, h, fonts, surface, glyphPath, probe, quality, fresh (a new engine: no history),
   // level (adaptive preview level to render at), prefill (a colour the surface holds before the frame), textScale (the
-  // cut's text.scale), using (an engine record from engineFor to render with) }
+  // cut's text.scale), using (an engine record from engineFor to render with), asset (media mode: a fixture of the fake
+  // store, 'fixture:<name>', put in the part's media param) }. kind 'shot' / 'rig' shows a camera preset (key).
   async function renderPart(o) {
     const source = o.parts || defaultSource();
     if (!source) throw new Error('lab: no parts registry on this page');
-    const rec = o.using || engineFor(source, !!o.fonts, !!o.fresh);
+    const asset = o.asset ? fixtureAsset(o.asset) : null;
+    const rec = o.using || engineFor(source, !!o.fonts, !!o.fresh, !!asset);
     const reg = rec.registry;
-    const ref = o.kind && o.key ? { kind: o.kind, key: o.key, params: o.params } : {};
-    if (ref.kind && !reg.get(ref.kind, ref.key)) throw new Error('lab: unknown part ' + ref.kind + '/' + ref.key + ' in ' + source);
+    const camera = CAM_KINDS.includes(o.kind);
+    let params = o.params;
+    if (asset) {
+      const param = mediaParamOf(o.kind && o.key ? reg.get(o.kind, o.key) : null);
+      if (!param) throw new Error('lab: ' + o.kind + '/' + o.key + ' has no media param');
+      params = Object.assign({}, o.params, { [param]: asset.id });
+    }
+    const ref = o.kind && o.key ? { kind: o.kind, key: o.key, params } : {};
+    if (camera && !cameraKeys(o.kind).includes(o.key)) throw new Error('lab: unknown ' + o.kind + ' preset ' + o.key);
+    if (ref.kind && !camera && !reg.get(ref.kind, ref.key)) throw new Error('lab: unknown part ' + ref.kind + '/' + ref.key + ' in ' + source);
     const plan = FAC.samplePlan(reg, ref, { text: o.text, theme: o.theme, aspect: o.aspect, orient: o.orient, backdrop: o.backdrop,
       textScale: o.textScale });
+    if (asset) plan.media = mediaFixtures().planMedia([asset.id]);
     rec.engine.setPlan(plan);
     if (o.fonts) await rec.engine.prepare(0, plan.duration, { export: true });
     const t = Number.isFinite(o.t) ? o.t : timeAt(rec.engine, plan, o.kind, o.u);
@@ -228,13 +320,19 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'engine/facade', '
     const raw = String(hash || '').replace(/^#/, '');
     const [head, ...rest] = raw.split('&');
     const out = { mode: 'part', kind: null, key: null, aspect: '16:9', u: 0.5, text: '', theme: '', orient: '', parts: '',
-      backdrop: 'scene', fonts: false };
+      backdrop: 'scene', fonts: false, asset: '' };
     const at = head.lastIndexOf('@');
     const main = at >= 0 ? head.slice(0, at) : head;
     const tail = at >= 0 ? decodeURIComponent(head.slice(at + 1)) : '';
     if (main === 'gallery') out.mode = 'gallery';
     else if (main.startsWith('text:')) { out.mode = 'text'; out.text = decodeURIComponent(main.slice(5)); out.orient = tail === 'v' ? 'v' : 'h'; }
-    else if (main) { const [kind, key] = main.split(':'); out.kind = KINDS.includes(kind) ? kind : null; out.key = key || null; }
+    else if (main.startsWith('media:')) {
+      const [kind, key] = main.slice(6).split('/');
+      out.mode = 'media'; out.kind = KINDS.includes(kind) ? kind : null; out.key = key || null;
+    } else if (main) {
+      const [kind, key] = main.split(':');
+      out.kind = KINDS.includes(kind) || CAM_KINDS.includes(kind) ? kind : null; out.key = key || null;
+    }
     if (out.mode !== 'text' && ASPECTS.includes(tail)) out.aspect = tail;
     for (const pair of rest) {
       const eq = pair.indexOf('=');
@@ -249,7 +347,10 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'engine/facade', '
   function formatHash(s) {
     if (s.mode === 'gallery') return '#gallery@' + s.aspect + (s.parts ? '&parts=' + s.parts : '');
     if (s.mode === 'text') return '#text:' + encodeURIComponent(s.text) + '@' + (s.orient === 'v' ? 'v' : 'h');
-    let h = '#' + (s.kind || 'arrive') + ':' + (s.key || '') + '@' + s.aspect + '&t=' + Math.round(s.u * 1000) / 1000;
+    const u = Math.round(s.u * 1000) / 1000;
+    let h = s.mode === 'media'
+      ? '#media:' + (s.kind || 'ground') + '/' + (s.key || '') + '@' + s.aspect + '&asset=' + encodeURIComponent(s.asset || FIXTURE + 'jpeg') + '&t=' + u
+      : '#' + (s.kind || 'arrive') + ':' + (s.key || '') + '@' + s.aspect + '&t=' + u;
     for (const k of ['text', 'theme', 'orient', 'parts']) if (s[k]) h += '&' + k + '=' + encodeURIComponent(s[k]);
     if (s.backdrop && s.backdrop !== 'scene') h += '&backdrop=' + s.backdrop;
     if (s.fonts) h += '&fonts=1';
@@ -288,11 +389,17 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'engine/facade', '
       const src = state.parts || defaultSource();
       bar.replaceChildren();
       if (!src) { bar.append(el('span', { text: 'No parts yet: parts/catalog is not built, and this page has no test fixtures.' })); return null; }
-      const reg = registryOf(src);
-      const kind = state.kind && reg.keys(state.kind).length ? state.kind : 'arrive';
-      const keys = reg.keys(kind);
+      const media = state.mode === 'media';
+      const reg = media ? mediaRegistry(src) : registryOf(src);
+      const found = media ? mediaParts(reg) : [];
+      const keysOf = (k) => (media ? found.filter((m) => m.kind === k).map((m) => m.key)
+        : CAM_KINDS.includes(k) ? cameraKeys(k).slice() : reg.keys(k));
+      const kinds = media ? [...new Set(found.map((m) => m.kind))] : KINDS.filter((k) => reg.keys(k).length).concat(CAM_KINDS);
+      const kind = state.kind && kinds.includes(state.kind) && keysOf(state.kind).length ? state.kind : kinds[0] || 'arrive';
+      const keys = keysOf(kind);
       const key = keys.includes(state.key) ? state.key : keys[0];
       state.kind = kind; state.key = key;
+      if (media && !state.asset) state.asset = FIXTURE + 'jpeg';
       const slider = el('input', { type: 'range', min: '0', max: '1', step: '0.005', value: String(state.u),
         on: { input: () => apply({ u: Number(slider.value) }) } });
       const text = el('input', { type: 'text', value: state.text, placeholder: FAC.SAMPLE_TEXT, style: { width: '200px' },
@@ -301,14 +408,17 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'engine/facade', '
         on: { click: () => { playing = !playing; play.textContent = playing ? 'pause' : 'play'; tick(); } } });
       bar.append(
         select(sources(), src, (v) => apply({ parts: v, key: null })),
-        select(KINDS.filter((k) => reg.keys(k).length), kind, (v) => apply({ kind: v, key: null })),
+        select(kinds, kind, (v) => apply({ kind: v, key: null })),
         select(keys, key, (v) => apply({ key: v })),
+        media ? select(mediaFixtures().FIXTURES.map((a) => FIXTURE + a.name), state.asset, (v) => apply({ asset: v })) : null,
         select(ASPECTS, state.aspect, (v) => apply({ aspect: v })),
         select([''].concat(reg.keys('theme')), state.theme, (v) => apply({ theme: v })),
         select(['', 'h', 'v'], state.orient, (v) => apply({ orient: v })),
         select(['scene', 'chroma', 'black', 'clear'], state.backdrop, (v) => apply({ backdrop: v })),
         text, slider, play,
-        el('button', { text: 'gallery', on: { click: () => apply({ mode: 'gallery' }) } }));
+        el('button', { text: 'gallery', on: { click: () => apply({ mode: 'gallery' }) } }),
+        hasMediaFixtures() ? el('button', { text: media ? 'parts' : 'media',
+          on: { click: () => apply({ mode: media ? 'part' : 'media', kind: null, key: null }) } }) : null);
       return reg;
     }
 
@@ -319,12 +429,15 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'engine/facade', '
       if (view.width !== w || view.height !== h) { view.width = w; view.height = h; }
       const surface = { canvas: view, ctx: view.getContext('2d'), w, h };
       const r = await renderPart({ parts: state.parts || defaultSource(), kind: state.kind, key: state.key, aspect: state.aspect,
-        u: state.u, text: state.text, theme: state.theme, orient: state.orient, backdrop: state.backdrop, fonts: state.fonts, surface });
+        u: state.u, text: state.text, theme: state.theme, orient: state.orient, backdrop: state.backdrop, fonts: state.fonts, surface,
+        asset: state.mode === 'media' ? state.asset : '' });
       const scene = r.engine.scene('cut', 0);
       const tm = scene ? scene.times : null;
+      const cam = CAM_KINDS.includes(state.kind) ? r.engine.viewAt(r.t) : null;
       info.textContent = state.kind + '/' + state.key + '  t=' + r.t.toFixed(3) + 's  ' + (tm ? 'times a=' + tm.a.toFixed(2) + ' rest=' +
         tm.rest.toFixed(2) + ' out=' + tm.out.toFixed(2) + ' b=' + tm.b.toFixed(2) : '') + '  drawn ' + JSON.stringify(r.stats.drawn) +
-        '  passes ' + r.stats.passes;
+        '  passes ' + r.stats.passes + (r.stats.media ? '  media ' + JSON.stringify(r.stats.media) : '') +
+        (cam ? '  camera x=' + cam.x.toFixed(1) + ' y=' + cam.y.toFixed(1) + ' zoom=' + cam.zoom.toFixed(3) + ' roll=' + cam.roll.toFixed(3) : '');
       poses.replaceChildren(poseTable(scene));
     }
 
@@ -445,13 +558,16 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'engine/facade', '
   // --- contact sheets ----------------------------------------------------------------------------------------------------
 
   // sheet(o) → { png: data URL, cells, errors, width, height } — a labelled grid: one row per part, one column per
-  // normalized time. o = { parts, kind, keys, aspect, times, text, theme, orient, backdrop, cell (px width), fonts }
+  // normalized time. o = { parts, kind, keys, aspect, times, text, theme, orient, backdrop, cell (px width), fonts, asset }
+  // kind 'shot' / 'rig': camera presets; asset: the media mode (the parts with a media param, showing that fixture).
   async function sheet(o) {
     const source = o.parts || defaultSource();
-    const reg = registryOf(source);
+    const reg = o.asset ? mediaRegistry(source) : registryOf(source);
     const kind = o.kind;
-    if (!KINDS.includes(kind)) throw new Error('lab.sheet: unknown kind ' + kind);
-    const keys = (o.keys && o.keys.length ? o.keys : reg.keys(kind)).filter((k) => !!k);
+    const camera = CAM_KINDS.includes(kind);
+    if (!KINDS.includes(kind) && !camera) throw new Error('lab.sheet: unknown kind ' + kind);
+    const all = camera ? cameraKeys(kind) : o.asset ? mediaParts(reg).filter((m) => m.kind === kind).map((m) => m.key) : reg.keys(kind);
+    const keys = (o.keys && o.keys.length ? o.keys : all).filter((k) => !!k);
     const times = o.times && o.times.length ? o.times : [0.1, 0.3, 0.6, 0.9];
     const aspect = ASPECTS.includes(o.aspect) ? o.aspect : '16:9';
     const [dw, dh] = DOC.DESIGN_SIZE[aspect];
@@ -474,7 +590,7 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'engine/facade', '
     for (let r = 0; r < keys.length; r++) {
       const key = keys[r];
       const y = headH + r * (cellH + gap);
-      const def = reg.get(kind, key);
+      const def = camera ? { label: { ja: kind, en: kind } } : reg.get(kind, key);
       g.fillStyle = '#e8e8e8'; g.font = '600 13px system-ui, sans-serif';
       g.fillText(key, gap, y + 4);
       g.font = '12px system-ui, sans-serif'; g.fillStyle = '#aaa';
@@ -484,7 +600,7 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'engine/facade', '
         try {
           if (!def) throw new Error('unknown part');
           const res = await renderPart({ parts: source, kind, key, aspect, u: times[c], text: o.text, theme: o.theme, orient: o.orient,
-            backdrop: o.backdrop, fonts: o.fonts, surface: cell, quality: 'export' });
+            backdrop: o.backdrop, fonts: o.fonts, surface: cell, quality: 'export', asset: o.asset });
           g.drawImage(cell.canvas, x, y);
           g.fillStyle = 'rgba(0,0,0,0.55)'; g.fillRect(x, y + cellH - 16, 70, 16);
           g.fillStyle = '#fff'; g.font = '11px system-ui, sans-serif';
@@ -601,14 +717,72 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'engine/facade', '
 
   function percentile(sorted, p) { return sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))] : 0; }
 
+  function copyPlan(plan) {
+    const out = JSON.parse(JSON.stringify(plan));
+    Object.defineProperty(out, 'env', { enumerable: false, value: plan.env });
+    return out;
+  }
+
+  const CUT_PARTICLES = 400;         // the cut scenes' material particle budget (DESIGN_2_1 §5.9.4)
+
+  function autoParams(reg, kind, key, feat, look, seed) {
+    const ax = { f: feat, look: { amounts: look.amounts, mood: null, bpm: 120 } };
+    const p = {};
+    for (const { name, spec } of reg.params(kind, key)) {
+      p[name] = SCH.autoValue(spec, Object.assign({}, ax, { rng: RNG.stream(seed, 'param', kind, key, name) }));
+    }
+    return p;
+  }
+
+  // The sample material of each kind in every slot it fits (the 'materials' source): arrive, dwell, depart, lens, one
+  // ornament and one filter on every cut; the ground and the atmosphere of every segment.
+  function withMaterials(plan, reg) {
+    const out = copyPlan(plan);
+    const mat = (kind) => reg.keys(kind).find((k) => k.startsWith(MATERIAL_KEY) && (kind !== 'ornament' ||
+      reg.get(kind, k).scope !== 'run')) || null;
+    const atmos = reg.keys('ornament').find((k) => k.startsWith(MATERIAL_KEY) && reg.get('ornament', k).scope === 'run') || null;
+    const decision = (kind, key, feat, seed) => ({ v: key, p: autoParams(reg, kind, key, feat, out.look, seed), from: 'auto' });
+    out.cuts.forEach((c, i) => {
+      for (const kind of ['arrive', 'dwell', 'depart', 'lens']) if (mat(kind)) c.slots[kind] = decision(kind, mat(kind), c.feat, i);
+      if (mat('ornament')) {
+        c.slots['ornament.count'] = { v: Math.max(1, (c.slots['ornament.count'] || { v: 0 }).v), from: 'auto' };
+        c.slots['ornament#0'] = decision('ornament', mat('ornament'), c.feat, i);
+      }
+      if (mat('filter')) {
+        c.slots['filter.count'] = { v: Math.max(1, (c.slots['filter.count'] || { v: 0 }).v), from: 'auto' };
+        const d = decision('filter', mat('filter'), c.feat, i);
+        d.p.when = 'always';
+        c.slots['filter#0'] = d;
+      }
+      c.fp += '|materials';
+    });
+    out.grounds.forEach((g, i) => {
+      const feat = (out.cuts.find((c) => g.cuts.includes(c.key)) || out.cuts[0]).feat;
+      if (mat('ground')) g.ground = decision('ground', mat('ground'), feat, 1000 + i);
+      if (atmos) g.atmos = decision('ornament', atmos, feat, 2000 + i);
+      g.fp += '|materials';
+    });
+    return out;
+  }
+
   // perf(o) → frame times (ms) of a fixture project rendered for `seconds` at `fps` with the short side `short` (720 by
   // default). Each frame is followed by a 1-pixel read, so the time includes the canvas work, not only the recording of
-  // the calls.
+  // the calls. o.camera: the automatic camerawork at full strength (work:amount.camera pinned to 1, so the planner's
+  // shots, DESIGN_2_1 §4.7, are the most it makes) under a rig (work:rig pinned to slowSwell: project_long's own runs
+  // draw none); o.materials: the sample materials in every slot (source 'materials'). The result adds behaveP50 (the
+  // behave stage: evaluation and world solve), shots (cut scenes in the window with a shot), rigs (rig runs other than
+  // 'none') and mixShare (the smallest particle share of the scenes built).
   async function perf(o) {
     const source = o.parts || defaultSource();
     const rec = engineFor(source, false, true);
-    rec.engine.setDoc(projectDoc(o.project));
-    const plan = rec.engine.plan;
+    const doc = projectDoc(o.project);
+    if (o.camera) {
+      doc.pins = Object.assign({}, doc.pins, { 'work:amount.camera': { v: 1, by: 'user' }, 'work:rig': { v: 'slowSwell', by: 'user' } });
+    }
+    rec.engine.setDoc(doc);
+    let plan = rec.engine.plan;
+    if (o.materials) plan = withMaterials(plan, rec.engine.registry);
+    if (plan !== rec.engine.plan) rec.engine.setPlan(plan);
     const short = o.short || 720;
     const k = short / Math.min(plan.design.w, plan.design.h);
     const w = Math.round(plan.design.w * k), h = Math.round(plan.design.h * k);
@@ -620,9 +794,10 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'engine/facade', '
     rec.engine.renderFrame(s, start, ropts);
     await rec.engine.prepare(start, start + seconds, { export: false });
     for (let i = 0; i < 5; i++) { rec.engine.renderFrame(s, start + i / fps, ropts); s.ctx.getImageData(0, 0, 1, 1); }
-    const times = [];
+    const times = [], behave = [];
     const stages = { behave: 0, draw: 0, post: 0 };
     const n = Math.round(seconds * fps);
+    let shots = 0, share = 1;
     for (let i = 0; i < n; i++) {
       const t0 = performance.now();
       rec.engine.renderFrame(s, start + i / fps, ropts);
@@ -630,25 +805,54 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'engine/facade', '
       times.push(performance.now() - t0);
       const st = rec.engine.stats().stageMs;
       stages.behave += st.behave; stages.draw += st.draw; stages.post += st.post;
+      behave.push(st.behave);
     }
+    // Material particles are drawn by paints (not in drawn.particles): the budget is read from the chosen defs, Σ
+    // mine.cost.particles of a cut, and the share env.mixShare scales it by (min(1, 400 / Σ), DESIGN_2_1 §5.9.4).
+    let particles = 0;
+    plan.cuts.forEach((c, i) => {
+      if (c.b < start || c.a > start + seconds) return;
+      const scene = rec.engine.scene('cut', i);
+      if (scene && scene.shot) shots++;
+      let sum = 0;
+      for (const [slot, d] of Object.entries(c.slots)) {
+        const kind = slot.split('#')[0];
+        const def = d && typeof d.v === 'string' && REG.PART_KINDS.includes(kind) ? rec.engine.registry.get(kind, d.v) : null;
+        const cost = def && def.mine ? def.mine.cost : null;
+        if (cost && cost.particles > 0) sum += cost.particles;
+      }
+      particles = Math.max(particles, sum);
+    });
+    share = particles > CUT_PARTICLES ? CUT_PARTICLES / particles : 1;
     const sorted = times.slice().sort((a, b) => a - b);
     const mean = times.reduce((a, b) => a + b, 0) / Math.max(1, times.length);
     for (const k of Object.keys(stages)) stages[k] /= Math.max(1, n);
     return { frames: n, p50: percentile(sorted, 0.5), p95: percentile(sorted, 0.95), max: sorted[sorted.length - 1] || 0, mean,
-      stages, w, h, scenes: rec.engine.stats().scenes };
+      stages, behaveP50: percentile(behave.sort((a, b) => a - b), 0.5), w, h, scenes: rec.engine.stats().scenes, shots,
+      rigs: (plan.rigs || []).filter((r) => r.rig && r.rig.v !== 'none').length, particles, mixShare: share };
   }
 
   async function renderApi(o) {
     const surface = o.w && o.h ? makeSurface(o.w, o.h, o.backdrop !== 'clear') : undefined;
     const r = await renderPart(Object.assign({}, o, { surface }));
     return { t: r.t, stats: r.stats, variance: variance(r.surface), warnings: r.engine.warnings(), w: r.surface.w, h: r.surface.h,
-      hash: hashPixels(r.surface) };
+      hash: hashPixels(r.surface), view: r.engine.viewAt(r.t), media: r.engine.mediaAt(r.t) };
+  }
+
+  // thumb(o) → { variance, hash, w, h, stats }: engine.thumb of a part or a camera preset (kind 'shot' / 'rig'), the tile
+  // the pickers show. o = { parts, kind, key, params, aspect, w, h }
+  function thumbApi(o) {
+    const rec = engineFor(o.parts || defaultSource(), false, false);
+    const [w, h] = o.w && o.h ? [o.w, o.h] : fitSize(o.aspect || '16:9', 240, 135);
+    const surface = makeSurface(w, h, true);
+    const stats = rec.engine.thumb({ kind: o.kind, key: o.key, params: o.params }, surface, { aspect: o.aspect });
+    return { variance: variance(surface), hash: hashPixels(surface), w, h, stats };
   }
 
   // sequence(o) → [{ hash, glyphs }]: one fresh engine renders o's part once per step, in order; a step { w, h, probe,
   // u, t } overrides o. Frame N of a sequence must not depend on the steps before it (determinism.py).
   async function sequence(o) {
-    const using = engineFor(o.parts || defaultSource(), !!o.fonts, true);
+    const using = engineFor(o.parts || defaultSource(), !!o.fonts, true, !!o.asset);
     const out = [];
     for (const step of o.steps || []) {
       const w = step.w || o.w, h = step.h || o.h;
@@ -659,14 +863,22 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'engine/facade', '
     return out;
   }
 
-  // info() → { sources, parts: { source: { kind: keys } }, notes: { source: text }, problems: { source: [...] }, aspects }
+  // info() → { sources, parts: { source: { kind: keys } }, notes: { source: text }, problems: { source: [...] }, aspects,
+  //   camera: { shot: keys, rig: keys }, media: { parts: { source: [{ kind, key, param, accept }] }, fixtures: [names] } | null }
   function info() {
-    const out = { sources: sources(), parts: {}, notes: {}, problems: {}, aspects: ASPECTS.slice() };
+    const out = { sources: sources(), parts: {}, notes: {}, problems: {}, aspects: ASPECTS.slice(),
+      camera: { shot: SHOT.SHOT_KEYS.slice(), rig: SHOT.RIG_KEYS.slice() }, media: null };
+    if (hasMediaFixtures()) {
+      out.media = { parts: {}, fixtures: mediaFixtures().FIXTURES.map((a) => a.name) };
+      for (const src of out.sources) {
+        try { out.media.parts[src] = mediaParts(mediaRegistry(src)); } catch (e) { out.media.parts[src] = []; }
+      }
+    }
     for (const src of out.sources) {
       let reg;
       try { reg = registryOf(src); } catch (e) { out.notes[src] = String(e && e.message); out.parts[src] = {}; continue; }
       out.parts[src] = {};
-      for (const kind of KINDS) out.parts[src][kind] = reg.keys(kind);
+      for (const kind of KINDS) out.parts[src][kind] = ownKeys(src, reg, kind);
       if (notes[src]) out.notes[src] = notes[src];
       if (reg.problems && reg.problems.length) out.problems[src] = reg.problems.slice(0, 50);
     }
@@ -676,7 +888,7 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'engine/facade', '
   function installApi(page) {
     window.addEventListener('error', (e) => pageErrors.push(String(e.message || e.error)));
     window.addEventListener('unhandledrejection', (e) => pageErrors.push(String((e.reason && e.reason.message) || e.reason)));
-    window.__lab = Object.freeze({ info, render: renderApi, sequence, sheet, parity, blurSweep, frames, perf,
+    window.__lab = Object.freeze({ info, render: renderApi, thumb: thumbApi, sequence, sheet, parity, blurSweep, frames, perf,
       errors: () => pageErrors.slice(), page });
   }
 

@@ -334,7 +334,7 @@ MV.def('parts/arrange/editorial', ['parts/kit'], (K) => {
     key: 'diptychSplit',
     label: L('二面', 'Diptych split'),
     blurb: L('画面を二枚の面に分け、句を交互に置く', 'The frame split into two panels, the phrases set alternately in them'),
-    tags: ['serious', 'minimal'], family: 'editorial',
+    tags: ['serious', 'minimal'], family: 'editorial', cam: 'none',
     traits: { cells: [2, 36] },
     // One word (「紙ひこうき」, "Hello") has no phrase to split at: its one piece would fill one panel and leave the
     // other half of the frame empty, so the planner (nearly) never picks the diptych for it. A note would fill the
@@ -404,7 +404,7 @@ MV.def('parts/arrange/editorial', ['parts/kit'], (K) => {
     key: 'slantBand',
     label: L('斜め帯', 'Slant band'),
     blurb: L('画面を斜めに横切る色帯に一行を載せる', 'The line set on a tinted band tilted across the frame'),
-    tags: ['bold', 'fast'], family: 'tilt',
+    tags: ['bold', 'fast'], family: 'tilt', cam: 'gentle',
     traits: { cells: [2, 26], energy: [0.3, 1] },
     params: {
       angle: { type: 'num', min: -20, max: -8, step: 0.5, unit: 'deg', label: L('傾き', 'Angle'),
@@ -573,7 +573,7 @@ MV.def('parts/arrange/editorial', ['parts/kit'], (K) => {
     key: 'tickerMarquee',
     label: L('流れ帯', 'Ticker marquee'),
     blurb: L('帯の上を一行がくり返し流れていく', 'One line scrolling along a strip across the frame, repeated end to end'),
-    tags: ['fast', 'digital'], family: 'strip', motion: 'own',
+    tags: ['fast', 'digital'], family: 'strip', motion: 'own', cam: 'none',
     traits: { cells: [2, 40], energy: [0.35, 1] },
     params: {
       speed: { type: 'num', min: 60, max: 900, step: 5, unit: 'du', label: L('流れる速さ', 'Speed'),
