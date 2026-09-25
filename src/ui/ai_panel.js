@@ -405,7 +405,8 @@ MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/a
         else setTarget('area', r);
       }
 
-      return { root, update, text, preset, highlight };
+      // the one 写真・動画をAIが使ってよい switch: the board reads it too (DESIGN_2_1 §11.6.1)
+      return { root, update, text, preset, highlight, mediaAllowed: () => allowMedia.checked };
     }
 
     function toolsBlock(app, ctl, openBoard) {
@@ -495,7 +496,7 @@ MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/a
       let boardWanted = false;
       const boardHost = h('div', { class: 'ai-board-host', hidden: true });
       function openBoard() {
-        if (!board) board = BOARD.mount(app, ctl, { onBack: closeBoard });
+        if (!board) board = BOARD.mount(app, ctl, { onBack: closeBoard, allowMedia: () => tools.direct.mediaAllowed() });
         dom.replace(boardHost, board.el);
         boardWanted = true;
         boardHost.hidden = !!ctl.state.review;

@@ -710,7 +710,9 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
         }
         if (target && PROJECT_EXT.test(target.name)) return saveLight(target);
       }
-      if (target) sink = SINK.createFileSink(target);
+      // 保存 over the open project (handle given) must never delete it when the save is cancelled or fails: only a file
+      // the save dialog has just created is removed then.
+      if (target) sink = SINK.createFileSink(target, { removeOnAbort: !handle });
       else {
         if (lay.bytes > PKG_MEMORY && app.confirm && !(await app.confirm({ text: t('pkg.warn.memory', { size }) }))) return null;
         sink = SINK.createMemorySink({ name, type: PKG.MIME });
@@ -917,8 +919,16 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
             await withProgress('open', file, (pr) => openPackage(file, Object.assign({}, pr, { handle: handles[0] })));
             return;
           }
+          if (route === 'project') {
+            // the picked file becomes the file 保存 writes only when it opened: a refused one (newer app, damaged) is
+            // left alone, never overwritten with the work still on screen
+            if (await openProject(file)) {
+              fileHandle = handles[0];
+              fileSaved = { name: file.name, at: Date.now(), opened: true, text: D.serialize({ doc: app.doc, side: app.store.side }) };
+            }
+            return;
+          }
           await openFiles([file]);
-          if (route === 'project') { fileHandle = handles[0]; fileSaved = { name: file.name, at: Date.now(), opened: true, text: D.serialize({ doc: app.doc, side: app.store.side }) }; }
           return;
         } catch (e) {
           if (e && e.name === 'AbortError') return;

@@ -1,6 +1,6 @@
 <!doctype html><html lang="ja"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-qKJYPYuE2lZqLMHJOUf1GS6cXa8DvnPniWqQjRy0ELM='; style-src 'sha256-gmrSoWwvipUekLywDjXgyrJxA8IKarXht0Er4wORaLQ=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-eVgRwF5xlJlst2MS8tPtbJEYTvium6HADAQ1lixelGk='; style-src 'sha256-gmrSoWwvipUekLywDjXgyrJxA8IKarXht0Er4wORaLQ=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
 <title>文字PVメーカー</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -42101,8 +42101,9 @@ MV.def('ai/recipe', ['core/num', 'core/hash', 'core/color', 'core/curve', 'core/
         if (ai && Array.isArray(ai.colors) && ai.colors.length) bits.push('colours ' + ai.colors.join(' '));
         if (ai && isObject(ai.text)) bits.push('text area: ' + boxWords(ai.text));
         if (ai && isObject(ai.subject)) bits.push('subject: ' + boxWords(ai.subject));
+        // Never the file name: the AI gets only the kind, size, shape and what the user let the vision step describe.
         const line = 'asset:' + n + ' ' + kind + (isNumber(e.dur) && kind !== 'image' ? ' ' + clock(e.dur) : '') + ' ' + e.w + '×'
-          + e.h + ' ' + shape + ' ' + JSON.stringify(String(e.name)) + ' — ' + bits.join(' · ');
+          + e.h + ' ' + shape + ' — ' + bits.join(' · ');
         out.push({ n, id: e.id, kind: e.kind, anim: !!e.anim, alpha: !!e.alpha, dur: isNumber(e.dur) ? e.dur : null, w: e.w, h: e.h,
           name: String(e.name), line });
       }
@@ -48229,10 +48230,13 @@ MV.def('export/host/sink', ['export/schedule'], (S) => {
 
   function partSize(part) { return part instanceof Uint8Array ? part.byteLength : part.size; }
 
-  // createFileSink(fileHandle): streams into the file through createWritable(); abort() discards the written data and
-  // removes the file the save dialog created, so a cancelled export leaves nothing behind. States: open → closing →
-  // closed, or → aborted. A close() that fails leaves the sink 'failed', and abort() still removes the file then.
-  function createFileSink(handle) {
+  // createFileSink(fileHandle, { removeOnAbort = true }?): streams into the file through createWritable(); abort()
+  // discards the written data and removes the file the save dialog created, so a cancelled export leaves nothing behind.
+  // A caller writing over a file the user already has (保存 to the open project) passes removeOnAbort: false: abort() then
+  // only drops the swap file, and the file keeps its last saved contents. States: open → closing → closed, or → aborted.
+  // A close() that fails leaves the sink 'failed', and abort() still removes (or keeps) the file then.
+  function createFileSink(handle, opts) {
+    const removeOnAbort = !(opts && opts.removeOnAbort === false);
     let writable = null;
     let size = 0;
     let state = 'open';
@@ -48272,7 +48276,7 @@ MV.def('export/host/sink', ['export/schedule'], (S) => {
         if (state === 'closed' || state === 'aborted') return;
         state = 'aborted';
         try { if (writable) await writable.abort(); } catch (err) { /* the stream may already be errored */ }
-        try { if (typeof handle.remove === 'function') await handle.remove(); } catch (err) { /* the file stays empty */ }
+        try { if (removeOnAbort && typeof handle.remove === 'function') await handle.remove(); } catch (err) { /* the file stays empty */ }
         size = 0;
       },
     };
@@ -57038,8 +57042,10 @@ MV.def('ui/ai_board', ['ui/dom', 'ui/icons', 'planner/areas', 'ui/fields', 'ui/a
       flush();
       const b = AC.boardBriefs(rows, asks());
       if (!b.briefs.length || b.over) return;
-      // the library's pictures on this device may be placed, as in the instruction block (DESIGN_2_1 §11.6.1)
-      const here = (app.doc.media && app.doc.media.list ? app.doc.media.list : []).filter((e) => !app.media || app.media.state(e.id) !== 'missing');
+      // the library's pictures on this device may be placed, as in the instruction block, and only while its
+      // 写真・動画をAIが使ってよい switch is on (DESIGN_2_1 §11.6.1)
+      const allowed = typeof o.allowMedia === 'function' && o.allowMedia();
+      const here = !allowed ? [] : (app.doc.media && app.doc.media.list ? app.doc.media.list : []).filter((e) => !app.media || app.media.state(e.id) !== 'missing');
       ctl.run('direct', { briefs: b.briefs, mode: 'all', allowMaterials: allow.checked, media: here.length ? here.map((e) => e.id) : false });
     });
 
@@ -58412,7 +58418,9 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
         }
         if (target && PROJECT_EXT.test(target.name)) return saveLight(target);
       }
-      if (target) sink = SINK.createFileSink(target);
+      // 保存 over the open project (handle given) must never delete it when the save is cancelled or fails: only a file
+      // the save dialog has just created is removed then.
+      if (target) sink = SINK.createFileSink(target, { removeOnAbort: !handle });
       else {
         if (lay.bytes > PKG_MEMORY && app.confirm && !(await app.confirm({ text: t('pkg.warn.memory', { size }) }))) return null;
         sink = SINK.createMemorySink({ name, type: PKG.MIME });
@@ -58619,8 +58627,16 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
             await withProgress('open', file, (pr) => openPackage(file, Object.assign({}, pr, { handle: handles[0] })));
             return;
           }
+          if (route === 'project') {
+            // the picked file becomes the file 保存 writes only when it opened: a refused one (newer app, damaged) is
+            // left alone, never overwritten with the work still on screen
+            if (await openProject(file)) {
+              fileHandle = handles[0];
+              fileSaved = { name: file.name, at: Date.now(), opened: true, text: D.serialize({ doc: app.doc, side: app.store.side }) };
+            }
+            return;
+          }
           await openFiles([file]);
-          if (route === 'project') { fileHandle = handles[0]; fileSaved = { name: file.name, at: Date.now(), opened: true, text: D.serialize({ doc: app.doc, side: app.store.side }) }; }
           return;
         } catch (e) {
           if (e && e.name === 'AbortError') return;
@@ -66868,7 +66884,8 @@ MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/a
         else setTarget('area', r);
       }
 
-      return { root, update, text, preset, highlight };
+      // the one 写真・動画をAIが使ってよい switch: the board reads it too (DESIGN_2_1 §11.6.1)
+      return { root, update, text, preset, highlight, mediaAllowed: () => allowMedia.checked };
     }
 
     function toolsBlock(app, ctl, openBoard) {
@@ -66958,7 +66975,7 @@ MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/a
       let boardWanted = false;
       const boardHost = h('div', { class: 'ai-board-host', hidden: true });
       function openBoard() {
-        if (!board) board = BOARD.mount(app, ctl, { onBack: closeBoard });
+        if (!board) board = BOARD.mount(app, ctl, { onBack: closeBoard, allowMedia: () => tools.direct.mediaAllowed() });
         dom.replace(boardHost, board.el);
         boardWanted = true;
         boardHost.hidden = !!ctl.state.review;

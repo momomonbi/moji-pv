@@ -21,10 +21,13 @@ MV.def('export/host/sink', ['export/schedule'], (S) => {
 
   function partSize(part) { return part instanceof Uint8Array ? part.byteLength : part.size; }
 
-  // createFileSink(fileHandle): streams into the file through createWritable(); abort() discards the written data and
-  // removes the file the save dialog created, so a cancelled export leaves nothing behind. States: open → closing →
-  // closed, or → aborted. A close() that fails leaves the sink 'failed', and abort() still removes the file then.
-  function createFileSink(handle) {
+  // createFileSink(fileHandle, { removeOnAbort = true }?): streams into the file through createWritable(); abort()
+  // discards the written data and removes the file the save dialog created, so a cancelled export leaves nothing behind.
+  // A caller writing over a file the user already has (保存 to the open project) passes removeOnAbort: false: abort() then
+  // only drops the swap file, and the file keeps its last saved contents. States: open → closing → closed, or → aborted.
+  // A close() that fails leaves the sink 'failed', and abort() still removes (or keeps) the file then.
+  function createFileSink(handle, opts) {
+    const removeOnAbort = !(opts && opts.removeOnAbort === false);
     let writable = null;
     let size = 0;
     let state = 'open';
@@ -64,7 +67,7 @@ MV.def('export/host/sink', ['export/schedule'], (S) => {
         if (state === 'closed' || state === 'aborted') return;
         state = 'aborted';
         try { if (writable) await writable.abort(); } catch (err) { /* the stream may already be errored */ }
-        try { if (typeof handle.remove === 'function') await handle.remove(); } catch (err) { /* the file stays empty */ }
+        try { if (removeOnAbort && typeof handle.remove === 'function') await handle.remove(); } catch (err) { /* the file stays empty */ }
         size = 0;
       },
     };

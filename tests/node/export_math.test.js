@@ -598,6 +598,22 @@ test('file sink: a cancelled export aborts the stream and removes the file; memo
   assert.equal(dropped.bytes, 0);
 });
 
+// 保存 over the open project hands the sink the file the user already has: a cancelled or failed save must leave it.
+test('file sink with removeOnAbort false: a cancelled or failed write drops the swap file and keeps the user\'s file', async () => {
+  const cancelled = fakeHandle();
+  const sink = SINK.createFileSink(cancelled.handle, { removeOnAbort: false });
+  await sink.write(new Uint8Array(3));
+  await sink.abort();
+  assert.equal(cancelled.handle.removed, false);
+  deepEqual(cancelled.log.map((x) => x[0]), ['open', 'write', 'abort']);
+  const failed = fakeHandle({ closeFails: true });
+  const again = SINK.createFileSink(failed.handle, { removeOnAbort: false });
+  await again.write(new Uint8Array(8));
+  await assert.rejects(again.close(), (e) => e.code === 'sink');
+  await again.abort();
+  assert.equal(failed.handle.removed, false, 'a failed close keeps the file too');
+});
+
 test('downloadBlob saves through a link that is in the page only for its click, and always releases the URL', () => {
   const log = [];
   const timers = [];
