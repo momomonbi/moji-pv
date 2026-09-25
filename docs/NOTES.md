@@ -4037,3 +4037,124 @@ The owner asked for a near-future thinking animation while the AI works (timing,
   steps, glow, orb, pointer passes through). `ai_align` checks the four steps up to 考え中, and that the HUD and the glow
   go away with the answer.
 
+## v2.1-H.1
+
+H.1 of DESIGN_2_1 §8.8: the WebM writer `export/webm` (§13.5) and the subtitles `export/subtitles` (§13.8), both pure
+(L5, Node-tested), with `tests/node/webm.test.js` (19 tests) and `tests/node/subtitles.test.js` (11 tests). No other
+source file changed; `build.py` already gives `export/*` layer 5. The shipped pages are rebuilt because they now contain
+the two modules. Goldens unchanged (`update_golden.js --check`: both match).
+
+Base: this worktree's branch started at `origin/main`, which does not have §11–§13 or package A. It was fast-forwarded
+to the package-A commit (the base of the other v2.1 packages) before any work; no merge commit.
+
+**`createWebm` as frozen, and what the design left open**
+
+- **Calls.** `video(colour, alpha, key, ts)` and `audio(chunk, ts)` take `ts` in µs (the chunk timestamp, `ts(i)`).
+  Block times are `round(ts / 1000)` ms. Frames and packets may be a `Uint8Array`, an `ArrayBuffer` or view, or an
+  encoded chunk (anything with `byteLength` and `copyTo`, e.g. `EncodedVideoChunk`); they are copied, so the caller may
+  reuse its buffers. `alpha` may be `null` for a frame (a BlockGroup without BlockAdditions).
+- **`key` means "decoding can start here".** With alpha, the host passes `colour.type === 'key' && alpha.type === 'key'`.
+  §13.5 calls spontaneous key frames in one encoder harmless; that holds for playing straight through, but a cluster and
+  cue at a colour-only key frame would make a seek there start the alpha decoder on a delta frame.
+- **Checks** (`ExportError` codes): `args` (options, empty or non-byte frames, an alpha frame on an opaque track, audio
+  without an audio track, a bad OpusHead), `order` (the first video frame is not a key frame; video times not strictly
+  increasing in whole ms; audio times not strictly increasing), `finished`, `sink`.
+- **Return values.** `video()` and `audio()` return a promise that resolves once the bytes they completed are written. It
+  never rejects, so an ignored promise cannot become an unhandled rejection; a failed write makes the next call throw
+  `sink`, and `finish()` rejects. `finish()` → `{ bytes, frames, packets, clusters, cues, duration (s) }`.
+- **Opaque WebM** (`video.alpha` not `true`): the frames are SimpleBlocks with the key flag, and the track has no
+  MaxBlockAdditionID, BlockAdditionMapping or AlphaMode. G's counter fixtures (§11.8.1) need this. With alpha, every
+  frame is a BlockGroup (`ReferenceBlock` = previous frame's ms − this frame's ms on delta frames).
+- **Clusters.** A cluster starts at every key frame. It holds the video up to the next key frame and the audio packets
+  timed before it, in time order (video first at equal ms). It is assembled in memory and appended in one write once it
+  is complete: when the next key frame has arrived and, with audio, a packet at or after the cluster's end has too. The
+  output depends only on each track's own sequence, not on how the calls interleave (tested with random interleavings).
+  A group longer than 32 767 ms is split at the first block past that. Only the part that holds the key frame gets a
+  CuePoint. There is one CuePoint per key frame, at the cluster that holds it; that equals "one per cluster" of §13.5
+  whenever key frames come at least every 32.7 s.
+- **Placeholders.** The Segment is written with the unknown size (`01 FF…FF`, 8 bytes), so a file cut short still
+  parses. The SeekHead lives in a fixed 96-byte area (SeekHead + Void). `finish()` appends the Cues, then makes exactly
+  three positional writes: the Segment size, the Duration (8-byte float, in ms), and the whole SeekHead area, now with
+  the Cues entry. A file without video frames has no Cues (a Cues element needs a CuePoint) and no Cues entry.
+- **Duration** = the latest end of any frame or packet, rounded to the µs. A frame ends at `ts` plus the chunk's own
+  `duration` when it carries one, else plus 1/fps. A packet ends at `ts` plus its chunk `duration`, else at `ts`. With
+  `EncodedVideoChunk`s made from `frameDur(i)`, the Duration is exactly `ts(N)`.
+- **Determinism.** Identical input → identical bytes. TrackUID = the track number, and there is no SegmentUID or DateUTC.
+- **Audio entry** as in §13.5, plus `FlagLacing 0` (as on the video entry; we never lace). CodecPrivate is the encoder's
+  OpusHead as given, checked for its magic, its length (≥ 19) and a channel count equal to `audio.channels`; CodecDelay
+  comes from its pre-skip. Without one, the head is built from the options (§13.5's values when the host passes 2 and
+  48000); more than 2 channels without a head are refused (mapping family 0). SamplingFrequency is `audio.rate`.
+- Additive exports beyond §13.11: `ebmlSize(n, width?)` takes an optional fixed width (the Segment size uses 8).
+
+**Subtitles**
+
+- `srt` works in whole µs (`Math.round(t · 1e6)`), then milliseconds with halves up. So `0.5005` s is `,501`, although
+  `0.5005 · 1e6` is 500499.99999999994 in binary, and `4.2 − 1.1` gives `,100`.
+- The 0.1 s rule is checked on the written milliseconds, after the overlap cut-back. Lines with empty text (after
+  trimming) are left out before that, so they never cut back the cue before them. Line breaks in a text (CR, LF,
+  U+2028/9) become spaces: a blank line would end the cue.
+- Cues are sorted by start (stable, so equal starts keep plan order). `per: 'cut'` uses the cuts that have a `line`
+  (roles `lyric` and `focus`); title, intro, gap and outro cuts are left out.
+- `srt` throws `ExportError('args')` for an unknown `per` or a non-numeric `t0`/`t1`. An empty or reversed range gives
+  `''`. The design names no furigana or line-break rules, so none are applied.
+- `BOM` (`'﻿'`) is exported so that the kit and the menu item add the same one.
+- `lrc(plan, doc)` is `lrcText`'s algorithm. The test keeps a verbatim copy of the previous `lrcText` as the reference and
+  also compares with the live `ui/project_io.lrcText` on all six fixture projects.
+
+**Checks.** Mutation check: 35 hand-made mutants of the two modules; 33 are caught. The two survivors are equivalent:
+a line that ends exactly at `t0`, or starts exactly at `t1`, becomes a zero-length cue, which is dropped anyway and cannot
+cut back another cue.
+
+**Browser probe** (not committed; Playwright with the bundled Chromium 141.0.7390.37, headless). `VideoEncoder` VP9
+`vp09.00.10.08`, or VP8 at 24 fps, encoded 72–90 frames, key frames forced every 2 s. The alpha encoder got an I420 frame
+whose Y plane is the alpha and whose U and V are 128. `createWebm` wrote the chunks; `<video src=blob:>` played the file,
+seeking to 6 frame times, drawing to a canvas and reading pixels:
+- opaque VP9 192×108@30: loads, duration 3 s, colours within ±2 of the source;
+- VP9 alpha 192×108@30: alpha 128 on the half-transparent square and 0 outside at every sample, colour within ±2
+  (±4 in the case below);
+- VP9 alpha 320×180@30 + Opus (`AudioEncoder`, its OpusHead passed as `codecPrivate`, pre-skip 312):
+  `decodeAudioData` gives 144 648 samples for `audioFrames` 144 000 (less than one 960-sample packet over), RMS 0.21
+  for a 0.3 sine;
+- VP8 alpha 192×108@24: same results as VP9 alpha.
+
+So Chrome accepts `MaxBlockAdditionID` and `BlockAdditionMapping` and reads the alpha from BlockAdditional id 1. H.2's
+`webm_check.py` repeats this properly.
+
+**Requests to other packages**
+
+- **H.2 (host WebM and kit):**
+  - The Tracks element, and with it the OpusHead, is written when `createWebm` is called. So encode the audio before
+    the video, and pass the first output's `decoderConfig.description` as `codecPrivate`. This also avoids a memory trap:
+    while audio lags behind the video, the writer holds the video clusters in memory. 60 min of Opus at 160 kbps is
+    about 70 MB. Pass `audio: null` when there is no song.
+  - Pass `key` as described above.
+  - The encoded chunks can be passed as they are (their durations are used).
+  - Add `SUB.BOM` before the SRT text.
+  - `lrc(plan, doc)` has no range. FG7 says "SRT and LRC … relative to the export range", but §13.8 freezes
+    `lrc(plan, doc)` with the same bytes as today. If the kit's LRC must be relative to the export range, that needs a
+    lead decision (for example an optional `{ t0, t1 }` that keeps today's bytes when absent).
+  - `ui/project_io.lrcText` → `export/subtitles.lrc(app.plan, app.doc)` (§8.8 H.2).
+- **G.1 (`media/matroska`, `media/samples`):**
+  - WebM times are whole milliseconds (TimestampScale 1 ms, frozen). At 24, 30, 30000/1001 and 60 fps, frame k starts up
+    to 0.5 ms after k/fps. For example, frame 2 of a 30-fps file is at 0.067 s, not 0.0667 s. With `EPS_MEDIA` = 0.1 ms,
+    `sampleAt(table, k / fps)` then returns k − 1 for a third of the frames at 24, 30 and 60 fps. This holds for our
+    own WebM and for ffmpeg's alike.
+  - A possible rule: when a track has `DefaultDuration` and every block time is within 0.5 ms of `i · DefaultDuration`,
+    take `pts = i · DefaultDuration`. Otherwise the frame-exactness expectations of §11.8.3 for WebM sources must be
+    computed from the ms times. G and the lead should decide.
+  - The round trip through `media/matroska` named in §13.12 is not in `webm.test.js`, because the module is not in this
+    tree. At integration, add it there: `writeFile`, `makeFrames` and `readFile` in the test already produce the
+    expected table, including the alpha ranges. Alternatively, confirm that G's `media_demux.test.js` "matroska on
+    `export/webm` output" covers it.
+- **Strings wanted:** none.
+
+## Lead decisions (v2.1 integration)
+
+- **LRC times are always song times.** `export/subtitles.lrc(plan, doc)` has no range: an LRC file travels with the song,
+  so its times count from the song's start, whatever the export range. SRT follows the export range
+  (`srt(plan, { t0, t1 })`, times relative to `t0`), because it sits next to the exported clip. H.2 and H.3 follow this.
+- **WebM frame times are snapped to the frame grid.** WebM stores whole milliseconds, so at 24, 30 and 60 fps some
+  frames start up to 0.5 ms after `k / fps`, and `sampleAt(k / fps)` would pick frame k − 1. `media/matroska` therefore
+  sets `pts = i · DefaultDuration` (i = the presentation index) when a track has a DefaultDuration and every block time is
+  within 0.5 ms of that grid. Otherwise it keeps the stored times (VFR). The frame-exactness tests of §11.8.3 then hold for
+  our WebM files and for ffmpeg's alike.
