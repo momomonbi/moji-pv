@@ -19,7 +19,8 @@ With no lyrics yet, [サンプルで試す] lies inside the editor at every view
 (1024×600 …), and the empty editor shows no gutter (final fixes, ui-data).
 
 Step ④ is also checked with its longest pre-flight items and their fix links (透過PNG leaving out a screen effect; an
-MP4 of a transparent backdrop).
+MP4 of a transparent backdrop), with every format (MP4, Filmora用, 透過動画, PNG連番, 透過PNG; 詳しく closed and open: always
+the five controls), and the Filmora set's contents fit the step column at 288–352 px (DESIGN_2_1 §13.12).
 
 v2.1 (DESIGN_2_1 §7.4): on the v21 project, the curve widget with かんたん open, the keyframe editor, the AI board and a
 material page are checked at every viewport with the same layout, clipping, covering and budget checks; the panel never
@@ -155,7 +156,8 @@ CLIP_JS = r"""
   };
 """
 
-# Step ④'s one line on transparency (no transparent video in the browser): shown, whole, inside the step column.
+# Step ④'s one line on transparency (exp.alphaNote2: 透過動画（WebM） for editors, PNG sequences for compositing): shown,
+# whole, inside the step column.
 ALPHA_NOTE = r"""
 () => {
 """ + CLIP_JS + r"""
@@ -370,7 +372,8 @@ async def run_lang(browser, base, rel, lang, viewports, shots):
       const fx = reg.keys('filter').find((k) => reg.get('filter', k).alphaSafe === false);
       if (fx) a.batch({ label: ['undo.pin', { field: 'x', scope: 'y' }] }, [{ t: 'pin.set', path: 'work:filter.count', v: 1, by: 'user' },
         { t: 'pin.set', path: 'work:filter#0', v: fx, by: 'user' }]);
-      document.querySelector('[data-seg="format"] [data-v="pngAlpha"]').click(); }""")
+      const other = document.querySelector('[data-other="format"]');
+      other.value = 'pngAlpha'; other.dispatchEvent(new Event('change')); }""")
     for label, js in (('透過PNG', None), ('MP4 + 透明', """() => { const a = window.__mv;
       a.batch({ label: ['undo.output', {}] }, [{ t: 'output.set', key: 'format', v: 'mp4' }, { t: 'look.set', key: 'backdrop', v: 'clear' }]); }""")):
         if js:
@@ -382,6 +385,7 @@ async def run_lang(browser, base, rel, lang, viewports, shots):
             failures += note_problems(await page.evaluate(ALPHA_NOTE), '%s %dx%d step export %s' % (lang, w, h, label))
             if shots:
                 await page.screenshot(path=str(Path(shots) / ('%s_%dx%d_export_%s.png' % (lang, w, h, 'alpha' if js is None else 'mp4clear'))))
+    failures += await check_formats(page, lang, shots)
     await page.evaluate("""() => { const a = window.__mv;
       a.batch({ label: ['undo.output', {}] }, [{ t: 'output.set', key: 'format', v: 'mp4' }, { t: 'look.set', key: 'backdrop', v: 'scene' },
         { t: 'pin.clear', path: 'work:filter.count' }, { t: 'pin.clear', path: 'work:filter#0' }]);
@@ -399,6 +403,118 @@ async def run_lang(browser, base, rel, lang, viewports, shots):
     if errors:
         failures.append('%s page errors: %r' % (lang, errors))
     return checked, failures
+
+
+# DESIGN_2_1 §13.12: step ④ keeps ≤ 5 controls with every format (詳しく closed and open), and the Filmora set's
+# contents (詳しく) fit the step column at every width it takes, 288–352 px: the standard (296) and wide (320) step
+# columns, the compact side column (320) and the stacked layout at 288, 320 and 352 px (phones: 390).
+KIT_WIDTHS = [(1280, 720), (1440, 900), (1024, 768), (288, 800), (320, 800), (352, 800), (390, 844)]
+KIT_PROBE = r"""
+() => {
+""" + CLIP_JS + r"""
+  const box = document.querySelector('.step-export .kit-box');
+  if (!box || !box.checkVisibility()) return { width: 0, problems: ['the set\'s contents are not shown'] };
+  const column = box.closest('.region-steps, .region-side');
+  const c = column.getBoundingClientRect();
+  const problems = [];
+  for (const el of box.querySelectorAll('legend, label, label > span, input, button, p')) {
+    const r = el.getBoundingClientRect();
+    if (!r.width || !r.height) continue;
+    const name = (el.textContent || el.id || el.tagName).trim().slice(0, 32);
+    if (r.left < c.left - 0.5 || r.right > c.right + 0.5) problems.push(name + ' leaves the column');
+    if (el.tagName !== 'INPUT' && (el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 2)) problems.push(name + ' is clipped');
+    const why = cutByParent(el);
+    if (why) problems.push(name + ' (' + why + ')');
+  }
+  const rows = [...box.querySelectorAll('.kit-set .check-row')].map((r) => r.getBoundingClientRect());
+  for (let i = 1; i < rows.length; i++) {
+    for (let j = 0; j < i; j++) {
+      const a = rows[i], b = rows[j];
+      if (a.left < b.right - 0.5 && b.left < a.right - 0.5 && a.top < b.bottom - 0.5 && b.top < a.bottom - 0.5) problems.push('two rows of the set overlap');
+    }
+  }
+  if (document.scrollingElement.scrollWidth > innerWidth) problems.push('the page scrolls sideways');
+  return { width: Math.round(c.width), problems };
+}
+"""
+
+
+async def check_formats(page, lang, shots):
+    failures = []
+    await page.set_viewport_size({'width': 1440, 'height': 900})
+    formats = await page.evaluate("() => MV.use('ui/output').FORMATS")
+    for fmt in formats:
+        await page.evaluate("""(f) => { const a = window.__mv, OUT = MV.use('ui/output');
+          a.batch({ label: ['undo.output', {}] }, OUT.formatCmds(a.doc, f)); a.goStep('export'); }""", fmt)
+        for opened in (False, True):
+            await page.evaluate("(o) => { document.querySelector('.step-export details.more').open = o; }", opened)
+            await settle(page)
+            where = '%s step export %s%s' % (lang, fmt, ' + 詳しく' if opened else '')
+            probe = await page.evaluate(PROBE)
+            failures += check(probe, where, None)
+            if probe['budget']['body'] != 5:
+                failures.append('%s: %d step controls, the budget is 5 (形式 大きさ なめらかさ 背景 詳しく)' % (where, probe['budget']['body']))
+    widths = set()
+    # a song where AAC does not encode (this Chromium): the set lists its WAV row too, so every row of 詳しく is measured
+    await page.evaluate(WAV_JS)
+    await page.evaluate("async () => { await window.__mv.loadSong(window.__wav(4, 'kit.wav')); }")
+    await page.evaluate("() => window.__mv.dispatch({ t: 'output.set', key: 'audio', v: true }, { label: ['undo.output', {}] })")
+    for (w, h) in KIT_WIDTHS:
+        await page.set_viewport_size({'width': w, 'height': h})
+        await page.evaluate("""() => { const a = window.__mv; a.view.set({ panel: null, rail: false, drawer: false });
+          a.batch({ label: ['undo.output', {}] }, [{ t: 'output.set', key: 'format', v: 'kit' },
+            { t: 'output.set', key: 'kit', v: { overlay: true, bg: true, green: true, srt: true, lrc: true } }]);
+          a.goStep('export'); document.querySelector('.step-export details.more').open = true; }""")
+        await settle(page)
+        res = await page.evaluate(KIT_PROBE)
+        widths.add(res['width'])
+        failures += ['%s %dx%d (column %d px) the set\'s contents: %s' % (lang, w, h, res['width'], p) for p in res['problems']]
+        if shots and (w, h) in ((1280, 720), (288, 800)):
+            await page.locator('.step-export .kit-box').screenshot(path=str(Path(shots) / ('%s_%dx%d_kit_set.png' % (lang, w, h))))
+    if not (min(widths) <= 288 and max(widths) >= 352):
+        failures.append('%s: the set\'s contents were checked at %r px only (288–352 wanted)' % (lang, sorted(widths)))
+    failures += await check_kit_guide(page, lang, shots)
+    await page.set_viewport_size({'width': 1440, 'height': 900})
+    await page.evaluate("() => { document.querySelector('.step-export details.more').open = false; }")
+    return failures
+
+
+# 「Filmoraで使うには」 opens on what the user came for (UX-H3-5): the first numbered step is inside the dialog's visible
+# area at 1280×720 and 1440×900, and the file list comes after the steps.
+GUIDE_PROBE = r"""
+() => {
+  const d = document.querySelector('dialog.dlg[open]');
+  if (!d) return { problems: ['the guide did not open'] };
+  const box = d.getBoundingClientRect(), first = d.querySelector('.kit-steps li');
+  const problems = [];
+  if (!first) problems.push('no numbered step');
+  else {
+    const r = first.getBoundingClientRect();
+    if (r.top < box.top - 0.5 || r.bottom > box.bottom + 0.5 || r.bottom > innerHeight) problems.push('the first step is out of view (' + Math.round(r.top) + '–' + Math.round(r.bottom) + ' in ' + Math.round(box.top) + '–' + Math.round(box.bottom) + ')');
+  }
+  const files = d.querySelector('.kit-help-files');
+  if (!first || !files || !(first.compareDocumentPosition(files) & Node.DOCUMENT_POSITION_FOLLOWING)) problems.push('the file list does not come after the steps');
+  if (box.right > innerWidth + 0.5 || box.left < -0.5) problems.push('the dialog is wider than the window');
+  return { problems };
+}
+"""
+
+
+async def check_kit_guide(page, lang, shots):
+    failures = []
+    for (w, h) in ((1280, 720), (1440, 900)):
+        await page.set_viewport_size({'width': w, 'height': h})
+        await settle(page)
+        await page.click('[data-kit-help="planned"]')
+        await page.wait_for_selector('dialog.dlg[open]')
+        await settle(page)
+        res = await page.evaluate(GUIDE_PROBE)
+        failures += ['%s %dx%d 「Filmoraで使うには」: %s' % (lang, w, h, p) for p in res['problems']]
+        if shots:
+            await page.screenshot(path=str(Path(shots) / ('%s_%dx%d_kit_guide.png' % (lang, w, h))))
+        await page.keyboard.press('Escape')
+        await page.wait_for_selector('dialog.dlg[open]', state='detached')
+    return failures
 
 
 async def check_playbar(page, lang, viewports, shots):

@@ -5035,24 +5035,24 @@ plus 「Filmoraで使うには」.
 | `exp.kit.main` / `.overlay` / `.bg` / `.green` / `.srt` / `.lrc` | 完成動画（MP4） / 文字と装飾だけ（透過WebM） / 背景だけ（MP4） / グリーンバック（MP4） / 字幕（SRT） / 時間つき歌詞（LRC） | Finished video (MP4) / Words and decorations only (transparent WebM) / Background only (MP4) / Green screen (MP4) / Subtitles (SRT) / Timed lyrics (LRC) |
 | `exp.kit.summary` | Filmora用セット: {n}ファイル・約 {size}（{where}） | Set for Filmora: {n} files, about {size} ({where}) |
 | `exp.kit.toFolder` / `exp.kit.toZip` | フォルダに保存 / ZIPでダウンロード | saved to a folder / downloaded as a ZIP |
-| `exp.kit.phase` | {what} を書き出し中 | Writing {what} |
+| `exp.kit.phase` | {what}を書き出し中 | Writing {what} |
 | `exp.kit.done` | {n}ファイルを書き出しました: {folder} | Wrote {n} files: {folder} |
 | `exp.kit.howTo` | Filmoraで使うには | How to use in Filmora |
 | `exp.pre.opus-audio` (B) | このブラウザでは AAC で書き出せないため、音声は Opus で入ります。ブラウザ・YouTube・VLC では再生できます。編集ソフト（Filmora など）で音が出ないときは「Filmora用」で書き出してください。 | This browser cannot write AAC, so the sound is Opus. Browsers, YouTube and VLC play it. If an editor (such as Filmora) has no sound, export with "For Filmora". |
-| `exp.pre.kit-wav` | このブラウザでは AAC が使えないため、曲は別のファイル（{name}.wav）になります。Filmoraでは 0:00 に置いてください。 | This browser cannot write AAC, so the song is a separate file ({name}.wav). Place it at 0:00 in Filmora. |
+| `exp.pre.kit-wav` | このブラウザでは動画に曲を入れられないため、曲は別のファイル（{name}.wav）になります。Filmoraでは 0:00 に置いてください。 | This browser cannot put the song into the video, so the song is a separate file ({name}.wav). Place it at 0:00 in Filmora. |
 | `exp.pre.kit-fps` | Filmoraのプロジェクトも {fps}fps・{w}×{h} にしてください | Set the Filmora project to {fps} fps, {w}×{h} too |
 | `exp.pre.kit-size` | Filmoraでは 1080p か 4K が扱いやすいです | 1080p or 4K is easiest in Filmora |
-| `exp.pre.layers-approx` | 重ねたとき、{what} は少し違って見えます | When layered, {what} look slightly different |
+| `exp.pre.layers-approx` | 「背景だけ」に「文字と装飾だけ」を重ねると、{what}は完成動画と少し違って見えます | When "Words and decorations only" is laid over "Background only", these look slightly different from the finished video: {what} |
 | `exp.pre.no-vp9` | このブラウザは透過動画（VP9）を書き出せません。PC の Chrome か Edge を使ってください | This browser cannot write transparent video (VP9). Use Chrome or Edge on a computer |
 | `exp.pre.kit-memory` | このブラウザではセットをメモリで作ってから ZIP で保存します（約 {size}） | This browser builds the set in memory and saves it as a ZIP (about {size}) |
 | `exp.alphaNote2` | 透明にするときは「透過動画（WebM）」がおすすめです（Filmora・Premiere・DaVinci・ブラウザで使えます）。PNG連番は After Effects などに。 | For transparency, "Transparent video (WebM)" is recommended (Filmora, Premiere, DaVinci, browsers). PNG sequences suit After Effects and similar. |
 | `kit.help.title` | Filmoraで使うには | Using the files in Filmora |
 | `kit.help.1` | Filmoraで新しいプロジェクトを作り、{w}×{h}・{fps}fps にします。 | Create a new Filmora project at {w}×{h}, {fps} fps. |
 | `kit.help.2` | 「{main}」を読み込み、タイムラインの 0:00 に置きます。 | Import "{main}" and place it at 0:00 on the timeline. |
-| `kit.help.3` | 自分の映像に文字だけ重ねるときは、「{overlay}」を上のトラックの 0:00 に置きます（透過WebM）。 | To put only the words over your own footage, place "{overlay}" on an upper track at 0:00 (transparent WebM). |
-| `kit.help.4` | グリーンバックのときは「{green}」を上のトラックに置き、クロマキーで色 #00B140 を選びます。 | For the green screen, place "{green}" on an upper track and pick #00B140 with the chroma key. |
-| `kit.help.5` | 字幕は「{srt}」を読み込みます。 | For subtitles, import "{srt}". |
-| `kit.help.6` | 音が入っていないときは「{wav}」を 0:00 に置きます。 | If there is no sound, place "{wav}" at 0:00. |
+| `kit.help.3` | 完成動画の代わりに自分の映像の上へ文字だけを重ねるときは、「{overlay}」を上のトラックの 0:00 に置きます（透過WebM）。 | To put only the words over your own footage instead of the finished video, place "{overlay}" on an upper track at 0:00 (transparent WebM). |
+| `kit.help.4` | グリーンバックで重ねるときは、「{green}」を上のトラックの 0:00 に置き、クロマキー（緑幕）をオンにして色 #00B140 を選び、許容範囲を少し上げます。 | To key out the green screen, place "{green}" on an upper track at 0:00, turn on Chroma Key (green screen), pick #00B140 and raise the tolerance a little. |
+| `kit.help.5` | 歌詞を字幕として別に出したいときだけ、「{srt}」を読み込みます（完成動画には歌詞がもう入っています）。 | Only if you want the lyrics as separate subtitles, import "{srt}" (the finished video already shows them). |
+| `kit.help.6` | 完成動画には音が入っていません。「{wav}」を音声トラックの 0:00 に置きます。 | The finished video has no sound: place "{wav}" on an audio track at 0:00. |
 | `kit.readme.head` | 文字PVメーカーの書き出しファイル（Filmora用） | Files exported by Moji PV Maker (for Filmora) |
 | `menu.saveSrt` | 字幕（.srt）を保存 | Save subtitles (.srt) |
 

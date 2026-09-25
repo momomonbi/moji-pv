@@ -8,34 +8,57 @@ MV.def('export/host/kit', ['export/schedule', 'export/subtitles', 'export/zip', 
   const CRC_SLICE = 8 * 1024 * 1024;    // bytes of a memory file read per step for the ZIP's CRC-32
   const CRLF = '\r\n';
   const RULE = '-'.repeat(60);
-  // The label of each file in the README (the step ④ strings of §13.10); the WAV and the README have none.
+  // The label of each file in the README (the step ④ strings of §13.10); the README does not list itself.
   const LABELS = Object.freeze({ main: 'exp.kit.main', overlay: 'exp.kit.overlay', bg: 'exp.kit.bg', green: 'exp.kit.green',
-    srt: 'exp.kit.srt', lrc: 'exp.kit.lrc' });
+    srt: 'exp.kit.srt', lrc: 'exp.kit.lrc', wav: 'exp.kit.wav' });
   const TYPES = Object.freeze({ main: 'video/mp4', overlay: 'video/webm', bg: 'video/mp4', green: 'video/mp4', srt: 'text/plain',
     lrc: 'text/plain', wav: 'audio/wav', readme: 'text/plain' });
 
   // --- the README (pure) ---------------------------------------------------------------------------------------------
 
+  function nameOf(files, kind) { const f = files.find((x) => x.kind === kind); return f ? f.name : null; }
+
+  // steps(t, files, { w, h, fps }) → the numbered steps everyone follows (texts, in t's language): the project settings,
+  // the main MP4 at 0:00 and — when the song is a WAV file because the MP4 has no sound — the WAV right after it, each
+  // with its real name. The README and the in-app guide (ui/filmora_help) both use it.
+  function steps(t, files, info) {
+    const out = [t('kit.help.1', { w: info.w, h: info.h, fps: info.fps }), t('kit.help.2', { main: nameOf(files, 'main') })];
+    if (nameOf(files, 'wav')) out.push(t('kit.help.6', { wav: nameOf(files, 'wav') }));
+    return out;
+  }
+
+  // extras(t, files) → [{ kind, text }]: the other files' uses, only for when they are needed and each saying when —
+  // instead of the finished video (the overlay, the background, the green screen with its key colour #00B140), or the
+  // lyrics as separate subtitles (the finished video already shows them) — so following the numbered steps never puts
+  // the same words on screen twice. Listed under 「必要なときだけ」 by the README and the guide.
+  function extras(t, files) {
+    const out = [];
+    const add = (kind, key, param) => { if (nameOf(files, kind)) out.push({ kind, text: t(key, { [param]: nameOf(files, kind) }) }); };
+    add('overlay', 'kit.help.3', 'overlay');
+    add('bg', 'kit.help.bg', 'bg');
+    add('green', 'kit.help.4', 'green');
+    add('srt', 'kit.help.5', 'srt');
+    return out;
+  }
+
   function readmeIn(t, files, info) {
-    const name = (kind) => { const f = files.find((x) => x.kind === kind); return f ? f.name : null; };
     const lines = [t('kit.readme.head'), ''];
     for (const f of files) {
       if (f.kind === 'readme') continue;
       lines.push('- ' + f.name + (LABELS[f.kind] ? ' : ' + t(LABELS[f.kind]) : ''));
     }
     lines.push('');
-    const steps = [t('kit.help.1', { w: info.w, h: info.h, fps: info.fps }), t('kit.help.2', { main: name('main') })];
-    if (name('overlay')) steps.push(t('kit.help.3', { overlay: name('overlay') }));
-    if (name('green')) steps.push(t('kit.help.4', { green: name('green') }));
-    if (name('srt')) steps.push(t('kit.help.5', { srt: name('srt') }));
-    if (name('wav')) steps.push(t('kit.help.6', { wav: name('wav') }));
-    steps.forEach((s, k) => lines.push(k + 1 + '. ' + s));
+    steps(t, files, info).forEach((s, k) => lines.push(k + 1 + '. ' + s));
+    lines.push('', t('kit.help.align'));
+    const more = extras(t, files);
+    if (more.length) lines.push('', t('kit.help.optional'), ...more.map((x) => '- ' + x.text));
     return lines;
   }
 
-  // readme(files, { w, h, fps }) → README_Filmora.txt: the heading, every file with its label, and the numbered steps
-  // of the in-app guide (kit.help.*) with the real names, size and frame rate (the key colour #00B140 is in the green
-  // screen's step) — in Japanese, then in English. CRLF line endings; the caller adds the BOM.
+  // readme(files, { w, h, fps }) → README_Filmora.txt: the heading, every file with its label, the numbered steps of the
+  // in-app guide (kit.help.*) with the real names, size and frame rate, the 0:00 line, then 「必要なときだけ」 and the
+  // other files' uses (the key colour #00B140 is in the green screen's) — in Japanese, then in English. CRLF line
+  // endings; the caller adds the BOM.
   function readme(files, info) {
     const ja = readmeIn(T.createT('ja', STRINGS), files, info);
     const en = readmeIn(T.createT('en', STRINGS), files, info);
@@ -254,5 +277,5 @@ MV.def('export/host/kit', ['export/schedule', 'export/subtitles', 'export/zip', 
     }
   }
 
-  return { exportKit, readme, KEY_COLOUR };
+  return { exportKit, readme, steps, extras, KEY_COLOUR };
 });

@@ -150,8 +150,9 @@ MV.def('export/host/sink', ['export/schedule'], (S) => {
 
   // --- folders (the Filmora kit, DESIGN_2_1 §13.9) --------------------------------------------------------------
 
-  // createDirSink(dirHandle, { parent?, name? }) → DirSink = { kind: 'dir', name, file(name) → Promise<Sink>, files,
-  // close() → { files: [{ name, bytes }] }, abort() }. Each file(name) creates the file in the folder and returns its
+  // createDirSink(dirHandle, { parent?, name? }) → DirSink = { kind: 'dir', name, parentName, file(name) → Promise<Sink>,
+  // files, close() → { files: [{ name, bytes }] }, abort() }. parentName: the name of the folder it was made in (the one
+  // the user picked; null when not known or empty). Each file(name) creates the file in the folder and returns its
   // file sink (createFileSink); a name is used once. close() closes the sinks still open and lists every file written, in
   // order. abort() aborts every file sink (each removes its file) and then removes the folder itself when its parent is
   // known (removeEntry(name, { recursive: true })), else every file it created, so a cancelled kit leaves nothing.
@@ -165,6 +166,7 @@ MV.def('export/host/sink', ['export/schedule'], (S) => {
     return {
       kind: 'dir',
       get name() { return o.name || dir.name; },
+      get parentName() { return (o.parent && o.parent.name) || null; },
       get files() { return entries.map((e) => ({ name: e.name, bytes: e.sink.bytes })); },
       async file(name) {
         check();

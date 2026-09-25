@@ -32,12 +32,14 @@ MV.def('ui/playbar', ['ui/dom', 'ui/icons', 'ui/looks', 'ui/selection', 'ui/time
   function mount(app, stageEl) {
     const t = app.t;
     const lane = h('canvas', { class: 'lane-canvas' });
-    const laneBox = h('div', { class: 'lane', role: 'slider', tabindex: '0', 'aria-label': t('play.lane'), 'aria-valuemin': '0' }, lane);
+    const laneBox = h('div', { class: 'lane', role: 'slider', tabindex: '0', 'aria-label': t('play.lane'), title: t('play.lane'), 'aria-valuemin': '0' }, lane);
     const stripText = h('span', { class: 'strip-text', role: 'status' });
     const stripActs = h('span', { class: 'strip-acts' });
     const strip = h('div', { class: 'mode-strip', hidden: true }, stripText, stripActs);
     const laneRow = h('div', { class: 'lane-row' }, laneBox, strip);
 
+    // 最初に戻る (⏮, the Home key's seek.edge): the way back to 0:00 a beginner can see, next to 再生
+    const startBtn = h('button', { class: 'pbtn to-start', type: 'button', 'data-ctl': 'toStart' });
     const playBtn = h('button', { class: 'pbtn play', type: 'button', 'data-act': 'play.toggle' });
     const timeBtn = h('button', { class: 'time-readout', type: 'button', title: t('play.timeTip') });
     const timeInput = h('input', { class: 'time-input', type: 'text', hidden: true, 'aria-label': t('play.timeInput'), spellcheck: false });
@@ -50,7 +52,7 @@ MV.def('ui/playbar', ['ui/dom', 'ui/icons', 'ui/looks', 'ui/selection', 'ui/time
     const tlBtn = h('button', { class: 'pbtn', type: 'button', 'data-act': 'timeline.toggle', 'aria-pressed': 'false',
       title: t('cmd.timeline.toggle') + ' (Shift+T)', 'aria-label': t('cmd.timeline.toggle') }, I.icon('timeline'));
     const controls = h('div', { class: 'controls', role: 'toolbar', 'aria-label': t('play.toolbar') },
-      h('div', { class: 'ctl-group' }, playBtn, timeBtn, timeInput),
+      h('div', { class: 'ctl-group' }, startBtn, playBtn, timeBtn, timeInput),
       h('span', { class: 'grow' }),
       h('div', { class: 'ctl-group hist' }, prevBtn, histBtn, nextBtn),
       omakase,
@@ -66,6 +68,7 @@ MV.def('ui/playbar', ['ui/dom', 'ui/icons', 'ui/looks', 'ui/selection', 'ui/time
     let flashing = null;
 
     dom.on(controls, 'click', '[data-act]', (ev, b) => app.actions.run(b.dataset.act, { from: 'playbar' }));
+    startBtn.addEventListener('click', () => app.actions.run('seek.edge', { to: 'start', from: 'playbar' }));
     timeBtn.addEventListener('click', () => {
       timeInput.value = T.fmtTime(app.time());
       timeBtn.hidden = true;
@@ -263,6 +266,18 @@ MV.def('ui/playbar', ['ui/dom', 'ui/icons', 'ui/looks', 'ui/selection', 'ui/time
       button.title = extraTitle ? label + ' (' + extraTitle + ')' : label;
     }
 
+    // 再生 / 一時停止, and 最初から再生 (↻) once the playhead stands at the end: ▶ there starts again from 0:00. Redrawn
+    // only when that state changes (onTime runs every frame while playing).
+    let playKey = '';
+    function updatePlay() {
+      const vs = app.view.state;
+      const end = typeof app.clockEnd === 'function' ? app.clockEnd() : 0;
+      const state = vs.playing ? 'pause' : end > 0 && vs.time >= end - 0.05 ? 'replay' : 'play';
+      if (state === playKey) return;
+      playKey = state;
+      setIconLabel(playBtn, state, t('play.' + state), t('key.space'));
+    }
+
     function updateTime() {
       const d = app.plan ? app.plan.duration : 0;
       timeBtn.textContent = '';
@@ -273,7 +288,10 @@ MV.def('ui/playbar', ['ui/dom', 'ui/icons', 'ui/looks', 'ui/selection', 'ui/time
     function updateControls() {
       const vs = app.view.state;
       const hasLines = !!(app.plan && app.plan.lines.length);
-      setIconLabel(playBtn, vs.playing ? 'pause' : 'play', vs.playing ? t('play.pause') : t('play.play'), t('key.space'));
+      playKey = '';
+      updatePlay();
+      setIconLabel(startBtn, 'toStart', t('play.toStart'), 'Home');
+      startBtn.disabled = !hasLines;
       playBtn.disabled = !hasLines;
       if (!hasLines) playBtn.title = t('play.needLyrics');
       updateTime();
@@ -321,7 +339,7 @@ MV.def('ui/playbar', ['ui/dom', 'ui/icons', 'ui/looks', 'ui/selection', 'ui/time
       updateStrip();
     }
 
-    function onTime() { updateTime(); drawLane(); }
+    function onTime() { updateTime(); updatePlay(); drawLane(); }
 
     app.bus.on('time', onTime);
     app.bus.on('plan', () => { drawLane(); updateControls(); });

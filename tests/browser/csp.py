@@ -7,7 +7,8 @@ when missing or stale). It also builds a small scratch tree whose inputs have CR
 that Chromium accepts every hash the build computed for it. WP8 extends it to every UI flow (DESIGN §8.3); v2.1 adds the
 new pages on the v21 project (curve widget, keyframes, マイ素材, the AI area list and board, 区画 bands) and the photo and
 video flows (import incl. SVG, playback, scrubbing, the crop overlay, the library and asset page, a vision request to a
-faked Gemini, a PNG export and a package saved and opened; package G.4). Google Fonts
+faked Gemini, a PNG export and a package saved and opened; package G.4), and the editor-ready output (package H.3): a
+透過動画（WebM）, the Filmora set into a folder and as a ZIP with its guide, and 字幕（.srt） saved both ways. Google Fonts
 requests are blocked here, so the test never waits on the network and passes with fallback fonts.
 Run: PW_EXECUTABLE=/opt/pw-browsers/chromium python3 tests/browser/csp.py   (CI: PW_CHANNEL=chrome)
 """
@@ -25,6 +26,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'dev'))
 from browser import launch, new_page  # noqa: E402  (dev/browser.py, the shared launcher)
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from ui_flows import FAKE_DIR, FAKE_SAVE, KIT_CODECS  # noqa: E402  (the faked pickers and the kit's codecs, shared with the flows)
 from playwright.async_api import TimeoutError as PlaywrightTimeout, async_playwright  # noqa: E402
 
 PAGES = (('index.html', 'ja'), ('en/index.html', 'en'), ('tests/www/lab.html', 'ja'))
@@ -211,7 +214,7 @@ MEDIA_STEPS = [
     """async () => { const a = window.__mv;
       window.showSaveFilePicker = undefined; window.showDirectoryPicker = undefined;
       a.goStep('export'); await new Promise((r) => setTimeout(r, 300));
-      document.querySelector('[data-seg="format"] [data-v="png"]').click();
+      const other = document.querySelector('[data-other="format"]'); other.value = 'png'; other.dispatchEvent(new Event('change'));
       a.batch({ label: ['undo.output', {}] }, [{ t: 'output.set', key: 'short', v: 360 }, { t: 'output.set', key: 'range', v: { t0: 5, t1: 5.5 } }]);
       await new Promise((r) => setTimeout(r, 100));
       await a.exportStart();
@@ -274,6 +277,76 @@ async def check_media(browser, base, rel, lang):
     return problems
 
 
+# v2.1 editor-ready output (package H.3, DESIGN_2_1 §13.12): a 透過動画（WebM） built in memory and downloaded; the Filmora
+# set with 詳しく, its guide from 詳しく and from the done state, written into a folder (the picker faked with OPFS) and,
+# without a folder picker, as one ZIP; ≡ › 字幕（.srt）を保存 through the save dialog (faked) and as a download: 0 violations.
+OUTPUT_STEPS = [
+    """async () => { const a = window.__mv; a.view.setPref('autoplay', false);
+      a.dispatch({ t: 'lyrics.set', text: '窓をあけて/光を入れる\\nまだ眠い街に\\n坂道を下って/駅まで歩く' }, { label: ['undo.paste', {}] });
+      a.pause(); a.goStep('export'); await new Promise((r) => setTimeout(r, 200));
+      const other = document.querySelector('[data-other="format"]'); other.value = 'webmAlpha'; other.dispatchEvent(new Event('change'));
+      a.batch({ label: ['undo.output', {}] }, [{ t: 'output.set', key: 'short', v: 720 }, { t: 'output.set', key: 'range', v: { t0: 1, t1: 1.4 } }]);
+      Object.defineProperty(window, 'showSaveFilePicker', { value: undefined, configurable: true });
+      for (let i = 0; i < 100 && !a.exportProbe(); i++) await new Promise((r) => setTimeout(r, 100));
+      await a.exportStart(); window.__done = [a.exportState().phase]; a.exportReset(); }""",
+    """async () => { const a = window.__mv, wait = (ms) => new Promise((r) => setTimeout(r, ms));
+      document.querySelector('[data-seg="format"] [data-v="kit"]').click(); await wait(100);
+      document.querySelector('.step-export details.more > summary').click(); await wait(100);
+      document.querySelector('label[for="exp-kit-bg"]').click(); await wait(100);
+      document.querySelector('[data-kit-help="planned"]').click(); await wait(300);
+      document.querySelector('dialog.dlg[open] .dlg-head .icon-btn').click();
+      for (let i = 0; i < 100 && !a.exportProbe(); i++) await wait(100);
+      await a.exportStart(); window.__done.push(a.exportState().phase);
+      const help = document.querySelector('[data-kit-help="written"]');
+      if (help) { help.click(); await wait(300); document.querySelector('dialog.dlg[open] .dlg-head .icon-btn').click(); }
+      a.exportReset(); }""",
+    """async () => { const a = window.__mv;
+      Object.defineProperty(window, 'showDirectoryPicker', { value: undefined, configurable: true }); a.bus.emit('export', a.exportState());
+      await a.exportStart(); window.__done.push(a.exportState().phase); a.exportReset(); }""",
+    """async () => { const a = window.__mv; window.__pickName = 'sub.srt';
+      await a.actions.run('file.saveSrt', { from: 'menu' }); await new Promise((r) => setTimeout(r, 300));
+      Object.defineProperty(window, 'showSaveFilePicker', { value: undefined, configurable: true });
+      await a.actions.run('file.saveSrt', { from: 'menu' }); window.__done.push((window.__picks || []).length); }""",
+]
+
+
+async def check_output(browser, base, rel, lang):
+    page = await new_page(browser, viewport={'width': 1440, 'height': 900})
+    errors, console_csp = [], []
+    page.on('pageerror', lambda e: errors.append(str(e)))
+    page.on('console', lambda m: console_csp.append(m.text) if 'Content Security Policy' in m.text else None)
+    for host in FONT_HOSTS:
+        await page.route(host, lambda route: route.abort())
+    await page.add_init_script(RECORD_VIOLATIONS)
+    await page.goto(base + rel + '?fresh=1&test=1', wait_until='load')
+    await page.wait_for_function('() => window.__mv && window.__mv.ready')
+    await page.evaluate('async () => { await window.__mv.ready; }')
+    await page.evaluate(KIT_CODECS)
+    await page.evaluate(FAKE_DIR)
+    await page.evaluate(FAKE_SAVE)
+    problems = []
+    for i, js in enumerate(OUTPUT_STEPS):
+        try:
+            if i == 0:
+                await page.evaluate("() => { window.__saveSink = window.showSaveFilePicker; }")
+            if i == 3:
+                await page.evaluate("() => { window.showSaveFilePicker = window.__saveSink; }")   # the faked save dialog again
+            await page.evaluate(js)
+        except Exception as e:  # noqa: BLE001 - reported with the violations
+            problems.append('step %d failed: %s' % (i, str(e).splitlines()[0]))
+        await page.wait_for_timeout(300)
+    done = await page.evaluate('() => window.__done || []')
+    violations = await page.evaluate('window.__cspViolations')
+    await page.close()
+    if done != ['done', 'done', 'done', 1]:
+        problems.append('not every output flow ran (WebM, set in a folder, set as a ZIP, SRT through the dialog): %r' % done)
+    if violations or console_csp:
+        problems.append('CSP violations: %r %r' % (violations, console_csp))
+    if errors:
+        problems.append('page errors: %r' % errors)
+    return problems
+
+
 def build_cr_tree(tmp):
     """A minimal tree whose sources, style and vendor scripts use CRLF (as a Windows checkout with core.autocrlf
     gives) and a lone CR; returns its root directory (src/ and vendor/) after building it."""
@@ -322,6 +395,10 @@ async def main():
                     problems = await check_v21(browser, base, rel, lang)
                     print('%s %s v2.1 pages' % ('FAIL' if problems else 'ok  ', rel))
                     failures += ['%s v2.1 pages: %s' % (rel, msg) for msg in problems]
+                for rel, lang in PAGES[:2]:
+                    problems = await check_output(browser, base, rel, lang)
+                    print('%s %s WebM, Filmora set, subtitles' % ('FAIL' if problems else 'ok  ', rel))
+                    failures += ['%s output: %s' % (rel, msg) for msg in problems]
                 for rel, lang in PAGES[:2]:
                     problems = await check_media(browser, base, rel, lang)
                     print('%s %s photos and videos' % ('FAIL' if problems else 'ok  ', rel))

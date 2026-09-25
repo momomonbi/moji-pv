@@ -6749,3 +6749,413 @@ under way) found three problems that the published app has. They are fixed here 
   appears in any request (a mutant that puts the name back fails it).
 - **MAI-2 / UI-1: 区画ごとに指示 ignored 「写真・動画をAIが使ってよい」.** The board now reads the instruction block's switch
   (`directBlock().mediaAllowed`, passed to `ai_board.mount` as `allowMedia`) and sends no `[media]` list when it is off.
+## v2.1-H.3
+
+H.3 of DESIGN_2_1 §8.8: step ④ for editor-ready output (§13.3, §13.10, §13.11) on H.2's exporters. New `ui/filmora_help`
+(「Filmoraで使うには」) and `docs/FILMORA.md`; changed `ui/output` (the five formats and the §13.3 coupling), `ui/step_export`
+(形式, the set's contents, summary, progress phases, done state, guide link, `exp.alphaNote2`, radio groups with arrow keys),
+`ui/menus` (`file.saveSrt`), `ui/boot` (the exporters, `exportStart` and `exportChecks` for the set and 透過動画,
+`defaultFileName`), `i18n/strings`, `ui/style.css`. Tests: `tests/node/ui_output.test.js` (+3 tests, 4 extended),
+`tests/node/ui_filmora.test.js` (new, 4), `tests/node/i18n.test.js` (run-time keys); browser `ui_flows.py` (flows kit,
+kit_keys, webm, subtitles; output and missing updated for その他 ▾), `ui_layout.py` (every format, the set at 288–352 px),
+`csp.py` (WebM, the set into a folder and as a ZIP, SRT both ways), `i18n_pages.py` (six screens), `transparent_check.py`
+(one selector). The shipped pages are rebuilt; no golden changed.
+
+### What was built
+
+- **形式** (§13.10): one control, `[MP4] [Filmora用]` as a radio pair (`role="radiogroup"`) plus `その他 ▾` (透過動画（WebM）/
+  PNG連番 / 透過PNG), in one segmented box like step ③'s 画面の形. The select shows the chosen other format and is marked like a
+  chosen segment; its 「その他」 placeholder is hidden from the list. When the chosen name does not fit beside the pair (en:
+  "Transparent video (WebM)" in the 296-px column) the select wraps to a row of its own under a line.
+- **Radio groups with arrow keys** (G.4's open item): 形式's pair, なめらかさ, and 詳しく's 範囲 and 画質. ← → ↑ ↓ choose the
+  next option (wrapping), Home / End the first / last; the keys never reach the app keymap (no frame step, no line change);
+  one Tab stop per group, the checked option (else the first enabled). The radios are made once and updated in place, so the
+  focus stays on the option a key chose (they used to be rebuilt on every render).
+- **The §13.3 coupling** (`ui/output`): `isAlpha(format)` from `export/schedule.FORMATS`; `formatCmds` (透過動画 / 透過PNG →
+  透明; MP4, Filmora用, PNG連番 while 透明 → 通常; the set keeps any other backdrop), `backdropCmds` (透明 →
+  `transparentOf(format)`: 透過PNG from a PNG sequence, else 透過動画; another backdrop while transparent → `opaqueOf`: MP4 /
+  PNG連番), `consistent`, `effectiveBackdrop` (`backdropFor`: the set renders the document's backdrop, 透明 read as 通常).
+  The backdrop list names 透明 by what choosing it makes (`clearLabel`: 透明（透過動画） / 透明（透過PNG）); the inspector's
+  背景の種類 uses the same commands and its toast names the format it switched to.
+- **Pre-flight** (`app.exportChecks`): `vp9Codec`, `dirAccess` (`SINK.canDirectory()`) and `registry` (`app.reg`) go to
+  `schedule.preflight`. `ui/output.checks`' `alpha-backdrop` covers both transparent formats (`params.format`); `withFixes`:
+  `clear-mp4` → 透過動画にする, `no-vp9` → 透過PNGにする (透過動画) or 「文字と装飾だけ」を入れない (the set: `kitCmd overlay
+  false`, `params.kit`); `fixLabel(item)`; `layersWhat(params, t)` builds `layers-approx`'s `{what}` from the effects' names and
+  「場面の切り替わり（n か所）」; `shownChecks` lists `memory` and `kit-memory` only when they ask first (the summary line
+  already says メモリ上で作成 / ZIPでダウンロード); `ERROR_KEYS['no-vp9']`.
+- **詳しく for Filmora用**: its label reads 「詳しく（範囲・画質・音声・ファイル名・セットの中身）」; after ファイル名 (whose placeholder
+  is the set's base name, `kitBase`) comes 「セットに入れるもの」: 完成動画（MP4） checked and disabled with 「いつも入ります」, then
+  文字と装飾だけ, 背景だけ, グリーンバック, and 字幕 / 時間つき歌詞 side by side; each checkbox is one undo entry
+  (`output.set kit` with the whole object, `ui/output.kitCmd`). Then 「Filmoraで使うには ›」. 音声を入れる applies to MP4, the set
+  and 透過動画 (`hasSound`). `exp.alphaNote2` replaces `exp.alphaNote` under 背景, hidden for the set.
+- **Summary line** (`ui/output.summary`, pure): the set 「Filmora用セット: {n}ファイル・約 {size}（フォルダに保存 / ZIPでダウンロード）」
+  from `S.kitFiles(doc, plan, { audioCodec, songReady })` (so the WAV counts where AAC does not encode); the other formats as
+  before, 透過動画 by `estimateWebmBytes`.
+- **Export** (`app.exportStart`): the set asks `SINK.openDirectory({ name: S.kitFolder(doc) })` straight from the click where
+  `canDirectory()` (null from the picker = cancelled), else memory files and a ZIP; the `confirm` item (`kit-memory` above
+  1.5 GiB) asks first, as for `memory`. Then `exporter.kit.exportKit({ engine, doc, audio, dir, assets: app.assets, signal,
+  onProgress })`; 透過動画 opens `openSink({ name, kind: 'webm' })` and runs `exporter.webm.exportWebm`. A memory result is
+  downloaded (`downloadBlob`). `defaultFileName` is `S.FORMATS[format].ext`'s file, the set's folder for the kit.
+- **Progress and done state**: the export state keeps the set's phase as `part` (`phase` is the state machine); step ④ shows
+  「動画 を書き出し中」, 「曲・字幕・説明 を書き出し中」, 「ZIP を書き出し中」 under the title. Done: 「{n}ファイルを書き出しました: {folder}」
+  (the folder openDirectory made, e.g. 「朝の窓_filmora (2)」, or the ZIP's name), every file with its name, what it is and its
+  size, and 「Filmoraで使うには ›」 for the files written. The export's size and fps are kept with the done state for the guide.
+- **「Filmoraで使うには」** (`ui/filmora_help`, a `<dialog>` through `ui/dialogs.open` like the shortcut sheet): where the
+  files are (before the export: 「書き出すと、次のファイルができます。」; after: the folder, or 「…zip を展開してから…」), every file
+  with its name and label, the numbered steps, the key colour with a swatch when the green screen is in the set, and 「同じ手順は
+  README_Filmora.txt にも…」. Pure parts: `planned(doc, plan, env)`, `written(result, size)`, `guide(info, t)`. The steps are
+  `export/host/kit.steps(t, files, info)`, the function the README uses — one source, the same words.
+- **≡ › ファイル › 字幕（.srt）を保存** (`ui/menus` `file.saveSrt`, listed after 時間つき歌詞): `SUB.BOM + SUB.srt(app.plan)` (the
+  whole video, song times) as `S.kitBase(doc) + '.srt'` through `app.io.saveText` (the save dialog, else a download).
+- **Strings**: every §13.10 key was there (package A); added `cmd.file.saveSrt`, H.2's wanted `exp.kit.wav`, `exp.kit.readme`,
+  `exp.kit.what.video|files|zip`, `exp.pre.layers.seams`, `kit.help.bg`, and the screens' `exp.fmt.otherLabel`,
+  `exp.bg.clearWebm`, `exp.moreKit`, `exp.pre.makeWebm`, `exp.pre.noOverlay`, `exp.kit.always`, `exp.kit.files`,
+  `exp.kit.metaSep`, `kit.help.before|folder|zip|filesTitle|stepsTitle|keyColour|same`. Changed: `exp.pre.alpha-backdrop`
+  takes `{format}`; `exp.pre.clear-mp4` recommends 透過動画（WebM）.
+- **docs/FILMORA.md** (ja, then en): exporting (folder or ZIP), what each file is, the steps in Filmora, the key colour
+  #00B140 (with the eyedropper advice for the BT.601 tag), what to check, the other formats, and §13.1's facts with their
+  status (the ? rows are the FG10 checklist).
+- **The running view** of step ④ is made once per export and updated in place, at most every 100 ms (a new phase and the
+  last frame at once). It used to be rebuilt for every frame; see Open items for why this matters with the set.
+
+### Decisions where the design was silent
+
+- **The set's contents live in 詳しく** (§13.10), and 「Filmoraで使うには」 appears there and in the done state only, so step ④
+  keeps its five controls (`[data-ctl]`: 形式, 大きさ, なめらかさ, 背景, 詳しく) with every format.
+- **The transparency note** (`exp.alphaNote2`) shows for MP4, 透過動画, PNG連番 and 透過PNG, not for Filmora用 (the set holds its
+  own transparent video and the guide explains it).
+- **`memory` and `kit-memory` are listed only when they ask first** (`confirm`, above 1.5 GiB); below that the summary
+  line's 「メモリ上で作成」/「ZIPでダウンロード」 says the same. The confirmation text is `exp.pre.memory.confirm` for both.
+- **Fixes:** `clear-mp4` (an older file: MP4 with 透明) now offers 透過動画にする — the transparent path of §13.3 — and its text
+  recommends 透過動画（WebM）; `no-vp9` offers 透過PNGにする for 透過動画 and 「文字と装飾だけ」を入れない for the set, so a
+  browser without VP9 can still export something useful in one click.
+- **ファイル名 for the set** shows the base name (`kitBase`) as its placeholder, not the folder: a name typed there is the
+  start of every file, and the folder adds `_filmora`.
+- **字幕（.srt）from the menu** is named like the video (`kitBase + '.srt'`, H.2's request), not like the LRC (`project_io`'s
+  title-based name), and holds the whole video in song times; the set's SRT is relative to its export range (H.2).
+- **Keys:** 詳しく's 範囲 and 画質 became radio groups too (the same helper), so every segmented control of step ④ behaves
+  alike. その他 ▾ is a native select: ↑ ↓ and type-ahead choose there (P → PNG連番), and its hidden 「その他」 placeholder
+  cannot be chosen.
+- **The guide's steps** gained the background file's step (`kit.help.bg`, H.2's wanted string) and the README too — one
+  function (`export/host/kit.steps`) writes both, so they cannot drift.
+- **The export state** keeps the set's phase as `part` (`phase` is idle/running/done/error), and the done state keeps the
+  export's width, height and fps (the guide names them even after the settings change).
+
+### Deviations (with reasons)
+
+- **透明 from PNG連番 gives 透過PNG, not 透過動画.** §13.3's table says "backdrop clear while the format is opaque → webmAlpha".
+  From MP4 and Filmora用 it does; from PNG連番 the frames stay frames (`transparentOf`), because the way back (another
+  backdrop while 透過PNG → PNG連番, "as today") would otherwise turn a PNG sequence into an MP4 after 透明 → 通常, and the
+  existing `clear-png` fix already pairs PNG連番 with 透過PNG. Tested both ways (Node: the round trips; flow webm).
+- **`export/host/kit.js` changed** (H.2's file): `steps(t, files, info)` is exported and the README uses it, with the new
+  background step (see Decisions). The README of a set with `_bg.mp4` gains that one numbered step; nothing else changes.
+- **Locally, the kit flows patch the codecs:** where this Chromium has no H.264 encoder, `ui_flows.py`'s kit flows make the
+  set's MP4s VP9 in MP4 (as `kit_check.py` does) and report that codec from the probe, so step ④ lets the set start. Where
+  H.264 encodes (CI's Chrome) nothing is patched and the flows print nothing.
+
+### Outside the H.3 file list
+
+- `src/export/host/kit.js`: `steps` (above).
+- `src/ui/project_io.js`: `saveText` is exported (≡ › 字幕 uses the same save dialog / download as 時間つき歌詞).
+- Tests of other packages that clicked the old `[data-v="png"]` / `[data-v="pngAlpha"]` buttons now choose その他 ▾:
+  `ui_flows.py` (output, large-export, missing — its keyboard variant presses P in その他 ▾), `ui_layout.py`, `csp.py`
+  (the media PNG export), `transparent_check.py`. `i18n.test.js`' run-time key list covers the five formats and the set.
+
+### Tests
+
+- `tests/node/ui_output.test.js` (9; 4 extended, 3 new): every format × backdrop × choice stays consistent, and each row
+  of §13.3's table as commands (透過動画 / 透過PNG → 透明; MP4, Filmora用, PNG連番 → 通常; the set keeps 黒; 透明 from MP4
+  and Filmora用 → 透過動画, from PNG連番 → 透過PNG; the round trips); `effectiveBackdrop` for the set and 透過動画;
+  `alpha-backdrop` for both transparent formats with `params.format`; the fixes (`clear-mp4` → 透過動画, `no-vp9` → 透過PNG or
+  the set without its overlay, whose block then goes) and `fixLabel`; `kitCmd` changes exactly one file; `summary` (the
+  set's count, bytes and folder/ZIP, the WAV where AAC does not encode; MP4, 透過動画 and 透過PNG sizes); `shownChecks`;
+  `layersWhat` in ja and en; every kind the set writes has a name; `hasSound`; `errorKey('no-vp9')`.
+- `tests/node/ui_filmora.test.js` (new, 4): the guide before the export (the files of `kitFiles`, their names, the
+  numbered steps with the real names, #00B140 only with the green screen), after it (the folder openDirectory made or the
+  ZIP to extract; only the steps that apply), the README holding every guide step word for word in ja and en (the
+  background step included), and ≡ › 字幕: the BOM, CRLF, one cue per line of the whole video in song times,
+  '<name>.srt', nothing without lines.
+- `tests/node/i18n.test.js`: the run-time keys cover the five formats, 透明's two labels, the fixes, the set's files and
+  phases and the guide.
+- `ui_flows.py` (+4 flows): **kit** (Filmora用 one undo entry, backdrop kept, the note hidden, 音声を入れる for the set and
+  透過動画 but not PNG; 詳しく's label and contents, each checkbox one entry, the summary equal to `kitFiles`' count and size;
+  kit-fps / kit-size / kit-wav exactly without AAC; every pre-flight text filled; no VP9 → the block and its fix
+  「文字と装飾だけ」を入れない; the guide from 詳しく (files and steps of the set, focus inside, Esc → focus back); 書き出す →
+  the picker once (`readwrite`, `mojipv-kit`), the files in the new OPFS folder, the progress 動画 then 曲・字幕・説明, the
+  running view made once; the done list and 「{n}ファイルを書き出しました: {folder}」; the done guide names the folder; 中止
+  removes the second folder 「… (2)」 and keeps the first; without a folder picker `kit-memory` and one ZIP download with the
+  same files in order), **kit_keys** (keyboard only: one Tab stop per radio group on the checked option; → ← End ↓ choose
+  and keep the focus, never moving the playhead or the selection; Tab to その他 ▾, P → PNG連番; Shift+Tab back; なめらかさ
+  → ←; Enter opens 詳しく; Space on 背景だけ; Enter / Esc on the guide; Enter on [書き出す]; the done guide), **webm** (その他
+  › 透過動画 → 透明 in one entry, preview transparent, その他 marked, the pair unchecked; 透明（透過動画）; no set contents;
+  背景 グリーンバック → MP4, 透明 → 透過動画 again; PNG連番 → 通常, 透明 → 透過PNG; no VP9 → 透過PNGにする; a 0.3 s WebM
+  downloaded with the EBML header and the done state's name), **subtitles** (the ≡ › ファイル item after .lrc; through the
+  faked save dialog '<name>.srt' with the BOM, CRLF and every cue of the whole video; the download path gives the same
+  bytes). The output and missing flows choose PNG formats in その他 ▾ now.
+- `ui_layout.py`: step ④ with each of the five formats, 詳しく closed and open: exactly the five controls, nothing clipped;
+  the set's contents (all five on) at step-column widths 288, 296, 320, 352 and 390 px: every label whole and inside the
+  column, rows not overlapping, no sideways scroll.
+- `csp.py`: + a 透過動画 downloaded, the set with 詳しく, its guide from 詳しく and from the done state, written into a
+  folder and (no folder picker) as a ZIP, and 字幕 saved through the dialog and as a download, on both pages: 0 violations.
+- `i18n_pages.py`: + six screens per page (step ④ with the set's contents, the guide, 透過動画, the set's progress and done
+  state (the exporter stubbed), the done state's guide); file-name suffixes such as `_overlay.webm` and the format names
+  WebM, SRT, README, Filmora, VP9, Premiere, DaVinci, After Effects are allowed on the ja page.
+
+### Requests to other packages
+
+- **Lead / H.2 (export/host/kit, engine):** a stall of the set in headless Chromium, see Open items; a look to reproduce it
+  is given there.
+- **Lead:** DESIGN_2_1 §13.3 could record 透明 from PNG連番 → 透過PNG (Deviations), §13.10 the fixes of `clear-mp4` and
+  `no-vp9`, and §13.11 `export/host/kit.steps` (the README's and the guide's one source) and `ui/filmora_help`'s pure parts.
+- **FG10:** someone with Filmora (Windows 11 and macOS, the current major version) walks `docs/FILMORA.md`'s checklist and
+  records it under `## v2.1-H Filmora check`; the ? rows of FILMORA.md are then set to ✔ or ✗.
+
+### Checks
+
+- `python3 build.py --check`: 210 modules OK. `node --test --test-concurrency=1 "tests/node/*.test.js"`: 1561 pass, 0 fail
+  (H.3 adds 7: `ui_output.test.js` 6 → 9, `ui_filmora.test.js` 4). `build.py --lab`, `build.py`, `tests/build_test.py`: OK.
+- Every `tests/browser/*.py` (local Chromium, no H.264, no AAC): OK except `perf.py`'s known red row basic+media (this run;
+  long+camera+materials passed). `ui_flows.py` 42 flows (kit, kit_keys, webm, subtitles among them), `ui_layout.py` 488
+  layouts plus step ④ in every format and the set at 288–352 px, `i18n_pages.py` 43 screens per page, `csp.py` 0 violations
+  (the output flows on both pages), `kit_check.py`, `webm_check.py`, `transparent_check.py`: OK.
+- One failure seen once and not again: `registryFor stays within its budget` (a 3 ms timing test) failed while browser tests
+  ran on the same CPUs; alone it passes (the CI sequence above).
+- Mutation checks: 22 Node mutants of the new logic — the five coupling rules (透過動画's 透明, PNG連番's 透過PNG, 透過動画 →
+  MP4, `consistent`, `alpha-backdrop` for WebM), the three fixes (`clear-mp4`, `no-vp9` for the set, `ERROR_KEYS`),
+  `kitCmd`'s whole object, the summary's folder/ZIP, sum and WebM size, `layersWhat`'s scene changes, `shownChecks`,
+  `hasSound`, the README's background step, the guide's intro, `written`'s folder, the key colour, the SRT's BOM, range
+  and name — all fail `ui_output` / `ui_filmora`. 20 browser mutants — the radio keys reaching the app keymap, the radios
+  rebuilt (focus lost), every radio a Tab stop, the set never asking for a folder, the set's result named like a file,
+  `vp9Codec` or `dirAccess` not passed to the pre-flight, the set's contents shown for other formats, the note shown for
+  the set, 音声を入れる off for 透過動画, an inverted checkbox, `layers-approx` without `{what}`, the phase line never
+  changing or held back by the throttle, the running view rebuilt per frame, the done list missing, `file.saveSrt`
+  undefined, nowrap labels in the set (288 px), a sixth `[data-ctl]`, その他 ▾ writing the format without its backdrop —
+  each fails its flow or `ui_layout`. The first round left one alive (the radio keys reaching the app keymap: the flow
+  compared the playhead only after the whole key sequence, and ↓'s line selection seeked back to where it began); the flow
+  now checks the playhead and the selection after every key.
+
+### Measured (this machine: 4 shared CPUs; headless Chromium, no H.264 / AAC encoder)
+
+- The set through step ④, 1080p30, 3 s (90 frames): the main MP4 (VP9 in MP4 here), overlay, background, SRT, WAV and
+  README into a folder, 7.6–13 s over the four QA pages (6 files, about 11 MB by the summary's estimate).
+
+### Open items
+
+- **A stall of the set in headless Chromium (for the lead and H.2 / B).** Recipe: the ja sample lyrics (`i18n_pages.py`'s
+  `LYRICS['ja']`), a 14-s song, `look.omakase { seed: 7, moodSeed: 7 }`, 1080p30, range 2–5 s, the set with the overlay
+  (and the background), started with `app.exportStart()`. The page's main thread then sometimes blocks for good before or
+  right after the first frames: the CPU is idle, and neither `page.evaluate` nor a DevTools `Debugger.pause` gets an
+  answer — a native wait, not a JavaScript loop. Counts: through `exportStart` in the QA sequence (after UI clicks), 9 of
+  9 stalled while step ④ rebuilt its running view for every frame, and about 1 in 3–5 after the view became persistent;
+  with `--disable-gpu` that sequence still stalled at times. Through `exportStart` without the clicks: 1 of 4 stalled
+  with the GPU process, 0 of 6 with `--disable-gpu`. The overlay alone as 透過動画: 0 of 5. The same set called directly
+  (`exporter.kit.exportKit`, no step ④ updates): 1 of 1 finished. With the default look: never (the kit flows, the
+  mutation runs, 13 replays). The pattern points at a synchronous canvas capture (the overlay's `getImageData`, the
+  MP4s' `new VideoFrame(canvas)`) meeting main-thread painting in this headless build; not tried in a real Chrome (none
+  here) — worth a look on CI's Chrome and on a desktop. The QA screenshots were taken with retries for this reason.
+- **FG10, the manual Filmora checklist, is not done**: no Filmora here. `docs/FILMORA.md` keeps the ? rows and lists the
+  checks (the §13.12 list plus H.2's two: the green read as #00B140 or about (0, 152, 61), and the overlay's alpha without
+  trails).
+- The en page's flows run the first run only (the existing rule); the H.3 flows run on the ja page, and the en page is
+  covered by `i18n_pages.py`, `csp.py` and the screenshots.
+- QA screenshots (git-ignored): `.qa-H3/` — step ④ in MP4, Filmora用 with 詳しく and its summary, 透過動画（WebM）, the guide
+  before and after, the set's progress (the exporter stubbed at 40 of 90 frames) and done state, ≡ › ファイル, at 1440×900
+  and 390×844, ja and en (36 files).
+
+### Review fixes (the H.3 review: H3S-1…8, UX-H3-1…11, H3-EXP-1, A11Y-1/2, I18N-1, UX-I18N-2)
+
+Each finding was reproduced first (probe scripts or the reviewer's recipe); every fix has a test, and the key tests were
+mutation-checked (below).
+
+- **H3-EXP-1 (major), 中止 missing after a cancelled export.** `update()`'s idle branch now drops the running view
+  (`runView = null`), so the next export builds it — and 中止 in the footer — again. flow **kit** records the footer on
+  every running state: only 中止 (enabled) while the first set is written and, after 中止, while the ZIP is written.
+- **UX-H3-1 (major), 0:00 for every file.** The background and green-screen uses say 「…トラックの 0:00 に置き」; the
+  guide and the README add 「どのファイルも 0:00 にそろえて置けば、曲とぴったり合います。」 (`kit.help.align`).
+  ui_filmora: every use of a video file and the WAV contains 0:00.
+- **UX-H3-2 (major), the set's export freezing the tab: root cause found, not fixable in the app.** See Open items (the
+  stack of the frozen renderer). `docs/FILMORA.md` gains 「うまくいかないとき」 / "If something goes wrong" (close the
+  tab, export again, delete the half-written folder), and the item stays open.
+- **UX-H3-3, the WAV step.** `export/host/kit.steps` puts the WAV right after the main MP4 (the MP4 has no sound then):
+  `kit.help.6` 「完成動画には音が入っていません。「{wav}」を音声トラックの 0:00 に置きます。」; `exp.pre.kit-wav` says
+  「このブラウザでは動画に曲を入れられないため…」 (no "AAC").
+- **UX-H3-4, alternatives numbered as steps.** `steps()` numbers only the path everyone follows (project settings, the
+  main MP4 at 0:00, the WAV); the new `extras()` lists the other files' uses under 「必要なときだけ」
+  (`kit.help.optional`), each saying when: the overlay 「完成動画の代わりに…」, the background, the green screen, and
+  the SRT 「歌詞を字幕として別に出したいときだけ…（完成動画には歌詞がもう入っています）」. The README has the same
+  structure (numbered lines, the 0:00 line, then 「必要なときだけ」 and "- " lines); the guide shows them as an `<ol>`
+  and a `<ul>`.
+- **UX-H3-5, the guide opens on the file list.** `ui/filmora_help.open` shows the intro, 手順, the 0:00 line,
+  必要なときだけ (the key colour swatch inside the green screen's use), then a compact file list (name and label on one
+  line). ui_layout: the first step is inside the dialog at 1280×720 and 1440×900 (it was below the fold).
+- **UX-H3-6, Filmora用 → 透明 → 通常 lost the set.** Option (b): step ④'s 背景 list does not offer 透明 while 形式 is
+  Filmora用 (`ui/output.backdropChoices`; a document already 透明 keeps it listed), so every trip through the list keeps
+  the set; the set's transparent file is 「文字と装飾だけ」 in 詳しく. Option (a) would need a remembered format outside
+  the document that undo and other format changes would have to invalidate. The inspector's 背景の種類 still follows
+  §13.3 and toasts the format it switched to.
+- **UX-H3-7, the summary counted files 詳しく did not list.** 詳しく lists the files the set adds by itself as checked,
+  disabled rows like 完成動画: 「使い方（README） いつも入ります」 and, where the browser cannot put the song into the
+  MP4, 「曲（WAV） このブラウザでは曲が別のファイルになります」 (`ui/output.kitAlways`, from `kitFiles`). Node: 1 +
+  ticked boxes + these rows = the summary's count; flow kit: the ticked rows add up to it.
+- **UX-H3-8, where the set goes.** With a folder picker a hint under the summary says
+  「書き出すときに選んだフォルダの中に 「{folder}」を作り、そこにファイルを入れます。」 (`exp.kit.folderHint`). The
+  DirSink knows the picked folder's name (`export/host/sink` `parentName`); `app.exportStart` puts it on the result
+  (`result.parent`), and the done state says
+  「選んだフォルダ「{parent}」の中の「{folder}」に{n}ファイルを書き出しました」 (`exp.kit.doneIn`), the guide
+  「ファイルは、選んだフォルダ「{parent}」の中のフォルダ「{folder}」に入っています。」 (`kit.help.folderIn`). Without a
+  name (the root of the origin-private file system, or a browser that gives none) the old texts stay.
+- **UX-H3-9, the README's WAV line.** `LABELS` in `export/host/kit` has `wav: 'exp.kit.wav'`; ui_filmora checks that
+  every file line of the README has a label.
+- **UX-H3-10 and I18N-1, `layers-approx` and the phase line.**
+  「「背景だけ」に「文字と装飾だけ」を重ねると、{what}は完成動画と 少し違って見えます」 / "When "Words and decorations
+  only" is laid over "Background only", these look slightly different from the finished video: {what}"; `{what}` is
+  「A・B・C」 in Japanese and "A, B, and C" in English (`ui/output.listText`, `Intl.ListFormat`). `exp.kit.phase` is
+  「{what}を書き出し中」 (no space).
+- **UX-H3-11 and UX-I18N-2, no PNG sequence for the set.** `withFixes` gives the set's `no-h264` and `no-webcodecs` no
+  format-changing fix, and `no-h264` for the set has its own text (`ui/output.checkKey` → `exp.pre.kit-no-h264`:
+  「このブラウザでは Filmora用の MP4（H.264）を作れません。PC の Chrome か Edge で開いてください。」). 透過動画 is not
+  offered instead (UX-I18N-2's option): it has no background, so it is no stand-in for the finished video.
+- **H3S-1, the texts said MP4 for every format.** `exp.pre.no-webcodecs` and `exp.pre.no-audio-codec` take `{format}`,
+  the chosen format's name inside a sentence (`exp.fmtIn.*`: MP4 / Filmora用セット / 透過動画（WebM） …; `withFixes`
+  sets `params.format`); the disabled options' title and an export error (`ExportError('no-webcodecs')`) use the same
+  words.
+- **H3S-2, 透過動画 without WebCodecs.** The fix of `no-webcodecs` / `no-h264` for a transparent format is 透過PNGにする
+  (it stays transparent), labelled like `no-vp9`'s.
+- **H3S-3, 透過動画 by keys.** flow **kit_keys**: in その他 ▾, ↓ picks 透過動画 (backdrop 透明, one undo entry, the
+  focus stays, 背景 says 透明（透過動画）), ↓ again PNG連番 (通常, 透明（透過PNG）).
+- **H3S-4, the set's ZIP path.** flow kit: the ZIP export's last phase is 「ZIPを書き出し中」 after 曲・字幕・説明; a
+  2160p60 set of every file with a one-minute song, without a folder picker, asks first (`kit-memory` at confirm level)
+  with its size, and やめる starts nothing and downloads nothing.
+- **H3S-5, the shared AssetStore.** flow kit spies the kit exporter: it got `app.assets`.
+- **H3S-6, the green screen's how-to line (§13.6).** `exp.chromaNote`
+  「Filmoraでは上のトラックに置き、クロマキー（緑幕）を オンにして色 #00B140 を選び、許容範囲を少し上げます。」 shows
+  under 背景 in place of `exp.alphaNote2` when the file is green (`ui/output.backdropNote`: MP4, PNG連番 or the set with
+  グリーンバック) and under the set's グリーンバック box while it is ticked; `kit.help.4` carries the same how-to. flows
+  webm and kit check both places.
+- **H3S-7.** `exp.alphaNote` is deleted (nothing used it; its text was no longer true); pages and lab rebuilt.
+- **H3S-8.** FILMORA.md's 他の形式 / Other formats line for 透過動画 now says when 透明 picks it (from MP4; PNG連番 →
+  透過PNG; Filmora用 does not offer 透明). §13.3's decision on 透明 from PNG連番 stays open for the lead (Requests).
+- **A11Y-1, the focus after a fix.** A fix button moves the focus to what it changed — the chosen 形式 option or その他
+  ▾, 背景, the set's checkbox (when on screen) — else to the pre-flight list (`tabindex -1`), never to the page. flow
+  webm: Enter on [透過動画にする] leaves the focus on その他 ▾ and Space does not start playback; `no_vp9_fix` presses
+  Enter on its button and checks the focus (その他 ▾ for 透過動画, the 文字と装飾だけ box for the set).
+- **A11Y-2, progress and done for screen readers.** One persistent status region in step ④ (`.exp-said`, role status,
+  polite) says each new phase of the set and 「書き出しました {info}」 at the end, and the progress bar's
+  `aria-valuetext` begins with the phase (`exp.kit.running`). A persistent region rather than role=status on the phase
+  line and the done view (the reviewer's suggestion): both are inserted or unhidden with their text, which screen
+  readers announce unreliably; a region that exists before its text changes is announced. flow kit checks the said texts
+  and the bar's text.
+
+### Review: strings, design text and files outside H.3
+
+- **New strings** (the block after `kit.help.same`): `exp.fmtIn.mp4|kit|webmAlpha|png|pngAlpha`, `exp.pre.kit-no-h264`,
+  `exp.chromaNote`, `exp.kit.wavWhy`, `exp.kit.folderHint`, `exp.kit.doneIn`, `exp.kit.running`, `exp.checks`,
+  `kit.help.folderIn`, `kit.help.align`, `kit.help.optional`. **Changed:** `exp.pre.no-webcodecs`,
+  `exp.pre.no-audio-codec` (`{format}`; the "PNG 連番は使えます" sentence went, the fix button says it),
+  `exp.kit.phase`, `exp.pre.kit-wav`, `exp.pre.layers-approx`, `kit.help.3`, `kit.help.4`, `kit.help.5`, `kit.help.6`,
+  `kit.help.bg`. **Deleted:** `exp.alphaNote`.
+- **DESIGN_2_1 §13.10's strings table** has the new texts of `exp.kit.phase`, `exp.pre.kit-wav`, `exp.pre.layers-approx`
+  and `kit.help.3`–`6`, as UX-H3-10 asked (i18n.test.js keeps single-key rows equal to strings.js).
+- `src/export/host/kit.js` (H.2): `steps` + the new `extras`, the README's 0:00 line and 「必要なときだけ」, the WAV's
+  label; `tests/node/export_kit.test.js`' README expectation follows. `src/export/host/sink.js` (H.2):
+  `DirSink.parentName`.
+- `tests/browser/i18n_pages.py` fakes the folder picker with a folder named in the page's language (「動画」 /
+  "Videos"), since the done state now names it (a user's folder name, not the app's words).
+
+### Review: mutation checks
+
+- Node, 19 mutants, all killed (ui_output, ui_filmora, i18n): the alpha formats' fix back to PNG連番, a PNG fix for the
+  set, no `params.format`, `checkKey` ignoring the set, 透明 offered for the set, no green note, English `{what}` with
+  `; `, no WAV row, the alpha fix labelled PNG連番, the WAV not a numbered step, the README's WAV without a label, the
+  subtitles' use missing, the README without 「必要なときだけ」, the guide without the picked folder, the background and
+  green uses without 0:00, `no-webcodecs` naming MP4 again, a missing key, the phase with its space.
+- Browser, 19 mutants, all killed (ui_flows kit / kit_keys / webm, ui_layout), each on a copy of the tree (the `--root`
+  option of the browser tests): the running view kept after 中止 (H3-EXP-1), その他 ▾ setting the format without its
+  backdrop, `kit-memory` never asking, no ZIP phase, the kit without `app.assets`, a fix leaving the focus on the page,
+  the phase not said, the progress bar's text without the phase, the done state without the picked folder (boot and step
+  ④ each), 透明 offered for the set, the green how-to never under 背景 or under its box, no WAV row, no folder hint, the
+  done state not said, the WAV reason unable to wrap (ui_layout: clipped at 296 px), the guide opening on the file list
+  (ui_layout and flow kit). The first round left the last one alive in ui_layout (a compact list above the steps still
+  left the first step in view); ui_layout now also checks that the file list comes after the steps.
+
+### Review: requests
+
+- **Lead (DESIGN_2_1):** §13.10's strings table could take the new keys (`exp.chromaNote` — H3S-6 noted that §13.6's
+  how-to line had no key —, `exp.pre.kit-no-h264`, `exp.fmtIn.*`, `exp.kit.wavWhy`, `exp.kit.folderHint`,
+  `exp.kit.doneIn`, `kit.help.align`, `kit.help.optional`, `kit.help.folderIn`); §13.9 / §13.10 could say that the
+  README's and the guide's numbered steps are the path everyone follows and the other files are 「必要なときだけ」 uses;
+  §13.3 / §13.10 could record that step ④ does not offer 透明 while 形式 is Filmora用 (UX-H3-6), next to the open
+  decision on 透明 from PNG連番 (H3S-8).
+- **FG10:** the freeze below on Chrome and Edge on Windows 11 and macOS (the reviewer's recipe), with the checklist.
+
+### Review: open items
+
+- **The set's export freezing the tab (UX-H3-2): root cause** (this replaces the first round's stall item above). The
+  reviewer's recipe (the ja sample lyrics, a 14-s song, `look.omakase { seed: 7, moodSeed: 7 }`, 1080p30, range 2–5 s,
+  the set with the overlay and the background, started from step ④) froze 8 of 34 fresh headless Chromium 141 pages on
+  this machine with the web fonts blocked (the tests' setting; 6 of 26 on the H.3 commit, 2 of 8 with this round's
+  fixes) and 1 of 18 with the web fonts loaded. In each of the six frozen pages dumped, `gdb` (attached to this test's
+  own processes only) shows the renderer's main thread blocked for good in a synchronous call to the Linux font service
+  — `font_service::internal::FontServiceThread::MatchFamilyName` (four) or `::FontRenderStyleForStrike` (two), called
+  from `blink::FontCache::CreateFontPlatformData` ← `BaseRenderingContext2D::fillText` — while every other thread of the
+  renderer and of the browser process waits idle: the reply never comes. So it is neither the canvas read-back nor the
+  encoders, and no loop of the app: a canvas `fillText` with a font face (family × size) not drawn before makes Chromium
+  ask the browser process, and that request sometimes gets no answer. The set draws more new faces than other exports
+  (the export size, a second planned fork for the green screen); with the web fonts blocked every family of each stack
+  is looked up that way, which is why the tests see it more often. One session sets 58 different fonts, so it is not an
+  ever-changing size. `FontServiceThread` is the Linux sandbox's font path (`content::WebSandboxSupportLinux`); Chrome
+  and Edge on Windows and macOS — Filmora's platforms — do not use it, so the owner is probably not affected, but that
+  is not verified. Nothing in the app can make that reply come: the item stays open, FILMORA.md tells a user what to do
+  (close the tab, export again, delete the half-written folder), and the check on real Chrome/Edge on Windows and macOS
+  stays with FG10. A Chromium bug report with the stacks would be the next step if it shows on a desktop Linux Chrome.
+- `mix.test.js`' "registryFor stays within its budget" (3 ms / 4 ms, a timing test of parts/mix) failed in this round's
+  full Node runs on this machine (load 4–9 from other sessions: 4–7 ms) and the same way on the H.3 commit without this
+  round's changes; alone at load 2.5 it passed 2 of 3 runs. Nothing of this round touches it.
+
+### Review: checks
+
+- `python3 build.py --check`: 210 modules OK. `node --test --test-concurrency=1 "tests/node/*.test.js"`: 1564 tests,
+  1563 pass; the one failure is the timing test above (H.3 adds 3 tests this round: ui_output 9 → 12; ui_filmora's 4 and
+  export_kit's README test rewritten). `build.py --lab`, `build.py` (pages rebuilt), `tests/build_test.py`: OK.
+- Every `tests/browser/*.py` in name order (local Chromium, no H.264, no AAC): OK except `perf.py`'s two known red rows
+  (long+camera+materials, basic+media). `ui_flows.py` 42 flows, `ui_layout.py` 488 layouts (plus step ④ in every format,
+  the set at 288–390 px with every row, the guide at 1280×720 and 1440×900), `i18n_pages.py` 43 screens per page,
+  `csp.py` 0 violations, `kit_check.py`, `webm_check.py`, `transparent_check.py`: OK.
+- QA screenshots (git-ignored) in `.qa-H3/`: the 36 of the first round again, plus 背景 グリーンバック with the how-to
+  line (`*_10_mp4_green.png`), ja and en, 1440×900 and 390×844 (40 files); the guide is shown for a set with every file,
+  the done state for a folder picked as 「動画」 / "Videos".
+
+## Lead: integrating H.3
+
+H.3 (ce699ac on 16ca0d6, both review rounds) applied to main without conflicts. Node: all pass; build --check 213
+modules; goldens unchanged.
+
+**Decisions asked of the lead:**
+
+- 透明 chosen from PNG連番 gives 透過PNG (not 透過動画): accepted. It keeps a PNG sequence a PNG sequence, as the existing
+  clear-png fix does; from MP4 and Filmora用 it gives 透過動画 as §13.3 says.
+- Step ④'s 背景 list does not offer 透明 while Filmora用 is chosen: accepted. The set always holds the finished video with
+  its background; transparency comes from its own `_overlay.webm`.
+- The README and the guide number only the main path (project, main MP4, the WAV when there is one) and list the other
+  files under 「必要なときだけ」: accepted.
+- The new string keys (exp.chromaNote, exp.pre.kit-no-h264, exp.fmtIn.* and others) are not added to DESIGN_2_1 §13.10's
+  table; strings.js is their record, and i18n.test.js checks the table rows that exist.
+
+**Open:** the Filmora set's export sometimes froze a headless Linux Chromium with the web fonts blocked; the frozen
+renderers waited on a synchronous font lookup of the system font service during `fillText`. The Windows and macOS
+browsers Filmora runs on do not use that service; FG10 (the manual Filmora check) confirms it there.
+
+## Lead: going back to the start
+
+The owner asked how to get back to the start after the song has played to the end. ▶ already started again from 0:00
+there (`app.play` from the end), the lane took a click or a drag, and Home went to 0:00, but nothing on screen said
+so. The play bar now shows it:
+
+- **⏮ 最初に戻る** (`.pbtn.to-start`, the Home key's `seek.edge`) stands left of ▶: it stops and goes to 0:00.
+- **▶ reads 最初から再生 (↻)** while the playhead stands at the end, so the button says what it will do. The icon is
+  redrawn only when the state changes (`updatePlay`; the time listener runs every frame while playing).
+- The lane has its hint as a tooltip too (「タイムライン（クリックで移動・ダブルクリックで行を選ぶ）」).
+
+ui_flows' playback flow plays to the end, checks 最初から再生, plays again from under 1 s, and checks that ⏮ stops at
+0:00; a mutant that never shows 最初から再生 fails it. ui_layout: all 488 layouts fit with the extra button (390 px:
+⏮ ↻ time ‹ › おまかせ ▭ in one row).

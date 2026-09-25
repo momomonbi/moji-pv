@@ -205,7 +205,7 @@ test('UI keys built at run time exist for every value they can take', () => {
   each('step.short.', ['lyrics', 'song', 'look', 'export']);
   each('step.', ['lyrics', 'song', 'look', 'export']);
   each('lang.', D.LANGS.filter((l) => l !== 'auto'));
-  each('exp.fmt.', ['mp4', 'png', 'pngAlpha']);
+  each('exp.fmt.', MV.use('ui/output').FORMATS.concat(['other', 'otherLabel']));
   each('exp.bg.', D.BACKDROPS);
   each('exp.q.', ['standard', 'high', 'max']);
   each('exp.range.', ['all', 'sel', 'io']);
@@ -220,6 +220,18 @@ test('UI keys built at run time exist for every value they can take', () => {
   const OUT = MV.use('ui/output');
   each('insp.fxRule.', OUT.BACKDROPS.filter((b) => b !== 'scene'));
   want.push('exp.bg.clearPng', 'exp.pre.makeAlpha', 'exp.pre.makeClear', 'exp.pre.fix', ...Object.values(OUT.ERROR_KEYS));
+  // DESIGN_2_1 §13.10: 透明 by what it makes, the fixes, the set's files and the progress phases of the Filmora set
+  want.push(...OUT.FORMATS.map(OUT.clearLabel), 'exp.pre.makeWebm', 'exp.pre.noOverlay', 'exp.pre.layers.seams', 'exp.moreKit');
+  each('exp.kit.', OUT.KIT_KEYS);
+  each('exp.kit.what.', ['video', 'files', 'zip']);
+  for (const kind of ['main', 'overlay', 'bg', 'green', 'srt', 'lrc', 'wav', 'readme']) want.push(OUT.kitLabel(kind));
+  each('kit.help.', ['title', '1', '2', '3', '4', '5', '6', 'bg', 'before', 'folder', 'zip', 'filesTitle', 'stepsTitle', 'keyColour', 'same']);
+  // the review of H.3: the format named in a sentence, the set's own no-H.264 text, the green screen's how-to, the
+  // set's always-included rows, where it goes, the progress with its phase, the guide's 0:00 line and optional part
+  each('exp.fmtIn.', OUT.FORMATS);
+  want.push('exp.pre.kit-no-h264', 'exp.chromaNote', 'exp.kit.wavWhy', 'exp.kit.always', 'exp.kit.folderHint', 'exp.kit.doneIn',
+    'exp.kit.running', 'exp.checks');
+  each('kit.help.', ['folderIn', 'align', 'optional']);
   const output = fs.readFileSync(path.join(SRC, 'ui', 'output.js'), 'utf8');
   for (const m of output.matchAll(/out\.push\(\{\s*code:\s*'([a-z-]+)'/g)) want.push('exp.pre.' + m[1]);
   for (const k of ['syn.line', 'syn.blank', 'syn.cut', 'syn.emph', 'syn.impact', 'syn.note', 'syn.comment', 'syn.time', 'syn.meta']) {

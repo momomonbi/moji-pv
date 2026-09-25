@@ -68,8 +68,9 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
       explain: MV.use('planner/explain').explain,
       tapCore: MV.use('core/tap'),
       sample: (lang) => (lang === 'en' ? lyrics.SAMPLE_EN : lyrics.SAMPLE_JA),
-      exporter: { mp4: MV.use('export/host/mp4'), png: MV.use('export/host/png'), sink: MV.use('export/host/sink'),
-        schedule: MV.use('export/schedule') },
+      // the exports of step ④: MP4, PNG sequences, 透過動画（WebM）and the Filmora set (DESIGN_2_1 §13.5, §13.9)
+      exporter: { mp4: MV.use('export/host/mp4'), png: MV.use('export/host/png'), webm: MV.use('export/host/webm'),
+        kit: MV.use('export/host/kit'), sink: MV.use('export/host/sink'), schedule: MV.use('export/schedule') },
     };
   }
 
@@ -546,7 +547,8 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
     };
   }
 
-  // Export (§4.21) through export/host/*: probe + preflight, openSink from the click, progress, cancel, done.
+  // Export (§4.21) through export/host/*: probe + preflight, openSink (or, for the Filmora set, openDirectory) from the
+  // click, progress, cancel, done.
   function installExport(app) {
     const { t } = app;
     let st = { phase: 'idle' };
@@ -556,9 +558,12 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
     const ex = () => app.svc.exporter;
     app.exportState = () => st;
     app.exportReset = () => set({ phase: 'idle' });
+    // The name of what the export saves: the file, by the format's extension (export/schedule FORMATS); for the Filmora
+    // set, its folder '<base>_filmora' (its ZIP adds '.zip').
     app.defaultFileName = () => {
-      const ext = app.doc.output.format === 'mp4' ? 'mp4' : 'zip';
-      return ex().schedule.fileName(app.doc, ext);
+      const S = ex().schedule;
+      const format = app.doc.output.format;
+      return format === 'kit' ? S.kitFolder(app.doc) : S.fileName(app.doc, S.FORMATS[format].ext);
     };
     // WebCodecs support for the current size (async; cached per w×h×fps, then the step re-renders).
     app.exportProbe = () => {
@@ -570,7 +575,7 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
         probed = { key, value: null };
         ex().mp4.probe({ w, h, fps: o.fps }).then((value) => {
           if (probed.key === key) { probed.value = value; app.bus.emit('export', st); }
-        }).catch(() => { probed.value = { webcodecs: false, codec: null, audioCodec: null, anyCodec: false }; });
+        }).catch(() => { probed.value = { webcodecs: false, codec: null, audioCodec: null, anyCodec: false, vp9Codec: null }; });
       }
       return probed.value;
     };
@@ -579,10 +584,13 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
     app.exportChecks = () => {
       if (!app.plan || !app.plan.lines.length) return [{ code: 'no-lines', level: 'block', params: {} }];
       const pr = app.exportProbe() || {};
+      // DESIGN_2_1 §13.10: the VP9 probe (透過動画 and the set's overlay), whether a folder can be written (the set; else
+      // one ZIP) and the effective registry (which screen effects the set's layers leave out, layers-approx).
       const items = ex().schedule.preflight(app.doc, app.plan, {
         webcodecs: typeof VideoEncoder === 'function', codec: pr.codec, audioCodec: pr.audioCodec, anyCodec: pr.anyCodec,
-        fontsReady: fontsReady(),
-        fsAccess: ex().sink.canStream(), songReady: !app.doc.song || app.songReady(), warnings: app.warnings(),
+        vp9Codec: pr.vp9Codec, fontsReady: fontsReady(),
+        fsAccess: ex().sink.canStream(), dirAccess: ex().sink.canDirectory(), songReady: !app.doc.song || app.songReady(),
+        warnings: app.warnings(), registry: app.reg,
       });
       // photos and videos (DESIGN_2_1 §11.7.8): an asset not on this device blocks, with [つなぎ直す]
       const media = app.media ? app.media.preflight() : [];
@@ -605,17 +613,31 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
       if (!f || typeof f.fonts.ready !== 'function' || !f.usage.refs.length) return;
       Promise.resolve(f.fonts.ready(f.usage.refs, f.usage.textByFamily)).then(() => app.bus.emit('fonts'), () => app.bus.emit('fonts'));
     };
-    // A large export built in memory asks first (§4.21 pre-flight 'confirm'), however the export starts (button, Ctrl+K,
-    // keys). Such an item exists only without File System Access, where openSink shows no picker and so needs no user
-    // activation: awaiting the dialog before it is safe.
+    // A large export built in memory asks first (§4.21 pre-flight 'confirm': `memory`, or `kit-memory` for the Filmora
+    // set), however the export starts (button, Ctrl+K, keys). Such an item exists only without File System Access (for
+    // the set: without a folder picker), where no picker opens and so none needs the user's gesture: awaiting the
+    // dialog before it is safe.
     const confirmLarge = async () => {
       const item = app.exportChecks().find((c) => c.level === 'confirm');
       if (!item) return true;
       const text = t('exp.pre.memory.confirm', { size: T.fmtBytes(item.params.bytes) });
       return app.confirm ? app.confirm({ text }) : window.confirm(text);
     };
-    const openSink = async (o, name) => {
-      try { return await ex().sink.openSink({ name, kind: o.format === 'mp4' ? 'mp4' : 'zip' }); } catch (e) {
+    // Where the export writes, asked straight from the click (the pickers need the user's gesture): { sink } for a file
+    // (the save dialog, or memory without File System Access); for the Filmora set { dir } — a new folder in the folder
+    // the user picks (openDirectory), or null memory files that become one ZIP where no folder can be written. null:
+    // the user closed the picker (or it failed, then the error is shown).
+    const openTarget = async (o, name) => {
+      const SINK = ex().sink;
+      try {
+        if (o.format === 'kit') {
+          if (!SINK.canDirectory()) return { dir: null };
+          const dir = await SINK.openDirectory({ name: ex().schedule.kitFolder(app.doc) });
+          return dir ? { dir } : null;
+        }
+        const sink = await SINK.openSink({ name, kind: ex().schedule.FORMATS[o.format].ext });
+        return sink ? { sink } : null;
+      } catch (e) {
         set({ phase: 'error', message: t('err.exp.sink') });
         return null;
       }
@@ -624,17 +646,20 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
     app.exportStart = async () => {
       if (st.phase === 'running' || starting) return;
       starting = true;
-      let sink = null;
+      let target = null;
       try {
-        if (await confirmLarge()) sink = await openSink(app.doc.output, app.defaultFileName());
+        if (await confirmLarge()) target = await openTarget(app.doc.output, app.defaultFileName());
       } finally { starting = false; }
-      if (!sink) return;
+      if (!target) return;
       const o = app.doc.output;
       const name = app.defaultFileName();
+      // the size and frame rate of this export, for the done state and the guide (the settings may change meanwhile)
+      const size = app.plan ? ex().schedule.outputSize(app.plan.design.aspect, o.short) : { w: 0, h: 0 };
       abort = new AbortController();
       app.pause();
-      set({ phase: 'running', i: 0, N: 0, eta: null, fps: o.fps, short: o.short, started: performance.now() });
-      const onProgress = (p) => set(Object.assign({}, st, { i: p.i, N: p.N, eta: p.eta }));
+      set({ phase: 'running', i: 0, N: 0, eta: null, fps: o.fps, short: o.short, format: o.format, part: null, started: performance.now() });
+      // the Filmora set reports its phase too: 'video' (every video, frame by frame), 'files', 'zip'
+      const onProgress = (p) => set(Object.assign({}, st, { i: p.i, N: p.N, eta: p.eta, part: p.phase || null }));
       // The export renders the committed document: a fork planned from app.doc, whatever the preview shows (a try-on or
       // the compare view render another document on the preview engine).
       const doc = app.doc;
@@ -642,18 +667,32 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
       try {
         source = app.engine.fork();
         source.setDoc(doc);
-        const args = { engine: source, doc, sink, signal: abort.signal, onProgress };
-        const result = o.format === 'mp4'
-          ? await ex().mp4.exportVideo(Object.assign(args, { audio: o.audio && app.songReady() ? app.buffer : null }))
-          : await ex().png.exportPngs(Object.assign(args, { alpha: o.format === 'pngAlpha' }));
+        const song = o.audio && app.songReady() ? app.buffer : null;
+        const args = { engine: source, doc, signal: abort.signal, onProgress };
+        let result;
+        if (o.format === 'kit') {
+          // one pass writes every file of the set (export/host/kit); the preview's AssetStore is shared by its forks
+          result = await ex().kit.exportKit(Object.assign(args, { audio: song, dir: target.dir, assets: app.assets }));
+        } else if (o.format === 'webmAlpha') {
+          result = await ex().webm.exportWebm(Object.assign(args, { audio: song, sink: target.sink }));
+        } else if (o.format === 'mp4') {
+          result = await ex().mp4.exportVideo(Object.assign(args, { audio: song, sink: target.sink }));
+        } else {
+          result = await ex().png.exportPngs(Object.assign(args, { sink: target.sink, alpha: o.format === 'pngAlpha' }));
+        }
         if (result.blob) ex().sink.downloadBlob(result.blob, result.name || name);
-        set({ phase: 'done', result: Object.assign({ name }, result) });
+        // a set written into a folder has no single name (result.folder names the folder, result.parent the folder the
+        // user picked, for the done state); a ZIP or a file has one
+        if (o.format === 'kit' && target.dir && target.dir.parentName) result.parent = target.dir.parentName;
+        set({ phase: 'done', result: o.format === 'kit' ? result : Object.assign({ name }, result), format: o.format,
+          w: size.w, h: size.h, fps: o.fps });
       } catch (e) {
         const code = e && e.code ? e.code : 'encode';
         if (code === 'cancelled' || (abort && abort.signal.aborted)) { set({ phase: 'idle' }); app.toast(t('err.exp.cancelled')); }
         else {
           if (typeof console !== 'undefined') console.error(e);
-          set({ phase: 'error', message: t(OUT.errorKey(code), OUT.errorParams(e)) });
+          // the message may name the chosen format (no-webcodecs: 「このブラウザでは{format}を書き出せません」)
+          set({ phase: 'error', message: t(OUT.errorKey(code), Object.assign({ format: t('exp.fmtIn.' + o.format) }, OUT.errorParams(e))) });
         }
       } finally {
         if (source && typeof source.dispose === 'function') source.dispose();

@@ -1,5 +1,5 @@
-/* 文字PVメーカー v2 — original work. Menus: the ≡ menu, field ⋯ menus and context menus; transient popovers (DESIGN §6.4.12). */
-MV.def('ui/menus', ['ui/dom', 'ui/icons', 'ui/keys'], (dom, I, K) => {
+/* 文字PVメーカー v2 — original work. Menus: the ≡ menu, field ⋯ menus and context menus; transient popovers (DESIGN §6.4.12; DESIGN_2_1 §12.7, §13.8). */
+MV.def('ui/menus', ['ui/dom', 'ui/icons', 'ui/keys', 'export/subtitles', 'export/schedule'], (dom, I, K, SUB, S) => {
   'use strict';
 
   const { h } = dom;
@@ -122,7 +122,7 @@ MV.def('ui/menus', ['ui/dom', 'ui/icons', 'ui/keys'], (dom, I, K) => {
       checked: app.view.state.prefs.quality === q, run: () => app.actions.run('view.quality', { q }) }));
     return [
       // ≡ › ファイル (DESIGN_2_1 §12.7): 保存 writes the one file with everything (.mojipv), 軽い保存 the .json without
-      // pictures, videos or the song; 字幕（.srt）appears once its action exists (package H).
+      // pictures, videos or the song; 時間つき歌詞（.lrc）and 字幕（.srt）(§13.8) save the lyric timing.
       { heading: t('menu.file') }, a('file.new'), a('file.open'), a('file.save'), a('file.saveAs'), a('file.saveLight'),
       a('media.import'), { label: t('menu.recent'), sub: () => recentItems(app) }, a('file.saveLrc'), a('file.saveSrt'),
       a('lyrics.bakeTimes'),
@@ -165,6 +165,15 @@ MV.def('ui/menus', ['ui/dom', 'ui/icons', 'ui/keys'], (dom, I, K) => {
     return true;
   }
 
+  // 字幕（.srt）を保存 (DESIGN_2_1 §13.8): one cue per sung line of the whole video (export/subtitles.srt), UTF-8 with a BOM
+  // and CRLF line endings — the form Filmora and most editors read — named like the video ('<name>.srt',
+  // export/schedule.kitBase), through the save dialog where the browser has one, else a download.
+  function saveSrt(app) {
+    const plan = app.plan;
+    if (!plan || !plan.lines.length || !app.io || !app.io.saveText) return null;
+    return app.io.saveText(SUB.BOM + SUB.srt(plan), S.kitBase(app.doc) + '.srt', 'text/plain');
+  }
+
   // この端末に保存した作品と曲を消す: asks first (what goes, that the open work closes, that it cannot be undone), then
   // clears the autosaved works, the stored songs and the AI keys (ui/project_io.clearDevice). → Promise<boolean>
   async function clearDevice(app) {
@@ -187,6 +196,7 @@ MV.def('ui/menus', ['ui/dom', 'ui/icons', 'ui/keys'], (dom, I, K) => {
     def('view.quality', (c, a) => view.setPref('quality', a && a.q ? a.q : 'auto'), { checked: () => view.state.prefs.quality !== 'auto' });
     def('view.foldSteps', () => view.setRail(!view.state.rail), { checked: () => view.state.rail });
     def('lyrics.bakeTimes', () => bakeTimes(app), { enabled: () => !!(app.plan && app.plan.lines.length && MV.has('core/lyrics')) });
+    def('file.saveSrt', () => { saveSrt(app); }, { enabled: () => !!(app.plan && app.plan.lines.length && app.io && app.io.saveText) });
     def('edit.history', () => {
       const anchor = document.querySelector('[data-act="edit.undo"]');
       if (app.shell && anchor) app.shell.header.openHistory(anchor);
@@ -218,8 +228,9 @@ MV.def('ui/menus', ['ui/dom', 'ui/icons', 'ui/keys'], (dom, I, K) => {
       openMain: (at) => open(app, at, mainItems(app)),
       context: (ev, items) => open(app, { x: ev.clientX, y: ev.clientY }, items),
       bakeTimes: () => bakeTimes(app),
+      saveSrt: () => saveSrt(app),
     };
   }
 
-  return { mount, popover, bakeTimes };
+  return { mount, popover, bakeTimes, saveSrt };
 });

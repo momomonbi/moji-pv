@@ -48,6 +48,14 @@ Flows, each on a fresh page (new browser context) and each ending with undo-all 
   clear_device (release)     ≡ › 設定 › この端末に保存した作品と曲を消す: asks first; キャンセル keeps all; 消す empties both
                              IndexedDB stores and every AI key, an empty work opens and is stored only once it changes;
                              a newer project file is named in the error
+v2.1 editor-ready output (package H.3, DESIGN_2_1 §13.12):
+  kit                        Filmora用 (the backdrop kept), 詳しく's set contents (one entry each) and summary, the no-VP9 fix,
+                             「Filmoraで使うには」, 書き出す into a folder (the picker faked with OPFS), the phases, the done
+                             list and its guide, 中止 removing its folder, and one ZIP without a folder picker
+  kit_keys                   keyboard only: the radio groups (one Tab stop, arrows choose, the app keys stay out), その他 ▾,
+                             the set's checkboxes, the guide, [書き出す] and the done state's guide
+  webm                       その他 › 透過動画 sets 透明; the backdrop list and the coupling both ways; the no-VP9 fix; a WebM
+  subtitles                  ≡ › ファイル › 字幕（.srt）を保存 through the save dialog and as a download
 It also asserts: no page errors and no CSP violations. The ja page runs every flow; the en page runs the first run.
 The first run exports with the mouse and, in the keyboard flow, with Tab + Enter. Where H.264 encodes, the file's video
 sample count is checked here (stsz or trun); the decoded-frame count of the same export path is WP6's check in
@@ -60,12 +68,14 @@ import argparse
 import asyncio
 import functools
 import http.server
+import io
 import json
 import os
 import struct
 import subprocess
 import sys
 import threading
+import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -1173,17 +1183,22 @@ OUTPUT = """() => [window.__mv.doc.output.format, window.__mv.doc.look.backdrop,
   document.querySelector('.canvas-wrap').dataset.backdrop]"""
 
 
+async def choose_other(page, fmt):
+    """Step ④'s その他 ▾ (DESIGN_2_1 §13.10): 透過動画（WebM）, PNG連番 or 透過PNG."""
+    await page.select_option('[data-other="format"]', fmt)
+
+
 async def flow_output(f, lang):
     """透過PNG ⇔ 透明 as one pair (step ④ and 作品全体), skipped screen effects greyed with the reason, a PNG export."""
     page = f.page
     done0, doc0 = await with_lyrics(f)
     await page.evaluate("() => window.__mv.goStep('export')")
     await f.settle(2)
-    note = await page.evaluate("() => window.__mv.t('exp.alphaNote')")
+    note = await page.evaluate("() => window.__mv.t('exp.alphaNote2')")
     shown = await page.evaluate("() => { const n = document.querySelector('.step-export [data-note=\"alpha\"]'); return n ? n.textContent : null; }")
-    f.check(shown == note, 'step ④ says why there is no transparent video (MP4): %r' % shown)
+    f.check(shown == note, 'step ④ says which transparent format to use (MP4): %r' % shown)
     done = await page.evaluate(DONE)
-    await page.click('[data-seg="format"] [data-v="pngAlpha"]')
+    await choose_other(page, 'pngAlpha')
     await f.settle(2)
     f.check(await page.evaluate(OUTPUT) == ['pngAlpha', 'clear', 'clear'], '透過PNG makes the backdrop 透明 and the preview transparent')
     f.check(await page.evaluate(DONE) == done + 1, 'one undo entry for the pair')
@@ -1255,7 +1270,7 @@ async def flow_output(f, lang):
 async def large_export_asks(f):
     """A large in-memory export (pre-flight 'confirm', §4.21) asks first however it starts: Ctrl+K › 書き出す and the button."""
     page = f.page
-    await page.click('[data-seg="format"] [data-v="pngAlpha"]')
+    await choose_other(page, 'pngAlpha')
     await page.evaluate("""() => { const a = window.__mv;
       Object.defineProperty(window, 'showSaveFilePicker', { value: undefined, configurable: true });
       a.dispatch({ t: 'output.set', key: 'range', v: null }, { label: ['undo.range', {}] });
@@ -1446,6 +1461,24 @@ async def flow_playback(f, lang):
     gaps = [y - x for x, y in zip(at, at[1:]) if y - x > 0.5]      # (a seek's debounced prepare may land just after play)
     f.check(bool(gaps) and max(gaps) <= 1.75 and min(gaps) >= 1.4, 'a prepare about every 1.5 s of playback: %r' % at)
     f.check(len(at) <= 8, 'not one prepare per frame (%d calls)' % len(at))
+    # Played to the end, ▶ reads 最初から再生 and starts again from 0:00; ⏮ 最初に戻る goes back to 0:00 and stops.
+    label = "() => document.querySelector('.pbtn.play').getAttribute('aria-label')"
+    t = lambda k: page.evaluate('(k) => window.__mv.t(k)', k)
+    end = await page.evaluate('() => window.__mv.clockEnd()')
+    await page.evaluate('(e) => { window.__mv.seek(e - 0.4); window.__mv.play(); }', end)
+    ended = await f.until("(e) => !window.__mv.view.state.playing && window.__mv.view.state.time >= e - 0.05", 'playback stops at the end', end, timeout=5000)
+    f.check(ended and await page.evaluate(label) == await t('play.replay'), 'at the end, ▶ is 最初から再生: %r' % await page.evaluate(label))
+    await page.click('.pbtn.play')
+    await f.until('() => window.__mv.view.state.playing', 'playing again')
+    now = await page.evaluate('() => window.__mv.time()')
+    f.check(now < 1.0, 'it plays from the start again (%.2f s)' % now)
+    f.check(await page.evaluate(label) == await t('play.pause'), 'while playing, the button is 一時停止')
+    await page.click('.pbtn.to-start')
+    st = await page.evaluate('() => [window.__mv.view.state.playing, window.__mv.view.state.time]')
+    f.check(st == [False, 0], '⏮ 最初に戻る stops at 0:00: %r' % st)
+    f.check(await page.evaluate(label) == await t('play.play'), 'at 0:00 the button is 再生 again')
+    f.check(await page.evaluate("() => document.querySelector('.pbtn.to-start').getAttribute('aria-label')") == await t('play.toStart'),
+            '⏮ has its name')
     await f.undo_all(done0, doc0)
 
 
@@ -3603,11 +3636,11 @@ async def flow_missing(f, lang):
         await other.keyboard.press('4')
         await g.until("() => window.__mv.view.state.step === 'export'", '4 = step ④ (%s)' % mode)
         if mode == 'mouse':
-            await other.click('[data-seg="format"] [data-v="png"]')     # a PNG sequence needs no encoder (this Chromium has no H.264)
+            await choose_other(other, 'png')     # a PNG sequence needs no encoder (this Chromium has no H.264)
         else:
-            # keyboard only: Tab to the format's PNG button, Space
-            g.check(await tab_to(other, '[data-seg="format"] [data-v="png"]'), 'Tab reaches the PNG format (keys)')
-            await other.keyboard.press(' ')
+            # keyboard only: Tab to その他 ▾; P picks PNG連番 (the select's own type-ahead)
+            g.check(await tab_to(other, '[data-other="format"]'), 'Tab reaches その他 (keys)')
+            await other.keyboard.press('p')
         await g.until("() => window.__mv.doc.output.format === 'png'", 'PNG chosen (%s)' % mode)
         await g.settle(3)
         blocked = await other.evaluate("() => ({ item: !!document.querySelector('.check[data-code=\"media-missing\"]'), off: document.querySelector('[data-act=\"export.start\"]').disabled })")
@@ -3916,6 +3949,576 @@ async def flow_media_song(f, lang):
     await f.until("(s) => !!window.__mv.doc.song && window.__mv.doc.song.sha1 !== s", 'この動画の音を曲にする makes that video\'s sound the song', song, timeout=20000)
 
 
+# --- v2.1 editor-ready output (package H.3, DESIGN_2_1 §13.10, §13.12): 形式, the Filmora set, 透過動画, 字幕 --------------
+
+# Where this Chromium has no H.264 encoder (local runs), the Filmora set's MP4s use VP9 in MP4, as tests/browser/kit_check.py
+# does, and the probe reports that codec, so step ④ lets the set start; the UI path is the same. Where H.264 encodes (CI's
+# Chrome), nothing is patched. → 'h264' | 'vp9'
+KIT_CODECS = r"""async () => {
+  const a = window.__mv, S = MV.use('export/schedule');
+  let h264 = false;
+  try {
+    h264 = typeof VideoEncoder === 'function' && !!(await VideoEncoder.isConfigSupported({ codec: 'avc1.42001f', width: 1280,
+      height: 720, bitrate: 2e6, framerate: 30 })).supported;
+  } catch (e) { h264 = false; }
+  if (h264) return 'h264';
+  const ex = a.svc.exporter, mp4 = ex.mp4, kit = ex.kit;
+  ex.mp4 = Object.assign({}, mp4, { probe: async (o) => Object.assign({}, await mp4.probe(o), { codec: S.pickVp9(o.w, o.h, o.fps)[0], anyCodec: true }) });
+  ex.kit = Object.assign({}, kit, { exportKit: (o) => {
+    const { w, h } = S.outputSize(a.plan.design.aspect, o.doc.output.short);
+    return kit.exportKit(Object.assign({ codecs: { video: S.pickVp9(w, h, o.doc.output.fps)[0] } }, o));
+  } });
+  return 'vp9';
+}"""
+# The folder picker, faked (a page test cannot click it): the OPFS folder 'kit_pick' stands for the folder the user picks;
+# window.__dirPicks records each call's options.
+FAKE_DIR = r"""async () => {
+  const root = await navigator.storage.getDirectory();
+  try { await root.removeEntry('kit_pick', { recursive: true }); } catch (e) { /* not there yet */ }
+  window.__dirPicks = [];
+  window.showDirectoryPicker = async (o) => { window.__dirPicks.push(o); return root.getDirectoryHandle('kit_pick', { create: true }); };
+}"""
+# The files of a folder inside 'kit_pick' → [[name, bytes]] by name, or null when there is no such folder.
+OPFS_DIR = r"""async (name) => {
+  const root = await navigator.storage.getDirectory();
+  try {
+    const dir = await (await root.getDirectoryHandle('kit_pick')).getDirectoryHandle(name);
+    const out = [];
+    for await (const [n, h] of dir.entries()) out.push([n, h.kind === 'file' ? (await h.getFile()).size : -1]);
+    return out.sort((x, y) => (x[0] < y[0] ? -1 : 1));
+  } catch (e) { return null; }
+}"""
+# An OPFS file's bytes (a list of numbers), or null.
+OPFS_BYTES = r"""async (name) => { try { const root = await navigator.storage.getDirectory();
+  return Array.from(new Uint8Array(await (await (await root.getFileHandle(name)).getFile()).arrayBuffer())); } catch (e) { return null; } }"""
+# Every running state of the export from now on: the set's phase, the phase line step ④ showed with it and the progress
+# bar's text; the footer's buttons [text, data-act, disabled]; what the step's status region said (each new text once).
+WATCH_EXPORT = r"""() => { window.__phases = []; window.__views = new Set(); window.__footers = []; window.__said = [];
+  window.__mv.bus.on('export', (x) => {
+  const said = document.querySelector('.step-export .exp-said[role="status"]');
+  if (said && said.textContent && window.__said[window.__said.length - 1] !== said.textContent) window.__said.push(said.textContent);
+  if (x.phase !== 'running') return;
+  const el = document.querySelector('.step-export .exp-phase');
+  const bar = document.querySelector('.step-export .exp-running [role="progressbar"]');
+  window.__views.add(document.querySelector('.step-export .exp-running .exp-title'));
+  window.__footers.push([...document.querySelectorAll('.footer-export button')].map((b) => [b.textContent, b.dataset.act || '', b.disabled]));
+  window.__phases.push([x.part, el && !el.hidden ? el.textContent : null, bar ? bar.getAttribute('aria-valuetext') : null]); }); }"""
+# The kit exporter as step ④ calls it, spied: whether it got the preview's AssetStore (app.assets, shared by its forks).
+SPY_KIT_ASSETS = r"""() => { const a = window.__mv, ex = a.svc.exporter, kit = ex.kit;
+  window.__kitAssets = [];
+  ex.kit = Object.assign({}, kit, { exportKit: (o) => { window.__kitAssets.push(!!o.assets && o.assets === a.assets); return kit.exportKit(o); } }); }"""
+# Step ④ as the set sees it.
+KIT_STATE = r"""() => { const a = window.__mv, box = document.querySelector('.kit-box');
+  return { format: a.doc.output.format, backdrop: a.doc.look.backdrop, kit: a.doc.output.kit,
+    boxes: [...document.querySelectorAll('.kit-set input[type="checkbox"]')].filter((b) => !b.closest('[hidden]'))
+      .map((b) => [b.id.replace('exp-kit-', ''), b.checked, b.disabled]),
+    green: (() => { const n = document.querySelector('.kit-set [data-note="kit-chroma"]'); return n && !n.hidden ? n.textContent : null; })(),
+    folderHint: (() => { const n = document.querySelector('.step-export [data-note="kit-folder"]'); return n && !n.hidden ? n.textContent : null; })(),
+    backdrops: [...document.querySelectorAll('[data-ctl="backdrop"] option')].map((o) => o.value),
+    shown: box.checkVisibility({ contentVisibilityAuto: true, visibilityProperty: true }), summary: document.querySelector('.exp-summary').textContent,
+    more: document.querySelector('.step-export details.more > summary').textContent,
+    checks: Object.fromEntries([...document.querySelectorAll('.step-export .check')].map((c) => [c.dataset.code, c.querySelector('.check-body span').textContent])) }; }"""
+# What the set would write now (export/schedule.kitFiles with the probe's audio codec) and the summary line that says so.
+KIT_WANT = r"""() => { const a = window.__mv, S = MV.use('export/schedule'), T = MV.use('i18n/t'), pr = a.exportProbe() || {};
+  const files = S.kitFiles(a.doc, a.plan, { audioCodec: pr.audioCodec, songReady: a.songReady() });
+  const dir = typeof window.showDirectoryPicker === 'function';
+  return { names: files.map((x) => x.name), base: S.kitBase(a.doc), aac: pr.audioCodec === 'mp4a.40.2',
+    summary: a.t('exp.kit.summary', { n: files.length, size: T.fmtBytes(files.reduce((s, x) => s + x.est, 0)),
+      where: a.t(dir ? 'exp.kit.toFolder' : 'exp.kit.toZip') }) }; }"""
+# The open help sheet (a <dialog>), or null.
+SHEET = r"""() => { const d = document.querySelector('dialog.dlg[open]');
+  if (!d) return null;
+  const steps = d.querySelector('.kit-steps'), files = d.querySelector('.kit-help-files');
+  return { title: d.querySelector('.dlg-title').textContent, intro: d.querySelector('.dlg-body > .dlg-text').textContent,
+    files: [...d.querySelectorAll('.kit-help-files .kit-file-name')].map((x) => x.textContent),
+    steps: [...d.querySelectorAll('.kit-steps li')].map((x) => x.textContent),
+    extras: [...d.querySelectorAll('.kit-extras li > span:first-child')].map((x) => x.textContent),
+    key: !!d.querySelector('.kit-key'), keyInGreen: !!d.querySelector('.kit-extras li[data-kind="green"] .kit-key'),
+    stepsFirst: !!(steps && files && (steps.compareDocumentPosition(files) & Node.DOCUMENT_POSITION_FOLLOWING)),
+    inside: d.contains(document.activeElement) }; }"""
+# The steps the guide should show for the set the settings describe (ui/filmora_help over export/schedule.kitFiles).
+SHEET_WANT = r"""() => { const a = window.__mv, H = MV.use('ui/filmora_help'), pr = a.exportProbe() || {};
+  const g = H.guide(H.planned(a.doc, a.plan, { audioCodec: pr.audioCodec, songReady: a.songReady() }), a.t);
+  return { steps: g.steps, extras: g.extras.map((x) => x.text) }; }"""
+EXPORT_DONE = "() => ['done', 'error'].includes(window.__mv.exportState().phase)"
+# Step ④'s done state.
+DONE_STATE = r"""() => { const st = window.__mv.exportState(), el = document.querySelector('.step-export .exp-running');
+  return { phase: st.phase, message: st.message || null, files: [...el.querySelectorAll('.kit-done-files .kit-file-name')].map((x) => x.textContent),
+    metas: [...el.querySelectorAll('.kit-done-files .kit-file-meta')].map((x) => x.textContent),
+    info: [...el.querySelectorAll('.exp-done .muted')].map((x) => x.textContent).join(' | '), result: st.result ? { folder: st.result.folder,
+      name: st.result.name || null, files: (st.result.files || []).map((x) => [x.name, x.bytes]) } : null }; }"""
+# The probe without VP9 (a browser that cannot write transparent video): on → every new probe says vp9Codec null; off → back.
+NO_VP9 = r"""(on) => { const ex = window.__mv.svc.exporter;
+  if (on) { ex.__mp4 = ex.mp4; ex.mp4 = Object.assign({}, ex.mp4, { probe: async (o) => Object.assign({}, await ex.__mp4.probe(o), { vp9Codec: null }) }); }
+  else if (ex.__mp4) { ex.mp4 = ex.__mp4; delete ex.__mp4; } }"""
+# The fix button of a pre-flight item, by code.
+FIX_OF = """(code) => { const li = document.querySelector('.step-export .check[data-code="' + code + '"]');
+  const b = li && li.querySelector('.check-actions .link'); return b ? b.textContent : null; }"""
+
+
+async def no_vp9_fix(f, fmt, fix_key, fixed_js, what, focus):
+    """Where VP9 does not encode, `no-vp9` blocks 透過動画 and the set's transparent video, and its fix button does `what`;
+    the focus then goes to the control it changed (`focus`, as FOCUS names it), not to the page (A11Y-1)."""
+    page = f.page
+    fps = await page.evaluate('() => window.__mv.doc.output.fps')
+    await page.evaluate(NO_VP9, True)
+    await page.evaluate("(v) => window.__mv.dispatch({ t: 'output.set', key: 'fps', v }, { label: ['undo.output', {}] })", 24 if fps != 24 else 60)
+    if not await f.until("() => window.__mv.exportChecks().some((c) => c.code === 'no-vp9')", 'no VP9: no-vp9 (%s)' % fmt, timeout=15000):
+        return
+    await f.settle(2)
+    label = await page.evaluate(FIX_OF, 'no-vp9')
+    f.check(label == await page.evaluate('(k) => window.__mv.t(k)', fix_key) and await page.is_disabled('[data-act="export.start"]'),
+            'no VP9 blocks %s, with [%s]: %r' % (fmt, what, label))
+    await page.focus('.step-export .check[data-code="no-vp9"] .check-actions .link')
+    await page.keyboard.press('Enter')
+    await f.settle(2)
+    f.check(await page.evaluate(fixed_js) and not await page.evaluate("() => window.__mv.exportChecks().some((c) => c.code === 'no-vp9')"),
+            'the fix %s and the block goes' % what)
+    f.check(await page.evaluate(FOCUS) == focus, 'the focus goes to what the fix changed (%s), not the page: %r' % (focus, await page.evaluate(FOCUS)))
+    await page.evaluate(NO_VP9, False)
+    await page.evaluate("(v) => window.__mv.dispatch({ t: 'output.set', key: 'fps', v }, { label: ['undo.output', {}] })", fps)
+    await f.until('() => !!window.__mv.exportProbe()', 'probed again', timeout=15000)
+
+
+FOCUS = r"""() => { const e = document.activeElement;
+  return e ? e.dataset.v || e.dataset.other || e.dataset.kitHelp || e.dataset.act || e.id || e.tagName.toLowerCase() : null; }"""
+
+
+async def flow_kit(f, lang):
+    """The Filmora set (DESIGN_2_1 §13.10, §13.12 flow "kit"): Filmora用 is one undo entry and keeps the backdrop (背景 does
+    not offer 透明 then, so exploring it keeps the set); 詳しく shows the set's contents (完成動画 and the README always in,
+    the WAV where the browser cannot put the song into the MP4; each checkbox one undo entry; the rows add up to the
+    summary line's count; the green screen's how-to under its box) and where the set goes; its pre-flight names the
+    Filmora project settings; 「Filmoraで使うには」 opens from 詳しく with the steps first, then the other files' uses, and
+    closes with Esc; 書き出す asks for a folder (the picker, faked with OPFS) and writes the files there with the preview's
+    AssetStore, the progress saying 動画 then 曲・字幕・説明 (also to screen readers and in the progress bar's text); the
+    done state lists the files written and the folder inside the picked one, and its guide names both; 中止 removes the
+    folder it made, and the next export has its 中止 again; without a folder picker the same files come as one ZIP
+    download (phase ZIP), and a set too large for memory asks first."""
+    page = f.page
+    done0, doc0 = await with_lyrics(f)
+    await page.evaluate(AI_WAV_JS)
+    f.check(await page.evaluate("async () => { await window.__mv.loadSong(window.__wav(12, 'song.wav')); return window.__mv.songReady(); }"),
+            'the test song loads')
+    codec = await page.evaluate(KIT_CODECS)
+    await page.evaluate(SPY_KIT_ASSETS)
+    await page.evaluate(FAKE_DIR)
+    await page.evaluate(WATCH_EXPORT)
+    await page.evaluate("""() => { const a = window.__mv;
+      a.batch({ label: ['undo.output', {}] }, [{ t: 'output.set', key: 'short', v: 720 }, { t: 'output.set', key: 'fps', v: 30 },
+        { t: 'output.set', key: 'range', v: { t0: 1, t1: 2 } }, { t: 'output.set', key: 'audio', v: true }]);
+      a.goStep('export'); }""")
+    await f.until('() => !!window.__mv.exportProbe()', 'the encoders are probed', timeout=15000)
+    await f.settle(2)
+    t = lambda key, params=None: page.evaluate('([k, p]) => window.__mv.t(k, p || {})', [key, params])  # noqa: E731
+    done = await page.evaluate(DONE)
+    await page.click('[data-seg="format"] [data-v="kit"]')
+    await f.settle(2)
+    st = await page.evaluate(KIT_STATE)
+    f.check([st['format'], st['backdrop']] == ['kit', 'scene'], 'Filmora用 keeps the backdrop: %r' % [st['format'], st['backdrop']])
+    f.check(await page.evaluate(DONE) == done + 1, 'Filmora用 is one undo entry')
+    f.check(await page.get_attribute('[data-seg="format"] [data-v="kit"]', 'aria-checked') == 'true', 'Filmora用 is the checked option')
+    f.check(not st['shown'], 'the set\'s contents wait inside 詳しく')
+    f.check(st['more'] == await t('exp.moreKit'), '詳しく says it holds the set\'s contents: %r' % st['more'])
+    f.check(await page.evaluate("() => document.querySelector('.step-export [data-note=\"alpha\"]').hidden"),
+            'the transparency note is not shown for the set (it has its own transparent video)')
+    want = await page.evaluate(KIT_WANT)
+    f.check(st['folderHint'] == await t('exp.kit.folderHint', {'folder': want['base'] + '_filmora'}),
+            'where the set goes: a new folder inside the one the user picks: %r' % st['folderHint'])
+    # 背景 without 透明 for the set, and a trip through its list comes back to the set (UX-H3-6)
+    f.check(st['backdrops'] == ['scene', 'chroma', 'black'], 'Filmora用 does not offer 透明: %r' % st['backdrops'])
+    for choice in ('chroma', 'scene'):
+        await page.select_option('[data-ctl="backdrop"] select', choice)
+        await f.settle(1)
+        got = await page.evaluate(OUTPUT)
+        f.check(got[:2] == ['kit', choice], '背景 %s keeps Filmora用: %r' % (choice, got))
+        note = await page.evaluate("() => { const n = document.querySelector('.step-export [data-note=\"chroma\"]'); return n.hidden ? null : n.textContent; }")
+        f.check(note == (await t('exp.chromaNote') if choice == 'chroma' else None), 'the green screen\'s how-to under 背景 (%s): %r' % (choice, note))
+    f.check(not await page.is_disabled('#exp-audio'), '音声を入れる applies to the set')
+    await choose_other(page, 'webmAlpha')
+    await f.settle(1)
+    f.check(not await page.is_disabled('#exp-audio'), '… and to 透過動画 (Opus in the WebM)')
+    await choose_other(page, 'png')
+    await f.settle(1)
+    f.check(await page.is_disabled('#exp-audio'), '… not to a PNG sequence')
+    await page.click('[data-seg="format"] [data-v="kit"]')
+    await f.settle(1)
+    await page.click('.step-export details.more > summary')
+    await f.settle(1)
+    st = await page.evaluate(KIT_STATE)
+    want = await page.evaluate(KIT_WANT)
+    f.check(st['shown'], '詳しく shows the set\'s contents')
+    always = [['wav', True, True]] if not want['aac'] else []
+    f.check(st['boxes'] == [['main', True, True], ['overlay', True, False], ['bg', False, False], ['green', False, False],
+                            ['srt', True, False], ['lrc', False, False]] + always + [['readme', True, True]],
+            'the contents and their defaults (完成動画 and the README always; the WAV without AAC): %r' % st['boxes'])
+    f.check(st['summary'] == want['summary'], 'the summary line counts the set: %r (want %r)' % (st['summary'], want['summary']))
+    f.check(sum(1 for _, on, _ in st['boxes'] if on) == len(want['names']), 'the ticked rows add up to the summary\'s count (%d)' % len(want['names']))
+    for key in ('bg', 'lrc', 'green'):
+        done = await page.evaluate(DONE)
+        await page.click('label[for="exp-kit-%s"]' % key)
+        await f.settle(1)
+        st = await page.evaluate(KIT_STATE)
+        f.check(st['kit'][key] is True and await page.evaluate(DONE) == done + 1, '%s joins the set, one undo entry: %r' % (key, st['kit']))
+    f.check(st['green'] == await t('exp.chromaNote'), 'the green screen\'s how-to under its box: %r' % st['green'])
+    await page.click('label[for="exp-kit-green"]')
+    await f.settle(1)
+    st = await page.evaluate(KIT_STATE)
+    f.check(st['kit']['green'] is False and st['green'] is None, 'and it goes with the box')
+    want = await page.evaluate(KIT_WANT)
+    f.check(st['summary'] == want['summary'] and '%d' % len(want['names']) in st['summary'], 'the summary follows: %r' % st['summary'])
+    f.check(sum(1 for _, on, _ in st['boxes'] if on) == len(want['names']), 'and the rows still add up to it')
+    f.check(st['checks'].get('kit-fps') == await t('exp.pre.kit-fps', {'fps': 30, 'w': 1280, 'h': 720}), 'the Filmora project settings: %r' % st['checks'])
+    f.check('kit-size' in st['checks'], '720p: 1080p or 4K is easier in Filmora')
+    f.check(('kit-wav' in st['checks']) == (not want['aac']), 'the WAV note exactly when AAC does not encode (aac=%s)' % want['aac'])
+    f.check(not any(c.endswith('memory') for c in st['checks']), 'a folder can be written: no memory note')
+    f.check(not any('{' in v for v in st['checks'].values()), 'every pre-flight text is filled in: %r' % st['checks'])
+    await f.shot(lang + '_kit_more')
+    await no_vp9_fix(f, 'the set', 'exp.pre.noOverlay', '() => window.__mv.doc.output.kit.overlay === false', 'leaves the transparent video out',
+                     'exp-kit-overlay')
+    await page.click('label[for="exp-kit-overlay"]')
+    await f.settle(1)
+    f.check((await page.evaluate(KIT_STATE))['kit']['overlay'] is True, 'the transparent video is back in the set')
+    # 「Filmoraで使うには」 from 詳しく: the steps first, then 「必要なときだけ」, then the files
+    await page.click('[data-kit-help="planned"]')
+    await f.until('() => !!document.querySelector("dialog.dlg[open]")', 'the guide opens')
+    sheet = await page.evaluate(SHEET)
+    guide = await page.evaluate(SHEET_WANT)
+    f.check(sheet and sheet['title'] == await t('kit.help.title') and sheet['intro'] == await t('kit.help.before'), 'the guide: %r' % sheet)
+    f.check(sheet and sheet['files'] == want['names'] and sheet['steps'] == guide['steps'] and len(sheet['steps']) >= 2
+            and sheet['extras'] == guide['extras'] and len(sheet['extras']) >= 3,
+            'its files, numbered steps and other uses are the set\'s: %r' % (sheet and [sheet['steps'], sheet['extras']]))
+    f.check(sheet and sheet['stepsFirst'], 'the steps come before the file list')
+    f.check(sheet and sheet['inside'], 'the focus is inside the guide')
+    await f.shot(lang + '_kit_help')
+    await page.keyboard.press('Escape')
+    await f.until('() => !document.querySelector("dialog.dlg[open]")', 'Esc closes the guide')
+    f.check(await page.evaluate(FOCUS) == 'planned', 'the focus is back on 「Filmoraで使うには」')
+    # 書き出す: the folder picker, then every file into a new folder in it
+    await page.click('[data-act="export.start"]')
+    if not await f.until(EXPORT_DONE, 'the set is written', timeout=180000):
+        return
+    res = await page.evaluate(DONE_STATE)
+    folder = want['base'] + '_filmora'
+    f.check(res['phase'] == 'done', 'the set is written: %r' % res['message'])
+    f.check(await page.evaluate('() => window.__dirPicks') == [{'mode': 'readwrite', 'id': 'mojipv-kit'}], 'the folder picker opened once, read-write')
+    f.check(await page.evaluate('() => window.__kitAssets') == [True], 'the set\'s engine forks share the preview\'s AssetStore (app.assets)')
+    f.check(res['files'] == want['names'], 'the done state lists the files written: %r' % res['files'])
+    done_text = await t('exp.kit.doneIn', {'n': len(want['names']), 'folder': folder, 'parent': 'kit_pick'})
+    f.check(res['info'] == done_text, 'and where: inside the picked folder: %r' % res['info'])
+    f.check(await page.evaluate('() => window.__said.slice(-1)[0]') == await t('exp.done') + ' ' + done_text, 'and says so to screen readers')
+    on_disk = await page.evaluate(OPFS_DIR, folder)
+    f.check(on_disk is not None and sorted(n for n, _ in on_disk) == sorted(want['names']) and all(b > 0 for _, b in on_disk),
+            'the folder %s holds every file: %r' % (folder, on_disk))
+    f.check(len(res['metas']) == len(want['names']) and all(res['metas']), 'each file says what it is and its size: %r' % res['metas'])
+    phases = await page.evaluate('() => window.__phases')
+    parts = [p[0] for p in phases if p[0]]
+    f.check(parts and parts[0] == 'video' and 'files' in parts and parts.index('files') > parts.index('video'),
+            'the progress goes 動画 then 曲・字幕・説明: %r' % sorted(set(parts)))
+    shown = {p[0]: p[1] for p in phases if p[0]}
+    video_text = await t('exp.kit.phase', {'what': await t('exp.kit.what.video')})
+    files_text = await t('exp.kit.phase', {'what': await t('exp.kit.what.files')})
+    f.check(shown.get('video') == video_text, 'the phase line: %r' % shown)
+    f.check(shown.get('files') == files_text, 'a new phase shows at once: %r' % shown)
+    f.check(any(p[0] == 'files' and (p[2] or '').startswith(files_text) for p in phases), 'the progress bar\'s text names the phase: %r' % phases[-1:])
+    said = await page.evaluate('() => window.__said')
+    f.check(video_text in said and files_text in said and said.index(files_text) > said.index(video_text), 'the phases are said: %r' % said)
+    f.check(await page.evaluate('() => window.__views.size') == 1 and len(phases) > 5,
+            'the running view is made once and updated in place (%d progress events)' % len(phases))
+    footers = await page.evaluate('() => window.__footers')
+    only_cancel = [[await t('exp.cancel'), '', False]]
+    f.check(footers and all(ft == only_cancel for ft in footers), 'while it runs the footer holds 中止 only: %r' % footers[:2])
+    await f.shot(lang + '_kit_done')
+    await page.click('[data-kit-help="written"]')
+    await f.until('() => !!document.querySelector("dialog.dlg[open]")', 'the guide opens from the done state')
+    sheet = await page.evaluate(SHEET)
+    f.check(sheet and sheet['intro'] == await t('kit.help.folderIn', {'folder': folder, 'parent': 'kit_pick'}) and sheet['files'] == want['names'],
+            'it names the folder, the one it is in and the files written: %r' % sheet)
+    await page.click('dialog.dlg[open] .dlg-head .icon-btn')
+    await f.until('() => !document.querySelector("dialog.dlg[open]")', '× closes the guide')
+    # 中止 while the videos are written: the folder it made goes away
+    await page.click('.footer-export .btn')
+    await page.evaluate("""() => window.__mv.dispatch({ t: 'output.set', key: 'range', v: { t0: 0, t1: 8 } }, { label: ['undo.range', {}] })""")
+    await f.settle(2)
+    await page.click('[data-act="export.start"]')
+    if await f.until("() => window.__mv.exportState().phase === 'running' && window.__mv.exportState().i >= 3", 'the second set is on its way', timeout=60000):
+        await page.click('.footer-export .btn')
+        await f.until("() => window.__mv.exportState().phase === 'idle'", '中止 stops it', timeout=30000)
+        f.check(len(await page.evaluate('() => window.__dirPicks')) == 2, 'the picker opened for it')
+        f.check(await page.evaluate(OPFS_DIR, folder + ' (2)') is None, 'the new folder (%s (2)) is removed' % folder)
+        f.check(await page.evaluate(OPFS_DIR, folder) is not None, 'the first set stays')
+    # no folder picker (Firefox, Safari): one ZIP download of the same files
+    await page.evaluate("""() => { Object.defineProperty(window, 'showDirectoryPicker', { value: undefined, configurable: true });
+      window.__mv.dispatch({ t: 'output.set', key: 'range', v: { t0: 1, t1: 2 } }, { label: ['undo.range', {}] }); }""")
+    await f.settle(2)
+    want = await page.evaluate(KIT_WANT)
+    st = await page.evaluate(KIT_STATE)
+    f.check(st['summary'] == want['summary'] and (await t('exp.kit.toZip')) in want['summary'], 'the summary says ZIPでダウンロード')
+    f.check(st['folderHint'] is None, 'no folder is picked for a ZIP, so no hint about one')
+    f.check(await page.evaluate("() => window.__mv.exportChecks().some((c) => c.code === 'kit-memory')"),
+            'no folder picker: the set is built in memory (kit-memory; listed only when it asks first)')
+    await page.evaluate('() => { window.__phases = []; window.__footers = []; }')
+    async with page.expect_download(timeout=180000) as info:
+        await page.click('[data-act="export.start"]')
+    dl = await info.value
+    data = Path(await dl.path()).read_bytes()
+    names = [i.filename for i in zipfile.ZipFile(io.BytesIO(data)).infolist()]
+    f.check(dl.suggested_filename == folder + '.zip' and names == want['names'], 'the ZIP %s holds the same files: %r' % (dl.suggested_filename, names))
+    await f.until(EXPORT_DONE, 'the ZIP is done')
+    res = await page.evaluate(DONE_STATE)
+    f.check(res['info'] == await t('exp.kit.done', {'n': len(want['names']), 'folder': folder + '.zip'}), 'the done state names the ZIP: %r' % res['info'])
+    # after 中止, this export has its 中止 again, and no working-looking 書き出す (H3-EXP-1)
+    footers = await page.evaluate('() => window.__footers')
+    f.check(footers and all(ft == only_cancel for ft in footers),
+            'after 中止, the next export shows 中止 (enabled) and no 書き出す: %r' % footers[:2])
+    phases = await page.evaluate('() => window.__phases')
+    zip_text = await t('exp.kit.phase', {'what': await t('exp.kit.what.zip')})
+    at = next((k for k, p in enumerate(phases) if p[0] == 'zip'), None)
+    f.check(at is not None and phases[at][1] == zip_text and any(p[0] == 'files' for p in phases[:at]),
+            'the last phase is ZIPを書き出し中, after 曲・字幕・説明: %r' % [p[:2] for p in phases if p[0] != 'video'])
+    if codec == 'vp9':
+        print('note  kit: this Chromium has no H.264 encoder, so the set\'s MP4s were VP9 in MP4 (CI\'s Chrome writes H.264)')
+    await page.click('.footer-export .btn')
+    await f.settle(1)
+    await kit_memory_asks(f, t)
+    await f.undo_all(done0, doc0)
+
+
+async def kit_memory_asks(f, t):
+    """A set too large to build in memory (no folder picker; `kit-memory` at confirm level, above 1.5 GiB) asks first,
+    naming its size; キャンセル starts nothing and downloads nothing."""
+    page = f.page
+    downloads = []
+    page.on('download', lambda d: downloads.append(d))
+    await page.evaluate("async () => { await window.__mv.loadSong(window.__wav(60, 'long.wav')); }")
+    await page.evaluate("""() => window.__mv.batch({ label: ['undo.output', {}] }, [{ t: 'output.set', key: 'short', v: 2160 },
+      { t: 'output.set', key: 'fps', v: 60 }, { t: 'output.set', key: 'quality', v: 'max' }, { t: 'output.set', key: 'range', v: null },
+      { t: 'output.set', key: 'kit', v: { overlay: true, bg: true, green: true, srt: true, lrc: true } }])""")
+    await f.settle(2)
+    item = await page.evaluate("() => window.__mv.exportChecks().find((c) => c.code === 'kit-memory') || null")
+    if not f.check(item and item['level'] == 'confirm', 'a 2160p60 set of every file, a minute long, asks before building in memory: %r' % item):
+        return
+    await page.click('.footer-export [data-act="export.start"]')
+    if await f.until("() => !!document.querySelector('dialog.dlg[open]') && window.__mv.exportState().phase === 'idle'", 'the set asks first'):
+        text = await page.evaluate("() => document.querySelector('dialog.dlg[open]').textContent")
+        size = await page.evaluate("(b) => MV.use('i18n/t').fmtBytes(b)", item['params']['bytes'])
+        f.check(await t('exp.pre.memory.confirm', {'size': size}) in text, 'it names the size: %r' % text)
+        no = 'dialog.dlg[open] .dlg-actions .btn:not(.primary)'
+        f.check(await page.text_content(no) == await t('dlg.cancel'), 'with キャンセル (やめる)')
+        await page.click(no)
+        await f.until("() => !document.querySelector('dialog.dlg[open]')", 'キャンセル closes the question')
+    await f.settle(3)
+    f.check(await page.evaluate("() => window.__mv.exportState().phase") == 'idle' and not downloads, 'declining starts nothing and downloads nothing')
+
+
+async def flow_kit_keys(f, lang):
+    """The keyboard-only variant (DESIGN_2_1 §13.12): 形式 and なめらかさ are radio groups — one Tab stop each (the checked
+    option), the arrows (and Home / End) choose and keep the focus, and the app's frame keys stay out; その他 ▾ is the next
+    Tab stop (↓ picks 透過動画 there, which makes the backdrop 透明 — flow "webm" by keys —, ↓ again PNG連番, P PNG連番);
+    the set's contents are checkboxes (Space); 「Filmoraで使うには」 opens with Enter and Esc gives the focus back; Enter
+    on [書き出す] writes the set, and the done state's guide opens with Enter too."""
+    page = f.page
+    done0, doc0 = await with_lyrics(f)
+    await page.evaluate(KIT_CODECS)
+    await page.evaluate(FAKE_DIR)
+    await page.evaluate("""() => window.__mv.batch({ label: ['undo.output', {}] }, [{ t: 'output.set', key: 'short', v: 720 },
+      { t: 'output.set', key: 'range', v: { t0: 1, t1: 1.4 } }])""")
+    await f.blur()
+    await page.keyboard.press('4')
+    await f.until("() => window.__mv.view.state.step === 'export'", '4 = step ④')
+    await f.until('() => !!window.__mv.exportProbe()', 'the encoders are probed', timeout=15000)
+    fmt = "() => window.__mv.doc.output.format"
+    where = "() => [window.__mv.time(), JSON.stringify(window.__mv.view.state.sel)]"
+    f.check(await tab_to(page, '[data-seg="format"] [role="radio"]'), 'Tab reaches 形式')
+    f.check(await page.evaluate(FOCUS) == 'mp4', 'its Tab stop is the checked option, MP4')
+    for key, want in (('ArrowRight', 'kit'), ('ArrowRight', 'mp4'), ('End', 'kit'), ('ArrowLeft', 'mp4'), ('ArrowDown', 'kit')):
+        before = await page.evaluate(where)
+        await page.keyboard.press(key)
+        await f.settle(1)
+        got = [await page.evaluate(fmt), await page.evaluate(FOCUS)]
+        f.check(got == [want, want], '%s chooses %s and the focus follows: %r' % (key, want, got))
+        f.check(await page.evaluate(where) == before, '%s neither moves the playhead nor the selection (the app keymap stays out)' % key)
+    await page.keyboard.press('Tab')
+    f.check(await page.evaluate(FOCUS) == 'format', 'Tab goes on to その他 ▾ (one stop for the radio pair)')
+    # その他 › 透過動画 by keys: the backdrop becomes 透明 with it, in one undo entry (H3S-3)
+    clear_label = "() => [...document.querySelectorAll('[data-ctl=\"backdrop\"] option')].find((o) => o.value === 'clear').textContent"
+    for want in (['webmAlpha', 'clear', 'clear'], ['png', 'scene', 'scene']):
+        done = await page.evaluate(DONE)
+        await page.keyboard.press('ArrowDown')
+        await f.settle(2)
+        got = await page.evaluate(OUTPUT)
+        f.check(got == want and await page.evaluate(DONE) == done + 1 and await page.evaluate(FOCUS) == 'format',
+                '↓ in その他 ▾ picks %s (one undo entry, the focus stays): %r' % (want[0], [got, await page.evaluate(FOCUS)]))
+        label = await page.evaluate(clear_label)
+        f.check(label == await page.evaluate('(k) => window.__mv.t(k)', 'exp.bg.clearWebm' if want[0] == 'webmAlpha' else 'exp.bg.clearPng'),
+                '背景 names what 透明 makes now: %r' % label)
+    await page.keyboard.press('p')
+    await f.settle(2)
+    f.check(await page.evaluate(OUTPUT) == ['png', 'scene', 'scene'], 'P picks PNG連番 in その他 ▾: %r' % await page.evaluate(OUTPUT))
+    await page.keyboard.press('Shift+Tab')
+    f.check(await page.evaluate(FOCUS) == 'mp4', 'Shift+Tab: back to the pair, on its first option while none is checked')
+    await page.keyboard.press('End')
+    await f.settle(1)
+    f.check(await page.evaluate(fmt) == 'kit', 'End chooses Filmora用')
+    f.check(await tab_to(page, '[data-seg="fps"] [role="radio"]'), 'Tab reaches なめらかさ')
+    f.check(await page.evaluate(FOCUS) == '30', 'its Tab stop is 30')
+    await page.keyboard.press('ArrowRight')
+    await f.settle(1)
+    f.check(await page.evaluate('() => window.__mv.doc.output.fps') == 60 and await page.evaluate(FOCUS) == '60', '→ chooses 60')
+    await page.keyboard.press('ArrowLeft')
+    await f.settle(1)
+    f.check(await page.evaluate('() => window.__mv.doc.output.fps') == 30, '← back to 30')
+    f.check(await tab_to(page, '.step-export details.more > summary'), 'Tab reaches 詳しく')
+    await page.keyboard.press('Enter')
+    f.check(await page.evaluate("() => document.querySelector('.step-export details.more').open"), 'Enter opens 詳しく')
+    f.check(await tab_to(page, '#exp-kit-bg'), 'Tab reaches 背景だけ（MP4）')
+    await page.keyboard.press(' ')
+    await f.settle(1)
+    f.check(await page.evaluate('() => window.__mv.doc.output.kit.bg') is True, 'Space puts it into the set')
+    f.check(await tab_to(page, '[data-kit-help="planned"]'), 'Tab reaches 「Filmoraで使うには」')
+    await page.keyboard.press('Enter')
+    await f.until('() => !!document.querySelector("dialog.dlg[open]")', 'Enter opens the guide')
+    f.check((await page.evaluate(SHEET) or {}).get('inside'), 'the focus is inside the guide')
+    await page.keyboard.press('Escape')
+    await f.until('() => !document.querySelector("dialog.dlg[open]")', 'Esc closes it')
+    f.check(await page.evaluate(FOCUS) == 'planned', 'the focus is back on the link')
+    f.check(await tab_to(page, '[data-act="export.start"]'), 'Tab reaches [書き出す]')
+    await page.keyboard.press('Enter')
+    if not await f.until(EXPORT_DONE, 'the set is written (keys)', timeout=180000):
+        return
+    res = await page.evaluate(DONE_STATE)
+    f.check(res['phase'] == 'done' and len(res['files']) >= 4, 'the done state lists the files (keys): %r' % res)
+    f.check(await tab_to(page, '[data-kit-help="written"]'), 'Tab reaches the done state\'s guide')
+    await page.keyboard.press('Enter')
+    await f.until('() => !!document.querySelector("dialog.dlg[open]")', 'Enter opens it')
+    await page.keyboard.press('Escape')
+    await f.until('() => !document.querySelector("dialog.dlg[open]")', 'Esc closes it')
+    f.check(await page.evaluate(FOCUS) == 'written', 'the focus is back')
+    await page.evaluate('() => window.__mv.exportReset()')
+    await f.undo_all(done0, doc0)
+
+
+async def flow_webm(f, lang):
+    """透過動画（WebM） (DESIGN_2_1 §13.3, §13.12 flow "webm"): その他 › 透過動画 sets the backdrop 透明 in one undo entry (the
+    preview turns transparent; その他 is marked, the pair is not); the backdrop list names 透明 by what it makes; another
+    backdrop turns 透過動画 into MP4, and 透明 turns MP4 back into 透過動画 and PNG連番 into 透過PNG; a short WebM (memory,
+    downloaded) is a WebM file with the name the done state shows."""
+    page = f.page
+    done0, doc0 = await with_lyrics(f)
+    await page.evaluate("() => window.__mv.goStep('export')")
+    await f.settle(2)
+    t = lambda key, params=None: page.evaluate('([k, p]) => window.__mv.t(k, p || {})', [key, params])  # noqa: E731
+    bg = '[data-ctl="backdrop"] select'
+    done = await page.evaluate(DONE)
+    await choose_other(page, 'webmAlpha')
+    await f.settle(2)
+    f.check(await page.evaluate(OUTPUT) == ['webmAlpha', 'clear', 'clear'], 'その他 › 透過動画 makes the backdrop 透明: %r' % await page.evaluate(OUTPUT))
+    f.check(await page.evaluate(DONE) == done + 1, 'one undo entry for the pair')
+    ui = await page.evaluate("""() => { const s = document.querySelector('[data-other="format"]');
+      return { on: s.classList.contains('is-on'), text: s.options[s.selectedIndex].textContent,
+        radios: [...document.querySelectorAll('[data-seg="format"] [role="radio"]')].map((b) => [b.dataset.v, b.getAttribute('aria-checked'), b.tabIndex]),
+        clear: [...document.querySelectorAll('[data-ctl="backdrop"] option')].find((o) => o.value === 'clear').textContent,
+        note: document.querySelector('.step-export [data-note="alpha"]').hidden ? null : document.querySelector('.step-export [data-note="alpha"]').textContent }; }""")
+    f.check(ui['on'] and ui['text'] == await t('exp.fmt.webmAlpha'), 'その他 shows 透過動画（WebM）, marked chosen: %r' % ui)
+    f.check(ui['radios'] == [['mp4', 'false', 0], ['kit', 'false', -1]], 'the pair is unchecked, MP4 its Tab stop: %r' % ui['radios'])
+    f.check(ui['clear'] == await t('exp.bg.clearWebm') and ui['note'] == await t('exp.alphaNote2'), '透明（透過動画） and the note: %r' % ui)
+    f.check(await page.evaluate("() => document.querySelector('.step-export .kit-box').hidden"), 'no set contents for 透過動画')
+    await f.shot(lang + '_webm')
+    notes = """() => Object.fromEntries(['alpha', 'chroma'].map((k) => { const n = document.querySelector('.step-export [data-note="' + k + '"]');
+      return [k, n.hidden ? null : n.textContent]; }))"""
+    for choice, want in (('chroma', ['mp4', 'chroma', 'chroma']), ('clear', ['webmAlpha', 'clear', 'clear'])):
+        done = await page.evaluate(DONE)
+        await page.select_option(bg, choice)
+        await f.settle(2)
+        got = await page.evaluate(OUTPUT)
+        f.check(got == want and await page.evaluate(DONE) == done + 1, '背景 %s → %r (one entry): %r' % (choice, want, got))
+        shown = await page.evaluate(notes)
+        want_notes = {'alpha': None, 'chroma': await t('exp.chromaNote')} if choice == 'chroma' else {'alpha': await t('exp.alphaNote2'), 'chroma': None}
+        f.check(shown == want_notes, 'under 背景 %s: the green screen\'s how-to (#00B140) or the transparency note: %r' % (choice, shown))
+    # a fix by keys: Enter on [透過動画にする] (MP4 with 透明, an older file) keeps the focus in step ④, and Space then
+    # does not start playback (A11Y-1)
+    await page.evaluate("""() => window.__mv.batch({ label: ['undo.output', {}] }, [{ t: 'output.set', key: 'format', v: 'mp4' },
+      { t: 'look.set', key: 'backdrop', v: 'clear' }])""")
+    await f.settle(2)
+    await page.focus('.step-export .check[data-code="clear-mp4"] .check-actions .link')
+    await page.keyboard.press('Enter')
+    await f.settle(2)
+    f.check(await page.evaluate(OUTPUT) == ['webmAlpha', 'clear', 'clear'], '[透過動画にする] makes it 透過動画')
+    f.check(await page.evaluate(FOCUS) == 'format', 'the focus goes to その他 ▾, which now shows 透過動画: %r' % await page.evaluate(FOCUS))
+    before = await page.evaluate(NOW)
+    await page.keyboard.press(' ')
+    await f.settle(3)
+    f.check(await page.evaluate(NOW) == before and not await page.evaluate('() => window.__mv.view.state.playing'), 'Space does not start playback')
+    await choose_other(page, 'png')
+    await f.settle(2)
+    f.check(await page.evaluate(OUTPUT) == ['png', 'scene', 'scene'], 'PNG連番 turns 透明 back to 通常')
+    f.check(await page.evaluate("() => [...document.querySelectorAll('[data-ctl=\"backdrop\"] option')].find((o) => o.value === 'clear').textContent")
+            == await t('exp.bg.clearPng'), 'from PNG連番, 透明 says 透過PNG')
+    await page.select_option(bg, 'clear')
+    await f.settle(2)
+    f.check(await page.evaluate(OUTPUT) == ['pngAlpha', 'clear', 'clear'], 'PNG連番 + 透明 → 透過PNG (frames stay frames)')
+    # a short 透過動画, built in memory and downloaded
+    await choose_other(page, 'webmAlpha')
+    await page.evaluate("""() => { Object.defineProperty(window, 'showSaveFilePicker', { value: undefined, configurable: true });
+      window.__mv.batch({ label: ['undo.output', {}] }, [{ t: 'output.set', key: 'short', v: 720 }, { t: 'output.set', key: 'range', v: { t0: 1, t1: 1.3 } }]); }""")
+    await f.until('() => !!window.__mv.exportProbe()', 'the encoders are probed', timeout=15000)
+    await f.settle(2)
+    await no_vp9_fix(f, '透過動画', 'exp.pre.makeAlpha', "() => window.__mv.doc.output.format === 'pngAlpha' && window.__mv.doc.look.backdrop === 'clear'",
+                     'makes it 透過PNG', 'format')
+    await choose_other(page, 'webmAlpha')
+    await f.settle(2)
+    if await page.evaluate("() => window.__mv.exportChecks().some((c) => c.code === 'no-vp9')"):
+        print('skip  webm: this browser has no VP9 encoder (the export is blocked by no-vp9)')
+    else:
+        name = await page.evaluate("() => MV.use('export/schedule').fileName(window.__mv.doc, 'webm')")
+        async with page.expect_download(timeout=120000) as info:
+            await page.click('[data-act="export.start"]')
+        dl = await info.value
+        data = Path(await dl.path()).read_bytes()
+        f.check(dl.suggested_filename == name and data[:4] == b'\x1a\x45\xdf\xa3' and b'webm' in data[:64],
+                'a WebM file named %s (%r, %r)' % (name, dl.suggested_filename, data[:8]))
+        await f.until(EXPORT_DONE, 'the WebM is done')
+        res = await page.evaluate(DONE_STATE)
+        f.check(res['phase'] == 'done' and name in res['info'], 'the done state names it: %r' % res['info'])
+        await page.click('.footer-export .btn')
+    await f.undo_all(done0, doc0)
+
+
+async def flow_subtitles(f, lang):
+    """≡ › ファイル › 字幕（.srt）を保存 (DESIGN_2_1 §13.8): listed right after 時間つき歌詞（.lrc）; through the save dialog
+    (faked with OPFS) it offers '<name>.srt' and writes UTF-8 with a BOM and CRLF, one cue per sung line of the whole
+    video; without the dialog the same bytes are downloaded."""
+    page = f.page
+    await with_lyrics(f)
+    await page.evaluate("""() => window.__mv.dispatch({ t: 'output.set', key: 'range', v: { t0: 2, t1: 3 } }, { label: ['undo.range', {}] })""")
+    await page.evaluate(FAKE_SAVE)
+    await page.evaluate("() => { window.__pickName = 'sub.srt'; }")
+    await f.blur()
+    await page.click('[data-act="menu.open"]')
+    await f.until("() => !!document.querySelector('.popover.menu')", 'the ≡ menu opens')
+    labels = await page.evaluate("() => [...document.querySelectorAll('.popover.menu .menu-item .menu-label')].map((x) => x.textContent)")
+    srt, lrc = await page.evaluate("() => [window.__mv.t('cmd.file.saveSrt'), window.__mv.t('cmd.file.saveLrc')]")
+    f.check(srt in labels and lrc in labels and labels.index(srt) == labels.index(lrc) + 1, 'ファイル lists 字幕（.srt）を保存 after .lrc: %r' % labels)
+    await f.shot(lang + '_menu_file')
+    await page.evaluate(MENU_RUN, 'cmd.file.saveSrt')
+    await f.until('() => (window.__picks || []).length === 1', 'the save dialog opens')
+    want = await page.evaluate("""() => { const a = window.__mv, SUB = MV.use('export/subtitles'), S = MV.use('export/schedule');
+      return { text: SUB.BOM + SUB.srt(a.plan), name: S.kitBase(a.doc) + '.srt', lines: a.plan.lines.length }; }""")
+    f.check(await page.evaluate('() => window.__picks') == [{'name': want['name'], 'exts': ['.srt']}], 'it offers %s' % want['name'])
+    await f.until("async () => { const r = await navigator.storage.getDirectory(); try { return (await (await r.getFileHandle('sub.srt')).getFile()).size > 0; } catch (e) { return false; } }",
+                  'the file is written')
+    raw = bytes(await page.evaluate(OPFS_BYTES, 'sub.srt') or [])
+    f.check(raw.startswith(b'\xef\xbb\xbf1\r\n') and b'\n' not in raw.replace(b'\r\n', b''), 'UTF-8 with a BOM, CRLF only: %r' % raw[:24])
+    f.check(raw.decode('utf-8') == want['text'] and raw.count(b'\r\n\r\n') == want['lines'],
+            'one cue per sung line of the whole video (not the export range)')
+    # without a save dialog: a download of the same bytes
+    await page.evaluate("() => Object.defineProperty(window, 'showSaveFilePicker', { value: undefined, configurable: true })")
+    async with page.expect_download(timeout=30000) as info:
+        await page.evaluate("() => window.__mv.actions.run('file.saveSrt', { from: 'palette' })")
+    dl = await info.value
+    f.check(dl.suggested_filename == want['name'] and Path(await dl.path()).read_bytes() == raw, 'the download is the same file: %r' % dl.suggested_filename)
+
+
 FLOWS = [('first_run', flow_first_run_mouse, True), ('first_run_keys', flow_first_run_keys, True), ('drill', flow_drill, False),
          ('pin', flow_pin, False), ('lock', flow_lock, False), ('history', flow_history, False), ('tools', flow_tools, False),
          ('keys', flow_keys, False), ('values', flow_values, False), ('ai_prep', flow_ai_prep, False),
@@ -3930,6 +4533,8 @@ FLOWS += [('curve', flow_curve, False), ('keyframes', flow_keyframes, False), ('
 # v2.1 photos and videos (package G.4, DESIGN_2_1 §11.8.3).
 FLOWS += [('media', flow_media, True), ('library', flow_library, False), ('missing', flow_missing, False), ('package', flow_package, False),
           ('media_device', flow_media_device, False), ('media_song', flow_media_song, False)]
+# v2.1 editor-ready output (package H.3, DESIGN_2_1 §13.12).
+FLOWS += [('kit', flow_kit, False), ('kit_keys', flow_kit_keys, False), ('webm', flow_webm, False), ('subtitles', flow_subtitles, False)]
 
 
 async def run(browser, base, rel, lang, only, shots):
