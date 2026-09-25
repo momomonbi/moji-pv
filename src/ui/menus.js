@@ -121,8 +121,11 @@ MV.def('ui/menus', ['ui/dom', 'ui/icons', 'ui/keys'], (dom, I, K) => {
     const quality = ['auto', 'smooth', 'sharp'].map((q) => ({ label: t('menu.quality.' + q), radio: true,
       checked: app.view.state.prefs.quality === q, run: () => app.actions.run('view.quality', { q }) }));
     return [
-      { heading: t('menu.file') }, a('file.new'), a('file.open'), a('file.save'), a('file.saveAs'),
-      { label: t('menu.recent'), sub: () => recentItems(app) }, a('file.saveLrc'), a('lyrics.bakeTimes'),
+      // ≡ › ファイル (DESIGN_2_1 §12.7): 保存 writes the one file with everything (.mojipv), 軽い保存 the .json without
+      // pictures, videos or the song; 字幕（.srt）appears once its action exists (package H).
+      { heading: t('menu.file') }, a('file.new'), a('file.open'), a('file.save'), a('file.saveAs'), a('file.saveLight'),
+      a('media.import'), { label: t('menu.recent'), sub: () => recentItems(app) }, a('file.saveLrc'), a('file.saveSrt'),
+      a('lyrics.bakeTimes'),
       { sep: true }, { heading: t('menu.edit') }, a('edit.undo'), a('edit.redo'), a('edit.history'), a('palette.open'),
       { sep: true }, { heading: t('menu.view') }, c('pref.safeArea'), { label: t('menu.quality'), sub: () => quality },
       c('pref.reduceFlash'), c('view.foldSteps'), c('pref.autoFold'), c('pref.seekOnSelect'), c('pref.follow'),

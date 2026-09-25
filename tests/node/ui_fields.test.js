@@ -261,7 +261,8 @@ function fieldPaths(sel, sectionId, plan = PLAN) {
 
 test('sectionsFor: 作品全体 has its §6.4.5 sections with 見た目 and 強さ open', () => {
   const sections = F.sectionsFor({ level: 'work' }, PLAN, REG);
-  assert.deepEqual(sections.map((s) => s.id), ['look', 'colors', 'type', 'energy', 'parts', 'title', 'timing', 'lines', 'looks',
+  // 写真・動画 (DESIGN_2_1 §11.7.3) follows 見た目; it opens once the library holds something.
+  assert.deepEqual(sections.map((s) => s.id), ['look', 'media', 'colors', 'type', 'energy', 'parts', 'title', 'timing', 'lines', 'looks',
     'defaults', 'other']);
   assert.deepEqual(sections.filter((s) => s.open).map((s) => s.id), ['look', 'energy']);
   assert.deepEqual(sections[0].label, ['sec.look', {}]);
@@ -327,7 +328,7 @@ test('sectionsFor: 要素 pages follow the element and the list index', () => {
 
 test('sectionsFor: several lines, no plan, and ids unique within a page', () => {
   assert.deepEqual(sectionIds({ level: 'line', ids: ['r4', 'r5'] }), ['multi', 'direction', 'colortype', 'shift']);
-  assert.deepEqual(sectionIds({ level: 'work' }, null).slice(0, 2), ['look', 'colors'], 'works before there are lyrics');
+  assert.deepEqual(sectionIds({ level: 'work' }, null).slice(0, 3), ['look', 'media', 'colors'], 'works before there are lyrics');
   const sels = [{ level: 'work' }, { level: 'line', ids: ['r4'] }, { level: 'cut', key: 'r4~0' },
     { level: 'el', scope: 'cut/r4~0', el: 'text' }, { level: 'el', scope: 'work', el: 'filter', idx: 2 }];
   for (const sel of sels) {

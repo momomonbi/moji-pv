@@ -1082,7 +1082,7 @@ Given a key with aim box `B = {x, y, w, h}`, its centre `c`, frame centre `C = (
 5. **Bleed-safe clamp:**
    `|X| ≤ LX(Z) = W · min over k ∈ {0.5, 1.2} of (0.6 − 0.5 / (1 + (Z − 1)·k)) / k`, and the same for `Y` with `H`.
    - 0.6 = the 0.5 half frame plus 0.1 of the 0.15 ground/particle bleed. 0.05 is left for the rig and lens.
-   - At Z = 1 this allows ±0.083 W; at Z = 1.5 it allows ±0.28 W.
+   - At Z = 1 this allows ±0.083 W; at Z = 1.5 it allows ±0.24 W (the k = 1.2 term is the smaller one).
 
 **Interpolation between keys i → j**, for `t ∈ [t_i, t_j)`:
 ```
@@ -2505,9 +2505,10 @@ A.2 follows: `core/recipe` complete. B, D and F start on A.1; C and E need A.2.
 **B.4 — the MP4 must not be silent without AAC (§13.4; ≈ 80 LOC plus tests):**
 - **Files:** `export/host/mp4.js` and `export/schedule.js`, owned by B for this item only and handed to H afterwards;
   `tests/node/export_math.test.js` (+); `tests/browser/export_check.py` (+).
-- **Change:** `audioConfig` tries AAC-LC (`mp4a.40.2`, 192 kbps), then Opus (`{ codec: 'opus', sampleRate: 48000,
-  numberOfChannels: 2, bitrate: 160000 }`). Songs are always decoded at 48 kHz (`audio/host/decode.DECODE_RATE`), so no
-  resampling is needed.
+- **Change:** `audioConfig` tries AAC-LC (`mp4a.40.2`, 192 kbps), then Opus (`{ codec: 'opus', sampleRate, numberOfChannels: 2,
+  bitrate: 160000 }`, where `sampleRate` is the song buffer's rate). Songs are always decoded at 48 kHz
+  (`audio/host/decode.DECODE_RATE`), so that rate is 48000 and no resampling is needed; a buffer at another rate is never
+  fed at the wrong speed.
   - `muxCodec('opus') → 'opus'`, which mp4-muxer supports (its `Opus` sample entry with `dOps`).
   - `probe()` returns `audioCodec: 'mp4a.40.2' | 'opus' | null`. `Result.audioCodec` is added.
   - `preflight` adds `opus-audio` (info) when the MP4 has sound and the codec is Opus. `no-audio-codec` is reported only
@@ -4639,7 +4640,8 @@ Every **?** line becomes a row of the manual checklist (§13.12).
 | 透過WebM, kit `_overlay.webm` | Opus in WebM, the WebM standard (standalone: when 音声を入れる is on; overlay: never) | same |
 
 - The WAV writer is `audio/wav.encodePcm16(channels, rate, start, frames) → Uint8Array` (additive; package H). It mixes
-  down with `export/schedule.fillPlanar` (the D§4.21 down-mix) and writes a RIFF header.
+  down with the D§4.21 down-mix and writes a RIFF header. The down-mix (`mixMatrix`, `fillPlanar`) lives in `audio/wav`,
+  because `audio/*` (L1) may not depend on `export/*` (L5); `export/schedule` re-exports the same functions.
 - A WAV over 4 GB (≈ 6 h 12 min at 48 kHz) is impossible within the 60-min cap.
 
 ### 13.5 Transparent WebM (`export/host/webm`, `export/webm`; package H)
@@ -4658,7 +4660,9 @@ Every **?** line becomes a row of the manual checklist (§13.12).
 5. Both encoders use the same config:
    - codec: the first supported of `pickVp9(w, h, fps)` = `vp09.00.<level>.08` (level from the size and rate table),
      then `vp8`;
-   - bitrate: C = `bitrate(w, h, fps, quality)`, A = 25 % of that;
+   - bitrate: C = `bitrate(w, h, fps, quality)`, A = the same (`ALPHA_SHARE` 1). At 25 % the alpha fell behind moving
+     text within a key-frame interval (a ghost trail over the user's footage; measured in NOTES "## v2.1-H.2"); the
+     variable-rate encoder uses only what the alpha needs;
    - `latencyMode: 'quality'`;
    - key frames forced on both at `i % (2·fps) === 0`.
 6. The muxer pairs C and A chunks by timestamp and writes one `BlockGroup` per frame:
@@ -4846,7 +4850,7 @@ plus 「Filmoraで使うには」.
 | `export/schedule` (+) | pure | `pickVp9`, `kitFiles(doc, plan, env) → [{ name, kind, est }]`, the new preflight codes, `FORMATS` |
 | `export/host/webm` (new, L6) | host | `exportWebm({ engine, doc, audio, sink, signal, onProgress })` → Result (§13.5) |
 | `export/host/kit` (new, L6) | host | `exportKit({ engine, doc, audio, dir \| null, signal, onProgress })` → `{ files, ms, audio }` |
-| `export/host/sink` (+) | host | `openDirectory({ name })`, `createDirSink(dirHandle)` → `{ file(name) → Sink, abort(), close() }`; `write` accepts `Blob` (§12.3) |
+| `export/host/sink` (+) | host | `openDirectory({ name })`, `createDirSink(dirHandle)` → `{ file(name) → Promise<Sink>, abort(), close() }` (file handles are made asynchronously); `write` accepts `Blob` (§12.3) |
 | `export/host/mp4` (+) | host | the `layers` and `backdrop` options through `openJob`; reuse by the kit. The `mediaReady` await (B.3) and the Opus fallback (B.4) are B's items. |
 | `audio/wav` (+) | pure | `encodePcm16(channels, rate, start, frames)` |
 | `ui/output` (+), `ui/step_export` (+), `ui/filmora_help` (new), `ui/menus` (+ `file.saveSrt`) | UI | §13.10 |
@@ -4860,7 +4864,7 @@ plus 「Filmoraで使うには」.
 | `subtitles.test.js` (new) | H | the SRT grammar (a small parser); CRLF; the BOM added by the caller; rounding; overlap trimming; range clipping; per-cut mode; `lrc` bytes equal the previous `lrcText` over the fixtures |
 | `export_math.test.js` (+) | H, B | `pickVp9` levels; `kitFiles` names and estimates; preflight `kit-wav`, `kit-fps`, `layers-approx`, `no-vp9`, `opus-audio` (B) and `no-audio-codec` only when there is no codec at all |
 | `doc.test.js`, `commands.test.js` (+) | A | `output.format` `kit` and `webmAlpha`; `output.kit` normalize and validate; `output.set kit` |
-| `webm_check.py` (new, browser) | H | A 3-s 720p30 transparent WebM of project_basic with an alpha test pattern cut. **Decoded by Chrome** (`<video src=blob:>` + `requestVideoFrameCallback` + draw + `getImageData`) at 6 frame times: alpha within ±6/255 of the transparent PNG export of the same frames; fully clear areas ≤ 3; glyph cores ≥ 250. **Decoded by WebCodecs** through `media/matroska`: N frames, both streams, key frames aligned every 60. **Frame-exact:** the §11.8.1 counter pattern drawn by a cut, and each decoded frame's code equals `i`. Cues, Duration and DefaultDuration present. With the song: the Opus track length equals `audioFrames(N)` ± one packet. |
+| `webm_check.py` (new, browser) | H | A 3-s 720p30 transparent WebM of project_basic with an alpha test pattern cut. **Decoded by Chrome** (`<video src=blob:>` + `requestVideoFrameCallback` + draw + `getImageData`) at 6 frame times: alpha within ±6/255 of the transparent PNG export of the same frames for ≥ 99 % of the pixels, mean \|Δα\| ≤ 1; fully clear areas (no PNG α > 0 within 4 px) ≤ 3 and glyph cores (PNG α = 255 within 3 px) ≥ 250 for ≥ 99.9 % of their pixels, with no spike beyond 24 or below 232 (VP9 leaves isolated one-pixel spikes even at a fixed quantizer). **Decoded by WebCodecs** through `media/matroska`: N frames, both streams, key frames aligned every 60. **Frame-exact:** the §11.8.1 counter pattern drawn by a cut, and each decoded frame's code equals `i`. Cues, Duration and DefaultDuration present. With the song: the Opus track length equals `audioFrames(N)` ± one packet. |
 | `kit_check.py` (new, browser) | H | A kit of project_basic plus a still background, 2 s, 1080p30, to OPFS through `createDirSink`. It checks: file names; MP4 codec (`avc1.64…` when H.264 encodes, else the VP9 fallback of `export_check.py`) with CFR `stts`, `stss` every 60 and AAC present (Chrome CI) or `<base>.wav` present with the right length (AAC off); overlay WebM alpha present; `_bg.mp4` has N frames; **composite** `_bg` + `_overlay` (from the PNG exports of the same frames, to avoid codec loss) vs the full render MAE ≤ 2/255 on a project without world seams; `_green.mp4` decoded background ±4 of #00B140; SRT parses and its times equal `plan.lines`; README holds the real names. **ZIP path** (no File System Access, faked): one store-only ZIP with the same files. **Cancel** removes the folder. |
 | `export_check.py` (+) | B | **AAC fallback:** with AAC disabled (`codecs: { audioList: ['bogus.aac', 'opus'] }`), and by default on local Chromium, `exportVideo` returns `audio: true`, `audioCodec: 'opus'`; the MP4's `stsd` has `Opus` with a `dOps` box; `decodeAudioData` of the file gives a duration = N / fps (± 25 ms) and RMS > 0.01 for the test song; the preflight lists `opus-audio`, not `no-audio-codec` |
 | `ui_flows.py` (+) | H | **flow "kit":** choose Filmora用 → the contents checkboxes → 書き出す → the files listed in the done state → 「Filmoraで使うには」 opens and closes; **flow "webm":** その他 › 透過動画 sets backdrop 透明; keyboard-only variant |

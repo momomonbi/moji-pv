@@ -1,5 +1,5 @@
-/* 文字PVメーカー v2 — original work. Part browser: tile pages with try-on, filter pages ("use only these"), thumbnails via engine.thumb, マイ素材 (DESIGN §6.4.12; DESIGN_2_1 §6.9). */
-MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output'], (dom, I, OUT) => {
+/* 文字PVメーカー v2 — original work. Part browser: tile pages with try-on, filter pages ("use only these"), thumbnails via engine.thumb, マイ素材, the 写真・動画 tab (DESIGN §6.4.12; DESIGN_2_1 §6.9, §11.7.5). */
+MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output', 'ui/media_widgets', 'ui/media_io'], (dom, I, OUT, MW, MI) => {
   'use strict';
 
   const { h } = dom;
@@ -7,7 +7,7 @@ MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output'], (dom, I, OUT) => 
   const CACHE_MAX = 200;                        // §7.3 thumbnails (UI): LRU 200
   const SLICE_MS = 8;
   const TRYON_MS = 250;
-  const TABS = ['rec', 'all', 'season', 'mine'];
+  const TABS = ['rec', 'all', 'season', 'mine', 'media'];
   const SEASONS = ['spring', 'summer', 'autumn', 'winter'];
   const FILTER_KINDS = ['arrange', 'arrive', 'dwell', 'depart', 'seam', 'ornament', 'ground', 'lens', 'filter'];
   // The moment a still thumbnail shows (the sample cut spans 0–3 s): entrances mid-way, exits on their way out.
@@ -156,6 +156,14 @@ MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output'], (dom, I, OUT) => 
     });
   }
 
+  // A ground derived from a pooled photo or video (registry.extra[key].media === true, DESIGN_2_1 §11.5.9): the tile page
+  // shows the asset in its 写真・動画 tab instead of a part tile. A material's `media` is a list of ids, so the test is
+  // strict (NOTES v2.1-C). The filter page lists them by the asset's name (「これだけ使う」 can mean "only my photos").
+  function isDerivedMedia(reg, key) {
+    const extra = reg && reg.extra ? reg.extra[key] : null;
+    return !!extra && extra.media === true;
+  }
+
   // Grid navigation: the tiles in rows by their offsetTop.
   function moveFocus(grid, dx, dy) {
     const tiles = [...grid.querySelectorAll('.pb-tile:not([hidden])')];
@@ -214,7 +222,7 @@ MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output'], (dom, I, OUT) => 
     const grid = h('div', { class: 'pb-grid', role: 'listbox', 'aria-label': o.label });
     const el = h('div', { class: 'pb-page' }, tabs, search, tags, grid);
 
-    const all = listed ? o.keys.slice() : keysFor(reg, o.kind, o);
+    const all = listed ? o.keys.slice() : keysFor(reg, o.kind, o).filter((k) => !isDerivedMedia(reg, k));
     const mine = listed ? [] : mineFor(reg, o.kind, o);
     // What a tile shows and is searched by: a registry part's def, or o.info for listed keys.
     const defOf = (k) => (listed ? Object.assign({ tags: [], text: k }, o.info(k)) : reg.get(o.kind, k));
@@ -307,10 +315,13 @@ MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output'], (dom, I, OUT) => 
 
     // Tabs and tag chips are built once; a click updates their state in place (so the focus stays on them). マイ素材 is
     // offered for every kind a material can be made of (DESIGN_2_1 §6.9), even while it is empty: its first tile makes one.
+    // 写真・動画 {n} (DESIGN_2_1 §11.7.5): for ground, ornament and atmosphere slots while the library holds something.
+    const library = () => (app.doc.media && app.doc.media.list ? app.doc.media.list : []);
     const tabList = listed ? (o.alts ? ['rec', 'all'] : []) : TABS.filter((x) => (x !== 'season' || all.some((k) => defOf(k).season))
-      && (x !== 'mine' || (!!o.make && FILTER_KINDS.includes(o.kind))));
+      && (x !== 'mine' || (!!o.make && FILTER_KINDS.includes(o.kind))) && (x !== 'media' || (!!o.media && library().length > 0)));
     const tabButtons = tabList.map((x) => h('button', { class: 'seg', type: 'button', role: 'tab', 'data-tab': x,
-      on: { click: () => { tab = x; arrange(); } } }, x === 'mine' ? t('pb.tab.mine', { n: mine.length }) : t('pb.tab.' + x)));
+      on: { click: () => { tab = x; arrange(); } } }, x === 'mine' ? t('pb.tab.mine', { n: mine.length })
+      : x === 'media' ? t('pb.tab.media', { n: library().length }) : t('pb.tab.' + x)));
     tabs.hidden = !tabList.length;
     const tagButtons = tagList.length > 1 ? tagList.map((x) => h('button', { class: 'chip pb-tag', type: 'button', 'data-tag': x,
       on: { click: () => { tag = tag === x ? null : x; arrange(); } } }, t.has('tag.' + x) ? t('tag.' + x) : x)) : [];
@@ -369,8 +380,27 @@ MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output'], (dom, I, OUT) => 
       if (description && o.make) o.make.run({ description, use: makeUse.checked });
     });
 
+    // The 写真・動画 tab's tiles: [＋ 読み込む], then the assets (posters). A pick pins the kind's media part and its source.
+    let mediaTiles = [];
+    function buildMedia() {
+      if (!o.media) { mediaTiles = []; return; }
+      const add = h('button', { class: 'pb-tile pb-make pb-media-add', type: 'button' },
+        h('span', { class: 'pb-thumb pb-autoicon', 'aria-hidden': 'true' }, I.icon('plus', { size: 26 })),
+        h('span', { class: 'pb-name', text: t('pb.importTile') }));
+      mediaTiles = [add].concat(library().map((e) => {
+        const missing = app.media && app.media.state(e.id) === 'missing';
+        const canvas = h('canvas', { class: 'pb-thumb', width: THUMB_W, height: THUMB_H, 'aria-hidden': 'true' });
+        if (!missing) MW.posterInto(app, canvas, e.id);
+        return h('button', { class: 'pb-tile pb-media', type: 'button', role: 'option', 'aria-selected': 'false', 'data-media': e.id,
+          'aria-label': t('media.a11y.tile', { name: e.name, kind: t(MI.kindKey(e)) }) + (missing ? t('media.a11y.sep') + t('media.missing') : '') },
+        canvas, h('span', { class: 'pb-name', text: e.name }),
+        missing ? h('span', { class: 'pb-badge', text: t('media.missing') }) : null);
+      }));
+    }
+
     // Every tile of the page, for the document and plan as they are now.
     function build() {
+      buildMedia();
       leading = [tile(null, o.allowNone ? t('pb.none') : t('pb.auto'), { blurb: t('pb.autoTip') })];
       tiles = new Map();
       drawn = new Set();
@@ -405,6 +435,11 @@ MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output'], (dom, I, OUT) => 
     // (the same elements come back). The grid changes only when its content does, and a focused tile keeps the focus.
     function arrange() {
       showControls();
+      if (tab === 'media') {
+        const now = grid.children;
+        if (mediaTiles.length !== now.length || mediaTiles.some((n, i) => now[i] !== n)) dom.replace(grid, mediaTiles);
+        return;
+      }
       const keys = tabKeys().filter(matches);
       const want = leading.concat(tab === 'mine' && makeTile ? [makeTile] : [], keys.map((k) => tiles.get(k)));
       if (!keys.length && !pending()) want.push(emptyNote);
@@ -436,8 +471,25 @@ MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output'], (dom, I, OUT) => 
     function stopTry() { clearTimeout(tryTimer); app.tryOn(null); }
     const keyOfTile = (el2) => (el2.dataset.key === '' ? null : el2.dataset.key);
 
-    // ＋ AIで作る (.pb-make) is a tile of its own: it opens the form and is never picked or tried on.
-    const PICKABLE = '.pb-tile:not(.pb-make)';
+    // ＋ AIで作る (.pb-make) is a tile of its own: it opens the form and is never picked or tried on; so are the 写真・動画
+    // tab's tiles (.pb-media, and its ＋ 読み込む).
+    const PICKABLE = '.pb-tile:not(.pb-make):not(.pb-media)';
+    const pickMedia = (id) => { stopTry(); if (o.media) o.media.onPick(id); };
+    dom.on(grid, 'click', '.pb-media', (ev, el2) => pickMedia(el2.dataset.media));
+    dom.on(grid, 'click', '.pb-media-add', () => {
+      // the import ends later: the tab's owner places it only while this browser is still shown (o.media.onImported)
+      if (app.media) app.media.pickAndImport({ onPicked: (e) => (o.media && o.media.onImported ? o.media.onImported(e.id) : false) });
+    });
+    const tryMedia = (el2) => {
+      clearTimeout(tryTimer);
+      tryTimer = setTimeout(() => {
+        const doc = o.media ? o.media.tryDoc(el2.dataset.media) : null;
+        const e = MI.entryOf(app.doc, el2.dataset.media);
+        if (doc) app.tryOn(doc, t('look.tryOn', { name: e ? e.name : '' }));
+      }, TRYON_MS);
+    };
+    dom.on(grid, 'pointerover', '.pb-media', (ev, el2) => tryMedia(el2));
+    dom.on(grid, 'focusin', '.pb-media', (ev, el2) => tryMedia(el2));
     dom.on(grid, 'click', PICKABLE, (ev, el2) => { stopTry(); o.onPick(keyOfTile(el2)); });
     dom.on(grid, 'pointerover', PICKABLE, (ev, el2) => {
       tryKey(keyOfTile(el2));
@@ -485,6 +537,8 @@ MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output'], (dom, I, OUT) => 
       },
       pick() {
         const at = focusedTile();
+        if (at && at.classList.contains('pb-media')) { pickMedia(at.dataset.media); return true; }
+        if (at && at.classList.contains('pb-media-add')) { at.click(); return true; }
         if (at && at.classList.contains('pb-make')) { toggleMake(); return true; }
         if (at) { stopTry(); o.onPick(keyOfTile(at)); return true; }
         return false;
@@ -625,6 +679,6 @@ MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output'], (dom, I, OUT) => 
     };
   }
 
-  return { createThumbs, pickerPage, filterPage, counts, setFilter, denyOne, allowedBy, keysFor, mineFor, tagWeight, FILTER_KINDS,
-    THUMB_W, THUMB_H };
+  return { createThumbs, pickerPage, filterPage, counts, setFilter, denyOne, allowedBy, keysFor, mineFor, tagWeight, isDerivedMedia,
+    FILTER_KINDS, THUMB_W, THUMB_H };
 });

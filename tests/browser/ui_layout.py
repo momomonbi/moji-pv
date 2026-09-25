@@ -23,7 +23,8 @@ MP4 of a transparent backdrop).
 
 v2.1 (DESIGN_2_1 §7.4): on the v21 project, the curve widget with かんたん open, the keyframe editor, the AI board and a
 material page are checked at every viewport with the same layout, clipping, covering and budget checks; the panel never
-scrolls sideways, and the viewports cover panel widths from 288 to 352 px.
+scrolls sideways, and the viewports cover panel widths from 288 to 352 px. Photos and videos (§11.8.3): the library, the
+asset page, the picker and the trim row get the same checks, and the crop overlay never covers the preview canvas.
 
 Run: PW_EXECUTABLE=/opt/pw-browsers/chromium python3 tests/browser/ui_layout.py [--quick] [--shots DIR] [--root DIR]
 """
@@ -538,6 +539,141 @@ async def v21_pages(browser, base, rel, lang, viewports, shots):
     return checked, failures, sorted(widths)
 
 
+# v2.1 photos and videos (package G.4, DESIGN_2_1 §11.8.3): a photo and a video imported here (tests/helpers/media_gen.js),
+# the video as line 3's background; the library, the asset page, the picker and the trim row are checked like the pages
+# above, and the crop overlay never covers the preview canvas (it draws on the overlay canvas only).
+MEDIA_HELPERS = ('tests/helpers/exif_write.js', 'tests/helpers/media_gen.js')
+MEDIA_SETUP = """async (lyrics) => {
+  const a = window.__mv;
+  a.view.setPref('autoplay', false);
+  a.dispatch({ t: 'lyrics.set', text: lyrics }, { label: ['undo.paste', {}] });
+  a.pause();
+  const c = new OffscreenCanvas(1600, 900), g = c.getContext('2d');
+  g.fillStyle = '#4080e0'; g.fillRect(0, 0, 1600, 900);
+  const png = new File([await c.convertToBlob({ type: 'image/png' })], '青空と海辺のとても長い名前の写真.png', { type: 'image/png' });
+  const v = await window.MVMediaGen.encodeCounter({ container: 'mp4', fps: 30, frames: 45 });
+  const mp4 = new File([v.bytes], '海辺.mp4', { type: 'video/mp4' });
+  const got = await a.media.importFiles([png, mp4], {});
+  const line = a.plan.lines[2].id;
+  a.media.place(got[1].id, 'ground', { kind: 'lines', scopes: ['line/' + line], lineIds: [line], area: null });
+  // a third asset whose bytes are not on this device: its row reads この端末にありません with [つなぎ直す]
+  const ghost = Object.assign({}, got[0], { id: 'a' + 'f'.repeat(24), name: '夜景と街あかりのとても長い名前の写真.png' });
+  a.dispatch({ t: 'media.put', entry: ghost }, { label: ['undo.media.put', {}] });
+  await a.assets.check([ghost.id]);
+  return got.length;
+}"""
+LINE_GROUND = "a.select({ level: 'el', scope: 'line/' + a.plan.lines[2].id, el: 'ground' }, { from: 'crumbs', open: true });"
+MEDIA_PAGES = [
+    ('library', """() => { const a = window.__mv; a.openPanel('details'); a.select({ level: 'work' }, { from: 'crumbs', open: true }); }""",
+     "() => document.querySelectorAll('.med-row').length === 3 && !!document.querySelector('.med-row.is-missing')"),
+    ('asset', """() => { const a = window.__mv; a.media.openAsset(a.doc.media.list[1].id); }""",
+     "() => !!document.querySelector('.med-page .med-title')"),
+    ('picker', """() => { const a = window.__mv; a.openPanel('details'); """ + LINE_GROUND + """
+      requestAnimationFrame(() => requestAnimationFrame(() => document.querySelector('.frow[data-slot="ground@photoPan.image"] .w-media').click())); }""",
+     "() => document.querySelectorAll('.med-picker .pb-tile').length >= 3"),
+    ('trim', """() => { const a = window.__mv; a.openPanel('details'); """ + LINE_GROUND + """
+      requestAnimationFrame(() => requestAnimationFrame(() => { const t = document.querySelector('.w-trim'); if (t) t.scrollIntoView({ block: 'center' }); })); }""",
+     "() => !!document.querySelector('.w-trim .w-trim-h:not(:disabled)')"),
+]
+MEDIA_SCOPE = {'library': '.med-lib', 'asset': '.med-page', 'picker': '.med-picker', 'trim': '.frow[data-slot="ground@photoPan.clipIn"]'}
+# While the crop overlay is on: every element whose box meets the preview canvas is the canvas itself, the overlay canvas,
+# or an ancestor of them (hit-tested at nine points), and the overlay canvas has the crop's frame and thirds drawn.
+CROP_COVER = r"""() => {
+  const main = document.querySelector('.canvas-wrap canvas:not(.canvas-overlay)');
+  const over = document.querySelector('.canvas-overlay');
+  const r = main.getBoundingClientRect();
+  const out = [];
+  for (const fx of [0.1, 0.5, 0.9]) for (const fy of [0.1, 0.5, 0.9]) {
+    const el = document.elementFromPoint(r.left + r.width * fx, r.top + r.height * fy);
+    if (el && el !== main && el !== over && !el.contains(main)) out.push((el.className || el.tagName) + '');
+  }
+  const d = over.getContext('2d').getImageData(0, 0, over.width, over.height).data;
+  let drawn = 0;
+  for (let i = 3; i < d.length; i += 4) if (d[i] > 0) drawn++;
+  return { cover: [...new Set(out)], drawn: drawn > over.width, cropping: document.querySelector('.canvas-wrap').classList.contains('is-cropping') };
+}"""
+# The library rows at a 288 px panel: every name and every status (facts, この端末にありません, つなぎ直す) shows whole.
+ROW_CLIP = r"""async (px) => {
+  const panel = document.querySelector('.region-panel:not([hidden])') || document.querySelector('.region-side:not([hidden])');
+  if (!panel) return ['no panel'];
+  const old = panel.style.width;
+  panel.style.width = px + 'px';
+  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(r))));
+  const out = [];
+  for (const el of document.querySelectorAll('.med-row .med-name, .med-row .med-info, .med-row .med-relink, .med-row .med-used')) {
+    const r = el.getBoundingClientRect(), row = el.closest('.med-row').getBoundingClientRect();
+    if (el.scrollWidth > el.clientWidth + 1 || r.right > row.right + 0.5 || r.width < 8) out.push('clipped: ' + el.textContent);
+  }
+  panel.style.width = old;
+  return out;
+}"""
+LYRICS_LAYOUT = '\n'.join(['# Aメロ', '窓をあけて/光を入れる', 'まだ眠い街に/*おはよう*', '坂道を下って/駅まで歩く', '', '# サビ',
+                            '今日も/ここから始まる!', '小さな/一歩で'])
+
+
+async def media_pages(browser, base, rel, lang, viewports, shots):
+    page = await new_page(browser, viewport={'width': 1440, 'height': 900})
+    errors = []
+    page.on('pageerror', lambda e: errors.append(str(e)))
+    for host in FONT_HOSTS:
+        await page.route(host, lambda route: route.abort())
+    await page.goto(base + rel + '?fresh=1&test=1', wait_until='load')
+    await page.wait_for_function('window.__mv && window.__mv.ready')
+    await page.evaluate('async () => { await window.__mv.ready; }')
+    for helper in MEDIA_HELPERS:
+        await page.evaluate((ROOT / helper).read_text(encoding='utf-8'))
+    failures, checked, widths = [], 0, set()
+    if await page.evaluate(MEDIA_SETUP, LYRICS_LAYOUT) != 2:
+        await page.close()
+        return 0, ['%s media pages: the two files did not import' % lang], []
+    for (w, h) in viewports:
+        await page.set_viewport_size({'width': w, 'height': h})
+        for name, js, ready in MEDIA_PAGES:
+            await page.evaluate("() => { const a = window.__mv; a.view.set({ rail: false, railBy: null, drawer: false }); }")
+            await page.evaluate(js)
+            where = '%s %dx%d media %s' % (lang, w, h, name)
+            if not await poll(page, ready):
+                failures.append('%s: the page did not open' % where)
+                continue
+            await settle(page)
+            probe = await page.evaluate(PROBE)
+            failures += check(probe, where, None)
+            panel = probe['regions'].get('panel') or probe['regions'].get('side')
+            side = await page.evaluate("""() => { const p = document.querySelector('.region-panel:not([hidden]), .region-side:not([hidden])');
+              const s = p && p.querySelector('.insp-sub:not([hidden]), .insp-body');
+              return p ? { sw: (s || p).scrollWidth, cw: (s || p).clientWidth } : null; }""")
+            if side and side['sw'] > side['cw'] + 1:
+                failures.append('%s: the panel scrolls sideways (%d in %d)' % (where, side['sw'], side['cw']))
+            if panel:
+                widths.add(round(panel['w']))
+            checked += 1
+            if shots and (w, h) in ((1024, 768), (1440, 900)):
+                await page.screenshot(path=str(Path(shots) / ('%s_%dx%d_media_%s.png' % (lang, w, h, name))))
+            if (w, h) == viewports[0]:
+                bad = await page.evaluate(NARROW_PROBE, [288, MEDIA_SCOPE[name]])
+                failures += ['%s at a 288 px panel: %s' % (where, x) for x in bad]
+            if name == 'library':
+                failures += ['%s: a library row at a 288 px panel: %s' % (where, x) for x in await page.evaluate(ROW_CLIP, 288)]
+                failures += ['%s: a library row: %s' % (where, x) for x in await page.evaluate(ROW_CLIP, round(panel['w']) if panel else 320)]
+            if name == 'trim':
+                # the crop overlay (切り抜き [画面で調整]) never covers the preview: it draws on the overlay canvas
+                await page.click('.frow[data-slot="ground@photoPan.cropZoom"] .w-crop-edit')
+                await poll(page, "() => document.querySelector('.canvas-wrap').classList.contains('is-cropping')")
+                await settle(page)
+                crop = await page.evaluate(CROP_COVER)
+                if not crop['cropping'] or crop['cover'] or not crop['drawn']:
+                    failures.append('%s: the crop overlay covers the preview or draws nothing: %r' % (where, crop))
+                failures += check(await page.evaluate(PROBE), where + ' (cropping)', None)
+                await page.keyboard.press('Escape')
+            await page.keyboard.press('Escape')
+    if viewports == VIEWPORTS and not {312, 320, 352} <= widths:
+        failures.append('%s: the media pages were not checked at every panel width of §6.2 (saw %r)' % (lang, sorted(widths)))
+    await page.close()
+    if errors:
+        failures.append('%s media pages: page errors: %r' % (lang, errors[:3]))
+    return checked, failures, sorted(widths)
+
+
 async def poll(page, js, timeout_ms=4000):
     """Waits until the expression is truthy; returns its last value."""
     try:
@@ -784,6 +920,10 @@ async def main():
                     total += n
                     failures += f
                     print('%s %s: %d v2.1 pages checked (panel widths %r)' % ('FAIL' if f else 'ok  ', lang, n, widths))
+                    n, f, widths = await media_pages(browser, base, rel, lang, viewports, args.shots)
+                    total += n
+                    failures += f
+                    print('%s %s: %d media pages checked (panel widths %r)' % ('FAIL' if f else 'ok  ', lang, n, widths))
             finally:
                 await browser.close()
     finally:

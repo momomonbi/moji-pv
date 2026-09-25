@@ -128,8 +128,43 @@
 
   const BT709 = { primaries: 'bt709', transfer: 'bt709', matrix: 'bt709', fullRange: false };
 
-  // encodeCounter({ codec, container: 'mp4' | 'webm', fps, frames, vfr, alpha, rotation, keyEvery })
-  //   → { bytes: Uint8Array, times: [s], codec, keys: [bool] }
+  // encodeTone(seconds) → { chunks: [{ data, key, ts, dur }], meta } of an Opus track (a 440 Hz tone, 48 kHz stereo), or
+  // null where this browser has no Opus AudioEncoder: the sound of a video with audio (encodeCounter's `audio`).
+  async function encodeTone(seconds) {
+    if (typeof AudioEncoder === 'undefined') return null;
+    const cfg = { codec: 'opus', sampleRate: 48000, numberOfChannels: 2, bitrate: 64000 };
+    try { const r = await AudioEncoder.isConfigSupported(cfg); if (!r || !r.supported) return null; } catch (e) { return null; }
+    const chunks = [];
+    let meta = null, failure = null;
+    const enc = new AudioEncoder({
+      output: (chunk, m) => {
+        const data = new Uint8Array(chunk.byteLength);
+        chunk.copyTo(data);
+        chunks.push({ data, key: chunk.type === 'key', ts: chunk.timestamp, dur: chunk.duration });
+        if (!meta && m && m.decoderConfig) meta = m;
+      },
+      error: (e) => { failure = e; },
+    });
+    enc.configure(cfg);
+    const n = Math.round(seconds * 48000), block = 960;
+    for (let at = 0; at < n; at += block) {
+      const len = Math.min(block, n - at);
+      const data = new Float32Array(len * 2);                // planar: left, then right
+      for (let i = 0; i < len; i++) data[i] = data[len + i] = 0.3 * Math.sin((2 * Math.PI * 440 * (at + i)) / 48000);
+      const ad = new AudioData({ format: 'f32-planar', sampleRate: 48000, numberOfFrames: len, numberOfChannels: 2,
+        timestamp: Math.round((at * 1e6) / 48000), data });
+      enc.encode(ad);
+      ad.close();
+    }
+    await enc.flush();
+    enc.close();
+    if (failure) throw failure;
+    return { chunks, meta };
+  }
+
+  // encodeCounter({ codec, container: 'mp4' | 'webm', fps, frames, vfr, alpha, rotation, keyEvery, audio })
+  //   → { bytes: Uint8Array, times: [s], codec, keys: [bool], audio: bool } — audio (MP4 only): an Opus tone track as
+  //   long as the video, where this browser encodes Opus.
   async function encodeCounter(o) {
     const fps = o.fps || 30, frames = o.frames || 45, keyEvery = o.keyEvery || 30;
     const times = timesOf(frames, fps, !!o.vfr);
@@ -139,7 +174,7 @@
     let alphaChunks = null;
     if (o.alpha) alphaChunks = await encode(codec, frames, times, keyEvery, alphaFrame, { framerate: fps, bitrate: 400000 });
     const keys = chunks.map((c, i) => c.key && (!alphaChunks || alphaChunks[i].key));
-    let bytes;
+    let bytes, tone = null;
     if (o.container === 'webm') {
       const Wm = MV.use('export/webm');
       let buf = new Uint8Array(0);
@@ -155,8 +190,10 @@
     } else {
       const avc = /^avc/.test(codec);
       const target = new Mp4Muxer.ArrayBufferTarget();
-      const mux = new Mp4Muxer.Muxer({ target, video: { codec: avc ? 'avc' : /^av01/.test(codec) ? 'av1' : 'vp9', width: W, height: H,
-        rotation: o.rotation || 0 }, fastStart: 'in-memory', firstTimestampBehavior: 'offset' });
+      tone = o.audio ? await encodeTone(times[frames - 1] + 1 / fps) : null;
+      const mux = new Mp4Muxer.Muxer(Object.assign({ target, video: { codec: avc ? 'avc' : /^av01/.test(codec) ? 'av1' : 'vp9', width: W, height: H,
+        rotation: o.rotation || 0 }, fastStart: 'in-memory', firstTimestampBehavior: 'offset' },
+      tone ? { audio: { codec: 'opus', numberOfChannels: 2, sampleRate: 48000 } } : {}));
       for (let i = 0; i < frames; i++) {
         const c = chunks[i];
         const meta = c.meta && c.meta.decoderConfig ? { decoderConfig: Object.assign({}, c.meta.decoderConfig) } : undefined;
@@ -164,11 +201,12 @@
         const next = i + 1 < frames ? chunks[i + 1].ts : c.ts + (c.dur || Math.round(1e6 / fps));
         mux.addVideoChunkRaw(c.data, c.key ? 'key' : 'delta', c.ts, next - c.ts, meta);
       }
+      if (tone) tone.chunks.forEach((a, i) => mux.addAudioChunkRaw(a.data, 'key', a.ts, a.dur, i ? undefined : tone.meta));
       mux.finalize();
       bytes = new Uint8Array(target.buffer);
     }
     for (const c of chunks) c.chunk = null;
-    return { bytes, times, codec, keys };
+    return { bytes, times, codec, keys, audio: !!tone };
   }
 
   // Stills: a PNG with a half-transparent area, a JPEG, a WebP, and a JPEG stored 64×32 with EXIF orientation 6 whose
@@ -212,5 +250,5 @@
   const SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"><rect width="200" height="100" fill="#204080"/>' +
     '<circle cx="50" cy="50" r="40" fill="#f0c040"/></svg>';
 
-  G.MVMediaGen = { W, H, drawCounter, readCounter, codeOf, timesOf, supported, h264, encodeCounter, stills, wav, SVG, squareX };
+  G.MVMediaGen = { W, H, drawCounter, readCounter, codeOf, timesOf, supported, h264, encodeCounter, encodeTone, stills, wav, SVG, squareX };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

@@ -113,6 +113,12 @@ MV.def('ui/ai_review', ['ui/dom', 'ui/icons', 'ai/changes', 'i18n/t', 'ui/ai_con
     if (c.kind === 'palette' && c.to) extra.push(swatches([c.to.accent, c.to.shiftA, c.to.shiftB]));
     if (first && c.diff) extra.push(diffBlock(t, c.diff));
     if (first && c.reason) extra.push(h('div', { class: 'ai-why', text: t('ai.review.reason', { text: c.reason }) }));
+    // 写真の説明 (DESIGN_2_1 §11.6.2, §11.9.5): the colours it found, the suggested 動きと重なり and why
+    if (c.kind === 'media' && c.to) {
+      if (Array.isArray(c.to.colors) && c.to.colors.length) extra.push(swatches(c.to.colors));
+      if (c.depth && t.has('opt.depth.' + c.depth)) extra.push(h('div', { class: 'ai-why', text: t('media.ai.depth', { v: t('opt.depth.' + c.depth) }) }));
+      if (c.reason) extra.push(h('div', { class: 'ai-why', text: t('ai.review.reason', { text: c.reason }) }));
+    }
     return h('label', { class: ['ai-row', c.stale ? 'is-stale' : null], 'data-id': c.id, 'data-check': rowState(c),
       'data-line': lineOf(c), 'data-kind': c.kind },
       box, h('span', { class: 'ai-row-main' },

@@ -4846,6 +4846,7 @@ no change. `ai_direct.test.js` therefore asks for values the fixture plan does n
 automatic rig is `slowSwell`, and depth `still`, where the video ground's automatic depth is `back`. A new assertion covers
 the equal-value rule for a rig. The review text of a planned speed now reads the number
 (「動きの速さ: 100% → 50%（2行）」) where it used to read 自動.
+
 ## v2.1-B
 
 Package B of DESIGN_2_1 §8.2: the engine side of camerawork and curves, the media engine hooks (B.3), sound in MP4
@@ -5720,3 +5721,256 @@ moves every row below it.
   file stays as it is; `src/ui/lyric_editor.js`, `src/ui/style.css` and `tests/node/ui_selection.test.js` apply with
   `git apply` to the pending UI package's copies (checked). This section is appended to NOTES.md, as other packages'
   are: keep both. Rebuild `index.html` and `en/index.html` with `build.py` rather than merging them.
+
+## v2.1-G.4
+
+G.4 of DESIGN_2_1 §8.7: the photo and video UI (§11.7, §11.9.5, §12.7) on G.1's device store and import, B's facade,
+C's `registryFor`, D's `plan.media`, E's `ai/vision`, F's inspector and G.3's parts. Built in two rounds: the package,
+then the fixes of its review (41 findings, all fixed; see "Review fixes").
+
+### What was built
+
+- **`ui/boot`: the AssetStore.** One `media/host/store` per app over `app.io.mediaBlobs` (IndexedDB, or this tab's memory
+  when it is full or missing); the metadata comes from every library entry the store has seen (ids name content, so an
+  entry seen once stays right for try-on and undo documents). The preview engine gets it (`createEngine(assets)`); every
+  `engine.fork()` (the export, the Filmora kit, the test harness) forks it and disposes the fork. `app.assets` (getter,
+  H.2's request), `app.knownMedia()` (every id seen), `app.media` (`ui/media_io`), the action `file.saveLight`, the page's
+  drop label, the mode strips 「使う範囲を調整中」 (trim peek) and 「切り抜きを調整中 — …」 with [終わる] (crop overlay), and
+  the one document `paste` listener (below).
+- **Paste (§11.7.2).** Ctrl+V outside the text fields is left to the browser (the key handler does not consume it), so
+  the `paste` event always comes: image or video files are imported (`media_io.pastedFiles`), anything else runs
+  `look.paste`. The palette and the menus run `look.paste` directly.
+- **New `ui/media_io`**: the import queue (drop, paste, ≡ › ファイル › 写真・動画を読み込む…, the library's ＋ 読み込む, the
+  picker's ＋ tile): one file at a time, a sticky progress row 「読み込み中: {name} {p}%（あと n件）」 with [中止], which
+  stops the file and every file waiting; the live region hears it at most once every 5 s (a `quiet` toast when it is
+  made again); closed with ×, the row comes back with the next file. Imports belong to the work they started in: a work
+  loaded meanwhile (`plan` event `load`) stops them and they place nothing. An audio-only MP4/WebM goes to the song; a
+  duplicate says so; errors are `media.err.*`. A file dropped on the preview becomes the background where the selection
+  is (作品全体, the selected lines, the cut) with `media.put` in the same undo step; its toast offers [元に戻す]
+  [ほかの使い方…], and on step ② [この動画の音を曲にする] for a video with sound (then kept until used or closed; the
+  duplicate toast too). A video dropped on step ②'s song box also gives the song its sound (see Decisions). The end
+  toast [使い方を選ぶ]; the storage warnings (2 GB, `quotaNote`). Placement (`placeCmds`: the part and its media param
+  per scope, ornaments at `freeIndex`, cut pins written where the cut lives with its sig), delete (`media.remove` plus
+  `pin.clear` of every part pin whose media param emptied; lock pins stay), この写真を使わない (この動画を使わない for a
+  video), 上へ/下へ, 使っている場所, relink (same id: stored, `forget`; another file of the same kind and size or length:
+  asked, `media.relink`; a file that fits no missing entry is refused with [代わりにこのファイルを使う] when one entry of
+  its kind could take it), 置き換える…, colour matching (one batch 「色を写真に合わせる」 and a toast with [元に戻す]),
+  posters, filmstrips, sample tables and GOP stats from the device store (nothing is cached for an asset that gave
+  nothing, and a relink, a replace, a load that finds it missing and ≡ › 設定 › 消す drop what is cached, bitmaps
+  closed), the file progress rows of G.1 (`fileProgress`), step ④'s items (`preflight`), and the pictures of 写真の説明
+  (`visionParts`: a still decoded upright at the size it is sent at, 768 px on the long side, JPEG 0.8, the bitmap closed;
+  a video or an animation as three frames of the range it is used in (`usedRange`: its first use's clipIn…clipOut) at
+  10 %, 50 % and 90 %, decoded exactly by a fork of the AssetStore at 768 px). ≡ › 設定 › 消す forgets every id the tab
+  has seen (`app.knownMedia`), not only the empty work's. `scopeWords`: 作品全体 / 3行目 / サビ1 / 3–5行 / 3行目のカット2.
+- **New `ui/media_widgets`**: `mediaRows(gen)` turns a part's generated rows into the element page's media rows: the
+  source first (widget `media`: poster, name, short badges, ？ when missing, 再生できません when the preview could not
+  decode it, › the picker; its accessible name says the badges too); 動きと重なり right under it as a radiogroup of its
+  five options whose おまかせ is 自動 (unpins; the tag 「自動: 後ろに下げる」, ⓘ toggles why, and the why follows the
+  value); 拡大 as 切り抜き [画面で調整] with the zoom in %; 動きの強さ, 薄幕, 色味 and 速さ in %, ぼかし without a unit;
+  a background's shared 強さ (which only strengthens its 薄幕 in photoPan) as 薄幕の強さ right after 薄幕; 重ね方 as
+  明るく重ねる / 暗く重ねる / くっきり重ねる / そのまま重ねる; 使う範囲 (clipIn and clipOut) as one `trim` row; the video
+  rows marked `video` with a `when`. `paramSpec(registry, media, name)`: another param's own spec (the crop overlay's
+  focus and zoom, the trim's end). The widgets: `media`, `crop`, `trim` (filmstrip, two handles that are 24 px buttons
+  with the slider role and their time as `aria-valuetext`, drag = one gesture with a peek, ← → one source frame, Shift
+  one second, Home/End, [▶ 範囲を見る]).
+- **New `ui/media_page`**: 作品全体 › 写真・動画 (a listbox of two-line rows: the whole name, then the facts or
+  この端末にありません, 再生できません, 使用 n, おまかせ, ⋯, [つなぎ直す]; one tab stop; the row's name says the kind
+  once), the asset page (crumbs 全体 › 写真・動画 › name, where 写真・動画 opens the library, and no second copy of the
+  path above it; rename ✎; facts, badges, the missing banner; a poster that is a picture for a still and a focusable
+  picture that scrubs its filmstrip for a video; 使う buttons that name where they place: 作品全体の背景, 「2行目の背景」,
+  「文字の中に（2行目）」…, disabled with 「つなぎ直すと使えます」 while the file is missing; おまかせでも背景に使う;
+  使っている場所 (「3行目（枠）」); colours with [この色に合わせる] and what it does; the AI row, whose
+  [AIに説明してもらう…] waits for the file; [この動画の音を曲にする]; [置き換える…] [削除]). The page is drawn again
+  only when what it shows changes, and the focus stays on the same control (✎ after a rename). The picker sub-page (＋
+  読み込む, なし, the assets its param accepts; try-on after 250 ms; a tile's name says この端末にありません).
+- **`ui/fields`**: widgets `media`, `trim`, `crop`; `sec.media` after 見た目; the media rows of every part page; the text
+  page's 文字の中に写真・動画; `freeIndex` (see Decisions); the video rows in a section of their own right after the
+  part's (`video` after 背景, `video.atmos` after 重ねる映像: each keeps its own open state); 空気（粒子） that shows
+  a mediaLayer reads 重ねる映像; a pinned clipOut stays inside the trim row.
+- **`ui/widgets`**: `choice` with `radio` and `autoValue`; the three makers.
+- **`ui/inspector`**: the asset page and picker sub-pages (a page may name its own crumbs and have no title bar), the part
+  browser's 写真・動画 tab, the crop target of a row, `siblingOf` (with the sibling's own spec), textFill commits (the
+  picture pins the part too; なし clears both; the row reads 自動 / なし, not 無効, until its slot holds textFill), the
+  picker and the tab place an import that ends later only while they are still shown, and asset pages refresh on media
+  events.
+- **`ui/part_browser`**: the 写真・動画 tab; derived `myMed…` grounds left out of the lists by `extra[key].media === true`.
+- **`ui/stage`**: the drop target; the crop overlay (drag, wheel, arrows 1 % / Shift 10 %, + −, 0 or a double-click
+  resets, Esc leaves and gives the focus back to [画面で調整]; entering it says the keys in the live region and the play
+  bar's strip says what the mouse does); want/ready; the placeholder plates 「写真がありません: {name}」 /
+  「動画がありません: {name}」 / 「この動画を再生できませんでした」 where each picture is drawn (a frame's in its box,
+  text fill's on the text, a background's in the middle); 映像を準備中 only while a picture this device has is still on
+  its way; the trim peek.
+- **`ui/menus`** (≡ › ファイル as §12.7), **`ui/palette`** (romaji aliases; the command that clears the device comes
+  last and 写真 / 動画 find 読み込む… first), **`ui/step_look`** (the hint), **`style.css`**, **`strings`** (the keys the
+  screens needed that A had not written).
+- **写真の説明 (§11.6.2).** `ui/ai_controller` gains the tool `vision` (Gemini only; no lyrics needed); `describeMedia`
+  asks the consent per asset, sends the JPEGs before the prompt, opens the review in the AI tab, and says
+  「写真・動画がこの端末にないため、説明を頼めません…」 when none of the pictures is on this device.
+- **G.1's requests:** `app.media.importFiles`; the store in boot over `app.io.mediaBlobs`; `check` on load and `forget`
+  after relink and 消す; `quotaNote(storageInfo())` once; the progress rows through `fileProgress`; the header's file
+  line from `io.fileState()` (「ファイル: 作品.mojipv（10:20 に開きました）」 until the first save to it); ≡ › 軽い保存 →
+  `io.saveLight()`. **G.3's:** boot wires the store (`tests/www/media_parts.js` no longer patches `engine.fork`). **H.2's:**
+  `app.assets`.
+
+### Decisions
+
+- **freeIndex (文字の中に, 写真の枠として).** Never a slot a user or lock pin holds; of the others, the one where the
+  fewest cuts of the scope change: a cut changes when the slot shows an automatic decoration there (it would be replaced)
+  or when its count is below the slot (the planner raises the count to reach a pinned slot and fills the slots in
+  between); ties go to the slot that replaces fewer, then the lower one. The review asked for the first slot no cut
+  uses; measured on the sample lyrics (50 cuts: #0 in all, #1 in 15), pinning #2 adds a decoration to 35 cuts and the
+  planner's variety rule then changes 13 of the 50 first decorations, while #1 replaces the 15 second ones and keeps 48
+  of 50 first ones. A slot is "full" only when pins hold all three.
+- **The asset page's scope.** 選択中 is gone: every scoped button names its scope. While the page shows 作品全体, the
+  other scope is the latest line or cut selected since the work was loaded (「2行目の背景」); with none, every button says
+  作品全体.
+- **Step ②'s song box** (a deviation from §11.7.2's table, which routes a video with sound to media only): a video with
+  sound dropped on the song box (「曲を選ぶ（ここにドロップも可）」) still joins 写真・動画, and its sound becomes the song
+  at once; a video dropped anywhere else on step ② keeps the toast's [この動画の音を曲にする], now until used or closed.
+- **Saving without everything on this device (§12.7).** The package's result toast carries what is not in the file:
+  「保存しました: …。ただし写真・動画1件と曲はこの端末にないため入っていません [つなぎ直す]」 (a warning that stays until
+  closed); the song counts too. The separate `pkg.warn.missingIn` toast before the save is not shown (the toast host
+  evicted it); `ui/toasts` now drops an ok or info note before a warning when more than two are shown.
+- **Plain words** (the owner's rule): 重ね方's options are 明るく重ねる / 暗く重ねる / くっきり重ねる / そのまま重ねる
+  (`opt.blend.*`) instead of §11.7.11's スクリーン / 乗算 / オーバーレイ / 通常 (those keys stay for other uses);
+  a single line is 「3行目」 in every placement and 使っている場所 text; a video is 動画 in its toast, plate and ⋯ menu.
+- **Step ④'s [つなぎ直す]** opens the library (§11.7.8) with the focus on the first missing row; its [つなぎ直す] (or
+  Enter, then the asset page's [つなぎ直す]) opens the file dialog.
+- The crop drag writes cropX and cropY as one batch per move inside one store gesture; the crop keys write through the
+  row's commit with one merge key (one undo entry per burst).
+- The trim keys move exactly one source frame although clipIn and clipOut have a 0.01 s step (the value still means
+  that frame).
+- Step ④'s media items cover every asset the plan draws (`plan.media`: decision params and materials); media-skipped
+  follows the backdrop the export renders (`ui/output.effectiveBackdrop`).
+- The vision consent is the app's question dialog; its 約{kb}KB is the size of one sent picture, which is now true for
+  videos too (768-px frames).
+
+### Review fixes
+
+- **G4UX-1, G4-R1, a11y-1** (crop keys pinned cropX = 1): `siblingOf` read the value against the 切り抜き row's spec;
+  now `MW.paramSpec`. Node: `paramSpec`; flow media: → ↑ ← + − (1 %, one entry), Shift+← (10 %), the wheel, 0, double-click.
+- **G4-S1, G4-R8** (paste after copying a look): see Paste. Flow media: a real clipboard picture after Ctrl+C →
+  `media.put`, no `pin.copy`; text on the clipboard → the look.
+- **G4-S2, G4-R4, G4-S4, G4-S8** (step ④): see Decisions. Node: a material-only missing asset blocks, HDR through a
+  material, webmAlpha skips, an MP4 with an old 透明 does not, the jump; flow missing: the library opens on the missing row.
+- **G4-S3** (untested behaviours): flows media, library, missing, and the new package, media_device and media_song (below).
+- **G4-S5** 再生できません on the row, the asset page and the media widget (flow library, a stubbed state).
+- **G4-S6** video section ids (Node). **G4-S7** the audio action on the placed and the duplicate toasts (flow media_song).
+- **G4-S9** plates where the picture is (flow missing: the frame's plate in its corner box, the background's centred).
+- **G4-S10** progress: announcements rate-limited, × then the next file shows a row again, [中止] stops the queue (flow
+  library: three quick files are announced once; × comes back; 中止 imports none).
+- **G4-S11, G4-R9** vision pictures (Node `usedRange`; flow library: the 1280×720 photo is sent at 768×432, a video's
+  three frames are 18, 30 and 42 of its clipIn 0.5 s range, read back from the JPEGs).
+- **G4-S12** the keyboard-only variant is Tab, Space and Enter from step ④ to the file dialog (step ④'s format buttons
+  are plain buttons: Tab and Space; they have no arrow keys, and step ④ is H.3's).
+- **G4-S13** overlay footage from the asset page, そのまま重ねる, then 後ろに下げる and 文字の前に出す: black glyphs stay
+  black behind it and take its colour in front (the readability guard screens it at 45 %, §11.9.3) (flow media).
+- **G4UX-2** see freeIndex; the text-fill row reads 自動 / なし (flow library: the first decorations stay, なし clears).
+- **G4UX-3** see Saving (flow missing: the result toast after Ctrl+S names the three pictures and keeps [つなぎ直す]).
+- **G4UX-4** see the asset page's scope (flow library, with and without a remembered line). **G4UX-5** see the song box.
+- **G4UX-6** 映像を準備中 (flow missing: one picture back, one still missing, the badge does not stay).
+- **G4UX-7** ⓘ toggles and the why follows the pin (flow media). **G4UX-8** the missing page (flow missing).
+- **G4UX-9, a11y-5** the crop strip, the live region and Esc (flow media). **G4UX-10** units (Node and flow media).
+- **G4UX-11** words by kind (flows media and missing: 背景を動画にしました, 動画がありません: 海.mp4, この動画を使わない;
+  Node: 「3行目」; 重ねる映像 as the section title). **G4UX-12, a11y-7** two-line rows (ui_layout: names and statuses
+  whole at 288 px and at the real width; flow library: the row's name).
+- **G4UX-13** この色に合わせる (flow library). **G4UX-14** the palette (Node `order`; flow library: 一覧 → focus on a row).
+- **G4UX-15** opened time (flow package). **G4UX-16** the stand-in (flow missing). **G4UX-17** crumbs (flow library).
+- **G4-R2** imports stopped by a load (flow media_device: a file whose reader finishes anyway after another work
+  opened places nothing there). **G4-R3** `project_io.loadFile` keeps the loaded work's asset ids in `usedMedia` (flow
+  media_device: a picture only in 写真・動画, which nothing reads after the work is reopened, deleted, autosaved, undone:
+  the bytes are still here).
+- **G4-R5** 消す forgets all (flow media_device: the reopened light file shows its pictures missing, the one the preview
+  never drew too, and step ④ blocks).
+- **G4-R6** captured picker and tab (flow library: a picker import finishing after another line was selected, and a
+  part-browser import finishing after it was closed, place nothing). **G4-R7** caches (flow missing: the relinked row
+  shows its poster; flow media_device: a poster that gave nothing is asked again once the bytes are back).
+- **a11y-2** the asset page keeps the focus (flow library: ✎, the switch with Space). **a11y-3** badges in names (flows
+  library and missing). **a11y-4** trim handles (flow media). **a11y-6** the poster (flow library).
+
+### Outside the G.4 file list
+
+`ui/toasts` (several actions, sticky rows, `update`, `quiet`, `onClose`, and a warning outlives ok notes), `ui/header`
+(the save and file state; 「…に開きました」), `ui/project_io` (G.1's file: relink action on the missing toast, drop target
+passed on, progress rows, the result toast of a package save with what is missing, the `device` event, the loaded work's
+ids kept for pruning, `fileState().opened`), `ui/step_export` (the jump button's label and comments), `ui/ai_controller`
+(the vision tool; the missing-pictures toast), `ui/ai_panel`, `ui/ai_board`, `ui/ai_review`, `tests/node/ui_fields.test.js`,
+`tests/www/media_parts.js` and `transparent_check.py` (the workaround removed), `tests/helpers/media_gen.js`
+(`encodeTone` and `encodeCounter({ audio })`: an Opus tone track in the MP4, so a test video can have sound), and
+`i18n_pages.py`.
+
+### Tests
+
+- `tests/node/ui_media.test.js` (28): routing by the tracks; `whereOf`; `scopeWords`; placement batches at the work, on
+  lines, on an area, on a cut and a full scope, with the decorations of the lines kept; `freeIndex` (pins, AI pins,
+  fewest changes, ties, a typical work); the library order; delete; この写真を使わない; 使っている場所; relink candidates;
+  colour matching; library facts; `mediaRows` (media, depth, trim, crop; units, 薄幕の強さ, 重ね方's words); `paramSpec`;
+  the video rows' `when` and their section ids; the text page's textFill slot; `sec.media`; `isDerivedMedia`; trim maths;
+  a document without a library; the palette's order; step ④'s items (plan.media, materials, HDR, the effective
+  backdrop, the jump); the vision consent, request, review, apply and the missing-pictures toast; `usedRange`.
+- `ui_flows.py`: **media** (stage drop; element page with ⓘ, units, 薄幕の強さ; the crop overlay's strip, live region,
+  drag, keys, − and +, wheel, 0, double-click, Esc; paste after a copied look, and a paste of text; an MP4 on 3行目 with
+  its toast and ⋯ menu; trim keys, slider handles, drag with its peek strip, [▶ 範囲を見る]; 後ろに下げる undone;
+  overlay footage in front of and behind black glyphs (pixels); export where H.264 encodes; undo-all), **library**
+  (import, the rows' names, a duplicate, the asset page's crumbs, buttons, poster, ✎, the switch, この色に合わせる; the
+  palette; おまかせ × 20; the part browser's tab; the picker (Enter, click, ＋ finishing late); the part browser's ＋
+  finishing after it closed; 再生できません; the asset page with a remembered line; 文字の中に on 作品全体; the progress
+  row (announcements, ×, 中止); 写真の説明 (a still at 768 px, a video's range); 置き換える…; 削除; undo-all),
+  **missing** (light save; a fresh context with three missing pictures: toast, ？ and names, picker tiles, plates in place,
+  a video's plate, the package result toast; step ④; [つなぎ直す] → library → relink, mouse and keyboard-only; the
+  relinked row's poster; 映像を準備中; the missing page; the stand-in; export allowed), **package** (§12.8 G: 保存 →
+  .mojipv through a faked dialog offering the package first, the header 「ファイルに保存中… n%」 and the row with [中止],
+  保存しました and the header's file; Ctrl+S again without the dialog; 軽い保存 → .json and Ctrl+S keeps it; [中止] leaves
+  the work and the files; opening shows its progress row and 「…に開きました」), **media_device** (R3, R2, R5, R7),
+  **media_song** (the song box, the placed toast's action kept past a toast's life, the duplicate's, the sound becomes the
+  song). Mutation-checked: 17 Node mutants of the new logic (pre-flight ids, backdrop and jump, `paramSpec`, three of
+  `freeIndex`, the units, 重ね方, 薄幕の強さ, the section ids and title, `usedRange`, the vision toast, two of the
+  palette's order, 「n行目」) and 24 browser mutants of the fixes (each fails its flow): see Checks.
+- `ui_layout.py`: the library with a missing asset (its row and names whole at 288 px and at the real width), the asset
+  page, picker and trim row at every viewport, and the crop overlay never covering the preview canvas. `csp.py`: import,
+  playback, scrubbing, the trim, crop overlay, library, asset page, picker, 写真の説明, a PNG export, a package saved and
+  opened. `i18n_pages.py`: + a missing asset's page and 重ねる映像 with its 重ね方 (ten media screens).
+
+### Checks
+
+- `python3 build.py --check`: 209 modules OK. `node --test --test-concurrency=1 "tests/node/*.test.js"`: 1553 pass
+  (1525 before G.4, + 28 in `ui_media.test.js`). `build.py --lab`, `build.py`, `tests/build_test.py`: OK.
+- Every `tests/browser/*.py` (local Chromium, no H.264): all OK except `perf.py`'s two known red rows,
+  long+camera+materials and basic+media (as before G.4). `ui_flows.py` 38 flows (the six media flows among them),
+  `ui_layout.py` 488 layouts, `i18n_pages.py` 37 screens per page, `csp.py` 0 violations.
+- Mutation checks: the 17 Node mutants listed in Tests fail `ui_media.test.js`. 24 browser mutants of the review fixes
+  each fail their flow: crop keys against the sibling's spec, Ctrl+V consumed by the key handler, ⓘ that only opens, a
+  why line that does not follow the pin, no crop strip, Esc without the focus back, trim handles without the slider
+  role, 映像を準備中 for a missing picture, every plate in the middle, the old saved toast, no 「…に開きました」, the song
+  box drop, the placed toast without the sound, a picker import placed after the selection moved, 無効 on the text-fill
+  row, every progress update announced, × not closing the row, 中止 stopping only the current file, the asset page
+  losing the focus, vision frames of the whole video, an import placed in the work opened meanwhile, `usedMedia` not
+  seeded on load, 消す forgetting only the shown work's pictures, and a poster that gave nothing kept as nothing. The
+  first run left four alive (the generation check, the seed, 消す, the empty poster); the media_device flow was made
+  sharper (a reader that ignores the abort, a picture nothing reads after the reopen, a poster asked again once the
+  bytes are back) and kills them.
+- `webm_check.py` loads a raw document without `media`: the first full run caught `ui/media_io` reading
+  `doc.media.list` there; it now reads the library through `libraryOf` (tested).
+
+### Open
+
+- The 2 s MP4 of the media flow runs only where H.264 encodes (CI's Chrome); local Chromium skips it with a message.
+- The keyboard-only relink ends in the system's file dialog, which a page test drives through its file chooser.
+- Step ④'s format and fps segments have no arrow keys (they are Tab stops); H.3 may make them radiogroups proper.
+
+## Lead: integrating G.4
+
+- **The library flow depended on the random look.** Its check "the first decorations stay" counts how many first
+  decorations stay the same when 文字の中に写真・動画 pins `textFill`; the planner's variety rule may swap a few next to a cut
+  that changed. The おまかせ runs earlier in the flow leave a random seed and mood seed, and over 22 runs the count went
+  from 11 to 15 of 15 (one run fell under the 80 % bound). With the seed alone fixed it still varied (the mood seed stayed
+  random). The flow now sets `look.omakase { seed: 1, moodSeed: 1 }` before it opens the text page, so the inspector row,
+  the slot `freeIndex` picks and the counts come from one known plan: 15 of 15 in every run.
+- **The video's pictures for 写真の説明 were asked for too early.** The flow waited for the entry in `doc.media.list`,
+  while `visionParts` describes only an asset whose bytes are stored and checked (`state(id) === 'ok'`). Under load
+  (four runs at once) the list came back empty. The flow now waits for the state first.
+- **DESIGN_2_1 wording asked for by the packages:** §4.5.4's check line (±0.24 W at Z = 1.5), the Opus `sampleRate` (the
+  song buffer's rate, 48000), the down-mix's home in `audio/wav` (§13.4), the alpha bitrate at the colour's bitrate
+  (§13.5, `ALPHA_SHARE` 1), `DirSink.file(name)` returning a Promise (§13.11) and webm_check's statistical alpha bounds
+  (§13.12). §11.3.7's `mediaAt` item shape and §11.4.3 are left to the media-row work, which edits the same sections.
+

@@ -1,14 +1,14 @@
 /* 文字PVメーカー v2 — original work. Browser harness for the media parts (DESIGN_2_1 §11.8.3, package G.3; not shipped). */
 // Evaluated in the built app page (index.html?fresh=1&test=1) after tests/helpers/exif_write.js and
 // tests/helpers/media_gen.js, so everything runs under the app's real CSP with its real modules and device store.
-// Until G.4 wires the AssetStore into ui/boot (DESIGN_2_1 §8.7), the app's own engine has no store: every engine here is
-// created (or the app's engine is forked) with a real one, media/host/store over the app's device store.
-// window.__mediaParts = { exact, alpha, determinism, perf, importPng, wireExport, boxOf } → plain JSON for Python:
+// The engines made here get a store of their own (media/host/store over the app's device store); the app's own engine has
+// the AssetStore ui/boot gives it (package G.4), and its forks (the export's) fork that store.
+// window.__mediaParts = { exact, alpha, determinism, perf, importPng, boxOf } → plain JSON for Python:
 //   media_exact.py        exact.prepare(), exact.run(job), exact.mp4(job)
 //   media_alpha.py        alpha()
 //   determinism.py        determinism(opts)
 //   perf.py               perf(opts)
-//   transparent_check.py  importPng(), wireExport(), boxOf(owner, t, w)
+//   transparent_check.py  importPng(), boxOf(owner, t, w)
 (function () {
   'use strict';
   const a = window.__mv;
@@ -718,22 +718,9 @@
     return importBytes((await G.stills()).png, 'transparent_frame.png', 'image/png');
   }
 
-  // The app's export forks the preview engine (ui/boot exportStart: app.engine.fork()), which has no AssetStore until G.4:
-  // give its forks a real one (a software fork of the device store), as ui/boot will.
-  let wired = null;
-  function wireExport() {
-    if (wired) return true;
-    const root = newStore();
-    wired = root.fork();
-    const fork = a.engine.fork.bind(a.engine);
-    a.engine.fork = (opts) => fork(Object.assign({ assets: wired }, opts || {}));
-    return true;
-  }
-
-  // The rect (output px) an element's picks cover in a frame of the app's document at t (the preview engine's fork with a
-  // real store): { x, y, w, h }, or null.
+  // The rect (output px) an element's picks cover in a frame of the app's document at t (a fork of the preview engine, as
+  // the export makes: its store is a fork of the app's): { x, y, w, h }, or null.
   async function boxOf(owner, t, w) {
-    wireExport();
     const e = a.engine.fork();
     try {
       const plan = e.plan;
@@ -755,7 +742,6 @@
     determinism,
     perf,
     importPng,
-    wireExport,
     boxOf,
   });
 })();

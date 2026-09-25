@@ -4,10 +4,11 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
   (PR, PREP, LOOKS, SONG, CH, T, LK, S, AREAS) => {
     'use strict';
 
-    // v2.1: 'direct' (指示: area instructions, one brief from the panel, up to 8 from the board, or camera mode) and
-    // 'material' (素材づくり). Their request builders and validators are ai/direct and ai/recipe, injected (deps.direct,
-    // deps.recipe) so the Node tests can fake the answers.
-    const TOOLS = Object.freeze(['prep', 'looks', 'edit', 'transcribe', 'align', 'analyze', 'direct', 'material']);
+    // v2.1: 'direct' (指示: area instructions, one brief from the panel, up to 8 from the board, or camera mode),
+    // 'material' (素材づくり) and 'vision' (写真の説明, DESIGN_2_1 §11.6.2). Their request builders and validators are
+    // ai/direct, ai/recipe and ai/vision, injected (deps.direct, deps.recipe, deps.vision) so the Node tests can fake the
+    // answers.
+    const TOOLS = Object.freeze(['prep', 'looks', 'edit', 'transcribe', 'align', 'analyze', 'direct', 'material', 'vision']);
     const SONG_TOOLS = Object.freeze(['transcribe', 'align', 'analyze']);
     // 歌詞 / 全体 / 行ごと / 時間 (§6.4.10.5), then the groups of area instructions (DESIGN_2_1 §5.6; the last four of
     // ai/changes GROUPS): 素材 / 区画 / カット / 区画の外.
@@ -423,6 +424,8 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
       // ai/direct and ai/recipe (package E), injected by ui/ai_panel; a build without them says boot.soon.
       const DIRECT = d.direct || null;
       const RECIPE = d.recipe || null;
+      const VISION = d.vision || null;
+      const visionConsented = new Set();  // asset ids the user agreed to send to Gemini, for this project only (§11.6.2)
       let seq = 0;
       let checking = null;                // the AbortController of a running key check
       let state = initialState();
@@ -560,12 +563,20 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
         return !!song && consented.has(song.sha1);
       }
 
+      // Why 写真の説明 cannot be used, ignoring consent: pictures go to Google Gemini only (the service that takes media
+      // parts, as it takes the song's audio); null when it can.
+      function visionBlocked() {
+        if (!VISION) return 'boot.soon';
+        return PR.PROVIDERS[state.provider].audio ? null : 'ai.visionOnlyGemini';
+      }
+
       // Why a tool cannot run now (the disabled reason, a string key), or null.
       function blocked(tool) {
         if (!TOOLS.includes(tool)) return 'ai.needLines';
         if (state.run) return 'ai.needIdle';
         if (state.review) return 'ai.needReview';
         if (!state.key) return 'ai.needKey';
+        if (tool === 'vision') return visionBlocked();          // pictures, not lines: it works before the lyrics too
         if (tool === 'material' && !RECIPE) return 'boot.soon';
         if (tool === 'direct' && !DIRECT) return 'boot.soon';
         if (SONG_TOOLS.includes(tool)) {
@@ -615,8 +626,9 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
       async function askDirect(conn, sent, o, signal) {
         const reg = host.registry;
         let allow = !!o.allowMaterials;
+        // o.media: the asset ids the AI may place (DESIGN_2_1 §11.6.1: bytes on this device, 写真・動画をAIが使ってよい)
         const make = () => DIRECT.directRequests(sent.doc, sent.plan, reg, { briefs: o.briefs, uiLang: host.lang, mode: o.mode || 'all',
-          allowMaterials: allow });
+          allowMaterials: allow, media: Array.isArray(o.media) && o.media.length ? o.media.slice() : false });
         let reqs = make();
         let failed = false;
         let outs = [];
@@ -665,6 +677,15 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
         const reg = host.registry;
         const valid = { rev: sent.rev };
         if (tool === 'direct') return askDirect(conn, sent, opts, signal);
+        if (tool === 'vision') {
+          // the host makes the JPEGs (a still: one at 768 px; a video: three frames); only they and the prompt are sent
+          const items = await host.visionParts(opts.ids);
+          if (signal.aborted) throw new PR.AIError('aborted');
+          const req = VISION.visionRequest(sent.doc, items, { uiLang: lang });
+          if (!req.sent.items.length) return { res: {}, out: { changes: [], warnings: [['ai.warn.empty', {}]] } };
+          const res = await call(conn, req, signal, req.media);
+          return { res, out: VISION.visionChanges(sent.doc, res.json, req.sent, valid) };
+        }
         if (tool === 'material') {
           const req = RECIPE.materialRequest(sent.doc, sent.plan, reg, Object.assign({ description: String(opts.description || '').slice(0, MAX_INSTRUCTION),
             kind: opts.kind, uiLang: lang }, opts.current ? { current: opts.current } : {}));
@@ -768,6 +789,11 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
           o = Object.assign({}, o, { briefs });
         }
         if (tool === 'material' && !String(o.description || '').trim()) return false;
+        if (tool === 'vision') {
+          const ids = (Array.isArray(o.ids) ? o.ids : []).filter((x) => visionConsented.has(x));
+          if (!ids.length) return false;
+          o = Object.assign({}, o, { ids });
+        }
         if (tool === 'edit' && !String(o.instruction || '').trim()) return false;
         const ac = new AbortController();
         seq += 1;
@@ -882,6 +908,7 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
       function projectChanged() {
         if (state.run) state.run.abort.abort();
         consented.clear();
+        visionConsented.clear();
         const hadReview = !!state.review;
         endTryOn();
         state = Object.assign({}, state, { run: null, review: null, error: null, notice: null });
@@ -1041,6 +1068,25 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
         return { n, kept };
       }
 
+      // 「AIに説明してもらう」 (DESIGN_2_1 §11.6.2): the assets on this device (at most 8), a consent first for those not
+      // agreed yet (per asset, this project only, not saved), then the vision tool; its review opens in the AI tab.
+      // → Promise<boolean>: true when a review or a notice came back.
+      async function describeMedia(ids) {
+        const list = [...new Set(Array.isArray(ids) ? ids : [])].filter((x) => host.mediaHere(x)).slice(0, VISION ? VISION.MAX_ITEMS : 0);
+        const why = blocked('vision');
+        if (why === 'ai.needKey') { host.openAi(); set({ error: { code: 'no_key', tool: 'vision' } }); return false; }
+        if (why) { host.toast(t(why), { kind: 'warn' }); return false; }
+        // the pictures asked about are not on this device: say so (nothing would be sent)
+        if (!list.length) { if (Array.isArray(ids) && ids.length) host.toast(t('ai.visionMissing'), { kind: 'warn' }); return false; }
+        if (!list.every((x) => visionConsented.has(x))) {
+          const ok = await host.confirm({ title: t('ai.tool.vision'), text: t('ai.visionConsent', { kb: host.visionKb(list) }), ok: t('ai.visionSend') });
+          if (!ok) return false;
+          for (const x of list) visionConsented.add(x);
+        }
+        host.openAi();
+        return run('vision', { ids: list });
+      }
+
       // 「AIが決めた固定 n [すべて自動に戻す]」: every pin by 'ai', one undo step.
       function clearAiPins() {
         if (!aiPinCount(host.doc)) return false;
@@ -1051,11 +1097,13 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
       return {
         get state() { return state; },
         on, setProvider, setModel, setKey, setRemember, forgetKey, forgetKeys, checkKey, blocked, songBlocked, hasConsent, consent,
+        visionBlocked, describeMedia, hasVisionConsent: (id) => visionConsented.has(id),
         run, abort, dismiss, toggle, toggleAgg, toggleAll, setTranscriptTimes, apply, applyTranscript, discard, tryOn, endTryOn,
         tryOnReplaced, strip, docChanged, projectChanged, revert, clearAiPins, logEntries,
         keyPrefix: () => KEY_PREFIX[state.provider] || '',
         hasDirect: () => !!DIRECT,
         hasRecipe: () => !!RECIPE,
+        hasVision: () => !!VISION,
       };
     }
 

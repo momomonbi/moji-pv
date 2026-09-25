@@ -21,17 +21,24 @@ MV.def('ui/palette', ['ui/dom', 'ui/icons', 'ui/keys', 'ui/selection', 'i18n/str
     const STARTERS = ['look.omakase', 'play.toggle', 'panel.details', 'step.go:lyrics', 'step.go:song', 'step.go:look',
       'step.go:export', 'timeline.toggle', 'tap.start', 'export.start', 'help.keys'];
     const isSetting = (id) => id.startsWith('pref.') || id === 'app.lang';
+    // Commands that delete what cannot be brought back come after everything else, so Enter on a search never reaches
+    // them first; a search for 写真 or 動画 finds the import first (DESIGN_2_1 §11.7).
+    const LAST = new Set(['file.clearDevice']);
+    const FIRST = ['media.import', 'media.library', 'media.relink'];
 
-    // order(items, recent, query) → the palette's row order: settings last; then recent first; with an empty query the
-    // starters next, in their order; ties by label.
+    // order(items, recent, query) → the palette's row order: settings and destructive commands last; then recent first;
+    // with an empty query the starters next, in their order; the photo and video actions before other matches; ties by
+    // label.
     function order(items, recent, query) {
       const empty = !String(query || '').trim();
       const tier = (x) => {
+        if (LAST.has(x.id)) return [4, 0];
         if (isSetting(x.id)) return [3, 0];
         const r = recent.indexOf(x.id);
         if (r >= 0) return [0, r];
         const s = empty ? STARTERS.indexOf(x.id) : -1;
-        return s >= 0 ? [1, s] : [2, 0];
+        const f = FIRST.indexOf(x.id);
+        return s >= 0 ? [1, s] : [2, f >= 0 ? f - FIRST.length : 0];
       };
       return items.map((x) => ({ x, k: tier(x) })).sort((a, b) => a.k[0] - b.k[0] || a.k[1] - b.k[1]
         || (a.x.text < b.x.text ? -1 : a.x.text > b.x.text ? 1 : 0)).map((e) => e.x);
@@ -48,6 +55,9 @@ MV.def('ui/palette', ['ui/dom', 'ui/icons', 'ui/keys', 'ui/selection', 'i18n/str
       'edit.history': 'rireki', 'help.syntax': 'kihou', 'app.lang': 'gengo english nihongo', 'look.details': 'kuwashiku',
       'play.fromLine': 'kono gyou saisei', 'view.foldSteps': 'tatamu', 'pref.safeArea': 'anzen waku', 'ai.prep': 'shitagoshirae',
       'ai.looks': 'sanan', 'ai.align': 'taimingu',
+      // >写真 finds the photo and video actions by their labels (写真・動画を読み込む… …, DESIGN_2_1 §11.7), and these by romaji.
+      'media.import': 'shashin douga yomikomu gazou', 'media.library': 'shashin douga ichiran gazou',
+      'media.relink': 'shashin douga tsunaginaosu', 'file.saveLight': 'karui hozon json',
     };
 
     function norm(s) { return String(s || '').toLowerCase().normalize('NFKC'); }

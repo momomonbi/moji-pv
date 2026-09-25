@@ -70,8 +70,11 @@ kbd {
 .region-stage { background: radial-gradient(120% 90% at 50% 40%, #12151b 0%, var(--stage) 70%); }
 .mv[data-layout="stacked"] .region-side { border-right: 0; border-top: 1px solid var(--line); }
 .mv.is-dropping::after {
-  content: ""; position: fixed; inset: 10px; border: 2px dashed var(--focus); border-radius: 16px; pointer-events: none;
+  content: attr(data-drop); position: fixed; inset: 10px; border: 2px dashed var(--focus); border-radius: 16px; pointer-events: none;
   z-index: 60; background: rgba(124, 196, 255, 0.05);
+  /* 「ここにドロップ: 歌詞・曲・作品・写真・動画」 at the top edge (DESIGN_2_1 §11.7.1) */
+  display: flex; justify-content: center; align-items: flex-start; padding-top: 14px; box-sizing: border-box;
+  color: var(--focus); font-size: 13px; font-weight: 700;
 }
 
 /* ---- header ---------------------------------------------------------------------------------------------- */
@@ -1149,3 +1152,91 @@ details.ai-group > summary { cursor: pointer; list-style-position: inside; }
 .ai-row.is-disabled { cursor: default; opacity: 0.55; }
 .ai-need { display: inline-flex; align-self: flex-start; font-size: 11.5px; color: var(--gold); }
 .ai-mat-thumb { width: 96px; height: 54px; flex: none; border-radius: 5px; background: #0b0d11; }
+
+/* ---- v2.1 photos and videos (DESIGN_2_1 §11.7) ---------------------------------------------------------------- */
+
+/* The stage: the drop target's outline (its label at the top edge, the preview stays visible), 映像を準備中, cropping. */
+.stage-drop { position: absolute; inset: 6px; border: 2px dashed var(--gold); border-radius: 10px; pointer-events: none;
+  display: flex; justify-content: center; align-items: flex-start; }
+.stage-drop-text { margin-top: 8px; padding: 3px 12px; border-radius: 999px; background: rgba(12, 14, 18, 0.82); color: var(--gold);
+  font-size: 12.5px; font-weight: 700; }
+.stage-badge.stage-media { top: auto; bottom: 10px; font-weight: 600; color: var(--text-2); }
+.canvas-wrap.is-cropping { cursor: move; }
+.toast.is-sticky { border-color: #3a4456; }
+.toast.has-acts { flex-wrap: wrap; }
+.toast-acts { display: flex; flex-wrap: wrap; flex-basis: 100%; gap: 4px 14px; padding-left: 24px; }
+
+/* The 動きと重なり radiogroup: its five options wrap onto two lines in a narrow column. */
+.w-seg.is-wrap .seg { flex: 1 1 auto; min-width: 84px; }
+
+/* The media widget: a 64×36 poster, the name and its badges, then ›. */
+.w-media {
+  display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 4px 8px 4px 4px; border: 1px solid var(--line-2);
+  border-radius: 9px; background: var(--panel-2); color: var(--text); text-align: left;
+}
+.w-media:hover:not(:disabled) { border-color: #4a5366; background: var(--panel-3); }
+.w-media-thumb, .med-thumb-box { position: relative; flex: none; width: 64px; height: 36px; border-radius: 5px; background: #0b0d11; overflow: hidden; }
+.w-media-poster, .med-thumb { display: block; width: 64px; height: 36px; }
+.w-media-q { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-weight: 800; }
+.med-poster-box .w-media-q { font-size: 28px; }
+.w-media-text { display: flex; flex-direction: column; gap: 2px; flex: 1 1 auto; min-width: 0; }
+.w-media-name { font-size: 13px; font-weight: 700; min-width: 0; }
+.w-media-badges, .med-badges { display: flex; flex-wrap: wrap; gap: 4px; }
+.w-media-badge, .med-badge { padding: 0 6px; border: 1px solid var(--line-2); border-radius: 999px; font-size: 11px; color: var(--text-2); }
+
+/* 切り抜き [画面で調整] 拡大 ──●── 100% */
+.w-crop { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.w-crop .w-number { flex: 1 1 140px; min-width: 0; }
+.w-crop-edit.is-on { border-color: var(--gold); color: var(--gold); }
+
+/* 使う範囲: the filmstrip with its two handles, the times and [▶ 範囲を見る]. */
+.w-trim { display: flex; flex-direction: column; gap: 6px; }
+.w-trim-bar { position: relative; height: 40px; margin: 0 12px; border-radius: 6px; background: #0b0d11; }   /* the handles' half-width */
+.w-trim-strip { display: block; width: 100%; height: 40px; border-radius: 6px; }
+.w-trim-shade { position: absolute; top: 0; bottom: 0; background: rgba(10, 12, 15, 0.7); pointer-events: none; }
+/* a handle is a 24 px target (D§6.12) around a 14 px bar */
+.w-trim-h { position: absolute; top: -3px; bottom: -3px; width: 24px; margin-left: -12px; padding: 0; border: 0; background: none;
+  cursor: ew-resize; touch-action: none; }
+.w-trim-h::before { content: ''; position: absolute; top: 0; bottom: 0; left: 5px; width: 14px; box-sizing: border-box;
+  border: 2px solid var(--gold); border-radius: 5px; background: rgba(240, 182, 77, 0.25); }
+.w-trim-h:focus-visible { outline-offset: 1px; }
+.w-trim-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 12px; }
+.w-trim-times { font-size: 12px; }
+
+/* 作品全体 › 写真・動画: the library. */
+.med-lib { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.med-lib-head { display: flex; align-items: center; gap: 8px; }
+.med-list { display: flex; flex-direction: column; gap: 2px; }
+/* a row on two lines: the whole name, then the facts (or この端末にありません), 使用 n, おまかせ and ⋯ */
+.med-row { display: flex; align-items: flex-start; gap: 8px; min-width: 0; padding: 4px 4px 4px 4px; border-radius: 8px; cursor: pointer; }
+.med-row:hover, .med-row:focus-visible { background: var(--panel-2); }
+.med-main { display: flex; flex-direction: column; gap: 1px; flex: 1 1 auto; min-width: 0; line-height: 1.35; }
+.med-name { font-size: 12.5px; font-weight: 700; overflow-wrap: anywhere; }
+.med-sub { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; min-width: 0; }
+.med-info, .med-used { font-size: 11.5px; }
+.med-info { min-width: 0; overflow-wrap: anywhere; }
+.med-used { flex: none; }
+.med-pool { display: inline-flex; align-items: center; gap: 3px; flex: none; font-size: 11.5px; }
+.med-row.is-missing .med-info { color: var(--gold); }
+.med-badge.is-warn, .w-media-badge.is-warn { border-color: var(--gold); color: var(--gold); }
+.med-total { margin: 2px 0 0; }
+
+/* The asset page. */
+.med-page { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.med-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.med-title { margin: 0; min-width: 0; font-size: 15px; font-weight: 800; overflow-wrap: anywhere; }
+.med-rename { flex: 1 1 auto; min-width: 0; }
+.med-facts { margin: 0; overflow-wrap: anywhere; }
+.med-poster-box { position: relative; display: block; box-sizing: border-box; width: 100%; padding: 0; border: 1px solid var(--line-2); border-radius: 9px;
+  background: #0b0d11; overflow: hidden; }
+.med-colors-tip { flex-basis: 100%; margin: 0; }
+.med-poster { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; }
+.med-use { gap: 6px; }
+.med-use .btn { height: auto; min-height: 30px; white-space: normal; text-align: left; }
+.med-places { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.med-colors { flex-wrap: wrap; }
+.med-swatches { display: inline-flex; gap: 4px; }
+.med-sw { width: 18px; height: 18px; border-radius: 4px; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18); }
+.med-ai { display: flex; flex-direction: column; gap: 4px; }
+.med-ai .note { margin: 0; }
+.med-delete { align-items: center; padding-top: 8px; border-top: 1px solid var(--line); }

@@ -490,9 +490,12 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
       return out;
     }
 
+    // 「{n}件の写真・動画がこの端末にありません [つなぎ直す]」 (§11.7.8): the relink picker of ui/media_io.
     async function toastMissing(doc) {
       const n = (await missingMedia(doc)).length;
-      if (n) app.toast(t('media.missingOpen', { n }), { kind: 'warn' });
+      const relink = app.media && typeof app.media.relink === 'function'
+        ? { label: t('media.relink'), run: () => app.media.relink() } : undefined;
+      if (n) app.toast(t('media.missingOpen', { n }), { kind: 'warn', action: relink });
     }
 
     // --- new / open / save -----------------------------------------------------------------------------------
@@ -506,6 +509,8 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
       saved = { id: null, text: null };
       used.clear();                                          // loading clears the undo history (§6.10)
       usedMedia.clear();
+      // the loaded work's own assets stay while it is open: deleting one and undoing must find its bytes (§11.2.7)
+      for (const e of (file.doc && file.doc.media && file.doc.media.list) || []) usedMedia.add(e.id);
       app.loadProject(file.doc, file.side);
       schedule();
     }
@@ -535,24 +540,34 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
       }
     }
 
-    async function openFiles(files) {
+    // openFiles(files, { target }) — target 'stage' when the files were dropped on the preview (§11.7.2: the first photo
+    // or video becomes the background there). A package opens with the progress rows of ui/media_io.
+    async function openFiles(files, opts) {
       const media = [];
       for (const f of files) {
         const route = await routeFile(f);
-        if (route === 'package') await openPackage(f);
+        if (route === 'package') await withProgress('open', f, (pr) => openPackage(f, pr));
         else if (route === 'project') await openProject(f);
         else if (route === 'lyrics') await openLyrics(f);
         else if (route === 'song') app.loadSong(f);
         else if (route === 'media') media.push(f);
         else app.toast(t('io.unknownFile', { name: f.name }), { kind: 'error' });
       }
-      if (media.length) await importMediaFiles(media);
+      if (media.length) await importMediaFiles(media, opts);
     }
 
-    // Photos and videos: the full import flow of §11.7.2 belongs to ui/media_io (G.4), which sets app.media; until then
-    // each file is imported here and added to the library as one undoable step.
-    async function importMediaFiles(files) {
-      if (app.media && typeof app.media.importFiles === 'function') return app.media.importFiles(files);
+    // withProgress(kind, file, fn) → fn({ signal, onProgress }): the progress of a package save or open from ui/media_io
+    // (a toast row with [中止], and the header's 「ファイルに保存中… 42%」 while saving); plain {} without it. The row
+    // closes when fn settles.
+    async function withProgress(kind, file, fn) {
+      const pr = app.media && typeof app.media.fileProgress === 'function' ? app.media.fileProgress(kind, file) || {} : {};
+      try { return await fn(pr); } finally { if (typeof pr.done === 'function') pr.done(); }
+    }
+
+    // Photos and videos: the full import flow of §11.7.2 belongs to ui/media_io, which sets app.media; without it each
+    // file is imported here and added to the library as one undoable step.
+    async function importMediaFiles(files, opts) {
+      if (app.media && typeof app.media.importFiles === 'function') return app.media.importFiles(files, opts);
       const entries = [];
       for (const f of files) {
         const entry = await importMedia(f);
@@ -680,7 +695,6 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
       const doc = app.doc, side = app.store.side;
       const { have, blobs } = await collect(doc);
       const lay = PKG.layout(doc, side, have);
-      if (lay.missing.length) app.toast(t('pkg.warn.missingIn', { n: lay.missing.length }), { kind: 'warn' });
       const size = T.fmtBytes(lay.bytes);
       if (lay.bytes > PKG_BIG && app.confirm && !(await app.confirm({ text: t('pkg.warn.big', { size }) }))) return null;
       let target = handle || null;
@@ -722,12 +736,21 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
       }
       if (target) fileHandle = target;
       fileSaved = { name: target ? target.name : name, at: Date.now(), text: lay.projectText };
+      savedToast(lay, size, !!doc.song && !have.song);
+      return { name: fileSaved.name, bytes: lay.bytes, missing: lay.missing.slice(), songMissing: !!doc.song && !have.song, kind: 'package' };
+    }
+
+    // 保存しました: …, in one toast that stays readable after the save: what is not in the file because it is not on this
+    // device (photos and videos, the song) is part of it, with [つなぎ直す] (DESIGN_2_1 §12.7).
+    function savedToast(lay, size, songMissing) {
       const c = contentsOf(lay);
-      // io.savedWhat names the song, so a package without one says only where it went (a string without the song is
-      // requested from package F: io.savedWhatNoSong)
-      app.toast(c.song ? t('io.savedPkg', { name: fileSaved.name, size, what: t('io.savedWhat', { p: c.p, v: c.v }) })
-        : t('io.saved', { name: fileSaved.name }), { kind: 'ok' });
-      return { name: fileSaved.name, bytes: lay.bytes, missing: lay.missing.slice(), kind: 'package' };
+      const params = { name: fileSaved.name, size, what: t(c.song ? 'io.savedWhat' : 'io.savedWhatNoSong', { p: c.p, v: c.v }) };
+      const n = lay.missing.length;
+      if (!n && !songMissing) { app.toast(t('io.savedPkg', params), { kind: 'ok' }); return; }
+      const missing = [n ? t('pkg.missing.media', { n }) : null, songMissing ? t('pkg.missing.song') : null].filter(Boolean).join(t('pkg.missing.and'));
+      const relink = n && app.media ? () => app.media.relink() : songMissing && app.pickRelink ? () => app.pickRelink() : null;
+      app.toast(t('io.savedMissing', Object.assign(params, { missing })), { kind: 'warn', sticky: true,
+        action: relink ? { label: t('media.relink'), run: relink } : undefined });
     }
 
     // saveLight(handle?) → the .json save (ids only, §11.2.9); the toast says what is not in it.
@@ -849,7 +872,7 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
       }
       await loadFile(parsed);
       if (o.handle) fileHandle = o.handle;
-      fileSaved = { name: file.name, at: Date.now(), text: D.serialize({ doc: parsed.doc, side: parsed.side }) };
+      fileSaved = { name: file.name, at: Date.now(), opened: true, text: D.serialize({ doc: parsed.doc, side: parsed.side }) };
       app.toast(t('io.opened', { name: file.name }), { kind: 'ok' });
       if (damaged) app.toast(t('pkg.warn.damaged', { n: damaged }), { kind: 'warn' });
       await toastMissing(parsed.doc);
@@ -857,9 +880,12 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
     }
 
     // fileState() → { name, at, dirty } of the file this work was last saved to or opened from, or null (§12.5).
+    // fileState() → { name, at, opened, dirty } of the project file: `opened` until the first save to it (the header then
+    // says 「…に開きました」, not 「…に保存」).
     function fileState() {
       if (!fileSaved) return null;
-      return { name: fileSaved.name, at: fileSaved.at, dirty: D.serialize({ doc: app.doc, side: app.store.side }) !== fileSaved.text };
+      return { name: fileSaved.name, at: fileSaved.at, opened: !!fileSaved.opened,
+        dirty: D.serialize({ doc: app.doc, side: app.store.side }) !== fileSaved.text };
     }
 
     // A lyric or LRC file in UTF-8 / UTF-16 (with a BOM), Shift_JIS or EUC-JP; the toast names a legacy encoding.
@@ -887,9 +913,12 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
               'video/*': ['.mp4', '.m4v', '.mov', '.webm', '.mkv'] } }] });
           const file = await handles[0].getFile();
           const route = await routeFile(file);
-          if (route === 'package') { await openPackage(file, { handle: handles[0] }); return; }
+          if (route === 'package') {
+            await withProgress('open', file, (pr) => openPackage(file, Object.assign({}, pr, { handle: handles[0] })));
+            return;
+          }
           await openFiles([file]);
-          if (route === 'project') { fileHandle = handles[0]; fileSaved = { name: file.name, at: Date.now(), text: D.serialize({ doc: app.doc, side: app.store.side }) }; }
+          if (route === 'project') { fileHandle = handles[0]; fileSaved = { name: file.name, at: Date.now(), opened: true, text: D.serialize({ doc: app.doc, side: app.store.side }) }; }
           return;
         } catch (e) {
           if (e && e.name === 'AbortError') return;
@@ -910,14 +939,15 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
 
     // 保存 (Ctrl+S): the same kind as the current file handle (a .mojipv handle gets a package, a .json handle a light
     // save); without a handle it is 名前を付けて保存 with the package type first (§12.3).
-    async function save() {
-      if (!fileHandle) return saveAs();
-      if (PACKAGE_EXT.test(fileHandle.name)) return savePackage(fileHandle);
+    async function save(opts) {
+      if (!fileHandle) return saveAs(opts);
+      if (PACKAGE_EXT.test(fileHandle.name)) return opts ? savePackage(fileHandle, opts) : withProgress('save', null, (pr) => savePackage(fileHandle, pr));
       return saveLight(fileHandle);
     }
 
-    // 名前を付けて保存: a package by default (the picker also offers the light .json).
-    function saveAs() { return savePackage(null); }
+    // 名前を付けて保存: a package by default (the picker also offers the light .json). opts = { signal, onProgress }
+    // (ui/media_io's progress row when absent).
+    function saveAs(opts) { return opts ? savePackage(null, opts) : withProgress('save', null, (pr) => savePackage(null, pr)); }
 
     async function saveText(text, name, type, onHandle, note) {
       if (typeof window.showSaveFilePicker === 'function') {
@@ -955,7 +985,7 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
         ev.preventDefault();
         depth = 0;
         root.classList.remove('is-dropping');
-        openFiles([...ev.dataTransfer.files]);
+        openFiles([...ev.dataTransfer.files], { target: ev.mvTarget || null });   // ui/stage marks a drop on the preview
       });
       window.addEventListener('pagehide', flushNow);
       document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushNow(); });
@@ -989,6 +1019,7 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
       app.loadProject(D.defaultDoc(), D.defaultSide(), { quiet: true });
       pending.cancel();                                      // the empty work is stored at its first change, not now
       setState('idle');
+      app.bus.emit('device', { cleared: true });             // the AssetStore forgets what it held (ui/media_io)
       return ok;
     }
 

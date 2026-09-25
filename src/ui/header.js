@@ -135,8 +135,11 @@ MV.def('ui/header', ['ui/dom', 'ui/icons', 'ui/keys'], (dom, I, K) => {
       const doc = app.doc;
       titleText.textContent = titleOf(doc) || t('hdr.untitled');
       const st = app.io ? app.io.state() : 'idle';
-      saveState.textContent = st === 'idle' ? '' : t('hdr.save.' + st);
-      saveState.dataset.state = st;
+      // While a package is written: 「ファイルに保存中… 42%」; the tooltip names the file this work was saved to or
+      // opened from, or says it has unsaved changes (DESIGN_2_1 §12.5, §12.7). Text only, no new control.
+      const saving = typeof app.fileSaving === 'number';
+      saveState.textContent = saving ? t('io.savingPkg', { p: app.fileSaving }) : st === 'idle' ? '' : t('hdr.save.' + st);
+      saveState.dataset.state = saving ? 'file' : st;
       const peek = app.store.peek();
       undo.disabled = !peek.undo;
       redo.disabled = !peek.redo;
@@ -151,8 +154,17 @@ MV.def('ui/header', ['ui/dom', 'ui/icons', 'ui/keys'], (dom, I, K) => {
       ai.title = t('cmd.panel.ai') + ' (A)';
     }
 
+    // The file line of the tooltip (it serializes the work to compare): on save-state changes and when pointed at.
+    function updateFile() {
+      const file = app.io && typeof app.io.fileState === 'function' ? app.io.fileState() : null;
+      saveState.title = !file ? '' : file.dirty ? t('io.fileState.dirty')
+        : t(file.opened ? 'io.fileState.opened' : 'io.fileState.saved',
+          { name: file.name, time: new Date(file.at).toLocaleTimeString(app.lang === 'en' ? 'en' : 'ja', { hour: '2-digit', minute: '2-digit' }) });
+    }
+    saveState.addEventListener('pointerenter', updateFile);
+
     app.bus.on('plan', update);
-    app.bus.on('save', update);
+    app.bus.on('save', () => { update(); updateFile(); });
     app.view.on((changed) => { if (changed.includes('panel') || changed.includes('prefs') || changed.includes('aiReview')) update(); });
     update();
     return { update, openMenu, openHistory };

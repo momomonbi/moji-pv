@@ -36,6 +36,13 @@ MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/a
       return parts.join(' · ');
     }
 
+    // The library's assets whose bytes are on this device: the ones the direct tool may offer (DESIGN_2_1 §11.6.1).
+    function mediaOnDevice(app) {
+      const list = app.doc.media && Array.isArray(app.doc.media.list) ? app.doc.media.list : [];
+      const here = list.filter((e) => !app.media || app.media.state(e.id) !== 'missing').map((e) => e.id);
+      return here.length ? here : false;
+    }
+
     function storageOf(kind) {
       try { const s = window[kind]; s.getItem('mojipv.probe'); return s; } catch (e) { return null; }
     }
@@ -58,6 +65,12 @@ MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/a
         song: () => songOf(app),
         now: () => Date.now(),
         nextFrame: () => new Promise((resolve) => requestAnimationFrame(() => resolve())),
+        // 写真の説明 (DESIGN_2_1 §11.6.2): the pictures come from ui/media_io, the consent is a question
+        confirm: (o) => (app.confirm ? app.confirm(o) : Promise.resolve(false)),
+        openAi: () => app.openPanel('ai', 'ai'),
+        mediaHere: (id) => !!app.media && !!app.media.entry(id) && app.media.state(id) === 'ok',
+        visionParts: (ids) => (app.media ? app.media.visionParts(ids) : Promise.resolve([])),
+        visionKb: (ids) => (app.media ? app.media.visionKb(ids) : 0),
       };
     }
 
@@ -183,8 +196,10 @@ MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/a
         more.hidden = !more.hidden;
         btn.setAttribute('aria-expanded', String(!more.hidden));
       });
+      // photos leave the device only when the user asks 「AIに説明してもらう」 (DESIGN_2_1 §11.6.4)
       return h('div', { class: 'ai-sends', role: 'note' },
-        h('div', { class: 'ai-sends-line' }, I.icon('info', { size: 15 }), h('span', { class: 'grow', text: t('ai.sends') }), btn), more);
+        h('div', { class: 'ai-sends-line' }, I.icon('info', { size: 15 }), h('span', { class: 'grow', text: t('ai.sends') }), btn),
+        h('p', { class: 'note subtle', text: t('ai.sendsMedia') }), more);
     }
 
     function guideBlock(t) {
@@ -222,8 +237,11 @@ MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/a
       const chips = h('div', { class: 'chips ai-chips', role: 'group', 'aria-label': t('ai.direct.phrases') },
         CHIPS.map((c) => h('button', { class: 'chip', type: 'button', 'data-chip': c, text: t('ai.chip.' + c) })));
       const allow = h('input', { type: 'checkbox', 'data-ctl': 'allowMaterials' });
+      // 写真・動画をAIが使ってよい (DESIGN_2_1 §11.6.1): on by default, offered while the library has a picture on this device
+      const allowMedia = h('input', { type: 'checkbox', checked: true, 'data-ctl': 'allowMedia' });
+      const mediaRow = h('label', { class: 'check-row', hidden: true }, allowMedia, h('span', { text: t('ai.direct.allowMedia') }));
       const more = h('details', { class: 'ai-direct-more' }, h('summary', { text: t('ai.direct.more') }),
-        h('label', { class: 'check-row' }, allow, h('span', { text: t('ai.direct.allowMaterials') })));
+        h('label', { class: 'check-row' }, allow, h('span', { text: t('ai.direct.allowMaterials') })), mediaRow);
       const camera = h('button', { class: 'btn small', type: 'button', 'data-tool': 'camera', text: t('ai.camera.run') });
       const send = h('button', { class: 'btn small primary', type: 'button', 'data-tool': 'direct', text: t('ai.direct.send') });
       const board = h('button', { class: 'link ai-board-link', type: 'button', text: t('ai.board.open') });
@@ -315,7 +333,8 @@ MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/a
         const r = ref();
         const instruction = text.value.trim();
         if (!r || (mode !== 'camera' && !instruction)) { dom.focus(text); return; }
-        ctl.run('direct', { briefs: [{ ref: r, instruction }], mode, allowMaterials: mode === 'camera' ? false : allow.checked });
+        ctl.run('direct', { briefs: [{ ref: r, instruction }], mode, allowMaterials: mode === 'camera' ? false : allow.checked,
+          media: mode === 'camera' || !allowMedia.checked ? false : mediaOnDevice(app) });
       }
 
       function renderList() {
@@ -363,6 +382,7 @@ MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/a
         chip.hidden = !area;
         chipText.textContent = area ? areaLine(t, area) : '';
         counter.textContent = t('ai.edit.count', { n: text.value.length, max: AC.MAX_INSTRUCTION });
+        mediaRow.hidden = !mediaOnDevice(app);
         const why = !r ? (target.mode === 'sel' ? 'ai.edit.noLine' : 'ai.direct.pickArea') : ctl.blocked('direct');
         send.disabled = !!why || !text.value.trim();
         send.title = why ? t(why) : '';
@@ -468,7 +488,7 @@ MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/a
     function mount(app, el) {
       const t = app.t;
       const ctl = AC.createController(hostOf(app), { session: storageOf('sessionStorage'), local: storageOf('localStorage'),
-        direct: optional('ai/direct'), recipe: optional('ai/recipe') });
+        direct: optional('ai/direct'), recipe: optional('ai/recipe'), vision: optional('ai/vision') });
       const conn = connectionCard(app, ctl);
       // 区画ごとに指示 (the board): a sub-page of the AI tab; it takes the place of the tools while it is open.
       let board = null;

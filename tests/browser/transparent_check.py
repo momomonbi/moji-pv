@@ -22,8 +22,7 @@ DESIGN_2_1 §11.8.3 (+): the project also holds a photo frame (photoFrame, shape
 with alpha (tests/helpers/media_gen.js stills: opaque on the left, a half-transparent square, cleared elsewhere), in the
 lower right corner. The glyph checks above leave its rect out, and the 透過PNG frames keep its alpha exactly as the PNG
 has it (opaque 255, the square 128 ± 3, cleared 0), as PNG glyphs keep theirs; over the green screen and black it is
-drawn too (§11.4.10). Until G.4 gives the app's engine its AssetStore, the export's fork gets one through the test
-harness (tests/www/media_parts.js wireExport).
+drawn too (§11.4.10). The export's engine is a fork of the app's, with a fork of the app's AssetStore (ui/boot).
 Google Fonts are blocked, so the glyphs come from the system fonts: without a Japanese font the test stops at once with
 one message saying so (dev/browser.py japanese_font_missing).
 
@@ -469,7 +468,6 @@ async def run(root, keep):
                 for rel in HELPERS:
                     await page.evaluate((ROOT / rel).read_text(encoding='utf-8'))
                 frame = await page.evaluate('() => window.__mediaParts.importPng()')
-                await page.evaluate('() => window.__mediaParts.wireExport()')
                 project = (ROOT / 'tests' / 'fixtures' / 'project_basic.json').read_text(encoding='utf-8')
                 info = await page.evaluate(SETUP, [project, frame])
                 if not checks.ok(info is not None, 'a lyric cut that is alone on screen for %d frames' % FRAMES):

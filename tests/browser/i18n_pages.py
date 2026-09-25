@@ -5,7 +5,9 @@ Both built pages are opened from a local http.server and walked through the scre
 lyrics in, the four steps (④ with 詳しく open), 詳細 at every level (作品全体 → 行 → カット → 要素), the part browser, the
 AI tab, the timeline drawer, the ≡ menu, the command palette, the shortcut sheet, the syntax help and the About page;
 v2.1 adds the area page, the curve widget, マイ素材 (list, page, the 「AIで作る」 form), the keyframe editor, the AI area list
-and the board (a material's name is user data: the en page shows its English name).
+and the board (a material's name is user data: the en page shows its English name); the photo and video screens (the
+drop label, the library and a row's menu, the asset page, the media rows with the trim row, the crop overlay and the
+picker; asset names are user data) come last.
 On every screen the visible text and the accessible names (aria-label, title, placeholder, alt) are read and checked:
 
   en page   no Japanese text (kana or kanji) outside the product name 文字PVメーカー and user data (the lyrics here are
@@ -43,6 +45,7 @@ JAPANESE = re.compile(r'[぀-ヿ㐀-䶿一-鿿豈-﫿ｦ-ﾟ]')
 RAW_KEY = re.compile(r'^[a-z][A-Za-z0-9]*(?:\.[A-Za-z][A-Za-z0-9-]*)+$')
 WORD = re.compile(r'[A-Za-z][A-Za-z0-9\'’.-]*[A-Za-z0-9]|[A-Za-z]')
 VERSION = re.compile(r'^v?\d+(\.\d+)+$')
+HEX = re.compile(r'#[0-9A-Fa-f]{6}\b')          # a colour code (the colour rows and a photo's swatches) is not a word
 BROKEN = re.compile(r'\[object \w+\]|\bundefined\b|\bNaN\b|\{[A-Za-z0-9_]+\}')
 # English words a Japanese UI legitimately shows: formats and codecs, units, key names, services and model names,
 # the lab-free product parts that are names (not prose). Font families and part keys are added from the page.
@@ -183,7 +186,7 @@ def check_screen(walk, name, items, table, families):
         else:
             if it['license']:
                 continue
-            rest = text
+            rest = HEX.sub(' ', text)
             for proper in JA_NAMES:
                 rest = rest.replace(proper, ' ')
             words = [w for w in english_words(rest) if w.lower() not in JA_WORDS and w not in families and not VERSION.match(w)]
@@ -251,6 +254,78 @@ async def v21_screens(w, table, families):
     await page.click('.ai-board-link')
     await page.wait_for_function("() => !!document.querySelector('.ai-board .ai-board-row')")
     await screen(w, 'v21-board', table, families)
+    await w.act('panel.close')
+
+
+# v2.1 photos and videos (package G.4, DESIGN_2_1 §11.8.3): a still and a video imported here (names are user data: the en
+# page gets English names), the video as line 2's background, the still as line 1's overlay footage, and a third photo
+# whose bytes are not on this device. Screens: the preview's drop label, 全体 › 写真・動画, a row's ⋯ menu, the asset page,
+# a missing asset's page, 重ねる映像 with its 重ね方, the element page with its media rows and the trim row, the crop
+# overlay (with its strip) and the picker.
+MEDIA_HELPERS = ('tests/helpers/exif_write.js', 'tests/helpers/media_gen.js')
+MEDIA_NAMES = {'ja': ['空の写真.png', '海辺.mp4', '夜景.png'], 'en': ['Blue Sky.png', 'Seaside Walk.mp4', 'Night View.png']}
+MEDIA_SETUP = """async (names) => {
+  const a = window.__mv, G = window.MVMediaGen;
+  const st = await G.stills();
+  const v = await G.encodeCounter({ container: 'mp4', fps: 30, frames: 45 });
+  const got = await a.media.importFiles([new File([st.png], names[0], { type: 'image/png' }), new File([v.bytes], names[1], { type: 'video/mp4' })], {});
+  const line = a.plan.lines[1].id;
+  a.media.place(got[1].id, 'ground', { kind: 'lines', scopes: ['line/' + line], lineIds: [line], area: null });
+  // the photo as overlay footage on line 1, and a third photo whose bytes are not on this device
+  const first = a.plan.lines[0].id;
+  a.media.place(got[0].id, 'overlay', { kind: 'lines', scopes: ['line/' + first], lineIds: [first], area: null });
+  const ghost = Object.assign({}, got[0], { id: 'a' + 'e'.repeat(24), name: names[2] });
+  a.dispatch({ t: 'media.put', entry: ghost }, { label: ['undo.media.put', {}] });
+  await a.assets.check([ghost.id]);
+  return { line, first, video: got[1].id, ghost: ghost.id };
+}"""
+DRAG_OVER = """(leave) => { const w = document.querySelector('.canvas-wrap'), dt = new DataTransfer();
+  dt.items.add(new File(['x'], 'x.png', { type: 'image/png' }));
+  w.dispatchEvent(new DragEvent(leave ? 'dragleave' : 'dragenter', { bubbles: true, dataTransfer: dt })); }"""
+
+
+async def media_screens(w, table, families):
+    page = w.page
+    for helper in MEDIA_HELPERS:
+        await page.evaluate((ROOT / helper).read_text(encoding='utf-8'))
+    got = await w.run(MEDIA_SETUP, MEDIA_NAMES[w.lang])
+    await w.run(DRAG_OVER, False)
+    await screen(w, 'media-drop', table, families)
+    await w.run(DRAG_OVER, True)
+    await w.act('panel.details')
+    await w.run("() => window.__mv.select({ level: 'work' }, { from: 'crumbs', open: true })")
+    await w.settle(4)
+    await w.run("() => window.__mv.inspector.openSection('media')")
+    await page.wait_for_function("() => document.querySelectorAll('.med-row').length === 3")
+    await screen(w, 'media-library', table, families)
+    await page.click('.med-row[data-id="%s"] .med-more' % got['video'])
+    await screen(w, 'media-row-menu', table, families)
+    await w.escape()
+    await w.run("(id) => window.__mv.media.openAsset(id)", got['video'])
+    await page.wait_for_function("() => !!document.querySelector('.med-page .med-title')")
+    await screen(w, 'media-asset', table, families)
+    await w.escape()
+    await w.run("() => window.__mv.view.setPref('ai', true)")
+    await w.run("(id) => window.__mv.media.openAsset(id)", got['ghost'])
+    await page.wait_for_function("() => !!document.querySelector('.med-page .med-missing')")
+    await screen(w, 'media-asset-missing', table, families)
+    await w.escape()
+    await w.run("""(line) => window.__mv.select({ level: 'el', scope: 'line/' + line, el: 'ground' }, { from: 'crumbs', open: true })""", got['first'])
+    await page.wait_for_function("() => !!document.querySelector('.frow[data-slot=\"atmos@mediaLayer.blend\"]')")
+    await w.run("() => document.querySelector('.frow[data-slot=\"atmos@mediaLayer.blend\"]').scrollIntoView({ block: 'center' })")
+    await screen(w, 'media-overlay', table, families)
+    await w.run("""(line) => window.__mv.select({ level: 'el', scope: 'line/' + line, el: 'ground' }, { from: 'crumbs', open: true })""", got['line'])
+    await page.wait_for_function("() => !!document.querySelector('.w-trim')")
+    await screen(w, 'media-element', table, families)
+    await w.run("() => document.querySelector('.w-trim').scrollIntoView({ block: 'center' })")
+    await screen(w, 'media-trim', table, families)
+    await page.click('.frow[data-slot="ground@photoPan.cropZoom"] .w-crop-edit')
+    await screen(w, 'media-crop', table, families)
+    await w.escape()
+    await page.click('.frow[data-slot="ground@photoPan.image"] .w-media')
+    await page.wait_for_function("() => document.querySelectorAll('.med-picker .pb-tile').length >= 3")
+    await screen(w, 'media-picker', table, families)
+    await w.escape()
     await w.act('panel.close')
 
 
@@ -331,6 +406,7 @@ async def walk_page(browser, base, lang, shots):
     await screen(w, 'about', table, families)
     await w.escape()
     await v21_screens(w, table, families)
+    await media_screens(w, table, families)
 
     used = await w.run('() => [...window.__i18nUsed]')
     for key in sorted(used):

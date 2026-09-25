@@ -1,6 +1,6 @@
-/* 文字PVメーカー v2 — original work. Inspector widgets: part, choice, number, time, color, font, toggle, words, cutpoints, text, slots, curve, shot, rig, partRefs (DESIGN §6.4.4; DESIGN_2_1 §6.5, §6.6). */
-MV.def('ui/widgets', ['ui/dom', 'ui/icons', 'i18n/t', 'core/color', 'ui/playbar', 'core/shot', 'ui/curve_widget'],
-  (dom, I, T, C, PB, SHOT, CW) => {
+/* 文字PVメーカー v2 — original work. Inspector widgets: part, choice, number, time, color, font, toggle, words, cutpoints, text, slots, curve, shot, rig, partRefs, media, trim, crop (DESIGN §6.4.4; DESIGN_2_1 §6.5, §6.6, §11.7.4–§11.7.7). */
+MV.def('ui/widgets', ['ui/dom', 'ui/icons', 'i18n/t', 'core/color', 'ui/playbar', 'core/shot', 'ui/curve_widget', 'ui/media_widgets'],
+  (dom, I, T, C, PB, SHOT, CW, MW) => {
   'use strict';
 
   const { h } = dom;
@@ -71,16 +71,19 @@ MV.def('ui/widgets', ['ui/dom', 'ui/icons', 'i18n/t', 'core/color', 'ui/playbar'
 
   // --- choice (segmented ≤ 4 options, else a select) ---------------------------------------------------------------
 
+  // field.radio: segmented whatever the count (the five options of 動きと重なり wrap; DESIGN_2_1 §11.9.5). field.autoValue:
+  // the option that stands for 自動 — shown while the value is automatic, and choosing it unpins.
   function choice(field, env) {
     const t = env.t;
     const options = (field.auto ? [{ v: AUTO, label: 'state.auto' }] : []).concat(field.options || []);
-    const segmented = options.length <= SEGMENTS_MAX && !field.select;
+    const segmented = (options.length <= SEGMENTS_MAX || !!field.radio) && !field.select;
+    const autoV = field.autoValue !== undefined ? field.autoValue : AUTO;
     let current = null;
-    const pick = (o) => (o.v === AUTO ? env.unpin() : env.commit(o.v));
+    const pick = (o) => (o.v === AUTO || (field.autoValue !== undefined && o.v === field.autoValue) ? env.unpin() : env.commit(o.v));
     if (segmented) {
       const buttons = options.map((o) => h('button', { class: 'seg', type: 'button', role: 'radio', 'aria-checked': 'false',
         tabindex: '-1', on: { click: () => pick(o) } }, optionText(t, o)));
-      const el = h('div', { class: 'segmented w-seg', role: 'radiogroup', 'aria-label': env.label }, buttons);
+      const el = h('div', { class: ['segmented', 'w-seg', field.radio ? 'is-wrap' : ''], role: 'radiogroup', 'aria-label': env.label }, buttons);
       // Radio-group keys (§6.12): arrows move to the next option and choose it; one tab stop for the group.
       el.addEventListener('keydown', (ev) => {
         if (!ownsKey(ev) || ev.key === 'PageUp' || ev.key === 'PageDown') return;
@@ -97,7 +100,7 @@ MV.def('ui/widgets', ['ui/dom', 'ui/icons', 'i18n/t', 'core/color', 'ui/playbar'
       return {
         el, focus: () => dom.focus(buttons.find((b) => b.getAttribute('aria-checked') === 'true') || buttons[0]),
         update(st) {
-          current = st.auto && field.auto ? AUTO : st.mixed ? null : st.value;
+          current = st.auto && (field.auto || field.autoValue !== undefined) ? autoV : st.mixed ? null : st.value;
           let stop = -1;
           options.forEach((o, i) => {
             const on = !st.mixed && same(o.v, current);
@@ -636,7 +639,8 @@ MV.def('ui/widgets', ['ui/dom', 'ui/icons', 'i18n/t', 'core/color', 'ui/playbar'
     };
   }
 
-  const MAKERS = { part, choice, number, time, color, font, toggle, words, cutpoints, text, slots, curve: CW.make, shot, rig, partRefs };
+  const MAKERS = { part, choice, number, time, color, font, toggle, words, cutpoints, text, slots, curve: CW.make, shot, rig, partRefs,
+    media: MW.media, trim: MW.trim, crop: (field, env) => MW.crop(field, env, number) };
 
   function make(field, env) {
     const maker = MAKERS[field.widget];
