@@ -1,0 +1,182 @@
+{
+ "format": "mojipv.project",
+ "schema": 1,
+ "doc": {
+  "meta": {
+   "app": "2.0.0",
+   "lang": "auto"
+  },
+  "sheet": {
+   "next": 11,
+   "rows": [
+    {
+     "id": "r1",
+     "src": "[ti:紙ひこうきの朝]"
+    },
+    {
+     "id": "r2",
+     "src": "# Bメロ"
+    },
+    {
+     "id": "r3",
+     "src": "信号待ちの/交差点で"
+    },
+    {
+     "id": "r4",
+     "src": "昨日の*ため息*を/置いてきた"
+    },
+    {
+     "id": "r5",
+     "src": "ビルの谷間に/光が落ちて"
+    },
+    {
+     "id": "r6",
+     "src": "影ぼうしが/背のびをする"
+    },
+    {
+     "id": "r7",
+     "src": "約束の丘へ/続く坂道|ひとりごと"
+    },
+    {
+     "id": "r8",
+     "src": "遠回りしても/たどり着ける"
+    },
+    {
+     "id": "r9",
+     "src": ""
+    },
+    {
+     "id": "ra",
+     "src": "飛ばせ/*紙ひこうき*/空の果てまで"
+    }
+   ]
+  },
+  "timing": {
+   "snap": "off",
+   "lead": 0.12,
+   "tail": 0.25,
+   "leadIn": 1,
+   "outro": 2,
+   "tapLatency": 0.06
+  },
+  "song": null,
+  "look": {
+   "seed": 20240917,
+   "moodSeed": 77003311,
+   "aspect": "9:16",
+   "backdrop": "scene"
+  },
+  "pins": {
+   "cut/r3~0:el.text.nudge": {
+    "v": {
+     "dx": 0,
+     "dy": -24,
+     "rot": 0,
+     "s": 1
+    },
+    "by": "user",
+    "sig": "信号待ちの"
+   },
+   "cut/r3~0:orient": {
+    "v": "v",
+    "by": "user",
+    "sig": "信号待ちの"
+   },
+   "cut/r3~5:arrive.each": {
+    "v": 0.05,
+    "by": "user",
+    "sig": "交差点で"
+   },
+   "cut/r6~0:arrange": {
+    "v": "centerAnchor",
+    "by": "lock",
+    "sig": "影ぼうしが"
+   },
+   "cut/r6~0:dwell": {
+    "v": "stillHold",
+    "by": "lock",
+    "sig": "影ぼうしが"
+   },
+   "cut/r6~0:orient": {
+    "v": "v",
+    "by": "lock",
+    "sig": "影ぼうしが"
+   },
+   "cut/r6~5:arrange": {
+    "v": "centerAnchor",
+    "by": "lock",
+    "sig": "背のびをする"
+   },
+   "cut/r6~5:lens": {
+    "v": "fixedFrame",
+    "by": "lock",
+    "sig": "背のびをする"
+   },
+   "cut/r6~5:orient": {
+    "v": "v",
+    "by": "lock",
+    "sig": "背のびをする"
+   },
+   "line/r4:arrange": {
+    "v": "centerAnchor",
+    "by": "user"
+   },
+   "line/r5:start": {
+    "v": 12.5,
+    "by": "tap"
+   },
+   "line/r6:split": {
+    "v": [
+     0,
+     5
+    ],
+    "by": "lock"
+   },
+   "work:amount.glitch": {
+    "v": 0,
+    "by": "user"
+   },
+   "work:color.accent": {
+    "v": "#C2413A",
+    "by": "user"
+   },
+   "work:mood": {
+    "v": "quietHush",
+    "by": "user"
+   }
+  },
+  "salts": {
+   "cut/r3~0:depart": 1,
+   "line/r5": 2
+  },
+  "locks": {
+   "r6": {
+    "n": 7
+   }
+  },
+  "filters": {
+   "seam": {
+    "only": [
+     "hardCut"
+    ],
+    "deny": null
+   }
+  },
+  "output": {
+   "format": "mp4",
+   "short": 1080,
+   "fps": 30,
+   "quality": "high",
+   "audio": true,
+   "range": null,
+   "name": null
+  }
+ },
+ "side": {
+  "looks": {
+   "list": [],
+   "cap": 50
+  },
+  "aiLog": []
+ }
+}

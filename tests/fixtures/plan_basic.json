@@ -1,0 +1,2679 @@
+{
+ "v": 1,
+ "hash": "921a28b0",
+ "duration": 60,
+ "design": {
+  "aspect": "16:9",
+  "w": 1920,
+  "h": 1080,
+  "short": 1080
+ },
+ "look": {
+  "mood": {
+   "v": "quietHush",
+   "from": "auto"
+  },
+  "theme": {
+   "v": "sumiWashi",
+   "from": "auto"
+  },
+  "season": {
+   "v": "any",
+   "from": "auto"
+  },
+  "amounts": {
+   "motion": 0.3,
+   "glitch": 0,
+   "chroma": 0.05,
+   "ornament": 0.35,
+   "density": 0.3,
+   "texture": 0.5,
+   "groundSwitch": 0.2,
+   "flash": 0,
+   "shake": 0.05,
+   "camera": 0.3,
+   "pace": 0.3
+  },
+  "amountsFrom": {},
+  "palette": {
+   "ground": "#EFE9DC",
+   "ground2": "#E2D9C6",
+   "ink": "#1C1A17",
+   "accent": "#B8322A",
+   "shiftA": "#3E6E8C",
+   "shiftB": "#C9A15B",
+   "muted": "#8C8577"
+  },
+  "faces": {
+   "display": {
+    "ja": {
+     "family": "Yuji Syuku",
+     "weight": 400
+    },
+    "latin": {
+     "family": "Fraunces",
+     "weight": 400
+    }
+   },
+   "serif": {
+    "ja": {
+     "family": "Shippori Mincho B1",
+     "weight": 600
+    },
+    "latin": {
+     "family": "Cormorant Garamond",
+     "weight": 600
+    }
+   },
+   "body": {
+    "ja": {
+     "family": "Zen Kaku Gothic New",
+     "weight": 500
+    },
+    "latin": {
+     "family": "Inter",
+     "weight": 500
+    }
+   }
+  },
+  "texture": {
+   "v": "grainFilm",
+   "p": {
+    "amount": 0.5,
+    "when": "always"
+   },
+   "from": "auto"
+  },
+  "backdrop": "scene"
+ },
+ "beats": {
+  "bpm": 120,
+  "offset": 0.25,
+  "meter": 4
+ },
+ "lines": [
+  {
+   "id": "r4",
+   "row": "r4",
+   "index": 0,
+   "text": "始発のホームに白い息",
+   "t0": 4.25,
+   "t1": 8,
+   "by": {
+    "start": "auto",
+    "end": "auto"
+   },
+   "cuts": [
+    "r4~0",
+    "r4~7"
+   ],
+   "locked": false,
+   "lang": "ja"
+  },
+  {
+   "id": "r5",
+   "row": "r5",
+   "index": 1,
+   "text": "改札の向こうで朝がほどける",
+   "t0": 8.25,
+   "t1": 12,
+   "by": {
+    "start": "auto",
+    "end": "auto"
+   },
+   "cuts": [
+    "r5~0",
+    "r5~7"
+   ],
+   "locked": false,
+   "lang": "ja"
+  },
+  {
+   "id": "r6",
+   "row": "r6",
+   "index": 2,
+   "text": "ポケットの切符をそっと握って",
+   "t0": 12.25,
+   "t1": 16,
+   "by": {
+    "start": "auto",
+    "end": "auto"
+   },
+   "cuts": [
+    "r6~0",
+    "r6~8"
+   ],
+   "locked": false,
+   "lang": "ja"
+  },
+  {
+   "id": "r7",
+   "row": "r7",
+   "index": 3,
+   "text": "まだ名前のない今日へ行く",
+   "t0": 16.25,
+   "t1": 20,
+   "by": {
+    "start": "auto",
+    "end": "auto"
+   },
+   "cuts": [
+    "r7~0",
+    "r7~7"
+   ],
+   "locked": false,
+   "lang": "ja"
+  },
+  {
+   "id": "ra",
+   "row": "ra",
+   "index": 4,
+   "text": "飛ばせ紙ひこうき空の果てまで",
+   "t0": 22.25,
+   "t1": 27,
+   "by": {
+    "start": "auto",
+    "end": "auto"
+   },
+   "cuts": [
+    "ra~0",
+    "ra~3",
+    "ra~8"
+   ],
+   "locked": false,
+   "lang": "ja"
+  },
+  {
+   "id": "rb",
+   "row": "rb",
+   "index": 5,
+   "text": "折り目の数だけ強くなれる",
+   "t0": 27.25,
+   "t1": 31,
+   "by": {
+    "start": "auto",
+    "end": "auto"
+   },
+   "cuts": [
+    "rb~0",
+    "rb~7"
+   ],
+   "locked": false,
+   "lang": "ja"
+  },
+  {
+   "id": "rc",
+   "row": "rc",
+   "index": 6,
+   "text": "向かい風でもかまわないさ",
+   "t0": 31.25,
+   "t1": 35,
+   "by": {
+    "start": "auto",
+    "end": "auto"
+   },
+   "cuts": [
+    "rc~0",
+    "rc~6"
+   ],
+   "locked": false,
+   "lang": "ja"
+  },
+  {
+   "id": "rd",
+   "row": "rd",
+   "index": 7,
+   "text": "Fly highどこまでも",
+   "t0": 35.25,
+   "t1": 39,
+   "by": {
+    "start": "auto",
+    "end": "auto"
+   },
+   "cuts": [
+    "rd~0",
+    "rd~8"
+   ],
+   "locked": false,
+   "lang": "ja"
+  }
+ ],
+ "cuts": [
+  {
+   "key": "title",
+   "line": null,
+   "role": "title",
+   "text": "紙ひこうきの朝",
+   "emph": [],
+   "impact": false,
+   "note": null,
+   "t0": 0,
+   "t1": 4.25,
+   "a": -0.12,
+   "b": 4.5,
+   "repT": 0.835,
+   "lang": "ja",
+   "feat": {
+    "cells": 7,
+    "graphemes": 7,
+    "script": "ja",
+    "latin": 0,
+    "orients": [
+     "h",
+     "v"
+    ],
+    "words": 2,
+    "units": {
+     "glyph": 7,
+     "word": 2,
+     "line": 1
+    },
+    "emph": false,
+    "impact": false,
+    "dur": 4.25,
+    "cps": 1.647,
+    "energy": 0.201,
+    "beat": 0.5,
+    "onBeat": false,
+    "section": null,
+    "repeatOf": null,
+    "pos": 0,
+    "role": "title"
+   },
+   "fp": "855ef14d",
+   "slots": {
+    "orient": {
+     "v": "h",
+     "from": "auto"
+    },
+    "arrange": {
+     "v": "centerAnchor",
+     "p": {
+      "offsetX": 0,
+      "offsetY": 0
+     },
+     "from": "auto"
+    },
+    "text.face": {
+     "v": "serif",
+     "from": "auto"
+    },
+    "text.scale": {
+     "v": 0.94,
+     "from": "auto"
+    },
+    "text.ink": {
+     "v": "ink",
+     "from": "auto"
+    },
+    "text.style": {
+     "v": "plain",
+     "from": "auto"
+    },
+    "arrive": {
+     "v": "stubFade",
+     "p": {
+      "dur": 0.6,
+      "each": 0,
+      "order": "lead",
+      "ease": "cubicOut"
+     },
+     "from": "auto"
+    },
+    "dwell": {
+     "v": "stubBob",
+     "p": {
+      "amount": 0.3,
+      "speed": 1
+     },
+     "from": "auto"
+    },
+    "depart": {
+     "v": "stubFadeOut",
+     "p": {
+      "dur": 0.35,
+      "each": 0.02,
+      "order": "lead",
+      "ease": "quadIn"
+     },
+     "from": "auto"
+    },
+    "ornament.count": {
+     "v": 0,
+     "from": "auto"
+    },
+    "lens": {
+     "v": "fixedFrame",
+     "p": {
+      "amount": 0.3
+     },
+     "from": "auto"
+    },
+    "filter.count": {
+     "v": 0,
+     "from": "auto"
+    }
+   },
+   "els": {},
+   "ground": 0,
+   "seamIn": -1
+  },
+  {
+   "key": "r4~0",
+   "line": "r4",
+   "role": "lyric",
+   "text": "始発のホームに",
+   "emph": [],
+   "impact": false,
+   "note": null,
+   "t0": 4.25,
+   "t1": 6.4,
+   "a": 4.13,
+   "b": 6.65,
+   "repT": 5.046,
+   "lang": "ja",
+   "feat": {
+    "cells": 7,
+    "graphemes": 7,
+    "script": "ja",
+    "latin": 0,
+    "orients": [
+     "h",
+     "v"
+    ],
+    "words": 2,
+    "units": {
+     "glyph": 7,
+     "word": 2,
+     "line": 1
+    },
+    "emph": false,
+    "impact": false,
+    "dur": 2.15,
+    "cps": 3.256,
+    "energy": 0.518,
+    "beat": 0.5,
+    "onBeat": true,
+    "section": null,
+    "repeatOf": null,
+    "pos": 0.071,
+    "role": "lyric"
+   },
+   "fp": "b5d60b17",
+   "slots": {
+    "orient": {
+     "v": "h",
+     "from": "auto"
+    },
+    "arrange": {
+     "v": "stubBlock",
+     "p": {
+      "offsetX": 0,
+      "offsetY": 0,
+      "lift": 0.1
+     },
+     "from": "auto"
+    },
+    "text.face": {
+     "v": "display",
+     "from": "auto"
+    },
+    "text.scale": {
+     "v": 1.004,
+     "from": "auto"
+    },
+    "text.ink": {
+     "v": "ink",
+     "from": "auto"
+    },
+    "text.style": {
+     "v": "plain",
+     "from": "auto"
+    },
+    "arrive": {
+     "v": "stubFade",
+     "p": {
+      "dur": 0.55,
+      "each": 0.04,
+      "order": "word",
+      "ease": "expoOut"
+     },
+     "from": "auto"
+    },
+    "dwell": {
+     "v": "stillHold",
+     "p": {
+      "amount": 0.3,
+      "speed": 1
+     },
+     "from": "auto"
+    },
+    "depart": {
+     "v": "stubFadeOut",
+     "p": {
+      "dur": 0.35,
+      "each": 0.02,
+      "order": "lead",
+      "ease": "quadIn"
+     },
+     "from": "auto"
+    },
+    "ornament.count": {
+     "v": 1,
+     "from": "auto"
+    },
+    "lens": {
+     "v": "stubDrift",
+     "p": {
+      "amount": 0.3
+     },
+     "from": "auto"
+    },
+    "filter.count": {
+     "v": 0,
+     "from": "auto"
+    },
+    "ornament#0": {
+     "v": "hairFrame",
+     "p": {
+      "amount": 0.4,
+      "ink": "accent",
+      "gap": 24
+     },
+     "from": "auto"
+    }
+   },
+   "els": {
+    "text": {
+     "nudge": {
+      "dx": 0,
+      "dy": -24,
+      "rot": 0,
+      "s": 1
+     }
+    }
+   },
+   "ground": 0,
+   "seamIn": -1
+  },
+  {
+   "key": "r4~7",
+   "line": "r4",
+   "role": "lyric",
+   "text": "白い息",
+   "emph": [],
+   "impact": false,
+   "note": null,
+   "t0": 6.4,
+   "t1": 8,
+   "a": 6.28,
+   "b": 8.33,
+   "repT": 7.12,
+   "lang": "ja",
+   "feat": {
+    "cells": 3,
+    "graphemes": 3,
+    "script": "ja",
+    "latin": 0,
+    "orients": [
+     "h",
+     "v"
+    ],
+    "words": 1,
+    "units": {
+     "glyph": 3,
+     "word": 1,
+     "line": 1
+    },
+    "emph": false,
+    "impact": false,
+    "dur": 1.6,
+    "cps": 1.875,
+    "energy": 0.464,
+    "beat": 0.5,
+    "onBeat": false,
+    "section": null,
+    "repeatOf": null,
+    "pos": 0.107,
+    "role": "lyric"
+   },
+   "fp": "b354eed3",
+   "slots": {
+    "orient": {
+     "v": "h",
+     "from": "auto"
+    },
+    "arrange": {
+     "v": "centerAnchor",
+     "p": {
+      "offsetX": 0,
+      "offsetY": 0
+     },
+     "from": "auto"
+    },
+    "text.face": {
+     "v": "display",
+     "from": "auto"
+    },
+    "text.scale": {
+     "v": 0.993,
+     "from": "auto"
+    },
+    "text.ink": {
+     "v": "ink",
+     "from": "auto"
+    },
+    "text.style": {
+     "v": "plain",
+     "from": "auto"
+    },
+    "arrive": {
+     "v": "stubFade",
+     "p": {
+      "dur": 0.65,
+      "each": 0.04,
+      "order": "lead",
+      "ease": "expoOut"
+     },
+     "from": "auto"
+    },
+    "dwell": {
+     "v": "stubBob",
+     "p": {
+      "amount": 0.3,
+      "speed": 1
+     },
+     "from": "auto"
+    },
+    "depart": {
+     "v": "stubFadeOut",
+     "p": {
+      "dur": 0.35,
+      "each": 0.02,
+      "order": "lead",
+      "ease": "quadIn"
+     },
+     "from": "auto"
+    },
+    "ornament.count": {
+     "v": 0,
+     "from": "auto"
+    },
+    "lens": {
+     "v": "fixedFrame",
+     "p": {
+      "amount": 0.3
+     },
+     "from": "auto"
+    },
+    "filter.count": {
+     "v": 0,
+     "from": "auto"
+    }
+   },
+   "els": {},
+   "ground": 0,
+   "seamIn": -1
+  },
+  {
+   "key": "r5~0",
+   "line": "r5",
+   "role": "lyric",
+   "text": "改札の向こうで",
+   "emph": [],
+   "impact": false,
+   "note": null,
+   "t0": 8.25,
+   "t1": 10.4,
+   "a": 8.13,
+   "b": 10.65,
+   "repT": 8.956,
+   "lang": "ja",
+   "feat": {
+    "cells": 7,
+    "graphemes": 7,
+    "script": "ja",
+    "latin": 0,
+    "orients": [
+     "h",
+     "v"
+    ],
+    "words": 2,
+    "units": {
+     "glyph": 7,
+     "word": 2,
+     "line": 1
+    },
+    "emph": false,
+    "impact": false,
+    "dur": 2.15,
+    "cps": 3.256,
+    "energy": 0.608,
+    "beat": 0.5,
+    "onBeat": true,
+    "section": null,
+    "repeatOf": null,
+    "pos": 0.138,
+    "role": "lyric"
+   },
+   "fp": "ebeef636",
+   "slots": {
+    "orient": {
+     "v": "h",
+     "from": "auto"
+    },
+    "arrange": {
+     "v": "stubBlock",
+     "p": {
+      "offsetX": 0,
+      "offsetY": 0,
+      "lift": 0.14
+     },
+     "from": "auto"
+    },
+    "text.face": {
+     "v": "display",
+     "from": "auto"
+    },
+    "text.scale": {
+     "v": 1.022,
+     "from": "auto"
+    },
+    "text.ink": {
+     "v": "ink",
+     "from": "auto"
+    },
+    "text.style": {
+     "v": "plain",
+     "from": "auto"
+    },
+    "arrive": {
+     "v": "stubFade",
+     "p": {
+      "dur": 0.45,
+      "each": 0.04,
+      "order": "word",
+      "ease": "expoOut"
+     },
+     "from": "auto"
+    },
+    "dwell": {
+     "v": "stubBob",
+     "p": {
+      "amount": 0.3,
+      "speed": 1
+     },
+     "from": "auto"
+    },
+    "depart": {
+     "v": "stubFadeOut",
+     "p": {
+      "dur": 0.35,
+      "each": 0.02,
+      "order": "lead",
+      "ease": "quadIn"
+     },
+     "from": "auto"
+    },
+    "ornament.count": {
+     "v": 0,
+     "from": "auto"
+    },
+    "lens": {
+     "v": "stubDrift",
+     "p": {
+      "amount": 0.3
+     },
+     "from": "auto"
+    },
+    "filter.count": {
+     "v": 0,
+     "from": "auto"
+    }
+   },
+   "els": {},
+   "ground": 0,
+   "seamIn": 0
+  },
+  {
+   "key": "r5~7",
+   "line": "r5",
+   "role": "lyric",
+   "text": "朝がほどける",
+   "emph": [],
+   "impact": false,
+   "note": null,
+   "t0": 10.4,
+   "t1": 12,
+   "a": 10.28,
+   "b": 12.5,
+   "repT": 11.132,
+   "lang": "ja",
+   "feat": {
+    "cells": 6,
+    "graphemes": 6,
+    "script": "ja",
+    "latin": 0,
+    "orients": [
+     "h",
+     "v"
+    ],
+    "words": 2,
+    "units": {
+     "glyph": 6,
+     "word": 2,
+     "line": 1
+    },
+    "emph": false,
+    "impact": false,
+    "dur": 1.6,
+    "cps": 3.75,
+    "energy": 0.673,
+    "beat": 0.5,
+    "onBeat": false,
+    "section": null,
+    "repeatOf": null,
+    "pos": 0.173,
+    "role": "lyric"
+   },
+   "fp": "bfcb1fce",
+   "slots": {
+    "orient": {
+     "v": "h",
+     "from": "auto"
+    },
+    "arrange": {
+     "v": "centerAnchor",
+     "p": {
+      "offsetX": 0,
+      "offsetY": 0
+     },
+     "from": "auto"
+    },
+    "text.face": {
+     "v": "display",
+     "from": "auto"
+    },
+    "text.scale": {
+     "v": 1.035,
+     "from": "auto"
+    },
+    "text.ink": {
+     "v": "ink",
+     "from": "auto"
+    },
+    "text.style": {
+     "v": "plain",
+     "from": "auto"
+    },
+    "arrive": {
+     "v": "stubFade",
+     "p": {
+      "dur": 0.55,
+      "each": 0.04,
+      "order": "lead",
+      "ease": "expoOut"
+     },
+     "from": "auto"
+    },
+    "dwell": {
+     "v": "stillHold",
+     "p": {
+      "amount": 0.3,
+      "speed": 1
+     },
+     "from": "auto"
+    },
+    "depart": {
+     "v": "stubFadeOut",
+     "p": {
+      "dur": 0.35,
+      "each": 0.02,
+      "order": "lead",
+      "ease": "quadIn"
+     },
+     "from": "auto"
+    },
+    "ornament.count": {
+     "v": 1,
+     "from": "auto"
+    },
+    "lens": {
+     "v": "fixedFrame",
+     "p": {
+      "amount": 0.3
+     },
+     "from": "auto"
+    },
+    "filter.count": {
+     "v": 0,
+     "from": "auto"
+    },
+    "ornament#0": {
+     "v": "stubRule",
+     "p": {
+      "amount": 0.4,
+      "ink": "accent",
+      "gap": 24
+     },
+     "from": "auto"
+    }
+   },
+   "els": {},
+   "ground": 0,
+   "seamIn": -1
+  },
+  {
+   "key": "r6~0",
+   "line": "r6",
+   "role": "lyric",
+   "text": "ポケットの切符を",
+   "emph": [
+    [
+     5,
+     7
+    ]
+   ],
+   "impact": false,
+   "note": null,
+   "t0": 12.25,
+   "t1": 14.4,
+   "a": 12.13,
+   "b": 14.65,
+   "repT": 13.17,
+   "lang": "ja",
+   "feat": {
+    "cells": 8,
+    "graphemes": 8,
+    "script": "ja",
+    "latin": 0,
+    "orients": [
+     "h",
+     "v"
+    ],
+    "words": 2,
+    "units": {
+     "glyph": 8,
+     "word": 2,
+     "line": 1
+    },
+    "emph": true,
+    "impact": false,
+    "dur": 2.15,
+    "cps": 3.721,
+    "energy": 0.604,
+    "beat": 0.5,
+    "onBeat": true,
+    "section": null,
+    "repeatOf": null,
+    "pos": 0.204,
+    "role": "lyric"
+   },
+   "fp": "025e82a0",
+   "slots": {
+    "orient": {
+     "v": "h",
+     "from": "auto"
+    },
+    "arrange": {
+     "v": "stubBlock",
+     "p": {
+      "offsetX": 0,
+      "offsetY": 0,
+      "lift": 0.1
+     },
+     "from": "auto"
+    },
+    "text.face": {
+     "v": "display",
+     "from": "auto"
+    },
+    "text.scale": {
+     "v": 1.021,
+     "from": "auto"
+    },
+    "text.ink": {
+     "v": "ink",
+     "from": "auto"
+    },
+    "text.style": {
+     "v": "plain",
+     "from": "auto"
+    },
+    "arrive": {
+     "v": "stubFade",
+     "p": {
+      "dur": 0.65,
+      "each": 0.04,
+      "order": "word",
+      "ease": "expoOut"
+     },
+     "from": "auto"
+    },
+    "dwell": {
+     "v": "stubBob",
+     "p": {
+      "amount": 0.3,
+      "speed": 1
+     },
+     "from": "auto"
+    },
+    "depart": {
+     "v": "stubFadeOut",
+     "p": {
+      "dur": 0.35,
+      "each": 0.02,
+      "order": "lead",
+      "ease": "quadIn"
+     },
+     "from": "auto"
+    },
+    "ornament.count": {
+     "v": 0,
+     "from": "auto"
+    },
+    "lens": {
+     "v": "stubDrift",
+     "p": {
+      "amount": 0.3
+     },
+     "from": "auto"
+    },
+    "filter.count": {
+     "v": 0,
+     "from": "auto"
+    }
+   },
+   "els": {},
+   "ground": 0,
+   "seamIn": -1
+  },
+  {
+   "key": "r6~8",
+   "line": "r6",
+   "role": "lyric",
+   "text": "そっと握って",
+   "emph": [],
+   "impact": false,
+   "note": null,
+   "t0": 14.4,
+   "t1": 16,
+   "a": 14.28,
+   "b": 16.5,
+   "repT": 15.042,
+   "lang": "ja",
+   "feat": {
+    "cells": 6,
+    "graphemes": 6,
+    "script": "ja",
+    "latin": 0,
+    "orients": [
+     "h",
+     "v"
+    ],
+    "words": 2,
+    "units": {
+     "glyph": 6,
+     "word": 2,
+     "line": 1
+    },
+    "emph": false,
+    "impact": false,
+    "dur": 1.6,
+    "cps": 3.75,
+    "energy": 0.473,
+    "beat": 0.5,
+    "onBeat": false,
+    "section": null,
+    "repeatOf": null,
+    "pos": 0.24,
+    "role": "lyric"
+   },
+   "fp": "558debeb",
+   "slots": {
+    "orient": {
+     "v": "h",
+     "from": "auto"
+    },
+    "arrange": {
+     "v": "centerAnchor",
+     "p": {
+      "offsetX": 0,
+      "offsetY": 0
+     },
+     "from": "auto"
+    },
+    "text.face": {
+     "v": "display",
+     "from": "auto"
+    },
+    "text.scale": {
+     "v": 0.995,
+     "from": "auto"
+    },
+    "text.ink": {
+     "v": "ink",
+     "from": "auto"
+    },
+    "text.style": {
+     "v": "plain",
+     "from": "auto"
+    },
+    "arrive": {
+     "v": "stubFade",
+     "p": {
+      "dur": 0.45,
+      "each": 0.04,
+      "order": "lead",
+      "ease": "expoOut"
+     },
+     "from": "auto"
+    },
+    "dwell": {
+     "v": "stubBob",
+     "p": {
+      "amount": 0.3,
+      "speed": 1
+     },
+     "from": "auto"
+    },
+    "depart": {
+     "v": "stubFadeOut",
+     "p": {
+      "dur": 0.35,
+      "each": 0.02,
+      "order": "lead",
+      "ease": "quadIn"
+     },
+     "from": "auto"
+    },
+    "ornament.count": {
+     "v": 0,
+     "from": "auto"
+    },
+    "lens": {
+     "v": "fixedFrame",
+     "p": {
+      "amount": 0.3
+     },
+     "from": "auto"
+    },
+    "filter.count": {
+     "v": 0,
+     "from": "auto"
+    }
+   },
+   "els": {},
+   "ground": 0,
+   "seamIn": -1
+  },
+  {
+   "key": "r7~0",
+   "line": "r7",
+   "role": "lyric",
+   "text": "まだ名前のない",
+   "emph": [],
+   "impact": false,
+   "note": null,
+   "t0": 16.25,
+   "t1": 18.4,
+   "a": 16.13,
+   "b": 18.65,
+   "repT": 17.046,
+   "lang": "ja",
+   "feat": {
+    "cells": 7,
+    "graphemes": 7,
+    "script": "ja",
+    "latin": 0,
+    "orients": [
+     "h",
+     "v"
+    ],
+    "words": 2,
+    "units": {
+     "glyph": 7,
+     "word": 2,
+     "line": 1
+    },
+    "emph": false,
+    "impact": false,
+    "dur": 2.15,
+    "cps": 3.256,
+    "energy": 0.538,
+    "beat": 0.5,
+    "onBeat": true,
+    "section": null,
+    "repeatOf": null,
+    "pos": 0.271,
+    "role": "lyric"
+   },
+   "fp": "d9c1aa2b",
+   "slots": {
+    "orient": {
+     "v": "h",
+     "from": "auto"
+    },
+    "arrange": {
+     "v": "stubBlock",
+     "p": {
+      "offsetX": 0,
+      "offsetY": 0,
+      "lift": 0.14
+     },
+     "from": "auto"
+    },
+    "text.face": {
+     "v": "display",
+     "from": "auto"
+    },
+    "text.scale": {
+     "v": 1.008,
+     "from": "auto"
+    },
+    "text.ink": {
+     "v": "ink",
+     "from": "auto"
+    },
+    "text.style": {
+     "v": "plain",
+     "from": "auto"
+    },
+    "arrive": {
+     "v": "stubFade",
+     "p": {
+      "dur": 0.55,
+      "each": 0.04,
+      "order": "word",
+      "ease": "expoOut"
+     },
+     "from": "auto"
+    },
+    "dwell": {
+     "v": "stillHold",
+     "p": {
+      "amount": 0.3,
+      "speed": 1
+     },
+     "from": "auto"
+    },
+    "depart": {
+     "v": "stubFadeOut",
+     "p": {
+      "dur": 0.35,
+      "each": 0.02,
+      "order": "lead",
+      "ease": "quadIn"
+     },
+     "from": "auto"
+    },
+    "ornament.count": {
+     "v": 1,
+     "from": "auto"
+    },
+    "lens": {
+     "v": "stubDrift",
+     "p": {
+      "amount": 0.3
+     },
+     "from": "auto"
+    },
+    "filter.count": {
+     "v": 0,
+     "from": "auto"
+    },
+    "ornament#0": {
+     "v": "hairFrame",
+     "p": {
+      "amount": 0.4,
+      "ink": "accent",
+      "gap": 24
+     },
+     "from": "auto"
+    }
+   },
+   "els": {},
+   "ground": 0,
+   "seamIn": -1
+  },
+  {
+   "key": "r7~7",
+   "line": "r7",
+   "role": "lyric",
+   "text": "今日へ行く",
+   "emph": [],
+   "impact": false,
+   "note": null,
+   "t0": 18.4,
+   "t1": 20,
+   "a": 18.28,
+   "b": 22.5,
+   "repT": 19.388,
+   "lang": "ja",
+   "feat": {
+    "cells": 5,
+    "graphemes": 5,
+    "script": "ja",
+    "latin": 0,
+    "orients": [
+     "h",
+     "v"
+    ],
+    "words": 1,
+    "units": {
+     "glyph": 5,
+     "word": 1,
+     "line": 1
+    },
+    "emph": false,
+    "impact": false,
+    "dur": 1.6,
+    "cps": 3.125,
+    "energy": 0.662,
+    "beat": 0.5,
+    "onBeat": false,
+    "section": null,
+    "repeatOf": null,
+    "pos": 0.307,
+    "role": "lyric"
+   },
+   "fp": "95720767",
+   "slots": {
+    "orient": {
+     "v": "h",
+     "from": "auto"
+    },
+    "arrange": {
+     "v": "centerAnchor",
+     "p": {
+      "offsetX": 0,
+      "offsetY": 0
+     },
+     "from": "auto"
+    },
+    "text.face": {
+     "v": "display",
+     "from": "auto"
+    },
+    "text.scale": {
+     "v": 1.032,
+     "from": "auto"
+    },
+    "text.ink": {
+     "v": "ink",
+     "from": "auto"
+    },
+    "text.style": {
+     "v": "plain",
+     "from": "auto"
+    },
+    "arrive": {
+     "v": "stubFade",
+     "p": {
+      "dur": 0.65,
+      "each": 0.04,
+      "order": "lead",
+      "ease": "expoOut"
+     },
+     "from": "auto"
+    },
+    "dwell": {
+     "v": "stubBob",
+     "p": {
+      "amount": 0.3,
+      "speed": 1
+     },
+     "from": "auto"
+    },
+    "depart": {
+     "v": "stubFadeOut",
+     "p": {
+      "dur": 0.35,
+      "each": 0.02,
+      "order": "lead",
+      "ease": "quadIn"
+     },
+     "from": "auto"
+    },
+    "ornament.count": {
+     "v": 0,
+     "from": "auto"
+    },
+    "lens": {
+     "v": "fixedFrame",
+     "p": {
+      "amount": 0.3
+     },
+     "from": "auto"
+    },
+    "filter.count": {
+     "v": 0,
+     "from": "auto"
+    }
+   },
+   "els": {},
+   "ground": 0,
+   "seamIn": -1
+  },
+  {
+   "key": "ra~0",
+   "line": "ra",
+   "role": "lyric",
+   "text": "飛ばせ",
+   "emph": [],
+   "impact": false,
+   "note": null,
+   "t0": 22.25,
+   "t1": 23.4,
+   "a": 22.13,
+   "b": 23.65,
+   "repT": 22.72,
+   "lang": "ja",
+   "feat": {
+    "cells": 3,
+    "graphemes": 3,
+    "script": "ja",
+    "latin": 0,
+    "orients": [
+     "h",
+     "v"
+    ],
+    "words": 1,
+    "units": {
+     "glyph": 3,
+     "word": 1,
+     "line": 1
+    },
+    "emph": false,
+    "impact": false,
+    "dur": 1.15,
+    "cps": 2.609,
+    "energy": 0.807,
+    "beat": 0.5,
+    "onBeat": true,
+    "section": "chorus",
+    "repeatOf": null,
+    "pos": 0.371,
+    "role": "lyric"
+   },
+   "fp": "70a987a6",
+   "slots": {
+    "orient": {
+     "v": "h",
+     "from": "auto"
+    },
+    "arrange": {
+     "v": "stubBlock",
+     "p": {
+      "offsetX": 0,
+      "offsetY": 0,
+      "lift": 0.1
+     },
+     "from": "auto"
+    },
+    "text.face": {
+     "v": "display",
+     "from": "auto"
+    },
+    "text.scale": {
+     "v": 1.061,
+     "from": "auto"
+    },
+    "text.ink": {
+     "v": "ink",
+     "from": "auto"
+    },
+    "text.style": {
+     "v": "plain",
+     "from": "auto"
+    },
+    "arrive": {
+     "v": "stubFade",
+     "p": {
+      "dur": 0.45,
+      "each": 0.04,
+      "order": "word",
+      "ease": "expoOut"
+     },
+     "from": "auto"
+    },
+    "dwell": {
+     "v": "stubBob",
+     "p": {
+      "amount": 0.3,
+      "speed": 1
+     },
+     "from": "auto"
+    },
+    "depart": {
+     "v": "stubFadeOut",
+     "p": {
+      "dur": 0.35,
+      "each": 0.02,
+      "order": "lead",
+      "ease": "quadIn"
+     },
+     "from": "auto"
+    },
+    "ornament.count": {
+     "v": 0,
+     "from": "auto"
+    },
+    "lens": {
+     "v": "stubDrift",
+     "p": {
+      "amount": 0.3
+     },
+     "from": "auto"
+    },
+    "filter.count": {
+     "v": 0,
+     "from": "auto"
+    }
+   },
+   "els": {},
+   "ground": 1,
+   "seamIn": -1
+  },
+  {
+   "key": "ra~3",
+   "line": "ra",
+   "role": "focus",
+   "text": "紙ひこうき",
+   "emph": [
+    [
+     0,
+     5
+    ]
+   ],
+   "impact": false,
+   "note": null,
+   "t0": 23.4,
+   "t1": 25,
+   "a": 23.28,
+   "b": 25.25,
+   "repT": 24.073,
+   "lang": "ja",
+   "feat": {
+    "cells": 5,
+    "graphemes": 5,
+    "script": "ja",
+    "latin": 0,
+    "orients": [
+     "h",
+     "v"
+    ],
+    "words": 1,
+    "units": {
+     "glyph": 5,
+     "word": 1,
+     "line": 1
+    },
+    "emph": true,
+    "impact": false,
+    "dur": 1.6,
+    "cps": 3.125,
+    "energy": 0.828,
+    "beat": 0.5,
+    "onBeat": false,
+    "section": "chorus",
+    "repeatOf": null,
+    "pos": 0.39,
+    "role": "focus"
+   },
+   "fp": "669efc8c",
+   "slots": {
+    "orient": {
+     "v": "h",
+     "from": "auto"
+    },
+    "arrange": {
+     "v": "centerAnchor",
+     "p": {
+      "offsetX": 0,
+      "offsetY": 0
+     },
+     "from": "auto"
+    },
+    "text.face": {
+     "v": "display",
+     "from": "auto"
+    },
+    "text.scale": {
+     "v": 1.066,
+     "from": "auto"
+    },
+    "text.ink": {
+     "v": "ink",
+     "from": "auto"
+    },
+    "text.style": {
+     "v": "plain",
+     "from": "auto"
+    },
+    "arrive": {
+     "v": "stubFade",
+     "p": {
+      "dur": 0.55,
+      "each": 0.04,
+      "order": "lead",
+      "ease": "expoOut"
+     },
+     "from": "auto"
+    },
+    "dwell": {
+     "v": "stillHold",
+     "p": {
+      "amount": 0.3,
+      "speed": 1
+     },
+     "from": "auto"
+    },
+    "depart": {
+     "v": "stubFadeOut",
+     "p": {
+      "dur": 0.35,
+      "each": 0.02,
+      "order": "lead",
+      "ease": "quadIn"
+     },
+     "from": "auto"
+    },
+    "ornament.count": {
+     "v": 1,
+     "from": "auto"
+    },
+    "lens": {
+     "v": "fixedFrame",
+     "p": {
+      "amount": 0.3
+     },
+     "from": "auto"
+    },
+    "filter.count": {
+     "v": 1,
+     "from": "auto"
+    },
+    "ornament#0": {
+     "v": "stubRule",
+     "p": {
+      "amount": 0.4,
+      "ink": "accent",
+      "gap": 24
+     },
+     "from": "auto"
+    },
+    "filter#0": {
+     "v": "stubDim",
+     "p": {
+      "amount": 0.5,
+      "when": "always"
+     },
+     "from": "auto"
+    }
+   },
+   "els": {},
+   "ground": 1,
+   "seamIn": -1
+  },
+  {
+   "key": "ra~8",
+   "line": "ra",
+   "role": "lyric",
+   "text": "空の果てまで",
+   "emph": [],
+   "impact": false,
+   "note": null,
+   "t0": 25,
+   "t1": 27,
+   "a": 24.88,
+   "b": 27.5,
+   "repT": 25.862,
+   "lang": "ja",
+   "feat": {
+    "cells": 6,
+    "graphemes": 6,
+    "script": "ja",
+    "latin": 0,
+    "orients": [
+     "h",
+     "v"
+    ],
+    "words": 2,
+    "units": {
+     "glyph": 6,
+     "word": 2,
+     "line": 1
+    },
+    "emph": false,
+    "impact": false,
+    "dur": 2,
+    "cps": 3,
+    "energy": 0.913,
+    "beat": 0.5,
+    "onBeat": false,
+    "section": "chorus",
+    "repeatOf": null,
+    "pos": 0.417,
+    "role": "lyric"
+   },
+   "fp": "f713dd87",
+   "slots": {
+    "orient": {
+     "v": "h",
+     "from": "auto"
+    },
+    "arrange": {
+     "v": "stubBlock",
+     "p": {
+      "offsetX": 0,
+      "offsetY": 0,
+      "lift": 0.14
+     },
+     "from": "auto"
+    },
+    "text.face": {
+     "v": "display",
+     "from": "auto"
+    },
+    "text.scale": {
+     "v": 1.083,
+     "from": "auto"
+    },
+    "text.ink": {
+     "v": "ink",
+     "from": "auto"
+    },
+    "text.style": {
+     "v": "plain",
+     "from": "auto"
+    },
+    "arrive": {
+     "v": "stubFade",
+     "p": {
+      "dur": 0.65,
+      "each": 0.04,
+      "order": "word",
+      "ease": "expoOut"
+     },
+     "from": "auto"
+    },
+    "dwell": {
+     "v": "stubBob",
+     "p": {
+      "amount": 0.3,
+      "speed": 1
+     },
+     "from": "auto"
+    },
+    "depart": {
+     "v": "stubFadeOut",
+     "p": {
+      "dur": 0.35,
+      "each": 0.02,
+      "order": "lead",
+      "ease": "quadIn"
+     },
+     "from": "auto"
+    },
+    "ornament.count": {
+     "v": 0,
+     "from": "auto"
+    },
+    "lens": {
+     "v": "stubDrift",
+     "p": {
+      "amount": 0.3
+     },
+     "from": "auto"
+    },
+    "filter.count": {
+     "v": 0,
+     "from": "auto"
+    }
+   },
+   "els": {},
+   "ground": 1,
+   "seamIn": -1
+  },
+  {
+   "key": "rb~0",
+   "line": "rb",
+   "role": "lyric",
+   "text": "折り目の数だけ",
+   "emph": [],
+   "impact": false,
+   "note": null,
+   "t0": 27.25,
+   "t1": 29.2,
+   "a": 27.13,
+   "b": 29.45,
+   "repT": 27.936,
+   "lang": "ja",
+   "feat": {
+    "cells": 7,
+    "graphemes": 7,
+    "script": "ja",
+    "latin": 0,
+    "orients": [
+     "h",
+     "v"
+    ],
+    "words": 2,
+    "units": {
+     "glyph": 7,
+     "word": 2,
+     "line": 1
+    },
+    "emph": false,
+    "impact": false,
+    "dur": 1.95,
+    "cps": 3.59,
+    "energy": 0.964,
+    "beat": 0.5,
+    "onBeat": true,
+    "section": "chorus",
+    "repeatOf": null,
+    "pos": 0.454,
+    "role": "lyric"
+   },
+   "fp": "781ac75c",
+   "slots": {
+    "orient": {
+     "v": "h",
+     "from": "auto"
+    },
+    "arrange": {
+     "v": "centerAnchor",
+     "p": {
+      "offsetX": 0,
+      "offsetY": 0
+     },
+     "from": "auto"
+    },
+    "text.face": {
+     "v": "display",
+     "from": "auto"
+    },
+    "text.scale": {
+     "v": 1.093,
+     "from": "auto"
+    },
+    "text.ink": {
+     "v": "ink",
+     "from": "auto"
+    },
+    "text.style": {
+     "v": "plain",
+     "from": "auto"
+    },
+    "arrive": {
+     "v": "stubFade",
+     "p": {
+      "dur": 0.45,
+      "each": 0.04,
+      "order": "lead",
+      "ease": "expoOut"
+     },
+     "from": "auto"
+    },
+    "dwell": {
+     "v": "stubBob",
+     "p": {
+      "amount": 0.3,
+      "speed": 1
+     },
+     "from": "auto"
+    },
+    "depart": {
+     "v": "stubFadeOut",
+     "p": {
+      "dur": 0.35,
+      "each": 0.02,
+      "order": "lead",
+      "ease": "quadIn"
+     },
+     "from": "auto"
+    },
+    "ornament.count": {
+     "v": 0,
+     "from": "auto"
+    },
+    "lens": {
+     "v": "fixedFrame",
+     "p": {
+      "amount": 0.3
+     },
+     "from": "auto"
+    },
+    "filter.count": {
+     "v": 0,
+     "from": "auto"
+    }
+   },
+   "els": {},
+   "ground": 1,
+   "seamIn": -1
+  },
+  {
+   "key": "rb~7",
+   "line": "rb",
+   "role": "lyric",
+   "text": "強くなれる",
+   "emph": [],
+   "impact": false,
+   "note": null,
+   "t0": 29.2,
+   "t1": 31,
+   "a": 29.08,
+   "b": 31.5,
+   "repT": 29.918,
+   "lang": "ja",
+   "feat": {
+    "cells": 5,
+    "graphemes": 5,
+    "script": "ja",
+    "latin": 0,
+    "orients": [
+     "h",
+     "v"
+    ],
+    "words": 1,
+    "units": {
+     "glyph": 5,
+     "word": 1,
+     "line": 1
+    },
+    "emph": false,
+    "impact": false,
+    "dur": 1.8,
+    "cps": 2.778,
+    "energy": 0.929,
+    "beat": 0.5,
+    "onBeat": true,
+    "section": "chorus",
+    "repeatOf": null,
+    "pos": 0.487,
+    "role": "lyric"
+   },
+   "fp": "a6f5db38",
+   "slots": {
+    "orient": {
+     "v": "h",
+     "from": "auto"
+    },
+    "arrange": {
+     "v": "stubBlock",
+     "p": {
+      "offsetX": 0,
+      "offsetY": 0,
+      "lift": 0.1
+     },
+     "from": "auto"
+    },
+    "text.face": {
+     "v": "display",
+     "from": "auto"
+    },
+    "text.scale": {
+     "v": 1.086,
+     "from": "auto"
+    },
+    "text.ink": {
+     "v": "ink",
+     "from": "auto"
+    },
+    "text.style": {
+     "v": "plain",
+     "from": "auto"
+    },
+    "arrive": {
+     "v": "stubFade",
+     "p": {
+      "dur": 0.55,
+      "each": 0.04,
+      "order": "word",
+      "ease": "expoOut"
+     },
+     "from": "auto"
+    },
+    "dwell": {
+     "v": "stillHold",
+     "p": {
+      "amount": 0.3,
+      "speed": 1
+     },
+     "from": "auto"
+    },
+    "depart": {
+     "v": "stubFadeOut",
+     "p": {
+      "dur": 0.35,
+      "each": 0.02,
+      "order": "lead",
+      "ease": "quadIn"
+     },
+     "from": "auto"
+    },
+    "ornament.count": {
+     "v": 1,
+     "from": "auto"
+    },
+    "lens": {
+     "v": "stubDrift",
+     "p": {
+      "amount": 0.3
+     },
+     "from": "auto"
+    },
+    "filter.count": {
+     "v": 0,
+     "from": "auto"
+    },
+    "ornament#0": {
+     "v": "hairFrame",
+     "p": {
+      "amount": 0.4,
+      "ink": "accent",
+      "gap": 24
+     },
+     "from": "auto"
+    }
+   },
+   "els": {},
+   "ground": 1,
+   "seamIn": -1
+  },
+  {
+   "key": "rc~0",
+   "line": "rc",
+   "role": "lyric",
+   "text": "向かい風でも",
+   "emph": [],
+   "impact": false,
+   "note": null,
+   "t0": 31.25,
+   "t1": 33.1,
+   "a": 31.13,
+   "b": 33.35,
+   "repT": 32.072,
+   "lang": "ja",
+   "feat": {
+    "cells": 6,
+    "graphemes": 6,
+    "script": "ja",
+    "latin": 0,
+    "orients": [
+     "h",
+     "v"
+    ],
+    "words": 2,
+    "units": {
+     "glyph": 6,
+     "word": 2,
+     "line": 1
+    },
+    "emph": false,
+    "impact": false,
+    "dur": 1.85,
+    "cps": 3.243,
+    "energy": 0.838,
+    "beat": 0.5,
+    "onBeat": true,
+    "section": "chorus",
+    "repeatOf": null,
+    "pos": 0.521,
+    "role": "lyric"
+   },
+   "fp": "98c26933",
+   "slots": {
+    "orient": {
+     "v": "h",
+     "from": "auto"
+    },
+    "arrange": {
+     "v": "centerAnchor",
+     "p": {
+      "offsetX": 0,
+      "offsetY": 0
+     },
+     "from": "auto"
+    },
+    "text.face": {
+     "v": "display",
+     "from": "auto"
+    },
+    "text.scale": {
+     "v": 1.068,
+     "from": "auto"
+    },
+    "text.ink": {
+     "v": "ink",
+     "from": "auto"
+    },
+    "text.style": {
+     "v": "plain",
+     "from": "auto"
+    },
+    "arrive": {
+     "v": "stubFade",
+     "p": {
+      "dur": 0.65,
+      "each": 0.04,
+      "order": "lead",
+      "ease": "expoOut"
+     },
+     "from": "auto"
+    },
+    "dwell": {
+     "v": "stubBob",
+     "p": {
+      "amount": 0.3,
+      "speed": 1
+     },
+     "from": "auto"
+    },
+    "depart": {
+     "v": "stubFadeOut",
+     "p": {
+      "dur": 0.35,
+      "each": 0.02,
+      "order": "lead",
+      "ease": "quadIn"
+     },
+     "from": "auto"
+    },
+    "ornament.count": {
+     "v": 0,
+     "from": "auto"
+    },
+    "lens": {
+     "v": "fixedFrame",
+     "p": {
+      "amount": 0.3
+     },
+     "from": "auto"
+    },
+    "filter.count": {
+     "v": 0,
+     "from": "auto"
+    }
+   },
+   "els": {},
+   "ground": 1,
+   "seamIn": -1
+  },
+  {
+   "key": "rc~6",
+   "line": "rc",
+   "role": "lyric",
+   "text": "かまわないさ",
+   "emph": [],
+   "impact": false,
+   "note": null,
+   "t0": 33.1,
+   "t1": 35,
+   "a": 32.98,
+   "b": 35.5,
+   "repT": 33.772,
+   "lang": "ja",
+   "feat": {
+    "cells": 6,
+    "graphemes": 6,
+    "script": "ja",
+    "latin": 0,
+    "orients": [
+     "h",
+     "v"
+    ],
+    "words": 2,
+    "units": {
+     "glyph": 6,
+     "word": 2,
+     "line": 1
+    },
+    "emph": false,
+    "impact": false,
+    "dur": 1.9,
+    "cps": 3.158,
+    "energy": 0.794,
+    "beat": 0.5,
+    "onBeat": false,
+    "section": "chorus",
+    "repeatOf": null,
+    "pos": 0.552,
+    "role": "lyric"
+   },
+   "fp": "9d58c91e",
+   "slots": {
+    "orient": {
+     "v": "h",
+     "from": "auto"
+    },
+    "arrange": {
+     "v": "stubBlock",
+     "p": {
+      "offsetX": 0,
+      "offsetY": 0,
+      "lift": 0.14
+     },
+     "from": "auto"
+    },
+    "text.face": {
+     "v": "display",
+     "from": "auto"
+    },
+    "text.scale": {
+     "v": 1.059,
+     "from": "auto"
+    },
+    "text.ink": {
+     "v": "ink",
+     "from": "auto"
+    },
+    "text.style": {
+     "v": "plain",
+     "from": "auto"
+    },
+    "arrive": {
+     "v": "stubFade",
+     "p": {
+      "dur": 0.45,
+      "each": 0.04,
+      "order": "word",
+      "ease": "expoOut"
+     },
+     "from": "auto"
+    },
+    "dwell": {
+     "v": "stubBob",
+     "p": {
+      "amount": 0.3,
+      "speed": 1
+     },
+     "from": "auto"
+    },
+    "depart": {
+     "v": "stubFadeOut",
+     "p": {
+      "dur": 0.35,
+      "each": 0.02,
+      "order": "lead",
+      "ease": "quadIn"
+     },
+     "from": "auto"
+    },
+    "ornament.count": {
+     "v": 0,
+     "from": "auto"
+    },
+    "lens": {
+     "v": "stubDrift",
+     "p": {
+      "amount": 0.3
+     },
+     "from": "auto"
+    },
+    "filter.count": {
+     "v": 0,
+     "from": "auto"
+    }
+   },
+   "els": {},
+   "ground": 1,
+   "seamIn": -1
+  },
+  {
+   "key": "rd~0",
+   "line": "rd",
+   "role": "lyric",
+   "text": "Fly high",
+   "emph": [],
+   "impact": false,
+   "note": null,
+   "t0": 35.25,
+   "t1": 37,
+   "a": 35.13,
+   "b": 37.25,
+   "repT": 36.04,
+   "lang": "en",
+   "feat": {
+    "cells": 4.15,
+    "graphemes": 8,
+    "script": "en",
+    "latin": 0.875,
+    "orients": [
+     "h"
+    ],
+    "words": 2,
+    "units": {
+     "glyph": 8,
+     "word": 2,
+     "line": 1
+    },
+    "emph": false,
+    "impact": false,
+    "dur": 1.75,
+    "cps": 2.371,
+    "energy": 0.82,
+    "beat": 0.5,
+    "onBeat": true,
+    "section": "chorus",
+    "repeatOf": null,
+    "pos": 0.588,
+    "role": "lyric"
+   },
+   "fp": "81626e1b",
+   "slots": {
+    "orient": {
+     "v": "h",
+     "from": "auto"
+    },
+    "arrange": {
+     "v": "centerAnchor",
+     "p": {
+      "offsetX": 0,
+      "offsetY": 0
+     },
+     "from": "auto"
+    },
+    "text.face": {
+     "v": "display",
+     "from": "auto"
+    },
+    "text.scale": {
+     "v": 1.064,
+     "from": "auto"
+    },
+    "text.ink": {
+     "v": "ink",
+     "from": "auto"
+    },
+    "text.style": {
+     "v": "plain",
+     "from": "auto"
+    },
+    "arrive": {
+     "v": "stubFade",
+     "p": {
+      "dur": 0.55,
+      "each": 0.04,
+      "order": "lead",
+      "ease": "expoOut"
+     },
+     "from": "auto"
+    },
+    "dwell": {
+     "v": "stillHold",
+     "p": {
+      "amount": 0.3,
+      "speed": 1
+     },
+     "from": "auto"
+    },
+    "depart": {
+     "v": "stubFadeOut",
+     "p": {
+      "dur": 0.35,
+      "each": 0.02,
+      "order": "lead",
+      "ease": "quadIn"
+     },
+     "from": "auto"
+    },
+    "ornament.count": {
+     "v": 1,
+     "from": "auto"
+    },
+    "lens": {
+     "v": "fixedFrame",
+     "p": {
+      "amount": 0.3
+     },
+     "from": "auto"
+    },
+    "filter.count": {
+     "v": 0,
+     "from": "auto"
+    },
+    "ornament#0": {
+     "v": "stubRule",
+     "p": {
+      "amount": 0.4,
+      "ink": "accent",
+      "gap": 24
+     },
+     "from": "auto"
+    }
+   },
+   "els": {},
+   "ground": 1,
+   "seamIn": -1
+  },
+  {
+   "key": "rd~8",
+   "line": "rd",
+   "role": "lyric",
+   "text": "どこまでも",
+   "emph": [],
+   "impact": true,
+   "note": null,
+   "t0": 37,
+   "t1": 39,
+   "a": 36.88,
+   "b": 39.25,
+   "repT": 37.803,
+   "lang": "ja",
+   "feat": {
+    "cells": 5,
+    "graphemes": 5,
+    "script": "ja",
+    "latin": 0,
+    "orients": [
+     "h",
+     "v"
+    ],
+    "words": 1,
+    "units": {
+     "glyph": 5,
+     "word": 1,
+     "line": 1
+    },
+    "emph": false,
+    "impact": true,
+    "dur": 2,
+    "cps": 2.5,
+    "energy": 0.878,
+    "beat": 0.5,
+    "onBeat": false,
+    "section": "chorus",
+    "repeatOf": null,
+    "pos": 0.617,
+    "role": "lyric"
+   },
+   "fp": "04be4074",
+   "slots": {
+    "orient": {
+     "v": "h",
+     "from": "auto"
+    },
+    "arrange": {
+     "v": "stubBlock",
+     "p": {
+      "offsetX": 0,
+      "offsetY": 0,
+      "lift": 0.1
+     },
+     "from": "auto"
+    },
+    "text.face": {
+     "v": "display",
+     "from": "auto"
+    },
+    "text.scale": {
+     "v": 1.076,
+     "from": "auto"
+    },
+    "text.ink": {
+     "v": "ink",
+     "from": "auto"
+    },
+    "text.style": {
+     "v": "plain",
+     "from": "auto"
+    },
+    "arrive": {
+     "v": "stubFade",
+     "p": {
+      "dur": 0.65,
+      "each": 0.04,
+      "order": "word",
+      "ease": "expoOut"
+     },
+     "from": "auto"
+    },
+    "dwell": {
+     "v": "stubBob",
+     "p": {
+      "amount": 0.3,
+      "speed": 1
+     },
+     "from": "auto"
+    },
+    "depart": {
+     "v": "stubFadeOut",
+     "p": {
+      "dur": 0.35,
+      "each": 0.02,
+      "order": "lead",
+      "ease": "quadIn"
+     },
+     "from": "auto"
+    },
+    "ornament.count": {
+     "v": 0,
+     "from": "auto"
+    },
+    "lens": {
+     "v": "stubDrift",
+     "p": {
+      "amount": 0.3
+     },
+     "from": "auto"
+    },
+    "filter.count": {
+     "v": 0,
+     "from": "auto"
+    }
+   },
+   "els": {},
+   "ground": 1,
+   "seamIn": -1
+  },
+  {
+   "key": "outro",
+   "line": null,
+   "role": "outro",
+   "text": "サンプル楽団",
+   "emph": [],
+   "impact": false,
+   "note": null,
+   "t0": 39,
+   "t1": 60,
+   "a": 38.88,
+   "b": 60,
+   "repT": 41.487,
+   "lang": "ja",
+   "feat": {
+    "cells": 6,
+    "graphemes": 6,
+    "script": "ja",
+    "latin": 0,
+    "orients": [
+     "h",
+     "v"
+    ],
+    "words": 2,
+    "units": {
+     "glyph": 6,
+     "word": 2,
+     "line": 1
+    },
+    "emph": false,
+    "impact": false,
+    "dur": 21,
+    "cps": 0.286,
+    "energy": 0.227,
+    "beat": 0.5,
+    "onBeat": false,
+    "section": null,
+    "repeatOf": null,
+    "pos": 0.65,
+    "role": "outro"
+   },
+   "fp": "fd958f0b",
+   "slots": {
+    "orient": {
+     "v": "h",
+     "from": "auto"
+    },
+    "arrange": {
+     "v": "centerAnchor",
+     "p": {
+      "offsetX": 0,
+      "offsetY": 0
+     },
+     "from": "auto"
+    },
+    "text.face": {
+     "v": "display",
+     "from": "auto"
+    },
+    "text.scale": {
+     "v": 0.945,
+     "from": "auto"
+    },
+    "text.ink": {
+     "v": "ink",
+     "from": "auto"
+    },
+    "text.style": {
+     "v": "plain",
+     "from": "auto"
+    },
+    "arrive": {
+     "v": "stubFade",
+     "p": {
+      "dur": 0.6,
+      "each": 0,
+      "order": "lead",
+      "ease": "cubicOut"
+     },
+     "from": "auto"
+    },
+    "dwell": {
+     "v": "stubBob",
+     "p": {
+      "amount": 0.3,
+      "speed": 1
+     },
+     "from": "auto"
+    },
+    "depart": {
+     "v": "stubFadeOut",
+     "p": {
+      "dur": 0.35,
+      "each": 0.02,
+      "order": "lead",
+      "ease": "quadIn"
+     },
+     "from": "auto"
+    },
+    "ornament.count": {
+     "v": 0,
+     "from": "auto"
+    },
+    "lens": {
+     "v": "fixedFrame",
+     "p": {
+      "amount": 0.3
+     },
+     "from": "auto"
+    },
+    "filter.count": {
+     "v": 0,
+     "from": "auto"
+    }
+   },
+   "els": {},
+   "ground": 1,
+   "seamIn": -1
+  }
+ ],
+ "grounds": [
+  {
+   "key": "gtitle",
+   "t0": 0,
+   "t1": 22.25,
+   "cuts": [
+    "title",
+    "r4~0",
+    "r4~7",
+    "r5~0",
+    "r5~7",
+    "r6~0",
+    "r6~8",
+    "r7~0",
+    "r7~7"
+   ],
+   "ground": {
+    "v": "flatFill",
+    "p": {
+     "amount": 0.6
+    },
+    "from": "auto"
+   },
+   "atmos": {
+    "v": "none",
+    "from": "auto"
+   },
+   "fp": "b6797302"
+  },
+  {
+   "key": "gra~0",
+   "t0": 22.25,
+   "t1": 60,
+   "cuts": [
+    "ra~0",
+    "ra~3",
+    "ra~8",
+    "rb~0",
+    "rb~7",
+    "rc~0",
+    "rc~6",
+    "rd~0",
+    "rd~8",
+    "outro"
+   ],
+   "ground": {
+    "v": "stubTint",
+    "p": {
+     "amount": 0.55,
+     "at": 0.4
+    },
+    "from": "auto"
+   },
+   "atmos": {
+    "v": "none",
+    "from": "auto"
+   },
+   "fp": "b0bb9562"
+  }
+ ],
+ "seams": [
+  {
+   "into": "r5~0",
+   "at": 8.13,
+   "dur": 0.4,
+   "scope": "text",
+   "a": "r4~7",
+   "b": "r5~0",
+   "slot": {
+    "v": "stubCross",
+    "p": {
+     "dur": 0.4
+    },
+    "from": "auto"
+   }
+  }
+ ],
+ "impulses": [
+  {
+   "t": 37,
+   "kind": "shake",
+   "amp": 0.05,
+   "decay": 0.4
+  }
+ ],
+ "warnings": []
+}

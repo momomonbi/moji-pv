@@ -1,42 +1,100 @@
-# Moji PV Maker (working title)
+# Moji PV Maker
 
-A browser app that turns lyrics and a song into a lyric motion video.
+Turn lyrics into a lyric motion video, right in your browser.
 
-**▶ Open the app: <https://momomonbi.github.io/moji-pv/en/>**
+**▶ <https://momomonbi.github.io/moji-pv/en/>** (Japanese UI: <https://momomonbi.github.io/moji-pv/>)
 
-- Nothing to install. Lyrics, audio and exports are processed in your browser.
-- Every feature works without AI.
+Nothing to install, no account. Every feature works without AI.
 
-## What it does
+## How to use it (3 steps)
 
-707 parts and 24 styles combine into cuts automatically, exported as MP4. **Syntax** in the app explains the lyric
-marks; **About / rights** shows the rights and licenses.
+1. **Paste your lyrics** into step 1 (or press "Try a sample").
+2. **New look** — each press of **New look** in the play bar (key: R) changes mood, colors and motion at once. Press it as often as you like.
+3. **Export** — pick a format and size in step 4 and press **Export**.
 
-On top of that there is an optional AI assistant:
+**Syntax** in the app explains the lyric marks: `/` splits a cut, `*word*` for emphasis, a trailing `!` for an impact
+line, `[00:12.34]` for a start time (LRC), and more.
 
-| Feature | What it does |
+## Fine-tuning
+
+Click the preview or a lyric line and the **Details** column shows that part. You move through
+**whole video → line → cut → element** (text, decor, background, camera, screen effects, transition).
+
+- **Auto / Pinned** — everything starts as Auto. A value you pick yourself is Pinned: New look and reroll leave it alone.
+  **Unpin** makes it automatic again.
+- **Lock** — lock a line you like and it keeps its look.
+- **Look history ◀ ▶** — the ◀ ▶ buttons in the play bar step through the looks you have tried.
+- Every change can be undone, and your work is autosaved in the browser.
+
+## Song (optional) and tap sync
+
+You can make a video without a song; its length then follows the lyrics. Load an mp3, wav, m4a, ogg or flac file in
+step 2 and the app finds the tempo and uses it for the motion. **Snap to beats** moves the automatic line starts onto
+the beat.
+
+- **Tap to sync** — play the song and press Space when each line starts; the times are recorded line by line.
+- Times in the lyrics such as `[00:12.34]` (LRC) are used as they are.
+
+## Export
+
+| Format | What you get |
 |---|---|
-| Prepare lyrics | Suggests lines to drop (credits, [Verse] labels…), where to cut phrases, words to emphasize and unusual readings |
-| Three looks by AI | Proposes three looks (style, colors, motion, how the chorus appears) from what the lyrics mean, leaving out motifs of another season |
-| One-line edit | Turns one sentence such as "Make the chorus bolder" into a list of changes |
-| Use the song (Gemini only, experimental) | Transcribes lyrics from the song, times the typed lyrics to it, or analyzes its sections, mood and tempo |
+| MP4 | A video (sound can be included) |
+| PNG seq. | One PNG per frame, in a ZIP |
+| PNG alpha | A PNG sequence with a transparent background |
 
-You always see the list of changes before anything is applied, and **Undo AI change** takes it back.
+Sizes 720p to 2160p, 24 / 30 / 60 fps; screen shapes 16:9, 9:16, 1:1 and more.
 
-## Using the AI assistant
+**Background modes**: Normal / Green screen / Black (white text) / Transparent (= PNG alpha sequence).
+Browsers cannot make a transparent **video file** today. To lay the lyrics over other footage, use PNG alpha, or Green
+screen for video apps.
 
-1. Click **AI** at the top right (or **Get three looks from AI** in Simple mode).
-2. Under **AI service and API key**, pick a service and paste your key.
-   The default is Google Gemini **gemini-3.8-flash** (key: [Google AI Studio](https://aistudio.google.com/apikey)).
-3. Run a feature, tick the changes you want, and apply.
+For MP4 export, Chrome or Edge on a computer is recommended (it uses WebCodecs).
 
-What is sent: the lyric text, your one-line instruction and setting values, directly from your browser to the AI
-service you chose. The song audio is sent to Google Gemini only when you tick the agreement and press one of the
-**Use the song** buttons (transcribe lyrics, time the lyrics, analyze the song). The key stays in this browser (forgotten when the tab closes unless you tick
-**Remember on this device**) and is never written into project files. The service bills you; each call shows its token
-use and an approximate cost.
+## AI assist (optional)
 
-## Development and license
+Open the **AI** tab of the detail column. You need your own API key (the default is Google Gemini
+**gemini-3.8-flash**).
 
-Build with `python3 build.py`; tests and CI are listed in [README.md](README.md#開発).
+- **Prepare lyrics** — drops lines that are not lyrics (credits, [Chorus] …) and suggests cut points, emphasis and readings
+- **Three looks** — three looks that fit the meaning and the season of the lyrics; try each one on before you choose
+- **One-line edit** — changes settings from one instruction such as "make the chorus more dramatic"
+- **Use the song** (Gemini only) — with your consent, sends the song to transcribe it, time the lines or analyze it
+
+Results first appear as a checked list; only what you keep is applied, and one undo takes it back.
+Only the lyric text, your instruction and setting values are sent. The song's audio is sent only after you agree under
+**Use the song**. The key stays in this browser and goes straight to the AI service you chose, nowhere else.
+
+More in [docs/AI_GUIDE.md](docs/AI_GUIDE.md).
+
+## Privacy
+
+Lyrics, songs and exports are all processed inside your browser; nothing is uploaded to a server of ours.
+The only outside connections are the typefaces (Google Fonts) and, when you use AI assist, the AI service.
+
+## Development
+
+Python 3.11 and Node 22, no npm or pip packages (the browser tests use Playwright).
+
+```
+python3 build.py --check              # lint, layer rules and module order; writes nothing
+node --test 'tests/node/*.test.js'    # Node tests
+python3 build.py --lab                # also builds tests/www/lab.html for the tests
+python3 build.py                      # builds index.html and en/index.html
+python3 tests/browser/ui_flows.py     # browser tests (tests/browser/*.py, Playwright)
+python3 tests/build_test.py           # tests of build.py
+```
+
+Browser tests run with `PW_CHANNEL=chrome` (an installed Chrome) or `PW_EXECUTABLE=/path/to/chromium`. CI
+(`.github/workflows/ci.yml`) runs all of these in this order and checks that the committed index.html / en/index.html
+match the build. The pages carry a CSP that allows scripts by hash, so never edit index.html by hand: rebuild it with
+`build.py`.
+
+Design: [docs/DESIGN.md](docs/DESIGN.md) · spec: [docs/SPEC.md](docs/SPEC.md) · work notes: [docs/NOTES.md](docs/NOTES.md) ·
+design addendum for the next version (v2.1): [docs/DESIGN_2_1.md](docs/DESIGN_2_1.md).
+
+## License
+
 [MIT License](LICENSE). Third-party software: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+Videos and images you make with this app belong to you (and to the rights holders of the lyrics and the song).

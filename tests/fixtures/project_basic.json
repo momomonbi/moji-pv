@@ -1,0 +1,128 @@
+{
+ "format": "mojipv.project",
+ "schema": 1,
+ "doc": {
+  "meta": {
+   "app": "2.0.0",
+   "lang": "auto"
+  },
+  "sheet": {
+   "next": 14,
+   "rows": [
+    {
+     "id": "r1",
+     "src": "[ti:紙ひこうきの朝]"
+    },
+    {
+     "id": "r2",
+     "src": "[ar:サンプル楽団]"
+    },
+    {
+     "id": "r3",
+     "src": "# Aメロ"
+    },
+    {
+     "id": "r4",
+     "src": "始発のホームに/白い息"
+    },
+    {
+     "id": "r5",
+     "src": "改札の向こうで/朝がほどける"
+    },
+    {
+     "id": "r6",
+     "src": "ポケットの*切符*を/そっと握って"
+    },
+    {
+     "id": "r7",
+     "src": "まだ名前のない/今日へ行く"
+    },
+    {
+     "id": "r8",
+     "src": ""
+    },
+    {
+     "id": "r9",
+     "src": "# サビ"
+    },
+    {
+     "id": "ra",
+     "src": "飛ばせ/*紙ひこうき*/空の果てまで"
+    },
+    {
+     "id": "rb",
+     "src": "折り目の数だけ/強くなれる"
+    },
+    {
+     "id": "rc",
+     "src": "向かい風でも/かまわないさ"
+    },
+    {
+     "id": "rd",
+     "src": "Fly high/どこまでも!"
+    }
+   ]
+  },
+  "timing": {
+   "snap": "beat",
+   "lead": 0.12,
+   "tail": 0.25,
+   "leadIn": 1,
+   "outro": 2,
+   "tapLatency": 0.06
+  },
+  "song": {
+   "name": "demo.m4a",
+   "sha1": "3ba2b676a9cf4b58e189e02b2be90aa72fa56761",
+   "seconds": 60,
+   "bpm": 120,
+   "offset": 0.25,
+   "meter": 4,
+   "bpmConfidence": 0.82,
+   "digest": {
+    "hz": 20,
+    "loud": "KSIlLic2KyooMigvKiwyNDU0Mzg6OTk4Mj4+PEAzOjVANz5HRj1EPDxGPEA/U0FCTEJFRUNHSVhXSUZHT0xMU1RaXVRRWVtRW1ZbX1VWVF1+fHN1dpKKf3h8c3p1d3ePgXlwcHNyc3Bqi4J4bGhraGNlYpN4bG9vb2FjY2yRgHRmb29sbGNkiXxqZm5kZGZjZ5GAa2ZoaWxvamiHeHVuam1qc21vjoB+cXhzdHRwd42AfHV0eHl8cnSbjX+Ben10dnZ/nIqBenx5gXt1eJ2KhHx7en6Be3mci4OIgIOIf395oZaNi4OBeXuBhqiVhoKDf3qAgHWelIeFg4R8dHl8oIWFgYF9cnl8dpSCfH50bWtud2uOgn94a3Rpamt0l3xvdXJvZHBjbol5d3FyamFoa26Jd3BnZmRrZ2phh35tamNsZ2VjbZKCbWZoaGhjcGOQdXhyZnFxZWZrjINzdHdtamtrcZV+gn15fHp4dXqfkIF1eXV7fnV2n5WCfIODgYB7fJmOhH6DgoR7hIOdk4WEfEdGUVBHdmVWUU1IVU1ISG5hXFNVS1FHU1FuXVxLVlVRT1BKdFlQV1Ctqqysq9bGs7iut7axrLDUwrKzq7avrqyv27++vq61s7Grtt7Ev7ayvLmvtLvTwsW4wbK1s7q41svHvMbCt764xOTUz8m6wLvEurzp08jJxsTBv8G+6dbU0MrNwcjAzezU0M3Ky9DHz8fq2djN1czP0MfQ9uTQ0tHN1NPTz/ff1dLK0dTGysn04NTWyc3LxsjJ8dfbyMfPy87GwfPX18jIxsHBy8Hs08fGzsXGwr3C6dbHxca/wbrCuenPwr7Gv7fAvLnY0sjGtL+9tLOx08TCtb28r7yvsNLJu7y1sauzqq7TvLaysbSrs7Cu18a8tLCpsa2wtM/Av7K0taevs6bXxr62uKmzq7Kz18e0uK6yrrWzsdXGwL61rbi4tLfWwra0uLO0tbC108vEwLK6t7W3wNnTzMO7wsK9vLnm1cvBwrq6xse63c7OwsjHwMa+y+vbz9HPe3t5gnqCiIaBe4SAe3d6gYR/gHt5fH1/eIOCeIF7cHN4cHaBe3t1e3VxdHl4hHp6cXFtdG1tdIB2c25sbHVrdG92bmpudG50a2VlcWlsdGlqaGNtbGtqcGVtaWRpaGJuZG5gYmBial1jc2loZ2BcZV9dZ2ZkXlxjWWFiWFtpaF9cYlZjXlldamJjX2FcXVZSUmVgXV5WWltTV1NlVFdXUldaUVpPYFNQTlhXS05LS1ZdVldSUE1TVUdRUU1PVE9NT0tEXFNSU0ZHUUZPRlVPTkZBQUNHTUdWREZAS0ZFTEhIVUJBSz5AQjpIRUtLRzxCRkY5OEFCQTxEQzpEOUM7Sj45PjQzNz46Oj9DNj43Pjk5Ozg6OTM7MjU2NzU1PjU9Lis4LjUzNDwvMyszMjMrKTU/NTU1LCkmJikqNzgqLyssLykrLjcnKi0wKyMfLCkrJicnISkiKCgkMS4qKyIoHCIfHSckJRoZIRsZHSMiJxwfGCEeHSMdISAgGBUTIR0cEiEYExQYGxETFhkfFR8dFQ8PFxYOIxMTGxIVGBUODx0RFBMK"
+   },
+   "info": null
+  },
+  "look": {
+   "seed": 918273645,
+   "moodSeed": 44120771,
+   "aspect": "16:9",
+   "backdrop": "scene"
+  },
+  "pins": {},
+  "salts": {},
+  "locks": {},
+  "filters": {},
+  "output": {
+   "format": "mp4",
+   "short": 1080,
+   "fps": 30,
+   "quality": "high",
+   "audio": true,
+   "range": null,
+   "name": null
+  }
+ },
+ "side": {
+  "looks": {
+   "list": [
+    {
+     "n": 1,
+     "seed": 918273645,
+     "moodSeed": 44120771,
+     "salts": {},
+     "scope": "work",
+     "label": [
+      "look.first",
+      {}
+     ],
+     "star": false
+    }
+   ],
+   "cap": 50
+  },
+  "aiLog": []
+ }
+}

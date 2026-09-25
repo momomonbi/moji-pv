@@ -1,8 +1,10 @@
+# 文字PVメーカー v2 — original work. CI (DESIGN §8), in order: build.py --check · Node tests · build.py --lab ·
+# build.py (the committed pages must match the build) · every browser test with its default arguments (Google Chrome,
+# so the H.264 exports run) · build_test.py.
 name: CI
 
 on:
   push:
-    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -10,51 +12,70 @@ permissions:
   contents: read
 
 jobs:
-  checks:
-    name: Build, snapshots, English glossary
+  test:
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
+
       - uses: actions/setup-node@v4
         with:
-          node-version: '24'
-      - name: Built pages are up to date
-        run: |
-          python3 build.py
-          git diff --exit-code -- index.html en/index.html || { echo "::error::index.html / en/index.html are stale. Run python3 build.py and commit."; exit 1; }
-      - name: Snapshot tests (parseLyrics / computeTiming / plan / omakase)
-        run: node dev/snapshot_test.js
-      - name: AI core unit tests (providers faked, no key)
-        run: |
-          node dev/ai_test.js
-          node dev/ai_audio_test.js
-      - name: English glossary covers every UI string
-        run: |
-          (cd dev && npm ci)
-          python3 dev/check_english.py
+          node-version: '22'
 
-  browser:
-    name: Smoke (all 707 parts) and CSP in Chrome
-    runs-on: ubuntu-latest
-    env:
-      PW_CHANNEL: chrome        # Playwright drives the Google Chrome that ships with the runner
-    steps:
-      - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
-      - name: Install Playwright (Python)
-        run: pip install playwright==1.63.0
-      - name: Smoke test every expression part
+          python-version: '3.11'
+
+      - name: Install Playwright (Python; drives the runner's Google Chrome, no browser download)
+        run: python3 -m pip install --quiet playwright
+
+      - name: Google Chrome
+        run: google-chrome --version
+
+      - name: Lint, layers and module order
+        run: python3 build.py --check
+
+      - name: Node tests
+        # The glob reports every test. `node --test tests/node` also works: Node 22 loads tests/node/index.js, which
+        # runs each file in its own process and reports one result per file.
+        run: node --test "tests/node/*.test.js"
+
+      - name: Build the lab page
+        run: python3 build.py --lab
+
+      - name: Build the pages (the committed index.html and en/index.html must match)
         run: |
-          python3 dev/build_test.py all --all-packs
-          (cd dev/www && python3 -m http.server 8765 --bind 127.0.0.1 &)
-          sleep 1
-          python3 dev/smoke_all.py
-      - name: CSP has no violations and fonts load
-        run: python3 dev/csp_check.py --strict-fonts
-      - name: AI panel end to end (Gemini answers faked)
-        run: python3 dev/ai_ui_check.py
+          python3 build.py
+          git ls-files --error-unmatch index.html en/index.html > /dev/null
+          if ! git diff --exit-code --stat -- index.html en/index.html; then
+            echo "::error::index.html / en/index.html differ from the build: run python3 build.py and commit the pages"
+            exit 1
+          fi
+
+      - name: Browser tests
+        # Every tests/browser/*.py with its default arguments, in name order: contact_sheet (self-check), csp,
+        # determinism, export_check, fx_parts, glyph_parity, ground_contrast, i18n_pages, parts_gallery, perf,
+        # transparent_check, ui_flows, ui_layout. Google Chrome encodes H.264 (no AAC on Linux), so export_check runs its
+        # H.264 branch (the MP4 checked without sound) and ui_flows its first-run MP4; MV_REQUIRE_H264 makes either fail
+        # instead of skipping without an H.264 encoder.
+        # Every test runs; the step fails at the end when any of them failed.
+        env:
+          PW_CHANNEL: chrome
+          MV_REQUIRE_H264: '1'
+        run: |
+          shopt -s nullglob
+          files=(tests/browser/*.py)
+          if [ ${#files[@]} -eq 0 ]; then echo "::error::no browser tests found"; exit 1; fi
+          failed=()
+          for f in "${files[@]}"; do
+            echo "::group::$f"
+            python3 "$f" || failed+=("$f")
+            echo "::endgroup::"
+          done
+          if [ ${#failed[@]} -gt 0 ]; then
+            for f in "${failed[@]}"; do echo "::error file=$f::$f failed"; done
+            exit 1
+          fi
+
+      - name: Build tests
+        run: python3 tests/build_test.py
