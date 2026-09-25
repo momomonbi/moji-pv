@@ -593,7 +593,7 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
       if (quality === 'preview' && now) adaptTo(last.ms);
       const c = dc.counts;
       const stats = { ms: last.ms, drawn: { glyphs: c.glyphs, shapes: c.shapes, paints: c.paints, particles: c.particles }, passes,
-        provisional, level, media: { drawn: c.media, waiting: dc.mediaWaiting } };
+        provisional, level, media: { drawn: c.media, waiting: dc.mediaWaiting, fallback: c.mediaFallback } };
       // export quality never draws a substitute: the facade turns this into EngineError('media-not-ready' | 'media-missing')
       if (dc.mediaError) stats.mediaError = dc.mediaError;
       return stats;
@@ -601,10 +601,12 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
 
     // mediaAt(plan, source, t, out, scale) → out: [{ id, m }] of the media nodes of the scenes active at absolute time
     // t, with their media times (closed form, the drawing's own rule); no behaviour runs. Unsorted; the facade sorts.
-    // With an output scale, a still also carries the px and blur its draw will ask the store for (shapes.frameFor: the
-    // box's long side × scale × headroom, blur × scale; a 'soft' fit adds its blurred copy), so the store readies
-    // exactly that tier. The media of a scene come from source.media(kind, i) (the facade's memo by fingerprint, so no
-    // scene is kept or rebuilt for this) when the source has it, else from the built scene (mediaEntries).
+    // With an output scale, every medium also carries the px and blur its draw will ask the store for (shapes.frameFor:
+    // the box's long side × scale × headroom, blur × scale; a 'soft' fit adds its blurred copy), so the store readies
+    // exactly that still tier, and bakes exactly that blur of a video or animation frame (DESIGN_2_1 §11.4.6). The
+    // products are shapes.frameFor's, in its order, so the store's keys match bit for bit. The media of a scene come
+    // from source.media(kind, i) (the facade's memo by fingerprint, so no scene is kept or rebuilt for this) when the
+    // source has it, else from the built scene (mediaEntries).
     const mediaGraph = { fg: null };
     function mediaAt(plan, source, t, out, scale) {
       const list = out || [];
@@ -614,11 +616,11 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
       const entries = (kind, i) => (source.media ? source.media(kind, i) : mediaEntries(kind === 'cut' ? source.cut(i) : source.ground(i)));
       const add = (ms, tl) => {
         for (const e of ms) {
-          if (e.time) { list.push({ id: e.id, m: MEDIA.mapTime(e.time, e.time.clock === 'song' ? t : tl) }); continue; }
-          if (!(scale > 0)) { list.push({ id: e.id, m: 0 }); continue; }
+          const m = e.time ? MEDIA.mapTime(e.time, e.time.clock === 'song' ? t : tl) : 0;
+          if (!(scale > 0)) { list.push({ id: e.id, m }); continue; }
           const px = e.size * scale * e.headroom;                    // shapes.frameFor's product, in its order
-          list.push({ id: e.id, m: 0, px, blur: e.blur * scale });
-          if (e.softBlur >= 0) list.push({ id: e.id, m: 0, px, blur: e.softBlur * scale });
+          list.push({ id: e.id, m, px, blur: e.blur * scale });
+          if (e.softBlur >= 0) list.push({ id: e.id, m, px, blur: e.softBlur * scale });
         }
       };
       const seen = new Set();

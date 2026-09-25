@@ -358,7 +358,7 @@ test('mediaAt(t) lists exactly what the frame draws (sorted, deduplicated), with
   assert.deepEqual(e.engine.mediaAt(1), [], 'no plan media: nothing to list');
 });
 
-test('mediaAt(t, { scale }): a still carries the px and blur its draw asks the store for; mediaReady readies exactly those', async () => {
+test('mediaAt(t, { scale }): every medium carries the px and blur its draw asks the store for; mediaReady readies exactly those', async () => {
   const e = mediaEngine({});
   const plan = partPlan('ornament', 'mediaTestFrame', 'png', { depth: 'anim', blur: 4 });
   const g = partPlan('ground', 'mediaTestGround', 'jpeg', { depth: 'anim', fit: 'soft', move: 'none' });
@@ -381,10 +381,55 @@ test('mediaAt(t, { scale }): a still carries the px and blur its draw asks the s
   e.store.ready = (items, o) => { readied.push(items); return ready(items, o); };
   await e.engine.mediaReady(1.2, { scale: 2 * scale });
   assert.deepEqual(readied[0].map((x) => x.px), listed.map((x) => 2 * x.px), 'mediaReady at the export scale');
-  // videos: the media time only (the store sizes video frames itself)
+  // videos too (DESIGN_2_1 §11.4.6: the store bakes their blur from these values): the media time plus exactly the px and
+  // blur of the draw's requests, the soft copy's included — bit for bit, so the store's keys match
   const v = mediaEngine({});
-  v.engine.setPlan(partPlan('ground', 'mediaTestGround', 'mp4', { depth: 'anim', clock: 'song' }));
-  assert.deepEqual(Object.keys(v.engine.mediaAt(1, { scale })[0]), ['id', 'm']);
+  const vp = partPlan('ground', 'mediaTestGround', 'mp4', { depth: 'back', clock: 'song', fit: 'soft', move: 'none' });
+  v.engine.setPlan(vp);
+  const vl = v.engine.mediaAt(1.2, { scale });
+  assert.deepEqual(Object.keys(vl[0]), ['id', 'm', 'px', 'blur']);
+  assert.ok(vl.length === 2 && vl.every((x) => x.blur > 0), 'the picture and its soft copy, both blurred at depth back: ' + JSON.stringify(vl));
+  v.store.calls.length = 0;
+  render(v, v.rec, 1.2);
+  const vAsked = [...new Map(v.store.calls.map((c) => [key(c), { id: c.id, m: Math.round(c.m * 1e9) / 1e9, px: c.px, blur: c.blur }])).values()]
+    .sort((a, b) => a.px - b.px || a.blur - b.blur);
+  assert.deepEqual(vl.map((x) => ({ id: x.id, m: Math.round(x.m * 1e9) / 1e9, px: x.px, blur: x.blur })), vAsked, 'what the video draw asked for');
+  const fresh = mediaEngine({});
+  fresh.engine.setPlan(vp);
+  assert.deepEqual(Object.keys(fresh.engine.mediaAt(1.2)[0]), ['id', 'm'], 'no scale and no frame yet: the media time only');
+});
+
+test('a blurred video comes baked from the store (MediaFrame.blur > 0) and is drawn straight; the per-frame blur runs only for an unbaked frame, counted', () => {
+  const plan = partPlan('ground', 'mediaTestGround', 'mp4', { depth: 'back', clock: 'song', move: 'none', edge: 'plain', veil: 0 });
+  const blurOps = (rec, mark) => rec.ops().slice(mark).filter((op) => op[1] === 'set:filter' && /blur\(/.test(String(op[2])));
+  // baked: one drawImage of the baked copy (at 1/b: 1920 → 480 for 640 px at depth back), no filter, no isolated surface
+  const e = mediaEngine({});
+  e.engine.setPlan(plan);
+  const mark = e.rec.mark();
+  const r = render(e, e.rec, 1.3);
+  assert.equal(r.stats.media.fallback, 0);
+  assert.equal(r.ops.length, 1);
+  assert.ok(r.ops[0].blur, 'the baked copy (its stand-in names the blur)');
+  assert.equal(blurOps(e.rec, mark).length, 0, 'no per-frame blur');
+  assert.equal(r.ops[0].canvas, 'c1', 'drawn straight onto the frame, no isolated surface: ' + r.ops[0].canvas);
+  const f = e.store.calls.filter((c) => c.id === ID.mp4).pop();
+  assert.ok(f.blur > 0, 'want.blur is asked for a video too');
+  // unbaked (a store that hands out the plain frame): the isolated path blurs it per frame, and the fallback is counted
+  const u = mediaEngine({ storeOpts: { bake: false } });
+  u.engine.setPlan(plan);
+  const um = u.rec.mark();
+  const ur = render(u, u.rec, 1.3);
+  assert.equal(ur.stats.media.fallback, 1);
+  assert.ok(!ur.ops[0].blur);
+  assert.ok(blurOps(u.rec, um).length >= 1, 'the per-frame blur of the isolated path');
+  assert.notEqual(ur.ops[0].canvas, 'c1', 'drawn into a pooled surface');
+  // a still with blur never counts as a fallback (the store blurs it), nor does an unblurred video
+  const st = mediaEngine({ storeOpts: { bake: false } });
+  st.engine.setPlan(partPlan('ground', 'mediaTestGround', 'jpeg', { depth: 'back', move: 'none' }));
+  assert.equal(render(st, st.rec, 1.3).stats.media.fallback, 0);
+  const nb = mediaEngine({ storeOpts: { bake: false } });
+  nb.engine.setPlan(partPlan('ground', 'mediaTestGround', 'mp4', { depth: 'anim', clock: 'song' }));
+  assert.equal(render(nb, nb.rec, 1.3).stats.media.fallback, 0);
 });
 
 test("export quality never draws a substitute: EngineError 'media-not-ready' / 'media-missing'; mediaReady first", async () => {
@@ -411,7 +456,7 @@ test("export quality never draws a substitute: EngineError 'media-not-ready' / '
   await assert.rejects(m.engine.mediaReady(1.0), (err) => err.code === 'media-missing');
 });
 
-test('mediaReady(t) asks the store for the frames at t (ready) and ahead (want); forks own their store', async () => {
+test('mediaReady(t) asks the store for the frames at t (ready) and every frame ahead (want); forks own their store', async () => {
   const e = mediaEngine({});
   const calls = [];
   const store = e.store;
@@ -425,7 +470,12 @@ test('mediaReady(t) asks the store for the frames at t (ready) and ahead (want);
   await engine.mediaReady(1, { fps: 30 });
   assert.deepEqual(calls.map((c) => c[0]), ['want', 'ready']);
   assert.deepEqual(calls[1][1], engine.mediaAt(1));
-  assert.deepEqual(calls[0][1], engine.mediaAt(1 + 3 / 30), 'ahead = 3 / fps');
+  // ahead = 3 / fps: every output frame of it (a look-ahead naming only the last one lets the session close the frames
+  // before it as they pass, to be decoded again from their key frame when they are asked for)
+  assert.deepEqual(calls[0][1], [1, 2, 3].flatMap((k) => engine.mediaAt(1 + (3 / 30) * k / 3)), 'ahead = 3 / fps, every frame of it');
+  calls.length = 0;
+  await engine.mediaReady(1, { fps: 30, ahead: 0 });
+  assert.deepEqual(calls.map((c) => c[0]), ['ready'], 'ahead 0: no look-ahead');
   // fork(): the store's own fork, disposed with the forked engine; fork({ assets }) uses the given one
   const forked = e.engine.fork();
   assert.equal(e.store.forks.length, 1);

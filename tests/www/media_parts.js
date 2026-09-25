@@ -148,12 +148,26 @@
     return { h264, clips };
   }
 
+  // A store (and every fork of it: an export forks the engine, and the fork forks the store) whose frame() calls for id
+  // with a blur are counted: baked (MediaFrame.blur > 0, the store's copy) or not.
+  function bakeWatched(store, id, count) {
+    return Object.assign({}, store, {
+      frame(fid, m, want) {
+        const f = store.frame(fid, m, want);
+        if (fid === id && f && want && want.blur > 0) { if (f.blur > 0) count.yes++; else count.no++; }
+        return f;
+      },
+      fork(o) { return bakeWatched(store.fork(o), id, count); },
+    });
+  }
+
   // One PNG export of a counter video and the code of every frame. job = { clip, fps, short, t0, t1, params, kind }:
   //   kind 'ground' (default): the work background (photoPan: cover, still depth, no motion, no veil, clock song unless
   //     params say otherwise); the code is read over the whole frame;
   //   kind 'frame': a photo frame in the middle of the first lyric cut (clock show: the clip starts when the cut appears),
   //     the export range inside the cut's hold (the text-following envelope at 1); the code is read in the frame's rect.
-  // → { codes, t0, fps, n, w, h, cutA (absolute time the cut appears, kind 'frame') }
+  // → { codes, t0, fps, n, w, h, cutA (absolute time the cut appears, kind 'frame'), baked: { yes, no } (the frames of the
+  //   clip drawn with a blur: with the store's baked copy, or without) }
   async function runExact(job) {
     const clip = clips[job.clip];
     const media = Object.assign({ fit: 'cover', move: 'none', depth: 'still', clock: job.kind === 'frame' ? 'show' : 'song' }, job.params || {});
@@ -165,7 +179,8 @@
     const output = { format: 'png', short: job.short, fps: job.fps, range: { t0: job.t0 || 0, t1: job.t1 } };
     let doc = docOf(text, pins, output);
     const store = newStore();
-    const engine = newEngine(store);
+    const baked = { yes: 0, no: 0 };
+    const engine = newEngine(bakeWatched(store, clip.id, baked));
     try {
       engine.setDoc(doc);
       let rect = null, cutA = null;
@@ -192,7 +207,7 @@
         codes.push(codeIn(bmp, rect));
         bmp.close();
       }
-      return { codes, t0, fps: job.fps, n: frames.length, w, h, cutA, ms: Math.round(ms) };
+      return { codes, t0, fps: job.fps, n: frames.length, w, h, cutA, ms: Math.round(ms), baked };
     } finally {
       engine.dispose();
       store.dispose();
@@ -409,11 +424,16 @@
     return (h >>> 0).toString(16).padStart(8, '0');
   }
 
-  // A store whose frame() calls are seen (the test hook): the last MediaFrame index handed out per asset.
+  // A store whose frame() calls are seen (the test hook): the last MediaFrame index handed out per asset, whether it was
+  // exact, and the blur already applied to it (MediaFrame.blur: a baked video frame, a blurred still).
   function watched(store) {
     const seen = new Map();
     const spy = Object.assign({}, store, {
-      frame(id, m, want) { const f = store.frame(id, m, want); seen.set(id, f ? { index: f.index, exact: f.exact } : null); return f; },
+      frame(id, m, want) {
+        const f = store.frame(id, m, want);
+        seen.set(id, f ? { index: f.index, exact: f.exact, baked: f.blur > 0 } : null);
+        return f;
+      },
     });
     return { store: spy, seen };
   }
@@ -468,7 +488,7 @@
           await e.mediaReady(t, { fps, scale });
           const st = e.renderFrame(surf, t, { quality: 'export', scale });
           const img = surf.ctx.getImageData(0, 0, w, h);
-          out.push({ hash: hashOf(img), img, media: st.media.drawn, index: Object.fromEntries(seen) });
+          out.push({ hash: hashOf(img), img, media: st.media.drawn, fallback: st.media.fallback, index: Object.fromEntries(seen) });
         }
       } finally {
         e.dispose();
@@ -479,7 +499,8 @@
     const n = Math.round(q.seconds * q.fps);
     const at = (fps, k) => t0 + k / fps;
     const seq = await run(q.fps, Array.from({ length: n }, (_, k) => at(q.fps, k)));
-    const res = { t0, n, w, h, media: seq.map((x) => x.media), distinct: new Set(seq.map((x) => x.hash)).size, alone: [], rate: null, preview: [] };
+    const res = { t0, n, w, h, media: seq.map((x) => x.media), distinct: new Set(seq.map((x) => x.hash)).size, alone: [], rate: null, preview: [],
+      fallback: seq.map((x) => x.fallback), videoBaked: seq.map((x) => !!(x.index[clips.webm30.id] && x.index[clips.webm30.id].baked)) };
     for (const k of q.probes) {
       const [one] = await run(q.fps, [at(q.fps, k)]);
       res.alone.push({ k, same: one.hash === seq[k].hash, index: one.index, seqIndex: seq[k].index });
@@ -521,8 +542,10 @@
   // --- performance (perf.py) ---------------------------------------------------------------------------------------------
 
   // A counter video at any size (the media_gen.js pattern scaled up), VP9 in WebM: { bytes, times }. With alpha, the
-  // two-encoder path of media_gen.js (the alpha stream's square at 128).
-  async function bigCounter(W, H, fps, frames, keyEvery, alpha) {
+  // two-encoder path of media_gen.js (the alpha stream's square at 128). With bars, six saturated colour bars across the
+  // lower quarter (so a colour matrix shows).
+  const BARS = ['#e02020', '#20c040', '#2040e0', '#f0d020', '#20d0e0', '#d020c0'];
+  async function bigCounter(W, H, fps, frames, keyEvery, alpha, bars) {
     const kx = W / G.W, ky = H / G.H;
     const times = Array.from({ length: frames }, (_, i) => i / fps);
     const encodeWith = async (source, bitrate) => {
@@ -548,6 +571,7 @@
       const g = c.getContext('2d');
       g.scale(kx, ky);
       G.drawCounter(g, i, !!alpha);
+      if (bars) BARS.forEach((ink, k) => { g.fillStyle = ink; g.fillRect(8 + k * 29, 80, 29, 20); });
       return new VideoFrame(c, { timestamp: ts, duration: Math.round(1e6 / fps), alpha: 'discard' });
     }, 4000000);
     const mask = alpha ? await encodeWith((i, ts) => {
@@ -578,89 +602,211 @@
     return s.length ? s[Math.min(s.length - 1, Math.floor(p * s.length))] : 0;
   }
 
-  // Frame times of a document at 720p (export quality, each frame awaited with mediaReady first, which is not timed; each
-  // frame followed by a 1-pixel read), with drawMedia timed on its own (engine/render/shapes.drawMedia wrapped).
-  async function timeFrames(doc, start, seconds, fps, short, prefer) {
-    const root = newStore();
-    const store = prefer === 'software' ? root.fork() : root;
-    const e = newEngine(store);
-    e.setDoc(doc);
+  // Frame times of a document at 720p (export quality), measured as the whole iteration a player or an exporter runs:
+  // `await engine.mediaReady(t)` (the store's main-thread work for that frame: decoder output, the alpha merge, the
+  // blur bakes; decoding itself runs ahead through want(t + 3 / fps)) + renderFrame + a 1-pixel read (so the canvas
+  // work is inside the measurement). The split into ready and render is reported, and so are the store's own
+  // decodeMs / prepMs per frame (stats(), with the injected clock). Warm-up as lab.js perf() does it: a first frame,
+  // prepare() around the playhead, then 5 frames. o = { doc, start, seconds, fps, short, prefer, video, still, flush, trace }
+  //   drawMedia (engine/render/shapes.drawMedia wrapped): every call's time, split by medium (video: a record with a
+  //   time; still), unflushed (as before: the gate of §11.8.3 until the lead decides). With o.flush a separate pass over
+  //   the same frames reads 1 px of the call's target before the call (untimed) and after it (timed), so raster work
+  //   the canvas defers is charged to the call, and counts the draws of each call (drawImage onto any 2D context while
+  //   the call runs: the picture, its mirrored neighbours, a soft copy, an isolated surface's composite).
+  //   video (an id): whether each frame of it came with its blur baked (MediaFrame.blur > 0), the effective depth of the
+  //   ground that shows it (the plan's decision) and its blur in device px (mediaAt).
+  async function timeFrames(o) {
+    const q = Object.assign({ fps: 30, short: 720 }, o);
+    const root = STORE.createMediaStore({ blobs: a.io.mediaBlobs, entries: (id) => entries.get(id) || null, now: () => performance.now() });
+    const store = q.prefer === 'software' ? root.fork() : root;
+    const seen = { baked: 0, unbaked: 0, blur: [] };
+    const spy = Object.assign({}, store, {
+      frame(id, m, want) {
+        const f = store.frame(id, m, want);
+        if (q.video && id === q.video && f && want && want.blur > 0) { if (f.blur > 0) seen.baked++; else seen.unbaked++; }
+        return f;
+      },
+    });
+    const e = newEngine(spy);
+    e.setDoc(q.doc);
     const plan = e.plan;
-    const k = short / Math.min(plan.design.w, plan.design.h);
+    const k = q.short / Math.min(plan.design.w, plan.design.h);
     const w = Math.round(plan.design.w * k), h = Math.round(plan.design.h * k);
     const surf = surfaceOf(w, h, false);
     const ropts = { quality: 'export', pick: true, scale: w / plan.design.w };
+    const rq = { fps: q.fps, scale: ropts.scale };
     const draw = SH.drawMedia;
-    let calls = [], inFrame = 0;
-    SH.drawMedia = function () {
+    let calls = { video: [], still: [] }, inFrame = 0;
+    const timed = function (g, rec) {
       const t0 = performance.now();
       const r = draw.apply(this, arguments);
       const ms = performance.now() - t0;
-      calls.push(ms); inFrame += ms;
+      calls[rec.time ? 'video' : 'still'].push(ms); inFrame += ms;
       return r;
     };
-    const frames = [], media = [], perFrame = [], stages = { behave: 0, draw: 0, post: 0 };
+    const frames = [], ready = [], render = [], media = [], perFrame = [], decode = [], prep = [], fallback = [];
+    const stages = { behave: 0, draw: 0, post: 0 };
+    const n = Math.round(q.seconds * q.fps);
+    let flushed = null, depth = null, bakedBytes = 0, decoder = null;
     try {
-      for (let i = 0; i < 5; i++) { await e.mediaReady(start + i / fps, { fps, scale: ropts.scale }); e.renderFrame(surf, start + i / fps, ropts); }
-      calls = [];
-      const n = Math.round(seconds * fps);
+      SH.drawMedia = timed;
+      await e.mediaReady(q.start, rq);
+      e.renderFrame(surf, q.start, ropts);
+      await e.prepare(q.start, q.start + q.seconds, { export: false });
+      for (let i = 0; i < 5; i++) {
+        await e.mediaReady(q.start + i / q.fps, rq);
+        e.renderFrame(surf, q.start + i / q.fps, ropts);
+        surf.ctx.getImageData(0, 0, 1, 1);
+      }
+      calls = { video: [], still: [] };
+      seen.baked = 0; seen.unbaked = 0;
+      const sStart = store.stats();
       for (let i = 0; i < n; i++) {
-        const t = start + i / fps;
-        await e.mediaReady(t, { fps, scale: ropts.scale });
+        const t = q.start + i / q.fps;
+        const s0 = store.stats();
         inFrame = 0;
         const t0 = performance.now();
+        await e.mediaReady(t, rq);
+        const tR = performance.now();
         const st = e.renderFrame(surf, t, ropts);
         surf.ctx.getImageData(0, 0, 1, 1);
-        frames.push(performance.now() - t0);
+        const t1 = performance.now();
+        const s1 = store.stats();
+        frames.push(t1 - t0); ready.push(tR - t0); render.push(t1 - tR);
         perFrame.push(inFrame);
         media.push(st.media.drawn);
+        fallback.push(st.media.fallback || 0);
+        decode.push(s1.decodeMs - s0.decodeMs); prep.push((s1.prepMs || 0) - (s0.prepMs || 0));
         const sm = e.stats().stageMs;
         stages.behave += sm.behave / n; stages.draw += sm.draw / n; stages.post += sm.post / n;
       }
+      const sEnd = store.stats();
+      bakedBytes = sEnd.bakedBytes || 0;
+      decoder = { fed: (sEnd.fed || 0) - (sStart.fed || 0), seeks: (sEnd.seeks || 0) - (sStart.seeks || 0) };
+      if (q.video) {
+        const g = plan.grounds.find((x) => x.ground && x.ground.p && x.ground.p.image === q.video);
+        const item = e.mediaAt(q.start, { scale: ropts.scale }).find((x) => x.id === q.video);
+        depth = { depth: g ? g.ground.p.depth : null, blurPx: item && item.blur !== undefined ? item.blur : null,
+          px: item && item.px !== undefined ? item.px : null, baked: seen.baked, unbaked: seen.unbaked };
+      }
+      if (q.flush) flushed = await flushedPass(e, surf, ropts, rq, q, n, draw);
     } finally {
       SH.drawMedia = draw;
       e.dispose();
       if (store !== root) store.dispose();
       root.dispose();
     }
-    return { w, h, frames: frames.length, p50: percentile(frames, 0.5), p95: percentile(frames, 0.95), max: Math.max(...frames),
-      drawMedia: { calls: calls.length, p50: percentile(calls, 0.5), p95: percentile(calls, 0.95), perFrameP50: percentile(perFrame, 0.5) },
+    const sum = (list) => list.reduce((x, y) => x + y, 0);
+    const bucket = (list) => ({ calls: list.length, p50: percentile(list, 0.5), p95: percentile(list, 0.95) });
+    const all = calls.video.concat(calls.still);
+    // the slowest iterations, with their split (what the p95 is made of)
+    const slowest = frames.map((ms, i) => ({ i, ms, ready: ready[i], render: render[i], prep: prep[i], decode: decode[i] }))
+      .sort((x, y) => y.ms - x.ms).slice(0, 10);
+    return { w, h, frames: frames.length, slowest, trace: q.trace ? { frames, ready, render, media } : null, p50: percentile(frames, 0.5), p95: percentile(frames, 0.95), max: Math.max(...frames),
+      ready: { p50: percentile(ready, 0.5), p95: percentile(ready, 0.95), mean: sum(ready) / n },
+      render: { p50: percentile(render, 0.5), p95: percentile(render, 0.95), mean: sum(render) / n },
+      store: { decodeP50: percentile(decode, 0.5), decodeMean: sum(decode) / n, prepP50: percentile(prep, 0.5), prepMean: sum(prep) / n, bakedBytes,
+        fed: decoder ? decoder.fed : 0, seeks: decoder ? decoder.seeks : 0 },
+      drawMedia: Object.assign(bucket(all), { perFrameP50: percentile(perFrame, 0.5), video: bucket(calls.video), still: bucket(calls.still),
+        stillPerFrame: sum(calls.still) / n }),
+      flushed, depth, fallback: { max: Math.max(...fallback), sum: sum(fallback) },
       media: { min: Math.min(...media), max: Math.max(...media) }, stages };
   }
 
+  // The flushed drawMedia pass of timeFrames (same frames, after the timed loop): each call is timed from a 1-px read of
+  // its target before it (untimed) to one after it, and its drawImage calls on any 2D context are counted.
+  async function flushedPass(e, surf, ropts, rq, q, n, draw) {
+    const P = [typeof OffscreenCanvasRenderingContext2D !== 'undefined' ? OffscreenCanvasRenderingContext2D.prototype : null,
+      typeof CanvasRenderingContext2D !== 'undefined' ? CanvasRenderingContext2D.prototype : null].filter(Boolean);
+    const originals = P.map((pr) => pr.drawImage);
+    let draws = 0, counting = false;
+    P.forEach((pr, j) => { pr.drawImage = function () { if (counting) draws++; return originals[j].apply(this, arguments); }; });
+    const calls = { video: [], still: [] }, drawsOf = { video: [], still: [] }, perFrame = [];
+    let inFrame = 0;
+    SH.drawMedia = function (g, rec) {
+      if (g && g.getImageData) g.getImageData(0, 0, 1, 1);
+      draws = 0; counting = true;
+      const t0 = performance.now();
+      const r = draw.apply(this, arguments);
+      if (g && g.getImageData) g.getImageData(0, 0, 1, 1);
+      const ms = performance.now() - t0;
+      counting = false;
+      const kind = rec.time ? 'video' : 'still';
+      calls[kind].push(ms); drawsOf[kind].push(draws); inFrame += ms;
+      return r;
+    };
+    try {
+      for (let i = 0; i < n; i++) {
+        const t = q.start + i / q.fps;
+        await e.mediaReady(t, rq);
+        inFrame = 0;
+        e.renderFrame(surf, t, ropts);
+        surf.ctx.getImageData(0, 0, 1, 1);
+        perFrame.push(inFrame);
+      }
+    } finally {
+      P.forEach((pr, j) => { pr.drawImage = originals[j]; });
+      SH.drawMedia = draw;
+    }
+    const sum = (list) => list.reduce((x, y) => x + y, 0);
+    const bucket = (k) => ({ calls: calls[k].length, p50: percentile(calls[k], 0.5), p95: percentile(calls[k], 0.95),
+      perFrame: sum(calls[k]) / n, draws: { min: drawsOf[k].length ? Math.min(...drawsOf[k]) : 0, max: drawsOf[k].length ? Math.max(...drawsOf[k]) : 0,
+        p50: percentile(drawsOf[k], 0.5) } });
+    return { video: bucket('video'), still: bucket('still'), perFrameP50: percentile(perFrame, 0.5), trace: q.trace ? perFrame : null };
+  }
+
   // perf.py (DESIGN_2_1 §11.8.3): project_basic with a 1080p30 video ground (VP9, clock song) and a still photoFrame, 10 s
-  // at 30 fps at 720p. o = { project (the saved text of project_basic), seconds, start, rows } — rows adds the other
+  // at 30 fps at 720p. o = { project (the saved text of project_basic), seconds, start, rows, trace } — trace adds the
+  // per-frame times (NOTES: what the p95 is made of); rows adds the other
   // §11.5.12 figures (still and video grounds alone, the isolated path, the WebM alpha merge, scrubbing, export overhead).
   const big = {};
-  async function perf(o) {
-    const q = Object.assign({ seconds: 10, start: 2, runs: 2 }, o || {});
+  async function bigAssets() {
     if (!big.video) {
       const v = await bigCounter(1920, 1080, 30, 60, 60, false);
       big.video = await importBytes(v.bytes, 'perf_1080p30.webm');
       big.still = await importBytes(await patternJpeg(1600, 1200), 'perf_still.jpg', 'image/jpeg');
     }
-    const file = JSON.parse(q.project);
-    const docWith = (pins) => {
-      const doc = clone(file.doc);
-      doc.media = { list: [...entries.values()].map(clone) };
-      doc.pins = Object.assign({}, doc.pins);
-      for (const [path, v] of Object.entries(pins)) doc.pins[path] = { v, by: 'user' };
-      doc.output = Object.assign({}, doc.output, { audio: false });
-      return doc;
-    };
+    return big;
+  }
+
+  // project_basic (the saved text) with these work pins, the library imported here, no audio.
+  function basicWith(project, pins) {
+    const file = JSON.parse(project);
+    const doc = clone(file.doc);
+    doc.media = { list: [...entries.values()].map(clone) };
+    doc.pins = Object.assign({}, doc.pins);
+    for (const [path, v] of Object.entries(pins)) doc.pins[path] = { v, by: 'user' };
+    doc.output = Object.assign({}, doc.output, { audio: false });
+    return doc;
+  }
+
+  async function perf(o) {
+    const q = Object.assign({ seconds: 10, start: 2, runs: 2 }, o || {});
+    await bigAssets();
+    const docWith = (pins) => basicWith(q.project, pins);
     const main = docWith(Object.assign({ 'work:ornament.count': 1 },
       partPins('ground', 'photoPan', { image: big.video.id, clock: 'song' }),
       partPins('ornament#0', 'photoFrame', { src: big.still.id, place: 'side' })));
     const runs = [];
-    for (let r = 0; r < q.runs; r++) runs.push(await timeFrames(main, q.start, q.seconds, 30, 720));
+    for (let r = 0; r < q.runs; r++) {
+      runs.push(await timeFrames({ doc: main, start: q.start, seconds: q.seconds, video: big.video.id, still: big.still.id, flush: r === 0, trace: q.trace }));
+    }
+    const flushed = runs[0].flushed;
     runs.sort((x, y) => x.p95 - y.p95);
-    const out = { main: runs[0], others: runs.slice(1).map((x) => x.p95), rows: null };
+    // project_basic as it is (no media), in the same page and run: the baseline of the per-part split
+    const baseline = await timeFrames({ doc: docWith({}), start: q.start, seconds: q.seconds, trace: q.trace });
+    const out = { main: Object.assign({}, runs[0], { flushed }), others: runs.slice(1).map((x) => ({ p50: x.p50, p95: x.p95 })),
+      baseline: { p50: baseline.p50, p95: baseline.p95, render: baseline.render, trace: baseline.trace }, rows: null };
     if (!q.rows) return out;
     // the other §11.5.12 rows, measured once (NOTES)
     const rows = {};
-    const alone = async (pins) => timeFrames(docWith(Object.assign({ 'work:ornament.count': 0 }, pins)), q.start, 4, 30, 720);
+    const alone = async (pins) => timeFrames({ doc: docWith(Object.assign({ 'work:ornament.count': 0 }, pins)), start: q.start, seconds: 4, flush: true });
     rows.stillGround = await alone(partPins('ground', 'photoPan', { image: big.still.id, move: 'none', depth: 'anim', veil: 0 }));
     rows.videoGround = await alone(partPins('ground', 'photoPan', { image: big.video.id, move: 'none', depth: 'anim', veil: 0, clock: 'song' }));
+    // the video ground alone at its automatic depth (back: the baked blur and the veil), for the per-part split
+    const back = await timeFrames({ doc: docWith(Object.assign({ 'work:ornament.count': 0 }, partPins('ground', 'photoPan', { image: big.video.id, clock: 'song' }))),
+      start: q.start, seconds: 4, flush: true, video: big.video.id });
+    rows.videoBack = back;
     rows.plainGround = await alone({});
     const png = await importBytes((await G.stills()).png, 'perf_alpha.png', 'image/png');
     rows.isolated = await alone(partPins('ground', 'photoPan', { image: png.id, move: 'none', depth: 'anim', veil: 0 }));
@@ -710,6 +856,186 @@
     return out;
   }
 
+  // playback (media_exact.py; DESIGN_2_1 §11.4.5–§11.4.6): the preview playing in real time, as the stage does it. At
+  // every 30-fps tick of the wall clock (a late tick skips frames, as a player does): want(mediaAt(t) and mediaAt(t +
+  // k / 30), k = 1…ahead) with no await, then renderFrame in preview quality at 720p and a 1-px read. The document is
+  // project_basic with the 1080p30 video ground (the 2-s clip loops) at its automatic depth (back: blurred), on the root
+  // store (the preview's). Per frame: the source frame the store handed out for the ground (MediaFrame.index), exact
+  // and baked or not, against the frame its time asks for. o = { project, seconds, ahead, start, skip } → { frames,
+  // right (the frame asked for), rightBaked (that frame, exact, with its baked blur), provisional, fallback (frames the
+  // engine blurred itself), lag { max, p95 } (source frames behind, after the first `skip` frames: the cold start),
+  // bakes, seeks, fed, loops, renderP50, bad (the first wrong frames: [tick, want, got, exact, blur]) }
+  async function playback(o) {
+    const q = Object.assign({ seconds: 6, ahead: 8, start: 2, skip: 30 }, o || {});
+    const { video } = await bigAssets();
+    const id = video.id;
+    const doc = basicWith(q.project, Object.assign({ 'work:ornament.count': 0 }, partPins('ground', 'photoPan', { image: id, clock: 'song' })));
+    const root = STORE.createMediaStore({ blobs: a.io.mediaBlobs, entries: (x) => entries.get(x) || null, now: () => performance.now() });
+    let got = null;
+    const spy = Object.assign({}, root, {
+      frame(fid, m, want) {
+        const f = root.frame(fid, m, want);
+        if (fid === id && got && want && want.blur > 0) got.push(f ? { index: f.index, exact: f.exact, blur: f.blur } : null);
+        return f;
+      },
+    });
+    const e = newEngine(spy);
+    const rows = [], render = [];
+    try {
+      e.setDoc(doc);
+      const plan = e.plan;
+      const k = 720 / Math.min(plan.design.w, plan.design.h);
+      const w = Math.round(plan.design.w * k), h = Math.round(plan.design.h * k);
+      const surf = surfaceOf(w, h, false);
+      const scale = w / plan.design.w;
+      const ropts = { quality: 'preview', scale };
+      e.renderFrame(surf, q.start, ropts);
+      await e.prepare(q.start, q.start + q.seconds, { export: false });
+      const n = Math.round(q.seconds * 30), fps = video.fps || 30;
+      const s0 = root.stats();
+      const T0 = performance.now() + 20;
+      let last = -1;
+      for (;;) {
+        const due = T0 + ((last + 1) * 1000) / 30, now = performance.now();
+        if (now < due) { await new Promise((r) => setTimeout(r, due - now)); continue; }
+        const tick = Math.floor(((now - T0) * 30) / 1000);
+        if (tick >= n) break;
+        last = tick;
+        const t = q.start + tick / 30;
+        const list = e.mediaAt(t, { scale });
+        const all = list.slice();
+        for (let j = 1; j <= q.ahead; j++) all.push(...e.mediaAt(t + j / 30, { scale }));
+        root.want(all);
+        got = [];
+        const r0 = performance.now();
+        const st = e.renderFrame(surf, t, ropts);
+        surf.ctx.getImageData(0, 0, 1, 1);
+        render.push(performance.now() - r0);
+        const item = list.find((x) => x.id === id);
+        const want = item ? Math.floor(item.m * fps + 1e-4) % video.frames : -1;
+        const f = got.find((x) => x) || null;
+        rows.push({ tick, want, index: f ? f.index : -1, exact: !!(f && f.exact), blur: f ? f.blur : 0, fallback: st.media.fallback || 0,
+          provisional: st.provisional });
+        got = null;
+      }
+      const s1 = root.stats();
+      const after = rows.filter((r) => r.tick >= q.skip);
+      const lag = after.map((r) => ((r.want - r.index) % video.frames + video.frames) % video.frames);
+      return { frames: rows.length, of: n, after: after.length,
+        right: after.filter((r) => r.index === r.want).length,
+        rightBaked: after.filter((r) => r.index === r.want && r.exact && r.blur > 0).length,
+        provisional: after.filter((r) => r.provisional).length,
+        fallback: after.filter((r) => r.fallback > 0).length,
+        lag: { max: lag.length ? Math.max(...lag) : 0, p95: percentile(lag, 0.95) },
+        bakes: (s1.routes.yuv + s1.routes.canvas) - (s0.routes.yuv + s0.routes.canvas),
+        seeks: s1.seeks - s0.seeks, fed: s1.fed - s0.fed,
+        loops: Math.floor((q.start + q.seconds) / video.dur) - Math.floor(q.start / video.dur),
+        renderP50: percentile(render, 0.5),
+        bad: rows.filter((r) => r.index !== r.want || !r.exact).slice(0, 12).map((r) => [r.tick, r.want, r.index, r.exact ? 1 : 0, r.blur]) };
+    } finally {
+      e.dispose();
+      root.dispose();
+    }
+  }
+
+  // bakeLook (media_exact.py; DESIGN_2_1 §11.4.6): the look of the baked blur against the per-frame blur it replaces. A
+  // 1080p30 counter (the media_gen.js pattern scaled up: hard black and white edges, the worst case for a resampled blur)
+  // as the work background at its automatic depth (back: blurred and veiled), exported at each short side, twice: once
+  // as the store bakes it (the plain path), once from a store that hands the frames out unbaked (want.blur dropped for the
+  // video, so the engine blurs each output frame itself: the isolated path of before). → per size: MAE and the largest
+  // difference (0–255, per channel), the share of pixels off by more than 16, inside a 16-px border and inside the colour
+  // bars (flat: the colour conversion alone), the fallbacks of each run, the variant
+  // sizes baked; with o.crop ({ x, y, w, h } in output px) also PNG data URLs of that crop of the first time, baked and
+  // unbaked (for looking at them). o = { times, shorts, crop }
+  async function bakeLook(o) {
+    const q = Object.assign({ times: [0.4, 0.75], shorts: [720, 1080] }, o || {});
+    if (!big.look) {
+      const v = await bigCounter(1920, 1080, 30, 30, 30, false, true);
+      big.look = await importBytes(v.bytes, 'look_1080p30.webm');
+    }
+    const id = big.look.id;
+    const doc = docOf('[00:00.50]あいうえお\n[00:04.00]かきくけこ', partPins('ground', 'photoPan', { image: id, clock: 'song', move: 'none' }),
+      { format: 'png', short: 720, fps: 30 });
+    const out = {};
+    for (const short of q.shorts) {
+      const run = async (unbaked) => {
+        const root = newStore();
+        const store = root.fork();
+        const spy = unbaked ? Object.assign({}, store, {
+          frame(fid, m, want) { return store.frame(fid, m, fid === id && want ? Object.assign({}, want, { blur: 0 }) : want); },
+          ready(list, ro) { return store.ready((list || []).map((x) => (x.id === id ? { id: x.id, m: x.m } : x)), ro); },
+        }) : store;
+        const e = newEngine(spy);
+        e.setDoc(doc);
+        const plan = e.plan;
+        const k = short / Math.min(plan.design.w, plan.design.h);
+        const w = Math.round(plan.design.w * k), h = Math.round(plan.design.h * k);
+        const surf = surfaceOf(w, h, false);
+        const scale = w / plan.design.w;
+        const imgs = [], fallback = [];
+        let png = null;
+        try {
+          for (const t of q.times) {
+            await e.mediaReady(t, { scale });
+            const st = e.renderFrame(surf, t, { quality: 'export', scale });
+            fallback.push(st.media.fallback);
+            imgs.push(surf.ctx.getImageData(0, 0, w, h).data);
+            if (q.crop && !png) {
+              const c = new OffscreenCanvas(q.crop.w, q.crop.h);
+              c.getContext('2d').drawImage(surf.canvas, q.crop.x, q.crop.y, q.crop.w, q.crop.h, 0, 0, q.crop.w, q.crop.h);
+              const blob = await c.convertToBlob({ type: 'image/png' });
+              png = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(blob); });
+            }
+          }
+          const item = e.mediaAt(q.times[0], { scale }).find((x) => x.id === id);
+          return { imgs, fallback, w, h, item, stats: store.stats(), png };
+        } finally {
+          e.dispose();
+          store.dispose();
+          root.dispose();
+        }
+      };
+      const a = await run(false), b = await run(true);
+      // everything, and the inside apart from a 16-px border (where the per-frame blur of the isolated surface faded to
+      // transparency over the ground colour: the fringe the mirrored border of the baked copy removes)
+      let sum = 0, max = 0, off = 0, count = 0, isum = 0, imax = 0, icount = 0;
+      const B = 16;
+      for (let f = 0; f < a.imgs.length; f++) {
+        const x = a.imgs[f], y = b.imgs[f];
+        for (let i = 0; i < x.length; i += 4) {
+          const px = (i >> 2) % a.w, py = Math.floor((i >> 2) / a.w);
+          const inner = px >= B && py >= B && px < a.w - B && py < a.h - B;
+          for (let c = 0; c < 3; c++) {
+            const d = Math.abs(x[i + c] - y[i + c]);
+            sum += d; if (d > max) max = d; if (d > 16) off++; count++;
+            if (inner) { isum += d; if (d > imax) imax = d; icount++; }
+          }
+        }
+      }
+      // the inside of the six colour bars (flat colour: no blur shows there, only the colour conversion: the store's own
+      // YUV → RGB against the browser's)
+      let bsum = 0, bmax = 0, bcount = 0;
+      const kx = a.w / G.W, ky = a.h / G.H;
+      for (let f = 0; f < a.imgs.length; f++) {
+        const x = a.imgs[f], y = b.imgs[f];
+        for (let k = 0; k < BARS.length; k++) {
+          for (let py = Math.ceil(84 * ky); py < Math.floor(96 * ky); py++) {
+            for (let px = Math.ceil((14 + k * 29) * kx); px < Math.floor((31 + k * 29) * kx); px++) {
+              const i = 4 * (py * a.w + px);
+              for (let c = 0; c < 3; c++) { const d = Math.abs(x[i + c] - y[i + c]); bsum += d; if (d > bmax) bmax = d; bcount++; }
+            }
+          }
+        }
+      }
+      out[short] = { w: a.w, h: a.h, mae: sum / count, max, over16: off / count, inner: { mae: isum / icount, max: imax },
+        bars: { mae: bsum / Math.max(1, bcount), max: bmax },
+        fallback: { baked: a.fallback, unbaked: b.fallback },
+        blurPx: a.item && a.item.blur, px: a.item && a.item.px, routes: a.stats.routes, bakedBytes: a.stats.bakedBytes, baked: a.stats.baked,
+        pngs: q.crop ? [a.png, b.png] : null };
+    }
+    return out;
+  }
+
   // --- transparent_check.py ----------------------------------------------------------------------------------------------
 
   // The PNG with alpha of media_gen.js (a 96 × 64 picture: opaque on the left, a half-transparent square at 60–90 × 20–50,
@@ -737,7 +1063,7 @@
   }
 
   window.__mediaParts = Object.freeze({
-    exact: Object.freeze({ prepare: prepareExact, run: runExact, mp4: mp4Exact }),
+    exact: Object.freeze({ prepare: prepareExact, run: runExact, mp4: mp4Exact, look: bakeLook, play: playback }),
     alpha: alphaChecks,
     determinism,
     perf,

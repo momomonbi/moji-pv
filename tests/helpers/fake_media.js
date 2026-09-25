@@ -3,12 +3,14 @@
 // createFakeMedia(MV, opts) → an AssetStore with synthetic assets, no decoding:
 //   stills   delivered at the §11.4.6 tier the request asks for (core/media.tier); a blurred copy when want.blur > 0
 //   videos   and animations: a sample table (any fps, VFR, explicit pts); frame(id, m) picks the source frame by the
-//            §11.4.2 rule (the largest i with pts[i] ≤ m + 1e-4, else 0) and reports it as MediaFrame.index
+//            §11.4.2 rule (the largest i with pts[i] ≤ m + 1e-4, else 0) and reports it as MediaFrame.index; with
+//            want.blur > 0 the frame comes baked, as the real store bakes it (§11.4.6): a copy at 1/b of the frame
+//            (media/yuv.factorFor) with MediaFrame.blur = want.blur (opts.bake: false hands out unbaked frames, blur 0)
 //   images   in Node, stand-ins named by engine/render/record.mediaTag ('media:<id>@<m>#<index>'), so recorder op
 //            hashes show the chosen source frame; with opts.canvas (a CanvasFactory, the lab) real canvases: a coloured
 //            checkerboard per asset, a bar code of the index on video frames
 // opts = { assets: [entry] (default FIXTURES), missing: [id] (not on this device), exact: 'always' | 'ready',
-//          canvas: CanvasFactory | null }. With exact 'ready' a video frame is exact only once ready() (or want() and
+//          canvas: CanvasFactory | null, bake: boolean (default true) }. With exact 'ready' a video frame is exact only once ready() (or want() and
 //          then settle()) asked for it; until then frame() returns the last held frame of that asset, marked not exact.
 // Test hooks: calls (every frame() request), settle(), forks, disposed, table(id).
 // This file is also loaded into the lab page (tests/browser/contact_sheet.py wraps it like the other fixtures), so it
@@ -96,6 +98,7 @@ function createFakeMedia(MV, options) {
   const opts = options || {};
   const R = MV.use('engine/render/record');
   const M = MV.use('core/media');
+  const YUV = MV.use('media/yuv');
   const list = opts.assets || FIXTURES;
   const byId = new Map(list.map((a) => [a.id, { a, meta: metaOf(a), pts: a.kind === 'video' || a.anim ? ptsOf(a) : null }]));
   const missing = new Set(opts.missing || []);
@@ -151,14 +154,16 @@ function createFakeMedia(MV, options) {
       index = lastShown.has(id) ? lastShown.get(id) : 0;
       shownM = e.pts[index];
     } else if (e.pts) lastShown.set(id, index);
-    // stills come at the tier the node needs; videos at their size
+    // stills come at the tier the node needs, blurred as asked; videos at their size, or baked (blurred, at 1/b)
     const long = Math.max(meta.w, meta.h);
-    const tier = e.pts ? long : M.tier(w.px || long, meta);
+    const blur = w.blur > 0 && (!e.pts || (opts.bake !== false && !w.thumb)) ? w.blur : 0;
+    const b = e.pts && blur > 0 ? YUV.factorFor(long, w.px > 0 ? w.px : long, blur) : 1;
+    const tier = e.pts ? long / b : M.tier(w.px || long, meta);
     const dw = Math.max(1, Math.round((meta.w * tier) / long)), dh = Math.max(1, Math.round((meta.h * tier) / long));
     const turned = meta.rot === 90 || meta.rot === 270;
     const f = frames.get(id) || {};
-    f.image = imageOf(id, shownM, index, turned ? dh : dw, turned ? dw : dh, e.pts ? 0 : w.blur || 0);
-    f.w = dw; f.h = dh; f.rot = meta.rot; f.exact = exact; f.index = index;
+    f.image = imageOf(id, shownM, index, turned ? dh : dw, turned ? dw : dh, blur);
+    f.w = dw; f.h = dh; f.rot = meta.rot; f.exact = exact; f.index = index; f.blur = blur;
     frames.set(id, f);
     return f;
   }

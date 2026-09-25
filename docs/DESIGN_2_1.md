@@ -3095,8 +3095,8 @@ registry. The reducers, the library's 使用 n count and the delete dialog all u
 | Module | Layer | May depend on | Owner |
 |---|---|---|---|
 | `core/media`, `core/sha256` | L0 | L0 | A (`core/media`), G (`core/sha256`) |
-| `media/sniff`, `media/isobmff`, `media/matroska`, `media/samples`, `media/palette` | **L1** (new directory `src/media/`) | L0, and L1 inside `media/` | G |
-| `media/host/probe`, `media/host/session`, `media/host/store` | **L6** (new directory `src/media/host/`) | L0–L5 | G |
+| `media/sniff`, `media/isobmff`, `media/matroska`, `media/samples`, `media/palette`, `media/yuv` | **L1** (new directory `src/media/`) | L0, and L1 inside `media/` | G |
+| `media/host/probe`, `media/host/session`, `media/host/store`, `media/host/bake` | **L6** (new directory `src/media/host/`) | L0–L5 | G |
 | `export/webm`, `export/unzip`, `export/package`, `export/subtitles` | L5 (pure) | L0–L4 | H (`webm`, `subtitles`), G (`unzip`, `package`) |
 | `export/host/webm`, `export/host/kit` | L6 | L0–L5 | H |
 | `ui/media_io`, `ui/media_page`, `ui/media_widgets` | L7 | everything | G |
@@ -3181,6 +3181,16 @@ toData(table) / fromData(data)             // IndexedDB form (ArrayBuffers)
 codecString(track) → string                // avc1 / hvc1 / vp09 / av01 / vp8 strings (§11.4.3)
 stats(table) → { gopMean, gopMax, vfr }
 
+// media/yuv — the reduced RGBA copy of an 8-bit 4:2:0 video frame that the store blurs (§11.4.6; deterministic)
+supports(format, colorSpace) → boolean        // 'I420' | 'NV12', matrix bt709 | bt470bg | smpte170m, not PQ / HLG / BT.2020
+factorFor(long, px, blur) → b ∈ {1, 2, 4, 8}  // the largest power of two ≤ 8 with long / b ≥ px / 4 (px / 8 when blur ≥ 8)
+sigmaFor(blur, long, b, px) → σ               // blur (device px) × copy px per device px, in 1/32 copy px, > 0
+padFor(σ, cw, ch) → ceil(3σ)                  // at most the copy's shorter side
+toRgba({ format, data, layout, w, h }, { b, matrix, full, pad, out? }) → { data: Uint8ClampedArray, w, h, cw, ch, pad }
+   // the planes of the visible rect (VideoFrame.copyTo); each copy pixel averages its b × b block of Y and its
+   // (b/2) × (b/2) block of U and V, converted in fixed point with the matrix and range of VideoFrame.colorSpace; a
+   // mirrored border of `pad` px (pixel −1 − k shows pixel k)
+
 // media/palette — dominant colours (deterministic)
 dominant(rgba: Uint8ClampedArray, w, h, { k = 5 }) → ['#RRGGBB', …]   // 64×64 input; OKLab k-means++ seeded by hash32 of
                                                                          // the bytes; 8 iterations; sorted by weight
@@ -3206,6 +3216,11 @@ createAnimSession({ blob, mime, table }) → AnimSession                        
 // media/host/store
 createMediaStore({ blobs: { get(id) → Promise<Blob | null>, index…, thumbs… }, canvas: CanvasFactory, now, idle })
   → AssetStore (§11.3.6)
+
+// media/host/bake (one per store fork; used by the store only)
+createBaker({ canvas, now }) → { variant(long, px, blur) → { b, sigma, blur, key } | null,
+                                 bake(held, variant, { alpha }) → Promise<{ bitmap, w, h, index, blur, bytes, route }>,
+                                 stats() → { prepMs, baked, yuv, canvas }, dispose() }       // §11.4.6
 ```
 
 #### 11.3.6 AssetStore (D§4.20 `AssetStore` amended; FROZEN)
@@ -3214,23 +3229,50 @@ createMediaStore({ blobs: { get(id) → Promise<Blob | null>, index…, thumbs�
 AssetStore = {
   get(id) → CanvasImageSource | null,          // v2.0 member, kept: a still at its largest cached tier (lab, old callers)
   frame(id, m, want) → MediaFrame | null,      // m: media seconds (ignored for stills);
-                                               // want: { px /* needed device px, long side */, blur /* device px, 0 */,
+                                               // want: { px /* needed device px, long side */, blur /* device px, 0;
+                                               //         every medium: stills, videos and animations */,
                                                //         exact: boolean /* export */, thumb: boolean /* posters only */ }
-  want(list: [{ id, m }]) → void,              // preview: start decoding soon (no promise)
-  ready(list: [{ id, m }], { signal }) → Promise<void>,   // resolves when every exact frame of the list is held
+  want(list: [{ id, m, px?, blur? }]) → void,  // look-ahead: start decoding soon (no promise); with a blur, bake the
+                                               // listed frames as they are held (§11.4.6)
+  ready(list: [{ id, m, px?, blur? }], { signal }) → Promise<void>,   // resolves when every exact frame of the list is
+                                               // held, and (timed media with blur > 0) its baked copy too (§11.4.6)
   has(id) → boolean,                           // bytes on this device (or in the session fallback)
   info(id) → { state: 'ok' | 'missing' | 'loading' | 'error', code?: string },
   on(event: 'ready' | 'state', fn) → off,      // 'ready': new frames are held (the stage redraws a provisional frame)
   fork() → AssetStore,                         // own video and animation sessions; shared still cache and blobs
-  stats() → { stillBytes, sessions, sessionPixels, held, decodeMs },
+  stats() → { stillBytes, sessions, sessionPixels, held, decodeMs, prepMs /* additive: time in bakes */, … },
   dispose(),
 }
-MediaFrame = { image: CanvasImageSource, w, h /* displayed px */, rot, exact: boolean, index: int }
+MediaFrame = { image: CanvasImageSource, w, h /* displayed px */, rot, exact: boolean, index: int,
+               blur /* additive: device px of blur already applied to image; 0 = none */ }
             // pooled per store: valid until the next frame() call for the same id
 ```
 
 `engine/facade` takes it as before, through `createEngine({ assets })`. `ui/boot` passes the real store. Node tests and
 the lab pass `tests/helpers/fake_media.js` (package B).
+
+- The store keys a prepared frame (a still tier, a baked video frame) only by the values of the request itself (`px`,
+  `blur` of the `ready()` / `want()` item or of `want`), never by sizes learned from earlier `frame()` calls, so frame N
+  rendered directly equals frame N after 0..N−1 (determinism check 7).
+- `MediaFrame.blur > 0` tells the engine that the blur is already in the image: it draws a blurred video frame then on
+  the plain path. With `blur` 0 for a node that has a blur, the engine blurs the frame itself (§11.5.4) and counts it in
+  `FrameStats.media.fallback`.
+- **Contract changes of the media-row work (perf: media row; not additive; signed off by the lead, NOTES "## Lead: integrating the media-row work").** They change
+  the behaviour of this FROZEN interface and of §11.4.5:
+  1. In the preview, `frame()` returns `exact: false` for a held frame of a blurred video or animation (`want.blur > 0`)
+     until its baked copy exists. Before, a held frame was always exact. It keeps the stage redrawing a paused frame
+     until it shows the baked look, which is the export's.
+  2. The provisional frame of a blurred timed medium (§11.4.5 step 2) is the baked copy of the frame that order
+     picks, when there is one. When the exact frame is held but not yet baked, a baked copy of one of the
+     `NEAR_BAKED = 2` frames before it may stand in (playback: the frame shown a moment ago). Otherwise the exact
+     frame is returned unbaked.
+  3. `ready()` also bakes: for timed media with `blur > 0` it resolves once the baked copy is held, or once its bake
+     has failed.
+  4. `want.blur` is now sent for videos and animations too (it was sent for stills only). A store that applies
+     `want.blur` to every frame but does not report it in `MediaFrame.blur` would have that frame blurred twice. The
+     stores in this tree (`media/host/store`, `tests/helpers/fake_media.js`) report it.
+  5. `want()` bakes every listed frame of a blurred timed medium as the session gets it. The engine's `mediaReady`
+     lists every output frame of its look-ahead, not only the last one (§11.3.7).
 
 #### 11.3.7 Engine and kit (D§4.17–§4.20 additive; package B)
 
@@ -3240,9 +3282,9 @@ the lab pass `tests/helpers/fake_media.js` (package B).
 | `engine/scene/build` | `svc.media` (= `plan.media`) becomes `env.media`, a frozen read-only lookup. The scene gains `media: [{ node, id, time: TimeSpec \| null }]`, collected at commit. |
 | `engine/render/shapes` | New `drawMedia(g, rec, M, alpha, dc, tl) → boolean` (§11.5.5). |
 | `engine/render/draw` | `drawLayer` sends records with `media: true` to `drawMedia`, and counts `dc.counts.media` and `dc.mediaWaiting`. It skips `sceneOnly` records when `dc.backdrop !== 'scene'`. |
-| `engine/render/renderer` | Sets `dc.t` (the absolute frame time, for `clock: 'song'`) and `dc.backdrop`. New option `opts.layers: 'all' \| 'ground'` (`'ground'`: only the ground layer of every item plus the backdrop fill, used by §13.7). New `mediaAt(plan, source, t, out) → out` (the media nodes of the active scenes and their media times; no behaviours run). FrameStats gains `media: { drawn, waiting }`, and `provisional` becomes true when `waiting > 0`. |
+| `engine/render/renderer` | Sets `dc.t` (the absolute frame time, for `clock: 'song'`) and `dc.backdrop`. New option `opts.layers: 'all' \| 'ground'` (`'ground'`: only the ground layer of every item plus the backdrop fill, used by §13.7). New `mediaAt(plan, source, t, out) → out` (the media nodes of the active scenes and their media times; no behaviours run). FrameStats gains `media: { drawn, waiting, fallback }` (`fallback`, additive: blurred timed nodes drawn with the per-frame blur because their frame came unbaked; export fixtures assert 0), and `provisional` becomes true when `waiting > 0`. |
 | `engine/render/record` | Media records are logged as `drawImage('media:<id>@<q6(m)>#<index>', sx, sy, sw, sh, dx, dy, dw, dh)`, with the index from the injected store. Op hashes therefore cover media timing. |
-| `engine/facade` | New `mediaAt(t) → [{ id, m }]`, sorted and deduplicated. New `mediaReady(t, { signal, ahead = 3 / fps }) → Promise` (= `assets.ready(mediaAt(t))` plus `assets.want(mediaAt(t + ahead))`). `fork({ assets? } = {})` (additive option) uses `assets` when given, else `assets.fork ? assets.fork() : assets`, and disposes a store it forked. `renderFrame(…, { quality: 'export' })` throws `EngineError('media-not-ready')` when `assets.frame(…).exact` is false, which is a programming error: exporters await `mediaReady` first. `thumb()` asks for posters only (`want.thumb`). |
+| `engine/facade` | New `mediaAt(t, { scale }?) → [{ id, m, px?, blur? }]`, sorted and deduplicated; with an output scale (given, or the last frame's) every medium carries the `px` and `blur` its draw asks the store for, the products of `shapes.frameFor` in its order (stills: their tier; videos and animations: their baked blur, §11.4.6). New `mediaReady(t, { signal, ahead = 3 / fps }) → Promise` (= `assets.ready(mediaAt(t))` plus `assets.want` of `mediaAt` at every output frame after `t` up to `t + ahead`, at most 8. A look-ahead that named only `t + ahead` let the session close the frames before it as they passed, and each one was then decoded again from its key frame when it was asked for. Measured: a 600-frame 1080p export with a pause between frames, as an encoder's awaits make, fed 4425 chunks and made 127 seeks, where 601 chunks and 11 seeks suffice. Signed off by the lead: §11.3.6 item 5). `fork({ assets? } = {})` (additive option) uses `assets` when given, else `assets.fork ? assets.fork() : assets`, and disposes a store it forked. `renderFrame(…, { quality: 'export' })` throws `EngineError('media-not-ready')` when `assets.frame(…).exact` is false, which is a programming error: exporters await `mediaReady` first. `thumb()` asks for posters only (`want.thumb`). |
 | `parts/kit` | New exports `media(env, o)`, `mediaParams(o)` and `MEDIA` (§11.5.6). |
 | `export/host/mp4`, `export/host/png` | The frame loop awaits `e.mediaReady(t)` before each `renderFrame` (D§4.21 steps amended, §9). |
 
@@ -3381,6 +3423,28 @@ A session owns one `VideoDecoder`, plus a second one for WebM alpha, for one ass
      - Frames at or after the smallest outstanding target are **held**. At most `HOLD = 3` frames per session are
        held, plus the last frame shown; the oldest is closed first.
      - Every other frame is `close()`d at once. Holding a decoded frame too long stalls hardware decoders.
+- **Look-ahead hints** (`hint(list)`, from `want()`) never send the decoder back: a hinted frame behind the decode
+  position (output since the last seek, or in a GOP before the one the decoder started from) is decoded when it is
+  requested. Otherwise the look-ahead of a loop's first frame resets the decoder under the frames about to be drawn, and
+  they are decoded again from their key frame (measured: ≈ 150 ms at every loop of a 1080p one-GOP clip).
+- **Hints never close a frame about to be shown** (the stage hints 8 frames; `HOLD` is 3). The first two rules are
+  needed. Without the first, without the second, or with the first counting frames by index alone, real-time preview
+  playback (media_exact.py) fell to 34–138 of 127–150 frames shown right and baked, or made more seeks than the clip
+  has loops.
+  - A hint is decoded only while at most `HOLD` frames still to be shown are held. That count includes the last frame
+    decoded, and it covers the frames after the shown one and the hinted ones: a loop's start comes after its end. The
+    hints resume on `show()`.
+  - Past a hinted target, the next chunk is fed only once the decoder has made no progress for `SETTLE_MS` (20 ms): it
+    needs more input, as reordered frames do. A request (a waited-for target) still takes the next chunk as soon as the
+    decoder has taken the previous ones. Every frame output past the target is held. Once more than `HOLD` are held,
+    `evict()` closes the oldest, which in playback is the next frame to be shown.
+  - A request preempts a hinted target at once. No fixture here exercises this: it is meant for decoders that output a
+    frame only after more input (reordered H.264, frame-threaded software decoders). Such a decoder gets each hinted
+    frame only after `SETTLE_MS` per extra chunk, so its look-ahead lags and requests take over. That is not measured
+    here: this Chromium has no H.264 encoder to make the fixture, and the CI Chrome encodes baseline H.264, which has no
+    reordered frames.
+- **Frame hooks** (additive, for the store): `onHeld(i)` when frame `i` becomes held (the store bakes a hinted frame
+  then), `onDrop(i)` when a held frame is closed by eviction (the store closes that frame's baked copies with it).
 - **Reads.** Payloads are read with `read(off, size)` and coalesced into windows of at most 4 MB of consecutive samples,
   from `Blob.slice().arrayBuffer()`. Nothing is read twice while the cursor moves forward.
 - **Errors.** A decoder `error` resets the session once and retries from the previous key frame. A second error sets
@@ -3398,6 +3462,12 @@ A session owns one `VideoDecoder`, plus a second one for WebM alpha, for one ass
   2. `drawMedia` calls `frame(id, m, { exact: false })`. The store returns the exact frame when it is held. Otherwise it
      returns, in this order: the nearest held frame at or before the target, the last frame shown for that id, the
      nearest filmstrip frame, the poster. That result has `exact: false` and `dc.mediaWaiting` is counted.
+     - A blurred video or animation (`want.blur > 0`) is exact only with its baked copy (§11.4.6; a contract change,
+       §11.3.6). While that bakes, the provisional result depends on whether the exact frame is held. If it is held,
+       the result is the baked copy of one of the `NEAR_BAKED = 2` frames before it (playback: the frame shown a moment
+       ago), else the exact frame unbaked (`blur` 0: the engine blurs it itself and counts a fallback). If it is not
+       held, the result is the frame the order above picks, as its baked copy when there is one, else unbaked. All of
+       these have `exact: false`, and the `ready` event follows the bake.
   3. `FrameStats.provisional` is then true, and the stage already redraws paused provisional frames (`retrySoon`,
      `PROVISIONAL_RETRY_MS`). It also redraws on the store's `ready` event.
   - There is no spinner over the preview. When media frames have been pending for more than 400 ms, the play bar's time
@@ -3405,7 +3475,9 @@ A session owns one `VideoDecoder`, plus a second one for WebM alpha, for one ass
 - **Export** (D§4.21 amended; `export/host/mp4`, `png`, `webm`, `kit`):
   1. `prepare(t0, t1, { export: true })` also runs `assets.ready(stills used in [t0, t1])`, which decodes every still at
      its export tier while it fits the still budget.
-  2. For each frame `i`, before `renderFrame`: `await e.mediaReady(t0 + i / fps, { signal })`.
+  2. For each frame `i`, before `renderFrame`: `await e.mediaReady(t0 + i / fps, { signal })`. For a blurred video or
+     animation, `ready()` resolves only once the baked copy of that frame is held (§11.4.6), so export frames draw it;
+     a bake that fails leaves the exact unbaked frame, which the engine blurs itself (counted as a fallback).
   3. Export frames are therefore always exact. If the store cannot deliver a frame (a decode error or missing bytes), the
      export stops with an `ExportError` that names the asset; it never renders a substitute.
 - **Time cost.** Export decodes each needed source frame once. At speed `s` it decodes about `s × source fps` frames per
@@ -3432,6 +3504,48 @@ A session owns one `VideoDecoder`, plus a second one for WebM alpha, for one ass
   the sprite rule of D§4.19.5 with one more step. A blur between two levels crossfades the two cached copies.
 - **Animated images** use the video path: their table comes from the frame durations read at import, and they loop by
   default.
+- **Blur of a video or animation frame** is made by the store too, once per source frame, never per output frame:
+  - **Key:** `(id, index, b, σ)`. The copy is `1/b` of the frame, with `b` the largest power of two ≤ 8 whose copy keeps
+    a long side ≥ `px / 4` (`px / 8` when `blur` ≥ 8 device px), so the copy's long side lies in `[px/4, px/2)`: 480×270
+    from a 1080p source in the 720p preview, 960×540 in a 1080p export. `σ` in copy px = `blur × copyLong / px` (the
+    still rule, headroom included), rounded to 1/32 px. The blur is not snapped to the still levels (a 1080p export's
+    3 px would become 2 px). `px` and `blur` are the request's own (`ready()`/`want()` item, `want`), so the copy is a
+    function of the frame and the request only.
+  - **The factor for a small blur (signed off by the lead).** The rule applies to every blur > 0, including the
+    2 device px of a `back` ground in the 720p preview. That copy is 480×270, ≈ 1/3 of the drawn 1472 px. The
+    principle's premise ("a large blur is visually identical at 1/2–1/4 scale") holds only loosely there: the engine's
+    own per-frame blur works at 1/2 of the output below 8 px (`engine/render/post.blurred`). A copy of at least half the
+    drawn size (`b = 2`, 960×540) costs 13.2–13.6 ms per source frame in software. That is the JS conversion 6.3 ms
+    and `ctx.filter` at that size 7.2 ms, against 3.2 ms at `b = 4`, and the media row then fails: p50 24.1–25.3 ms.
+    The look difference at `b = 4` is under **Look**.
+  - **Pixels** (`media/host/bake`): a `VideoFrame` whose format is 8-bit I420 or NV12, with a known matrix
+    (`media/yuv.supports`) and `b ≥ 2`, is copied out (`copyTo`, the visible rect) and reduced in JS (`media/yuv.toRgba`:
+    a box average, the matrix and range of `VideoFrame.colorSpace`, fixed point). That includes a GPU-backed frame that
+    reports one of these formats: `copyTo` reads it back. Nothing tells how a frame is backed, and the readback's cost
+    on a GPU machine is not measured (no GPU here). Any other frame takes the canvas route: format `null` (an opaque GPU
+    frame can have it), 10-bit or alpha formats, an unknown matrix, the alpha-merged or animation `ImageBitmap`, or
+    `b = 1`. The browser draws it into a copy-sized canvas. The route depends on the frame's own properties only, never
+    on history.
+  - **Blur:** `ctx.filter = blur(σ)` from a copy padded by `ceil(3σ)`: mirrored for opaque media (the frame edges stay
+    opaque, as the mirrored neighbours of §11.5.2 continue them), transparent for media with alpha. Without
+    `ctx.filter`, a smaller copy scaled back up stands in. The result is an `ImageBitmap` (`transferToImageBitmap`).
+  - **When:** in `ready()` (export: the frame of the list), and for the preview in idle slices, at most one per slice:
+    the frame on screen first, then the frames of the latest `want()` list in list order, each as soon as the session
+    holds it (the session's `onHeld` starts the queue). Never in the decoder's output callback, never frames skipped at
+    speed. Measured with the stage's 8-frame look-ahead, playing in real time at 30 fps (media_exact.py; NOTES "Perf:
+    media row", review round 2). After the first second, 264–285 of 269–285 frames showed their exact baked frame in
+    10-s runs, with one bake per source frame. Before this rule it was 5 of 300 in the probe, and 69 of 300 in the
+    reviewer's.
+  - **Look (signed off by the lead):** close to the per-frame blur it replaces, and without the darker fringe the
+    per-frame blur of the whole frame left at the frame edges. `media_exact.py` asserts MAE ≤ 3 of 255 inside the frame
+    on a hard-edged pattern, and ≤ 3 inside flat colour, where only the colour conversion shows. Measured: MAE 2.21 at
+    720p (the largest difference 65 of 255, 4.6 % of the pixels off by more than 16) and 1.30 at 1080p (the largest 20).
+    σ is ≈ 0.87 × the per-frame blur's at camera zoom 1, because px includes the 1.15 camera headroom, as the still
+    rule does. The JS colour conversion follows the standard BT.709 / BT.601 coefficients. This Chromium's libyuv
+    differs from them by up to 13 of 255 in blue at an extreme U. Export pixels of a blurred video therefore change,
+    deterministically. `tests/golden/project_media.json` was regenerated for it (frame hashes only), signed off by
+    the lead (§7.5). A bake that fails in an export leaves that one frame with the per-frame look (the edge fringe)
+    among baked frames. It is counted in `FrameStats.media.fallback`, which the export fixtures assert to be 0.
 
 #### 11.4.7 Caches and memory bounds (D§7.3 additions)
 
@@ -3440,6 +3554,7 @@ A session owns one `VideoDecoder`, plus a second one for WebM alpha, for one ass
 | Still bitmaps (per page, shared by forks) | (id, tier) | 320 MB LRU; ≤ 24 MP per bitmap; export waits and evicts instead of failing |
 | Blurred stills | (id, tier, blur level) | inside the 320 MB |
 | Held video frames | per session | `HOLD = 3` + the last frame shown |
+| Baked video and animation frames (§11.4.6) | per session: (variant, frame) | one per held frame and variant, at `1/b` size, closed when the session closes its source frame (`onDrop`) or with the session; so at most HOLD + shown + pinned + the frame being decoded (measured: ≤ 5 in a 600-frame 1080p export and while playing, never more than the frames held) |
 | Video sessions (per store fork) | asset | Σ coded pixels of open sessions ≤ 16.6 MP (two 4K, or eight 1080p). The least recently used session closes first and reopens with a seek. |
 | Decoder queue | per session | ≤ 8 chunks in flight |
 | Read windows | per session | ≤ 4 MB |
@@ -3629,13 +3744,18 @@ soft:     contain as above, drawn over a cover copy of the same source with zoom
   - `veil`: `fillRect` of `q.rgba(ink, a)` over `dest` with source-over.
   - `tint`: `fillRect` of the tint ink with `globalCompositeOperation = 'color'` at alpha `a`, clipped to `dest`.
   - Both touch only the media's pixels, because the media is opaque inside `dest`.
-- **Media with alpha, or `comp: 'atop'`, or video blur** use the **isolated path**:
+- **Media with alpha, or `comp: 'atop'`, or a video blur the frame did not bring baked** use the **isolated path**:
   1. Draw into a pooled full-frame surface (`pool.take()`).
   2. Apply veil and tint with `source-atop`.
   3. Apply blur with `PO.blurred(pool, S, blurPx)`.
   4. Composite onto the target with `comp`.
   - This costs one extra surface, within the D§7.2 pool limits.
 - **Still blur** comes pre-made from the store (§11.4.6); no per-frame blur.
+- **Video and animation blur** comes pre-made from the store as well (§11.4.6: baked once per source frame,
+  `MediaFrame.blur > 0`), so a blurred opaque video takes the plain path: one draw of the small copy (and its mirrored
+  neighbours) plus the veil. The per-frame `PO.blurred` of the isolated path remains only as the fallback when a node with
+  a blur gets a frame with `blur` 0 (a provisional preview frame, a bake that failed); it is counted in
+  `FrameStats.media.fallback`.
 - **Mask:** `save(); setMatrix(M); B.replayShape(g, mask); clip(); … restore()`. The shapes come from `K.shape`, so all
   geometry is ours. Clips are anti-aliased by the canvas.
 - **`comp`** sets `globalCompositeOperation` for the node's draw only, then restores `source-over`.
@@ -3648,11 +3768,12 @@ soft:     contain as above, drawn over a cover copy of the same source with zoom
 ```
 1  m = rec.time ? MEDIA.mapTime(rec.time, rec.time.clock === 'song' ? dc.t : tl) : 0
 2  f = dc.assets ? dc.assets.frame(rec.src, m, want) : null        // want is a pooled object:
-     want.px = max(rec.box.w, rec.box.h) · dc.scale · rec.headroom;  want.blur = rec.blur · dc.scale (stills);
+     want.px = max(rec.box.w, rec.box.h) · dc.scale · rec.headroom;  want.blur = rec.blur · dc.scale (every medium);
      want.exact = dc.quality === 'export'
 3  f null → preview: draw the placeholder (§11.7.8), dc.mediaWaiting++; export: throw EngineError('media-missing')
    !f.exact → dc.mediaWaiting++ (export: throw 'media-not-ready')
-4  choose the plain path or the isolated path (§11.5.4); set the transform M · R(rot) (rot about dest centre, 90° steps)
+4  choose the plain path or the isolated path (§11.5.4; a timed frame's own blur only when f.blur is 0: the fallback,
+   dc.counts.mediaFallback++); set the transform M · R(rot) (rot about dest centre, 90° steps)
 5  drawImage(f.image, source rect mapped to coded px, dest rect); edge neighbours (mirror) when visible;
    soft: the blurred cover copy first
 6  veil, tint, comp, mask, restore; dc.counts.media++; pick the dest quad
@@ -3818,6 +3939,19 @@ K.MEDIA = { FITS, EDGES, MOVES, LOOPS, CLOCKS, SHAPES: ['rect', 'round', 'circle
 | Export overhead of one 1080p30 H.264 background at 1080p30 | ≤ +35 % of the same project's export time without it |
 | Import | hashing ≥ 150 MB/s; MP4 probe ≤ 300 ms; poster ≤ 200 ms |
 | Re-plan with media pins | unchanged (media resolution is O(pins)) |
+
+- The per-call `drawMedia` rows (still 0.3 ms, video 0.8 ms) assume a GPU: a frame upload and a scaled draw on the GPU.
+  With software raster (the GitHub CI runner, headless browsers without a GPU), every scaled full-frame draw of any
+  medium costs ≈ 2.6–3.5 ms per call, whatever the source size (measured with 480×270, 1472×828 and 1920×1080 bitmaps:
+  2.6–3.0 ms; an unscaled blit 0.3 ms). The software figures are recorded in NOTES ("Perf: media row"). The figures of
+  the reference laptop (§8.7) are still to be measured there.
+- An unblurred video (depth `anim` or `still`) is drawn from its `VideoFrame`. With software raster, each such draw
+  converts the whole 1080p frame (≈ 9.1–9.6 ms), and so does each mirrored neighbour. No way of preparing the frame ahead
+  of the draw is cheaper per frame here (NOTES). The frame total of such a project therefore stays near or above twice
+  the target in software. The prepared-frame principle ("draw a frame prepared ahead, at the size it is drawn") is
+  applied to blurred video and animation only. Whether and how to apply it to unblurred video is open for the lead.
+- The frame total of a media row is the whole iteration an exporter or a player runs: `await mediaReady(t)` (the
+  store's main-thread work for that frame: decoder output, the blur bake) plus `renderFrame` (§11.8.3).
 
 ### 11.6 AI (package E; everything optional)
 
@@ -4233,7 +4367,7 @@ Part labels and blurbs of `photoFrame`, `textFill` and `mediaLayer` live in thei
 | `determinism.py` (+) | G | a project with a video ground, an alpha WebM frame and a still: in export quality, frame N directly equals frame N after 0..N−1 (pixel hash). The paused preview after scrubbing, redrawn until exact, shows the same source frame indices as the export (`MediaFrame.index`, reported through the test hook), with pixels within MAE ≤ 2/255: the preview may decode in hardware. |
 | `media_alpha.py` (new) | G | the alpha WebM fixture as a `photoFrame`: the alpha of the merged frame at 5 times is within ±4/255 of the generated truth; a transparent PNG export keeps the frame's alpha; `photoPan` absent in `clear`, `chroma` and `black`; `mediaLayer` skipped there |
 | `transparent_check.py` (+) | G | the existing checks with a `photoFrame` (PNG with alpha) in the project |
-| `perf.py` (+) | G | project_basic with a 1080p30 video ground plus a still `photoFrame`: frame ≤ 10 ms p50 at 720p; `drawMedia` ≤ 1 ms p50 |
+| `perf.py` (+) | G | project_basic with a 1080p30 video ground plus a still `photoFrame`: frame ≤ 10 ms p50 at 720p; `drawMedia` ≤ 1 ms p50. The timed frame is the whole iteration (`await mediaReady(t)` + `renderFrame` + a 1-px read), because the store's main-thread work belongs to the frame; the ready / render split is printed. `drawMedia` is gated per medium, the video calls and the still calls each. Pooled, the photo frame's calls outnumber the video's and would set the median alone. It is timed unflushed, which measures the call's own main-thread work: recording, plus any synchronous work such as a `VideoFrame`'s colour conversion (≈ 9 ms at 1080p) or a forced raster. The raster itself is inside the frame total. A separate flushed pass (a 1-px read of the call's target before and after it) reports the per-call cost with raster, per medium, with its draws per call, and marks it OVER above twice the budget. With software raster any scaled full-frame draw costs ≈ 2.6–3 ms, so that pass is not gated. Whether it becomes the gate, and on which hardware, is the lead's decision. The ground stays at its automatic depth (`back`: blurred); the row asserts that its frames come baked and that `FrameStats.media.fallback` is 0. |
 | `ui_flows.py` (+) | G | **flow "media"**: drop a PNG on the stage → the background is set at work scope in one undo step → the crop overlay drag equals one gesture → drop an MP4 while 12行 is selected → the line background → trim with the keyboard → export 2 s 720p MP4 → undo all equals the start. **Flow "library"**: import 3 files → toggle おまかせ → おまかせ picks a photo ground at least once in 20 seeds → delete with confirmation clears the pins. **Flow "missing"**: a light-saved project opened with an empty IndexedDB → placeholder → export blocked → relink by the same file → export enabled. Keyboard-only variant. |
 | `ui_layout.py` (+) | G | the asset page, picker, trim widget and library fit 288–352 px; control budgets unchanged; the crop overlay never covers the preview canvas (overlay only) |
 | `csp.py`, `i18n_pages.py` (+) | G | 0 CSP violations across import (incl. SVG), playback, scrub, export, vision (faked provider) and package flows; no Japanese UI text on the en page (asset names excepted) |

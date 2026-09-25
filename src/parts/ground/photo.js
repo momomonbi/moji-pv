@@ -24,7 +24,9 @@ MV.def('parts/ground/photo', ['parts/kit'], (K) => {
     build(env, p) {
       const { sb, pal, D } = env;
       const area = { x0: -BLEED * D.w, y0: -BLEED * D.h, W: D.w * (1 + 2 * BLEED), H: D.h * (1 + 2 * BLEED), fill: pal.ground };
-      sb.paint({ layer: 'ground', bleed: BLEED, animated: false, owner: env.owner, data: area, draw: flatDraw });
+      // Drawn live (not animated: false): one fillRect costs about 0.2 ms, whereas a cached raster of the frame and its
+      // bleed is resampled under the camera every frame (a full-frame scaled draw: ≈ 3 ms in software raster).
+      sb.paint({ layer: 'ground', bleed: BLEED, owner: env.owner, data: area, draw: flatDraw });
       const media = Object.assign({}, p, { veil: p.veil * (0.6 + 0.4 * p.amount) });
       K.media(env, { layer: 'ground', owner: env.owner, use: 'ground', src: p.image, box: { x: 0, y: 0, w: D.w, h: D.h }, p: media });
     },

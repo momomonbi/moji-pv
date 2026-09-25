@@ -8,6 +8,7 @@
   const G = window.MVMediaGen;
   const PR = MV.use('media/host/probe');
   const STORE = MV.use('media/host/store');
+  const SES = MV.use('media/host/session');
   const SM = MV.use('media/samples');
   const Z = MV.use('export/zip');
   const SHA = MV.use('core/sha256');
@@ -69,14 +70,19 @@
 
   // Frame exactness through the real AssetStore: ready() then frame() must give exactly frame k, whose code is k. The
   // counter is drawn in the coded orientation, so it is read unrotated; `rot` (how to display it) is checked as given.
-  async function exactness(store, id, times, order, fps, rot) {
+  // With `want` ({ px, blur }) the request asks for a blur: the frame must come as the store's baked copy (MediaFrame.blur
+  // > 0, DESIGN_2_1 §11.4.6), and the code read from that copy must still be k (the copy is of frame k, not another).
+  async function exactness(store, id, times, order, fps, rot, want) {
     const bad = [];
+    const px = want ? want.px : 192, blur = want ? want.blur : 0;
     for (const k of order) {
       const m = fps ? k / fps : times[k];
-      await store.ready([{ id, m }]);
-      const f = store.frame(id, m, { px: 192, blur: 0, exact: true, thumb: false });
+      await store.ready([want ? { id, m, px, blur } : { id, m }]);
+      const f = store.frame(id, m, { px, blur, exact: true, thumb: false });
       const code = f ? G.codeOf(f.image, 0) : -2;
-      if (!f || !f.exact || f.index !== k || code !== k || f.rot !== rot) bad.push({ k, exact: f && f.exact, index: f && f.index, code, rot: f && f.rot });
+      if (!f || !f.exact || f.index !== k || code !== k || f.rot !== rot || (want && !(f.blur > 0))) {
+        bad.push({ k, exact: f && f.exact, index: f && f.index, code, rot: f && f.rot, blur: f && f.blur });
+      }
     }
     return bad;
   }
@@ -145,12 +151,20 @@
       const seq = Array.from({ length: n }, (_, i) => i);
       const t0 = performance.now();
       const rot = vids[name].rotation || 0;
+      const routes0 = fork.stats().routes;
       out.exact[name] = {
         sequential: await exactness(store, id, times, seq, fps, rot),
         random: await exactness(store, id, times, shuffled(n, 7), fps, rot),
         fork: await exactness(fork, id, times, seq, fps, rot),
+        // the baked blur: a copy at 1/2 (px 384: the JS route for a 4:2:0 frame) and the whole frame (px 1472: b = 1,
+        // the canvas route), in the export fork, in order and shuffled
+        baked: await exactness(fork, id, times, seq, fps, rot, { px: 384, blur: 1 }),
+        bakedRandom: await exactness(fork, id, times, shuffled(n, 11), fps, rot, { px: 384, blur: 1 }),
+        bakedWhole: await exactness(fork, id, times, seq, fps, rot, { px: 1472, blur: 2 }),
         ms: Math.round(performance.now() - t0),
       };
+      const routes1 = fork.stats().routes;
+      out.exact[name].routes = { yuv: routes1.yuv - routes0.yuv, canvas: routes1.canvas - routes0.canvas, n };
     }
     // alpha: the merged frame has the alpha stream's square (128) and is clear elsewhere
     if (out.gen.alpha.ok) {
@@ -228,6 +242,196 @@
       const f17 = pv.frame(id, 17 / 30, { px: 192 });
       out.lookAhead = { k16: c16, k17: f17 && f17.exact ? G.codeOf(f17.image, 0) : -1, heldBefore, held: pv.stats().held };
       pv.dispose();
+    }
+    // an export over a loop: the look-ahead (want) of the clip's first frame comes while the last frames are still to
+    // be drawn. It must not send the decoder back under them (they would then be decoded again from their key frame, a
+    // stall of ≈ 150 ms per loop for a 1080p clip): drawing frame 43 after the hint feeds a few chunks, not 43.
+    if (out.gen.webm30.ok) {
+      const id = out.gen.webm30.entry.id;
+      const ex = STORE.createMediaStore({ blobs: a.io.mediaBlobs, entries: (x) => entries.get(x) || null }).fork();
+      for (let k = 0; k <= 40; k++) await ex.ready([{ id, m: k / 30 }]);
+      const before = ex.stats();
+      ex.want([{ id, m: 0 }]);
+      await new Promise((r) => setTimeout(r, 20));                    // the hint reaches the decoder before the next request
+      await ex.ready([{ id, m: 43 / 30 }]);
+      const f43 = ex.frame(id, 43 / 30, { px: 192, exact: true });      // (a pooled MediaFrame: read it before the next call)
+      const i43 = f43 && f43.exact ? f43.index : -1, code43 = f43 ? G.codeOf(f43.image, 0) : -1;
+      const mid = ex.stats();
+      await ex.ready([{ id, m: 0 }]);
+      const f0 = ex.frame(id, 0, { px: 192, exact: true });
+      out.loopFeed = { fed: mid.fed - before.fed, seeks: mid.seeks - before.seeks, i43, code43, i0: f0 && f0.exact ? f0.index : -1,
+        code0: f0 ? G.codeOf(f0.image, 0) : -1 };
+      ex.dispose();
+    }
+    // the preview with a blur (DESIGN_2_1 §11.4.5–§11.4.6): the frame on screen is provisional until its baked copy is
+    // made in an idle slice (then exact, blurred, and the copy shows its own frame); want() bakes the next hinted frame
+    // before it is drawn; and baked copies go with their source frames (at most HOLD + shown + pinned held)
+    if (out.gen.webm30.ok) {
+      const id = out.gen.webm30.entry.id;
+      const pv = STORE.createMediaStore({ blobs: a.io.mediaBlobs, entries: (x) => entries.get(x) || null });
+      await pv.check([id]);
+      const want = { px: 384, blur: 1, exact: false };
+      const answers = [];
+      let f = pv.frame(id, 20 / 30, want), t = 0;
+      answers.push(f ? { exact: f.exact, blur: f.blur } : null);
+      while ((!f || !f.exact) && t++ < 400) {
+        await new Promise((r) => setTimeout(r, 5));
+        f = pv.frame(id, 20 / 30, want);
+        const x = f ? { exact: f.exact, blur: f.blur, index: f.index } : null;
+        const last = answers[answers.length - 1];
+        if (JSON.stringify(x) !== JSON.stringify(last)) answers.push(x);
+      }
+      const shown = f && f.exact ? { index: f.index, blur: f.blur, code: G.codeOf(f.image, 0) } : null;
+      pv.want([{ id, m: 21 / 30, px: 384, blur: 1 }, { id, m: 22 / 30, px: 384, blur: 1 }]);
+      let n = 0;
+      const bakedBefore = pv.stats().baked;
+      while (pv.stats().baked < bakedBefore + 1 && n++ < 400) await new Promise((r) => setTimeout(r, 5));
+      const f21 = pv.frame(id, 21 / 30, want);
+      const hinted = f21 ? { exact: f21.exact, blur: f21.blur, index: f21.index, code: f21.exact ? G.codeOf(f21.image, 0) : -1 } : null;
+      // play on through 30 frames: the baked copies held stay bounded (they are closed with their source frames)
+      let most = 0;
+      for (let k = 22; k < 52; k++) {
+        await pv.ready([{ id, m: k / 30, px: 384, blur: 1 }]);
+        pv.frame(id, k / 30, Object.assign({}, want, { exact: true }));
+        const st = pv.stats();
+        most = Math.max(most, st.baked);
+      }
+      out.previewBake = { answers, shown, hinted, bakedMost: most, stats: pv.stats() };
+      pv.dispose();
+    }
+    // the preview's provisional frame with a blur follows §11.4.5 (px 1472, blur 4: the whole 192 × 108 frame, canvas
+    // route): scrubbing to frame 40 first gives the nearest held frame at or before it (frame 15 here: the store holds
+    // 13–15 and has shown 15). Once 40 is held but its bake has not finished (the copy's transfer is held back here) it is
+    // 40 unbaked (blur 0: the engine's fallback), never another frame's baked copy; then 40 baked. want() alone bakes the
+    // hinted frames as the session gets them (no frame() or want() call after it). Scrubbing back to 3 (not held,
+    // nothing held before it) gives the last frame shown, 40, not the older 15. And the baked copies held never
+    // outnumber the held frames (each goes with its source frame), while playing and while paused.
+    if (out.gen.webm30.ok) {
+      const id = out.gen.webm30.entry.id;
+      const pv = STORE.createMediaStore({ blobs: a.io.mediaBlobs, entries: (x) => entries.get(x) || null });
+      await pv.check([id]);
+      const want = { px: 1472, blur: 4, exact: false };
+      const pick = (f) => (f ? { index: f.index, exact: f.exact, blur: f.blur } : null);
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      const bakesMade = () => { const r = pv.stats().routes; return r.yuv + r.canvas; };
+      for (let k = 10; k <= 15; k++) { await pv.ready([{ id, m: k / 30, px: 1472, blur: 4 }]); pv.frame(id, k / 30, want); }
+      const OC = OffscreenCanvas.prototype, transfer = OC.transferToImageBitmap;
+      const held = [];
+      let gated = true, first = null, heldUnbaked = null, n = 0;
+      OC.transferToImageBitmap = function () {
+        const bm = transfer.call(this);
+        return gated ? new Promise((r) => held.push(() => r(bm))) : bm;
+      };
+      try {
+        first = pick(pv.frame(id, 40 / 30, want));
+        while (n++ < 400) {
+          const plain = pv.frame(id, 40 / 30, { px: 1472, blur: 0, exact: false });   // held yet? (no blur: exact when held)
+          if (plain && plain.exact) { heldUnbaked = pick(pv.frame(id, 40 / 30, want)); break; }
+          await sleep(2);
+        }
+      } finally {
+        gated = false;
+        OC.transferToImageBitmap = transfer;
+        held.splice(0).forEach((go) => go());
+      }
+      let heldAt = null;
+      for (n = 0; n < 400 && !(heldAt && heldAt.exact); n++) { await sleep(2); heldAt = pick(pv.frame(id, 40 / 30, want)); }
+      const before = bakesMade();
+      pv.want([41, 42, 43].map((k) => ({ id, m: k / 30, px: 1472, blur: 4 })));
+      for (n = 0; n < 500 && bakesMade() - before < 3; n++) await sleep(4);
+      const hintBakes = bakesMade() - before;
+      const back = pick(pv.frame(id, 3 / 30, want));
+      let most = { baked: 0, held: 0, over: 0 };
+      const count = () => { const st = pv.stats(); most.baked = Math.max(most.baked, st.baked); most.held = Math.max(most.held, st.held); if (st.baked > st.held) most.over++; };
+      for (let k = 3; k < 45; k++) { await pv.ready([{ id, m: k / 30, px: 1472, blur: 4 }]); pv.frame(id, k / 30, want); count(); }
+      await sleep(60);
+      count();
+      out.provisionalOrder = { first, heldUnbaked, heldAt, hintBakes, back, copies: most, paused: pv.stats() };
+      pv.dispose();
+    }
+    // the preview's look-ahead (DESIGN_2_1 §11.4.4): 8 hinted frames are decoded only while at most HOLD frames still to be
+    // shown are held (the last one decoded included: HOLD + 1 after the shown one), so no hinted frame is closed before
+    // it is drawn; showing the next frame lets one more decode, with no further want() (fed: 1, or 2 when the decoder
+    // was slower than SETTLE_MS and one more chunk went in)
+    if (out.gen.webm30.ok) {
+      const id = out.gen.webm30.entry.id;
+      const pv = STORE.createMediaStore({ blobs: a.io.mediaBlobs, entries: (x) => entries.get(x) || null });
+      await pv.check([id]);
+      const settle = async () => { let last = -1; for (let n = 0; n < 100; n++) { await new Promise((r) => setTimeout(r, 25)); const f = pv.stats().fed; if (f === last) break; last = f; } };
+      const plain = { px: 192, blur: 0, exact: false };
+      await pv.ready([{ id, m: 10 / 30 }]);
+      pv.frame(id, 10 / 30, plain);
+      await settle();
+      const a0 = pv.stats();
+      pv.want(Array.from({ length: 8 }, (_, k) => ({ id, m: (11 + k) / 30 })));
+      await settle();
+      const a1 = pv.stats();
+      const shown11 = pv.frame(id, 11 / 30, plain);
+      const exact11 = !!(shown11 && shown11.exact);
+      await settle();
+      const a2 = pv.stats();
+      const f14 = pv.frame(id, 15 / 30, plain);
+      out.hintRoom = { hold: SES.HOLD, fedHinted: a1.fed - a0.fed, heldHinted: a1.held, exact11, fedAfterShow: a2.fed - a1.fed, exact15: !!(f14 && f14.exact),
+        seeks: a2.seeks - a0.seeks };
+      pv.dispose();
+    }
+    // an export's look-ahead (engine/facade mediaReady: want() of every output frame up to t + 3 / fps, then ready(t)),
+    // with a render's main-thread time (15 ms) and a pause between frames, as an exporter has: the frames are decoded
+    // once each, in order — none is closed as the look-ahead passes it and decoded again from its key frame (with a
+    // look-ahead of t + 3 / fps alone, as mediaReady had it, a 1080p clip was: NOTES "Perf: media row", round 2, item 13).
+    if (out.gen.webm30.ok) {
+      const id = out.gen.webm30.entry.id;
+      const run = async (ahead) => {
+        const root = STORE.createMediaStore({ blobs: a.io.mediaBlobs, entries: (x) => entries.get(x) || null });
+        const ex = root.fork();
+        await ex.ready([{ id, m: 0 }]);
+        const s0 = ex.stats();
+        const wrong = [];
+        for (let k = 0; k < 40; k++) {
+          ex.want(ahead.map((j) => ({ id, m: (k + j) / 30 })));
+          await ex.ready([{ id, m: k / 30 }]);
+          const f = ex.frame(id, k / 30, { px: 192, blur: 0, exact: true });
+          if (!f || !f.exact || f.index !== k) wrong.push(k);
+          const t0 = performance.now();
+          while (performance.now() - t0 < 15) { /* the render's main-thread time */ }
+          await new Promise((r) => setTimeout(r, 0));
+        }
+        const s1 = ex.stats();
+        ex.dispose();
+        root.dispose();
+        return { fed: s1.fed - s0.fed, seeks: s1.seeks - s0.seeks, wrong };
+      };
+      out.exportLookAhead = await run([1, 2, 3]);
+    }
+    // a bake that fails (a transient drawImage error on frame 27, in an export fork) leaves that frame unbaked (blur 0:
+    // the engine's fallback); forget(id) (a relink) drops the memory of it, so the next ready() bakes frame 27 again
+    if (out.gen.webm30.ok) {
+      const id = out.gen.webm30.entry.id;
+      const root = STORE.createMediaStore({ blobs: a.io.mediaBlobs, entries: (x) => entries.get(x) || null });
+      const ex = root.fork();
+      const want = { px: 1472, blur: 4, exact: true };
+      const P = OffscreenCanvasRenderingContext2D.prototype, draw = P.drawImage;
+      let armed = false;
+      P.drawImage = function (img) {
+        if (armed && typeof VideoFrame !== 'undefined' && img instanceof VideoFrame) { armed = false; throw new Error('a transient draw error'); }
+        return draw.apply(this, arguments);
+      };
+      const at = async (k) => { await ex.ready([{ id, m: k / 30, px: 1472, blur: 4 }]); const f = ex.frame(id, k / 30, want); return f ? { index: f.index, exact: f.exact, blur: f.blur } : null; };
+      let failed = null, again = null, next = null;
+      try {
+        for (let k = 20; k < 27; k++) await at(k);
+        armed = true;
+        failed = await at(27);
+        armed = false;
+        root.forget(id);
+        again = await at(27);
+        next = await at(28);
+      } finally {
+        P.drawImage = draw;
+      }
+      out.bakeRelink = { failed, again, next };
+      ex.dispose();
+      root.dispose();
     }
     out.storeStats = fork.stats();
     fork.dispose();

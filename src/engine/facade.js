@@ -613,7 +613,7 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
       alive();
       if (!plan) {
         return { ms: 0, drawn: { glyphs: 0, shapes: 0, paints: 0, particles: 0 }, passes: 0, provisional: false,
-          media: { drawn: 0, waiting: 0 } };
+          media: { drawn: 0, waiting: 0, fallback: 0 } };
       }
       const exporting = !!ropts && ropts.quality === 'export';
       if (exporting) {
@@ -636,9 +636,10 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
     // --- media (DESIGN_2_1 §11.3.7) ---
 
     // mediaAt(t, { scale }?) → [{ id, m, px?, blur? }]: the media the frame at t draws, with their media times (seconds),
-    // sorted by id, m, px, blur and deduplicated. No behaviour runs; without plan media it is empty at once. Stills also
-    // carry the px (long side, device px) and blur their draw asks the store for at the output scale (`scale`, else the
-    // last frame's), so assets.ready() decodes exactly that tier; none before a first frame without a scale.
+    // sorted by id, m, px, blur and deduplicated. No behaviour runs; without plan media it is empty at once. Every
+    // medium (stills, videos and animations) also carries the px (long side, device px) and blur its draw asks the store
+    // for at the output scale (`scale`, else the last frame's), so assets.ready() decodes exactly that still tier and
+    // bakes exactly that blur of a video frame (DESIGN_2_1 §11.4.6); none before a first frame without a scale.
     const mediaScratch = [];
     const byMedia = (a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : a.m - b.m || (a.px || 0) - (b.px || 0) || (a.blur || 0) - (b.blur || 0));
     function mediaAt(t, mopts) {
@@ -657,8 +658,10 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
     }
 
     // mediaReady(t, { signal, ahead = 3 / fps, fps, scale }) → Promise: resolves when the store holds every exact frame
-    // the frame at t draws at that output scale (assets.ready of mediaAt), and asks it to start on the frames `ahead`
-    // seconds later (assets.want). Resolved at once without a store or media.
+    // the frame at t draws at that output scale (assets.ready of mediaAt), and asks it to start on the frames of the
+    // next `ahead` seconds (assets.want of mediaAt at every output frame after t up to t + ahead: a look-ahead that
+    // named only the last one would let the session close the frames before it as they pass, to be decoded again from
+    // their key frame when they are asked for). Resolved at once without a store or media.
     function mediaReady(t, ropts) {
       alive();
       const q = ropts || {};
@@ -667,8 +670,10 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
       const ahead = Number.isFinite(q.ahead) ? q.ahead : 3 / fps;
       const at = { scale: q.scale };
       const list = mediaAt(t, at);
-      if (typeof assets.want === 'function') {
-        const next = mediaAt(t + ahead, at);
+      if (typeof assets.want === 'function' && ahead > 0) {
+        const steps = Math.max(1, Math.min(8, Math.round(ahead * fps)));
+        const next = [];
+        for (let k = 1; k <= steps; k++) for (const x of mediaAt(t + (ahead * k) / steps, at)) next.push(x);
         if (next.length) assets.want(next);
       }
       if (list.length === 0 || typeof assets.ready !== 'function') return Promise.resolve();

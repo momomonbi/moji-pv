@@ -284,11 +284,13 @@ MV.def('engine/render/shapes', ['core/color', 'core/media', 'engine/scene/table'
 
   // One frame of the media: frame() for the source at media time m. Returns the MediaFrame (valid until the next call
   // for the same id) or null; counts a missing or provisional frame, and in export quality records the error the
-  // facade raises (EngineError 'media-missing' / 'media-not-ready') instead of drawing a substitute.
+  // facade raises (EngineError 'media-missing' / 'media-not-ready') instead of drawing a substitute. want.blur is asked
+  // for every medium: the store bakes it into stills (§11.4.6) and into video and animation frames once per source
+  // frame (MediaFrame.blur > 0), so the draw applies no blur of its own then.
   function frameFor(dc, rec, m, blur) {
     const store = dc.assets;
     WANT.px = Math.max(rec.box.w, rec.box.h) * dc.scale * rec.headroom;
-    WANT.blur = rec.time ? 0 : blur * dc.scale;
+    WANT.blur = blur * dc.scale;
     WANT.thumb = dc.thumb === true;
     WANT.exact = dc.quality === 'export' && !WANT.thumb;     // a thumbnail shows the poster, never waits for a frame
     const f = store && typeof store.frame === 'function' ? store.frame(rec.src, m, WANT) : null;
@@ -306,9 +308,12 @@ MV.def('engine/render/shapes', ['core/color', 'core/media', 'engine/scene/table'
 
   // drawMedia(g, rec, M, alpha, dc, tl) → boolean (§11.5.5): one media node. Its media time is closed-form (clock
   // 'song': the frame's absolute time dc.t; 'show': the scene-local tl); the store picks the source frame. An opaque
-  // picture without blur is drawn straight (veil and tint over it); a picture with alpha, a text fill ('atop') or a
-  // blurred video goes through a pooled full-frame surface (veil and tint 'source-atop', then the blur), composited
-  // with `comp`. 'soft' draws the blurred cover copy first. The mask (a K.shape in box coordinates) clips. Allocation-free.
+  // picture without blur is drawn straight (veil and tint over it), and so is a blurred one whose frame comes with its
+  // blur baked (MediaFrame.blur > 0: stills always, videos and animations once the store has baked that frame); a
+  // picture with alpha, a text fill ('atop') or a blurred video frame that came without its blur goes through a pooled
+  // full-frame surface (veil and tint 'source-atop', then the per-frame blur, counted as dc.counts.mediaFallback),
+  // composited with `comp`. 'soft' draws the blurred cover copy first. The mask (a K.shape in box coordinates) clips.
+  // Allocation-free.
   function drawMedia(g, rec, M, alpha, dc, tl) {
     const T0 = rec.time;
     const m = T0 ? MEDIA.mapTime(T0, T0.clock === 'song' ? dc.t : tl) : 0;
@@ -319,7 +324,7 @@ MV.def('engine/render/shapes', ['core/color', 'core/media', 'engine/scene/table'
     if (rec.soft) {
       const f = frameFor(dc, rec, m, rec.softBlur);
       if (f) {
-        drawLayered(g, rec, f, rec.soft, M, alpha, dc, vis, mirror, rec.softVeil, T0 ? rec.softBlur : 0, 'over');
+        drawLayered(g, rec, f, rec.soft, M, alpha, dc, vis, mirror, rec.softVeil, frameBlur(dc, T0, f, rec.softBlur), 'over');
         drew = true;
       }
     }
@@ -328,9 +333,17 @@ MV.def('engine/render/shapes', ['core/color', 'core/media', 'engine/scene/table'
       if (dc.quality !== 'export' && !drew) drawPlaceholder(g, rec, M, alpha, pal);
       return drew;
     }
-    drawLayered(g, rec, f, rec.rect, M, alpha, dc, vis, mirror, rec.veil, T0 ? rec.blur : 0, rec.comp);
+    drawLayered(g, rec, f, rec.rect, M, alpha, dc, vis, mirror, rec.veil, frameBlur(dc, T0, f, rec.blur), rec.comp);
     dc.counts.media++;
     return true;
+  }
+
+  // The blur (du) the draw itself must apply to a frame: none for a still (the store blurs it) or a frame whose blur came
+  // baked (f.blur > 0); a timed frame without it gets the per-frame blur of the isolated path, counted as a fallback.
+  function frameBlur(dc, T0, f, blur) {
+    if (!T0 || !(blur > 0) || f.blur > 0) return 0;
+    dc.counts.mediaFallback++;
+    return blur;
   }
 
   function drawLayered(g, rec, f, fit, M, alpha, dc, vis, mirror, veil, videoBlur, comp) {

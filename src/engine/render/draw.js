@@ -65,7 +65,8 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
   // createDrawContext({ sprites, paints, scratch, pool?, blurred? }) → dc, mutated per frame by the renderer:
   //   g (current target), D (device matrix), pal, W, H, scale (device px per du), q (paint helpers), assets, pick,
   //   glyphPath ('auto' | 'sprite' | 'direct'), probe ({ blur, glow, shard, pixel } added to glyph poses; lab only),
-  //   face (FontRef for glyph particles), counts { glyphs, shapes, paints, particles, media }
+  //   face (FontRef for glyph particles), counts { glyphs, shapes, paints, particles, media, mediaFallback (blurred
+  //   timed media drawn with the per-frame blur: the store handed out a frame without its baked blur, §11.5.4) }
   //   (DESIGN_2_1) t (absolute frame time, for media on the song clock), backdrop, quality, thumb (posters only),
   //   visible (device rect x0 y0 x1 y1), mediaWaiting, mediaError, pool and blurred (the isolated media path), over and
   //   overKey (the raster oversampling of paints in a zoomed ground and its cache key), cam and layerK (the camera and
@@ -75,7 +76,7 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
     return {
       g: null, D: new Float32Array([1, 0, 0, 1, 0, 0]), pal: null, W: 0, H: 0, scale: 1, q: null, assets: null,
       pick: null, glyphPath: 'auto', probe: null, face: null, sprites: o.sprites, paints: o.paints, scratch: o.scratch,
-      counts: { glyphs: 0, shapes: 0, paints: 0, particles: 0, media: 0 },
+      counts: { glyphs: 0, shapes: 0, paints: 0, particles: 0, media: 0, mediaFallback: 0 },
       font: null, pair: { lo: 0, hi: 0, f: 0 },
       VD: new Float32Array(6), VW: new Float32Array(6), M: new Float32Array(6), W6: new Float32Array(6),
       RM: new Float32Array(6), quad: new Float32Array(8),
@@ -88,7 +89,7 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
 
   function resetCounts(dc) {
     const c = dc.counts;
-    c.glyphs = 0; c.shapes = 0; c.paints = 0; c.particles = 0; c.media = 0;
+    c.glyphs = 0; c.shapes = 0; c.paints = 0; c.particles = 0; c.media = 0; c.mediaFallback = 0;
     dc.mediaWaiting = 0; dc.mediaError = null;
   }
 

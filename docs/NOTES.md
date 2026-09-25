@@ -5987,3 +5987,478 @@ hashed on every call. The versions are unchanged (same signature). Measured here
 assets 3.9 → 0.42 ms. `registry.test.js` covers the re-use (the same param list object; a bad frozen definition keeps
 its problem) and the unfrozen case (an edit changes the version and the checks); mutants that never re-use or that
 re-use unfrozen definitions both fail it.
+
+## Perf: media row
+
+The perf.py media row of DESIGN_2_1 §11.8.3 (project_basic with a 1080p30 VP9 video ground at its automatic depth,
+`back`, and a still photo frame, 10 s at 30 fps at 720p) failed here at p50 34.7–43.5 ms against twice the 10 ms
+target. The cause was real work in the pipeline, not the budget: the blur of a `back` video ran per output frame on a
+full-frame surface (the isolated path), after a YUV → RGB conversion of the 1080p `VideoFrame` on every draw (the
+centre, each mirrored neighbour). This change makes the harness honest first, then removes that work. No budget or
+test was loosened; one test was made stricter (below).
+
+All figures: this machine (4 shared CPUs, other engineers' tests running, load 2.5–5), headless Chromium 141 at
+`/opt/pw-browsers/chromium`, software raster, no GPU. The GitHub CI runner (Google Chrome, software raster) is the
+twice-the-budget gate; it is not the reference laptop of §8.7, whose figures are still to be measured.
+
+### What was changed
+
+- **Harness (tests/www/media_parts.js, tests/browser/perf.py).** The timed frame is now the whole iteration a player or
+  an exporter runs: `await engine.mediaReady(t)` + `renderFrame` + a 1-px read. Before, `mediaReady` was untimed, so
+  any work moved into the store looked free (the ImageBitmap experiment of G.3 only moved work there). The store is
+  created with `now: performance.now`, and `stats().decodeMs` / `prepMs` per frame are printed. Warm-up as lab.js
+  `perf()`: a frame, `prepare(start, start + seconds)`, 5 frames. `drawMedia` is split by medium (video, still); a
+  separate flushed pass reads 1 px of the call's target before (untimed) and after (timed) each call, so the raster the
+  canvas defers is charged to the call, and counts its draws. The row asserts that the ground is at `back` with a blur,
+  that every frame of it came baked (`MediaFrame.blur > 0`) and that `FrameStats.media.fallback` is 0; project_basic
+  without the media runs in the same page as the baseline. The pooled unflushed `drawMedia` gate is unchanged (see the
+  open items). `--media-rows` adds `videoBack` (the ground alone at `back`) for the per-part split. perf.py's docstring
+  now says that CI is the gate and the §8.7 laptop the reference.
+- **Engine (package B).** `renderer.mediaAt` gives timed media `px` and `blur` too (the products of `frameFor`, in its
+  order, so the store's keys match bit for bit; a Node test mutating the product order fails), `shapes.frameFor` asks
+  `want.blur` for every medium, and `drawMedia` blurs a timed frame itself only when it came without its blur
+  (`f.blur` 0), counted as `dc.counts.mediaFallback` → `FrameStats.media.fallback` (additive).
+- **Store (package G.1).** New pure L1 module `media/yuv` (8-bit I420 / NV12 planes of the visible rect → an RGBA copy
+  at 1/b by an integer box average, BT.709 / BT.601, limited or full range from `VideoFrame.colorSpace`, fixed point,
+  with a mirrored border of ceil(3σ)); new host module `media/host/bake` (copyTo → media/yuv → putImageData →
+  `ctx.filter` blur into a copy-sized canvas → `transferToImageBitmap`; any other frame takes the canvas route: the
+  browser draws it into the copy; the route depends on the frame's own properties only). The store bakes in `ready()`
+  (export) and, for the preview, one bake per idle slice, keyed by the request's own px and blur. Baked copies go with
+  their source frames. `MediaFrame.blur`, `stats().prepMs`, `baked`, `bakedBytes`, `routes`, `fed` and `seeks` are new
+  fields. The behaviour changes to the FROZEN AssetStore are listed in DESIGN_2_1 §11.3.6 and await the lead's
+  sign-off. Review round 2 (below) changed which frames the preview bakes and when.
+- **Session (package G.1): look-ahead hints never seek back.** Found by the honest timing: at every loop of the 2-s
+  (one-GOP) clip, `want(t + 3/fps)` hinted the clip's first frame while the last ones were still decoding; the hint reset
+  the decoder, and the next frame (media frame 58) was decoded again from frame 1: `ready` took 110–170 ms at each loop.
+  A hinted frame behind the decode position now waits for its request (§11.4.4). After the fix the loop frames cost one
+  key-frame decode (ready 17–25 ms), and the ready p95 went from 10.9 to 4.6–5.0 ms.
+- **photoPan (parts/ground/photo.js).** The base paint (one fillRect of the ground colour over the frame and its bleed)
+  is drawn live instead of from a cached raster, which software raster resampled under the camera every frame. Checked in
+  a clean tree (the base commit with only this change, against the base commit, same browser): 4 cases × 12 frames
+  (a transparent PNG contained, the PNG at depth anim, a JPEG with edge plain, no picture) are pixel-identical (all 48
+  frame hashes equal, 12 distinct frames per case). Time: render p50 −3.4 ms in the media row (14.6–15.8 → 11.2–12.0
+  with the rest of the change in place), −3.0 ms for a still ground and −3.6 ms for the isolated-path row.
+
+### The media row (perf.py, 5 runs, all of perf.py each time)
+
+| run | judged p50 / p95 (ms) | ready p50 / p95 | render p50 / p95 | other run p50 / p95 | baseline (no media) p50 / p95 |
+|---|---|---|---|---|---|
+| 1 | 14.5 / 26.3 | 3.1 / 5.0 | 11.2 / 20.2 | 14.4 / 27.3 | 12.1 / 22.8 |
+| 2 | 14.0 / 23.5 | 3.0 / 4.6 | 10.7 / 19.8 | 14.2 / 27.0 | 11.8 / 22.7 |
+| 3 | 14.5 / 24.2 | 3.0 / 4.6 | 11.3 / 19.6 | 14.2 / 26.4 | 11.3 / 22.6 |
+| 4 | 14.5 / 25.7 | 3.1 / 4.8 | 11.1 / 20.5 | 14.3 / 26.0 | 11.8 / 23.9 |
+| 5 | 14.5 / 25.5 | 3.0 / 5.0 | 11.2 / 19.7 | 14.0 / 27.0 | 11.9 / 22.5 |
+| 6 (the CI sequence below) | 14.3 / 25.3 | 2.9 / 5.7 | 11.2 / 20.3 | 13.5 / 26.6 | — |
+
+- Gate: p50 ≤ 20 ms, p95 ≤ 33.4 ms. Passed in all 6 runs, margin ≥ 5.5 ms on p50 and ≥ 7.1 ms on the judged p95.
+- Every run: max 38–52 ms; the ground at `back`, blur 2.00 device px, px 1472; 300 of 300 frames baked, 0 unbaked,
+  fallback 0; 2–3 media per frame; store prepMs p50 2.7–2.8 ms (mean 2.82–2.92) per frame; decodeMs p50 0.
+- drawMedia unflushed (the gate): 647 calls, p50 0.000 ms, p95 0.100 ms, 0.1 ms per frame.
+- drawMedia flushed: video 300 calls, p50 3.5–3.7 ms, p95 4.9–5.5 ms, 3.59–3.92 ms per frame, 1–9 draws per call
+  (p50 1); still (the photo frame) 347 calls, p50 0.5–0.6 ms, p95 1.0–1.1 ms, 0.65–0.71 ms per frame, 1 draw per call.
+- The same page, before and after (A/B, the new harness on both trees, alternating, 3 repeats): the base commit
+  p50 36.3–37.8, p95 100.6–114.7 (ready 0.3–0.4, render 34.8–37.0; flushed video call p50 19.1–20.4, p95 84–92, 34.7–36.6
+  ms per frame; 5–13 draws per call); this change p50 13.8–15.5, p95 25.3–26.8 (ready 3.0–3.1, render 10.7–12.1; flushed
+  video call 3.5–3.7, p95 5.0–5.1; 1–9 draws). Baseline project_basic in the same runs: p50 11.3–12.0, p95 21.0–26.0.
+- What the p95 is made of now (per-frame traces): the frames where project_basic itself is heavy (t ≈ 5.7–5.9 s: 30–58
+  ms without any media) and the loop frames of the 2-s clip (one key-frame decode after the seek, ready ≈ 20 ms).
+- Per-part split of a frame (p50): project_basic without media 11.3–12.1 ms; with the media the render is ≈ 0.5–1 ms
+  lower (11.2) because the video ground replaces the project's own ground; the video ground's draw (the baked copy, its
+  neighbours, the veil) 3.5–3.7 ms flushed; the photo frame 0.5–0.6 ms flushed; the bake 2.7–2.8 ms (in ready); the
+  photoPan base paint ≈ 0.2 ms (it was ≈ 3.4 ms as a cached raster). Seams: 2–3 media per frame (a world seam draws
+  both grounds); the video's draws per call go to 9 when the camera zooms out below 1 (all 8 mirrored neighbours).
+- Bake phases (1080p VP9 frames, 720p preview, b = 4 → 480 × 270, σ 0.656 copy px; a 25-frame probe in the page,
+  medians): copyTo 0.3–0.4 ms, the JS conversion 2.2 ms (1.5–1.6 ms warm in Node; 6.9 ms before the word-wide sums and
+  the fixed-point conversion), putImageData 0.1, blur 0.1, transfer 0.4–0.5: 3.1–3.3 ms; in the perf row the store's
+  prepMs is 2.7–2.8 ms p50. At b = 2 (1080p export, 960 × 540): conversion 4.8, blur 1.2, transfer 2.5, total ≈ 9 ms.
+- Memory of the baked copies: 2.6 MB held at 720p (5 copies of 480 × 270: HOLD + shown + pinned), 2 MB per copy at
+  1080p export (960 × 540).
+
+### The other §11.5.12 rows (perf.py --media-rows; base commit → this change, same page runs, 2 repeats)
+
+| §11.5.12 row (budget) | base commit | this change |
+|---|---|---|
+| drawMedia, still, full frame (≤ 0.3 ms) | flushed 2.6–3.1 ms per call (stillGround), unflushed p50 ≤ 0.1 | 2.5–2.7 ms flushed; row p50 12.9–13.1 → 9.8–10.1 ms (photoPan paint) |
+| drawMedia, video, full frame (≤ 0.8 ms, a GPU upload) | depth anim (no blur): 10.4–10.6 ms flushed; depth back: 17.5–19.4 ms flushed, 5–8 draws | anim: 10.8–12.5 ms (unchanged path: the VideoFrame is still converted per draw); back: 3.1–3.5 ms, 1–4 draws; row p50 29.5–30.8 → 13.7–15.0 ms |
+| Isolated path (≤ +1.2 ms) | a PNG with alpha as the ground: 3.2 ms flushed per call | 3.2–3.4 ms; row p50 13.7–14.6 → 10.0–10.6 ms (photoPan paint) |
+| Mirror edges (≤ 2 extra draws) | 1–4 draws at rest and small moves, 5–13 in the blurred row (isolated surfaces) | 1–4 in the rows; 1–9 in the media row (the camera's zoom-outs below 1 show all 8 neighbours) |
+| WebM alpha merge, 1080p (≤ 7 ms) | 42.9–45.5 ms p50 per frame, both streams decoded in software | 42.0–44.6 ms (unchanged) |
+| Frame total, one video ground + one still frame (≤ 10 ms target, 16.7 hard) | whole iteration p50 36.3–37.8, p95 100.6–114.7 | p50 13.8–15.5, p95 23.5–27.3 |
+| Scrub, 1080p, GOP 2 s (≤ 250 ms) | 37–97 ms | 51–114 ms |
+| Export overhead, 1 s 1080p30 VP9 background at 1080p30 (≤ +35 %) | 1302–1331 ms → 2095–2190 ms: +61–65 % | 1312–1335 → 1568–1608 ms: +19.5–20.5 % (+12 % in a quieter run) |
+| mediaAt(t) (≤ 0.05 ms) | B: 2.2 µs | the Node budget test passes (timed items now carry px and blur) |
+| Import | G.1's figures | unchanged |
+
+### Checks
+
+- Node: new `media_yuv.test.js` (8 tests: supports, factorFor, sigmaFor / padFor, within 1 of a double-precision
+  reference for bt709 / bt601, limited / full, b 2/4/8 and odd sizes, known colours, word-wide and byte-wide sums equal,
+  stride padding never read, NV12 = I420, the visible rect read at an offset, the mirrored border, the reused buffer);
+  `media_engine.test.js`: videos carry px and blur equal to what the draw asks for; a baked video is drawn straight (one
+  drawImage, no filter, no pooled surface) and an unbaked one takes the per-frame blur, counted; `facade.test.js` (the
+  empty stats gain `fallback: 0`); `build_test.py` (the layer rules of media/yuv and media/host/bake).
+- Browser: `media_import.py` (every counter video baked at 1/2 through the JS route and at 1/1 through the canvas route,
+  in order and shuffled, in the export fork: each baked copy's counter code equals `MediaFrame.index`; the preview is
+  provisional until the baked copy, then exact; `want()` bakes the next hinted frame before it is drawn; at most 5
+  baked copies held while playing 30 frames; the loop-hint case feeds 3 chunks and never seeks), `media_exact.py`
+  (webm30 and VFR backgrounds at depth back and back + blur 12, 1280×720 and 1920×1080: every frame exact and drawn
+  from the baked copy; the baked look against the per-frame blur of the same 1080p frames: MAE inside a 16-px border
+  2.21 at 720p and 1.30 at 1080p, max 65 / 20, and 1.36 inside flat colour bars; thresholds 3.0 and 3.0),
+  `determinism.py` check 7 (every export frame of the blurred ground baked, fallback 0, alone = in order, 30 = 60 fps;
+  the paused preview ends on the baked look, MAE 0 against the export).
+- Mutation checks: 12 Node mutants (the BT.709 constants, the lane fold, the mirror index, the limited-range chroma
+  scale, the largest factor, σ without 1/b, the chroma rows, the engine's f.blur test, want.blur for timed media, the
+  fallback count, mediaAt without px for videos, the px product order) and 8 browser mutants (ready() without the bake,
+  a baked copy of another frame, an unbaked preview frame marked exact, no pruning, no hint bake, the wrong matrix, the
+  range flag inverted, a 4× blur) — all caught; the hint fix's mutant fails `media_import.py` (45 chunks fed, 1 seek).
+  The first colour-look check (MAE over the whole frame) let the wrong-matrix mutant through at 2.88; the flat-bar MAE
+  (5.46 with the wrong matrix, 1.36 without) was added for that.
+- This Chromium's own YUV → RGB (libyuv) clamps the BT.709 blue coefficient: against the standard coefficients the
+  store uses, its blue differs by up to 13 at an extreme U (MAE 0.93 over a 150-code grid); flat colour in the test
+  video differs by 1.36 on average. The store's copy follows the standard (and is the same on every machine).
+
+### Goldens
+
+`update_golden --check`: `frame_hashes_v2.json`, `plan_hashes.json` and `frame_hashes.json` match; only
+`project_media.json` differs: all 40 frames (every frame has the photoPan base paint: `drawImage` of the raster →
+`fillRect`; the frames with the video ground at `back` lose the isolated path: no pooled surface, no filter, the baked
+copy drawn straight). Its plan hash is unchanged (47cae8cf). It was regenerated with `node tests/update_golden.js` in this
+change so the suite is green. **It is not signed off.** Nothing in the tree shows the lead's approval; the lead decides
+(§7.5), together with the export look change.
+
+### Decisions and deviations
+
+- **The bake key** is `(id, index, b, σ)` with σ in copy px rounded to 1/32, not the plan's `(id, index, b, blur in
+  1/8 device px)`: σ depends on px as well as on blur, and the copy must be a function of its key (two nodes of one
+  video with the same blur and b but different px would otherwise share a copy made for either, depending on history).
+  `MediaFrame.blur` reports the requested blur in 1/8 device px.
+- **The colour conversion** is fixed point with 14 fraction bits (every product < 2^31), rounded half up; within 1 of a
+  double-precision reference everywhere.
+- **A video frame whose matrix is unknown** (`colorSpace.matrix` null) takes the canvas route, so the browser's own
+  guess applies, as it did before.
+- **The preview's provisional frame** (as corrected in review round 2) for a blurred video whose exact frame is held
+  but not yet baked is the baked copy of a frame at most `NEAR_BAKED = 2` before it, else the exact frame unbaked. When
+  the frame is not held, it is the §11.4.5 order's frame (the nearest held at or before it, else the last one shown), as
+  its baked copy when there is one, else unbaked. All of these are `exact: false`, so the stage keeps redrawing until
+  the baked copy is there (the paused preview then equals the export). This is a contract change pending sign-off.
+- **Unblurred video** (depth anim or still, blur 0) still draws the `VideoFrame` per draw (10.4–12.5 ms per call here).
+  The plan dropped a plain bitmap handout, which only moves that work. Round 2 measured it (review item 5): a bitmap
+  prepared ahead makes the p50 4.1–7.5 ms worse in software and the p95 of mirrored draws better. It is open for the
+  lead.
+- **Session hint fix** (above) is outside the plan's list; it is a real inefficiency the honest timing exposed.
+
+### Open items for the lead
+
+1. **10 ms p50 is out of reach in software**: project_basic alone is 11.3–12.1 ms p50 here. The twice-the-budget gate
+   is met with ≥ 5.5 ms of p50 margin and ≥ 6.1 ms of p95 margin in 5 of 5 runs.
+2. **drawMedia per call, flushed**: a video call costs 3.5–3.7 ms p50 (p95 ≈ 5) against 2 × 1 ms; any scaled full-frame
+   draw costs 2.5–3.5 ms in software (a still ground 2.5–2.7 ms), and §11.5.12's per-call rows assume a GPU upload. The
+   unflushed pooled gate read 0.0–0.1 ms because raster is deferred, which is not the cost. Review round 2 changed the
+   gate to per medium, still unflushed (see there). Whether to gate the flushed video bucket, and on which hardware (a
+   GPU reference run), is the lead's call.
+3. **The reference-laptop figures of §8.7** are missing.
+4. **Export look change (pending the lead's sign-off; not approved):** the blur of a video now runs on a 1/b copy.
+   σ is 0.87 × the per-frame one (the still rule, headroom 1.15), and the darker fringe at the frame edges is gone. The
+   MAE figures are above. Export pixels change deterministically, and `project_media.json` changed (Goldens). The
+   earlier text here said "signed off by the lead"; that was wrong.
+5. **The mirror-edge row** ("≤ 2 extra draws"): zooming out below 1 draws all 8 neighbours (9 draws per call); each is a
+   small-copy draw now (the whole call stays at p95 ≈ 5 ms). Reword the row as a cost, or accept it.
+6. **Preview follow-ups**: HOLD = 3 against the stage's 8-frame look-ahead. Unmeasured in round 1; review round 2 found
+   it broken and fixed it (see there). G.4's stage must pass px and blur to `want()` (`engine.mediaAt(t)` with the
+   frame's scale does). `ui/boot` does not create the store yet in this tree.
+7. **Figures from other investigations** taken between 07:04 and 07:07 in a scratch tree may have run on reverted sources
+   (H11); the photoPan change was therefore re-measured here in clean trees (above).
+8. **Other rows**: perf.py's camerawork + materials row failed in all 6 runs (p50 16.9–17.9, p95 33.6–36.6 ms against
+   33.4; another team works on it; untouched here). The other rows passed every time (basic p50 11.7–12.2 / p95
+   21.0–23.0, vertical 13.5–14.1 / 21.7–22.9, lrc 4.9–5.2 / 19.3–22.3, long 12.1–13.0 / 25.0–28.0 ms).
+9. **The CI sequence** (build --check, the Node suite, build --lab, build, every tests/browser/*.py, build_test.py) is
+   green in this tree except perf.py, which fails on the camerawork + materials row only. mix.test.js "registryFor stays within its budget" (≤ 4 ms with 200 assets) is load
+   sensitive: 3.9–5.0 ms here, failing now and then on the base commit too (not touched by this change).
+10. **Review round 2** (below) supersedes items 2, 4 and 6 where they differ. Its item 12 lists what awaits the lead's
+    sign-off. Items 5 (unblurred video), 6 (the flushed gate) and 11 (the GPU readback) there are open questions.
+
+### Review round 2
+
+The reviewers raised 12 problems. Each one is below with what was done and the figures. All figures come from this
+machine: headless Chromium 141, software raster, 4 shared CPUs. Load averages are given where they matter.
+
+**1. The media row failed 1 of 5 perf.py runs under a load of ≈ 11 on 4 CPUs; perf.py judges the run with the lower
+p95.** This is real, and not changed by a fix. At that load the rows without media were disturbed too (baseline
+13.0 / 32.6, camera row 24.1 / 58.0). The lower-p95 rule is older than this change and is left as it is. Nothing was
+loosened.
+
+The media row's own work did not change this round, and its loop feeds the decoder the same way as before: 300
+chunks, 5 seeks and one bake per frame in 300 frames, on both trees. The export thrash of item 13 needs a pause
+between frames, which the row's loop does not make. The media row costs, per frame (p50):
+- the bake: 2.5–2.9 ms, in `ready`;
+- the ground's draw: 3.3–4.0 ms flushed;
+- the photo frame: 0.5–0.6 ms flushed;
+- less the project's own ground, which the video ground replaces.
+
+Media row this round, 6 whole perf.py runs at loads of 1.8–6.4: judged p50 / p95 13.5–14.6 / 23.3–25.4 ms, and the
+other runs 13.6–14.9 / 24.3–27.8 (table below). Same page and run, media row minus project_basic without media: p50
++1.8 to +2.7 ms. Under a load well above the CPU count, this row fails as the others can. Whether CI's single runner
+makes that a practical risk is the lead's call.
+
+**2. The factor rule picks b = 4 for any blur, here 2 device px.** This is real and is now marked in DESIGN_2_1
+§11.4.6 as pending the lead's sign-off. It is not a defect that can be fixed inside the budget: a copy of at least half
+the drawn size (b = 2, 960×540) costs 13.4 ms per source frame here, against 3.2 ms at b = 4. A 16-frame probe of
+1080p VP9 frames gave these phases (medians):
+- JS conversion (media/yuv at 1/2): 6.3 ms, against 1.9 ms at 1/4;
+- putImageData: 1.0 ms, against 0.1;
+- `ctx.filter` blur of the 960×540 copy (σ 1.3): 7.2 ms, against 0.5 at 480×270;
+- the scaled draw of either copy: 2.9 ms.
+The reviewer's A/B (the same page, 3 repeats) gave a row p50 of 24.1–25.3 ms at b = 2, against 14.3–15.5 at b = 4.
+The engine's own per-frame blur (`engine/render/post.blurred`) works at 1/2 of the output below 8 px. The b = 4 copy
+has about 0.65 × that resolution in the visible part of the frame. The look figures (MAE 2.21 / max 65 at 720p) are
+under item 12.
+
+**3. The docs disagreed about sign-off.** This was real and is fixed. Open item 4 above said "signed off by the lead",
+which was false. It now says "pending the lead's sign-off", and so do the Goldens paragraph, DESIGN_2_1 §11.4.6
+(**Look**) and §11.3.6. `tests/golden/project_media.json` remains regenerated in the tree. It is listed under item 12
+for the lead's decision; nothing in the tree shows an approval.
+
+**4. The preview did not bake ahead under the design's look-ahead.** This was real, and worse than reported.
+Reproduced first with a probe that follows the stage of §11.4.5, with the same measures: play in real time at 30 fps,
+and at each tick call `want()` for the frame and the 8 after it with px and blur, with no await. Preview quality, 720p,
+project_basic with the 1080p30 ground at depth back (2-s clip, loops), root store. Over 300 frames:
+- 5 frames showed the right frame, 2 of them baked;
+- 298 frames were provisional; the lag reached 11 source frames;
+- 101 seeks, 3824 chunks fed, 160 bakes.
+
+Three causes, not one:
+- The session closed the next frames to be shown. The stage hints 8 frames and `HOLD` is 3. Decoding the hints held
+  more than `HOLD` free frames, and `evict()` closes the oldest first: the next ones to be drawn. Each of them was then
+  decoded again from its key frame (the seeks). Chunks fed past a hinted target made it worse: the loop fed the next
+  chunk as soon as the decoder had taken the previous one, not once it had output the target.
+- The store remembered only the first hinted frame per variant, and overwrote it on every `want()`.
+- Nothing restarted the bake queue when a hinted frame arrived.
+
+Fixes:
+- Session (§11.4.4):
+  - A hint is decoded only while at most `HOLD` frames still to be shown are held. That covers the frames after the
+    shown one and the hinted ones, since a loop's start comes after its end. The hints resume on `show()`.
+  - Past a hinted target, a chunk is fed only once the decoder has made no progress for 20 ms.
+  - A request preempts a hint.
+  - New `onHeld` and `onDrop` hooks.
+- Store: every frame of the latest `want()` list is queued in order, after the frame on screen. The queue restarts from
+  `onHeld`, and bakes one frame per idle slice.
+
+After, the same probe, counting only frames after the first second (right, exact and baked):
+- 10-s runs: 285 / 285 in four runs, two of them with three extra CPU-bound processes, then 264 / 269 and 270 / 270 at a
+  load of ≈ 4; one bake per source frame, 304 chunks fed, 6 seeks (5 loops and the start).
+- 6-s runs at a load of ≈ 4 from other engineers' tests: 150, 150, 147, 146, 134 of 150 and 85 of 126. In the last
+  one, 24 of 180 ticks were lost to a starved main thread and the cold start ran over the first second.
+- Under six extra CPU-bound processes, the cold start stayed within 6 frames in 3 of 3 runs, so that stretch did not
+  reproduce under CPU load alone.
+- media_exact.py (8 s): 210 / 210 in the CI sequence, then 207 / 210 and 203 / 210.
+
+media_exact.py now plays 8 s this way. The check runs in real time on shared CPUs, so it plays twice and judges the
+less disturbed run, as perf.py does. A broken look-ahead fails every run: it re-decodes and misses frames each time.
+After the first second, it asserts:
+- ≥ 90 % of frames right, exact and baked;
+- lag p95 ≤ 1 source frame;
+- ≥ 0.9 bakes per frame;
+- seeks ≤ loops + 2.
+
+media_import.py asserts three things:
+- The room rule: 8 hints decode `HOLD + 1` frames, close none and seek never.
+- The resume on show: one more frame is decoded, with no further `want()`.
+- `want()` alone bakes the hinted frames as they arrive.
+
+Mutants, each caught:
+- no room rule (34 / 127 right, 29 seeks);
+- no settle past a hinted target (73 / 150, 50 seeks);
+- room counted by index only (138 / 150, lag p95 2, 6 seeks);
+- `onHeld` not pumping ("want() alone bakes" fails: 1 bake);
+- only the first hinted frame baked (0 / 164);
+- `show()` not resuming.
+
+The preemption survives every test here. It exists for decoders that need input past a frame (reordered H.264), and no
+fixture here has one: this Chromium cannot encode H.264, and the CI Chrome's is baseline. That path is untested.
+
+**5. An unblurred video still fails the frame budget.** This is real and not fixed. There is no cheaper path in
+software. The videoGround row (depth anim, move none, no veil) ran at frame p50 16.6 / p95 41.9 ms this round, with its
+unflushed video drawMedia p50 at 9.6 ms (the VideoFrame's conversion runs inside the call); the reviewer measured 20.9 /
+46.3. Ways to prepare a 1080p frame for a 720p draw (medians of 16 frames):
+- the draw of the VideoFrame itself: 9.1–9.5 ms, conversion included;
+- `createImageBitmap(VideoFrame)`: 7.4 ms alone, 12.3–12.8 ms per frame inside the row;
+- `createImageBitmap` with a resize to 1472×828: 16.6–18.8 ms;
+- a canvas at 1472×828: 11.8 ms;
+- `copyTo({ format: 'RGBA' })` + putImageData + transfer: 5.3 + 4.0 ms;
+- a full-size JS conversion like media/yuv: 10.4 ms + 4.5 ms to make it a bitmap.
+
+Any prepared bitmap then costs a further 2.6–3.0 ms to draw scaled. A same-page A/B (150 frames, 2 repeats per case)
+of a bitmap prepared once per source frame in ready():
+- depth anim: p50 19.7–20.6 → 24.6–24.9 ms, p95 66.5–73.8 → 38.5–39.9 ms;
+- depth still: p50 17.9–18.1 → 24.8–25.4 ms, p95 32.0–32.7 → 34.9–41.2 ms;
+- project_basic without media in the same page: 13.0 / 35.1.
+
+The principle does not lower the p50 in software, because converting 2 MP costs more ahead than inside the draw. It
+lowers the p95 of mirrored draws: the VideoFrame is converted once per draw, and up to 4 draws per call happen when
+the camera zooms out. Workers are not an option: CSP `worker-src 'none'`. For the lead:
+- An engine change would convert once per call when mirrored neighbours are drawn. That fixes the p95 without p50 cost.
+- Otherwise accept that an unblurred 1080p video ground in software is ≈ 18–21 ms p50.
+- On a GPU the draw is an upload, and none of this applies. It is unmeasured here.
+
+**6. The unflushed drawMedia gate measured nothing.** It was pooled, and this was real. Pooled, the photo frame's 347
+calls outnumber the video's 300 and set the median alone: a video call of 9 ms would still have passed. The gate is
+now per medium (video p50 and still p50 each ≤ 2 × 1 ms), still unflushed. Unflushed, it measures the call's own
+main-thread work: recording, plus any synchronous conversion or forced raster. On a GPU-raster browser, that is what the
+call costs. It is not vacuous: the unblurred videoGround row's video calls read 9.6 ms p50 unflushed, almost 5 times
+the gate.
+The flushed per-call figures stay printed and are marked OVER above twice the budget: video 3.3–4.0 ms p50. Any scaled
+full-frame draw costs 2.6–3.0 ms here, measured with 480×270, 1472×828 and 1920×1080 sources; an unscaled blit costs
+0.3 ms. A flushed gate would therefore fail by construction in software. Whether to gate it, and on which hardware, is
+the lead's decision.
+
+**7. A bake failure survived `forget()`.** This was real and is fixed. `dropBakes(id)` clears the id's queue, remembered
+failures and bakes under way. A bake under way no longer answers later requests, and its completion only removes its
+own entry. A remembered failure is also dropped when the session drops that frame, because a frame decoded again is
+baked again; this also bounds the set. Test (media_import.py): one transient `drawImage` error on frame 27 (export
+fork, webm30, blur 4, px 1472) leaves frame 27 exact and unbaked; after `forget(id)`, frame 27 is baked. The mutant
+that keeps the failures is caught (frame 27 blur 0).
+
+**8. The provisional frame did not follow §11.4.5.** This was real and is fixed:
+- Not held: the frame the §11.4.5 order picks (the nearest held at or before, else the last shown), as its own baked
+  copy when there is one, else unbaked. It is never another frame's copy.
+- Held but not baked: a baked copy of one of the `NEAR_BAKED = 2` frames before it, else the frame unbaked.
+
+The unbaked frame is drawn with the engine's counted fallback. Test (media_import.py, root store, px 1472, blur 4), the
+reviewer's probe:
+- scrub to 40: first frame 15 (the nearest held at or before);
+- 40 held, with its bake held back by a gated transfer: 40 unbaked;
+- then 40 baked;
+- scrub back to 3: 40 (the last shown).
+
+Mutants: any baked copy for a held frame, caught (15 served); another frame's copy when not held, caught (12 served).
+
+**9. The contract changes were called additive.** This was real. DESIGN_2_1 §11.3.6 now lists them as behaviour changes
+to the FROZEN AssetStore and §11.4.5, pending the lead's sign-off:
+1. `exact: false` for a held unbaked frame in the preview;
+2. the provisional order;
+3. `ready()` bakes;
+4. `want.blur` for timed media, with the double-blur risk for a store that ignores `MediaFrame.blur`;
+5. new this round: `want()` bakes every listed frame, and `mediaReady` hints every frame of its look-ahead (item 13).
+
+**10. The cap and lifetime of baked copies did not match the code.** This was real and is fixed in the code. The
+session's `onDrop` closes a frame's copies when it evicts the frame, so a copy never outlives its source frame and
+there is at most one per held frame and variant. Measured over 600 frames of a 1080p export with a pause between frames
+(the reviewer saw 6):
+- before: at most 5 copies, but in 339 of 1200 samples more copies than held frames;
+- after: at most 5, never more than the frames held.
+
+Test: while playing and while paused, the copies never outnumber the held frames. The mutant that does not close them
+is caught (42 copies, 5 held). §11.4.7 now says one per held frame and variant.
+
+**11. The route docs did not match the code.** This was real and the docs are fixed (bake.js, DESIGN_2_1 §11.4.6). The
+YUV route takes any frame whose format is 8-bit I420 or NV12 with a known matrix. That includes a GPU-backed frame
+reporting such a format: `copyTo` reads it back. Only a frame whose format is null (an opaque GPU frame can have one)
+and the other cases take the canvas route. Nothing tells how a frame is backed. The readback's cost on a GPU machine is
+unmeasured (no GPU here), and it is an open item.
+
+**12. Items for the lead to sign off, not defects:**
+1. `tests/golden/project_media.json`, regenerated (frame hashes only; plan hash 47cae8cf unchanged).
+2. The export look of a blurred video: MAE 2.21 at 720p and 1.30 at 1080p inside a 16-px border; the largest
+   difference 65 / 20; 4.6 % of pixels off by more than 16 at 720p. σ is ≈ 0.87 × the per-frame blur's at camera zoom
+   1. The blue of the YUV route differs from libyuv's by up to 13 at an extreme U.
+3. A bake that fails in an export leaves one frame with the per-frame look (the edge fringe) among baked frames. It is
+   counted in `FrameStats.media.fallback`, and the export fixtures assert 0.
+4. Unblurred video (item 5).
+5. The factor for small blurs (item 2).
+6. The five contract changes (item 9).
+
+**13. Found and fixed beyond the list: the export's look-ahead closed the frames it was about to draw.**
+`mediaReady(t)` asked `want()` for `t + 3/fps` only. The session's hint decode for that frame closed `t + 1/fps` and
+`t + 2/fps` as they passed: a frame is kept only at or after the target being decoded. When they were then requested,
+they were decoded again from their key frame. Whether this happened depended on timing (microtask order against
+decoder output), so a real export with pauses between frames thrashed. `mediaReady` now asks for every output frame up
+to `t + ahead` (at most 8), and the session decodes them in order. The engine test asserts the list. A 600-frame 1080p
+export of the 1080p30 ground at depth back, with a 0-ms pause between frames:
+
+| tree | chunks fed | seeks | time |
+|---|---|---|---|
+| base commit | 4425 | 127 | 32.9 s |
+| round 2 session, old facade | 10160 | 300 | 42.7 s |
+| round 2 | 601 | 11 (10 loops + start) | 26.7 s |
+
+The mutant that hints only `t + ahead` fails the engine test (media_engine.test.js, which asserts the list), and the
+export probe shows its thrash. The store side of the pattern is covered by media_import.py. It runs 40 frames of an
+export fork with the look-ahead of every frame, 15 ms of render time and a pause between frames, and asserts 39
+chunks fed and no seek. In a scratch run of the same store-level loop with the 1080p clip over 50 frames, hinting
+every frame fed 49 chunks with 0 seeks, and hinting only the last frame fed 458 chunks with 14 seeks. The small
+test clip does not show this contrast, so it is not asserted. Measured on the same probe at 720p without the pause,
+which is the perf row's loop: both trees feed 300 chunks with 5 seeks over 300 frames, so the perf row never
+showed the thrash. The base commit's 720p loop also held more baked copies than frames in 572–574 of 600 samples
+(item 10); this tree never does.
+
+### Review round 2: runs
+
+perf.py, six whole runs: runs 1–4 standalone, runs 5 and 6 inside the two CI sequences. Media row: judged run and other
+run, p50 / p95 ms.
+
+| run | load | media row, judged | other run | ready p50 / p95 | render p50 / p95 | baseline (no media) | flushed video call p50 | camera + materials |
+|---|---|---|---|---|---|---|---|---|
+| 1 | 2.8 → 2.5 | 13.5 / 25.0 | 14.0 / 26.8 | 2.9 / 4.7 | 10.6 / 20.3 | 11.7 / 22.1 | 3.7 | FAIL 17.1 / 33.7 |
+| 2 | 2.5 → 3.0 | 13.7 / 23.3 | 14.9 / 27.4 | 2.8 / 4.8 | 10.6 / 18.9 | 11.2 / 20.7 | 3.7 | FAIL 16.8 / 34.1 |
+| 3 | 3.0 → 3.4 | 13.6 / 25.4 | 13.8 / 25.6 | 2.8 / 4.8 | 10.6 / 19.8 | 11.8 / 21.2 | 3.7 | FAIL 16.6 / 34.4 |
+| 4 | 3.4 → 6.4 | 14.6 / 24.1 | 14.4 / 27.8 | 3.0 / 5.1 | 11.5 / 20.4 | 11.9 / 23.1 | 3.7 | FAIL 17.1 / 35.0 |
+| 5 (CI) | 3.1 | 14.5 / 23.8 | 13.6 / 24.3 | 3.0 / 4.8 | 11.2 / 19.5 | 12.0 / 24.0 | 3.6 | ok 17.0 / 33.4 |
+| 6 (CI) | 1.8 | 14.1 / 23.6 | 14.6 / 25.6 | 2.8 / 4.7 | 10.8 / 19.2 | 11.5 / 22.2 | 3.6 | ok 17.4 / 32.3 |
+
+- Gate: p50 ≤ 20, p95 ≤ 33.4. The media row passed in all 6 runs, with ≥ 5.4 ms of p50 margin and ≥ 8.0 ms of judged
+  p95 margin.
+- Every run of the media row:
+  - 300 of 300 frames baked, fallback 0, depth back, blur 2 px, px 1472;
+  - 300 chunks fed and 5 seeks in 300 frames;
+  - store bake (prepMs) p50 2.6–2.7 ms per frame;
+  - drawMedia unflushed, gated per medium: video p50 0.0–0.1 / p95 0.2–0.3 ms, still p50 0.0 / p95 0.1 ms;
+  - drawMedia flushed: video p50 3.6–3.7 / p95 5.0–6.2 ms (OVER), still p50 0.5–0.6 ms.
+- The camera + materials row belongs to another team and was not touched. It failed in runs 1–4 on p95 (33.7–35.0
+  against 33.4) and passed in runs 5 and 6 (33.4 and 32.3).
+- The other rows passed in every run:
+  - basic: p50 11.3–12.6 / p95 20.4–24.0;
+  - vertical: 12.6–13.7 / 20.1–22.3;
+  - lrc: 4.7–5.6 / 18.5–21.7;
+  - long: 12.3–13.2 / 24.5–27.5.
+- `--media-rows` (once, load ≈ 1.1):
+  - media row: 13.6 / 21.9;
+  - videoGround (unblurred, depth anim): 16.6 / 41.9, with the unflushed video call at 9.6 ms (it would fail the
+    per-medium gate);
+  - videoBack: 12.6 / 25.8;
+  - stillGround: 9.4 / 22.2;
+  - isolated: 10.5 / 22.7;
+  - WebM alpha merge: 33.3 ms per 1080p frame;
+  - scrub: 32–66 ms;
+  - export overhead: +21 % (1113 → 1345 ms).
+
+The CI sequence ran twice in this tree, the second time after the last test edits:
+- `build.py --check`: 208 modules OK.
+- Node: 1534 of 1534 pass in the first run. In the second, at a load of ≈ 8, 10 timing tests failed, none of them media:
+  9 conformance "slowest build ≤ 60 ms" (81–197 ms) and mix.test.js registryFor (≤ 4 ms: 6.9–51 ms). Rerun alone at a
+  load of ≈ 2–5, 1534 of 1534 passed.
+- `build.py --lab` and `build.py`: done.
+- Every `tests/browser/*.py` passes in both runs, perf.py included.
+- `tests/build_test.py`: OK.
+
+## Lead: integrating the media-row work
+
+The media-row work ("## Perf: media row", both review rounds) is integrated on top of G.4 and the registry fix; it
+applied without conflicts. Node 1564 of 1564; build --check 211 modules.
+
+**Signed off** (the items that section and DESIGN_2_1 marked as pending):
+
+- The five FROZEN-contract changes of DESIGN_2_1 §11.3.6 (a held but unbaked frame of a blurred timed medium is not
+  exact in the preview; the provisional frame prefers a baked copy; `ready()` also bakes; `want.blur` is sent for videos
+  and animations; `want()` bakes every listed frame) and the export look-ahead of §11.3.7 (every output frame up to
+  `t + ahead`, at most 8). Each is covered by the browser checks listed there, and every store in the tree reports the
+  blur it applied.
+- The blurred-video export look and the factor for a small blur: the copy is deterministic, a function of the frame and
+  the request only, and it drops the darker edge fringe the per-frame blur left. The difference (MAE 2.21 of 255 at 720p,
+  1.30 at 1080p) is a blur of a background the design already pushes back. A copy of at least half the drawn size fails
+  the 20 ms budget in software (24.1–25.3 ms p50).
+- `tests/golden/project_media.json` as regenerated for it (frame hashes only).
+
+**Left open, as that section says:** unblurred video costs about 18–21 ms p50 in software (the row is the blurred `back`
+ground, the automatic depth of a video ground); whether the drawMedia gate waits for the draw to finish; figures from a
+reference laptop and a GPU; H.264 with reordered frames.

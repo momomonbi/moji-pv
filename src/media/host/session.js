@@ -2,16 +2,21 @@
 MV.def('media/host/session', ['media/samples'], (SM) => {
   'use strict';
 
-  // createVideoSession({ track, read, prefer, alpha, canvas }) → VideoSession
+  // createVideoSession({ track, read, prefer, alpha, canvas, onHeld, onDrop }) → VideoSession
   //   track = { codec, description, codedW, codedH, w, h, rot, color, table }; read(offset, length) → Promise<Uint8Array>
   //   prefer: 'software' (export forks: bit-exact software decoders when the browser has them) | 'hardware' (preview)
   //   alpha: true → a second decoder for the WebM alpha stream (BlockAdditional id 1), merged per frame
+  //   onHeld(i) / onDrop(i): called when frame i becomes held, and when a held frame i is closed (evicted; not on close())
+  //   — the store bakes a hinted frame once it is held, and closes a frame's baked copies with it (§11.4.6)
   // VideoSession = {
   //   request(i, { pin }) → Promise<Held>   presentation index i; resolves when that exact frame is held
   //   held(i) → Held | null                 synchronous
   //   nearest(i) → Held | null              the nearest held frame at or before i, else the last shown one
   //   show(i)                               marks i as shown: kept until another frame is shown
-  //   hint(list)                            preview look-ahead: decode these soon, lowest priority, no promise
+  //   hint(list)                            preview look-ahead: decode these soon, lowest priority, no promise (a hinted
+  //                                         frame behind the decode position waits for its request: hints never seek back;
+  //                                         and a hint waits while more than HOLD frames still to be shown are held, so
+  //                                         it never closes a frame about to be shown: hints resume on show())
   //   pin(set)                              frames the next draws need (export): never evicted until the next pin()
   //   pixels, failed (null | 'decode' | 'codec'), stats() → { held, decodeMs, seeks }, close()
   // }  Held = { image: VideoFrame | ImageBitmap, index, w, h (displayed px of the image), rot }
@@ -23,6 +28,7 @@ MV.def('media/host/session', ['media/samples'], (SM) => {
   const QUEUE_MAX = 8;            // chunks in flight
   const WINDOW = 4 * 1024 * 1024; // coalesced read window
   const STALL_MS = 10000;         // no decoder progress for this long counts as a decode error
+  const SETTLE_MS = 20;           // past a hinted target: the decoder is given this long to output it before another chunk
 
   function mediaError(code, message) { return new SM.MediaError(code, message); }
 
@@ -64,6 +70,8 @@ MV.def('media/host/session', ['media/samples'], (SM) => {
     const withAlpha = !!opts.alpha && !!table.aoff;
     const factory = opts.canvas || null;
     const clock = typeof opts.now === 'function' ? opts.now : () => 0;
+    const onHeld = typeof opts.onHeld === 'function' ? opts.onHeld : null;
+    const onDrop = typeof opts.onDrop === 'function' ? opts.onDrop : null;
     const nd = table.key.length;
     const pres = SM.presentationOf(table);
     const byTs = new Map();
@@ -85,7 +93,8 @@ MV.def('media/host/session', ['media/samples'], (SM) => {
     let current = -1;                        // the target being decoded now, or the last one decoded
     let seekFrom = 0;                        // the key frame the decoder started from at the last seek
     const waiting = new Map();               // presentation index → [{ resolve, reject }]
-    let hints = [];
+    let hints = [];                          // the hinted frames still to decode, in list order
+    let hinted = new Set();                  // the latest hint list, whole
     const pairs = { c: new Map(), a: new Map() };   // alpha merge: timestamp → frame waiting for its partner
     const drop = new Set();                  // timestamps whose colour frame was not wanted: close the alpha too
     let win = { at: 0, bytes: new Uint8Array(0) };
@@ -99,6 +108,15 @@ MV.def('media/host/session', ['media/samples'], (SM) => {
       return new Promise((resolve) => {
         wake = resolve;
         setTimeout(() => { if (wake === resolve) { wake = null; resolve(); } }, 250);
+      });
+    }
+
+    // → true when `ms` pass without decoder progress (an output or a dequeue), false as soon as there is some.
+    function quietFor(ms) {
+      return new Promise((resolve) => {
+        const w = () => resolve(false);
+        wake = w;
+        setTimeout(() => { if (wake === w) { wake = null; resolve(true); } }, ms);
       });
     }
 
@@ -136,7 +154,7 @@ MV.def('media/host/session', ['media/samples'], (SM) => {
 
     function keep(i, image) {
       const prev = held.get(i);
-      if (prev) closeImage(prev.image);
+      if (prev) closeImage(prev.image);           // the same frame decoded again: its baked copies stay valid
       held.delete(i);
       const w = image.displayWidth || image.width, h = image.displayHeight || image.height;
       held.set(i, { image, index: i, w: swap ? h : w, h: swap ? w : h, rot: track.rot || 0 });
@@ -147,6 +165,7 @@ MV.def('media/host/session', ['media/samples'], (SM) => {
         const got = held.get(i);
         for (const p of list) p.resolve(got);
       }
+      if (onHeld && held.has(i)) { try { onHeld(i); } catch (e) { /* the store's problem */ } }
       tick();
     }
 
@@ -159,7 +178,18 @@ MV.def('media/host/session', ['media/samples'], (SM) => {
         closeImage(h.image);
         held.delete(i);
         free--;
+        if (onDrop) { try { onDrop(i); } catch (e) { /* the store's problem */ } }
       }
+    }
+
+    // Whether a hint may be decoded now: at most HOLD frames still to be shown are held (after the shown one, or in the
+    // latest hint list: a loop's start comes after its end; the last one decoded included). Decoding another then
+    // leaves at most HOLD free frames besides the new one, so evict() closes none of them; with more, it would close
+    // the oldest, which in playback is the next frame to be shown (the stage hints 8).
+    function roomAhead() {
+      let ahead = 0;
+      for (const i of held.keys()) if ((i > shown || hinted.has(i)) && i !== shown && !pinned.has(i) && !waiting.has(i)) ahead++;
+      return ahead <= HOLD;
     }
 
     function closeImage(image) { try { image.close(); } catch (err) { /* already closed */ } }
@@ -350,18 +380,24 @@ MV.def('media/host/session', ['media/samples'], (SM) => {
     // target is at most AHEAD_MAX samples on (through the key frame at `from` if needed), wait when it was fed and is
     // still in the decoder, and seek otherwise. Up to the target the queue holds 8 chunks; after it, one more chunk
     // at a time and only when the decoder has taken the previous ones, so hardly any frame after the target comes out
-    // (and is closed) before it is asked for.
-    async function ensure(i) {
+    // (and is closed) before it is asked for. A hinted target (`isHint`: the look-ahead, nobody waits for it) is more
+    // careful still: past it, another chunk only once the decoder has shown no progress for SETTLE_MS (it needs more
+    // input: reordered frames), because every frame it outputs past the target is held and, beyond HOLD, closes the
+    // oldest held one — in playback the next to be shown; and it gives way to a request at once.
+    async function ensure(i, isHint) {
       const t0 = clock();
       current = i;
       const { from, to } = SM.runFor(table, i);
       if (needSeek || output[to] || from < seekFrom || (c <= to && to - c > AHEAD_MAX)) seek(from);
       let flushedAt = -1;
       while (!closed && !failed && !held.has(i)) {
+        if (isHint && waiting.size) break;             // a request goes first; the stage hints this frame again
         if (needSeek) { seek(from); continue; }
         if (c < nd) {
           await room(c <= to ? QUEUE_MAX : 0);
           if (closed || failed || held.has(i) || needSeek) continue;
+          if (isHint && c > to && !(await quietFor(SETTLE_MS))) continue;
+          if (closed || failed || held.has(i) || needSeek || (isHint && waiting.size)) continue;
           await feed(c);
           c++;
           continue;
@@ -379,10 +415,23 @@ MV.def('media/host/session', ['media/samples'], (SM) => {
       for (const i of waiting.keys()) if (best < 0 || i < best) best = i;
       if (best >= 0) return best;
       while (hints.length) {
-        const i = hints.shift();
-        if (!held.has(i)) return i;
+        const i = hints[0];
+        if (held.has(i) || behind(i)) { hints.shift(); continue; }
+        if (!roomAhead()) return -1;               // resumed by show()
+        hints.shift();
+        return i;
       }
       return -1;
+    }
+
+    // A look-ahead hint never sends the decoder back: a frame behind the decode position (output since the last seek
+    // and closed, or in a GOP before the one the decoder started from) is decoded when it is requested, not hinted.
+    // Otherwise the look-ahead of a loop's first frame resets the decoder under the frames about to be drawn, which
+    // are then decoded again from their key frame (a 1080p export stalled ≈ 150 ms at every loop of a one-GOP clip).
+    function behind(i) {
+      if (needSeek) return false;
+      const { from, to } = SM.runFor(table, i);
+      return output[to] === 1 || from < seekFrom;
     }
 
     async function work() {
@@ -395,7 +444,7 @@ MV.def('media/host/session', ['media/samples'], (SM) => {
           if (i < 0) break;
           if (held.has(i)) { keepWaiting(i); continue; }
           try {
-            await ensure(i);
+            await ensure(i, !waiting.has(i));
           } catch (err) {
             if (err && err.code === 'decode' && !failed) fail('decode', err);
             else if (!failed) fail(err && err.code ? err.code : 'decode', err);
@@ -439,9 +488,16 @@ MV.def('media/host/session', ['media/samples'], (SM) => {
         for (const h of held.values()) if (h.index <= i && (!best || h.index > best.index)) best = h;
         return best || held.get(shown) || null;
       },
-      show(i) { if (held.has(i)) { shown = i; evict(); } },
+      show(i) {
+        if (!held.has(i)) return;
+        shown = i;
+        evict();
+        if (hints.length && !closed && !failed) work();
+      },
       hint(list) {
-        hints = (list || []).filter((i) => Number.isInteger(i) && i >= 0 && i < table.n && !held.has(i));
+        const all = (list || []).filter((i) => Number.isInteger(i) && i >= 0 && i < table.n);
+        hinted = new Set(all);
+        hints = all.filter((i) => !held.has(i));
         if (hints.length) work();
       },
       pin(set) { pinned = new Set(set || []); evict(); },
@@ -462,10 +518,12 @@ MV.def('media/host/session', ['media/samples'], (SM) => {
     };
   }
 
-  // createAnimSession({ blob, mime, table, capBytes }) → the same interface over ImageDecoder: random access by frame
-  // index, decoded frames kept as ImageBitmaps in an LRU of capBytes (64 MB).
+  // createAnimSession({ blob, mime, table, capBytes, onHeld, onDrop }) → the same interface over ImageDecoder: random
+  // access by frame index, decoded frames kept as ImageBitmaps in an LRU of capBytes (64 MB).
   function createAnimSession(opts) {
     const table = opts.table;
+    const onHeld = typeof opts.onHeld === 'function' ? opts.onHeld : null;
+    const onDrop = typeof opts.onDrop === 'function' ? opts.onDrop : null;
     const cap = opts.capBytes || 64 * 1024 * 1024;
     const cache = new Map();                 // frame → Held (insertion order = LRU order)
     const pending = new Map();
@@ -493,6 +551,7 @@ MV.def('media/host/session', ['media/samples'], (SM) => {
         cache.delete(i);
         bytes -= h.w * h.h * 4;
         try { h.image.close(); } catch (e) { /* closed */ }
+        if (onDrop) { try { onDrop(i); } catch (e) { /* the store's problem */ } }
       }
     }
 
@@ -514,6 +573,7 @@ MV.def('media/host/session', ['media/samples'], (SM) => {
         cache.set(k, h);
         bytes += h.w * h.h * 4;
         evict();
+        if (onHeld && cache.has(k)) { try { onHeld(k); } catch (e) { /* the store's problem */ } }
         return h;
       }).catch((err) => {
         if (!closed && (!err || err.code !== 'closed')) failed = 'decode';

@@ -317,7 +317,12 @@ class Check(unittest.TestCase):
                  'media/host/probe.js': module('media/host/probe', ['media/isobmff', 'export/unzip', 'core/a'],
                                                body='  function f() { return document.createElement("canvas").getContext("2d").getImageData(0, 0, 1, 1); }\n  return { f };'),
                  'export/unzip.js': module('export/unzip', ['core/a']),
-                 'ui/x.js': module('ui/x', ['media/host/probe', 'media/samples'])}
+                 'ui/x.js': module('ui/x', ['media/host/probe', 'media/samples']),
+                 # §11.3.4 / §11.4.6: media/yuv (the pure YUV → RGBA copy, L1) and media/host/bake (its host glue: ctx.filter,
+                 # putImageData, L6) under the same prefix rules
+                 'media/yuv.js': module('media/yuv', ['core/a']),
+                 'media/host/bake.js': module('media/host/bake', ['media/yuv'],
+                                              body='  function f(g, d) { g.putImageData(d, 0, 0); g.filter = "blur(1px)"; return performance.now(); }\n  return { f };')}
         self.check(media, ok=True)
         cases = [
             ({'media/sniff.js': module('media/sniff', ['i18n/b']), 'i18n/b.js': module('i18n/b')}, r'layer: media/sniff → i18n/b'),
@@ -339,6 +344,12 @@ class Check(unittest.TestCase):
              r'src/media/sniff\.js:4: lint document \(L0–L5\)'),
             ({'media/samples.js': module('media/samples', body='  const f = (g) => setTimeout(g, 1);\n  return { f };')},
              r'lint setTimeout \(L0–L5\)'),
+            ({'media/yuv.js': module('media/yuv', ['media/host/bake']), 'media/host/bake.js': module('media/host/bake')},
+             r'layer: media/yuv → media/host/bake'),
+            ({'engine/render/shapes.js': module('engine/render/shapes', ['media/yuv']), 'media/yuv.js': module('media/yuv')},
+             r'layer: engine/render/shapes → media/yuv \(the engine never depends on media'),
+            ({'media/yuv.js': module('media/yuv', body='  const f = () => performance.now();\n  return { f };')},
+             r'src/media/yuv\.js:4: lint performance\.now \(L0–L5\)'),
         ]
         for files, fragment in cases:
             with self.subTest(fragment=fragment):

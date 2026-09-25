@@ -1,6 +1,6 @@
 <!doctype html><html lang="ja"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-m9ySRd5mGwllhtO71lxCnQlQunKlX4YuafNItqWjeYQ='; style-src 'sha256-gmrSoWwvipUekLywDjXgyrJxA8IKarXht0Er4wORaLQ=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-wrSiAiaRiRbE+VRW5Sw03vlPS6ZdtcO5q07vWYRHdbs='; style-src 'sha256-gmrSoWwvipUekLywDjXgyrJxA8IKarXht0Er4wORaLQ=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
 <title>文字PVメーカー</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -14839,6 +14839,276 @@ MV.def('media/sniff', [], () => {
 
   return { HEAD, PACKAGE_MIME, sniff };
 });
+/* 文字PVメーカー v2 — original work. Reduced RGBA copies of 8-bit YUV video frames: a box average at 1/b with the colour matrix of the frame, and a mirrored border for a blur (DESIGN_2_1 §11.3.4, §11.4.6). */
+MV.def('media/yuv', [], () => {
+  'use strict';
+
+  // The store bakes the blur of a video frame once per source frame (DESIGN_2_1 §11.4.6 "Blur of a video or animation
+  // frame"): the host copies the frame's planes out (VideoFrame.copyTo, the visible rect only), this module turns them
+  // into a small RGBA copy, and the host blurs that copy with ctx.filter. Pure: typed arrays in, typed arrays out; the
+  // result is a function of the bytes and the options only (IEEE doubles, rounded by Uint8ClampedArray), so every run
+  // and every machine gives the same copy of the same decoded frame.
+  //
+  //   FORMATS                         the VideoFrame formats this module reads: 8-bit 4:2:0, planar or semi-planar
+  //   MATRICES                        colour matrix name (VideoColorSpace.matrix) → [Kr, Kb]
+  //   supports(format, cs)            → boolean: FORMATS, a known matrix, SDR (no PQ / HLG transfer, no BT.2020
+  //                                     primaries); anything else goes through the browser's own conversion (the host's
+  //                                     canvas route), chosen by these properties only, never by history
+  //   factorFor(long, px, blur)       → b ∈ {1, 2, 4, 8}: the largest power of two ≤ 8 with long / b ≥ px / 4 (px / 8
+  //                                     when blur ≥ 8 device px), so the copy's long side lies in [px / 4, px / 2); 1
+  //                                     when even the whole frame is smaller than that
+  //   sigmaFor(blur, long, b, px)     → the blur in copy px (blur device px × copy px per device px), in 1/32 px, > 0
+  //   padFor(sigma, cw, ch)           → the border a blur of sigma needs: ceil(3σ), at most the copy's shorter side
+  //   toRgba(src, o) → { data, w, h, cw, ch, pad }
+  //       src = { format: 'I420' | 'NV12', data: Uint8Array, layout: [{ offset, stride }], w, h }   (w × h visible px)
+  //       o   = { b: 2 | 4 | 8, matrix, full: boolean, pad, out?: Uint8ClampedArray (reused when large enough) }
+  //       data: RGBA (alpha 255) of (cw + 2·pad) × (ch + 2·pad) px, cw = ceil(w / b), ch = ceil(h / b): each copy pixel
+  //       is the average of its b × b block of Y and its (b/2) × (b/2) block of U and V (the last row and column
+  //       average what they cover), converted with the matrix (limited or full range); the border mirrors the copy
+  //       (pixel −1 − k shows pixel k), as the engine's mirrored edges do.
+
+  const FORMATS = ['I420', 'NV12'];
+  const MATRICES = Object.freeze({ bt709: [0.2126, 0.0722], bt470bg: [0.299, 0.114], smpte170m: [0.299, 0.114] });
+  const SIGMA_STEP = 32;
+
+  function supports(format, cs) {
+    if (!FORMATS.includes(format)) return false;
+    const c = cs || {};
+    if (!c.matrix || !Object.prototype.hasOwnProperty.call(MATRICES, c.matrix)) return false;
+    if (c.transfer === 'pq' || c.transfer === 'hlg') return false;
+    if (c.primaries === 'bt2020') return false;
+    return true;
+  }
+
+  function factorFor(long, px, blur) {
+    const need = (blur >= 8 ? px / 8 : px / 4);
+    let b = 1;
+    for (const k of [2, 4, 8]) if (long / k >= need) b = k;
+    return b;
+  }
+
+  function sigmaFor(blur, long, b, px) {
+    const s = (blur * (long / b)) / Math.max(1, px);
+    return Math.max(1, Math.round(s * SIGMA_STEP)) / SIGMA_STEP;
+  }
+
+  function padFor(sigma, cw, ch) { return Math.max(0, Math.min(Math.ceil(3 * sigma), cw, ch)); }
+
+  // Colour conversion constants: R = ky·(Y − y0) + kr·V', G = ky·(Y − y0) − kgu·U' − kgv·V', B = ky·(Y − y0) + kbu·U',
+  // with U' = U − 128, V' = V − 128 (8-bit codes); limited range scales Y by 255/219 and chroma by 255/224.
+  function coefficients(matrix, full) {
+    const [kr, kb] = MATRICES[matrix] || MATRICES.bt709;
+    const kg = 1 - kr - kb;
+    const cy = full ? 1 : 255 / 219, cc = full ? 1 : 255 / 224;
+    return { y0: full ? 0 : 16, ky: cy, kr: 2 * (1 - kr) * cc, kbu: 2 * (1 - kb) * cc,
+      kgu: ((2 * kb * (1 - kb)) / kg) * cc, kgv: ((2 * kr * (1 - kr)) / kg) * cc };
+  }
+
+  const LITTLE = new Uint8Array(new Uint32Array([1]).buffer)[0] === 1;
+
+  // Sums of one plane's rows [r0, r1) into acc, block by block: block width bw (1, 2, 4 or 8 px), n output columns, a
+  // plane pw px wide; `step` 2 reads every other byte (the interleaved chroma of NV12). The last block sums what it
+  // covers. Scalar, unrolled per block width.
+  function sumRows(d, off, stride, r0, r1, pw, bw, n, acc, step) {
+    const full = Math.min(n, Math.floor(pw / bw));
+    for (let r = r0; r < r1; r++) {
+      let p = off + r * stride;
+      let o = 0;
+      if (step === 1) {
+        if (bw === 1) for (; o < full; o++, p++) acc[o] += d[p];
+        else if (bw === 2) for (; o < full; o++, p += 2) acc[o] += d[p] + d[p + 1];
+        else if (bw === 4) for (; o < full; o++, p += 4) acc[o] += d[p] + d[p + 1] + d[p + 2] + d[p + 3];
+        else for (; o < full; o++, p += 8) acc[o] += d[p] + d[p + 1] + d[p + 2] + d[p + 3] + d[p + 4] + d[p + 5] + d[p + 6] + d[p + 7];
+      } else {
+        if (bw === 1) for (; o < full; o++, p += 2) acc[o] += d[p];
+        else if (bw === 2) for (; o < full; o++, p += 4) acc[o] += d[p] + d[p + 2];
+        else if (bw === 4) for (; o < full; o++, p += 8) acc[o] += d[p] + d[p + 2] + d[p + 4] + d[p + 6];
+        else for (; o < full; o++, p += 16) acc[o] += d[p] + d[p + 2] + d[p + 4] + d[p + 6] + d[p + 8] + d[p + 10] + d[p + 12] + d[p + 14];
+      }
+      for (let x = o * bw; o < n; o++) {                        // the last, partial block
+        const x1 = Math.min(pw, x + bw);
+        let s = 0;
+        for (; x < x1; x++, p += step) s += d[p];
+        acc[o] += s;
+      }
+    }
+  }
+
+  // The same over whole 32-bit words (a planar plane on a little-endian machine, word-aligned rows, bw 2, 4 or 8): two
+  // bytes per 16-bit lane, lanes summed over the rows (≤ 8 rows × 4 bytes × 255 < 2^16) and folded once; the columns
+  // past the last whole word are summed as above. The sums are the same as sumRows' (integers), only faster.
+  function sumRowsWords(d, u32, off, stride, r0, r1, pw, bw, n, acc, lanes) {
+    const words = bw === 2 ? pw >> 2 : bw === 4 ? pw >> 2 : pw >> 3;      // lane groups of whole words
+    lanes.fill(0, 0, words);
+    for (let r = r0; r < r1; r++) {
+      let p = (off + r * stride) >> 2;
+      if (bw === 8) {
+        for (let k = 0; k < words; k++, p += 2) {
+          const v = u32[p], x = u32[p + 1];
+          lanes[k] += (v & 0x00ff00ff) + ((v >>> 8) & 0x00ff00ff) + (x & 0x00ff00ff) + ((x >>> 8) & 0x00ff00ff);
+        }
+      } else {
+        for (let k = 0; k < words; k++, p++) { const v = u32[p]; lanes[k] += (v & 0x00ff00ff) + ((v >>> 8) & 0x00ff00ff); }
+      }
+    }
+    let o = 0;
+    if (bw === 2) {
+      for (let k = 0; k < words; k++) { const l = lanes[k]; acc[o++] += l & 0xffff; acc[o++] += l >>> 16; }
+    } else {
+      for (let k = 0; k < words; k++) { const l = lanes[k]; acc[o++] += (l & 0xffff) + (l >>> 16); }
+    }
+    if (o < n) sumTail(d, off, stride, r0, r1, pw, bw, o, n, acc);   // columns past the whole words: scalar
+  }
+
+  // Whole square blocks (bw rows of bw px, bw 2, 4 or 8) over whole words, the rows read side by side (no lane array):
+  // → the number of output columns summed; the caller sums the columns past them.
+  const M8 = 0x00ff00ff;
+  function sumBlocksWords(u32, p, ws, bw, n, acc) {
+    let o = 0;
+    if (bw === 2) {
+      const words = Math.min(n >> 1, ws);
+      for (let k = 0; k < words; k++, p++) {
+        const v0 = u32[p], v1 = u32[p + ws];
+        const s = (v0 & M8) + ((v0 >>> 8) & M8) + (v1 & M8) + ((v1 >>> 8) & M8);
+        acc[o++] += s & 0xffff; acc[o++] += s >>> 16;
+      }
+    } else if (bw === 4) {
+      const w2 = 2 * ws, w3 = 3 * ws;
+      for (; o < n; o++, p++) {
+        const v0 = u32[p], v1 = u32[p + ws], v2 = u32[p + w2], v3 = u32[p + w3];
+        const s = (v0 & M8) + ((v0 >>> 8) & M8) + (v1 & M8) + ((v1 >>> 8) & M8) + (v2 & M8) + ((v2 >>> 8) & M8) + (v3 & M8) + ((v3 >>> 8) & M8);
+        acc[o] += (s & 0xffff) + (s >>> 16);
+      }
+    } else {
+      for (; o < n; o++, p += 2) {
+        let s = 0;
+        for (let r = 0, q = p; r < 8; r++, q += ws) {
+          const v = u32[q], x = u32[q + 1];
+          s += (v & M8) + ((v >>> 8) & M8) + (x & M8) + ((x >>> 8) & M8);
+        }
+        acc[o] += (s & 0xffff) + (s >>> 16);
+      }
+    }
+    return o;
+  }
+
+  function sumPlane(d, u32, off, stride, r0, r1, pw, bw, n, acc, lanes, step) {
+    if (u32 && step === 1 && bw >= 2 && (off & 3) === 0 && (stride & 3) === 0) {
+      if (r1 - r0 === bw) {
+        // whole blocks of whole words first (bw 2: pairs of columns in one word; bw 4: one word; bw 8: two words)
+        const full = bw === 2 ? (pw >> 2) << 1 : bw === 4 ? pw >> 2 : pw >> 3;
+        const o = sumBlocksWords(u32, (off + r0 * stride) >> 2, stride >> 2, bw, Math.min(n, full), acc);
+        if (o < n) sumTail(d, off, stride, r0, r1, pw, bw, o, n, acc);
+      } else sumRowsWords(d, u32, off, stride, r0, r1, pw, bw, n, acc, lanes);
+    } else sumRows(d, off, stride, r0, r1, pw, bw, n, acc, step);
+  }
+
+  // Columns [o, n) of rows [r0, r1), byte by byte (the part of a row past its whole words).
+  function sumTail(d, off, stride, r0, r1, pw, bw, o, n, acc) {
+    for (let r = r0; r < r1; r++) {
+      let x = o * bw, p = off + r * stride + x;
+      for (let q = o; q < n; q++) {
+        const x1 = Math.min(pw, x + bw);
+        let s = 0;
+        for (; x < x1; x++, p++) s += d[p];
+        acc[q] += s;
+      }
+    }
+  }
+
+  const FIX = 14, ONE = 1 << FIX, HALF = 1 << (FIX - 1);
+
+  // Copy pixels [o0, o1) of one row from block sums, in fixed point (FIX fraction bits; every product stays below
+  // 2^31): R = (ay·ΣY + rv·ΣV + r0) >> FIX, and alike, where ay = ky / nY, rv = kr / nC, … and the constants fold the
+  // offsets (y0, 128); each channel rounded half up and clamped to 0..255. Integers only: the same on every machine.
+  function convert(accY, accU, accV, o0, o1, nY, nC, K, out, out32, row) {
+    const ay = Math.round((K.ky * ONE) / nY) | 0, rv = Math.round((K.kr * ONE) / nC) | 0, gu = Math.round((K.kgu * ONE) / nC) | 0;
+    const gv = Math.round((K.kgv * ONE) / nC) | 0, bu = Math.round((K.kbu * ONE) / nC) | 0;
+    const cy = (Math.round(-K.ky * K.y0 * ONE) + HALF) | 0;
+    const r0 = (cy - Math.round(128 * K.kr * ONE)) | 0, g0 = (cy + Math.round(128 * (K.kgu + K.kgv) * ONE)) | 0;
+    const b0 = (cy - Math.round(128 * K.kbu * ONE)) | 0;
+    if (out32 !== null) {
+      for (let o = o0; o < o1; o++) {
+        const y = ay * accY[o], u = accU[o], v = accV[o];
+        let r = (y + rv * v + r0) >> FIX, g = (y - gu * u - gv * v + g0) >> FIX, bb = (y + bu * u + b0) >> FIX;
+        r = r < 0 ? 0 : r > 255 ? 255 : r;
+        g = g < 0 ? 0 : g > 255 ? 255 : g;
+        bb = bb < 0 ? 0 : bb > 255 ? 255 : bb;
+        out32[row + o] = r | (g << 8) | (bb << 16) | -16777216;        // little-endian RGBA; 0xff000000 as an int32
+      }
+      return;
+    }
+    for (let o = o0; o < o1; o++) {
+      const y = ay * accY[o], u = accU[o], v = accV[o], q = (row + o) * 4;
+      out[q] = (y + rv * v + r0) >> FIX;                                // Uint8ClampedArray clamps
+      out[q + 1] = (y - gu * u - gv * v + g0) >> FIX;
+      out[q + 2] = (y + bu * u + b0) >> FIX;
+      out[q + 3] = 255;
+    }
+  }
+
+  function toRgba(src, o) {
+    const b = o.b | 0;
+    if (!(b === 2 || b === 4 || b === 8)) throw new Error('yuv: b must be 2, 4 or 8');
+    if (!FORMATS.includes(src.format)) throw new Error('yuv: format ' + src.format);
+    const w = src.w, h = src.h, d = src.data, L = src.layout;
+    const cw = Math.ceil(w / b), ch = Math.ceil(h / b);
+    const pad = Math.max(0, Math.min(o.pad | 0, cw, ch));
+    const pw = cw + 2 * pad, ph = ch + 2 * pad;
+    const size = pw * ph * 4;
+    const out = o.out && o.out.length >= size ? o.out.subarray(0, size) : new Uint8ClampedArray(size);
+    const K = coefficients(o.matrix, !!o.full);
+    const out32 = LITTLE ? new Int32Array(out.buffer, out.byteOffset, pw * ph) : null;
+    const hb = b >> 1;
+    const cwp = (w + 1) >> 1, chp = (h + 1) >> 1;                  // chroma plane size
+    const nv12 = src.format === 'NV12';
+    const accY = new Int32Array(cw), accU = new Int32Array(cw), accV = new Int32Array(cw);
+    const words = LITTLE && (d.byteOffset & 3) === 0 ? new Uint32Array(d.buffer, d.byteOffset, d.byteLength >> 2) : null;
+    const lanes = words ? new Uint32Array((w >> 2) + 1) : null;
+    for (let oy = 0; oy < ch; oy++) {
+      accY.fill(0); accU.fill(0); accV.fill(0);
+      const r0 = oy * b, r1 = Math.min(h, r0 + b);
+      const c0 = oy * hb, c1 = Math.min(chp, c0 + hb);
+      sumPlane(d, words, L[0].offset, L[0].stride, r0, r1, w, b, cw, accY, lanes, 1);
+      if (nv12) {
+        sumRows(d, L[1].offset, L[1].stride, c0, c1, cwp, hb, cw, accU, 2);
+        sumRows(d, L[1].offset + 1, L[1].stride, c0, c1, cwp, hb, cw, accV, 2);
+      } else {
+        sumPlane(d, words, L[1].offset, L[1].stride, c0, c1, cwp, hb, cw, accU, lanes, 1);
+        sumPlane(d, words, L[2].offset, L[2].stride, c0, c1, cwp, hb, cw, accV, lanes, 1);
+      }
+      const ny = r1 - r0, nc = c1 - c0;
+      const row = (oy + pad) * pw + pad;
+      // whole blocks: one set of factors per row (every block of the row has ny rows and b × b/2 columns)
+      const full = Math.min(cw, Math.floor(w / b), Math.floor(cwp / hb));
+      convert(accY, accU, accV, 0, full, b * ny, hb * nc, K, out, out32, row);
+      for (let ox = full; ox < cw; ox++) {                        // the partial last column
+        const nx = Math.min(w, (ox + 1) * b) - ox * b, ncx = Math.min(cwp, (ox + 1) * hb) - ox * hb;
+        convert(accY, accU, accV, ox, ox + 1, nx * ny, ncx * nc, K, out, out32, row);
+      }
+    }
+    if (pad > 0) mirror(out, pw, ph, cw, ch, pad);
+    return { data: out, w: pw, h: ph, cw, ch, pad };
+  }
+
+  // The border: columns of the copy's rows first, then whole rows (so the corners mirror both ways).
+  function mirror(out, pw, ph, cw, ch, pad) {
+    const u32 = new Uint32Array(out.buffer, out.byteOffset, pw * ph);
+    for (let y = pad; y < pad + ch; y++) {
+      const row = y * pw;
+      for (let k = 0; k < pad; k++) {
+        u32[row + pad - 1 - k] = u32[row + pad + k];
+        u32[row + pad + cw + k] = u32[row + pad + cw - 1 - k];
+      }
+    }
+    for (let k = 0; k < pad; k++) {
+      u32.copyWithin((pad - 1 - k) * pw, (pad + k) * pw, (pad + k + 1) * pw);
+      u32.copyWithin((pad + ch + k) * pw, (pad + ch - 1 - k) * pw, (pad + ch - k) * pw);
+    }
+  }
+
+  return { FORMATS, MATRICES, SIGMA_STEP, supports, factorFor, sigmaFor, padFor, coefficients, toRgba };
+});
 /* 文字PVメーカー v2 — original work. The chooser: stream seeds, candidate weights and Gumbel-max picks (DESIGN §4.16.4, §4.1.3). */
 MV.def('planner/choose', ['core/hash', 'core/rng', 'core/num'], (H, R, N) => {
   'use strict';
@@ -22994,11 +23264,13 @@ MV.def('engine/render/shapes', ['core/color', 'core/media', 'engine/scene/table'
 
   // One frame of the media: frame() for the source at media time m. Returns the MediaFrame (valid until the next call
   // for the same id) or null; counts a missing or provisional frame, and in export quality records the error the
-  // facade raises (EngineError 'media-missing' / 'media-not-ready') instead of drawing a substitute.
+  // facade raises (EngineError 'media-missing' / 'media-not-ready') instead of drawing a substitute. want.blur is asked
+  // for every medium: the store bakes it into stills (§11.4.6) and into video and animation frames once per source
+  // frame (MediaFrame.blur > 0), so the draw applies no blur of its own then.
   function frameFor(dc, rec, m, blur) {
     const store = dc.assets;
     WANT.px = Math.max(rec.box.w, rec.box.h) * dc.scale * rec.headroom;
-    WANT.blur = rec.time ? 0 : blur * dc.scale;
+    WANT.blur = blur * dc.scale;
     WANT.thumb = dc.thumb === true;
     WANT.exact = dc.quality === 'export' && !WANT.thumb;     // a thumbnail shows the poster, never waits for a frame
     const f = store && typeof store.frame === 'function' ? store.frame(rec.src, m, WANT) : null;
@@ -23016,9 +23288,12 @@ MV.def('engine/render/shapes', ['core/color', 'core/media', 'engine/scene/table'
 
   // drawMedia(g, rec, M, alpha, dc, tl) → boolean (§11.5.5): one media node. Its media time is closed-form (clock
   // 'song': the frame's absolute time dc.t; 'show': the scene-local tl); the store picks the source frame. An opaque
-  // picture without blur is drawn straight (veil and tint over it); a picture with alpha, a text fill ('atop') or a
-  // blurred video goes through a pooled full-frame surface (veil and tint 'source-atop', then the blur), composited
-  // with `comp`. 'soft' draws the blurred cover copy first. The mask (a K.shape in box coordinates) clips. Allocation-free.
+  // picture without blur is drawn straight (veil and tint over it), and so is a blurred one whose frame comes with its
+  // blur baked (MediaFrame.blur > 0: stills always, videos and animations once the store has baked that frame); a
+  // picture with alpha, a text fill ('atop') or a blurred video frame that came without its blur goes through a pooled
+  // full-frame surface (veil and tint 'source-atop', then the per-frame blur, counted as dc.counts.mediaFallback),
+  // composited with `comp`. 'soft' draws the blurred cover copy first. The mask (a K.shape in box coordinates) clips.
+  // Allocation-free.
   function drawMedia(g, rec, M, alpha, dc, tl) {
     const T0 = rec.time;
     const m = T0 ? MEDIA.mapTime(T0, T0.clock === 'song' ? dc.t : tl) : 0;
@@ -23029,7 +23304,7 @@ MV.def('engine/render/shapes', ['core/color', 'core/media', 'engine/scene/table'
     if (rec.soft) {
       const f = frameFor(dc, rec, m, rec.softBlur);
       if (f) {
-        drawLayered(g, rec, f, rec.soft, M, alpha, dc, vis, mirror, rec.softVeil, T0 ? rec.softBlur : 0, 'over');
+        drawLayered(g, rec, f, rec.soft, M, alpha, dc, vis, mirror, rec.softVeil, frameBlur(dc, T0, f, rec.softBlur), 'over');
         drew = true;
       }
     }
@@ -23038,9 +23313,17 @@ MV.def('engine/render/shapes', ['core/color', 'core/media', 'engine/scene/table'
       if (dc.quality !== 'export' && !drew) drawPlaceholder(g, rec, M, alpha, pal);
       return drew;
     }
-    drawLayered(g, rec, f, rec.rect, M, alpha, dc, vis, mirror, rec.veil, T0 ? rec.blur : 0, rec.comp);
+    drawLayered(g, rec, f, rec.rect, M, alpha, dc, vis, mirror, rec.veil, frameBlur(dc, T0, f, rec.blur), rec.comp);
     dc.counts.media++;
     return true;
+  }
+
+  // The blur (du) the draw itself must apply to a frame: none for a still (the store blurs it) or a frame whose blur came
+  // baked (f.blur > 0); a timed frame without it gets the per-frame blur of the isolated path, counted as a fallback.
+  function frameBlur(dc, T0, f, blur) {
+    if (!T0 || !(blur > 0) || f.blur > 0) return 0;
+    dc.counts.mediaFallback++;
+    return blur;
   }
 
   function drawLayered(g, rec, f, fit, M, alpha, dc, vis, mirror, veil, videoBlur, comp) {
@@ -24087,7 +24370,8 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
   // createDrawContext({ sprites, paints, scratch, pool?, blurred? }) → dc, mutated per frame by the renderer:
   //   g (current target), D (device matrix), pal, W, H, scale (device px per du), q (paint helpers), assets, pick,
   //   glyphPath ('auto' | 'sprite' | 'direct'), probe ({ blur, glow, shard, pixel } added to glyph poses; lab only),
-  //   face (FontRef for glyph particles), counts { glyphs, shapes, paints, particles, media }
+  //   face (FontRef for glyph particles), counts { glyphs, shapes, paints, particles, media, mediaFallback (blurred
+  //   timed media drawn with the per-frame blur: the store handed out a frame without its baked blur, §11.5.4) }
   //   (DESIGN_2_1) t (absolute frame time, for media on the song clock), backdrop, quality, thumb (posters only),
   //   visible (device rect x0 y0 x1 y1), mediaWaiting, mediaError, pool and blurred (the isolated media path), over and
   //   overKey (the raster oversampling of paints in a zoomed ground and its cache key), cam and layerK (the camera and
@@ -24097,7 +24381,7 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
     return {
       g: null, D: new Float32Array([1, 0, 0, 1, 0, 0]), pal: null, W: 0, H: 0, scale: 1, q: null, assets: null,
       pick: null, glyphPath: 'auto', probe: null, face: null, sprites: o.sprites, paints: o.paints, scratch: o.scratch,
-      counts: { glyphs: 0, shapes: 0, paints: 0, particles: 0, media: 0 },
+      counts: { glyphs: 0, shapes: 0, paints: 0, particles: 0, media: 0, mediaFallback: 0 },
       font: null, pair: { lo: 0, hi: 0, f: 0 },
       VD: new Float32Array(6), VW: new Float32Array(6), M: new Float32Array(6), W6: new Float32Array(6),
       RM: new Float32Array(6), quad: new Float32Array(8),
@@ -24110,7 +24394,7 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
 
   function resetCounts(dc) {
     const c = dc.counts;
-    c.glyphs = 0; c.shapes = 0; c.paints = 0; c.particles = 0; c.media = 0;
+    c.glyphs = 0; c.shapes = 0; c.paints = 0; c.particles = 0; c.media = 0; c.mediaFallback = 0;
     dc.mediaWaiting = 0; dc.mediaError = null;
   }
 
@@ -25875,7 +26159,7 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
       if (quality === 'preview' && now) adaptTo(last.ms);
       const c = dc.counts;
       const stats = { ms: last.ms, drawn: { glyphs: c.glyphs, shapes: c.shapes, paints: c.paints, particles: c.particles }, passes,
-        provisional, level, media: { drawn: c.media, waiting: dc.mediaWaiting } };
+        provisional, level, media: { drawn: c.media, waiting: dc.mediaWaiting, fallback: c.mediaFallback } };
       // export quality never draws a substitute: the facade turns this into EngineError('media-not-ready' | 'media-missing')
       if (dc.mediaError) stats.mediaError = dc.mediaError;
       return stats;
@@ -25883,10 +26167,12 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
 
     // mediaAt(plan, source, t, out, scale) → out: [{ id, m }] of the media nodes of the scenes active at absolute time
     // t, with their media times (closed form, the drawing's own rule); no behaviour runs. Unsorted; the facade sorts.
-    // With an output scale, a still also carries the px and blur its draw will ask the store for (shapes.frameFor: the
-    // box's long side × scale × headroom, blur × scale; a 'soft' fit adds its blurred copy), so the store readies
-    // exactly that tier. The media of a scene come from source.media(kind, i) (the facade's memo by fingerprint, so no
-    // scene is kept or rebuilt for this) when the source has it, else from the built scene (mediaEntries).
+    // With an output scale, every medium also carries the px and blur its draw will ask the store for (shapes.frameFor:
+    // the box's long side × scale × headroom, blur × scale; a 'soft' fit adds its blurred copy), so the store readies
+    // exactly that still tier, and bakes exactly that blur of a video or animation frame (DESIGN_2_1 §11.4.6). The
+    // products are shapes.frameFor's, in its order, so the store's keys match bit for bit. The media of a scene come
+    // from source.media(kind, i) (the facade's memo by fingerprint, so no scene is kept or rebuilt for this) when the
+    // source has it, else from the built scene (mediaEntries).
     const mediaGraph = { fg: null };
     function mediaAt(plan, source, t, out, scale) {
       const list = out || [];
@@ -25896,11 +26182,11 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
       const entries = (kind, i) => (source.media ? source.media(kind, i) : mediaEntries(kind === 'cut' ? source.cut(i) : source.ground(i)));
       const add = (ms, tl) => {
         for (const e of ms) {
-          if (e.time) { list.push({ id: e.id, m: MEDIA.mapTime(e.time, e.time.clock === 'song' ? t : tl) }); continue; }
-          if (!(scale > 0)) { list.push({ id: e.id, m: 0 }); continue; }
+          const m = e.time ? MEDIA.mapTime(e.time, e.time.clock === 'song' ? t : tl) : 0;
+          if (!(scale > 0)) { list.push({ id: e.id, m }); continue; }
           const px = e.size * scale * e.headroom;                    // shapes.frameFor's product, in its order
-          list.push({ id: e.id, m: 0, px, blur: e.blur * scale });
-          if (e.softBlur >= 0) list.push({ id: e.id, m: 0, px, blur: e.softBlur * scale });
+          list.push({ id: e.id, m, px, blur: e.blur * scale });
+          if (e.softBlur >= 0) list.push({ id: e.id, m, px, blur: e.softBlur * scale });
         }
       };
       const seen = new Set();
@@ -34936,7 +35222,9 @@ MV.def('parts/ground/photo', ['parts/kit'], (K) => {
     build(env, p) {
       const { sb, pal, D } = env;
       const area = { x0: -BLEED * D.w, y0: -BLEED * D.h, W: D.w * (1 + 2 * BLEED), H: D.h * (1 + 2 * BLEED), fill: pal.ground };
-      sb.paint({ layer: 'ground', bleed: BLEED, animated: false, owner: env.owner, data: area, draw: flatDraw });
+      // Drawn live (not animated: false): one fillRect costs about 0.2 ms, whereas a cached raster of the frame and its
+      // bleed is resampled under the camera every frame (a full-frame scaled draw: ≈ 3 ms in software raster).
+      sb.paint({ layer: 'ground', bleed: BLEED, owner: env.owner, data: area, draw: flatDraw });
       const media = Object.assign({}, p, { veil: p.veil * (0.6 + 0.4 * p.amount) });
       K.media(env, { layer: 'ground', owner: env.owner, use: 'ground', src: p.image, box: { x: 0, y: 0, w: D.w, h: D.h }, p: media });
     },
@@ -44342,7 +44630,7 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
       alive();
       if (!plan) {
         return { ms: 0, drawn: { glyphs: 0, shapes: 0, paints: 0, particles: 0 }, passes: 0, provisional: false,
-          media: { drawn: 0, waiting: 0 } };
+          media: { drawn: 0, waiting: 0, fallback: 0 } };
       }
       const exporting = !!ropts && ropts.quality === 'export';
       if (exporting) {
@@ -44365,9 +44653,10 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
     // --- media (DESIGN_2_1 §11.3.7) ---
 
     // mediaAt(t, { scale }?) → [{ id, m, px?, blur? }]: the media the frame at t draws, with their media times (seconds),
-    // sorted by id, m, px, blur and deduplicated. No behaviour runs; without plan media it is empty at once. Stills also
-    // carry the px (long side, device px) and blur their draw asks the store for at the output scale (`scale`, else the
-    // last frame's), so assets.ready() decodes exactly that tier; none before a first frame without a scale.
+    // sorted by id, m, px, blur and deduplicated. No behaviour runs; without plan media it is empty at once. Every
+    // medium (stills, videos and animations) also carries the px (long side, device px) and blur its draw asks the store
+    // for at the output scale (`scale`, else the last frame's), so assets.ready() decodes exactly that still tier and
+    // bakes exactly that blur of a video frame (DESIGN_2_1 §11.4.6); none before a first frame without a scale.
     const mediaScratch = [];
     const byMedia = (a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : a.m - b.m || (a.px || 0) - (b.px || 0) || (a.blur || 0) - (b.blur || 0));
     function mediaAt(t, mopts) {
@@ -44386,8 +44675,10 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
     }
 
     // mediaReady(t, { signal, ahead = 3 / fps, fps, scale }) → Promise: resolves when the store holds every exact frame
-    // the frame at t draws at that output scale (assets.ready of mediaAt), and asks it to start on the frames `ahead`
-    // seconds later (assets.want). Resolved at once without a store or media.
+    // the frame at t draws at that output scale (assets.ready of mediaAt), and asks it to start on the frames of the
+    // next `ahead` seconds (assets.want of mediaAt at every output frame after t up to t + ahead: a look-ahead that
+    // named only the last one would let the session close the frames before it as they pass, to be decoded again from
+    // their key frame when they are asked for). Resolved at once without a store or media.
     function mediaReady(t, ropts) {
       alive();
       const q = ropts || {};
@@ -44396,8 +44687,10 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
       const ahead = Number.isFinite(q.ahead) ? q.ahead : 3 / fps;
       const at = { scale: q.scale };
       const list = mediaAt(t, at);
-      if (typeof assets.want === 'function') {
-        const next = mediaAt(t + ahead, at);
+      if (typeof assets.want === 'function' && ahead > 0) {
+        const steps = Math.max(1, Math.min(8, Math.round(ahead * fps)));
+        const next = [];
+        for (let k = 1; k <= steps; k++) for (const x of mediaAt(t + (ahead * k) / steps, at)) next.push(x);
         if (next.length) assets.want(next);
       }
       if (list.length === 0 || typeof assets.ready !== 'function') return Promise.resolve();
@@ -48079,20 +48372,184 @@ MV.def('export/host/kit', ['export/schedule', 'export/subtitles', 'export/zip', 
 
   return { exportKit, readme, KEY_COLOUR };
 });
+/* 文字PVメーカー v2 — original work. Baked blur of video and animation frames: a small blurred copy made once per source frame, off the draw call (DESIGN_2_1 §11.4.6). */
+MV.def('media/host/bake', ['media/yuv'], (YUV) => {
+  'use strict';
+
+  // createBaker({ canvas, now }) → Baker (one per store fork; its jobs run one at a time)
+  //   variant(long, px, blur) → Variant | null     long: the frame's displayed long side; px, blur: the draw's want
+  //       (device px). null when blur is 0. Variant = { b, sigma, blur, key }: the copy is 1/b of the frame
+  //       (media/yuv.factorFor), blurred by sigma copy px (blur × copy px per device px, in 1/32 px); key = b|sigma,
+  //       and the copy is a function of (source frame, key) only.
+  //   bake(held, v, { alpha }) → Promise<Baked>    held = the session's Held { image, index, w, h, rot }
+  //       Baked = { bitmap: ImageBitmap, w, h (the copy's displayed size: the frame's / b), index, blur, bytes, route }
+  //       Route 'yuv': a VideoFrame whose format is 8-bit I420 / NV12 with a known matrix (media/yuv.supports) and b ≥
+  //       2 — copyTo (the visible rect), the box average and colour conversion of media/yuv with a mirrored border of 3σ,
+  //       putImageData, then ctx.filter blur into a copy-sized canvas. That includes a GPU-backed frame that reports
+  //       such a format: copyTo reads it back (nothing here tells how a frame is backed; the readback's cost on a GPU
+  //       machine is not measured). Route 'canvas' (any other frame: a format of null, as an opaque GPU frame can
+  //       have, a 10-bit or alpha format, an unknown matrix, the alpha-merged or animation ImageBitmap, or b = 1): the
+  //       browser draws the frame into a copy-sized canvas, the border is 8 mirrored draws of it (or transparent for a
+  //       medium with alpha), then the same blur. The route depends on the frame's own properties only, never on
+  //       history.
+  //       Without ctx.filter, a smaller copy scaled back up stands in for the blur (as engine/render/post does).
+  //   stats() → { prepMs, baked, yuv, canvas }   dispose()
+
+  function createBaker(opts) {
+    const o = opts || {};
+    const factory = o.canvas || null;
+    const now = typeof o.now === 'function' ? o.now : () => 0;
+    const canvases = new Map();              // 'role wxh' → { canvas, ctx } (a few sizes per store)
+    let bytes = null, rgba = null;           // scratch: the planes of a frame, the copy with its border
+    let chain = Promise.resolve();
+    let filterOk = null;
+    const counters = { prepMs: 0, baked: 0, yuv: 0, canvas: 0 };
+
+    function surface(role, w, h) {
+      const key = role + ' ' + w + 'x' + h;
+      let s = canvases.get(key);
+      if (s) { canvases.delete(key); canvases.set(key, s); return s; }
+      s = factory ? factory.create(w, h, { alpha: true }) : (() => { const c = new OffscreenCanvas(w, h); return { canvas: c, ctx: c.getContext('2d') }; })();
+      canvases.set(key, s);
+      while (canvases.size > 8) canvases.delete(canvases.keys().next().value);
+      return s;
+    }
+
+    function filterWorks(ctx) {
+      if (filterOk === null) {
+        try { ctx.filter = 'blur(1px)'; filterOk = ctx.filter === 'blur(1px)'; ctx.filter = 'none'; } catch (e) { filterOk = false; }
+      }
+      return filterOk;
+    }
+
+    function variant(long, px, blur) {
+      if (!(blur > 0) || !(long > 0)) return null;
+      const need = px > 0 ? px : long;
+      const b = YUV.factorFor(long, need, blur);
+      const sigma = YUV.sigmaFor(blur, long, b, need);
+      return { b, sigma, blur: Math.max(1, Math.round(blur * 8)) / 8, key: b + '|' + sigma };
+    }
+
+    function isFrame(img) { return typeof VideoFrame !== 'undefined' && img instanceof VideoFrame; }
+
+    // The blurred copy: src (a canvas cw + 2·pad by ch + 2·pad holding the copy and its border) → an ImageBitmap cw × ch.
+    function blurInto(src, cw, ch, pad, sigma) {
+      const out = surface('out', cw, ch);
+      const g = out.ctx;
+      g.setTransform(1, 0, 0, 1, 0, 0);
+      g.globalAlpha = 1;
+      g.globalCompositeOperation = 'source-over';
+      g.clearRect(0, 0, cw, ch);
+      if (filterWorks(g)) {
+        g.filter = 'blur(' + Math.round(sigma * 1000) / 1000 + 'px)';
+        g.drawImage(src.canvas, -pad, -pad);
+        g.filter = 'none';
+      } else {
+        const d = Math.max(1, Math.ceil(sigma));             // no ctx.filter: a smaller copy scaled back up
+        const sw = Math.max(1, Math.ceil(cw / d)), sh = Math.max(1, Math.ceil(ch / d));
+        const small = surface('small', sw, sh);
+        small.ctx.clearRect(0, 0, sw, sh);
+        small.ctx.drawImage(src.canvas, pad, pad, cw, ch, 0, 0, sw, sh);
+        g.drawImage(small.canvas, 0, 0, sw, sh, 0, 0, cw, ch);
+      }
+      return out.canvas.transferToImageBitmap ? out.canvas.transferToImageBitmap() : createImageBitmap(out.canvas);
+    }
+
+    async function viaYuv(img, v) {
+      const rect = img.visibleRect;
+      const vw = rect.width, vh = rect.height;
+      const size = img.allocationSize();
+      if (!bytes || bytes.length < size) bytes = new Uint8Array(size);
+      const layout = await img.copyTo(bytes);
+      const cw = Math.ceil(vw / v.b), ch = Math.ceil(vh / v.b);
+      const pad = YUV.padFor(v.sigma, cw, ch);
+      const need = (cw + 2 * pad) * (ch + 2 * pad) * 4;
+      if (!rgba || rgba.length < need) rgba = new Uint8ClampedArray(need);
+      const cs = img.colorSpace || {};
+      const r = YUV.toRgba({ format: img.format, data: bytes, layout, w: vw, h: vh },
+        { b: v.b, matrix: cs.matrix, full: cs.fullRange === true, pad, out: rgba });
+      const a = surface('in', r.w, r.h);
+      a.ctx.putImageData(new ImageData(r.data, r.w, r.h), 0, 0);
+      const bitmap = await blurInto(a, cw, ch, pad, v.sigma);
+      return { bitmap, cw, ch, vw, vh };
+    }
+
+    async function viaCanvas(img, v, alpha) {
+      const iw = isFrame(img) ? img.displayWidth : img.width, ih = isFrame(img) ? img.displayHeight : img.height;
+      const cw = Math.max(1, Math.ceil(iw / v.b)), ch = Math.max(1, Math.ceil(ih / v.b));
+      const pad = YUV.padFor(v.sigma, cw, ch);
+      const t = surface('copy', cw, ch);
+      t.ctx.setTransform(1, 0, 0, 1, 0, 0);
+      t.ctx.globalCompositeOperation = 'copy';
+      t.ctx.drawImage(img, 0, 0, cw, ch);
+      t.ctx.globalCompositeOperation = 'source-over';
+      const a = surface('in', cw + 2 * pad, ch + 2 * pad);
+      const g = a.ctx;
+      g.setTransform(1, 0, 0, 1, 0, 0);
+      g.clearRect(0, 0, cw + 2 * pad, ch + 2 * pad);
+      if (alpha || pad === 0) g.drawImage(t.canvas, pad, pad);
+      else {
+        // the copy and its 8 mirrored neighbours: pixel −1 − k of the border shows pixel k, as media/yuv mirrors
+        for (let j = -1; j <= 1; j++) {
+          for (let i = -1; i <= 1; i++) {
+            const sx = i ? -1 : 1, sy = j ? -1 : 1;
+            const tx = i < 0 ? pad : i > 0 ? pad + 2 * cw : pad, ty = j < 0 ? pad : j > 0 ? pad + 2 * ch : pad;
+            g.setTransform(sx, 0, 0, sy, tx, ty);
+            g.drawImage(t.canvas, 0, 0);
+          }
+        }
+        g.setTransform(1, 0, 0, 1, 0, 0);
+      }
+      const bitmap = await blurInto(a, cw, ch, pad, v.sigma);
+      return { bitmap, cw, ch, vw: iw, vh: ih };
+    }
+
+    function bake(held, v, bo) {
+      const alpha = !!(bo && bo.alpha);
+      const job = chain.then(async () => {
+        const t0 = now();
+        const img = held.image;
+        const yuv = v.b >= 2 && !alpha && isFrame(img) && typeof img.copyTo === 'function' && YUV.supports(img.format, img.colorSpace);
+        const made = yuv ? await viaYuv(img, v) : await viaCanvas(img, v, alpha);
+        counters.prepMs += now() - t0;
+        counters.baked++;
+        counters[yuv ? 'yuv' : 'canvas']++;
+        const turned = held.rot === 90 || held.rot === 270;
+        const w = (turned ? made.vh : made.vw) / v.b, h = (turned ? made.vw : made.vh) / v.b;
+        return { bitmap: made.bitmap, w, h, index: held.index, blur: v.blur, bytes: made.cw * made.ch * 4, route: yuv ? 'yuv' : 'canvas' };
+      });
+      chain = job.then(() => {}, () => {});
+      return job;
+    }
+
+    return {
+      variant, bake,
+      stats() { return Object.assign({}, counters); },
+      dispose() { canvases.clear(); bytes = null; rgba = null; },
+    };
+  }
+
+  return { createBaker };
+});
 /* 文字PVメーカー v2 — original work. Frame-exact decode sessions: WebCodecs VideoDecoder fed from our sample tables, WebM alpha merge, ImageDecoder animations (DESIGN_2_1 §11.4.4, §11.4.10). */
 MV.def('media/host/session', ['media/samples'], (SM) => {
   'use strict';
 
-  // createVideoSession({ track, read, prefer, alpha, canvas }) → VideoSession
+  // createVideoSession({ track, read, prefer, alpha, canvas, onHeld, onDrop }) → VideoSession
   //   track = { codec, description, codedW, codedH, w, h, rot, color, table }; read(offset, length) → Promise<Uint8Array>
   //   prefer: 'software' (export forks: bit-exact software decoders when the browser has them) | 'hardware' (preview)
   //   alpha: true → a second decoder for the WebM alpha stream (BlockAdditional id 1), merged per frame
+  //   onHeld(i) / onDrop(i): called when frame i becomes held, and when a held frame i is closed (evicted; not on close())
+  //   — the store bakes a hinted frame once it is held, and closes a frame's baked copies with it (§11.4.6)
   // VideoSession = {
   //   request(i, { pin }) → Promise<Held>   presentation index i; resolves when that exact frame is held
   //   held(i) → Held | null                 synchronous
   //   nearest(i) → Held | null              the nearest held frame at or before i, else the last shown one
   //   show(i)                               marks i as shown: kept until another frame is shown
-  //   hint(list)                            preview look-ahead: decode these soon, lowest priority, no promise
+  //   hint(list)                            preview look-ahead: decode these soon, lowest priority, no promise (a hinted
+  //                                         frame behind the decode position waits for its request: hints never seek back;
+  //                                         and a hint waits while more than HOLD frames still to be shown are held, so
+  //                                         it never closes a frame about to be shown: hints resume on show())
   //   pin(set)                              frames the next draws need (export): never evicted until the next pin()
   //   pixels, failed (null | 'decode' | 'codec'), stats() → { held, decodeMs, seeks }, close()
   // }  Held = { image: VideoFrame | ImageBitmap, index, w, h (displayed px of the image), rot }
@@ -48104,6 +48561,7 @@ MV.def('media/host/session', ['media/samples'], (SM) => {
   const QUEUE_MAX = 8;            // chunks in flight
   const WINDOW = 4 * 1024 * 1024; // coalesced read window
   const STALL_MS = 10000;         // no decoder progress for this long counts as a decode error
+  const SETTLE_MS = 20;           // past a hinted target: the decoder is given this long to output it before another chunk
 
   function mediaError(code, message) { return new SM.MediaError(code, message); }
 
@@ -48145,6 +48603,8 @@ MV.def('media/host/session', ['media/samples'], (SM) => {
     const withAlpha = !!opts.alpha && !!table.aoff;
     const factory = opts.canvas || null;
     const clock = typeof opts.now === 'function' ? opts.now : () => 0;
+    const onHeld = typeof opts.onHeld === 'function' ? opts.onHeld : null;
+    const onDrop = typeof opts.onDrop === 'function' ? opts.onDrop : null;
     const nd = table.key.length;
     const pres = SM.presentationOf(table);
     const byTs = new Map();
@@ -48166,7 +48626,8 @@ MV.def('media/host/session', ['media/samples'], (SM) => {
     let current = -1;                        // the target being decoded now, or the last one decoded
     let seekFrom = 0;                        // the key frame the decoder started from at the last seek
     const waiting = new Map();               // presentation index → [{ resolve, reject }]
-    let hints = [];
+    let hints = [];                          // the hinted frames still to decode, in list order
+    let hinted = new Set();                  // the latest hint list, whole
     const pairs = { c: new Map(), a: new Map() };   // alpha merge: timestamp → frame waiting for its partner
     const drop = new Set();                  // timestamps whose colour frame was not wanted: close the alpha too
     let win = { at: 0, bytes: new Uint8Array(0) };
@@ -48180,6 +48641,15 @@ MV.def('media/host/session', ['media/samples'], (SM) => {
       return new Promise((resolve) => {
         wake = resolve;
         setTimeout(() => { if (wake === resolve) { wake = null; resolve(); } }, 250);
+      });
+    }
+
+    // → true when `ms` pass without decoder progress (an output or a dequeue), false as soon as there is some.
+    function quietFor(ms) {
+      return new Promise((resolve) => {
+        const w = () => resolve(false);
+        wake = w;
+        setTimeout(() => { if (wake === w) { wake = null; resolve(true); } }, ms);
       });
     }
 
@@ -48217,7 +48687,7 @@ MV.def('media/host/session', ['media/samples'], (SM) => {
 
     function keep(i, image) {
       const prev = held.get(i);
-      if (prev) closeImage(prev.image);
+      if (prev) closeImage(prev.image);           // the same frame decoded again: its baked copies stay valid
       held.delete(i);
       const w = image.displayWidth || image.width, h = image.displayHeight || image.height;
       held.set(i, { image, index: i, w: swap ? h : w, h: swap ? w : h, rot: track.rot || 0 });
@@ -48228,6 +48698,7 @@ MV.def('media/host/session', ['media/samples'], (SM) => {
         const got = held.get(i);
         for (const p of list) p.resolve(got);
       }
+      if (onHeld && held.has(i)) { try { onHeld(i); } catch (e) { /* the store's problem */ } }
       tick();
     }
 
@@ -48240,7 +48711,18 @@ MV.def('media/host/session', ['media/samples'], (SM) => {
         closeImage(h.image);
         held.delete(i);
         free--;
+        if (onDrop) { try { onDrop(i); } catch (e) { /* the store's problem */ } }
       }
+    }
+
+    // Whether a hint may be decoded now: at most HOLD frames still to be shown are held (after the shown one, or in the
+    // latest hint list: a loop's start comes after its end; the last one decoded included). Decoding another then
+    // leaves at most HOLD free frames besides the new one, so evict() closes none of them; with more, it would close
+    // the oldest, which in playback is the next frame to be shown (the stage hints 8).
+    function roomAhead() {
+      let ahead = 0;
+      for (const i of held.keys()) if ((i > shown || hinted.has(i)) && i !== shown && !pinned.has(i) && !waiting.has(i)) ahead++;
+      return ahead <= HOLD;
     }
 
     function closeImage(image) { try { image.close(); } catch (err) { /* already closed */ } }
@@ -48431,18 +48913,24 @@ MV.def('media/host/session', ['media/samples'], (SM) => {
     // target is at most AHEAD_MAX samples on (through the key frame at `from` if needed), wait when it was fed and is
     // still in the decoder, and seek otherwise. Up to the target the queue holds 8 chunks; after it, one more chunk
     // at a time and only when the decoder has taken the previous ones, so hardly any frame after the target comes out
-    // (and is closed) before it is asked for.
-    async function ensure(i) {
+    // (and is closed) before it is asked for. A hinted target (`isHint`: the look-ahead, nobody waits for it) is more
+    // careful still: past it, another chunk only once the decoder has shown no progress for SETTLE_MS (it needs more
+    // input: reordered frames), because every frame it outputs past the target is held and, beyond HOLD, closes the
+    // oldest held one — in playback the next to be shown; and it gives way to a request at once.
+    async function ensure(i, isHint) {
       const t0 = clock();
       current = i;
       const { from, to } = SM.runFor(table, i);
       if (needSeek || output[to] || from < seekFrom || (c <= to && to - c > AHEAD_MAX)) seek(from);
       let flushedAt = -1;
       while (!closed && !failed && !held.has(i)) {
+        if (isHint && waiting.size) break;             // a request goes first; the stage hints this frame again
         if (needSeek) { seek(from); continue; }
         if (c < nd) {
           await room(c <= to ? QUEUE_MAX : 0);
           if (closed || failed || held.has(i) || needSeek) continue;
+          if (isHint && c > to && !(await quietFor(SETTLE_MS))) continue;
+          if (closed || failed || held.has(i) || needSeek || (isHint && waiting.size)) continue;
           await feed(c);
           c++;
           continue;
@@ -48460,10 +48948,23 @@ MV.def('media/host/session', ['media/samples'], (SM) => {
       for (const i of waiting.keys()) if (best < 0 || i < best) best = i;
       if (best >= 0) return best;
       while (hints.length) {
-        const i = hints.shift();
-        if (!held.has(i)) return i;
+        const i = hints[0];
+        if (held.has(i) || behind(i)) { hints.shift(); continue; }
+        if (!roomAhead()) return -1;               // resumed by show()
+        hints.shift();
+        return i;
       }
       return -1;
+    }
+
+    // A look-ahead hint never sends the decoder back: a frame behind the decode position (output since the last seek
+    // and closed, or in a GOP before the one the decoder started from) is decoded when it is requested, not hinted.
+    // Otherwise the look-ahead of a loop's first frame resets the decoder under the frames about to be drawn, which
+    // are then decoded again from their key frame (a 1080p export stalled ≈ 150 ms at every loop of a one-GOP clip).
+    function behind(i) {
+      if (needSeek) return false;
+      const { from, to } = SM.runFor(table, i);
+      return output[to] === 1 || from < seekFrom;
     }
 
     async function work() {
@@ -48476,7 +48977,7 @@ MV.def('media/host/session', ['media/samples'], (SM) => {
           if (i < 0) break;
           if (held.has(i)) { keepWaiting(i); continue; }
           try {
-            await ensure(i);
+            await ensure(i, !waiting.has(i));
           } catch (err) {
             if (err && err.code === 'decode' && !failed) fail('decode', err);
             else if (!failed) fail(err && err.code ? err.code : 'decode', err);
@@ -48520,9 +49021,16 @@ MV.def('media/host/session', ['media/samples'], (SM) => {
         for (const h of held.values()) if (h.index <= i && (!best || h.index > best.index)) best = h;
         return best || held.get(shown) || null;
       },
-      show(i) { if (held.has(i)) { shown = i; evict(); } },
+      show(i) {
+        if (!held.has(i)) return;
+        shown = i;
+        evict();
+        if (hints.length && !closed && !failed) work();
+      },
       hint(list) {
-        hints = (list || []).filter((i) => Number.isInteger(i) && i >= 0 && i < table.n && !held.has(i));
+        const all = (list || []).filter((i) => Number.isInteger(i) && i >= 0 && i < table.n);
+        hinted = new Set(all);
+        hints = all.filter((i) => !held.has(i));
         if (hints.length) work();
       },
       pin(set) { pinned = new Set(set || []); evict(); },
@@ -48543,10 +49051,12 @@ MV.def('media/host/session', ['media/samples'], (SM) => {
     };
   }
 
-  // createAnimSession({ blob, mime, table, capBytes }) → the same interface over ImageDecoder: random access by frame
-  // index, decoded frames kept as ImageBitmaps in an LRU of capBytes (64 MB).
+  // createAnimSession({ blob, mime, table, capBytes, onHeld, onDrop }) → the same interface over ImageDecoder: random
+  // access by frame index, decoded frames kept as ImageBitmaps in an LRU of capBytes (64 MB).
   function createAnimSession(opts) {
     const table = opts.table;
+    const onHeld = typeof opts.onHeld === 'function' ? opts.onHeld : null;
+    const onDrop = typeof opts.onDrop === 'function' ? opts.onDrop : null;
     const cap = opts.capBytes || 64 * 1024 * 1024;
     const cache = new Map();                 // frame → Held (insertion order = LRU order)
     const pending = new Map();
@@ -48574,6 +49084,7 @@ MV.def('media/host/session', ['media/samples'], (SM) => {
         cache.delete(i);
         bytes -= h.w * h.h * 4;
         try { h.image.close(); } catch (e) { /* closed */ }
+        if (onDrop) { try { onDrop(i); } catch (e) { /* the store's problem */ } }
       }
     }
 
@@ -48595,6 +49106,7 @@ MV.def('media/host/session', ['media/samples'], (SM) => {
         cache.set(k, h);
         bytes += h.w * h.h * 4;
         evict();
+        if (onHeld && cache.has(k)) { try { onHeld(k); } catch (e) { /* the store's problem */ } }
         return h;
       }).catch((err) => {
         if (!closed && (!err || err.code !== 'closed')) failed = 'decode';
@@ -49077,7 +49589,7 @@ MV.def('media/host/probe', ['core/media', 'core/sha256', 'export/zip', 'media/sn
     drawUpright, blobReader, POSTER, STRIP, TILE, THUMB_V, SUBTLE_MAX, SLICE };
 });
 /* 文字PVメーカー v2 — original work. The real AssetStore: still tiers, decode sessions per fork, provisional frames for the preview, exact frames for export (DESIGN_2_1 §11.3.6, §11.4.5–§11.4.7). */
-MV.def('media/host/store', ['core/media', 'media/samples', 'media/host/session', 'media/host/probe'], (MEDIA, SM, SES, PR) => {
+MV.def('media/host/store', ['core/media', 'media/samples', 'media/host/session', 'media/host/probe', 'media/host/bake'], (MEDIA, SM, SES, PR, BK) => {
   'use strict';
 
   // createMediaStore({ blobs, entries, canvas, now, idle, prefer }) → AssetStore (§11.3.6), plus check(ids).
@@ -49087,10 +49599,19 @@ MV.def('media/host/store', ['core/media', 'media/samples', 'media/host/session',
   //   entries(id) → AssetEntry | null   the document's metadata (doc.media); w, h, kind and anim come from it
   //   prefer: 'hardware' for the preview (the default here), 'software' for export forks (fork() uses it)
   // Media time m picks the source frame with media/samples.sampleAt; the preview may get a provisional frame
-  // (exact: false: the nearest held frame, the last shown one, a filmstrip tile or the poster) while the exact one
-  // decodes, and a 'ready' event follows. Export calls ready() first, so every frame() it makes is exact.
+  // (exact: false: the nearest held frame at or before it, else the last shown one, a filmstrip tile or the poster)
+  // while the exact one decodes, and a 'ready' event follows. Export calls ready() first, so every frame() it makes is
+  // exact.
+  // Blur of a video or animation frame (DESIGN_2_1 §11.4.6): the store bakes it once per source frame (media/host/bake:
+  // a small blurred copy), keyed only by the px and blur of the ready() / want() / frame() request, never by sizes seen
+  // before — in ready() for export; for the preview in idle slices, one bake per slice: the frame on screen first,
+  // then the frames of the latest want() list in its order, each as soon as its session holds it (never in the
+  // decoder's output callback, never frames skipped at speed). MediaFrame.blur is the blur (device px) already applied
+  // to the image, 0 when none: the engine then blurs a timed frame itself (its counted fallback).
+  // A baked copy is closed with its source frame (the session's onDrop), so at most one per held frame and variant.
 
   const STILL_BUDGET = 320 * 1024 * 1024;          // §11.4.7: still bitmaps, blurred copies included
+  const NEAR_BAKED = 2;                            // frames: how far back a baked copy may stand in for an unbaked one
   const SESSION_PIXELS = 16.6e6;                   // Σ coded pixels of the open sessions of one store
   const BLUR_LEVELS = [0, 2, 4, 8, 16, 32, 64, 128];
 
@@ -49130,6 +49651,13 @@ MV.def('media/host/store', ['core/media', 'media/samples', 'media/host/session',
     const lastPx = new Map();
     let decodeMs = 0;
     let disposed = false;
+    const baker = BK.createBaker({ canvas: shared.canvas, now: shared.now });
+    const bakes = new Map();                     // id → Map('b|sigma#index' → Baked), only for frames the session holds
+    const bakeP = new Map();                     // 'id|b|sigma#index' → Promise<Baked | null> (a bake under way)
+    const bakeFailed = new Set();                // 'id|b|sigma#index': the bake of that held frame failed (it is drawn
+                                                 // with the engine's fallback until the session drops the frame)
+    const queue = new Map();                     // preview bakes: 'id|b|sigma' → { id, v, shown: index | −1, hinted: [index] }
+    let pumping = false;
 
     function emit(event, arg) {
       for (const store of shared.stores) for (const fn of store.listeners[event]) { try { fn(arg); } catch (e) { /* a listener's problem */ } }
@@ -49296,12 +49824,16 @@ MV.def('media/host/store', ['core/media', 'media/samples', 'media/host/session',
       if (s) { sessions.delete(id); sessions.set(id, s); return s; }
       const idx = loadIndex(id).value, blob = blobNow(id);
       if (!idx || !blob) return null;
+      let self = null;                           // the session the hooks belong to (a replaced one is ignored)
+      const onHeld = (i) => { if (sessions.get(id) === self) frameHeld(id, i); };
+      const onDrop = (i) => { if (sessions.get(id) === self) frameDropped(id, i); };
       if (entry.anim || idx.track.anim) {
-        s = SES.createAnimSession({ blob, mime: entry.mime, table: idx.table, now: shared.now });
+        s = SES.createAnimSession({ blob, mime: entry.mime, table: idx.table, now: shared.now, onHeld, onDrop });
       } else {
         s = SES.createVideoSession({ track: PR.sessionTrack(idx.table, idx.track), read: PR.blobReader(blob), prefer,
-          alpha: !!idx.track.alpha && entry.alpha !== false, canvas: shared.canvas, now: shared.now });
+          alpha: !!idx.track.alpha && entry.alpha !== false, canvas: shared.canvas, now: shared.now, onHeld, onDrop });
       }
+      self = s;
       sessions.set(id, s);
       let total = 0;
       for (const x of sessions.values()) total += x.pixels;
@@ -49312,6 +49844,7 @@ MV.def('media/host/store', ['core/media', 'media/samples', 'media/host/session',
         decodeMs += x.stats().decodeMs;
         x.close();
         sessions.delete(k);
+        dropBakes(k);
       }
       return s;
     }
@@ -49325,17 +49858,17 @@ MV.def('media/host/store', ['core/media', 'media/samples', 'media/host/session',
 
     // --- frames ----------------------------------------------------------------------------------------------------------
 
-    function mf(id, image, w, h, rot, exact, index) {
+    function mf(id, image, w, h, rot, exact, index, blur) {
       let f = frames.get(id);
-      if (!f) { f = { image: null, w: 0, h: 0, rot: 0, exact: false, index: 0 }; frames.set(id, f); }
-      f.image = image; f.w = w; f.h = h; f.rot = rot; f.exact = exact; f.index = index;
+      if (!f) { f = { image: null, w: 0, h: 0, rot: 0, exact: false, index: 0, blur: 0 }; frames.set(id, f); }
+      f.image = image; f.w = w; f.h = h; f.rot = rot; f.exact = exact; f.index = index; f.blur = blur > 0 ? blur : 0;
       return f;
     }
 
     function posterFrame(id, exact) {
       const t = loadThumbs(id).value;
       if (!t || !t.poster) return null;
-      return mf(id, t.poster, t.poster.width, t.poster.height, 0, exact, 0);
+      return mf(id, t.poster, t.poster.width, t.poster.height, 0, exact, 0, 0);
     }
 
     function isTimed(entry) { return entry.kind === 'video' || entry.anim === true; }
@@ -49356,15 +49889,23 @@ MV.def('media/host/store', ['core/media', 'media/samples', 'media/host/session',
       lastPx.set(id, Math.max(lastPx.get(id) || 0, px));
       const tier = MEDIA.tier(px, entry), level = blurLevel(w.blur);
       const hit = touchStill(stillKey(id, tier, level));
-      if (hit) return mf(id, hit.bitmap, hit.bitmap.width, hit.bitmap.height, 0, true, 0);
+      if (hit) return mf(id, hit.bitmap, hit.bitmap.width, hit.bitmap.height, 0, true, 0, level);
       decodeStill(id, entry, tier, level).catch(() => {});
-      let best = null;
-      for (const [k, r] of shared.stills) if (k.startsWith(id + '|') && (!best || r.bitmap.width > best.bitmap.width)) best = r;
-      if (best) return mf(id, best.bitmap, best.bitmap.width, best.bitmap.height, 0, false, 0);
+      let best = null, bestLevel = 0;
+      for (const [k, r] of shared.stills) {
+        if (k.startsWith(id + '|') && (!best || r.bitmap.width > best.bitmap.width)) { best = r; bestLevel = Number(k.slice(k.lastIndexOf('|') + 1)); }
+      }
+      if (best) return mf(id, best.bitmap, best.bitmap.width, best.bitmap.height, 0, false, 0, bestLevel);
       loadThumbs(id);
       return posterFrame(id, false);
     }
 
+    // A timed frame. With want.blur the baked copy of that variant is handed out when it is held (exact); export gets
+    // the unbaked exact frame otherwise (blur 0: the engine's counted fallback). The preview, while the bake waits for
+    // an idle slice, gets a provisional frame (exact: false): the baked copy of a frame at most NEAR_BAKED before it
+    // (playback: the frame shown a moment ago), else the exact frame unbaked (the engine blurs it itself). A frame that is
+    // not held yet gives the order of §11.4.5 — the nearest held frame at or before it, else the last one shown — as its
+    // baked copy when there is one, else unbaked; then a filmstrip tile, then the poster.
     function timedFrame(id, entry, m, w) {
       const idx = loadIndex(id);
       if (!idx.value) { loadThumbs(id); return posterFrame(id, false); }
@@ -49372,25 +49913,178 @@ MV.def('media/host/store', ['core/media', 'media/samples', 'media/host/session',
       const i = SM.sampleAt(table, typeof m === 'number' && Number.isFinite(m) ? m : 0);
       const s = sessionFor(id, entry);
       if (!s) return posterFrame(id, false);
+      const v = w.blur > 0 ? variantOf(entry, w.px, w.blur) : null;
       const h = s.held(i);
-      if (h) { s.show(i); return mf(id, h.image, h.w, h.h, h.rot, true, i); }
+      if (h) {
+        s.show(i);
+        if (!v) return mf(id, h.image, h.w, h.h, h.rot, true, i, 0);
+        const bk = bakedOf(id, v, i);
+        if (bk) return mf(id, bk.bitmap, bk.w, bk.h, h.rot, true, i, bk.blur);
+        if (w.exact || bakeFailed.has(id + '|' + v.key + '#' + i)) return mf(id, h.image, h.w, h.h, h.rot, true, i, 0);
+        schedule(id, v, i);
+        const near = recentBaked(id, v, i);
+        if (near) return mf(id, near.bitmap, near.w, near.h, h.rot, false, near.index, near.blur);
+        return mf(id, h.image, h.w, h.h, h.rot, false, i, 0);
+      }
       s.request(i).then(() => emit('ready', { id }), () => sessionFailed(id, s));
+      if (v && !w.exact) schedule(id, v, i);      // baked as soon as it is held (the session's onHeld)
       const near = s.nearest(i);
-      if (near) return mf(id, near.image, near.w, near.h, near.rot, false, near.index);
+      if (near) {
+        const bk = v ? bakedOf(id, v, near.index) : null;
+        if (bk) return mf(id, bk.bitmap, bk.w, bk.h, near.rot, false, near.index, bk.blur);
+        return mf(id, near.image, near.w, near.h, near.rot, false, near.index, 0);
+      }
       const t = loadThumbs(id).value;
       if (t && t.tiles.length) {
         const picks = PR.stripPicks(table, entry.anim === true || idx.value.track.anim);
         let k = 0;
         for (let j = 0; j < picks.length; j++) if (picks[j] <= i) k = j;
         const tile = t.tiles[Math.min(k, t.tiles.length - 1)];
-        return mf(id, tile, tile.width, tile.height, 0, false, picks[k]);
+        return mf(id, tile, tile.width, tile.height, 0, false, picks[k], 0);
       }
       return posterFrame(id, false);
     }
 
+    // --- baked blur of timed frames (§11.4.6) ------------------------------------------------------------------------
+
+    // The variant a request asks for: from the entry's displayed long side and the request's px and blur only.
+    function variantOf(entry, px, blur) { return baker.variant(Math.max(entry.w || 0, entry.h || 0), px, blur); }
+
+    function bakedOf(id, v, i) { const m = bakes.get(id); return m ? m.get(v.key + '#' + i) || null : null; }
+
+    // The baked copy of this variant of the latest frame before i, at most NEAR_BAKED frames before it (the frame shown
+    // a moment ago in playback), or null.
+    function recentBaked(id, v, i) {
+      const m = bakes.get(id);
+      if (!m) return null;
+      let best = null;
+      for (const [k, r] of m) {
+        if (!k.startsWith(v.key + '#') || r.index >= i || r.index < i - NEAR_BAKED) continue;
+        if (!best || r.index > best.index) best = r;
+      }
+      return best;
+    }
+
+    function closeBaked(r) { try { r.bitmap.close(); } catch (e) { /* closed */ } }
+
+    // Everything baked for one id goes (its session closed, a relink, a clear): the copies, the queued bakes, the
+    // remembered failures, and the bakes under way (they finish, but no later request waits on them).
+    function dropBakes(id) {
+      const m = bakes.get(id);
+      if (m) { for (const r of m.values()) closeBaked(r); bakes.delete(id); }
+      const pre = id + '|';
+      for (const k of [...queue.keys()]) if (k.startsWith(pre)) queue.delete(k);
+      for (const k of [...bakeFailed]) if (k.startsWith(pre)) bakeFailed.delete(k);
+      for (const k of [...bakeP.keys()]) if (k.startsWith(pre)) bakeP.delete(k);
+    }
+
+    // The session closed frame i (evicted): its baked copies go with it, and so does a remembered failure (a frame
+    // decoded again is baked again).
+    function frameDropped(id, i) {
+      const m = bakes.get(id);
+      if (m) for (const [k, r] of m) if (r.index === i) { closeBaked(r); m.delete(k); }
+      if (bakeFailed.size) {
+        const pre = id + '|', end = '#' + i;
+        for (const k of [...bakeFailed]) if (k.startsWith(pre) && k.endsWith(end)) bakeFailed.delete(k);
+      }
+    }
+
+    // The session holds frame i now: bake it if the preview's queue asks for it.
+    function frameHeld(id, i) {
+      for (const q of queue.values()) {
+        if (q.id === id && (q.shown === i || q.hinted.includes(i))) { pump(); return; }
+      }
+    }
+
+    // bakeHeld(id, s, h, v, entry) → Promise<Baked | null>: at most one bake per (id, variant, frame) under way. A failure
+    // on a frame that is still held is remembered until the session drops that frame (it is drawn with the engine's
+    // fallback meanwhile, not retried at every draw).
+    function bakeHeld(id, s, h, v, entry) {
+      const have = bakedOf(id, v, h.index);
+      if (have) return Promise.resolve(have);
+      const pk = id + '|' + v.key + '#' + h.index;
+      if (bakeFailed.has(pk)) return Promise.resolve(null);
+      if (bakeP.has(pk)) return bakeP.get(pk);
+      const p = baker.bake(h, v, { alpha: !!entry.alpha }).then((r) => {
+        if (bakeP.get(pk) === p) bakeP.delete(pk);
+        if (disposed || sessions.get(id) !== s || !s.held(h.index)) { closeBaked(r); return null; }
+        let m = bakes.get(id);
+        if (!m) { m = new Map(); bakes.set(id, m); }
+        const prev = m.get(v.key + '#' + h.index);
+        if (prev) closeBaked(prev);
+        m.set(v.key + '#' + h.index, r);
+        return r;
+      }, () => {
+        if (bakeP.get(pk) === p) bakeP.delete(pk);
+        if (!disposed && sessions.get(id) === s && s.held(h.index) === h) bakeFailed.add(pk);
+        return null;
+      });
+      bakeP.set(pk, p);
+      return p;
+    }
+
+    // Preview bakes (§11.4.6): per asset and variant, the frame on screen (frame()) and the frames of the latest want()
+    // list, baked one per idle slice in that order as soon as the session holds them.
+    function queueOf(id, v) {
+      const key = id + '|' + v.key;
+      let q = queue.get(key);
+      if (!q) { q = { id, v, shown: -1, hinted: [] }; queue.set(key, q); }
+      return q;
+    }
+
+    function schedule(id, v, i) {
+      queueOf(id, v).shown = i;
+      pump();
+    }
+
+    function slice() {
+      if (typeof shared.idle === 'function') return Promise.resolve(shared.idle());
+      return new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    // The next preview bake: a frame on screen first, then the hinted frames in list order; only frames the session
+    // holds that are not baked, not failed and not being baked.
+    function nextBake() {
+      for (let pass = 0; pass < 2; pass++) {
+        for (const [k, q] of queue) {
+          const s = sessions.get(q.id);
+          if (!s) { queue.delete(k); continue; }
+          const list = pass === 0 ? (q.shown >= 0 ? [q.shown] : []) : q.hinted;
+          for (const i of list) {
+            const h = s.held(i);
+            if (!h) continue;
+            const pk = q.id + '|' + q.v.key + '#' + i;
+            if (bakedOf(q.id, q.v, i) || bakeFailed.has(pk) || bakeP.has(pk)) continue;
+            return { id: q.id, s, h, v: q.v };
+          }
+        }
+      }
+      return null;
+    }
+
+    async function pump() {
+      if (pumping || disposed) return;
+      pumping = true;
+      try {
+        for (;;) {
+          const job = nextBake();
+          if (!job) break;
+          const r = await bakeHeld(job.id, job.s, job.h, job.v, shared.entries(job.id) || {});
+          if (r) emit('ready', { id: job.id });
+          await slice();
+          if (disposed) break;
+        }
+      } finally {
+        pumping = false;
+      }
+    }
+
+    // want(list): the preview's look-ahead (the stage lists the frame at t, then t + k / 30, k = 1…8, while playing).
+    // Timed items start decoding (the session's hints); with a blur, every listed frame of that variant is baked as soon
+    // as the session holds it, in list order (the list replaces the previous one: hints that are no longer listed lapse).
     function want(list) {
       if (disposed) return;
-      const byId = new Map();
+      const byId = new Map(), hinted = new Map();
       for (const item of list || []) {
         if (!item || !MEDIA.isId(item.id)) continue;
         const entry = shared.entries(item.id);
@@ -49398,16 +50092,30 @@ MV.def('media/host/store', ['core/media', 'media/samples', 'media/host/session',
         const idx = loadIndex(item.id);
         if (!idx.value) continue;
         if (!byId.has(item.id)) byId.set(item.id, []);
-        byId.get(item.id).push(SM.sampleAt(idx.value.table, item.m || 0));
+        const i = SM.sampleAt(idx.value.table, item.m || 0);
+        byId.get(item.id).push(i);
+        const v = item.blur > 0 ? variantOf(entry, item.px, item.blur) : null;
+        if (!v) continue;
+        const key = item.id + '|' + v.key;
+        if (!hinted.has(key)) hinted.set(key, { id: item.id, v, list: [] });
+        const h = hinted.get(key);
+        if (!h.list.includes(i)) h.list.push(i);
       }
       for (const [id, indices] of byId) {
         const s = sessionFor(id, shared.entries(id));
         if (s) s.hint(indices);
       }
+      for (const [k, q] of queue) {
+        q.hinted = [];
+        if (q.shown < 0 && !hinted.has(k)) queue.delete(k);
+      }
+      for (const h of hinted.values()) queueOf(h.id, h.v).hinted = h.list;
+      if (hinted.size) pump();
     }
 
-    // ready(list, { signal }) → resolves when every exact frame is held. Items are { id, m } and, for stills, may carry
-    // { px, blur } (the tier the draw will ask for); without px a still decodes at the largest need seen, else full size.
+    // ready(list, { signal }) → resolves when every exact frame is held. Items are { id, m } and may carry { px, blur }:
+    // a still decodes at that tier (without px: the largest need seen, else full size); a timed frame with blur > 0 is
+    // also baked at that variant, so export frames draw the baked copy (a bake that fails leaves the exact unbaked frame).
     async function ready(list, o) {
       const signal = o && o.signal;
       const jobs = [];
@@ -49432,7 +50140,10 @@ MV.def('media/host/store', ['core/media', 'media/samples', 'media/host/session',
           pins.get(id).add(i);
           const s = sessionFor(id, entry);
           s.pin(pins.get(id));
-          try { await s.request(i, { pin: true }); } catch (err) { sessionFailed(id, s); throw err; }
+          let h;
+          try { h = await s.request(i, { pin: true }); } catch (err) { sessionFailed(id, s); throw err; }
+          const v = item.blur > 0 ? variantOf(entry, item.px, item.blur) : null;
+          if (v && h) await bakeHeld(id, s, h, v, entry);
         })());
       }
       const all = Promise.all(jobs);
@@ -49493,16 +50204,29 @@ MV.def('media/host/store', ['core/media', 'media/samples', 'media/host/session',
         return () => set.delete(fn);
       },
       fork(o) { return storeOver(shared, (o && o.prefer) || 'software', false); },
+      // stats() → { stillBytes, sessions, sessionPixels, held, decodeMs } plus (additive) prepMs (time in bakes), baked
+      // and bakedBytes (the copies held now), routes { yuv, canvas } (bakes made so far by each route), and fed and
+      // seeks (chunks fed and decoder seeks of the open sessions)
       stats() {
-        let pixels = 0, held = 0, ms = decodeMs;
-        for (const s of sessions.values()) { pixels += s.pixels; const st = s.stats(); held += st.held; ms += st.decodeMs; }
-        return { stillBytes: shared.stillBytes, sessions: sessions.size, sessionPixels: pixels, held, decodeMs: ms };
+        let pixels = 0, held = 0, ms = decodeMs, baked = 0, bakedBytes = 0, fed = 0, seeks = 0;
+        for (const s of sessions.values()) {
+          pixels += s.pixels;
+          const st = s.stats();
+          held += st.held; ms += st.decodeMs; fed += st.fed || 0; seeks += st.seeks || 0;
+        }
+        for (const m of bakes.values()) for (const r of m.values()) { baked++; bakedBytes += r.bytes; }
+        const bs = baker.stats();
+        return { stillBytes: shared.stillBytes, sessions: sessions.size, sessionPixels: pixels, held, decodeMs: ms,
+          prepMs: bs.prepMs, baked, bakedBytes, routes: { yuv: bs.yuv, canvas: bs.canvas }, fed, seeks };
       },
       dispose() {
         if (disposed) return;
         disposed = true;
         for (const s of sessions.values()) s.close();
         sessions.clear();
+        for (const id of [...bakes.keys()]) dropBakes(id);
+        queue.clear(); bakeFailed.clear(); bakeP.clear();
+        baker.dispose();
         frames.clear();
         shared.stores.delete(internal);
         if (root) {
@@ -49512,12 +50236,12 @@ MV.def('media/host/store', ['core/media', 'media/samples', 'media/host/session',
         }
       },
     };
-    const internal = { listeners, dropSession(id) { const s = sessions.get(id); if (s) { s.close(); sessions.delete(id); } } };
+    const internal = { listeners, dropSession(id) { const s = sessions.get(id); if (s) { s.close(); sessions.delete(id); } dropBakes(id); } };
     shared.stores.add(internal);
     return api;
   }
 
-  return { createMediaStore, blurLevel, STILL_BUDGET, SESSION_PIXELS, BLUR_LEVELS };
+  return { createMediaStore, blurLevel, STILL_BUDGET, SESSION_PIXELS, BLUR_LEVELS, NEAR_BAKED };
 });
 /* 文字PVメーカー v2 — original work. DOM helpers: element builder (text only via textContent), delegated events, CSSOM styles, focus, frame batching. */
 MV.def('ui/dom', [], () => {

@@ -80,7 +80,7 @@ test('createEngine checks its services', () => {
   assert.equal(e.plan, null);
   const s = surfaceOf(rec);
   assert.deepEqual(e.renderFrame(s, 1, {}), { ms: 0, drawn: { glyphs: 0, shapes: 0, paints: 0, particles: 0 }, passes: 0, provisional: false,
-    media: { drawn: 0, waiting: 0 } });
+    media: { drawn: 0, waiting: 0, fallback: 0 } });
 });
 
 test('setDoc plans once per document and lists the cuts and segments whose fingerprint changed', () => {

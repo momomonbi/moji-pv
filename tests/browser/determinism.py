@@ -22,7 +22,10 @@ The windows cover entrances, exits, a seam and the texture filter. Two targeted 
    engine and store equals frame N after 0..N−1 (pixel hashes, and the same source frames), and the 60-fps run equals
    the 30-fps run at their shared times. The paused preview (the root store, hardware preferred) after a scrub, redrawn
    until it is exact, shows the export's source frames (MediaFrame.index, seen through the store's frame calls) with
-   pixels within MAE ≤ 2/255. --no-media skips it.
+   pixels within MAE ≤ 2/255. The video ground is at its automatic depth (back: blurred), so its frames come with the
+   blur baked by the store (DESIGN_2_1 §11.4.6): every export frame of it must be baked (MediaFrame.blur > 0), no draw
+   may fall back to the per-frame blur (FrameStats.media.fallback 0), and the paused preview ends on the baked look too.
+   --no-media skips it.
 Registries: the catalog (what ships) and the examples, when the page has them; --parts picks one.
 Google Fonts are blocked (fallback faces).
 Run: PW_EXECUTABLE=/opt/pw-browsers/chromium python3 tests/browser/determinism.py [--parts catalog] [--projects basic,lrc]
@@ -184,6 +187,10 @@ async def check_media(browser, failures):
             bad.append('frame %d alone differs from the same frame after 0..%d (source frames %r / %r)' % (x['k'], x['k'] - 1, x['index'], x['seqIndex']))
     if r['rate'] != 'same':
         bad.append('the 30- and 60-fps runs differ at shared times: %s' % r['rate'])
+    if any(r['fallback']):
+        bad.append('export frames fell back to the per-frame blur: %r' % r['fallback'])
+    if not all(r['videoBaked']):
+        bad.append('export frames of the blurred video ground came without their baked blur: %r' % r['videoBaked'])
     for x in r['preview']:
         if not x['first']:
             bad.append('preview at frame %d: the first frame after the scrub was not provisional (nothing was decoding?)' % x['k'])

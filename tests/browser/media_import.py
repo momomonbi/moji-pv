@@ -223,9 +223,12 @@ async def main():
             c.ok(th and th['strip'] and th['tiles'] == 12 and th['strip'][0] >= 12 * min(th['strip'][1], 1), '%s: a 12-tile filmstrip (%r)' % (name, th))
     # frame exactness through the AssetStore
     for name, res in r['exact'].items():
-        for mode in ('sequential', 'random', 'fork'):
+        for mode in ('sequential', 'random', 'fork', 'baked', 'bakedRandom', 'bakedWhole'):
             c.ok(res[mode] == [], '%s: every frame exact, index k shows code k, rot as stored (%s): %r' % (name, mode, res[mode][:4]))
-        print('info  %s: %d ms for the three passes' % (name, res['ms']))
+        rt = res['routes']
+        # software VP9 / H.264 frames are 8-bit I420: the half copy takes the JS route, the whole frame the canvas route
+        c.ok(rt['yuv'] >= rt['n'] and rt['canvas'] >= rt['n'], '%s: the baked copies took both routes (JS 4:2:0 at 1/2, canvas at 1/1): %r' % (name, rt))
+        print('info  %s: %d ms for the six passes' % (name, res['ms']))
     c.ok(set(r['exact']) >= {'webm30', 'mp4_25', 'vfr', 'rot90', 'webm60'}, 'exactness ran for every counter video: %r' % sorted(r['exact']))
     ap = r.get('alphaProbe') or []
     c.ok(len(ap) == 3 and all(p['exact'] and abs(p['inside'] - 128) <= 12 and p['outside'] <= 4 for p in ap),
@@ -235,6 +238,46 @@ async def main():
          'animation through the store: m picks the frame by its durations, and that frame is drawn: %r' % an)
     la = r.get('lookAhead') or {}
     c.ok(la.get('k16') == 16 and la.get('k17') == 17, 'preview look-ahead: want() decodes frames 16 and 17 before they are drawn (%r)' % la)
+    lf = r.get('loopFeed') or {}
+    c.ok(lf.get('fed', 999) <= 5 and lf.get('seeks', 99) == 0 and lf.get('i43') == lf.get('code43') == 43 and lf.get('i0') == lf.get('code0') == 0,
+         'over a loop, the look-ahead of the clip\'s start never sends the decoder back under its last frames: %r' % lf)
+    pb = r.get('previewBake') or {}
+    ans, shown, hinted = pb.get('answers') or [], pb.get('shown'), pb.get('hinted')
+    early = [x for x in ans[:-1] if x is not None]
+    c.ok(early and all(x['exact'] is False for x in early) and shown and shown['blur'] > 0 and shown['index'] == 20 and shown['code'] == 20,
+         'preview with a blur: provisional (poster, unbaked frame) until the baked copy of frame 20 (exact, blurred, code 20): %r → %r' % (ans[:5], shown))
+    c.ok(hinted and hinted['exact'] and hinted['blur'] > 0 and hinted['index'] == 21 and hinted['code'] == 21,
+         'preview look-ahead with a blur: want() bakes the next hinted frame before it is drawn: %r' % hinted)
+    c.ok(0 < pb.get('bakedMost', 0) <= 5, 'baked copies go with their source frames (at most HOLD + shown + pinned held): %r' % pb.get('bakedMost'))
+    po = r.get('provisionalOrder') or {}
+    first, unbaked, held_at, back, copies = po.get('first'), po.get('heldUnbaked'), po.get('heldAt'), po.get('back'), po.get('copies') or {}
+    c.ok(first and first['index'] == 15 and first['exact'] is False,
+         'preview scrub to frame 40 with a blur: first the nearest held frame at or before it (15), provisional: %r' % first)
+    c.ok(unbaked and unbaked['index'] == 40 and unbaked['exact'] is False and unbaked['blur'] == 0,
+         'frame 40 held, its bake not finished: 40 unbaked (blur 0, the engine blurs it), provisional — never another frame\'s '
+         'baked copy: %r' % unbaked)
+    c.ok(held_at and held_at['index'] == 40 and held_at['exact'] and held_at['blur'] > 0, 'then frame 40 baked, exact: %r' % held_at)
+    c.ok(po.get('hintBakes', 0) >= 3, 'want() alone bakes the hinted frames as the session gets them: %r bakes' % po.get('hintBakes'))
+    c.ok(back and back['index'] == 40 and back['exact'] is False,
+         'scrubbing back to frame 3 (not held, nothing held before it) shows the last frame shown (40), provisional: %r' % back)
+    c.ok(copies.get('baked', 0) > 0 and copies.get('over', 1) == 0 and (po.get('paused') or {}).get('baked', 99) <= (po.get('paused') or {}).get('held', 0),
+         'baked copies never outnumber the held frames (closed with their source frames), playing and paused: %r, paused %r' % (
+             copies, {k: (po.get('paused') or {}).get(k) for k in ('baked', 'held')}))
+    hr = r.get('hintRoom') or {}
+    c.ok(hr.get('hold') == 3 and hr.get('heldHinted') == hr['hold'] + 2 and hr.get('fedHinted', 99) <= hr['hold'] + 1 and hr.get('seeks') == 0,
+         'preview look-ahead of 8 frames: decoded only while at most HOLD frames still to be shown are held (the shown one + '
+         'HOLD + 1 held, nothing closed, no seek): %r' % hr)
+    c.ok(hr.get('exact11') and hr.get('fedAfterShow') in (1, 2) and hr.get('exact15'),
+         'showing the next frame lets the look-ahead decode one more (frame 15), with no further want(): %r' % hr)
+    el = r.get('exportLookAhead') or {}
+    c.ok(el.get('wrong') == [] and el.get('seeks', 99) == 0 and 0 < el.get('fed', 999) <= 43,
+         'an export\'s look-ahead of every frame up to t + 3/fps, with a render\'s time and a pause between frames: each frame '
+         'decoded once, in order (no seek, ≤ 43 chunks for 40 frames): fed %r, seeks %r, wrong %r' % (el.get('fed'), el.get('seeks'), el.get('wrong')))
+    br = r.get('bakeRelink') or {}
+    c.ok(br.get('failed') and br['failed']['index'] == 27 and br['failed']['exact'] and br['failed']['blur'] == 0,
+         'a bake that fails leaves the exact frame unbaked (blur 0: the engine blurs it): %r' % br.get('failed'))
+    c.ok(br.get('again') and br['again']['index'] == 27 and br['again']['blur'] > 0 and br.get('next') and br['next']['blur'] > 0,
+         'after forget(id) (a relink) that frame is baked again: %r, then %r' % (br.get('again'), br.get('next')))
     pv = r.get('provisional') or {}
     c.ok(pv.get('first') is None or pv['first']['exact'] is False, 'preview: the first answer is provisional (%r)' % pv.get('first'))
     c.ok(pv.get('later') and pv['later']['exact'] and pv['later']['index'] == 30 and pv['later']['code'] == 30,
