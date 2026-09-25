@@ -40,16 +40,18 @@ the beat.
 | Format | What you get |
 |---|---|
 | MP4 | A video (sound can be included) |
+| For Filmora | The finished MP4 and the files to layer with it (a transparent video of the lyrics and decorations, subtitles and more) in one folder. How to use it: [docs/FILMORA.md](docs/FILMORA.md) |
+| Transparent video (WebM) | A video with a transparent background (VP9 with alpha), to lay over other footage in Filmora, Premiere, DaVinci and others |
 | PNG seq. | One PNG per frame, in a ZIP |
 | PNG alpha | A PNG sequence with a transparent background |
 
 Sizes 720p to 2160p, 24 / 30 / 60 fps; screen shapes 16:9, 9:16, 1:1 and more.
 
-**Background modes**: Normal / Green screen / Black (white text) / Transparent (= PNG alpha sequence).
-Browsers cannot make a transparent **video file** today. To lay the lyrics over other footage, use PNG alpha, or Green
-screen for video apps.
+**Background modes**: Normal / Green screen / Black (white text) / Transparent (transparent video or PNG alpha).
+To lay the lyrics over other footage, Transparent video (WebM) is recommended; PNG sequences suit After Effects and
+similar.
 
-For MP4 export, Chrome or Edge on a computer is recommended (it uses WebCodecs).
+For MP4, transparent video and the Filmora set, Chrome or Edge on a computer is recommended (they use WebCodecs).
 
 ## AI assist (optional)
 
@@ -58,18 +60,25 @@ Open the **AI** tab of the detail column. You need your own API key (the default
 
 - **Prepare lyrics** — drops lines that are not lyrics (credits, [Chorus] …) and suggests cut points, emphasis and readings
 - **Three looks** — three looks that fit the meaning and the season of the lyrics; try each one on before you choose
-- **One-line edit** — changes settings from one instruction such as "make the chorus more dramatic"
+- **Instruction** — changes the whole video, the selected lines or a section (Chorus 1 …) from an instruction such as
+  "add a seasonal feel here and slow the motion down"; **Instructions per section** sends one for each section at once
+- **Make a material** — builds a new material (My materials) from the app's parts and simple shapes
+- **Describe photos** (Gemini only) — after a confirmation every time, sends your photos and videos made smaller and
+  describes them: what they show, their colors, and a suggestion for their motion and layering
 - **Use the song** (Gemini only) — with your consent, sends the song to transcribe it, time the lines or analyze it
 
 Results first appear as a checked list; only what you keep is applied, and one undo takes it back.
-Only the lyric text, your instruction and setting values are sent. The song's audio is sent only after you agree under
-**Use the song**. The key stays in this browser and goes straight to the AI service you chose, nowhere else.
+Sent: the lyric text, your instruction, and setting values and names. With **AI may use photos and videos** on, also
+each photo or video's number, kind, size, length and shape, and the AI's description of it. The song's audio and the
+pictures are sent to Google Gemini only after you agree. File names are never sent. The key stays in this browser and
+goes straight to the AI service you chose, nowhere else.
 
 More in [docs/AI_GUIDE.md](docs/AI_GUIDE.md).
 
 ## Privacy
 
-Lyrics, songs and exports are all processed inside your browser; nothing is uploaded to a server of ours.
+Lyrics, songs, photos, videos and exports are all processed inside your browser; nothing is uploaded to a server of
+ours.
 The only outside connections are the typefaces (Google Fonts) and, when you use AI assist, the AI service.
 
 ## Development
@@ -91,7 +100,7 @@ match the build. The pages carry a CSP that allows scripts by hash, so never edi
 `build.py`.
 
 Design: [docs/DESIGN.md](docs/DESIGN.md) · spec: [docs/SPEC.md](docs/SPEC.md) · work notes: [docs/NOTES.md](docs/NOTES.md) ·
-design addendum for the next version (v2.1): [docs/DESIGN_2_1.md](docs/DESIGN_2_1.md).
+v2.1 design addendum: [docs/DESIGN_2_1.md](docs/DESIGN_2_1.md).
 
 ## License
 

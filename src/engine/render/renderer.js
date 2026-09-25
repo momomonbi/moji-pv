@@ -477,6 +477,8 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
 
     // fx.textAt(dt): the visible cuts' text and near layers again at t − dt, into a pooled surface the size the FxContext
     // has now (a filter running at half resolution gets a half-size copy drawn at half scale, like its other surfaces).
+    // A photo or video in those layers (文字の中に, a frame or overlay in front) keeps the media frame of the frame's own
+    // time (dc.ghostTl): mediaAt / mediaReady list only that one, and an export frame draws exact frames only.
     const D_SAVED = new Float32Array(6);
     function textAt(dt) {
       const fx = ctl.fx;
@@ -490,10 +492,11 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
         const it = items[n];
         if (it.ground >= 0) continue;
         F.evaluate(it.scene, it.tl - dt);
+        dc.ghostTl = it.tl;
         for (const Lk of SE.TEXT_LAYERS) DR.drawLayer(dc, it.scene, Lk, view(it.cam, Lk), it.tl - dt, -1);
       }
       dc.D.set(D_SAVED);
-      dc.g = g0; dc.pick = pick;
+      dc.g = g0; dc.pick = pick; dc.ghostTl = null;
       return s;
     }
 

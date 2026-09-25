@@ -1,8 +1,8 @@
 /* 文字PVメーカー v2 — original work. plan(doc, { registry }) → Plan: the planner's stages in their FROZEN order (DESIGN §4.16.1–§4.16.2, §3.12; DESIGN_2_1 §2.7, §5.9.3, §11.2.6). */
 MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'core/timing', 'core/beats', 'core/motion',
-  'core/doc', 'core/schema', 'core/script', 'core/media', 'planner/choose', 'planner/params', 'planner/look',
+  'core/doc', 'core/schema', 'core/script', 'core/media', 'core/shot', 'planner/choose', 'planner/params', 'planner/look',
   'planner/segment', 'planner/features', 'planner/cast', 'planner/tracks', 'planner/camera', 'planner/encode'],
-(H, N, PINS, LY, TM, B, MO, D, S, SC, MEDIA, CH, PA, LK, SG, FE, CA, TR, CAM, EN) => {
+(H, N, PINS, LY, TM, B, MO, D, S, SC, MEDIA, SHOT, CH, PA, LK, SG, FE, CA, TR, CAM, EN) => {
   'use strict';
 
   // v2: rigs, cut.rig, grounds[].zoomed, feat.sectionStart, media, the camera slots (DESIGN_2_1 §2.7, §11.2.6).
@@ -261,8 +261,9 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
 
   // What a scene reads of the song besides its decisions (§3.12 fp; engine/scene/build baseEnv gives the parts
   // env.grid = the beat grid seen from the scene's origin, and env.level = the loudness from the origin on):
-  // - a chosen part needs 'beats' and there is a tempo → [bpm, meter, origin − beat offset]. The whole grid, not only
-  //   the beat phase: parts count beat indices (every n-th beat) and behaviours read the bar;
+  // - a chosen part needs 'beats', or the cut's shot has a key anchored on a beat ('beat:<n>', engine/scene/shot), and
+  //   there is a tempo → [bpm, meter, origin − beat offset]. The whole grid, not only the beat phase: parts count beat
+  //   indices (every n-th beat) and behaviours read the bar;
   // - a chosen part needs 'level' and the plan has an envelope → [origin, digest id] (without one the level is flat).
   // Either is null otherwise, so a scene that reads neither keeps its fingerprint when it moves in time.
   function songTerms(ctx, needs, beats, origin) {
@@ -290,6 +291,9 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
     const partSlots = slotKeys.filter((s) => s.indexOf('.') < 0 && s !== 'orient');
     const decisions = partSlots.map((s) => [slotKind(s), c.slots[s]]);
     const needs = needsOf(ctx, decisions);
+    // a custom shot with a beat anchor reads the grid too (no preset has one, so only a custom shot is looked at)
+    const shot = c.slots['cam.shot'];
+    if (shot && shot.v !== null && typeof shot.v === 'object' && SHOT.usesBeats(shot.v)) needs.add('beats');
     const { beat, level } = songTerms(ctx, needs, beats, c.t0);
     // Materials (matTerms) and assets (mediaTerms) the cut's parts use (DESIGN_2_1 §2.7, §11.2.6); '' without any.
     const used = mineOf(ctx, decisions, partSlots);

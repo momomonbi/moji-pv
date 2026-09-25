@@ -174,7 +174,7 @@ MV.def('media/samples', ['core/media'], (MEDIA) => {
   const h2 = (v) => (v & 255).toString(16).toUpperCase().padStart(2, '0');
   const d2 = (v) => String(v).padStart(2, '0');
 
-  // VP9 levels by picture size and sample rate (the VP9 level table; the §11.4.3 list 10 … 51 plus 52 for 4K60).
+  // VP9 levels by picture size and sample rate (the VP9 level table, §11.4.3: 10 … 52; 52 is 3840×2160 from 71 fps).
   const VP9_LEVELS = [
     [10, 36864, 829440], [11, 73728, 2764800], [20, 122880, 4608000], [21, 245760, 9216000], [30, 552960, 20736000],
     [31, 983040, 36864000], [40, 2228224, 83558400], [41, 2228224, 160432128], [50, 8912896, 311951360],

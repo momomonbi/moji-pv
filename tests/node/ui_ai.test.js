@@ -924,11 +924,13 @@ const FLURRY = { name: '桜吹雪', nameEn: 'Cherry flurry', kind: 'ornament', s
     pattern: '', stops: [], angle: 0 }] };
 
 // The app over the v21 fixture with the catalog and the project's materials (parts/mix.registryFor, as the engine composes it).
-function v21Setup(answers) {
+// edit(doc) → the document to start from (e.g. with photos).
+function v21Setup(answers, edit) {
   const seen = [];
   const base = MV.use('parts/catalog').defaultRegistry();
   const MIX = MV.use('parts/mix');
-  const doc = MV.use('core/migrate').parseFile(corpus.projectText('v21')).doc;
+  const v21 = MV.use('core/migrate').parseFile(corpus.projectText('v21')).doc;
+  const doc = edit ? edit(v21) : v21;
   const host = makeHost('x');
   host.store = ST.createStore({ doc, side: D.defaultSide(), reduce: CMD.reduce });
   let planned = { doc: null, plan: null, reg: null };
@@ -1040,4 +1042,166 @@ test('v2.1 素材づくり with ai/recipe: a material made for a row is used the
   assert.equal(await ctl.run('material', { description: 'もっと細かく', kind: 'ornament', current: host.doc.materials.list[3] }), true);
   const again = ctl.state.review.changes.find((c) => c.kind === 'material');
   assert.equal(again.materialId, id);
+});
+
+// ---- review fixes (NOTES "Review fixes: AI, materials, planner and privacy") ---------------------------------------
+
+// The media fixture's four assets under names that say something personal; the second one described by 写真の説明.
+const PRIVATE = ['山田花子_卒業式.png', '自宅前_2026-05-10.jpg', '娘の運動会.mp4', 'passport_scan.webm'];
+function withPhotos(doc) {
+  let out = doc;
+  MV.use('core/migrate').parseFile(corpus.projectText('media')).doc.media.list.forEach((entry, i) => {
+    out = CMD.reduce(out, { t: 'media.put', entry: Object.assign({}, entry, { name: PRIVATE[i],
+      ai: i === 1 ? { caption: { ja: '夕方の空', en: 'Evening sky' }, tags: ['soft'], colors: ['#F2A65A'], subject: null, text: null } : null }) });
+  });
+  return out;
+}
+const promptOf = (x) => JSON.stringify(x.body);
+const posts = (seen) => seen.filter((x) => x.init.method === 'POST');
+const EMPTY_A = { answers: [ANSWER_A(0, {})] };
+
+test('MAI-2 / UI-1: 写真・動画をAIが使ってよい is one switch for 指示 and the board; off, no [media] list; never a file name', async () => {
+  const { host, ctl, seen } = v21Setup([EMPTY_A, EMPTY_A, EMPTY_A, EMPTY_A], withPhotos);
+  const here = AC.mediaOnDevice(host.doc, null);
+  assert.equal(here.length, 4);
+  assert.deepEqual(AC.mediaOnDevice(host.doc, { state: (id) => (id === here[1] ? 'missing' : 'ok') }), [here[0], here[2], here[3]]);
+  assert.equal(AC.mediaOnDevice({ media: { list: [] } }, null), false, 'no pictures: nothing to offer');
+  assert.equal(ctl.state.allowMedia, true, 'on by default (§11.6.1)');
+  const CHORUS = { kind: 'song', n: 2, t0: 24, t1: 40 };
+  const VERSE = { kind: 'song', n: 1, t0: 4, t1: 24 };
+  // 指示, on: the [media] list, numbers and the vision text; no file name
+  await ctl.run('direct', { briefs: [{ ref: CHORUS, instruction: '写真を背景に' }], media: here });
+  let text = promptOf(posts(seen)[0]);
+  assert.ok(text.includes('[media]') && text.includes('asset:1 image') && text.includes('夕方の空'), 'offered with its description');
+  for (const name of PRIVATE) assert.ok(!text.includes(name) && !text.includes(name.split('.')[0]), name);
+  ctl.discard(); ctl.dismiss();
+  // off: neither the instruction block nor the board (several briefs) sends the list, whatever ids they pass
+  ctl.setAllowMedia(false);
+  assert.equal(ctl.state.allowMedia, false);
+  await ctl.run('direct', { briefs: [{ ref: CHORUS, instruction: '写真を背景に' }], media: here });
+  await ctl.run('direct', { briefs: [{ ref: VERSE, instruction: 'ゆっくり' }, { ref: CHORUS, instruction: '写真を背景に' }], mode: 'all', media: here });
+  for (const post of posts(seen).slice(1)) {
+    text = promptOf(post);
+    assert.ok(!text.includes('[media]') && !text.includes('asset:') && !text.includes('夕方の空'), 'no [media] list while it is off');
+  }
+  ctl.setAllowMedia(true);
+  await ctl.run('direct', { briefs: [{ ref: VERSE, instruction: 'ゆっくり' }, { ref: CHORUS, instruction: '写真を背景に' }], mode: 'all', media: here });
+  assert.ok(promptOf(posts(seen)[3]).includes('[media]'), 'on again, the board offers it');
+});
+
+test('MAI-7: AIで作り直す on a material with a photo layer lists its picture (the vision text only while it is allowed) and keeps it', async () => {
+  const photo = (doc) => {
+    const out = withPhotos(doc);
+    const recipe = { knobs: [], layers: [{ alpha: 1, appear: { at: 'start', draw: 'none', dur: 0 }, blur: 0, border: 8, comp: 'over', fit: 'cover',
+      inks: [], layer: 'mid', move: [], place: { anchor: 'focus', spread: 1, x: 0, y: 0 }, prim: 'media', shape: 'round', size: [0.3, 0.3],
+      src: out.media.list[1].id, time: { clipIn: 0, clipOut: 0, loop: 'loop', speed: 1 } }], parts: [], scope: 'cut', follow: 'text', seed: 1 };
+    return CMD.reduce(out, { t: 'material.put', id: 'm4', kind: 'ornament', by: 'ai', name: { ja: '写真の枠', en: 'Photo frame' }, recipe });
+  };
+  const echo = () => (url, init) => {
+    const body = JSON.parse(init.body);
+    const cur = /Current material \(remake it\): (\{.*\})/.exec(body.contents[0].parts[0].text);
+    const material = JSON.parse(cur[1]);
+    return { ok: true, status: 200, json: async () => answer({ understood: true, question: '', material }) };
+  };
+  const { host, seen } = v21Setup([], photo);
+  const answers = [echo(), echo()];
+  const fetchImpl = async (url, init) => { seen.push({ url, init, body: JSON.parse(init.body) }); return answers.shift()(url, init); };
+  const session = memoryStorage();
+  session.setItem('mojipv.ai.key.gemini', KEY);
+  const c2 = AC.createController(host, { session, local: memoryStorage(), fetchImpl, direct: MV.use('ai/direct'), recipe: MV.use('ai/recipe') });
+  const current = host.doc.materials.list[3];
+  const own = current.recipe.layers[0].src;
+  const here = AC.mediaOnDevice(host.doc, null);
+  // allowed: the pictures on this device with the vision text; the answer keeps the picture
+  assert.equal(await c2.run('material', { description: 'もう少しピンクに', kind: 'ornament', current, media: here }), true);
+  let body = seen[0].body;
+  let text = JSON.stringify(body);
+  assert.ok(text.includes('[media]') && text.includes('夕方の空') && text.includes('asset:3 video'), 'the library, described');
+  assert.ok(JSON.stringify(body.generationConfig.responseJsonSchema).includes('"media"'), 'the media schema');
+  for (const name of PRIVATE) assert.ok(!text.includes(name), name);
+  let m = c2.state.review.changes.find((c) => c.kind === 'material');
+  assert.deepEqual(m.entry.recipe.layers.map((l) => [l.prim, l.src]), [['media', own]], 'the photo stays in the material');
+  assert.deepEqual(c2.state.review.warnings || [], []);
+  c2.discard();
+  // not allowed: only the material's own picture, without its description; still kept
+  c2.setAllowMedia(false);
+  assert.equal(await c2.run('material', { description: 'もう少しピンクに', kind: 'ornament', current, media: here }), true);
+  body = seen[1].body;
+  text = JSON.stringify(body);
+  assert.ok(text.includes('[media]') && text.includes('asset:0 image') && !text.includes('asset:1') && !text.includes('夕方の空'),
+    'only its own picture, without the description');
+  assert.ok(JSON.stringify(body.generationConfig.responseJsonSchema).includes('"media"'));
+  m = c2.state.review.changes.find((c) => c.kind === 'material');
+  assert.deepEqual(m.entry.recipe.layers.map((l) => [l.prim, l.src]), [['media', own]]);
+});
+
+test('MAI-6: the 空気 row asks for an atmosphere (scope run) and the answer is pinned there as one', async () => {
+  const mat = Object.assign({}, FLURRY, { name: '雪の粒', nameEn: 'Snow grains', season: '', scope: 'cut' });
+  const { host, ctl, seen } = v21Setup([{ understood: true, question: '', material: mat }]);
+  assert.equal(await ctl.run('material', { description: '雪', kind: 'ornament', scope: 'run', useAt: { scope: 'line/r4', slot: 'atmos', paths: ['line/r4:atmos', 'line/r5:atmos'] } }), true);
+  assert.ok(promptOf(posts(seen)[0]).includes('scope \\"run\\"'), 'the prompt asks for scope run');
+  const r = ctl.state.review;
+  const m = r.changes.find((c) => c.kind === 'material');
+  assert.equal(m.entry.recipe.scope, 'run');
+  assert.deepEqual(r.changes.filter((c) => c.requires).map((c) => c.path), ['line/r4:atmos', 'line/r5:atmos'], 'every selected line (MAI-5)');
+  ctl.apply();
+  const plan = host.plan;
+  for (const line of ['r4', 'r5']) {
+    const g = plan.grounds[plan.cuts.find((c) => c.line === line).ground];
+    assert.equal(g.atmos.v, 'myMat4', line + ' shows it as its atmosphere');
+  }
+});
+
+test('MAI-9: a later window of one 指示 request counts the materials of the earlier ones; the one with no room is left out and the review applies', async () => {
+  // two headings of 150 and 120 lines (two request windows of ≤ 200 lines, §5.2) and 63 materials: room for one more
+  // (core/recipe LIMITS.materials 64); each window's answer makes one material and uses it as its area's atmosphere
+  const text = ['# A'].concat(Array.from({ length: 150 }, (_, i) => 'あさひ' + i), [''], ['# B'], Array.from({ length: 120 }, (_, i) => 'ゆうひ' + i)).join('\n');
+  const fill = (v21) => {
+    let doc = CMD.reduce(v21, { t: 'lyrics.set', text });
+    const m = doc.materials.list[1];
+    while (doc.materials.list.length < 63) {
+      doc = CMD.reduce(doc, { t: 'material.put', id: 'm' + doc.materials.next.toString(36), kind: m.kind, by: 'user', name: m.name, recipe: m.recipe });
+    }
+    return doc;
+  };
+  const one = (name) => [Object.assign({}, FLURRY, { name, nameEn: '', season: '', use: { slot: 'atmos', s: 0, lines: [], cuts: [] } })];
+  const { host, ctl, seen } = v21Setup([{ answers: [ANSWER_A(0, { speed: 0.5 })], materials: one('一') },
+    { answers: [ANSWER_A(0, { speed: 0.75 })], materials: one('二') }], fill);
+  const heads = AREAS.areasOf(host.doc, host.plan).heads;
+  assert.deepEqual(heads.map((a) => a.n), [150, 120]);
+  assert.equal(await ctl.run('direct', { briefs: heads.map((a, k) => ({ ref: a.ref, instruction: '素材を一つ ' + k })), allowMaterials: true }), true);
+  assert.equal(seen.filter((x) => x.init.method === 'POST').length, 2, 'two windows');
+  const r = ctl.state.review;
+  assert.deepEqual(r.changes.filter((c) => c.kind === 'material').map((c) => c.entry.name.ja), ['一'], 'window 1 finds no room left');
+  assert.ok((r.warnings || []).some((w) => w[0] === 'ai.warn.matFull' && w[1].n === 1), JSON.stringify(r.warnings));
+  assert.ok(ctl.apply() > 0, 'the review applies');
+  const doc = host.doc;
+  assert.equal(doc.materials.list.length, 64);
+  const made = 'myMat' + doc.materials.list[63].id.slice(1);
+  const [a, b] = heads.map((h) => h.lineIds[0]);
+  assert.equal(doc.pins['line/' + a + ':atmos'].v, made, 'area A uses the material of window 0');
+  assert.ok(!doc.pins['line/' + b + ':atmos'], 'the use of the one left out falls away');
+  assert.equal(doc.pins['line/' + b + ':motion.speed'].v, 0.75, 'the other changes of window 1 stay');
+});
+
+test('MAI-8: two new materials of one review: ▶ 見る previews each under its own id; the log groups map each to its own item', async () => {
+  const two = [Object.assign({}, FLURRY, { name: '一', nameEn: '' }), Object.assign({}, FLURRY, { name: '二', nameEn: '' })];
+  const { host, ctl } = v21Setup([{ answers: [ANSWER_A(0, { speed: 0.5 })], materials: two }]);
+  assert.equal(await ctl.run('direct', { briefs: [{ ref: { kind: 'song', n: 2, t0: 24, t1: 40 }, instruction: '素材を二つ' }], allowMaterials: true }), true);
+  const mats = ctl.state.review.changes.filter((c) => c.kind === 'material');
+  assert.deepEqual(mats.map((c) => c.entry.name.ja), ['一', '二']);
+  const doc0 = host.doc;
+  for (const c of mats) {
+    const id = AR.previewId(doc0, c);
+    const one = CH.apply(doc0, host.plan, [c]);
+    assert.ok(one.materials.list.some((m) => m.id === id && m.name.ja === c.entry.name.ja), c.entry.name.ja + ' is ' + id + ' in its preview');
+  }
+  const checked = ctl.state.review.changes.filter((c) => c.checked !== false);
+  const cmds = CH.toCommands(doc0, host.plan, checked);
+  const entry = CH.logEntry(doc0, cmds, {});
+  const groups = AC.changeGroups(doc0, host.plan, checked, entry.applied);
+  mats.forEach((c, k) => {
+    const items = groups[checked.indexOf(c)].map((i) => entry.applied[i]);
+    assert.deepEqual(items.map((x) => x.material), ['m' + (doc0.materials.next + k).toString(36)], c.entry.name.ja);
+  });
 });

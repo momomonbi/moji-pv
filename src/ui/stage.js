@@ -19,7 +19,7 @@ MV.def('ui/stage', ['ui/dom', 'ui/selection', 'ui/output', 'i18n/t', 'ui/shot_ed
   const MARKS = ['①', '②', '③', '④', '⑤', '⑥'];
   const PROVISIONAL_RETRY_MS = 120;       // a paused provisional frame (fonts, scenes still coming) is redrawn after this
   const PROVISIONAL_RETRIES = 50;         // … at most this many times in a row (the font book's epoch repaints later loads)
-  const MEDIA_AHEAD_S = 0.25;             // while playing, the store is asked to decode this far ahead (assets.want)
+  const LOOK_AHEAD = 8;                   // while playing, the store is asked for the frames at t + k / 30, k = 1…8 (assets.want)
   const CROP_DIM = 'rgba(0, 0, 0, 0.4)';  // §11.7.6: everything outside the chosen crop is dimmed at 40 %
   const CROP_STEP = 0.01, CROP_STEP_BIG = 0.1;   // arrow keys move the focus by 1 % (Shift 10 %)
   const CROP_WHEEL = 1.05;                // the wheel zooms ×1.05 per notch
@@ -539,7 +539,7 @@ MV.def('ui/stage', ['ui/dom', 'ui/selection', 'ui/output', 'i18n/t', 'ui/shot_ed
         }));
       mediaBadge.hidden = !coming;
       if (playing && lastMedia && app.assets && typeof app.engine.mediaAt === 'function') {
-        const next = app.engine.mediaAt(tNow + MEDIA_AHEAD_S);
+        const next = lookAhead(app.engine, tNow);
         if (next.length) app.assets.want(next);
       }
     }
@@ -769,8 +769,9 @@ MV.def('ui/stage', ['ui/dom', 'ui/selection', 'ui/output', 'i18n/t', 'ui/shot_ed
       w.timer = setTimeout(() => { w.g.end(); if (crop && crop.wheel === w) crop.wheel = null; }, CROP_WHEEL_END_MS);
     }
     // Keys while the overlay is on and the stage has focus: arrows 1 % (Shift 10 %), + and − zoom, 0 resets, Esc leaves.
+    // In tap mode they are the tap session's (D§6.4.15: ←/→ ±3 s, Esc finishes).
     wrap.addEventListener('keydown', (ev) => {
-      if (!crop || ev.ctrlKey || ev.metaKey) return;
+      if (!crop || ev.ctrlKey || ev.metaKey || app.view.state.mode === 'tap') return;
       const tg = crop.target;
       const step = ev.shiftKey ? CROP_STEP_BIG : CROP_STEP;
       const at = (name) => { const v = tg.value(name); return typeof v === 'number' ? v : 0.5; };
@@ -797,7 +798,9 @@ MV.def('ui/stage', ['ui/dom', 'ui/selection', 'ui/output', 'i18n/t', 'ui/shot_ed
 
     // setCrop(target | null, returnTo?): the crop overlay on or off. On, the play bar's strip says what the mouse does
     // (with [終わる]) and the live region what the keys do; returnTo is the control that Esc gives the focus back to.
+    // Never on in tap mode: the keys, the wheel and a double-click on the preview are the tap session's (D§6.4.15).
     function setCrop(target, returnTo) {
+      if (target && app.view.state.mode === 'tap') return;
       if (crop && crop.wheel) { clearTimeout(crop.wheel.timer); crop.wheel.g.end(); }
       if (crop && crop.drag) cropUp();
       crop = target ? { target, drag: null, wheel: null, returnTo: returnTo || null } : null;
@@ -857,8 +860,12 @@ MV.def('ui/stage', ['ui/dom', 'ui/selection', 'ui/output', 'i18n/t', 'ui/shot_ed
     app.bus.on('plan', () => { if (!alt) invalidate(); });
     app.bus.on('shotEdit', () => invalidate());
 
-    // A new plan or selection ends the crop overlay when its picture is gone from the page.
-    app.view.on((changed) => { if (crop && changed.includes('sel')) setCrop(null); });
+    // A new selection or the tap mode ends the crop overlay, and so does a new plan in which its element no longer shows
+    // its picture (an undo, another part: the target's alive()), before a key could pin a crop nothing shows.
+    app.view.on((changed) => {
+      if (crop && (changed.includes('sel') || (changed.includes('mode') && app.view.state.mode === 'tap'))) setCrop(null);
+    });
+    app.bus.on('plan', () => { if (crop && typeof crop.target.alive === 'function' && !crop.target.alive()) setCrop(null); });
 
     return {
       layout, invalidate, setAlt, fullscreen, focus: () => dom.focus(wrap), element: wrap,
@@ -867,5 +874,15 @@ MV.def('ui/stage', ['ui/dom', 'ui/selection', 'ui/output', 'i18n/t', 'ui/shot_ed
     };
   }
 
-  return { mount };
+  // lookAhead(engine, t) → the preview's want() list while playing (DESIGN_2_1 §11.4.5 step 1): the media of the frame
+  // at t, then of t + k / 30 for k = 1…LOOK_AHEAD (0.27 s), in that order. Every frame on the way is listed: a single
+  // time further on let the session close the frames between the shown one and it as they came out, and each was then
+  // decoded again from its key frame when it was drawn. media_exact.py plays through this function.
+  function lookAhead(engine, t) {
+    const out = [];
+    for (let k = 0; k <= LOOK_AHEAD; k++) for (const x of engine.mediaAt(t + k / 30)) out.push(x);
+    return out;
+  }
+
+  return { mount, lookAhead, LOOK_AHEAD };
 });

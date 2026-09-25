@@ -21,11 +21,11 @@ MV.def('export/host/sink', ['export/schedule'], (S) => {
 
   function partSize(part) { return part instanceof Uint8Array ? part.byteLength : part.size; }
 
-  // createFileSink(fileHandle, { removeOnAbort = true }?): streams into the file through createWritable(); abort()
+  // createFileSink(fileHandle, { removeOnAbort = true }): streams into the file through createWritable(); abort()
   // discards the written data and removes the file the save dialog created, so a cancelled export leaves nothing behind.
-  // A caller writing over a file the user already has (保存 to the open project) passes removeOnAbort: false: abort() then
-  // only drops the swap file, and the file keeps its last saved contents. States: open → closing → closed, or → aborted.
-  // A close() that fails leaves the sink 'failed', and abort() still removes (or keeps) the file then.
+  // With removeOnAbort false (a file this call did not create, such as the project file 保存 writes again) abort() only
+  // discards the written data: the browser writes into a copy, so the file keeps what it held. States: open → closing →
+  // closed, or → aborted. A close() that fails leaves the sink 'failed', and abort() still removes the file then.
   function createFileSink(handle, opts) {
     const removeOnAbort = !(opts && opts.removeOnAbort === false);
     let writable = null;
@@ -67,7 +67,9 @@ MV.def('export/host/sink', ['export/schedule'], (S) => {
         if (state === 'closed' || state === 'aborted') return;
         state = 'aborted';
         try { if (writable) await writable.abort(); } catch (err) { /* the stream may already be errored */ }
-        try { if (removeOnAbort && typeof handle.remove === 'function') await handle.remove(); } catch (err) { /* the file stays empty */ }
+        if (removeOnAbort) {
+          try { if (typeof handle.remove === 'function') await handle.remove(); } catch (err) { /* the file stays empty */ }
+        }
         size = 0;
       },
     };
@@ -150,15 +152,17 @@ MV.def('export/host/sink', ['export/schedule'], (S) => {
 
   // --- folders (the Filmora kit, DESIGN_2_1 §13.9) --------------------------------------------------------------
 
-  // createDirSink(dirHandle, { parent?, name? }) → DirSink = { kind: 'dir', name, parentName, file(name) → Promise<Sink>,
-  // files, close() → { files: [{ name, bytes }] }, abort() }. parentName: the name of the folder it was made in (the one
-  // the user picked; null when not known or empty). Each file(name) creates the file in the folder and returns its
-  // file sink (createFileSink); a name is used once. close() closes the sinks still open and lists every file written, in
-  // order. abort() aborts every file sink (each removes its file) and then removes the folder itself when its parent is
-  // known (removeEntry(name, { recursive: true })), else every file it created, so a cancelled kit leaves nothing.
+  // createDirSink(dirHandle, { parent?, name?, owned? }) → DirSink = { kind: 'dir', name, parentName,
+  // file(name) → Promise<Sink>, files, close() → { files: [{ name, bytes }] }, abort() }. parentName: the name of the
+  // folder it was made in (the one the user picked; null when not known or empty). Each file(name) creates the file in
+  // the folder and returns its file sink (createFileSink); a name is used once. close() closes the sinks still open and
+  // lists every file written, in order. abort() aborts every file sink and removes the files that file() created (never
+  // one that was in the folder before); then, only for a folder this call made (`owned`, from openDirectory) with its
+  // parent and name known, the folder itself with what is in it (removeEntry(name, { recursive: true })), so a
+  // cancelled kit leaves nothing and never deletes anything the user had.
   function createDirSink(dir, opts) {
     const o = opts || {};
-    const entries = [];                  // [{ name, sink }] in creation order
+    const entries = [];                  // [{ name, sink, created, closed }] in creation order
     let state = 'open';
 
     function check() { if (state !== 'open') throw new S.ExportError('sink', 'folder sink is ' + state); }
@@ -171,14 +175,15 @@ MV.def('export/host/sink', ['export/schedule'], (S) => {
       async file(name) {
         check();
         if (entries.some((e) => e.name === name)) throw new S.ExportError('sink', 'folder sink: ' + name + ' is already written');
-        let handle;
+        let handle, created;
         try {
+          created = !(await exists(dir, name));
           handle = await dir.getFileHandle(name, { create: true });
         } catch (err) {
           throw sinkError(err);
         }
-        const inner = createFileSink(handle);
-        const entry = { name, sink: inner, closed: false };
+        const inner = createFileSink(handle, { removeOnAbort: created });
+        const entry = { name, sink: inner, created, closed: false };
         entries.push(entry);
         return {                         // the file sink, remembering that its writer closed it
           kind: 'file',
@@ -211,11 +216,12 @@ MV.def('export/host/sink', ['export/schedule'], (S) => {
         if (state === 'aborted' || state === 'closed') return;
         state = 'aborted';
         for (const e of entries) await e.sink.abort();
-        if (o.parent && o.name) {
-          try { await o.parent.removeEntry(o.name, { recursive: true }); } catch (err) { /* already gone, or not ours to remove */ }
+        if (o.owned && o.parent && o.name) {
+          try { await o.parent.removeEntry(o.name, { recursive: true }); } catch (err) { /* already gone */ }
           return;
         }
         for (const e of entries) {
+          if (!e.created) continue;
           try { await dir.removeEntry(e.name); } catch (err) { /* removed by its sink */ }
         }
       },
@@ -224,17 +230,38 @@ MV.def('export/host/sink', ['export/schedule'], (S) => {
 
   function canDirectory() { return typeof globalThis.showDirectoryPicker === 'function'; }
 
-  // The names in a folder (files and folders).
+  // Names as case-insensitive file systems compare them (NTFS, APFS: letter case, Unicode normalization).
+  function fold(name) { return String(name).normalize('NFC').toLowerCase(); }
+
+  // The names in a folder (files and folders), folded.
   async function namesIn(dir) {
     const out = new Set();
-    for await (const key of dir.keys()) out.add(key);
+    for await (const key of dir.keys()) out.add(fold(key));
     return out;
+  }
+
+  // true when the folder has an entry (a file or a folder) under this name, as its own file system looks names up, so a
+  // name that differs only in case or form from an existing one counts as taken where the file system says so.
+  async function exists(dir, name) {
+    for (const get of ['getFileHandle', 'getDirectoryHandle']) {
+      try {
+        await dir[get](name);
+        return true;
+      } catch (err) {
+        if (!err || err.name !== 'NotFoundError') {
+          if (err && err.name === 'TypeMismatchError') return true;   // the name is taken by the other kind
+          throw err;
+        }
+      }
+    }
+    return false;
   }
 
   // openDirectory({ name, id? }) → DirSink | null. The folder picker opens (showDirectoryPicker, read-write; call this
   // directly from the click, before any other await); null means the user closed it. In the chosen folder a new folder
-  // `name` is made — or 'name (2)', 'name (3)' … when that name is taken, so nothing the user has is ever written into
-  // or removed. Only where canDirectory() is true; otherwise the kit writes memory sinks and one ZIP.
+  // `name` is made — or 'name (2)', 'name (3)' … when that name is taken (compared without letter case or Unicode form,
+  // then asked of the file system itself), so nothing the user has is ever written into or removed: the sink owns only
+  // the folder it made. Only where canDirectory() is true; otherwise the kit writes memory sinks and one ZIP.
   async function openDirectory(opts) {
     if (!canDirectory()) throw new S.ExportError('sink', 'this browser cannot write into a folder');
     let parent;
@@ -247,11 +274,11 @@ MV.def('export/host/sink', ['export/schedule'], (S) => {
     try {
       const taken = await namesIn(parent);
       let name = opts.name;
-      for (let k = 2; taken.has(name); k++) {
+      for (let k = 2; taken.has(fold(name)) || await exists(parent, name); k++) {
         if (k > MAX_NAME_TRIES) throw new Error('no free folder name for ' + opts.name);
         name = opts.name + ' (' + k + ')';
       }
-      return createDirSink(await parent.getDirectoryHandle(name, { create: true }), { parent, name });
+      return createDirSink(await parent.getDirectoryHandle(name, { create: true }), { parent, name, owned: true });
     } catch (err) {
       throw sinkError(err);
     }

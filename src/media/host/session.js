@@ -135,6 +135,7 @@ MV.def('media/host/session', ['media/samples'], (SM) => {
       if (!opening) {
         opening = (async () => {
           config = await supportedConfig(track, prefer);
+          if (closed) return;                      // closed while the browser was asked: no decoder is ever made
           if (!config) throw mediaError('codec', 'this browser cannot decode ' + track.codec);
           if (withAlpha) aConfig = alphaConfigOf(config);
           newDecoders();

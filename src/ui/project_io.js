@@ -11,6 +11,7 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
   const AUTOSAVE_MS = 1000;
   const LOCK_PREFIX = 'mojipv-work:';   // one Web Lock per open work: two tabs never write the same record
   const LOCK_WAIT_MS = 1500;            // a reloaded page may still see its previous document's lock for a moment
+  const ASSETS_LOCK = 'mojipv-assets';  // held shared while a tab stores assets no work record names yet; pruning takes it
   const LYRIC_EXT = /\.(txt|lrc)$/i;
   const PROJECT_EXT = /\.json$/i;
   const PACKAGE_EXT = /\.mojipv$/i;
@@ -19,6 +20,7 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
   const PKG_BIG = 2 * 1024 * MB;        // §12.3 step 3: a confirmation above 2 GB
   const PKG_MEMORY = 1.5 * 1024 * MB;   // without File System Access, a confirmation above 1.5 GB
   const QUOTA_WARN = 0.8;               // §11.2.7: a warning above 80 % of the quota
+  const SAVE_SLICE = 32 * MB;           // a larger asset is written in pieces, so [中止] and the progress act within it
 
   // --- text files: the encoding of a lyric / LRC file ------------------------------------------------------------
 
@@ -86,6 +88,14 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
     }
     for (const doc of docs || []) add(doc);
     return keep;
+  }
+
+  // The assets a document names, as 'media:<id>' and 'song:<sha1>' (those a work record written from it keeps).
+  function assetKeys(doc) {
+    const out = new Set();
+    for (const id of mediaInUse([], [doc])) out.add('media:' + id);
+    if (doc && doc.song && typeof doc.song.sha1 === 'string') out.add('song:' + doc.song.sha1);
+    return out;
   }
 
   // routeOf(name, type, sniffed) → 'package' | 'project' | 'lyrics' | 'song' | 'media' | 'container' | 'unknown'.
@@ -187,7 +197,14 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
     // The in-memory fallback of the three media stores: without IndexedDB, or when it is full (QuotaExceededError), an
     // asset stays in memory for this session only, and the user is told to save a package (§11.2.7).
     const memory = { media: new Map(), mediaIndex: new Map(), thumbs: new Map() };
+    const memorySongs = new Map();        // song sha1 → Blob, for this session only, when IndexedDB cannot store it
     const songCrcs = new Map();           // song sha1 → CRC-32, computed once per session for package saves (§12.3)
+    // Assets this tab stored that no work record it wrote names yet ('media:<id>', 'song:<sha1>'). While there are any,
+    // the tab holds ASSETS_LOCK shared, and prune() in every tab leaves media and songs alone: another tab's autosave
+    // never deletes what an open, import or relink here has just stored (§11.2.7 across tabs).
+    const unnamed = new Set();
+    let savedKeys = new Set();            // the assets the work record this tab wrote last names
+    let assetsHold = null;                // Promise<release()> of this tab's shared ASSETS_LOCK while `unnamed` has keys
     let persistAsked = false;
     let fileSaved = null;                 // { name, at, text } of the last package or light save to a file
 
@@ -259,6 +276,44 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
       });
     }
 
+    // --- assets another tab's pruning must leave alone -------------------------------------------------------
+
+    // Before an asset is stored: unless the record this tab wrote last names it already, it stays unnamed until an
+    // autosave names it, and the tab holds ASSETS_LOCK shared meanwhile (after a prune under way in another tab).
+    function holdAsset(key) {
+      if (savedKeys.has(key)) return Promise.resolve();
+      unnamed.add(key);
+      const locks = lockApi();
+      if (!locks) return Promise.resolve();
+      if (!assetsHold) {
+        assetsHold = new Promise((granted) => {
+          locks.request(ASSETS_LOCK, { mode: 'shared' }, () => new Promise((release) => granted(release)))
+            .catch(() => granted(() => {}));
+        });
+      }
+      return assetsHold;
+    }
+
+    // The keys for which done(key) is true need no hold any more (a record names them, or no record will); with none
+    // left the lock is released.
+    function unhold(done) {
+      for (const k of [...unnamed]) if (done(k)) unnamed.delete(k);
+      if (unnamed.size || !assetsHold) return;
+      const hold = assetsHold;
+      assetsHold = null;
+      hold.then((release) => release());
+    }
+
+    // An operation that stored these keys ended without them (a cancelled or failed open, a refused import or relink):
+    // unless the current document names them, no record will, and pruning may take them again.
+    function letGo(keys) {
+      const cur = assetKeys(app.doc);
+      unhold((k) => keys.has(k) && !cur.has(k));
+    }
+
+    // releaseMedia(id): the photo or video an import, relink or replace stored does not join the work (ui/media_io).
+    function releaseMedia(id) { letGo(new Set(['media:' + id])); }
+
     // --- autosave ------------------------------------------------------------------------------------------
 
     // One transaction. `direct` (leaving the page) puts at once; otherwise the record is read first and, when another
@@ -292,11 +347,13 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
     // Writes the current document. The work id, its name and the text are read here, before anything waits, so a work
     // opened meanwhile never receives the previous work's text.
     function writeNow(direct) {
-      const job = { id: workId, name: app.titleOf() || '', text: D.serialize({ doc: app.doc, side: app.store.side }) };
+      const job = { id: workId, name: app.titleOf() || '', doc: app.doc, text: D.serialize({ doc: app.doc, side: app.store.side }) };
       if (job.text === saved.text && job.id === saved.id) { setState('saved'); return writing; }
       setState('saving');
       writing = startPut(job, direct).then(async ({ d, out }) => {
         saved = { id: out.id, text: job.text };
+        savedKeys = assetKeys(job.doc);
+        unhold((k) => savedKeys.has(k));
         if (out.id !== job.id && workId === job.id) {
           setWork(out.id);
           app.toast(t('io.forked'), { kind: 'warn' });
@@ -331,22 +388,36 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
     }
 
     // Old works beyond the newest RECENT go, and so does every song's audio that no kept work, the current document or
-    // this tab's undo history (songs it stored or read since the last load) still uses.
+    // this tab's undo history (songs it stored or read since the last load) still uses; the same for photos and videos.
+    // The stores' media and songs are deleted only under ASSETS_LOCK held exclusively (no tab is storing assets that its
+    // records do not name yet), with the works read again under it; where Web Locks are missing they are kept.
     async function prune(d) {
       const all = ((await tx(d, 'works', 'readonly', (s) => s.getAll())) || []).sort((a, b) => b.at - a.at);
       const old = all.slice(RECENT);
       if (old.length) await tx(d, 'works', 'readwrite', (s) => { for (const w of old) s.delete(w.id); });
-      const keep = songsInUse(all.slice(0, RECENT).map((w) => w.text), [...used, app.doc.song ? app.doc.song.sha1 : null]);
+      const keep = keepOf(all.slice(0, RECENT).map((w) => w.text));
+      for (const k of [...memorySongs.keys()]) if (!keep.songs.has(k)) memorySongs.delete(k);
+      for (const name of MEDIA_STORES) for (const k of [...memory[name].keys()]) if (!keep.media.has(k)) memory[name].delete(k);
+      const locks = lockApi();
+      if (locks) await locks.request(ASSETS_LOCK, { mode: 'exclusive', ifAvailable: true }, (lock) => (lock ? pruneStores(d) : null));
+    }
+
+    // What pruning keeps: the songs and assets of the given work records (their text), of the current document and of
+    // this tab's history (an asset's blob, index and thumbs stay while one of them uses it).
+    function keepOf(texts) {
+      return { songs: songsInUse(texts, [...used, app.doc.song ? app.doc.song.sha1 : null]), media: mediaInUse(texts, [app.doc], usedMedia) };
+    }
+
+    async function pruneStores(d) {
+      const all = ((await tx(d, 'works', 'readonly', (s) => s.getAll())) || []).sort((a, b) => b.at - a.at);
+      const keep = keepOf(all.slice(0, RECENT).map((w) => w.text));
       const keys = (await tx(d, 'songs', 'readonly', (s) => s.getAllKeys())) || [];
-      const drop = keys.filter((k) => !keep.has(k));
+      const drop = keys.filter((k) => !keep.songs.has(k));
       if (drop.length) await tx(d, 'songs', 'readwrite', (s) => { for (const k of drop) s.delete(k); });
-      // an asset's blob, index and thumbs stay while a kept work, the current document or this tab's history uses it
-      const keepMedia = mediaInUse(all.slice(0, RECENT).map((w) => w.text), [app.doc], usedMedia);
       for (const name of MEDIA_STORES) {
         const ids = (await tx(d, name, 'readonly', (s) => s.getAllKeys())) || [];
-        const gone = ids.filter((k) => !keepMedia.has(k));
+        const gone = ids.filter((k) => !keep.media.has(k));
         if (gone.length) await tx(d, name, 'readwrite', (s) => { for (const k of gone) s.delete(k); });
-        for (const k of [...memory[name].keys()]) if (!keepMedia.has(k)) memory[name].delete(k);
       }
     }
 
@@ -363,6 +434,7 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
           setWork(newest.id, release);
           await claim(d, newest.id);
           saved = { id: newest.id, text: newest.text };
+          savedKeys = assetKeys(file.doc);
           setState('saved');
         } else {
           setWork(newId());
@@ -400,12 +472,24 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
       return true;
     }
 
+    // putSong(sha1, blob) → { stored: true } or { stored: false, reason: 'quota' | 'nodb' }: without IndexedDB, or when it
+    // is full, the song stays in this session's memory (§11.2.7, as photos and videos do).
     async function putSong(sha1, blob) {
       used.add(sha1);
-      try { const d = await db(); await tx(d, 'songs', 'readwrite', (s) => s.put(blob, sha1)); } catch (e) { /* the song stays in memory */ }
+      await holdAsset('song:' + sha1);
+      try {
+        const d = await db();
+        await tx(d, 'songs', 'readwrite', (s) => s.put(blob, sha1));
+        memorySongs.delete(sha1);
+        return { stored: true, reason: null };
+      } catch (e) {
+        memorySongs.set(sha1, blob);
+        return { stored: false, reason: e && e.name === 'QuotaExceededError' ? 'quota' : 'nodb' };
+      }
     }
 
     async function getSong(sha1) {
+      if (memorySongs.has(sha1)) { used.add(sha1); return memorySongs.get(sha1); }
       try {
         const d = await db();
         const blob = (await tx(d, 'songs', 'readonly', (s) => s.get(sha1))) || null;
@@ -451,7 +535,11 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
       } catch (e) { return null; }
     }
 
-    async function putMedia(id, rec) { persistOnce(); return putIn('media', id, rec); }
+    async function putMedia(id, rec) {
+      persistOnce();
+      await holdAsset('media:' + id);
+      return putIn('media', id, rec);
+    }
     function getMedia(id) { return getFrom('media', id); }
     function putIndex(id, rec) { return putIn('mediaIndex', id, rec); }
     function getIndex(id) { return getFrom('mediaIndex', id); }
@@ -507,6 +595,9 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
       fileHandle = null;
       fileSaved = null;
       saved = { id: null, text: null };
+      savedKeys = new Set();
+      const next = assetKeys(file.doc);                      // what the loaded work names is held until its autosave
+      unhold((k) => !next.has(k));
       used.clear();                                          // loading clears the undo history (§6.10)
       usedMedia.clear();
       // the loaded work's own assets stay while it is open: deleting one and undoing must find its bytes (§11.2.7)
@@ -596,6 +687,7 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
       if (list.some((e) => e.id === res.entry.id)) {
         app.toast(t('media.dup', { name: file.name }), { kind: 'info' });
       } else if (list.length >= MEDIA.LIMITS.library) {
+        if (res.fresh) releaseMedia(res.entry.id);
         app.toast(t('media.full'), { kind: 'error' });
         return null;
       } else {
@@ -679,6 +771,11 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
       return { have, blobs };
     }
 
+    // The size of the file behind a handle, or -1 when it cannot be read.
+    async function sizeOf(handle) {
+      try { return (await handle.getFile()).size; } catch (e) { return -1; }
+    }
+
     function pickerTypes() {
       return {
         pkg: { description: t('io.typePkg'), accept: { [PKG.MIME]: [PKG.EXT] } },
@@ -710,22 +807,30 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
         }
         if (target && PROJECT_EXT.test(target.name)) return saveLight(target);
       }
-      // 保存 over the open project (handle given) must never delete it when the save is cancelled or fails: only a file
-      // the save dialog has just created is removed then.
-      if (target) sink = SINK.createFileSink(target, { removeOnAbort: !handle });
+      // [中止] or a failure removes the file only when this save made it (the save dialog's new, empty file); the project
+      // file that 保存 writes again keeps what it held, since the browser writes into a copy until close() (D§4.21).
+      if (target) sink = SINK.createFileSink(target, { removeOnAbort: !handle && (await sizeOf(target)) === 0 });
       else {
         if (lay.bytes > PKG_MEMORY && app.confirm && !(await app.confirm({ text: t('pkg.warn.memory', { size }) }))) return null;
         sink = SINK.createMemorySink({ name, type: PKG.MIME });
       }
-      const zip = Z.createZip((part) => sink.write(part));
+      let done = 0;
+      const report = (n) => { if (o.onProgress) o.onProgress(Math.min(1, n / Math.max(1, lay.bytes))); };
+      const zip = Z.createZip(async (part) => {
+        if (!(part instanceof Blob) || part.size <= SAVE_SLICE) return sink.write(part);
+        for (let at = 0; at < part.size; at += SAVE_SLICE) {   // a large asset in pieces: [中止] and the progress act within it
+          checkAbort(o.signal);
+          await sink.write(part.slice(at, at + SAVE_SLICE));
+          report(done + Math.min(part.size, at + SAVE_SLICE));
+        }
+      });
       try {
-        let done = 0;
         for (const e of lay.order) {
           checkAbort(o.signal);
           if (e.text !== undefined) await zip.add(e.name, Z.utf8(e.text));
           else await zip.addBlob(e.name, blobs.get(e.role === 'song' ? 'song' : e.role + ':' + e.id), { crc: e.crc });
           done += e.bytes;
-          if (o.onProgress) o.onProgress(Math.min(1, done / Math.max(1, lay.bytes)));
+          report(done);
         }
         await zip.finish();
         const res = await sink.close();
@@ -781,7 +886,8 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
     // openPackage(file, { signal, onProgress, handle }) → true when the package opened. Random access through
     // File.slice: the directory, the manifest and project.json are checked first (a damaged one is refused and the work
     // stays as it is); then each asset not yet on this device is verified (CRC-32, and SHA-256 = its id for media) and
-    // stored as a slice of the file. A damaged asset is skipped and reported (pkg.warn.damaged): it is missing, to relink.
+    // stored as a slice of the file. A damaged asset is skipped and reported (pkg.warn.damaged, the song apart:
+    // pkg.warn.songDamaged): it is missing, to relink.
     async function openPackage(file, opts) {
       const o = opts || {};
       const read = PR.blobReader(file);
@@ -821,23 +927,36 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
         if (e && e.name === 'AbortError') return false;
         return fail(e && e.code === 'truncated' ? 'pkg.err.truncated' : 'pkg.err.invalid');
       }
-      // assets: dedupe by id / sha1, verify, store the slice itself
-      const names = new Map(((parsed.doc.media && parsed.doc.media.list) || []).map((e) => [e.id, e.name]));
+      // assets: dedupe by id / sha1, verify, store the slice itself. Each asset is read on its own: one that is damaged
+      // (its data, or its local header) is skipped and reported, and the others and the project still open (§12.1).
+      const entries = new Map(((parsed.doc.media && parsed.doc.media.list) || []).map((e) => [e.id, e]));
       const total = plan.media.reduce((n, m) => n + m.entry.bytes, 0) + (plan.song ? plan.song.entry.bytes : 0);
-      let done = 0, damaged = 0, count = 0;
+      const puts = [];                                         // { stored, reason, kind: 'media' | 'song' } of every put
+      const added = new Set();                                 // the keys this open stores ('media:<id>', 'song:<sha1>')
+      let done = 0, damaged = 0, count = 0, songDamaged = false;
       const report = () => { if (o.onProgress) o.onProgress({ p: total ? done / total : 1, i: count, n: plan.media.length }); };
       try {
         for (const m of plan.media) {
           checkAbort(o.signal);
           count++;
           if (await hasMedia(m.id)) { done += m.entry.bytes; report(); continue; }
-          const start = await U.dataStart(read, m.entry);
-          const slice = file.slice(start, start + m.entry.bytes, m.mime);
           const base = done;
-          const hashed = await PR.hashBlob(slice, { signal: o.signal, onProgress: (p) => { done = base + p * m.entry.bytes; report(); } });
+          try {
+            const start = await U.dataStart(read, m.entry);
+            const slice = file.slice(start, start + m.entry.bytes, m.mime);
+            const hashed = await PR.hashBlob(slice, { signal: o.signal, onProgress: (p) => { done = base + p * m.entry.bytes; report(); } });
+            if (hashed.id !== m.id || hashed.crc !== m.entry.crc) damaged++;
+            else {
+              const e = entries.get(m.id);
+              added.add('media:' + m.id);
+              const res = await putMedia(m.id, { blob: slice, mime: m.mime, bytes: m.entry.bytes, crc: m.entry.crc, name: e ? e.name : m.id });
+              puts.push(Object.assign({ kind: 'media' }, res));
+            }
+          } catch (e) {
+            if (e && e.name === 'AbortError') throw e;
+            damaged++;                                         // a bad local header or a read that fails
+          }
           done = base + m.entry.bytes;
-          if (hashed.id !== m.id || hashed.crc !== m.entry.crc) { damaged++; continue; }
-          await putMedia(m.id, { blob: slice, mime: m.mime, bytes: m.entry.bytes, crc: m.entry.crc, name: names.get(m.id) || m.id });
           report();
         }
         for (const th of plan.thumbs) {
@@ -845,31 +964,43 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
           if (!(await hasMedia(th.id)) || await getThumbs(th.id)) continue;
           try {
             const bytes = await entryBytes(th.entry);
-            await putThumbs(th.id, { v: PR.THUMB_V, poster: new Blob([bytes], { type: 'image/webp' }), strip: null, tiles: 0 });
+            // a video's or animation's filmstrip is not in the package: the record is marked partial, and the first use
+            // makes the whole record (media/host/probe thumbsOf)
+            const e = entries.get(th.id);
+            const moving = !!(e && (e.kind === 'video' || e.anim));
+            await putThumbs(th.id, Object.assign({ v: PR.THUMB_V, poster: new Blob([bytes], { type: 'image/webp' }), strip: null, tiles: 0 },
+              moving ? { partial: true } : {}));
           } catch (e) { /* a damaged poster is made again from the asset */ }
         }
         if (plan.song) {
           checkAbort(o.signal);
           const sha1 = plan.song.sha1;
           if (!(await getSong(sha1))) {
-            const start = await U.dataStart(read, plan.song.entry);
-            const slice = file.slice(start, start + plan.song.entry.bytes, plan.song.mime);
-            let crc = 0;
-            for (let at = 0; at < slice.size; at += 8 * MB) {
-              crc = Z.crc32(new Uint8Array(await slice.slice(at, at + 8 * MB).arrayBuffer()), crc);
-              checkAbort(o.signal);
+            try {
+              const start = await U.dataStart(read, plan.song.entry);
+              const slice = file.slice(start, start + plan.song.entry.bytes, plan.song.mime);
+              let crc = 0;
+              for (let at = 0; at < slice.size; at += 8 * MB) {
+                crc = Z.crc32(new Uint8Array(await slice.slice(at, at + 8 * MB).arrayBuffer()), crc);
+                checkAbort(o.signal);
+              }
+              const songName = parsed.doc.song && parsed.doc.song.sha1 === sha1 ? parsed.doc.song.name : 'song.' + PKG.extOf(plan.song.mime);
+              if ((crc >>> 0) === plan.song.entry.crc) {
+                added.add('song:' + sha1);
+                puts.push(Object.assign({ kind: 'song' }, await putSong(sha1, new File([slice], songName, { type: plan.song.mime }))));
+                songCrcs.set(sha1, crc >>> 0);
+              } else songDamaged = true;
+            } catch (e) {
+              if (e && e.name === 'AbortError') throw e;
+              songDamaged = true;
             }
-            const songName = parsed.doc.song && parsed.doc.song.sha1 === sha1 ? parsed.doc.song.name : 'song.' + PKG.extOf(plan.song.mime);
-            if ((crc >>> 0) === plan.song.entry.crc) {
-              await putSong(sha1, new File([slice], songName, { type: plan.song.mime }));
-              songCrcs.set(sha1, crc >>> 0);
-            } else damaged++;
           }
           done += plan.song.entry.bytes;
           report();
         }
       } catch (e) {
-        if (e && e.name === 'AbortError') return false;       // the work is untouched; stored assets are pruned later
+        letGo(added);                                          // the work is untouched; stored assets are pruned later
+        if (e && e.name === 'AbortError') return false;
         return fail('pkg.err.truncated');
       }
       await loadFile(parsed);
@@ -877,6 +1008,19 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
       fileSaved = { name: file.name, at: Date.now(), opened: true, text: D.serialize({ doc: parsed.doc, side: parsed.side }) };
       app.toast(t('io.opened', { name: file.name }), { kind: 'ok' });
       if (damaged) app.toast(t('pkg.warn.damaged', { n: damaged }), { kind: 'warn' });
+      if (songDamaged) {
+        app.toast(t('pkg.warn.songDamaged'), { kind: 'warn',
+          action: app.pickRelink ? { label: t('media.relink'), run: () => app.pickRelink() } : undefined });
+      }
+      // what this device could not store stays for this session only (§11.2.7): say so once, as an import does, naming
+      // what goes when the tab closes (the photos and videos, the song, or both)
+      const lost = puts.filter((r) => r && !r.stored);
+      if (lost.some((r) => r.reason === 'quota')) {
+        app.toast(t('media.err.quota'), { kind: 'error', action: { label: t('io.saveFile'), run: () => saveAs() } });
+      } else if (lost.length) {
+        const media = lost.some((r) => r.kind === 'media'), song = lost.some((r) => r.kind === 'song');
+        app.toast(t(media && song ? 'media.warn.memoryOnlyAll' : song ? 'song.warn.memoryOnly' : 'media.warn.memoryOnly'), { kind: 'warn' });
+      }
       await toastMissing(parsed.doc);
       return true;
     }
@@ -919,9 +1063,7 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
             await withProgress('open', file, (pr) => openPackage(file, Object.assign({}, pr, { handle: handles[0] })));
             return;
           }
-          if (route === 'project') {
-            // the picked file becomes the file 保存 writes only when it opened: a refused one (newer app, damaged) is
-            // left alone, never overwritten with the work still on screen
+          if (route === 'project') {                        // the file becomes this work's file only when it opened
             if (await openProject(file)) {
               fileHandle = handles[0];
               fileSaved = { name: file.name, at: Date.now(), opened: true, text: D.serialize({ doc: app.doc, side: app.store.side }) };
@@ -1021,7 +1163,10 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
         for (const name of MEDIA_STORES) await tx(d, name, 'readwrite', (s) => s.clear());
       } catch (e) { ok = false; }
       for (const name of MEDIA_STORES) memory[name].clear();
+      memorySongs.clear();
       songCrcs.clear();
+      savedKeys = new Set();
+      unhold(() => true);
       setWork(newId());
       fileHandle = null;
       fileSaved = null;
@@ -1042,7 +1187,7 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
       save, saveAs, saveLight, savePackage, openPackage, saveLrc, lrcText, saveText, putSong, getSong, installDrop, begin, fileName,
       clearDevice, workId: () => workId, fileState,
       putMedia, getMedia, hasMedia, putIndex, getIndex, putThumbs, getThumbs, storageInfo, missingMedia, importMedia,
-      importMediaFiles, routeFile, device, mediaBlobs, usedMedia,
+      importMediaFiles, routeFile, device, mediaBlobs, usedMedia, releaseMedia,
     };
   }
 

@@ -307,7 +307,8 @@ MV.def('engine/render/shapes', ['core/color', 'core/media', 'engine/scene/table'
   }
 
   // drawMedia(g, rec, M, alpha, dc, tl) → boolean (§11.5.5): one media node. Its media time is closed-form (clock
-  // 'song': the frame's absolute time dc.t; 'show': the scene-local tl); the store picks the source frame. An opaque
+  // 'song': the frame's absolute time dc.t; 'show': the scene-local tl, or in a ghost pass of fx.textAt the frame's own
+  // dc.ghostTl, so the frame asks for no media frame mediaAt did not list); the store picks the source frame. An opaque
   // picture without blur is drawn straight (veil and tint over it), and so is a blurred one whose frame comes with its
   // blur baked (MediaFrame.blur > 0: stills always, videos and animations once the store has baked that frame); a
   // picture with alpha, a text fill ('atop') or a blurred video frame that came without its blur goes through a pooled
@@ -316,7 +317,7 @@ MV.def('engine/render/shapes', ['core/color', 'core/media', 'engine/scene/table'
   // Allocation-free.
   function drawMedia(g, rec, M, alpha, dc, tl) {
     const T0 = rec.time;
-    const m = T0 ? MEDIA.mapTime(T0, T0.clock === 'song' ? dc.t : tl) : 0;
+    const m = T0 ? MEDIA.mapTime(T0, T0.clock === 'song' ? dc.t : dc.ghostTl === null ? tl : dc.ghostTl) : 0;
     const pal = dc.pal;
     const vis = dc.visible;
     const mirror = rec.edge === 'mirror' && rec.bleed > 0;

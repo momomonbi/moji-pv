@@ -1191,6 +1191,38 @@ test('v2.1 keyframes: a stage drag is inverted through engine.viewAt, so the tex
 
 // --- v2.1 (package F): マイ素材 (DESIGN_2_1 §6.9) ----------------------------------------------------------------------
 
+// MAI-4: the page bakes the knobs into the recipe and keeps them, and core/commands checks a recipe with every knob at its
+// maximum, so an AI material fitted to the budget has no room above its fitted amount: the slider ends where the store
+// still accepts the value (a larger one would be refused with a toast at every step).
+test('v2.1 material knobs go only as far as the store accepts (an AI ornament fitted to the particle budget)', () => {
+  const MP = MV.use('ui/material_page');
+  const RC = MV.use('core/recipe');
+  const RECIPE = MV.use('ai/recipe');
+  const CMD = MV.use('core/commands');
+  const M = MV.use('core/migrate');
+  const cat = MV.use('parts/catalog').defaultRegistry();
+  const lay = { prim: 'particles', shape: 'petal', glyph: '', inks: ['accent'], alpha: 0.85, layer: 'near', anchor: 'frame', x: 0, y: 0,
+    spread: 1.15, sizeMin: 0.012, sizeMax: 0.022, count: 200, stroke: 0, dir: 115, speed: 0.09, sway: 26, swayHz: 0.35, spin: 60,
+    burst: 'none', move: 'none', moveWhat: 'scale', moveAmp: 0, moveHz: 0, appear: 'always', draw: 'fade', style: '', pattern: '', stops: [], angle: 0 };
+  const made = RECIPE.fromAi({ name: '花', nameEn: '', kind: 'ornament', scope: 'cut', season: '', tags: [], blurb: '', base: '', params: [],
+    parts: [], layers: [lay], unit: 'glyph', order: 'lead', dur: -1, each: -1, tracks: [], curve: { name: '', ends: 'both', edge: -1, peak: -1 },
+    osc: [], knobs: ['count'], use: { slot: 'none', s: 0, lines: [], cuts: [] } }, cat);
+  assert.ok(made.warnings.some((w) => w[0] === 'ai.warn.matScaled'), 'fitted to the budget');
+  let doc = M.parseFile(corpus.projectText('v21')).doc;
+  doc = CMD.reduce(doc, { t: 'material.put', id: 'm4', kind: 'ornament', by: 'ai', name: made.entry.name, recipe: made.entry.recipe });
+  const e = MP.entryOf(doc, 'm4');
+  const spec = RC.knobSpecs('ornament', e.recipe).count;
+  const limit = MP.knobLimit('ornament', e.recipe, {}, 'count', spec, doc.media);
+  assert.ok(limit >= 1 && limit < spec.max, 'the slider ends before ×' + spec.max + ': ×' + limit);
+  const put = (v) => MP.putCmd(e, RC.withKnobs(e.recipe, { count: v }));
+  assert.doesNotThrow(() => CMD.reduce(doc, put(limit)), 'the store takes the limit');
+  assert.throws(() => CMD.reduce(doc, put(Math.round((limit + spec.step) * 100) / 100)), /particles/, 'one step more is refused');
+  // a material with room keeps the whole range; a knob never ends below the value it has
+  const m3 = MP.entryOf(doc, 'm3');
+  assert.equal(MP.knobLimit('ornament', m3.recipe, {}, 'count', RC.knobSpecs('ornament', m3.recipe).count, doc.media), 1.5);
+  assert.equal(MP.knobLimit('ornament', e.recipe, { count: 0.5 }, 'count', spec, doc.media) >= 0.5, true);
+});
+
 test('v2.1 materials: ids ↔ keys, uses, places, weight, duplicate and the recipe check', () => {
   const MP = MV.use('ui/material_page');
   const M = MV.use('core/migrate');

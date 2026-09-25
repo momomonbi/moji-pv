@@ -434,7 +434,7 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
     // buffer whose sha1 no longer matches and looks the song up again by sha1 (syncSong).
     let song = { state: 'none', name: '', progress: 0 };
     let linking = null;                                   // the sha1 being looked up in IndexedDB
-    let looked = null;                                    // the last sha1 looked up (a miss is not retried per edit)
+    let looked = null;                                    // the last sha1 looked up (a miss is retried only on a load)
     const setSong = (x) => { song = x; app.bus.emit('song', x); };
     const idle = () => setSong({ state: 'none', name: '', progress: 0 });
     app.songReady = () => !!(app.doc.song && app.buffer && app.bufferSha1 === app.doc.song.sha1);
@@ -453,7 +453,8 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
       if (dropped) { app.setSongBuffer(null); app.peaks = null; }
       if (want && looked !== want) { looked = want; app.relinkSong(app.doc.song); } else if (dropped) app.bus.emit('song', song);
     };
-    store.on('doc', () => app.syncSong());
+    // a load (open, recent, new work, restore) looks the song up once more: a package opened since may have stored it
+    store.on('doc', (e) => { if (e && e.kind === 'load') looked = null; app.syncSong(); });
     app.pickSong = async () => {
       const files = await dom.pickFiles('audio/*,.mp3,.wav,.m4a,.ogg,.flac', false);
       if (files[0]) app.loadSong(files[0]);

@@ -143,6 +143,15 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
       return ids.filter((id) => known.has(id));
     }
 
+    // mediaOnDevice(doc, media) → the ids of the library's photos and videos whose bytes are on this device (media:
+    // ui/media_io, or null before it is ready), or false when there are none: what 指示 and the board may offer when
+    // 「写真・動画をAIが使ってよい」 is on (DESIGN_2_1 §11.6.1; the controller's state.allowMedia is the one switch).
+    function mediaOnDevice(doc, media) {
+      const list = doc && doc.media && Array.isArray(doc.media.list) ? doc.media.list : [];
+      const here = list.filter((e) => !media || media.state(e.id) !== 'missing').map((e) => e.id);
+      return here.length ? here : false;
+    }
+
     function isChecked(c) { return c.checked !== false; }
     function letter(i) { return LETTERS[i] || String(i + 1); }
 
@@ -206,10 +215,14 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
     function changeGroups(doc, plan, changes, applied) {
       const at = new Map(applied.map((item, i) => [itemKey(item), i]));
       const wholeSheet = at.has('rows');
+      // new materials take the next ids in list order, as ai/changes.toCommands numbers them; a remade one keeps its id
+      const next = doc.materials && Number.isInteger(doc.materials.next) ? doc.materials.next : 1;
+      const fresh = changes.filter((c) => c.kind === 'material' && c.entry && !c.materialId);
       return changes.map((c) => {
         let keys;
         if (LYRIC_EDIT_KINDS.includes(c.kind)) keys = [wholeSheet ? 'rows' : 'r:' + c.rowId];
         else if ((c.kind === 'part' || c.kind === 'time' || c.kind === 'value') && c.path) keys = ['p:' + c.path];
+        else if (c.kind === 'material' && c.entry) keys = ['m:' + (c.materialId || 'm' + (next + fresh.indexOf(c)).toString(36))];
         else keys = CH.logEntry(doc, CH.toCommands(doc, plan, [c]), {}).applied.map(itemKey);
         return [...new Set(keys)].filter((k) => at.has(k)).map((k) => at.get(k));
       });
@@ -425,7 +438,9 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
       const DIRECT = d.direct || null;
       const RECIPE = d.recipe || null;
       const VISION = d.vision || null;
-      const visionConsented = new Set();  // asset ids the user agreed to send to Gemini, for this project only (§11.6.2)
+      // The asset ids of the one 「AIに説明してもらう」 the user has just agreed to (§11.6.2): the consent is asked every
+      // time pictures are sent, so it holds for that one run only.
+      const visionAgreed = new Set();
       let seq = 0;
       let checking = null;                // the AbortController of a running key check
       let state = initialState();
@@ -439,6 +454,8 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
           keyStatus: keyStatus(provider, k.key, k.ok, model), keyName: null, keyError: null,
           run: null, review: null, error: null, notice: null, tryOn: null,
           applied: [],                    // the area keys of the last applied area review (the board's 反映済み)
+          // 写真・動画をAIが使ってよい (DESIGN_2_1 §11.6.1): one switch for the instruction block and the board
+          allowMedia: true,
         };
       }
 
@@ -589,6 +606,11 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
         return plan && Array.isArray(plan.lines) && plan.lines.length ? null : 'ai.needLines';
       }
 
+      // 写真・動画をAIが使ってよい: while it is off, 指示 and the board offer no [media] list (askDirect).
+      function setAllowMedia(onOff) {
+        if (state.allowMedia !== !!onOff) set({ allowMedia: !!onOff });
+      }
+
       function consent(onOff) {
         const song = host.song();
         if (!song) return;
@@ -626,9 +648,11 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
       async function askDirect(conn, sent, o, signal) {
         const reg = host.registry;
         let allow = !!o.allowMaterials;
-        // o.media: the asset ids the AI may place (DESIGN_2_1 §11.6.1: bytes on this device, 写真・動画をAIが使ってよい)
+        // o.media: the asset ids the AI may place (DESIGN_2_1 §11.6.1: bytes on this device), offered only while
+        // 写真・動画をAIが使ってよい is on — whichever block sent the request
+        const media = state.allowMedia && Array.isArray(o.media) && o.media.length ? o.media.slice() : false;
         const make = () => DIRECT.directRequests(sent.doc, sent.plan, reg, { briefs: o.briefs, uiLang: host.lang, mode: o.mode || 'all',
-          allowMaterials: allow, media: Array.isArray(o.media) && o.media.length ? o.media.slice() : false });
+          allowMaterials: allow, media });
         let reqs = make();
         let failed = false;
         let outs = [];
@@ -650,8 +674,11 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
           }
           if (res.usage) { usage.input += Number(res.usage.input) || 0; usage.output += Number(res.usage.output) || 0; }
           model = res.model || model;
-          // ai/direct prefixes the ids of window k with 'w<k>:' itself (its `sent.window`).
-          outs.push(DIRECT.directChanges(sent.doc, sent.plan, reg, res.json, { rev: sent.rev, sent: reqs[k].sent, allowMaterials: allow }));
+          // ai/direct prefixes the ids of window k with 'w<k>:' itself (its `sent.window`); the materials of the earlier
+          // windows take their room in doc.materials first
+          const materialsBefore = [].concat(...outs.map((x) => (x.changes || []).filter((c) => c.kind === 'material')));
+          outs.push(DIRECT.directChanges(sent.doc, sent.plan, reg, res.json, { rev: sent.rev, sent: reqs[k].sent, allowMaterials: allow,
+            materialsBefore }));
         }
         const merged = { results: [], changes: [], warnings: [] };
         for (const out of outs) {
@@ -660,6 +687,18 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
           merged.warnings.push(...(out.warnings || []));
         }
         return { res: { usage, model }, out: merged, materialsFailed: failed };
+      }
+
+      // AIで作り直す on a material with a photo or video layer (DESIGN_2_1 §11.5.8): the [media] list, so its pictures stay
+      // 'asset:<n>'. While 写真・動画をAIが使ってよい is on, the pictures on this device (`here`, asset ids) and the
+      // material's own, with their vision text; while it is off, only the material's own, without it. null: no media layer.
+      function remakeMedia(doc, current, here, lang) {
+        const layers = current.recipe && Array.isArray(current.recipe.layers) ? current.recipe.layers : [];
+        const own = layers.filter((l) => l && l.prim === 'media');
+        if (!own.length) return null;
+        const ids = own.map((l) => l.src).filter(Boolean);
+        if (!state.allowMedia) return RECIPE.mediaSent(doc, { only: ids, lang, described: false });
+        return RECIPE.mediaSent(doc, { only: ids.concat(Array.isArray(here) ? here : []), lang });
       }
 
       // The briefs as the review names them: { key, ref, label, n, instruction } from the document they were sent from.
@@ -687,8 +726,9 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
           return { res, out: VISION.visionChanges(sent.doc, res.json, req.sent, valid) };
         }
         if (tool === 'material') {
+          const remake = opts.current ? { current: opts.current, media: remakeMedia(sent.doc, opts.current, opts.media, lang) } : {};
           const req = RECIPE.materialRequest(sent.doc, sent.plan, reg, Object.assign({ description: String(opts.description || '').slice(0, MAX_INSTRUCTION),
-            kind: opts.kind, uiLang: lang }, opts.current ? { current: opts.current } : {}));
+            kind: opts.kind, scope: opts.scope, uiLang: lang }, remake));
           const res = await call(conn, req, signal);
           return { res, out: RECIPE.materialChanges(sent.doc, sent.plan, reg, res.json, Object.assign(valid, { sent: req.sent }, opts.useAt ? { useAt: opts.useAt } : {})) };
         }
@@ -771,8 +811,8 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
       }
 
       // run(tool, opts) → true when a review or a notice came back. opts (edit): { instruction, lineIds }; (direct):
-      // { briefs: [{ ref, instruction }], mode: 'all' | 'camera', allowMaterials }; (material): { description, kind,
-      // current?, useAt? }.
+      // { briefs: [{ ref, instruction }], mode: 'all' | 'camera', allowMaterials, media }; (material): { description, kind,
+      // scope? ('cut' | 'run': an ornament for that place), current?, useAt?, media? (a remake: the asset ids on this device) }.
       async function run(tool, opts) {
         const o0 = opts || {};
         const why = blocked(tool, o0);
@@ -790,7 +830,8 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
         }
         if (tool === 'material' && !String(o.description || '').trim()) return false;
         if (tool === 'vision') {
-          const ids = (Array.isArray(o.ids) ? o.ids : []).filter((x) => visionConsented.has(x));
+          const ids = (Array.isArray(o.ids) ? o.ids : []).filter((x) => visionAgreed.has(x));
+          visionAgreed.clear();
           if (!ids.length) return false;
           o = Object.assign({}, o, { ids });
         }
@@ -908,7 +949,7 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
       function projectChanged() {
         if (state.run) state.run.abort.abort();
         consented.clear();
-        visionConsented.clear();
+        visionAgreed.clear();
         const hadReview = !!state.review;
         endTryOn();
         state = Object.assign({}, state, { run: null, review: null, error: null, notice: null });
@@ -1068,9 +1109,9 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
         return { n, kept };
       }
 
-      // 「AIに説明してもらう」 (DESIGN_2_1 §11.6.2): the assets on this device (at most 8), a consent first for those not
-      // agreed yet (per asset, this project only, not saved), then the vision tool; its review opens in the AI tab.
-      // → Promise<boolean>: true when a review or a notice came back.
+      // 「AIに説明してもらう」 (DESIGN_2_1 §11.6.2): the assets on this device (at most 8), a consent every time (it states
+      // what is sent: 768 px JPEGs, about {kb} KB each, three frames of a video; nothing is remembered), then the vision
+      // tool; its review opens in the AI tab. → Promise<boolean>: true when a review or a notice came back.
       async function describeMedia(ids) {
         const list = [...new Set(Array.isArray(ids) ? ids : [])].filter((x) => host.mediaHere(x)).slice(0, VISION ? VISION.MAX_ITEMS : 0);
         const why = blocked('vision');
@@ -1078,13 +1119,11 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
         if (why) { host.toast(t(why), { kind: 'warn' }); return false; }
         // the pictures asked about are not on this device: say so (nothing would be sent)
         if (!list.length) { if (Array.isArray(ids) && ids.length) host.toast(t('ai.visionMissing'), { kind: 'warn' }); return false; }
-        if (!list.every((x) => visionConsented.has(x))) {
-          const ok = await host.confirm({ title: t('ai.tool.vision'), text: t('ai.visionConsent', { kb: host.visionKb(list) }), ok: t('ai.visionSend') });
-          if (!ok) return false;
-          for (const x of list) visionConsented.add(x);
-        }
+        const ok = await host.confirm({ title: t('ai.tool.vision'), text: t('ai.visionConsent', { kb: host.visionKb(list) }), ok: t('ai.visionSend') });
+        if (!ok) return false;
         host.openAi();
-        return run('vision', { ids: list });
+        for (const x of list) visionAgreed.add(x);
+        try { return await run('vision', { ids: list }); } finally { visionAgreed.clear(); }
       }
 
       // 「AIが決めた固定 n [すべて自動に戻す]」: every pin by 'ai', one undo step.
@@ -1096,8 +1135,8 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
 
       return {
         get state() { return state; },
-        on, setProvider, setModel, setKey, setRemember, forgetKey, forgetKeys, checkKey, blocked, songBlocked, hasConsent, consent,
-        visionBlocked, describeMedia, hasVisionConsent: (id) => visionConsented.has(id),
+        on, setProvider, setModel, setKey, setRemember, forgetKey, forgetKeys, checkKey, blocked, songBlocked, hasConsent, consent, setAllowMedia,
+        visionBlocked, describeMedia,
         run, abort, dismiss, toggle, toggleAgg, toggleAll, setTranscriptTimes, apply, applyTranscript, discard, tryOn, endTryOn,
         tryOnReplaced, strip, docChanged, projectChanged, revert, clearAiPins, logEntries,
         keyPrefix: () => KEY_PREFIX[state.provider] || '',
@@ -1110,7 +1149,7 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
     return {
       TOOLS, SONG_TOOLS, GROUP_ORDER, AREA_GROUP_ORDER, DIRECT_ORDER, STAGES, GUIDE_TOPICS, MAX_INSTRUCTION, MAX_BRIEFS,
       ASK_MAX, ASKS_CAP, LOG_CAP, KEY_PREFIX, SETTINGS_KEY,
-      readSettings, createKeyStore, keyStatus, statusOfError, costText, consentFacts, selectedLines, withChecked, withAll,
+      readSettings, createKeyStore, keyStatus, statusOfError, costText, consentFacts, selectedLines, mediaOnDevice, withChecked, withAll,
       grouped, counts, withLog, revertable, changeGroups, revertTally, aiPinCount, changesOf, letter, createController,
       targetRef, groupOfChange, directGroups, aggRows, aggState, isDisabled, withToggle, withAggToggle, withAsk,
       boardBriefs, refOfKey, itemKey,

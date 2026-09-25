@@ -5,7 +5,8 @@ Runs in the built app page (index.html?fresh=1&test=1), under its real CSP, with
 tests/helpers/media_gen.js and the harness tests/www/media_check.js evaluated into it. Every generated fixture (the
 counter videos: VP9 in WebM at 30 and 60 fps, VP9 in MP4, VFR, rotated, VP9 alpha, H.264 where the browser encodes it;
 PNG with alpha, JPEG, WebP, a JPEG with EXIF orientation 6, an SVG) and every committed one (tests/fixtures/media) goes
-through media/host/probe.importFile. Checked: the entry fields; the refusals and their media.err codes; routing by the
+through media/host/probe.importFile. Checked: the entry fields; the refusals and their media.err codes (a JPEG whose
+frame header lies after 128 KB of APP2 data is measured before decoding: imported, or refused as too big); routing by the
 bytes (a WebM with video is media, an audio-only WebM is the song); dedupe; the IndexedDB round trip (blob = id, CRC,
 index, thumbs) and pruning; the quota fallback (a faked QuotaExceededError keeps the asset in memory); and, through the
 real AssetStore, frame exactness of every counter video in order, in a shuffled order and in a software export fork,
@@ -182,6 +183,9 @@ async def main():
     vfr_ix = idb['index'].get(g['vfr']['entry']['id']) if g['vfr'].get('ok') else None
     c.ok(vfr_ix and vfr_ix['vfr'] is True, 'VFR: the table is variable rate (%r)' % vfr_ix)
     c.ok(not idb['index'].get(g['webm30']['entry']['id'], {}).get('vfr', True), 'CFR: the table is constant rate')
+    for name, sc in r['stripCodes'].items():
+        c.ok(len(sc['codes']) == 12 and sc['codes'] == sc['picks'], '%s: filmstrip tile k shows the key frame picked for it: %r' % (name, sc))
+    c.ok(sorted(r['stripCodes']) == ['mp4_25', 'vfr', 'webm30'], 'the filmstrips were read: %r' % sorted(r['stripCodes']))
     # animation (committed anim.gif: real GIF data)
     check_entry(c, r['committed']['anim.gif'], 'animated GIF', kind='image', mime='image/gif', anim=True, frames=10, dur=1.1, fps=10, w=64, h=36)
     gif_ix = idb['index'].get(r['committed']['anim.gif']['entry']['id']) if r['committed']['anim.gif'].get('ok') else None
@@ -196,6 +200,9 @@ async def main():
         ok = not res['ok'] and (res['code'] == 'broken' or (res['code'] == 'codec' and res['detail'] == {'codec': codec}))
         c.ok(ok, '%s (placeholder frames): refused as codec %s or broken (%r)' % (name, codec, {k: res.get(k) for k in ('code', 'detail')}))
     c.ok(not g['huge']['ok'] and g['huge']['code'] == 'tooBig', '50 MP header → media.err.tooBig before decoding (%r)' % g['huge'])
+    check_entry(c, g['lateSof'], 'JPEG with 128 KB of APP2 before its frame header', kind='image', mime='image/jpeg', w=96, h=64)
+    c.ok(not g['lateHuge']['ok'] and g['lateHuge']['code'] == 'tooBig',
+         'a 240 MP JPEG header after 128 KB of APP2 → media.err.tooBig before decoding (%r)' % g['lateHuge'])
     c.ok(not g['junk']['ok'] and g['junk']['code'] == 'type', 'unknown bytes → media.err.type (%r)' % g['junk'])
     c.ok(not g['cut']['ok'] and g['cut']['code'] == 'broken', 'a truncated MP4 → media.err.broken (%r)' % g['cut'])
     c.ok(not g['audioOnly']['ok'] and g['audioOnly']['code'] == 'audioOnly', 'an audio-only WebM is not media (%r)' % g['audioOnly'])

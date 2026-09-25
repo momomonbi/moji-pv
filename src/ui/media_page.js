@@ -164,6 +164,7 @@ MV.def('ui/media_page', ['ui/dom', 'ui/icons', 'i18n/t', 'core/media', 'ui/media
     let scrubTimer = 0;
     let shownSig = null;
     let focusNext = null;                  // a control to focus once the page is drawn again (✎ after a rename)
+    let lastName = '';                     // the name shown last: the crumbs keep it when the asset leaves the document
     const entry = () => MI.entryOf(app.doc, o.id);
 
     function button(label, run, extra) {
@@ -282,6 +283,7 @@ MV.def('ui/media_page', ['ui/dom', 'ui/icons', 'i18n/t', 'core/media', 'ui/media
     function render(force) {
       const e = entry();
       if (!e) { clearInterval(scrubTimer); shownSig = null; dom.replace(el, h('p', { class: 'note subtle', text: t('media.gone') })); return; }
+      lastName = e.name;
       const st = app.media.state(e.id);
       const missing = st === 'missing';
       const places = MI.usePlaces(app.doc, app.plan, e.id);
@@ -347,10 +349,11 @@ MV.def('ui/media_page', ['ui/dom', 'ui/icons', 'i18n/t', 'core/media', 'ui/media
     }
 
     render(true);
-    const e0 = entry();
+    // An asset that left the document (its import undone) keeps its last name in the crumbs, never its content id.
+    const nameNow = () => { const e = entry(); return e ? e.name : lastName || t('media.gone'); };
     return {
-      id: 'media:' + o.id, crumb: ['media.crumb', { name: e0 ? e0.name : o.id }], el, bare: true,
-      crumbs: () => { const e = entry(); return [{ label: ['sec.media', {}], run: o.onLibrary || null }, { label: e ? e.name : o.id }]; },
+      id: 'media:' + o.id, crumb: ['media.crumb', { name: nameNow() }], el, bare: true,
+      crumbs: () => [{ label: ['sec.media', {}], run: o.onLibrary || null }, { label: nameNow() }],
       focus() {
         dom.focus(el.querySelector(renaming ? '.med-rename' : '[data-act="relink"]') || el.querySelector('.med-use .btn:not(:disabled)')
           || el.querySelector('button'));

@@ -50,19 +50,24 @@ MV.def('ui/ai_board', ['ui/dom', 'ui/icons', 'planner/areas', 'ui/fields', 'ui/a
     const list = h('div', { class: 'ai-board-rows' });
     const addSel = h('button', { class: 'chip-btn', type: 'button', text: t('ai.board.addSel') });
     const allow = h('input', { type: 'checkbox' });
+    // 写真・動画をAIが使ってよい: the same switch as the instruction block's (the controller's), shown while the library
+    // has a picture on this device (DESIGN_2_1 §11.6.1)
+    const allowMedia = h('input', { type: 'checkbox', 'data-ctl': 'allowMedia' });
+    const mediaRow = h('label', { class: 'check-row', hidden: true }, allowMedia, h('span', { text: t('ai.direct.allowMedia') }));
     const send = h('button', { class: 'btn small primary', type: 'button', text: t('ai.board.send') });
     const why = h('p', { class: 'ai-reason', role: 'status', hidden: true });
     const empty = h('p', { class: 'note subtle', text: t('ai.board.empty') });
     const el = h('section', { class: 'ai-sec ai-board', 'aria-label': t('ai.board.title') },
       h('div', { class: 'sub-head' }, back, title), list, empty,
       h('div', { class: 'row-actions ai-board-foot' }, addSel,
-        h('label', { class: 'check-row' }, allow, h('span', { text: t('ai.direct.allowMaterials') }))),
+        h('label', { class: 'check-row' }, allow, h('span', { text: t('ai.direct.allowMaterials') })), mediaRow),
       h('div', { class: 'ai-edit-row' }, why, h('span', { class: 'grow' }), send));
     const added = [];
     const timers = new Map();
     let rows = [];
 
     back.addEventListener('click', () => o.onBack());
+    allowMedia.addEventListener('change', () => ctl.setAllowMedia(allowMedia.checked));
 
     const asks = () => (app.store.side && app.store.side.asks) || {};
     function save(key, text) {
@@ -85,11 +90,9 @@ MV.def('ui/ai_board', ['ui/dom', 'ui/icons', 'planner/areas', 'ui/fields', 'ui/a
       flush();
       const b = AC.boardBriefs(rows, asks());
       if (!b.briefs.length || b.over) return;
-      // the library's pictures on this device may be placed, as in the instruction block, and only while its
-      // 写真・動画をAIが使ってよい switch is on (DESIGN_2_1 §11.6.1)
-      const allowed = typeof o.allowMedia === 'function' && o.allowMedia();
-      const here = !allowed ? [] : (app.doc.media && app.doc.media.list ? app.doc.media.list : []).filter((e) => !app.media || app.media.state(e.id) !== 'missing');
-      ctl.run('direct', { briefs: b.briefs, mode: 'all', allowMaterials: allow.checked, media: here.length ? here.map((e) => e.id) : false });
+      // the library's pictures on this device, as in the instruction block: the controller offers them only while
+      // 写真・動画をAIが使ってよい is on (DESIGN_2_1 §11.6.1)
+      ctl.run('direct', { briefs: b.briefs, mode: 'all', allowMaterials: allow.checked, media: AC.mediaOnDevice(app.doc, app.media) });
     });
 
     function flush() {
@@ -153,6 +156,8 @@ MV.def('ui/ai_board', ['ui/dom', 'ui/icons', 'planner/areas', 'ui/fields', 'ui/a
       why.textContent = reason ? t(reason) : '';
       send.disabled = !!reason || !b.briefs.length;
       addSel.disabled = !AC.selectedLines(app.view.state.sel, app.plan).length;
+      mediaRow.hidden = !AC.mediaOnDevice(app.doc, app.media);
+      allowMedia.checked = ctl.state.allowMedia;
     }
 
     // Rebuilt only when the rows or their states change: typing (a draft saved to side.asks) keeps the inputs.

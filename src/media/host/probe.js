@@ -22,6 +22,7 @@ MV.def('media/host/probe', ['core/media', 'core/sha256', 'export/zip', 'media/sn
   const POSTER = 320;                     // poster long side (px)
   const STRIP = 12, TILE = 160;           // filmstrip: 12 tiles of 160 px on the long side
   const THUMB_V = 1;
+  const JPEG_SCAN = 16 * MB;              // a JPEG's frame header (SOFn) is looked for this far into the file at most
   const L = MEDIA.LIMITS;
 
   const err = (code, message, detail) => new SM.MediaError(code, message || code, detail);
@@ -105,19 +106,39 @@ MV.def('media/host/probe', ['core/media', 'core/sha256', 'export/zip', 'media/sn
     return toBlob(s, 'image/webp');
   }
 
-  // A sprite of STRIP tiles side by side, each the displayed frame with its long side TILE.
-  async function stripBlob(images, w, h, rot, canvas) {
+  // A sprite of STRIP tiles side by side, each the displayed frame with its long side TILE. put(k, image) draws tile k
+  // from a frame in its coded orientation as soon as it is decoded, so no full-size copy of a frame is kept for the
+  // strip (twelve 4K frames would be ≈ 400 MB); blob() encodes the sprite.
+  function stripSheet(w, h, rot, canvas) {
     const [tw, th] = fitLong(w, h, TILE);
     const s = surface(canvas, tw * STRIP, th);
     s.ctx.clearRect(0, 0, tw * STRIP, th);
-    images.forEach((img, k) => { if (img) drawUpright(s.ctx, img, rot || 0, k * tw, 0, tw, th); });
-    return toBlob(s, 'image/webp');
+    return {
+      put(k, image) { drawUpright(s.ctx, image, rot || 0, k * tw, 0, tw, th); },
+      blob() { return toBlob(s, 'image/webp'); },
+    };
   }
 
   // The STRIP indices spread evenly over n items (repeats when n < STRIP).
   function spread(n) { return Array.from({ length: STRIP }, (_, k) => (n <= 1 ? 0 : Math.round((k * (n - 1)) / (STRIP - 1)))); }
 
   // --- stills ------------------------------------------------------------------------------------------------------------
+
+  // jpegSize(blob, head) → { w, h } | null: the coded size of a JPEG whose frame header comes after the sniffed head
+  // (large ICC or XMP segments first). The marker walk of media/sniff goes on through the file one 64-KB read at a
+  // time, up to JPEG_SCAN bytes, so the 40 MP check runs on the header before anything is decoded (§11.4.13 step 1).
+  async function jpegSize(blob, head) {
+    let at = 0, b = head, p = 2;
+    for (;;) {
+      const r = SN.jpegWalk(b, p);
+      if (!r) return null;
+      if (r.w !== undefined) return r;
+      if (b.length < SN.HEAD || at + r.next >= Math.min(blob.size, JPEG_SCAN)) return null;   // the file or the scan ends
+      at += r.next;
+      p = 0;
+      b = new Uint8Array(await blob.slice(at, at + SN.HEAD).arrayBuffer());
+    }
+  }
 
   async function decodeStill(blob, extra) {
     try {
@@ -167,9 +188,8 @@ MV.def('media/host/probe', ['core/media', 'core/sha256', 'export/zip', 'media/sn
       const n = tr.frameCount;
       if (n > L.animFrames) throw err('animTooBig', n + ' frames');
       const picks = spread(n);
-      const tiles = new Array(STRIP).fill(null);
       const cts = [], dur = [];
-      let t = 0, w = 0, h = 0, poster = null;
+      let t = 0, w = 0, h = 0, poster = null, sheet = null;
       for (let k = 0; k < n; k++) {
         const r = await dec.decode({ frameIndex: k, completeFramesOnly: true });
         const f = r.image;
@@ -177,14 +197,14 @@ MV.def('media/host/probe', ['core/media', 'core/sha256', 'export/zip', 'media/sn
           w = f.displayWidth; h = f.displayHeight;
           if (Math.max(w, h) > L.animLong || w * h > L.imagePixels) { f.close(); throw err('animTooBig', w + '×' + h); }
           poster = await posterBlob(f, w, h, 0, canvas);
+          sheet = stripSheet(w, h, 0, canvas);
         }
         const d = f.duration > 0 ? f.duration : 100000;       // µs; an unknown delay plays at 10 fps
         cts.push(t); dur.push(d); t += d;
-        for (let j = 0; j < STRIP; j++) if (picks[j] === k) tiles[j] = await createImageBitmap(f);
+        for (let j = 0; j < STRIP; j++) if (picks[j] === k) sheet.put(j, f);
         f.close();
       }
-      const strip = await stripBlob(tiles, w, h, 0, canvas);
-      for (const b of new Set(tiles)) if (b) b.close();
+      const strip = await sheet.blob();
       const table = SM.build({ timescale: 1e6, cts, dur, key: cts.map(() => 1), off: cts.map(() => 0), size: cts.map(() => 0) });
       const alpha = sniffed.container === 'gif' || sniffed.alphaHint !== false ? await hasAlpha(blob, canvas) : false;
       return { fields: { w, h, dur: table.duration, fps: table.fps, frames: n, rot: 0, alpha, anim: true,
@@ -294,14 +314,13 @@ MV.def('media/host/probe', ['core/media', 'core/sha256', 'export/zip', 'media/sn
       const first = await session.request(0);
       const poster = await posterBlob(first.image, info.w, info.h, info.rot, o.canvas);
       const picks = stripPicks(table, false);                // 12 key frames spread evenly, for the filmstrip
-      const frames = new Map();
+      const sheet = stripSheet(info.w, info.h, info.rot, o.canvas);
       for (const i of [...new Set(picks)].sort((a, b) => a - b)) {
         const h = await session.request(i);
-        frames.set(i, await createImageBitmap(h.image));
+        picks.forEach((pick, k) => { if (pick === i) sheet.put(k, h.image); });   // drawn now: the session may close it next
         checkAbort(o.signal);
       }
-      const strip = await stripBlob(picks.map((i) => frames.get(i)), info.w, info.h, info.rot, o.canvas);
-      for (const b of frames.values()) b.close();
+      const strip = await sheet.blob();
       return { fields: videoFields(table, info), thumbs: { v: THUMB_V, poster, strip, tiles: STRIP },
         index: { v: MEDIA.INDEX_V, table: SM.toData(table), track: info } };
     } catch (e) {
@@ -363,6 +382,11 @@ MV.def('media/host/probe', ['core/media', 'core/sha256', 'export/zip', 'media/sn
     if (sniffed.kind !== 'image' && sniffed.kind !== 'video') throw err('type', 'unknown file type');
     if (sniffed.kind === 'image') {
       if (blob.size > L.imageBytes) throw err('tooBig', 'image file over 60 MB');
+      if (sniffed.container === 'jpeg' && sniffed.w === undefined) {
+        const size = await jpegSize(blob, head);
+        if (!size) throw err('broken', 'no JPEG frame header');
+        sniffed.w = size.w; sniffed.h = size.h;
+      }
       if (sniffed.w * sniffed.h > L.imagePixels) throw err('tooBig', 'image larger than 40 MP');
       if (sniffed.anim && Math.max(sniffed.w, sniffed.h) > L.animLong) throw err('animTooBig', 'animation larger than 2048 px');
     } else if (blob.size > L.videoBytes) throw err('tooBigVideo', 'video file over 4 GB');
@@ -413,21 +437,24 @@ MV.def('media/host/probe', ['core/media', 'core/sha256', 'export/zip', 'media/sn
 
   // --- posters and filmstrips (thumbs store; rebuilt when missing) --------------------------------------------------------------
 
+  // thumbsOf(id, { store, canvas }) → the thumbs record ({ v, poster, strip, tiles }), made from the asset and stored when
+  // it is missing or partial (a package's poster of a video or an animation, without its filmstrip: ui/project_io).
   async function thumbsOf(id, o) {
     const store = o && o.store;
     if (!store) return null;
     let rec = null;
     try { rec = await store.getThumbs(id); } catch (e) { rec = null; }
-    if (rec && rec.v === THUMB_V && rec.poster) return rec;
+    const poster = rec && rec.v === THUMB_V && rec.poster ? rec : null;
+    if (poster && !poster.partial) return poster;
     const media = await store.getMedia(id);
-    if (!media || !media.blob) return null;
+    if (!media || !media.blob) return poster;
     const sniffed = SN.sniff(new Uint8Array(await media.blob.slice(0, SN.HEAD).arrayBuffer()));
     let probed;
     try {
       if (sniffed.kind === 'video') probed = await probeVideo(media.blob, sniffed, { canvas: o.canvas }, []);
       else if (sniffed.anim) probed = await probeAnim(media.blob, sniffed, o.canvas, []);
       else probed = await probeStill(media.blob, sniffed, o.canvas);
-    } catch (e) { return null; }
+    } catch (e) { return poster; }
     try { await store.putThumbs(id, probed.thumbs); } catch (e) { /* kept in memory by the caller */ }
     return probed.thumbs;
   }
@@ -443,5 +470,5 @@ MV.def('media/host/probe', ['core/media', 'core/sha256', 'export/zip', 'media/sn
   }
 
   return { importFile, rasterizeSvg, posterOf, stripOf, thumbsOf, indexOf, animIndexOf, stripPicks, hashBlob, sessionTrack,
-    drawUpright, blobReader, POSTER, STRIP, TILE, THUMB_V, SUBTLE_MAX, SLICE };
+    drawUpright, blobReader, jpegSize, POSTER, STRIP, TILE, THUMB_V, SUBTLE_MAX, SLICE, JPEG_SCAN };
 });

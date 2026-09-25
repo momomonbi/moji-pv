@@ -24,6 +24,8 @@ MV.def('media/host/store', ['core/media', 'media/samples', 'media/host/session',
   const NEAR_BAKED = 2;                            // frames: how far back a baked copy may stand in for an unbaked one
   const SESSION_PIXELS = 16.6e6;                   // Σ coded pixels of the open sessions of one store
   const BLUR_LEVELS = [0, 2, 4, 8, 16, 32, 64, 128];
+  const SIGMA_STEPS = 12;                          // the blur of a still's copy, in 1/12-octave steps (at most 3 % off):
+                                                   // a draw 20 % larger or smaller makes about 3 new copies, not one per px
 
   // The blur level (device px) a request uses: the nearest level, so cached copies are reused.
   function blurLevel(px) {
@@ -42,7 +44,7 @@ MV.def('media/host/store', ['core/media', 'media/samples', 'media/host/session',
       blob: new Map(),            // id → { p: Promise<Blob | null>, value: Blob | null | undefined }
       index: new Map(),           // id → { p, value: { table, track } | null | undefined, error }
       thumbs: new Map(),          // id → { p, value: { poster, tiles, picks } | null | undefined }
-      stills: new Map(),          // key → { bitmap, w, h, bytes } (Map order = least recently used first)
+      stills: new Map(),          // key → { bitmap, w, h, bytes, level } (Map order = least recently used first)
       stillP: new Map(),          // key → Promise
       stillBytes: 0,
       failed: new Map(),          // id → code: an asset that cannot be read or decoded here
@@ -69,8 +71,13 @@ MV.def('media/host/store', ['core/media', 'media/samples', 'media/host/session',
     const queue = new Map();                     // preview bakes: 'id|b|sigma' → { id, v, shown: index | −1, hinted: [index] }
     let pumping = false;
 
+    // emit: shared state (bytes, sample tables, thumbs, stills, failures) reaches the listeners of every store over it;
+    // emitOwn: what this store's own sessions and bakes hold (an export fork's frames are not the preview's).
     function emit(event, arg) {
       for (const store of shared.stores) for (const fn of store.listeners[event]) { try { fn(arg); } catch (e) { /* a listener's problem */ } }
+    }
+    function emitOwn(event, arg) {
+      for (const fn of listeners[event]) { try { fn(arg); } catch (e) { /* a listener's problem */ } }
     }
 
     // --- bytes, index and thumbs (shared by every fork) ---------------------------------------------------------
@@ -134,13 +141,15 @@ MV.def('media/host/store', ['core/media', 'media/samples', 'media/host/session',
         rec.p = (async () => {
           let stored = null;
           try { stored = shared.blobs.thumbs ? await shared.blobs.thumbs(id) : null; } catch (e) { stored = null; }
-          if (!stored || !stored.poster) {
+          if (!stored || !stored.poster || stored.partial) {    // partial: a package's poster without the filmstrip
             const blob = await loadBlob(id).p;
-            if (!blob) return null;
-            const store = { getThumbs: async () => null, getMedia: async () => ({ blob }),
-              putThumbs: async (k, r) => { if (shared.blobs.putThumbs) await shared.blobs.putThumbs(k, r); } };
-            stored = await PR.thumbsOf(id, { store, canvas: shared.canvas });
-            if (!stored) return null;
+            if (blob) {
+              const had = stored;
+              const store = { getThumbs: async () => had, getMedia: async () => ({ blob }),
+                putThumbs: async (k, r) => { if (shared.blobs.putThumbs) await shared.blobs.putThumbs(k, r); } };
+              stored = await PR.thumbsOf(id, { store, canvas: shared.canvas });
+            }
+            if (!stored || !stored.poster) return null;
           }
           const poster = await createImageBitmap(stored.poster);
           let tiles = [];
@@ -159,7 +168,21 @@ MV.def('media/host/store', ['core/media', 'media/samples', 'media/host/session',
 
     // --- stills ------------------------------------------------------------------------------------------------------
 
-    function stillKey(id, tier, level) { return id + '|' + tier + '|' + level; }
+    // The key of a still at `tier` (level 0), or of its blurred copy: its level and its blur in copy px (§11.4.6).
+    function stillKey(id, tier, level, sigma) { return id + '|' + tier + '|' + level + (level > 0 ? '|' + sigma : ''); }
+
+    // The blurred copy of a still at `tier` for a draw of `px` device px (the request's): the tier bitmap downscaled by
+    // k = max(1, level / 4), blurred by σ = level × copy long side / px copy px (as video frames are), so the blur on
+    // screen is the same whatever the photo's resolution. σ is rounded to SIGMA_STEPS per octave, so a resize or a
+    // zoom that changes px a little reuses the copy.
+    function stillCopy(entry, tier, level, px) {
+      const long = Math.max(entry.w, entry.h);
+      const tw = Math.max(1, Math.round((entry.w * tier) / long)), th = Math.max(1, Math.round((entry.h * tier) / long));
+      const k = Math.max(1, level / 4);
+      const sigma = (level * (Math.max(tw, th) / k)) / (px > 0 ? px : tier);
+      return { k, w: Math.max(1, Math.round(tw / k)), h: Math.max(1, Math.round(th / k)),
+        sigma: Math.pow(2, Math.round(Math.log2(sigma) * SIGMA_STEPS) / SIGMA_STEPS) };
+    }
 
     function touchStill(key) {
       const hit = shared.stills.get(key);
@@ -180,23 +203,24 @@ MV.def('media/host/store', ['core/media', 'media/samples', 'media/host/session',
     }
 
     // Decodes a still at `tier` px on the long side (EXIF orientation applied, colour converted to sRGB), and its
-    // blurred copy at `level` when asked: downscaled by max(1, level / 4) and filtered in the host (§11.4.6).
-    function decodeStill(id, entry, tier, level) {
-      const key = stillKey(id, tier, level);
+    // blurred copy at `level` for a draw of `px` when asked (stillCopy: never larger than the tier), filtered in the
+    // host (§11.4.6).
+    function decodeStill(id, entry, tier, level, px) {
+      const copy = level > 0 ? stillCopy(entry, tier, level, px) : null;
+      const key = stillKey(id, tier, level, copy ? copy.sigma : 0);
       if (shared.stills.has(key)) return Promise.resolve(shared.stills.get(key));
       if (shared.stillP.has(key)) return shared.stillP.get(key);
       const t0 = shared.now();
       const p = (async () => {
-        if (level > 0) {
+        if (copy) {
           const base = await decodeStill(id, entry, tier, 0);
-          const k = Math.max(1, level / 4);
-          const w = Math.max(1, Math.round(base.w / k)), h = Math.max(1, Math.round(base.h / k));
+          const { w, h } = copy;
           const s = shared.canvas ? shared.canvas.create(w, h, { alpha: true }) : (() => { const c = new OffscreenCanvas(w, h); return { canvas: c, ctx: c.getContext('2d') }; })();
-          s.ctx.filter = 'blur(' + (level / k) + 'px)';
+          s.ctx.filter = 'blur(' + copy.sigma + 'px)';
           s.ctx.drawImage(base.bitmap, 0, 0, w, h);
           s.ctx.filter = 'none';
           const bitmap = typeof s.canvas.transferToImageBitmap === 'function' ? s.canvas.transferToImageBitmap() : await createImageBitmap(s.canvas);
-          return { bitmap, w: entry.w, h: entry.h, bytes: w * h * 4 };
+          return { bitmap, w: entry.w, h: entry.h, bytes: w * h * 4, level };
         }
         const blob = await loadBlob(id).p;
         if (!blob) throw mediaError('missing', 'not on this device', { id });
@@ -211,7 +235,7 @@ MV.def('media/host/store', ['core/media', 'media/samples', 'media/host/session',
             throw mediaError('broken', 'the image does not decode');
           }
         }
-        return { bitmap, w: entry.w, h: entry.h, bytes: rw * rh * 4 };
+        return { bitmap, w: entry.w, h: entry.h, bytes: rw * rh * 4, level: 0 };
       })().then((rec) => {
         shared.stillP.delete(key);
         decodeMs += shared.now() - t0;
@@ -229,7 +253,21 @@ MV.def('media/host/store', ['core/media', 'media/samples', 'media/host/session',
 
     // --- sessions (per store) ---------------------------------------------------------------------------------------------
 
-    function sessionFor(id, entry) {
+    // The timed media of the latest draw: the ids frame() and want() are asked for in one synchronous turn (the stage
+    // draws a frame, then lists its look-ahead, in one turn), or the list of the latest ready().
+    const drawn = new Set();
+    let drawOpen = false;
+    function newDraw() {
+      drawn.clear();
+      if (!drawOpen) { drawOpen = true; queueMicrotask(() => { drawOpen = false; }); }
+    }
+    function drawing(id) { if (!drawOpen) newDraw(); drawn.add(id); }
+
+    // The session of a timed medium, opened when missing. Opening one beyond SESSION_PIXELS closes the least recently
+    // used others first (§11.4.7), but never one of the latest draw (`drawn`) or of `keep` (the ids of the ready() list
+    // being readied): the bound may be exceeded while one frame draws more video than it allows. The sessions of
+    // earlier draws close first even with a request still waiting (a scrub across many clips stays within the bound).
+    function sessionFor(id, entry, keep) {
       let s = sessions.get(id);
       if (s) { sessions.delete(id); sessions.set(id, s); return s; }
       const idx = loadIndex(id).value, blob = blobNow(id);
@@ -249,7 +287,7 @@ MV.def('media/host/store', ['core/media', 'media/samples', 'media/host/session',
       for (const x of sessions.values()) total += x.pixels;
       for (const [k, x] of sessions) {
         if (total <= SESSION_PIXELS || sessions.size <= 1) break;
-        if (k === id) continue;
+        if (k === id || drawn.has(k) || (keep && keep.has(k))) continue;
         total -= x.pixels;
         decodeMs += x.stats().decodeMs;
         x.close();
@@ -298,14 +336,14 @@ MV.def('media/host/store', ['core/media', 'media/samples', 'media/host/session',
       const px = w.px > 0 ? w.px : Math.max(entry.w, entry.h);
       lastPx.set(id, Math.max(lastPx.get(id) || 0, px));
       const tier = MEDIA.tier(px, entry), level = blurLevel(w.blur);
-      const hit = touchStill(stillKey(id, tier, level));
+      const hit = touchStill(stillKey(id, tier, level, level > 0 ? stillCopy(entry, tier, level, px).sigma : 0));
       if (hit) return mf(id, hit.bitmap, hit.bitmap.width, hit.bitmap.height, 0, true, 0, level);
-      decodeStill(id, entry, tier, level).catch(() => {});
-      let best = null, bestLevel = 0;
+      decodeStill(id, entry, tier, level, px).catch(() => {});
+      let best = null;
       for (const [k, r] of shared.stills) {
-        if (k.startsWith(id + '|') && (!best || r.bitmap.width > best.bitmap.width)) { best = r; bestLevel = Number(k.slice(k.lastIndexOf('|') + 1)); }
+        if (k.startsWith(id + '|') && (!best || r.bitmap.width > best.bitmap.width)) best = r;
       }
-      if (best) return mf(id, best.bitmap, best.bitmap.width, best.bitmap.height, 0, false, 0, bestLevel);
+      if (best) return mf(id, best.bitmap, best.bitmap.width, best.bitmap.height, 0, false, 0, best.level);
       loadThumbs(id);
       return posterFrame(id, false);
     }
@@ -321,6 +359,7 @@ MV.def('media/host/store', ['core/media', 'media/samples', 'media/host/session',
       if (!idx.value) { loadThumbs(id); return posterFrame(id, false); }
       const table = idx.value.table;
       const i = SM.sampleAt(table, typeof m === 'number' && Number.isFinite(m) ? m : 0);
+      drawing(id);
       const s = sessionFor(id, entry);
       if (!s) return posterFrame(id, false);
       const v = w.blur > 0 ? variantOf(entry, w.px, w.blur) : null;
@@ -336,7 +375,7 @@ MV.def('media/host/store', ['core/media', 'media/samples', 'media/host/session',
         if (near) return mf(id, near.bitmap, near.w, near.h, h.rot, false, near.index, near.blur);
         return mf(id, h.image, h.w, h.h, h.rot, false, i, 0);
       }
-      s.request(i).then(() => emit('ready', { id }), () => sessionFailed(id, s));
+      s.request(i).then(() => emitOwn('ready', { id }), () => sessionFailed(id, s));
       if (v && !w.exact) schedule(id, v, i);      // baked as soon as it is held (the session's onHeld)
       const near = s.nearest(i);
       if (near) {
@@ -480,7 +519,7 @@ MV.def('media/host/store', ['core/media', 'media/samples', 'media/host/session',
           const job = nextBake();
           if (!job) break;
           const r = await bakeHeld(job.id, job.s, job.h, job.v, shared.entries(job.id) || {});
-          if (r) emit('ready', { id: job.id });
+          if (r) emitOwn('ready', { id: job.id });
           await slice();
           if (disposed) break;
         }
@@ -511,6 +550,7 @@ MV.def('media/host/store', ['core/media', 'media/samples', 'media/host/session',
         const h = hinted.get(key);
         if (!h.list.includes(i)) h.list.push(i);
       }
+      for (const id of byId.keys()) drawing(id);
       for (const [id, indices] of byId) {
         const s = sessionFor(id, shared.entries(id));
         if (s) s.hint(indices);
@@ -530,6 +570,10 @@ MV.def('media/host/store', ['core/media', 'media/samples', 'media/host/session',
       const signal = o && o.signal;
       const jobs = [];
       const pins = new Map();
+      const keep = new Set();                    // the frame's media: their sessions do not close one another
+      for (const item of list || []) if (item && MEDIA.isId(item.id)) keep.add(item.id);
+      newDraw();                                 // the frame being readied is the latest draw
+      for (const id of keep) drawn.add(id);
       for (const item of list || []) {
         if (!item || !MEDIA.isId(item.id)) continue;
         const id = item.id;
@@ -540,7 +584,7 @@ MV.def('media/host/store', ['core/media', 'media/samples', 'media/host/session',
           if (!blob) throw mediaError('missing', 'not on this device', { id });
           if (!isTimed(entry)) {
             const px = item.px > 0 ? item.px : lastPx.get(id) || Math.max(entry.w, entry.h);
-            await decodeStill(id, entry, MEDIA.tier(px, entry), blurLevel(item.blur));
+            await decodeStill(id, entry, MEDIA.tier(px, entry), blurLevel(item.blur), px);
             return;
           }
           const idx = await loadIndex(id).p;
@@ -548,7 +592,7 @@ MV.def('media/host/store', ['core/media', 'media/samples', 'media/host/session',
           const i = SM.sampleAt(idx.table, item.m || 0);
           if (!pins.has(id)) pins.set(id, new Set());
           pins.get(id).add(i);
-          const s = sessionFor(id, entry);
+          const s = sessionFor(id, entry, keep);
           s.pin(pins.get(id));
           let h;
           try { h = await s.request(i, { pin: true }); } catch (err) { sessionFailed(id, s); throw err; }
@@ -585,7 +629,7 @@ MV.def('media/host/store', ['core/media', 'media/samples', 'media/host/session',
     // get(id): the v2.0 member — a still at its largest cached tier (starts a full-size decode when none is cached).
     function get(id) {
       let best = null;
-      for (const [k, r] of shared.stills) if (k.startsWith(id + '|') && k.endsWith('|0') && (!best || r.bitmap.width > best.bitmap.width)) best = r;
+      for (const [k, r] of shared.stills) if (k.startsWith(id + '|') && r.level === 0 && (!best || r.bitmap.width > best.bitmap.width)) best = r;
       if (best) return best.bitmap;
       const entry = shared.entries(id);
       if (entry && !isTimed(entry) && blobNow(id)) decodeStill(id, entry, MEDIA.tier(Infinity, entry), 0).catch(() => {});

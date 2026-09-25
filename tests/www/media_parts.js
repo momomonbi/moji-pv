@@ -26,6 +26,7 @@
   const S = MV.use('export/schedule');
   const U = MV.use('export/unzip');
   const D = MV.use('core/doc');
+  const STAGE = MV.use('ui/stage');
 
   const factory = HC.createCanvasFactory();
   const clone = (x) => JSON.parse(JSON.stringify(x));
@@ -857,16 +858,17 @@
   }
 
   // playback (media_exact.py; DESIGN_2_1 §11.4.5–§11.4.6): the preview playing in real time, as the stage does it. At
-  // every 30-fps tick of the wall clock (a late tick skips frames, as a player does): want(mediaAt(t) and mediaAt(t +
-  // k / 30), k = 1…ahead) with no await, then renderFrame in preview quality at 720p and a 1-px read. The document is
+  // every 30-fps tick of the wall clock (a late tick skips frames, as a player does): renderFrame in preview quality at
+  // 720p and a 1-px read, then want() of the stage's own look-ahead list (ui/stage.lookAhead: mediaAt(t) and mediaAt(t +
+  // k / 30), k = 1…8) with no await, as the stage's mediaAfter does after each frame while playing. The document is
   // project_basic with the 1080p30 video ground (the 2-s clip loops) at its automatic depth (back: blurred), on the root
   // store (the preview's). Per frame: the source frame the store handed out for the ground (MediaFrame.index), exact
-  // and baked or not, against the frame its time asks for. o = { project, seconds, ahead, start, skip } → { frames,
+  // and baked or not, against the frame its time asks for. o = { project, seconds, start, skip } → { frames,
   // right (the frame asked for), rightBaked (that frame, exact, with its baked blur), provisional, fallback (frames the
   // engine blurred itself), lag { max, p95 } (source frames behind, after the first `skip` frames: the cold start),
   // bakes, seeks, fed, loops, renderP50, bad (the first wrong frames: [tick, want, got, exact, blur]) }
   async function playback(o) {
-    const q = Object.assign({ seconds: 6, ahead: 8, start: 2, skip: 30 }, o || {});
+    const q = Object.assign({ seconds: 6, start: 2, skip: 30 }, o || {});
     const { video } = await bigAssets();
     const id = video.id;
     const doc = basicWith(q.project, Object.assign({ 'work:ornament.count': 0 }, partPins('ground', 'photoPan', { image: id, clock: 'song' })));
@@ -902,15 +904,14 @@
         if (tick >= n) break;
         last = tick;
         const t = q.start + tick / 30;
-        const list = e.mediaAt(t, { scale });
-        const all = list.slice();
-        for (let j = 1; j <= q.ahead; j++) all.push(...e.mediaAt(t + j / 30, { scale }));
-        root.want(all);
         got = [];
         const r0 = performance.now();
         const st = e.renderFrame(surf, t, ropts);
         surf.ctx.getImageData(0, 0, 1, 1);
         render.push(performance.now() - r0);
+        const next = STAGE.lookAhead(e, t);         // the stage's list, at the scale of the frame just drawn
+        if (next.length) root.want(next);
+        const list = e.mediaAt(t, { scale });
         const item = list.find((x) => x.id === id);
         const want = item ? Math.floor(item.m * fps + 1e-4) % video.frames : -1;
         const f = got.find((x) => x) || null;

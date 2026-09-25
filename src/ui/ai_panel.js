@@ -37,20 +37,18 @@ MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/a
     }
 
     // The library's assets whose bytes are on this device: the ones the direct tool may offer (DESIGN_2_1 §11.6.1).
-    function mediaOnDevice(app) {
-      const list = app.doc.media && Array.isArray(app.doc.media.list) ? app.doc.media.list : [];
-      const here = list.filter((e) => !app.media || app.media.state(e.id) !== 'missing').map((e) => e.id);
-      return here.length ? here : false;
-    }
+    function mediaOnDevice(app) { return AC.mediaOnDevice(app.doc, app.media); }
 
     function storageOf(kind) {
       try { const s = window[kind]; s.getItem('mojipv.probe'); return s; } catch (e) { return null; }
     }
 
-    // The app as the controller sees it (ui/ai_controller createController's host).
+    // The app as the controller sees it (ui/ai_controller createController's host). The registry is read when a request
+    // is made: app.reg changes with the project's materials and photos (a restored or opened work, a new material).
     function hostOf(app) {
       return {
-        t: app.t, lang: app.lang, registry: app.reg,
+        t: app.t, lang: app.lang,
+        get registry() { return app.reg; },
         get doc() { return app.doc; },
         get plan() { return app.plan; },
         get rev() { return app.store.rev; },
@@ -196,10 +194,11 @@ MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/a
         more.hidden = !more.hidden;
         btn.setAttribute('aria-expanded', String(!more.hidden));
       });
-      // photos leave the device only when the user asks 「AIに説明してもらう」 (DESIGN_2_1 §11.6.4)
+      // what is said about photos and videos (never a file name; the vision text only while 写真・動画をAIが使ってよい is
+      // on), and that pictures leave the device only through 「AIに説明してもらう」 (DESIGN_2_1 §11.6.4)
       return h('div', { class: 'ai-sends', role: 'note' },
         h('div', { class: 'ai-sends-line' }, I.icon('info', { size: 15 }), h('span', { class: 'grow', text: t('ai.sends') }), btn),
-        h('p', { class: 'note subtle', text: t('ai.sendsMedia') }), more);
+        h('p', { class: 'note subtle', text: t('ai.sendsMediaList') }), h('p', { class: 'note subtle', text: t('ai.sendsMedia') }), more);
     }
 
     function guideBlock(t) {
@@ -237,8 +236,10 @@ MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/a
       const chips = h('div', { class: 'chips ai-chips', role: 'group', 'aria-label': t('ai.direct.phrases') },
         CHIPS.map((c) => h('button', { class: 'chip', type: 'button', 'data-chip': c, text: t('ai.chip.' + c) })));
       const allow = h('input', { type: 'checkbox', 'data-ctl': 'allowMaterials' });
-      // 写真・動画をAIが使ってよい (DESIGN_2_1 §11.6.1): on by default, offered while the library has a picture on this device
-      const allowMedia = h('input', { type: 'checkbox', checked: true, 'data-ctl': 'allowMedia' });
+      // 写真・動画をAIが使ってよい (DESIGN_2_1 §11.6.1): on by default, offered while the library has a picture on this
+      // device; the switch is the controller's (the board shows and honours the same one)
+      const allowMedia = h('input', { type: 'checkbox', checked: ctl.state.allowMedia, 'data-ctl': 'allowMedia' });
+      allowMedia.addEventListener('change', () => ctl.setAllowMedia(allowMedia.checked));
       const mediaRow = h('label', { class: 'check-row', hidden: true }, allowMedia, h('span', { text: t('ai.direct.allowMedia') }));
       const more = h('details', { class: 'ai-direct-more' }, h('summary', { text: t('ai.direct.more') }),
         h('label', { class: 'check-row' }, allow, h('span', { text: t('ai.direct.allowMaterials') })), mediaRow);
@@ -334,7 +335,7 @@ MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/a
         const instruction = text.value.trim();
         if (!r || (mode !== 'camera' && !instruction)) { dom.focus(text); return; }
         ctl.run('direct', { briefs: [{ ref: r, instruction }], mode, allowMaterials: mode === 'camera' ? false : allow.checked,
-          media: mode === 'camera' || !allowMedia.checked ? false : mediaOnDevice(app) });
+          media: mode === 'camera' ? false : mediaOnDevice(app) });
       }
 
       function renderList() {
@@ -383,6 +384,7 @@ MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/a
         chipText.textContent = area ? areaLine(t, area) : '';
         counter.textContent = t('ai.edit.count', { n: text.value.length, max: AC.MAX_INSTRUCTION });
         mediaRow.hidden = !mediaOnDevice(app);
+        allowMedia.checked = st.allowMedia;
         const why = !r ? (target.mode === 'sel' ? 'ai.edit.noLine' : 'ai.direct.pickArea') : ctl.blocked('direct');
         send.disabled = !!why || !text.value.trim();
         send.title = why ? t(why) : '';
@@ -405,8 +407,7 @@ MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/a
         else setTarget('area', r);
       }
 
-      // the one 写真・動画をAIが使ってよい switch: the board reads it too (DESIGN_2_1 §11.6.1)
-      return { root, update, text, preset, highlight, mediaAllowed: () => allowMedia.checked };
+      return { root, update, text, preset, highlight };
     }
 
     function toolsBlock(app, ctl, openBoard) {
@@ -496,7 +497,7 @@ MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/a
       let boardWanted = false;
       const boardHost = h('div', { class: 'ai-board-host', hidden: true });
       function openBoard() {
-        if (!board) board = BOARD.mount(app, ctl, { onBack: closeBoard, allowMedia: () => tools.direct.mediaAllowed() });
+        if (!board) board = BOARD.mount(app, ctl, { onBack: closeBoard });
         dom.replace(boardHost, board.el);
         boardWanted = true;
         boardHost.hidden = !!ctl.state.review;

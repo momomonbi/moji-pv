@@ -1,6 +1,6 @@
 <!doctype html><html lang="ja"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-imn8hQ2fIAVeOR3FTEsILJXQutEREEgjyv/GvNEIWrU='; style-src 'sha256-C7f+4dHVZFSrPADTL/+9MwqvHeCG8qOUP1K4ARo7x3A=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-0CAMY3Q4A8qJHoQDQi2FT0zqE+7bmI0h521nNiaYQTs='; style-src 'sha256-C7f+4dHVZFSrPADTL/+9MwqvHeCG8qOUP1K4ARo7x3A=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
 <title>文字PVメーカー</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -12939,6 +12939,9 @@ MV.def('i18n/strings', [], () => ({
   'ai.warn.matScaled': ['素材「{name}」は重すぎたので量を減らしました', '"{name}" was too heavy, so amounts were reduced'],
   'ai.warn.matFlash': ['素材「{name}」の点滅を弱めました', '"{name}" flashed too fast, so it was toned down'],
   'ai.warn.matEmpty': ['素材「{name}」は作れませんでした', 'Could not make "{name}"'],
+  'ai.warn.matFull': ['マイ素材がいっぱいのため、新しい素材を{n}個作れませんでした（64個・160KBまで）',
+    'My materials are full, so {n} new material was not made (up to 64, 160 KB)|My materials are full, so {n} new materials were not made (up to 64, 160 KB)'],
+  'ai.warn.matMediaLost': ['素材「{name}」の写真・動画が作り直しでなくなりました', 'The remake of "{name}" lost its photo or video'],
   'ai.warn.matUnknown': ['「{name}」という素材はこの答えにありません', 'There is no material named "{name}" in this answer'],
 
   // v2.1 materials UI (§6.11)
@@ -13115,6 +13118,11 @@ MV.def('i18n/strings', [], () => ({
   'media.warn.bigFile': ['大きなファイルです（{size}）。読み込みに時間がかかります', 'Large file ({size}); importing takes a while'],
   'media.warn.memoryOnly': ['この端末に保存できないため、写真・動画はこのタブを閉じると消えます。作品ファイルに保存してください',
     'Photos and videos cannot be stored on this device and disappear when this tab closes. Save a project file.'],
+  // a package opened where the song (or the song and the photos and videos) cannot be stored
+  'song.warn.memoryOnly': ['この端末に保存できないため、曲はこのタブを閉じると消えます。作品ファイルに保存してください',
+    'The song cannot be stored on this device and disappears when this tab closes. Save a project file.'],
+  'media.warn.memoryOnlyAll': ['この端末に保存できないため、写真・動画と曲はこのタブを閉じると消えます。作品ファイルに保存してください',
+    'Photos, videos and the song cannot be stored on this device and disappear when this tab closes. Save a project file.'],
   'media.err.type': ['読めない種類のファイルです: {name}', 'Cannot read this kind of file: {name}'],
   'media.err.heic': ['HEIC は読めません。JPEG に変換してから読み込んでください（iPhone: 設定 › カメラ › フォーマット › 互換性優先）',
     'HEIC cannot be read. Convert it to JPEG first (iPhone: Settings › Camera › Formats › Most Compatible)'],
@@ -13206,11 +13214,13 @@ MV.def('i18n/strings', [], () => ({
   'ai.tool.vision': ['写真の説明', 'Describe photos'],
   'ai.name.vision': ['写真の説明', 'Photo descriptions'],
   'ai.visionSend': ['送って説明してもらう', 'Send and describe'],
-  'ai.visionConsent': ['選んだ写真を小さくして（長い辺 768px の JPEG、1枚 約{kb}KB）Google Gemini に送ります。この作品ではこのときだけ。',
-    'The selected photos will be sent to Google Gemini, downscaled (JPEG, 768 px long side, about {kb} KB each), this time only.'],
+  'ai.visionConsent': ['選んだ写真・動画を小さな静止画にして Google Gemini に送ります（長い辺 768px の JPEG、1枚 約{kb}KB。動画・アニメは3枚）。ファイル名は送りません。送るたびにたずねます。',
+    'The selected photos and videos will be sent to Google Gemini as small stills (JPEG, 768 px long side, about {kb} KB per image; a video or animation sends 3 frames). File names are not sent. You are asked every time.'],
   'ai.visionOnlyGemini': ['写真の説明は Google Gemini のときだけ使えます', 'Photo descriptions work only with Google Gemini'],
-  'ai.sendsMedia': ['写真は『AIに説明してもらう』のときだけ（小さくして）送ります',
-    'Photos are sent (downscaled) only when you ask AI to describe them'],
+  'ai.sendsMedia': ['写真・動画そのものは、『AIに説明してもらう』でそのつど同意したときだけ、小さな静止画にして Google Gemini に送ります（動画・アニメは3枚）',
+    'The pictures themselves go to Google Gemini, as small stills (3 for a video or animation), only when you agree each time under "Ask AI to describe"'],
+  'ai.sendsMediaList': ['写真・動画について送るのは、番号・種類・大きさ・長さ・縦長か横長かだけです（ファイル名は送りません）。『写真・動画をAIが使ってよい』がオンのときは、『AIに説明してもらう』で付いた説明・色・位置も送ります',
+    'For photos and videos, only their number, kind, size, length and shape are sent (never file names). While "AI may use photos and videos" is on, the description, colors and positions from "Ask AI to describe" are sent too'],
   'ai.ch.media': ['写真「{name}」の説明: {caption}', 'Description of "{name}": {caption}'],
   'undo.media.put': ['写真・動画を追加', 'Add photo or video'],
   'undo.media.meta': ['写真・動画の設定', 'Photo or video settings'],
@@ -13294,6 +13304,8 @@ MV.def('i18n/strings', [], () => ({
   'pkg.warn.missingIn': ['{n}件の写真・動画はこの端末にないため、ファイルに入っていません',
     '{n} photos or videos are not on this device, so they are not in the file'],
   'pkg.warn.damaged': ['{n}件の写真・動画が壊れていたため読み込めませんでした', '{n} photos or videos were damaged and could not be loaded'],
+  'pkg.warn.songDamaged': ['ファイルの中の曲が壊れていたため読み込めませんでした。曲をつなぎ直してください',
+    'The song in the file was damaged and could not be loaded. Please re-link the song'],
   'pkg.err.truncated': ['ファイルが途中までしか保存されていないか、壊れています', 'The file is incomplete or damaged'],
   'pkg.err.notPackage': ['文字PVメーカーの作品ファイルではありません', 'This is not a Moji PV Maker project file'],
   'pkg.err.unsupported': ['この形式の ZIP は開けません', 'This kind of ZIP cannot be opened'],
@@ -13440,6 +13452,8 @@ MV.def('i18n/strings', [], () => ({
   'media.use.frameAt': ['写真の枠として（{scope}）', 'As a photo frame ({scope})'],
   'media.use.overlayAt': ['重ねる映像（{scope}）', 'As overlay footage ({scope})'],
   'media.colorsMatched': ['作品の色を写真に合わせました', 'The video\'s colors now match the photo'],
+  'media.undoLater': ['このあとに別の変更をしたので、ここからは戻せません。戻すときは「変更の履歴」を使ってください',
+    'Other changes came after this, so it cannot be undone from here. Use the edit history to go back'],
   'media.matchColorsTip': ['作品全体の色（アクセントと差し色）をこの写真の色に合わせます', 'Match the colors of the whole video (accent and shift colors) to this photo'],
   'media.needsFile': ['この端末にないため使えません。つなぎ直すと使えます', 'Not on this device. Relink it to use it'],
   'media.cropMode': ['切り抜きを調整中 — ドラッグで位置、ホイールで拡大、ダブルクリックで元に戻す',
@@ -13883,7 +13897,7 @@ MV.def('media/samples', ['core/media'], (MEDIA) => {
   const h2 = (v) => (v & 255).toString(16).toUpperCase().padStart(2, '0');
   const d2 = (v) => String(v).padStart(2, '0');
 
-  // VP9 levels by picture size and sample rate (the VP9 level table; the §11.4.3 list 10 … 51 plus 52 for 4K60).
+  // VP9 levels by picture size and sample rate (the VP9 level table, §11.4.3: 10 … 52; 52 is 3840×2160 from 71 fps).
   const VP9_LEVELS = [
     [10, 36864, 829440], [11, 73728, 2764800], [20, 122880, 4608000], [21, 245760, 9216000], [30, 552960, 20736000],
     [31, 983040, 36864000], [40, 2228224, 83558400], [41, 2228224, 160432128], [50, 8912896, 311951360],
@@ -14802,20 +14816,30 @@ MV.def('media/sniff', [], () => {
   // JPEG: the first SOFn marker gives the coded size (EXIF orientation is applied later by the decoder).
   function jpeg(b) {
     const r = out('image', 'jpeg', 'image/jpeg', { anim: false, alphaHint: false });
-    for (let p = 2; p + 4 <= b.length;) {
+    const size = jpegWalk(b, 2);
+    if (size && size.w !== undefined) { r.w = size.w; r.h = size.h; }
+    return r;
+  }
+
+  // jpegWalk(b, p) walks a JPEG's markers from offset p of the bytes b to the first SOFn: { w, h } (the coded size);
+  // { next } when b ends before it (next: the offset in b where the walk goes on, the start of a segment, which may lie
+  // past b's end: probe reads on from there when large ICC or XMP segments come first); null at the scan data or the
+  // end of the image, where no SOFn can follow.
+  function jpegWalk(b, p0) {
+    let p = p0;
+    for (;;) {
+      if (p + 4 > b.length) return { next: p };
       if (b[p] !== 0xff) { p++; continue; }
       const m = b[p + 1];
       if (m === 0xff) { p++; continue; }
       if (m === 0xd8 || m === 0x01 || (m >= 0xd0 && m <= 0xd7)) { p += 2; continue; }
-      if (m === 0xd9 || m === 0xda) break;
-      const len = u16be(b, p + 2);
-      if (m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc && p + 9 <= b.length) {
-        r.h = u16be(b, p + 5); r.w = u16be(b, p + 7);
-        break;
+      if (m === 0xd9 || m === 0xda) return null;
+      if (m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc) {
+        if (p + 9 > b.length) return { next: p };
+        return { h: u16be(b, p + 5), w: u16be(b, p + 7) };
       }
-      p += 2 + len;
+      p += 2 + u16be(b, p + 2);
     }
-    return r;
   }
 
   // GIF: the logical screen size; a NETSCAPE2.0 loop block or a second image descriptor makes it animated.
@@ -14931,7 +14955,7 @@ MV.def('media/sniff', [], () => {
     return /<svg[\s>]/i.test(text);
   }
 
-  return { HEAD, PACKAGE_MIME, sniff };
+  return { HEAD, PACKAGE_MIME, sniff, jpegWalk };
 });
 /* 文字PVメーカー v2 — original work. Reduced RGBA copies of 8-bit YUV video frames: a box average at 1/b with the colour matrix of the frame, and a mirrored border for a blur (DESIGN_2_1 §11.3.4, §11.4.6). */
 MV.def('media/yuv', [], () => {
@@ -19476,9 +19500,9 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
   });
 /* 文字PVメーカー v2 — original work. plan(doc, { registry }) → Plan: the planner's stages in their FROZEN order (DESIGN §4.16.1–§4.16.2, §3.12; DESIGN_2_1 §2.7, §5.9.3, §11.2.6). */
 MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'core/timing', 'core/beats', 'core/motion',
-  'core/doc', 'core/schema', 'core/script', 'core/media', 'planner/choose', 'planner/params', 'planner/look',
+  'core/doc', 'core/schema', 'core/script', 'core/media', 'core/shot', 'planner/choose', 'planner/params', 'planner/look',
   'planner/segment', 'planner/features', 'planner/cast', 'planner/tracks', 'planner/camera', 'planner/encode'],
-(H, N, PINS, LY, TM, B, MO, D, S, SC, MEDIA, CH, PA, LK, SG, FE, CA, TR, CAM, EN) => {
+(H, N, PINS, LY, TM, B, MO, D, S, SC, MEDIA, SHOT, CH, PA, LK, SG, FE, CA, TR, CAM, EN) => {
   'use strict';
 
   // v2: rigs, cut.rig, grounds[].zoomed, feat.sectionStart, media, the camera slots (DESIGN_2_1 §2.7, §11.2.6).
@@ -19737,8 +19761,9 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
 
   // What a scene reads of the song besides its decisions (§3.12 fp; engine/scene/build baseEnv gives the parts
   // env.grid = the beat grid seen from the scene's origin, and env.level = the loudness from the origin on):
-  // - a chosen part needs 'beats' and there is a tempo → [bpm, meter, origin − beat offset]. The whole grid, not only
-  //   the beat phase: parts count beat indices (every n-th beat) and behaviours read the bar;
+  // - a chosen part needs 'beats', or the cut's shot has a key anchored on a beat ('beat:<n>', engine/scene/shot), and
+  //   there is a tempo → [bpm, meter, origin − beat offset]. The whole grid, not only the beat phase: parts count beat
+  //   indices (every n-th beat) and behaviours read the bar;
   // - a chosen part needs 'level' and the plan has an envelope → [origin, digest id] (without one the level is flat).
   // Either is null otherwise, so a scene that reads neither keeps its fingerprint when it moves in time.
   function songTerms(ctx, needs, beats, origin) {
@@ -19766,6 +19791,9 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
     const partSlots = slotKeys.filter((s) => s.indexOf('.') < 0 && s !== 'orient');
     const decisions = partSlots.map((s) => [slotKind(s), c.slots[s]]);
     const needs = needsOf(ctx, decisions);
+    // a custom shot with a beat anchor reads the grid too (no preset has one, so only a custom shot is looked at)
+    const shot = c.slots['cam.shot'];
+    if (shot && shot.v !== null && typeof shot.v === 'object' && SHOT.usesBeats(shot.v)) needs.add('beats');
     const { beat, level } = songTerms(ctx, needs, beats, c.t0);
     // Materials (matTerms) and assets (mediaTerms) the cut's parts use (DESIGN_2_1 §2.7, §11.2.6); '' without any.
     const used = mineOf(ctx, decisions, partSlots);
@@ -23490,7 +23518,8 @@ MV.def('engine/render/shapes', ['core/color', 'core/media', 'engine/scene/table'
   }
 
   // drawMedia(g, rec, M, alpha, dc, tl) → boolean (§11.5.5): one media node. Its media time is closed-form (clock
-  // 'song': the frame's absolute time dc.t; 'show': the scene-local tl); the store picks the source frame. An opaque
+  // 'song': the frame's absolute time dc.t; 'show': the scene-local tl, or in a ghost pass of fx.textAt the frame's own
+  // dc.ghostTl, so the frame asks for no media frame mediaAt did not list); the store picks the source frame. An opaque
   // picture without blur is drawn straight (veil and tint over it), and so is a blurred one whose frame comes with its
   // blur baked (MediaFrame.blur > 0: stills always, videos and animations once the store has baked that frame); a
   // picture with alpha, a text fill ('atop') or a blurred video frame that came without its blur goes through a pooled
@@ -23499,7 +23528,7 @@ MV.def('engine/render/shapes', ['core/color', 'core/media', 'engine/scene/table'
   // Allocation-free.
   function drawMedia(g, rec, M, alpha, dc, tl) {
     const T0 = rec.time;
-    const m = T0 ? MEDIA.mapTime(T0, T0.clock === 'song' ? dc.t : tl) : 0;
+    const m = T0 ? MEDIA.mapTime(T0, T0.clock === 'song' ? dc.t : dc.ghostTl === null ? tl : dc.ghostTl) : 0;
     const pal = dc.pal;
     const vis = dc.visible;
     const mirror = rec.edge === 'mirror' && rec.bleed > 0;
@@ -24578,8 +24607,10 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
   //   (DESIGN_2_1) t (absolute frame time, for media on the song clock), backdrop, quality, thumb (posters only),
   //   visible (device rect x0 y0 x1 y1), mediaWaiting, mediaError, pool and blurred (the isolated media path), over and
   //   overKey (the raster oversampling of paints in a zoomed ground and its cache key), cam and layerK (the camera and
-  //   parallax of the layer being drawn: a medium at another camera factor gets its own view, §11.9.3) and stillMode
-  //   (0 every node, 1 all but `still` media, 2 only `still` media: those are drawn outside a seam composite)
+  //   parallax of the layer being drawn: a medium at another camera factor gets its own view, §11.9.3), stillMode
+  //   (0 every node, 1 all but `still` media, 2 only `still` media: those are drawn outside a seam composite) and
+  //   ghostTl (null, or while fx.textAt draws the text layers at an earlier time, the scene time of the frame itself:
+  //   media on the show clock keep that frame's media time)
   function createDrawContext(o) {
     return {
       g: null, D: new Float32Array([1, 0, 0, 1, 0, 0]), pal: null, W: 0, H: 0, scale: 1, q: null, assets: null,
@@ -24590,7 +24621,7 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
       RM: new Float32Array(6), quad: new Float32Array(8),
       t: 0, backdrop: 'scene', quality: 'preview', thumb: false, visible: new Float32Array(4), mediaWaiting: 0, mediaError: null,
       pool: o.pool || null, blurred: o.blurred || null, over: 1, overKey: 0,
-      cam: null, layerK: 1, stillMode: 0, depthCam: { x: 0, y: 0, zoom: 1, roll: 0, shakeX: 0, shakeY: 0, fz: 1 },
+      cam: null, layerK: 1, stillMode: 0, ghostTl: null, depthCam: { x: 0, y: 0, zoom: 1, roll: 0, shakeX: 0, shakeY: 0, fz: 1 },
       VM: new Float32Array(6),
     };
   }
@@ -26454,6 +26485,8 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
 
     // fx.textAt(dt): the visible cuts' text and near layers again at t − dt, into a pooled surface the size the FxContext
     // has now (a filter running at half resolution gets a half-size copy drawn at half scale, like its other surfaces).
+    // A photo or video in those layers (文字の中に, a frame or overlay in front) keeps the media frame of the frame's own
+    // time (dc.ghostTl): mediaAt / mediaReady list only that one, and an export frame draws exact frames only.
     const D_SAVED = new Float32Array(6);
     function textAt(dt) {
       const fx = ctl.fx;
@@ -26467,10 +26500,11 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
         const it = items[n];
         if (it.ground >= 0) continue;
         F.evaluate(it.scene, it.tl - dt);
+        dc.ghostTl = it.tl;
         for (const Lk of SE.TEXT_LAYERS) DR.drawLayer(dc, it.scene, Lk, view(it.cam, Lk), it.tl - dt, -1);
       }
       dc.D.set(D_SAVED);
-      dc.g = g0; dc.pick = pick;
+      dc.g = g0; dc.pick = pick; dc.ghostTl = null;
       return s;
     }
 
@@ -27859,9 +27893,10 @@ MV.def('parts/kit', ['core/num', 'core/noise', 'core/ease', 'core/curve', 'core/
   // 0 in a ground scene and times.a in a cut.
   // Depth (p.depth, §11.9.3): anim as placed, camera factor 1, fading with the cut's entrance and exit (frames and
   // layers); front on the near layer at factor 1.15, and a medium covering ≥ 40 % of the frame capped at alpha 0.45 with
-  // comp 'screen' (unless the part asks for another blend; a photo frame keeps its alpha); back on the far layer (grounds:
-  // ground) at factor 0.5, Ken Burns zoom ≤ 0.06, blur + 3 du and veil + 0.15; still as placed, no camera, no Ken Burns,
-  // outside the seam composite. The choice changes pixels only: the media times and mediaAt are the same.
+  // comp 'screen' (unless the part passes a comp, 'over' too: a pinned 重ね方 = 通常; a photo frame keeps its alpha);
+  // back on the far layer (grounds: ground) at factor 0.5, Ken Burns zoom ≤ 0.06, blur + 3 du and veil + 0.15; still as
+  // placed, no camera, no Ken Burns, outside the seam composite. The choice changes pixels only: the media times and
+  // mediaAt are the same.
   function media(env, o) {
     const q = o || {};
     const p = q.p || {};
@@ -27901,7 +27936,7 @@ MV.def('parts/kit', ['core/num', 'core/noise', 'core/ease', 'core/curve', 'core/
       const r = MEDIA.fitRect(meta, box, fit, crop.zoom, crop.x, crop.y);
       if ((r.dw * r.dh) / (D.w * D.h) >= FRONT_COVER) {        // the readability guard
         alpha = Math.min(alpha, FRONT_ALPHA);
-        if (comp === 'over') comp = 'screen';
+        if (!q.comp && comp === 'over') comp = 'screen';           // a blend the part passes (重ね方 = 通常 too) is kept
       }
     }
     const node = env.sb.media({
@@ -40180,10 +40215,17 @@ MV.def('ai/catalog', ['core/doc', 'core/ease', 'core/curve', 'core/shot', 'core/
     return !!registry.extra && Object.prototype.hasOwnProperty.call(registry.extra, key);
   }
 
+  // A pooled photo or video's derived ground (§11.5.9): its name is the file name on this device, which no prompt may
+  // carry (§11.6.4), so no list names it; the [media] list offers the asset as 'asset:<n>' when the user allows it.
+  // (mine.media is true for such a ground; a material's is the list of asset ids it uses, [] when none.)
+  function isMedia(registry, key) {
+    return isMine(registry, key) && !!registry.extra[key] && registry.extra[key].media === true;
+  }
+
   // { kind: [{ key, name, tags (first 3), season }] }: the parts auto picks may use under the project's filters.
   // The season is left to the AI (every season is listed, marked). Kinds may include 'atmos' (run-scope ornaments).
-  // opts (the direct tool): { mine: false } leaves out materials and derived media; { cutOrnaments: true } lists only
-  // cut-scope ornaments under 'ornament' (the run-scope ones are the 'atmos' list).
+  // Derived media grounds are never listed (isMedia). opts (the direct tool): { mine: false } leaves out materials too;
+  // { cutOrnaments: true } lists only cut-scope ornaments under 'ornament' (the run-scope ones are the 'atmos' list).
   function catalog(registry, doc, kinds = CATALOG_KINDS, lang = 'ja', opts) {
     const o = opts || {};
     const out = {};
@@ -40194,7 +40236,7 @@ MV.def('ai/catalog', ['core/doc', 'core/ease', 'core/curve', 'core/shot', 'core/
       if (pseudo) pool.scope = pseudo.scope;
       else if (kind === 'ornament' && o.cutOrnaments) pool.scope = 'cut';
       out[name] = registry.pool(kind, pool)
-        .filter((key) => servesLyrics(registry, kind, key) && (o.mine !== false || !isMine(registry, key)))
+        .filter((key) => servesLyrics(registry, kind, key) && !isMedia(registry, key) && (o.mine !== false || !isMine(registry, key)))
         .map((key) => {
           const def = registry.get(kind, key);
           return { key, name: nameOf(registry, kind, key, lang), tags: (def.tags || []).slice(0, TAGS_SHOWN), season: def.season || null };
@@ -40258,9 +40300,8 @@ MV.def('ai/catalog', ['core/doc', 'core/ease', 'core/curve', 'core/shot', 'core/
     const out = [];
     for (const kind of RC.MAT_KINDS) {
       for (const key of registry.mine(kind)) {
-        const mine = registry.extra && registry.extra[key];
         const def = registry.get(kind, key);
-        if (!def || (mine && mine.media)) continue;
+        if (!def || isMedia(registry, key)) continue;
         const where = kind === 'ornament' && def.scope === 'run' ? kind + '/run' : kind;
         const x = { key, name: nameOf(registry, kind, key, lang), tags: (def.tags || []).slice(0, TAGS_SHOWN), season: def.season || null };
         out.push('[mine] ' + x.key + '=' + x.name + ' ' + where + (x.season ? '{' + x.season + '}' : '')
@@ -40770,9 +40811,9 @@ MV.def('ai/changes', ['core/commands', 'core/lyrics', 'core/doc', 'core/hash', '
 
   // Change = { id, kind, scope: 'work' | 'line' | 'cut' | 'rows', lineId?, rowId?, path?, from, to,
   //            base: { rev, value?, src? }, label: [stringKey, params], checked: true, stale: false, …kind extras }
-  // v2.1 (DESIGN_2_1 §5.6) adds: group, areaKey, agg, requires: [changeId], staleWhy, field, cutKey, cutSig, matName and
-  // entry, and the kinds `value` (any pin by path; `to: null` clears it), `material` (material.put) and `media`
-  // (media.meta of a vision result, §11.6.2).
+  // v2.1 (DESIGN_2_1 §5.6) adds: group, areaKey, agg, requires: [changeId], staleWhy, field, cutKey, cutSig, matName,
+  // matLabel (the material's { ja, en } name) and entry, and the kinds `value` (any pin by path; `to: null` clears it),
+  // `material` (material.put) and `media` (media.meta of a vision result, §11.6.2).
   const KINDS = Object.freeze(['theme', 'mood', 'season', 'amount', 'flash', 'palette', 'avoid', 'allow', 'part', 'impact',
     'emphasis', 'cut', 'note', 'remove', 'time', 'rows', 'songInfo', 'value', 'material', 'media']);
   const LYRIC_KINDS = Object.freeze(['cut', 'note', 'emphasis', 'impact']);       // also the order they apply in
@@ -41332,7 +41373,7 @@ MV.def('ai/changes', ['core/commands', 'core/lyrics', 'core/doc', 'core/hash', '
     if (slot === 'cam.zoom' || (param === 'speed' && slot !== param)) return '×' + v;
     if (slot === 'season') return t('fld.season.' + v);
     if (param === 'depth' && slot !== param && t.has('opt.depth.' + v)) return t('opt.depth.' + v);
-    if (slot === 'avoid' && Array.isArray(v)) return v.map((ref) => t.part(ref.split('.')[0], ref.split('.')[1])).join('・');
+    if (slot === 'avoid' && Array.isArray(v)) return v.map((ref) => t.part(ref.split('.')[0], ref.split('.')[1])).join(t('list.sep'));
     if (typeof v === 'number') return String(Math.round(v * 100) / 100);
     return String(v);
   }
@@ -41344,9 +41385,17 @@ MV.def('ai/changes', ['core/commands', 'core/lyrics', 'core/doc', 'core/hash', '
     return t.has('kind.' + base) ? t('kind.' + base) : base;
   }
 
+  // The name of the material a change makes or places, in the page's language: the entry's { ja, en } (`matLabel` on
+  // the rows that place it), else the name the answer used ('' when there is none).
+  function matText(t, c) {
+    const n = c.matLabel || (c.kind === 'material' && c.entry ? c.entry.name : null);
+    const text = n ? (t.lang === 'en' ? n.en || n.ja : n.ja) : '';
+    return text || c.matName || '';
+  }
+
   function shown(t, c, key, v) {
     if (v === null || v === undefined) return c.kind === 'value' || c.areaKey || c.cutKey ? t('curve.auto') : '';
-    if (typeof v === 'string' && v.startsWith(MAT_PREFIX) && c.matName) return c.matName;
+    if (typeof v === 'string' && v.startsWith(MAT_PREFIX) && (c.matName || c.matLabel)) return matText(t, c);
     if (c.kind === 'part') return v === 'none' ? t('opt.none') : t.part(c.partKind, v);
     if (c.kind === 'value') return valueText(t, c, v);
     if (NAMED[c.kind]) return t.part(NAMED[c.kind], v);
@@ -41371,6 +41420,7 @@ MV.def('ai/changes', ['core/commands', 'core/lyrics', 'core/doc', 'core/hash', '
     if (Array.isArray(p.where)) p.where = t(p.where[0], p.where[1]);
     if (typeof p.field === 'string') p.field = fieldText(t, c, p.field);
     if (c.kind === 'material') {
+      if ('name' in p) p.name = matText(t, c) || p.name;
       if ('kind' in p) p.kind = kindText(t, p.kind);
       if ('season' in p) p.season = t('fld.season.' + (p.season || 'none'));
       return t(key, p);
@@ -41409,7 +41459,7 @@ MV.def('ai/changes', ['core/commands', 'core/lyrics', 'core/doc', 'core/hash', '
 
   return {
     KINDS, GROUPS, STALE_WHY, FLASH_ON, make, snapshot, rowSrcs, lineResolver, markStale, groupOf, toCommands, apply,
-    logEntry, revertCommands, describe, describeAgg, warningText, sameJSON, entryHash, keyInUse, inArea,
+    logEntry, revertCommands, describe, describeAgg, warningText, matText, sameJSON, entryHash, keyInUse, inArea,
   };
 });
 /* 文字PVメーカー v2 — original work. 歌詞の下ごしらえ: removals, cut points, emphasis and readings suggested per lyric row (DESIGN §4.22.4). */
@@ -41751,9 +41801,10 @@ MV.def('ai/recipe', ['core/num', 'core/hash', 'core/color', 'core/curve', 'core/
     }
 
     // A param value written as text → a typed value through the part's spec (numbers, booleans, enums, curves as a
-    // name or JSON, inks); undefined when it does not fit. Media params are never set this way (§11.2.3).
+    // name or JSON, inks); undefined when it does not fit. Media params are never set this way (§11.2.3), and neither
+    // are free-text params (a label or a number the part draws): an AI material shows only allow-listed glyphs (§5.12).
     function paramValue(spec, text) {
-      if (!spec || spec.type === 'media') return undefined;
+      if (!spec || spec.type === 'media' || spec.type === 'text') return undefined;
       const s = typeof text === 'string' ? text.trim() : String(text);
       let v = s;
       if (spec.type === 'num' || spec.type === 'int') v = s === '' ? NaN : Number(s);
@@ -41934,7 +41985,7 @@ MV.def('ai/recipe', ['core/num', 'core/hash', 'core/color', 'core/curve', 'core/
     function compositeOf(ai, kind, base, ctx, seed) {
       switch (kind) {
         case 'ornament': {
-          const scope = ai.scope === 'run' ? 'run' : 'cut';
+          const scope = ctx.scope || (ai.scope === 'run' ? 'run' : 'cut');
           return { follow: scope === 'run' ? 'own' : 'text', knobs: knobsOf(ai.knobs, kind), layers: layersOf(ai, kind, ctx),
             parts: partsOf(ai, kind, base, scope), scope, seed };
         }
@@ -42019,33 +42070,40 @@ MV.def('ai/recipe', ['core/num', 'core/hash', 'core/color', 'core/curve', 'core/
 
     // fromAi(ai, registry, kindHint?, opts?) → { entry: MaterialEntry without id | null, warnings }.
     // opts = { media: the request's [media] list ([{ n, id, kind, anim, alpha, dur }]), lang: 'ja' | 'en' (the language
-    // the blurb is written in) }. kindHint (the standalone tool's kind, or the material being remade) wins over the
-    // answer's kind. The base registry checks variant bases and inner parts, so materials never nest.
+    // the blurb is written in), scope: 'cut' | 'run' (an ornament the tool asked for at that scope) }. kindHint (the
+    // standalone tool's kind, or the material being remade) wins over the answer's kind, and opts.scope over its scope
+    // (a variant of a base part of the other scope is not used). The base registry checks variant bases and inner
+    // parts, so materials never nest.
     function fromAi(ai, registry, kindHint, opts) {
       const o = opts || {};
       const warnings = [];
       const warn = (w) => { warnings.push(w); };
       const a = isObject(ai) ? ai : {};
       const name = cleanText(a.name, RC.LIMITS.name) || UNTITLED[0];
+      const nameEn = cleanText(a.nameEn, RC.LIMITS.name);
+      const shownName = o.lang === 'en' && nameEn ? nameEn : name;          // the warnings name it in the page's language
       const kind = RC.MAT_KINDS.includes(kindHint) ? kindHint : RC.MAT_KINDS.includes(a.kind) ? a.kind : null;
       const base = registry.base || registry;
-      if (!kind) { warn(['ai.warn.matEmpty', { name }]); return { entry: null, warnings }; }
+      if (!kind) { warn(['ai.warn.matEmpty', { name: shownName }]); return { entry: null, warnings }; }
+      const scope = kind === 'ornament' && (o.scope === 'cut' || o.scope === 'run') ? o.scope : null;
       const baseKey = str(a.base);
-      const def = baseKey ? basePart(base, kind, baseKey) : null;
+      let def = baseKey ? basePart(base, kind, baseKey) : null;
+      if (def && scope && (def.scope || 'cut') !== scope) def = null;
       if (baseKey && !def) warn(['ai.warn.unknown', { kind, key: baseKey }]);
-      const ctx = { media: Array.isArray(o.media) ? o.media : null, warn };
+      const ctx = { media: Array.isArray(o.media) ? o.media : null, scope, warn };
       let recipe = null;
       if (def) recipe = variantOf(a, kind, base, def);
       else if (RC.COMPOSITE_KINDS.includes(kind)) recipe = compositeOf(a, kind, base, ctx, H.hash32('material', name));
       const mediaCtx = { list: list(ctx.media).map((x) => ({ id: x.id, kind: x.kind, anim: !!x.anim, alpha: !!x.alpha })) };
-      const fit = recipe ? fitted(kind, recipe, { registry: base, media: mediaCtx }, warn, name) : null;
-      if (!fit) { warn(['ai.warn.matEmpty', { name }]); return { entry: null, warnings }; }
+      const fit = recipe ? fitted(kind, recipe, { registry: base, media: mediaCtx }, warn, shownName) : null;
+      if (!fit) { warn(['ai.warn.matEmpty', { name: shownName }]); return { entry: null, warnings }; }
       const blurb = cleanText(a.blurb, RC.LIMITS.blurb);
       const tags = [...new Set(list(a.tags).map(str).filter((x) => S.TAGS.includes(x)))].slice(0, RC.LIMITS.tags);
       const season = REG.SEASONS.includes(a.season) ? a.season : null;
       const entry = {
-        kind, by: 'ai', name: { ja: name, en: cleanText(a.nameEn, RC.LIMITS.name) },
-        blurb: blurb ? { ja: blurb, en: o.lang === 'en' ? blurb : '' } : null, tags, season, pool: false, recipe: fit,
+        kind, by: 'ai', name: { ja: name, en: nameEn },
+        // the blurb is written in the page's language (materialRequest, systemText) and kept under that one
+        blurb: blurb ? (o.lang === 'en' ? { ja: '', en: blurb } : { ja: blurb, en: '' }) : null, tags, season, pool: false, recipe: fit,
       };
       return { entry, warnings };
     }
@@ -42096,7 +42154,7 @@ MV.def('ai/recipe', ['core/num', 'core/hash', 'core/color', 'core/curve', 'core/
       const curve = motion ? motion.curve : shared.ease ? shared.ease.value : null;
       return {
         name: e.name ? e.name.ja : '', nameEn: e.name ? e.name.en || '' : '', kind: e.kind, scope: r.scope === 'run' ? 'run' : 'cut',
-        season: e.season || '', tags: list(e.tags).slice(), blurb: e.blurb ? e.blurb.ja || '' : '', base: r.base || '',
+        season: e.season || '', tags: list(e.tags).slice(), blurb: e.blurb ? e.blurb.ja || e.blurb.en || '' : '', base: r.base || '',
         params: paramsToAi(r.params), parts: list(r.parts).map((p) => ({ key: p.key, params: paramsToAi(p.params) })),
         layers: list(r.layers).map((l) => layerToAi(l, mediaList)),
         unit: motion ? motion.unit : 'glyph',
@@ -42119,24 +42177,29 @@ MV.def('ai/recipe', ['core/num', 'core/hash', 'core/color', 'core/curve', 'core/
       lens: 'a camera texture (shake, sway)', ornament: 'a decoration near the words, or with scope run an atmosphere',
       seam: 'a transition between cuts',
     });
+    const SCOPE_WORDS = Object.freeze({ cut: 'a decoration near the words', run: 'an atmosphere over the background of a segment' });
 
     function outLang(lang) { return lang === 'en' ? 'English' : 'Japanese'; }
 
     // materialRequest(doc, plan, registry, { description, kind, uiLang, current?, media? }) → { system, prompt, schema,
-    // effort: 'medium', sent }. current: the entry to remake. media: the [media] list (ai/direct.mediaSent) when the
-    // user allowed photos and videos; only names, sizes and vision text are sent (§11.6.4).
+    // effort: 'medium', sent }. current: the entry to remake. media: the [media] list (mediaSent) when the answer may hold
+    // media layers (§11.5.8; [] still allows a picture the user picks, src ''); null or absent: none. Only numbers,
+    // sizes and (when allowed) the vision text are sent, never file names (§11.6.4).
     function materialRequest(doc, plan, registry, opts) {
       const o = opts || {};
       const kind = RC.MAT_KINDS.includes(o.kind) ? o.kind : o.current && RC.MAT_KINDS.includes(o.current.kind) ? o.current.kind : 'ornament';
-      const media = Array.isArray(o.media) && o.media.length ? o.media : null;
+      const media = Array.isArray(o.media) ? o.media : null;
       const lang = o.uiLang === 'en' ? 'en' : 'ja';
       const base = registry.base || registry;
+      // an ornament asked for one place (the 空気 row: an atmosphere; a 装飾 row: near the words), or remade, keeps its scope
+      const scope = kind !== 'ornament' ? null : o.scope === 'cut' || o.scope === 'run' ? o.scope
+        : o.current ? ornamentScope(o.current, base) : null;
       const system = [
-        'You design one material (素材) for a lyric-motion video (文字PV): ' + KIND_WORDS[kind] + '. A material is data built '
-          + 'from existing parts and the primitives below, never code.',
+        'You design one material (素材) for a lyric-motion video (文字PV): ' + (scope ? SCOPE_WORDS[scope] : KIND_WORDS[kind])
+          + '. A material is data built from existing parts and the primitives below, never code.',
         'Prefer a variant (base = an existing part of the same kind with other values) when one comes close; otherwise build '
           + 'it from layers, tracks or oscillators. Keep it light: few layers, calm blinking.',
-        'kind must be "' + kind + '". "use" is ignored here (slot "none").',
+        'kind must be "' + kind + '"' + (scope ? ' and scope "' + scope + '"' : '') + '. "use" is ignored here (slot "none").',
         'name: a short Japanese name; nameEn: the English name; blurb (one short sentence) and "question" in ' + outLang(lang) + '.',
         'If the description is unclear or impossible, set understood=false and ask in "question".',
       ].join('\n');
@@ -42146,14 +42209,15 @@ MV.def('ai/recipe', ['core/num', 'core/hash', 'core/color', 'core/curve', 'core/
         o.current ? 'Current material (remake it): ' + JSON.stringify(toAi(o.current, { media })) : '',
         '',
         'Existing parts of this kind (base or parts):',
-        CAT.catalogText(CAT.catalog(base, doc, kind === 'ornament' ? ['ornament', 'atmos'] : [kind], lang, { mine: false, cutOrnaments: true })),
-        media ? '\n' + mediaText(media) : '',
+        CAT.catalogText(CAT.catalog(base, doc, kind !== 'ornament' ? [kind] : scope === 'run' ? ['atmos'] : scope === 'cut' ? ['ornament']
+          : ['ornament', 'atmos'], lang, { mine: false, cutOrnaments: true })),
+        media && media.length ? '\n' + mediaText(media) : '',
         '',
         CAT.recipeText({ media: !!media }),
       ];
       return {
         system, prompt: parts.filter((p) => p !== '').join('\n'), schema: media ? MATERIAL_SCHEMA_MEDIA : MATERIAL_SCHEMA,
-        effort: 'medium', sent: { kind, current: o.current ? o.current.id : null, media: media || [], lang },
+        effort: 'medium', sent: { kind, scope, current: o.current ? o.current.id : null, media, lang },
       };
     }
 
@@ -42174,14 +42238,17 @@ MV.def('ai/recipe', ['core/num', 'core/hash', 'core/color', 'core/curve', 'core/
       return v + ' ' + (cx < 1 / 3 ? 'left' : cx > 2 / 3 ? 'right' : 'center');
     }
 
-    // mediaSent(doc, { only?, lang? }) → [{ n, id, kind, anim, alpha, dur, w, h, name, line }]: the library in its
-    // order (at most 40), numbered for the AI. `only` (asset ids) keeps the assets whose bytes are on this device. The
-    // line holds names, sizes and the vision text only, never pixels (§11.6.4).
+    // mediaSent(doc, { only?, lang?, described? }) → [{ n, id, kind, anim, alpha, dur, w, h, name, line }]: the library
+    // in its order (at most 40), numbered for the AI. `only` (asset ids) keeps the assets whose bytes are on this device.
+    // The line (what the AI reads) holds the number, kind, length, size and shape, plus the vision text (caption, colours,
+    // text area, subject) unless `described` is false (写真・動画をAIが使ってよい is off): never a file name, never pixels
+    // (§11.6.4). `name` stays on this device (review rows, warnings).
     function mediaSent(doc, opts) {
       const o = opts || {};
       const all = doc && doc.media && Array.isArray(doc.media.list) ? doc.media.list : [];
       const only = Array.isArray(o.only) ? new Set(o.only) : null;
       const lang = o.lang === 'en' ? 'en' : 'ja';
+      const described = o.described !== false;
       const out = [];
       for (const e of all) {
         if (out.length >= MAX_MEDIA) break;
@@ -42189,7 +42256,7 @@ MV.def('ai/recipe', ['core/num', 'core/hash', 'core/color', 'core/curve', 'core/
         const n = out.length;
         const kind = e.kind === 'video' ? 'video' : e.anim ? 'animation' : 'image';
         const shape = e.w > e.h ? 'landscape' : e.w < e.h ? 'portrait' : 'square';
-        const ai = isObject(e.ai) ? e.ai : null;
+        const ai = described && isObject(e.ai) ? e.ai : null;
         const caption = ai && ai.caption ? (ai.caption[lang] || ai.caption[lang === 'en' ? 'ja' : 'en'] || '') : '';
         const bits = [caption || '(no description)'];
         if (ai && Array.isArray(ai.colors) && ai.colors.length) bits.push('colours ' + ai.colors.join(' '));
@@ -42197,7 +42264,7 @@ MV.def('ai/recipe', ['core/num', 'core/hash', 'core/color', 'core/curve', 'core/
         if (ai && isObject(ai.subject)) bits.push('subject: ' + boxWords(ai.subject));
         // Never the file name: the AI gets only the kind, size, shape and what the user let the vision step describe.
         const line = 'asset:' + n + ' ' + kind + (isNumber(e.dur) && kind !== 'image' ? ' ' + clock(e.dur) : '') + ' ' + e.w + '×'
-          + e.h + ' ' + shape + ' — ' + bits.join(' · ');
+          + e.h + ' ' + shape + (described ? ' — ' + bits.join(' · ') : '');
         out.push({ n, id: e.id, kind: e.kind, anim: !!e.anim, alpha: !!e.alpha, dur: isNumber(e.dur) ? e.dur : null, w: e.w, h: e.h,
           name: String(e.name), line });
       }
@@ -42231,10 +42298,18 @@ MV.def('ai/recipe', ['core/num', 'core/hash', 'core/color', 'core/curve', 'core/
     }
 
     // The slot a material takes at a scope (§5.11): 'atmos' for a run ornament, 'ornament' / 'filter' (a free index is
-    // picked), the kind itself otherwise.
-    function slotFor(entry) {
-      if (entry.kind === 'ornament') return entry.recipe.scope === 'run' ? 'atmos' : 'ornament';
+    // picked), the kind itself otherwise. With the registry, a variant ornament has its base part's scope.
+    function slotFor(entry, registry) {
+      if (entry.kind === 'ornament') return ornamentScope(entry, registry) === 'run' ? 'atmos' : 'ornament';
       return entry.kind;
+    }
+
+    // An ornament material's scope: its recipe's, or (with the registry) a variant's base part's.
+    function ornamentScope(entry, registry) {
+      const r = isObject(entry.recipe) ? entry.recipe : {};
+      const def = r.base && registry ? (registry.base || registry).get('ornament', r.base) : null;
+      if (def) return def.scope === 'run' ? 'run' : 'cut';
+      return r.scope === 'run' ? 'run' : 'cut';
     }
 
     // The lowest free index of a list slot (ornament#i, filter#i) at a scope: not pinned by the user or a lock there
@@ -42260,9 +42335,11 @@ MV.def('ai/recipe', ['core/num', 'core/hash', 'core/color', 'core/curve', 'core/
       return line && Array.isArray(line.cuts) ? line.cuts : [];
     }
 
-    // materialChanges(doc, plan, registry, json, { rev, sent, useAt?: { scope, slot } }) → { understood, question,
+    // materialChanges(doc, plan, registry, json, { rev, sent, useAt?: { scope, slot, paths? } }) → { understood, question,
     // changes, warnings }: one material change, plus with useAt one dependent pin at that scope ('work' | 'line/<id>' |
-    // 'cut/<key>'; slot 'ornament' / 'filter' take the first free index) that requires the material.
+    // 'cut/<key>'; slot 'ornament' / 'filter' take the first free index) that requires the material; with useAt.paths
+    // (the inspector's selected lines or cuts, §6.9: one batch) one at each of those pin paths. A place whose slot does
+    // not take the material (an atmosphere on a 装飾 row) gets none (ai.warn.noSlot).
     function materialChanges(doc, plan, registry, json, opts) {
       const o = opts || {};
       const sent = o.sent || {};
@@ -42270,23 +42347,41 @@ MV.def('ai/recipe', ['core/num', 'core/hash', 'core/color', 'core/curve', 'core/
       if (!json || !isObject(json.material)) return { understood: false, question, changes: [], warnings: [['ai.warn.empty', {}]] };
       if (json.understood === false) return { understood: false, question, changes: [], warnings: [] };
       const current = sent.current && doc.materials ? doc.materials.list.find((m) => m.id === sent.current) || null : null;
-      const res = fromAi(json.material, registry, current ? current.kind : sent.kind, { media: sent.media, lang: sent.lang });
+      const res = fromAi(json.material, registry, current ? current.kind : sent.kind, { media: sent.media, lang: sent.lang, scope: sent.scope });
       if (!res.entry) return { understood: true, question, changes: [], warnings: res.warnings };
+      // a remake that lost a photo or video layer says so (the picture is no longer in the material)
+      if (current && mediaLayers(res.entry.recipe) < mediaLayers(current.recipe)) {
+        res.warnings.push(['ai.warn.matMediaLost', { name: (sent.lang === 'en' && current.name.en) || current.name.ja }]);
+      }
       const make = { rev: o.rev, prefix: '', srcs: CH.rowSrcs(doc) };
       const mat = materialChange(doc, res.entry, { id: 'mat:0', current }, make);
       const changes = [mat];
       const use = o.useAt && typeof o.useAt.scope === 'string' ? o.useAt : null;
       if (use) {
-        const dep = useChange(doc, plan, mat, use, make);
-        if (dep) changes.push(dep);
-        else res.warnings.push(['ai.warn.noSlot', { n: 0 }]);
+        const places = Array.isArray(use.paths) && use.paths.length ? use.paths.map(useAtOf) : [use];
+        let missed = false;
+        for (const at of places) {
+          const dep = at ? useChange(doc, plan, registry, mat, at, make) : null;
+          if (dep) changes.push(dep);
+          else missed = true;
+        }
+        if (missed) res.warnings.push(['ai.warn.noSlot', { n: 0 }]);
       }
       return { understood: true, question, changes, warnings: res.warnings };
     }
 
-    function useChange(doc, plan, mat, use, make) {
+    // A pin path → the place useChange takes ({ scope, slot }); null when it does not parse.
+    function useAtOf(path) {
+      try { return { scope: P.scopeKey(path), slot: P.parse(path).slot }; } catch (e) { return null; }
+    }
+
+    function mediaLayers(recipe) { return list(recipe && recipe.layers).filter((l) => isObject(l) && l.prim === 'media').length; }
+
+    function useChange(doc, plan, registry, mat, use, make) {
       const scope = use.scope;
-      let slot = typeof use.slot === 'string' && use.slot ? use.slot : slotFor(mat.entry);
+      const want = slotFor(mat.entry, registry);
+      let slot = typeof use.slot === 'string' && use.slot ? use.slot : want;
+      if (slot.replace(/#[0-9]$/, '') !== want) return null;      // e.g. a decoration made for the 空気 row
       if (slot === 'ornament' || slot === 'filter') slot = freeIndex(doc, plan, scope, slot);
       if (!slot) return null;
       const path = scope + ':' + slot;
@@ -42298,6 +42393,7 @@ MV.def('ai/recipe', ['core/num', 'core/hash', 'core/color', 'core/curve', 'core/
       const fields = {
         id: 'use:' + path, kind: 'part', scope: kind, path, slot, partKind: mat.entry.kind,
         from: pin ? pin.v : null, fromSource: pin ? 'pin:' + kind : 'auto', to: key, requires: [mat.id], matName: mat.matName,
+        matLabel: mat.entry.name,
         group: kind === 'cut' ? 'cuts' : kind === 'line' ? 'lines' : 'work',
         label: ['ai.ch.value', { where: whereOf(plan, parsed.scope), field: fieldOf(mat.entry.kind, slot), from: pin ? pin.v : null, to: key }],
       };
@@ -43653,7 +43749,8 @@ MV.def('ai/direct', ['core/pins', 'core/paths', 'core/curve', 'core/shot', 'core
   // directRequests(doc, plan, registry, { briefs: [{ ref, instruction }], uiLang, mode: 'all' | 'camera', allowMaterials,
   // media }) → [{ system, prompt, schema, effort, sent }], one per window of ≤ 200 area lines (§5.2). media: true offers
   // the whole library, a list of asset ids only those (the ones whose bytes are on this device); false or absent
-  // offers none. Only lyric text, the instructions, setting values and asset names, sizes and vision text are sent.
+  // offers none. Only lyric text, the instructions, setting values and the assets' numbers, sizes and vision text are
+  // sent (never a file name, §11.6.4).
   function directRequests(doc, plan, registry, opts) {
     const o = opts || {};
     const mode = o.mode === 'camera' ? 'camera' : 'all';
@@ -43744,6 +43841,12 @@ MV.def('ai/direct', ['core/pins', 'core/paths', 'core/curve', 'core/shot', 'core
     return d ? { v: d.v, source: d.from, own: null } : { v: null, source: 'auto', own: null };
   }
 
+  // Whether every cut of a line that is not pinned by cut shows `to` for a slot now.
+  function lineShows(run, line, slot, to) {
+    const cuts = cutsOf(run, line).filter((c) => { const hit = PINS.lookup(run.ix, cutAt(c), slot); return !hit || hit.from !== 'pin:cut'; });
+    return cuts.length > 0 && cuts.every((c) => { const d = decisionOf(run, c, slot); return !!d && CH.sameJSON(d.v, to); });
+  }
+
   function fieldOf(slot) {
     if (FIELDS[slot]) return FIELDS[slot];
     const m = /@[A-Za-z0-9]+\.([A-Za-z0-9]+)$/.exec(slot);
@@ -43754,7 +43857,7 @@ MV.def('ai/direct', ['core/pins', 'core/paths', 'core/curve', 'core/shot', 'core
 
   // Adds one change for a target and slot (first one wins per path), unless nothing would change: a part the target's
   // own pin already holds, a value the target already shows, or a line slot every cut of the line pins by hand.
-  // x = { kind: 'part' | 'value', partKind?, fromAll, aggSlot?, requires?, matName?, toName? }
+  // x = { kind: 'part' | 'value', partKind?, fromAll, aggSlot?, requires?, matName?, matLabel?, toName? }
   function slotChange(run, b, T, slot, to, x) {
     const path = T.key + ':' + slot;
     if (run.byPath.has(path)) return run.byPath.get(path);
@@ -43774,7 +43877,11 @@ MV.def('ai/direct', ['core/pins', 'core/paths', 'core/curve', 'core/shot', 'core
     }
     const cur = current(run, T, slot);
     const placeholder = typeof to === 'string' && to.startsWith(MAT_PREFIX);
-    if (!placeholder && (x.kind === 'part' ? cur.own && CH.sameJSON(cur.own.v, to) : CH.sameJSON(cur.v, to))) return null;
+    // a value equal to the current one changes nothing; a line without its own pin has one only when all its cuts
+    // (but those pinned by cut) show the same (§5.5)
+    const same = x.kind === 'part' ? cur.own && CH.sameJSON(cur.own.v, to)
+      : T.scope === 'line' && !cur.own ? lineShows(run, T.line, slot, to) : CH.sameJSON(cur.v, to);
+    if (!placeholder && same) return null;
     const field = fieldOf(slot);
     const key = Array.isArray(field) ? field[0] : field;
     const fields = {
@@ -43789,6 +43896,7 @@ MV.def('ai/direct', ['core/pins', 'core/paths', 'core/curve', 'core/shot', 'core
     if (x.fromAll && T.scope === 'line') fields.agg = b.key + '|' + (x.aggSlot || slot);
     if (x.requires) fields.requires = x.requires.slice();
     if (x.matName) fields.matName = x.matName;
+    if (x.matLabel) fields.matLabel = x.matLabel;
     if (x.toName) fields.toName = x.toName;
     const c = CH.make(run.doc, fields, run.make);
     run.byPath.set(path, c);
@@ -44128,10 +44236,16 @@ MV.def('ai/direct', ['core/pins', 'core/paths', 'core/curve', 'core/shot', 'core
 
   // ---- materials (§5.10, §5.11) ------------------------------------------------------------------------------------
 
-  // The answer's materials → material changes; each is known by its name for 'mat:<name>' and its `use`.
-  function materialsOf(run, materials) {
+  // The answer's materials → material changes; each is known by its name for 'mat:<name>' and its `use`. Only as many
+  // as doc.materials has room for (§5.8: 64 entries, 160 KB): each is put on a copy of the document that already holds
+  // the ones before it (and `before`, the material changes of earlier windows); the first that does not fit and all
+  // after it are left out (ai.warn.matFull), and their uses fall away as unknown materials.
+  function materialsOf(run, materials, before) {
     let k = 0;
+    let room = CH.apply(run.doc, run.plan, list(before));
+    let left = 0;
     list(materials).forEach((m, idx) => {
+      if (left) { left++; return; }
       const res = RECIPE.fromAi(m, run.registry, null, { media: run.sent.media && run.sent.media.length ? run.sent.media : null,
         lang: run.sent.uiLang });
       res.warnings.forEach(run.warn);
@@ -44139,12 +44253,15 @@ MV.def('ai/direct', ['core/pins', 'core/paths', 'core/curve', 'core/shot', 'core
       const raw = str(isObject(m) ? m.name : '');
       const name = res.entry.name.ja;
       if (run.mats.has(raw || name) || run.mats.has(name)) return;
-      const change = RECIPE.materialChange(run.doc, res.entry, { id: run.prefix + 'mat:' + idx, k: k++, matName: name }, run.make);
+      const change = RECIPE.materialChange(run.doc, res.entry, { id: run.prefix + 'mat:' + idx, k, matName: name }, run.make);
+      try { room = CH.apply(room, run.plan, [change]); } catch (e) { left = 1; return; }
+      k++;
       const mat = { change, entry: res.entry, use: isObject(m) ? m.use : null, name };
       run.mats.set(name, mat);
       if (raw) run.mats.set(raw, mat);
       run.changes.push(change);
     });
+    if (left) run.warn(['ai.warn.matFull', { n: left }]);
   }
 
   // A material placed on a target (a 'mat:<name>' field or its `use`): a part pin that requires the material, plus a
@@ -44157,7 +44274,7 @@ MV.def('ai/direct', ['core/pins', 'core/paths', 'core/curve', 'core/shot', 'core
     const base = slot.replace(/#[0-9]$/, '');
     if (want !== base) { run.warn(warnKind(T, base, name)); return null; }
     const c = slotChange(run, b, T, slot, MAT_PREFIX + mat.name, { kind: 'part', partKind: e.kind, fromAll: src.fromAll,
-      requires: [mat.change.id], matName: mat.name, aggSlot: base + ':' + MAT_PREFIX + mat.name });
+      requires: [mat.change.id], matName: mat.name, matLabel: e.name, aggSlot: base + ':' + MAT_PREFIX + mat.name });
     if (c && e.season && !src.seasonSet && b.area.kind !== 'cut') {
       const season = seasonOf(run, T, null);
       if (season !== e.season && season !== 'any') {
@@ -44434,9 +44551,10 @@ MV.def('ai/direct', ['core/pins', 'core/paths', 'core/curve', 'core/shot', 'core
     if (dropped) run.warn(['ai.warn.outside', { n: dropped }]);
   }
 
-  // directChanges(doc, plan, registry, json, { rev, sent, allowMaterials }) → { results: [{ s, areaKey, understood,
-  // summary, question }], changes, warnings }. Validate against the doc and plan the request was built from (§5.5);
-  // change ids start with 'w<window>:'.
+  // directChanges(doc, plan, registry, json, { rev, sent, allowMaterials, materialsBefore? }) → { results: [{ s, areaKey,
+  // understood, summary, question }], changes, warnings }. Validate against the doc and plan the request was built from
+  // (§5.5); change ids start with 'w<window>:'. materialsBefore: the material changes of the earlier windows of the same
+  // request (they take room in doc.materials first).
   function directChanges(doc, plan, registry, json, opts) {
     const o = opts || {};
     const sent = isObject(o.sent) ? o.sent : { briefs: [] };
@@ -44469,7 +44587,7 @@ MV.def('ai/direct', ['core/pins', 'core/paths', 'core/curve', 'core/shot', 'core
       done.add(a.s);
       answers.push(a);
     }
-    if (allowMaterials && run.mode !== 'camera') materialsOf(run, json.materials);
+    if (allowMaterials && run.mode !== 'camera') materialsOf(run, json.materials, o.materialsBefore);
     run.workSeason = workSeasonAfter(run, answers);
     const results = answers.map((a) => answerChanges(run, a));
     for (const mat of new Set(run.mats.values())) useChanges(run, mat);
@@ -44540,7 +44658,8 @@ MV.def('ai/vision', ['core/schema', 'core/media', 'ai/changes'], (S, MEDIA, CH) 
     return mime === JPEG && typeof x.data === 'string' && x.data.length > 0 && BASE64.test(x.data);
   }
 
-  const SYSTEM = [
+  // The system text; reason is written in the page's language (it is shown next to 「AIのおすすめ」, §11.9.5).
+  const systemText = (lang) => [
     'You describe pictures for a lyric-motion video tool (文字PV). The pictures are the user\'s own photos and video frames.',
     'For each picture n: caption = what it shows, in Japanese, at most 60 characters; captionEn = the same in English; tags = '
       + 'mood words from the list; colors = up to 5 dominant colours as #RRGGBB; subject = the box of the main subject; text = '
@@ -44549,10 +44668,11 @@ MV.def('ai/vision', ['core/schema', 'core/media', 'ai/changes'], (S, MEDIA, CH) 
     'depth = how the picture takes part in the animation when it is a background: front only for see-through or overlay '
       + 'footage (light leaks, particles, rain); back for busy or detailed pictures and for videos with strong motion; still '
       + 'for pictures that must stay readable (a logo, text in the picture); anim otherwise. reason = why, in a few words (at '
-      + 'most 60 characters, in the language of the captions the user reads).',
+      + 'most 60 characters, in ' + (lang === 'en' ? 'English' : 'Japanese') + ').',
     'Boxes are fractions of the picture (x, y from the top left, w, h), all 0 when there is none. Describe only what is '
       + 'visible; never name or identify people.',
   ].join('\n');
+  const SYSTEM = Object.freeze({ ja: systemText('ja'), en: systemText('en') });
 
   // visionRequest(doc, items: [{ id, parts: [{ inline_data: { mime_type: 'image/jpeg', data } }] }], { uiLang })
   //   → { system, prompt, schema: VISION_SCHEMA, effort: 'low', media: parts, sent: { items: [{ n, id, kind, frames }] } }
@@ -44574,7 +44694,8 @@ MV.def('ai/vision', ['core/schema', 'core/media', 'ai/changes'], (S, MEDIA, CH) 
     const lines = sent.map((x) => 'n=' + x.n + ': ' + (x.kind === 'photo' ? 'photo (1 image)'
       : 'video (' + x.frames + (x.frames === 1 ? ' frame' : ' frames, from its start, middle and end') + ')'));
     const prompt = ['The images above, in order:', lines.join('\n'), '', 'Tags (use only these): ' + S.TAGS.join(' ')].join('\n');
-    return { system: SYSTEM, prompt, schema: VISION_SCHEMA, effort: 'low', media, sent: { items: sent, lang: opts && opts.uiLang === 'en' ? 'en' : 'ja' } };
+    const lang = opts && opts.uiLang === 'en' ? 'en' : 'ja';
+    return { system: SYSTEM[lang], prompt, schema: VISION_SCHEMA, effort: 'low', media, sent: { items: sent, lang } };
   }
 
   function caption(v, max) {
@@ -48324,11 +48445,11 @@ MV.def('export/host/sink', ['export/schedule'], (S) => {
 
   function partSize(part) { return part instanceof Uint8Array ? part.byteLength : part.size; }
 
-  // createFileSink(fileHandle, { removeOnAbort = true }?): streams into the file through createWritable(); abort()
+  // createFileSink(fileHandle, { removeOnAbort = true }): streams into the file through createWritable(); abort()
   // discards the written data and removes the file the save dialog created, so a cancelled export leaves nothing behind.
-  // A caller writing over a file the user already has (保存 to the open project) passes removeOnAbort: false: abort() then
-  // only drops the swap file, and the file keeps its last saved contents. States: open → closing → closed, or → aborted.
-  // A close() that fails leaves the sink 'failed', and abort() still removes (or keeps) the file then.
+  // With removeOnAbort false (a file this call did not create, such as the project file 保存 writes again) abort() only
+  // discards the written data: the browser writes into a copy, so the file keeps what it held. States: open → closing →
+  // closed, or → aborted. A close() that fails leaves the sink 'failed', and abort() still removes the file then.
   function createFileSink(handle, opts) {
     const removeOnAbort = !(opts && opts.removeOnAbort === false);
     let writable = null;
@@ -48370,7 +48491,9 @@ MV.def('export/host/sink', ['export/schedule'], (S) => {
         if (state === 'closed' || state === 'aborted') return;
         state = 'aborted';
         try { if (writable) await writable.abort(); } catch (err) { /* the stream may already be errored */ }
-        try { if (removeOnAbort && typeof handle.remove === 'function') await handle.remove(); } catch (err) { /* the file stays empty */ }
+        if (removeOnAbort) {
+          try { if (typeof handle.remove === 'function') await handle.remove(); } catch (err) { /* the file stays empty */ }
+        }
         size = 0;
       },
     };
@@ -48453,15 +48576,17 @@ MV.def('export/host/sink', ['export/schedule'], (S) => {
 
   // --- folders (the Filmora kit, DESIGN_2_1 §13.9) --------------------------------------------------------------
 
-  // createDirSink(dirHandle, { parent?, name? }) → DirSink = { kind: 'dir', name, parentName, file(name) → Promise<Sink>,
-  // files, close() → { files: [{ name, bytes }] }, abort() }. parentName: the name of the folder it was made in (the one
-  // the user picked; null when not known or empty). Each file(name) creates the file in the folder and returns its
-  // file sink (createFileSink); a name is used once. close() closes the sinks still open and lists every file written, in
-  // order. abort() aborts every file sink (each removes its file) and then removes the folder itself when its parent is
-  // known (removeEntry(name, { recursive: true })), else every file it created, so a cancelled kit leaves nothing.
+  // createDirSink(dirHandle, { parent?, name?, owned? }) → DirSink = { kind: 'dir', name, parentName,
+  // file(name) → Promise<Sink>, files, close() → { files: [{ name, bytes }] }, abort() }. parentName: the name of the
+  // folder it was made in (the one the user picked; null when not known or empty). Each file(name) creates the file in
+  // the folder and returns its file sink (createFileSink); a name is used once. close() closes the sinks still open and
+  // lists every file written, in order. abort() aborts every file sink and removes the files that file() created (never
+  // one that was in the folder before); then, only for a folder this call made (`owned`, from openDirectory) with its
+  // parent and name known, the folder itself with what is in it (removeEntry(name, { recursive: true })), so a
+  // cancelled kit leaves nothing and never deletes anything the user had.
   function createDirSink(dir, opts) {
     const o = opts || {};
-    const entries = [];                  // [{ name, sink }] in creation order
+    const entries = [];                  // [{ name, sink, created, closed }] in creation order
     let state = 'open';
 
     function check() { if (state !== 'open') throw new S.ExportError('sink', 'folder sink is ' + state); }
@@ -48474,14 +48599,15 @@ MV.def('export/host/sink', ['export/schedule'], (S) => {
       async file(name) {
         check();
         if (entries.some((e) => e.name === name)) throw new S.ExportError('sink', 'folder sink: ' + name + ' is already written');
-        let handle;
+        let handle, created;
         try {
+          created = !(await exists(dir, name));
           handle = await dir.getFileHandle(name, { create: true });
         } catch (err) {
           throw sinkError(err);
         }
-        const inner = createFileSink(handle);
-        const entry = { name, sink: inner, closed: false };
+        const inner = createFileSink(handle, { removeOnAbort: created });
+        const entry = { name, sink: inner, created, closed: false };
         entries.push(entry);
         return {                         // the file sink, remembering that its writer closed it
           kind: 'file',
@@ -48514,11 +48640,12 @@ MV.def('export/host/sink', ['export/schedule'], (S) => {
         if (state === 'aborted' || state === 'closed') return;
         state = 'aborted';
         for (const e of entries) await e.sink.abort();
-        if (o.parent && o.name) {
-          try { await o.parent.removeEntry(o.name, { recursive: true }); } catch (err) { /* already gone, or not ours to remove */ }
+        if (o.owned && o.parent && o.name) {
+          try { await o.parent.removeEntry(o.name, { recursive: true }); } catch (err) { /* already gone */ }
           return;
         }
         for (const e of entries) {
+          if (!e.created) continue;
           try { await dir.removeEntry(e.name); } catch (err) { /* removed by its sink */ }
         }
       },
@@ -48527,17 +48654,38 @@ MV.def('export/host/sink', ['export/schedule'], (S) => {
 
   function canDirectory() { return typeof globalThis.showDirectoryPicker === 'function'; }
 
-  // The names in a folder (files and folders).
+  // Names as case-insensitive file systems compare them (NTFS, APFS: letter case, Unicode normalization).
+  function fold(name) { return String(name).normalize('NFC').toLowerCase(); }
+
+  // The names in a folder (files and folders), folded.
   async function namesIn(dir) {
     const out = new Set();
-    for await (const key of dir.keys()) out.add(key);
+    for await (const key of dir.keys()) out.add(fold(key));
     return out;
+  }
+
+  // true when the folder has an entry (a file or a folder) under this name, as its own file system looks names up, so a
+  // name that differs only in case or form from an existing one counts as taken where the file system says so.
+  async function exists(dir, name) {
+    for (const get of ['getFileHandle', 'getDirectoryHandle']) {
+      try {
+        await dir[get](name);
+        return true;
+      } catch (err) {
+        if (!err || err.name !== 'NotFoundError') {
+          if (err && err.name === 'TypeMismatchError') return true;   // the name is taken by the other kind
+          throw err;
+        }
+      }
+    }
+    return false;
   }
 
   // openDirectory({ name, id? }) → DirSink | null. The folder picker opens (showDirectoryPicker, read-write; call this
   // directly from the click, before any other await); null means the user closed it. In the chosen folder a new folder
-  // `name` is made — or 'name (2)', 'name (3)' … when that name is taken, so nothing the user has is ever written into
-  // or removed. Only where canDirectory() is true; otherwise the kit writes memory sinks and one ZIP.
+  // `name` is made — or 'name (2)', 'name (3)' … when that name is taken (compared without letter case or Unicode form,
+  // then asked of the file system itself), so nothing the user has is ever written into or removed: the sink owns only
+  // the folder it made. Only where canDirectory() is true; otherwise the kit writes memory sinks and one ZIP.
   async function openDirectory(opts) {
     if (!canDirectory()) throw new S.ExportError('sink', 'this browser cannot write into a folder');
     let parent;
@@ -48550,11 +48698,11 @@ MV.def('export/host/sink', ['export/schedule'], (S) => {
     try {
       const taken = await namesIn(parent);
       let name = opts.name;
-      for (let k = 2; taken.has(name); k++) {
+      for (let k = 2; taken.has(fold(name)) || await exists(parent, name); k++) {
         if (k > MAX_NAME_TRIES) throw new Error('no free folder name for ' + opts.name);
         name = opts.name + ' (' + k + ')';
       }
-      return createDirSink(await parent.getDirectoryHandle(name, { create: true }), { parent, name });
+      return createDirSink(await parent.getDirectoryHandle(name, { create: true }), { parent, name, owned: true });
     } catch (err) {
       throw sinkError(err);
     }
@@ -49365,6 +49513,7 @@ MV.def('media/host/session', ['media/samples'], (SM) => {
       if (!opening) {
         opening = (async () => {
           config = await supportedConfig(track, prefer);
+          if (closed) return;                      // closed while the browser was asked: no decoder is ever made
           if (!config) throw mediaError('codec', 'this browser cannot decode ' + track.codec);
           if (withAlpha) aConfig = alphaConfigOf(config);
           newDecoders();
@@ -49862,6 +50011,7 @@ MV.def('media/host/probe', ['core/media', 'core/sha256', 'export/zip', 'media/sn
   const POSTER = 320;                     // poster long side (px)
   const STRIP = 12, TILE = 160;           // filmstrip: 12 tiles of 160 px on the long side
   const THUMB_V = 1;
+  const JPEG_SCAN = 16 * MB;              // a JPEG's frame header (SOFn) is looked for this far into the file at most
   const L = MEDIA.LIMITS;
 
   const err = (code, message, detail) => new SM.MediaError(code, message || code, detail);
@@ -49945,19 +50095,39 @@ MV.def('media/host/probe', ['core/media', 'core/sha256', 'export/zip', 'media/sn
     return toBlob(s, 'image/webp');
   }
 
-  // A sprite of STRIP tiles side by side, each the displayed frame with its long side TILE.
-  async function stripBlob(images, w, h, rot, canvas) {
+  // A sprite of STRIP tiles side by side, each the displayed frame with its long side TILE. put(k, image) draws tile k
+  // from a frame in its coded orientation as soon as it is decoded, so no full-size copy of a frame is kept for the
+  // strip (twelve 4K frames would be ≈ 400 MB); blob() encodes the sprite.
+  function stripSheet(w, h, rot, canvas) {
     const [tw, th] = fitLong(w, h, TILE);
     const s = surface(canvas, tw * STRIP, th);
     s.ctx.clearRect(0, 0, tw * STRIP, th);
-    images.forEach((img, k) => { if (img) drawUpright(s.ctx, img, rot || 0, k * tw, 0, tw, th); });
-    return toBlob(s, 'image/webp');
+    return {
+      put(k, image) { drawUpright(s.ctx, image, rot || 0, k * tw, 0, tw, th); },
+      blob() { return toBlob(s, 'image/webp'); },
+    };
   }
 
   // The STRIP indices spread evenly over n items (repeats when n < STRIP).
   function spread(n) { return Array.from({ length: STRIP }, (_, k) => (n <= 1 ? 0 : Math.round((k * (n - 1)) / (STRIP - 1)))); }
 
   // --- stills ------------------------------------------------------------------------------------------------------------
+
+  // jpegSize(blob, head) → { w, h } | null: the coded size of a JPEG whose frame header comes after the sniffed head
+  // (large ICC or XMP segments first). The marker walk of media/sniff goes on through the file one 64-KB read at a
+  // time, up to JPEG_SCAN bytes, so the 40 MP check runs on the header before anything is decoded (§11.4.13 step 1).
+  async function jpegSize(blob, head) {
+    let at = 0, b = head, p = 2;
+    for (;;) {
+      const r = SN.jpegWalk(b, p);
+      if (!r) return null;
+      if (r.w !== undefined) return r;
+      if (b.length < SN.HEAD || at + r.next >= Math.min(blob.size, JPEG_SCAN)) return null;   // the file or the scan ends
+      at += r.next;
+      p = 0;
+      b = new Uint8Array(await blob.slice(at, at + SN.HEAD).arrayBuffer());
+    }
+  }
 
   async function decodeStill(blob, extra) {
     try {
@@ -50007,9 +50177,8 @@ MV.def('media/host/probe', ['core/media', 'core/sha256', 'export/zip', 'media/sn
       const n = tr.frameCount;
       if (n > L.animFrames) throw err('animTooBig', n + ' frames');
       const picks = spread(n);
-      const tiles = new Array(STRIP).fill(null);
       const cts = [], dur = [];
-      let t = 0, w = 0, h = 0, poster = null;
+      let t = 0, w = 0, h = 0, poster = null, sheet = null;
       for (let k = 0; k < n; k++) {
         const r = await dec.decode({ frameIndex: k, completeFramesOnly: true });
         const f = r.image;
@@ -50017,14 +50186,14 @@ MV.def('media/host/probe', ['core/media', 'core/sha256', 'export/zip', 'media/sn
           w = f.displayWidth; h = f.displayHeight;
           if (Math.max(w, h) > L.animLong || w * h > L.imagePixels) { f.close(); throw err('animTooBig', w + '×' + h); }
           poster = await posterBlob(f, w, h, 0, canvas);
+          sheet = stripSheet(w, h, 0, canvas);
         }
         const d = f.duration > 0 ? f.duration : 100000;       // µs; an unknown delay plays at 10 fps
         cts.push(t); dur.push(d); t += d;
-        for (let j = 0; j < STRIP; j++) if (picks[j] === k) tiles[j] = await createImageBitmap(f);
+        for (let j = 0; j < STRIP; j++) if (picks[j] === k) sheet.put(j, f);
         f.close();
       }
-      const strip = await stripBlob(tiles, w, h, 0, canvas);
-      for (const b of new Set(tiles)) if (b) b.close();
+      const strip = await sheet.blob();
       const table = SM.build({ timescale: 1e6, cts, dur, key: cts.map(() => 1), off: cts.map(() => 0), size: cts.map(() => 0) });
       const alpha = sniffed.container === 'gif' || sniffed.alphaHint !== false ? await hasAlpha(blob, canvas) : false;
       return { fields: { w, h, dur: table.duration, fps: table.fps, frames: n, rot: 0, alpha, anim: true,
@@ -50134,14 +50303,13 @@ MV.def('media/host/probe', ['core/media', 'core/sha256', 'export/zip', 'media/sn
       const first = await session.request(0);
       const poster = await posterBlob(first.image, info.w, info.h, info.rot, o.canvas);
       const picks = stripPicks(table, false);                // 12 key frames spread evenly, for the filmstrip
-      const frames = new Map();
+      const sheet = stripSheet(info.w, info.h, info.rot, o.canvas);
       for (const i of [...new Set(picks)].sort((a, b) => a - b)) {
         const h = await session.request(i);
-        frames.set(i, await createImageBitmap(h.image));
+        picks.forEach((pick, k) => { if (pick === i) sheet.put(k, h.image); });   // drawn now: the session may close it next
         checkAbort(o.signal);
       }
-      const strip = await stripBlob(picks.map((i) => frames.get(i)), info.w, info.h, info.rot, o.canvas);
-      for (const b of frames.values()) b.close();
+      const strip = await sheet.blob();
       return { fields: videoFields(table, info), thumbs: { v: THUMB_V, poster, strip, tiles: STRIP },
         index: { v: MEDIA.INDEX_V, table: SM.toData(table), track: info } };
     } catch (e) {
@@ -50203,6 +50371,11 @@ MV.def('media/host/probe', ['core/media', 'core/sha256', 'export/zip', 'media/sn
     if (sniffed.kind !== 'image' && sniffed.kind !== 'video') throw err('type', 'unknown file type');
     if (sniffed.kind === 'image') {
       if (blob.size > L.imageBytes) throw err('tooBig', 'image file over 60 MB');
+      if (sniffed.container === 'jpeg' && sniffed.w === undefined) {
+        const size = await jpegSize(blob, head);
+        if (!size) throw err('broken', 'no JPEG frame header');
+        sniffed.w = size.w; sniffed.h = size.h;
+      }
       if (sniffed.w * sniffed.h > L.imagePixels) throw err('tooBig', 'image larger than 40 MP');
       if (sniffed.anim && Math.max(sniffed.w, sniffed.h) > L.animLong) throw err('animTooBig', 'animation larger than 2048 px');
     } else if (blob.size > L.videoBytes) throw err('tooBigVideo', 'video file over 4 GB');
@@ -50253,21 +50426,24 @@ MV.def('media/host/probe', ['core/media', 'core/sha256', 'export/zip', 'media/sn
 
   // --- posters and filmstrips (thumbs store; rebuilt when missing) --------------------------------------------------------------
 
+  // thumbsOf(id, { store, canvas }) → the thumbs record ({ v, poster, strip, tiles }), made from the asset and stored when
+  // it is missing or partial (a package's poster of a video or an animation, without its filmstrip: ui/project_io).
   async function thumbsOf(id, o) {
     const store = o && o.store;
     if (!store) return null;
     let rec = null;
     try { rec = await store.getThumbs(id); } catch (e) { rec = null; }
-    if (rec && rec.v === THUMB_V && rec.poster) return rec;
+    const poster = rec && rec.v === THUMB_V && rec.poster ? rec : null;
+    if (poster && !poster.partial) return poster;
     const media = await store.getMedia(id);
-    if (!media || !media.blob) return null;
+    if (!media || !media.blob) return poster;
     const sniffed = SN.sniff(new Uint8Array(await media.blob.slice(0, SN.HEAD).arrayBuffer()));
     let probed;
     try {
       if (sniffed.kind === 'video') probed = await probeVideo(media.blob, sniffed, { canvas: o.canvas }, []);
       else if (sniffed.anim) probed = await probeAnim(media.blob, sniffed, o.canvas, []);
       else probed = await probeStill(media.blob, sniffed, o.canvas);
-    } catch (e) { return null; }
+    } catch (e) { return poster; }
     try { await store.putThumbs(id, probed.thumbs); } catch (e) { /* kept in memory by the caller */ }
     return probed.thumbs;
   }
@@ -50283,7 +50459,7 @@ MV.def('media/host/probe', ['core/media', 'core/sha256', 'export/zip', 'media/sn
   }
 
   return { importFile, rasterizeSvg, posterOf, stripOf, thumbsOf, indexOf, animIndexOf, stripPicks, hashBlob, sessionTrack,
-    drawUpright, blobReader, POSTER, STRIP, TILE, THUMB_V, SUBTLE_MAX, SLICE };
+    drawUpright, blobReader, jpegSize, POSTER, STRIP, TILE, THUMB_V, SUBTLE_MAX, SLICE, JPEG_SCAN };
 });
 /* 文字PVメーカー v2 — original work. The real AssetStore: still tiers, decode sessions per fork, provisional frames for the preview, exact frames for export (DESIGN_2_1 §11.3.6, §11.4.5–§11.4.7). */
 MV.def('media/host/store', ['core/media', 'media/samples', 'media/host/session', 'media/host/probe', 'media/host/bake'], (MEDIA, SM, SES, PR, BK) => {
@@ -50311,6 +50487,8 @@ MV.def('media/host/store', ['core/media', 'media/samples', 'media/host/session',
   const NEAR_BAKED = 2;                            // frames: how far back a baked copy may stand in for an unbaked one
   const SESSION_PIXELS = 16.6e6;                   // Σ coded pixels of the open sessions of one store
   const BLUR_LEVELS = [0, 2, 4, 8, 16, 32, 64, 128];
+  const SIGMA_STEPS = 12;                          // the blur of a still's copy, in 1/12-octave steps (at most 3 % off):
+                                                   // a draw 20 % larger or smaller makes about 3 new copies, not one per px
 
   // The blur level (device px) a request uses: the nearest level, so cached copies are reused.
   function blurLevel(px) {
@@ -50329,7 +50507,7 @@ MV.def('media/host/store', ['core/media', 'media/samples', 'media/host/session',
       blob: new Map(),            // id → { p: Promise<Blob | null>, value: Blob | null | undefined }
       index: new Map(),           // id → { p, value: { table, track } | null | undefined, error }
       thumbs: new Map(),          // id → { p, value: { poster, tiles, picks } | null | undefined }
-      stills: new Map(),          // key → { bitmap, w, h, bytes } (Map order = least recently used first)
+      stills: new Map(),          // key → { bitmap, w, h, bytes, level } (Map order = least recently used first)
       stillP: new Map(),          // key → Promise
       stillBytes: 0,
       failed: new Map(),          // id → code: an asset that cannot be read or decoded here
@@ -50356,8 +50534,13 @@ MV.def('media/host/store', ['core/media', 'media/samples', 'media/host/session',
     const queue = new Map();                     // preview bakes: 'id|b|sigma' → { id, v, shown: index | −1, hinted: [index] }
     let pumping = false;
 
+    // emit: shared state (bytes, sample tables, thumbs, stills, failures) reaches the listeners of every store over it;
+    // emitOwn: what this store's own sessions and bakes hold (an export fork's frames are not the preview's).
     function emit(event, arg) {
       for (const store of shared.stores) for (const fn of store.listeners[event]) { try { fn(arg); } catch (e) { /* a listener's problem */ } }
+    }
+    function emitOwn(event, arg) {
+      for (const fn of listeners[event]) { try { fn(arg); } catch (e) { /* a listener's problem */ } }
     }
 
     // --- bytes, index and thumbs (shared by every fork) ---------------------------------------------------------
@@ -50421,13 +50604,15 @@ MV.def('media/host/store', ['core/media', 'media/samples', 'media/host/session',
         rec.p = (async () => {
           let stored = null;
           try { stored = shared.blobs.thumbs ? await shared.blobs.thumbs(id) : null; } catch (e) { stored = null; }
-          if (!stored || !stored.poster) {
+          if (!stored || !stored.poster || stored.partial) {    // partial: a package's poster without the filmstrip
             const blob = await loadBlob(id).p;
-            if (!blob) return null;
-            const store = { getThumbs: async () => null, getMedia: async () => ({ blob }),
-              putThumbs: async (k, r) => { if (shared.blobs.putThumbs) await shared.blobs.putThumbs(k, r); } };
-            stored = await PR.thumbsOf(id, { store, canvas: shared.canvas });
-            if (!stored) return null;
+            if (blob) {
+              const had = stored;
+              const store = { getThumbs: async () => had, getMedia: async () => ({ blob }),
+                putThumbs: async (k, r) => { if (shared.blobs.putThumbs) await shared.blobs.putThumbs(k, r); } };
+              stored = await PR.thumbsOf(id, { store, canvas: shared.canvas });
+            }
+            if (!stored || !stored.poster) return null;
           }
           const poster = await createImageBitmap(stored.poster);
           let tiles = [];
@@ -50446,7 +50631,21 @@ MV.def('media/host/store', ['core/media', 'media/samples', 'media/host/session',
 
     // --- stills ------------------------------------------------------------------------------------------------------
 
-    function stillKey(id, tier, level) { return id + '|' + tier + '|' + level; }
+    // The key of a still at `tier` (level 0), or of its blurred copy: its level and its blur in copy px (§11.4.6).
+    function stillKey(id, tier, level, sigma) { return id + '|' + tier + '|' + level + (level > 0 ? '|' + sigma : ''); }
+
+    // The blurred copy of a still at `tier` for a draw of `px` device px (the request's): the tier bitmap downscaled by
+    // k = max(1, level / 4), blurred by σ = level × copy long side / px copy px (as video frames are), so the blur on
+    // screen is the same whatever the photo's resolution. σ is rounded to SIGMA_STEPS per octave, so a resize or a
+    // zoom that changes px a little reuses the copy.
+    function stillCopy(entry, tier, level, px) {
+      const long = Math.max(entry.w, entry.h);
+      const tw = Math.max(1, Math.round((entry.w * tier) / long)), th = Math.max(1, Math.round((entry.h * tier) / long));
+      const k = Math.max(1, level / 4);
+      const sigma = (level * (Math.max(tw, th) / k)) / (px > 0 ? px : tier);
+      return { k, w: Math.max(1, Math.round(tw / k)), h: Math.max(1, Math.round(th / k)),
+        sigma: Math.pow(2, Math.round(Math.log2(sigma) * SIGMA_STEPS) / SIGMA_STEPS) };
+    }
 
     function touchStill(key) {
       const hit = shared.stills.get(key);
@@ -50467,23 +50666,24 @@ MV.def('media/host/store', ['core/media', 'media/samples', 'media/host/session',
     }
 
     // Decodes a still at `tier` px on the long side (EXIF orientation applied, colour converted to sRGB), and its
-    // blurred copy at `level` when asked: downscaled by max(1, level / 4) and filtered in the host (§11.4.6).
-    function decodeStill(id, entry, tier, level) {
-      const key = stillKey(id, tier, level);
+    // blurred copy at `level` for a draw of `px` when asked (stillCopy: never larger than the tier), filtered in the
+    // host (§11.4.6).
+    function decodeStill(id, entry, tier, level, px) {
+      const copy = level > 0 ? stillCopy(entry, tier, level, px) : null;
+      const key = stillKey(id, tier, level, copy ? copy.sigma : 0);
       if (shared.stills.has(key)) return Promise.resolve(shared.stills.get(key));
       if (shared.stillP.has(key)) return shared.stillP.get(key);
       const t0 = shared.now();
       const p = (async () => {
-        if (level > 0) {
+        if (copy) {
           const base = await decodeStill(id, entry, tier, 0);
-          const k = Math.max(1, level / 4);
-          const w = Math.max(1, Math.round(base.w / k)), h = Math.max(1, Math.round(base.h / k));
+          const { w, h } = copy;
           const s = shared.canvas ? shared.canvas.create(w, h, { alpha: true }) : (() => { const c = new OffscreenCanvas(w, h); return { canvas: c, ctx: c.getContext('2d') }; })();
-          s.ctx.filter = 'blur(' + (level / k) + 'px)';
+          s.ctx.filter = 'blur(' + copy.sigma + 'px)';
           s.ctx.drawImage(base.bitmap, 0, 0, w, h);
           s.ctx.filter = 'none';
           const bitmap = typeof s.canvas.transferToImageBitmap === 'function' ? s.canvas.transferToImageBitmap() : await createImageBitmap(s.canvas);
-          return { bitmap, w: entry.w, h: entry.h, bytes: w * h * 4 };
+          return { bitmap, w: entry.w, h: entry.h, bytes: w * h * 4, level };
         }
         const blob = await loadBlob(id).p;
         if (!blob) throw mediaError('missing', 'not on this device', { id });
@@ -50498,7 +50698,7 @@ MV.def('media/host/store', ['core/media', 'media/samples', 'media/host/session',
             throw mediaError('broken', 'the image does not decode');
           }
         }
-        return { bitmap, w: entry.w, h: entry.h, bytes: rw * rh * 4 };
+        return { bitmap, w: entry.w, h: entry.h, bytes: rw * rh * 4, level: 0 };
       })().then((rec) => {
         shared.stillP.delete(key);
         decodeMs += shared.now() - t0;
@@ -50516,7 +50716,21 @@ MV.def('media/host/store', ['core/media', 'media/samples', 'media/host/session',
 
     // --- sessions (per store) ---------------------------------------------------------------------------------------------
 
-    function sessionFor(id, entry) {
+    // The timed media of the latest draw: the ids frame() and want() are asked for in one synchronous turn (the stage
+    // draws a frame, then lists its look-ahead, in one turn), or the list of the latest ready().
+    const drawn = new Set();
+    let drawOpen = false;
+    function newDraw() {
+      drawn.clear();
+      if (!drawOpen) { drawOpen = true; queueMicrotask(() => { drawOpen = false; }); }
+    }
+    function drawing(id) { if (!drawOpen) newDraw(); drawn.add(id); }
+
+    // The session of a timed medium, opened when missing. Opening one beyond SESSION_PIXELS closes the least recently
+    // used others first (§11.4.7), but never one of the latest draw (`drawn`) or of `keep` (the ids of the ready() list
+    // being readied): the bound may be exceeded while one frame draws more video than it allows. The sessions of
+    // earlier draws close first even with a request still waiting (a scrub across many clips stays within the bound).
+    function sessionFor(id, entry, keep) {
       let s = sessions.get(id);
       if (s) { sessions.delete(id); sessions.set(id, s); return s; }
       const idx = loadIndex(id).value, blob = blobNow(id);
@@ -50536,7 +50750,7 @@ MV.def('media/host/store', ['core/media', 'media/samples', 'media/host/session',
       for (const x of sessions.values()) total += x.pixels;
       for (const [k, x] of sessions) {
         if (total <= SESSION_PIXELS || sessions.size <= 1) break;
-        if (k === id) continue;
+        if (k === id || drawn.has(k) || (keep && keep.has(k))) continue;
         total -= x.pixels;
         decodeMs += x.stats().decodeMs;
         x.close();
@@ -50585,14 +50799,14 @@ MV.def('media/host/store', ['core/media', 'media/samples', 'media/host/session',
       const px = w.px > 0 ? w.px : Math.max(entry.w, entry.h);
       lastPx.set(id, Math.max(lastPx.get(id) || 0, px));
       const tier = MEDIA.tier(px, entry), level = blurLevel(w.blur);
-      const hit = touchStill(stillKey(id, tier, level));
+      const hit = touchStill(stillKey(id, tier, level, level > 0 ? stillCopy(entry, tier, level, px).sigma : 0));
       if (hit) return mf(id, hit.bitmap, hit.bitmap.width, hit.bitmap.height, 0, true, 0, level);
-      decodeStill(id, entry, tier, level).catch(() => {});
-      let best = null, bestLevel = 0;
+      decodeStill(id, entry, tier, level, px).catch(() => {});
+      let best = null;
       for (const [k, r] of shared.stills) {
-        if (k.startsWith(id + '|') && (!best || r.bitmap.width > best.bitmap.width)) { best = r; bestLevel = Number(k.slice(k.lastIndexOf('|') + 1)); }
+        if (k.startsWith(id + '|') && (!best || r.bitmap.width > best.bitmap.width)) best = r;
       }
-      if (best) return mf(id, best.bitmap, best.bitmap.width, best.bitmap.height, 0, false, 0, bestLevel);
+      if (best) return mf(id, best.bitmap, best.bitmap.width, best.bitmap.height, 0, false, 0, best.level);
       loadThumbs(id);
       return posterFrame(id, false);
     }
@@ -50608,6 +50822,7 @@ MV.def('media/host/store', ['core/media', 'media/samples', 'media/host/session',
       if (!idx.value) { loadThumbs(id); return posterFrame(id, false); }
       const table = idx.value.table;
       const i = SM.sampleAt(table, typeof m === 'number' && Number.isFinite(m) ? m : 0);
+      drawing(id);
       const s = sessionFor(id, entry);
       if (!s) return posterFrame(id, false);
       const v = w.blur > 0 ? variantOf(entry, w.px, w.blur) : null;
@@ -50623,7 +50838,7 @@ MV.def('media/host/store', ['core/media', 'media/samples', 'media/host/session',
         if (near) return mf(id, near.bitmap, near.w, near.h, h.rot, false, near.index, near.blur);
         return mf(id, h.image, h.w, h.h, h.rot, false, i, 0);
       }
-      s.request(i).then(() => emit('ready', { id }), () => sessionFailed(id, s));
+      s.request(i).then(() => emitOwn('ready', { id }), () => sessionFailed(id, s));
       if (v && !w.exact) schedule(id, v, i);      // baked as soon as it is held (the session's onHeld)
       const near = s.nearest(i);
       if (near) {
@@ -50767,7 +50982,7 @@ MV.def('media/host/store', ['core/media', 'media/samples', 'media/host/session',
           const job = nextBake();
           if (!job) break;
           const r = await bakeHeld(job.id, job.s, job.h, job.v, shared.entries(job.id) || {});
-          if (r) emit('ready', { id: job.id });
+          if (r) emitOwn('ready', { id: job.id });
           await slice();
           if (disposed) break;
         }
@@ -50798,6 +51013,7 @@ MV.def('media/host/store', ['core/media', 'media/samples', 'media/host/session',
         const h = hinted.get(key);
         if (!h.list.includes(i)) h.list.push(i);
       }
+      for (const id of byId.keys()) drawing(id);
       for (const [id, indices] of byId) {
         const s = sessionFor(id, shared.entries(id));
         if (s) s.hint(indices);
@@ -50817,6 +51033,10 @@ MV.def('media/host/store', ['core/media', 'media/samples', 'media/host/session',
       const signal = o && o.signal;
       const jobs = [];
       const pins = new Map();
+      const keep = new Set();                    // the frame's media: their sessions do not close one another
+      for (const item of list || []) if (item && MEDIA.isId(item.id)) keep.add(item.id);
+      newDraw();                                 // the frame being readied is the latest draw
+      for (const id of keep) drawn.add(id);
       for (const item of list || []) {
         if (!item || !MEDIA.isId(item.id)) continue;
         const id = item.id;
@@ -50827,7 +51047,7 @@ MV.def('media/host/store', ['core/media', 'media/samples', 'media/host/session',
           if (!blob) throw mediaError('missing', 'not on this device', { id });
           if (!isTimed(entry)) {
             const px = item.px > 0 ? item.px : lastPx.get(id) || Math.max(entry.w, entry.h);
-            await decodeStill(id, entry, MEDIA.tier(px, entry), blurLevel(item.blur));
+            await decodeStill(id, entry, MEDIA.tier(px, entry), blurLevel(item.blur), px);
             return;
           }
           const idx = await loadIndex(id).p;
@@ -50835,7 +51055,7 @@ MV.def('media/host/store', ['core/media', 'media/samples', 'media/host/session',
           const i = SM.sampleAt(idx.table, item.m || 0);
           if (!pins.has(id)) pins.set(id, new Set());
           pins.get(id).add(i);
-          const s = sessionFor(id, entry);
+          const s = sessionFor(id, entry, keep);
           s.pin(pins.get(id));
           let h;
           try { h = await s.request(i, { pin: true }); } catch (err) { sessionFailed(id, s); throw err; }
@@ -50872,7 +51092,7 @@ MV.def('media/host/store', ['core/media', 'media/samples', 'media/host/session',
     // get(id): the v2.0 member — a still at its largest cached tier (starts a full-size decode when none is cached).
     function get(id) {
       let best = null;
-      for (const [k, r] of shared.stills) if (k.startsWith(id + '|') && k.endsWith('|0') && (!best || r.bitmap.width > best.bitmap.width)) best = r;
+      for (const [k, r] of shared.stills) if (k.startsWith(id + '|') && r.level === 0 && (!best || r.bitmap.width > best.bitmap.width)) best = r;
       if (best) return best.bitmap;
       const entry = shared.entries(id);
       if (entry && !isTimed(entry) && blobNow(id)) decodeStill(id, entry, MEDIA.tier(Infinity, entry), 0).catch(() => {});
@@ -55440,6 +55660,15 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
       return ids.filter((id) => known.has(id));
     }
 
+    // mediaOnDevice(doc, media) → the ids of the library's photos and videos whose bytes are on this device (media:
+    // ui/media_io, or null before it is ready), or false when there are none: what 指示 and the board may offer when
+    // 「写真・動画をAIが使ってよい」 is on (DESIGN_2_1 §11.6.1; the controller's state.allowMedia is the one switch).
+    function mediaOnDevice(doc, media) {
+      const list = doc && doc.media && Array.isArray(doc.media.list) ? doc.media.list : [];
+      const here = list.filter((e) => !media || media.state(e.id) !== 'missing').map((e) => e.id);
+      return here.length ? here : false;
+    }
+
     function isChecked(c) { return c.checked !== false; }
     function letter(i) { return LETTERS[i] || String(i + 1); }
 
@@ -55503,10 +55732,14 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
     function changeGroups(doc, plan, changes, applied) {
       const at = new Map(applied.map((item, i) => [itemKey(item), i]));
       const wholeSheet = at.has('rows');
+      // new materials take the next ids in list order, as ai/changes.toCommands numbers them; a remade one keeps its id
+      const next = doc.materials && Number.isInteger(doc.materials.next) ? doc.materials.next : 1;
+      const fresh = changes.filter((c) => c.kind === 'material' && c.entry && !c.materialId);
       return changes.map((c) => {
         let keys;
         if (LYRIC_EDIT_KINDS.includes(c.kind)) keys = [wholeSheet ? 'rows' : 'r:' + c.rowId];
         else if ((c.kind === 'part' || c.kind === 'time' || c.kind === 'value') && c.path) keys = ['p:' + c.path];
+        else if (c.kind === 'material' && c.entry) keys = ['m:' + (c.materialId || 'm' + (next + fresh.indexOf(c)).toString(36))];
         else keys = CH.logEntry(doc, CH.toCommands(doc, plan, [c]), {}).applied.map(itemKey);
         return [...new Set(keys)].filter((k) => at.has(k)).map((k) => at.get(k));
       });
@@ -55722,7 +55955,9 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
       const DIRECT = d.direct || null;
       const RECIPE = d.recipe || null;
       const VISION = d.vision || null;
-      const visionConsented = new Set();  // asset ids the user agreed to send to Gemini, for this project only (§11.6.2)
+      // The asset ids of the one 「AIに説明してもらう」 the user has just agreed to (§11.6.2): the consent is asked every
+      // time pictures are sent, so it holds for that one run only.
+      const visionAgreed = new Set();
       let seq = 0;
       let checking = null;                // the AbortController of a running key check
       let state = initialState();
@@ -55736,6 +55971,8 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
           keyStatus: keyStatus(provider, k.key, k.ok, model), keyName: null, keyError: null,
           run: null, review: null, error: null, notice: null, tryOn: null,
           applied: [],                    // the area keys of the last applied area review (the board's 反映済み)
+          // 写真・動画をAIが使ってよい (DESIGN_2_1 §11.6.1): one switch for the instruction block and the board
+          allowMedia: true,
         };
       }
 
@@ -55886,6 +56123,11 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
         return plan && Array.isArray(plan.lines) && plan.lines.length ? null : 'ai.needLines';
       }
 
+      // 写真・動画をAIが使ってよい: while it is off, 指示 and the board offer no [media] list (askDirect).
+      function setAllowMedia(onOff) {
+        if (state.allowMedia !== !!onOff) set({ allowMedia: !!onOff });
+      }
+
       function consent(onOff) {
         const song = host.song();
         if (!song) return;
@@ -55923,9 +56165,11 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
       async function askDirect(conn, sent, o, signal) {
         const reg = host.registry;
         let allow = !!o.allowMaterials;
-        // o.media: the asset ids the AI may place (DESIGN_2_1 §11.6.1: bytes on this device, 写真・動画をAIが使ってよい)
+        // o.media: the asset ids the AI may place (DESIGN_2_1 §11.6.1: bytes on this device), offered only while
+        // 写真・動画をAIが使ってよい is on — whichever block sent the request
+        const media = state.allowMedia && Array.isArray(o.media) && o.media.length ? o.media.slice() : false;
         const make = () => DIRECT.directRequests(sent.doc, sent.plan, reg, { briefs: o.briefs, uiLang: host.lang, mode: o.mode || 'all',
-          allowMaterials: allow, media: Array.isArray(o.media) && o.media.length ? o.media.slice() : false });
+          allowMaterials: allow, media });
         let reqs = make();
         let failed = false;
         let outs = [];
@@ -55947,8 +56191,11 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
           }
           if (res.usage) { usage.input += Number(res.usage.input) || 0; usage.output += Number(res.usage.output) || 0; }
           model = res.model || model;
-          // ai/direct prefixes the ids of window k with 'w<k>:' itself (its `sent.window`).
-          outs.push(DIRECT.directChanges(sent.doc, sent.plan, reg, res.json, { rev: sent.rev, sent: reqs[k].sent, allowMaterials: allow }));
+          // ai/direct prefixes the ids of window k with 'w<k>:' itself (its `sent.window`); the materials of the earlier
+          // windows take their room in doc.materials first
+          const materialsBefore = [].concat(...outs.map((x) => (x.changes || []).filter((c) => c.kind === 'material')));
+          outs.push(DIRECT.directChanges(sent.doc, sent.plan, reg, res.json, { rev: sent.rev, sent: reqs[k].sent, allowMaterials: allow,
+            materialsBefore }));
         }
         const merged = { results: [], changes: [], warnings: [] };
         for (const out of outs) {
@@ -55957,6 +56204,18 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
           merged.warnings.push(...(out.warnings || []));
         }
         return { res: { usage, model }, out: merged, materialsFailed: failed };
+      }
+
+      // AIで作り直す on a material with a photo or video layer (DESIGN_2_1 §11.5.8): the [media] list, so its pictures stay
+      // 'asset:<n>'. While 写真・動画をAIが使ってよい is on, the pictures on this device (`here`, asset ids) and the
+      // material's own, with their vision text; while it is off, only the material's own, without it. null: no media layer.
+      function remakeMedia(doc, current, here, lang) {
+        const layers = current.recipe && Array.isArray(current.recipe.layers) ? current.recipe.layers : [];
+        const own = layers.filter((l) => l && l.prim === 'media');
+        if (!own.length) return null;
+        const ids = own.map((l) => l.src).filter(Boolean);
+        if (!state.allowMedia) return RECIPE.mediaSent(doc, { only: ids, lang, described: false });
+        return RECIPE.mediaSent(doc, { only: ids.concat(Array.isArray(here) ? here : []), lang });
       }
 
       // The briefs as the review names them: { key, ref, label, n, instruction } from the document they were sent from.
@@ -55984,8 +56243,9 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
           return { res, out: VISION.visionChanges(sent.doc, res.json, req.sent, valid) };
         }
         if (tool === 'material') {
+          const remake = opts.current ? { current: opts.current, media: remakeMedia(sent.doc, opts.current, opts.media, lang) } : {};
           const req = RECIPE.materialRequest(sent.doc, sent.plan, reg, Object.assign({ description: String(opts.description || '').slice(0, MAX_INSTRUCTION),
-            kind: opts.kind, uiLang: lang }, opts.current ? { current: opts.current } : {}));
+            kind: opts.kind, scope: opts.scope, uiLang: lang }, remake));
           const res = await call(conn, req, signal);
           return { res, out: RECIPE.materialChanges(sent.doc, sent.plan, reg, res.json, Object.assign(valid, { sent: req.sent }, opts.useAt ? { useAt: opts.useAt } : {})) };
         }
@@ -56068,8 +56328,8 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
       }
 
       // run(tool, opts) → true when a review or a notice came back. opts (edit): { instruction, lineIds }; (direct):
-      // { briefs: [{ ref, instruction }], mode: 'all' | 'camera', allowMaterials }; (material): { description, kind,
-      // current?, useAt? }.
+      // { briefs: [{ ref, instruction }], mode: 'all' | 'camera', allowMaterials, media }; (material): { description, kind,
+      // scope? ('cut' | 'run': an ornament for that place), current?, useAt?, media? (a remake: the asset ids on this device) }.
       async function run(tool, opts) {
         const o0 = opts || {};
         const why = blocked(tool, o0);
@@ -56087,7 +56347,8 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
         }
         if (tool === 'material' && !String(o.description || '').trim()) return false;
         if (tool === 'vision') {
-          const ids = (Array.isArray(o.ids) ? o.ids : []).filter((x) => visionConsented.has(x));
+          const ids = (Array.isArray(o.ids) ? o.ids : []).filter((x) => visionAgreed.has(x));
+          visionAgreed.clear();
           if (!ids.length) return false;
           o = Object.assign({}, o, { ids });
         }
@@ -56205,7 +56466,7 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
       function projectChanged() {
         if (state.run) state.run.abort.abort();
         consented.clear();
-        visionConsented.clear();
+        visionAgreed.clear();
         const hadReview = !!state.review;
         endTryOn();
         state = Object.assign({}, state, { run: null, review: null, error: null, notice: null });
@@ -56365,9 +56626,9 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
         return { n, kept };
       }
 
-      // 「AIに説明してもらう」 (DESIGN_2_1 §11.6.2): the assets on this device (at most 8), a consent first for those not
-      // agreed yet (per asset, this project only, not saved), then the vision tool; its review opens in the AI tab.
-      // → Promise<boolean>: true when a review or a notice came back.
+      // 「AIに説明してもらう」 (DESIGN_2_1 §11.6.2): the assets on this device (at most 8), a consent every time (it states
+      // what is sent: 768 px JPEGs, about {kb} KB each, three frames of a video; nothing is remembered), then the vision
+      // tool; its review opens in the AI tab. → Promise<boolean>: true when a review or a notice came back.
       async function describeMedia(ids) {
         const list = [...new Set(Array.isArray(ids) ? ids : [])].filter((x) => host.mediaHere(x)).slice(0, VISION ? VISION.MAX_ITEMS : 0);
         const why = blocked('vision');
@@ -56375,13 +56636,11 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
         if (why) { host.toast(t(why), { kind: 'warn' }); return false; }
         // the pictures asked about are not on this device: say so (nothing would be sent)
         if (!list.length) { if (Array.isArray(ids) && ids.length) host.toast(t('ai.visionMissing'), { kind: 'warn' }); return false; }
-        if (!list.every((x) => visionConsented.has(x))) {
-          const ok = await host.confirm({ title: t('ai.tool.vision'), text: t('ai.visionConsent', { kb: host.visionKb(list) }), ok: t('ai.visionSend') });
-          if (!ok) return false;
-          for (const x of list) visionConsented.add(x);
-        }
+        const ok = await host.confirm({ title: t('ai.tool.vision'), text: t('ai.visionConsent', { kb: host.visionKb(list) }), ok: t('ai.visionSend') });
+        if (!ok) return false;
         host.openAi();
-        return run('vision', { ids: list });
+        for (const x of list) visionAgreed.add(x);
+        try { return await run('vision', { ids: list }); } finally { visionAgreed.clear(); }
       }
 
       // 「AIが決めた固定 n [すべて自動に戻す]」: every pin by 'ai', one undo step.
@@ -56393,8 +56652,8 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
 
       return {
         get state() { return state; },
-        on, setProvider, setModel, setKey, setRemember, forgetKey, forgetKeys, checkKey, blocked, songBlocked, hasConsent, consent,
-        visionBlocked, describeMedia, hasVisionConsent: (id) => visionConsented.has(id),
+        on, setProvider, setModel, setKey, setRemember, forgetKey, forgetKeys, checkKey, blocked, songBlocked, hasConsent, consent, setAllowMedia,
+        visionBlocked, describeMedia,
         run, abort, dismiss, toggle, toggleAgg, toggleAll, setTranscriptTimes, apply, applyTranscript, discard, tryOn, endTryOn,
         tryOnReplaced, strip, docChanged, projectChanged, revert, clearAiPins, logEntries,
         keyPrefix: () => KEY_PREFIX[state.provider] || '',
@@ -56407,7 +56666,7 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
     return {
       TOOLS, SONG_TOOLS, GROUP_ORDER, AREA_GROUP_ORDER, DIRECT_ORDER, STAGES, GUIDE_TOPICS, MAX_INSTRUCTION, MAX_BRIEFS,
       ASK_MAX, ASKS_CAP, LOG_CAP, KEY_PREFIX, SETTINGS_KEY,
-      readSettings, createKeyStore, keyStatus, statusOfError, costText, consentFacts, selectedLines, withChecked, withAll,
+      readSettings, createKeyStore, keyStatus, statusOfError, costText, consentFacts, selectedLines, mediaOnDevice, withChecked, withAll,
       grouped, counts, withLog, revertable, changeGroups, revertTally, aiPinCount, changesOf, letter, createController,
       targetRef, groupOfChange, directGroups, aggRows, aggState, isDisabled, withToggle, withAggToggle, withAsk,
       boardBriefs, refOfKey, itemKey,
@@ -56885,8 +57144,14 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
         textFillIdx: null, textFillOn: false,
       };
       if (page === 'el.text') {
-        // the slot 文字の中に写真・動画 manages: the first that shows textFill, else the first free one (§5.5)
-        let at = [0, 1, 2].find((i) => agreedKey(ctx, 'ornament#' + i) === 'textFill');
+        // the slot 文字の中に写真・動画 manages: the one pinned to textFill at the page's scope (a line or cut that picks
+        // another decoration there does not hide it), else the first that shows textFill, else the first free one (§5.5)
+        const pinnedFill = (i) => {
+          const pin = doc ? doc.pins[writePath(scope + ':ornament#' + i, plan)] : null;
+          return !!pin && pin.v === 'textFill';
+        };
+        let at = [0, 1, 2].find(pinnedFill);
+        if (at === undefined) at = [0, 1, 2].find((i) => agreedKey(ctx, 'ornament#' + i) === 'textFill');
         ctx.textFillOn = at !== undefined;
         if (at === undefined) at = doc ? freeIndex(doc, plan, scope, 'ornament') : 0;
         ctx.textFillIdx = at === null ? null : at;
@@ -57350,19 +57615,24 @@ MV.def('ui/ai_board', ['ui/dom', 'ui/icons', 'planner/areas', 'ui/fields', 'ui/a
     const list = h('div', { class: 'ai-board-rows' });
     const addSel = h('button', { class: 'chip-btn', type: 'button', text: t('ai.board.addSel') });
     const allow = h('input', { type: 'checkbox' });
+    // 写真・動画をAIが使ってよい: the same switch as the instruction block's (the controller's), shown while the library
+    // has a picture on this device (DESIGN_2_1 §11.6.1)
+    const allowMedia = h('input', { type: 'checkbox', 'data-ctl': 'allowMedia' });
+    const mediaRow = h('label', { class: 'check-row', hidden: true }, allowMedia, h('span', { text: t('ai.direct.allowMedia') }));
     const send = h('button', { class: 'btn small primary', type: 'button', text: t('ai.board.send') });
     const why = h('p', { class: 'ai-reason', role: 'status', hidden: true });
     const empty = h('p', { class: 'note subtle', text: t('ai.board.empty') });
     const el = h('section', { class: 'ai-sec ai-board', 'aria-label': t('ai.board.title') },
       h('div', { class: 'sub-head' }, back, title), list, empty,
       h('div', { class: 'row-actions ai-board-foot' }, addSel,
-        h('label', { class: 'check-row' }, allow, h('span', { text: t('ai.direct.allowMaterials') }))),
+        h('label', { class: 'check-row' }, allow, h('span', { text: t('ai.direct.allowMaterials') })), mediaRow),
       h('div', { class: 'ai-edit-row' }, why, h('span', { class: 'grow' }), send));
     const added = [];
     const timers = new Map();
     let rows = [];
 
     back.addEventListener('click', () => o.onBack());
+    allowMedia.addEventListener('change', () => ctl.setAllowMedia(allowMedia.checked));
 
     const asks = () => (app.store.side && app.store.side.asks) || {};
     function save(key, text) {
@@ -57385,11 +57655,9 @@ MV.def('ui/ai_board', ['ui/dom', 'ui/icons', 'planner/areas', 'ui/fields', 'ui/a
       flush();
       const b = AC.boardBriefs(rows, asks());
       if (!b.briefs.length || b.over) return;
-      // the library's pictures on this device may be placed, as in the instruction block, and only while its
-      // 写真・動画をAIが使ってよい switch is on (DESIGN_2_1 §11.6.1)
-      const allowed = typeof o.allowMedia === 'function' && o.allowMedia();
-      const here = !allowed ? [] : (app.doc.media && app.doc.media.list ? app.doc.media.list : []).filter((e) => !app.media || app.media.state(e.id) !== 'missing');
-      ctl.run('direct', { briefs: b.briefs, mode: 'all', allowMaterials: allow.checked, media: here.length ? here.map((e) => e.id) : false });
+      // the library's pictures on this device, as in the instruction block: the controller offers them only while
+      // 写真・動画をAIが使ってよい is on (DESIGN_2_1 §11.6.1)
+      ctl.run('direct', { briefs: b.briefs, mode: 'all', allowMaterials: allow.checked, media: AC.mediaOnDevice(app.doc, app.media) });
     });
 
     function flush() {
@@ -57453,6 +57721,8 @@ MV.def('ui/ai_board', ['ui/dom', 'ui/icons', 'planner/areas', 'ui/fields', 'ui/a
       why.textContent = reason ? t(reason) : '';
       send.disabled = !!reason || !b.briefs.length;
       addSel.disabled = !AC.selectedLines(app.view.state.sel, app.plan).length;
+      mediaRow.hidden = !AC.mediaOnDevice(app.doc, app.media);
+      allowMedia.checked = ctl.state.allowMedia;
     }
 
     // Rebuilt only when the rows or their states change: typing (a draft saved to side.asks) keeps the inputs.
@@ -58062,6 +58332,7 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
   const AUTOSAVE_MS = 1000;
   const LOCK_PREFIX = 'mojipv-work:';   // one Web Lock per open work: two tabs never write the same record
   const LOCK_WAIT_MS = 1500;            // a reloaded page may still see its previous document's lock for a moment
+  const ASSETS_LOCK = 'mojipv-assets';  // held shared while a tab stores assets no work record names yet; pruning takes it
   const LYRIC_EXT = /\.(txt|lrc)$/i;
   const PROJECT_EXT = /\.json$/i;
   const PACKAGE_EXT = /\.mojipv$/i;
@@ -58070,6 +58341,7 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
   const PKG_BIG = 2 * 1024 * MB;        // §12.3 step 3: a confirmation above 2 GB
   const PKG_MEMORY = 1.5 * 1024 * MB;   // without File System Access, a confirmation above 1.5 GB
   const QUOTA_WARN = 0.8;               // §11.2.7: a warning above 80 % of the quota
+  const SAVE_SLICE = 32 * MB;           // a larger asset is written in pieces, so [中止] and the progress act within it
 
   // --- text files: the encoding of a lyric / LRC file ------------------------------------------------------------
 
@@ -58137,6 +58409,14 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
     }
     for (const doc of docs || []) add(doc);
     return keep;
+  }
+
+  // The assets a document names, as 'media:<id>' and 'song:<sha1>' (those a work record written from it keeps).
+  function assetKeys(doc) {
+    const out = new Set();
+    for (const id of mediaInUse([], [doc])) out.add('media:' + id);
+    if (doc && doc.song && typeof doc.song.sha1 === 'string') out.add('song:' + doc.song.sha1);
+    return out;
   }
 
   // routeOf(name, type, sniffed) → 'package' | 'project' | 'lyrics' | 'song' | 'media' | 'container' | 'unknown'.
@@ -58238,7 +58518,14 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
     // The in-memory fallback of the three media stores: without IndexedDB, or when it is full (QuotaExceededError), an
     // asset stays in memory for this session only, and the user is told to save a package (§11.2.7).
     const memory = { media: new Map(), mediaIndex: new Map(), thumbs: new Map() };
+    const memorySongs = new Map();        // song sha1 → Blob, for this session only, when IndexedDB cannot store it
     const songCrcs = new Map();           // song sha1 → CRC-32, computed once per session for package saves (§12.3)
+    // Assets this tab stored that no work record it wrote names yet ('media:<id>', 'song:<sha1>'). While there are any,
+    // the tab holds ASSETS_LOCK shared, and prune() in every tab leaves media and songs alone: another tab's autosave
+    // never deletes what an open, import or relink here has just stored (§11.2.7 across tabs).
+    const unnamed = new Set();
+    let savedKeys = new Set();            // the assets the work record this tab wrote last names
+    let assetsHold = null;                // Promise<release()> of this tab's shared ASSETS_LOCK while `unnamed` has keys
     let persistAsked = false;
     let fileSaved = null;                 // { name, at, text } of the last package or light save to a file
 
@@ -58310,6 +58597,44 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
       });
     }
 
+    // --- assets another tab's pruning must leave alone -------------------------------------------------------
+
+    // Before an asset is stored: unless the record this tab wrote last names it already, it stays unnamed until an
+    // autosave names it, and the tab holds ASSETS_LOCK shared meanwhile (after a prune under way in another tab).
+    function holdAsset(key) {
+      if (savedKeys.has(key)) return Promise.resolve();
+      unnamed.add(key);
+      const locks = lockApi();
+      if (!locks) return Promise.resolve();
+      if (!assetsHold) {
+        assetsHold = new Promise((granted) => {
+          locks.request(ASSETS_LOCK, { mode: 'shared' }, () => new Promise((release) => granted(release)))
+            .catch(() => granted(() => {}));
+        });
+      }
+      return assetsHold;
+    }
+
+    // The keys for which done(key) is true need no hold any more (a record names them, or no record will); with none
+    // left the lock is released.
+    function unhold(done) {
+      for (const k of [...unnamed]) if (done(k)) unnamed.delete(k);
+      if (unnamed.size || !assetsHold) return;
+      const hold = assetsHold;
+      assetsHold = null;
+      hold.then((release) => release());
+    }
+
+    // An operation that stored these keys ended without them (a cancelled or failed open, a refused import or relink):
+    // unless the current document names them, no record will, and pruning may take them again.
+    function letGo(keys) {
+      const cur = assetKeys(app.doc);
+      unhold((k) => keys.has(k) && !cur.has(k));
+    }
+
+    // releaseMedia(id): the photo or video an import, relink or replace stored does not join the work (ui/media_io).
+    function releaseMedia(id) { letGo(new Set(['media:' + id])); }
+
     // --- autosave ------------------------------------------------------------------------------------------
 
     // One transaction. `direct` (leaving the page) puts at once; otherwise the record is read first and, when another
@@ -58343,11 +58668,13 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
     // Writes the current document. The work id, its name and the text are read here, before anything waits, so a work
     // opened meanwhile never receives the previous work's text.
     function writeNow(direct) {
-      const job = { id: workId, name: app.titleOf() || '', text: D.serialize({ doc: app.doc, side: app.store.side }) };
+      const job = { id: workId, name: app.titleOf() || '', doc: app.doc, text: D.serialize({ doc: app.doc, side: app.store.side }) };
       if (job.text === saved.text && job.id === saved.id) { setState('saved'); return writing; }
       setState('saving');
       writing = startPut(job, direct).then(async ({ d, out }) => {
         saved = { id: out.id, text: job.text };
+        savedKeys = assetKeys(job.doc);
+        unhold((k) => savedKeys.has(k));
         if (out.id !== job.id && workId === job.id) {
           setWork(out.id);
           app.toast(t('io.forked'), { kind: 'warn' });
@@ -58382,22 +58709,36 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
     }
 
     // Old works beyond the newest RECENT go, and so does every song's audio that no kept work, the current document or
-    // this tab's undo history (songs it stored or read since the last load) still uses.
+    // this tab's undo history (songs it stored or read since the last load) still uses; the same for photos and videos.
+    // The stores' media and songs are deleted only under ASSETS_LOCK held exclusively (no tab is storing assets that its
+    // records do not name yet), with the works read again under it; where Web Locks are missing they are kept.
     async function prune(d) {
       const all = ((await tx(d, 'works', 'readonly', (s) => s.getAll())) || []).sort((a, b) => b.at - a.at);
       const old = all.slice(RECENT);
       if (old.length) await tx(d, 'works', 'readwrite', (s) => { for (const w of old) s.delete(w.id); });
-      const keep = songsInUse(all.slice(0, RECENT).map((w) => w.text), [...used, app.doc.song ? app.doc.song.sha1 : null]);
+      const keep = keepOf(all.slice(0, RECENT).map((w) => w.text));
+      for (const k of [...memorySongs.keys()]) if (!keep.songs.has(k)) memorySongs.delete(k);
+      for (const name of MEDIA_STORES) for (const k of [...memory[name].keys()]) if (!keep.media.has(k)) memory[name].delete(k);
+      const locks = lockApi();
+      if (locks) await locks.request(ASSETS_LOCK, { mode: 'exclusive', ifAvailable: true }, (lock) => (lock ? pruneStores(d) : null));
+    }
+
+    // What pruning keeps: the songs and assets of the given work records (their text), of the current document and of
+    // this tab's history (an asset's blob, index and thumbs stay while one of them uses it).
+    function keepOf(texts) {
+      return { songs: songsInUse(texts, [...used, app.doc.song ? app.doc.song.sha1 : null]), media: mediaInUse(texts, [app.doc], usedMedia) };
+    }
+
+    async function pruneStores(d) {
+      const all = ((await tx(d, 'works', 'readonly', (s) => s.getAll())) || []).sort((a, b) => b.at - a.at);
+      const keep = keepOf(all.slice(0, RECENT).map((w) => w.text));
       const keys = (await tx(d, 'songs', 'readonly', (s) => s.getAllKeys())) || [];
-      const drop = keys.filter((k) => !keep.has(k));
+      const drop = keys.filter((k) => !keep.songs.has(k));
       if (drop.length) await tx(d, 'songs', 'readwrite', (s) => { for (const k of drop) s.delete(k); });
-      // an asset's blob, index and thumbs stay while a kept work, the current document or this tab's history uses it
-      const keepMedia = mediaInUse(all.slice(0, RECENT).map((w) => w.text), [app.doc], usedMedia);
       for (const name of MEDIA_STORES) {
         const ids = (await tx(d, name, 'readonly', (s) => s.getAllKeys())) || [];
-        const gone = ids.filter((k) => !keepMedia.has(k));
+        const gone = ids.filter((k) => !keep.media.has(k));
         if (gone.length) await tx(d, name, 'readwrite', (s) => { for (const k of gone) s.delete(k); });
-        for (const k of [...memory[name].keys()]) if (!keepMedia.has(k)) memory[name].delete(k);
       }
     }
 
@@ -58414,6 +58755,7 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
           setWork(newest.id, release);
           await claim(d, newest.id);
           saved = { id: newest.id, text: newest.text };
+          savedKeys = assetKeys(file.doc);
           setState('saved');
         } else {
           setWork(newId());
@@ -58451,12 +58793,24 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
       return true;
     }
 
+    // putSong(sha1, blob) → { stored: true } or { stored: false, reason: 'quota' | 'nodb' }: without IndexedDB, or when it
+    // is full, the song stays in this session's memory (§11.2.7, as photos and videos do).
     async function putSong(sha1, blob) {
       used.add(sha1);
-      try { const d = await db(); await tx(d, 'songs', 'readwrite', (s) => s.put(blob, sha1)); } catch (e) { /* the song stays in memory */ }
+      await holdAsset('song:' + sha1);
+      try {
+        const d = await db();
+        await tx(d, 'songs', 'readwrite', (s) => s.put(blob, sha1));
+        memorySongs.delete(sha1);
+        return { stored: true, reason: null };
+      } catch (e) {
+        memorySongs.set(sha1, blob);
+        return { stored: false, reason: e && e.name === 'QuotaExceededError' ? 'quota' : 'nodb' };
+      }
     }
 
     async function getSong(sha1) {
+      if (memorySongs.has(sha1)) { used.add(sha1); return memorySongs.get(sha1); }
       try {
         const d = await db();
         const blob = (await tx(d, 'songs', 'readonly', (s) => s.get(sha1))) || null;
@@ -58502,7 +58856,11 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
       } catch (e) { return null; }
     }
 
-    async function putMedia(id, rec) { persistOnce(); return putIn('media', id, rec); }
+    async function putMedia(id, rec) {
+      persistOnce();
+      await holdAsset('media:' + id);
+      return putIn('media', id, rec);
+    }
     function getMedia(id) { return getFrom('media', id); }
     function putIndex(id, rec) { return putIn('mediaIndex', id, rec); }
     function getIndex(id) { return getFrom('mediaIndex', id); }
@@ -58558,6 +58916,9 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
       fileHandle = null;
       fileSaved = null;
       saved = { id: null, text: null };
+      savedKeys = new Set();
+      const next = assetKeys(file.doc);                      // what the loaded work names is held until its autosave
+      unhold((k) => !next.has(k));
       used.clear();                                          // loading clears the undo history (§6.10)
       usedMedia.clear();
       // the loaded work's own assets stay while it is open: deleting one and undoing must find its bytes (§11.2.7)
@@ -58647,6 +59008,7 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
       if (list.some((e) => e.id === res.entry.id)) {
         app.toast(t('media.dup', { name: file.name }), { kind: 'info' });
       } else if (list.length >= MEDIA.LIMITS.library) {
+        if (res.fresh) releaseMedia(res.entry.id);
         app.toast(t('media.full'), { kind: 'error' });
         return null;
       } else {
@@ -58730,6 +59092,11 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
       return { have, blobs };
     }
 
+    // The size of the file behind a handle, or -1 when it cannot be read.
+    async function sizeOf(handle) {
+      try { return (await handle.getFile()).size; } catch (e) { return -1; }
+    }
+
     function pickerTypes() {
       return {
         pkg: { description: t('io.typePkg'), accept: { [PKG.MIME]: [PKG.EXT] } },
@@ -58761,22 +59128,30 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
         }
         if (target && PROJECT_EXT.test(target.name)) return saveLight(target);
       }
-      // 保存 over the open project (handle given) must never delete it when the save is cancelled or fails: only a file
-      // the save dialog has just created is removed then.
-      if (target) sink = SINK.createFileSink(target, { removeOnAbort: !handle });
+      // [中止] or a failure removes the file only when this save made it (the save dialog's new, empty file); the project
+      // file that 保存 writes again keeps what it held, since the browser writes into a copy until close() (D§4.21).
+      if (target) sink = SINK.createFileSink(target, { removeOnAbort: !handle && (await sizeOf(target)) === 0 });
       else {
         if (lay.bytes > PKG_MEMORY && app.confirm && !(await app.confirm({ text: t('pkg.warn.memory', { size }) }))) return null;
         sink = SINK.createMemorySink({ name, type: PKG.MIME });
       }
-      const zip = Z.createZip((part) => sink.write(part));
+      let done = 0;
+      const report = (n) => { if (o.onProgress) o.onProgress(Math.min(1, n / Math.max(1, lay.bytes))); };
+      const zip = Z.createZip(async (part) => {
+        if (!(part instanceof Blob) || part.size <= SAVE_SLICE) return sink.write(part);
+        for (let at = 0; at < part.size; at += SAVE_SLICE) {   // a large asset in pieces: [中止] and the progress act within it
+          checkAbort(o.signal);
+          await sink.write(part.slice(at, at + SAVE_SLICE));
+          report(done + Math.min(part.size, at + SAVE_SLICE));
+        }
+      });
       try {
-        let done = 0;
         for (const e of lay.order) {
           checkAbort(o.signal);
           if (e.text !== undefined) await zip.add(e.name, Z.utf8(e.text));
           else await zip.addBlob(e.name, blobs.get(e.role === 'song' ? 'song' : e.role + ':' + e.id), { crc: e.crc });
           done += e.bytes;
-          if (o.onProgress) o.onProgress(Math.min(1, done / Math.max(1, lay.bytes)));
+          report(done);
         }
         await zip.finish();
         const res = await sink.close();
@@ -58832,7 +59207,8 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
     // openPackage(file, { signal, onProgress, handle }) → true when the package opened. Random access through
     // File.slice: the directory, the manifest and project.json are checked first (a damaged one is refused and the work
     // stays as it is); then each asset not yet on this device is verified (CRC-32, and SHA-256 = its id for media) and
-    // stored as a slice of the file. A damaged asset is skipped and reported (pkg.warn.damaged): it is missing, to relink.
+    // stored as a slice of the file. A damaged asset is skipped and reported (pkg.warn.damaged, the song apart:
+    // pkg.warn.songDamaged): it is missing, to relink.
     async function openPackage(file, opts) {
       const o = opts || {};
       const read = PR.blobReader(file);
@@ -58872,23 +59248,36 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
         if (e && e.name === 'AbortError') return false;
         return fail(e && e.code === 'truncated' ? 'pkg.err.truncated' : 'pkg.err.invalid');
       }
-      // assets: dedupe by id / sha1, verify, store the slice itself
-      const names = new Map(((parsed.doc.media && parsed.doc.media.list) || []).map((e) => [e.id, e.name]));
+      // assets: dedupe by id / sha1, verify, store the slice itself. Each asset is read on its own: one that is damaged
+      // (its data, or its local header) is skipped and reported, and the others and the project still open (§12.1).
+      const entries = new Map(((parsed.doc.media && parsed.doc.media.list) || []).map((e) => [e.id, e]));
       const total = plan.media.reduce((n, m) => n + m.entry.bytes, 0) + (plan.song ? plan.song.entry.bytes : 0);
-      let done = 0, damaged = 0, count = 0;
+      const puts = [];                                         // { stored, reason, kind: 'media' | 'song' } of every put
+      const added = new Set();                                 // the keys this open stores ('media:<id>', 'song:<sha1>')
+      let done = 0, damaged = 0, count = 0, songDamaged = false;
       const report = () => { if (o.onProgress) o.onProgress({ p: total ? done / total : 1, i: count, n: plan.media.length }); };
       try {
         for (const m of plan.media) {
           checkAbort(o.signal);
           count++;
           if (await hasMedia(m.id)) { done += m.entry.bytes; report(); continue; }
-          const start = await U.dataStart(read, m.entry);
-          const slice = file.slice(start, start + m.entry.bytes, m.mime);
           const base = done;
-          const hashed = await PR.hashBlob(slice, { signal: o.signal, onProgress: (p) => { done = base + p * m.entry.bytes; report(); } });
+          try {
+            const start = await U.dataStart(read, m.entry);
+            const slice = file.slice(start, start + m.entry.bytes, m.mime);
+            const hashed = await PR.hashBlob(slice, { signal: o.signal, onProgress: (p) => { done = base + p * m.entry.bytes; report(); } });
+            if (hashed.id !== m.id || hashed.crc !== m.entry.crc) damaged++;
+            else {
+              const e = entries.get(m.id);
+              added.add('media:' + m.id);
+              const res = await putMedia(m.id, { blob: slice, mime: m.mime, bytes: m.entry.bytes, crc: m.entry.crc, name: e ? e.name : m.id });
+              puts.push(Object.assign({ kind: 'media' }, res));
+            }
+          } catch (e) {
+            if (e && e.name === 'AbortError') throw e;
+            damaged++;                                         // a bad local header or a read that fails
+          }
           done = base + m.entry.bytes;
-          if (hashed.id !== m.id || hashed.crc !== m.entry.crc) { damaged++; continue; }
-          await putMedia(m.id, { blob: slice, mime: m.mime, bytes: m.entry.bytes, crc: m.entry.crc, name: names.get(m.id) || m.id });
           report();
         }
         for (const th of plan.thumbs) {
@@ -58896,31 +59285,43 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
           if (!(await hasMedia(th.id)) || await getThumbs(th.id)) continue;
           try {
             const bytes = await entryBytes(th.entry);
-            await putThumbs(th.id, { v: PR.THUMB_V, poster: new Blob([bytes], { type: 'image/webp' }), strip: null, tiles: 0 });
+            // a video's or animation's filmstrip is not in the package: the record is marked partial, and the first use
+            // makes the whole record (media/host/probe thumbsOf)
+            const e = entries.get(th.id);
+            const moving = !!(e && (e.kind === 'video' || e.anim));
+            await putThumbs(th.id, Object.assign({ v: PR.THUMB_V, poster: new Blob([bytes], { type: 'image/webp' }), strip: null, tiles: 0 },
+              moving ? { partial: true } : {}));
           } catch (e) { /* a damaged poster is made again from the asset */ }
         }
         if (plan.song) {
           checkAbort(o.signal);
           const sha1 = plan.song.sha1;
           if (!(await getSong(sha1))) {
-            const start = await U.dataStart(read, plan.song.entry);
-            const slice = file.slice(start, start + plan.song.entry.bytes, plan.song.mime);
-            let crc = 0;
-            for (let at = 0; at < slice.size; at += 8 * MB) {
-              crc = Z.crc32(new Uint8Array(await slice.slice(at, at + 8 * MB).arrayBuffer()), crc);
-              checkAbort(o.signal);
+            try {
+              const start = await U.dataStart(read, plan.song.entry);
+              const slice = file.slice(start, start + plan.song.entry.bytes, plan.song.mime);
+              let crc = 0;
+              for (let at = 0; at < slice.size; at += 8 * MB) {
+                crc = Z.crc32(new Uint8Array(await slice.slice(at, at + 8 * MB).arrayBuffer()), crc);
+                checkAbort(o.signal);
+              }
+              const songName = parsed.doc.song && parsed.doc.song.sha1 === sha1 ? parsed.doc.song.name : 'song.' + PKG.extOf(plan.song.mime);
+              if ((crc >>> 0) === plan.song.entry.crc) {
+                added.add('song:' + sha1);
+                puts.push(Object.assign({ kind: 'song' }, await putSong(sha1, new File([slice], songName, { type: plan.song.mime }))));
+                songCrcs.set(sha1, crc >>> 0);
+              } else songDamaged = true;
+            } catch (e) {
+              if (e && e.name === 'AbortError') throw e;
+              songDamaged = true;
             }
-            const songName = parsed.doc.song && parsed.doc.song.sha1 === sha1 ? parsed.doc.song.name : 'song.' + PKG.extOf(plan.song.mime);
-            if ((crc >>> 0) === plan.song.entry.crc) {
-              await putSong(sha1, new File([slice], songName, { type: plan.song.mime }));
-              songCrcs.set(sha1, crc >>> 0);
-            } else damaged++;
           }
           done += plan.song.entry.bytes;
           report();
         }
       } catch (e) {
-        if (e && e.name === 'AbortError') return false;       // the work is untouched; stored assets are pruned later
+        letGo(added);                                          // the work is untouched; stored assets are pruned later
+        if (e && e.name === 'AbortError') return false;
         return fail('pkg.err.truncated');
       }
       await loadFile(parsed);
@@ -58928,6 +59329,19 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
       fileSaved = { name: file.name, at: Date.now(), opened: true, text: D.serialize({ doc: parsed.doc, side: parsed.side }) };
       app.toast(t('io.opened', { name: file.name }), { kind: 'ok' });
       if (damaged) app.toast(t('pkg.warn.damaged', { n: damaged }), { kind: 'warn' });
+      if (songDamaged) {
+        app.toast(t('pkg.warn.songDamaged'), { kind: 'warn',
+          action: app.pickRelink ? { label: t('media.relink'), run: () => app.pickRelink() } : undefined });
+      }
+      // what this device could not store stays for this session only (§11.2.7): say so once, as an import does, naming
+      // what goes when the tab closes (the photos and videos, the song, or both)
+      const lost = puts.filter((r) => r && !r.stored);
+      if (lost.some((r) => r.reason === 'quota')) {
+        app.toast(t('media.err.quota'), { kind: 'error', action: { label: t('io.saveFile'), run: () => saveAs() } });
+      } else if (lost.length) {
+        const media = lost.some((r) => r.kind === 'media'), song = lost.some((r) => r.kind === 'song');
+        app.toast(t(media && song ? 'media.warn.memoryOnlyAll' : song ? 'song.warn.memoryOnly' : 'media.warn.memoryOnly'), { kind: 'warn' });
+      }
       await toastMissing(parsed.doc);
       return true;
     }
@@ -58970,9 +59384,7 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
             await withProgress('open', file, (pr) => openPackage(file, Object.assign({}, pr, { handle: handles[0] })));
             return;
           }
-          if (route === 'project') {
-            // the picked file becomes the file 保存 writes only when it opened: a refused one (newer app, damaged) is
-            // left alone, never overwritten with the work still on screen
+          if (route === 'project') {                        // the file becomes this work's file only when it opened
             if (await openProject(file)) {
               fileHandle = handles[0];
               fileSaved = { name: file.name, at: Date.now(), opened: true, text: D.serialize({ doc: app.doc, side: app.store.side }) };
@@ -59072,7 +59484,10 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
         for (const name of MEDIA_STORES) await tx(d, name, 'readwrite', (s) => s.clear());
       } catch (e) { ok = false; }
       for (const name of MEDIA_STORES) memory[name].clear();
+      memorySongs.clear();
       songCrcs.clear();
+      savedKeys = new Set();
+      unhold(() => true);
       setWork(newId());
       fileHandle = null;
       fileSaved = null;
@@ -59093,7 +59508,7 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
       save, saveAs, saveLight, savePackage, openPackage, saveLrc, lrcText, saveText, putSong, getSong, installDrop, begin, fileName,
       clearDevice, workId: () => workId, fileState,
       putMedia, getMedia, hasMedia, putIndex, getIndex, putThumbs, getThumbs, storageInfo, missingMedia, importMedia,
-      importMediaFiles, routeFile, device, mediaBlobs, usedMedia,
+      importMediaFiles, routeFile, device, mediaBlobs, usedMedia, releaseMedia,
     };
   }
 
@@ -59464,6 +59879,9 @@ MV.def('ui/media_io', ['ui/dom', 'core/media', 'core/color', 'i18n/t', 'ui/selec
     const plan = () => app.plan;
     const entry = (id) => entryOf(doc(), id);
     const device = () => (app.io ? app.io.device : null);
+    // An asset an import, relink or replace stored (res.fresh) that does not join the work: other tabs may prune it again
+    // (an import dropped for another work needs nothing: that load let go of what the new work does not name).
+    const drop = (res) => { if (res.fresh && app.io && typeof app.io.releaseMedia === 'function') app.io.releaseMedia(res.entry.id); };
     const canvas = () => (app.svc && app.svc.canvas ? app.svc.canvas : null);
 
     // state(id) → 'ok' | 'missing' | 'loading' | 'error' (the AssetStore's view of the bytes on this device)
@@ -59581,6 +59999,17 @@ MV.def('ui/media_io', ['ui/dom', 'core/media', 'core/color', 'i18n/t', 'ui/selec
       return e && e.audio && app.view.state.step === 'song' ? [{ label: t('media.useAudio'), run: () => useAudio(e.id) }] : [];
     }
 
+    // [元に戻す] of a toast that reports the step just made (§11.7.2): it undoes that step while it is still the newest.
+    // After other edits it would undo one of those instead, so it says so (the toast of step ② stays until closed).
+    function undoLast() {
+      const newest = () => { const done = app.store.list().filter((x) => x.done); return done.length ? done[done.length - 1].n : 0; };
+      const n = newest();
+      return { label: t('cmd.edit.undo'), run: () => {
+        if (newest() === n) app.actions.run('edit.undo');
+        else if (app.store.list().some((x) => x.n === n && x.done)) app.toast(t('media.undoLater'), { kind: 'info' });
+      } };
+    }
+
     async function importOne(job) {
       const { file, batch } = job;
       const job0 = current;
@@ -59598,7 +60027,7 @@ MV.def('ui/media_io', ['ui/dom', 'core/media', 'core/color', 'i18n/t', 'ui/selec
       if (batch.gen !== generation) { app.toast(t('media.cancelled', { name: file.name })); return; }   // another work is open now
       const have = entry(res.entry.id);
       const fresh = !have;
-      if (fresh && libraryOf(doc()).length >= MEDIA.LIMITS.library) { app.toast(t('media.full'), { kind: 'error' }); return; }
+      if (fresh && libraryOf(doc()).length >= MEDIA.LIMITS.library) { drop(res); app.toast(t('media.full'), { kind: 'error' }); return; }
       if (res.notes.includes('quota')) app.toast(t('media.err.quota'), { kind: 'error', action: { label: t('io.saveFile'), run: () => app.io.saveAs() } });
       else if (res.notes.includes('memoryOnly')) app.toast(t('media.warn.memoryOnly'), { kind: 'warn' });
       if (res.notes.includes('bigFile')) app.toast(t('media.warn.bigFile', { size: T.fmtBytes(res.entry.bytes) }), { kind: 'info' });
@@ -59616,7 +60045,7 @@ MV.def('ui/media_io', ['ui/dom', 'core/media', 'core/color', 'i18n/t', 'ui/selec
         if (placed) {
           const scope = scopeText(batch.w);
           app.toast(t(e.kind === 'video' ? 'media.placedVideo' : 'media.placed', { scope }), { kind: 'ok', sticky: audioActs(e).length > 0,
-            actions: [{ label: t('cmd.edit.undo'), run: () => app.actions.run('edit.undo') },
+            actions: [undoLast(),
               { label: t('media.otherUses'), run: () => openAsset(e.id) }].concat(audioActs(e)) });
         } else if (put.length) app.dispatch(put[0], { label: ['undo.media.put', {}] });
       } else if (put.length) {
@@ -59738,7 +60167,10 @@ MV.def('ui/media_io', ['ui/dom', 'core/media', 'core/color', 'i18n/t', 'ui/selec
         return false;
       }
       const id = res.entry.id;
-      if (entry(id)) {
+      // The original file of a missing asset: its bytes are here again. A file of an asset that is already here is not a
+      // relink (its caches stay); it goes on like any other file.
+      const known = !!entry(id);
+      if (known && state(id) === 'missing') {
         forget(id);
         app.toast(t('media.relinked', { name: file.name }), { kind: 'ok' });
         return true;
@@ -59746,16 +60178,20 @@ MV.def('ui/media_io', ['ui/dom', 'core/media', 'core/color', 'i18n/t', 'ui/selec
       const pool = missingEntries().filter((e) => !only || e.id === only);
       const cand = relinkCandidate(pool, res.entry);
       if (!cand) {
-        // Not the original file: say so, and offer it as a stand-in for the one missing entry it could replace (置き換える).
+        // Not the original file: say so (or that it is in the library already), and offer it as a stand-in for the one
+        // missing entry it could replace (置き換える).
         const target = only ? entry(only) : pool.length === 1 ? pool[0] : null;
-        const act = target && target.kind === res.entry.kind
+        // The file stays held while 置き換える is offered; closing the toast lets it go.
+        const act = target && target.id !== id && target.kind === res.entry.kind
           ? { label: t('media.useInstead'), run: () => standIn(target.id, res.entry, file.name) } : undefined;
-        app.toast(t('media.relinkNone', { name: file.name }), { kind: 'warn', action: act, sticky: !!act });
+        app.toast(t(known ? 'media.dup' : 'media.relinkNone', { name: file.name }), { kind: 'warn', action: act, sticky: !!act,
+          onClose: act ? () => drop(res) : undefined });
+        if (!act) drop(res);
         return false;
       }
       const text = t('media.relinkAsk', { kind: t(kindKey(cand)), name: file.name });
       const ok = app.confirm ? await app.confirm({ title: t('media.relink'), text, ok: t('media.relink') }) : true;
-      if (!ok) return false;
+      if (!ok) { drop(res); return false; }
       standIn(cand.id, res.entry, file.name);
       return true;
     }
@@ -59780,7 +60216,7 @@ MV.def('ui/media_io', ['ui/dom', 'core/media', 'core/color', 'i18n/t', 'ui/selec
         return false;
       }
       if (res.entry.id === id) { forget(id); return true; }
-      if (res.entry.kind !== e.kind) { app.toast(t('media.replaceKind'), { kind: 'warn' }); return false; }
+      if (res.entry.kind !== e.kind) { drop(res); app.toast(t('media.replaceKind'), { kind: 'warn' }); return false; }
       app.dispatch({ t: 'media.relink', from: id, entry: res.entry }, { label: ['undo.media.relink', {}] });
       forget(id);
       return true;
@@ -59951,15 +60387,17 @@ MV.def('ui/media_io', ['ui/dom', 'core/media', 'core/color', 'i18n/t', 'ui/selec
     }
 
     // この色に合わせる: accent, shiftA and shiftB as work pins, one batch 「色を写真に合わせる」, then a toast that says what
-    // changed, with [元に戻す].
+    // changed, with [元に戻す] only when the batch made a step (the same colours pinned again make none, and the button
+    // would then undo an older, unrelated step).
     async function matchColorsOf(id) {
       const list = await colorsOf(id);
       const p = plan();
       const m = matchColors(list, p && p.look ? p.look.palette.ground : null);
       if (!m) return false;
       const cmds = Object.keys(m).map((tok) => ({ t: 'pin.set', path: 'work:color.' + tok, v: m[tok], by: 'user' }));
+      const rev = app.store.rev;
       app.batch({ label: ['undo.media.colors', {}] }, cmds);
-      app.toast(t('media.colorsMatched'), { kind: 'ok', action: { label: t('cmd.edit.undo'), run: () => app.actions.run('edit.undo') } });
+      app.toast(t('media.colorsMatched'), { kind: 'ok', action: app.store.rev !== rev ? undoLast() : undefined });
       return true;
     }
 
@@ -60251,6 +60689,7 @@ MV.def('ui/media_page', ['ui/dom', 'ui/icons', 'i18n/t', 'core/media', 'ui/media
     let scrubTimer = 0;
     let shownSig = null;
     let focusNext = null;                  // a control to focus once the page is drawn again (✎ after a rename)
+    let lastName = '';                     // the name shown last: the crumbs keep it when the asset leaves the document
     const entry = () => MI.entryOf(app.doc, o.id);
 
     function button(label, run, extra) {
@@ -60369,6 +60808,7 @@ MV.def('ui/media_page', ['ui/dom', 'ui/icons', 'i18n/t', 'core/media', 'ui/media
     function render(force) {
       const e = entry();
       if (!e) { clearInterval(scrubTimer); shownSig = null; dom.replace(el, h('p', { class: 'note subtle', text: t('media.gone') })); return; }
+      lastName = e.name;
       const st = app.media.state(e.id);
       const missing = st === 'missing';
       const places = MI.usePlaces(app.doc, app.plan, e.id);
@@ -60434,10 +60874,11 @@ MV.def('ui/media_page', ['ui/dom', 'ui/icons', 'i18n/t', 'core/media', 'ui/media
     }
 
     render(true);
-    const e0 = entry();
+    // An asset that left the document (its import undone) keeps its last name in the crumbs, never its content id.
+    const nameNow = () => { const e = entry(); return e ? e.name : lastName || t('media.gone'); };
     return {
-      id: 'media:' + o.id, crumb: ['media.crumb', { name: e0 ? e0.name : o.id }], el, bare: true,
-      crumbs: () => { const e = entry(); return [{ label: ['sec.media', {}], run: o.onLibrary || null }, { label: e ? e.name : o.id }]; },
+      id: 'media:' + o.id, crumb: ['media.crumb', { name: nameNow() }], el, bare: true,
+      crumbs: () => [{ label: ['sec.media', {}], run: o.onLibrary || null }, { label: nameNow() }],
       focus() {
         dom.focus(el.querySelector(renaming ? '.med-rename' : '[data-act="relink"]') || el.querySelector('.med-use .btn:not(:disabled)')
           || el.querySelector('button'));
@@ -61669,7 +62110,7 @@ MV.def('ui/stage', ['ui/dom', 'ui/selection', 'ui/output', 'i18n/t', 'ui/shot_ed
   const MARKS = ['①', '②', '③', '④', '⑤', '⑥'];
   const PROVISIONAL_RETRY_MS = 120;       // a paused provisional frame (fonts, scenes still coming) is redrawn after this
   const PROVISIONAL_RETRIES = 50;         // … at most this many times in a row (the font book's epoch repaints later loads)
-  const MEDIA_AHEAD_S = 0.25;             // while playing, the store is asked to decode this far ahead (assets.want)
+  const LOOK_AHEAD = 8;                   // while playing, the store is asked for the frames at t + k / 30, k = 1…8 (assets.want)
   const CROP_DIM = 'rgba(0, 0, 0, 0.4)';  // §11.7.6: everything outside the chosen crop is dimmed at 40 %
   const CROP_STEP = 0.01, CROP_STEP_BIG = 0.1;   // arrow keys move the focus by 1 % (Shift 10 %)
   const CROP_WHEEL = 1.05;                // the wheel zooms ×1.05 per notch
@@ -62189,7 +62630,7 @@ MV.def('ui/stage', ['ui/dom', 'ui/selection', 'ui/output', 'i18n/t', 'ui/shot_ed
         }));
       mediaBadge.hidden = !coming;
       if (playing && lastMedia && app.assets && typeof app.engine.mediaAt === 'function') {
-        const next = app.engine.mediaAt(tNow + MEDIA_AHEAD_S);
+        const next = lookAhead(app.engine, tNow);
         if (next.length) app.assets.want(next);
       }
     }
@@ -62419,8 +62860,9 @@ MV.def('ui/stage', ['ui/dom', 'ui/selection', 'ui/output', 'i18n/t', 'ui/shot_ed
       w.timer = setTimeout(() => { w.g.end(); if (crop && crop.wheel === w) crop.wheel = null; }, CROP_WHEEL_END_MS);
     }
     // Keys while the overlay is on and the stage has focus: arrows 1 % (Shift 10 %), + and − zoom, 0 resets, Esc leaves.
+    // In tap mode they are the tap session's (D§6.4.15: ←/→ ±3 s, Esc finishes).
     wrap.addEventListener('keydown', (ev) => {
-      if (!crop || ev.ctrlKey || ev.metaKey) return;
+      if (!crop || ev.ctrlKey || ev.metaKey || app.view.state.mode === 'tap') return;
       const tg = crop.target;
       const step = ev.shiftKey ? CROP_STEP_BIG : CROP_STEP;
       const at = (name) => { const v = tg.value(name); return typeof v === 'number' ? v : 0.5; };
@@ -62447,7 +62889,9 @@ MV.def('ui/stage', ['ui/dom', 'ui/selection', 'ui/output', 'i18n/t', 'ui/shot_ed
 
     // setCrop(target | null, returnTo?): the crop overlay on or off. On, the play bar's strip says what the mouse does
     // (with [終わる]) and the live region what the keys do; returnTo is the control that Esc gives the focus back to.
+    // Never on in tap mode: the keys, the wheel and a double-click on the preview are the tap session's (D§6.4.15).
     function setCrop(target, returnTo) {
+      if (target && app.view.state.mode === 'tap') return;
       if (crop && crop.wheel) { clearTimeout(crop.wheel.timer); crop.wheel.g.end(); }
       if (crop && crop.drag) cropUp();
       crop = target ? { target, drag: null, wheel: null, returnTo: returnTo || null } : null;
@@ -62507,8 +62951,12 @@ MV.def('ui/stage', ['ui/dom', 'ui/selection', 'ui/output', 'i18n/t', 'ui/shot_ed
     app.bus.on('plan', () => { if (!alt) invalidate(); });
     app.bus.on('shotEdit', () => invalidate());
 
-    // A new plan or selection ends the crop overlay when its picture is gone from the page.
-    app.view.on((changed) => { if (crop && changed.includes('sel')) setCrop(null); });
+    // A new selection or the tap mode ends the crop overlay, and so does a new plan in which its element no longer shows
+    // its picture (an undo, another part: the target's alive()), before a key could pin a crop nothing shows.
+    app.view.on((changed) => {
+      if (crop && (changed.includes('sel') || (changed.includes('mode') && app.view.state.mode === 'tap'))) setCrop(null);
+    });
+    app.bus.on('plan', () => { if (crop && typeof crop.target.alive === 'function' && !crop.target.alive()) setCrop(null); });
 
     return {
       layout, invalidate, setAlt, fullscreen, focus: () => dom.focus(wrap), element: wrap,
@@ -62517,7 +62965,17 @@ MV.def('ui/stage', ['ui/dom', 'ui/selection', 'ui/output', 'i18n/t', 'ui/shot_ed
     };
   }
 
-  return { mount };
+  // lookAhead(engine, t) → the preview's want() list while playing (DESIGN_2_1 §11.4.5 step 1): the media of the frame
+  // at t, then of t + k / 30 for k = 1…LOOK_AHEAD (0.27 s), in that order. Every frame on the way is listed: a single
+  // time further on let the session close the frames between the shown one and it as they came out, and each was then
+  // decoded again from its key frame when it was drawn. media_exact.py plays through this function.
+  function lookAhead(engine, t) {
+    const out = [];
+    for (let k = 0; k <= LOOK_AHEAD; k++) for (const x of engine.mediaAt(t + k / 30)) out.push(x);
+    return out;
+  }
+
+  return { mount, lookAhead, LOOK_AHEAD };
 });
 /* 文字PVメーカー v2 — original work. Step ④ 書き出し: settings, the Filmora set's contents, preflight with jump links, progress, cancel, done (DESIGN §6.4.3, §4.21; DESIGN_2_1 §13.10). */
 MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 'export/schedule', 'i18n/t'], (dom, I, OUT, HELP, SCH, T) => {
@@ -63536,6 +63994,13 @@ MV.def('ui/tap', ['ui/dom', 'ui/icons', 'ui/keys', 'ui/selection', 'i18n/t'], (d
       session.state = app.tapCore.tapReduce(session.state, { type, t: tt });
       return session.state !== before;
     }
+
+    // The session is paused exactly while playback is stopped, however it stopped or started again (P, ▶ in the play
+    // bar, 1行戻る, the song's end): after P then ▶ the marks count again.
+    app.view.on((changed, st) => {
+      if (!session || !changed.includes('playing')) return;
+      if (reduce(st.playing ? 'resume' : 'pause', app.player.now())) update();
+    });
 
     // While playback is stopped (▶, P, a click elsewhere) the clock stands still: a mark would give every line the same
     // time, so none is taken and the panel says why.
@@ -66005,6 +66470,9 @@ MV.def('ui/widgets', ['ui/dom', 'ui/icons', 'i18n/t', 'core/color', 'ui/playbar'
       el, focus: () => dom.focus(chips.querySelector('button') || add),
       update(st) {
         list = Array.isArray(st.value) ? st.value.slice() : [];
+        // a chip's × that had the focus is drawn again (or gone after its removal): the focus goes to the × now at its
+        // place, else the last one, else [+] (never to the page)
+        const had = [...chips.querySelectorAll('button')].indexOf(document.activeElement);
         if (st.mixed) { dom.replace(chips, h('span', { class: 'muted small', text: t('state.mixed') })); }
         else if (!list.length) dom.replace(chips, h('span', { class: 'muted small', text: t('fld.none') }));
         else {
@@ -66019,6 +66487,10 @@ MV.def('ui/widgets', ['ui/dom', 'ui/icons', 'i18n/t', 'core/color', 'ui/playbar'
           }));
         }
         add.disabled = !!st.readOnly || list.length >= 24;
+        if (had >= 0) {
+          const xs = chips.querySelectorAll('button');
+          dom.focus(xs.length ? xs[Math.min(had, xs.length - 1)] : add);
+        }
       },
     };
   }
@@ -66037,8 +66509,8 @@ MV.def('ui/widgets', ['ui/dom', 'ui/icons', 'i18n/t', 'core/color', 'ui/playbar'
 });
 /* 文字PVメーカー v2 — original work. マイ素材: the material page (knobs, weight, uses, recipe JSON, remake, duplicate, delete) and the material menus (DESIGN_2_1 §6.9). */
 MV.def('ui/material_page', ['ui/dom', 'ui/icons', 'ui/widgets', 'ui/part_browser', 'ui/fields', 'ui/selection', 'core/recipe',
-  'core/paths', 'planner/areas', 'parts/mix'],
-(dom, I, W, PB, F, S, RC, P, AREAS, MIX) => {
+  'core/paths', 'planner/areas', 'parts/mix', 'ui/ai_controller'],
+(dom, I, W, PB, F, S, RC, P, AREAS, MIX, AC) => {
   'use strict';
 
   const { h } = dom;
@@ -66096,6 +66568,19 @@ MV.def('ui/material_page', ['ui/dom', 'ui/icons', 'ui/widgets', 'ui/part_browser
       ? (entry.recipe && entry.recipe.scope === 'run' ? BUDGET_MS.ornamentRun : BUDGET_MS.ornamentCut) : BUDGET_MS.other;
     const bars = Math.max(1, Math.min(COST_BARS, Math.ceil(ms / max * COST_BARS)));
     return { ms, max, bars, word: bars <= 2 ? 'light' : bars <= 3 ? 'normal' : 'heavy' };
+  }
+
+  // knobLimit(kind, base, factors, name, spec, media) → the largest value of knob `name` (in its steps, not below the value
+  // it has) the store accepts with the other knobs as they are. The page bakes the knobs into the recipe and keeps them,
+  // and core/commands checks a recipe with every knob at its maximum (core/recipe.problems), so an AI material fitted
+  // to the budget has no room above ×1 (§5.8). media: doc.media.
+  function knobLimit(kind, base, factors, name, spec, media) {
+    const cur = factors[name] === undefined ? 1 : factors[name];
+    const step = spec.step > 0 ? spec.step : 0.05;
+    for (let v = spec.max; v > cur; v = Math.round((v - step) * 1e6) / 1e6) {
+      if (!RC.problems(kind, RC.withKnobs(base, Object.assign({}, factors, { [name]: v })), { media }).length) return v;
+    }
+    return Math.min(spec.max, cur);
   }
 
   // duplicateCmd(doc, entry) → material.put of a copy under the next id, made by the user (§6.9 複製).
@@ -66222,12 +66707,16 @@ MV.def('ui/material_page', ['ui/dom', 'ui/icons', 'ui/widgets', 'ui/part_browser
       const want = base ? RC.hash(RC.withKnobs(base, factors)) : null;
       if (!base || RC.hash(e.recipe) !== want) { base = e.recipe; factors = {}; }
       return names.map((name) => {
-        const spec = specs[name];
+        // a knob goes only as far as the store accepts (MAI-4): its slider ends there
+        const spec = specs[name].type === 'num'
+          ? Object.assign({}, specs[name], { max: knobLimit(e.kind, base, factors, name, specs[name], app.doc.media) }) : specs[name];
         const label = spec.label ? spec.label[t.lang] || spec.label.ja : t('mat.knob.' + name);
         const field = { id: 'mat/' + name, widget: 'number', spec, label: 'fld.param', path: null };
         const env = {
           app, t, label, field,
-          commit: (v) => write(Object.assign({}, factors, { [name]: v }), null),
+          // keyboard steps on the slider merge into one undo step per knob, as the inspector's sliders do
+          commit: (v, c) => write(Object.assign({}, factors, { [name]: v }),
+            c && (c.mergeKey || c.merge) ? c.mergeKey || 'mat:' + e.id + ':' + name : null),
           gesture: () => {
             gesture = app.store.gesture('mat:' + e.id + ':' + name);
             return { set: (v) => write(Object.assign({}, factors, { [name]: v }), 'mat:' + e.id + ':' + name),
@@ -66346,7 +66835,9 @@ MV.def('ui/material_page', ['ui/dom', 'ui/icons', 'ui/widgets', 'ui/part_browser
       go.addEventListener('click', () => {
         if (!app.ai) return;
         app.openPanel('ai', 'ai');
-        app.ai.run('material', { description: text.value.trim(), kind: e.kind, current: e });
+        // a photo or video layer keeps its picture: the controller lists it (and, while 写真・動画をAIが使ってよい is on,
+        // the pictures on this device) for the AI (DESIGN_2_1 §11.5.8)
+        app.ai.run('material', { description: text.value.trim(), kind: e.kind, current: e, media: AC.mediaOnDevice(app.doc, app.media) });
       });
       return h('div', { class: 'pb-make-form' }, text, h('div', { class: 'row-actions' }, h('span', { class: 'grow' }), go), reason);
     }
@@ -66410,7 +66901,7 @@ MV.def('ui/material_page', ['ui/dom', 'ui/icons', 'ui/widgets', 'ui/part_browser
   }
 
   return {
-    keyOfId, idOfKey, entryOf, usesOf, usePlaces, weightOf, duplicateCmd, putCmd, checkRecipe, problemText, usable, kindText, nameText,
+    keyOfId, idOfKey, entryOf, usesOf, usePlaces, weightOf, knobLimit, duplicateCmd, putCmd, checkRecipe, problemText, usable, kindText, nameText,
     menuItems, remove, duplicate, page, listRows,
   };
 });
@@ -66747,7 +67238,7 @@ MV.def('ui/ai_review', ['ui/dom', 'ui/icons', 'ai/changes', 'i18n/t', 'ui/ai_con
   function valueText(t, c, v) {
     if (v === null || v === undefined) return t('state.auto');
     const slot = slotOf(c) || '';
-    if (typeof v === 'string' && v.startsWith('mat:')) return t('ai.review.mine', { name: c.matName || v.slice(4) });
+    if (typeof v === 'string' && v.startsWith('mat:')) return t('ai.review.mine', { name: CH.matText(t, c) || v.slice(4) });
     if (typeof v === 'string' && /^myMat[0-9a-z]+$/.test(v)) {
       const kind = c.partKind || (slot === 'atmos' ? 'ornament' : (/^([a-z]+)/.exec(slot) || [])[1]);
       return t('ai.review.mine', { name: kind ? t.part(kind, v) : v });
@@ -66791,7 +67282,7 @@ MV.def('ui/ai_review', ['ui/dom', 'ui/icons', 'ai/changes', 'i18n/t', 'ui/ai_con
     if (!text || text === (c.label && c.label[0])) {
       if (c.kind === 'material') {
         const e = c.entry || {};
-        text = t('ai.ch.material', { name: c.matName || MP.nameText(t, e), kind: e.kind ? MP.kindText(t, e) : '',
+        text = t('ai.ch.material', { name: CH.matText(t, c) || MP.nameText(t, e), kind: e.kind ? MP.kindText(t, e) : '',
           season: e.season ? t('fld.season.' + e.season) : t('fld.season.none') });
       } else text = t('ai.ch.value', { where: whereText(t, ctx.app, c), field: fieldText(t, c), from: fromText(t, c), to: valueText(t, c, c.to) });
     }
@@ -66809,14 +67300,17 @@ MV.def('ui/ai_review', ['ui/dom', 'ui/icons', 'ai/changes', 'i18n/t', 'ui/ai_con
     return F.areaLabel(t, { label: b.label });
   }
 
+  // The id a material change has in CH.apply(doc, plan, [c]): only that change is applied, so a new material takes the
+  // next id (ai/changes.toCommands, §5.6), whatever its place in the review; a remade one keeps its id.
+  function previewId(doc, c) {
+    const next = doc.materials && Number.isInteger(doc.materials.next) ? doc.materials.next : 1;
+    return c.materialId || 'm' + next.toString(36);
+  }
+
   // ▶ 見る: a new material's thumbnail, rendered on a fork whose document holds it (the try-on registry, §5.6).
-  function playMaterial(ctx, r, c, canvas) {
+  function playMaterial(ctx, c, canvas) {
     const app = ctx.app;
-    // New materials take the next ids in list order (ai/changes.toCommands, §5.6); a remade one keeps its id.
-    const mats = r.changes.filter((x) => x.kind === 'material' && !(x.entry && x.entry.id));
-    const k = Math.max(0, mats.indexOf(c));
-    const next = app.doc.materials && Number.isInteger(app.doc.materials.next) ? app.doc.materials.next : 1;
-    const id = c.materialId || c.plannedId || (c.entry && c.entry.id ? c.entry.id : 'm' + (next + k).toString(36));
+    const id = previewId(app.doc, c);
     const kind = c.entry && c.entry.kind ? c.entry.kind : 'ornament';
     let fork = null;
     try {
@@ -66853,9 +67347,9 @@ MV.def('ui/ai_review', ['ui/dom', 'ui/icons', 'ai/changes', 'i18n/t', 'ui/ai_con
       extra.push(h('span', { class: 'mat-bars', title: t('mat.cost'), 'aria-label': t('mat.cost') + ' ' + t('mat.' + w.word),
         text: '■'.repeat(w.bars) + '□'.repeat(5 - w.bars) }));
       const canvas = h('canvas', { class: 'ai-mat-thumb', width: 192, height: 108, hidden: true, 'aria-hidden': 'true' });
-      extra.push(button(t('ai.review.look'), { icon: 'play', fkey: 'look:' + c.id, run: () => { canvas.hidden = false; playMaterial(ctx, r, c, canvas); } }), canvas);
+      extra.push(button(t('ai.review.look'), { icon: 'play', fkey: 'look:' + c.id, run: () => { canvas.hidden = false; playMaterial(ctx, c, canvas); } }), canvas);
     }
-    if (disabled && need) extra.push(h('span', { class: 'ai-need', id: needId, text: t('ai.needsMaterial', { name: need.matName || MP.nameText(t, need.entry || {}) }) }));
+    if (disabled && need) extra.push(h('span', { class: 'ai-need', id: needId, text: t('ai.needsMaterial', { name: CH.matText(t, need) || MP.nameText(t, need.entry || {}) }) }));
     // A vision row (ai/vision): the suggested depth and its reason next to the caption (§11.9.5).
     if (c.kind === 'media' && c.depth && t.has('opt.depth.' + c.depth)) {
       extra.push(h('div', { class: 'ai-why', text: t('media.ai.depth', { v: t('opt.depth.' + c.depth) }) }));
@@ -66900,7 +67394,7 @@ MV.def('ui/ai_review', ['ui/dom', 'ui/icons', 'ai/changes', 'i18n/t', 'ui/ai_con
       'data-lines': row.changes.map((c) => c.lineId).filter(Boolean).join(',') },
     h('div', { class: 'ai-row' }, box, h('span', { class: 'ai-row-main' }, h('span', { class: 'ai-row-text', text }),
       stale.length ? h('span', { class: 'ai-stale' }, I.icon('warn', { size: 12 }), staleText(t, stale[0])) : null,
-      need ? h('span', { class: 'ai-need', text: t('ai.needsMaterial', { name: need.matName || MP.nameText(t, need.entry || {}) }) }) : null),
+      need ? h('span', { class: 'ai-need', text: t('ai.needsMaterial', { name: CH.matText(t, need) || MP.nameText(t, need.entry || {}) }) }) : null),
     more), members);
   }
 
@@ -67036,7 +67530,7 @@ MV.def('ui/ai_review', ['ui/dom', 'ui/icons', 'ai/changes', 'i18n/t', 'ui/ai_con
     ];
   }
 
-  return { textDiff, renderReview, patchReview, renderLog, diffBlock, TRANSCRIPT_SHOWN, fieldText, valueText, fromText, rowText };
+  return { textDiff, renderReview, patchReview, renderLog, diffBlock, TRANSCRIPT_SHOWN, fieldText, valueText, fromText, rowText, previewId };
 });
 /* 文字PVメーカー v2 — original work. The AI panel (tab AI of the detail column): connection, what is sent, guide, tools with the instruction block, the board, running, review, log (DESIGN §6.4.10; DESIGN_2_1 §6.2–§6.4). */
 MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/ai_controller', 'ui/ai_review', 'ui/ai_thinking',
@@ -67077,20 +67571,18 @@ MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/a
     }
 
     // The library's assets whose bytes are on this device: the ones the direct tool may offer (DESIGN_2_1 §11.6.1).
-    function mediaOnDevice(app) {
-      const list = app.doc.media && Array.isArray(app.doc.media.list) ? app.doc.media.list : [];
-      const here = list.filter((e) => !app.media || app.media.state(e.id) !== 'missing').map((e) => e.id);
-      return here.length ? here : false;
-    }
+    function mediaOnDevice(app) { return AC.mediaOnDevice(app.doc, app.media); }
 
     function storageOf(kind) {
       try { const s = window[kind]; s.getItem('mojipv.probe'); return s; } catch (e) { return null; }
     }
 
-    // The app as the controller sees it (ui/ai_controller createController's host).
+    // The app as the controller sees it (ui/ai_controller createController's host). The registry is read when a request
+    // is made: app.reg changes with the project's materials and photos (a restored or opened work, a new material).
     function hostOf(app) {
       return {
-        t: app.t, lang: app.lang, registry: app.reg,
+        t: app.t, lang: app.lang,
+        get registry() { return app.reg; },
         get doc() { return app.doc; },
         get plan() { return app.plan; },
         get rev() { return app.store.rev; },
@@ -67236,10 +67728,11 @@ MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/a
         more.hidden = !more.hidden;
         btn.setAttribute('aria-expanded', String(!more.hidden));
       });
-      // photos leave the device only when the user asks 「AIに説明してもらう」 (DESIGN_2_1 §11.6.4)
+      // what is said about photos and videos (never a file name; the vision text only while 写真・動画をAIが使ってよい is
+      // on), and that pictures leave the device only through 「AIに説明してもらう」 (DESIGN_2_1 §11.6.4)
       return h('div', { class: 'ai-sends', role: 'note' },
         h('div', { class: 'ai-sends-line' }, I.icon('info', { size: 15 }), h('span', { class: 'grow', text: t('ai.sends') }), btn),
-        h('p', { class: 'note subtle', text: t('ai.sendsMedia') }), more);
+        h('p', { class: 'note subtle', text: t('ai.sendsMediaList') }), h('p', { class: 'note subtle', text: t('ai.sendsMedia') }), more);
     }
 
     function guideBlock(t) {
@@ -67277,8 +67770,10 @@ MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/a
       const chips = h('div', { class: 'chips ai-chips', role: 'group', 'aria-label': t('ai.direct.phrases') },
         CHIPS.map((c) => h('button', { class: 'chip', type: 'button', 'data-chip': c, text: t('ai.chip.' + c) })));
       const allow = h('input', { type: 'checkbox', 'data-ctl': 'allowMaterials' });
-      // 写真・動画をAIが使ってよい (DESIGN_2_1 §11.6.1): on by default, offered while the library has a picture on this device
-      const allowMedia = h('input', { type: 'checkbox', checked: true, 'data-ctl': 'allowMedia' });
+      // 写真・動画をAIが使ってよい (DESIGN_2_1 §11.6.1): on by default, offered while the library has a picture on this
+      // device; the switch is the controller's (the board shows and honours the same one)
+      const allowMedia = h('input', { type: 'checkbox', checked: ctl.state.allowMedia, 'data-ctl': 'allowMedia' });
+      allowMedia.addEventListener('change', () => ctl.setAllowMedia(allowMedia.checked));
       const mediaRow = h('label', { class: 'check-row', hidden: true }, allowMedia, h('span', { text: t('ai.direct.allowMedia') }));
       const more = h('details', { class: 'ai-direct-more' }, h('summary', { text: t('ai.direct.more') }),
         h('label', { class: 'check-row' }, allow, h('span', { text: t('ai.direct.allowMaterials') })), mediaRow);
@@ -67374,7 +67869,7 @@ MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/a
         const instruction = text.value.trim();
         if (!r || (mode !== 'camera' && !instruction)) { dom.focus(text); return; }
         ctl.run('direct', { briefs: [{ ref: r, instruction }], mode, allowMaterials: mode === 'camera' ? false : allow.checked,
-          media: mode === 'camera' || !allowMedia.checked ? false : mediaOnDevice(app) });
+          media: mode === 'camera' ? false : mediaOnDevice(app) });
       }
 
       function renderList() {
@@ -67423,6 +67918,7 @@ MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/a
         chipText.textContent = area ? areaLine(t, area) : '';
         counter.textContent = t('ai.edit.count', { n: text.value.length, max: AC.MAX_INSTRUCTION });
         mediaRow.hidden = !mediaOnDevice(app);
+        allowMedia.checked = st.allowMedia;
         const why = !r ? (target.mode === 'sel' ? 'ai.edit.noLine' : 'ai.direct.pickArea') : ctl.blocked('direct');
         send.disabled = !!why || !text.value.trim();
         send.title = why ? t(why) : '';
@@ -67445,8 +67941,7 @@ MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/a
         else setTarget('area', r);
       }
 
-      // the one 写真・動画をAIが使ってよい switch: the board reads it too (DESIGN_2_1 §11.6.1)
-      return { root, update, text, preset, highlight, mediaAllowed: () => allowMedia.checked };
+      return { root, update, text, preset, highlight };
     }
 
     function toolsBlock(app, ctl, openBoard) {
@@ -67536,7 +68031,7 @@ MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/a
       let boardWanted = false;
       const boardHost = h('div', { class: 'ai-board-host', hidden: true });
       function openBoard() {
-        if (!board) board = BOARD.mount(app, ctl, { onBack: closeBoard, allowMedia: () => tools.direct.mediaAllowed() });
+        if (!board) board = BOARD.mount(app, ctl, { onBack: closeBoard });
         dom.replace(boardHost, board.el);
         boardWanted = true;
         boardHost.hidden = !!ctl.state.review;
@@ -67883,6 +68378,22 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       return fs.state === 'inherited' && !!row.field.firstCut && fs.pinnedAt === 'line' && row.hereKinds.includes('line');
     }
 
+    // The state the row's tag shows. 使う範囲 is one row for both of its handles: when only its end (clipOut, which has
+    // no row of its own) is pinned here, the tag says so, and ×, Del and ⋯ 自動に戻す clear it (row.clearPaths has both).
+    // An end fixed elsewhere (作品で固定 ↑) shows too while the start is automatic.
+    function tagState(row) {
+      const fs = row.fs, out = row.fsOut;
+      if (!out || pinnedHere(fs, row)) return fs;
+      if (pinnedHere(out, row) || ((!fs || fs.state === 'auto') && out.state !== 'auto')) return out;
+      return fs;
+    }
+
+    // The inherited state 作品の設定へ / the tag goes to: the tag's own, else the start's (an end pinned here and a
+    // start fixed at the work go to the work).
+    function ownerState(row) {
+      return [tagState(row), row.fs].find((fs) => fs && fs.state === 'inherited') || null;
+    }
+
     // --- values of command and derived fields -----------------------------------------------------------------
 
     function rowOfLine(line) {
@@ -67969,7 +68480,9 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
         const id = MW.sourcesOf(ctx, field.media)[0] || null;
         return { out: row && row.fsOut ? row.fsOut.value : 0, entry: id ? MI.entryOf(doc(), id) : null };
       }
-      if (field.widget === 'crop') return { canCrop: MW.sourcesOf(ctx, field.media).length > 0 && !!(app.shell && app.shell.stage.crop) };
+      if (field.widget === 'crop') {
+        return { canCrop: MW.sourcesOf(ctx, field.media).length > 0 && !!(app.shell && app.shell.stage.crop) && app.view.state.mode !== 'tap' };
+      }
       if (field.widget === 'color') return { palette: p ? p.look.palette : {} };
       if (field.widget === 'font') return { families: familiesFor(field), sample: ctx.line ? ctx.line.text : p && p.lines[0] ? p.lines[0].text : '' };
       if (field.path && field.path.startsWith('amount.')) {
@@ -68084,6 +68597,13 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       return {
         key: field.id + '|' + ctx.scope, fieldId: field.id, id, meta, cutKeys: ctx.cutKeys.slice(), scope: ctx.scope,
         owner: m.slot === 'ground' ? 'ground' : m.slot === 'atmos' ? 'atmos' : m.slot,
+        // whether the element still shows this picture with this part (an undo or another part takes it away; the same
+        // picture used elsewhere does not count): the stage ends the overlay on a new plan when it does not
+        alive: () => {
+          if (!plan()) return false;
+          const now = F.contextOf(S.validate(app.view.state.sel, plan(), doc()), plan(), app.reg, doc());
+          return MW.sourcesOf(now, m)[0] === id;
+        },
         value: read,
         gesture: (name) => siblingOf(row, base + '.' + name).gesture(),
         // several params in one gesture (the overlay's drag moves cropX and cropY together: one undo entry)
@@ -68115,6 +68635,8 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       if (!on) { app.shell.stage.crop(null); return; }
       const target = cropTarget(row);
       if (!target) return;
+      app.shell.stage.crop(target, row.widget.el.querySelector('.w-crop-edit'));
+      if (!cropOn(row)) return;                 // the stage keeps it off in tap mode: the tap session plays on
       if (app.view.state.playing) app.pause();
       // the playhead goes where the picture shows, so the overlay frames it
       const ctx = page.ctx;
@@ -68123,7 +68645,6 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
         const tt = S.seekTime(ctx.sel.level === 'el' ? { level: 'cut', key: ctx.cutKeys[0] } : ctx.sel, app.plan);
         if (tt !== null) app.seek(tt);
       }
-      app.shell.stage.crop(target, row.widget.el.querySelector('.w-crop-edit'));
       app.shell.stage.focus();
     }
 
@@ -68309,6 +68830,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
     function makeRow(field, ctx) {
       const paths = pathsOf(field, ctx);
       const clearPaths = F.clearPathsFor(field, ctx);
+      if (field.trimOut) clearPaths.push(...F.clearPathsFor(Object.assign({}, field, { path: field.trimOut }), ctx));
       const path = paths.length ? paths[0] : null;
       const label = labelOf(field);
       const row = { field, path, paths, clearPaths, hereKinds: [...new Set(clearPaths.map(scopeKindOf))], fs: null, whyKind: null,
@@ -68352,7 +68874,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
         if (path && (ev.key === 'F10' && ev.shiftKey || ev.key === 'ContextMenu')) { ev.preventDefault(); openFieldMenu(row, more || el); }
       });
       tag.addEventListener('click', () => {
-        const fs = row.fs;
+        const fs = tagState(row);
         if (pinnedHere(fs, row)) unpin(row);
         else if (fs && fs.state === 'inherited') goOwner(row);
       });
@@ -68405,14 +68927,15 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       const st = stateOf(row, fs, ctx);
       row.widget.update(st);
       if (!row.path) { row.tag.hidden = true; return; }
-      const state = fs ? fs.state : 'auto';
+      const shown = tagState(row);
+      const state = shown ? shown.state : 'auto';
       row.tag.hidden = false;
       row.tag.dataset.state = state;
       // 動きと重なり while automatic: 「自動: 後ろに下げる」 (the planner's choice, DESIGN_2_1 §11.9.5)
       const depthAuto = row.field.depth && state === 'auto' && fs && typeof fs.value === 'string' && t.has('opt.depth.' + fs.value);
       dom.replace(row.tag, I.icon(STATE_ICON[state] || 'ring', { size: 12 }),
-        depthAuto ? t('media.depthAuto', { v: t('opt.depth.' + fs.value) }) : tagOf(fs || { state: 'auto' }, row));
-      const here = pinnedHere(fs, row);
+        depthAuto ? t('media.depthAuto', { v: t('opt.depth.' + fs.value) }) : tagOf(shown || { state: 'auto' }, row));
+      const here = pinnedHere(shown, row);
       row.tag.title = here ? t('act.unpin') : state === 'inherited' ? t('fld.goOwner') : '';
       row.tag.disabled = !(here || state === 'inherited');
       row.x.hidden = !here;
@@ -68457,6 +68980,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       const ctx = page.ctx;
       const fs = row.fs || { state: 'auto' };
       const here = pinnedHere(fs, row);
+      const clearable = pinnedHere(tagState(row), row);
       const stored = storedPath(row);
       const pin = stored ? doc().pins[stored] : null;
       const parsed = row.path ? P.parse(row.path) : null;
@@ -68465,7 +68989,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       const canWork = here && !!parsed && parsed.scope.kind !== 'work' && canPin('work');
       const clip = app.fieldClipboard;
       app.menus.open(at, [
-        { label: t('fm.unpin'), keys: 'Del', disabled: !here, run: () => unpin(row) },
+        { label: t('fm.unpin'), keys: 'Del', disabled: !clearable, run: () => unpin(row) },
         rerollable(row.field) ? { label: t('act.reroll'), disabled: lineLocked(ctx), run: () => reroll(row) } : null,
         { label: t('fm.pinNow'), disabled: here || fs.state === 'mixed' || fs.value === null || fs.value === undefined,
           run: () => commit(row, fs.value) },
@@ -68475,7 +68999,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
         { sep: true },
         { label: t('fm.promoteLine'), disabled: !canLine || !pin, run: () => promote(row, 'line') },
         { label: t('fm.promoteWork'), disabled: !canWork || !pin, run: () => promote(row, 'work') },
-        { label: t('fm.goOwner'), disabled: fs.state !== 'inherited', run: () => goOwner(row) },
+        { label: t('fm.goOwner'), disabled: !ownerState(row), run: () => goOwner(row) },
         { sep: true },
         { label: t('fm.why'), run: () => showWhy(row, true) },
       ]);
@@ -68499,7 +69023,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
     }
 
     function goOwner(row) {
-      const fs = row.fs;
+      const fs = ownerState(row);
       if (!fs || !fs.pinnedAt) return;
       const ctx = page.ctx;
       const lineId = ctx.line ? ctx.line.id : ctx.cut ? ctx.cut.line : null;
@@ -68605,7 +69129,9 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       push(pg);
     }
 
-    // The part browser's 「AIで素材を作る」 (the standalone material tool): made for this kind, used on this row's scope.
+    // The part browser's 「AIで素材を作る」 (the standalone material tool): made for this kind, used on this row's scope
+    // (every selected line or cut). An ornament is asked for at the row's own scope: an atmosphere on the 空気 row, a
+    // decoration near the words on a 装飾 row.
     function makeFor(row, kind, ctx) {
       const word = ctx.scopeKind === 'cut' ? 'pb.scope.cut' : ctx.page === 'lines' ? 'pb.scope.lines' : ctx.scopeKind === 'line'
         ? 'pb.scope.line' : 'pb.scope.work';
@@ -68617,7 +69143,9 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
           const useAt = use && row.paths.length ? { scope: P.scopeKey(row.paths[0]), slot: row.field.path, paths: row.paths.slice() } : null;
           clearStack();
           app.openPanel('ai', 'ai');
-          app.ai.run('material', { description, kind: kind === 'atmos' ? 'ornament' : kind, useAt });
+          const ornament = kind === 'atmos' || kind === 'ornament';
+          app.ai.run('material', Object.assign({ description, kind: ornament ? 'ornament' : kind, useAt },
+            ornament ? { scope: kind === 'atmos' || row.field.run ? 'run' : 'cut' } : {}));
         },
       };
     }
@@ -69327,6 +69855,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
         // Focus follows a drill made from inside the inspector (§6.12); never into the text box, so single keys still work.
         if (inside) { const target = headEl.querySelector('.lh-title') || headEl.querySelector('.lh-btn'); if (target) dom.focus(target); }
       } else if (changed.includes('panel') || changed.includes('prefs')) { if (state.panel === 'details' || dirty) soon('panel'); }
+      if (changed.includes('mode')) soon('mode');            // [画面で調整] is off in tap mode
     });
     app.bus.on('layout', () => { if (dirty) soon('layout'); });
     app.store.on('doc', (e) => {
@@ -69812,7 +70341,7 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
     // buffer whose sha1 no longer matches and looks the song up again by sha1 (syncSong).
     let song = { state: 'none', name: '', progress: 0 };
     let linking = null;                                   // the sha1 being looked up in IndexedDB
-    let looked = null;                                    // the last sha1 looked up (a miss is not retried per edit)
+    let looked = null;                                    // the last sha1 looked up (a miss is retried only on a load)
     const setSong = (x) => { song = x; app.bus.emit('song', x); };
     const idle = () => setSong({ state: 'none', name: '', progress: 0 });
     app.songReady = () => !!(app.doc.song && app.buffer && app.bufferSha1 === app.doc.song.sha1);
@@ -69831,7 +70360,8 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
       if (dropped) { app.setSongBuffer(null); app.peaks = null; }
       if (want && looked !== want) { looked = want; app.relinkSong(app.doc.song); } else if (dropped) app.bus.emit('song', song);
     };
-    store.on('doc', () => app.syncSong());
+    // a load (open, recent, new work, restore) looks the song up once more: a package opened since may have stored it
+    store.on('doc', (e) => { if (e && e.kind === 'load') looked = null; app.syncSong(); });
     app.pickSong = async () => {
       const files = await dom.pickFiles('audio/*,.mp3,.wav,.m4a,.ogg,.flac', false);
       if (files[0]) app.loadSong(files[0]);

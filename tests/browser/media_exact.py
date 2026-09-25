@@ -16,7 +16,8 @@ larger blur of 12 du): its frames are the store's baked copies (DESIGN_2_1 §11.
 show its exact source frame; and the look of the baked copy (a 1080p source: the JS 4:2:0 route) stays within LOOK_MAE
 of the per-frame blur it replaces, inside a 16-px border (the border itself differs on purpose: the old fringe is gone),
 at 1280×720 and 1920×1080. Then the preview playing in real time as the stage does it (§11.4.5: at every 30-fps tick,
-want() of the frame and the 8 after it, no await, then a preview-quality frame at 720p; project_basic with a 1080p30
+a preview-quality frame at 720p, then want() of the stage's own look-ahead list, ui/stage.lookAhead: the frame and the
+8 after it, no await; project_basic with a 1080p30
 video ground at its automatic depth, back): after the cold start (the first 1 s) the ground must show the frame its
 time asks for, exact and baked, in at least PLAY_SHARE of the frames, at most PLAY_LAG source frames behind (p95), with
 one bake per source frame and no seek but the loops' (the look-ahead must neither lose frames about to be shown nor
@@ -158,7 +159,7 @@ async def main(quick):
                 # on shared CPUs: two runs, and the one other processes disturbed least is judged (as perf.py does); a broken
                 # look-ahead fails both (it re-decodes and misses frames in every run)
                 project = (ROOT / 'tests' / 'fixtures' / 'project_basic.json').read_text(encoding='utf-8')
-                plays = [await page.evaluate('(o) => window.__mediaParts.exact.play(o)', {'project': project, 'seconds': 4 if quick else 8, 'ahead': 8})
+                plays = [await page.evaluate('(o) => window.__mediaParts.exact.play(o)', {'project': project, 'seconds': 4 if quick else 8})
                          for _ in range(2)]
                 plays.sort(key=lambda x: (-x['rightBaked'] / max(1, x['after']), x['lag']['p95']))
                 pb = plays[0]

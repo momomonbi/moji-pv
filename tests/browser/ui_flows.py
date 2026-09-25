@@ -707,6 +707,29 @@ async def flow_values(f, lang):
         await page.click(relock)
         await f.until("(p) => { const x = window.__mv.doc.pins[p]; return !!x && x.by === 'lock'; }", '[ロックし直す] freezes the split again', split)
         await f.until("(id) => !window.__mv.plan.warnings.some((w) => w.code === 'lock-partial' && w.line === id)", 'the warning goes', info['id'])
+    # UI-10: removing parts from この行で使わない部品 with the keyboard keeps the focus in the row: on the next chip's ×, then
+    # (the last one gone) on [+], never on the page itself.
+    avoid = 'line/%s:avoid' % info['id']
+    await page.evaluate("""(p) => window.__mv.dispatch({ t: 'pin.set', path: p, v: ['arrive.bloomOpen', 'arrive.curtainRise'], by: 'user' },
+      { label: ['undo.pin', { field: '', scope: '' }] })""", avoid)
+    await open_line(f, info['id'])
+    await open_section(f, 'direction')
+    await page.evaluate("""() => { const d = document.querySelector('[data-mount="inspector"] .isec[data-sec="direction"] details.isec-more');
+      if (d) d.open = true; }""")
+    await f.settle(2)
+    await page.focus(ROW % 'avoid' + ' .w-ref button')
+    await page.keyboard.press('Enter')
+    await f.until("(p) => { const x = window.__mv.doc.pins[p]; return !!x && x.v.length === 1; }", 'Enter on × removes one part', avoid)
+    await f.settle(2)
+    focus_in_refs = """(s) => { const a = document.activeElement; const row = document.querySelector(s);
+      return !a || !row || !row.contains(a) ? (a ? a.tagName : null) : a.closest('.w-ref') ? a.closest('.w-ref').dataset.ref : a.className; }"""
+    at = await page.evaluate(focus_in_refs, ROW % 'avoid')
+    f.check(at == 'arrive.curtainRise', 'the focus moves to the next chip\'s ×: %r' % at)
+    await page.keyboard.press('Enter')
+    await f.until("(p) => !window.__mv.doc.pins[p]", 'the last × unpins the list', avoid)
+    await f.settle(2)
+    at = await page.evaluate(focus_in_refs, ROW % 'avoid')
+    f.check(at is not None and 'chip-btn' in at, 'with no chip left the focus is on [+]: %r' % at)
     # 作品全体 › 行: an LRC stamp is a mark (LRC badge), not a pin.
     await page.evaluate("() => window.__mv.select({ level: 'work' }, { from: 'header', open: true })")
     await f.settle(2)
@@ -1823,6 +1846,40 @@ async def flow_tap(f, lang):
     r = await page.evaluate("() => ({ pins: Object.keys(window.__mv.doc.pins), undo: window.__mv.store.list().length })")
     f.check(not r['pins'] and r['undo'] == 0, 'and Esc afterwards records nothing: %r' % r)
 
+    # UI-3: after P, playback started again by ▶ in the play bar (or by 1行戻る) takes marks again: the session is
+    # paused exactly while playback is stopped.
+    opened = await page.evaluate('() => window.__mv.plan.lines.map((l) => l.id)')
+    await page.evaluate("(id) => { const a = window.__mv; a.select({ level: 'line', ids: [id] }, { from: 'key', seek: false }); a.shell.stage.focus(); }", opened[0])
+    await page.keyboard.press('t')
+    await f.until("() => window.__mv.view.state.mode === 'tap' && window.__mv.view.state.playing", 'T starts tap mode (P, then ▶)')
+    await page.wait_for_timeout(300)
+    await page.keyboard.press('Space')
+    first = await page.evaluate('() => window.__mv.time()')
+    await page.keyboard.press('p')
+    await f.until("() => !window.__mv.view.state.playing", 'P pauses')
+    await page.click('[data-act="play.toggle"]')
+    await f.until("() => window.__mv.view.state.playing", '▶ in the play bar plays again')
+    await page.wait_for_timeout(300)
+    await page.keyboard.press('Space')
+    await f.settle(1)
+    tap_panel = """(i) => { const a = window.__mv; return { n: document.querySelector('.tap-count').textContent, want: a.t('tap.progress', { i, n: 3 }),
+      paused: document.querySelector('.step-tap').classList.contains('is-paused') }; }"""
+    r = await page.evaluate(tap_panel, 3)
+    f.check(r['n'] == r['want'] and not r['paused'], 'Space after P and ▶ marks line 2: %r' % r)
+    await page.keyboard.press('p')
+    await f.until("() => !window.__mv.view.state.playing", 'P pauses again')
+    await page.keyboard.press('Backspace')
+    await f.until("() => window.__mv.view.state.playing", '1行戻る plays')
+    await f.until("(t) => window.__mv.time() > t + 0.3", 'the clock is past line 1\'s mark', first)
+    await page.keyboard.press('Space')
+    await f.settle(1)
+    r = await page.evaluate(tap_panel, 3)
+    f.check(r['n'] == r['want'] and not r['paused'], 'Space after P and 1行戻る marks line 2 again: %r' % r)
+    await page.keyboard.press('Escape')
+    await f.until("() => window.__mv.view.state.mode === 'normal'", 'Esc finishes')
+    r = await page.evaluate("(ids) => ids.map((id) => (window.__mv.doc.pins['line/' + id + ':start'] || {}).by || null)", opened)
+    f.check(r[:2] == ['tap', 'tap'] and r[2] is None, 'lines 1 and 2 are marked: %r' % r)
+
 
 async def flow_first_look(f, lang):
     """flows-8, spec-3, ux-2, ux-11, ux-12, ux-13, ux-19: typed lyrics get a first look that ◀ returns to; Space after a
@@ -2617,6 +2674,94 @@ async def flow_ai_board(f, lang):
     await f.undo_all(done0, doc0)
 
 
+async def next_post(f, n, what):
+    """The body of the AI request after the first n POSTs (None when none comes)."""
+    for _ in range(200):
+        posts = [s for s in f.ai_seen if s['method'] == 'POST']
+        if len(posts) > n:
+            return posts[n]['body']
+        await asyncio.sleep(0.05)
+    f.check(False, 'timed out: ' + what)
+    return None
+
+
+async def flow_ai_media(f, lang):
+    """写真・動画をAIが使ってよい (DESIGN_2_1 §11.6.1, §11.6.4) with a photo named after a person in the library: the notice
+    says what is sent about photos; ticked (the default), 指示 lists it as asset:0 and never sends its file name; unticked
+    under 詳しく, neither 指示 nor the board's まとめて送る sends a [media] list (MAI-2 / UI-1); the board shows the same
+    switch, and ticking it there ticks it in 指示 too."""
+    page = f.page
+    done0, doc0 = await with_lyrics(f)
+    await media_page(f)
+    name = '山田花子_卒業式.png'
+    ok = await page.evaluate("""async (name) => { const a = window.__mv, st = await window.MVMediaGen.stills();
+      await a.media.importFiles([new File([st.png], name, { type: 'image/png' })], {});
+      const t0 = performance.now();
+      while (!(a.doc.media.list.length && a.media.state(a.doc.media.list[0].id) === 'ok') && performance.now() - t0 < 20000) {
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      return a.doc.media.list.length === 1 && a.doc.media.list[0].name === name; }""", name)
+    if not f.check(ok, 'the photo is in the library'):
+        return
+    await ai_route(f, [{'answers': [d_answer(0, all_={'speed': 0.75})]} for _ in range(4)])
+    await ai_open(f)
+    notice = await page.evaluate("() => [document.querySelector('.ai-sends').textContent, window.__mv.t('ai.sendsMediaList')]")
+    f.check(notice[1] in notice[0], 'the notice says what is sent about photos and videos: %r' % notice[0])
+    sent = 0
+
+    async def send_direct(what):
+        await page.fill('#ai-direct-text', '写真を背景に')
+        await page.click('.ai-direct [data-tool="direct"]')
+        return await next_post(f, sent, what)
+
+    async def closed():
+        await f.until('() => !!window.__mv.ai.state.review || !!window.__mv.ai.state.notice', 'the answer is in')
+        await page.evaluate('() => { const c = window.__mv.ai; c.discard(); c.dismiss(); }')
+        await f.settle(2)
+
+    body = await send_direct('指示 with the box ticked')
+    text = json.dumps(body, ensure_ascii=False) if body else ''
+    f.check('[media]' in text and 'asset:0 image' in text, '指示 offers the photo as asset:0')
+    f.check(name not in text and '山田花子' not in text, 'its file name is never sent')
+    sent += 1
+    await closed()
+    # 詳しく › 写真・動画をAIが使ってよい off: 指示 sends no [media] list.
+    await page.click('.ai-direct-more summary')
+    box = '.ai-direct [data-ctl="allowMedia"]'
+    f.check(await page.is_visible(box) and await page.is_checked(box), 'the box is shown, ticked by default')
+    await page.click(box)
+    await f.until('() => window.__mv.ai.state.allowMedia === false', 'the box turns the switch off')
+    body = await send_direct('指示 with the box unticked')
+    f.check(body and '[media]' not in json.dumps(body, ensure_ascii=False), '指示 sends no [media] list once it is off')
+    sent += 1
+    await closed()
+    # The board: the same switch, off; まとめて送る sends no [media] list either.
+    await page.click('.ai-board-link')
+    if not await f.until("() => !!document.querySelector('.ai-board .ai-board-input')", 'the board opens'):
+        return
+    bbox = '.ai-board [data-ctl="allowMedia"]'
+    f.check(await page.is_visible(bbox) and not await page.is_checked(bbox), 'the board shows the same switch, off')
+    await page.fill('.ai-board-row .ai-board-input >> nth=0', '写真を背景に')
+    await page.click('.ai-board .btn.primary')
+    body = await next_post(f, sent, 'the board with the box unticked')
+    f.check(body and '[media]' not in json.dumps(body, ensure_ascii=False), 'まとめて送る sends no [media] list while it is off')
+    sent += 1
+    await closed()
+    # Ticked on the board: the board offers the photo (still without its name), and 指示 shows the box ticked.
+    await f.until("() => !!document.querySelector('.ai-board [data-ctl=\"allowMedia\"]')", 'the board comes back')
+    await page.click(bbox)
+    await f.until('() => window.__mv.ai.state.allowMedia === true', 'the board turns the switch on')
+    await page.click('.ai-board .btn.primary')
+    body = await next_post(f, sent, 'the board with the box ticked')
+    text = json.dumps(body, ensure_ascii=False) if body else ''
+    f.check('[media]' in text and name not in text, 'the board offers the photo, without its name')
+    await closed()
+    await page.click('.ai-board [data-fkey="board-back"]')
+    await f.settle(2)
+    f.check(await page.is_checked(box), '指示 shows the box ticked too (one switch)')
+    await f.undo_all(done0, doc0)
+
+
 async def flow_materials(f, lang):
     """マイ素材 (DESIGN_2_1 §6.9) on the v21 project: 入り › マイ素材 › ＋ AIで作る (the inline form) runs the material tool for
     the line; its review applies the material and uses it there (one undo step). 全体 › マイ素材 › a material: rename ✎,
@@ -2676,6 +2821,17 @@ async def flow_materials(f, lang):
         await page.keyboard.press('Enter')
         await f.until('(b) => JSON.stringify(window.__mv.doc.materials.list[2].recipe) !== b', 'the knob bakes into the recipe', before)
     f.check(await page.evaluate(DONE) >= done + 3, 'each change is an undo entry')
+    # UI-9: arrow keys on a knob's slider merge into one undo step, as the inspector's sliders do.
+    rng = '.mat-page .mat-knob .w-range'
+    if await page.evaluate('(s) => !!document.querySelector(s)', rng):
+        done_k = await page.evaluate(DONE)
+        before = await page.evaluate("() => JSON.stringify(window.__mv.doc.materials.list[2].recipe)")
+        await page.focus(rng)
+        for _ in range(5):
+            await page.keyboard.press('ArrowLeft')
+        await f.until('(b) => JSON.stringify(window.__mv.doc.materials.list[2].recipe) !== b', 'the arrow keys change the knob', before)
+        await f.settle(2)
+        f.check(await page.evaluate(DONE) == done_k + 1, 'five arrow steps on a knob are one undo step: %d' % (await page.evaluate(DONE) - done_k))
     await page.click('.mat-page .row-actions .btn >> nth=1')
     await f.until("() => window.__mv.doc.materials.list.length === 5", '複製')
     dup = await page.evaluate("() => { const m = window.__mv.doc.materials.list[4]; return [m.by, m.name.ja]; }")
@@ -2693,6 +2849,74 @@ async def flow_materials(f, lang):
     await f.until("() => !window.__mv.doc.materials.list.some((m) => m.id === 'm3')", 'the material is deleted')
     pins = await page.evaluate("() => Object.keys(window.__mv.doc.pins).filter((p) => p.includes('myMat3') || (window.__mv.doc.pins[p].v === 'myMat3'))")
     f.check(pins == [], 'its pins go with it: %r' % pins)
+    # MAI-4: an AI ornament fitted to the particle budget: its 量 slider ends where the store still accepts the value, and
+    # the end of the slider is taken without an error.
+    mid = await page.evaluate("""() => { const a = window.__mv, R = MV.use('ai/recipe');
+      const lay = { prim: 'particles', shape: 'petal', glyph: '', inks: ['accent'], alpha: 0.85, layer: 'near', anchor: 'frame', x: 0, y: 0,
+        spread: 1.15, sizeMin: 0.012, sizeMax: 0.022, count: 200, stroke: 0, dir: 115, speed: 0.09, sway: 26, swayHz: 0.35, spin: 60,
+        burst: 'none', move: 'none', moveWhat: 'scale', moveAmp: 0, moveHz: 0, appear: 'always', draw: 'fade', style: '', pattern: '', stops: [], angle: 0 };
+      const made = R.fromAi({ name: '花', nameEn: 'Flowers', kind: 'ornament', scope: 'cut', season: '', tags: [], blurb: '', base: '', params: [],
+        parts: [], layers: [lay], unit: 'glyph', order: 'lead', dur: -1, each: -1, tracks: [], curve: { name: '', ends: 'both', edge: -1, peak: -1 },
+        osc: [], knobs: ['count'], use: { slot: 'none', s: 0, lines: [], cuts: [] } }, a.reg).entry;
+      const id = 'm' + a.doc.materials.next.toString(36);
+      a.dispatch({ t: 'material.put', id, kind: 'ornament', by: 'ai', name: made.name, recipe: made.recipe }, { label: ['undo.material.put', {}] });
+      return id; }""")
+    await page.evaluate("() => { const a = window.__mv; a.openPanel('details'); a.select({ level: 'work' }, { from: 'key', open: true }); }")
+    await f.settle(3)
+    await open_section(f, 'materials')
+    await page.click('.mat-row[data-mat="%s"] .insp-item' % mid)
+    if await f.until("() => !!document.querySelector('.mat-page .mat-knob .w-range')", 'the fitted material\'s page and its 量 knob'):
+        top = float(await page.get_attribute(rng, 'max'))
+        f.check(1 <= top < 1.5, 'the slider ends before ×1.5: ×%s' % top)
+        before = await page.evaluate("(id) => JSON.stringify(window.__mv.doc.materials.list.find((m) => m.id === id).recipe)", mid)
+        await page.focus(rng)
+        await page.keyboard.press('End')
+        await f.settle(3)
+        toasts = await page.evaluate("() => [...document.querySelectorAll('.toast')].map((x) => x.textContent).join(' | ')")
+        refused = await page.evaluate("() => window.__mv.t('err.command')")
+        f.check(refused not in toasts, 'the end of the slider is accepted: %r' % toasts)
+        after = await page.evaluate("(id) => JSON.stringify(window.__mv.doc.materials.list.find((m) => m.id === id).recipe)", mid)
+        f.check(top == 1 or after != before, 'the knob bakes into the recipe at its end')
+    await f.undo_all(done0, doc0)
+
+
+async def flow_material_scope(f, lang):
+    """MAI-6: ＋ AIで作る on an ornament row asks for that row's own scope. On 背景 › 空気 the request says scope "run" and
+    the new material becomes the line's atmosphere; on 装飾 it says scope "cut" and the material is the line's decoration.
+    Both answers name the other scope: the row's scope wins."""
+    page = f.page
+    done0, doc0 = await open_v21(f)
+    answers = [dict(D_FLURRY, name='雪の粒', nameEn='Snow grains', season='', scope='cut'),
+               dict(D_FLURRY, name='光の粒', nameEn='Sparks', season='', scope='run')]
+    await ai_route(f, [{'understood': True, 'question': '', 'material': m} for m in answers])
+    await ai_open(f)
+    for el, slot, scope, text in (('ground', 'atmos', 'run', '雪が静かに降る'), ('ornament', 'ornament#0', 'cut', '文字のまわりに光の粒')):
+        n = await page.evaluate('() => window.__mv.doc.materials.list.length')
+        mat_id = await page.evaluate("() => 'myMat' + window.__mv.doc.materials.next.toString(36)")
+        await open_el(f, 'line/r5', el)
+        await page.click(FIELD % slot + ' .w-part')
+        if not await f.until("() => !!document.querySelector('.pb-tabs [data-tab=\"mine\"]')", 'the part browser of %s has マイ素材' % slot):
+            return
+        await page.click('.pb-tabs [data-tab="mine"]')
+        await f.until("() => !!document.querySelector('.pb-tile.pb-make')", '＋ AIで作る on %s' % slot)
+        await page.click('.pb-tile.pb-make')
+        await f.until("() => !document.querySelector('#pb-make-form').hidden", 'the inline form opens (%s)' % slot)
+        await page.keyboard.type(text)
+        posts = len([s for s in f.ai_seen if s['method'] == 'POST'])
+        await page.keyboard.press('Enter')
+        if not await f.until("() => window.__mv.ai.state.review && window.__mv.ai.state.review.tool === 'material'", 'the review (%s)' % slot):
+            return
+        body = [s for s in f.ai_seen if s['method'] == 'POST'][posts]['body']
+        system = ' '.join(p.get('text', '') for p in body['systemInstruction']['parts'])
+        f.check('scope "%s"' % scope in system, 'the %s row asks for scope "%s": %r' % (slot, scope, system[:300]))
+        await f.settle(3)
+        await page.click('.ai-review-foot .btn.primary')
+        await f.until('(n) => window.__mv.doc.materials.list.length === n + 1', 'the material is made (%s)' % slot, n)
+        made = await page.evaluate("() => { const m = window.__mv.doc.materials.list.at(-1); return [m.kind, m.recipe.scope]; }")
+        f.check(made == ['ornament', scope], 'the material has the row\'s scope: %r' % made)
+        pin = await page.evaluate(PIN_V, 'line/r5:' + slot)
+        f.check(pin == {'v': mat_id, 'by': 'ai'}, 'it is used on the line\'s %s: %r' % (slot, pin))
+    ai_requests_ok(f)
     await f.undo_all(done0, doc0)
 
 
@@ -2740,6 +2964,9 @@ DROP = """async ([sel, names, hold]) => {
 FILE_BYTES = """async (name) => { const f = window.__files[name];
   return { name: f.name, mimeType: f.type, bytes: Array.from(new Uint8Array(await f.arrayBuffer())) }; }"""
 MEDIA_IDS = '() => window.__mv.doc.media.list.map((e) => e.id)'
+# Records the media times of `id` in every want() the app makes (window.__wants), until __wantReal is put back.
+WANTS = """(id) => { const a = window.__mv.assets; window.__wantReal = window.__wantReal || a.want; window.__wants = [];
+  a.want = (list) => { window.__wants.push((list || []).filter((x) => x.id === id).map((x) => x.m)); return window.__wantReal.call(a, list); }; }"""
 TOASTS = "() => [...document.querySelectorAll('.toast .toast-text')].map((x) => x.textContent)"
 FIELD = '[data-mount="inspector"] .frow[data-slot="%s"]'
 
@@ -2776,6 +3003,8 @@ async def choose_files(f, click, names):
     await (await info.value).set_files(payloads)
 
 
+# Whether the crop overlay is on.
+CROPPING = "() => document.querySelector('.canvas-wrap').classList.contains('is-cropping')"
 # The crop pins of a scope: [cropX, cropY, cropZoom] (None when not pinned).
 CROP = """(base) => ['cropX', 'cropY', 'cropZoom'].map((n) => { const p = window.__mv.doc.pins[base + '.' + n]; return p ? p.v : null; })"""
 # The glyphs (black text) inside the text block of the cut at the playhead, on the main canvas: 'mark' remembers the
@@ -2806,9 +3035,13 @@ async def flow_media(f, lang):
     work's background in one undo step; the element page shows its source, 動きと重なり as a radiogroup whose ⓘ toggles a
     why line that follows the value, and its shares in %; the crop overlay says what it does (the play bar's strip, the
     live region), its drag and its keys (→ ↑ ← 1 %, Shift 10 %, +) are one undo entry each at their own values, the
-    wheel zooms, 0 and a double-click reset, Esc gives the focus back to [画面で調整]; a pasted picture is imported even
+    wheel zooms, 0 and a double-click reset, Esc gives the focus back to [画面で調整]; T over the overlay ends it, and
+    [画面で調整] stays off while the tap session lasts (the wheel and two quick taps then pin nothing, → and Esc are the
+    session's); a redo that takes the photo away ends it (the arrows then
+    pin nothing and the redo stays), a plan that keeps the photo keeps it; a pasted picture is imported even
     after a look was copied, and a paste without one pastes the look; an MP4 dropped while a line is selected is that
-    line's background (「3行目」); its 使う範囲 with the keyboard (slider handles ≥ 24 px) and with a drag (the peek and its
+    line's background (「3行目」), and while it plays every want() of the stage lists it at t and at t + k/30, k = 1…8;
+    its 使う範囲 with the keyboard (slider handles ≥ 24 px) and with a drag (the peek and its
     strip), [▶ 範囲を見る]; 後ろに下げる then undone; overlay footage placed from the asset page (重ねる映像) with そのまま重ねる:
     後ろに下げる leaves the glyphs their colour, 文字の前に出す covers them (pixels); the 2 s 720p MP4 export where H.264
     encodes; undo-all returns to the start."""
@@ -2837,6 +3070,16 @@ async def flow_media(f, lang):
     acts = await page.evaluate("() => [...document.querySelectorAll('.toast.has-acts .toast-act')].map((b) => b.textContent)")
     f.check(lang != 'ja' or acts[:2] == ['元に戻す', 'ほかの使い方…'], 'the toast offers 元に戻す and ほかの使い方…: %r' % acts)
     await f.shot('drop')
+    # UI-5: after another edit the toast's 元に戻す undoes neither that edit nor the placement, and says why
+    await page.hover('.toast.has-acts')
+    await page.evaluate("() => window.__mv.dispatch({ t: 'pin.set', path: 'work:text.scale', v: 1.1, by: 'user' }, { label: ['undo.pin', { field: '', scope: '' }] })")
+    later = await page.evaluate(DONE)
+    await page.click('.toast.has-acts .toast-act')
+    await f.until("(t) => [...document.querySelectorAll('.toast .toast-text')].some((x) => x.textContent === t)", 'the toast says it cannot undo from here',
+                  await page.evaluate("() => window.__mv.t('media.undoLater')"))
+    kept = await page.evaluate("() => ({ scale: !!window.__mv.doc.pins['work:text.scale'], image: !!window.__mv.doc.pins['work:ground@photoPan.image'] })")
+    f.check(await page.evaluate(DONE) == later and kept == {'scale': True, 'image': True}, 'nothing is undone: %r' % kept)
+    await page.evaluate("() => window.__mv.store.undo()")
     # 2. the element page: source, 動きと重なり (a radiogroup whose おまかせ says what it does), shares in %, 切り抜き
     await open_el(f, 'work', 'ground')
     name = await page.evaluate("(s) => document.querySelector(s + ' .w-media-name').textContent", FIELD % 'ground@photoPan.image')
@@ -2941,6 +3184,90 @@ async def flow_media(f, lang):
     f.check(await page.evaluate("() => !!document.activeElement && document.activeElement.classList.contains('w-crop-edit')"),
             'Esc gives the focus back to [画面で調整]')
     f.check(await page.evaluate("() => document.querySelector('.mode-strip').hidden"), 'the crop strip goes with the overlay')
+    # tap mode has the preview to itself (D§6.4.15): T over the overlay ends it, and [画面で調整] cannot open it again while
+    # the session lasts (the button is off; a click that lands before it is drawn off opens nothing and pauses nothing),
+    # so the wheel and a double-click (two quick taps) pin no crop, → seeks 3 s, and Esc finishes the session
+    edit = FIELD % 'ground@photoPan.cropZoom' + ' .w-crop-edit'
+    crop_x = "() => !!window.__mv.doc.pins['work:ground@photoPan.cropX']"
+    crop_pins = "() => ['cropX', 'cropY', 'cropZoom'].map((n) => JSON.stringify(window.__mv.doc.pins['work:ground@photoPan.' + n] || null)).join()"
+    await page.click(edit)
+    if await f.until(CROPPING, 'the crop overlay opens again'):
+        await page.keyboard.press('ArrowRight')             # a crop the user made: taps must not reset it
+        await f.until(crop_x, '→ pins a crop before tap mode')
+        pins0 = await page.evaluate(crop_pins)
+        done = await page.evaluate(DONE)
+        await page.keyboard.press('t')
+        await f.until("() => window.__mv.view.state.mode === 'tap'", 'T starts tap mode over the crop overlay')
+        f.check(not await page.evaluate(CROPPING), 'tap mode ends the crop overlay')
+        await f.until("(sel) => document.querySelector(sel).disabled", '[画面で調整] is off in tap mode', edit)
+        playing = await page.evaluate("() => window.__mv.view.state.playing")
+        await page.evaluate("(sel) => { const b = document.querySelector(sel); b.disabled = false; b.click(); }", edit)
+        await f.settle(3)
+        f.check(not await page.evaluate(CROPPING), 'a click on [画面で調整] in tap mode opens no overlay')
+        f.check(await page.evaluate("() => [window.__mv.view.state.mode, window.__mv.view.state.playing]") == ['tap', playing],
+                'nor pauses the tap session')
+        box = await page.evaluate("() => { const r = document.querySelector('.canvas-wrap').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; }")
+        await page.mouse.move(box['x'], box['y'])
+        for _ in range(3):
+            await page.mouse.wheel(0, -100)
+            await f.settle(1)
+        await page.mouse.dblclick(box['x'], box['y'])
+        await page.wait_for_timeout(500)
+        f.check(await page.evaluate(crop_pins) == pins0 and await page.evaluate(DONE) == done,
+                'the wheel and two quick taps in tap mode leave the crop and the history as they were')
+        await page.focus('.canvas-wrap')
+        t0 = await page.evaluate("() => window.__mv.time()")
+        await page.keyboard.press('ArrowRight')
+        await f.settle(2)
+        t1, end = await page.evaluate("() => [window.__mv.time(), window.__mv.plan.duration]")
+        f.check(t1 - t0 >= 2.9 or t1 >= end - 0.01, '→ in tap mode seeks 3 s: %.2f → %.2f' % (t0, t1))
+        f.check(await page.evaluate(DONE) == done and await page.evaluate(crop_pins) == pins0, '→ in tap mode pins no crop')
+        await page.keyboard.press('Escape')
+        await f.until("() => window.__mv.view.state.mode === 'normal'", 'Esc finishes the tap session')
+        await f.until("(sel) => !document.querySelector(sel).disabled", '[画面で調整] is on again after tap mode', edit)
+        await page.evaluate("() => window.__mv.dispatch({ t: 'pin.clear', path: 'work:ground@photoPan.cropX' }, { label: ['undo.unpinField', { field: '' }] })")
+        # the same without the overlay and without a mark (no new plan draws the page again): the mode alone turns it off
+        await f.settle(3)
+        await page.focus('.canvas-wrap')
+        await page.keyboard.press('t')
+        await f.until("() => window.__mv.view.state.mode === 'tap'", 'T starts tap mode')
+        await f.until("(sel) => document.querySelector(sel).disabled", '[画面で調整] is off in a tap session started without the overlay', edit)
+        await page.keyboard.press('Escape')
+        await f.until("() => window.__mv.view.state.mode === 'normal'", 'Esc finishes a tap session with no marks')
+        await f.until("(sel) => !document.querySelector(sel).disabled", '[画面で調整] is on again after a session with no marks', edit)
+    # the overlay goes with its picture (§11.7.6): a redo that takes the photo off the background ends it, so the arrows
+    # pin no crop for a part nothing shows and the history keeps its redo; a new plan that keeps the picture keeps it
+    await f.blur()
+    await page.evaluate("() => window.__mv.dispatch({ t: 'pin.set', path: 'work:ground', v: 'washiFiber', by: 'user' }, { label: ['undo.pin', { field: '', scope: '' }] })")
+    await page.keyboard.press('Control+z')
+    await f.until("() => window.__mv.doc.pins['work:ground'].v === 'photoPan'", 'undo puts the photo back')
+    await f.settle(3)
+    await page.click(edit)
+    if await f.until(CROPPING, 'the crop overlay opens before the redo'):
+        done = await page.evaluate(DONE)
+        await page.keyboard.press('Control+Shift+z')
+        await f.until("() => window.__mv.doc.pins['work:ground'].v === 'washiFiber'", 'redo takes the photo off the background')
+        await f.until('() => !(%s)()' % CROPPING, 'a plan without the picture ends the crop overlay')
+        await page.focus('.canvas-wrap')
+        await page.keyboard.press('ArrowLeft')
+        await page.keyboard.press('ArrowLeft')
+        await f.settle(2)
+        f.check(await page.evaluate(DONE) == done + 1 and not await page.evaluate(crop_x), 'the arrows pin no crop once the picture is gone')
+        await f.blur()
+        await page.keyboard.press('Control+z')
+        await f.until("() => window.__mv.doc.pins['work:ground'].v === 'photoPan'", 'undo puts the photo back again')
+        f.check(await page.evaluate("() => window.__mv.store.peek().redo !== null"), 'the redo is still there')
+    await f.settle(3)
+    await page.click(edit)
+    if await f.until(CROPPING, 'the crop overlay opens once more'):
+        await page.evaluate("() => window.__mv.dispatch({ t: 'pin.set', path: 'work:ground@photoPan.veil', v: 0.2, by: 'user' }, { label: ['undo.pin', { field: '', scope: '' }] })")
+        await f.settle(3)
+        f.check(await page.evaluate(CROPPING), 'a new plan that still shows the picture keeps the crop overlay')
+        await page.keyboard.press('Control+z')
+        await f.until("() => !window.__mv.doc.pins['work:ground@photoPan.veil']", 'undo takes the veil off')
+        await f.settle(3)
+        f.check(await page.evaluate(CROPPING), 'an undo that keeps the picture keeps the crop overlay')
+        await page.evaluate("() => window.__mv.shell.stage.crop(null)")
     # 4. a pasted picture is imported even after a look was copied (Ctrl+V is left to the paste event); a paste without
     # a picture pastes the look
     ids = await page.evaluate("() => window.__mv.plan.lines.slice(0, 2).map((l) => l.id)")
@@ -2990,6 +3317,17 @@ async def flow_media(f, lang):
     items = await page.evaluate("() => [...document.querySelectorAll('.popover.menu .menu-item')].map((b) => b.textContent)")
     f.check(lang != 'ja' or any(x.startswith('この動画を使わない') for x in items), 'the ⋯ menu of a video says この動画を使わない: %r' % items)
     await page.keyboard.press('Escape')
+    # 5b. the stage's look-ahead while the video plays (§11.4.5 step 1, ui/stage mediaAfter): every want() the app makes
+    # lists the video at t and at every frame up to t + 8/30, not one time further on
+    await page.evaluate(WANTS, video)
+    t_line = await page.evaluate('(id) => window.__mv.plan.lines.find((l) => l.id === id).t0', lid)
+    await page.evaluate("(t) => { window.__mv.seek(t); window.__mv.play(); }", t_line + 0.05)
+    await page.wait_for_timeout(1000)
+    wants = await page.evaluate("() => { window.__mv.pause(); window.__mv.assets.want = window.__wantReal; return window.__wants; }")
+    listed = [ms for ms in wants if ms]
+    full = [ms for ms in listed if len(set(ms)) >= 9 and max(ms) - min(ms) >= 8 / 30 - 1e-3]
+    f.check(len(listed) >= 10 and len(full) >= 0.8 * len(listed),
+            'while playing, want() lists the video at 9 times over 8/30 s: %d of %d calls (%r)' % (len(full), len(listed), listed[:2]))
     # 6. 使う範囲 with the keyboard: → three frames on the in handle, ← one frame on the out handle
     await open_el(f, 'line/' + lid, 'ground')
     f.check(await page.evaluate("() => !!document.querySelector('.isec[data-sec=\"video\"] .w-trim')"), 'a video has the trim row in 動画')
@@ -3017,6 +3355,42 @@ async def flow_media(f, lang):
             'the pinned end stays inside the trim row (no row of its own)')
     times = await page.evaluate("(s) => document.querySelector(s + ' .w-trim-len').textContent", trim)
     f.check(lang != 'ja' or '秒' in times, 'the range length is shown: %r' % times)
+    # UI-4: with only the end pinned the row still reads 固定 with ×, and Del on it resets the end
+    await page.evaluate("(p) => window.__mv.dispatch({ t: 'pin.clear', path: p }, { label: ['undo.unpin', {}] })", 'line/%s:ground@photoPan.clipIn' % lid)
+    await f.settle(3)
+    alone = await page.evaluate("(s) => { const r = document.querySelector(s); return { state: r.dataset.state, x: !r.querySelector('[data-role=\"unpin\"]').hidden }; }", trim)
+    f.check(alone == {'state': 'pinned', 'x': True}, 'a pinned end alone reads 固定 with ×: %r' % alone)
+    await page.focus(trim + ' .w-trim-h.is-out')
+    await page.keyboard.press('Delete')
+    await f.until("(p) => !window.__mv.doc.pins[p]", 'Del on the trim row resets its end', 'line/%s:ground@photoPan.clipOut' % lid)
+    await f.settle(3)
+    f.check(await page.evaluate("(s) => document.querySelector(s).dataset.state", trim) == 'auto', 'then the row reads 自動')
+    # UI-4: an end fixed at the work, the start automatic: the line's row reads 作品で固定 ↑ and its tag goes to the work
+    await page.evaluate("() => window.__mv.dispatch({ t: 'pin.set', path: 'work:ground@photoPan.clipOut', v: 1.2, by: 'user' }, { label: ['undo.pin', { field: '', scope: '' }] })")
+    await f.settle(3)
+    upper = await page.evaluate("""(s) => { const r = document.querySelector(s), tag = r.querySelector('.state-tag');
+      return { state: r.dataset.state, x: !r.querySelector('[data-role="unpin"]').hidden, tag: !tag.disabled }; }""", trim)
+    f.check(upper == {'state': 'inherited', 'x': False, 'tag': True}, 'an end fixed at the work reads inherited, without ×: %r' % upper)
+    await page.click(trim + ' .state-tag')
+    await f.until("() => { const s = window.__mv.view.state.sel; return s.level === 'el' && s.scope === 'work' && s.el === 'ground'; }",
+                  'its tag goes to the work\'s 背景')
+    await page.evaluate("() => window.__mv.dispatch({ t: 'pin.clear', path: 'work:ground@photoPan.clipOut' }, { label: ['undo.unpin', {}] })")
+    # the end pinned on the line, the start fixed at the work: ⋯ 固定元へ移動 still goes to the work (the start's owner)
+    await open_el(f, 'line/' + lid, 'ground')
+    await page.evaluate("""(id) => { const a = window.__mv, m = { label: ['undo.pin', { field: '', scope: '' }] };
+      a.dispatch({ t: 'pin.set', path: 'work:ground@photoPan.clipIn', v: 0.3, by: 'user' }, m);
+      a.dispatch({ t: 'pin.set', path: 'line/' + id + ':ground@photoPan.clipOut', v: 1.0, by: 'user' }, m); }""", lid)
+    await f.settle(3)
+    f.check(await page.evaluate("(s) => document.querySelector(s).dataset.state", trim) == 'pinned', 'the end pinned on the line reads 固定')
+    await page.click(trim + ' [aria-haspopup="menu"]')
+    await f.until("() => !!document.querySelector('.popover.menu')", 'the trim row\'s ⋯ menu')
+    await page.evaluate("() => [...document.querySelectorAll('.popover.menu .menu-item')].find((b) => b.textContent.startsWith(window.__mv.t('fm.goOwner'))).click()")
+    await f.until("() => { const s = window.__mv.view.state.sel; return s.level === 'el' && s.scope === 'work' && s.el === 'ground'; }",
+                  '⋯ 固定元へ移動 goes to the work\'s 背景')
+    await page.evaluate("""(id) => { const a = window.__mv, m = { label: ['undo.unpin', {}] };
+      a.dispatch({ t: 'pin.clear', path: 'work:ground@photoPan.clipIn' }, m);
+      a.dispatch({ t: 'pin.clear', path: 'line/' + id + ':ground@photoPan.clipOut' }, m); }""", lid)
+    await open_el(f, 'line/' + lid, 'ground')
     # a drag of the in handle: one gesture, the stage peeks at the source frame with 「使う範囲を調整中」
     await page.evaluate("(s) => document.querySelector(s).scrollIntoView({ block: 'center' })", trim)
     await f.settle(2)
@@ -3205,8 +3579,32 @@ async def flow_library(f, lang):
     await page.click('.med-page [data-act="colors"]')
     await f.until("() => !!window.__mv.doc.pins['work:color.accent']", 'この色に合わせる pins the accent')
     f.check(await page.evaluate(DONE) == done + 1 and await page.evaluate(LAST_LABEL) == 'undo.media.colors', 'one batch 色を写真に合わせる')
-    await f.until("(t) => [...document.querySelectorAll('.toast .toast-text')].some((x) => x.textContent === t)", 'the colours toast',
-                  await page.evaluate("() => window.__mv.t('media.colorsMatched')"))
+    matched = await page.evaluate("() => window.__mv.t('media.colorsMatched')")
+    await f.until("(t) => [...document.querySelectorAll('.toast .toast-text')].some((x) => x.textContent === t)", 'the colours toast', matched)
+    # its 元に戻す undoes that step while it is the newest one
+    await page.evaluate("(t) => [...document.querySelectorAll('.toast')].find((x) => x.querySelector('.toast-text').textContent === t).querySelector('.toast-act').click()",
+                        matched)
+    await f.until("() => !window.__mv.doc.pins['work:color.accent']", 'the toast\'s 元に戻す undoes the colours')
+    f.check(await page.evaluate(DONE) == done, 'one step back')
+    # UI-5: matched again, then another pin, then matched once more (the same colours, no step): that toast offers no
+    # 元に戻す, so it cannot undo the other pin
+    await page.click('.med-page [data-act="colors"]')
+    await f.until("() => !!window.__mv.doc.pins['work:color.accent']", 'この色に合わせる again')
+    await page.evaluate("() => document.querySelectorAll('.toast .toast-x').forEach((x) => x.click())")
+    await page.evaluate("() => window.__mv.dispatch({ t: 'pin.set', path: 'work:text.scale', v: 1.1, by: 'user' }, { label: ['undo.pin', { field: '', scope: '' }] })")
+    steps = await page.evaluate(DONE)
+    await page.click('.med-page [data-act="colors"]')
+    await f.until("(t) => [...document.querySelectorAll('.toast .toast-text')].some((x) => x.textContent === t)", 'the colours toast again', matched)
+    acts = await page.evaluate("""(t) => [...document.querySelectorAll('.toast')].filter((x) => x.querySelector('.toast-text').textContent === t)
+      .map((x) => [...x.querySelectorAll('.toast-act')].map((b) => b.textContent))""", matched)
+    f.check(await page.evaluate(DONE) == steps and acts == [[]], 'the same colours again make no step and offer no 元に戻す: %r' % acts)
+    await page.evaluate("(t) => [...document.querySelectorAll('.toast')].filter((x) => x.querySelector('.toast-text').textContent === t).forEach((x) => { const b = x.querySelector('.toast-act'); if (b) b.click(); })",
+                        matched)
+    await f.settle(3)
+    f.check(await page.evaluate("() => !!window.__mv.doc.pins['work:text.scale']"), 'the other pin stays')
+    await page.evaluate("() => { window.__mv.actions.run('edit.undo'); window.__mv.actions.run('edit.undo'); }")
+    await f.until("() => !window.__mv.doc.pins['work:color.accent'] && !window.__mv.doc.pins['work:text.scale']", 'both undone')
+    f.check(await page.evaluate(DONE) == done, 'back to where the flow was')
     # the crumb 写真・動画 goes back to the library, the focus on its first row
     await page.evaluate("() => [...document.querySelectorAll('[data-mount=\"inspector\"] .insp-crumbs button.crumb')].pop().click()")
     await f.until("() => !document.querySelector('.med-page') && document.activeElement && document.activeElement.classList.contains('med-row')",
@@ -3481,6 +3879,21 @@ async def flow_library(f, lang):
     await f.until("(id) => !window.__mv.doc.media.list.some((e) => e.id === id)", 'the asset is deleted', forest2)
     pins = await page.evaluate("(id) => Object.entries(window.__mv.doc.pins).filter(([p, x]) => x.v === id || p === 'work:ground').map(([p]) => p)", forest2)
     f.check(pins == [], 'its pins and the emptied background part go: %r' % pins)
+    # UI-8: an asset page whose asset leaves the document (its import undone) keeps the name in its crumbs, never the id
+    await drop(f, '[data-mount="inspector"]', ['a.png'])
+    if await f.until("() => window.__mv.doc.media.list.some((e) => e.name === 'a.png')", 'a.png is imported', timeout=10000):
+        gone = await page.evaluate("() => window.__mv.doc.media.list.find((e) => e.name === 'a.png').id")
+        await page.evaluate("(id) => window.__mv.media.openAsset(id)", gone)
+        await f.until("() => !!document.querySelector('.med-page .med-title')", 'its asset page')
+        await f.blur()
+        await page.keyboard.press('Control+z')
+        await f.until("(id) => !window.__mv.doc.media.list.some((e) => e.id === id)", 'undo takes the import back', gone)
+        await f.settle(3)
+        r = await page.evaluate("""() => { const p = document.querySelector('.med-page');
+          return { crumbs: document.querySelector('[data-mount="inspector"] .insp-crumbs').textContent, page: p ? p.textContent : null,
+            gone: window.__mv.t('media.gone') }; }""")
+        f.check(gone not in r['crumbs'] and 'a.png' in r['crumbs'] and r['page'] == r['gone'],
+                'the crumbs keep the name of an asset that is gone: %r' % r)
     await f.undo_all(done0, doc0)
 
 
@@ -3669,6 +4082,20 @@ async def flow_missing(f, lang):
                 g.check(page_state['use'] and page_state['vision'] is True and (lang != 'ja' or 'つなぎ直すと使えます' in page_state['note']),
                         'a missing picture offers neither 使う nor 写真の説明: %r' % page_state)
                 await g.shot('asset_missing')
+                # UI-6: the file of the background, which is here again, is not a relink of the frame: 「もう入っています」
+                # (never 「つなぎ直しました」), the frame stays missing and the background keeps what it holds
+                async with other.expect_file_chooser() as fc:
+                    await other.click('.med-page [data-act="relink"]')
+                await (await fc.value).set_files([chooser('夕焼け.png')])
+                dup = await other.evaluate("() => window.__mv.t('media.dup', { name: '夕焼け.png' })")
+                await g.until("(t) => [...document.querySelectorAll('.toast .toast-text')].some((x) => x.textContent === t)", 'もう入っています for the background\'s file',
+                              dup, timeout=10000)
+                said = await other.evaluate("""([p, f]) => ({ texts: [...document.querySelectorAll('.toast .toast-text')].map((x) => x.textContent),
+                  relinked: window.__mv.t('media.relinked', { name: '夕焼け.png' }), photo: window.__mv.media.state(p), frame: window.__mv.media.state(f) })""",
+                                            [photo, frame])
+                g.check(said['relinked'] not in said['texts'] and said['photo'] == 'ok' and said['frame'] == 'missing',
+                        'another asset\'s file does not relink the frame: %r' % said)
+                await other.evaluate("(t) => { const x = [...document.querySelectorAll('.toast')].find((y) => y.querySelector('.toast-text').textContent === t); if (x) x.querySelector('.toast-x').click(); }", dup)
                 # another file is refused, with [代わりにこのファイルを使う]
                 async with other.expect_file_chooser() as fc:
                     await other.click('.med-page [data-act="relink"]')
@@ -4529,7 +4956,8 @@ FLOWS = [('first_run', flow_first_run_mouse, True), ('first_run_keys', flow_firs
          ('song_step', flow_song_step, False), ('clear_device', flow_clear_device, False)]
 # v2.1 (package F, DESIGN_2_1 §7.4).
 FLOWS += [('curve', flow_curve, False), ('keyframes', flow_keyframes, False), ('areas', flow_areas, False),
-          ('ai_area', flow_ai_area, False), ('ai_board', flow_ai_board, False), ('materials', flow_materials, False)]
+          ('ai_area', flow_ai_area, False), ('ai_board', flow_ai_board, False), ('ai_media', flow_ai_media, False),
+          ('materials', flow_materials, False), ('material_scope', flow_material_scope, False)]
 # v2.1 photos and videos (package G.4, DESIGN_2_1 §11.8.3).
 FLOWS += [('media', flow_media, True), ('library', flow_library, False), ('missing', flow_missing, False), ('package', flow_package, False),
           ('media_device', flow_media_device, False), ('media_song', flow_media_song, False)]

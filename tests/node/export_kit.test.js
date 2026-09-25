@@ -404,7 +404,7 @@ test('createDirSink: one file sink per name, close lists the files, abort remove
   const log = [];
   const parent = fakeDir('Videos', log);
   const folder = await parent.getDirectoryHandle('clip_filmora', { create: true });
-  const dir = SINK.createDirSink(folder, { parent, name: 'clip_filmora' });
+  const dir = SINK.createDirSink(folder, { parent, name: 'clip_filmora', owned: true });
   deepEqual([dir.kind, dir.name], ['dir', 'clip_filmora']);
   const a = await dir.file('a.mp4');
   await a.write(Uint8Array.from([1, 2, 3]));
@@ -424,7 +424,7 @@ test('createDirSink: one file sink per name, close lists the files, abort remove
   const log2 = [];
   const parent2 = fakeDir('Videos', log2);
   const folder2 = await parent2.getDirectoryHandle('x_filmora', { create: true });
-  const dir2 = SINK.createDirSink(folder2, { parent: parent2, name: 'x_filmora' });
+  const dir2 = SINK.createDirSink(folder2, { parent: parent2, name: 'x_filmora', owned: true });
   await (await dir2.file('m.mp4')).write(new Uint8Array(4));
   await dir2.file('n.webm');
   await dir2.abort();
@@ -463,6 +463,131 @@ test('openDirectory: the picker (read-write, id mojipv-kit), a new folder never 
     assert.equal(await SINK.openDirectory({ name: 'y' }), null);
     globalThis.showDirectoryPicker = async () => { throw Object.assign(new Error('denied'), { name: 'SecurityError' }); };
     await assert.rejects(SINK.openDirectory({ name: 'y' }), (e) => e.code === 'sink');
+  } finally {
+    if (saved === undefined) delete globalThis.showDirectoryPicker; else globalThis.showDirectoryPicker = saved;
+  }
+});
+
+// A directory handle of a file system that compares names through `key` (NTFS, APFS: without letter case and Unicode
+// form), as the browser's handles do there: getDirectoryHandle / getFileHandle of a name that folds to an existing
+// entry return that entry. keys() gives the names as they were made.
+function foldingDir(name, log, key) {
+  const entries = new Map();              // key(name) → { shown, handle }
+  const dir = {
+    name, kind: 'directory', entries,
+    async getFileHandle(n, o) {
+      const k = key(n);
+      if (entries.has(k)) {
+        const e = entries.get(k).handle;
+        if (e.kind !== 'file') throw Object.assign(new Error('a folder'), { name: 'TypeMismatchError' });
+        return e;
+      }
+      if (!(o && o.create)) throw Object.assign(new Error('not found'), { name: 'NotFoundError' });
+      const file = { name: n, kind: 'file', data: new Uint8Array(0) };
+      file.createWritable = async () => ({
+        async write(x) { file.data = x.data instanceof Uint8Array ? x.data : new Uint8Array(await x.data.arrayBuffer()); },
+        async close() { log.push(['close', n]); },
+        async abort() { log.push(['abort', n]); },
+      });
+      file.remove = async () => { entries.delete(k); log.push(['remove', n]); };
+      entries.set(k, { shown: n, handle: file });
+      return file;
+    },
+    async getDirectoryHandle(n, o) {
+      const k = key(n);
+      if (entries.has(k)) {
+        const e = entries.get(k).handle;
+        if (e.kind !== 'directory') throw Object.assign(new Error('a file'), { name: 'TypeMismatchError' });
+        return e;
+      }
+      if (!(o && o.create)) throw Object.assign(new Error('not found'), { name: 'NotFoundError' });
+      const sub = foldingDir(n, log, key);
+      entries.set(k, { shown: n, handle: sub });
+      return sub;
+    },
+    async removeEntry(n, o) { log.push(['removeEntry', n, !!(o && o.recursive)]); entries.delete(key(n)); },
+    async* keys() { for (const e of entries.values()) yield e.shown; },
+  };
+  return dir;
+}
+
+test('createFileSink: abort removes the file it streamed into, but with removeOnAbort false only discards the new data', async () => {
+  const make = (log) => {
+    const file = { name: 'work.mojipv', kind: 'file', data: 'ORIGINAL', removed: false };
+    file.createWritable = async () => {
+      let swap = '';                     // the browser writes into a copy until close()
+      return {
+        async write(x) { swap += String(x.data.length); },
+        async close() { file.data = swap; log.push('close'); },
+        async abort() { log.push('abort'); },
+      };
+    };
+    file.remove = async () => { file.removed = true; log.push('remove'); };
+    return file;
+  };
+  const log1 = [];
+  const fresh = make(log1);
+  const s1 = SINK.createFileSink(fresh);
+  await s1.write(new Uint8Array(3));
+  await s1.abort();
+  deepEqual([log1, fresh.removed], [['abort', 'remove'], true], 'by default a cancelled export removes its file');
+  const log2 = [];
+  const saved = make(log2);
+  const s2 = SINK.createFileSink(saved, { removeOnAbort: false });
+  await s2.write(new Uint8Array(3));
+  await s2.abort();
+  deepEqual([log2, saved.removed, saved.data, s2.bytes], [['abort'], false, 'ORIGINAL', 0], 'a file it did not create keeps what it held');
+  await s2.abort();
+  deepEqual(log2, ['abort'], 'abort twice does nothing more');
+});
+
+test('createDirSink without `owned`: abort removes only the files it created, never the folder or what was in it', async () => {
+  const log = [];
+  const parent = fakeDir('Videos', log);
+  const folder = await parent.getDirectoryHandle('mine', { create: true });
+  const theirs = await folder.getFileHandle('notes.txt', { create: true });
+  theirs.data = Uint8Array.from([5, 6]);
+  const dir = SINK.createDirSink(folder, { parent, name: 'mine' });
+  await (await dir.file('new.mp4')).write(new Uint8Array(4));
+  await (await dir.file('notes.txt')).write(new Uint8Array(1));
+  await dir.abort();
+  assert.ok(parent.entries.has('mine'), 'the folder stays: this sink did not make it');
+  assert.ok(!folder.entries.has('new.mp4'), 'the file it created is removed');
+  assert.ok(folder.entries.has('notes.txt') && !theirs.removed, 'the file that was there stays');
+  assert.ok(!log.some((x) => x[0] === 'removeEntry' && x[2]), 'nothing is removed recursively: ' + JSON.stringify(log));
+});
+
+test('openDirectory: a folder whose name differs only in letter case or Unicode form is taken; abort removes only the new folder', async () => {
+  const saved = globalThis.showDirectoryPicker;
+  const log = [];
+  const parent = foldingDir('Movies', log, (n) => n.normalize('NFC').toLowerCase());
+  const users = await parent.getDirectoryHandle('Sakura_filmora', { create: true });
+  await (await users.getFileHandle('my_edit.wfp', { create: true })).createWritable();
+  await users.getFileHandle('Sakura.mp4', { create: true });
+  await parent.getDirectoryHandle('が_filmora'.normalize('NFD'), { create: true });
+  try {
+    globalThis.showDirectoryPicker = async () => parent;
+    const dir = await SINK.openDirectory({ name: 'sakura_filmora' });
+    assert.equal(dir.name, 'sakura_filmora (2)', 'the user\'s Sakura_filmora is not reused');
+    const f = await dir.file('sakura.mp4');
+    await f.write(new Uint8Array(3));
+    await dir.abort();
+    deepEqual([...users.entries.values()].map((e) => e.shown).sort(), ['Sakura.mp4', 'my_edit.wfp'], 'the user\'s folder keeps its files');
+    deepEqual([...parent.entries.values()].map((e) => e.shown).sort(), ['Sakura_filmora', 'が_filmora'.normalize('NFD')].sort(),
+      'the new folder is gone, the user\'s folders stay');
+    deepEqual(log.filter((x) => x[0] === 'removeEntry'), [['removeEntry', 'sakura_filmora (2)', true]]);
+    const nfc = await SINK.openDirectory({ name: 'が_filmora'.normalize('NFC') });
+    assert.equal(nfc.name, 'が_filmora'.normalize('NFC') + ' (2)', 'another Unicode form of the same name is taken');
+    await nfc.abort();
+    // a file system that folds more than letter case and form (here: trailing dots, as Windows does) is asked itself
+    const log2 = [];
+    const win = foldingDir('D', log2, (n) => n.normalize('NFC').toLowerCase().replace(/[. ]+$/, ''));
+    await win.getDirectoryHandle('song_filmora', { create: true });
+    globalThis.showDirectoryPicker = async () => win;
+    const dot = await SINK.openDirectory({ name: 'song_filmora.' });
+    assert.equal(dot.name, 'song_filmora. (2)', 'the file system says the name is taken');
+    await dot.abort();
+    deepEqual([...win.entries.values()].map((e) => e.shown), ['song_filmora']);
   } finally {
     if (saved === undefined) delete globalThis.showDirectoryPicker; else globalThis.showDirectoryPicker = saved;
   }
@@ -619,7 +744,7 @@ test('exportKit into a folder: one file sink each; cancel, a missing VP9 or a st
     const parent = fakeDir('Videos', fsLog);
     const folder = await parent.getDirectoryHandle('夜明け_filmora', { create: true });
     const progress = [];
-    const { result } = await kitRun(kitDoc({}), { dir: SINK.createDirSink(folder, { parent, name: '夜明け_filmora' }),
+    const { result } = await kitRun(kitDoc({}), { dir: SINK.createDirSink(folder, { parent, name: '夜明け_filmora', owned: true }),
       onProgress: (p) => progress.push(p.phase + p.i) });
     deepEqual([...folder.entries.keys()].sort(), result.files.map((f) => f.name).sort());
     assert.ok(result.files.every((f) => folder.entries.get(f.name).data.length === f.bytes));
@@ -635,7 +760,7 @@ test('exportKit into a folder: one file sink each; cancel, a missing VP9 or a st
       const fsLog = [];
       const parent = fakeDir('Videos', fsLog);
       const folder = await parent.getDirectoryHandle('k', { create: true });
-      const o = { dir: SINK.createDirSink(folder, { parent, name: 'k' }) };
+      const o = { dir: SINK.createDirSink(folder, { parent, name: 'k', owned: true }) };
       setup(o);
       await assert.rejects(kitRun(kitDoc({}), o), (e) => e instanceof S.ExportError && e.code === code, what);
       assert.ok(!parent.entries.has('k'), what + ': the folder is removed');
@@ -648,7 +773,7 @@ test('exportKit into a folder: one file sink each; cancel, a missing VP9 or a st
     const parent = fakeDir('Videos', []);
     const folder = await parent.getDirectoryHandle('k', { create: true });
     try {
-      await assert.rejects(kitRun(kitDoc({}), { dir: SINK.createDirSink(folder, { parent, name: 'k' }) }), (e) => e.code === 'no-webcodecs');
+      await assert.rejects(kitRun(kitDoc({}), { dir: SINK.createDirSink(folder, { parent, name: 'k', owned: true }) }), (e) => e.code === 'no-webcodecs');
     } finally {
       globalThis.VideoEncoder = saved;
     }
