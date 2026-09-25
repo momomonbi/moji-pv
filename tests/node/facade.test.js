@@ -457,6 +457,37 @@ test('post: filters run by stage, `when` gates accents, a failing filter is skip
   assert.ok(e3.engine.warnings().some((w) => w.code === 'part-error' && /brokenLens/.test(w.detail)));
   assert.throws(() => { const e4 = engineOf(reg); e4.engine.setPlan(bp); render(e4.engine, surfaceOf(e4.rec), bp.cuts[0].repT); }, /boom/,
     'a strict engine (tests) rethrows');
+
+  // a filter that throws after drawing on the stack's surface (fx.own): the frame is drawn again with every filter
+  // copying, so the output holds nothing of it (as a skipped filter never did before fx.own)
+  const torn = K.filter({ key: 'tornLens', label: { ja: '破れ', en: 'Torn' }, blurb: { ja: '破れ', en: 'Torn' }, stage: 'tone',
+    cost: 1, passes: 1, alphaSafe: true, apply(fx, src) {
+      const out = fx.own(src);
+      out.ctx.fillStyle = '#FF00FF';
+      out.ctx.fillRect(0, 0, 9, 9);
+      throw new Error('torn');
+    } });
+  const tr = REG.createRegistry([torn].concat(FALLBACKS));
+  const e5 = engineOf(tr, { strict: false });
+  const tp = FAC.samplePlan(tr, { kind: 'filter', key: 'tornLens' }, {});
+  e5.engine.setPlan(tp);
+  const s5 = surfaceOf(e5.rec);
+  m = e5.rec.mark();
+  const st5 = render(e5.engine, s5, tp.cuts[0].repT);
+  assert.ok(st5.drawn.glyphs > 0);
+  const ops5 = e5.rec.ops().slice(m);
+  const magenta = ops5.filter((op) => op[1] === 'set:fillStyle' && op[2] === '#FF00FF').map((op) => op[0]);
+  assert.equal(magenta.length, 2, 'the filter ran in both passes');
+  const puts = ops5.filter((op) => op[0] === s5.canvas.id && op[1] === 'drawImage');
+  assert.equal(puts.length, 1, 'one output onto the target');
+  assert.equal(magenta[0], puts[0][2], 'the first pass drew on the frame surface itself (pooled: the second pass reuses it)');
+  assert.notEqual(magenta[1], puts[0][2], 'the second pass drew on a copy, not on the output');
+  // the second pass redrew the frame surface from the start (its first ops after the second pass began)
+  const second = ops5.findIndex((op, k) => k > ops5.findIndex((x) => x[1] === 'set:fillStyle' && x[2] === '#FF00FF') &&
+    op[0] === puts[0][2]);
+  assert.ok(second > 0 && ['clearRect', 'save', 'setTransform', 'fillRect', 'set:globalAlpha', 'set:fillStyle'].includes(ops5[second][1]),
+    'the frame surface is drawn anew: ' + JSON.stringify(ops5[second]));
+  assert.equal(e5.engine.warnings().filter((w) => w.code === 'part-error' && /tornLens/.test(w.detail)).length, 1);
 });
 
 // --- warnings, fonts, prepare ------------------------------------------------------------------------------------------------
@@ -1229,6 +1260,64 @@ test('pooled surfaces and the target start every frame with default line state (
     const at = mine.indexOf(want);
     assert.ok(at >= 0 && at < firstFill, want + ' before the backdrop fill');
   }
+});
+
+test('pool.warm makes the missing frame surfaces once (cleared, touched) and leaves free ones alone; the preview warm-up of a seam', async () => {
+  const rec = recorder();
+  const pool = SF.createPool(rec.factory);
+  assert.equal(pool.warm(6), 0, 'no frame size yet');
+  pool.frame(64, 36);
+  const touched = [];
+  assert.equal(pool.warm(6, (sf) => touched.push(sf.canvas.id)), 6);
+  assert.equal(touched.length, 6);
+  assert.equal(pool.stats().created, 6);
+  assert.ok(touched.every((id) => rec.ops().some((op) => op[0] === id && op[1] === 'clearRect')), 'made cleared');
+  assert.equal(pool.warm(6, () => assert.fail('a warm pool touches nothing')), 0);
+  const m = rec.mark();
+  assert.equal(pool.warm(6), 0);
+  assert.equal(rec.ops().length, m, 'and draws nothing');
+  pool.begin();
+  const got = [0, 1, 2, 3, 4, 5].map(() => pool.take());
+  assert.equal(pool.stats().created, 6, 'six takes, none made');
+  assert.deepEqual(got.map((sf) => sf.canvas.id).sort(), touched.slice().sort());
+  pool.end();
+  assert.equal(pool.warm(100), pool.limit - 6, 'at most the limit');
+  pool.frame(32, 18);
+  assert.equal(pool.warm(2), 2, 'a new frame size starts empty');
+  pool.frame(48, 27);
+  let asks = 0;
+  assert.equal(pool.warm(3, null, () => ++asks === 1), 1, 'stop() after the first surface ends the call');
+  assert.equal(pool.warm(3, null, () => { asks++; return false; }), 2, 'the next call makes the rest');
+  assert.equal(asks, 3, 'asked after each surface made');
+  // the engine: the preview warm-up makes a seam's surfaces on a host canvas (settle), never on the recorder alone
+  const reg = MV.use('parts/catalog').defaultRegistry();
+  const doc = corpus.project('long').doc;
+  const run = async (host) => {
+    const r = recorder();
+    const factory = host ? Object.assign({}, r.factory, { settle() {} }) : r.factory;
+    const frameSized = () => [...r.sizes.values()].filter(([w, h]) => w === 320 && h === 180).length;
+    const perSlice = [];
+    let last = 0;
+    // no clock: a slice is due after 2 units of work (a build, a glyph that made a sprite, a surface warmed)
+    const engine = FAC.createEngine({ registry: reg, canvas: factory, measurer: fakeMeasurer(), fonts: null, assets: null, strict: true,
+      idle: () => { perSlice.push(frameSized() - last); last = frameSized(); return Promise.resolve(); } });
+    const plan = engine.setDoc(doc).plan;
+    const seam = plan.seams.find((x) => x.at > 5);
+    const s = surfaceOf(r, 320, 180);
+    const opts = { quality: 'preview', pick: false, scale: 320 / plan.design.w };
+    engine.renderFrame(s, seam.at - 1.5, opts);
+    last = frameSized();
+    await engine.prepare(seam.at - 1.5, seam.at + 1);
+    const before = frameSized();
+    engine.renderFrame(s, seam.at, opts);
+    return { made: frameSized() - before, warmed: before, perSlice };
+  };
+  const host = await run(true), plain = await run(false);
+  assert.equal(host.made, 0, 'the seam frame makes no surface: the warm-up made them');
+  assert.ok(plain.made > 0, 'without settle the seam frame makes its own (the recorder\'s ids stay as they were)');
+  assert.ok(host.warmed > plain.warmed);
+  assert.ok(host.perSlice.filter((n) => n > 0).length >= 2 && Math.max(...host.perSlice) <= 2,
+    'the surfaces are made over several slices, at most 2 in one: ' + host.perSlice.join(','));
 });
 
 test('adaptive level 3 draws at 0.75 only above 720p (the stage has already stepped a 720p preview down)', () => {

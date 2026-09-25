@@ -19,6 +19,7 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
   const IDENTITY = Object.freeze({ x: 0, y: 0, zoom: 1, roll: 0, shakeX: 0, shakeY: 0, fz: 1 });
   const NO_FEATURES = Object.freeze({});
   const OVERSAMPLE = 1.25;         // static ground rasters of a segment the shots zoom into (DESIGN_2_1 §4.8)
+  const SEAM_SURFACES = 6;         // frame surfaces a seam frame takes at once (a text seam: both sides and sumiSeep's 4)
 
   // mediaEntries(scene) → frozen [{ id, time, size, headroom, blur, softBlur }]: a scene's media nodes as mediaAt needs
   // them — size = the box's long side (design units; size × output scale × headroom = the px its draw asks for), blur
@@ -34,13 +35,18 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
     }));
   }
 
-  // createRenderer({ canvas: CanvasFactory, registry, assets, now?, strict?, spriteBudget? }) → Renderer
+  // createRenderer({ canvas: CanvasFactory, registry, assets, now?, strict?, spriteBudget?, postCopy? }) → Renderer
+  // (postCopy: lab and tests only — fx.own copies, the post stack as it drew before filters could draw in place)
   //   render(surface, plan, t, opts, source) → FrameStats   source = { cut(i), ground(i), fresh(kind, i), fontKey, face }
   //   warmAt(plan, source, t) · beginWarm() · warmBytes() · lastTime() · hitTest(x, y) · boxes() · stats() · level
   //   · setSpriteBudget(bytes) · clear() · dispose()
   //   (DESIGN_2_1, additive) setRegistry(registry) · mediaAt(plan, source, t, out, scale) (source.media(kind, i)
   //   optional) · lastScale() · opts.layers 'all' | 'ground' · opts.thumb (posters only) · FrameStats.media
   //   { drawn, waiting } and mediaError (export quality)
+  //   (lab only, additive) opts.flush(frame): called with the frame surface once the world is drawn, before the post
+  //   stack, and timed with the draw stage. The lab reads one pixel there, so the time the canvas spends rasterizing the
+  //   world is charged to 'draw' and not to 'post' (NOTES "Perf: camerawork + materials row", MEAS-1). Never set by
+  //   the app or an export: the readback itself costs time.
   // `now` (ms clock) comes from the host; without it frame times read 0 and the adaptive preview stays at level 0.
   function createRenderer(o) {
     const factory = o.canvas;
@@ -50,7 +56,7 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
     const sprites = SP.createSpriteCache(factory, { budget: o.spriteBudget });
     const paints = SH.createPaintCache(factory);
     const tiles = PO.createTileBank(factory);
-    const ctl = PO.createFx({ pool, tiles });
+    const ctl = PO.createFx({ pool, tiles, copy: o.postCopy === true });
     const scratch = SF.surfaceOf(factory, SP.MAX_SIDE, SP.MAX_SIDE, true);
     const dc = DR.createDrawContext({ sprites, paints, scratch, pool, blurred: (src, px) => PO.blurred(pool, src, px, ctl.caps) });
     const picks = PK.createPickList();
@@ -64,7 +70,7 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
     let fontKey = null;
     const adapt = { level: 0, ema: 0, slow: 0, fast: 0 };
     // The latest frame's time, device scale, backdrop, glyph path and probe (sprite warm-up draws what it would draw).
-    const lastLook = { t: NaN, scale: 0, backdrop: 'scene', glyphPath: 'auto', probe: null };
+    const lastLook = { t: NaN, scale: 0, backdrop: 'scene', glyphPath: 'auto', probe: null, fw: 0, fh: 0 };
     const last = { ms: 0, behave: 0, draw: 0, post: 0, passes: 0 };
     const palettes = new WeakMap();                // palette → { black, ids }
     let palSeq = 0;
@@ -504,6 +510,10 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
 
     // --- one frame --------------------------------------------------------------------------------------------------
 
+    // A frame is rendered once more with every filter copying its input (fx.own copies) when a filter threw after it had
+    // drawn on its input in place (PO.run's torn): the frame then shows what it would have shown had that filter never
+    // run, as every skipped filter did before fx.own. Errors are reported by the first pass.
+    let copyPass = false;
     function render(surface, plan, t, opts, source) {
       const start = clock();
       const ro = opts || {};
@@ -533,6 +543,7 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
       dc.t = t; dc.backdrop = backdrop; dc.quality = quality; dc.thumb = ro.thumb === true;
       dc.glyphPath = !exporting && (ro.glyphPath === 'sprite' || ro.glyphPath === 'direct') ? ro.glyphPath : 'auto';
       dc.probe = !exporting && ro.probe ? ro.probe : null;
+      dc.meter = ro.meter && typeof ro.meter === 'object' ? ro.meter : null;
       q.draft = quality === 'draft' || (!exporting && level >= 2);
       q.scale = dc.scale; q.pal = pal;
       lastLook.t = t; lastLook.scale = dc.scale; lastLook.backdrop = backdrop;
@@ -547,6 +558,7 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
       const fw = dpr === 1 ? sw : Math.max(1, Math.round(sw * dpr)), fh = dpr === 1 ? sh : Math.max(1, Math.round(sh * dpr));
       pool.frame(fw, fh);
       pool.begin();
+      lastLook.fw = fw; lastLook.fh = fh;
       dc.pick = ro.pick ? picks : null;
       if (ro.pick) picks.begin(plan);
 
@@ -566,13 +578,19 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
         if (seam.scope === 'world') drawWorldSeam(g, fw, fh, backdrop, part, seam.u);
         else drawTextSeam(g, fw, fh, backdrop, part, seam.u);
       } else drawWorld(g, fw, fh, 0, backdrop);     // (a text seam mixes only text layers: none with layers 'ground')
+      if (typeof ro.flush === 'function') ro.flush(frame);
       const tDraw = clock();
 
       let passes = 0;
       if (!direct) {
         let out = frame;
         if (post.length) {
-          const res = PO.run(ctl, pool, frame, post, t, level, onFilterError);
+          const res = PO.run(ctl, pool, frame, post, t, level, copyPass ? null : onFilterError, copyPass);
+          if (res.torn && !copyPass) {
+            pool.end();
+            copyPass = true;
+            try { return render(surface, plan, t, opts, source); } finally { copyPass = false; }
+          }
           out = res.out; passes = res.passes;
         }
         // The target is prepared first (cleared, or filled with the backdrop), so whatever a filter leaves transparent
@@ -636,7 +654,10 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
     // The cuts are gathered and evaluated as render() does, with their cameras, and every glyph off the direct path
     // looks up exactly the keys drawGlyph asks for (draw.warmLayer). Grounds are skipped (their text, if any, takes
     // the direct path), and so are static layers (drawn once into their raster). Nothing happens before the first frame.
-    function warmAt(plan, source, t) {
+    // stop (optional) is asked after each glyph that made a new sprite; when it answers true the walk ends there (a host
+    // canvas rasterizes each sprite as it is made, so a frame of large blurred glyphs is more work than one slice of
+    // engine.prepare): the caller yields and walks the same t again, finding the sprites made so far.
+    function warmAt(plan, source, t, stop) {
       if (!(lastLook.scale > 0) || !plan) return 0;
       fg = F.frameAt(plan, t, fg);
       nItems = 0;
@@ -645,6 +666,14 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
       if (fg.seam) {
         for (const i of fg.seam.aCuts) addCut(plan, source, i, t, 0);
         for (const i of fg.seam.bCuts) addCut(plan, source, i, t, 0);
+        // a seam draws each side on a frame surface and mixes them on more: on a host canvas those are made (and
+        // rasterized once) now, so the seam's first frame does not make them. The recorder has no settle: its canvas
+        // ids, and so its op streams, stay as they were. stop() is asked after each surface, as after each glyph that
+        // made a sprite: a warm-up slice makes at most one more surface once it is due.
+        if (typeof factory.settle === 'function' && lastLook.fw > 0) {
+          pool.frame(lastLook.fw, lastLook.fh);
+          pool.warm(SEAM_SURFACES, (sf) => factory.settle(sf.canvas), stop);
+        }
       }
       const s = lastLook.scale;
       dc.pal = paletteOf(plan.look.palette, lastLook.backdrop);
@@ -652,13 +681,15 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
       dc.glyphPath = lastLook.glyphPath; dc.probe = lastLook.probe;
       dc.D[0] = s; dc.D[1] = 0; dc.D[2] = 0; dc.D[3] = s; dc.D[4] = 0; dc.D[5] = 0;
       let n = 0;
-      for (let k = 0; k < nItems; k++) {
+      walk: for (let k = 0; k < nItems; k++) {
         const it = items[k];
         for (const Lk of WARM_LAYERS) {
           if (!DR.hasLayer(it.scene, Lk)) continue;
           const spec = it.scene.layers[Lk];
           if (spec && T.isIsolated(spec) && spec.cache === 'static' && !spec.mask && !spec.filter) continue;
-          n += DR.warmLayer(dc, it.scene, Lk, view(it.cam, Lk));
+          const got = DR.warmLayer(dc, it.scene, Lk, view(it.cam, Lk), stop);
+          if (got < 0) { n += -got - 1; break walk; }
+          n += got;
         }
       }
       nItems = 0;

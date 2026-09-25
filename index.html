@@ -1,6 +1,6 @@
 <!doctype html><html lang="ja"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-wrSiAiaRiRbE+VRW5Sw03vlPS6ZdtcO5q07vWYRHdbs='; style-src 'sha256-gmrSoWwvipUekLywDjXgyrJxA8IKarXht0Er4wORaLQ=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-qKJYPYuE2lZqLMHJOUf1GS6cXa8DvnPniWqQjRy0ELM='; style-src 'sha256-gmrSoWwvipUekLywDjXgyrJxA8IKarXht0Er4wORaLQ=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
 <title>文字PVメーカー</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -21134,8 +21134,31 @@ MV.def('engine/render/surface', [], () => {
       gen++;
     }
 
+    // warm(n, touch, stop) → the surfaces made: makes sure n full-frame surfaces (at most the limit) can be taken
+    // without making one, so the first frame of a seam (which takes several at once) does not pay for them. The missing
+    // ones are made cleared, passed to touch(surface) (the host rasterizes it now) and put in the free list; the free
+    // ones are left alone, so a warm pool costs nothing. stop() (optional) is asked after each surface made: true ends
+    // the call there (a time slice is due), and the next call makes the rest.
+    function warm(n, touch, stop) {
+      if (!(frameW > 0 && frameH > 0)) return 0;
+      const k = keyOf(frameW, frameH);
+      if (!free.has(k)) free.set(k, []);
+      const list = free.get(k);
+      let made = 0;
+      for (let have = list.length + fullOut; have < Math.min(n, limit); have++) {
+        const s = clear(surfaceOf(factory, frameW, frameH, true));
+        created++; live++; made++;
+        bytes += frameW * frameH * 4;
+        mine.set(s, gen);
+        if (touch) touch(s);
+        list.push(s);
+        if (stop && stop()) break;
+      }
+      return made;
+    }
+
     return {
-      frame, take, give, begin, end, isPooled, drop,
+      frame, take, give, begin, end, isPooled, drop, warm,
       get limit() { return limit; },
       stats: () => ({ live, out: out.size, bytes, created }),
     };
@@ -21522,6 +21545,41 @@ MV.def('engine/scene/behave', ['core/num', 'core/curve', 'core/rng', 'core/motio
     return Object.assign({}, beh, inner, { run: runWarped, warp: CV.warp(curve), w0, span: w1 - w0 });
   }
 
+  // --- sprite masks (DESIGN_2_1 §5.9.5) -------------------------------------------------------------------------
+
+  // The pose columns a glyph sprite budget can take back from a behaviour, by group: tint, echo and glow each on their
+  // own; blur with the shard and pixel columns (every column that puts a glyph on the sprite path); grow = the scale and
+  // depth columns (sx, sy, z: the size a glyph is drawn at).
+  const MASK_GROUPS = Object.freeze({ tint: Object.freeze(['tint']), echo: Object.freeze(['echo']), glow: Object.freeze(['glow']),
+    blur: Object.freeze(['blur', 'shard', 'pixel']), grow: Object.freeze(['sx', 'sy', 'z']) });
+
+  // A masked behaviour runs the behaviour it wraps and then puts back, on the nodes [mfrom, mto), the values the masked
+  // columns had before it ran: what it wrote there is dropped, what earlier behaviours wrote stays. Allocation-free per
+  // frame (the saved values live in `saved`, made at build).
+  function runMasked(P, t, b) {
+    const cols = b.cols, from = b.mfrom, n = b.mto - b.mfrom, sv = b.saved;
+    for (let c = 0; c < cols.length; c++) {
+      const col = P[cols[c]];
+      for (let j = 0; j < n; j++) sv[c * n + j] = col[from + j];
+    }
+    b.of.run(P, t, b.of);
+    for (let c = 0; c < cols.length; c++) {
+      const col = P[cols[c]];
+      for (let j = 0; j < n; j++) col[from + j] = sv[c * n + j];
+    }
+  }
+
+  // masked(beh, groups, from, to) → a behaviour that keeps beh's writes except those to the columns of `groups` (names of
+  // MASK_GROUPS) on the nodes [from, to) ∩ beh's range; beh itself when nothing is masked. Made at build, never per frame.
+  function masked(beh, groups, from, to) {
+    const cols = [];
+    for (const g of groups || []) for (const c of MASK_GROUPS[g] || []) if (!cols.includes(c)) cols.push(c);
+    const mfrom = Math.max(from, beh.from), mto = Math.min(to, beh.to);
+    if (cols.length === 0 || !(mto > mfrom)) return beh;
+    return Object.assign({}, beh, { run: runMasked, of: beh, cols: Object.freeze(cols), mfrom, mto,
+      saved: new Float32Array(cols.length * (mto - mfrom)) });
+  }
+
   // --- beat lookups without allocation ----------------------------------------------------------------------
 
   // Fills out { index, phase, since, bar } like Grid.beatAt(t) (core/beats) plus the bar index.
@@ -21784,7 +21842,7 @@ MV.def('engine/scene/behave', ['core/num', 'core/curve', 'core/rng', 'core/motio
   return {
     PH, LIVE, DELTA, BehaviourError, RAMP_IN, RAMP_OUT,
     check, sortBehaviours, isActive, runBehaviours, envelopeWeight, followWeight, beatInto,
-    runDrift, runFollow, runGlyphMotion, runHold, runWarped, warped,
+    runDrift, runFollow, runGlyphMotion, runHold, runWarped, warped, MASK_GROUPS, runMasked, masked,
     compileMoves, directionOf, exposedName, identityOf, motionTiming, motionTotal, glyphMotionMaker, holdMaker, easeOf,
     TRACK_UNITS,
   };
@@ -22790,6 +22848,37 @@ MV.def('engine/render/sprites', ['engine/scene/builder'], (B) => {
     return q < BLUR_CODES ? q : BLUR_CODES - 1;
   }
 
+  // inkRect(box, F, style, blurPx, side) → { x, y, w, h } | null: the part of a side × side glyph raster (the glyph drawn
+  // at its centre, F px per em) that its blurred ink can reach. box = the host's inkBox of the grapheme at F px
+  // ({ left, right, ascent, descent } from the draw point, measureText's actual bounding box); widened by half the
+  // outline, extended by the shadow or duo offset, padded by 3 blur standard deviations + 2 px (the blur's reach and the
+  // edge antialiasing), in whole px and clamped to the raster. Null without a box, or when the rect would be the whole
+  // raster. Outside the rect the whole raster holds nothing but transparency (tests/browser/glyph_parity.py checks
+  // it, and the rect's border too).
+  const INK_PAD_SIGMA = 3;
+  const INK_PAD_PX = 2;
+  function inkRect(box, F, style, blurPx, side) {
+    if (!box || !Number.isFinite(box.left) || !Number.isFinite(box.right) || !Number.isFinite(box.ascent) ||
+      !Number.isFinite(box.descent) || !(side > 0)) return null;
+    const c = side / 2;
+    let x0 = c - box.left, x1 = c + box.right, y0 = c - box.ascent, y1 = c + box.descent;
+    if (style === 'outline') {
+      const o = (OUTLINE_WIDTH * F) / 2;
+      x0 -= o; x1 += o; y0 -= o; y1 += o;
+    } else if (style === 'shadow') {
+      x1 += SHADOW_OFFSET[0] * F; y1 += SHADOW_OFFSET[1] * F;
+    } else if (style === 'duo') {
+      x1 += DUO_OFFSET[0] * F; y1 += DUO_OFFSET[1] * F;
+    }
+    const pad = INK_PAD_SIGMA * Math.max(0, blurPx) + INK_PAD_PX;
+    const clampPx = (v) => (v < 0 ? 0 : v > side ? side : v);
+    const ix = clampPx(Math.floor(Math.min(x0, x1) - pad)), iy = clampPx(Math.floor(Math.min(y0, y1) - pad));
+    const ix1 = clampPx(Math.ceil(Math.max(x0, x1) + pad)), iy1 = clampPx(Math.ceil(Math.max(y0, y1) + pad));
+    if (ix1 <= ix || iy1 <= iy) return null;
+    if (ix === 0 && iy === 0 && ix1 === side && iy1 === side) return null;
+    return { x: ix, y: iy, w: ix1 - ix, h: iy1 - iy };
+  }
+
   // Descends one level of the nested key maps, creating it when missing (only on a cache miss).
   function child(map, key) {
     let m = map.get(key);
@@ -22848,6 +22937,13 @@ MV.def('engine/render/sprites', ['engine/scene/builder'], (B) => {
 
     function canvasOf(w, h) { return factory.create(w, h, { alpha: true }); }
 
+    // A host factory's settle(canvas) rasterizes a new sprite now (engine/host/canvas), so a sprite made while the
+    // engine prepares is not painted inside the first frame that draws it. The recording factory has none.
+    function settled(e) {
+      if (typeof factory.settle === 'function') factory.settle(e.canvas);
+      return e;
+    }
+
     // A blurred draw: ctx.filter when it works, else the glyph drawn small and scaled up (a soft stand-in).
     function blurredDraw(ctx, side, blurPx, paint) {
       if (blurOk === null) blurOk = filterWorks(ctx);
@@ -22875,6 +22971,11 @@ MV.def('engine/render/sprites', ['engine/scene/builder'], (B) => {
     // they then match the direct path's edges closely (§4.19.5 parity). Blurred levels need no extra detail: a raster
     // whose blur is wider than BLUR_RASTER_PX is made smaller (a Gaussian that wide holds nothing finer than the grid,
     // so drawing it scaled up shows the same picture) — a 32 du blur of a large glyph takes kilobytes, not a megabyte.
+    // On a host factory that measures ink (inkBox) the entry keeps `ink`, the rect of the raster its ink can reach
+    // (inkRect: 2 px round the ink at level 0; 3 blur standard deviations + 2 px when blurred, only where ctx.filter
+    // blurs, since the small-and-scaled stand-in spreads differently): draw.spriteAt clips a draw that scales the raster
+    // up to it. The raster itself is made and kept whole, exactly as without inkBox, so its texels never change.
+    // Whether an entry has `ink` depends only on its key and the factory, never on the cache's history.
     function rasterGlyph(font, ch, ink, style, ink2, k, level, steps) {
       const F0 = bucketPx(k) * (level === 0 ? LEVEL0_SUPERSAMPLE : 1);
       const blur0 = steps / BLUR_STEPS;
@@ -22895,10 +22996,17 @@ MV.def('engine/render/sprites', ['engine/scene/builder'], (B) => {
       };
       if (blurPx > 0.01) blurredDraw(made.ctx, side, blurPx, paint);
       else paint(made.ctx);
-      return { canvas: made.canvas, w: side, h: side, cx: c, cy: c, F, bytes: side * side * 4, chain: null, code: 0, span: -1 };
+      let rect = null;
+      if (typeof factory.inkBox === 'function' && (blurPx <= 0.01 || blurOk)) {    // (blurredDraw has probed blurOk)
+        rect = inkRect(factory.inkBox(css, ch), F, style, blurPx > 0.01 ? blurPx : 0, side);
+      }
+      return { canvas: made.canvas, w: side, h: side, cx: c, cy: c, F, bytes: side * side * 4, ink: rect, chain: null, code: 0,
+        span: -1 };
     }
 
-    // glyph(font, ch, ink, style, ink2, k, level, emDu) → { canvas, w, h, cx, cy, F } with F = raster px per em.
+    // glyph(font, ch, ink, style, ink2, k, level, emDu) → { canvas, w, h, cx, cy, F, ink } with F = raster px per em and
+    // ink = null, or on a host with inkBox the rect { x, y, w, h } of the raster outside which it is transparent
+    // (inkRect; draw.spriteAt clips the draws that scale it up to it).
     // Key (§4.19.5): font, grapheme, ink, second ink, bucket k, blur level, style, and for blurred levels the blur in
     // raster px (it depends on the glyph's em in du).
     function glyph(font, ch, ink, style, ink2, k, level, emDu) {
@@ -22909,7 +23017,8 @@ MV.def('engine/render/sprites', ['engine/scene/builder'], (B) => {
       const code = ((k * 8 + level) * 8 + (STYLE_INDEX[style] || 0)) * BLUR_CODES + steps;
       const hit = leaf.get(code);
       if (hit) { touch(hit); return hit; }
-      return remember([chars, ch, inks, ink, seconds, second, leaf], code, rasterGlyph(font, ch, ink, style, ink2, k, level, steps));
+      return remember([chars, ch, inks, ink, seconds, second, leaf], code,
+        settled(rasterGlyph(font, ch, ink, style, ink2, k, level, steps)));
     }
 
     // The extent of one particle shape in its unit space (1 unit = the particle's size in du).
@@ -22950,7 +23059,7 @@ MV.def('engine/render/sprites', ['engine/scene/builder'], (B) => {
       const leaf = child(inks, ink);
       const hit = leaf.get(k);
       if (hit) { touch(hit); return hit; }
-      return remember([inks, ink, leaf], k, rasterParticle(rec, ink, k, font));
+      return remember([inks, ink, leaf], k, settled(rasterParticle(rec, ink, k, font)));
     }
 
     function clear() {
@@ -22974,8 +23083,8 @@ MV.def('engine/render/sprites', ['engine/scene/builder'], (B) => {
   }
 
   return {
-    LEVELS, DIRECT_BLUR, MAX_SIDE, BOX_EM, BUDGET, BUDGET_SHARED, STYLES, OUTLINE_WIDTH, SHADOW_OFFSET, DUO_OFFSET, BLUR_STEPS,
-    bucketOf, bucketPx, levelPair, blurStepsOf, paintStyled, createSpriteCache,
+    LEVELS, DIRECT_BLUR, MAX_SIDE, BOX_EM, BLUR_REACH, BUDGET, BUDGET_SHARED, STYLES, OUTLINE_WIDTH, SHADOW_OFFSET, DUO_OFFSET, BLUR_STEPS,
+    bucketOf, bucketPx, levelPair, blurStepsOf, paintStyled, createSpriteCache, inkRect,
   };
 });
 /* 文字PVメーカー v2 — original work. Non-text draw paths: shapes, paints (with the static raster cache), particles, images and media (DESIGN §4.19.6; DESIGN_2_1 §11.5.4–§11.5.5). */
@@ -24463,9 +24572,74 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
     }
   }
 
-  function spriteAt(g, sp, e, alpha) {
+  // One sprite at the glyph's origin, e du per raster px, drawn whole. A raster that carries its ink rect (sp.ink: a host
+  // with inkBox; outside the rect it is transparent, engine/render/sprites inkRect) and is drawn scaled up on both axes
+  // is clipped to that rect widened by INK_CLIP texels, so a canvas without a GPU spends its time only there. The clip
+  // is chosen so that every pixel is what the unclipped draw gives (clip, from inkClip):
+  //   INK_ALL  — a draw whose transform turns or skews the raster: all four sides. A canvas maps each pixel on its own
+  //              then; a pixel cut or touched by the clip samples only transparent texels (a texel is ≥ 1 device px when
+  //              scaling up, and the bilinear footprint is 2 × 2 texels), so its value stays;
+  //   INK_OPEN_LEFT / INK_OPEN_RIGHT — a scale-and-translate draw: the top, the bottom and the side where the canvas's
+  //              rows end. A software canvas steps along each row from the row's first pixel in fixed point, so a row
+  //              that starts elsewhere rounds a few texel weights differently (1–5/255, measured); the side where rows
+  //              start (the device's left: the raster's left, or its right when the draw is mirrored) stays open.
+  // A draw that scales down on any axis (a canvas may sample it through mip levels, whose footprint is wider) and every
+  // draw on the recorder (no ink rects) are not clipped (INK_NONE).
+  const INK_CLIP = 2;
+  const INK_NONE = 0, INK_ALL = 1, INK_OPEN_LEFT = 2, INK_OPEN_RIGHT = 3;
+  function spriteAt(g, sp, e, alpha, clip, meter) {
     g.globalAlpha = alpha;
-    g.drawImage(sp.canvas, -sp.cx * e, -sp.cy * e, sp.w * e, sp.h * e);
+    const r = clip !== INK_NONE ? sp.ink : null;
+    const x = -sp.cx * e, y = -sp.cy * e, w = sp.w * e, h = sp.h * e;
+    if (!r) {
+      if (meter) metered(g, meter, x, y, x + w, y + h);
+      g.drawImage(sp.canvas, x, y, w, h);
+      return;
+    }
+    // (an open side lies a texel beyond the quad, so no row of the quad starts on the clip's edge)
+    const cy0 = (r.y - INK_CLIP - sp.cy) * e, cy1 = (r.y + r.h + INK_CLIP - sp.cy) * e;
+    const cx0 = clip === INK_OPEN_LEFT ? x - e : (r.x - INK_CLIP - sp.cx) * e;
+    const cx1 = clip === INK_OPEN_RIGHT ? x + w + e : (r.x + r.w + INK_CLIP - sp.cx) * e;
+    if (meter) metered(g, meter, Math.max(x, cx0), Math.max(y, cy0), Math.min(x + w, cx1), Math.min(y + h, cy1));
+    g.save();
+    g.beginPath();
+    g.rect(cx0, cy0, cx1 - cx0, cy1 - cy0);
+    g.clip();
+    g.drawImage(sp.canvas, x, y, w, h);
+    g.restore();
+  }
+
+  // The lab's sprite meter (render option `meter`, never set by the app or an export): the device px of the frame a
+  // sprite draw covers (the bounding box of its drawn rect, within the frame) and the number of draws.
+  function metered(g, meter, x0, y0, x1, y1) {
+    const m = g.getTransform();
+    let lx = Infinity, ly = Infinity, hx = -Infinity, hy = -Infinity;
+    for (let k = 0; k < 4; k++) {
+      const px = k & 1 ? x1 : x0, py = k & 2 ? y1 : y0;
+      const X = m.a * px + m.c * py + m.e, Y = m.b * px + m.d * py + m.f;
+      if (X < lx) lx = X; if (X > hx) hx = X; if (Y < ly) ly = Y; if (Y > hy) hy = Y;
+    }
+    const w = Math.min(hx, meter.w) - Math.max(lx, 0), h = Math.min(hy, meter.h) - Math.max(ly, 0);
+    if (w > 0 && h > 0) meter.px += w * h;
+    meter.n++;
+  }
+
+  // The smallest device scale of a glyph's draw (device px per du along its shortest axis): the smaller singular value
+  // of M, times the tate-chu-yoko squeeze.
+  function minScaleOf(M, rec) {
+    const a = M[0], b = M[1], c = M[2], d = M[3];
+    const t = a * a + b * b + c * c + d * d, det = a * d - b * c;
+    const s = Math.sqrt(Math.max(0, (t - Math.sqrt(Math.max(0, t * t - 4 * det * det))) / 2));
+    return rec.sx < 1 ? s * rec.sx : s;
+  }
+
+  // The clip spriteAt gives a raster drawn under M and the glyph's own turn (localTurn): none unless it has an ink rect
+  // and is scaled up on both axes; all sides when the transform turns (a turned glyph, or M with a rotation or skew);
+  // else open on the side where device rows start (M's x scale times the squeeze: positive → the raster's left).
+  function inkClip(sp, rec, M) {
+    if (!sp.ink || (rec.em / sp.F) * minScaleOf(M, rec) < 1) return INK_NONE;
+    if (rec.rot || M[1] !== 0 || M[2] !== 0) return INK_ALL;
+    return M[0] * rec.sx > 0 ? INK_OPEN_LEFT : INK_OPEN_RIGHT;
   }
 
   // The crossfaded pair of blur levels of one ink/style (§4.19.5: alpha 1 − f and f). Without a target (g null: a
@@ -24478,8 +24652,8 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
     setMatrix(g, M);
     if (dx) g.translate(dx, 0);
     localTurn(g, rec);
-    if (pr.f < 1) spriteAt(g, lo, rec.em / lo.F, alpha * (1 - pr.f));
-    if (hi) spriteAt(g, hi, rec.em / hi.F, alpha * pr.f);
+    if (pr.f < 1) spriteAt(g, lo, rec.em / lo.F, alpha * (1 - pr.f), inkClip(lo, rec, M), dc.meter);
+    if (hi) spriteAt(g, hi, rec.em / hi.F, alpha * pr.f, inkClip(hi, rec, M), dc.meter);
   }
 
   function drawPixelated(dc, g, sp, e, alpha, pixel) {
@@ -24515,7 +24689,7 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
     setMatrix(g, M);
     localTurn(g, rec);
     g.globalCompositeOperation = 'lighter';
-    spriteAt(g, gl, rec.em / gl.F, alpha * (glow > 1 ? 1 : glow));
+    spriteAt(g, gl, rec.em / gl.F, alpha * (glow > 1 ? 1 : glow), inkClip(gl, rec, M), dc.meter);
     g.globalCompositeOperation = 'source-over';
   }
 
@@ -24583,6 +24757,114 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
     }
     if (reveal < 1 && g) { g.restore(); dc.font = null; }
     return true;
+  }
+
+  // --- the glyph cost model (DESIGN_2_1 §5.9.5) ------------------------------------------------------------------
+
+  // glyphCover(rec, P, i, wa, M, W, H) → the du² of the frame [0, W] × [0, H] that drawing glyph node i (pose P, world
+  // alpha wa) covers under the screen matrix M (du → frame du), summed over what drawGlyph draws (a spot drawn twice
+  // counts twice), each draw counted by the bounding box of its rect within the frame:
+  //   - the direct path: the glyph's ink (fillText), its two echo copies and its tint copy;
+  //   - the sprite path: the halo (a glow, or the text style's; also on the direct path), the echo pairs, the body (a
+  //     crossfaded pair of blur levels, or one raster for shards and pixels) and the tint pair. Each sprite counts at
+  //     least the rect spriteAt draws of it at 720p or larger: a raster of level ≤ 2 whole (it may be drawn scaled down,
+  //     which is never clipped), shards (widened by the strips' spread) and the mosaic whole, and a level ≥ 3 raster from
+  //     its box's left edge to the ink's right edge plus the clip's pad (the open side of the scale-and-translate clip)
+  //     by the ink's height plus the pad.
+  // The ink is taken as inkEm(style) em (or half the cell, if larger) either side of the glyph's centre. Allocation-free.
+  const COVER_INK = 0.66;        // the ink's reach from the centre in em: descenders and emoji reach 0.63 (textBaseline middle)
+  const COVER_PX = 3;            // 2 device px of antialiasing at 720p (1.5 du per px)
+  // what a text style adds to the reach (engine/render/sprites: half the outline, the shadow's or duo's larger offset)
+  const COVER_STYLE = Object.freeze({ outline: SP.OUTLINE_WIDTH / 2, shadow: Math.max(...SP.SHADOW_OFFSET),
+    duo: Math.max(...SP.DUO_OFFSET) });
+  // inkEm(style) → the ink's reach from the glyph's centre (em) the model assumes for a text style
+  // (tests/browser/glyph_parity.py holds every measured ink rect to it).
+  function inkEm(style) { return COVER_INK + (COVER_STYLE[style] || 0); }
+  function inkReach(rec) { return Math.max(inkEm(rec.style) * rec.em, 0.5 * (rec.w || 0), 0.5 * (rec.h || 0)); }
+  const COVER_M = new Float64Array(6);          // M · the glyph's own turn (localTurn)
+  const COVER_PAIR = { lo: 0, hi: 0, f: 0 };
+
+  // count (optional, tests): { sprites, inks } incremented per sprite and per direct-path ink draw counted.
+  function glyphCover(rec, P, i, wa, M, W, H, count) {
+    if (!(P.reveal[i] > 0.001) || !(wa >= T.MIN_ALPHA)) return 0;
+    return poseCover(rec, P.blur[i], P.glow[i], P.shard[i], P.pixel[i], P.echo[i], P.tint[i], M, W, H, count);
+  }
+
+  // poseCover(rec, blur, glow, shard, pixel, echo, tint, M, W, H, count?) → glyphCover for a visible glyph with these
+  // pose values.
+  let COUNT = null;
+  function poseCover(rec, blurIn, glow, shard, pixel, echo, tint, M, W, H, count) {
+    COUNT = count || null;
+    if (!rec || !rec.font || rec.cls === 'space') return 0;
+    const blur = blurIn > 0 ? blurIn : 0;
+    const halo = rec.style === 'glow' && glow < STYLE_GLOW ? STYLE_GLOW : glow;
+    const direct = blur < SP.DIRECT_BLUR && glow < 0.01 && shard === 0 && pixel < 1;
+    const N = COVER_M;
+    N[0] = M[0]; N[1] = M[1]; N[2] = M[2]; N[3] = M[3]; N[4] = M[4]; N[5] = M[5];
+    if (rec.rot === 2) { N[0] = -N[0]; N[1] = -N[1]; }                      // scale(−1, 1)
+    if (rec.rot) { const a = N[0], b = N[1]; N[0] = N[2]; N[1] = N[3]; N[2] = -a; N[3] = -b; }   // rotate(π/2)
+    if (rec.sx !== 1) { N[0] *= rec.sx; N[1] *= rec.sx; }                  // scale(sx, 1)
+    let sum = 0;
+    if (halo > 0) sum += rasterCover(rec, M, GLOW_LEVEL, 0, 0, false, W, H);
+    if (direct) {
+      if (echo > 0) { const dx = ECHO_SHIFT * echo * rec.em; sum += inkCover(rec, M, dx, W, H) + inkCover(rec, M, -dx, W, H); }
+      sum += inkCover(rec, M, 0, W, H);
+      if (tint > 0) sum += inkCover(rec, M, 0, W, H);
+      return sum;
+    }
+    const pr = SP.levelPair(blur, COVER_PAIR);
+    if (echo > 0) {
+      const dx = ECHO_SHIFT * echo * rec.em;
+      sum += pairCover(rec, M, pr, dx, W, H) + pairCover(rec, M, pr, -dx, W, H);
+    }
+    if (pixel >= 1 || shard > 0) sum += rasterCover(rec, M, pr.lo, 0, pixel >= 1 ? 0 : shard, true, W, H);
+    else sum += pairCover(rec, M, pr, 0, W, H);
+    if (tint > 0) sum += pairCover(rec, M, pr, 0, W, H);
+    return sum;
+  }
+
+  // The frame du² of the glyph's ink (a direct-path fillText), dx = an echo shift before the glyph's own turn.
+  function inkCover(rec, M, dx, W, H) {
+    if (COUNT) COUNT.inks++;
+    const ink = inkReach(rec) + COVER_PX;
+    return rectCover(M, -ink, -ink, ink, ink, dx, W, H);
+  }
+
+  function pairCover(rec, M, pr, dx, W, H) {
+    const lo = pr.lo, hi = pr.hi, f = pr.f;       // (read before rasterCover: pr is shared)
+    return (f < 1 ? rasterCover(rec, M, lo, dx, 0, false, W, H) : 0) + (f > 0 ? rasterCover(rec, M, hi, dx, 0, false, W, H) : 0);
+  }
+
+  // The frame du² one raster of blur level `level` covers: whole (level ≤ 2, shards spread by `shard`, the mosaic) or
+  // clipped to the ink (level ≥ 3); dx = the echo shift, in the node frame before the glyph's own turn (spritePair).
+  function rasterCover(rec, M, level, dx, shard, whole, W, H) {
+    if (COUNT) COUNT.sprites++;
+    const em = rec.em, blurDu = SP.LEVELS[level];
+    // a raster px is at most max(blur/4, 0.0035 em) du (BLUR_RASTER_PX, MAX_SIDE), so its 2 px margins are within the
+    // added 0.5·blur + 0.01 em, and the clip's pad (3σ + 2 px, widened by INK_CLIP texels) within 4·blur + 0.015 em
+    const half = (SP.BOX_EM * em) / 2 + SP.BLUR_REACH * blurDu + 0.5 * blurDu + 0.01 * em + COVER_PX;
+    let x0 = -half, x1 = half, y0 = -half, y1 = half;
+    if (!whole && level >= 3) {
+      const ink = inkReach(rec);
+      const pad = 4 * blurDu + 0.015 * em + COVER_PX;
+      x1 = ink + pad; y0 = -ink - pad; y1 = ink + pad;
+    }
+    if (shard > 0) { const sx = 0.6 * shard * em, sy = 0.4 * shard * em; x0 -= sx; x1 += sx; y0 -= sy; y1 += sy; }
+    return rectCover(M, x0, y0, x1, y1, dx, W, H);
+  }
+
+  // The frame du² of the bounding box of the rect x0..x1 × y0..y1 (after the glyph's own turn, COVER_M) moved by dx in
+  // the node frame (M's own axes).
+  function rectCover(M, x0, y0, x1, y1, dx, W, H) {
+    const N = COVER_M, ox = N[4] + M[0] * dx, oy = N[5] + M[1] * dx;
+    let lx = Infinity, ly = Infinity, hx = -Infinity, hy = -Infinity;
+    for (let k = 0; k < 4; k++) {
+      const u = k & 1 ? x1 : x0, v = k & 2 ? y1 : y0;
+      const X = N[0] * u + N[2] * v + ox, Y = N[1] * u + N[3] * v + oy;
+      if (X < lx) lx = X; if (X > hx) hx = X; if (Y < ly) ly = Y; if (Y > hy) hy = Y;
+    }
+    const w = Math.min(hx, W) - Math.max(lx, 0), h = Math.min(hy, H) - Math.max(ly, 0);
+    return w > 0 && h > 0 ? w * h : 0;
   }
 
   // --- a scene layer ------------------------------------------------------------------------------------------------
@@ -24727,10 +25009,12 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
     g.globalAlpha = 1;
   }
 
-  // warmLayer(dc, scene, L, view) → glyphs visited: the sprite lookups drawLayer would make for the glyphs of one layer
-  // (the same keys: size bucket from the full transform with pose scale and camera zoom, blur level pair, flip-shaded
-  // ink, halo, echo and tint inks, level 0 for pixel and shard), without drawing. Missing sprites are rasterized now.
-  function warmLayer(dc, scene, L, view) {
+  // warmLayer(dc, scene, L, view, stop?) → glyphs visited: the sprite lookups drawLayer would make for the glyphs of one
+  // layer (the same keys: size bucket from the full transform with pose scale and camera zoom, blur level pair,
+  // flip-shaded ink, halo, echo and tint inks, level 0 for pixel and shard), without drawing. Missing sprites are
+  // rasterized now. stop() is asked after each glyph that made a sprite; when it answers true the walk ends there and
+  // the result is −(glyphs visited) − 1.
+  function warmLayer(dc, scene, L, view, stop) {
     const list = nodesByLayer(scene)[L];
     if (list.length === 0) return 0;
     const t = scene.table, g0 = dc.g;
@@ -24741,7 +25025,9 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
         const i = list[k];
         if (t.type[i] !== TYPE.glyph || T.isHidden(t, i)) continue;
         const VW = MAT.mul(dc.VW, view, worldInto(dc.W6, t, i));
+        const made = dc.sprites.made;
         if (drawGlyph(dc, scene, i, MAT.mul(dc.M, dc.D, VW))) n++;
+        if (stop && dc.sprites.made !== made && stop()) return -n - 1;
       }
     } finally {
       dc.g = g0;
@@ -24750,11 +25036,11 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
   }
 
   return { createDrawContext, resetCounts, drawLayer, warmLayer, drawGlyph, hasLayer, hasMedia, hasStill, nodesByLayer, inkOf,
-    secondInk, shaded, cssOf, clipReveal, STYLE_GLOW, GLOW_LEVEL };
+    secondInk, shaded, cssOf, clipReveal, minScaleOf, inkClip, INK_CLIP, glyphCover, poseCover, inkEm, STYLE_GLOW, GLOW_LEVEL };
 });
 /* 文字PVメーカー v2 — original work. Post stack: the FxContext, texture tiles, blurs and the ordered screen-effect passes (DESIGN §4.18.11, §4.19.2). */
-MV.def('engine/render/post', ['core/hash', 'core/rng', 'core/noise', 'core/schema', 'engine/scene/frame'],
-(H, RNG, NZ, SCH, F) => {
+MV.def('engine/render/post', ['core/hash', 'core/rng', 'core/noise', 'core/schema', 'engine/scene/frame', 'engine/render/surface'],
+(H, RNG, NZ, SCH, F, SF) => {
   'use strict';
 
   const STAGES = Object.freeze(['shape', 'tone', 'light', 'optic', 'film']);
@@ -24972,12 +25258,14 @@ MV.def('engine/render/post', ['core/hash', 'core/rng', 'core/noise', 'core/schem
 
   // --- the FxContext ---------------------------------------------------------------------------------------------------
 
-  // createFx({ pool, tiles }) → the §4.18.11 FxContext, one per renderer. frame(o) sets the per-frame fields; use(seed,
-  // cut, allowTextAt) prepares one filter or seam call. fx.cut is null for the work-level texture.
+  // createFx({ pool, tiles, copy? }) → the §4.18.11 FxContext, one per renderer. frame(o) sets the per-frame fields;
+  // use(seed, cut, allowTextAt, own) prepares one filter or seam call (own: fx.own may hand the filter its input to draw
+  // on, true only in run()); drew() says whether the call since use() drew on its input. fx.cut is null for the
+  // work-level texture. copy (lab and tests only) makes fx.own always copy, as it did before it existed.
   function createFx(o) {
-    const pool = o.pool, tiles = o.tiles;
+    const pool = o.pool, tiles = o.tiles, copy = o.copy === true;
     const caps = { filter: null };
-    const st = { plan: null, seed: 0, allowTextAt: false, textAt: null, textCalls: 0, flashScale: 1,
+    const st = { plan: null, seed: 0, allowTextAt: false, textAt: null, textCalls: 0, flashScale: 1, own: false, drew: false,
       beat: { index: 0, phase: 0, since: 0, bar: 0 } };
     // Additive to the FROZEN §4.18.11 FxContext: `pal`, the frame palette after the backdrop rule (§4.19.4), the one the
     // paints draw with (duoTone maps the frame to its ground and accent); `flashScale`, the preview's reduce-flash
@@ -24987,10 +25275,25 @@ MV.def('engine/render/post', ['core/hash', 'core/rng', 'core/noise', 'core/schem
     // a frame-sized picture that is the same on every frame (edgeShade's vignette) painted once per key and frame size
     // by paint(ctx, w, h) and kept (tile bank), so a costly full-frame paint becomes one drawImage. Too large to keep, it
     // is painted into a frame surface that the frame's pool.end() takes back.
+    // `own(src)` (additive, NOTES "Perf: camerawork + materials row", POST-1): the surface a filter draws its result on,
+    // with the picture of src and the state of a new surface (transform, alpha, blend, smoothing, filter, line and fill
+    // state reset). In the post stack that is src itself, which the pipeline owns and nothing reads after the filter;
+    // elsewhere (a seam's fx, a surface the pool did not make) a copy, as `take()` plus `drawImage(src)` made before. A
+    // filter that calls own(src) reads src only before that call, and returns what own gave it.
     const fx = {
       w: 0, h: 0, unit: 1, quality: 'preview', alpha: false, cut: null, pal: null, flashScale: 1, backdrop: 'scene',
       take: () => pool.take(fx.w, fx.h),
       give: (s) => pool.give(s),
+      own(src) {
+        if (st.own && !copy && pool.isPooled(src) && src.w === fx.w && src.h === fx.h) {
+          SF.resetState(src.ctx);
+          st.drew = true;
+          return src;
+        }
+        const out = pool.take(fx.w, fx.h);
+        out.ctx.drawImage(src.canvas, 0, 0);
+        return out;
+      },
       isolate: (src, ch) => isolate(pool, src, ch),
       blurred: (src, px) => blurred(pool, src, px, caps),
       impulse: (kind, t) => (st.plan ? F.impulseAt(st.plan, kind, t) * (kind === 'flash' ? st.flashScale : 1) : 0),
@@ -25021,7 +25324,10 @@ MV.def('engine/render/post', ['core/hash', 'core/rng', 'core/noise', 'core/schem
         fx.pal = f.pal || null; fx.flashScale = st.flashScale; fx.backdrop = f.backdrop || (f.alpha ? 'clear' : 'scene');
       },
       size(w, h, unit) { fx.w = w; fx.h = h; fx.unit = unit; },
-      use(seed, cut, allowTextAt) { st.seed = seed >>> 0; fx.cut = cut; st.allowTextAt = !!allowTextAt; },
+      use(seed, cut, allowTextAt, own) {
+        st.seed = seed >>> 0; fx.cut = cut; st.allowTextAt = !!allowTextAt; st.own = own === true; st.drew = false;
+      },
+      drew: () => st.drew,
     };
     return control;
   }
@@ -25097,13 +25403,17 @@ MV.def('engine/render/post', ['core/hash', 'core/rng', 'core/noise', 'core/schem
     return out;
   }
 
-  // run(ctl, pool, src, list, t, level, onError) → { out, passes }: each filter's apply(fx, src, p, t) in order,
-  // ping-ponging pooled surfaces. level = the adaptive preview level (0 in export). A filter that throws is skipped and
-  // reported through onError(entry, error).
-  function run(ctl, pool, src, list, t, level, onError) {
+  // run(ctl, pool, src, list, t, level, onError, copy?) → { out, passes, torn }: each filter's apply(fx, src, p, t) in
+  // order, ping-ponging pooled surfaces. level = the adaptive preview level (0 in export). The input of each filter is a
+  // pooled surface this pipeline owns (src, the frame, or an earlier filter's result), and only the returned surface is
+  // read afterwards, so fx.own lets a filter draw on it instead of copying it (copy: true makes fx.own copy, as it did
+  // before). A filter that throws is skipped and reported through onError(entry, error). torn = one that threw had
+  // already drawn on its input (fx.own): what the stack returns then shows part of it, and the caller renders the frame
+  // again with copy (the renderer does), so a skipped filter never leaves a trace.
+  function run(ctl, pool, src, list, t, level, onError, copy) {
     const fx = ctl.fx;
     const fullW = fx.w, fullH = fx.h, unit = fx.unit;
-    let cur = src, passes = 0;
+    let cur = src, passes = 0, torn = false;
     for (let k = 0; k < list.length; k++) {
       const e = list[k];
       const cost = e.def.cost || 1;
@@ -25112,7 +25422,7 @@ MV.def('engine/render/post', ['core/hash', 'core/rng', 'core/noise', 'core/schem
       if (!(w > 0)) continue;
       const p = pooledParams(e.p);
       if (typeof e.p.amount === 'number') p.amount = e.p.amount * w;
-      ctl.use(e.seed, e.cut, (e.def.needs || []).includes('textAt'));
+      ctl.use(e.seed, e.cut, (e.def.needs || []).includes('textAt'), copy !== true);
       const half = level >= 1 && cost >= HALF_COST;
       try {
         let input = cur;
@@ -25125,11 +25435,11 @@ MV.def('engine/render/post', ['core/hash', 'core/rng', 'core/noise', 'core/schem
         if (!out || !out.canvas) throw new FxError('bad-result', 'apply() must return a Surface');
         if (half) {
           ctl.size(fullW, fullH, unit);
-          if (out === input) out = cur;
+          if (out === input && !ctl.drew()) out = cur;       // nothing drawn: the full-resolution input stays
           else {
             const up = pool.take(fullW, fullH);
             up.ctx.drawImage(out.canvas, 0, 0, out.w, out.h, 0, 0, fullW, fullH);
-            pool.give(out);
+            if (out !== input) pool.give(out);             // (input, drawn on in place, is given back below)
             out = up;
           }
           pool.give(input);
@@ -25138,10 +25448,11 @@ MV.def('engine/render/post', ['core/hash', 'core/rng', 'core/noise', 'core/schem
         passes += e.def.passes || 1;
       } catch (err) {
         ctl.size(fullW, fullH, unit);
+        if (ctl.drew()) torn = true;
         if (onError) onError(e, err);
       }
     }
-    return { out: cur, passes };
+    return { out: cur, passes, torn };
   }
 
   return { STAGES, STAGE_INDEX, TILE, TILE_NAMES, FxError, blurred, isolate, createTileBank, createFx, paramsFor,
@@ -25308,6 +25619,12 @@ MV.def('engine/render/record', ['core/hash', 'core/rng', 'core/noise', 'core/col
         return s;
       },
       give(s) { if (s && s.canvas) { pool.push(s); out--; } },
+      // A recording FxContext stands for the filter alone, outside a post stack: own(src) is always a copy.
+      own(src) {
+        const s = fx.take();
+        s.ctx.drawImage(src.canvas, 0, 0);
+        return s;
+      },
       isolate(src, ch) {
         if (!CHANNEL[ch]) throw new FxError('bad-channel', 'isolate needs r g b c m or y');
         const s = fx.take(), g = s.ctx;
@@ -25585,6 +25902,7 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
   const IDENTITY = Object.freeze({ x: 0, y: 0, zoom: 1, roll: 0, shakeX: 0, shakeY: 0, fz: 1 });
   const NO_FEATURES = Object.freeze({});
   const OVERSAMPLE = 1.25;         // static ground rasters of a segment the shots zoom into (DESIGN_2_1 §4.8)
+  const SEAM_SURFACES = 6;         // frame surfaces a seam frame takes at once (a text seam: both sides and sumiSeep's 4)
 
   // mediaEntries(scene) → frozen [{ id, time, size, headroom, blur, softBlur }]: a scene's media nodes as mediaAt needs
   // them — size = the box's long side (design units; size × output scale × headroom = the px its draw asks for), blur
@@ -25600,13 +25918,18 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
     }));
   }
 
-  // createRenderer({ canvas: CanvasFactory, registry, assets, now?, strict?, spriteBudget? }) → Renderer
+  // createRenderer({ canvas: CanvasFactory, registry, assets, now?, strict?, spriteBudget?, postCopy? }) → Renderer
+  // (postCopy: lab and tests only — fx.own copies, the post stack as it drew before filters could draw in place)
   //   render(surface, plan, t, opts, source) → FrameStats   source = { cut(i), ground(i), fresh(kind, i), fontKey, face }
   //   warmAt(plan, source, t) · beginWarm() · warmBytes() · lastTime() · hitTest(x, y) · boxes() · stats() · level
   //   · setSpriteBudget(bytes) · clear() · dispose()
   //   (DESIGN_2_1, additive) setRegistry(registry) · mediaAt(plan, source, t, out, scale) (source.media(kind, i)
   //   optional) · lastScale() · opts.layers 'all' | 'ground' · opts.thumb (posters only) · FrameStats.media
   //   { drawn, waiting } and mediaError (export quality)
+  //   (lab only, additive) opts.flush(frame): called with the frame surface once the world is drawn, before the post
+  //   stack, and timed with the draw stage. The lab reads one pixel there, so the time the canvas spends rasterizing the
+  //   world is charged to 'draw' and not to 'post' (NOTES "Perf: camerawork + materials row", MEAS-1). Never set by
+  //   the app or an export: the readback itself costs time.
   // `now` (ms clock) comes from the host; without it frame times read 0 and the adaptive preview stays at level 0.
   function createRenderer(o) {
     const factory = o.canvas;
@@ -25616,7 +25939,7 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
     const sprites = SP.createSpriteCache(factory, { budget: o.spriteBudget });
     const paints = SH.createPaintCache(factory);
     const tiles = PO.createTileBank(factory);
-    const ctl = PO.createFx({ pool, tiles });
+    const ctl = PO.createFx({ pool, tiles, copy: o.postCopy === true });
     const scratch = SF.surfaceOf(factory, SP.MAX_SIDE, SP.MAX_SIDE, true);
     const dc = DR.createDrawContext({ sprites, paints, scratch, pool, blurred: (src, px) => PO.blurred(pool, src, px, ctl.caps) });
     const picks = PK.createPickList();
@@ -25630,7 +25953,7 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
     let fontKey = null;
     const adapt = { level: 0, ema: 0, slow: 0, fast: 0 };
     // The latest frame's time, device scale, backdrop, glyph path and probe (sprite warm-up draws what it would draw).
-    const lastLook = { t: NaN, scale: 0, backdrop: 'scene', glyphPath: 'auto', probe: null };
+    const lastLook = { t: NaN, scale: 0, backdrop: 'scene', glyphPath: 'auto', probe: null, fw: 0, fh: 0 };
     const last = { ms: 0, behave: 0, draw: 0, post: 0, passes: 0 };
     const palettes = new WeakMap();                // palette → { black, ids }
     let palSeq = 0;
@@ -26070,6 +26393,10 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
 
     // --- one frame --------------------------------------------------------------------------------------------------
 
+    // A frame is rendered once more with every filter copying its input (fx.own copies) when a filter threw after it had
+    // drawn on its input in place (PO.run's torn): the frame then shows what it would have shown had that filter never
+    // run, as every skipped filter did before fx.own. Errors are reported by the first pass.
+    let copyPass = false;
     function render(surface, plan, t, opts, source) {
       const start = clock();
       const ro = opts || {};
@@ -26099,6 +26426,7 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
       dc.t = t; dc.backdrop = backdrop; dc.quality = quality; dc.thumb = ro.thumb === true;
       dc.glyphPath = !exporting && (ro.glyphPath === 'sprite' || ro.glyphPath === 'direct') ? ro.glyphPath : 'auto';
       dc.probe = !exporting && ro.probe ? ro.probe : null;
+      dc.meter = ro.meter && typeof ro.meter === 'object' ? ro.meter : null;
       q.draft = quality === 'draft' || (!exporting && level >= 2);
       q.scale = dc.scale; q.pal = pal;
       lastLook.t = t; lastLook.scale = dc.scale; lastLook.backdrop = backdrop;
@@ -26113,6 +26441,7 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
       const fw = dpr === 1 ? sw : Math.max(1, Math.round(sw * dpr)), fh = dpr === 1 ? sh : Math.max(1, Math.round(sh * dpr));
       pool.frame(fw, fh);
       pool.begin();
+      lastLook.fw = fw; lastLook.fh = fh;
       dc.pick = ro.pick ? picks : null;
       if (ro.pick) picks.begin(plan);
 
@@ -26132,13 +26461,19 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
         if (seam.scope === 'world') drawWorldSeam(g, fw, fh, backdrop, part, seam.u);
         else drawTextSeam(g, fw, fh, backdrop, part, seam.u);
       } else drawWorld(g, fw, fh, 0, backdrop);     // (a text seam mixes only text layers: none with layers 'ground')
+      if (typeof ro.flush === 'function') ro.flush(frame);
       const tDraw = clock();
 
       let passes = 0;
       if (!direct) {
         let out = frame;
         if (post.length) {
-          const res = PO.run(ctl, pool, frame, post, t, level, onFilterError);
+          const res = PO.run(ctl, pool, frame, post, t, level, copyPass ? null : onFilterError, copyPass);
+          if (res.torn && !copyPass) {
+            pool.end();
+            copyPass = true;
+            try { return render(surface, plan, t, opts, source); } finally { copyPass = false; }
+          }
           out = res.out; passes = res.passes;
         }
         // The target is prepared first (cleared, or filled with the backdrop), so whatever a filter leaves transparent
@@ -26202,7 +26537,10 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
     // The cuts are gathered and evaluated as render() does, with their cameras, and every glyph off the direct path
     // looks up exactly the keys drawGlyph asks for (draw.warmLayer). Grounds are skipped (their text, if any, takes
     // the direct path), and so are static layers (drawn once into their raster). Nothing happens before the first frame.
-    function warmAt(plan, source, t) {
+    // stop (optional) is asked after each glyph that made a new sprite; when it answers true the walk ends there (a host
+    // canvas rasterizes each sprite as it is made, so a frame of large blurred glyphs is more work than one slice of
+    // engine.prepare): the caller yields and walks the same t again, finding the sprites made so far.
+    function warmAt(plan, source, t, stop) {
       if (!(lastLook.scale > 0) || !plan) return 0;
       fg = F.frameAt(plan, t, fg);
       nItems = 0;
@@ -26211,6 +26549,14 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
       if (fg.seam) {
         for (const i of fg.seam.aCuts) addCut(plan, source, i, t, 0);
         for (const i of fg.seam.bCuts) addCut(plan, source, i, t, 0);
+        // a seam draws each side on a frame surface and mixes them on more: on a host canvas those are made (and
+        // rasterized once) now, so the seam's first frame does not make them. The recorder has no settle: its canvas
+        // ids, and so its op streams, stay as they were. stop() is asked after each surface, as after each glyph that
+        // made a sprite: a warm-up slice makes at most one more surface once it is due.
+        if (typeof factory.settle === 'function' && lastLook.fw > 0) {
+          pool.frame(lastLook.fw, lastLook.fh);
+          pool.warm(SEAM_SURFACES, (sf) => factory.settle(sf.canvas), stop);
+        }
       }
       const s = lastLook.scale;
       dc.pal = paletteOf(plan.look.palette, lastLook.backdrop);
@@ -26218,13 +26564,15 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
       dc.glyphPath = lastLook.glyphPath; dc.probe = lastLook.probe;
       dc.D[0] = s; dc.D[1] = 0; dc.D[2] = 0; dc.D[3] = s; dc.D[4] = 0; dc.D[5] = 0;
       let n = 0;
-      for (let k = 0; k < nItems; k++) {
+      walk: for (let k = 0; k < nItems; k++) {
         const it = items[k];
         for (const Lk of WARM_LAYERS) {
           if (!DR.hasLayer(it.scene, Lk)) continue;
           const spec = it.scene.layers[Lk];
           if (spec && T.isIsolated(spec) && spec.cache === 'static' && !spec.mask && !spec.filter) continue;
-          n += DR.warmLayer(dc, it.scene, Lk, view(it.cam, Lk));
+          const got = DR.warmLayer(dc, it.scene, Lk, view(it.cam, Lk), stop);
+          if (got < 0) { n += -got - 1; break walk; }
+          n += got;
         }
       }
       nItems = 0;
@@ -26264,10 +26612,198 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
 
   return { createRenderer, mediaEntries, WORLD_LAYERS };
 });
+/* 文字PVメーカー v2 — original work. The glyph budget of a cut: what drawing its glyphs covers, sampled over each material phase, and the masks that keep a material within its share (DESIGN_2_1 §5.9.5). */
+MV.def('engine/scene/budget', ['core/mat', 'engine/scene/table', 'engine/scene/behave', 'engine/scene/frame', 'engine/render/draw'],
+(MAT, T, BH, F, DR) => {
+  'use strict';
+
+  // A material entrance, hold or exit (a text material: its def has `mine`) may add at most SHARE frames to what drawing
+  // its cut's glyphs covers (draw.glyphCover: the rects drawGlyph draws, summed, as frame areas) at every sample of its
+  // phase, over the same cut with that material's masks all on. A cut's window overlaps only its neighbours' (by lead +
+  // tail), so where the slots hold materials, a frame's glyphs cover at most 2 · SHARE frames more than the same text
+  // without them.
+  const SHARE = 2;
+  const SLACK = 1.2;              // zoom beyond the cut's own camera (lens ∘ shot): a rig (≤ 1.15) and a punch (1.04)
+  const STEP = 1 / 30;            // seconds between samples (the export frame rate)
+  const MAX_SAMPLES = 40;
+  const HOLD_SAMPLES = 16;        // a hold's cover changes slowly (its oscillators only add a halo and a tint, or sway)
+  // The masks (BH.MASK_GROUPS) tried in order until the phase fits: the tint, the echo, the glow, then everything that
+  // puts a glyph on the sprite path, then its size. Each step takes back more, so the cover never grows along it.
+  const LADDER = Object.freeze([[], ['tint'], ['tint', 'echo'], ['tint', 'echo', 'glow'], ['tint', 'echo', 'glow', 'blur'],
+    ['tint', 'echo', 'glow', 'blur', 'grow']].map((g) => Object.freeze(g)));
+  const LAST = LADDER.length - 1;
+  const PHASES = Object.freeze(['arrive', 'dwell', 'depart']);
+
+  // A recorded glyph at one sample: its screen matrix (6), blur, glow, shard, pixel, echo, tint, and whether it is drawn.
+  const REC = 13;
+  const B_BLUR = 6, B_GLOW = 7, B_SHARD = 8, B_PIXEL = 9, B_ECHO = 10, B_TINT = 11, B_ON = 12;
+
+  const CAM = { x: 0, y: 0, zoom: 1, roll: 0, jx: 0, jy: 0, fz: 1 };
+  const POSE = { x: 0, y: 0, zoom: 1, roll: 0, shakeX: 0, shakeY: 0, fz: 1 };
+  const VIEW = new Float32Array(6), WORLD = new Float32Array(6), SCREEN = new Float32Array(6), M6 = new Float32Array(6);
+
+  // Evaluates the scene at cut-local time tl and walks its glyph nodes under the cut's camera zoomed by slack (each layer
+  // at its parallax): visit(i, screen matrix, P, world alpha) for each glyph node that is not hidden by flag.
+  function walk(scene, tl, D, slack, visit) {
+    const table = F.evaluate(scene, tl);
+    F.cutCamera(scene, CAM);
+    POSE.x = CAM.x; POSE.y = CAM.y; POSE.zoom = CAM.zoom * slack; POSE.roll = CAM.roll; POSE.shakeX = CAM.jx; POSE.shakeY = CAM.jy;
+    const m = table.m;
+    let layer = -1;
+    for (let i = 0; i < table.n; i++) {
+      if (table.type[i] !== T.TYPE.glyph || (table.flags[i] & T.FLAG.hidden) !== 0) continue;
+      if (table.layer[i] !== layer) { layer = table.layer[i]; F.viewMatrix(VIEW, POSE, T.LAYERS[layer].parallax, D.w, D.h); }
+      const o = i * 6;
+      for (let k = 0; k < 6; k++) WORLD[k] = m[o + k];
+      visit(i, MAT.mul(SCREEN, VIEW, WORLD), table.live, table.wa[i]);
+    }
+  }
+
+  // coverAt(scene, tl, D, slack?) → the frame share drawing the scene's glyphs covers at cut-local time tl (evaluated
+  // here), under the cut's camera zoomed by slack (SLACK by default). D = { w, h } (du).
+  function coverAt(scene, tl, D, slack) {
+    const store = scene.stores.glyph, table = scene.table;
+    let sum = 0;
+    walk(scene, tl, D, slack > 0 ? slack : SLACK, (i, M, P, wa) => {
+      sum += DR.glyphCover(store[table.payload[i]], P, i, wa, M, D.w, D.h);
+    });
+    return sum / (D.w * D.h);
+  }
+
+  // The sample times of a window [t0, t1] (cut-local): at most STEP apart, both ends included, at most `max`
+  // (MAX_SAMPLES by default).
+  function samplesOf(t0, t1, max) {
+    if (!(t1 > t0)) return [];
+    const n = Math.min(max > 1 ? max : MAX_SAMPLES, Math.max(2, Math.ceil((t1 - t0) / STEP) + 1));
+    const out = new Array(n);
+    for (let k = 0; k < n; k++) out[k] = t0 + ((t1 - t0) * k) / (n - 1);
+    return out;
+  }
+
+  function windowOf(times, phase) {
+    if (phase === 'arrive') return [times.a, times.rest];
+    if (phase === 'dwell') return [times.rest, times.out];
+    return [times.out, times.b];
+  }
+
+  // The glyph nodes of a scene, in node order.
+  function glyphNodes(table) {
+    const out = [];
+    for (let i = 0; i < table.n; i++) if (table.type[i] === T.TYPE.glyph) out.push(i);
+    return out;
+  }
+
+  // Records every glyph node at each sample (REC values per node; B_ON 0 when it draws nothing).
+  function record(scene, times, D, nodes) {
+    const slot = new Int32Array(scene.table.n).fill(-1);
+    nodes.forEach((i, k) => { slot[i] = k; });
+    const out = new Float64Array(times.length * nodes.length * REC);
+    times.forEach((t, s) => {
+      walk(scene, t, D, SLACK, (i, M, P, wa) => {
+        const o = (s * nodes.length + slot[i]) * REC;
+        for (let k = 0; k < 6; k++) out[o + k] = M[k];
+        out[o + B_BLUR] = P.blur[i]; out[o + B_GLOW] = P.glow[i]; out[o + B_SHARD] = P.shard[i]; out[o + B_PIXEL] = P.pixel[i];
+        out[o + B_ECHO] = P.echo[i]; out[o + B_TINT] = P.tint[i];
+        out[o + B_ON] = P.reveal[i] > 0.001 && wa >= T.MIN_ALPHA ? 1 : 0;
+      });
+    });
+    return out;
+  }
+
+  // The cover (frame share) of sample s at ladder step k: a = the unmasked record, b = the record with every mask on
+  // (null: step 0 only). Below LAST the size and whether a glyph is drawn come from a (the grow group is masked only at
+  // LAST), the masked columns from b; LAST is b.
+  function coverOf(scene, nodes, a, b, s, k, D) {
+    const store = scene.stores.glyph, table = scene.table, n = nodes.length;
+    const g = LADDER[k];
+    const tint = !!b && g.includes('tint'), echo = !!b && g.includes('echo'), glow = !!b && g.includes('glow');
+    const blur = !!b && g.includes('blur');
+    const src = k === LAST ? b : a;
+    let sum = 0;
+    for (let j = 0; j < n; j++) {
+      const o = (s * n + j) * REC;
+      if (src[o + B_ON] !== 1) continue;
+      for (let q = 0; q < 6; q++) M6[q] = src[o + q];
+      sum += DR.poseCover(store[table.payload[nodes[j]]], (blur ? b : src)[o + B_BLUR], (glow ? b : src)[o + B_GLOW],
+        (blur ? b : src)[o + B_SHARD], (blur ? b : src)[o + B_PIXEL], (echo ? b : src)[o + B_ECHO], (tint ? b : src)[o + B_TINT],
+        M6, D.w, D.h);
+    }
+    return sum / (D.w * D.h);
+  }
+
+  // Puts the masks of LADDER[step] on a phase's behaviours in scene.behaviours (the originals: ph.list; the ones in
+  // place: ph.now, kept up to date).
+  function applyStep(scene, ph, step) {
+    const groups = LADDER[step];
+    const from = scene.text.from, to = scene.text.to;
+    for (let k = 0; k < ph.list.length; k++) {
+      const next = BH.masked(ph.list[k], groups, from, to);
+      const at = scene.behaviours.indexOf(ph.now[k]);
+      if (at >= 0) scene.behaviours[at] = next;
+      ph.now[k] = next;
+    }
+  }
+
+  // fit(scene, D, phases) → the budget record, or null when no phase holds a material. phases = [{ phase, def, list }]:
+  // the cut's entrance, hold and exit (def = the part definition, list = the behaviours its make returned, now in
+  // scene.behaviours). A material phase may add at most SHARE frames to what its cut's glyphs cover (coverAt) at every
+  // sample of its window, over the same cut with every mask of that material on (the last LADDER step: its text as it
+  // is without the material's sprite columns and size changes). Over it, the phase gets the first LADDER step that fits
+  // (the added cover never grows along the ladder; the last step adds nothing); its behaviours in scene.behaviours are
+  // replaced by masked ones. A pure function of the scene as built; the scene's live pose, world matrices and alphas are
+  // left as they were. Each sample is evaluated once as built and, when the phase is over SHARE even counting the text
+  // itself, once more with every mask on: a step between differs from the first only in masked sprite columns, which
+  // move nothing, so its cover is read from the two.
+  // Record: { share, arrive?, dwell?, depart? }, each { key, added, fitted, step, masks }.
+  function fit(scene, D, phases) {
+    const own = (phases || []).filter((p) => p && p.def && p.def.mine && Array.isArray(p.list) && p.list.length > 0 &&
+      PHASES.includes(p.phase));
+    if (own.length === 0 || !(scene.text && scene.text.to > scene.text.from)) return null;
+    const table = scene.table;
+    const keepM = table.m.slice(0, table.n * 6), keepWa = table.wa.slice(0, table.n);
+    const nodes = glyphNodes(table);
+    const out = { share: SHARE };
+    try {
+      for (const p of own) {
+        const [t0, t1] = windowOf(scene.times, p.phase);
+        const times = samplesOf(t0, t1, p.phase === 'dwell' ? HOLD_SAMPLES : MAX_SAMPLES);
+        if (times.length === 0) continue;
+        const ph = { list: p.list, now: p.list.slice() };
+        const a = record(scene, times, D, nodes);
+        let total = 0;
+        for (let s = 0; s < times.length; s++) total = Math.max(total, coverOf(scene, nodes, a, null, s, 0, D));
+        let step = 0, added = total, fitted = total;
+        if (total > SHARE) {
+          applyStep(scene, ph, LAST);
+          const b = record(scene, times, D, nodes);
+          const addedAt = (k) => {
+            let peak = 0;
+            for (let s = 0; s < times.length; s++) {
+              peak = Math.max(peak, coverOf(scene, nodes, a, b, s, k, D) - coverOf(scene, nodes, a, b, s, LAST, D));
+            }
+            return peak;
+          };
+          added = addedAt(0);
+          while (step < LAST && addedAt(step) > SHARE) step++;
+          fitted = addedAt(step);
+        }
+        applyStep(scene, ph, step);
+        out[p.phase] = Object.freeze({ key: p.def.key, added, fitted, step, masks: LADDER[step] });
+      }
+    } finally {
+      T.resetLive(table);
+      table.m.set(keepM);
+      table.wa.set(keepWa);
+    }
+    return Object.freeze(out);
+  }
+
+  return { SHARE, SLACK, STEP, MAX_SAMPLES, HOLD_SAMPLES, LADDER, coverAt, samplesOf, fit };
+});
 /* 文字PVメーカー v2 — original work. Scene build: one Plan cut (or ground segment) → node table + behaviours (DESIGN §4.17.5; DESIGN_2_1 §3.10, §5.9.4, §11.3.7). */
 MV.def('engine/scene/build', ['core/hash', 'core/rng', 'core/schema', 'engine/scene/table', 'engine/scene/builder',
-  'engine/scene/behave', 'engine/scene/frame', 'engine/scene/shot'],
-(H, RNG, SCH, T, B, BH, F, SHOT) => {
+  'engine/scene/behave', 'engine/scene/frame', 'engine/scene/shot', 'engine/scene/budget'],
+(H, RNG, SCH, T, B, BH, F, SHOT, BG) => {
   'use strict';
 
   const SAFE = 0.05;              // safe margin: 5% of the short side on every edge
@@ -26598,11 +27134,18 @@ MV.def('engine/scene/build', ['core/hash', 'core/rng', 'core/schema', 'engine/sc
     for (const b of checked(lensB, 'lens/' + lens.def.key)) builder.sb.behave(b);
     if (shot) for (const b of shot.behaviours) builder.sb.behave(b);
 
-    return sceneOf(builder, {
+    const scene = sceneOf(builder, {
       key: cut.key, fp: cut.fp, kind: 'cut', t0: cut.t0, cam, text: range, span: { a: cut.a, b: cut.b }, times, target,
       focus, warnings: warnings.concat(overfullOf(builder, cut)), svc, shot: shot ? shot.track : null,
       lean: shot ? shot.lean : null,
     });
+    // the glyph budget of material phases (DESIGN_2_1 §5.9.5): may mask what a material writes to the sprite columns. The
+    // phases as made stay on the scene, not enumerable, for the tests and the lab.
+    const phases = [{ phase: 'arrive', def: arrive.def, list: arriveB }, { phase: 'dwell', def: dwell.def, list: dwellB },
+      { phase: 'depart', def: depart.def, list: departB }];
+    scene.spriteBudget = BG.fit(scene, D, phases);
+    Object.defineProperty(scene, 'budgetPhases', { value: Object.freeze(phases), enumerable: false });
+    return scene;
   }
 
   function buildOrnaments(builder, base, slots, els, reg, cut, hints, warnings, where, ax) {
@@ -26723,6 +27266,7 @@ MV.def('engine/scene/build', ['core/hash', 'core/rng', 'core/schema', 'engine/sc
   //   cam              the camera node (frame.cameraAt reads its live pose)
   //   shot, lean       (DESIGN_2_1 §3.10) the cut's shot Track and follow Lean, or null
   //   media            (DESIGN_2_1 §11.3.7) [{ node, id, time: TimeSpec | null }] of the media nodes, in node order
+  //   spriteBudget     (DESIGN_2_1 §5.9.5, cuts) the glyph budget record of engine/scene/budget.fit, or null
   function sceneOf(builder, o) {
     const behaviours = builder.seal();
     const glyphKeys = new Set();
@@ -26736,7 +27280,7 @@ MV.def('engine/scene/build', ['core/hash', 'core/rng', 'core/schema', 'engine/sc
       span: o.span, warnings: o.warnings, glyphKeys: [...glyphKeys].sort(), provisional: o.svc.provisional === true,
       stores: builder.stores, times: o.times, target: o.target, focus: o.focus,
       fontKey: o.svc.text ? o.svc.text.key : null,
-      shot: o.shot || null, lean: o.lean || null, media: builder.mediaList(),
+      shot: o.shot || null, lean: o.lean || null, media: builder.mediaList(), spriteBudget: null,
     };
   }
 
@@ -33536,12 +34080,6 @@ MV.def('parts/filter/film', ['parts/kit'], (K) => {
     g.setLineDash(NO_DASH);
   }
 
-  function copyOf(fx, src) {
-    const out = fx.take();
-    out.ctx.drawImage(src.canvas, 0, 0);
-    return out;
-  }
-
   // Covers the frame with a texture tile drawn as images, one per tile position: `k` (a whole number) device px per
   // tile pixel, shifted by (ox, oy) px, so neighbouring tiles meet without a seam. On a canvas without a GPU a pattern
   // fill under a blend mode, a smoothed resize and a shrunk tile each cost several full-frame copies; a 1:1 tile costs
@@ -33565,7 +34103,7 @@ MV.def('parts/filter/film', ['parts/kit'], (K) => {
     const a = clamp(p.amount * 0.55);
     if (a < 1 / 64) return src;
     const k = fx.tick(p.rate, t);
-    const out = copyOf(fx, src), g = out.ctx;
+    const out = fx.own(src), g = out.ctx;
     g.globalCompositeOperation = 'overlay';
     g.globalAlpha = a;
     tileCover(g, fx, fx.tile('grain', k), tileScale(p.size * fx.unit), rnd(fx, k, 0) * TILE, rnd(fx, k, 1) * TILE, false);
@@ -33596,7 +34134,7 @@ MV.def('parts/filter/film', ['parts/kit'], (K) => {
     const pitch = Math.max(2, p.pitch * fx.unit), line = Math.max(1, Math.round(pitch * 0.35));
     const a = clamp((p.amount * 0.14 * pitch) / line);          // the same average darkening at any pitch
     if (a < 1 / 64) return src;
-    const out = copyOf(fx, src), g = out.ctx;
+    const out = fx.own(src), g = out.ctx;
     g.globalAlpha = a;
     g.fillStyle = '#000000';
     g.beginPath();
@@ -33645,7 +34183,7 @@ MV.def('parts/filter/film', ['parts/kit'], (K) => {
     const a = clamp(p.amount);
     if (a < 0.02) return src;
     const k = fx.tick(p.rate, t);
-    const out = copyOf(fx, src), g = out.ctx;
+    const out = fx.own(src), g = out.ctx;
     lineState(g, Math.max(0.6, 1.3 * fx.unit));
     const draft = fx.quality === 'draft' ? 0.5 : 1;
     const most = Math.round(p.specks * 1.2 * draft), shown = p.specks * (0.4 + 0.8 * a) * draft;
@@ -33845,8 +34383,7 @@ MV.def('parts/filter/flash', ['parts/kit'], (K) => {
     const k = fx.tick(p.rate, age);
     if (k >= 2 * blinks || k % 2 === 1) return src;
     if (!(p.amount * flashScale(fx) > SAFE_AMOUNT)) return src;
-    const out = fx.take(), g = out.ctx;
-    g.drawImage(src.canvas, 0, 0);
+    const out = fx.own(src), g = out.ctx;
     g.globalCompositeOperation = 'difference';
     g.fillStyle = '#FFFFFF';
     g.fillRect(0, 0, fx.w, fx.h);
@@ -33882,12 +34419,6 @@ MV.def('parts/filter/frame', ['parts/kit'], (K) => {
   // Compositions that set words against the top or bottom edge, where letterbox bars would cover them.
   const EDGE_HUGGERS = Object.freeze(['cornerNote', 'hangingTags', 'tickerMarquee']);
 
-  function copyOf(fx, src) {
-    const out = fx.take();
-    out.ctx.drawImage(src.canvas, 0, 0);
-    return out;
-  }
-
   // --- edgeShade -----------------------------------------------------------------------------------------------------
 
   // A vignette: an elliptical radial gradient (the frame's own proportions) from clear inside `size` to dark at the
@@ -33918,7 +34449,7 @@ MV.def('parts/filter/frame', ['parts/kit'], (K) => {
     if (!(dark >= 1 / 255)) return src;
     const size = p.size;
     const layer = fx.layer('edgeShade:' + size, (g, w, h) => vignette(g, w, h, size));
-    const out = copyOf(fx, src), g = out.ctx;
+    const out = fx.own(src), g = out.ctx;
     g.globalAlpha = dark;
     g.drawImage(layer, 0, 0);
     g.globalAlpha = 1;
@@ -33947,7 +34478,7 @@ MV.def('parts/filter/frame', ['parts/kit'], (K) => {
   function bars(fx, src, p) {
     const bh = Math.round(clamp(p.size * Math.min(2 * p.amount, 1.5), 0, 0.3) * Math.min(fx.w, fx.h));
     if (bh < 1) return src;
-    const out = copyOf(fx, src), g = out.ctx;
+    const out = fx.own(src), g = out.ctx;
     g.fillStyle = '#000000';
     g.fillRect(0, 0, fx.w, bh);
     g.fillRect(0, fx.h - bh, fx.w, bh);
@@ -34159,8 +34690,7 @@ MV.def('parts/filter/glow', ['parts/kit'], (K) => {
   function veil(fx, src, p) {
     if (!(p.amount > 0.01)) return src;
     const b = fx.blurred(src, Math.max(1, p.radius * fx.unit));
-    const out = fx.take(), g = out.ctx;
-    g.drawImage(src.canvas, 0, 0);
+    const out = fx.own(src), g = out.ctx;
     g.globalAlpha = clamp(p.amount * p.mist * 0.5);
     g.drawImage(b.canvas, 0, 0);
     g.globalCompositeOperation = 'screen';
@@ -34259,8 +34789,7 @@ MV.def('parts/filter/glow', ['parts/kit'], (K) => {
     gb.drawImage(A.canvas, 0, 0, w2, h2, 0, 0, w4, h4);
     gb.globalCompositeOperation = 'source-over';
     const maskX = blurMask(A, B, levels, down, up, w4, h4);
-    const out = fx.take(), go = out.ctx;
-    go.drawImage(src.canvas, 0, 0);
+    const out = fx.own(src), go = out.ctx;
     go.globalCompositeOperation = 'screen';
     go.globalAlpha = clamp(p.amount * (1 + p.burn));
     go.drawImage(B.canvas, maskX, 0, w4, h4, 0, 0, w, h);
@@ -34314,8 +34843,7 @@ MV.def('parts/filter/glow', ['parts/kit'], (K) => {
       gl.fillRect(x0, y0, x1 - x0, y1 - y0);
     }
     reset(gl);
-    const out = fx.take(), g = out.ctx;
-    g.drawImage(src.canvas, 0, 0);
+    const out = fx.own(src), g = out.ctx;
     g.globalCompositeOperation = 'hard-light';
     g.drawImage(layer.canvas, 0, 0, lw, lh, 0, 0, w, h);
     reset(g);
@@ -34362,6 +34890,7 @@ MV.def('parts/filter/print', ['parts/kit'], (K) => {
   const TOOTH_PX = 1.1;              // du per tooth grain (one tile pixel up to 1080p)
   const FIBRE_PX = 1.2;              // du per fibre-tile pixel
 
+  // A copy of the frame to work on while the frame itself is still read (duoTone's tone layer).
   function copyOf(fx, src) {
     const out = fx.take();
     out.ctx.drawImage(src.canvas, 0, 0);
@@ -34392,7 +34921,7 @@ MV.def('parts/filter/print', ['parts/kit'], (K) => {
   function dots(fx, src, p) {
     const a = clamp(p.amount * 0.55);
     if (a < 1 / 64) return src;
-    const out = copyOf(fx, src), g = out.ctx;
+    const out = fx.own(src), g = out.ctx;
     g.globalCompositeOperation = 'overlay';
     g.globalAlpha = a;
     tileCover(g, fx, fx.tile('halftone', 0), tileScale((p.pitch * fx.unit) / HALFTONE_CELL), 0, 0, true);
@@ -34480,7 +35009,7 @@ MV.def('parts/filter/print', ['parts/kit'], (K) => {
     gt.fillRect(0, 0, fx.w, fx.h);
     gt.globalCompositeOperation = 'source-over';
     if (mix >= 1 - 1 / 64) return tone;
-    const out = copyOf(fx, src), g = out.ctx;
+    const out = fx.own(src), g = out.ctx;
     g.globalAlpha = mix;
     g.drawImage(tone.canvas, 0, 0);
     g.globalAlpha = 1;
@@ -34513,7 +35042,7 @@ MV.def('parts/filter/print', ['parts/kit'], (K) => {
   function paper(fx, src, p) {
     const a = clamp(p.amount);
     if (a < 0.02) return src;
-    const out = copyOf(fx, src), g = out.ctx;
+    const out = fx.own(src), g = out.ctx;
     g.globalCompositeOperation = 'overlay';
     g.globalAlpha = clamp(a * (0.08 + 0.3 * p.tooth));
     tileCover(g, fx, fx.tile('grain', 3), tileScale(TOOTH_PX * fx.unit), 0, 0, false);
@@ -34568,8 +35097,7 @@ MV.def('parts/filter/trail', ['parts/kit'], (K) => {
   function trail(fx, src, p) {
     const n = Math.max(1, Math.min(MAX_TRAILS, p.trails | 0));
     if (!(p.amount > 0.01)) return src;
-    const out = fx.take(), g = out.ctx;
-    g.drawImage(src.canvas, 0, 0);
+    const out = fx.own(src), g = out.ctx;
     for (let k = n; k >= 1; k--) {
       const ghost = fx.textAt(k * p.gap);
       g.globalAlpha = clamp(p.amount * p.strength * (1 - (k - 1) / (n + 0.5)));
@@ -44313,7 +44841,8 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
   // once the host has had time for other work; prepare() yields through it) — both come from the host canvas factory
   // when absent — and `strict` (tests: part errors throw instead of falling back). Additive members: setPlan(plan),
   // scene(kind, i), fontUsage(t0, t1), setLevel(n). `spriteBudget` (bytes; tests and the lab) replaces the preview's
-  // §7.3 sprite budget.
+  // §7.3 sprite budget. `postCopy` (lab and tests only): the post stack copies each filter's input as it did before
+  // fx.own drew in place (the pixel-identity check of that change).
   // DESIGN_2_1 additive members: registry (getter: the effective registry, parts/mix registryFor of the base registry
   // and the document's materials and media), shotTrack(cutKey), viewAt(t), mediaAt(t), mediaReady(t, opts),
   // fork({ assets }); thumb() also takes the kinds 'shot' and 'rig'. Internal options: `effective` (a fork's registry)
@@ -44330,7 +44859,8 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
     const sceneMax = Number.isInteger(o.sceneMax) && o.sceneMax > 0 ? o.sceneMax : SCENE_MAX;
     // the effective registry: the base plus the document's materials (and pooled media); the base until a document
     let registry = o.effective && typeof o.effective.get === 'function' ? o.effective : base;
-    const renderer = R.createRenderer({ canvas: factory, registry, assets, now, strict: !!o.strict, spriteBudget: o.spriteBudget });
+    const renderer = R.createRenderer({ canvas: factory, registry, assets, now, strict: !!o.strict, spriteBudget: o.spriteBudget,
+      postCopy: o.postCopy === true });
     const cache = CACHE.createSceneCache({ max: sceneMax });
     const found = new Map();                         // cut / segment key → { fp, list } of scene warnings
     const scanned = new Set();                       // fps whose warnings are known
@@ -44593,18 +45123,23 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
     // blur level, the echo, tint and halo inks: renderer.warmAt walks the frame as it will be drawn). It stops early once
     // the sprites these frames use (found or made) reach WARM_SHARE of the sprite budget. Frames that playback has shown
     // while this waited for a slice are skipped. → false when a newer prepare took over.
+    // A frame whose sprites are more than a slice of work (on a host canvas each sprite is rasterized as it is made)
+    // is walked in parts: the walk stops once the slice is due after a new sprite, and the same frame is walked again
+    // after the yield (the sprites made so far are found at once).
     async function warmAhead(lo, hi, slice) {
       const from = renderer.lastTime();
       if (from === null || from < lo || from > hi) return true;
       renderer.beginWarm();
-      let j = 0;
+      let j = 0, cut = false;
+      const stop = () => (cut = slice.due());
       for (;;) {
         const t = from + j / WARM_FPS;
         const ws = renderer.warmBytes();
         if (t > Math.min(hi, from + WARM_AHEAD) + 1e-9 || ws.used > WARM_SHARE * ws.budget) return true;
-        renderer.warmAt(plan, source, t);
-        j++;
-        if (slice.due()) {
+        cut = false;
+        renderer.warmAt(plan, source, t, stop);
+        if (!cut) j++;
+        if (cut || slice.due()) {
           if (!(await slice.pause())) return false;
           const shown = renderer.lastTime();
           if (shown !== null && shown > from) j = Math.max(j, Math.ceil((shown - from) * WARM_FPS - 1e-9));
@@ -46910,10 +47445,22 @@ MV.def('audio/host/player', [], () => {
 MV.def('engine/host/canvas', [], () => {
   'use strict';
 
-  // createCanvasFactory({ document?, offscreen? }) → CanvasFactory = { create(w, h, { alpha }) → { canvas, ctx }, now(), idle() }
+  // createCanvasFactory({ document?, offscreen? }) → CanvasFactory = { create(w, h, { alpha }) → { canvas, ctx }, now(), idle(),
+  //   settle(canvas), inkBox(css, text) }
   // `now` and `idle` are additive: the engine below L6 may not read clocks or use timers, so the host lends it a clock
   // (frame statistics, the adaptive preview, §7.4) and a yield (engine.prepare works in slices between yields, so
   // playback and typing are not held up). OffscreenCanvas is preferred; a detached <canvas> is the fallback.
+  // `settle(canvas)` is additive too (DESIGN_2_1 §3.10, NOTES "Perf: camerawork + materials row"): a canvas
+  // records its drawing calls and rasterizes them only when its picture is first used, so a glyph sprite made during
+  // engine.prepare was still painted (and blurred) inside the first frame that drew it. settle() uses the picture once,
+  // on a private 1 × 1 canvas of the same kind that is cleared at once, so the raster work happens when the sprite is
+  // made. It changes no pixel and draws nothing the engine can see; the recording factory has no settle, so op streams
+  // are unchanged.
+  // `inkBox(css, text)` is additive as well: { left, right, ascent, descent } (px) of the ink of `text` in the font
+  // `css`, drawn with textAlign 'center' and textBaseline 'middle' (measureText's actual bounding box; left and ascent
+  // are distances to the left of and above the draw point), or null. The sprite cache crops blurred glyph rasters to
+  // it (engine/render/sprites). Only the host has it: the engine never measures, and the recording factory's canvases
+  // (and so the Node op streams) do not change.
   function createCanvasFactory(opts) {
     const o = opts || {};
     const doc = o.document || (typeof document !== 'undefined' ? document : null);
@@ -46955,7 +47502,34 @@ MV.def('engine/host/canvas', [], () => {
       return new Promise((resolve) => setTimeout(resolve, 0));
     }
 
-    return Object.freeze({ create, now: clock, idle });
+    // The private 1 × 1 context of settle(): made on first use, never handed out.
+    let tiny = null;
+    function tinyCtx() {
+      if (!tiny) tiny = create(1, 1, { alpha: true }).ctx;
+      return tiny;
+    }
+
+    function settle(canvas) {
+      if (!canvas || !(canvas.width > 0) || !(canvas.height > 0)) return;
+      const g = tinyCtx();
+      g.drawImage(canvas, 0, 0, 1, 1);
+      g.clearRect(0, 0, 1, 1);
+    }
+
+    function inkBox(css, text) {
+      const g = tinyCtx();
+      if (typeof g.measureText !== 'function') return null;
+      g.font = css;
+      g.textAlign = 'center';
+      g.textBaseline = 'middle';
+      const m = g.measureText(text);
+      const box = { left: m.actualBoundingBoxLeft, right: m.actualBoundingBoxRight, ascent: m.actualBoundingBoxAscent,
+        descent: m.actualBoundingBoxDescent };
+      return Number.isFinite(box.left) && Number.isFinite(box.right) && Number.isFinite(box.ascent) && Number.isFinite(box.descent)
+        ? box : null;
+    }
+
+    return Object.freeze({ create, now: clock, idle, settle, inkBox });
   }
 
   return { createCanvasFactory };
@@ -51702,8 +52276,8 @@ MV.def('ui/header', ['ui/dom', 'ui/icons', 'ui/keys'], (dom, I, K) => {
 /* 文字PVメーカー v2 — original work. Part lab: one part in a canned cut with a pose-column view, contact sheets, a text mode and the browser-test API (DESIGN §6.14, §8.3). */
 MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core/schema', 'core/rng', 'engine/facade',
   'engine/host/canvas', 'engine/host/fonts', 'engine/host/measure', 'engine/text/faces', 'engine/text/service',
-  'engine/render/sprites', 'parts/kit', 'parts/mix', 'i18n/t', 'i18n/strings'],
-(REG, DOC, S, SHOT, SCH, RNG, FAC, HC, HF, HM, FACES, TS, SP, K, MIX, I18N, strings) => {
+  'engine/render/sprites', 'engine/render/draw', 'engine/scene/budget', 'parts/kit', 'parts/mix', 'i18n/t', 'i18n/strings'],
+(REG, DOC, S, SHOT, SCH, RNG, FAC, HC, HF, HM, FACES, TS, SP, DR, BG, K, MIX, I18N, strings) => {
   'use strict';
 
   // The lab is a developer page (build.py --lab → tests/www/lab.html, MV.DEV = true). It is not shipped, so its control
@@ -51805,6 +52379,39 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core
 
   function defaultSource() { return sources()[0] || null; }
 
+  // The heaviest glyph work §5.8 admits in each text kind (DESIGN_2_1 §7.4: perf.py's camerawork + materials row): every
+  // column that puts a glyph on the sprite path at its limit (blur 0.6 em, glow 1, tint 1), size tracks, a turn, the amp
+  // knob, and an inner part that adds an echo (arrive), a tint sweep (dwell) or a glow and tint (depart). The glyph
+  // budget of each scene (§5.9.5) decides what of it is drawn; tests/node/budget.test.js uses the same recipes.
+  const track = (col, from, to) => ({ col, from, to });
+  const HEAVIEST = Object.freeze({
+    arrive: { knobs: [{ what: 'amp' }], parts: [{ key: 'ghostConverge' }], motion: { unit: 'glyph', curve: 'expoOut', tracks: [
+      track('y', 0.6, 0), track('alpha', 0, 1), track('blur', 0.6, 0), track('glow', 1, 0), track('tint', 1, 0),
+      track('sx', 2, 1), track('sy', 2, 1), track('rot', -30, 0)] } },
+    dwell: { knobs: [{ what: 'amp' }], parts: [{ key: 'shimmerSweep' }], osc: [{ col: 'glow', amp: 1, hz: 0, wave: 'beat' },
+      { col: 'tint', amp: 1, hz: 0.5, wave: 'sine' }, { col: 'rot', amp: 30, hz: 0.3, wave: 'sine' },
+      { col: 'sx', amp: 0.3, hz: 0.5, wave: 'sine' }] },
+    depart: { knobs: [{ what: 'amp' }], parts: [{ key: 'burnOut' }], motion: { unit: 'glyph', curve: 'quadIn', tracks: [
+      track('x', 0, 0.6), track('alpha', 1, 0), track('blur', 0, 0.6), track('glow', 0, 1), track('tint', 0, 1),
+      track('sx', 1, 2), track('sy', 1, 2), track('rot', 0, 30)] } },
+  });
+
+  // The 'materials' registry with the sample material of each kind in `recipes` ({ kind: recipe }, or 'heaviest' for
+  // HEAVIEST) replaced by a material derived from that recipe (parts/mix derive: core/recipe's limits apply, a refused
+  // recipe throws). perf.py's camerawork + materials row renders with the heaviest.
+  function recipesRegistry(given) {
+    const recipes = given === 'heaviest' ? HEAVIEST : given;
+    const base = catalogRegistry();
+    const defs = materialDefs().filter((d) => !recipes[d.kind]);
+    for (const kind of Object.keys(recipes)) {
+      const got = MIX.derive({ id: 'mz' + kind.toLowerCase(), kind, by: 'user', name: { ja: kind, en: kind }, tags: ['soft'], season: null,
+        pool: true, rv: 1, recipe: recipes[kind] }, base);
+      if (!got.def) throw new Error('lab: the ' + kind + ' recipe is refused: ' + JSON.stringify(got.problems));
+      defs.push(got.def);
+    }
+    return REG.extend(base, defs);
+  }
+
   function cameraKeys(kind) { return kind === 'shot' ? SHOT.SHOT_KEYS : kind === 'rig' ? SHOT.RIG_KEYS : []; }
 
   // --- media mode: the fake store and its test parts (test pages only) -------------------------------------------------
@@ -51857,17 +52464,33 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core
   const engines = new Map();
   const factory = HC.createCanvasFactory();
 
+  // Engine variants for A/B checks (NOTES "Perf: camerawork + materials row"): inkClip false → a factory without
+  // inkBox (no glyph raster has an ink rect, so no sprite draw is clipped to one), settle false → without settle (sprites
+  // rasterize when first drawn), postCopy true → filters copy their input instead of drawing on it (createEngine's
+  // postCopy). Each variant is a fresh engine; the default engines are the app's.
+  function factoryFor(v) {
+    if (!v || (v.inkClip !== false && v.settle !== false)) return factory;
+    const f = Object.assign({}, factory);
+    if (v.inkClip === false) delete f.inkBox;
+    if (v.settle === false) delete f.settle;
+    return Object.freeze(f);
+  }
+
   // One engine per (source, fonts, media): with fonts the real FontBook (Google Fonts) loads faces; without, faces are
   // never requested and the fallback stacks draw (fast and deterministic, what the tests use). A media engine has the
   // fake store (checkerboard stills, bar-coded video frames) and the media registry.
-  function engineFor(source, withFonts, fresh, media) {
+  // extra (fresh engines only) = { idle, variant, registry }: the engine's yield hook, a variant (factoryFor, postCopy) and
+  // a registry in place of the source's.
+  function engineFor(source, withFonts, fresh, media, extra) {
     const id = source + '|' + (withFonts ? 'fonts' : 'plain') + (media ? '|media' : '');
     if (!fresh && engines.has(id)) return engines.get(id);
-    const registry = media ? mediaRegistry(source) : registryOf(source);
+    const x = extra || {};
+    const registry = x.registry || (media ? mediaRegistry(source) : registryOf(source));
     const fonts = withFonts ? HF.createFontBook({ document, timeoutMs: 8000 }) : null;
     const measurer = HM.createCanvasMeasurer(factory, fonts);
     const assets = media ? mediaFixtures().createFakeMedia(MV, { canvas: factory }) : null;
-    const engine = FAC.createEngine({ registry, canvas: factory, measurer, fonts, assets });
+    const engine = FAC.createEngine(Object.assign({ registry, canvas: factoryFor(x.variant), measurer, fonts, assets },
+      x.idle ? { idle: x.idle } : {}, x.variant && x.variant.postCopy === true ? { postCopy: true } : {}));
     const rec = { engine, registry, fonts, measurer };
     if (!fresh) engines.set(id, rec);
     return rec;
@@ -52466,44 +53089,231 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core
     return out;
   }
 
+  // The plan perf() and compare() render: the fixture project, o.camera true → work:rig pinned to slowSwell (the
+  // planner's automatic shots stay), 'off' → the camerawork pinned off (work:cam.shot and work:rig 'none': the v2
+  // frames); o.materials → the sample materials in every slot (withMaterials). Set on the engine.
+  function projectPlan(engine, o) {
+    const doc = projectDoc(o.project);
+    if (o.camera === 'off') {
+      doc.pins = Object.assign({}, doc.pins, { 'work:cam.shot': { v: 'none', by: 'user' }, 'work:rig': { v: 'none', by: 'user' } });
+    } else if (o.camera) doc.pins = Object.assign({}, doc.pins, { 'work:rig': { v: 'slowSwell', by: 'user' } });
+    engine.setDoc(doc);
+    let plan = engine.plan;
+    if (o.materials) plan = withMaterials(plan, engine.registry);
+    if (plan !== engine.plan) engine.setPlan(plan);
+    return plan;
+  }
+
+  // compare(o) → [{ t, max, n, box, passes, hashA, hashB }]: a fixture project (projectPlan: o.project, o.camera,
+  // o.materials) drawn by two fresh engines, variant o.a and variant o.b (engineFor's variants: inkClip, settle,
+  // postCopy), at each of o.times; max = the largest channel difference (0..255), n = the pixels that differ and box
+  // their bounds [x0, y0, x1, y1] (null when none), passes = the post passes side a drew. o.w (640), o.quality
+  // ('export'), o.backdrop (the plan's), o.prepare (true: engine.prepare({ export: false }) first, as the preview),
+  // o.recipes (as perf: the sample materials of those kinds replaced), o.list (pixelDiff's list of differing pixels).
+  async function compare(o) {
+    const source = o.parts || defaultSource();
+    const sides = [o.a || {}, o.b || {}].map((variant) => {
+      const rec = engineFor(source, false, true, false, { variant, registry: o.recipes ? recipesRegistry(o.recipes) : null });
+      return { rec, plan: projectPlan(rec.engine, o) };
+    });
+    const plan = sides[0].plan;
+    const w = o.w || 640, h = o.h || Math.round((w * plan.design.h) / plan.design.w);
+    const alpha = o.backdrop === 'clear';
+    const surfaces = sides.map(() => makeSurface(w, h, alpha));
+    const ropts = { quality: o.quality || 'export', pick: false, scale: w / plan.design.w, backdrop: o.backdrop };
+    if (o.prepare) {
+      for (let k = 0; k < 2; k++) {
+        sides[k].rec.engine.renderFrame(surfaces[k], o.times[0], ropts);
+        await sides[k].rec.engine.prepare(o.times[0], o.times[o.times.length - 1], { export: false });
+      }
+    }
+    const out = [];
+    for (const t of o.times) {
+      let passes = 0;
+      for (let k = 0; k < 2; k++) {
+        const st = sides[k].rec.engine.renderFrame(surfaces[k], t, ropts);
+        if (k === 0) passes = st.passes;
+      }
+      const d = pixelDiff(pixels(surfaces[0]), pixels(surfaces[1]), w, h, o.list);
+      out.push({ t, max: d.max, n: d.n, box: d.box, passes, hashA: hashPixels(surfaces[0]), hashB: hashPixels(surfaces[1]),
+        px: d.px });
+    }
+    for (const side of sides) side.rec.engine.dispose();
+    return out;
+  }
+
+  // The largest channel difference (0..255) of two RGBA arrays of a w × h frame, the pixels that differ and their bounds;
+  // with list (a count) also the first `list` differing pixels as [x, y, rgbaA, rgbaB] (px).
+  function pixelDiff(a, b, w, h, list) {
+    let max = 0, n = 0, x0 = w, y0 = h, x1 = -1, y1 = -1;
+    const px = [];
+    for (let i = 0; i < a.length; i += 4) {
+      const d = Math.max(Math.abs(a[i] - b[i]), Math.abs(a[i + 1] - b[i + 1]), Math.abs(a[i + 2] - b[i + 2]), Math.abs(a[i + 3] - b[i + 3]));
+      if (d > 0) {
+        n++; if (d > max) max = d;
+        const x = (i / 4) % w, y = Math.floor(i / 4 / w);
+        x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y);
+        if (list > px.length) px.push([x, y, Array.from(a.subarray(i, i + 4)), Array.from(b.subarray(i, i + 4))]);
+      }
+    }
+    return { max, n, box: n ? [x0, y0, x1, y1] : null, px };
+  }
+
+  // comparePart(o) → { max, n, box, passes, glyphs, hashA, hashB }: renderPart(o) by two fresh engines, variant o.a and
+  // variant o.b (as compare()), on w × h surfaces (480 × 270 unless given); passes and glyphs are side a's FrameStats.
+  async function comparePart(o) {
+    const w = o.w || 480, h = o.h || 270;
+    const got = [];
+    for (const variant of [o.a || {}, o.b || {}]) {
+      const using = engineFor(o.parts || defaultSource(), false, true, false, { variant });
+      const r = await renderPart(Object.assign({}, o, { using, surface: makeSurface(w, h, o.backdrop !== 'clear') }));
+      got.push({ data: pixels(r.surface), stats: r.stats, hash: hashPixels(r.surface) });
+      using.engine.dispose();
+    }
+    const d = pixelDiff(got[0].data, got[1].data, w, h);
+    return { max: d.max, n: d.n, box: d.box, passes: got[0].stats.passes, glyphs: got[0].stats.drawn.glyphs, hashA: got[0].hash,
+      hashB: got[1].hash };
+  }
+
+  // spriteCheck(o) → { cases, clipped, outside, ring, texel, area, clip, reach, beyond, reachAt, bad }: the glyph rasters
+  // of o.chars (an array of graphemes) × o.styles × o.sizes (device em px) × o.levels (0 and the blur levels 1–5), made
+  // by a sprite cache on the host factory (with ink rects, engine/render/sprites) and by one on a factory without inkBox.
+  // clipped = the rasters that have an ink rect; outside = the largest alpha (0..255) such a raster has outside its rect
+  // (draw.spriteAt's clip is exact only when that is 0); ring = the largest on the rect's border (for information: the
+  // clip is widened by 2 texels); texel = the largest channel difference (premultiplied) between the two caches' rasters
+  // (0: inkBox never changes a raster); area / clip = the raster px and the ink-rect px of the clipped rasters; reach =
+  // the farthest a level-0 ink rect (the ink and its 2 px) reaches from the raster's centre (em); beyond = the most
+  // device px by which one reaches past the ink the §5.9.5 model takes (draw.inkEm of its style) and its 2 px at 720p
+  // (≤ 0: the model's ink holds every ink rect), reachAt = that case; bad = the first cases that fail (outside > 0 or
+  // texel > 0). o.family / o.weight pick the face (fallback stacks without fonts).
+  function spriteCheck(o) {
+    const plain = SP.createSpriteCache(factoryFor({ inkClip: false }));
+    const inked = SP.createSpriteCache(factory);
+    const font = FACES.faceRef(o.family || 'Noto Sans JP', o.weight || 400, 'ja');
+    const ink = '#F2EEE6', ink2 = '#2A3F66';
+    const res = { cases: 0, clipped: 0, outside: 0, ring: 0, texel: 0, area: 0, clip: 0, reach: 0, beyond: -Infinity, reachAt: null,
+      bad: [] };
+    const read = (sp) => sp.canvas.getContext('2d').getImageData(0, 0, sp.w, sp.h).data;
+    for (const ch of o.chars) {
+      for (const style of o.styles) {
+        for (const size of o.sizes) {
+          const k = SP.bucketOf(size);
+          for (const level of o.levels) {
+            const a = plain.glyph(font, ch, ink, style, ink2, k, level, size);
+            const b = inked.glyph(font, ch, ink, style, ink2, k, level, size);
+            res.cases++;
+            const A = read(a), Bd = read(b);
+            let outside = 0, ring = 0, texel = 0;
+            const r = b.ink;
+            if (a.w !== b.w || a.h !== b.h || a.ink) texel = 255;
+            for (let y = 0; y < a.h && texel < 255; y++) {
+              for (let x = 0; x < a.w; x++) {
+                const i = (y * a.w + x) * 4;
+                // premultiplied, as the canvas keeps and composites them (getImageData divides by alpha, so a
+                // 1/255 alpha step shows as a large colour step in the faintest halo pixels)
+                texel = Math.max(texel, Math.abs(A[i + 3] - Bd[i + 3]));
+                for (let c = 0; c < 3; c++) {
+                  texel = Math.max(texel, Math.abs(Math.round((A[i + c] * A[i + 3]) / 255) - Math.round((Bd[i + c] * Bd[i + 3]) / 255)));
+                }
+                if (!r) continue;
+                const inside = x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
+                if (!inside) { if (A[i + 3] > outside) outside = A[i + 3]; continue; }
+                const edge = x === r.x || y === r.y || x === r.x + r.w - 1 || y === r.y + r.h - 1;
+                if (edge && A[i + 3] > ring) ring = A[i + 3];
+              }
+            }
+            if (r) { res.clipped++; res.area += a.w * a.h; res.clip += r.w * r.h; }
+            if (r && level === 0) {
+              const c = b.cx, far = Math.max(c - r.x, r.x + r.w - c, c - r.y, r.y + r.h - c) / b.F;
+              const beyond = far * size - (DR.inkEm(style) * size + 2);
+              res.reach = Math.max(res.reach, far);
+              if (beyond > res.beyond) { res.beyond = beyond; res.reachAt = { ch, style, size, reach: far, model: DR.inkEm(style) }; }
+            }
+            res.outside = Math.max(res.outside, outside); res.ring = Math.max(res.ring, ring); res.texel = Math.max(res.texel, texel);
+            if ((outside > 0 || texel > 0) && res.bad.length < 8) {
+              res.bad.push({ ch, style, size, level, outside, ring, texel, w: a.w, rect: r ? [r.x, r.y, r.w, r.h] : null });
+            }
+          }
+        }
+      }
+    }
+    plain.clear(); inked.clear();
+    return res;
+  }
+
   // perf(o) → frame times (ms) of a fixture project rendered for `seconds` at `fps` with the short side `short` (720 by
   // default). Each frame is followed by a 1-pixel read, so the time includes the canvas work, not only the recording of
   // the calls. o.camera: the planner's automatic camerawork (DESIGN_2_1 §4.7: the shots it gives the project) under a
   // rig (work:rig pinned to slowSwell: project_long's own runs draw none); o.materials: the sample materials in every
   // slot (source 'materials'). The result adds behaveP50 (the behave stage: evaluation and world solve), shots (cut
   // scenes in the window with a shot), rigs (rig runs other than 'none') and mixShare (the smallest particle share of the
-  // scenes built).
+  // scenes built). o.flushStages (a diagnostic, never in perf.py's judgement: it adds a readback per frame): the frame
+  // surface is read once the world is drawn (render option `flush`), so 'draw' holds the canvas's raster time of the
+  // world and 'post' only the post stack's; `stages.rest` is the time after the render call (the final readback).
+  // o.recipes ({ kind: recipe } or 'heaviest'): those sample materials replaced by materials of these recipes
+  // (recipesRegistry). `budget` summarizes the glyph budget records of the cuts in the window (§5.9.5).
+  // The result also carries `times`, the frame times in order (per-frame comparisons across runs), and `slices`: the
+  // longest stretch of work engine.prepare did between two yields to the host, and how many yields it made.
+  // o.meter (a diagnostic, never in perf.py's judgement): `cover`, per frame [the frame share the glyph sprite draws
+  // cover (their drawn rects, summed), the number of sprite draws, the §5.9.5 model's cover of the same frame (camera
+  // slack 1)], and `drawMs`, the behave, draw and post stages per frame ([ms, ms, ms]).
+  // The §5.9.5 model's cover of the text sprites of every cut on screen at t, under each cut's own camera (slack 1):
+  // what engine/scene/budget sums, for comparison with the meter. Re-evaluates the scenes (the next frame does again).
+  function modelCover(engine, plan, t) {
+    let sum = 0;
+    plan.cuts.forEach((c, i) => {
+      if (t < c.a || t >= c.b) return;
+      const scene = engine.scene('cut', i);
+      if (scene) sum += BG.coverAt(scene, t - c.t0, plan.design, 1);
+    });
+    return sum;
+  }
+
   async function perf(o) {
     const source = o.parts || defaultSource();
-    const rec = engineFor(source, false, true);
-    const doc = projectDoc(o.project);
-    if (o.camera) doc.pins = Object.assign({}, doc.pins, { 'work:rig': { v: 'slowSwell', by: 'user' } });
-    rec.engine.setDoc(doc);
-    let plan = rec.engine.plan;
-    if (o.materials) plan = withMaterials(plan, rec.engine.registry);
-    if (plan !== rec.engine.plan) rec.engine.setPlan(plan);
+    const slices = { max: 0, n: 0 };
+    let resumed = -1;
+    const idle = () => {
+      const at = performance.now();
+      if (resumed >= 0) slices.max = Math.max(slices.max, at - resumed);
+      slices.n++;
+      return factory.idle().then(() => { resumed = performance.now(); });
+    };
+    const rec = engineFor(source, false, true, false, { idle, variant: o, registry: o.recipes ? recipesRegistry(o.recipes) : null });
+    const plan = projectPlan(rec.engine, o);
     const short = o.short || 720;
     const k = short / Math.min(plan.design.w, plan.design.h);
     const w = Math.round(plan.design.w * k), h = Math.round(plan.design.h * k);
     const s = makeSurface(w, h, false);
     const fps = o.fps || 30, seconds = o.seconds || 10, start = o.start || 0;
     const ropts = { quality: 'export', pick: true, scale: w / plan.design.w };
+    if (o.flushStages) ropts.flush = (frame) => { frame.ctx.getImageData(0, 0, 1, 1); };
+    const meter = o.meter ? { px: 0, n: 0, w, h } : null;
+    const cover = [];
     // As in the app (ui/boot installPrepare): the preview shows a frame, then prepares around the playhead — which
     // warms the sprites of blurred motion at the scale of that frame — and keeps doing so while it plays.
     rec.engine.renderFrame(s, start, ropts);
+    resumed = performance.now();
     await rec.engine.prepare(start, start + seconds, { export: false });
+    if (resumed >= 0) slices.max = Math.max(slices.max, performance.now() - resumed);
+    resumed = -1;
     for (let i = 0; i < 5; i++) { rec.engine.renderFrame(s, start + i / fps, ropts); s.ctx.getImageData(0, 0, 1, 1); }
-    const times = [], behave = [];
-    const stages = { behave: 0, draw: 0, post: 0 };
+    const times = [], behave = [], drawMs = [];
+    const stages = { behave: 0, draw: 0, post: 0, rest: 0 };
     const n = Math.round(seconds * fps);
     let shots = 0, share = 1;
+    if (meter) ropts.meter = meter;
     for (let i = 0; i < n; i++) {
+      if (meter) { meter.px = 0; meter.n = 0; }
       const t0 = performance.now();
       rec.engine.renderFrame(s, start + i / fps, ropts);
       s.ctx.getImageData(0, 0, 1, 1);
       times.push(performance.now() - t0);
+      if (meter) cover.push([meter.px / (w * h), meter.n, modelCover(rec.engine, plan, start + i / fps)]);
       const st = rec.engine.stats().stageMs;
+      drawMs.push([st.behave, st.draw, st.post]);
       stages.behave += st.behave; stages.draw += st.draw; stages.post += st.post;
+      stages.rest += times[i] - st.behave - st.draw - st.post;
       behave.push(st.behave);
     }
     // Material particles are drawn by paints (not in drawn.particles): the budget is read from the chosen defs, Σ
@@ -52523,12 +53333,63 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core
       particles = Math.max(particles, sum);
     });
     share = particles > CUT_PARTICLES ? CUT_PARTICLES / particles : 1;
+    // the glyph budget (DESIGN_2_1 §5.9.5) of the material phases of the cuts in the window: how many, how many masked,
+    // the largest cover one adds (fitted), and those over the share with a mask left to put on (none, by construction)
+    const budget = { phases: 0, masked: 0, fitted: 0, over: 0, share: BG.SHARE };
+    plan.cuts.forEach((c, i) => {
+      if (c.b < start || c.a > start + seconds) return;
+      const scene = rec.engine.scene('cut', i);
+      const rb = scene && scene.spriteBudget;
+      if (!rb) return;
+      for (const ph of ['arrive', 'dwell', 'depart']) {
+        const r = rb[ph];
+        if (!r) continue;
+        budget.phases++;
+        if (r.step > 0) budget.masked++;
+        budget.fitted = Math.max(budget.fitted, r.fitted);
+        if (r.fitted > BG.SHARE + 1e-9 && r.step < BG.LADDER.length - 1) budget.over++;
+      }
+    });
     const sorted = times.slice().sort((a, b) => a - b);
     const mean = times.reduce((a, b) => a + b, 0) / Math.max(1, times.length);
     for (const k of Object.keys(stages)) stages[k] /= Math.max(1, n);
     return { frames: n, p50: percentile(sorted, 0.5), p95: percentile(sorted, 0.95), max: sorted[sorted.length - 1] || 0, mean,
       stages, behaveP50: percentile(behave.sort((a, b) => a - b), 0.5), w, h, scenes: rec.engine.stats().scenes, shots,
-      rigs: (plan.rigs || []).filter((r) => r.rig && r.rig.v !== 'none').length, particles, mixShare: share };
+      rigs: (plan.rigs || []).filter((r) => r.rig && r.rig.v !== 'none').length, particles, mixShare: share, times, slices,
+      cover: meter ? cover : null, drawMs: meter || o.flushStages ? drawMs : null, budget };
+  }
+
+  // cuts(o) → [{ i, key, a, b, t0, times, slots, glyphs, em, cellArea, spriteBudget }]: the cuts of a fixture project
+  // (projectPlan: o.project, o.camera, o.materials, o.recipes) that are visible in [o.start, o.start + o.seconds] (all
+  // without o.seconds): their windows, the arrive / dwell / depart / seam choices, the glyph count, the largest and mean
+  // em (du), the summed rest cell area as a share of the frame, and the scene's glyph sprite budget record (null
+  // without one). A diagnostic for the §5.9.5 budget.
+  function cutsApi(o) {
+    const source = o.parts || defaultSource();
+    const rec = engineFor(source, false, true, false, { registry: o.recipes ? recipesRegistry(o.recipes) : null });
+    const plan = projectPlan(rec.engine, o);
+    const t0 = Number.isFinite(o.start) ? o.start : -Infinity, t1 = Number.isFinite(o.seconds) ? t0 + o.seconds : Infinity;
+    const area = plan.design.w * plan.design.h;
+    const out = [];
+    plan.cuts.forEach((c, i) => {
+      if (c.b < t0 || c.a > t1) return;
+      const scene = rec.engine.scene('cut', i);
+      const tg = scene && scene.target;
+      let emMax = 0, emSum = 0, cell = 0, n = 0;
+      if (tg) {
+        for (let j = 0; j < tg.to - tg.from; j++) {
+          if (tg.cls[j] === 'space') continue;
+          n++; emMax = Math.max(emMax, tg.em[j]); emSum += tg.em[j]; cell += tg.w[j] * tg.h[j];
+        }
+      }
+      const slot = (k) => (c.slots[k] && typeof c.slots[k].v === 'string' ? c.slots[k].v : null);
+      out.push({ i, key: c.key, a: c.a, b: c.b, t0: c.t0, times: scene ? scene.times : null, text: c.text,
+        slots: { arrange: slot('arrange'), arrive: slot('arrive'), dwell: slot('dwell'), depart: slot('depart') },
+        glyphs: n, em: { max: emMax, mean: n ? emSum / n : 0 }, cellArea: cell / area,
+        spriteBudget: scene && scene.spriteBudget ? scene.spriteBudget : null });
+    });
+    rec.engine.dispose();
+    return { cuts: out, seams: (plan.seams || []).filter((s) => s.at >= t0 - 2 && s.at <= t1 + 2), design: plan.design };
   }
 
   async function renderApi(o) {
@@ -52588,6 +53449,7 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core
     window.addEventListener('error', (e) => pageErrors.push(String(e.message || e.error)));
     window.addEventListener('unhandledrejection', (e) => pageErrors.push(String((e.reason && e.reason.message) || e.reason)));
     window.__lab = Object.freeze({ info, render: renderApi, thumb: thumbApi, sequence, sheet, parity, blurSweep, frames, perf,
+      compare, comparePart, spriteCheck, cuts: cutsApi,
       errors: () => pageErrors.slice(), page });
   }
 

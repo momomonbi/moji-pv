@@ -113,6 +113,41 @@ MV.def('engine/scene/behave', ['core/num', 'core/curve', 'core/rng', 'core/motio
     return Object.assign({}, beh, inner, { run: runWarped, warp: CV.warp(curve), w0, span: w1 - w0 });
   }
 
+  // --- sprite masks (DESIGN_2_1 §5.9.5) -------------------------------------------------------------------------
+
+  // The pose columns a glyph sprite budget can take back from a behaviour, by group: tint, echo and glow each on their
+  // own; blur with the shard and pixel columns (every column that puts a glyph on the sprite path); grow = the scale and
+  // depth columns (sx, sy, z: the size a glyph is drawn at).
+  const MASK_GROUPS = Object.freeze({ tint: Object.freeze(['tint']), echo: Object.freeze(['echo']), glow: Object.freeze(['glow']),
+    blur: Object.freeze(['blur', 'shard', 'pixel']), grow: Object.freeze(['sx', 'sy', 'z']) });
+
+  // A masked behaviour runs the behaviour it wraps and then puts back, on the nodes [mfrom, mto), the values the masked
+  // columns had before it ran: what it wrote there is dropped, what earlier behaviours wrote stays. Allocation-free per
+  // frame (the saved values live in `saved`, made at build).
+  function runMasked(P, t, b) {
+    const cols = b.cols, from = b.mfrom, n = b.mto - b.mfrom, sv = b.saved;
+    for (let c = 0; c < cols.length; c++) {
+      const col = P[cols[c]];
+      for (let j = 0; j < n; j++) sv[c * n + j] = col[from + j];
+    }
+    b.of.run(P, t, b.of);
+    for (let c = 0; c < cols.length; c++) {
+      const col = P[cols[c]];
+      for (let j = 0; j < n; j++) col[from + j] = sv[c * n + j];
+    }
+  }
+
+  // masked(beh, groups, from, to) → a behaviour that keeps beh's writes except those to the columns of `groups` (names of
+  // MASK_GROUPS) on the nodes [from, to) ∩ beh's range; beh itself when nothing is masked. Made at build, never per frame.
+  function masked(beh, groups, from, to) {
+    const cols = [];
+    for (const g of groups || []) for (const c of MASK_GROUPS[g] || []) if (!cols.includes(c)) cols.push(c);
+    const mfrom = Math.max(from, beh.from), mto = Math.min(to, beh.to);
+    if (cols.length === 0 || !(mto > mfrom)) return beh;
+    return Object.assign({}, beh, { run: runMasked, of: beh, cols: Object.freeze(cols), mfrom, mto,
+      saved: new Float32Array(cols.length * (mto - mfrom)) });
+  }
+
   // --- beat lookups without allocation ----------------------------------------------------------------------
 
   // Fills out { index, phase, since, bar } like Grid.beatAt(t) (core/beats) plus the bar index.
@@ -375,7 +410,7 @@ MV.def('engine/scene/behave', ['core/num', 'core/curve', 'core/rng', 'core/motio
   return {
     PH, LIVE, DELTA, BehaviourError, RAMP_IN, RAMP_OUT,
     check, sortBehaviours, isActive, runBehaviours, envelopeWeight, followWeight, beatInto,
-    runDrift, runFollow, runGlyphMotion, runHold, runWarped, warped,
+    runDrift, runFollow, runGlyphMotion, runHold, runWarped, warped, MASK_GROUPS, runMasked, masked,
     compileMoves, directionOf, exposedName, identityOf, motionTiming, motionTotal, glyphMotionMaker, holdMaker, easeOf,
     TRACK_UNITS,
   };

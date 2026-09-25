@@ -158,9 +158,74 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
     }
   }
 
-  function spriteAt(g, sp, e, alpha) {
+  // One sprite at the glyph's origin, e du per raster px, drawn whole. A raster that carries its ink rect (sp.ink: a host
+  // with inkBox; outside the rect it is transparent, engine/render/sprites inkRect) and is drawn scaled up on both axes
+  // is clipped to that rect widened by INK_CLIP texels, so a canvas without a GPU spends its time only there. The clip
+  // is chosen so that every pixel is what the unclipped draw gives (clip, from inkClip):
+  //   INK_ALL  — a draw whose transform turns or skews the raster: all four sides. A canvas maps each pixel on its own
+  //              then; a pixel cut or touched by the clip samples only transparent texels (a texel is ≥ 1 device px when
+  //              scaling up, and the bilinear footprint is 2 × 2 texels), so its value stays;
+  //   INK_OPEN_LEFT / INK_OPEN_RIGHT — a scale-and-translate draw: the top, the bottom and the side where the canvas's
+  //              rows end. A software canvas steps along each row from the row's first pixel in fixed point, so a row
+  //              that starts elsewhere rounds a few texel weights differently (1–5/255, measured); the side where rows
+  //              start (the device's left: the raster's left, or its right when the draw is mirrored) stays open.
+  // A draw that scales down on any axis (a canvas may sample it through mip levels, whose footprint is wider) and every
+  // draw on the recorder (no ink rects) are not clipped (INK_NONE).
+  const INK_CLIP = 2;
+  const INK_NONE = 0, INK_ALL = 1, INK_OPEN_LEFT = 2, INK_OPEN_RIGHT = 3;
+  function spriteAt(g, sp, e, alpha, clip, meter) {
     g.globalAlpha = alpha;
-    g.drawImage(sp.canvas, -sp.cx * e, -sp.cy * e, sp.w * e, sp.h * e);
+    const r = clip !== INK_NONE ? sp.ink : null;
+    const x = -sp.cx * e, y = -sp.cy * e, w = sp.w * e, h = sp.h * e;
+    if (!r) {
+      if (meter) metered(g, meter, x, y, x + w, y + h);
+      g.drawImage(sp.canvas, x, y, w, h);
+      return;
+    }
+    // (an open side lies a texel beyond the quad, so no row of the quad starts on the clip's edge)
+    const cy0 = (r.y - INK_CLIP - sp.cy) * e, cy1 = (r.y + r.h + INK_CLIP - sp.cy) * e;
+    const cx0 = clip === INK_OPEN_LEFT ? x - e : (r.x - INK_CLIP - sp.cx) * e;
+    const cx1 = clip === INK_OPEN_RIGHT ? x + w + e : (r.x + r.w + INK_CLIP - sp.cx) * e;
+    if (meter) metered(g, meter, Math.max(x, cx0), Math.max(y, cy0), Math.min(x + w, cx1), Math.min(y + h, cy1));
+    g.save();
+    g.beginPath();
+    g.rect(cx0, cy0, cx1 - cx0, cy1 - cy0);
+    g.clip();
+    g.drawImage(sp.canvas, x, y, w, h);
+    g.restore();
+  }
+
+  // The lab's sprite meter (render option `meter`, never set by the app or an export): the device px of the frame a
+  // sprite draw covers (the bounding box of its drawn rect, within the frame) and the number of draws.
+  function metered(g, meter, x0, y0, x1, y1) {
+    const m = g.getTransform();
+    let lx = Infinity, ly = Infinity, hx = -Infinity, hy = -Infinity;
+    for (let k = 0; k < 4; k++) {
+      const px = k & 1 ? x1 : x0, py = k & 2 ? y1 : y0;
+      const X = m.a * px + m.c * py + m.e, Y = m.b * px + m.d * py + m.f;
+      if (X < lx) lx = X; if (X > hx) hx = X; if (Y < ly) ly = Y; if (Y > hy) hy = Y;
+    }
+    const w = Math.min(hx, meter.w) - Math.max(lx, 0), h = Math.min(hy, meter.h) - Math.max(ly, 0);
+    if (w > 0 && h > 0) meter.px += w * h;
+    meter.n++;
+  }
+
+  // The smallest device scale of a glyph's draw (device px per du along its shortest axis): the smaller singular value
+  // of M, times the tate-chu-yoko squeeze.
+  function minScaleOf(M, rec) {
+    const a = M[0], b = M[1], c = M[2], d = M[3];
+    const t = a * a + b * b + c * c + d * d, det = a * d - b * c;
+    const s = Math.sqrt(Math.max(0, (t - Math.sqrt(Math.max(0, t * t - 4 * det * det))) / 2));
+    return rec.sx < 1 ? s * rec.sx : s;
+  }
+
+  // The clip spriteAt gives a raster drawn under M and the glyph's own turn (localTurn): none unless it has an ink rect
+  // and is scaled up on both axes; all sides when the transform turns (a turned glyph, or M with a rotation or skew);
+  // else open on the side where device rows start (M's x scale times the squeeze: positive → the raster's left).
+  function inkClip(sp, rec, M) {
+    if (!sp.ink || (rec.em / sp.F) * minScaleOf(M, rec) < 1) return INK_NONE;
+    if (rec.rot || M[1] !== 0 || M[2] !== 0) return INK_ALL;
+    return M[0] * rec.sx > 0 ? INK_OPEN_LEFT : INK_OPEN_RIGHT;
   }
 
   // The crossfaded pair of blur levels of one ink/style (§4.19.5: alpha 1 − f and f). Without a target (g null: a
@@ -173,8 +238,8 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
     setMatrix(g, M);
     if (dx) g.translate(dx, 0);
     localTurn(g, rec);
-    if (pr.f < 1) spriteAt(g, lo, rec.em / lo.F, alpha * (1 - pr.f));
-    if (hi) spriteAt(g, hi, rec.em / hi.F, alpha * pr.f);
+    if (pr.f < 1) spriteAt(g, lo, rec.em / lo.F, alpha * (1 - pr.f), inkClip(lo, rec, M), dc.meter);
+    if (hi) spriteAt(g, hi, rec.em / hi.F, alpha * pr.f, inkClip(hi, rec, M), dc.meter);
   }
 
   function drawPixelated(dc, g, sp, e, alpha, pixel) {
@@ -210,7 +275,7 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
     setMatrix(g, M);
     localTurn(g, rec);
     g.globalCompositeOperation = 'lighter';
-    spriteAt(g, gl, rec.em / gl.F, alpha * (glow > 1 ? 1 : glow));
+    spriteAt(g, gl, rec.em / gl.F, alpha * (glow > 1 ? 1 : glow), inkClip(gl, rec, M), dc.meter);
     g.globalCompositeOperation = 'source-over';
   }
 
@@ -278,6 +343,114 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
     }
     if (reveal < 1 && g) { g.restore(); dc.font = null; }
     return true;
+  }
+
+  // --- the glyph cost model (DESIGN_2_1 §5.9.5) ------------------------------------------------------------------
+
+  // glyphCover(rec, P, i, wa, M, W, H) → the du² of the frame [0, W] × [0, H] that drawing glyph node i (pose P, world
+  // alpha wa) covers under the screen matrix M (du → frame du), summed over what drawGlyph draws (a spot drawn twice
+  // counts twice), each draw counted by the bounding box of its rect within the frame:
+  //   - the direct path: the glyph's ink (fillText), its two echo copies and its tint copy;
+  //   - the sprite path: the halo (a glow, or the text style's; also on the direct path), the echo pairs, the body (a
+  //     crossfaded pair of blur levels, or one raster for shards and pixels) and the tint pair. Each sprite counts at
+  //     least the rect spriteAt draws of it at 720p or larger: a raster of level ≤ 2 whole (it may be drawn scaled down,
+  //     which is never clipped), shards (widened by the strips' spread) and the mosaic whole, and a level ≥ 3 raster from
+  //     its box's left edge to the ink's right edge plus the clip's pad (the open side of the scale-and-translate clip)
+  //     by the ink's height plus the pad.
+  // The ink is taken as inkEm(style) em (or half the cell, if larger) either side of the glyph's centre. Allocation-free.
+  const COVER_INK = 0.66;        // the ink's reach from the centre in em: descenders and emoji reach 0.63 (textBaseline middle)
+  const COVER_PX = 3;            // 2 device px of antialiasing at 720p (1.5 du per px)
+  // what a text style adds to the reach (engine/render/sprites: half the outline, the shadow's or duo's larger offset)
+  const COVER_STYLE = Object.freeze({ outline: SP.OUTLINE_WIDTH / 2, shadow: Math.max(...SP.SHADOW_OFFSET),
+    duo: Math.max(...SP.DUO_OFFSET) });
+  // inkEm(style) → the ink's reach from the glyph's centre (em) the model assumes for a text style
+  // (tests/browser/glyph_parity.py holds every measured ink rect to it).
+  function inkEm(style) { return COVER_INK + (COVER_STYLE[style] || 0); }
+  function inkReach(rec) { return Math.max(inkEm(rec.style) * rec.em, 0.5 * (rec.w || 0), 0.5 * (rec.h || 0)); }
+  const COVER_M = new Float64Array(6);          // M · the glyph's own turn (localTurn)
+  const COVER_PAIR = { lo: 0, hi: 0, f: 0 };
+
+  // count (optional, tests): { sprites, inks } incremented per sprite and per direct-path ink draw counted.
+  function glyphCover(rec, P, i, wa, M, W, H, count) {
+    if (!(P.reveal[i] > 0.001) || !(wa >= T.MIN_ALPHA)) return 0;
+    return poseCover(rec, P.blur[i], P.glow[i], P.shard[i], P.pixel[i], P.echo[i], P.tint[i], M, W, H, count);
+  }
+
+  // poseCover(rec, blur, glow, shard, pixel, echo, tint, M, W, H, count?) → glyphCover for a visible glyph with these
+  // pose values.
+  let COUNT = null;
+  function poseCover(rec, blurIn, glow, shard, pixel, echo, tint, M, W, H, count) {
+    COUNT = count || null;
+    if (!rec || !rec.font || rec.cls === 'space') return 0;
+    const blur = blurIn > 0 ? blurIn : 0;
+    const halo = rec.style === 'glow' && glow < STYLE_GLOW ? STYLE_GLOW : glow;
+    const direct = blur < SP.DIRECT_BLUR && glow < 0.01 && shard === 0 && pixel < 1;
+    const N = COVER_M;
+    N[0] = M[0]; N[1] = M[1]; N[2] = M[2]; N[3] = M[3]; N[4] = M[4]; N[5] = M[5];
+    if (rec.rot === 2) { N[0] = -N[0]; N[1] = -N[1]; }                      // scale(−1, 1)
+    if (rec.rot) { const a = N[0], b = N[1]; N[0] = N[2]; N[1] = N[3]; N[2] = -a; N[3] = -b; }   // rotate(π/2)
+    if (rec.sx !== 1) { N[0] *= rec.sx; N[1] *= rec.sx; }                  // scale(sx, 1)
+    let sum = 0;
+    if (halo > 0) sum += rasterCover(rec, M, GLOW_LEVEL, 0, 0, false, W, H);
+    if (direct) {
+      if (echo > 0) { const dx = ECHO_SHIFT * echo * rec.em; sum += inkCover(rec, M, dx, W, H) + inkCover(rec, M, -dx, W, H); }
+      sum += inkCover(rec, M, 0, W, H);
+      if (tint > 0) sum += inkCover(rec, M, 0, W, H);
+      return sum;
+    }
+    const pr = SP.levelPair(blur, COVER_PAIR);
+    if (echo > 0) {
+      const dx = ECHO_SHIFT * echo * rec.em;
+      sum += pairCover(rec, M, pr, dx, W, H) + pairCover(rec, M, pr, -dx, W, H);
+    }
+    if (pixel >= 1 || shard > 0) sum += rasterCover(rec, M, pr.lo, 0, pixel >= 1 ? 0 : shard, true, W, H);
+    else sum += pairCover(rec, M, pr, 0, W, H);
+    if (tint > 0) sum += pairCover(rec, M, pr, 0, W, H);
+    return sum;
+  }
+
+  // The frame du² of the glyph's ink (a direct-path fillText), dx = an echo shift before the glyph's own turn.
+  function inkCover(rec, M, dx, W, H) {
+    if (COUNT) COUNT.inks++;
+    const ink = inkReach(rec) + COVER_PX;
+    return rectCover(M, -ink, -ink, ink, ink, dx, W, H);
+  }
+
+  function pairCover(rec, M, pr, dx, W, H) {
+    const lo = pr.lo, hi = pr.hi, f = pr.f;       // (read before rasterCover: pr is shared)
+    return (f < 1 ? rasterCover(rec, M, lo, dx, 0, false, W, H) : 0) + (f > 0 ? rasterCover(rec, M, hi, dx, 0, false, W, H) : 0);
+  }
+
+  // The frame du² one raster of blur level `level` covers: whole (level ≤ 2, shards spread by `shard`, the mosaic) or
+  // clipped to the ink (level ≥ 3); dx = the echo shift, in the node frame before the glyph's own turn (spritePair).
+  function rasterCover(rec, M, level, dx, shard, whole, W, H) {
+    if (COUNT) COUNT.sprites++;
+    const em = rec.em, blurDu = SP.LEVELS[level];
+    // a raster px is at most max(blur/4, 0.0035 em) du (BLUR_RASTER_PX, MAX_SIDE), so its 2 px margins are within the
+    // added 0.5·blur + 0.01 em, and the clip's pad (3σ + 2 px, widened by INK_CLIP texels) within 4·blur + 0.015 em
+    const half = (SP.BOX_EM * em) / 2 + SP.BLUR_REACH * blurDu + 0.5 * blurDu + 0.01 * em + COVER_PX;
+    let x0 = -half, x1 = half, y0 = -half, y1 = half;
+    if (!whole && level >= 3) {
+      const ink = inkReach(rec);
+      const pad = 4 * blurDu + 0.015 * em + COVER_PX;
+      x1 = ink + pad; y0 = -ink - pad; y1 = ink + pad;
+    }
+    if (shard > 0) { const sx = 0.6 * shard * em, sy = 0.4 * shard * em; x0 -= sx; x1 += sx; y0 -= sy; y1 += sy; }
+    return rectCover(M, x0, y0, x1, y1, dx, W, H);
+  }
+
+  // The frame du² of the bounding box of the rect x0..x1 × y0..y1 (after the glyph's own turn, COVER_M) moved by dx in
+  // the node frame (M's own axes).
+  function rectCover(M, x0, y0, x1, y1, dx, W, H) {
+    const N = COVER_M, ox = N[4] + M[0] * dx, oy = N[5] + M[1] * dx;
+    let lx = Infinity, ly = Infinity, hx = -Infinity, hy = -Infinity;
+    for (let k = 0; k < 4; k++) {
+      const u = k & 1 ? x1 : x0, v = k & 2 ? y1 : y0;
+      const X = N[0] * u + N[2] * v + ox, Y = N[1] * u + N[3] * v + oy;
+      if (X < lx) lx = X; if (X > hx) hx = X; if (Y < ly) ly = Y; if (Y > hy) hy = Y;
+    }
+    const w = Math.min(hx, W) - Math.max(lx, 0), h = Math.min(hy, H) - Math.max(ly, 0);
+    return w > 0 && h > 0 ? w * h : 0;
   }
 
   // --- a scene layer ------------------------------------------------------------------------------------------------
@@ -422,10 +595,12 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
     g.globalAlpha = 1;
   }
 
-  // warmLayer(dc, scene, L, view) → glyphs visited: the sprite lookups drawLayer would make for the glyphs of one layer
-  // (the same keys: size bucket from the full transform with pose scale and camera zoom, blur level pair, flip-shaded
-  // ink, halo, echo and tint inks, level 0 for pixel and shard), without drawing. Missing sprites are rasterized now.
-  function warmLayer(dc, scene, L, view) {
+  // warmLayer(dc, scene, L, view, stop?) → glyphs visited: the sprite lookups drawLayer would make for the glyphs of one
+  // layer (the same keys: size bucket from the full transform with pose scale and camera zoom, blur level pair,
+  // flip-shaded ink, halo, echo and tint inks, level 0 for pixel and shard), without drawing. Missing sprites are
+  // rasterized now. stop() is asked after each glyph that made a sprite; when it answers true the walk ends there and
+  // the result is −(glyphs visited) − 1.
+  function warmLayer(dc, scene, L, view, stop) {
     const list = nodesByLayer(scene)[L];
     if (list.length === 0) return 0;
     const t = scene.table, g0 = dc.g;
@@ -436,7 +611,9 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
         const i = list[k];
         if (t.type[i] !== TYPE.glyph || T.isHidden(t, i)) continue;
         const VW = MAT.mul(dc.VW, view, worldInto(dc.W6, t, i));
+        const made = dc.sprites.made;
         if (drawGlyph(dc, scene, i, MAT.mul(dc.M, dc.D, VW))) n++;
+        if (stop && dc.sprites.made !== made && stop()) return -n - 1;
       }
     } finally {
       dc.g = g0;
@@ -445,5 +622,5 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
   }
 
   return { createDrawContext, resetCounts, drawLayer, warmLayer, drawGlyph, hasLayer, hasMedia, hasStill, nodesByLayer, inkOf,
-    secondInk, shaded, cssOf, clipReveal, STYLE_GLOW, GLOW_LEVEL };
+    secondInk, shaded, cssOf, clipReveal, minScaleOf, inkClip, INK_CLIP, glyphCover, poseCover, inkEm, STYLE_GLOW, GLOW_LEVEL };
 });

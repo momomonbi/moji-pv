@@ -1,8 +1,8 @@
 /* 文字PVメーカー v2 — original work. Part lab: one part in a canned cut with a pose-column view, contact sheets, a text mode and the browser-test API (DESIGN §6.14, §8.3). */
 MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core/schema', 'core/rng', 'engine/facade',
   'engine/host/canvas', 'engine/host/fonts', 'engine/host/measure', 'engine/text/faces', 'engine/text/service',
-  'engine/render/sprites', 'parts/kit', 'parts/mix', 'i18n/t', 'i18n/strings'],
-(REG, DOC, S, SHOT, SCH, RNG, FAC, HC, HF, HM, FACES, TS, SP, K, MIX, I18N, strings) => {
+  'engine/render/sprites', 'engine/render/draw', 'engine/scene/budget', 'parts/kit', 'parts/mix', 'i18n/t', 'i18n/strings'],
+(REG, DOC, S, SHOT, SCH, RNG, FAC, HC, HF, HM, FACES, TS, SP, DR, BG, K, MIX, I18N, strings) => {
   'use strict';
 
   // The lab is a developer page (build.py --lab → tests/www/lab.html, MV.DEV = true). It is not shipped, so its control
@@ -104,6 +104,39 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core
 
   function defaultSource() { return sources()[0] || null; }
 
+  // The heaviest glyph work §5.8 admits in each text kind (DESIGN_2_1 §7.4: perf.py's camerawork + materials row): every
+  // column that puts a glyph on the sprite path at its limit (blur 0.6 em, glow 1, tint 1), size tracks, a turn, the amp
+  // knob, and an inner part that adds an echo (arrive), a tint sweep (dwell) or a glow and tint (depart). The glyph
+  // budget of each scene (§5.9.5) decides what of it is drawn; tests/node/budget.test.js uses the same recipes.
+  const track = (col, from, to) => ({ col, from, to });
+  const HEAVIEST = Object.freeze({
+    arrive: { knobs: [{ what: 'amp' }], parts: [{ key: 'ghostConverge' }], motion: { unit: 'glyph', curve: 'expoOut', tracks: [
+      track('y', 0.6, 0), track('alpha', 0, 1), track('blur', 0.6, 0), track('glow', 1, 0), track('tint', 1, 0),
+      track('sx', 2, 1), track('sy', 2, 1), track('rot', -30, 0)] } },
+    dwell: { knobs: [{ what: 'amp' }], parts: [{ key: 'shimmerSweep' }], osc: [{ col: 'glow', amp: 1, hz: 0, wave: 'beat' },
+      { col: 'tint', amp: 1, hz: 0.5, wave: 'sine' }, { col: 'rot', amp: 30, hz: 0.3, wave: 'sine' },
+      { col: 'sx', amp: 0.3, hz: 0.5, wave: 'sine' }] },
+    depart: { knobs: [{ what: 'amp' }], parts: [{ key: 'burnOut' }], motion: { unit: 'glyph', curve: 'quadIn', tracks: [
+      track('x', 0, 0.6), track('alpha', 1, 0), track('blur', 0, 0.6), track('glow', 0, 1), track('tint', 0, 1),
+      track('sx', 1, 2), track('sy', 1, 2), track('rot', 0, 30)] } },
+  });
+
+  // The 'materials' registry with the sample material of each kind in `recipes` ({ kind: recipe }, or 'heaviest' for
+  // HEAVIEST) replaced by a material derived from that recipe (parts/mix derive: core/recipe's limits apply, a refused
+  // recipe throws). perf.py's camerawork + materials row renders with the heaviest.
+  function recipesRegistry(given) {
+    const recipes = given === 'heaviest' ? HEAVIEST : given;
+    const base = catalogRegistry();
+    const defs = materialDefs().filter((d) => !recipes[d.kind]);
+    for (const kind of Object.keys(recipes)) {
+      const got = MIX.derive({ id: 'mz' + kind.toLowerCase(), kind, by: 'user', name: { ja: kind, en: kind }, tags: ['soft'], season: null,
+        pool: true, rv: 1, recipe: recipes[kind] }, base);
+      if (!got.def) throw new Error('lab: the ' + kind + ' recipe is refused: ' + JSON.stringify(got.problems));
+      defs.push(got.def);
+    }
+    return REG.extend(base, defs);
+  }
+
   function cameraKeys(kind) { return kind === 'shot' ? SHOT.SHOT_KEYS : kind === 'rig' ? SHOT.RIG_KEYS : []; }
 
   // --- media mode: the fake store and its test parts (test pages only) -------------------------------------------------
@@ -156,17 +189,33 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core
   const engines = new Map();
   const factory = HC.createCanvasFactory();
 
+  // Engine variants for A/B checks (NOTES "Perf: camerawork + materials row"): inkClip false → a factory without
+  // inkBox (no glyph raster has an ink rect, so no sprite draw is clipped to one), settle false → without settle (sprites
+  // rasterize when first drawn), postCopy true → filters copy their input instead of drawing on it (createEngine's
+  // postCopy). Each variant is a fresh engine; the default engines are the app's.
+  function factoryFor(v) {
+    if (!v || (v.inkClip !== false && v.settle !== false)) return factory;
+    const f = Object.assign({}, factory);
+    if (v.inkClip === false) delete f.inkBox;
+    if (v.settle === false) delete f.settle;
+    return Object.freeze(f);
+  }
+
   // One engine per (source, fonts, media): with fonts the real FontBook (Google Fonts) loads faces; without, faces are
   // never requested and the fallback stacks draw (fast and deterministic, what the tests use). A media engine has the
   // fake store (checkerboard stills, bar-coded video frames) and the media registry.
-  function engineFor(source, withFonts, fresh, media) {
+  // extra (fresh engines only) = { idle, variant, registry }: the engine's yield hook, a variant (factoryFor, postCopy) and
+  // a registry in place of the source's.
+  function engineFor(source, withFonts, fresh, media, extra) {
     const id = source + '|' + (withFonts ? 'fonts' : 'plain') + (media ? '|media' : '');
     if (!fresh && engines.has(id)) return engines.get(id);
-    const registry = media ? mediaRegistry(source) : registryOf(source);
+    const x = extra || {};
+    const registry = x.registry || (media ? mediaRegistry(source) : registryOf(source));
     const fonts = withFonts ? HF.createFontBook({ document, timeoutMs: 8000 }) : null;
     const measurer = HM.createCanvasMeasurer(factory, fonts);
     const assets = media ? mediaFixtures().createFakeMedia(MV, { canvas: factory }) : null;
-    const engine = FAC.createEngine({ registry, canvas: factory, measurer, fonts, assets });
+    const engine = FAC.createEngine(Object.assign({ registry, canvas: factoryFor(x.variant), measurer, fonts, assets },
+      x.idle ? { idle: x.idle } : {}, x.variant && x.variant.postCopy === true ? { postCopy: true } : {}));
     const rec = { engine, registry, fonts, measurer };
     if (!fresh) engines.set(id, rec);
     return rec;
@@ -765,44 +814,231 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core
     return out;
   }
 
+  // The plan perf() and compare() render: the fixture project, o.camera true → work:rig pinned to slowSwell (the
+  // planner's automatic shots stay), 'off' → the camerawork pinned off (work:cam.shot and work:rig 'none': the v2
+  // frames); o.materials → the sample materials in every slot (withMaterials). Set on the engine.
+  function projectPlan(engine, o) {
+    const doc = projectDoc(o.project);
+    if (o.camera === 'off') {
+      doc.pins = Object.assign({}, doc.pins, { 'work:cam.shot': { v: 'none', by: 'user' }, 'work:rig': { v: 'none', by: 'user' } });
+    } else if (o.camera) doc.pins = Object.assign({}, doc.pins, { 'work:rig': { v: 'slowSwell', by: 'user' } });
+    engine.setDoc(doc);
+    let plan = engine.plan;
+    if (o.materials) plan = withMaterials(plan, engine.registry);
+    if (plan !== engine.plan) engine.setPlan(plan);
+    return plan;
+  }
+
+  // compare(o) → [{ t, max, n, box, passes, hashA, hashB }]: a fixture project (projectPlan: o.project, o.camera,
+  // o.materials) drawn by two fresh engines, variant o.a and variant o.b (engineFor's variants: inkClip, settle,
+  // postCopy), at each of o.times; max = the largest channel difference (0..255), n = the pixels that differ and box
+  // their bounds [x0, y0, x1, y1] (null when none), passes = the post passes side a drew. o.w (640), o.quality
+  // ('export'), o.backdrop (the plan's), o.prepare (true: engine.prepare({ export: false }) first, as the preview),
+  // o.recipes (as perf: the sample materials of those kinds replaced), o.list (pixelDiff's list of differing pixels).
+  async function compare(o) {
+    const source = o.parts || defaultSource();
+    const sides = [o.a || {}, o.b || {}].map((variant) => {
+      const rec = engineFor(source, false, true, false, { variant, registry: o.recipes ? recipesRegistry(o.recipes) : null });
+      return { rec, plan: projectPlan(rec.engine, o) };
+    });
+    const plan = sides[0].plan;
+    const w = o.w || 640, h = o.h || Math.round((w * plan.design.h) / plan.design.w);
+    const alpha = o.backdrop === 'clear';
+    const surfaces = sides.map(() => makeSurface(w, h, alpha));
+    const ropts = { quality: o.quality || 'export', pick: false, scale: w / plan.design.w, backdrop: o.backdrop };
+    if (o.prepare) {
+      for (let k = 0; k < 2; k++) {
+        sides[k].rec.engine.renderFrame(surfaces[k], o.times[0], ropts);
+        await sides[k].rec.engine.prepare(o.times[0], o.times[o.times.length - 1], { export: false });
+      }
+    }
+    const out = [];
+    for (const t of o.times) {
+      let passes = 0;
+      for (let k = 0; k < 2; k++) {
+        const st = sides[k].rec.engine.renderFrame(surfaces[k], t, ropts);
+        if (k === 0) passes = st.passes;
+      }
+      const d = pixelDiff(pixels(surfaces[0]), pixels(surfaces[1]), w, h, o.list);
+      out.push({ t, max: d.max, n: d.n, box: d.box, passes, hashA: hashPixels(surfaces[0]), hashB: hashPixels(surfaces[1]),
+        px: d.px });
+    }
+    for (const side of sides) side.rec.engine.dispose();
+    return out;
+  }
+
+  // The largest channel difference (0..255) of two RGBA arrays of a w × h frame, the pixels that differ and their bounds;
+  // with list (a count) also the first `list` differing pixels as [x, y, rgbaA, rgbaB] (px).
+  function pixelDiff(a, b, w, h, list) {
+    let max = 0, n = 0, x0 = w, y0 = h, x1 = -1, y1 = -1;
+    const px = [];
+    for (let i = 0; i < a.length; i += 4) {
+      const d = Math.max(Math.abs(a[i] - b[i]), Math.abs(a[i + 1] - b[i + 1]), Math.abs(a[i + 2] - b[i + 2]), Math.abs(a[i + 3] - b[i + 3]));
+      if (d > 0) {
+        n++; if (d > max) max = d;
+        const x = (i / 4) % w, y = Math.floor(i / 4 / w);
+        x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y);
+        if (list > px.length) px.push([x, y, Array.from(a.subarray(i, i + 4)), Array.from(b.subarray(i, i + 4))]);
+      }
+    }
+    return { max, n, box: n ? [x0, y0, x1, y1] : null, px };
+  }
+
+  // comparePart(o) → { max, n, box, passes, glyphs, hashA, hashB }: renderPart(o) by two fresh engines, variant o.a and
+  // variant o.b (as compare()), on w × h surfaces (480 × 270 unless given); passes and glyphs are side a's FrameStats.
+  async function comparePart(o) {
+    const w = o.w || 480, h = o.h || 270;
+    const got = [];
+    for (const variant of [o.a || {}, o.b || {}]) {
+      const using = engineFor(o.parts || defaultSource(), false, true, false, { variant });
+      const r = await renderPart(Object.assign({}, o, { using, surface: makeSurface(w, h, o.backdrop !== 'clear') }));
+      got.push({ data: pixels(r.surface), stats: r.stats, hash: hashPixels(r.surface) });
+      using.engine.dispose();
+    }
+    const d = pixelDiff(got[0].data, got[1].data, w, h);
+    return { max: d.max, n: d.n, box: d.box, passes: got[0].stats.passes, glyphs: got[0].stats.drawn.glyphs, hashA: got[0].hash,
+      hashB: got[1].hash };
+  }
+
+  // spriteCheck(o) → { cases, clipped, outside, ring, texel, area, clip, reach, beyond, reachAt, bad }: the glyph rasters
+  // of o.chars (an array of graphemes) × o.styles × o.sizes (device em px) × o.levels (0 and the blur levels 1–5), made
+  // by a sprite cache on the host factory (with ink rects, engine/render/sprites) and by one on a factory without inkBox.
+  // clipped = the rasters that have an ink rect; outside = the largest alpha (0..255) such a raster has outside its rect
+  // (draw.spriteAt's clip is exact only when that is 0); ring = the largest on the rect's border (for information: the
+  // clip is widened by 2 texels); texel = the largest channel difference (premultiplied) between the two caches' rasters
+  // (0: inkBox never changes a raster); area / clip = the raster px and the ink-rect px of the clipped rasters; reach =
+  // the farthest a level-0 ink rect (the ink and its 2 px) reaches from the raster's centre (em); beyond = the most
+  // device px by which one reaches past the ink the §5.9.5 model takes (draw.inkEm of its style) and its 2 px at 720p
+  // (≤ 0: the model's ink holds every ink rect), reachAt = that case; bad = the first cases that fail (outside > 0 or
+  // texel > 0). o.family / o.weight pick the face (fallback stacks without fonts).
+  function spriteCheck(o) {
+    const plain = SP.createSpriteCache(factoryFor({ inkClip: false }));
+    const inked = SP.createSpriteCache(factory);
+    const font = FACES.faceRef(o.family || 'Noto Sans JP', o.weight || 400, 'ja');
+    const ink = '#F2EEE6', ink2 = '#2A3F66';
+    const res = { cases: 0, clipped: 0, outside: 0, ring: 0, texel: 0, area: 0, clip: 0, reach: 0, beyond: -Infinity, reachAt: null,
+      bad: [] };
+    const read = (sp) => sp.canvas.getContext('2d').getImageData(0, 0, sp.w, sp.h).data;
+    for (const ch of o.chars) {
+      for (const style of o.styles) {
+        for (const size of o.sizes) {
+          const k = SP.bucketOf(size);
+          for (const level of o.levels) {
+            const a = plain.glyph(font, ch, ink, style, ink2, k, level, size);
+            const b = inked.glyph(font, ch, ink, style, ink2, k, level, size);
+            res.cases++;
+            const A = read(a), Bd = read(b);
+            let outside = 0, ring = 0, texel = 0;
+            const r = b.ink;
+            if (a.w !== b.w || a.h !== b.h || a.ink) texel = 255;
+            for (let y = 0; y < a.h && texel < 255; y++) {
+              for (let x = 0; x < a.w; x++) {
+                const i = (y * a.w + x) * 4;
+                // premultiplied, as the canvas keeps and composites them (getImageData divides by alpha, so a
+                // 1/255 alpha step shows as a large colour step in the faintest halo pixels)
+                texel = Math.max(texel, Math.abs(A[i + 3] - Bd[i + 3]));
+                for (let c = 0; c < 3; c++) {
+                  texel = Math.max(texel, Math.abs(Math.round((A[i + c] * A[i + 3]) / 255) - Math.round((Bd[i + c] * Bd[i + 3]) / 255)));
+                }
+                if (!r) continue;
+                const inside = x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
+                if (!inside) { if (A[i + 3] > outside) outside = A[i + 3]; continue; }
+                const edge = x === r.x || y === r.y || x === r.x + r.w - 1 || y === r.y + r.h - 1;
+                if (edge && A[i + 3] > ring) ring = A[i + 3];
+              }
+            }
+            if (r) { res.clipped++; res.area += a.w * a.h; res.clip += r.w * r.h; }
+            if (r && level === 0) {
+              const c = b.cx, far = Math.max(c - r.x, r.x + r.w - c, c - r.y, r.y + r.h - c) / b.F;
+              const beyond = far * size - (DR.inkEm(style) * size + 2);
+              res.reach = Math.max(res.reach, far);
+              if (beyond > res.beyond) { res.beyond = beyond; res.reachAt = { ch, style, size, reach: far, model: DR.inkEm(style) }; }
+            }
+            res.outside = Math.max(res.outside, outside); res.ring = Math.max(res.ring, ring); res.texel = Math.max(res.texel, texel);
+            if ((outside > 0 || texel > 0) && res.bad.length < 8) {
+              res.bad.push({ ch, style, size, level, outside, ring, texel, w: a.w, rect: r ? [r.x, r.y, r.w, r.h] : null });
+            }
+          }
+        }
+      }
+    }
+    plain.clear(); inked.clear();
+    return res;
+  }
+
   // perf(o) → frame times (ms) of a fixture project rendered for `seconds` at `fps` with the short side `short` (720 by
   // default). Each frame is followed by a 1-pixel read, so the time includes the canvas work, not only the recording of
   // the calls. o.camera: the planner's automatic camerawork (DESIGN_2_1 §4.7: the shots it gives the project) under a
   // rig (work:rig pinned to slowSwell: project_long's own runs draw none); o.materials: the sample materials in every
   // slot (source 'materials'). The result adds behaveP50 (the behave stage: evaluation and world solve), shots (cut
   // scenes in the window with a shot), rigs (rig runs other than 'none') and mixShare (the smallest particle share of the
-  // scenes built).
+  // scenes built). o.flushStages (a diagnostic, never in perf.py's judgement: it adds a readback per frame): the frame
+  // surface is read once the world is drawn (render option `flush`), so 'draw' holds the canvas's raster time of the
+  // world and 'post' only the post stack's; `stages.rest` is the time after the render call (the final readback).
+  // o.recipes ({ kind: recipe } or 'heaviest'): those sample materials replaced by materials of these recipes
+  // (recipesRegistry). `budget` summarizes the glyph budget records of the cuts in the window (§5.9.5).
+  // The result also carries `times`, the frame times in order (per-frame comparisons across runs), and `slices`: the
+  // longest stretch of work engine.prepare did between two yields to the host, and how many yields it made.
+  // o.meter (a diagnostic, never in perf.py's judgement): `cover`, per frame [the frame share the glyph sprite draws
+  // cover (their drawn rects, summed), the number of sprite draws, the §5.9.5 model's cover of the same frame (camera
+  // slack 1)], and `drawMs`, the behave, draw and post stages per frame ([ms, ms, ms]).
+  // The §5.9.5 model's cover of the text sprites of every cut on screen at t, under each cut's own camera (slack 1):
+  // what engine/scene/budget sums, for comparison with the meter. Re-evaluates the scenes (the next frame does again).
+  function modelCover(engine, plan, t) {
+    let sum = 0;
+    plan.cuts.forEach((c, i) => {
+      if (t < c.a || t >= c.b) return;
+      const scene = engine.scene('cut', i);
+      if (scene) sum += BG.coverAt(scene, t - c.t0, plan.design, 1);
+    });
+    return sum;
+  }
+
   async function perf(o) {
     const source = o.parts || defaultSource();
-    const rec = engineFor(source, false, true);
-    const doc = projectDoc(o.project);
-    if (o.camera) doc.pins = Object.assign({}, doc.pins, { 'work:rig': { v: 'slowSwell', by: 'user' } });
-    rec.engine.setDoc(doc);
-    let plan = rec.engine.plan;
-    if (o.materials) plan = withMaterials(plan, rec.engine.registry);
-    if (plan !== rec.engine.plan) rec.engine.setPlan(plan);
+    const slices = { max: 0, n: 0 };
+    let resumed = -1;
+    const idle = () => {
+      const at = performance.now();
+      if (resumed >= 0) slices.max = Math.max(slices.max, at - resumed);
+      slices.n++;
+      return factory.idle().then(() => { resumed = performance.now(); });
+    };
+    const rec = engineFor(source, false, true, false, { idle, variant: o, registry: o.recipes ? recipesRegistry(o.recipes) : null });
+    const plan = projectPlan(rec.engine, o);
     const short = o.short || 720;
     const k = short / Math.min(plan.design.w, plan.design.h);
     const w = Math.round(plan.design.w * k), h = Math.round(plan.design.h * k);
     const s = makeSurface(w, h, false);
     const fps = o.fps || 30, seconds = o.seconds || 10, start = o.start || 0;
     const ropts = { quality: 'export', pick: true, scale: w / plan.design.w };
+    if (o.flushStages) ropts.flush = (frame) => { frame.ctx.getImageData(0, 0, 1, 1); };
+    const meter = o.meter ? { px: 0, n: 0, w, h } : null;
+    const cover = [];
     // As in the app (ui/boot installPrepare): the preview shows a frame, then prepares around the playhead — which
     // warms the sprites of blurred motion at the scale of that frame — and keeps doing so while it plays.
     rec.engine.renderFrame(s, start, ropts);
+    resumed = performance.now();
     await rec.engine.prepare(start, start + seconds, { export: false });
+    if (resumed >= 0) slices.max = Math.max(slices.max, performance.now() - resumed);
+    resumed = -1;
     for (let i = 0; i < 5; i++) { rec.engine.renderFrame(s, start + i / fps, ropts); s.ctx.getImageData(0, 0, 1, 1); }
-    const times = [], behave = [];
-    const stages = { behave: 0, draw: 0, post: 0 };
+    const times = [], behave = [], drawMs = [];
+    const stages = { behave: 0, draw: 0, post: 0, rest: 0 };
     const n = Math.round(seconds * fps);
     let shots = 0, share = 1;
+    if (meter) ropts.meter = meter;
     for (let i = 0; i < n; i++) {
+      if (meter) { meter.px = 0; meter.n = 0; }
       const t0 = performance.now();
       rec.engine.renderFrame(s, start + i / fps, ropts);
       s.ctx.getImageData(0, 0, 1, 1);
       times.push(performance.now() - t0);
+      if (meter) cover.push([meter.px / (w * h), meter.n, modelCover(rec.engine, plan, start + i / fps)]);
       const st = rec.engine.stats().stageMs;
+      drawMs.push([st.behave, st.draw, st.post]);
       stages.behave += st.behave; stages.draw += st.draw; stages.post += st.post;
+      stages.rest += times[i] - st.behave - st.draw - st.post;
       behave.push(st.behave);
     }
     // Material particles are drawn by paints (not in drawn.particles): the budget is read from the chosen defs, Σ
@@ -822,12 +1058,63 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core
       particles = Math.max(particles, sum);
     });
     share = particles > CUT_PARTICLES ? CUT_PARTICLES / particles : 1;
+    // the glyph budget (DESIGN_2_1 §5.9.5) of the material phases of the cuts in the window: how many, how many masked,
+    // the largest cover one adds (fitted), and those over the share with a mask left to put on (none, by construction)
+    const budget = { phases: 0, masked: 0, fitted: 0, over: 0, share: BG.SHARE };
+    plan.cuts.forEach((c, i) => {
+      if (c.b < start || c.a > start + seconds) return;
+      const scene = rec.engine.scene('cut', i);
+      const rb = scene && scene.spriteBudget;
+      if (!rb) return;
+      for (const ph of ['arrive', 'dwell', 'depart']) {
+        const r = rb[ph];
+        if (!r) continue;
+        budget.phases++;
+        if (r.step > 0) budget.masked++;
+        budget.fitted = Math.max(budget.fitted, r.fitted);
+        if (r.fitted > BG.SHARE + 1e-9 && r.step < BG.LADDER.length - 1) budget.over++;
+      }
+    });
     const sorted = times.slice().sort((a, b) => a - b);
     const mean = times.reduce((a, b) => a + b, 0) / Math.max(1, times.length);
     for (const k of Object.keys(stages)) stages[k] /= Math.max(1, n);
     return { frames: n, p50: percentile(sorted, 0.5), p95: percentile(sorted, 0.95), max: sorted[sorted.length - 1] || 0, mean,
       stages, behaveP50: percentile(behave.sort((a, b) => a - b), 0.5), w, h, scenes: rec.engine.stats().scenes, shots,
-      rigs: (plan.rigs || []).filter((r) => r.rig && r.rig.v !== 'none').length, particles, mixShare: share };
+      rigs: (plan.rigs || []).filter((r) => r.rig && r.rig.v !== 'none').length, particles, mixShare: share, times, slices,
+      cover: meter ? cover : null, drawMs: meter || o.flushStages ? drawMs : null, budget };
+  }
+
+  // cuts(o) → [{ i, key, a, b, t0, times, slots, glyphs, em, cellArea, spriteBudget }]: the cuts of a fixture project
+  // (projectPlan: o.project, o.camera, o.materials, o.recipes) that are visible in [o.start, o.start + o.seconds] (all
+  // without o.seconds): their windows, the arrive / dwell / depart / seam choices, the glyph count, the largest and mean
+  // em (du), the summed rest cell area as a share of the frame, and the scene's glyph sprite budget record (null
+  // without one). A diagnostic for the §5.9.5 budget.
+  function cutsApi(o) {
+    const source = o.parts || defaultSource();
+    const rec = engineFor(source, false, true, false, { registry: o.recipes ? recipesRegistry(o.recipes) : null });
+    const plan = projectPlan(rec.engine, o);
+    const t0 = Number.isFinite(o.start) ? o.start : -Infinity, t1 = Number.isFinite(o.seconds) ? t0 + o.seconds : Infinity;
+    const area = plan.design.w * plan.design.h;
+    const out = [];
+    plan.cuts.forEach((c, i) => {
+      if (c.b < t0 || c.a > t1) return;
+      const scene = rec.engine.scene('cut', i);
+      const tg = scene && scene.target;
+      let emMax = 0, emSum = 0, cell = 0, n = 0;
+      if (tg) {
+        for (let j = 0; j < tg.to - tg.from; j++) {
+          if (tg.cls[j] === 'space') continue;
+          n++; emMax = Math.max(emMax, tg.em[j]); emSum += tg.em[j]; cell += tg.w[j] * tg.h[j];
+        }
+      }
+      const slot = (k) => (c.slots[k] && typeof c.slots[k].v === 'string' ? c.slots[k].v : null);
+      out.push({ i, key: c.key, a: c.a, b: c.b, t0: c.t0, times: scene ? scene.times : null, text: c.text,
+        slots: { arrange: slot('arrange'), arrive: slot('arrive'), dwell: slot('dwell'), depart: slot('depart') },
+        glyphs: n, em: { max: emMax, mean: n ? emSum / n : 0 }, cellArea: cell / area,
+        spriteBudget: scene && scene.spriteBudget ? scene.spriteBudget : null });
+    });
+    rec.engine.dispose();
+    return { cuts: out, seams: (plan.seams || []).filter((s) => s.at >= t0 - 2 && s.at <= t1 + 2), design: plan.design };
   }
 
   async function renderApi(o) {
@@ -887,6 +1174,7 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core
     window.addEventListener('error', (e) => pageErrors.push(String(e.message || e.error)));
     window.addEventListener('unhandledrejection', (e) => pageErrors.push(String((e.reason && e.reason.message) || e.reason)));
     window.__lab = Object.freeze({ info, render: renderApi, thumb: thumbApi, sequence, sheet, parity, blurSweep, frames, perf,
+      compare, comparePart, spriteCheck, cuts: cutsApi,
       errors: () => pageErrors.slice(), page });
   }
 

@@ -1,6 +1,6 @@
 /* 文字PVメーカー v2 — original work. Post stack: the FxContext, texture tiles, blurs and the ordered screen-effect passes (DESIGN §4.18.11, §4.19.2). */
-MV.def('engine/render/post', ['core/hash', 'core/rng', 'core/noise', 'core/schema', 'engine/scene/frame'],
-(H, RNG, NZ, SCH, F) => {
+MV.def('engine/render/post', ['core/hash', 'core/rng', 'core/noise', 'core/schema', 'engine/scene/frame', 'engine/render/surface'],
+(H, RNG, NZ, SCH, F, SF) => {
   'use strict';
 
   const STAGES = Object.freeze(['shape', 'tone', 'light', 'optic', 'film']);
@@ -218,12 +218,14 @@ MV.def('engine/render/post', ['core/hash', 'core/rng', 'core/noise', 'core/schem
 
   // --- the FxContext ---------------------------------------------------------------------------------------------------
 
-  // createFx({ pool, tiles }) → the §4.18.11 FxContext, one per renderer. frame(o) sets the per-frame fields; use(seed,
-  // cut, allowTextAt) prepares one filter or seam call. fx.cut is null for the work-level texture.
+  // createFx({ pool, tiles, copy? }) → the §4.18.11 FxContext, one per renderer. frame(o) sets the per-frame fields;
+  // use(seed, cut, allowTextAt, own) prepares one filter or seam call (own: fx.own may hand the filter its input to draw
+  // on, true only in run()); drew() says whether the call since use() drew on its input. fx.cut is null for the
+  // work-level texture. copy (lab and tests only) makes fx.own always copy, as it did before it existed.
   function createFx(o) {
-    const pool = o.pool, tiles = o.tiles;
+    const pool = o.pool, tiles = o.tiles, copy = o.copy === true;
     const caps = { filter: null };
-    const st = { plan: null, seed: 0, allowTextAt: false, textAt: null, textCalls: 0, flashScale: 1,
+    const st = { plan: null, seed: 0, allowTextAt: false, textAt: null, textCalls: 0, flashScale: 1, own: false, drew: false,
       beat: { index: 0, phase: 0, since: 0, bar: 0 } };
     // Additive to the FROZEN §4.18.11 FxContext: `pal`, the frame palette after the backdrop rule (§4.19.4), the one the
     // paints draw with (duoTone maps the frame to its ground and accent); `flashScale`, the preview's reduce-flash
@@ -233,10 +235,25 @@ MV.def('engine/render/post', ['core/hash', 'core/rng', 'core/noise', 'core/schem
     // a frame-sized picture that is the same on every frame (edgeShade's vignette) painted once per key and frame size
     // by paint(ctx, w, h) and kept (tile bank), so a costly full-frame paint becomes one drawImage. Too large to keep, it
     // is painted into a frame surface that the frame's pool.end() takes back.
+    // `own(src)` (additive, NOTES "Perf: camerawork + materials row", POST-1): the surface a filter draws its result on,
+    // with the picture of src and the state of a new surface (transform, alpha, blend, smoothing, filter, line and fill
+    // state reset). In the post stack that is src itself, which the pipeline owns and nothing reads after the filter;
+    // elsewhere (a seam's fx, a surface the pool did not make) a copy, as `take()` plus `drawImage(src)` made before. A
+    // filter that calls own(src) reads src only before that call, and returns what own gave it.
     const fx = {
       w: 0, h: 0, unit: 1, quality: 'preview', alpha: false, cut: null, pal: null, flashScale: 1, backdrop: 'scene',
       take: () => pool.take(fx.w, fx.h),
       give: (s) => pool.give(s),
+      own(src) {
+        if (st.own && !copy && pool.isPooled(src) && src.w === fx.w && src.h === fx.h) {
+          SF.resetState(src.ctx);
+          st.drew = true;
+          return src;
+        }
+        const out = pool.take(fx.w, fx.h);
+        out.ctx.drawImage(src.canvas, 0, 0);
+        return out;
+      },
       isolate: (src, ch) => isolate(pool, src, ch),
       blurred: (src, px) => blurred(pool, src, px, caps),
       impulse: (kind, t) => (st.plan ? F.impulseAt(st.plan, kind, t) * (kind === 'flash' ? st.flashScale : 1) : 0),
@@ -267,7 +284,10 @@ MV.def('engine/render/post', ['core/hash', 'core/rng', 'core/noise', 'core/schem
         fx.pal = f.pal || null; fx.flashScale = st.flashScale; fx.backdrop = f.backdrop || (f.alpha ? 'clear' : 'scene');
       },
       size(w, h, unit) { fx.w = w; fx.h = h; fx.unit = unit; },
-      use(seed, cut, allowTextAt) { st.seed = seed >>> 0; fx.cut = cut; st.allowTextAt = !!allowTextAt; },
+      use(seed, cut, allowTextAt, own) {
+        st.seed = seed >>> 0; fx.cut = cut; st.allowTextAt = !!allowTextAt; st.own = own === true; st.drew = false;
+      },
+      drew: () => st.drew,
     };
     return control;
   }
@@ -343,13 +363,17 @@ MV.def('engine/render/post', ['core/hash', 'core/rng', 'core/noise', 'core/schem
     return out;
   }
 
-  // run(ctl, pool, src, list, t, level, onError) → { out, passes }: each filter's apply(fx, src, p, t) in order,
-  // ping-ponging pooled surfaces. level = the adaptive preview level (0 in export). A filter that throws is skipped and
-  // reported through onError(entry, error).
-  function run(ctl, pool, src, list, t, level, onError) {
+  // run(ctl, pool, src, list, t, level, onError, copy?) → { out, passes, torn }: each filter's apply(fx, src, p, t) in
+  // order, ping-ponging pooled surfaces. level = the adaptive preview level (0 in export). The input of each filter is a
+  // pooled surface this pipeline owns (src, the frame, or an earlier filter's result), and only the returned surface is
+  // read afterwards, so fx.own lets a filter draw on it instead of copying it (copy: true makes fx.own copy, as it did
+  // before). A filter that throws is skipped and reported through onError(entry, error). torn = one that threw had
+  // already drawn on its input (fx.own): what the stack returns then shows part of it, and the caller renders the frame
+  // again with copy (the renderer does), so a skipped filter never leaves a trace.
+  function run(ctl, pool, src, list, t, level, onError, copy) {
     const fx = ctl.fx;
     const fullW = fx.w, fullH = fx.h, unit = fx.unit;
-    let cur = src, passes = 0;
+    let cur = src, passes = 0, torn = false;
     for (let k = 0; k < list.length; k++) {
       const e = list[k];
       const cost = e.def.cost || 1;
@@ -358,7 +382,7 @@ MV.def('engine/render/post', ['core/hash', 'core/rng', 'core/noise', 'core/schem
       if (!(w > 0)) continue;
       const p = pooledParams(e.p);
       if (typeof e.p.amount === 'number') p.amount = e.p.amount * w;
-      ctl.use(e.seed, e.cut, (e.def.needs || []).includes('textAt'));
+      ctl.use(e.seed, e.cut, (e.def.needs || []).includes('textAt'), copy !== true);
       const half = level >= 1 && cost >= HALF_COST;
       try {
         let input = cur;
@@ -371,11 +395,11 @@ MV.def('engine/render/post', ['core/hash', 'core/rng', 'core/noise', 'core/schem
         if (!out || !out.canvas) throw new FxError('bad-result', 'apply() must return a Surface');
         if (half) {
           ctl.size(fullW, fullH, unit);
-          if (out === input) out = cur;
+          if (out === input && !ctl.drew()) out = cur;       // nothing drawn: the full-resolution input stays
           else {
             const up = pool.take(fullW, fullH);
             up.ctx.drawImage(out.canvas, 0, 0, out.w, out.h, 0, 0, fullW, fullH);
-            pool.give(out);
+            if (out !== input) pool.give(out);             // (input, drawn on in place, is given back below)
             out = up;
           }
           pool.give(input);
@@ -384,10 +408,11 @@ MV.def('engine/render/post', ['core/hash', 'core/rng', 'core/noise', 'core/schem
         passes += e.def.passes || 1;
       } catch (err) {
         ctl.size(fullW, fullH, unit);
+        if (ctl.drew()) torn = true;
         if (onError) onError(e, err);
       }
     }
-    return { out: cur, passes };
+    return { out: cur, passes, torn };
   }
 
   return { STAGES, STAGE_INDEX, TILE, TILE_NAMES, FxError, blurred, isolate, createTileBank, createFx, paramsFor,

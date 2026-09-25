@@ -598,7 +598,10 @@ MV.def('core/recipe', ['core/num', 'core/hash', 'core/color', 'core/curve', 'cor
   problems(kind, recipe) → Problem[],               // Problem = { path, code, params }; [] when valid (on normalized recipes)
   entryProblems(entry) → Problem[],                 // id, kind, by, name (≤ 24), blurb (≤ 80), tags ⊂ TAGS, season, pool, rv
   hash(recipe) → 'xxxxxxxx',                        // hashJSON of the canonical recipe
-  cost(kind, recipe) → { ms, particles, nodes, paints, parts, cost, passes, cover },   // with every knob at its maximum
+  cost(kind, recipe, ctx?) → { ms, particles, nodes, paints, parts, cost, passes, cover },   // every knob at its maximum;
+                                                    // ctx = { registry?, media? }. Glyph sprites have no per-recipe cost:
+                                                    // what they cost depends on the text, so each cut scene budgets them
+                                                    // (§5.9.5)
   knobSpecs(kind, recipe) → { [name]: ParamSpec }, // generated knob params (§5.7.6); validate with validateSpec
   withKnobs(recipe, p) → recipe,                   // the recipe with knob multipliers applied (pure; used at build)
   upgrade(recipe, rv) → { recipe, rv } | null,     // future rv migrations; null = unknown rv
@@ -798,6 +801,44 @@ Track = { a, b, keys: [{ t, X, Y, Z, R, cx, cy, sx, sy, box }], reading: null | 
 - `setRegistry(registry)` (additive) swaps the registry for filter and seam lookups.
 
 **`engine/render/seam`:** `seamPart` adds `warp: CV.warp(p.curve)` to its cached entry, and `mix` receives `part.warp(k)`.
+
+**Host canvas factory and the sprite and post paths** (additive; the perf.py camerawork + materials row, NOTES "Perf:
+camerawork + materials row"):
+- `engine/host/canvas` `CanvasFactory` gains two optional members next to `now` and `idle`:
+  `settle(canvas)` uses a new canvas's picture once on a private 1 × 1 canvas (cleared at once), so a canvas that
+  records its calls rasterizes when it is made, not inside the first frame that draws it; `inkBox(css, text) →
+  { left, right, ascent, descent } | null` measures the ink of text drawn centred on a middle baseline (measureText's
+  actual bounding box). The recording factory has neither, so Node op streams and the frame goldens do not depend on
+  them; the engine never measures and never makes a canvas for them.
+- `engine/render/sprites`: a new sprite is settled when the factory can. Every glyph raster is made and kept whole, as
+  before; on a factory with `inkBox` its entry also keeps `ink`, the rect outside which the raster is transparent
+  (`inkRect`: the ink box, half the outline, the shadow or duo offset, 3 blur standard deviations + 2 px; for blurred
+  levels only where ctx.filter blurs).
+- `engine/render/draw`: `spriteAt` draws a raster with an ink rect that is scaled up on both axes (`minScaleOf`) whole,
+  with the same call as always, inside a clip round the rect widened by `INK_CLIP` (2) texels (`inkClip`): all four
+  sides when the transform turns or skews the raster (the canvas maps every pixel on its own; a pixel the clip cuts
+  samples only transparent texels), and for a scale-and-translate draw the top, the bottom and the side where device
+  rows end (a software canvas steps along each row in fixed point from the row's first pixel, so the side where rows
+  start stays open, a texel beyond the quad). Every pixel is what the unclipped draw gives (`glyph_parity.py`); only
+  the time is spent inside the clip. A draw that scales down, shards and the pixel mosaic are drawn as before.
+- `engine/render/post`: the FxContext gains `own(src)` (D§4.18.11 additive): in the post stack the filter draws on its
+  input, which the stack owns, instead of a copy; seams and other callers get a copy. `control.use(seed, cut,
+  allowTextAt, own)` and `control.drew()`; at half resolution a drawn input is scaled up, an untouched one leaves the
+  full-resolution input. `run(…, copy?)` → `{ out, passes, torn }`: `torn` when a filter threw after it had drawn on
+  its input; the renderer then renders that frame again with every filter copying (`copy`), so a skipped filter
+  leaves no trace, as before. Pixels are identical (`determinism.py` compares with the lab switch `postCopy`).
+- `engine/render/surface` pool: `warm(n, touch, stop)` makes sure n frame surfaces can be taken without making one
+  (`stop()`, asked after each surface made, ends the call early); the preview warm-up (`renderer.warmAt`) calls it on
+  a host canvas when a seam is on screen (6 surfaces: a text seam's two sides and its mix), with its slice clock, so a
+  seam's first frame does not make them and no prepare slice makes more than one once it is due.
+- `engine/facade`: the preview warm-up walks one frame in parts when its sprites are more than a slice of work
+  (`renderer.warmAt(plan, source, t, stop)`), so prepare still yields on time with settled sprites. Lab and test
+  options: `createEngine({ postCopy })`, render options `flush(frame)` (timed with the draw stage) and `meter` (the
+  frame share the glyph sprite draws cover).
+- `engine/scene/build` + `engine/scene/budget` (new, L3): the glyph budget of material phases (§5.9.5). A cut scene
+  gains `spriteBudget` (the record) and keeps its phases as made (`budgetPhases`, not enumerable; tests and the lab).
+  `engine/scene/behave` gains `masked(beh, groups, from, to)` (`MASK_GROUPS`: tint, echo, glow, blur with shard and
+  pixel, grow = sx sy z) and `engine/render/draw` the cost model `glyphCover` / `poseCover`.
 
 **`engine/facade`** (D§4.20, additive members):
 
@@ -1278,6 +1319,9 @@ value = CH.pickWeighted(pool keys sorted, w → q6(w), slotSeed('cam.shot'))    
 | `renderer.staticRaster` | Rasterizes ×1.25 when the ground's segment is `zoomed`. At 1080p that is 1.56 × 11.6 MB ≈ 18 MB, under the existing per-raster cap of 24 MB. Above the cap it draws live as today. It depends only on the plan, so preview equals export. |
 | `seam.mix` | receives the warped `u` |
 | Glyph path | unchanged (D§4.19.5 rule). Zoomed blurred glyphs pick larger sprite buckets, still ≤ 512 px. |
+| Sprite rasters | settled when made; a raster drawn scaled up is clipped round its ink, on a host with `inkBox` only (§3.10). Node op streams unchanged; browser frames identical. |
+| Post stack | filters draw on the stack's own surface (`fx.own`, §3.10): no copy per filter. Identical pixels; op hashes lose the copies. A filter that throws after drawing makes the frame render again with copies. |
+| Material text phases | masked by the scene's glyph budget where they would add more than their share of glyph cover (§5.9.5); v2 documents have no materials and are unchanged. |
 | Optional culling | `draw.drawLayer` may skip glyphs whose view-space quad lies fully outside the frame when view zoom > 1.3. Decided from geometry only, so it is identical in preview and export. |
 
 ### 4.9 Line season and avoid (planner; D§4.16 amended)
@@ -1698,6 +1742,7 @@ A failing layer, track, osc or part is dropped with a problem. A recipe left emp
 | speed | ≤ 1.5 short sides/s; spin ≤ 720 °/s; swayHz ≤ 2; mover hz ≤ 4 |
 | motion tracks | x y z ±10 em (z ≥ −1400 du); rot kx ky rx ry ±720°; blur ≤ 0.6 em; sx sy 0–8; others 0–1 |
 | filter stack | Σ inner `cost` ≤ 6 (the derived `cost` = min(5, Σ)); Σ `passes` ≤ 6 |
+| glyph sprites (`arrive`, `depart`, `dwell`) | no per-recipe limit beyond the track and oscillator limits: blur, glow, tint, echo (through parts) and size may all be used at once. What they cost depends on the glyphs they dress (their number, size and the blur's reach), which only a scene knows, so each cut scene keeps every material phase within its share (§5.9.5). |
 | static cost (`cost().ms`, knobs at max) | ornament cut ≤ 1.2 ms, run ≤ 1.5 ms, ground ≤ 2.0 ms |
 | strings | name ≤ 24, blurb ≤ 80, glyphs from `GLYPHS`, no control characters |
 | sizes | canonical recipe ≤ 6 KB; `doc.materials` ≤ 64 entries and ≤ 160 KB |
@@ -1754,6 +1799,40 @@ Therefore no material produces a full-frame flash, and `export/schedule` needs n
 
 Interpreters multiply particle counts by it. It is a function of the chosen defs, which `matTerms` covers, so it is
 deterministic. The D§7.4 draw budget of ≤ 400 particles holds even with three material ornaments.
+
+#### 5.9.5 Glyph budget in cut scenes (`engine/scene/budget`)
+
+A glyph that a pose puts on the sprite path (blur, glow, shards, the mosaic; D§4.19.5) is drawn as one or more rasters:
+a halo under a glow, two echo pairs, the body (a crossfaded pair of blur levels) and a tinted pair. On a canvas without
+a GPU each costs about its drawn area, so the cost of a text material is its sprites × the glyphs' size and number × the
+blur's reach: six glyphs of 700 du with blur and tint cover about six frames. It cannot be bounded per recipe, so the
+scene bounds it where the text is known. For each cut phase (entrance [a, rest], hold [rest, out], exit [out, b]) whose
+part is a material (`def.mine`):
+- **Cover** (`draw.glyphCover`, the same path and sprites as `drawGlyph`): the frame du² the draws of a glyph cover under
+  its screen matrix (the world matrix under the cut's own camera, lens ∘ shot, zoomed by `SLACK` = 1.2 for a rig and a
+  punch), each draw counted by the bounding box of its rect within the frame: a direct-path body, echo or tint by its
+  ink (`draw.inkEm`: 0.66 em either side of the centre, where descenders and emoji reach under `textBaseline`
+  'middle', plus half the outline, or the shadow's or duo's larger offset; or half the cell, if larger); a sprite by the
+  rect `spriteAt` draws at 720p or larger (level ≤ 2, shards and the mosaic whole; level ≥ 3 from its box's left edge
+  to the ink plus the clip's pad). It is at least what is drawn: `glyph_parity.py` compares it with the lab's sprite
+  meter on every frame, and holds every measured ink rect (the fonts, styles and sizes of its check 3) to `inkEm`.
+- **Samples:** every 1/30 s over the phase's window (at most 40; a hold 16).
+- **Share:** at every sample the phase may add at most `SHARE` = 2 frames of cover over the same cut with the material's
+  masks all on (its text as it is without the material's sprite columns and size changes). A phase within it counting
+  the text itself is left as made.
+- **Ladder** (`BH.masked` on the material's behaviours, nodes of the text only): take back the tint; then the echo; then
+  the glow; then everything that puts a glyph on the sprite path (blur, shards, the mosaic); then its size (sx, sy, z).
+  The first step that fits is kept; each step takes back more, so the cover never grows along it, and the last adds
+  nothing. A mask puts back the values the masked columns had before the behaviour ran, so other parts' poses stay.
+- **Record:** `scene.spriteBudget = { share, arrive?, dwell?, depart? }`, each `{ key, added, fitted, step, masks }`.
+
+A cut's window overlaps only its neighbours' (by lead + tail), so where the slots hold materials their glyphs cover at
+most 2 · `SHARE` = 4 frames more than the same text without them; perf.py's camerawork + materials row, with the
+heaviest glyph work §5.8 admits in every entrance, hold and exit, keeps within twice the frame budget (numbers in
+NOTES). It is a pure function of the scene as built (du, no clock, the scene's live pose, matrices and alphas put back),
+covered by the cut's fingerprint, the same for every output size, so preview equals export. Parts of the catalog are
+never masked: documents without materials are unchanged. The fit costs about two evaluations of the scene per sample
+of an over-share phase (≈ 2 ms a cut with the heaviest materials).
 
 ### 5.10 AI materials
 
@@ -2308,7 +2387,8 @@ The en page shows no Japanese except the product name and user data, such as mat
 | Cold plan after a material meta edit | ≤ 35 ms |
 | `registryFor` with 64 materials | ≤ 3 ms; runs only when `doc.materials` changes identity |
 | Scene build per cut with materials | ≤ 4 ms: ≤ 48 shape nodes and ≤ 240 particles × `mixShare` |
-| Draw | ≤ 400 particles guaranteed by `mixShare`; filter stacks ≤ 6 passes; the adaptive preview is unchanged; export never degrades |
+| Draw | ≤ 400 particles guaranteed by `mixShare`; filter stacks ≤ 6 passes; material text phases add ≤ `SHARE` = 2 frames of glyph cover each, ≤ 4 in a frame (§5.9.5); the adaptive preview is unchanged; export never degrades |
+| Glyph sprites and post (§3.10) | sprites rasterize when made (prepare); a raster drawn scaled up is clipped round its ink (identical pixels); filters draw on the stack's own surface; a seam's surfaces are made in prepare. perf.py's camerawork + materials row (the heaviest text materials): p95 ≤ 2 × 16.7 ms (numbers in NOTES) |
 | Static ground raster | ×1.25 only for `zoomed` segments; still ≤ the 24 MB cap at 1080p; 4K draws live (existing rule) |
 | `direct` request build and validation | O(area lines), < 2 ms for 100 lines; prompt ≈ 1.5–5 k tokens (primitives text only with materials allowed) |
 | Media (drawing, decoding, import, export overhead) | §11.5.12 |
@@ -2326,6 +2406,7 @@ The en page shows no Japanese except the product name and user data, such as mat
 | `shot_engine.test.js` (new) | B | aimed box fills `fill` ±1 % at key times; keep vs `ox`/`oy`; safe and bleed clamps; anchors including `word:k`/`beat:n`; key sort and jumps; reading path hits each unit centre at its sung time; pose continuous at 240 Hz except deliberate jumps (aim screen speed ≤ 1.5 frame widths/s outside snap keys); lean bounded, 0 at rest, continuous; `none` leaves the camera untouched; lens amplitudes screen-constant under shot zoom (handHeld corner travel within ±5 % at Z = 1 and Z = 2.5) |
 | `frame.test.js`, `lens_filter_seam.test.js`, `conformance.test.js`, `facade.test.js` (+) | B | `rigAt` purity, blend continuity, `cameraAt` equals sequential view application (1e-6, roll 0); **default `lens.curve`, `seam.curve`, `dwell.curve` and `flow` reproduce the v2 op hashes exactly**; periodic lenses warp only when not linear; conformance of every shot preset and rig × 7 aspects × h/v × the 6 texts × 24 times (no NaN, zoom within [0.855, 3·1.15·1.04], same op hash twice, build ≤ 20 ms); facade `shotTrack`, `viewAt`, `registry` getter, fork keeps materials |
 | `mix.test.js` (new) | C | `derive` for every kind (variant and composite) gives defs that `REG.extend` accepts; `registryFor` returns `base` for no materials and is memoized; `version` changes on meta edits only; `baseVersion` constant; `sampleDefs()` pass the conformance harness (no NaN, balanced save/restore, identity rule for motion recipes, same op hash twice, particles ≤ budget after `mixShare`) over 40 seeded generated recipes × 7 aspects × 24 times |
+| `budget.test.js`, `sprites.test.js` (new) | B | masked behaviours put back exactly the masked columns of the masked nodes; `glyphCover` takes `drawGlyph`'s path and sprites; the fit: no budget without materials, every material phase within `SHARE` (or fully masked) with the step before over it and the ladder monotone, evaluated directly; the same records and frames from two engines and every output size. Sprites: ink rects of every level, rasters equal to those without `inkBox`, clipped draws that are the unclipped calls inside a clip (`inkClip`: none, all sides, open where rows start), shards and mosaics as before, settle, the sliced warm-up |
 | `camera_planner.test.js` (new) | D | determinism over the corpus; `amount.camera = 0` → all `none` and rigs `none`; impact cuts favour snapZoom (≥ 60 %); echo: repeated lines share shots (≥ 80 %); framing lens → `none` ≥ 70 %; `cam: 'none'` arranges never get auto shots; carry only within lines; rig runs follow sections; last chorus `slowBloom`; stability (insert a line → ≤ 4 other cuts' shots change; reroll a cut → ≤ 3); **documents without new pins keep every v2 part choice** |
 | `planner_areas_season.test.js` (new) | D | line `season` gates pools, ×2.5, starts a segment, raises atmos probability; no `pin-off-season` when it matches; `avoid` excludes, relaxes with `avoid-empty`, pins still win; locks immune; `motion.speed` scales only unpinned dur/each/speed with `pfrom: 'rule'` |
 | `planner_materials.test.js` (new) | D | a pinned material is chosen; `pool: false` never auto-picked; one `pool: true` material keeps ≥ 90 % of choices; a body edit changes only the fp of cuts using it and keeps the cast cache warm; a meta edit changes `version`; a deleted material gives `pin-bad-value` plus a fallback; `material-bad` warning; golden plan hashes unchanged without materials |
@@ -2339,7 +2420,7 @@ The en page shows no Japanese except the product name and user data, such as mat
 | File | Owner | Asserts |
 |---|---|---|
 | `determinism.py` (+) | B | shots with follow and rigs, plus a project with materials: frame N directly equals frame N after 0..N−1; 30 vs 60 fps sample times |
-| `perf.py` (+) | B | project_long with auto camerawork plus the heaviest allowed material in every slot: behave + solve ≤ 0.8 ms p50 at 720p; frame ≤ 2× budget |
+| `perf.py` (+) | B | project_long with auto camerawork plus the heaviest allowed material in every slot (the text slots: the heaviest glyph work §5.8 admits; the others: the sample materials): behave + solve ≤ 0.8 ms p50 at 720p; frame ≤ 2× budget; no material phase over its glyph share (§5.9.5) |
 | `parts_gallery.py` (+) | B | shot and rig thumbnails in every aspect; 0 CSP violations |
 | `materials_gallery.py` (new) | C | `sampleDefs` and 12 generated materials × aspects: no console errors, not blank, 0 CSP violations |
 | `ui_flows.py` (+) | F | curve widget drag = one undo step; preset → custom via a handle; keyframe edit → custom pin → プリセットに戻す; area band click → multi-line page with the area header; **flow "area direct"**: faked analysis → click サビ1 → target chip → faked answer (run-ornament material, speed 0.5, ramp curve, pushIn custom shot) → review with 4 groups → try-on → apply → preview renders the material → マイ素材 tile exists → undo restores materials and pins → redo → selective revert → delete material (pins cleared); board with 2 areas; keyboard-only variant |

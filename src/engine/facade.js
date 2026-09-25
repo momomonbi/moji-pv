@@ -296,7 +296,8 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
   // once the host has had time for other work; prepare() yields through it) — both come from the host canvas factory
   // when absent — and `strict` (tests: part errors throw instead of falling back). Additive members: setPlan(plan),
   // scene(kind, i), fontUsage(t0, t1), setLevel(n). `spriteBudget` (bytes; tests and the lab) replaces the preview's
-  // §7.3 sprite budget.
+  // §7.3 sprite budget. `postCopy` (lab and tests only): the post stack copies each filter's input as it did before
+  // fx.own drew in place (the pixel-identity check of that change).
   // DESIGN_2_1 additive members: registry (getter: the effective registry, parts/mix registryFor of the base registry
   // and the document's materials and media), shotTrack(cutKey), viewAt(t), mediaAt(t), mediaReady(t, opts),
   // fork({ assets }); thumb() also takes the kinds 'shot' and 'rig'. Internal options: `effective` (a fork's registry)
@@ -313,7 +314,8 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
     const sceneMax = Number.isInteger(o.sceneMax) && o.sceneMax > 0 ? o.sceneMax : SCENE_MAX;
     // the effective registry: the base plus the document's materials (and pooled media); the base until a document
     let registry = o.effective && typeof o.effective.get === 'function' ? o.effective : base;
-    const renderer = R.createRenderer({ canvas: factory, registry, assets, now, strict: !!o.strict, spriteBudget: o.spriteBudget });
+    const renderer = R.createRenderer({ canvas: factory, registry, assets, now, strict: !!o.strict, spriteBudget: o.spriteBudget,
+      postCopy: o.postCopy === true });
     const cache = CACHE.createSceneCache({ max: sceneMax });
     const found = new Map();                         // cut / segment key → { fp, list } of scene warnings
     const scanned = new Set();                       // fps whose warnings are known
@@ -576,18 +578,23 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
     // blur level, the echo, tint and halo inks: renderer.warmAt walks the frame as it will be drawn). It stops early once
     // the sprites these frames use (found or made) reach WARM_SHARE of the sprite budget. Frames that playback has shown
     // while this waited for a slice are skipped. → false when a newer prepare took over.
+    // A frame whose sprites are more than a slice of work (on a host canvas each sprite is rasterized as it is made)
+    // is walked in parts: the walk stops once the slice is due after a new sprite, and the same frame is walked again
+    // after the yield (the sprites made so far are found at once).
     async function warmAhead(lo, hi, slice) {
       const from = renderer.lastTime();
       if (from === null || from < lo || from > hi) return true;
       renderer.beginWarm();
-      let j = 0;
+      let j = 0, cut = false;
+      const stop = () => (cut = slice.due());
       for (;;) {
         const t = from + j / WARM_FPS;
         const ws = renderer.warmBytes();
         if (t > Math.min(hi, from + WARM_AHEAD) + 1e-9 || ws.used > WARM_SHARE * ws.budget) return true;
-        renderer.warmAt(plan, source, t);
-        j++;
-        if (slice.due()) {
+        cut = false;
+        renderer.warmAt(plan, source, t, stop);
+        if (!cut) j++;
+        if (cut || slice.due()) {
           if (!(await slice.pause())) return false;
           const shown = renderer.lastTime();
           if (shown !== null && shown > from) j = Math.max(j, Math.ceil((shown - from) * WARM_FPS - 1e-9));

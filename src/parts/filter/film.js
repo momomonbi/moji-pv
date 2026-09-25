@@ -22,12 +22,6 @@ MV.def('parts/filter/film', ['parts/kit'], (K) => {
     g.setLineDash(NO_DASH);
   }
 
-  function copyOf(fx, src) {
-    const out = fx.take();
-    out.ctx.drawImage(src.canvas, 0, 0);
-    return out;
-  }
-
   // Covers the frame with a texture tile drawn as images, one per tile position: `k` (a whole number) device px per
   // tile pixel, shifted by (ox, oy) px, so neighbouring tiles meet without a seam. On a canvas without a GPU a pattern
   // fill under a blend mode, a smoothed resize and a shrunk tile each cost several full-frame copies; a 1:1 tile costs
@@ -51,7 +45,7 @@ MV.def('parts/filter/film', ['parts/kit'], (K) => {
     const a = clamp(p.amount * 0.55);
     if (a < 1 / 64) return src;
     const k = fx.tick(p.rate, t);
-    const out = copyOf(fx, src), g = out.ctx;
+    const out = fx.own(src), g = out.ctx;
     g.globalCompositeOperation = 'overlay';
     g.globalAlpha = a;
     tileCover(g, fx, fx.tile('grain', k), tileScale(p.size * fx.unit), rnd(fx, k, 0) * TILE, rnd(fx, k, 1) * TILE, false);
@@ -82,7 +76,7 @@ MV.def('parts/filter/film', ['parts/kit'], (K) => {
     const pitch = Math.max(2, p.pitch * fx.unit), line = Math.max(1, Math.round(pitch * 0.35));
     const a = clamp((p.amount * 0.14 * pitch) / line);          // the same average darkening at any pitch
     if (a < 1 / 64) return src;
-    const out = copyOf(fx, src), g = out.ctx;
+    const out = fx.own(src), g = out.ctx;
     g.globalAlpha = a;
     g.fillStyle = '#000000';
     g.beginPath();
@@ -131,7 +125,7 @@ MV.def('parts/filter/film', ['parts/kit'], (K) => {
     const a = clamp(p.amount);
     if (a < 0.02) return src;
     const k = fx.tick(p.rate, t);
-    const out = copyOf(fx, src), g = out.ctx;
+    const out = fx.own(src), g = out.ctx;
     lineState(g, Math.max(0.6, 1.3 * fx.unit));
     const draft = fx.quality === 'draft' ? 0.5 : 1;
     const most = Math.round(p.specks * 1.2 * draft), shown = p.specks * (0.4 + 0.8 * a) * draft;

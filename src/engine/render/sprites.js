@@ -86,6 +86,37 @@ MV.def('engine/render/sprites', ['engine/scene/builder'], (B) => {
     return q < BLUR_CODES ? q : BLUR_CODES - 1;
   }
 
+  // inkRect(box, F, style, blurPx, side) → { x, y, w, h } | null: the part of a side × side glyph raster (the glyph drawn
+  // at its centre, F px per em) that its blurred ink can reach. box = the host's inkBox of the grapheme at F px
+  // ({ left, right, ascent, descent } from the draw point, measureText's actual bounding box); widened by half the
+  // outline, extended by the shadow or duo offset, padded by 3 blur standard deviations + 2 px (the blur's reach and the
+  // edge antialiasing), in whole px and clamped to the raster. Null without a box, or when the rect would be the whole
+  // raster. Outside the rect the whole raster holds nothing but transparency (tests/browser/glyph_parity.py checks
+  // it, and the rect's border too).
+  const INK_PAD_SIGMA = 3;
+  const INK_PAD_PX = 2;
+  function inkRect(box, F, style, blurPx, side) {
+    if (!box || !Number.isFinite(box.left) || !Number.isFinite(box.right) || !Number.isFinite(box.ascent) ||
+      !Number.isFinite(box.descent) || !(side > 0)) return null;
+    const c = side / 2;
+    let x0 = c - box.left, x1 = c + box.right, y0 = c - box.ascent, y1 = c + box.descent;
+    if (style === 'outline') {
+      const o = (OUTLINE_WIDTH * F) / 2;
+      x0 -= o; x1 += o; y0 -= o; y1 += o;
+    } else if (style === 'shadow') {
+      x1 += SHADOW_OFFSET[0] * F; y1 += SHADOW_OFFSET[1] * F;
+    } else if (style === 'duo') {
+      x1 += DUO_OFFSET[0] * F; y1 += DUO_OFFSET[1] * F;
+    }
+    const pad = INK_PAD_SIGMA * Math.max(0, blurPx) + INK_PAD_PX;
+    const clampPx = (v) => (v < 0 ? 0 : v > side ? side : v);
+    const ix = clampPx(Math.floor(Math.min(x0, x1) - pad)), iy = clampPx(Math.floor(Math.min(y0, y1) - pad));
+    const ix1 = clampPx(Math.ceil(Math.max(x0, x1) + pad)), iy1 = clampPx(Math.ceil(Math.max(y0, y1) + pad));
+    if (ix1 <= ix || iy1 <= iy) return null;
+    if (ix === 0 && iy === 0 && ix1 === side && iy1 === side) return null;
+    return { x: ix, y: iy, w: ix1 - ix, h: iy1 - iy };
+  }
+
   // Descends one level of the nested key maps, creating it when missing (only on a cache miss).
   function child(map, key) {
     let m = map.get(key);
@@ -144,6 +175,13 @@ MV.def('engine/render/sprites', ['engine/scene/builder'], (B) => {
 
     function canvasOf(w, h) { return factory.create(w, h, { alpha: true }); }
 
+    // A host factory's settle(canvas) rasterizes a new sprite now (engine/host/canvas), so a sprite made while the
+    // engine prepares is not painted inside the first frame that draws it. The recording factory has none.
+    function settled(e) {
+      if (typeof factory.settle === 'function') factory.settle(e.canvas);
+      return e;
+    }
+
     // A blurred draw: ctx.filter when it works, else the glyph drawn small and scaled up (a soft stand-in).
     function blurredDraw(ctx, side, blurPx, paint) {
       if (blurOk === null) blurOk = filterWorks(ctx);
@@ -171,6 +209,11 @@ MV.def('engine/render/sprites', ['engine/scene/builder'], (B) => {
     // they then match the direct path's edges closely (§4.19.5 parity). Blurred levels need no extra detail: a raster
     // whose blur is wider than BLUR_RASTER_PX is made smaller (a Gaussian that wide holds nothing finer than the grid,
     // so drawing it scaled up shows the same picture) — a 32 du blur of a large glyph takes kilobytes, not a megabyte.
+    // On a host factory that measures ink (inkBox) the entry keeps `ink`, the rect of the raster its ink can reach
+    // (inkRect: 2 px round the ink at level 0; 3 blur standard deviations + 2 px when blurred, only where ctx.filter
+    // blurs, since the small-and-scaled stand-in spreads differently): draw.spriteAt clips a draw that scales the raster
+    // up to it. The raster itself is made and kept whole, exactly as without inkBox, so its texels never change.
+    // Whether an entry has `ink` depends only on its key and the factory, never on the cache's history.
     function rasterGlyph(font, ch, ink, style, ink2, k, level, steps) {
       const F0 = bucketPx(k) * (level === 0 ? LEVEL0_SUPERSAMPLE : 1);
       const blur0 = steps / BLUR_STEPS;
@@ -191,10 +234,17 @@ MV.def('engine/render/sprites', ['engine/scene/builder'], (B) => {
       };
       if (blurPx > 0.01) blurredDraw(made.ctx, side, blurPx, paint);
       else paint(made.ctx);
-      return { canvas: made.canvas, w: side, h: side, cx: c, cy: c, F, bytes: side * side * 4, chain: null, code: 0, span: -1 };
+      let rect = null;
+      if (typeof factory.inkBox === 'function' && (blurPx <= 0.01 || blurOk)) {    // (blurredDraw has probed blurOk)
+        rect = inkRect(factory.inkBox(css, ch), F, style, blurPx > 0.01 ? blurPx : 0, side);
+      }
+      return { canvas: made.canvas, w: side, h: side, cx: c, cy: c, F, bytes: side * side * 4, ink: rect, chain: null, code: 0,
+        span: -1 };
     }
 
-    // glyph(font, ch, ink, style, ink2, k, level, emDu) → { canvas, w, h, cx, cy, F } with F = raster px per em.
+    // glyph(font, ch, ink, style, ink2, k, level, emDu) → { canvas, w, h, cx, cy, F, ink } with F = raster px per em and
+    // ink = null, or on a host with inkBox the rect { x, y, w, h } of the raster outside which it is transparent
+    // (inkRect; draw.spriteAt clips the draws that scale it up to it).
     // Key (§4.19.5): font, grapheme, ink, second ink, bucket k, blur level, style, and for blurred levels the blur in
     // raster px (it depends on the glyph's em in du).
     function glyph(font, ch, ink, style, ink2, k, level, emDu) {
@@ -205,7 +255,8 @@ MV.def('engine/render/sprites', ['engine/scene/builder'], (B) => {
       const code = ((k * 8 + level) * 8 + (STYLE_INDEX[style] || 0)) * BLUR_CODES + steps;
       const hit = leaf.get(code);
       if (hit) { touch(hit); return hit; }
-      return remember([chars, ch, inks, ink, seconds, second, leaf], code, rasterGlyph(font, ch, ink, style, ink2, k, level, steps));
+      return remember([chars, ch, inks, ink, seconds, second, leaf], code,
+        settled(rasterGlyph(font, ch, ink, style, ink2, k, level, steps)));
     }
 
     // The extent of one particle shape in its unit space (1 unit = the particle's size in du).
@@ -246,7 +297,7 @@ MV.def('engine/render/sprites', ['engine/scene/builder'], (B) => {
       const leaf = child(inks, ink);
       const hit = leaf.get(k);
       if (hit) { touch(hit); return hit; }
-      return remember([inks, ink, leaf], k, rasterParticle(rec, ink, k, font));
+      return remember([inks, ink, leaf], k, settled(rasterParticle(rec, ink, k, font)));
     }
 
     function clear() {
@@ -270,7 +321,7 @@ MV.def('engine/render/sprites', ['engine/scene/builder'], (B) => {
   }
 
   return {
-    LEVELS, DIRECT_BLUR, MAX_SIDE, BOX_EM, BUDGET, BUDGET_SHARED, STYLES, OUTLINE_WIDTH, SHADOW_OFFSET, DUO_OFFSET, BLUR_STEPS,
-    bucketOf, bucketPx, levelPair, blurStepsOf, paintStyled, createSpriteCache,
+    LEVELS, DIRECT_BLUR, MAX_SIDE, BOX_EM, BLUR_REACH, BUDGET, BUDGET_SHARED, STYLES, OUTLINE_WIDTH, SHADOW_OFFSET, DUO_OFFSET, BLUR_STEPS,
+    bucketOf, bucketPx, levelPair, blurStepsOf, paintStyled, createSpriteCache, inkRect,
   };
 });

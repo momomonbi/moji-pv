@@ -382,6 +382,8 @@ function flashProbe(plan, flashScale) {
   const fx = {
     w: FX_W, h: FX_H, unit: FX_W / 1920, quality: 'export', alpha: false, cut: null,
     take: () => { ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over'; return surface; },
+    // a copy, as the recording FxContext's: `out === src` then still means the filter drew nothing
+    own: (s) => { const out = fx.take(); out.ctx.drawImage(s.canvas, 0, 0); return out; },
     give() {},
     impulse: (kind, t) => F.impulseAt(plan, kind, t) * (kind === 'flash' && flashScale !== undefined ? flashScale : 1),
     beat: (t) => F.beatAt(plan, t), tick: F.tick, noise: () => 0.5, level: () => 0.5,
@@ -1098,4 +1100,164 @@ test('shutterSnap closes with the black backdrop’s own black', () => {
   };
   assert.equal(blade(BLACK_PAL), '#000000');
   assert.equal(blade(NIGHT_PAL), '#0B0B0D');
+});
+
+// --- the post stack draws on its own surfaces (fx.own; NOTES "Perf: camerawork + materials row", POST-1) -------------
+
+const SF = MV.use('engine/render/surface');
+// The catalog filters that draw their result on their input (fx.own) and those that still need a copy (they read the
+// input while drawing: flashPop adds the frame to itself, chromaSlip and sliceGlitch shift parts of it).
+const IN_PLACE = ['amberSpill', 'afterImage', 'cinemaBars', 'dotScreen', 'duoTone', 'dustSpecks', 'edgeShade', 'glowSpill',
+  'grainFilm', 'invertBlink', 'paperTooth', 'rasterLines', 'softVeil'];
+const COPYING = ['chromaSlip', 'flashPop', 'sliceGlitch'];
+
+// engine/render/post's FxContext and pool on the recorder, one FX_W × FX_H frame begun.
+function stackOf(o) {
+  const rec = R.createRecorder();
+  const pool = SF.createPool(rec.factory), tiles = PO.createTileBank(rec.factory);
+  const ctl = PO.createFx({ pool, tiles, copy: !!(o && o.copy) });
+  pool.frame(FX_W, FX_H);
+  pool.begin();
+  ctl.frame({ plan: fxPlan(), w: FX_W, h: FX_H, unit: FX_W / 1920, quality: 'export', alpha: false, pal: null, backdrop: 'scene',
+    textAt: () => pool.take(ctl.fx.w, ctl.fx.h) });
+  return { rec, pool, ctl, frame: pool.take() };
+}
+
+function entryOf(d, p, t, impact) {
+  const cut = cutAt(t, impact);
+  return { def: d, p, seed: H.hash32('fx', d.key), cut, times: null, tl: cut.tl, order: 1, key: d.key, slot: 'filter#0' };
+}
+
+// Copies of the frame: drawImage(frame, 0, 0) onto another canvas.
+function copiesOf(ops, frame) {
+  return ops.filter((op) => op[1] === 'drawImage' && op[0] !== frame.canvas.id && op[2] === frame.canvas.id && op.length === 5).length;
+}
+
+test('fx.own: in the post stack the pooled input itself, state reset; a copy for seams, other surfaces and copy mode', () => {
+  const s = stackOf();
+  const { ctl, pool, frame, rec } = s;
+  frame.ctx.setTransform(2, 0, 0, 2, 5, 5);
+  frame.ctx.globalAlpha = 0.3;
+  frame.ctx.globalCompositeOperation = 'multiply';
+  frame.ctx.lineWidth = 7;
+  ctl.use(1, null, false, true);
+  assert.equal(ctl.drew(), false);
+  const created = pool.stats().created;
+  assert.equal(ctl.fx.own(frame), frame, 'the input itself');
+  assert.equal(ctl.drew(), true);
+  assert.equal(pool.stats().created, created, 'no surface made');
+  assert.deepEqual([frame.ctx.globalAlpha, frame.ctx.globalCompositeOperation, frame.ctx.lineWidth], [1, 'source-over', 1],
+    'the state of a new surface');
+  assert.ok(rec.ops().some((op) => op[0] === frame.canvas.id && op[1] === 'setTransform' && op[2] === 1 && op[6] === 0));
+  const copied = (x) => {
+    const m = rec.mark();
+    const out = ctl.fx.own(x);
+    assert.notEqual(out, x);
+    assert.deepEqual(rec.ops().slice(m).filter((op) => op[0] === out.canvas.id && op[1] === 'drawImage').map((op) => op.slice(2)),
+      [[x.canvas.id, 0, 0]], 'a copy of its input');
+    return out;
+  };
+  ctl.use(1, null, false);                                     // a seam's call (seam.mix): never its own
+  copied(frame);
+  assert.equal(ctl.drew(), false);
+  ctl.use(1, null, false, true);
+  copied(R.surfaceOf(rec.factory, FX_W, FX_H, true));          // not the pool's
+  copied(pool.take(FX_W / 2, FX_H / 2));                       // another size than the FxContext's
+  assert.equal(ctl.drew(), false, 'none of these drew on their input');
+  const c = stackOf({ copy: true });
+  c.ctl.use(1, null, false, true);
+  assert.notEqual(c.ctl.fx.own(c.frame), c.frame, 'copy mode (the lab\'s postCopy)');
+  // the recording FxContext stands for a filter alone: always a copy
+  const fx = R.createRecordingFx(R.createRecorder(), { w: FX_W, h: FX_H });
+  const src = fx.take();
+  assert.notEqual(fx.own(src), src);
+});
+
+const paint = (key, draw) => ({ key, stage: 'film', cost: 3, passes: 1, needs: [], apply: draw });
+const drawOn = (fx, src) => { const out = fx.own(src); out.ctx.fillStyle = '#FF0000'; out.ctx.fillRect(1, 2, 3, 4); return out; };
+
+test('PO.run: a filter that draws on its input leaves no copy; at half resolution the drawn input is scaled up', () => {
+  const s = stackOf();
+  const before = s.pool.stats().created;
+  let res = PO.run(s.ctl, s.pool, s.frame, [entryOf(paint('a', drawOn), { amount: 1, when: 'always' }, 1.5),
+    entryOf(paint('b', drawOn), { amount: 1, when: 'always' }, 1.5)], 1.5, 0);
+  assert.equal(res.out, s.frame, 'two filters, drawn on the frame itself');
+  assert.equal(res.passes, 2);
+  assert.equal(s.pool.stats().created, before, 'no surface made');
+  assert.equal(s.rec.ops().filter((op) => op[0] === s.frame.canvas.id && op[1] === 'fillRect').length, 2);
+  // half resolution (adaptive level ≥ 1, cost ≥ 3): the half-size input is drawn on and scaled up into a new surface
+  const h = stackOf();
+  const m = h.rec.mark();
+  res = PO.run(h.ctl, h.pool, h.frame, [entryOf(paint('a', drawOn), { amount: 1, when: 'always' }, 1.5)], 1.5, 1);
+  assert.notEqual(res.out, h.frame, 'the drawing is not lost');
+  const ops = h.rec.ops().slice(m);
+  const drawn = ops.find((op) => op[1] === 'fillRect');
+  const up = ops.filter((op) => op[0] === res.out.canvas.id && op[1] === 'drawImage');
+  assert.deepEqual(up.map((op) => op.slice(2)), [[drawn[0], 0, 0, FX_W / 2, FX_H / 2, 0, 0, FX_W, FX_H]], 'the drawn half surface, scaled up');
+  assert.equal(h.pool.stats().out, 2, 'the frame and the result; the half surface went back once');
+  const x = h.pool.take(FX_W / 2, FX_H / 2), y = h.pool.take(FX_W / 2, FX_H / 2);
+  assert.notEqual(x, y, 'the half surface is in the free list once');
+  // a filter that returns its half-size input untouched leaves the full-resolution frame as it was (also right after a
+  // full-resolution filter that drew on the frame)
+  const u = stackOf();
+  const cheap = Object.assign(paint('c', drawOn), { cost: 1 });
+  res = PO.run(u.ctl, u.pool, u.frame, [entryOf(cheap, { amount: 1, when: 'always' }, 1.5),
+    entryOf(paint('n', (fx, src) => src), { amount: 1, when: 'always' }, 1.5)], 1.5, 1);
+  assert.equal(res.out, u.frame);
+  assert.equal(res.passes, 2);
+});
+
+test('PO.run: a filter that throws after drawing on its input marks the result torn; in copy mode it leaves no trace', () => {
+  const broken = paint('broken', (fx, src) => { drawOn(fx, src); throw new Error('boom'); });
+  const list = (s) => [entryOf(broken, { amount: 1, when: 'always' }, 1.5), entryOf(paint('next', drawOn), { amount: 1, when: 'always' }, 1.5)];
+  const s = stackOf();
+  const errors = [];
+  const res = PO.run(s.ctl, s.pool, s.frame, list(s), 1.5, 0, (e, err) => errors.push(e.def.key + ': ' + err.message));
+  assert.deepEqual(errors, ['broken: boom']);
+  assert.equal(res.torn, true, 'the thrower had drawn on the frame: the caller renders again with copy');
+  assert.equal(res.passes, 1);
+  // copy mode: the thrower drew on a copy, which is dropped; the next filter draws on a copy of the untouched frame
+  const c = stackOf();
+  const again = PO.run(c.ctl, c.pool, c.frame, list(c), 1.5, 0, null, true);
+  assert.equal(again.torn, false);
+  assert.notEqual(again.out, c.frame);
+  assert.equal(c.rec.ops().filter((op) => op[0] === c.frame.canvas.id && op[1] === 'fillRect').length, 0, 'the frame is untouched');
+  assert.equal(c.rec.ops().filter((op) => op[0] === again.out.canvas.id && op[1] === 'fillRect').length, 1, 'only the next filter drew');
+  // a filter that throws before drawing is simply skipped, not torn
+  const q = stackOf();
+  const early = paint('early', () => { throw new Error('early'); });
+  assert.equal(PO.run(q.ctl, q.pool, q.frame, [entryOf(early, { amount: 1, when: 'always' }, 1.5)], 1.5, 0, () => {}).torn, false);
+});
+
+test('every catalog filter draws on the stack\'s surface unless it reads its input while drawing (then it copies)', () => {
+  assert.deepEqual(IN_PLACE.concat(COPYING).sort(), REGISTRY.keys('filter').slice().sort(), 'every filter is listed');
+  for (const key of IN_PLACE.concat(COPYING)) {
+    const d = def('filter', key);
+    const flash = d.gate === 'flash';
+    let seen = 0;
+    for (const t of [0.2, 0.7, 1.01, 1.05, 1.3, 1.9, 2.4]) {
+      // duoTone at amount 0.5 mixes its tone layer over the frame (above ~0.76 it returns the tone layer itself)
+      const p = Object.assign(autoParams('filter', key), { amount: key === 'duoTone' ? 0.5 : 0.7, when: flash ? 'impact' : 'always' });
+      const s = stackOf();
+      const m = s.rec.mark();
+      const res = PO.run(s.ctl, s.pool, s.frame, [entryOf(d, p, t, true)], t, 0);
+      const ops = s.rec.ops().slice(m);
+      if (!ops.some((op) => op[1] === 'fillRect' || op[1] === 'drawImage' || op[1] === 'fill')) continue;   // drew nothing now
+      seen++;
+      if (IN_PLACE.includes(key)) {
+        assert.equal(res.out, s.frame, key + ' at ' + t + ': the result is the frame surface');
+        assert.equal(copiesOf(ops, s.frame), key === 'duoTone' ? 1 : 0, key + ': no copy of the frame (duoTone: its tone layer)');
+      } else {
+        assert.notEqual(res.out, s.frame, key);
+        assert.ok(copiesOf(ops, s.frame) + ops.filter((op) => op[1] === 'drawImage' && op[2] === s.frame.canvas.id).length > 0, key);
+      }
+      // copy mode (the lab's postCopy, what the stack drew before): a new surface, a copy of the frame
+      const c = stackOf({ copy: true });
+      const mc = c.rec.mark();
+      const old = PO.run(c.ctl, c.pool, c.frame, [entryOf(d, p, t, true)], t, 0);
+      assert.notEqual(old.out, c.frame, key + ' copy mode');
+      assert.ok(copiesOf(c.rec.ops().slice(mc), c.frame) >= 1, key + ' copy mode copies');
+    }
+    assert.ok(seen > 0, key + ' drew at some time');
+  }
 });

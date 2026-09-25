@@ -126,8 +126,31 @@ MV.def('engine/render/surface', [], () => {
       gen++;
     }
 
+    // warm(n, touch, stop) → the surfaces made: makes sure n full-frame surfaces (at most the limit) can be taken
+    // without making one, so the first frame of a seam (which takes several at once) does not pay for them. The missing
+    // ones are made cleared, passed to touch(surface) (the host rasterizes it now) and put in the free list; the free
+    // ones are left alone, so a warm pool costs nothing. stop() (optional) is asked after each surface made: true ends
+    // the call there (a time slice is due), and the next call makes the rest.
+    function warm(n, touch, stop) {
+      if (!(frameW > 0 && frameH > 0)) return 0;
+      const k = keyOf(frameW, frameH);
+      if (!free.has(k)) free.set(k, []);
+      const list = free.get(k);
+      let made = 0;
+      for (let have = list.length + fullOut; have < Math.min(n, limit); have++) {
+        const s = clear(surfaceOf(factory, frameW, frameH, true));
+        created++; live++; made++;
+        bytes += frameW * frameH * 4;
+        mine.set(s, gen);
+        if (touch) touch(s);
+        list.push(s);
+        if (stop && stop()) break;
+      }
+      return made;
+    }
+
     return {
-      frame, take, give, begin, end, isPooled, drop,
+      frame, take, give, begin, end, isPooled, drop, warm,
       get limit() { return limit; },
       stats: () => ({ live, out: out.size, bytes, created }),
     };

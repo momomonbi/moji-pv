@@ -2074,6 +2074,12 @@ fx = {
   // layer(key, paint) → CanvasImageSource: a frame-sized picture that is the same on every frame (a vignette), painted
   // once by paint(ctx, w, h) per (key, frame size) and kept (LRU, 4 layers within 64 MB); the key names everything
   // paint draws besides the size, so a kept layer and a new one hold the same pixels (§7.1)
+  // own(src) → Surface: the surface to draw the result on, holding src's picture with a new surface's state. In the post
+  // stack that is src itself (the stack owns every filter input and reads only what a filter returns); elsewhere, and
+  // for a surface the pool did not make, a copy (take() + drawImage(src)). A filter that calls it reads src only before
+  // the call and returns what it got; one that reads src while drawing (adds or shifts it) keeps take() + drawImage.
+  // A filter that throws after own() has drawn on the frame: the renderer draws that frame again with own() copying,
+  // so a skipped filter never leaves a trace.
 }
 Surface = { canvas, ctx, w, h }
 ```

@@ -159,6 +159,12 @@ MV.def('engine/render/record', ['core/hash', 'core/rng', 'core/noise', 'core/col
         return s;
       },
       give(s) { if (s && s.canvas) { pool.push(s); out--; } },
+      // A recording FxContext stands for the filter alone, outside a post stack: own(src) is always a copy.
+      own(src) {
+        const s = fx.take();
+        s.ctx.drawImage(src.canvas, 0, 0);
+        return s;
+      },
       isolate(src, ch) {
         if (!CHANNEL[ch]) throw new FxError('bad-channel', 'isolate needs r g b c m or y');
         const s = fx.take(), g = s.ctx;

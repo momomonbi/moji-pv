@@ -170,6 +170,21 @@ test('limits: one over → the problem named (§5.8)', () => {
   hasProblem('ornament', { parts: [{ key: 'cornerTicks', params }, { key: 'hankoSeal', params }] }, 'too-big');
 });
 
+test('glyph sprite columns: any mix of blur, glow and tint is within the limits; the scene decides what is drawn (§5.9.5)', () => {
+  // no per-recipe count of glyph sprites: their cost depends on the text a material dresses, which only a scene knows
+  assert.equal(R.LIMITS.glyphSprites, undefined);
+  const tr = (col, from) => ({ col, from, to: col === 'alpha' ? 1 : 0 });
+  const heavy = { motion: { tracks: [tr('y', 0.6), tr('blur', 0.6), tr('glow', 1), tr('alpha', 0), tr('tint', 1), tr('rot', 20),
+    tr('sx', 8), tr('sy', 8)] } };
+  assert.deepEqual(problemsOf('arrive', heavy), []);
+  assert.equal(R.cost('arrive', heavy).sprites, undefined, 'cost() has no sprite count');
+  const osc = (col, amp) => ({ col, amp, hz: 0.5, wave: 'sine' });
+  assert.deepEqual(problemsOf('dwell', { osc: [osc('glow', 1), osc('tint', 1), osc('rot', 30), osc('sx', 0.3)] }), []);
+  // the track limits still hold: a blur over 0.6 em is clamped (§5.8)
+  const over = R.normalize('arrive', { motion: { tracks: [tr('blur', 0.9)] } });
+  assert.equal(over.recipe.motion.tracks[0].from, 0.6);
+});
+
 test('filter stacks: inner cost and passes from the registry; flash parts are refused at derive', () => {
   const reg = { get: (kind, key) => ({ grainFilm: { cost: 2, passes: 1 }, rgbSplit: { cost: 5, passes: 6 } })[key] || null };
   const ok = R.normalize('filter', { parts: [{ key: 'grainFilm' }, { key: 'grainFilm' }] }).recipe;

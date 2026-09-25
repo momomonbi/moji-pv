@@ -19,8 +19,7 @@ MV.def('parts/filter/glow', ['parts/kit'], (K) => {
   function veil(fx, src, p) {
     if (!(p.amount > 0.01)) return src;
     const b = fx.blurred(src, Math.max(1, p.radius * fx.unit));
-    const out = fx.take(), g = out.ctx;
-    g.drawImage(src.canvas, 0, 0);
+    const out = fx.own(src), g = out.ctx;
     g.globalAlpha = clamp(p.amount * p.mist * 0.5);
     g.drawImage(b.canvas, 0, 0);
     g.globalCompositeOperation = 'screen';
@@ -119,8 +118,7 @@ MV.def('parts/filter/glow', ['parts/kit'], (K) => {
     gb.drawImage(A.canvas, 0, 0, w2, h2, 0, 0, w4, h4);
     gb.globalCompositeOperation = 'source-over';
     const maskX = blurMask(A, B, levels, down, up, w4, h4);
-    const out = fx.take(), go = out.ctx;
-    go.drawImage(src.canvas, 0, 0);
+    const out = fx.own(src), go = out.ctx;
     go.globalCompositeOperation = 'screen';
     go.globalAlpha = clamp(p.amount * (1 + p.burn));
     go.drawImage(B.canvas, maskX, 0, w4, h4, 0, 0, w, h);
@@ -174,8 +172,7 @@ MV.def('parts/filter/glow', ['parts/kit'], (K) => {
       gl.fillRect(x0, y0, x1 - x0, y1 - y0);
     }
     reset(gl);
-    const out = fx.take(), g = out.ctx;
-    g.drawImage(src.canvas, 0, 0);
+    const out = fx.own(src), g = out.ctx;
     g.globalCompositeOperation = 'hard-light';
     g.drawImage(layer.canvas, 0, 0, lw, lh, 0, 0, w, h);
     reset(g);
