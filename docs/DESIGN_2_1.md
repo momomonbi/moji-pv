@@ -4310,8 +4310,9 @@ only the scenes that use the media.
     detailed pictures and videos with strong motion; `still` for pictures that must stay readable (a logo, text in the
     picture); `anim` otherwise.
   - `visionChanges` writes it to the asset: `media.meta { id, ai: { …, depth } }`. `ORDER.assetAi` becomes
-    `['caption', 'tags', 'colors', 'subject', 'text', 'depth']`, and `core/media.normalizeEntry` keeps `ai.depth` only
-    when it is one of the four values. Package E may edit `core/media` for this one field; A is merged.
+    `['caption', 'tags', 'colors', 'subject', 'text', 'depth', 'reason']`, and `core/media.normalizeEntry` keeps
+    `ai.depth` only when it is one of the four values. It keeps `ai.reason` (≤ 60 characters) only with a kept depth, so
+    the asset page can show why. Package E may edit `core/media` for these fields; A is merged.
   - Reverting the vision change clears it.
 - **The direct tool** (`ai/direct`): the media variant of the answer schema gains `depth` (enum `keep anim front back
   still`).

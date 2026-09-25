@@ -97,6 +97,11 @@ test('media.meta: name, pool and ai only; ai: null clears; the same validation',
   assert.equal(reduce(doc, { t: 'media.meta', id: SKY.id, ai: null }).media.list[1].ai, null);
   const ai = { caption: { ja: '海', en: 'Sea' }, tags: ['wet'], colors: ['#00aaff'], subject: { x: 0.2, y: 0.2, w: 0.5, h: 0.5 }, text: null };
   deepEqual(reduce(doc, { t: 'media.meta', id: SEA.id, ai }).media.list[2].ai, withField(ai, { colors: ['#00AAFF'] }));
+  // §11.9.4: the vision tool's depth suggestion is kept (last in ORDER.assetAi) when it is a known value
+  const deep = reduce(doc, { t: 'media.meta', id: SEA.id, ai: withField(ai, { depth: 'back' }) }).media.list[2].ai;
+  assert.deepEqual(Object.keys(deep), ['caption', 'tags', 'colors', 'subject', 'text', 'depth']);
+  assert.equal(deep.depth, 'back');
+  assert.ok(!('depth' in reduce(doc, { t: 'media.meta', id: SEA.id, ai: withField(ai, { depth: 'sideways' }) }).media.list[2].ai));
   assert.equal(reduce(doc, { t: 'media.meta', id: SKY.id, name: SKY.name }), doc, 'unchanged → the same doc');
   assert.equal(reduce(doc, { t: 'media.meta', id: SKY.id }), doc);
   throwsCode(() => reduce(doc, { t: 'media.meta', id: 'a000000000000000000000000', name: 'x' }), 'payload');

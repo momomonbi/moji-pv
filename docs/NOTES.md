@@ -4409,3 +4409,134 @@ filters, where it would clash with the list slot's count. A definition added thr
 because its paths always carry its key (`atmos@myMat3.count`). `parts/mix` detects this when the module loads, so the
 ornament count knob is now `count`, as the §2.1 example writes it. Test: `registry.test.js`, "a material may name its
 ornament count knob `count`".
+## v2.1-E
+
+Package E of DESIGN_2_1 §8.5, with its media additions (§11.6) and the depth request (§11.9.4): the `direct` tool, AI
+materials, vision, and the v2.1 parts of `ai/changes`, `ai/catalog` and `ai/looks`.
+
+- **New modules** (L5): `ai/direct` (requests, the FROZEN answer schema in five frozen variants, answer → changes),
+  `ai/recipe` (`AI_MATERIAL`, `fromAi`, `toAi`, the standalone material tool, the `[media]` list), `ai/vision`
+  (`VISION_SCHEMA`, `visionRequest`, `visionChanges`).
+- **Changed:** `ai/changes` (kinds `value`, `material`, `media`; groups; the new Change fields; `markStale` with
+  `staleWhy` and `resolveArea`; `toCommands` in the §5.6 order with `requires` and the apply-time area check; material
+  and media log items and revert; review text), `ai/catalog` (`atmos`, `materialsText`, `cameraText`, `recipeText`),
+  `ai/looks` (the `helpers` export only), `core/media` (§11.9.4: `ai.depth`, `DEPTHS`).
+- **Tests:** `ai_direct` (32), `ai_recipe` (14), `ai_vision` (5) are new; `ai_providers` walks every new schema variant;
+  `ai_looks` checks the helpers and pins the hashes of the two look schemas; `media_core` and `media_doc` cover
+  `ai.depth`.
+- **Mutation check:** 21 mutants of the key rules; 20 fail a test. They cover `requires`, the stale reasons, revert while
+  the user uses a material, the free index, lines over all, the speed epsilon, the area guarantee and its cut-in-line
+  rule, depth `keep`, locks, the recipe drift guard, the flash fix, budget scaling, toAi curve names, vision boxes and
+  JPEG-only parts, and `ai.depth` in `normalizeEntry`. The survivor is equivalent: an unknown depth written by
+  `visionChanges` is also dropped by `normalizeEntry`, whose own mutant fails.
+
+**Decisions where the design is silent**
+
+- **Material hash.** Stale checks and revert compare `CH.entryHash(entry)` = `hashJSON` of the stored entry.
+  `material.put` stores entries normalized, so this is the §3.12 definition of `parts/mix.materialHash`. E does not
+  call the stub, whose constant `'00000000'` would make every material look unchanged.
+- **Areas and targets.**
+  - `lines[i]` wins over `all` field by field, even when the line's value cannot be used: that line gets neither.
+    `camera` is merged slot by slot.
+  - A cut area merges `all`, `lines[0]` and `cuts[0,0]` onto the cut; `season` and `avoid` are never cut pins.
+  - Cut pins are written under the plan cut's `pinKey`, as `ui/fields.writePath` does. Area checks use the cut key.
+  - A special cut (title, intro, outro, gap) is sent as line 0 with `lineId: null`.
+  - In a whole-video brief, `all.avoid` turns the parts off (the existing kind `avoid`, a filter), because
+    `work:avoid` is refused. `all.season` and `work.season` make one work season change.
+  - Windows: a line area applies `all` to the lines of each window. A whole-video brief split into windows applies
+    its work pins only in the first part (the prompt says so). Ids are `w<k>:s<s>:<path>`, materials `w<k>:mat:<i>`.
+- **Values.** Parts are "no change" only when the target's own pin holds them (as in `looks`). Values compare with
+  what the target shows (its pin, else the plan). `from` is the target's pin, else the first cut the line pin reaches.
+  `ornaments: ['none']` / `filters: ['none']` pin the count 0. A run-scope ornament named among `ornaments` is taken
+  as the atmosphere.
+- **Materials.**
+  - `use.slot` other than `none` places the material where its kind goes (§5.11 table); the given slot word is not
+    trusted further. `use.s = −1` means every understood brief of the window.
+  - The season fix is added when the season in effect is a specific season other than the material's (not under
+    `any`), unless the answer set one. It is skipped in cut areas, where it would leave the area.
+  - A remake keeps the id, kind, name and おまかせ setting; `by` becomes `ai`.
+  - `fromAi` details: the seed is `hash32('material', name)`; particles and glyphs spin from any angle (`rot [0, 360]`);
+    `appear: 'always'` is `{ start, none, 0 }`, other appears last 0.5 s; `index`/`word` oscillators step 0.3; a
+    composite's `dur`/`each` become `[d, d]` (−1: the kind's default range); a variant's `dur`, `each`, `curve` (its
+    `ease`) and `order` become shared autos, and a param named like a shared param is one too; a media layer's border
+    is `stroke × 1000` du and its shape maps roundRect → round, ellipse/ring/dot → circle, arc → arch, else round; a
+    ground without a leading fill gets its first fill moved to the front, or a default fill.
+  - Fitting order: the flash fix first (alpha movers off `beat`/`ramp` to `sine` ≤ 1 Hz, hz ≤ 3 / speed knob max,
+    amp ≤ 0.35 / amp knob max, appear ≥ 0.15 s), then counts × 0.9 (at least 1) until the recipe fits, then the last
+    layer, then the last part. Anything still wrong gives `null` and `ai.warn.matEmpty`.
+- **Curves.** `curveFromAi` lives in `ai/recipe` (materials need it; `ai/direct` re-exports it). It reads the §1.4 #1
+  names too: slowFastSlow / fastSlowFast (ramps), easeIn / easeOut / easeInOut (cubic), hold (holdThenDash), snap
+  (dashStop). A ramp without numbers takes edge 0.1 and peak 4. `cameraFromAi` also accepts a move word as `shot`.
+- **Media.**
+  - `opts.media` is `true` (the library) or a list of asset ids (the ones whose bytes are on this device).
+  - The accept rule reads the part's `media` spec; a param that is not of type `media` yet (today's
+    `photoPan.image`) accepts any. Params the part does not have are skipped.
+  - A kind mismatch warns with the planner's existing string `warn.media-kind` (`{ detail: name }`).
+  - `use: 'none'` clears exactly the pins §11.6.1 names; the AI's param pins of those parts (a blur) stay, unused.
+  - `depth` with `use: ''` pins the depth of the media part the target shows as `as` (the ground's `photoPan` or a
+    pooled `myMed…` ground, the atmosphere's `mediaLayer`, every `photoFrame`); `fill` has none; `keep` does nothing.
+- **Vision.** Image parts are passed through as given, in either JSON spelling (`inline_data`/`mime_type` or
+  `inlineData`/`mimeType`); only inline JPEG parts count. The prompt lists `n=k: photo | video (frames)` and the tag
+  vocabulary. `use` and the depth `reason` stay on the change for the review; neither is stored (`ORDER.assetAi` has no
+  field for them).
+- **Review text.** Direct rows use `ai.ch.value` with `where` as a label tuple; `CH.describeAgg(list, t)` gives the
+  aggregate row; `null` reads 自動 and a `none` part なし. `logEntry` records a material's hash as stored after the put.
+- **Cost.** Area membership is checked with `CH.inArea`, the rule of `planner/areas.inArea` with the area's scopes in a
+  Set, so a large review stays linear (the per-scope `paths.isUnder` loop took 3/4 of the time). `toCommands` and
+  `markStale` resolve each area key once per call. Measured on 100 area lines (a loaded machine): the request builds
+  in about 1.4 ms; validation costs about 10 µs per change it produces (an answer that sets 11 settings on 100 lines
+  gives 1,100 changes in about 12 ms; three settings, about 3–4 ms). §7.2's "< 2 ms for 100 lines" holds for the
+  request and for answers that change a few settings; nothing here runs per frame.
+
+**Deviations**
+
+- `CH.GROUPS` keeps its four v2 groups; the §5.6 groups are `CH.AREA_GROUPS` (`materials`, `area`, `cuts`,
+  `outside`). `ui_ai.test.js` (F) asserts that every `GROUPS` key has a heading in `ui/ai_controller` `GROUP_ORDER`,
+  which F owns. `groupOf` returns the new groups already.
+- `ai/looks.helpers` also holds `flashChange` (the direct tool's `work.flash`) and `PALETTE_SCHEMA` (§5.4 names
+  `LOOKS.PALETTE_SCHEMA`); keeping it inside `helpers` leaves the other exports unchanged.
+- A gone area marks its rows `left` (区画から外れました), not `gone`, whose text is about cuts.
+- Additive exports beyond §3.13: `ai/direct.MEDIA_USES`; `ai/recipe` `AI_MATERIAL_MEDIA`, `MATERIAL_SCHEMA_MEDIA`,
+  `USE_SLOTS`, `curveToAi`, `materialChange`, `slotFor`, `freeIndex`, `whereOf`, `assetOf`, `mediaSent`, `mediaText`,
+  `MAX_MEDIA`; `ai/changes` `AREA_GROUPS`, `STALE_WHY`, `describeAgg`, `entryHash`, `keyInUse`, `inArea`; `ai/vision` `MAX_ITEMS`,
+  `MAX_FRAMES`, `USES`, `DEPTHS`; `core/media.DEPTHS`; `ai/catalog.catalog` takes an optional fifth argument
+  `{ mine, cutOrnaments }` (defaults keep v2's lists).
+- `ai_looks.test.js`: the drift guard that lists every change kind now names `value`, `material` and `media` as covered
+  by `ai_direct` and `ai_vision`.
+
+**Requests to other packages**
+
+- **F** (`ui/ai_controller`, `ui/ai_review`, `ui_ai.test.js`):
+  - add `materials`, `area`, `cuts`, `outside` to `GROUP_ORDER` with their headings (`ai.grp.*`), then fold
+    `CH.AREA_GROUPS` into `CH.GROUPS` (one line in `ai/changes`), or let the test read both;
+  - `itemKey` of the new log items: `{ material: id }` → `'m:' + id`, `{ media: id }` → `'a:' + id`;
+  - pass `resolveArea(areaKey)` (the sent brief's ref through `AREAS.resolve`) to `markStale`, `toCommands` and
+    `apply`; dispatch with `['undo.aiArea', { area, n }]` (`['undo.ai', …]` for the whole video); give `logEntry` the
+    `areas` and `instructions`;
+  - run the windows of one request in order and merge them into one review; on `bad_request` retry once with
+    `allowMaterials: false` and show `ai.materialsFailed`;
+  - aggregate rows through `CH.describeAgg`; a material's dependents (`requires`) disabled while it is unchecked;
+  - vision rows: `change.depth`, `change.reason` and `change.use` next to the caption (`media.ai.depth`).
+- **C:** keep `materialHash(entry)` equal to `hashJSON` of the stored (normalized) entry, so it agrees with
+  `CH.entryHash`.
+- **B / G:** the direct tool pins only the media params a part has: `fit`, `blur`, `veil`, `clipIn`, `speed` (§11.5.6)
+  and `depth` (§11.9.1, an enum with `auto`).
+- **Lead:** the vision `reason` has no field in `doc.media`. If the asset page should show it after the review, the
+  entry format needs `ai.reason` (≤ 60).
+
+**Strings wanted**
+
+None new. `param.depth` and `opt.depth.*` (§11.9.6, package F) are read through `t.has` and fall back to the key until
+F adds them.
+
+## Lead: the AI's depth reason is stored
+
+Package E kept the vision `reason` on the review change only. §11.9.5 shows it on the asset page, so it is now stored:
+- `core/media.AI_ORDER` ends with `'depth', 'reason'`.
+- `normalizeEntry` keeps `ai.reason` only as text next to a valid depth.
+- `entryProblems` refuses a reason over 60 characters or one with control characters.
+- `ai/vision.aiOf` writes the cleaned reason with the depth.
+
+Tests: `media_core.test.js` (normalize and problems) and `ai_vision.test.js` (stored with the depth, dropped with an
+unknown depth, field order).
+

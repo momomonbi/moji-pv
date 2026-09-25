@@ -62,15 +62,27 @@ test('entryProblems: the fixture entries are valid; every rule of §11.2.1 / §1
 
 test('normalizeEntry: §11.2.1 field order, q3 numbers, upper-case colours, unknown fields dropped; frozen and idempotent', () => {
   const raw = withField(SKY, { extra: 1, dur: null });
-  raw.ai = { text: { x: 0.12345, y: 0, w: 0.5, h: 0.25 }, colors: ['#f2a65a'], junk: 1, caption: { en: 'Sky', ja: '空', x: 2 },
-    subject: null, tags: ['airy'] };
+  raw.ai = { reason: '細部が多い', depth: 'back', text: { x: 0.12345, y: 0, w: 0.5, h: 0.25 }, colors: ['#f2a65a'], junk: 1,
+    caption: { en: 'Sky', ja: '空', x: 2 }, subject: null, tags: ['airy'] };
   const shuffled = {};
   for (const k of Object.keys(raw).reverse()) shuffled[k] = raw[k];
   const out = ME.normalizeEntry(shuffled);
   assert.deepEqual(Object.keys(out), ME.ORDER.slice());
   assert.deepEqual(Object.keys(out.ai), ME.AI_ORDER.slice());
   deepEqual(out.ai, { caption: { ja: '空', en: 'Sky' }, tags: ['airy'], colors: ['#F2A65A'], subject: null,
-    text: { x: 0.123, y: 0, w: 0.5, h: 0.25 } });
+    text: { x: 0.123, y: 0, w: 0.5, h: 0.25 }, depth: 'back', reason: '細部が多い' });
+  // the reason belongs to the depth: dropped without a valid depth, and when it is not text
+  assert.ok(!('reason' in ME.normalizeEntry(withField(SKY, { ai: withField(SKY.ai, { depth: 'auto', reason: 'x' }) })).ai));
+  assert.ok(!('reason' in ME.normalizeEntry(withField(SKY, { ai: withField(SKY.ai, { depth: 'back', reason: 3 }) })).ai));
+  deepEqual(ME.entryProblems(withField(SKY, { ai: withField(SKY.ai, { depth: 'back', reason: 'あ'.repeat(60) }) })), []);
+  assert.equal(ME.entryProblems(withField(SKY, { ai: withField(SKY.ai, { depth: 'back', reason: 'あ'.repeat(61) }) })).length, 1);
+  assert.equal(ME.entryProblems(withField(SKY, { ai: withField(SKY.ai, { depth: 'back', reason: 'a\nb' }) })).length, 1);
+  // §11.9.4: ai.depth is kept only when it is one of the four values
+  assert.deepEqual([...ME.DEPTHS], ['anim', 'front', 'back', 'still']);
+  for (const depth of ME.DEPTHS) assert.equal(ME.normalizeEntry(withField(SKY, { ai: withField(SKY.ai, { depth }) })).ai.depth, depth);
+  for (const depth of ['auto', 'keep', '', 3, null]) {
+    assert.ok(!('depth' in ME.normalizeEntry(withField(SKY, { ai: withField(SKY.ai, { depth }) })).ai), String(depth));
+  }
   assert.ok(Object.isFrozen(out) && Object.isFrozen(out.ai) && Object.isFrozen(out.ai.text));
   deepEqual(ME.normalizeEntry(out), out, 'idempotent');
   assert.deepEqual(ME.entryProblems(out), []);

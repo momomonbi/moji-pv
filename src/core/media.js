@@ -39,7 +39,9 @@ MV.def('core/media', ['core/num', 'core/hash'], (N, H) => {
   const CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
   const ORDER = Object.freeze(['id', 'kind', 'name', 'mime', 'bytes', 'w', 'h', 'dur', 'fps', 'frames', 'rot', 'alpha',
     'anim', 'audio', 'codec', 'color', 'hdr', 'pv', 'pool', 'ai']);
-  const AI_ORDER = Object.freeze(['caption', 'tags', 'colors', 'subject', 'text']);
+  const AI_ORDER = Object.freeze(['caption', 'tags', 'colors', 'subject', 'text', 'depth', 'reason']);
+  // The vision tool's suggestion for how the asset takes part in the animation (§11.9.4): kept only when it is one of these.
+  const DEPTHS = Object.freeze(['anim', 'front', 'back', 'still']);
   const META_ORDER = Object.freeze(['kind', 'w', 'h', 'dur', 'fps', 'frames', 'rot', 'alpha', 'anim']);
 
   function deepFreeze(v) {
@@ -126,6 +128,9 @@ MV.def('core/media', ['core/num', 'core/hash'], (N, H) => {
       out.push(['.colors', 'must list ≤ ' + LIMITS.colorsMax + ' #RRGGBB colours']);
     }
     for (const k of ['subject', 'text']) if (ai[k] !== null && !isBox01(ai[k])) out.push(['.' + k, 'must be null or a box of fractions']);
+    // §11.9.5: why the AI suggests that depth, shown on the asset page next to it.
+    if (ai.reason !== undefined && !(typeof ai.reason === 'string' && Array.from(ai.reason).length <= LIMITS.captionMax
+      && !CONTROL.test(ai.reason))) out.push(['.reason', 'must be a text of ≤ ' + LIMITS.captionMax + ' characters']);
     return out;
   }
 
@@ -145,7 +150,9 @@ MV.def('core/media', ['core/num', 'core/hash'], (N, H) => {
   function normalizeAi(ai) {
     const out = {};
     for (const k of AI_ORDER) {
-      if (ai[k] === undefined) continue;
+      if (ai[k] === undefined || (k === 'depth' && !DEPTHS.includes(ai[k]))) continue;
+      // The reason belongs to the depth: kept only with a valid depth, and only as text.
+      if (k === 'reason' && (typeof ai[k] !== 'string' || !ai[k] || !DEPTHS.includes(ai.depth))) continue;
       let v = ai[k];
       if (k === 'caption' && isObject(v)) v = { ja: v.ja, en: v.en };
       else if (k === 'colors' && Array.isArray(v)) v = v.map((c) => (typeof c === 'string' ? c.toUpperCase() : c));
@@ -283,7 +290,7 @@ MV.def('core/media', ['core/num', 'core/hash'], (N, H) => {
   function metaHash(entry) { return H.hashJSON(metaOf(entry)); }
 
   return {
-    PROBE_V, INDEX_V, KINDS, FITS, EDGES, MOVES, LOOPS, CLOCKS, COLORS, LIMITS, ID, ORDER, AI_ORDER,
+    PROBE_V, INDEX_V, KINDS, FITS, EDGES, MOVES, LOOPS, CLOCKS, COLORS, LIMITS, ID, ORDER, AI_ORDER, DEPTHS,
     isId, keyOf, idOfKey, entryProblems, normalizeEntry, refsOf, metaOf, metaHash, timeSpec, mapTime, fitRect, tier,
   };
 });

@@ -545,8 +545,15 @@ MV.def('ai/looks', ['core/color', 'core/doc', 'core/pins', 'core/lyrics', 'plann
     return { understood: true, summary, question, changes: res.changes, warnings };
   }
 
+  // The validators of this module, for the direct tool (ai/direct, DESIGN_2_1 §3.13, §5.5). Additive: the schemas and
+  // the behaviour of 演出3案 and ひとこと修正 are unchanged.
+  const helpers = Object.freeze({
+    partChange, lineChanges, lyricChanges, filterChanges, seasonChanges, amountChanges, flashChange, paletteChange,
+    namedChange, sharedContext, contextOf, lookContext, PALETTE_SCHEMA: deepFreeze(PALETTE_SCHEMA),
+  });
+
   return {
     AI_AMOUNTS, SEASON_ENUM, PROPOSALS_SCHEMA, EDIT_SCHEMA, planLines, lookContext, proposalsRequest, proposalChanges,
-    editRequest, editChanges,
+    editRequest, editChanges, helpers,
   };
 });
