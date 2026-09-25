@@ -1,0 +1,708 @@
+/* 文字PVメーカー v2 — original work. Inspector field catalogue: FieldSpecs per page and section, and sectionsFor (DESIGN §6.4.4–§6.4.9, §4.23). */
+MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color', 'core/ease', 'core/doc', 'ui/selection'],
+  (P, R, SC, C, E, D, S) => {
+    'use strict';
+
+    // A FieldSpec (§4.23) is one row of the inspector: { id, path, scopes, el?, section, widget, label, hint?, basic,
+    // when?(ctx) }. `path` is the slot (the text after ':'); the inspector prefixes the scope of the page (pathsFor).
+    // Fields that edit the document through a command instead of a pin have `path: null` and `cmd: { t, key }`;
+    // read-only derived values have `path: null` and `derived`. Additive fields: `page`, `kind`/`idx` (part widgets),
+    // `spec` (the ParamSpec the widget follows), `options` (choices), `scale` (display factor), `auto` (the choice
+    // offers 自動 = unpin), `labelArgs` (label params that are themselves string keys), `labelText` ({ ja, en } of a
+    // generated part parameter; its `label` is 'fld.param' = '{name}'), `param` (generated part parameters),
+    // `firstCut` (the line page's 切り替え: written at the line's first cut, §6.4.6), `pinnedOnly` (a pinned parameter
+    // of a part that is no longer chosen, shown as 無効).
+
+    const ALL = Object.freeze(['work', 'line', 'cut']);
+    const WORK = Object.freeze(['work']);
+    const LINE = Object.freeze(['line']);
+    const CUT = Object.freeze(['cut']);
+    const WIDGETS = Object.freeze(['part', 'choice', 'number', 'time', 'color', 'font', 'toggle', 'words', 'cutpoints',
+      'text', 'slots']);
+    const FACE_ROLES = Object.freeze(['display', 'serif', 'body']);
+    const FACE_SCRIPTS = Object.freeze(['ja', 'latin', 'ko', 'zhHant', 'zhHans']);
+    const LIST_KINDS = Object.freeze(['ornament', 'filter']);
+    const SLOT_KINDS = Object.freeze(['arrange', 'arrive', 'dwell', 'depart', 'ornament', 'lens', 'filter', 'ground', 'atmos',
+      'seam']);
+    const TEXT_STYLES = R.TEXT_STYLES;
+    const SEASONS = Object.freeze(['any', 'none', 'spring', 'summer', 'autumn', 'winter']);
+    const LANGS = Object.freeze(D.LANGS.filter((l) => l !== 'auto'));
+    const SNAPS = Object.freeze(['off', 'beat', 'half', 'bar']);
+    const COMMANDS_USED = Object.freeze(['look.set', 'look.seed', 'meta.set', 'timing.set', 'lyrics.row']);
+    const PARAM_LABEL = 'fld.param';        // '{name}': the label of a generated part parameter (name from labelText)
+
+    // --- the slot catalogue (§3.4.1–§3.4.3): which scopes a slot is valid at --------------------------------------
+
+    const WORK_NAMES = new Set(['mood', 'theme', 'season', 'bpm', 'beatOffset', 'readRate', 'length', 'titleCard']);
+    const LINE_NAMES = new Set(['start', 'end', 'split', 'lang']);
+    const CUT_NAMES = new Set(['orient', 'text.face', 'text.scale', 'text.ink', 'text.style']);
+
+    function sharedNames(kind) {
+      if (kind === 'atmos') return ['amount'];
+      const shared = R.SHARED[kind];
+      return shared ? Object.keys(shared) : [];
+    }
+
+    function workName(slot) {
+      if (WORK_NAMES.has(slot)) return true;
+      const m = /^([a-z]+)\.([A-Za-z0-9]+)(?:\.([A-Za-z0-9]+))?$/.exec(slot);
+      if (!m) return false;
+      if (m[1] === 'color') return !m[3] && C.TOKENS.includes(m[2]);
+      if (m[1] === 'amount') return !m[3] && SC.AMOUNT_KEYS.includes(m[2]);
+      if (m[1] === 'face') return FACE_ROLES.includes(m[2]) && (FACE_SCRIPTS.includes(m[3]) || m[3] === 'weight');
+      return false;
+    }
+
+    // slotScopes(slot) → the scope kinds where the slot may be pinned ([] when the slot is unknown or malformed).
+    function slotScopes(slot) {
+      let parsed;
+      try { parsed = P.parse('work:' + slot); } catch (e) { return []; }
+      if (parsed.el) return ALL.slice();
+      if (parsed.name !== null) {
+        if (workName(slot)) return WORK.slice();
+        if (LINE_NAMES.has(slot)) return LINE.slice();
+        if (slot === 't0') return CUT.slice();
+        return CUT_NAMES.has(slot) ? ALL.slice() : [];
+      }
+      return partScopes(parsed.part);
+    }
+
+    function partScopes(part) {
+      if (part.kind === 'texture') return part.idx === null && part.key === null && part.param === null ? WORK.slice() : [];
+      const list = LIST_KINDS.includes(part.kind);
+      if (list && part.param === 'count') return part.idx === null && part.key === null ? ALL.slice() : [];
+      if (list !== (part.idx !== null)) return [];
+      if (part.key !== null && part.param === null) return [];
+      if (part.param !== null && part.key === null && !sharedNames(part.kind).includes(part.param)) return [];
+      return ALL.slice();
+    }
+
+    function fieldPath(field, scope) { return field.path ? scope + ':' + field.path : null; }
+
+    // --- widgets for parameter specs ----------------------------------------------------------------------------
+
+    // widgetFor(ParamSpec) → the widget that edits it (§6.4.4: every registry param maps to a widget).
+    function widgetFor(spec) {
+      switch (spec && spec.type) {
+        case 'num': case 'int': return 'number';
+        case 'bool': return 'toggle';
+        case 'enum': case 'ease': case 'order': case 'face': return 'choice';
+        case 'ink': case 'color': return 'color';
+        case 'text': return 'text';
+        case 'nudge': return 'number';
+        default: return null;
+      }
+    }
+
+    // Choice options for a spec: [{ v, label | text | labelArgs }]. Option labels are string keys; values that are
+    // their own label (aspects, numbers) use `text`.
+    function optionsFor(spec) {
+      switch (spec && spec.type) {
+        case 'enum': return spec.of.map((v) => (typeof v === 'number' ? { v, text: String(v) } : { v, label: 'opt.' + v, fallback: String(v) }));
+        case 'ease': return E.EASES.map((v) => easeOption(v));
+        case 'order': return SC.ORDERS.map((v) => ({ v, label: 'opt.order.' + v }));
+        case 'face': return FACE_ROLES.map((v) => ({ v, label: 'fld.faceRole.' + v }));
+        default: return [];
+      }
+    }
+
+    function easeOption(v) {
+      const m = /^(linear|steps|[a-z]+?)(InOut|In|Out)?$/.exec(v);
+      if (!m || !m[2]) return { v, label: 'opt.ease.' + v };
+      return { v, label: 'opt.ease', labelArgs: { family: 'opt.ease.' + m[1], dir: 'opt.easeDir.' + m[2] } };
+    }
+
+    // --- builders -----------------------------------------------------------------------------------------------
+
+    function F(o) {
+      const f = Object.assign({ scopes: ALL, basic: true, path: null }, o);
+      if (!f.key) f.key = f.path || (f.cmd ? f.cmd.t + '.' + f.cmd.key : f.derived);
+      return f;
+    }
+    function sec(id, open, fields, extra) { return Object.assign({ id, open, fields }, extra || {}); }
+    const opts = (values, prefix) => values.map((v) => ({ v, label: prefix + v }));
+    const sharedSpec = (kind, name) => R.SHARED[kind === 'atmos' ? 'ground' : kind][name];
+    const enumSpec = (of) => ({ type: 'enum', of });
+
+    const SPEC = {
+      scale: { type: 'num', min: 0.5, max: 2, step: 0.01, unit: 'x' },
+      ink: { type: 'ink' },
+      color: { type: 'color' },
+      weight: { type: 'int', min: 100, max: 900, step: 100 },
+      unit: { type: 'num', min: 0, max: 1, step: 0.01 },
+      bpm: { type: 'num', min: 40, max: 240, step: 0.1, unit: '' },
+      offset: { type: 'num', min: 0, max: 4, step: 0.001, unit: 's' },
+      readRate: { type: 'num', min: 3, max: 14, step: 0.1, unit: '' },
+      count: { type: 'int', min: 0, max: 3, step: 1 },
+      seed: { type: 'int', min: 0, max: 4294967295, step: 1 },
+      timing: { type: 'num', min: 0, max: 10, step: 0.01, unit: 's' },
+      nudge: { type: 'nudge' },
+      text: { type: 'text', max: 200 },
+      family: { type: 'text', max: 80 },
+    };
+
+    // Shared-parameter rows written out by name (the line page lists them, §6.4.6).
+    function sharedField(kind, name, label, extra) {
+      const spec = sharedSpec(kind, name);
+      return F(Object.assign({ path: kind + '.' + name, widget: widgetFor(spec), label, spec }, extra || {}));
+    }
+
+    function partField(kind, label, extra) {
+      return F(Object.assign({ path: kind, widget: 'part', kind, label }, extra || {}));
+    }
+
+    function listFields(kind, i) {
+      const when = (ctx) => ctx.idx === i;
+      const owner = kind + '#' + i;
+      const out = [partField(kind, 'fld.kindOf', { path: owner, idx: i, when, noneOk: true })];
+      if (kind === 'ornament') {
+        out.push(F({ path: 'el.' + owner + '.hide', widget: 'toggle', label: 'fld.hide', when }),
+          F({ path: 'el.' + owner + '.nudge', widget: 'number', label: 'fld.nudge', spec: SPEC.nudge, when, basic: false }));
+      }
+      return out;
+    }
+
+    // Face rows only for scripts in use (ja and latin always).
+    const faceWhen = (script) => (ctx) => script === 'ja' || script === 'latin' || ctx.scripts.has(script);
+    const faceFields = [];
+    for (const role of FACE_ROLES) {
+      for (const script of FACE_SCRIPTS) {
+        faceFields.push(F({ path: 'face.' + role + '.' + script, scopes: WORK, widget: 'font', label: 'fld.faceOf',
+          labelArgs: { role: 'fld.faceRole.' + role, script: 'fld.script.' + script }, spec: SPEC.family, script, role,
+          when: faceWhen(script) }));
+      }
+    }
+    for (const role of FACE_ROLES) {
+      faceFields.push(F({ path: 'face.' + role + '.weight', scopes: WORK, widget: 'number', label: 'fld.faceWeight',
+        labelArgs: { role: 'fld.faceRole.' + role }, spec: SPEC.weight, basic: false }));
+    }
+
+    const textFaceField = (extra) => F(Object.assign({ path: 'text.face', widget: 'choice', label: 'fld.textFace',
+      spec: { type: 'face' }, options: optionsFor({ type: 'face' }) }, extra || {}));
+    const textInkField = () => F({ path: 'text.ink', widget: 'color', label: 'fld.textInk', spec: SPEC.ink });
+    const textStyleField = () => F({ path: 'text.style', widget: 'choice', label: 'fld.textStyle', spec: enumSpec(TEXT_STYLES),
+      options: opts(TEXT_STYLES, 'fld.style.') });
+    const textScaleField = (label) => F({ path: 'text.scale', widget: 'number', label: label || 'fld.textScale', spec: SPEC.scale });
+    const orientField = () => F({ path: 'orient', widget: 'choice', label: 'fld.orient', spec: enumSpec(['h', 'v']),
+      options: opts(['h', 'v'], 'fld.orient.'), auto: true, when: (ctx) => ctx.orients.includes('v') || ctx.scopeKind === 'work' });
+
+    const isInnerCut = (ctx) => !!(ctx.cut && ctx.cut.line && P.cutOffset(ctx.cut.key) > 0);
+    const isRole = (role) => (ctx) => !!(ctx.cut && ctx.cut.role === role);
+
+    // --- pages ----------------------------------------------------------------------------------------------------
+
+    const PAGES = {
+      work: [
+        sec('look', true, [
+          partField('mood', 'kind.mood', { scopes: WORK }),
+          partField('theme', 'kind.theme', { scopes: WORK }),
+          F({ path: 'season', scopes: WORK, widget: 'choice', label: 'fld.season', spec: enumSpec(SEASONS),
+            options: opts(SEASONS, 'fld.season.'), auto: true }),
+          F({ cmd: { t: 'look.set', key: 'aspect' }, scopes: WORK, widget: 'choice', label: 'look.shape',
+            options: D.ASPECTS.map((v) => ({ v, text: v })), select: true }),
+          F({ cmd: { t: 'look.set', key: 'backdrop' }, scopes: WORK, widget: 'choice', label: 'fld.backdrop',
+            options: opts(D.BACKDROPS, 'exp.bg.'), select: true }),
+        ]),
+        sec('colors', false, C.TOKENS.map((tok) => F({ path: 'color.' + tok, scopes: WORK, widget: 'color',
+          label: 'fld.color.' + tok, spec: SPEC.color })), { custom: 'colorsReset' }),
+        sec('type', false, faceFields.concat([textScaleField('fld.textScaleAll')]), { custom: 'fontBanner', customTop: true }),
+        sec('energy', true, SC.AMOUNT_KEYS.map((k) => F({ path: 'amount.' + k, scopes: WORK,
+          widget: k === 'flash' ? 'toggle' : 'number', label: 'fld.amount.' + k, spec: SPEC.unit, scale: 100,
+          flashToggle: k === 'flash' })), { custom: 'amountsReset' }),
+        sec('parts', false, [], { custom: 'parts' }),
+        sec('title', false, [
+          F({ cmd: { t: 'meta.set', key: 'title' }, scopes: WORK, widget: 'text', label: 'fld.title', spec: SPEC.text }),
+          F({ cmd: { t: 'meta.set', key: 'artist' }, scopes: WORK, widget: 'text', label: 'fld.artist', spec: SPEC.text }),
+          F({ path: 'titleCard', scopes: WORK, widget: 'choice', label: 'fld.titleCard', spec: { type: 'bool' },
+            options: [{ v: true, label: 'fld.titleCard.on' }, { v: false, label: 'fld.titleCard.off' }], auto: true }),
+        ], { custom: 'titleLink' }),
+        sec('timing', false, [
+          F({ path: 'readRate', scopes: WORK, widget: 'number', label: 'fld.readRate', spec: SPEC.readRate }),
+          F({ cmd: { t: 'timing.set', key: 'snap' }, scopes: WORK, widget: 'choice', label: 'song.snap',
+            options: opts(SNAPS, 'fld.snap.') }),
+          F({ cmd: { t: 'timing.set', key: 'lead' }, scopes: WORK, widget: 'number', label: 'fld.lead', spec: SPEC.timing }),
+          F({ cmd: { t: 'timing.set', key: 'tail' }, scopes: WORK, widget: 'number', label: 'fld.tail', spec: SPEC.timing }),
+          F({ cmd: { t: 'timing.set', key: 'leadIn' }, scopes: WORK, widget: 'number', label: 'fld.leadIn', spec: SPEC.timing }),
+          F({ cmd: { t: 'timing.set', key: 'outro' }, scopes: WORK, widget: 'number', label: 'fld.outro', spec: SPEC.timing }),
+          F({ path: 'length', scopes: WORK, widget: 'time', label: 'fld.length' }),
+          F({ path: 'bpm', scopes: WORK, widget: 'number', label: 'song.tempo', spec: SPEC.bpm }),
+          F({ path: 'beatOffset', scopes: WORK, widget: 'number', label: 'fld.beatOffset', spec: SPEC.offset, basic: false }),
+          F({ cmd: { t: 'timing.set', key: 'tapLatency' }, scopes: WORK, widget: 'number', label: 'fld.tapLatency',
+            spec: SPEC.timing, basic: false }),
+        ]),
+        sec('lines', false, [], { custom: 'lines' }),
+        sec('looks', false, [], { custom: 'looks' }),
+        sec('defaults', false, [
+          partField('texture', 'fld.texture', { scopes: WORK, noneOk: true, texture: true, partKind: 'filter' }),
+        ], { custom: 'elements' }),
+        sec('other', false, [
+          F({ cmd: { t: 'look.seed', key: 'seed' }, scopes: WORK, widget: 'number', label: 'fld.seed', spec: SPEC.seed }),
+        ], { custom: 'other' }),
+      ],
+      line: [
+        sec('time', true, [
+          F({ path: 'start', scopes: LINE, widget: 'time', label: 'fld.start' }),
+          F({ path: 'end', scopes: LINE, widget: 'time', label: 'fld.end' }),
+          F({ derived: 'lineLength', scopes: LINE, widget: 'time', label: 'fld.duration', readOnly: true }),
+        ]),
+        sec('marks', true, [
+          F({ cmd: { t: 'lyrics.row', key: 'emph' }, scopes: LINE, widget: 'words', label: 'fld.emph' }),
+          F({ cmd: { t: 'lyrics.row', key: 'impact' }, scopes: LINE, widget: 'toggle', label: 'fld.impact' }),
+          F({ path: 'split', scopes: LINE, widget: 'cutpoints', label: 'fld.split' }),
+          F({ cmd: { t: 'lyrics.row', key: 'note' }, scopes: LINE, widget: 'text', label: 'fld.note', spec: SPEC.text }),
+          F({ path: 'lang', scopes: LINE, widget: 'choice', label: 'fld.lang', spec: enumSpec(LANGS),
+            options: opts(LANGS, 'lang.'), auto: true, select: true, basic: false }),
+        ], { custom: 'lockPartial', customTop: true }),
+        sec('direction', true, directionFields()),
+        sec('colortype', false, [textFaceField(), textInkField(), textStyleField(), textScaleField()]),
+        sec('cuts', false, [], { custom: 'cuts', when: (ctx) => !!ctx.line && ctx.line.cuts.length > 1 }),
+        sec('elements', false, [], { custom: 'elements' }),
+        sec('ai', false, [], { custom: 'ai' }),
+      ],
+      lines: [
+        sec('multi', true, [], { custom: 'multi' }),
+        sec('direction', true, directionFields()),
+        sec('colortype', false, [textFaceField(), textInkField(), textStyleField(), textScaleField()]),
+        sec('shift', true, [], { custom: 'shift' }),
+      ],
+      cut: [
+        sec('time', true, [
+          F({ path: 't0', scopes: CUT, widget: 'time', label: 'fld.cutStart', when: isInnerCut }),
+          F({ derived: 'cutEnd', scopes: CUT, widget: 'time', label: 'fld.cutEnd', readOnly: true, when: (ctx) => !!ctx.cut }),
+        ]),
+        sec('titletext', true, [
+          F({ cmd: { t: 'meta.set', key: 'title' }, scopes: CUT, widget: 'text', label: 'fld.title', spec: SPEC.text, when: isRole('title') }),
+          F({ cmd: { t: 'meta.set', key: 'artist' }, scopes: CUT, widget: 'text', label: 'fld.artist', spec: SPEC.text, when: isRole('title') }),
+        ]),
+        sec('gaplabel', true, [
+          F({ path: 'arrange@breathMark.label', scopes: CUT, widget: 'text', label: 'fld.gapLabel', spec: { type: 'text', max: 40 },
+            presets: [{ v: 'none', label: 'fld.gapLabel.none' }, { v: '♪', text: '♪' }, { v: 'heading', label: 'fld.gapLabel.heading' }],
+            when: isRole('interlude') }),
+        ]),
+        sec('layout', true, [partField('arrange', 'kind.arrange'),
+          F({ path: 'el.text.nudge', widget: 'number', label: 'fld.nudge', spec: SPEC.nudge }), textScaleField()]),
+        sec('motion', true, [partField('arrive', 'kind.arrive'), partField('dwell', 'kind.dwell'), partField('depart', 'kind.depart')]),
+        sec('seam', true, [partField('seam', 'kind.seam')]),
+        sec('elements', true, [], { custom: 'elements' }),
+      ],
+      'el.text': [
+        sec('text', true, [textFaceField(), textScaleField(), textInkField(),
+          F({ path: 'el.text.fill', widget: 'color', label: 'fld.emphInk', spec: SPEC.ink }), textStyleField(), orientField(),
+          F({ path: 'el.text.nudge', widget: 'number', label: 'fld.nudgeFull', spec: SPEC.nudge }),
+          F({ path: 'el.text.hide', widget: 'toggle', label: 'fld.hide' }),
+          sharedField('arrive', 'order', 'fld.order'), sharedField('arrive', 'each', 'fld.each')]),
+        sec('tune', false, [], { params: [{ kind: 'arrange' }, { kind: 'arrive' }, { kind: 'dwell' }, { kind: 'depart' }] }),
+      ],
+      'el.ornament': [
+        sec('list', true, [F({ path: 'ornament.count', widget: 'number', label: 'fld.count', spec: SPEC.count }),
+          F({ key: 'ornament.list', derived: 'slots', widget: 'slots', label: 'fld.slots', kind: 'ornament' })]),
+        sec('slot', true, [0, 1, 2].flatMap((i) => listFields('ornament', i)), { labelOf: 'crumb.ornament' }),
+      ],
+      'el.ground': [
+        sec('ground', true, [partField('ground', 'kind.ground')], { custom: 'groundRun' }),
+        sec('atmos', true, [partField('atmos', 'fld.atmos', { noneOk: true, partKind: 'ornament', run: true })]),
+      ],
+      'el.lens': [sec('lens', true, [partField('lens', 'fld.lensMove')])],
+      'el.filter': [
+        sec('list', true, [F({ path: 'filter.count', widget: 'number', label: 'fld.count', spec: SPEC.count }),
+          F({ key: 'filter.list', derived: 'slots', widget: 'slots', label: 'fld.slots', kind: 'filter' })], { custom: 'backdropNote' }),
+        sec('slot', true, [0, 1, 2].flatMap((i) => listFields('filter', i)), { labelOf: 'crumb.filter' }),
+        sec('workfx', true, [
+          partField('texture', 'fld.texture', { scopes: WORK, noneOk: true, texture: true, partKind: 'filter' }),
+          F({ path: 'amount.flash', scopes: WORK, widget: 'toggle', label: 'fld.amount.flash', spec: SPEC.unit, flashToggle: true }),
+        ]),
+      ],
+      'el.seam': [sec('seam', true, [partField('seam', 'kind.seam', { scopes: CUT })])],
+    };
+
+    function directionFields() {
+      return [
+        partField('arrange', 'kind.arrange'),
+        partField('arrive', 'kind.arrive'),
+        sharedField('arrive', 'dur', 'fld.dur'), sharedField('arrive', 'ease', 'fld.ease'),
+        sharedField('arrive', 'order', 'fld.order'), sharedField('arrive', 'each', 'fld.each'),
+        partField('dwell', 'kind.dwell'), sharedField('dwell', 'amount', 'fld.amount'),
+        partField('depart', 'kind.depart'), sharedField('depart', 'dur', 'fld.dur'), sharedField('depart', 'ease', 'fld.ease'),
+        // §6.4.6: the transition into the line's first cut (a line-scope seam pin would change every cut boundary).
+        partField('seam', 'fld.seamIntoLine', { firstCut: true }),
+        orientField(),
+      ];
+    }
+
+    // Choice options are filled from the spec where the page does not list them.
+    function finish(field, page, section) {
+      const f = Object.assign({}, field, { page, section });
+      if (f.widget === 'choice' && !f.options) f.options = optionsFor(f.spec);
+      f.id = page + '/' + section + '/' + f.key;
+      return Object.freeze(f);
+    }
+
+    const PAGE_SECTIONS = {};
+    const FIELDS = [];
+    for (const page of Object.keys(PAGES)) {
+      PAGE_SECTIONS[page] = PAGES[page].map((s) => {
+        const fields = s.fields.map((f) => finish(f, page, s.id));
+        FIELDS.push(...fields);
+        return Object.freeze(Object.assign({}, s, { fields }));
+      });
+    }
+    Object.freeze(FIELDS);
+
+    // --- context of a selection -----------------------------------------------------------------------------------
+
+    const SCRIPT_OF = { ja: 'ja', en: 'latin', ko: 'ko', zhHant: 'zhHant', zhHans: 'zhHans' };
+
+    function pageOf(sel, plan) {
+      const s = S.validate(sel, plan);
+      if (s.level === 'work') return 'work';
+      if (s.level === 'line') return s.ids.length > 1 ? 'lines' : 'line';
+      if (s.level === 'cut') return 'cut';
+      return 'el.' + s.el;
+    }
+
+    // contextOf(sel, plan, registry) → what sectionsFor and the inspector need about a selection.
+    function contextOf(sel, plan, registry) {
+      const s = S.validate(sel, plan);
+      const page = pageOf(s, plan);
+      const cutsAll = plan && Array.isArray(plan.cuts) ? plan.cuts : [];
+      const linesAll = plan && Array.isArray(plan.lines) ? plan.lines : [];
+      const scope = page === 'lines' ? 'line/' + s.ids[0] : S.scopeOf(s, plan);
+      const scopeKind = scope === 'work' ? 'work' : scope.startsWith('line/') ? 'line' : 'cut';
+      let keys;
+      if (page === 'lines') keys = S.cutsOf(s, plan);
+      else if (scopeKind === 'work') keys = cutsAll.map((c) => c.key);
+      else if (scopeKind === 'line') keys = (linesAll.find((l) => l.id === scope.slice(5)) || { cuts: [] }).cuts;
+      else keys = [scope.slice(4)];
+      const byKey = new Map(cutsAll.map((c) => [c.key, c]));
+      const cuts = keys.map((k) => byKey.get(k)).filter(Boolean);
+      const lineIds = page === 'lines' ? s.ids.slice() : scopeKind === 'line' ? [scope.slice(5)] : [];
+      const line = lineIds.length === 1 ? linesAll.find((l) => l.id === lineIds[0]) || null : null;
+      const scripts = new Set(linesAll.map((l) => SCRIPT_OF[l.lang]).filter(Boolean));
+      const orients = [...new Set(cuts.flatMap((c) => (c.feat && Array.isArray(c.feat.orients) ? c.feat.orients : ['h'])))];
+      return {
+        sel: s, page, scope, scopeKind, plan: plan || null, registry: registry || null, cuts, cutKeys: keys, lineIds, line,
+        cut: scopeKind === 'cut' ? byKey.get(scope.slice(4)) || null : null, idx: s.level === 'el' ? s.idx || 0 : null,
+        el: s.level === 'el' ? s.el : null, scripts, orients,
+      };
+    }
+
+    // The part chosen for a slot across the context's cuts, when every cut agrees; null when mixed or unknown.
+    function decisionsOf(ctx, slot) {
+      const plan = ctx.plan;
+      if (!plan) return [];
+      if (slot === 'ground' || slot === 'atmos') {
+        const grounds = Array.isArray(plan.grounds) ? plan.grounds : [];
+        return ctx.cuts.map((c) => grounds[c.ground]).filter(Boolean).map((g) => g[slot]).filter(Boolean);
+      }
+      if (slot === 'seam') {
+        const seams = Array.isArray(plan.seams) ? plan.seams : [];
+        return ctx.cuts.map((c) => {
+          const s = seams.find((x) => x.into === c.key);
+          return s ? s.slot : { v: fallbackKey(ctx.registry, 'seam'), from: 'auto' };
+        });
+      }
+      return ctx.cuts.map((c) => (c.slots ? c.slots[slot] : null)).filter(Boolean);
+    }
+
+    function fallbackKey(registry, kind) {
+      try { return registry ? registry.fallback(kind) : null; } catch (e) { return null; }
+    }
+
+    function agreedKey(ctx, slot) {
+      const list = decisionsOf(ctx, slot);
+      if (!list.length) return null;
+      const v = list[0].v;
+      return list.every((d) => d.v === v) && typeof v === 'string' && v !== 'none' ? v : null;
+    }
+
+    // paramFields(kind, idx, partKey, registry, { shared, part, section, scopes }) → generated FieldSpecs for the
+    // parameters of a part (shared ones by `kind.param`, own ones by `kind@key.param`). partKey null → shared only.
+    function paramFields(kind, idx, partKey, registry, o) {
+      const opt = o || {};
+      const regKind = kind === 'atmos' ? 'ornament' : kind;
+      let list = partKey && registry && typeof registry.params === 'function' ? registry.params(regKind, partKey) : null;
+      if (!list) {
+        const shared = R.SHARED[regKind] || {};
+        list = Object.keys(shared).map((name) => ({ name, spec: shared[name], shared: true }));
+      }
+      if (kind === 'atmos') list = list.filter((p) => !p.shared || p.name === 'amount');
+      const out = [];
+      for (const p of list) {
+        if (p.shared ? opt.shared === false : opt.part === false) continue;
+        const slot = P.slotParamPath(kind, idx === undefined ? null : idx, p.shared ? null : partKey, p.name, p.shared);
+        out.push(Object.freeze({
+          id: (opt.page || 'param') + '/' + (opt.section || 'param') + '/' + slot, key: slot, path: slot,
+          scopes: opt.scopes || ALL, section: opt.section || null, page: opt.page || null, widget: widgetFor(p.spec),
+          label: PARAM_LABEL, labelText: p.spec.label || { ja: p.name, en: p.name }, basic: p.spec.ui !== 'advanced',
+          spec: p.spec, options: widgetFor(p.spec) === 'choice' ? optionsFor(p.spec) : undefined,
+          param: Object.freeze({ kind, idx: idx === undefined ? null : idx, key: p.shared ? null : partKey, name: p.name, shared: p.shared }),
+          generated: true,
+        }));
+      }
+      return out;
+    }
+
+    // The first cut of every line of the context (the cuts a firstCut field covers).
+    function firstCuts(ctx) {
+      const lines = ctx.plan && Array.isArray(ctx.plan.lines) ? ctx.plan.lines : [];
+      const byKey = new Map(ctx.cuts.map((c) => [c.key, c]));
+      return ctx.lineIds.map((id) => {
+        const line = lines.find((l) => l.id === id);
+        return line && line.cuts.length ? byKey.get(line.cuts[0]) : null;
+      }).filter(Boolean);
+    }
+
+    const withFlags = (g, flags) => (Object.keys(flags).length ? Object.freeze(Object.assign({}, g, flags)) : g);
+
+    // Generated parameter rows go right after their part row; rows the page already lists are not repeated.
+    function expand(section, fields, ctx, pageSlots) {
+      const out = [];
+      for (const f of fields) {
+        out.push(f);
+        if (f.widget !== 'part' || !SLOT_KINDS.includes(f.kind)) continue;
+        const idx = f.idx === undefined ? null : f.idx;
+        const key = agreedKey(f.firstCut ? Object.assign({}, ctx, { cuts: firstCuts(ctx) }) : ctx, f.path);
+        const gen = paramFields(f.kind, idx, key, ctx.registry, { section: section.id, page: ctx.page, scopes: f.scopes });
+        const flags = f.firstCut ? { firstCut: true } : {};
+        for (const g of gen) if (!pageSlots.has(g.path)) { out.push(withFlags(g, flags)); pageSlots.add(g.path); }
+      }
+      for (const want of section.params || []) {
+        const key = agreedKey(ctx, want.kind);
+        if (!key) continue;
+        const gen = paramFields(want.kind, null, key, ctx.registry, { shared: false, section: section.id, page: ctx.page });
+        for (const g of gen) if (!pageSlots.has(g.path)) { out.push(Object.assign({ group: want.kind }, g)); pageSlots.add(g.path); }
+      }
+      return out;
+    }
+
+    // sectionsFor(sel, plan, registry) → [{ id, label, open, fields, custom }] for the page of the selection (§6.4.5–
+    // §6.4.9). Fields are filtered by the page scope and their `when`; part rows are followed by their parameters.
+    function sectionsFor(sel, plan, registry) {
+      const ctx = contextOf(sel, plan, registry);
+      const visible = (f) => f.scopes.includes(ctx.scopeKind) && (!f.when || f.when(ctx));
+      const pageSlots = new Set();
+      const sections = PAGE_SECTIONS[ctx.page].filter((s) => !s.when || s.when(ctx)).map((s) => {
+        const fields = s.fields.filter(visible);
+        for (const f of fields) if (f.path) pageSlots.add(f.path);
+        return { s, fields };
+      });
+      return sections.map(({ s, fields }) => ({
+        id: s.id,
+        label: s.labelOf ? [s.labelOf, { k: (ctx.idx || 0) + 1 }] : ['sec.' + s.id, {}],
+        open: s.open,
+        custom: s.custom || null,
+        customTop: !!s.customTop,
+        params: s.params || null,
+        fields: expand(s, fields, ctx, pageSlots),
+      })).filter((s) => s.custom || s.fields.length);
+    }
+
+    // --- the paths a row writes -------------------------------------------------------------------------------------
+
+    // The scope of a line's first cut; a one-cut line keeps its line scope (its cut fields merge into the line page).
+    function firstCutScope(ctx, lineId) {
+      const lines = ctx.plan && Array.isArray(ctx.plan.lines) ? ctx.plan.lines : [];
+      const line = lines.find((l) => l.id === lineId);
+      return line && line.cuts.length > 1 ? 'cut/' + line.cuts[0] : 'line/' + lineId;
+    }
+
+    // pathsFor(field, ctx) → the full paths a row writes: the page scope; every selected line on the several-lines
+    // page; the first cut of the line(s) for firstCut fields.
+    function pathsFor(field, ctx) {
+      if (!field.path) return [];
+      if (field.firstCut && ctx.lineIds.length) return ctx.lineIds.map((id) => firstCutScope(ctx, id) + ':' + field.path);
+      if (ctx.page === 'lines') return ctx.lineIds.map((id) => 'line/' + id + ':' + field.path);
+      return [ctx.scope + ':' + field.path];
+    }
+
+    // clearPathsFor(field, ctx) → the paths × / Del may clear: pathsFor, plus (firstCut fields) the line-scope pin of
+    // the same slot, which also reaches the first cut and could not be removed from anywhere else, plus the paths the
+    // pins really live at when a cut keeps them under an older key (writePath).
+    function clearPathsFor(field, ctx) {
+      const out = pathsFor(field, ctx);
+      if (field.firstCut) {
+        for (const id of ctx.lineIds) {
+          const p = 'line/' + id + ':' + field.path;
+          if (!out.includes(p)) out.push(p);
+        }
+      }
+      for (const p of out.slice()) {
+        const w = writePath(p, ctx.plan);
+        if (!out.includes(w)) out.push(w);
+      }
+      return out;
+    }
+
+    // --- where pins are written (§4.10.4) ---------------------------------------------------------------------------
+
+    const cutMaps = new WeakMap();
+    function cutByKey(plan, key) {
+      if (!plan || !Array.isArray(plan.cuts)) return null;
+      let map = cutMaps.get(plan);
+      if (!map) { map = new Map(plan.cuts.map((c) => [c.key, c])); cutMaps.set(plan, map); }
+      return map.get(key) || null;
+    }
+
+    // writePath(path, plan) → where a pin for this path is written. A cut whose pins still live under an older key
+    // (the plan cut's `pinKey`, after a text edit moved its offset) keeps them there: a pin at the new exact key would
+    // win step 1 of the reattachment and leave the older pins, lock pins included, orphaned (§4.10.4).
+    function writePath(path, plan) {
+      if (typeof path !== 'string' || !path.startsWith('cut/')) return path;
+      const at = path.indexOf(':');
+      if (at < 0) return path;
+      const key = path.slice(4, at);
+      const cut = cutByKey(plan, key);
+      return cut && cut.pinKey && cut.pinKey !== key ? 'cut/' + cut.pinKey + path.slice(at) : path;
+    }
+
+    // writeScope(scope, plan) → the scope the pins of a cut scope live under (writePath for a whole scope).
+    function writeScope(scope, plan) {
+      return scope.startsWith('cut/') ? writePath(scope + ':x', plan).slice(0, -2) : scope;
+    }
+
+    // pinCmd(path, v, plan, pinSig, by = 'user') → the pin.set of a displayed path: written at writePath, with the
+    // cut's current text as `sig` on cut paths (§3.9; pinSig is planner.pinSig).
+    function pinCmd(path, v, plan, pinSig, by) {
+      const cmd = { t: 'pin.set', path: writePath(path, plan), v, by: by || 'user' };
+      if (path.startsWith('cut/')) cmd.sig = pinSig(plan, path.slice(4, path.indexOf(':')));
+      return cmd;
+    }
+
+    // --- pinned parameters of parts that are no longer chosen (§3.4, §6.6 無効) -----------------------------------------
+
+    // The slots of part-parameter pins (kind@key.param) in the given scopes.
+    function pinnedParamSlots(pins, scopes) {
+      const want = new Set(scopes);
+      const out = new Set();
+      for (const path of Object.keys(pins || {})) {
+        const i = path.indexOf(':');
+        const slot = path.slice(i + 1);
+        if (want.has(path.slice(0, i)) && slot.includes('@') && slot.includes('.')) out.add(slot);
+      }
+      return out;
+    }
+
+    // pinnedSlots(ctx, pins) → { page, firstCut }: the part-parameter slots pinned at the page scope(s) and at the first
+    // cut of the line(s) (what firstCut rows write).
+    function pinnedSlots(ctx, pins) {
+      const withKeys = (scopes) => scopes.concat(scopes.map((s) => writeScope(s, ctx.plan)));
+      const pageScopes = ctx.page === 'lines' ? ctx.lineIds.map((id) => 'line/' + id) : [ctx.scope];
+      return { page: pinnedParamSlots(pins, withKeys(pageScopes)),
+        firstCut: pinnedParamSlots(pins, withKeys(ctx.lineIds.map((id) => firstCutScope(ctx, id)))) };
+    }
+
+    function pinnedParamField(part, slot, where, registry) {
+      const idx = part.idx === null ? undefined : part.idx;
+      const o = { shared: false, section: where.section, page: where.page, scopes: where.scopes };
+      let f = paramFields(part.kind, idx, part.key, registry, o).find((g) => g.path === slot);
+      if (!f) {
+        // A part the registry does not know (any more): the value is shown as written and can only be unpinned.
+        f = { id: (where.page || 'param') + '/' + (where.section || 'param') + '/' + slot, key: slot, path: slot,
+          scopes: where.scopes || ALL, section: where.section || null, page: where.page || null, widget: 'text',
+          label: PARAM_LABEL, labelText: { ja: part.param, en: part.param }, basic: true, spec: SPEC.text, readOnly: true,
+          param: Object.freeze({ kind: part.kind, idx: part.idx, key: part.key, name: part.param, shared: false }), generated: true };
+      }
+      return Object.freeze(Object.assign({}, f, { basic: true, pinnedOnly: true }, where.flags));
+    }
+
+    function partOfSlot(slot) {
+      try { return P.parse('work:' + slot).part; } catch (e) { return null; }
+    }
+
+    // withPinnedParams(sections, ctx, pinned) → sections plus one row for every pinned part parameter that no row shows
+    // (the part changed, or the cuts disagree): after its part's rows, or in a section that lists that kind's params.
+    // `pinned` is pinnedSlots(ctx, doc.pins). The inspector reads their state (無効 when the part is not chosen).
+    function withPinnedParams(sections, ctx, pinned) {
+      const shown = new Set(sections.flatMap((s) => s.fields.map((f) => f.path).filter(Boolean)));
+      const out = sections.map((s) => Object.assign({}, s, { fields: s.fields.slice() }));
+      const matches = (part, kind, idx) => part && part.key !== null && part.param !== null && part.kind === kind && part.idx === idx;
+      for (const s of out) {
+        for (let i = 0; i < s.fields.length; i++) {
+          const f = s.fields[i];
+          if (f.widget !== 'part' || !SLOT_KINDS.includes(f.kind)) continue;
+          const idx = f.idx === undefined ? null : f.idx;
+          const set = f.firstCut ? pinned.firstCut : pinned.page;
+          let at = i + 1;
+          while (at < s.fields.length && s.fields[at].param && s.fields[at].param.kind === f.kind && s.fields[at].param.idx === idx) at++;
+          for (const slot of [...(set || [])].sort()) {
+            const part = partOfSlot(slot);
+            if (shown.has(slot) || !matches(part, f.kind, idx)) continue;
+            const where = { section: s.id, page: ctx.page, scopes: f.scopes, flags: f.firstCut ? { firstCut: true } : {} };
+            s.fields.splice(at++, 0, pinnedParamField(part, slot, where, ctx.registry));
+            shown.add(slot);
+          }
+        }
+        for (const want of s.params || []) {
+          for (const slot of [...(pinned.page || [])].sort()) {
+            const part = partOfSlot(slot);
+            if (shown.has(slot) || !matches(part, want.kind, null)) continue;
+            const where = { section: s.id, page: ctx.page, scopes: ALL, flags: { group: want.kind } };
+            s.fields.push(pinnedParamField(part, slot, where, ctx.registry));
+            shown.add(slot);
+          }
+        }
+      }
+      return out;
+    }
+
+    // --- なぜ: explain() in words (§4.16.8, §6.4.4 item 5) -----------------------------------------------------------
+
+    // The string key of a planner rule ('whyRule.<rule>'). The mood slot's own rule (the lyrics and song facts) reads
+    // differently from values that follow the mood; element and list slots share one entry per kind of rule.
+    function whyRuleKey(rule, slot) {
+      const r = String(rule);
+      if (r === 'mood' && slot === 'mood') return 'whyRule.moodPick';
+      if (r === 'el.text.fill') return 'whyRule.el.textFill';
+      const el = /^el\.[a-z]+(?:#\d+)?\.(nudge|fill|hide)$/.exec(r);
+      if (el) return 'whyRule.el.' + el[1];
+      if (/^(ornament|filter)#\d+$/.test(r)) return 'whyRule.slot';
+      return 'whyRule.' + r;
+    }
+
+    // A cut as the breadcrumbs name it: 「3行」, or 「3行のカット2」 when the line has several cuts.
+    function cutLabel(plan, key, t) {
+      if (!cutByKey(plan, key)) return null;
+      const list = S.crumbs({ level: 'cut', key }, plan).slice(1).map((c) => t.label(c.label));
+      if (!list.length) return null;
+      return list.length > 1 ? t('why.lineCut', { line: list[0], cut: list[1] }) : list[0];
+    }
+
+    // whyParts(ex, path, t, plan) → the reasons of an explain() result as display text. Every code or id in the params
+    // becomes words (mood and part keys → their labels; tag, scope, by, amount, rule → their strings; a cut key → its
+    // line and cut); the family id is not shown. A reason that would still show a code is left out.
+    function whyParts(ex, path, t, plan) {
+      if (!ex || !Array.isArray(ex.why)) return [];
+      let parsed = null;
+      try { parsed = P.parse(path); } catch (e) { parsed = null; }
+      const slot = parsed ? parsed.slot : null;
+      const part = parsed && parsed.part ? parsed.part : null;
+      const partKind = part ? (part.kind === 'atmos' ? 'ornament' : part.kind === 'texture' ? 'filter' : part.kind) : null;
+      const word = (prefix, v) => (t.has(prefix + v) ? t(prefix + v) : null);
+      const out = [];
+      for (const w of ex.why) {
+        if (!w || !t.has('why.' + w.code)) continue;
+        const p = Object.assign({}, w.params || {});
+        let ok = true;
+        const put = (k, v) => { if (v === null || v === undefined) ok = false; else p[k] = v; };
+        if (p.mood !== undefined) put('mood', t.part('mood', p.mood));
+        if (p.tag !== undefined) put('tag', word('tag.', p.tag));
+        if (p.scope !== undefined) put('scope', word('scope.', p.scope));
+        if (p.by !== undefined) put('by', word('by.', p.by));
+        if (p.amount !== undefined) put('amount', word('fld.amount.', p.amount));
+        if (p.rule !== undefined) put('rule', word('', whyRuleKey(p.rule, slot)) || t('whyRule.rule'));
+        if (p.cut !== undefined) put('cut', cutLabel(plan, p.cut, t));
+        if (p.key !== undefined && partKind) p.key = t.part(partKind, p.key);
+        if (typeof p.x === 'number') p.x = p.x.toFixed(2);
+        delete p.family;
+        if (ok) out.push(t.why(w.code, p));
+      }
+      return out;
+    }
+
+    return {
+      WIDGETS, FIELDS, PAGES: PAGE_SECTIONS, FACE_ROLES, FACE_SCRIPTS, LIST_KINDS, SLOT_KINDS, COMMANDS_USED, SNAPS, SEASONS,
+      PARAM_LABEL, sectionsFor, contextOf, pageOf, paramFields, widgetFor, optionsFor, slotScopes, fieldPath, decisionsOf,
+      agreedKey, sharedNames, pathsFor, clearPathsFor, firstCutScope, pinnedSlots, withPinnedParams, writePath, writeScope,
+      pinCmd, whyParts, whyRuleKey,
+    };
+  });

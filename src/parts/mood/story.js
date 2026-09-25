@@ -1,0 +1,47 @@
+/* 文字PVメーカー v2 — original work. Storytelling moods: cinematic reel, editorial column, aching ballad (DESIGN §5.11). */
+MV.def('parts/mood/story', ['parts/kit'], (K) => [
+  K.mood({
+    key: 'silverReel',
+    label: { ja: '銀幕', en: 'Reel' },
+    blurb: { ja: '帯とフィルムの粒子、映画のような間。', en: 'Letterbox bars, film grain and a cinematic pace.' },
+    tagBias: { slow: 1.5, dark: 1.5, serious: 1.4, minimal: 1.2, literary: 1.1, bold: 1.1, wet: 1.1,
+      busy: 0.5, playful: 0.5, digital: 0.7, bright: 0.8, fast: 0.8 },
+    amounts: { motion: 0.45, glitch: 0.05, chroma: 0.15, ornament: 0.3, density: 0.35, texture: 0.7,
+      groundSwitch: 0.3, flash: 0.2, shake: 0.15, camera: 0.8, pace: 0.35 },
+    themes: { emberGlow: 1.6, nightTram: 1.4, brassLamp: 1.3, mossStone: 1.2, mapleInk: 1.2 },
+    pace: { seam: 0.5, focus: 0.3 },
+    filters: { cinemaBars: 0.9, grainFilm: 0.8, edgeShade: 0.8, amberSpill: 0.3 },
+    variety: 0.8,
+    keywords: ['cinematic', 'epic', '壮大', '映画'],
+  }),
+
+  K.mood({
+    key: 'printColumn',
+    label: { ja: '誌面', en: 'Column' },
+    blurb: { ja: '雑誌の誌面のように端正な組みと余白。', en: 'Neat editorial type and margins, like a printed page.' },
+    tagBias: { literary: 1.7, minimal: 1.6, serious: 1.3, bold: 1.3, retro: 1.1, organic: 1.1,
+      wet: 0.5, busy: 0.6, digital: 0.7, playful: 0.8, soft: 0.8, airy: 0.9 },
+    amounts: { motion: 0.4, glitch: 0, chroma: 0.05, ornament: 0.55, density: 0.45, texture: 0.45,
+      groundSwitch: 0.35, flash: 0.1, shake: 0.05, camera: 0.25, pace: 0.45 },
+    themes: { monoPress: 2, risoPink: 1.4, sumiWashi: 1.3, frostGlass: 1.2, chalkBoard: 1.2 },
+    pace: { seam: 0.3, focus: 0.4 },
+    filters: { dotScreen: 0.5, grainFilm: 0.4, duoTone: 0.3 },
+    variety: 0.9,
+    keywords: ['acoustic', 'folk', '語り', '淡々'],
+  }),
+
+  K.mood({
+    key: 'heartAche',
+    label: { ja: '胸の奥', en: 'Ache' },
+    blurb: { ja: 'にじむ光とゆっくりした動きで、切なさを見せる。', en: 'Bleeding light and slow motion for aching songs.' },
+    tagBias: { soft: 1.6, wet: 1.5, slow: 1.4, literary: 1.3, organic: 1.2, airy: 1.1, dark: 1.1,
+      hard: 0.5, digital: 0.4, busy: 0.7, fast: 0.7, playful: 0.7, bold: 0.7 },
+    amounts: { motion: 0.45, glitch: 0.1, chroma: 0.25, ornament: 0.45, density: 0.35, texture: 0.55,
+      groundSwitch: 0.35, flash: 0.25, shake: 0.1, camera: 0.5, pace: 0.4 },
+    themes: { snowLantern: 1.5, sakuraFog: 1.4, mapleInk: 1.3, nightTram: 1.2, tidePool: 1.1 },
+    pace: { seam: 0.45, focus: 0.4 },
+    filters: { glowSpill: 0.6, softVeil: 0.5, amberSpill: 0.4, grainFilm: 0.4 },
+    variety: 0.9,
+    keywords: ['sad', 'emotional', '切ない', '泣き', '感動'],
+  }),
+]);

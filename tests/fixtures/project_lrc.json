@@ -1,0 +1,102 @@
+{
+ "format": "mojipv.project",
+ "schema": 1,
+ "doc": {
+  "meta": {
+   "app": "2.0.0",
+   "lang": "auto"
+  },
+  "sheet": {
+   "next": 14,
+   "rows": [
+    {
+     "id": "r1",
+     "src": "[ti:Paper Plane Morning]"
+    },
+    {
+     "id": "r2",
+     "src": "[ar:Sample Band]"
+    },
+    {
+     "id": "r3",
+     "src": "[00:04.00]始発のホームに/白い息"
+    },
+    {
+     "id": "r4",
+     "src": "[00:08.50]Good <00:09.10>morning, little swallow"
+    },
+    {
+     "id": "r5",
+     "src": "窓に映った寝ぐせの僕も"
+    },
+    {
+     "id": "r6",
+     "src": "[00:17.20]悪くないねと/笑ってみせる"
+    },
+    {
+     "id": "r7",
+     "src": ""
+    },
+    {
+     "id": "r8",
+     "src": "[00:22.00][00:48.00]飛ばせ/*紙ひこうき*/空の果てまで"
+    },
+    {
+     "id": "r9",
+     "src": "[00:26.40][00:52.40]Fly high, *fly high*"
+    },
+    {
+     "id": "ra",
+     "src": "[00:31.00]Hello/まだ見ぬ/青い空"
+    },
+    {
+     "id": "rb",
+     "src": "Across the morning sky"
+    },
+    {
+     "id": "rc",
+     "src": "[0:44.125]明日の僕へ/手紙を書こう"
+    },
+    {
+     "id": "rd",
+     "src": "[01:00.00]始発のベルが/鳴り終わるまで!"
+    }
+   ]
+  },
+  "timing": {
+   "snap": "off",
+   "lead": 0.12,
+   "tail": 0.25,
+   "leadIn": 1,
+   "outro": 2,
+   "tapLatency": 0.06
+  },
+  "song": null,
+  "look": {
+   "seed": 5550123,
+   "moodSeed": 9081726,
+   "aspect": "1:1",
+   "backdrop": "scene"
+  },
+  "pins": {},
+  "salts": {},
+  "locks": {},
+  "filters": {},
+  "output": {
+   "format": "mp4",
+   "short": 720,
+   "fps": 24,
+   "quality": "standard",
+   "audio": false,
+   "range": null,
+   "name": "lrc-sample"
+  }
+ },
+ "side": {
+  "looks": {
+   "list": [],
+   "cap": 50
+  },
+  "aiLog": []
+ }
+}

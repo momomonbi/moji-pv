@@ -1,0 +1,47 @@
+/* 文字PVメーカー v2 — original work. High-energy moods: fizzy pop, sprint and glitch (DESIGN §5.11). */
+MV.def('parts/mood/lively', ['parts/kit'], (K) => [
+  K.mood({
+    key: 'popFizz',
+    label: { ja: 'はじける', en: 'Fizz' },
+    blurb: { ja: '明るい色と弾む動きで、はじけるように。', en: 'Bright colors and bouncy motion that fizz and pop.' },
+    tagBias: { playful: 1.8, bright: 1.7, fast: 1.4, bold: 1.3, busy: 1.2, retro: 1.1, airy: 1.1,
+      dark: 0.5, slow: 0.5, serious: 0.6, minimal: 0.6, literary: 0.8 },
+    amounts: { motion: 0.75, glitch: 0.1, chroma: 0.2, ornament: 0.7, density: 0.6, texture: 0.2,
+      groundSwitch: 0.6, flash: 0.6, shake: 0.3, camera: 0.6, pace: 0.7 },
+    themes: { sodaFloat: 2, risoPink: 1.8, cicadaNoon: 1.4, tidePool: 1.2 },
+    pace: { seam: 0.6, focus: 0.5 },
+    filters: { dotScreen: 0.4, glowSpill: 0.4, flashPop: 0.5 },
+    variety: 1.1,
+    keywords: ['pop', 'bright', 'cheerful', '明るい', 'ポップ', '元気'],
+  }),
+
+  K.mood({
+    key: 'dashSprint',
+    label: { ja: '疾走', en: 'Sprint' },
+    blurb: { ja: '速い切り替えと強い動きで一気に駆け抜ける。', en: 'Fast cuts and strong motion that race ahead.' },
+    tagBias: { fast: 2, bold: 1.6, hard: 1.3, bright: 1.2, busy: 1.2, playful: 1.1, digital: 1.1,
+      slow: 0.3, minimal: 0.6, soft: 0.6, literary: 0.8, airy: 0.8 },
+    amounts: { motion: 0.9, glitch: 0.3, chroma: 0.35, ornament: 0.6, density: 0.7, texture: 0.3,
+      groundSwitch: 0.8, flash: 0.7, shake: 0.5, camera: 0.85, pace: 0.9 },
+    themes: { cicadaNoon: 1.5, sodaFloat: 1.3, emberGlow: 1.3, nightTram: 1.2, risoPink: 1.2 },
+    pace: { seam: 0.7, focus: 0.6 },
+    filters: { flashPop: 0.6, chromaSlip: 0.4, sliceGlitch: 0.3 },
+    variety: 1.1,
+    keywords: ['rock', 'fast', 'energetic', '疾走', 'アップテンポ'],
+  }),
+
+  K.mood({
+    key: 'glitchFracture',
+    label: { ja: 'ひび割れ', en: 'Fracture' },
+    blurb: { ja: '色ずれと乱れで画面がひび割れる。', en: 'Color slips and glitches that crack the frame.' },
+    tagBias: { digital: 2, hard: 1.6, fast: 1.5, dark: 1.3, busy: 1.2, bold: 1.2, retro: 1.1,
+      soft: 0.4, organic: 0.4, airy: 0.6, slow: 0.6, literary: 0.7, playful: 0.7 },
+    amounts: { motion: 0.8, glitch: 0.85, chroma: 0.8, ornament: 0.5, density: 0.6, texture: 0.5,
+      groundSwitch: 0.7, flash: 0.7, shake: 0.6, camera: 0.6, pace: 0.8 },
+    themes: { nightTram: 2, emberGlow: 1.4, tidePool: 1.2, cyanPrint: 1 },
+    pace: { seam: 0.8, focus: 0.5 },
+    filters: { chromaSlip: 0.8, sliceGlitch: 0.8, rasterLines: 0.6, invertBlink: 0.4 },
+    variety: 1.2,
+    keywords: ['electronic', 'glitch', 'edm', 'heavy', '激しい', '電子'],
+  }),
+]);
