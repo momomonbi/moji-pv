@@ -479,7 +479,7 @@ async def run(root, keep):
                 rect = rect or {'x': 0, 'y': 0, 'w': 0, 'h': 0}
 
                 # 透過PNG, chosen in step ④: the backdrop follows (透明).
-                await page.click('[data-seg="format"] [data-v="pngAlpha"]')
+                await page.select_option('[data-other="format"]', 'pngAlpha')     # その他 ▾ (DESIGN_2_1 §13.10)
                 state = await page.evaluate('() => [window.__mv.doc.output.format, window.__mv.doc.look.backdrop]')
                 checks.ok(state == ['pngAlpha', 'clear'], '透過PNG makes the backdrop 透明 (%r)' % state)
                 # the stage shows the backdrop when it next draws (a frame after the click), so wait for that draw

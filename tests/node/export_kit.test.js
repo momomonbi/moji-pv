@@ -659,12 +659,16 @@ test('exportKit into a folder: one file sink each; cancel, a missing VP9 or a st
 test('readme: the files with their labels and the guide\'s steps (only those that apply), Japanese then English', () => {
   const files = [{ name: 'a.mp4', kind: 'main' }, { name: 'a.wav', kind: 'wav' }, { name: 'README_Filmora.txt', kind: 'readme' }];
   const text = KIT.readme(files, { w: 1920, h: 1080, fps: 24 });
+  // H.3 review: the WAV has its label, comes right after the main MP4 (the MP4 has no sound then), and every file goes
+  // at 0:00; without other files there is no 「必要なときだけ」 part
   deepEqual(text.split('\r\n'), [
-    '文字PVメーカーの書き出しファイル（Filmora用）', '', '- a.mp4 : 完成動画（MP4）', '- a.wav', '',
+    '文字PVメーカーの書き出しファイル（Filmora用）', '', '- a.mp4 : 完成動画（MP4）', '- a.wav : 曲（WAV）', '',
     '1. Filmoraで新しいプロジェクトを作り、1920×1080・24fps にします。', '2. 「a.mp4」を読み込み、タイムラインの 0:00 に置きます。',
-    '3. 音が入っていないときは「a.wav」を 0:00 に置きます。', '-'.repeat(60), '',
-    'Files exported by Moji PV Maker (for Filmora)', '', '- a.mp4 : Finished video (MP4)', '- a.wav', '',
+    '3. 完成動画には音が入っていません。「a.wav」を音声トラックの 0:00 に置きます。', '',
+    'どのファイルも 0:00 にそろえて置けば、曲とぴったり合います。', '-'.repeat(60), '',
+    'Files exported by Moji PV Maker (for Filmora)', '', '- a.mp4 : Finished video (MP4)', '- a.wav : Song (WAV)', '',
     '1. Create a new Filmora project at 1920×1080, 24 fps.', '2. Import "a.mp4" and place it at 0:00 on the timeline.',
-    '3. If there is no sound, place "a.wav" at 0:00.', '']);
+    '3. The finished video has no sound: place "a.wav" on an audio track at 0:00.', '',
+    'Place every file at 0:00 and it lines up with the song exactly.', '']);
   assert.equal(KIT.KEY_COLOUR, '#00B140');
 });

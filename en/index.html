@@ -1,6 +1,6 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-2RFFxCRSACAW3hZrWIdqtQ9CCKqHF8fD9NslYBtUQp0='; style-src 'sha256-gmrSoWwvipUekLywDjXgyrJxA8IKarXht0Er4wORaLQ=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-ztmmSmsO35Netadxx4KnaP3T8RhHN0GLw8xZvR7fO+k='; style-src 'sha256-C7f+4dHVZFSrPADTL/+9MwqvHeCG8qOUP1K4ARo7x3A=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
 <title>Moji PV Maker</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -388,6 +388,47 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent);
 .exp-nums { display: flex; justify-content: space-between; font-size: 12px; color: var(--text-2); font-variant-numeric: tabular-nums; }
 .exp-done { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 16px 0; text-align: center; color: var(--ok); }
 .exp-done .exp-title { color: var(--text); }
+/* 形式 (DESIGN_2_1 §13.10): [MP4] [Filmora用] and [その他 ▾] in one segmented box; when the chosen other format's name does
+   not fit beside the pair, the select takes a row of its own (a line above it, never a doubled left edge). */
+.exp-settings .segmented.fmt-seg { flex-wrap: wrap; }
+.fmt-radios { display: flex; flex: 2 1 9em; min-width: 0; }
+.fmt-seg .seg-select { flex: 1 1 auto; min-width: 0; margin-left: -1px; border-left: 1px solid var(--line); box-shadow: 0 -1px 0 var(--line); }
+.fmt-seg .seg-select.is-on { box-shadow: 0 -1px 0 var(--line), inset 0 -2px 0 var(--accent); }
+/* keyboard focus inside a clipping segmented box stays visible (an inset ring) */
+.exp-settings .seg:focus-visible, .exp-settings .seg-select:focus-visible { outline: 2px solid var(--focus); outline-offset: -3px; }
+.exp-phase { font-size: 12.5px; color: var(--text-2); }
+/* the Filmora set's contents (詳しく) and the guide link */
+.kit-box { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; padding-top: 10px; border-top: 1px solid var(--line); }
+.kit-set { display: flex; flex-direction: column; gap: 7px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.kit-set legend { padding: 0; margin-bottom: 6px; }
+.kit-set .check-row { align-items: flex-start; font-size: 12.5px; line-height: 1.45; min-width: 0; }
+.kit-set .check-row input { flex: none; margin-top: 1px; }
+.kit-set .check-row span { min-width: 0; overflow-wrap: anywhere; }
+.kit-set .check-row.is-fixed { opacity: 0.8; }
+/* a file the set always holds or adds by itself: its name stays whole, the reason beside it wraps (the WAV's is long) */
+.kit-set .check-row.is-fixed > span:first-of-type { flex: none; }
+.kit-always { flex: 0 1 auto; font-size: 11px; }
+/* the green screen's how-to line under its checkbox, in line with the label text */
+.kit-set .kit-note { margin: -2px 0 0 24px; font-size: 11.5px; line-height: 1.5; overflow-wrap: anywhere; }
+.kit-pair { display: flex; flex-wrap: wrap; gap: 7px 18px; }
+.kit-howto { align-self: flex-start; min-height: 24px; }
+.kit-howto:hover { text-decoration: underline; }
+/* the done state's file list (cards) and the guide's (compact: name and what it is on one line, wrapping when narrow) */
+.kit-done-files, .kit-help-files { display: flex; flex-direction: column; gap: 6px; width: 100%; margin: 4px 0 0; padding: 0; list-style: none; text-align: left; }
+.kit-done-files li { display: flex; flex-direction: column; gap: 1px; min-width: 0; padding: 6px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); }
+.kit-help-files { gap: 3px; margin: 0; }
+.kit-help-files li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 10px; min-width: 0; }
+.kit-file-name { font-size: 12.5px; font-weight: 700; color: var(--text); overflow-wrap: anywhere; }
+.kit-file-meta { font-size: 11.5px; color: var(--text-2); overflow-wrap: anywhere; }
+.exp-done .kit-howto { align-self: center; }
+.kit-steps { display: flex; flex-direction: column; gap: 6px; margin: 0; padding-left: 1.5em; font-size: 13px; line-height: 1.7; color: var(--text-2); overflow-wrap: anywhere; }
+.kit-key { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 12.5px; color: var(--text-2); }
+.kit-align { margin: 0; font-size: 12.5px; line-height: 1.6; }
+/* 「必要なときだけ」: the other files' uses, each saying when (bullets, not steps) */
+.kit-extras { display: flex; flex-direction: column; gap: 6px; margin: 0; padding-left: 1.3em; font-size: 13px; line-height: 1.7;
+  color: var(--text-2); overflow-wrap: anywhere; list-style: disc; }
+.kit-extras .kit-key { margin-top: 4px; }
+.kit-key-chip { flex: none; width: 18px; height: 18px; border-radius: 4px; background: #00b140; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35); }
 
 /* tap */
 .step-tap .tap-count { font: 700 13px var(--mono); color: var(--gold); }
@@ -11740,17 +11781,17 @@ MV.def('i18n/strings', [], () => ({
     'Press Shift+I (in) and Shift+O (out) at the playhead to set a range'],
   'exp.rangeBad': ['範囲の開始が終わりより後になっています', 'The range starts after it ends'],
   'exp.noLines': ['歌詞を入れると書き出せます', 'Add lyrics to export'],
-  'exp.pre.no-webcodecs': ['このブラウザでは MP4 を書き出せません。PC の Chrome か Edge を使ってください。PNG 連番は使えます。',
-    'This browser cannot export MP4. Use Chrome or Edge on a computer. PNG sequences still work.'],
+  'exp.pre.no-webcodecs': ['このブラウザでは{format}を書き出せません。PC の Chrome か Edge を使ってください。',
+    'This browser cannot export {format}. Use Chrome or Edge on a computer.'],
   'exp.pre.no-codec': ['このパソコンでは {w}×{h}・{fps}fps の MP4 を作れません。大きさかなめらかさを下げてください。',
     'This computer cannot make an MP4 at {w}×{h}, {fps} fps. Choose a smaller size or frame rate.'],
   'exp.pre.no-h264': ['このブラウザは MP4（H.264）を書き出せません。PNG連番で書き出すか、PC の Chrome か Edge で開いてください。',
     'This browser cannot encode MP4 (H.264). Export a PNG sequence, or open the app in Chrome or Edge on a computer.'],
-  'exp.pre.no-audio-codec': ['このブラウザでは MP4 に音声を入れられません。音なしで書き出します。',
-    'This browser cannot add sound to an MP4. The video is exported without sound.'],
+  'exp.pre.no-audio-codec': ['このブラウザでは{format}に音声を入れられません。音なしで書き出します。',
+    'This browser cannot add sound to {format}. The video is exported without sound.'],
   'exp.pre.song-missing': ['曲がつながっていないため、音なしで書き出します: {name}', 'The song is not loaded, so the video has no sound: {name}'],
-  'exp.pre.clear-mp4': ['MP4 は透明にできないため、通常の背景で書き出します。透明にするには透過PNGを選んでください。',
-    'An MP4 cannot be transparent, so it gets the normal background. Choose transparent PNG for transparency.'],
+  'exp.pre.clear-mp4': ['MP4 は透明にできないため、通常の背景で書き出します。透明にするには透過動画（WebM）を選んでください。',
+    'An MP4 cannot be transparent, so it gets the normal background. Choose transparent video (WebM) for transparency.'],
   'exp.pre.fonts-loading': ['書体を読み込み中です。読み込みが終わってから書き出します。', 'Typefaces are still loading. The export starts once they are ready.'],
   'exp.pre.memory': ['ファイルに直接書けないため、メモリ上で作ります（約 {size}）。',
     'The file cannot be written directly, so it is built in memory (about {size}).'],
@@ -12676,12 +12717,10 @@ MV.def('i18n/strings', [], () => ({
 
   // step ④ pre-flight items of the UI (ui/output.checks) and their fixes
   'exp.pre.fx-skipped': ['背景「{bg}」では次の画面効果は書き出されません: {list}', 'With the background "{bg}", these screen effects are left out: {list}'],
-  'exp.pre.alpha-backdrop': ['透過PNGは背景を描かずに書き出します（背景の種類は「{bg}」）。',
-    'PNG alpha is exported without a background (the background mode is "{bg}").'],
+  'exp.pre.alpha-backdrop': ['{format}は背景を描かずに書き出します（背景の種類は「{bg}」）。',
+    '{format} is exported without a background (the background mode is "{bg}").'],
   'exp.pre.clear-png': ['PNG連番は透明にならないため、通常の背景で書き出します。透明にするには透過PNGを選んでください。',
     'A PNG sequence is not transparent, so it gets the normal background. Choose PNG alpha for transparency.'],
-  'exp.alphaNote': ['透明な動画はまだブラウザで作れません。透過PNGか、動画アプリ用はグリーンバックで。',
-    'Browsers cannot make a transparent video yet: use PNG alpha, or Green screen for video apps.'],
   'exp.pre.makeAlpha': ['透過PNGにする', 'Use PNG alpha'],
   'exp.pre.makePng': ['PNG連番にする', 'Use PNG sequence'],
   'exp.pre.makeClear': ['背景を透明にする', 'Make it transparent'],
@@ -13274,16 +13313,17 @@ MV.def('i18n/strings', [], () => ({
   'exp.kit.summary': ['Filmora用セット: {n}ファイル・約 {size}（{where}）', 'Set for Filmora: {n} files, about {size} ({where})'],
   'exp.kit.toFolder': ['フォルダに保存', 'saved to a folder'],
   'exp.kit.toZip': ['ZIPでダウンロード', 'downloaded as a ZIP'],
-  'exp.kit.phase': ['{what} を書き出し中', 'Writing {what}'],
+  'exp.kit.phase': ['{what}を書き出し中', 'Writing {what}'],
   'exp.kit.done': ['{n}ファイルを書き出しました: {folder}', 'Wrote {n} files: {folder}'],
   'exp.kit.howTo': ['Filmoraで使うには', 'How to use in Filmora'],
   'exp.pre.opus-audio': ['このブラウザでは AAC で書き出せないため、音声は Opus で入ります。ブラウザ・YouTube・VLC では再生できます。編集ソフト（Filmora など）で音が出ないときは「Filmora用」で書き出してください。',
     'This browser cannot write AAC, so the sound is Opus. Browsers, YouTube and VLC play it. If an editor (such as Filmora) has no sound, export with "For Filmora".'],
-  'exp.pre.kit-wav': ['このブラウザでは AAC が使えないため、曲は別のファイル（{name}.wav）になります。Filmoraでは 0:00 に置いてください。',
-    'This browser cannot write AAC, so the song is a separate file ({name}.wav). Place it at 0:00 in Filmora.'],
+  'exp.pre.kit-wav': ['このブラウザでは動画に曲を入れられないため、曲は別のファイル（{name}.wav）になります。Filmoraでは 0:00 に置いてください。',
+    'This browser cannot put the song into the video, so the song is a separate file ({name}.wav). Place it at 0:00 in Filmora.'],
   'exp.pre.kit-fps': ['Filmoraのプロジェクトも {fps}fps・{w}×{h} にしてください', 'Set the Filmora project to {fps} fps, {w}×{h} too'],
   'exp.pre.kit-size': ['Filmoraでは 1080p か 4K が扱いやすいです', '1080p or 4K is easiest in Filmora'],
-  'exp.pre.layers-approx': ['重ねたとき、{what} は少し違って見えます', 'When layered, {what} look slightly different'],
+  'exp.pre.layers-approx': ['「背景だけ」に「文字と装飾だけ」を重ねると、{what}は完成動画と少し違って見えます',
+    'When "Words and decorations only" is laid over "Background only", these look slightly different from the finished video: {what}'],
   'exp.pre.no-vp9': ['このブラウザは透過動画（VP9）を書き出せません。PC の Chrome か Edge を使ってください',
     'This browser cannot write transparent video (VP9). Use Chrome or Edge on a computer'],
   'exp.pre.kit-memory': ['このブラウザではセットをメモリで作ってから ZIP で保存します（約 {size}）',
@@ -13293,14 +13333,66 @@ MV.def('i18n/strings', [], () => ({
   'kit.help.title': ['Filmoraで使うには', 'Using the files in Filmora'],
   'kit.help.1': ['Filmoraで新しいプロジェクトを作り、{w}×{h}・{fps}fps にします。', 'Create a new Filmora project at {w}×{h}, {fps} fps.'],
   'kit.help.2': ['「{main}」を読み込み、タイムラインの 0:00 に置きます。', 'Import "{main}" and place it at 0:00 on the timeline.'],
-  'kit.help.3': ['自分の映像に文字だけ重ねるときは、「{overlay}」を上のトラックの 0:00 に置きます（透過WebM）。',
-    'To put only the words over your own footage, place "{overlay}" on an upper track at 0:00 (transparent WebM).'],
-  'kit.help.4': ['グリーンバックのときは「{green}」を上のトラックに置き、クロマキーで色 #00B140 を選びます。',
-    'For the green screen, place "{green}" on an upper track and pick #00B140 with the chroma key.'],
-  'kit.help.5': ['字幕は「{srt}」を読み込みます。', 'For subtitles, import "{srt}".'],
-  'kit.help.6': ['音が入っていないときは「{wav}」を 0:00 に置きます。', 'If there is no sound, place "{wav}" at 0:00.'],
+  'kit.help.3': ['完成動画の代わりに自分の映像の上へ文字だけを重ねるときは、「{overlay}」を上のトラックの 0:00 に置きます（透過WebM）。',
+    'To put only the words over your own footage instead of the finished video, place "{overlay}" on an upper track at 0:00 (transparent WebM).'],
+  'kit.help.4': ['グリーンバックで重ねるときは、「{green}」を上のトラックの 0:00 に置き、クロマキー（緑幕）をオンにして色 #00B140 を選び、許容範囲を少し上げます。',
+    'To key out the green screen, place "{green}" on an upper track at 0:00, turn on Chroma Key (green screen), pick #00B140 and raise the tolerance a little.'],
+  'kit.help.5': ['歌詞を字幕として別に出したいときだけ、「{srt}」を読み込みます（完成動画には歌詞がもう入っています）。',
+    'Only if you want the lyrics as separate subtitles, import "{srt}" (the finished video already shows them).'],
+  'kit.help.6': ['完成動画には音が入っていません。「{wav}」を音声トラックの 0:00 に置きます。',
+    'The finished video has no sound: place "{wav}" on an audio track at 0:00.'],
   'kit.readme.head': ['文字PVメーカーの書き出しファイル（Filmora用）', 'Files exported by Moji PV Maker (for Filmora)'],
   'menu.saveSrt': ['字幕（.srt）を保存', 'Save subtitles (.srt)'],
+
+  // v2.1 editor-ready output: the step ④ words of package H.3 not in §13.10 (NOTES "## v2.1-H.2" strings wanted, and
+  // the ones the screens needed)
+  'cmd.file.saveSrt': ['字幕（.srt）を保存', 'Save subtitles (.srt)'],
+  'exp.kit.wav': ['曲（WAV）', 'Song (WAV)'],
+  'exp.kit.readme': ['使い方（README）', 'How to use (README)'],
+  'exp.kit.what.video': ['動画', 'the videos'],
+  'exp.kit.what.files': ['曲・字幕・説明', 'the song, subtitles and notes'],
+  'exp.kit.what.zip': ['ZIP', 'the ZIP'],
+  'exp.pre.layers.seams': ['場面の切り替わり（{n}か所）', 'scene changes ({n})'],
+  'kit.help.bg': ['背景だけを使うときは、「{bg}」を下のトラックの 0:00 に置き、その上に自分の文字や映像を重ねます。',
+    'To use the background only, place "{bg}" on a lower track at 0:00 and put your own titles or footage above it.'],
+  'exp.fmt.otherLabel': ['その他の形式', 'Other formats'],
+  'exp.bg.clearWebm': ['透明（透過動画）', 'Transparent (video)'],
+  'exp.moreKit': ['詳しく（範囲・画質・音声・ファイル名・セットの中身）', 'More (range, quality, audio, file name, files in the set)'],
+  'exp.pre.makeWebm': ['透過動画にする', 'Use transparent video'],
+  'exp.pre.noOverlay': ['「文字と装飾だけ」を入れない', 'Leave out "Words and decorations only"'],
+  'exp.kit.always': ['いつも入ります', 'always included'],
+  'exp.kit.files': ['書き出したファイル', 'Exported files'],
+  'exp.kit.metaSep': ['・', ' · '],
+  'kit.help.before': ['書き出すと、次のファイルができます。', 'Exporting makes these files.'],
+  'kit.help.folder': ['ファイルはフォルダ「{folder}」に入っています。', 'The files are in the folder "{folder}".'],
+  'kit.help.zip': ['「{zip}」を展開してから（右クリック →「すべて展開」など）、中のファイルを使います。',
+    'Extract "{zip}" first (for example, right-click → Extract All), then use the files inside.'],
+  'kit.help.filesTitle': ['ファイル', 'Files'],
+  'kit.help.stepsTitle': ['手順', 'Steps'],
+  'kit.help.keyColour': ['キー色', 'Key color'],
+  'kit.help.same': ['同じ手順は「README_Filmora.txt」にも書いてあります。', 'The same steps are in "README_Filmora.txt".'],
+  // the review of H.3 (NOTES "## v2.1-H.3", Review fixes): the words that name the chosen format, the set's always-included
+  // files, where the set goes, the guide's optional part and the green screen's how-to line (DESIGN_2_1 §13.6)
+  'exp.fmtIn.mp4': ['MP4', 'MP4'],
+  'exp.fmtIn.kit': ['Filmora用セット', 'the set for Filmora'],
+  'exp.fmtIn.webmAlpha': ['透過動画（WebM）', 'transparent video (WebM)'],
+  'exp.fmtIn.png': ['PNG連番', 'a PNG sequence'],
+  'exp.fmtIn.pngAlpha': ['透過PNG', 'PNG alpha'],
+  'exp.pre.kit-no-h264': ['このブラウザでは Filmora用の MP4（H.264）を作れません。PC の Chrome か Edge で開いてください。',
+    'This browser cannot make the MP4s (H.264) of the set for Filmora. Open the app in Chrome or Edge on a computer.'],
+  'exp.chromaNote': ['Filmoraでは上のトラックに置き、クロマキー（緑幕）をオンにして色 #00B140 を選び、許容範囲を少し上げます。',
+    'In Filmora, put it on an upper track, turn on Chroma Key (green screen), pick #00B140 and raise the tolerance a little.'],
+  'exp.kit.wavWhy': ['このブラウザでは曲が別のファイルになります', 'this browser writes the song as its own file'],
+  'exp.kit.folderHint': ['書き出すときに選んだフォルダの中に「{folder}」を作り、そこにファイルを入れます。',
+    'When you export, pick a folder: "{folder}" is made inside it for the files.'],
+  'exp.kit.doneIn': ['選んだフォルダ「{parent}」の中の「{folder}」に{n}ファイルを書き出しました',
+    'Wrote {n} files to "{folder}" inside "{parent}", the folder you picked'],
+  'exp.kit.running': ['{phase}・{progress}', '{phase} · {progress}'],
+  'kit.help.folderIn': ['ファイルは、選んだフォルダ「{parent}」の中のフォルダ「{folder}」に入っています。',
+    'The files are in the folder "{folder}" inside "{parent}", the folder you picked.'],
+  'kit.help.align': ['どのファイルも 0:00 にそろえて置けば、曲とぴったり合います。', 'Place every file at 0:00 and it lines up with the song exactly.'],
+  'kit.help.optional': ['必要なときだけ', 'Only when you need them'],
+  'exp.checks': ['書き出す前の確認', 'Before exporting'],
 
   // v2.1 photos and videos: the words of the G.4 screens (§11.7) not in §11.7.11
   'cmd.file.saveLight': ['軽い保存（画像・動画・曲なし）…', 'Light save (without images, videos or song)…'],
@@ -48359,8 +48451,9 @@ MV.def('export/host/sink', ['export/schedule'], (S) => {
 
   // --- folders (the Filmora kit, DESIGN_2_1 §13.9) --------------------------------------------------------------
 
-  // createDirSink(dirHandle, { parent?, name? }) → DirSink = { kind: 'dir', name, file(name) → Promise<Sink>, files,
-  // close() → { files: [{ name, bytes }] }, abort() }. Each file(name) creates the file in the folder and returns its
+  // createDirSink(dirHandle, { parent?, name? }) → DirSink = { kind: 'dir', name, parentName, file(name) → Promise<Sink>,
+  // files, close() → { files: [{ name, bytes }] }, abort() }. parentName: the name of the folder it was made in (the one
+  // the user picked; null when not known or empty). Each file(name) creates the file in the folder and returns its
   // file sink (createFileSink); a name is used once. close() closes the sinks still open and lists every file written, in
   // order. abort() aborts every file sink (each removes its file) and then removes the folder itself when its parent is
   // known (removeEntry(name, { recursive: true })), else every file it created, so a cancelled kit leaves nothing.
@@ -48374,6 +48467,7 @@ MV.def('export/host/sink', ['export/schedule'], (S) => {
     return {
       kind: 'dir',
       get name() { return o.name || dir.name; },
+      get parentName() { return (o.parent && o.parent.name) || null; },
       get files() { return entries.map((e) => ({ name: e.name, bytes: e.sink.bytes })); },
       async file(name) {
         check();
@@ -48702,34 +48796,57 @@ MV.def('export/host/kit', ['export/schedule', 'export/subtitles', 'export/zip', 
   const CRC_SLICE = 8 * 1024 * 1024;    // bytes of a memory file read per step for the ZIP's CRC-32
   const CRLF = '\r\n';
   const RULE = '-'.repeat(60);
-  // The label of each file in the README (the step ④ strings of §13.10); the WAV and the README have none.
+  // The label of each file in the README (the step ④ strings of §13.10); the README does not list itself.
   const LABELS = Object.freeze({ main: 'exp.kit.main', overlay: 'exp.kit.overlay', bg: 'exp.kit.bg', green: 'exp.kit.green',
-    srt: 'exp.kit.srt', lrc: 'exp.kit.lrc' });
+    srt: 'exp.kit.srt', lrc: 'exp.kit.lrc', wav: 'exp.kit.wav' });
   const TYPES = Object.freeze({ main: 'video/mp4', overlay: 'video/webm', bg: 'video/mp4', green: 'video/mp4', srt: 'text/plain',
     lrc: 'text/plain', wav: 'audio/wav', readme: 'text/plain' });
 
   // --- the README (pure) ---------------------------------------------------------------------------------------------
 
+  function nameOf(files, kind) { const f = files.find((x) => x.kind === kind); return f ? f.name : null; }
+
+  // steps(t, files, { w, h, fps }) → the numbered steps everyone follows (texts, in t's language): the project settings,
+  // the main MP4 at 0:00 and — when the song is a WAV file because the MP4 has no sound — the WAV right after it, each
+  // with its real name. The README and the in-app guide (ui/filmora_help) both use it.
+  function steps(t, files, info) {
+    const out = [t('kit.help.1', { w: info.w, h: info.h, fps: info.fps }), t('kit.help.2', { main: nameOf(files, 'main') })];
+    if (nameOf(files, 'wav')) out.push(t('kit.help.6', { wav: nameOf(files, 'wav') }));
+    return out;
+  }
+
+  // extras(t, files) → [{ kind, text }]: the other files' uses, only for when they are needed and each saying when —
+  // instead of the finished video (the overlay, the background, the green screen with its key colour #00B140), or the
+  // lyrics as separate subtitles (the finished video already shows them) — so following the numbered steps never puts
+  // the same words on screen twice. Listed under 「必要なときだけ」 by the README and the guide.
+  function extras(t, files) {
+    const out = [];
+    const add = (kind, key, param) => { if (nameOf(files, kind)) out.push({ kind, text: t(key, { [param]: nameOf(files, kind) }) }); };
+    add('overlay', 'kit.help.3', 'overlay');
+    add('bg', 'kit.help.bg', 'bg');
+    add('green', 'kit.help.4', 'green');
+    add('srt', 'kit.help.5', 'srt');
+    return out;
+  }
+
   function readmeIn(t, files, info) {
-    const name = (kind) => { const f = files.find((x) => x.kind === kind); return f ? f.name : null; };
     const lines = [t('kit.readme.head'), ''];
     for (const f of files) {
       if (f.kind === 'readme') continue;
       lines.push('- ' + f.name + (LABELS[f.kind] ? ' : ' + t(LABELS[f.kind]) : ''));
     }
     lines.push('');
-    const steps = [t('kit.help.1', { w: info.w, h: info.h, fps: info.fps }), t('kit.help.2', { main: name('main') })];
-    if (name('overlay')) steps.push(t('kit.help.3', { overlay: name('overlay') }));
-    if (name('green')) steps.push(t('kit.help.4', { green: name('green') }));
-    if (name('srt')) steps.push(t('kit.help.5', { srt: name('srt') }));
-    if (name('wav')) steps.push(t('kit.help.6', { wav: name('wav') }));
-    steps.forEach((s, k) => lines.push(k + 1 + '. ' + s));
+    steps(t, files, info).forEach((s, k) => lines.push(k + 1 + '. ' + s));
+    lines.push('', t('kit.help.align'));
+    const more = extras(t, files);
+    if (more.length) lines.push('', t('kit.help.optional'), ...more.map((x) => '- ' + x.text));
     return lines;
   }
 
-  // readme(files, { w, h, fps }) → README_Filmora.txt: the heading, every file with its label, and the numbered steps
-  // of the in-app guide (kit.help.*) with the real names, size and frame rate (the key colour #00B140 is in the green
-  // screen's step) — in Japanese, then in English. CRLF line endings; the caller adds the BOM.
+  // readme(files, { w, h, fps }) → README_Filmora.txt: the heading, every file with its label, the numbered steps of the
+  // in-app guide (kit.help.*) with the real names, size and frame rate, the 0:00 line, then 「必要なときだけ」 and the
+  // other files' uses (the key colour #00B140 is in the green screen's) — in Japanese, then in English. CRLF line
+  // endings; the caller adds the BOM.
   function readme(files, info) {
     const ja = readmeIn(T.createT('ja', STRINGS), files, info);
     const en = readmeIn(T.createT('en', STRINGS), files, info);
@@ -48948,7 +49065,7 @@ MV.def('export/host/kit', ['export/schedule', 'export/subtitles', 'export/zip', 
     }
   }
 
-  return { exportKit, readme, KEY_COLOUR };
+  return { exportKit, readme, steps, extras, KEY_COLOUR };
 });
 /* 文字PVメーカー v2 — original work. Baked blur of video and animation frames: a small blurred copy made once per source frame, off the draw call (DESIGN_2_1 §11.4.6). */
 MV.def('media/host/bake', ['media/yuv'], (YUV) => {
@@ -54226,8 +54343,8 @@ MV.def('ui/media_widgets', ['ui/dom', 'ui/icons', 'i18n/t', 'core/media'], (dom,
   return { VIDEO_PARAMS, PCT_PARAMS, mediaOf, sourcesOf, timedIn, mediaRows, shownId, paramSpec, stepFrame, rangeOf, shortBadges, posterInto,
     drawPoster, media, crop, trim };
 });
-/* 文字PVメーカー v2 — original work. Menus: the ≡ menu, field ⋯ menus and context menus; transient popovers (DESIGN §6.4.12). */
-MV.def('ui/menus', ['ui/dom', 'ui/icons', 'ui/keys'], (dom, I, K) => {
+/* 文字PVメーカー v2 — original work. Menus: the ≡ menu, field ⋯ menus and context menus; transient popovers (DESIGN §6.4.12; DESIGN_2_1 §12.7, §13.8). */
+MV.def('ui/menus', ['ui/dom', 'ui/icons', 'ui/keys', 'export/subtitles', 'export/schedule'], (dom, I, K, SUB, S) => {
   'use strict';
 
   const { h } = dom;
@@ -54350,7 +54467,7 @@ MV.def('ui/menus', ['ui/dom', 'ui/icons', 'ui/keys'], (dom, I, K) => {
       checked: app.view.state.prefs.quality === q, run: () => app.actions.run('view.quality', { q }) }));
     return [
       // ≡ › ファイル (DESIGN_2_1 §12.7): 保存 writes the one file with everything (.mojipv), 軽い保存 the .json without
-      // pictures, videos or the song; 字幕（.srt）appears once its action exists (package H).
+      // pictures, videos or the song; 時間つき歌詞（.lrc）and 字幕（.srt）(§13.8) save the lyric timing.
       { heading: t('menu.file') }, a('file.new'), a('file.open'), a('file.save'), a('file.saveAs'), a('file.saveLight'),
       a('media.import'), { label: t('menu.recent'), sub: () => recentItems(app) }, a('file.saveLrc'), a('file.saveSrt'),
       a('lyrics.bakeTimes'),
@@ -54393,6 +54510,15 @@ MV.def('ui/menus', ['ui/dom', 'ui/icons', 'ui/keys'], (dom, I, K) => {
     return true;
   }
 
+  // 字幕（.srt）を保存 (DESIGN_2_1 §13.8): one cue per sung line of the whole video (export/subtitles.srt), UTF-8 with a BOM
+  // and CRLF line endings — the form Filmora and most editors read — named like the video ('<name>.srt',
+  // export/schedule.kitBase), through the save dialog where the browser has one, else a download.
+  function saveSrt(app) {
+    const plan = app.plan;
+    if (!plan || !plan.lines.length || !app.io || !app.io.saveText) return null;
+    return app.io.saveText(SUB.BOM + SUB.srt(plan), S.kitBase(app.doc) + '.srt', 'text/plain');
+  }
+
   // この端末に保存した作品と曲を消す: asks first (what goes, that the open work closes, that it cannot be undone), then
   // clears the autosaved works, the stored songs and the AI keys (ui/project_io.clearDevice). → Promise<boolean>
   async function clearDevice(app) {
@@ -54415,6 +54541,7 @@ MV.def('ui/menus', ['ui/dom', 'ui/icons', 'ui/keys'], (dom, I, K) => {
     def('view.quality', (c, a) => view.setPref('quality', a && a.q ? a.q : 'auto'), { checked: () => view.state.prefs.quality !== 'auto' });
     def('view.foldSteps', () => view.setRail(!view.state.rail), { checked: () => view.state.rail });
     def('lyrics.bakeTimes', () => bakeTimes(app), { enabled: () => !!(app.plan && app.plan.lines.length && MV.has('core/lyrics')) });
+    def('file.saveSrt', () => { saveSrt(app); }, { enabled: () => !!(app.plan && app.plan.lines.length && app.io && app.io.saveText) });
     def('edit.history', () => {
       const anchor = document.querySelector('[data-act="edit.undo"]');
       if (app.shell && anchor) app.shell.header.openHistory(anchor);
@@ -54446,48 +54573,85 @@ MV.def('ui/menus', ['ui/dom', 'ui/icons', 'ui/keys'], (dom, I, K) => {
       openMain: (at) => open(app, at, mainItems(app)),
       context: (ev, items) => open(app, { x: ev.clientX, y: ev.clientY }, items),
       bakeTimes: () => bakeTimes(app),
+      saveSrt: () => saveSrt(app),
     };
   }
 
-  return { mount, popover, bakeTimes };
+  return { mount, popover, bakeTimes, saveSrt };
 });
-/* 文字PVメーカー v2 — original work. Output rules shared by step ④, the stage and the inspector: format ↔ backdrop, filters per backdrop, UI pre-flight items (DESIGN §3.2, §4.19.4, §4.21, §6.4.3). */
+/* 文字PVメーカー v2 — original work. Output rules shared by step ④, the stage and the inspector: format ↔ backdrop, filters per backdrop, UI pre-flight items, the summary line and the Filmora set's contents (DESIGN §3.2, §4.19.4, §4.21, §6.4.3; DESIGN_2_1 §13.3, §13.10). */
 MV.def('ui/output', ['export/schedule', 'engine/scene/frame'], (S, F) => {
   'use strict';
 
-  const FORMATS = Object.freeze(['mp4', 'png', 'pngAlpha']);
+  // The formats in the order of core/doc OUTPUT_CHOICES.format. Step ④'s 形式 shows MAIN_FORMATS as a segmented pair
+  // and OTHER_FORMATS in its その他 ▾ select (DESIGN_2_1 §13.10).
+  const FORMATS = Object.freeze(['mp4', 'kit', 'webmAlpha', 'png', 'pngAlpha']);
+  const MAIN_FORMATS = Object.freeze(['mp4', 'kit']);
+  const OTHER_FORMATS = Object.freeze(['webmAlpha', 'png', 'pngAlpha']);
   const BACKDROPS = Object.freeze(['scene', 'chroma', 'black', 'clear']);
+  // The Filmora set's optional files, in the order of its contents list (core/doc KIT_KEYS); the main MP4 is always in.
+  const KIT_KEYS = Object.freeze(['overlay', 'bg', 'green', 'srt', 'lrc']);
+  // The name of every file the set can hold, by export/schedule.kitFiles kind.
+  const KIT_LABELS = Object.freeze({ main: 'exp.kit.main', overlay: 'exp.kit.overlay', bg: 'exp.kit.bg', green: 'exp.kit.green',
+    srt: 'exp.kit.srt', lrc: 'exp.kit.lrc', wav: 'exp.kit.wav', readme: 'exp.kit.readme' });
 
-  // Transparency exists only as the transparent PNG sequence (SPEC §6 "transparent (PNG export)", §7; DESIGN §3.2
-  // `clear` "PNG export only"), so the pair is kept consistent: format 透過PNG ⇔ backdrop 透明. Each helper returns the
-  // commands of one user choice (the caller dispatches them as one undo entry).
+  // Whether a format writes transparent frames (透過動画（WebM）, 透過PNG; export/schedule FORMATS).
+  function isAlpha(format) { return !!(S.FORMATS[format] && S.FORMATS[format].alpha); }
 
-  // formatCmds(doc, format) → commands: 透過PNG makes the backdrop 透明; MP4 or PNG連番 turns 透明 back to 通常.
+  // A transparent format and the backdrop 透明 go together (DESIGN_2_1 §13.3), so the pair is kept consistent. Each
+  // helper returns the commands of one user choice (the caller dispatches them as one undo entry).
+
+  // formatCmds(doc, format) → commands: 透過動画 or 透過PNG makes the backdrop 透明; MP4, Filmora用 or PNG連番 turn 透明
+  // back to 通常 (the Filmora set renders the document's backdrop and is never transparent as a whole).
   function formatCmds(doc, format) {
     const cmds = [];
     if (doc.output.format !== format) cmds.push({ t: 'output.set', key: 'format', v: format });
     const backdrop = doc.look.backdrop;
-    if (format === 'pngAlpha' && backdrop !== 'clear') cmds.push({ t: 'look.set', key: 'backdrop', v: 'clear' });
-    if (format !== 'pngAlpha' && backdrop === 'clear') cmds.push({ t: 'look.set', key: 'backdrop', v: 'scene' });
+    if (isAlpha(format) && backdrop !== 'clear') cmds.push({ t: 'look.set', key: 'backdrop', v: 'clear' });
+    if (!isAlpha(format) && backdrop === 'clear') cmds.push({ t: 'look.set', key: 'backdrop', v: 'scene' });
     return cmds;
   }
 
-  // backdropCmds(doc, backdrop) → commands: 透明 makes the output 透過PNG; another backdrop while 透過PNG keeps a PNG
-  // sequence, now opaque, so the frames show the chosen background.
+  // transparentOf(format) → the format the backdrop 透明 leads to: 透過PNG from a PNG sequence (frames stay frames, as the
+  // way back gives PNG連番 again), else 透過動画（WebM）, the primary transparent path (from MP4 and Filmora用).
+  function transparentOf(format) { return format === 'png' || format === 'pngAlpha' ? 'pngAlpha' : 'webmAlpha'; }
+
+  // opaqueOf(format) → the format another backdrop leads to from a transparent one: 透過動画 → MP4, 透過PNG → PNG連番.
+  function opaqueOf(format) { return format === 'pngAlpha' ? 'png' : format === 'webmAlpha' ? 'mp4' : format; }
+
+  // backdropCmds(doc, backdrop) → commands: 透明 makes the output transparent (transparentOf); another backdrop while the
+  // output is transparent makes it opaque (opaqueOf), so the file shows the chosen background.
   function backdropCmds(doc, backdrop) {
     const cmds = [];
     if (doc.look.backdrop !== backdrop) cmds.push({ t: 'look.set', key: 'backdrop', v: backdrop });
     const format = doc.output.format;
-    if (backdrop === 'clear' && format !== 'pngAlpha') cmds.push({ t: 'output.set', key: 'format', v: 'pngAlpha' });
-    if (backdrop !== 'clear' && format === 'pngAlpha') cmds.push({ t: 'output.set', key: 'format', v: 'png' });
+    if (backdrop === 'clear' && !isAlpha(format)) cmds.push({ t: 'output.set', key: 'format', v: transparentOf(format) });
+    if (backdrop !== 'clear' && isAlpha(format)) cmds.push({ t: 'output.set', key: 'format', v: opaqueOf(format) });
     return cmds;
+  }
+
+  // clearLabel(format) → the key that names the backdrop 透明 in step ④'s list: what choosing it makes of this format.
+  function clearLabel(format) { return transparentOf(format) === 'pngAlpha' ? 'exp.bg.clearPng' : 'exp.bg.clearWebm'; }
+
+  // backdropChoices(format, backdrop) → the backdrops step ④'s 背景 list offers. Filmora用 leaves 透明 out: choosing it
+  // would turn the set into 透過動画 and another backdrop then into MP4, so exploring the list lost the set (the set has
+  // its own transparent file, 「文字と装飾だけ」 in 詳しく). A document that is already 透明 keeps it listed.
+  function backdropChoices(format, backdrop) {
+    return format === 'kit' && backdrop !== 'clear' ? BACKDROPS.filter((b) => b !== 'clear') : BACKDROPS.slice();
+  }
+
+  // backdropNote(doc) → the note under 背景: the green screen's how-to line (DESIGN_2_1 §13.6) when the file is green,
+  // else the transparency advice (exp.alphaNote2, §13.10) — not for Filmora用, whose set has its own transparent video.
+  function backdropNote(doc) {
+    if (effectiveBackdrop(doc) === 'chroma') return 'exp.chromaNote';
+    return doc.output.format === 'kit' ? null : 'exp.alphaNote2';
   }
 
   // The backdrop the export renders (export/schedule.backdropFor); the preview renders the same one.
   function effectiveBackdrop(doc) { return S.backdropFor(doc.output.format, doc.look.backdrop); }
 
   // Whether the document's format and backdrop agree (a file saved before the pair was coupled may not).
-  function consistent(doc) { return (doc.output.format === 'pngAlpha') === (doc.look.backdrop === 'clear'); }
+  function consistent(doc) { return isAlpha(doc.output.format) === (doc.look.backdrop === 'clear'); }
 
   // skipOf(registry, key, backdrop) → null when the filter runs under the backdrop, else that backdrop (§4.19.4).
   function skipOf(registry, key, backdrop) {
@@ -54521,15 +54685,16 @@ MV.def('ui/output', ['export/schedule', 'engine/scene/frame'], (S, F) => {
 
   // checks(doc, plan, registry) → the UI's own pre-flight items (export/schedule.preflight has the rest):
   //   fx-skipped (info)      the effective backdrop leaves out screen effects the video uses (params.keys)
-  //   alpha-backdrop (warn)  透過PNG with a backdrop other than 透明: the export clears it anyway   (fix: backdrop 透明)
+  //   alpha-backdrop (warn)  透過動画 or 透過PNG with a backdrop other than 透明: the export clears it anyway
+  //                          (params.format; fix: backdrop 透明)
   //   clear-png (warn)       PNG連番 with 透明: the frames get the normal background              (fix: format 透過PNG)
   // A fix is a list of commands, dispatched as one undo entry.
   function checks(doc, plan, registry) {
     const out = [];
     const format = doc.output.format;
     const backdrop = doc.look.backdrop;
-    if (format === 'pngAlpha' && backdrop !== 'clear') {
-      out.push({ code: 'alpha-backdrop', level: 'warn', params: { bg: backdrop }, fix: backdropCmds(doc, 'clear') });
+    if (isAlpha(format) && backdrop !== 'clear') {
+      out.push({ code: 'alpha-backdrop', level: 'warn', params: { bg: backdrop, format }, fix: backdropCmds(doc, 'clear') });
     }
     if (format === 'png' && backdrop === 'clear') out.push({ code: 'clear-png', level: 'warn', params: {}, fix: formatCmds(doc, 'pngAlpha') });
     const effective = effectiveBackdrop(doc);
@@ -54540,16 +54705,121 @@ MV.def('ui/output', ['export/schedule', 'engine/scene/frame'], (S, F) => {
     return out;
   }
 
-  // withFixes(items, doc) → pre-flight items where the schedule's `clear-mp4` gets its fix (switch to 透過PNG), an MP4 this
-  // browser cannot encode at all (`no-webcodecs`, `no-h264`) offers PNG連番, and every `fix` is a command list.
+  // kitCmd(doc, key, on) → the command that puts one optional file into the Filmora set or leaves it out (output.set kit
+  // takes the whole object, DESIGN_2_1 §13.3).
+  function kitCmd(doc, key, on) {
+    return { t: 'output.set', key: 'kit', v: Object.assign(S.kitOptions(doc.output), { [key]: !!on }) };
+  }
+
+  // The items whose text names the chosen format (params.format: 「このブラウザでは{format}を書き出せません」).
+  const NAMES_FORMAT = new Set(['no-webcodecs', 'no-h264', 'no-audio-codec']);
+
+  // withFixes(items, doc) → pre-flight items where the schedule's `clear-mp4` gets its fix (switch to 透過動画); a video
+  // this browser cannot encode at all (`no-webcodecs`, `no-h264`) offers frames instead — 透過PNG for 透過動画 (it stays
+  // transparent), PNG連番 for MP4 — and nothing for the Filmora set (a PNG sequence is no way into Filmora, R3: the text
+  // alone sends the user to Chrome or Edge); a transparent video it cannot encode (`no-vp9`) offers 透過PNG — in the
+  // Filmora set, leaving the transparent video out (params.kit). The items that name the format get params.format.
+  // Every `fix` is a command list.
   function withFixes(items, doc) {
+    const format = doc.output.format;
     return items.map((c) => {
-      if (c.code === 'clear-mp4' && !c.fix) return Object.assign({}, c, { fix: formatCmds(doc, 'pngAlpha') });
-      if ((c.code === 'no-webcodecs' || c.code === 'no-h264') && !c.fix) return Object.assign({}, c, { fix: formatCmds(doc, 'png') });
+      if (NAMES_FORMAT.has(c.code)) c = Object.assign({}, c, { params: Object.assign({}, c.params, { format }) });
+      if (c.code === 'clear-mp4' && !c.fix) return Object.assign({}, c, { fix: formatCmds(doc, 'webmAlpha') });
+      if ((c.code === 'no-webcodecs' || c.code === 'no-h264') && !c.fix) {
+        if (format === 'kit') return c;
+        return Object.assign({}, c, { fix: formatCmds(doc, isAlpha(format) ? 'pngAlpha' : 'png') });
+      }
+      if (c.code === 'no-vp9' && !c.fix) {
+        const kit = doc.output.format === 'kit';
+        return Object.assign({}, c, { params: Object.assign({}, c.params, { kit }),
+          fix: kit ? [kitCmd(doc, 'overlay', false)] : formatCmds(doc, 'pngAlpha') });
+      }
       if (c.fix && !Array.isArray(c.fix)) return Object.assign({}, c, { fix: [c.fix] });
       return c;
     });
   }
+
+  // The button of a pre-flight item that has a fix, by code.
+  const FIX_LABELS = Object.freeze({ 'flash-rate': 'exp.pre.flash-fix', 'clear-mp4': 'exp.pre.makeWebm', 'clear-png': 'exp.pre.makeAlpha',
+    'alpha-backdrop': 'exp.pre.makeClear', 'no-webcodecs': 'exp.pre.makePng', 'no-h264': 'exp.pre.makePng' });
+
+  // fixLabel(item) → the string key of an item's fix button; no-vp9, no-webcodecs and no-h264 name what their fix does
+  // (withFixes: 透過動画 → 透過PNG).
+  function fixLabel(item) {
+    const p = item.params || {};
+    if (item.code === 'no-vp9') return p.kit ? 'exp.pre.noOverlay' : 'exp.pre.makeAlpha';
+    if ((item.code === 'no-webcodecs' || item.code === 'no-h264') && isAlpha(p.format)) return 'exp.pre.makeAlpha';
+    return FIX_LABELS[item.code] || 'exp.pre.fix';
+  }
+
+  // checkKey(item) → the string key of a pre-flight item's text: 'exp.pre.<code>', and for the Filmora set without an
+  // H.264 encoder its own text (the MP4s of the set cannot be made here; no PNG sequence is offered).
+  function checkKey(item) {
+    if (item.code === 'no-h264' && item.params && item.params.format === 'kit') return 'exp.pre.kit-no-h264';
+    return 'exp.pre.' + item.code;
+  }
+
+  // layersWhat(params, t) → the {what} of `layers-approx` (DESIGN_2_1 §13.7): the screen effects by name, then the scene
+  // changes that each file mixes on its own, as one list — 「A・B・C」 in Japanese, "A, B, and C" in English.
+  function layersWhat(params, t) {
+    const p = params || {};
+    const names = (p.keys || []).map((k) => t.part('filter', k));
+    if (p.seams) names.push(t('exp.pre.layers.seams', { n: p.seams }));
+    return listText(names, t);
+  }
+
+  // listText(names, t) → the names as one list in t's language: 「・」 in Japanese, a sentence list in English.
+  function listText(names, t) {
+    if (t.lang === 'en' && names.length > 1 && typeof Intl !== 'undefined' && typeof Intl.ListFormat === 'function') {
+      return new Intl.ListFormat('en', { style: 'long', type: 'conjunction' }).format(names);
+    }
+    return names.join(t('list.sep'));
+  }
+
+  // summary(doc, plan, env) → step ④'s one line under its settings as { key, params }, bytes and seconds as numbers (the
+  // caller formats them). env = { fsAccess, dirAccess, audioCodec, songReady } (the probe and the sink's abilities).
+  //   Filmora用  exp.kit.summary { n: files, bytes: Σ kitFiles estimates, where: 'folder' | 'zip' } (§13.10)
+  //   others     exp.summary { w, h, fps, seconds, bytes, where: 'disk' | 'memory' }
+  function summary(doc, plan, env) {
+    const e = env || {};
+    const o = doc.output;
+    if (o.format === 'kit') {
+      const files = S.kitFiles(doc, plan, { audioCodec: e.audioCodec, songReady: e.songReady });
+      return { key: 'exp.kit.summary', params: { n: files.length, bytes: files.reduce((sum, f) => sum + f.est, 0),
+        where: e.dirAccess ? 'folder' : 'zip' } };
+    }
+    const { t0, t1 } = S.exportRange(doc, plan);
+    const seconds = Math.max(0, t1 - t0);
+    const { w, h } = S.outputSize(plan.design.aspect, o.short);
+    const song = !!(o.audio && doc.song);
+    let bytes;
+    if (o.format === 'mp4') bytes = S.estimateBytes(seconds, S.bitrate(w, h, o.fps, o.quality), song);
+    else if (o.format === 'webmAlpha') bytes = S.estimateWebmBytes(seconds, S.bitrate(w, h, o.fps, o.quality), song);
+    else bytes = S.estimatePngBytes(S.frameCount(seconds, o.fps), w, h, o.format === 'pngAlpha');
+    return { key: 'exp.summary', params: { w, h, fps: o.fps, seconds, bytes, where: e.fsAccess ? 'disk' : 'memory' } };
+  }
+
+  // kitLabel(kind) → the key that names a file of the set (step ④'s done list, the guide), or null (none for a kind
+  // this module does not know).
+  function kitLabel(kind) { return KIT_LABELS[kind] || null; }
+
+  // kitAlways(doc, plan, env) → the kinds of the files the set adds by itself, in its order (export/schedule.kitFiles):
+  // the song's WAV where the browser cannot put the song into the MP4, and the README. 詳しく lists them under the
+  // checkboxes, so its rows add up to the summary line's count. env = { audioCodec, songReady } as for kitFiles.
+  function kitAlways(doc, plan, env) {
+    const e = env || {};
+    return S.kitFiles(doc, plan, { audioCodec: e.audioCodec, songReady: e.songReady }).map((f) => f.kind)
+      .filter((kind) => kind === 'wav' || kind === 'readme');
+  }
+
+  // shownChecks(items) → the pre-flight items step ④ lists: a memory note only when it asks first (the summary line
+  // already says 「メモリ上で作成」 or 「ZIPでダウンロード」).
+  function shownChecks(items) {
+    return items.filter((c) => !((c.code === 'memory' || c.code === 'kit-memory') && c.level !== 'confirm'));
+  }
+
+  // hasSound(format) → whether the format can carry the song (音声を入れる applies): MP4, the set, 透過動画.
+  function hasSound(format) { return !!(S.FORMATS[format] && S.FORMATS[format].audio); }
 
   // mergeFonts(items) → the items with every `font-fallback` folded into the first one (params.families), so a
   // blocked font service gives one line instead of one per typeface.
@@ -54574,7 +54844,7 @@ MV.def('ui/output', ['export/schedule', 'engine/scene/frame'], (S, F) => {
   const ERROR_KEYS = Object.freeze({
     cancelled: 'err.exp.cancelled', sink: 'err.exp.sink', 'range-empty': 'exp.pre.range-empty',
     'no-webcodecs': 'exp.pre.no-webcodecs', 'no-codec': 'err.exp.codec', codec: 'err.exp.codec', 'no-plan': 'err.exp.noPlan',
-    media: 'err.exp.media',
+    media: 'err.exp.media', 'no-vp9': 'exp.pre.no-vp9',
   });
   function errorKey(code) { return ERROR_KEYS[code] || 'err.exp.encode'; }
 
@@ -54588,9 +54858,78 @@ MV.def('ui/output', ['export/schedule', 'engine/scene/frame'], (S, F) => {
   }
 
   return {
-    FORMATS, BACKDROPS, ERROR_KEYS, formatCmds, backdropCmds, effectiveBackdrop, consistent, skipOf, usedFilters,
-    skippedFilters, checks, withFixes, mergeFonts, errorKey, errorParams,
+    FORMATS, MAIN_FORMATS, OTHER_FORMATS, BACKDROPS, KIT_KEYS, ERROR_KEYS, isAlpha, formatCmds, transparentOf, opaqueOf,
+    backdropCmds, clearLabel, backdropChoices, backdropNote, effectiveBackdrop, consistent, skipOf, usedFilters, skippedFilters,
+    checks, kitCmd, withFixes, fixLabel, checkKey, layersWhat, listText, summary, kitLabel, kitAlways, shownChecks, hasSound,
+    mergeFonts, errorKey, errorParams,
   };
+});
+/* 文字PVメーカー v2 — original work. 「Filmoraで使うには」: a help sheet with the numbered steps of the Filmora set's README, the uses of its other files and the files themselves, with the real names and settings (DESIGN_2_1 §13.9, §13.10). */
+MV.def('ui/filmora_help', ['ui/dom', 'ui/output', 'export/schedule', 'export/host/kit'], (dom, OUT, S, KIT) => {
+  'use strict';
+
+  const { h } = dom;
+
+  // Info = { files: [{ name, kind }], w, h, fps, folder: string | null, parent: string | null, zip: string | null }: what
+  // the sheet talks about (parent: the name of the folder the user picked, when the browser gives it).
+
+  // planned(doc, plan, env) → Info for the set the current settings would write (export/schedule.kitFiles, the names
+  // before the export; env = { audioCodec, songReady } as for kitFiles). Where it goes is not known yet.
+  function planned(doc, plan, env) {
+    const { w, h: hh } = S.outputSize(plan.design.aspect, doc.output.short);
+    return { files: S.kitFiles(doc, plan, env || {}).map((f) => ({ name: f.name, kind: f.kind })), w, h: hh,
+      fps: doc.output.fps, folder: null, parent: null, zip: null };
+  }
+
+  // written(result, size) → Info for a set exportKit wrote: its files, and the folder they are in (inside the folder the
+  // user picked, result.parent) — or the ZIP, when the browser could not write a folder (result.name). size = { w, h,
+  // fps } of that export.
+  function written(result, size) {
+    const zip = result.name || null;
+    return { files: result.files.map((f) => ({ name: f.name, kind: f.kind })), w: size.w, h: size.h, fps: size.fps,
+      folder: zip ? null : result.folder || null, parent: zip ? null : result.parent || null, zip };
+  }
+
+  // guide(info, t) → { intro, steps: [text], align, extras: [{ kind, text }], key: '#00B140' | null, files: [{ name,
+  // kind, label }], same } in t's language: where the files are (or that the export makes them); the README's numbered
+  // steps and its uses of the other files (export/host/kit.steps and .extras: the same text as README_Filmora.txt); the
+  // green screen's key colour when the set has one; every file with its name.
+  function guide(info, t) {
+    const where = info.parent ? t('kit.help.folderIn', { folder: info.folder, parent: info.parent })
+      : t('kit.help.folder', { folder: info.folder });
+    const intro = info.zip ? t('kit.help.zip', { zip: info.zip }) : info.folder ? where : t('kit.help.before');
+    const files = info.files.map((f) => ({ name: f.name, kind: f.kind, label: OUT.kitLabel(f.kind) ? t(OUT.kitLabel(f.kind)) : '' }));
+    return {
+      intro, steps: KIT.steps(t, info.files, info), align: t('kit.help.align'), extras: KIT.extras(t, info.files),
+      key: info.files.some((f) => f.kind === 'green') ? KIT.KEY_COLOUR : null, files, same: t('kit.help.same'),
+    };
+  }
+
+  // open(app, info) → Promise: the sheet in a <dialog> (ui/dialogs, like the shortcut sheet): the steps first (what the
+  // user came for, in view when it opens), then 「必要なときだけ」 with the key colour under the green screen's use,
+  // then the files as a compact list. Esc, × or a click outside close it, and the focus goes back to where it was.
+  function open(app, info) {
+    const t = app.t;
+    const g = guide(info, t);
+    const keyLine = () => h('p', { class: 'kit-key' }, h('span', { class: 'kit-key-chip', 'aria-hidden': 'true' }),
+      h('span', { text: t('kit.help.keyColour') + ': ' + g.key }));
+    return app.dialogs.open((body) => {
+      dom.replace(body,
+        h('p', { class: 'dlg-text', text: g.intro }),
+        h('h3', { class: 'dlg-sub', text: t('kit.help.stepsTitle') }),
+        h('ol', { class: 'kit-steps' }, g.steps.map((s) => h('li', { text: s }))),
+        h('p', { class: 'note kit-align', text: g.align }),
+        g.extras.length ? [h('h3', { class: 'dlg-sub', text: t('kit.help.optional') }),
+          h('ul', { class: 'kit-extras' }, g.extras.map((x) => h('li', { 'data-kind': x.kind },
+            h('span', { text: x.text }), x.kind === 'green' && g.key ? keyLine() : null)))] : null,
+        h('h3', { class: 'dlg-sub', text: t('kit.help.filesTitle') }),
+        h('ul', { class: 'kit-help-files' }, g.files.map((f) => h('li', {},
+          h('span', { class: 'kit-file-name', text: f.name }), f.label ? h('span', { class: 'kit-file-meta', text: f.label }) : null))),
+        h('p', { class: 'note subtle', text: g.same }));
+    }, { title: t('kit.help.title'), wide: true });
+  }
+
+  return { planned, written, guide, open };
 });
 /* 文字PVメーカー v2 — original work. The selection: one Sel for the whole app, drill up/down, crumbs, preview picks (DESIGN §6.5, §4.23). */
 MV.def('ui/selection', ['core/paths', 'planner/areas'], (P, AREAS) => {
@@ -58667,6 +59006,8 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
     // (ui/media_io's progress row when absent).
     function saveAs(opts) { return opts ? savePackage(null, opts) : withProgress('save', null, (pr) => savePackage(null, pr)); }
 
+    // saveText(text, name, type, onHandle?, note?): a text file through the save dialog where the browser has one, else a
+    // download; a toast says where it went (≡ › ファイル › 時間つき歌詞 and 字幕, ui/menus).
     async function saveText(text, name, type, onHandle, note) {
       if (typeof window.showSaveFilePicker === 'function') {
         try {
@@ -58745,7 +59086,7 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
 
     return {
       state: () => state, schedule, flush, flushNow, restore, recent, openRecent, newWork, open, openFiles,
-      save, saveAs, saveLight, savePackage, openPackage, saveLrc, lrcText, putSong, getSong, installDrop, begin, fileName,
+      save, saveAs, saveLight, savePackage, openPackage, saveLrc, lrcText, saveText, putSong, getSong, installDrop, begin, fileName,
       clearDevice, workId: () => workId, fileState,
       putMedia, getMedia, hasMedia, putIndex, getIndex, putThumbs, getThumbs, storageInfo, missingMedia, importMedia,
       importMediaFiles, routeFile, device, mediaBlobs, usedMedia,
@@ -62174,28 +62515,55 @@ MV.def('ui/stage', ['ui/dom', 'ui/selection', 'ui/output', 'i18n/t', 'ui/shot_ed
 
   return { mount };
 });
-/* 文字PVメーカー v2 — original work. Step ④ 書き出し: settings, preflight with jump links, progress, cancel, done (DESIGN §6.4.3, §4.21). */
-MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'export/schedule', 'i18n/t'], (dom, I, OUT, SCH, T) => {
+/* 文字PVメーカー v2 — original work. Step ④ 書き出し: settings, the Filmora set's contents, preflight with jump links, progress, cancel, done (DESIGN §6.4.3, §4.21; DESIGN_2_1 §13.10). */
+MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 'export/schedule', 'i18n/t'], (dom, I, OUT, HELP, SCH, T) => {
   'use strict';
 
   const { h } = dom;
   const SHORTS = [720, 1080, 1440, 2160];
   const FPS = [24, 30, 60];
-  const FORMATS = OUT.FORMATS;
-  const BACKDROPS = OUT.BACKDROPS;
-  // The button of a pre-flight item that has a fix, and the undo label of that fix.
-  const FIX_LABEL = { 'flash-rate': 'exp.pre.flash-fix', 'clear-mp4': 'exp.pre.makeAlpha', 'clear-png': 'exp.pre.makeAlpha',
-    'alpha-backdrop': 'exp.pre.makeClear', 'no-webcodecs': 'exp.pre.makePng', 'no-h264': 'exp.pre.makePng' };
   // The button of a pre-flight item that jumps (default 見る): a missing photo or video says つなぎ直す and opens the
   // library, where its row has [つなぎ直す] (DESIGN_2_1 §11.7.8).
   const JUMP_LABEL = { 'media-missing': 'media.relink' };
   const QUALITIES = ['standard', 'high', 'max'];
   const PROGRESS_ANNOUNCE_MS = 5000;
+  const RUN_UPDATE_MS = 100;            // the running view is redrawn at most this often (a new phase at once)
+  const RADIO_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End']);
+
+  // radioKeys(group): a segmented radio group of step ④ (§6.12): the arrows move to the next option and choose it (Home
+  // and End: the first and the last); the app keymap (← → frames) never sees them. One tab stop per group (fillSeg).
+  function radioKeys(group) {
+    group.addEventListener('keydown', (ev) => {
+      if (!RADIO_KEYS.has(ev.key) || ev.ctrlKey || ev.metaKey || ev.altKey) return;
+      const radios = [...group.querySelectorAll('[role="radio"]')].filter((b) => !b.disabled);
+      if (!radios.length) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      const at = radios.indexOf(document.activeElement);
+      const n = radios.length;
+      const to = ev.key === 'Home' ? 0 : ev.key === 'End' ? n - 1
+        : (Math.max(0, at) + (ev.key === 'ArrowRight' || ev.key === 'ArrowDown' ? 1 : n - 1)) % n;
+      if (to === at) return;
+      dom.focus(radios[to]);
+      radios[to].click();
+    });
+  }
 
   function mount(app) {
     const t = app.t;
-    const seg = (name, label) => h('div', { class: 'segmented', role: 'radiogroup', 'aria-label': label, 'data-seg': name });
-    const format = seg('format', t('exp.format'));
+    const seg = (name, label) => {
+      const el = h('div', { class: 'segmented', role: 'radiogroup', 'aria-label': label, 'data-seg': name });
+      radioKeys(el);
+      return el;
+    };
+    // 形式 (DESIGN_2_1 §13.10): [MP4] [Filmora用] as a radio pair, plus [その他 ▾] (透過動画（WebM）/ PNG連番 / 透過PNG) — one
+    // control, the pattern of step ③'s 画面の形.
+    const formatPair = h('div', { class: 'fmt-radios', role: 'radiogroup', 'aria-label': t('exp.format') });
+    radioKeys(formatPair);
+    const otherFormat = h('select', { class: 'seg-select', 'aria-label': t('exp.fmt.otherLabel'), 'data-other': 'format' },
+      h('option', { value: '', hidden: true, text: t('exp.fmt.other') }),
+      OUT.OTHER_FORMATS.map((v) => h('option', { value: v, text: t('exp.fmt.' + v) })));
+    const format = h('div', { class: 'segmented fmt-seg', 'data-seg': 'format' }, formatPair, otherFormat);
     const size = h('select', { class: 'select', 'aria-label': t('exp.size') });
     const fps = seg('fps', t('exp.fps'));
     const backdrop = h('select', { class: 'select', 'aria-label': t('exp.backdrop') });
@@ -62203,24 +62571,54 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'export/schedule', 
     const quality = seg('quality', t('exp.quality'));
     const audio = h('input', { type: 'checkbox', id: 'exp-audio' });
     const name = h('input', { class: 'text-input', type: 'text', 'aria-label': t('exp.name'), spellcheck: false });
-    const more = h('details', { class: 'more', 'data-ctl': 'more' }, h('summary', { text: t('exp.more') }),
+    // 詳しく for Filmora用: the set's contents, then the guide (§13.10). The main MP4 is always in the set.
+    const kitBoxes = {};
+    const kitRow = (key) => {
+      kitBoxes[key] = h('input', { type: 'checkbox', id: 'exp-kit-' + key, 'data-kit': key });
+      return h('label', { class: 'check-row', htmlFor: 'exp-kit-' + key }, kitBoxes[key], h('span', { text: t('exp.kit.' + key) }));
+    };
+    // A file the set always holds (完成動画, the README) or adds by itself (the song's WAV where the browser cannot put
+    // it into the MP4): checked and disabled, with why — so the rows add up to the summary line's count.
+    const fixedRow = (kind, why) => h('label', { class: 'check-row is-fixed', htmlFor: 'exp-kit-' + kind, 'data-always': kind },
+      h('input', { type: 'checkbox', id: 'exp-kit-' + kind, checked: true, disabled: true }),
+      h('span', { text: t(OUT.kitLabel(kind)) }), h('span', { class: 'muted kit-always', text: why }));
+    const wavRow = fixedRow('wav', t('exp.kit.wavWhy'));
+    // the green screen's how-to line (DESIGN_2_1 §13.6), under its checkbox while it is ticked
+    const greenNote = h('p', { class: 'note subtle kit-note', 'data-note': 'kit-chroma', hidden: true, text: t('exp.chromaNote') });
+    const kitSet = h('fieldset', { class: 'kit-set' }, h('legend', { class: 'field-label', text: t('exp.kit.title') }),
+      fixedRow('main', t('exp.kit.always')), kitRow('overlay'), kitRow('bg'), kitRow('green'), greenNote,
+      h('div', { class: 'kit-pair' }, kitRow('srt'), kitRow('lrc')), wavRow, fixedRow('readme', t('exp.kit.always')));
+    const howTo = h('button', { class: 'link kit-howto', type: 'button', 'data-kit-help': 'planned' }, t('exp.kit.howTo') + ' ›');
+    const kitBox = h('div', { class: 'kit-box', hidden: true }, kitSet, howTo);
+    const moreLabel = h('summary', { text: t('exp.more') });
+    const more = h('details', { class: 'more', 'data-ctl': 'more' }, moreLabel,
       row(t('exp.range'), range), row(t('exp.quality'), quality),
       h('label', { class: 'check-row', htmlFor: 'exp-audio' }, audio, h('span', { text: t('exp.audio') })),
-      row(t('exp.name'), name));
+      row(t('exp.name'), name), kitBox);
     const summary = h('div', { class: 'exp-summary' });
-    const checks = h('ul', { class: 'checks' });
-    // Transparency is a PNG sequence only: browsers cannot encode a video with alpha today (SPEC §6, §7).
-    const alphaNote = h('p', { class: 'note subtle exp-note', 'data-note': 'alpha', text: t('exp.alphaNote') });
+    // Where the set goes (with a folder picker): a new folder inside the folder the user picks.
+    const folderHint = h('p', { class: 'note subtle exp-note', 'data-note': 'kit-folder', hidden: true });
+    // The pre-flight list; it takes the focus when a fix button re-renders it away (tabindex -1: not a Tab stop).
+    const checks = h('ul', { class: 'checks', tabindex: '-1', 'aria-label': t('exp.checks') });
+    // Under 背景 (ui/output.backdropNote): transparency (§13.10, exp.alphaNote2) — the transparent WebM is the one to use
+    // in editors, PNG sequences suit compositing apps; not for Filmora用, whose set has its own transparent video — or,
+    // when the file is green, the green screen's how-to line (DESIGN_2_1 §13.6).
+    const alphaNote = h('p', { class: 'note subtle exp-note', 'data-note': 'alpha', text: t('exp.alphaNote2') });
+    const chromaNote = h('p', { class: 'note subtle exp-note', 'data-note': 'chroma', hidden: true, text: t('exp.chromaNote') });
     const settings = h('div', { class: 'exp-settings' },
       field(t('exp.format'), format, 'format'), field(t('exp.size'), size, 'size'), field(t('exp.fps'), fps, 'fps'),
-      field(t('exp.backdrop'), [backdrop, alphaNote], 'backdrop'), more, summary, checks);
+      field(t('exp.backdrop'), [backdrop, alphaNote, chromaNote], 'backdrop'), more, summary, folderHint, checks);
     const running = h('div', { class: 'exp-running', hidden: true });
+    // Said to screen readers: the Filmora set's phase and the end of an export (the progress bar says the numbers).
+    const said = h('div', { class: 'sr-only exp-said', role: 'status', 'aria-live': 'polite' });
     const root = h('div', { class: 'step step-export' },
-      h('div', { class: 'step-head' }, h('h2', { class: 'step-title', text: t('step.short.export') })), settings, running);
+      h('div', { class: 'step-head' }, h('h2', { class: 'step-title', text: t('step.short.export') })), settings, running, said);
     const go = h('button', { class: 'btn primary wide', type: 'button', 'data-act': 'export.start' }, I.icon('export'), t('exp.go'));
     const footer = h('div', { class: 'footer-export' }, go);
     let lastAnnounce = 0;
     let blocked = false;
+    let runView = null;                 // the running view's elements (runningView), made once per export; null otherwise
+    let lastRun = 0;
 
     function row(label, control) { return h('div', { class: 'field-row labeled' }, h('span', { class: 'field-label inline', text: label }), control); }
     function field(label, control, id) {
@@ -62228,20 +62626,24 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'export/schedule', 
     }
 
     function setOut(key, v) { app.dispatch({ t: 'output.set', key, v }, { label: ['undo.output', {}] }); }
+    // A format choice keeps its backdrop in step (透過動画 / 透過PNG ⇔ 透明, ui/output): one choice, one undo entry.
+    function setFormat(v) { app.batch({ label: ['undo.output', {}] }, OUT.formatCmds(app.doc, v)); }
 
     dom.on(root, 'click', '[data-seg] [data-v]', (ev, b) => {
-      const which = b.parentNode.dataset.seg;
+      const which = b.closest('[data-seg]').dataset.seg;
       const v = b.dataset.v;
-      // 透過PNG ⇔ 透明 (ui/output): one choice, one undo entry.
-      if (which === 'format') app.batch({ label: ['undo.output', {}] }, OUT.formatCmds(app.doc, v));
+      if (which === 'format') setFormat(v);
       else if (which === 'fps') setOut('fps', Number(v));
       else if (which === 'quality') setOut('quality', v);
       else if (which === 'range') chooseRange(v);
     });
+    otherFormat.addEventListener('change', () => { if (otherFormat.value) setFormat(otherFormat.value); });
     size.addEventListener('change', () => setOut('short', Number(size.value)));
     backdrop.addEventListener('change', () => app.batch({ label: ['undo.backdrop', {}] }, OUT.backdropCmds(app.doc, backdrop.value)));
     audio.addEventListener('change', () => setOut('audio', audio.checked));
     name.addEventListener('change', () => setOut('name', name.value.trim() || null));
+    dom.on(kitSet, 'change', '[data-kit]', (ev, box) => app.dispatch(OUT.kitCmd(app.doc, box.dataset.kit, box.checked), { label: ['undo.output', {}] }));
+    howTo.addEventListener('click', () => HELP.open(app, HELP.planned(app.doc, planOf(), kitEnv())));
     // The export action asks about a large in-memory export itself (app.exportStart), from here and from Ctrl+K alike.
     go.addEventListener('click', () => app.actions.run('export.start'));
 
@@ -62255,29 +62657,63 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'export/schedule', 
       if (!app.doc.output.range) app.toast(t('exp.rangeHowTo'));
     }
 
+    // fillSeg(el, values, cur, label, disabled?) → the radios of a segmented group: made once and updated in place, so
+    // the focus stays on the option an arrow key chose. The checked one is the group's tab stop (else the first enabled).
     function fillSeg(el, values, cur, label, disabled) {
-      dom.replace(el, values.map((v) => h('button', {
-        class: 'seg', type: 'button', role: 'radio', 'data-v': String(v), 'aria-checked': String(String(v) === String(cur)),
-        disabled: !!(disabled && disabled(v)), title: disabled && disabled(v) ? disabled(v) : null,
-      }, label(v))));
+      let buttons = [...el.querySelectorAll('[role="radio"]')];
+      if (buttons.length !== values.length || buttons.some((b, i) => b.dataset.v !== String(values[i]))) {
+        buttons = values.map((v) => h('button', { class: 'seg', type: 'button', role: 'radio', 'data-v': String(v) }));
+        dom.replace(el, buttons);
+      }
+      let stop = -1;
+      values.forEach((v, i) => {
+        const b = buttons[i];
+        const why = disabled ? disabled(v) : '';
+        const on = String(v) === String(cur);
+        b.setAttribute('aria-checked', String(on));
+        b.disabled = !!why;
+        if (why) b.title = why; else b.removeAttribute('title');
+        const text = label(v);
+        if (b.textContent !== text) b.textContent = text;
+        if (on) stop = i;
+      });
+      const first = stop >= 0 ? stop : buttons.findIndex((b) => !b.disabled);
+      buttons.forEach((b, i) => { b.tabIndex = i === first ? 0 : -1; });
     }
 
-    // Sizes and estimates: export/schedule owns the frozen math (§4.21).
-    function sizeOf(aspect, short) { return SCH.outputSize(aspect, short); }
-    function bytesOf(o, sz, seconds) {
-      if (o.format === 'mp4') return SCH.estimateBytes(seconds, SCH.bitrate(sz.w, sz.h, o.fps, o.quality), o.audio && !!app.doc.song);
-      return SCH.estimatePngBytes(SCH.frameCount(seconds, o.fps), sz.w, sz.h, o.format === 'pngAlpha');
+    // その他 ▾ shows the other format when one is chosen (and is marked like a chosen segment), else 「その他」.
+    function fillOther(cur, disabled) {
+      const chosen = OUT.OTHER_FORMATS.includes(cur);
+      for (const opt of otherFormat.options) if (opt.value) opt.disabled = !!disabled(opt.value);
+      const want = chosen ? cur : '';
+      if (otherFormat.value !== want) otherFormat.value = want;
+      otherFormat.classList.toggle('is-on', chosen);
     }
 
     function canStream() { return app.svc.exporter.sink.canStream(); }
+    function canDirectory() { return app.svc.exporter.sink.canDirectory(); }
+    // The plan the numbers come from; before there is one (no lyrics yet), an empty video of the work's shape.
+    function planOf() { return app.plan || { duration: 0, design: { aspect: app.doc.look.aspect }, lines: [], cuts: [] }; }
+    // What the Filmora set holds depends on the audio codec the browser has (AAC, else a WAV file) and the song.
+    function kitEnv() {
+      const probe = app.exportProbe ? app.exportProbe() || {} : {};
+      return { audioCodec: probe.audioCodec, songReady: !!app.doc.song && app.songReady() };
+    }
 
     // The range the export renders: output.range clamped to the video (export/schedule.exportRange), or null.
     function rangeOf() { return app.plan ? SCH.exportRange(app.doc, app.plan) : null; }
-    function durationOf() {
-      const r = rangeOf();
-      return r ? Math.max(0, r.t1 - r.t0) : 0;
-    }
     const clock = (sec) => T.fmtTime(sec).replace(/\.\d+$/, '');
+
+    function summaryText() {
+      const env = Object.assign({ fsAccess: canStream(), dirAccess: canDirectory() }, kitEnv());
+      const s = OUT.summary(app.doc, planOf(), env);
+      const p = s.params;
+      if (s.key === 'exp.kit.summary') {
+        return t(s.key, { n: p.n, size: T.fmtBytes(p.bytes), where: t(p.where === 'folder' ? 'exp.kit.toFolder' : 'exp.kit.toZip') });
+      }
+      return t(s.key, { w: p.w, h: p.h, fps: p.fps, dur: clock(p.seconds), size: T.fmtBytes(p.bytes),
+        where: t(p.where === 'disk' ? 'exp.toDisk' : 'exp.toMemory') });
+    }
 
     // Pre-flight items (export/schedule.preflight + ui/output.checks) as text: 'exp.pre.<code>' with display params.
     function checkText(c) {
@@ -62290,14 +62726,39 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'export/schedule', 
       if (Array.isArray(p.keys)) params.list = p.keys.map((k) => app.label('filter', k)).join(t('list.sep'));
       if (Array.isArray(p.families)) { params.family = p.families.join(t('list.sep')); params.n = p.families.length; }
       if (c.code === 'overfull') params.n = p.line;
-      return t('exp.pre.' + c.code, params);
+      // the chosen format by name: as the subject (alpha-backdrop) or inside a sentence (no-webcodecs, no-audio-codec, …)
+      if (c.code === 'alpha-backdrop') params.format = t('exp.fmt.' + p.format);
+      else if (p.format) params.format = t('exp.fmtIn.' + p.format);
+      if (c.code === 'layers-approx') params.what = OUT.layersWhat(p, t);
+      return t(OUT.checkKey(c), params);
     }
 
+    // A fix re-renders the pre-flight list, which takes its button away: the focus goes to the control the fix changed
+    // (the chosen 形式, 背景, or the set's checkbox, when on screen), else to the list, never to the page (where Space
+    // would start playback).
     function fixButton(c) {
       if (!c.fix || !c.fix.length) return null;
       const undo = c.code === 'flash-rate' ? 'undo.flashFix' : 'undo.output';
-      return h('button', { class: 'link', type: 'button', text: t(FIX_LABEL[c.code] || 'exp.pre.fix'),
-        on: { click: () => app.batch({ label: [undo, {}] }, c.fix) } });
+      return h('button', { class: 'link', type: 'button', text: t(OUT.fixLabel(c)), on: { click: () => {
+        const target = fixTarget(c.fix);
+        app.batch({ label: [undo, {}] }, c.fix);
+        const shown = target && root.contains(target) && !target.disabled && target.getClientRects().length > 0;
+        dom.focus(shown ? target : checks);
+      } } });
+    }
+
+    // fixTarget(cmds) → the control of step ④ that shows what the fix changes (asked before it is applied).
+    function fixTarget(cmds) {
+      const cmd = (kind, key) => cmds.find((x) => x.t === kind && x.key === key);
+      const f = cmd('output.set', 'format');
+      if (f) return OUT.MAIN_FORMATS.includes(f.v) ? formatPair.querySelector('[data-v="' + f.v + '"]') : otherFormat;
+      const kit = cmd('output.set', 'kit');
+      if (kit) {
+        const before = SCH.kitOptions(app.doc.output);
+        const key = OUT.KIT_KEYS.find((x) => !!before[x] !== !!kit.v[x]);
+        return key ? kitBoxes[key] : null;
+      }
+      return cmd('look.set', 'backdrop') ? backdrop : null;
     }
 
     function jumpTo(c) {
@@ -62311,29 +62772,42 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'export/schedule', 
       const o = app.doc.output;
       const env = app.env();
       const aspect = app.doc.look.aspect;
-      fillSeg(format, FORMATS, o.format, (v) => t('exp.fmt.' + v), (v) => (v === 'mp4' && !env.webcodecs ? t('exp.pre.no-webcodecs') : ''));
+      // the formats that encode video need WebCodecs (MP4, the set, 透過動画); the reason names the format
+      const noVideo = (v) => (SCH.FORMATS[v].video && !env.webcodecs ? t('exp.pre.no-webcodecs', { format: t('exp.fmtIn.' + v) }) : '');
+      fillSeg(formatPair, OUT.MAIN_FORMATS, o.format, (v) => t('exp.fmt.' + v), noVideo);
+      fillOther(o.format, noVideo);
       dom.replace(size, SHORTS.map((s) => {
-        const sz = sizeOf(aspect, s);
+        const sz = SCH.outputSize(aspect, s);
         return h('option', { value: String(s), selected: s === o.short, text: t('exp.sizeOpt', { p: s, w: sz.w, h: sz.h }) });
       }));
       fillSeg(fps, FPS, o.fps, (v) => String(v));
-      // 透明 is always offered: choosing it makes the output 透過PNG (the only transparent format, SPEC §7).
-      dom.replace(backdrop, BACKDROPS.map((b) => h('option', {
-        value: b, selected: b === app.doc.look.backdrop, text: t(b === 'clear' ? 'exp.bg.clearPng' : 'exp.bg.' + b),
+      // 透明 makes the output transparent (透過動画, or 透過PNG from a PNG sequence); Filmora用 does not offer it
+      // (ui/output.backdropChoices: the set would be lost on the way back).
+      dom.replace(backdrop, OUT.backdropChoices(o.format, app.doc.look.backdrop).map((b) => h('option', {
+        value: b, selected: b === app.doc.look.backdrop, text: t(b === 'clear' ? OUT.clearLabel(o.format) : 'exp.bg.' + b),
       })));
+      const note = OUT.backdropNote(app.doc);
+      alphaNote.hidden = note !== 'exp.alphaNote2';
+      chromaNote.hidden = note !== 'exp.chromaNote';
       const r = o.range ? rangeOf() || o.range : null;
       fillSeg(range, ['all', 'sel', 'io'], r ? 'io' : 'all', (v) => (v === 'io' && r ? clock(r.t0) + '–' + clock(r.t1) : t('exp.range.' + v)));
       fillSeg(quality, QUALITIES, o.quality, (v) => t('exp.q.' + v));
       audio.checked = !!o.audio;
-      audio.disabled = o.format !== 'mp4' || !app.doc.song;
+      audio.disabled = !OUT.hasSound(o.format) || !app.doc.song;
       if (document.activeElement !== name) name.value = o.name || '';
-      name.placeholder = app.defaultFileName();
-      const sz = sizeOf(aspect, o.short);
-      const bytes = bytesOf(o, sz, durationOf());
-      summary.textContent = t('exp.summary', { w: sz.w, h: sz.h, fps: o.fps, dur: clock(durationOf()),
-        size: T.fmtBytes(bytes), where: canStream() ? t('exp.toDisk') : t('exp.toMemory') });
+      name.placeholder = o.format === 'kit' ? SCH.kitBase(app.doc) : app.defaultFileName();
+      const kit = o.format === 'kit';
+      kitBox.hidden = !kit;
+      moreLabel.textContent = t(kit ? 'exp.moreKit' : 'exp.more');
+      const chosen = SCH.kitOptions(o);
+      for (const key of OUT.KIT_KEYS) kitBoxes[key].checked = !!chosen[key];
+      greenNote.hidden = !chosen.green;
+      wavRow.hidden = !(kit && OUT.kitAlways(app.doc, planOf(), kitEnv()).includes('wav'));
+      summary.textContent = summaryText();
+      folderHint.hidden = !(kit && canDirectory());
+      if (!folderHint.hidden) folderHint.textContent = t('exp.kit.folderHint', { folder: SCH.kitFolder(app.doc) });
       const list = app.exportChecks();
-      dom.replace(checks, list.filter((c) => c.code !== 'memory' || c.level === 'confirm').map((c) => {
+      dom.replace(checks, OUT.shownChecks(list).map((c) => {
         const actions = [fixButton(c),
           c.jump || c.code === 'no-lines' ? h('button', { class: 'link', type: 'button', text: t(JUMP_LABEL[c.code] || 'exp.jump'),
             on: { click: () => jumpTo(c) } }) : null]
@@ -62346,26 +62820,84 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'export/schedule', 
       go.disabled = blocked || !!app.exporting;
     }
 
-    function renderRunning(st) {
-      const pct = st.N ? Math.floor(st.i / st.N * 100) : 0;
-      const sz = sizeOf(app.doc.look.aspect, st.short || app.doc.output.short);
-      const bar = h('div', { class: 'progress big', role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': '100',
-        'aria-valuenow': String(pct), 'aria-valuetext': t('exp.progress', { i: st.i, n: st.N, eta: clock(st.eta || 0) }),
-        'aria-label': t('exp.progressLabel') }, h('div', { class: 'progress-bar', style: { width: pct + '%' } }));
+    // The done state of a Filmora set (§13.9): how many files and where (the folder, or the ZIP that was downloaded), each
+    // file with its name, what it is and its size, and 「Filmoraで使うには」.
+    function kitDone(st) {
+      const r = st.result;
+      const help = h('button', { class: 'link kit-howto', type: 'button', 'data-kit-help': 'written' }, t('exp.kit.howTo') + ' ›');
+      help.addEventListener('click', () => HELP.open(app, HELP.written(r, { w: st.w, h: st.h, fps: st.fps })));
+      return h('div', { class: 'exp-done' }, I.icon('check', { size: 28 }),
+        h('div', { class: 'exp-title', text: t('exp.done') }),
+        h('div', { class: 'muted', text: kitDoneText(r) }),
+        h('ul', { class: 'kit-done-files', 'aria-label': t('exp.kit.files') }, r.files.map((f) => h('li', { 'data-kind': f.kind },
+          h('span', { class: 'kit-file-name', text: f.name }),
+          h('span', { class: 'kit-file-meta', text: [OUT.kitLabel(f.kind) ? t(OUT.kitLabel(f.kind)) : '', T.fmtBytes(f.bytes)].filter(Boolean)
+            .join(t('exp.kit.metaSep')) })))),
+        help);
+    }
+
+    // 「{n}ファイルを書き出しました」 and where: the folder inside the folder the user picked (result.parent, when the browser
+    // names it), or the ZIP that was downloaded.
+    function kitDoneText(r) {
+      if (!r.name && r.parent) return t('exp.kit.doneIn', { n: r.files.length, folder: r.folder, parent: r.parent });
+      return t('exp.kit.done', { n: r.files.length, folder: r.name || r.folder });
+    }
+
+    // The running view: made once per export, then updated in place — at most every RUN_UPDATE_MS, at once for a new
+    // phase and for the last frame. Rebuilding it for every frame (tens a second) churned the page while the export
+    // renders and reads back canvases on the same thread; with the Filmora set that stalled headless Chromium's export.
+    function runningView() {
+      const v = {
+        title: h('div', { class: 'exp-title' }),
+        phase: h('div', { class: 'exp-phase', hidden: true }),         // the Filmora set: 動画 → 曲・字幕・説明 → ZIP (also said)
+        fill: h('div', { class: 'progress-bar' }),
+        frames: h('span'), percent: h('span'), left: h('div', { class: 'muted' }), part: undefined,
+      };
+      v.bar = h('div', { class: 'progress big', role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': '100',
+        'aria-label': t('exp.progressLabel') }, v.fill);
+      dom.replace(running, v.title, v.phase, v.bar, h('div', { class: 'exp-nums' }, v.frames, v.percent), v.left,
+        h('p', { class: 'note', text: t('exp.snapshot') }));
+      dom.replace(footer, h('button', { class: 'btn wide', type: 'button', text: t('exp.cancel'), on: { click: () => app.actions.run('export.cancel') } }));
+      return v;
+    }
+
+    function showRunning(st) {
       const now = performance.now();
-      if (now - lastAnnounce < PROGRESS_ANNOUNCE_MS) bar.setAttribute('aria-live', 'off');
-      else lastAnnounce = now;
-      if (st.phase === 'running') {
-        dom.replace(running,
-          h('div', { class: 'exp-title', text: t('exp.running', { h: Math.min(sz.w, sz.h), fps: st.fps || app.doc.output.fps }) }),
-          bar, h('div', { class: 'exp-nums' }, h('span', { text: t('exp.frames', { i: st.i, n: st.N }) }), h('span', { text: pct + '%' })),
-          h('div', { class: 'muted', text: st.eta !== null && st.eta !== undefined ? t('exp.left', { time: clock(st.eta) }) : t('exp.preparing') }),
-          h('p', { class: 'note', text: t('exp.snapshot') }));
-        dom.replace(footer, h('button', { class: 'btn wide', type: 'button', text: t('exp.cancel'), on: { click: () => app.actions.run('export.cancel') } }));
-      } else if (st.phase === 'done') {
-        dom.replace(running, h('div', { class: 'exp-done' }, I.icon('check', { size: 28 }),
-          h('div', { class: 'exp-title', text: t('exp.done') }),
-          h('div', { class: 'muted', text: t('exp.doneInfo', { name: st.result.name, size: T.fmtBytes(st.result.bytes), frames: st.result.frames }) })));
+      const fresh = !runView || !running.contains(runView.title);
+      if (fresh) runView = runningView();
+      else if (st.part === runView.part && st.i < st.N && now - lastRun < RUN_UPDATE_MS) return;
+      lastRun = now;
+      const v = runView;
+      const pct = st.N ? Math.floor(st.i / st.N * 100) : 0;
+      const sz = SCH.outputSize(app.doc.look.aspect, st.short || app.doc.output.short);
+      v.title.textContent = t('exp.running', { h: Math.min(sz.w, sz.h), fps: st.fps || app.doc.output.fps });
+      const phase = st.part ? t('exp.kit.phase', { what: t('exp.kit.what.' + st.part) }) : '';
+      if (st.part !== v.part) {
+        v.part = st.part;
+        v.phase.hidden = !st.part;
+        if (st.part) { v.phase.dataset.part = st.part; v.phase.textContent = phase; said.textContent = phase; }
+      }
+      const progress = t('exp.progress', { i: st.i, n: st.N, eta: clock(st.eta || 0) });
+      v.bar.setAttribute('aria-valuenow', String(pct));
+      v.bar.setAttribute('aria-valuetext', phase ? t('exp.kit.running', { phase, progress }) : progress);
+      // the value is announced at most every PROGRESS_ANNOUNCE_MS
+      if (now - lastAnnounce < PROGRESS_ANNOUNCE_MS) v.bar.setAttribute('aria-live', 'off');
+      else { lastAnnounce = now; v.bar.removeAttribute('aria-live'); }
+      dom.setStyle(v.fill, { width: pct + '%' });
+      v.frames.textContent = t('exp.frames', { i: st.i, n: st.N });
+      v.percent.textContent = pct + '%';
+      v.left.textContent = st.eta !== null && st.eta !== undefined ? t('exp.left', { time: clock(st.eta) }) : t('exp.preparing');
+    }
+
+    function renderRunning(st) {
+      if (st.phase === 'running') { showRunning(st); return; }
+      runView = null;
+      if (st.phase === 'done') {
+        const info = st.result.files ? kitDoneText(st.result)
+          : t('exp.doneInfo', { name: st.result.name, size: T.fmtBytes(st.result.bytes), frames: st.result.frames });
+        dom.replace(running, st.result.files ? kitDone(st) : h('div', { class: 'exp-done' }, I.icon('check', { size: 28 }),
+          h('div', { class: 'exp-title', text: t('exp.done') }), h('div', { class: 'muted', text: info })));
+        said.textContent = t('exp.done') + ' ' + info;
         dom.replace(footer, h('button', { class: 'btn wide', type: 'button', text: t('exp.again'), on: { click: () => app.exportReset() } }));
       } else if (st.phase === 'error') {
         dom.replace(running, h('div', { class: 'inline-error', role: 'alert' }, I.icon('warn'), h('span', { text: st.message })));
@@ -62379,7 +62911,14 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'export/schedule', 
       settings.hidden = busy;
       running.hidden = !busy;
       if (busy) renderRunning(st);
-      else { dom.replace(footer, go); renderSettings(); }
+      else {
+        // idle (after 中止 too): the next export makes its running view, and 中止 in the footer, afresh (and says its
+        // phases and its end again, even when they read as the last one's did)
+        runView = null;
+        said.textContent = '';
+        dom.replace(footer, go);
+        renderSettings();
+      }
     }
 
     // Showing the step asks for the faces the export will draw, so 書体を読み込み中 clears before [書き出す] (§4.14).
@@ -62395,7 +62934,7 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'export/schedule', 
     return { root, footer, update: () => update(), onShow };
   }
 
-  return { mount };
+  return { mount, radioKeys };
 });
 /* 文字PVメーカー v2 — original work. Step ③ 見た目: mood chips, theme swatches (hover = try-on), screen shape, 詳しく…, AI 3 looks (DESIGN §6.4.3). */
 MV.def('ui/step_look', ['ui/dom', 'ui/icons', 'core/doc'], (dom, I, D) => {
@@ -68885,8 +69424,9 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
       explain: MV.use('planner/explain').explain,
       tapCore: MV.use('core/tap'),
       sample: (lang) => (lang === 'en' ? lyrics.SAMPLE_EN : lyrics.SAMPLE_JA),
-      exporter: { mp4: MV.use('export/host/mp4'), png: MV.use('export/host/png'), sink: MV.use('export/host/sink'),
-        schedule: MV.use('export/schedule') },
+      // the exports of step ④: MP4, PNG sequences, 透過動画（WebM）and the Filmora set (DESIGN_2_1 §13.5, §13.9)
+      exporter: { mp4: MV.use('export/host/mp4'), png: MV.use('export/host/png'), webm: MV.use('export/host/webm'),
+        kit: MV.use('export/host/kit'), sink: MV.use('export/host/sink'), schedule: MV.use('export/schedule') },
     };
   }
 
@@ -69363,7 +69903,8 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
     };
   }
 
-  // Export (§4.21) through export/host/*: probe + preflight, openSink from the click, progress, cancel, done.
+  // Export (§4.21) through export/host/*: probe + preflight, openSink (or, for the Filmora set, openDirectory) from the
+  // click, progress, cancel, done.
   function installExport(app) {
     const { t } = app;
     let st = { phase: 'idle' };
@@ -69373,9 +69914,12 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
     const ex = () => app.svc.exporter;
     app.exportState = () => st;
     app.exportReset = () => set({ phase: 'idle' });
+    // The name of what the export saves: the file, by the format's extension (export/schedule FORMATS); for the Filmora
+    // set, its folder '<base>_filmora' (its ZIP adds '.zip').
     app.defaultFileName = () => {
-      const ext = app.doc.output.format === 'mp4' ? 'mp4' : 'zip';
-      return ex().schedule.fileName(app.doc, ext);
+      const S = ex().schedule;
+      const format = app.doc.output.format;
+      return format === 'kit' ? S.kitFolder(app.doc) : S.fileName(app.doc, S.FORMATS[format].ext);
     };
     // WebCodecs support for the current size (async; cached per w×h×fps, then the step re-renders).
     app.exportProbe = () => {
@@ -69387,7 +69931,7 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
         probed = { key, value: null };
         ex().mp4.probe({ w, h, fps: o.fps }).then((value) => {
           if (probed.key === key) { probed.value = value; app.bus.emit('export', st); }
-        }).catch(() => { probed.value = { webcodecs: false, codec: null, audioCodec: null, anyCodec: false }; });
+        }).catch(() => { probed.value = { webcodecs: false, codec: null, audioCodec: null, anyCodec: false, vp9Codec: null }; });
       }
       return probed.value;
     };
@@ -69396,10 +69940,13 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
     app.exportChecks = () => {
       if (!app.plan || !app.plan.lines.length) return [{ code: 'no-lines', level: 'block', params: {} }];
       const pr = app.exportProbe() || {};
+      // DESIGN_2_1 §13.10: the VP9 probe (透過動画 and the set's overlay), whether a folder can be written (the set; else
+      // one ZIP) and the effective registry (which screen effects the set's layers leave out, layers-approx).
       const items = ex().schedule.preflight(app.doc, app.plan, {
         webcodecs: typeof VideoEncoder === 'function', codec: pr.codec, audioCodec: pr.audioCodec, anyCodec: pr.anyCodec,
-        fontsReady: fontsReady(),
-        fsAccess: ex().sink.canStream(), songReady: !app.doc.song || app.songReady(), warnings: app.warnings(),
+        vp9Codec: pr.vp9Codec, fontsReady: fontsReady(),
+        fsAccess: ex().sink.canStream(), dirAccess: ex().sink.canDirectory(), songReady: !app.doc.song || app.songReady(),
+        warnings: app.warnings(), registry: app.reg,
       });
       // photos and videos (DESIGN_2_1 §11.7.8): an asset not on this device blocks, with [つなぎ直す]
       const media = app.media ? app.media.preflight() : [];
@@ -69422,17 +69969,31 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
       if (!f || typeof f.fonts.ready !== 'function' || !f.usage.refs.length) return;
       Promise.resolve(f.fonts.ready(f.usage.refs, f.usage.textByFamily)).then(() => app.bus.emit('fonts'), () => app.bus.emit('fonts'));
     };
-    // A large export built in memory asks first (§4.21 pre-flight 'confirm'), however the export starts (button, Ctrl+K,
-    // keys). Such an item exists only without File System Access, where openSink shows no picker and so needs no user
-    // activation: awaiting the dialog before it is safe.
+    // A large export built in memory asks first (§4.21 pre-flight 'confirm': `memory`, or `kit-memory` for the Filmora
+    // set), however the export starts (button, Ctrl+K, keys). Such an item exists only without File System Access (for
+    // the set: without a folder picker), where no picker opens and so none needs the user's gesture: awaiting the
+    // dialog before it is safe.
     const confirmLarge = async () => {
       const item = app.exportChecks().find((c) => c.level === 'confirm');
       if (!item) return true;
       const text = t('exp.pre.memory.confirm', { size: T.fmtBytes(item.params.bytes) });
       return app.confirm ? app.confirm({ text }) : window.confirm(text);
     };
-    const openSink = async (o, name) => {
-      try { return await ex().sink.openSink({ name, kind: o.format === 'mp4' ? 'mp4' : 'zip' }); } catch (e) {
+    // Where the export writes, asked straight from the click (the pickers need the user's gesture): { sink } for a file
+    // (the save dialog, or memory without File System Access); for the Filmora set { dir } — a new folder in the folder
+    // the user picks (openDirectory), or null memory files that become one ZIP where no folder can be written. null:
+    // the user closed the picker (or it failed, then the error is shown).
+    const openTarget = async (o, name) => {
+      const SINK = ex().sink;
+      try {
+        if (o.format === 'kit') {
+          if (!SINK.canDirectory()) return { dir: null };
+          const dir = await SINK.openDirectory({ name: ex().schedule.kitFolder(app.doc) });
+          return dir ? { dir } : null;
+        }
+        const sink = await SINK.openSink({ name, kind: ex().schedule.FORMATS[o.format].ext });
+        return sink ? { sink } : null;
+      } catch (e) {
         set({ phase: 'error', message: t('err.exp.sink') });
         return null;
       }
@@ -69441,17 +70002,20 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
     app.exportStart = async () => {
       if (st.phase === 'running' || starting) return;
       starting = true;
-      let sink = null;
+      let target = null;
       try {
-        if (await confirmLarge()) sink = await openSink(app.doc.output, app.defaultFileName());
+        if (await confirmLarge()) target = await openTarget(app.doc.output, app.defaultFileName());
       } finally { starting = false; }
-      if (!sink) return;
+      if (!target) return;
       const o = app.doc.output;
       const name = app.defaultFileName();
+      // the size and frame rate of this export, for the done state and the guide (the settings may change meanwhile)
+      const size = app.plan ? ex().schedule.outputSize(app.plan.design.aspect, o.short) : { w: 0, h: 0 };
       abort = new AbortController();
       app.pause();
-      set({ phase: 'running', i: 0, N: 0, eta: null, fps: o.fps, short: o.short, started: performance.now() });
-      const onProgress = (p) => set(Object.assign({}, st, { i: p.i, N: p.N, eta: p.eta }));
+      set({ phase: 'running', i: 0, N: 0, eta: null, fps: o.fps, short: o.short, format: o.format, part: null, started: performance.now() });
+      // the Filmora set reports its phase too: 'video' (every video, frame by frame), 'files', 'zip'
+      const onProgress = (p) => set(Object.assign({}, st, { i: p.i, N: p.N, eta: p.eta, part: p.phase || null }));
       // The export renders the committed document: a fork planned from app.doc, whatever the preview shows (a try-on or
       // the compare view render another document on the preview engine).
       const doc = app.doc;
@@ -69459,18 +70023,32 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
       try {
         source = app.engine.fork();
         source.setDoc(doc);
-        const args = { engine: source, doc, sink, signal: abort.signal, onProgress };
-        const result = o.format === 'mp4'
-          ? await ex().mp4.exportVideo(Object.assign(args, { audio: o.audio && app.songReady() ? app.buffer : null }))
-          : await ex().png.exportPngs(Object.assign(args, { alpha: o.format === 'pngAlpha' }));
+        const song = o.audio && app.songReady() ? app.buffer : null;
+        const args = { engine: source, doc, signal: abort.signal, onProgress };
+        let result;
+        if (o.format === 'kit') {
+          // one pass writes every file of the set (export/host/kit); the preview's AssetStore is shared by its forks
+          result = await ex().kit.exportKit(Object.assign(args, { audio: song, dir: target.dir, assets: app.assets }));
+        } else if (o.format === 'webmAlpha') {
+          result = await ex().webm.exportWebm(Object.assign(args, { audio: song, sink: target.sink }));
+        } else if (o.format === 'mp4') {
+          result = await ex().mp4.exportVideo(Object.assign(args, { audio: song, sink: target.sink }));
+        } else {
+          result = await ex().png.exportPngs(Object.assign(args, { sink: target.sink, alpha: o.format === 'pngAlpha' }));
+        }
         if (result.blob) ex().sink.downloadBlob(result.blob, result.name || name);
-        set({ phase: 'done', result: Object.assign({ name }, result) });
+        // a set written into a folder has no single name (result.folder names the folder, result.parent the folder the
+        // user picked, for the done state); a ZIP or a file has one
+        if (o.format === 'kit' && target.dir && target.dir.parentName) result.parent = target.dir.parentName;
+        set({ phase: 'done', result: o.format === 'kit' ? result : Object.assign({ name }, result), format: o.format,
+          w: size.w, h: size.h, fps: o.fps });
       } catch (e) {
         const code = e && e.code ? e.code : 'encode';
         if (code === 'cancelled' || (abort && abort.signal.aborted)) { set({ phase: 'idle' }); app.toast(t('err.exp.cancelled')); }
         else {
           if (typeof console !== 'undefined') console.error(e);
-          set({ phase: 'error', message: t(OUT.errorKey(code), OUT.errorParams(e)) });
+          // the message may name the chosen format (no-webcodecs: 「このブラウザでは{format}を書き出せません」)
+          set({ phase: 'error', message: t(OUT.errorKey(code), Object.assign({ format: t('exp.fmtIn.' + o.format) }, OUT.errorParams(e))) });
         }
       } finally {
         if (source && typeof source.dispose === 'function') source.dispose();

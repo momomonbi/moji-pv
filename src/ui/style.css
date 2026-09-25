@@ -385,6 +385,47 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent);
 .exp-nums { display: flex; justify-content: space-between; font-size: 12px; color: var(--text-2); font-variant-numeric: tabular-nums; }
 .exp-done { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 16px 0; text-align: center; color: var(--ok); }
 .exp-done .exp-title { color: var(--text); }
+/* 形式 (DESIGN_2_1 §13.10): [MP4] [Filmora用] and [その他 ▾] in one segmented box; when the chosen other format's name does
+   not fit beside the pair, the select takes a row of its own (a line above it, never a doubled left edge). */
+.exp-settings .segmented.fmt-seg { flex-wrap: wrap; }
+.fmt-radios { display: flex; flex: 2 1 9em; min-width: 0; }
+.fmt-seg .seg-select { flex: 1 1 auto; min-width: 0; margin-left: -1px; border-left: 1px solid var(--line); box-shadow: 0 -1px 0 var(--line); }
+.fmt-seg .seg-select.is-on { box-shadow: 0 -1px 0 var(--line), inset 0 -2px 0 var(--accent); }
+/* keyboard focus inside a clipping segmented box stays visible (an inset ring) */
+.exp-settings .seg:focus-visible, .exp-settings .seg-select:focus-visible { outline: 2px solid var(--focus); outline-offset: -3px; }
+.exp-phase { font-size: 12.5px; color: var(--text-2); }
+/* the Filmora set's contents (詳しく) and the guide link */
+.kit-box { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; padding-top: 10px; border-top: 1px solid var(--line); }
+.kit-set { display: flex; flex-direction: column; gap: 7px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.kit-set legend { padding: 0; margin-bottom: 6px; }
+.kit-set .check-row { align-items: flex-start; font-size: 12.5px; line-height: 1.45; min-width: 0; }
+.kit-set .check-row input { flex: none; margin-top: 1px; }
+.kit-set .check-row span { min-width: 0; overflow-wrap: anywhere; }
+.kit-set .check-row.is-fixed { opacity: 0.8; }
+/* a file the set always holds or adds by itself: its name stays whole, the reason beside it wraps (the WAV's is long) */
+.kit-set .check-row.is-fixed > span:first-of-type { flex: none; }
+.kit-always { flex: 0 1 auto; font-size: 11px; }
+/* the green screen's how-to line under its checkbox, in line with the label text */
+.kit-set .kit-note { margin: -2px 0 0 24px; font-size: 11.5px; line-height: 1.5; overflow-wrap: anywhere; }
+.kit-pair { display: flex; flex-wrap: wrap; gap: 7px 18px; }
+.kit-howto { align-self: flex-start; min-height: 24px; }
+.kit-howto:hover { text-decoration: underline; }
+/* the done state's file list (cards) and the guide's (compact: name and what it is on one line, wrapping when narrow) */
+.kit-done-files, .kit-help-files { display: flex; flex-direction: column; gap: 6px; width: 100%; margin: 4px 0 0; padding: 0; list-style: none; text-align: left; }
+.kit-done-files li { display: flex; flex-direction: column; gap: 1px; min-width: 0; padding: 6px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); }
+.kit-help-files { gap: 3px; margin: 0; }
+.kit-help-files li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 10px; min-width: 0; }
+.kit-file-name { font-size: 12.5px; font-weight: 700; color: var(--text); overflow-wrap: anywhere; }
+.kit-file-meta { font-size: 11.5px; color: var(--text-2); overflow-wrap: anywhere; }
+.exp-done .kit-howto { align-self: center; }
+.kit-steps { display: flex; flex-direction: column; gap: 6px; margin: 0; padding-left: 1.5em; font-size: 13px; line-height: 1.7; color: var(--text-2); overflow-wrap: anywhere; }
+.kit-key { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 12.5px; color: var(--text-2); }
+.kit-align { margin: 0; font-size: 12.5px; line-height: 1.6; }
+/* 「必要なときだけ」: the other files' uses, each saying when (bullets, not steps) */
+.kit-extras { display: flex; flex-direction: column; gap: 6px; margin: 0; padding-left: 1.3em; font-size: 13px; line-height: 1.7;
+  color: var(--text-2); overflow-wrap: anywhere; list-style: disc; }
+.kit-extras .kit-key { margin-top: 4px; }
+.kit-key-chip { flex: none; width: 18px; height: 18px; border-radius: 4px; background: #00b140; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35); }
 
 /* tap */
 .step-tap .tap-count { font: 700 13px var(--mono); color: var(--gold); }

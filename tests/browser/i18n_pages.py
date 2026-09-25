@@ -7,7 +7,9 @@ AI tab, the timeline drawer, the ≡ menu, the command palette, the shortcut she
 v2.1 adds the area page, the curve widget, マイ素材 (list, page, the 「AIで作る」 form), the keyframe editor, the AI area list
 and the board (a material's name is user data: the en page shows its English name); the photo and video screens (the
 drop label, the library and a row's menu, the asset page, the media rows with the trim row, the crop overlay and the
-picker; asset names are user data) come last.
+picker; asset names are user data) come last; then the editor-ready output (package H.3): step ④ with Filmora用 and 詳しく,
+「Filmoraで使うには」, その他 › 透過動画（WebM）, and the Filmora set's progress and done state (its exporter stubbed: the
+words are checked here, the files by the flows).
 On every screen the visible text and the accessible names (aria-label, title, placeholder, alt) are read and checked:
 
   en page   no Japanese text (kana or kanji) outside the product name 文字PVメーカー and user data (the lyrics here are
@@ -32,7 +34,7 @@ sys.path.insert(0, str(ROOT / 'dev'))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from browser import launch, new_page  # noqa: E402
 from playwright.async_api import async_playwright  # noqa: E402
-from ui_flows import FONT_HOSTS, RECORD, ensure_built, serve  # noqa: E402
+from ui_flows import FONT_HOSTS, KIT_CODECS, RECORD, ensure_built, serve  # noqa: E402
 
 PRODUCT = '文字PVメーカー'
 LYRICS = {
@@ -46,6 +48,9 @@ RAW_KEY = re.compile(r'^[a-z][A-Za-z0-9]*(?:\.[A-Za-z][A-Za-z0-9-]*)+$')
 WORD = re.compile(r'[A-Za-z][A-Za-z0-9\'’.-]*[A-Za-z0-9]|[A-Za-z]')
 VERSION = re.compile(r'^v?\d+(\.\d+)+$')
 HEX = re.compile(r'#[0-9A-Fa-f]{6}\b')          # a colour code (the colour rows and a photo's swatches) is not a word
+# The ASCII part of a file name the export writes (the Filmora set's suffixes '_overlay.webm', 'README_Filmora.txt' and its
+# folder '_filmora'; DESIGN_2_1 §13.9, FG8) is a name, not a word.
+FILE_NAME = re.compile(r'[A-Za-z0-9_()\-]*(?:\.(?:mp4|webm|srt|lrc|wav|txt|zip)\b|_filmora\b)')
 BROKEN = re.compile(r'\[object \w+\]|\bundefined\b|\bNaN\b|\{[A-Za-z0-9_]+\}')
 # English words a Japanese UI legitimately shows: formats and codecs, units, key names, services and model names,
 # the lab-free product parts that are names (not prose). Font families and part keys are added from the page.
@@ -54,9 +59,10 @@ MP4 PNG ZIP LRC JSON WAV MP3 M4A OGG FLAC AAC H.264 HEX RGB BPM fps px du Hz kHz
 Ctrl Shift Alt Esc Enter Space Tab Del Delete Backspace Home End PageUp PageDown Cmd Option Win F1 F2 F6 F11 I O R T L
 Gemini Claude Google Anthropic Opus Sonnet Haiku Flash gemini-3.8-flash pro preview
 Chrome Edge WebCodecs OK x vs PV MIT ti ar
+WebM SRT README Filmora VP9 Premiere DaVinci
 '''.split()}
 # Proper names of other works shown as they are (removed before the word check on the ja page).
-JA_NAMES = ('Google Fonts', 'SIL Open Font License', 'File System Access', 'mp4-muxer', '@anthropic-ai/sdk', 'standardwebhooks',
+JA_NAMES = ('After Effects', 'Google Fonts', 'SIL Open Font License', 'File System Access', 'mp4-muxer', '@anthropic-ai/sdk', 'standardwebhooks',
             '@stablelib/base64', 'fast-sha256')
 # Language names are written in their own language: the ja page offers "English".
 JA_TEXTS = {'English'}
@@ -186,7 +192,7 @@ def check_screen(walk, name, items, table, families):
         else:
             if it['license']:
                 continue
-            rest = HEX.sub(' ', text)
+            rest = FILE_NAME.sub(' ', HEX.sub(' ', text))
             for proper in JA_NAMES:
                 rest = rest.replace(proper, ' ')
             words = [w for w in english_words(rest) if w.lower() not in JA_WORDS and w not in families and not VERSION.match(w)]
@@ -329,6 +335,59 @@ async def media_screens(w, table, families):
     await w.act('panel.close')
 
 
+# The Filmora set's exporter, stubbed for the words of its progress and done state: it reports the videos (動画), waits
+# for window.__kitResolve(), then reports the files (曲・字幕・説明) and returns the files export/schedule.kitFiles names.
+STUB_KIT = """() => { const a = window.__mv, S = MV.use('export/schedule');
+  a.svc.exporter.kit = { exportKit: (o) => new Promise((resolve) => {
+    o.onProgress({ i: 12, N: 30, eta: 8, phase: 'video' });
+    window.__kitResolve = () => {
+      o.onProgress({ i: 30, N: 30, eta: 0, phase: 'files' });
+      const files = S.kitFiles(o.doc, a.plan, {}).map((f) => ({ name: f.name, kind: f.kind, bytes: f.est }));
+      resolve({ files, ms: 1, audio: 'aac', frames: 30, folder: o.dir ? o.dir.name : S.kitFolder(o.doc), bytes: 1 });
+    };
+  }) }; }"""
+
+
+# The folder picker, faked with an OPFS folder that stands for the one the user picks. Its name is the user's, not the
+# app's words, so it is in the page's language (the done state and the guide name it).
+PICK_DIR = {'ja': '動画', 'en': 'Videos'}
+FAKE_PICK = """async (name) => { const root = await navigator.storage.getDirectory();
+  try { await root.removeEntry(name, { recursive: true }); } catch (e) { /* not there yet */ }
+  window.showDirectoryPicker = async () => root.getDirectoryHandle(name, { create: true }); }"""
+
+
+async def kit_screens(w, table, families):
+    page = w.page
+    await w.run(KIT_CODECS)
+    await w.run(FAKE_PICK, PICK_DIR[w.lang])
+    await w.act('step.go', {'step': 'export'})
+    await page.wait_for_function('() => !!window.__mv.exportProbe()', timeout=15000)
+    await page.click('[data-seg="format"] [data-v="kit"]')
+    await w.run("() => { document.querySelector('.step-export details.more').open = true; }")
+    await screen(w, 'export-kit', table, families)
+    await page.click('[data-kit-help="planned"]')
+    await page.wait_for_function('() => !!document.querySelector("dialog.dlg[open] .kit-steps")')
+    await screen(w, 'kit-help', table, families)
+    await w.escape()
+    await page.select_option('[data-other="format"]', 'webmAlpha')
+    await screen(w, 'export-webm', table, families)
+    await page.click('[data-seg="format"] [data-v="kit"]')
+    await w.run(STUB_KIT)
+    await w.run('() => { window.__kitRun = window.__mv.exportStart(); }')
+    await page.wait_for_function('() => !!document.querySelector(".step-export .exp-phase")')
+    await screen(w, 'kit-progress', table, families)
+    await w.run('() => window.__kitResolve()')
+    await page.wait_for_function('() => !!document.querySelector(".kit-done-files")')
+    await screen(w, 'kit-done', table, families)
+    await page.click('[data-kit-help="written"]')
+    await page.wait_for_function('() => !!document.querySelector("dialog.dlg[open] .kit-steps")')
+    await screen(w, 'kit-help-done', table, families)
+    await w.escape()
+    await w.run("""() => { const a = window.__mv; a.exportReset();
+      a.batch({ label: ['undo.output', {}] }, MV.use('ui/output').formatCmds(a.doc, 'mp4'));
+      document.querySelector('.step-export details.more').open = false; }""")
+
+
 async def walk_page(browser, base, lang, shots):
     page = await new_page(browser, viewport={'width': 1440, 'height': 900})
     await page.add_init_script(INSTALL_KEY_LOG)
@@ -356,6 +415,7 @@ async def walk_page(browser, base, lang, shots):
         await screen(w, 'step-' + step, table, families)
     await page.click('[data-ctl="more"] > summary')
     await screen(w, 'export-more', table, families)
+    await kit_screens(w, table, families)
     await w.act('step.go', {'step': 'lyrics'})
     await w.act('panel.details')
     await screen(w, 'details-work', table, families)

@@ -959,6 +959,8 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
     // (ui/media_io's progress row when absent).
     function saveAs(opts) { return opts ? savePackage(null, opts) : withProgress('save', null, (pr) => savePackage(null, pr)); }
 
+    // saveText(text, name, type, onHandle?, note?): a text file through the save dialog where the browser has one, else a
+    // download; a toast says where it went (≡ › ファイル › 時間つき歌詞 and 字幕, ui/menus).
     async function saveText(text, name, type, onHandle, note) {
       if (typeof window.showSaveFilePicker === 'function') {
         try {
@@ -1037,7 +1039,7 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
 
     return {
       state: () => state, schedule, flush, flushNow, restore, recent, openRecent, newWork, open, openFiles,
-      save, saveAs, saveLight, savePackage, openPackage, saveLrc, lrcText, putSong, getSong, installDrop, begin, fileName,
+      save, saveAs, saveLight, savePackage, openPackage, saveLrc, lrcText, saveText, putSong, getSong, installDrop, begin, fileName,
       clearDevice, workId: () => workId, fileState,
       putMedia, getMedia, hasMedia, putIndex, getIndex, putThumbs, getThumbs, storageInfo, missingMedia, importMedia,
       importMediaFiles, routeFile, device, mediaBlobs, usedMedia,
