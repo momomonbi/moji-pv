@@ -1,7 +1,7 @@
 /* 文字PVメーカー v2 — original work. マイ素材: the material page (knobs, weight, uses, recipe JSON, remake, duplicate, delete) and the material menus (DESIGN_2_1 §6.9). */
 MV.def('ui/material_page', ['ui/dom', 'ui/icons', 'ui/widgets', 'ui/part_browser', 'ui/fields', 'ui/selection', 'core/recipe',
-  'core/paths', 'planner/areas', 'parts/mix'],
-(dom, I, W, PB, F, S, RC, P, AREAS, MIX) => {
+  'core/paths', 'planner/areas', 'parts/mix', 'ui/ai_controller'],
+(dom, I, W, PB, F, S, RC, P, AREAS, MIX, AC) => {
   'use strict';
 
   const { h } = dom;
@@ -59,6 +59,19 @@ MV.def('ui/material_page', ['ui/dom', 'ui/icons', 'ui/widgets', 'ui/part_browser
       ? (entry.recipe && entry.recipe.scope === 'run' ? BUDGET_MS.ornamentRun : BUDGET_MS.ornamentCut) : BUDGET_MS.other;
     const bars = Math.max(1, Math.min(COST_BARS, Math.ceil(ms / max * COST_BARS)));
     return { ms, max, bars, word: bars <= 2 ? 'light' : bars <= 3 ? 'normal' : 'heavy' };
+  }
+
+  // knobLimit(kind, base, factors, name, spec, media) → the largest value of knob `name` (in its steps, not below the value
+  // it has) the store accepts with the other knobs as they are. The page bakes the knobs into the recipe and keeps them,
+  // and core/commands checks a recipe with every knob at its maximum (core/recipe.problems), so an AI material fitted
+  // to the budget has no room above ×1 (§5.8). media: doc.media.
+  function knobLimit(kind, base, factors, name, spec, media) {
+    const cur = factors[name] === undefined ? 1 : factors[name];
+    const step = spec.step > 0 ? spec.step : 0.05;
+    for (let v = spec.max; v > cur; v = Math.round((v - step) * 1e6) / 1e6) {
+      if (!RC.problems(kind, RC.withKnobs(base, Object.assign({}, factors, { [name]: v })), { media }).length) return v;
+    }
+    return Math.min(spec.max, cur);
   }
 
   // duplicateCmd(doc, entry) → material.put of a copy under the next id, made by the user (§6.9 複製).
@@ -185,12 +198,16 @@ MV.def('ui/material_page', ['ui/dom', 'ui/icons', 'ui/widgets', 'ui/part_browser
       const want = base ? RC.hash(RC.withKnobs(base, factors)) : null;
       if (!base || RC.hash(e.recipe) !== want) { base = e.recipe; factors = {}; }
       return names.map((name) => {
-        const spec = specs[name];
+        // a knob goes only as far as the store accepts (MAI-4): its slider ends there
+        const spec = specs[name].type === 'num'
+          ? Object.assign({}, specs[name], { max: knobLimit(e.kind, base, factors, name, specs[name], app.doc.media) }) : specs[name];
         const label = spec.label ? spec.label[t.lang] || spec.label.ja : t('mat.knob.' + name);
         const field = { id: 'mat/' + name, widget: 'number', spec, label: 'fld.param', path: null };
         const env = {
           app, t, label, field,
-          commit: (v) => write(Object.assign({}, factors, { [name]: v }), null),
+          // keyboard steps on the slider merge into one undo step per knob, as the inspector's sliders do
+          commit: (v, c) => write(Object.assign({}, factors, { [name]: v }),
+            c && (c.mergeKey || c.merge) ? c.mergeKey || 'mat:' + e.id + ':' + name : null),
           gesture: () => {
             gesture = app.store.gesture('mat:' + e.id + ':' + name);
             return { set: (v) => write(Object.assign({}, factors, { [name]: v }), 'mat:' + e.id + ':' + name),
@@ -309,7 +326,9 @@ MV.def('ui/material_page', ['ui/dom', 'ui/icons', 'ui/widgets', 'ui/part_browser
       go.addEventListener('click', () => {
         if (!app.ai) return;
         app.openPanel('ai', 'ai');
-        app.ai.run('material', { description: text.value.trim(), kind: e.kind, current: e });
+        // a photo or video layer keeps its picture: the controller lists it (and, while 写真・動画をAIが使ってよい is on,
+        // the pictures on this device) for the AI (DESIGN_2_1 §11.5.8)
+        app.ai.run('material', { description: text.value.trim(), kind: e.kind, current: e, media: AC.mediaOnDevice(app.doc, app.media) });
       });
       return h('div', { class: 'pb-make-form' }, text, h('div', { class: 'row-actions' }, h('span', { class: 'grow' }), go), reason);
     }
@@ -373,7 +392,7 @@ MV.def('ui/material_page', ['ui/dom', 'ui/icons', 'ui/widgets', 'ui/part_browser
   }
 
   return {
-    keyOfId, idOfKey, entryOf, usesOf, usePlaces, weightOf, duplicateCmd, putCmd, checkRecipe, problemText, usable, kindText, nameText,
+    keyOfId, idOfKey, entryOf, usesOf, usePlaces, weightOf, knobLimit, duplicateCmd, putCmd, checkRecipe, problemText, usable, kindText, nameText,
     menuItems, remove, duplicate, page, listRows,
   };
 });

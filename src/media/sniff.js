@@ -62,20 +62,30 @@ MV.def('media/sniff', [], () => {
   // JPEG: the first SOFn marker gives the coded size (EXIF orientation is applied later by the decoder).
   function jpeg(b) {
     const r = out('image', 'jpeg', 'image/jpeg', { anim: false, alphaHint: false });
-    for (let p = 2; p + 4 <= b.length;) {
+    const size = jpegWalk(b, 2);
+    if (size && size.w !== undefined) { r.w = size.w; r.h = size.h; }
+    return r;
+  }
+
+  // jpegWalk(b, p) walks a JPEG's markers from offset p of the bytes b to the first SOFn: { w, h } (the coded size);
+  // { next } when b ends before it (next: the offset in b where the walk goes on, the start of a segment, which may lie
+  // past b's end: probe reads on from there when large ICC or XMP segments come first); null at the scan data or the
+  // end of the image, where no SOFn can follow.
+  function jpegWalk(b, p0) {
+    let p = p0;
+    for (;;) {
+      if (p + 4 > b.length) return { next: p };
       if (b[p] !== 0xff) { p++; continue; }
       const m = b[p + 1];
       if (m === 0xff) { p++; continue; }
       if (m === 0xd8 || m === 0x01 || (m >= 0xd0 && m <= 0xd7)) { p += 2; continue; }
-      if (m === 0xd9 || m === 0xda) break;
-      const len = u16be(b, p + 2);
-      if (m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc && p + 9 <= b.length) {
-        r.h = u16be(b, p + 5); r.w = u16be(b, p + 7);
-        break;
+      if (m === 0xd9 || m === 0xda) return null;
+      if (m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc) {
+        if (p + 9 > b.length) return { next: p };
+        return { h: u16be(b, p + 5), w: u16be(b, p + 7) };
       }
-      p += 2 + len;
+      p += 2 + u16be(b, p + 2);
     }
-    return r;
   }
 
   // GIF: the logical screen size; a NETSCAPE2.0 loop block or a second image descriptor makes it animated.
@@ -191,5 +201,5 @@ MV.def('media/sniff', [], () => {
     return /<svg[\s>]/i.test(text);
   }
 
-  return { HEAD, PACKAGE_MIME, sniff };
+  return { HEAD, PACKAGE_MIME, sniff, jpegWalk };
 });

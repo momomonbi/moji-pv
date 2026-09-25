@@ -136,9 +136,10 @@ MV.def('ai/recipe', ['core/num', 'core/hash', 'core/color', 'core/curve', 'core/
     }
 
     // A param value written as text → a typed value through the part's spec (numbers, booleans, enums, curves as a
-    // name or JSON, inks); undefined when it does not fit. Media params are never set this way (§11.2.3).
+    // name or JSON, inks); undefined when it does not fit. Media params are never set this way (§11.2.3), and neither
+    // are free-text params (a label or a number the part draws): an AI material shows only allow-listed glyphs (§5.12).
     function paramValue(spec, text) {
-      if (!spec || spec.type === 'media') return undefined;
+      if (!spec || spec.type === 'media' || spec.type === 'text') return undefined;
       const s = typeof text === 'string' ? text.trim() : String(text);
       let v = s;
       if (spec.type === 'num' || spec.type === 'int') v = s === '' ? NaN : Number(s);
@@ -319,7 +320,7 @@ MV.def('ai/recipe', ['core/num', 'core/hash', 'core/color', 'core/curve', 'core/
     function compositeOf(ai, kind, base, ctx, seed) {
       switch (kind) {
         case 'ornament': {
-          const scope = ai.scope === 'run' ? 'run' : 'cut';
+          const scope = ctx.scope || (ai.scope === 'run' ? 'run' : 'cut');
           return { follow: scope === 'run' ? 'own' : 'text', knobs: knobsOf(ai.knobs, kind), layers: layersOf(ai, kind, ctx),
             parts: partsOf(ai, kind, base, scope), scope, seed };
         }
@@ -404,33 +405,40 @@ MV.def('ai/recipe', ['core/num', 'core/hash', 'core/color', 'core/curve', 'core/
 
     // fromAi(ai, registry, kindHint?, opts?) → { entry: MaterialEntry without id | null, warnings }.
     // opts = { media: the request's [media] list ([{ n, id, kind, anim, alpha, dur }]), lang: 'ja' | 'en' (the language
-    // the blurb is written in) }. kindHint (the standalone tool's kind, or the material being remade) wins over the
-    // answer's kind. The base registry checks variant bases and inner parts, so materials never nest.
+    // the blurb is written in), scope: 'cut' | 'run' (an ornament the tool asked for at that scope) }. kindHint (the
+    // standalone tool's kind, or the material being remade) wins over the answer's kind, and opts.scope over its scope
+    // (a variant of a base part of the other scope is not used). The base registry checks variant bases and inner
+    // parts, so materials never nest.
     function fromAi(ai, registry, kindHint, opts) {
       const o = opts || {};
       const warnings = [];
       const warn = (w) => { warnings.push(w); };
       const a = isObject(ai) ? ai : {};
       const name = cleanText(a.name, RC.LIMITS.name) || UNTITLED[0];
+      const nameEn = cleanText(a.nameEn, RC.LIMITS.name);
+      const shownName = o.lang === 'en' && nameEn ? nameEn : name;          // the warnings name it in the page's language
       const kind = RC.MAT_KINDS.includes(kindHint) ? kindHint : RC.MAT_KINDS.includes(a.kind) ? a.kind : null;
       const base = registry.base || registry;
-      if (!kind) { warn(['ai.warn.matEmpty', { name }]); return { entry: null, warnings }; }
+      if (!kind) { warn(['ai.warn.matEmpty', { name: shownName }]); return { entry: null, warnings }; }
+      const scope = kind === 'ornament' && (o.scope === 'cut' || o.scope === 'run') ? o.scope : null;
       const baseKey = str(a.base);
-      const def = baseKey ? basePart(base, kind, baseKey) : null;
+      let def = baseKey ? basePart(base, kind, baseKey) : null;
+      if (def && scope && (def.scope || 'cut') !== scope) def = null;
       if (baseKey && !def) warn(['ai.warn.unknown', { kind, key: baseKey }]);
-      const ctx = { media: Array.isArray(o.media) ? o.media : null, warn };
+      const ctx = { media: Array.isArray(o.media) ? o.media : null, scope, warn };
       let recipe = null;
       if (def) recipe = variantOf(a, kind, base, def);
       else if (RC.COMPOSITE_KINDS.includes(kind)) recipe = compositeOf(a, kind, base, ctx, H.hash32('material', name));
       const mediaCtx = { list: list(ctx.media).map((x) => ({ id: x.id, kind: x.kind, anim: !!x.anim, alpha: !!x.alpha })) };
-      const fit = recipe ? fitted(kind, recipe, { registry: base, media: mediaCtx }, warn, name) : null;
-      if (!fit) { warn(['ai.warn.matEmpty', { name }]); return { entry: null, warnings }; }
+      const fit = recipe ? fitted(kind, recipe, { registry: base, media: mediaCtx }, warn, shownName) : null;
+      if (!fit) { warn(['ai.warn.matEmpty', { name: shownName }]); return { entry: null, warnings }; }
       const blurb = cleanText(a.blurb, RC.LIMITS.blurb);
       const tags = [...new Set(list(a.tags).map(str).filter((x) => S.TAGS.includes(x)))].slice(0, RC.LIMITS.tags);
       const season = REG.SEASONS.includes(a.season) ? a.season : null;
       const entry = {
-        kind, by: 'ai', name: { ja: name, en: cleanText(a.nameEn, RC.LIMITS.name) },
-        blurb: blurb ? { ja: blurb, en: o.lang === 'en' ? blurb : '' } : null, tags, season, pool: false, recipe: fit,
+        kind, by: 'ai', name: { ja: name, en: nameEn },
+        // the blurb is written in the page's language (materialRequest, systemText) and kept under that one
+        blurb: blurb ? (o.lang === 'en' ? { ja: '', en: blurb } : { ja: blurb, en: '' }) : null, tags, season, pool: false, recipe: fit,
       };
       return { entry, warnings };
     }
@@ -481,7 +489,7 @@ MV.def('ai/recipe', ['core/num', 'core/hash', 'core/color', 'core/curve', 'core/
       const curve = motion ? motion.curve : shared.ease ? shared.ease.value : null;
       return {
         name: e.name ? e.name.ja : '', nameEn: e.name ? e.name.en || '' : '', kind: e.kind, scope: r.scope === 'run' ? 'run' : 'cut',
-        season: e.season || '', tags: list(e.tags).slice(), blurb: e.blurb ? e.blurb.ja || '' : '', base: r.base || '',
+        season: e.season || '', tags: list(e.tags).slice(), blurb: e.blurb ? e.blurb.ja || e.blurb.en || '' : '', base: r.base || '',
         params: paramsToAi(r.params), parts: list(r.parts).map((p) => ({ key: p.key, params: paramsToAi(p.params) })),
         layers: list(r.layers).map((l) => layerToAi(l, mediaList)),
         unit: motion ? motion.unit : 'glyph',
@@ -504,24 +512,29 @@ MV.def('ai/recipe', ['core/num', 'core/hash', 'core/color', 'core/curve', 'core/
       lens: 'a camera texture (shake, sway)', ornament: 'a decoration near the words, or with scope run an atmosphere',
       seam: 'a transition between cuts',
     });
+    const SCOPE_WORDS = Object.freeze({ cut: 'a decoration near the words', run: 'an atmosphere over the background of a segment' });
 
     function outLang(lang) { return lang === 'en' ? 'English' : 'Japanese'; }
 
     // materialRequest(doc, plan, registry, { description, kind, uiLang, current?, media? }) → { system, prompt, schema,
-    // effort: 'medium', sent }. current: the entry to remake. media: the [media] list (ai/direct.mediaSent) when the
-    // user allowed photos and videos; only names, sizes and vision text are sent (§11.6.4).
+    // effort: 'medium', sent }. current: the entry to remake. media: the [media] list (mediaSent) when the answer may hold
+    // media layers (§11.5.8; [] still allows a picture the user picks, src ''); null or absent: none. Only numbers,
+    // sizes and (when allowed) the vision text are sent, never file names (§11.6.4).
     function materialRequest(doc, plan, registry, opts) {
       const o = opts || {};
       const kind = RC.MAT_KINDS.includes(o.kind) ? o.kind : o.current && RC.MAT_KINDS.includes(o.current.kind) ? o.current.kind : 'ornament';
-      const media = Array.isArray(o.media) && o.media.length ? o.media : null;
+      const media = Array.isArray(o.media) ? o.media : null;
       const lang = o.uiLang === 'en' ? 'en' : 'ja';
       const base = registry.base || registry;
+      // an ornament asked for one place (the 空気 row: an atmosphere; a 装飾 row: near the words), or remade, keeps its scope
+      const scope = kind !== 'ornament' ? null : o.scope === 'cut' || o.scope === 'run' ? o.scope
+        : o.current ? ornamentScope(o.current, base) : null;
       const system = [
-        'You design one material (素材) for a lyric-motion video (文字PV): ' + KIND_WORDS[kind] + '. A material is data built '
-          + 'from existing parts and the primitives below, never code.',
+        'You design one material (素材) for a lyric-motion video (文字PV): ' + (scope ? SCOPE_WORDS[scope] : KIND_WORDS[kind])
+          + '. A material is data built from existing parts and the primitives below, never code.',
         'Prefer a variant (base = an existing part of the same kind with other values) when one comes close; otherwise build '
           + 'it from layers, tracks or oscillators. Keep it light: few layers, calm blinking.',
-        'kind must be "' + kind + '". "use" is ignored here (slot "none").',
+        'kind must be "' + kind + '"' + (scope ? ' and scope "' + scope + '"' : '') + '. "use" is ignored here (slot "none").',
         'name: a short Japanese name; nameEn: the English name; blurb (one short sentence) and "question" in ' + outLang(lang) + '.',
         'If the description is unclear or impossible, set understood=false and ask in "question".',
       ].join('\n');
@@ -531,14 +544,15 @@ MV.def('ai/recipe', ['core/num', 'core/hash', 'core/color', 'core/curve', 'core/
         o.current ? 'Current material (remake it): ' + JSON.stringify(toAi(o.current, { media })) : '',
         '',
         'Existing parts of this kind (base or parts):',
-        CAT.catalogText(CAT.catalog(base, doc, kind === 'ornament' ? ['ornament', 'atmos'] : [kind], lang, { mine: false, cutOrnaments: true })),
-        media ? '\n' + mediaText(media) : '',
+        CAT.catalogText(CAT.catalog(base, doc, kind !== 'ornament' ? [kind] : scope === 'run' ? ['atmos'] : scope === 'cut' ? ['ornament']
+          : ['ornament', 'atmos'], lang, { mine: false, cutOrnaments: true })),
+        media && media.length ? '\n' + mediaText(media) : '',
         '',
         CAT.recipeText({ media: !!media }),
       ];
       return {
         system, prompt: parts.filter((p) => p !== '').join('\n'), schema: media ? MATERIAL_SCHEMA_MEDIA : MATERIAL_SCHEMA,
-        effort: 'medium', sent: { kind, current: o.current ? o.current.id : null, media: media || [], lang },
+        effort: 'medium', sent: { kind, scope, current: o.current ? o.current.id : null, media, lang },
       };
     }
 
@@ -559,14 +573,17 @@ MV.def('ai/recipe', ['core/num', 'core/hash', 'core/color', 'core/curve', 'core/
       return v + ' ' + (cx < 1 / 3 ? 'left' : cx > 2 / 3 ? 'right' : 'center');
     }
 
-    // mediaSent(doc, { only?, lang? }) → [{ n, id, kind, anim, alpha, dur, w, h, name, line }]: the library in its
-    // order (at most 40), numbered for the AI. `only` (asset ids) keeps the assets whose bytes are on this device. The
-    // line holds names, sizes and the vision text only, never pixels (§11.6.4).
+    // mediaSent(doc, { only?, lang?, described? }) → [{ n, id, kind, anim, alpha, dur, w, h, name, line }]: the library
+    // in its order (at most 40), numbered for the AI. `only` (asset ids) keeps the assets whose bytes are on this device.
+    // The line (what the AI reads) holds the number, kind, length, size and shape, plus the vision text (caption, colours,
+    // text area, subject) unless `described` is false (写真・動画をAIが使ってよい is off): never a file name, never pixels
+    // (§11.6.4). `name` stays on this device (review rows, warnings).
     function mediaSent(doc, opts) {
       const o = opts || {};
       const all = doc && doc.media && Array.isArray(doc.media.list) ? doc.media.list : [];
       const only = Array.isArray(o.only) ? new Set(o.only) : null;
       const lang = o.lang === 'en' ? 'en' : 'ja';
+      const described = o.described !== false;
       const out = [];
       for (const e of all) {
         if (out.length >= MAX_MEDIA) break;
@@ -574,7 +591,7 @@ MV.def('ai/recipe', ['core/num', 'core/hash', 'core/color', 'core/curve', 'core/
         const n = out.length;
         const kind = e.kind === 'video' ? 'video' : e.anim ? 'animation' : 'image';
         const shape = e.w > e.h ? 'landscape' : e.w < e.h ? 'portrait' : 'square';
-        const ai = isObject(e.ai) ? e.ai : null;
+        const ai = described && isObject(e.ai) ? e.ai : null;
         const caption = ai && ai.caption ? (ai.caption[lang] || ai.caption[lang === 'en' ? 'ja' : 'en'] || '') : '';
         const bits = [caption || '(no description)'];
         if (ai && Array.isArray(ai.colors) && ai.colors.length) bits.push('colours ' + ai.colors.join(' '));
@@ -582,7 +599,7 @@ MV.def('ai/recipe', ['core/num', 'core/hash', 'core/color', 'core/curve', 'core/
         if (ai && isObject(ai.subject)) bits.push('subject: ' + boxWords(ai.subject));
         // Never the file name: the AI gets only the kind, size, shape and what the user let the vision step describe.
         const line = 'asset:' + n + ' ' + kind + (isNumber(e.dur) && kind !== 'image' ? ' ' + clock(e.dur) : '') + ' ' + e.w + '×'
-          + e.h + ' ' + shape + ' — ' + bits.join(' · ');
+          + e.h + ' ' + shape + (described ? ' — ' + bits.join(' · ') : '');
         out.push({ n, id: e.id, kind: e.kind, anim: !!e.anim, alpha: !!e.alpha, dur: isNumber(e.dur) ? e.dur : null, w: e.w, h: e.h,
           name: String(e.name), line });
       }
@@ -616,10 +633,18 @@ MV.def('ai/recipe', ['core/num', 'core/hash', 'core/color', 'core/curve', 'core/
     }
 
     // The slot a material takes at a scope (§5.11): 'atmos' for a run ornament, 'ornament' / 'filter' (a free index is
-    // picked), the kind itself otherwise.
-    function slotFor(entry) {
-      if (entry.kind === 'ornament') return entry.recipe.scope === 'run' ? 'atmos' : 'ornament';
+    // picked), the kind itself otherwise. With the registry, a variant ornament has its base part's scope.
+    function slotFor(entry, registry) {
+      if (entry.kind === 'ornament') return ornamentScope(entry, registry) === 'run' ? 'atmos' : 'ornament';
       return entry.kind;
+    }
+
+    // An ornament material's scope: its recipe's, or (with the registry) a variant's base part's.
+    function ornamentScope(entry, registry) {
+      const r = isObject(entry.recipe) ? entry.recipe : {};
+      const def = r.base && registry ? (registry.base || registry).get('ornament', r.base) : null;
+      if (def) return def.scope === 'run' ? 'run' : 'cut';
+      return r.scope === 'run' ? 'run' : 'cut';
     }
 
     // The lowest free index of a list slot (ornament#i, filter#i) at a scope: not pinned by the user or a lock there
@@ -645,9 +670,11 @@ MV.def('ai/recipe', ['core/num', 'core/hash', 'core/color', 'core/curve', 'core/
       return line && Array.isArray(line.cuts) ? line.cuts : [];
     }
 
-    // materialChanges(doc, plan, registry, json, { rev, sent, useAt?: { scope, slot } }) → { understood, question,
+    // materialChanges(doc, plan, registry, json, { rev, sent, useAt?: { scope, slot, paths? } }) → { understood, question,
     // changes, warnings }: one material change, plus with useAt one dependent pin at that scope ('work' | 'line/<id>' |
-    // 'cut/<key>'; slot 'ornament' / 'filter' take the first free index) that requires the material.
+    // 'cut/<key>'; slot 'ornament' / 'filter' take the first free index) that requires the material; with useAt.paths
+    // (the inspector's selected lines or cuts, §6.9: one batch) one at each of those pin paths. A place whose slot does
+    // not take the material (an atmosphere on a 装飾 row) gets none (ai.warn.noSlot).
     function materialChanges(doc, plan, registry, json, opts) {
       const o = opts || {};
       const sent = o.sent || {};
@@ -655,23 +682,41 @@ MV.def('ai/recipe', ['core/num', 'core/hash', 'core/color', 'core/curve', 'core/
       if (!json || !isObject(json.material)) return { understood: false, question, changes: [], warnings: [['ai.warn.empty', {}]] };
       if (json.understood === false) return { understood: false, question, changes: [], warnings: [] };
       const current = sent.current && doc.materials ? doc.materials.list.find((m) => m.id === sent.current) || null : null;
-      const res = fromAi(json.material, registry, current ? current.kind : sent.kind, { media: sent.media, lang: sent.lang });
+      const res = fromAi(json.material, registry, current ? current.kind : sent.kind, { media: sent.media, lang: sent.lang, scope: sent.scope });
       if (!res.entry) return { understood: true, question, changes: [], warnings: res.warnings };
+      // a remake that lost a photo or video layer says so (the picture is no longer in the material)
+      if (current && mediaLayers(res.entry.recipe) < mediaLayers(current.recipe)) {
+        res.warnings.push(['ai.warn.matMediaLost', { name: (sent.lang === 'en' && current.name.en) || current.name.ja }]);
+      }
       const make = { rev: o.rev, prefix: '', srcs: CH.rowSrcs(doc) };
       const mat = materialChange(doc, res.entry, { id: 'mat:0', current }, make);
       const changes = [mat];
       const use = o.useAt && typeof o.useAt.scope === 'string' ? o.useAt : null;
       if (use) {
-        const dep = useChange(doc, plan, mat, use, make);
-        if (dep) changes.push(dep);
-        else res.warnings.push(['ai.warn.noSlot', { n: 0 }]);
+        const places = Array.isArray(use.paths) && use.paths.length ? use.paths.map(useAtOf) : [use];
+        let missed = false;
+        for (const at of places) {
+          const dep = at ? useChange(doc, plan, registry, mat, at, make) : null;
+          if (dep) changes.push(dep);
+          else missed = true;
+        }
+        if (missed) res.warnings.push(['ai.warn.noSlot', { n: 0 }]);
       }
       return { understood: true, question, changes, warnings: res.warnings };
     }
 
-    function useChange(doc, plan, mat, use, make) {
+    // A pin path → the place useChange takes ({ scope, slot }); null when it does not parse.
+    function useAtOf(path) {
+      try { return { scope: P.scopeKey(path), slot: P.parse(path).slot }; } catch (e) { return null; }
+    }
+
+    function mediaLayers(recipe) { return list(recipe && recipe.layers).filter((l) => isObject(l) && l.prim === 'media').length; }
+
+    function useChange(doc, plan, registry, mat, use, make) {
       const scope = use.scope;
-      let slot = typeof use.slot === 'string' && use.slot ? use.slot : slotFor(mat.entry);
+      const want = slotFor(mat.entry, registry);
+      let slot = typeof use.slot === 'string' && use.slot ? use.slot : want;
+      if (slot.replace(/#[0-9]$/, '') !== want) return null;      // e.g. a decoration made for the 空気 row
       if (slot === 'ornament' || slot === 'filter') slot = freeIndex(doc, plan, scope, slot);
       if (!slot) return null;
       const path = scope + ':' + slot;
@@ -683,6 +728,7 @@ MV.def('ai/recipe', ['core/num', 'core/hash', 'core/color', 'core/curve', 'core/
       const fields = {
         id: 'use:' + path, kind: 'part', scope: kind, path, slot, partKind: mat.entry.kind,
         from: pin ? pin.v : null, fromSource: pin ? 'pin:' + kind : 'auto', to: key, requires: [mat.id], matName: mat.matName,
+        matLabel: mat.entry.name,
         group: kind === 'cut' ? 'cuts' : kind === 'line' ? 'lines' : 'work',
         label: ['ai.ch.value', { where: whereOf(plan, parsed.scope), field: fieldOf(mat.entry.kind, slot), from: pin ? pin.v : null, to: key }],
       };

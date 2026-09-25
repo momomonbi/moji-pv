@@ -70,8 +70,10 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
   //   (DESIGN_2_1) t (absolute frame time, for media on the song clock), backdrop, quality, thumb (posters only),
   //   visible (device rect x0 y0 x1 y1), mediaWaiting, mediaError, pool and blurred (the isolated media path), over and
   //   overKey (the raster oversampling of paints in a zoomed ground and its cache key), cam and layerK (the camera and
-  //   parallax of the layer being drawn: a medium at another camera factor gets its own view, §11.9.3) and stillMode
-  //   (0 every node, 1 all but `still` media, 2 only `still` media: those are drawn outside a seam composite)
+  //   parallax of the layer being drawn: a medium at another camera factor gets its own view, §11.9.3), stillMode
+  //   (0 every node, 1 all but `still` media, 2 only `still` media: those are drawn outside a seam composite) and
+  //   ghostTl (null, or while fx.textAt draws the text layers at an earlier time, the scene time of the frame itself:
+  //   media on the show clock keep that frame's media time)
   function createDrawContext(o) {
     return {
       g: null, D: new Float32Array([1, 0, 0, 1, 0, 0]), pal: null, W: 0, H: 0, scale: 1, q: null, assets: null,
@@ -82,7 +84,7 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
       RM: new Float32Array(6), quad: new Float32Array(8),
       t: 0, backdrop: 'scene', quality: 'preview', thumb: false, visible: new Float32Array(4), mediaWaiting: 0, mediaError: null,
       pool: o.pool || null, blurred: o.blurred || null, over: 1, overKey: 0,
-      cam: null, layerK: 1, stillMode: 0, depthCam: { x: 0, y: 0, zoom: 1, roll: 0, shakeX: 0, shakeY: 0, fz: 1 },
+      cam: null, layerK: 1, stillMode: 0, ghostTl: null, depthCam: { x: 0, y: 0, zoom: 1, roll: 0, shakeX: 0, shakeY: 0, fz: 1 },
       VM: new Float32Array(6),
     };
   }

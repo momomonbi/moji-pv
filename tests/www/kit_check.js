@@ -181,7 +181,7 @@
     const { root, folder } = await opfsFolder(name);
     const progress = [];
     const started = performance.now();
-    const result = await KIT.exportKit({ engine, doc, audio: song, dir: SINK.createDirSink(folder, { parent: root, name }), assets: store,
+    const result = await KIT.exportKit({ engine, doc, audio: song, dir: SINK.createDirSink(folder, { parent: root, name, owned: true }), assets: store,
       codecs, onProgress: (p) => progress.push({ i: p.i, N: p.N, phase: p.phase }) });
     out.ms = performance.now() - started;
     out.result = { files: result.files, audio: result.audio, frames: result.frames, folder: result.folder, codec: result.codec,
@@ -254,7 +254,7 @@
     const gone = await opfsFolder('kit_cancel');
     const ctl = new AbortController();
     try {
-      await KIT.exportKit({ engine, doc, audio: song, dir: SINK.createDirSink(gone.folder, { parent: gone.root, name: 'kit_cancel' }),
+      await KIT.exportKit({ engine, doc, audio: song, dir: SINK.createDirSink(gone.folder, { parent: gone.root, name: 'kit_cancel', owned: true }),
         assets: store, codecs, signal: ctl.signal, onProgress: (p) => { if (p.i === 5) ctl.abort(); } });
       out.cancel = { ok: true };
     } catch (e) {

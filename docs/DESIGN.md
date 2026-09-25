@@ -751,7 +751,8 @@ Notes:
   (entrance finished, text fully visible) used for seeking and thumbnails.
 - `fp` (fingerprint) = hash of everything the scene build needs: slots, `els`, text, emph, duration `b − a`, role, palette,
   faces, design size; plus the beat grid seen from the scene's origin (`bpm`, `meter`, origin − offset) when a chosen part
-  declares `needs: ['beats']`, and the origin and the digest when one declares `needs: ['level']` (origin = the cut's `t0`,
+  declares `needs: ['beats']` or the cut's custom shot has a key anchored on a beat (`core/shot.usesBeats`, DESIGN_2_1
+  §3.3), and the origin and the digest when one declares `needs: ['level']` (origin = the cut's `t0`,
   a segment's `t0`). A segment's `fp` covers its ground and atmos decisions (with params), its span and the shared look,
   not its cuts. `fp` hashes each decision's `{ p, v }` only, never where it came from. The scene cache rebuilds only
   cuts whose `fp` changed.
@@ -889,6 +890,7 @@ ParamSpec = {
   auto: AutoSpec,               // REQUIRED
   ui: 'basic' | 'advanced',     // default 'basic'
   ai: true,                     // expose to the AI catalog (default true)
+  optKey,                       // enum only (v2.1, DESIGN_2_1 §3.5): option labels opt.<optKey>.<value>, not opt.<value>
 }
 AutoSpec =
     { value: v }                                         // constant

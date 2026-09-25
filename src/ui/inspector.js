@@ -146,6 +146,22 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       return fs.state === 'inherited' && !!row.field.firstCut && fs.pinnedAt === 'line' && row.hereKinds.includes('line');
     }
 
+    // The state the row's tag shows. 使う範囲 is one row for both of its handles: when only its end (clipOut, which has
+    // no row of its own) is pinned here, the tag says so, and ×, Del and ⋯ 自動に戻す clear it (row.clearPaths has both).
+    // An end fixed elsewhere (作品で固定 ↑) shows too while the start is automatic.
+    function tagState(row) {
+      const fs = row.fs, out = row.fsOut;
+      if (!out || pinnedHere(fs, row)) return fs;
+      if (pinnedHere(out, row) || ((!fs || fs.state === 'auto') && out.state !== 'auto')) return out;
+      return fs;
+    }
+
+    // The inherited state 作品の設定へ / the tag goes to: the tag's own, else the start's (an end pinned here and a
+    // start fixed at the work go to the work).
+    function ownerState(row) {
+      return [tagState(row), row.fs].find((fs) => fs && fs.state === 'inherited') || null;
+    }
+
     // --- values of command and derived fields -----------------------------------------------------------------
 
     function rowOfLine(line) {
@@ -232,7 +248,9 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
         const id = MW.sourcesOf(ctx, field.media)[0] || null;
         return { out: row && row.fsOut ? row.fsOut.value : 0, entry: id ? MI.entryOf(doc(), id) : null };
       }
-      if (field.widget === 'crop') return { canCrop: MW.sourcesOf(ctx, field.media).length > 0 && !!(app.shell && app.shell.stage.crop) };
+      if (field.widget === 'crop') {
+        return { canCrop: MW.sourcesOf(ctx, field.media).length > 0 && !!(app.shell && app.shell.stage.crop) && app.view.state.mode !== 'tap' };
+      }
       if (field.widget === 'color') return { palette: p ? p.look.palette : {} };
       if (field.widget === 'font') return { families: familiesFor(field), sample: ctx.line ? ctx.line.text : p && p.lines[0] ? p.lines[0].text : '' };
       if (field.path && field.path.startsWith('amount.')) {
@@ -347,6 +365,13 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       return {
         key: field.id + '|' + ctx.scope, fieldId: field.id, id, meta, cutKeys: ctx.cutKeys.slice(), scope: ctx.scope,
         owner: m.slot === 'ground' ? 'ground' : m.slot === 'atmos' ? 'atmos' : m.slot,
+        // whether the element still shows this picture with this part (an undo or another part takes it away; the same
+        // picture used elsewhere does not count): the stage ends the overlay on a new plan when it does not
+        alive: () => {
+          if (!plan()) return false;
+          const now = F.contextOf(S.validate(app.view.state.sel, plan(), doc()), plan(), app.reg, doc());
+          return MW.sourcesOf(now, m)[0] === id;
+        },
         value: read,
         gesture: (name) => siblingOf(row, base + '.' + name).gesture(),
         // several params in one gesture (the overlay's drag moves cropX and cropY together: one undo entry)
@@ -378,6 +403,8 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       if (!on) { app.shell.stage.crop(null); return; }
       const target = cropTarget(row);
       if (!target) return;
+      app.shell.stage.crop(target, row.widget.el.querySelector('.w-crop-edit'));
+      if (!cropOn(row)) return;                 // the stage keeps it off in tap mode: the tap session plays on
       if (app.view.state.playing) app.pause();
       // the playhead goes where the picture shows, so the overlay frames it
       const ctx = page.ctx;
@@ -386,7 +413,6 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
         const tt = S.seekTime(ctx.sel.level === 'el' ? { level: 'cut', key: ctx.cutKeys[0] } : ctx.sel, app.plan);
         if (tt !== null) app.seek(tt);
       }
-      app.shell.stage.crop(target, row.widget.el.querySelector('.w-crop-edit'));
       app.shell.stage.focus();
     }
 
@@ -572,6 +598,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
     function makeRow(field, ctx) {
       const paths = pathsOf(field, ctx);
       const clearPaths = F.clearPathsFor(field, ctx);
+      if (field.trimOut) clearPaths.push(...F.clearPathsFor(Object.assign({}, field, { path: field.trimOut }), ctx));
       const path = paths.length ? paths[0] : null;
       const label = labelOf(field);
       const row = { field, path, paths, clearPaths, hereKinds: [...new Set(clearPaths.map(scopeKindOf))], fs: null, whyKind: null,
@@ -615,7 +642,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
         if (path && (ev.key === 'F10' && ev.shiftKey || ev.key === 'ContextMenu')) { ev.preventDefault(); openFieldMenu(row, more || el); }
       });
       tag.addEventListener('click', () => {
-        const fs = row.fs;
+        const fs = tagState(row);
         if (pinnedHere(fs, row)) unpin(row);
         else if (fs && fs.state === 'inherited') goOwner(row);
       });
@@ -668,14 +695,15 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       const st = stateOf(row, fs, ctx);
       row.widget.update(st);
       if (!row.path) { row.tag.hidden = true; return; }
-      const state = fs ? fs.state : 'auto';
+      const shown = tagState(row);
+      const state = shown ? shown.state : 'auto';
       row.tag.hidden = false;
       row.tag.dataset.state = state;
       // 動きと重なり while automatic: 「自動: 後ろに下げる」 (the planner's choice, DESIGN_2_1 §11.9.5)
       const depthAuto = row.field.depth && state === 'auto' && fs && typeof fs.value === 'string' && t.has('opt.depth.' + fs.value);
       dom.replace(row.tag, I.icon(STATE_ICON[state] || 'ring', { size: 12 }),
-        depthAuto ? t('media.depthAuto', { v: t('opt.depth.' + fs.value) }) : tagOf(fs || { state: 'auto' }, row));
-      const here = pinnedHere(fs, row);
+        depthAuto ? t('media.depthAuto', { v: t('opt.depth.' + fs.value) }) : tagOf(shown || { state: 'auto' }, row));
+      const here = pinnedHere(shown, row);
       row.tag.title = here ? t('act.unpin') : state === 'inherited' ? t('fld.goOwner') : '';
       row.tag.disabled = !(here || state === 'inherited');
       row.x.hidden = !here;
@@ -720,6 +748,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       const ctx = page.ctx;
       const fs = row.fs || { state: 'auto' };
       const here = pinnedHere(fs, row);
+      const clearable = pinnedHere(tagState(row), row);
       const stored = storedPath(row);
       const pin = stored ? doc().pins[stored] : null;
       const parsed = row.path ? P.parse(row.path) : null;
@@ -728,7 +757,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       const canWork = here && !!parsed && parsed.scope.kind !== 'work' && canPin('work');
       const clip = app.fieldClipboard;
       app.menus.open(at, [
-        { label: t('fm.unpin'), keys: 'Del', disabled: !here, run: () => unpin(row) },
+        { label: t('fm.unpin'), keys: 'Del', disabled: !clearable, run: () => unpin(row) },
         rerollable(row.field) ? { label: t('act.reroll'), disabled: lineLocked(ctx), run: () => reroll(row) } : null,
         { label: t('fm.pinNow'), disabled: here || fs.state === 'mixed' || fs.value === null || fs.value === undefined,
           run: () => commit(row, fs.value) },
@@ -738,7 +767,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
         { sep: true },
         { label: t('fm.promoteLine'), disabled: !canLine || !pin, run: () => promote(row, 'line') },
         { label: t('fm.promoteWork'), disabled: !canWork || !pin, run: () => promote(row, 'work') },
-        { label: t('fm.goOwner'), disabled: fs.state !== 'inherited', run: () => goOwner(row) },
+        { label: t('fm.goOwner'), disabled: !ownerState(row), run: () => goOwner(row) },
         { sep: true },
         { label: t('fm.why'), run: () => showWhy(row, true) },
       ]);
@@ -762,7 +791,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
     }
 
     function goOwner(row) {
-      const fs = row.fs;
+      const fs = ownerState(row);
       if (!fs || !fs.pinnedAt) return;
       const ctx = page.ctx;
       const lineId = ctx.line ? ctx.line.id : ctx.cut ? ctx.cut.line : null;
@@ -868,7 +897,9 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       push(pg);
     }
 
-    // The part browser's 「AIで素材を作る」 (the standalone material tool): made for this kind, used on this row's scope.
+    // The part browser's 「AIで素材を作る」 (the standalone material tool): made for this kind, used on this row's scope
+    // (every selected line or cut). An ornament is asked for at the row's own scope: an atmosphere on the 空気 row, a
+    // decoration near the words on a 装飾 row.
     function makeFor(row, kind, ctx) {
       const word = ctx.scopeKind === 'cut' ? 'pb.scope.cut' : ctx.page === 'lines' ? 'pb.scope.lines' : ctx.scopeKind === 'line'
         ? 'pb.scope.line' : 'pb.scope.work';
@@ -880,7 +911,9 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
           const useAt = use && row.paths.length ? { scope: P.scopeKey(row.paths[0]), slot: row.field.path, paths: row.paths.slice() } : null;
           clearStack();
           app.openPanel('ai', 'ai');
-          app.ai.run('material', { description, kind: kind === 'atmos' ? 'ornament' : kind, useAt });
+          const ornament = kind === 'atmos' || kind === 'ornament';
+          app.ai.run('material', Object.assign({ description, kind: ornament ? 'ornament' : kind, useAt },
+            ornament ? { scope: kind === 'atmos' || row.field.run ? 'run' : 'cut' } : {}));
         },
       };
     }
@@ -1590,6 +1623,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
         // Focus follows a drill made from inside the inspector (§6.12); never into the text box, so single keys still work.
         if (inside) { const target = headEl.querySelector('.lh-title') || headEl.querySelector('.lh-btn'); if (target) dom.focus(target); }
       } else if (changed.includes('panel') || changed.includes('prefs')) { if (state.panel === 'details' || dirty) soon('panel'); }
+      if (changed.includes('mode')) soon('mode');            // [画面で調整] is off in tap mode
     });
     app.bus.on('layout', () => { if (dirty) soon('layout'); });
     app.store.on('doc', (e) => {

@@ -5,9 +5,9 @@ MV.def('ai/changes', ['core/commands', 'core/lyrics', 'core/doc', 'core/hash', '
 
   // Change = { id, kind, scope: 'work' | 'line' | 'cut' | 'rows', lineId?, rowId?, path?, from, to,
   //            base: { rev, value?, src? }, label: [stringKey, params], checked: true, stale: false, …kind extras }
-  // v2.1 (DESIGN_2_1 §5.6) adds: group, areaKey, agg, requires: [changeId], staleWhy, field, cutKey, cutSig, matName and
-  // entry, and the kinds `value` (any pin by path; `to: null` clears it), `material` (material.put) and `media`
-  // (media.meta of a vision result, §11.6.2).
+  // v2.1 (DESIGN_2_1 §5.6) adds: group, areaKey, agg, requires: [changeId], staleWhy, field, cutKey, cutSig, matName,
+  // matLabel (the material's { ja, en } name) and entry, and the kinds `value` (any pin by path; `to: null` clears it),
+  // `material` (material.put) and `media` (media.meta of a vision result, §11.6.2).
   const KINDS = Object.freeze(['theme', 'mood', 'season', 'amount', 'flash', 'palette', 'avoid', 'allow', 'part', 'impact',
     'emphasis', 'cut', 'note', 'remove', 'time', 'rows', 'songInfo', 'value', 'material', 'media']);
   const LYRIC_KINDS = Object.freeze(['cut', 'note', 'emphasis', 'impact']);       // also the order they apply in
@@ -567,7 +567,7 @@ MV.def('ai/changes', ['core/commands', 'core/lyrics', 'core/doc', 'core/hash', '
     if (slot === 'cam.zoom' || (param === 'speed' && slot !== param)) return '×' + v;
     if (slot === 'season') return t('fld.season.' + v);
     if (param === 'depth' && slot !== param && t.has('opt.depth.' + v)) return t('opt.depth.' + v);
-    if (slot === 'avoid' && Array.isArray(v)) return v.map((ref) => t.part(ref.split('.')[0], ref.split('.')[1])).join('・');
+    if (slot === 'avoid' && Array.isArray(v)) return v.map((ref) => t.part(ref.split('.')[0], ref.split('.')[1])).join(t('list.sep'));
     if (typeof v === 'number') return String(Math.round(v * 100) / 100);
     return String(v);
   }
@@ -579,9 +579,17 @@ MV.def('ai/changes', ['core/commands', 'core/lyrics', 'core/doc', 'core/hash', '
     return t.has('kind.' + base) ? t('kind.' + base) : base;
   }
 
+  // The name of the material a change makes or places, in the page's language: the entry's { ja, en } (`matLabel` on
+  // the rows that place it), else the name the answer used ('' when there is none).
+  function matText(t, c) {
+    const n = c.matLabel || (c.kind === 'material' && c.entry ? c.entry.name : null);
+    const text = n ? (t.lang === 'en' ? n.en || n.ja : n.ja) : '';
+    return text || c.matName || '';
+  }
+
   function shown(t, c, key, v) {
     if (v === null || v === undefined) return c.kind === 'value' || c.areaKey || c.cutKey ? t('curve.auto') : '';
-    if (typeof v === 'string' && v.startsWith(MAT_PREFIX) && c.matName) return c.matName;
+    if (typeof v === 'string' && v.startsWith(MAT_PREFIX) && (c.matName || c.matLabel)) return matText(t, c);
     if (c.kind === 'part') return v === 'none' ? t('opt.none') : t.part(c.partKind, v);
     if (c.kind === 'value') return valueText(t, c, v);
     if (NAMED[c.kind]) return t.part(NAMED[c.kind], v);
@@ -606,6 +614,7 @@ MV.def('ai/changes', ['core/commands', 'core/lyrics', 'core/doc', 'core/hash', '
     if (Array.isArray(p.where)) p.where = t(p.where[0], p.where[1]);
     if (typeof p.field === 'string') p.field = fieldText(t, c, p.field);
     if (c.kind === 'material') {
+      if ('name' in p) p.name = matText(t, c) || p.name;
       if ('kind' in p) p.kind = kindText(t, p.kind);
       if ('season' in p) p.season = t('fld.season.' + (p.season || 'none'));
       return t(key, p);
@@ -644,6 +653,6 @@ MV.def('ai/changes', ['core/commands', 'core/lyrics', 'core/doc', 'core/hash', '
 
   return {
     KINDS, GROUPS, STALE_WHY, FLASH_ON, make, snapshot, rowSrcs, lineResolver, markStale, groupOf, toCommands, apply,
-    logEntry, revertCommands, describe, describeAgg, warningText, sameJSON, entryHash, keyInUse, inArea,
+    logEntry, revertCommands, describe, describeAgg, warningText, matText, sameJSON, entryHash, keyInUse, inArea,
   };
 });

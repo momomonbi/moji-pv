@@ -365,7 +365,8 @@ MV.def('ai/direct', ['core/pins', 'core/paths', 'core/curve', 'core/shot', 'core
   // directRequests(doc, plan, registry, { briefs: [{ ref, instruction }], uiLang, mode: 'all' | 'camera', allowMaterials,
   // media }) → [{ system, prompt, schema, effort, sent }], one per window of ≤ 200 area lines (§5.2). media: true offers
   // the whole library, a list of asset ids only those (the ones whose bytes are on this device); false or absent
-  // offers none. Only lyric text, the instructions, setting values and asset names, sizes and vision text are sent.
+  // offers none. Only lyric text, the instructions, setting values and the assets' numbers, sizes and vision text are
+  // sent (never a file name, §11.6.4).
   function directRequests(doc, plan, registry, opts) {
     const o = opts || {};
     const mode = o.mode === 'camera' ? 'camera' : 'all';
@@ -456,6 +457,12 @@ MV.def('ai/direct', ['core/pins', 'core/paths', 'core/curve', 'core/shot', 'core
     return d ? { v: d.v, source: d.from, own: null } : { v: null, source: 'auto', own: null };
   }
 
+  // Whether every cut of a line that is not pinned by cut shows `to` for a slot now.
+  function lineShows(run, line, slot, to) {
+    const cuts = cutsOf(run, line).filter((c) => { const hit = PINS.lookup(run.ix, cutAt(c), slot); return !hit || hit.from !== 'pin:cut'; });
+    return cuts.length > 0 && cuts.every((c) => { const d = decisionOf(run, c, slot); return !!d && CH.sameJSON(d.v, to); });
+  }
+
   function fieldOf(slot) {
     if (FIELDS[slot]) return FIELDS[slot];
     const m = /@[A-Za-z0-9]+\.([A-Za-z0-9]+)$/.exec(slot);
@@ -466,7 +473,7 @@ MV.def('ai/direct', ['core/pins', 'core/paths', 'core/curve', 'core/shot', 'core
 
   // Adds one change for a target and slot (first one wins per path), unless nothing would change: a part the target's
   // own pin already holds, a value the target already shows, or a line slot every cut of the line pins by hand.
-  // x = { kind: 'part' | 'value', partKind?, fromAll, aggSlot?, requires?, matName?, toName? }
+  // x = { kind: 'part' | 'value', partKind?, fromAll, aggSlot?, requires?, matName?, matLabel?, toName? }
   function slotChange(run, b, T, slot, to, x) {
     const path = T.key + ':' + slot;
     if (run.byPath.has(path)) return run.byPath.get(path);
@@ -486,7 +493,11 @@ MV.def('ai/direct', ['core/pins', 'core/paths', 'core/curve', 'core/shot', 'core
     }
     const cur = current(run, T, slot);
     const placeholder = typeof to === 'string' && to.startsWith(MAT_PREFIX);
-    if (!placeholder && (x.kind === 'part' ? cur.own && CH.sameJSON(cur.own.v, to) : CH.sameJSON(cur.v, to))) return null;
+    // a value equal to the current one changes nothing; a line without its own pin has one only when all its cuts
+    // (but those pinned by cut) show the same (§5.5)
+    const same = x.kind === 'part' ? cur.own && CH.sameJSON(cur.own.v, to)
+      : T.scope === 'line' && !cur.own ? lineShows(run, T.line, slot, to) : CH.sameJSON(cur.v, to);
+    if (!placeholder && same) return null;
     const field = fieldOf(slot);
     const key = Array.isArray(field) ? field[0] : field;
     const fields = {
@@ -501,6 +512,7 @@ MV.def('ai/direct', ['core/pins', 'core/paths', 'core/curve', 'core/shot', 'core
     if (x.fromAll && T.scope === 'line') fields.agg = b.key + '|' + (x.aggSlot || slot);
     if (x.requires) fields.requires = x.requires.slice();
     if (x.matName) fields.matName = x.matName;
+    if (x.matLabel) fields.matLabel = x.matLabel;
     if (x.toName) fields.toName = x.toName;
     const c = CH.make(run.doc, fields, run.make);
     run.byPath.set(path, c);
@@ -840,10 +852,16 @@ MV.def('ai/direct', ['core/pins', 'core/paths', 'core/curve', 'core/shot', 'core
 
   // ---- materials (§5.10, §5.11) ------------------------------------------------------------------------------------
 
-  // The answer's materials → material changes; each is known by its name for 'mat:<name>' and its `use`.
-  function materialsOf(run, materials) {
+  // The answer's materials → material changes; each is known by its name for 'mat:<name>' and its `use`. Only as many
+  // as doc.materials has room for (§5.8: 64 entries, 160 KB): each is put on a copy of the document that already holds
+  // the ones before it (and `before`, the material changes of earlier windows); the first that does not fit and all
+  // after it are left out (ai.warn.matFull), and their uses fall away as unknown materials.
+  function materialsOf(run, materials, before) {
     let k = 0;
+    let room = CH.apply(run.doc, run.plan, list(before));
+    let left = 0;
     list(materials).forEach((m, idx) => {
+      if (left) { left++; return; }
       const res = RECIPE.fromAi(m, run.registry, null, { media: run.sent.media && run.sent.media.length ? run.sent.media : null,
         lang: run.sent.uiLang });
       res.warnings.forEach(run.warn);
@@ -851,12 +869,15 @@ MV.def('ai/direct', ['core/pins', 'core/paths', 'core/curve', 'core/shot', 'core
       const raw = str(isObject(m) ? m.name : '');
       const name = res.entry.name.ja;
       if (run.mats.has(raw || name) || run.mats.has(name)) return;
-      const change = RECIPE.materialChange(run.doc, res.entry, { id: run.prefix + 'mat:' + idx, k: k++, matName: name }, run.make);
+      const change = RECIPE.materialChange(run.doc, res.entry, { id: run.prefix + 'mat:' + idx, k, matName: name }, run.make);
+      try { room = CH.apply(room, run.plan, [change]); } catch (e) { left = 1; return; }
+      k++;
       const mat = { change, entry: res.entry, use: isObject(m) ? m.use : null, name };
       run.mats.set(name, mat);
       if (raw) run.mats.set(raw, mat);
       run.changes.push(change);
     });
+    if (left) run.warn(['ai.warn.matFull', { n: left }]);
   }
 
   // A material placed on a target (a 'mat:<name>' field or its `use`): a part pin that requires the material, plus a
@@ -869,7 +890,7 @@ MV.def('ai/direct', ['core/pins', 'core/paths', 'core/curve', 'core/shot', 'core
     const base = slot.replace(/#[0-9]$/, '');
     if (want !== base) { run.warn(warnKind(T, base, name)); return null; }
     const c = slotChange(run, b, T, slot, MAT_PREFIX + mat.name, { kind: 'part', partKind: e.kind, fromAll: src.fromAll,
-      requires: [mat.change.id], matName: mat.name, aggSlot: base + ':' + MAT_PREFIX + mat.name });
+      requires: [mat.change.id], matName: mat.name, matLabel: e.name, aggSlot: base + ':' + MAT_PREFIX + mat.name });
     if (c && e.season && !src.seasonSet && b.area.kind !== 'cut') {
       const season = seasonOf(run, T, null);
       if (season !== e.season && season !== 'any') {
@@ -1146,9 +1167,10 @@ MV.def('ai/direct', ['core/pins', 'core/paths', 'core/curve', 'core/shot', 'core
     if (dropped) run.warn(['ai.warn.outside', { n: dropped }]);
   }
 
-  // directChanges(doc, plan, registry, json, { rev, sent, allowMaterials }) → { results: [{ s, areaKey, understood,
-  // summary, question }], changes, warnings }. Validate against the doc and plan the request was built from (§5.5);
-  // change ids start with 'w<window>:'.
+  // directChanges(doc, plan, registry, json, { rev, sent, allowMaterials, materialsBefore? }) → { results: [{ s, areaKey,
+  // understood, summary, question }], changes, warnings }. Validate against the doc and plan the request was built from
+  // (§5.5); change ids start with 'w<window>:'. materialsBefore: the material changes of the earlier windows of the same
+  // request (they take room in doc.materials first).
   function directChanges(doc, plan, registry, json, opts) {
     const o = opts || {};
     const sent = isObject(o.sent) ? o.sent : { briefs: [] };
@@ -1181,7 +1203,7 @@ MV.def('ai/direct', ['core/pins', 'core/paths', 'core/curve', 'core/shot', 'core
       done.add(a.s);
       answers.push(a);
     }
-    if (allowMaterials && run.mode !== 'camera') materialsOf(run, json.materials);
+    if (allowMaterials && run.mode !== 'camera') materialsOf(run, json.materials, o.materialsBefore);
     run.workSeason = workSeasonAfter(run, answers);
     const results = answers.map((a) => answerChanges(run, a));
     for (const mat of new Set(run.mats.values())) useChanges(run, mat);

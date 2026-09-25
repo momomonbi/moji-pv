@@ -7159,3 +7159,586 @@ so. The play bar now shows it:
 ui_flows' playback flow plays to the end, checks 最初から再生, plays again from under 1 s, and checks that ⏮ stops at
 0:00; a mutant that never shows 最初から再生 fails it. ui_layout: all 488 layouts fit with the extra button (390 px:
 ⏮ ↻ time ‹ › おまかせ ▭ in one row).
+## Review fixes: saving and opening
+
+Group "save-open" of the review round (on 9c89cac). Every finding reproduced on this code; each fix has a check that
+fails without it (mutation checks below).
+
+- **SO-1 = SEC-1 (blocker): a cancelled or failed 保存 deleted the project file.** `export/host/sink.createFileSink`
+  takes `{ removeOnAbort }` (default true, so export keeps its behaviour); `false` makes `abort()` discard only what it
+  wrote (the browser writes into a copy until `close()`). `savePackage` passes `removeOnAbort: !handle && size === 0`:
+  only the save dialog's new, empty file of this call is removed. 保存 (Ctrl+S) onto the current `.mojipv`, and a file
+  the dialog hands over with its contents, keep what they held; `fileHandle` / `fileSaved` change only after success, as
+  before.
+- **SO-2: a .json that 開く refused became the work's file.** `open()` handles the project route itself: the handle and
+  「…に開きました」 are set only when `openProject` returns true, so a refused file (newer, damaged) is never written by
+  the next 保存.
+- **SO-3: a package opened after a failed song lookup never re-linked its song.** `ui/boot`: a 'doc' event of kind
+  'load' (open, 最近の作品, new work, restore) resets `looked`, so each load looks the sha1 up once more; edits still do
+  not retry a miss.
+- **SO-4: a video's filmstrip never came back after a package round trip.** `openPackage` stores the packaged poster of
+  a video or animation as `{ …, strip: null, tiles: 0, partial: true }` (a photo's poster is complete).
+  `media/host/probe.thumbsOf` treats a partial record as missing: it probes the asset, stores the whole record, and
+  keeps the poster if probing fails. `media/host/store.loadThumbs` does the same, so the AssetStore's tiles come back too.
+- **SO-5: another tab's autosave pruned the assets a package open had just stored.** `putMedia` and `putSong` hold the
+  Web Lock `mojipv-assets` shared (waiting for a prune under way) for each asset that the record this tab wrote last
+  does not name; a write that names it, the next load (for keys the loaded work does not name) or 消す lets it go.
+  `prune` still deletes old works and this tab's memory copies at once, but deletes media and songs only inside
+  `locks.request('mojipv-assets', { mode: 'exclusive', ifAvailable: true })`, reading the works again there; without
+  Web Locks it deletes none. This covers imports and relinks too (media_io stores through `io.device`). An asset that
+  never joins the library (a refused import) keeps the lock until the tab loads another work, so pruning in every tab
+  waits until then; nothing is lost by that.
+- **SO-6: a full device (or no IndexedDB) dropped the package's song without a word.** `putSong` returns
+  `{ stored, reason }` and keeps the song in a per-tab `memorySongs` Map when the put fails (`getSong` reads it first;
+  prune and 消す clear it, as the media Maps). `openPackage` collects every put's result and, after loading, shows
+  `media.err.quota` (with 保存) or `media.warn.memoryOnly` once, as an import does.
+- **SO-7: a damaged local header refused the whole package.** Each asset (and the song) is read in its own try/catch:
+  an AbortError goes on, anything else (a bad local header, a read that fails) counts that entry as damaged. Only the
+  directory, the manifest and project.json can refuse the file.
+- **SO-8: a damaged song was reported as a damaged photo or video.** The song has its own flag and the new string
+  `pkg.warn.songDamaged` 「ファイルの中の曲が壊れていたため読み込めませんでした。曲をつなぎ直してください」 / "The song in
+  the file was damaged and could not be loaded. Please re-link the song", with [つなぎ直す] (`app.pickRelink`).
+- **SO-9: [中止] waited for the whole current entry.** The ZIP writer's `write` in `savePackage` hands a Blob part larger
+  than 32 MB (`SAVE_SLICE`) to the sink in 32 MB slices, checking the signal and reporting progress between them (ZIP
+  offsets are unaffected: `zip.put` adds the part's size after the write). With SO-1 a cancelled Ctrl+S keeps the file.
+- **SEC-3: a kit folder could land in the user's folder whose name differed only in case or Unicode form, and a cancel
+  deleted it recursively.** `openDirectory` compares folded names (`normalize('NFC').toLowerCase()`) and then asks the
+  file system itself (`getFileHandle` / `getDirectoryHandle` without `create`; `TypeMismatchError` counts as taken)
+  before it creates a folder, and passes `owned: true`. `createDirSink` removes a folder recursively only when it is
+  `owned` (with its parent and name); otherwise it removes only the files `file()` created (a name that was already there
+  is written into but never removed: its file sink gets `removeOnAbort: false`).
+- DESIGN_2_1 §11.2.7 (pruning across tabs, the song's memory fallback), §12.3 step 5 and §13.9's destination say the
+  same.
+
+**Tests.** `tests/node/export_kit.test.js`: `createFileSink` with and without `removeOnAbort`; `createDirSink` without
+`owned`; `openDirectory` on a case- and form-folding fake file system (the user's `Sakura_filmora` and an NFD name are
+taken, the user's files stay, abort removes only the new folder) and on one that also folds trailing dots (only the
+file system's own lookup can tell). The existing folder tests pass `owned: true` where the test made the folder
+(also in `tests/www/kit_check.js`). Browser: `tests/www/package_review.js`, run by `package_io.py` after its round
+trip, checks each finding (SO-1 through SO-9) in the app page, and `package_io.py` opens a second tab in the same
+browser context for SO-5 (tab A's open waits on a gate at its 2nd asset while tab B edits and autosaves). The page
+now comes from a context of its own (`browser.new_context`) so that the second tab shares its origin.
+
+**Mutation checks** (each reverted fix fails its check): `removeOnAbort` ignored in the sink; the size check dropped
+from `savePackage`; no `removeOnAbort` in `savePackage`; `owned` not required; every file removed in a folder not
+owned; `created` always true; the file-system lookup in `openDirectory` dropped; openDirectory without `owned`; the
+slicing off; `open()` keeping a refused file; `looked` not reset on load; no `partial` mark; `thumbsOf` or `loadThumbs`
+accepting a partial record; prune ignoring the lock; no hold; the hold never released; a hold for an asset its record
+names; no `memorySongs`; either notice of SO-6 dropped; the per-asset and the song's try/catch rethrowing; the song
+counted as a photo or video. Survived, equivalent: dropping the folded-name Set in `openDirectory` (the file system's
+own lookup catches the same names; the Set only saves the lookups).
+
+**Run:** Node suite (`--test-concurrency=1`): 1589 of 1590; the one failure was a build-time budget of
+`conformance.test.js` (61.7 ms > 60 ms, a different part on each run) while the machine's load average was above 6 on
+4 CPUs, and that file passes when run again. `build.py --check`, `build_test.py`, `package_io.py`, `ui_flows.py --only`
+package, media_device, song, song_step, open_damaged, autosave, tabs, clear_device, missing, media_song,
+`kit_check.py`, `csp.py`, `media_import.py`, `i18n_pages.py`, `ui_layout.py`: all pass.
+
+## Review fixes: saving and opening (second round)
+
+Group "save-open" again, on 6c95333: the two problems the verifier found in the first round's fixes. Both reproduced
+with the verifier's probes on this code (a song-only package opened where IndexedDB cannot store: the notice named
+写真・動画; an open cancelled after its assets were stored: `mojipv-assets` still held after two autosaves).
+
+- **SO-6-wording: the notice after a package open named photos and videos when only the song could not be stored.**
+  `openPackage` records what each put was for (`kind: 'media' | 'song'`). A quota failure still gives
+  `media.err.quota` (it names neither). Otherwise the notice names what disappears with the tab:
+  `media.warn.memoryOnly` (photos and videos only), the new `song.warn.memoryOnly`
+  「この端末に保存できないため、曲はこのタブを閉じると消えます。作品ファイルに保存してください」 / "The song cannot be stored
+  on this device and disappears when this tab closes. Save a project file.", or the new `media.warn.memoryOnlyAll`
+  「この端末に保存できないため、写真・動画と曲はこのタブを閉じると消えます。作品ファイルに保存してください」 / "Photos, videos and
+  the song cannot be stored on this device and disappear when this tab closes. Save a project file." (both).
+- **SO-5-orphan-hold: an asset stored by an operation that ended without it kept `mojipv-assets` for the tab's
+  life.** `ui/project_io` has `letGo(keys)`: the keys the current document does not name leave `unnamed`, and the
+  lock goes when none are left. `openPackage` collects the keys it stores (`added`) and lets them go on [中止] and on
+  `pkg.err.truncated`. `io.releaseMedia(id)` does the same for one photo or video, and `ui/media_io` calls it
+  (`drop(res)`, only for a file this call stored, `res.fresh`) where the file does not join the work: つなぎ直す
+  with a file that fits no missing asset and nothing to offer, a declined 「つなぎ直しますか？」, 置き換える with
+  another kind, an import into a full library (also in ui/project_io's own `importMedia`). While a sticky toast offers
+  置き換える for the file, it stays held; closing the toast (`onClose`) lets it go. Not changed: an import dropped
+  because another work was opened (`batch.gen !== generation`). That load already lets go of every key the new work
+  does not name, and it aborts an import that has not stored yet. The test below checks this. This tab still keeps
+  such an asset until its next load (`usedMedia`, as before the first round); other tabs prune it at their autosave
+  again. Left: a sticky 置き換える toast that the toast stack pushes out (instead of being closed) keeps its file held
+  until the next load.
+- DESIGN_2_1 §11.2.7 (what lets the lock go; the three notices) and the §11.7 string table say the same.
+
+**Tests** (`tests/www/package_review.js`, checked by `tests/browser/package_io.py`). SO-6: the full package where
+nothing can be stored says 写真・動画と曲; with the song already on the device, 写真・動画 only; a song-only package
+says 曲 and no toast contains 写真・動画. SO-5 (`letGoChecks`): an open cancelled after its first asset is stored
+holds nothing, nor after an autosave. In a work whose photo and video are missing (a light .json): つなぎ直す with
+another size keeps the file held while 置き換える is offered, and clicking the toast's × lets it go. A same-size file
+declined at the question lets it go, and so does a file that fits neither missing asset. 置き換える with a video for a
+photo lets the video go. An import into a 200-asset library lets the file go, through `app.media.importFiles` and
+`io.importMedia`. An import whose store is gated while another work is opened holds the lock while it is stored and
+nothing afterwards. The file picker is answered by a one-shot `HTMLInputElement.click` stub.
+
+**Mutation checks** (each reverted fix fails its check): the notice always `media.warn.memoryOnly`; no `letGo` in
+`openPackage`; no `onClose` on the 置き換える toast; no `drop` for a file with nothing to offer; none for a declined
+question; none for another kind; none for a full library in media_io; none in project_io's `importMedia`.
+
+**Run:** `build.py --check`; `package_io.py`; `ui_flows.py --only` package, missing, library, media_device; `kit_check.py`;
+`csp.py`; `i18n_pages.py`; Node: i18n, project_io_media, package, export_kit, zip, unzip, ui_media, ui_data, then the
+whole suite (`--test-concurrency=1`): 1590 of 1590. All pass.
+## Review fixes: media runtime and stage
+
+Group "media-stage" of the review round (findings MR-1 … MR-9, UI-2, UI-7). Every fix has a test that fails without it;
+the mutation checks are listed at the end.
+
+- **MR-1 (the stage's look-ahead).** `ui/stage` asked the store for one time point, `mediaAt(t + 0.25)`, after each
+  frame, so the session closed the frames between the shown one and that hint as they came out and seeked back to the key
+  frame for each of them. The stage now hints what §11.4.5 step 1 names: `lookAhead(engine, t)` (exported from
+  `ui/stage`, with `LOOK_AHEAD = 8`) lists the media of t and of t + k/30 for k = 1…8, in that order, and `mediaAfter`
+  passes that list to `assets.want`. `media_exact.py`'s playback (`tests/www/media_parts.js`) now plays through that very
+  function, in the stage's order (the frame, then `want`), so the real path is what it measures (its own 8-frame list and
+  the `ahead` option are gone). Measured here: 210 of 210 frames after the cold start right and baked, lag p95 0, 5 seeks
+  for 4 loops, 244 chunks fed (the other run 208 of 209). With the old single point put back (mutant, `--quick`): 2 of 90,
+  88 provisional, 23 seeks, 808 chunks fed. Node: `media_host.test.js` plays 2 s at 60 Hz through the real store and
+  session over the fake decoder; after the first 0.5 s at least 95 % of the draws must show their exact frame, with no
+  seek.
+- **MR-2 (残像 over a text fill).** `fx.textAt(dt)` draws the text and near layers at `tl − dt`, and a medium on the show
+  clock in them asked the store for a media time `mediaAt` never listed (export: `media-not-ready`). The renderer now sets
+  `dc.ghostTl` (a new draw-context field, `null` outside a ghost pass) to the item's own `tl` while `textAt` draws, and
+  `drawMedia` maps a show-clock medium at `dc.ghostTl` when it is set: a ghost reuses the media frame of the frame's own
+  time, the one `mediaReady` readied, and keeps its fill. The exact `tl` is used, not `(tl − dt) + dt`, so the media time
+  is bit-identical to `mediaAt`'s. Test: `media_engine.test.js` renders the r5 cut of the media fixture with 残像 pinned,
+  in export quality, and every `frame()` call must be one `mediaAt` listed (and the ghosts must draw the fill). Goldens
+  unchanged (`update_golden.js --check`: all four match; no golden frame has a ghost over a medium).
+- **MR-3 (two large videos in one frame).** Opening a session beyond `SESSION_PIXELS` closed the least recently used
+  one even when the frame being readied needed it. `sessionFor` now skips a session that is `busy` (a new getter of
+  both session kinds: a request is waiting for its frame) or whose id is in `keep`, the ids of the `ready()` list being
+  readied. The bound may then be exceeded while one frame draws more video than it allows; the next session opened for
+  a frame without them closes them again. This differs from the verifier's fix on purpose: counting **pinned** frames as
+  busy would keep open every session an export ever pinned, because pins are only replaced by the next `ready()` that
+  lists the same asset, which lifts the §11.4.7 bound for a long export with many clips (the test has a mutant for it).
+  Test: two 4096×2160 videos (17.7 MP) readied together, then b joining a whose frame is already held, both exact; a
+  frame of a third video alone leaves one session open; the preview drawing both makes no decoder per draw and its
+  redrawn frames are exact.
+- **MR-4 (a decoder made after close).** `open()` returns right after `isConfigSupported` when the session was closed
+  meanwhile, so no decoder is configured that nothing would close. Test: request, close at once, the codec answer comes
+  20 ms later: no decoder made.
+- **MR-5 (the blur of a still).** The blurred copy was sized from the source (`entry.w/h`), not the tier, and blurred by
+  `level / k` in that space, so the blur on screen depended on the photo's resolution (0.26–0.49 of the asked blur for a
+  12 MP photo; a 40 MP photo made a 160 MB copy). Now `stillCopy` sizes it from the tier bitmap divided by
+  `k = max(1, level / 4)` (never larger than the tier) and blurs it by `σ = level × copy long side / px` copy px in 1/32 px
+  (`media/yuv.sigmaFor`, the rule of video frames), with `px` the request's own (`ready()` and `frame()` pass it). The
+  still cache key is now `(id, tier, level, σ)` for a copy (`(id, tier, 0)` for the tier bitmap), and each record carries
+  its `level` (the provisional fallback and `get()` read it instead of parsing the key). Pixels of blurred stills change
+  in preview and export, on purpose; the Node goldens use the fake store, so no op hash moves. Test: a 4032×3024 photo
+  at 1472 px and blur 2 gives a 2048×1536 copy blurred by 2 × 2048 / 1472; for a 12 MP and a 2 MP photo at blur 2, 8 and
+  16 the blur on screen (σ × px / copy long side) is the level within 5 %.
+- **MR-6 (export events reaching the preview).** A store now emits the `ready` events of its own sessions and bakes
+  (`timedFrame`'s request, the preview bake queue) to its own listeners only (`emitOwn`); shared state (bytes, sample
+  tables, thumbs, stills, failures) still reaches every store over it. The optional guard in `stage.onMediaEvent` is not
+  added (not needed once the fork's events stay in the fork). Test: 20 frames exported through a fork with a blurred
+  look-ahead: the fork hears its bakes, the root store none.
+- **MR-7 (a pinned 通常 turned into screen).** The front readability guard caps the alpha and turns `over` into `screen`
+  only when the part passes no `comp` (photoPan and grounds); `mediaLayer`'s pinned 重ね方 = 通常 stays `over`. Test in
+  `media_engine.test.js`'s mediaLayer test.
+- **MR-8 (a JPEG header after 64 KB).** `media/sniff`'s marker walk is now `jpegWalk(b, p)`, which also says where it
+  stopped when the bytes end first. For a JPEG without a size in the sniffed head, `importFile` step 1 goes on with
+  `probe.jpegSize(blob, head)`: the walk continues through the file one 64 KB read at a time, up to `JPEG_SCAN` = 16 MB,
+  and the 40 MP check runs on that size before anything is decoded. A JPEG with no frame header there is refused as
+  `broken` before decoding (it failed to decode as `broken` before). Other formats keep their header size at a fixed
+  place inside the head (PNG, GIF, WebP) and are unchanged. Tests: Node (a 20000×12000 header after two 65,533-byte APP2
+  segments is `tooBig` with no bitmap made; a 4000×3000 one is measured; none at all is `broken`) and `media_import.py`
+  (the generated JPEG with 128 KB of APP2 inserted imports at 96×64; with a 240 MP header it is refused as too big).
+- **MR-9 (twelve full-size frames for the filmstrip).** The strip is now a sheet (`stripSheet`) drawn tile by tile
+  straight from each decoded frame as it is held; no full-size `ImageBitmap` is kept, so nothing is left open on a
+  cancel. The animation import did the same (up to 12 bitmaps of up to 2048 px) and uses the sheet too. Tests: Node (the
+  import of `vp9.webm` over the fake decoder makes no `ImageBitmap` of a frame and draws the 12 tiles from frames) and
+  `media_import.py` (tile k of the webm30, mp4_25 and vfr strips shows the code of the key frame `stripPicks` names).
+- **UI-2 (the crop overlay outliving its picture).** The crop target has `alive()`: from a fresh context of the current
+  selection, whether the element still shows this picture with this part (`MW.sourcesOf(ctx, field.media)[0] === id`; the
+  same picture used elsewhere does not count). `ui/stage` ends the overlay on every `plan` event where it is not, so a
+  key can no longer pin a crop nothing shows (and wipe the redo). `ui_flows.py` (flow_media): a redo that takes the photo
+  off the background ends the overlay, two ← then pin nothing and add no entry, and undo keeps its redo; a plan change
+  that keeps the picture (a veil pin, and its undo) keeps the overlay.
+- **UI-7 (crop keys in tap mode).** The overlay's key handler leaves every key to the tap session in tap mode (←/→ ±3 s,
+  Esc finishes), and entering tap mode ends the overlay (the stage's view listener). `ui_flows.py`: T over the overlay
+  ends it; the overlay opened again in tap mode lets → seek 3 s without a pin and Esc finish the session.
+
+New test files: `tests/helpers/fake_webcodecs.js` (VideoDecoder, VideoFrame, EncodedVideoChunk and createImageBitmap
+stand-ins, and a recording canvas factory, installed per test file) and `tests/node/media_host.test.js` (the real
+`media/host/store`, `session` and `probe` in Node). Before this, the real store and sessions ran only in the browser
+tests.
+
+**Mutation checks.** Node, each restored after: the single-point look-ahead (MR-1), the ghost at `tl − dt` (MR-2), the
+eviction without a skip, with `busy` only, with `keep` only, and with pinned frames counted as busy (MR-3), no `closed`
+check after the codec question (MR-4), the copy sized from the source, σ = level / k (MR-5), the broadcast emit (MR-6),
+the guard ignoring the part's comp (MR-7), no JPEG walk (MR-8), bitmap copies of the strip frames (MR-9): all killed.
+Browser: the single point in `media_exact.py` (above), and in `ui_flows.py` flow_media: no plan listener (UI-2), tap
+mode not ending the overlay, and the key handler without the mode check (UI-7): all killed.
+
+**Runs.** `build.py --check` (212 modules); the whole Node suite, `--test-concurrency=1`: 1596 pass; `build_test.py`;
+`update_golden.js --check`: all match. Browser: `media_import.py`, `media_exact.py` (118 s), `media_alpha.py`,
+`determinism.py`, and `ui_flows.py` flows media, library, missing and tap: OK. The pages are rebuilt.
+
+**For the lead.**
+- DESIGN_2_1 wording that no longer matches: §11.4.6 "Blur of a still … downscaled by max(1, blurPx / 4) … cached with
+  the key (id, tier, blur level)" → "a copy of the tier bitmap downscaled by max(1, level / 4), blurred by σ = level ×
+  copy long side / px in 1/32 px (the video rule), cached with the key (id, tier, level, σ)"; the §11.4.7 rows "Blurred
+  stills" (key) and "Video sessions" ("the least recently used session closes first, never one with a request waiting
+  or one the frame being readied needs; the bound may be exceeded for that frame").
+- The stage asks `want()` after each frame (as before), not before it as §11.4.5 step 1 says; measured above, it keeps
+  up. Moving it before the frame would need the frame's scale before the first draw.
+- MR-8 covers JPEG; an AVIF whose `ispe` lay past the first 64 KB would still reach the decoder without a header size
+  (not handled here).
+
+## Review fixes, round 2: media runtime and stage
+
+Group "media-stage" again: the verifier's five findings on the first round (MR-3-bound, UI-7-tapmode-overlay, MR-1-test,
+MR-6-test, MR-5-resize). All five reproduced on the round-1 code; each fix has a test that fails without it.
+
+- **MR-3-bound (a scrub kept every 4K session open).** Round 1 kept every session with a request waiting (`busy`),
+  also requests from draws the preview no longer shows: a scrub across six 3840×2160 clips with a 25-ms decoder left
+  6 sessions, 49.8 MP, open (the verifier's scrub, run here: the same). The store now remembers the media of the latest
+  draw (`drawn` in `media/host/store`): the timed ids that `frame()` and `want()` are asked for in one synchronous turn
+  (the stage draws a frame and lists its look-ahead in one turn; a microtask closes the draw), or the list of the latest
+  `ready()`. Opening a session beyond `SESSION_PIXELS` closes the least recently used others that are not in that draw
+  (nor in `ready()`'s `keep`), even with a request still waiting. The `busy` getter of both session kinds is gone (nothing
+  reads it). The same scrub now peaks at 2 sessions, 16.6 MP, and ends there (DELAY 25, 10 and 4). This is stricter than the
+  verifier's fix (a time window for busy sessions, then a trim when requests settle): with the draw rule the bound holds
+  at every open, so no trim is needed, and nothing depends on the clock. Tests (`media_host.test.js`): the verifier's scrub
+  (Σ ≤ the bound during the scrub and after it, and the clip it stopped on gets its exact frame); a playing draw whose
+  `want()` lists two coming 4K clips beside the one shown opens one decoder per clip, not one per draw (the look-ahead is
+  part of the draw); the two 4096×2160 cases pass unchanged (`ready()` starts a draw of its list, so a frame of c alone
+  still closes a and b).
+- **UI-7-tapmode-overlay (the overlay could be opened in tap mode).** `ui/stage` `setCrop` no longer turns the overlay
+  on in tap mode, so the stage's wheel and double-click (and the keys) never reach a crop during a tap session.
+  [画面で調整] is off (disabled) in tap mode: the inspector's `canCrop` is false then, and the inspector redraws on a
+  mode change. `toggleCrop` asks the stage first and pauses and seeks only when the overlay really opened, so a click that
+  lands before the button is drawn off does not pause the tap session. The wheel and double-click handlers keep no mode
+  check of their own (the overlay cannot be on). `ui_flows.py` flow_media: with a crop pinned, T ends the overlay; the
+  button is off in tap mode; a forced click (the button enabled by script) opens nothing and leaves the session playing;
+  three wheel notches and a double-click over the preview leave the three crop pins and the history as they were; → seeks
+  3 s; Esc finishes and the button is on again; T without the overlay and Esc without a mark turn it off and on again.
+- **MR-1-test (the call site was untested).** `ui_flows.py` flow_media (step 5b): with the MP4 as line 3's background,
+  `window.__mv.assets.want` is wrapped and the app plays 1 s from the line's start; every `want()` must list the video at
+  ≥ 9 distinct media times spanning ≥ 8/30 s (in ≥ 80 % of the calls; measured here: 61 of 61 calls, 9 each). The
+  verifier's mutant (`mediaAfter` hinting `mediaAt(tNow + 0.25)`) now fails it: 0 of 59 calls.
+- **MR-6-test (the session half of emitOwn was untested).** The fork test also asks the fork (exact: false, no blur) for a
+  frame it does not hold, so its session decodes it on request: the fork hears that decode and the root store hears
+  nothing. The verifier's mutant (`timedFrame`'s request back to `emit`) is now killed, and so is the bake half.
+- **MR-5-resize (a new blurred copy per preview px).** σ of a still's blurred copy is rounded to 1/12 octave
+  (`SIGMA_STEPS`: at most 2.9 % off) in both the key and the copy, instead of 1/32 px, so a resize or a zoom reuses the
+  copy until px has changed by about 6 %. The verifier's resize (three 4032×3024 photos, one blurred, px 1300 → 1600 over
+  60 frames): 4 copies, 56 of 60 draws exact, still bytes 53 MB (was 38 copies, 22 of 60, 160 MB). The store no longer
+  needs `media/yuv` (its `sigmaFor` was used only there). Test: px 1300 → 1560 → 1040 makes at most 4 copies each way
+  (3, then 4 here), the blur on screen stays within 5 % of the level at every px, and every draw but the first at each
+  new σ finds its copy; the still-blur test now expects the stepped σ. No pixel of the Node goldens moves (they use the
+  fake store): `update_golden.js --check` all match.
+
+**Mutation checks.** Node (`media_host.test.js`, each in a copy of the tree): round 1's busy rule put back (with the
+getter), no `drawn` skip, `ready()` not starting a draw, `want()` not marking its ids, σ in 1/32 px, σ in half octaves,
+`timedFrame`'s request with `emit`, the bake with `emit`: all killed. Browser (`ui_flows.py --only media` on a built
+copy): no `setCrop` guard, no tap clause in `canCrop`, no redraw on a mode change, the pause before `setCrop`, and the
+single-point hint in `mediaAfter`: all killed.
+
+**Runs.** `build.py --check` (212 modules); Node `media_*`, `facade`, `ui_media`; the whole Node suite with
+`--test-concurrency=1`: 1599 pass; `update_golden.js --check`: all match. Browser: `media_exact.py` (118 s),
+`media_import.py`, `media_alpha.py`, `determinism.py`, `ui_flows.py` flows media, library, missing and tap: OK. The
+verifier's `tapwheel.py` and `tapdbl.py` (with the click forced, since the button is now off): no overlay, zoom and cropX
+unchanged, no undo entry. The pages are rebuilt.
+
+**For the lead.** Design text that changes with this round (replacing round 1's proposals):
+- §11.4.6 "Blur of a still": "a copy of the tier bitmap downscaled by max(1, level / 4), blurred by σ = level × copy long
+  side / px, rounded to 1/12 octave, cached with the key (id, tier, level, σ)"; the §11.4.7 row "Blurred stills" (key).
+- §11.4.7 row "Video sessions": "the least recently used session closes first, never one the latest draw asks for (the
+  media of one frame and its look-ahead, or of the frame being readied); the bound may be exceeded while one draw needs
+  more".
+## Review fixes: AI, materials, planner and privacy
+
+Group "ai-planner-privacy" on 9c89cac. The lead decisions of this round: (1) no prompt carries a photo or video file
+name; an asset is `asset:<n>` with kind, size, length and shape, plus the vision text only while 「写真・動画をAIが使ってよい」
+is on, and the always-visible notice says exactly that; (2) the board honours the same switch, from one source; (3) the
+picture consent is asked every time and states the real payload. DESIGN_2_1 §11.6.1, §11.6.2, §11.6.4 and the string
+table say the same now, and DESIGN §3.12's fp rule names the beat-keyed shot (CP-1).
+
+- **MAI-1 / SEC-2 / DTC-1** (file names sent). `ai/recipe.mediaSent` builds the `[media]` line without the name (the
+  name stays in the returned object for the review rows and warnings) and takes `described: false` to leave out the
+  vision text. A second leak the probes did not name: a pooled asset's derived ground (`myMed…`, §11.5.9) is labelled
+  with its file name, and `ai/catalog.catalog` listed it in the part lists of 3案 and ひとこと (`ai/looks`); derived
+  media grounds are now left out of every part list (`isMedia`). Notice: `ai.sendsMediaList` (new, always visible) and
+  `ai.sendsMedia` (reworded: pictures only through 説明, every time, 3 stills for a video). New
+  `tests/node/ai_privacy.test.js`: every request of every tool (direct with media true / ids / none, the board's
+  multi-brief request, camera, material new and remake, looks, edit, prep, the three song tools, vision) in ja and en,
+  with the media fixture's assets renamed to personal names and pooled, holds no `doc.media.list[i].name` nor its stem;
+  and the `[media]` line with and without `described`.
+- **MAI-2 / UI-1** (the board ignored the opt-out). The switch is `ui/ai_controller` `state.allowMedia` (on by
+  default, `setAllowMedia`); `askDirect` offers `o.media` only while it is on, whichever block sent the request. The
+  instruction block's checkbox and a new identical checkbox in the board's footer both write it and show it
+  (`AC.mediaOnDevice` is the one "pictures on this device" rule for both). Tests: `ui_ai` (off → neither 指示 nor a
+  two-brief board request has `[media]`; on again → it has), `ui_flows` new flow `ai_media` (a photo named
+  山田花子_卒業式.png: the notice, 指示 ticked sends asset:0 without the name, unticked under 詳しく sends no list, the
+  board shows the same switch off and sends no list, ticked on the board → the list, and 指示 shows it ticked).
+- **PRIV-1** (consent wording and remembered consent). `describeMedia` asks every time; the agreed ids hold for that
+  one run (`visionAgreed`, cleared when the run starts, in a `finally`, and on a project change), so `run('vision')`
+  alone sends nothing. `hasVisionConsent` is gone (nothing read it). `ai.visionConsent` states 768 px JPEG, about {kb} KB
+  per image, 3 frames for a video, no file names, asked every time. `ui_media` describeMedia test rewritten for it.
+- **MAI-3.** `recipe.paramValue` never takes a `text` param from the AI (breathMark.label, sidebarIndex.number,
+  serialMark.number through inner parts). Test in `ai_recipe`.
+- **MAI-4.** `material_page.knobLimit` (pure): the largest knob value, in the knob's steps and not below its current
+  value, that `core/recipe.problems` accepts with the other knobs as they are; the page uses it as the slider's max.
+  Tests: `ui_fields` (an AI ornament fitted to 240 particles: the limit is accepted by `material.put`, one step more
+  is refused; m3 keeps ×1.5) and `ui_flows materials` (such a material's 量 slider ends before ×1.5 and End is
+  accepted with no error toast).
+- **MAI-5.** `materialChanges` makes one dependent per `useAt.paths` entry (the inspector's selected lines or cuts),
+  ids `use:<path>`; noSlot once when any place got none. Tests in `ai_recipe` and `ui_ai`.
+- **MAI-6.** The inspector's 「AIで作る」 passes `scope` ('run' on the 空気 row, 'cut' on 装飾 rows); `materialRequest`
+  says `scope "<scope>"`, lists only that scope's bases and puts it in `sent`; `fromAi` forces it (a variant of a base
+  of the other scope is refused with ai.warn.unknown); a remake keeps the material's scope. `useChange` refuses a slot
+  that does not take the material (`slotFor` with the registry sees a variant's base scope). Tests in `ai_recipe`
+  (the plan shows the result as the atmosphere) and `ui_ai`.
+- **MAI-7.** AIで作り直す on a material with a media layer sends a `[media]` list and the media schema (even with an
+  empty list, so `src ''` survives): while the switch is on, the pictures on this device plus the material's own, with
+  their vision text; while off, only its own, without it (`remakeMedia`; the material page passes the on-device ids).
+  `materialRequest` now sets `sent.media` to null without media, so a plain request drops media layers (§11.5.8); a
+  remake that still loses one warns `ai.warn.matMediaLost` (new). Tests in `ai_recipe` and `ui_ai`.
+- **MAI-8.** ▶ 見る takes `ai_review.previewId` (the next id, as `CH.apply(doc, plan, [c])` numbers it; a remake keeps
+  its id); `changeGroups` numbers new materials in list order as `toCommands` does. Test in `ui_ai` (two materials).
+- **MAI-9.** `direct.materialsOf` puts each new material on a copy of the document (after `materialsBefore`, the
+  materials of earlier windows, which the controller passes); the first that does not fit and the rest are left out
+  (fromAi is not even run for them) with `ai.warn.matFull` (new), and their uses fall away; the other changes apply.
+  Test in `ai_direct` (62 materials + 3 → 2 made, a later window makes none).
+- **CP-1.** `planCut` adds 'beats' to the cut's needs when its custom shot has a `beat:<n>` key (`SHOT.usesBeats`; presets
+  have none and are not looked at). Test in `planner_determinism` (fresh plans and the re-plan path: the fp follows a
+  small move and a one-beat offset change with a beat key, and stays without one or with a preset). plan_hashes.json,
+  frame hashes and project_media.json unchanged (`update_golden.js --check`: no fixture pins a beat-keyed shot).
+- **CP-2.** `slotChange`: a value change on a line without its own pin is "the same" only when every cut not pinned by
+  cut already shows it (`lineShows`). Test in `ai_direct` (basic: a mixed line gets the pin, an even line does not). The
+  old test of `none` ornaments/filters compared with the first cut only; it now expects a change unless every cut
+  shows 0 already. speedTo keeps its first-cut tolerance (±0.02; open below).
+- **I18N-1.** Material rows name the material in the page's language: `CH.matText` (the entry's `{ ja, en }`, carried
+  as `matLabel` on the pins that place it) in `describe`, `shown`, and ai_review's rows and 「…が必要」 notes; fromAi's
+  warnings use the en name on the en page; a blurb is stored under the language it was written in (`{ ja: '', en }` on
+  the en page; `parts/mix.labelsOf` falls back to the name). Tests in `ai_recipe`, `ai_direct`.
+- **I18N-2.** avoid lists join with `t('list.sep')`. Test in `ai_direct`.
+- **I18N-3.** The vision system text asks for `reason` in Japanese or English by `uiLang`. Test in `ai_vision`.
+- **UI-9.** The knob's commit passes the widget's merge on (`mat:<id>:<knob>`). Test: `ui_flows materials` (five
+  ArrowLeft presses on the 量 slider = one undo entry).
+- **Mutation checks.** Node, 22 mutants, 21 killed: the name back in the line; derived grounds listed; the switch
+  ignored; remembered consent (the old describeMedia); text params allowed; the limit always the spec max; one place
+  only; the scope not forced; the slot check removed; `sent.media` back to `[]`; no remake list; the remake list
+  described while off; previewId = plannedId; the old changeGroups; no room check; no beat term; the first-cut
+  comparison; `matName` before the entry's names; the blurb under ja; '・'; the language-less reason. One redundant
+  mutant survived as expected: removing the `visionAgreed.clear()` inside `run` (the `finally` in describeMedia still
+  clears it). Browser: the switch ignored (ai_media: 2 checks fail), the knob merge dropped and the slider max left at
+  the spec (materials) — killed.
+- **Open, for the lead.** (a) The direct tool's `materialRef` / `useChanges` / `listTo` still call `slotFor` without the
+  registry, so a run-scope *variant* ornament named among `ornaments` goes to `ornament#i` and is ignored by the plan
+  (the same defect as MAI-6, in the direct tool; not changed here). (b) `speedTo` compares with the first unpinned cut
+  (CP-2's optional part). (c) The standalone ＋ AIで作る (not a remake) still offers no pictures. (d) docs/AI_GUIDE.md §7
+  and "What is sent and stored" should say what `ai.sendsMediaList` / `ai.sendsMedia` say; left to the docs group's
+  AI_GUIDE work (DTC-5) so the file is not edited twice in this round.
+
+## Review fixes round 2: AI, materials, planner and privacy
+
+Group "ai-planner-privacy", second round, on bf5cd12: the four problems the verifier found in the first round's fixes.
+
+- **PRIV-1-ANIM** (the consent and the notice left out animations). An animated GIF or WebP (「アニメ」) is timed
+  (`media_io.isTimed`) and sends 3 JPEG frames, like a video. `ai.visionConsent` now says 「動画・アニメは3枚」 / "a video
+  or animation sends 3 frames", and `ai.sendsMedia` 「（動画・アニメは3枚）」 / "(3 for a video or animation)". DESIGN_2_1
+  §11.6.2 (wording, and "Videos and animations" under What is sent), §11.6.4 and the string table say the same. Test:
+  `ui_media` describeMedia requires the animation words in both strings, ja and en, and that `isTimed` is true for
+  `{ kind: 'image', anim: true }` (the old strings fail it: consent and notice, each on its own).
+- **MAI-6-TEST** (the inspector's scope had no test). New `ui_flows` flow `material_scope` on the v21 project: 要素 ›
+  背景 › 空気 › マイ素材 › ＋ AIで作る sends `scope "run"` in the request, and the material (the answer says scope cut)
+  is made as a run ornament and pinned at `line/r5:atmos`; 要素 › 装飾 › ornament#0 sends `scope "cut"` and the material
+  (the answer says run) lands at `line/r5:ornament#0`. With `makeFor` passing `{}` again, the flow fails 6 checks.
+- **MAI-9-TEST** (the controller's `materialsBefore` had no test). New `ui_ai` test with the real ai/direct: the v21
+  project with two headings of 150 and 120 lines (two request windows) and 63 materials; each window's answer makes one
+  material used as its area's atmosphere. The review holds only window 0's material, warns `ai.warn.matFull` (1), and
+  applies (64 materials; area A uses it, area B has no atmosphere pin and keeps window 1's speed). With
+  `materialsBefore: []` in `askDirect` it fails (both materials are in the review).
+- **SEC-2-DOC** (docs/AI_GUIDE.md said nothing about photos and videos). §7 送るものと保存されるもの and "What is sent
+  and stored" now say what `ai.sendsMediaList`, `ai.sendsMedia` and `ai.visionConsent` say: only number, kind, size,
+  length and shape, never file names; the description, colours and positions only while 写真・動画をAIが使ってよい is on
+  (one switch for 指示 and 区画ごとに指示; off, neither uses photos and videos); the pictures only through
+  AIに説明してもらう…, Gemini only, as 768 px JPEGs, 3 frames for a video or animation; asked every time, remembered
+  neither per photo nor per project. The storage table and "Stored" add the applied photo descriptions (in the project)
+  and the stills and consents (not stored); 「AI がしないこと」 and "What the AI never does" add pictures without consent and
+  file names. Test in `ai_privacy` (both sections, whitespace-folded; no 「この作品では」 / "per asset" / "this project only"
+  there); the old guide fails it. The docs group's AI_GUIDE rewrite (DTC-5) touches the same file: whoever merges keeps
+  these paragraphs and this test.
+- **The file-name test** asked for is the first round's `ai_privacy` test (every request of every tool, ja and en, with
+  personal file names, no name nor stem in any system text, prompt or schema); unchanged and passing.
+- **Checks.** Node: the group's files (ai_*, recipe, mix, planner_*, ui_ai, ui_media, ui_fields, i18n) and the whole
+  suite with `--test-concurrency=1` (1606/1606); `update_golden.js --check` matches (plan_hashes unchanged: no engine
+  change); `build.py --check` OK. Browser, all OK: ui_flows ai_prep, ai_looks, ai_edit, ai_align, ai_area, ai_board,
+  ai_media, materials, material_scope, library; i18n_pages.py; csp.py.
+## Review fixes: UI
+
+Findings UI-3, UI-4, UI-5, UI-6, UI-8, UI-10 and CC-1 of this review round. Each has a test that fails without its fix
+(checked by reverting the fix and running the test).
+
+- **UI-3 (tap marks lost after P).** `ui/tap` now keeps the session's paused flag in step with the clock: a view
+  listener reduces `pause` / `resume` whenever `playing` changes during a session, so ▶ in the play bar, 1行戻る and the
+  song's end all agree with P. `.step-tap.is-paused` now also shows while playback is stopped from the play bar.
+  Test: ui_flows `tap` (P, then ▶, then Space marks line 2; P, then Backspace, then Space marks it again; both starts
+  are recorded).
+- **UI-4 (trim row, clipOut).** The 使う範囲 row's `clearPaths` also hold the clipOut paths, so ×, Del, ⋯ 自動に戻す and
+  `focusField` reset the end too. Its tag, × and tag click use the end's state (`row.fsOut`) when only the end is
+  pinned here (`tagState`); the value, 今の値で固定, copy and promote still read clipIn. The crop half of the finding
+  was refuted by the verifier (cropX and cropY have rows of their own) and is left as it is. Test: ui_flows `media`
+  (only clipOut pinned: 固定 with ×; Del on the out handle clears it; then 自動).
+- **UI-5 (toast 元に戻す undid a later edit).** The placement toast and the この色に合わせる toast get their
+  [元に戻す] from `undoLast()`, which remembers the number of the undo step just made. It undoes only while that step
+  is still the newest. After other edits it says so (`media.undoLater`, 「…「変更の履歴」を使ってください」) and undoes
+  nothing. The entry number is used instead of `store.rev`, so an undo and redo of the step keeps the button working.
+  Tests: ui_flows `media` (after another pin the toast's 元に戻す changes nothing and says why) and `library` (the
+  colours toast's 元に戻す still undoes its step).
+- **UI-6 (relink with another asset's file).** A picked file whose id is in the library is stored under that id only
+  when that asset is missing. It is then relinked even when another row's つなぎ直す was used, because the bytes are
+  that asset's own. This differs from the suggested `id === only`, which would offer the file as a stand-in and leave
+  its own asset marked missing. A file of an asset that is already here keeps its caches and goes on to the stand-in
+  path: the same kind and size are asked about as before; otherwise the toast says 「もう入っています: …」 (not
+  「この作品の写真・動画とは合いません」), with [代わりにこのファイルを使う] when there is one target. That button is never
+  offered for the file's own asset. Test: ui_flows `missing` (on the missing frame's page, picking the background's
+  file says もう入っています, the frame stays missing and the background stays ok).
+- **UI-8 (crumbs showed the content id).** The asset page remembers the name it last drew; when the asset leaves the
+  document (its import undone) the crumbs keep that name (else 「この写真・動画はもうありません」), never `o.id`. The page
+  itself still says この写真・動画はもうありません and stays, so a redo shows the asset again. Test: ui_flows `library`
+  (import a.png, open its page, Ctrl+Z).
+- **UI-10 (focus lost after removing a part).** `partRefs.update` notes which chip × had the focus; after the chips are
+  drawn again, the × now at that place (else the last one, else [+]) gets the focus. Test: ui_flows `values` (Enter on
+  the first ×: the focus is on the next chip's ×; Enter again: the list is unpinned and the focus is on [+]).
+- **CC-1 (文字の中に写真 lost its slot).** `fields.contextOf` on a text page first takes the ornament slot pinned to
+  textFill at the page's own scope, then the slot every cut shows as textFill, then `freeIndex`. A line that picks
+  another decoration in that slot no longer sends the 要素の既定 row to a free slot. Test: ui_media.test.js (work
+  ornament#2 = textFill with a source, line r3's ornament#2 = hankoSeal: the work row stays on #2 with its fit and crop
+  rows; line r3's own text page follows its own pin).
+
+Checks: Node all pass (1588); ui_flows tap, values, media, library, missing and media_song; ui_layout.py; csp.py;
+build --check 212 modules.
+
+Second pass (the verifier's residuals of UI-5 and UI-4), each with a test that fails without it:
+
+- **UI-5-residual (colours toast after a batch that changed nothing).** `matchColorsOf` notes `store.rev` before its
+  batch and gives the toast [元に戻す] only when the batch made a step. Pinning the same colours again makes none, and
+  `undoLast()` would then have remembered an older, unrelated step. Test: ui_flows `library` (match, pin
+  work:text.scale, match again: the toast has no 元に戻す and the other pin stays).
+- **UI-4-residual (trim end fixed above the page).** `tagState` also shows the end's state when the start is automatic
+  and the end is not, so a line's 使う範囲 with only the work's clipOut pinned reads 「作品で固定 ↑」 (not 自動), without
+  ×. The tag and ⋯ 固定元へ移動 read `ownerState` (the tag's inherited state, else the start's). When the end is pinned
+  on the line and the start at the work, they still go to the work, not to the line's own page. Tests: ui_flows `media`
+  (the work's clipOut alone: inherited, no ×, the tag opens the work's 背景; the end on the line and the start at the
+  work: ⋯ 固定元へ移動 opens the work's 背景).
+
+Not changed here, for the engine's owner: with work:ground@photoPan.clipOut = 1.2 and line/r4:…clipOut = 1.0,
+`fieldStates` reports the line path as `pinned` at the line with the value 1.2. The line's ground is the work's section,
+so the line pin does not apply. With the line pin alone it reports `inactive` (not-applicable). The trim row shows what
+it is given (固定, 0:01.20).
+
+Checks: Node all pass (1588); ui_flows tap, values, media, library, missing and media_song; ui_layout.py; csp.py;
+build --check 212 modules.
+## Review fixes: documents
+
+Findings DTC-2, DTC-3, DTC-4 and DTC-5 of the v2.1 review. All four reproduced on 9c89cac. The new
+`tests/node/docs.test.js` ties each document to the code; every check there fails on the old documents (checked by
+putting the old files back).
+
+- **DTC-2 → DESIGN_2_1 §11.4.3.** The Frames item now states the lead decision "WebM frame times are snapped to the
+  frame grid": with a `DefaultDuration`, and every block within 0.5 ms of `i · DefaultDuration` from the first frame,
+  the frame time is `i · DefaultDuration`; otherwise the stored times stay (variable frame rate); the snapped times are
+  integer ns ticks, so §11.4.2 (4) holds. The VP9 level list gains 52. The finding's "52 for 4K60" is wrong: probed,
+  `vp9Level(3840, 2160, 60)` is 51 and 52 starts at 71 fps, so the text says "3840×2160 at 71 fps or more" and names
+  the fallback 62. The comment on `VP9_LEVELS` (`media/samples.js`) is corrected the same way. The older NOTES v2.1-C
+  line "level 52 (4K60)" is left as history; this entry corrects it. Tests: the level list equals every level
+  `vp9Level` gives within §11.2.8 (sizes up to 4096×2176, 1–120 fps), the 70/71 fps edge, and the snap text; a WebM
+  in whole milliseconds snaps and one block 0.67 ms off the grid keeps the stored times.
+- **DTC-3 → optKey recorded.** DESIGN_2_1 §3.5 gains the field (enum only, `^[a-z][a-zA-Z0-9]*$`, labels
+  `opt.<optKey>.<value>`), §11.9.1 says the depth spec sets `optKey: 'depth'`, §9's D§4.2 row lists it (approved by
+  the lead, NOTES "Lead: integrating G.3"), and D§4.2's ParamSpec block in DESIGN.md gets one line pointing to §3.5.
+  Test: the pattern read from §3.5 agrees with `validateSpec` on eight keys; a non-enum is refused; `K.mediaParams`'
+  depth carries it; §9, §11.9.1 and D§4.2 mention it.
+- **DTC-4 → SPEC.md for v2.1.** Camerawork, speed curves and 動きの速さ, line season and avoid, My materials, and a
+  "Photos and videos" block (formats, limits, uses, controls, 動きと重なり, この色に合わせる) in §6; §5 the video's own
+  sound; §7 Opus in MP4, 透過動画（WebM）, the Filmora用 set, .srt/.lrc, the project package `.mojipv` as the default save
+  with 軽い保存 `.json`, and lead decision (4) "a save or an export never deletes a file or folder that it did not create
+  itself"; §8 rewritten: 指示 (replaces ひとこと修正), 区画ごとに指示, カメラワークをAIに任せる, materials, 写真の説明, and
+  exactly what is sent and never sent (lead decisions 1–3); §10 "Not in v2.1". Tests: §7 names every
+  `OUTPUT_CHOICES.format` as step ④ labels it and the package / light save; §8 names the tools by their `strings.js`
+  labels and states the privacy rules; the v2.0 sentence "Only lyric text, … are sent" is gone.
+- **DTC-5 → docs/AI_GUIDE.md rewritten (ja, then en), README.md / README.en.md.** New sections: 指示 (targets, the
+  区画▾ groups, chips, 詳しく with 新しい素材を作ってもよい and 写真・動画をAIが使ってよい, camera mode, questions, the
+  inspector's 「…をAIに頼む…」), 区画ごとに指示 (the same photo/video box, one source), 素材づくり (three ways; data, never
+  code), 写真・動画と AI (what 指示 sends: `asset:<n>`, kind, size, length, shape and the stored description, never file
+  names; 写真の説明: the confirmation every time, 768-px JPEG, 3 frames for a video or animation, Gemini only, no EXIF;
+  動きと重なり and the AI's suggestion), the v2.1 review groups, "送るもの / 送らないもの / 保存されるもの", the
+  current clear-device label, and four new troubleshooting rows. The READMEs' AI sections list 指示, 素材づくり and
+  写真の説明 instead of ひとこと修正 and say what is sent; their privacy lines name photos and videos; the DESIGN_2_1
+  link no longer calls v2.1 "the next version". Tests: 34 labels quoted by the guide are the `strings.js` values in
+  both languages; no ひとこと修正 / One-line edit; the privacy sentences; every troubleshooting message and disabled
+  reason is a string of the app; the READMEs name the tools, say file names are never sent and link the guide.
+- **Depends on the same round's code fixes.** The guide, SPEC §8 and the READMEs describe the behaviour after
+  SEC-2 = DTC-1 = MAI-1 (no file names in any prompt), UI-1 = MAI-2 (the board follows the same box) and PRIV-1
+  (the picture consent asked every time). They quote neither `ai.visionConsent`, `ai.sends` nor `ai.sendsMedia`,
+  which that work rewrites; the labels they do quote are bound by `docs.test.js`, so a later rename fails there.
+- **Left to others.** DESIGN_2_1 §11.6.1's `[media]` example with file names, §11.6.2's per-asset consent wording,
+  §11.6.4 ("The `direct` tool sends names …") and §9's §4.22.6 row belong to the privacy fixes above. README's export
+  section still says browsers cannot make a transparent video file: step ④ on this commit offers only MP4 / PNG連番 /
+  透過PNG, so that line changes with the step ④ UI (H.3).
+
+## Review fixes: documents, round 2
+
+The verifier's findings DOCS-V1 to DOCS-V5 on the section above. All five reproduced on c465f59 with the verifier's
+probes. The tests are in `tests/node/docs.test.js` (now 12); each fix was reverted alone and a test failed.
+
+- **DOCS-V1 → no prompt names a pooled photo or video; the AI tools read the current registry.** `ai/catalog.catalog`
+  leaves out the grounds derived from pooled photos and videos (`isMedia`: `registry.extra[key].media === true`) for
+  every tool, so AIに3案 and the edit request no longer send `myMed…=空.jpg`. The guard must be `=== true`: a
+  material's `mine.media` is the list of pictures it uses (`[]` when none), so a truthiness test drops every material
+  as well. `materialsText` had that slip (`mine && mine.media`) and so listed no material at all with a registry from
+  `parts/mix` (ai_recipe.test.js only reached it with a hand-made def without `media`); it uses `isMedia` now.
+  `ui/ai_panel.hostOf` reads `registry` through a getter: the panel is mounted before `ui/boot` restores the saved
+  work, so the tools kept the base registry and never saw the project's materials, whose names the guide (§10) says
+  are sent. Tests: with 空.jpg in おまかせ and the effective registry, no file name of the library is in AIに3案 (ja
+  and en), the edit request, 指示 with photos off or 素材づくり; the host's registry follows `app.reg` after mounting;
+  AIに3案 lists `myMat1=ふわり着地` and 指示's "Materials of this project" lists all three materials. On this branch
+  the [media] list of 指示 with photos on still holds names: that is SEC-2 = DTC-1 = MAI-1 (`recipe.mediaSent`), fixed
+  by the privacy work of this round, so the test leaves that one case to it.
+- **DOCS-V2 → what 写真・動画をAIが使ってよい off still lets through.** 指示's state lines name the background part and
+  mark a photo background (`ground=photoPan(photo)`) with no [media] list. The guide (§4, §5, §7.1, §10 and the
+  English Instruction, photos and "What is sent" paragraphs) and SPEC §8 now say that with the box off no number,
+  kind, size, length, shape or description is sent and only the part names tell that a background is a photo or
+  video, and that the box is on by default, under 詳しく / Options. Tests: the new sentences in both languages and in
+  SPEC §8, the old 「写真・動画のことは何も送りません」 / "nothing about them" gone, and a behaviour check: with the box
+  off 指示's prompt has `ground=photoPan(photo)` but no `asset:<n>`, no picture size and no caption or colour; with it
+  on, it has them.
+- **DOCS-V3 → SPEC §7.** 名前を付けて保存 (and 保存 of a work without a file) writes the package by default; 保存 keeps
+  the kind of the open file, so a work opened from or last saved to a `.json` gets a light save (DESIGN_2_1 §12.3,
+  `project_io.save`). Filmora用: the finished MP4 always; 文字と装飾だけ, 背景だけ, グリーンバック, 字幕 and 時間つき歌詞
+  optional, "on by default" for the two `KIT_DEFAULT` turns on. Tests: every `KIT_KEYS` file is among the optional
+  ones under its step ④ label, marked on by default exactly when `KIT_DEFAULT` says so; the save sentences and the
+  §12.3 Ctrl+S rule they follow; the old 「保存 / 名前を付けて保存 write」 sentence is gone.
+- **DOCS-V4 → the snap test pins the 0.5 ms.** The off-grid case is [0, 34, 67, 100] (frame 1 is 0.67 ms off; the old
+  [0, 33, 67, 101] was 1.0 ms off at frame 3), plus a pair on a 33.55 ms `DefaultDuration` grid, where whole
+  milliseconds come 0.45 ms (snapped) and 0.55 ms (kept) off. `SNAP_NS` 400000, 600000 and 700000 each fail the test.
+  The line of the section above that says "one block 0.67 ms off" is left as history; this entry corrects it.
+- **DOCS-V5 → the Mine tab.** The English guide says "the **Mine** tab of the part browser" in both places
+  (`pb.tab.mine`; My materials is the section of 作品全体). `pb.tab.mine` joins the labels docs.test.js binds (without
+  its " {n}"), and the English guide may not send the reader to "My materials in the part browser".
+- Checks: `build.py --check`; the whole Node suite (1599 pass); `ui_flows.py` OK (38 flows, the AI flows included, as
+  the AI host changed); no forbidden word in the Markdown touched.
+
+## Lead: integrating the review fixes
+
+The five review-fix groups (saving and opening, media runtime and stage, AI/materials/planner/privacy, UI, documents)
+applied to main 214780f in that order. Three places overlapped:
+
+- `ui/media_io.relinkFile`, the toast for a file that is not the missing original: the UI group's change
+  (「もう入っています」 for a file already in the library, and no 置き換える offered for the asset itself) and the saving
+  group's (the new file stays held while 置き換える is offered and is let go when the toast is closed) are both kept.
+- `ai/catalog.isMedia`: the documents group's `registry.extra[key].media === true` is kept. A material's `mine.media` is
+  the list of pictures it uses (`[]` when none), so the truthiness test of the privacy group's branch hid every
+  material from AIに3案 and 指示 (docs.test.js lists `myMat1=ふわり着地` and fails with it).
+- `docs/AI_GUIDE.md`: the documents group's §10 / "What is sent, what is not, what is stored" is kept, with the privacy
+  group's paragraph on pictures (768 px JPEG, 3 frames for a video, asked every time) in both languages; the stored
+  table says 反映した写真の説明 and AI が作った素材. `ai_privacy.test.js` now reads those renumbered headings.
+
+The README's export section still said a browser cannot write a transparent video file. It now lists Filmora用 (with
+a link to docs/FILMORA.md) and 透過動画（WebM）, and says 透明 means transparent video or PNG alpha, in both languages.
+
+Checks: `build.py --check` (213 modules); goldens unchanged; the whole Node suite (1645 pass); every browser test and
+`build_test.py` (see the PR run).

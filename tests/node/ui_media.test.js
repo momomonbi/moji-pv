@@ -473,6 +473,26 @@ test('the text page offers 文字の中に写真 on the first free ornament; its
   assert.deepEqual(on('line/r3', full), []);
 });
 
+test('文字の中に写真 at 要素の既定 stays on the slot pinned to textFill there when one line picks another decoration in it', () => {
+  const text = { level: 'el', scope: 'work', el: 'text' };
+  const on = (w) => rowsOf(fieldsOf(text, w)).filter((f) => /@textFill\./.test(f.path || '')).map((f) => f.path);
+  const rows = ['ornament#2@textFill.src', 'ornament#2@textFill.fit', 'ornament#2@textFill.cropZoom'];
+  const fill = [set('work:ornament#2', 'textFill'), set('work:ornament#2@textFill.src', LOGO)];
+  const filled = world((doc) => apply(doc, fill));
+  const ctx0 = F.contextOf(text, filled.plan, filled.registry, filled.doc);
+  assert.deepEqual([ctx0.textFillIdx, ctx0.textFillOn], [2, true]);
+  assert.deepEqual(on(filled), rows);
+  // line 3 shows a seal in that slot: the work's picture still fills the text of the other lines, and the row keeps it
+  const narrowed = world((doc) => apply(doc, fill.concat([set('line/r3:ornament#2', 'hankoSeal')])));
+  assert.ok(narrowed.plan.cuts.some((c) => c.line === 'r3' && c.slots['ornament#2'] && c.slots['ornament#2'].v === 'hankoSeal'));
+  assert.ok(narrowed.plan.cuts.some((c) => c.line !== 'r3' && c.slots['ornament#2'] && c.slots['ornament#2'].v === 'textFill'));
+  const ctx = F.contextOf(text, narrowed.plan, narrowed.registry, narrowed.doc);
+  assert.deepEqual([ctx.textFillIdx, ctx.textFillOn], [2, true], 'not the free slot #0 with なし');
+  assert.deepEqual(on(narrowed), rows, 'with its fit and crop rows');
+  // a line page follows its own scope: line 3 pins the seal there, so its row goes to a free slot
+  assert.equal(F.contextOf({ level: 'el', scope: 'line/r3', el: 'text' }, narrowed.plan, narrowed.registry, narrowed.doc).textFillOn, false);
+});
+
 test('the work page has 写真・動画 after 見た目, open while the library has assets', () => {
   const sections = fieldsOf(S.WORK);
   const ids = sections.map((s) => s.id);
@@ -590,7 +610,7 @@ test('preflight: a missing asset blocks with [つなぎ直す]; skipped backgrou
 
 // --- 写真の説明 (§11.6.2): the consent, the request, the review and apply --------------------------------------------------
 
-test('describeMedia: a consent per asset first; the JPEGs go before the prompt; the review writes the description', async () => {
+test('describeMedia: a consent every time pictures are sent; the JPEGs go before the prompt; the review writes the description', async () => {
   const AC = MV.use('ui/ai_controller');
   const ST = MV.use('core/store');
   const D = MV.use('core/doc');
@@ -633,6 +653,16 @@ test('describeMedia: a consent per asset first; the JPEGs go before the prompt; 
   assert.equal(await ctl.describeMedia([SEA]), false);
   assert.equal(log.asked.length, 1);
   assert.ok(log.asked[0].includes('約88KB') && log.asked[0].includes('Google Gemini'), log.asked[0]);
+  // the consent states what is sent: 768 px JPEGs, three frames of a video or an animation (media_io.isTimed sends
+  // an animated GIF or WebP as three frames too), no file names, asked every time; the notice says the same
+  assert.ok(['768px', 'JPEG', '動画・アニメは3枚', 'ファイル名は送りません', '送るたびに'].every((w) => log.asked[0].includes(w)), log.asked[0]);
+  const tEn = T.createT('en', STRINGS, reg, { strict: true });
+  const en = tEn('ai.visionConsent', { kb: 88 });
+  assert.ok(['768 px', 'about 88 KB per image', 'a video or animation sends 3 frames', 'File names are not sent', 'every time'].every((w) => en.includes(w)), en);
+  assert.ok(host.t('ai.sendsMedia').includes('動画・アニメは3枚'), host.t('ai.sendsMedia'));
+  assert.ok(tEn('ai.sendsMedia').includes('3 for a video or animation'), tEn('ai.sendsMedia'));
+  assert.ok(MI.isTimed({ kind: 'image', anim: true }) && MI.isTimed({ kind: 'video' }) && !MI.isTimed({ kind: 'image' }),
+    'the wording covers exactly what sends 3 frames');
   assert.equal(seen.length, 0);
   assert.deepEqual(log.parts, []);
   // consent: the asset on this device only (きらめき.webm is not), the images first, no lyrics in the prompt
@@ -652,16 +682,25 @@ test('describeMedia: a consent per asset first; the JPEGs go before the prompt; 
   const ai = store.doc.media.list.find((e) => e.id === SEA).ai;
   assert.equal(ai.depth, 'back');
   assert.deepEqual(ai.caption, { ja: '夕方の海', en: 'Evening sea' });
-  // asked once per asset for this project; a new project asks again
+  // asked every time: nothing is remembered, a no sends nothing, and a run without that consent sends nothing either
   const asked = log.asked.length;
   yes = false;
-  await ctl.describeMedia([SEA]);
-  assert.equal(log.asked.length, asked, 'no second question for the same asset');
+  assert.equal(await ctl.describeMedia([SEA]), false);
+  assert.equal(log.asked.length, asked + 1, 'a second question for the same asset');
+  assert.equal(seen.length, 1, 'nothing is sent without it');
+  assert.equal(await ctl.run('vision', { ids: [SEA] }), false, 'the vision tool sends only what was just agreed');
+  assert.equal(seen.length, 1);
+  yes = true;
+  assert.equal(await ctl.describeMedia([SEA]), true);
+  assert.equal(log.asked.length, asked + 2);
   assert.equal(seen.length, 2);
   ctl.discard();
+  assert.equal(await ctl.run('vision', { ids: [SEA] }), false, 'the consent held for that one run');
+  assert.equal(seen.length, 2);
   ctl.projectChanged();
+  yes = false;
   assert.equal(await ctl.describeMedia([SEA]), false);
-  assert.equal(log.asked.length, asked + 1);
+  assert.equal(log.asked.length, asked + 3);
   // the second service cannot describe pictures
   session.set('mojipv.ai.key.claude', 'sk-ant-' + 'y'.repeat(40));
   ctl.setProvider('claude');

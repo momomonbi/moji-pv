@@ -288,7 +288,7 @@ test('materialRequest: the kind, the description, the parts of the kind and the 
   assert.ok(q.prompt.includes('[arrive] ') && q.prompt.includes('inkRise=墨のぼり') && !q.prompt.includes('[dwell] '));
   assert.ok(q.prompt.includes(CAT.recipeText()));
   assert.ok(!/飛ばせ|始発のホーム/.test(q.prompt), 'no lyrics');
-  deepEqual(q.sent, { kind: 'arrive', current: null, media: [], lang: 'ja' });
+  deepEqual(q.sent, { kind: 'arrive', scope: null, current: null, media: null, lang: 'ja' }, 'no media layers without a [media] list');
   const remake = RECIPE.materialRequest(DOC, PLAN, reg, { description: 'もっと多く', current: DOC.materials.list[2], uiLang: 'en', media: MEDIA_LIST });
   assert.equal(remake.sent.kind, 'ornament');
   assert.equal(remake.sent.current, 'm3');
@@ -336,4 +336,113 @@ test('materials with a registry that holds materials: variant bases come from th
   assert.ok(!CAT.catalogText(CAT.catalog(ext, DOC, ['arrive'], 'ja', { mine: false })).includes('myMat9'));
   assert.equal(CAT.materialsText(reg, 'ja'), '', 'no materials, no list');
   assert.ok(S.coerce({ type: 'partRefs' }, ['arrive.myMat9']), 'material keys are part refs');
+});
+
+// ---- review fixes (NOTES "Review fixes: AI, materials, planner and privacy") ---------------------------------------
+
+test('MAI-3: an AI material never sets a free-text param (a label or number a part draws); §5.12 allows glyphs only', () => {
+  const breath = RECIPE.fromAi(ai({ kind: 'arrange', base: 'breathMark', params: [{ name: 'label', value: 'FOLLOW @someone NOW' }], layers: [] }), reg);
+  assert.equal(breath.entry.recipe.base, 'breathMark');
+  assert.ok(!('label' in breath.entry.recipe.params), JSON.stringify(breath.entry.recipe.params));
+  const side = RECIPE.fromAi(ai({ kind: 'arrange', base: 'sidebarIndex', params: [{ name: 'number', value: 'BUY' }], layers: [] }), reg);
+  assert.ok(!('number' in side.entry.recipe.params));
+  const inner = RECIPE.fromAi(ai({ scope: 'cut', layers: [], parts: [{ key: 'serialMark', params: [{ name: 'number', value: '12:34' }] }] }), reg);
+  deepEqual(inner.entry.recipe.parts, [{ key: 'serialMark', params: {} }]);
+  assert.equal(reg.get('arrange', 'breathMark').params.label.type, 'text', 'the spec is a text param');
+});
+
+test('MAI-5: 作ったら選択中の行に使う with several lines: one pin per selected line, each requiring the material', () => {
+  const q = RECIPE.materialRequest(DOC, PLAN, reg, { description: 'x', kind: 'ornament', scope: 'cut', uiLang: 'ja' });
+  const json = { understood: true, question: '', material: ai({ scope: 'cut', season: '' }) };
+  const paths = ['line/r4:ornament#0', 'line/r5:ornament#0', 'line/rc:ornament#0'];
+  const r = RECIPE.materialChanges(DOC, PLAN, reg, json, { rev: 2, sent: q.sent, useAt: { scope: 'line/r4', slot: 'ornament#0', paths } });
+  const [mat, ...deps] = r.changes;
+  deepEqual(deps.map((c) => [c.path, c.to, c.requires]), paths.map((p) => [p, 'mat:桜吹雪', [mat.id]]));
+  deepEqual(r.warnings, []);
+  const cmds = CH.toCommands(DOC, PLAN, r.changes);
+  deepEqual(cmds.slice(1).map((c) => [c.path, c.v]), paths.map((p) => [p, 'myMat4']));
+});
+
+test('MAI-6: an ornament asked for one place keeps that scope; a result of the other scope is never pinned there', () => {
+  // the 空気 row asks for an atmosphere: the prompt says so and lists only run-scope bases
+  const run = RECIPE.materialRequest(DOC, PLAN, reg, { description: '雪', kind: 'ornament', scope: 'run', uiLang: 'ja' });
+  assert.equal(run.sent.scope, 'run');
+  assert.ok(run.system.includes('scope "run"') && run.system.includes('an atmosphere'), run.system);
+  assert.ok(run.prompt.includes('[atmos] ') && !run.prompt.includes('[ornament] '));
+  const cutAnswer = { understood: true, question: '', material: ai({ scope: 'cut', season: '' }) };
+  const a = RECIPE.materialChanges(DOC, PLAN, reg, cutAnswer, { rev: 2, sent: run.sent, useAt: { scope: 'line/r4', slot: 'atmos' } });
+  assert.equal(a.changes[0].entry.recipe.scope, 'run', 'the scope asked for wins over the answer');
+  deepEqual(a.changes.slice(1).map((c) => [c.path, c.to]), [['line/r4:atmos', 'mat:桜吹雪']]);
+  const planned = PL.plan(CMD.reduce(DOC, { t: 'batch', cmds: CH.toCommands(DOC, PLAN, a.changes) }), { registry: MV.use('parts/mix').registryFor(reg,
+    CMD.reduce(DOC, { t: 'batch', cmds: CH.toCommands(DOC, PLAN, a.changes) }).materials) });
+  const g = planned.grounds[planned.cuts.find((c) => c.line === 'r4').ground];
+  assert.equal(g.atmos.v, 'myMat4', 'the plan uses it as the atmosphere');
+  // a 装飾 row asks for a decoration near the words
+  const cut = RECIPE.materialRequest(DOC, PLAN, reg, { description: '星', kind: 'ornament', scope: 'cut', uiLang: 'ja' });
+  assert.ok(cut.prompt.includes('[ornament] ') && !cut.prompt.includes('[atmos] '));
+  const runAnswer = { understood: true, question: '', material: ai({ scope: 'run', season: '' }) };
+  const b = RECIPE.materialChanges(DOC, PLAN, reg, runAnswer, { rev: 2, sent: cut.sent, useAt: { scope: 'line/r4', slot: 'ornament#0' } });
+  assert.equal(b.changes[0].entry.recipe.scope, 'cut');
+  deepEqual(b.changes.slice(1).map((c) => c.path), ['line/r4:ornament#0']);
+  // a variant of a base part of the other scope is not used for it
+  const atmosBase = reg.pool('ornament', { scope: 'run', season: 'any' })[0];
+  const v = RECIPE.fromAi(ai({ base: atmosBase, layers: [], parts: [] }), reg, 'ornament', { scope: 'cut' });
+  assert.equal(v.entry, null);
+  assert.ok(v.warnings.some((w) => w[0] === 'ai.warn.unknown' && w[1].key === atmosBase));
+  // without a scope asked for (older callers), a result that cannot take the row's slot gets no pin (ai.warn.noSlot)
+  const free = RECIPE.materialRequest(DOC, PLAN, reg, { description: 'x', kind: 'ornament', uiLang: 'ja' });
+  const c = RECIPE.materialChanges(DOC, PLAN, reg, runAnswer, { rev: 2, sent: free.sent, useAt: { scope: 'line/r4', slot: 'ornament#0' } });
+  deepEqual([c.changes.length, c.warnings], [1, [['ai.warn.noSlot', { n: 0 }]]]);
+  // a remake keeps the material's scope (m3 is an atmosphere)
+  assert.equal(RECIPE.materialRequest(DOC, PLAN, reg, { description: 'x', current: DOC.materials.list[2], uiLang: 'ja' }).sent.scope, 'run');
+  assert.equal(RECIPE.slotFor({ kind: 'ornament', recipe: { base: atmosBase, params: {}, shared: {} } }, reg), 'atmos', 'a variant has its base\'s scope');
+});
+
+test('MAI-7: AIで作り直す keeps a photo layer: a fixed asset stays, a picture the user picks stays, a lost one is warned about', () => {
+  const photo = ai({ scope: 'cut', season: '', layers: [layer({ prim: 'media', media: 'asset:1', shape: 'ellipse', sizeMin: 0.3, sizeMax: 0.3 }),
+    layer({ prim: 'media', media: '', shape: 'roundRect', sizeMin: 0.3, sizeMax: 0.3 })] });
+  const made = RECIPE.fromAi(photo, reg, null, { media: MEDIA_LIST }).entry;
+  const doc = CMD.reduce(DOC, { t: 'material.put', id: 'm4', kind: 'ornament', by: 'ai', name: made.name, recipe: made.recipe });
+  const current = doc.materials.list[3];
+  // the remake request lists the pictures, with the media schema even when the list is empty
+  const q = RECIPE.materialRequest(doc, PLAN, reg, { description: 'もう少しピンクに', current, uiLang: 'ja', media: MEDIA_LIST });
+  assert.equal(q.schema, RECIPE.MATERIAL_SCHEMA_MEDIA);
+  assert.ok(q.prompt.includes('"media":"asset:1"'), 'the current material names its picture');
+  const echo = { understood: true, question: '', material: RECIPE.toAi(current, { media: MEDIA_LIST }) };
+  const r = RECIPE.materialChanges(doc, PLAN, reg, echo, { rev: 2, sent: q.sent });
+  deepEqual(r.changes[0].entry.recipe.layers.map((l) => [l.prim, l.src]), [['media', MEDIA_LIST[1].id], ['media', '']]);
+  deepEqual(r.warnings, []);
+  const empty = RECIPE.materialRequest(doc, PLAN, reg, { description: 'x', current, uiLang: 'ja', media: [] });
+  assert.equal(empty.schema, RECIPE.MATERIAL_SCHEMA_MEDIA);
+  assert.ok(!empty.prompt.includes('[media] the user\'s own'), 'no list to send');
+  const kept = RECIPE.materialChanges(doc, PLAN, reg, { understood: true, question: '', material: RECIPE.toAi(current, { media: [] }) }, { rev: 2, sent: empty.sent });
+  deepEqual(kept.changes[0].entry.recipe.layers.map((l) => l.src), ['', ''], 'the picture the user picks survives; the fixed one is unlinked');
+  // a request without media drops media layers (§11.5.8), and says the picture was lost
+  const none = RECIPE.materialRequest(doc, PLAN, reg, { description: 'x', current, uiLang: 'ja' });
+  assert.equal(none.schema, RECIPE.MATERIAL_SCHEMA);
+  const lost = RECIPE.materialChanges(doc, PLAN, reg, { understood: true, question: '', material: ai({ scope: 'cut', season: '',
+    layers: [layer({ prim: 'media', media: '' }), layer({})] }) }, { rev: 2, sent: none.sent });
+  deepEqual(lost.changes[0].entry.recipe.layers.map((l) => l.prim), ['particles']);
+  assert.ok(lost.warnings.some((w) => w[0] === 'ai.warn.matMediaLost' && w[1].name === made.name.ja), JSON.stringify(lost.warnings));
+});
+
+test('I18N-1: an AI material is named in the page\'s language in the review; its blurb is kept under the language it was written in', () => {
+  const T = MV.use('i18n/t');
+  const STRINGS = MV.use('i18n/strings');
+  const en = T.createT('en', STRINGS, reg, { strict: true });
+  const ja = T.createT('ja', STRINGS, reg, { strict: true });
+  const q = RECIPE.materialRequest(DOC, PLAN, reg, { description: 'x', kind: 'ornament', scope: 'cut', uiLang: 'en' });
+  const r = RECIPE.materialChanges(DOC, PLAN, reg, { understood: true, question: '', material: ai({ scope: 'cut', season: '', blurb: 'Petals drift' }) },
+    { rev: 2, sent: q.sent, useAt: { scope: 'line/r4', slot: 'ornament#0' } });
+  const [mat, pin] = r.changes;
+  assert.ok(CH.describe(mat, en).includes('"Cherry flurry"') && !CH.describe(mat, en).includes('桜吹雪'), CH.describe(mat, en));
+  assert.ok(CH.describe(pin, en).includes('Cherry flurry') && !CH.describe(pin, en).includes('桜吹雪'), CH.describe(pin, en));
+  assert.ok(CH.describe(mat, ja).includes('桜吹雪') && CH.describe(pin, ja).includes('桜吹雪'));
+  deepEqual(mat.entry.blurb, { ja: '', en: 'Petals drift' });
+  const jq = RECIPE.materialRequest(DOC, PLAN, reg, { description: 'x', kind: 'ornament', uiLang: 'ja' });
+  deepEqual(RECIPE.materialChanges(DOC, PLAN, reg, { understood: true, question: '', material: ai({}) }, { sent: jq.sent }).changes[0].entry.blurb,
+    { ja: '花びらが斜めに舞う', en: '' });
+  // warnings name the material in the page's language too
+  const heavy = RECIPE.fromAi(ai({ layers: [layer({ count: 240 }), layer({ count: 240 })], knobs: ['count'] }), reg, null, { lang: 'en' });
+  assert.ok(heavy.warnings.some((w) => w[0] === 'ai.warn.matScaled' && w[1].name === 'Cherry flurry'), JSON.stringify(heavy.warnings));
 });

@@ -70,6 +70,17 @@ test('visionRequest: image parts first, JPEG only, ≤ 8 assets, a photo 1 image
   assert.equal(VI.visionRequest(big, eight, {}).sent.items.length, 8);
 });
 
+// I18N-3: the reason is shown next to 「AIのおすすめ」 in the page's language (§11.9.5), so the request names that language.
+test('visionRequest: the reason is asked for in the page\'s language', () => {
+  const items = [{ id: A['空.jpg'].id, parts: [JPEG('QUJD')] }];
+  const ja = VI.visionRequest(DOC, items, { uiLang: 'ja' });
+  const en = VI.visionRequest(DOC, items, { uiLang: 'en' });
+  assert.ok(ja.system.includes('reason = why, in a few words (at most 60 characters, in Japanese)'), ja.system);
+  assert.ok(en.system.includes('reason = why, in a few words (at most 60 characters, in English)'), en.system);
+  assert.equal(ja.prompt, en.prompt, 'only the language of the reason differs');
+  assert.equal(VI.visionRequest(DOC, items, {}).system, ja.system, 'ja by default');
+});
+
 test('the provider: image parts precede the prompt for Gemini; the other service takes no media', async () => {
   const q = VI.visionRequest(DOC, [{ id: A['空.jpg'].id, parts: [JPEG('QUJD')] }], { uiLang: 'en' });
   const seen = [];

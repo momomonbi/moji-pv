@@ -620,6 +620,10 @@ validator cannot drift apart (§5.10).
 - `checkCandidate` accepts any value that coerces, so `auto: { pick: ['expoOut', 'holdThenDash'] }` is valid.
 - `describeAuto` shows object values as `CV.keyOf` / `'custom'`. The inspector's display text comes from `label()`, not
   from here.
+- `optKey` (new optional field; enum only, an identifier `^[a-z][a-zA-Z0-9]*$`): the options are labelled
+  `opt.<optKey>.<value>` instead of the shared `opt.<value>`. It is for an enum whose values need their own words, such
+  as `depth`, whose `back` is 後ろに下げる and not `opt.back` 逆方向 (§11.9.1). `validateSpec` refuses it on any other type
+  and in any other form. Lead decision (NOTES "Lead: integrating G.3").
 - Dependencies become `['core/num', 'core/ease', 'core/color', 'core/curve', 'core/shot']`, all L0 with no cycle:
   `core/shot` depends on `core/curve` and `core/num` only.
 
@@ -2828,7 +2832,7 @@ edits of §11.7. F keeps the ownership of `i18n/strings.js` from A, and adds the
 | §3.9 | commands `media.put`, `media.meta`, `media.move`, `media.remove`, `media.relink`; `output.set kit` (§11.2.5) | WP1, WP7, WP8 |
 | §3.12 | `plan.media`; `mediaTerms` in the cut `fp` and `groundFp`; segment break on a changed media source (§11.2.6) | WP3, WP4 |
 | §3.13 | warnings `media-missing`, `media-kind`; why `media.pool`, `media.pin` | WP3, WP8 |
-| §4.2 | ParamSpec type `media` (§11.2.3) | WP0, WP3, WP5, WP8 |
+| §4.2 | ParamSpec type `media` (§11.2.3); the enum field `optKey` (§3.5, §11.9.1) | WP0, WP3, WP5, WP8; `optKey`: lead |
 | §4.6 | the `myMed<10 hex>` key rule; `extra[key].media` (§11.5.9) | WP0, WP3, WP5 |
 | §4.17.3, §4.17.5 | `sb.media` and its record; `env.media`; `scene.media` (§11.5.1) | WP4, WP5 |
 | §4.18.1–§4.18.3 | kit exports `media`, `mediaParams`, `MEDIA`; needs value `'media'`; `photoPan` params and label (§11.5.6–§11.5.7) | WP4, WP5 |
@@ -3122,13 +3126,24 @@ registry. The reducers, the library's 使用 n count and the delete dialog all u
     current document, or this tab's `usedMedia` set (ids stored or read since the last load, because undo can bring
     them back).
   - Everything else is deleted, like songs.
+  - Across tabs: a tab that stores a photo, video or song that no work record it wrote names yet (an import, a package
+    open, a relink) holds the Web Lock `mojipv-assets` shared until its autosave names it. An asset that will not join
+    the work is let go at once (unless the current document names it): a package open cancelled or refused after
+    storing assets, つなぎ直す with a file that fits no missing asset or a declined question, 置き換える with a file of
+    another kind, an import into a full library. While a toast offers 置き換える for the file, it stays held until the
+    toast is closed. The next load lets go of every asset the loaded work does not name. `prune` deletes media and
+    songs only when it gets that lock exclusively (`ifAvailable`), reading the works again under it; without Web Locks
+    it deletes none.
 - **Persistence:** the first media import calls `navigator.storage.persist()` once, so Chrome does not evict large
   assets. Its answer is not required.
 - **Quota:**
   - `navigator.storage.estimate()` runs after each import. Above 80 % of the quota, a warning names the usage.
   - `QuotaExceededError` gives `media.err.quota`. The asset then stays **in memory for this session only** (the
-    `media` store keeps a `Map` fallback), and the user is told to save a package (§12).
-- **Without IndexedDB,** the in-memory fallback is used and the same notice is shown.
+    `media` store keeps a `Map` fallback, and so does the song), and the user is told to save a package (§12). A
+    package opened on a full device gives the same notice.
+- **Without IndexedDB,** the in-memory fallback is used and the same notice is shown. After a package open it names
+  what disappears with the tab: the photos and videos (`media.warn.memoryOnly`), the song (`song.warn.memoryOnly`), or
+  both (`media.warn.memoryOnlyAll`).
 - **`clearDevice`** (≡ › 設定) also clears `media`, `mediaIndex` and `thumbs`. Its label becomes
   「この端末に保存した作品・曲・写真・動画を消す」.
 
@@ -3465,11 +3480,18 @@ function. Export at any output size picks the same source frames: size affects o
     `BlockAdditions/BlockMore(BlockAddID 1)/BlockAdditional`, it records the frame's byte range, the key flag and the
     alpha payload range.
   - Frame time = `(ClusterTimestamp + relative) · TimestampScale / 1e9` seconds.
+  - **Snap to the frame grid** (lead decision, NOTES "Lead decisions (v2.1 integration)"). WebM stores whole
+    milliseconds, so at 24, 30 or 60 fps a third of the frames start up to 0.5 ms after `k / fps`, and §11.4.2's
+    `sampleAt(k / fps)` would pick frame k − 1. So when the track has a `DefaultDuration` and every block time, counted
+    from the first frame, is within 0.5 ms of `i · DefaultDuration` (i = the presentation index), the frame time is
+    `i · DefaultDuration`. Otherwise the stored times are kept (a variable frame rate). The snapped times are integer
+    nanosecond ticks (timescale 1e9), so §11.4.2 (4) still holds.
 - **Laced video blocks** are refused (`media.err.container`).
 - **Codec strings:**
   - VP9: `vp09.PP.LL.DD`. The profile and bit depth come from the first key frame's uncompressed header (frame marker,
     profile bits, and for profile ≥ 2 the bit-depth flag). The level comes from the D§4.21-style table of size and rate:
-    `10, 11, 20, 21, 30, 31, 40, 41, 50, 51`.
+    `10, 11, 20, 21, 30, 31, 40, 41, 50, 51, 52`. Level 52 is for 3840×2160 at 71 fps or more (up to the 120 fps that
+    §11.2.8 allows); a stream beyond the table gets 62.
   - VP8: `vp8`.
   - AV1: the string built from `CodecPrivate`'s `av1C`.
 - **Cues** are not needed: the sample table is complete, so no seek index is required.
@@ -4040,7 +4062,8 @@ K.MEDIA = { FITS, EDGES, MOVES, LOOPS, CLOCKS, SHAPES: ['rect', 'round', 'circle
 
 - **When media is offered.** A request offers media only when `opts.media` is true. The UI sets it when the library has
   at least one asset whose bytes are on this device and the checkbox 「写真・動画をAIが使ってよい」 (under 詳しく, on by
-  default) is ticked.
+  default) is ticked. The checkbox is one switch (`ui/ai_controller` `state.allowMedia`): the instruction block and the
+  board (区画ごとに指示, which shows the same checkbox) both read it, and while it is off no request of either offers media.
 - **Schema variant:** `directSchema({ mode, allowMaterials, media })` (§5.4) adds one property to `EDIT_PROPS`:
 
   ```js
@@ -4052,14 +4075,21 @@ K.MEDIA = { FITS, EDGES, MOVES, LOOPS, CLOCKS, SHAPES: ['rect', 'round', 'circle
   ```
 
   The portability test covers the variant.
-- **What is sent.** A `[media]` list is added after the part lists. It holds no pixels, ever:
+- **What is sent.** A `[media]` list is added after the part lists. It holds no pixels and no file names, ever: an asset
+  is its number, kind, length, size and shape, plus the vision text while the checkbox is on:
   ```
   [media] the user's own photos and videos (use only these, as "asset:<n>")
-  asset:0 image 4032×3024 landscape "海辺.jpg" — 夕方の海、オレンジの空 · colours #F2A65A #3D5A80 · text area: upper third
-  asset:1 video 0:12 1920×1080 "街.mp4" — (no description)
+  asset:0 image 4032×3024 landscape — 夕方の海、オレンジの空 · colours #F2A65A #3D5A80 · text area: upper third
+  asset:1 video 0:12 1920×1080 landscape — (no description)
   ```
-  The description, colours and text area come from `entry.ai` (§11.6.2) when present. The limit is 40 assets, taken in
-  library order.
+  The description, colours, text area and subject come from `entry.ai` (§11.6.2) when present. The limit is 40 assets,
+  taken in library order. A file name often says who or where (「山田花子_卒業式.jpg」), so it stays on this device (the
+  review rows and warnings show it there). Derived media grounds (§11.5.9), whose labels are file names, are left out of
+  every part list for the same reason.
+- **AIで作り直す on a material with a media layer** (§11.5.8) sends a `[media]` list too, with the media schema even when
+  the list is empty, so a picture the user picks (`src ''`) and a fixed asset survive: while the checkbox is on, the
+  pictures on this device and the material's own, with their vision text; while it is off, only the material's own
+  pictures, without it. A remake that still loses a media layer warns `ai.warn.matMediaLost`.
 - **System prompt paragraph** (English; added only with media):
   「Media: the user's photos and videos are listed as asset:<n>. Use one only when the instruction asks for a photo or
   video, or when it clearly fits the area. as = ground (background of the area), frame (a framed photo near the words),
@@ -4087,16 +4117,17 @@ K.MEDIA = { FITS, EDGES, MOVES, LOOPS, CLOCKS, SHAPES: ['rect', 'round', 'circle
 - **Why it exists:** a caption, tags, colours, a subject box and a calm text area make the `direct` answers better.
   Nothing else uses them.
 - **Consent.**
-  - Before anything is sent, a consent card appears. It works like the audio card (D§4.22.6): per asset, for this
-    project only, and not saved. `ui/ai_controller` keeps `visionConsented: Set<id>`, which is cleared on a new or
-    opened project.
-  - Wording: 「選んだ写真を小さくして（長い辺 768px の JPEG、1枚 約{kb}KB）Google Gemini に送ります。この作品ではこのときだけ。」
-    / "The selected photos will be sent to Google Gemini, downscaled (JPEG, 768 px long side, about {kb} KB each), this
-    time only."
+  - Before anything is sent, a consent question appears, every time 「AIに説明してもらう」 sends pictures: nothing is
+    remembered. `ui/ai_controller` holds the agreed asset ids for that one run only (and the vision tool sends nothing
+    else); they are cleared when the run starts and on a new or opened project.
+  - Wording (it states the real payload): 「選んだ写真・動画を小さな静止画にして Google Gemini に送ります（長い辺 768px の
+    JPEG、1枚 約{kb}KB。動画・アニメは3枚）。ファイル名は送りません。送るたびにたずねます。」 / "The selected photos and videos
+    will be sent to Google Gemini as small stills (JPEG, 768 px long side, about {kb} KB per image; a video or animation
+    sends 3 frames). File names are not sent. You are asked every time."
 - **What is sent:**
   - **Photos:** one JPEG at quality 0.8, 768 px on the long side. The host makes it from the decoded still with
     `canvas.convertToBlob`, and EXIF is not included.
-  - **Videos:** 3 JPEGs, at 10 %, 50 % and 90 % of the used range.
+  - **Videos and animations** (an animated GIF or WebP, 「アニメ」): 3 JPEGs, at 10 %, 50 % and 90 % of the used range.
   - At most 8 assets per request.
   - The only text is the prompt below: no lyrics, and no file names beyond the list index.
 - **API:**
@@ -4133,9 +4164,14 @@ K.MEDIA = { FITS, EDGES, MOVES, LOOPS, CLOCKS, SHAPES: ['rect', 'round', 'circle
 
 #### 11.6.4 Privacy (D§4.22.6, restated)
 
-- Media bytes leave the device only through the vision tool, only to Gemini, and only after consent.
-- The `direct` tool sends names, sizes and the vision text.
-- The always-visible notice gains 「写真は『AIに説明してもらう』のときだけ（小さくして）送ります」.
+- Media bytes leave the device only through the vision tool, only to Gemini, and only after a consent asked each time.
+- No prompt of any tool (direct, board, camera, material, looks, prep, song, vision) holds a photo or video file name.
+  An asset is `asset:<n>` with its kind, size, length and shape; the vision text (caption, colours, text area, subject)
+  goes only while 「写真・動画をAIが使ってよい」 is on. `ai_privacy.test.js` checks every tool's prompts.
+- The always-visible notice says exactly this: 「写真・動画について送るのは、番号・種類・大きさ・長さ・縦長か横長かだけです（ファイル名は
+  送りません）。『写真・動画をAIが使ってよい』がオンのときは、『AIに説明してもらう』で付いた説明・色・位置も送ります」 and
+  「写真・動画そのものは、『AIに説明してもらう』でそのつど同意したときだけ、小さな静止画にして Google Gemini に送ります（動画・
+  アニメは3枚）」.
 
 ### 11.7 UI (package G; D§6 additions)
 
@@ -4349,6 +4385,7 @@ AI  [AIに説明してもらう…]   夕方の海、オレンジの空（AIの�
 | `media.missingOpen` | {n}件の写真・動画がこの端末にありません | {n} photos or videos are not on this device |
 | `media.full` | 写真・動画は200件までです | Up to 200 photos and videos |
 | `media.warn.big` / `.bigFile` / `.memoryOnly` | 写真・動画が {size} あります。作品ファイルが大きくなります / 大きなファイルです（{size}）。読み込みに時間がかかります / この端末に保存できないため、写真・動画はこのタブを閉じると消えます。作品ファイルに保存してください | Your photos and videos take {size}; project files get large / Large file ({size}); importing takes a while / Photos and videos cannot be stored on this device and disappear when this tab closes. Save a project file. |
+| `song.warn.memoryOnly` / `media.warn.memoryOnlyAll` | この端末に保存できないため、曲はこのタブを閉じると消えます。作品ファイルに保存してください / この端末に保存できないため、写真・動画と曲はこのタブを閉じると消えます。作品ファイルに保存してください | The song cannot be stored on this device and disappears when this tab closes. Save a project file. / Photos, videos and the song cannot be stored on this device and disappear when this tab closes. Save a project file. |
 | `media.err.type` / `.heic` | 読めない種類のファイルです: {name} / HEIC は読めません。JPEG に変換してから読み込んでください（iPhone: 設定 › カメラ › フォーマット › 互換性優先） | Cannot read this kind of file: {name} / HEIC cannot be read. Convert it to JPEG first (iPhone: Settings › Camera › Formats › Most Compatible) |
 | `media.err.codec` | この動画の形式（{codec}）はこのブラウザでは読めません。H.264 の MP4 か WebM に変換してください | This video's format ({codec}) cannot be read in this browser. Convert it to an H.264 MP4 or a WebM |
 | `media.err.noWebCodecs` | このブラウザでは動画を読めません。PC の Chrome か Edge を使ってください | This browser cannot read videos. Use Chrome or Edge on a computer |
@@ -4372,8 +4409,11 @@ AI  [AIに説明してもらう…]   夕方の海、オレンジの空（AIの�
 | `media.peek` | 使う範囲を調整中 | Adjusting the range |
 | `media.a11y.row` / `.tile` / `.in` / `.out` | {name}、{kind}、{info} / {name}（{kind}） / 始め {time} / 終わり {time} | {name}, {kind}, {info} / {name} ({kind}) / Start {time} / End {time} |
 | `ai.direct.allowMedia` / `ai.warn.mediaUnknown` | 写真・動画をAIが使ってよい / 「{name}」という写真・動画はありません | AI may use photos and videos / There is no photo or video "{name}" |
-| `ai.tool.vision` / `ai.visionConsent` / `ai.visionOnlyGemini` | 写真の説明 / 選んだ写真を小さくして（長い辺 768px の JPEG、1枚 約{kb}KB）Google Gemini に送ります。この作品ではこのときだけ。 / 写真の説明は Google Gemini のときだけ使えます | Describe photos / The selected photos will be sent to Google Gemini, downscaled (JPEG, 768 px long side, about {kb} KB each), this time only. / Photo descriptions work only with Google Gemini |
-| `ai.sendsMedia` | 写真は『AIに説明してもらう』のときだけ（小さくして）送ります | Photos are sent (downscaled) only when you ask AI to describe them |
+| `ai.tool.vision` / `ai.visionConsent` / `ai.visionOnlyGemini` | 写真の説明 / 選んだ写真・動画を小さな静止画にして Google Gemini に送ります（長い辺 768px の JPEG、1枚 約{kb}KB。動画・アニメは3枚）。ファイル名は送りません。送るたびにたずねます。 / 写真の説明は Google Gemini のときだけ使えます | Describe photos / The selected photos and videos will be sent to Google Gemini as small stills (JPEG, 768 px long side, about {kb} KB per image; a video or animation sends 3 frames). File names are not sent. You are asked every time. / Photo descriptions work only with Google Gemini |
+| `ai.sendsMedia` | 写真・動画そのものは、『AIに説明してもらう』でそのつど同意したときだけ、小さな静止画にして Google Gemini に送ります（動画・アニメは3枚） | The pictures themselves go to Google Gemini, as small stills (3 for a video or animation), only when you agree each time under "Ask AI to describe" |
+| `ai.sendsMediaList` | 写真・動画について送るのは、番号・種類・大きさ・長さ・縦長か横長かだけです（ファイル名は送りません）。『写真・動画をAIが使ってよい』がオンのときは、『AIに説明してもらう』で付いた説明・色・位置も送ります | For photos and videos, only their number, kind, size, length and shape are sent (never file names). While "AI may use photos and videos" is on, the description, colors and positions from "Ask AI to describe" are sent too |
+| `ai.warn.matMediaLost` | 素材「{name}」の写真・動画が作り直しでなくなりました | The remake of "{name}" lost its photo or video |
+| `ai.warn.matFull` | マイ素材がいっぱいのため、新しい素材を{n}個作れませんでした（64個・160KBまで） | My materials are full, so {n} new material was not made (up to 64, 160 KB) (plural: …materials were not made…) |
 | `ai.ch.media` | 写真「{name}」の説明: {caption} | Description of "{name}": {caption} |
 | `undo.media.put` / `.meta` / `.move` / `.remove` / `.relink` / `.place` / `.colors` | 写真・動画を追加 / 写真・動画の設定 / 写真・動画の並べ替え / 写真・動画を削除 / 写真・動画を置き換え / 写真・動画を使う（{scope}） / 色を写真に合わせる | Add photo or video / Photo or video settings / Reorder photos and videos / Delete photo or video / Replace photo or video / Use photo or video ({scope}) / Match colours to the photo |
 | `warn.media-missing` / `warn.media-kind` | 写真・動画が見つかりません（{detail}） / この場所には使えない種類です（{detail}） | A photo or video is missing ({detail}) / This kind cannot be used here ({detail}) |
@@ -4436,7 +4476,7 @@ Part labels and blurbs of `photoFrame`, `textFill` and `mediaLayer` live in thei
 | `media_engine.test.js` (new) | B | with `fake_media.js`: `sb.media` checks; `K.media` for every `use`; the recorder op hash covers media time, and the source index equals `sampleAt` at 24, 30 and 60 fps output times (60 s of frames); mirror edge neighbours only when visible; rotation 0/90/180/270; `soft` draws the blurred copy first; `sceneOnly` skipped for chroma, black and clear; the `layers: 'ground'` option; `mediaAt` equals the drawn list; export quality throws `media-not-ready` on a non-exact frame; frame N direct equals N after 0..N−1; conformance of `photoPan`, `photoFrame`, `textFill` and `mediaLayer` (no NaN, balanced save/restore, same op hash twice) × 7 aspects × 24 times |
 | `planner_media.test.js` (new) | D | `plan.media` holds exactly the referenced ids; `mediaTerms` change only the fps of the cuts that use them; segment break on a changed source (and not without media pins: goldens equal); `media-missing` and `media-kind` warnings fall back to `''`; derived `myMed` grounds chosen only when `pool`; never for segments < 3 s or `title`; filters include and deny them; explain `media.pool` |
 | `mix.test.js` (+) | C | `registryFor(base, materials, media)`: derived defs per pooled asset, memoized, `version` changes on the `pool` toggle only; recipe `prim: 'media'` normalize, limits, cost and flash rule; interpreter via `K.media` |
-| `ai_direct.test.js` (+), `ai_vision.test.js` (new) | E | the media schema variant is portable; every mapping row; an unknown asset warns; kind mismatch; `none`; the `[media]` list holds no data beyond names, sizes and vision text; vision request (image parts first, ≤ 8 assets, JPEG only); `visionChanges` clamps and filters; revert |
+| `ai_direct.test.js` (+), `ai_vision.test.js` (new) | E | the media schema variant is portable; every mapping row; an unknown asset warns; kind mismatch; `none`; the `[media]` list holds no data beyond numbers, kinds, sizes, lengths, shapes and (while allowed) the vision text, never a file name (`ai_privacy.test.js`: no prompt of any tool holds one); vision request (image parts first, ≤ 8 assets, JPEG only); `visionChanges` clamps and filters; revert |
 | `ui_media.test.js` (new) | G | routing by sniff (a WebM with video goes to media; audio-only WebM goes to the song); placement batches per scope (work, lines, area, cut) equal the specified commands; the library order; delete batches clear part pins whose media param emptied; `media_widgets` FieldSpecs map `media` → `media` and `clipIn`/`clipOut` → `trim`; the video rows' `when` |
 
 #### 11.8.3 Browser tests (`tests/browser`)
@@ -4482,7 +4522,8 @@ The options, in this order:
 | `back` | 後ろに下げる | Push back |
 | `still` | 動かさない | Keep still |
 
-The strings are `opt.depth.*` and `param.depth` (package F). `mediaLayer` loses its `over` param: `depth` replaces it.
+The spec sets `optKey: 'depth'` (§3.5), so the option labels are the strings `opt.depth.*`; the label is `param.depth`
+(package F). `mediaLayer` loses its `over` param: `depth` replaces it.
 `front` is its old `over: text`, and `back` its old `over: behind`. v2.1 has not shipped, so no document holds `over`.
 
 #### 11.9.2 Resolution of `auto` (planner, package D; deterministic)
@@ -4660,7 +4701,9 @@ file**, and this is the **default** save. The light JSON save stays as a seconda
      - **Without it:** a memory sink with `Blob` parts gives one `Blob`, which goes to `downloadBlob`. Above 1.5 GB this
        asks for confirmation first (`pkg.warn.memory`: 「ブラウザが一時的に{size}の領域を使います」).
   5. Progress goes to the header save state (「ファイルに保存中… 42%」). [中止] in the toast calls `sink.abort()`, which
-     removes the partial file (D§4.21 sink rules).
+     removes the partial file when this save made it (名前を付けて保存's new file). 保存 onto the current file only
+     discards what it wrote: the browser writes into a copy until `close()`, so that file keeps its contents. An asset
+     larger than 32 MB is written in 32 MB pieces, so [中止] and the progress act within it.
   6. When done: `io.savedPkg`, e.g. 「保存しました: 夜明け.mojipv（1.2 GB・写真3・動画1・曲）」.
 - **Ctrl+S (保存)** writes the same kind as the current file handle: a `.mojipv` handle gets a package, a `.json`
   handle a light save. Without a handle it acts as 名前を付けて保存 with the package type preselected.
@@ -4969,8 +5012,10 @@ lrc(plan, doc) → string                                                       
 
 **Destination:**
 - With File System Access: `showDirectoryPicker({ mode: 'readwrite', id: 'mojipv-kit' })`, then a new folder
-  `<base>_filmora`, with one file sink per file. Cancel or failure removes the created files and the folder
-  (`removeEntry(…, { recursive: true })`).
+  `<base>_filmora`, with one file sink per file. A name the folder already has — compared without letter case or
+  Unicode form, then asked of the file system itself — gets ' (2)', ' (3)' …. Cancel or failure removes the created
+  files and the folder this export made (`removeEntry(…, { recursive: true })`), never a folder or file that was there
+  before.
 - Without it: memory sinks, then one store-only ZIP `<base>_filmora.zip` assembled from `Blob` parts (§12.3 `addBlob`),
   then `downloadBlob`. The memory confirmation of D§4.21 applies to the total.
 

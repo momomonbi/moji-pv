@@ -331,7 +331,7 @@ MV.def('ui/ai_review', ['ui/dom', 'ui/icons', 'ai/changes', 'i18n/t', 'ui/ai_con
   function valueText(t, c, v) {
     if (v === null || v === undefined) return t('state.auto');
     const slot = slotOf(c) || '';
-    if (typeof v === 'string' && v.startsWith('mat:')) return t('ai.review.mine', { name: c.matName || v.slice(4) });
+    if (typeof v === 'string' && v.startsWith('mat:')) return t('ai.review.mine', { name: CH.matText(t, c) || v.slice(4) });
     if (typeof v === 'string' && /^myMat[0-9a-z]+$/.test(v)) {
       const kind = c.partKind || (slot === 'atmos' ? 'ornament' : (/^([a-z]+)/.exec(slot) || [])[1]);
       return t('ai.review.mine', { name: kind ? t.part(kind, v) : v });
@@ -375,7 +375,7 @@ MV.def('ui/ai_review', ['ui/dom', 'ui/icons', 'ai/changes', 'i18n/t', 'ui/ai_con
     if (!text || text === (c.label && c.label[0])) {
       if (c.kind === 'material') {
         const e = c.entry || {};
-        text = t('ai.ch.material', { name: c.matName || MP.nameText(t, e), kind: e.kind ? MP.kindText(t, e) : '',
+        text = t('ai.ch.material', { name: CH.matText(t, c) || MP.nameText(t, e), kind: e.kind ? MP.kindText(t, e) : '',
           season: e.season ? t('fld.season.' + e.season) : t('fld.season.none') });
       } else text = t('ai.ch.value', { where: whereText(t, ctx.app, c), field: fieldText(t, c), from: fromText(t, c), to: valueText(t, c, c.to) });
     }
@@ -393,14 +393,17 @@ MV.def('ui/ai_review', ['ui/dom', 'ui/icons', 'ai/changes', 'i18n/t', 'ui/ai_con
     return F.areaLabel(t, { label: b.label });
   }
 
+  // The id a material change has in CH.apply(doc, plan, [c]): only that change is applied, so a new material takes the
+  // next id (ai/changes.toCommands, §5.6), whatever its place in the review; a remade one keeps its id.
+  function previewId(doc, c) {
+    const next = doc.materials && Number.isInteger(doc.materials.next) ? doc.materials.next : 1;
+    return c.materialId || 'm' + next.toString(36);
+  }
+
   // ▶ 見る: a new material's thumbnail, rendered on a fork whose document holds it (the try-on registry, §5.6).
-  function playMaterial(ctx, r, c, canvas) {
+  function playMaterial(ctx, c, canvas) {
     const app = ctx.app;
-    // New materials take the next ids in list order (ai/changes.toCommands, §5.6); a remade one keeps its id.
-    const mats = r.changes.filter((x) => x.kind === 'material' && !(x.entry && x.entry.id));
-    const k = Math.max(0, mats.indexOf(c));
-    const next = app.doc.materials && Number.isInteger(app.doc.materials.next) ? app.doc.materials.next : 1;
-    const id = c.materialId || c.plannedId || (c.entry && c.entry.id ? c.entry.id : 'm' + (next + k).toString(36));
+    const id = previewId(app.doc, c);
     const kind = c.entry && c.entry.kind ? c.entry.kind : 'ornament';
     let fork = null;
     try {
@@ -437,9 +440,9 @@ MV.def('ui/ai_review', ['ui/dom', 'ui/icons', 'ai/changes', 'i18n/t', 'ui/ai_con
       extra.push(h('span', { class: 'mat-bars', title: t('mat.cost'), 'aria-label': t('mat.cost') + ' ' + t('mat.' + w.word),
         text: '■'.repeat(w.bars) + '□'.repeat(5 - w.bars) }));
       const canvas = h('canvas', { class: 'ai-mat-thumb', width: 192, height: 108, hidden: true, 'aria-hidden': 'true' });
-      extra.push(button(t('ai.review.look'), { icon: 'play', fkey: 'look:' + c.id, run: () => { canvas.hidden = false; playMaterial(ctx, r, c, canvas); } }), canvas);
+      extra.push(button(t('ai.review.look'), { icon: 'play', fkey: 'look:' + c.id, run: () => { canvas.hidden = false; playMaterial(ctx, c, canvas); } }), canvas);
     }
-    if (disabled && need) extra.push(h('span', { class: 'ai-need', id: needId, text: t('ai.needsMaterial', { name: need.matName || MP.nameText(t, need.entry || {}) }) }));
+    if (disabled && need) extra.push(h('span', { class: 'ai-need', id: needId, text: t('ai.needsMaterial', { name: CH.matText(t, need) || MP.nameText(t, need.entry || {}) }) }));
     // A vision row (ai/vision): the suggested depth and its reason next to the caption (§11.9.5).
     if (c.kind === 'media' && c.depth && t.has('opt.depth.' + c.depth)) {
       extra.push(h('div', { class: 'ai-why', text: t('media.ai.depth', { v: t('opt.depth.' + c.depth) }) }));
@@ -484,7 +487,7 @@ MV.def('ui/ai_review', ['ui/dom', 'ui/icons', 'ai/changes', 'i18n/t', 'ui/ai_con
       'data-lines': row.changes.map((c) => c.lineId).filter(Boolean).join(',') },
     h('div', { class: 'ai-row' }, box, h('span', { class: 'ai-row-main' }, h('span', { class: 'ai-row-text', text }),
       stale.length ? h('span', { class: 'ai-stale' }, I.icon('warn', { size: 12 }), staleText(t, stale[0])) : null,
-      need ? h('span', { class: 'ai-need', text: t('ai.needsMaterial', { name: need.matName || MP.nameText(t, need.entry || {}) }) }) : null),
+      need ? h('span', { class: 'ai-need', text: t('ai.needsMaterial', { name: CH.matText(t, need) || MP.nameText(t, need.entry || {}) }) }) : null),
     more), members);
   }
 
@@ -620,5 +623,5 @@ MV.def('ui/ai_review', ['ui/dom', 'ui/icons', 'ai/changes', 'i18n/t', 'ui/ai_con
     ];
   }
 
-  return { textDiff, renderReview, patchReview, renderLog, diffBlock, TRANSCRIPT_SHOWN, fieldText, valueText, fromText, rowText };
+  return { textDiff, renderReview, patchReview, renderLog, diffBlock, TRANSCRIPT_SHOWN, fieldText, valueText, fromText, rowText, previewId };
 });

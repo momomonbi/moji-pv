@@ -114,6 +114,23 @@
       made[name] = await G.encodeCounter(spec);
       keep(name, await importOne(new File([made[name].bytes], name + (spec.container === 'webm' ? '.webm' : '.mp4'))));
     }
+    // the filmstrip: tile k shows the key frame stripPicks names for it (each tile is drawn from its decoded frame)
+    out.stripCodes = {};
+    for (const name of ['webm30', 'mp4_25', 'vfr']) {
+      const e = out.gen[name].entry;
+      if (!e) continue;
+      const th = await a.io.mediaBlobs.thumbs(e.id), ix = await a.io.mediaBlobs.index(e.id);
+      const sprite = await createImageBitmap(th.strip);
+      const tw = Math.floor(sprite.width / th.tiles);
+      const codes = [];
+      for (let k = 0; k < th.tiles; k++) {
+        const tile = await createImageBitmap(sprite, k * tw, 0, tw, sprite.height);
+        codes.push(G.codeOf(tile, 0));
+        tile.close();
+      }
+      sprite.close();
+      out.stripCodes[name] = { codes, picks: PR.stripPicks(SM.fromData(ix.table), false) };
+    }
     // committed fixtures (demuxer edge cases and refusals)
     for (const [name, b64] of Object.entries(committed || {})) {
       out.committed[name] = await importOne(new File([fromB64(b64)], name));
@@ -123,6 +140,17 @@
     const big = new Uint8Array(64);
     big.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0x27, 0x10, 0, 0, 0x13, 0x88, 8, 6, 0, 0, 0]);
     out.gen.huge = await importOne(new File([big], 'huge.png'));                   // 10000 × 5000 in the header: 50 MP
+    // a JPEG whose frame header comes after 128 KB of APP2 data (a large ICC profile): its size is read past the sniffed
+    // 64 KB, before decoding: imported at its size, or refused when that is over 40 MP (20000 × 12000 in the header)
+    const jb = await bytesOf(s.jpeg);
+    const app2 = new Uint8Array(4 + 65533);
+    app2.set([0xff, 0xe2, 0xff, 0xff]);
+    out.gen.lateSof = await importOne(new File([jb.subarray(0, 2), app2, app2, jb.subarray(2)], 'icc.jpg'));
+    const huge = jb.slice();
+    for (let p = 2; p + 9 < huge.length; p++) {
+      if (huge[p] === 0xff && huge[p + 1] >= 0xc0 && huge[p + 1] <= 0xc3) { huge.set([12000 >> 8, 12000 & 255, 20000 >> 8, 20000 & 255], p + 5); break; }
+    }
+    out.gen.lateHuge = await importOne(new File([huge.subarray(0, 2), app2, app2, huge.subarray(2)], 'icc_huge.jpg'));
     out.gen.junk = await importOne(new File([new Uint8Array(500).fill(7)], 'junk.png'));
     out.gen.cut = await importOne(new File([made.mp4_25.bytes.subarray(0, Math.floor(made.mp4_25.bytes.length / 2))], 'cut.mp4'));
     out.gen.audioOnly = await importOne(new File([fromB64(o.audioOnly)], 'sound.webm'));

@@ -1,10 +1,13 @@
 # 文字PVメーカー v2 — product spec (what it does, not how)
 
-v2 is an **original** engine and UI for lyric videos. This file describes behaviour only, from the outside.
+v2 is an **original** engine and UI for lyric videos. This file describes behaviour only, from the outside. v2.1 adds
+camerawork, speed curves, instructions per area, materials, the user's photos and videos, the one-file project package
+and Filmora-ready output; how they are built is in `docs/DESIGN_2_1.md`.
 
 ## 0. Sources and layout (for everyone who writes v2 code)
 
-- References: this spec, `docs/DESIGN.md` and general web/graphics knowledge. Third-party code:
+- References: this spec, `docs/DESIGN.md` with its v2.1 addendum `docs/DESIGN_2_1.md`, and general web/graphics
+  knowledge. Third-party code (v2.1 adds none):
   `vendor/mp4-muxer.min.js` (MIT, keep its notice), `vendor/ai-sdk.min.js` (MIT; the bundle also carries three MIT /
   Unlicense packages, all in `THIRD_PARTY_NOTICES.md`). Browser-test launcher: `dev/browser.py`.
 - Names of parts, themes and moods are v2's own.
@@ -14,7 +17,7 @@ v2 is an **original** engine and UI for lyric videos. This file describes behavi
 ## 1. Who and where
 
 - People making lyric videos (文字PV) for songs: from a quick "make it look good" to frame-level tweaking.
-- PC Chrome / Edge first (WebCodecs for MP4). Other browsers: everything but MP4 export.
+- PC Chrome / Edge first (WebCodecs for video export and for imported videos). Other browsers: everything but those.
 - Static page on GitHub Pages, strict CSP (inline scripts by hash; network only to Google Fonts and the AI APIs). No server.
 - Japanese UI first, English UI too (one string table).
 
@@ -31,6 +34,8 @@ v2 is an **original** engine and UI for lyric videos. This file describes behavi
 - ◀ ▶ steps through looks tried with おまかせ / reroll.
 - Keyboard: Space play/pause, ← → frame step (Shift = 1 s), R おまかせ, T tap-sync mode, Del clears a pinned value.
 - The AI assistant is a side panel that never covers the preview or the header.
+- v2.1 adds no top-level control: camerawork, speed curves, materials, photos and videos live one level deeper or more.
+  Files (lyrics, songs, photos, videos, projects) can be dropped anywhere.
 
 ## 3. Lyrics
 
@@ -55,6 +60,7 @@ v2 is an **original** engine and UI for lyric videos. This file describes behavi
 - Load mp3 / wav / m4a / ogg / flac. Decode in the browser; show a waveform on the timeline.
 - Own analysis: loudness envelope, onsets, tempo (BPM) and beat grid; user can type BPM / offset instead.
 - Playback in sync with the preview. The video length follows the song when a song is loaded.
+- An imported video's own sound can become the song (この動画の音を曲にする); otherwise a video's sound is not used.
 
 ## 6. Look (the engine)
 
@@ -78,33 +84,90 @@ v2 is an **original** engine and UI for lyric videos. This file describes behavi
   avoids repeating the same choice in neighbouring cuts; respects every pinned value and locked line.
 - **Variety controls**: おまかせ (new mood + theme + seed), reroll per line / cut / part, lock per line, "use only these
   parts" filters.
-- Background modes: normal, green screen, black (white text only), transparent (PNG export).
+- **Camerawork (カメラワーク, v2.1)**: automatic by default and aimed at the words: it pushes in on a word, follows the
+  singing word by word, reframes between phrases, and drifts slowly over a whole area (区画のカメラ). Its strength is at
+  作品全体 › 強さ › カメラワーク; presets and a closeness slider are one level deeper, keyframes the deepest. Pinnable at
+  every scope, like every automatic choice.
+- **Speed curves (緩急, v2.1)** wherever something moves over time: entrances and exits and their stagger, holds, camera
+  moves and transitions. Presets such as 「一瞬ゆっくり→すごく速く→一瞬ゆっくり」, a two-slider form, or a custom curve in a
+  small editor. **動きの速さ** (×0.25–×4) gives slow or fast motion per line or cut.
+- **Per line (v2.1)**: its own season (この行の季節) and parts it must not use (この行で使わない部品).
+- **My materials (マイ素材, v2.1)**: new materials that the AI or the user builds from existing parts and a fixed set of
+  primitives (shapes, particles, patterns, motion tracks, oscillators). They are data, never code; they are stored in the
+  project and shown under マイ素材 in the part browser. AI-made materials appear only where they are placed, unless
+  their おまかせでも使う is ticked.
+- Background modes: normal, green screen, black (white text only), transparent (transparent WebM and PNG export).
 - Performance: smooth preview at 720p for typical cuts on a mid-range laptop; export is frame-exact and deterministic.
+
+**Photos and videos (写真・動画, v2.1)**
+- Import images (PNG, JPEG, WebP, AVIF; animated GIF, WebP and APNG play like short silent videos; SVG is turned into
+  a picture once) and videos (MP4, M4V, MOV, WebM, MKV with H.264, VP8, VP9 or AV1, and HEVC where the browser reads
+  it). Unreadable files (HEIC, ProRes, …) are refused with what to do instead. Limits: images up to 40 MP; videos up to
+  4K, 120 fps, 60 min and 4 GB.
+- Uses: the background of the whole video, an area, a line or a cut; a photo frame near the words; inside the letters;
+  overlay footage; inside a material. おまかせ uses a photo or video as a background only when its
+  おまかせでも背景に使う is ticked.
+- Controls: fit, crop (on the preview), Ken Burns motion, blur, veil and tint; for videos also the range used, speed,
+  loop or hold, and the clock (from when it appears, or with the song).
+- **動きと重なり** (Motion and layering) for backgrounds, frames and overlay footage: おまかせ / 演出と一緒に動かす /
+  文字の前に出す / 後ろに下げる / 動かさない. おまかせ takes the AI's suggestion when 写真の説明 made one, else fixed rules.
+- この色に合わせる matches the theme colours to a photo, on the device, without AI.
+- Video is frame-exact in export. Photos and videos are kept in this browser and in the project package; a missing one
+  can be relinked.
 
 ## 7. Output
 
-- MP4 (H.264 + AAC) via WebCodecs + mp4-muxer; 24 / 30 / 60 fps; 720p–2160p; progress, cancel, time left.
-  Streams to disk when the File System Access API is available, otherwise builds in memory with a size warning.
-- PNG sequence (ZIP) and transparent PNG sequence.
-- Project file (.json, versioned, with line ids) save / open; autosave in the browser.
+- MP4 (H.264 + AAC; Opus in MP4, with a note, where the browser has no AAC encoder) via WebCodecs + mp4-muxer;
+  24 / 30 / 60 fps; 720p–2160p; progress, cancel, time left. Streams to disk when the File System Access API is
+  available, otherwise builds in memory with a size warning.
+- **Transparent video** (透過動画（WebM）, v2.1): VP9 with alpha (VP8 where VP9 cannot be encoded), for video editors.
+- **Filmora用 (v2.1)**: one choice of 形式 writes a set of files into one folder (a ZIP download without the File System
+  Access API): the finished MP4 always, and optionally 文字と装飾だけ (transparent WebM, on by default), 背景だけ (MP4),
+  グリーンバック (MP4, key colour #00B140), 字幕 (SRT, on by default) and 時間つき歌詞 (LRC); a WAV of the song when the MP4
+  cannot carry AAC; and README_Filmora.txt (Japanese and English). 「Filmoraで使うには」 explains the steps in the app.
+- PNG sequence (PNG連番, a ZIP) and transparent PNG sequence (透過PNG). Subtitles (.srt) and timed lyrics (.lrc) can also
+  be saved alone.
+- **Project file (v2.1)**: 名前を付けて保存 (and 保存 of a work that has no file yet) writes the project package `.mojipv`
+  by default, one file with the project, its photos, videos and song. 保存 keeps the kind of the open file: a work opened
+  from, or last saved to, a `.json` gets a light save again. 軽い保存 writes the project alone as `.json` (versioned,
+  with line ids); photos, videos and the song that are on the device relink when it is opened. `.mojipv`, v2.1 `.json`
+  and v2.0 `.json` all open. Autosave stays in the browser and never rewrites a file.
+- A save or an export never deletes a file or folder that it did not create itself.
 
 ## 8. AI assistant (optional)
 
-On the v2 data model:
+Everything works without AI. On the v2 data model:
 - Google Gemini `gemini-3.8-flash` by default (REST, key in `x-goog-api-key`), the second service through the bundled
-  SDK; key check (free model-info request); key kept in session / local storage only.
-- 歌詞の下ごしらえ, AI 演出3案 (season-aware), ひとこと修正, and with the user's consent the song features
-  (transcribe with times, align lines, analyze sections / mood / tempo). Every AI result is shown as a checked list of
-  changes before anything is applied, and can be undone.
-- Only lyric text, the instruction and setting values are sent; audio only for the song features after consent.
+  SDK; key check (free model-info request); key kept in session / local storage only, never in project files, logs,
+  URLs or error texts.
+- Tools: 歌詞の下ごしらえ; AI 演出3案 (season-aware); **指示** (v2.1, replaces ひとこと修正): an instruction for the whole
+  video, the selected lines or an area (a song section, a `#` heading block, a blank-line block, one cut), and
+  区画ごとに指示 for up to 8 areas at once. カメラワークをAIに任せる changes camera fields only. With
+  新しい素材を作ってもよい the AI may make new materials; with 写真・動画をAIが使ってよい it may place the user's photos and
+  videos. **素材づくり** makes or remakes one material. **写真の説明** (Google Gemini only) describes photos and videos and
+  suggests their 動きと重なり. With the user's consent, the song features (transcribe with times, align lines, analyze
+  sections / mood / tempo). Every AI result is shown as a checked list of changes before anything is applied, and can
+  be undone.
+- What is sent, straight from the browser to the chosen service only:
+  - lyric text, the instruction and setting values (theme, mood, names of parts and materials, numbers);
+  - for 指示 and 区画ごとに指示, only while 写真・動画をAIが使ってよい is on (one box for both): each photo or video only as
+    `asset:<n>` with its kind, size, length and shape, and what 写真の説明 stored for it (such as its description and
+    colours). The box is on by default, under 詳しく. With it off, no number, kind, size, length, shape or description
+    of a photo or video is sent (only the part names, such as `photoPan`, tell that a background shows one);
+  - audio only for the song features, after consent, to Google Gemini;
+  - pictures only for 写真の説明, to Google Gemini, after a consent that is asked every time: JPEGs made smaller (768 px
+    on the long side, without EXIF; a video sends 3 frames).
+- Never sent: file names (of photos, videos or the song), and the key to anyone but the chosen service.
 
 ## 9. Quality bar
 
 - Node unit tests: lyric parser (incl. LRC gaps), line-id diff, timing, planner determinism and variety, project
-  migration, WAV / export math, AI adapters (providers faked).
+  migration, WAV / export math, AI adapters (providers faked); v2.1: curves, shots, materials, media demuxers, the
+  project package, subtitles.
 - Browser tests: render every registered part in every aspect without errors; CSP violations = 0; UI flow tests;
-  ja / en string coverage.
+  ja / en string coverage; v2.1: frame-exact media, transparent WebM, the Filmora set.
 
-## 10. Not in v2.0
+## 10. Not in v2.1
 
-After Effects export / panels.
+After Effects export / panels. Also later (DESIGN_2_1 §10): a material or media library shared between projects,
+HEIC, mixing a video's own sound with the song, 写真の説明 with the second AI service, ProRes and HDR export.

@@ -309,11 +309,12 @@ test('ornaments and filters: the lowest index not pinned by the user or a lock; 
   assert.ok(r.warnings.some((w) => w[0] === 'ai.warn.noSlot' && w[1].n === 6));
   assert.equal(p['line/rb:ornament#0'].agg, 'song:2@24-40|ornament:sparkSpray', 'aggregated per ornament, whatever the index');
   const none = direct(DOC, [CHORUS], [ANSWER(0, { all: ALL({ ornaments: ['none'], filters: ['none'] }) })]);
-  const first = (id) => PLAN.cuts.find((c) => c.line === id).slots;
+  const cutsOf = (id) => PLAN.cuts.filter((c) => c.line === id);
   const want = [];
   for (const id of ['rb', 'rc']) {
     for (const kind of ['filter', 'ornament']) {
-      if (first(id)[kind + '.count'].v !== 0) want.push(['line/' + id + ':' + kind + '.count', 'value', 0]);   // 0 already: no change
+      // 0 on every cut of the line already: no change (a line whose cuts differ has no single current value, §5.5)
+      if (!cutsOf(id).every((c) => c.slots[kind + '.count'].v === 0)) want.push(['line/' + id + ':' + kind + '.count', 'value', 0]);
     }
   }
   assert.ok(want.some((x) => x[0] === 'line/rb:ornament.count'));
@@ -513,7 +514,7 @@ function mediaAsk(answers, doc) {
 }
 const n = (name) => DOC.media.list.findIndex((e) => e.name === name);
 
-test('media: the [media] list holds kinds, sizes and vision text only — never a file name; no request carries pixels', () => {
+test('media: the [media] list holds numbers, sizes and vision text only, never a file name; no request carries pixels', () => {
   const q = DI.directRequests(DOC, PLAN, reg, { briefs: [{ ref: CHORUS, instruction: '写真を背景に' }], uiLang: 'ja', mode: 'all', media: true, allowMaterials: true });
   const req = q[0];
   assert.equal(req.schema, DI.directSchema({ mode: 'all', allowMaterials: true, media: true }));
@@ -525,14 +526,11 @@ test('media: the [media] list holds kinds, sizes and vision text only — never 
     'asset:1 image 4032×3024 landscape — 夕方の空 · colours #F2A65A #3D5A80 · text area: upper third',
     'asset:2 video 0:13 1920×1080 landscape — (no description)',
     'asset:3 video 0:04 1280×720 landscape — (no description)']);
+  for (const e of DOC.media.list) assert.ok(!JSON.stringify(q.map((r) => [r.system, r.prompt])).includes(e.name), 'no file name is sent: ' + e.name);
   assert.ok(req.prompt.includes('media layer: media "" = a picture the user picks'), 'the recipe text knows media layers');
   assert.equal(req.media, undefined, 'no request parts');
-  const json = JSON.stringify(q.map((r) => [r.system, r.prompt]));
-  for (const bad of ['inline_data', 'inlineData', 'base64', 'data:image', 'bytes', 'blob']) assert.ok(!JSON.stringify(q).includes(bad), bad);
-  // the owner's rule: the AI gets lyrics, instructions and numbers — never the names of the user's files
-  for (const e of DOC.media.list) {
-    assert.ok(!json.includes(e.name), 'no file name in a request: ' + e.name);
-  }
+  const json = JSON.stringify(q);
+  for (const bad of ['inline_data', 'inlineData', 'base64', 'data:image', 'bytes', 'blob']) assert.ok(!json.includes(bad), bad);
   assert.ok(!json.includes('"' + DOC.media.list[0].bytes), 'no byte counts');
   const only = DI.directRequests(DOC, PLAN, reg, { briefs: [{ ref: CHORUS, instruction: 'x' }], uiLang: 'en', media: [ASSET['海辺.mp4'].id] });
   deepEqual(only[0].sent.media.map((m) => [m.n, m.name]), [[0, '海辺.mp4']], 'only the assets on this device');
@@ -858,4 +856,59 @@ test('review text: every row reads in ja and en (strict keys); aggregate rows an
   assert.equal(CH.describeAgg(ground, ja), '写真・動画: 自動 → 空.jpg（2行）');
   assert.equal(CH.describe(r.changes.find((c) => c.kind === 'material'), ja), '新しい素材「桜吹雪」 装飾 · 春');
   assert.equal(CH.describe(r.changes.find((c) => c.path === 'line/rc:atmos'), ja), '6行 · 空気（粒子）: 自動（none） → 桜吹雪'.replace('none', 'なし'));
+});
+
+// ---- review fixes (NOTES "Review fixes: AI, materials, planner and privacy") ---------------------------------------
+
+test('CP-2: a line whose cuts show different values has no single current value: an answer equal to the first cut\'s is a change', () => {
+  const doc = M.parseFile(corpus.projectText('basic')).doc;
+  const plan = planOf(doc);
+  const cutsOf = (l) => l.cuts.map((k) => plan.cuts.find((c) => c.key === k));
+  const shots = (l) => cutsOf(l).map((c) => c.slots['cam.shot'].v);
+  const mixed = plan.lines.find((l) => l.cuts.length > 1 && new Set(shots(l)).size > 1);
+  const even = plan.lines.find((l) => l.cuts.length > 1 && new Set(shots(l)).size === 1);
+  assert.ok(mixed && even, 'the fixture has both kinds of line');
+  const ask = (line, shot) => direct(doc, [{ kind: 'lines', ids: [line.id] }], [ANSWER(0, { all: ALL({ camera: CAM({ shot }) }) })]);
+  const r = ask(mixed, shots(mixed)[0]);
+  deepEqual(r.changes.map((c) => [c.path, c.to]), [['line/' + mixed.id + ':cam.shot', shots(mixed)[0]]], 'the other cuts get it too');
+  deepEqual(r.warnings, []);
+  const after = planOf(CH.apply(doc, plan, r.changes));
+  assert.ok(after.lines.find((l) => l.id === mixed.id).cuts.every((k) => after.cuts.find((c) => c.key === k).slots['cam.shot'].v === shots(mixed)[0]));
+  deepEqual(ask(even, shots(even)[0]).changes, [], 'every cut shows it already: no change');
+});
+
+test('MAI-9: only as many new materials as doc.materials has room for; the rest are left out with their uses, the other changes stay', () => {
+  let doc = DOC;
+  const m2 = DOC.materials.list[1];
+  while (doc.materials.list.length < 62) {
+    doc = CMD.reduce(doc, { t: 'material.put', id: 'm' + doc.materials.next.toString(36), kind: m2.kind, by: 'user', name: m2.name, recipe: m2.recipe });
+  }
+  const mats = ['一', '二', '三'].map((name) => material({ name, nameEn: '', season: '', use: { slot: 'none', s: 0, lines: [], cuts: [] } }));
+  mats[2].use = { slot: 'atmos', s: 0, lines: [], cuts: [] };
+  const r = direct(doc, [CHORUS], [ANSWER(0, { all: ALL({ speed: 0.5 }) })], { allowMaterials: true, materials: mats });
+  deepEqual(r.changes.filter((c) => c.kind === 'material').map((c) => c.entry.name.ja), ['一', '二']);
+  assert.ok(!r.changes.some((c) => c.to === 'mat:三'), 'the uses of the one left out fall away');
+  assert.ok(r.warnings.some((w) => w[0] === 'ai.warn.matFull' && w[1].n === 1), JSON.stringify(r.warnings));
+  assert.ok(r.changes.some((c) => c.slot === 'motion.speed'), 'the other changes stay');
+  const applied = CH.apply(doc, r.plan, r.changes);
+  assert.equal(applied.materials.list.length, 64);
+  for (const lang of ['ja', 'en']) assert.ok(CH.warningText(['ai.warn.matFull', { n: 1 }], T.createT(lang, STRINGS, reg, { strict: true })));
+  // a later window of the same request counts the materials of the earlier ones
+  const later = DI.directChanges(doc, r.plan, reg, { answers: [ANSWER(0, {})], materials: [material({ name: '四', season: '' })] },
+    { rev: 3, sent: r.req.sent, allowMaterials: true, materialsBefore: r.changes.filter((c) => c.kind === 'material') });
+  deepEqual(later.changes.filter((c) => c.kind === 'material'), []);
+  assert.ok(later.warnings.some((w) => w[0] === 'ai.warn.matFull' && w[1].n === 1));
+});
+
+test('I18N-1 / I18N-2: the en review names an AI material in English and lists avoided parts with the en separator', () => {
+  const en = T.createT('en', STRINGS, reg, { strict: true });
+  const r = direct(DOC, [CHORUS], [ANSWER(0, { all: ALL({ atmos: 'mat:桜吹雪' }) })], { allowMaterials: true, materials: [material({})], uiLang: 'en' });
+  const mat = r.changes.find((c) => c.kind === 'material');
+  const pin = r.changes.find((c) => c.path === 'line/rc:atmos');
+  assert.ok(CH.describe(mat, en).includes('"Cherry flurry"'), CH.describe(mat, en));
+  assert.ok(CH.describe(pin, en).endsWith('→ Cherry flurry'), CH.describe(pin, en));
+  assert.ok(!/桜吹雪/.test(CH.describeAgg(r.changes.filter((c) => c.agg === pin.agg), en)));
+  const avoid = direct(DOC, [CHORUS], [ANSWER(0, { lines: [LINE(1, { avoid: ['arrive.strobeIn', 'ornament.petalFall'] })] })], { uiLang: 'en' });
+  const text = CH.describe(avoid.changes.find((c) => c.path === 'line/rc:avoid'), en);
+  assert.ok(text.includes('; ') && !text.includes('・'), text);
 });

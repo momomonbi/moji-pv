@@ -477,9 +477,10 @@ MV.def('parts/kit', ['core/num', 'core/noise', 'core/ease', 'core/curve', 'core/
   // 0 in a ground scene and times.a in a cut.
   // Depth (p.depth, §11.9.3): anim as placed, camera factor 1, fading with the cut's entrance and exit (frames and
   // layers); front on the near layer at factor 1.15, and a medium covering ≥ 40 % of the frame capped at alpha 0.45 with
-  // comp 'screen' (unless the part asks for another blend; a photo frame keeps its alpha); back on the far layer (grounds:
-  // ground) at factor 0.5, Ken Burns zoom ≤ 0.06, blur + 3 du and veil + 0.15; still as placed, no camera, no Ken Burns,
-  // outside the seam composite. The choice changes pixels only: the media times and mediaAt are the same.
+  // comp 'screen' (unless the part passes a comp, 'over' too: a pinned 重ね方 = 通常; a photo frame keeps its alpha);
+  // back on the far layer (grounds: ground) at factor 0.5, Ken Burns zoom ≤ 0.06, blur + 3 du and veil + 0.15; still as
+  // placed, no camera, no Ken Burns, outside the seam composite. The choice changes pixels only: the media times and
+  // mediaAt are the same.
   function media(env, o) {
     const q = o || {};
     const p = q.p || {};
@@ -519,7 +520,7 @@ MV.def('parts/kit', ['core/num', 'core/noise', 'core/ease', 'core/curve', 'core/
       const r = MEDIA.fitRect(meta, box, fit, crop.zoom, crop.x, crop.y);
       if ((r.dw * r.dh) / (D.w * D.h) >= FRONT_COVER) {        // the readability guard
         alpha = Math.min(alpha, FRONT_ALPHA);
-        if (comp === 'over') comp = 'screen';
+        if (!q.comp && comp === 'over') comp = 'screen';           // a blend the part passes (重ね方 = 通常 too) is kept
       }
     }
     const node = env.sb.media({

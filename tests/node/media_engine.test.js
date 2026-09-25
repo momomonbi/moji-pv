@@ -490,6 +490,37 @@ test('mediaReady(t) asks the store for the frames at t (ready) and every frame a
   await bare.mediaReady(0);
 });
 
+test("a ghost of fx.textAt (残像 over a text fill) draws the media frame of the frame's own time: only what mediaAt listed", async () => {
+  const reg = MV.use('parts/catalog').defaultRegistry();
+  const base = FM.goldenDoc(corpus.project('media').doc);         // 文字の中に: the WebM clip on line r5 (show clock)
+  const doc = Object.assign({}, base, { pins: Object.assign({}, base.pins, {
+    'line/r5:filter.count': { v: 1, by: 'user' }, 'line/r5:filter#0': { v: 'afterImage', by: 'user' } }) });
+  const rec = recorder();
+  const store = FM.createFakeMedia(MV);
+  const engine = FAC.createEngine({ registry: reg, canvas: rec.factory, measurer: fakeMeasurer(), fonts: null, assets: store });
+  const { plan } = engine.setDoc(doc);
+  const cut = plan.cuts.find((c) => c.slots['ornament#0'] && c.slots['ornament#0'].v === 'textFill'
+    && c.slots['filter#0'] && c.slots['filter#0'].v === 'afterImage');
+  assert.ok(cut, 'a cut with the text fill and 残像');
+  await engine.prepare(cut.t0, cut.t1, { export: true });
+  const [dw, dh] = DOC.DESIGN_SIZE[doc.look.aspect];
+  const w = 640, h = Math.round((640 * dh) / dw), scale = w / plan.design.w;
+  const made = rec.factory.create(w, h, { alpha: false });
+  const s = { canvas: made.canvas, ctx: made.ctx, w, h };
+  const webm = FM.fixture('webm').id;
+  let ghosts = 0;
+  for (let t = cut.t0 + 0.2; t < cut.t1; t += 1 / 15) {
+    const listed = engine.mediaAt(t, { scale });
+    store.calls.length = 0;
+    engine.renderFrame(s, t, { quality: 'export', scale });
+    const stray = store.calls.filter((x) => !listed.some((y) => y.id === x.id && y.m === x.m)).map((x) => [x.id.slice(0, 5), x.m]);
+    assert.deepEqual(stray, [], 'every media frame drawn at t = ' + t.toFixed(3) + ' is one mediaAt listed');
+    if (store.calls.filter((x) => x.id === webm).length > listed.filter((y) => y.id === webm).length) ghosts++;
+  }
+  assert.ok(ghosts > 0, 'the ghosts draw the text fill too (' + ghosts + ' frames)');
+  engine.dispose();
+});
+
 test('thumbnails ask the store for posters only', () => {
   const e = mediaEngine({});
   const plan = partPlan('ground', 'mediaTestGround', 'mp4', { depth: 'anim' });
@@ -847,6 +878,10 @@ test('mediaLayer: footage over the frame and its bleed; blend → comp, alpha 0.
   const front = built({ depth: 'front', blend: 'screen', amount: 1 });
   assert.deepEqual([front.layer, front.rec.comp], ['near', 'screen']);
   assert.ok(front.alpha <= 0.45 + 1e-6);
+  // the guard caps the alpha but keeps a blend the part passes: 重ね方 = 通常 (a pin; the auto is スクリーン) stays normal
+  const normal = built({ depth: 'front', blend: 'normal', amount: 1 });
+  assert.deepEqual([normal.layer, normal.rec.comp], ['near', 'over'], 'a pinned 通常 is not turned into screen');
+  assert.ok(normal.alpha <= 0.45 + 1e-6);
   assert.equal(built({ depth: 'back' }).layer, 'far');
   // no picture: nothing
   const none = partScene('ornament', 'mediaLayer', '', {}).scene;

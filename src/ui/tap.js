@@ -65,6 +65,13 @@ MV.def('ui/tap', ['ui/dom', 'ui/icons', 'ui/keys', 'ui/selection', 'i18n/t'], (d
       return session.state !== before;
     }
 
+    // The session is paused exactly while playback is stopped, however it stopped or started again (P, ▶ in the play
+    // bar, 1行戻る, the song's end): after P then ▶ the marks count again.
+    app.view.on((changed, st) => {
+      if (!session || !changed.includes('playing')) return;
+      if (reduce(st.playing ? 'resume' : 'pause', app.player.now())) update();
+    });
+
     // While playback is stopped (▶, P, a click elsewhere) the clock stands still: a mark would give every line the same
     // time, so none is taken and the panel says why.
     function stopped() {

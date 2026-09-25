@@ -621,6 +621,9 @@ MV.def('ui/widgets', ['ui/dom', 'ui/icons', 'i18n/t', 'core/color', 'ui/playbar'
       el, focus: () => dom.focus(chips.querySelector('button') || add),
       update(st) {
         list = Array.isArray(st.value) ? st.value.slice() : [];
+        // a chip's × that had the focus is drawn again (or gone after its removal): the focus goes to the × now at its
+        // place, else the last one, else [+] (never to the page)
+        const had = [...chips.querySelectorAll('button')].indexOf(document.activeElement);
         if (st.mixed) { dom.replace(chips, h('span', { class: 'muted small', text: t('state.mixed') })); }
         else if (!list.length) dom.replace(chips, h('span', { class: 'muted small', text: t('fld.none') }));
         else {
@@ -635,6 +638,10 @@ MV.def('ui/widgets', ['ui/dom', 'ui/icons', 'i18n/t', 'core/color', 'ui/playbar'
           }));
         }
         add.disabled = !!st.readOnly || list.length >= 24;
+        if (had >= 0) {
+          const xs = chips.querySelectorAll('button');
+          dom.focus(xs.length ? xs[Math.min(had, xs.length - 1)] : add);
+        }
       },
     };
   }

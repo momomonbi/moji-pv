@@ -57,7 +57,8 @@ MV.def('ai/vision', ['core/schema', 'core/media', 'ai/changes'], (S, MEDIA, CH) 
     return mime === JPEG && typeof x.data === 'string' && x.data.length > 0 && BASE64.test(x.data);
   }
 
-  const SYSTEM = [
+  // The system text; reason is written in the page's language (it is shown next to 「AIのおすすめ」, §11.9.5).
+  const systemText = (lang) => [
     'You describe pictures for a lyric-motion video tool (文字PV). The pictures are the user\'s own photos and video frames.',
     'For each picture n: caption = what it shows, in Japanese, at most 60 characters; captionEn = the same in English; tags = '
       + 'mood words from the list; colors = up to 5 dominant colours as #RRGGBB; subject = the box of the main subject; text = '
@@ -66,10 +67,11 @@ MV.def('ai/vision', ['core/schema', 'core/media', 'ai/changes'], (S, MEDIA, CH) 
     'depth = how the picture takes part in the animation when it is a background: front only for see-through or overlay '
       + 'footage (light leaks, particles, rain); back for busy or detailed pictures and for videos with strong motion; still '
       + 'for pictures that must stay readable (a logo, text in the picture); anim otherwise. reason = why, in a few words (at '
-      + 'most 60 characters, in the language of the captions the user reads).',
+      + 'most 60 characters, in ' + (lang === 'en' ? 'English' : 'Japanese') + ').',
     'Boxes are fractions of the picture (x, y from the top left, w, h), all 0 when there is none. Describe only what is '
       + 'visible; never name or identify people.',
   ].join('\n');
+  const SYSTEM = Object.freeze({ ja: systemText('ja'), en: systemText('en') });
 
   // visionRequest(doc, items: [{ id, parts: [{ inline_data: { mime_type: 'image/jpeg', data } }] }], { uiLang })
   //   → { system, prompt, schema: VISION_SCHEMA, effort: 'low', media: parts, sent: { items: [{ n, id, kind, frames }] } }
@@ -91,7 +93,8 @@ MV.def('ai/vision', ['core/schema', 'core/media', 'ai/changes'], (S, MEDIA, CH) 
     const lines = sent.map((x) => 'n=' + x.n + ': ' + (x.kind === 'photo' ? 'photo (1 image)'
       : 'video (' + x.frames + (x.frames === 1 ? ' frame' : ' frames, from its start, middle and end') + ')'));
     const prompt = ['The images above, in order:', lines.join('\n'), '', 'Tags (use only these): ' + S.TAGS.join(' ')].join('\n');
-    return { system: SYSTEM, prompt, schema: VISION_SCHEMA, effort: 'low', media, sent: { items: sent, lang: opts && opts.uiLang === 'en' ? 'en' : 'ja' } };
+    const lang = opts && opts.uiLang === 'en' ? 'en' : 'ja';
+    return { system: SYSTEM[lang], prompt, schema: VISION_SCHEMA, effort: 'low', media, sent: { items: sent, lang } };
   }
 
   function caption(v, max) {

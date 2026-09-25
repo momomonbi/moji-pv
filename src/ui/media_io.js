@@ -362,6 +362,9 @@ MV.def('ui/media_io', ['ui/dom', 'core/media', 'core/color', 'i18n/t', 'ui/selec
     const plan = () => app.plan;
     const entry = (id) => entryOf(doc(), id);
     const device = () => (app.io ? app.io.device : null);
+    // An asset an import, relink or replace stored (res.fresh) that does not join the work: other tabs may prune it again
+    // (an import dropped for another work needs nothing: that load let go of what the new work does not name).
+    const drop = (res) => { if (res.fresh && app.io && typeof app.io.releaseMedia === 'function') app.io.releaseMedia(res.entry.id); };
     const canvas = () => (app.svc && app.svc.canvas ? app.svc.canvas : null);
 
     // state(id) → 'ok' | 'missing' | 'loading' | 'error' (the AssetStore's view of the bytes on this device)
@@ -479,6 +482,17 @@ MV.def('ui/media_io', ['ui/dom', 'core/media', 'core/color', 'i18n/t', 'ui/selec
       return e && e.audio && app.view.state.step === 'song' ? [{ label: t('media.useAudio'), run: () => useAudio(e.id) }] : [];
     }
 
+    // [元に戻す] of a toast that reports the step just made (§11.7.2): it undoes that step while it is still the newest.
+    // After other edits it would undo one of those instead, so it says so (the toast of step ② stays until closed).
+    function undoLast() {
+      const newest = () => { const done = app.store.list().filter((x) => x.done); return done.length ? done[done.length - 1].n : 0; };
+      const n = newest();
+      return { label: t('cmd.edit.undo'), run: () => {
+        if (newest() === n) app.actions.run('edit.undo');
+        else if (app.store.list().some((x) => x.n === n && x.done)) app.toast(t('media.undoLater'), { kind: 'info' });
+      } };
+    }
+
     async function importOne(job) {
       const { file, batch } = job;
       const job0 = current;
@@ -496,7 +510,7 @@ MV.def('ui/media_io', ['ui/dom', 'core/media', 'core/color', 'i18n/t', 'ui/selec
       if (batch.gen !== generation) { app.toast(t('media.cancelled', { name: file.name })); return; }   // another work is open now
       const have = entry(res.entry.id);
       const fresh = !have;
-      if (fresh && libraryOf(doc()).length >= MEDIA.LIMITS.library) { app.toast(t('media.full'), { kind: 'error' }); return; }
+      if (fresh && libraryOf(doc()).length >= MEDIA.LIMITS.library) { drop(res); app.toast(t('media.full'), { kind: 'error' }); return; }
       if (res.notes.includes('quota')) app.toast(t('media.err.quota'), { kind: 'error', action: { label: t('io.saveFile'), run: () => app.io.saveAs() } });
       else if (res.notes.includes('memoryOnly')) app.toast(t('media.warn.memoryOnly'), { kind: 'warn' });
       if (res.notes.includes('bigFile')) app.toast(t('media.warn.bigFile', { size: T.fmtBytes(res.entry.bytes) }), { kind: 'info' });
@@ -514,7 +528,7 @@ MV.def('ui/media_io', ['ui/dom', 'core/media', 'core/color', 'i18n/t', 'ui/selec
         if (placed) {
           const scope = scopeText(batch.w);
           app.toast(t(e.kind === 'video' ? 'media.placedVideo' : 'media.placed', { scope }), { kind: 'ok', sticky: audioActs(e).length > 0,
-            actions: [{ label: t('cmd.edit.undo'), run: () => app.actions.run('edit.undo') },
+            actions: [undoLast(),
               { label: t('media.otherUses'), run: () => openAsset(e.id) }].concat(audioActs(e)) });
         } else if (put.length) app.dispatch(put[0], { label: ['undo.media.put', {}] });
       } else if (put.length) {
@@ -636,7 +650,10 @@ MV.def('ui/media_io', ['ui/dom', 'core/media', 'core/color', 'i18n/t', 'ui/selec
         return false;
       }
       const id = res.entry.id;
-      if (entry(id)) {
+      // The original file of a missing asset: its bytes are here again. A file of an asset that is already here is not a
+      // relink (its caches stay); it goes on like any other file.
+      const known = !!entry(id);
+      if (known && state(id) === 'missing') {
         forget(id);
         app.toast(t('media.relinked', { name: file.name }), { kind: 'ok' });
         return true;
@@ -644,16 +661,20 @@ MV.def('ui/media_io', ['ui/dom', 'core/media', 'core/color', 'i18n/t', 'ui/selec
       const pool = missingEntries().filter((e) => !only || e.id === only);
       const cand = relinkCandidate(pool, res.entry);
       if (!cand) {
-        // Not the original file: say so, and offer it as a stand-in for the one missing entry it could replace (置き換える).
+        // Not the original file: say so (or that it is in the library already), and offer it as a stand-in for the one
+        // missing entry it could replace (置き換える).
         const target = only ? entry(only) : pool.length === 1 ? pool[0] : null;
-        const act = target && target.kind === res.entry.kind
+        // The file stays held while 置き換える is offered; closing the toast lets it go.
+        const act = target && target.id !== id && target.kind === res.entry.kind
           ? { label: t('media.useInstead'), run: () => standIn(target.id, res.entry, file.name) } : undefined;
-        app.toast(t('media.relinkNone', { name: file.name }), { kind: 'warn', action: act, sticky: !!act });
+        app.toast(t(known ? 'media.dup' : 'media.relinkNone', { name: file.name }), { kind: 'warn', action: act, sticky: !!act,
+          onClose: act ? () => drop(res) : undefined });
+        if (!act) drop(res);
         return false;
       }
       const text = t('media.relinkAsk', { kind: t(kindKey(cand)), name: file.name });
       const ok = app.confirm ? await app.confirm({ title: t('media.relink'), text, ok: t('media.relink') }) : true;
-      if (!ok) return false;
+      if (!ok) { drop(res); return false; }
       standIn(cand.id, res.entry, file.name);
       return true;
     }
@@ -678,7 +699,7 @@ MV.def('ui/media_io', ['ui/dom', 'core/media', 'core/color', 'i18n/t', 'ui/selec
         return false;
       }
       if (res.entry.id === id) { forget(id); return true; }
-      if (res.entry.kind !== e.kind) { app.toast(t('media.replaceKind'), { kind: 'warn' }); return false; }
+      if (res.entry.kind !== e.kind) { drop(res); app.toast(t('media.replaceKind'), { kind: 'warn' }); return false; }
       app.dispatch({ t: 'media.relink', from: id, entry: res.entry }, { label: ['undo.media.relink', {}] });
       forget(id);
       return true;
@@ -849,15 +870,17 @@ MV.def('ui/media_io', ['ui/dom', 'core/media', 'core/color', 'i18n/t', 'ui/selec
     }
 
     // この色に合わせる: accent, shiftA and shiftB as work pins, one batch 「色を写真に合わせる」, then a toast that says what
-    // changed, with [元に戻す].
+    // changed, with [元に戻す] only when the batch made a step (the same colours pinned again make none, and the button
+    // would then undo an older, unrelated step).
     async function matchColorsOf(id) {
       const list = await colorsOf(id);
       const p = plan();
       const m = matchColors(list, p && p.look ? p.look.palette.ground : null);
       if (!m) return false;
       const cmds = Object.keys(m).map((tok) => ({ t: 'pin.set', path: 'work:color.' + tok, v: m[tok], by: 'user' }));
+      const rev = app.store.rev;
       app.batch({ label: ['undo.media.colors', {}] }, cmds);
-      app.toast(t('media.colorsMatched'), { kind: 'ok', action: { label: t('cmd.edit.undo'), run: () => app.actions.run('edit.undo') } });
+      app.toast(t('media.colorsMatched'), { kind: 'ok', action: app.store.rev !== rev ? undoLast() : undefined });
       return true;
     }
 

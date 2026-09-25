@@ -438,6 +438,44 @@ test('fingerprints cover the beat grid and the loudness a chosen part needs, for
   assert.notEqual(firstFp({ atmos: 'beatMist', bpm: 60 }), firstFp({ atmos: 'beatMist' }), 'an atmos reading the grid');
 });
 
+// A custom shot keyed on a beat ('beat:<n>', engine/scene/shot anchorTime reads env.grid) reads the grid like a part
+// that needs beats (CP-1): the cut's fingerprint follows its place on the grid, in a fresh plan and in a re-plan that
+// reuses the cut's encoding. A preset, or a custom shot without a beat key, keeps its fingerprint when the cut moves.
+test('a custom shot with a beat key fingerprints the beat grid; presets and other custom shots do not', () => {
+  const D = MV.use('core/doc');
+  const reg = corpus.stubRegistry(MV);
+  const texts = ['あさのひかり', 'まどをあけて', 'かぜがふいた', 'きみをよぶ'];
+  const BEAT_SHOT = { keys: [{ at: 'a', aim: 'block', fill: 0.5 }, { at: 'beat:1', aim: 'emph', fill: 1 }, { at: 'b', aim: 'block', fill: 0.6 }] };
+  const PLAIN_SHOT = { keys: [{ at: 'a', aim: 'block', fill: 0.5 }, { at: 'mid', aim: 'emph', fill: 1 }, { at: 'b', aim: 'block', fill: 0.6 }] };
+  // o: { shot (line r2's cam.shot), offset (the beat offset), shift (s, every line) }
+  const docOf = (o) => {
+    const doc = Object.assign(D.defaultDoc(), { sheet: { next: 5, rows: texts.map((src, i) => ({ id: 'r' + (i + 1), src })) } });
+    doc.timing = Object.assign({}, doc.timing, { snap: 'off' });
+    const user = (v) => ({ v, by: 'user' });
+    doc.pins = { 'work:mood': user('quietHush'), 'work:bpm': user(96), 'work:beatOffset': user(o.offset || 0) };
+    if (o.shot) doc.pins['line/r2:cam.shot'] = user(o.shot);
+    texts.forEach((_, i) => {
+      doc.pins['line/r' + (i + 1) + ':start'] = user(4 * (i + 1) + (o.shift || 0));
+      doc.pins['line/r' + (i + 1) + ':end'] = user(4 * (i + 1) + 3 + (o.shift || 0));
+    });
+    return doc;
+  };
+  const cutOf = (p) => p.cuts.find((c) => c.line === 'r2');
+  const fp = (o) => cutOf(PL.run(docOf(o), reg, { fresh: true })).fp;
+  assert.ok(MV.use('core/shot').usesBeats(cutOf(PL.run(docOf({ shot: BEAT_SHOT }), reg, { fresh: true })).slots['cam.shot'].v), 'the pin holds');
+  // moved a little (the features stay), and a beat offset of one whole beat at 96 BPM (same phase, indices one apart)
+  for (const m of [{ shift: 0.01 }, { offset: 0.625 }]) {
+    assert.notEqual(fp(Object.assign({ shot: BEAT_SHOT }, m)), fp({ shot: BEAT_SHOT }), 'a beat key: ' + JSON.stringify(m));
+    assert.equal(fp(Object.assign({ shot: PLAIN_SHOT }, m)), fp({ shot: PLAIN_SHOT }), 'no beat key: ' + JSON.stringify(m));
+    assert.equal(fp(Object.assign({ shot: 'pushIn' }, m)), fp({ shot: 'pushIn' }), 'a preset: ' + JSON.stringify(m));
+  }
+  // the re-plan path (planner/plan reuses a moved cut's encoding) gives the fresh fingerprint
+  const before = PL.plan(docOf({ shot: BEAT_SHOT }), { registry: reg });
+  const after = PL.plan(docOf({ shot: BEAT_SHOT, shift: 0.01 }), { registry: reg });
+  assert.notEqual(cutOf(after).fp, cutOf(before).fp);
+  assert.equal(cutOf(after).fp, fp({ shot: BEAT_SHOT, shift: 0.01 }));
+});
+
 // --- re-planning ------------------------------------------------------------------------------------------------
 
 // plan() reuses the casts, features and encodings of unchanged cuts from the previous plans (planner/cast castCut,

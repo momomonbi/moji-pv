@@ -26,10 +26,17 @@ MV.def('ai/catalog', ['core/doc', 'core/ease', 'core/curve', 'core/shot', 'core/
     return !!registry.extra && Object.prototype.hasOwnProperty.call(registry.extra, key);
   }
 
+  // A pooled photo or video's derived ground (§11.5.9): its name is the file name on this device, which no prompt may
+  // carry (§11.6.4), so no list names it; the [media] list offers the asset as 'asset:<n>' when the user allows it.
+  // (mine.media is true for such a ground; a material's is the list of asset ids it uses, [] when none.)
+  function isMedia(registry, key) {
+    return isMine(registry, key) && !!registry.extra[key] && registry.extra[key].media === true;
+  }
+
   // { kind: [{ key, name, tags (first 3), season }] }: the parts auto picks may use under the project's filters.
   // The season is left to the AI (every season is listed, marked). Kinds may include 'atmos' (run-scope ornaments).
-  // opts (the direct tool): { mine: false } leaves out materials and derived media; { cutOrnaments: true } lists only
-  // cut-scope ornaments under 'ornament' (the run-scope ones are the 'atmos' list).
+  // Derived media grounds are never listed (isMedia). opts (the direct tool): { mine: false } leaves out materials too;
+  // { cutOrnaments: true } lists only cut-scope ornaments under 'ornament' (the run-scope ones are the 'atmos' list).
   function catalog(registry, doc, kinds = CATALOG_KINDS, lang = 'ja', opts) {
     const o = opts || {};
     const out = {};
@@ -40,7 +47,7 @@ MV.def('ai/catalog', ['core/doc', 'core/ease', 'core/curve', 'core/shot', 'core/
       if (pseudo) pool.scope = pseudo.scope;
       else if (kind === 'ornament' && o.cutOrnaments) pool.scope = 'cut';
       out[name] = registry.pool(kind, pool)
-        .filter((key) => servesLyrics(registry, kind, key) && (o.mine !== false || !isMine(registry, key)))
+        .filter((key) => servesLyrics(registry, kind, key) && !isMedia(registry, key) && (o.mine !== false || !isMine(registry, key)))
         .map((key) => {
           const def = registry.get(kind, key);
           return { key, name: nameOf(registry, kind, key, lang), tags: (def.tags || []).slice(0, TAGS_SHOWN), season: def.season || null };
@@ -104,9 +111,8 @@ MV.def('ai/catalog', ['core/doc', 'core/ease', 'core/curve', 'core/shot', 'core/
     const out = [];
     for (const kind of RC.MAT_KINDS) {
       for (const key of registry.mine(kind)) {
-        const mine = registry.extra && registry.extra[key];
         const def = registry.get(kind, key);
-        if (!def || (mine && mine.media)) continue;
+        if (!def || isMedia(registry, key)) continue;
         const where = kind === 'ornament' && def.scope === 'run' ? kind + '/run' : kind;
         const x = { key, name: nameOf(registry, kind, key, lang), tags: (def.tags || []).slice(0, TAGS_SHOWN), season: def.season || null };
         out.push('[mine] ' + x.key + '=' + x.name + ' ' + where + (x.season ? '{' + x.season + '}' : '')

@@ -470,8 +470,14 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
         textFillIdx: null, textFillOn: false,
       };
       if (page === 'el.text') {
-        // the slot 文字の中に写真・動画 manages: the first that shows textFill, else the first free one (§5.5)
-        let at = [0, 1, 2].find((i) => agreedKey(ctx, 'ornament#' + i) === 'textFill');
+        // the slot 文字の中に写真・動画 manages: the one pinned to textFill at the page's scope (a line or cut that picks
+        // another decoration there does not hide it), else the first that shows textFill, else the first free one (§5.5)
+        const pinnedFill = (i) => {
+          const pin = doc ? doc.pins[writePath(scope + ':ornament#' + i, plan)] : null;
+          return !!pin && pin.v === 'textFill';
+        };
+        let at = [0, 1, 2].find(pinnedFill);
+        if (at === undefined) at = [0, 1, 2].find((i) => agreedKey(ctx, 'ornament#' + i) === 'textFill');
         ctx.textFillOn = at !== undefined;
         if (at === undefined) at = doc ? freeIndex(doc, plan, scope, 'ornament') : 0;
         ctx.textFillIdx = at === null ? null : at;
