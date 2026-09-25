@@ -4240,6 +4240,118 @@ Part labels and blurbs of `photoFrame`, `textFill` and `mediaLayer` live in thei
 
 ---
 
+### 11.9 Depth: how a photo or video takes part in the animation (動きと重なり; FROZEN)
+
+This is a later request from the owner. For every background photo or video, the user can choose whether it:
+- moves with the animation;
+- comes in front of the text;
+- is pushed back;
+- stays out of the animation altogether.
+
+おまかせ decides it too. When the AI has looked at the picture, its suggestion is used. All of it works without AI.
+
+#### 11.9.1 The param `depth` (`K.mediaParams`, package B; parts, package G.3)
+
+| Name | Type | Auto | ja / en | Notes |
+|---|---|---|---|---|
+| `depth` | enum `auto anim front back still` | `auto` | 動きと重なり / Motion and layering | `ai: true` (the only media param the AI may set); `ui: basic`; for `use` `ground`, `frame` and `layer` (not `fill`: inside the text is its own place) |
+
+The options, in this order:
+
+| Value | ja | en |
+|---|---|---|
+| `auto` | おまかせ | Auto |
+| `anim` | 演出と一緒に動かす | Move with the animation |
+| `front` | 文字の前に出す | In front of the text |
+| `back` | 後ろに下げる | Push back |
+| `still` | 動かさない | Keep still |
+
+The strings are `opt.depth.*` and `param.depth` (package F). `mediaLayer` loses its `over` param: `depth` replaces it.
+`front` is its old `over: text`, and `back` its old `over: behind`. v2.1 has not shipped, so no document holds `over`.
+
+#### 11.9.2 Resolution of `auto` (planner, package D; deterministic)
+
+The effective value goes into the plan: the decision's `p.depth`, never `'auto'`. The `why` code is given in brackets.
+The first rule that applies wins:
+1. A pin wins (`user`, `ai`, `lock`), as for every param.
+2. The asset's AI suggestion, `doc.media` entry `ai.depth`, when it is set (§11.9.4) (`why.media.depth.ai`).
+3. `use: 'layer'` (`mediaLayer`): `front` (`why.media.depth.overlay`).
+4. `use: 'frame'` (`photoFrame`): `anim` (`why.media.depth.frame`).
+5. `use: 'ground'`:
+   - a video, or an animation that runs for 2 s or more: `back` (`why.media.depth.video`; its own motion is enough);
+   - a still photo in a segment whose text covers ≥ 35 % of the frame (from `hints.focus` boxes): `back`
+     (`why.media.depth.busy`);
+   - otherwise: `anim` (`why.media.depth.still`).
+
+`explain` and `fields` report the rule. The `depth` term joins the cut `fp` and the `groundFp`, so a change re-plans
+only the scenes that use the media.
+
+#### 11.9.3 Engine meaning (package B; `K.media` reads `p.depth`)
+
+| Effective | Layer | Camera | Seams | Ken Burns | Look |
+|---|---|---|---|---|---|
+| `anim` | as placed: `ground` for grounds, the cut's layer for frames, far for layers | factor 1: the cut camera, shots, rigs and shakes, as in §4.4 | takes part | as `move` says | frames and layers also take the cut's entrance and exit: alpha follows the arrive envelope's first 0.3 s and the depart envelope's last 0.3 s |
+| `front` | near: above the text | factor 1.15 (parallax: nearer things move more) | takes part | as `move` says | readability guard: a media that covers ≥ 40 % of the frame is capped at alpha 0.45, with `comp: 'screen'` unless a blend is pinned; a `photoFrame` keeps full alpha, and the planner never places it `behind` (auto `place` becomes `side`) |
+| `back` | far (grounds: `ground`) | factor 0.5 | takes part | `zoom` capped at 0.06 | depth cue: `blur + 3 du` and `veil + 0.15` (both clamped to their ranges) |
+| `still` | as `anim` | factor 0: no camera, rig or shake | none: the media stays in place through transitions; it is drawn outside the seam composite, like the hud, and under the text for grounds | none (`move` is treated as `none`) | a video still plays |
+
+- **Camera factor `f`** (`K.depthCam(cam, f)`, a new FROZEN kit export): `x' = f·x`, `y' = f·y`, `roll' = f·roll`,
+  `zoom' = exp(f · ln zoom)`, shakes `· f`.
+  - `f = 1` is the identity on the camera. So documents without media, and media at `anim`, keep every frame hash.
+  - `f = 1.15` is clamped so that the zoom stays ≤ 4.
+- **Export:** the choice changes pixels only, so it has no effect on media exactness (§11.4). `mediaAt` still lists
+  every drawn media.
+
+#### 11.9.4 AI (package E; everything optional)
+
+- **Vision** (`ai/vision`): `VISION_SCHEMA` gains `depth` per asset: enum `anim front back still` plus `reason` (≤ 60
+  chars).
+  - The prompt says: `front` only for see-through or overlay footage (light leaks, particles, rain); `back` for busy or
+    detailed pictures and videos with strong motion; `still` for pictures that must stay readable (a logo, text in the
+    picture); `anim` otherwise.
+  - `visionChanges` writes it to the asset: `media.meta { id, ai: { …, depth } }`. `ORDER.assetAi` becomes
+    `['caption', 'tags', 'colors', 'subject', 'text', 'depth']`, and `core/media.normalizeEntry` keeps `ai.depth` only
+    when it is one of the four values. Package E may edit `core/media` for this one field; A is merged.
+  - Reverting the vision change clears it.
+- **The direct tool** (`ai/direct`): the media variant of the answer schema gains `depth` (enum `keep anim front back
+  still`).
+  - Mapping row: an instruction such as 「背景を後ろに下げて」, 「写真を前に出して」, 「背景は動かさないで」 or 「背景も一緒に
+    動かして」 becomes a pin of `@<mediaKey>.depth` (or `…:ground@photoPan.depth`) at the answer's scope (work, area,
+    lines or cut), `by: 'ai'`, one Change each, reviewable and revertible.
+  - `keep` makes no change.
+
+#### 11.9.5 UI (package G.4; strings package F)
+
+- **The element page** of a media part (背景, 写真の枠, 重ねる映像) shows 「動きと重なり」 as a segmented control of the
+  five options, right under the source row.
+  - While it is auto, the tag reads 「自動: 後ろに下げる」 and the ⓘ shows the `why` text.
+- **The asset page** shows the AI's suggestion when there is one: 「AIのおすすめ: 後ろに下げる」, plus the reason.
+- **Keyboard:** the segmented control is a radiogroup. The top-level control budgets are unchanged, because this row
+  lives in 詳細.
+
+#### 11.9.6 Strings (package F adds them; pairs [ja, en])
+
+| Key | ja | en |
+|---|---|---|
+| `param.depth` | 動きと重なり | Motion and layering |
+| `opt.depth.auto` / `.anim` / `.front` / `.back` / `.still` | おまかせ / 演出と一緒に動かす / 文字の前に出す / 後ろに下げる / 動かさない | Auto / Move with the animation / In front of the text / Push back / Keep still |
+| `why.media.depth.ai` | 写真の内容からのAIのおすすめ | The AI's suggestion from the picture |
+| `why.media.depth.overlay` | 重ねる映像は文字の前に出します | Overlay footage goes in front of the text |
+| `why.media.depth.frame` | 写真の枠は演出と一緒に動かします | A photo frame moves with the animation |
+| `why.media.depth.video` | 動画は自分で動くため、後ろに下げました | A video moves on its own, so it is pushed back |
+| `why.media.depth.busy` | 文字が多い場面なので、後ろに下げました | The text fills much of the frame, so it is pushed back |
+| `why.media.depth.still` | 写真なので、演出と一緒に動かします | A still photo moves with the animation |
+| `media.ai.depth` | AIのおすすめ: {v} | AI suggests: {v} |
+
+#### 11.9.7 Tests
+
+| Package | Asserts |
+|---|---|
+| B | `media_engine.test.js` (+): `K.depthCam` identity at 1, zero at 0, the clamp at 1.15; each effective value's layer, seam rule, Ken Burns and look (op hashes); the readability guard (≥ 40 % → alpha ≤ 0.45); `still` equal across a seam; frame hashes of media-free fixtures unchanged |
+| D | `planner_media.test.js` (+): every rule of §11.9.2 in order; pins win; `ai.depth` wins over the heuristics; the fp terms; explain for each why code |
+| E | `ai_vision.test.js` / `ai_direct.test.js` (+): the schema is portable; `visionChanges` writes and reverts `ai.depth`; every depth phrase maps to one pin at the right scope; `keep` makes no change |
+| G | the element page's radiogroup; `ui_flows.py` flow "media": set 後ろに下げる, then undo; a `mediaLayer` with 文字の前に出す draws above the text (pixel probe) |
+
 ## 12. The project package (`.mojipv`): one file holds everything
 
 The owner's decision: the project file itself must be able to hold everything (images, videos and the song) in **one
