@@ -7,9 +7,9 @@ const corpus = require('../helpers/corpus.js');
 const FM = require('../helpers/fake_media.js');
 const { approx, throwsCode } = require('../helpers/assert_plus.js');
 
-// The media parts of the catalog (photoPan upgraded, photoFrame, textFill, mediaLayer) are package G's; their
-// conformance joins this file when they land. Until then the kit and the engine are tested with the four test parts of
-// tests/helpers/fake_media.js (testParts), one per `use`, written the way the §11.5.7 parts are described.
+// The kit and the engine are tested with the four test parts of tests/helpers/fake_media.js (testParts), one per `use`;
+// the catalog's media parts (package G.3: photoPan upgraded, photoFrame, textFill, mediaLayer, §11.5.7) have their own
+// section below, with their conformance, and the media golden (tests/golden/project_media.json) closes the file.
 
 const MV = load();
 const H = MV.use('core/hash');
@@ -514,6 +514,387 @@ test('conformance of the test media parts: no NaN, balanced save/restore, same o
   }
 });
 
+// --- the catalog's media parts (§11.5.7, package G.3): photoPan (upgraded), photoFrame, textFill, mediaLayer ---------
+
+const SCH = MV.use('core/schema');
+const BH = MV.use('engine/scene/behave');
+const FR = MV.use('engine/scene/frame');
+const CAT = MV.use('parts/catalog').defaultRegistry();
+const DEG = Math.PI / 180;
+
+// The nodes an element owns in a scene (in index order), and small readers of a node.
+function nodesOf(scene, el) {
+  const out = [];
+  for (let i = 0; i < scene.table.n; i++) if (scene.owners[scene.table.owner[i]].el === el) out.push(i);
+  return out;
+}
+const typeOf = (scene, i) => T.TYPE_NAMES[scene.table.type[i]];
+const layerOf = (scene, i) => T.LAYERS[scene.table.layer[i]].name;
+const imageOf = (scene, i) => scene.stores.image[scene.table.payload[i]];
+const shapeOf = (scene, i) => scene.stores.shape[scene.table.payload[i]];
+
+// One media part in the sample cut, built: its scene (the cut; the segment for grounds and atmospheres).
+function partScene(kind, key, asset, params, opts) {
+  const e = mediaEngine({});
+  const plan = partPlan(kind, key, asset, params, opts);
+  e.engine.setPlan(plan);
+  render(e, e.rec, (plan.cuts[0].a + plan.cuts[0].b) / 2);
+  const inGround = kind === 'ground' || REG.get(kind, key).scope === 'run';
+  return { e, plan, scene: e.engine.scene(inGround ? 'ground' : 'cut', 0) };
+}
+
+// A part built straight into a builder with chosen cut times (the sample cut enters at once) and text hints: { b, env,
+// p, behaviours (sorted) }. params over the part's autos as the sample plan resolves them.
+function directBuild(key, asset, params, times, hints) {
+  const media = FM.planMedia(asset ? [asset] : []);
+  const { env, b } = kitEnv(media, true);
+  const p = FAC.samplePlan(REG, { kind: 'ornament', key, params: Object.assign({ src: ID[asset] || '' }, params) }, {}).cuts[0].slots['ornament#0'].p;
+  const focus = { x: 760, y: 470, w: 400, h: 140 };
+  Object.assign(env, { times, owner: 'ornament#0', hints: hints || { focus, free: b.sb.freeAround(focus) } });
+  b.setContext({ owner: 'ornament#0', rng: null });
+  REG.get('ornament', key).build(env, p);
+  return { b, env, p, behaviours: b.seal() };
+}
+
+// The live world pose of a direct build at local time tl.
+function poseAt(d, tl) {
+  T.resetLive(d.b.table);
+  BH.runBehaviours(d.b.table.live, d.behaviours, tl);
+  T.solve(d.b.table);
+  return d.b.table;
+}
+
+test('photoPan (upgraded in place): 写真・動画, an image param of type media, v2\'s zoom, pan and veil kept; the base paint and one media node', () => {
+  const def = CAT.get('ground', 'photoPan');
+  assert.deepEqual([def.key, def.label, def.blurb, def.pool, def.tags, def.needs], ['photoPan', { ja: '写真・動画', en: 'Photo or video' },
+    { ja: '写真や動画を背景にする（選んだときだけ）', en: 'Your photo or video as the background (only when chosen)' }, false, ['soft'],
+    ['media']]);
+  assert.deepEqual(Object.keys(def.params), Object.keys(K.mediaParams({ src: 'image', use: 'ground' })), 'the §11.5.6 params for grounds');
+  assert.deepEqual(def.params.image, { type: 'media', accept: 'any', label: { ja: '写真・動画', en: 'Photo or video' }, auto: { value: '' },
+    ai: false });
+  // v2's three params keep their names and ranges (pins are forever); only the veil's auto differs from other media parts
+  const v2 = { zoom: [0, 0.4, 0.01, 'x', { range: [0.06, 0.14] }], pan: [-180, 180, 1, 'deg', { range: [-180, 180] }],
+    veil: [0, 0.9, 0.01, undefined, { range: [0.3, 0.45] }] };
+  for (const [name, [min, max, step, unit, auto]] of Object.entries(v2)) {
+    const s = def.params[name];
+    assert.deepEqual([s.type, s.min, s.max, s.step, s.unit, s.auto], ['num', min, max, step, unit, auto], name);
+  }
+  // the base paint, then K.media with use 'ground': mirror edges, the frame as its box, the veil in the node (v2's strength)
+  const { scene } = partScene('ground', 'photoPan', 'jpeg', { depth: 'anim', veil: 0.4, amount: 0.5, move: 'none' });
+  const own = nodesOf(scene, 'ground');
+  assert.deepEqual(own.map((i) => typeOf(scene, i)), ['paint', 'image']);
+  const r = imageOf(scene, own[1]);
+  assert.deepEqual([layerOf(scene, own[1]), r.media, r.src, r.edge, r.bleed, r.cam, r.box], ['ground', true, ID.jpeg, 'mirror', 0.15, 1,
+    { x: 0, y: 0, w: 1920, h: 1080 }]);
+  approx(r.veil.a, 0.4 * (0.6 + 0.4 * 0.5), 1e-9, 'the veil strength of v2: veil · (0.6 + 0.4 · amount)');
+  assert.equal(r.veil.ink, 'ground');
+  // the depth and the params reach the node through K.media: pushed back adds the depth cue to the veil
+  const back = partScene('ground', 'photoPan', 'mp4', { depth: 'back', veil: 0.4, amount: 0.5, clock: 'song', edge: 'zoom' }).scene;
+  const rb = imageOf(back, nodesOf(back, 'ground')[1]);
+  assert.deepEqual([rb.cam, rb.edge, rb.time.clock, rb.blur], [0.5, 'zoom', 'song', 3]);
+  approx(rb.veil.a, 0.4 * 0.8 + 0.15, 1e-9);
+  // no picture (none chosen, or an id the plan does not hold): the base paint only, as v2 drew without an image
+  for (const asset of ['', 'a000000000000000000000000']) {
+    const none = partScene('ground', 'photoPan', asset, {}).scene;
+    assert.deepEqual(nodesOf(none, 'ground').map((i) => typeOf(none, i)), ['paint'], JSON.stringify(asset));
+  }
+});
+
+test('photoFrame: the picture in a group, its stepped shadow below and its border above, all on the layer of its depth', () => {
+  for (const depth of ['auto', 'anim', 'front', 'back', 'still']) {
+    const { scene } = partScene('ornament', 'photoFrame', 'jpeg', { depth, place: 'side', shape: 'round', tilt: 3, border: 10,
+      borderInk: 'accent', shadow: 0.4 });
+    const own = nodesOf(scene, 'ornament#0');
+    assert.deepEqual(own.map((i) => typeOf(scene, i)), ['group', 'shape', 'shape', 'shape', 'shape', 'image', 'shape'], depth);
+    const layer = { auto: 'mid', anim: 'mid', still: 'mid', front: 'near', back: 'far' }[depth];
+    assert.deepEqual([...new Set(own.slice(1).map((i) => layerOf(scene, i)))], [layer], depth + ': picture, shadow and border share a layer');
+    assert.ok(own.slice(1).every((i) => scene.table.parent[i] === own[0]), 'one group holds the frame');
+    approx(scene.table.base.rot[own[0]], 3 * DEG, 1e-6, 'the tilt');
+    const rec = imageOf(scene, own[5]);
+    assert.ok(rec.mask && rec.fit === 'cover', 'the round mask clips the picture');
+    const border = shapeOf(scene, own[6]);
+    assert.deepEqual([border.stroke, border.width, border.fill], ['accent', 10, null]);
+    assert.equal(border.path, rec.mask, 'the border strokes the mask');
+    const steps = own.slice(1, 5).map((i) => shapeOf(scene, i));
+    assert.ok(steps.every((s) => s.fill === '#000000' && s.stroke === null), 'the shadow: fills, no filter');
+    for (const i of own.slice(1, 5)) approx(scene.table.base.alpha[i], 0.08, 1e-6);
+    const step = 0.015 * 1080 * 0.4;
+    steps.forEach((s, k) => {
+      approx(s.bounds[0] - border.bounds[0], (k + 1) * step, 1e-3, 'shadow step ' + k + ' x');
+      approx(s.bounds[1] - border.bounds[1], (k + 1) * step, 1e-3, 'shadow step ' + k + ' y');
+    });
+  }
+  // border 0 and shadow 0 leave them out; a cut-out (shape free) shows the picture's own alpha with neither
+  const plain = partScene('ornament', 'photoFrame', 'png', { border: 0, shadow: 0 }).scene;
+  assert.deepEqual(nodesOf(plain, 'ornament#0').map((i) => typeOf(plain, i)), ['group', 'image']);
+  const cut = partScene('ornament', 'photoFrame', 'png', { shape: 'free', border: 20, shadow: 1 }).scene;
+  const cutOwn = nodesOf(cut, 'ornament#0');
+  assert.deepEqual(cutOwn.map((i) => typeOf(cut, i)), ['group', 'image']);
+  assert.equal(imageOf(cut, cutOwn[1]).mask, null);
+  // no picture: nothing at all
+  for (const asset of ['', 'a000000000000000000000000']) {
+    const none = partScene('ornament', 'photoFrame', asset, {}).scene;
+    assert.deepEqual(nodesOf(none, 'ornament#0'), [], JSON.stringify(asset));
+  }
+});
+
+test('photoFrame: sizes and shapes (a circle is square, an arch upright, the others take the picture\'s aspect)', () => {
+  const box = (asset, shape, size) => {
+    const { scene } = partScene('ornament', 'photoFrame', asset, { shape, size, place: 'free' });
+    return imageOf(scene, nodesOf(scene, 'ornament#0').find((i) => typeOf(scene, i) === 'image')).box;
+  };
+  const short = 1080;
+  let b = box('mp4', 'rect', 0.5);                                            // 16:9
+  assert.deepEqual([b.w, b.h], [0.5 * short, (0.5 * short * 9) / 16]);
+  approx(b.x, -b.w / 2, 1e-9, 'centred on the group');
+  b = box('rot90', 'round', 0.5);                                             // 9:16 upright
+  assert.deepEqual([b.w, b.h], [(0.5 * short * 9) / 16, 0.5 * short]);
+  b = box('mp4', 'circle', 0.4);
+  assert.deepEqual([b.w, b.h], [0.4 * short, 0.4 * short]);
+  b = box('mp4', 'arch', 0.4);
+  approx(b.w / b.h, 0.85, 1e-9, 'an arch is never wider than 0.85 of its height');
+  b = box('jpeg', 'free', 1);                                                 // 4:3, the long side = size × short
+  assert.deepEqual([b.w, b.h], [short, (short * 3) / 4]);
+});
+
+test('photoFrame: placements — behind the text (far), beside it in a free band, the corner of the safe area, the middle (free)', () => {
+  const D = BUILD.designEnv({ w: 1920, h: 1080, short: 1080 });
+  const at = (place, extra) => {
+    const { scene } = partScene('ornament', 'photoFrame', 'jpeg', Object.assign({ place, tilt: 0, size: 0.3, depth: 'anim' }, extra));
+    const own = nodesOf(scene, 'ornament#0');
+    const g = own[0], rec = imageOf(scene, own.find((i) => typeOf(scene, i) === 'image'));
+    const x = scene.table.base.x[g], y = scene.table.base.y[g];
+    return { scene, layer: layerOf(scene, own[1]), x, y, box: { x: x + rec.box.x, y: y + rec.box.y, w: rec.box.w, h: rec.box.h } };
+  };
+  const inside = (a, b) => a.x >= b.x - 1e-6 && a.y >= b.y - 1e-6 && a.x + a.w <= b.x + b.w + 1e-6 && a.y + a.h <= b.y + b.h + 1e-6;
+  const meets = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+  const behind = at('behind');
+  const f = behind.scene.focus;
+  approx(behind.x, f.x + f.w / 2, 1e-3); approx(behind.y, f.y + f.h / 2, 1e-3);
+  assert.equal(behind.layer, 'far');
+  const side = at('side');
+  const bands = builderWith({}).sb.freeAround(side.scene.focus);
+  assert.ok(bands.some((band) => inside(side.box, band)), 'inside a free band: ' + JSON.stringify(side.box));
+  assert.ok(!meets(side.box, side.scene.focus), 'off the text block');
+  assert.equal(side.layer, 'mid');
+  const corner = at('corner');
+  approx(corner.box.x + corner.box.w, D.w - D.safe.r - 0.03 * D.short, 1e-3);
+  approx(corner.box.y + corner.box.h, D.h - D.safe.b - 0.03 * D.short, 1e-3);
+  const free = at('free');
+  assert.deepEqual([free.x, free.y, free.layer], [D.cx, D.cy, 'mid']);
+  // in front of the text a frame goes to the near layer wherever it is placed
+  assert.equal(at('behind', { depth: 'front' }).layer, 'near');
+  // a big frame is scaled into its band
+  const big = at('side', { size: 1 });
+  assert.ok(bands.some((band) => inside(big.box, band)) && big.box.w < 1080, JSON.stringify(big.box));
+  // with no band that takes it, the corner, scaled into the lower right quarter of the safe area
+  const times = { a: 0, rest: 0.4, out: 2, b: 2.4 };
+  const focus = { x: 200, y: 150, w: 1520, h: 780 };
+  const d = directBuild('photoFrame', 'jpeg', { place: 'side', size: 1, tilt: 0, depth: 'anim' }, times, { focus, free: [{ x: 100, y: 60, w: 1720, h: 90 }] });
+  const t = d.b.table, rec = d.b.stores.image[t.payload[t.n - 2]];
+  const x0 = t.base.x[0] + rec.box.x, y0 = t.base.y[0] + rec.box.y;
+  assert.ok(x0 >= (D.safe.l + D.w - D.safe.r) / 2 - 1e-3 && y0 >= (D.safe.t + D.h - D.safe.b) / 2 - 1e-3, 'the lower right quarter');
+  approx(x0 + rec.box.w, D.w - D.safe.r - 0.03 * D.short, 1e-3);
+});
+
+test('photoFrame: the border and the shadow keep the picture\'s pose (its Ken Burns and depth fade) at every time', () => {
+  const times = { a: -0.12, rest: 0.4, out: 2, b: 2.4 };
+  const d = directBuild('photoFrame', 'jpeg', { depth: 'anim', move: 'push', zoom: 0.2, pan: 30, appear: 'grow', shadow: 0.5, border: 12 }, times);
+  const t = d.b.table;
+  const kinds = Array.from({ length: t.n }, (_, i) => T.TYPE_NAMES[t.type[i]]);
+  assert.deepEqual(kinds, ['group', 'shape', 'shape', 'shape', 'shape', 'image', 'shape']);
+  const media = 5, companions = [1, 2, 3, 4, 6];
+  assert.ok(d.behaviours.some((b) => b.run === K.runKenBurns && b.from === media), 'K.media moves the picture');
+  const scale = [], alpha = [];
+  for (let k = 0; k <= 48; k++) {
+    const tl = times.a + ((times.b - times.a) * k) / 48;
+    poseAt(d, tl);
+    for (const i of companions) {
+      for (let c = 0; c < 6; c++) approx(t.m[i * 6 + c], t.m[media * 6 + c], 1e-3, 'node ' + i + ' matrix at ' + tl.toFixed(3));
+      approx(t.wa[i], t.wa[media] * t.base.alpha[i], 1e-6, 'node ' + i + ' alpha at ' + tl.toFixed(3));
+    }
+    scale.push(Math.hypot(t.m[media * 6], t.m[media * 6 + 1]));
+    alpha.push(t.wa[media]);
+  }
+  assert.ok(scale[48] > scale[24] + 0.01, 'the picture pushes in: ' + scale[24] + ' → ' + scale[48]);
+  assert.ok(alpha[0] < 0.05 && alpha[24] > 0.99 && alpha[48] < 0.05, 'the anim depth fade: ' + [alpha[0], alpha[24], alpha[48]].join(' '));
+});
+
+test('photoFrame: entrances over the text\'s — grow from 0.8, slide in from the outer side, a slower fade, none', () => {
+  const times = { a: 0, rest: 0.5, out: 2, b: 2.4 };
+  const group = (appear, place) => directBuild('photoFrame', 'jpeg', { appear, place: place || 'side', depth: 'still', move: 'none', tilt: 0 }, times);
+  const g = group('grow');
+  let t = poseAt(g, 0);
+  approx(Math.hypot(t.m[0], t.m[1]), 0.8, 1e-6, 'grow starts at 0.8');
+  t = poseAt(g, 0.5);
+  approx(Math.hypot(t.m[0], t.m[1]), 1, 1e-6, 'full size when the text has entered');
+  const s = group('slide');
+  const x1 = poseAt(s, 0.5).m[4], y1 = s.b.table.m[5];
+  const x0 = poseAt(s, 0).m[4], y0 = s.b.table.m[5];
+  const off = Math.hypot(x0 - x1, y0 - y1);
+  approx(off, 0.06 * 1080, 1e-3, 'slides 0.06 × short');
+  const f = s.env.hints.focus, fc = [f.x + f.w / 2, f.y + f.h / 2];
+  assert.ok(Math.hypot(x0 - fc[0], y0 - fc[1]) > Math.hypot(x1 - fc[0], y1 - fc[1]), 'from the side away from the text');
+  const fade = group('fade');
+  assert.ok(poseAt(fade, 0).wa[0] < 1e-6 && poseAt(fade, 0.5).wa[0] < 1 && poseAt(fade, 0.9).wa[0] > 0.999, 'fades over the entrance + 0.4 s');
+  const none = group('none');
+  assert.equal(none.behaviours.filter((b) => b.from === 0).length, 0, 'no entrance of its own (the follow-text envelope still applies)');
+  // an instant text entrance still shows the frame arrive (0.3 s)
+  const inst = directBuild('photoFrame', 'jpeg', { appear: 'grow', depth: 'still', move: 'none' }, { a: 0, rest: 0, out: 2, b: 2.4 });
+  assert.ok(Math.hypot(poseAt(inst, 0.15).m[0], inst.b.table.m[1]) < 0.99);
+  approx(Math.hypot(poseAt(inst, 0.3).m[0], inst.b.table.m[1]), 1, 1e-6);
+});
+
+test('textFill: the picture atop the glyphs in the isolated text layer; alpha 0.4 + 0.6 · amount; fitted to the frame or the text', () => {
+  const { scene, e } = partScene('ornament', 'textFill', 'webm', { place: 'frame', amount: 0.5, move: 'none' });
+  const own = nodesOf(scene, 'ornament#0');
+  assert.equal(own.length, 1);
+  const i = own[0], rec = imageOf(scene, i);
+  assert.deepEqual([layerOf(scene, i), rec.comp, rec.box], ['text', 'atop', { x: 0, y: 0, w: 1920, h: 1080 }]);
+  assert.equal(scene.layers[T.LAYER_INDEX.text].isolate, true, 'the text layer is isolated');
+  const glyphs = [];
+  for (let j = 0; j < scene.table.n; j++) if (typeOf(scene, j) === 'glyph') glyphs.push(j);
+  assert.ok(glyphs.length > 0 && glyphs.every((j) => j < i), 'the picture comes after every glyph');
+  approx(scene.table.base.alpha[i], 0.7, 1e-6);
+  assert.equal(CAT.get('ornament', 'textFill').shared.amount.auto.value, 1, 'full strength by default');
+  assert.ok(!('depth' in CAT.get('ornament', 'textFill').params), 'inside the text is its own place: no depth');
+  // drawn: the glyphs, then the picture composited 'source-atop' onto the same (isolated) surface
+  const mark = e.rec.mark();
+  render(e, e.rec, 1.4);
+  const ops = e.rec.ops().slice(mark);
+  const k = ops.findIndex((op, n) => op[1] === 'drawImage' && n > 0 && ops[n - 1][1] === 'set:globalCompositeOperation' &&
+    ops[n - 1][2] === 'source-atop');
+  assert.ok(k > 0, 'a source-atop composite');
+  const onto = ops[k][0];
+  assert.ok(ops.slice(0, k).some((op) => op[0] === onto && op[1] === 'fillText'), 'onto the surface that holds the glyphs');
+  // 'text': the text block enlarged by 10 %
+  const t = partScene('ornament', 'textFill', 'jpeg', { place: 'text' }).scene;
+  const f = t.focus, bx = imageOf(t, nodesOf(t, 'ornament#0')[0]).box;
+  for (const [a, b] of [[bx.w, 1.1 * f.w], [bx.h, 1.1 * f.h], [bx.x + bx.w / 2, f.x + f.w / 2], [bx.y + bx.h / 2, f.y + f.h / 2]]) approx(a, b, 1e-3);
+  // no picture: nothing, and the text layer is left as it is
+  const none = partScene('ornament', 'textFill', '', {}).scene;
+  assert.deepEqual(nodesOf(none, 'ornament#0'), []);
+  assert.equal(none.layers[T.LAYER_INDEX.text].isolate, false);
+});
+
+test('mediaLayer: footage over the frame and its bleed; blend → comp, alpha 0.2 + 0.8 · amount, scene backdrop only; depth replaces over', () => {
+  const def = CAT.get('ornament', 'mediaLayer');
+  assert.deepEqual([def.scope, def.follow, def.pool, def.needs], ['run', 'own', false, ['media']]);
+  assert.ok(!('over' in def.params) && def.params.depth.of.includes('front'), 'depth replaces the draft over param');
+  const built = (params) => {
+    const { scene } = partScene('ornament', 'mediaLayer', 'mp4', Object.assign({ move: 'none' }, params));
+    const own = nodesOf(scene, 'atmos');
+    assert.equal(own.length, 1);
+    return { rec: imageOf(scene, own[0]), layer: layerOf(scene, own[0]), alpha: scene.table.base.alpha[own[0]] };
+  };
+  const anim = built({ depth: 'anim', blend: 'multiply', amount: 0.5 });
+  assert.deepEqual([anim.layer, anim.rec.comp, anim.rec.sceneOnly, anim.rec.box], ['far', 'multiply', true,
+    { x: -288, y: -162, w: 2496, h: 1404 }]);
+  approx(anim.alpha, 0.6, 1e-6);
+  assert.equal(built({ depth: 'anim', blend: 'normal' }).rec.comp, 'over');
+  assert.equal(built({ depth: 'anim', blend: 'overlay' }).rec.comp, 'overlay');
+  // in front of the text (the old over: text): the near layer, with the readability guard; pushed back (over: behind): far
+  const front = built({ depth: 'front', blend: 'screen', amount: 1 });
+  assert.deepEqual([front.layer, front.rec.comp], ['near', 'screen']);
+  assert.ok(front.alpha <= 0.45 + 1e-6);
+  assert.equal(built({ depth: 'back' }).layer, 'far');
+  // no picture: nothing
+  const none = partScene('ornament', 'mediaLayer', '', {}).scene;
+  assert.deepEqual(nodesOf(none, 'atmos'), []);
+});
+
+test('mediaLayer in front of the text is drawn after the glyphs; behind it (back, anim), before them', () => {
+  const order = (depth) => {
+    const e = mediaEngine({});
+    const plan = partPlan('ornament', 'mediaLayer', 'jpeg', { depth, blend: 'normal', move: 'none' });
+    e.engine.setPlan(plan);
+    const s = surface(e.rec);
+    render(e, e.rec, 1.3, {}, s);
+    const mark = e.rec.mark();
+    render(e, e.rec, 1.4, {}, s);
+    const ops = e.rec.ops().slice(mark);
+    const media = ops.findIndex((op) => op[1] === 'drawImage' && String(op[2]).startsWith('media:'));
+    const glyphs = ops.map((op, n) => (op[1] === 'fillText' ? n : -1)).filter((n) => n >= 0);
+    assert.ok(media >= 0 && glyphs.length > 0, depth);
+    return { before: glyphs.filter((n) => n < media).length, after: glyphs.filter((n) => n > media).length };
+  };
+  const front = order('front');
+  assert.deepEqual([front.after, front.before > 0], [0, true], 'front: after every glyph');
+  for (const depth of ['back', 'anim']) {
+    const o = order(depth);
+    assert.deepEqual([o.before, o.after > 0], [0, true], depth + ': before every glyph');
+  }
+});
+
+test('mediaLayer is skipped for the chroma, black and clear backdrops; photoFrame and textFill are drawn there', () => {
+  for (const backdrop of ['scene', 'chroma', 'black', 'clear']) {
+    const drawn = (key, asset) => {
+      const e = mediaEngine({});
+      e.engine.setPlan(partPlan('ornament', key, asset, { move: 'none', appear: 'none' }, { backdrop }));
+      return render(e, e.rec, 1.4, { backdrop }).stats.media.drawn;
+    };
+    assert.equal(drawn('mediaLayer', 'mp4'), backdrop === 'scene' ? 1 : 0, 'mediaLayer ' + backdrop);
+    assert.equal(drawn('photoFrame', 'png'), 1, 'photoFrame ' + backdrop);
+    assert.equal(drawn('textFill', 'jpeg'), 1, 'textFill ' + backdrop);
+  }
+});
+
+test('conformance of photoPan, photoFrame, textFill and mediaLayer: no NaN, balanced save/restore, same op hash twice (× 7 aspects × 24 times)', () => {
+  const DEPTHS = ['auto', 'anim', 'front', 'back', 'still'];
+  const SHAPES = K.MEDIA.SHAPES, PLACES = K.MEDIA.PLACES, APPEARS = ['fade', 'grow', 'slide', 'none'];
+  const cases = [];
+  DOC.ASPECTS.forEach((aspect, a) => {
+    DEPTHS.forEach((depth, d) => {
+      const n = a + d;
+      cases.push(['ground', 'photoPan', ['jpeg', 'mp4', 'gif', 'rot90'][n % 4], { depth, edge: K.MEDIA.EDGES[n % 3], fit: K.MEDIA.FITS[n % 3],
+        move: K.MEDIA.MOVES[n % 5], clock: n % 2 ? 'song' : 'show', blur: n % 3 ? 0 : 6 }, aspect]);
+      cases.push(['ornament', 'photoFrame', ['png', 'jpeg', 'mp4', 'webm', 'vfr'][n % 5], { depth, shape: SHAPES[n % 5], place: PLACES[(n + 1) % 4],
+        appear: APPEARS[n % 4], tilt: (n % 7) - 3 }, aspect]);
+      cases.push(['ornament', 'mediaLayer', ['mp4', 'jpeg', 'webm'][n % 3], { depth, blend: K.MEDIA.BLENDS[n % 4] }, aspect]);
+    });
+    for (const place of ['frame', 'text']) cases.push(['ornament', 'textFill', a % 2 ? 'webm' : 'jpeg', { place, clock: 'song' }, aspect]);
+  });
+  for (const [kind, key, asset, params, aspect] of cases) {
+    const where = kind + '/' + key + ' ' + asset + ' ' + aspect + ' ' + JSON.stringify(params);
+    const hashes = [];
+    let drawn = 0;
+    for (let run = 0; run < 2; run++) {
+      const e = mediaEngine({});
+      const plan = partPlan(kind, key, asset, params, { aspect });
+      e.engine.setPlan(plan);
+      const [w, h] = plan.design.w >= plan.design.h ? [640, Math.round((640 * plan.design.h) / plan.design.w)]
+        : [Math.round((640 * plan.design.w) / plan.design.h), 640];
+      const s = surface(e.rec, w, h);
+      const list = [];
+      for (let k = 0; k < 24; k++) {
+        const r = render(e, e.rec, (plan.duration * (k + 0.5)) / 24, { scale: w / plan.design.w }, s);
+        list.push(r.hash);
+        drawn += r.ops.length;
+      }
+      const st = e.rec.stats();
+      assert.ok(st.balanced, where + ': save/restore balanced');
+      assert.equal(st.nan, 0, where + ': NaN');
+      assert.equal(st.alphaBad, 0, where + ': alpha');
+      assert.deepEqual(e.engine.warnings().filter((x) => x.code === 'part-error'), [], where);
+      hashes.push(list);
+    }
+    assert.ok(drawn > 0, where + ': the medium is drawn');
+    assert.deepEqual(hashes[0], hashes[1], where + ': same op hashes twice');
+  }
+});
+
+test('おまかせ with the user\'s media: a pooled video becomes a derived photoPan that plays with the song and keeps still', () => {
+  const MIX = MV.use('parts/mix');
+  const media = { list: corpus.project('media').doc.media.list.map((a) => Object.assign({}, a, { pool: true })) };
+  const reg = MIX.registryFor(CAT, { next: 1, list: [] }, media);
+  const video = media.list.find((a) => a.kind === 'video'), still = media.list.find((a) => a.kind === 'image');
+  const dv = reg.get('ground', MEDIA.keyOf(video.id)), ds = reg.get('ground', MEDIA.keyOf(still.id));
+  assert.deepEqual([dv.params.image.auto, dv.params.clock.auto, dv.params.move.auto, dv.pool, dv.build], [{ value: video.id },
+    { value: 'song' }, { value: 'none' }, true, CAT.get('ground', 'photoPan').build]);
+  assert.deepEqual([ds.params.clock.auto, ds.params.move.auto], [{ value: 'show' }, { value: 'auto' }], 'a still keeps photoPan\'s autos');
+  assert.deepEqual(SCH.validateSpec('image', dv.params.image), []);
+});
+
 // --- depth (§11.9.3) ------------------------------------------------------------------------------------------------
 
 test('K.depthCam: the identity at 1, no camera at 0, factor · pose (zoom in log space), the ≤ 4 zoom clamp above 1', () => {
@@ -681,4 +1062,42 @@ test('frame hashes of the media-free fixtures are unchanged (tests/golden/frame_
     assert.deepEqual(await frames(doc), withCamera[name], name + ': with an asset store the frames are the golden frames');
     assert.deepEqual(await frames(corpus.withoutCamerawork(doc)), v2[name], name + ': and without the camerawork the v2 frames');
   }
+});
+
+// DESIGN_2_1 §7.5 step (c): the media golden, made by tests/update_golden.js. The v2.1 media fixture with a text fill
+// (tests/helpers/fake_media.js goldenDoc) holds a still background, a photo frame, a text fill and a video background;
+// rendered with the fake store, its op hashes include the media times.
+test('the media golden: project_media plans and renders the golden frames with the fake store (tests/golden/project_media.json)', async () => {
+  const golden = JSON.parse(require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'golden', 'project_media.json'), 'utf8'));
+  const reg = MV.use('parts/catalog').defaultRegistry();
+  assert.deepEqual(golden.registry, { kind: 'catalog', version: reg.version }, 'made with this catalog');
+  const doc = FM.goldenDoc(corpus.project('media').doc);
+  const rec = recorder();
+  const engine = FAC.createEngine({ registry: reg, canvas: rec.factory, measurer: fakeMeasurer(), fonts: null, assets: FM.createFakeMedia(MV) });
+  const { plan } = engine.setDoc(doc);
+  assert.equal(plan.hash, golden.plan, 'the plan hash');
+  // what the golden covers: a video background, a still one (a pooled asset), a photo frame and a text fill
+  const grounds = plan.grounds.map((g) => [g.ground.v, g.ground.p.image || g.ground.p.src]);
+  assert.ok(grounds.some(([k, id]) => k === 'photoPan' && id === ID.mp4), 'the video background');
+  assert.ok(grounds.some(([k]) => k === MEDIA.keyOf(ID.jpeg)), 'the still background');
+  const slots = plan.cuts.flatMap((c) => ['ornament#0', 'ornament#1'].map((s) => c.slots[s] && c.slots[s].v));
+  assert.ok(slots.includes('photoFrame') && slots.includes('textFill'), 'a photo frame and a text fill');
+  await engine.prepare(0, plan.duration, { export: true });
+  const [dw, dh] = DOC.DESIGN_SIZE[doc.look.aspect];
+  const k = 360 / Math.min(dw, dh);
+  const [w, h] = [Math.round(dw * k), Math.round(dh * k)];
+  const made = rec.factory.create(w, h, { alpha: false });
+  const s = { canvas: made.canvas, ctx: made.ctx, w, h };
+  const list = [];
+  let media = 0;
+  for (let i = 0; i < golden.frames.length; i++) {
+    const before = rec.ops().length;
+    const st = engine.renderFrame(s, (plan.duration * (i + 0.5)) / golden.frames.length, { quality: 'export', pick: false, scale: w / plan.design.w });
+    media += st.media.drawn;
+    list.push(H.hashJSON(rec.ops().slice(before)));
+  }
+  engine.dispose();
+  assert.equal(golden.frames.length, 40);
+  assert.ok(media >= 60, 'the media are drawn (' + media + ' media draws in 40 frames)');
+  assert.deepEqual(list, golden.frames);
 });

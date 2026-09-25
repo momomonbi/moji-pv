@@ -5440,3 +5440,205 @@ no golden changed. The lead decisions are followed: LRC in song times, SRT relat
   #00B140 (it is tagged BT.601)? If it shows about (0, 152, 61), the MP4s should be fed as our own BT.709 I420 frames.
   And: does Filmora read VP9 alpha at our alpha bitrate without trails?
 - The kit at 4K60 has not been run here (memory and time); the ZIP path keeps every file in memory until the download.
+## v2.1-G.3
+
+G.3 of DESIGN_2_1 §8.7: the media parts (§11.5.7, with §11.9 depth) on B's kit (`K.media`, `K.mediaParams`, `K.MEDIA`,
+`K.runKenBurns`), their tests, and goldens step (c) of §7.5.
+
+### What was built
+
+- **`parts/ground/photo.js`: `photoPan`, upgraded in place.** Key, `pool: false` and tags kept; label 写真・動画 / Photo or
+  video and the §11.5.7 blurb; `needs: ['media']`. Params: `K.mediaParams({ src: 'image', use: 'ground', autos: { veil:
+  range 0.3–0.45 } })`: `image` (type `media`, accept `any`), `depth`, `fit`, `cropZoom`/`cropX`/`cropY`, `edge`,
+  `move`, `zoom`, `pan`, `blur`, `veil`, `veilInk`, `tint`, `tintInk`, `clipIn`, `clipOut`, `speed`, `loop`, `clock`;
+  `zoom`, `pan` and `veil` keep their v2 names, ranges, steps, units and autos. Build: the v2 base paint (the ground
+  colour over the frame and its bleed), then `K.media(use 'ground', box = the frame)`; the veil is now the node's own,
+  at v2's strength `veil · (0.6 + 0.4 · amount)`. No picture (none chosen, or an id the plan does not hold): the base
+  paint only, as v2 drew without an image.
+- **New `parts/ornament/media.js`**: `photoFrame`, `textFill`, `mediaLayer`, each `pool: false`, `needs: ['media']`, tags
+  `['soft']`, labels and blurbs in the definitions. Params: the source and the depth first (the element page shows the
+  depth under the source row, §11.9.5), then the part's own (the §11.5.7 table), then the other media params of its use.
+  A part without a picture builds nothing.
+  - `photoFrame` (cut, follow text; roles lyric, focus, title and outro, like the other text-bound frames): a group at
+    its place, turned by `tilt`, holding the stepped shadow (4 fills of the outline, `#000000`, alpha 0.08 each, step
+    `0.015 · short · shadow` down and right, no filter), the picture (`K.media`, use `frame`, the outline as its mask)
+    and the border (the mask stroked, `borderInk`, `border` du). Box: the long side is `size · short`; a circle is
+    square, an arch upright (width ≤ 0.85 of the height), the other shapes take the picture's aspect (within 1:2 and
+    2:1), so the default cover fit shows the whole picture. `free` is the picture's own alpha: no mask, border or shadow.
+    Places: `behind` on the text block's centre in the far layer; `side` in the free band where it fits largest (a
+    margin of 0.03 short from the text and the band's edges; a band that takes less than 0.12 short sends it to the
+    corner); `corner` the lower right of the safe area, scaled into that quarter; `free` the middle, moved by the
+    element's nudge. The border and the shadow share the picture's layer (the §11.9.3 table: front → near, back → far)
+    and, through one behaviour after K.media's, its pose: its Ken Burns and its depth fade, so the frame moves as one.
+    `appear` over the text's entrance (at least 0.3 s): grow from 0.8, slide in over 0.06 short from its outer side
+    (away from the text; from below when not `side`), fade (a bloom 0.4 s longer than the entrance), none; the exit is
+    the automatic follow-text envelope.
+  - `textFill` (cut, follow text): `K.media` use `fill` (comp `atop`) in the text layer after the glyphs, the text layer
+    isolated only when a picture is built; alpha `0.4 + 0.6 · amount` with `amount` auto 1; `place` frame (the whole
+    frame) or text (the text block grown by 10 %; the frame when the block is empty). No depth (§11.9.1).
+  - `mediaLayer` (run, follow own): `blend` (screen, multiply, overlay; normal = comp `over`), no `over` (depth replaces
+    it); `K.media` use `layer` on the far layer (the kit moves front to near and sets `sceneOnly`), the box the frame plus
+    the 15 % bleed so camera moves never show an edge; alpha `0.2 + 0.8 · amount`.
+- **Registration:** nothing to change. `parts/catalog` gathers every module under `parts/<kind>/`, `build.py` collects
+  `src/` and gives `parts/ornament/*` layer 4 with the part-file lint; `build.py --check`: 200 modules OK. The base
+  registry version goes `1e6ef40c` → `83c7523d`.
+
+### Tests
+
+- `media_engine.test.js` (+14): photoPan (label, the media params, v2's three params, base paint + one node, the veil
+  strength, depth and params through K.media, no picture); photoFrame (group, shadow, picture, border on the layer of
+  every depth; border strokes the mask; shadow steps; sizes and shapes; the four placements and the corner fallback;
+  border and shadow keep the picture's pose at 49 times with Ken Burns and the anim depth fade; the four entrances);
+  textFill (after every glyph, isolated text layer, `source-atop` onto the glyphs' surface, alpha, the two places);
+  mediaLayer (bleed box, blend → comp, alpha, front/back layers, drawn after the glyphs in front and before them
+  behind: the op order); backdrops (mediaLayer skipped for chroma, black, clear; photoFrame and textFill drawn);
+  **conformance** of the four parts: 154 cases (every depth × every aspect, with fit, edge, move, clock, blur, shape,
+  place, appear, tilt, blend and still, video, VFR, rotated and animated sources varied) × 24 times × 2 runs: no NaN,
+  balanced save/restore, no alpha out of range, no part-error, the medium drawn, the same op hashes twice; the derived
+  おまかせ ground of a pooled video (C's `registryFor`) now gets `clock: song` and `move: none`; the media golden.
+- `parts_world.test.js`: the §5.5/§5.6 tables also read DESIGN_2_1 §11.5.7 (photoPan's new label; the three media
+  ornaments' keys, labels, scope, follow, tags, pool, needs); the v2 photoPan test now uses an asset of the plan's media
+  (a v2 text value such as `asset:test` is no id and gives the plain ground) and still checks "pans and zooms
+  closed-form and always covers the frame" with the edge rule `zoom` (v2's behaviour). No check removed.
+- New `tests/browser/media_exact.py`, `media_alpha.py`, the shared page helper `media_page.py`, the harness
+  `tests/www/media_parts.js` (everything in the built app page under its CSP, the real AssetStore):
+  - `media_exact.py`: the counter videos of media_gen.js (VP9 WebM 30 fps, VP9 MP4 25 fps, VFR; H.264 where it encodes,
+    `MV_REQUIRE_H264=1` for CI) as the background in PNG exports at 24, 30 and 60 fps, 1280×720 and 1920×1080, 2.4 s
+    (a loop wrap): every frame's code equals the frame expected from the times the clip was made with (Python, not
+    `sampleAt`); speed 0.5 and 2, clipIn 0.5, clipIn–clipOut, hold past the end; clock `show` in a cut (a photo frame,
+    read inside it); a 3-s MP4 export decodes back to the same codes. About 2,500 frames, all exact here (VP9; ≈ 70 s).
+  - `media_alpha.py`: the alpha WebM's merged frames at 5 times (128 and 0 exactly here, ±4 allowed); as a free-shape
+    photoFrame in a 透過PNG export the alpha is kept (128 / 0 / nothing outside); photoPan and mediaLayer drawn over the
+    scene backdrop and absent from green, black and clear frames (those frames are exactly the backdrop); the §11.9.7
+    probe: a mediaLayer at 文字の前に出す turns every glyph pixel bluer (8,077 of 8,077), at anim and back every glyph pixel
+    keeps the ink.
+- `determinism.py` (+ check 7, `--no-media`): video ground + alpha WebM frame + still frame, camerawork on, export
+  quality: frame N of a fresh engine and store = frame N after 0..N−1 (pixels and source frames), 30 = 60 fps; the
+  paused preview after a scrub starts provisional and, redrawn until exact, shows the export's source frames with MAE 0
+  here (≤ 2/255 allowed).
+- `perf.py` (+ media row, `--no-media`, `--media-rows`), `transparent_check.py` (+ a free-shape photoFrame of a PNG with
+  alpha in every export: its rect left out of the glyph checks; in 透過PNG its alpha is the PNG's, opaque 255, half 128,
+  cleared 0; drawn over green and black), `package_io.py` (the preview-frame check G.1 left: the WebM as the
+  background and the PNG in a photo frame, identical pixel for pixel before the save and after clear + open;
+  `media_check.js` `previewFrame`), `parts_gallery.py` (the media mode must list the four catalog media parts; it
+  shows 8 parts: those and B's four test parts).
+- **Mutation checks:** 16 mutants of the parts against the Node tests (the pose tracking's scale and alpha, the frame
+  layer, textFill's isolation and alpha, mediaLayer's normal blend, alpha and bleed, `behind` in mid, the side margin,
+  the shadow strength, fade, slide direction, circle, photoPan's veil strength and auto): all caught. Browser: no
+  0.1-ms rule in `sampleAt` (5 VFR frames wrong), a scaled loop time, an overlay never in front, a frame at alpha 0.98
+  (transparent_check), a behaviour with history (determinism check 7): all caught. (A first history mutant was
+  equivalent: two frames made its counter even at every evaluation.)
+
+### Goldens (§7.5 step (c))
+
+Asserted before regenerating: `node tests/update_golden.js --check` gave `frame_hashes_v2.json: matches`; the 160
+frames of `frame_hashes.json` (4 projects × 40) rendered with the new catalog were compared hash by hash: 0 differ;
+`media_engine.test.js` "frame hashes of the media-free fixtures are unchanged" passed with the new registry. And the 240
+corpus plans, with their hashes and fingerprints left out, are byte-identical to the plans of the catalog before G.3
+(no part choice, param, window or slot moved: photoPan stays pool-only and the new parts are `pool: false`). Then
+`node tests/update_golden.js`:
+- `frame_hashes_v2.json`: matches (unchanged);
+- `plan_hashes.json`: all 240 plans (+ the registry line), because the base registry version enters every plan hash
+  through `sharedText`; nothing else changed;
+- `frame_hashes.json`: only its registry version line changed; the frames are byte-identical;
+- new `project_media.json` (plan hash and 40 frame hashes): the v2.1 media fixture plus a text fill on r5
+  (`fake_media.js goldenDoc`; A.3's fixture has the video background, the pooled still background, the photo frame and
+  a material, but no text fill), planned with its effective registry and rendered with the fake store, so its op hashes
+  include the media times. `media_engine.test.js` checks it; `update_golden.js` writes it.
+
+### Decisions where the design was silent
+
+- The param order (source, depth, own, other media params); the photoFrame geometry, shadow step and ink, round radius
+  (0.12 of the shorter side), placement rules and entrance numbers above; `free` has no border or shadow (there is no
+  outline to draw); textFill isolates the text layer only when it draws; mediaLayer's bleed box; `photoPan` also
+  declares `needs: ['media']` (the vocabulary word; it only feeds the song terms of `needs`, so nothing changes).
+- None of the parts names `use` in its specs: the planner's rule (ground → ground, run ornament → layer, cut ornament →
+  frame) is right for all four, and textFill has no depth.
+
+### Deviations (with reasons)
+
+- **Entrance window.** §11.5.7 says `appear` runs over `[a, rest]`. It runs over at least 0.3 s (an instant text
+  entrance would otherwise show no entrance at all), and `fade` 0.4 s longer: the follow-text envelope already fades the
+  frame over `[a, rest]`, so `fade` and `none` would otherwise look the same.
+- **Border and shadow at depth front, back and still.** They share the picture's layer and pose, but only media nodes
+  carry a camera factor (`sb.media` `cam`/`still`), so at those depths they see the layer's own camera while the picture
+  sees `depthCam(f)`; under camera motion (and, for `still`, through a seam) the picture then slides inside its border.
+  At anim (the automatic depth of a frame) they match exactly. Request to B below.
+- **Files outside §8.7's G.3 list:** `tests/node/parts_world.test.js` (the photoPan upgrade changes its v2 label and
+  param type, which that file checks against DESIGN.md §5.5; it now also reads DESIGN_2_1 §11.5.7);
+  `tests/helpers/fake_media.js` (`goldenDoc`, the golden's document, shared by `update_golden.js` and the test);
+  `tests/update_golden.js` (the `project_media.json` job); `tests/www/media_check.js` (`previewFrame` for package_io);
+  `tests/browser/package_io.py` also waits up to 10 s for its two download events before reading them (it read them at
+  once, and one run on the loaded machine reported none; no check changed).
+- **The app's engine has no AssetStore until G.4** (ui/boot passes `assets: null`): the tests fork it with a store
+  (`engine.fork({ assets })`), and transparent_check's step-④ exports go through `wireExport`, which makes
+  `app.engine.fork()` pass one, as ui/boot will.
+
+### Measured (this machine: 4 shared CPUs, other packages' tests running; headless Chromium 141, software raster)
+
+| §11.5.12 row | here |
+|---|---|
+| `drawMedia`, still, full frame | p50 ≤ 0.1 ms per call (the timer's resolution); frame p50 13.0–14.5 ms vs 12.0 without (budget ≤ 0.3 ms) |
+| `drawMedia`, video, full frame | p50 11.3–13.0 ms per call for a 1080p VP9 frame drawn at 720p (budget ≤ 0.8 ms, "a hardware frame upload") |
+| Isolated path (a PNG with alpha as the ground) | +2.8–3.0 ms per call (budget ≤ +1.2 ms) |
+| WebM alpha merge, 1080p | 45–51 ms per frame through the store, decoding both 1080p streams in software included (budget ≤ 7 ms merge) |
+| Frame with one video ground and one still frame (perf.py row) | p50 34.7–43.5 ms, p95 100–160 ms at 720p (budget ≤ 10 ms target, 16.7 ms hard) |
+| Scrub, 1080p, GOP 2 s | 33–120 ms to the exact frame (budget ≤ 250 ms) |
+| Export overhead of a 1080p30 background at 1080p30 | +43 % to +61 % (VP9 export here: no H.264 encoder; budget ≤ +35 % for H.264) |
+| `mediaAt(t)` | B's figure: 2.2 µs with media everywhere (budget 50 µs) |
+| Import (hashing, probe, poster) | G.1's figures |
+| Re-plan with media pins | unchanged: the 240 corpus plans hold the same values; `planner_determinism` passes |
+
+Where the time goes, measured in the page: `drawImage` of a 1080p `VideoFrame` costs 8–17 ms **every** time here (YUV →
+RGB on the CPU, not cached between draws of the same frame); `createImageBitmap(frame)` takes 6–9 ms once (async), and
+drawing that bitmap 3 ms. A video ground at its automatic depth (back) adds the per-frame video blur of the isolated
+path (+≈ 12 ms). With the store's video frames turned into bitmaps (an experiment, not committed) the perf.py row went
+from p50 29.7 to 23.4 ms. The budgets are written for a GPU laptop; this machine cannot show them.
+
+### Requests to other packages
+
+- **G.4 / F (`ui/fields`, strings):** `ui_fields.test.js` "spec-4: every string value of every registered enum parameter
+  has an opt.<value> label" fails now that the catalog has media parts: `depth` (auto, anim, front, still) and
+  `move`'s `auto` have no `opt.<value>` string, and `opt.back` exists with another meaning (逆方向). §11.9.6 names the
+  depth labels `opt.depth.*` (F adds them): `ui/fields` should label the `depth` enum `'opt.depth.' + v`, and `move`'s
+  `auto` needs a string (below). Until then this one Node test is red in this tree.
+- **B:** let `sb.shape` (and `sb.group`) take `cam` and `still` as `sb.media` does, and give parts the effective depth of
+  a picture (for example `K.media` returning it, or a `K.depthOf(p, use, meta)` export), so a photo frame's border and
+  shadow can share its camera factor and seam pass. Performance: the per-frame blur of a `back` video (the isolated
+  path) is the largest item in the perf.py media row here.
+- **G.1 (`media/host/session`, `store`):** hand out video frames as `ImageBitmap`s made once when they are held
+  (`createImageBitmap` in the output path, off the main thread) instead of drawing the `VideoFrame` each time: here a
+  draw drops from ≈ 10 ms to ≈ 3 ms (and mirror neighbours draw the same frame again). Worth measuring on a GPU first:
+  there a `VideoFrame` draw is a texture upload.
+- **G.4 (ui/boot):** create the AssetStore and pass it to `createEngine`; then `wireExport` and the `engine.fork({ assets
+  })` calls of the harnesses can go.
+- **E:** `ai/direct`'s comment "a param that is not of type media yet (today's photoPan.image)" is outdated: it is one
+  now.
+- **Lead:** DESIGN_2_1 §11.5.7's table still lists mediaLayer's `over` (§11.9.1 replaced it by `depth`). The perf.py
+  media row (and B's camerawork + materials row) cannot meet their budgets on a software-rendered runner; they need a
+  GPU reference machine or a decision about CI.
+
+### Strings wanted (key, ja, en)
+
+- `opt.auto`: おまかせ / Auto (`move`'s `auto`; photoPan, photoFrame, textFill, mediaLayer)
+- the `depth` options through `opt.depth.auto` / `.anim` / `.front` / `.back` / `.still` (§11.9.6; F has them) once
+  `ui/fields` maps the depth enum to them.
+
+### Open items
+
+- `ui_fields.test.js` spec-4 is red until the request above lands; the perf.py media row fails here (numbers above).
+- H.264 exactness runs only where the browser encodes H.264 (Chrome CI with `MV_REQUIRE_H264=1`).
+- Visual QA of the photo frame's placements and entrances in every aspect (the Node tests check their geometry).
+
+## Lead: integrating G.3
+
+- G.3's diff was applied onto the integration branch after F and H.2. The goldens were then regenerated. Beforehand,
+  `update_golden --check` showed `frame_hashes_v2.json` unchanged, and the only key that changed in `frame_hashes.json`
+  was `registry.version` (1e6ef40c → 83c7523d): no media-free frame moved. `project_media.json` is G.3's new golden.
+- spec-4 (option labels): an enum spec may name its own label group with `optKey`. Its options are then labelled
+  `opt.<optKey>.<value>`. The reason: `depth`'s `back` means 後ろに下げる, not the shared `opt.back` 逆方向.
+  `core/schema.validateSpec` accepts `optKey` only on an enum and only as an identifier. `K.mediaParams`' depth sets
+  `optKey: 'depth'`. `opt.auto` おまかせ / Auto is added for `move: auto`. Tests: `schema.test.js` and `ui_fields.test.js`.
+- Open: perf.py's new media row (a 1080p30 video ground and a still photo frame) fails here and on CI, which have no
+  GPU: a 1080p VideoFrame costs 8–17 ms to draw in software. This is handled next, together with the
+  camerawork + materials row.

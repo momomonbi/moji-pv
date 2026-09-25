@@ -17,11 +17,17 @@
 //                     (corpus.withoutCamerawork). These are the v2 frames, byte for byte, and they are FROZEN: a plain run
 //                     never writes them. It checks them first and writes nothing when they differ (DESIGN_2_1 §7.5: the
 //                     frames that must stay equal are asserted before the goldens are regenerated). --v2 rewrites them.
+//   project_media.json { "registry": …, "measurer": "fake", "media": "fake", "plan": "<plan.hash>", "frames": [40 hashes] }
+//                     the v2.1 media fixture with a text fill added (tests/helpers/fake_media.js goldenDoc: a still
+//                     background, a photo frame, a text fill and a video background; DESIGN_2_1 §7.5 step (c)), planned
+//                     with its effective registry (materials and pooled media) and rendered like the frames above with
+//                     the fake asset store, so its op hashes include the media times ('media:<id>@<m>#<index>').
 
 const fs = require('node:fs');
 const path = require('node:path');
 const { load } = require('./helpers/load.js');
 const corpus = require('./helpers/corpus.js');
+const FM = require('./helpers/fake_media.js');
 
 const MV = load();
 const H = MV.use('core/hash');
@@ -52,30 +58,37 @@ function outputSize(aspect) {
   return [Math.round(w * k), Math.round(h * k)];
 }
 
-async function frameHashes(reg, prepare = (doc) => doc) {
+// The plan hash and the FRAMES frame hashes of one document (an engine of its own; assets: an AssetStore or null).
+async function renderDoc(reg, doc, assets) {
   const { createEngine } = MV.use('engine/facade');
   const { createRecorder } = MV.use('engine/render/record');
   const { fakeMeasurer } = MV.use('engine/text/fake_measure');
-  const frames = {};
-  for (const { name, doc: stored } of corpus.projects()) {
-    const doc = prepare(stored);
-    const rec = createRecorder();
-    const engine = createEngine({ registry: reg, canvas: rec.factory, measurer: fakeMeasurer(), fonts: null, assets: null });
-    const { plan } = engine.setDoc(doc);
-    await engine.prepare(0, plan.duration, { export: true });
-    const [w, h] = outputSize(doc.look.aspect);
-    const made = rec.factory.create(w, h, { alpha: false });
-    const surface = { canvas: made.canvas, ctx: made.ctx, w, h };
-    const list = [];
-    for (let i = 0; i < FRAMES; i++) {
-      const before = rec.ops().length;
-      engine.renderFrame(surface, (plan.duration * (i + 0.5)) / FRAMES, { quality: 'export', pick: false, scale: w / plan.design.w });
-      list.push(H.hashJSON(rec.ops().slice(before)));
-    }
-    engine.dispose();
-    frames[name] = list;
+  const rec = createRecorder();
+  const engine = createEngine({ registry: reg, canvas: rec.factory, measurer: fakeMeasurer(), fonts: null, assets });
+  const { plan } = engine.setDoc(doc);
+  await engine.prepare(0, plan.duration, { export: true });
+  const [w, h] = outputSize(doc.look.aspect);
+  const made = rec.factory.create(w, h, { alpha: false });
+  const surface = { canvas: made.canvas, ctx: made.ctx, w, h };
+  const list = [];
+  for (let i = 0; i < FRAMES; i++) {
+    const before = rec.ops().length;
+    engine.renderFrame(surface, (plan.duration * (i + 0.5)) / FRAMES, { quality: 'export', pick: false, scale: w / plan.design.w });
+    list.push(H.hashJSON(rec.ops().slice(before)));
   }
+  engine.dispose();
+  return { plan: plan.hash, frames: list };
+}
+
+async function frameHashes(reg, prepare = (doc) => doc) {
+  const frames = {};
+  for (const { name, doc } of corpus.projects()) frames[name] = (await renderDoc(reg, prepare(doc), null)).frames;
   return frames;
+}
+
+async function mediaGolden(reg, info) {
+  const r = await renderDoc(reg, FM.goldenDoc(corpus.project('media').doc), FM.createFakeMedia(MV));
+  return { registry: info, measurer: 'fake', media: 'fake', plan: r.plan, frames: r.frames };
 }
 
 function readGolden(file) {
@@ -97,6 +110,8 @@ async function main() {
       make: async () => ({ registry: info, plans: planHashes(reg) }) },
     { file: 'frame_hashes.json', needs: ENGINE, empty: { registry: null, measurer: 'fake', frames: {} },
       make: async () => ({ registry: info, measurer: 'fake', frames: await frameHashes(reg) }) },
+    { file: 'project_media.json', needs: ENGINE.concat(['planner/plan', 'parts/mix']),
+      empty: { registry: null, measurer: 'fake', media: 'fake', plan: null, frames: [] }, make: () => mediaGolden(reg, info) },
   ];
   let failed = false;
   fs.mkdirSync(GOLDEN, { recursive: true });

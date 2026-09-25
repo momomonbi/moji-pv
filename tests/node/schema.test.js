@@ -349,3 +349,10 @@ test('v2.1 describeAuto: object values show as the curve key or custom; media as
   assert.equal(S.describeAuto({ type: 'media', auto: { value: 'a3f9c2d17b0e4a5c6d7e8f901' } }, 'en'), 'photo or video');
   assert.equal(S.describeAuto({ type: 'partRefs', auto: { value: [] } }, 'en'), 'always none');
 });
+
+test('validateSpec: optKey names an enum\'s own label group (opt.<optKey>.<value>), and only on an enum', () => {
+  const enumSpec = { type: 'enum', of: ['auto', 'back'], optKey: 'depth', label: { ja: '奥行き', en: 'Depth' }, auto: { value: 'auto' } };
+  assert.deepEqual(S.validateSpec('depth', enumSpec), []);
+  assert.equal(S.validateSpec('depth', Object.assign({}, enumSpec, { optKey: 'Bad-Key' })).length, 1);
+  assert.equal(S.validateSpec('n', { type: 'num', min: 0, max: 1, optKey: 'x', label: { ja: 'x', en: 'x' }, auto: { value: 0 } }).length, 1);
+});

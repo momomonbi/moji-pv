@@ -1270,3 +1270,12 @@ test('v2.1 part browser マイ素材: materials of the kind, never the grounds d
   assert.deepEqual(PB.mineFor(reg, 'ornament', { run: true }), ['myMat2'], 'the atmosphere row: run ornaments only');
   assert.deepEqual(PB.mineFor({ keys: () => [], get: () => null }, 'ground', {}), [], 'a registry without materials');
 });
+
+test('an enum with optKey labels its options from its own key group (depth: back is 後ろに下げる, not 逆方向)', () => {
+  const reg = catalogRegistry();
+  const field = F.paramFields('ground', undefined, 'photoPan', reg).find((f) => f.param.name === 'depth');
+  assert.deepEqual(field.options.map((o) => o.label), ['opt.depth.auto', 'opt.depth.anim', 'opt.depth.front', 'opt.depth.back', 'opt.depth.still']);
+  const t = T.createT('ja', STRINGS);
+  const W = MV.use('ui/widgets');
+  assert.equal(W.optionText(t, field.options.find((o) => o.v === 'back')), '後ろに下げる');
+});

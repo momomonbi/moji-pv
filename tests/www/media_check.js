@@ -311,6 +311,36 @@
 
   function flip(bytes, at) { const c = Uint8Array.from(bytes); c[at] ^= 0x55; return c; }
 
+  // A frame of the preview with the document's photos and videos (DESIGN_2_1 §12.8): the preview engine forked with a real
+  // store over the device (ui/boot gives the preview engine its store in G.4), at the middle of the first lyric cut,
+  // redrawn until it is exact → { hash, media, provisional, t }.
+  async function previewFrame() {
+    const store = STORE.createMediaStore({ blobs: a.io.mediaBlobs, entries: (id) => a.doc.media.list.find((e) => e.id === id) || null });
+    const e = a.engine.fork({ assets: store });
+    try {
+      e.setDoc(a.doc);
+      const plan = e.plan;
+      const cut = plan.cuts.find((c) => c.role === 'lyric');
+      const t = (cut.a + cut.b) / 2;
+      const w = 640, h = Math.round((w * plan.design.h) / plan.design.w), scale = w / plan.design.w;
+      const canvas = new OffscreenCanvas(w, h);
+      const surf = { canvas, ctx: canvas.getContext('2d', { alpha: false }), w, h };
+      await e.mediaReady(t, { scale });
+      let st = e.renderFrame(surf, t, { quality: 'preview', scale });
+      for (let k = 0; st.provisional && k < 300; k++) {
+        await new Promise((r) => setTimeout(r, 10));
+        st = e.renderFrame(surf, t, { quality: 'preview', scale });
+      }
+      const d = surf.ctx.getImageData(0, 0, w, h).data;
+      let hash = 0x811c9dc5;
+      for (let i = 0; i < d.length; i++) { hash ^= d[i]; hash = Math.imul(hash, 0x01000193); }
+      return { hash: (hash >>> 0).toString(16).padStart(8, '0'), media: st.media.drawn, provisional: st.provisional, t };
+    } finally {
+      e.dispose();
+      store.dispose();
+    }
+  }
+
   async function entryRange(bytes, name) {
     const read = async (at, n) => bytes.subarray(at, at + n);
     const z = await U.openZip(read, bytes.length);
@@ -339,7 +369,12 @@
     const wavBytes = G.wav(2);
     await a.loadSong(new File([wavBytes], 'tone.wav', { type: 'audio/wav' }));
     await waitFor(() => a.doc.song && a.doc.song.sha1, 20000);
+    // the media in use: the WebM as the work background (with the song's clock), the PNG as a photo frame
+    const put = (path, v) => a.dispatch({ t: 'pin.set', path, v, by: 'user' }, { label: ['undo.typing', {}] });
+    put('work:ground', 'photoPan'); put('work:ground@photoPan.image', vw.id); put('work:ground@photoPan.clock', 'song');
+    put('work:ornament.count', 1); put('work:ornament#0', 'photoFrame'); put('work:ornament#0@photoFrame.src', png.id);
     await a.io.flush();
+    const frameBefore = await previewFrame();
     const ids = [png, vw, vm].map((e) => e && e.id);
     const song = a.doc.song ? Object.assign({}, a.doc.song) : null;
     const text0 = D.serialize({ doc: a.doc, side: a.store.side });
@@ -376,6 +411,7 @@
       relinked: await waitFor(() => a.bufferSha1 === song.sha1, 20000),
       thumbs: Object.keys((await idbMedia()).thumbs).length,
     };
+    out.open.frame = { before: frameBefore, after: await previewFrame() };
     out.opened = opened;
     // dedupe: open again; nothing but headers, the manifest and project.json is read
     const counted = countingFile(fileBytes, 'again.mojipv');

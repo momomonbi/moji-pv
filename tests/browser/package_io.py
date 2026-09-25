@@ -8,15 +8,16 @@ Checked:
   it) and a WAV song is saved as a package with a memory sink (downloaded) and with an OPFS file sink: the same bytes
   both ways, a store-only ZIP that Python's zipfile reads (mimetype first, at offset 38, entries in the FROZEN order,
   every CRC right), the manifest listing each asset and the song. Then clearDevice, then open: every asset back with
-  the same bytes, the document identical, the song stored again and re-linked (decoded) by the app.
+  the same bytes, the document identical, the song stored again and re-linked (decoded) by the app, and a frame of the
+  preview (the WebM as the background, the PNG in a photo frame; the preview engine forked with a real AssetStore, as
+  ui/boot will give it one in G.4) identical, pixel for pixel, to the same frame before the save.
 - Dedupe: opening it again reads no asset (a counting File.slice sees headers, the manifest and project.json only).
 - Corrupt: one flipped byte in the MP4 entry → the project opens, pkg.warn.damaged (n = 1), that asset missing, the
   others fine; a truncated file → pkg.err.truncated and the work untouched; a damaged project.json → refused; a plain ZIP
   or junk named .mojipv → pkg.err.notPackage.
 - Old files: a v2.0 .json (schema 1) opens; a v2.1 light .json whose assets are on this device links them.
 - Cancel mid-open leaves the work unchanged. 0 CSP violations.
-The check "a frame of the preview identical to before" is enabled in G.3, when the engine draws media (ui/boot wires
-the AssetStore in G.4). --long adds the 4.1 GiB sparse package (ZIP64) written to OPFS and read back (header checks).
+--long adds the 4.1 GiB sparse package (ZIP64) written to OPFS and read back (header checks).
 Run: PW_EXECUTABLE=/opt/pw-browsers/chromium python3 tests/browser/package_io.py   (CI: PW_CHANNEL=chrome)
 """
 import argparse
@@ -186,6 +187,10 @@ async def main(long_run):
                     await page.evaluate((ROOT / rel).read_text(encoding='utf-8'))
                 r = await page.evaluate('(o) => window.__packageIo(o)', {'schema1': schema1})
                 file_bytes = await page_bytes(page, '__pkgBytes')
+                for _ in range(100):             # the two downloads (package, light save) may be reported late on a busy machine
+                    if len(downloads) >= 2:
+                        break
+                    await page.wait_for_timeout(100)
                 saved = {}
                 for d in downloads:
                     saved[d.suggested_filename] = Path(await d.path()).read_bytes()
@@ -232,7 +237,10 @@ async def main(long_run):
     c.ok(old['v20doc']['rows'] > 0 and old['v20doc']['media'] == 0, 'a v2.0 .json (schema 1) opens, with an empty library (%r)' % old['v20doc'])
     c.ok(old['lightLinked'] == [True, True, True] and len(old['lightMedia']) == 3 and old['missingText'] not in old['lightToasts'],
          'a v2.1 light .json links the assets on this device (%r)' % old['lightToasts'])
-    print('SKIP  "a frame of the preview identical to before": enabled in G.3 (the engine draws media from then on)')
+    fr = o['frame']
+    c.ok(fr['before']['media'] >= 2 and not fr['before']['provisional'] and not fr['after']['provisional']
+         and fr['after']['hash'] == fr['before']['hash'],
+         'open: a frame of the preview with the media is identical to the one before the save (%r)' % fr)
     if long_run and long_result.get('skipped'):
         print('SKIP  the 4.1 GiB package: %s (it needs 8.5 GB of OPFS; ZIP64 sizes are also checked in Node with a fake 4.1 GiB Blob)'
               % long_result['skipped'])

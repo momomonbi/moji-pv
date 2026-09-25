@@ -557,7 +557,7 @@ MV.def('parts/kit', ['core/num', 'core/noise', 'core/ease', 'core/curve', 'core/
     const all = {
       [q.src || 'src']: { type: 'media', accept: ['image', 'video', 'any'].includes(q.accept) ? q.accept : 'any',
         label: L2('写真・動画', 'Photo or video'), auto: { value: '' } },
-      depth: { type: 'enum', of: MEDIA_KIT.DEPTHS.slice(), label: L2('動きと重なり', 'Motion and layering'), auto: { value: 'auto' } },
+      depth: { type: 'enum', of: MEDIA_KIT.DEPTHS.slice(), optKey: 'depth', label: L2('動きと重なり', 'Motion and layering'), auto: { value: 'auto' } },
       fit: { type: 'enum', of: MEDIA.FITS.slice(), label: L2('収め方', 'Fit'), auto: { value: 'cover' } },
       cropZoom: num(R0.cropZoom, 'x', L2('拡大', 'Zoom'), { value: 1 }),
       cropX: num(R0.cropX, 'frac', L2('中心 横', 'Focus X'), { value: 0.5 }, 'advanced'),

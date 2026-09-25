@@ -10,8 +10,9 @@ stub parts (tests/fixtures). Google Fonts are blocked, so fallback faces draw: t
 test stops at once with one message saying so (dev/browser.py japanese_font_missing).
 DESIGN_2_1 additions: every shot and rig preset of core/shot in every aspect, rendered in the canned cut at the same two
 times and as the picker thumbnail (engine.thumb), with the same checks; and the media mode: every part with a media
-param (the fake store's test parts, and the catalog's media parts once they exist) × every aspect × a still and a video
-fixture of tests/helpers/fake_media.js, in export quality (not blank, no errors, the medium drawn).
+param (the fake store's test parts, and the catalog's media parts: photoPan, photoFrame, textFill and mediaLayer, which
+must all be there) × every aspect × a still and a video fixture of tests/helpers/fake_media.js, in export quality (not
+blank, no errors, the medium drawn).
 Run: PW_EXECUTABLE=/opt/pw-browsers/chromium python3 tests/browser/parts_gallery.py [--parts examples] [--aspects 16:9,9:16]
 """
 import argparse
@@ -27,6 +28,7 @@ EPS = 1.0            # luminance variance (0..255 scale) below this counts as a 
 TIMES = (0.2, 0.7)
 WIDTH = 256
 MEDIA_ASSETS = ('fixture:jpeg', 'fixture:mp4')       # a still and a video; overlay footage takes the video only
+CATALOG_MEDIA = {('ground', 'photoPan'), ('ornament', 'photoFrame'), ('ornament', 'textFill'), ('ornament', 'mediaLayer')}
 
 # One in-page loop per registry: fewer round trips, same checks.
 RENDER_ALL = """
@@ -151,6 +153,9 @@ async def run(args):
                 found = media['parts'].get(src, [])
                 if not found:
                     failures.append('%s: no part with a media param (the fake store\'s test parts are missing)' % src)
+                missing = CATALOG_MEDIA - {(m['kind'], m['key']) for m in found} if src == 'catalog' else set()
+                if missing:
+                    failures.append('catalog: the media parts %s have no media param' % sorted(missing))
                 jobs = [{'kind': m['kind'], 'key': m['key'], 'aspect': aspect, 'asset': asset}
                         for m in found for aspect in aspects for asset in MEDIA_ASSETS
                         if m['accept'] != 'image' or asset != 'fixture:mp4'

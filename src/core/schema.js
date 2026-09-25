@@ -293,6 +293,9 @@ MV.def('core/schema', ['core/num', 'core/ease', 'core/color', 'core/curve', 'cor
     if (!(opts && opts.label === false) || spec.label !== undefined) checkLabel(spec.label, bad);
     if (spec.ui !== undefined && spec.ui !== 'basic' && spec.ui !== 'advanced') bad("ui must be 'basic' or 'advanced'");
     if (spec.ai !== undefined && typeof spec.ai !== 'boolean') bad('ai must be a boolean');
+    if (spec.optKey !== undefined && !(spec.type === 'enum' && /^[a-z][a-zA-Z0-9]*$/.test(spec.optKey))) {
+      bad('optKey is an identifier, and only for an enum');
+    }
     checkAuto(spec, bad);
     return errors;
   }

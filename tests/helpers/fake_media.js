@@ -255,4 +255,14 @@ function testParts(K) {
   ];
 }
 
-module.exports = { FIXTURES, EPS_MEDIA, metaOf, planMedia, fixture, sampleAt, createFakeMedia, testParts };
+// goldenDoc(doc) → the document of the media golden (tests/golden/project_media.json, DESIGN_2_1 §7.5 step (c)): the
+// v2.1 media fixture (tests/fixtures/project_media.json: a video background, a pooled still background on r3, a photo
+// frame on r2, a material with the MP4 on r5) plus a text fill on r5 (ornament#0, the alpha WebM), so the golden holds a
+// still background, a photoFrame, a textFill and a video background. A copy; the fixture itself is not changed.
+function goldenDoc(doc) {
+  const webm = FIXTURES.find((a) => a.name === 'webm').id;
+  const add = { 'line/r5:ornament#0': { v: 'textFill', by: 'user' }, 'line/r5:ornament#0@textFill.src': { v: webm, by: 'user' } };
+  return Object.assign({}, doc, { pins: Object.assign({}, doc.pins, add) });
+}
+
+module.exports = { FIXTURES, EPS_MEDIA, metaOf, planMedia, fixture, sampleAt, createFakeMedia, testParts, goldenDoc };

@@ -108,10 +108,12 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
     }
 
     // Choice options for a spec: [{ v, label | text | labelArgs }]. Option labels are string keys; values that are
-    // their own label (aspects, numbers) use `text`.
+    // their own label (aspects, numbers) use `text`. An enum whose values need their own words (depth's 'back' is not
+    // opt.back 逆方向) names a key group with `optKey`: its labels are opt.<optKey>.<value>.
     function optionsFor(spec) {
       switch (spec && spec.type) {
-        case 'enum': return spec.of.map((v) => (typeof v === 'number' ? { v, text: String(v) } : { v, label: 'opt.' + v, fallback: String(v) }));
+        case 'enum': return spec.of.map((v) => (typeof v === 'number' ? { v, text: String(v) }
+          : { v, label: 'opt.' + (spec.optKey ? spec.optKey + '.' : '') + v, fallback: String(v) }));
         case 'ease': return E.EASES.map((v) => easeOption(v));
         case 'curve': return Object.keys(CV.PRESETS).map((v) => ({ v, label: 'curve.' + v })).concat(E.EASES.map((v) => easeOption(v)));
         case 'shot': return ['none'].concat(SHOT.SHOT_KEYS).map((v) => ({ v, label: 'shot.' + v }));
