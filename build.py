@@ -258,9 +258,9 @@ class Module:
 def layer_of(mid):
     if mid.startswith('core/'):
         return 0
-    if mid.startswith('audio/host/'):
+    if mid.startswith(('audio/host/', 'media/host/')):
         return 6
-    if mid.startswith(('i18n/', 'engine/text/', 'audio/')):
+    if mid.startswith(('i18n/', 'engine/text/', 'audio/', 'media/')):
         return 1
     if mid.startswith('planner/'):
         return 2
@@ -278,7 +278,7 @@ def layer_of(mid):
 
 
 def l1_group(mid):
-    for g in ('i18n/', 'engine/text/', 'audio/'):
+    for g in ('i18n/', 'engine/text/', 'audio/', 'media/'):
         if mid.startswith(g):
             return g
     return None
@@ -298,6 +298,8 @@ def dependency_allowed(mid, dep):
     ls, ld = layer_of(mid), layer_of(dep)
     if dep.startswith('ui/') and ls != 7:
         return False, 'only ui/* may depend on ui/*'
+    if dep.startswith('media/') and mid.startswith('engine/'):
+        return False, 'the engine never depends on media/* (its media math is core/media)'
     if ls == 0:
         return ld == 0, 'L0 may depend only on L0'
     if ls == 1:

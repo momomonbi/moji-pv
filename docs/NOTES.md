@@ -4540,3 +4540,159 @@ Package E kept the vision `reason` on the review change only. §11.9.5 shows it 
 Tests: `media_core.test.js` (normalize and problems) and `ai_vision.test.js` (stored with the depth, dropped with an
 unknown depth, field order).
 
+## v2.1-G.1
+
+G.1 of DESIGN_2_1 §8.7: images and videos at runtime, and the single-file project package. Pure: `core/sha256` (L0),
+`media/sniff`, `media/isobmff`, `media/matroska`, `media/samples`, `media/palette` (L1), `export/unzip`,
+`export/package` (L5). Host: `media/host/probe`, `media/host/session`, `media/host/store` (L6). Changed:
+`export/zip` (`addBlob`, Blob parts, a faster CRC-32), `export/host/sink` (`write` takes a Blob), `ui/project_io`
+(IndexedDB v2, the device media store, pruning, the package save and open, routing by sniffing), `build.py` and
+`tests/build_test.py` (layers). H.1's four files (`export/webm`, `export/subtitles` and their tests) were checked out
+from the lead branch unchanged, as the lead asked (no merge).
+
+**What works now.** A photo, animation or video imports (sniff, SHA-256 + CRC-32 in one pass, probe, poster and
+12-tile filmstrip, IndexedDB) and is added to `doc.media`. The AssetStore gives frame-exact video frames (WebCodecs
+fed from our own sample tables) and still tiers; the engine does not draw media yet (B.3, G.3), and `ui/boot` passes
+`assets: null` until G.4 wires the store in. 保存 / 名前を付けて保存 write a `.mojipv` holding the project, every asset,
+the posters and the song; opening one restores all of it, the song included (it is stored again by its sha1, so
+`ui/boot` re-links it as usual).
+
+**Tests.** Node: `sha256`, `media_demux`, `media_samples`, `media_palette`, `unzip`, `package`, `zip` (+),
+`project_io_media` (new: the pure parts of the project_io additions). Browser: `media_import.py`, `package_io.py` (both
+in the built app page, under its CSP, through the app's own `ui/project_io`). Frame exactness is checked in G.1
+already, through the real AssetStore: every frame of the counter videos (VP9 WebM 30 and 60 fps, VP9 MP4 25 fps,
+VFR, rotated; H.264 where the browser encodes it), in order, shuffled, and in a software export fork, shows its own
+code. Mutation checks: 20 mutants across the pure modules and the build rules, and one of the store (it hands out the
+previous frame), all caught; two tests were strengthened on the way (the EPS rule is now tested directly, and pixels
+counting by their alpha in the palette).
+
+**Measured** (this machine: 4 shared CPUs, load 5–12; headless Chromium):
+- Hashing plus CRC-32 of a 64 MB file in the page: 127 MB/s through `crypto.subtle` (files ≤ 256 MB) and 109 MB/s
+  streaming (our SHA-256), under that load. CRC-32 alone went from 358 to 674 MB/s with slicing-by-8; our SHA-256
+  alone runs at ~120 MB/s in Node. The §11.5.12 "≥ 150 MB/s" row is plausible for files up to 256 MB on an idle
+  mid-range laptop, but the streaming path (> 256 MB) is bound by our SHA-256; see open items.
+- Exact frames through the store: 135 decodes (three passes of 45 frames, 192×108 VP9) in 170–220 ms, 270 at 60 fps
+  in about 410 ms, including every seek of the shuffled pass.
+
+### Decisions where the design was silent
+
+- **Committed fixtures without ffmpeg** (the constraint of this run): `tests/helpers/make_media_fixtures.js` writes
+  them byte by byte: ISO BMFF boxes, EBML elements and GIF blocks are real; codec payloads are placeholders except a
+  VP9 key frame's uncompressed header, and `anim.gif` is a real GIF (LZW data) that browsers decode. `MAKE.txt` holds
+  the generator line, the ffmpeg recipe each file could be replaced with, and the expected tables (computed by the
+  generator from what it wrote, not by the demuxer). `media_demux.test.js` rebuilds everything in memory and fails if a
+  committed byte differs. In the browser the placeholder clips are refused as `media.err.codec` (no decoder for the
+  codec here) or `media.err.broken` (a decoder, bad data); `media_import.py` asserts exactly that.
+  - Contents beyond §11.8.1's list: `bframes.mp4` also has an empty edit and one pre-roll frame; `frag.mp4` uses trun
+    version 1 with negative composition offsets; `rot90.mp4` uses `co64` and `colr nclx`; `clip.mov` has a `wide` box,
+    `colr nclc`, a constant `stsz` and a sound track; `laced.mkv` is H.264 + Opus with a last frame in a BlockGroup
+    with BlockDuration; `av1.webm` has a Segment and Clusters of unknown size.
+- **SampleTable.** `n` counts shown frames; the decode-order arrays may be longer (pre-roll: fed, never shown).
+  Equal presentation times get distinct chunk timestamps (+1 µs in presentation order), so decoder output always maps
+  back to one sample. The last frame's duration is its own sample duration, else the median. `vfr` ignores the last
+  frame and allows 1.5 ms or 5 % around the median (so 33/34 ms WebM steps are constant rate). `runFor` steps back one
+  GOP for a leading picture of an open GOP (shown before its key frame).
+- **MediaError** lives in `media/samples` (both demuxers and the host use it). Its codes are the §11.7.9 ones plus
+  `container` (§11.4.3 laced video, and Matroska content encodings), `tooBigVideo` (> 4 GB), `tooFast` (> 120 fps) and
+  `audioOnly` (a file with sound only: `ui/project_io` sends it to the song).
+- **Demuxers.** `Movie.warnings` is added (`rotation` for a matrix that is not a quarter turn; `codec:<fourcc>`).
+  VP8/VP9 tracks get no `description` (vpcC is not decoder input; the §11.4.3 wording lists it). ctts and trun
+  composition offsets are read signed in both versions, as writers use them. Matroska also accepts H.264 and HEVC
+  tracks (`V_MPEG4/ISO/AVC`, `V_MPEGH/ISO/HEVC`, CodecPrivate as description); any element that runs past the end of
+  the file is `broken` (a cut download), and `parse(…, { tracksOnly })` stops after Tracks for routing. The VP9 level
+  table goes to level 52 (4K60), one step past the §11.4.3 list.
+- **Matroska times (lead decision):** when a track has a DefaultDuration and every block time is within 0.5 ms of
+  i · DefaultDuration (i counted from the first frame, in presentation order), the frames start exactly there;
+  otherwise the stored milliseconds stay (VFR). Tested at 24, 29.97, 30 and 60 fps over 40 s of frames and on
+  `export/webm` output (no off-by-one), and on a VFR file (times kept).
+- **sniff** returns three more kinds for routing: `audio` (WAV, MP3, AAC, FLAC, Ogg, M4A), `package` (a ZIP whose
+  first entry is the package mimetype) and `zip`.
+- **Probe.** Posters are drawn upright (`rot` applied), WebP, 320 px on the long side; the filmstrip is one WebP sprite
+  of 12 tiles, 160 px on the long side each, key frames spread evenly (frames, for animations). The thumbs record is
+  `{ v: 1, poster, strip, tiles }` (tiles added). The mediaIndex track record holds codec, description, coded and
+  displayed size, rot, colour, alpha, audio, container and mime, so a stored video's entry is rebuilt without a second
+  scan. Import results carry `notes` (`animFirstFrame`, `alphaIgnored`, `bigFile`, `quota`, `memoryOnly`) and `crc`.
+  An SVG keeps its file name as the entry name; the stored bytes and mime are the PNG.
+- **AssetStore** (`createMediaStore`): it takes `entries(id)` (the document's metadata; w, h, kind and anim come from
+  it) besides the §11.3.5 options, and adds `check(ids)` (load presence so `has`/`info` answer at once) and
+  `forget(id)` (drop caches after a relink or a clear). `ready()` items may carry `{ px, blur }` for stills (see the
+  request to B). `MediaFrame.w`/`h` are the displayed size of the image returned (a tier, a poster, a video frame), and
+  posters and stills have `rot` 0. Blur is quantized to 0, 2, 4, … 128 device px; the crossfade between two levels is
+  left to the drawer. `fork()` prefers software decoders. A missing or failed asset gives `null` (the placeholder).
+- **Sessions.** Up to the target the queue holds 8 chunks; after the target, one chunk at a time once the decoder has
+  taken the previous ones, so frames after the target are not output (and closed) before they are asked for: with
+  HOLD = 3 an overshoot would force a seek. Frames at or after the frame being decoded are kept; `pin()` keeps an
+  export batch, `hint()` is the preview look-ahead. No decoder progress for 10 s counts as a decode error (the §11.4.4
+  retry rule then applies).
+- **project_io.** DB v2 adds `media`, `mediaIndex`, `thumbs`; `putMedia` returns `{ stored, reason }`, and a failure
+  (no IndexedDB, or `QuotaExceededError`) keeps the record in a per-tab Map. `persist()` is asked once, at the first
+  media put. Pruning keeps an asset used by a kept work, the current document or this tab's `usedMedia`. `clearDevice`
+  clears the three stores and the Map. `save()` follows the file handle's kind, `saveAs()` writes a package (the picker
+  offers the light .json second, and choosing it writes the light save), `saveLight()` is new; `fileState()` gives
+  the header tooltip data. `openFiles` routes by `routeOf` (text formats by extension, the rest by bytes, containers by
+  their tracks). Until G.4 sets `app.media.importFiles`, `openFiles` imports media itself (`importMedia`: one undo
+  step, `media.dup`, `media.full`, the `media.err.*` toasts). Opening a light .json or a package shows
+  `media.missingOpen` when assets are not on this device. A package's song is stored as a File named after
+  `doc.song.name`, so the existing relink path decodes it.
+- **Package.** `layout()` returns every entry in the FROZEN order (text entries carry their text), the manifest and
+  the exact file size (`archiveSize` mirrors `export/zip`). Thumbs are packed only for the media that are packed; the
+  song only when its sha1 is the document's and is 40 hex digits. `manifestProblems` returns `'code: detail'` strings
+  (`newer` → `pkg.err.newer`, others → `pkg.err.invalid`) and also checks file order and that project.json comes last.
+  `mimetypeProblem` checks the first entry by its CRC and size (plus a sniff of the first 64 bytes when opening).
+- **Unzip.** The end record is read from the last 22 bytes when there is no comment (so only headers are read), else
+  from the 65,557-byte tail. An unsafe name refuses the whole archive (`bad-entry` → `pkg.err.invalid`); bytes that are
+  no ZIP at all → `pkg.err.notPackage`; a cut file → `pkg.err.truncated`. `Entry.limit` (the directory start) is added.
+- **Memory sink** keeps Blob parts by reference and accepts them only as appends (overwriting inside a Blob part
+  throws; nothing writes that way).
+- **build.py**: besides the §11.3.1 rules, `engine/*` may not depend on `media/*` (the design says it never does).
+
+### Deviations (with reasons)
+
+- **Fixtures** are generated, not made with ffmpeg (no ffmpeg here; see above). The ffmpeg recipes are in MAKE.txt.
+- **`tests/browser/ui_flows.py`** (package F's file): its IndexedDB helper opened `mojipv-v2` at version 1, which throws
+  VersionError once G.1 upgrades the database to 2. One edit: it now opens the current version. No check changed.
+- **`package_io.py`**: "a frame of the preview identical to before" is skipped until G.3 (the engine draws no media
+  yet), as §8.7 says. The 4.1 GiB run (`--long`) needs 8.5 GB of OPFS; the local headless profile's quota is 969 MB,
+  so it reports a skip there. ZIP64 sizes are also checked in Node with a fake 4.1 GiB Blob (`zip`, `package` tests).
+- **No APNG / animated WebP is generated** in the browser (canvases cannot encode them); `anim.gif` covers animation
+  decoding, the ImageDecoder table and the store.
+- **Re-probing** (§11.2.9, `pv < PROBE_V`) is not implemented: PROBE_V is 1 and `entryProblems` refuses pv < 1, so no
+  entry can need it yet. It is one call to `importFile` on the stored blob when PROBE_V moves.
+- **The 80 % quota warning** and a package toast without a song have no string yet (below); `quotaNote()` exists, and a
+  package without a song reports with `io.saved`.
+
+### Requests to other packages
+
+- **B (B.3):** (1) `mediaAt` items for still nodes should carry `px` (the node's `want.px` at that output scale) and
+  `blur`, so `mediaReady` → `assets.ready()` decodes exactly the tier the export draw asks for; without them the store
+  decodes the largest tier any `frame()` asked for, else full size. (2) `MediaFrame.w`/`h` are the returned image's
+  displayed size: scale FitRect by `w / meta.w`. Posters and stills are upright (`rot` 0); video frames come in coded
+  orientation with the track's `rot`. (3) `frame()` returns `null` for a missing or failed asset (placeholder in the
+  preview; the export throws). (4) The store does not crossfade blur levels.
+- **G.4:** set `app.media.importFiles` (the §11.7.2 flow) — `project_io` defers to it; create the store in `ui/boot`
+  with `createMediaStore({ blobs: app.io.mediaBlobs, entries: (id) => entry of app.doc.media, canvas })` and call
+  `check(ids)` on load and `forget(id)` after a relink or clear; show `quotaNote(await io.storageInfo())`; progress
+  toasts from the `onProgress` of `savePackage`/`openPackage` (and an AbortController for [中止]); the header file
+  line from `io.fileState()`; ≡ › ファイル › 軽い保存 → `app.io.saveLight()`; the import notes as toasts.
+- **F:** the strings below; the one-line `ui_flows.py` edit above.
+- **H (H.2):** `sink.write` takes a Blob; `zip.addBlob(name, blob, { crc })`; a memory sink keeps Blob parts append-only.
+- **Lead:** `build.py` has the extra engine → media rule; DESIGN §11.4.3 could list VP9 level 52 and the Matroska
+  snap rule.
+
+### Strings wanted (key, ja, en)
+
+- `media.err.container`: 「この動画の入れ物（コンテナ）の形式には対応していません: {name}」 / "This video's container layout is not supported: {name}"
+- `media.err.tooBigVideo`: 「4GBより大きい動画は読めません」 / "Videos larger than 4 GB cannot be read"
+- `media.err.tooFast`: 「120fpsを超える動画は読めません」 / "Videos above 120 fps cannot be read"
+- `media.warn.storage`: 「この端末の保存容量の{p}%を使っています（{size}）。作品ファイルに保存してください」 / "{p}% of this device's storage is in use ({size}). Save a project file"
+- `io.savedWhatNoSong`: 「写真{p}・動画{v}」 / "{p} photos, {v} videos"
+- `media.note.animFirstFrame`: 「このブラウザではアニメの最初のコマだけを使います」 / "This browser uses only the first frame of the animation"
+- `media.note.alphaIgnored`: 「1920×1080 より大きい透明動画は、透明なしで再生します」 / "Transparent videos larger than 1920×1080 play without transparency"
+
+### Open items
+
+- The streaming hash path (files over 256 MB) runs at about 100–120 MB/s here, below the 150 MB/s row. A faster
+  streaming SHA-256 (unrolled rounds) would close it; `crypto.subtle` cannot stream, and a tree hash instead of the
+  plain SHA-256 would change the AssetId, which needs a D§9.4 decision.
+- H.264 counter videos and H.264 decoding are exercised only where the browser encodes H.264 (Chrome CI:
+  `MV_REQUIRE_H264=1` fails the run without it).

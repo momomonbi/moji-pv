@@ -1,4 +1,4 @@
-/* 文字PVメーカー v2 — original work. Store-only streaming ZIP writer (ZIP64 when needed) with a table-driven CRC-32 (§4.21). */
+/* 文字PVメーカー v2 — original work. Store-only streaming ZIP writer (ZIP64 when needed) with a table-driven CRC-32 (§4.21; Blob entries, DESIGN_2_1 §12.3). */
 MV.def('export/zip', [], () => {
   'use strict';
 
@@ -10,15 +10,19 @@ MV.def('export/zip', [], () => {
   const VERSION_ZIP64 = 45;            // 4.5: ZIP64 extensions
   const ZIP64_EXTRA = 0x0001;
 
-  const CRC_TABLE = (() => {
-    const table = new Uint32Array(256);
+  // Slicing-by-8 tables: CRC_TABLES[0] is the classic byte table, CRC_TABLES[k][n] the CRC of n followed by k zero bytes,
+  // so eight bytes are folded per step (the media store hashes whole videos at import, DESIGN_2_1 §11.4.13).
+  const CRC_TABLES = (() => {
+    const t = Array.from({ length: 8 }, () => new Uint32Array(256));
     for (let n = 0; n < 256; n++) {
       let c = n;
       for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
-      table[n] = c >>> 0;
+      t[0][n] = c >>> 0;
     }
-    return table;
+    for (let n = 0; n < 256; n++) for (let k = 1; k < 8; k++) t[k][n] = (t[k - 1][n] >>> 8) ^ t[0][t[k - 1][n] & 255];
+    return t;
   })();
+  const CRC_TABLE = CRC_TABLES[0];
 
   function zipError(code, message) {
     const e = new Error(message);
@@ -29,10 +33,25 @@ MV.def('export/zip', [], () => {
 
   // crc32(bytes, previous = 0) → uint32; pass the previous result to continue a running CRC over several buffers.
   function crc32(bytes, previous = 0) {
+    const [t0, t1, t2, t3, t4, t5, t6, t7] = CRC_TABLES;
     let c = (previous ^ MAX32) >>> 0;
-    for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 255] ^ (c >>> 8);
+    let i = 0;
+    const n = bytes.length, end8 = n - (n % 8);
+    for (; i < end8; i += 8) {
+      c ^= bytes[i] | (bytes[i + 1] << 8) | (bytes[i + 2] << 16) | (bytes[i + 3] << 24);
+      c = t7[c & 255] ^ t6[(c >>> 8) & 255] ^ t5[(c >>> 16) & 255] ^ t4[c >>> 24]
+        ^ t3[bytes[i + 4]] ^ t2[bytes[i + 5]] ^ t1[bytes[i + 6]] ^ t0[bytes[i + 7]];
+    }
+    for (; i < n; i++) c = CRC_TABLE[(c ^ bytes[i]) & 255] ^ (c >>> 8);
     return (c ^ MAX32) >>> 0;
   }
+
+  // A Blob (or File) without naming the global: pure code may run where Blob is not defined.
+  function isBlob(v) {
+    return !!v && typeof v === 'object' && typeof v.size === 'number' && typeof v.slice === 'function' && typeof v.arrayBuffer === 'function';
+  }
+
+  function sizeOf(part) { return part instanceof Uint8Array ? part.length : part.size; }
 
   function utf8(text) {
     const out = [];
@@ -159,10 +178,13 @@ MV.def('export/zip', [], () => {
     return bytes;
   }
 
-  // createZip(write, { date?, zip64? }) → { add(name, bytes), finish(), bytes, count }. `write(Uint8Array)` receives the
-  // archive in order (never seeks back): local header and data per entry, then the central directory. Entries are stored
-  // uncompressed (PNG data is already compressed). ZIP64 records are written when sizes, offsets or the entry count
-  // need them, or always with `zip64: true`. Calls are queued, so add() may be called without awaiting the previous one.
+  // createZip(write, { date?, zip64? }) → { add(name, bytes), addBlob(name, blob, { crc }), finish(), bytes, count }.
+  // `write(part)` receives the archive in order (never seeks back): local header and data per entry, then the central
+  // directory. A part is a Uint8Array, or the Blob given to addBlob, handed over as it is (a file sink streams it from
+  // disk; a memory sink keeps it by reference), so a large video never sits in JS memory. Entries are stored
+  // uncompressed (PNG and media data are already compressed). ZIP64 records are written when sizes, offsets or the entry
+  // count need them, or always with `zip64: true`. Calls are queued, so add() may be called without awaiting the
+  // previous one.
   function createZip(write, opts) {
     if (typeof write !== 'function') throw zipError('args', 'createZip: write must be a function');
     const o = opts || {};
@@ -174,9 +196,9 @@ MV.def('export/zip', [], () => {
     let closed = false;
     let chain = Promise.resolve();
 
-    async function put(bytes) {
-      await write(bytes);
-      offset += bytes.length;
+    async function put(part) {
+      await write(part);
+      offset += sizeOf(part);
     }
 
     function queue(job) {
@@ -185,18 +207,38 @@ MV.def('export/zip', [], () => {
       return run;
     }
 
-    function add(name, bytes) {
-      if (closed) return Promise.reject(zipError('closed', 'zip: add after finish'));
-      if (typeof name !== 'string' || !name || name.length > MAX16) return Promise.reject(zipError('name', 'zip: bad entry name'));
-      if (names.has(name)) return Promise.reject(zipError('duplicate', 'zip: duplicate entry ' + name));
-      if (!(bytes instanceof Uint8Array)) return Promise.reject(zipError('args', 'zip: entry data must be a Uint8Array'));
+    function refuse(name) {
+      if (closed) return zipError('closed', 'zip: add after finish');
+      if (typeof name !== 'string' || !name || name.length > MAX16) return zipError('name', 'zip: bad entry name');
+      if (names.has(name)) return zipError('duplicate', 'zip: duplicate entry ' + name);
+      return null;
+    }
+
+    function entryJob(name, data, crc) {
       names.add(name);
       return queue(async () => {
-        const entry = { name: utf8(name), crc: crc32(bytes), size: bytes.length, offset, zip64: force64 || bytes.length >= MAX32 };
+        const size = sizeOf(data);
+        const entry = { name: utf8(name), crc, size, offset, zip64: force64 || size >= MAX32 };
         await put(localHeader(entry, stamp));
-        await put(bytes);
+        await put(data);
         entries.push(entry);
       });
+    }
+
+    function add(name, bytes) {
+      const bad = refuse(name) || (bytes instanceof Uint8Array ? null : zipError('args', 'zip: entry data must be a Uint8Array'));
+      if (bad) return Promise.reject(bad);
+      return entryJob(name, bytes, crc32(bytes));
+    }
+
+    // addBlob(name, blob, { crc }): an entry whose CRC-32 is already known (the media store computes it at import,
+    // §11.2.7), so the Blob is never read here. The local header carries the CRC and size (ZIP64 at ≥ 4 GiB).
+    function addBlob(name, blob, opts) {
+      const crc = opts && opts.crc;
+      const bad = refuse(name) || (isBlob(blob) ? null : zipError('args', 'zip: addBlob needs a Blob'))
+        || (Number.isInteger(crc) && crc >= 0 && crc <= MAX32 ? null : zipError('args', 'zip: addBlob needs its crc (uint32)'));
+      if (bad) return Promise.reject(bad);
+      return entryJob(name, blob, crc >>> 0);
     }
 
     function finish() {
@@ -219,11 +261,12 @@ MV.def('export/zip', [], () => {
 
     return {
       add,
+      addBlob,
       finish,
       get bytes() { return offset; },
       get count() { return entries.length; },
     };
   }
 
-  return { SIG, crc32, createZip, utf8 };
+  return { SIG, crc32, createZip, utf8, isBlob };
 });

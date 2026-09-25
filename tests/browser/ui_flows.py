@@ -1431,7 +1431,7 @@ IO_JS = r"""
   };
   window.__project = (rows, name) => new File([window.__projectText(rows)], name || 'project.json', { type: 'application/json' });
   window.__idb = async () => {
-    const db = await new Promise((res, rej) => { const r = indexedDB.open('mojipv-v2', 1); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+    const db = await new Promise((res, rej) => { const r = indexedDB.open('mojipv-v2'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
     const get = (store, how) => new Promise((res) => { const q = db.transaction(store).objectStore(store)[how](); q.onsuccess = () => res(q.result); });
     const works = await get('works', 'getAll');
     const songs = await get('songs', 'getAllKeys');

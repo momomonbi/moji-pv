@@ -99,6 +99,11 @@ test('crc32: standard vectors and running CRCs', () => {
     const s = rng.stream('crc', 4);
     const data = Uint8Array.from({ length: 10000 }, () => s.int(0, 255));
     assert.equal(Z.crc32(data), zlib.crc32(data), 'same as zlib');
+    // every length around the 8-byte steps, at an odd offset, and a running CRC split at odd places
+    for (let n = 0; n <= 40; n++) assert.equal(Z.crc32(data.subarray(3, 3 + n)), zlib.crc32(data.subarray(3, 3 + n)), 'length ' + n);
+    let run = 0;
+    for (let at = 0; at < data.length; at += 997) run = Z.crc32(data.subarray(at, at + 997), run);
+    assert.equal(run, zlib.crc32(data), 'a running CRC over 997-byte pieces');
   }
 });
 
@@ -207,4 +212,88 @@ test('zip: errors — duplicate names, bad data, add after finish, finish twice,
   assert.throws(() => Z.createZip(null), (e) => e.code === 'args');
   const broken = Z.createZip(async () => { throw new Error('disk full'); });
   await assert.rejects(broken.add('a', bytesOf('1')), /disk full/);
+});
+
+// --- Blob entries (DESIGN_2_1 §12.3, §12.8 zip.test.js) ----------------------------------------------------------------
+
+// A writer that keeps every part as it is given (Uint8Array or Blob), like the memory sink, and can assemble them.
+function partCollector() {
+  const parts = [];
+  return {
+    parts,
+    write: async (part) => { parts.push(part); await new Promise((r) => setImmediate(r)); },
+    bytes: async () => {
+      const chunks = [];
+      for (const p of parts) chunks.push(p instanceof Uint8Array ? p : new Uint8Array(await p.arrayBuffer()));
+      return Uint8Array.from(Buffer.concat(chunks));
+    },
+  };
+}
+
+test('zip.addBlob: a Blob entry gives the same bytes as add() with the same data, and write() receives the Blob itself', async () => {
+  const s = rng.stream('zipblob', 1);
+  const data = Uint8Array.from({ length: 5000 }, () => s.int(0, 255));
+  for (const zip64 of [false, true]) {
+    const a = collector();
+    const za = Z.createZip(a.write, { zip64 });
+    await za.add('mimetype', bytesOf('application/vnd.mojipv+zip'));
+    await za.add('media/a.png', data);
+    await za.add('project.json', bytesOf('{}'));
+    await za.finish();
+    const b = partCollector();
+    const zb = Z.createZip(b.write, { zip64 });
+    const blob = new Blob([data.subarray(0, 1000), data.subarray(1000)], { type: 'image/png' });
+    const pending = [zb.add('mimetype', bytesOf('application/vnd.mojipv+zip')), zb.addBlob('media/a.png', blob, { crc: Z.crc32(data) }),
+      zb.add('project.json', bytesOf('{}'))];                      // queued without awaiting, like add()
+    await Promise.all(pending);
+    const done = await zb.finish();
+    assert.ok(b.parts.includes(blob), 'the Blob is handed to write() as it is');
+    assert.equal(b.parts.filter((p) => !(p instanceof Uint8Array)).length, 1, 'only the entry data is a Blob');
+    const bytes = await b.bytes();
+    assert.deepEqual(Buffer.from(bytes), Buffer.from(a.bytes()), 'zip64 ' + zip64 + ': byte-identical archives');
+    assert.equal(done.bytes, bytes.length, 'offsets advance by blob.size');
+    const read = readZip(bytes);
+    assert.equal(read.zip64, zip64);
+    assert.deepEqual(Buffer.from(read.entries[1].data), Buffer.from(data));
+    assert.equal(read.entries[1].crc, Z.crc32(data));
+  }
+});
+
+test('zip.addBlob: a Blob of 4 GiB or more gets ZIP64 sizes in its local header and the directory', async () => {
+  const huge = 4 * 1024 * 1024 * 1024 + 17;
+  const fake = { size: huge, slice() { throw new Error('never read'); }, arrayBuffer() { throw new Error('never read'); } };
+  const parts = [];
+  const zip = Z.createZip(async (p) => { parts.push(p); });
+  await zip.add('mimetype', bytesOf('x'));
+  await zip.addBlob('media/big.mp4', fake, { crc: 0xdeadbeef });
+  const done = await zip.finish();
+  assert.equal(done.zip64, true, 'the central directory starts beyond 4 GiB');
+  assert.equal(done.bytes, parts.reduce((n, p) => n + (p instanceof Uint8Array ? p.length : p.size), 0));
+  const local = parts[2];
+  const v = new DataView(local.buffer, local.byteOffset, local.byteLength);
+  assert.equal(v.getUint32(0, true), Z.SIG.local);
+  assert.equal(v.getUint32(14, true), 0xdeadbeef, 'the given CRC');
+  assert.equal(v.getUint32(18, true), 0xffffffff, 'sizes moved to the ZIP64 extra field');
+  const at = 30 + 'media/big.mp4'.length;
+  assert.equal(v.getUint16(at, true), 1);
+  assert.equal(u64(v, at + 4), huge);
+  assert.equal(parts[3], fake, 'the entry data is the Blob');
+  const central = parts[5];                                  // after the mimetype entry's central header
+  const cv = new DataView(central.buffer, central.byteOffset, central.byteLength);
+  assert.equal(cv.getUint32(0, true), Z.SIG.central);
+  assert.equal(cv.getUint32(20, true), 0xffffffff);
+});
+
+test('zip.addBlob: refusals — no CRC, not a Blob, a duplicate name, after finish', async () => {
+  const zip = Z.createZip(partCollector().write);
+  const blob = new Blob([bytesOf('abc')]);
+  await assert.rejects(zip.addBlob('a', blob), (e) => e.code === 'args');
+  await assert.rejects(zip.addBlob('a', blob, { crc: -1 }), (e) => e.code === 'args');
+  await assert.rejects(zip.addBlob('a', bytesOf('abc'), { crc: 1 }), (e) => e.code === 'args');
+  await zip.addBlob('a', blob, { crc: Z.crc32(bytesOf('abc')) });
+  await assert.rejects(zip.addBlob('a', blob, { crc: 1 }), (e) => e.code === 'duplicate');
+  await zip.finish();
+  await assert.rejects(zip.addBlob('b', blob, { crc: 1 }), (e) => e.code === 'closed');
+  assert.equal(Z.isBlob(blob), true);
+  assert.equal(Z.isBlob(bytesOf('x')), false);
 });

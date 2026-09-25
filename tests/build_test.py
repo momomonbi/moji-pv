@@ -310,6 +310,40 @@ class Check(unittest.TestCase):
                    'part files may depend only on parts/kit')
         self.check({'engine/facade.js': module('engine/facade', ['parts/mix']), 'parts/mix.js': module('parts/mix')}, ok=True)
 
+    def test_media_layers(self):
+        # DESIGN_2_1 §11.3.1: media/* is L1 (core/* and media/* only; pure); media/host/* is L6; the engine never uses media/*.
+        media = {'core/a.js': module('core/a'), 'media/samples.js': module('media/samples', ['core/a']),
+                 'media/isobmff.js': module('media/isobmff', ['core/a', 'media/samples']),
+                 'media/host/probe.js': module('media/host/probe', ['media/isobmff', 'export/unzip', 'core/a'],
+                                               body='  function f() { return document.createElement("canvas").getContext("2d").getImageData(0, 0, 1, 1); }\n  return { f };'),
+                 'export/unzip.js': module('export/unzip', ['core/a']),
+                 'ui/x.js': module('ui/x', ['media/host/probe', 'media/samples'])}
+        self.check(media, ok=True)
+        cases = [
+            ({'media/sniff.js': module('media/sniff', ['i18n/b']), 'i18n/b.js': module('i18n/b')}, r'layer: media/sniff → i18n/b'),
+            ({'media/sniff.js': module('media/sniff', ['audio/d']), 'audio/d.js': module('audio/d')}, r'layer: media/sniff → audio/d'),
+            ({'media/sniff.js': module('media/sniff', ['media/host/probe']), 'media/host/probe.js': module('media/host/probe')},
+             r'layer: media/sniff → media/host/probe'),
+            ({'audio/d.js': module('audio/d', ['media/sniff']), 'media/sniff.js': module('media/sniff')}, r'layer: audio/d → media/sniff'),
+            ({'export/package.js': module('export/package', ['media/host/store']), 'media/host/store.js': module('media/host/store')},
+             r'layer: export/package → media/host/store'),
+            ({'engine/render/shapes.js': module('engine/render/shapes', ['media/samples']), 'media/samples.js': module('media/samples')},
+             r'layer: engine/render/shapes → media/samples \(the engine never depends on media'),
+            ({'engine/facade.js': module('engine/facade', ['media/samples']), 'media/samples.js': module('media/samples')},
+             r'layer: engine/facade → media/samples'),
+            ({'media/host/store.js': module('media/host/store', ['ui/dom']), 'ui/dom.js': module('ui/dom')},
+             'only ui/\\* may depend on ui/\\*'),
+            ({'media/palette.js': module('media/palette', body='  const r = () => Math.random();\n  return { r };')},
+             r'src/media/palette\.js:4: lint Math\.random \(L0–L5\)'),
+            ({'media/sniff.js': module('media/sniff', body='  const f = () => document.title;\n  return { f };')},
+             r'src/media/sniff\.js:4: lint document \(L0–L5\)'),
+            ({'media/samples.js': module('media/samples', body='  const f = (g) => setTimeout(g, 1);\n  return { f };')},
+             r'lint setTimeout \(L0–L5\)'),
+        ]
+        for files, fragment in cases:
+            with self.subTest(fragment=fragment):
+                self.check(files, fragment)
+
     def test_part_file_rules(self):
         kit = module('parts/kit')
 

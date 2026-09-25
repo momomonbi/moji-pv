@@ -11,8 +11,11 @@ MV.def('export/host/sink', ['export/schedule'], (S) => {
     return err && err.code === 'sink' ? err : new S.ExportError('sink', 'writing the file failed: ' + (err && err.message), err);
   }
 
-  // Sink = { kind: 'file' | 'memory', name, bytes, write(bytes, position?), close() → { bytes, blob? }, abort() }
+  // Sink = { kind: 'file' | 'memory', name, bytes, write(part, position?), close() → { bytes, blob? }, abort() }
   // write() without a position appends; with one it writes there (the MP4 stream target patches earlier bytes).
+  // A part is a Uint8Array or a Blob (DESIGN_2_1 §12.3: package entries stream from IndexedDB's backing store).
+
+  function partSize(part) { return part instanceof Uint8Array ? part.byteLength : part.size; }
 
   // createFileSink(fileHandle): streams into the file through createWritable(); abort() discards the written data and
   // removes the file the save dialog created, so a cancelled export leaves nothing behind. States: open → closing →
@@ -35,11 +38,11 @@ MV.def('export/host/sink', ['export/schedule'], (S) => {
         if (state !== 'open') throw new S.ExportError('sink', 'file sink is ' + state);
         const at = position === undefined ? size : position;
         try {
-          await (await open()).write({ type: 'write', position: at, data: bytes });
+          await (await open()).write({ type: 'write', position: at, data: bytes });   // a Blob streams from its source
         } catch (err) {
           throw sinkError(err);
         }
-        size = Math.max(size, at + bytes.byteLength);
+        size = Math.max(size, at + partSize(bytes));
       },
       async close() {
         if (state !== 'open') throw new S.ExportError('sink', 'file sink is ' + state);
@@ -63,7 +66,9 @@ MV.def('export/host/sink', ['export/schedule'], (S) => {
     };
   }
 
-  // createMemorySink(): keeps the written pieces (no copy for appends) and builds a Blob on close().
+  // createMemorySink(): keeps the written pieces (no copy for appends; a Blob by reference) and builds a Blob on close()
+  // from them, so a package of large media is assembled without copying. A Blob can only be appended: a positional
+  // write that would change bytes inside a Blob piece throws (nothing writes that way: the ZIP writer only appends).
   function createMemorySink(opts) {
     const type = (opts && opts.type) || 'application/octet-stream';
     let pieces = [];                                  // [{ at, bytes }] in file order, never overlapping
@@ -73,8 +78,10 @@ MV.def('export/host/sink', ['export/schedule'], (S) => {
     function patch(at, bytes) {
       for (const piece of pieces) {
         const from = Math.max(at, piece.at);
-        const to = Math.min(at + bytes.byteLength, piece.at + piece.bytes.byteLength);
-        if (from < to) piece.bytes.set(bytes.subarray(from - at, to - at), from - piece.at);
+        const to = Math.min(at + bytes.byteLength, piece.at + partSize(piece.bytes));
+        if (from >= to) continue;
+        if (!(piece.bytes instanceof Uint8Array)) throw new S.ExportError('sink', 'memory sink: cannot overwrite a Blob part');
+        piece.bytes.set(bytes.subarray(from - at, to - at), from - piece.at);
       }
     }
 
@@ -88,6 +95,12 @@ MV.def('export/host/sink', ['export/schedule'], (S) => {
         if (at > size) {
           pieces.push({ at: size, bytes: new Uint8Array(at - size) });
           size = at;
+        }
+        if (!(bytes instanceof Uint8Array)) {
+          if (at < size && bytes.size > 0) throw new S.ExportError('sink', 'memory sink: a Blob part can only be appended');
+          pieces.push({ at: size, bytes });
+          size += bytes.size;
+          return;
         }
         const inside = Math.min(bytes.byteLength, size - at);
         if (inside > 0) patch(at, bytes.subarray(0, inside));
