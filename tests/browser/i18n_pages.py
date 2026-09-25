@@ -3,7 +3,9 @@
 
 Both built pages are opened from a local http.server and walked through the screens a user meets: the empty first run,
 lyrics in, the four steps (④ with 詳しく open), 詳細 at every level (作品全体 → 行 → カット → 要素), the part browser, the
-AI tab, the timeline drawer, the ≡ menu, the command palette, the shortcut sheet, the syntax help and the About page.
+AI tab, the timeline drawer, the ≡ menu, the command palette, the shortcut sheet, the syntax help and the About page;
+v2.1 adds the area page, the curve widget, マイ素材 (list, page, the 「AIで作る」 form), the keyframe editor, the AI area list
+and the board (a material's name is user data: the en page shows its English name).
 On every screen the visible text and the accessible names (aria-label, title, placeholder, alt) are read and checked:
 
   en page   no Japanese text (kana or kanji) outside the product name 文字PVメーカー and user data (the lyrics here are
@@ -198,6 +200,60 @@ async def screen(walk, name, table, families):
         await walk.page.screenshot(path=str(Path(walk.shots) / ('i18n_%s_%02d_%s.png' % (walk.lang, walk.screens, name))))
 
 
+# v2.1 (package F, DESIGN_2_1 §7.4): the new screens. A material with a name in both languages (user data: the en page
+# shows its English name), a ramp curve and a custom shot on line 1, then: the area page of # Chorus, the 緩急 row with
+# かんたん, the keyframe editor, 全体 › マイ素材 and the material page, 入り › マイ素材 with the 「AIで作る」 form, the AI
+# tab's area list and the board.
+V21_SETUP = """() => { const a = window.__mv, id = a.plan.lines[0].id;
+  a.batch({ label: ['undo.paste', {}] }, [
+    { t: 'material.put', id: 'm' + a.doc.materials.next.toString(36), kind: 'ornament', by: 'ai', name: { ja: '桜吹雪', en: 'Cherry flurry' },
+      blurb: { ja: '花びらが舞う', en: 'Petals drift' }, tags: ['soft'], season: 'spring', pool: false,
+      recipe: { scope: 'run', knobs: [{ what: 'count' }], layers: [{ prim: 'particles', shape: 'petal', count: 40, inks: ['accent'] }] } },
+    { t: 'pin.set', path: 'line/' + id + ':arrive.ease', v: { ramp: { edge: 0.1, ends: 'both', peak: 6 } }, by: 'user' }]);
+  return id; }"""
+
+
+async def v21_screens(w, table, families):
+    page = w.page
+    lid = await w.run(V21_SETUP)
+    await w.act('panel.details')
+    await w.run("""() => { const a = window.__mv, AR = MV.use('planner/areas'), S = MV.use('ui/selection');
+      const heads = AR.areasOf(a.doc, a.plan).heads; a.select(S.areaSel(heads[heads.length - 1]), { from: 'crumbs', open: true }); }""")
+    await screen(w, 'v21-area', table, families)
+    await w.run("(id) => window.__mv.select({ level: 'line', ids: [id] }, { from: 'crumbs', open: true })", lid)
+    await w.settle(4)
+    await w.run("() => { const r = document.querySelector('.frow[data-slot=\"arrive.ease\"]'); if (r) r.scrollIntoView({ block: 'center' }); }")
+    await screen(w, 'v21-curve', table, families)
+    await page.click('[data-mount="inspector"] .frow[data-slot="arrive"] .w-part')
+    await page.wait_for_function("() => !!document.querySelector('.pb-tabs [data-tab=\"mine\"]')")
+    await page.click('.pb-tabs [data-tab="mine"]')
+    await page.click('.pb-tile.pb-make')
+    await screen(w, 'v21-mine-make', table, families)
+    await w.escape()
+    await w.run("() => { const a = window.__mv; a.select({ level: 'el', scope: 'cut/' + a.plan.lines[0].cuts[0], el: 'lens' }, { from: 'crumbs', open: true }); }")
+    await w.settle(4)
+    await screen(w, 'v21-camera', table, families)
+    await page.click('[data-custom="camKeys"] button')
+    await page.wait_for_function("() => document.querySelectorAll('.ke-page .ke-row').length > 1")
+    await screen(w, 'v21-keyframes', table, families)
+    await w.escape()
+    await w.run("() => window.__mv.select({ level: 'work' }, { from: 'crumbs', open: true })")
+    await w.settle(4)
+    await w.run("() => window.__mv.inspector.openSection('materials')")
+    await screen(w, 'v21-materials', table, families)
+    await page.click('.mat-row .insp-item')
+    await page.wait_for_function("() => !!document.querySelector('.mat-page .mat-name')")
+    await screen(w, 'v21-material-page', table, families)
+    await w.escape()
+    await w.act('panel.ai')
+    await page.click('.ai-direct [data-target="area"]')
+    await screen(w, 'v21-ai-areas', table, families)
+    await page.click('.ai-board-link')
+    await page.wait_for_function("() => !!document.querySelector('.ai-board .ai-board-row')")
+    await screen(w, 'v21-board', table, families)
+    await w.act('panel.close')
+
+
 async def walk_page(browser, base, lang, shots):
     page = await new_page(browser, viewport={'width': 1440, 'height': 900})
     await page.add_init_script(INSTALL_KEY_LOG)
@@ -274,6 +330,7 @@ async def walk_page(browser, base, lang, shots):
     await w.act('help.about')
     await screen(w, 'about', table, families)
     await w.escape()
+    await v21_screens(w, table, families)
 
     used = await w.run('() => [...window.__i18nUsed]')
     for key in sorted(used):

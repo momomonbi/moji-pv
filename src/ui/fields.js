@@ -19,7 +19,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
     const LINE = Object.freeze(['line']);
     const CUT = Object.freeze(['cut']);
     const WIDGETS = Object.freeze(['part', 'choice', 'number', 'time', 'color', 'font', 'toggle', 'words', 'cutpoints',
-      'text', 'slots']);
+      'text', 'slots', 'curve', 'shot', 'rig', 'partRefs']);
     const FACE_ROLES = Object.freeze(['display', 'serif', 'body']);
     const FACE_SCRIPTS = Object.freeze(['ja', 'latin', 'ko', 'zhHant', 'zhHans']);
     const LIST_KINDS = Object.freeze(['ornament', 'filter']);
@@ -34,9 +34,13 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
 
     // --- the slot catalogue (§3.4.1–§3.4.3): which scopes a slot is valid at --------------------------------------
 
-    const WORK_NAMES = new Set(['mood', 'theme', 'season', 'bpm', 'beatOffset', 'readRate', 'length', 'titleCard']);
-    const LINE_NAMES = new Set(['start', 'end', 'split', 'lang']);
-    const CUT_NAMES = new Set(['orient', 'text.face', 'text.scale', 'text.ink', 'text.style']);
+    const WORK_NAMES = new Set(['mood', 'theme', 'bpm', 'beatOffset', 'readRate', 'length', 'titleCard']);
+    const LINE_NAMES = new Set(['start', 'end', 'split', 'lang', 'avoid']);
+    // v2.1 (DESIGN_2_1 §2.3): camerawork, motion speed and the section camera cascade cut > line > work; the line season
+    // is a line value that may also be pinned for the whole video (the existing work:season).
+    const CUT_NAMES = new Set(['orient', 'text.face', 'text.scale', 'text.ink', 'text.style', 'motion.speed', 'cam.shot',
+      'cam.zoom', 'cam.curve', 'cam.follow', 'rig', 'rig.curve']);
+    const LINE_WORK_NAMES = new Set(['season']);
 
     function sharedNames(kind) {
       if (kind === 'atmos') return ['amount'];
@@ -61,6 +65,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
       if (parsed.el) return ALL.slice();
       if (parsed.name !== null) {
         if (workName(slot)) return WORK.slice();
+        if (LINE_WORK_NAMES.has(slot)) return ['work', 'line'];
         if (LINE_NAMES.has(slot)) return LINE.slice();
         if (slot === 't0') return CUT.slice();
         return CUT_NAMES.has(slot) ? ALL.slice() : [];
@@ -87,10 +92,14 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
       switch (spec && spec.type) {
         case 'num': case 'int': return 'number';
         case 'bool': return 'toggle';
-        // v2.1 one-time compatibility (DESIGN_2_1 §8.1) until the curve, shot, rig, partRefs and media widgets land:
-        // curves, shots and rigs are choices of their presets; partRefs and media fall back to plain text.
-        case 'enum': case 'ease': case 'curve': case 'shot': case 'rig': case 'order': case 'face': return 'choice';
-        case 'partRefs': case 'media': return 'text';
+        case 'enum': case 'ease': case 'order': case 'face': return 'choice';
+        // v2.1 (DESIGN_2_1 §3.14): the curve widget (ui/curve_widget), shot tiles, the section-camera select and part
+        // chips. `media` stays plain text until its widget lands (package G).
+        case 'curve': return 'curve';
+        case 'shot': return 'shot';
+        case 'rig': return 'rig';
+        case 'partRefs': return 'partRefs';
+        case 'media': return 'text';
         case 'ink': case 'color': return 'color';
         case 'text': return 'text';
         case 'nudge': return 'number';
@@ -146,6 +155,14 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
       nudge: { type: 'nudge' },
       text: { type: 'text', max: 200 },
       family: { type: 'text', max: 80 },
+      // v2.1 cut slots (DESIGN_2_1 §2.3, planner/camera.SLOT_SPECS): shown ×100 as percentages.
+      speed: { type: 'num', min: 0.25, max: 4, step: 0.05, unit: 'pct' },
+      camZoom: { type: 'num', min: 0.5, max: 2, step: 0.01, unit: 'pct' },
+      follow: { type: 'num', min: 0, max: 1, step: 0.01, unit: 'pct' },
+      curve: { type: 'curve' },
+      shot: { type: 'shot' },
+      rig: { type: 'rig' },
+      partRefs: { type: 'partRefs' },
     };
 
     // Shared-parameter rows written out by name (the line page lists them, §6.4.6).
@@ -196,6 +213,18 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
     const isInnerCut = (ctx) => !!(ctx.cut && ctx.cut.line && P.cutOffset(ctx.cut.key) > 0);
     const isRole = (role) => (ctx) => !!(ctx.cut && ctx.cut.role === role);
 
+    // v2.1 rows (DESIGN_2_1 §6.5): motion speed, camerawork and its closeness / curve / follow, the section camera.
+    const speedField = () => F({ path: 'motion.speed', widget: 'number', label: 'fld.motionSpeed', spec: SPEC.speed, scale: 100 });
+    const shotField = () => F({ path: 'cam.shot', widget: 'shot', label: 'fld.camShot', spec: SPEC.shot, kind: 'shot' });
+    const rigFields = () => [
+      F({ path: 'rig', widget: 'rig', label: 'fld.rig', spec: SPEC.rig, auto: true, select: true }),
+      F({ path: 'rig.curve', widget: 'curve', label: 'fld.rigCurve', spec: SPEC.curve }),
+    ];
+    const lineSeasonField = () => F({ path: 'season', scopes: LINE, widget: 'choice', label: 'fld.lineSeason', spec: enumSpec(SEASONS),
+      options: opts(SEASONS, 'fld.season.'), auto: true, select: true, basic: false });
+    const avoidField = () => F({ path: 'avoid', scopes: LINE, widget: 'partRefs', label: 'fld.avoid', spec: SPEC.partRefs, basic: false });
+    const hasArea = (ctx) => !!ctx.area;
+
     // --- pages ----------------------------------------------------------------------------------------------------
 
     const PAGES = {
@@ -245,6 +274,8 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
         sec('other', false, [
           F({ cmd: { t: 'look.seed', key: 'seed' }, scopes: WORK, widget: 'number', label: 'fld.seed', spec: SPEC.seed }),
         ], { custom: 'other' }),
+        // マイ素材 (DESIGN_2_1 §6.9): collapsed, and only when the project has materials.
+        sec('materials', false, [], { custom: 'materials', when: (ctx) => ctx.materials > 0 }),
       ],
       line: [
         sec('time', true, [
@@ -269,6 +300,8 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
       lines: [
         sec('multi', true, [], { custom: 'multi' }),
         sec('direction', true, directionFields()),
+        // An area selection (区画, DESIGN_2_1 §6.5) adds its section camera; its runs are split at the area's edges.
+        sec('rig', true, rigFields(), { when: hasArea }),
         sec('colortype', false, [textFaceField(), textInkField(), textStyleField(), textScaleField()]),
         sec('shift', true, [], { custom: 'shift' }),
       ],
@@ -288,9 +321,11 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
         ]),
         sec('layout', true, [partField('arrange', 'kind.arrange'),
           F({ path: 'el.text.nudge', widget: 'number', label: 'fld.nudge', spec: SPEC.nudge }), textScaleField()]),
-        sec('motion', true, [partField('arrive', 'kind.arrive'), partField('dwell', 'kind.dwell'), partField('depart', 'kind.depart')]),
+        sec('motion', true, [partField('arrive', 'kind.arrive'), partField('dwell', 'kind.dwell'), partField('depart', 'kind.depart'),
+          speedField()]),
         sec('seam', true, [partField('seam', 'kind.seam')]),
         sec('elements', true, [], { custom: 'elements' }),
+        sec('ai', false, [], { custom: 'ai', when: (ctx) => !!(ctx.cut && ctx.cut.line) }),
       ],
       'el.text': [
         sec('text', true, [textFaceField(), textScaleField(), textInkField(),
@@ -309,7 +344,16 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
         sec('ground', true, [partField('ground', 'kind.ground')], { custom: 'groundRun' }),
         sec('atmos', true, [partField('atmos', 'fld.atmos', { noneOk: true, partKind: 'ornament', run: true })]),
       ],
-      'el.lens': [sec('lens', true, [partField('lens', 'fld.lensMove')])],
+      // 要素 › カメラ (DESIGN_2_1 §6.5): the shot of the cut, the lens texture, and the section camera of the run.
+      'el.lens': [
+        sec('camwork', true, [shotField(),
+          F({ path: 'cam.zoom', widget: 'number', label: 'fld.camZoom', spec: SPEC.camZoom, scale: 100 }),
+          F({ path: 'cam.curve', widget: 'curve', label: 'fld.camCurve', spec: SPEC.curve }),
+          F({ path: 'cam.follow', widget: 'number', label: 'fld.camFollow', spec: SPEC.follow, scale: 100, basic: false }),
+        ], { custom: 'camKeys' }),
+        sec('camtexture', true, [partField('lens', 'fld.lensMove'), sharedField('lens', 'curve', 'fld.lensCurve', { basic: false })]),
+        sec('rig', false, rigFields(), { custom: 'rigRun', customTop: true }),
+      ],
       'el.filter': [
         sec('list', true, [F({ path: 'filter.count', widget: 'number', label: 'fld.count', spec: SPEC.count }),
           F({ key: 'filter.list', derived: 'slots', widget: 'slots', label: 'fld.slots', kind: 'filter' })], { custom: 'backdropNote' }),
@@ -322,17 +366,22 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
       'el.seam': [sec('seam', true, [partField('seam', 'kind.seam', { scopes: CUT })])],
     };
 
+    // 行 › 演出 (§6.4.6; DESIGN_2_1 §6.5): 緩急 after 入り and 抜け (the curve widget), 動きの速さ, カメラワーク; advanced:
+    // 出方の緩急, この行の季節, この行で使わない部品.
     function directionFields() {
       return [
         partField('arrange', 'kind.arrange'),
         partField('arrive', 'kind.arrive'),
-        sharedField('arrive', 'dur', 'fld.dur'), sharedField('arrive', 'ease', 'fld.ease'),
+        sharedField('arrive', 'dur', 'fld.dur'), sharedField('arrive', 'ease', 'fld.speedCurve'),
         sharedField('arrive', 'order', 'fld.order'), sharedField('arrive', 'each', 'fld.each'),
+        sharedField('arrive', 'flow', 'fld.flow', { basic: false }),
         partField('dwell', 'kind.dwell'), sharedField('dwell', 'amount', 'fld.amount'),
-        partField('depart', 'kind.depart'), sharedField('depart', 'dur', 'fld.dur'), sharedField('depart', 'ease', 'fld.ease'),
+        partField('depart', 'kind.depart'), sharedField('depart', 'dur', 'fld.dur'), sharedField('depart', 'ease', 'fld.speedCurve'),
+        speedField(), shotField(),
         // §6.4.6: the transition into the line's first cut (a line-scope seam pin would change every cut boundary).
         partField('seam', 'fld.seamIntoLine', { firstCut: true }),
         orientField(),
+        lineSeasonField(), avoidField(),
       ];
     }
 
@@ -359,16 +408,19 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
 
     const SCRIPT_OF = { ja: 'ja', en: 'latin', ko: 'ko', zhHant: 'zhHant', zhHans: 'zhHans' };
 
+    // An area selection (sel.area, DESIGN_2_1 §5.1) is shown on the several-lines page, even with one line: its header
+    // names the area and it carries the area's own rows.
     function pageOf(sel, plan) {
       const s = S.validate(sel, plan);
       if (s.level === 'work') return 'work';
-      if (s.level === 'line') return s.ids.length > 1 ? 'lines' : 'line';
+      if (s.level === 'line') return s.ids.length > 1 || s.area ? 'lines' : 'line';
       if (s.level === 'cut') return 'cut';
       return 'el.' + s.el;
     }
 
-    // contextOf(sel, plan, registry) → what sectionsFor and the inspector need about a selection.
-    function contextOf(sel, plan, registry) {
+    // contextOf(sel, plan, registry, doc?) → what sectionsFor and the inspector need about a selection. `doc` (optional)
+    // gives the material count of the work page.
+    function contextOf(sel, plan, registry, doc) {
       const s = S.validate(sel, plan);
       const page = pageOf(s, plan);
       const cutsAll = plan && Array.isArray(plan.cuts) ? plan.cuts : [];
@@ -386,10 +438,12 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
       const line = lineIds.length === 1 ? linesAll.find((l) => l.id === lineIds[0]) || null : null;
       const scripts = new Set(linesAll.map((l) => SCRIPT_OF[l.lang]).filter(Boolean));
       const orients = [...new Set(cuts.flatMap((c) => (c.feat && Array.isArray(c.feat.orients) ? c.feat.orients : ['h'])))];
+      const mats = doc && doc.materials && Array.isArray(doc.materials.list) ? doc.materials.list.length : 0;
       return {
         sel: s, page, scope, scopeKind, plan: plan || null, registry: registry || null, cuts, cutKeys: keys, lineIds, line,
         cut: scopeKind === 'cut' ? byKey.get(scope.slice(4)) || null : null, idx: s.level === 'el' ? s.idx || 0 : null,
-        el: s.level === 'el' ? s.el : null, scripts, orients,
+        el: s.level === 'el' ? s.el : null, scripts, orients, area: s.level === 'line' && s.area ? s.area : null,
+        materials: mats,
       };
     }
 
@@ -482,10 +536,10 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
       return out;
     }
 
-    // sectionsFor(sel, plan, registry) → [{ id, label, open, fields, custom }] for the page of the selection (§6.4.5–
-    // §6.4.9). Fields are filtered by the page scope and their `when`; part rows are followed by their parameters.
-    function sectionsFor(sel, plan, registry) {
-      const ctx = contextOf(sel, plan, registry);
+    // sectionsFor(sel, plan, registry, doc?) → [{ id, label, open, fields, custom }] for the page of the selection
+    // (§6.4.5–§6.4.9). Fields are filtered by the page scope and their `when`; part rows are followed by their parameters.
+    function sectionsFor(sel, plan, registry, doc) {
+      const ctx = contextOf(sel, plan, registry, doc);
       const visible = (f) => f.scopes.includes(ctx.scopeKind) && (!f.when || f.when(ctx));
       const pageSlots = new Set();
       const sections = PAGE_SECTIONS[ctx.page].filter((s) => !s.when || s.when(ctx)).map((s) => {
@@ -674,9 +728,14 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
       return list.length > 1 ? t('why.lineCut', { line: list[0], cut: list[1] }) : list[0];
     }
 
+    // The part kind a why code's `key` names when it is not the path's own part: the lens or the layout a shot keeps
+    // clear of (planner/camera).
+    const WHY_KEY_KIND = Object.freeze({ 'cam.lens': 'lens', 'cam.arrange': 'arrange' });
+
     // whyParts(ex, path, t, plan) → the reasons of an explain() result as display text. Every code or id in the params
     // becomes words (mood and part keys → their labels; tag, scope, by, amount, rule → their strings; a cut key → its
-    // line and cut); the family id is not shown. A reason that would still show a code is left out.
+    // line and cut; a song section and a season → their names; a shot or rig preset → its name); the family id is not
+    // shown. A reason that would still show a code is left out.
     function whyParts(ex, path, t, plan) {
       if (!ex || !Array.isArray(ex.why)) return [];
       let parsed = null;
@@ -698,7 +757,15 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
         if (p.amount !== undefined) put('amount', word('fld.amount.', p.amount));
         if (p.rule !== undefined) put('rule', word('', whyRuleKey(p.rule, slot)) || t('whyRule.rule'));
         if (p.cut !== undefined) put('cut', cutLabel(plan, p.cut, t));
-        if (p.key !== undefined && partKind) p.key = t.part(partKind, p.key);
+        // D's camera and line reasons name a song section, a season or another part by its key (DESIGN_2_1 §2.8)
+        if (p.section !== undefined) put('section', word('songSec.', p.section));
+        if (p.season !== undefined) put('season', word('fld.season.', p.season));
+        if (p.key !== undefined) {
+          const kind = WHY_KEY_KIND[w.code] || partKind;
+          if (kind) p.key = t.part(kind, p.key);
+          else if (slot === 'cam.shot') p.key = t.label(SHOT.label(p.key));
+          else if (slot === 'rig') p.key = t.label(SHOT.rigLabel(p.key));
+        }
         if (typeof p.x === 'number') p.x = p.x.toFixed(2);
         delete p.family;
         if (ok) out.push(t.why(w.code, p));
@@ -706,10 +773,29 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
       return out;
     }
 
+    // --- areas in words (DESIGN_2_1 §3.8 labels) ----------------------------------------------------------------------
+
+    // areaLabel(t, area) → the area's name: 「サビ1」, 「# サビ」, 「3–5行」; a `kind` param reads through songSec.<kind>.
+    function areaLabel(t, area) {
+      const label = area && area.label;
+      if (!Array.isArray(label)) return '';
+      const p = Object.assign({}, label[1] || {});
+      if (typeof p.kind === 'string' && t.has('songSec.' + p.kind)) p.kind = t('songSec.' + p.kind);
+      return t(label[0], p);
+    }
+
+    // areaTitle(t, area) → 「サビ1（5行）」 (the several-lines page header, the review title). The whole video, a cut and
+    // a single line of a line set (「4行」) name no count.
+    function areaTitle(t, area) {
+      if (!area) return '';
+      const bare = area.kind === 'work' || area.kind === 'cut' || (area.kind === 'lines' && area.n === 1);
+      return bare ? areaLabel(t, area) : t('area.title', { area: areaLabel(t, area), n: area.n });
+    }
+
     return {
       WIDGETS, FIELDS, PAGES: PAGE_SECTIONS, FACE_ROLES, FACE_SCRIPTS, LIST_KINDS, SLOT_KINDS, COMMANDS_USED, SNAPS, SEASONS,
       PARAM_LABEL, sectionsFor, contextOf, pageOf, paramFields, widgetFor, optionsFor, slotScopes, fieldPath, decisionsOf,
       agreedKey, sharedNames, pathsFor, clearPathsFor, firstCutScope, pinnedSlots, withPinnedParams, writePath, writeScope,
-      pinCmd, whyParts, whyRuleKey,
+      pinCmd, whyParts, whyRuleKey, areaLabel, areaTitle,
     };
   });

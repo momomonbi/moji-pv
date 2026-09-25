@@ -633,8 +633,8 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent);
 .w-part:hover:not(:disabled) { border-color: #4a5366; background: var(--panel-3); }
 .w-thumb { width: 64px; height: 36px; border-radius: 5px; background: #0b0d11; flex: none; }
 .w-part-name { flex: 1 1 auto; min-width: 0; font-size: 13px; font-weight: 700; }
-.w-seg { display: flex; width: 100%; }
-.w-seg .seg { flex: 1 1 0; justify-content: center; padding: 0 6px; }
+.w-seg { display: flex; width: 100%; box-sizing: border-box; }
+.w-seg .seg, .cw-seg .seg { flex: 1 1 0; justify-content: center; padding: 0 6px; }
 .w-number { display: flex; align-items: center; gap: 8px; }
 .w-track { position: relative; flex: 1 1 auto; min-width: 0; display: flex; align-items: center; }
 .w-range { width: 100%; margin: 0; accent-color: var(--accent); }
@@ -795,7 +795,7 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent);
 .vl-time.is-mark { color: #8fc8ff; }
 .insp-banner { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 0 0 6px; padding: 6px 8px; border: 1px solid rgba(240, 182, 77, 0.5); border-radius: 6px; background: rgba(240, 182, 77, 0.08); color: #ffe2a8; font-size: 12px; line-height: 1.45; }
 .state-tag.is-warn { display: inline-flex; align-items: center; gap: 3px; height: 20px; padding: 0 7px; border: 1px solid rgba(240, 182, 77, 0.75); border-radius: 10px; color: #ffe2a8; }
-.w-seg .seg:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.w-seg .seg:focus-visible, .cw-seg .seg:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 
 /* ==== WP8c (UI part 3): the AI panel — connection, what is sent, guide, tools, running, review, log ============== */
 
@@ -998,3 +998,130 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent);
 .check-actions { display: flex; flex-wrap: wrap; gap: 4px 14px; }
 .check-actions .link { font-size: 12px; }
 .song-row .song-cancel { margin-left: 4px; }
+
+/* ---- v2.1: curves, keyframes, マイ素材, area instructions (DESIGN_2_1 §6) ------------------------------------------ */
+
+/* The curve widget (緩急): the select, a small plot with its handles, [▶], かんたん and カスタム. */
+.w-curve { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.cw-row { display: flex; align-items: flex-start; gap: 6px; }
+.cw-plot { position: relative; flex: 1 1 auto; min-width: 0; height: 80px; border: 1px solid var(--line); border-radius: 7px; overflow: visible; }
+.cw-canvas { display: block; width: 100%; height: 100%; border-radius: 6px; }
+.cw-canvas, .cw-handles { touch-action: none; }
+.cw-handles { position: absolute; inset: 0; pointer-events: none; }
+.cw-h {
+  position: absolute; width: 14px; height: 14px; margin: -7px 0 0 -7px; padding: 0; border: 2px solid var(--bg); border-radius: 50%;
+  background: var(--gold); pointer-events: auto; cursor: grab; touch-action: none;
+}
+.cw-h[data-kind="sp"] { background: var(--focus); border-radius: 3px; }
+.cw-h:hover:not(:disabled) { box-shadow: 0 0 0 3px rgba(240, 182, 77, 0.35); }
+.cw-h:active { cursor: grabbing; }
+.cw-h:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.cw-simple, .cw-custom { display: flex; flex-direction: column; gap: 6px; }
+.cw-line { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 12px; }
+.cw-lab, .ke-lab { flex: none; min-width: 64px; font-size: 11.5px; color: var(--muted); }
+.cw-line .w-range { flex: 1 1 auto; min-width: 0; }
+.cw-seg { display: flex; box-sizing: border-box; }
+.cw-line .segmented { flex: 1 1 auto; min-width: 0; }
+.cw-val { flex: none; min-width: 38px; text-align: right; font: 11.5px var(--mono); color: var(--text-2); }
+.cw-note, .cw-hint { margin: 0; font-size: 11.5px; }
+
+/* The shot, rig and 使わない部品 widgets. */
+.w-refsbox { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0; }
+.w-refs { max-width: 100%; }
+.w-ref { display: inline-flex; align-items: center; gap: 2px; max-width: 100%; min-width: 0; padding-right: 2px; }
+.w-ref .icon-btn.small { width: 22px; height: 22px; }
+
+/* キーフレーム: one row group per key. */
+.ke-page { display: flex; flex-direction: column; gap: 10px; }
+.ke-rows { display: flex; flex-direction: column; gap: 8px; }
+.ke-row { display: flex; flex-direction: column; gap: 5px; padding: 8px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel-2); }
+.ke-line { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.ke-line .ke-sel { flex: 1 1 120px; width: auto; min-width: 0; }
+.ke-line .ke-size { flex: 1 1 auto; width: auto; min-width: 0; }
+.ke-line .w-curve { flex: 1 1 120px; min-width: 0; }
+.ke-num { width: 56px; height: 30px; text-align: right; }
+.ke-mark { flex: none; display: grid; place-items: center; width: 22px; height: 22px; font-weight: 800; color: var(--gold); }
+.ke-foot { align-items: center; }
+
+/* マイ素材: the page and the list in 全体. */
+.mat-page { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.mat-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.mat-name { margin: 0; min-width: 0; font-size: 15px; font-weight: 800; overflow-wrap: anywhere; }
+.mat-rename { flex: 1 1 auto; min-width: 0; }
+.mat-meta { margin: 0; }
+.mat-thumb-btn { position: relative; display: block; width: 100%; padding: 0; border: 1px solid var(--line-2); border-radius: 9px; background: #0b0d11; overflow: hidden; }
+.mat-thumb { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; }
+.mat-play { position: absolute; right: 8px; bottom: 8px; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%;
+  background: rgba(12, 14, 18, 0.75); color: var(--text); }
+.mat-cost { flex-wrap: wrap; font-size: 12.5px; }
+.mat-bars { font: 12px var(--mono); letter-spacing: 1px; color: var(--gold); }
+.mat-uses { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.mat-recipe summary { cursor: pointer; font-size: 12.5px; font-weight: 700; color: var(--text-2); }
+.mat-recipe[open] { display: flex; flex-direction: column; gap: 6px; }
+.mat-json { max-height: 220px; margin: 0; padding: 8px; overflow: auto; border-radius: 7px; background: #0f1216; font: 11px/1.5 var(--mono);
+  color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+.mat-json-box { display: flex; flex-direction: column; gap: 6px; }
+.mat-json-edit { box-sizing: border-box; width: 100%; padding: 7px 9px; border: 1px solid var(--line-2); border-radius: 8px; background: #0f1216;
+  color: var(--text); font: 11.5px/1.5 var(--mono); resize: vertical; }
+.mat-problems { margin: 0; padding-left: 18px; font-size: 12px; color: var(--error); }
+.mat-problems .muted { color: var(--ok); }
+.mat-delete { align-items: center; padding-top: 8px; border-top: 1px solid var(--line); }
+.mat-row { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.mat-row > .insp-item { flex: 1 1 auto; min-width: 0; }
+.mat-kind { flex: none; font-size: 11.5px; }
+.pb-make { justify-content: center; border-style: dashed; }
+.pb-make .pb-thumb { display: grid; place-items: center; }
+.pb-make-form { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px dashed var(--line-2); border-radius: 9px; }
+
+/* 区画ごとの指示: 対象, the area list, the target chip, the phrase chips. */
+.ai-direct .segmented { display: flex; flex-wrap: nowrap; }
+.ai-direct .segmented .seg { flex: 1 1 0; justify-content: center; }
+.ai-area-list { display: flex; flex-direction: column; gap: 1px; max-height: 240px; overflow: auto; padding: 4px; border: 1px solid var(--line-2);
+  border-radius: 9px; background: #12151b; }
+.ai-area-group { padding: 4px 6px 2px; font-size: 11px; font-weight: 800; color: var(--gold); letter-spacing: 0.03em; }
+.ai-area-opt { display: block; width: 100%; min-height: 30px; padding: 4px 8px; border: 0; border-radius: 6px; background: transparent;
+  color: var(--text); font-size: 12.5px; text-align: left; overflow-wrap: anywhere; }
+.ai-area-opt:hover, .ai-area-opt.is-current { background: var(--panel-3); }
+.ai-area-opt.is-current { box-shadow: inset 2px 0 0 var(--accent); }
+.ai-target-chip { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 2px 2px 2px 9px; border: 1px solid var(--line-2);
+  border-radius: 999px; background: var(--panel-2); font-size: 12.5px; }
+.ai-chip-text { min-width: 0; }
+.ai-diamond { flex: none; color: var(--gold); }
+.ai-chips .chip { height: 26px; padding: 0 9px; font-size: 12px; }
+.ai-direct-more summary { cursor: pointer; font-size: 12px; font-weight: 700; color: var(--text-2); }
+.ai-direct-more[open] { display: flex; flex-direction: column; gap: 6px; }
+.ai-need-song { margin: 4px 6px; }
+.ai-questions { display: flex; flex-direction: column; gap: 4px; }
+.ai-question { margin: 0; padding: 6px 9px; border-left: 3px solid var(--gold); border-radius: 0 7px 7px 0; background: rgba(240, 182, 77, 0.08);
+  font-size: 12.5px; overflow-wrap: anywhere; }
+
+/* The board: one fieldset per area. */
+.ai-board-rows { display: flex; flex-direction: column; gap: 8px; }
+.ai-board-row { display: flex; flex-direction: column; gap: 5px; min-width: 0; margin: 0; padding: 6px 8px 8px; border: 1px solid var(--line);
+  border-radius: 9px; background: var(--panel-2); }
+.ai-board-row.is-done { border-color: rgba(98, 197, 154, 0.45); }
+.ai-board-head { display: flex; align-items: center; gap: 6px; max-width: 100%; min-width: 0; padding: 0 2px; font-size: 12.5px; font-weight: 700; }
+.ai-board-input { width: 100%; box-sizing: border-box; height: auto; min-height: 32px; padding-top: 5px; padding-bottom: 5px; resize: none;
+  overflow: hidden; line-height: 1.45; overflow-wrap: anywhere; }
+.ai-board .state-tag[data-state="done"] { border-color: rgba(98, 197, 154, 0.7); color: #bff0da; }
+.ai-board-foot { align-items: center; }
+.ai-board-foot .chip-btn { max-width: 100%; height: auto; min-height: 28px; padding: 4px 10px; border-radius: 14px; white-space: normal;
+  text-align: left; }
+.ai-board-link { align-self: flex-start; }
+
+/* The area review: area groups fold, aggregates are tri-state rows with their lines under ▸. */
+details.ai-group > summary { cursor: pointer; list-style-position: inside; }
+.ai-agg { display: flex; flex-direction: column; gap: 2px; }
+.ai-agg > .ai-row { cursor: pointer; }
+.ai-agg-box { display: grid; place-items: center; flex: none; width: 16px; height: 16px; margin-top: 2px; border: 1px solid var(--line-2);
+  border-radius: 4px; background: var(--panel-2); font: 700 11px/1 var(--mono); color: #fff; }
+.ai-agg-box[aria-checked="true"] { border-color: transparent; background: var(--accent); }
+.ai-agg-box[aria-checked="true"]::after { content: "\2713"; }
+.ai-agg-box[aria-checked="mixed"] { border-color: var(--accent); color: var(--accent); }
+.ai-agg-box[aria-checked="mixed"]::after { content: "\2212"; }
+.ai-agg-box[aria-disabled="true"] { opacity: 0.5; }
+.ai-agg-list { display: flex; flex-direction: column; gap: 1px; padding-left: 22px; }
+.ai-agg-more { align-self: flex-start; margin-left: 22px; }
+.ai-row.is-disabled { cursor: default; opacity: 0.55; }
+.ai-need { display: inline-flex; align-self: flex-start; font-size: 11.5px; color: var(--gold); }
+.ai-mat-thumb { width: 96px; height: 54px; flex: none; border-radius: 5px; background: #0b0d11; }

@@ -1037,15 +1037,35 @@ async def flow_ai_looks(f, lang):
     await f.undo_all(done0, doc0)
 
 
-def edit_answer(understood, lines=None, motion=-1):
-    amounts = {'motion': motion, 'glitch': -1, 'chroma': -1, 'ornament': -1, 'density': -1, 'texture': -1, 'groundSwitch': -1}
-    return {'understood': understood, 'summary': 'サビを強くします' if understood else '', 'question': '' if understood else 'どの行を派手にしますか？',
-            'changes': {'theme': '', 'mood': '', 'season': '', 'amounts': amounts, 'flash': 'keep',
-                        'palette': {'accent': '', 'shiftA': '', 'shiftB': ''}, 'avoid': [], 'allow': [], 'lines': lines or []}}
+# Answers of ai/direct (package E) in its frozen schema: every property present, -1 / '' / 'keep' = no change.
+def d_curve(name='', **x):
+    return dict({'name': name, 'ends': 'both', 'edge': -1, 'peak': -1}, **x)
+
+
+def d_cam(**x):
+    return dict({'shot': '', 'move': 'pushIn', 'focus': 'text', 'timing': 'whole', 'fill': -1, 'closer': -1, 'follow': -1,
+                 'curve': d_curve()}, **x)
+
+
+def d_edit(**x):
+    return dict({'arrange': '', 'arrive': '', 'dwell': '', 'depart': '', 'lens': '', 'ground': '', 'atmos': '', 'ornaments': [],
+                 'filters': [], 'avoid': [], 'season': '', 'speed': -1, 'arriveCurve': d_curve(), 'departCurve': d_curve(),
+                 'flow': d_curve(), 'lensCurve': d_curve(), 'camera': d_cam(), 'impact': 'keep', 'emphasis': []}, **x)
+
+
+def d_answer(s, understood=True, question='', summary='', all_=None, lines=None, cuts=None, work=None):
+    amounts = {k: -1 for k in ('motion', 'glitch', 'chroma', 'ornament', 'density', 'texture', 'groundSwitch', 'camera')}
+    w = {'theme': '', 'mood': '', 'season': '', 'amounts': amounts, 'flash': 'keep', 'palette': {'accent': '', 'shiftA': '', 'shiftB': ''}}
+    if work:
+        w['amounts'] = dict(amounts, **work)
+    return {'s': s, 'understood': understood, 'summary': summary or ('' if not understood else 'サビを強くします'), 'question': question,
+            'all': dict({'rig': '', 'rigCurve': d_curve()}, **d_edit(**(all_ or {}))), 'lines': lines or [], 'cuts': cuts or [], 'work': w}
 
 
 async def flow_ai_edit(f, lang):
-    """ひとこと修正: the AI asks back (inline question), then a second instruction on the selected line is applied."""
+    """指示 (DESIGN_2_1 §6.2; was ひとこと修正): 対象 選択中 sends the selected line as an area; the AI asks back (the question
+    shows under the box, per area); then (compact layout, 詳細 opened during the run) the answer is a review with the area
+    group and 区画の外 (unchecked by default); checking it and applying is one undo step."""
     page = f.page
     done0, doc0 = await with_lyrics(f)
     keys = await page.evaluate(AI_KEYS)
@@ -1054,45 +1074,56 @@ async def flow_ai_edit(f, lang):
     other = [k for k in keys['arrange'] if k != line['arrange']]
     if not f.check(bool(other), 'another composition to choose'):
         return
-    answers = [edit_answer(False), edit_answer(True, [{'i': idx, 'arrange': other[0], 'arrive': '', 'depart': '', 'dwell': '',
-                                                         'impact': 'keep', 'emphasis': []}], motion=0.95)]
+    answers = [{'answers': [d_answer(0, False, 'どの行を派手にしますか？')]},
+               {'answers': [d_answer(0, lines=[dict({'i': 0}, **d_edit(arrange=other[0]))], work={'motion': 0.95})]}]
     await ai_route(f, answers)
     await page.evaluate("(id) => window.__mv.select({ level: 'line', ids: [id] }, { from: 'key', seek: false })", line['id'])
     await ai_open(f)
-    await page.fill('#ai-edit-text', 'サビをもっと派手に')
-    await page.click('.ai-edit [data-target="lines"]')
-    f.check(await page.get_attribute('.ai-edit [data-target="lines"]', 'aria-checked') == 'true', '対象: 選択中の行')
-    await page.focus('#ai-edit-text')
+    await page.fill('#ai-direct-text', 'サビをもっと派手に')
+    await page.click('.ai-direct [data-target="sel"]')
+    f.check(await page.get_attribute('.ai-direct [data-target="sel"]', 'aria-checked') == 'true', '対象: 選択中')
+    chip = await page.evaluate("() => { const c = document.querySelector('.ai-target-chip'); return c && !c.hidden ? c.textContent : null; }")
+    f.check(bool(chip), 'the target chip names the selected line: %r' % chip)
+    await page.focus('#ai-direct-text')
     await page.keyboard.press('Enter')
     await f.until("() => window.__mv.ai.state.notice && window.__mv.ai.state.notice.kind === 'question'", 'the AI asks back')
-    note = await page.inner_text('.ai-note')
-    f.check('どの行を派手にしますか？' in note, 'the question is shown inline: %r' % note)
+    await f.until("() => document.querySelector('.ai-direct .ai-questions').textContent.length > 0", 'the question shows')
+    note = await page.inner_text('.ai-direct .ai-questions')
+    f.check('どの行を派手にしますか？' in note, 'the question is shown under the box: %r' % note)
     f.check(not (await page.evaluate(AI_STATE))['aiReview'], 'a question opens no review')
     prompt = [s for s in f.ai_seen if s['method'] == 'POST'][0]['body']['contents'][0]['parts'][0]['text']
-    f.check('Instruction: サビをもっと派手に' in prompt and ('The user selected lines %d' % idx) in prompt,
-            'the instruction and the selected line are sent')
+    plain = prompt.replace('/', '')
+    f.check('サビをもっと派手に' in prompt and line['text'].replace('/', '') in plain, 'the instruction and the selected line are sent')
+    far = [x['text'] for i, x in enumerate(keys['lines']) if abs(i - idx) > 1]
+    f.check(not any(t.replace('/', '') in plain for t in far), 'no other lyric line is sent (only one context line each side)')
     # Compact layout: the side column's 詳細 is opened while the second request runs; the review must take over.
     await page.set_viewport_size({'width': 1100, 'height': 900})
     await f.until("() => window.__mv.layout && window.__mv.layout.layout === 'compact'", 'the compact layout')
     f.ai_delay[0] = 0.8
-    await page.focus('#ai-edit-text')
+    await page.focus('#ai-direct-text')
     await page.keyboard.press('Enter')
     await details_during_run(f, '.side-tabs [data-side="details"]', 'compact side tab')
     f.check(await page.is_disabled('.side-tabs [data-side="details"]'), 'the compact 詳細 side tab is disabled during the review')
     await page.set_viewport_size({'width': 1440, 'height': 900})
     if not await f.until("() => document.querySelectorAll('.ai-review .ai-row').length === 2", 'the second answer is a review of 2 rows'):
         return
-    heads = await page.evaluate("() => [...document.querySelectorAll('.ai-group-head')].map((e) => e.textContent)")
-    f.check(lang != 'ja' or heads == ['全体', '行ごと'], 'rows grouped 全体 / 行ごと: %r' % heads)
+    heads = await page.evaluate("() => [...document.querySelectorAll('.ai-review .ai-group-head')].map((e) => e.textContent)")
+    f.check(lang != 'ja' or (len(heads) == 2 and heads[0].startswith('区画') and heads[1].startswith('区画の外（作品全体）')),
+            'rows grouped 区画 / 区画の外: %r' % heads)
+    checks = await page.evaluate("() => [...document.querySelectorAll('.ai-review .ai-row input')].map((b) => b.checked)")
+    f.check(checks == [True, False], 'the row outside the area starts unchecked: %r' % checks)
     ai_requests_ok(f)
     await f.shot('ai_edit_review')
+    await page.click('.ai-review .ai-row >> nth=1')
     done = await page.evaluate(DONE)
     await page.click('.ai-review-foot .btn.primary')
     await f.until('(p) => { const x = window.__mv.doc.pins[p]; return !!x && x.by === "ai"; }', 'the line pin is set by ai',
                   'line/%s:arrange' % line['id'])
     f.check(await page.evaluate(DONE) == done + 1, 'one undo entry')
     pins = await page.evaluate("() => window.__mv.doc.pins")
-    f.check(pins.get('work:amount.motion', {}).get('v') == 0.95, 'the work amount is pinned: %r' % pins.get('work:amount.motion'))
+    f.check(pins.get('work:amount.motion', {}).get('v') == 0.95, 'the checked outside row is applied: %r' % pins.get('work:amount.motion'))
+    label = await page.evaluate("() => window.__mv.store.peek().undo")
+    f.check(label[0] == 'undo.aiArea', 'the undo entry names the area: %r' % label)
     await f.undo_all(done0, doc0)
 
 
@@ -2002,6 +2033,636 @@ async def flow_clear_device(f, lang):
     f.check('mirai.json' in newer and newer in r['toasts'] and r['rows'] == ['新しい行'], 'a newer file is named and not opened: %r' % r)
 
 
+# --- v2.1 (package F): curves, keyframes, areas, area instructions, the board, マイ素材 (DESIGN_2_1 §6, §7.4) -------------
+
+V21_TEXT = (ROOT / 'tests' / 'fixtures' / 'project_v21.json').read_text(encoding='utf-8')
+PIN_V = "(p) => { const x = window.__mv.doc.pins[p]; return x ? { v: x.v, by: x.by } : null; }"
+CURVE_SEL = ROW % 'arrive.ease' + ' select.cw-select'
+
+
+async def open_v21(f):
+    """Opens the v21 fixture (song sections, materials, camera and curve pins, a board draft) as a project."""
+    await f.page.evaluate("""async (text) => { const a = window.__mv; a.view.setPref('autoplay', false);
+      await a.io.openFiles([new File([text], 'v21.json', { type: 'application/json' })]); a.pause(); }""", V21_TEXT)
+    await f.until('() => window.__mv.plan && window.__mv.plan.lines.length === 9', 'the v21 project opens')
+    await f.settle(2)
+    return await f.page.evaluate(DONE), await f.page.evaluate(DOC)
+
+
+async def handle_point(f, i):
+    """The CSS centre of curve handle i of the 緩急 row (scrolled into view)."""
+    await f.page.evaluate("(sel) => document.querySelector(sel).closest('.frow').scrollIntoView({ block: 'center' })", CURVE_SEL)
+    await f.settle(2)
+    return await f.page.evaluate("""([sel, i]) => { const row = document.querySelector(sel).closest('.w-curve');
+      const b = row.querySelectorAll('.cw-h')[i]; if (!b) return null; const r = b.getBoundingClientRect();
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; }""", [CURVE_SEL, i])
+
+
+async def flow_curve(f, lang):
+    """緩急 (DESIGN_2_1 §6.6): a preset from the select; dragging a handle turns it custom as one undo entry; keyboard only:
+    the arrows move a handle (one entry per field), Enter adds and Delete removes a speed step, Esc returns to the select;
+    かんたん's slider; 自動 unpins. Undo-all returns to the start."""
+    page = f.page
+    done0, doc0 = await with_lyrics(f)
+    lid = await page.evaluate('() => window.__mv.plan.lines[1].id')
+    path = 'line/%s:arrive.ease' % lid
+    await open_line(f, lid)
+    if not await f.until('(s) => !!document.querySelector(s)', 'the 緩急 row has the curve widget', CURVE_SEL):
+        return
+    # A preset from the select: one undo entry, the pin names it.
+    done = await page.evaluate(DONE)
+    await page.select_option(CURVE_SEL, 'softEnds')
+    await f.until('(p) => !!window.__mv.doc.pins[p]', 'the preset is pinned', path)
+    f.check((await page.evaluate(PIN_V, path)) == {'v': 'softEnds', 'by': 'user'}, 'the preset is pinned by the user')
+    f.check(await page.evaluate(DONE) == done + 1, 'a preset is one undo entry')
+    await f.settle(3)
+    await f.shot('curve_preset')
+    # Mouse: dragging a Bézier handle turns the preset into its data (custom) within one undo entry.
+    pt = await handle_point(f, 1)
+    if not f.check(pt is not None, 'the Bézier has handles'):
+        return
+    done = await page.evaluate(DONE)
+    await page.mouse.move(pt['x'], pt['y'])
+    await page.mouse.down()
+    for i in range(1, 6):
+        await page.mouse.move(pt['x'] - i * 4, pt['y'] + i * 2)
+    await page.mouse.up()
+    await f.settle(2)
+    v = (await page.evaluate(PIN_V, path))['v']
+    f.check(isinstance(v, dict) and 'bz' in v and v['bz'][2] < 0.4, 'the drag pins a custom Bézier: %r' % v)
+    f.check(await page.evaluate(DONE) == done + 1, 'the drag is one undo entry')
+    f.check(await page.evaluate('(s) => document.querySelector(s).value', CURVE_SEL) == 'custom', 'the select reads カスタム')
+    # Keyboard only: a speed-step preset, Tab to a handle, ↑ ×3 (one entry), Enter adds a step, Delete removes it, Esc.
+    await page.focus(CURVE_SEL)
+    await page.select_option(CURVE_SEL, 'hushRushHush')
+    await f.until('(p) => JSON.stringify(window.__mv.doc.pins[p].v) === \'"hushRushHush"\'', 'the speed-step preset', path)
+    await f.settle(2)
+    await page.focus(CURVE_SEL)
+    await page.keyboard.press('Tab')
+    await page.keyboard.press('Tab')
+    on_handle = await page.evaluate("() => document.activeElement.classList.contains('cw-h') ? Number(document.activeElement.dataset.i) : -1")
+    if not f.check(on_handle == 1, 'Tab reaches the second handle: %r' % on_handle):
+        return
+    done = await page.evaluate(DONE)
+    for _ in range(3):
+        await page.keyboard.press('ArrowUp')
+    await f.settle(2)
+    v = (await page.evaluate(PIN_V, path))['v']
+    f.check(isinstance(v, dict) and abs(v['sp'][1][1] - 0.33) < 1e-6, '↑ ×3 raises the step by 0.03: %r' % v)
+    f.check(await page.evaluate(DONE) == done + 1, 'the arrow steps merge into one undo entry')
+    await page.keyboard.press('Enter')
+    await f.settle(2)
+    n = len((await page.evaluate(PIN_V, path))['v']['sp'])
+    f.check(n == 7, 'Enter adds a speed step: %d' % n)
+    await page.keyboard.press('Delete')
+    await f.settle(2)
+    pin = await page.evaluate(PIN_V, path)
+    f.check(pin is not None and len(pin['v']['sp']) == 6, 'Delete removes the step, not the pin: %r' % pin)
+    await page.keyboard.press('Escape')
+    f.check(await page.evaluate("(s) => document.activeElement === document.querySelector(s)", CURVE_SEL), 'Esc returns to the select')
+    # かんたん: the default ramp; ← on the length slider (keyboard) shortens the slow part.
+    await page.select_option(CURVE_SEL, 'simple')
+    await f.until("(p) => { const x = window.__mv.doc.pins[p]; return !!x && !!x.v.ramp; }", 'かんたん pins a ramp', path)
+    await f.settle(2)
+    edge = ROW % 'arrive.ease' + ' .cw-simple input[type="range"]'
+    await page.focus(edge)
+    await page.keyboard.press('ArrowLeft')
+    await f.settle(2)
+    ramp = (await page.evaluate(PIN_V, path))['v']['ramp']
+    f.check(abs(ramp['edge'] - 0.09) < 1e-6 and ramp['ends'] == 'both' and ramp['peak'] == 6, 'the slider edits the ramp: %r' % ramp)
+    await f.shot('curve_simple')
+    # 自動 unpins.
+    await page.select_option(CURVE_SEL, 'auto')
+    await f.until('(p) => !window.__mv.doc.pins[p]', '自動 unpins', path)
+    await f.undo_all(done0, doc0)
+
+
+# engine.shotTrack / engine.viewAt (package B) as tests/helpers/fake_engine.js has them, installed on the page's engine
+# only while it has none (a build without the engine's camera): one track key per key of the shot being edited, spread
+# over the cut, each aiming a little further right. The engine has them since B, so this stands aside ('engine').
+FAKE_TRACK = """() => {
+  const a = window.__mv, e = a.engine;
+  if (typeof e.shotTrack === 'function') return 'engine';
+  try {
+    e.shotTrack = (cutKey) => {
+      const cut = a.plan.cuts.find((c) => c.key === cutKey), n = a.shotEdit ? a.shotEdit.keys().length : 2;
+      if (!cut) return null;
+      const d = a.plan.design, keys = [];
+      for (let i = 0; i < n; i++) {
+        const aim = { x: d.w * (0.1 + 0.2 * i), y: d.h * 0.4, w: d.w * 0.2, h: d.h * 0.2 };
+        keys.push({ t: cut.a + (cut.b - cut.a) * i / Math.max(1, n - 1), x: 0, y: 0, zoom: 1 + 0.1 * i, roll: 0, aim });
+      }
+      return { a: cut.a, b: cut.b, keys };
+    };
+    e.viewAt = () => ({ x: 0, y: 0, zoom: 1, roll: 0 });
+    return 'fake';
+  } catch (err) { return 'frozen'; }
+}"""
+KEYS_STATE = """(p) => { const a = window.__mv, pin = a.doc.pins[p], rows = document.querySelectorAll('.ke-page .ke-row');
+  return { pin: pin ? pin.v : null, by: pin ? pin.by : null, rows: rows.length, times: a.shotEdit ? a.shotEdit.times().length : 0,
+    marks: a.shotEdit ? a.shotEdit.marks().length : 0, reset: !!document.querySelector('.ke-reset:not([disabled])') }; }"""
+
+
+async def flow_keyframes(f, lang):
+    """カメラワーク and キーフレーム (DESIGN_2_1 §6.5, §6.7): a preset from the shot picker; キーフレームを編集… lists its keys;
+    editing a row pins the whole shot as custom (one undo entry each); + adds and × removes a key; a marker dragged on the
+    preview places its key (one entry); a timeline ◆ dragged moves its key (one entry); プリセットに戻す clears the pin. The
+    keyboard-only variant opens the page with Enter and edits とき with the arrows."""
+    page = f.page
+    done0, doc0 = await with_lyrics(f)
+    info = await page.evaluate("() => { const a = window.__mv, l = a.plan.lines[2]; return { key: l.cuts[0], id: l.id }; }")
+    scope = 'cut/' + info['key']
+    await page.evaluate("(s) => window.__mv.select({ level: 'el', scope: s, el: 'lens' }, { from: 'crumbs', open: true, seek: true })", scope)
+    await f.until("() => window.__mv.view.state.panel === 'details'", '詳細 opens on the camera page')
+    await f.settle(3)
+    if not await f.until('(s) => !!document.querySelector(s)', 'the カメラワーク row', ROW % 'cam.shot' + ' .w-shot'):
+        return
+    await page.click(ROW % 'cam.shot' + ' .w-shot')
+    if not await f.until("() => !!document.querySelector('.pb-tile[data-key=\"pushWord\"]')", 'the shot picker lists the presets'):
+        return
+    await f.shot('shots')
+    await page.click('.pb-tile[data-key="pushWord"]')
+    path = scope + ':cam.shot'
+    await f.until('(p) => !!window.__mv.doc.pins[p]', 'picking a shot pins it', path)
+    f.check((await page.evaluate(PIN_V, path)) == {'v': 'pushWord', 'by': 'user'}, 'the shot is pinned at the cut')
+    await f.settle(2)
+    await page.click('[data-custom="camKeys"] button')
+    if not await f.until("() => document.querySelectorAll('.ke-page .ke-row').length > 0", 'the keyframe page opens'):
+        return
+    how = await page.evaluate(FAKE_TRACK)
+    await page.evaluate("() => window.__mv.bus.emit('shotEdit')")
+    await f.settle(3)
+    st = await page.evaluate(KEYS_STATE, path)
+    n0 = st['rows']
+    f.check(n0 >= 2 and st['times'] == n0, 'one row and one ◆ per key: %r' % st)
+    await f.shot('keyframes')
+    # A row edit: key ① at 割合 → the whole shot is pinned as custom by the user; one undo entry.
+    done = await page.evaluate(DONE)
+    await page.select_option('.ke-row[data-i="0"] .ke-sel >> nth=0', 'frac')
+    await f.until('(p) => { const x = window.__mv.doc.pins[p]; return !!x && typeof x.v === "object"; }', 'the edit pins a custom shot', path)
+    st = await page.evaluate(KEYS_STATE, path)
+    f.check(st['by'] == 'user' and isinstance(st['pin']['keys'][0]['at'], (int, float)) and st['reset'], 'key ① gets a number at: %r' % st)
+    f.check(await page.evaluate(DONE) == done + 1, 'a row edit is one undo entry')
+    await page.click('.ke-add')
+    await f.until('(n) => document.querySelectorAll(".ke-page .ke-row").length === n + 1', '+ キーを足す adds a row', n0)
+    await page.click('.ke-row[data-i="%d"] .ke-remove' % n0)
+    await f.until('(n) => document.querySelectorAll(".ke-page .ke-row").length === n', '× removes it', n0)
+    # The markers on the preview (engine.shotTrack of package B; FAKE_TRACK stands aside): drag ② = 位置 自由, one entry.
+    f.check(how == 'engine', 'the engine gives the shot track itself: %s' % how)
+    await page.evaluate("(t) => window.__mv.seek(t)", await page.evaluate("(k) => { const c = window.__mv.plan.cuts.find((x) => x.key === k); return (c.a + c.b) / 2; }", info['key']))
+    await f.settle(3)
+    st = await page.evaluate(KEYS_STATE, path)
+    if f.check(st['marks'] == st['rows'], 'one marker per key: %r' % st):
+        pt = await page.evaluate("""() => { const a = window.__mv, m = a.shotEdit.marks()[1], d = a.plan.design;
+          const r = document.querySelector('.canvas-wrap').getBoundingClientRect();
+          return { x: r.left + m.x / d.w * r.width, y: r.top + m.y / d.h * r.height }; }""")
+        done = await page.evaluate(DONE)
+        await page.mouse.move(pt['x'], pt['y'])
+        await page.mouse.down()
+        for i in range(1, 7):
+            await page.mouse.move(pt['x'] + i * 12, pt['y'] - i * 4)
+        await page.mouse.up()
+        await f.settle(2)
+        k1 = (await page.evaluate(PIN_V, path))['v']['keys'][1]
+        want = await page.evaluate("""(p) => { const d = window.__mv.plan.design, r = document.querySelector('.canvas-wrap').getBoundingClientRect();
+          return Math.round(Math.max(-0.4, Math.min(0.4, ((p.x - r.left) / r.width * d.w - d.w / 2) / d.w)) * 1000) / 1000; }""",
+                                   {'x': pt['x'] + 72, 'y': pt['y'] - 24})
+        f.check('oy' in k1 and abs(k1.get('ox', 9) - want) < 0.002, 'the marker drag places key ② where it is dropped: %r (ox %r)' % (k1, want))
+        f.check(await page.evaluate(DONE) == done + 1, 'the marker drag is one undo entry')
+        f.check(await page.evaluate("() => window.__mv.view.state.sel.level") == 'el', 'the drag does not change the selection')
+    # The ◆ of key ② on the timeline: a drag gives it a number at (one entry).
+    await page.keyboard.press('Shift+T') if not await page.evaluate('() => window.__mv.view.state.drawer') else None
+    await f.until('() => window.__mv.view.state.drawer', 'the timeline drawer opens')
+    await f.settle(3)
+    pt = await page.evaluate("""() => { const a = window.__mv, tl = a.timeline, m = a.shotEdit.times()[1];
+      const r = document.querySelector('.tl-canvas').getBoundingClientRect(), rows = tl.rows();
+      return { x: r.left + tl.xOf(m.t), y: r.top + (rows.cut[0] + rows.cut[1]) / 2 }; }""")
+    done = await page.evaluate(DONE)
+    await page.mouse.move(pt['x'], pt['y'])
+    await page.mouse.down()
+    for i in range(1, 5):
+        await page.mouse.move(pt['x'] - i * 5, pt['y'])
+    await page.mouse.up()
+    await f.settle(2)
+    at = (await page.evaluate(PIN_V, path))['v']['keys'][1]['at']
+    f.check(isinstance(at, (int, float)), 'the ◆ drag gives key ② a number at: %r' % at)
+    f.check(await page.evaluate(DONE) == done + 1, 'the ◆ drag is one undo entry')
+    # プリセットに戻す: the pin goes (the cut shows its inherited or automatic shot again).
+    await page.click('.ke-reset')
+    await f.until('(p) => !window.__mv.doc.pins[p]', 'プリセットに戻す clears the pin', path)
+    # Keyboard only: Esc from the page back to the camera page, Enter on キーフレームを編集…, ↓ on ① とき.
+    await page.focus('.ke-add')
+    await page.keyboard.press('Escape')
+    await f.until("() => !document.querySelector('.ke-page')", 'Esc leaves the keyframe page')
+    await f.until("() => document.activeElement && document.activeElement.closest('[data-custom=\"camKeys\"]')", 'the focus returns to its button')
+    await page.keyboard.press('Enter')
+    await f.until("() => !!document.querySelector('.ke-page .ke-sel')", 'Enter opens the keyframe page')
+    f.check(await page.evaluate("() => document.activeElement.classList.contains('ke-sel')"), 'the focus starts on ① とき')
+    done = await page.evaluate(DONE)
+    await page.keyboard.press('ArrowDown')
+    await f.until('(p) => !!window.__mv.doc.pins[p]', '↓ on とき pins a custom shot', path)
+    f.check(await page.evaluate(DONE) == done + 1, 'one undo entry')
+    await f.undo_all(done0, doc0)
+
+
+# The area bands of the drawer (planner/areas.bands) with their CSS rectangles, and the selection's area.
+BANDS = """() => { const a = window.__mv, AR = MV.use('planner/areas'), F = MV.use('ui/fields'), tl = a.timeline;
+  const r = document.querySelector('.tl-canvas').getBoundingClientRect(), rows = tl.rows();
+  return AR.bands(a.doc, a.plan).map((b) => { const area = AR.resolve(a.doc, a.plan, b.ref);
+    return { key: b.key, ids: area.lineIds, title: F.areaTitle(a.t, area), x: r.left + (tl.xOf(b.t0) + tl.xOf(b.t1)) / 2,
+      y: r.top + (rows.song[0] + rows.song[1]) / 2, t: (b.t0 + b.t1) / 2 }; }); }"""
+# The play bar's lane at a time: the colour of its band strip (the top fifth) and of the cut blocks, and a point on the
+# strip to click (DESIGN_2_1 §6.8).
+LANE_AT = """(tt) => { const c = document.querySelector('.lane-canvas'), a = window.__mv, g = c.getContext('2d');
+  const d = a.plan.duration, x = Math.min(c.width - 1, Math.max(0, Math.round(tt / d * c.width)));
+  const px = (y) => Array.from(g.getImageData(x, y, 1, 1).data.slice(0, 3)), r = c.getBoundingClientRect();
+  return { band: px(Math.round(c.height * 0.08)), cut: px(Math.round(c.height * 0.5)),
+    client: { x: r.left + tt / d * r.width, y: r.top + r.height * 0.08 } }; }"""
+LANE_ON = [226, 85, 59]           # ui/playbar: the selected area's band, and a highlighted or selected cut
+SEL_AREA = """() => { const a = window.__mv, s = a.view.state.sel, AR = MV.use('planner/areas');
+  const t = document.querySelector('[data-mount="inspector"] .lh-title');
+  return { level: s.level, ids: s.ids || null, area: s.area ? AR.keyOf(s.area) : null, title: t ? t.textContent : null,
+    panel: a.view.state.panel, rig: !!document.querySelector('[data-mount="inspector"] .isec[data-sec="rig"]') }; }"""
+
+
+async def flow_areas(f, lang):
+    """区画 (DESIGN_2_1 §6.8): a band of the drawer's 曲 row selects its lines as the area and opens the 行 page with the area
+    header 「サビ（3行）」 and 区画のカメラ; the play bar's lane shows the bands and an area highlight, and a double-click on
+    its band selects the area; the lyric gutter's heading § does the same; %サビ in Ctrl+K too. Keyboard only:
+    ↑ from the first line of the timeline listbox reaches the bands, ↓ moves among them, Enter selects."""
+    page = f.page
+    await with_lyrics(f)
+    await f.blur()
+    await page.keyboard.press('Shift+T')
+    await f.until('() => window.__mv.view.state.drawer', 'the timeline drawer opens')
+    await f.settle(3)
+    bands = await page.evaluate(BANDS)
+    if not f.check(len(bands) == 2, 'two bands (the headings # Aメロ and # サビ): %r' % bands):
+        return
+    await page.mouse.click(bands[1]['x'], bands[1]['y'])
+    await f.until("() => window.__mv.view.state.panel === 'details'", 'a band click opens 詳細')
+    await f.settle(3)
+    s = await page.evaluate(SEL_AREA)
+    f.check(s['level'] == 'line' and s['ids'] == bands[1]['ids'] and s['area'] == bands[1]['key'], 'the band selects its area: %r' % s)
+    f.check(s['title'] == bands[1]['title'] and len(bands[1]['ids']) > 1, 'the 行 page names the area: %r' % s)
+    f.check(lang != 'ja' or 'サビ' in s['title'], 'the heading is the area name: %r' % s['title'])
+    f.check(s['rig'], '区画のカメラ is offered for an area')
+    await f.shot('area_page')
+    # The play bar's lane shows the same bands in its top strip, the selected area's in the selection ink; an area
+    # highlight (view.highlight as an array of line ids) marks its lines' cuts; a double-click on the strip selects.
+    lane = await page.evaluate(LANE_AT, bands[1]['t'])
+    other = await page.evaluate(LANE_AT, bands[0]['t'])
+    f.check(lane['band'] == LANE_ON, 'the lane marks the selected area band: %r' % lane)
+    f.check(other['band'] not in (LANE_ON, [18, 21, 27]), 'the lane draws the other band too: %r' % other)
+    f.check(other['cut'] != LANE_ON, 'the other area is not marked: %r' % other)
+    await page.evaluate('(ids) => window.__mv.view.set({ highlight: ids })', bands[0]['ids'])
+    lit = await page.evaluate(LANE_AT, bands[0]['t'])
+    f.check(lit['cut'] == LANE_ON, 'an area highlight marks the cuts of its lines on the lane: %r' % lit)
+    await page.evaluate('() => window.__mv.view.set({ highlight: null })')
+    await page.mouse.dblclick(other['client']['x'], other['client']['y'])
+    await f.settle(2)
+    s2 = await page.evaluate(SEL_AREA)
+    f.check(s2['area'] == bands[0]['key'] and s2['ids'] == bands[0]['ids'], 'a double-click on a lane band selects its area: %r' % s2)
+    # The lyric gutter: § of # Aメロ.
+    await page.evaluate("() => window.__mv.select({ level: 'work' }, { from: 'key' })")
+    await page.evaluate("() => { window.__mv.view.set({ drawer: false }); window.__mv.goStep('lyrics'); }")
+    await f.until("() => !!document.querySelector('.le-g[data-heading]')", 'the gutter shows the headings')
+    await f.settle(4)
+    await f.shot('gutter')
+    await page.click('.le-g[data-heading] >> nth=0')
+    await f.settle(2)
+    s = await page.evaluate(SEL_AREA)
+    f.check(s['area'] == bands[0]['key'] and s['ids'] == bands[0]['ids'], 'the heading § selects its area: %r' % s)
+    # Ctrl+K %サビ.
+    await f.blur()
+    await page.keyboard.press('Control+k')
+    await f.until('() => window.__mv.paletteOpen', 'Ctrl+K opens the palette')
+    await page.keyboard.type('%' + ('サビ' if lang == 'ja' else ''))
+    await f.settle(2)
+    await page.keyboard.press('Enter')
+    await f.until('(k) => { const s = window.__mv.view.state.sel; return !!s.area && MV.use("planner/areas").keyOf(s.area) === k; }',
+                  '%サビ selects the area', bands[1]['key'] if lang == 'ja' else bands[0]['key'])
+    # Keyboard only: the timeline listbox leads with the bands.
+    await page.evaluate("() => { const a = window.__mv; a.view.set({ drawer: true }); a.select({ level: 'line', ids: [a.plan.lines[0].id] }, { from: 'key' }); }")
+    await f.settle(3)
+    await page.focus('.tl-proxy')
+    await page.keyboard.press('ArrowUp')
+    active = await page.evaluate("() => document.querySelector('.tl-proxy').getAttribute('aria-activedescendant')")
+    f.check(active == 'tl-band-%d' % (len(bands) - 1), '↑ from the first line reaches the last band: %r' % active)
+    await page.keyboard.press('ArrowUp')
+    await page.keyboard.press('Enter')
+    await f.settle(2)
+    s = await page.evaluate(SEL_AREA)
+    f.check(s['area'] == bands[0]['key'], 'Enter selects the focused band: %r' % s)
+    label = await page.evaluate("() => document.getElementById('tl-band-0').textContent")
+    f.check(bands[0]['title'].split('（')[0] in label or lang != 'ja', 'the band option reads its area: %r' % label)
+
+
+# A new run ornament in ai/direct's material schema (the §2.1 cherry flurry), used where the brief asks (s 0).
+D_FLURRY = {'name': '桜吹雪', 'nameEn': 'Cherry flurry', 'kind': 'ornament', 'scope': 'run', 'season': 'spring', 'tags': ['organic', 'soft'],
+            'blurb': '花びらが斜めに舞う', 'base': '', 'params': [], 'parts': [], 'unit': 'glyph', 'order': 'lead', 'dur': -1, 'each': -1,
+            'tracks': [], 'curve': d_curve(), 'osc': [], 'knobs': ['count'], 'use': {'slot': 'none', 's': 0, 'lines': [], 'cuts': []},
+            'layers': [{'prim': 'particles', 'shape': 'petal', 'glyph': '', 'inks': ['#F4B4C6', 'accent'], 'alpha': 0.85, 'layer': 'near',
+                        'anchor': 'frame', 'x': 0, 'y': 0, 'spread': 1.15, 'sizeMin': 0.012, 'sizeMax': 0.022, 'count': 90, 'stroke': 0,
+                        'dir': 115, 'speed': 0.09, 'sway': 26, 'swayHz': 0.35, 'spin': 60, 'burst': 'none', 'move': 'none',
+                        'moveWhat': 'scale', 'moveAmp': 0, 'moveHz': 0, 'appear': 'always', 'draw': 'fade', 'style': '', 'pattern': '',
+                        'stops': [], 'angle': 0}]}
+# The song areas of the plan (planner/areas), the review's group headings and what the AI state holds.
+SONG_AREAS = """() => { const a = window.__mv, AR = MV.use('planner/areas');
+  return AR.areasOf(a.doc, a.plan).song.map((x) => ({ key: x.key, kind: x.songKind, ids: x.lineIds })); }"""
+REVIEW_GROUPS = "() => [...document.querySelectorAll('.ai-review .ai-group-head')].map((e) => e.textContent)"
+# Whether the current plan puts a part key in a segment's atmosphere, and the paint nodes of a frame the app's engine
+# draws in the middle of a line (engine.renderFrame's FrameStats; the atmosphere of a material draws as paints).
+PLAN_USES = "(k) => window.__mv.plan.grounds.some((g) => !!g.atmos && g.atmos.v === k)"
+PAINTS_AT = """(ids) => { const a = window.__mv, l = a.plan.lines.find((x) => x.id === ids[0]), c = new OffscreenCanvas(320, 180);
+  return a.engine.renderFrame({ canvas: c, ctx: c.getContext('2d'), w: 320, h: 180 }, (l.t0 + l.t1) / 2,
+    { quality: 'export', pick: false }).drawn.paints; }"""
+
+
+async def analysed_song(f, answers):
+    """A 12 s song, the key, the consent and a faked 曲を分析 saved: the lines fall into イントロ / Aメロ / サビ."""
+    page = f.page
+    await page.evaluate(AI_WAV_JS)
+    ok = await page.evaluate("async () => { await window.__mv.loadSong(window.__wav(12, 'ai.wav')); return window.__mv.songReady(); }")
+    if not f.check(ok, 'the song is loaded'):
+        return False
+    t = await page.evaluate("() => window.__mv.plan.lines.map((l) => l.t0)")
+    clock = lambda x: '0:%05.2f' % x  # noqa: E731
+    answers.insert(0, {'summary': '明るい曲', 'mood': '軽快', 'bpm': 120, 'highlights': [],
+                       'sections': [{'kind': 'intro', 'start': clock(0), 'end': clock(t[0] - 0.05)},
+                                    {'kind': 'verse', 'start': clock(t[0] - 0.05), 'end': clock(t[3] - 0.05)},
+                                    {'kind': 'chorus', 'start': clock(t[3] - 0.05), 'end': clock(12)}]})
+    await ai_route(f, answers)
+    await ai_open(f)
+    await page.click('.ai-consent input[type="checkbox"]')
+    await f.until("() => !document.querySelector('[data-tool=\"analyze\"]').disabled", 'consent enables 曲を分析')
+    await page.click('[data-tool="analyze"]')
+    if not await f.until("() => window.__mv.ai.state.review && window.__mv.ai.state.review.kind === 'analysis'", 'the analysis review'):
+        return False
+    await page.click('.ai-review-foot .btn.primary')
+    return await f.until("() => { const i = window.__mv.doc.song.info; return !!i && i.sections.length === 3; }", 'the sections are saved')
+
+
+async def flow_ai_area(f, lang):
+    """The §7.4 "area direct" story: a faked analysis gives song sections; 区画▾ › サビ1 shows the target chip; the faked
+    answer (a new run-ornament material, speed 0.5, a ramp curve, a custom push-in, a cut and a work change) is a review
+    of 4 groups (素材 / 区画 / カット / 区画の外); 試写; apply = one undo step; the material is in マイ素材; undo restores
+    materials and pins; redo; selective revert; the material deleted from its page clears its pins."""
+    page = f.page
+    done0, doc0 = await with_lyrics(f)
+    answers = []
+    if not await analysed_song(f, answers):
+        return
+    areas = await page.evaluate(SONG_AREAS)
+    chorus = next((x for x in areas if x['kind'] == 'chorus'), None)
+    if not f.check(chorus and len(chorus['ids']) == 2, 'サビ1 has the last two lines: %r' % areas):
+        return
+    answers.append({'answers': [d_answer(0, summary='桜が舞う中、ゆっくり文字へ寄ります', all_={
+        'atmos': 'mat:桜吹雪', 'speed': 0.5, 'arriveCurve': d_curve('ramp', edge=0.1, peak=6),
+        'camera': d_cam(shot='custom', move='pushIn', focus='text', timing='whole')},
+        cuts=[{'i': 0, 'j': 1, 'arrange': '', 'arrive': '', 'depart': '', 'lens': '', 'ornaments': [], 'speed': 0.75, 'camera': d_cam()}],
+        work={'motion': 0.9})], 'materials': [D_FLURRY]})
+    await page.click('.ai-direct [data-target="area"]')
+    await f.until("() => !document.querySelector('#ai-area-list').hidden", '区画▾ opens the area list')
+    await f.shot('area_list')
+    await page.click('#ai-area-list [data-area="%s"]' % chorus['key'])
+    chip = await page.evaluate("() => { const c = document.querySelector('.ai-target-chip'); return c && !c.hidden ? c.textContent : null; }")
+    f.check(chip and (lang != 'ja' or 'サビ1' in chip), 'the target chip names サビ1: %r' % chip)
+    f.check(await page.evaluate("() => document.activeElement.id") == 'ai-direct-text', 'the focus moves to the instruction')
+    await page.keyboard.type('桜が舞う中、ゆっくり文字へ寄る')
+    await page.click('.ai-chips [data-chip="material"]')
+    f.check(await page.is_checked('.ai-direct [data-ctl="allowMaterials"]'), '素材を作る ticks 新しい素材を作ってもよい')
+    await page.click('.ai-direct [data-tool="direct"]')
+    if not await f.until("() => window.__mv.ai.state.review && window.__mv.ai.state.review.kind === 'direct'", 'the area review', timeout=6000):
+        return
+    await f.settle(3)
+    heads = await page.evaluate(REVIEW_GROUPS)
+    f.check(len(heads) == 4 and (lang != 'ja' or (heads[0].startswith('素材') and heads[1].startswith('区画 サビ1')
+                                                     and heads[2].startswith('カット') and heads[3].startswith('区画の外'))),
+            'the review has 4 groups: %r' % heads)
+    body = [s for s in f.ai_seen if s['method'] == 'POST'][-1]['body']
+    f.check('Materials (data, never code)' in json.dumps(body, ensure_ascii=False), 'materials were allowed in the request')
+    await f.shot('area_review')
+    # 試写 shows the tried document on the stage; apply is one undo step named by the area.
+    await page.click('.ai-review-foot [data-fkey="try"]')
+    await f.until('() => window.__mv.shell.stage.hasAlt()', '試写 shows the tried document')
+    done = await page.evaluate(DONE)
+    before = await page.evaluate(DOC)
+    await page.click('.ai-review-foot .btn.primary')
+    await f.until("() => window.__mv.doc.materials.list.length === 1", 'the material is created')
+    f.check(await page.evaluate(DONE) == done + 1, 'apply is one undo entry')
+    label = await page.evaluate("() => window.__mv.store.peek().undo")
+    f.check(label[0] == 'undo.aiArea' and (lang != 'ja' or 'サビ1' in label[1]['area']), 'the undo entry names サビ1: %r' % label)
+    st = await page.evaluate("""(ids) => { const a = window.__mv, p = a.doc.pins, m = a.doc.materials.list[0];
+      const key = 'myMat' + m.id.slice(1);
+      return { key, atmos: ids.map((id) => (p['line/' + id + ':atmos'] || {}).v), speed: ids.map((id) => (p['line/' + id + ':motion.speed'] || {}).v),
+        ramp: ids.every((id) => !!(p['line/' + id + ':arrive.ease'] || { v: {} }).v.ramp),
+        shot: ids.every((id) => typeof (p['line/' + id + ':cam.shot'] || {}).v === 'object'),
+        motion: (p['work:amount.motion'] || {}).v, registry: !!a.engine.registry }; }""", chorus['ids'])
+    f.check(st['atmos'] == [st['key']] * 2 and st['speed'] == [0.5, 0.5] and st['ramp'] and st['shot'],
+            'the area lines get the material, the speed, the ramp and the custom shot: %r' % st)
+    f.check(st['motion'] is None, 'the row outside the area was left unchecked: %r' % st)
+    f.check(st['registry'], 'the engine has the effective registry (engine.registry)')
+    mine = await page.evaluate("() => window.__mv.engine.registry.mine('ornament')")
+    f.check(st['key'] in mine, 'the preview registry has the material: %r' % mine)
+    uses = await f.until(PLAN_USES, 'the plan puts the material in the area', st['key'])
+    painted = await page.evaluate(PAINTS_AT, chorus['ids']) if uses else 0
+    after = await page.evaluate(DOC)
+    # 全体 › マイ素材 lists it.
+    await page.evaluate("() => { const a = window.__mv; a.openPanel('details'); a.select({ level: 'work' }, { from: 'key', open: true }); }")
+    await f.settle(3)
+    await open_section(f, 'materials')
+    rows = await page.evaluate("() => [...document.querySelectorAll('.mat-row')].map((r) => r.textContent)")
+    f.check(len(rows) == 1 and (lang != 'ja' or '桜吹雪' in rows[0]), 'マイ素材 lists the material: %r' % rows)
+    # Undo restores the materials and the pins; redo brings them back; the log's 元に戻す reverts pins, then the material.
+    await f.blur()
+    await page.keyboard.press('Control+z')
+    await f.until('(d) => JSON.stringify(window.__mv.doc) === d', 'undo restores materials and pins', before)
+    # The preview renders the material (DESIGN_2_1 §7.4): a frame inside the area draws more paints with it than without.
+    if await f.until('(k) => !(%s)(k)' % PLAN_USES, 'the plan drops the material with the undo', st['key']):
+        bare = await page.evaluate(PAINTS_AT, chorus['ids'])
+        f.check(painted > bare, 'the preview draws the material in the area (%d paints, %d without)' % (painted, bare))
+    await page.keyboard.press('Control+Shift+z')
+    await f.until('(d) => JSON.stringify(window.__mv.doc) === d', 'redo brings them back', after)
+    run_id = await page.evaluate("() => { const l = window.__mv.store.side.aiLog; return l[l.length - 1].runId; }")
+    res = await page.evaluate("(id) => window.__mv.ai.revert(id)", run_id)
+    f.check(res and res['kept'] == 0 and res['n'] > 0, 'selective revert: %r' % res)
+    f.check(await page.evaluate('() => window.__mv.doc.materials.list.length') == 0, 'the created material goes with the revert')
+    await page.keyboard.press('Control+z')
+    await f.until('(d) => JSON.stringify(window.__mv.doc) === d', 'undo of the revert', after)
+    # Delete from the material page: its pins go with it (material.remove).
+    await f.settle(2)
+    await open_section(f, 'materials')
+    await page.click('.mat-row .insp-item')
+    await f.until("() => !!document.querySelector('.mat-page .mat-delete .btn')", 'the material page opens')
+    await f.shot('material_page')
+    await page.click('.mat-page .mat-delete .btn')
+    await f.until("() => window.__mv.doc.materials.list.length === 0", 'the material is deleted')
+    left = await page.evaluate("(k) => Object.entries(window.__mv.doc.pins).filter(([p, x]) => x.v === k).length", st['key'])
+    f.check(left == 0, 'its pins are cleared: %d left' % left)
+    await f.undo_all(done0, doc0)
+
+
+async def flow_ai_board(f, lang):
+    """区画ごとに指示 (DESIGN_2_1 §6.3), keyboard only: the board lists the song areas; two drafts (kept in side.asks and
+    when the board is closed and opened again); まとめて送る → one request with two briefs → a review with two area groups →
+    Enter on 反映 → both rows say 反映済み. 9 drafts disable 送る with ai.board.max."""
+    page = f.page
+    done0, doc0 = await with_lyrics(f)
+    answers = []
+    if not await analysed_song(f, answers):
+        return
+    areas = await page.evaluate(SONG_AREAS)
+    verse = next((x for x in areas if x['kind'] == 'verse'), None)
+    chorus = next((x for x in areas if x['kind'] == 'chorus'), None)
+    answers.append({'answers': [d_answer(0, all_={'speed': 0.75}), d_answer(1, all_={'arriveCurve': d_curve('softEnds')})]})
+    # 対象 by keyboard: → → reaches 区画 and opens the list with the focus on its first area; ↓ and Enter pick サビ1.
+    await page.focus('.ai-direct [data-target="work"]')
+    await page.keyboard.press('ArrowRight')
+    await page.keyboard.press('ArrowRight')
+    await f.until("() => !document.querySelector('#ai-area-list').hidden", '→ → opens the area list')
+    f.check(await page.evaluate("() => document.activeElement.getAttribute('role')") == 'option', 'the focus is on the first area')
+    for _ in range(len(areas) + 2):
+        if await page.evaluate("(k) => document.activeElement.dataset.area === k", chorus['key']):
+            break
+        await page.keyboard.press('ArrowDown')
+    await page.keyboard.press('Enter')
+    chip = await page.evaluate("() => { const c = document.querySelector('.ai-target-chip'); return c && !c.hidden ? c.textContent : null; }")
+    f.check(chip and (lang != 'ja' or 'サビ1' in chip), 'Enter picks サビ1: %r' % chip)
+    f.check(await page.evaluate("() => document.activeElement.id") == 'ai-direct-text', 'the focus moves to the instruction')
+    await page.focus('.ai-board-link')
+    await page.keyboard.press('Enter')
+    if not await f.until("() => !!document.querySelector('.ai-board .ai-board-input')", 'the board opens'):
+        return
+    rows = await page.evaluate("() => [...document.querySelectorAll('.ai-board-row')].map((r) => r.dataset.key)")
+    f.check(rows == [x['key'] for x in areas], 'one row per song area: %r' % rows)
+    f.check(await page.evaluate("() => document.activeElement === document.querySelector('.ai-board-input')"), 'the focus starts on the first row')
+    await page.focus('.ai-board-row[data-key="%s"] .ai-board-input' % verse['key'])
+    await page.keyboard.type('動きをゆっくり')
+    await page.keyboard.press('Tab')
+    active = await page.evaluate("() => document.activeElement.closest('.ai-board-row').dataset.key")
+    f.check(active == chorus['key'], 'Tab moves to the next row: %r' % active)
+    await page.keyboard.type('入りを滑らかに')
+    await f.until('(k) => !!(window.__mv.store.side.asks || {})[k]', 'the drafts are kept in side.asks', chorus['key'])
+    # Back and in again: the drafts are still there.
+    await page.focus('.ai-board [data-fkey="board-back"]')
+    await page.keyboard.press('Enter')
+    await f.until("() => !document.querySelector('.ai-board') || document.querySelector('.ai-board-host').hidden", 'back to the tools')
+    await page.focus('.ai-board-link')
+    await page.keyboard.press('Enter')
+    await f.until("() => !!document.querySelector('.ai-board .ai-board-input')", 'the board opens again')
+    kept = await page.evaluate("(k) => document.querySelector('.ai-board-row[data-key=\"' + k + '\"] .ai-board-input').value", verse['key'])
+    f.check(kept == '動きをゆっくり', 'a draft survives closing the board: %r' % kept)
+    await f.shot('board')
+    await page.focus('.ai-board .btn.primary')
+    await page.keyboard.press('Enter')
+    if not await f.until("() => window.__mv.ai.state.review && window.__mv.ai.state.review.kind === 'direct'", 'the review of both areas'):
+        return
+    sent = [s for s in f.ai_seen if s['method'] == 'POST'][-1]['body']['contents'][0]['parts'][0]['text']
+    f.check('動きをゆっくり' in sent and '入りを滑らかに' in sent, 'one request carries both briefs')
+    await f.settle(3)
+    heads = await page.evaluate(REVIEW_GROUPS)
+    f.check(len(heads) == 2 and (lang != 'ja' or (heads[0].startswith('区画 Aメロ1') and heads[1].startswith('区画 サビ1'))),
+            'a group per area: %r' % heads)
+    done = await page.evaluate(DONE)
+    await page.focus('.ai-review-foot .btn.primary')
+    await page.keyboard.press('Enter')
+    await f.until('(n) => window.__mv.store.list().filter((e) => e.done).length === n + 1', 'one undo entry', done)
+    await f.until("() => !!document.querySelector('.ai-board-row')", 'the board comes back after the review')
+    states = await page.evaluate("() => [...document.querySelectorAll('.ai-board-row')].map((r) => r.querySelector('.ai-board-state').dataset.state)")
+    want = ['done' if k in (verse['key'], chorus['key']) else 'new' for k in rows]
+    f.check(states == want, 'both rows say 反映済み: %r' % states)
+    # 9 drafts: 送る is off and says why.
+    await page.evaluate("""() => { const a = window.__mv, AC = MV.use('ui/ai_controller'), AR = MV.use('planner/areas');
+      const ids = a.plan.lines.map((l) => l.id), sets = ids.map((x) => [x]);
+      for (let i = 0; i < ids.length; i++) for (let j = i + 1; j < ids.length; j++) sets.push([ids[i], ids[j]]);
+      a.store.setSide((side) => sets.slice(0, 9).reduce((s, x, k) => AC.withAsk(s, AR.keyOf({ kind: 'lines', ids: x }), 'x' + k, k), side)); }""")
+    await f.settle(3)
+    n = await page.evaluate("() => document.querySelectorAll('.ai-board-row').length")
+    why = await page.evaluate("() => { const b = document.querySelector('.ai-board .btn.primary'), r = document.querySelector('.ai-board .ai-reason'); return { off: b.disabled, text: r.hidden ? '' : r.textContent, want: window.__mv.t('ai.board.max') }; }")
+    f.check(why['off'] and why['text'] == why['want'], 'more than 8 drafts: 送る is off with ai.board.max (%d rows): %r' % (n, why))
+    await f.undo_all(done0, doc0)
+
+
+async def flow_materials(f, lang):
+    """マイ素材 (DESIGN_2_1 §6.9) on the v21 project: 入り › マイ素材 › ＋ AIで作る (the inline form) runs the material tool for
+    the line; its review applies the material and uses it there (one undo step). 全体 › マイ素材 › a material: rename ✎,
+    おまかせでも使う, a knob (量), 複製, the recipe JSON (確かめる names what is wrong), 削除 with its note. Undo-all."""
+    page = f.page
+    done0, doc0 = await open_v21(f)
+    mat = dict(D_FLURRY, name='ふわ入り', nameEn='Soft rise', kind='arrive', scope='cut', season='', base='inkRise',
+               params=[{'name': 'yFrom', 'value': '1.2'}], layers=[], knobs=[])
+    await ai_route(f, [{'understood': True, 'question': '', 'material': mat}])
+    await ai_open(f)
+    await open_line(f, 'r5')
+    await page.click(ROW % 'arrive' + ' .w-part')
+    await f.until("() => !!document.querySelector('.pb-tabs [data-tab=\"mine\"]')", 'the part browser has マイ素材')
+    await page.click('.pb-tabs [data-tab="mine"]')
+    await f.until("() => !!document.querySelector('.pb-tile.pb-make')", 'the first tile is ＋ AIで作る')
+    tiles = await page.evaluate("() => [...document.querySelectorAll('.pb-grid .pb-tile')].map((x) => x.dataset.key || 'make')")
+    f.check('myMat1' in tiles, 'the 入り material is a tile: %r' % tiles)
+    await page.click('.pb-tile.pb-make')
+    await f.until("() => !document.querySelector('#pb-make-form').hidden", 'the inline form opens under the grid')
+    f.check(await page.evaluate("() => document.activeElement.classList.contains('pb-make-text')"), 'the focus is in the form')
+    await page.keyboard.type('ふわっと浮かんで着地する')
+    await f.shot('make_form')
+    done = await page.evaluate(DONE)
+    await page.keyboard.press('Enter')
+    if not await f.until("() => window.__mv.ai.state.review && window.__mv.ai.state.review.tool === 'material'", 'the material review'):
+        return
+    await f.settle(3)
+    rows = await page.evaluate("() => document.querySelectorAll('.ai-review .ai-row').length")
+    f.check(rows == 2, 'the material and its use on the line: %d rows' % rows)
+    await page.click('.ai-review-foot .btn.primary')
+    await f.until("() => window.__mv.doc.materials.list.length === 4", 'the material is made')
+    f.check(await page.evaluate(DONE) == done + 1, 'one undo entry')
+    pin = await page.evaluate(PIN_V, 'line/r5:arrive')
+    f.check(pin == {'v': 'myMat4', 'by': 'ai'}, 'the line uses it: %r' % pin)
+    # 全体 › マイ素材 › 桜吹雪.
+    await page.evaluate("() => { const a = window.__mv; a.openPanel('details'); a.select({ level: 'work' }, { from: 'key', open: true }); }")
+    await f.settle(3)
+    await open_section(f, 'materials')
+    names = await page.evaluate("() => [...document.querySelectorAll('.mat-row')].map((r) => r.dataset.mat)")
+    f.check(names == ['m1', 'm2', 'm3', 'm4'], 'マイ素材 lists every material: %r' % names)
+    await page.click('.mat-row[data-mat="m3"] .insp-item')
+    await f.until("() => !!document.querySelector('.mat-page .mat-name')", 'the material page opens')
+    crumb = await page.evaluate("() => document.querySelector('[data-mount=\"inspector\"] .insp-crumbs').textContent")
+    f.check(lang != 'ja' or '桜吹雪' in crumb, 'the crumb names it: %r' % crumb)
+    done = await page.evaluate(DONE)
+    await page.click('.mat-page .mat-head .icon-btn')
+    await page.keyboard.press('Control+a')
+    await page.keyboard.type('夜桜')
+    await page.keyboard.press('Enter')
+    await f.until("() => window.__mv.doc.materials.list[2].name.ja === '夜桜'", 'rename ✎')
+    await page.click('.mat-page .check-row input')
+    await f.until("() => window.__mv.doc.materials.list[2].pool === true", 'おまかせでも使う')
+    knob = '.mat-page .mat-knob input[type="text"], .mat-page .mat-knob .w-num'
+    if await page.evaluate('(s) => !!document.querySelector(s)', knob):
+        before = await page.evaluate("() => JSON.stringify(window.__mv.doc.materials.list[2].recipe)")
+        await page.fill(knob + ' >> nth=0', '1.5')
+        await page.keyboard.press('Enter')
+        await f.until('(b) => JSON.stringify(window.__mv.doc.materials.list[2].recipe) !== b', 'the knob bakes into the recipe', before)
+    f.check(await page.evaluate(DONE) >= done + 3, 'each change is an undo entry')
+    await page.click('.mat-page .row-actions .btn >> nth=1')
+    await f.until("() => window.__mv.doc.materials.list.length === 5", '複製')
+    dup = await page.evaluate("() => { const m = window.__mv.doc.materials.list[4]; return [m.by, m.name.ja]; }")
+    f.check(dup == ['user', '夜桜'], 'the copy is made by the user: %r' % dup)
+    await page.click('.mat-page .mat-recipe summary')
+    await page.click('.mat-page .mat-recipe .link')
+    await page.fill('.mat-page .mat-json-edit', '{ "layers": [')
+    await page.click('.mat-page .mat-json-box .btn >> nth=0')
+    probs = await page.evaluate("() => document.querySelector('.mat-page .mat-problems').textContent")
+    f.check(probs == await page.evaluate("() => window.__mv.t('mat.badJson')"), '確かめる says the JSON is unreadable: %r' % probs)
+    await f.shot('material_page')
+    note = await page.evaluate("() => { const n = document.querySelector('.mat-page .mat-delete .note'); return n ? n.textContent : ''; }")
+    f.check(lang != 'ja' or '2か所' in note, '削除 says how many places use it: %r' % note)
+    await page.click('.mat-page .mat-delete .btn')
+    await f.until("() => !window.__mv.doc.materials.list.some((m) => m.id === 'm3')", 'the material is deleted')
+    pins = await page.evaluate("() => Object.keys(window.__mv.doc.pins).filter((p) => p.includes('myMat3') || (window.__mv.doc.pins[p].v === 'myMat3'))")
+    f.check(pins == [], 'its pins go with it: %r' % pins)
+    await f.undo_all(done0, doc0)
+
+
 FLOWS = [('first_run', flow_first_run_mouse, True), ('first_run_keys', flow_first_run_keys, True), ('drill', flow_drill, False),
          ('pin', flow_pin, False), ('lock', flow_lock, False), ('history', flow_history, False), ('tools', flow_tools, False),
          ('keys', flow_keys, False), ('values', flow_values, False), ('ai_prep', flow_ai_prep, False),
@@ -2010,6 +2671,9 @@ FLOWS = [('first_run', flow_first_run_mouse, True), ('first_run_keys', flow_firs
          ('playback', flow_playback, False), ('open_damaged', flow_open_damaged, False), ('autosave', flow_autosave, False),
          ('tabs', flow_tabs, False), ('tap', flow_tap, False), ('first_look', flow_first_look, False), ('preview', flow_preview, False),
          ('song_step', flow_song_step, False), ('clear_device', flow_clear_device, False)]
+# v2.1 (package F, DESIGN_2_1 §7.4).
+FLOWS += [('curve', flow_curve, False), ('keyframes', flow_keyframes, False), ('areas', flow_areas, False),
+          ('ai_area', flow_ai_area, False), ('ai_board', flow_ai_board, False), ('materials', flow_materials, False)]
 
 
 async def run(browser, base, rel, lang, only, shots):

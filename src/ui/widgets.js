@@ -1,5 +1,6 @@
-/* 文字PVメーカー v2 — original work. Inspector widgets: part, choice, number, time, color, font, toggle, words, cutpoints, text, slots (DESIGN §6.4.4). */
-MV.def('ui/widgets', ['ui/dom', 'ui/icons', 'i18n/t', 'core/color', 'ui/playbar'], (dom, I, T, C, PB) => {
+/* 文字PVメーカー v2 — original work. Inspector widgets: part, choice, number, time, color, font, toggle, words, cutpoints, text, slots, curve, shot, rig, partRefs (DESIGN §6.4.4; DESIGN_2_1 §6.5, §6.6). */
+MV.def('ui/widgets', ['ui/dom', 'ui/icons', 'i18n/t', 'core/color', 'ui/playbar', 'core/shot', 'ui/curve_widget'],
+  (dom, I, T, C, PB, SHOT, CW) => {
   'use strict';
 
   const { h } = dom;
@@ -539,7 +540,103 @@ MV.def('ui/widgets', ['ui/dom', 'ui/icons', 'i18n/t', 'core/color', 'ui/playbar'
     };
   }
 
-  const MAKERS = { part, choice, number, time, color, font, toggle, words, cutpoints, text, slots };
+  // --- shot (カメラワーク: thumbnail and name → the shot tile page, DESIGN_2_1 §6.5) ------------------------------------
+
+  function shot(field, env) {
+    const t = env.t;
+    const canvas = h('canvas', { class: 'w-thumb', width: 128, height: 72, 'aria-hidden': 'true' });
+    const name = h('span', { class: 'w-part-name' });
+    const btn = h('button', { class: 'w-part w-shot', type: 'button', 'aria-haspopup': 'true', 'aria-label': env.label },
+      canvas, name, I.icon('next', { size: 16 }));
+    btn.addEventListener('click', () => env.open());
+    let shown;
+    return {
+      el: btn,
+      focus: () => dom.focus(btn),
+      update(st) {
+        const v = SHOT.coerceShot(st.value);
+        const text = st.mixed ? t('state.mixed') : t.label(SHOT.label(v === undefined ? 'none' : v));
+        name.textContent = text;
+        btn.setAttribute('aria-label', env.label + ': ' + text);
+        btn.disabled = !!st.readOnly;
+        // A custom shot has no preset thumbnail.
+        const key = st.mixed || v === undefined || typeof v !== 'string' ? null : v;
+        if (key !== shown) { shown = key; env.thumb(canvas, key); }
+      },
+    };
+  }
+
+  // --- rig (区画のカメラ: a select of 自動 / なし / the presets; a custom rig is shown, not offered) ------------------------
+
+  function rig(field, env) {
+    const t = env.t;
+    const options = [{ v: AUTO, label: 'state.auto' }].concat(['none'].concat(SHOT.RIG_KEYS).map((v) => ({ v, label: 'rig.' + v })));
+    const mixedOpt = h('option', { value: 'mixed', text: t('state.mixed'), disabled: true });
+    const customOpt = h('option', { value: 'custom', text: t('rig.custom'), disabled: true });
+    const sel = h('select', { class: 'select w-select', 'aria-label': env.label }, mixedOpt, customOpt,
+      options.map((o, i) => h('option', { value: String(i), text: optionText(t, o) })));
+    sel.addEventListener('change', () => {
+      const o = options[Number(sel.value)];
+      if (!o) return;
+      if (o.v === AUTO) env.unpin(); else env.commit(o.v);
+    });
+    return {
+      el: sel, focus: () => dom.focus(sel),
+      update(st) {
+        const v = SHOT.coerceRig(st.value);
+        const isCustom = v !== undefined && typeof v !== 'string';
+        const at = st.mixed || isCustom ? -1 : st.auto ? 0 : options.findIndex((o) => o.v === v);
+        mixedOpt.hidden = !st.mixed;
+        customOpt.hidden = !isCustom;
+        if (document.activeElement !== sel) sel.value = st.mixed ? 'mixed' : isCustom ? 'custom' : String(Math.max(0, at));
+        sel.disabled = !!st.readOnly;
+      },
+    };
+  }
+
+  // --- partRefs (この行で使わない部品: chips with ×, plus [+] → a kind, then the part browser in pick mode) --------------
+
+  // refsWith(list, ref) / refsWithout(list, ref) → the canonical PartRefs (sorted, unique, ≤ 24).
+  function refsWith(list, ref) {
+    return [...new Set((Array.isArray(list) ? list : []).concat([ref]))].sort().slice(0, 24);
+  }
+  function refsWithout(list, ref) { return (Array.isArray(list) ? list : []).filter((x) => x !== ref); }
+
+  function partRefs(field, env) {
+    const t = env.t;
+    const chips = h('div', { class: 'chips w-refs', role: 'list', 'aria-label': env.label });
+    const add = h('button', { class: 'chip-btn', type: 'button', on: { click: () => env.open() } }, I.icon('plus', { size: 14 }),
+      t('w.refs.add'));
+    const el = h('div', { class: 'w-refsbox' }, chips, add);
+    let list = [];
+    const nameOf = (ref) => {
+      const at = ref.indexOf('.');
+      const kind = ref.slice(0, at), key = ref.slice(at + 1);
+      return t('w.refs.item', { kind: t.has('kind.' + kind) ? t('kind.' + kind) : kind, part: env.app.label(kind, key) });
+    };
+    return {
+      el, focus: () => dom.focus(chips.querySelector('button') || add),
+      update(st) {
+        list = Array.isArray(st.value) ? st.value.slice() : [];
+        if (st.mixed) { dom.replace(chips, h('span', { class: 'muted small', text: t('state.mixed') })); }
+        else if (!list.length) dom.replace(chips, h('span', { class: 'muted small', text: t('fld.none') }));
+        else {
+          dom.replace(chips, list.map((ref) => {
+            const name = nameOf(ref);
+            return h('span', { class: 'chip w-ref', role: 'listitem', 'data-ref': ref }, h('span', { class: 'ell', text: name }),
+              h('button', { class: 'icon-btn small', type: 'button', title: t('w.refs.remove', { name }), 'aria-label': t('w.refs.remove', { name }),
+                disabled: !!st.readOnly, on: { click: () => {
+                  const next = refsWithout(list, ref);
+                  if (next.length) env.commit(next); else env.unpin();
+                } } }, I.icon('close', { size: 12 })));
+          }));
+        }
+        add.disabled = !!st.readOnly || list.length >= 24;
+      },
+    };
+  }
+
+  const MAKERS = { part, choice, number, time, color, font, toggle, words, cutpoints, text, slots, curve: CW.make, shot, rig, partRefs };
 
   function make(field, env) {
     const maker = MAKERS[field.widget];
@@ -547,5 +644,6 @@ MV.def('ui/widgets', ['ui/dom', 'ui/icons', 'i18n/t', 'core/color', 'ui/playbar'
     return maker(field, env);
   }
 
-  return { make, AUTO, toggleRange, covered, optionText, round, cutClick, numberText, ownsKey, colorView, names: () => Object.keys(MAKERS) };
+  return { make, AUTO, toggleRange, covered, optionText, round, cutClick, numberText, ownsKey, colorView, refsWith, refsWithout,
+    names: () => Object.keys(MAKERS) };
 });

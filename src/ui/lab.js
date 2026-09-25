@@ -767,18 +767,16 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core
 
   // perf(o) → frame times (ms) of a fixture project rendered for `seconds` at `fps` with the short side `short` (720 by
   // default). Each frame is followed by a 1-pixel read, so the time includes the canvas work, not only the recording of
-  // the calls. o.camera: the automatic camerawork at full strength (work:amount.camera pinned to 1, so the planner's
-  // shots, DESIGN_2_1 §4.7, are the most it makes) under a rig (work:rig pinned to slowSwell: project_long's own runs
-  // draw none); o.materials: the sample materials in every slot (source 'materials'). The result adds behaveP50 (the
-  // behave stage: evaluation and world solve), shots (cut scenes in the window with a shot), rigs (rig runs other than
-  // 'none') and mixShare (the smallest particle share of the scenes built).
+  // the calls. o.camera: the planner's automatic camerawork (DESIGN_2_1 §4.7: the shots it gives the project) under a
+  // rig (work:rig pinned to slowSwell: project_long's own runs draw none); o.materials: the sample materials in every
+  // slot (source 'materials'). The result adds behaveP50 (the behave stage: evaluation and world solve), shots (cut
+  // scenes in the window with a shot), rigs (rig runs other than 'none') and mixShare (the smallest particle share of the
+  // scenes built).
   async function perf(o) {
     const source = o.parts || defaultSource();
     const rec = engineFor(source, false, true);
     const doc = projectDoc(o.project);
-    if (o.camera) {
-      doc.pins = Object.assign({}, doc.pins, { 'work:amount.camera': { v: 1, by: 'user' }, 'work:rig': { v: 'slowSwell', by: 'user' } });
-    }
+    if (o.camera) doc.pins = Object.assign({}, doc.pins, { 'work:rig': { v: 'slowSwell', by: 'user' } });
     rec.engine.setDoc(doc);
     let plan = rec.engine.plan;
     if (o.materials) plan = withMaterials(plan, rec.engine.registry);

@@ -94,13 +94,16 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
 
   function createApp(svc) {
     const lang = MV.LANG === 'en' ? 'en' : 'ja';
-    const t = T.createT(lang, strings, svc.registry);
     const view = V.createView({ storage: safeStorage('localStorage') });
     const store = ST.createStore({ doc: D.defaultDoc(), side: D.defaultSide(), reduce: svc.reduce, now: () => Date.now() });
     const engine = svc.createEngine();
+    // The effective registry: the base parts plus this project's materials (engine.registry, DESIGN_2_1 §3.10). Part
+    // names read through it (a material's name, §3.7).
+    const regOf = () => engine.registry;
+    const t = T.createT(lang, strings, regOf);
     const bus = createBus();
     return {
-      t, lang, view, store, engine, bus, reg: svc.registry, svc, actions: null, layout: null, shell: null, io: null, tap: null,
+      t, lang, view, store, engine, bus, get reg() { return regOf(); }, svc, actions: null, layout: null, shell: null, io: null, tap: null,
       plan: null, prevDoc: null, exporting: null, popover: null, clipboard: null, peaks: null, tapCore: svc.tapCore,
       get doc() { return store.doc; },
       reduce: (doc, cmd) => svc.reduce(doc, cmd),
@@ -136,7 +139,7 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
       const before = app.plan;
       engine.setDoc(store.doc);
       app.plan = engine.plan;
-      const sel = S.validate(view.state.sel, app.plan);
+      const sel = S.validate(view.state.sel, app.plan, store.doc);
       if (!S.equal(sel, view.state.sel)) view.set({ sel });
       if (app.plan && view.state.time > app.plan.duration) view.set({ time: app.plan.duration });
       bus.emit('plan', Object.assign({ before }, e || { kind: 'load', touched: { rows: 'all', look: true } }));
@@ -293,7 +296,7 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
     // select(sel, { from, open, pause, seek: true | false | 'ifPaused' }).
     app.select = (sel, opts) => {
       const o = opts || {};
-      const s = S.validate(sel, app.plan);
+      const s = S.validate(sel, app.plan, app.doc);
       if (o.pause) app.pause();
       view.set({ sel: s });
       const openable = s.level !== 'work' || o.from === 'header' || o.from === 'crumbs';
@@ -614,7 +617,7 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
         if (code === 'cancelled' || (abort && abort.signal.aborted)) { set({ phase: 'idle' }); app.toast(t('err.exp.cancelled')); }
         else {
           if (typeof console !== 'undefined') console.error(e);
-          set({ phase: 'error', message: t(OUT.errorKey(code)) });
+          set({ phase: 'error', message: t(OUT.errorKey(code), OUT.errorParams(e)) });
         }
       } finally {
         if (source && typeof source.dispose === 'function') source.dispose();

@@ -190,3 +190,81 @@ test('lyric editor: only the changed middle of the rows is rebuilt', () => {
   assert.deepEqual(E.changedRows(a, a), { a: 1500, oldEnd: 1500, newEnd: 1500 }, 'no change');
   assert.deepEqual(E.changedRows(['x', 'x'], ['x', 'x', 'x']), { a: 2, oldEnd: 2, newEnd: 3 }, 'repeated rows');
 });
+
+// --- v2.1 (package F): a line selection that names an area (DESIGN_2_1 §5.1, §6.3, §6.8) -----------------------------
+
+function v21() {
+  const M = MV.use('core/migrate');
+  const doc = M.parseFile(corpus.projectText('v21')).doc;
+  const plan = MV.use('planner/plan').plan(doc, { registry: MV.use('parts/catalog').defaultRegistry() });
+  return { doc, plan };
+}
+
+test('v2.1 areaSel: an area selects its lines with the ref, a cut area its cut, the work area 全体', () => {
+  const AREAS = MV.use('planner/areas');
+  const { doc, plan } = v21();
+  const all = AREAS.areasOf(doc, plan);
+  const verse = all.song.find((a) => a.n > 1);
+  const sel = S.areaSel(verse);
+  assert.deepEqual(sel, { level: 'line', ids: verse.lineIds.slice(), area: verse.ref });
+  assert.notEqual(sel.ids, verse.lineIds, 'a copy of the frozen list');
+  assert.deepEqual(S.areaSel(all.song.find((a) => a.n === 0)), S.WORK, 'a section without lines (the intro)');
+  assert.deepEqual(S.areaSel(AREAS.resolve(doc, plan, { kind: 'work' })), S.WORK);
+  const cutKey = plan.cuts.find((c) => c.line).key;
+  assert.deepEqual(S.areaSel(AREAS.resolve(doc, plan, { kind: 'cut', key: cutKey })), { level: 'cut', key: cutKey });
+  assert.deepEqual(S.areaSel(null), S.WORK);
+  // Crumbs and the scope of an area selection are those of its lines (the last crumb keeps the area).
+  const labels = (s) => S.crumbs(s, plan).map((c) => c.label);
+  assert.deepEqual(labels(sel), labels({ level: 'line', ids: sel.ids }));
+  assert.deepEqual(S.crumbs(sel, plan).pop().sel, sel);
+  assert.deepEqual(S.scopeOf(sel), S.scopeOf({ level: 'line', ids: sel.ids }));
+});
+
+test('v2.1 validate: the area stays while it has exactly the selected lines, else it is dropped and the ids stay', () => {
+  const AREAS = MV.use('planner/areas');
+  const { doc, plan } = v21();
+  const head = AREAS.areasOf(doc, plan).heads[0];
+  const sel = S.areaSel(head);
+  assert.equal(S.validate(sel, plan, doc), sel, 'unchanged');
+  assert.equal(S.validate(sel, plan), sel, 'without the document a well-formed ref is kept');
+  // A bad or non-line ref is dropped even without the document.
+  for (const area of [{ kind: 'cut', key: plan.cuts[0].key }, { kind: 'work' }, { kind: 'head' }, 'head:r3', null]) {
+    assert.deepEqual(S.validate(Object.assign({}, sel, { area }), plan), { level: 'line', ids: sel.ids }, JSON.stringify(area));
+  }
+  // Fewer ids than the heading has (a line typed into it since): the area is dropped.
+  const fewer = { level: 'line', ids: sel.ids.slice(0, -1), area: head.ref };
+  assert.deepEqual(S.validate(fewer, plan, doc), { level: 'line', ids: fewer.ids });
+  // More ids than it has (a line added to the selection with Shift): the area is dropped too.
+  const extra = plan.lines.find((l) => !sel.ids.includes(l.id)).id;
+  const more = { level: 'line', ids: sel.ids.concat([extra]), area: head.ref };
+  assert.deepEqual(S.validate(more, plan, doc), { level: 'line', ids: more.ids });
+  // The heading row is deleted: the ref no longer resolves.
+  const gone = { level: 'line', ids: sel.ids, area: { kind: 'head', rowId: 'nope' } };
+  assert.deepEqual(S.validate(gone, plan, doc), { level: 'line', ids: sel.ids });
+  // A line of the area deleted: the ids shrink first (the area goes with them).
+  const plan2 = Object.assign({}, plan, { lines: plan.lines.filter((l) => l.id !== sel.ids[0]) });
+  assert.deepEqual(S.validate(sel, plan2, doc), { level: 'line', ids: sel.ids.slice(1) });
+  // A "lines" ref (the board's 選択中の行を区画にする) holds while those lines exist.
+  const ids = plan.lines.slice(0, 2).map((l) => l.id);
+  const lines = { level: 'line', ids, area: { kind: 'lines', ids } };
+  assert.equal(S.validate(lines, plan, doc), lines);
+});
+
+test('v2.1 timeline: the area band under a time; the highlight names one line or an area\'s lines', () => {
+  const TL = MV.use('ui/timeline');
+  const AREAS = MV.use('planner/areas');
+  const { doc, plan } = v21();
+  const bands = AREAS.bands(doc, plan);
+  assert.ok(bands.length >= 2);
+  assert.equal(TL.bandAt(bands, bands[1].t0), bands[1], 'a band starts at its t0');
+  assert.equal(TL.bandAt(bands, bands[0].t1), bands[1], 'and ends before its t1');
+  assert.equal(TL.bandAt(bands, -1), null);
+  assert.equal(TL.bandAt(null, 3), null);
+  // The band's selection is its area's lines (ui/selection.areaSel of the resolved ref).
+  const verse = bands.find((b) => b.n > 1);
+  const sel = S.areaSel(AREAS.resolve(doc, plan, verse.ref));
+  assert.equal(sel.ids.length, verse.n);
+  assert.deepEqual([...TL.highlighted(['r4', 'r5'])], ['r4', 'r5']);
+  assert.deepEqual([...TL.highlighted('r4')], ['r4']);
+  assert.deepEqual([...TL.highlighted(null)], []);
+});

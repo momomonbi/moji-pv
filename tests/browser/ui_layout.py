@@ -21,6 +21,10 @@ With no lyrics yet, [サンプルで試す] lies inside the editor at every view
 Step ④ is also checked with its longest pre-flight items and their fix links (透過PNG leaving out a screen effect; an
 MP4 of a transparent backdrop).
 
+v2.1 (DESIGN_2_1 §7.4): on the v21 project, the curve widget with かんたん open, the keyframe editor, the AI board and a
+material page are checked at every viewport with the same layout, clipping, covering and budget checks; the panel never
+scrolls sideways, and the viewports cover panel widths from 288 to 352 px.
+
 Run: PW_EXECUTABLE=/opt/pw-browsers/chromium python3 tests/browser/ui_layout.py [--quick] [--shots DIR] [--root DIR]
 """
 import argparse
@@ -429,6 +433,111 @@ async def check_playbar(page, lang, viewports, shots):
     return failures
 
 
+# v2.1 (package F, DESIGN_2_1 §7.4): the new pages in the 詳細 / AI panel at every viewport: the curve widget with
+# かんたん open, the keyframe editor, the board and a material page fit the panel (288–352 px wide), with the same layout,
+# clipping, covering and control-budget checks as above.
+V21_TEXT = (ROOT / 'tests' / 'fixtures' / 'project_v21.json').read_text(encoding='utf-8')
+V21_PAGES = [
+    ('curve', """() => { const a = window.__mv; a.openPanel('details');
+      a.select({ level: 'line', ids: ['r4'] }, { from: 'crumbs', open: true }); }""",
+     "() => !!document.querySelector('.frow[data-slot=\"arrive.ease\"] .cw-simple:not([hidden])')"),
+    ('keyframes', """() => { const a = window.__mv; a.openPanel('details');
+      a.select({ level: 'el', scope: 'cut/' + a.plan.lines[1].cuts[0], el: 'lens' }, { from: 'crumbs', open: true });
+      requestAnimationFrame(() => requestAnimationFrame(() => document.querySelector('[data-custom="camKeys"] button').click())); }""",
+     "() => document.querySelectorAll('.ke-page .ke-row').length > 1"),
+    ('board', """() => { const a = window.__mv; a.openPanel('ai');
+      requestAnimationFrame(() => document.querySelector('.ai-board-link').click()); }""",
+     "() => document.querySelectorAll('.ai-board .ai-board-row').length > 1"),
+    ('material', """() => { const a = window.__mv; a.openPanel('details'); a.select({ level: 'work' }, { from: 'crumbs', open: true });
+      requestAnimationFrame(() => requestAnimationFrame(() => { a.inspector.openSection('materials');
+        requestAnimationFrame(() => document.querySelector('.mat-row[data-mat="m3"] .insp-item').click()); })); }""",
+     "() => !!document.querySelector('.mat-page .mat-name')"),
+]
+
+
+# The open panel narrowed to `px` (CSSOM, restored after): no control of the new page (`scope`) is clipped or cut off, and
+# the page does not stick out of the panel or scroll sideways.
+NARROW_PROBE = r"""
+async ([px, scope]) => {
+""" + CLIP_JS + r"""
+  const panel = document.querySelector('.region-panel:not([hidden])') || document.querySelector('.region-side:not([hidden])');
+  const root = document.querySelector(scope);
+  if (!panel || !root) return ['no panel or no ' + scope];
+  const old = panel.style.width;
+  panel.style.width = px + 'px';
+  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(r))));
+  const out = [];
+  const visible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+  for (const el of root.querySelectorAll(CONTROLS)) {
+    if (!visible(el) || el.closest('[hidden]')) continue;
+    const name = (el.textContent || el.getAttribute('aria-label') || el.className).trim().slice(0, 40);
+    if (el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 2) out.push('clipped: ' + name);
+    const why = cutByParent(el);
+    if (why) out.push(name + ' ' + why);
+  }
+  const pr = panel.getBoundingClientRect(), rr = root.getBoundingClientRect();
+  if (rr.right > pr.right + 0.5) out.push(scope + ' sticks out by ' + Math.round(rr.right - pr.right) + ' px');
+  if (root.scrollWidth > root.clientWidth + 1) out.push(scope + ' scrolls sideways (' + root.scrollWidth + ' in ' + root.clientWidth + ')');
+  panel.style.width = old;
+  return [...new Set(out)];
+}
+"""
+
+
+NARROW_SCOPE = {'curve': '.frow[data-slot="arrive.ease"]', 'keyframes': '.ke-page', 'board': '.ai-board', 'material': '.mat-page'}
+
+
+async def v21_pages(browser, base, rel, lang, viewports, shots):
+    page = await new_page(browser, viewport={'width': 1440, 'height': 900})
+    errors = []
+    page.on('pageerror', lambda e: errors.append(str(e)))
+    for host in FONT_HOSTS:
+        await page.route(host, lambda route: route.abort())
+    await page.goto(base + rel + '?fresh=1&test=1', wait_until='load')
+    await page.wait_for_function('window.__mv && window.__mv.ready')
+    await page.evaluate('async () => { await window.__mv.ready; }')
+    await page.evaluate("""async (text) => { const a = window.__mv; a.view.setPref('autoplay', false);
+      await a.io.openFiles([new File([text], 'v21.json', { type: 'application/json' })]); a.pause();
+      a.dispatch({ t: 'pin.set', path: 'line/r4:arrive.ease', v: { ramp: { edge: 0.1, ends: 'both', peak: 6 } }, by: 'user' }); }""", V21_TEXT)
+    failures, checked, widths = [], 0, set()
+    for (w, h) in viewports:
+        await page.set_viewport_size({'width': w, 'height': h})
+        for name, js, ready in V21_PAGES:
+            await page.evaluate("() => { const a = window.__mv; a.view.set({ rail: false, railBy: null, drawer: false }); }")
+            await page.evaluate(js)
+            if not await poll(page, ready):
+                failures.append('%s %dx%d %s: the page did not open' % (lang, w, h, name))
+                continue
+            if name == 'curve':
+                await page.evaluate("() => document.querySelector('.frow[data-slot=\"arrive.ease\"]').scrollIntoView({ block: 'center' })")
+            await settle(page)
+            probe = await page.evaluate(PROBE)
+            where = '%s %dx%d %s' % (lang, w, h, name)
+            failures += check(probe, where, None)
+            panel = probe['regions'].get('panel') or probe['regions'].get('side')
+            side = await page.evaluate("""() => { const p = document.querySelector('.region-panel:not([hidden]), .region-side:not([hidden])');
+              const s = p && p.querySelector('.insp-sub:not([hidden]), .insp-body, .ai-panel');
+              return p ? { sw: (s || p).scrollWidth, cw: (s || p).clientWidth } : null; }""")
+            if side and side['sw'] > side['cw'] + 1:
+                failures.append('%s: the panel scrolls sideways (%d in %d)' % (where, side['sw'], side['cw']))
+            if panel:
+                widths.add(round(panel['w']))
+            checked += 1
+            if shots and (w, h) in ((1024, 768), (1440, 900)):
+                await page.screenshot(path=str(Path(shots) / ('%s_%dx%d_v21_%s.png' % (lang, w, h, name))))
+            # The narrowest panel the design allows (288 px; no layout of §6.2 makes it that narrow today).
+            if (w, h) == viewports[0]:
+                bad = await page.evaluate(NARROW_PROBE, [288, NARROW_SCOPE[name]])
+                failures += ['%s at a 288 px panel: %s' % (where, x) for x in bad]
+            await page.keyboard.press('Escape')
+    if viewports == VIEWPORTS and not {312, 320, 352} <= widths:
+        failures.append('%s: the new pages were not checked at every panel width of §6.2 (saw %r)' % (lang, sorted(widths)))
+    await page.close()
+    if errors:
+        failures.append('%s v2.1 pages: page errors: %r' % (lang, errors[:3]))
+    return checked, failures, sorted(widths)
+
+
 async def poll(page, js, timeout_ms=4000):
     """Waits until the expression is truthy; returns its last value."""
     try:
@@ -671,6 +780,10 @@ async def main():
                     f = await behaviour(browser, base, rel, lang)
                     failures += f
                     print('%s %s: behaviour checks' % ('FAIL' if f else 'ok  ', lang))
+                    n, f, widths = await v21_pages(browser, base, rel, lang, viewports, args.shots)
+                    total += n
+                    failures += f
+                    print('%s %s: %d v2.1 pages checked (panel widths %r)' % ('FAIL' if f else 'ok  ', lang, n, widths))
             finally:
                 await browser.close()
     finally:

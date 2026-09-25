@@ -4,7 +4,8 @@
 First version (WP0): loads index.html, en/index.html and the lab page tests/www/lab.html from a local
 http.server and checks that the boot module rendered into #app and both vendor scripts ran (pages are rebuilt first
 when missing or stale). It also builds a small scratch tree whose inputs have CRLF and lone-CR line endings and checks
-that Chromium accepts every hash the build computed for it. WP8 extends it to every UI flow (DESIGN §8.3). Google Fonts
+that Chromium accepts every hash the build computed for it. WP8 extends it to every UI flow (DESIGN §8.3); v2.1 adds the
+new pages on the v21 project (curve widget, keyframes, マイ素材, the AI area list and board, 区画 bands). Google Fonts
 requests are blocked here, so the test never waits on the network and passes with fallback fonts.
 Run: PW_EXECUTABLE=/opt/pw-browsers/chromium python3 tests/browser/csp.py   (CI: PW_CHANNEL=chrome)
 """
@@ -104,6 +105,57 @@ async def check_page(browser, base, rel, lang):
     return problems
 
 
+# v2.1 (package F, DESIGN_2_1 §7.4): the new pages cause no violations either. The v21 project is opened and the curve
+# widget (かんたん, a drawn plot, handles placed through CSSOM), the keyframe editor, the area list and the board of the
+# AI tab, a material page (its thumbnail animated) and 区画 bands in the drawer are shown in turn.
+V21_TEXT = (ROOT / 'tests' / 'fixtures' / 'project_v21.json').read_text(encoding='utf-8')
+V21_STEPS = [
+    """async (text) => { const a = window.__mv; a.view.setPref('autoplay', false);
+      await a.io.openFiles([new File([text], 'v21.json', { type: 'application/json' })]); a.pause(); }""",
+    """() => { const a = window.__mv; a.dispatch({ t: 'pin.set', path: 'line/r4:arrive.ease', v: { ramp: { edge: 0.1, ends: 'both', peak: 6 } },
+      by: 'user' }); a.openPanel('details'); a.select({ level: 'line', ids: ['r4'] }, { from: 'crumbs', open: true }); a.view.set({ drawer: true }); }""",
+    """() => { const a = window.__mv; a.select({ level: 'el', scope: 'cut/' + a.plan.lines[1].cuts[0], el: 'lens' }, { from: 'crumbs', open: true });
+      requestAnimationFrame(() => requestAnimationFrame(() => document.querySelector('[data-custom="camKeys"] button').click())); }""",
+    """() => { const a = window.__mv; a.select({ level: 'work' }, { from: 'crumbs', open: true });
+      requestAnimationFrame(() => requestAnimationFrame(() => { a.inspector.openSection('materials');
+        requestAnimationFrame(() => { document.querySelector('.mat-row[data-mat="m3"] .insp-item').click();
+          requestAnimationFrame(() => document.querySelector('.mat-thumb-btn').focus()); }); })); }""",
+    """() => { const a = window.__mv; a.openPanel('ai');
+      requestAnimationFrame(() => { document.querySelector('.ai-direct [data-target="area"]').click();
+        requestAnimationFrame(() => document.querySelector('.ai-board-link').click()); }); }""",
+]
+
+
+async def check_v21(browser, base, rel, lang):
+    page = await new_page(browser, viewport={'width': 1440, 'height': 900})
+    errors, console_csp = [], []
+    page.on('pageerror', lambda e: errors.append(str(e)))
+    page.on('console', lambda m: console_csp.append(m.text) if 'Content Security Policy' in m.text else None)
+    for host in FONT_HOSTS:
+        await page.route(host, lambda route: route.abort())
+    await page.add_init_script(RECORD_VIOLATIONS)
+    await page.goto(base + rel + '?fresh=1&test=1', wait_until='load')
+    await page.wait_for_function('() => window.__mv && window.__mv.ready')
+    await page.evaluate('async () => { await window.__mv.ready; }')
+    shown = []
+    for i, js in enumerate(V21_STEPS):
+        await page.evaluate(js, V21_TEXT) if i == 0 else await page.evaluate(js)
+        await page.wait_for_timeout(500)
+        shown.append(await page.evaluate("""() => ['.w-curve .cw-canvas', '.ke-page', '.mat-page', '.ai-board', '.tl-canvas']
+          .filter((s) => { const el = document.querySelector(s); return !!el && el.getClientRects().length > 0; })"""))
+    violations = await page.evaluate('window.__cspViolations')
+    await page.close()
+    problems = []
+    seen = {s for step in shown for s in step}
+    if not {'.w-curve .cw-canvas', '.ke-page', '.mat-page', '.ai-board', '.tl-canvas'} <= seen:
+        problems.append('not every new page was shown: %r' % shown)
+    if violations or console_csp:
+        problems.append('CSP violations: %r %r' % (violations, console_csp))
+    if errors:
+        problems.append('page errors: %r' % errors)
+    return problems
+
+
 def build_cr_tree(tmp):
     """A minimal tree whose sources, style and vendor scripts use CRLF (as a Windows checkout with core.autocrlf
     gives) and a lone CR; returns its root directory (src/ and vendor/) after building it."""
@@ -148,6 +200,10 @@ async def main():
                     problems = await check_page(browser, base, rel, lang)
                     print('%s %s' % ('FAIL' if problems else 'ok  ', rel))
                     failures += ['%s: %s' % (rel, msg) for msg in problems]
+                for rel, lang in PAGES[:2]:
+                    problems = await check_v21(browser, base, rel, lang)
+                    print('%s %s v2.1 pages' % ('FAIL' if problems else 'ok  ', rel))
+                    failures += ['%s v2.1 pages: %s' % (rel, msg) for msg in problems]
                 problems = await check_cr_tree(browser)
                 print('%s %s' % ('FAIL' if problems else 'ok  ', 'CRLF / lone-CR scratch tree'))
                 failures += ['CR tree: %s' % msg for msg in problems]

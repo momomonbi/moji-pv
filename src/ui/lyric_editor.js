@@ -1,5 +1,5 @@
 /* 文字PVメーカー v2 — original work. Lyric editor: a controlled textarea over a tinted mirror layer, with a gutter of times, locks, pins and warnings. */
-MV.def('ui/lyric_editor', ['ui/dom', 'ui/selection', 'i18n/t', 'core/lyrics'], (dom, S, T, L) => {
+MV.def('ui/lyric_editor', ['ui/dom', 'ui/selection', 'i18n/t', 'core/lyrics', 'planner/areas'], (dom, S, T, L, AREAS) => {
   'use strict';
 
   const { h } = dom;
@@ -129,6 +129,7 @@ MV.def('ui/lyric_editor', ['ui/dom', 'ui/selection', 'i18n/t', 'core/lyrics'], (
     let rowSrcs = [];                       // the texts they show
     let caretBefore = null;                 // the caret before the pending edit (undo puts it back there)
     let gutterFrame = 0;
+    let gutterStale = false;              // a gutter render came while the editor was hidden
     const seal = dom.debounce(() => app.store.seal(), SEAL_MS);
 
     sample.addEventListener('click', () => { if (o.onSample) o.onSample(); });
@@ -249,8 +250,11 @@ MV.def('ui/lyric_editor', ['ui/dom', 'ui/selection', 'i18n/t', 'core/lyrics'], (
       return lo;
     }
 
-    // Gutter entries for the visible rows only (§6.4.14); scrolling and resizing build the rest when they come in.
+    // Gutter entries for the visible rows only (§6.4.14); scrolling and resizing build the rest when they come in. While
+    // the editor is hidden (another step) its rows have no positions: the gutter is built when it shows again.
     function renderGutter() {
+      if (!root.clientWidth) { gutterStale = true; return; }
+      gutterStale = false;
       const doc = app.doc;
       const plan = app.plan;
       const aligned = textarea.value === docText(doc);
@@ -301,10 +305,12 @@ MV.def('ui/lyric_editor', ['ui/dom', 'ui/selection', 'i18n/t', 'core/lyrics'], (
     }
 
     // Gutter click: select the line and open 詳細 (no auto-fold); Shift = range, Ctrl = toggle; a heading selects its
-    // section (the lines up to the next heading).
+    // section (the lines up to the next heading) as the area 「# サビ」 (DESIGN_2_1 §6.8).
     dom.on(gutter, 'click', '.le-g', (ev, el) => {
       const plan = app.plan;
       if (el.dataset.heading) {
+        const area = AREAS.resolve(app.doc, plan, { kind: 'head', rowId: el.dataset.row });
+        if (area && area.lineIds.length) { app.select(S.areaSel(area), { from: 'lyrics', open: true }); return; }
         const rows = app.doc.sheet.rows;
         const at = rows.findIndex((r) => r.id === el.dataset.row);
         const ids = [];
@@ -430,7 +436,8 @@ MV.def('ui/lyric_editor', ['ui/dom', 'ui/selection', 'i18n/t', 'core/lyrics'], (
     let measureFrame = 0;
     const remeasure = () => {
       measureFrame = 0;
-      if (root.clientWidth && root.clientWidth !== lastWidth) { lastWidth = root.clientWidth; renderMirror(); }
+      if (!root.clientWidth) return;
+      if (root.clientWidth !== lastWidth) { lastWidth = root.clientWidth; renderMirror(); } else if (gutterStale) renderGutter();
     };
     if (typeof ResizeObserver === 'function') {
       new ResizeObserver(() => { if (!measureFrame) measureFrame = requestAnimationFrame(remeasure); }).observe(root);

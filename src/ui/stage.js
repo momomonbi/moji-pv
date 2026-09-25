@@ -1,5 +1,5 @@
-/* 文字PVメーカー v2 — original work. The stage: canvas host, DPR sizing, render loop, overlay, drill clicks, direct manipulation, try-on, compare. */
-MV.def('ui/stage', ['ui/dom', 'ui/selection', 'ui/output', 'i18n/t'], (dom, S, OUT, T) => {
+/* 文字PVメーカー v2 — original work. The stage: canvas host, DPR sizing, render loop, overlay, drill clicks, direct manipulation, try-on, compare, the keyframe markers (DESIGN_2_1 §6.7). */
+MV.def('ui/stage', ['ui/dom', 'ui/selection', 'ui/output', 'i18n/t', 'ui/shot_editor'], (dom, S, OUT, T, KE) => {
   'use strict';
 
   const { h } = dom;
@@ -14,6 +14,9 @@ MV.def('ui/stage', ['ui/dom', 'ui/selection', 'ui/output', 'i18n/t'], (dom, S, O
   const SELECT_INK = '#7cc4ff';
   const HIGHLIGHT_INK = '#f0b64d';        // the line a review row points at (§6.4.10.6)
   const DOUBLE_MS = 600;                  // a second click this soon after the first belongs to the same double-click
+  const MARK_PX = 13;                     // the keyframe markers ①②③ (radius, CSS px)
+  const MARK_INK = '#f0b64d';
+  const MARKS = ['①', '②', '③', '④', '⑤', '⑥'];
   const PROVISIONAL_RETRY_MS = 120;       // a paused provisional frame (fonts, scenes still coming) is redrawn after this
   const PROVISIONAL_RETRIES = 50;         // … at most this many times in a row (the font book's epoch repaints later loads)
 
@@ -224,14 +227,54 @@ MV.def('ui/stage', ['ui/dom', 'ui/selection', 'ui/output', 'i18n/t'], (dom, S, O
       }
       if (sel.level === 'el' && sel.el === 'text') for (const hd of handles(boxes, k)) drawHandle(hd, dpr);
       octx.shadowBlur = 0;
+      drawMarks(k, dpr);
+    }
+
+    // The keyframe editor's markers ①②③ where each key places its aim (DESIGN_2_1 §6.7), while its page is open and
+    // 「プレビューに印を出す」 is on.
+    function marks() {
+      const edit = app.shotEdit;
+      return edit && edit.markers ? edit.marks() : [];
+    }
+
+    function drawMarks(k, dpr) {
+      const list = marks();
+      if (!list.length) return;
+      octx.save();
+      octx.lineWidth = 2 * dpr;
+      octx.strokeStyle = MARK_INK;
+      octx.fillStyle = 'rgba(15,17,21,0.78)';
+      octx.textAlign = 'center';
+      octx.textBaseline = 'middle';
+      octx.font = Math.round(13 * dpr) + 'px system-ui, sans-serif';
+      for (const m of list) {
+        const x = m.x * k, y = m.y * k;
+        octx.beginPath();
+        octx.arc(x, y, MARK_PX * dpr, 0, Math.PI * 2);
+        octx.fill();
+        octx.stroke();
+        octx.fillStyle = MARK_INK;
+        octx.fillText(MARKS[m.i] || String(m.i + 1), x, y + dpr);
+        octx.fillStyle = 'rgba(15,17,21,0.78)';
+      }
+      octx.restore();
+    }
+
+    // The marker under a point (design units), or null.
+    function markAt(p) {
+      const plan = app.engine.plan;
+      if (!plan || !plan.design) return null;
+      const du = MARK_PX * 1.4 * plan.design.w / Math.max(1, css.w);
+      return marks().find((m) => Math.hypot(m.x - p.x, m.y - p.y) <= du) || null;
     }
 
     // The line a hovered review row points at (view.highlight, §6.4.10.6): its drawn boxes in their own ink, except
-    // the cuts the selection already outlines (`skip`).
+    // the cuts the selection already outlines (`skip`). An area highlights all of its lines (an array).
     function drawHighlight(all, skip, k, dpr) {
-      const line = app.view.state.highlight;
-      if (!line) return;
-      const boxes = all.filter((b) => b.line === line && !(skip && skip.has(b.cut)));
+      const hl = app.view.state.highlight;
+      if (!hl) return;
+      const lines = new Set(Array.isArray(hl) ? hl : [hl]);
+      const boxes = all.filter((b) => lines.has(b.line) && !(skip && skip.has(b.cut)));
       if (!boxes.length) return;
       octx.save();
       octx.lineWidth = 2.5 * dpr;
@@ -325,6 +368,13 @@ MV.def('ui/stage', ['ui/dom', 'ui/selection', 'ui/output', 'i18n/t'], (dom, S, O
       const p = toDesign(ev);
       if (!p) return;
       press = { sx: ev.clientX, sy: ev.clientY, p, alt: ev.altKey, drag: null };
+      // A keyframe marker: dragging it places its key freely (ox / oy, one gesture = one undo entry).
+      const mark = markAt(p);
+      if (mark) {
+        press.mark = mark;
+        wrap.setPointerCapture(ev.pointerId);
+        return;
+      }
       const sel = textSelected();
       if (sel) {
         const plan = app.engine.plan;
@@ -332,12 +382,21 @@ MV.def('ui/stage', ['ui/dom', 'ui/selection', 'ui/output', 'i18n/t'], (dom, S, O
         const { boxes } = quadsFor(plan);
         const hd = handles(boxes, k).find((x) => Math.hypot(x.x - p.px, x.y - p.py) <= HANDLE_PX * 1.6 * (overlay.width / css.w));
         const inside = hd || app.engine.hitTest(p.x, p.y).some((hit) => S.cutsOf(sel, app.plan).includes(hit.cut) && hit.owner === 'text');
-        if (inside) press.drag = { sel, handle: hd || null, base: app.nudgeOf(sel), k };
+        if (inside) press.drag = { sel, handle: hd || null, base: app.nudgeOf(sel), k, view: viewNow() };
       }
       wrap.setPointerCapture(ev.pointerId);
     });
 
     wrap.addEventListener('pointermove', (ev) => {
+      if (press && press.mark && app.shotEdit) {
+        const moved = Math.hypot(ev.clientX - press.sx, ev.clientY - press.sy);
+        if (!press.markGesture && moved < DRAG_MIN_PX) return;
+        const key = 'mark:' + press.mark.i;
+        if (!press.markGesture) press.markGesture = app.shotEdit.gesture(key);
+        const p = toDesign(ev);
+        if (p) app.shotEdit.place(press.mark.i, p, app.engine.plan.design, press.markGesture.key);
+        return;
+      }
       if (!press || !press.drag) return;
       const moved = Math.hypot(ev.clientX - press.sx, ev.clientY - press.sy);
       if (!press.gesture && moved < DRAG_MIN_PX) return;
@@ -365,9 +424,12 @@ MV.def('ui/stage', ['ui/dom', 'ui/selection', 'ui/output', 'i18n/t'], (dom, S, O
         const s = Math.max(0.2, Math.min(4, base.s * Math.hypot(p.x - cx, p.y - cy) / d0));
         return Object.assign({}, base, { s: Math.round(s * 100) / 100 });
       }
-      let dx = base.dx + (p.x - pr.p.x);
-      let dy = base.dy + (p.y - pr.p.y);
-      if (ev.shiftKey) { if (Math.abs(p.x - pr.p.x) > Math.abs(p.y - pr.p.y)) dy = base.dy; else dx = base.dx; }
+      // The drag is on the screen; the nudge is in the world under the camera: invert its zoom and roll (engine.viewAt,
+      // DESIGN_2_1 §6.7) so the text stays under the pointer at any closeness.
+      const w = KE.screenToWorld(p.x - pr.p.x, p.y - pr.p.y, pr.drag.view);
+      let dx = base.dx + w.dx;
+      let dy = base.dy + w.dy;
+      if (ev.shiftKey) { if (Math.abs(w.dx) > Math.abs(w.dy)) dy = base.dy; else dx = base.dx; }
       if (!ev.altKey) { dx = snap(dx); dy = snap(dy); }
       return Object.assign({}, base, { dx: Math.round(dx), dy: Math.round(dy) });
     }
@@ -384,15 +446,28 @@ MV.def('ui/stage', ['ui/dom', 'ui/selection', 'ui/output', 'i18n/t'], (dom, S, O
       return Math.abs(rot - near) <= 3 ? near : rot;
     }
 
+    // The camera at this moment ({ x, y, zoom, roll } of engine.viewAt: the current cut's camera composed with the rig).
+    function viewNow() { return app.engine.viewAt(app.time()); }
+
     wrap.addEventListener('pointerup', (ev) => {
       if (!press) return;
       if (press.gesture) { press.gesture.end(); suppressClick = true; }
+      if (press.mark) { if (press.markGesture && app.shotEdit) app.shotEdit.end(); suppressClick = true; }
       press = null;
     });
     wrap.addEventListener('pointercancel', () => {
       if (press && press.gesture) press.gesture.end();
+      if (press && press.markGesture && app.shotEdit) app.shotEdit.end();
       press = null;
     });
+    // The wheel over a marker sets its key's closeness (DESIGN_2_1 §6.7).
+    wrap.addEventListener('wheel', (ev) => {
+      const p = toDesign(ev);
+      const mark = p ? markAt(p) : null;
+      if (!mark || !app.shotEdit) return;
+      ev.preventDefault();
+      app.shotEdit.grow(mark.i, ev.deltaY < 0 ? 1 : -1);
+    }, { passive: false });
 
     // The first click opens 詳細, and auto-fold can move the canvas before the second click of a double-click lands:
     // the second click reuses the first one's design-space point instead of mapping its screen point again.
@@ -442,6 +517,7 @@ MV.def('ui/stage', ['ui/dom', 'ui/selection', 'ui/output', 'i18n/t'], (dom, S, O
       if (changed.includes('playing') && app.view.state.playing) startLoop();
     });
     app.bus.on('plan', () => { if (!alt) invalidate(); });
+    app.bus.on('shotEdit', () => invalidate());
 
     return {
       layout, invalidate, setAlt, fullscreen, focus: () => dom.focus(wrap), element: wrap,

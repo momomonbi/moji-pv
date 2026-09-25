@@ -5009,6 +5009,126 @@ v2 frames. The registry version is unchanged (1e6ef40c): shared autos are not in
 - Only the fake store has driven the media engine so far; the real store (G.1) and the catalog media parts (G.3) meet
   it in G.3 / G.4.
 
+## v2.1-F
+
+Package F of DESIGN_2_1 §8.6: the UI of §6 (the instruction block, the board, the area review, the inspector rows, the
+curve widget, the keyframe editor, areas, マイ素材, keys and accessibility) and the §7.4 browser flows. F now holds
+`i18n/strings.js`.
+
+**Built**
+- **New modules** (L7): `ui/curve_widget` (選択肢, the plot with its handles, かんたん, カスタム), `ui/shot_editor` (キーフレーム:
+  rows, markers, ◆, the drag inversion helpers), `ui/material_page` (the material page, the マイ素材 rows and menus),
+  `ui/ai_board` (区画ごとに指示).
+- **Changed:**
+  - `ui/fields`: the §2.3 scope table (camerawork, speed, rig, line season, avoid, curve params); the curve, shot, rig
+    and partRefs widgets; the pages of §6.5 (行 › 演出 and 区画のカメラ, カット › 動き and AI, 要素 › カメラ, 全体 ›
+    マイ素材); `areaLabel` / `areaTitle`.
+  - `ui/widgets` (shot, rig, partRefs; curve from `ui/curve_widget`) and `ui/inspector` (the rows, the shot and part-ref
+    pickers, キーフレーム, the material page, この区画 / この行をAIに頼む…, the area header).
+  - `ui/part_browser`: the マイ素材 tab with ＋ AIで作る and its inline form, material menus, and the thumbnail key with
+    `rhash`.
+  - `ui/ai_panel`, `ui/ai_review` and `ui/ai_controller`: the direct and material tools; targets, groups, aggregates,
+    dependencies, windows, the bad_request retry and board drafts.
+  - `ui/selection` (`sel.area`, `areaSel`), `ui/timeline` (area bands, band options in the listbox, ◆), `ui/stage`
+    (markers, drag inversion through `engine.viewAt`), `ui/palette` (`%`), `ui/lyric_editor` (§ selects the heading's
+    area), `ui/boot` (the registry comes from `engine.registry` when the engine has it), `ui/style.css` (one v2.1 block
+    at the end) and `i18n/strings`.
+- **Tests:**
+  - Node: `ui_fields` (+15), `ui_ai` (+8, two of them against the real `ai/direct`, `ai/recipe` and `parts/mix`),
+    `ui_selection` (+3). `tests/helpers/fake_engine.js` gains `registry`, `shotTrack` and `viewAt`.
+  - Browser: `ui_flows` gains six flows (curve, keyframes, areas, ai_area, ai_board, materials) and `ai_edit` moves to
+    the instruction block. `ui_layout` checks the new pages at every viewport and in a 288 px panel. `csp` and
+    `i18n_pages` walk the new screens.
+- **Mutation check:** 25 mutants of the key rules, and every one fails a test. They cover:
+  - selection: the area check and `areaSel`;
+  - the controller: the dependency cascade, disabled rows at apply, the drafts cap, the bad_request retry, 反映済み,
+    log item keys, `boot.soon` and the material request's `sent`;
+  - keyframes: the drag inversion and the key-to-track order;
+  - the curve widget: knob bounds, Delete, 位置の動きだけ, ease names in words and the speed scale;
+  - マイ素材: uses, problem texts, derive problems and the strict media test; the one-line area title.
+
+  Four tests were made stronger on the way: a superset area, a missing material, the exact knob removed and the problem
+  text.
+
+**Decisions where the design is silent**
+- **Selections and areas:**
+  - An area selection is `{ level: 'line', ids, area }` and opens the 行 page with the area header, even for one
+    line. `S.validate(sel, plan, doc?)` keeps `area` only while the area still has exactly those lines. Without
+    `doc`, a well-formed line-level ref is kept.
+  - `view.highlight` may be a list of line ids (an area); the stage and the drawer read both forms.
+  - Area titles are 「サビ1（5行）」. The whole video, a cut and a one-line set (「4行」) name no count.
+  - The board's rows are the song sections (else the headings, else the blocks), then added and drafted areas. Sections
+    without lines (イントロ, 間奏) are rows too, since their special cuts are in the area.
+  - A board draft is a one-line textarea that wraps and grows, so 120 characters show whole. Enter never adds a line
+    break.
+- **Curves and keyframes:**
+  - Dragging a preset, an ease or a ramp turns it into its data within the same gesture. A speed-step curve draws its
+    speed fill in knot units, through the handles.
+  - A keyframe edit pins the whole Shot at the page scope. Editing from なし starts from 落ち着く's keys.
+  - Markers use `engine.shotTrack`. Its keys (in time order) are matched to the data keys by their estimated times.
+- **マイ素材:**
+  - The knobs (量 …) bake their multipliers into the recipe with `core/recipe.withKnobs`, over the recipe as the page
+    opened. One drag is one undo entry.
+  - この素材を使わない is the kind's filter deny list, like この部品を使わない.
+  - [確かめる] lists `parts/mix.derive`'s problems in words (`mat.why.<code>`). [反映] needs a recipe that derives into a
+    part.
+  - The マイ素材 tab hides grounds derived from pooled photos with `extra[key].media === true`.
+- **Keys and the AI tab:**
+  - Sub-pages without a tile grid (キーフレーム, マイ素材, 使わない部品's kinds) leave the arrows and Enter to their controls:
+    `picker.move` / `picker.pick` run only when the top page has them. ＋ AIで作る is never picked or tried on.
+  - Arrowing onto 対象 › 区画 without an area opens the list with the focus on its first area.
+  - A question of the direct tool shows under the instruction box, per area, not in the message line.
+  - The controller has no stand-in for `ai/direct` / `ai/recipe`: a build without them says `boot.soon`.
+  - `GROUP_ORDER` adds `materials`, `area`, `cuts` and `outside`. Their headings are the design's `ai.grp.*` keys;
+    `ai.group.*` stay for the v2 groups.
+  - The resolver given to `markStale` / `toCommands` / `apply` returns `undefined` for a key it cannot read, so no
+    area check is made for it.
+- **Two fixes found by the new checks:**
+  - The lyric gutter was built with every entry at the top when the editor was hidden (another step) and not rebuilt
+    when it showed again. A render while hidden now waits until the editor shows.
+  - `.w-seg` now includes its border in its width. The 向き control stuck out 2 px on line pages.
+
+**Deviations**
+- The §7.4 "area direct" flow wants "preview renders the material" and "マイ素材 tile exists". Both need B's
+  `engine.registry`. `ui_flows` checks them when the engine has it and otherwise checks 全体 › マイ素材 (from the
+  document).
+- The §6.8 bands in the play bar's lane are not drawn: `ui/playbar` is not F's (request below). The drawer's 曲 row has
+  them.
+- The layouts give panels of 312, 320 and 352 px. The 288 px end of §7.4 is checked by narrowing the open panel through
+  the CSSOM in `ui_layout`.
+- `validate(sel, plan)` has an optional third argument.
+- axe-core is not available. Roles, names and focus order are checked in the flows instead:
+  - radiogroups with roving tabindex, the area listbox and the timeline's band options;
+  - tri-state aggregate checkboxes (`aria-checked="mixed"`) and `aria-describedby` on stale and needs-material rows;
+  - focus return from sub-pages, and the keyboard-only paths of every new flow.
+
+**Requests to other packages**
+- **Lead (`ui/playbar`):** draw the area bands in the lane, and accept a list in `view.highlight`.
+- **E:** fold `CH.AREA_GROUPS` into `CH.GROUPS`. `ui_ai.test.js` reads both until then.
+- **B:** `engine.registry`, `shotTrack(cutKey)` and `viewAt(t)` are read when present (`ui/boot`, `ui/shot_editor`,
+  `ui/stage`). `fake_engine.js` has their shapes. `ui_flows`' `FAKE_TRACK` steps aside by itself when the engine has
+  `shotTrack`.
+- **G.4:** the G.1 strings wanted are in `strings.js`. `mineFor` already hides pooled media grounds.
+
+**Integration notes**
+- From the lead branch, by path and without a merge:
+  - `docs/DESIGN_2_1.md` (§11.9);
+  - C and E: `src/parts/mix.js`, `src/ai/`, `src/core/media.js`, `src/core/registry.js` and their tests (`mix`,
+    `ai_direct`, `ai_recipe`, `ai_vision`, `ai_looks`, `ai_providers`, `media_core`, `media_doc`, `registry`,
+    `contract`).
+  - `ai_panel` injects `ai/direct` and `ai/recipe` through `MV.has`, so the direct and material tools run against E's
+    modules. The Node tests use them with faked answers in E's schema.
+- **G.1:** its one-line `ui_flows.py` change (IndexedDB opened without a version) is applied by hand.
+- **Fakes to replace:**
+  - `tests/helpers/fake_engine.js` (`registry`, `shotTrack`, `viewAt`) and `ui_flows`' `FAKE_TRACK`;
+  - `ui_flows`' `ai_board` / `ai_area` answers, which follow E's frozen schema.
+- **Strings added:**
+  - the F block (curves, keyframes, areas, the instruction block, the board, the area review, マイ素材);
+  - §11.9.6 (`param.depth`, `opt.depth.*`, `why.media.depth.*`, `media.ai.depth`);
+  - `mat.why.*` (C's derive codes and core/recipe's codes);
+  - G.1's `media.err.container` / `tooBigVideo` / `tooFast`, `media.warn.storage`, `media.note.animFirstFrame` /
+    `alphaIgnored` and `io.savedWhatNoSong`.
+
 ## Lead integration: B and F
 
 ### B with D's planner: the five failing Node tests
@@ -5053,3 +5173,96 @@ every test green alone; together, D's automatic camerawork is drawn by B's engin
     × 8 moods × 3 aspects) and the tuning of the §4.7 constants, D's open numbers included — comes after this
     integration. These two goldens are regenerated now so that CI checks the integrated engine, and will be regenerated
     again, on purpose, after that tuning.
+
+### F (UI) applied
+
+- F's worktree commit was applied with `git apply --3way` from its base, without the files F had copied unchanged from
+  the lead branch (DESIGN_2_1.md, `parts/mix`, `ai/*`, `core/media`, `core/registry`, their tests, the two pages).
+  F's section `## v2.1-F` is placed before this one.
+- **One conflict**, the module header of `ui/ai_panel`: both sides kept — F's new dependencies (`ui/ai_board`,
+  `planner/areas`, `ui/fields`, `ui/selection`, `i18n/t`) and the lead's `ui/ai_thinking` (the running line's orb
+  `AT.orb` and the preview HUD `AT.mountHud`; no `.ai-spin` element is left). The other overlaps merged cleanly and were
+  checked by hand: `ui/stage` (tap mode returns from pointerdown before F's marker drag, and the click returns early),
+  `i18n/strings` (the tap keys and the new `tap.ready` text next to F's block), `ui/style.css` (the tap pad, `--ai-a` /
+  `--ai-b`, the orb and HUD block and `.ai-hud-text` in the shared ellipsis rule, next to F's v2.1 block; ux-16's
+  one-rule test passes), `tests/browser/ui_flows.py` (the tap mouse sub-flow, the HUD checks of ai_prep and ai_align,
+  G.1's `indexedDB.open` without a version, F's own `FLOWS +=` line, `flow_ai_edit` on the instruction block and no
+  `edit_answer` helper). F did not touch `ui/tap`.
+- **The real interfaces now that B landed:** `ui/boot` reads `app.reg` from `engine.registry`, `ui/shot_editor` calls
+  `engine.shotTrack(cutKey)` and `ui/stage` inverts drags with `engine.viewAt(t)`, all without presence checks.
+  `tests/helpers/fake_engine.js` keeps the three for the Node tests. In `ui_flows`: `FAKE_TRACK` stands aside and the
+  keyframes flow requires the engine's own track; the area-direct flow requires `engine.registry`, finds the material
+  in `registry.mine('ornament')`, waits until the plan puts it in the area's atmosphere and checks that a frame in the
+  area draws more paints with it than after the undo (§7.4 "preview renders the material"); the materials flow requires
+  the マイ素材 tile. All 32 flows pass.
+
+### Requests closed
+
+- **E → `CH.GROUPS`.** `AREA_GROUPS` is folded into `ai/changes` `GROUPS` (`materials: ['material']`, `area`, `cuts`,
+  `outside`, §5.6 "GROUPS +="); `groupOf` reads one table. `ui_ai.test.js` asserts that `GROUP_ORDER` and the groups
+  are the same set, that the four area groups are groups, that `AREA_GROUPS` is gone, and two `groupOf` answers.
+- **F → the play bar.** `ui/playbar` draws the area bands (`planner/areas.bands`, the timeline's memo rule) in the
+  strip above the cut blocks, the selected area's band in the selection ink; a double-click on the strip selects that
+  area (`S.areaSel`, 詳細 opens), as the drawer's band does; `view.highlight` may be an array (an area's lines) through
+  the timeline's `highlighted`. `ui_flows` `areas` reads the lane's pixels (the selected band, the other band, the cuts
+  of a highlighted area) and double-clicks a band; both checks fail when their drawing is removed.
+- **B → export errors.** `ui/output.ERROR_KEYS.media = 'err.exp.media'`, plus `errorParams(err)`: the asset's name from
+  `ExportError('media').detail` ('—' when the library no longer names it). `ui/boot` passes it. String `err.exp.media`
+  as requested. `ui_output.test.js` checks the key, the words with a name, the fallback and other codes.
+- **D → strings and なぜ.** `whyRule.motion.speed`, `.cam.curve`, `.cam.follow` and `.rig.curve` now have D's texts
+  (F had written placeholders under the same keys); `val.refs` is new (`{n}件` / `{n} part|{n} parts`). `ui/fields
+  whyParts` turns D's params into words: `section` through `songSec.*`, `season` through `fld.season.*`, the `key` of
+  `cam.lens` / `cam.arrange` through the part label, and a shot or rig key through its preset name. spec-5's check
+  that Japanese text has no Latin letters now allows the song-section names (Aメロ, Bメロ, Cメロ are Japanese); new
+  assertions cover each translation, and removing any one of them fails the test.
+- **Strings wanted** in the sections of A to G.1 were checked one by one against `i18n/strings` (39 keys: C's
+  `mat.why.*`, G.1's media and storage texts, D's, B's, and §11.9.6): all present with the requested words, except that
+  `val.refs` is written with the English plural.
+
+### perf.py "long+camera+materials": the real cause, and what is left open
+
+- **The stand-in camerawork is gone.** B's row gave every cut a shot and every 4 cuts a rig until D's planner made
+  camerawork. It now uses the planner's automatic camerawork of project_long (5 shots in the window) under a pinned rig
+  (`slowSwell`: the project's own two rig runs draw none), as §7.4 says ("auto camerawork"). A first version pinned
+  `amount.camera` to 1 as well; that also raises v2's punch impulses and beatZoom amplitude (the only thing it adds) and
+  cost about 1.5 ms of p95, so the project keeps its own amount.
+- **Where the time goes** (local Chromium, 720p, the p95 of the per-frame minimum over three fresh-engine runs; taking one
+  sample material out at a time; the plan and the rest unchanged):
+
+  | Row | p50 | p95 |
+  |---|---|---|
+  | every sample material | 16.4–16.6 | 31.9–32.8 |
+  | without the arrive material (blur track 0.1 em) | 15.6–16.0 | 25.5–26.0 |
+  | without the dwell material (a `glow` beat oscillator) | 13.7–13.8 | 28.2 |
+  | without the filter stack (grainFilm + edgeShade, 4 passes) | 12.8–13.2 | 27.5–29.1 |
+  | without the ornament and the atmosphere | 15.3 | 31.5 |
+  | the catalog alone | 11.9 | 23.9 |
+
+  - The filter stack costs what its two filters cost as two separate filter slots (post mean +3.4 ms against +2.9 ms;
+    grainFilm alone +1.3–1.6, edgeShade alone +0.1–0.6): its chain has no extra pass or copy to remove. It adds a flat
+    ~3.5 ms to every frame of every cut, because the row gives every cut a filter slot with `when: 'always'`.
+  - The frames that set the p95 are glyph frames: cut re~8 (`edgeBleed`, six glyphs of about 480 px em at 720p). The
+    arrive material's blur and the dwell material's glow put each glyph on the sprite path (D§4.19.5: the path follows
+    the pose), whose quads are 746–775 px here (the 1.6 em box plus the blur reach, rasterized at most 512 px and drawn
+    scaled): its entrance frames cost 37–53 ms (14 ms without the arrive material) and its hold 31–58 ms (13–27 ms
+    without the dwell material). A filtered draw of such a quad costs about 1.3 ms on this software canvas (an
+    unfiltered 1:1 blit 0.27 ms); `willReadFrequently`, ImageBitmap sprites, an opaque target and the prepare following
+    the playhead made no difference. The catalog does the same (inkRise on every cut is heavier than the arrive
+    material; taking the depart material out makes the row slower, because the catalog departs there blur).
+  - Measured at preview quality with the adaptive preview, the p95 stays the same: its levels (half-resolution filters,
+    draft paints, DPR only above 720p) do not touch glyph sprites.
+- **Before / after** (p95; limit 33.4 ms): B's stand-in 32.1–39.6 ms here (B); the lead branch 4163b5b (camerawork at
+  amount 1) 32.6 here, 36.7 on CI (Google Chrome); now 33.1–35.0 here over five perf.py runs (each the best of three
+  fresh engines; 33.6 in the last complete CI sequence), with another agent's browser tests sharing the CPUs part of the
+  time. **Still over the limit, so nothing after 4163b5b is pushed.**
+- **Open, for the lead (a design decision):** §7.4 asks this row for "frame ≤ 2× budget" with the heaviest allowed
+  material in every slot, and §5.8 allows exactly what costs the time (glyph blur up to 0.6 em, glow up to 1, stacks of
+  6 passes); on a software canvas the frozen glyph path cannot draw that on giant text within 33.4 ms. Nothing here is
+  raised, skipped or loosened. Options, none taken:
+  1. change the glyph path (D§4.19.5): draw the body of a glowing glyph on the direct path, as the text style `glow`
+     already does (measured −1.5 ms p95), and draw blurred sprites with their quad trimmed to the ink plus the blur reach
+     (not measured; about half the area). Both change v2 frames with those poses, so the v2 goldens move;
+  2. give this row a budget that says what §7.2 guarantees for materials (behave + solve ≤ 0.8 ms p50, the particles
+     through `mixShare`, the passes of a stack) and report its frame times, or fail on p50 only;
+  3. fill only the slots the plan has (the row now creates a filter slot on every cut, which the planner never does for
+     this mood): −1.5 to 2 ms, not enough for CI on its own.

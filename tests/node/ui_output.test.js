@@ -9,6 +9,7 @@ const MV = load();
 const OUT = MV.use('ui/output');
 const S = MV.use('export/schedule');
 const STRINGS = MV.use('i18n/strings');
+const T = MV.use('i18n/t');
 const REG = MV.use('core/registry');
 const reduce = MV.has('core/commands') ? MV.use('core/commands').reduce : null;
 
@@ -145,6 +146,14 @@ test('every export error code has a message, and every key the output rules name
     assert.ok(OUT.errorKey(code) in STRINGS, code + ' → ' + OUT.errorKey(code));
   }
   assert.equal(OUT.errorKey('unknown'), 'err.exp.encode');
+  // a photo or video the export could not read (package B: ExportError('media', …, { id, name, code })) is named
+  assert.equal(OUT.errorKey('media'), 'err.exp.media');
+  const t = T.createT('ja', STRINGS);
+  const err = Object.assign(new Error('x'), { code: 'media', detail: { id: 'a1', name: '海辺.mp4', code: 'decode' } });
+  assert.equal(t(OUT.errorKey(err.code), OUT.errorParams(err)),
+    '写真・動画「海辺.mp4」を読めないため、書き出しを止めました。つなぎ直してからもう一度書き出してください。');
+  assert.deepEqual(OUT.errorParams({ code: 'media', detail: { id: 'a1', name: null } }), { name: '—' });
+  assert.deepEqual(OUT.errorParams({ code: 'sink' }), {});
   for (const b of OUT.BACKDROPS) assert.ok('exp.bg.' + b in STRINGS, b);
   for (const code of ['fx-skipped', 'alpha-backdrop', 'clear-png', 'clear-mp4']) assert.ok('exp.pre.' + code in STRINGS, code);
 });

@@ -1,5 +1,6 @@
-/* 文字PVメーカー v2 — original work. Timeline drawer: beat / song / line / cut rows, drags that write time pins, zoom, snap, keyboard nudges, a11y proxies (DESIGN §6.4.13). */
-MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/t', 'core/paths', 'core/doc'], (dom, I, S, F, T, P, D) => {
+/* 文字PVメーカー v2 — original work. Timeline drawer: beat / song / line / cut rows, drags that write time pins, zoom, snap, keyboard nudges, a11y proxies, area bands and key diamonds (DESIGN §6.4.13; DESIGN_2_1 §6.7, §6.8). */
+MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/t', 'core/paths', 'core/doc', 'planner/areas'],
+  (dom, I, S, F, T, P, D, AREAS) => {
   'use strict';
 
   const { h } = dom;
@@ -13,7 +14,9 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
   const COLORS = { bg: '#101318', row: '#161a21', line: '#465063', line2: '#3b4252', sel: '#e2553b', cut: '#343b48',
     text: '#eceae5', muted: '#8e94a1', beat: 'rgba(242,239,232,0.18)', bar: 'rgba(242,239,232,0.45)', play: '#f2efe8',
     range: 'rgba(124,196,255,0.14)', focus: '#7cc4ff', wave: 'rgba(160,168,184,0.35)', section: 'rgba(240,182,77,0.16)',
-    highlight: '#f0b64d', mark: '#c9b27a' };
+    highlight: '#f0b64d', mark: '#c9b27a', band: 'rgba(240,182,77,0.16)', band2: 'rgba(124,196,255,0.14)',
+    bandOn: 'rgba(226,85,59,0.34)', key: '#f0b64d' };
+  const KEY_PX = 5;                     // half the size of a key diamond ◆
 
   function decodeDigest(b64) {
     try {
@@ -48,6 +51,12 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
   // The kind of a line edge: 'pin' (solid), 'lrc' (the stamp in the text: a mark, solid and muted), 'auto' (dashed).
   function edgeKind(by) { return by === 'pin' || by === 'lrc' ? by : 'auto'; }
 
+  // bandAt(bands, t) → the area band under a time (planner/areas.bands: song sections, else headings, else blocks).
+  function bandAt(bands, t) { return (bands || []).find((b) => t >= b.t0 && t < b.t1) || null; }
+
+  // highlighted(hl) → the set of line ids view.highlight names (one id, or an area's list).
+  function highlighted(hl) { return new Set(Array.isArray(hl) ? hl : hl ? [hl] : []); }
+
   function mount(app, host) {
     const t = app.t;
     const snapBtn = h('button', { class: 'chip-btn tl-btn', type: 'button', 'aria-pressed': 'false' }, t('song.snap'));
@@ -68,7 +77,7 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
     let W = 0, H = 0, dpr = 1;
     let view = { t0: 0, span: 0 };               // visible window; span 0 = fit
     let press = null;
-    let focus = { lineId: null, edge: 'start' }; // the edge Ctrl+←/→ nudges
+    let focus = { lineId: null, edge: 'start', band: null }; // the edge Ctrl+←/→ nudges
     let digest = { key: null, data: null };
 
     // --- geometry -----------------------------------------------------------------------------------------------
@@ -157,6 +166,22 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
       }
     }
 
+    // The area bands of the 曲 row (DESIGN_2_1 §6.8): song sections, else headings, else blocks; each with its area.
+    let bandMemo = { plan: null, rows: null, info: null, list: [] };
+    function bands() {
+      const p = app.plan;
+      if (!p || !p.lines || !p.lines.length) return [];
+      const rows = app.doc.sheet.rows, info = app.doc.song ? app.doc.song.info : null;
+      if (bandMemo.plan !== p || bandMemo.rows !== rows || bandMemo.info !== info) {
+        let list = [];
+        try {
+          list = AREAS.bands(app.doc, p).map((b) => Object.assign({}, b, { area: AREAS.resolve(app.doc, p, b.ref) })).filter((b) => b.area);
+        } catch (e) { list = []; }
+        bandMemo = { plan: p, rows, info, list };
+      }
+      return bandMemo.list;
+    }
+
     function drawSong(r) {
       const song = app.doc.song;
       const loud = digestOf(song);
@@ -169,14 +194,27 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
           const a = loud[i] / 255 * half;
           g.fillRect(x, mid - a, 1, 2 * a);
         }
-      } else label(t('tl.noSong'), 6, mid, W - 12, COLORS.muted);
+      } else if (!bands().length) label(t('tl.noSong'), 6, mid, W - 12, COLORS.muted);
       const marks = songMarks(song && song.info);
-      for (const s of marks.sections) {
-        const x0 = xOf(s.t0), x1 = xOf(s.t1);
-        if (x1 < 0 || x0 > W) continue;
-        g.fillStyle = COLORS.section;
-        g.fillRect(x0, r[0] + 1, Math.max(1, x1 - x0), r[1] - r[0] - 2);
-        label(t('songSec.' + s.kind), x0 + 4, r[0] + 8, x1 - x0 - 8, COLORS.muted);
+      const list = bands();
+      const sel = S.validate(app.view.state.sel, app.plan, app.doc);
+      const selKey = sel.level === 'line' && sel.area ? AREAS.keyOf(sel.area) : null;
+      if (list.length) {
+        list.forEach((b, i) => {
+          const x0 = xOf(b.t0), x1 = xOf(b.t1);
+          if (x1 < 0 || x0 > W) return;
+          g.fillStyle = b.key === selKey ? COLORS.bandOn : i % 2 ? COLORS.band2 : COLORS.band;
+          g.fillRect(x0, r[0] + 1, Math.max(1, x1 - x0 - 1), r[1] - r[0] - 2);
+          label(F.areaLabel(t, b.area), x0 + 4, r[0] + 8, x1 - x0 - 8, COLORS.text);
+        });
+      } else {
+        for (const s of marks.sections) {
+          const x0 = xOf(s.t0), x1 = xOf(s.t1);
+          if (x1 < 0 || x0 > W) continue;
+          g.fillStyle = COLORS.section;
+          g.fillRect(x0, r[0] + 1, Math.max(1, x1 - x0), r[1] - r[0] - 2);
+          label(t('songSec.' + s.kind), x0 + 4, r[0] + 8, x1 - x0 - 8, COLORS.muted);
+        }
       }
       g.fillStyle = COLORS.highlight;
       for (const at of marks.highlights) g.fillRect(xOf(at) - 1, r[0], 2, r[1] - r[0]);
@@ -185,15 +223,16 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
     function drawLines(r, sel) {
       const p = app.plan;
       const selLines = new Set(sel.level === 'line' ? sel.ids : [S.lineOfSel(sel)].filter(Boolean));
+      const hl = highlighted(app.view.state.highlight);
       p.lines.forEach((l, i) => {
         const x0 = xOf(l.t0), x1 = xOf(l.t1);
         if (x1 < 0 || x0 > W) return;
-        const on = selLines.has(l.id) || app.view.state.highlight === l.id;
+        const on = selLines.has(l.id) || hl.has(l.id);
         g.fillStyle = on ? COLORS.sel : i % 2 ? COLORS.line2 : COLORS.line;
         g.fillRect(x0, r[0] + 3, Math.max(1, x1 - x0 - 1), r[1] - r[0] - 6);
         if (l.locked) hatch(x0, x1, r[0] + 3, r[1] - 3);
         label((i + 1) + ' ' + l.text, Math.max(x0, 0) + 4, (r[0] + r[1]) / 2, x1 - Math.max(x0, 0) - 8);
-        const f = focus.lineId === l.id && document.activeElement === proxy;
+        const f = focus.band === null && focus.lineId === l.id && document.activeElement === proxy;
         edge(x0, r[0], r[1], edgeKind(l.by && l.by.start), f && focus.edge === 'start');
         edge(x1, r[0] + 4, r[1] - 4, edgeKind(l.by && l.by.end), f && focus.edge === 'end');
       });
@@ -213,6 +252,32 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
           (r[0] + r[1]) / 2, x1 - x0 - 6, COLORS.muted);
         if (line && k > 1) edge(x0, r[0], r[1], app.doc.pins[F.writePath('cut/' + c.key + ':t0', p)] ? 'pin' : 'auto', false);
       });
+      drawKeys(r);
+    }
+
+    // ◆ at the key times of the shot being edited (the keyframe page is open, DESIGN_2_1 §6.7).
+    function keyMarks() {
+      const edit = app.shotEdit;
+      return edit ? edit.times() : [];
+    }
+
+    function drawKeys(r) {
+      const list = keyMarks();
+      if (!list.length) return;
+      const y = (r[0] + r[1]) / 2;
+      g.save();
+      g.fillStyle = COLORS.key;
+      g.strokeStyle = COLORS.bg;
+      g.lineWidth = 1;
+      for (const m of list) {
+        const x = xOf(m.t);
+        g.beginPath();
+        g.moveTo(x, y - KEY_PX); g.lineTo(x + KEY_PX, y); g.lineTo(x, y + KEY_PX); g.lineTo(x - KEY_PX, y);
+        g.closePath();
+        g.fill();
+        g.stroke();
+      }
+      g.restore();
     }
 
     function drawRuler(r) {
@@ -266,6 +331,14 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
       const row = rowAt(y);
       const p = app.plan;
       if (!p) return { row };
+      if (row === 'cut') {
+        const key = keyMarks().find((m) => Math.abs(x - xOf(m.t)) <= KEY_PX + 2);
+        if (key) return { row, keyMark: key };
+      }
+      if (row === 'song') {
+        const band = bandAt(bands(), tOf(x));
+        return band ? { row, band } : { row };
+      }
       if (row === 'line') {
         for (const l of p.lines) {
           const x0 = xOf(l.t0), x1 = xOf(l.t1);
@@ -326,6 +399,10 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
     function dragTo(pt, ev) {
       const tt = tOf(pt.x);
       const hit = press.hit;
+      if (hit.keyMark && app.shotEdit) {
+        app.shotEdit.moveTo(hit.keyMark.i, snapTime(tt, null, ev.altKey), press.keyGesture.key);
+        return;
+      }
       if (press.range) {
         const a = Math.max(0, Math.min(press.t, tt)), b = Math.min(duration(), Math.max(press.t, tt));
         if (b - a > 0.05) {
@@ -357,7 +434,7 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
       const pt = localPoint(ev);
       const hit = hitAt(pt.x, pt.y);
       press = { x: pt.x, t: tOf(pt.x), hit, range: hit.row === 'ruler' && ev.shiftKey, gesture: null, moved: false };
-      if (hit.line) focus = { lineId: hit.line.id, edge: hit.edge === 'end' ? 'end' : 'start' };
+      if (hit.line) focus = { lineId: hit.line.id, edge: hit.edge === 'end' ? 'end' : 'start', band: null };
       canvas.setPointerCapture(ev.pointerId);
     });
     canvas.addEventListener('pointermove', (ev) => {
@@ -368,6 +445,12 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
         return;
       }
       if (!press.moved && Math.abs(pt.x - press.x) < DRAG_PX) return;
+      // A key diamond: its key gets a number `at` (one gesture = one undo entry, DESIGN_2_1 §6.7).
+      if (press.hit.keyMark && app.shotEdit) {
+        if (!press.moved) { press.moved = true; press.keyGesture = app.shotEdit.gesture('diamond:' + press.hit.keyMark.i); }
+        dragTo(pt, ev);
+        return;
+      }
       const draggable = press.range || (press.hit.line && press.hit.row === 'line') || press.hit.edge === 'inner';
       if (!draggable) return;
       if (!press.moved) {
@@ -380,15 +463,51 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
       if (!press) return;
       const p = press;
       press = null;
+      if (p.keyGesture) { if (app.shotEdit) app.shotEdit.end(); return; }
       if (p.gesture) { p.gesture.end(); return; }
       clickAt(p);
     };
     canvas.addEventListener('pointerup', endPress);
-    canvas.addEventListener('pointercancel', () => { if (press && press.gesture) press.gesture.end(); press = null; });
+    canvas.addEventListener('pointercancel', () => {
+      if (press && press.gesture) press.gesture.end();
+      if (press && press.keyGesture && app.shotEdit) app.shotEdit.end();
+      press = null;
+    });
+
+    // 区画: a click selects the area's lines with the area and opens 詳細; ⋯ (the context menu) offers
+    // この区画をAIに頼む… and 区画のカメラ ▸ (DESIGN_2_1 §6.8).
+    function selectBand(band, opts) {
+      if (!band || !band.area) return;
+      app.select(S.areaSel(band.area), Object.assign({ from: 'timeline', open: true }, opts || {}));
+    }
+
+    function bandMenu(band, at) {
+      if (!app.menus || !band) return;
+      app.menus.context(at, [
+        { label: t('insp.askArea'), disabled: !app.view.state.prefs.ai, run: () => {
+          app.aiTarget = { ref: band.ref };
+          app.openPanel('ai', 'ai');
+          app.bus.emit('ai.tool', 'direct');
+        } },
+        { label: t('tl.bandRig'), run: () => {
+          selectBand(band);
+          if (app.inspector) requestAnimationFrame(() => app.inspector.openSection('rig'));
+        } },
+      ]);
+    }
+
+    canvas.addEventListener('contextmenu', (ev) => {
+      const pt = localPoint(ev);
+      const hit = hitAt(pt.x, pt.y);
+      if (!hit.band) return;
+      ev.preventDefault();
+      bandMenu(hit.band, ev);
+    });
 
     // A click selects (line → 行, cut → カット; seeks when paused) and opens 詳細; elsewhere it seeks (§6.5).
     function clickAt(p) {
       const hit = p.hit;
+      if (hit.row === 'song' && hit.band) { selectBand(hit.band); return; }
       if (hit.row === 'line' && hit.line) {
         app.select({ level: 'line', ids: [hit.line.id] }, { from: 'timeline', open: true });
       } else if (hit.row === 'cut' && hit.cut) {
@@ -466,18 +585,28 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
       return parts.join(t('tl.proxySep'));
     }
 
+    // A band as the listbox reads it: 「サビ1, 0:41 から 1:02, 5行」 (DESIGN_2_1 §6.8).
+    function bandLabel(b) {
+      const time = (x) => T.fmtTime(x).replace(/\.\d+$/, '');
+      return t('area.proxy', { area: F.areaLabel(t, b.area), t0: time(b.t0), t1: time(b.t1), n: t('count.lines', { n: b.n }) });
+    }
+
+    // The bands lead the listbox; focus.band is the focused band's index (the lines follow them).
     function renderProxy() {
       const lines = app.plan ? app.plan.lines : [];
-      dom.replace(proxy, lines.map((l, i) => h('div', { role: 'option', id: 'tl-opt-' + l.id, 'aria-selected': String(focus.lineId === l.id),
-        text: proxyLabel(l, i) })));
-      if (focus.lineId) proxy.setAttribute('aria-activedescendant', 'tl-opt-' + focus.lineId);
+      const list = bands();
+      dom.replace(proxy, list.map((b, i) => h('div', { role: 'option', id: 'tl-band-' + i, 'aria-selected': String(focus.band === i),
+        'data-band': String(i), text: bandLabel(b) })).concat(lines.map((l, i) => h('div', { role: 'option', id: 'tl-opt-' + l.id,
+        'aria-selected': String(focus.band === null && focus.lineId === l.id), text: proxyLabel(l, i) }))));
+      if (focus.band !== null && list[focus.band]) proxy.setAttribute('aria-activedescendant', 'tl-band-' + focus.band);
+      else if (focus.lineId) proxy.setAttribute('aria-activedescendant', 'tl-opt-' + focus.lineId);
     }
 
     proxy.addEventListener('focus', () => {
       const lines = app.plan ? app.plan.lines : [];
       if (!focus.lineId && lines.length) {
         const own = S.lineOfSel(S.validate(app.view.state.sel, app.plan));
-        focus = { lineId: own || lines[0].id, edge: 'start' };
+        focus = { lineId: own || lines[0].id, edge: 'start', band: null };
       }
       renderProxy();
       draw();
@@ -487,14 +616,31 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
       if (ev.ctrlKey || ev.metaKey || ev.altKey) return;         // Ctrl+←/→ is the timeline.nudge action
       const lines = app.plan ? app.plan.lines : [];
       if (!lines.length) return;
+      const list = bands();
+      // On a band: ↑ ↓ move among the bands (↓ from the last one reaches the lines), Enter selects the area, the menu key
+      // (or Shift+F10) opens its menu.
+      if (focus.band !== null && list[focus.band]) {
+        let done = true;
+        if (ev.key === 'ArrowUp') focus.band = Math.max(0, focus.band - 1);
+        else if (ev.key === 'ArrowDown') {
+          if (focus.band < list.length - 1) focus.band += 1;
+          else focus = { lineId: lines[0].id, edge: focus.edge || 'start', band: null };
+        } else if (ev.key === 'Enter') selectBand(list[focus.band]);
+        else if (ev.key === 'ContextMenu' || (ev.key === 'F10' && ev.shiftKey)) bandMenu(list[focus.band], proxy);
+        else done = false;
+        if (done) { ev.preventDefault(); ev.stopPropagation(); renderProxy(); draw(); }
+        return;
+      }
       const at = Math.max(0, lines.findIndex((l) => l.id === focus.lineId));
       let handled = true;
-      if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+      if (ev.key === 'ArrowUp' && at === 0 && list.length) {
+        focus = { lineId: focus.lineId, edge: focus.edge, band: list.length - 1 };
+      } else if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
         const to = Math.max(0, Math.min(lines.length - 1, at + (ev.key === 'ArrowDown' ? 1 : -1)));
-        focus = { lineId: lines[to].id, edge: focus.edge };
+        focus = { lineId: lines[to].id, edge: focus.edge, band: null };
         app.select({ level: 'line', ids: [lines[to].id] }, { from: 'timeline' });
       } else if (ev.key === 'ArrowLeft' || ev.key === 'ArrowRight') {
-        focus = { lineId: lines[at].id, edge: ev.key === 'ArrowLeft' ? 'start' : 'end' };
+        focus = { lineId: lines[at].id, edge: ev.key === 'ArrowLeft' ? 'start' : 'end', band: null };
       } else if (ev.key === 'Enter') {
         app.select({ level: 'line', ids: [lines[at].id] }, { from: 'timeline', open: true });
       } else handled = false;
@@ -522,6 +668,7 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
     const redraw = dom.createBatcher(() => draw());
     app.bus.on('time', (tt) => { if (!host.hidden) { follow(tt); redraw('time'); } });
     app.bus.on('plan', () => { clampView(); if (!host.hidden) { renderProxy(); redraw('plan'); } });
+    app.bus.on('shotEdit', () => { if (!host.hidden) redraw('keys'); });
     app.bus.on('layout', () => { if (!host.hidden) requestAnimationFrame(layout); });
     app.view.on((changed) => {
       if (changed.includes('drawer') && app.view.state.drawer) requestAnimationFrame(() => { renderProxy(); layout(); });
@@ -531,5 +678,5 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
     return { draw, layout, view: () => win(), focus: () => dom.focus(proxy), hitAt, xOf, tOf, rows };
   }
 
-  return { mount, songMarks, edgeKind };
+  return { mount, songMarks, edgeKind, bandAt, highlighted };
 });

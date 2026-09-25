@@ -14,17 +14,19 @@ MV.def('ai/changes', ['core/commands', 'core/lyrics', 'core/doc', 'core/hash', '
   const WORK_PIN_KINDS = Object.freeze(['theme', 'mood', 'season', 'amount', 'flash']);
   const PALETTE_TOKENS = Object.freeze(['accent', 'shiftA', 'shiftB']);
   const FLASH_ON = 0.7;
-  // kind → review group (§4.22.5).
+  // kind → review group (§4.22.5), then the v2.1 groups of area instructions (DESIGN_2_1 §5.6 GROUPS +=). groupOf: a
+  // change's own `group` wins, then material changes ('materials'), cut changes ('cuts') and area changes ('area');
+  // 'outside' is set by ai/direct. Every group has a heading in ui/ai_controller GROUP_ORDER.
   const GROUPS = Object.freeze({
     lyrics: ['cut', 'note', 'emphasis', 'impact', 'remove', 'rows'],
     work: ['theme', 'mood', 'season', 'amount', 'flash', 'palette', 'avoid', 'allow', 'songInfo', 'media'],
     lines: ['part', 'value'],
     time: ['time'],
+    materials: ['material'],
+    area: [],
+    cuts: [],
+    outside: [],
   });
-  // The v2.1 groups of area instructions (§5.6 GROUPS +=): a change's own `group` wins, then material changes
-  // ('materials'), cut changes ('cuts') and area changes ('area'); 'outside' is set by ai/direct. They are listed apart
-  // from GROUPS until the review (ui/ai_controller GROUP_ORDER, package F) has their headings.
-  const AREA_GROUPS = Object.freeze({ materials: ['material'], area: [], cuts: [], outside: [] });
   const STALE_WHY = Object.freeze(['changed', 'left', 'gone', 'material']);
   // value slots that are line-level settings (applied before part pins, §5.6 step 3)
   const LINE_VALUE_SLOTS = Object.freeze(['season', 'avoid']);
@@ -205,7 +207,7 @@ MV.def('ai/changes', ['core/commands', 'core/lyrics', 'core/doc', 'core/hash', '
 
   function groupOf(c) {
     const own = typeof c.group === 'string' ? c.group : '';
-    if (Object.prototype.hasOwnProperty.call(GROUPS, own) || Object.prototype.hasOwnProperty.call(AREA_GROUPS, own)) return own;
+    if (Object.prototype.hasOwnProperty.call(GROUPS, own)) return own;
     if (c.kind === 'material') return 'materials';
     if (c.cutKey && (c.kind === 'part' || c.kind === 'value')) return 'cuts';
     if (c.areaKey && (c.kind === 'part' || c.kind === 'value')) return 'area';
@@ -641,7 +643,7 @@ MV.def('ai/changes', ['core/commands', 'core/lyrics', 'core/doc', 'core/hash', '
   }
 
   return {
-    KINDS, GROUPS, AREA_GROUPS, STALE_WHY, FLASH_ON, make, snapshot, rowSrcs, lineResolver, markStale, groupOf, toCommands, apply,
+    KINDS, GROUPS, STALE_WHY, FLASH_ON, make, snapshot, rowSrcs, lineResolver, markStale, groupOf, toCommands, apply,
     logEntry, revertCommands, describe, describeAgg, warningText, sameJSON, entryHash, keyInUse, inArea,
   };
 });

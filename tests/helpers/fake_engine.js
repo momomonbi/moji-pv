@@ -365,6 +365,19 @@
         g.restore();
       },
       warnings() { return plan ? plan.warnings.slice() : []; },
+      // v2.1 (DESIGN_2_1 §4.20 additions; the real ones are engine/facade's): the effective registry is the one given
+      // (no materials); a cut's camera track is a push-in on the cut's box from zoom 1 to `o.shotZoom` (default 1.25), its
+      // first key at the cut's start and its last at its end; the view at any time is `o.view` (default the identity).
+      get registry() { return o.registry || null; },
+      shotTrack(cutKey) {
+        const i = plan ? plan.cuts.findIndex((c) => c.key === cutKey) : -1;
+        if (i < 0) return null;
+        const cut = plan.cuts[i];
+        const aim = boxOf(cut, i, plan.design);
+        const z = typeof o.shotZoom === 'number' ? o.shotZoom : 1.25;
+        return { a: cut.a, b: cut.b, keys: [{ t: cut.a, x: 0, y: 0, zoom: 1, roll: 0, aim }, { t: cut.b, x: 0, y: 0, zoom: z, roll: 0, aim }] };
+      },
+      viewAt() { return Object.assign({ x: 0, y: 0, zoom: 1, roll: 0 }, o.view || {}); },
       fork() { return createFakeEngine(Object.assign({}, o, { plan })); },
       stats() {
         return { frameMs: 0, stageMs: { behave: 0, draw: 0, post: 0 }, spriteBytes: 0, surfaces: 0,

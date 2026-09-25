@@ -9,10 +9,9 @@ software-rendered headless browser make these numbers pessimistic; CI with Googl
 project is played twice, each time on a fresh engine whose scenes and sprites start cold (--runs), and the run with the
 lower p95 is judged, which discounts time other processes took from the shared CPUs (INT-LEAD: long's p95 spread 30–35 ms
 between identical single runs here); a slow draw path is slow in both runs.
-DESIGN_2_1 §7.4 (+): project_long with the automatic camerawork at full strength (amount.camera pinned to 1: the
-planner's shots, under a pinned rig because the project's own rig runs draw none) plus the sample material of each kind
-in every slot it fits (registry 'materials'): the behave stage (evaluation and world solve) must stay ≤ 0.8 ms p50 at
-720p and the frame within twice the budget. Material particles are drawn by paints, so their budget is read from the
+DESIGN_2_1 §7.4 (+): project_long with the automatic camerawork (the planner's shots, under a pinned rig because the
+project's own rig runs draw none) plus the sample material of each kind in every slot it fits (registry 'materials'):
+the behave stage (evaluation and world solve) must stay ≤ 0.8 ms p50 at 720p and the frame within twice the budget. Material particles are drawn by paints, so their budget is read from the
 chosen definitions (Σ mine.cost.particles, scaled by env.mixShare to ≤ 400), not from FrameStats.drawn.particles.
 Run: PW_EXECUTABLE=/opt/pw-browsers/chromium python3 tests/browser/perf.py [--seconds 10] [--projects basic,long]
 """

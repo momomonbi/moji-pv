@@ -1,7 +1,7 @@
-/* 文字PVメーカー v2 — original work. The inspector (詳細): crumbs, level header, sections from FIELDS, field rows, sub-pages (DESIGN §6.4.4–§6.4.9, §6.6). */
+/* 文字PVメーカー v2 — original work. The inspector (詳細): crumbs, level header, sections from FIELDS, field rows, sub-pages (DESIGN §6.4.4–§6.4.9, §6.6; DESIGN_2_1 §6.5–§6.9). */
 MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/part_browser', 'ui/selection', 'ui/looks',
-  'ui/output', 'i18n/t', 'core/paths', 'core/pins'],
-(dom, I, F, W, PB, S, LK, OUT, T, P, PINS) => {
+  'ui/output', 'i18n/t', 'core/paths', 'core/pins', 'core/shot', 'planner/areas', 'ui/shot_editor', 'ui/material_page'],
+(dom, I, F, W, PB, S, LK, OUT, T, P, PINS, SHOT, AREAS, KE, MP) => {
   'use strict';
 
   const { h } = dom;
@@ -10,8 +10,11 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
   const LINES_BOX_PX = 300;
   const STATE_ICON = { auto: 'ring', pinned: 'pin', inherited: 'ring', ai: 'pin', locked: 'lock', mark: 'mark', derived: 'info',
     inactive: 'close', mixed: 'more' };
-  const DICE_WIDGETS = new Set(['part', 'number', 'choice']);
-  const NO_DICE = /^(mood|theme|season|texture|start|end|split|lang|t0|titleCard|bpm|beatOffset|readRate|length|color\.|amount\.|face\.|el\.)/;
+  const DICE_WIDGETS = new Set(['part', 'number', 'choice', 'shot', 'curve']);
+  // No [d] where a reroll changes nothing: fixed values, formulas (closeness, follow, motion speed) and the section
+  // camera (its seed is the run's first cut, DESIGN_2_1 §4.6).
+  const NO_DICE = /^(mood|theme|season|texture|start|end|split|lang|t0|titleCard|bpm|beatOffset|readRate|length|color\.|amount\.|face\.|el\.|avoid|motion\.speed|cam\.zoom|cam\.follow|rig)/;
+  const REF_KINDS = ['arrange', 'arrive', 'dwell', 'depart', 'ornament', 'ground', 'lens', 'filter', 'seam'];
   const ELEMENTS = ['text', 'ornament', 'ground', 'lens', 'filter', 'seam'];
   // Custom sections redrawn even while they hold focus (their buttons change state); focus is put back (§6.12).
   const REDRAW_FOCUSED = new Set(['looks', 'colorsReset', 'amountsReset', 'lockPartial', 'multi']);
@@ -332,7 +335,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       }
       if (field.path === 'split') return Array.isArray(v) && v.length <= 1 ? 'none' : v;
       const spec = field.spec;
-      if (spec && ['num', 'int', 'enum', 'ease', 'order', 'ink', 'color', 'face', 'text'].includes(spec.type)) {
+      if (spec && ['num', 'int', 'enum', 'ease', 'order', 'ink', 'color', 'face', 'text', 'curve', 'shot', 'rig', 'partRefs'].includes(spec.type)) {
         const coerced = MV.use('core/schema').coerce(spec, v);
         return coerced === undefined ? (fs ? fs.value : v) : coerced;
       }
@@ -401,7 +404,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
         commit: (v, o) => commit(row, v, o),
         gesture: () => gestureFor(row),
         unpin: () => unpin(row),
-        open: () => openPicker(row),
+        open: () => (field.widget === 'shot' ? openShots(row) : field.widget === 'partRefs' ? openRefKinds(row) : openPicker(row)),
         thumb: (canvas, key) => app.thumbs.draw(canvas, key ? { kind: field.partKind || field.kind, key } : null),
         slot: (action, i) => slotAction(field.kind, action, i),
       };
@@ -650,7 +653,84 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
           pop();
           if (key === null) unpin(row); else commit(row, key);
         },
+        // マイ素材 (DESIGN_2_1 §6.9): the tab's 「AIで作る」 form, fitted into this row when 作ったら…に使う is on, and
+        // the material tiles' own menu.
+        make: field.texture ? null : makeFor(row, kind, ctx),
+        menuFor: (key) => MP.menuItems(app, key, openMaterial),
       }), { returnTo: () => { const r = findRow(field.path); if (r) r.widget.focus(); } }));
+    }
+
+    // The part browser's 「AIで素材を作る」 (the standalone material tool): made for this kind, used on this row's scope.
+    function makeFor(row, kind, ctx) {
+      const word = ctx.scopeKind === 'cut' ? 'pb.scope.cut' : ctx.page === 'lines' ? 'pb.scope.lines' : ctx.scopeKind === 'line'
+        ? 'pb.scope.line' : 'pb.scope.work';
+      return {
+        scopeWord: t(word),
+        blocked: () => (app.ai ? app.ai.blocked('material') : 'boot.soon'),
+        run: ({ description, use }) => {
+          if (!app.ai) return;
+          const useAt = use && row.paths.length ? { scope: P.scopeKey(row.paths[0]), slot: row.field.path, paths: row.paths.slice() } : null;
+          clearStack();
+          app.openPanel('ai', 'ai');
+          app.ai.run('material', { description, kind: kind === 'atmos' ? 'ornament' : kind, useAt });
+        },
+      };
+    }
+
+    // カメラワーク (the shot widget): tiles of 自動 / 動かさない / the 9 presets, try-on on hover or focus (DESIGN_2_1 §6.5).
+    function openShots(row) {
+      const field = row.field;
+      const paths = pathsOf(field, page.ctx);
+      const tryDoc = (key) => {
+        const cmds = key === null ? removablePaths(row.clearPaths).map((path) => ({ t: 'pin.clear', path }))
+          : paths.map((path) => pinCmd(path, key));
+        let d = doc();
+        try { for (const cmd of cmds) d = app.reduce(d, cmd); } catch (e) { return null; }
+        return d;
+      };
+      const value = row.fs && row.fs.state !== 'mixed' && typeof row.fs.value === 'string' ? row.fs.value : null;
+      push(Object.assign(PB.pickerPage(app, {
+        kind: 'shot', path: row.path, label: labelOf(field), value, tryDoc,
+        keys: ['none'].concat(SHOT.SHOT_KEYS),
+        info: (k) => ({ text: t('shot.' + k), blurb: k === 'none' ? t('shot.none') : t('shot.blurb.' + k),
+          tags: k === 'none' ? [] : SHOT.SHOTS[k].tags.slice() }),
+        onPick: (key) => { pop(); if (key === null) unpin(row); else commit(row, key); },
+      }), { returnTo: () => { const r = findRow(field.path); if (r) r.widget.focus(); } }));
+    }
+
+    // この行で使わない部品 [+]: a kind, then the part browser in pick mode; the pick joins the list (DESIGN_2_1 §6.5).
+    function openRefKinds(row) {
+      const field = row.field;
+      const list = h('div', { class: 'insp-list' }, REF_KINDS.map((kind) => h('button', { class: 'insp-item', type: 'button', 'data-kind': kind,
+        on: { click: () => openRefParts(row, kind) } }, h('span', { class: 'grow', text: t('kind.' + kind) }), I.icon('next', { size: 14 }))));
+      push({ id: 'refs:' + row.path, crumb: ['w.refs.kind', {}], el: list, focus: () => dom.focus(list.querySelector('button')),
+        destroy() {}, returnTo: () => { const r = findRow(field.path); if (r) r.widget.focus(); } });
+    }
+
+    function openRefParts(row, kind) {
+      const current = row.fs && Array.isArray(row.fs.value) ? row.fs.value : [];
+      push(PB.pickerPage(app, {
+        kind, path: row.path + ':' + kind, label: t('kind.' + kind), value: null, tryDoc: () => null,
+        onPick: (key) => {
+          pop();
+          pop();
+          if (key !== null && key !== 'none') commit(row, W.refsWith(current, kind + '.' + key));
+        },
+      }));
+    }
+
+    // マイ素材 › a material: its page on the sub-page stack (DESIGN_2_1 §6.9).
+    function openMaterial(id, opts) {
+      clearStack();
+      push(Object.assign(MP.page(app, { id, remake: !!(opts && opts.remake),
+        onSelect: (sel) => { clearStack(); app.select(sel, { from: 'crumbs' }); }, onGone: () => pop() }), {}));
+    }
+
+    // キーフレームを編集…: the keyframe sub-page of the page scope (DESIGN_2_1 §6.7).
+    function openKeys(ctx) {
+      push(Object.assign(KE.page(app, { scope: ctx.scope, ctx }), {
+        returnTo: () => dom.focus(bodyEl.querySelector('[data-custom="camKeys"] button')),
+      }));
     }
 
     function openFilter(kind) {
@@ -736,8 +816,11 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
         sub.textContent = p && p.lines.length ? [t('count.lines', { n: p.lines.length }), T.fmtTime(p.duration)].join(' · ') : t('lh.empty');
         buttons.push(headButton('dice', t('act.reroll'), () => app.actions.run('look.reroll'), { title: t('lh.rerollWork') }));
       } else if (ctx.page === 'lines') {
-        title.textContent = t('crumb.lines', { n: ctx.lineIds.length });
+        // An area selection names its area: 「サビ1（5行）」 (DESIGN_2_1 §6.5); both ask the AI about these lines.
+        const area = ctx.area ? AREAS.resolve(doc(), p, ctx.area) : null;
+        title.textContent = area ? F.areaTitle(t, area) : t('crumb.lines', { n: ctx.lineIds.length });
         sub.textContent = t('lh.multi');
+        buttons.push(askButton(ctx.area || AREAS.ofLines(doc(), p, ctx.lineIds), 'insp.askArea'));
       } else {
         const line = ctx.line || (ctx.cut && ctx.cut.line ? p.lines.find((l) => l.id === ctx.cut.line) : null);
         if (line && (ctx.page === 'line' || ctx.el === 'text')) kids.push(lineInput(line));
@@ -882,13 +965,24 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
             c ? h('span', { class: 'muted mono', text: T.fmtTime(c.t0) }) : null, I.icon('next', { size: 14 }));
         }));
       },
+      // [この行をAIに頼む…] (line page) / [このカットをAIに頼む…] (cut page): the AI panel's instruction box with that
+      // target (DESIGN_2_1 §6.2).
       ai(ctx) {
-        return h('button', { class: 'chip-btn', type: 'button', disabled: !app.view.state.prefs.ai, on: { click: () => {
-          app.aiTarget = { lines: ctx.lineIds.slice() };
-          app.openPanel('ai', 'ai');
-          app.bus.emit('ai.tool', 'edit');
-        } } }, I.icon('ai', { size: 14 }), t('insp.askAi'));
+        const cut = ctx.page === 'cut' && ctx.cut;
+        const ref = cut ? { kind: 'cut', key: ctx.cut.key } : AREAS.ofLines(doc(), plan(), ctx.lineIds);
+        return askButton(ref, cut ? 'insp.askCut' : 'insp.askAi');
       },
+      // 要素 › カメラ: [キーフレームを編集…] (DESIGN_2_1 §6.7).
+      camKeys(ctx) {
+        return h('button', { class: 'chip-btn', type: 'button', on: { click: () => openKeys(ctx) } }, t('fld.camKeys'));
+      },
+      // 区画のカメラ: the rig run this page's cut belongs to (「サビ1（5行）で続くカメラ」), from plan.rigs.
+      rigRun(ctx) {
+        const text = rigRunText(ctx);
+        return text ? h('p', { class: 'note subtle', text }) : null;
+      },
+      // 作品全体 › マイ素材 (DESIGN_2_1 §6.9).
+      materials() { return MP.listRows(app, openMaterial); },
       multi(ctx) {
         const allLocked = ctx.lineIds.every((id) => doc().locks[id]);
         const a = (id, icon, label, off) => h('button', { class: 'btn small', type: 'button',
@@ -961,6 +1055,34 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
     };
 
     function allWarnings() { return (plan() ? plan().warnings : []).concat(app.warnings()); }
+
+    function askAi(ref) {
+      app.aiTarget = { ref };
+      app.openPanel('ai', 'ai');
+      app.bus.emit('ai.tool', 'direct');
+    }
+
+    function askButton(ref, label) {
+      return h('button', { class: 'chip-btn', type: 'button', disabled: !app.view.state.prefs.ai, 'data-ask': label,
+        on: { click: () => askAi(ref) } }, I.icon('ai', { size: 14 }), t(label));
+    }
+
+    // 「サビ1（12–16行）で続くカメラ」: the rig run of the page's first cut (plan.rigs, DESIGN_2_1 §2.7); null before the
+    // planner makes runs.
+    function rigRunText(ctx) {
+      const p = plan();
+      const cut = ctx.cuts[0];
+      const run = p && Array.isArray(p.rigs) && cut && Number.isInteger(cut.rig) ? p.rigs[cut.rig] : null;
+      if (!run || !Array.isArray(run.cuts)) return null;
+      const lineIds = [...new Set(run.cuts.map((k) => { const c = p.cuts.find((x) => x.key === k); return c ? c.line : null; }).filter(Boolean))];
+      if (!lineIds.length) return null;
+      const nums = lineIds.map((id) => { const l = p.lines.find((x) => x.id === id); return l ? l.index + 1 : 0; }).filter(Boolean);
+      const a = Math.min(...nums), b = Math.max(...nums);
+      const lines = a === b ? t('area.linesOne', { a }) : t('area.lines', { a, b });
+      const ref = AREAS.ofLines(doc(), p, lineIds);
+      const area = ref.kind !== 'lines' ? AREAS.resolve(doc(), p, ref) : null;
+      return t('insp.rigRun', { area: area ? F.areaLabel(t, area) : lines, lines: area ? lines : t('count.lines', { n: lineIds.length }) });
+    }
 
     function resetButton(prefix, label, undoLabel) {
       const paths = removablePaths(Object.keys(doc().pins).filter((p) => p.startsWith(prefix)));
@@ -1204,10 +1326,10 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
     function render() {
       if (!visible()) { dirty = true; return; }
       dirty = false;
-      const sel = S.validate(app.view.state.sel, plan());
-      const ctx = F.contextOf(sel, plan(), app.reg);
+      const sel = S.validate(app.view.state.sel, plan(), doc());
+      const ctx = F.contextOf(sel, plan(), app.reg, doc());
       // Pinned parameters of parts that are no longer chosen stay listed (無効), never hidden (§3.4).
-      const sections = F.withPinnedParams(F.sectionsFor(sel, plan(), app.reg), ctx, F.pinnedSlots(ctx, doc().pins));
+      const sections = F.withPinnedParams(F.sectionsFor(sel, plan(), app.reg, doc()), ctx, F.pinnedSlots(ctx, doc().pins));
       const sig = JSON.stringify(sel) + '|' + sections.map((s) => s.id + ':' + s.fields.map((f) => f.id).join(',')).join(';');
       renderCrumbs();
       renderHead(ctx);
@@ -1246,8 +1368,10 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
     }
 
     const def = (id, fn) => { if (!app.actions.has(id)) app.actions.defineAction({ id, label: 'cmd.' + id, run: fn }); };
-    def('picker.move', (c, a) => (inPicker() ? stack[stack.length - 1].move(a ? a.dx : 0, a ? a.dy : 0) !== false : false));
-    def('picker.pick', () => (inPicker() ? stack[stack.length - 1].pick() : false));
+    // Sub-pages without a grid (キーフレーム, マイ素材, 使わない部品's kinds) leave the arrows and Enter to their controls.
+    const topHas = (fn) => inPicker() && typeof stack[stack.length - 1][fn] === 'function';
+    def('picker.move', (c, a) => (topHas('move') ? stack[stack.length - 1].move(a ? a.dx : 0, a ? a.dy : 0) !== false : false));
+    def('picker.pick', () => (topHas('pick') ? stack[stack.length - 1].pick() : false));
     def('picker.back', () => (inPicker() ? pop() : false));
 
     // Opens one section of the current page and scrolls to it (e.g. 試した見た目 from the play bar's n/m).

@@ -1,6 +1,7 @@
-/* 文字PVメーカー v2 — original work. Command palette (Ctrl+K): actions, @line / @time jumps, #kind part pins, ? help (DESIGN §6.4.12). */
-MV.def('ui/palette', ['ui/dom', 'ui/icons', 'ui/keys', 'ui/selection', 'i18n/strings', 'i18n/t', 'ui/playbar', 'ui/fields'],
-  (dom, I, K, S, STRINGS, T, PB, F) => {
+/* 文字PVメーカー v2 — original work. Command palette (Ctrl+K): actions, @line / @time jumps, #kind part pins, %area selection, ? help (DESIGN §6.4.12; DESIGN_2_1 §6.8). */
+MV.def('ui/palette', ['ui/dom', 'ui/icons', 'ui/keys', 'ui/selection', 'i18n/strings', 'i18n/t', 'ui/playbar', 'ui/fields',
+  'planner/areas'],
+  (dom, I, K, S, STRINGS, T, PB, F, AREAS) => {
     'use strict';
 
     const { h } = dom;
@@ -147,10 +148,26 @@ MV.def('ui/palette', ['ui/dom', 'ui/icons', 'ui/keys', 'ui/selection', 'i18n/str
         app.batch({ label: ['undo.pin', { field: t('kind.' + kind), scope: t.label(S.crumbs(sel, plan).slice(-1)[0].label) }] }, cmds);
       }
 
+      // %サビ1 → select that area (its lines with the area, DESIGN_2_1 §6.8): song sections, all of a kind, headings, blocks.
+      function areaItems(q) {
+        const plan = app.plan;
+        if (!plan || !plan.lines.length) return [{ text: t('pal.noAreas'), disabled: true }];
+        const all = AREAS.areasOf(app.doc, plan);
+        const words = norm(q).split(/\s+/).filter(Boolean);
+        const out = [];
+        for (const area of all.song.concat(all.kinds, all.heads, all.paras)) {
+          const name = F.areaLabel(t, area);
+          if (words.length && !matches(words, norm(name + ' ' + area.key))) continue;
+          out.push({ text: t('pal.area', { area: F.areaTitle(t, area) }), run: () => app.select(S.areaSel(area), { from: 'key', open: true, seek: true }) });
+          if (out.length >= LIMIT) break;
+        }
+        return out.length ? out : [{ text: t('pal.noAreas'), disabled: true }];
+      }
+
       function helpItems() {
         return [
           { text: t('pal.help.actions'), disabled: true }, { text: t('pal.help.jump'), disabled: true },
-          { text: t('pal.help.part'), disabled: true },
+          { text: t('pal.help.part'), disabled: true }, { text: t('pal.help.area'), disabled: true },
           { text: t('cmd.help.keys'), keys: '?', run: () => app.actions.run('help.keys') },
         ];
       }
@@ -158,6 +175,7 @@ MV.def('ui/palette', ['ui/dom', 'ui/icons', 'ui/keys', 'ui/selection', 'i18n/str
       function compute(q) {
         if (q.startsWith('@')) return jumpItems(q.slice(1));
         if (q.startsWith('#')) return partItems(q.slice(1));
+        if (q.startsWith('%')) return areaItems(q.slice(1));
         if (q.startsWith('?')) return helpItems();
         return actionItems(q.startsWith('>') ? q.slice(1) : q).slice(0, LIMIT);
       }
