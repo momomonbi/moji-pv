@@ -513,7 +513,7 @@ function mediaAsk(answers, doc) {
 }
 const n = (name) => DOC.media.list.findIndex((e) => e.name === name);
 
-test('media: the [media] list holds names, sizes and vision text only; no request carries pixels', () => {
+test('media: the [media] list holds kinds, sizes and vision text only — never a file name; no request carries pixels', () => {
   const q = DI.directRequests(DOC, PLAN, reg, { briefs: [{ ref: CHORUS, instruction: '写真を背景に' }], uiLang: 'ja', mode: 'all', media: true, allowMaterials: true });
   const req = q[0];
   assert.equal(req.schema, DI.directSchema({ mode: 'all', allowMaterials: true, media: true }));
@@ -521,14 +521,18 @@ test('media: the [media] list holds names, sizes and vision text only; no reques
   const list = req.prompt.slice(req.prompt.indexOf('[media]')).split('\n').slice(0, 5);
   deepEqual(list, [
     '[media] the user\'s own photos and videos (use only these, as "asset:<n>")',
-    'asset:0 image 800×800 square "ロゴ.png" — (no description)',
-    'asset:1 image 4032×3024 landscape "空.jpg" — 夕方の空 · colours #F2A65A #3D5A80 · text area: upper third',
-    'asset:2 video 0:13 1920×1080 landscape "海辺.mp4" — (no description)',
-    'asset:3 video 0:04 1280×720 landscape "きらめき.webm" — (no description)']);
+    'asset:0 image 800×800 square — (no description)',
+    'asset:1 image 4032×3024 landscape — 夕方の空 · colours #F2A65A #3D5A80 · text area: upper third',
+    'asset:2 video 0:13 1920×1080 landscape — (no description)',
+    'asset:3 video 0:04 1280×720 landscape — (no description)']);
   assert.ok(req.prompt.includes('media layer: media "" = a picture the user picks'), 'the recipe text knows media layers');
   assert.equal(req.media, undefined, 'no request parts');
-  const json = JSON.stringify(q);
-  for (const bad of ['inline_data', 'inlineData', 'base64', 'data:image', 'bytes', 'blob']) assert.ok(!json.includes(bad), bad);
+  const json = JSON.stringify(q.map((r) => [r.system, r.prompt]));
+  for (const bad of ['inline_data', 'inlineData', 'base64', 'data:image', 'bytes', 'blob']) assert.ok(!JSON.stringify(q).includes(bad), bad);
+  // the owner's rule: the AI gets lyrics, instructions and numbers — never the names of the user's files
+  for (const e of DOC.media.list) {
+    assert.ok(!json.includes(e.name), 'no file name in a request: ' + e.name);
+  }
   assert.ok(!json.includes('"' + DOC.media.list[0].bytes), 'no byte counts');
   const only = DI.directRequests(DOC, PLAN, reg, { briefs: [{ ref: CHORUS, instruction: 'x' }], uiLang: 'en', media: [ASSET['海辺.mp4'].id] });
   deepEqual(only[0].sent.media.map((m) => [m.n, m.name]), [[0, '海辺.mp4']], 'only the assets on this device');

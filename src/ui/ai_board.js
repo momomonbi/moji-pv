@@ -85,8 +85,10 @@ MV.def('ui/ai_board', ['ui/dom', 'ui/icons', 'planner/areas', 'ui/fields', 'ui/a
       flush();
       const b = AC.boardBriefs(rows, asks());
       if (!b.briefs.length || b.over) return;
-      // the library's pictures on this device may be placed, as in the instruction block (DESIGN_2_1 §11.6.1)
-      const here = (app.doc.media && app.doc.media.list ? app.doc.media.list : []).filter((e) => !app.media || app.media.state(e.id) !== 'missing');
+      // the library's pictures on this device may be placed, as in the instruction block, and only while its
+      // 写真・動画をAIが使ってよい switch is on (DESIGN_2_1 §11.6.1)
+      const allowed = typeof o.allowMedia === 'function' && o.allowMedia();
+      const here = !allowed ? [] : (app.doc.media && app.doc.media.list ? app.doc.media.list : []).filter((e) => !app.media || app.media.state(e.id) !== 'missing');
       ctl.run('direct', { briefs: b.briefs, mode: 'all', allowMaterials: allow.checked, media: here.length ? here.map((e) => e.id) : false });
     });
 

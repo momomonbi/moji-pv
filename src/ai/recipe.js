@@ -580,8 +580,9 @@ MV.def('ai/recipe', ['core/num', 'core/hash', 'core/color', 'core/curve', 'core/
         if (ai && Array.isArray(ai.colors) && ai.colors.length) bits.push('colours ' + ai.colors.join(' '));
         if (ai && isObject(ai.text)) bits.push('text area: ' + boxWords(ai.text));
         if (ai && isObject(ai.subject)) bits.push('subject: ' + boxWords(ai.subject));
+        // Never the file name: the AI gets only the kind, size, shape and what the user let the vision step describe.
         const line = 'asset:' + n + ' ' + kind + (isNumber(e.dur) && kind !== 'image' ? ' ' + clock(e.dur) : '') + ' ' + e.w + '×'
-          + e.h + ' ' + shape + ' ' + JSON.stringify(String(e.name)) + ' — ' + bits.join(' · ');
+          + e.h + ' ' + shape + ' — ' + bits.join(' · ');
         out.push({ n, id: e.id, kind: e.kind, anim: !!e.anim, alpha: !!e.alpha, dur: isNumber(e.dur) ? e.dur : null, w: e.w, h: e.h,
           name: String(e.name), line });
       }

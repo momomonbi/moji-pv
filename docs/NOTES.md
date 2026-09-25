@@ -6728,3 +6728,24 @@ checkerboard ('scene')", while every export check passed and the check passed lo
 check read it right after the click. It now waits (up to 5 s) for the stage to draw the new backdrop, as ui_flows'
 output flow does with its settle. perf.py passed on the same run: long+camera+materials p50 13.5 / p95 23.3 ms,
 basic+media p50 11.4 / p95 19.5 ms.
+
+## Lead: hotfix for the review's blockers
+
+The full review of v2.1 (8 lenses, every finding verified by a second agent; the fixes of the other 40-odd findings are
+under way) found three problems that the published app has. They are fixed here ahead of the rest:
+
+- **SO-1 / SEC-1: 保存 deleted the saved project when it was cancelled or failed.** `savePackage` aborted its file sink
+  on [中止] or on a write error, and `createFileSink.abort()` removed the file: on Ctrl+S that is the user's own .mojipv.
+  `createFileSink(handle, { removeOnAbort })` now keeps the file when the caller writes over one the user already has
+  (`savePackage` passes `removeOnAbort: !handle`); a file the save dialog has just created is still removed. Node test in
+  export_math.test.js (a mutant that always removes fails it); the reviewer's browser probe now keeps 3760 of 3760 bytes
+  after [中止] and 3809 of 3809 after a failed write.
+- **SO-2: a refused .json became the file 保存 writes.** `open()` took the picker's handle as the project file even when
+  `openProject` refused the file (newer app, damaged), and the next Ctrl+S overwrote it with the work on screen. The
+  handle is now taken only when the file opened. Probe: the schema-99 file stays schema 99 after Ctrl+S.
+- **MAI-1 / SEC-2 / DTC-1: the direct tool sent the names of the user's photo and video files to the AI.** The
+  `[media]` list line (`ai/recipe.mediaSent`) no longer carries the file name: an asset is `asset:<n>` with its kind,
+  duration, size, shape and what the vision step stored. ai_direct.test.js asserts that no file name of the library
+  appears in any request (a mutant that puts the name back fails it).
+- **MAI-2 / UI-1: 区画ごとに指示 ignored 「写真・動画をAIが使ってよい」.** The board now reads the instruction block's switch
+  (`directBlock().mediaAllowed`, passed to `ai_board.mount` as `allowMedia`) and sends no `[media]` list when it is off.
