@@ -242,6 +242,10 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
       const hit = PINS.lookup(ix, cat === 't0' ? { cutKey: null, pinCutKey: at.pinCutKey, lineId: null } : at, parsed.slot);
       return hit ? { from: hit.from, by: hit.by, at: hit.at } : { from: 'auto' };
     }
+    if (cat === 'part' && parsed.part.kind === 'seam') {
+      const hard = hardCutSource(plan, cut, registry, ix, at);
+      if (hard) return hard;
+    }
     const d = decisionAt(plan, cut, parsed, registry);
     if (!d) return { from: 'auto' };
     if (cat === 'param') {
@@ -260,6 +264,14 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
       if (hit) src.at = hit.at;
     }
     return src;
+  }
+
+  // A hard cut is not listed in Plan.seams (tracks.seams), so its decision keeps no source. When a pin chose it, the
+  // planner applied that pin: report the pin, or a pinned 切り替え「なし」 would read as not applicable (無効).
+  function hardCutSource(plan, cut, registry, ix, at) {
+    if (!registry || cut.seamIn >= 0 || !plan.cuts.length || cut.key === plan.cuts[0].key) return null;
+    const hit = PINS.lookup(ix, at, 'seam');
+    return hit && hit.v === registry.fallback('seam') ? { from: hit.from, by: hit.by, at: hit.at } : null;
   }
 
   function decisionSlot(parsed) {

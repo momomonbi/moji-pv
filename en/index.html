@@ -1,6 +1,6 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-r9WuhmxyqH2SfntsZoQZPphJtwSp5MO2wXPTQRaozRE='; style-src 'sha256-RJ+J2jPfQmujoLqduc4mjqSSzNBP7DIWLiYjNX3ebXY=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-025tNQMstR9VOLjS2zNO/DY4hp6RvRfiq5MM+5M0g4I='; style-src 'sha256-RJ+J2jPfQmujoLqduc4mjqSSzNBP7DIWLiYjNX3ebXY=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
 <title>Moji PV Maker</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -13562,6 +13562,10 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
       const hit = PINS.lookup(ix, cat === 't0' ? { cutKey: null, pinCutKey: at.pinCutKey, lineId: null } : at, parsed.slot);
       return hit ? { from: hit.from, by: hit.by, at: hit.at } : { from: 'auto' };
     }
+    if (cat === 'part' && parsed.part.kind === 'seam') {
+      const hard = hardCutSource(plan, cut, registry, ix, at);
+      if (hard) return hard;
+    }
     const d = decisionAt(plan, cut, parsed, registry);
     if (!d) return { from: 'auto' };
     if (cat === 'param') {
@@ -13580,6 +13584,14 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
       if (hit) src.at = hit.at;
     }
     return src;
+  }
+
+  // A hard cut is not listed in Plan.seams (tracks.seams), so its decision keeps no source. When a pin chose it, the
+  // planner applied that pin: report the pin, or a pinned 切り替え「なし」 would read as not applicable (無効).
+  function hardCutSource(plan, cut, registry, ix, at) {
+    if (!registry || cut.seamIn >= 0 || !plan.cuts.length || cut.key === plan.cuts[0].key) return null;
+    const hit = PINS.lookup(ix, at, 'seam');
+    return hit && hit.v === registry.fallback('seam') ? { from: hit.from, by: hit.by, at: hit.at } : null;
   }
 
   function decisionSlot(parsed) {

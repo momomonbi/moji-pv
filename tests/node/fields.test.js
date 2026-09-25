@@ -161,6 +161,33 @@ test('field states: locked, mark, derived, inactive (part changed, not applicabl
   }
 });
 
+test('a pinned hard cut (切り替え「なし」) reads as pinned, although hard cuts are not listed in Plan.seams', () => {
+  const doc = clone(corpus.project('basic').doc);
+  const p0 = plan(doc);
+  const hard = REGISTRY.fallback('seam');
+  const first = p0.cuts[0], later = p0.cuts.slice(1);
+  // Pin the hard cut on every later boundary, at cut scope: each one is applied, none is 無効.
+  for (const c of later) doc.pins['cut/' + c.key + ':seam'] = user(hard, c.text);
+  let p = plan(doc);
+  assert.equal(p.seams.length, 0, 'every boundary is a hard cut');
+  for (const c of later) {
+    const fs = state(doc, p, 'cut/' + c.key + ':seam');
+    assert.deepEqual([fs.state, fs.pinnedAt, fs.value, fs.pinAt], ['pinned', 'cut', hard, 'cut/' + c.key + ':seam'], c.key);
+  }
+  // A line pin of the hard cut applies to the line's cuts: the cut's row shows it inherited from the line.
+  const line = p0.lines.find((l, i) => i > 0);
+  const lineDoc = clone(corpus.project('basic').doc);
+  lineDoc.pins['line/' + line.id + ':seam'] = user(hard);
+  p = plan(lineDoc);
+  const fs = state(lineDoc, p, 'cut/' + line.cuts[0] + ':seam');
+  assert.deepEqual([fs.state, fs.pinnedAt, fs.value], ['inherited', 'line', hard]);
+  // The very first cut has no boundary before it, so a seam pin there never applies.
+  doc.pins['cut/' + first.key + ':seam'] = user(hard, first.text);
+  p = plan(doc);
+  assert.deepEqual([state(doc, p, 'cut/' + first.key + ':seam').state, state(doc, p, 'cut/' + first.key + ':seam').inactiveReason],
+    ['inactive', 'not-applicable']);
+});
+
 test('field states of work slots, parameters, counts and elements', () => {
   const doc = clone(corpus.project('basic').doc);
   doc.pins = { 'work:mood': user('stubBright'), 'work:color.accent': user('#112233'), 'work:amount.glitch': user(0.4) };

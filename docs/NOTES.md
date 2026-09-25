@@ -3918,3 +3918,11 @@ The first CI run of the v2 browser suite (ubuntu-latest, Google Chrome) failed t
 - Seen once while the browser tests ran in parallel with other browser runs here: `ui_flows.py` `values` read the
   切り替え row as 無効 (`OTHER_TILE` picked a transition that does not apply at that boundary). Four runs of the flow alone,
   with either font set, passed; it looks like a timing flake in the tile order, not a font effect.
+
+## Pinned hard cut reads as pinned
+
+A pinned 切り替え「なし」 (the seam fallback, the hard cut) is applied by the planner, but hard cuts are not listed in
+`Plan.seams`, so `planner/fields.sourceAt` found no source for the pin and the inspector showed it as 無効
+(not-applicable). `sourceAt` now reports the winning pin when a later cut has no seam and that pin is the hard cut
+(`hardCutSource`); a seam pin on the very first cut still reads as not applicable. This made ui_flows' `values` flow
+fail whenever its tile pick happened to be the hard cut. Test: fields.test.js 'a pinned hard cut … reads as pinned'.
