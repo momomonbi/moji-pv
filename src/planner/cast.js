@@ -1,6 +1,6 @@
-/* 文字PVメーカー v2 — original work. Casting: every cut slot in the FROZEN order, from pins, rules or the chooser (DESIGN §4.16.2, §3.4.3). */
+/* 文字PVメーカー v2 — original work. Casting: every cut slot in the FROZEN order, from pins, rules or the chooser (DESIGN §4.16.2, §3.4.3; DESIGN_2_1 §3.9, §4.9). */
 MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 'core/pins', 'planner/choose',
-  'planner/params', 'planner/look'], (S, REG, R, N, PINS, CH, PA, LK) => {
+  'planner/params', 'planner/look', 'planner/camera'], (S, REG, R, N, PINS, CH, PA, LK, CAM) => {
     'use strict';
 
     const LIST_KINDS = Object.freeze(['ornament', 'filter']);
@@ -13,8 +13,9 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     const FACE_WEIGHTS = Object.freeze({ display: 3, serif: 2, body: 1 });
     const AVOID_REPEAT = new Set(['arrange', 'arrive']);   // §8.2: no identical adjacent arrange/arrive (see choose.pick)
 
-    // Specs of the non-part cut slots (§3.4.3); pins are coerced through them and planner/fields shows them.
-    const SLOT_SPECS = Object.freeze({
+    // Specs of the non-part cut slots (§3.4.3, and the v2.1 camera slots of planner/camera); pins are coerced through
+    // them and planner/fields shows them.
+    const SLOT_SPECS = Object.freeze(Object.assign({
       orient: { type: 'enum', of: ['h', 'v'] },
       'text.face': { type: 'face' },
       'text.scale': { type: 'num', min: 0.5, max: 2, step: 0.01 },
@@ -25,34 +26,98 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       'el.nudge': { type: 'nudge' },
       'el.fill': { type: 'ink' },
       'el.hide': { type: 'bool' },
-    });
+    }, CAM.SLOT_SPECS));
+    const SEASON_SPEC = LK.LOOK_SPECS.season;
+    const AVOID_SPEC = Object.freeze({ type: 'partRefs' });
     const NUDGE_LIMITS = Object.freeze({ dx: [-4000, 4000, 0], dy: [-4000, 4000, 0], rot: [-360, 360, 0], s: [0.1, 10, 1] });
+
+    // --- line conditions: season and avoid (DESIGN_2_1 §4.9) ------------------------------------------------------
+
+    // The conditions a cut's automatic picks work under: the effective season (the line pin 'season', rank pin:line
+    // only, else the look's season; special cuts have no line) and the line's avoid list ('line/<id>:avoid', line only),
+    // made once per plan and line. { season, pinned, deny: { kind: keys } | null, n: { kind: count }, id, line, warnings }.
+    // A line's pin warnings are kept on it and replayed wherever it is read (the warner reports each once), so a cast
+    // taken from the cache reports them like a fresh one.
+    function lineCond(ctx, lineId) {
+      if (!lineId) return workCond(ctx);
+      const seen = ctx.lineConds || (ctx.lineConds = new Map());
+      let c = seen.get(lineId);
+      if (c === undefined) {
+        const warnings = [];
+        const warn = (w) => { warnings.push(w); };
+        const at = { cutKey: null, pinCutKey: null, lineId };
+        const lineOnly = (spec) => (v, rank) => {
+          if (rank !== 'pin:line') return { na: true };
+          const x = S.coerce(spec, v);
+          return x === undefined ? { bad: true } : { v: x };
+        };
+        const sp = PA.pinned(ctx.ix, 'season') ? PA.resolvePin(ctx.ix, at, 'season', lineOnly(SEASON_SPEC), warn) : null;
+        const ap = PA.pinned(ctx.ix, 'avoid') ? PA.resolvePin(ctx.ix, at, 'avoid', lineOnly(AVOID_SPEC), warn) : null;
+        const refs = ap ? ap.v : [];
+        if (!sp && !refs.length && !warnings.length) c = workCond(ctx);
+        else {
+          const deny = refs.length ? {} : null;
+          const n = {};
+          for (const ref of refs) {
+            const dot = ref.indexOf('.');
+            const kind = ref.slice(0, dot);
+            (deny[kind] || (deny[kind] = [])).push(ref.slice(dot + 1));
+            n[kind] = (n[kind] || 0) + 1;
+          }
+          const season = sp ? sp.v : ctx.look.season;
+          c = { season, pinned: !!sp, deny, n, id: (sp ? season + '!' : season) + (refs.length ? '|a:' + refs.join(',') : ''),
+            line: lineId, warnings };
+        }
+        seen.set(lineId, c);
+      }
+      for (const w of c.warnings) ctx.warn(w);
+      return c;
+    }
+
+    function workCond(ctx) {
+      return ctx.workCond || (ctx.workCond = { season: ctx.look.season, pinned: false, deny: null, n: {}, id: '', line: null,
+        warnings: [] });
+    }
 
     // --- pools and part pins -----------------------------------------------------------------------------------
 
-    // registry.pool, cached per plan: season, filters and amounts are fixed for one plan.
+    // registry.pool, cached per plan: filters and amounts are fixed for one plan, the season and avoid list per line.
     function poolOf(ctx, kind, o) {
       const sub = (o.role || '') + '|' + (o.orient || '') + '|' + (o.script || '') + '|' + (o.aspect || '');
-      return poolBy(ctx, kind, sub, o.role, o.orient, o.script, o.aspect, o.scope);
+      return poolBy(ctx, kind, sub, o.role, o.orient, o.script, o.aspect, o.scope, o.cond);
     }
 
-    // The pool under kind and `sub` (role, orientation, script and aspect as text; a cut makes its text once). Gates
-    // read the amounts as the backdrop allows them (planner/look gateAmounts). A cut's screen effects never take the
-    // work texture again (it already runs over the whole video: risoPink's dotScreen texture plus a dotScreen effect
-    // doubled the dots); a pin still can.
-    function poolBy(ctx, kind, sub, role, orient, script, aspect, scope) {
+    function poolBy(ctx, kind, sub, role, orient, script, aspect, scope, cond) {
+      return poolEntry(ctx, kind, sub, role, orient, script, aspect, scope, cond).keys;
+    }
+
+    // The pool under kind and `sub` (role, orientation, script and aspect as text; a cut makes its text once) and the
+    // line conditions: { keys, relaxed }. Gates read the amounts as the backdrop allows them (planner/look gateAmounts).
+    // A cut's screen effects never take the work texture again (it already runs over the whole video: risoPink's
+    // dotScreen texture plus a dotScreen effect doubled the dots); a pin still can. The line's avoid list is added to
+    // the kind's deny filter; when that would empty a pool that is not empty without it, the avoid list is relaxed for
+    // that kind (relaxed: the chooser reports avoid-empty).
+    function poolEntry(ctx, kind, sub, role, orient, script, aspect, scope, cond) {
+      const c = cond || workCond(ctx);
       let byKind = ctx.pools.get(kind);
       if (!byKind) { byKind = new Map(); ctx.pools.set(kind, byKind); }
-      const id = scope ? sub + '|' + scope : sub;
-      let keys = byKind.get(id);
-      if (!keys) {
-        keys = ctx.registry.pool(kind, { role, orient, script, aspect, scope, season: ctx.look.season, filters: ctx.doc.filters,
+      const id = (scope ? sub + '|' + scope : sub) + (c.id ? '|' + c.id : '');
+      let entry = byKind.get(id);
+      if (!entry) {
+        let keys = ctx.registry.pool(kind, { role, orient, script, aspect, scope, season: c.season, filters: ctx.doc.filters,
           amounts: LK.gateAmounts(ctx.look.amounts, ctx.doc.look.backdrop, kind) });
         const texture = kind === 'filter' && ctx.look.plan && ctx.look.plan.texture ? ctx.look.plan.texture.v : null;
         if (texture && keys.includes(texture)) keys = keys.filter((k) => k !== texture);
-        byKind.set(id, keys);
+        let relaxed = false;
+        const deny = c.deny ? c.deny[kind] : null;
+        if (deny && keys.length) {
+          const kept = keys.filter((k) => !deny.includes(k));
+          if (kept.length) keys = kept; else relaxed = true;
+        }
+        entry = { keys, relaxed };
+        byKind.set(id, entry);
       }
-      return keys;
+      return entry;
     }
 
     function serves(ctx, kind, key, role) {
@@ -87,12 +152,14 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       return !!f && (Array.isArray(f.only) || Array.isArray(f.deny));
     }
 
-    // Pins win over filters and the season gate, with a warning (§3.8).
-    function pinWarnings(ctx, kind, key, pin) {
-      if (key === 'none') return;
+    // Pins win over filters and the season gate, with a warning (§3.8). The season is the cut's effective season
+    // (cond, DESIGN_2_1 §4.9); a pinned part on the line's avoid list is used without a warning (pins still win).
+    function pinWarnings(ctx, kind, key, pin, cond) {
+      if (key === 'none' || typeof key !== 'string') return;
       if (!filterAllows(ctx.doc.filters, kind, key)) ctx.warn({ code: 'pin-filtered', path: pin.at });
       const def = ctx.registry.get(kind, key);
-      if (def && def.season && ctx.look.season !== 'any' && def.season !== ctx.look.season) {
+      const season = (cond || workCond(ctx)).season;
+      if (def && def.season && season !== 'any' && def.season !== season) {
         ctx.warn({ code: 'pin-off-season', path: pin.at });
       }
     }
@@ -100,25 +167,33 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     // --- the chooser with its fallbacks (§4.16.4, §3.8) ---------------------------------------------------------
 
     // chooseAuto(ctx, req) → { v, from, stage, base, ref, win } (base / ref: the natural and reference picks, see
-    // createHistory; win: the winner before req.avoid, which v differs from only when the winner was avoided). req = { kind, slot, path, feat, role, orient, script, scope, chosen, seed, recent, ref, echo,
-    // avoid, list, orNone, cutKey, trace, silent }.
+    // createHistory; win: the winner before req.avoid, which v differs from only when the winner was avoided).
+    // req = { kind, slot, path, feat, role, orient, script, scope, chosen, seed, recent, ref, echo, avoid, list, orNone,
+    // cutKey, trace, silent, cond (the line conditions of lineCond; default the work's), noMedia (derived media grounds
+    // weigh 0 here, DESIGN_2_1 §11.5.9) }.
     // Stages (§4.16.4, §3.8): the full weights; the same pool without traitFit and fits; the pool without the text
     // traits (orient, script, aspect); then the kind's fallback — or 'none' for a list slot whose fallback does not
     // serve the cut's role, and for atmos (orNone). pool-empty is reported on lyric cuts, and elsewhere only when the
     // fallback itself is outside the user's filter (a seam filter of just the hard cut is fully honoured by the
-    // fallback). silent: no warnings (explain's alternatives, the natural pass).
+    // fallback). A pick from a pool whose avoid list had to be relaxed reports avoid-empty. silent: no warnings
+    // (explain's alternatives, the natural pass).
     function chooseAuto(ctx, req) {
       const trace = req.trace || null;
+      const cond = req.cond || workCond(ctx);
       const ask = {
         kind: req.kind, keys: null, noFit: false, trace: null, feat: req.feat, chosen: req.chosen, seed: req.seed,
         variety: ctx.look.variety, recent: req.recent, ref: req.ref || null, echo: req.echo,
-        moodFilter: req.kind === 'filter', avoid: req.avoid || null,
+        moodFilter: req.kind === 'filter', avoid: req.avoid || null, season: cond.season, seasonPinned: cond.pinned,
+        noMedia: !!req.noMedia,
       };
-      const full = req.poolId !== undefined
-        ? poolBy(ctx, req.kind, req.poolId, req.role, req.orient, req.script, ctx.aspect, req.scope)
-        : poolOf(ctx, req.kind, { role: req.role, orient: req.orient, script: req.script, aspect: ctx.aspect, scope: req.scope });
+      const sub = req.poolId !== undefined ? req.poolId
+        : (req.role || '') + '|' + (req.orient || '') + '|' + (req.script || '') + '|' + (ctx.aspect || '');
+      const full = poolEntry(ctx, req.kind, sub, req.role, req.orient, req.script, ctx.aspect, req.scope, cond);
+      if (trace) trace.cond = cond;
       for (let stage = 0; stage < 3; stage++) {
-        const keys = stage < 2 ? full : poolOf(ctx, req.kind, { role: req.role, scope: req.scope });
+        const entry = stage < 2 ? full
+          : poolEntry(ctx, req.kind, (req.role || '') + '|||', req.role, undefined, undefined, undefined, req.scope, cond);
+        const keys = entry.keys;
         if (!keys.length) continue;
         ask.keys = keys;
         ask.noFit = stage > 0;
@@ -127,9 +202,12 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
         const name = stage === 0 ? 'auto' : 'relaxed';
         if (trace) {
           Object.assign(trace, { keys, candidates: ask.trace, noFit: ask.noFit, stage: name,
-            avoided: hit ? hit.avoided || null : null });
+            avoided: hit ? hit.avoided || null : null, avoidRelaxed: entry.relaxed });
         }
-        if (hit) return { v: hit.v, from: 'auto', stage: name, base: hit.base, ref: hit.ref, win: hit.avoided || hit.v };
+        if (hit) {
+          if (entry.relaxed && !req.silent) ctx.warn({ code: 'avoid-empty', path: 'line/' + cond.line + ':avoid', line: cond.line });
+          return { v: hit.v, from: 'auto', stage: name, base: hit.base, ref: hit.ref, win: hit.avoided || hit.v };
+        }
       }
       if (req.orNone) {
         if (trace) trace.stage = 'none';
@@ -235,8 +313,10 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       return g;
     }
 
+    // A slot whose value takes part in recency and echoes: part choices, and the preset shots of cam.shot (DESIGN_2_1
+    // §3.9; a custom shot object is not a choice).
     function isChoice(slot, v) {
-      return typeof v === 'string' && v !== 'none' && slot.indexOf('.') < 0 && slot !== 'orient';
+      return typeof v === 'string' && v !== 'none' && ((slot.indexOf('.') < 0 && slot !== 'orient') || slot === 'cam.shot');
     }
 
     function addTo(map, g, v) {
@@ -343,7 +423,7 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
         : acceptPart(ctx, kind, cut.role, { none: list, scope: kind === 'ornament' ? 'cut' : null }), ctx.warn);
       let d;
       if (pin) {
-        pinWarnings(ctx, kind, pin.v, pin);
+        pinWarnings(ctx, kind, pin.v, pin, st.cond);
         d = pinDecision(pin);
         if (trace) Object.assign(shadow(st, kind, slot, seed, list, trace), { kind, stage: 'pin', pin });
       } else if (o.force) {
@@ -358,7 +438,7 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
         const got = chooseAuto(ctx, {
           kind, slot, path: 'cut/' + cut.key + ':' + slot, feat: cut.feat, role: cut.role, orient: st.chosen.orient,
           script: cut.feat.script, scope: kind === 'ornament' ? 'cut' : null, chosen: st.chosen, seed, recent, echo,
-          list, cutKey: cut.key, trace, silent: st.natural, ref, poolId: poolIdOf(st),
+          list, cutKey: cut.key, trace, silent: st.natural, ref, poolId: poolIdOf(st), cond: st.cond,
           avoid: AVOID_REPEAT.has(kind) && !st.natural ? st.hist.previous(slot) : null,
         });
         d = { v: got.v, from: got.from };
@@ -369,10 +449,11 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       if (d.v !== 'none' && !st.natural) {
         const def = ctx.registry.get(kind, d.v);
         const { p, pfrom } = PA.resolveParams(def, kind, idx, at, ctx.ix, {
-          registry: ctx.registry, seed, salts: ctx.salts, warn: ctx.warn, f: cut.feat, look: lookAx(ctx),
+          registry: ctx.registry, seed, salts: ctx.salts, warn: ctx.warn, f: cut.feat, look: lookAx(ctx), media: ctx.media,
         });
         d.p = p;
         if (pfrom) d.pfrom = pfrom;
+        if (MOTION_KINDS.includes(kind)) CAM.applySpeed(st, kind, d);
       }
       if (trace) trace.decision = d;
       setDecision(st, slot, d);
@@ -387,7 +468,7 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       const echo = st.hist.echo(cut.feat.repeatOf, slot);
       chooseAuto(ctx, { kind, slot, path: 'cut/' + cut.key + ':' + slot, feat: cut.feat, role: cut.role,
         orient: st.chosen.orient, script: cut.feat.script, scope: kind === 'ornament' ? 'cut' : null, chosen: st.chosen,
-        seed, recent, echo, list, cutKey: cut.key, trace, silent: true });
+        seed, recent, echo, list, cutKey: cut.key, trace, silent: true, cond: st.cond });
       return Object.assign(trace, { recent, echo });
     }
 
@@ -400,7 +481,9 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       return out;
     }
 
-    // A non-part slot: pin (coerced through its spec, plus an optional applicability check) or the auto value.
+    // A non-part slot: pin (coerced through its spec, plus an optional applicability check) or the auto value,
+    // autoFn(seed, withWhy). The auto may return `rule` (its rule name) and, when asked (withWhy: explain is tracing
+    // this slot), `why` (explain's reasons, planner/camera); both go to the trace, never into the Plan.
     function decideValue(st, slot, spec, autoFn, applies) {
       const { ctx, at } = st;
       const trace = tracing(st, slot);
@@ -409,12 +492,20 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
         if (c === undefined) return { bad: true };
         return applies && !applies(c) ? { na: true } : { v: c };
       }, ctx.warn);
-      const d = pin ? pinDecision(pin) : autoFn(seedOf(st, slot));
+      const got = pin ? pinDecision(pin) : autoFn(seedOf(st, slot), !!trace);
+      const d = got.rule !== undefined || got.why !== undefined ? withoutTrace(got) : got;
       if (trace) Object.assign(trace, { stage: pin ? 'pin' : d.from === 'rule' ? 'rule' : 'auto', pin, decision: d,
-        rule: d.from === 'rule' ? d.rule || slot : slot });
-      if (d.rule) delete d.rule;
+        rule: d.from === 'rule' ? got.rule || slot : slot, why: pin ? null : got.why || null });
       setDecision(st, slot, d);
       return d;
+    }
+
+    // A decision without the trace-only fields rule and why. A new object rather than `delete`, which would leave the
+    // decision a slow (dictionary) object for everything that reads it later: encoding, freezing, copying.
+    function withoutTrace(d) {
+      const out = {};
+      for (const k of Object.keys(d)) if (k !== 'rule' && k !== 'why') out[k] = d[k];
+      return out;
     }
 
     // orient (§4.16.4): 'h' when the text cannot stand vertically; else 'v' with probability
@@ -540,25 +631,29 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       return els;
     }
 
-    // The slots of one cut in the FROZEN order (§4.16.2): orient → arrange → text.* → arrive → dwell → depart →
-    // ornament.count → ornament#i → lens → filter.count → filter#i. natural = the neighbours' view (no recency, no
-    // runner-up rule, no parameters).
+    // The slots of one cut in the FROZEN order (§4.16.2, DESIGN_2_1 §3.9): orient → arrange → text.* → motion.speed →
+    // arrive → dwell → depart → ornament.count → ornament#i → lens → cam.shot → cam.zoom → cam.curve → cam.follow →
+    // filter.count → filter#i. Every slot keeps its own stream, so the camera slots change no part choice. natural =
+    // the neighbours' view (no recency, no runner-up rule, no parameters). st.decide = decideValue, for planner/camera.
     function castSlots(ctx, cut, hist, natural) {
       const st = {
         ctx, cut, hist, natural, slots: {}, chosen: {}, base: {}, ref: {},
         at: { cutKey: cut.key, pinCutKey: cut.pinKey, lineId: cut.line },
         cutSeed: CH.cutSeed(ctx.doc.look.seed, cut.key, cut.line, ctx.salts), slotPrefix: 0, poolKey: null,
+        cond: lineCond(ctx, cut.line), decide: decideValue,
       };
       st.slotPrefix = CH.slotPrefix(st.cutSeed);
       decideOrient(st);
       const arrange = decidePart(st, 'arrange', null);
       decideText(st);
+      CAM.decideSpeed(st);
       const own = ctx.registry.get('arrange', arrange.v).motion === 'own';
       for (const kind of MOTION_KINDS) {
         decidePart(st, kind, null, own ? { force: ctx.registry.fallback(kind), rule: 'motion-own' } : null);
       }
       decideList(st, 'ornament');
       decidePart(st, 'lens', null);
+      CAM.decideCamera(st);
       decideList(st, 'filter');
       return st;
     }
@@ -664,11 +759,23 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     // recency reads (createHistory rowsRead). castInputs records them; an entry is reused when they compare equal
     // (sameInputs). Entries live for the last two plans. Cached decisions are frozen, and a plan gets its own copy of
     // each slots map (tracks may replace entries).
+    // The cache is keyed by the base registry (registry.base ?? registry, DESIGN_2_1 §3.9), then by registry.version
+    // (the last 4 versions): an effective registry is a new object after every material edit, and an edit that keeps
+    // what the planner reads keeps the version, so the casts stay warm (the fingerprints still see the new material
+    // hash, planner/plan matTerms).
     const casts = new WeakMap();
+    const VERSIONS_KEPT = 4;
     let nextEntryId = 1;
     function castCache(registry) {
-      let c = casts.get(registry);
-      if (!c) { c = { prev: new Map(), cur: new Map() }; casts.set(registry, c); }
+      const root = registry.base || registry;
+      let byVersion = casts.get(root);
+      if (!byVersion) { byVersion = new Map(); casts.set(root, byVersion); }
+      let c = byVersion.get(registry.version);
+      if (!c) {
+        c = { prev: new Map(), cur: new Map() };
+        byVersion.set(registry.version, c);
+        if (byVersion.size > VERSIONS_KEPT) byVersion.delete(byVersion.keys().next().value);
+      }
       return c;
     }
 
@@ -762,12 +869,17 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       };
     }
 
-    // Decisions hold primitives, p and pfrom (flat maps of primitives), so three freezes cover one.
+    // Decisions hold a value, p and pfrom; values and parameters may be objects since v2.1 (curves, shots), which are
+    // canonical and already frozen when they come from core/curve or core/shot, so deepFreeze stops at them.
     function freezeSlots(slots) {
       for (const slot of Object.keys(slots)) {
         const d = slots[slot];
-        if (d.p) Object.freeze(d.p);
+        if (d.p) {
+          const p = Object.freeze(d.p);
+          for (const k in p) { const x = p[k]; if (x !== null && typeof x === 'object') deepFreeze(x); }
+        }
         if (d.pfrom) Object.freeze(d.pfrom);
+        if (d.v !== null && typeof d.v === 'object') deepFreeze(d.v);
         Object.freeze(d);
       }
       return Object.freeze(slots);
@@ -783,6 +895,7 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
 
     return {
       SLOT_SPECS, LIST_KINDS, MOTION_KINDS, castCut, createHistory, chooseAuto, poolOf, acceptPart, pinWarnings, serves,
-      filterAllows, lookAx, lockFreeCtx, lockFreeIndex, beginCasts, castKeys, intern, deepFreeze, historyRow,
+      filterAllows, lookAx, lockFreeCtx, lockFreeIndex, beginCasts, castKeys, intern, deepFreeze, historyRow, lineCond,
+      isChoice,
     };
   });

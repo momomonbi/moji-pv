@@ -134,9 +134,10 @@ MV.def('planner/encode', ['core/hash'], (H) => {
     return t;
   }
 
-  // A plain decision: only the five fields, a primitive value, and p / pfrom that JSON.stringify prints canonically.
+  // A plain decision: only the five fields, a value, p and pfrom that JSON.stringify prints canonically (primitives,
+  // and the canonical curve and shot objects of v2.1, whose keys core/curve and core/shot sort).
   function plainDecision(d) {
-    if (!d || d.v === undefined || (typeof d.v === 'object' && d.v !== null)) return false;
+    if (!d || d.v === undefined || (typeof d.v === 'object' && d.v !== null && !asIs(d.v))) return false;
     if (typeof d.by !== 'string' && d.by !== undefined) return false;
     if (typeof d.from !== 'string' && d.from !== undefined) return false;
     for (const f of Object.keys(d)) if (!DECISION_KEYS.has(f)) return false;
@@ -179,11 +180,11 @@ MV.def('planner/encode', ['core/hash'], (H) => {
   function sceneHead(first, k, hasP) { return piecesOf(k).scene[(first ? 2 : 0) + (hasP ? 1 : 0)]; }
 
   // A decision's value as its closing piece: [',"v":' + JSON + '}', '"v":' + JSON + '}'] (after other fields, alone).
-  // Part keys and other string values repeat, so their pieces are made once (the hash then reads flat strings); other
-  // values get fresh pieces.
+  // Part keys, other string values and numbers (counts, scales and the camera's rounded values) repeat, so their
+  // pieces are made once (the hash then reads flat strings); other values get fresh pieces.
   const valueTails = new Map();
   function valueTail(v) {
-    if (typeof v !== 'string') { const j = JSON.stringify(v); return [',"v":' + j + '}', '"v":' + j + '}']; }
+    if (typeof v !== 'string' && typeof v !== 'number') { const j = JSON.stringify(v); return [',"v":' + j + '}', '"v":' + j + '}']; }
     let s = valueTails.get(v);
     if (s === undefined) {
       if (valueTails.size > 4096) valueTails.clear();
@@ -236,10 +237,11 @@ MV.def('planner/encode', ['core/hash'], (H) => {
     return q ? cutPieces(cut, keys, enc.fp, q.feat, q.P, q.V) : null;
   }
 
+  // `rig` (the cut's rig run, Plan v2) is printed next to `ground`, in key order.
   function cutPieces(cut, keys, fp, feat, P, V) {
     const head = JSON.stringify({ a: cut.a, b: cut.b, els: cut.els, emph: cut.emph });
     const mid = JSON.stringify({ fp, ground: cut.ground, impact: cut.impact, key: cut.key, lang: cut.lang, line: cut.line,
-      note: cut.note, pinKey: cut.pinKey, repT: cut.repT, role: cut.role, seamIn: cut.seamIn });
+      note: cut.note, pinKey: cut.pinKey, repT: cut.repT, rig: cut.rig, role: cut.role, seamIn: cut.seamIn });
     const parts = [head.slice(0, -1) + ',"feat":' + feat + ',' + mid.slice(1, -1) + ',"slots":{'];
     for (let i = 0; i < keys.length; i++) {
       const d = cut.slots[keys[i]];
@@ -279,7 +281,9 @@ MV.def('planner/encode', ['core/hash'], (H) => {
     put('fp', '"' + fp + '"'); put('ground', canon(cut.ground)); put('impact', t.impact); put('key', canon(cut.key));
     put('lang', t.lang); put('line', canon(cut.line)); put('note', t.note);
     if (cut.pinKey !== undefined) put('pinKey', canon(cut.pinKey));
-    put('repT', canon(cut.repT)); put('role', t.role); put('seamIn', canon(cut.seamIn));
+    put('repT', canon(cut.repT));
+    if (cut.rig !== undefined) put('rig', canon(cut.rig));
+    put('role', t.role); put('seamIn', canon(cut.seamIn));
     put('slots', slotsParts(cut.slots, keys, 'full'));
     put('t0', canon(cut.t0)); put('t1', canon(cut.t1)); put('text', t.text);
     parts.push(pending + '}');

@@ -4696,3 +4696,153 @@ counting by their alpha in the palette).
   plain SHA-256 would change the AssetId, which needs a D§9.4 decision.
 - H.264 counter videos and H.264 decoding are exercised only where the browser encodes H.264 (Chrome CI:
   `MV_REQUIRE_H264=1` fails the run without it).
+## v2.1-D
+
+Package D, the planner (DESIGN_2_1 §8.4), with the media additions of §11.2.6 and §11.5.9 and the depth resolution of
+§11.9.2. Plan v2 (§2.7): `v: 2`, the camera slots of every cut, `cut.rig`, `rigs`, `grounds[].zoomed`,
+`feat.sectionStart` and `media`.
+
+- **New:** `planner/camera` (L2): the `motion.speed` slot and its scaling of motion parameters (§4.3), the automatic
+  shot, zoom, curve and follow of every cut (§4.7), carry between the cuts of one line (§4.5.7), and the rig runs with
+  `rig` and `rig.curve` (§4.6). Tests: `camera_planner`, `planner_areas_season`, `planner_materials`, `planner_media`.
+- **Changed:**
+  - `cast`: the FROZEN slot order with `motion.speed` after `text.*` and the four `cam.*` slots after `lens`, each on
+    its own slot stream, so no part choice moves. Line conditions (§4.9): the effective season (line pin, else the
+    look's) and the line's avoid list feed the pools, which are cached per condition. The cast cache is keyed by
+    `registry.base ?? registry`, then by `registry.version` (the last 4).
+  - `choose`: a part of the line's own season weighs `SECTION_SEASON` ×2.5; the look-only factors are cached per season;
+    `noMedia` gives derived media grounds the weight 0.
+  - `params`: media params are checked against `doc.media` (`media-missing`, `media-kind`, the value falls back to
+    `''`); `depth: 'auto'` is resolved (`depthRule`, `textCoverage`); a frame in front never sits `behind` (an
+    automatic `place: 'behind'` becomes `side`, §11.9.3).
+  - `tracks`: segments also break where the effective season changes and where the media source of a pinned ground or
+    atmosphere changes; grounds, atmospheres and seams read their line's conditions; a line with its own season has an
+    atmosphere chance of at least 0.85; derived media grounds never go to a segment under 3 s or to the title card;
+    motions replaced by a seam follow the cut's speed.
+  - `plan`: `sharedText` uses `registry.baseVersion ?? registry.version`; `matTerms` and `mediaTerms` go into the cut
+    fingerprint, the encoding key and `groundFp`; `plan.media`; `material-bad`; `grounds[].zoomed`.
+  - `features` (`sectionStart`, `sectionOf`), `segment` (the specs of the line slots `season` and `avoid`), `encode`
+    (`rig` in the cut; canonical curve and shot objects print as plain decisions), `explain` and `fields` (every new
+    slot, its why codes and alternatives, `media.pin`, `media.pool`, `why.media.depth.<rule>` as the auto text of a
+    depth field).
+
+**Goldens.** `node tests/update_golden.js --check` reported `plan_hashes.json: DIFFERS` and `frame_hashes.json:
+matches`. The plan golden was regenerated: all 240 entries change because every plan now has the Plan v2 fields (`v: 2`,
+five camera slots per cut, `cut.rig`, `rigs`, `grounds[].zoomed`, `feat.sectionStart`, `media: {}`). The registry
+version stays `1e6ef40c`. No part choice changed:
+- `camera_planner` checks a digest of every v2 choice (parts, their parameters and sources, cut windows, grounds,
+  atmospheres, seams, warnings) over corpus(4) with the stub and the synthetic registry against the digest of the
+  planner before v2.1;
+- before regenerating, 720 plans (corpus(20) × stub, synthetic and catalog) were compared value by value with the old
+  planner: every v2 value was identical.
+
+The regenerated `frame_hashes.json` is byte-identical.
+
+**Decisions where the design was silent**
+
+- A pin wins over `amount.camera` 0, as pins win elsewhere. `amount.camera` below 0.1 turns off the automatic shot,
+  and below 0.15 the automatic rig; pinned shots and rigs still apply.
+- Carry is skipped when there is nothing to carry (A's shot ends on the frame, as `wideHold` does) or nothing to carry it
+  into (B's shot opens on the frame). It needs A and B on one line, across a hard cut or a text-scope transition, and B
+  on a preset shot.
+- A pinned rig still gets `amp = q2(0.4 + 0.6·A)`, with ×1.25 (≤ 1.3) on the last chorus. `rig.curve` is read at a
+  run's first cut.
+- Rig runs also split around each title, interlude and outro cut and where the resolved rig pin changes. A title reads
+  the intro row. An interlude or outro cut reads its own row, unless its section is intro, interlude or outro. The last
+  chorus is the last run of lyric cuts in a chorus section. An empty document has one run `k` with rig `none`,
+  `[0, duration]`.
+- The previous run's winner (before its own runner-up rule) is avoided, as the grounds do (D§4.16.6). `none` is exempt.
+- `cam.shot` recency reads the previous cut's final shot (×0.1) and the natural shots of the 3 cuts before (×0.4); only
+  preset strings count as choices (a custom shot object is not one).
+- Line `season` is a line value that cascades (line pin, else the work's season). `work:season` stays the look's. A
+  line `avoid` list is the line's pin, else `[]`. A pinned part on the avoid list is used without a warning.
+- `material-bad` reads `registry.problems` in the format of `## v2.1-C`: `'<kind>/myMat<x>: <code>'` gives
+  `{ id: 'm<x>', code }`; `'<kind>/?: <code>'` gives id `''`. `REG.extend`'s own `'<kind>/<key>: <message>'` gives the
+  code `def`. `'ground/<myMed key>: media-key'` is not about a material and gives nothing.
+- A derived ground of a pooled asset (`mine.media === true`) adds its asset `mine.id` to `plan.media` and to the
+  fingerprints. A material adds the ids in `mine.media`. An id the library does not hold warns `media-missing`.
+- **Depth:**
+  - How a media part uses its picture comes from `spec.use` when a spec names it. Otherwise a ground is `ground`, a
+    run ornament is `layer`, and a cut ornament is `frame`.
+  - A pin of `depth: 'auto'` is no pin.
+  - The AI's suggestion is read from `doc.media` entry `ai.depth`, only when it is one of anim, front, back or still.
+  - The cast cache key of the media library includes each entry's id, kind, anim, dur and `ai.depth`.
+- `motion.speed` scales only unpinned parameters, each coerced through its part's own spec, with `pfrom: 'rule'`.
+  Explain names this with the rule `speed`.
+
+**Deviations**
+
+- **hints.focus → text coverage.** §11.9.2 rule 5 reads the text boxes of `hints.focus`. Those come from layout,
+  which the planner does not have (fonts and measuring belong to the engine). `PA.textCoverage` estimates them
+  instead: a lyric cut's text covers about 1.5 / cells of the frame, times the square of its `text.scale`. A segment's
+  coverage is the duration-weighted mean over its lyric cuts. A busy still photo is one with coverage ≥ 0.35.
+- **§7.3 targets for shots.** The FROZEN weights of §4.7 give less than §7.3 asks, measured over corpus(8):
+  - impact cuts → `snapZoom`: 54 % with the catalog, 52 % with the synthetic registry (target ≥ 60 %);
+  - framing lens → `none`: 62 % and 62 % (target ≥ 70 %);
+  - repeated lines sharing their shot: 34 % and 30 %, against 25 % and 18 % for unrelated cuts (target ≥ 80 %).
+
+  The tests hold the direction and size of each effect. The constants are for the lead's tuning, step (b) of §7.5.
+- **Shot stability.** §4.7 says inserting a line changes ≤ 4 other cuts' shots, and a reroll ≤ 3. Because a shot
+  weighs ×0.1 against the previous cut's *final* shot, a change can occasionally travel down a run of cuts that
+  alternate between two presets. Measured with line starts pinned:
+  - catalog: 1 of 108 insertions changed more than 4 other cuts (worst 5);
+  - synthetic: 3 of 108 (worst 7);
+  - rerolls: 1 of 249 changed more than 3 (worst 5).
+
+  `planner_stability` holds these bounds (≤ 5 % of insertions, worst 7; with automatic timing ≤ 15 %, worst 9; rerolls
+  ≤ 2 %, worst 5).
+- **Planning speed** (below): the §8.4 targets (cold ≤ 10 ms, re-plan ≤ 5 ms) are not met. The planner before v2.1
+  did not meet them either on this machine. v2.1 adds 10–20 % to a cold plan and up to about 15 % to a re-plan.
+
+**Measured** (`project_long`, best of several runs, on a shared machine that other work was also using; the planner
+before v2.1 on the same machine in brackets; ms):
+
+| registry | cold plan | re-plan after an edit |
+|---|---|---|
+| stub | 28–30 (23–26) | 6.7–7.2 (5.6–5.9) |
+| catalog | 41–44 (36–40) | 6.8–7.5 (6.1–6.8) |
+
+`planner_determinism`'s own speed test, run alone, measured a re-plan of 5.9 ms and a cold plan of 27.5 ms (budgets 10
+and 60 ms). Most of the added time is encoding and hashing (`encodeCut`, `feed`, `planHash`), which grows with the
+number of slots (five more per cut). The camera itself (`decideCamera`, `carry`, `rigs`) takes about 3 %. Two fixes
+brought v2.1 down to these numbers:
+- `plan` now declares every `ctx` field that is filled late or on first use, so `ctx` keeps one shape while the cuts
+  are cast. Before, the first plans of a session were up to twice as slow;
+- `cast.decideValue` no longer `delete`s the trace-only fields of a decision, which left the object slow for encoding.
+
+Before these fixes, with the machine under heavy load, the cold test measured 55–80 ms against its 60 ms budget; the
+planner before v2.1 measured 35–37 ms at the same time. After the fixes it measures 27–37 ms. CI runs the Node tests
+one file at a time.
+
+**Requests to other packages**
+
+- **B (engine):**
+  - read `plan.rigs` (an empty document has one run `k`, rig `none`);
+  - read `p.depth` (never `'auto'` in a plan);
+  - read `p.carry` on `cam.shot` and `grounds[].zoomed`.
+  - A media part may name its use in its spec (`use: 'ground' | 'layer' | 'frame'`) when kind and scope do not tell.
+- **C (materials):** keep the `registry.problems` format above; `material-bad` parses it.
+- **F (UI and strings):**
+  - add the strings below;
+  - `whyParts` could translate the section and season params of `cam.section`, `rig.section` and `season.line`, which
+    are key names today.
+- **Lead:**
+  - tune the §4.7 constants (above);
+  - the `diff` view has no readout for the camera slots yet.
+
+**Strings wanted** (key, ja, en)
+
+- `whyRule.motion.speed`: いつもの速さ / The usual speed
+- `whyRule.cam.curve`: カットの勢いと雰囲気から / From the energy of the cut and the mood
+- `whyRule.cam.follow`: カメラワークと動きの量から / From the camerawork and the motion amount
+- `whyRule.rig.curve`: 区画のカメラの標準 / The section camera's own curve
+- `val.refs`: {n}件 / {n} parts
+
+## Lead: integrating D after E
+
+With D's planner, the plan resolves rig, motion.speed and media depth, where E's tests had assumed null or auto. By §5.5
+("a change that equals the current value is not made"), an instruction that asks for the value a line already has makes
+no change. `ai_direct.test.js` therefore asks for values the fixture plan does not hold: rig `leanTilt`, where rc's
+automatic rig is `slowSwell`, and depth `still`, where the video ground's automatic depth is `back`. A new assertion covers
+the equal-value rule for a rig. The review text of a planned speed now reads the number
+(「動きの速さ: 100% → 50%（2行）」) where it used to read 自動.

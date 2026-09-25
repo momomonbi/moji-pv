@@ -394,10 +394,13 @@ test('camera: cam.shot, cam.zoom (closer), cam.follow and cam.curve; unreadable 
 });
 
 test('rig and rigCurve (all only): rig and rig.curve on every area line; the whole video → work pins', () => {
-  const r = direct(DOC, [CHORUS], [ANSWER(0, { all: ALL({ rig: 'slowSwell', rigCurve: CURVE('fadeBrake') }) })]);
-  deepEqual(r.changes.map((c) => [c.path, c.to, c.agg]), [['line/rb:rig', 'slowSwell', 'song:2@24-40|rig'],
-    ['line/rb:rig.curve', 'fadeBrake', 'song:2@24-40|rig.curve'], ['line/rc:rig', 'slowSwell', 'song:2@24-40|rig'],
+  const r = direct(DOC, [CHORUS], [ANSWER(0, { all: ALL({ rig: 'leanTilt', rigCurve: CURVE('fadeBrake') }) })]);
+  deepEqual(r.changes.map((c) => [c.path, c.to, c.agg]), [['line/rb:rig', 'leanTilt', 'song:2@24-40|rig'],
+    ['line/rb:rig.curve', 'fadeBrake', 'song:2@24-40|rig.curve'], ['line/rc:rig', 'leanTilt', 'song:2@24-40|rig'],
     ['line/rc:rig.curve', 'fadeBrake', 'song:2@24-40|rig.curve']]);
+  // a value the plan holds already is no change (§5.5 common rules): rc's automatic rig is slowSwell
+  assert.equal(PLAN.rigs.find((x) => x.cuts.some((k) => k.startsWith('rc~'))).rig.v, 'slowSwell');
+  deepEqual(direct(DOC, [CHORUS], [ANSWER(0, { all: ALL({ rig: 'slowSwell' }) })]).changes.map((c) => c.path), ['line/rb:rig']);
   const w = direct(DOC, [WORKREF], [ANSWER(0, { all: ALL({ rig: 'none' }) })]);
   deepEqual(w.changes.map((c) => [c.path, c.to]), [['work:rig', 'none']]);
   const bad = direct(DOC, [CHORUS], [ANSWER(0, { all: ALL({ rig: 'spinAround' }) })]);
@@ -640,10 +643,10 @@ test('media depth (§11.9.4): each value is one pin of the media part\'s depth a
   assert.equal(byPath(placed.changes)['line/rb:ornament#0@photoFrame.depth'].to, 'still');
   // one change each, reviewable and revertible
   const q = DI.directRequests(doc, plan, ext, { briefs: [{ ref: CHORUS, instruction: 'x' }], uiLang: 'ja', media: true })[0];
-  const r = DI.directChanges(doc, plan, ext, { answers: [ANSWER(0, { all: ALL({ media: MED({ as: 'ground', depth: 'back' }) }) })] }, { rev: 1, sent: q.sent });
+  const r = DI.directChanges(doc, plan, ext, { answers: [ANSWER(0, { all: ALL({ media: MED({ as: 'ground', depth: 'still' }) }) })] }, { rev: 1, sent: q.sent });
   const cmds = CH.toCommands(doc, plan, r.changes);
-  deepEqual(cmds, [{ t: 'pin.set', path: 'line/rb:ground@photoPan.depth', v: 'back', by: 'ai' },
-    { t: 'pin.set', path: 'line/rc:ground@' + key + '.depth', v: 'back', by: 'ai' }]);
+  deepEqual(cmds, [{ t: 'pin.set', path: 'line/rb:ground@photoPan.depth', v: 'still', by: 'ai' },
+    { t: 'pin.set', path: 'line/rc:ground@' + key + '.depth', v: 'still', by: 'ai' }]);
   const after = CMD.reduce(doc, { t: 'batch', cmds });
   const entry = CH.logEntry(doc, cmds, { runId: 'd', tool: 'direct' });
   deepEqual(CMD.reduce(after, { t: 'batch', cmds: CH.revertCommands(after, { applied: [entry.applied[1]] }).cmds }).pins,
@@ -729,7 +732,7 @@ test('camera mode: low effort, the instruction may be empty, camera lists only; 
 function scenario(doc) {
   return direct(doc || WINTER, [CHORUS, WORKREF], [
     ANSWER(0, { all: ALL({ atmos: 'mat:桜吹雪', speed: 0.5, arriveCurve: CURVE('ramp', { ends: 'both', edge: 0.1, peak: 6 }),
-      camera: CAM({ shot: 'custom', move: 'pushIn' }), rig: 'slowSwell' }), lines: [LINE(0, { impact: 'on' })],
+      camera: CAM({ shot: 'custom', move: 'pushIn' }), rig: 'leanTilt' }), lines: [LINE(0, { impact: 'on' })],
     cuts: [CUT(1, 1, { arrive: 'wordPop' })], work: WORK({ mood: 'quietHush' }) }),
     ANSWER(1, { work: WORK({ flash: 'off' }) }),
   ], { allowMaterials: true, materials: [material({})] });
@@ -841,7 +844,7 @@ test('review text: every row reads in ja and en (strict keys); aggregate rows an
   }
   const ja = T.createT('ja', STRINGS, reg, { strict: true });
   const speed = r.changes.filter((c) => c.agg === 'song:2@24-40|motion.speed');
-  assert.equal(CH.describeAgg(speed, ja), '動きの速さ: 自動 → 50%（2行）');
+  assert.equal(CH.describeAgg(speed, ja), '動きの速さ: 100% → 50%（2行）');
   const ground = media.changes.filter((c) => c.agg === 'song:2@24-40|ground.image');
   assert.equal(CH.describeAgg(ground, ja), '写真・動画: 自動 → 空.jpg（2行）');
   assert.equal(CH.describe(r.changes.find((c) => c.kind === 'material'), ja), '新しい素材「桜吹雪」 装飾 · 春');

@@ -1,11 +1,12 @@
-/* 文字PVメーカー v2 — original work. plan(doc, { registry }) → Plan: the planner's stages in their FROZEN order (DESIGN §4.16.1–§4.16.2, §3.12). */
+/* 文字PVメーカー v2 — original work. plan(doc, { registry }) → Plan: the planner's stages in their FROZEN order (DESIGN §4.16.1–§4.16.2, §3.12; DESIGN_2_1 §2.7, §5.9.3, §11.2.6). */
 MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'core/timing', 'core/beats', 'core/motion',
-  'core/doc', 'core/schema', 'core/script', 'planner/choose', 'planner/params', 'planner/look', 'planner/segment',
-  'planner/features', 'planner/cast', 'planner/tracks', 'planner/encode'],
-(H, N, PINS, LY, TM, B, MO, D, S, SC, CH, PA, LK, SG, FE, CA, TR, EN) => {
+  'core/doc', 'core/schema', 'core/script', 'core/media', 'planner/choose', 'planner/params', 'planner/look',
+  'planner/segment', 'planner/features', 'planner/cast', 'planner/tracks', 'planner/camera', 'planner/encode'],
+(H, N, PINS, LY, TM, B, MO, D, S, SC, MEDIA, CH, PA, LK, SG, FE, CA, TR, CAM, EN) => {
   'use strict';
 
-  const PLAN_VERSION = 1;
+  // v2: rigs, cut.rig, grounds[].zoomed, feat.sectionStart, media, the camera slots (DESIGN_2_1 §2.7, §11.2.6).
+  const PLAN_VERSION = 2;
   const MEMO_SIZE = 2;
   const LANG_SPEC = SG.LINE_SPECS.lang;
 
@@ -190,8 +191,72 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
   }
 
   // The part of the look every scene depends on (§3.12 fp: palette, faces, design size), plus the amounts parts read.
+  // The registry term is the base registry's version (DESIGN_2_1 §2.7): adding or editing a material changes only the
+  // fingerprints of the scenes that use it (matTerms), not every scene.
   function sharedText(ctx, look, design) {
-    return EN.canon([ctx.registry.version, look.palette, look.faces, look.amounts, design]);
+    return EN.canon([ctx.registry.baseVersion || ctx.registry.version, look.palette, look.faces, look.amounts, design]);
+  }
+
+  // --- materials and media in fingerprints (DESIGN_2_1 §5.9.3, §11.2.6) --------------------------------------------
+
+  // What the fingerprints need to know of a registry: the keys (any kind) of definitions that are materials or derived
+  // media parts (registry.extra) or have a media param, and each one's media param names. Made once per registry;
+  // `none` when there is nothing, so plans without materials or media skip the scan.
+  const mineCache = new WeakMap();
+  function mineInfo(registry) {
+    let info = mineCache.get(registry);
+    if (info) return info;
+    const extra = registry.extra || {};
+    const keys = new Map();
+    for (const def of registry.all()) {
+      if (!def || !def.key || def.kind === 'theme' || def.kind === 'mood') continue;
+      const list = registry.params(def.kind, def.key) || [];
+      const media = list.filter((x) => x.spec && x.spec.type === 'media').map((x) => x.name);
+      const mine = extra[def.key] && def.mine ? def.mine : null;
+      if (media.length || mine) keys.set(def.kind + '/' + def.key, { media, mine });
+    }
+    info = keys.size ? { keys } : NO_MINE;
+    mineCache.set(registry, info);
+    return info;
+  }
+  const NO_MINE = Object.freeze({ keys: null });
+
+  // The materials and assets a list of [kind, decision] uses: { mat: [[slot, key, rhash]], ids: [AssetId] } (ids
+  // sorted and unique; only ids the document's library holds). slots: the slot name of each decision.
+  function mineOf(ctx, decisions, slots) {
+    const info = mineInfo(ctx.registry);
+    if (!info.keys) return null;
+    let mat = null, ids = null;
+    for (let i = 0; i < decisions.length; i++) {
+      const [kind, d] = decisions[i];
+      if (!d || typeof d.v !== 'string' || d.v === 'none') continue;
+      const e = info.keys.get(kind + '/' + d.v);
+      if (!e) continue;
+      if (e.mine) {
+        (mat || (mat = [])).push([slots[i], d.v, String(e.mine.rhash)]);
+        // mine.media: the asset ids of a material; true for a derived ground of a pooled asset, whose id is mine.id.
+        if (Array.isArray(e.mine.media)) for (const id of e.mine.media) ids = addId(ctx, ids, id);
+        else if (e.mine.media === true) ids = addId(ctx, ids, e.mine.id);
+      }
+      for (const name of e.media) if (d.p && typeof d.p[name] === 'string' && d.p[name] !== '') ids = addId(ctx, ids, d.p[name]);
+    }
+    if (!mat && !ids) return null;
+    return { mat: mat || [], ids: ids ? [...ids].sort() : [] };
+  }
+
+  // An asset id the library holds; a material's own asset that is gone warns media-missing (a media param was already
+  // checked, planner/params).
+  function addId(ctx, ids, id) {
+    if (ctx.media && ctx.media.entries.has(id)) return (ids || new Set()).add(id);
+    if (typeof id === 'string' && id !== '') ctx.warn({ code: 'media-missing', detail: { id } });
+    return ids;
+  }
+
+  // The fingerprint term of a scene's materials and assets: '' without any, else the canonical text of
+  // [matTerms, mediaTerms], mediaTerms = [[id, hashJSON(MediaMeta)]].
+  function mineText(ctx, used) {
+    if (!used) return '';
+    return EN.canon([used.mat, used.ids.map((id) => [id, ctx.media.metaHash(id)])]);
   }
 
   // What a scene reads of the song besides its decisions (§3.12 fp; engine/scene/build baseEnv gives the parts
@@ -218,15 +283,20 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
     const out = {
       key: c.key, line: c.line, role: c.role, text: c.text, emph: c.emph, impact: c.impact, note: c.note,
       t0: c.t0, t1: c.t1, a: c.a, b: c.b, repT, lang: c.lang, feat: c.feat, fp: '', slots: c.slots,
-      els: c.els, ground: c.ground, seamIn: c.seamIn,
+      els: c.els, ground: c.ground, rig: c.rig, seamIn: c.seamIn,
     };
     if (c.pinKey && c.pinKey !== c.key) out.pinKey = c.pinKey;
     const slotKeys = Object.keys(c.slots).sort();
-    const decisions = slotKeys.filter((s) => s.indexOf('.') < 0 && s !== 'orient').map((s) => [slotKind(s), c.slots[s]]);
+    const partSlots = slotKeys.filter((s) => s.indexOf('.') < 0 && s !== 'orient');
+    const decisions = partSlots.map((s) => [slotKind(s), c.slots[s]]);
     const needs = needsOf(ctx, decisions);
     const { beat, level } = songTerms(ctx, needs, beats, c.t0);
+    // Materials (matTerms) and assets (mediaTerms) the cut's parts use (DESIGN_2_1 §2.7, §11.2.6); '' without any.
+    const used = mineOf(ctx, decisions, partSlots);
+    if (used) for (const id of used.ids) ctx.mediaUsed.add(id);
+    const mine = mineText(ctx, used);
     // A cut whose cast was not reused is made of new objects: nothing to look up (its encoding is kept next time).
-    const key = ctx.encodings && c.castHit ? encodingKey(out, c.cast, shared, beat, level) : null;
+    const key = ctx.encodings && c.castHit ? encodingKey(out, c.cast, shared, beat, level, mine) : null;
     const hit = key !== null ? ctx.encodings.get(key) : undefined;
     if (hit) {
       out.fp = hit.fp;
@@ -238,6 +308,7 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
       }
     }
     const extra = [EN.objectCanon(c.els), N.q6(c.t0 - c.a), N.q6(c.b - c.a), shared.text, beat, level];
+    if (mine) extra.push(mine);
     const enc = EN.encodeCut(out, slotKeys, extra);
     out.fp = enc.fp;
     if (key !== null) {
@@ -254,8 +325,10 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
 
   // Everything planCut encodes besides the absolute times: a reused cast entry stands for the key, line, pin key,
   // role, impact, features (by value, so lang too), element map and decisions it was made with (planner/cast
-  // castInputs); the text, marks, window relative to t0, ground, incoming seam, shared look and song terms are in the
-  // key; the seam rules may replace the entrance or exit. Equal features do not mean equal text (「あ」→「い」).
+  // castInputs); the text, marks, window relative to t0, ground, rig run, incoming seam, shared look, song terms and
+  // material and media terms are in the key; the seam rules may replace the entrance or exit and the carry rule the
+  // shot (by identity: planner/tracks and planner/camera keep their decisions on the cast entry). Equal features do
+  // not mean equal text (「あ」→「い」).
   const objectIds = new WeakMap();
   let nextObjectId = 1;
   function idOf(v) {
@@ -265,22 +338,30 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
     return id;
   }
 
-  function encodingKey(out, cast, shared, beat, level) {
-    return cast.id + idOf(out.slots.arrive) + idOf(out.slots.depart) + JSON.stringify([out.text, out.emph, out.note,
-      N.q6(out.t0 - out.a), N.q6(out.b - out.a), out.ground, out.seamIn, shared.id, beat, level]);
+  function encodingKey(out, cast, shared, beat, level, mine) {
+    return cast.id + idOf(out.slots.arrive) + idOf(out.slots.depart) + idOf(out.slots['cam.shot']) +
+      JSON.stringify([out.text, out.emph, out.note, N.q6(out.t0 - out.a), N.q6(out.b - out.a), out.ground, out.rig, out.seamIn,
+        shared.id, beat, level, mine]);
   }
 
   // A segment's fingerprint: everything a ground scene reads (engine/scene/build buildGround): its ground and atmos
-  // as { p, v }, its length, the shared look (palette, faces, amounts, design size, registry version), and the beat
-  // grid or loudness seen from its start when a part needs them (songTerms). A ground scene gets nothing of the
-  // segment's cuts (the planner resolves the segment's parameters from its first cut, §4.16.6), so editing a cut never
-  // rebuilds its background (§3.12 fp, §7.1.5).
+  // as { p, v }, its length, the shared look (palette, faces, amounts, design size, base registry version), the beat
+  // grid or loudness seen from its start when a part needs them (songTerms), and the materials and assets its parts
+  // use (matTerms, mediaTerms; DESIGN_2_1 §2.7, §11.2.6). A ground scene gets nothing of the segment's cuts (the
+  // planner resolves the segment's parameters from its first cut, §4.16.6), so editing a cut never rebuilds its
+  // background (§3.12 fp, §7.1.5).
   function groundFp(ctx, g, shared, beats) {
-    const needs = needsOf(ctx, [['ground', g.ground], ['ornament', g.atmos]]);
+    const decisions = [['ground', g.ground], ['ornament', g.atmos]];
+    const needs = needsOf(ctx, decisions);
     const { beat, level } = songTerms(ctx, needs, beats, g.t0);
     const scene = '[' + EN.decisionTexts(g.ground).scene + ',' + EN.decisionTexts(g.atmos).scene + ']';
-    return EN.hex8(H.hash32(scene, N.q6(g.t1 - g.t0), shared, beat, level));
+    const used = mineOf(ctx, decisions, GROUND_SLOTS);
+    if (used) for (const id of used.ids) ctx.mediaUsed.add(id);
+    const mine = mineText(ctx, used);
+    return mine ? EN.hex8(H.hash32(scene, N.q6(g.t1 - g.t0), shared, beat, level, mine))
+      : EN.hex8(H.hash32(scene, N.q6(g.t1 - g.t0), shared, beat, level));
   }
+  const GROUND_SLOTS = Object.freeze(['ground', 'atmos']);
 
   // --- features, reused across plans ----------------------------------------------------------------------------
 
@@ -298,7 +379,7 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
   function featuresOf(cut, fx, songKey, cached) {
     if (!cached) return { feat: FE.cutFeatures(cut, fx), id: null };
     const key = JSON.stringify([cut.text, cut.role, cut.lang, cut.emph.length > 0, !!cut.impact, cut.t0, cut.t1,
-      fx.section, fx.repeatOf, fx.repeats]) + songKey;
+      fx.section, fx.repeatOf, fx.repeats, fx.sectionStart]) + songKey;
     let e = featCur.get(key);
     if (e === undefined) {
       e = featPrev.get(key);
@@ -333,6 +414,79 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
     };
   }
 
+  // --- materials, media and camera facts of the Plan (DESIGN_2_1) --------------------------------------------------
+
+  // The document's library as the planner reads it: { entries: Map<id, AssetEntry>, key (for the cast cache: what
+  // decisions read of an entry — that it exists, its kind, whether it is animated and how long, and the AI's depth
+  // suggestion, §11.2.6, §11.9.2), metaOf(id), metaHash(id) } or null without assets. Made once per plan (≤ 200
+  // entries), so an entry changed in place is seen.
+  function mediaIndex(doc) {
+    const list = doc.media && Array.isArray(doc.media.list) ? doc.media.list : null;
+    if (!list || !list.length) return null;
+    const entries = new Map();
+    for (const e of list) if (e && MEDIA.isId(e.id) && MEDIA.KINDS.includes(e.kind) && !entries.has(e.id)) entries.set(e.id, e);
+    const metas = new Map(), hashes = new Map();
+    const metaOf = (id) => {
+      let m = metas.get(id);
+      if (m === undefined) { m = sortedMeta(MEDIA.metaOf(entries.get(id))); metas.set(id, m); }
+      return m;
+    };
+    const keyOf = (e) => [e.id, e.kind, e.anim === true, e.dur, e.ai && typeof e.ai === 'object' ? e.ai.depth || '' : ''].join(':');
+    return {
+      entries, key: [...entries.values()].map(keyOf).join(','), metaOf,
+      metaHash(id) {
+        let h = hashes.get(id);
+        if (h === undefined) { h = H.hashJSON(metaOf(id)); hashes.set(id, h); }
+        return h;
+      },
+    };
+  }
+
+  function sortedMeta(meta) {
+    const out = {};
+    for (const k of Object.keys(meta).sort()) out[k] = meta[k];
+    return Object.freeze(out);
+  }
+
+  // plan.media (§11.2.6): { [AssetId]: MediaMeta } for every asset a decision param or a chosen material uses (collected
+  // by planCut and groundFp), keys sorted.
+  function planMedia(ctx) {
+    const out = {};
+    for (const id of [...ctx.mediaUsed].sort()) out[id] = ctx.media.metaOf(id);
+    return out;
+  }
+
+  // material-bad (§2.8, §5.9.2): every problem of an extended registry that names a material, detail { id, code }.
+  // registry.problems holds text '<kind>/<key>: …': parts/mix registryFor's '<kind>/myMat<x>: <code>' for an entry it
+  // could not derive ('<kind>/?: <code>' when the entry has no usable id; the id is then ''), and REG.extend's own
+  // '<kind>/<key>: <message>' for a derived definition that did not validate (code 'def'). Problems of derived media
+  // grounds ('ground/myMed…: media-key') are not about materials.
+  function materialWarnings(ctx) {
+    const reg = ctx.registry;
+    if (!reg.base || !Array.isArray(reg.problems)) return;
+    for (const text of reg.problems) {
+      const detail = materialProblem(text);
+      if (detail) ctx.warn({ code: 'material-bad', detail });
+    }
+  }
+
+  function materialProblem(text) {
+    const m = /^[a-z?]+\/(myMat([0-9a-z]+)|\?): (.*)$/s.exec(String(text));
+    if (!m) return null;
+    return { code: /^[a-z][A-Za-z0-9-]*$/.test(m[3]) ? m[3] : 'def', id: m[2] ? 'm' + m[2] : '' };
+  }
+
+  // grounds[i].zoomed (§2.7): some cut of the segment has a shot (cam.shot ≠ 'none'), so the renderer oversamples its
+  // static raster (§4.8).
+  function markZoomed(cuts, grounds) {
+    const zoomed = grounds.map(() => false);
+    for (const c of cuts) {
+      const d = c.slots['cam.shot'];
+      if (d && d.v !== 'none' && c.ground >= 0 && c.ground < zoomed.length) zoomed[c.ground] = true;
+    }
+    grounds.forEach((g, i) => { g.zoomed = zoomed[i]; });
+  }
+
   // --- the pipeline ---------------------------------------------------------------------------------------------
 
   // run(doc, registry, { trace, fresh }) → Plan. trace = { cutKey, slot, out } records one slot's decision
@@ -344,14 +498,20 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
     const design = { aspect, w, h, short: Math.min(w, h) };
     const trace = (opts && opts.trace) || null;
     const cached = !trace && !(opts && opts.fresh);
+    // The fields filled later or on first use (from castKeys on) are declared here, so ctx keeps one shape while the
+    // cuts are cast: a field added in the middle of casting sends the optimized code that reads ctx back to the
+    // interpreter (the first plans of a session were up to twice as slow).
     const ctx = {
       doc, registry, ix: PINS.index(doc.pins), warn: warner.warn, aspect,
       salts: doc.salts && Object.keys(doc.salts).length ? doc.salts : null,
       timing: Object.assign({}, TM.TIMING_DEFAULTS, doc.timing || {}), pools: new Map(), trace, casts: null,
-      lockFree: CA.lockFreeIndex(doc.pins),
+      lockFree: CA.lockFreeIndex(doc.pins), media: mediaIndex(doc), mediaUsed: new Set(),
+      castKeys: null, seams: null, encodings: null, fallbacks: null, lookAxis: null, lineConds: null, workCond: null,
+      shotMood: null,
     };
     // Traced runs (explain) and fresh runs neither read nor refresh the caches of re-planning.
     if (cached) beginFeatures();
+    materialWarnings(ctx);
 
     // 1. parse and time
     const { sheet, lines: parsed } = parsedSheet(doc);
@@ -382,27 +542,35 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
     const info = doc.song && doc.song.info ? doc.song.info : null;
     const loud = digest && typeof digest.loud === 'string' ? digest.hz + ':' + digest.loud : null;
     const songKey = '|' + CA.intern(EN.canon([duration, loud, timing.beats, info]));
-    for (const cut of cuts) {
+    // sectionStart (DESIGN_2_1 §2.7): the first cut, and every cut whose section differs from the previous cut's.
+    let prevSection;
+    cuts.forEach((cut, i) => {
       const fx = fxOf(cut);
+      const section = FE.sectionOf(cut, { info, section: fx.section });
       const got = featuresOf(cut, { duration, env: ctx.env, grid, info, section: fx.section, repeatOf: fx.repeatOf,
-        repeats: fx.repeats }, songKey, cached);
+        repeats: fx.repeats, sectionStart: i === 0 || section !== prevSection }, songKey, cached);
+      prevSection = section;
       cut.feat = got.feat;
       cut.featId = got.id;
-    }
+    });
 
     // 5. cast, in time order (a cut whose inputs did not change reuses its cast, planner/cast castCut)
     if (cached) {
       ctx.casts = CA.beginCasts(registry);
       ctx.castKeys = CA.castKeys(ctx, EN.canon([registry.version, look.mood.key, look.theme.key, look.season, look.amounts,
-        look.variety, aspect, doc.look.seed, doc.filters || null, ctx.bpm]));
+        look.variety, aspect, doc.look.seed, doc.filters || null, ctx.bpm, ctx.media ? ctx.media.key : null]));
     }
     const hist = CA.createHistory(registry);
     for (const cut of cuts) Object.assign(cut, CA.castCut(ctx, cut, hist));
 
-    // 6. tracks: grounds → seams (and their rule overrides) → impulses
+    // 6. tracks: grounds → seams (and their rule overrides) → carry → rigs → impulses (DESIGN_2_1 §3.9)
     const grounds = TR.grounds(ctx, cuts, duration);
     const seams = TR.seams(ctx, cuts);
+    ctx.seams = seams;
+    CAM.carry(ctx, cuts, seams);
+    const rigs = CAM.rigs(ctx, cuts, seams, duration);
     const impulses = TR.impulses(ctx, cuts, duration);
+    markZoomed(cuts, grounds);
 
     // 7. derived
     const sharedT = sharedText(ctx, look.plan, design);
@@ -421,7 +589,7 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
     }));
     const plan = {
       v: PLAN_VERSION, hash: '', duration, design, look: look.plan, beats: timing.beats, lines: planLines,
-      cuts: encoded.map((e) => e.cut), grounds, seams, impulses, warnings: warner.list,
+      cuts: encoded.map((e) => e.cut), grounds, rigs, seams, impulses, media: planMedia(ctx), warnings: warner.list,
     };
     plan.hash = EN.planHash(plan, encoded.map((e) => e.parts));
     Object.defineProperty(plan, 'env', { value: ctx.env, enumerable: false });

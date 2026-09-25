@@ -17,6 +17,8 @@ MV.def('planner/choose', ['core/hash', 'core/rng', 'core/num'], (H, R, N) => {
   // own season (a seasonal theme is its season's picture; its prefer map damps the other seasons), else ×0.25 — under
   // a non-seasonal theme a stray petal wash or maple paper reads as a mistake (QA-LOOK). Themes themselves ×0.5.
   const SEASON_ANY = 0.5, SEASON_ANY_STRAY = 0.25, SEASON_MATCH = 1.5;
+  // A line's own season (the line slot 'season', DESIGN_2_1 §4.9) that matches a part's season.
+  const SECTION_SEASON = 2.5;
   // The smallest scale "50 % beyond" a numeric trait is measured against (so a bound of 0 still has a slope).
   const CELLS_SCALE = 2, ENERGY_SCALE = 0.2;
 
@@ -103,10 +105,11 @@ MV.def('planner/choose', ['core/hash', 'core/rng', 'core/num'], (H, R, N) => {
   }
 
   // The season factor of a part (§3.8). home = the theme's season (null for a non-seasonal theme) when a part slot is
-  // weighed; undefined when a theme itself is.
-  function seasonFactor(partSeason, season, home) {
+  // weighed; undefined when a theme itself is. lineSeason: the season comes from a line's own season pin, and a match
+  // then weighs SECTION_SEASON (DESIGN_2_1 §4.9).
+  function seasonFactor(partSeason, season, home, lineSeason) {
     if (!partSeason) return 1;
-    if (season === partSeason) return SEASON_MATCH;
+    if (season === partSeason) return lineSeason ? SECTION_SEASON : SEASON_MATCH;
     if (season !== 'any') return 1;                     // other seasons never reach the pool
     return home === undefined || home === partSeason ? SEASON_ANY : SEASON_ANY_STRAY;
   }
@@ -131,33 +134,39 @@ MV.def('planner/choose', ['core/hash', 'core/rng', 'core/num'], (H, R, N) => {
   // --- the chooser -------------------------------------------------------------------------------------------
 
   // createChooser(registry, look) → { pick, statics, weigh }. look = { mood: MoodDef, theme: ThemeDef, season,
-  // amounts }. The look-only factors of each candidate are computed once per plan.
+  // amounts }. The look-only factors of each candidate are computed once per plan and season (a line may pin its own
+  // season, DESIGN_2_1 §4.9).
   function createChooser(registry, look) {
     const cache = new Map();
 
-    // Factors that depend only on the look: base weight, mood tag bias, gate, theme preference, season and (filter
-    // slots only) the mood's filter weights.
-    function statics(kind, key, moodFilter) {
-      const id = kind + '/' + key + (moodFilter ? '#f' : '');
+    // Factors that depend only on the look and the season: base weight, mood tag bias, gate, theme preference, season
+    // and (filter slots only) the mood's filter weights. season / lineSeason: the cut's effective season and whether it
+    // comes from a line pin (default: the look's season).
+    function statics(kind, key, moodFilter, season, lineSeason) {
+      const id = kind + '/' + key + (moodFilter ? '#f' : '') + seasonTag(season, lineSeason);
       let s = cache.get(id);
       if (s) return s;
-      s = makeStatics(kind, key, moodFilter);
+      s = makeStatics(kind, key, moodFilter, season === undefined ? look.season : season, !!lineSeason);
       cache.set(id, s);
       return s;
     }
 
+    function seasonTag(season, lineSeason) {
+      return season === undefined || (season === look.season && !lineSeason) ? '' : '|' + season + (lineSeason ? '!' : '');
+    }
+
     // The statics of a whole pool, cached per pool array (pools are cached per plan, so this is one lookup per pick).
     const byPool = new WeakMap();
-    function poolStatics(kind, keys, moodFilter) {
+    function poolStatics(kind, keys, moodFilter, season, lineSeason) {
       let m = byPool.get(keys);
       if (!m) { m = new Map(); byPool.set(keys, m); }
-      const id = kind + (moodFilter ? '#f' : '');
+      const id = kind + (moodFilter ? '#f' : '') + seasonTag(season, lineSeason);
       let list = m.get(id);
-      if (!list) { list = keys.map((key) => statics(kind, key, moodFilter)); m.set(id, list); }
+      if (!list) { list = keys.map((key) => statics(kind, key, moodFilter, season, lineSeason)); m.set(id, list); }
       return list;
     }
 
-    function makeStatics(kind, key, moodFilter) {
+    function makeStatics(kind, key, moodFilter, season, lineSeason) {
       const def = registry.get(kind, key);
       const prefer = look.theme && look.theme.prefer && look.theme.prefer[kind];
       const s = {
@@ -169,8 +178,9 @@ MV.def('planner/choose', ['core/hash', 'core/rng', 'core/num'], (H, R, N) => {
         mood: moodBias(def.tags, look.mood),
         gate: def.gate ? num(look.amounts[def.gate], 0) : 1,
         prefer: prefer ? num(prefer[key], 1) : 1,
-        season: seasonFactor(def.season, look.season, look.theme ? look.theme.season || null : null),
+        season: seasonFactor(def.season, season, look.theme ? look.theme.season || null : null, lineSeason),
         moodFilter: moodFilter ? filterWeight(look.mood, key) : 1,
+        media: !!(def.mine && def.mine.media === true),         // a derived ground of the user's media (§11.5.9)
       };
       s.product = s.weight * s.mood * s.gate * s.prefer * s.season * s.moodFilter;
       return s;
@@ -208,9 +218,10 @@ MV.def('planner/choose', ['core/hash', 'core/rng', 'core/num'], (H, R, N) => {
 
     // A candidate's weight before the recency factors (not quantized); with `f` (tracing) the factors are written
     // into it.
+    // req.noMedia: a derived ground of the user's media weighs 0 (a segment shorter than 3 s, the title card; §11.5.9).
     function preWeight(req, key, s, f) {
       let w = s.product;
-      let fit = 1, fits = 1, impact = 1, echo = 1;
+      let fit = 1, fits = 1, impact = 1, echo = 1, media = 1;
       if (!req.noFit) {
         fit = traitFit(s.traits, req.feat);
         if (s.fits !== null) fits = Math.max(0, num(s.fits(req.feat, req.chosen || {}), 0));
@@ -218,9 +229,10 @@ MV.def('planner/choose', ['core/hash', 'core/rng', 'core/num'], (H, R, N) => {
       }
       if (req.feat && req.feat.impact && s.traits && s.traits.impact) { impact = IMPACT; w *= IMPACT; }
       if (req.echo && req.echo === key) { echo = ECHO; w *= ECHO; }
+      if (req.noMedia && s.media) { media = 0; w = 0; }
       if (f) {
         Object.assign(f, { weight: s.weight, mood: s.mood, gate: s.gate, prefer: s.prefer, season: s.season,
-          moodFilter: s.moodFilter, fit, fits, impact, echo });
+          moodFilter: s.moodFilter, fit, fits, impact, echo, media });
       }
       return w;
     }
@@ -229,7 +241,7 @@ MV.def('planner/choose', ['core/hash', 'core/rng', 'core/num'], (H, R, N) => {
     // weight without the recency factors and `refW` the weight with the reference recency `req.ref` (see pick).
     let baseW = 0, refW = 0;
     function weigh(req, key, f, st) {
-      const s = st || statics(req.kind, key, req.moodFilter);
+      const s = st || statics(req.kind, key, req.moodFilter, req.season, req.seasonPinned);
       const w = preWeight(req, key, s, f);
       const q = baseW = N.q6(w);
       if (req.ref) refW = withRecency(w, q, recencyFlags(req.ref, key, s.family));
@@ -261,7 +273,7 @@ MV.def('planner/choose', ['core/hash', 'core/rng', 'core/num'], (H, R, N) => {
 
     // pick(req) → { v, w, base, ref, avoided? } | null (null when every candidate weighs 0).
     // req = { kind, keys (the pool, sorted), feat, chosen, seed, variety, recent?, ref?, echo?, noFit?, moodFilter?,
-    // avoid?, trace? }. score = ln(w) + variety · gumbel(seed, key); argmax, ties → the smaller key (keys arrive sorted).
+    // avoid?, trace?, season?, seasonPinned?, noMedia? }. score = ln(w) + variety · gumbel(seed, key); argmax, ties → the smaller key (keys arrive sorted).
     // Two more argmaxes share the same noise (planner/cast createHistory): base = without the recency factors (the
     // cut's natural pick) and ref = with the recency `req.ref` (the cut's reference pick).
     // avoid (arrange and arrive, §8.2 "no identical adjacent"): when the winner is the previous cut's value and another
@@ -274,7 +286,7 @@ MV.def('planner/choose', ['core/hash', 'core/rng', 'core/num'], (H, R, N) => {
       let base = null, baseScore = -Infinity;
       let ref = null, refScore = -Infinity;
       const keys = req.keys, n = keys.length;
-      const list = poolStatics(req.kind, keys, req.moodFilter);
+      const list = poolStatics(req.kind, keys, req.moodFilter, req.season, req.seasonPinned);
       const prefix = gumbelPrefix(req.seed);
       if (flagsA.length < n) { flagsA = new Uint8Array(n); flagsB = new Uint8Array(n); }
       const at = positionsOf(keys);
@@ -335,6 +347,6 @@ MV.def('planner/choose', ['core/hash', 'core/rng', 'core/num'], (H, R, N) => {
     cutSeed, slotSeed, slotPrefix, slotSeedAt, segSeed, paramStream, saltOf, moodBias, seasonFactor, traitFit, createChooser, pickWeighted,
     gumbelPrefix, gumbelAt, paramPrefix,
     FACTORS: Object.freeze({ RECENT_PREV, RECENT_NEAR, SAME_FAMILY, ECHO, IMPACT, MOOD_FILTER_DEFAULT, FIT_FLOOR,
-      MOOD_POWER, SEASON_ANY, SEASON_ANY_STRAY, SEASON_MATCH }),
+      MOOD_POWER, SEASON_ANY, SEASON_ANY_STRAY, SEASON_MATCH, SECTION_SEASON }),
   };
 });

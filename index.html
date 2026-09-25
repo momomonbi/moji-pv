@@ -1,6 +1,6 @@
 <!doctype html><html lang="ja"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-LbiipnWpOKd/vuo0ctU8YFdK0keBMS54qLnV/OpruD4='; style-src 'sha256-4EZv5UN8nyYJe/U95JLfKzkVGoRJa/AFVU4ZB8M0pec=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-5J3GpmV0VW/iRtg8uiNRj8k340SnSW2LXfEKrb6dodE='; style-src 'sha256-4EZv5UN8nyYJe/U95JLfKzkVGoRJa/AFVU4ZB8M0pec=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
 <title>文字PVメーカー</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -14315,6 +14315,8 @@ MV.def('planner/choose', ['core/hash', 'core/rng', 'core/num'], (H, R, N) => {
   // own season (a seasonal theme is its season's picture; its prefer map damps the other seasons), else ×0.25 — under
   // a non-seasonal theme a stray petal wash or maple paper reads as a mistake (QA-LOOK). Themes themselves ×0.5.
   const SEASON_ANY = 0.5, SEASON_ANY_STRAY = 0.25, SEASON_MATCH = 1.5;
+  // A line's own season (the line slot 'season', DESIGN_2_1 §4.9) that matches a part's season.
+  const SECTION_SEASON = 2.5;
   // The smallest scale "50 % beyond" a numeric trait is measured against (so a bound of 0 still has a slope).
   const CELLS_SCALE = 2, ENERGY_SCALE = 0.2;
 
@@ -14401,10 +14403,11 @@ MV.def('planner/choose', ['core/hash', 'core/rng', 'core/num'], (H, R, N) => {
   }
 
   // The season factor of a part (§3.8). home = the theme's season (null for a non-seasonal theme) when a part slot is
-  // weighed; undefined when a theme itself is.
-  function seasonFactor(partSeason, season, home) {
+  // weighed; undefined when a theme itself is. lineSeason: the season comes from a line's own season pin, and a match
+  // then weighs SECTION_SEASON (DESIGN_2_1 §4.9).
+  function seasonFactor(partSeason, season, home, lineSeason) {
     if (!partSeason) return 1;
-    if (season === partSeason) return SEASON_MATCH;
+    if (season === partSeason) return lineSeason ? SECTION_SEASON : SEASON_MATCH;
     if (season !== 'any') return 1;                     // other seasons never reach the pool
     return home === undefined || home === partSeason ? SEASON_ANY : SEASON_ANY_STRAY;
   }
@@ -14429,33 +14432,39 @@ MV.def('planner/choose', ['core/hash', 'core/rng', 'core/num'], (H, R, N) => {
   // --- the chooser -------------------------------------------------------------------------------------------
 
   // createChooser(registry, look) → { pick, statics, weigh }. look = { mood: MoodDef, theme: ThemeDef, season,
-  // amounts }. The look-only factors of each candidate are computed once per plan.
+  // amounts }. The look-only factors of each candidate are computed once per plan and season (a line may pin its own
+  // season, DESIGN_2_1 §4.9).
   function createChooser(registry, look) {
     const cache = new Map();
 
-    // Factors that depend only on the look: base weight, mood tag bias, gate, theme preference, season and (filter
-    // slots only) the mood's filter weights.
-    function statics(kind, key, moodFilter) {
-      const id = kind + '/' + key + (moodFilter ? '#f' : '');
+    // Factors that depend only on the look and the season: base weight, mood tag bias, gate, theme preference, season
+    // and (filter slots only) the mood's filter weights. season / lineSeason: the cut's effective season and whether it
+    // comes from a line pin (default: the look's season).
+    function statics(kind, key, moodFilter, season, lineSeason) {
+      const id = kind + '/' + key + (moodFilter ? '#f' : '') + seasonTag(season, lineSeason);
       let s = cache.get(id);
       if (s) return s;
-      s = makeStatics(kind, key, moodFilter);
+      s = makeStatics(kind, key, moodFilter, season === undefined ? look.season : season, !!lineSeason);
       cache.set(id, s);
       return s;
     }
 
+    function seasonTag(season, lineSeason) {
+      return season === undefined || (season === look.season && !lineSeason) ? '' : '|' + season + (lineSeason ? '!' : '');
+    }
+
     // The statics of a whole pool, cached per pool array (pools are cached per plan, so this is one lookup per pick).
     const byPool = new WeakMap();
-    function poolStatics(kind, keys, moodFilter) {
+    function poolStatics(kind, keys, moodFilter, season, lineSeason) {
       let m = byPool.get(keys);
       if (!m) { m = new Map(); byPool.set(keys, m); }
-      const id = kind + (moodFilter ? '#f' : '');
+      const id = kind + (moodFilter ? '#f' : '') + seasonTag(season, lineSeason);
       let list = m.get(id);
-      if (!list) { list = keys.map((key) => statics(kind, key, moodFilter)); m.set(id, list); }
+      if (!list) { list = keys.map((key) => statics(kind, key, moodFilter, season, lineSeason)); m.set(id, list); }
       return list;
     }
 
-    function makeStatics(kind, key, moodFilter) {
+    function makeStatics(kind, key, moodFilter, season, lineSeason) {
       const def = registry.get(kind, key);
       const prefer = look.theme && look.theme.prefer && look.theme.prefer[kind];
       const s = {
@@ -14467,8 +14476,9 @@ MV.def('planner/choose', ['core/hash', 'core/rng', 'core/num'], (H, R, N) => {
         mood: moodBias(def.tags, look.mood),
         gate: def.gate ? num(look.amounts[def.gate], 0) : 1,
         prefer: prefer ? num(prefer[key], 1) : 1,
-        season: seasonFactor(def.season, look.season, look.theme ? look.theme.season || null : null),
+        season: seasonFactor(def.season, season, look.theme ? look.theme.season || null : null, lineSeason),
         moodFilter: moodFilter ? filterWeight(look.mood, key) : 1,
+        media: !!(def.mine && def.mine.media === true),         // a derived ground of the user's media (§11.5.9)
       };
       s.product = s.weight * s.mood * s.gate * s.prefer * s.season * s.moodFilter;
       return s;
@@ -14506,9 +14516,10 @@ MV.def('planner/choose', ['core/hash', 'core/rng', 'core/num'], (H, R, N) => {
 
     // A candidate's weight before the recency factors (not quantized); with `f` (tracing) the factors are written
     // into it.
+    // req.noMedia: a derived ground of the user's media weighs 0 (a segment shorter than 3 s, the title card; §11.5.9).
     function preWeight(req, key, s, f) {
       let w = s.product;
-      let fit = 1, fits = 1, impact = 1, echo = 1;
+      let fit = 1, fits = 1, impact = 1, echo = 1, media = 1;
       if (!req.noFit) {
         fit = traitFit(s.traits, req.feat);
         if (s.fits !== null) fits = Math.max(0, num(s.fits(req.feat, req.chosen || {}), 0));
@@ -14516,9 +14527,10 @@ MV.def('planner/choose', ['core/hash', 'core/rng', 'core/num'], (H, R, N) => {
       }
       if (req.feat && req.feat.impact && s.traits && s.traits.impact) { impact = IMPACT; w *= IMPACT; }
       if (req.echo && req.echo === key) { echo = ECHO; w *= ECHO; }
+      if (req.noMedia && s.media) { media = 0; w = 0; }
       if (f) {
         Object.assign(f, { weight: s.weight, mood: s.mood, gate: s.gate, prefer: s.prefer, season: s.season,
-          moodFilter: s.moodFilter, fit, fits, impact, echo });
+          moodFilter: s.moodFilter, fit, fits, impact, echo, media });
       }
       return w;
     }
@@ -14527,7 +14539,7 @@ MV.def('planner/choose', ['core/hash', 'core/rng', 'core/num'], (H, R, N) => {
     // weight without the recency factors and `refW` the weight with the reference recency `req.ref` (see pick).
     let baseW = 0, refW = 0;
     function weigh(req, key, f, st) {
-      const s = st || statics(req.kind, key, req.moodFilter);
+      const s = st || statics(req.kind, key, req.moodFilter, req.season, req.seasonPinned);
       const w = preWeight(req, key, s, f);
       const q = baseW = N.q6(w);
       if (req.ref) refW = withRecency(w, q, recencyFlags(req.ref, key, s.family));
@@ -14559,7 +14571,7 @@ MV.def('planner/choose', ['core/hash', 'core/rng', 'core/num'], (H, R, N) => {
 
     // pick(req) → { v, w, base, ref, avoided? } | null (null when every candidate weighs 0).
     // req = { kind, keys (the pool, sorted), feat, chosen, seed, variety, recent?, ref?, echo?, noFit?, moodFilter?,
-    // avoid?, trace? }. score = ln(w) + variety · gumbel(seed, key); argmax, ties → the smaller key (keys arrive sorted).
+    // avoid?, trace?, season?, seasonPinned?, noMedia? }. score = ln(w) + variety · gumbel(seed, key); argmax, ties → the smaller key (keys arrive sorted).
     // Two more argmaxes share the same noise (planner/cast createHistory): base = without the recency factors (the
     // cut's natural pick) and ref = with the recency `req.ref` (the cut's reference pick).
     // avoid (arrange and arrive, §8.2 "no identical adjacent"): when the winner is the previous cut's value and another
@@ -14572,7 +14584,7 @@ MV.def('planner/choose', ['core/hash', 'core/rng', 'core/num'], (H, R, N) => {
       let base = null, baseScore = -Infinity;
       let ref = null, refScore = -Infinity;
       const keys = req.keys, n = keys.length;
-      const list = poolStatics(req.kind, keys, req.moodFilter);
+      const list = poolStatics(req.kind, keys, req.moodFilter, req.season, req.seasonPinned);
       const prefix = gumbelPrefix(req.seed);
       if (flagsA.length < n) { flagsA = new Uint8Array(n); flagsB = new Uint8Array(n); }
       const at = positionsOf(keys);
@@ -14633,7 +14645,7 @@ MV.def('planner/choose', ['core/hash', 'core/rng', 'core/num'], (H, R, N) => {
     cutSeed, slotSeed, slotPrefix, slotSeedAt, segSeed, paramStream, saltOf, moodBias, seasonFactor, traitFit, createChooser, pickWeighted,
     gumbelPrefix, gumbelAt, paramPrefix,
     FACTORS: Object.freeze({ RECENT_PREV, RECENT_NEAR, SAME_FAMILY, ECHO, IMPACT, MOOD_FILTER_DEFAULT, FIT_FLOOR,
-      MOOD_POWER, SEASON_ANY, SEASON_ANY_STRAY, SEASON_MATCH }),
+      MOOD_POWER, SEASON_ANY, SEASON_ANY_STRAY, SEASON_MATCH, SECTION_SEASON }),
   };
 });
 /* 文字PVメーカー v2 — original work. diff(planA, planB, scope?): what changed after おまかせ, a reroll or an undo (DESIGN §4.16.1, §6.7). */
@@ -14840,9 +14852,10 @@ MV.def('planner/encode', ['core/hash'], (H) => {
     return t;
   }
 
-  // A plain decision: only the five fields, a primitive value, and p / pfrom that JSON.stringify prints canonically.
+  // A plain decision: only the five fields, a value, p and pfrom that JSON.stringify prints canonically (primitives,
+  // and the canonical curve and shot objects of v2.1, whose keys core/curve and core/shot sort).
   function plainDecision(d) {
-    if (!d || d.v === undefined || (typeof d.v === 'object' && d.v !== null)) return false;
+    if (!d || d.v === undefined || (typeof d.v === 'object' && d.v !== null && !asIs(d.v))) return false;
     if (typeof d.by !== 'string' && d.by !== undefined) return false;
     if (typeof d.from !== 'string' && d.from !== undefined) return false;
     for (const f of Object.keys(d)) if (!DECISION_KEYS.has(f)) return false;
@@ -14885,11 +14898,11 @@ MV.def('planner/encode', ['core/hash'], (H) => {
   function sceneHead(first, k, hasP) { return piecesOf(k).scene[(first ? 2 : 0) + (hasP ? 1 : 0)]; }
 
   // A decision's value as its closing piece: [',"v":' + JSON + '}', '"v":' + JSON + '}'] (after other fields, alone).
-  // Part keys and other string values repeat, so their pieces are made once (the hash then reads flat strings); other
-  // values get fresh pieces.
+  // Part keys, other string values and numbers (counts, scales and the camera's rounded values) repeat, so their
+  // pieces are made once (the hash then reads flat strings); other values get fresh pieces.
   const valueTails = new Map();
   function valueTail(v) {
-    if (typeof v !== 'string') { const j = JSON.stringify(v); return [',"v":' + j + '}', '"v":' + j + '}']; }
+    if (typeof v !== 'string' && typeof v !== 'number') { const j = JSON.stringify(v); return [',"v":' + j + '}', '"v":' + j + '}']; }
     let s = valueTails.get(v);
     if (s === undefined) {
       if (valueTails.size > 4096) valueTails.clear();
@@ -14942,10 +14955,11 @@ MV.def('planner/encode', ['core/hash'], (H) => {
     return q ? cutPieces(cut, keys, enc.fp, q.feat, q.P, q.V) : null;
   }
 
+  // `rig` (the cut's rig run, Plan v2) is printed next to `ground`, in key order.
   function cutPieces(cut, keys, fp, feat, P, V) {
     const head = JSON.stringify({ a: cut.a, b: cut.b, els: cut.els, emph: cut.emph });
     const mid = JSON.stringify({ fp, ground: cut.ground, impact: cut.impact, key: cut.key, lang: cut.lang, line: cut.line,
-      note: cut.note, pinKey: cut.pinKey, repT: cut.repT, role: cut.role, seamIn: cut.seamIn });
+      note: cut.note, pinKey: cut.pinKey, repT: cut.repT, rig: cut.rig, role: cut.role, seamIn: cut.seamIn });
     const parts = [head.slice(0, -1) + ',"feat":' + feat + ',' + mid.slice(1, -1) + ',"slots":{'];
     for (let i = 0; i < keys.length; i++) {
       const d = cut.slots[keys[i]];
@@ -14985,7 +14999,9 @@ MV.def('planner/encode', ['core/hash'], (H) => {
     put('fp', '"' + fp + '"'); put('ground', canon(cut.ground)); put('impact', t.impact); put('key', canon(cut.key));
     put('lang', t.lang); put('line', canon(cut.line)); put('note', t.note);
     if (cut.pinKey !== undefined) put('pinKey', canon(cut.pinKey));
-    put('repT', canon(cut.repT)); put('role', t.role); put('seamIn', canon(cut.seamIn));
+    put('repT', canon(cut.repT));
+    if (cut.rig !== undefined) put('rig', canon(cut.rig));
+    put('role', t.role); put('seamIn', canon(cut.seamIn));
     put('slots', slotsParts(cut.slots, keys, 'full'));
     put('t0', canon(cut.t0)); put('t1', canon(cut.t1)); put('text', t.text);
     parts.push(pending + '}');
@@ -15134,7 +15150,8 @@ MV.def('planner/features', ['core/script', 'core/num', 'engine/text/breaker', 'e
   }
 
   // cutFeatures(cut, fx) → CutFeatures (§4.16.7). cut = { key, role, text, emph, impact, t0, t1, lang };
-  // fx = { duration, env|null, grid|null, info (song.info)|null, section (heading-derived)|null, repeatOf, repeats }.
+  // fx = { duration, env|null, grid|null, info (song.info)|null, section (heading-derived)|null, repeatOf, repeats,
+  // sectionStart (DESIGN_2_1 §2.7: the first cut, or its section differs from the previous cut's; planner/plan) }.
   function cutFeatures(cut, fx) {
     const text = cut.text;
     const gs = S.graphemes(text);
@@ -15160,11 +15177,14 @@ MV.def('planner/features', ['core/script', 'core/num', 'engine/text/breaker', 'e
       beat: beat ? r3(beat) : 0, cells, cps: r3(cells / dur), dur: r3(dur), emph: cut.emph.length > 0,
       energy: r3(N.clamp(energy)), graphemes: gs.length, impact: !!cut.impact, latin: r3(latinShare(gs)), onBeat,
       orients: orientsOf(text, script), pos, repeatOf: fx.repeatOf || null, role: cut.role, script,
-      section: songSection(fx.info, cut.t0) || fx.section || null, units: { glyph: glyphs, line: 1, word: words }, words,
+      section: sectionOf(cut, fx), sectionStart: !!fx.sectionStart, units: { glyph: glyphs, line: 1, word: words }, words,
     };
   }
 
-  return { cutFeatures, sectionOfHeading, songSection, meanLevel, percentile, orientsOf };
+  // The section of a cut: the song.info section at its t0, else the heading above its line, else null.
+  function sectionOf(cut, fx) { return songSection(fx.info, cut.t0) || fx.section || null; }
+
+  return { cutFeatures, sectionOf, sectionOfHeading, songSection, meanLevel, percentile, orientsOf };
 });
 /* 文字PVメーカー v2 — original work. Areas (区画): song sections, lyric headings, blocks, line sets, cuts and the whole video (DESIGN_2_1 §3.8, §5.1). */
 MV.def('planner/areas', ['core/paths', 'core/lyrics', 'planner/features'], (P, LY, FE) => {
@@ -15450,7 +15470,7 @@ MV.def('planner/areas', ['core/paths', 'core/lyrics', 'planner/features'], (P, L
 
   return { AREA_KINDS, keyOf, areasOf, resolve, inArea, ofLines, bands, sameRef };
 });
-/* 文字PVメーカー v2 — original work. Ranked pin resolution and part parameters (DESIGN §3.5, §4.16.8). */
+/* 文字PVメーカー v2 — original work. Ranked pin resolution and part parameters (DESIGN §3.5, §4.16.8; DESIGN_2_1 §11.2.6, §11.9.2). */
 MV.def('planner/params', ['core/pins', 'core/schema', 'core/paths', 'planner/choose'], (PINS, S, P, CH) => {
   'use strict';
 
@@ -15547,6 +15567,11 @@ MV.def('planner/params', ['core/pins', 'core/schema', 'core/paths', 'planner/cho
       }));
       // The positions of the params in name order: p and pfrom are built with sorted keys (see planner/encode asIs).
       list.sorted = list.map((x, i) => i).sort((a, b) => (list[a].name < list[b].name ? -1 : 1));
+      // A media part's source (its first media param), its `depth` (§11.9.1: an enum with 'auto') and `place`.
+      list.media = list.findIndex((x) => x.spec.type === 'media');
+      list.depth = list.findIndex((x) => x.name === 'depth' && x.spec.type === 'enum' && Array.isArray(x.spec.of) &&
+        x.spec.of.includes(DEPTH_AUTO));
+      list.place = list.findIndex((x) => x.name === 'place');
       byDef.set(id, list);
     }
     return list;
@@ -15589,12 +15614,81 @@ MV.def('planner/params', ['core/pins', 'core/schema', 'core/paths', 'planner/cho
     return S.autoValue(spec, auto);
   }
 
+  // A media parameter's value against the document's library (DESIGN_2_1 §11.2.6): an id that is not in doc.media
+  // warns media-missing and an entry whose kind does not fit spec.accept warns media-kind (detail { id }); both give
+  // ''. media = { entries: Map<id, AssetEntry> } (planner/plan). Pinned values warn at the pin's path.
+  function checkMedia(media, v, spec, pin, at, warn) {
+    if (typeof v !== 'string' || v === '') return v;
+    const entry = media.entries.get(v);
+    const accept = spec.accept || 'any';
+    const code = !entry ? 'media-missing' : accept !== 'any' && entry.kind !== accept ? 'media-kind' : null;
+    if (!code) return v;
+    if (warn) {
+      const line = pin && pin.from !== 'pin:work' && at.lineId ? at.lineId : undefined;
+      warn({ code, path: pin ? pin.at : undefined, line, detail: { id: v } });
+    }
+    return '';
+  }
+
+  // --- depth of a photo or video (DESIGN_2_1 §11.9.2) -----------------------------------------------------------
+
+  const DEPTH_AUTO = 'auto';
+  const DEPTHS = Object.freeze(['anim', 'front', 'back', 'still']);
+  const DEPTH_BUSY = 0.35;          // share of the frame the text covers
+  const DEPTH_LONG_ANIM = 2;        // seconds: an animated image this long moves on its own, like a video
+
+  // How a media part uses its picture: 'ground' (a background), 'layer' (a run ornament: overlay footage) or 'frame'
+  // (a cut ornament: a photo frame). A spec may name it (`use`), else the part's kind and scope tell.
+  function useOf(def, partKind, spec) {
+    if (spec && (spec.use === 'ground' || spec.use === 'frame' || spec.use === 'layer')) return spec.use;
+    if (partKind === 'ground') return 'ground';
+    return def && def.scope === 'run' ? 'layer' : 'frame';
+  }
+
+  // depthRule(use, id, entries, coverage) → { v, rule }: the effective depth of an automatic `depth` and the rule
+  // (the why code media.depth.<rule>). The first that applies: the asset's AI suggestion (entry.ai.depth); overlay
+  // footage in front; a photo frame with the animation; a background video (or an animation of 2 s or more) pushed
+  // back; a still photo behind busy text (coverage ≥ 0.35, textCoverage) pushed back; otherwise with the animation.
+  function depthRule(use, id, entries, coverage) {
+    const entry = entries && typeof id === 'string' && id !== '' ? entries.get(id) || null : null;
+    const ai = entry && entry.ai && typeof entry.ai === 'object' && DEPTHS.includes(entry.ai.depth) ? entry.ai.depth : null;
+    if (ai) return { v: ai, rule: 'ai' };
+    if (use === 'layer') return { v: 'front', rule: 'overlay' };
+    if (use === 'frame') return { v: 'anim', rule: 'frame' };
+    const moving = !!entry && (entry.kind === 'video' ||
+      (entry.anim === true && typeof entry.dur === 'number' && entry.dur >= DEPTH_LONG_ANIM));
+    if (moving) return { v: 'back', rule: 'video' };
+    const still = !entry || (entry.kind === 'image' && entry.anim !== true);
+    if (still && coverage >= DEPTH_BUSY) return { v: 'back', rule: 'busy' };
+    return { v: 'anim', rule: 'still' };
+  }
+
+  // textCoverage(cuts) → the share of the frame the text of a segment covers, estimated (0..1). The planner has no
+  // layout (fonts and measuring are the engine's, DESIGN §7.1.3), so the §11.9.2 "hints.focus boxes" are estimated
+  // from what it knows: a lyric cut's text set to fill the width takes about 1.5 / cells of the frame, times the
+  // square of its text.scale; the segment's value is the mean over its lyric cuts weighted by their durations (what
+  // the picture spends its time behind). cuts = plan or cast cuts ({ role, feat, slots }).
+  function textCoverage(cuts) {
+    let sum = 0, time = 0;
+    for (const c of cuts) {
+      if (!c || (c.role !== 'lyric' && c.role !== 'focus') || !c.feat) continue;
+      const d = c.slots && c.slots['text.scale'];
+      const s = d && typeof d.v === 'number' ? d.v : 1;
+      const dur = Math.max(0, c.feat.dur || 0);
+      sum += dur * Math.min(1, 1.5 * s * s / Math.max(1, c.feat.cells || 0));
+      time += dur;
+    }
+    return time > 0 ? Math.round((sum / time) * 1000) / 1000 : 0;
+  }
+
   // resolveParams(def, kind, idx, at, pinIndex, ax) → { p, pfrom }
   // For each param in declared order (shared first, as registry.params lists them): the pin at the shared path
   // (`kind.param` / `kind#i.param`) or the part path (`kind@key.param`), else the AutoSpec with
   // ax.rng = stream(slotSeed, 'param', name); always coerced. `kind` is the slot KIND of the path grammar
   // ('atmos' and 'texture' address ornament and filter parts). ax = { f, look: { amounts, mood, bpm }, seed,
-  // registry, partKind?, salts?, warn?, fixed?: { name: value } (values set by a rule, e.g. the texture amount) }.
+  // registry, partKind?, salts?, warn?, fixed?: { name: value } (values set by a rule, e.g. the texture amount),
+  // media? (the document's library: media params are checked against it, checkMedia), coverage? (textCoverage of
+  // the segment, for a background's depth) }.
   // Every param has a stream of its own, so the order only decides the order of warnings; p and pfrom get their keys
   // in name order.
   function resolveParams(def, kind, idx, at, pinIndex, ax) {
@@ -15611,14 +15705,28 @@ MV.def('planner/params', ['core/pins', 'core/schema', 'core/paths', 'planner/cho
         values[i] = pin.v;
         from[i] = pin.from;
         pinned = true;
-        continue;
+      } else if (ax.fixed && name in ax.fixed && S.coerce(spec, ax.fixed[name]) !== undefined) {
+        values[i] = S.coerce(spec, ax.fixed[name]);
+      } else {
+        const salt = ax.salts ? paramSalt(ax.salts, at, slot) : 0;
+        values[i] = autoOf(spec, auto, () => CH.paramStream(ax.seed, name, salt, prefix));
       }
-      if (ax.fixed && name in ax.fixed) {
-        const c = S.coerce(spec, ax.fixed[name]);
-        if (c !== undefined) { values[i] = c; continue; }
+      if (spec.type === 'media' && ax.media) values[i] = checkMedia(ax.media, values[i], spec, pin, at, ax.warn);
+    }
+    // depth 'auto' of a media part → its effective value (DESIGN_2_1 §11.9.2). A pin of 'auto' is no pin: the value is
+    // the rule's, and a lock freezes that.
+    const di = list.depth, mi = list.media;
+    if (di >= 0 && mi >= 0) {
+      const use = useOf(def, ax.partKind || kind, list[di].spec);
+      if (values[di] === DEPTH_AUTO) {
+        values[di] = depthRule(use, values[mi], ax.media ? ax.media.entries : null, ax.coverage || 0).v;
+        if (from[di] !== undefined) { from[di] = undefined; pinned = from.some((x) => x !== undefined); }
       }
-      const salt = ax.salts ? paramSalt(ax.salts, at, slot) : 0;
-      values[i] = autoOf(spec, auto, () => CH.paramStream(ax.seed, name, salt, prefix));
+      // In front of the text, a photo frame is never placed behind it: an automatic 'behind' becomes 'side' (§11.9.3).
+      const pi = list.place;
+      if (values[di] === 'front' && use === 'frame' && pi >= 0 && from[pi] === undefined && values[pi] === 'behind') {
+        values[pi] = 'side';
+      }
     }
     const p = {};
     const pfrom = pinned ? {} : null;
@@ -15629,8 +15737,638 @@ MV.def('planner/params', ['core/pins', 'core/schema', 'core/paths', 'planner/cho
     return { p, pfrom };
   }
 
-  return { resolvePin, resolveParams, acceptSpec, pinned, pinnedUnder, coerceStepped, RANKS };
+  // paramInfo(registry, partKind, def) → { media, depth, place } names ('' when absent) of a part's params.
+  function paramInfo(registry, partKind, def) {
+    const list = paramList(registry, partKind, def, partKind, null);
+    const name = (i) => (i >= 0 ? list[i].name : '');
+    return { media: name(list.media), depth: name(list.depth), place: name(list.place), depthSpec: list.depth >= 0 ? list[list.depth].spec : null };
+  }
+
+  return {
+    resolvePin, resolveParams, acceptSpec, pinned, pinnedUnder, coerceStepped, RANKS, depthRule, useOf, textCoverage,
+    paramInfo, DEPTHS,
+  };
 });
+/* 文字PVメーカー v2 — original work. Automatic camerawork: motion speed, the shot of each cut, carry between phrases and section rigs (DESIGN_2_1 §3.9, §4.3, §4.5.7, §4.6, §4.7). */
+MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'core/shot', 'planner/choose', 'planner/params'],
+  (H, N, R, S, SHOT, CH, PA) => {
+    'use strict';
+
+    // Specs of the v2.1 cut slots (§2.3); planner/cast merges them into its SLOT_SPECS, planner/fields shows them.
+    const SLOT_SPECS = Object.freeze({
+      'motion.speed': { type: 'num', min: 0.25, max: 4, step: 0.05, unit: 'x' },
+      'cam.shot': { type: 'shot' },
+      'cam.zoom': { type: 'num', min: 0.5, max: 2, step: 0.01, unit: 'x' },
+      'cam.curve': { type: 'curve' },
+      'cam.follow': { type: 'num', min: 0, max: 1, step: 0.01 },
+      rig: { type: 'rig' },
+      'rig.curve': { type: 'curve' },
+    });
+    const CAM_SLOTS = Object.freeze(['cam.shot', 'cam.zoom', 'cam.curve', 'cam.follow']);
+
+    // --- §4.7 constants (FROZEN formulas; the lead may tune them after visual QA, §7.5 step (b)) --------------------
+    const NONE = 'none';
+    const SHOT_POOL = Object.freeze(SHOT.SHOT_KEYS.concat([NONE]).sort());
+    const AMOUNT_OFF = 0.1;                         // A below this: no automatic shot
+    const SHORT_CUT = 0.8;                          // seconds
+    const SHORT_POOL = Object.freeze(['none', 'settle']);
+    const ROLE_POOLS = Object.freeze({
+      title: Object.freeze(['pullReveal', 'settle', 'wideHold']),
+      interlude: Object.freeze(['driftOff', 'none', 'wideHold']),
+      outro: Object.freeze(['none', 'pullReveal', 'wideHold']),
+    });
+    const GENTLE_POOL = Object.freeze(['driftOff', 'settle', 'tiltHold', 'wideHold']);
+    // × section (verse or no section share a row).
+    const SHOT_SECTION = Object.freeze({
+      chorus: Object.freeze({ pushWord: 1.5, snapZoom: 1.5, sweepAcross: 1.5, none: 0.6 }),
+      verse: Object.freeze({ settle: 1.3, driftOff: 1.3, none: 1.3 }),
+      bridge: Object.freeze({ tiltHold: 1.5, wideHold: 1.5 }),
+      intro: Object.freeze({ pullReveal: 1.5, wideHold: 1.5 }),
+      outro: Object.freeze({ pullReveal: 1.5, wideHold: 1.5 }),
+    });
+    const SHOT_RECENT = 0.1, SHOT_NEAR = 0.4, SHOT_ECHO = 3;
+    const RIG_OFF = 0.15;                           // A below this: no automatic rig
+    const RIG_WEIGHTS = Object.freeze({
+      chorus: Object.freeze({ slowSwell: 3, climbRise: 2, leanTilt: 0.5, none: 1 }),
+      prechorus: Object.freeze({ climbRise: 3, slowSwell: 1 }),
+      verse: Object.freeze({ driftSide: 2, slowSwell: 1, none: 2 }),
+      bridge: Object.freeze({ leanTilt: 2, driftSide: 1, none: 1 }),
+      intro: Object.freeze({ slowSwell: 2, none: 1 }),
+      outro: Object.freeze({ pullAway: 4, none: 1 }),
+      interlude: Object.freeze({ driftSide: 2, none: 1 }),
+      other: Object.freeze({ slowSwell: 1, climbRise: 1 }),
+    });
+    const LAST_CHORUS_AMP = 1.25, AMP_MAX = 1.3;
+    const SPECIAL = new Set(['title', 'interlude', 'outro']);
+
+    function q2(x) { return Math.round(x * 100) / 100; }
+
+    function tracing(ctx, cutKey, slot) {
+      const t = ctx.trace;
+      if (!t || t.cutKey !== cutKey || t.slot !== slot) return null;
+      t.hit = true;
+      return t.out;
+    }
+
+    function seedOf(st, slot) { return CH.slotSeedAt(st.slotPrefix, st.cut.key, st.cut.line, slot, st.ctx.salts); }
+
+    function setDecision(st, slot, d) {
+      st.slots[slot] = d;
+      st.chosen[slot] = d.v;
+    }
+
+    const acceptShot = PA.acceptSpec(SLOT_SPECS['cam.shot']);
+    const acceptRig = PA.acceptSpec(SLOT_SPECS.rig);
+
+    // --- motion speed (§4.3) -------------------------------------------------------------------------------------
+
+    // decideSpeed(st): the motion.speed slot of a cut; a pin coerced through its spec, else 1.
+    function decideSpeed(st) {
+      return st.decide(st, 'motion.speed', SLOT_SPECS['motion.speed'], () => ({ v: 1, from: 'auto' }));
+    }
+
+    const SPEED_PARAMS = Object.freeze({ arrive: ['dur', 'each'], depart: ['dur', 'each'], dwell: ['speed'] });
+
+    // applySpeed(st, kind, d): right after the parameters of arrive, dwell and depart are resolved. Unpinned durations
+    // and staggers are divided by the cut's motion speed and an unpinned hold speed is multiplied by it, each coerced
+    // through the part's own spec, with pfrom 'rule'. Nothing happens at speed 1. st needs { ctx: { registry }, slots };
+    // d.p must still be writable (the decision is frozen later).
+    function applySpeed(st, kind, d) {
+      const s = st.slots['motion.speed'];
+      const speed = s && typeof s.v === 'number' ? s.v : 1;
+      const names = SPEED_PARAMS[kind];
+      if (speed === 1 || !names || !d || !d.p || d.v === NONE) return d;
+      const list = st.ctx.registry.params(kind, d.v) || [];
+      let pfrom = null;
+      for (const name of names) {
+        const x = d.p[name];
+        if (typeof x !== 'number' || (d.pfrom && d.pfrom[name])) continue;
+        const item = list.find((e) => e.name === name);
+        if (!item) continue;
+        const c = S.coerce(item.spec, kind === 'dwell' ? x * speed : x / speed);
+        if (c === undefined) continue;
+        d.p[name] = c;
+        (pfrom || (pfrom = Object.assign({}, d.pfrom || {})))[name] = 'rule';
+      }
+      if (pfrom) d.pfrom = sortedCopy(pfrom);
+      return d;
+    }
+
+    function sortedCopy(o) {
+      const out = {};
+      for (const k of Object.keys(o).sort()) out[k] = o[k];
+      return out;
+    }
+
+    // --- shots (§4.7) --------------------------------------------------------------------------------------------
+
+    // Pools are bit sets over SHOT_POOL (10 keys).
+    const bitsOf = (keys) => keys.reduce((m, key) => m | (1 << SHOT_POOL.indexOf(key)), 0);
+    const ALL_BITS = bitsOf(SHOT_POOL), SHORT_BITS = bitsOf(SHORT_POOL), GENTLE_BITS = bitsOf(GENTLE_POOL);
+    const ROLE_BITS = Object.freeze(Object.fromEntries(Object.keys(ROLE_POOLS).map((role) => [role, bitsOf(ROLE_POOLS[role])])));
+
+    // The pool of a cut after the rules and what limited it: { bits, gentle, arrange } or a forced value
+    // { forced: { v, from, rule }, mask, arrange }. rulesWhy and maskOf give explain's view of them.
+    function shotRules(st) {
+      const { ctx, cut } = st;
+      const A = ctx.look.amounts.camera;
+      const arrange = st.chosen.arrange ? ctx.registry.get('arrange', st.chosen.arrange) : null;
+      const cam = arrange && arrange.cam ? arrange.cam : 'any';
+      if (!(A >= AMOUNT_OFF)) return { forced: { v: NONE, from: 'auto', rule: 'none-camera' }, mask: 'gate', arrange };
+      if (cam === 'none') return { forced: { v: NONE, from: 'rule', rule: 'arrange' }, mask: 'trait', arrange };
+      let bits = ALL_BITS;
+      if (cut.feat.dur < SHORT_CUT) bits &= SHORT_BITS;
+      if (ROLE_BITS[cut.role] !== undefined) bits &= ROLE_BITS[cut.role];
+      if (cam === 'gentle') bits &= GENTLE_BITS;
+      return { bits, gentle: cam === 'gentle', arrange };
+    }
+
+    // The reasons of the rules (explain), in their order: forced values, then each pool that limited the cut.
+    function rulesWhy(st, rules) {
+      const A = st.ctx.look.amounts.camera;
+      if (rules.forced) {
+        return rules.forced.rule === 'none-camera'
+          ? [{ code: 'rule', params: { rule: 'none-camera' } }, { code: 'cam.amount', params: { x: A } }]
+          : [{ code: 'cam.arrange', params: { key: rules.arrange.key } }];
+      }
+      const why = [];
+      if (st.cut.feat.dur < SHORT_CUT) why.push({ code: 'cam.short', params: {} });
+      if (ROLE_BITS[st.cut.role] !== undefined) why.push({ code: 'rule', params: { rule: 'role' } });
+      if (rules.gentle) why.push({ code: 'cam.arrange', params: { key: rules.arrange.key } });
+      return why;
+    }
+
+    // Explain's mask of a shot key the rules left out: the first rule (in order) that removed it.
+    function maskOf(st, rules, i) {
+      const bit = 1 << i;
+      if (st.cut.feat.dur < SHORT_CUT && !(SHORT_BITS & bit)) return 'trait';
+      if (ROLE_BITS[st.cut.role] !== undefined && !(ROLE_BITS[st.cut.role] & bit)) return 'role';
+      return rules.gentle && !(GENTLE_BITS & bit) ? 'trait' : null;
+    }
+
+    // The §4.7 base weight of one shot key (before mood, section, recency and echo).
+    function baseWeight(key, f, A, orient, frames) {
+      switch (key) {
+        case 'none': return 3 * (1 - A) * (1 - A) + (frames ? 4 : 0);
+        case 'settle': return 1.2;
+        case 'pushWord': return (f.emph ? 3 : f.words >= 2 ? 0.8 : 0.2) * (0.6 + f.energy);
+        case 'readAlong': return (f.words >= 3 && f.dur >= 2.2 ? 1.6 : 0) * (orient === 'v' ? 0.7 : 1);
+        case 'snapZoom': return f.impact ? 5 : (f.energy >= 0.75 && f.onBeat ? 0.5 : 0);
+        case 'pullReveal': return f.sectionStart ? 2 : 0.4;
+        case 'sweepAcross': return f.words >= 2 && f.cells >= 8 && orient === 'h' ? 0.9 : 0;
+        case 'tiltHold': return 0.6 * (f.energy >= 0.4 ? 1 : 0.3);
+        case 'driftOff': return f.cells <= 10 ? 0.7 : 0.2;
+        case 'wideHold': return f.dur >= 3 && f.energy < 0.45 ? 1 : 0.1;
+        default: return 0;
+      }
+    }
+
+    // The reasons behind one key's base weight (explain): the feature that raised it.
+    function baseWhy(key, f, A, orient, lensKey, frames) {
+      switch (key) {
+        case 'none': return (frames ? [{ code: 'cam.lens', params: { key: lensKey } }] : []).concat([{ code: 'cam.amount', params: { x: A } }]);
+        case 'pushWord': return f.emph ? [{ code: 'cam.emph', params: {} }] : f.words >= 2 ? [{ code: 'cam.words', params: { n: f.words } }] : [];
+        case 'readAlong': return f.words >= 3 && f.dur >= 2.2 ? [{ code: 'cam.words', params: { n: f.words } }] : [];
+        case 'snapZoom': return f.impact ? [{ code: 'cam.impact', params: {} }] : [];
+        case 'pullReveal': return f.sectionStart ? [{ code: 'cam.sectionStart', params: {} }] : [];
+        case 'sweepAcross': return f.words >= 2 && f.cells >= 8 && orient === 'h' ? [{ code: 'cam.words', params: { n: f.words } }] : [];
+        case 'wideHold': return f.dur >= 3 && f.energy < 0.45 ? [{ code: 'cam.long', params: {} }] : [];
+        default: return [];
+      }
+    }
+
+    // The mood factor of every shot key (moodBias of the preset's tags; 1 for none), made once per plan.
+    function moodFactors(ctx) {
+      let m = ctx.shotMood;
+      if (!m) {
+        m = new Float64Array(SHOT_POOL.length);
+        SHOT_POOL.forEach((key, i) => { m[i] = key === NONE ? 1 : CH.moodBias(SHOT.SHOTS[key].tags, ctx.look.mood); });
+        ctx.shotMood = m;
+      }
+      return m;
+    }
+
+    // The mood factor of a shot preset and its strongest tag (explain).
+    function moodWhy(tags, mood) {
+      let best = null, bestAbs = 0;
+      for (const tag of tags || []) {
+        const b = mood && mood.tagBias && typeof mood.tagBias[tag] === 'number' ? mood.tagBias[tag] : 1;
+        const a = Math.abs(Math.log(Math.max(b, 1e-6)));
+        if (a > bestAbs) { best = { code: 'mood.tag', params: { mood: mood.key, tag, x: q2(b) } }; bestAbs = a; }
+      }
+      return best;
+    }
+
+    // weighShots(st, rules, rec, withWhy) → [{ key, w, wBase, why }] over the whole shot pool in sorted order (w = 0
+    // outside the rules' pool). w is q6 of every factor; wBase leaves out the recency factors (the cut's natural pick).
+    // rec = { prev, near, echo } (keys or null / arrays). why is null unless withWhy.
+    function weighShots(st, rules, rec, withWhy) {
+      const { ctx, cut } = st;
+      const f = cut.feat;
+      const A = ctx.look.amounts.camera;
+      const mood = ctx.look.mood;
+      const orient = st.chosen.orient;
+      const lensKey = st.chosen.lens && st.chosen.lens !== NONE ? st.chosen.lens : null;
+      const lens = lensKey ? ctx.registry.get('lens', lensKey) : null;
+      const frames = !!(lens && lens.frames === true);
+      const bySection = SHOT_SECTION[f.section === null || f.section === undefined ? 'verse' : f.section] || null;
+      const moods = moodFactors(ctx);
+      const out = new Array(SHOT_POOL.length);
+      for (let i = 0; i < SHOT_POOL.length; i++) {
+        const key = SHOT_POOL[i];
+        if (!(rules.bits & (1 << i))) { out[i] = { key, w: 0, wBase: 0, why: withWhy ? [] : null }; continue; }
+        const m = moods[i];
+        const sec = bySection && bySection[key] ? bySection[key] : 1;
+        const echo = rec.echo === key;
+        // Left to right, like the factors are listed in §4.7 (the product is rounded once, by q6).
+        const w = baseWeight(key, f, A, orient, frames) * m * sec * (echo ? SHOT_ECHO : 1);
+        const wBase = N.q6(w);
+        let wr = w;
+        if (rec.prev === key) wr *= SHOT_RECENT;
+        if (rec.near.includes(key)) wr *= SHOT_NEAR;
+        let why = null;
+        if (withWhy) {
+          why = baseWhy(key, f, A, orient, lensKey, frames);
+          if (m !== 1) { const t = moodWhy(SHOT.SHOTS[key].tags, mood); if (t) why.push(t); }
+          if (sec !== 1 && f.section) why.push({ code: 'cam.section', params: { section: f.section } });
+          if (echo) why.push({ code: 'echo', params: { cut: f.repeatOf } });
+          if (rec.prev && rec.prev !== key) why.push({ code: 'recent', params: { key: rec.prev } });
+        }
+        out[i] = { key, w: wr === w ? wBase : N.q6(wr), wBase, why };
+      }
+      return out;
+    }
+
+    // The recency and echo a cut's shot reads (§4.7): the previous cut's final shot (×0.1), the natural shots of the
+    // 3 cuts before it (×0.4) and the natural shot of the cut it echoes (×3). The natural pass (st.natural) weighs
+    // without recency, like the part slots.
+    function recencyOf(st) {
+      const hist = st.hist;
+      const echo = hist.echo(st.cut.feat.repeatOf, 'cam.shot');
+      if (st.natural) return { prev: null, near: EMPTY, echo };
+      return { prev: hist.previous('cam.shot'), near: hist.recent('cam.shot', 'cam.shot', null).near, echo };
+    }
+    const EMPTY = Object.freeze([]);
+
+    // shotWeights(st) → [{ key, w, why }] for the cut in st (tests and tools; the planner picks from the same numbers).
+    function shotWeights(st) {
+      const rules = shotRules(st);
+      const poolWhy = rulesWhy(st, rules);
+      if (rules.forced) {
+        return SHOT_POOL.map((key) => ({ key, w: 0, why: key === rules.forced.v ? poolWhy.slice() : [] }));
+      }
+      const list = weighShots(st, rules, recencyOf(st), true);
+      return list.map((c) => ({ key: c.key, w: c.w, why: poolWhy.concat(c.why) }));
+    }
+
+    // The automatic shot: { v, from, base, gentle, rule?, why?, candidates?, recent? }. Gumbel-max over q6 weights keyed
+    // by shot key (ties → the smaller key, keys sorted); base = the same argmax without the recency factors. why,
+    // candidates and recent (explain) only with withWhy.
+    function autoShot(st, withWhy) {
+      const rules = shotRules(st);
+      if (rules.forced) {
+        const out = { v: rules.forced.v, from: rules.forced.from, rule: rules.forced.rule, base: rules.forced.v, gentle: false };
+        if (withWhy) {
+          out.why = rulesWhy(st, rules);
+          out.candidates = SHOT_POOL.map((key) => ({ key, w: 0, masked: key === rules.forced.v ? null : rules.mask }));
+        }
+        return out;
+      }
+      const rec = recencyOf(st);
+      const list = weighShots(st, rules, rec, withWhy);
+      const prefix = CH.gumbelPrefix(seedOf(st, 'cam.shot'));
+      let best = null, bestScore = -Infinity, base = null, baseScore = -Infinity;
+      for (const c of list) {
+        if (!(c.w > 0) && !(c.wBase > 0)) continue;
+        const noise = CH.gumbelAt(prefix, c.key);
+        if (c.w > 0) { const s = Math.log(c.w) + noise; if (s > bestScore) { best = c.key; bestScore = s; } }
+        if (c.wBase > 0) { const s = Math.log(c.wBase) + noise; if (s > baseScore) { base = c.key; baseScore = s; } }
+      }
+      const v = best === null ? NONE : best;
+      const out = { v, from: 'auto', base: base === null ? v : base, gentle: rules.gentle };
+      if (withWhy) {
+        const own = list[SHOT_POOL.indexOf(v)];
+        out.why = rulesWhy(st, rules).concat(own.why);
+        if (!out.why.length) out.why.push({ code: 'cam.amount', params: { x: st.ctx.look.amounts.camera } });
+        out.candidates = list.map((c, i) => ({ key: c.key, w: c.w, masked: maskOf(st, rules, i) }));
+        out.recent = rec;
+      }
+      return out;
+    }
+
+    function decideShot(st) {
+      const { ctx, at } = st;
+      const slot = 'cam.shot';
+      const trace = tracing(ctx, st.cut.key, slot);
+      const pin = PA.pinned(ctx.ix, slot) ? PA.resolvePin(ctx.ix, at, slot, acceptShot, ctx.warn) : null;
+      let d, gentle = false;
+      if (pin) {
+        d = { v: pin.v, from: pin.from, by: pin.by };
+        if (trace) {
+          const shadow = autoShot(st, true);
+          Object.assign(trace, { kind: 'cam.shot', stage: 'pin', pin, candidates: shadow.candidates });
+        }
+        gentle = gentleArrange(st);
+      } else {
+        const got = autoShot(st, !!trace);
+        d = { v: got.v, from: got.from };
+        gentle = !!got.gentle;
+        if (got.base !== got.v) st.base[slot] = got.base;
+        if (trace) {
+          Object.assign(trace, { kind: 'cam.shot', stage: got.from === 'rule' ? 'rule' : 'auto', rule: got.rule || null,
+            why: got.why, candidates: got.candidates, recent: got.recent || null });
+        }
+      }
+      if (trace) trace.decision = d;
+      setDecision(st, slot, d);
+      return gentle;
+    }
+
+    function gentleArrange(st) {
+      const arrange = st.chosen.arrange ? st.ctx.registry.get('arrange', st.chosen.arrange) : null;
+      return !!arrange && arrange.cam === 'gentle';
+    }
+
+    // decideCamera(st): cam.shot → cam.zoom → cam.curve → cam.follow (§4.7), each with its own slot seed. The natural
+    // pass (neighbours' view) needs only the shot.
+    function decideCamera(st) {
+      const gentle = decideShot(st);
+      if (st.natural) return;
+      const { ctx, cut } = st;
+      const f = cut.feat;
+      const A = ctx.look.amounts.camera;
+      const shot = st.chosen['cam.shot'];
+      st.decide(st, 'cam.zoom', SLOT_SPECS['cam.zoom'], (seed, withWhy) => {
+        let z = q2(N.lerp(0.85, 1.2, N.clamp(0.5 * A + 0.5 * f.energy)) * (f.impact ? 1.1 : 1));
+        let capped = false;
+        if (gentle) {
+          const fill = SHOT.maxFill(shot);
+          if (fill > 0 && 0.7 / fill < z) { z = 0.7 / fill; capped = true; }
+        }
+        const d = { v: S.coerce(SLOT_SPECS['cam.zoom'], z), from: 'auto' };
+        if (withWhy) {
+          d.why = [{ code: 'cam.amount', params: { x: A } }];
+          if (f.impact) d.why.push({ code: 'cam.impact', params: {} });
+          if (capped) d.why.push({ code: 'rule', params: { rule: 'gentle' } });
+        }
+        return d;
+      });
+      st.decide(st, 'cam.curve', SLOT_SPECS['cam.curve'], (seed, withWhy) => {
+        const bias = ctx.look.mood && ctx.look.mood.tagBias ? ctx.look.mood.tagBias.fast : undefined;
+        let v;
+        if (f.impact) v = R.fromSeed(seed).weighted(['dashStop', 'holdThenDash'], [3, 2]);
+        else if (f.energy >= 0.65 || (typeof bias === 'number' && bias > 1.2)) {
+          v = R.fromSeed(seed).weighted(['hushRushHush', 'holdThenDash', 'softEnds'], [3, 2, 1]);
+        } else v = R.fromSeed(seed).weighted(['softEnds', 'fadeBrake', 'slowBloom'], [3, 2, 1]);
+        return withWhy && f.impact ? { v, from: 'auto', why: [{ code: 'cam.impact', params: {} }] } : { v, from: 'auto' };
+      });
+      st.decide(st, 'cam.follow', SLOT_SPECS['cam.follow'], () => {
+        let x;
+        if (shot === NONE || shot === 'wideHold') x = 0;
+        else {
+          const own = typeof shot === 'string' ? SHOT.SHOTS[shot] && SHOT.SHOTS[shot].follow : shot && shot.follow;
+          if (typeof own === 'number' && own > 0) x = own;
+          else {
+            const arrive = st.chosen.arrive ? ctx.registry.get('arrive', st.chosen.arrive) : null;
+            const fast = !!(arrive && Array.isArray(arrive.tags) && arrive.tags.includes('fast'));
+            x = q2(N.clamp(0.1 + 0.4 * ctx.look.amounts.motion + (fast ? 0.1 : 0)));
+          }
+        }
+        return { v: S.coerce(SLOT_SPECS['cam.follow'], x), from: 'auto' };
+      });
+    }
+
+    // --- carry (§4.5.7; stage 6, after the seams) ------------------------------------------------------------------
+
+    // Whether a shot starts by framing the text at the cut's start (the key expandShot's carry replaces).
+    function opensOnText(v) {
+      const shot = typeof v === 'string' ? SHOT.SHOTS[v] : null;
+      if (!shot) return false;
+      const k0 = shot.keys[0];
+      return k0.at === 'a' && k0.aim !== 'frame' && k0.aim !== 'point';
+    }
+
+    // carry(ctx, cuts, seams = ctx.seams): consecutive cuts A → B of the same line, both with a shot, B's shot a preset
+    // (not a custom object), across a hard cut or a text transition: B's cam.shot becomes a new frozen decision with
+    // p.carry = SHOT.lastFraming(A's shot, { zoom: A's cam.zoom }) and pfrom.carry 'rule', so B opens at A's closeness,
+    // screen position and roll (a match cut). Skipped when there is nothing to carry (A ends on the frame) or nothing
+    // to carry it into (B opens on the frame). The decision is kept on B's cast entry while its inputs are the same.
+    function carry(ctx, cuts, seams) {
+      const list = seams || ctx.seams || [];
+      for (let j = 1; j < cuts.length; j++) {
+        const A = cuts[j - 1], B = cuts[j];
+        if (!A.line || A.line !== B.line) continue;
+        const a = A.slots['cam.shot'], b = B.slots['cam.shot'];
+        if (!a || !b || a.v === NONE || typeof b.v !== 'string' || b.v === NONE || !opensOnText(b.v)) continue;
+        if (B.seamIn >= 0 && list[B.seamIn] && list[B.seamIn].scope !== 'text') continue;
+        const zoom = A.slots['cam.zoom'] ? A.slots['cam.zoom'].v : 1;
+        const framing = SHOT.lastFraming(a.v, { zoom });
+        if (!framing) continue;
+        const text = JSON.stringify(framing);
+        const memo = B.cast ? B.cast.carry : null;
+        let d;
+        if (memo && memo.base === b && memo.text === text) d = memo.d;
+        else {
+          d = {};
+          if (b.by !== undefined) d.by = b.by;
+          d.from = b.from;
+          d.p = { carry: framing };
+          d.pfrom = { carry: 'rule' };
+          d.v = b.v;
+          d = deepFreeze(d);
+          if (B.cast) B.cast.carry = { base: b, text, d };
+        }
+        B.slots['cam.shot'] = d;
+        const t = tracing(ctx, B.key, 'cam.shot');
+        if (t) t.override = { rule: 'carry', decision: d };
+      }
+    }
+
+    function deepFreeze(v) {
+      if (v && typeof v === 'object' && !Object.isFrozen(v)) {
+        Object.freeze(v);
+        for (const k of Object.keys(v)) deepFreeze(v[k]);
+      }
+      return v;
+    }
+
+    // --- rigs (§4.6, §4.7; stage 6, after the seams) ---------------------------------------------------------------
+
+    function atOf(cut) { return { cutKey: cut.key, pinCutKey: cut.pinKey, lineId: cut.line }; }
+
+    // The weight row of a run (§4.7 table): its first cut's section (none → the verse row). A special cut is a run of
+    // its own and reads its role's row — title → the intro row, interlude and outro their own — unless its section is
+    // one of those instructional sections itself (an intro cut inside the song's intro section reads intro).
+    const ROLE_ROWS = Object.freeze({ title: 'intro', interlude: 'interlude', outro: 'outro' });
+    const EDGE_SECTIONS = new Set(['intro', 'interlude', 'outro']);
+    function rigRow(first) {
+      const s = first.feat.section;
+      if (first.role === 'title') return { row: 'intro', why: { code: 'rule', params: { rule: 'role' } } };
+      if (ROLE_ROWS[first.role]) {
+        const row = s && EDGE_SECTIONS.has(s) ? s : ROLE_ROWS[first.role];
+        return { row, why: { code: 'rig.section', params: { section: row } } };
+      }
+      if (s) return { row: RIG_WEIGHTS[s] ? s : 'other', why: { code: 'rig.section', params: { section: s } } };
+      return { row: 'verse', why: null };
+    }
+
+    // The last chorus run: the last run of lyric cuts whose section is chorus.
+    function lastChorusOf(cuts, runs) {
+      let last = -1;
+      runs.forEach((run, r) => {
+        const first = cuts[run.idx[0]];
+        if (first.feat.section === 'chorus' && !SPECIAL.has(first.role)) last = r;
+      });
+      return last;
+    }
+
+    // The resolved rig pin of a cut (cut > line > work), or null.
+    function rigPin(ctx, cut) {
+      return PA.pinned(ctx.ix, 'rig') ? PA.resolvePin(ctx.ix, atOf(cut), 'rig', acceptRig, ctx.warn) : null;
+    }
+
+    // Runs of consecutive cuts: a new run where the section changes (null counts as its own value), around every title,
+    // interlude and outro cut, and where the resolved rig pin changes (compared by canonical JSON).
+    function splitRuns(ctx, cuts) {
+      const runs = [];
+      let cur = null, prevText = null;
+      cuts.forEach((cut, j) => {
+        const pin = rigPin(ctx, cut);
+        const text = pin ? JSON.stringify(pin.v) : null;
+        const prev = j ? cuts[j - 1] : null;
+        const fresh = !cur || prev.feat.section !== cut.feat.section || SPECIAL.has(prev.role) || SPECIAL.has(cut.role) ||
+          text !== prevText;
+        if (fresh) { cur = { idx: [], pin }; runs.push(cur); }
+        cur.idx.push(j);
+        prevText = text;
+      });
+      return runs;
+    }
+
+    // The automatic rig of a run: Gumbel-max over the row's weights × moodBias(tags), keyed by rig key (sorted, ties →
+    // the smaller key), avoiding the previous run's winner while another candidate weighs > 0 ('none' is exempt).
+    // → { v, win, why, candidates }.
+    function autoRig(ctx, row, seed, avoid, withWhy) {
+      const weights = RIG_WEIGHTS[row.row];
+      const mood = ctx.look.mood;
+      const keys = SHOT.RIG_KEYS.concat([NONE]).sort();
+      const prefix = CH.gumbelPrefix(seed);
+      let best = null, bestScore = -Infinity, next = null, nextScore = -Infinity;
+      const candidates = [];
+      for (const key of keys) {
+        const base = weights[key] || 0;
+        const w = N.q6(key === NONE ? base : base * CH.moodBias(SHOT.RIGS[key].tags, mood));
+        candidates.push({ key, w, masked: null });
+        if (!(w > 0)) continue;
+        const s = Math.log(w) + CH.gumbelAt(prefix, key);
+        if (s > bestScore) { next = best; nextScore = bestScore; best = key; bestScore = s; }
+        else if (s > nextScore) { next = key; nextScore = s; }
+      }
+      const win = best === null ? NONE : best;
+      const v = avoid && win === avoid && next !== null ? next : win;
+      const out = { v, win, candidates };
+      if (withWhy) {
+        out.why = row.why ? [row.why] : [];
+        if (v !== NONE) { const t = moodWhy(SHOT.RIGS[v].tags, mood); if (t) out.why.push(t); }
+        if (v !== win) out.why.push({ code: 'recent', params: { key: win } });
+      }
+      return out;
+    }
+
+    function withAmp(d, amp) {
+      const out = {};
+      if (d.by !== undefined) out.by = d.by;
+      out.from = d.from;
+      if (d.v !== NONE) out.p = { amp };
+      out.v = d.v;
+      return out;
+    }
+
+    // rigs(ctx, cuts, seams, duration) → Plan.rigs; sets cut.rig (the run index). A run's rig and rig.curve come from
+    // its first cut (pins cut > line > work; seed hash32('rig', look.seed, first cut key, its cut salt)); amp =
+    // q2(0.4 + 0.6·A); the last chorus run gets amp ×1.25 (≤ 1.3) and, unless rig.curve is pinned, the curve slowBloom;
+    // other runs take the preset's own curve ('linear' for none and custom rigs). blend = the window of a transition
+    // (not the hard cut) into the run's first cut, else null. t0 = the first cut's a (0 for the first run), t1 = the
+    // next run's t0 (the duration for the last).
+    function rigs(ctx, cuts, seams, duration) {
+      const A = ctx.look.amounts.camera;
+      if (!cuts.length) {
+        return [{ blend: null, cuts: [], curve: { from: 'auto', v: 'linear' }, key: 'k', rig: { from: 'auto', v: NONE }, t0: 0,
+          t1: N.q6(Math.max(0, duration)) }];
+      }
+      const runs = splitRuns(ctx, cuts);
+      const lastChorus = lastChorusOf(cuts, runs);
+      const out = [];
+      let avoid = null;
+      runs.forEach((run, r) => {
+        const first = cuts[run.idx[0]];
+        const row = rigRow(first);
+        const trace = tracing(ctx, first.key, 'rig');
+        const seed = H.hash32('rig', ctx.doc.look.seed, first.key, CH.saltOf(ctx.salts, 'cut/' + first.key));
+        const chorusEnd = r === lastChorus;
+        let d, win;
+        if (run.pin) {
+          d = { from: run.pin.from, by: run.pin.by, v: run.pin.v };
+          win = typeof d.v === 'string' ? d.v : null;
+          if (trace) {
+            const shadow = autoRig(ctx, row, seed, avoid, false);
+            Object.assign(trace, { kind: 'rig', stage: 'pin', pin: run.pin, candidates: shadow.candidates });
+          }
+        } else if (!(A >= RIG_OFF)) {
+          d = { from: 'auto', v: NONE };
+          win = NONE;
+          if (trace) {
+            Object.assign(trace, { kind: 'rig', stage: 'rule', rule: 'none-camera', why: [{ code: 'cam.amount', params: { x: A } }],
+              candidates: SHOT.RIG_KEYS.concat([NONE]).sort().map((key) => ({ key, w: 0, masked: key === NONE ? null : 'gate' })) });
+          }
+        } else {
+          const got = autoRig(ctx, row, seed, avoid, !!trace);
+          d = { from: 'auto', v: got.v };
+          win = got.win;
+          if (trace) {
+            const why = got.why.slice();
+            if (chorusEnd && got.v !== NONE) why.push({ code: 'rig.lastChorus', params: {} });
+            Object.assign(trace, { kind: 'rig', stage: 'auto', why, candidates: got.candidates });
+          }
+        }
+        avoid = win && win !== NONE ? win : null;
+        const amp = q2(Math.min(AMP_MAX, q2(0.4 + 0.6 * A) * (chorusEnd ? LAST_CHORUS_AMP : 1)));
+        const rig = withAmp(d, amp);
+        if (trace) trace.decision = rig;
+        const curve = rigCurve(ctx, first, rig.v, chorusEnd);
+        for (const j of run.idx) cuts[j].rig = r;
+        const s = first.seamIn >= 0 && seams && seams[first.seamIn] ? seams[first.seamIn] : null;
+        out.push({ blend: r > 0 && s ? { t0: N.q6(s.at - s.dur / 2), t1: N.q6(s.at + s.dur / 2) } : null,
+          cuts: run.idx.map((j) => cuts[j].key), curve, key: 'k' + first.key, rig, t0: r === 0 ? 0 : N.q6(Math.max(0, first.a)),
+          t1: 0 });
+      });
+      out.forEach((g, k) => { g.t1 = k + 1 < out.length ? out[k + 1].t0 : N.q6(Math.max(duration, g.t0)); });
+      return out;
+    }
+
+    // rig.curve of a run: its pin at the first cut, else slowBloom on the last chorus, else the preset's own curve.
+    function rigCurve(ctx, first, v, chorusEnd) {
+      const trace = tracing(ctx, first.key, 'rig.curve');
+      const pin = PA.pinned(ctx.ix, 'rig.curve')
+        ? PA.resolvePin(ctx.ix, atOf(first), 'rig.curve', PA.acceptSpec(SLOT_SPECS['rig.curve']), ctx.warn) : null;
+      let d, why;
+      if (pin) d = { by: pin.by, from: pin.from, v: pin.v };
+      else if (chorusEnd && v !== NONE) {
+        d = { from: 'auto', v: 'slowBloom' };
+        why = [{ code: 'rig.lastChorus', params: {} }];
+      } else {
+        d = { from: 'auto', v: typeof v === 'string' && SHOT.RIGS[v] ? SHOT.RIGS[v].curve : 'linear' };
+        why = [{ code: 'rule', params: { rule: 'rig.curve' } }];
+      }
+      if (trace) Object.assign(trace, { kind: 'rig.curve', stage: pin ? 'pin' : 'auto', pin, why: why || null, decision: d });
+      return d;
+    }
+
+    return {
+      SLOT_SPECS, CAM_SLOTS, SHOT_POOL, decideSpeed, applySpeed, decideCamera, shotWeights, carry, rigs,
+      FACTORS: Object.freeze({ AMOUNT_OFF, SHORT_CUT, SHOT_RECENT, SHOT_NEAR, SHOT_ECHO, RIG_OFF, LAST_CHORUS_AMP, AMP_MAX }),
+    };
+  });
 /* 文字PVメーカー v2 — original work. The work-level look: season, mood, theme, amounts, palette, faces, texture (DESIGN §4.16.3). */
 MV.def('planner/look', ['core/hash', 'core/color', 'core/num', 'core/schema', 'core/pins', 'core/lyrics', 'audio/digest',
   'engine/text/faces', 'planner/choose', 'planner/params'], (H, C, N, S, PINS, LY, DG, FACES, CH, PA) => {
@@ -15991,9 +16729,9 @@ MV.def('planner/look', ['core/hash', 'core/color', 'core/num', 'core/schema', 'c
     moodWeight, moodFacts, autoMood, moodPool, palette, faces, gateAmounts, WORK_AT, THEME_DEFAULT_WEIGHT,
   };
 });
-/* 文字PVメーカー v2 — original work. Casting: every cut slot in the FROZEN order, from pins, rules or the chooser (DESIGN §4.16.2, §3.4.3). */
+/* 文字PVメーカー v2 — original work. Casting: every cut slot in the FROZEN order, from pins, rules or the chooser (DESIGN §4.16.2, §3.4.3; DESIGN_2_1 §3.9, §4.9). */
 MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 'core/pins', 'planner/choose',
-  'planner/params', 'planner/look'], (S, REG, R, N, PINS, CH, PA, LK) => {
+  'planner/params', 'planner/look', 'planner/camera'], (S, REG, R, N, PINS, CH, PA, LK, CAM) => {
     'use strict';
 
     const LIST_KINDS = Object.freeze(['ornament', 'filter']);
@@ -16006,8 +16744,9 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     const FACE_WEIGHTS = Object.freeze({ display: 3, serif: 2, body: 1 });
     const AVOID_REPEAT = new Set(['arrange', 'arrive']);   // §8.2: no identical adjacent arrange/arrive (see choose.pick)
 
-    // Specs of the non-part cut slots (§3.4.3); pins are coerced through them and planner/fields shows them.
-    const SLOT_SPECS = Object.freeze({
+    // Specs of the non-part cut slots (§3.4.3, and the v2.1 camera slots of planner/camera); pins are coerced through
+    // them and planner/fields shows them.
+    const SLOT_SPECS = Object.freeze(Object.assign({
       orient: { type: 'enum', of: ['h', 'v'] },
       'text.face': { type: 'face' },
       'text.scale': { type: 'num', min: 0.5, max: 2, step: 0.01 },
@@ -16018,34 +16757,98 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       'el.nudge': { type: 'nudge' },
       'el.fill': { type: 'ink' },
       'el.hide': { type: 'bool' },
-    });
+    }, CAM.SLOT_SPECS));
+    const SEASON_SPEC = LK.LOOK_SPECS.season;
+    const AVOID_SPEC = Object.freeze({ type: 'partRefs' });
     const NUDGE_LIMITS = Object.freeze({ dx: [-4000, 4000, 0], dy: [-4000, 4000, 0], rot: [-360, 360, 0], s: [0.1, 10, 1] });
+
+    // --- line conditions: season and avoid (DESIGN_2_1 §4.9) ------------------------------------------------------
+
+    // The conditions a cut's automatic picks work under: the effective season (the line pin 'season', rank pin:line
+    // only, else the look's season; special cuts have no line) and the line's avoid list ('line/<id>:avoid', line only),
+    // made once per plan and line. { season, pinned, deny: { kind: keys } | null, n: { kind: count }, id, line, warnings }.
+    // A line's pin warnings are kept on it and replayed wherever it is read (the warner reports each once), so a cast
+    // taken from the cache reports them like a fresh one.
+    function lineCond(ctx, lineId) {
+      if (!lineId) return workCond(ctx);
+      const seen = ctx.lineConds || (ctx.lineConds = new Map());
+      let c = seen.get(lineId);
+      if (c === undefined) {
+        const warnings = [];
+        const warn = (w) => { warnings.push(w); };
+        const at = { cutKey: null, pinCutKey: null, lineId };
+        const lineOnly = (spec) => (v, rank) => {
+          if (rank !== 'pin:line') return { na: true };
+          const x = S.coerce(spec, v);
+          return x === undefined ? { bad: true } : { v: x };
+        };
+        const sp = PA.pinned(ctx.ix, 'season') ? PA.resolvePin(ctx.ix, at, 'season', lineOnly(SEASON_SPEC), warn) : null;
+        const ap = PA.pinned(ctx.ix, 'avoid') ? PA.resolvePin(ctx.ix, at, 'avoid', lineOnly(AVOID_SPEC), warn) : null;
+        const refs = ap ? ap.v : [];
+        if (!sp && !refs.length && !warnings.length) c = workCond(ctx);
+        else {
+          const deny = refs.length ? {} : null;
+          const n = {};
+          for (const ref of refs) {
+            const dot = ref.indexOf('.');
+            const kind = ref.slice(0, dot);
+            (deny[kind] || (deny[kind] = [])).push(ref.slice(dot + 1));
+            n[kind] = (n[kind] || 0) + 1;
+          }
+          const season = sp ? sp.v : ctx.look.season;
+          c = { season, pinned: !!sp, deny, n, id: (sp ? season + '!' : season) + (refs.length ? '|a:' + refs.join(',') : ''),
+            line: lineId, warnings };
+        }
+        seen.set(lineId, c);
+      }
+      for (const w of c.warnings) ctx.warn(w);
+      return c;
+    }
+
+    function workCond(ctx) {
+      return ctx.workCond || (ctx.workCond = { season: ctx.look.season, pinned: false, deny: null, n: {}, id: '', line: null,
+        warnings: [] });
+    }
 
     // --- pools and part pins -----------------------------------------------------------------------------------
 
-    // registry.pool, cached per plan: season, filters and amounts are fixed for one plan.
+    // registry.pool, cached per plan: filters and amounts are fixed for one plan, the season and avoid list per line.
     function poolOf(ctx, kind, o) {
       const sub = (o.role || '') + '|' + (o.orient || '') + '|' + (o.script || '') + '|' + (o.aspect || '');
-      return poolBy(ctx, kind, sub, o.role, o.orient, o.script, o.aspect, o.scope);
+      return poolBy(ctx, kind, sub, o.role, o.orient, o.script, o.aspect, o.scope, o.cond);
     }
 
-    // The pool under kind and `sub` (role, orientation, script and aspect as text; a cut makes its text once). Gates
-    // read the amounts as the backdrop allows them (planner/look gateAmounts). A cut's screen effects never take the
-    // work texture again (it already runs over the whole video: risoPink's dotScreen texture plus a dotScreen effect
-    // doubled the dots); a pin still can.
-    function poolBy(ctx, kind, sub, role, orient, script, aspect, scope) {
+    function poolBy(ctx, kind, sub, role, orient, script, aspect, scope, cond) {
+      return poolEntry(ctx, kind, sub, role, orient, script, aspect, scope, cond).keys;
+    }
+
+    // The pool under kind and `sub` (role, orientation, script and aspect as text; a cut makes its text once) and the
+    // line conditions: { keys, relaxed }. Gates read the amounts as the backdrop allows them (planner/look gateAmounts).
+    // A cut's screen effects never take the work texture again (it already runs over the whole video: risoPink's
+    // dotScreen texture plus a dotScreen effect doubled the dots); a pin still can. The line's avoid list is added to
+    // the kind's deny filter; when that would empty a pool that is not empty without it, the avoid list is relaxed for
+    // that kind (relaxed: the chooser reports avoid-empty).
+    function poolEntry(ctx, kind, sub, role, orient, script, aspect, scope, cond) {
+      const c = cond || workCond(ctx);
       let byKind = ctx.pools.get(kind);
       if (!byKind) { byKind = new Map(); ctx.pools.set(kind, byKind); }
-      const id = scope ? sub + '|' + scope : sub;
-      let keys = byKind.get(id);
-      if (!keys) {
-        keys = ctx.registry.pool(kind, { role, orient, script, aspect, scope, season: ctx.look.season, filters: ctx.doc.filters,
+      const id = (scope ? sub + '|' + scope : sub) + (c.id ? '|' + c.id : '');
+      let entry = byKind.get(id);
+      if (!entry) {
+        let keys = ctx.registry.pool(kind, { role, orient, script, aspect, scope, season: c.season, filters: ctx.doc.filters,
           amounts: LK.gateAmounts(ctx.look.amounts, ctx.doc.look.backdrop, kind) });
         const texture = kind === 'filter' && ctx.look.plan && ctx.look.plan.texture ? ctx.look.plan.texture.v : null;
         if (texture && keys.includes(texture)) keys = keys.filter((k) => k !== texture);
-        byKind.set(id, keys);
+        let relaxed = false;
+        const deny = c.deny ? c.deny[kind] : null;
+        if (deny && keys.length) {
+          const kept = keys.filter((k) => !deny.includes(k));
+          if (kept.length) keys = kept; else relaxed = true;
+        }
+        entry = { keys, relaxed };
+        byKind.set(id, entry);
       }
-      return keys;
+      return entry;
     }
 
     function serves(ctx, kind, key, role) {
@@ -16080,12 +16883,14 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       return !!f && (Array.isArray(f.only) || Array.isArray(f.deny));
     }
 
-    // Pins win over filters and the season gate, with a warning (§3.8).
-    function pinWarnings(ctx, kind, key, pin) {
-      if (key === 'none') return;
+    // Pins win over filters and the season gate, with a warning (§3.8). The season is the cut's effective season
+    // (cond, DESIGN_2_1 §4.9); a pinned part on the line's avoid list is used without a warning (pins still win).
+    function pinWarnings(ctx, kind, key, pin, cond) {
+      if (key === 'none' || typeof key !== 'string') return;
       if (!filterAllows(ctx.doc.filters, kind, key)) ctx.warn({ code: 'pin-filtered', path: pin.at });
       const def = ctx.registry.get(kind, key);
-      if (def && def.season && ctx.look.season !== 'any' && def.season !== ctx.look.season) {
+      const season = (cond || workCond(ctx)).season;
+      if (def && def.season && season !== 'any' && def.season !== season) {
         ctx.warn({ code: 'pin-off-season', path: pin.at });
       }
     }
@@ -16093,25 +16898,33 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     // --- the chooser with its fallbacks (§4.16.4, §3.8) ---------------------------------------------------------
 
     // chooseAuto(ctx, req) → { v, from, stage, base, ref, win } (base / ref: the natural and reference picks, see
-    // createHistory; win: the winner before req.avoid, which v differs from only when the winner was avoided). req = { kind, slot, path, feat, role, orient, script, scope, chosen, seed, recent, ref, echo,
-    // avoid, list, orNone, cutKey, trace, silent }.
+    // createHistory; win: the winner before req.avoid, which v differs from only when the winner was avoided).
+    // req = { kind, slot, path, feat, role, orient, script, scope, chosen, seed, recent, ref, echo, avoid, list, orNone,
+    // cutKey, trace, silent, cond (the line conditions of lineCond; default the work's), noMedia (derived media grounds
+    // weigh 0 here, DESIGN_2_1 §11.5.9) }.
     // Stages (§4.16.4, §3.8): the full weights; the same pool without traitFit and fits; the pool without the text
     // traits (orient, script, aspect); then the kind's fallback — or 'none' for a list slot whose fallback does not
     // serve the cut's role, and for atmos (orNone). pool-empty is reported on lyric cuts, and elsewhere only when the
     // fallback itself is outside the user's filter (a seam filter of just the hard cut is fully honoured by the
-    // fallback). silent: no warnings (explain's alternatives, the natural pass).
+    // fallback). A pick from a pool whose avoid list had to be relaxed reports avoid-empty. silent: no warnings
+    // (explain's alternatives, the natural pass).
     function chooseAuto(ctx, req) {
       const trace = req.trace || null;
+      const cond = req.cond || workCond(ctx);
       const ask = {
         kind: req.kind, keys: null, noFit: false, trace: null, feat: req.feat, chosen: req.chosen, seed: req.seed,
         variety: ctx.look.variety, recent: req.recent, ref: req.ref || null, echo: req.echo,
-        moodFilter: req.kind === 'filter', avoid: req.avoid || null,
+        moodFilter: req.kind === 'filter', avoid: req.avoid || null, season: cond.season, seasonPinned: cond.pinned,
+        noMedia: !!req.noMedia,
       };
-      const full = req.poolId !== undefined
-        ? poolBy(ctx, req.kind, req.poolId, req.role, req.orient, req.script, ctx.aspect, req.scope)
-        : poolOf(ctx, req.kind, { role: req.role, orient: req.orient, script: req.script, aspect: ctx.aspect, scope: req.scope });
+      const sub = req.poolId !== undefined ? req.poolId
+        : (req.role || '') + '|' + (req.orient || '') + '|' + (req.script || '') + '|' + (ctx.aspect || '');
+      const full = poolEntry(ctx, req.kind, sub, req.role, req.orient, req.script, ctx.aspect, req.scope, cond);
+      if (trace) trace.cond = cond;
       for (let stage = 0; stage < 3; stage++) {
-        const keys = stage < 2 ? full : poolOf(ctx, req.kind, { role: req.role, scope: req.scope });
+        const entry = stage < 2 ? full
+          : poolEntry(ctx, req.kind, (req.role || '') + '|||', req.role, undefined, undefined, undefined, req.scope, cond);
+        const keys = entry.keys;
         if (!keys.length) continue;
         ask.keys = keys;
         ask.noFit = stage > 0;
@@ -16120,9 +16933,12 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
         const name = stage === 0 ? 'auto' : 'relaxed';
         if (trace) {
           Object.assign(trace, { keys, candidates: ask.trace, noFit: ask.noFit, stage: name,
-            avoided: hit ? hit.avoided || null : null });
+            avoided: hit ? hit.avoided || null : null, avoidRelaxed: entry.relaxed });
         }
-        if (hit) return { v: hit.v, from: 'auto', stage: name, base: hit.base, ref: hit.ref, win: hit.avoided || hit.v };
+        if (hit) {
+          if (entry.relaxed && !req.silent) ctx.warn({ code: 'avoid-empty', path: 'line/' + cond.line + ':avoid', line: cond.line });
+          return { v: hit.v, from: 'auto', stage: name, base: hit.base, ref: hit.ref, win: hit.avoided || hit.v };
+        }
       }
       if (req.orNone) {
         if (trace) trace.stage = 'none';
@@ -16228,8 +17044,10 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       return g;
     }
 
+    // A slot whose value takes part in recency and echoes: part choices, and the preset shots of cam.shot (DESIGN_2_1
+    // §3.9; a custom shot object is not a choice).
     function isChoice(slot, v) {
-      return typeof v === 'string' && v !== 'none' && slot.indexOf('.') < 0 && slot !== 'orient';
+      return typeof v === 'string' && v !== 'none' && ((slot.indexOf('.') < 0 && slot !== 'orient') || slot === 'cam.shot');
     }
 
     function addTo(map, g, v) {
@@ -16336,7 +17154,7 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
         : acceptPart(ctx, kind, cut.role, { none: list, scope: kind === 'ornament' ? 'cut' : null }), ctx.warn);
       let d;
       if (pin) {
-        pinWarnings(ctx, kind, pin.v, pin);
+        pinWarnings(ctx, kind, pin.v, pin, st.cond);
         d = pinDecision(pin);
         if (trace) Object.assign(shadow(st, kind, slot, seed, list, trace), { kind, stage: 'pin', pin });
       } else if (o.force) {
@@ -16351,7 +17169,7 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
         const got = chooseAuto(ctx, {
           kind, slot, path: 'cut/' + cut.key + ':' + slot, feat: cut.feat, role: cut.role, orient: st.chosen.orient,
           script: cut.feat.script, scope: kind === 'ornament' ? 'cut' : null, chosen: st.chosen, seed, recent, echo,
-          list, cutKey: cut.key, trace, silent: st.natural, ref, poolId: poolIdOf(st),
+          list, cutKey: cut.key, trace, silent: st.natural, ref, poolId: poolIdOf(st), cond: st.cond,
           avoid: AVOID_REPEAT.has(kind) && !st.natural ? st.hist.previous(slot) : null,
         });
         d = { v: got.v, from: got.from };
@@ -16362,10 +17180,11 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       if (d.v !== 'none' && !st.natural) {
         const def = ctx.registry.get(kind, d.v);
         const { p, pfrom } = PA.resolveParams(def, kind, idx, at, ctx.ix, {
-          registry: ctx.registry, seed, salts: ctx.salts, warn: ctx.warn, f: cut.feat, look: lookAx(ctx),
+          registry: ctx.registry, seed, salts: ctx.salts, warn: ctx.warn, f: cut.feat, look: lookAx(ctx), media: ctx.media,
         });
         d.p = p;
         if (pfrom) d.pfrom = pfrom;
+        if (MOTION_KINDS.includes(kind)) CAM.applySpeed(st, kind, d);
       }
       if (trace) trace.decision = d;
       setDecision(st, slot, d);
@@ -16380,7 +17199,7 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       const echo = st.hist.echo(cut.feat.repeatOf, slot);
       chooseAuto(ctx, { kind, slot, path: 'cut/' + cut.key + ':' + slot, feat: cut.feat, role: cut.role,
         orient: st.chosen.orient, script: cut.feat.script, scope: kind === 'ornament' ? 'cut' : null, chosen: st.chosen,
-        seed, recent, echo, list, cutKey: cut.key, trace, silent: true });
+        seed, recent, echo, list, cutKey: cut.key, trace, silent: true, cond: st.cond });
       return Object.assign(trace, { recent, echo });
     }
 
@@ -16393,7 +17212,9 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       return out;
     }
 
-    // A non-part slot: pin (coerced through its spec, plus an optional applicability check) or the auto value.
+    // A non-part slot: pin (coerced through its spec, plus an optional applicability check) or the auto value,
+    // autoFn(seed, withWhy). The auto may return `rule` (its rule name) and, when asked (withWhy: explain is tracing
+    // this slot), `why` (explain's reasons, planner/camera); both go to the trace, never into the Plan.
     function decideValue(st, slot, spec, autoFn, applies) {
       const { ctx, at } = st;
       const trace = tracing(st, slot);
@@ -16402,12 +17223,20 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
         if (c === undefined) return { bad: true };
         return applies && !applies(c) ? { na: true } : { v: c };
       }, ctx.warn);
-      const d = pin ? pinDecision(pin) : autoFn(seedOf(st, slot));
+      const got = pin ? pinDecision(pin) : autoFn(seedOf(st, slot), !!trace);
+      const d = got.rule !== undefined || got.why !== undefined ? withoutTrace(got) : got;
       if (trace) Object.assign(trace, { stage: pin ? 'pin' : d.from === 'rule' ? 'rule' : 'auto', pin, decision: d,
-        rule: d.from === 'rule' ? d.rule || slot : slot });
-      if (d.rule) delete d.rule;
+        rule: d.from === 'rule' ? got.rule || slot : slot, why: pin ? null : got.why || null });
       setDecision(st, slot, d);
       return d;
+    }
+
+    // A decision without the trace-only fields rule and why. A new object rather than `delete`, which would leave the
+    // decision a slow (dictionary) object for everything that reads it later: encoding, freezing, copying.
+    function withoutTrace(d) {
+      const out = {};
+      for (const k of Object.keys(d)) if (k !== 'rule' && k !== 'why') out[k] = d[k];
+      return out;
     }
 
     // orient (§4.16.4): 'h' when the text cannot stand vertically; else 'v' with probability
@@ -16533,25 +17362,29 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       return els;
     }
 
-    // The slots of one cut in the FROZEN order (§4.16.2): orient → arrange → text.* → arrive → dwell → depart →
-    // ornament.count → ornament#i → lens → filter.count → filter#i. natural = the neighbours' view (no recency, no
-    // runner-up rule, no parameters).
+    // The slots of one cut in the FROZEN order (§4.16.2, DESIGN_2_1 §3.9): orient → arrange → text.* → motion.speed →
+    // arrive → dwell → depart → ornament.count → ornament#i → lens → cam.shot → cam.zoom → cam.curve → cam.follow →
+    // filter.count → filter#i. Every slot keeps its own stream, so the camera slots change no part choice. natural =
+    // the neighbours' view (no recency, no runner-up rule, no parameters). st.decide = decideValue, for planner/camera.
     function castSlots(ctx, cut, hist, natural) {
       const st = {
         ctx, cut, hist, natural, slots: {}, chosen: {}, base: {}, ref: {},
         at: { cutKey: cut.key, pinCutKey: cut.pinKey, lineId: cut.line },
         cutSeed: CH.cutSeed(ctx.doc.look.seed, cut.key, cut.line, ctx.salts), slotPrefix: 0, poolKey: null,
+        cond: lineCond(ctx, cut.line), decide: decideValue,
       };
       st.slotPrefix = CH.slotPrefix(st.cutSeed);
       decideOrient(st);
       const arrange = decidePart(st, 'arrange', null);
       decideText(st);
+      CAM.decideSpeed(st);
       const own = ctx.registry.get('arrange', arrange.v).motion === 'own';
       for (const kind of MOTION_KINDS) {
         decidePart(st, kind, null, own ? { force: ctx.registry.fallback(kind), rule: 'motion-own' } : null);
       }
       decideList(st, 'ornament');
       decidePart(st, 'lens', null);
+      CAM.decideCamera(st);
       decideList(st, 'filter');
       return st;
     }
@@ -16657,11 +17490,23 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     // recency reads (createHistory rowsRead). castInputs records them; an entry is reused when they compare equal
     // (sameInputs). Entries live for the last two plans. Cached decisions are frozen, and a plan gets its own copy of
     // each slots map (tracks may replace entries).
+    // The cache is keyed by the base registry (registry.base ?? registry, DESIGN_2_1 §3.9), then by registry.version
+    // (the last 4 versions): an effective registry is a new object after every material edit, and an edit that keeps
+    // what the planner reads keeps the version, so the casts stay warm (the fingerprints still see the new material
+    // hash, planner/plan matTerms).
     const casts = new WeakMap();
+    const VERSIONS_KEPT = 4;
     let nextEntryId = 1;
     function castCache(registry) {
-      let c = casts.get(registry);
-      if (!c) { c = { prev: new Map(), cur: new Map() }; casts.set(registry, c); }
+      const root = registry.base || registry;
+      let byVersion = casts.get(root);
+      if (!byVersion) { byVersion = new Map(); casts.set(root, byVersion); }
+      let c = byVersion.get(registry.version);
+      if (!c) {
+        c = { prev: new Map(), cur: new Map() };
+        byVersion.set(registry.version, c);
+        if (byVersion.size > VERSIONS_KEPT) byVersion.delete(byVersion.keys().next().value);
+      }
       return c;
     }
 
@@ -16755,12 +17600,17 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       };
     }
 
-    // Decisions hold primitives, p and pfrom (flat maps of primitives), so three freezes cover one.
+    // Decisions hold a value, p and pfrom; values and parameters may be objects since v2.1 (curves, shots), which are
+    // canonical and already frozen when they come from core/curve or core/shot, so deepFreeze stops at them.
     function freezeSlots(slots) {
       for (const slot of Object.keys(slots)) {
         const d = slots[slot];
-        if (d.p) Object.freeze(d.p);
+        if (d.p) {
+          const p = Object.freeze(d.p);
+          for (const k in p) { const x = p[k]; if (x !== null && typeof x === 'object') deepFreeze(x); }
+        }
         if (d.pfrom) Object.freeze(d.pfrom);
+        if (d.v !== null && typeof d.v === 'object') deepFreeze(d.v);
         Object.freeze(d);
       }
       return Object.freeze(slots);
@@ -16776,7 +17626,8 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
 
     return {
       SLOT_SPECS, LIST_KINDS, MOTION_KINDS, castCut, createHistory, chooseAuto, poolOf, acceptPart, pinWarnings, serves,
-      filterAllows, lookAx, lockFreeCtx, lockFreeIndex, beginCasts, castKeys, intern, deepFreeze, historyRow,
+      filterAllows, lookAx, lockFreeCtx, lockFreeIndex, beginCasts, castKeys, intern, deepFreeze, historyRow, lineCond,
+      isChoice,
     };
   });
 /* 文字PVメーカー v2 — original work. The cutter: lines → cut skeletons, special cuts, windows, pin reattachment (DESIGN §4.16.5). */
@@ -16794,13 +17645,16 @@ MV.def('planner/segment', ['core/script', 'core/num', 'core/pins', 'core/rng', '
   const INTRO_ROOM = 3, OUTRO_ROOM = 3, GAP_MIN = 2.8;
   const SPECIAL_ROLES = new Set(['title', 'interlude', 'outro']);
 
-  // Specs of the line- and cut-scope timing slots (§3.4.2, §3.4.3), shown by planner/fields.
+  // Specs of the line- and cut-scope timing slots (§3.4.2, §3.4.3) and the v2.1 line slots season and avoid
+  // (DESIGN_2_1 §2.3), shown by planner/fields.
   const LINE_SPECS = Object.freeze({
     start: { type: 'num', min: 0, max: 36000, step: 0.001, unit: 's' },
     end: { type: 'num', min: 0, max: 36000, step: 0.001, unit: 's' },
     t0: { type: 'num', min: 0, max: 36000, step: 0.001, unit: 's' },
     lang: { type: 'enum', of: ['ja', 'en', 'zhHant', 'zhHans', 'ko'] },
     split: { type: 'split' },
+    season: { type: 'enum', of: ['any', 'none', 'spring', 'summer', 'autumn', 'winter'] },
+    avoid: { type: 'partRefs' },
   });
 
   const q6 = N.q6;
@@ -17188,17 +18042,19 @@ MV.def('planner/segment', ['core/script', 'core/num', 'core/pins', 'core/rng', '
 
   return { cutAll, autoStarts, bestSplit, weightsOf, pieceText, LINE_SPECS, BASE, SPECIAL_ROLES, windows };
 });
-/* 文字PVメーカー v2 — original work. Tracks: background segments, seams (decided after grounds), rule overrides, impulses (DESIGN §4.16.6). */
-MV.def('planner/tracks', ['core/rng', 'core/num', 'planner/choose', 'planner/params', 'planner/cast'],
-  (R, N, CH, PA, CA) => {
+/* 文字PVメーカー v2 — original work. Tracks: background segments, seams (decided after grounds), rule overrides, impulses (DESIGN §4.16.6; DESIGN_2_1 §4.9, §11.2.6, §11.5.9). */
+MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose', 'planner/params', 'planner/cast',
+  'planner/camera'], (R, N, P, CH, PA, CA, CAM) => {
     'use strict';
 
     const SPECIAL = new Set(['title', 'interlude', 'outro']);
     const WORLD_CHANCE = 0.7;
     const ATMOS_CHANCE = 0.6;
+    const LINE_SEASON_ATMOS = 0.85;  // at least this atmos chance where a line pins its own season (DESIGN_2_1 §4.9)
     const SEAM_SHARE = 0.4;         // a seam takes at most 40 % of the shorter of its two cuts
     const WORLD_MAX = 0.8;          // world seams are clamped to 0.8 s (§7.4)
     const GAP_BREAK = 1.5;
+    const MEDIA_MIN_SEGMENT = 3;    // seconds: shorter segments never take a derived media ground (§11.5.9)
 
     function atOf(cut) { return { cutKey: cut.key, pinCutKey: cut.pinKey, lineId: cut.line }; }
 
@@ -17242,10 +18098,11 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'planner/choose', 'planner/par
       return { v: d.v, base: (got && got.base) || d.v, ref: (got && got.ref) || d.v, win: (got && got.win) || d.v };
     }
 
-    function params(ctx, def, slotKind, at, seed, feat, partKind) {
+    // coverage: the segment's text coverage, for the depth of a background photo (PA.textCoverage, §11.9.2).
+    function params(ctx, def, slotKind, at, seed, feat, partKind, coverage) {
       return PA.resolveParams(def, slotKind, null, at, ctx.ix, {
         registry: ctx.registry, seed, salts: ctx.salts, warn: ctx.warn, f: feat, look: CA.lookAx(ctx),
-        partKind: partKind || slotKind,
+        partKind: partKind || slotKind, media: ctx.media, coverage: coverage || 0,
       });
     }
 
@@ -17293,7 +18150,11 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'planner/choose', 'planner/par
 
     // Segments of consecutive cuts. The resolved ground pin (gp) and atmos pin (ap) of each cut split them like
     // §4.16.6 says for the ground: a new segment starts where either differs from the previous cut's, so a pin on any
-    // cut (or line) applies to exactly the cuts it covers; with neither pinned, breakScore decides.
+    // cut (or line) applies to exactly the cuts it covers; with neither pinned, breakScore decides. DESIGN_2_1 adds
+    // two more breaks: where the effective season of the cut differs from the previous cut's (only line season pins
+    // make them differ, §4.9), and where the resolved value of a media param of the pinned ground or atmos part
+    // changes (compared by string, §11.2.6), so two lines pinned to one photo part with different photos each show
+    // their own.
     function splitSegments(ctx, cuts) {
       const L = Math.round(N.lerp(8, 1, ctx.look.amounts.groundSwitch));
       const segs = [];
@@ -17302,12 +18163,47 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'planner/choose', 'planner/par
         const pin = groundPin(ctx, cut, ctx.warn);
         const apin = atmosPin(ctx, cut, ctx.warn);
         const gp = pin ? pin.v : null, ap = apin ? apin.v : null;
-        const fresh = !cur || gp !== cur.gp || ap !== cur.ap ||
+        const season = CA.lineCond(ctx, cut.line).season;
+        const src = gp === null && ap === null ? '' : mediaSource(ctx, cut, 'ground', gp) + '|' + mediaSource(ctx, cut, 'atmos', ap);
+        const fresh = !cur || gp !== cur.gp || ap !== cur.ap || season !== cur.season || src !== cur.src ||
           (gp === null && breakScore(ctx, cuts[j - 1], cut, L) >= 1);
-        if (fresh) { cur = { gp, ap, pin, apin, idx: [] }; segs.push(cur); }
+        if (fresh) { cur = { gp, ap, pin, apin, season, src, idx: [] }; segs.push(cur); }
         cur.idx.push(j);
       });
       return segs;
+    }
+
+    // The media params of a part as [{ name, spec, slot }] (slot paths at `slotKind`), made once per definition.
+    const mediaParamCache = new WeakMap();
+    function mediaParams(ctx, slotKind, key) {
+      const partKind = slotKind === 'atmos' ? 'ornament' : slotKind;
+      const def = ctx.registry.get(partKind, key);
+      if (!def) return NO_PARAMS;
+      let byKind = mediaParamCache.get(def);
+      if (!byKind) { byKind = new Map(); mediaParamCache.set(def, byKind); }
+      let list = byKind.get(slotKind);
+      if (!list) {
+        list = (ctx.registry.params(partKind, key) || []).filter((x) => x.spec && x.spec.type === 'media')
+          .map((x) => ({ name: x.name, spec: x.spec, slot: P.slotParamPath(slotKind, null, key, x.name, x.shared),
+            accept: PA.acceptSpec(x.spec) }));
+        byKind.set(slotKind, list);
+      }
+      return list;
+    }
+    const NO_PARAMS = Object.freeze([]);
+
+    // The resolved values of the media params of the pinned part `key` at a cut, as one string ('' without any).
+    function mediaSource(ctx, cut, slotKind, key) {
+      if (key === null || key === 'none') return '';
+      const list = mediaParams(ctx, slotKind, key);
+      if (!list.length) return '';
+      let out = '';
+      for (const x of list) {
+        const pin = PA.resolvePin(ctx.ix, atOf(cut), x.slot, x.accept, null);
+        const v = pin ? pin.v : x.spec.auto && typeof x.spec.auto.value === 'string' ? x.spec.auto.value : '';
+        out += x.name + '=' + v + ';';
+      }
+      return out;
     }
 
     // A decision of the chooser for a segment or boundary: { decision, entry } (entry = its history entry).
@@ -17339,42 +18235,49 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'planner/choose', 'planner/par
       return last && last.win !== free ? last.win : null;
     }
 
-    function decideGround(ctx, seg, first, seed, history) {
+    // A segment's ground. The segment reads its first cut's line conditions (season and avoid list, DESIGN_2_1 §4.9);
+    // noMedia: derived grounds of the user's media weigh 0 here (§11.5.9); seg.coverage: its text coverage (§11.9.2).
+    function decideGround(ctx, seg, first, seed, history, noMedia) {
       const trace = tracing(ctx, first.key, 'ground');
       const rec = recentOf(ctx, 'ground', history);
+      const cond = CA.lineCond(ctx, first.line);
       const req = { kind: 'ground', slot: 'ground', path: 'cut/' + first.key + ':ground', feat: first.feat, chosen: {}, seed,
-        recent: rec.recent, ref: rec.ref, echo: null, cutKey: first.key, avoid: avoidOf(history, null) };
+        recent: rec.recent, ref: rec.ref, echo: null, cutKey: first.key, avoid: avoidOf(history, null), cond, noMedia };
       let out;
       if (seg.pin) {
-        CA.pinWarnings(ctx, 'ground', seg.pin.v, seg.pin);
+        CA.pinWarnings(ctx, 'ground', seg.pin.v, seg.pin, cond);
         out = fixed(pinDecision(seg.pin));
         if (trace) shadow(ctx, req, trace, { kind: 'ground', stage: 'pin', pin: seg.pin, recent: rec.recent, echo: null });
       } else {
-        if (trace) Object.assign(trace, { kind: 'ground', recent: rec.recent, echo: null });
+        if (trace) Object.assign(trace, { kind: 'ground', recent: rec.recent, echo: null, noMedia });
         out = chosen(ctx, req, trace);
       }
       const d = out.decision = withParams(out.decision, params(ctx, ctx.registry.get('ground', out.decision.v), 'ground',
-        atOf(first), seed, first.feat));
+        atOf(first), seed, first.feat, 'ground', seg.coverage));
       if (trace) trace.decision = d;
       return out;
     }
 
     // atmos: its pin (the segment's, see splitSegments), else with probability 0.6·amount.ornament the chooser over
-    // ornaments with scope 'run' (nothing eligible → 'none'), else 'none'.
+    // ornaments with scope 'run' (nothing eligible → 'none'), else 'none'. Where the first cut's line pins its own
+    // season the chance is at least 0.85, and run ornaments of that season weigh ×2.5 (the chooser's line season).
     function decideAtmos(ctx, seg, first, seed, history) {
       const trace = tracing(ctx, first.key, 'atmos');
       const pin = seg.apin;
+      const cond = CA.lineCond(ctx, first.line);
+      const chance = cond.pinned ? Math.max(ATMOS_CHANCE * ctx.look.amounts.ornament, LINE_SEASON_ATMOS)
+        : ATMOS_CHANCE * ctx.look.amounts.ornament;
       let out;
       if (pin) {
-        CA.pinWarnings(ctx, 'ornament', pin.v, pin);
+        CA.pinWarnings(ctx, 'ornament', pin.v, pin, cond);
         out = fixed(pinDecision(pin));
         if (trace) Object.assign(trace, { kind: 'ornament', stage: 'pin', pin });
-      } else if (R.stream(seed, 'chance').next() < ATMOS_CHANCE * ctx.look.amounts.ornament) {
+      } else if (R.stream(seed, 'chance').next() < chance) {
         const rec = recentOf(ctx, 'ornament', history);
         if (trace) Object.assign(trace, { kind: 'ornament', recent: rec.recent, echo: null });
         out = chosen(ctx, { kind: 'ornament', slot: 'atmos', path: 'cut/' + first.key + ':atmos', feat: first.feat,
           chosen: {}, seed, scope: 'run', recent: rec.recent, ref: rec.ref, echo: null, orNone: true, cutKey: first.key,
-          avoid: avoidOf(history, 'none') }, trace);
+          avoid: avoidOf(history, 'none'), cond }, trace);
       } else {
         out = fixed({ from: 'auto', v: 'none' });
         if (trace) Object.assign(trace, { kind: 'ornament', stage: 'rule', rule: 'chance' });
@@ -17408,11 +18311,14 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'planner/choose', 'planner/par
     // A segment's ground and atmos: { ground, atmos } (each { decision, entry }). They are a function of the first
     // cut's cast inputs (its pins, which also give the segment's pins, seeds, features, look) and the history entries
     // they read, so they are kept on that cut's cast entry (planner/cast) and reused while those are the same.
-    function segmentOf(ctx, seg, first, groundsSoFar, atmosSoFar) {
+    // noMedia and the text coverage are part of the memo: they depend on the segment's length and cuts, which the
+    // first cut's cast does not fix.
+    function segmentOf(ctx, seg, first, groundsSoFar, atmosSoFar, noMedia) {
       const gRead = groundsSoFar.slice(Math.max(0, groundsSoFar.length - 4));
       const aRead = atmosSoFar.slice(Math.max(0, atmosSoFar.length - 4));
       const memo = first.cast ? first.cast.segment : null;
-      if (memo && sameEntries(memo.gRead, gRead) && sameEntries(memo.aRead, aRead)) {
+      if (memo && memo.noMedia === noMedia && memo.coverage === seg.coverage && sameEntries(memo.gRead, gRead) &&
+          sameEntries(memo.aRead, aRead)) {
         for (const w of memo.warnings) ctx.warn(w);
         return memo;
       }
@@ -17422,13 +18328,13 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'planner/choose', 'planner/par
       try {
         const segSeed = CH.segSeed(ctx.doc.look.seed, first.key, ctx.salts);
         const ground = decideGround(ctx, seg, first, CH.slotSeed(segSeed, first.key, first.line, 'ground', ctx.salts),
-          groundsSoFar);
+          groundsSoFar, noMedia);
         const atmos = decideAtmos(ctx, seg, first, CH.slotSeed(segSeed, first.key, first.line, 'atmos', ctx.salts),
           atmosSoFar);
         if (first.cast) {
           CA.deepFreeze(ground.decision);
           CA.deepFreeze(atmos.decision);
-          first.cast.segment = { gRead, aRead, warnings, ground, atmos };
+          first.cast.segment = { gRead, aRead, noMedia, coverage: seg.coverage, warnings, ground, atmos };
         }
         return { ground, atmos };
       } finally {
@@ -17436,22 +18342,40 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'planner/choose', 'planner/par
       }
     }
 
-    // grounds(ctx, cuts, duration) → Plan.grounds; sets cut.ground (index).
+    // Whether the registry has derived grounds of the user's media (registry.extra[key].media, §11.5.9).
+    const mediaGroundCache = new WeakMap();
+    function hasMediaGrounds(registry) {
+      let hit = mediaGroundCache.get(registry);
+      if (hit === undefined) {
+        const extra = registry.extra || {};
+        hit = (registry.mine ? registry.mine('ground') : []).some((key) => !!(extra[key] && extra[key].media === true));
+        mediaGroundCache.set(registry, hit);
+      }
+      return hit;
+    }
+
+    // grounds(ctx, cuts, duration) → Plan.grounds; sets cut.ground (index). A segment spans [t0, t1): t0 = its first
+    // cut's a (0 for the first segment), t1 = the next segment's t0 (the duration for the last). A derived media ground
+    // is never chosen for a segment shorter than 3 s or for the title card (§11.5.9).
     function grounds(ctx, cuts, duration) {
       if (!cuts.length) return emptyGround(ctx, duration);
       const segs = splitSegments(ctx, cuts);
+      const starts = segs.map((seg, k) => (k === 0 ? 0 : N.q6(Math.max(0, cuts[seg.idx[0]].a))));
+      const media = hasMediaGrounds(ctx.registry);
       const out = [];
       const groundsSoFar = [], atmosSoFar = [];
       segs.forEach((seg, k) => {
         const first = cuts[seg.idx[0]];
-        const { ground, atmos } = segmentOf(ctx, seg, first, groundsSoFar, atmosSoFar);
+        const t1 = k + 1 < segs.length ? starts[k + 1] : N.q6(Math.max(duration, starts[k]));
+        const noMedia = media && (t1 - starts[k] < MEDIA_MIN_SEGMENT || first.role === 'title');
+        seg.coverage = PA.textCoverage(seg.idx.map((j) => cuts[j]));
+        const { ground, atmos } = segmentOf(ctx, seg, first, groundsSoFar, atmosSoFar, noMedia);
         groundsSoFar.push(ground.entry);
         atmosSoFar.push(atmos.entry);
         for (const j of seg.idx) cuts[j].ground = k;
         out.push({ atmos: atmos.decision, cuts: seg.idx.map((j) => cuts[j].key), fp: '', ground: ground.decision,
-          key: 'g' + first.key, t0: k === 0 ? 0 : N.q6(Math.max(0, first.a)), t1: 0 });
+          key: 'g' + first.key, t0: starts[k], t1 });
       });
-      out.forEach((g, k) => { g.t1 = k + 1 < out.length ? out[k + 1].t0 : N.q6(Math.max(duration, g.t0)); });
       return out;
     }
 
@@ -17460,7 +18384,7 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'planner/choose', 'planner/par
     function isPinned(d) { return !!d && typeof d.from === 'string' && d.from.startsWith('pin'); }
 
     // A seam that replaces an exit (entrance) turns the other cut's unpinned depart (arrive) into the kind's fallback,
-    // from 'rule' (§4.16.6).
+    // from 'rule' (§4.16.6). Its parameters follow the cut's motion speed like any motion's (DESIGN_2_1 §4.3).
     function replaceMotion(ctx, cut, kind) {
       const old = cut.slots[kind];
       if (isPinned(old)) return;
@@ -17468,8 +18392,10 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'planner/choose', 'planner/par
         const key = ctx.registry.fallback(kind);
         const seed = CH.slotSeed(CH.cutSeed(ctx.doc.look.seed, cut.key, cut.line, ctx.salts), cut.key, cut.line, kind,
           ctx.salts);
-        return withParams({ v: key, from: 'rule' }, PA.resolveParams(ctx.registry.get(kind, key), kind, null, atOf(cut),
-          ctx.ix, { registry: ctx.registry, seed, salts: ctx.salts, warn: null, f: cut.feat, look: CA.lookAx(ctx) }));
+        const got = PA.resolveParams(ctx.registry.get(kind, key), kind, null, atOf(cut), ctx.ix,
+          { registry: ctx.registry, seed, salts: ctx.salts, warn: null, f: cut.feat, look: CA.lookAx(ctx) });
+        const scaled = CAM.applySpeed({ ctx, slots: cut.slots }, kind, { v: key, p: got.p, pfrom: got.pfrom || undefined });
+        return withParams({ v: key, from: 'rule' }, { p: scaled.p, pfrom: scaled.pfrom || null });
       };
       // The same cast gives the same decision, kept on the cast's cache entry and reused with it across plans.
       let d;
@@ -17493,15 +18419,17 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'planner/choose', 'planner/par
       const world = A.ground !== B.ground;
       const pin = PA.resolvePin(ctx.ix, at, 'seam', CA.acceptPart(ctx, 'seam', null, { checkRole: false }), ctx.warn);
       const rec = recentOf(ctx, 'seam', history);
+      // The receiving cut's line conditions (season, avoid list; DESIGN_2_1 §4.9).
+      const cond = CA.lineCond(ctx, B.line);
       // A transition does not repeat the one into the previous cut while another candidate weighs > 0 (avoidOf; the
       // runner-up may be the hard cut). Hard cuts repeat freely.
       const req = { kind: 'seam', slot: 'seam', path: 'cut/' + B.key + ':seam', feat: B.feat, chosen: {}, seed,
         scope: world ? 'world' : 'text', recent: rec.recent, ref: rec.ref, echo: null, cutKey: B.key,
-        avoid: avoidOf(history, hard) };
+        avoid: avoidOf(history, hard), cond };
       let out;
       if (trace) trace.world = world;
       if (pin) {
-        CA.pinWarnings(ctx, 'seam', pin.v, pin);
+        CA.pinWarnings(ctx, 'seam', pin.v, pin, cond);
         out = fixed(pinDecision(pin));
         if (trace) shadow(ctx, req, trace, { kind: 'seam', stage: 'pin', pin, recent: rec.recent, echo: null });
       } else {
@@ -17639,14 +18567,15 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'planner/choose', 'planner/par
 
     return { grounds, seams, impulses, breakScore, splitSegments };
   });
-/* 文字PVメーカー v2 — original work. plan(doc, { registry }) → Plan: the planner's stages in their FROZEN order (DESIGN §4.16.1–§4.16.2, §3.12). */
+/* 文字PVメーカー v2 — original work. plan(doc, { registry }) → Plan: the planner's stages in their FROZEN order (DESIGN §4.16.1–§4.16.2, §3.12; DESIGN_2_1 §2.7, §5.9.3, §11.2.6). */
 MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'core/timing', 'core/beats', 'core/motion',
-  'core/doc', 'core/schema', 'core/script', 'planner/choose', 'planner/params', 'planner/look', 'planner/segment',
-  'planner/features', 'planner/cast', 'planner/tracks', 'planner/encode'],
-(H, N, PINS, LY, TM, B, MO, D, S, SC, CH, PA, LK, SG, FE, CA, TR, EN) => {
+  'core/doc', 'core/schema', 'core/script', 'core/media', 'planner/choose', 'planner/params', 'planner/look',
+  'planner/segment', 'planner/features', 'planner/cast', 'planner/tracks', 'planner/camera', 'planner/encode'],
+(H, N, PINS, LY, TM, B, MO, D, S, SC, MEDIA, CH, PA, LK, SG, FE, CA, TR, CAM, EN) => {
   'use strict';
 
-  const PLAN_VERSION = 1;
+  // v2: rigs, cut.rig, grounds[].zoomed, feat.sectionStart, media, the camera slots (DESIGN_2_1 §2.7, §11.2.6).
+  const PLAN_VERSION = 2;
   const MEMO_SIZE = 2;
   const LANG_SPEC = SG.LINE_SPECS.lang;
 
@@ -17831,8 +18760,72 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
   }
 
   // The part of the look every scene depends on (§3.12 fp: palette, faces, design size), plus the amounts parts read.
+  // The registry term is the base registry's version (DESIGN_2_1 §2.7): adding or editing a material changes only the
+  // fingerprints of the scenes that use it (matTerms), not every scene.
   function sharedText(ctx, look, design) {
-    return EN.canon([ctx.registry.version, look.palette, look.faces, look.amounts, design]);
+    return EN.canon([ctx.registry.baseVersion || ctx.registry.version, look.palette, look.faces, look.amounts, design]);
+  }
+
+  // --- materials and media in fingerprints (DESIGN_2_1 §5.9.3, §11.2.6) --------------------------------------------
+
+  // What the fingerprints need to know of a registry: the keys (any kind) of definitions that are materials or derived
+  // media parts (registry.extra) or have a media param, and each one's media param names. Made once per registry;
+  // `none` when there is nothing, so plans without materials or media skip the scan.
+  const mineCache = new WeakMap();
+  function mineInfo(registry) {
+    let info = mineCache.get(registry);
+    if (info) return info;
+    const extra = registry.extra || {};
+    const keys = new Map();
+    for (const def of registry.all()) {
+      if (!def || !def.key || def.kind === 'theme' || def.kind === 'mood') continue;
+      const list = registry.params(def.kind, def.key) || [];
+      const media = list.filter((x) => x.spec && x.spec.type === 'media').map((x) => x.name);
+      const mine = extra[def.key] && def.mine ? def.mine : null;
+      if (media.length || mine) keys.set(def.kind + '/' + def.key, { media, mine });
+    }
+    info = keys.size ? { keys } : NO_MINE;
+    mineCache.set(registry, info);
+    return info;
+  }
+  const NO_MINE = Object.freeze({ keys: null });
+
+  // The materials and assets a list of [kind, decision] uses: { mat: [[slot, key, rhash]], ids: [AssetId] } (ids
+  // sorted and unique; only ids the document's library holds). slots: the slot name of each decision.
+  function mineOf(ctx, decisions, slots) {
+    const info = mineInfo(ctx.registry);
+    if (!info.keys) return null;
+    let mat = null, ids = null;
+    for (let i = 0; i < decisions.length; i++) {
+      const [kind, d] = decisions[i];
+      if (!d || typeof d.v !== 'string' || d.v === 'none') continue;
+      const e = info.keys.get(kind + '/' + d.v);
+      if (!e) continue;
+      if (e.mine) {
+        (mat || (mat = [])).push([slots[i], d.v, String(e.mine.rhash)]);
+        // mine.media: the asset ids of a material; true for a derived ground of a pooled asset, whose id is mine.id.
+        if (Array.isArray(e.mine.media)) for (const id of e.mine.media) ids = addId(ctx, ids, id);
+        else if (e.mine.media === true) ids = addId(ctx, ids, e.mine.id);
+      }
+      for (const name of e.media) if (d.p && typeof d.p[name] === 'string' && d.p[name] !== '') ids = addId(ctx, ids, d.p[name]);
+    }
+    if (!mat && !ids) return null;
+    return { mat: mat || [], ids: ids ? [...ids].sort() : [] };
+  }
+
+  // An asset id the library holds; a material's own asset that is gone warns media-missing (a media param was already
+  // checked, planner/params).
+  function addId(ctx, ids, id) {
+    if (ctx.media && ctx.media.entries.has(id)) return (ids || new Set()).add(id);
+    if (typeof id === 'string' && id !== '') ctx.warn({ code: 'media-missing', detail: { id } });
+    return ids;
+  }
+
+  // The fingerprint term of a scene's materials and assets: '' without any, else the canonical text of
+  // [matTerms, mediaTerms], mediaTerms = [[id, hashJSON(MediaMeta)]].
+  function mineText(ctx, used) {
+    if (!used) return '';
+    return EN.canon([used.mat, used.ids.map((id) => [id, ctx.media.metaHash(id)])]);
   }
 
   // What a scene reads of the song besides its decisions (§3.12 fp; engine/scene/build baseEnv gives the parts
@@ -17859,15 +18852,20 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
     const out = {
       key: c.key, line: c.line, role: c.role, text: c.text, emph: c.emph, impact: c.impact, note: c.note,
       t0: c.t0, t1: c.t1, a: c.a, b: c.b, repT, lang: c.lang, feat: c.feat, fp: '', slots: c.slots,
-      els: c.els, ground: c.ground, seamIn: c.seamIn,
+      els: c.els, ground: c.ground, rig: c.rig, seamIn: c.seamIn,
     };
     if (c.pinKey && c.pinKey !== c.key) out.pinKey = c.pinKey;
     const slotKeys = Object.keys(c.slots).sort();
-    const decisions = slotKeys.filter((s) => s.indexOf('.') < 0 && s !== 'orient').map((s) => [slotKind(s), c.slots[s]]);
+    const partSlots = slotKeys.filter((s) => s.indexOf('.') < 0 && s !== 'orient');
+    const decisions = partSlots.map((s) => [slotKind(s), c.slots[s]]);
     const needs = needsOf(ctx, decisions);
     const { beat, level } = songTerms(ctx, needs, beats, c.t0);
+    // Materials (matTerms) and assets (mediaTerms) the cut's parts use (DESIGN_2_1 §2.7, §11.2.6); '' without any.
+    const used = mineOf(ctx, decisions, partSlots);
+    if (used) for (const id of used.ids) ctx.mediaUsed.add(id);
+    const mine = mineText(ctx, used);
     // A cut whose cast was not reused is made of new objects: nothing to look up (its encoding is kept next time).
-    const key = ctx.encodings && c.castHit ? encodingKey(out, c.cast, shared, beat, level) : null;
+    const key = ctx.encodings && c.castHit ? encodingKey(out, c.cast, shared, beat, level, mine) : null;
     const hit = key !== null ? ctx.encodings.get(key) : undefined;
     if (hit) {
       out.fp = hit.fp;
@@ -17879,6 +18877,7 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
       }
     }
     const extra = [EN.objectCanon(c.els), N.q6(c.t0 - c.a), N.q6(c.b - c.a), shared.text, beat, level];
+    if (mine) extra.push(mine);
     const enc = EN.encodeCut(out, slotKeys, extra);
     out.fp = enc.fp;
     if (key !== null) {
@@ -17895,8 +18894,10 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
 
   // Everything planCut encodes besides the absolute times: a reused cast entry stands for the key, line, pin key,
   // role, impact, features (by value, so lang too), element map and decisions it was made with (planner/cast
-  // castInputs); the text, marks, window relative to t0, ground, incoming seam, shared look and song terms are in the
-  // key; the seam rules may replace the entrance or exit. Equal features do not mean equal text (「あ」→「い」).
+  // castInputs); the text, marks, window relative to t0, ground, rig run, incoming seam, shared look, song terms and
+  // material and media terms are in the key; the seam rules may replace the entrance or exit and the carry rule the
+  // shot (by identity: planner/tracks and planner/camera keep their decisions on the cast entry). Equal features do
+  // not mean equal text (「あ」→「い」).
   const objectIds = new WeakMap();
   let nextObjectId = 1;
   function idOf(v) {
@@ -17906,22 +18907,30 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
     return id;
   }
 
-  function encodingKey(out, cast, shared, beat, level) {
-    return cast.id + idOf(out.slots.arrive) + idOf(out.slots.depart) + JSON.stringify([out.text, out.emph, out.note,
-      N.q6(out.t0 - out.a), N.q6(out.b - out.a), out.ground, out.seamIn, shared.id, beat, level]);
+  function encodingKey(out, cast, shared, beat, level, mine) {
+    return cast.id + idOf(out.slots.arrive) + idOf(out.slots.depart) + idOf(out.slots['cam.shot']) +
+      JSON.stringify([out.text, out.emph, out.note, N.q6(out.t0 - out.a), N.q6(out.b - out.a), out.ground, out.rig, out.seamIn,
+        shared.id, beat, level, mine]);
   }
 
   // A segment's fingerprint: everything a ground scene reads (engine/scene/build buildGround): its ground and atmos
-  // as { p, v }, its length, the shared look (palette, faces, amounts, design size, registry version), and the beat
-  // grid or loudness seen from its start when a part needs them (songTerms). A ground scene gets nothing of the
-  // segment's cuts (the planner resolves the segment's parameters from its first cut, §4.16.6), so editing a cut never
-  // rebuilds its background (§3.12 fp, §7.1.5).
+  // as { p, v }, its length, the shared look (palette, faces, amounts, design size, base registry version), the beat
+  // grid or loudness seen from its start when a part needs them (songTerms), and the materials and assets its parts
+  // use (matTerms, mediaTerms; DESIGN_2_1 §2.7, §11.2.6). A ground scene gets nothing of the segment's cuts (the
+  // planner resolves the segment's parameters from its first cut, §4.16.6), so editing a cut never rebuilds its
+  // background (§3.12 fp, §7.1.5).
   function groundFp(ctx, g, shared, beats) {
-    const needs = needsOf(ctx, [['ground', g.ground], ['ornament', g.atmos]]);
+    const decisions = [['ground', g.ground], ['ornament', g.atmos]];
+    const needs = needsOf(ctx, decisions);
     const { beat, level } = songTerms(ctx, needs, beats, g.t0);
     const scene = '[' + EN.decisionTexts(g.ground).scene + ',' + EN.decisionTexts(g.atmos).scene + ']';
-    return EN.hex8(H.hash32(scene, N.q6(g.t1 - g.t0), shared, beat, level));
+    const used = mineOf(ctx, decisions, GROUND_SLOTS);
+    if (used) for (const id of used.ids) ctx.mediaUsed.add(id);
+    const mine = mineText(ctx, used);
+    return mine ? EN.hex8(H.hash32(scene, N.q6(g.t1 - g.t0), shared, beat, level, mine))
+      : EN.hex8(H.hash32(scene, N.q6(g.t1 - g.t0), shared, beat, level));
   }
+  const GROUND_SLOTS = Object.freeze(['ground', 'atmos']);
 
   // --- features, reused across plans ----------------------------------------------------------------------------
 
@@ -17939,7 +18948,7 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
   function featuresOf(cut, fx, songKey, cached) {
     if (!cached) return { feat: FE.cutFeatures(cut, fx), id: null };
     const key = JSON.stringify([cut.text, cut.role, cut.lang, cut.emph.length > 0, !!cut.impact, cut.t0, cut.t1,
-      fx.section, fx.repeatOf, fx.repeats]) + songKey;
+      fx.section, fx.repeatOf, fx.repeats, fx.sectionStart]) + songKey;
     let e = featCur.get(key);
     if (e === undefined) {
       e = featPrev.get(key);
@@ -17974,6 +18983,79 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
     };
   }
 
+  // --- materials, media and camera facts of the Plan (DESIGN_2_1) --------------------------------------------------
+
+  // The document's library as the planner reads it: { entries: Map<id, AssetEntry>, key (for the cast cache: what
+  // decisions read of an entry — that it exists, its kind, whether it is animated and how long, and the AI's depth
+  // suggestion, §11.2.6, §11.9.2), metaOf(id), metaHash(id) } or null without assets. Made once per plan (≤ 200
+  // entries), so an entry changed in place is seen.
+  function mediaIndex(doc) {
+    const list = doc.media && Array.isArray(doc.media.list) ? doc.media.list : null;
+    if (!list || !list.length) return null;
+    const entries = new Map();
+    for (const e of list) if (e && MEDIA.isId(e.id) && MEDIA.KINDS.includes(e.kind) && !entries.has(e.id)) entries.set(e.id, e);
+    const metas = new Map(), hashes = new Map();
+    const metaOf = (id) => {
+      let m = metas.get(id);
+      if (m === undefined) { m = sortedMeta(MEDIA.metaOf(entries.get(id))); metas.set(id, m); }
+      return m;
+    };
+    const keyOf = (e) => [e.id, e.kind, e.anim === true, e.dur, e.ai && typeof e.ai === 'object' ? e.ai.depth || '' : ''].join(':');
+    return {
+      entries, key: [...entries.values()].map(keyOf).join(','), metaOf,
+      metaHash(id) {
+        let h = hashes.get(id);
+        if (h === undefined) { h = H.hashJSON(metaOf(id)); hashes.set(id, h); }
+        return h;
+      },
+    };
+  }
+
+  function sortedMeta(meta) {
+    const out = {};
+    for (const k of Object.keys(meta).sort()) out[k] = meta[k];
+    return Object.freeze(out);
+  }
+
+  // plan.media (§11.2.6): { [AssetId]: MediaMeta } for every asset a decision param or a chosen material uses (collected
+  // by planCut and groundFp), keys sorted.
+  function planMedia(ctx) {
+    const out = {};
+    for (const id of [...ctx.mediaUsed].sort()) out[id] = ctx.media.metaOf(id);
+    return out;
+  }
+
+  // material-bad (§2.8, §5.9.2): every problem of an extended registry that names a material, detail { id, code }.
+  // registry.problems holds text '<kind>/<key>: …': parts/mix registryFor's '<kind>/myMat<x>: <code>' for an entry it
+  // could not derive ('<kind>/?: <code>' when the entry has no usable id; the id is then ''), and REG.extend's own
+  // '<kind>/<key>: <message>' for a derived definition that did not validate (code 'def'). Problems of derived media
+  // grounds ('ground/myMed…: media-key') are not about materials.
+  function materialWarnings(ctx) {
+    const reg = ctx.registry;
+    if (!reg.base || !Array.isArray(reg.problems)) return;
+    for (const text of reg.problems) {
+      const detail = materialProblem(text);
+      if (detail) ctx.warn({ code: 'material-bad', detail });
+    }
+  }
+
+  function materialProblem(text) {
+    const m = /^[a-z?]+\/(myMat([0-9a-z]+)|\?): (.*)$/s.exec(String(text));
+    if (!m) return null;
+    return { code: /^[a-z][A-Za-z0-9-]*$/.test(m[3]) ? m[3] : 'def', id: m[2] ? 'm' + m[2] : '' };
+  }
+
+  // grounds[i].zoomed (§2.7): some cut of the segment has a shot (cam.shot ≠ 'none'), so the renderer oversamples its
+  // static raster (§4.8).
+  function markZoomed(cuts, grounds) {
+    const zoomed = grounds.map(() => false);
+    for (const c of cuts) {
+      const d = c.slots['cam.shot'];
+      if (d && d.v !== 'none' && c.ground >= 0 && c.ground < zoomed.length) zoomed[c.ground] = true;
+    }
+    grounds.forEach((g, i) => { g.zoomed = zoomed[i]; });
+  }
+
   // --- the pipeline ---------------------------------------------------------------------------------------------
 
   // run(doc, registry, { trace, fresh }) → Plan. trace = { cutKey, slot, out } records one slot's decision
@@ -17985,14 +19067,20 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
     const design = { aspect, w, h, short: Math.min(w, h) };
     const trace = (opts && opts.trace) || null;
     const cached = !trace && !(opts && opts.fresh);
+    // The fields filled later or on first use (from castKeys on) are declared here, so ctx keeps one shape while the
+    // cuts are cast: a field added in the middle of casting sends the optimized code that reads ctx back to the
+    // interpreter (the first plans of a session were up to twice as slow).
     const ctx = {
       doc, registry, ix: PINS.index(doc.pins), warn: warner.warn, aspect,
       salts: doc.salts && Object.keys(doc.salts).length ? doc.salts : null,
       timing: Object.assign({}, TM.TIMING_DEFAULTS, doc.timing || {}), pools: new Map(), trace, casts: null,
-      lockFree: CA.lockFreeIndex(doc.pins),
+      lockFree: CA.lockFreeIndex(doc.pins), media: mediaIndex(doc), mediaUsed: new Set(),
+      castKeys: null, seams: null, encodings: null, fallbacks: null, lookAxis: null, lineConds: null, workCond: null,
+      shotMood: null,
     };
     // Traced runs (explain) and fresh runs neither read nor refresh the caches of re-planning.
     if (cached) beginFeatures();
+    materialWarnings(ctx);
 
     // 1. parse and time
     const { sheet, lines: parsed } = parsedSheet(doc);
@@ -18023,27 +19111,35 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
     const info = doc.song && doc.song.info ? doc.song.info : null;
     const loud = digest && typeof digest.loud === 'string' ? digest.hz + ':' + digest.loud : null;
     const songKey = '|' + CA.intern(EN.canon([duration, loud, timing.beats, info]));
-    for (const cut of cuts) {
+    // sectionStart (DESIGN_2_1 §2.7): the first cut, and every cut whose section differs from the previous cut's.
+    let prevSection;
+    cuts.forEach((cut, i) => {
       const fx = fxOf(cut);
+      const section = FE.sectionOf(cut, { info, section: fx.section });
       const got = featuresOf(cut, { duration, env: ctx.env, grid, info, section: fx.section, repeatOf: fx.repeatOf,
-        repeats: fx.repeats }, songKey, cached);
+        repeats: fx.repeats, sectionStart: i === 0 || section !== prevSection }, songKey, cached);
+      prevSection = section;
       cut.feat = got.feat;
       cut.featId = got.id;
-    }
+    });
 
     // 5. cast, in time order (a cut whose inputs did not change reuses its cast, planner/cast castCut)
     if (cached) {
       ctx.casts = CA.beginCasts(registry);
       ctx.castKeys = CA.castKeys(ctx, EN.canon([registry.version, look.mood.key, look.theme.key, look.season, look.amounts,
-        look.variety, aspect, doc.look.seed, doc.filters || null, ctx.bpm]));
+        look.variety, aspect, doc.look.seed, doc.filters || null, ctx.bpm, ctx.media ? ctx.media.key : null]));
     }
     const hist = CA.createHistory(registry);
     for (const cut of cuts) Object.assign(cut, CA.castCut(ctx, cut, hist));
 
-    // 6. tracks: grounds → seams (and their rule overrides) → impulses
+    // 6. tracks: grounds → seams (and their rule overrides) → carry → rigs → impulses (DESIGN_2_1 §3.9)
     const grounds = TR.grounds(ctx, cuts, duration);
     const seams = TR.seams(ctx, cuts);
+    ctx.seams = seams;
+    CAM.carry(ctx, cuts, seams);
+    const rigs = CAM.rigs(ctx, cuts, seams, duration);
     const impulses = TR.impulses(ctx, cuts, duration);
+    markZoomed(cuts, grounds);
 
     // 7. derived
     const sharedT = sharedText(ctx, look.plan, design);
@@ -18062,7 +19158,7 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
     }));
     const plan = {
       v: PLAN_VERSION, hash: '', duration, design, look: look.plan, beats: timing.beats, lines: planLines,
-      cuts: encoded.map((e) => e.cut), grounds, seams, impulses, warnings: warner.list,
+      cuts: encoded.map((e) => e.cut), grounds, rigs, seams, impulses, media: planMedia(ctx), warnings: warner.list,
     };
     plan.hash = EN.planHash(plan, encoded.map((e) => e.parts));
     Object.defineProperty(plan, 'env', { value: ctx.env, enumerable: false });
@@ -18105,23 +19201,27 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
 
   return { plan, trace, pinSig, run, canon: EN.canon, PLAN_VERSION };
 });
-/* 文字PVメーカー v2 — original work. Inspector field states, lock payloads and plan-value readers (DESIGN §4.16.8, §3.13, §3.6). */
+/* 文字PVメーカー v2 — original work. Inspector field states, lock payloads and plan-value readers (DESIGN §4.16.8, §3.13, §3.6; DESIGN_2_1 §3.9). */
 MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyrics', 'core/schema', 'core/timing',
-  'planner/cast', 'planner/look', 'planner/segment', 'planner/plan'], (P, PINS, REG, LY, S, TM, CA, LK, SG, PL) => {
+  'core/curve', 'core/shot', 'planner/params', 'planner/cast', 'planner/look', 'planner/segment', 'planner/plan'],
+(P, PINS, REG, LY, S, TM, CV, SHOT, PA, CA, LK, SG, PL) => {
   'use strict';
 
   const LOOK_NAMES = new Set(['mood', 'theme', 'season', 'bpm', 'beatOffset', 'readRate', 'length', 'titleCard']);
   const LOOK_PREFIX = /^(color|amount|face)\./;
-  const LINE_NAMES = new Set(['start', 'end', 'split', 'lang']);
+  const LINE_NAMES = new Set(['start', 'end', 'split', 'lang', 'avoid']);
+  const RIG_SLOTS = new Set(['rig', 'rig.curve']);
   const TRACK_KINDS = new Set(['ground', 'atmos', 'seam']);
   const EL_DEFAULT = Object.freeze({ nudge: Object.freeze({ dx: 0, dy: 0, rot: 0, s: 1 }), fill: null, hide: false });
 
   // --- what a path addresses ---------------------------------------------------------------------------------
 
-  // 'look' (work-scope slots), 'line' (start/end/split/lang), 't0', 'el', 'count', 'part', 'param' or 'value'
-  // (orient, text.*).
+  // 'look' (work-scope slots), 'line' (start/end/split/lang; since v2.1 also avoid, and season at line or cut scope,
+  // which is a line value while work:season stays the look's), 't0', 'el', 'count', 'part', 'param' or 'value'
+  // (orient, text.*, motion.speed, cam.*, rig, rig.curve).
   function categoryOf(parsed) {
     const slot = parsed.slot;
+    if (slot === 'season' && parsed.scope.kind !== 'work') return 'line';
     if (LOOK_NAMES.has(slot) || LOOK_PREFIX.test(slot) || (parsed.part && parsed.part.kind === 'texture')) return 'look';
     if (LINE_NAMES.has(slot)) return 'line';
     if (slot === 't0') return 't0';
@@ -18171,10 +19271,14 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
     return plan.cuts.slice();
   }
 
-  // The Decision a cut holds for a part/value/count slot (seams: the boundary into the cut; grounds: its segment).
-  // A boundary without a seam entry is the hard cut (registry.fallback('seam')).
+  // The Decision a cut holds for a part/value/count slot (seams: the boundary into the cut; grounds: its segment;
+  // rig and rig.curve: its rig run). A boundary without a seam entry is the hard cut (registry.fallback('seam')).
   function decisionAt(plan, cut, parsed, registry) {
     const part = parsed.part;
+    if (RIG_SLOTS.has(parsed.slot)) {
+      const run = plan.rigs && cut.rig !== undefined ? plan.rigs[cut.rig] : null;
+      return run ? (parsed.slot === 'rig' ? run.rig : run.curve) : null;
+    }
     if (part && part.kind === 'ground') return plan.grounds[cut.ground] ? plan.grounds[cut.ground].ground : null;
     if (part && part.kind === 'atmos') return plan.grounds[cut.ground] ? plan.grounds[cut.ground].atmos : null;
     if (part && part.kind === 'seam') {
@@ -18183,6 +19287,26 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
     }
     const slot = part ? (part.param === 'count' && part.idx === null ? part.kind + '.count' : choiceSlot(part)) : parsed.slot;
     return (cut.slots && cut.slots[slot]) || null;
+  }
+
+  // The rule behind the automatic depth of a media part at a cut (DESIGN_2_1 §11.9.2): 'ai' | 'overlay' | 'frame' |
+  // 'video' | 'busy' | 'still' (the why code media.depth.<rule>), or null when the path is not an automatic depth.
+  // The same inputs as the planner: the part's use, its source asset, and for a background its segment's text.
+  function depthRuleAt(doc, plan, cut, parsed, registry) {
+    if (!cut || !registry || !parsed.part || parsed.part.param !== 'depth') return null;
+    const d = decisionAt(plan, cut, parsed, registry);
+    if (!d || typeof d.v !== 'string' || d.v === 'none' || !d.p || (d.pfrom && d.pfrom.depth)) return null;
+    if (parsed.part.key && parsed.part.key !== d.v) return null;
+    const kind = partKindOf(parsed.part.kind);
+    const def = registry.get(kind, d.v);
+    const info = def ? PA.paramInfo(registry, kind, def) : null;
+    if (!info || !info.depth || !info.media) return null;
+    const use = PA.useOf(def, kind, info.depthSpec);
+    const list = doc && doc.media && Array.isArray(doc.media.list) ? doc.media.list : [];
+    const entries = new Map(list.filter((e) => e && typeof e.id === 'string').map((e) => [e.id, e]));
+    const seg = use === 'ground' ? plan.grounds[cut.ground] : null;
+    const coverage = seg ? PA.textCoverage(seg.cuts.map((k) => cutOf(plan, k))) : 0;
+    return PA.depthRule(use, d.p[info.media], entries, coverage).rule;
   }
 
   // A work pin's value coerced through the slot's spec, or undefined (no pin, or one the planner ignores).
@@ -18238,22 +19362,43 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
     return f ? (f.ja || f.latin).weight : undefined;
   }
 
-  function lineValue(plan, parsed, lineId) {
+  function lineValue(plan, parsed, lineId, ix) {
     const line = cutIndex(plan).lines.get(lineId);
     if (!line) return undefined;
     if (parsed.slot === 'start') return line.t0;
     if (parsed.slot === 'end') return line.t1;
     if (parsed.slot === 'lang') return line.lang;
+    if (parsed.slot === 'season') return lineSeason(plan, lineId, ix);
+    if (parsed.slot === 'avoid') return lineAvoid(lineId, ix);
     return line.cuts.map((k) => P.cutOffset(k));        // split
   }
 
+  // A line's effective season (DESIGN_2_1 §4.9): its own pin, else the work's season (the look's value, which is the
+  // work pin or the lyrics' season).
+  function lineSeason(plan, lineId, ix) {
+    const hit = ix ? PINS.lookup(ix, { cutKey: null, pinCutKey: null, lineId }, 'season') : null;
+    if (hit && hit.from === 'pin:line') {
+      const v = S.coerce(SG.LINE_SPECS.season, hit.v);
+      if (v !== undefined) return v;
+    }
+    return plan.look.season.v;
+  }
+
+  // A line's avoid list: its pin, coerced (sorted, unique, ≤ 24), else [].
+  function lineAvoid(lineId, ix) {
+    const hit = ix ? PINS.lookup(ix, { cutKey: null, pinCutKey: null, lineId }, 'avoid') : null;
+    const v = hit && hit.from === 'pin:line' ? S.coerce(SG.LINE_SPECS.avoid, hit.v) : undefined;
+    return v === undefined ? NO_REFS : v;
+  }
+  const NO_REFS = Object.freeze([]);
+
   // valueAt(plan, cut, parsed, registry, ix?) → the value a path shows at one cut (cut may be null for work/line
   // slots). ix = the document's pin index, for the look values that are requests rather than Plan values (weights,
-  // the reading rate).
+  // the reading rate) and the line slots season and avoid.
   function valueAt(plan, cut, parsed, registry, ix) {
     const cat = categoryOf(parsed);
     if (cat === 'look') return lookValue(plan, parsed, registry, ix);
-    if (cat === 'line') return lineValue(plan, parsed, cut ? cut.line : parsed.scope.lineId);
+    if (cat === 'line') return lineValue(plan, parsed, cut ? cut.line : parsed.scope.lineId, ix);
     if (!cut) return undefined;
     if (cat === 't0') return cut.t0;
     if (cat === 'el') {
@@ -18330,7 +19475,7 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
   function canPinAt(parsed) {
     const cat = categoryOf(parsed);
     if (cat === 'look') return ['work'];
-    if (cat === 'line') return ['line'];
+    if (cat === 'line') return parsed.slot === 'season' ? ['line', 'work'] : ['line'];
     if (cat === 't0') return ['cut'];
     const kind = parsed.scope.kind;
     if (kind === 'work') return ['work'];
@@ -18364,8 +19509,11 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
     const src = { from: d.from, by: d.by };
     if (d.from && d.from.startsWith('pin')) {
       const slot = decisionSlot(parsed);
-      const probe = parsed.part && TRACK_KINDS.has(parsed.part.kind) && parsed.part.kind !== 'seam' && plan.grounds[cut.ground]
-        ? cutOf(plan, plan.grounds[cut.ground].cuts[0]) : cut;
+      // Segments and rig runs read their pins at their first cut.
+      const run = RIG_SLOTS.has(parsed.slot) && plan.rigs ? plan.rigs[cut.rig] : null;
+      const probe = run && run.cuts.length ? cutOf(plan, run.cuts[0])
+        : parsed.part && TRACK_KINDS.has(parsed.part.kind) && parsed.part.kind !== 'seam' && plan.grounds[cut.ground]
+          ? cutOf(plan, plan.grounds[cut.ground].cuts[0]) : cut;
       const pat = { cutKey: probe.key, pinCutKey: probe.pinKey || probe.key, lineId: probe.line };
       const hit = PINS.lookup(ix, pat, slot);
       if (hit) src.at = hit.at;
@@ -18405,9 +19553,14 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
     return hit ? { from: hit.from, by: hit.by, at: hit.at } : { from: 'auto' };
   }
 
+  // A line value's source. A line season cascades like a cut slot (line pin, else the work season: its pin or auto).
   function lineSource(doc, plan, parsed, lineId, ix) {
     const hit = lineId ? PINS.lookup(ix, { cutKey: null, pinCutKey: null, lineId }, parsed.slot) : null;
     if (hit && hit.from === 'pin:line') return { from: hit.from, by: hit.by, at: hit.at };
+    if (parsed.slot === 'season') {
+      const L = plan.look.season;
+      return L.from === 'pin:work' ? { from: L.from, by: L.by, at: 'work:season' } : { from: 'auto' };
+    }
     const line = cutIndex(plan).lines.get(lineId);
     if (parsed.slot === 'start' && line && line.by && line.by.start === 'lrc') return { from: 'mark' };
     if (parsed.slot === 'split' && line) {
@@ -18417,8 +19570,20 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
     return { from: 'auto' };
   }
 
-  function displayOf(parsed, value, registry, cat) {
+  // The display of a value: [stringKey, params] or text. Curves, shots and rigs by core/curve.label, core/shot.label
+  // and core/shot.rigLabel; an avoid list by its size; a photo or video by the asset's name (user data).
+  function displayOf(parsed, value, registry, cat, schema, doc) {
     if (value === undefined || value === null) return ['val.none', {}];
+    const type = schema ? schema.type : null;
+    if (type === 'curve') return CV.label(value);
+    if (type === 'shot') return SHOT.label(value);
+    if (type === 'rig') return SHOT.rigLabel(value);
+    if (type === 'partRefs') return Array.isArray(value) && value.length ? ['val.refs', { n: value.length }] : ['val.none', {}];
+    if (type === 'media') {
+      const list = doc && doc.media && Array.isArray(doc.media.list) ? doc.media.list : [];
+      const entry = value ? list.find((e) => e && e.id === value) : null;
+      return entry ? String(entry.name) : ['val.none', {}];
+    }
     if (cat === 'part' || (cat === 'look' && (parsed.slot === 'mood' || parsed.slot === 'theme' ||
         (parsed.part && parsed.part.kind === 'texture' && !parsed.part.param)))) {
       if (value === 'none') return ['val.none', {}];
@@ -18487,7 +19652,12 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
     } else if (sources.length && sources.every((s) => s.from === 'mark')) fs.state = 'mark';
     else if (sources.length && sources.every((s) => s.from === 'rule')) fs.state = 'derived';
     else if (sources.some((s) => s.from.startsWith('pin'))) fs.state = 'mixed';
-    fs.display = fs.state === 'mixed' ? ['state.mixed', {}] : displayOf(parsed, fs.value, registry, cat);
+    fs.display = fs.state === 'mixed' ? ['state.mixed', {}] : displayOf(parsed, fs.value, registry, cat, fs.schema, doc);
+    // An automatic depth of a photo or video names its rule (DESIGN_2_1 §11.9.2, §11.9.5 「自動: …」).
+    if (cat === 'param' && fs.state === 'auto' && cuts.length) {
+      const rule = depthRuleAt(doc, plan, cuts[0], parsed, registry);
+      if (rule) fs.autoText = ['why.media.depth.' + rule, {}];
+    }
     fs.pinAt = own ? own.path : null;
     return fs;
   }
@@ -18588,17 +19758,18 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
 
   return {
     fieldState, fieldStates, lockPayload, pinSig: PL.pinSig, valueAt, decisionAt, categoryOf, cutsFor, cutOf, choiceSlot,
-    schemaOf, canPinAt,
+    schemaOf, canPinAt, depthRuleAt,
   };
 });
-/* 文字PVメーカー v2 — original work. explain(): why a slot has its value, and the alternatives — lazy, never in the Plan (DESIGN §4.16.8). */
-MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'planner/choose', 'planner/look', 'planner/plan',
-  'planner/fields'], (P, PINS, LY, CH, LK, PL, F) => {
+/* 文字PVメーカー v2 — original work. explain(): why a slot has its value, and the alternatives — lazy, never in the Plan (DESIGN §4.16.8; DESIGN_2_1 §2.8, §3.9, §11.2.6). */
+MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media', 'planner/choose', 'planner/look',
+  'planner/plan', 'planner/fields'], (P, PINS, LY, MEDIA, CH, LK, PL, F) => {
   'use strict';
 
   const SCOPE_OF = { 'pin:cut': 'cut', 'pin:line': 'line', 'pin:work': 'work' };
   const TRACED = new Set(['part', 'value', 'count']);
   const ROLE_GATED = new Set(['arrange', 'arrive', 'dwell', 'depart', 'ornament', 'lens', 'filter']);
+  const ALT_SLOTS = new Set(['cam.shot', 'rig']);           // value slots with alternatives (planner/camera weights)
 
   function r2(x) { return Math.round(x * 100) / 100; }
 
@@ -18629,10 +19800,23 @@ MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'planner/ch
     return best;
   }
 
-  function factorWhy(registry, plan, cut, trace, kind, value, seasonWord) {
+  // The name of a derived media part's asset (the doc.media entry, else the part's label).
+  function mediaName(doc, registry, kind, key) {
+    const id = MEDIA.idOfKey(key, doc);
+    const entry = id ? doc.media.list.find((e) => e && e.id === id) : null;
+    if (entry) return String(entry.name);
+    const def = registry.get(kind, key);
+    return def && def.label ? def.label.ja : key;
+  }
+
+  function factorWhy(registry, plan, cut, trace, kind, value, seasonWord, doc) {
     const why = [];
     const cand = (trace.candidates || []).find((c) => c.key === value);
     const def = registry.get(kind, value);
+    const cond = trace.cond || null;
+    if (def && def.mine && def.mine.media === true) {
+      why.push({ code: 'media.pool', params: { name: mediaName(doc, registry, kind, value) } });
+    }
     if (cand && cand.f && def) {
       const f = cand.f;
       const mood = registry.get('mood', plan.look.mood.v);
@@ -18644,10 +19828,13 @@ MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'planner/ch
       if (fit !== 1) why.push({ code: 'fit', params: { x: r2(fit) } });
       if (f.impact > 1) why.push({ code: 'impact', params: {} });
       if (f.echo > 1) why.push({ code: 'echo', params: { cut: cut.feat.repeatOf } });
-      if (f.season !== 1) why.push({ code: 'season', params: { season: plan.look.season.v, word: seasonWord || '' } });
+      if (f.season !== 1 && cond && cond.pinned) why.push({ code: 'season.line', params: { season: cond.season } });
+      else if (f.season !== 1) why.push({ code: 'season', params: { season: plan.look.season.v, word: seasonWord || '' } });
       if (f.prefer !== 1) why.push({ code: 'theme.prefer', params: { x: r2(f.prefer) } });
       if (def.gate) why.push({ code: 'gate', params: { amount: def.gate } });
     }
+    const refs = cond && cond.deny ? cond.deny[kind] : null;
+    if (refs && refs.length && !trace.avoidRelaxed) why.push({ code: 'avoid', params: { n: refs.length } });
     const recent = trace.recent;
     if (recent && recent.prev) {
       const other = [...recent.prev].filter((k) => k !== value).sort()[0];
@@ -18668,12 +19855,13 @@ MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'planner/ch
     return Array.isArray(f.deny) && f.deny.includes(key);
   }
 
-  // Why a registry part is not a candidate here: 'filter' | 'season' | 'gate' | 'role' | 'trait' | null.
+  // Why a registry part is not a candidate here: 'filter' | 'season' | 'gate' | 'role' | 'trait' | null. ctx.season is
+  // the cut's effective season and ctx.deny its line's avoid list for the kind (DESIGN_2_1 §4.9; not when relaxed).
   function maskOf(registry, doc, plan, kind, key, ctx) {
     const def = registry.get(kind, key);
     const t = registry.traits(kind, key);
-    const season = plan.look.season.v;
-    if (filterMasks(doc.filters, kind, key)) return 'filter';
+    const season = ctx.season || plan.look.season.v;
+    if (filterMasks(doc.filters, kind, key) || (ctx.deny && ctx.deny.includes(key))) return 'filter';
     if (def.season && season !== 'any' && season !== def.season) return 'season';
     if (def.gate && !(LK.gateAmounts(plan.look.amounts, plan.look.backdrop, kind)[def.gate] > 0)) return 'gate';
     if (ctx.role && ROLE_GATED.has(kind) && !t.roles.includes(ctx.role)) return 'role';
@@ -18751,10 +19939,14 @@ MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'planner/ch
 
   function explainRead(doc, plan, parsed, registry, cut) {
     const cat = F.categoryOf(parsed);
-    const value = F.valueAt(plan, cut, parsed, registry);
     const ix = PINS.index(doc.pins);
+    const value = F.valueAt(plan, cut, parsed, registry, ix);
     const path = P.format(parsed);
+    if (cat === 'line' && (parsed.slot === 'season' || parsed.slot === 'avoid')) {
+      return explainLineCond(doc, plan, parsed, registry, cut, ix, value, path);
+    }
     let from = 'auto', by;
+    let spec = null;
     if (cat === 'line') {
       const lineId = cut ? cut.line : parsed.scope.lineId;
       const hit = lineId ? PINS.lookup(ix, { cutKey: null, pinCutKey: null, lineId }, parsed.slot) : null;
@@ -18771,6 +19963,7 @@ MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'planner/ch
       if (hit) { from = hit.from; by = hit.by; }
     } else if (cut && cat === 'param') {
       const d = F.decisionAt(plan, cut, parsed, registry);
+      spec = d && d.v !== 'none' ? F.schemaOf(registry, plan, parsed, [cut]) : null;
       if (d && d.pfrom && d.pfrom[parsed.part.param]) {
         from = d.pfrom[parsed.part.param];
         const at = { cutKey: cut.key, pinCutKey: cut.pinKey || cut.key, lineId: cut.line };
@@ -18782,8 +19975,36 @@ MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'planner/ch
     let why;
     if (from.startsWith('pin')) why = pinWhy(from, by);
     else if (from === 'mark') why = [{ code: 'rule', params: { rule: parsed.slot === 'split' ? 'marks' : 'lrc' } }];
+    else if (from === 'rule') why = [{ code: 'rule', params: { rule: 'speed' } }];     // scaled by motion.speed (§4.3)
     else why = [{ code: 'rule', params: { rule: cat === 'param' ? 'auto' : parsed.slot } }];
+    // The automatic depth of a photo or video: the §11.9.2 rule that decided it.
+    const depthRule = cat === 'param' && from === 'auto' ? F.depthRuleAt(doc, plan, cut, parsed, registry) : null;
+    if (depthRule) why = [{ code: 'media.depth.' + depthRule, params: {} }];
+    // A photo or video (a media param, §11.2.6): chosen by the user or the AI (media.pin), or the asset of a derived
+    // おまかせ ground (media.pool).
+    if (spec && spec.type === 'media' && typeof value === 'string' && value !== '') {
+      const entry = doc.media && Array.isArray(doc.media.list) ? doc.media.list.find((e) => e && e.id === value) : null;
+      const name = entry ? String(entry.name) : value;
+      if (from.startsWith('pin')) why.push({ code: 'media.pin', params: { name } });
+      else why = [{ code: 'media.pool', params: { name } }];
+    }
     return { path, value, from, by, why, alts: [] };
+  }
+
+  // The line slots season and avoid (DESIGN_2_1 §4.9). A line season follows the work's season unless the line pins
+  // its own; its reasons are then the work season's. An avoid list is the line's own pin, else empty.
+  function explainLineCond(doc, plan, parsed, registry, cut, ix, value, path) {
+    const lineId = cut ? cut.line : parsed.scope.lineId;
+    const hit = lineId ? PINS.lookup(ix, { cutKey: null, pinCutKey: null, lineId }, parsed.slot) : null;
+    if (hit && hit.from === 'pin:line') {
+      const why = pinWhy(hit.from, hit.by);
+      if (parsed.slot === 'season') why.push({ code: 'season.line', params: { season: value } });
+      else why.push({ code: 'avoid', params: { n: Array.isArray(value) ? value.length : 0 } });
+      return { path, value, from: hit.from, by: hit.by, why, alts: [] };
+    }
+    if (parsed.slot === 'avoid') return { path, value, from: 'auto', by: undefined, why: [], alts: [] };
+    const work = explainLook(doc, plan, P.parse('work:season'), registry);
+    return { path, value, from: work.from, by: work.by, why: work.why, alts: [] };
   }
 
   // --- chooser slots (re-run with tracing) ----------------------------------------------------------------------
@@ -18794,31 +20015,45 @@ MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'planner/ch
       const seg = plan.grounds[cut.ground];
       return { cutKey: seg ? seg.cuts[0] : cut.key, slot: part.kind };
     }
+    if (parsed.slot === 'rig' || parsed.slot === 'rig.curve') {
+      const run = plan.rigs ? plan.rigs[cut.rig] : null;
+      return { cutKey: run && run.cuts.length ? run.cuts[0] : cut.key, slot: parsed.slot };
+    }
     if (part) return { cutKey: cut.key, slot: part.param === 'count' ? part.kind + '.count' : F.choiceSlot(part) };
     return { cutKey: cut.key, slot: parsed.slot };
   }
 
   // What masks alternatives of a slot: the cut's role, orientation, script and aspect for per-cut kinds; only the
-  // scope for backgrounds, atmospheres and seams (they belong to a segment or a boundary, not to the cut's text).
+  // scope for backgrounds, atmospheres and seams (they belong to a segment or a boundary, not to the cut's text); and
+  // the line conditions the pick was made under (season, avoid list).
   function maskContext(plan, cut, parsed, kind, trace) {
     const slotKind = parsed.part.kind;
-    if (kind === 'ground') return {};
-    if (kind === 'seam') return { scope: trace.world ? 'world' : 'text' };
-    if (slotKind === 'atmos') return { scope: 'run' };
-    return {
+    const cond = trace.cond || null;
+    const lineCtx = { season: cond ? cond.season : null, deny: cond && cond.deny && !trace.avoidRelaxed ? cond.deny[kind] || null : null };
+    if (kind === 'ground') return lineCtx;
+    if (kind === 'seam') return Object.assign(lineCtx, { scope: trace.world ? 'world' : 'text' });
+    if (slotKind === 'atmos') return Object.assign(lineCtx, { scope: 'run' });
+    return Object.assign(lineCtx, {
       role: cut.role, orient: cut.slots && cut.slots.orient ? cut.slots.orient.v : null, script: cut.feat.script,
       aspect: plan.design.aspect, scope: kind === 'ornament' ? 'cut' : null,
-    };
+    });
   }
 
   function tracedWhy(doc, registry, plan, cut, parsed, trace, d, value) {
-    if (d.from && d.from.startsWith('pin')) return pinWhy(d.from, d.by);
+    if (d.from && d.from.startsWith('pin')) {
+      const pinned = pinWhy(d.from, d.by);
+      return trace.override && trace.override.rule === 'carry' ? pinned.concat([{ code: 'rule', params: { rule: 'carry' } }]) : pinned;
+    }
+    if (trace.override && trace.override.rule === 'carry') {
+      return (trace.why || []).concat([{ code: 'rule', params: { rule: 'carry' } }]);
+    }
     if (trace.override) return [{ code: 'rule', params: { rule: trace.override.rule } }];
+    if (trace.why) return trace.why.slice();
     if (d.from === 'rule') return [{ code: 'rule', params: { rule: trace.rule || 'rule' } }];
     if (d.from === 'fallback') return [{ code: 'rule', params: { rule: 'fallback' } }];
     if (F.categoryOf(parsed) === 'part' && trace.candidates) {
       const seasonWord = LK.scanSeason(LY.parseSheet(doc.sheet.rows)).word;
-      return factorWhy(registry, plan, cut, trace, trace.kind || parsed.part.kind, value, seasonWord);
+      return factorWhy(registry, plan, cut, trace, trace.kind || parsed.part.kind, value, seasonWord, doc);
     }
     return [{ code: 'rule', params: { rule: trace.rule || parsed.slot } }];
   }
@@ -18831,6 +20066,11 @@ MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'planner/ch
     const d = F.decisionAt(p, tcut, parsed, registry) || { v: value, from: 'auto' };
     const why = tracedWhy(doc, registry, p, tcut, parsed, t, d, value);
     const out = { path: P.format(parsed), value, from: d.from, by: d.by, why, alts: [] };
+    if (ALT_SLOTS.has(parsed.slot) && Array.isArray(t.candidates)) {
+      out.alts = t.candidates.map((c) => ({ key: c.key, w: c.masked ? 0 : c.w, masked: c.masked || null }))
+        .sort((a, b) => b.w - a.w || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+      return out;
+    }
     const kind = t.kind || (parsed.part ? parsed.part.kind : null);
     if (F.categoryOf(parsed) !== 'part' || !kind) return out;
     out.alts = altsOf(registry, doc, p, kind, t, maskContext(p, tcut, parsed, kind, t));

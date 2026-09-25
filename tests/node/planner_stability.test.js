@@ -254,6 +254,62 @@ for (const [RN, SYN] of REGISTRIES) {
   // A slot salt changes that slot's stream only (§3.7). Its new value becomes the cut's reference pick, which the next
   // cut weighs against (so the two do not repeat); nothing further depends on it, except the runner-up rule of
   // arrange/arrive one cut later.
+  // DESIGN_2_1 §4.7 "Stability": inserting a line changes ≤ 4 other cuts' shots, rerolling a cut ≤ 3. A shot weighs
+  // ×0.1 against the previous cut's *final* shot (hist.previous, FROZEN), so a changed shot can, rarely, pass the change
+  // on down a run of cuts whose shots alternate between two presets; the line before an inserted line also gets a
+  // shorter span, so new features (measured with starts pinned: catalog 1 of 108 insertions over 4, worst 5; synthetic
+  // 3 of 108, worst 7; rerolls: 1 of 249 over 3, worst 5; NOTES ## v2.1-D). The bounds hold the rest.
+  const shotText = (c) => JSON.stringify(c.slots['cam.shot'].v);
+  function shotChanges(a, b, skipLine) {
+    const before = new Map(a.cuts.map((c) => [c.key, c]));
+    return b.cuts.filter((c) => before.has(c.key) && !(skipLine && c.line === skipLine) && shotText(before.get(c.key)) !== shotText(c))
+      .map((c) => c.key);
+  }
+
+  // With line starts pinned only the chooser is at work; with automatic timing the moved lines also get new features
+  // (duration, energy), which the §4.7 weights read, so the bound is the one of the part choices above.
+  test(RN + ': inserting a line changes at most 4 other cuts\' shots (a few more in rare relays, or with moved lines)', (t) => {
+    for (const [timing, bound] of [['anchored', { worst: 7, share: 0.05 }], ['auto', { worst: 9, share: 0.15 }]]) {
+      let cases = 0, over = 0, worst = { n: -1 };
+      for (const { name, doc } of corpus.corpus(3)) {
+        const base = timing === 'anchored' ? anchored(doc) : JSON.parse(JSON.stringify(doc));
+        const a = PL.run(base, SYN, null);
+        const rows = lyricRowIndexes(base);
+        for (const k of [1, rows.length >> 1, rows.length - 1]) {
+          const { doc: edited, id } = insertLine(base, rows[k]);
+          const changed = shotChanges(a, PL.run(edited, SYN, null), id);
+          cases++;
+          if (changed.length > 4) over++;
+          if (changed.length > worst.n) worst = { n: changed.length, where: timing + ' ' + name + ' row ' + rows[k] + ': ' + changed.join(' ') };
+        }
+      }
+      t.diagnostic('shots, ' + timing + ': ' + over + ' of ' + cases + ' insertions changed more than 4 other cuts; worst ' + worst.n);
+      assert.ok(worst.n <= bound.worst, worst.where);
+      assert.ok(over <= cases * bound.share, timing + ': ' + over + ' of ' + cases);
+    }
+  });
+
+  test(RN + ': rerolling a cut changes at most 3 other cuts\' shots (a few more in rare relays)', (t) => {
+    let cases = 0, over = 0, worst = { n: -1 };
+    for (const { name, doc } of corpus.corpus(2)) {
+      const a = PL.run(doc, SYN, null);
+      const step = Math.max(2, Math.floor(a.cuts.length / 10));
+      for (let i = 0; i < a.cuts.length; i += step) {
+        const key = a.cuts[i].key;
+        const rolled = JSON.parse(JSON.stringify(doc));
+        rolled.salts = Object.assign({}, rolled.salts, { ['cut/' + key]: (rolled.salts['cut/' + key] || 0) + 1 });
+        const others = shotChanges(a, PL.run(rolled, SYN, null), null).filter((k) => k !== key);
+        cases++;
+        if (others.length > 3) over++;
+        if (others.length > worst.n) worst = { n: others.length, where: name + ' ' + key + ': ' + others.join(' ') };
+      }
+    }
+    t.diagnostic('shots: ' + over + ' of ' + cases + ' rerolls changed more than 3 other cuts; worst ' + worst.n);
+    assert.ok(cases > 200);
+    assert.ok(worst.n <= 5, worst.where);
+    assert.ok(over <= cases * 0.02, over + ' of ' + cases);
+  });
+
   test(RN + ': field dice (a slot salt) change that slot of that cut, and at most the next cut (two for arrive)', () => {
     const { doc } = corpus.corpus(1).find((c) => c.name.startsWith('long'));
     const a = PL.run(doc, SYN, null);
