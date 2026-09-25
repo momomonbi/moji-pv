@@ -482,6 +482,11 @@ async def run(root, keep):
                 await page.click('[data-seg="format"] [data-v="pngAlpha"]')
                 state = await page.evaluate('() => [window.__mv.doc.output.format, window.__mv.doc.look.backdrop]')
                 checks.ok(state == ['pngAlpha', 'clear'], '透過PNG makes the backdrop 透明 (%r)' % state)
+                # the stage shows the backdrop when it next draws (a frame after the click), so wait for that draw
+                try:
+                    await page.wait_for_function("() => document.querySelector('.canvas-wrap').dataset.backdrop === 'clear'", timeout=5000)
+                except Exception:
+                    pass
                 preview = await page.evaluate("() => document.querySelector('.canvas-wrap').dataset.backdrop")
                 checks.ok(preview == 'clear', 'the preview shows the transparent frame over the checkerboard (%r)' % preview)
                 frames, _ = await export(page, checks, 'clear', keep)

@@ -6719,3 +6719,12 @@ pass; build --check 212 modules.
   `mixShare`; a "material-lightened" note is not added (a beginner sees a lighter cut, not an error). The build time
   with the heaviest materials (3.0 ms p50, 8–10 ms p95 per cut in Node, over §7.2's 4 ms at p95) stays open: it is paid
   in prepare slices, not in frames, and no document without heavy materials is affected.
+
+## Lead: transparent_check on CI
+
+main's CI (e60e767) failed one check of `transparent_check.py`, "the preview shows the transparent frame over the
+checkerboard ('scene')", while every export check passed and the check passed locally. The stage sets
+`.canvas-wrap[data-backdrop]` when it next draws (`stage.showBackdrop` in `render`, a frame after the change), and the
+check read it right after the click. It now waits (up to 5 s) for the stage to draw the new backdrop, as ui_flows'
+output flow does with its settle. perf.py passed on the same run: long+camera+materials p50 13.5 / p95 23.3 ms,
+basic+media p50 11.4 / p95 19.5 ms.
