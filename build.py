@@ -264,7 +264,7 @@ def layer_of(mid):
         return 1
     if mid.startswith('planner/'):
         return 2
-    if mid.startswith(('engine/scene/', 'engine/render/')) or mid == 'parts/kit':
+    if mid.startswith(('engine/scene/', 'engine/render/')) or mid in ('parts/kit', 'parts/mix'):
         return 3
     if mid == 'parts/catalog' or re.match(r'^parts/(%s)/' % '|'.join(PART_KINDS), mid):
         return 4

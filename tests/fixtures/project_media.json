@@ -1,0 +1,292 @@
+{
+ "format": "mojipv.project",
+ "schema": 2,
+ "doc": {
+  "meta": {
+   "app": "2.1.0",
+   "lang": "auto"
+  },
+  "sheet": {
+   "next": 6,
+   "rows": [
+    {
+     "id": "r1",
+     "src": "[ti:海辺の写真]"
+    },
+    {
+     "id": "r2",
+     "src": "夕方の海が/光る"
+    },
+    {
+     "id": "r3",
+     "src": "[00:06.00]波の音を/聞いていた"
+    },
+    {
+     "id": "r4",
+     "src": ""
+    },
+    {
+     "id": "r5",
+     "src": "ロゴのように/残る夏"
+    }
+   ]
+  },
+  "timing": {
+   "snap": "off",
+   "lead": 0.12,
+   "tail": 0.25,
+   "leadIn": 1,
+   "outro": 2,
+   "tapLatency": 0.06
+  },
+  "song": null,
+  "look": {
+   "seed": 777,
+   "moodSeed": 888,
+   "aspect": "16:9",
+   "backdrop": "scene"
+  },
+  "pins": {
+   "line/r2:ornament#0": {
+    "v": "photoFrame",
+    "by": "user"
+   },
+   "line/r2:ornament#0@photoFrame.src": {
+    "v": "a1c2e3f4a5b6c7d8e9f0a1b2c",
+    "by": "user"
+   },
+   "line/r3:ground": {
+    "v": "myMed2d4f6a8b0c",
+    "by": "user"
+   },
+   "line/r3:ground@myMed2d4f6a8b0c.blur": {
+    "v": 12,
+    "by": "user"
+   },
+   "line/r5:avoid": {
+    "v": [
+     "filter.sliceGlitch",
+     "ground.myMed2d4f6a8b0c"
+    ],
+    "by": "user"
+   },
+   "line/r5:ornament#1": {
+    "v": "myMat1",
+    "by": "user"
+   },
+   "work:ground": {
+    "v": "photoPan",
+    "by": "user"
+   },
+   "work:ground@photoPan.image": {
+    "v": "a3f9c2d17b0e4a5c6d7e8f901",
+    "by": "user"
+   }
+  },
+  "salts": {},
+  "locks": {},
+  "filters": {},
+  "materials": {
+   "next": 2,
+   "list": [
+    {
+     "id": "m1",
+     "kind": "ornament",
+     "by": "user",
+     "name": {
+      "ja": "きらめきの窓",
+      "en": "Sparkle window"
+     },
+     "blurb": null,
+     "tags": [
+      "bright"
+     ],
+     "season": null,
+     "pool": true,
+     "rv": 1,
+     "recipe": {
+      "follow": "text",
+      "knobs": [],
+      "layers": [
+       {
+        "alpha": 1,
+        "appear": {
+         "at": "arrive",
+         "draw": "grow",
+         "dur": 0.5
+        },
+        "blur": 0,
+        "border": 8,
+        "comp": "screen",
+        "fit": "cover",
+        "inks": [
+         "ground"
+        ],
+        "layer": "mid",
+        "move": [],
+        "place": {
+         "anchor": "focus",
+         "spread": 1,
+         "x": 0,
+         "y": 0
+        },
+        "prim": "media",
+        "shape": "round",
+        "size": [
+         0.4,
+         0.4
+        ],
+        "src": "a3f9c2d17b0e4a5c6d7e8f901",
+        "time": {
+         "clipIn": 0,
+         "clipOut": 0,
+         "loop": "loop",
+         "speed": 1
+        }
+       }
+      ],
+      "parts": [],
+      "scope": "cut",
+      "seed": 1
+     }
+    }
+   ]
+  },
+  "media": {
+   "list": [
+    {
+     "id": "a1c2e3f4a5b6c7d8e9f0a1b2c",
+     "kind": "image",
+     "name": "ロゴ.png",
+     "mime": "image/png",
+     "bytes": 48213,
+     "w": 800,
+     "h": 800,
+     "dur": null,
+     "fps": null,
+     "frames": null,
+     "rot": 0,
+     "alpha": true,
+     "anim": false,
+     "audio": false,
+     "codec": null,
+     "color": "srgb",
+     "hdr": false,
+     "pv": 1,
+     "pool": false,
+     "ai": null
+    },
+    {
+     "id": "a2d4f6a8b0c2d4e6f8a0b2c4d",
+     "kind": "image",
+     "name": "空.jpg",
+     "mime": "image/jpeg",
+     "bytes": 3214567,
+     "w": 4032,
+     "h": 3024,
+     "dur": null,
+     "fps": null,
+     "frames": null,
+     "rot": 0,
+     "alpha": false,
+     "anim": false,
+     "audio": false,
+     "codec": null,
+     "color": "srgb",
+     "hdr": false,
+     "pv": 1,
+     "pool": true,
+     "ai": {
+      "caption": {
+       "ja": "夕方の空",
+       "en": "Evening sky"
+      },
+      "tags": [
+       "airy",
+       "bright"
+      ],
+      "colors": [
+       "#F2A65A",
+       "#3D5A80"
+      ],
+      "subject": null,
+      "text": {
+       "x": 0,
+       "y": 0,
+       "w": 1,
+       "h": 0.333
+      }
+     }
+    },
+    {
+     "id": "a3f9c2d17b0e4a5c6d7e8f901",
+     "kind": "video",
+     "name": "海辺.mp4",
+     "mime": "video/mp4",
+     "bytes": 48213344,
+     "w": 1920,
+     "h": 1080,
+     "dur": 12.512,
+     "fps": 29.97,
+     "frames": 375,
+     "rot": 0,
+     "alpha": false,
+     "anim": false,
+     "audio": true,
+     "codec": "avc1.640028",
+     "color": "bt709",
+     "hdr": false,
+     "pv": 1,
+     "pool": false,
+     "ai": null
+    },
+    {
+     "id": "a4b5c6d7e8f9a0b1c2d3e4f50",
+     "kind": "video",
+     "name": "きらめき.webm",
+     "mime": "video/webm",
+     "bytes": 2345678,
+     "w": 1280,
+     "h": 720,
+     "dur": 4,
+     "fps": 30,
+     "frames": 120,
+     "rot": 0,
+     "alpha": true,
+     "anim": false,
+     "audio": false,
+     "codec": "vp09.00.31.08",
+     "color": "bt709",
+     "hdr": false,
+     "pv": 1,
+     "pool": false,
+     "ai": null
+    }
+   ]
+  },
+  "output": {
+   "format": "kit",
+   "short": 1080,
+   "fps": 30,
+   "quality": "high",
+   "audio": true,
+   "range": null,
+   "name": null,
+   "kit": {
+    "overlay": true,
+    "bg": true,
+    "green": false,
+    "srt": true,
+    "lrc": false
+   }
+  }
+ },
+ "side": {
+  "looks": {
+   "list": [],
+   "cap": 50
+  },
+  "aiLog": [],
+  "asks": {}
+ }
+}

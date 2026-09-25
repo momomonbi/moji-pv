@@ -1,6 +1,7 @@
 /* 文字PVメーカー v2 — original work. Inspector field catalogue: FieldSpecs per page and section, and sectionsFor (DESIGN §6.4.4–§6.4.9, §4.23). */
-MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color', 'core/ease', 'core/doc', 'ui/selection'],
-  (P, R, SC, C, E, D, S) => {
+MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color', 'core/ease', 'core/doc', 'ui/selection',
+  'core/curve', 'core/shot'],
+  (P, R, SC, C, E, D, S, CV, SHOT) => {
     'use strict';
 
     // A FieldSpec (§4.23) is one row of the inspector: { id, path, scopes, el?, section, widget, label, hint?, basic,
@@ -86,7 +87,10 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
       switch (spec && spec.type) {
         case 'num': case 'int': return 'number';
         case 'bool': return 'toggle';
-        case 'enum': case 'ease': case 'order': case 'face': return 'choice';
+        // v2.1 one-time compatibility (DESIGN_2_1 §8.1) until the curve, shot, rig, partRefs and media widgets land:
+        // curves, shots and rigs are choices of their presets; partRefs and media fall back to plain text.
+        case 'enum': case 'ease': case 'curve': case 'shot': case 'rig': case 'order': case 'face': return 'choice';
+        case 'partRefs': case 'media': return 'text';
         case 'ink': case 'color': return 'color';
         case 'text': return 'text';
         case 'nudge': return 'number';
@@ -100,6 +104,9 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
       switch (spec && spec.type) {
         case 'enum': return spec.of.map((v) => (typeof v === 'number' ? { v, text: String(v) } : { v, label: 'opt.' + v, fallback: String(v) }));
         case 'ease': return E.EASES.map((v) => easeOption(v));
+        case 'curve': return Object.keys(CV.PRESETS).map((v) => ({ v, label: 'curve.' + v })).concat(E.EASES.map((v) => easeOption(v)));
+        case 'shot': return ['none'].concat(SHOT.SHOT_KEYS).map((v) => ({ v, label: 'shot.' + v }));
+        case 'rig': return ['none'].concat(SHOT.RIG_KEYS).map((v) => ({ v, label: 'rig.' + v }));
         case 'order': return SC.ORDERS.map((v) => ({ v, label: 'opt.order.' + v }));
         case 'face': return FACE_ROLES.map((v) => ({ v, label: 'fld.faceRole.' + v }));
         default: return [];

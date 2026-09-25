@@ -3926,3 +3926,75 @@ A pinned 切り替え「なし」 (the seam fallback, the hard cut) is applied b
 (not-applicable). `sourceAt` now reports the winning pin when a later cut has no seam and that pin is the hard cut
 (`hardCutSource`); a seam pin on the very first cut still reads as not applicable. This made ui_flows' `values` flow
 fail whenever its tile pick happened to be the hard cut. Test: fields.test.js 'a pinned hard cut … reads as pinned'.
+
+## v2.1 package A
+
+A.1, A.2 and A.3 of DESIGN_2_1 §8.1, delivered together: curves, shots and rigs, the recipe validator, areas, schema 2
+(materials, media, `output.kit`, `side.asks`) with the 1 → 2 migration, the material and media commands, `core/media`,
+the ParamSpec types `curve`, `shot`, `rig`, `partRefs` and `media`, the registry's shared params and `extend`, the
+`parts/mix` stub, and every string of §6.11, §11.7.11, §12.7 and §13.10.
+
+- **New modules:** `core/curve`, `core/shot`, `core/recipe`, `core/media` (L0), `planner/areas` (L2), `parts/mix` (L3,
+  stub: `derive` → `{ def: null }`, `registryFor(base)` → `base`, `materialHash` → `'00000000'`, `sampleDefs` → `[]`).
+  `build.py.layer_of` maps `parts/mix` to L3 (build_test `test_parts_mix_is_l3`).
+- **Changed:** `core/schema`, `core/registry`, `core/doc`, `core/migrate`, `core/commands` (33 commands), `core/types`,
+  `i18n/t` (the registry argument may be a function that returns the current, effective registry), `i18n/strings`,
+  `ui/fields` (one-time compatibility, below).
+- **Fixtures:** `project_v21.json` and `project_media.json` (schema 2, stored exactly as `serialize` writes them);
+  `corpus.V21_PROJECTS`, `ALL_PROJECTS` and `projects(names)`. The v2.0 corpus (`corpus()`) is unchanged, so every
+  existing golden keeps its inputs.
+
+**Frames and goldens.** `node tests/update_golden.js --check` reported `frame_hashes.json: matches` and
+`plan_hashes.json: DIFFERS`. The plan golden was regenerated (all 240 entries). Every arrive and depart decision now
+carries `p.flow = 'linear'`, and every dwell and lens decision carries `p.curve = 'linear'` (seams alike). These are
+constant autos with no random draw, so every pick and every frame is the same; the regenerated `frame_hashes.json` is
+byte-identical. The base registry version stays `1e6ef40c`: its signature is the kinds, the keys and each definition's
+own param names, and shared params are not part of it.
+
+**Decisions and deviations**
+
+- **String keys that already existed with another meaning:**
+  - `keys.title` is the keyboard help heading (キーボード操作), so §6.11's keyframe heading is `keys.heading` (キーフレーム /
+    Keyframes). `keys.item` is as designed.
+  - `opt.start` / `opt.end` are 行頭 / 行末 for the arrange `anchor` enum and stay that way. The curve editor's ends use
+    `curve.both` / `curve.start` / `curve.end`, which have the texts that §6.11 gives for `opt.*`. `opt.both` is new.
+  - `whyRule.role` existed; it now has the §6.11 text.
+  - `menu.clearDevice` (changed) is the existing key `cmd.file.clearDevice`, and its text is updated.
+  - `part.ground.photoPan` (changed): part labels live in their definitions (D§4.18.1). The new label 写真・動画 / Photo
+    or video comes with the photoPan upgrade in package G.3, which owns `parts/ground/photo.js`.
+  - "colour" in five en texts of §11.7.11 is written "color" (the ux-16 test asks for American spelling).
+  - `i18n.test.js` reads the four string tables from DESIGN_2_1.md at test time. It checks that every key exists and
+    that each single-key row has the design text. The two renamed keys are listed in the test (`DESIGN_KEY_HOME`).
+- **`ui/fields` compatibility:** `curve` → `choice` with presets and ease names (as §8.1 says). `ui_fields.test.js` asks
+  that every `SC.TYPES` entry has a widget, so `shot` and `rig` → `choice` (none and the presets), and `partRefs` and
+  `media` → `text`. Packages F and G replace these with their widgets.
+- **Recipe media cost:** "plus 1.5 ms with blur or alpha" (§11.5.8) is read as: the layer's `blur > 0`, or the asset has
+  alpha (its `doc.media` entry, passed as `ctx.media`). The layer's own `alpha` param does not count, because every layer
+  has one. Without a media list, only blur counts.
+  - **Design tension:** 0.4 + 1.5 = 1.9 ms is over the ornament budgets (1.2 ms per cut, 1.5 ms per run). So a blurred
+    or transparent-video media layer fits only in a ground material (2 ms), and the media fixture's ornament material
+    uses the MP4. If transparent overlays in ornaments are wanted, the budget or `mediaHeavy` needs a new number (C, E
+    or the lead); nothing else depends on it.
+- **Recipe normalize:**
+  - A composite kind whose `base` is not a valid part key is treated as a composite, and the base is reported `dropped`.
+  - `cost()` normalizes its input first, so raw input never throws.
+  - A particle field `dir` is rounded before and after the wrap, and 360 becomes 0. The fuzz test found that 359.9999999
+    normalized to 360 and then to 0; `normalize` is now idempotent there too.
+- **Media reducers** (the details §11.2.5 leaves open):
+  - `media.relink` to an asset that is already in the library keeps that entry and its place (the payload's metadata is
+    not applied) and removes `from`.
+  - A rewritten `@key` path replaces a pin already at the new path.
+  - Avoid lists rewritten by a relink are de-duplicated and sorted.
+  - `media.remove` leaves material recipes unchanged, as designed. `refsOf` still lists them, so the library can count
+    them.
+  - `entryProblems` returns `'field: what'` strings. `validate` adds the unique-id check.
+- **Files:** a file without a `doc` object is refused (`not-a-project`) before any migration step runs. `normalize`
+  fills a missing `materials.next` with one past the highest id.
+- **NOTES heading:** this section uses the lead's name, "v2.1 package A". §8 of DESIGN_2_1 suggests `## v2.1-<letter>`.
+
+**Until the other packages land.** `registryFor` returns the base registry, so pins with material or media keys
+(`myMat…`, `myMed…`) and the parts G adds (`photoFrame`) plan with `pin-bad-value`. `cam.*`, `rig*`, `motion.speed`,
+line `season` and `avoid` pins are stored, validated and scope-checked, but the planner does not read them yet (D).
+Shared `flow` and `curve` params are resolved into the plan but not applied by the engine yet (B). Linear is the
+identity, so this cannot change a frame. An `ease` pinned to a curve preset or a custom curve plays as linear until
+then (`behave.easeOf` falls back for names it does not know).

@@ -40,7 +40,7 @@ MV.def('i18n/t', [], () => {
   }
 
   // createT(lang, strings, registry?) → t(key, params?). A missing key is an error in dev builds and shows the key
-  // otherwise; an empty English text falls back to Japanese.
+  // otherwise; an empty English text falls back to Japanese. `registry` is a Registry or a function returning one.
   function createT(lang, strings, registry, opts) {
     const li = lang === 'en' ? 1 : 0;
     const table = strings || {};
@@ -63,7 +63,11 @@ MV.def('i18n/t', [], () => {
 
     t.lang = LANGS[li];
     t.has = (key) => Object.prototype.hasOwnProperty.call(table, key);
-    t.part = (kind, key) => (registry ? registry.label(kind, key, t.lang) : key);
+    // `registry` may be a function returning the current registry (v2.1: the effective registry with materials).
+    t.part = (kind, key) => {
+      const reg = typeof registry === 'function' ? registry() : registry;
+      return reg ? reg.label(kind, key, t.lang) : key;
+    };
     t.why = (code, params) => t('why.' + code, params);
     t.err = (code, params) => t('err.ai.' + code, params);
     // A label tuple [stringKey, params] (undo labels, look history) or plain text.

@@ -1,11 +1,18 @@
-/* 文字PVメーカー v2 — original work. Reading project files: JSON, schema upgrades, defaults, validation (DESIGN §3.2, §4.4). */
+/* 文字PVメーカー v2 — original work. Reading project files: JSON, schema upgrades, defaults, validation (DESIGN §3.2, §4.4; DESIGN_2_1 §2.2). */
 MV.def('core/migrate', ['core/doc'], (D) => {
   'use strict';
 
   const CURRENT_SCHEMA = D.CURRENT_SCHEMA;
 
-  // MIGRATIONS[n] turns a schema-n file into a schema-(n+1) file. Schema 1 is the first, so there are none yet.
-  const MIGRATIONS = Object.freeze({});
+  // MIGRATIONS[n] turns a schema-n file into a schema-(n+1) file. Each step is pure and touches nothing else.
+  // 1 → 2 (v2.1, DESIGN_2_1 §2.2): the material list and the media library, both empty. Pins, rows and every other
+  // field stay as they are; normalize fills output.kit and side.asks.
+  const MIGRATIONS = Object.freeze({
+    1: (file) => Object.assign({}, file, {
+      schema: 2,
+      doc: Object.assign({}, file.doc, { materials: { next: 1, list: [] }, media: { list: [] } }),
+    }),
+  });
 
   class MigrateError extends Error {
     constructor(code, message, problems) {
@@ -26,6 +33,7 @@ MV.def('core/migrate', ['core/doc'], (D) => {
     if (schema > CURRENT_SCHEMA) {
       throw new MigrateError('newer', 'made by a newer version (schema ' + schema + ' > ' + CURRENT_SCHEMA + ')');
     }
+    if (!isObject(json.doc)) throw new MigrateError('not-a-project', 'the file has no document');
     let file = json;
     while (schema < CURRENT_SCHEMA) {
       const step = MIGRATIONS[schema];

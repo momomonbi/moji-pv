@@ -1,4 +1,4 @@
-/* 文字PVメーカー v2 — original work. JSDoc type definitions mirroring DESIGN §3 (data model) and §4 (interfaces). */
+/* 文字PVメーカー v2 — original work. JSDoc type definitions mirroring DESIGN §3 (data model) and §4 (interfaces), with the DESIGN_2_1 additions. */
 MV.def('core/types', [], () => {
   'use strict';
   // This module has no runtime content: it only carries the @typedefs below for editors and reviewers.
@@ -9,7 +9,7 @@ MV.def('core/types', [], () => {
   /**
    * @typedef {Object} ProjectFile
    * @property {'mojipv.project'} format
-   * @property {number} schema                 1 in v2.0
+   * @property {number} schema                 1 in v2.0, 2 in v2.1 (core/migrate upgrades 1 → 2)
    * @property {Doc} doc                       undoable
    * @property {Side} side                     persisted, not undoable
    */
@@ -24,6 +24,8 @@ MV.def('core/types', [], () => {
    * @property {Object<string, number>} salts            'line/r4' | 'cut/r3~0' | 'cut/r3~0:depart' → positive integer
    * @property {Object<string, { n: number }>} locks     lineId → store revision when locked
    * @property {Object<string, KindFilter>} filters      per kind: arrange … theme
+   * @property {{ next: number, list: MaterialEntry[] }} [materials]   v2.1; next only grows, ids never reused
+   * @property {{ list: AssetEntry[] }} [media]          v2.1; the photo and video library (metadata only)
    * @property {OutputSettings} output
    */
   /** @typedef {{ id: string, src: string }} Row                      one line of the lyric box, raw text as typed */
@@ -60,15 +62,19 @@ MV.def('core/types', [], () => {
   /** @typedef {{ only: string[]|null, deny: string[]|null }} KindFilter */
   /**
    * @typedef {Object} OutputSettings
-   * @property {'mp4'|'png'|'pngAlpha'} format
+   * @property {'mp4'|'kit'|'webmAlpha'|'png'|'pngAlpha'} format
    * @property {720|1080|1440|2160} short
    * @property {24|30|60} fps
    * @property {'standard'|'high'|'max'} quality
    * @property {boolean} audio
    * @property {{ t0: number, t1: number }|null} range
    * @property {string|null} name
+   * @property {{ overlay: boolean, bg: boolean, green: boolean, srt: boolean, lrc: boolean }} [kit]   v2.1 (Filmora set)
    */
-  /** @typedef {{ looks: { list: LookEntry[], cap: number }, aiLog: AiLogEntry[] }} Side */
+  /**
+   * @typedef {{ looks: { list: LookEntry[], cap: number }, aiLog: AiLogEntry[],
+   *             asks?: Object<string, { text: string, at: number }> }} Side     asks: board drafts by area key (v2.1)
+   */
   /**
    * @typedef {Object} LookEntry     §3.7
    * @property {number} n
@@ -298,7 +304,8 @@ MV.def('core/types', [], () => {
   // ===== §4.2 Parameter specs =================================================================================
   /**
    * @typedef {Object} ParamSpec
-   * @property {'num'|'int'|'bool'|'enum'|'ease'|'order'|'ink'|'color'|'face'|'text'} type
+   * @property {'num'|'int'|'bool'|'enum'|'ease'|'order'|'ink'|'color'|'face'|'text'|'curve'|'shot'|'rig'|'partRefs'|'media'} type
+   * @property {'image'|'video'|'any'} [accept]   media: which assets fit (default 'any')
    * @property {number} [min]
    * @property {number} [max]              num/int; text: max length (default 40)
    * @property {number} [step]
@@ -669,6 +676,125 @@ MV.def('core/types', [], () => {
    * @property {(ctx: Object) => boolean} [when]
    */
   /** @typedef {(key: string, params?: Object) => string} Translate   i18n/t.createT(lang, strings, registry?) */
+
+  // ===== DESIGN_2_1 (v2.1) ======================================================================================
+
+  /**
+   * @typedef {string
+   *   | { bz: [number, number, number, number] }
+   *   | { sp: Array<[number, number]> }
+   *   | { ramp: { edge: number, ends: 'both'|'start'|'end', peak: number } }} Curve
+   * §2.4: an ease name, a preset (softEnds hushRushHush holdThenDash dashStop slowBloom fadeBrake snapSettle), a cubic
+   * Bézier (x ∈ [0,1], y ∈ [−0.5, 1.5]), speed knots (2–8; u from 0 to 1, non-decreasing; s ∈ [0, 8]; area > 0) or the
+   * two-slider ramp (edge ∈ [0, 0.4], peak ∈ [0.125, 8]). Canonical (core/curve.coerce): q3, sorted keys, frozen.
+   */
+  /**
+   * @typedef {Object} ShotKey
+   * @property {number|string} at        0..1 or an anchor: a rest sung mid end out b emph word:<k> beat:<n>
+   * @property {number} [dt]             −2..2 s (default 0)
+   * @property {string} aim              block emph first last reading frame point word:<k> line:<k> glyph:<k>
+   * @property {number} [fill]           text aims, 0.1..1.2 (default 0.6)
+   * @property {number} [zoom]           frame and point aims, 0.9..1.25 (default 1)
+   * @property {number} [px]             point aim, 0..1 (default 0.5)
+   * @property {number} [py]
+   * @property {number} [ox]             −0.4..0.4; absent = keep the aim where the composition put it
+   * @property {number} [oy]
+   * @property {number} [roll]           −15..15 deg (default 0)
+   * @property {Curve} [curve]           the move into this key; absent → the cut's cam.curve
+   */
+  /** @typedef {{ keys: ShotKey[], follow?: number }} Shot           2–6 keys; follow 0..1 (default 0) */
+  /** @typedef {string|Shot} ShotRef                                  a preset key, 'none' or a Shot */
+  /** @typedef {{ u: number, zoom?: number, x?: number, y?: number, roll?: number, curve?: Curve }} RigKey */
+  /** @typedef {{ keys: RigKey[] }} Rig                               2–4 keys, u non-decreasing */
+  /** @typedef {string|Rig} RigRef                                    a preset key, 'none' or a Rig */
+  /** @typedef {string[]} PartRefs                                    sorted unique "kind.key", ≤ 24 */
+  /**
+   * @typedef {Object} MaterialEntry     §5.7.1
+   * @property {string} id               'm' + base36, never reused
+   * @property {'arrange'|'arrive'|'depart'|'dwell'|'filter'|'ground'|'lens'|'ornament'|'seam'} kind
+   * @property {'ai'|'user'} by
+   * @property {{ ja: string, en: string }} name            ≤ 24 characters each; en '' falls back to ja
+   * @property {{ ja: string, en: string }|null} blurb      ≤ 80 characters each
+   * @property {string[]} tags                              the D§4.18.1 tag vocabulary
+   * @property {'spring'|'summer'|'autumn'|'winter'|null} season
+   * @property {boolean} pool                               auto picks may use it (default: by 'user')
+   * @property {number} rv                                  recipe version (core/recipe.RECIPE_V)
+   * @property {Object} recipe                              normalized (core/recipe.normalize); §5.7.2–§5.7.6, §11.5.8
+   */
+  /** @typedef {{ path: string, code: string, params: Object }} RecipeProblem   core/recipe problems */
+  /**
+   * @typedef {{ kind: 'work' } | { kind: 'song', n: number, t0: number, t1: number } | { kind: 'songKind', of: string }
+   *   | { kind: 'head', rowId: string } | { kind: 'para', rowId: string } | { kind: 'lines', ids: string[] }
+   *   | { kind: 'cut', key: string }} AreaRef
+   */
+  /**
+   * @typedef {Object} Area              planner/areas.resolve
+   * @property {AreaRef} ref
+   * @property {string} key              'work' | 'song:3@41.2-62.8' | 'kind:chorus' | 'head:r12' | 'para:r20' | 'lines:r3,r4' | 'cut:r7~5'
+   * @property {string} kind
+   * @property {LabelRef} label
+   * @property {string[]} lineIds        time order
+   * @property {string[]} cutKeys        time order
+   * @property {string[]} scopes         'work' | 'line/<id>' | 'cut/<key>'
+   * @property {number} t0
+   * @property {number} t1
+   * @property {number} n                number of lines
+   * @property {string[]} locked         the locked lines among lineIds
+   * @property {string|null} songKind    the section kind (song areas; heading areas: the kind its heading names)
+   */
+  /**
+   * Plan additions (plan.v 2; §2.7, §11.2.6): cut.rig (index into rigs), feat.sectionStart, grounds[].zoomed,
+   * rigs[] = { key, cuts, t0, t1, blend: null | { t0, t1 }, rig: Decision, curve: Decision },
+   * media = { [AssetId]: MediaMeta }.
+   * @typedef {{ key: string, cuts: string[], t0: number, t1: number, blend: { t0: number, t1: number }|null,
+   *             rig: Decision, curve: Decision }} RigRun
+   */
+  /**
+   * @typedef {Object} AssetEntry        §11.2.1
+   * @property {string} id               'a' + 24 hex digits of the SHA-256 of the bytes
+   * @property {'image'|'video'} kind
+   * @property {string} name             1–80 characters
+   * @property {string} mime             the sniffed type
+   * @property {number} bytes
+   * @property {number} w                displayed size, after orientation
+   * @property {number} h
+   * @property {number|null} dur         video and animation: seconds (q3)
+   * @property {number|null} fps
+   * @property {number|null} frames
+   * @property {0|90|180|270} rot
+   * @property {boolean} alpha
+   * @property {boolean} anim
+   * @property {boolean} audio
+   * @property {string|null} codec
+   * @property {'srgb'|'bt709'|'bt601'|'bt2020'|'p3'|'other'} color
+   * @property {boolean} hdr
+   * @property {number} pv               probe version
+   * @property {boolean} pool            おまかせでも使う
+   * @property {null|{ caption: { ja: string, en: string }, tags: string[], colors: string[],
+   *                   subject: Box01|null, text: Box01|null }} ai
+   */
+  /** @typedef {{ x: number, y: number, w: number, h: number }} Box01      fractions of the displayed image */
+  /** @typedef {{ kind: string, w: number, h: number, dur: number|null, fps: number|null, frames: number|null, rot: number, alpha: boolean, anim: boolean }} MediaMeta */
+  /** @typedef {{ clock: 'show'|'song', origin: number, clipIn: number, end: number, speed: number, loop: 'loop'|'hold', frame: number }} TimeSpec */
+  /**
+   * @typedef {{ sx: number, sy: number, sw: number, sh: number, dx: number, dy: number, dw: number, dh: number,
+   *             bx: number, by: number, bw: number, bh: number }} FitRect
+   * source rect in displayed px, destination rect and box in du (§11.5.2)
+   */
+  /**
+   * @typedef {Object} AssetStore        §11.3.6 (a still at its largest tier via get; frames by media time via frame)
+   * @property {(id: string) => Object|null} get
+   * @property {(id: string, m: number, want: { px: number, blur: number, exact: boolean, thumb: boolean }) => MediaFrame|null} frame
+   * @property {(list: Array<{ id: string, m: number }>) => void} want
+   * @property {(list: Array<{ id: string, m: number }>, opts: { signal?: Object }) => Promise<void>} ready
+   * @property {(id: string) => boolean} has
+   * @property {(id: string) => { state: 'ok'|'missing'|'loading'|'error', code?: string }} info
+   * @property {(event: 'ready'|'state', fn: Function) => Function} on
+   * @property {() => AssetStore} fork
+   * @property {() => { stillBytes: number, sessions: number, sessionPixels: number, held: number, decodeMs: number }} stats
+   * @property {() => void} dispose
+   */
+  /** @typedef {{ image: Object, w: number, h: number, rot: number, exact: boolean, index: number }} MediaFrame */
 
   return {};
 });

@@ -1,4 +1,4 @@
-/* 文字PVメーカー v2 — original work. Tests for core/registry: validation, sorting, pools, one-part registries. */
+/* 文字PVメーカー v2 — original work. Tests for core/registry: validation, sorting, pools, one-part registries, v2.1 extend. */
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -199,7 +199,7 @@ test('get, has, label, blurb, params and traits', () => {
   assert.equal(reg.label('arrive', 'missingKey', 'en'), 'missingKey');
   assert.equal(reg.blurb('seam', 'hardCut', 'en'), 'No transition');
   assert.deepEqual(reg.params('arrive', 'stubFade').map((p) => [p.name, p.shared]),
-    [['dur', true], ['each', true], ['order', true], ['ease', true]]);
+    [['dur', true], ['each', true], ['order', true], ['ease', true], ['flow', true]]);
   assert.deepEqual(reg.params('ground', 'stubTint').map((p) => p.name), ['amount', 'at']);
   assert.deepEqual(reg.params('theme', 'sumiWashi'), []);
   assert.equal(reg.params('arrive', 'nope'), null);
@@ -280,4 +280,126 @@ test('pool honours pool:false, role, orient, script, aspect, gate, scope and tex
   assert.deepEqual(reg.pool('seam', { scope: 'world' }), []);
   assert.deepEqual(reg.pool('filter', { texture: true }), ['grainFilm']);
   assert.deepEqual(reg.pool('nope', {}), []);
+});
+
+// --- v2.1 (DESIGN_2_1 §2.3, §3.6): curve params, def fields, key rules, extend ------------------------------------------
+
+const S = MV.use('core/schema');
+
+test('v2.1 shared params: ease is a curve with the v2 picks; flow and the curve params default to linear', () => {
+  assert.deepEqual(R.SHARED.arrive.ease.auto, { pick: ['expoOut', 'cubicOut', 'quadOut', 'backOut'], weights: [3, 3, 2, 1] });
+  assert.deepEqual(R.SHARED.depart.ease.auto, { pick: ['quadIn', 'cubicIn', 'expoIn', 'sineIn'], weights: [3, 2, 2, 1] });
+  assert.deepEqual({ ...R.SHARED.arrive.ease.label }, { ja: '緩急', en: 'Speed curve' });
+  const labels = { 'arrive.flow': ['出方の緩急', 'Stagger curve'], 'depart.flow': ['出方の緩急', 'Stagger curve'],
+    'dwell.curve': ['見せの緩急', 'Hold curve'], 'lens.curve': ['動きの緩急', 'Motion curve'],
+    'seam.curve': ['切り替えの緩急', 'Transition curve'] };
+  for (const [path, [ja, en]] of Object.entries(labels)) {
+    const [kind, name] = path.split('.');
+    const spec = R.SHARED[kind][name];
+    assert.equal(spec.type, 'curve', path);
+    assert.deepEqual({ ...spec.label }, { ja, en }, path);
+    assert.deepEqual({ ...spec.auto }, { value: 'linear' }, path);
+    assert.equal(spec.ui, path === 'lens.curve' ? undefined : 'advanced', path);
+    assert.deepEqual(S.validateSpec(name, spec), [], path);
+  }
+  // an old ease pin value is still a valid curve, and a curve pick list validates (§3.5 checkCandidate)
+  assert.equal(S.coerce(R.SHARED.arrive.ease, 'backOut'), 'backOut');
+  assert.deepEqual(S.validateSpec('ease', { type: 'curve', label: { ja: 'a', en: 'a' }, auto: { pick: ['expoOut', 'holdThenDash'] } }), []);
+  // a part may still narrow the ease auto
+  const defs = corpus.allStubParts();
+  defs.find((d) => d.key === 'stubFade').shared = { ease: { auto: { value: 'softEnds' } } };
+  assert.deepEqual(R.createRegistry(defs).params('arrive', 'stubFade').find((p) => p.name === 'ease').spec.auto, { value: 'softEnds' });
+});
+
+test('v2.1 def fields: lens frames/warp, arrange cam; createRegistry refuses myMat/myMed keys and `mine`', () => {
+  expectProblem('lens', 'stubDrift', (d) => { d.frames = 'yes'; }, 'frames must be a boolean');
+  expectProblem('lens', 'stubDrift', (d) => { d.warp = 1; }, 'warp must be a boolean');
+  expectProblem('arrange', 'stubBlock', (d) => { d.cam = 'soft'; }, 'cam must be one of any gentle none');
+  assert.deepEqual(problemsWith('lens', 'stubDrift', (d) => { d.frames = true; d.warp = false; }), []);
+  assert.deepEqual(problemsWith('arrange', 'stubBlock', (d) => { d.cam = 'gentle'; }), []);
+  expectProblem('arrive', 'stubFade', (d) => { d.key = 'myMat3'; }, 'added only through extend');
+  expectProblem('arrive', 'stubFade', (d) => { d.key = 'myMedAbc'; }, 'added only through extend');
+  expectProblem('arrive', 'stubFade', (d) => { d.mine = { id: 'm1' }; }, 'mine is allowed only');
+  assert.ok(R.NEEDS.includes('media'), 'needs: media (§11.5.7)');
+});
+
+function mat(kind, key, patch) {
+  const base = corpus.allStubParts().find((d) => d.kind === kind && d.fallback !== true && !d.fallback);
+  return Object.assign({}, base, { key, label: { ja: key, en: key }, pool: false, family: 'mine',
+    mine: { id: 'm' + key.slice(5), rhash: '0000abcd', cost: 0.2, by: 'ai' } }, patch || {});
+}
+
+test('extend: added defs join the base registry; the base is never mutated', () => {
+  const base = corpus.stubRegistry(MV);
+  const before = { version: base.version, keys: base.keys('ornament').slice(), all: base.all().length };
+  Object.freeze(base);
+  const ext = R.extend(base, [mat('ornament', 'myMat3'), mat('arrive', 'myMat1a', { pool: true })]);
+  assert.deepEqual(ext.problems, []);
+  assert.equal(ext.base, base);
+  assert.equal(ext.baseVersion, base.version);
+  assert.notEqual(ext.version, base.version);
+  assert.deepEqual(ext.keys('ornament'), [...base.keys('ornament'), 'myMat3'].sort());
+  assert.ok(ext.has('arrive', 'myMat1a') && ext.has('arrive', 'stubFade'));
+  assert.equal(ext.get('arrive', 'stubFade'), base.get('arrive', 'stubFade'), 'base defs are reused');
+  assert.deepEqual(ext.mine('ornament'), ['myMat3']);
+  assert.deepEqual(ext.mine('arrive'), ['myMat1a']);
+  assert.deepEqual(ext.mine('lens'), []);
+  assert.deepEqual(Object.keys(ext.extra).sort(), ['myMat1a', 'myMat3']);
+  assert.equal(ext.extra.myMat3.id, 'm3');
+  assert.ok(ext.pool('arrive', {}).includes('myMat1a'));
+  assert.ok(!ext.pool('ornament', {}).includes('myMat3'), 'pool: false materials are pin-only');
+  assert.equal(ext.fallback('arrive'), base.fallback('arrive'));
+  assert.equal(ext.label('ornament', 'myMat3', 'en'), 'myMat3');
+  assert.deepEqual(ext.params('ornament', 'myMat3').map((p) => p.name), base.params('ornament', base.keys('ornament')[0]).map((p) => p.name));
+  assert.deepEqual(ext.params('arrive', 'stubFade'), base.params('arrive', 'stubFade'));
+  assert.equal(ext.all().length, before.all + 2);
+  assert.deepEqual(base.keys('ornament'), before.keys);
+  assert.equal(base.version, before.version);
+  assert.equal(base.has('ornament', 'myMat3'), false);
+});
+
+test('extend: the key rule, required mine, duplicates and strict mode', () => {
+  const base = corpus.stubRegistry(MV);
+  const bad = [
+    mat('ornament', 'myMat3', { mine: undefined }),
+    Object.assign(mat('ornament', 'myMat4'), { key: 'stubRule' }),
+    Object.assign(mat('ornament', 'myMat5'), { key: 'myMedxyz' }),
+    mat('ornament', 'myMat6'), mat('ornament', 'myMat6'),
+    mat('ornament', 'myMat7', { fallback: true }),
+  ];
+  const ext = R.extend(base, bad, { problems: ['ornament/myMat9: derive: bad-layer'] });
+  assert.equal(ext.problems[0], 'ornament/myMat9: derive: bad-layer', "the caller's problems come first");
+  const text = ext.problems.join('\n');
+  assert.match(text, /ornament\/myMat3: mine must be an object/);
+  assert.match(text, /ornament\/stubRule: an added key must be myMat<id> or myMed<10 hex digits>/);
+  assert.match(text, /ornament\/myMedxyz: an added key/);
+  assert.match(text, /ornament\/myMat6: duplicate key in ornament/);
+  assert.match(text, /ornament\/myMat7: an added definition cannot be the fallback/);
+  assert.deepEqual(ext.mine('ornament'), ['myMat6']);
+  assert.ok(R.extend(base, [mat('ground', 'myMed3f9c2d17b0')]).has('ground', 'myMed3f9c2d17b0'), 'the media key rule');
+  assert.throws(() => R.extend(base, bad.slice(0, 1), { strict: true }), (e) => e.name === 'RegistryError' && e.problems.length === 1);
+  assert.throws(() => R.extend(null, []), (e) => e.name === 'RegistryError');
+});
+
+test('extend: version = base version + added keys, param names and what the planner reads', () => {
+  const base = corpus.stubRegistry(MV);
+  const v = (defs) => R.extend(base, defs).version;
+  const one = v([mat('ornament', 'myMat3')]);
+  assert.equal(v([mat('ornament', 'myMat3')]), one, 'deterministic');
+  assert.equal(R.extend(base, []).version, v([]));
+  assert.notEqual(v([]), base.version);
+  assert.equal(v([mat('ornament', 'myMat3', { mine: { id: 'm3', rhash: 'ffff0000', cost: 0.2, by: 'ai' } })]), one,
+    'a body edit (rhash) keeps the version');
+  assert.equal(v([mat('ornament', 'myMat3', { label: { ja: '別名', en: 'Other' } })]), one, 'labels are not read by the planner');
+  for (const patch of [{ tags: ['soft'] }, { season: 'spring' }, { weight: 2 }, { pool: true }, { family: 'petal' },
+    { gate: 'ornament' }, { traits: { roles: ['title'] } }, { scope: 'run' }, { follow: 'own' },
+    { params: { knob: { type: 'num', min: 0, max: 2, label: { ja: 'a', en: 'a' }, auto: { value: 1 } } } }]) {
+    const def = mat('ornament', 'myMat3', patch);
+    if (patch.params) def.params = Object.assign({}, mat('ornament', 'myMat3').params, patch.params);
+    const ext = R.extend(base, [def]);
+    assert.deepEqual(ext.problems, [], JSON.stringify(patch));
+    assert.notEqual(ext.version, one, JSON.stringify(patch));
+  }
+  const ext = R.extend(base, [mat('ornament', 'myMat3')]);
+  assert.equal(R.extend(ext, [mat('arrive', 'myMat4')]).baseVersion, base.version, 'extending an extension keeps the base version');
 });

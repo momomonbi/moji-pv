@@ -6,24 +6,30 @@ const stubs = require('../fixtures/stub_parts.js');
 
 const FIXTURES = path.resolve(__dirname, '..', 'fixtures');
 const PROJECTS = Object.freeze(['basic', 'vertical', 'lrc', 'long']);
+// v2.1 fixtures (schema 2): 'v21' has materials, camera and curve pins, line season and avoid, song sections and a board
+// draft; 'media' has four assets (PNG with alpha, JPEG, MP4, WebM with alpha), photoPan and photoFrame pins, a pooled
+// asset and output.kit (DESIGN_2_1 §8.1). They are not in PROJECTS, so the v2 goldens keep their keys; ask for them by
+// name or pass ALL_PROJECTS.
+const V21_PROJECTS = Object.freeze(['v21', 'media']);
+const ALL_PROJECTS = Object.freeze(PROJECTS.concat(V21_PROJECTS));
 const DEFAULT_ASPECTS = Object.freeze(['16:9', '9:16', '1:1']);
 
 function readFixture(name) { return fs.readFileSync(path.join(FIXTURES, name), 'utf8'); }
 function readJSON(name) { return JSON.parse(readFixture(name)); }
 
-// The saved text of a fixture project ('basic' | 'vertical' | 'lrc' | 'long').
+// The saved text of a fixture project ('basic' | 'vertical' | 'lrc' | 'long' | 'v21' | 'media').
 function projectText(name) {
-  if (!PROJECTS.includes(name)) throw new Error('corpus: unknown project ' + name);
+  if (!ALL_PROJECTS.includes(name)) throw new Error('corpus: unknown project ' + name);
   return readFixture('project_' + name + '.json');
 }
 
-// A fresh (unfrozen) { doc, side } of a fixture project.
+// A fresh (unfrozen) { doc, side } of a fixture project, as stored (the v2 fixtures are schema 1).
 function project(name) {
   const file = JSON.parse(projectText(name));
   return { doc: file.doc, side: file.side };
 }
 
-function projects() { return PROJECTS.map((name) => Object.assign({ name }, project(name))); }
+function projects(names = PROJECTS) { return names.map((name) => Object.assign({ name }, project(name))); }
 function planBasic() { return readJSON('plan_basic.json'); }
 function songDigest() { return readJSON('song_digest.json'); }
 function sampleLyrics() { return readFixture('sample_lyrics.txt'); }
@@ -36,11 +42,11 @@ function seedOf(...labels) {
   return h >>> 0;
 }
 
-// corpus(seeds = 20, aspects = ['16:9', '9:16', '1:1']) → [{ name, doc }]: every fixture project × aspect × seed, with
-// look.seed / moodSeed / aspect changed. Deterministic; every call returns fresh documents.
-function corpus(seeds = 20, aspects = DEFAULT_ASPECTS) {
+// corpus(seeds = 20, aspects = ['16:9', '9:16', '1:1'], names = PROJECTS) → [{ name, doc }]: every fixture project ×
+// aspect × seed, with look.seed / moodSeed / aspect changed. Deterministic; every call returns fresh documents.
+function corpus(seeds = 20, aspects = DEFAULT_ASPECTS, names = PROJECTS) {
   const out = [];
-  for (const name of PROJECTS) {
+  for (const name of names) {
     const base = projectText(name);
     for (const aspect of aspects) {
       for (let s = 0; s < seeds; s++) {
@@ -68,6 +74,7 @@ function stubRegistry(MVorRegistry) {
 }
 
 module.exports = {
-  FIXTURES, PROJECTS, readFixture, projectText, project, projects, planBasic, songDigest, sampleLyrics, seedOf, corpus,
+  FIXTURES, PROJECTS, V21_PROJECTS, ALL_PROJECTS, readFixture, projectText, project, projects, planBasic, songDigest, sampleLyrics,
+  seedOf, corpus,
   minimalFallbacks, stubParts, allStubParts, stubRegistry,
 };

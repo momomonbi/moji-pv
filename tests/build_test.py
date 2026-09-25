@@ -294,6 +294,22 @@ class Check(unittest.TestCase):
                    'engine/host/c.js': module('engine/host/c', ['engine/facade']), 'engine/facade.js': module('engine/facade', ['planner/p'])}
         self.check(allowed, ok=True)
 
+    def test_parts_mix_is_l3(self):
+        # DESIGN_2_1 §2.3: parts/mix is L3 (like parts/kit): L0, L1 and L3 only; not a part file; no part depends on it.
+        mix = {'parts/mix.js': module('parts/mix', ['core/a', 'i18n/b', 'parts/kit', 'engine/scene/s']),
+               'parts/kit.js': module('parts/kit', ['core/a']), 'core/a.js': module('core/a'),
+               'i18n/b.js': module('i18n/b', ['core/a']), 'engine/scene/s.js': module('engine/scene/s', ['core/a'])}
+        self.check(mix, ok=True)
+        self.check({'parts/mix.js': module('parts/mix', ['planner/p']), 'planner/p.js': module('planner/p')},
+                   r'layer: parts/mix → planner/p')
+        self.check({'parts/mix.js': module('parts/mix', ['engine/facade']), 'engine/facade.js': module('engine/facade')},
+                   r'layer: parts/mix → engine/facade')
+        self.check({'parts/mix.js': module('parts/mix', body='  const r = () => Math.random();\n  return { r };')},
+                   r'src/parts/mix\.js:4: lint Math\.random')
+        self.check({'parts/arrive/soft.js': module('parts/arrive/soft', ['parts/mix']), 'parts/mix.js': module('parts/mix')},
+                   'part files may depend only on parts/kit')
+        self.check({'engine/facade.js': module('engine/facade', ['parts/mix']), 'parts/mix.js': module('parts/mix')}, ok=True)
+
     def test_part_file_rules(self):
         kit = module('parts/kit')
 
