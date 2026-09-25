@@ -4158,3 +4158,13 @@ So Chrome accepts `MaxBlockAdditionID` and `BlockAdditionMapping` and reads the 
   sets `pts = i · DefaultDuration` (i = the presentation index) when a track has a DefaultDuration and every block time is
   within 0.5 ms of that grid. Otherwise it keeps the stored times (VFR). The frame-exactness tests of §11.8.3 then hold for
   our WebM files and for ffmpeg's alike.
+
+## CI: Node tests one file at a time
+
+On PR #4 one CI run failed `planning speed: re-planning project_long after an edit`, with batches of 10.1–16.2 ms against
+the 10 ms budget (the best of eight must stay within it). The other run on the same commit passed. The speed tests
+(planner_determinism, conformance, …) shared the runner's cores with the other test files, which `node --test` runs side
+by side; the H.1 property tests had just added CPU-heavy files. The budgets are unchanged. Instead, CI now runs
+`node --test --test-concurrency=1`, so each file has the CPU to itself. Locally that takes about 3 minutes (1215 tests),
+and the re-plan measures 5.8 ms. Run the Node tests the same way on a busy machine.
+

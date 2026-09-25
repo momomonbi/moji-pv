@@ -48,7 +48,10 @@ jobs:
       - name: Node tests
         # The glob reports every test. `node --test tests/node` also works: Node 22 loads tests/node/index.js, which
         # runs each file in its own process and reports one result per file.
-        run: node --test "tests/node/*.test.js"
+        # One file at a time: the speed budgets (planner_determinism, conformance, …) are measured on a CPU that no
+        # other test file shares. Run side by side on the runner's cores, a re-plan measured 10–16 ms against the
+        # 10 ms budget; alone it measures 5–6 ms.
+        run: node --test --test-concurrency=1 "tests/node/*.test.js"
 
       - name: Build the lab page
         run: python3 build.py --lab
