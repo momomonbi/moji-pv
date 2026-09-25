@@ -6462,3 +6462,260 @@ applied without conflicts. Node 1564 of 1564; build --check 211 modules.
 **Left open, as that section says:** unblurred video costs about 18–21 ms p50 in software (the row is the blurred `back`
 ground, the automatic depth of a video ground); whether the drawMedia gate waits for the draw to finish; figures from a
 reference laptop and a GPU; H.264 with reordered frames.
+
+## Perf: camerawork + materials row
+
+perf.py's row "long+camera+materials" (DESIGN_2_1 §7.4: project_long with the automatic camerawork and the heaviest
+allowed material in every slot; frame ≤ 2 × budget, so p95 ≤ 33.4 ms and p50 ≤ 20 ms) failed on CI (p95 36.7 ms). It now
+passes with the heaviest glyph work §5.8 admits in every entrance, hold and exit (not only the sample materials), by
+construction: the engine no longer does needless work on the frames that set the p95, and a glyph budget in each cut
+scene (DESIGN_2_1 §5.9.5) keeps what a material adds to its glyphs' drawing within a share, whatever the recipe. No test
+was loosened, the row got heavier, and the pixels of v2 documents are exactly those of 617e3e6 (the review round below
+replaced the first round's crops, which moved pixels by ≤ 2/255, and its per-glyph sprite cap).
+
+### What changed
+
+- **Stage split and meters for the lab (MEAS-1).** `__lab.perf({ flushStages: true })` reads one pixel of the frame
+  surface once the world is drawn (render option `flush`, lab only), so the canvas's raster time of the world counts as
+  `draw`; `drawMs` then holds the behave, draw and post stages of every frame. `perf({ meter: true })` adds `cover`:
+  per frame the share of the frame the glyph sprite draws cover (render option `meter`: each sprite draw's drawn rect,
+  bounding box within the frame; lab only), the number of sprite draws and the §5.9.5 model's cover of the same frame.
+  `perf` also reports `budget` (the glyph budget records of the window's cuts), `times` (per frame) and `slices`
+  (prepare's longest stretch between yields); `__lab.cuts(o)` lists a window's cuts with their text size and budget
+  records, `compare` takes `recipes` and `list`, and `recipes: 'heaviest'` names the lab's HEAVIEST text recipes.
+  Never part of perf.py's timing.
+- **Sprites rasterize when they are made (G3, first round, kept).** A canvas records its calls and rasterizes them when
+  its picture is first used, so a sprite made in `prepare` was still painted and blurred inside the first frame that
+  drew it. The host factory's `settle(canvas)` uses a new sprite's picture once on a private 1 × 1 canvas; the warm-up
+  (`renderer.warmAt(…, stop)`) stops after a glyph that made a sprite when the slice is due, and the facade walks the
+  same frame again after the yield.
+- **Rasters drawn scaled up are clipped round their ink, exactly (replaces the first round's G1 and G2).** Every glyph
+  raster is made and kept whole, exactly as at 617e3e6; on a host factory with `inkBox` (measureText's actual bounding
+  box) its entry keeps `ink`, the rect outside which it is transparent (`inkRect`: the ink box, half the outline, the
+  shadow or duo offset, 3 σ + 2 px). `draw.spriteAt` draws a raster that is scaled up on both axes with the same
+  `drawImage` call as always, inside a clip round the rect widened by `INK_CLIP` = 2 texels. The clip keeps every pixel
+  because of where it is placed (`draw.inkClip`):
+  - a transform that turns or skews the raster: all four sides. The canvas maps each pixel on its own there; a pixel
+    that the clip cuts or touches samples only transparent texels (a texel is ≥ 1 px when scaling up, and the bilinear
+    footprint is 2 × 2 texels).
+  - a scale-and-translate transform: the top, the bottom and the side where device rows end; the side where rows start
+    stays open, a texel beyond the quad. Measured first: clipping that side as well moves one column by 1–5/255 (a
+    software canvas steps along each row in fixed point from the row's first pixel, so a row that starts elsewhere rounds
+    a few texel weights differently; a micro-test reproduces it, and it is also why the first round's smaller images
+    sampled differently). Clipping the top, bottom and right, or a turned draw on all sides, changes nothing.
+  Draws that scale down (mip levels have a wider footprint), shards and the pixel mosaic are drawn as at 617e3e6. The
+  first round's whole-box scratch canvas, crop copies and pooled mosaic surface are gone; sprites take the bytes they
+  took at 617e3e6.
+- **The post stack draws on its own surfaces (POST-1, first round, kept); a filter that throws after drawing no longer
+  leaves a trace.** FxContext `own(src)` (DESIGN §4.18.11, additive): in `PO.run` it returns the filter's input itself,
+  with a new surface's state, because the stack owns every input and reads only what a filter returns; seams and other
+  callers get the copy as before. Filters that draw in place: grainFilm, rasterLines, dustSpecks, edgeShade,
+  cinemaBars, dotScreen, duoTone (its `out`; the tone layer stays a copy), paperTooth, softVeil, glowSpill, amberSpill,
+  afterImage, invertBlink; flashPop, chromaSlip and sliceGlitch read their input while drawing and keep their copy.
+  New in this round: when a filter throws after it has drawn on its input, `PO.run` returns `torn` and the renderer
+  renders that frame again with every filter copying (`PO.run`'s `copy`), reporting the error once, so the frame shows
+  what it showed at 617e3e6, where a skipped filter never drew on the frame. A second render only in that error case.
+- **A seam's surfaces are made in prepare.** A text seam takes six frame surfaces at once (its two sides and
+  sumiSeep's mask, feather, cut-in and result); the first seam frame of a session made them (the row's re~8 → rf~0 seam
+  start: draw 31.5 ms, then about 15). The preview warm-up (`warmAt`, a seam on screen, host canvas only) now calls
+  `pool.warm(6, settle, stop)`: the missing frame surfaces are made cleared and settled, one unit of work each (the
+  slice clock is asked after each, as after a glyph that made a sprite, so six 720p surfaces, 11–19 ms together, never
+  hold one slice); a warm pool costs nothing. The first seam frame: draw 19–23 ms. The recorder has no `settle`, so
+  Node op streams are unchanged.
+- **The glyph budget of material phases (DESIGN_2_1 §5.9.5; replaces the first round's `LIMITS.glyphSprites`).**
+  - *Model:* `draw.glyphCover` walks `drawGlyph`'s path and counts what it draws: the direct-path ink (and its echo and
+    tint copies), the halo (a glow or the text style's), the echo pairs, the body (a crossfaded pair, or one raster for
+    shards and the mosaic) and the tint pair, each as the bounding box of its drawn rect within the frame (at 720p or
+    larger: level ≤ 2 and shards whole; level ≥ 3 clipped as `spriteAt` clips). The ink is `draw.inkEm(style)` em
+    either side of the centre: 0.66, plus half the outline or the shadow's or duo's larger offset. Measured ink rects
+    reach 0.64 em for descenders and emoji under `textBaseline` 'middle' and 0.71 em with the shadow (at 96 and 480 px;
+    at 24 px the rects' own 2 px add up to 0.07 em, within the model's 2 px). This round's first draft took 0.62 em for
+    every style (±0.5 em and overhangs, a guess); a browser mutant that shrank it to 0.2 em survived, so nothing
+    checked it, and measuring showed it short (by 7 px on a 480 px 'g', 40 px with the shadow). `glyph_parity.py`
+    check 5 now holds every level-0 ink rect of check 3 to `inkEm`, and requires the model's cover of every frame of
+    the perf window to be at least what the sprite meter measures (model/meter at least 1.08 with the sample
+    materials and 1.04 with the heaviest, which draw up to 2.44 frames of sprite cover).
+  - *Fit, per cut at build:* each entrance, hold and exit whose part is a material (`def.mine`) is sampled every 1/30 s
+    over its window (at most 40; a hold 16) by evaluating the scene (`frame.evaluate`, the cut's own camera zoomed by
+    1.2 for a rig and a punch). It may add at most `SHARE` = 2 frames of cover over the same cut with the material's
+    masks all on. Over it, the material's behaviours are masked on the text's nodes (`behave.masked`: the values the
+    masked columns had before the behaviour ran are put back): the tint, then the echo, then the glow, then everything
+    that puts a glyph on the sprite path (blur, shards, the mosaic), then its size (sx, sy, z); the first step that fits
+    is kept. Each sample is evaluated as built and, when over, with every mask on; the steps between differ only in
+    sprite columns, which move nothing, so their cover is read from the two (a Node test checks it against direct
+    evaluation).
+  - A cut's window overlaps only its neighbours', so materials add at most 4 frames of glyph cover to any frame. The
+    budget depends on the scene alone (du, no clock), so preview equals export and every output size gets the same
+    masks. Catalog parts are never masked: v2 documents are unchanged (their op goldens and pixels, below).
+  - *Removed:* `LIMITS.glyphSprites`, `cost().sprites`, the problem `glyph-sprites` and `mat.why.glyph-sprites`, and
+    `ai/recipe`'s dropping of sprite tracks (`core/recipe.js`, `ai/recipe.js` and the string table are as at 617e3e6): a
+    material may use blur, glow, tint, echo (through parts) and size tracks together again; each scene decides what is
+    drawn.
+- **The row.** perf.py's camerawork + materials row now uses the lab's HEAVIEST text materials (every column that puts
+  a glyph on the sprite path at its §5.8 limit — blur 0.6 em, glow 1, tint 1 — size tracks ×2, a turn, the amp knob,
+  and an inner part that adds an echo (ghostConverge), a tint sweep (shimmerSweep) or a glow and tint (burnOut)), the
+  sample materials in the other slots, and fails when the budget was not exercised or a phase is over its share.
+
+### The review, problem by problem
+
+1. *Heavy materials the cap admits go over the budget; the row uses the light samples.* Fixed. The per-glyph count is
+   gone; each scene bounds what a material adds by its glyphs' drawn area. With the heaviest glyph work §5.8 admits in
+   every text slot the row passes (below; in its window 26 of 36 material phases are masked, and the largest fitted
+   phase adds 1.99 of its 2 frames). The step 7 recipes of the first round (blur + tint entrance, glow + tint + rot
+   hold, blur + tint exit), which failed the row at 35.5 ms, now give p95 26.0–28.2 ms (median 26.8, 3 fresh engines;
+   per-frame-min p95 24.5).
+2. *The pass relies on the preview warm-up; a 4 s window from 19 s is about 40 ms on re~8.* Addressed. The cold cost was
+   rasterizing and drawing re~8's giant blurred sprites; the budget takes back what the materials add there, and a
+   seam's surfaces are made in prepare. The same cold window (lab perf from 19 s for 4 s, a fresh engine each run, 5
+   runs interleaved): c88f936 p95 36.6–42.3 ms, each frame's fastest run at most 42.7 ms; now 22.7–25.4 ms, at most
+   26.1 ms; with the heaviest materials 24.5–28.8 ms, at most 28.5 ms. Documents without materials are as at v2:
+   seeking into a catalog part with blur on giant text costs what it did at 617e3e6.
+3. *G1 and G2 change v2 frames by up to 2/255.* Fixed: they are replaced by exact clips (above). v2 frames are those of
+   617e3e6 pixel for pixel (below), and `glyph_parity.py` check 4 requires every pixel equal again (the first round's
+   ≤ 2/255 tolerance is gone). No sign-off needed.
+4. *Not measured on CI's Google Chrome.* Still true: nothing is pushed from here and this machine has no Google Chrome.
+   Local numbers below; at CI's +10–15 %, perf.py's camera row (p50 15.8–16.9 ms, p95 25.6–27.4 ms here) would be
+   p50 17.4–19.4 and p95 28.2–31.5 against 20 and 33.4: within, with p50 the tight one.
+5. *The limits do not keep the heaviest allowed material within budget by construction.* As 1: the share is a bound on
+   drawn area per phase that holds whatever the recipe (the ladder's last step adds nothing), checked against the meter
+   (and the model's ink against measured ink) and by the row.
+6. *The cap can be bypassed; §7.2's "≤ 4 glyph sprites per glyph" is false.* The cap is gone. The model counts what
+   `drawGlyph` draws (echo pairs, the text style's halo, inner parts through the poses they actually write, since the
+   scene is evaluated), a Node test compares it with `drawGlyph`'s sprite lookups pose by pose, and §7.2 now states the
+   share (§5.9.5).
+7. *The cap removes a capability without the guarantee.* The cap, its problem, its string and the AI's dropping of
+   tracks are removed. A material is restricted only in the scenes where the model says it would add more than its
+   share, and only as far as needed (the first ladder step that fits).
+8. *Pixels of v2 documents change beyond 1/255; a clipped draw of the whole raster is not evaluated.* Evaluated and
+   adopted, with one refinement found by measuring: clipping the side where device rows start is not exact (1–5/255 in
+   a column), so that side stays open. Every pixel equal (3).
+9. *CI margin unconfirmed.* As 4.
+10. *Memory outside the §7.3 sprite budget (scratch canvas, pooled mosaic surface).* Both are gone with the crops. The
+    new `pool.warm` keeps at most 6 frame surfaces free, within the pool's own limit (10 below 1440p, 6 above) and
+    counted in its bytes, as a seam frame would have made them anyway.
+11. *A filter that throws after `fx.own()` leaves its partial drawing.* Fixed: the frame is rendered again with copies
+    (above); a Node test checks the output holds nothing of it and the error is reported once.
+
+### Measured (local headless Chromium, 720p; 4 CPUs shared with other sessions' test runs, load 1.8–4.8)
+
+A/B runs interleave the variants in one browser (lab perf = perf.py's row: a fresh engine per run, prepare, 300 frames
+from 20 s). "p95 med" is the median over runs; "per-frame min" is the p95 of each frame's fastest run (617e3e6's lab
+does not report per-frame times).
+
+| Session (rounds, load) | 617e3e6 | c88f936 (first round) | now, sample materials | now, heaviest materials |
+|---|---|---|---|---|
+| p95 med (6, 2.7–4.2) | 36.1 | 26.8 | 25.9 | 28.0 |
+| per-frame-min p95 | – | 23.7 | 22.6 | 24.7 |
+| p50 med / mean | 17.9 / 20.3 | 15.1 / 16.7 | 15.1 / 16.4 | 16.9 / 18.2 |
+| p95 med, after the pool.warm split (6, 2.6–4.2) | | 26.0 | 24.9 | 27.2 |
+| prepare's longest slice, median of runs (range) | | 19.4 (13–25) | 20.7 (14–27) | 30.0 (20–36) |
+
+- Heavy recipes, 3 fresh engines each (load 1.8–2.8), p95 median / per-frame-min p95: samples 24.7 / 23.0; the first
+  round's step 7 recipes 26.8 / 24.5 (c88f936: 35.5); the heaviest 25.4 / 24.7.
+- `SHARE` (the step 7 recipes, 3 fresh engines each, before the ink reach fix): 2 → p95 median 27.8 ms, 2.5 → 30.9,
+  3 → 32.3 (samples 23.9 / 26.0 / 27.6). 2 keeps the heaviest row about 15 % under the limit here, the room CI's slower
+  Chrome needs.
+- The slowest frames with the heaviest materials are where one cut's exit overlaps the next one's entrance (rg~0 →
+  rg~6 at 26.4 s, rh~0 → rh~9 at 28.1 s, rh~9 → ri~0 at 28.8 s: 25–32 ms at their fastest run), no longer re~8's
+  (its entrance, hold and exit are masked at steps 4, 3 and 4); the text seam into rf~0 is 24–28 ms.
+- Prepare slices: the heaviest materials make larger sprites and fit costlier cuts, so their slices are longer (a
+  single giant blurred raster, or one build, is not split). The fit in the browser: about 2 ms a cut on average,
+  3–15 ms for a cut with the heaviest materials (more while the JIT is cold).
+
+**perf.py, five runs of the final tree** (load 1.6–4.2; p50 / p95 ms; each project the better of 2 fresh engines, the
+camera row of 3):
+
+| Run | basic | vertical | lrc | long | long+camera+materials (heaviest) |
+|---|---|---|---|---|---|
+| 1 | 11.4 / 21.8 | 12.5 / 18.6 | 4.8 / 16.0 | 11.4 / 25.9 | 15.8 / 25.8 |
+| 2 | 11.3 / 20.5 | 12.8 / 19.6 | 5.6 / 16.6 | 11.6 / 22.5 | 16.9 / 27.4 |
+| 3 | 11.2 / 22.2 | 12.2 / 17.1 | 4.9 / 16.3 | 12.1 / 23.0 | 16.2 / 26.5 |
+| 4 | 10.5 / 19.9 | 12.0 / 16.7 | 5.1 / 15.5 | 12.2 / 23.4 | 16.6 / 27.3 |
+| 5 | 10.9 / 21.8 | 12.2 / 17.4 | 4.9 / 15.9 | 11.7 / 23.1 | 15.9 / 25.6 |
+
+Every camera row: behave p50 0.10 ms, 5 shots, 2 rig runs, material particles 126 × 1.00, glyph budget 36 material
+phases in the window, 26 masked, the largest fitted phase 1.99 of 2 frames. The first round's five runs had the row
+(with the sample materials) at p50 14.8–15.3, p95 25.0–27.5: the row now carries the heaviest allowed materials within
+the same p95, at about 1 ms more p50. The complete CI sequence ran green here on the final tree: `build.py --check`
+(204 modules), 1508 Node tests, `build.py --lab`, `build.py` (the pages rebuilt and committed), all 16 browser tests
+(perf.py's camera row inside it: p50 16.3 ms, p95 26.8 ms), `build_test.py`; `update_golden.js --check`: all three
+files match.
+
+### Goldens and pixel evidence
+
+- **Node op streams.** `settle`, `inkBox` and `pool.warm` act only on a host factory; the recording factory has none of
+  them, and no golden project has materials, so the glyph budget touches none. `node tests/update_golden.js --check`:
+  all three files match, as the first round wrote them. That round changed op hashes only (POST-1): each in-place
+  filter drops its copy's pool take (state reset, clearRect) and drawImage, and resets the state of its input instead.
+  Frames that moved, in both `frame_hashes_v2.json` and `frame_hashes.json`: basic 40/40, vertical 40/40, lrc 14/40
+  (frames 6, 10, 11, 14, 16, 25, 26, 27, 29, 30, 31, 32, 37, 38), long 40/40: exactly the frames where a filter or the
+  work texture runs. Pixels, in place vs the lab switch `postCopy`: basic, vertical, lrc, long and v21 × backdrops
+  scene, clear, black, chroma × camerawork on and pinned off (12 frames each at 480 px) plus the perf window (31
+  frames at 720p): 511 frames (185 with filters running), all identical; every catalog filter and the filter-stack
+  material on the sample cut at export and at adaptive level 2 (the half-resolution branch), 3 times each: identical.
+  `determinism.py` check 7 keeps this in CI. plan_hashes.json unchanged; registry catalog 1e6ef40c.
+- **Ink clips in the browser.** `glyph_parity.py` checks 3–4: 1620 rasters (18 graphemes × 5 styles × 3 sizes × levels
+  0–5), 1449 with an ink rect, no alpha outside a rect, rasters equal with and without `inkBox`; frames with and without
+  the clips over the perf window (sample and heaviest materials), basic, vertical, lrc, long and v21, and the probes blur
+  + shards, blur + mosaic, blur + glow and glow at 360p and 1080p: every pixel equal. Glyph parity is unchanged
+  (catalog MAE 1.293/255 horizontal, 0.827/255 vertical; examples 1.883, 1.356: the values of 617e3e6).
+- **Against a 617e3e6 build** (lab frames at export quality, FNV hashes of the pixels): basic 640 and 1920 px, vertical
+  1080 px, lrc 1280 px, long 1280 and 1920 px: 152 frames, all equal. v21 (a v2.1 document with materials): 27 of 30
+  equal; the three others are the entrances of r7~0 and r7~8, where its material `myMat1` is masked (r7~0: step 1, the
+  tint, added 2.85 frames; r7~8: step 4, the sprite columns, on edgeBleed's six 473 du glyphs, added 6.94).
+- **Tests.** New `tests/node/budget.test.js` (masked behaviours; the model against `drawGlyph`'s lookups, the text
+  style's halo; the fit: no budget without materials, every material phase within the share or fully masked, the step
+  before over it, the ladder monotone, all evaluated directly; purity: the same records and frames from two engines, the
+  live pose, matrices and alphas put back; the same masks at every output size; the samples on small text left as
+  made). `sprites.test.js` rewritten for ink rects and clips (the clipped draw is the unclipped call inside a clip;
+  `inkClip`'s cases; shards and mosaics as before). `facade.test.js`: the torn filter; `pool.warm` (its `stop`) and the
+  seam warm-up (host canvas only; the surfaces spread over slices, at most 2 in one). `lens_filter_seam.test.js`:
+  `PO.run`'s torn and copy. `recipe.test.js`, `ai_recipe.test.js`, `mix.test.js`: the cap's tests replaced by the
+  recipes it refused, now valid. Browser: `glyph_parity.py` checks 3–5, perf.py's row.
+- **Mutation checks.** Node, 18 mutants, all killed: masks that do not restore, a fit that always takes the last step
+  or keeps no masks, the two-record shortcut ignoring the masked record, the tint pair or echo or the style's halo not
+  counted, the open side on a turned draw or on the quad edge, `torn` never set or not redone, the live pose not put
+  back, masks over the whole behaviour range, a blurred ink rect without its blur pad, clipping a draw scaled down, the
+  build skipping the fit, the shortcut ignoring the share, `pool.warm` ignoring `stop`. Browser (`glyph_parity.py`):
+  the left side clipped too, a 1 σ blur pad, the model's clip pad without the blur, the model's ink at 0.62 em, the
+  shadow's reach left out: killed. Survived: `INK_CLIP` = 0 (no widening of the clip), equivalent here because every
+  ink rect already carries 2 px beyond the ink (check 3 finds no alpha on the rects' own border); the 2 texels are a
+  margin for the bilinear footprint, kept.
+
+### Open, for the lead
+
+- (a) Nothing bounds post per cut or per frame: catalog pins on filter#0–#2 alone can exceed the budget (ROW-1a,
+  POST-2). The row's filter slot keeps the sample stack (grainFilm + edgeShade, 4 passes).
+- (b) Once filters have time weights, the row should use the heaviest stack the limit admits (ROW-1b).
+- (c) `SHARE` = 2 is set from the measurements above. With the heaviest materials the row's p50 is the tighter of its
+  two limits (p50 15.8–16.9 ms here against 20; CI's Chrome +10–15 %).
+- (d) The budget acts silently, like `mixShare`: a material that is masked in a cut shows less there (no warning or why
+  text yet). A `material-lightened` warning would be a §2.8 addition.
+- (e) The fit costs build time: with the heaviest materials in every slot, a cut builds in 3.0 ms p50 (1.0 ms without
+  the budget), 8–10 ms p95 in Node; within §7.2's ≤ 4 ms per cut at p50, not at p95. Material phases within their
+  share cost one evaluation per sample. In the browser a build is one unit of prepare, so such a cut lengthens a slice
+  (above).
+- (f) Documents without materials keep v2's costs: a catalog part with blur and tint on giant text is not budgeted (the
+  budget only masks materials, so v2 frames stay as they are).
+- (g) The model's ink reach (`inkEm`) is measured on the test machine's fallback faces (check 3's graphemes and styles);
+  a face whose ink reaches further than 0.66 em from the centre (up to the sprite box's 0.8 em) is counted short by
+  that difference on the direct path. `glyph_parity.py` fails on the CI fonts if theirs do.
+- (h) Not measured on CI's Google Chrome (nothing pushed).
+
+## Lead: integrating the camerawork + materials row work
+
+The row work ("## Perf: camerawork + materials row", 42f6874 on 617e3e6) is integrated on top of main (5e6349d: G.3,
+G.4, the media-row work, the registry fix). Two files conflicted, both tests that both works extended:
+`tests/browser/determinism.py` keeps the media check as check 7 and the post-in-place check as check 8, and
+`tests/browser/perf.py`'s description takes the row work's camera paragraph and keeps the media row's text. Node: all
+pass; build --check 212 modules.
+
+- **`tests/golden/project_media.json` regenerated on purpose.** The row work's tree predates G.3, so it could not update
+  this golden. The plan hash and the registry are unchanged; 16 of the 40 frame op hashes change, for the same reasons
+  `frame_hashes.json` changed in the row work (the post stack drawing in place, the ink clips, the glyph budget). The
+  pixel checks of determinism.py (check 8) and glyph_parity.py cover the equality of pixels.
+- **Decisions asked of the lead:** `SHARE` = 2 frames of glyph cover per material phase is accepted as measured (2.5 and
+  3 were slower); it is re-checked against CI's Google Chrome figures of this PR. The budget acts silently, like
+  `mixShare`; a "material-lightened" note is not added (a beginner sees a lighter cut, not an error). The build time
+  with the heaviest materials (3.0 ms p50, 8–10 ms p95 per cut in Node, over §7.2's 4 ms at p95) stays open: it is paid
+  in prepare slices, not in frames, and no document without heavy materials is affected.

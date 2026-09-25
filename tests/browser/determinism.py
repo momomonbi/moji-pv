@@ -26,6 +26,12 @@ The windows cover entrances, exits, a seam and the texture filter. Two targeted 
    blur baked by the store (DESIGN_2_1 §11.4.6): every export frame of it must be baked (MediaFrame.blur > 0), no draw
    may fall back to the per-frame blur (FrameStats.media.fallback 0), and the paused preview ends on the baked look too.
    --no-media skips it.
+8. Filters that draw on the post stack's own surface (fx.own; NOTES "Perf: camerawork + materials row", POST-1) give
+   the pixels they gave when every filter copied its input (lab switch postCopy): the fixture projects basic, vertical,
+   lrc, long and v21 × the backdrops scene, clear, black and chroma × the automatic camerawork on and pinned off, and
+   the perf.py camerawork + materials window, at export quality; then every screen effect of the catalog and the
+   filter-stack material on the sample cut, at export quality and at adaptive level 2 (the half-resolution branch).
+   The frames must be identical, and filters must have run in them.
 Registries: the catalog (what ships) and the examples, when the page has them; --parts picks one.
 Google Fonts are blocked (fallback faces).
 Run: PW_EXECUTABLE=/opt/pw-browsers/chromium python3 tests/browser/determinism.py [--parts catalog] [--projects basic,lrc]
@@ -56,6 +62,9 @@ MIXED_SIZE = (960, 540)
 MIXED_BEFORE = ({'w': 1104, 'h': 621}, {'w': 835, 'h': 470}, {'textScale': 1.04}, {'textScale': 0.96}, {'textScale': 1.08},
                 {'textScale': 0.92})
 MIXED_BLURS = (1.0, 3.0, 6.0, 12.0)
+POST_PROJECTS = (('basic', 24), ('vertical', 24), ('lrc', 24), ('long', 60), ('v21', 24))
+POST_BACKDROPS = ('scene', 'clear', 'black', 'chroma')
+POST_FRAMES = 12
 
 
 def times_at(fps, t0, t1):
@@ -211,6 +220,57 @@ async def check_media(browser, failures):
               max([x['mae'] for x in r['preview']] or [0])))
 
 
+async def check_post_in_place(page, info, failures):
+    """Check 8: filters drawing on the stack's own surface give the frames the copying stack gave."""
+    bad, frames, drawn = 0, 0, 0
+    for project, end in POST_PROJECTS:
+        times = [0.5 + (end - 0.5) * i / (POST_FRAMES - 1) for i in range(POST_FRAMES)]
+        for camera in (None, 'off'):
+            for backdrop in POST_BACKDROPS:
+                rows = await page.evaluate('(o) => window.__lab.compare(o)', {
+                    'parts': 'catalog', 'project': project, 'camera': camera, 'backdrop': backdrop, 'times': times, 'w': 480,
+                    'a': {}, 'b': {'postCopy': True}})
+                frames += len(rows)
+                drawn += sum(1 for r in rows if r['passes'] > 0)
+                for r in rows:
+                    if r['max'] > 0:
+                        bad += 1
+                        failures.append('post in place: %s camera %s backdrop %s t=%.2f differs by %d/255 on %d px' % (
+                            project, camera or 'auto', backdrop, r['t'], r['max'], r['n']))
+    if 'materials' in info['sources']:
+        rows = await page.evaluate('(o) => window.__lab.compare(o)', {
+            'parts': 'materials', 'project': 'long', 'camera': True, 'materials': True, 'w': 1280,
+            'times': [20 + i / 3 for i in range(31)], 'a': {}, 'b': {'postCopy': True}})
+        frames += len(rows)
+        drawn += sum(1 for r in rows if r['passes'] > 0)
+        bad += sum(1 for r in rows if r['max'] > 0)
+        if any(r['max'] > 0 for r in rows):
+            failures.append('post in place: the perf.py materials window differs')
+    if drawn < frames // 4:
+        failures.append('post in place: filters ran in only %d of %d frames' % (drawn, frames))
+    print('%s post stack in place = copying: %d frames (%d with filters) identical' % (
+        'FAIL' if bad else 'ok  ', frames, drawn))
+    parts = []
+    for src in [x for x in ('catalog', 'materials') if x in info['sources']]:
+        keys = info['parts'][src].get('filter', [])
+        parts += [(src, k) for k in keys]
+    bad, ran = 0, 0
+    for src, key in parts:
+        for quality, level in (('export', 0), ('preview', 2)):
+            for u in (0.2, 0.5, 0.8):
+                r = await page.evaluate('(o) => window.__lab.comparePart(o)', {
+                    'parts': src, 'kind': 'filter', 'key': key, 'u': u, 'quality': quality, 'level': level,
+                    'params': {'when': 'always'}, 'a': {}, 'b': {'postCopy': True}})
+                ran += 1 if r['passes'] > 0 else 0
+                if r['max'] > 0:
+                    bad += 1
+                    failures.append('post in place: %s filter/%s (%s, level %d, u %.1f) differs by %d/255 on %d px' % (
+                        src, key, quality, level, u, r['max'], r['n']))
+    if ran < len(parts) * 6:
+        failures.append('post in place: a screen effect did not run on the sample cut (%d of %d)' % (ran, len(parts) * 6))
+    print('%s %d screen effects in place = copying at export and at half resolution' % ('FAIL' if bad else 'ok  ', len(parts)))
+
+
 def sources_of(info, wanted):
     if wanted:
         return [wanted]
@@ -238,6 +298,7 @@ async def run(args):
                 await check_mixed_em(page, src, failures)
                 if src == 'catalog':
                     await check_camera(page, src, failures)
+                    await check_post_in_place(page, info, failures)
             violations = await csp_violations(page)
             if violations:
                 failures.append('CSP violations: %r' % violations)

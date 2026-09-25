@@ -549,6 +549,18 @@ test('derive refuses what core/recipe, the base registry or the kit refuse; reco
   assert.equal(frames.def.frames, true);
 });
 
+test('derive: blur, glow, tint, size tracks and inner parts with an echo are all accepted; each scene decides what is drawn', () => {
+  const tr = (col, from, to) => ({ col, from, to: to === undefined ? (col === 'alpha' || col === 'sx' || col === 'sy' ? 1 : 0) : to });
+  const heavy = MIX.derive(entry('arrive', { knobs: [{ what: 'amp' }], parts: [{ key: 'ghostConverge' }, { key: 'inkRise' }],
+    motion: { tracks: [tr('y', 0.6), tr('alpha', 0), tr('blur', 0.6), tr('glow', 1), tr('tint', 1), tr('sx', 3), tr('sy', 3), tr('rot', -30)] } }), BASE);
+  assert.ok(heavy.def, JSON.stringify(heavy.problems));
+  assert.deepEqual(heavy.problems, []);
+  assert.equal(heavy.def.mine.cost.sprites, undefined, 'no per-recipe sprite count (DESIGN_2_1 §5.9.5)');
+  const hold = MIX.derive(entry('dwell', { osc: [{ col: 'glow', amp: 1, hz: 0, wave: 'beat' }, { col: 'tint', amp: 1, hz: 0.5 },
+    { col: 'rot', amp: 30, hz: 0.3 }, { col: 'sx', amp: 0.3, hz: 0.5 }], parts: [{ key: 'shimmerSweep' }] }), BASE);
+  assert.ok(hold.def && hold.problems.length === 0, JSON.stringify(hold.problems));
+});
+
 test('derive: filter stacks bind their inner filters (stage, cost, passes, alphaSafe, needs) and stay flash-free', () => {
   const def = MIX.derive(entry('filter', RECIPES.filter), BASE).def;
   const a = BASE.get('filter', 'grainFilm'), b = BASE.get('filter', 'edgeShade');

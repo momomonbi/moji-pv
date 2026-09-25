@@ -144,8 +144,7 @@ MV.def('parts/filter/flash', ['parts/kit'], (K) => {
     const k = fx.tick(p.rate, age);
     if (k >= 2 * blinks || k % 2 === 1) return src;
     if (!(p.amount * flashScale(fx) > SAFE_AMOUNT)) return src;
-    const out = fx.take(), g = out.ctx;
-    g.drawImage(src.canvas, 0, 0);
+    const out = fx.own(src), g = out.ctx;
     g.globalCompositeOperation = 'difference';
     g.fillStyle = '#FFFFFF';
     g.fillRect(0, 0, fx.w, fx.h);

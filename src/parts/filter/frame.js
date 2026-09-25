@@ -8,12 +8,6 @@ MV.def('parts/filter/frame', ['parts/kit'], (K) => {
   // Compositions that set words against the top or bottom edge, where letterbox bars would cover them.
   const EDGE_HUGGERS = Object.freeze(['cornerNote', 'hangingTags', 'tickerMarquee']);
 
-  function copyOf(fx, src) {
-    const out = fx.take();
-    out.ctx.drawImage(src.canvas, 0, 0);
-    return out;
-  }
-
   // --- edgeShade -----------------------------------------------------------------------------------------------------
 
   // A vignette: an elliptical radial gradient (the frame's own proportions) from clear inside `size` to dark at the
@@ -44,7 +38,7 @@ MV.def('parts/filter/frame', ['parts/kit'], (K) => {
     if (!(dark >= 1 / 255)) return src;
     const size = p.size;
     const layer = fx.layer('edgeShade:' + size, (g, w, h) => vignette(g, w, h, size));
-    const out = copyOf(fx, src), g = out.ctx;
+    const out = fx.own(src), g = out.ctx;
     g.globalAlpha = dark;
     g.drawImage(layer, 0, 0);
     g.globalAlpha = 1;
@@ -73,7 +67,7 @@ MV.def('parts/filter/frame', ['parts/kit'], (K) => {
   function bars(fx, src, p) {
     const bh = Math.round(clamp(p.size * Math.min(2 * p.amount, 1.5), 0, 0.3) * Math.min(fx.w, fx.h));
     if (bh < 1) return src;
-    const out = copyOf(fx, src), g = out.ctx;
+    const out = fx.own(src), g = out.ctx;
     g.fillStyle = '#000000';
     g.fillRect(0, 0, fx.w, bh);
     g.fillRect(0, fx.h - bh, fx.w, bh);

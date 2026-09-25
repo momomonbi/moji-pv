@@ -1,7 +1,7 @@
 /* 文字PVメーカー v2 — original work. Scene build: one Plan cut (or ground segment) → node table + behaviours (DESIGN §4.17.5; DESIGN_2_1 §3.10, §5.9.4, §11.3.7). */
 MV.def('engine/scene/build', ['core/hash', 'core/rng', 'core/schema', 'engine/scene/table', 'engine/scene/builder',
-  'engine/scene/behave', 'engine/scene/frame', 'engine/scene/shot'],
-(H, RNG, SCH, T, B, BH, F, SHOT) => {
+  'engine/scene/behave', 'engine/scene/frame', 'engine/scene/shot', 'engine/scene/budget'],
+(H, RNG, SCH, T, B, BH, F, SHOT, BG) => {
   'use strict';
 
   const SAFE = 0.05;              // safe margin: 5% of the short side on every edge
@@ -332,11 +332,18 @@ MV.def('engine/scene/build', ['core/hash', 'core/rng', 'core/schema', 'engine/sc
     for (const b of checked(lensB, 'lens/' + lens.def.key)) builder.sb.behave(b);
     if (shot) for (const b of shot.behaviours) builder.sb.behave(b);
 
-    return sceneOf(builder, {
+    const scene = sceneOf(builder, {
       key: cut.key, fp: cut.fp, kind: 'cut', t0: cut.t0, cam, text: range, span: { a: cut.a, b: cut.b }, times, target,
       focus, warnings: warnings.concat(overfullOf(builder, cut)), svc, shot: shot ? shot.track : null,
       lean: shot ? shot.lean : null,
     });
+    // the glyph budget of material phases (DESIGN_2_1 §5.9.5): may mask what a material writes to the sprite columns. The
+    // phases as made stay on the scene, not enumerable, for the tests and the lab.
+    const phases = [{ phase: 'arrive', def: arrive.def, list: arriveB }, { phase: 'dwell', def: dwell.def, list: dwellB },
+      { phase: 'depart', def: depart.def, list: departB }];
+    scene.spriteBudget = BG.fit(scene, D, phases);
+    Object.defineProperty(scene, 'budgetPhases', { value: Object.freeze(phases), enumerable: false });
+    return scene;
   }
 
   function buildOrnaments(builder, base, slots, els, reg, cut, hints, warnings, where, ax) {
@@ -457,6 +464,7 @@ MV.def('engine/scene/build', ['core/hash', 'core/rng', 'core/schema', 'engine/sc
   //   cam              the camera node (frame.cameraAt reads its live pose)
   //   shot, lean       (DESIGN_2_1 §3.10) the cut's shot Track and follow Lean, or null
   //   media            (DESIGN_2_1 §11.3.7) [{ node, id, time: TimeSpec | null }] of the media nodes, in node order
+  //   spriteBudget     (DESIGN_2_1 §5.9.5, cuts) the glyph budget record of engine/scene/budget.fit, or null
   function sceneOf(builder, o) {
     const behaviours = builder.seal();
     const glyphKeys = new Set();
@@ -470,7 +478,7 @@ MV.def('engine/scene/build', ['core/hash', 'core/rng', 'core/schema', 'engine/sc
       span: o.span, warnings: o.warnings, glyphKeys: [...glyphKeys].sort(), provisional: o.svc.provisional === true,
       stores: builder.stores, times: o.times, target: o.target, focus: o.focus,
       fontKey: o.svc.text ? o.svc.text.key : null,
-      shot: o.shot || null, lean: o.lean || null, media: builder.mediaList(),
+      shot: o.shot || null, lean: o.lean || null, media: builder.mediaList(), spriteBudget: null,
     };
   }
 

@@ -12,8 +12,7 @@ MV.def('parts/filter/trail', ['parts/kit'], (K) => {
   function trail(fx, src, p) {
     const n = Math.max(1, Math.min(MAX_TRAILS, p.trails | 0));
     if (!(p.amount > 0.01)) return src;
-    const out = fx.take(), g = out.ctx;
-    g.drawImage(src.canvas, 0, 0);
+    const out = fx.own(src), g = out.ctx;
     for (let k = n; k >= 1; k--) {
       const ghost = fx.textAt(k * p.gap);
       g.globalAlpha = clamp(p.amount * p.strength * (1 - (k - 1) / (n + 0.5)));

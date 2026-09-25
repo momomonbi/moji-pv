@@ -176,6 +176,20 @@ test('fromAi: over the budget → counts × 0.9 until it fits (ai.warn.matScaled
   deepEqual(RECIPE.fromAi(heavy, reg), res);
 });
 
+test('fromAi: blur, glow and tint together are kept whole (no ai.warn.matScaled): each scene decides what is drawn (§5.9.5)', () => {
+  const heavy = ai({ kind: 'arrive', layers: [], tracks: [{ col: 'y', from: 0.6, to: 0 }, { col: 'blur', from: 0.3, to: 0 },
+    { col: 'glow', from: 1, to: 0 }, { col: 'tint', from: 1, to: 0 }, { col: 'alpha', from: 0, to: 1 }] });
+  const res = RECIPE.fromAi(heavy, reg);
+  valid(res.entry);
+  deepEqual(res.entry.recipe.motion.tracks.map((t) => t.col), ['y', 'blur', 'glow', 'tint', 'alpha']);
+  assert.ok(!res.warnings.some((w) => w[0] === 'ai.warn.matScaled'));
+  const hold = RECIPE.fromAi(ai({ kind: 'dwell', layers: [], osc: [{ col: 'glow', amp: 1, hz: 0, wave: 'beat', phase: 'same' },
+    { col: 'tint', amp: 1, hz: 0.5, wave: 'sine', phase: 'same' }], parts: [{ key: 'swaySwing', params: [] }] }), reg);
+  valid(hold.entry);
+  deepEqual(hold.entry.recipe.osc.map((o) => o.col), ['glow', 'tint']);
+  assert.ok(!hold.warnings.some((w) => w[0] === 'ai.warn.matScaled'));
+});
+
 test('fromAi: the flash rule: a big layer that blinks is calmed (ai.warn.matFlash)', () => {
   const blink = ai({ scope: 'cut', layers: [layer({ prim: 'fill', layer: 'far', stops: ['accent@0', 'ground@1'], move: 'beat', moveWhat: 'alpha', moveAmp: 0.9, moveHz: 2 }),
     layer({ prim: 'pattern', pattern: 'stripes', layer: 'far', move: 'sine', moveWhat: 'alpha', moveAmp: 0.2, moveHz: 4, count: 1 })], knobs: ['speed'] });

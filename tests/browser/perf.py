@@ -10,9 +10,13 @@ project is played twice, each time on a fresh engine whose scenes and sprites st
 lower p95 is judged, which discounts time other processes took from the shared CPUs (INT-LEAD: long's p95 spread 30–35 ms
 between identical single runs here); a slow draw path is slow in both runs.
 DESIGN_2_1 §7.4 (+): project_long with the automatic camerawork (the planner's shots, under a pinned rig because the
-project's own rig runs draw none) plus the sample material of each kind in every slot it fits (registry 'materials'):
-the behave stage (evaluation and world solve) must stay ≤ 0.8 ms p50 at 720p and the frame within twice the budget. Material particles are drawn by paints, so their budget is read from the
-chosen definitions (Σ mine.cost.particles, scaled by env.mixShare to ≤ 400), not from FrameStats.drawn.particles.
+project's own rig runs draw none) plus a material in every slot it fits (registry 'materials'): the heaviest glyph work
+§5.8 admits for the entrance, the hold and the exit (the lab's HEAVIEST: blur 0.6 em, glow 1 and tint 1 at once, size
+tracks, a turn and an inner part that adds an echo, a tint sweep or a glow), the sample material of every other kind.
+The behave stage (evaluation and world solve) must stay ≤ 0.8 ms p50 at 720p and the frame within twice the budget.
+Material particles are drawn by paints, so their budget is read from the chosen definitions (Σ mine.cost.particles,
+scaled by env.mixShare to ≤ 400), not from FrameStats.drawn.particles. The glyph budget (§5.9.5) is read from the scenes:
+no material phase may add more than its share of glyph cover while a mask is left to put on.
 DESIGN_2_1 §11.8.3 (+): project_basic with a 1080p30 video ground (VP9, clock song, depth auto: 'back', so the
 video is blurred) and a still photoFrame (a 1600×1200 JPEG), 10 s at 30 fps at 720p, in the built app page with the real
 AssetStore (tests/www/media_parts.js). The timed frame is the whole iteration a player or an exporter runs: `await
@@ -100,7 +104,8 @@ async def run(args):
 
 
 async def check_camerawork(page, info, args, failures):
-    """project_long with the automatic camerawork, a rig and the sample materials in every slot (DESIGN_2_1 §7.4)."""
+    """project_long with the automatic camerawork, a rig and a material in every slot, the heaviest text ones
+    (DESIGN_2_1 §7.4)."""
     src = 'materials' if 'materials' in info['sources'] else ('catalog' if 'catalog' in info['sources'] else None)
     if src is None:
         print('SKIP  camerawork: no catalog on the lab page')
@@ -109,7 +114,7 @@ async def check_camerawork(page, info, args, failures):
     for _ in range(max(3, args.runs)):          # the heaviest row: one more fresh run against the shared-CPU noise
         runs.append(await page.evaluate('(o) => window.__lab.perf(o)', {
             'parts': src, 'project': 'long', 'seconds': args.seconds, 'fps': 30, 'short': 720, 'start': START['long'],
-            'camera': True, 'materials': src == 'materials'}))
+            'camera': True, 'materials': src == 'materials', 'recipes': 'heaviest' if src == 'materials' else None}))
     # as above: the run the other processes disturbed least (lowest p95) is judged
     runs.sort(key=lambda x: x['p95'])
     r = runs[0]
@@ -122,12 +127,17 @@ async def check_camerawork(page, info, args, failures):
         bad.append('no camerawork was drawn (%d shots, %d rig runs)' % (r['shots'], r['rigs']))
     if r['particles'] * r['mixShare'] > PARTICLES + 1e-6:
         bad.append('material particles %.0f × share %.3f exceed %d' % (r['particles'], r['mixShare'], PARTICLES))
+    gb = r['budget']
+    if src == 'materials' and (gb['phases'] < 1 or gb['masked'] < 1):
+        bad.append('the glyph budget was not exercised (%d material phases, %d masked)' % (gb['phases'], gb['masked']))
+    if gb['over'] > 0:
+        bad.append('%d material phases add more than %.1f frames of glyph cover' % (gb['over'], gb['share']))
     st = r['stages']
     print('%s long+camera%s %dx%d, %d frames: behave p50 %.2f ms (mean %.2f), frame p50 %.2f ms, p95 %.2f ms, max %.2f ms; '
-          '%d shots, %d rig runs, material particles %.0f × %.2f' % (
+          '%d shots, %d rig runs, material particles %.0f × %.2f; glyph budget: %d phases, %d masked, largest %.2f of %.1f' % (
               'FAIL' if bad else 'ok  ', '+materials' if src == 'materials' else '', r['w'], r['h'], r['frames'],
               r['behaveP50'], st['behave'], r['p50'], r['p95'], r['max'], r['shots'], r['rigs'], r['particles'],
-              r['mixShare']))
+              r['mixShare'], gb['phases'], gb['masked'], gb['fitted'], gb['share']))
     failures.extend('long+camera: ' + b for b in bad)
 
 

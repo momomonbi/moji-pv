@@ -10,6 +10,7 @@ MV.def('parts/filter/print', ['parts/kit'], (K) => {
   const TOOTH_PX = 1.1;              // du per tooth grain (one tile pixel up to 1080p)
   const FIBRE_PX = 1.2;              // du per fibre-tile pixel
 
+  // A copy of the frame to work on while the frame itself is still read (duoTone's tone layer).
   function copyOf(fx, src) {
     const out = fx.take();
     out.ctx.drawImage(src.canvas, 0, 0);
@@ -40,7 +41,7 @@ MV.def('parts/filter/print', ['parts/kit'], (K) => {
   function dots(fx, src, p) {
     const a = clamp(p.amount * 0.55);
     if (a < 1 / 64) return src;
-    const out = copyOf(fx, src), g = out.ctx;
+    const out = fx.own(src), g = out.ctx;
     g.globalCompositeOperation = 'overlay';
     g.globalAlpha = a;
     tileCover(g, fx, fx.tile('halftone', 0), tileScale((p.pitch * fx.unit) / HALFTONE_CELL), 0, 0, true);
@@ -128,7 +129,7 @@ MV.def('parts/filter/print', ['parts/kit'], (K) => {
     gt.fillRect(0, 0, fx.w, fx.h);
     gt.globalCompositeOperation = 'source-over';
     if (mix >= 1 - 1 / 64) return tone;
-    const out = copyOf(fx, src), g = out.ctx;
+    const out = fx.own(src), g = out.ctx;
     g.globalAlpha = mix;
     g.drawImage(tone.canvas, 0, 0);
     g.globalAlpha = 1;
@@ -161,7 +162,7 @@ MV.def('parts/filter/print', ['parts/kit'], (K) => {
   function paper(fx, src, p) {
     const a = clamp(p.amount);
     if (a < 0.02) return src;
-    const out = copyOf(fx, src), g = out.ctx;
+    const out = fx.own(src), g = out.ctx;
     g.globalCompositeOperation = 'overlay';
     g.globalAlpha = clamp(a * (0.08 + 0.3 * p.tooth));
     tileCover(g, fx, fx.tile('grain', 3), tileScale(TOOTH_PX * fx.unit), 0, 0, false);
