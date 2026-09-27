@@ -197,7 +197,7 @@ MV.def('planner/extreme', ['core/hash', 'core/num', 'core/pins', 'core/paths', '
 
   // weigh(ctx, cut, rules, rec, withWhy) → [{ key, w, wOwn, why }] over XPOOL (w = 0 outside the pool). w = q6 of every
   // factor; wOwn leaves out the recency, the pair and the echo (the cut's natural pick, which the near set of the cuts
-  // 2–4 after it reads). rec = { prev, near, echo, pair, nextStart } (see recencyOf).
+  // 2–4 after it reads). rec = { prev, near, echo, pair, nextStart } (see recencyOf) and ahead (alignedKey).
   function weigh(ctx, cut, rules, rec, withWhy) {
     const f = cut.feat;
     const mood = ctx.look.mood;
@@ -215,6 +215,7 @@ MV.def('planner/extreme', ['core/hash', 'core/num', 'core/pins', 'core/paths', '
       if (rec.pair && key === 'whipPan') w *= PAIR;
       if (rec.echo === key) w *= ECHO;
       if (rec.prev === key) w *= RECENT;
+      if (rec.ahead === key) w *= RECENT;
       if (rec.near.includes(key)) w *= NEAR;
       let why = null;
       if (withWhy) {
@@ -232,14 +233,14 @@ MV.def('planner/extreme', ['core/hash', 'core/num', 'core/pins', 'core/paths', '
   // The overlay's own window (its recency and echo read nothing of the cast history): one row per cut in time order,
   // { key: the EXTREME preset the cut shows (a pin or the overlay's pick; null for none), m: mirrored, nat: its natural
   // pick (null when the overlay did not pick), copyOf: the line cut it sings (feat.repeatOf or its key), section,
-  // cut }. byCut maps cut keys to rows (the echo).
+  // cut, i: its index }. byCut maps cut keys to rows (the echo).
   function createWindow() {
     const rows = [];
     const byCut = new Map();
     return {
       rows, byCut,
       push(cut, key, m, nat) {
-        const row = { key, m, nat, copyOf: cut.feat.repeatOf || cut.key, section: cut.feat.section, cut };
+        const row = { key, m, nat, copyOf: cut.feat.repeatOf || cut.key, section: cut.feat.section, cut, i: rows.length };
         rows.push(row);
         byCut.set(cut.key, row);
         return row;
@@ -377,12 +378,17 @@ MV.def('planner/extreme', ['core/hash', 'core/num', 'core/pins', 'core/paths', '
         win.push(cut, null, false, null);
         continue;
       }
-      const rec = recencyOf(win, cut, j + 1 < cuts.length ? cuts[j + 1] : null, free);
+      const next = j + 1 < cuts.length ? cuts[j + 1] : null;
+      const rec = recencyOf(win, cut, next, free);
+      rec.ahead = alignedKey(ctx, win, next, salts);
       const list = weigh(ctx, cut, rules, rec, !!t);
       const prefix = shotPrefix(ctx, cut, salts);
-      const got = argmax(list, prefix);
+      // 「くり返しの行をそろえる」: the preset its source shows, where it fits the cut (weighs > 0 there)
+      const src = alignedSource(ctx, cut, salts);
+      const same = sameAs(win, src, rec.prev, list);
+      const got = same ? { key: same.key, nat: same.key } : argmax(list, prefix);
       if (got.key === null) { win.push(cut, null, false, null); continue; }
-      const m = mirrorOf(got.key, rec, prefix);
+      const m = same ? same.m : mirrorOf(got.key, rec, prefix);
       win.push(cut, got.key, m, got.nat);
       if (!write) continue;
       const d = intern('auto', null, got.key + (m ? '~m' : ''));
@@ -390,13 +396,45 @@ MV.def('planner/extreme', ['core/hash', 'core/num', 'core/pins', 'core/paths', '
       neutral(ctx, cut, x);
       if (t) {
         const own = list[XPOOL.indexOf(got.key)];
-        t.override = { rule: 'extreme', decision: d, why: [{ code: 'cam.extreme', params: { x } }].concat(rules.why, own.why) };
+        const why = same ? [{ code: 'repeat.same', params: { cut: src.key } }] : rules.why.concat(own.why);
+        t.override = { rule: 'extreme', decision: d, why: [{ code: 'cam.extreme', params: { x } }].concat(why) };
         t.candidates = list.map((c) => ({ key: c.key, w: c.w,
           masked: c.w > 0 || rules.pool.includes(c.key) ? null : rules.mask }));
         t.recent = { prev: rec.prev, near: rec.near, echo: rec.echo, pair: rec.pair };
       }
     }
     return win;
+  }
+
+  // 「くり返しの行をそろえる」 (DESIGN_2_1 §4.10, planner/cast alignments): alignedSource(ctx, cut, salts) → the cut's
+  // source, or null (the opt-in is off there, or the cut, its line or their カメラワーク field is rerolled: salts of this
+  // pass). A repeat plays the EXTREME preset its source shows (a pick or a pin), mirrored alike, where the preset fits it
+  // (the pools and rules above give it a weight > 0); else it picks its own. The source comes first in time order, so
+  // its row is in the window. alignedKey(ctx, win, next, salts) → the preset the next cut takes that way, or null: the
+  // cut right before a repeat weighs it ×RECENT, as its previous cut (the same move does not play twice in a row).
+  function alignedSource(ctx, cut, salts) {
+    const src = cut && ctx.align ? ctx.align.get(cut.key) || null : null;
+    if (!src || !salts) return src;
+    const line = cut.line ? 'line/' + cut.line : null;
+    const salted = salts['cut/' + cut.key] || salts['cut/' + cut.key + ':cam.shot']
+      || (line && (salts[line] || salts[line + ':cam.shot']));
+    return salted ? null : src;
+  }
+
+  // sameAs(win, src, prev, list) → the source's row where the cut plays its preset, or null. Not where the previous cut
+  // already shows that preset and the cut before the source did not (§8.2 no identical neighbours, as planner/cast's
+  // nearClash for a layout): the same move twice in a row is left to the pick.
+  function sameAs(win, src, prev, list) {
+    const row = src ? win.byCut.get(src.key) : null;
+    if (!row || !row.key || !(list[XPOOL.indexOf(row.key)].w > 0)) return null;
+    const before = row.i > 0 ? win.rows[row.i - 1] : null;
+    return prev === row.key && !(before && before.key === row.key) ? null : row;
+  }
+
+  function alignedKey(ctx, win, next, salts) {
+    const src = alignedSource(ctx, next, salts);
+    const row = src ? win.byCut.get(src.key) : null;
+    return row && row.key ? row.key : null;
   }
 
   // A trace of cam.extreme in a document that pins it nowhere: off, automatically.

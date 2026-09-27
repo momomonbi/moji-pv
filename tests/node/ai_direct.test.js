@@ -275,6 +275,34 @@ test('parts: arrange arrive dwell depart lens → line pins per area line (agg),
   deepEqual(cmds.find((c) => c.path === 'line/rb:arrive'), { t: 'pin.set', path: 'line/rb:arrive', v: 'inkRise', by: 'ai' });
 });
 
+// 「くり返しの行をそろえる」 (DESIGN_2_1 §4.10): a line that takes its looks from an earlier copy follows that copy's changes,
+// so where an answer changes the same slot on both, only the first copy's change is kept (and a warning says how many
+// were left to it); a change on the later copy alone stays; without the opt-in every change stays.
+test('repeat.same: an answer that changes a first copy and its later copy alike keeps the first copy\'s change only', () => {
+  const text = ['# サビ', '飛ばせ/空の果てまで', '強くなれる', '', '# Bメロ', '信号待ちの/交差点で', '', '# サビ', '飛ばせ/空の果てまで', '強くなれる'].join('\n');
+  const off = CMD.reduce(DOC, { t: 'lyrics.set', text });
+  const on = CMD.reduce(off, { t: 'pin.set', path: 'work:repeat.same', v: true, by: 'user' });
+  const run = (doc, lines) => {
+    const plan = planOf(doc);
+    const reqs = DI.directRequests(doc, plan, reg, { uiLang: 'ja', mode: 'all', briefs: [{ ref: WORKREF, instruction: 'お願い' }] });
+    const sent = reqs[0].sent.briefs[0].lines;
+    const at = (t, k) => sent.filter((x) => x.text === t)[k].i;
+    const res = DI.directChanges(doc, plan, reg, { answers: [ANSWER(0, { lines: lines(at) })] }, { rev: 3, sent: reqs[0].sent });
+    const line = (t, k) => plan.lines.filter((l) => l.text === t)[k].id;
+    return Object.assign({ p: byPath(res.changes), line }, res);
+  };
+  const both = (at) => [LINE(at('飛ばせ空の果てまで', 0), { arrive: 'fogIn', lens: 'slowPush' }), LINE(at('飛ばせ空の果てまで', 1), { arrive: 'fogIn' }),
+    LINE(at('強くなれる', 1), { depart: 'fogOut' })];
+  const a = run(on, both);
+  const first = a.line('飛ばせ空の果てまで', 0), later = a.line('飛ばせ空の果てまで', 1), alone = a.line('強くなれる', 1);
+  assert.ok(a.p['line/' + first + ':arrive'] && a.p['line/' + first + ':lens'], 'the first copy\'s changes');
+  assert.ok(!a.p['line/' + later + ':arrive'], 'the later copy follows the first copy\'s change');
+  assert.ok(a.p['line/' + alone + ':depart'], 'a change on the later copy alone stays');
+  assert.ok(a.warnings.some((w) => w[0] === 'ai.warn.repeatSame' && w[1].n === 1), JSON.stringify(a.warnings));
+  const b = run(off, both);
+  assert.ok(b.p['line/' + later + ':arrive'] && !hasWarn(b.warnings, 'ai.warn.repeatSame'), 'without the opt-in every change stays');
+});
+
 test('ground and atmos: part pins; atmos is a run ornament or none; the season gate', () => {
   const r = direct(DOC, [CHORUS], [ANSWER(0, { all: ALL({ ground: 'petalWash', atmos: 'petalFall' }), lines: [LINE(1, { atmos: 'none' })] })]);
   const p = byPath(r.changes);
@@ -1063,6 +1091,20 @@ test('EXTREME: the answer pins its moves and turns the switch on for the area as
   const kept = CH.apply(DOC, r.plan, r.changes.map((c) => (c.slot === 'cam.extreme' ? Object.assign({}, c, { checked: false }) : c)));
   assert.equal(kept.pins['line/rb:cam.extreme'], undefined);
   assert.equal(kept.pins['line/rb:cam.shot'].v, 'crashZoom');
+});
+
+test('EXTREME with 「くり返しの行をそろえる」: a later copy keeps its switch row (the area\'s, like its season) and follows the first copy\'s move', () => {
+  const text = ['# サビ', '飛ばせ/空の果てまで', '強くなれる', '', '# Bメロ', '信号待ちの/交差点で', '', '# サビ', '飛ばせ/空の果てまで', '強くなれる'].join('\n');
+  const off = CMD.reduce(DOC, { t: 'lyrics.set', text });
+  const on = CMD.reduce(off, { t: 'pin.set', path: 'work:repeat.same', v: true, by: 'user' });
+  const ids = planOf(on).lines.filter((l) => l.text === '飛ばせ空の果てまで').map((l) => l.id);
+  assert.equal(ids.length, 2);
+  const answer = [XANSWER(0, { lines: [{ i: 0, camera: XCAM({ shot: 'crashZoom' }) }, { i: 1, camera: XCAM({ shot: 'crashZoom' }) }] })];
+  const a = byPath(xdirect(on, { kind: 'lines', ids }, answer).changes);
+  assert.ok(a['line/' + ids[0] + ':cam.extreme'] && a['line/' + ids[1] + ':cam.extreme'], 'both lines get the switch');
+  assert.ok(a['line/' + ids[0] + ':cam.shot'] && !a['line/' + ids[1] + ':cam.shot'], 'the later copy follows the first copy\'s move');
+  const b = byPath(xdirect(off, { kind: 'lines', ids }, answer).changes);
+  assert.ok(b['line/' + ids[1] + ':cam.shot'] && b['line/' + ids[1] + ':cam.extreme'], 'without the opt-in every change stays');
 });
 
 test('EXTREME: the whole video gets one work switch; a line or area already on gets none; locked lines and cut areas none', () => {

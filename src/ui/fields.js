@@ -12,7 +12,8 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
     // offers 自動 = unpin), `labelArgs` (label params that are themselves string keys), `labelText` ({ ja, en } of a
     // generated part parameter; its `label` is 'fld.param' = '{name}'), `param` (generated part parameters),
     // `firstCut` (the line page's 切り替え: written at the line's first cut, §6.4.6), `pinnedOnly` (a pinned parameter
-    // of a part that is no longer chosen, shown as 無効).
+    // of a part that is no longer chosen, shown as 無効), `note` (a string key shown under the row), `offClears` (a toggle
+    // whose off is 自動: turning it off clears the pin), `noDice` (a setting, not drawn: no 振り直し).
 
     const ALL = Object.freeze(['work', 'line', 'cut']);
     const WORK = Object.freeze(['work']);
@@ -43,6 +44,10 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
     // The EXTREME switch (DESIGN_EXTREME §2.2) is an area's too: a line or the whole video.
     const LINE_WORK_NAMES = new Set(['season', 'cam.extreme']);
 
+    // 「くり返しの行をそろえる」 (DESIGN_2_1 §4.10): a switch of the whole video, and a choice of a line that sings an earlier
+    // line again.
+    const REPEAT_SAME = 'repeat.same';
+
     function sharedNames(kind) {
       if (kind === 'atmos') return ['amount'];
       const shared = R.SHARED[kind];
@@ -66,7 +71,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
       if (parsed.el) return ALL.slice();
       if (parsed.name !== null) {
         if (workName(slot)) return WORK.slice();
-        if (LINE_WORK_NAMES.has(slot)) return ['work', 'line'];
+        if (LINE_WORK_NAMES.has(slot) || slot === REPEAT_SAME) return ['work', 'line'];
         if (LINE_NAMES.has(slot)) return LINE.slice();
         if (slot === 't0') return CUT.slice();
         return CUT_NAMES.has(slot) ? ALL.slice() : [];
@@ -245,6 +250,10 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
     const lineSeasonField = () => F({ path: 'season', scopes: LINE, widget: 'choice', label: 'fld.lineSeason', spec: enumSpec(SEASONS),
       options: opts(SEASONS, 'fld.season.'), auto: true, select: true, basic: false });
     const avoidField = () => F({ path: 'avoid', scopes: LINE, widget: 'partRefs', label: 'fld.avoid', spec: SPEC.partRefs, basic: false });
+    // A line (or lines) that sings an earlier line again: そろえる / そろえない for it alone; 自動 follows 作品全体.
+    const repeatLineField = () => F({ path: REPEAT_SAME, scopes: LINE, widget: 'choice', label: 'fld.repeatSameLine',
+      spec: { type: 'bool' }, options: [{ v: true, label: 'opt.repeatSame.on' }, { v: false, label: 'opt.repeatSame.off' }], auto: true,
+      basic: false, noDice: true, when: (ctx) => ctx.scopeKind === 'line' && ctx.cuts.some((c) => !!(c.feat && c.feat.repeatOf)) });
     const hasArea = (ctx) => !!ctx.area;
 
     // カメラ EXTREME (DESIGN_EXTREME §2.6): the switch, and under 詳しい設定 its 激しさ [強め | かなり | 最大]; both write
@@ -278,6 +287,9 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
             options: D.ASPECTS.map((v) => ({ v, text: v })), select: true }),
           F({ cmd: { t: 'look.set', key: 'backdrop' }, scopes: WORK, widget: 'choice', label: 'fld.backdrop',
             options: opts(D.BACKDROPS, 'exp.bg.'), select: true }),
+          // on pins true for the whole video; off clears the pin (off is the default).
+          F({ path: REPEAT_SAME, scopes: WORK, widget: 'toggle', label: 'fld.repeatSame', spec: { type: 'bool' },
+            note: 'fld.repeatSame.note', offClears: true, noDice: true }),
         ]),
         // 写真・動画 (DESIGN_2_1 §11.7.3): the library, open when it holds something.
         sec('media', (ctx) => ctx.mediaCount > 0, [], { custom: 'media' }),
@@ -425,7 +437,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
         // §6.4.6: the transition into the line's first cut (a line-scope seam pin would change every cut boundary).
         partField('seam', 'fld.seamIntoLine', { firstCut: true }),
         orientField(),
-        lineSeasonField(), avoidField(),
+        lineSeasonField(), avoidField(), repeatLineField(),
       ];
     }
 

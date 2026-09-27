@@ -239,9 +239,11 @@ MV.def('core/commands', ['core/doc', 'core/paths', 'core/pins', 'core/lyrics', '
     // Cut slots that "paste look" copies besides part slots and text.* (CAM_SLOTS and the motion speed).
     const COPY_SLOTS = new Set(['motion.speed', 'cam.shot', 'cam.zoom', 'cam.curve', 'cam.follow']);
 
-    // Refuses `cut/…:season`, `cut/…:avoid`, `cut/…:cam.extreme` and `work:avoid` (payload).
+    // Refuses `cut/…:season`, `cut/…:avoid`, `cut/…:cam.extreme`, `cut/…:repeat.same` and `work:avoid` (payload).
+    // 「くり返しの行をそろえる」 (DESIGN_2_1 §4.10) is a setting of the whole video or of a line, like the line season.
     function checkSlotScope(parsed) {
-      need(!(parsed.scope.kind === 'cut' && NOT_CUT.has(parsed.slot)), parsed.slot + ' cannot be pinned at cut scope');
+      need(!(parsed.scope.kind === 'cut' && (NOT_CUT.has(parsed.slot) || parsed.slot === 'repeat.same')),
+        parsed.slot + ' cannot be pinned at cut scope');
       need(!(parsed.scope.kind === 'work' && parsed.slot === 'avoid'), 'avoid cannot be pinned at work scope');
     }
 

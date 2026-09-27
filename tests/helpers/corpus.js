@@ -12,14 +12,18 @@ const PROJECTS = Object.freeze(['basic', 'vertical', 'lrc', 'long']);
 // name or pass ALL_PROJECTS.
 const V21_PROJECTS = Object.freeze(['v21', 'media']);
 const ALL_PROJECTS = Object.freeze(PROJECTS.concat(V21_PROJECTS));
+// 'repeat': the sample lyrics with a second サビ, a short line sung twice at the end of each サビ and the サビ's first line
+// sung twice in the 大サビ, with 「くり返しの行をそろえる」 on for the whole video, one layout pinned and one line rerolled in
+// the second サビ (DESIGN_2_1 §4.10; tests/golden/project_repeat.json). Asked for by name only.
+const EXTRA_PROJECTS = Object.freeze(['repeat']);
 const DEFAULT_ASPECTS = Object.freeze(['16:9', '9:16', '1:1']);
 
 function readFixture(name) { return fs.readFileSync(path.join(FIXTURES, name), 'utf8'); }
 function readJSON(name) { return JSON.parse(readFixture(name)); }
 
-// The saved text of a fixture project ('basic' | 'vertical' | 'lrc' | 'long' | 'v21' | 'media').
+// The saved text of a fixture project ('basic' | 'vertical' | 'lrc' | 'long' | 'v21' | 'media' | 'repeat').
 function projectText(name) {
-  if (!ALL_PROJECTS.includes(name)) throw new Error('corpus: unknown project ' + name);
+  if (!ALL_PROJECTS.includes(name) && !EXTRA_PROJECTS.includes(name)) throw new Error('corpus: unknown project ' + name);
   return readFixture('project_' + name + '.json');
 }
 
@@ -83,7 +87,7 @@ function stubRegistry(MVorRegistry) {
 }
 
 module.exports = {
-  FIXTURES, PROJECTS, V21_PROJECTS, ALL_PROJECTS, readFixture, projectText, project, projects, withoutCamerawork, planBasic,
+  FIXTURES, PROJECTS, V21_PROJECTS, ALL_PROJECTS, EXTRA_PROJECTS, readFixture, projectText, project, projects, withoutCamerawork, planBasic,
   songDigest, sampleLyrics, seedOf, corpus,
   minimalFallbacks, stubParts, allStubParts, stubRegistry,
 };

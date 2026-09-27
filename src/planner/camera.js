@@ -36,7 +36,7 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
       outro: Object.freeze({ pullReveal: 1.5, wideHold: 1.5 }),
     });
     const SHOT_RECENT = 0.2, SHOT_NEAR = 0.5, SHOT_ECHO = 40;
-    // A pullReveal the echo gives a cut shorter than this (seconds) takes one curve, hushRushHush (cam.curve).
+    // A pullReveal on a cut shorter than this (seconds) takes one curve, hushRushHush (cam.curve).
     const SHORT_PULL = 1.8;
     const RIG_OFF = 0.15;                           // A below this: no automatic rig
     const RIG_WEIGHTS = Object.freeze({
@@ -347,6 +347,8 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
     // candidates and recent (explain) only with withWhy.
     function autoShot(st, withWhy) {
       const rules = shotRules(st);
+      const al = alignedShot(st);
+      if (al && al.from !== 'auto') return alignedOut(st, al.v, rules, withWhy, null, null);
       if (rules.forced) {
         const out = { v: rules.forced.v, from: rules.forced.from, rule: rules.forced.rule, base: rules.forced.v, gentle: false };
         if (withWhy) {
@@ -357,6 +359,7 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
       }
       const rec = recencyOf(st);
       const list = weighShots(st, rules, rec, withWhy);
+      if (al && fitsShot(al.v, rules, list)) return alignedOut(st, al.v, rules, withWhy, rec, list);
       const prefix = CH.gumbelPrefix(seedOf(st, 'cam.shot'));
       const kept = inheritedShot(st, rules, list);
       if (kept !== null) {
@@ -379,7 +382,7 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
         if (c.wOwn > 0) { const s = Math.log(c.wOwn) + noise; if (s > baseScore) { base = c.key; baseScore = s; } }
       }
       const v = best === null ? NONE : best;
-      const out = { v, from: 'auto', base: base === null ? v : base, gentle: rules.gentle, echoed: rec.echo !== null && v === rec.echo };
+      const out = { v, from: 'auto', base: base === null ? v : base, gentle: rules.gentle };
       if (withWhy) {
         const own = list[SHOT_POOL.indexOf(v)];
         out.why = rulesWhy(st, rules).concat(own.why);
@@ -388,6 +391,49 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
         out.recent = rec;
       }
       return out;
+    }
+
+    // --- 「くり返しの行をそろえる」 (DESIGN_2_1 §4.10) ---------------------------------------------------------------
+
+    // The shot of the cut's source (planner/cast alignments) as the Plan shows it, or null: no source, the cut or its
+    // line rerolled, a die on its shot (st.aligned gives null then), or a value a rule gave the source. A pinned or
+    // locked shot passes on as it is (a custom one too); an automatic one where it fits the cut (fitsShot).
+    function alignedShot(st) {
+      const d = st.align && st.aligned ? st.aligned(st, 'cam.shot') : null;
+      return d && (d.from === 'auto' || pinnedFrom(d)) ? d : null;
+    }
+
+    function pinnedFrom(d) { return typeof d.from === 'string' && d.from.startsWith('pin'); }
+    function alignWhy(src) { return { code: 'repeat.same', params: { cut: src.key } }; }
+
+    // An automatic shot fits the cut where its rules and weights would allow it: in its pool, weighing > 0 there
+    // (§4.7 "Repeated lines", rule 1; the source has the same impact mark, planner/cast alignments).
+    function fitsShot(v, rules, list) {
+      const i = typeof v === 'string' ? SHOT_POOL.indexOf(v) : -1;
+      return i >= 0 && !!(rules.bits & (1 << i)) && list[i].wBase > 0;
+    }
+
+    // The aligned shot as autoShot answers it. Its natural shot is the shot it shows (base = v): the cuts after it weigh
+    // against what they are next to.
+    function alignedOut(st, v, rules, withWhy, rec, list) {
+      const out = { v, from: 'auto', base: v, gentle: gentleArrange(st), aligned: true };
+      if (withWhy) {
+        const r = rec || recencyOf(st);
+        const l = list || (rules.forced ? null : weighShots(st, rules, r, false));
+        out.why = [alignWhy(st.align)];
+        out.candidates = l ? l.map((c, i) => ({ key: c.key, w: c.w, masked: maskOf(st, rules, i) }))
+          : SHOT_POOL.map((key) => ({ key, w: 0, masked: rules.mask }));
+        out.recent = r;
+      }
+      return out;
+    }
+
+    // An aligned cut's cam.zoom, cam.curve or cam.follow: the source's, where the cut took the source's shot.
+    function alignedValue(st, slot, withWhy) {
+      const d = st.shotAligned ? st.aligned(st, slot) : null;
+      const v = d ? S.coerce(SLOT_SPECS[slot], d.v) : undefined;
+      if (v === undefined) return null;
+      return withWhy ? { v, from: 'auto', why: [alignWhy(st.align)] } : { v, from: 'auto' };
     }
 
     // The own pick over a weighed list (see autoShot), or `or` when nothing weighs.
@@ -419,7 +465,6 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
         d = { v: got.v, from: got.from };
         gentle = !!got.gentle;
         if (got.inherited) st.heirCurve = inheritedCurve(st);
-        st.echoShot = !!(got.inherited || got.echoed);
         if (got.base !== got.v) st.base[slot] = got.base;
         if (trace) {
           Object.assign(trace, { kind: 'cam.shot', stage: got.from === 'rule' ? 'rule' : 'auto', rule: got.rule || null,
@@ -428,13 +473,19 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
       }
       if (trace) trace.decision = d;
       setDecision(st, slot, d);
+      // Under 「くり返しの行をそろえる」 the closeness, curve and follow go with the shot: wherever the cut shows its source's
+      // shot (taken, or given by the same rule or pin), they are the source's too.
+      if (st.align) {
+        const src = st.aligned(st, slot);
+        st.shotAligned = !!src && (src.v === d.v || JSON.stringify(src.v) === JSON.stringify(d.v));
+      }
       return gentle;
     }
 
     const CURVES_IMPACT = Object.freeze([Object.freeze(['dashStop', 'holdThenDash']), Object.freeze([3, 2])]);
     const CURVES_FAST = Object.freeze([Object.freeze(['hushRushHush', 'holdThenDash', 'softEnds']), Object.freeze([3, 2, 1])]);
     const CURVES_CALM = Object.freeze([Object.freeze(['softEnds', 'fadeBrake', 'slowBloom']), Object.freeze([3, 2, 1])]);
-    // The curve of a short pull the echo gives (SHORT_PULL), whatever the cut's list: hushRushHush. Of the curves that
+    // The curve of every pullReveal on a short cut (SHORT_PULL), whatever the cut's list: hushRushHush. Of the curves that
     // start and end slowly it has the lowest top speed, 1.4 × the move's mean speed (softEnds 2.5, holdThenDash 2.4);
     // fadeBrake and slowBloom reach 1.9 × at the first or the last frame, and dashStop (1.2 ×) runs at its top speed
     // from the cut's first frame into a sudden stop.
@@ -461,6 +512,8 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
       const A = ctx.look.amounts.camera;
       const shot = st.chosen['cam.shot'];
       st.decide(st, 'cam.zoom', SLOT_SPECS['cam.zoom'], (seed, withWhy) => {
+        const aligned = alignedValue(st, 'cam.zoom', withWhy);
+        if (aligned) return aligned;
         let z = q2(N.lerp(0.8, 0.9, N.clamp(0.5 * A + 0.5 * f.energy)) * (f.impact ? 1.05 : 1));
         let capped = false;
         if (gentle) {
@@ -479,11 +532,17 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
         const bias = ctx.look.mood && ctx.look.mood.tagBias ? ctx.look.mood.tagBias.fast : undefined;
         let [keys, weights] = f.impact ? CURVES_IMPACT
           : f.energy >= 0.65 || (typeof bias === 'number' && bias > 1.2) ? CURVES_FAST : CURVES_CALM;
-        // A pullReveal the echo put on a short cut (inherited, or picked as the ×40 echo) came from a copy that may have
-        // had more time: a curve that bunches the pull would make it a fast zoom-out, so it takes CURVES_SHORT_PULL
-        // (NOTES "Echo of repeated lines", round 5).
-        const calmed = shot === 'pullReveal' && st.echoShot && f.dur < SHORT_PULL;
+        // A pullReveal on a short cut, whatever gave it (the weights, the echo, a pin): a curve that bunches the pull would
+        // make it a fast zoom-out, so it takes CURVES_SHORT_PULL (NOTES "Echo of repeated lines", round 5, for the pulls
+        // the echo gives; "Calm short pull-backs" for every other one).
+        const calmed = shot === 'pullReveal' && f.dur < SHORT_PULL;
         if (calmed) [keys, weights] = CURVES_SHORT_PULL;
+        // An aligned shot keeps its source's curve, except a short pull's (a pinned curve passes on as it is).
+        const source = st.shotAligned ? st.aligned(st, 'cam.curve') : null;
+        if (source && (!calmed || pinnedFrom(source) || keys.includes(source.v))) {
+          const aligned = alignedValue(st, 'cam.curve', withWhy);
+          if (aligned) return aligned;
+        }
         // An inherited shot keeps its first copy's curve too, when this cut's own curves include it and its curve is
         // not rerolled (a die on cam.curve; a reroll of the cut or its line already stops the inheritance, rule 6).
         const kept = !st.curveSalted && st.heirCurve && keys.includes(st.heirCurve) ? st.heirCurve : null;
@@ -496,7 +555,9 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
         } else if (calmed) why.push({ code: 'cam.shortPull', params: {} });
         return why.length ? { v, from: 'auto', why } : { v, from: 'auto' };
       });
-      st.decide(st, 'cam.follow', SLOT_SPECS['cam.follow'], () => {
+      st.decide(st, 'cam.follow', SLOT_SPECS['cam.follow'], (seed, withWhy) => {
+        const aligned = alignedValue(st, 'cam.follow', withWhy);
+        if (aligned) return aligned;
         let x;
         if (shot === NONE || shot === 'wideHold') x = 0;
         else {
@@ -527,8 +588,9 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
     // p.carry = SHOT.lastFraming(A's shot, { zoom: A's cam.zoom }) and pfrom.carry 'rule', so B opens at A's closeness,
     // screen position and roll (a match cut). Skipped when there is nothing to carry (A ends on the frame) or nothing
     // to carry it into (B opens on the frame), and for a repeat on its first copy's preset (§4.7 "Repeated lines") when
-    // that copy did not carry: the repeat then opens as its first copy does, so the two play the same move. The decision
-    // is kept on B's cast entry while its inputs are the same.
+    // that copy did not carry: the repeat then opens as its first copy does, so the two play the same move (under
+    // 「くり返しの行をそろえる」 the copy is the cut's source, planner/cast alignments, §4.10). The decision is kept on B's
+    // cast entry while its inputs are the same.
     function carry(ctx, cuts, seams) {
       const list = seams || ctx.seams || [];
       const byKey = new Map();
@@ -539,7 +601,8 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
         const a = A.slots['cam.shot'], b = B.slots['cam.shot'];
         if (!a || !b || a.v === NONE || typeof b.v !== 'string' || b.v === NONE || !opensOnText(b.v)) continue;
         if (B.seamIn >= 0 && list[B.seamIn] && list[B.seamIn].scope !== 'text') continue;
-        const first = B.feat.repeatOf ? byKey.get(B.feat.repeatOf) : null;
+        const src = ctx.align ? ctx.align.get(B.key) : null;
+        const first = src || (B.feat.repeatOf ? byKey.get(B.feat.repeatOf) : null);
         if (first && first.slots['cam.shot'] && first.slots['cam.shot'].v === b.v && !carried(first)) continue;
         const zoom = A.slots['cam.zoom'] ? A.slots['cam.zoom'].v : 1;
         const framing = SHOT.lastFraming(a.v, { zoom });
@@ -684,6 +747,7 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
       const runs = splitRuns(ctx, cuts);
       const lastChorus = lastChorusOf(cuts, runs);
       const out = [];
+      const byFirst = ctx.align ? new Map() : null;
       let avoid = null;
       runs.forEach((run, r) => {
         const first = cuts[run.idx[0]];
@@ -691,6 +755,7 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
         const trace = tracing(ctx, first.key, 'rig');
         const seed = H.hash32('rig', ctx.doc.look.seed, first.key, CH.saltOf(ctx.salts, 'cut/' + first.key));
         const chorusEnd = r === lastChorus;
+        const copy = byFirst && !run.pin ? rigCopy(ctx, first, byFirst) : null;
         let d, win;
         if (run.pin) {
           d = { from: run.pin.from, by: run.pin.by, v: run.pin.v };
@@ -698,6 +763,15 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
           if (trace) {
             const shadow = autoRig(ctx, row, seed, avoid, false);
             Object.assign(trace, { kind: 'rig', stage: 'pin', pin: run.pin, candidates: shadow.candidates });
+          }
+        } else if (copy) {
+          d = { from: 'auto', v: copy.v };
+          win = typeof d.v === 'string' ? d.v : null;
+          if (trace) {
+            const shadow = autoRig(ctx, row, seed, avoid, false);
+            const why = [alignWhy(copy.src)];
+            if (chorusEnd && d.v !== NONE) why.push({ code: 'rig.lastChorus', params: {} });
+            Object.assign(trace, { kind: 'rig', stage: 'auto', why, candidates: shadow.candidates });
           }
         } else if (!(A >= RIG_OFF)) {
           d = { from: 'auto', v: NONE };
@@ -717,6 +791,7 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
           }
         }
         avoid = win && win !== NONE ? win : null;
+        if (byFirst) byFirst.set(first.key, d);
         const amp = q2(Math.min(AMP_MAX, q2(0.3 + 0.4 * A) * (chorusEnd ? LAST_CHORUS_AMP : 1)));
         const rig = withAmp(d, amp);
         if (trace) trace.decision = rig;
@@ -729,6 +804,18 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
       });
       out.forEach((g, k) => { g.t1 = k + 1 < out.length ? out[k + 1].t0 : N.q6(Math.max(duration, g.t0)); });
       return out;
+    }
+
+    // Under 「くり返しの行をそろえる」 (DESIGN_2_1 §4.10) a run whose first cut takes its decisions from an earlier copy
+    // (planner/cast alignments) that begins a run too takes that run's section camera, unless the first cut or its line
+    // is rerolled (or its rig): { v, src } | null. Its strength and curve are the run's own (the last chorus's larger).
+    function rigCopy(ctx, first, byFirst) {
+      const src = ctx.align.get(first.key);
+      const d = src ? byFirst.get(src.key) : undefined;
+      if (!d) return null;
+      const s = ctx.salts, line = first.line ? 'line/' + first.line : null;
+      if (s && (s['cut/' + first.key] || s['cut/' + first.key + ':rig'] || (line && (s[line] || s[line + ':rig'])))) return null;
+      return { v: d.v, src };
     }
 
     // rig.curve of a run: its pin at the first cut, else slowBloom on the last chorus, else the preset's own curve.

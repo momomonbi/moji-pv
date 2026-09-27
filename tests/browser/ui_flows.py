@@ -63,6 +63,9 @@ v2.1 editor-ready output (package H.3, DESIGN_2_1 §13.12):
   extreme_keys               the same by keyboard only (Space, Enter, Esc, the 激しさ radios, 次から表示しない)
   ai_extreme                 「カメラワークをAIに任せる」 with the 「EXTREME」 chip: the notice, the EXTREME request, the review's
                              カメラ EXTREME row and moves, apply = one undo step
+v2.1 「くり返しの行をそろえる」 (DESIGN_2_1 §4.10):
+  repeat                     作品全体 › 見た目: the switch (off, its note, no 振り直し) pins the opt-in, the second サビ takes the
+                             first one's layouts, lenses and shots, a repeated cut's なぜ names its first copy, off clears it
 It also asserts: no page errors and no CSP violations. The ja page runs every flow; the en page runs the first run.
 The first run exports with the mouse and, in the keyboard flow, with Tab + Enter. Where H.264 encodes, the file's video
 sample count is checked here (stsz or trun); the decoded-frame count of the same export path is WP6's check in
@@ -2383,6 +2386,68 @@ SEL_AREA = """() => { const a = window.__mv, s = a.view.state.sel, AR = MV.use('
   const t = document.querySelector('[data-mount="inspector"] .lh-title');
   return { level: s.level, ids: s.ids || null, area: s.area ? AR.keyOf(s.area) : null, title: t ? t.textContent : null,
     panel: a.view.state.panel, rig: !!document.querySelector('[data-mount="inspector"] .isec[data-sec="rig"]') }; }"""
+
+
+# The lyrics of the repeat flow: a サビ sung again after a Bメロ.
+REPEAT_LYRICS = '\n'.join([
+    '[ti:朝の窓]', '# Aメロ', '窓をあけて/光を入れる', 'まだ眠い街に/*おはよう*', '', '# サビ', '今日も/ここから始まる!', '小さな/一歩で',
+    '風を/追いかけて', '', '# Bメロ', '坂道を下って/駅まで歩く', '信号の/向こう側', '', '# サビ', '今日も/ここから始まる!', '小さな/一歩で',
+    '風を/追いかけて',
+])
+# How many repeated cuts (feat.repeatOf) show their first copy's orientation, layout, entrance, lens, shot and curve.
+REPEAT_SAME = """() => {
+  const p = window.__mv.plan, by = new Map(p.cuts.map((c) => [c.key, c]));
+  const v = (c, s) => JSON.stringify(c.slots[s] ? c.slots[s].v : null);
+  const reps = p.cuts.filter((c) => c.feat.repeatOf);
+  const same = reps.filter((c) => ['orient', 'arrange', 'arrive', 'lens', 'cam.shot', 'cam.curve'].every((s) => v(c, s) === v(by.get(c.feat.repeatOf), s)));
+  return { n: reps.length, same: same.length, first: reps.length ? reps[0].key : null };
+}"""
+
+
+async def flow_repeat(f, lang):
+    """作品全体 › 見た目 › くり返しの行をそろえる (DESIGN_2_1 §4.10): off by default, with its note under it; turning it on pins it
+    for the whole video (one undo entry) and the second サビ then shows the first one's layouts, lenses and shots; the なぜ of
+    a repeated cut's layout says it was taken from the first copy; turning it off clears the pin."""
+    page = f.page
+    done0, doc0 = await with_lyrics(f, REPEAT_LYRICS)
+    before = await page.evaluate(REPEAT_SAME)
+    if not f.check(before['n'] >= 6, 'the second サビ repeats the first: %r' % before):
+        return
+    await page.evaluate("() => window.__mv.select({ level: 'work' }, { from: 'header', open: true })")
+    await open_section(f, 'look')
+    row = ROW % 'repeat.same'
+    note = await page.text_content(row + ' .fr-note')
+    f.check(note == await page.evaluate("() => window.__mv.t('fld.repeatSame.note')"), 'the switch says what it does: %r' % note)
+    box = row + ' input[role="switch"]'
+    f.check(not await page.is_checked(box), 'off by default')
+    f.check(await page.locator(row + ' [data-role="dice"]').count() == 0, 'a setting, not drawn: no 振り直し')
+    done1 = await page.evaluate(DONE)
+    await page.click(row + ' .w-toggle')
+    await f.until("() => { const p = window.__mv.doc.pins['work:repeat.same']; return !!p && p.v === true; }", 'the switch pins it on')
+    await f.settle(3)
+    f.check(await page.evaluate(DONE) == done1 + 1, 'one undo entry')
+    f.check(await page.is_checked(box), 'the switch shows on')
+    f.check(await page.get_attribute(row + ' .state-tag', 'data-state') == 'pinned', 'the field shows 固定')
+    await f.shot('repeat-on')
+    after = await page.evaluate(REPEAT_SAME)
+    f.check(after['same'] == after['n'] and after['same'] > before['same'],
+            'the second サビ shows the first one\'s layouts, lenses and shots: %r → %r' % (before, after))
+    await page.evaluate("(k) => window.__mv.select({ level: 'cut', key: k }, { from: 'crumbs', open: true })", after['first'])
+    await f.settle(3)
+    arow = ROW % 'arrange'
+    await page.click(arow + ' button[aria-haspopup="menu"]')
+    await f.until("() => !!document.querySelector('.popover.menu .menu-item')", 'the field menu opens')
+    await page.evaluate("""(k) => [...document.querySelectorAll('.popover.menu .menu-item')].find((b) => b.textContent.startsWith(window.__mv.t(k))).click()""", 'fm.why')
+    await f.until("(s) => { const r = document.querySelector(s); return !!r && !r.hidden && r.textContent.length > 3; }", 'なぜ shows', arow + ' .fr-why')
+    why = await page.text_content(arow + ' .fr-why')
+    f.check('同じ見せ方にそろえた' in why, 'the layout\'s なぜ names the first copy: %r' % why)
+    await page.evaluate("() => window.__mv.select({ level: 'work' }, { from: 'header', open: true })")
+    await open_section(f, 'look')
+    await page.click(row + ' .w-toggle')
+    await f.until("() => !window.__mv.doc.pins['work:repeat.same']", 'turning it off clears the pin')
+    await f.settle(2)
+    f.check(not await page.is_checked(box), 'the switch shows off')
+    await f.undo_all(done0, doc0)
 
 
 async def flow_areas(f, lang):
@@ -4968,6 +5033,8 @@ FLOWS = [('first_run', flow_first_run_mouse, True), ('first_run_keys', flow_firs
 FLOWS += [('curve', flow_curve, False), ('keyframes', flow_keyframes, False), ('areas', flow_areas, False),
           ('ai_area', flow_ai_area, False), ('ai_board', flow_ai_board, False), ('ai_media', flow_ai_media, False),
           ('materials', flow_materials, False), ('material_scope', flow_material_scope, False)]
+# 「くり返しの行をそろえる」 (DESIGN_2_1 §4.10)
+FLOWS += [('repeat', flow_repeat, False)]
 # v2.1 photos and videos (package G.4, DESIGN_2_1 §11.8.3).
 FLOWS += [('media', flow_media, True), ('library', flow_library, False), ('missing', flow_missing, False), ('package', flow_package, False),
           ('media_device', flow_media_device, False), ('media_song', flow_media_song, False)]

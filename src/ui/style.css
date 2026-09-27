@@ -854,7 +854,9 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent);
 .fr-label { flex: 0 1 auto; min-width: 0; }
 .fr-top .state-tag { flex: none; }
 .frow[data-widget="toggle"] { flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: space-between; }
-.frow[data-widget="toggle"] > .fr-top { flex: 1 1 auto; }
+.frow[data-widget="toggle"] > .fr-top { flex: 1 1 0; min-width: 0; }
+/* A toggle's long label wraps beside its switch instead of widening a narrow panel (「くり返しの行をそろえる」 in English). */
+.frow[data-widget="toggle"] > .fr-top > .fr-label { white-space: normal; }
 .frow[data-widget="toggle"] > .fr-why { flex-basis: 100%; }
 .w-nudge { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)) auto; gap: 5px; align-items: end; }
 .w-nudge-cell { display: inline-flex; flex-direction: column; align-items: stretch; gap: 2px; color: var(--muted); font-size: 11px; }

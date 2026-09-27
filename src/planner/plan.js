@@ -513,7 +513,7 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
       timing: Object.assign({}, TM.TIMING_DEFAULTS, doc.timing || {}), pools: new Map(), trace, casts: null,
       lockFree: CA.lockFreeIndex(doc.pins), media: mediaIndex(doc), mediaUsed: new Set(),
       castKeys: null, seams: null, encodings: null, fallbacks: null, lookAxis: null, lineConds: null, workCond: null,
-      shotMood: null, echoed: null,
+      shotMood: null, echoed: null, align: null, alignNear: null,
     };
     // Traced runs (explain) and fresh runs neither read nor refresh the caches of re-planning.
     if (cached) beginFeatures();
@@ -569,6 +569,9 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
     // The cuts a later cut sings again (their rows keep what the repeats inherit, planner/cast castCut).
     ctx.echoed = new Set();
     for (const cut of cuts) if (cut.feat.repeatOf) ctx.echoed.add(cut.feat.repeatOf);
+    // 「くり返しの行をそろえる」: the earlier copy each repeat takes its decisions from (null without the pin).
+    ctx.align = CA.alignments(ctx, cuts);
+    ctx.alignNear = CA.neighboursOf(ctx.align, cuts);
     const hist = CA.createHistory(registry);
     for (const cut of cuts) Object.assign(cut, CA.castCut(ctx, cut, hist));
 

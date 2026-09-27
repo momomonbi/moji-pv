@@ -22,11 +22,13 @@
 //                     background, a photo frame, a text fill and a video background; DESIGN_2_1 §7.5 step (c)), planned
 //                     with its effective registry (materials and pooled media) and rendered like the frames above with
 //                     the fake asset store, so its op hashes include the media times ('media:<id>@<m>#<index>').
+//   project_repeat.json { "registry": …, "measurer": "fake", "plan": "<plan.hash>", "frames": [40 hashes] }
+//                     the 'repeat' fixture: 「くり返しの行をそろえる」 on (DESIGN_2_1 §4.10), rendered like the frames above.
 //   project_extreme.json { "registry": …, "measurer": "fake", "docs": { "<name>": { "plan": "<plan.hash>", "frames": [40] } } }
 //                     the EXTREME camerawork fixtures (tests/helpers/extreme_docs.js goldenDocs, DESIGN_EXTREME §5.2): the
 //                     basic project with the switch on and every EXTREME preset on one cut, and a 9:16 one with the switch
 //                     at 0.5 on the chorus only; rendered like the frames above (motion-blur copies included in the ops).
-//                     Every document without the switch renders as before: the four files above match first.
+//                     Every document without the switch renders as before: the files above match first.
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -92,6 +94,11 @@ async function frameHashes(reg, prepare = (doc) => doc) {
   return frames;
 }
 
+async function repeatGolden(reg, info) {
+  const r = await renderDoc(reg, corpus.project('repeat').doc, null);
+  return { registry: info, measurer: 'fake', plan: r.plan, frames: r.frames };
+}
+
 async function mediaGolden(reg, info) {
   const r = await renderDoc(reg, FM.goldenDoc(corpus.project('media').doc), FM.createFakeMedia(MV));
   return { registry: info, measurer: 'fake', media: 'fake', plan: r.plan, frames: r.frames };
@@ -124,6 +131,8 @@ async function main() {
       make: async () => ({ registry: info, measurer: 'fake', frames: await frameHashes(reg) }) },
     { file: 'project_media.json', needs: ENGINE.concat(['planner/plan', 'parts/mix']),
       empty: { registry: null, measurer: 'fake', media: 'fake', plan: null, frames: [] }, make: () => mediaGolden(reg, info) },
+    { file: 'project_repeat.json', needs: ENGINE.concat(['planner/plan']),
+      empty: { registry: null, measurer: 'fake', plan: null, frames: [] }, make: () => repeatGolden(reg, info) },
     { file: 'project_extreme.json', needs: ENGINE.concat(['planner/plan', 'planner/extreme', 'engine/scene/xshot']),
       empty: { registry: null, measurer: 'fake', docs: {} }, make: () => extremeGolden(reg, info) },
   ];

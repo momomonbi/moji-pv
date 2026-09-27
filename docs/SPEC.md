@@ -94,10 +94,18 @@ and Filmora-ready output; how they are built is in `docs/DESIGN_2_1.md`.
   shot picker's EXTREME group. Every word stays readable while it is sung; no flash is added and hard cuts count in
   step ④'s flash check. Turning it on shows a motion-sickness notice (「激しいカメラワークについて」); turning it off asks
   whether to turn back the lines and moves that would keep it. ≡ › 表示 › 激しいカメラを抑える（プレビュー） tones the
-  preview down (on at first where the device asks for reduced motion); the export is unchanged.
+  preview down (on at first where the device asks for reduced motion); the export is unchanged. With くり返しの行をそろえる
+  on too, a line sung again plays its first copy's EXTREME move where that move suits it (not the same move twice in a
+  row); the switch itself stays the area's (a later サビ without it keeps its normal camerawork).
 - **Speed curves (緩急, v2.1)** wherever something moves over time: entrances and exits and their stagger, holds, camera
   moves and transitions. Presets such as 「一瞬ゆっくり→すごく速く→一瞬ゆっくり」, a two-slider form, or a custom curve in a
   small editor. **動きの速さ** (×0.25–×4) gives slow or fast motion per line or cut.
+- **Repeat lines the same way (くり返しの行をそろえる, v2.1)**: one switch in 作品全体 › 見た目, off by default. When it is
+  on, a lyric line sung again (a second サビ) looks as it did the first time: its layout, text, motions, decorations,
+  lens, camerawork, background and transition (a line sung twice in a row still varies the second time, and no two
+  neighbouring cuts share a layout or an entrance). A line can opt out or in on its own (行 › 演出 ›
+  詳細); what is pinned or rerolled on a later copy stays as set there, and rerolling or pinning the first copy carries
+  to its copies.
 - **Per line (v2.1)**: its own season (この行の季節) and parts it must not use (この行で使わない部品).
 - **My materials (マイ素材, v2.1)**: new materials that the AI or the user builds from existing parts and a fixed set of
   primitives (shapes, particles, patterns, motion tracks, oscillators). They are data, never code; they are stored in the

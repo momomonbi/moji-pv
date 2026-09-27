@@ -74,7 +74,7 @@ AI タブの **指示** の欄に、してほしいことを書いて **送る**
   - **新しい素材を作ってもよい**: オンにすると、AI が新しい素材（マイ素材）を作って使うことがあります（6 を見てください）。「素材を作る」のボタンを押すとオンになります。
   - **写真・動画をAIが使ってよい**: 写真・動画がこの端末にあるときだけ出ます。はじめはオンです。オンのとき、AI があなたの写真・動画を背景などに使うことがあります（7 を見てください）。オフのときは、写真・動画の番号・種類・大きさ・長さ・形・説明を送りません（背景などが写真・動画かどうかは、部品の名前として伝わります）。
 - **カメラワークをAIに任せる**: カメラの動き（寄る・引く・区画のカメラ・緩急など）だけを AI に決めてもらいます。指示の文は空でもかまいません。
-  - **EXTREME**（そのすぐ右のボタン）: 押してから頼むと、激しいカメラワーク（一瞬で寄る・振って入る・回転・拍で揺れる・歌う言葉の寄りに切る など）を AI が選びます。はじめは、対象で「カメラ EXTREME」がオンなら押された状態です。まだオフの場所に頼むと、先に「激しいカメラワークについて」の注意が出ます（**オンにする** で続けます）。結果の一覧には、選んだ動きと、その区画の「カメラ EXTREME」をオンにする行が入ります（その行のチェックを外すと、AI が選んだ動きだけが残ります）。歌っている言葉は読めるように動き、点滅は増えません。
+  - **EXTREME**（そのすぐ右のボタン）: 押してから頼むと、激しいカメラワーク（一瞬で寄る・振って入る・回転・拍で揺れる・歌う言葉の寄りに切る など）を AI が選びます。はじめは、対象で「カメラ EXTREME」がオンなら押された状態です。まだオフの場所に頼むと、先に「激しいカメラワークについて」の注意が出ます（**オンにする** で続けます）。結果の一覧には、選んだ動きと、その区画の「カメラ EXTREME」をオンにする行が入ります（その行のチェックを外すと、AI が選んだ動きだけが残ります）。**くり返しの行をそろえる** がオンなら、2回目以降のサビは1回目に選んだ動きにそろいます（「カメラ EXTREME」をオンにする行は、2回目以降の行にもそのまま入ります）。歌っている言葉は読めるように動き、点滅は増えません。
   - 例: 「サビを激しく」「サビは一瞬で寄って、Aメロは拍で揺らす」「回転は控えめに」「最後のサビだけ振り抜いて」
   - 送るものは「カメラワークをAIに任せる」と同じ種類です（歌詞、指示、設定の値と名前）。EXTREME のときは、各行で EXTREME がオンかどうかと、その行の構図がカメラを動かせるかどうかも、設定の値として送ります。
 - 意味があいまいなときは、何も変えずに聞き返します（「AIからの質問: …」。区画ごとに頼んだときは「サビ1: …」のように区画の名前が付きます）。
@@ -82,6 +82,8 @@ AI タブの **指示** の欄に、してほしいことを書いて **送る**
 - 詳細の **この行をAIに頼む…** / **この区画をAIに頼む…** / **このカットをAIに頼む…** を押すと、その場所を対象にした状態で指示の欄が開きます。
 
 変更はその対象の中だけに入ります。対象の外も変わる提案は「区画の外（作品全体）」にまとまり、はじめはチェックが外れています（「区画の外も変わります」）。
+
+作品全体 › 見た目 の **くり返しの行をそろえる** がオンのときは、1回目のサビへの変更が2回目以降にもそのまま表れます。1回目と2回目以降の同じ所を一度に変える提案は1回目の分だけが残り、「くり返しの行は1回目にそろうので…」と表示されます。2回目以降だけを変える提案は、その行にだけ入ります。AI がこの設定を切り替えることはありません。
 
 ## 5. 区画ごとに指示
 
@@ -297,12 +299,17 @@ the tool's own button (**Prepare lyrics**, **Send**, **Make**, **Send and descri
   **May create new materials** and **AI may use photos and videos** (shown when you have photos or videos on this
   device; on by default). **Let AI do the camerawork** changes camera fields only. If the request is unclear, the AI
   asks back ("The AI asks: …") instead of guessing. Changes stay inside the target; anything outside it is grouped
-  under "Outside the section (whole video)" and starts unchecked.
+  under "Outside the section (whole video)" and starts unchecked. With **Repeat lines the same way** on (whole video ›
+  Look), a change to the first chorus shows in the later ones too: where a proposal changes the same thing on the
+  first copy and on a later copy, only the first copy's change is kept ("Lines sung again follow their first copy, …");
+  a change to a later copy alone applies to that line. The AI never switches this setting.
 - **EXTREME** — the chip right of **Let AI do the camerawork**. Press it, then ask, and the AI picks intense camerawork
   (crash zooms, whips, spins, shakes on the beat, cuts to a close-up of each sung word …). It starts pressed where
   **Camera EXTREME** is already on for the target. Where it is still off, the notice "About intense camerawork" comes
   first (**Turn on** goes on). The review lists the moves and a row that turns **Camera EXTREME** on for the area
-  (uncheck it and only the AI's moves stay). Every word stays readable while it is sung, and no flashing is added.
+  (uncheck it and only the AI's moves stay). With **Repeat lines the same way** on, a later chorus follows the moves
+  picked for the first one (the row that turns **Camera EXTREME** on still covers the later lines). Every word stays
+  readable while it is sung, and no flashing is added.
   Examples: "Make the chorus intense", "Crash in on the chorus, shake the verse on the beat", "Fewer spins", "Whip
   through the last chorus only". It sends the same kind of data as camerawork (lyrics, the instruction, setting values
   and names); with EXTREME, also whether each line has EXTREME on and whether its layout can move the camera, as

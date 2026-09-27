@@ -23,13 +23,16 @@ Click the preview or a lyric line and the **Details** column shows that part. Yo
 - **Auto / Pinned** — everything starts as Auto. A value you pick yourself is Pinned: New look and reroll leave it alone.
   **Unpin** makes it automatic again.
 - **Lock** — lock a line you like and it keeps its look.
+- **Repeat lines the same way** — turn it on under whole video › Look, and a lyric line sung again (a second chorus)
+  looks as it did the first time (off by default).
 - **Look history ◀ ▶** — the ◀ ▶ buttons in the play bar step through the looks you have tried.
 - Every change can be undone, and your work is autosaved in the browser.
 
 **Camera EXTREME** — switch on **Camera EXTREME** under whole video › Energy for intense camerawork: crash zooms, whips,
 spins, shakes on the beat and more (Strong / Very strong / Maximum; also per section or line, and from the **EXTREME**
-chip next to **Let AI do the camerawork**). Every word stays readable while it is sung, and no flashing is added. Some
-viewers may feel motion sick, so when you publish, consider noting that the video contains intense motion.
+chip next to **Let AI do the camerawork**). With **Repeat lines the same way** on too, a second chorus plays the same
+intense moves as the first. Every word stays readable while it is sung, and no flashing is added. Some viewers may
+feel motion sick, so when you publish, consider noting that the video contains intense motion.
 
 ## Song (optional) and tap sync
 

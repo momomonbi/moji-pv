@@ -9009,4 +9009,140 @@ What the scans, sheets and strips showed:
   `cover.test.js` and `xblur.test.js` (coverage), and in the scratch QA tools of this round.
 - The owner's review of four videos (a ballad, an upbeat song, 9:16, the chorus only).
 
-CHECKS_PLACEHOLDER
+**Checks** (phase F, on its own branch before main's 「くり返しの行をそろえる」 came in): `build.py --check` 218 modules
+OK; the five goldens as above; Node 1,743 pass, 1 fail — the re-planning speed test of `project_long`, which fails on
+this loaded machine on main too; no forbidden word in the documents. Browser tests (three at a time): contact_sheet,
+csp, determinism, editor_metrics, export_check, fx_parts, glyph_parity, ground_contrast, i18n_pages, kit_check,
+materials_gallery, media_alpha, media_import, package_io, parts_gallery, transparent_check, webm_check OK, ui_flows OK
+(47 flows); ui_layout failed one timing check under the load ("redo of song.set did not re-link the audio", in English
+only), and media_exact's playback check and perf.py's p95 fail here as they do on main. GitHub CI decides those.
+
+**Integration with main (the lead).** Main brought 「くり返しの行をそろえる」 and the calm short pull-backs (the next
+section). Conflicts: the dependency list of `ai/direct` (both `planner/cast` and `planner/extreme`), the slot-scope
+comment of `core/commands` (both `cam.extreme` and `repeat.same` are refused at a cut), the golden jobs and their
+comment in `tests/update_golden.js` (both files, `project_repeat.json` first), the AI guide paragraph and the design's
+contract-change table (both), the flow list of `ui_flows.py` (both); the pages were rebuilt. `project_extreme.json`
+was regenerated: its only change is one short pull-back of the 9:16 document (`r6~8`, pullReveal) that now takes
+`hushRushHush` under main's rule; the other five goldens match.
+
+**EXTREME with 「くり返しの行をそろえる」.** With both on, the overlay picked a repeat's preset on its own, weighed
+toward its first copy by the echo (×40). That matched only where the echo read the same cut the opt-in aligns: in
+`project_repeat` the second 「まっすぐに」 of the 大サビ's pair is aligned to the second one of the first pair, but its
+echo reads the first line, so it took crashZoom where its source showed shakeHits. Now a repeat with a source plays the
+source's preset (DESIGN_2_1 §14.8.3): mirrored alike, where it fits (weighs > 0 there; a short cut takes only the short
+pool), not when the previous cut already shows it (unless the cut before the source did too), and the cut before a
+repeat weighs that preset ×0.2. A reroll of the repeat, its line or their カメラワーク leaves it to the pick; a pin on it
+wins; a hand-picked move on the first copy carries. On the sample lyrics (708 pairs whose first copy shows an EXTREME
+move): the same move 47.7 % → 98.0 %; the same move twice in a row on an aligned repeat 41 times, 37 of them where the
+first copy has it twice too (without the neighbour rule: 99.7 % and 53). Documents without both switches plan exactly
+as before (every golden matches). The AI: a later copy's line switch row was left out by the rule that a later copy
+follows the first copy's changes (`cam.` matched `cam.extreme`), so an EXTREME request over both choruses turned the
+switch on for the first one only; the switch is the area's, like the season, and is no longer followed
+(`FOLLOWED` excludes it). Tests: four in `repeat_same.test.js` and `ai_direct.test.js`, each checked against a mutation
+(no copy, no neighbour rule, salts ignored, the switch followed): each mutation fails its test.
+
+## Repeat lines the same way (くり返しの行をそろえる)
+
+The owner took up the two items the echo work left open (the section above, "Asked of the owner and not built"): an
+opt-in that makes a repeated line look like its first copy, and a calm curve for every short pull-back (the entry at the
+end of this section). The design is DESIGN_2_1 §4.10; this records what was measured and decided. The probes are
+scratch scripts, not kept. The measures are those of the echo work: the app's sample lyrics with a second サビ (L1) and
+the same with the サビ's first line sung twice at the start of the 大サビ (L2), 2 × 12 seeds × 8 moods × 3 aspects = 576
+plans per song, four songs (a 75 s song shaped like the lyrics, the demo song, no song, the demo song looped to 75 s),
+in the browser with its fonts.
+
+**What makes a repeat look the same.** Each repeated cut against its first copy, rendered at 10 / 30 / 50 / 70 / 90 %
+of each cut's own time at 96 px wide (mean absolute difference per channel, 0–255; the chorus-shaped song, 7,776
+repeats):
+- today: median 23.4 (quartiles 18.4 / 30.4), under 5 for 0.1 %; two unrelated cuts two apart differ by 20.7. The
+  copies share the layout in 13.8 %, the lens in 20.5 %, the shot in 57 % (the echo) and the background in 5.6 %.
+- the cut decisions only (orientation, layout, text, motions, decorations, lens, camera, screen effects): 16.1
+  (11.5 / 21.5), under 5: 2.2 %. Layout, lens and shot now agree in 85.8 %, but the background (still 5.6 %), the
+  transition into the cut and the section camera differ, and they fill most of the frame.
+- with backgrounds (a copy starts a segment where its source does and takes its ground and atmosphere), transitions
+  and section cameras as well: 8.3 (3.9 / 14.7), under 5: 30.7 %. That is what is built.
+- the final build, with the neighbour rule below: 8.4 (4.0 / 14.8), under 5: 30.5 %.
+
+Per mood the medians go from 19–27 to 6–14 (silverReel, whose atmospheres move most, is highest). What differs after
+that is time (particles, a background's own clock, a rig whose strength grows in the last chorus), the repeats that
+have no source (below), and the curve of a short pull.
+
+**Which copy is the source.** The first design aligned cut by cut to the first copy. A line sung twice in a row then
+played the same thing back to back (the 大サビ's doubled line of L2), and a later chorus that sings a line twice aligned
+both copies to the one first copy. Runs of consecutive lines that sing the same line fixed both: a copy takes the line
+at its place in the first run, and the first run's own copies choose their look. A cut aligns only where the words,
+role and impact mark are the same as its source's (another split of the line keeps its own look).
+
+**How closely.** tests/node/repeat_same.test.js, the sample lyrics (three shapes, 3 aspects, 4 moods, 2 seeds),
+corpus(2) and doubled lines: with the catalog 2,931 of 3,100 repeats have a source (165 are a line sung again right
+after a copy of it, 4 have other words). Every slot is its source's in ≥ 99.7 % of them except the exit (96.6 %: a
+transition at the edge of the repeated lines takes it over by a rule, ×97); parameters 19,188 / 19,188, backgrounds
+703 / 703, transitions 2,931 / 2,931. The other exceptions are D§8.2 (below): 8 layouts and 4 entrances, and 11 slots of
+those cuts that follow their own layout. The stub registry has 2 layouts, so one such clash shifts the rest of its line:
+70 of 1,410 layouts (the test counts a clash as a slot where the source's value does not fit).
+
+**Neighbours.** Copies next to cuts that choose freely made identical neighbours, which D§8.2 rules out: over 576 plans
+0.25 % of neighbouring lyric cuts showed the same layout and 0.24 % the same entrance (0 without the opt-in). The cut
+right before a copy now also passes over what the copy will show (0.14 % left, all a copy next to a copy of another
+line: the last line of one chorus copy and the first of a chorus sung in another order), and a copy whose source's
+chosen layout or entrance the cut before it already shows chooses that slot itself unless the pair was the same at the
+first copy: 0 / 0. Other neighbours, the opt-in on against off: the same lens 1.51 % / 1.14 %, the same moving shot
+4.90 % / 5.35 %; distinct layouts per plan, median 16 / 17; no plan has one layout on over 60 % of its lyric cuts.
+
+**Does it harm the video.** The browser QA of the echo work over the four songs (2,304 plans, 141,120 cuts; this
+build with the opt-in off against on): fast zoom-outs 485 → 464 (quietHush 46 → 39), fast pans 865 → 857 (quietHush
+75 → 50; dashSprint 135 → 173 and heartAche 142 → 155 rise, silverReel 155 → 126 falls, the others move by a few),
+ground edges 0 → 0. Cuts with a sung word more than 30 % outside the frame 1,062 → 1,122 and cuts with glyphs off
+956 → 992: a copy takes its first copy's look, flaws included. Among the repeats they go from 0.09 % to 0.26 %, the
+first copies' own share (0.34 %); other cuts have 1.10 %. They are mostly edge layouts (cornerNote, sidebarIndex,
+tickerMarquee) on long lines, which place words at the frame edge whatever the camera does.
+
+The chorus contact sheets (all 576 plans: each cut of the first サビ, three frames, next to the same cut of the second
+サビ and of the 大サビ) show the later choruses as the first played again, with the exceptions above in view: a last
+cut sung shorter than 0.8 s takes a shot for short cuts, and L2's doubled line in the 大サビ chooses its own look. A
+chorus is not monotonous for it: its 9 cuts show 6–9 layouts (mostly 7–8) with no two neighbours alike, as without
+the opt-in. Of the 82 repeats with a sung word off the frame in the browser QA (four songs), 67 show their first
+copy's look and its flaw, 6 the same look where the first copy sings that word inside the frame (the copy sings it at
+another moment of the cut), and 9 a look of their own; without the opt-in there are 28, all with a look of their own.
+
+**Stability.** An edit of a first copy now moves its copies, which is the point; the test counts them apart (the
+followers) with the cut right before a follower and the 4 after it (relays), and compares the rest with the same edits
+with the opt-in off. Catalog: 54 insertions change more than 4 other cuts in 6 (off: 7), 230 rerolls more than 3 in 1
+(off: 3); stub: 11 (15) and 5 (7). Re-planning equals the plan made from scratch (the cast cache compares a copy's
+source by its cast entry, and the cut before a copy the entry of that copy's source).
+
+**Decisions.**
+- A pin (`repeat.same`, work or line; refused at a cut), not a schema field: an older build ignores it, the inspector
+  shows it like any slot, and a line can opt out. Its name cannot collide with a camera slot.
+- The copy takes what the Plan shows at its source: the source's pins, locks and rerolls pass on. Rerolling or pinning
+  the first copy therefore changes its copies (the user asked that they match); without the opt-in a reroll stays local.
+  Locking a copy's line freezes it.
+- A copy's own pins win; a reroll of the copy or its line gives it its own look back, a die on one slot that slot.
+- A value is taken only where it fits the copy (its pool, fits, role and orientation, and the short-pull rule), so the
+  copy's own avoid list and season still hold.
+- The AI tools do not set or clear the switch. Where one answer changes the same cut slot on a first copy and on a
+  copy that follows it, the first copy's change is kept and the review says so (`ai.warn.repeatSame`).
+- 作品全体 › 見た目 has one switch with a line of explanation; 行 › 演出 › 詳細 has the per-line choice only on lines
+  that are sung again.
+
+**Cost.** Without the pin, planning costs what it did: 8 rounds alternating with main over four documents (the
+long project, two corpus plans, the sample lyrics with a second サビ), cold plans and re-plans after a pin edit, give
+0.93–1.02 × main's time (paired medians); the Node suite's re-plan speed test gives 15.1 ms against main's 15.5 ms on
+this shared machine (both over its 10 ms here, as on main alone). With the pin, cold plans take 0.90–1.07 × and
+re-plans after an edit 1.05–1.18 × the time without it (an edit of a first copy re-casts its copies). perf.py (frame
+times) is main's within noise, run alternately twice.
+
+### Calm short pull-backs
+
+The echo work gave `hushRushHush` only to the short pulls the echo gives (round 5). Now every `pullReveal` on a cut
+under 1.8 s takes it, whatever gave the shot (DESIGN_2_1 §4.7 Parameters, why `cam.shortPull`). Over the 2,304 plans
+(the browser, 30 fps, the full view): fast zoom-outs 1,240 → 485, quietHush 133 → 46; fast pans 1,040 → 865, quietHush
+105 → 75. Per mood, zoom-outs / pans: quietHush 133 → 46 / 105 → 75, dashSprint 198 → 111 / 178 → 135, silverReel
+223 → 98 / 176 → 155, dreamHaze 143 → 27 / 111 → 103, popFizz 113 → 41 / 92 → 57, glitchFracture 120 → 65 / 127 → 109,
+printColumn 147 → 63 / 104 → 89, heartAche 163 → 34 / 147 → 142. Node's measure agrees (1,249 → 492; the short pulls'
+own fast zoom-outs 855 → 98). Cuts with a sung word off the frame 1,067 → 1,062, glyphs off and ground edges
+unchanged. No shot changes, so the §7.3 floors on the independent seeds 1400–1639 (240 plans per registry) are the same
+figures as before, every one with its margin (the thinnest: framing lens → `none` at ×4.01 in the lowest 12-seed
+window of the catalog); only the curve agreement of shared moving shots rises (catalog 0.830 → 0.865, synthetic
+0.859 → 0.904). It changes the camera curves of existing documents: 121 of the 240 plans of plan_hashes.json and one
+frame of frame_hashes.json; frame_hashes_v2.json and project_media.json are unchanged.
