@@ -651,8 +651,9 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
         // o.media: the asset ids the AI may place (DESIGN_2_1 §11.6.1: bytes on this device), offered only while
         // 写真・動画をAIが使ってよい is on — whichever block sent the request
         const media = state.allowMedia && Array.isArray(o.media) && o.media.length ? o.media.slice() : false;
+        // extreme: the camera request's 「EXTREME」 (DESIGN_EXTREME §2.5)
         const make = () => DIRECT.directRequests(sent.doc, sent.plan, reg, { briefs: o.briefs, uiLang: host.lang, mode: o.mode || 'all',
-          allowMaterials: allow, media });
+          allowMaterials: allow, media, extreme: o.mode === 'camera' && !!o.extreme });
         let reqs = make();
         let failed = false;
         let outs = [];
@@ -775,6 +776,7 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
           .map((r) => ({ areaKey: r.areaKey || null, text: r.question || r.summary || '' }));
         const summary = results.filter((r) => r && r.understood !== false && r.summary).map((r) => r.summary).join(' ');
         const extra = { briefs, mode: o.mode || 'all', materialsFailed: !!got.materialsFailed };
+        if (o.mode === 'camera' && o.extreme) extra.extreme = true;
         if (!changes.length) {
           if (questions.length) {
             return { notice: Object.assign({ kind: 'question', tool, text: questions.map((q) => q.text).filter(Boolean).join(' '), questions,
@@ -811,7 +813,8 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
       }
 
       // run(tool, opts) → true when a review or a notice came back. opts (edit): { instruction, lineIds }; (direct):
-      // { briefs: [{ ref, instruction }], mode: 'all' | 'camera', allowMaterials, media }; (material): { description, kind,
+      // { briefs: [{ ref, instruction }], mode: 'all' | 'camera', allowMaterials, media, extreme (camera only: the
+      // 「EXTREME」 request, DESIGN_EXTREME §2.5) }; (material): { description, kind,
       // scope? ('cut' | 'run': an ornament for that place), current?, useAt?, media? (a remake: the asset ids on this device) }.
       async function run(tool, opts) {
         const o0 = opts || {};

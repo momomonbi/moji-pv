@@ -13,12 +13,14 @@ MV.def('ui/view', ['ui/layout', 'ui/selection'], (L, S) => {
     seekOnSelect: true,       // 選択で再生位置を移動
     follow: true,             // 再生位置に追従
     reduceFlash: false,       // 点滅を抑える (preview only)
+    calmCamera: false,        // 激しいカメラを抑える (preview only, DESIGN_EXTREME §3.6; first run: the OS reduced-motion setting)
     safeArea: false,          // 安全枠
     ai: true,                 // AIを使う
     quality: 'auto',          // プレビューの画質 auto | smooth | sharp
     muted: false,
     hintOmakase: true,        // the first-time おまかせ hint is still to be shown
     hintStacked: true,        // the one-time narrow-window note is still to be shown
+    hintExtreme: true,        // the EXTREME motion-sickness notice is still shown (次から表示しない turns it off, §3.5)
   });
 
   // Whether the preview sound is off: the stored preference, or the one-off first-run autoplay mute.
@@ -34,8 +36,10 @@ MV.def('ui/view', ['ui/layout', 'ui/selection'], (L, S) => {
   }
 
   // Reads stored preferences; unknown keys and wrong types are ignored; any storage failure gives the defaults.
-  function readPrefs(storage, key) {
+  // defaults: this device's own first-run values of some preferences (calmCamera follows prefers-reduced-motion).
+  function readPrefs(storage, key, defaults) {
     const out = Object.assign({}, DEFAULT_PREFS);
+    for (const k of Object.keys(defaults || {})) if (typeof defaults[k] === typeof DEFAULT_PREFS[k]) out[k] = defaults[k];
     try {
       const raw = storage && storage.getItem(key);
       const saved = raw ? JSON.parse(raw) : null;
@@ -48,13 +52,13 @@ MV.def('ui/view', ['ui/layout', 'ui/selection'], (L, S) => {
     return out;
   }
 
-  // createView({ storage?, key? }) → view store. storage is an injected Storage-like object (localStorage in the
-  // browser); every access is wrapped so the app works without it.
+  // createView({ storage?, key?, defaults? }) → view store. storage is an injected Storage-like object (localStorage in
+  // the browser); every access is wrapped so the app works without it. defaults: first-run values (readPrefs).
   function createView(opts) {
     const o = opts || {};
     const key = o.key || PREF_KEY;
     const storage = o.storage || null;
-    let state = initialState(readPrefs(storage, key));
+    let state = initialState(readPrefs(storage, key, o.defaults));
     const listeners = [];
 
     function emit(changed) {

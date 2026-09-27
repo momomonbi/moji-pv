@@ -1205,3 +1205,43 @@ test('MAI-8: two new materials of one review: ▶ 見る previews each under its
     assert.deepEqual(items.map((x) => x.material), ['m' + (doc0.materials.next + k).toString(36)], c.entry.name.ja);
   });
 });
+
+// ---- 「EXTREME」 (DESIGN_EXTREME §2.5) ---------------------------------------------------------------------------------
+
+test('EXTREME: the camera request with extreme sends the EXTREME schema; the review has the moves and the switch row; one undo step', async () => {
+  const CHORUS = { kind: 'song', n: 2, t0: 24, t1: 40 };
+  const XCAM_A = (x) => Object.assign(CAM_A(), { power: -1, dir: 'auto' }, x);
+  const ans = { answers: [{ s: 0, understood: true, summary: 'サビを激しく', question: '',
+    all: { rig: '', rigCurve: CURVE_A(''), camera: XCAM_A({ shot: 'crash', focus: 'emphasis', power: 1 }) },
+    lines: [{ i: 1, camera: XCAM_A({ shot: 'whipPan~m' }) }], cuts: [] }] };
+  const { host, ctl, seen } = v21Setup([ans, JSON.parse(JSON.stringify(ans))]);
+  const doc0 = host.doc;
+  assert.equal(await ctl.run('direct', { briefs: [{ ref: CHORUS, instruction: '' }], mode: 'camera', extreme: true }), true);
+  const post = seen.filter((x) => x.init.method === 'POST');
+  assert.equal(post.length, 1);
+  const body = JSON.stringify(post[0].body);
+  assert.ok(body.includes('EXTREME mode') && body.includes('[extreme shots]') && body.includes('"power"'), 'the EXTREME request');
+  const r = ctl.state.review;
+  assert.equal(r.kind, 'direct');
+  assert.equal(r.mode, 'camera');
+  assert.equal(r.extreme, true);
+  const byPath = Object.fromEntries(r.changes.map((c) => [c.path, c]));
+  assert.equal(byPath['line/rc:cam.shot'].to, 'whipPan~m');
+  assert.equal(byPath['line/rb:cam.shot'].to.x, 1, 'the crash of all, a custom EXTREME move');
+  const rows = AC.aggRows(r.changes);
+  const sw = rows.find((x) => x.agg && x.agg.endsWith('|cam.extreme'));
+  assert.ok(sw && sw.changes.length === 2, 'the two chorus lines share one switch row');
+  assertTexts(r);
+  assert.equal(ctl.apply(), r.changes.length);
+  assert.deepEqual(host.doc.pins['line/rb:cam.extreme'], { v: 1, by: 'ai' });
+  assert.deepEqual(host.doc.pins['line/rc:cam.shot'], { v: 'whipPan~m', by: 'ai' });
+  host.store.undo();
+  assert.deepEqual(host.doc, doc0, 'one undo step');
+  // without extreme the same answer's EXTREME words are unreadable, and no switch row is made
+  assert.equal(await ctl.run('direct', { briefs: [{ ref: CHORUS, instruction: '' }], mode: 'camera' }), true);
+  const plain = JSON.stringify(seen.filter((x) => x.init.method === 'POST')[1].body);
+  assert.ok(!plain.includes('EXTREME') && !plain.includes('"power"'), 'the normal request');
+  const n = ctl.state.notice || ctl.state.review;
+  assert.ok(!(n.changes || []).some((c) => c.slot === 'cam.extreme' || (c.slot === 'cam.shot' && MV.use('core/shot').isExtreme(c.to))));
+  assert.ok((n.warnings || []).some((w) => w[0] === 'ai.warn.badShot'));
+});

@@ -14,6 +14,8 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core
   //   #text:<sample>@v                    the sample laid out in every theme face with the real measurer (WP2)
   //   #shot:<key>@<aspect>&t=…            a shot preset on the canned cut (DESIGN_2_1 §3.10; params zoom, curve, follow)
   //   #rig:<key>@<aspect>&t=…             a rig preset over the whole sample plan (§3.10; params amp, curve)
+  //   #xshot:<key>@<aspect>&t=…           an EXTREME preset ("~m" mirrors it) on the canned cut, EXTREME on (DESIGN_EXTREME
+  //                                       §5.3; params as shot plus extreme = cam.extreme)
   //   #media:<kind>/<key>@<aspect>&asset=fixture:<name>&t=…   a part with a media param, showing a fixture asset of the
   //                                       fake store (tests/helpers/fake_media.js; §11.5.7). Test pages only: the store
   //                                       and its test parts come with the fixtures (MVLabFixtures.media).
@@ -25,7 +27,7 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core
 
   const ASPECTS = DOC.ASPECTS;
   const KINDS = REG.KINDS;
-  const CAM_KINDS = Object.freeze(['shot', 'rig']);     // camera presets (core/shot), shown like parts
+  const CAM_KINDS = Object.freeze(['shot', 'rig', 'xshot']);   // camera presets (core/shot), shown like parts
   const FIXTURE = 'fixture:';
   const VIEW_W = 960, VIEW_H = 540;
   const POSE_COLS = ['x', 'y', 'z', 'rot', 'rx', 'ry', 'sx', 'sy', 'alpha', 'blur', 'reveal', 'tint', 'glow', 'shard', 'echo', 'pixel'];
@@ -137,7 +139,14 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core
     return REG.extend(base, defs);
   }
 
-  function cameraKeys(kind) { return kind === 'shot' ? SHOT.SHOT_KEYS : kind === 'rig' ? SHOT.RIG_KEYS : []; }
+  function cameraKeys(kind) {
+    return kind === 'shot' ? SHOT.SHOT_KEYS : kind === 'rig' ? SHOT.RIG_KEYS : kind === 'xshot' ? SHOT.XSHOT_KEYS : [];
+  }
+
+  // Whether key names a preset of a camera kind (an EXTREME preset may carry the mirror suffix "~m").
+  function cameraKeyOk(kind, key) {
+    return kind === 'xshot' ? SHOT.xKeyOf(key) !== null : cameraKeys(kind).includes(key);
+  }
 
   // --- media mode: the fake store and its test parts (test pages only) -------------------------------------------------
 
@@ -263,7 +272,8 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core
   // theme, orient, backdrop, w, h, fonts, surface, glyphPath, probe, quality, fresh (a new engine: no history),
   // level (adaptive preview level to render at), prefill (a colour the surface holds before the frame), textScale (the
   // cut's text.scale), using (an engine record from engineFor to render with), asset (media mode: a fixture of the fake
-  // store, 'fixture:<name>', put in the part's media param) }. kind 'shot' / 'rig' shows a camera preset (key).
+  // store, 'fixture:<name>', put in the part's media param), calm (the preview's 「激しいカメラを抑える」), sentinel (a
+  // colour the scene backdrop is filled with: ground edge checks) }. kind 'shot' / 'rig' / 'xshot' shows a camera preset.
   async function renderPart(o) {
     const source = o.parts || defaultSource();
     if (!source) throw new Error('lab: no parts registry on this page');
@@ -278,7 +288,7 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core
       params = Object.assign({}, o.params, { [param]: asset.id });
     }
     const ref = o.kind && o.key ? { kind: o.kind, key: o.key, params } : {};
-    if (camera && !cameraKeys(o.kind).includes(o.key)) throw new Error('lab: unknown ' + o.kind + ' preset ' + o.key);
+    if (camera && !cameraKeyOk(o.kind, o.key)) throw new Error('lab: unknown ' + o.kind + ' preset ' + o.key);
     if (ref.kind && !camera && !reg.get(ref.kind, ref.key)) throw new Error('lab: unknown part ' + ref.kind + '/' + ref.key + ' in ' + source);
     const plan = FAC.samplePlan(reg, ref, { text: o.text, theme: o.theme, aspect: o.aspect, orient: o.orient, backdrop: o.backdrop,
       textScale: o.textScale });
@@ -296,7 +306,7 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core
     if (Number.isInteger(o.level)) rec.engine.setLevel(o.level);
     const stats = rec.engine.renderFrame(surface, t, { quality: o.quality || 'preview', pick: true,
       scale: Math.min(surface.w / plan.design.w, surface.h / plan.design.h), glyphPath: o.glyphPath, probe: o.probe,
-      backdrop: o.backdrop });
+      backdrop: o.backdrop, calm: o.calm === true, sentinel: typeof o.sentinel === 'string' ? o.sentinel : undefined });
     return { plan, t, stats, surface, engine: rec.engine, registry: reg };
   }
 
@@ -745,13 +755,18 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core
   const projectEngines = new Map();
 
   // frames(o) → { hashes, duration }: pixel hashes of a fixture project at the given times; fresh = a new engine.
+  // o.pins (additive): pins merged into the project's (DESIGN_EXTREME: the cam.extreme switch, so a planned EXTREME
+  // document takes the determinism checks).
   async function frames(o) {
     const source = o.parts || defaultSource();
-    let rec = !o.fresh && projectEngines.get(source + '|' + o.project);
+    const id = source + '|' + o.project + (o.pins ? '|' + JSON.stringify(o.pins) : '');
+    let rec = !o.fresh && projectEngines.get(id);
     if (!rec) {
       rec = engineFor(source, false, true);
-      rec.engine.setDoc(projectDoc(o.project));
-      if (!o.fresh) projectEngines.set(source + '|' + o.project, rec);
+      const doc = projectDoc(o.project);
+      if (o.pins) doc.pins = Object.assign({}, doc.pins, o.pins);
+      rec.engine.setDoc(doc);
+      if (!o.fresh) projectEngines.set(id, rec);
     }
     const plan = rec.engine.plan;
     const w = o.w || 640, h = o.h || Math.round((w * plan.design.h) / plan.design.w);
@@ -816,12 +831,22 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core
 
   // The plan perf() and compare() render: the fixture project, o.camera true → work:rig pinned to slowSwell (the
   // planner's automatic shots stay), 'off' → the camerawork pinned off (work:cam.shot and work:rig 'none': the v2
-  // frames); o.materials → the sample materials in every slot (withMaterials). Set on the engine.
+  // frames); o.extreme → EXTREME camerawork (DESIGN_EXTREME §5.3): every line's cam.shot pinned to the x-presets in
+  // turn (as the planner's overlay would give them), under the slowSwell rig; o.materials → the sample materials in
+  // every slot (withMaterials). Set on the engine.
   function projectPlan(engine, o) {
-    const doc = projectDoc(o.project);
+    let doc = projectDoc(o.project);
     if (o.camera === 'off') {
       doc.pins = Object.assign({}, doc.pins, { 'work:cam.shot': { v: 'none', by: 'user' }, 'work:rig': { v: 'none', by: 'user' } });
-    } else if (o.camera) doc.pins = Object.assign({}, doc.pins, { 'work:rig': { v: 'slowSwell', by: 'user' } });
+    } else if (o.camera || o.extreme) doc.pins = Object.assign({}, doc.pins, { 'work:rig': { v: 'slowSwell', by: 'user' } });
+    if (o.extreme) {
+      engine.setDoc(doc);
+      const pins = Object.assign({}, doc.pins);
+      engine.plan.lines.forEach((line, i) => {
+        pins['line/' + line.id + ':cam.shot'] = { v: SHOT.XSHOT_KEYS[i % SHOT.XSHOT_KEYS.length], by: 'user' };
+      });
+      doc = Object.assign({}, doc, { pins });          // a new document: setDoc of the same one is a no-op
+    }
     engine.setDoc(doc);
     let plan = engine.plan;
     if (o.materials) plan = withMaterials(plan, engine.registry);
@@ -976,7 +1001,9 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core
   // surface is read once the world is drawn (render option `flush`), so 'draw' holds the canvas's raster time of the
   // world and 'post' only the post stack's; `stages.rest` is the time after the render call (the final readback).
   // o.recipes ({ kind: recipe } or 'heaviest'): those sample materials replaced by materials of these recipes
-  // (recipesRegistry). `budget` summarizes the glyph budget records of the cuts in the window (§5.9.5).
+  // (recipesRegistry). `budget` summarizes the glyph budget records of the cuts in the window (§5.9.5). o.extreme
+  // (DESIGN_EXTREME): EXTREME shots on every line (projectPlan); `xshots` counts the cut scenes in the window with an
+  // x-track and `blur` { frames, p50, p95 } times the motion-blurred frames apart.
   // The result also carries `times`, the frame times in order (per-frame comparisons across runs), and `slices`: the
   // longest stretch of work engine.prepare did between two yields to the host, and how many yields it made.
   // o.meter (a diagnostic, never in perf.py's judgement): `cover`, per frame [the frame share the glyph sprite draws
@@ -1023,17 +1050,18 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core
     if (resumed >= 0) slices.max = Math.max(slices.max, performance.now() - resumed);
     resumed = -1;
     for (let i = 0; i < 5; i++) { rec.engine.renderFrame(s, start + i / fps, ropts); s.ctx.getImageData(0, 0, 1, 1); }
-    const times = [], behave = [], drawMs = [];
+    const times = [], behave = [], drawMs = [], blurred = [];
     const stages = { behave: 0, draw: 0, post: 0, rest: 0 };
     const n = Math.round(seconds * fps);
-    let shots = 0, share = 1;
+    let shots = 0, xshots = 0, share = 1;
     if (meter) ropts.meter = meter;
     for (let i = 0; i < n; i++) {
       if (meter) { meter.px = 0; meter.n = 0; }
       const t0 = performance.now();
-      rec.engine.renderFrame(s, start + i / fps, ropts);
+      const fs = rec.engine.renderFrame(s, start + i / fps, ropts);
       s.ctx.getImageData(0, 0, 1, 1);
       times.push(performance.now() - t0);
+      if (fs.blur) blurred.push(times[i]);
       if (meter) cover.push([meter.px / (w * h), meter.n, modelCover(rec.engine, plan, start + i / fps)]);
       const st = rec.engine.stats().stageMs;
       drawMs.push([st.behave, st.draw, st.post]);
@@ -1048,6 +1076,7 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core
       if (c.b < start || c.a > start + seconds) return;
       const scene = rec.engine.scene('cut', i);
       if (scene && scene.shot) shots++;
+      if (scene && scene.shot && scene.shot.x) xshots++;
       let sum = 0;
       for (const [slot, d] of Object.entries(c.slots)) {
         const kind = slot.split('#')[0];
@@ -1077,11 +1106,13 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core
     });
     const sorted = times.slice().sort((a, b) => a - b);
     const mean = times.reduce((a, b) => a + b, 0) / Math.max(1, times.length);
+    blurred.sort((a, b) => a - b);
     for (const k of Object.keys(stages)) stages[k] /= Math.max(1, n);
     return { frames: n, p50: percentile(sorted, 0.5), p95: percentile(sorted, 0.95), max: sorted[sorted.length - 1] || 0, mean,
       stages, behaveP50: percentile(behave.sort((a, b) => a - b), 0.5), w, h, scenes: rec.engine.stats().scenes, shots,
       rigs: (plan.rigs || []).filter((r) => r.rig && r.rig.v !== 'none').length, particles, mixShare: share, times, slices,
-      cover: meter ? cover : null, drawMs: meter || o.flushStages ? drawMs : null, budget };
+      cover: meter ? cover : null, drawMs: meter || o.flushStages ? drawMs : null, budget,
+      xshots, blur: { frames: blurred.length, p50: percentile(blurred, 0.5), p95: percentile(blurred, 0.95) } };
   }
 
   // cuts(o) → [{ i, key, a, b, t0, times, slots, glyphs, em, cellArea, spriteBudget }]: the cuts of a fixture project
@@ -1149,10 +1180,10 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core
   }
 
   // info() → { sources, parts: { source: { kind: keys } }, notes: { source: text }, problems: { source: [...] }, aspects,
-  //   camera: { shot: keys, rig: keys }, media: { parts: { source: [{ kind, key, param, accept }] }, fixtures: [names] } | null }
+  //   camera: { shot: keys, rig: keys, xshot: keys }, media: { parts: { source: [{ kind, key, param, accept }] }, fixtures: [names] } | null }
   function info() {
     const out = { sources: sources(), parts: {}, notes: {}, problems: {}, aspects: ASPECTS.slice(),
-      camera: { shot: SHOT.SHOT_KEYS.slice(), rig: SHOT.RIG_KEYS.slice() }, media: null };
+      camera: { shot: SHOT.SHOT_KEYS.slice(), rig: SHOT.RIG_KEYS.slice(), xshot: SHOT.XSHOT_KEYS.slice() }, media: null };
     if (hasMediaFixtures()) {
       out.media = { parts: {}, fixtures: mediaFixtures().FIXTURES.map((a) => a.name) };
       for (const src of out.sources) {

@@ -17,8 +17,18 @@ MV.def('core/shot', ['core/num', 'core/curve'], (N, CV) => {
     rig: { u: [0, 1], zoom: [0.95, 1.15], x: [-0.05, 0.05], y: [-0.05, 0.05], roll: [-4, 4] },
     frameZoom: [0.9, 3],                          // the camera zoom a key may reach (§4.5.4, §1.4 #17)
   });
+  // EXTREME (DESIGN_EXTREME §1.1): the limits of an x-shot, next to LIMITS (which stays as it is). Every field of LIMITS
+  // is here too (the keyframe editor reads either through limitsOf); `mods` holds the shot-level beat modulators.
+  // (Phase F: the beat zoom up to 0.25 and the ground zoom up to 1.6, so 最大 is plainly stronger than the normal shots;
+  // docs/NOTES.md "カメラ EXTREME".)
+  const XLIMITS = deepFreeze(Object.assign(JSON.parse(JSON.stringify(LIMITS)), {
+    fill: [0.1, 0.95], ox: [-0.6, 0.6], oy: [-0.6, 0.6], roll: [-360, 360],
+    hit: [0, 1], gz: [1, 1.6], hop: [0, 0.35], whip: [0, 0.4], blur: [0, 1],
+    mods: { zoom: [0, 0.25], roll: [0, 20], shake: [0, 1], every: [1, 2, 4] },
+  }));
   const DEFAULTS = Object.freeze({ dt: 0, fill: 0.6, zoom: 1, px: 0.5, py: 0.5, roll: 0 });
   const ANCHORS = Object.freeze(['a', 'rest', 'sung', 'mid', 'end', 'out', 'b', 'emph']);
+  const X_ANCHORS = Object.freeze(ANCHORS.concat(['accent', 'accentEnd']));
   const TEXT_AIMS = Object.freeze(['block', 'emph', 'first', 'last', 'reading']);
   const PLACE_AIMS = Object.freeze(['frame', 'point']);
   const MOVES = Object.freeze(['drift', 'follow', 'panDown', 'panLeft', 'panRight', 'panUp', 'pullOut', 'punch', 'pushIn', 'tilt']);
@@ -150,8 +160,13 @@ MV.def('core/shot', ['core/num', 'core/curve'], (N, CV) => {
     return deepFreeze(sortedObject(out));
   }
 
+  // A ShotRef in canonical form, or undefined. EXTREME forms (an x-preset key with an optional "~m", an object with
+  // x === 1) are read by their own grammar; every other value exactly as before.
   function coerceShot(v) {
-    if (typeof v === 'string') return v === 'none' || Object.prototype.hasOwnProperty.call(SHOT_DATA, v) ? v : undefined;
+    if (typeof v === 'string') {
+      return v === 'none' || Object.prototype.hasOwnProperty.call(SHOT_DATA, v) || xKeyOf(v) !== null ? v : undefined;
+    }
+    if (isObject(v) && v.x === 1) return coerceXShotObject(v);
     return coerceShotObject(v);
   }
 
@@ -187,6 +202,148 @@ MV.def('core/shot', ['core/num', 'core/curve'], (N, CV) => {
 
   function isCustom(ref) { return isObject(ref); }
 
+  // --- EXTREME shots (DESIGN_EXTREME §1.1–§1.2) ----------------------------------------------------------------------
+
+  // XShot := { x: 1, keys: XKey[2..6], follow?, beat?: { zoom?, roll?, shake?, every? }, blur? }. An XKey is a Key with
+  // the XLIMITS ranges, the anchors accent / accentEnd, and hit (every aim), gz (text and frame aims), hop and whip
+  // (reading aims). Canonical like a Shot; defaults omitted: hit 0, gz 1, whip 0, beat.every 1, blur 1 (hop is kept at 0:
+  // absent means the reading hop rule). Only objects with x === 1 are read this way; every other value is coerced
+  // exactly as before.
+  function coerceXAt(v) {
+    if (typeof v === 'string' && X_ANCHORS.includes(v)) return v;
+    return coerceAt(v);
+  }
+
+  function coerceXKey(v) {
+    if (!isObject(v)) return undefined;
+    const at = coerceXAt(v.at), aim = coerceAim(v.aim);
+    if (at === undefined || aim === undefined) return undefined;
+    const kind = aimKind(aim);
+    const L = XLIMITS;
+    const out = { at, aim };
+    const num = (name, range, applies, dflt) => {
+      if (!applies || !isFiniteNumber(v[name])) return;
+      const x = clampTo(v[name], range);
+      if (dflt === undefined || x !== dflt) out[name] = x;
+    };
+    num('dt', L.dt, true, DEFAULTS.dt);
+    num('fill', L.fill, kind === 'text', DEFAULTS.fill);
+    num('zoom', L.zoom, kind !== 'text', DEFAULTS.zoom);
+    num('px', L.px, kind === 'point', DEFAULTS.px);
+    num('py', L.py, kind === 'point', DEFAULTS.py);
+    num('ox', L.ox, true);
+    num('oy', L.oy, true);
+    num('roll', L.roll, true, DEFAULTS.roll);
+    num('hit', L.hit, true, 0);
+    num('gz', L.gz, kind === 'text' || kind === 'frame', 1);
+    num('hop', L.hop, aim === 'reading');
+    num('whip', L.whip, aim === 'reading', 0);
+    if (v.curve !== undefined) {
+      const c = CV.coerce(v.curve);
+      if (c !== undefined) out.curve = c;
+    }
+    return sortedObject(out);
+  }
+
+  // every ∈ {1, 2, 4}: a number reads as the nearest of them.
+  function coerceEvery(v) {
+    if (!isFiniteNumber(v)) return undefined;
+    return v < 1.5 ? 1 : v < 3 ? 2 : 4;
+  }
+
+  function coerceBeat(v) {
+    if (!isObject(v)) return undefined;
+    const M = XLIMITS.mods;
+    const out = {};
+    for (const name of ['zoom', 'roll', 'shake']) {
+      if (!isFiniteNumber(v[name])) continue;
+      const x = clampTo(v[name], M[name]);
+      if (x !== 0) out[name] = x;
+    }
+    const every = coerceEvery(v.every);
+    if (every !== undefined && every !== 1) out.every = every;
+    return Object.keys(out).length ? sortedObject(out) : undefined;
+  }
+
+  function coerceXShotObject(v) {
+    if (!isObject(v) || v.x !== 1 || !Array.isArray(v.keys)) return undefined;
+    const keys = [];
+    for (const key of v.keys) {
+      const c = coerceXKey(key);
+      if (c !== undefined) keys.push(c);
+      if (keys.length === XLIMITS.keys[1]) break;
+    }
+    if (keys.length < XLIMITS.keys[0]) return undefined;
+    const out = { keys, x: 1 };
+    if (isFiniteNumber(v.follow)) {
+      const f = clampTo(v.follow, XLIMITS.follow);
+      if (f !== 0) out.follow = f;
+    }
+    const beat = coerceBeat(v.beat);
+    if (beat) out.beat = beat;
+    if (isFiniteNumber(v.blur)) {
+      const b = clampTo(v.blur, XLIMITS.blur);
+      if (b !== 1) out.blur = b;
+    }
+    return deepFreeze(sortedObject(out));
+  }
+
+  // The twelve presets (§1.2 table, FROZEN once accepted; the values tuned by the phase F visual QA so each is plainly
+  // stronger than the normal shots at 最大, docs/NOTES.md "カメラ EXTREME"). ⇆ = MIRRORS (a "~m" suffix flips ox and roll).
+  // jumpRead's second reading key carries hop 0 too, so both reading keys cut from word to word (the table's intent).
+  const XSHOT_DATA = {
+    crashZoom: { tags: ['hard', 'fast', 'bold'], blur: 1, keys: [k('a', 'block', { fill: 0.46 }),
+      k('accent', 'block', { dt: -0.04, fill: 0.46, curve: 'linear' }), k('accent', 'emph', { dt: 0.05, fill: 0.9, curve: 'dashStop', hit: 1 }),
+      k('accentEnd', 'emph', { fill: 0.9, curve: 'linear' }), k('accentEnd', 'block', { dt: 0.12, fill: 0.66, curve: 'dashStop' }),
+      k('b', 'block', { fill: 0.7, curve: 'linear' })] },
+    punchHit: { tags: ['hard', 'fast'], blur: 0.8, keys: [k('a', 'block', { fill: 0.44 }),
+      k('sung', 'block', { dt: -0.02, fill: 0.44, curve: 'linear' }), k('sung', 'block', { dt: 0.06, fill: 0.86, curve: 'dashStop', hit: 1 }),
+      k('b', 'block', { fill: 0.72, curve: 'fadeBrake' })] },
+    whipPan: { tags: ['fast', 'bold'], blur: 1, keys: [k('a', 'block', { fill: 0.64, ox: 0.5 }),
+      k('a', 'block', { dt: 0.1, fill: 0.64, curve: 'dashStop' }), k('b', 'block', { dt: -0.37, fill: 0.64, curve: 'linear' }),
+      k('b', 'block', { dt: -0.25, fill: 0.64, ox: -0.5, curve: 'slowBloom' })] },
+    whipRead: { tags: ['fast', 'playful'], blur: 1, keys: [k('a', 'first', { fill: 0.8 }),
+      k('sung', 'reading', { fill: 0.8, hop: 0.12, whip: 0.3 }), k('end', 'block', { dt: 0.02, fill: 0.62, curve: 'dashStop' })] },
+    jumpRead: { tags: ['hard', 'digital'], blur: 0, keys: [k('a', 'block', { fill: 0.5 }),
+      k('sung', 'block', { dt: -0.006, fill: 0.5, curve: 'linear' }), k('sung', 'reading', { fill: 0.85, hop: 0 }),
+      k('end', 'reading', { dt: 0.002, fill: 0.85, hop: 0 }), k('end', 'block', { dt: 0.008, fill: 0.56 })] },
+    spinIn: { tags: ['playful', 'bold'], blur: 1, keys: [k('a', 'block', { fill: 0.45, roll: -180 }),
+      k('sung', 'block', { dt: 0.2, fill: 0.68, curve: 'dashStop', hit: 0.6 }), k('b', 'block', { fill: 0.7, curve: 'linear' })] },
+    spinOut: { tags: ['playful'], blur: 1, keys: [k('a', 'block', { fill: 0.62 }),
+      k('end', 'block', { dt: 0.02, fill: 0.66, curve: 'linear' }), k('b', 'block', { fill: 0.5, roll: 360, curve: 'slowBloom' })] },
+    dutchSwing: { tags: ['bold', 'playful'], blur: 0.6, beat: { roll: 18, zoom: 0.08, every: 1 }, keys: [k('a', 'block', { fill: 0.66, roll: -14 }),
+      k('b', 'block', { fill: 0.7, roll: 14, curve: 'linear' })] },
+    shakeHits: { tags: ['hard', 'bold'], blur: 0.5, beat: { shake: 1, zoom: 0.06, every: 1 }, keys: [k('a', 'block', { fill: 0.66 }),
+      k('b', 'block', { fill: 0.72, curve: 'linear' })] },
+    beatCrash: { tags: ['fast', 'bold'], blur: 0.8, beat: { zoom: 0.2, every: 1 }, keys: [k('a', 'block', { fill: 0.58 }),
+      k('b', 'block', { fill: 0.62, curve: 'linear' })] },
+    vertigo: { tags: ['serious', 'slow'], blur: 0, keys: [k('a', 'block', { fill: 0.72, gz: 1 }),
+      k('b', 'block', { fill: 0.56, gz: 1.6, curve: 'slowBloom' })] },
+    orbit: { tags: ['airy', 'slow'], blur: 0.4, keys: [k('a', 'block', { fill: 0.58, roll: -24, ox: -0.16, oy: 0.04, gz: 1.2 }),
+      k('mid', 'block', { fill: 0.66, ox: 0, oy: -0.04, gz: 1, curve: 'linear' }),
+      k('b', 'block', { fill: 0.58, roll: 24, ox: 0.16, oy: 0.04, gz: 1.2, curve: 'linear' })] },
+  };
+  const MIRRORS = Object.freeze(['dutchSwing', 'orbit', 'spinIn', 'spinOut', 'whipPan']);
+  const MIRROR_SUFFIX = '~m';
+
+  // 'key' | 'key~m' of an x preset → { key, m } (m = true when mirrored); null for anything else.
+  function xKeyOf(v) {
+    if (typeof v !== 'string') return null;
+    const m = v.endsWith(MIRROR_SUFFIX);
+    const key = m ? v.slice(0, -MIRROR_SUFFIX.length) : v;
+    return Object.prototype.hasOwnProperty.call(XSHOT_DATA, key) ? { key, m } : null;
+  }
+
+  // Keys with ox and roll negated (left ↔ right).
+  function mirrorKeys(keys) {
+    return keys.map((key) => {
+      const out = Object.assign({}, key);
+      if (out.ox !== undefined) out.ox = out.ox === 0 ? 0 : -out.ox;
+      if (out.roll !== undefined) out.roll = -out.roll;
+      return sortedObject(out);
+    });
+  }
+
   // --- presets in canonical form -----------------------------------------------------------------------------------
 
   const SHOTS = deepFreeze(Object.fromEntries(Object.keys(SHOT_DATA).sort().map((key) => {
@@ -200,12 +357,43 @@ MV.def('core/shot', ['core/num', 'core/curve'], (N, CV) => {
     return [key, { tags: d.tags.slice(), curve: d.curve, keys: coerceRig({ keys: d.keys }).keys }];
   })));
   const RIG_KEYS = Object.freeze(Object.keys(RIGS));
+  const XSHOTS = deepFreeze(Object.fromEntries(Object.keys(XSHOT_DATA).sort().map((key) => {
+    const d = XSHOT_DATA[key];
+    const shot = coerceXShotObject({ x: 1, keys: d.keys, beat: d.beat, blur: d.blur });
+    return [key, Object.assign({ tags: d.tags.slice() }, shot)];
+  })));
+  const XSHOT_KEYS = Object.freeze(Object.keys(XSHOTS));
 
-  // The Shot (keys, follow) of a ShotRef; null for 'none' and unreadable values.
+  // isExtreme(ref): an x-preset key (with an optional "~m") or a readable object with x: 1.
+  function isExtreme(ref) {
+    if (typeof ref === 'string') return xKeyOf(ref) !== null;
+    return isObject(ref) && ref.x === 1 && coerceXShotObject(ref) !== undefined;
+  }
+
+  // presetOf(v) → the preset record a ShotRef names ({ tags, keys, … } as SHOTS / XSHOTS hold it; a mirrored x-preset
+  // with its keys mirrored), or null for 'none', objects and unknown values.
+  const XSHOTS_MIRRORED = deepFreeze(Object.fromEntries(XSHOT_KEYS.map((key) => [key,
+    Object.assign({}, XSHOTS[key], { tags: XSHOTS[key].tags.slice(), keys: mirrorKeys(XSHOTS[key].keys) })])));
+  function presetOf(v) {
+    if (typeof v !== 'string') return null;
+    if (Object.prototype.hasOwnProperty.call(SHOTS, v)) return SHOTS[v];
+    const x = xKeyOf(v);
+    if (!x) return null;
+    return x.m ? XSHOTS_MIRRORED[x.key] : XSHOTS[x.key];
+  }
+
+  // limitsOf(shot) → XLIMITS for an EXTREME value, else LIMITS.
+  function limitsOf(ref) { return isExtreme(ref) ? XLIMITS : LIMITS; }
+
+  // The Shot (keys, follow) of a ShotRef; null for 'none' and unreadable values. (An x-shot's keys; a mirrored x-preset's
+  // keys mirrored.)
   function shotOf(ref) {
     const v = coerceShot(ref);
     if (v === undefined || v === 'none') return null;
-    if (typeof v === 'string') return { keys: SHOTS[v].keys, follow: SHOTS[v].follow || 0 };
+    if (typeof v === 'string') {
+      const p = presetOf(v);
+      return { keys: p.keys, follow: p.follow || 0 };
+    }
     return { keys: v.keys, follow: v.follow || 0 };
   }
 
@@ -217,6 +405,7 @@ MV.def('core/shot', ['core/num', 'core/curve'], (N, CV) => {
   // key 0 is at 'a' and aims at the text; `follow` (not null) replaces the shot's follow.
   function expandShot(ref, opts) {
     const o = opts || {};
+    if (isExtreme(ref)) return expandX(ref, o);
     const shot = shotOf(ref);
     if (!shot) return null;
     const zoom = isFiniteNumber(o.zoom) ? o.zoom : 1;
@@ -251,9 +440,71 @@ MV.def('core/shot', ['core/num', 'core/curve'], (N, CV) => {
     return deepFreeze({ keys, follow: clampTo(isFiniteNumber(follow) ? follow : 0, LIMITS.follow) });
   }
 
+  // xIntensity(extreme) → g, the EXTREME intensity (DESIGN_EXTREME §1.4): max(0.3, cam.extreme) for a number, 1 without
+  // a decision (a hand-picked x-preset with the switch off).
+  function xIntensity(extreme) {
+    return isFiniteNumber(extreme) ? Math.max(0.3, N.clamp(extreme, 0, 1)) : 1;
+  }
+
+  // The intensity g also scales closeness and placement (phase F: 強め / かなり / 最大 then differ in every preset, not only
+  // in its tilts, hits and beats): a text key's fill moves toward X_FILL_MID by g (the crash, the punch and the pull-back
+  // are shallower at 強め), an offset within X_AWAY (it frames the words) is multiplied by g, and one beyond it (the
+  // words leave the frame on purpose: a whip) keeps X_AWAY and scales its excess, so it still leaves the frame.
+  const X_FILL_MID = 0.62;
+  const X_AWAY = 0.25;
+  function xOffset(v, g) {
+    if (!isFiniteNumber(v)) return v;
+    const a = Math.abs(v);
+    return a > X_AWAY ? Math.sign(v) * (X_AWAY + (a - X_AWAY) * g) : v * g;
+  }
+
+  // The x branch of expandShot (DESIGN_EXTREME §1.4): { x: 1, keys, follow, beat: { zoom, roll, shake, every }, blur, g,
+  // m } with every field of every key explicit (hop null = the reading hop rule). The mirror ("~m") is already in the
+  // keys (m = −1 records it for the hits); roll, hit, gz − 1, whip and the beat amplitudes are multiplied by g; a text
+  // key's fill is X_FILL_MID + (fill − X_FILL_MID)·g, times cam.zoom, clamped to XLIMITS; ox and oy scale by g as xOffset
+  // says; timing is not scaled. `carry` is ignored.
+  function expandX(ref, o) {
+    const v = coerceShot(ref);
+    const x = typeof v === 'string' ? xKeyOf(v) : null;
+    const src = typeof v === 'string' ? presetOf(v) : v;
+    const g = isFiniteNumber(o.g) ? N.clamp(o.g, 0, 1) : 1;
+    const zoom = isFiniteNumber(o.zoom) ? o.zoom : 1;
+    const curveIn = o.curve === undefined ? 'softEnds' : o.curve;
+    const curve = CV.coerce(curveIn) === undefined ? 'softEnds' : CV.coerce(curveIn);
+    const L = XLIMITS;
+    const keys = src.keys.map((key) => {
+      const kind = aimKind(key.aim);
+      const out = { at: key.at, dt: key.dt || 0, aim: key.aim };
+      if (kind === 'text') {
+        const f = key.fill === undefined ? DEFAULTS.fill : key.fill;
+        out.fill = clampTo((X_FILL_MID + (f - X_FILL_MID) * g) * zoom, L.fill);
+      } else out.zoom = clampTo(1 + ((key.zoom === undefined ? 1 : key.zoom) - 1) * zoom, L.zoom);
+      if (kind === 'point') {
+        out.px = key.px === undefined ? DEFAULTS.px : key.px;
+        out.py = key.py === undefined ? DEFAULTS.py : key.py;
+      }
+      if (key.ox !== undefined) out.ox = xOffset(key.ox, g);
+      if (key.oy !== undefined) out.oy = xOffset(key.oy, g);
+      out.roll = (key.roll || 0) * g;
+      out.curve = key.curve === undefined ? curve : key.curve;
+      out.hit = (key.hit || 0) * g;
+      out.gz = 1 + ((key.gz === undefined ? 1 : key.gz) - 1) * g;
+      out.hop = key.hop === undefined ? null : key.hop;
+      out.whip = (key.whip || 0) * g;
+      return out;
+    });
+    const b = src.beat || {};
+    const follow = o.follow === null || o.follow === undefined ? src.follow || 0 : o.follow;
+    return deepFreeze({ x: 1, keys, follow: clampTo(isFiniteNumber(follow) ? follow : 0, L.follow),
+      beat: { zoom: (b.zoom || 0) * g, roll: (b.roll || 0) * g, shake: (b.shake || 0) * g, every: b.every || 1 },
+      blur: src.blur === undefined ? 1 : src.blur, g, m: x && x.m ? -1 : 1 });
+  }
+
   // The symbolic framing of the shot's last key in data order (carry, §4.5.7): { fill, ox?, oy?, roll }, with the
-  // closeness scaled like expandShot. null for 'none' and when the last key does not aim at the text.
+  // closeness scaled like expandShot. null for 'none' and when the last key does not aim at the text. null for EXTREME
+  // values: the carry never reaches or leaves an EXTREME cut (DESIGN_EXTREME §1.4).
   function lastFraming(ref, opts) {
+    if (isExtreme(ref)) return null;
     const shot = shotOf(ref);
     if (!shot) return null;
     const last = shot.keys[shot.keys.length - 1];
@@ -339,16 +590,113 @@ MV.def('core/shot', ['core/num', 'core/curve'], (N, CV) => {
     return coerceShot(shot);
   }
 
+  // --- the AI's EXTREME vocabulary (DESIGN_EXTREME §1.7, FROZEN table once accepted) ------------------------------------
+
+  const XMOVES = Object.freeze(['crash', 'dutch', 'jump', 'orbit', 'pulse', 'shake', 'spin', 'vertigo', 'whip']);
+  const DIRS = Object.freeze(['auto', 'left', 'right']);
+
+  // fromXMove({ move, focus, timing, fill, power, dir }) → a canonical XShot (x: 1), or undefined for an unknown move.
+  // fill as fromMove (f1, f0 = f1 − 0.25); power p ∈ [0.3, 1] (a negative or missing power reads 0.8); dir: 'left' = the
+  // words travel left (the presets' own direction, as 'auto'), 'right' mirrors the keys. An unknown focus reads as
+  // 'text', an unknown timing as 'whole'. The crash is word-anchored: emphasis → accent … accentEnd (the preset); text
+  // and center → beat:0 … end; first → sung … word:1; last → word:−1 … end (a single word is never held while the
+  // other words are sung, §3.1 R3).
+  function fromXMove(m) {
+    const o = isObject(m) ? m : {};
+    if (!XMOVES.includes(o.move)) return undefined;
+    const timing = TIMINGS.includes(o.timing) ? o.timing : 'whole';
+    const focus = FOCI.includes(o.focus) ? o.focus : 'text';
+    const F = FOCUS_AIM[focus];
+    const f1 = isFiniteNumber(o.fill) && o.fill >= 0 ? N.clamp(o.fill, 0.3, 0.95) : 0.75;
+    const f0 = Math.max(0.3, f1 - 0.25);
+    const p = isFiniteNumber(o.power) && o.power >= 0 ? N.clamp(o.power, 0.3, 1) : 0.8;
+    const mirror = o.dir === 'right';
+    const at = (when, aim, f, extra) => Object.assign({ at: when, aim },
+      aim === 'frame' ? { zoom: 1 + 0.25 * (f - 0.3) / 0.8 } : { fill: f }, extra || {});
+    const up = (f, d) => Math.min(0.95, Math.max(0.3, f + d));
+    let shot;
+    switch (o.move) {
+      case 'crash': {
+        const [T1, T2] = focus === 'emphasis' ? ['accent', 'accentEnd'] : focus === 'first' ? ['sung', 'word:1']
+          : focus === 'last' ? ['word:-1', 'end'] : ['beat:0', 'end'];
+        shot = { blur: 1, keys: [at('a', 'block', 0.52), at(T1, 'block', 0.52, { dt: -0.04, curve: 'linear' }),
+          at(T1, F, f1, { dt: 0.05, curve: 'dashStop', hit: 0.5 + 0.5 * p }), at(T2, F, f1, { curve: 'linear' }),
+          at(T2, 'block', 0.66, { dt: 0.12, curve: 'dashStop' }), at('b', 'block', 0.7, { curve: 'linear' })] };
+        break;
+      }
+      case 'whip': {
+        if (timing === 'hold') {
+          shot = { blur: 1, keys: [at('a', 'first', f1), at('sung', 'reading', f1, { hop: 0.12, whip: 0.15 + 0.25 * p }),
+            at('end', 'block', up(f1, -0.18), { dt: 0.02, curve: 'dashStop' })] };
+          break;
+        }
+        const ox = 0.3 + 0.3 * p;
+        const keys = [];
+        keys.push(at('a', F, f1, timing === 'depart' ? {} : { ox }));
+        if (timing !== 'depart') keys.push(at('a', F, f1, { dt: 0.1, curve: 'dashStop' }));
+        if (timing !== 'arrive') {
+          keys.push(at('b', F, f1, { dt: -0.37, curve: 'linear' }), at('b', F, f1, { dt: -0.25, ox: -ox, curve: 'slowBloom' }));
+        } else keys.push(at('b', F, f1, { curve: 'linear' }));
+        shot = { blur: 1, keys };
+        break;
+      }
+      case 'spin': {
+        const rin = -(90 + 270 * p), rout = 360 * p;
+        const keys = [];
+        if (timing === 'depart') keys.push(at('a', F, f1));
+        else keys.push(at('a', F, f0, { roll: rin }), at('sung', F, f1, { dt: 0.2, curve: 'dashStop', hit: 0.6 }));
+        if (timing === 'arrive') keys.push(at('b', F, up(f1, 0.02), { curve: 'linear' }));
+        else keys.push(at('end', F, f1, { dt: 0.02, curve: 'linear' }), at('b', F, f0, { roll: rout, curve: 'slowBloom' }));
+        shot = { blur: 1, keys };
+        break;
+      }
+      case 'dutch': {
+        const r = 8 + 6 * p;
+        shot = { blur: 0.6, beat: { roll: 10 + 8 * p, zoom: 0.03 + 0.05 * p, every: 1 }, keys: [at('a', F, f1, { roll: -r }),
+          at('b', F, up(f1, 0.04), { roll: r, curve: 'linear' })] };
+        break;
+      }
+      case 'shake':
+        shot = { blur: 0.5, beat: { shake: p, zoom: 0.06, every: 1 }, keys: [at('a', F, f1), at('b', F, up(f1, 0.06), { curve: 'linear' })] };
+        break;
+      case 'vertigo':
+        shot = { blur: 0, keys: [at('a', F, f1), at('b', F, f0, { gz: 1 + 0.6 * p, curve: 'slowBloom' })] };
+        break;
+      case 'orbit': {
+        const r = 12 + 12 * p;
+        shot = { blur: 0.4, keys: [at('a', F, up(f1, -0.06), { roll: -r, ox: -0.16, oy: 0.04, gz: 1.2 }),
+          at('mid', F, f1, { ox: 0, oy: -0.04, curve: 'linear' }),
+          at('b', F, up(f1, -0.06), { roll: r, ox: 0.16, oy: 0.04, gz: 1.2, curve: 'linear' })] };
+        break;
+      }
+      case 'pulse':
+        shot = { blur: 0.8, beat: { zoom: 0.08 + 0.14 * p, every: 1 }, keys: [at('a', F, f1), at('b', F, up(f1, 0.04), { curve: 'linear' })] };
+        break;
+      default: {                                   // jump
+        const keys = [at('a', 'block', 0.55), at('sung', 'block', 0.55, { dt: -0.006, curve: 'linear' }),
+          at('sung', 'reading', f1, { hop: 0 }), at('end', 'reading', f1, { dt: 0.002, hop: 0 })];
+        if (timing !== 'depart') keys.push(at('end', 'block', 0.6, { dt: 0.008 }));
+        shot = { blur: 0, keys };
+      }
+    }
+    if (mirror) shot.keys = mirrorKeys(shot.keys);
+    return coerceShot(Object.assign({ x: 1 }, shot));
+  }
+
+  // Whether the shot's times depend on the beat grid: beat:n anchors; every EXTREME value (accent falls back to the
+  // first beat, and the beat modulators run on the grid).
   function usesBeats(ref) {
+    if (isExtreme(ref)) return true;
     const shot = shotOf(ref);
     return !!shot && shot.keys.some((key) => typeof key.at === 'string' && key.at.startsWith('beat:'));
   }
 
-  // [stringKey, params]: 'shot.<preset>', 'shot.none' (also for unreadable values), 'shot.custom' { n keys }.
+  // [stringKey, params]: 'shot.<preset>' (an x-preset too, mirrored or not), 'shot.none' (also for unreadable values),
+  // 'shot.custom' { n keys } (an x-shot object too).
   function label(ref) {
     const v = coerceShot(ref);
     if (v === undefined || v === 'none') return ['shot.none', {}];
-    if (typeof v === 'string') return ['shot.' + v, {}];
+    if (typeof v === 'string') { const x = xKeyOf(v); return ['shot.' + (x ? x.key : v), {}]; }
     return ['shot.custom', { n: v.keys.length }];
   }
 
@@ -362,5 +710,8 @@ MV.def('core/shot', ['core/num', 'core/curve'], (N, CV) => {
   return {
     SHOTS, SHOT_KEYS, RIGS, RIG_KEYS, MOVES, FOCI, TIMINGS, LIMITS,
     coerceShot, coerceRig, isCustom, expandShot, lastFraming, maxFill, expandRig, fromMove, usesBeats, label, rigLabel,
+    // EXTREME (DESIGN_EXTREME §1)
+    XSHOTS, XSHOT_KEYS, XLIMITS, XMOVES, DIRS, MIRRORS, X_ANCHORS, X_AWAY, X_FILL_MID,
+    isExtreme, xKeyOf, presetOf, limitsOf, fromXMove, xIntensity,
   };
 });

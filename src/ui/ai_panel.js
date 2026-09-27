@@ -1,7 +1,7 @@
 /* 文字PVメーカー v2 — original work. The AI panel (tab AI of the detail column): connection, what is sent, guide, tools with the instruction block, the board, running, review, log (DESIGN §6.4.10; DESIGN_2_1 §6.2–§6.4). */
 MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/ai_controller', 'ui/ai_review', 'ui/ai_thinking',
-  'ui/ai_board', 'planner/areas', 'ui/fields', 'ui/selection', 'i18n/t'],
-  (dom, I, PR, CH, AC, AR, AT, BOARD, AREAS, F, S, T) => {
+  'ui/ai_board', 'planner/areas', 'ui/fields', 'ui/selection', 'i18n/t', 'ui/extreme'],
+  (dom, I, PR, CH, AC, AR, AT, BOARD, AREAS, F, S, T, XU) => {
     'use strict';
 
     const { h } = dom;
@@ -244,6 +244,13 @@ MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/a
       const more = h('details', { class: 'ai-direct-more' }, h('summary', { text: t('ai.direct.more') }),
         h('label', { class: 'check-row' }, allow, h('span', { text: t('ai.direct.allowMaterials') })), mediaRow);
       const camera = h('button', { class: 'btn small', type: 'button', 'data-tool': 'camera', text: t('ai.camera.run') });
+      // 「EXTREME」 (DESIGN_EXTREME §2.5, §2.6): asks for intense camerawork (the answer also turns the area's switch on, as
+      // a row of the review). It starts as the target has it (on where EXTREME is on for every line of the target) until
+      // it is pressed; a new target starts again.
+      const xChip = h('button', { class: 'chip ai-xchip', type: 'button', 'aria-pressed': 'false', 'data-ctl': 'extreme',
+        title: t('ai.camera.extremeHint'), text: t('ai.camera.extreme') });
+      let xWant = null;
+      let xFor = null;
       const send = h('button', { class: 'btn small primary', type: 'button', 'data-tool': 'direct', text: t('ai.direct.send') });
       const board = h('button', { class: 'link ai-board-link', type: 'button', text: t('ai.board.open') });
       const questions = h('div', { class: 'ai-questions', role: 'status' });
@@ -254,7 +261,7 @@ MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/a
         h('div', { class: 'ai-edit-row' }, h('span', { class: 'muted small', id: 'ai-direct-hint', text: t('ai.edit.enterHint') }),
           h('span', { class: 'grow' }), counter),
         chips, more,
-        h('div', { class: 'ai-edit-row' }, camera, h('span', { class: 'grow' }), send),
+        h('div', { class: 'ai-edit-row' }, camera, xChip, h('span', { class: 'grow' }), send),
         questions, board);
 
       // The AreaRef the box sends now (null: nothing to send to).
@@ -328,14 +335,27 @@ MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/a
       });
       send.addEventListener('click', () => sendNow('all'));
       camera.addEventListener('click', () => sendNow('camera'));
+      xChip.addEventListener('click', () => { xWant = !extremeOn(); update(); });
       board.addEventListener('click', () => openBoard());
+
+      // Whether the camera request asks for EXTREME: the chip as pressed, else what the target has.
+      function extremeOn() {
+        const r = ref();
+        const key = r ? AREAS.keyOf(r) : null;
+        if (key !== xFor) { xFor = key; xWant = null; }
+        return xWant !== null ? xWant : !!r && XU.areaValue(app.doc, app.plan, r) > 0;
+      }
 
       function sendNow(mode) {
         const r = ref();
         const instruction = text.value.trim();
         if (!r || (mode !== 'camera' && !instruction)) { dom.focus(text); return; }
-        ctl.run('direct', { briefs: [{ ref: r, instruction }], mode, allowMaterials: mode === 'camera' ? false : allow.checked,
-          media: mode === 'camera' ? false : mediaOnDevice(app) });
+        const extreme = mode === 'camera' && extremeOn();
+        const go = () => ctl.run('direct', { briefs: [{ ref: r, instruction }], mode, allowMaterials: mode === 'camera' ? false : allow.checked,
+          media: mode === 'camera' ? false : mediaOnDevice(app), extreme });
+        // EXTREME asked for where it is not on yet: the notice first (DESIGN_EXTREME §3.5)
+        if (extreme && XU.areaValue(app.doc, app.plan, r) <= 0) XU.notice(app).then((ok) => { if (ok) go(); });
+        else go();
       }
 
       function renderList() {
@@ -390,6 +410,11 @@ MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/a
         send.title = why ? t(why) : '';
         camera.disabled = !!why;
         camera.title = why ? t(why) : '';
+        const xOn = extremeOn();
+        xChip.setAttribute('aria-pressed', String(xOn));
+        xChip.classList.toggle('is-pinned', xOn);
+        xChip.disabled = !!st.run || !!st.review;
+        xChip.title = xOn ? t('ai.camera.extremeOn') : t('ai.camera.extremeHint');
         text.disabled = !!st.run;
         board.disabled = !!st.run || !!st.review;
         // A question from the AI, under the box and per area (DESIGN_2_1 §6.2).

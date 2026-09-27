@@ -514,5 +514,8 @@ MV.def('engine/scene/shot', ['core/num', 'core/curve', 'core/shot', 'core/script
     P.y[c] += (L.follow * ly * k) / z;
   }
 
-  return { makeShot, aimBox, anchorTime, frame, poseAt, runShot, leanInto, bleedLimit, JUMP, FLOOR, SAFE };
+  // (additive, DESIGN_EXTREME §1.4) the helpers the x-track (engine/scene/xshot) reuses, so this track is not changed:
+  // readingUnits, unitsOf, emphRun, sungOf, leanOf, spanOf, textGlyphs, aimable, HOP_MAX.
+  return { makeShot, aimBox, anchorTime, frame, poseAt, runShot, leanInto, bleedLimit, JUMP, FLOOR, SAFE,
+    readingUnits, unitsOf, emphRun, sungOf, leanOf, spanOf, textGlyphs, aimable, HOP_MAX };
 });

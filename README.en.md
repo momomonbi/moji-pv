@@ -28,6 +28,12 @@ Click the preview or a lyric line and the **Details** column shows that part. Yo
 - **Look history ◀ ▶** — the ◀ ▶ buttons in the play bar step through the looks you have tried.
 - Every change can be undone, and your work is autosaved in the browser.
 
+**Camera EXTREME** — switch on **Camera EXTREME** under whole video › Energy for intense camerawork: crash zooms, whips,
+spins, shakes on the beat and more (Strong / Very strong / Maximum; also per section or line, and from the **EXTREME**
+chip next to **Let AI do the camerawork**). With **Repeat lines the same way** on too, a second chorus plays the same
+intense moves as the first. Every word stays readable while it is sung, and no flashing is added. Some viewers may
+feel motion sick, so when you publish, consider noting that the video contains intense motion.
+
 ## Song (optional) and tap sync
 
 You can make a video without a song; its length then follows the lyrics. Load an mp3, wav, m4a, ogg or flac file in

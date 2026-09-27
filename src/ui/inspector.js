@@ -1,8 +1,8 @@
 /* 文字PVメーカー v2 — original work. The inspector (詳細): crumbs, level header, sections from FIELDS, field rows, sub-pages (DESIGN §6.4.4–§6.4.9, §6.6; DESIGN_2_1 §6.5–§6.9). */
 MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/part_browser', 'ui/selection', 'ui/looks',
   'ui/output', 'i18n/t', 'core/paths', 'core/pins', 'core/shot', 'planner/areas', 'ui/shot_editor', 'ui/material_page',
-  'ui/media_page', 'ui/media_widgets', 'ui/media_io'],
-(dom, I, F, W, PB, S, LK, OUT, T, P, PINS, SHOT, AREAS, KE, MP, MPG, MW, MI) => {
+  'ui/media_page', 'ui/media_widgets', 'ui/media_io', 'ui/extreme'],
+(dom, I, F, W, PB, S, LK, OUT, T, P, PINS, SHOT, AREAS, KE, MP, MPG, MW, MI, XU) => {
   'use strict';
 
   const { h } = dom;
@@ -244,6 +244,11 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
 
     function extraFor(field, fs, ctx, row) {
       const p = plan();
+      // カメラ EXTREME: what its scope(s) have (null when the selected lines differ), DESIGN_EXTREME §2.6
+      if (field.widget === 'extreme') {
+        const scopes = (row ? row.paths : pathsOf(field, ctx)).map((x) => P.scopeKey(x));
+        return { v: XU.scopesValue(doc(), scopes), lines: XU.linesOn(doc(), scopes) };
+      }
       if (field.widget === 'trim') {
         const id = MW.sourcesOf(ctx, field.media)[0] || null;
         return { out: row && row.fsOut ? row.fsOut.value : 0, entry: id ? MI.entryOf(doc(), id) : null };
@@ -512,6 +517,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       const ctx = page.ctx;
       const field = row.field;
       if (field.cmd) { commitCmd(field, v, ctx); return; }
+      if (field.widget === 'extreme') { commitExtreme(row, v); return; }
       if (field.textFill !== undefined) { run(textFillCmds(row, v), { label: ['undo.pin', { field: labelOf(field), scope: scopeLabel(ctx) }] }); return; }
       // なし on a source whose automatic value is none is 自動 (photoPan without a picture is the plain ground)
       if (field.widget === 'media' && v === '' && field.spec && field.spec.auto && field.spec.auto.value === '') { unpin(row); return; }
@@ -523,6 +529,20 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       else if (o.merge) meta.mergeKey = 'field:' + row.path;
       run(pathsOf(field, ctx).map((path) => pinCmd(path, value)), meta);
       reportShadowed(row, ctx);
+    }
+
+    // カメラ EXTREME (DESIGN_EXTREME §2.6): on at a strength, or off, at every scope the row writes, through ui/extreme (the
+    // notice when it turns on, the question when moves were picked by hand) as one undo step; after a cancelled dialog
+    // the row shows what the scope has again.
+    function commitExtreme(row, v) {
+      const ctx = page.ctx;
+      const on = typeof v === 'number' && v > 0;
+      const lineCrumb = row.field.lineOf && ctx.cut ? S.crumbs({ level: 'line', ids: [ctx.cut.line] }, plan()).slice(-1)[0] : null;
+      const scope = lineCrumb ? t.label(lineCrumb.label) : scopeLabel(ctx);
+      const meta = { label: [on ? 'undo.xOn' : 'undo.xOff', { scope }], where: { scope: ctx.scope, field: row.field.path } };
+      XU.setSwitch(app, { scopes: row.paths.map((x) => P.scopeKey(x)), v: on ? v : 0, meta }).then((ok) => {
+        if (!ok && page && page.rows.includes(row)) updateRow(row, row.fs, page.ctx);
+      });
     }
 
     // 文字の中に写真・動画 (DESIGN_2_1 §11.7.4): a picture pins the textFill part on the row's slot too; なし clears the
@@ -921,7 +941,10 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       };
     }
 
-    // カメラワーク (the shot widget): tiles of 自動 / 動かさない / the 9 presets, try-on on hover or focus (DESIGN_2_1 §6.5).
+    // カメラワーク (the shot widget): tiles of 自動 / 動かさない / the 9 presets, try-on on hover or focus (DESIGN_2_1 §6.5);
+    // then the group 「EXTREME」 with the 12 EXTREME presets (DESIGN_EXTREME §2.6: ⚡ on each tile, 左右反転 on the current
+    // mirrored one, the group's note). Picking one pins the shot only; where EXTREME is off the notice comes first. Its
+    // own tile keeps a mirrored current value.
     function openShots(row) {
       const field = row.field;
       const paths = pathsOf(field, page.ctx);
@@ -933,12 +956,23 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
         return d;
       };
       const value = row.fs && row.fs.state !== 'mixed' && typeof row.fs.value === 'string' ? row.fs.value : null;
+      const xNow = value ? SHOT.xKeyOf(value) : null;
+      const xOwn = (key) => (xNow && xNow.key === key ? value : key);
+      const info = (k) => {
+        if (SHOT.XSHOTS[k]) return { text: t('shot.' + k), blurb: t('shot.blurb.' + k), tags: SHOT.XSHOTS[k].tags.slice() };
+        return { text: t('shot.' + k), blurb: k === 'none' ? t('shot.none') : t('shot.blurb.' + k), tags: k === 'none' ? [] : SHOT.SHOTS[k].tags.slice() };
+      };
       push(Object.assign(PB.pickerPage(app, {
-        kind: 'shot', path: row.path, label: labelOf(field), value, tryDoc,
-        keys: ['none'].concat(SHOT.SHOT_KEYS),
-        info: (k) => ({ text: t('shot.' + k), blurb: k === 'none' ? t('shot.none') : t('shot.blurb.' + k),
-          tags: k === 'none' ? [] : SHOT.SHOTS[k].tags.slice() }),
-        onPick: (key) => { pop(); if (key === null) unpin(row); else commit(row, key); },
+        kind: 'shot', path: row.path, label: labelOf(field), value, tryDoc: (key) => tryDoc(key === null ? null : xOwn(key)),
+        keys: ['none'].concat(SHOT.SHOT_KEYS), info,
+        isCurrent: (k) => k === value || (!!xNow && xNow.key === k),
+        groups: [{ id: 'extreme', label: t('shot.group.extreme'), note: t('shot.group.extremeNote'), keys: SHOT.XSHOT_KEYS.slice(), kind: 'xshot',
+          badge: (k) => t('shot.xBadge') + (xNow && xNow.key === k && xNow.m ? ' ' + t('shot.mirrored') : '') }],
+        onPick: (key) => {
+          if (key === null || !SHOT.isExtreme(key)) { pop(); if (key === null) unpin(row); else commit(row, key); return; }
+          const v = xOwn(key);
+          XU.pickShot(app, paths, v).then((ok) => { if (ok && stack.length && stack[stack.length - 1].id === 'pick:' + row.path) { pop(); commit(row, v); } });
+        },
       }), { returnTo: () => { const r = findRow(field.path); if (r) r.widget.focus(); } }));
     }
 

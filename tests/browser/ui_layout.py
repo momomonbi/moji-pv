@@ -22,6 +22,9 @@ Step ④ is also checked with its longest pre-flight items and their fix links (
 MP4 of a transparent backdrop), with every format (MP4, Filmora用, 透過動画, PNG連番, 透過PNG; 詳しく closed and open: always
 the five controls), and the Filmora set's contents fit the step column at 288–352 px (DESIGN_2_1 §13.12).
 
+カメラ EXTREME (DESIGN_EXTREME §5.3): the switch, the picker's EXTREME group, the keyframe editor on an x-shot and the AI chip
+are checked with the v2.1 pages below; the notice and the turn-off question fit the viewport from 1440 down to 320 px.
+
 v2.1 (DESIGN_2_1 §7.4): on the v21 project, the curve widget with かんたん open, the keyframe editor, the AI board and a
 material page are checked at every viewport with the same layout, clipping, covering and budget checks; the panel never
 scrolls sideways, and the viewports cover panel widths from 288 to 352 px. Photos and videos (§11.8.3): the library, the
@@ -601,7 +604,88 @@ async ([px, scope]) => {
 """
 
 
-NARROW_SCOPE = {'curve': '.frow[data-slot="arrive.ease"]', 'keyframes': '.ke-page', 'board': '.ai-board', 'material': '.mat-page'}
+# カメラ EXTREME (DESIGN_EXTREME §5.3): the switch with its ⚠ line and 激しさ (作品全体 › 強さ), the shot picker's EXTREME
+# group, the keyframe editor on an EXTREME shot (衝撃, 背景の寄り, 左右反転) and the AI panel's 「EXTREME」 chip, pressed.
+V21_PAGES += [
+    ('x_energy', """() => { const a = window.__mv; a.openPanel('details');
+      if (!a.doc.pins['work:cam.extreme']) a.dispatch({ t: 'pin.set', path: 'work:cam.extreme', v: 1, by: 'user' }, { label: ['undo.xOn', { scope: '' }] });
+      a.select({ level: 'work' }, { from: 'crumbs', open: true });
+      requestAnimationFrame(() => requestAnimationFrame(() => { const r = document.querySelector('.frow[data-field="work/energy/cam.extreme.power"]');
+        const d = r && r.closest('details'); if (d) d.open = true;
+        document.querySelector('.frow[data-field="work/energy/cam.extreme"]').scrollIntoView({ block: 'center' }); })); }""",
+     """() => { const s = document.querySelector('.frow[data-field="work/energy/cam.extreme.power"] .w-xpower');
+       return !!s && s.getClientRects().length > 0 && !!document.querySelector('.w-xswitch.is-on .w-xwarn:not([hidden])'); }"""),
+    ('x_picker', """() => { const a = window.__mv; a.openPanel('details');
+      a.select({ level: 'el', scope: 'cut/' + a.plan.lines[1].cuts[0], el: 'lens' }, { from: 'crumbs', open: true });
+      requestAnimationFrame(() => requestAnimationFrame(() => { document.querySelector('.frow[data-slot="cam.shot"] .w-shot').click();
+        requestAnimationFrame(() => { const g = document.querySelector('.pb-group'); if (g) g.scrollIntoView({ block: 'start' }); }); })); }""",
+     "() => document.querySelectorAll('.pb-tile[data-group=\"extreme\"]').length === 12"),
+    ('x_keys', """() => { const a = window.__mv; const key = a.plan.lines[1].cuts[0]; a.openPanel('details');
+      a.dispatch({ t: 'pin.set', path: 'cut/' + key + ':cam.shot', v: 'spinIn~m', by: 'user', sig: a.svc.pinSig(a.plan, key) }, { label: ['undo.xOn', { scope: '' }] });
+      a.select({ level: 'el', scope: 'cut/' + key, el: 'lens' }, { from: 'crumbs', open: true });
+      requestAnimationFrame(() => requestAnimationFrame(() => document.querySelector('[data-custom="camKeys"] button').click())); }""",
+     "() => document.querySelectorAll('.ke-page .ke-x').length > 1 && !document.querySelector('.ke-mirror').hidden"),
+    ('x_chip', """() => { const a = window.__mv; a.openPanel('ai');
+      const bh = document.querySelector('.ai-board-host'); if (bh && !bh.hidden) a.aiPanel.closeBoard();
+      requestAnimationFrame(() => requestAnimationFrame(() => { const c = document.querySelector('.ai-xchip');
+        if (c.getAttribute('aria-pressed') !== 'true') c.click(); c.scrollIntoView({ block: 'center' }); })); }""",
+     "() => { const c = document.querySelector('.ai-xchip'); return !!c && c.getAttribute('aria-pressed') === 'true' && c.getClientRects().length > 0; }"),
+]
+NARROW_SCOPE = {'curve': '.frow[data-slot="arrive.ease"]', 'keyframes': '.ke-page', 'board': '.ai-board', 'material': '.mat-page',
+                'x_energy': '.isec[data-sec="energy"]', 'x_picker': '.pb-page', 'x_keys': '.ke-page', 'x_chip': '.ai-direct'}
+
+# The EXTREME notice and the turn-off question (DESIGN_EXTREME §3.5, §2.6) at the desktop, compact and phone widths: the
+# dialog lies inside the viewport, its text and buttons whole, and nothing scrolls sideways.
+X_DIALOG_SIZES = [(1440, 900), (1024, 768), (390, 844), (320, 640)]
+X_DIALOG_PROBE = r"""
+() => {
+  const d = document.querySelector('dialog.dlg[open]');
+  if (!d) return ['no dialog'];
+  const out = [];
+  const r = d.getBoundingClientRect();
+  if (r.left < -0.5 || r.top < -0.5 || r.right > innerWidth + 0.5 || r.bottom > innerHeight + 0.5) out.push('the dialog leaves the viewport');
+  const body = d.querySelector('.dlg-body');
+  if (body.scrollWidth > body.clientWidth + 1) out.push('the dialog scrolls sideways');
+  for (const el of d.querySelectorAll('button, .dlg-text, label')) {
+    const b = el.getBoundingClientRect();
+    if (!b.width) continue;
+    if (el.scrollWidth > el.clientWidth + 1) out.push('clipped: ' + el.textContent.slice(0, 30));
+    if (b.left < r.left - 0.5 || b.right > r.right + 0.5) out.push('outside the dialog: ' + el.textContent.slice(0, 30));
+  }
+  if (document.scrollingElement.scrollWidth > innerWidth + 1) out.push('the page scrolls sideways');
+  return out;
+}
+"""
+
+
+async def x_dialogs(browser, base, rel, lang, shots):
+    page = await new_page(browser, viewport={'width': 1440, 'height': 900})
+    errors, failures, checked = [], [], 0
+    page.on('pageerror', lambda e: errors.append(str(e)))
+    for host in FONT_HOSTS:
+        await page.route(host, lambda route: route.abort())
+    await page.goto(base + rel + '?fresh=1&test=1', wait_until='load')
+    await page.wait_for_function('window.__mv && window.__mv.ready')
+    await page.evaluate('async () => { await window.__mv.ready; }')
+    await page.evaluate("(t) => { const a = window.__mv; a.view.setPref('autoplay', false); a.dispatch({ t: 'lyrics.set', text: t }, { label: ['undo.paste', {}] }); a.pause(); }",
+                        LYRICS_LAYOUT)
+    for (w, h) in X_DIALOG_SIZES:
+        await page.set_viewport_size({'width': w, 'height': h})
+        for name, js in (('notice', "() => { const a = window.__mv; a.view.setPref('hintExtreme', true); MV.use('ui/extreme').notice(a); }"),
+                         ('off', "() => { MV.use('ui/extreme').offChoice(window.__mv, 3); }")):
+            await page.evaluate(js)
+            await settle(page)
+            bad = await page.evaluate(X_DIALOG_PROBE)
+            failures += ['%s %dx%d EXTREME %s: %s' % (lang, w, h, name, x) for x in bad]
+            checked += 1
+            if shots and (w, h) in ((1440, 900), (390, 844)):
+                await page.screenshot(path=str(Path(shots) / ('%s_%dx%d_x_%s.png' % (lang, w, h, name))))
+            await page.keyboard.press('Escape')
+            await settle(page)
+    await page.close()
+    if errors:
+        failures.append('%s EXTREME dialogs: page errors: %r' % (lang, errors[:3]))
+    return checked, failures
 
 
 async def v21_pages(browser, base, rel, lang, viewports, shots):
@@ -1040,6 +1124,10 @@ async def main():
                     total += n
                     failures += f
                     print('%s %s: %d media pages checked (panel widths %r)' % ('FAIL' if f else 'ok  ', lang, n, widths))
+                    n, f = await x_dialogs(browser, base, rel, lang, args.shots)
+                    total += n
+                    failures += f
+                    print('%s %s: %d EXTREME dialogs checked' % ('FAIL' if f else 'ok  ', lang, n))
             finally:
                 await browser.close()
     finally:

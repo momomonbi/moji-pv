@@ -1,12 +1,14 @@
-/* 文字PVメーカー v2 — original work. The keyframe editor (キーフレーム): a shot's keys as rows, the markers on the preview and the key diamonds on the timeline (DESIGN_2_1 §6.7). */
+/* 文字PVメーカー v2 — original work. The keyframe editor (キーフレーム): a shot's keys as rows, the markers on the preview and the key diamonds on the timeline (DESIGN_2_1 §6.7; EXTREME shots, DESIGN_EXTREME §2.6). */
 MV.def('ui/shot_editor', ['ui/dom', 'ui/icons', 'core/shot', 'core/curve', 'ui/curve_widget', 'ui/fields', 'ui/selection'],
   (dom, I, SHOT, CV, CW, F, S) => {
     'use strict';
 
     const { h } = dom;
     const L = SHOT.LIMITS;
-    // とき: the anchors in time order, then n語目 / n拍目 / 割合 (a number `at`).
+    // とき: the anchors in time order, then n語目 / n拍目 / 割合 (a number `at`). An EXTREME shot has two anchors more:
+    // 強調の歌い出し (accent) and 強調の次の言葉 (accentEnd), DESIGN_EXTREME §1.4 X1.
     const WHEN = Object.freeze(['a', 'rest', 'sung', 'mid', 'end', 'out', 'b', 'emph', 'word', 'beat', 'frac']);
+    const X_WHEN = Object.freeze(['a', 'rest', 'sung', 'mid', 'end', 'out', 'b', 'emph', 'accent', 'accentEnd', 'word', 'beat', 'frac']);
     // ねらい (the §6.7 table; 画面の一点 is kept when a value already has it).
     const AIMS = Object.freeze(['block', 'emph', 'first', 'last', 'word', 'line', 'glyph', 'reading', 'frame']);
     // 位置: thirds are ox / oy ±0.167 (the other axis keeps the composition's placement).
@@ -23,16 +25,33 @@ MV.def('ui/shot_editor', ['ui/dom', 'ui/icons', 'core/shot', 'core/curve', 'ui/c
     // --- pure: keys ↔ controls (Node-tested) ------------------------------------------------------------------------
 
     // shotKeys(ref) → { keys: plain key objects (a copy), follow } of a ShotRef; 'none' or unreadable → the START_FROM
-    // preset (the editor always has keys to show).
+    // preset (the editor always has keys to show). An EXTREME value (a preset, mirrored or not, or an x-shot) also gives
+    // x: true and its shot-level beat and blur, which every edit keeps (DESIGN_EXTREME §1.1).
     function shotKeys(ref) {
       const v = SHOT.coerceShot(ref);
-      const src = v === undefined || v === 'none' ? SHOT.SHOTS[START_FROM] : typeof v === 'string' ? SHOT.SHOTS[v] : v;
-      return { keys: src.keys.map((k) => JSON.parse(JSON.stringify(k))), follow: src.follow || 0 };
+      const src = v === undefined || v === 'none' ? SHOT.SHOTS[START_FROM] : typeof v === 'string' ? SHOT.presetOf(v) : v;
+      const out = { keys: src.keys.map((k) => JSON.parse(JSON.stringify(k))), follow: src.follow || 0 };
+      if (v !== undefined && SHOT.isExtreme(v)) {
+        out.x = true;
+        if (src.beat) out.beat = JSON.parse(JSON.stringify(src.beat));
+        if (src.blur !== undefined) out.blur = src.blur;
+      }
+      return out;
     }
 
-    // toShot(keys, follow) → the canonical Shot object (the whole value the editor pins), or undefined.
-    function toShot(keys, follow) {
-      return SHOT.coerceShot(Object.assign({ keys }, follow ? { follow } : {}));
+    // limitsOf(state) → the ranges the rows edit within: XLIMITS for an EXTREME shot, else LIMITS (core/shot.limitsOf).
+    function limitsOf(state) { return state && state.x ? SHOT.XLIMITS : L; }
+
+    // toShot(keys, follow, x?) → the canonical Shot object (the whole value the editor pins), or undefined. x: the state
+    // of an EXTREME shot ({ x: true, beat?, blur? }): the value stays an x-shot.
+    function toShot(keys, follow, x) {
+      const base = Object.assign({ keys }, follow ? { follow } : {});
+      if (x && x.x) {
+        base.x = 1;
+        if (x.beat) base.beat = x.beat;
+        if (x.blur !== undefined) base.blur = x.blur;
+      }
+      return SHOT.coerceShot(base);
     }
 
     // whenOf(key) → { choice, n }: n is the 1-based word or beat, or the percentage of a number `at`.
@@ -41,7 +60,7 @@ MV.def('ui/shot_editor', ['ui/dom', 'ui/icons', 'core/shot', 'core/curve', 'ui/c
       if (isNum(at)) return { choice: 'frac', n: Math.round(at * 100) };
       const m = /^(word|beat):(-?\d+)$/.exec(String(at));
       if (m) { const k = Number(m[2]); return { choice: m[1], n: k >= 0 ? k + 1 : k }; }
-      return { choice: WHEN.includes(at) ? at : 'a', n: null };
+      return { choice: X_WHEN.includes(at) ? at : 'a', n: null };
     }
 
     // atFrom(choice, n) → the key's `at`.
@@ -97,10 +116,12 @@ MV.def('ui/shot_editor', ['ui/dom', 'ui/icons', 'core/shot', 'core/curve', 'ui/c
       return k;
     }
 
-    // sizeOf(key) → { kind: 'fill' | 'zoom', v, range } (大きさ: fill for text aims, zoom for the frame or a point).
-    function sizeOf(key) {
-      return isText(key.aim) ? { kind: 'fill', v: isNum(key.fill) ? key.fill : 0.6, range: L.fill }
-        : { kind: 'zoom', v: isNum(key.zoom) ? key.zoom : 1, range: L.zoom };
+    // sizeOf(key, lim?) → { kind: 'fill' | 'zoom', v, range } (大きさ: fill for text aims, zoom for the frame or a point;
+    // lim: the shot's limits, LIMITS by default).
+    function sizeOf(key, lim) {
+      const R = lim || L;
+      return isText(key.aim) ? { kind: 'fill', v: isNum(key.fill) ? key.fill : 0.6, range: R.fill }
+        : { kind: 'zoom', v: isNum(key.zoom) ? key.zoom : 1, range: R.zoom };
     }
 
     // editKey(state, i, patch) → the Shot with key i changed (patch keys set; null removes one). Changing the aim between
@@ -113,23 +134,34 @@ MV.def('ui/shot_editor', ['ui/dom', 'ui/icons', 'core/shot', 'core/curve', 'ui/c
       if (patch.aim !== undefined) {
         if (isText(k.aim)) delete k.zoom; else delete k.fill;
       }
-      return toShot(keys, state.follow);
+      return toShot(keys, state.follow, state);
     }
 
     // addKey(state) → the Shot with one more key (after the last; ≤ 6).
     function addKey(state) {
-      if (state.keys.length >= L.keys[1]) return toShot(state.keys, state.follow);
+      if (state.keys.length >= L.keys[1]) return toShot(state.keys, state.follow, state);
       const last = state.keys[state.keys.length - 1] || NEW_KEY;
       const k = Object.assign({}, NEW_KEY, { aim: last.aim });
       if (isText(k.aim) && isNum(last.fill)) k.fill = last.fill;
       if (!isText(k.aim) && isNum(last.zoom)) k.zoom = last.zoom;
-      return toShot(state.keys.concat([k]), state.follow);
+      return toShot(state.keys.concat([k]), state.follow, state);
     }
 
     // removeKey(state, i) → the Shot without key i (≥ 2 keys stay).
     function removeKey(state, i) {
-      if (state.keys.length <= L.keys[0]) return toShot(state.keys, state.follow);
-      return toShot(state.keys.filter((k, j) => j !== i), state.follow);
+      if (state.keys.length <= L.keys[0]) return toShot(state.keys, state.follow, state);
+      return toShot(state.keys.filter((k, j) => j !== i), state.follow, state);
+    }
+
+    // mirrorShot(state) → the EXTREME shot mirrored left ↔ right (左右反転: every ox and roll negated, as a "~m" preset).
+    function mirrorShot(state) {
+      const keys = state.keys.map((key) => {
+        const k = Object.assign({}, key);
+        if (isNum(k.ox)) k.ox = k.ox === 0 ? 0 : -k.ox;
+        if (isNum(k.roll)) k.roll = k.roll === 0 ? 0 : -k.roll;
+        return k;
+      });
+      return toShot(keys, state.follow, state);
     }
 
     // --- pure: times and the preview ------------------------------------------------------------------------------
@@ -188,9 +220,11 @@ MV.def('ui/shot_editor', ['ui/dom', 'ui/icons', 'core/shot', 'core/curve', 'ui/c
       return { x: C.x + z * (dx * Math.cos(r) - dy * Math.sin(r)), y: C.y + z * (dx * Math.sin(r) + dy * Math.cos(r)) };
     }
 
-    // offsetOfPoint(p, design) → the key's { ox, oy } for a marker dropped at p (frame fractions from the centre, clamped).
-    function offsetOfPoint(p, design) {
-      return { ox: q3(clamp((p.x - design.w / 2) / design.w, L.ox)), oy: q3(clamp((p.y - design.h / 2) / design.h, L.oy)) };
+    // offsetOfPoint(p, design, lim?) → the key's { ox, oy } for a marker dropped at p (frame fractions from the centre,
+    // clamped to the shot's limits: ±0.4, ±0.6 for an EXTREME shot).
+    function offsetOfPoint(p, design, lim) {
+      const R = lim || L;
+      return { ox: q3(clamp((p.x - design.w / 2) / design.w, R.ox)), oy: q3(clamp((p.y - design.h / 2) / design.h, R.oy)) };
     }
 
     // screenToWorld(dx, dy, view) → a screen drag (design units) in world units under the camera { zoom, roll }: the
@@ -212,9 +246,11 @@ MV.def('ui/shot_editor', ['ui/dom', 'ui/icons', 'core/shot', 'core/curve', 'ui/c
       const rows = h('div', { class: 'ke-rows' });
       const add = h('button', { class: 'chip-btn ke-add', type: 'button', text: t('keys.add') });
       const reset = h('button', { class: 'chip-btn ke-reset', type: 'button', text: t('keys.reset') });
+      // 左右反転: an EXTREME shot only (DESIGN_EXTREME §2.6)
+      const mirror = h('button', { class: 'chip-btn ke-mirror', type: 'button', hidden: true, text: t('keys.mirror') });
       const markBox = h('input', { type: 'checkbox', checked: true });
       const el = h('div', { class: 'ke-page' }, rows,
-        h('div', { class: 'row-actions ke-foot' }, add, reset),
+        h('div', { class: 'row-actions ke-foot' }, add, mirror, reset),
         h('label', { class: 'check-row' }, markBox, h('span', { text: t('keys.markers') })));
       let state = { keys: [], follow: 0 };
       let gesture = null;
@@ -283,10 +319,11 @@ MV.def('ui/shot_editor', ['ui/dom', 'ui/icons', 'core/shot', 'core/curve', 'ui/c
 
       function keyRow(k, i) {
         const n = state.keys.length;
+        const lim = limitsOf(state);
         const item = t('keys.item', { n: i + 1 });
         const lab = (key) => item + ' ' + t(key);
         const w = whenOf(k);
-        const whenOpts = WHEN.map((c) => ({ v: c, text: c === 'word' || c === 'beat' ? t('at.' + c, { n: 'n' })
+        const whenOpts = (state.x ? X_WHEN : WHEN).map((c) => ({ v: c, text: c === 'word' || c === 'beat' ? t('at.' + c, { n: 'n' })
           : c === 'frac' ? t('keys.frac') : t('at.' + c) }));
         const when = sel(lab('keys.when'), whenOpts, w.choice, (c) => write(editKey(state, i, { at: atFrom(c, w.n) })));
         const whenN = w.n === null ? null : num(lab('keys.when'), w.n, w.choice === 'frac' ? 0 : -20, w.choice === 'frac' ? 100 : 41,
@@ -296,7 +333,7 @@ MV.def('ui/shot_editor', ['ui/dom', 'ui/icons', 'core/shot', 'core/curve', 'ui/c
         const aimOpts = aimList.map((c) => ({ v: c, text: ['word', 'line', 'glyph'].includes(c) ? t('aim.' + c, { n: 'n' }) : t('aim.' + c) }));
         const aim = sel(lab('keys.aim'), aimOpts, a.choice, (c) => write(editKey(state, i, { aim: aimFrom(c, a.n) })));
         const aimN = a.n === null ? null : num(lab('keys.aim'), a.n, -20, 81, (v) => write(editKey(state, i, { aim: aimFrom(a.choice, v) })));
-        const size = sizeOf(k);
+        const size = sizeOf(k, lim);
         const range = h('input', { class: 'w-range ke-size', type: 'range', min: String(Math.round(size.range[0] * 100)),
           max: String(Math.round(size.range[1] * 100)), step: '1', value: String(Math.round(size.v * 100)), 'aria-label': lab('keys.size') });
         const sizeText = h('output', { class: 'cw-val mono', text: Math.round(size.v * 100) + '%' });
@@ -310,7 +347,7 @@ MV.def('ui/shot_editor', ['ui/dom', 'ui/icons', 'core/shot', 'core/curve', 'ui/c
         range.addEventListener('change', end);
         range.addEventListener('pointerup', end);
         const pos = sel(lab('keys.pos'), POS.map((c) => ({ v: c, text: t('pos.' + c) })), posOf(k),
-          (c) => write(toShot(state.keys.map((x, j) => (j === i ? withPos(x, c) : x)), state.follow)));
+          (c) => write(toShot(state.keys.map((x, j) => (j === i ? withPos(x, c) : x)), state.follow, state)));
         // 緩急 of the move into this key (absent → the cut's cam.curve) and 傾き.
         const curve = CW.make({ path: 'cam.curve', compact: true }, {
           t, label: lab('keys.curve'),
@@ -319,7 +356,15 @@ MV.def('ui/shot_editor', ['ui/dom', 'ui/icons', 'core/shot', 'core/curve', 'ui/c
           gesture: () => ({ set: (v) => write(editKey(state, i, { curve: v })), end() {} }),
         });
         curve.update({ value: k.curve === undefined ? 'linear' : k.curve, auto: k.curve === undefined, mixed: false, readOnly: false });
-        const roll = num(lab('keys.roll'), k.roll || 0, L.roll[0], L.roll[1], (v) => write(editKey(state, i, { roll: v })));
+        const roll = num(lab('keys.roll'), k.roll || 0, lim.roll[0], lim.roll[1], (v) => write(editKey(state, i, { roll: v })));
+        // An EXTREME shot's keys: 衝撃 (a shake hit at the key, 0–1) and 背景の寄り (the ground zoom, 1–1.35; text and frame
+        // aims), DESIGN_EXTREME §1.1.
+        const xLine = state.x ? h('div', { class: 'ke-line ke-x' },
+          h('span', { class: 'ke-lab', text: t('keys.hit') }),
+          num(lab('keys.hit'), isNum(k.hit) ? k.hit : 0, lim.hit[0], lim.hit[1], (v) => write(editKey(state, i, { hit: v }))),
+          k.aim === 'point' ? null : h('span', { class: 'ke-lab', text: t('keys.groundZoom') }),
+          k.aim === 'point' ? null : num(lab('keys.groundZoom'), isNum(k.gz) ? k.gz : 1, lim.gz[0], lim.gz[1],
+            (v) => write(editKey(state, i, { gz: v })))) : null;
         const remove = h('button', { class: 'icon-btn small ke-remove', type: 'button', title: t('keys.remove'), 'aria-label': item + ' ' + t('keys.remove'),
           disabled: n <= L.keys[0], on: { click: () => write(removeKey(state, i)) } }, I.icon('close', { size: 14 }));
         return h('div', { class: 'ke-row', role: 'group', 'aria-label': item, 'data-i': String(i) },
@@ -329,7 +374,8 @@ MV.def('ui/shot_editor', ['ui/dom', 'ui/icons', 'core/shot', 'core/curve', 'ui/c
           h('div', { class: 'ke-line' }, h('span', { class: 'ke-lab', text: t('keys.size') }), range, sizeText),
           h('div', { class: 'ke-line' }, h('span', { class: 'ke-lab', text: t('keys.pos') }), pos),
           h('div', { class: 'ke-line' }, h('span', { class: 'ke-lab', text: t('keys.curve') }), curve.el,
-            h('span', { class: 'ke-lab', text: t('keys.roll') }), roll, h('span', { class: 'grow' }), remove));
+            h('span', { class: 'ke-lab', text: t('keys.roll') }), roll, h('span', { class: 'grow' }), remove),
+          xLine);
       }
 
       function render(force) {
@@ -342,6 +388,8 @@ MV.def('ui/shot_editor', ['ui/dom', 'ui/icons', 'core/shot', 'core/curve', 'ui/c
         const at = active && rows.contains(active) ? { row: active.closest('.ke-row'), label: active.getAttribute('aria-label') } : null;
         dom.replace(rows, state.keys.map((k, i) => keyRow(k, i)));
         add.disabled = state.keys.length >= L.keys[1];
+        mirror.hidden = !state.x;
+        mirror.disabled = !state.keys.some((k) => (isNum(k.ox) && k.ox !== 0) || (isNum(k.roll) && k.roll !== 0));
         reset.disabled = !pinned();
         if (at && at.row) {
           const again = rows.querySelector('.ke-row[data-i="' + at.row.dataset.i + '"] [aria-label="' + CSS.escape(at.label || '') + '"]');
@@ -351,6 +399,7 @@ MV.def('ui/shot_editor', ['ui/dom', 'ui/icons', 'core/shot', 'core/curve', 'ui/c
       }
 
       add.addEventListener('click', () => write(addKey(state)));
+      mirror.addEventListener('click', () => write(mirrorShot(state)));
       reset.addEventListener('click', () => {
         if (pinned()) app.dispatch({ t: 'pin.clear', path: storedPath() }, { label: ['undo.unpinField', { field: t('fld.camShot') }] });
       });
@@ -374,11 +423,11 @@ MV.def('ui/shot_editor', ['ui/dom', 'ui/icons', 'core/shot', 'core/curve', 'ui/c
           return matched ? matched.map((k, i) => Object.assign({ i }, markerAt(k, design))) : [];
         },
         // A marker dropped on the preview: its key's ox / oy (自由); the wheel: its closeness.
-        place(i, p, design, merge) { write(editKey(state, i, offsetOfPoint(p, design)), merge); },
+        place(i, p, design, merge) { write(editKey(state, i, offsetOfPoint(p, design, limitsOf(state))), merge); },
         grow(i, d) {
           const k = state.keys[i];
           if (!k) return;
-          const size = sizeOf(k);
+          const size = sizeOf(k, limitsOf(state));
           write(editKey(state, i, { [size.kind]: q3(clamp(size.v + d * (size.kind === 'fill' ? 0.05 : 0.01), size.range)) }), 'keys:wheel:' + i);
         },
         // A diamond dragged on the timeline: a number `at`.
@@ -401,7 +450,7 @@ MV.def('ui/shot_editor', ['ui/dom', 'ui/icons', 'core/shot', 'core/curve', 'ui/c
     }
 
     return {
-      WHEN, AIMS, POS, THIRD, shotKeys, toShot, whenOf, atFrom, aimOf, aimFrom, posOf, withPos, sizeOf, editKey, addKey, removeKey,
-      approxTime, trackKeys, keyTimes, atOfTime, markerAt, offsetOfPoint, screenToWorld, page,
+      WHEN, X_WHEN, AIMS, POS, THIRD, shotKeys, limitsOf, toShot, whenOf, atFrom, aimOf, aimFrom, posOf, withPos, sizeOf, editKey, addKey,
+      removeKey, mirrorShot, approxTime, trackKeys, keyTimes, atOfTime, markerAt, offsetOfPoint, screenToWorld, page,
     };
   });

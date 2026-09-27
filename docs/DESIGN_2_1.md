@@ -39,6 +39,7 @@ Notation:
 - §11: images and videos (写真・動画).
 - §12: the single-file project package (`.mojipv`).
 - §13: Filmora support.
+- §14: カメラ EXTREME, intense camerawork (its own phases A–F; §14 is complete in itself and lists its FROZEN parts).
 
 Their work is in packages **G** and **H** (§8.7, §8.8), plus marked items in packages A–E. §9 lists the FROZEN contracts
 they touch.
@@ -114,6 +115,9 @@ they touch.
 7. **Filmora-ready output (§13).** 「Filmora用」 in step ④ writes a set of files into one folder: an MP4, a transparent
    WebM overlay, a background MP4, a green-screen MP4, SRT subtitles and a how-to. It also adds a standalone transparent
    video format (WebM with VP9 alpha).
+8. **カメラ EXTREME (§14).** One switch (作品全体 › 強さ, or per area) turns the camerawork intense: crash zooms, whips,
+   spins, jump cuts, beat pulses, shakes, dutch swings, vertigo and orbits, chosen automatically or by the AI (the chip
+   「EXTREME」), or picked by hand, with every word still readable while it is sung and a motion-sickness notice.
 
 ### 1.2 Principles kept from v2 (all binding)
 
@@ -368,6 +372,7 @@ Curve    := EaseName                                   // core/ease EASES
 
 ShotRef  := ShotPresetKey | "none" | Shot              // presets: settle pushWord readAlong snapZoom pullReveal sweepAcross
                                                        //          tiltHold driftOff wideHold
+                                                       // (EXTREME forms — x-preset keys with "~m", { "x": 1, … }: §14.2)
 Shot     := { "keys": Key[2..6], "follow"?: 0..1 }
 Key      := { "at": 0..1 | Anchor, "dt"?: −2..2 (s), "aim": Aim,
               "fill"?: 0.1..1.2    (text aims; default 0.6: the aimed box's larger side fills this share of the frame),
@@ -2244,6 +2249,8 @@ Guarantees:
 
 ### 6.5 Inspector placements (`ui/fields` PAGES)
 
+(The カメラ EXTREME rows — 作品全体 › 強さ, 要素 › カメラ, the area page — and the shot picker's EXTREME group: §14.10.)
+
 **要素 › カメラ (`el.lens`)**, at work, line and cut scope:
 
 ```
@@ -2411,6 +2418,8 @@ Guarantees:
 - The review's aggregate rows are `role="checkbox"` with `aria-checked="mixed"`.
 
 ### 6.11 Strings to add (`i18n/strings.js`, pairs [ja, en])
+
+(The カメラ EXTREME strings: §14.14.)
 
 The en page shows no Japanese except the product name and user data, such as material names.
 
@@ -3114,6 +3123,7 @@ edits of §11.7. F keeps the ownership of `i18n/strings.js` from A, and adds the
 | §4.22.6 | the vision consent (images only, Gemini only, per asset and project) | WP7, WP8 |
 | §6.4.3, §6.4.12, §6.14 | step ③ hint text; step ④ 形式 control (a segmented pair plus a select) and the kit contents; ≡ › ファイル items; IndexedDB v2 stores (§11.7, §12.7, §13.10) | WP8 |
 | SPEC §7 | the project file is a package (`.mojipv`) by default; the light `.json` save is kept (§12) | owner (decided) |
+| §2.3, §3.4.3, §3.9, §3.12, §3.13, §4.19, §4.20, §4.22, §6.4 | カメラ EXTREME (§14): modules `planner/extreme` (L2), `engine/scene/xshot`, `engine/scene/cover`, `engine/render/xblur` (L3); the slot `cam.extreme` (line, work; refused at cut scope, not copied, promotable); x-refs of `cam.shot` (§14.2); plan `grounds[].x` and why codes; CamPose `gz`, `cover`; facade `xJumps`, `viewAt`/`renderFrame` `calm`, `FrameStats.blur`, samplePlan `xshot`; the `cameraX` answer schema; the widget `extreme` | owner (requested), lead |
 | §3.4.2, §3.9, §3.13, §4.16.2 | 「くり返しの行をそろえる」 (§4.10): the slot `repeat.same` (work, line; refused at a cut); a copy's decisions from its source in the FROZEN slot order; segments, grounds, seams and rigs of copies from their sources; why `repeat.same`, rule `repeat.same`; `ai.warn.repeatSame`; the cast inputs `aligned` and `ahead`; D§8.2 across copies. Only documents with the pin change | owner (decided) |
 | §4.7 (this design) | every `pullReveal` on a cut under 1.8 s takes `hushRushHush` (was: only those the echo gives); camera curves of existing documents change, no shot and no v2 part choice | owner (decided) |
 
@@ -5417,3 +5427,443 @@ on Windows 11 and macOS:
 - a PNG sequence: record Filmora's behaviour (R3).
 
 Each ? row of §13.1 is then set to ✔ or ✗, and the README text is fixed if needed.
+
+---
+
+## 14. カメラ EXTREME: intense camerawork
+
+The owner's request: 「AIに頼むカメラワークですが、EXTREMEモードとしてかなり激しめなカメラワークも考えてもらいたい」. EXTREME
+adds a palette of intense moves (crash zooms, whips, spins, jump cuts, beat pulses, shakes, dutch swings, vertigo,
+orbits), one switch that turns them on for the automatic camerawork and for 「カメラワークをAIに任せる」, a hand choice of
+every move in the shot picker and the keyframe editor, and the safety rules that keep lyrics readable, grounds covered
+and every motion within the project's flash and frequency limits.
+
+This section is the contract as built (phases A–F; the numbers are the phase F tuning, docs/NOTES.md "## カメラ EXTREME").
+The preset table (§14.3), the AI vocabulary table (§14.7), the value grammar (§14.2) and the plan additions (§14.8.5) are
+**FROZEN** once the owner accepts them; the constants of §14.4 and §14.8.3 may be tuned by the visual QA of §14.13 (the
+formulas stay).
+
+### 14.1 Decisions
+
+1. **The switch is a pin, not a new document field.** The NAME slot `cam.extreme` (num 0–1, step 0.05; 0 = off) is
+   pinned at work or line scope. No schema change, no migration, path grammar unchanged (§2.5). 作品全体 › 強さ shows
+   it as the switch 「カメラ EXTREME」; a line pin (an area) gives "EXTREME for the chorus only"; a line pin 0 exempts a
+   line. Turning it on writes 1 (最大); the strengths 強め 0.5 / かなり 0.75 / 最大 1 sit under 詳しい設定.
+2. **EXTREME moves are a second preset table (`SHOT.XSHOTS`, 12 presets) and an opt-in shot form (`{ "x": 1, … }`).**
+   `SHOT.SHOT_KEYS`, `SHOT.LIMITS` and every coercion of a non-EXTREME value are unchanged, so the automatic pool of
+   `planner/camera` and the normal AI vocabulary cannot reach an EXTREME move.
+3. **The planner picks an EXTREME move only where `cam.extreme` resolves > 0**, in an overlay stage (`planner/extreme`)
+   run in stage 6 after casting. It returns at once when no scope pins the switch. `planner/camera` and `planner/cast`
+   are not changed.
+4. **Documents without EXTREME render exactly as before**, by construction: every new engine path is gated by data only
+   EXTREME documents hold (an x-shot on a cut, `grounds[i].x`). `frame_hashes_v2`, `plan_hashes`, `frame_hashes` and
+   `project_media` are asserted unchanged before `project_extreme.json` is written (§14.13).
+5. **Engine:** an x-track (`engine/scene/xshot`) with rotation-aware safe framing, a roll fence, speed caps, jump
+   spacing and beat modulators; a ground coverage limiter and a ground zoom channel (`engine/scene/cover`) on the ground
+   scene of EXTREME segments; a camera motion blur (`engine/render/xblur`, frame reprojection, no pixel reads).
+6. **AI:** the camera button gets the chip 「EXTREME」. With it, the request uses its own frozen schema, the EXTREME
+   vocabulary and an intense system text; the answer also turns the switch on for the area (a reviewable row). What is
+   sent is unchanged in kind (lyric text, the instruction, setting values and numbers).
+7. **Safety** (§14.11): lyrics readable while sung, no ground edge, capped frequencies, jumps counted as flashes, a
+   motion-sickness notice when EXTREME is turned on, and the preview preference 「激しいカメラを抑える（プレビュー）」.
+8. **Owner defaults (accepted):** 最大 when switched on; turning it off asks, with 元に戻す preselected; motion blur on,
+   without a control of its own; no EXTREME chip per area on the 区画ごと board (the panel's chip with 区画▾, or the area
+   page's switch).
+
+### 14.2 The shot model (`core/shot`; FROZEN grammar)
+
+A value is EXTREME (`SHOT.isExtreme(ref)`) iff it is an x-preset key, optionally with the mirror suffix `~m`, or a
+readable object with `x: 1`. Nothing else is read differently: a non-x custom shot is coerced exactly as in §2.4 (a
+`roll: 30` still clamps to 15; an `accent` anchor is refused outside an x-shot).
+
+```
+ShotRef  := … (§2.4)
+          | XShotPresetKey ("~m")?                                 // 12 keys (§14.3); "~m" = mirrored left ↔ right
+          | XShot
+XShot    := { "x": 1, "keys": XKey[2..6], "follow"?: 0..1,
+              "beat"?: { "zoom"?: 0..0.25, "roll"?: 0..20 (deg), "shake"?: 0..1, "every"?: 1 | 2 | 4 },
+              "blur"?: 0..1 }                                      // motion blur strength, default 1
+XKey     := Key (§2.4) with these ranges and fields:
+              "at": … | "accent" | "accentEnd"
+              "fill"?: 0.1..0.95   "ox"?, "oy"?: −0.6..0.6   "roll"?: −360..360
+              "hit"?: 0..1                                         // a shake hit starting at the key's time
+              "gz"?:  1..1.6                                       // ground zoom (text and frame aims)
+              "hop"?: 0..0.35   "whip"?: 0..0.4                    // reading aim only: hop length (0 = jump) and overshoot
+```
+
+`XLIMITS` sits next to `LIMITS` (which is untouched): keys 2–6; fill 0.1–0.95; zoom 0.9–1.25; frameZoom 0.9–3; ox, oy
+±0.6; roll ±360°; the rig limits unchanged; hit 0–1; gz 1–1.6; hop 0–0.35; whip 0–0.4; blur 0–1; beat zoom 0–0.25,
+roll 0–20°, shake 0–1, every 1/2/4. (Phase F raised the beat zoom from 0.1 and the ground zoom from 1.35.)
+
+Canonical form as §2.4 (q3 numbers, sorted keys, defaults omitted, deep-frozen); x defaults omitted: `hit 0`, `gz 1`,
+`whip 0`, `beat.every 1`, `blur 1`, an empty `beat`; `hop 0` is kept (absent = the reading hop rule). An x-shot object
+always prints `"x": 1`. `SHOT.limitsOf(v)`, `presetOf(v)` (a mirrored preset with its keys mirrored), `xKeyOf(v)` and
+`xIntensity(extreme)` serve the editor and the engine; `lastFraming(x) = null` (no §4.5.7 carry reaches or leaves an
+EXTREME cut); `usesBeats(x) = true` (so the cut fingerprint takes the beat phase, `planner/plan`).
+
+### 14.3 The twelve presets (`SHOT.XSHOTS`; FROZEN once accepted)
+
+Notation as §4.5.1: `at → aim fill, extras, curve`. ⇆ = mirrored by `~m` (`SHOT.MIRRORS`). Keys without a curve take
+the cut's `cam.curve`.
+
+| Key | ja / en | Tags | Keys and modulators (phase F values) | Blur |
+|---|---|---|---|---|
+| `crashZoom` | 一瞬で寄る / Crash zoom | hard fast bold | a → block .46 ; accent (dt −.04) → block .46 `linear` ; accent (dt +.05) → emph .9 `dashStop` hit 1 ; accentEnd → emph .9 `linear` ; accentEnd (dt +.12) → block .66 `dashStop` ; b → block .7 `linear` | 1 |
+| `punchHit` | 短く叩く / Punch hit | hard fast | a → block .44 ; sung (dt −.02) → block .44 `linear` ; sung (dt +.06) → block .86 `dashStop` hit 1 ; b → block .72 `fadeBrake` | .8 |
+| `whipPan` ⇆ | 振って入る・抜ける / Whip pan | fast bold | a → block .64 ox .5 ; a (dt +.1) → block .64 `dashStop` ; b (dt −.37) → block .64 `linear` ; b (dt −.25) → block .64 ox −.5 `slowBloom` | 1 |
+| `whipRead` | 言葉を振り抜く / Whip read | fast playful | a → first .8 ; sung → reading .8 hop .12 whip .3 ; end (dt +.02) → block .62 `dashStop` | 1 |
+| `jumpRead` | 寄りで切る / Jump read | hard digital | a → block .5 ; sung (dt −.006) → block .5 `linear` ; sung → reading .85 hop 0 ; end (dt +.002) → reading .85 hop 0 ; end (dt +.008) → block .56 | 0 |
+| `spinIn` ⇆ | 回って入る / Spin in | playful bold | a → block .45 roll −180 ; sung (dt +.2) → block .68 `dashStop` hit .6 ; b → block .7 `linear` | 1 |
+| `spinOut` ⇆ | 回って抜ける / Spin out | playful | a → block .62 ; end (dt +.02) → block .66 `linear` ; b → block .5 roll 360 `slowBloom` | 1 |
+| `dutchSwing` ⇆ | 拍で傾く / Dutch swing | bold playful | a → block .66 roll −14 ; b → block .7 roll 14 `linear` ; beat { roll 18, zoom .08, every 1 } | .6 |
+| `shakeHits` | 拍で揺れる / Shake hits | hard bold | a → block .66 ; b → block .72 `linear` ; beat { shake 1, zoom .06, every 1 } | .5 |
+| `beatCrash` | 拍ごとに寄る / Beat crash | fast bold | a → block .58 ; b → block .62 `linear` ; beat { zoom .2, every 1 } | .8 |
+| `vertigo` | めまい / Vertigo | serious slow | a → block .72 gz 1 ; b → block .56 gz 1.6 `slowBloom` (the words pull back while the background swells) | 0 |
+| `orbit` ⇆ | 回り込む / Orbit | airy slow | a → block .58 roll −24 ox −.16 oy .04 gz 1.2 ; mid → block .66 ox 0 oy −.04 gz 1 `linear` ; b → block .58 roll 24 ox .16 oy .04 gz 1.2 `linear` | .4 |
+
+- `jumpRead` makes two deliberate jumps (keys < 1/120 s apart, §4.5.2) and cuts from word to word (hop 0 on both reading
+  keys), spaced by X2.
+- `whipPan`'s `b − .37 … b − .25` window equals the next cut's lead window with the default timing (tail 0.25, lead
+  0.12), so A whips out while B whips in (the same direction under the pair rule, §14.8.4).
+
+**Intensity** `g = max(0.3, cam.extreme)` (1 without a decision: a hand-picked x-preset with the switch off).
+`SHOT.expandShot(ref, { zoom, curve, follow, g })` expands an x-ref: the mirror first, then
+- roll, hit, gz − 1, whip, beat zoom, beat roll and beat shake × g;
+- a text key's fill = `X_FILL_MID + (fill − X_FILL_MID)·g` (X_FILL_MID 0.62), then × cam.zoom, clamped to XLIMITS;
+- an offset |o| ≤ `X_AWAY` (0.25, it frames the words) × g; one beyond it (the words leave the frame on purpose)
+  `sign·(X_AWAY + (|o| − X_AWAY)·g)`, so a whip still leaves the frame at 強め;
+- timing is not scaled; `carry` is ignored.
+
+(Phase F added the fill and offset scaling and the g-scaled rotation cap of §14.4: before, 強め, かなり and 最大 of
+crashZoom, punchHit, whipPan, vertigo and spinOut drew the same frames.)
+
+### 14.4 The x-track (`engine/scene/xshot`, L3)
+
+`engine/scene/build` sends a cut whose `cam.shot` value is EXTREME to `XS.makeShot` (the normal track is not changed);
+its inputs add `extreme` (cam.extreme or null) and `camTrait` (the arrange's `cam`, default `'any'`). A cut without text
+glyphs gets no x-track.
+
+Constants (as built after the phase F tuning):
+
+```
+XSAFE = 0.08              share of the short side kept free on every edge in the sung span (normal SAFE 0.05)
+XROLL_SUNG = 30°          |roll| of a key inside the sung span
+XSPIN_LAND = 180°         |Δroll| of a segment that lands inside the sung span from before it
+XSPIN_INSIDE = 60°        |Δroll| of a segment that overlaps the sung span otherwise
+XROT_SPEED = 720°/s       average rotation speed of a segment at 最大, × (0.5 + 0.5·g) (the recipe's spin cap, §5.8)
+XZOOM_SPEED = 12 /s       average |Δ ln Z| per second of a segment
+XTRAVEL_SPEED = 10 W/s    average on-screen travel of the aim
+XJUMP_GAP = 0.4 s         deliberate jumps at least this far apart and from the cut's start a
+XSNAP = 0.08 s            a jump that comes too early becomes a move of this length
+XZ_FLOOR = 0.82           zoom floor of text keys on 'any' layouts (gentle and still layouts keep 0.9)
+PULSE_GAP = 1/3 s, PULSE_ATTACK = 0.035 s, PULSE_DECAY = 0.16 s, DOWNBEAT = ×1.3
+SWING_GAP = 0.5 s, SWING_FLIP = 0.16 s (dashStop ease)
+HIT_GAP = 0.5 s, HIT_HZ = 5, HIT_DECAY = 0.11 s, HIT_DU = 0.05·short, HIT_ROLL = 3°
+OFF_MAX = 0.6             outside the sung span the aim may go this far from the centre (whips leave the frame)
+XAWAY = 0.25              a key outside the sung span placed farther off the centre (or rolled beyond 30°) leaves on purpose
+XLEAVE = 0.2 s            a reading path is left over the last 0.2 s before the next (non-reading) key
+GENTLE = { roll 6°, beatRoll 4°, off 0.12, gz 1.1, hop 0.2 }       layouts cam 'gentle' and 'none' (X7)
+CALM = 0.3                the modulators under 「激しいカメラを抑える」 (preview only)
+SHUTTER = 1/48 s          the motion blur shutter at blur 1, g 1
+```
+
+Build rules (closed form at scene build):
+- **X1 anchors.** `accent` = the sung start of the emphasized word (without emphasis: the first beat at or after the
+  sung start); `accentEnd` = the sung start of the first word after the emphasized run (without emphasis: `end`). The
+  normal `emph` anchor keeps its meaning. An x-track's `emph` aim with an emphasis frames the whole words the run
+  touches (a run inside a word would crop the rest of it while it is sung).
+- **X2 jump spacing.** A deliberate jump earlier than XJUMP_GAP after the previous one or after `a` becomes an XSNAP
+  move (the earlier key moves back); reading hops of 0 obey the same rule per unit (≤ 2.5 jumps per second).
+- **X3 zoom.** Text aims use the key's rotated box, widened by the modulator envelope (beat roll and the hit jolt):
+  `Z = clamp(fill · min(W/w', H/h'), floor, 3)`. A key inside the sung span is also capped by `Zfit`, the largest zoom
+  at which the box fits the XSAFE area under the pulse, the hits and the swing.
+- **X3' holds.** A text key outside the sung span that does not leave on purpose (|ox| or |oy| ≤ XAWAY and |roll| ≤
+  XROLL_SUNG) is framed like a key inside it, so what is sung between two such keys stays framed.
+- **X4 position.** A key targets the on-screen position P of its aim centre (after the roll): inside the sung span (and
+  for X3' holds) P is clamped into the XSAFE area with the envelope; outside it to ±OFF_MAX. The camera is
+  `X = c − Rot(θ)·P/Z`. No bleed clamp on 'any' layouts: the ground limiter covers the ground instead (§14.5).
+- **X5 roll fence**, **X6 speed caps** (rotation, zoom, travel; deliberate jumps exempt; the excess is removed from the
+  key farther from the sung span), **X7 layouts** (`cam: 'gentle'`: the GENTLE caps and the §4.5.4 bleed clamp;
+  `cam: 'none'`: two holds at key 0's framing, only the modulators move, with the gentle caps).
+- **X8 hits.** Key hits and beat shakes merge into one list, ≥ HIT_GAP apart; directions hashed from the cut's value and
+  text. **X9 schedules.** Pulses on every `every`-th beat, thinned until ≥ PULSE_GAP apart (≤ 3 Hz); swing flips
+  thinned until ≥ SWING_GAP (≤ 1 Hz cycle); without a beat grid 0.5 s steps; stored as (first, step, count).
+- **X10 reading hops.** `h_k = min(hop, 0.6·(τ_k − τ_{k−1}))`; whip w overshoots the hop by `w·g·W·4f(1 − f)/Z`; every
+  unit is centred while it is sung.
+
+Pose at t (`XS.poseAt`, allocation-free): between keys, ln Z, the aim centre, the on-screen P, the roll and ln gz are
+lerped with the later key's curve, then `X = c − Rot(θ)·P/Z` (the words travel straight on screen while rolling).
+The camera behaviour (phase LENS, after the lens parts) composes the pose with the lens deltas as the normal track does,
+then adds the modulators: `sx, sy ×= 1 + pulse·k`, `rot += (swing + jolt)·k`, `jx, jy += hit·k/Z` (k = 1, or CALM).
+`XS.camAt` gives the closed-form camera the blur differentiates.
+
+### 14.5 Ground coverage (`engine/scene/cover`, L3; pure)
+
+Grounds paint the frame ± 0.15 on every side. The ground-scene layers of an EXTREME segment (`plan.grounds[i].x`, and
+every segment on screen while an EXTREME cut is, which the renderer also marks) see a pooled copy of their camera with
+`cover` set; `F.viewMatrix` then takes the limiter (a camera without `cover` takes the
+old code path bit for bit). For parallax k: `s = (1 + (Z − 1)k)·gz`, `θ = roll·k`, `T = (x + shake)·k`; the rotation is
+kneed to θmax (the largest tilt that still covers the frame with a 0.02 reserve for translation), then the
+translation per axis to what the rotated, scaled frame leaves. `knee(v, L)` is the identity below 0.8·L and C¹, so a
+limited ground never jerks. `depthCam` keeps `cover` and scales `gz` like the zoom. **Ground zoom** `gz ≥ 1` scales only
+the ground-scene layers (vertigo). At a hard boundary between two EXTREME cuts of one segment with no seam, the ground
+camera eases from A's to B's over `B.t0 ± 0.06 s`. Cut-scene layers are never limited.
+
+### 14.6 Camera motion blur (`engine/render/xblur`, L3)
+
+- **When:** the current cut has an x-track with blur > 0, no seam is active, the preview is not toned down, and the
+  reprojected displacement over the shutter is ≥ MIN_DU = 16 design units (phase F: was 12).
+- **Shutter:** `blur·g/48 s`, in seconds (30 and 60 fps sample the same function of t).
+- **Taps:** `t_j = t − SH·j/(n − 1)`; `n = clamp(ceil(d / MIN_DU), 2, most)`; most = 6 in export, 4 in the preview at
+  adaptive level 0, 3 at levels 1–2, none from level 3.
+- **Draw (phase F):** the n − 1 moved copies are averaged on a pooled surface of half the frame's size (the base drawn
+  there first, so borders no copy reaches keep it; then tap j with `S·D·V(t_j)·V(t)⁻¹·D⁻¹` at alpha 1, 1/j …), and the
+  average is drawn back over the frame at alpha (n − 1)/n. A clear backdrop adds the copies with `'lighter'` at
+  1/(n − 1), scales the frame by 1/n (`'destination-out'` at 1 − 1/n) and adds the average with `'lighter'` at
+  (n − 1)/n. No pixel reads, no `ctx.filter`; a blurred frame never takes the direct path; `FrameStats.blur` = n, and the
+  copies count as passes. (Full-size copies made a blurred frame about three times as expensive as a still one.)
+
+### 14.7 The AI's EXTREME vocabulary (`SHOT.fromXMove`; FROZEN table once accepted)
+
+Inputs: move, focus, timing, fill (f1; f0 = f1 − 0.25), power p ∈ [0.3, 1] (missing or negative: 0.8), dir
+(auto | left | right; right mirrors). `SHOT.XMOVES = crash dutch jump orbit pulse shake spin vertigo whip`.
+
+| move | Keys |
+|---|---|
+| `crash` | crashZoom's shape with f1 for the crash; hit .5 + .5p; focus emphasis keeps accent … accentEnd, first → sung … word:1, last → word:−1 … end, text / center → beat:0 … end |
+| `whip` | arrive → whip-in only; depart → whip-out only; whole → both; hold → whipRead (whip .15 + .25p); ox = ±(.3 + .3p) |
+| `spin` | arrive → roll −(90 + 270p) landing at sung + .2 with hit .6; depart → exit roll 360p; whole → both |
+| `dutch` | key roll ∓(8 + 6p), beat roll 10 + 8p, beat zoom .03 + .05p |
+| `shake` | beat shake p, zoom .06, every 1 |
+| `vertigo` | fill f1 → f0 (the words pull back), gz 1 → 1 + .6p |
+| `orbit` | roll ∓(12 + 12p), ox ∓.16, oy .04, gz 1.2 at the ends; f1 at mid |
+| `pulse` | beat zoom .08 + .14p, every 1 |
+| `jump` | jumpRead with fill f1 (depart: no jump back to wide) |
+
+### 14.8 The switch and the plan
+
+#### 14.8.1 Document and commands
+
+Slot `cam.extreme`: `{ type: 'num', min: 0, max: 1, step: 0.05 }`, pinned at line or work. `core/commands` refuses it
+at cut scope (`NOT_CUT`), does not copy it with 見た目を貼り付け, and allows `pin.promote` line → work.
+`ui/fields.LINE_WORK_NAMES` holds it. An older build ignores the pin and treats x-preset pins as a bad value with the
+fallback: an EXTREME project opens there as a normal one.
+
+#### 14.8.2 The overlay (`planner/extreme`, L2): `shots(ctx, cuts)` in stage 6, before the carry
+
+Per cut in time order, where the switch resolves > 0: `cut.slots['cam.extreme'] = { by, from, v }`. A pinned `cam.shot`
+(user, AI or lock) is kept (pins win; an EXTREME pin also takes the neutral follow and zoom below). Otherwise the rules
+and weights pick an x-preset (`{ from: 'auto', v: key or key~m }`), and the automatic `cam.follow` becomes 0 and the
+automatic `cam.zoom` `XZOOM` = 1 (the preset's own closeness; the normal 0.8–0.9 put most block keys at the zoom
+floor). `amount.camera` does not stop it: the switch is an explicit request.
+
+Rules (first match):
+
+| Rule | Pool |
+|---|---|
+| arrange `cam: 'none'` | no x-shot (the normal `none` stays; explain: `cam.xStill`) |
+| a cut without text | no x-shot (explain: `cam.xNoText`) |
+| arrange `cam: 'gentle'`, or a framing lens (`def.frames`) | `beatCrash`, `dutchSwing`, `shakeHits` |
+| `f.dur < 0.8` | `punchHit`, `shakeHits` |
+| role `title` / `interlude` / `outro` | `crashZoom spinIn vertigo` / `dutchSwing orbit vertigo` / `orbit spinOut vertigo` |
+| otherwise | all 12 |
+
+#### 14.8.3 Weights (q6)
+
+```
+crashZoom   (f.impact ? 30 : f.emph ? 4 : f.onBeat ? 1.5 : 0.6) · (0.6 + f.energy)
+punchHit    f.impact ? 6 : 0.5
+whipRead    (reads ? 2.5 : 0) · (orient 'v' ? 0.8 : 1)      reads = f.words ≥ 2 && f.dur ≥ 1.2 (phase F: was 3 and 1.6)
+jumpRead    reads ? 1.5 : 0
+whipPan     1.2 (× 6 right after a whipPan of the same section with a hard cut: the pair rule)
+spinIn      f.sectionStart ? 3 : 0.4        spinOut  next cut's sectionStart ? 2 : 0.4
+dutchSwing  1.2 · (f.energy ≥ 0.4 ? 1 : 0.6)   shakeHits  f.energy ≥ 0.6 ? 1.5 : 0.5
+beatCrash   plan beats ? (f.energy ≥ 0.5 ? 2 : 0.8) : 0.3
+vertigo     f.dur ≥ 2.5 && f.energy < 0.5 ? 2 : 0.3        orbit  f.dur ≥ 2 ? 1 : 0.3
+× √moodBias(tags) × section factors (chorus: crashZoom, whipRead, whipPan, beatCrash ×1.5; prechorus: beatCrash,
+  shakeHits ×1.5; verse or none: dutchSwing, orbit, vertigo ×1.3; bridge: vertigo, orbit, spinIn ×1.5; intro, outro:
+  vertigo, spinIn, spinOut ×1.5)
+× recency ×0.2 (= the previous cut's pick), ×0.5 (among the natural picks of the 3 before)
+× echo ×40 (the pick of feat.repeatOf's cut, read from a salt-free pass; never toward the previous cut's pick)
+value = Gumbel-max keyed by the preset key, on the cut's cam.shot seed stream (a reroll of the cut, its line or the
+        カメラワーク field rerolls the EXTREME pick too)
+```
+
+The overlay keeps its own recency and echo window; it reads nothing of the cast history.
+
+**With 「くり返しの行をそろえる」 (§4.10).** Where the opt-in aligns a cut to a source (`ctx.align`, planner/cast
+alignments) and neither the cut, its line nor their カメラワーク field is rerolled, the cut plays the preset its source
+shows (the overlay's pick or a pin), mirrored alike, provided that preset weighs > 0 at the cut (a short cut takes only
+the short pool; a misfit picks its own). Not where the previous cut already shows that preset and the cut before the
+source did not (§8.2 no identical neighbours, as `nearClash` for a layout): the same move twice in a row is left to the
+pick. The cut right before an aligned repeat weighs the preset the repeat takes ×0.2, as its previous cut. Explain:
+`repeat.same` (「…と同じ歌詞なので、同じ見せ方にそろえた」). Measured on the sample lyrics (L1–L3, 3 aspects, 4 moods,
+2 seeds, the switch at 1): repeats show their source's EXTREME move in 98.0 % of 708 pairs (47.7 % from the echo
+alone); the same move twice in a row on an aligned repeat 41 times, 37 of them where the first copy has it twice too.
+The switch itself is the area's, like the season: the opt-in never copies it (a later chorus without the switch keeps
+its normal shots), and the AI's rule that a later copy follows the first copy's changes leaves the switch row alone.
+
+#### 14.8.4 Mirror, grounds, rigs
+
+⇆ presets are mirrored by `hash32('xmirror', prefix) & 1`, except: a whipPan right after a whipPan (pair rule) keeps
+its direction, and a repeat that plays its first copy's preset plays it in the same direction. `tracks(ctx, cuts,
+grounds, rigs)` (after `markZoomed`) sets `grounds[i].x = true` for every segment an EXTREME cut (pin or pick) can
+drive: its own and every other one on screen during the cut's a … b (a segment that starts at the next cut's a is drawn
+with this cut's camera until the next cut's t0; phase F, found by the QA's sentinel scan behind a dutch swing), and,
+where the switch is pinned, gives every automatic rig run whose first cut has it on
+`amp = q2(min(1.6, (0.6 + 0.8·A)·(last chorus ? 1.25 : 1)))`.
+
+#### 14.8.5 Plan additions (EXTREME documents only; `plan.v` stays 2)
+
+`cut.slots['cam.extreme']`; x-refs in `cut.slots['cam.shot'].v`; `{ from: 'auto', v: 0 }` follow and `{ from: 'auto',
+v: 1 }` zoom on EXTREME cuts; raised `rigs[i].rig.p.amp`; `grounds[i].x`; why codes `cam.extreme {x}`, `cam.xStill
+{key}`, `cam.xNoText`; the rule `extreme`. The cut `fp` covers the slots and the beat phase; `grounds[i].x` is not in
+`groundFp`.
+
+#### 14.8.6 Engine flow and facade
+
+| Stage | Change | Gate |
+|---|---|---|
+| scene build | x-track | the cut's shot is EXTREME |
+| `F.evaluate(scene, tl, { calm })` | sets the x-track's modulator factor before the behaviours | x-track |
+| `cutCamera` / `composeCamera` | `gz` passes through | x-track |
+| `viewMatrix` / `depthCam` | the cover branch | `cam.cover` |
+| `renderer.gather` | cover copies for ground items; the boundary blend | `grounds[i].x` or an EXTREME cut |
+| `renderer.drawWorld` / `render` | the motion blur; no direct path on blurred frames | x-track with blur, not calm |
+
+Facade (additive): `shotTrack` of an x-track adds `x: true` and `gz`, `hit` on every key; `viewAt(t, { calm })`;
+`renderFrame` options `calm` (preview only) and `sentinel` (lab only: the scene backdrop's colour, for ground-edge
+checks); `FrameStats.blur`; `xJumps(t0, t1)` (the kept deliberate jumps, absolute and sorted); `samplePlan` kind
+`'xshot'` (the lab and the contact sheet).
+
+### 14.9 AI (「カメラワークをAIに任せる」 with 「EXTREME」)
+
+- `directRequests(…, { mode: 'camera', extreme: true })`: `sent.extreme = true`; the schema `SCHEMAS.cameraX` (the
+  camera schema with `move` ∈ MOVES ∪ XMOVES, `power`, `dir`; closed, portable, frozen); effort medium; the lists add
+  `[extreme shots]` (names and blurbs in the UI language, and the ones `~m` mirrors) and `[extreme moves]`; a line's
+  state adds ` cam=gentle` / ` cam=none` for such layouts and ` x=on` where the switch is on; the system text replaces
+  the calm camera mode with the EXTREME description and mode (strong moves on impact lines, emphasis, the chorus and
+  highlights; lighter ones in verses; no move on more than two lines in a row; repeats repeat; every word readable
+  while sung).
+- `cameraFromAi(x, { extreme })` reads x-preset keys (with `~m`) and the XMOVES through `fromXMove` only for an EXTREME
+  request; otherwise an x word is `badShot`, as before.
+- The answer also turns the switch on for its area: `work:cam.extreme = 1` for a whole-video brief, else
+  `line/<id>:cam.extreme = 1` on each unlocked line where it is off, as one aggregate row (`fld.camExtreme`), checked
+  by default. Unchecked, the AI's pinned moves stay; the automatic ones do not come. A move for a line whose layout is
+  `cam: 'none'` is left out with `ai.warn.xLayout`; a cut area gets no switch.
+- **Normal requests (phase F):** a line state whose shot is EXTREME (the overlay's pick, a hand or AI pin) prints it as
+  `custom` (`custom(auto)` for a pick) in every request that is not the EXTREME one, so the normal vocabulary can
+  answer it; the normal requests' system texts, schemas and lists stay those of main (sha snapshots in
+  `ai_direct.test.js`).
+
+### 14.10 UI
+
+- **作品全体 › 強さ**, after カメラワーク: the widget `extreme` — a `role="switch"` checkbox 「カメラ EXTREME」; while on,
+  the note 「⚠ 回転・急なズーム・揺れが増えます」; under 詳しい設定 the radios 激しさ [強め | かなり | 最大]. **要素 › カメラ**:
+  the same at work and line scope; on a cut's page it is the cut's line's (「カメラ EXTREME（この行）」). **The area page**
+  (区画): the widget in 区画のカメラ, a line pin on every selected line in one batch.
+- **Turning on** where it was off shows the notice 「激しいカメラワークについて」 ([やめる] [オンにする], 次から表示しない:
+  pref `hintExtreme`; a line about the device's reduced-motion setting when the preview tones EXTREME down). The switch
+  keeps showing off until オンにする is pressed, and stays off on やめる (phase F).
+- **Turning off** asks when anything else would keep EXTREME: moves picked by hand or by the AI under the scope (lock
+  pins stay), and, at 作品全体, lines whose own switch is on (e.g. the AI's area rows). One question with the counts,
+  [残す] [元に戻す] with 元に戻す preselected; 元に戻す turns EXTREME off everywhere (the switch, those line switches and
+  those moves); either choice is one undo step. After 残す the whole video's row says 「3 行で EXTREME がオンです（行ごとの
+  設定）」 (phase F: the lines' own switches were left on silently).
+- **Shot picker:** the group 「EXTREME」 with the 12 presets (try-on on hover and focus, ⚡ on each tile, 左右反転 on the
+  current mirrored one) and its note; picking one where EXTREME is off shows the notice first (「この動きを使う」).
+- **Keyframe editor:** `SHOT.limitsOf`; for x-shots the rows 衝撃 (hit) and 背景の寄り (gz), a [左右反転] button, and
+  the anchors accent / accentEnd in the anchor menu; every edit keeps `x: 1`, its beat and blur (one undo step).
+- **AI panel:** the chip 「EXTREME」 between [カメラワークをAIに任せる] and the spacer; it starts as the target has it and
+  a new target starts again; with it on where EXTREME is not yet on, the notice comes first.
+- **Explain (なぜ):** `why.cam.extreme`, `whyRule.extreme`; a cut EXTREME leaves on its normal shot says why
+  (`why.cam.xStill`: 「ただし構図「…」はカメラを動かさない作りなので、このカットは EXTREME の動きなし」, `why.cam.xNoText`).
+- **Timeline:** ⚡ before the name of an EXTREME cut. **≡ › 表示:** 「激しいカメラを抑える（プレビュー）」 (pref
+  `calmCamera`, default = `prefers-reduced-motion` at first run). **Step ④:** the info `extreme-motion` and the jumps
+  in the flash check (§14.11). No top-level control is added.
+
+### 14.11 Safety
+
+| Rule | Guarantee | How |
+|---|---|---|
+| R1 key frames | every text key in the sung span frames its aim inside the XSAFE area, tilted ≤ 30°, with the pulse, swing and hit envelope (on layouts where the envelope fits above the zoom floor) | X3–X5, by construction; `xshot.test.js` |
+| R2 words | every word fully on screen and tilted ≤ 45° for ≥ 50 % of its sung window (target ≥ 98 % of words; the phase F QA: 99.87 % of 41,700 words, NOTES) | preset design, X3', X5, X6; `xshot.test.js` and the QA |
+| R3 | a single-word aim is held only until the next word is sung | accentEnd, reading units |
+| R4 | no blur at rest (displacement < 16 du) | §14.6 |
+| ground | the painted ground covers the frame at every frame of an EXTREME segment (seams, gaps, rigs, shakes, pulses, gz) | §14.5; `cover.test.js` (10k cameras), `xblur.test.js` (whole frames), QA sentinel scans |
+
+Frequencies and speeds (by construction; tested): zoom pulses ≤ 3 Hz and ≤ +33 % (beat zoom ≤ 0.25 × 1.3 on a
+downbeat); swing flips ≥ 0.5 s apart (≤ 1 Hz cycle), ≤ 20°; shake hits 5 Hz damped (e-fold 0.11 s), ≥ 0.5 s apart,
+≤ 0.05·short and ≤ 3° of jolt; deliberate jumps ≥ 0.4 s apart (≤ 2.5/s); rotation ≤ 720°/s average per segment (the
+recipe's spin cap); zoom ≤ 12 e-folds/s; travel ≤ 10 frame widths/s. EXTREME adds no flash impulse, white transition or
+alpha modulation. **Photosensitivity:** a jump from wide to a close-up can change the frame's brightness at once, so
+step ④ counts `engine.xJumps` of the range with the flashes (`flashRate(plan, jumps)`, the same > 3 per 1 s threshold
+and fix) and lists `extreme-motion` as info. **Motion sickness:** the notice (§14.10) and the preview preference: under
+`calmCamera` the modulators × 0.3 and no blur; framing moves are unchanged, so the preview frames the words as the
+export does. Export never reads the preference.
+
+### 14.12 Performance
+
+| Work | Cost | Budget |
+|---|---|---|
+| overlay | O(cuts × 12), one pin resolve per cut; nothing without the pin | re-plan ≤ 5 ms per 100 lines (D§7.4) |
+| x-track | ≤ 6 keys at build; per frame one pose, O(1) schedules, ≤ 2 hits | behave + solve ≤ 0.8 ms |
+| limiter | ≤ 6 trig per ground-scene layer view | ≪ 0.05 ms |
+| motion blur | one half-size base draw, n − 1 half-size copies, one full draw back, on moving frames only | the long+extreme row of `perf.py` within twice the §7.4 budget where the normal rows pass (NOTES: on the shared machine its p95 went from 1.6× to 1.0–1.1× the long row's) |
+
+### 14.13 Tests and goldens
+
+| File | Asserts |
+|---|---|
+| `shot.test.js` (+) | XSHOTS canonical; x coercion by XLIMITS; non-x values exactly as before; isExtreme, presetOf, limitsOf; expandShot's g on angles, amplitudes, fills and offsets, mirror; lastFraming, usesBeats, labels; fromXMove for every move × focus × timing × power × dir |
+| `xshot.test.js` (new) | every preset × 3 texts × 3 layouts × 3 aspects: R1, roll fence, g-scaled rotation cap, zoom and travel caps, jump spacing, layout caps; R2; anchors; reading paths; mirror and intensity; schedules at BPM 60–240 (pulses ≤ 3 Hz, ≤ +33 %; flips; hits); continuity at 240 Hz; lens composition and calm; holds |
+| `cover.test.js` (new) | knee; θmax; 10k random cameras × 7 aspects × 4 parallaxes covered; identity below the knee; C¹; old path without cover |
+| `xblur.test.js` (new) | taps from the displacement; the shutter in seconds; maxTaps; the half-size average (running over the base, `lighter` for clear); no blur in seams and with calm; whole frames covered; the boundary blend |
+| `extreme_facade.test.js` (new) | samplePlan xshot; shotTrack; xJumps; calm; sentinel; every preset renders |
+| `extreme_planner.test.js` (new) | no pin → the golden corpus plans unchanged; pins, line switches, exemptions; rules and weights; variety; mirror and pair rule; rerolls; grounds and rigs; determinism; explain (picks, still layouts, cuts without words); fields |
+| `commands`, `ui_fields`, `ui_extreme`, `ui_ai`, `ai_direct`, `ai_providers`, `ai_privacy`, `i18n_extreme`, `export_math` (+) | scopes and copy rules; the widget rows; the switch flow (notice, turn-off question with lines and moves, one undo step); the chip; the EXTREME request and its schema; normal requests unchanged and printing EXTREME moves as custom; strings; the flash check with jumps |
+| browser (+) | `ui_flows.py` (extreme, extreme_keys, ai_extreme), `ui_layout.py`, `csp.py`, `i18n_pages.py`, `determinism.py`, `perf.py` (the long+extreme row), `contact_sheet.py --kind xshot --sentinel` |
+
+Goldens: `node tests/update_golden.js --check` must report the four files of §14.1 item 4 as matching; then
+`project_extreme.json` (the basic project with every preset once and two mirrored, and a 9:16 variant with the chorus
+at 0.5; plan hash and 40 recorder op hashes each, blur ops included) is regenerated on purpose.
+
+### 14.14 Strings (`i18n/strings.js`, pairs [ja, en])
+
+The design's list (`fld.camExtreme`, `fld.camExtremePower`, `opt.extreme.strong/very/max`, `fld.camExtreme.warn`,
+`shot.group.extreme`, `shot.group.extremeNote`, `shot.<key>` and `shot.blurb.<key>` of the 12 presets, `shot.mirrored`,
+`keys.hit`, `keys.groundZoom`, `keys.mirror`, `x.notice.*`, `x.off.title`, `x.off.text`, `x.off.keep`, `x.off.remove`,
+`ai.camera.extreme`, `ai.camera.extremeHint`, `ai.warn.xLayout`, `why.cam.extreme`, `whyRule.extreme`,
+`pref.calmCamera`, `cmd.pref.calmCamera`, `exp.pre.extreme-motion`) plus:
+
+| Key | ja | en |
+|---|---|---|
+| `fld.camExtremeLine` | カメラ EXTREME（この行） | EXTREME (this line) |
+| `x.notice.use` | この動きを使う | Use this move |
+| `shot.mirroredOf` | {name}（左右反転） | {name} (mirrored) |
+| `shot.xBadge` | ⚡ | ⚡ |
+| `at.accent` / `at.accentEnd` | 強調の歌い出し / 強調の次の言葉 | Accent / After the accent |
+| `ai.camera.extremeOn` | EXTREME で頼みます | Asking for EXTREME camerawork |
+| `undo.xOn` / `undo.xOff` | カメラ EXTREME をオン（{scope}） / …をオフ（{scope}） | Camera EXTREME on ({scope}) / … off ({scope}) |
+| `x.off.lines` | EXTREME をオンにしている行が {n} 行あります。これもオフにしますか？ | EXTREME is also on for {n} line of its own. Turn it off too? \| … {n} lines of their own. Turn them off too? |
+| `x.off.both` | 行ごとにオンにした EXTREME と、手で選んだ EXTREME の動きがあります。これもまとめて元に戻しますか？ | Some lines have EXTREME on of their own, and some EXTREME moves were chosen by hand. Turn them all back too? |
+| `x.off.countLines` / `x.off.countMoves` | EXTREME がオンの行：{n} 行 / 手で選んだ動き：{n} か所 | Lines with EXTREME on: {n} / Moves chosen by hand: {n} |
+| `fld.camExtreme.lines` | {n} 行で EXTREME がオンです（行ごとの設定） | EXTREME is on for {n} line of its own \| … {n} lines of their own |
+| `why.cam.xStill` | ただし構図「{key}」はカメラを動かさない作りなので、このカットは EXTREME の動きなし | But the layout "{key}" is made for a still camera, so this cut gets no EXTREME move |
+| `why.cam.xNoText` | ただし文字のないカットには EXTREME の動きを付けない | But a cut without words gets no EXTREME move |
+
+Plural forms (§4.24, English only; the `n` param picks `one|other`): `x.off.text` ("There is {n} EXTREME move chosen by
+hand. Remove it too?|There are {n} … Remove them too?"), `x.off.keep` ("Keep it|Keep them"), `x.off.remove` ("Remove
+it|Remove them"), `x.off.lines`, `fld.camExtreme.lines` and `exp.pre.extreme-motion` ("… in {n} cut.|… in {n} cuts.").
+The button labels take the total count of what the question lists. Phase F changed the blurb of `vertigo` to
+「文字は少し遠のき、背景が大きく迫ってくる」 / "The words pull back a little while the background swells" (its words
+used to hold still).
+
+### 14.15 Open items
+
+- A layout made for a still camera (`cam: 'none'`: gridMosaic, edgeBleed, diptychSplit, tickerMarquee, …) never moves
+  under EXTREME (about a fifth of the lyric cuts of the sample lyrics; NOTES); its full-frame paints are not covered by
+  the ground limiter. A pulse-only move there (zoom-in only, which cannot uncover) is a possible later addition.
+- On `cam: 'gentle'` layouts dutchSwing tilts at most 10°, so it is the mildest EXTREME preset there (still about 1.7×
+  the strongest normal shot).
+- No EXTREME chip per area on the 区画ごと board (owner default, §14.1 item 8).

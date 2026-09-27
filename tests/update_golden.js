@@ -24,12 +24,18 @@
 //                     the fake asset store, so its op hashes include the media times ('media:<id>@<m>#<index>').
 //   project_repeat.json { "registry": …, "measurer": "fake", "plan": "<plan.hash>", "frames": [40 hashes] }
 //                     the 'repeat' fixture: 「くり返しの行をそろえる」 on (DESIGN_2_1 §4.10), rendered like the frames above.
+//   project_extreme.json { "registry": …, "measurer": "fake", "docs": { "<name>": { "plan": "<plan.hash>", "frames": [40] } } }
+//                     the EXTREME camerawork fixtures (tests/helpers/extreme_docs.js goldenDocs, DESIGN_EXTREME §5.2): the
+//                     basic project with the switch on and every EXTREME preset on one cut, and a 9:16 one with the switch
+//                     at 0.5 on the chorus only; rendered like the frames above (motion-blur copies included in the ops).
+//                     Every document without the switch renders as before: the files above match first.
 
 const fs = require('node:fs');
 const path = require('node:path');
 const { load } = require('./helpers/load.js');
 const corpus = require('./helpers/corpus.js');
 const FM = require('./helpers/fake_media.js');
+const XD = require('./helpers/extreme_docs.js');
 
 const MV = load();
 const H = MV.use('core/hash');
@@ -98,6 +104,12 @@ async function mediaGolden(reg, info) {
   return { registry: info, measurer: 'fake', media: 'fake', plan: r.plan, frames: r.frames };
 }
 
+async function extremeGolden(reg, info) {
+  const docs = {};
+  for (const { name, doc } of XD.goldenDocs()) docs[name] = await renderDoc(reg, doc, null);
+  return { registry: info, measurer: 'fake', docs };
+}
+
 function readGolden(file) {
   try { return JSON.parse(fs.readFileSync(path.join(GOLDEN, file), 'utf8')); } catch (e) { return null; }
 }
@@ -121,6 +133,8 @@ async function main() {
       empty: { registry: null, measurer: 'fake', media: 'fake', plan: null, frames: [] }, make: () => mediaGolden(reg, info) },
     { file: 'project_repeat.json', needs: ENGINE.concat(['planner/plan']),
       empty: { registry: null, measurer: 'fake', plan: null, frames: [] }, make: () => repeatGolden(reg, info) },
+    { file: 'project_extreme.json', needs: ENGINE.concat(['planner/plan', 'planner/extreme', 'engine/scene/xshot']),
+      empty: { registry: null, measurer: 'fake', docs: {} }, make: () => extremeGolden(reg, info) },
   ];
   let failed = false;
   fs.mkdirSync(GOLDEN, { recursive: true });

@@ -7,7 +7,8 @@ AI tab, the timeline drawer, the ≡ menu, the command palette, the shortcut she
 v2.1 adds the area page, the curve widget, マイ素材 (list, page, the 「AIで作る」 form), the keyframe editor, the AI area list
 and the board (a material's name is user data: the en page shows its English name); the photo and video screens (the
 drop label, the library and a row's menu, the asset page, the media rows with the trim row, the crop overlay and the
-picker; asset names are user data) come last; then the editor-ready output (package H.3): step ④ with Filmora用 and 詳しく,
+picker; asset names are user data) come last, after カメラ EXTREME (the switch, its notice and turn-off question, the
+picker's EXTREME group, キーフレーム, the AI chip, step ④); then the editor-ready output (package H.3): step ④ with Filmora用 and 詳しく,
 「Filmoraで使うには」, その他 › 透過動画（WebM）, and the Filmora set's progress and done state (its exporter stubbed: the
 words are checked here, the files by the flows).
 On every screen the visible text and the accessible names (aria-label, title, placeholder, alt) are read and checked:
@@ -59,7 +60,7 @@ MP4 PNG ZIP LRC JSON WAV MP3 M4A OGG FLAC AAC H.264 HEX RGB BPM fps px du Hz kHz
 Ctrl Shift Alt Esc Enter Space Tab Del Delete Backspace Home End PageUp PageDown Cmd Option Win F1 F2 F6 F11 I O R T L
 Gemini Claude Google Anthropic Opus Sonnet Haiku Flash gemini-3.8-flash pro preview
 Chrome Edge WebCodecs OK x vs PV MIT ti ar
-WebM SRT README Filmora VP9 Premiere DaVinci
+WebM SRT README Filmora VP9 Premiere DaVinci EXTREME
 '''.split()}
 # Proper names of other works shown as they are (removed before the word check on the ja page).
 JA_NAMES = ('After Effects', 'Google Fonts', 'SIL Open Font License', 'File System Access', 'mp4-muxer', '@anthropic-ai/sdk', 'standardwebhooks',
@@ -261,6 +262,47 @@ async def v21_screens(w, table, families):
     await page.wait_for_function("() => !!document.querySelector('.ai-board .ai-board-row')")
     await screen(w, 'v21-board', table, families)
     await w.act('panel.close')
+
+
+# カメラ EXTREME (DESIGN_EXTREME §2.6, §3.5): the switch on at 作品全体 › 強さ with its ⚠ line and 激しさ, the notice, the
+# turn-off question, a cut's camera page (「この行」), the shot picker's EXTREME group, the keyframe editor on an EXTREME
+# shot, the AI tab with the 「EXTREME」 chip pressed, and step ④ with its item.
+async def x_screens(w, table, families):
+    page = w.page
+    await w.act('panel.details')
+    await w.run("""() => { const a = window.__mv; a.dispatch({ t: 'pin.set', path: 'work:cam.extreme', v: 1, by: 'user' }, { label: ['undo.xOn', { scope: '' }] });
+      a.select({ level: 'work' }, { from: 'crumbs', open: true }); }""")
+    await w.settle(4)
+    await w.run("""() => { const r = document.querySelector('.frow[data-field="work/energy/cam.extreme.power"]'); const d = r && r.closest('details');
+      if (d) d.open = true; document.querySelector('.frow[data-field="work/energy/cam.extreme"]').scrollIntoView({ block: 'center' }); }""")
+    await screen(w, 'x-energy', table, families)
+    await w.run("() => { const a = window.__mv; a.view.setPref('hintExtreme', true); MV.use('ui/extreme').notice(a); }")
+    await screen(w, 'x-notice', table, families)
+    await w.escape()
+    await w.run("() => { MV.use('ui/extreme').offChoice(window.__mv, 2); }")
+    await screen(w, 'x-off', table, families)
+    await w.escape()
+    await w.run("() => { const a = window.__mv; a.select({ level: 'el', scope: 'cut/' + a.plan.lines[1].cuts[0], el: 'lens' }, { from: 'crumbs', open: true }); }")
+    await w.settle(4)
+    await screen(w, 'x-camera', table, families)
+    await page.click('[data-mount="inspector"] .frow[data-slot="cam.shot"] .w-shot')
+    await page.wait_for_function("() => document.querySelectorAll('.pb-tile[data-group=\"extreme\"]').length === 12")
+    await w.run("() => document.querySelector('.pb-group').scrollIntoView({ block: 'start' })")
+    await screen(w, 'x-picker', table, families)
+    await page.click('.pb-tile[data-key="whipPan"]')
+    await w.settle(4)
+    await page.click('[data-custom="camKeys"] button')
+    await page.wait_for_function("() => document.querySelectorAll('.ke-page .ke-x').length > 1")
+    await screen(w, 'x-keyframes', table, families)
+    await w.escape()
+    await w.act('panel.ai')
+    await w.run("() => { const c = document.querySelector('.ai-xchip'); if (c.getAttribute('aria-pressed') !== 'true') c.click(); c.scrollIntoView({ block: 'center' }); }")
+    await screen(w, 'x-ai', table, families)
+    await w.act('panel.close')
+    await w.act('step.go', {'step': 'export'})
+    await page.wait_for_function("() => (window.__mv.exportChecks() || []).some((c) => c.code === 'extreme-motion')")
+    await screen(w, 'x-export', table, families)
+    await w.act('step.go', {'step': 'lyrics'})
 
 
 # v2.1 photos and videos (package G.4, DESIGN_2_1 §11.8.3): a still and a video imported here (names are user data: the en
@@ -466,6 +508,7 @@ async def walk_page(browser, base, lang, shots):
     await screen(w, 'about', table, families)
     await w.escape()
     await v21_screens(w, table, families)
+    await x_screens(w, table, families)
     await media_screens(w, table, families)
 
     used = await w.run('() => [...window.__i18nUsed]')

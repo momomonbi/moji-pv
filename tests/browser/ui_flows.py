@@ -56,6 +56,13 @@ v2.1 editor-ready output (package H.3, DESIGN_2_1 §13.12):
                              the set's checkboxes, the guide, [書き出す] and the done state's guide
   webm                       その他 › 透過動画 sets 透明; the backdrop list and the coupling both ways; the no-VP9 fix; a WebM
   subtitles                  ≡ › ファイル › 字幕（.srt）を保存 through the save dialog and as a download
+カメラ EXTREME (DESIGN_EXTREME §5.3):
+  extreme                    作品全体 › 強さ's switch: the notice (やめる changes nothing), on → the preview's EXTREME shots, ⚠,
+                             激しさ; the shot picker's EXTREME group (⚡, try-on, pick); キーフレーム on the x-shot (衝撃, 左右反転);
+                             off asks about the move picked by hand → 元に戻す; each one undo entry; undo / redo
+  extreme_keys               the same by keyboard only (Space, Enter, Esc, the 激しさ radios, 次から表示しない)
+  ai_extreme                 「カメラワークをAIに任せる」 with the 「EXTREME」 chip: the notice, the EXTREME request, the review's
+                             カメラ EXTREME row and moves, apply = one undo step
 v2.1 「くり返しの行をそろえる」 (DESIGN_2_1 §4.10):
   repeat                     作品全体 › 見た目: the switch (off, its note, no 振り直し) pins the opt-in, the second サビ takes the
                              first one's layouts, lenses and shots, a repeated cut's なぜ names its first copy, off clears it
@@ -5033,6 +5040,237 @@ FLOWS += [('media', flow_media, True), ('library', flow_library, False), ('missi
           ('media_device', flow_media_device, False), ('media_song', flow_media_song, False)]
 # v2.1 editor-ready output (package H.3, DESIGN_2_1 §13.12).
 FLOWS += [('kit', flow_kit, False), ('kit_keys', flow_kit_keys, False), ('webm', flow_webm, False), ('subtitles', flow_subtitles, False)]
+
+
+# --- カメラ EXTREME (DESIGN_EXTREME §2.6, §3.5, §5.3) -----------------------------------------------------------------
+
+X_ROW = '[data-mount="inspector"] .frow[data-field="%s"]'
+X_SWITCH = X_ROW % 'work/energy/cam.extreme'
+X_POWER = X_ROW % 'work/energy/cam.extreme.power'
+# The switch, the dialogs and what the plan and the engine make of it.
+X_STATE = """() => { const a = window.__mv, XU = MV.use('ui/extreme'), p = a.doc.pins['work:cam.extreme'];
+  const xs = a.plan.cuts.filter((c) => XU.isXCut(c)), tr = xs.length ? a.engine.shotTrack(xs[0].key) : null;
+  const box = document.querySelector('%s .w-xbox'), warn = document.querySelector('%s .w-xwarn');
+  return { pin: p ? p.v : null, by: p ? p.by : null, xcuts: xs.length, track: !!tr && tr.x === true, checked: box ? box.checked : null,
+    warn: !!warn && !warn.hidden, notice: !!document.querySelector('dialog.dlg[open] .x-notice'),
+    off: !!document.querySelector('dialog.dlg[open] .x-off'), dialog: !!document.querySelector('dialog.dlg[open]') }; }""" % (X_SWITCH, X_SWITCH)
+
+
+async def open_work(f):
+    await f.page.evaluate("() => { const a = window.__mv; a.openPanel('details'); a.select({ level: 'work' }, { from: 'crumbs', open: true }); }")
+    await f.settle(4)
+    await f.page.evaluate("(s) => document.querySelector(s).scrollIntoView({ block: 'center' })", X_SWITCH)
+    await f.settle(2)
+
+
+async def flow_extreme(f, lang):
+    """カメラ EXTREME: the switch at 作品全体 › 強さ asks the notice first (やめる changes nothing); on, the preview's
+    automatic shots are EXTREME (the engine builds x-tracks) and ⚠ shows; 激しさ かなり is one entry; the shot picker's
+    EXTREME group (⚡, try-on, pick); the keyframe editor on the picked x-shot (衝撃, 左右反転: one entry each); off asks
+    about the move picked by hand → 元に戻す removes it (one entry); undo / redo; undo-all."""
+    page = f.page
+    done0, doc0 = await with_lyrics(f)
+    await open_work(f)
+    st = await page.evaluate(X_STATE)
+    f.check(st['pin'] is None and st['xcuts'] == 0 and st['checked'] is False and not st['warn'], 'EXTREME starts off: %r' % st)
+    await page.click(X_SWITCH + ' .w-toggle')
+    if not await f.until("() => !!document.querySelector('dialog.dlg[open] .x-notice')", 'turning EXTREME on shows the notice'):
+        return
+    await f.shot('notice')
+    st = await page.evaluate(X_STATE)
+    f.check(st['checked'] is False and not st['warn'], 'while the notice is open the switch still shows off: %r' % st)
+    txt = await page.evaluate("() => document.querySelector('dialog.dlg[open]').textContent")
+    f.check(lang != 'ja' or ('乗り物酔い' in txt and '次から表示しない' in txt and 'オンにする' in txt), 'the notice text: %r' % txt[:120])
+    await page.click('dialog.dlg [data-x="cancel"]')
+    await f.until("() => !document.querySelector('dialog.dlg[open]')", 'やめる closes the notice')
+    await f.settle(2)
+    st = await page.evaluate(X_STATE)
+    f.check(st['pin'] is None and st['checked'] is False, 'やめる changes nothing: %r' % st)
+    f.check(await page.evaluate(DONE) == done0, 'no undo entry')
+    await page.click(X_SWITCH + ' .w-toggle')
+    await f.until("() => !!document.querySelector('dialog.dlg[open] .x-notice')", 'the notice again')
+    await page.click('dialog.dlg [data-x="ok"]')
+    await f.until("() => { const p = window.__mv.doc.pins['work:cam.extreme']; return !!p && p.v === 1; }", 'オンにする pins the switch at 最大')
+    await f.settle(3)
+    st = await page.evaluate(X_STATE)
+    f.check(st['by'] == 'user' and st['checked'] and st['warn'], 'the switch is on with its ⚠ line: %r' % st)
+    f.check(st['xcuts'] > 0 and st['track'], 'the preview shows EXTREME shots (the plan picks them, the engine builds x-tracks): %r' % st)
+    f.check(await page.evaluate(DONE) == done0 + 1, 'turning it on is one undo entry')
+    await f.shot('on')
+    # 激しさ (詳しい設定): かなり → 0.75, no notice while on
+    await page.evaluate("(s) => { const d = document.querySelector(s).closest('details'); if (d) d.open = true; }", X_POWER)
+    await f.settle(2)
+    await page.click(X_POWER + ' .seg[data-v="0.75"]')
+    await f.until("() => window.__mv.doc.pins['work:cam.extreme'].v === 0.75", '激しさ かなり pins 0.75')
+    f.check(not (await page.evaluate(X_STATE))['dialog'] and await page.evaluate(DONE) == done0 + 2, 'no notice; one entry')
+    checked = await page.evaluate("(s) => [...document.querySelectorAll(s + ' .seg')].map((b) => b.getAttribute('aria-checked'))", X_POWER)
+    f.check(checked == ['false', 'true', 'false'], 'かなり is checked: %r' % checked)
+    # The shot picker's EXTREME group on a cut's camera page.
+    key = await page.evaluate("() => window.__mv.plan.lines[3].cuts[0]")
+    scope = 'cut/' + key
+    await page.evaluate("(s) => window.__mv.select({ level: 'el', scope: s, el: 'lens' }, { from: 'crumbs', open: true })", scope)
+    await f.settle(4)
+    if not await f.until('(s) => !!document.querySelector(s)', 'the カメラワーク row', ROW % 'cam.shot' + ' .w-shot'):
+        return
+    await page.click(ROW % 'cam.shot' + ' .w-shot')
+    if not await f.until("() => document.querySelectorAll('.pb-tile[data-group=\"extreme\"]').length === 12", 'the EXTREME group has 12 tiles'):
+        return
+    grp = await page.evaluate("""() => { const g = document.querySelector('.pb-group[data-group="extreme"]');
+      const tiles = [...document.querySelectorAll('.pb-tile[data-group="extreme"]')];
+      return { head: g.textContent, badges: tiles.every((x) => (x.querySelector('.pb-badge') || {}).textContent === window.__mv.t('shot.xBadge')),
+        described: tiles.every((x) => x.getAttribute('aria-describedby') === g.querySelector('.pb-group-note').id) }; }""")
+    f.check(grp['badges'] and grp['described'] and (lang != 'ja' or 'EXTREME がオフでも' in grp['head']), 'the group, its note and ⚡: %r' % grp)
+    await page.evaluate("() => document.querySelector('.pb-group').scrollIntoView({ block: 'start' })")
+    await page.hover('.pb-tile[data-key="orbit"]')
+    await f.until('() => window.__mv.shell.stage.hasAlt()', 'hovering an EXTREME tile tries it on')
+    await f.shot('picker')
+    done = await page.evaluate(DONE)
+    await page.click('.pb-tile[data-key="spinIn"]')
+    path = scope + ':cam.shot'
+    await f.until('(p) => !!window.__mv.doc.pins[p]', 'picking an EXTREME tile pins it', path)
+    f.check((await page.evaluate(PIN_V, path)) == {'v': 'spinIn', 'by': 'user'} and not (await page.evaluate(X_STATE))['dialog'],
+            'spinIn is pinned by the user, no notice while EXTREME is on')
+    f.check(await page.evaluate(DONE) == done + 1, 'one entry')
+    # キーフレーム on the EXTREME shot: 衝撃 of key ① and 左右反転, one entry each; the value stays an x-shot.
+    await f.settle(2)
+    await page.click('[data-custom="camKeys"] button')
+    if not await f.until("() => document.querySelectorAll('.ke-page .ke-x').length > 1 && !document.querySelector('.ke-mirror').hidden",
+                         'the keyframe page shows 衝撃 and 背景の寄り and 左右反転'):
+        return
+    whens = await page.evaluate("() => [...document.querySelectorAll('.ke-row[data-i=\"0\"] .ke-sel')[0].options].map((o) => o.value)")
+    f.check('accent' in whens and 'accentEnd' in whens, 'the EXTREME anchors are offered: %r' % whens)
+    await f.shot('keyframes')
+    done = await page.evaluate(DONE)
+    hit = page.locator('.ke-row[data-i="0"] .ke-x .ke-num').first
+    await hit.fill('0.5')
+    await hit.press('Enter')
+    await f.until('(p) => { const x = window.__mv.doc.pins[p]; return !!x && typeof x.v === "object" && x.v.x === 1 && x.v.keys[0].hit === 0.5; }',
+                  '衝撃 pins the x-shot with the hit', path)
+    f.check(await page.evaluate(DONE) == done + 1, '衝撃 is one entry')
+    ox = await page.evaluate("(p) => window.__mv.doc.pins[p].v.keys.map((k) => k.roll || 0)", path)
+    await page.click('.ke-mirror')
+    await f.until('([p, n]) => window.__mv.store.list().filter((e) => e.done).length === n', '左右反転 is one entry', [path, done + 2])
+    after = await page.evaluate("(p) => window.__mv.doc.pins[p].v", path)
+    f.check(after['x'] == 1 and [(-(r) if r else 0) for r in ox] == [k.get('roll', 0) for k in after['keys']], '左右反転 negates the rolls: %r' % after)
+    # Off at 作品全体: the move picked by hand and a line's own switch (as the AI panel's area row makes it) → one question
+    # with both counts; the switch stays on while it is open; 元に戻す removes both (one entry); undo and redo.
+    await page.keyboard.press('Escape')
+    await f.settle(2)
+    line_sw = await page.evaluate("() => 'line/' + window.__mv.plan.lines[1].id + ':cam.extreme'")
+    await page.evaluate("(p) => window.__mv.dispatch({ t: 'pin.set', path: p, v: 1, by: 'ai' }, { label: ['undo.unpin', {}] })", line_sw)
+    await f.settle(2)
+    await open_work(f)
+    done = await page.evaluate(DONE)
+    await page.click(X_SWITCH + ' .w-toggle')
+    if not await f.until("() => !!document.querySelector('dialog.dlg[open] .x-off')", 'turning off asks about the moves picked by hand'):
+        return
+    txt = await page.evaluate("() => document.querySelector('dialog.dlg[open]').textContent")
+    f.check(lang != 'ja' or ('1 か所' in txt and '1 行' in txt), 'the question counts the move and the line: %r' % txt)
+    f.check((await page.evaluate(X_STATE))['checked'] is True, 'while the question is open the switch still shows on')
+    focus = await page.evaluate("() => document.activeElement.dataset.x")
+    f.check(focus == 'remove', '元に戻す is preselected: %r' % focus)
+    await f.shot('off')
+    before = await page.evaluate(DOC)
+    await page.keyboard.press('Enter')
+    await f.until("([p, l]) => !window.__mv.doc.pins['work:cam.extreme'] && !window.__mv.doc.pins[p] && !window.__mv.doc.pins[l]",
+                  '元に戻す clears the switch, the move and the line\'s switch', [path, line_sw])
+    f.check(await page.evaluate(DONE) == done + 1, 'turning off is one entry')
+    st = await page.evaluate(X_STATE)
+    f.check(st['xcuts'] == 0 and st['checked'] is False and not st['warn'], 'no EXTREME cut once off: %r' % st)
+    after = await page.evaluate(DOC)
+    await f.blur()
+    await page.keyboard.press('Control+z')
+    await f.until('(d) => JSON.stringify(window.__mv.doc) === d', 'undo brings the switch and the move back', before)
+    await page.keyboard.press('Control+Shift+z')
+    await f.until('(d) => JSON.stringify(window.__mv.doc) === d', 'redo turns it off again', after)
+    await f.undo_all(done0, doc0)
+
+
+async def flow_extreme_keys(f, lang):
+    """カメラ EXTREME by keyboard only: Space on the switch → the notice (focus on オンにする) → Enter; Space again turns it
+    off (no move picked by hand: no question); 激しさ's radios: → picks 強め … and asks the notice while it is off; Esc on
+    the notice changes nothing; 次から表示しない is remembered."""
+    page = f.page
+    done0, doc0 = await with_lyrics(f)
+    await open_work(f)
+    await page.focus(X_SWITCH + ' .w-xbox')
+    await page.keyboard.press('Space')
+    if not await f.until("() => !!document.querySelector('dialog.dlg[open] .x-notice')", 'Space shows the notice'):
+        return
+    f.check(await page.evaluate("() => document.activeElement.dataset.x") == 'ok', 'the focus is on オンにする')
+    await page.keyboard.press('Enter')
+    await f.until("() => { const p = window.__mv.doc.pins['work:cam.extreme']; return !!p && p.v === 1; }", 'Enter turns EXTREME on')
+    await f.settle(2)
+    f.check(await page.evaluate("() => document.activeElement.classList.contains('w-xbox')"), 'the focus returns to the switch')
+    await page.keyboard.press('Space')
+    await f.until("() => !window.__mv.doc.pins['work:cam.extreme']", 'Space turns it off (nothing picked by hand: no question)')
+    f.check(not (await page.evaluate(X_STATE))['dialog'], 'no dialog')
+    # 激しさ while off: the radios ask the notice first; Esc changes nothing
+    await page.evaluate("(s) => { const d = document.querySelector(s).closest('details'); if (d) d.open = true; }", X_POWER)
+    await f.settle(2)
+    await page.focus(X_POWER + ' .seg[data-v="0.5"]')
+    await page.keyboard.press('ArrowRight')
+    await f.until("() => !!document.querySelector('dialog.dlg[open] .x-notice')", '→ on 激しさ asks the notice while off')
+    await page.keyboard.press('Escape')
+    await f.until("() => !document.querySelector('dialog.dlg[open]')", 'Esc closes it')
+    f.check(await page.evaluate("() => window.__mv.doc.pins['work:cam.extreme'] === undefined"), 'Esc changes nothing')
+    await page.focus(X_POWER + ' .seg[data-v="0.5"]')
+    await page.keyboard.press('ArrowRight')
+    await f.until("() => !!document.querySelector('dialog.dlg[open] .x-notice')", 'the notice again')
+    await page.focus('dialog.dlg [data-x="again"]')
+    await page.keyboard.press('Space')
+    await page.focus('dialog.dlg [data-x="ok"]')
+    await page.keyboard.press('Enter')
+    await f.until("() => { const p = window.__mv.doc.pins['work:cam.extreme']; return !!p && p.v === 0.75; }", 'かなり turns it on at 0.75')
+    f.check(await page.evaluate("() => window.__mv.view.state.prefs.hintExtreme") is False, '次から表示しない is remembered')
+    await page.evaluate("() => window.__mv.view.setPref('hintExtreme', true)")
+    await f.undo_all(done0, doc0)
+
+
+async def flow_ai_extreme(f, lang):
+    """「カメラワークをAIに任せる」 with 「EXTREME」: the chip starts off (EXTREME is off for 全体) and is pressed; the notice
+    comes first; the request is the EXTREME one (its system text and schema); the review lists the EXTREME moves and the
+    カメラ EXTREME row; apply = one undo step (the switch and the moves pinned by the AI); undo-all."""
+    page = f.page
+    done0, doc0 = await with_lyrics(f)
+    cam = lambda **x: dict({'shot': '', 'move': 'pushIn', 'focus': 'text', 'timing': 'whole', 'fill': -1, 'closer': -1, 'follow': -1,  # noqa: E731
+                            'curve': d_curve(), 'power': -1, 'dir': 'auto'}, **x)
+    answers = [{'answers': [{'s': 0, 'understood': True, 'summary': 'サビを激しく', 'question': '',
+                             'all': {'rig': '', 'rigCurve': d_curve(), 'camera': cam(shot='custom', move='pulse', power=0.8)},
+                             'lines': [{'i': 3, 'camera': cam(shot='spinIn~m')}], 'cuts': []}]}]
+    await ai_route(f, answers)
+    await ai_open(f)
+    chip = '.ai-direct [data-ctl="extreme"]'
+    f.check(await page.get_attribute(chip, 'aria-pressed') == 'false', 'the chip starts as 全体 has it: off')
+    await page.click(chip)
+    f.check(await page.get_attribute(chip, 'aria-pressed') == 'true', 'pressed')
+    await f.shot('chip')
+    await page.click('.ai-direct [data-tool="camera"]')
+    if not await f.until("() => !!document.querySelector('dialog.dlg[open] .x-notice')", 'EXTREME not on yet: the notice first'):
+        return
+    await page.click('dialog.dlg [data-x="ok"]')
+    if not await f.until("() => window.__mv.ai.state.review && window.__mv.ai.state.review.kind === 'direct'", 'the review', timeout=6000):
+        return
+    body = json.dumps([s for s in f.ai_seen if s['method'] == 'POST'][-1]['body'], ensure_ascii=False)
+    f.check('EXTREME mode' in body and '[extreme shots]' in body and '"power"' in body, 'the EXTREME request was sent')
+    ai_requests_ok(f)
+    await f.settle(3)
+    rows = await page.evaluate("() => [...document.querySelectorAll('.ai-review .ai-row, .ai-review .ai-agg')].map((r) => r.textContent)")
+    name = await page.evaluate("() => window.__mv.t('fld.camExtreme')")
+    f.check(any(name in r for r in rows), 'the review has the カメラ EXTREME row: %r' % rows)
+    await f.shot('review')
+    done = await page.evaluate(DONE)
+    await page.click('.ai-review-foot .btn.primary')
+    await f.until("() => { const p = window.__mv.doc.pins['work:cam.extreme']; return !!p && p.by === 'ai' && p.v === 1; }", 'the switch is on, by the AI')
+    st = await page.evaluate("""() => { const a = window.__mv, SH = MV.use('core/shot');
+      return { line: (a.doc.pins['line/' + a.plan.lines[3].id + ':cam.shot'] || {}).v, work: SH.isExtreme((a.doc.pins['work:cam.shot'] || {}).v) }; }""")
+    f.check(st['line'] == 'spinIn~m' and st['work'], 'the EXTREME moves are pinned: %r' % st)
+    f.check(await page.evaluate(DONE) == done + 1, 'apply is one undo step')
+    await f.undo_all(done0, doc0)
+
+
+# カメラ EXTREME (DESIGN_EXTREME §5.3).
+FLOWS += [('extreme', flow_extreme, False), ('extreme_keys', flow_extreme_keys, False), ('ai_extreme', flow_ai_extreme, False)]
 
 
 async def run(browser, base, rel, lang, only, shots):

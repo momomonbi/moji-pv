@@ -232,13 +232,15 @@ MV.def('core/commands', ['core/doc', 'core/paths', 'core/pins', 'core/lyrics', '
     const LINE_ONLY = new Set(['start', 'end', 'split', 'lang', 'avoid']);
     const CUT_ONLY = new Set(['t0']);
     const TEXT_SLOTS = new Set(['orient', 'text.face', 'text.scale', 'text.ink', 'text.style']);
-    // v2.1 (DESIGN_2_1 §2.3, §3.7): line slots that are area-level, never pinned at a cut; `avoid` is line-only.
-    const NOT_CUT = new Set(['season', 'avoid']);
+    // v2.1 (DESIGN_2_1 §2.3, §3.7): line slots that are area-level, never pinned at a cut; `avoid` is line-only. The
+    // EXTREME switch (DESIGN_EXTREME §2.2) is an area's too: line or work, never a cut; "paste look" leaves it (it is not
+    // in COPY_SLOTS) and it may move line → work like the season.
+    const NOT_CUT = new Set(['season', 'avoid', 'cam.extreme']);
     // Cut slots that "paste look" copies besides part slots and text.* (CAM_SLOTS and the motion speed).
     const COPY_SLOTS = new Set(['motion.speed', 'cam.shot', 'cam.zoom', 'cam.curve', 'cam.follow']);
 
-    // Refuses `cut/…:season`, `cut/…:avoid`, `cut/…:repeat.same` and `work:avoid` (payload). 「くり返しの行をそろえる」
-    // (DESIGN_2_1 §4.10) is a setting of the whole video or of a line, like the line season.
+    // Refuses `cut/…:season`, `cut/…:avoid`, `cut/…:cam.extreme`, `cut/…:repeat.same` and `work:avoid` (payload).
+    // 「くり返しの行をそろえる」 (DESIGN_2_1 §4.10) is a setting of the whole video or of a line, like the line season.
     function checkSlotScope(parsed) {
       need(!(parsed.scope.kind === 'cut' && (NOT_CUT.has(parsed.slot) || parsed.slot === 'repeat.same')),
         parsed.slot + ' cannot be pinned at cut scope');
@@ -253,8 +255,8 @@ MV.def('core/commands', ['core/doc', 'core/paths', 'core/pins', 'core/lyrics', '
       need(cmd.to !== 'line' || parsed.scope.lineId !== null, 'special cuts have no line');
       need(!CUT_ONLY.has(parsed.slot) && !(cmd.to === 'work' && LINE_ONLY.has(parsed.slot)),
         parsed.slot + ' cannot be pinned at ' + cmd.to + ' scope');
-      // season may move line → work; avoid never moves (§2.6).
-      need(parsed.slot !== 'avoid' && !(parsed.slot === 'season' && from === 'cut'), parsed.slot + ' cannot be promoted');
+      // season and cam.extreme may move line → work; avoid never moves (§2.6); none of them leaves a (stray) cut pin.
+      need(parsed.slot !== 'avoid' && !(NOT_CUT.has(parsed.slot) && from === 'cut'), parsed.slot + ' cannot be promoted');
       const pin = doc.pins[cmd.path];
       if (!pin) return doc;
       const target = (cmd.to === 'line' ? 'line/' + parsed.scope.lineId : 'work') + ':' + parsed.slot;

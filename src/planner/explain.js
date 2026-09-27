@@ -279,12 +279,15 @@ MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media
   function tracedWhy(doc, registry, plan, cut, parsed, trace, d, value) {
     if (d.from && d.from.startsWith('pin')) {
       const pinned = pinWhy(d.from, d.by);
-      return trace.override && trace.override.rule === 'carry' ? pinned.concat([{ code: 'rule', params: { rule: 'carry' } }]) : pinned;
+      if (trace.override && trace.override.rule === 'carry') return pinned.concat([{ code: 'rule', params: { rule: 'carry' } }]);
+      // the EXTREME switch (DESIGN_EXTREME §2.3.6): the pin, then the strength it gives
+      return trace.kind === 'cam.extreme' && trace.why ? pinned.concat(trace.why) : pinned;
     }
     if (trace.override && trace.override.rule === 'carry') {
       return (trace.why || []).concat([{ code: 'rule', params: { rule: 'carry' } }]);
     }
-    if (trace.override) return [{ code: 'rule', params: { rule: trace.override.rule } }];
+    // an override (a rule that replaced the decision after casting) with its own reasons: the EXTREME overlay's
+    if (trace.override) return [{ code: 'rule', params: { rule: trace.override.rule } }].concat(trace.override.why || []);
     if (trace.why) return trace.why.slice();
     if (d.from === 'rule') return [{ code: 'rule', params: { rule: trace.rule || 'rule' } }];
     if (d.from === 'fallback') return [{ code: 'rule', params: { rule: 'fallback' } }];
@@ -299,8 +302,9 @@ MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media
     const res = PL.trace(doc, { registry }, traceTarget(plan, parsed, cut));
     const p = res.plan, t = res.out;
     const tcut = F.cutOf(p, cut.key) || cut;
-    const value = F.valueAt(p, tcut, parsed, registry);
-    const d = F.decisionAt(p, tcut, parsed, registry) || { v: value, from: 'auto' };
+    const ix = parsed.slot === 'cam.extreme' ? PINS.index(doc.pins) : undefined;   // its off state is a pin (planner/fields)
+    const value = F.valueAt(p, tcut, parsed, registry, ix);
+    const d = F.decisionAt(p, tcut, parsed, registry, ix) || { v: value, from: 'auto' };
     const why = tracedWhy(doc, registry, p, tcut, parsed, t, d, value);
     const out = { path: P.format(parsed), value, from: d.from, by: d.by, why, alts: [] };
     if (ALT_SLOTS.has(parsed.slot) && Array.isArray(t.candidates)) {

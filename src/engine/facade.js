@@ -17,6 +17,7 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
   const THUMB_PLANS = 8;
   const MEDIA_MEMO = 4096;          // scenes whose media lists mediaAt remembers (tiny entries; cleared when full)
   const SAMPLE_TEXT = 'はじまりの朝';
+  const CALM_EVAL = Object.freeze({ calm: true });
   const SAMPLE_TEXT_B = '光のなかへ';
 
   class EngineError extends Error {
@@ -74,10 +75,12 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
   // them; the second shows textB (else SAMPLE_TEXT_B), so a page in another language can pass both lines.
   // DESIGN_2_1 (additive): kind 'shot' puts a shot preset (key; params { zoom, curve, follow } = cam.zoom, cam.curve,
   // cam.follow) on the cut, kind 'rig' a rig preset (params { amp, curve }) on one run over the whole plan (plan v 2);
-  // material keys of an extended registry work like any part key.
+  // material keys of an extended registry work like any part key. DESIGN_EXTREME (additive): kind 'xshot' puts an
+  // EXTREME preset (key, "~m" mirrors it; params as 'shot' plus extreme = cam.extreme, default 1) on the cut and marks
+  // its ground segment EXTREME (grounds[0].x), as the planner does.
   function samplePlan(registry, ref, opts) {
     const kind = ref && ref.kind;
-    if (kind === 'shot' || kind === 'rig') return cameraSamplePlan(registry, ref, opts);
+    if (kind === 'shot' || kind === 'rig' || kind === 'xshot') return cameraSamplePlan(registry, ref, opts);
     const o = opts || {};
     const key = ref && ref.key;
     const def = kind && key ? registry.get(kind, key) : null;
@@ -181,15 +184,19 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
     const p = (ref && ref.params) || {};
     const plan = Object.assign({}, base, { v: 2 });
     const cut = Object.assign({}, base.cuts[0]);
-    if (ref.kind === 'shot') {
-      const shot = SHOT.coerceShot(ref.key);
+    const xshot = ref.kind === 'xshot';
+    if (ref.kind === 'shot' || xshot) {
+      const shot = xshot ? (SHOT.isExtreme(ref.key) ? SHOT.coerceShot(ref.key) : undefined) : SHOT.coerceShot(ref.key);
       const slots = Object.assign({}, cut.slots, { 'cam.shot': { v: shot === undefined ? 'none' : shot, from: 'auto' },
         'cam.zoom': { v: Number.isFinite(p.zoom) ? p.zoom : 1, from: 'auto' } });
       if (p.curve !== undefined) slots['cam.curve'] = { v: p.curve, from: 'auto' };
       if (Number.isFinite(p.follow)) slots['cam.follow'] = { v: p.follow, from: 'auto' };
+      if (xshot) slots['cam.extreme'] = { v: Number.isFinite(p.extreme) ? Math.min(1, Math.max(0, p.extreme)) : 1, from: 'pin:work' };
       cut.slots = slots;
-      cut.fp = H.hashJSON({ base: base.cuts[0].fp, shot: slots['cam.shot'].v, zoom: slots['cam.zoom'].v, curve: p.curve || null,
-        follow: Number.isFinite(p.follow) ? p.follow : null });
+      const fpOf = { base: base.cuts[0].fp, shot: slots['cam.shot'].v, zoom: slots['cam.zoom'].v, curve: p.curve || null,
+        follow: Number.isFinite(p.follow) ? p.follow : null };
+      if (xshot) fpOf.extreme = slots['cam.extreme'].v;
+      cut.fp = H.hashJSON(fpOf);
     }
     cut.rig = 0;
     plan.cuts = [cut];
@@ -198,7 +205,8 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
     plan.rigs = [{ blend: null, cuts: [cut.key], curve: { from: 'auto', v: p.curve !== undefined ? p.curve : preset ? preset.curve : 'linear' },
       key: 'k' + cut.key, rig: { from: 'auto', p: { amp: Number.isFinite(p.amp) ? p.amp : 1 }, v: rig === undefined ? 'none' : rig },
       t0: 0, t1: base.duration }];
-    plan.grounds = base.grounds.map((g) => Object.assign({}, g, { zoomed: ref.kind === 'shot' && cut.slots['cam.shot'].v !== 'none' }));
+    plan.grounds = base.grounds.map((g) => Object.assign({}, g, { zoomed: (ref.kind === 'shot' || xshot) && cut.slots['cam.shot'].v !== 'none' },
+      xshot && cut.slots['cam.shot'].v !== 'none' ? { x: true } : {}));
     plan.hash = '';
     plan.hash = H.hashJSON(plan);
     Object.defineProperty(plan, 'env', { enumerable: false, value: base.env });
@@ -300,7 +308,8 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
   // fx.own drew in place (the pixel-identity check of that change).
   // DESIGN_2_1 additive members: registry (getter: the effective registry, parts/mix registryFor of the base registry
   // and the document's materials and media), shotTrack(cutKey), viewAt(t), mediaAt(t), mediaReady(t, opts),
-  // fork({ assets }); thumb() also takes the kinds 'shot' and 'rig'. Internal options: `effective` (a fork's registry)
+  // fork({ assets }); thumb() also takes the kinds 'shot' and 'rig' (and 'xshot'); DESIGN_EXTREME additive members:
+  // xJumps(t0, t1), viewAt(t, { calm }). Internal options: `effective` (a fork's registry)
   // and `ownAssets` (the fork made its asset store and disposes it).
   function createEngine(opts) {
     const o = opts || {};
@@ -613,7 +622,8 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
     }
 
     // renderFrame(surface, t, opts) → FrameStats (§4.19.2). Additive options (DESIGN_2_1 §11.3.7): layers 'all' |
-    // 'ground'. FrameStats gains media { drawn, waiting }. In export quality a media frame that is not exact (or not on
+    // 'ground'; (DESIGN_EXTREME §3.6) calm: the preview's 「激しいカメラを抑える」 (EXTREME modulators ×0.3, no motion
+    // blur; export quality ignores it); sentinel (lab only): a colour the scene backdrop is filled with. FrameStats gains media { drawn, waiting }. In export quality a media frame that is not exact (or not on
     // this device) is a programming error: exporters await mediaReady(t) first, so this throws EngineError
     // ('media-not-ready' | 'media-missing') instead of letting a substitute frame be encoded.
     function renderFrame(surface, t, ropts) {
@@ -697,7 +707,8 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
 
     // shotTrack(cutKey) → { a, b, keys: [{ t, x, y, zoom, roll, aim: Box | null }] } | null: the cut's resolved shot from
     // its built scene (times absolute; x, y the camera offset in du; roll in radians; aim the aimed rest box), for the
-    // stage overlay and the timeline. null without a shot.
+    // stage overlay and the timeline. null without a shot. An EXTREME track (DESIGN_EXTREME §2.4) adds x: true, and gz
+    // (ground zoom) and hit on every key.
     function shotTrack(cutKey) {
       alive();
       const i = cutIndexOf(cutKey);
@@ -706,14 +717,37 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
       const tr = scene && scene.shot;
       if (!tr) return null;
       const t0 = plan.cuts[i].t0;
+      if (tr.x === true) {
+        return { a: t0 + tr.a, b: t0 + tr.b, x: true,
+          keys: tr.keys.map((k) => ({ t: t0 + k.t, x: k.X, y: k.Y, zoom: k.Z, roll: k.R, aim: k.box, gz: k.gz, hit: k.hit })) };
+      }
       return { a: t0 + tr.a, b: t0 + tr.b,
         keys: tr.keys.map((k) => ({ t: t0 + k.t, x: k.X, y: k.Y, zoom: k.Z, roll: k.R, aim: k.box })) };
     }
 
-    // viewAt(t) → { x, y, zoom, roll }: the text layer's camera at t — the current cut's camera composed with the rig
-    // (and the impulses, as drawn; x/y include the shake) — or the rig alone while no cut is on screen. The stage inverts
-    // drags with it.
-    function viewAt(t) {
+    // xJumps(t0, t1) → [times]: the deliberate jumps (hard cuts inside a cut) of the EXTREME tracks of the cuts that
+    // overlap [t0, t1), absolute and sorted — the export's flash check counts them (DESIGN_EXTREME §3.4). Builds the
+    // scenes of those cuts only (the EXTREME ones); [] for a plan without EXTREME shots.
+    function xJumps(t0, t1) {
+      alive();
+      const out = [];
+      if (!plan) return out;
+      const lo = Number.isFinite(t0) ? t0 : 0, hi = Number.isFinite(t1) ? t1 : plan.duration;
+      for (let i = 0; i < plan.cuts.length; i++) {
+        const c = plan.cuts[i], d = c.slots && c.slots['cam.shot'];
+        if (!(c.b > lo && c.a < hi) || !d || d.v === undefined || d.v === null || !SHOT.isExtreme(d.v)) continue;
+        const scene = sceneFor('cut', i);
+        const tr = scene && scene.shot;
+        if (!tr || tr.x !== true) continue;
+        for (const tj of tr.jumps) if (c.t0 + tj >= lo && c.t0 + tj < hi) out.push(c.t0 + tj);
+      }
+      return out.sort((a, b) => a - b);
+    }
+
+    // viewAt(t, { calm }?) → { x, y, zoom, roll }: the text layer's camera at t — the current cut's camera composed with
+    // the rig (and the impulses, as drawn; x/y include the shake) — or the rig alone while no cut is on screen. The stage
+    // inverts drags with it. calm (DESIGN_EXTREME §3.6): the preview's 「激しいカメラを抑える」, as renderFrame takes it.
+    function viewAt(t, vopts) {
       alive();
       if (!plan) return { x: 0, y: 0, zoom: 1, roll: 0 };
       const fg = F.frameAt(plan, t);
@@ -721,7 +755,7 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
       let cam;
       if (i >= 0) {
         const scene = sceneFor('cut', i);
-        F.evaluate(scene, t - plan.cuts[i].t0);
+        F.evaluate(scene, t - plan.cuts[i].t0, vopts && vopts.calm === true ? CALM_EVAL : undefined);
         cam = F.cameraAt(scene, plan, t);
       } else cam = F.rigCamera(plan, t);
       return { x: cam.x + cam.shakeX, y: cam.y + cam.shakeY, zoom: cam.zoom, roll: cam.roll };
@@ -831,7 +865,7 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
       boxes: () => renderer.boxes(),
       thumb, warnings, fork, stats, dispose,
       get registry() { return registry; },
-      shotTrack, viewAt, mediaAt, mediaReady,
+      shotTrack, viewAt, mediaAt, mediaReady, xJumps,
       setPlan, fontUsage,
       scene: (kind, i) => (plan ? sceneFor(kind, i) : null),
       setLevel: (v) => renderer.setLevel(v),

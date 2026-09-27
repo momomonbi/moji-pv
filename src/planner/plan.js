@@ -1,8 +1,8 @@
 /* 文字PVメーカー v2 — original work. plan(doc, { registry }) → Plan: the planner's stages in their FROZEN order (DESIGN §4.16.1–§4.16.2, §3.12; DESIGN_2_1 §2.7, §5.9.3, §11.2.6). */
 MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'core/timing', 'core/beats', 'core/motion',
   'core/doc', 'core/schema', 'core/script', 'core/media', 'core/shot', 'planner/choose', 'planner/params', 'planner/look',
-  'planner/segment', 'planner/features', 'planner/cast', 'planner/tracks', 'planner/camera', 'planner/encode'],
-(H, N, PINS, LY, TM, B, MO, D, S, SC, MEDIA, SHOT, CH, PA, LK, SG, FE, CA, TR, CAM, EN) => {
+  'planner/segment', 'planner/features', 'planner/cast', 'planner/tracks', 'planner/camera', 'planner/encode', 'planner/extreme'],
+(H, N, PINS, LY, TM, B, MO, D, S, SC, MEDIA, SHOT, CH, PA, LK, SG, FE, CA, TR, CAM, EN, XT) => {
   'use strict';
 
   // v2: rigs, cut.rig, grounds[].zoomed, feat.sectionStart, media, the camera slots (DESIGN_2_1 §2.7, §11.2.6).
@@ -291,9 +291,11 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
     const partSlots = slotKeys.filter((s) => s.indexOf('.') < 0 && s !== 'orient');
     const decisions = partSlots.map((s) => [slotKind(s), c.slots[s]]);
     const needs = needsOf(ctx, decisions);
-    // a custom shot with a beat anchor reads the grid too (no preset has one, so only a custom shot is looked at)
+    // a shot whose times read the grid reads it too: a custom shot with a beat anchor, and every EXTREME shot (accent
+    // falls back to the first beat, and its beat modulators run on the grid; DESIGN_EXTREME §2.3). No other preset reads
+    // it, so their fingerprints are as before.
     const shot = c.slots['cam.shot'];
-    if (shot && shot.v !== null && typeof shot.v === 'object' && SHOT.usesBeats(shot.v)) needs.add('beats');
+    if (shot && shot.v !== null && shot.v !== undefined && SHOT.usesBeats(shot.v)) needs.add('beats');
     const { beat, level } = songTerms(ctx, needs, beats, c.t0);
     // Materials (matTerms) and assets (mediaTerms) the cut's parts use (DESIGN_2_1 §2.7, §11.2.6); '' without any.
     const used = mineOf(ctx, decisions, partSlots);
@@ -573,14 +575,17 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
     const hist = CA.createHistory(registry);
     for (const cut of cuts) Object.assign(cut, CA.castCut(ctx, cut, hist));
 
-    // 6. tracks: grounds → seams (and their rule overrides) → carry → rigs → impulses (DESIGN_2_1 §3.9)
+    // 6. tracks: grounds → seams (and their rule overrides) → EXTREME shots → carry → rigs → impulses (DESIGN_2_1 §3.9;
+    // the EXTREME overlay, DESIGN_EXTREME §2.3, does nothing without a cam.extreme pin)
     const grounds = TR.grounds(ctx, cuts, duration);
     const seams = TR.seams(ctx, cuts);
     ctx.seams = seams;
+    XT.shots(ctx, cuts);
     CAM.carry(ctx, cuts, seams);
     const rigs = CAM.rigs(ctx, cuts, seams, duration);
     const impulses = TR.impulses(ctx, cuts, duration);
     markZoomed(cuts, grounds);
+    XT.tracks(ctx, cuts, grounds, rigs);
 
     // 7. derived
     const sharedT = sharedText(ctx, look.plan, design);

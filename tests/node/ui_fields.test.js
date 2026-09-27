@@ -59,7 +59,9 @@ test('every FieldSpec path parses and exists for its scopes; command fields name
   for (const f of F.FIELDS) {
     if (f.path) {
       const valid = F.slotScopes(f.path);
-      for (const scope of f.scopes) {
+      // a line's own setting shown on its cut's page (lineOf: カメラ EXTREME's 「この行」) writes the line
+      assert.ok(!f.lineOf || (f.scopes.length === 1 && f.scopes[0] === 'cut'), f.id + ': lineOf rows are on cut pages');
+      for (const scope of f.lineOf ? ['line'] : f.scopes) {
         assert.ok(valid.includes(scope), f.id + ': ' + f.path + ' is not a ' + scope + ' slot (valid: ' + valid.join(',') + ')');
         const path = F.fieldPath(f, SAMPLE_SCOPE[scope]);
         assert.equal(P.format(P.parse(path)), path, f.id + ': round trip');
@@ -125,6 +127,32 @@ test('v2.1 slots: the scope table of DESIGN_2_1 §2.3 (camerawork, speed, sectio
   assert.equal(ok('cut/r1~0:season', 'spring'), false, 'no season at cut scope');
   assert.equal(ok('work:avoid', ['arrive.inkRise']), false, 'avoid is a line value');
   assert.equal(ok('cut/r1~0:cam.shot', 'pushWord'), true);
+});
+
+// DESIGN_EXTREME §2.2: the EXTREME switch is an area's (the whole video or a line), like the line season.
+test('EXTREME: cam.extreme may be pinned at work and line scope only, and core/commands agrees', () => {
+  assert.deepEqual(F.slotScopes('cam.extreme'), ['work', 'line']);
+  assert.deepEqual(F.slotScopes('cam.extremes'), []);
+  const CMD = MV.use('core/commands');
+  const D0 = MV.use('core/doc').defaultDoc();
+  const ok = (path, v) => {
+    const cmd = { t: 'pin.set', path, v, by: 'user' };
+    if (path.startsWith('cut/')) cmd.sig = 's';
+    try { CMD.reduce(D0, cmd); return true; } catch (e) { return false; }
+  };
+  for (const scope of F.slotScopes('cam.extreme')) {
+    for (const v of [1, 0.75, 0.5, 0]) assert.equal(ok((scope === 'work' ? 'work' : 'line/r1') + ':cam.extreme', v), true, scope + ' ' + v);
+  }
+  assert.equal(ok('cut/r1~0:cam.extreme', 1), false, 'never at a cut');
+  // the widget's writes (planner/extreme switchCommands) are commands the reducer takes
+  const XT = MV.use('planner/extreme');
+  const on = CMD.reduce(D0, { t: 'batch', cmds: XT.switchCommands(D0, 'work', XT.ON) });
+  assert.deepEqual(on.pins['work:cam.extreme'], { v: 1, by: 'user' });
+  for (const v of XT.STEPS) assert.equal(CMD.reduce(on, { t: 'batch', cmds: XT.switchCommands(on, 'work', v) }).pins['work:cam.extreme'].v, v);
+  const exempt = CMD.reduce(on, { t: 'batch', cmds: XT.switchCommands(on, 'line/r1', 0) });
+  assert.deepEqual(exempt.pins['line/r1:cam.extreme'], { v: 0, by: 'user' }, 'a line off under the video\'s switch is pinned 0');
+  const off = CMD.reduce(exempt, { t: 'batch', cmds: XT.switchCommands(exempt, 'work', 0) });
+  assert.equal(off.pins['work:cam.extreme'], undefined);
 });
 
 test('v2.1 widgets: curve, shot, rig and partRefs specs map to their widgets; every new field has one', () => {
@@ -269,7 +297,10 @@ test('sectionsFor: 作品全体 has its §6.4.5 sections with 見た目 and 強�
   const type = fieldPaths({ level: 'work' }, 'type');
   assert.ok(type.includes('face.display.ja') && type.includes('face.body.latin'));
   assert.ok(!type.includes('face.display.ko'), 'scripts not in use are hidden');
-  assert.equal(fieldPaths({ level: 'work' }, 'energy').length, SC.AMOUNT_KEYS.length);
+  // the amounts, and after カメラワーク the カメラ EXTREME switch and its 激しさ (DESIGN_EXTREME §2.6)
+  const energy = fieldPaths({ level: 'work' }, 'energy');
+  assert.equal(energy.length, SC.AMOUNT_KEYS.length + 2);
+  assert.deepEqual(energy.slice(energy.indexOf('amount.camera'), energy.indexOf('amount.camera') + 3), ['amount.camera', 'cam.extreme', 'cam.extreme']);
   assert.ok(fieldPaths({ level: 'work' }, 'look').includes('look.set.aspect'), 'command fields are listed by key');
 });
 
@@ -332,7 +363,8 @@ test('sectionsFor: several lines, no plan, and ids unique within a page', () => 
   const sels = [{ level: 'work' }, { level: 'line', ids: ['r4'] }, { level: 'cut', key: 'r4~0' },
     { level: 'el', scope: 'cut/r4~0', el: 'text' }, { level: 'el', scope: 'work', el: 'filter', idx: 2 }];
   for (const sel of sels) {
-    const ids = F.sectionsFor(sel, PLAN, REG).flatMap((s) => s.fields.map((f) => f.path || f.key));
+    // (カメラ EXTREME's 激しさ is a second row of its switch's slot: its key names it)
+    const ids = F.sectionsFor(sel, PLAN, REG).flatMap((s) => s.fields.map((f) => (f.xpart === 'power' ? f.key : f.path || f.key)));
     assert.equal(new Set(ids).size, ids.length, JSON.stringify(sel) + ': ' + ids.join(' '));
   }
 });
@@ -508,7 +540,7 @@ test('WP8b views keep UI text in the string table: no Japanese in string literal
   const JAPANESE = /[぀-ヿ㐀-䶿一-鿿]/;
   const found = [];
   for (const name of ['fields', 'inspector', 'widgets', 'part_browser', 'palette', 'menus', 'dialogs', 'timeline',
-    'curve_widget', 'shot_editor', 'material_page', 'ai_board', 'ai_panel', 'ai_review', 'stage', 'lyric_editor']) {
+    'curve_widget', 'shot_editor', 'material_page', 'ai_board', 'ai_panel', 'ai_review', 'stage', 'lyric_editor', 'extreme']) {
     const text = fs.readFileSync(path.join(SRC, 'ui', name + '.js'), 'utf8');
     for (const m of text.matchAll(TOKEN)) if (!m[0].startsWith('/') && JAPANESE.test(m[0])) found.push(name + ': ' + m[0]);
   }

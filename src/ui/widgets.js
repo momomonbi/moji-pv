@@ -1,4 +1,4 @@
-/* 文字PVメーカー v2 — original work. Inspector widgets: part, choice, number, time, color, font, toggle, words, cutpoints, text, slots, curve, shot, rig, partRefs, media, trim, crop (DESIGN §6.4.4; DESIGN_2_1 §6.5, §6.6, §11.7.4–§11.7.7). */
+/* 文字PVメーカー v2 — original work. Inspector widgets: part, choice, number, time, color, font, toggle, words, cutpoints, text, slots, curve, shot, rig, partRefs, media, trim, crop, extreme (DESIGN §6.4.4; DESIGN_2_1 §6.5, §6.6, §11.7.4–§11.7.7; DESIGN_EXTREME §2.6). */
 MV.def('ui/widgets', ['ui/dom', 'ui/icons', 'i18n/t', 'core/color', 'ui/playbar', 'core/shot', 'ui/curve_widget', 'ui/media_widgets'],
   (dom, I, T, C, PB, SHOT, CW, MW) => {
   'use strict';
@@ -558,13 +558,97 @@ MV.def('ui/widgets', ['ui/dom', 'ui/icons', 'i18n/t', 'core/color', 'ui/playbar'
       focus: () => dom.focus(btn),
       update(st) {
         const v = SHOT.coerceShot(st.value);
-        const text = st.mixed ? t('state.mixed') : t.label(SHOT.label(v === undefined ? 'none' : v));
+        const x = !st.mixed && v !== undefined && SHOT.isExtreme(v) ? SHOT.xKeyOf(v) : null;
+        // an EXTREME move carries its ⚡ (DESIGN_EXTREME §2.6), a mirrored one says so
+        const base = st.mixed ? t('state.mixed') : t.label(SHOT.label(v === undefined ? 'none' : v));
+        const text = x && x.m ? t('shot.mirroredOf', { name: base }) : base;
         name.textContent = text;
+        btn.classList.toggle('is-extreme', !!(v !== undefined && !st.mixed && SHOT.isExtreme(v)));
         btn.setAttribute('aria-label', env.label + ': ' + text);
         btn.disabled = !!st.readOnly;
         // A custom shot has no preset thumbnail.
         const key = st.mixed || v === undefined || typeof v !== 'string' ? null : v;
         if (key !== shown) { shown = key; env.thumb(canvas, key); }
+      },
+    };
+  }
+
+  // --- extreme (カメラ EXTREME, DESIGN_EXTREME §2.6) --------------------------------------------------------------------
+
+  // The switch (a role="switch" checkbox; while on, the line 「⚠ 回転・急なズーム・揺れが増えます」) or, with field.xpart
+  // 'power', the three strengths 激しさ [強め | かなり | 最大] (field.options). Both commit a number: the strength, 0 = off
+  // (the inspector hands it to ui/extreme, which asks the notice or the turn-off question). The value shown is
+  // st.extra.v: what the scope has (null: the selected lines differ).
+  function extreme(field, env) {
+    const t = env.t;
+    const valueOf = (st) => (st.extra && Object.prototype.hasOwnProperty.call(st.extra, 'v') ? st.extra.v
+      : typeof st.value === 'number' ? st.value : 0);
+    if (field.xpart === 'power') {
+      const options = field.options || [];
+      const buttons = options.map((o) => h('button', { class: 'seg', type: 'button', role: 'radio', 'aria-checked': 'false', tabindex: '-1',
+        'data-v': String(o.v), on: { click: () => env.commit(o.v) } }, optionText(t, o)));
+      const el = h('div', { class: 'segmented w-seg w-xpower', role: 'radiogroup', 'aria-label': env.label }, buttons);
+      el.addEventListener('keydown', (ev) => {
+        if (!ownsKey(ev) || ev.key === 'PageUp' || ev.key === 'PageDown') return;
+        ev.preventDefault();
+        ev.stopPropagation();
+        const at = buttons.indexOf(document.activeElement);
+        const n = buttons.length;
+        const to = ev.key === 'Home' ? 0 : ev.key === 'End' ? n - 1
+          : (Math.max(0, at) + (ev.key === 'ArrowRight' || ev.key === 'ArrowDown' ? 1 : n - 1)) % n;
+        if (buttons[to].disabled || to === at) return;
+        dom.focus(buttons[to]);
+        env.commit(options[to].v);
+      });
+      return {
+        el, focus: () => dom.focus(buttons.find((b) => b.getAttribute('aria-checked') === 'true') || buttons[0]),
+        update(st) {
+          const v = st.mixed ? null : valueOf(st);
+          // the strength a value stands for: the step nearest to it (a pin written elsewhere may lie between two)
+          let on = -1;
+          if (typeof v === 'number' && v > 0) {
+            on = 0;
+            options.forEach((o, i) => { if (Math.abs(o.v - v) < Math.abs(options[on].v - v)) on = i; });
+          }
+          buttons.forEach((b, i) => {
+            b.setAttribute('aria-checked', String(i === on));
+            b.disabled = !!st.readOnly;
+            b.tabIndex = i === Math.max(0, on) ? 0 : -1;
+          });
+        },
+      };
+    }
+    const box = h('input', { class: 'w-xbox', type: 'checkbox', role: 'switch', 'aria-label': env.label });
+    const id = field.id.replace(/[^A-Za-z0-9_-]/g, '_');
+    const warn = h('p', { class: 'w-xwarn', role: 'note', hidden: true, id: 'xwarn-' + id, text: t('fld.camExtreme.warn') });
+    // off here while lines have their own switch on (the whole video's row): 「3 行で EXTREME がオンです」
+    const lines = h('p', { class: 'w-xlines muted small', role: 'note', hidden: true, id: 'xlines-' + id });
+    box.setAttribute('aria-describedby', warn.id + ' ' + lines.id);
+    const toggleEl = h('label', { class: 'w-toggle w-xtoggle' }, box, h('span', { class: 'w-switch', 'aria-hidden': 'true' }));
+    const el = h('div', { class: 'w-xswitch' }, toggleEl, warn, lines);
+    let shown = null;
+    const show = (v) => {
+      box.indeterminate = v === null;
+      box.checked = typeof v === 'number' && v > 0;
+      el.classList.toggle('is-on', box.checked);
+      warn.hidden = !(box.checked || v === null);
+    };
+    // The click asks first (the notice, or the question about what else is on): the switch keeps showing what the scope
+    // has until the change is made, and stays so when the dialog is cancelled (phase F).
+    box.addEventListener('change', () => {
+      const want = box.checked;
+      show(shown);
+      env.commit(want ? field.onValue || 1 : 0);
+    });
+    return {
+      el, focus: () => dom.focus(box),
+      update(st) {
+        shown = st.mixed ? null : valueOf(st);
+        show(shown);
+        box.disabled = !!st.readOnly;
+        const n = st.extra && typeof st.extra.lines === 'number' ? st.extra.lines : 0;
+        lines.hidden = !(shown === 0 && n > 0);
+        lines.textContent = n > 0 ? t('fld.camExtreme.lines', { n }) : '';
       },
     };
   }
@@ -647,7 +731,7 @@ MV.def('ui/widgets', ['ui/dom', 'ui/icons', 'i18n/t', 'core/color', 'ui/playbar'
   }
 
   const MAKERS = { part, choice, number, time, color, font, toggle, words, cutpoints, text, slots, curve: CW.make, shot, rig, partRefs,
-    media: MW.media, trim: MW.trim, crop: (field, env) => MW.crop(field, env, number) };
+    media: MW.media, trim: MW.trim, crop: (field, env) => MW.crop(field, env, number), extreme };
 
   function make(field, env) {
     const maker = MAKERS[field.widget];

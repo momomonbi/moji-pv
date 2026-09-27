@@ -512,6 +512,87 @@ test('an aligned repeat plays its first copy\'s move: the same shot, curve, clos
   assert.ok(shots > 300 && pulls >= 1, [shots, pulls, carried].join(' '));
 });
 
+// --- with カメラ EXTREME (DESIGN_EXTREME §2.3, planner/extreme alignedSource) ---------------------------------------------
+
+const SHOT = MV.use('core/shot');
+const XON = Object.freeze({ v: 1, by: 'user' });
+const xKey = (c) => { const v = valueOf(c, 'cam.shot'); const x = typeof v === 'string' ? SHOT.xKeyOf(v) : null; return x ? x.key : null; };
+function withExtreme(doc, optIn) {
+  const out = clone(doc);
+  out.pins = Object.assign({}, out.pins, { 'work:cam.extreme': XON });
+  if (!optIn) delete out.pins['work:repeat.same'];
+  return out;
+}
+
+// Pairs (an aligned repeat, its first copy showing an EXTREME preset) of the sample documents with the switch on.
+function xPairs(optIn) {
+  const out = [];
+  for (const { name, doc } of sampleDocs(['quietHush', 'dashSprint', 'popFizz', 'printColumn'], 1)) {
+    const d = withExtreme(doc, optIn);
+    const p = PL.run(d, CAT, null);
+    const src = sourcesOf(withOptIn(d), p);
+    p.cuts.forEach((c, i) => {
+      const o = src.get(c.key);
+      if (o && xKey(o)) out.push({ name, doc: d, p, c, o, prev: i > 0 ? p.cuts[i - 1] : null, before: p.cuts[p.cuts.indexOf(o) - 1] || null });
+    });
+  }
+  return out;
+}
+
+test('with カメラ EXTREME on, an aligned repeat plays its first copy\'s EXTREME move, mirrored alike; explain names the first copy', () => {
+  const on = xPairs(true), off = xPairs(false);
+  const same = (list) => list.filter((x) => valueOf(x.c, 'cam.shot') === valueOf(x.o, 'cam.shot')).length;
+  assert.ok(on.length > 250 && off.length === on.length, on.length + ' ' + off.length);
+  // measured: 98.0 % with the opt-in (the rest: the same move twice in a row, below, or a preset that does not fit the
+  // repeat), 47.7 % from the echo alone
+  assert.ok(same(on) >= 0.95 * on.length, same(on) + '/' + on.length);
+  assert.ok(same(off) <= 0.7 * off.length, same(off) + '/' + off.length);
+  assert.ok(on.some((x) => /~m$/.test(valueOf(x.c, 'cam.shot'))), 'a mirrored move is copied mirrored');
+  const shown = on.filter((x) => valueOf(x.c, 'cam.shot') === valueOf(x.o, 'cam.shot') && x.c.slots['cam.shot'].from === 'auto').slice(0, 4);
+  assert.equal(shown.length, 4);
+  for (const x of shown) {
+    const why = whyOf(x.doc, x.p, 'cut/' + x.c.key + ':cam.shot');
+    assert.deepEqual(aligned(why), { code: 'repeat.same', params: { cut: x.o.key } }, x.name + ' ' + x.c.key);
+  }
+});
+
+test('with カメラ EXTREME on, a repeat plays the same move twice in a row only where its first copy did', () => {
+  const on = xPairs(true);
+  const twice = on.filter((x) => x.prev && xKey(x.prev) === xKey(x.c));
+  const own = twice.filter((x) => !(x.before && xKey(x.before) === xKey(x.o)) && valueOf(x.c, 'cam.shot') === valueOf(x.o, 'cam.shot'));
+  // the rare rest: the repeat's own pick (×0.2 for its previous cut's preset) landed on it anyway
+  assert.ok(own.length <= 0.01 * on.length, own.length + ' of ' + on.length);
+  const whys = own.map((x) => aligned(whyOf(x.doc, x.p, 'cut/' + x.c.key + ':cam.shot')));
+  assert.ok(whys.every((w) => w === null), 'such a repeat does not say it follows its first copy');
+});
+
+test('with カメラ EXTREME on, a pin on the repeat wins, a reroll of it or its line or its カメラワーク leaves it to the pick; a pinned first copy is followed', () => {
+  const doc = withExtreme(secondChorus(0, '16:9', 'dashSprint'), true);
+  const p = PL.run(doc, CAT, null);
+  const src = sourcesOf(doc, p);
+  const r = p.cuts.find((c) => src.has(c.key) && xKey(src.get(c.key)) && valueOf(c, 'cam.shot') === valueOf(src.get(c.key), 'cam.shot'));
+  assert.ok(r, 'an aligned repeat with an EXTREME move');
+  const o = src.get(r.key);
+  const pinned = PL.run(withOptIn(doc, { ['cut/' + r.key + ':cam.shot']: { v: 'orbit', by: 'user', sig: r.text } }), CAT, null);
+  assert.equal(valueOf(pinned.cuts.find((c) => c.key === r.key), 'cam.shot'), 'orbit', 'the pin wins');
+  for (const key of ['cut/' + r.key, 'line/' + r.line, 'cut/' + r.key + ':cam.shot', 'line/' + r.line + ':cam.shot']) {
+    const d = withOptIn(doc, null, { [key]: 1 });
+    const q = PL.run(d, CAT, null);
+    assert.ok(!aligned(whyOf(d, q, 'cut/' + r.key + ':cam.shot')), key + ': picked on its own');
+  }
+  // a hand-picked EXTREME move on the first copy carries to the repeat where it fits there (weighs > 0; a short cut
+  // takes only the short pool, and then picks its own)
+  const alts = EX.explain(doc, p, 'cut/' + r.key + ':cam.shot', { registry: CAT }).alts;
+  const other = alts.find((a) => a.key !== xKey(o) && a.w > 0).key;
+  const misfit = alts.find((a) => !(a.w > 0)).key;
+  const m = PL.run(withOptIn(doc, { ['cut/' + o.key + ':cam.shot']: { v: misfit, by: 'user', sig: o.text } }), CAT, null);
+  assert.notEqual(valueOf(m.cuts.find((c) => c.key === r.key), 'cam.shot'), misfit, 'a preset that does not fit the repeat is not copied');
+  const d = withOptIn(doc, { ['cut/' + o.key + ':cam.shot']: { v: other, by: 'user', sig: o.text } });
+  const q = PL.run(d, CAT, null);
+  assert.equal(valueOf(q.cuts.find((c) => c.key === o.key), 'cam.shot'), other);
+  assert.equal(valueOf(q.cuts.find((c) => c.key === r.key), 'cam.shot'), other, 'the repeat follows the pinned first copy');
+});
+
 // --- the golden --------------------------------------------------------------------------------------------------------
 
 test('the opt-in golden: project_repeat plans and renders the golden frames (tests/golden/project_repeat.json)', async () => {

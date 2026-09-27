@@ -128,7 +128,7 @@ MV.def('ui/menus', ['ui/dom', 'ui/icons', 'ui/keys', 'export/subtitles', 'export
       a('lyrics.bakeTimes'),
       { sep: true }, { heading: t('menu.edit') }, a('edit.undo'), a('edit.redo'), a('edit.history'), a('palette.open'),
       { sep: true }, { heading: t('menu.view') }, c('pref.safeArea'), { label: t('menu.quality'), sub: () => quality },
-      c('pref.reduceFlash'), c('view.foldSteps'), c('pref.autoFold'), c('pref.seekOnSelect'), c('pref.follow'),
+      c('pref.reduceFlash'), c('pref.calmCamera'), c('view.foldSteps'), c('pref.autoFold'), c('pref.seekOnSelect'), c('pref.follow'),
       { sep: true }, { heading: t('menu.settings') }, c('pref.singleKeys'), c('pref.autoplay'), c('pref.ai'), a('file.clearDevice'),
       { sep: true }, { heading: t('menu.help') }, a('help.keys'), a('help.syntax'), a('help.about'),
       { sep: true }, { heading: t('menu.lang') }, a('app.lang'),
@@ -190,7 +190,7 @@ MV.def('ui/menus', ['ui/dom', 'ui/icons', 'ui/keys', 'export/subtitles', 'export
     const def = (id, run, extra) => {
       if (!app.actions.has(id)) app.actions.defineAction(Object.assign({ id, label: 'cmd.' + id, run }, extra || {}));
     };
-    for (const pref of ['safeArea', 'reduceFlash', 'seekOnSelect', 'follow']) {
+    for (const pref of ['safeArea', 'reduceFlash', 'calmCamera', 'seekOnSelect', 'follow']) {
       def('pref.' + pref, () => view.setPref(pref, !view.state.prefs[pref]), { checked: () => !!view.state.prefs[pref] });
     }
     def('view.quality', (c, a) => view.setPref('quality', a && a.q ? a.q : 'auto'), { checked: () => view.state.prefs.quality !== 'auto' });

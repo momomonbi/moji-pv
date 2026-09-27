@@ -1,7 +1,7 @@
 /* 文字PVメーカー v2 — original work. Scene build: one Plan cut (or ground segment) → node table + behaviours (DESIGN §4.17.5; DESIGN_2_1 §3.10, §5.9.4, §11.3.7). */
 MV.def('engine/scene/build', ['core/hash', 'core/rng', 'core/schema', 'engine/scene/table', 'engine/scene/builder',
-  'engine/scene/behave', 'engine/scene/frame', 'engine/scene/shot', 'engine/scene/budget'],
-(H, RNG, SCH, T, B, BH, F, SHOT, BG) => {
+  'engine/scene/behave', 'engine/scene/frame', 'engine/scene/shot', 'engine/scene/budget', 'engine/scene/xshot'],
+(H, RNG, SCH, T, B, BH, F, SHOT, BG, XS) => {
   'use strict';
 
   const SAFE = 0.05;              // safe margin: 5% of the short side on every edge
@@ -119,10 +119,13 @@ MV.def('engine/scene/build', ['core/hash', 'core/rng', 'core/schema', 'engine/sc
     return mixShareOf(defs, MIX_BUDGET.cut);
   }
 
-  // The shot inputs of a cut (DESIGN_2_1 §3.10): the cam.shot decision and the cam.zoom, cam.curve, cam.follow values.
-  function shotInputs(slots) {
+  // The shot inputs of a cut (DESIGN_2_1 §3.10): the cam.shot decision and the cam.zoom, cam.curve, cam.follow values;
+  // for EXTREME shots (DESIGN_EXTREME §1.4) also the cam.extreme value (null without a decision) and the arrange's camera
+  // trait (def.cam: 'any' | 'gentle' | 'none').
+  function shotInputs(slots, arrangeDef) {
     return { shot: decisionOf(slots, 'cam.shot'), zoom: valueOf(slots, 'cam.zoom', 1), curve: valueOf(slots, 'cam.curve', null),
-      follow: valueOf(slots, 'cam.follow', null) };
+      follow: valueOf(slots, 'cam.follow', null), extreme: valueOf(slots, 'cam.extreme', null),
+      camTrait: (arrangeDef && arrangeDef.cam) || 'any' };
   }
 
   function partEnv(base, builder, def, slot, decision, subject, owner, hints, extra) {
@@ -323,8 +326,10 @@ MV.def('engine/scene/build', ['core/hash', 'core/rng', 'core/schema', 'engine/sc
     const hints = { focus, free, lines: at.lines, emphLines: at.emphLines, emph: at.emph };
     buildOrnaments(builder, base, slots, els, reg, cut, hints, warnings, where, ax);
     // the camera: the shot is resolved first, so the lens sees the text and the track (read-only); the lens behaviours
-    // run first and the shot's after them, composing with their deltas (DESIGN_2_1 §4.4)
-    const shot = SHOT.makeShot(base, cam, target, shotInputs(slots));
+    // run first and the shot's after them, composing with their deltas (DESIGN_2_1 §4.4). An EXTREME shot builds an
+    // x-track instead (engine/scene/xshot); every other shot takes the normal track as before.
+    const inputs = shotInputs(slots, arrange.def);
+    const shot = (XS.isX(inputs) ? XS.makeShot : SHOT.makeShot)(base, cam, target, inputs);
     const lens = part('lens', 'lens');
     const lensEnv = partEnv(base, builder, lens.def, 'lens', lens.d, cut.text, 'lens', hints,
       { target, shot: shot ? shot.track : null });

@@ -54,6 +54,9 @@ function requests(lang) {
     }
   }
   out.push(...DI.directRequests(DOC, PLAN, REGISTRY, { briefs: [{ ref: work, instruction: '' }], uiLang: lang, mode: 'camera', media: true }));
+  // 「EXTREME」 (DESIGN_EXTREME §2.5): still only lyric text, the instruction and numbers
+  out.push(...DI.directRequests(DOC, PLAN, REGISTRY, { briefs: [{ ref: work, instruction: 'サビを激しく' }, { ref: firstLine, instruction: '' }],
+    uiLang: lang, mode: 'camera', media: true, extreme: true }));
   const sent = RECIPE.mediaSent(DOC, { lang });
   const withMedia = DOC.materials.list.find((m) => (m.recipe.layers || []).some((l) => l.prim === 'media')) || DOC.materials.list[0];
   for (const media of [sent, null]) {
@@ -124,4 +127,23 @@ test('docs/AI_GUIDE.md: 送るもの and "What is sent, what is not, what is sto
     assert.ok(en.includes(w), '"What is sent, what is not, what is stored" says "' + w + '"');
   }
   assert.ok(!/この作品では|per asset|this project only/.test(ja + en), 'no picture consent held for an asset or a project');
+});
+
+// DESIGN_EXTREME §2.5: the 「EXTREME」 camera request sends what the camera request sends — the lyric lines, the instruction,
+// setting values and numbers — never a picture, a media list or a file name.
+test('the EXTREME camera request sends no media list, no pictures and no file names', () => {
+  for (const lang of ['ja', 'en']) {
+    const reqs = DI.directRequests(DOC, PLAN, REGISTRY, { briefs: [{ ref: { kind: 'work' }, instruction: 'サビを激しく' }], uiLang: lang,
+      mode: 'camera', media: IDS, allowMaterials: true, extreme: true });
+    assert.ok(reqs.length >= 1);
+    for (const r of reqs) {
+      assert.equal(r.sent.extreme, true);
+      assert.deepEqual(r.sent.media, []);
+      assert.equal(r.media, undefined, 'no picture parts');
+      const text = [r.system, r.prompt].join('\n');
+      assert.ok(!text.includes('[media]') && !/asset:\d/.test(text), 'no media list');
+      for (const e of DOC.media.list) assert.ok(!text.includes(e.name.replace(/\.[a-z0-9]+$/i, '')), e.name);
+      assert.ok(text.includes('サビを激しく'), 'the instruction');
+    }
+  }
 });

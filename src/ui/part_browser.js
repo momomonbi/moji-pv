@@ -1,5 +1,5 @@
-/* 文字PVメーカー v2 — original work. Part browser: tile pages with try-on, filter pages ("use only these"), thumbnails via engine.thumb, マイ素材, the 写真・動画 tab (DESIGN §6.4.12; DESIGN_2_1 §6.9, §11.7.5). */
-MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output', 'ui/media_widgets', 'ui/media_io'], (dom, I, OUT, MW, MI) => {
+/* 文字PVメーカー v2 — original work. Part browser: tile pages with try-on, filter pages ("use only these"), thumbnails via engine.thumb, マイ素材, the 写真・動画 tab, tile groups (DESIGN §6.4.12; DESIGN_2_1 §6.9, §11.7.5; DESIGN_EXTREME §2.6). */
+MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output', 'ui/media_widgets', 'ui/media_io', 'core/shot'], (dom, I, OUT, MW, MI, SHOT) => {
   'use strict';
 
   const { h } = dom;
@@ -21,12 +21,15 @@ MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output', 'ui/media_widgets'
     let scheduled = false;
 
     function themeKey() { return app.plan && app.plan.look ? app.plan.look.theme.v : ''; }
+    // An EXTREME preset shown as a shot (the カメラワーク row, its tiles) is drawn as one (engine kind 'xshot': its
+    // background segment is marked EXTREME, as the planner does, DESIGN_EXTREME §2.6).
+    function norm(ref) { return ref.kind === 'shot' && SHOT.isExtreme(ref.key) ? Object.assign({}, ref, { kind: 'xshot' }) : ref; }
     // A material's thumbnail follows its recipe (registry.extra[key].rhash, DESIGN_2_1 §6.9).
     function rhashOf(ref) {
       const extra = app.reg && app.reg.extra ? app.reg.extra[ref.key] : null;
       return extra && extra.rhash ? extra.rhash : '';
     }
-    function keyOf(ref) { return [ref.kind, ref.key, ref.theme || themeKey(), app.doc.look.aspect, rhashOf(ref)].join('|'); }
+    function keyOf(ref) { return [norm(ref).kind, ref.key, ref.theme || themeKey(), app.doc.look.aspect, rhashOf(ref)].join('|'); }
 
     function paintSwatch(g, w, hh, sw, label) {
       g.fillStyle = sw.ground || '#333';
@@ -41,7 +44,8 @@ MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output', 'ui/media_widgets'
       bars.forEach((c, i) => { g.fillStyle = c || '#888'; g.fillRect(w * (0.08 + i * 0.14), hh * 0.8, w * 0.1, hh * 0.08); });
     }
 
-    function render(ref) {
+    function render(ref0) {
+      const ref = norm(ref0);
       const canvas = document.createElement('canvas');
       canvas.width = THUMB_W;
       canvas.height = THUMB_H;
@@ -164,13 +168,22 @@ MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output', 'ui/media_widgets'
     return !!extra && extra.media === true;
   }
 
-  // Grid navigation: the tiles in rows by their offsetTop.
+  // Grid navigation: the tiles in rows by their offsetTop. With tile groups (a heading starts a new row) ↑ ↓ go to the
+  // nearest tile of the row above or below.
   function moveFocus(grid, dx, dy) {
     const tiles = [...grid.querySelectorAll('.pb-tile:not([hidden])')];
     if (!tiles.length) return;
     const at = Math.max(0, tiles.indexOf(document.activeElement));
     const cols = Math.max(1, tiles.filter((x) => x.offsetTop === tiles[0].offsetTop).length);
-    const to = Math.max(0, Math.min(tiles.length - 1, at + dx + dy * cols));
+    let to = Math.max(0, Math.min(tiles.length - 1, at + dx + dy * cols));
+    if (dy && grid.querySelector('.pb-group')) {
+      const cur = tiles[at];
+      const rows = [...new Set(tiles.map((x) => x.offsetTop))].sort((a, b) => a - b);
+      const r = rows.indexOf(cur.offsetTop) + dy;
+      const row = r >= 0 && r < rows.length ? tiles.filter((x) => x.offsetTop === rows[r]) : [cur];
+      const near = row.reduce((best, x) => (Math.abs(x.offsetLeft - cur.offsetLeft) < Math.abs(best.offsetLeft - cur.offsetLeft) ? x : best));
+      to = tiles.indexOf(near);
+    }
     dom.focus(tiles[to]);
     tiles[to].scrollIntoView({ block: 'nearest' });
   }
@@ -193,7 +206,10 @@ MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output', 'ui/media_widgets'
   //   Additive (DESIGN_2_1 §6.5, §6.9): o.keys + o.info(key) → { text, blurb, tags } for tiles that are not registry
   //   parts (the shot presets); o.make → the マイ素材 tab and its inline 「AIで素材を作る」 form ({ scopeWord, blocked() →
   //   reason key | null, run({ description, use }) }); o.menuFor(key) → the context-menu items of a tile (materials);
-  //   o.startTab.
+  //   o.startTab. DESIGN_EXTREME §2.6: o.groups [{ id, label, note, keys, kind?, badge?(key) }] — tile groups after the
+  //   main tiles, each under its heading and note (its keys are read through o.info and picked through o.onPick like
+  //   the others; kind: the thumbnail kind); o.isCurrent(key) → whether a tile shows the current value (default
+  //   key === o.value).
   // The tiles are built once per plan. Tabs, tags and the search only choose and order the tiles the grid holds (§7.4:
   // a keystroke must not rebuild them). おすすめ comes from o.alts() — explain(), which re-runs the planner for the
   // slot — computed once per plan in an idle slice after the page shows. Until the first answer the tab holds only
@@ -215,6 +231,7 @@ MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output', 'ui/media_widgets'
     let tiles = new Map();                    // part key → its tile (the 自動 / なし tiles lead the grid)
     let leading = [];
     let emptyNote = null;
+    let groupEls = [];                        // [{ g, head }]: the tile groups (o.groups) with their headings
     const tabs = h('div', { class: 'segmented pb-tabs', role: 'tablist' });
     const search = h('input', { class: 'text-input pb-search', type: 'search', placeholder: t('pb.search'), 'aria-label': t('pb.search'),
       spellcheck: false });
@@ -224,10 +241,15 @@ MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output', 'ui/media_widgets'
 
     const all = listed ? o.keys.slice() : keysFor(reg, o.kind, o).filter((k) => !isDerivedMedia(reg, k));
     const mine = listed ? [] : mineFor(reg, o.kind, o);
+    const groups = listed && Array.isArray(o.groups) ? o.groups.filter((g) => g && Array.isArray(g.keys) && g.keys.length) : [];
+    const groupKind = new Map(groups.flatMap((g) => g.keys.map((k) => [k, g.kind || o.kind])));
+    const kindOf = (k) => groupKind.get(k) || o.kind;
+    const isCurrent = (k) => (o.isCurrent ? !!o.isCurrent(k) : k === o.value);
     // What a tile shows and is searched by: a registry part's def, or o.info for listed keys.
     const defOf = (k) => (listed ? Object.assign({ tags: [], text: k }, o.info(k)) : reg.get(o.kind, k));
     const searchOf = (k) => { const d = defOf(k); return listed ? [k, d.text] : [k, d.label.ja, d.label.en]; };
-    const tagList = [...new Set(all.flatMap((k) => (defOf(k).tags || [])))].sort();
+    const nameOf = (k) => (listed ? defOf(k).text : app.label(o.kind, k));
+    const tagList = [...new Set(all.concat([...groupKind.keys()]).flatMap((k) => (defOf(k).tags || [])))].sort();
     const moodNow = () => (app.plan && app.plan.look ? reg.get('mood', app.plan.look.mood.v) : null);
 
     // おすすめ without explain(): the mood's theme weights, else its tag fit.
@@ -293,10 +315,12 @@ MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output', 'ui/media_widgets'
     function tile(key, label, extra) {
       const canvas = key === null ? h('span', { class: 'pb-thumb pb-autoicon', 'aria-hidden': 'true' }, I.icon('ring', { size: 26 }))
         : h('canvas', { class: 'pb-thumb', width: THUMB_W, height: THUMB_H, 'aria-hidden': 'true' });
-      const current = key === o.value;
+      const current = key !== null && isCurrent(key);
       const el2 = h('button', {
-        class: ['pb-tile', current ? 'is-current' : '', extra && extra.dim ? 'is-dim' : ''], type: 'button', role: 'option',
-        'aria-selected': String(current), 'data-key': key === null ? '' : key, title: extra && extra.blurb ? extra.blurb : label,
+        class: ['pb-tile', current ? 'is-current' : '', extra && extra.dim ? 'is-dim' : '', extra && extra.group ? 'pb-in-group' : ''],
+        type: 'button', role: 'option', 'aria-selected': String(current), 'data-key': key === null ? '' : key,
+        title: extra && extra.blurb ? extra.blurb : label, 'aria-describedby': extra && extra.describedBy ? extra.describedBy : null,
+        'data-group': extra && extra.group ? extra.group : null,
       }, canvas, h('span', { class: 'pb-name', text: label }),
       extra && extra.badge ? h('span', { class: 'pb-badge', text: extra.badge }) : null,
       current ? h('span', { class: 'pb-cur' }, I.icon('check', { size: 14 })) : null);
@@ -310,7 +334,7 @@ MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output', 'ui/media_widgets'
       if (drawn.has(key)) return;
       drawn.add(key);
       const canvas = x.querySelector('canvas');
-      if (canvas) thumbs.draw(canvas, { kind: o.kind, key });
+      if (canvas) thumbs.draw(canvas, { kind: kindOf(key), key });
     }
 
     // Tabs and tag chips are built once; a click updates their state in place (so the focus stays on them). マイ素材 is
@@ -427,6 +451,18 @@ MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output', 'ui/media_widgets'
           blurb: skip ? blurb + '\n' + t('fld.fxSkipped', { bg: t('exp.bg.' + skip) }) : blurb,
         }));
       }
+      // the groups' tiles, each group under its heading and note (DESIGN_EXTREME §2.6: 「EXTREME」)
+      groupEls = groups.map((g, gi) => {
+        const id = String(g.id || gi);
+        const noteId = g.note ? 'pb-group-note-' + id : null;
+        for (const key of g.keys) {
+          const def = defOf(key);
+          tiles.set(key, tile(key, def.text, { blurb: def.blurb || def.text, badge: g.badge ? g.badge(key) : null, describedBy: noteId, group: id }));
+        }
+        const head = h('div', { class: 'pb-group', 'data-group': id, role: 'presentation' },
+          h('span', { class: 'pb-group-title', text: g.label }), g.note ? h('p', { class: 'pb-group-note', id: noteId, text: g.note }) : null);
+        return { g, head };
+      });
       emptyNote = h('p', { class: 'note subtle', text: t('pb.empty') });
       dom.clear(grid);
     }
@@ -441,8 +477,12 @@ MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output', 'ui/media_widgets'
         return;
       }
       const keys = tabKeys().filter(matches);
-      const want = leading.concat(tab === 'mine' && makeTile ? [makeTile] : [], keys.map((k) => tiles.get(k)));
-      if (!keys.length && !pending()) want.push(emptyNote);
+      const shownGroups = tab === 'all' || tab === 'rec' ? groupEls.map((x) => ({ head: x.head, keys: x.g.keys.filter(matches) }))
+        .filter((x) => x.keys.length) : [];
+      const groupKeys = [].concat(...shownGroups.map((x) => x.keys));
+      const want = leading.concat(tab === 'mine' && makeTile ? [makeTile] : [], keys.map((k) => tiles.get(k)),
+        ...shownGroups.map((x) => [x.head].concat(x.keys.map((k) => tiles.get(k)))));
+      if (!keys.length && !groupKeys.length && !pending()) want.push(emptyNote);
       const now = grid.children;
       if (want.length !== now.length || want.some((n, i) => now[i] !== n)) {
         const focused = grid.contains(document.activeElement) ? document.activeElement : null;
@@ -450,7 +490,7 @@ MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output', 'ui/media_widgets'
         // A focused tile that stays keeps the focus; one that leaves hands it to 自動に戻す (never to the page).
         if (focused && document.activeElement !== focused) dom.focus(want.includes(focused) ? focused : leading[0]);
       }
-      for (const key of keys) drawThumb(key, tiles.get(key));
+      for (const key of keys.concat(groupKeys)) drawThumb(key, tiles.get(key));
     }
 
     function render() {
@@ -465,7 +505,7 @@ MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output', 'ui/media_widgets'
       clearTimeout(tryTimer);
       tryTimer = setTimeout(() => {
         const doc = key === undefined ? null : o.tryDoc(key);
-        if (doc) app.tryOn(doc, t('look.tryOn', { name: key === null ? t('pb.auto') : key === 'none' ? t('fld.none') : app.label(o.kind, key) }));
+        if (doc) app.tryOn(doc, t('look.tryOn', { name: key === null ? t('pb.auto') : key === 'none' ? t('fld.none') : nameOf(key) }));
       }, TRYON_MS);
     }
     function stopTry() { clearTimeout(tryTimer); app.tryOn(null); }
@@ -495,7 +535,7 @@ MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output', 'ui/media_widgets'
       tryKey(keyOfTile(el2));
       if (stopAnim) stopAnim();
       const canvas = el2.querySelector('canvas');
-      stopAnim = canvas && keyOfTile(el2) ? thumbs.animate(canvas, { kind: o.kind, key: keyOfTile(el2) }) : null;
+      stopAnim = canvas && keyOfTile(el2) ? thumbs.animate(canvas, { kind: kindOf(keyOfTile(el2)), key: keyOfTile(el2) }) : null;
     });
     dom.on(grid, 'focusin', PICKABLE, (ev, el2) => tryKey(keyOfTile(el2)));
     grid.addEventListener('pointerleave', () => { stopTry(); if (stopAnim) { stopAnim(); stopAnim = null; } });

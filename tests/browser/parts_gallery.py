@@ -12,7 +12,8 @@ DESIGN_2_1 additions: every shot and rig preset of core/shot in every aspect, re
 times and as the picker thumbnail (engine.thumb), with the same checks; and the media mode: every part with a media
 param (the fake store's test parts, and the catalog's media parts: photoPan, photoFrame, textFill and mediaLayer, which
 must all be there) × every aspect × a still and a video fixture of tests/helpers/fake_media.js, in export quality (not
-blank, no errors, the medium drawn).
+blank, no errors, the medium drawn). DESIGN_EXTREME: the twelve EXTREME presets (lab kind xshot) take the camera checks
+too, rendered and as picker thumbnails.
 Run: PW_EXECUTABLE=/opt/pw-browsers/chromium python3 tests/browser/parts_gallery.py [--parts examples] [--aspects 16:9,9:16]
 """
 import argparse
@@ -54,7 +55,7 @@ async (o) => {
 }
 """
 
-# The picker tiles of the camera presets: engine.thumb with kind 'shot' / 'rig'.
+# The picker tiles of the camera presets: engine.thumb with kind 'shot' / 'rig' / 'xshot'.
 THUMB_ALL = """
 async (o) => {
   const out = [];
@@ -128,12 +129,12 @@ async def run(args):
             # the camera presets (DESIGN_2_1 §3.10) with the first registry's fallback parts
             src = sources[0]
             cam = [{'kind': kind, 'key': key, 'aspect': aspect}
-                   for kind in ('shot', 'rig') for key in info['camera'][kind] for aspect in aspects]
+                   for kind in ('shot', 'rig', 'xshot') for key in info['camera'].get(kind, []) for aspect in aspects]
             results = await page.evaluate(RENDER_ALL, {'jobs': cam, 'parts': src, 'times': list(TIMES), 'width': WIDTH})
             bad = check_results(results, src, failures)
-            print('%s %s camera: %d shots + %d rigs × %d aspects × %d times = %d renders' %
-                  ('FAIL' if bad else 'ok  ', src, len(info['camera']['shot']), len(info['camera']['rig']), len(aspects),
-                   len(TIMES), len(results)))
+            print('%s %s camera: %d shots + %d rigs + %d EXTREME shots × %d aspects × %d times = %d renders' %
+                  ('FAIL' if bad else 'ok  ', src, len(info['camera']['shot']), len(info['camera']['rig']),
+                   len(info['camera'].get('xshot', [])), len(aspects), len(TIMES), len(results)))
             thumbs = await page.evaluate(THUMB_ALL, {'jobs': cam, 'parts': src, 'width': 160})
             bad = 0
             for r in thumbs:
