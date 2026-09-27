@@ -608,6 +608,127 @@ test('the cast cache tells apart history rows that differ only in their natural 
   assert.ok(apart > 12, 'the two windows lead to different rows (' + apart + ' of 24)');
 });
 
+// The same for the rows' camera fields (DESIGN_2_1 §4.7 "Repeated lines"): a repeated line's cut inherits the shot its
+// first sung copy's row keeps (heir), and a cut after a salted one re-casts its heir against the previous row's shot
+// without salts (shadow). Two windows that differ only there must not share a cast, or a repeat keeps a stale shot.
+test('the cast cache tells apart history rows that differ only in their heir, their shadow or their twin, or in the line cut before', (t) => {
+  const REG = MV.use('core/registry');
+  const D = MV.use('core/doc');
+  const LY = MV.use('core/lyrics');
+  const PINS = MV.use('core/pins');
+  const LK = MV.use('planner/look');
+  const CH = MV.use('planner/choose');
+  const CA = MV.use('planner/cast');
+  const FE = MV.use('planner/features');
+  const reg = REG.createRegistry(corpus.allStubParts());
+  const ctxOf = (seed, cached) => {
+    const doc = Object.assign(D.defaultDoc(), { sheet: { next: 2, rows: [{ id: 'r1', src: 'ひかりのなかで' }] } });
+    doc.look = Object.assign({}, doc.look, { seed });
+    const ctx = { doc, registry: reg, ix: PINS.index(doc.pins), warn: () => {}, aspect: doc.look.aspect, salts: null,
+      pools: new Map(), trace: null, casts: null, lockFree: null, bpm: null, env: null, hint: 'ja' };
+    ctx.look = LK.resolveLook(ctx, LY.parseSheet(doc.sheet.rows), new Set(['ja']));
+    ctx.look = Object.assign({}, ctx.look, { amounts: Object.assign({}, ctx.look.amounts, { camera: 0.6 }) });
+    ctx.chooser = CH.createChooser(reg, { mood: ctx.look.mood, theme: ctx.look.theme, season: ctx.look.season, amounts: ctx.look.amounts });
+    if (cached) { ctx.casts = CA.beginCasts(reg); ctx.castKeys = CA.castKeys(ctx, 'look ' + seed); }
+    return ctx;
+  };
+  const cutOf = (repeatOf) => {
+    const cut = { key: 'r1~0', line: 'r1', role: 'lyric', text: 'ひかりのなかで', emph: [], impact: false, note: null, t0: 5, t1: 8,
+      lang: 'ja', pinKey: null, featId: repeatOf ? 'f2' : 'f1' };
+    cut.feat = FE.cutFeatures(cut, { duration: 30, env: null, grid: null, info: null, section: null, repeatOf, repeats: !!repeatOf });
+    return cut;
+  };
+  // An earlier cut's row: its final shot `last`, its shadow and its heir (what castCut sets before pushing it).
+  const rowOf = (last, shadow, heir) => {
+    const row = CA.historyRow({ 'cam.shot': { v: last } }, { 'cam.shot': last }, { 'cam.shot': last });
+    row.shadow = shadow;
+    row.heir = heir ? Object.freeze(Object.assign({ cause: 'shot', frames: false, curve: 'softEnds' }, heir)) : null;
+    return row;
+  };
+  const after = (row, ctx, cut) => {
+    const hist = CA.createHistory(reg);
+    hist.push('r0~0', row);
+    const cast = CA.castCut(ctx, cut, hist);
+    return { cast, row: hist.rowsRead(null)[3] };
+  };
+  let heirs = 0, shadows = 0;
+  for (let seed = 1; seed <= 24; seed++) {
+    // The echoed row: the same picks, another heir. The repeat inherits it.
+    const rep = cutOf('r0~0');
+    const A = rowOf('pullReveal', 'pullReveal', { v: 'tiltHold' }), B = rowOf('pullReveal', 'pullReveal', { v: 'settle' });
+    let ctx = ctxOf(seed, true);
+    after(A, ctx, rep);
+    let cached = after(B, ctx, rep), fresh = after(B, ctxOf(seed, false), rep);
+    assert.equal(cached.cast.castHit, false, 'seed ' + seed + ': another heir, no reuse');
+    assert.deepEqual(cached.cast.slots, fresh.cast.slots, 'seed ' + seed + ' heir');
+    assert.equal(fresh.cast.slots['cam.shot'].v, 'settle', 'seed ' + seed + ': the repeat inherits its first copy\'s heir');
+    if (after(A, ctxOf(seed, false), rep).cast.slots['cam.shot'].v !== fresh.cast.slots['cam.shot'].v) heirs++;
+    // The previous row: the same final shot, another shadow. The cut's own row (its heir and shadow) differs.
+    const cut = cutOf(null);
+    const C = rowOf('settle', 'settle', null), E = rowOf('settle', 'tiltHold', null);
+    ctx = ctxOf(seed, true);
+    after(C, ctx, cut);
+    cached = after(E, ctx, cut);
+    fresh = after(E, ctxOf(seed, false), cut);
+    assert.equal(cached.cast.castHit, false, 'seed ' + seed + ': another shadow, no reuse');
+    assert.deepEqual(cached.row, fresh.row, 'seed ' + seed + ': the recorded row');
+    assert.equal(after(E, ctx, cut).cast.castHit, true, 'the same window is reused');
+    if (after(C, ctxOf(seed, false), cut).row.shadow !== fresh.row.shadow) shadows++;
+  }
+  t.diagnostic('different casts: heirs ' + heirs + ', shadows ' + shadows + ' of 24');
+  assert.ok(heirs === 24 && shadows > 3, 'the windows lead to different casts: heirs ' + heirs + ', shadows ' + shadows + ' of 24');
+
+  // A line sung twice in a row: a repeat whose previous cut sings the same line cut weighs no echo toward the shot that
+  // cut ends on. Two windows with the same rows, where only the previous cut's line cut differs (the echoed cut itself,
+  // or another cut with the same row), must not share a cast either.
+  let follows = 0;
+  for (let seed = 1; seed <= 24; seed++) {
+    const rep = cutOf('r0~0');
+    const R = () => rowOf('settle', 'settle', { v: 'settle' });
+    const run = (ctx, twice) => {
+      const hist = CA.createHistory(reg);
+      for (const key of twice ? ['rp~0', 'rq~0', 'rs~0', 'r0~0'] : ['rp~0', 'rq~0', 'r0~0', 'rs~0']) hist.push(key, R(), key);
+      return CA.castCut(ctx, rep, hist);
+    };
+    const ctx = ctxOf(seed, true);
+    run(ctx, false);
+    const cached = run(ctx, true), fresh = run(ctxOf(seed, false), true);
+    assert.equal(cached.castHit, false, 'seed ' + seed + ': another previous line cut, no reuse');
+    assert.deepEqual(cached.slots, fresh.slots, 'seed ' + seed + ' follows');
+    assert.equal(run(ctx, true).castHit, true, 'the same window is reused');
+    if (run(ctxOf(seed, false), false).slots['cam.shot'].v !== fresh.slots['cam.shot'].v) follows++;
+  }
+  t.diagnostic('different casts: a line sung twice in a row ' + follows + ' of 24');
+  assert.ok(follows > 3, 'the windows lead to different casts: ' + follows + ' of 24');
+
+  // A salted row's twin (row.free, its picks without salts): a salted cut after it re-casts its heir and shadow
+  // against the twin (a rerolled line, cut after cut). Two windows with the same rows, where only the twin of the
+  // previous row differs, must not share a cast.
+  let twins = 0;
+  const twinOf = (arrange, lens) => {
+    const picks = { arrange, lens, 'cam.shot': 'settle' };
+    const t = CA.historyRow(Object.fromEntries(Object.entries(picks).map(([k, v]) => [k, { v }])), picks, picks);
+    return { base: t.base, both: t.both, last: t.last, own: t.own };
+  };
+  for (let seed = 1; seed <= 24; seed++) {
+    const cut = cutOf(null);
+    const salted = (cached) => Object.assign(ctxOf(seed, cached), { salts: { 'line/r1': 1 } });
+    const R = (twin) => { const row = rowOf('settle', 'settle', null); row.free = twin; return row; };
+    const A = R(twinOf('centerAnchor', 'fixedFrame')), B = R(twinOf('stubBlock', 'stubDrift'));
+    const ctx = salted(true);
+    after(A, ctx, cut);
+    const cached = after(B, ctx, cut), fresh = after(B, salted(false), cut);
+    assert.equal(cached.cast.castHit, false, 'seed ' + seed + ': another twin, no reuse');
+    assert.deepEqual(cached.row, fresh.row, 'seed ' + seed + ': the recorded row (twin)');
+    assert.equal(after(B, ctx, cut).cast.castHit, true, 'the same window is reused');
+    // The twin the cut leaves for the next salted cut (its picks without salts, against the previous twin).
+    const picks = (row) => JSON.stringify(['base', 'both', 'last'].map((f) => [...row.free[f].entries()].sort()));
+    if (picks(after(A, salted(false), cut).row) !== picks(fresh.row)) twins++;
+  }
+  t.diagnostic('different casts: the previous row\'s twin ' + twins + ' of 24');
+  assert.ok(twins > 3, 'the windows lead to different casts: ' + twins + ' of 24');
+});
+
 // §9.1 acceptance: plan() of project_long ≤ 10 ms in Node; §7.4: a re-plan of 100 lines ≤ 5 ms. The UI re-plans after
 // every edit, and an edit leaves most cuts' inputs as they were, so plan() reuses their casts (with the seams and
 // backgrounds decided from them) and encodings. Measured here (a shared container, INT-PLAN) at about 4.5–5.5 ms for

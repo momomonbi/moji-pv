@@ -16,7 +16,8 @@ const JAPANESE = /[　-〿぀-ヿㇰ-ㇿ㐀-䶿一-鿿＀-￯]/;
 const EN_ALLOW = ['文字PVメーカー'];
 
 // Codes other packages report through the table (DESIGN §3.13, §4.16.8, §4.22.1, §4.4).
-const WHY_CODES = ['mood.tag', 'fit', 'recent', 'family', 'echo', 'impact', 'season', 'theme.prefer', 'gate', 'rule', 'pin', 'lock'];
+const WHY_CODES = ['mood.tag', 'fit', 'recent', 'family', 'echo', 'echo.kept', 'impact', 'season', 'theme.prefer', 'gate', 'rule',
+  'pin', 'lock'];
 // §3.13 codes, plus `part-error` (reported by the scene and the renderer, WP4a).
 const WARN_CODES = ['pin-bad-value', 'pin-not-applicable', 'pin-filtered', 'pin-off-season', 'orphan-pin', 'shadowed-pin',
   'lock-partial', 'pool-empty', 'time-order', 'time-compressed', 'title-skipped', 'overfull', 'font-fallback', 'piece-merged',
@@ -52,6 +53,23 @@ test('every entry is a [ja, en] pair of non-empty strings', () => {
 test('ja and en use the same placeholders', () => {
   for (const [key, [ja, en]] of Object.entries(STRINGS)) {
     assert.deepEqual([...T.placeholders(en)].sort(), [...T.placeholders(ja)].sort(), key);
+  }
+});
+
+// A why is one clause of the inspector's 「なぜ」 line: it names each thing once (why.echo.kept once named its cut twice,
+// and a beginner could not tell which mention the rest of the sentence was about).
+test('a why names each placeholder once', () => {
+  for (const [key, pair] of Object.entries(STRINGS)) {
+    if (!key.startsWith('why.')) continue;
+    for (const text of pair) {
+      for (const form of text.split('|')) {
+        const seen = new Set();
+        for (const m of form.matchAll(/\{[^}]+\}/g)) {
+          assert.ok(!seen.has(m[0]), key + ': ' + m[0] + ' twice in ' + form);
+          seen.add(m[0]);
+        }
+      }
+    }
   }
 });
 

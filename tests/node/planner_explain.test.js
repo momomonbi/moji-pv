@@ -274,8 +274,8 @@ test('look and line slots: mood, theme and season alternatives and sources', () 
 
 // --- the v2.1 slots (DESIGN_2_1 §2.3, §2.8, §3.9) -----------------------------------------------------------------
 
-const NEW_WHY = new Set([...WHY, 'cam.emph', 'cam.impact', 'cam.words', 'cam.long', 'cam.short', 'cam.section', 'cam.sectionStart',
-  'cam.lens', 'cam.arrange', 'cam.amount', 'rig.section', 'rig.lastChorus', 'season.line', 'avoid']);
+const NEW_WHY = new Set([...WHY, 'cam.emph', 'cam.impact', 'cam.words', 'cam.long', 'cam.short', 'cam.shortPull', 'cam.section',
+  'cam.sectionStart', 'cam.lens', 'cam.arrange', 'cam.amount', 'rig.section', 'rig.lastChorus', 'season.line', 'avoid']);
 const VALUE_SLOTS = ['motion.speed', 'cam.shot', 'cam.zoom', 'cam.curve', 'cam.follow', 'rig', 'rig.curve'];
 const CURVE_PARAMS = ['arrive.ease', 'arrive.flow', 'depart.ease', 'depart.flow', 'dwell.curve', 'lens.curve', 'seam.curve'];
 
