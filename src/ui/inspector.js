@@ -491,6 +491,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
     }
 
     function valueFor(field, v, fs) {
+      if (field.offClears && !v) return W.AUTO;
       if (field.flashToggle) {
         const p = plan();
         const mood = p ? app.reg.get('mood', p.look.mood.v) : null;
@@ -592,7 +593,8 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
     // the source, 動きと重なり and the crop are chosen, never drawn (DESIGN_2_1 §11.5.6).
     function rerollable(field) {
       if (field.media && !(field.spec && field.spec.auto && (Array.isArray(field.spec.auto.range) || Array.isArray(field.spec.auto.pick)))) return false;
-      return !!field.path && DICE_WIDGETS.has(field.widget) && !NO_DICE.test(field.path) && !field.cmd && !field.path.includes('@breathMark');
+      return !!field.path && DICE_WIDGETS.has(field.widget) && !NO_DICE.test(field.path) && !field.cmd && !field.path.includes('@breathMark') &&
+        !field.noDice;
     }
 
     function makeRow(field, ctx) {
@@ -612,6 +614,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       // 動きと重なり: ⓘ says why the automatic choice is what it is (DESIGN_2_1 §11.9.5)
       const info = field.depth ? iconBtn('info', t('media.depthWhy'), () => showWhy(row, false), { 'data-role': 'why' }) : null;
       const why = h('div', { class: 'fr-why', hidden: true, role: 'note' });
+      const note = field.note ? h('p', { class: 'fr-note note subtle', text: t(field.note) }) : null;
       const env = {
         app, t, label, field,
         commit: (v, o) => commit(row, v, o),
@@ -628,7 +631,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       };
       const widget = W.make(field, env);
       const el = h('div', { class: 'frow', 'data-widget': field.widget, 'data-slot': field.path || field.key, 'data-field': field.id },
-        h('div', { class: 'fr-top' }, lab, tag, h('span', { class: 'grow' }), info, dice, x, more), widget.el, why);
+        h('div', { class: 'fr-top' }, lab, tag, h('span', { class: 'grow' }), info, dice, x, more), widget.el, note, why);
       Object.assign(row, { el, tag, dice, x, more, why, widget, lab });
       // Del / Backspace unpin the focused field (§6.8): the row publishes the paths it may clear while it has focus;
       // ui/boot's pin.clearField removes the ones that hold a pin (never a lock pin).

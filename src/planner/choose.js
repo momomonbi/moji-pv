@@ -278,11 +278,14 @@ MV.def('planner/choose', ['core/hash', 'core/rng', 'core/num'], (H, R, N) => {
     // cut's natural pick) and ref = with the recency `req.ref` (the cut's reference pick).
     // avoid (arrange and arrive, §8.2 "no identical adjacent"): when the winner is the previous cut's value and another
     // candidate weighs > 0, the runner-up is taken. The ×0.03 recency factor alone leaves such repeats rare but
-    // possible; a pool of one still returns its part.
+    // possible; a pool of one still returns its part. An array of values (the cut right before a repeat that shows
+    // its source's value, planner/cast avoidOf): the best candidate that is none of them.
     function pick(req) {
       const variety = num(req.variety, 1);
       let best = null, bestScore = -Infinity, bestW = 0;
       let next = null, nextScore = -Infinity, nextW = 0;
+      const avoids = Array.isArray(req.avoid) ? req.avoid : null;
+      let alt = null, altScore = -Infinity, altW = 0;
       let base = null, baseScore = -Infinity;
       let ref = null, refScore = -Infinity;
       const keys = req.keys, n = keys.length;
@@ -321,9 +324,13 @@ MV.def('planner/choose', ['core/hash', 'core/rng', 'core/num'], (H, R, N) => {
           next = best; nextScore = bestScore; nextW = bestW;
           best = key; bestScore = score; bestW = w;
         } else if (score > nextScore) { next = key; nextScore = score; nextW = w; }
+        if (avoids && score > altScore && !avoids.includes(key)) { alt = key; altScore = score; altW = w; }
       }
       if (best === null) return null;
       if (!req.ref || ref === null) ref = best;
+      if (avoids) {
+        return avoids.includes(best) && alt !== null ? { v: alt, w: altW, base, ref, avoided: best } : { v: best, w: bestW, base, ref };
+      }
       if (req.avoid && best === req.avoid && next !== null) return { v: next, w: nextW, base, ref, avoided: best };
       return { v: best, w: bestW, base, ref };
     }

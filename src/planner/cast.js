@@ -1,6 +1,6 @@
 /* 文字PVメーカー v2 — original work. Casting: every cut slot in the FROZEN order, from pins, rules or the chooser (DESIGN §4.16.2, §3.4.3; DESIGN_2_1 §3.9, §4.9). */
-MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 'core/pins', 'planner/choose',
-  'planner/params', 'planner/look', 'planner/camera'], (S, REG, R, N, PINS, CH, PA, LK, CAM) => {
+MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 'core/pins', 'core/paths', 'planner/choose',
+  'planner/params', 'planner/look', 'planner/camera'], (S, REG, R, N, PINS, P, CH, PA, LK, CAM) => {
     'use strict';
 
     const LIST_KINDS = Object.freeze(['ornament', 'filter']);
@@ -26,6 +26,8 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       'el.nudge': { type: 'nudge' },
       'el.fill': { type: 'ink' },
       'el.hide': { type: 'bool' },
+      // 「くり返しの行をそろえる」 (DESIGN_2_1 §4.10): pinned at work or line scope, never at a cut (core/commands).
+      'repeat.same': { type: 'bool' },
     }, CAM.SLOT_SPECS));
     const SEASON_SPEC = LK.LOOK_SPECS.season;
     const AVOID_SPEC = Object.freeze({ type: 'partRefs' });
@@ -451,6 +453,189 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       return true;
     }
 
+    // --- repeated lines the same way (「くり返しの行をそろえる」, DESIGN_2_1 §4.10) ---------------------------------
+
+    // The opt-in, a pin (work or line; off without one): a cut of a line sung again takes the cut decisions of the
+    // same cut of an earlier copy (its source, alignments), as the Plan shows them, with that copy's pins, locks and
+    // rerolls: orientation, layout, text, motion speed, entrance, hold and exit with their parameters, decorations,
+    // lens, camerawork and screen effects. The cut's own pins win, a reroll of the cut or of its line leaves every slot
+    // to the chooser and a die on one slot that slot (and a die on a parameter that parameter); a value that does not
+    // fit the cut (not in its pool, or a part whose fits gives 0 there) is chosen as usual. Element pins (nudge, fill,
+    // hide) stay the cut's own.
+    const REPEAT = 'repeat.same';
+    function acceptRepeat(v) { return typeof v === 'boolean' ? { v } : { bad: true }; }
+    function atOfCut(cut) { return { cutKey: cut.key, pinCutKey: cut.pinKey, lineId: cut.line }; }
+
+    // alignments(ctx, cuts) → Map<cut key, source cut> | null (null when no scope pins the opt-in; plan.run keeps it as
+    // ctx.align before casting). A run is consecutive lines that sing the same line (a line sung twice in a row is a
+    // run of two). A copy takes the line at its place in the first run of that line: the first copy for a copy sung
+    // alone, the second of the first run for the second of a later run; cut by cut, the cut at the same offset. The
+    // first run's own copies are chosen (so a line sung twice in a row does not play the same thing back to back), and
+    // so is a copy past the end of the first run. The two cuts must have the same text, role and impact mark (another
+    // split, or an impact the first copy lacks, keeps the cut's own look), and the opt-in must resolve on at the copy.
+    function alignments(ctx, cuts) {
+      if (!PA.pinned(ctx.ix, REPEAT)) return null;
+      const out = new Map(), byKey = new Map(), runs = new Map();
+      let line = null, source = null, open = null, prev = null, pos = 0;
+      for (const cut of cuts) {
+        byKey.set(cut.key, cut);
+        if (cut.line !== line) {
+          line = cut.line;
+          source = null;
+          const first = cut.feat.repeatOf ? byKey.get(cut.feat.repeatOf) : null;
+          const group = !line ? null : first ? first.line : line;
+          pos = group !== null && group === prev ? pos + 1 : 0;
+          prev = group;
+          if (open !== group) open = null;
+          if (group === null) continue;
+          if (group === line) { runs.set(group, [line]); open = group; } else {
+            const run = runs.get(group);
+            if (run && open === group) run.push(line);
+            else if (run && pos < run.length) source = run[pos];
+          }
+        }
+        if (source === null) continue;
+        const src = byKey.get(source + cut.key.slice(cut.key.indexOf('~')));
+        if (!src || src.text !== cut.text || src.role !== cut.role || !!src.impact !== !!cut.impact) continue;
+        const pin = PA.resolvePin(ctx.ix, atOfCut(cut), REPEAT, acceptRepeat, null);
+        if (pin && pin.v === true) out.set(cut.key, src);
+      }
+      return out;
+    }
+
+    // The opt-in as the cut sees it (the pin that applies there), kept among its decisions so the inspector shows it.
+    function decideRepeat(st) {
+      const { ctx, at } = st;
+      if (!PA.pinned(ctx.ix, REPEAT)) return;
+      const trace = tracing(st, REPEAT);
+      const pin = PA.resolvePin(ctx.ix, at, REPEAT, acceptRepeat, ctx.warn);
+      if (pin) setDecision(st, REPEAT, pinDecision(pin));
+      if (trace) {
+        Object.assign(trace, { stage: pin ? 'pin' : 'auto', pin, decision: pin ? st.slots[REPEAT] : null, rule: REPEAT,
+          why: pin ? null : [{ code: 'rule', params: { rule: REPEAT } }] });
+      }
+    }
+
+    // The source's decision of one slot, or null: no source, the cut or its line rerolled (st.rerolled), or a die on
+    // the slot. st.aligned = this, for planner/camera.
+    function alignedDecision(st, slot) {
+      const src = st.align;
+      if (!src || st.rerolled || fieldSalted(st.ctx, st.cut, slot)) return null;
+      return src.slots[slot] || null;
+    }
+
+    function alignWhy(st) { return { code: 'repeat.same', params: { cut: st.align.key } }; }
+
+    // neighboursOf(align, cuts) → { ahead, before } | null (plan.run keeps it as ctx.alignNear): ahead = Map<key of the
+    // cut right before a repeat that has a source, that source>; before = Map<source key, the cut right before it>.
+    function neighboursOf(align, cuts) {
+      if (!align) return null;
+      const ahead = new Map(), before = new Map();
+      for (let i = 1; i < cuts.length; i++) {
+        const src = align.get(cuts[i].key);
+        if (src) ahead.set(cuts[i - 1].key, src);
+      }
+      const sources = new Set();
+      for (const src of align.values()) sources.add(src.key);
+      for (let i = 1; i < cuts.length; i++) if (sources.has(cuts[i].key)) before.set(cuts[i].key, cuts[i - 1]);
+      return { ahead, before };
+    }
+
+    // §8.2 (no identical neighbouring layout or entrance) for a repeat: its source's value is passed over when the cut
+    // right before already shows it, unless the cut before the source showed it too (the pair is as it was then).
+    function nearClash(st, slot, v) {
+      if (st.hist.previous(slot) !== v) return false;
+      const pb = st.ctx.alignNear ? st.ctx.alignNear.before.get(st.align.key) : null;
+      return !(pb && pb.slots && pb.slots[slot] && pb.slots[slot].v === v);
+    }
+
+    // What the chooser passes over for a layout or an entrance (§8.2 no identical neighbours): the previous cut's value,
+    // and on the cut right before a repeat (st.ahead) also the value the repeat takes from its source.
+    function avoidOf(st, slot) {
+      const prev = st.hist.previous(slot);
+      const next = st.ahead && st.ahead.slots ? st.ahead.slots[slot] : null;
+      return next && next.v !== prev ? [prev, next.v] : prev;
+    }
+
+    // alignedSource(ctx, cut, slot) → the cut's source for a slot planner/tracks decides (ground, atmos, seam), or null:
+    // the cut has none, or it or its line is rerolled, or a die is on that slot.
+    function alignedSource(ctx, cut, slot) {
+      const src = ctx.align ? ctx.align.get(cut.key) || null : null;
+      if (!src) return null;
+      const s = ctx.salts;
+      if (s && (s['cut/' + cut.key] || (cut.line && s['line/' + cut.line]) || fieldSalted(ctx, cut, slot))) return null;
+      return src;
+    }
+
+    function pinnedFrom(d) { return typeof d.from === 'string' && d.from.startsWith('pin'); }
+
+    // The value slots that follow the source (orient: in its own auto, after the rule of a pinned layout).
+    const ALIGN_VALUES = new Set(['text.face', 'text.scale', 'text.ink', 'text.style', 'motion.speed', 'ornament.count',
+      'filter.count']);
+
+    function alignedValue(st, slot, spec, applies, withWhy) {
+      const ad = alignedDecision(st, slot);
+      if (!ad) return null;
+      const v = S.coerce(spec, ad.v);
+      if (v === undefined || (applies && !applies(v))) return null;
+      const d = { v, from: 'auto' };
+      if (withWhy) d.why = [alignWhy(st)];
+      return d;
+    }
+
+    // The source's part for one slot where it fits the cut: an automatic pick in the cut's own pool (its role,
+    // orientation, script, aspect and line conditions) whose fits does not give 0; a pinned or locked part where it
+    // serves the cut's role and orientation (a pin wins over the pools there too); 'none' of a list slot. A rule's or a
+    // fallback's value is left to the cut's own rules.
+    function alignedPart(st, kind, slot, list) {
+      const ad = alignedDecision(st, slot);
+      if (!ad || typeof ad.v !== 'string') return null;
+      const { ctx, cut } = st;
+      if (ad.v === 'none') return list && (ad.from === 'auto' || pinnedFrom(ad)) ? ad : null;
+      if (!ctx.registry.has(kind, ad.v)) return null;
+      const scope = kind === 'ornament' ? 'cut' : null;
+      const traits = ctx.registry.traits(kind, ad.v);
+      if (traits && Array.isArray(traits.orient) && st.chosen.orient && !traits.orient.includes(st.chosen.orient)) return null;
+      if (pinnedFrom(ad)) return 'v' in acceptPart(ctx, kind, cut.role, { none: list, scope })(ad.v) ? ad : null;
+      if (ad.from !== 'auto') return null;
+      if (AVOID_REPEAT.has(kind) && !st.natural && nearClash(st, slot, ad.v)) return null;
+      if (!poolEntry(ctx, kind, poolIdOf(st), cut.role, st.chosen.orient, cut.feat.script, ctx.aspect, scope, st.cond).keys
+        .includes(ad.v)) return null;
+      const def = ctx.registry.get(kind, ad.v);
+      if (typeof def.fits === 'function' && !(Number(def.fits(cut.feat, st.chosen)) > 0)) return null;
+      return ad;
+    }
+
+    // An aligned part (or a part a rule gives the cut and its source alike) keeps the source's parameters, except those
+    // pinned at the cut or rerolled there (a die on the
+    // parameter, 'cut/<key>:<param path>' or 'line/<id>:<param path>'), which the cut resolved itself (d, after its
+    // motion speed). The copies are plain values: the source's motion speed is already in them (the speed is aligned
+    // too), and a lock of the line pins them as they are.
+    // → the decision with the copies (d itself when nothing changed).
+    function copyParams(st, kind, idx, d, ad) {
+      if (!d.p || !ad.p) return d;
+      const { ctx, cut } = st;
+      const pfrom = d.pfrom || null;
+      let p = null, dropped = null;
+      for (const { name, shared } of ctx.registry.params(kind, d.v) || []) {
+        if (!(name in d.p) || !(name in ad.p)) continue;
+        const from = pfrom ? pfrom[name] : undefined;
+        if (from !== undefined && from !== 'rule') continue;
+        if (ctx.salts && fieldSalted(ctx, cut, P.slotParamPath(kind, idx, d.v, name, shared))) continue;
+        (p || (p = Object.assign({}, d.p)))[name] = ad.p[name];
+        if (from === 'rule') (dropped || (dropped = new Set())).add(name);
+      }
+      if (!p) return d;
+      const out = { v: d.v, from: d.from, p };
+      if (pfrom) {
+        const rest = {};
+        let any = false;
+        for (const k of Object.keys(pfrom)) if (!dropped || !dropped.has(k)) { rest[k] = pfrom[k]; any = true; }
+        if (any) out.pfrom = rest;
+      }
+      return out;
+    }
+
     // --- one cut -------------------------------------------------------------------------------------------------
 
     // The look as parameter autos read it (made once per plan; silent copies of ctx share it).
@@ -495,7 +680,7 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       const trace = tracing(st, slot);
       const pin = !PA.pinned(ctx.ix, slot) ? null : PA.resolvePin(ctx.ix, at, slot, o.force ? () => ({ na: true })
         : acceptPart(ctx, kind, cut.role, { none: list, scope: kind === 'ornament' ? 'cut' : null }), ctx.warn);
-      let d;
+      let d, ad = null;
       if (pin) {
         pinWarnings(ctx, kind, pin.v, pin, st.cond);
         d = pinDecision(pin);
@@ -503,6 +688,9 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       } else if (o.force) {
         d = { v: o.force, from: 'rule' };
         if (trace) Object.assign(shadow(st, kind, slot, seed, list, trace), { kind, stage: 'rule', rule: o.rule });
+      } else if (st.align && (ad = alignedPart(st, kind, slot, list)) !== null) {
+        d = { v: ad.v, from: 'auto' };
+        if (trace) Object.assign(shadow(st, kind, slot, seed, list, trace), { kind, stage: 'auto', why: [alignWhy(st)] });
       } else {
         const own = list ? ownValues(st, kind, idx) : null;
         const recent = st.natural ? null : st.hist.recent(kind, slot, own);
@@ -513,7 +701,7 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
           kind, slot, path: 'cut/' + cut.key + ':' + slot, feat: cut.feat, role: cut.role, orient: st.chosen.orient,
           script: cut.feat.script, scope: kind === 'ornament' ? 'cut' : null, chosen: st.chosen, seed, recent, echo,
           list, cutKey: cut.key, trace, silent: st.natural, ref, poolId: poolIdOf(st), cond: st.cond,
-          avoid: AVOID_REPEAT.has(kind) && !st.natural ? st.hist.previous(slot) : null,
+          avoid: AVOID_REPEAT.has(kind) && !st.natural ? avoidOf(st, slot) : null,
         });
         d = { v: got.v, from: got.from };
         if (got.base && got.base !== got.v) st.base[slot] = got.base;
@@ -528,6 +716,10 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
         d.p = p;
         if (pfrom) d.pfrom = pfrom;
         if (MOTION_KINDS.includes(kind)) CAM.applySpeed(st, kind, d);
+        // The source's parameters wherever the cut shows the source's part: taken from it, or given by the same rule (a
+        // layout that moves the text itself forces the same motions).
+        const same = ad || (st.align && !pin ? alignedDecision(st, slot) : null);
+        if (same && same.v === d.v) d = copyParams(st, kind, idx, d, same);
       }
       if (trace) trace.decision = d;
       setDecision(st, slot, d);
@@ -566,7 +758,8 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
         if (c === undefined) return { bad: true };
         return applies && !applies(c) ? { na: true } : { v: c };
       }, ctx.warn);
-      const got = pin ? pinDecision(pin) : autoFn(seedOf(st, slot), !!trace);
+      const got = pin ? pinDecision(pin) : (st.align && ALIGN_VALUES.has(slot) && alignedValue(st, slot, spec, applies, !!trace)) ||
+        autoFn(seedOf(st, slot), !!trace);
       const d = got.rule !== undefined || got.why !== undefined ? withoutTrace(got) : got;
       if (trace) Object.assign(trace, { stage: pin ? 'pin' : d.from === 'rule' ? 'rule' : 'auto', pin, decision: d,
         rule: d.from === 'rule' ? got.rule || slot : slot, why: pin ? null : got.why || null });
@@ -588,12 +781,14 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     function decideOrient(st) {
       const { ctx, cut, at } = st;
       const allowed = cut.feat.orients;
-      return decideValue(st, 'orient', SLOT_SPECS.orient, (seed) => {
+      return decideValue(st, 'orient', SLOT_SPECS.orient, (seed, withWhy) => {
         const pin = PA.resolvePin(ctx.ix, at, 'arrange', acceptPart(ctx, 'arrange', cut.role), null);
         if (pin) {
           const only = ctx.registry.traits('arrange', pin.v).orient;
           if (only.length === 1 && allowed.includes(only[0])) return { v: only[0], from: 'rule', rule: 'arrange' };
         }
+        const aligned = st.align ? alignedValue(st, 'orient', SLOT_SPECS.orient, (v) => allowed.includes(v), withWhy) : null;
+        if (aligned) return aligned;
         if (!allowed.includes('v')) return { v: 'h', from: 'auto' };
         const bias = ctx.look.mood.tagBias && typeof ctx.look.mood.tagBias.literary === 'number'
           ? ctx.look.mood.tagBias.literary : 1;
@@ -712,6 +907,7 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     // camOnly: stop after the camera slots (what a row's natural shot, heir and shadow read; see unsaltedCast).
     function castSlots(ctx, cut, hist, natural, camOnly) {
       const st = stateOf(ctx, cut, hist, natural);
+      decideRepeat(st);
       decideOrient(st);
       const arrange = decidePart(st, 'arrange', null);
       decideText(st);
@@ -732,8 +928,11 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
         ctx, cut, hist, natural, slots: {}, chosen: {}, base: {}, ref: {},
         at: { cutKey: cut.key, pinCutKey: cut.pinKey, lineId: cut.line },
         cutSeed: CH.cutSeed(ctx.doc.look.seed, cut.key, cut.line, ctx.salts), slotPrefix: 0, poolKey: null,
-        cond: lineCond(ctx, cut.line), decide: decideValue, shotSalted: false, curveSalted: false, heirCurve: null, echoShot: false,
+        cond: lineCond(ctx, cut.line), decide: decideValue, shotSalted: false, curveSalted: false, heirCurve: null,
+        align: ctx.align ? ctx.align.get(cut.key) || null : null, rerolled: false, aligned: alignedDecision, shotAligned: false,
+        ahead: ctx.alignNear ? ctx.alignNear.ahead.get(cut.key) || null : null,
       };
+      if (st.align && ctx.salts) st.rerolled = !!(ctx.salts['cut/' + cut.key] || (cut.line && ctx.salts['line/' + cut.line]));
       if (!natural && isSalted(ctx, cut)) {
         st.shotSalted = shotSalted(ctx, cut);
         st.curveSalted = fieldSalted(ctx, cut, 'cam.curve');
@@ -1000,8 +1199,17 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
         look: k.look, work: k.pins(k.work, 'work', ''), line: cut.line ? k.pins(k.line, 'line', cut.line) : '-',
         cut: k.pins(k.cut, 'cut', cut.pinKey || cut.key), salts: k.salts(cut), lineId: cut.line, pinKey: cut.pinKey,
         role: cut.role, impact: !!cut.impact, featId: cut.featId, rows: hist.rowsRead(cut.feat.repeatOf),
-        follows: hist.follows(cut.feat.repeatOf), echoed: echoed(ctx, cut),
+        follows: hist.follows(cut.feat.repeatOf), echoed: echoed(ctx, cut), aligned: alignedId(ctx.align, cut),
+        ahead: alignedId(ctx.alignNear && ctx.alignNear.ahead, cut),
       };
+    }
+
+    // The cast of the source a cut takes its decisions from (ctx.align), or of the source of the repeat right after it
+    // (ctx.alignNear.ahead), by its cache entry: 0 without one. (A source's entry also stands for the cut right before
+    // it, whose final values its own choices read.)
+    function alignedId(map, cut) {
+      const src = map ? map.get(cut.key) : null;
+      return src ? (src.cast ? src.cast.id : -1) : 0;
     }
 
     // Whether a later cut sings this cut again (it is some cut's feat.repeatOf; ctx.echoed, planner/plan), so its row
@@ -1010,8 +1218,9 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
 
     // follows: whether the previous cut sings the same line cut (a line sung twice in a row; planner/camera recencyOf);
     // echoed: whether a later cut sings this one again (its row keeps an heir).
+    // aligned: the source's cast entry under 「くり返しの行をそろえる」, ahead: that of the next cut's source (alignedId).
     const INPUT_FIELDS = Object.freeze(['look', 'work', 'line', 'cut', 'salts', 'lineId', 'pinKey', 'role', 'impact', 'featId',
-      'follows', 'echoed']);
+      'follows', 'echoed', 'aligned', 'ahead']);
     function sameInputs(a, b) {
       for (const f of INPUT_FIELDS) if (a[f] !== b[f]) return false;
       return sameRows(a.rows, b.rows);
@@ -1095,6 +1304,6 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     return {
       SLOT_SPECS, LIST_KINDS, MOTION_KINDS, castCut, createHistory, chooseAuto, poolOf, acceptPart, pinWarnings, serves,
       filterAllows, lookAx, lockFreeCtx, lockFreeIndex, beginCasts, castKeys, intern, deepFreeze, historyRow, lineCond,
-      isChoice,
+      isChoice, alignments, neighboursOf, alignedSource, REPEAT,
     };
   });

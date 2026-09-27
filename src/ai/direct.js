@@ -1,7 +1,7 @@
 /* 文字PVメーカー v2 — original work. The direct tool (指示): area instructions → requests, the portable answer schema, answer → checked changes (DESIGN_2_1 §5.2–§5.6, §5.11, §11.6.1, §11.9.4). */
 MV.def('ai/direct', ['core/pins', 'core/paths', 'core/curve', 'core/shot', 'core/schema', 'core/media', 'planner/areas',
-  'planner/plan', 'engine/scene/frame', 'ai/catalog', 'ai/changes', 'ai/looks', 'ai/recipe', 'i18n/t', 'i18n/strings'],
-  (PINS, P, CV, SHOT, S, MEDIA, AREAS, PL, FR, CAT, CH, LOOKS, RECIPE, I18N, STRINGS) => {
+  'planner/plan', 'planner/cast', 'engine/scene/frame', 'ai/catalog', 'ai/changes', 'ai/looks', 'ai/recipe', 'i18n/t', 'i18n/strings'],
+  (PINS, P, CV, SHOT, S, MEDIA, AREAS, PL, CA, FR, CAT, CH, LOOKS, RECIPE, I18N, STRINGS) => {
   'use strict';
 
   // One tool for every area instruction: the instruction box (one brief), the 区画ごと board (up to 8 briefs) and
@@ -1140,6 +1140,35 @@ MV.def('ai/direct', ['core/pins', 'core/paths', 'core/curve', 'core/shot', 'core
     }
   }
 
+  // 「くり返しの行をそろえる」 (DESIGN_2_1 §4.10): a line that takes its looks from an earlier copy (planner/cast
+  // alignments; every cut of it has a source on one line) follows that copy's changes too. Where an answer changes the
+  // same cut slot (a part, its parameters, the text, the motion speed or the camera) on both, the change on the later
+  // copy is left out, so the AI does not undo the switch; a change on the later copy alone stays (a pin wins there).
+  const FOLLOWED = /^(orient|text\.|motion\.speed|cam\.|(arrange|arrive|dwell|depart|lens)([.@]|$)|(ornament|filter)(\.count$|#))/;
+  function followSources(run) {
+    const src = CA.alignments({ ix: run.ix }, run.plan.cuts || []);
+    if (!src || !src.size) return;
+    const lineOf = new Map();
+    for (const line of run.plan.lines || []) {
+      const from = line.cuts.map((k) => (src.get(k) || {}).line || null);
+      if (from.length && from[0] && from.every((x) => x === from[0])) lineOf.set(line.id, from[0]);
+    }
+    const slotsOf = new Map();
+    for (const c of run.changes) {
+      if (!c.lineId || !c.slot) continue;
+      if (!slotsOf.has(c.lineId)) slotsOf.set(c.lineId, new Set());
+      slotsOf.get(c.lineId).add(c.slot);
+    }
+    let dropped = 0;
+    run.changes = run.changes.filter((c) => {
+      const from = c.lineId && c.slot && FOLLOWED.test(c.slot) ? lineOf.get(c.lineId) : null;
+      const keep = !from || !(slotsOf.get(from) && slotsOf.get(from).has(c.slot));
+      if (!keep) dropped++;
+      return keep;
+    });
+    if (dropped) run.warn(['ai.warn.repeatSame', { n: dropped }]);
+  }
+
   // The fields a cut takes (§5.4 CUT_EDIT).
   function cutOnly(set) {
     const out = {};
@@ -1207,6 +1236,7 @@ MV.def('ai/direct', ['core/pins', 'core/paths', 'core/curve', 'core/shot', 'core
     run.workSeason = workSeasonAfter(run, answers);
     const results = answers.map((a) => answerChanges(run, a));
     for (const mat of new Set(run.mats.values())) useChanges(run, mat);
+    followSources(run);
     guard(run);
     return { results, changes: run.changes, warnings };
   }

@@ -203,8 +203,8 @@ test('rules: layouts without camerawork, gentle layouts, short cuts and the role
   assert.ok(none > 50 && gentle > 50 && short > 20 && roles > 20, [none, gentle, short, roles].join(' '));
 });
 
-test('cam.zoom, cam.curve and cam.follow follow their formulas (§4.7)', () => {
-  let n = 0;
+test('cam.zoom, cam.curve and cam.follow follow their formulas (§4.7)', (t) => {
+  let n = 0, pulls = 0, calm = 0, explained = 0;
   for (const { doc } of corpus.corpus(2)) {
     const p = PL.run(doc, CAT, null);
     const A = p.look.amounts.camera, M = p.look.amounts.motion;
@@ -214,9 +214,22 @@ test('cam.zoom, cam.curve and cam.follow follow their formulas (§4.7)', () => {
       let z = q2(N.lerp(0.8, 0.9, N.clamp(0.5 * A + 0.5 * f.energy)) * (f.impact ? 1.05 : 1));
       if (CAT.get('arrange', c.slots.arrange.v).cam === 'gentle' && SHOT.maxFill(shot) > 0) z = Math.min(z, 0.7 / SHOT.maxFill(shot));
       assert.equal(c.slots['cam.zoom'].v, S.coerce(CAM.SLOT_SPECS['cam.zoom'], z), c.key + ' zoom');
-      const curves = f.impact ? ['dashStop', 'holdThenDash'] : f.energy >= 0.65 || (mood.tagBias.fast || 1) > 1.2
+      // Every pullReveal on a cut under 1.8 s takes hushRushHush (§4.7 Parameters, NOTES "Calm short pull-backs"; before,
+      // only a pull the echo gave did), and says so where no echo gave its curve.
+      const own = f.impact ? ['dashStop', 'holdThenDash'] : f.energy >= 0.65 || (mood.tagBias.fast || 1) > 1.2
         ? ['hushRushHush', 'holdThenDash', 'softEnds'] : ['softEnds', 'fadeBrake', 'slowBloom'];
+      const short = shot === 'pullReveal' && f.dur < 1.8;
+      const curves = short ? ['hushRushHush'] : own;
       assert.ok(curves.includes(c.slots['cam.curve'].v), c.key + ' curve ' + c.slots['cam.curve'].v);
+      if (short) {
+        pulls++;
+        if (!own.includes('hushRushHush')) calm++;
+        if (!c.feat.repeatOf && explained < 4) {
+          const why = EX.explain(doc, p, 'cut/' + c.key + ':cam.curve', { registry: CAT }).why.map((w) => w.code);
+          assert.ok(why.includes('cam.shortPull'), c.key + ' why ' + why.join(' '));
+          explained++;
+        }
+      }
       const fast = (CAT.get('arrive', c.slots.arrive.v).tags || []).includes('fast');
       const follow = shot === 'none' || shot === 'wideHold' ? 0 : shot === 'readAlong' ? 0.25
         : q2(N.clamp(0.1 + 0.4 * M + (fast ? 0.1 : 0)));
@@ -225,7 +238,8 @@ test('cam.zoom, cam.curve and cam.follow follow their formulas (§4.7)', () => {
       n++;
     }
   }
-  assert.ok(n > 500);
+  t.diagnostic(n + ' cuts; ' + pulls + ' pulls under 1.8 s (' + calm + ' on a list without hushRushHush)');
+  assert.ok(n > 500 && pulls > 20 && calm > 5 && explained === 4, [n, pulls, calm, explained].join(' '));
 });
 
 test('motion.speed divides the unpinned durations and staggers of arrive and depart and speeds up the hold (§4.3)', () => {
@@ -476,8 +490,8 @@ function inheritable(reg, p, c, o, prev) {
   if (framesOf(reg, c) && !framesOf(reg, o)) return null;
   return prev === v ? null : v;
 }
-// The curves a cut draws from (§4.7 Parameters); shot = a pullReveal the echo gave it: on a cut under 1.8 s only
-// hushRushHush, whatever the cut's own list.
+// The curves a cut draws from (§4.7 Parameters); shot = a pullReveal: on a cut under 1.8 s only hushRushHush, whatever
+// gave it (the weights, the echo, a pin) and the cut's own list.
 const SHORT_PULL = 'hushRushHush';
 function ownCurves(c, mood) {
   const bias = mood.tagBias && typeof mood.tagBias.fast === 'number' ? mood.tagBias.fast : 1;
@@ -688,24 +702,26 @@ test('a repeated line takes the shot and curve of its first sung copy wherever i
   t.diagnostic('inherited ' + inherited + ' shots (' + curves + ' with their curve; ' + shortPulls + ' short pulls, ' + calmed +
     ' of them after a first copy on another curve); a line sung twice in a row after a moving shot ' + pairs +
     ', the same move back to back ' + back + ' (snapZoom aside)');
-  assert.ok(inherited > 1500 && curves > 800 && explained === 6 && calmed >= 10, [inherited, curves, explained, calmed].join(' '));
+  // Since every short pull takes hushRushHush (NOTES "Calm short pull-backs"), a first copy under 1.8 s shows it too, so
+  // few inherited short pulls follow a first copy on another curve (none here; 91 of 149 before that rule).
+  assert.ok(inherited > 1500 && curves > 800 && explained === 6 && shortPulls >= 100, [inherited, curves, explained, shortPulls].join(' '));
   assert.ok(pairs > 150 && back < 0.1 * pairs, 'back to back ' + back + ' of ' + pairs);
 });
 
-// Short pulls the echo gives, on real plans with calm curve lists: the sample lyrics with a second サビ and the demo
-// song (the fixture's), whose later choruses fall on quieter passages, in four calm moods. Every pullReveal under 1.8 s
-// that a repeat shows because of the echo (its shot's why names it: inherited, or picked with the ×40 echo) takes
-// hushRushHush, and its curve's why says so ('cam.shortPull', or the echo where its first copy's curve is hushRushHush
-// too); a short pull the echo did not give keeps its own list. Round 4 left fadeBrake and slowBloom on the calm list,
-// which put the pull at 1.9 × its mean speed at its first or last frame (its review: with the demo song, 25 of 95 such
-// pulls still zoomed out fast, zoom rate over 3). Here 48 plans: 13 short pulls the echo gave, all on a calm list
-// (341d470 gives fadeBrake or slowBloom there), and 16 other short pulls on repeats.
-test('repeats: a short pull the echo gives takes hushRushHush, on calm curve lists too', (t) => {
+// Short pulls on real plans with calm curve lists: the sample lyrics with a second サビ and the demo song (the
+// fixture's), whose later choruses fall on quieter passages, in four calm moods. Every pullReveal under 1.8 s takes
+// hushRushHush, whatever gave it, and its curve's why says so ('cam.shortPull', or the echo where its first copy's curve
+// is hushRushHush too). Round 5 of the echo work gave that curve only to the pulls the echo gives (inherited, or picked
+// with the ×40 echo); the others kept their own list, and on cuts of about 1 s they made most of the calmest mood's fast
+// zoom-outs (NOTES "Calm short pull-backs"). Round 4 left fadeBrake and slowBloom on the calm list, which put the pull at
+// 1.9 × its mean speed at its first or last frame. Here 48 plans: 13 short pulls the echo gave (all on a calm list) and
+// 113 others, 16 of them on repeats and 72 on a calm list (1c303e6 gives those 113 their own list).
+test('every short pull takes hushRushHush, on calm curve lists too, whatever gave it', (t) => {
   const LY = MV.use('core/lyrics');
   const rows = LY.SAMPLE_JA.split('\n');
   const sabi = rows.slice(rows.indexOf('# サビ'), rows.indexOf('# Bメロ'));
   const lyrics = rows.slice(0, rows.indexOf('# 大サビ')).concat(sabi, rows.slice(rows.indexOf('# 大サビ')));
-  let plans = 0, given = 0, calm = 0, own = 0;
+  let plans = 0, given = 0, calm = 0, others = 0, onRepeats = 0, othersCalm = 0;
   for (const mood of ['quietHush', 'heartAche', 'dreamHaze', 'printColumn']) {
     for (const [aspect, s] of ['16:9', '9:16', '1:1'].flatMap((a) => [0, 1, 2, 3].map((k) => [a, k]))) {
       const doc = corpus.project('basic').doc;
@@ -716,24 +732,22 @@ test('repeats: a short pull the echo gives takes hushRushHush, on calm curve lis
       const md = CAT.get('mood', p.look.mood.v);
       plans++;
       for (const c of p.cuts) {
-        if (!c.feat.repeatOf || shotOf(c) !== 'pullReveal' || !(c.feat.dur < 1.8)) continue;
+        if (shotOf(c) !== 'pullReveal' || !(c.feat.dur < 1.8)) continue;
         const where = mood + ' ' + aspect + ' ' + c.key + ' (' + c.feat.dur.toFixed(2) + ' s)';
-        const curve = c.slots['cam.curve'].v;
-        if (!echoOf(EX.explain(doc, p, 'cut/' + c.key + ':cam.shot', { registry: CAT }).why)) {
-          assert.ok(ownCurves(c, md).includes(curve), where + ': not given by the echo, its own curve ' + curve);
-          own++;
-          continue;
-        }
         const codes = EX.explain(doc, p, 'cut/' + c.key + ':cam.curve', { registry: CAT }).why.map((w) => w.code);
-        assert.equal(curve, SHORT_PULL, where);
+        assert.equal(c.slots['cam.curve'].v, SHORT_PULL, where);
         assert.ok(codes.includes('cam.shortPull') || codes.includes('echo'), where + ': why ' + codes.join(' '));
-        given++;
-        if (!ownCurves(c, md).includes(SHORT_PULL)) calm++;
+        const fromEcho = !!c.feat.repeatOf && !!echoOf(EX.explain(doc, p, 'cut/' + c.key + ':cam.shot', { registry: CAT }).why);
+        if (fromEcho) { given++; if (!ownCurves(c, md).includes(SHORT_PULL)) calm++; continue; }
+        others++;
+        if (c.feat.repeatOf) onRepeats++;
+        if (!ownCurves(c, md).includes(SHORT_PULL)) othersCalm++;
       }
     }
   }
-  t.diagnostic(plans + ' plans: ' + given + ' short pulls the echo gave (' + calm + ' on a calm list), ' + own + ' other short pulls on repeats');
-  assert.ok(given >= 8 && calm >= 5, [given, calm].join(' '));
+  t.diagnostic(plans + ' plans: ' + given + ' short pulls the echo gave (' + calm + ' on a calm list), ' + others + ' others (' +
+    onRepeats + ' on repeats, ' + othersCalm + ' on a calm list)');
+  assert.ok(given >= 8 && calm >= 5 && others >= 30 && othersCalm >= 10, [given, calm, others, othersCalm].join(' '));
 });
 
 // Rerolls and repeats (§4.7 "Repeated lines", rule 6 and Stability): a reroll of the first copy, or a die on its lens,
