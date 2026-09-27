@@ -257,12 +257,12 @@ for (const [RN, SYN] of REGISTRIES) {
   // DESIGN_2_1 §4.7 "Stability": inserting a line changes ≤ 4 other cuts' shots, rerolling a cut ≤ 3. A shot weighs
   // against the previous cut's *final* shot (hist.previous, FROZEN), so a changed shot can, rarely, pass the change on
   // down a run of cuts; the line before an inserted line also gets a shorter span, so new features. And a line sung
-  // again takes the natural shot of its first sung copy (the echo, §7.3): when an insertion changes the shot of a first
-  // copy, its repeats follow it. Those followers (a changed cut whose feat.repeatOf cut changed too) are the echo at
-  // work; they are counted apart, and the §4.7 bound holds the other changes. With the constants of goldens step (b)
-  // (echo ×40, recency ×0.2 and ×0.5; NOTES "Step (b): automatic camerawork"), insertions with starts pinned over corpus
-  // seeds 3–29 (972 per registry, not the tested sample) change more than 4 other cuts about 1.8 times as often as
-  // before step (b) (echo ×3): 3.1 % against 1.7 %, the followers included; without them as often as before (0.7 %).
+  // again inherits the shot of its first sung copy (§4.7 "Repeated lines"): when an insertion changes the shot of a
+  // first copy, its repeats follow it. Those followers (a changed cut whose feat.repeatOf cut changed too) are the
+  // repeated line at work; they are counted apart, and the §4.7 bound holds the other changes. A rerolled shot does
+  // not reach them: what repeats inherit is the shot without salts (planner/cast `unsaltedCast`); the reroll test below
+  // counts every changed cut, followers included, and the test after it checks that a salt reaches later shots only
+  // through their parts, their span or the shot right before them.
   const shotText = (c) => JSON.stringify(c.slots['cam.shot'].v);
   function shotChanges(a, b, skipLine) {
     const before = new Map(a.cuts.map((c) => [c.key, c]));
@@ -275,16 +275,48 @@ for (const [RN, SYN] of REGISTRIES) {
     const byKey = new Map(b.cuts.map((c) => [c.key, c]));
     return changed.filter((k) => changed.includes(byKey.get(k).feat.repeatOf));
   }
+  // The changed cuts right after a changed follower that are not followers themselves: they may not repeat the move
+  // their neighbour now plays (×0.2 against the previous cut's final shot, §4.7).
+  function relaysOf(b, changed, followers) {
+    const at = new Map(b.cuts.map((c, i) => [c.key, i]));
+    return changed.filter((k) => !followers.includes(k) && at.get(k) > 0 && followers.includes(b.cuts[at.get(k) - 1].key));
+  }
+  // Of those, the ones that show their first copy's new shot: the same choice, inherited, not a change of their own.
+  function inheritors(b, followers) {
+    const byKey = new Map(b.cuts.map((c) => [c.key, c]));
+    return followers.filter((k) => shotText(byKey.get(k)) === shotText(byKey.get(byKey.get(k).feat.repeatOf)));
+  }
 
   // With line starts pinned only the chooser is at work; with automatic timing the moved lines also get new features
-  // (duration, energy), which the §4.7 weights read, so the bound is the one of the part choices above. `all` bounds
-  // every changed cut (as before step (b)); `own` the changes that are not echo followers, set so that every 3-seed
-  // window of corpus seeds 0–29 passes (NOTES "Step (b)").
+  // (duration, energy), which the §4.7 weights read, so the bound is the one of the part choices above. The bound
+  // values are those of goldens step (b) (NOTES "Step (b)"); the echo's followers are counted apart. `all` bounds every
+  // changed cut but the followers that show their first copy's new shot: the same choice, inherited (§7.3 at work: the
+  // later copies keep matching the first). `own` bounds the changes that are neither followers nor the cut right after
+  // a changed follower (a relay: it weighs ×0.2 against the shot the follower now shows, so that the two neighbours do
+  // not play one move back to back, and it was held off the follower's old shot the same way). To the user who inserts
+  // a line, a first copy near it that changes carries its repeats along, and the cut right next to each repeat moves
+  // with it: one change in the later chorus, at the repeat, not a change of its own somewhere else. A change 2–4 cuts
+  // after a follower still counts: since round 3 of the review a repeat's natural shot, which the near set of those
+  // cuts reads, is its own pick, so they no longer relay (1dcb103 recorded the inherited shot there, and its `own`
+  // went over the bound in 21 of the 324 windows below).
+  // Measured on corpus seeds 3–29, 30–59 and 90–119 (not the tested sample; 100 + 112 + 112 three-seed windows of this
+  // test's size over the two registries and timings), `own` exceeds its bound in 1 / 0 / 0 windows (worst 8 / 6 / 6
+  // other cuts), 382dce0 in 1 / 0 / 2 (worst 8 / 6 / 9). Counted with the relays, the cost of the inheritance shows:
+  // 7 / 3 / 0 windows (worst 9 / 7 / 6), pooled 10 of 324 against 3 of 324 for 382dce0; the diagnostic prints that
+  // count too. `all` exceeds its bound in 8 / 3 / 6 windows (worst 12 / 8 / 8); 382dce0, which counted every changed
+  // cut, in 22 / 27 / 26. On seeds 3–29, pinned / automatic timing: `all` over 4 in 1.0 % / 0.3 % (synthetic; worst
+  // 6 / 9) and 1.5 % / 0.9 % (catalog; worst 11 / 12), where before the inheritance every changed cut gave 3.5 % / 0.4 %
+  // (7 / 6) and 2.7 % / 2.0 % (15 / 12); every changed cut, the inheritors included, now goes over 4 in up to 5.6 %
+  // (worst 20–29: a line sung five times with two cuts per line carries up to 8 cuts along with its first copy;
+  // followers 351 / 165 and 208 / 174, against 166 / 33 and 123 / 88). `own` over 4 in 0.1 % / 0.1 % (worst 5 / 5)
+  // and 0.7 % / 0.3 % (worst 6 / 8), against 0.4 % / 0.1 % (5 / 5) and 1.0 % / 0.3 % (6 / 8); with the relays 0.1 % /
+  // 0.2 % (5 / 6) and 1.1 % / 0.4 % (7 / 9). The tested sample (seeds 0–2) passes either way (NOTES "Echo of repeated
+  // lines", round 3).
   test(RN + ': inserting a line changes at most 4 other cuts\' shots besides the echoes of a changed first copy', (t) => {
     for (const [timing, bound] of [['anchored', { all: { worst: 7, share: 0.05 }, own: { worst: 6, share: 0.03 } }],
       ['auto', { all: { worst: 9, share: 0.15 }, own: { worst: 8, share: 0.02 } }]]) {
-      let cases = 0;
-      const all = { over: 0, worst: { n: -1 } }, own = { over: 0, worst: { n: -1 } };
+      let cases = 0, relayed = 0;
+      const all = { over: 0, worst: { n: -1 } }, own = { over: 0, worst: { n: -1 } }, withRelays = { over: 0, worst: { n: -1 } };
       const count = (acc, keys, where) => {
         if (keys.length > 4) acc.over++;
         if (keys.length > acc.worst.n) acc.worst = { n: keys.length, where: where + ': ' + keys.join(' ') };
@@ -296,15 +328,20 @@ for (const [RN, SYN] of REGISTRIES) {
         for (const k of [1, rows.length >> 1, rows.length - 1]) {
           const { doc: edited, id } = insertLine(base, rows[k]);
           const b = PL.run(edited, SYN, null);
-          const changed = shotChanges(a, b, id), followers = echoFollowers(b, changed);
+          const changed = shotChanges(a, b, id), followers = echoFollowers(b, changed), inherited = inheritors(b, followers);
+          const relays = relaysOf(b, changed, followers);
           const where = timing + ' ' + name + ' row ' + rows[k];
           cases++;
-          count(all, changed, where);
-          count(own, changed.filter((key) => !followers.includes(key)), where + ' (without the echo followers)');
+          relayed += relays.length;
+          count(all, changed.filter((key) => !inherited.includes(key)), where + ' (without the inheriting followers)');
+          count(own, changed.filter((key) => !followers.includes(key) && !relays.includes(key)), where + ' (without the echo followers and the cut right after each)');
+          count(withRelays, changed.filter((key) => !followers.includes(key)), where);
         }
       }
-      t.diagnostic('shots, ' + timing + ': ' + all.over + ' of ' + cases + ' insertions changed more than 4 other cuts (worst ' +
-        all.worst.n + '); without the echo followers ' + own.over + ' (worst ' + own.worst.n + ')');
+      t.diagnostic('shots, ' + timing + ': ' + all.over + ' of ' + cases + ' insertions changed more than 4 other cuts besides the ' +
+        'followers that took their first copy\'s shot (worst ' + all.worst.n + '); without any follower and the cut right after ' +
+        'each ' + own.over + ' (worst ' + own.worst.n + '); with that cut (' + relayed + ' of them) ' + withRelays.over + ' (worst ' +
+        withRelays.worst.n + ')');
       for (const [acc, lim] of [[all, bound.all], [own, bound.own]]) {
         assert.ok(acc.worst.n <= lim.worst, acc.worst.where);
         assert.ok(acc.over <= cases * lim.share, timing + ': ' + acc.over + ' of ' + cases);
@@ -312,8 +349,17 @@ for (const [RN, SYN] of REGISTRIES) {
     }
   });
 
+  // Every changed cut counts here, the followers included; the diagnostic gives the count without them too. Since round
+  // 4 of the review what a first copy passes on is its shot in the plan without salts (the salt-free re-cast goes on
+  // over the cuts whose parts the reroll reached), so a reroll moves a first copy's repeats only where it changes a
+  // span. Over corpus seeds 3–29, 30–59 and 90–119 (catalog, 3,356 / 3,732 / 3,705 rerolls), 1 / 0 / 1 rerolls change
+  // more than 3 other cuts (worst 4 / 3 / 4), and none of the 26 / 29 / 29 two-seed windows exceeds the bound; followers
+  // 4 / 2 / 5. Round 3 (669aa12): 8 / 14 / 15 (worst 8 / 6 / 13; its worst, long@16:9#105 rerolling rg~0, changed the
+  // next cut's layout, and that cut and two first copies after it passed other shots on to 10 repeats), windows over
+  // 2 / 2 / 2, followers 52 / 69 / 75; 382dce0: 19 / 17 / 17 (worst 8 / 5 / 7), windows over 7 / 0 / 8. With the
+  // synthetic parts 0.0 / 0.1 / 0.2 % (worst 4 / 5 / 4), as on 382dce0 and in round 3.
   test(RN + ': rerolling a cut changes at most 3 other cuts\' shots (a few more in rare relays)', (t) => {
-    let cases = 0, over = 0, worst = { n: -1 };
+    let cases = 0, over = 0, worst = { n: -1 }, overOwn = 0, worstOwn = -1, followed = 0;
     for (const { name, doc } of corpus.corpus(2)) {
       const a = PL.run(doc, SYN, null);
       const step = Math.max(2, Math.floor(a.cuts.length / 10));
@@ -321,16 +367,119 @@ for (const [RN, SYN] of REGISTRIES) {
         const key = a.cuts[i].key;
         const rolled = JSON.parse(JSON.stringify(doc));
         rolled.salts = Object.assign({}, rolled.salts, { ['cut/' + key]: (rolled.salts['cut/' + key] || 0) + 1 });
-        const others = shotChanges(a, PL.run(rolled, SYN, null), null).filter((k) => k !== key);
+        const b = PL.run(rolled, SYN, null);
+        const changed = shotChanges(a, b, null);
+        const others = changed.filter((k) => k !== key);
+        const own = others.filter((k) => !echoFollowers(b, changed).includes(k));
         cases++;
+        followed += others.length - own.length;
         if (others.length > 3) over++;
+        if (own.length > 3) overOwn++;
+        worstOwn = Math.max(worstOwn, own.length);
         if (others.length > worst.n) worst = { n: others.length, where: name + ' ' + key + ': ' + others.join(' ') };
       }
     }
-    t.diagnostic('shots: ' + over + ' of ' + cases + ' rerolls changed more than 3 other cuts; worst ' + worst.n);
+    t.diagnostic('shots: ' + over + ' of ' + cases + ' rerolls changed more than 3 other cuts (worst ' + worst.n + '); followers ' +
+      followed + '; without them ' + overOwn + ' (worst ' + worstOwn + ')');
     assert.ok(cases > 200);
     assert.ok(worst.n <= 5, worst.where);
     assert.ok(over <= cases * 0.02, over + ' of ' + cases);
+  });
+
+  // DESIGN_2_1 §4.7 "Stability": a cut's natural shot, which the near set (×0.5) of the cuts 2–4 after it reads, is its
+  // own pick, without recency and without the echo, so it does not follow a first copy. When a first copy's shot
+  // changes (here: pinned to another preset), its repeats follow it, the cut right after a changed cut may move (×0.2
+  // against its new final shot), and the 4 cuts after the first copy itself may; nothing else. 1dcb103 recorded a
+  // repeat's inherited shot as its natural shot, and the cuts 2–4 after each follower moved too (here 31 cuts with the
+  // synthetic parts, 16 with the catalog): the relays that made insertions less local outside the tested sample (NOTES
+  // "Echo of repeated lines", round 3).
+  test(RN + ': a changed first copy moves its repeats and the cut right after a changed cut, and nothing else far away', (t) => {
+    let firsts = 0, changed = 0, followers = 0;
+    const far = [];
+    for (const { name, doc } of corpus.corpus(1)) {
+      const a = PL.run(doc, SYN, null);
+      const at = new Map(a.cuts.map((c, i) => [c.key, i]));
+      for (const key of new Set(a.cuts.filter((c) => c.feat.repeatOf).map((c) => c.feat.repeatOf))) {
+        const first = a.cuts[at.get(key)];
+        const pinned = JSON.parse(JSON.stringify(doc));
+        pinned.pins['cut/' + key + ':cam.shot'] = { v: first.slots['cam.shot'].v === 'settle' ? 'tiltHold' : 'settle', by: 'user', sig: first.text };
+        const b = PL.run(pinned, SYN, null);
+        const moved = b.cuts.map((c, j) => shotText(c) !== shotText(a.cuts[j]));
+        const fi = at.get(key);
+        firsts++;
+        b.cuts.forEach((c, j) => {
+          if (!moved[j] || j === fi) return;
+          changed++;
+          if (c.feat.repeatOf && moved[at.get(c.feat.repeatOf)]) { followers++; return; }
+          if ((j > fi && j - fi <= 4) || (j > 0 && moved[j - 1])) return;
+          far.push(name + ' pin ' + key + ' → ' + c.key + ' (+' + (j - fi) + ')');
+        });
+      }
+    }
+    t.diagnostic(firsts + ' first copies pinned; ' + changed + ' cuts changed, ' + followers + ' of them followers');
+    assert.ok(firsts > 100 && followers > 200, firsts + ' / ' + followers);
+    assert.deepEqual(far, []);
+  });
+
+  // DESIGN_2_1 §4.7 "Stability": what the cuts after a cut read of its shot (its natural shot, which the near set of the
+  // 3 cuts after the next one reads; its shadow, for the next cut's heir; its heir, which its repeats inherit) is its
+  // shot without salts (planner/cast unsaltedCast), and since round 4 of the review exactly the shot of the plan without
+  // salts: the salt-free re-cast goes on over every cut whose history differs from its salt-free twins (a cut after a
+  // salted one reads the salted cut's twin, and a cut whose parts come out otherwise without salts keeps a twin too). So
+  // a salt reaches a later cut's shot only through that cut's own parts (orientation, layout, lens), a changed span
+  // anywhere (other features, so another plan without salts) or the final shot of the cut right before it (×0.2).
+  // Wherever no span changed, a cut whose own orientation, layout and lens did not change, after a cut that shows the
+  // same shot, shows the same shot, even where the salt changed other cuts' parts. That is what round 4 adds: round 3
+  // re-cast an unsalted cut's camera alone over its Plan parts, so a first copy whose layout or lens followed the salt
+  // (the v2 path) passed another shot on to its repeats far away, often a shot that neither plan shows (669aa12, round
+  // 3, catalog: 31 later cuts moved here, 27 of them after line rerolls). Earlier rounds: the natural shot of a salted cut came
+  // from its natural pass (4dedf02), and each cut of a rerolled line was re-cast over the salted picks of the cut before
+  // it (1dcb103). Salted here: a reroll and a 寄り die of every tenth cut, and a reroll of that cut's line and of every
+  // line holding a first copy. For a line salt, the line's own cuts are the salted ones: they may change anything. Lock
+  // pins are left out: a locked cut shows its pins while its neighbours read it without them (§3.6), another path.
+  const CAM_PARTS = ['orient', 'arrange', 'lens'];
+  test(RN + ': a salt reaches later shots only through their own parts, a span or the shot right before them', (t) => {
+    let salts = 0, clean = 0, beside = 0, checked = 0, checkedBeside = 0, lines = 0;
+    const moved = [];
+    for (const { name, doc: source } of corpus.corpus(2)) {
+      const doc = JSON.parse(JSON.stringify(source));
+      for (const path of Object.keys(doc.pins || {})) if (doc.pins[path].by === 'lock') delete doc.pins[path];
+      const a = PL.run(doc, SYN, null);
+      const byKey = new Map(a.cuts.map((c) => [c.key, c]));
+      const step = Math.max(2, Math.floor(a.cuts.length / 10));
+      const cases = [];
+      const rolledLines = new Set(a.cuts.filter((c) => c.feat.repeatOf).map((c) => byKey.get(c.feat.repeatOf).line).filter(Boolean));
+      for (let i = 0; i < a.cuts.length; i += step) {
+        cases.push([i, 'cut/' + a.cuts[i].key], [i, 'cut/' + a.cuts[i].key + ':cam.zoom']);
+        if (a.cuts[i].line) rolledLines.add(a.cuts[i].line);
+      }
+      for (const line of rolledLines) cases.push([a.cuts.findIndex((c) => c.line === line), 'line/' + line]);
+      for (const [i, salt] of cases) {
+        const line = salt.startsWith('line/') ? a.cuts[i].line : null;
+        const own = (j) => (line ? a.cuts[j].line === line : j === i);
+        const rolled = JSON.parse(JSON.stringify(doc));
+        rolled.salts = Object.assign({}, rolled.salts, { [salt]: (rolled.salts[salt] || 0) + 1 });
+        const b = PL.run(rolled, SYN, null);
+        salts++;
+        if (line) lines++;
+        const spans = b.cuts.length !== a.cuts.length || b.cuts.some((c, j) => c.key !== a.cuts[j].key || c.t0 !== a.cuts[j].t0 ||
+          c.t1 !== a.cuts[j].t1);
+        if (spans) continue;
+        const parts = (j) => CAM_PARTS.some((s) => valueOf(b.cuts[j], s) !== valueOf(a.cuts[j], s));
+        const elsewhere = b.cuts.some((c, j) => !own(j) && parts(j));
+        if (elsewhere) beside++; else clean++;
+        for (let j = i + 1; j < b.cuts.length; j++) {
+          if (own(j) || parts(j) || shotText(b.cuts[j - 1]) !== shotText(a.cuts[j - 1])) continue;
+          checked++;
+          if (elsewhere) checkedBeside++;
+          if (shotText(b.cuts[j]) !== shotText(a.cuts[j])) moved.push(name + ' ' + salt + ' → ' + b.cuts[j].key + ' (+' + (j - i) + ')');
+        }
+      }
+    }
+    t.diagnostic('salts ' + salts + ' (' + lines + ' lines), of them without a span change ' + (clean + beside) + ' (' + beside +
+      ' with a part change elsewhere); later cuts checked ' + checked + ' (' + checkedBeside + ' of them beside a part change)');
+    assert.ok(clean > 400 && beside > 50 && checked > 30000 && checkedBeside > 2000, [clean, beside, checked, checkedBeside].join(' / '));
+    assert.deepEqual(moved, []);
   });
 
   test(RN + ': field dice (a slot salt) change that slot of that cut, and at most the next cut (two for arrive)', () => {
