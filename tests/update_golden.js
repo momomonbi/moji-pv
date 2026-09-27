@@ -22,6 +22,8 @@
 //                     background, a photo frame, a text fill and a video background; DESIGN_2_1 §7.5 step (c)), planned
 //                     with its effective registry (materials and pooled media) and rendered like the frames above with
 //                     the fake asset store, so its op hashes include the media times ('media:<id>@<m>#<index>').
+//   project_repeat.json { "registry": …, "measurer": "fake", "plan": "<plan.hash>", "frames": [40 hashes] }
+//                     the 'repeat' fixture: 「くり返しの行をそろえる」 on (DESIGN_2_1 §4.10), rendered like the frames above.
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -86,6 +88,11 @@ async function frameHashes(reg, prepare = (doc) => doc) {
   return frames;
 }
 
+async function repeatGolden(reg, info) {
+  const r = await renderDoc(reg, corpus.project('repeat').doc, null);
+  return { registry: info, measurer: 'fake', plan: r.plan, frames: r.frames };
+}
+
 async function mediaGolden(reg, info) {
   const r = await renderDoc(reg, FM.goldenDoc(corpus.project('media').doc), FM.createFakeMedia(MV));
   return { registry: info, measurer: 'fake', media: 'fake', plan: r.plan, frames: r.frames };
@@ -112,6 +119,8 @@ async function main() {
       make: async () => ({ registry: info, measurer: 'fake', frames: await frameHashes(reg) }) },
     { file: 'project_media.json', needs: ENGINE.concat(['planner/plan', 'parts/mix']),
       empty: { registry: null, measurer: 'fake', media: 'fake', plan: null, frames: [] }, make: () => mediaGolden(reg, info) },
+    { file: 'project_repeat.json', needs: ENGINE.concat(['planner/plan']),
+      empty: { registry: null, measurer: 'fake', plan: null, frames: [] }, make: () => repeatGolden(reg, info) },
   ];
   let failed = false;
   fs.mkdirSync(GOLDEN, { recursive: true });

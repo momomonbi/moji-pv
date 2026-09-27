@@ -83,6 +83,8 @@ they touch.
    - Presets and a closeness slider sit one level deeper. Keyframes sit deepest.
    - The camera moves *while* the text animates, because shot keys are anchored to the entrance, the sung start, the
      emphasis and the beats.
+   - 作品全体 › 見た目 › 「くり返しの行をそろえる」 (off by default; §4.10) shows a line sung again as it was the first
+     time: its layout, text, motions, lens, camera and background.
 2. **Speed curves (緩急) everywhere something moves over time.** This covers text entrances and exits, their stagger, holds,
    camera moves and transitions. The choices are:
    - presets such as 「一瞬ゆっくり→すごく速く→一瞬ゆっくり」;
@@ -342,6 +344,7 @@ and in the `.mojipv` package (§12). There are at most 200 entries, and the ids 
 |---|---|---|---|
 | `season` | `any`, `none`, `spring`, `summer`, `autumn` or `winter` | none (the line follows the work season) | Scopes: **line and work**. `work:season` is the existing work slot and is unchanged. `pin.promote` line → work is allowed. |
 | `avoid` | PartRefs: sorted unique `"kind.key"` list, ≤ 24 | none | Line only. It excludes parts from the line's auto pools (§4.9). Pins still win. |
+| `repeat.same` | boolean | none (off) | 「くり返しの行をそろえる」 (§4.10). Scopes: **work and line**, never a cut. A line pin decides for that line alone; `pin.promote` line → work is allowed. Only `true` switches it on. Not copied by `pin.copy`. |
 
 **Scope table** (`ui/fields.slotScopes`, `core/commands` rules):
 
@@ -350,6 +353,7 @@ and in the `.mojipv` package (§12). There are at most 200 entries, and the ids 
 | `motion.speed`, `cam.shot`, `cam.zoom`, `cam.curve`, `cam.follow`, `rig`, `rig.curve` | cut, line, work |
 | `season` | line, work |
 | `avoid` | line |
+| `repeat.same` | line, work |
 | new shared params (`arrive.flow`, `dwell.curve`, …) | cut, line, work (the existing part-param rule) |
 
 ### 2.4 Value grammars (FROZEN; canonical forms produced by `coerce`)
@@ -418,7 +422,7 @@ Modules that must learn the new names are listed in §3. In short:
 | `material.put` | `id, kind, name, blurb?, tags?, season?, pool?, by, recipe` | `id === 'm' + next.toString(36)` creates an entry and increments `next`. An existing id replaces the entry (its `kind` must match). The stored recipe is `recipe.normalize(kind, recipe).recipe` and the stored `rv` is `RECIPE_V`. It throws `CommandError('payload')` when `entryProblems`/`problems` report errors or a cap (§2.1) would be exceeded. An unchanged entry returns the same doc. |
 | `material.meta` | `id, name?, blurb?, tags?, season?, pool?` | metadata only; same validation |
 | `material.remove` | `id` | Removes the entry and cleans every reference to key `k = 'myMat' + id.slice(1)`: pins whose value is `k`; pins whose slot is part-qualified with `@k`; `"<kind>.k"` items of `avoid` pins (an emptied list removes the pin). `next` is kept. |
-| `pin.set` | unchanged | Also refused (`payload`): `cut/…:season`, `cut/…:avoid`, `work:avoid`. |
+| `pin.set` | unchanged | Also refused (`payload`): `cut/…:season`, `cut/…:avoid`, `cut/…:repeat.same`, `work:avoid` (the same check refuses such a path in `lock.set`). |
 | `pin.promote` | unchanged | `season` may move line → work. `avoid` never moves. |
 | `pin.copy` | unchanged | `copyable` adds `motion.speed` and `cam.*`. New shared params are part params and are already copied. `rig*`, `season` and `avoid` are not copied (area-level). |
 
@@ -490,7 +494,7 @@ The reducers stay pure. `material.*` reducers call only `core/recipe`, which is 
 | `cam.words {n}` | number of words |
 | `cam.long` | long cut |
 | `cam.short` | short cut |
-| `cam.shortPull` | a `pullReveal` the echo gave a cut under 1.8 s takes `hushRushHush`: the curves that cram the move into a short stretch are left out (§4.7 Parameters) |
+| `cam.shortPull` | a `pullReveal` on a cut under 1.8 s takes `hushRushHush`: the curves that cram the move into a short stretch are left out (§4.7 Parameters) |
 | `cam.section {section}` | the song section |
 | `cam.sectionStart` | first cut of a section |
 | `cam.lens {key}` | a framing lens is already chosen |
@@ -501,8 +505,10 @@ The reducers stay pure. `material.*` reducers call only `core/recipe`, which is 
 | `season.line {season}` | the line's own season |
 | `avoid {n}` | the line's avoid list |
 | `echo.kept {cut}` | a repeated line's shot or curve matches its first sung copy as that copy would be without rerolls or locks, not as it shows now (§4.7 "Repeated lines"; a curve counts as shown only on the shot it moves); `echo {cut}` where it shows the same |
+| `repeat.same {cut}` | 「くり返しの行をそろえる」: the value was taken from that earlier copy (§4.10) |
 
-**Rule names:** `carry`, `speed`, `gentle`, `none-camera` (amount < 0.1), `role`.
+**Rule names:** `carry`, `speed`, `gentle`, `none-camera` (amount < 0.1), `role`, `repeat.same` (the opt-in of §4.10 is
+off at this cut).
 
 **Media codes:** the warnings `media-missing` and `media-kind`, and the why codes `media.pool` and `media.pin`
 (§11.2.6).
@@ -1340,27 +1346,25 @@ by design (§7.3).
   - `f.energy ≥ 0.65` or `mood.tagBias.fast > 1.2` → `hushRushHush` 3, `holdThenDash` 2, `softEnds` 1;
   - otherwise → `softEnds` 3, `fadeBrake` 2, `slowBloom` 1.
 
-  A `pullReveal` the echo gives a cut shorter than 1.8 s (`SHORT_PULL`; inherited, or picked with the ×40 echo toward
-  it) takes `hushRushHush`, whatever its list, and its why says `cam.shortPull`
+  Every `pullReveal` on a cut shorter than 1.8 s (`SHORT_PULL`), whatever gave it (the weights, the echo, a pin of the
+  shot), takes `hushRushHush`, whatever its list, and its why says `cam.shortPull`
   (「短いカットで引くので、動きを短い間に詰めこむ緩急は避けた」), or `echo` when its first copy's curve is `hushRushHush`
-  too. A pull from a copy that had more time turned into a fast zoom-out on the short repeat where its curve bunched the
-  move (NOTES "Echo of repeated lines", rounds 4 and 5). Of the curves that start and end slowly, `hushRushHush` has the
-  lowest top speed: 1.4 × the move's mean speed, against 2.5 for `softEnds` and 2.4 for `holdThenDash`. `fadeBrake` and
-  `slowBloom` reach 1.9 × at the first or the last frame. `dashStop` (1.2 ×, the impact list's) runs at its top speed
-  from the cut's first frame into a sudden stop. Round 4 only left out `softEnds` and `holdThenDash`, so a calm list
-  still gave `fadeBrake` or `slowBloom`. Over the 374 such pulls of the sample-lyrics plans in NOTES (four songs,
-  2,304 plans; the browser's measure), fast zoom-outs (zoom rate over 3) went from 47 in round 4 to 20, and on calm
-  lists from 29 of 136 to 2. The why names what the rule leaves out, not a calmness the result may lack: on a cut of
-  about 1 s even `hushRushHush` zooms out fast now and then. An impact cut's curve why then names no impact (its curve
-  does not come from the impact list), and a die on its 緩急 leaves the curve as it is (the rule has one value). Every
-  other cut keeps its list. The same rule for every short `pullReveal` is the owner's to decide: it changes the camera
-  slots of every document.
+  too. A pull that has little time turns into a fast zoom-out where its curve bunches the move. Of the curves that start
+  and end slowly, `hushRushHush` has the lowest top speed: 1.4 × the move's mean speed, against 2.5 for `softEnds` and
+  2.4 for `holdThenDash`. `fadeBrake` and `slowBloom` reach 1.9 × at the first or the last frame. `dashStop` (1.2 ×, the
+  impact list's) runs at its top speed from the cut's first frame into a sudden stop. An impact cut's curve why then
+  names no impact (its curve does not come from the impact list), and a die on its 緩急 leaves the curve as it is (the
+  rule has one value). A pinned 緩急 wins, as always. Under 「くり返しの行をそろえる」 (§4.10) a repeat that takes its
+  source's pull keeps the source's curve only where it is `hushRushHush` (or pinned).
 
-  Over those 2,304 plans, fast zoom-outs number 1,288 on 382dce0, 1,267 in round 4 and 1,240 now. Fast pans (the focus
-  point faster than 1.5 frame widths a second) number 1,051 / 1,049 / 1,040. The calmest mood still gets more of both.
-  quietHush has 121 / 136 / 133 fast zoom-outs (+10 % over 382dce0) and 91 / 107 / 105 fast pans (+15 %; 14 new, none
-  gone). They come from pulls on cuts of about 1 s that no curve slows enough, and from relays: the cut after a changed
-  one takes a `pullReveal` on a 1.0 s cut.
+  History (NOTES "Echo of repeated lines" rounds 4 and 5, "Calm short pull-backs"): the echo work gave this curve only
+  to the pulls the echo gives (inherited, or picked with the ×40 echo); the owner then asked for it on every short pull.
+  Over the 2,304 plans of the sample lyrics in NOTES (four songs × 576; the browser's measure: 30 fps, the full view
+  with lens and rig), fast zoom-outs (a zoom rate over 3 outside `snapZoom`) went from 1,288 on 382dce0 and 1,240 with
+  the echo-only rule to 485, and in the calmest mood (quietHush) from 121 / 133 to 46; fast pans (the focus point faster
+  than 1.5 frame widths a second) from 1,051 / 1,040 to 865, in quietHush from 91 / 105 to 75. Every mood has fewer of
+  both (NOTES). It changes the curves of existing documents (121 of the 240 corpus plans of plan_hashes, one frame of
+  frame_hashes), no shot and no v2 part choice (frame_hashes_v2 and project_media are unchanged).
 
   A cut whose shot was inherited takes the first copy's curve instead when it is among these values (after the rule
   above) and its own `cam.curve` is not rerolled (a die `cut/<key>:cam.curve` or `line/<id>:cam.curve`). The why is
@@ -1480,6 +1484,94 @@ These are the planner rules behind the line slots `season` and `avoid` (§2.3).
 6. **Unchanged documents.** Without `season`/`avoid` pins every value is as in v2. Golden-tested.
 
 ---
+
+### 4.10 Repeat lines the same way (「くり返しの行をそろえる」; planner, opt-in)
+
+The echo of §4.7 makes a repeat's shot follow its first copy, but a repeated chorus still rarely looks like the first:
+its layouts, lenses, text, motions and backgrounds are chosen per copy (§7.3). With this opt-in a line sung again looks
+as it did the first time. It is **off by default**: documents without the pin plan exactly as before.
+
+**The switch** is the slot `repeat.same` (boolean; §2.3), pinned at **work** scope (作品全体 › 見た目 ›
+「くり返しの行をそろえる」: on pins `true`, off clears the pin) or at **line** scope (行 › 演出 › 詳細 ›
+「くり返しをそろえる」: そろえる / そろえない / 自動 = the work's). Never at a cut (`core/commands` refuses it, like
+`season`). Only `true` switches it on. It resolves at each cut (line > work) and is kept among the cut's decisions where
+a pin applies (`from: 'pin:line' | 'pin:work'`), so the inspector reads it like any slot. No schema change: an older
+build ignores the pin. Its name cannot collide with a camera slot (`cam.*`).
+
+**Sources** (`planner/cast alignments`, computed before casting; `ctx.align`, null without a pin anywhere). A **run** is
+consecutive lines that sing the same line (a line sung twice in a row is a run of two). A copy takes the line at its
+place in the first run of that line (the first copy for a copy sung alone, the first run's second for the second of a
+later run), cut by cut at the same offset. That cut is the copy's **source**. There is none, and the copy keeps its own
+look, where:
+- the copy is in the first run itself (a line sung twice in a row does not play the same thing back to back), or past
+  the end of the first run;
+- the source cut's words, role or impact mark differ (another split of the line, a title card, an impact the first copy
+  lacks);
+- the opt-in does not resolve on at the copy (a line pin `false`).
+
+The source is always earlier, never itself a copy with a source, so nothing chains.
+
+**What a copy takes**, slot by slot in the FROZEN order (§4.16.2 order unchanged; each slot keeps its own stream): the
+source's decision **as the Plan shows it** (with the source's pins, locks and rerolls), with `from: 'auto'`:
+- orientation (after the rule of a pinned one-orientation layout), layout, `text.face`, `text.scale`, `text.ink`,
+  `text.style`, `motion.speed`, entrance, hold, exit, decoration count and decorations, lens, screen-effect count and
+  effects;
+- the parameters of every part the copy shows as its source does (taken, or given by the same rule, such as the
+  standard motions of a layout that moves the text itself, or a transition that takes over an exit): plain values, so a
+  lock of the line pins them as they are;
+- the camera: the source's shot where it fits the cut (a pinned or locked shot as it is, a custom one too; an automatic
+  one where the cut's own rules and weights allow it, §4.7 rule 1); then, wherever the cut shows its source's shot,
+  `cam.zoom`, `cam.curve` and `cam.follow` too, except that a `pullReveal` under 1.8 s keeps `hushRushHush` (§4.7
+  Parameters; the source's pinned curve passes on). A copy carries (§4.5.7) only where its source carries;
+- the background: a cut with a source starts a segment where its source does (instead of `breakScore`), and a segment
+  whose first cut has a source that starts a segment takes that segment's ground and atmosphere, with their
+  parameters (unless the segment is pinned; a derived media ground only where one may go, §11.5.9);
+- the transition into the cut: the source's (the same hard cut or seam, with its parameters), where the background
+  changes at both boundaries or at neither and the cut has no seam pin;
+- the section camera: a rig run whose first cut has a source that begins a run takes that run's rig (its strength
+  and curve stay the run's own: the last chorus's is larger).
+
+A value that does not fit is chosen as usual: an automatic part must be in the copy's own pool (its role, orientation,
+script, aspect and line conditions, so the copy's avoid list and season still hold) and its `fits` must not give 0; a
+pinned or locked part must serve the copy's role and orientation; a value a rule gave the source is left to the copy's
+own rules. Element pins (nudge, fill, hide) stay the cut's own.
+
+**Neighbours (D§8.2).** No two neighbouring cuts show the same layout or entrance, with the opt-in too. The cut right
+before a copy passes over the layout and the entrance the copy will take (the chooser's avoid of D§8.2 with that value
+added; `ctx.alignNear`, `castInputs.ahead`). A copy whose source's automatic layout or entrance the cut right before
+already shows chooses that slot itself, unless the cut before the source showed it too (the pair is as it was then).
+That happens where the two were not neighbours at the first copy, such as the last line of one chorus and the first
+of the next sung in another order: 8 layouts and 4 entrances of 2931 aligned cuts in the test corpus, 0 identical
+neighbouring layouts or entrances in 576 plans of a song with two choruses (0.14 % of neighbours without this rule).
+
+**Pins, rerolls, locks.** The copy's own pins win, slot by slot (and its segment's ground pin, its seam pin and its
+run's rig pin). A reroll of the copy or of its line (`cut/<key>`, `line/<id>`) leaves every slot to the chooser, and
+the copy's background, transition and section camera to their own choice; a die on one slot (`cut/<key>:<slot>`,
+`line/<id>:<slot>`, a parameter's path too) leaves that slot. A reroll or a pin of the **first copy** carries to its
+copies: they follow what it shows (without the opt-in a reroll stays local, §3.7; the opt-in is the user's request that
+they match). Locking a copy's line freezes what it shows; its source can change afterwards without moving it.
+
+**History, cache, stability.** An aligned slot's natural and reference picks are the value it shows, so the cuts after
+a copy weigh against what they are next to. The cast cache compares each cut's source by its cast entry
+(`castInputs.aligned`), and the stage-6 memos that read a source (a transition's replaced motion) key on the decision
+they copied, so re-planning equals the plan made from scratch (tested through edits that change the sources). An edit
+that changes a first copy moves its copies (the followers) and may move the cut right before a follower and the 4
+after it (relays); everything else is as local as without the opt-in (tested against the same edits with the opt-in
+off: no more insertions over 4 other cuts, no more rerolls over 3). An inserted line that parts a line from its copy
+sung right after it makes that copy a later run's, so it takes the first one's look.
+
+**Why** (`repeat.same {cut}`, 「{cut}と同じ歌詞なので、同じ見せ方にそろえた」) is given exactly where a value was taken:
+parts, values, the shot and the camera values, the background, the atmosphere, the transition and the section camera.
+A value a rule gives the copy and its source alike says the rule; a rerolled or pinned slot says its own reason.
+Parameters keep 「部品の自動の値」 (they are the part's automatic values, drawn for the first copy).
+
+**AI.** The AI tools do not know the opt-in and never set it. Where one answer changes the same cut slot (a part, its
+parameters, the text, the motion speed or the camera) on a first copy and on a line that takes its looks from it, only
+the first copy's change is kept, so the copy follows it; the review warns 「くり返しの行は1回目にそろうので…」
+(`ai.warn.repeatSame`). A change on the later copy alone stays: it is a pin, and pins win.
+
+**Cost.** Without a pin anywhere the planner does one set lookup per plan and nothing per cut. With it, a copy's cast
+still weighs its own picks where it cannot take the source's, and `alignments` is one pass over the cuts.
 
 ## 5. Area instructions (AI) and materials
 
@@ -2179,6 +2271,8 @@ Guarantees:
 | カット › 動き | + 動きの速さ |
 | カット › 要素 | the カメラ chip leads to `el.lens` |
 | 要素 › 切り替え | + 緩急 (`seam.curve`, advanced) |
+| 作品全体 › 見た目 | after 背景の種類: **くり返しの行をそろえる** (`repeat.same`, toggle; on pins `true` for the whole video, off clears the pin; a note under it says what it does; no 振り直し; a toggle's label wraps beside its switch in a narrow panel) (§4.10) |
+| 行 › 演出 (`direction`), 「n行を選択中」 | advanced, for lines that sing an earlier line again: **くり返しをそろえる** (`repeat.same` at line scope, choice 自動/そろえる/そろえない, no 振り直し) |
 | 作品全体 › 強さ | `amount.camera` label → カメラワーク |
 | 作品全体 › 要素の既定 › カメラ | the `el.lens` page at work scope |
 | 作品全体 › マイ素材 (new, `sec.materials`) | collapsed by default; hidden when there are no materials (§6.9) |
@@ -2339,6 +2433,18 @@ The en page shows no Japanese except the product name and user data, such as mat
 | `curve.play` | 動きを見る | Preview the motion |
 | `curve.hint` | ダブルクリックで点を足す・Delで消す | Double-click adds a point, Del removes it |
 | `curve.positionOnly` | 位置の動きだけ | Position moves only |
+
+**「くり返しの行をそろえる」 (§4.10)**
+
+| Key | ja | en |
+|---|---|---|
+| `fld.repeatSame` | くり返しの行をそろえる | Repeat lines the same way |
+| `fld.repeatSame.note` | 同じ歌詞の2回目からを、1回目と同じ見せ方（構図・動き・カメラ・背景）にします。固定や振り直しをしたカットはそのままです。 | A line sung again looks as it did the first time (layout, motion, camera, background). Cuts you pin or reroll keep what you set. |
+| `fld.repeatSameLine` | くり返しをそろえる | Repeat the same way |
+| `opt.repeatSame.on` / `.off` | そろえる / そろえない | Match / Own look |
+| `why.repeat.same` | {cut}と同じ歌詞なので、同じ見せ方にそろえた | Same lyric as {cut}, so it is shown the same way |
+| `whyRule.repeat.same` | 同じ歌詞の行も、それぞれに選ぶ | Lines sung again are chosen on their own |
+| `ai.warn.repeatSame` | くり返しの行は1回目にそろうので、2回目以降への変更{n}件は1回目の変更にまかせました | Lines sung again follow their first copy, so {n} changes to later copies were left to the first copy's |
 
 **Shots, rigs, keys**
 
@@ -2542,7 +2648,8 @@ The en page shows no Japanese except the product name and user data, such as mat
 | `frame.test.js`, `lens_filter_seam.test.js`, `conformance.test.js`, `facade.test.js` (+) | B | `rigAt` purity, blend continuity, `cameraAt` equals sequential view application (1e-6, roll 0); **default `lens.curve`, `seam.curve`, `dwell.curve` and `flow` reproduce the v2 op hashes exactly**; periodic lenses warp only when not linear; conformance of every shot preset and rig × 7 aspects × h/v × the 6 texts × 24 times (no NaN, zoom within [0.855, 3·1.15·1.04], same op hash twice, build ≤ 20 ms); facade `shotTrack`, `viewAt`, `registry` getter, fork keeps materials |
 | `mix.test.js` (new) | C | `derive` for every kind (variant and composite) gives defs that `REG.extend` accepts; `registryFor` returns `base` for no materials and is memoized; `version` changes on meta edits only; `baseVersion` constant; `sampleDefs()` pass the conformance harness (no NaN, balanced save/restore, identity rule for motion recipes, same op hash twice, particles ≤ budget after `mixShare`) over 40 seeded generated recipes × 7 aspects × 24 times |
 | `budget.test.js`, `sprites.test.js` (new) | B | masked behaviours put back exactly the masked columns of the masked nodes; `glyphCover` takes `drawGlyph`'s path and sprites; the fit: no budget without materials, every material phase within `SHARE` (or fully masked) with the step before over it and the ladder monotone, evaluated directly; the same records and frames from two engines and every output size. Sprites: ink rects of every level, rasters equal to those without `inkBox`, clipped draws that are the unclipped calls inside a clip (`inkClip`: none, all sides, open where rows start), shards and mosaics as before, settle, the sliced warm-up |
-| `camera_planner.test.js` (new) | D | determinism over the corpus; `amount.camera = 0` → all `none` and rigs `none`; impact cuts favour snapZoom (≥ 60 %); echo: repeated lines share shots (≥ 80 % where both copies' layouts and lenses allow the same camerawork — the first copy's layout has camerawork and both lenses agree on moving the frame; over the repeated cuts open to camerawork — lyric or focus, ≥ 0.8 s, a layout with full camerawork, camera amount ≥ 0.1 — about 67–68 %, and over every repeated cut about 61 %, the rest set apart by the framing-lens rule, the layout rule and rule 5 (a first copy's `none` from a low camera amount is not passed on), NOTES "Echo of repeated lines"; these targets and the two above are checked on corpus(12), the impact share over corpus(24), with floors set against independent samples of those sizes); a repeat takes its first copy's shot and curve wherever its rules allow (each of the six rules also on a hand-made cut); a line sung twice in a row does not play the same move back to back (< 10 % of such pairs); a reroll of a first copy, of its whole line, or a die on its lens, curve or screen effect, leaves its repeats, and their why says whether they match what it shows (`echo`) or what it would show without rerolls (`echo.kept`), and after a reroll next to a first copy `echo.kept` names its shot in the plan without salts; a `pullReveal` the echo gives a cut under 1.8 s takes `hushRushHush`, on calm curve lists too; a repeat on its first copy's preset carries only when that copy does; every salt that reaches a repeat's shot makes it choose again, and a die on its curve draws the curve again; a pinned first copy passes its shot on; the moving shots of a video vary (no preset takes most of them, no long runs of one); framing lens → `none` ≥ 70 %; `cam: 'none'` arranges never get auto shots; carry only within lines; rig runs follow sections; last chorus `slowBloom`; re-planning after an edit that makes a line sung again (or no more) equals the plan made from scratch; stability (insert a line → ≤ 4 other cuts' shots change, echo followers and the cut right after a changed follower counted apart; reroll a cut → ≤ 3; a salt, a line reroll too, reaches a later shot only through that cut's own parts, a changed span or the shot right before it; a first copy whose shot changes moves its repeats and, far from it, only the cuts right after changed cuts; in planner_stability); **documents without new pins keep every v2 part choice** |
+| `camera_planner.test.js` (new) | D | determinism over the corpus; `amount.camera = 0` → all `none` and rigs `none`; impact cuts favour snapZoom (≥ 60 %); echo: repeated lines share shots (≥ 80 % where both copies' layouts and lenses allow the same camerawork — the first copy's layout has camerawork and both lenses agree on moving the frame; over the repeated cuts open to camerawork — lyric or focus, ≥ 0.8 s, a layout with full camerawork, camera amount ≥ 0.1 — about 67–68 %, and over every repeated cut about 61 %, the rest set apart by the framing-lens rule, the layout rule and rule 5 (a first copy's `none` from a low camera amount is not passed on), NOTES "Echo of repeated lines"; these targets and the two above are checked on corpus(12), the impact share over corpus(24), with floors set against independent samples of those sizes); a repeat takes its first copy's shot and curve wherever its rules allow (each of the six rules also on a hand-made cut); a line sung twice in a row does not play the same move back to back (< 10 % of such pairs); a reroll of a first copy, of its whole line, or a die on its lens, curve or screen effect, leaves its repeats, and their why says whether they match what it shows (`echo`) or what it would show without rerolls (`echo.kept`), and after a reroll next to a first copy `echo.kept` names its shot in the plan without salts; every `pullReveal` on a cut under 1.8 s takes `hushRushHush`, on calm curve lists too, whatever gave it; a repeat on its first copy's preset carries only when that copy does; every salt that reaches a repeat's shot makes it choose again, and a die on its curve draws the curve again; a pinned first copy passes its shot on; the moving shots of a video vary (no preset takes most of them, no long runs of one); framing lens → `none` ≥ 70 %; `cam: 'none'` arranges never get auto shots; carry only within lines; rig runs follow sections; last chorus `slowBloom`; re-planning after an edit that makes a line sung again (or no more) equals the plan made from scratch; stability (insert a line → ≤ 4 other cuts' shots change, echo followers and the cut right after a changed follower counted apart; reroll a cut → ≤ 3; a salt, a line reroll too, reaches a later shot only through that cut's own parts, a changed span or the shot right before it; a first copy whose shot changes moves its repeats and, far from it, only the cuts right after changed cuts; in planner_stability); **documents without new pins keep every v2 part choice** |
+| `repeat_same.test.js` (new, §4.10) | lead | the sources (runs of a line sung twice in a row, other splits, roles, impact marks, line pins); without the pin every plan as before; with it, every aligned cut shows its source's slots, parameters, background and transition (≥ 95 % of every slot, the exceptions named: a transition at the edge of the repeated lines takes over an exit); pins, rerolls and dice on a repeat win, a reroll or pin of the first copy carries, a locked repeat keeps its look; explain names `repeat.same` exactly where a value was taken; the inspector's states and the command scopes; re-planning equals the plan made from scratch through the edits that change the sources; stability against the same edits without the opt-in, followers and relays apart; the camera follows the shot; the golden `project_repeat.json` |
 | `planner_areas_season.test.js` (new) | D | line `season` gates pools, ×2.5, starts a segment, raises atmos probability; no `pin-off-season` when it matches; `avoid` excludes, relaxes with `avoid-empty`, pins still win; locks immune; `motion.speed` scales only unpinned dur/each/speed with `pfrom: 'rule'` |
 | `planner_materials.test.js` (new) | D | a pinned material is chosen; `pool: false` never auto-picked; one `pool: true` material keeps ≥ 90 % of choices; a body edit changes only the fp of cuts using it and keeps the cast cache warm; a meta edit changes `version`; a deleted material gives `pin-bad-value` plus a fallback; `material-bad` warning; golden plan hashes unchanged without materials |
 | `planner_pins`, `planner_explain`, `fields`, `planner_determinism` (+) | D | fuzz over the new slots and curve params at all scopes (always honoured); locks freeze `cam.*`/`motion.speed`, not `rig`; explain value equals plan value for the new slots; `fieldState` and `lockPayload` for the new slots; the cast cache tells history rows apart by their heir, shadow and twin, by whether the previous cut sings the same line cut, and (camera_planner) by whether a later cut sings the cut again (§4.7 "Repeated lines"); plan goldens regenerated on purpose |
@@ -2572,9 +2679,9 @@ lyrics with a chorus-shaped song), the same shot went from 50 % to 62 % of the c
 14 % and the same lens at 18 %, and the cells with the same layout, lens and shot, which a viewer would call the same
 shot again, went from 1.6 % to 2.3 %. Even the same preset on the same layout often moved otherwise, where only one
 copy carried the closeness of the cut before it (§4.5.7); since round 4 of the review a repeat carries only as its
-first copy does. The lever for 「サビの繰り返し」 is the v2 layout and lens. A possible next step,
-for the owner to decide: an opt-in setting (for example 「くり返しの行をそろえる」, off by default so documents without
-it keep their v2 frames) with which a repeat takes its first copy's layout and lens, and then its shot. Not built.
+first copy does. The lever for 「サビの繰り返し」 is the v2 layout and lens: the owner chose the opt-in
+「くり返しの行をそろえる」 (§4.10), off by default, with which a repeat takes its first copy's layout, lens, camera and
+the rest of its look.
 
 ### 7.4 Browser tests (`tests/browser`)
 
@@ -2584,7 +2691,7 @@ it keep their v2 frames) with which a repeat takes its first copy's layout and l
 | `perf.py` (+) | B | project_long with auto camerawork plus the heaviest allowed material in every slot (the text slots: the heaviest glyph work §5.8 admits; the others: the sample materials): behave + solve ≤ 0.8 ms p50 at 720p; frame ≤ 2× budget; no material phase over its glyph share (§5.9.5) |
 | `parts_gallery.py` (+) | B | shot and rig thumbnails in every aspect; 0 CSP violations |
 | `materials_gallery.py` (new) | C | `sampleDefs` and 12 generated materials × aspects: no console errors, not blank, 0 CSP violations |
-| `ui_flows.py` (+) | F | curve widget drag = one undo step; preset → custom via a handle; keyframe edit → custom pin → プリセットに戻す; area band click → multi-line page with the area header; **flow "area direct"**: faked analysis → click サビ1 → target chip → faked answer (run-ornament material, speed 0.5, ramp curve, pushIn custom shot) → review with 4 groups → try-on → apply → preview renders the material → マイ素材 tile exists → undo restores materials and pins → redo → selective revert → delete material (pins cleared); board with 2 areas; keyboard-only variant |
+| `ui_flows.py` (+) | F | flow `repeat` (§4.10): the switch in 作品全体 › 見た目 pins the opt-in, the second サビ takes the first one's looks, a repeat's なぜ names its first copy, off clears the pin; curve widget drag = one undo step; preset → custom via a handle; keyframe edit → custom pin → プリセットに戻す; area band click → multi-line page with the area header; **flow "area direct"**: faked analysis → click サビ1 → target chip → faked answer (run-ornament material, speed 0.5, ramp curve, pushIn custom shot) → review with 4 groups → try-on → apply → preview renders the material → マイ素材 tile exists → undo restores materials and pins → redo → selective revert → delete material (pins cleared); board with 2 areas; keyboard-only variant |
 | `ui_layout.py` (+) | F | curve widget, keyframe editor, board and material page fit 288–352 px; control budgets unchanged; nothing covers the preview |
 | `csp.py`, `i18n_pages.py` (+) | F | the new flows cause no CSP violations; the en page has no Japanese UI text (material names excepted) |
 
@@ -2612,6 +2719,13 @@ Goldens land in two steps. Only the lead regenerates them (`tests/update_golden.
   automatic choice changes.
 - New goldens: `project_media.json` (the A.3 fixture), which holds a still background, a `photoFrame`, a `textFill` and a
   video background. It renders with `fake_media.js`, and its op hashes include media times (§11.3.7).
+
+**「くり返しの行をそろえる」 (§4.10).** Documents without the pin plan and render as before: `frame_hashes_v2.json`,
+`plan_hashes.json`, `frame_hashes.json` and `project_media.json` are unchanged by the opt-in (the short-pull rule of §4.7,
+landed with it, regenerated plan_hashes and frame_hashes on purpose). A new golden, `project_repeat.json` (plan hash and
+40 frame hashes, rendered like frame_hashes), holds the fixture `project_repeat.json`: the sample lyrics with a second
+サビ, a short line sung twice at the end of each サビ and the サビ's first line sung twice in the 大サビ, the opt-in on
+for the whole video, one layout pinned and one line rerolled in the second サビ.
 
 ---
 
@@ -3000,6 +3114,8 @@ edits of §11.7. F keeps the ownership of `i18n/strings.js` from A, and adds the
 | §4.22.6 | the vision consent (images only, Gemini only, per asset and project) | WP7, WP8 |
 | §6.4.3, §6.4.12, §6.14 | step ③ hint text; step ④ 形式 control (a segmented pair plus a select) and the kit contents; ≡ › ファイル items; IndexedDB v2 stores (§11.7, §12.7, §13.10) | WP8 |
 | SPEC §7 | the project file is a package (`.mojipv`) by default; the light `.json` save is kept (§12) | owner (decided) |
+| §3.4.2, §3.9, §3.13, §4.16.2 | 「くり返しの行をそろえる」 (§4.10): the slot `repeat.same` (work, line; refused at a cut); a copy's decisions from its source in the FROZEN slot order; segments, grounds, seams and rigs of copies from their sources; why `repeat.same`, rule `repeat.same`; `ai.warn.repeatSame`; the cast inputs `aligned` and `ahead`; D§8.2 across copies. Only documents with the pin change | owner (decided) |
+| §4.7 (this design) | every `pullReveal` on a cut under 1.8 s takes `hushRushHush` (was: only those the echo gives); camera curves of existing documents change, no shot and no v2 part choice | owner (decided) |
 
 Everything is additive or widened: no existing path, pin or command changes meaning. Documents without the new pins or
 materials produce the same part choices as v2. Their plan hashes differ only by the new default params and slots, and

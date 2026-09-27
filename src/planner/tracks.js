@@ -111,9 +111,13 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
     // make them differ, §4.9), and where the resolved value of a media param of the pinned ground or atmos part
     // changes (compared by string, §11.2.6), so two lines pinned to one photo part with different photos each show
     // their own.
+    // Under 「くり返しの行をそろえる」 (DESIGN_2_1 §4.10) a cut that takes its decisions from an earlier copy (its source,
+    // planner/cast alignments) starts a segment where its source does, instead of by breakScore, so a repeated chorus
+    // is cut into backgrounds as its first copy was.
     function splitSegments(ctx, cuts) {
       const L = Math.round(N.lerp(8, 1, ctx.look.amounts.groundSwitch));
       const segs = [];
+      const heads = ctx.align ? new Set() : null;
       let cur = null;
       cuts.forEach((cut, j) => {
         const pin = groundPin(ctx, cut, ctx.warn);
@@ -121,9 +125,14 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
         const gp = pin ? pin.v : null, ap = apin ? apin.v : null;
         const season = CA.lineCond(ctx, cut.line).season;
         const src = gp === null && ap === null ? '' : mediaSource(ctx, cut, 'ground', gp) + '|' + mediaSource(ctx, cut, 'atmos', ap);
+        const copy = heads && cur ? CA.alignedSource(ctx, cut, 'ground') : null;
         const fresh = !cur || gp !== cur.gp || ap !== cur.ap || season !== cur.season || src !== cur.src ||
-          (gp === null && breakScore(ctx, cuts[j - 1], cut, L) >= 1);
-        if (fresh) { cur = { gp, ap, pin, apin, season, src, idx: [] }; segs.push(cur); }
+          (gp === null && (copy ? heads.has(copy.key) : breakScore(ctx, cuts[j - 1], cut, L) >= 1));
+        if (fresh) {
+          cur = { gp, ap, pin, apin, season, src, idx: [] };
+          segs.push(cur);
+          if (heads) heads.add(cut.key);
+        }
         cur.idx.push(j);
       });
       return segs;
@@ -193,7 +202,8 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
 
     // A segment's ground. The segment reads its first cut's line conditions (season and avoid list, DESIGN_2_1 §4.9);
     // noMedia: derived grounds of the user's media weigh 0 here (§11.5.9); seg.coverage: its text coverage (§11.9.2).
-    function decideGround(ctx, seg, first, seed, history, noMedia) {
+    // copy: the ground of the source's segment under 「くり返しの行をそろえる」 (groundCopy), taken with its parameters.
+    function decideGround(ctx, seg, first, seed, history, noMedia, copy) {
       const trace = tracing(ctx, first.key, 'ground');
       const rec = recentOf(ctx, 'ground', history);
       const cond = CA.lineCond(ctx, first.line);
@@ -204,6 +214,11 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
         CA.pinWarnings(ctx, 'ground', seg.pin.v, seg.pin, cond);
         out = fixed(pinDecision(seg.pin));
         if (trace) shadow(ctx, req, trace, { kind: 'ground', stage: 'pin', pin: seg.pin, recent: rec.recent, echo: null });
+      } else if (copy) {
+        out = fixed(copied(copy.d));
+        if (trace) shadow(ctx, req, trace, { kind: 'ground', stage: 'auto', why: [alignWhy(copy.src)], recent: rec.recent, echo: null });
+        if (trace) trace.decision = out.decision;
+        return out;
       } else {
         if (trace) Object.assign(trace, { kind: 'ground', recent: rec.recent, echo: null, noMedia });
         out = chosen(ctx, req, trace);
@@ -214,10 +229,46 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
       return out;
     }
 
+    // --- 「くり返しの行をそろえる」 (DESIGN_2_1 §4.10) -----------------------------------------------------------------
+
+    function alignWhy(src) { return { code: 'repeat.same', params: { cut: src.key } }; }
+
+    // A decision of the source's as the copy's own automatic one: its value and parameters (a pin of the source's
+    // passes on as a value, like its parts', planner/cast).
+    function copied(d) {
+      const out = { from: 'auto' };
+      if (d.p) out.p = d.p;
+      out.v = d.v;
+      return out;
+    }
+
+    // The ground a segment takes from its source's segment: its first cut has a source (planner/cast alignedSource) that
+    // starts a segment of its own, neither is pinned (the segment's own pin wins; a work pin gives both the same), and
+    // the ground fits (in the segment's pool; a derived media ground only where one may go, noMedia). → { src, d } | null.
+    function groundCopy(ctx, seg, first, byHead, noMedia) {
+      const src = seg.pin ? null : CA.alignedSource(ctx, first, 'ground');
+      const s = src ? byHead.get(src.key) : null;
+      if (!s) return null;
+      const d = s.ground.decision;
+      const def = ctx.registry.get('ground', d.v);
+      if (!def || (noMedia && def.mine && def.mine.media === true)) return null;
+      if (!isPinned(d) && !CA.poolOf(ctx, 'ground', { aspect: ctx.aspect, cond: CA.lineCond(ctx, first.line) }).includes(d.v)) {
+        return null;
+      }
+      return { src, d };
+    }
+
+    // The atmosphere likewise (its own chance or pin at the source), unless the segment pins its own.
+    function atmosCopy(ctx, seg, first, byHead) {
+      const src = seg.apin ? null : CA.alignedSource(ctx, first, 'atmos');
+      const s = src ? byHead.get(src.key) : null;
+      return s ? { src, d: s.atmos.decision } : null;
+    }
+
     // atmos: its pin (the segment's, see splitSegments), else with probability 0.6·amount.ornament the chooser over
     // ornaments with scope 'run' (nothing eligible → 'none'), else 'none'. Where the first cut's line pins its own
     // season the chance is at least 0.85, and run ornaments of that season weigh ×2.5 (the chooser's line season).
-    function decideAtmos(ctx, seg, first, seed, history) {
+    function decideAtmos(ctx, seg, first, seed, history, copy) {
       const trace = tracing(ctx, first.key, 'atmos');
       const pin = seg.apin;
       const cond = CA.lineCond(ctx, first.line);
@@ -228,6 +279,10 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
         CA.pinWarnings(ctx, 'ornament', pin.v, pin, cond);
         out = fixed(pinDecision(pin));
         if (trace) Object.assign(trace, { kind: 'ornament', stage: 'pin', pin });
+      } else if (copy) {
+        out = fixed(copied(copy.d));
+        if (trace) Object.assign(trace, { kind: 'ornament', stage: 'auto', why: [alignWhy(copy.src)], decision: out.decision });
+        return out;
       } else if (R.stream(seed, 'chance').next() < chance) {
         const rec = recentOf(ctx, 'ornament', history);
         if (trace) Object.assign(trace, { kind: 'ornament', recent: rec.recent, echo: null });
@@ -269,7 +324,20 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
     // they read, so they are kept on that cut's cast entry (planner/cast) and reused while those are the same.
     // noMedia and the text coverage are part of the memo: they depend on the segment's length and cuts, which the
     // first cut's cast does not fix.
-    function segmentOf(ctx, seg, first, groundsSoFar, atmosSoFar, noMedia) {
+    // Under 「くり返しの行をそろえる」 a segment whose first cut has a source that starts a segment takes that segment's
+    // ground and atmosphere (groundCopy, atmosCopy; byHead: the decided segments by their first cut), not memoized: the
+    // copy is cheap and follows the source's segment.
+    function segmentOf(ctx, seg, first, groundsSoFar, atmosSoFar, noMedia, byHead) {
+      const gCopy = byHead ? groundCopy(ctx, seg, first, byHead, noMedia) : null;
+      const aCopy = byHead ? atmosCopy(ctx, seg, first, byHead) : null;
+      if (gCopy || aCopy) {
+        const segSeed = CH.segSeed(ctx.doc.look.seed, first.key, ctx.salts);
+        return {
+          ground: decideGround(ctx, seg, first, CH.slotSeed(segSeed, first.key, first.line, 'ground', ctx.salts), groundsSoFar,
+            noMedia, gCopy),
+          atmos: decideAtmos(ctx, seg, first, CH.slotSeed(segSeed, first.key, first.line, 'atmos', ctx.salts), atmosSoFar, aCopy),
+        };
+      }
       const gRead = groundsSoFar.slice(Math.max(0, groundsSoFar.length - 4));
       const aRead = atmosSoFar.slice(Math.max(0, atmosSoFar.length - 4));
       const memo = first.cast ? first.cast.segment : null;
@@ -320,12 +388,14 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
       const media = hasMediaGrounds(ctx.registry);
       const out = [];
       const groundsSoFar = [], atmosSoFar = [];
+      const byHead = ctx.align ? new Map() : null;
       segs.forEach((seg, k) => {
         const first = cuts[seg.idx[0]];
         const t1 = k + 1 < segs.length ? starts[k + 1] : N.q6(Math.max(duration, starts[k]));
         const noMedia = media && (t1 - starts[k] < MEDIA_MIN_SEGMENT || first.role === 'title');
         seg.coverage = PA.textCoverage(seg.idx.map((j) => cuts[j]));
-        const { ground, atmos } = segmentOf(ctx, seg, first, groundsSoFar, atmosSoFar, noMedia);
+        const { ground, atmos } = segmentOf(ctx, seg, first, groundsSoFar, atmosSoFar, noMedia, byHead);
+        if (byHead) byHead.set(first.key, { ground, atmos });
         groundsSoFar.push(ground.entry);
         atmosSoFar.push(atmos.entry);
         for (const j of seg.idx) cuts[j].ground = k;
@@ -341,11 +411,17 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
 
     // A seam that replaces an exit (entrance) turns the other cut's unpinned depart (arrive) into the kind's fallback,
     // from 'rule' (§4.16.6). Its parameters follow the cut's motion speed like any motion's (DESIGN_2_1 §4.3).
+    // Under 「くり返しの行をそろえる」 a cut whose source's motion the same rule replaced takes that decision, parameters
+    // and all (planner/cast alignedSource; the source comes first, so its seams are decided).
     function replaceMotion(ctx, cut, kind) {
       const old = cut.slots[kind];
       if (isPinned(old)) return;
+      const key = ctx.registry.fallback(kind);
+      const src = CA.alignedSource(ctx, cut, kind);
+      const mine = src ? src.slots[kind] : null;
+      const theirs = mine && mine.from === 'rule' && mine.v === key && mine.p ? mine : null;
       const make = () => {
-        const key = ctx.registry.fallback(kind);
+        if (theirs) return withParams({ v: key, from: 'rule' }, { p: theirs.p, pfrom: theirs.pfrom || null });
         const seed = CH.slotSeed(CH.cutSeed(ctx.doc.look.seed, cut.key, cut.line, ctx.salts), cut.key, cut.line, kind,
           ctx.salts);
         const got = PA.resolveParams(ctx.registry.get(kind, key), kind, null, atOf(cut), ctx.ix,
@@ -353,12 +429,14 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
         const scaled = CAM.applySpeed({ ctx, slots: cut.slots }, kind, { v: key, p: got.p, pfrom: got.pfrom || undefined });
         return withParams({ v: key, from: 'rule' }, { p: scaled.p, pfrom: scaled.pfrom || null });
       };
-      // The same cast gives the same decision, kept on the cast's cache entry and reused with it across plans.
+      // The same cast gives the same decision, kept on the cast's cache entry and reused with it across plans (with the
+      // source's decision it copied, which the cast does not fix).
       let d;
       if (cut.cast) {
         const rules = cut.cast.rules || (cut.cast.rules = new Map());
-        d = rules.get(kind);
-        if (d === undefined) { d = CA.deepFreeze(make()); rules.set(kind, d); }
+        const m = rules.get(kind);
+        if (m !== undefined && m.theirs === theirs) d = m.d;
+        else { d = CA.deepFreeze(make()); rules.set(kind, { theirs, d }); }
       } else d = make();
       cut.slots[kind] = d;
       const t = ctx.trace;
@@ -453,15 +531,19 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
     // seams(ctx, cuts) → Plan.seams (only boundaries that are not the hard cut); sets cut.seamIn, applies the
     // replace rules to the neighbouring cuts' motions and ends the cuts before B with the window (endWithSeam).
     // Seam lengths read the windows the cutter gave (A is shortened only after its own seam is decided).
+    // Under 「くり返しの行をそろえる」 (DESIGN_2_1 §4.10) the boundary into a cut that takes its decisions from an earlier
+    // copy takes the boundary into that copy (seamCopy).
     function seams(ctx, cuts) {
       const out = [];
       const history = [];
       const hard = ctx.registry.fallback('seam');
       cuts.forEach((c) => { c.seamIn = -1; });
+      const at = ctx.align ? new Map(cuts.map((c, j) => [c.key, j])) : null;
       let reach = -Infinity;                    // the latest b among the cuts before A
       for (let j = 1; j < cuts.length; j++) {
         const A = cuts[j - 1], B = cuts[j];
-        const { got, entry } = seamOf(ctx, A, B, history);
+        const copy = at ? seamCopy(ctx, cuts, at, out, A, B, hard) : null;
+        const { got, entry } = copy || seamOf(ctx, A, B, history);
         history.push(entry);
         const d = got.decision;
         if (d.v !== hard) {
@@ -480,6 +562,25 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
         reach = Math.max(reach, A.b);
       }
       return out;
+    }
+
+    // The seam into B copied from the seam into its source S (planner/cast alignedSource): where S is not the first cut,
+    // the background changes at both boundaries or at neither (the same kind of transition fits), and B has no seam pin
+    // of its own (the pin wins). → { got, entry } | null. The copy keeps S's parameters; its window is fitted to B's cuts
+    // like any seam's.
+    function seamCopy(ctx, cuts, at, out, A, B, hard) {
+      const src = CA.alignedSource(ctx, B, 'seam');
+      const j = src ? at.get(src.key) : undefined;
+      if (!j) return null;
+      const before = cuts[j - 1];
+      if ((A.ground !== B.ground) !== (before.ground !== src.ground)) return null;
+      if (PA.pinned(ctx.ix, 'seam') && PA.resolvePin(ctx.ix, atOf(B), 'seam', CA.acceptPart(ctx, 'seam', null, { checkRole: false }), null)) {
+        return null;
+      }
+      const d = src.seamIn >= 0 ? copied(out[src.seamIn].slot) : { from: 'auto', v: hard };
+      const t = tracing(ctx, B.key, 'seam');
+      if (t) Object.assign(t, { kind: 'seam', stage: 'auto', world: A.ground !== B.ground, why: [alignWhy(src)], decision: d });
+      return { got: { decision: d }, entry: entryOf(d, null) };
     }
 
     // A transition hands the picture over to B: at the end of its window (B.a + dur/2) the seam shows B alone, so
