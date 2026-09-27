@@ -240,12 +240,15 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     function createHistory(registry) {
       const rows = [];
       const byCut = new Map();
-      // push(cutKey, row): row = historyRow(…) of the cut.
+      let lastCopyOf = null;
+      // push(cutKey, row, copyOf): row = historyRow(…) of the cut; copyOf = the first sung copy's cut key of the line
+      // cut it sings (its feat.repeatOf, or its own key; see follows).
       // The recency sets asked for since the last push (setsOf), per `which` and group.
       const sets = { both: new Map(), base: new Map() };
-      function push(cutKey, row) {
+      function push(cutKey, row, copyOf) {
         rows.push(row);
         byCut.set(cutKey, row);
+        lastCopyOf = copyOf || null;
         sets.both.clear();
         sets.base.clear();
       }
@@ -291,12 +294,46 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
         const v = rows.length ? rows[rows.length - 1].last.get(slot) : undefined;
         return v === undefined ? null : v;
       }
-      // What the earlier identical line's cut picked for this slot (its natural pick).
+      // The previous cut's shot as it would be without any salt (its row's shadow; see castCut), or null.
+      function unsaltedShot() { return rows.length ? rows[rows.length - 1].shadow : null; }
+      // What the earlier identical line's cut picked for this slot: its natural pick; for cam.shot the preset it shows
+      // (its heir, planner/camera heirOf), which its repeats inherit or, where they may not, weigh as the echo.
       function echo(repeatOf, slot) {
         const row = repeatOf ? byCut.get(repeatOf) : null;
-        return row && row.own[slot] ? row.own[slot] : null;
+        if (!row) return null;
+        if (slot === 'cam.shot') return row.heir && row.heir.v !== 'none' ? row.heir.v : null;
+        return row.own[slot] || null;
       }
-      return { push, recent, reference, previous, echo, rowsRead };
+      // What a repeat of that cut inherits from it (planner/camera heirOf), or null.
+      function heir(repeatOf) {
+        const row = repeatOf ? byCut.get(repeatOf) : null;
+        return row ? row.heir : null;
+      }
+      // Whether the previous cut sings the same line cut as a repeat of repeatOf: that cut itself or another repeat of
+      // it (a line sung twice or more in a row).
+      function follows(repeatOf) { return !!repeatOf && lastCopyOf === repeatOf; }
+      // Whether a row the next cut reads (rowsRead) has a salt-free twin (row.free; castCut) that differs from it where
+      // the next cut's parts read that row (TWIN_FIELDS at its place): then the cut's salt-free cast reads the twins.
+      function twinned(repeatOf) {
+        const n = rows.length;
+        for (let i = Math.max(0, n - 4); i < n; i++) if (twinDiffers(rows[i], TWIN_FIELDS[i - n + 4])) return true;
+        const e = repeatOf ? byCut.get(repeatOf) : null;
+        return !!e && twinDiffers(e, TWIN_FIELDS[4]);
+      }
+      // The same reads for the next cut with each row that has a twin replaced by it (the cut's salt-free re-cast,
+      // planner/cast unsaltedCast): a history of just the rows those reads touch.
+      function unsalted(repeatOf) {
+        const h = createHistory(registry);
+        const twin = (row) => (row.free ? Object.assign({}, row, row.free, { free: null }) : row);
+        const n = rows.length;
+        for (let i = Math.max(0, n - 4); i < n; i++) h.push(null, twin(rows[i]), i === n - 1 ? lastCopyOf : null);
+        const e = repeatOf ? byCut.get(repeatOf) : null;
+        if (e) h.name(repeatOf, twin(e));
+        return h;
+      }
+      // Registers a row under a cut key without adding it to the window (unsalted: the echoed row).
+      function name(cutKey, row) { byCut.set(cutKey, row); }
+      return { push, recent, reference, previous, unsaltedShot, echo, heir, follows, rowsRead, twinned, unsalted, name };
     }
 
     const NONE = Object.freeze([]);
@@ -325,11 +362,12 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     }
 
     // historyRow(slots, natural, refs) → what a cut leaves in the history: per group its natural picks (base) and its
-    // natural and reference picks (both), per slot its final value (last) and natural pick (own). slots = the cut's
-    // decisions (as its neighbours see them); natural / refs = { slot: pick }. Rows never change, so a cached cast
-    // keeps its row.
+    // natural and reference picks (both), per slot its final value (last) and natural pick (own), and what its repeats
+    // inherit (heir), its shot without salts (shadow) and, for a salted cut or one whose picks the salts reached, the
+    // same four fields as they would be without any salt (free; heir, shadow and free are set by castCut). slots = the cut's decisions (as its neighbours
+    // see them); natural / refs = { slot: pick }. Rows never change, so a cached cast keeps its row.
     function historyRow(slots, natural, refs) {
-      const row = { base: new Map(), both: new Map(), last: new Map(), own: {} };
+      const row = { base: new Map(), both: new Map(), last: new Map(), own: {}, heir: null, shadow: null, free: null };
       for (const slot of Object.keys(natural)) {
         const v = natural[slot];
         if (!isChoice(slot, v)) continue;
@@ -348,32 +386,68 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     // Whether two history windows (createHistory rowsRead) lead to the same choices: the same rows, or rows with the
     // same values where the next cut reads them (recency reads memberships, so the order inside a group is free). The
     // three rows before the previous one are read for their natural picks (near); the previous one for its natural
-    // picks (the reference pick weighs against them), both picks (recent) and final values (previous); the echoed
-    // row for its own picks.
-    const ROW_FIELDS = Object.freeze([['base'], ['base'], ['base'], ['base', 'both', 'last'], ['own']]);
+    // picks (the reference pick weighs against them), both picks (recent), final values (previous) and shadow; the
+    // echoed row for its own picks and its heir (the shot its repeats inherit, and whether that cut shows it). A cut's
+    // salt-free re-cast reads the same fields of each row's twin (row.free; unsaltedCast), and whether a twin differs
+    // from its row decides whether it re-casts, so the twins compare too (a row with one never equals a row without).
+    const ROW_FIELDS = Object.freeze([['base'], ['base'], ['base'], ['base', 'both', 'last', 'shadow'], ['own', 'heir']]);
+    const TWIN_FIELDS = Object.freeze([['base'], ['base'], ['base'], ['base', 'both', 'last'], ['own']]);
+    const TWIN_ALL = Object.freeze(['base', 'both', 'last', 'own']);
     function sameRows(a, b) {
       for (let i = 0; i < ROW_FIELDS.length; i++) {
         const x = a[i], y = b[i];
         if (x === y) continue;
-        if (!x || !y) return false;
-        for (const f of ROW_FIELDS[i]) if (!(f === 'own' ? sameRecord(x.own, y.own) : sameMap(x[f], y[f]))) return false;
+        if (!x || !y || !sameFields(x, y, ROW_FIELDS[i])) return false;
+        if (x.free !== y.free && (!x.free || !y.free || !sameFields(x.free, y.free, TWIN_FIELDS[i]))) return false;
       }
       return true;
     }
 
-    function sameMap(a, b) {
-      if (a.size !== b.size) return false;
+    // Whether a row's twin differs from the row in the fields a cut's salt-free re-cast (up to its camera slots) reads
+    // of it. The shot and the screen effects are left out: the re-cast reads the previous shot from the shadow and the
+    // near shots from base, whose shot the twin shares (castCut), and it stops before the screen effects (twinOf has
+    // none).
+    function twinDiffers(row, fields) {
+      const t = row ? row.free : null;
+      if (!t) return false;
+      for (const f of fields) {
+        if (!(f === 'own' ? sameRecord(row.own, t.own, unread) : sameMap(row[f], t[f], unread))) return true;
+      }
+      return false;
+    }
+    function unread(key) { return key === 'cam.shot' || key.startsWith('filter'); }
+
+    function sameFields(x, y, fields) {
+      for (const f of fields) {
+        const same = f === 'own' ? sameRecord(x.own, y.own) : f === 'heir' ? sameHeir(x.heir, y.heir)
+          : f === 'shadow' ? x.shadow === y.shadow : sameMap(x[f], y[f]);
+        if (!same) return false;
+      }
+      return true;
+    }
+
+    // skip(key): the keys left out of the comparison (twinDiffers), or undefined.
+    function sameMap(a, b, skip) {
+      if (skip === undefined && a.size !== b.size) return false;
       for (const [k, v] of a) {
+        if (skip && skip(k)) continue;
         const w = b.get(k);
         if (Array.isArray(v) ? !(Array.isArray(w) && v.length === w.length && v.every((x) => w.includes(x))) : v !== w) return false;
       }
+      if (skip) for (const k of b.keys()) if (!skip(k) && !a.has(k)) return false;
       return true;
     }
 
-    function sameRecord(a, b) {
+    function sameHeir(a, b) {
+      return a === b || (!!a && !!b && a.v === b.v && a.cause === b.cause && a.frames === b.frames && a.curve === b.curve &&
+        a.shows === b.shows && a.showsCurve === b.showsCurve);
+    }
+
+    function sameRecord(a, b, skip) {
       const ka = Object.keys(a);
-      if (ka.length !== Object.keys(b).length) return false;
-      for (const k of ka) if (a[k] !== b[k]) return false;
+      if (skip === undefined && ka.length !== Object.keys(b).length) return false;
+      for (const k of ka) if (!(skip && skip(k)) && a[k] !== b[k]) return false;
+      if (skip) for (const k of Object.keys(b)) if (!skip(k) && !(k in a)) return false;
       return true;
     }
 
@@ -635,14 +709,9 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     // arrive → dwell → depart → ornament.count → ornament#i → lens → cam.shot → cam.zoom → cam.curve → cam.follow →
     // filter.count → filter#i. Every slot keeps its own stream, so the camera slots change no part choice. natural =
     // the neighbours' view (no recency, no runner-up rule, no parameters). st.decide = decideValue, for planner/camera.
-    function castSlots(ctx, cut, hist, natural) {
-      const st = {
-        ctx, cut, hist, natural, slots: {}, chosen: {}, base: {}, ref: {},
-        at: { cutKey: cut.key, pinCutKey: cut.pinKey, lineId: cut.line },
-        cutSeed: CH.cutSeed(ctx.doc.look.seed, cut.key, cut.line, ctx.salts), slotPrefix: 0, poolKey: null,
-        cond: lineCond(ctx, cut.line), decide: decideValue,
-      };
-      st.slotPrefix = CH.slotPrefix(st.cutSeed);
+    // camOnly: stop after the camera slots (what a row's natural shot, heir and shadow read; see unsaltedCast).
+    function castSlots(ctx, cut, hist, natural, camOnly) {
+      const st = stateOf(ctx, cut, hist, natural);
       decideOrient(st);
       const arrange = decidePart(st, 'arrange', null);
       decideText(st);
@@ -654,7 +723,37 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       decideList(st, 'ornament');
       decidePart(st, 'lens', null);
       CAM.decideCamera(st);
-      decideList(st, 'filter');
+      if (!camOnly) decideList(st, 'filter');
+      return st;
+    }
+
+    function stateOf(ctx, cut, hist, natural) {
+      const st = {
+        ctx, cut, hist, natural, slots: {}, chosen: {}, base: {}, ref: {},
+        at: { cutKey: cut.key, pinCutKey: cut.pinKey, lineId: cut.line },
+        cutSeed: CH.cutSeed(ctx.doc.look.seed, cut.key, cut.line, ctx.salts), slotPrefix: 0, poolKey: null,
+        cond: lineCond(ctx, cut.line), decide: decideValue, shotSalted: false, curveSalted: false, heirCurve: null, echoShot: false,
+      };
+      if (!natural && isSalted(ctx, cut)) {
+        st.shotSalted = shotSalted(ctx, cut);
+        st.curveSalted = fieldSalted(ctx, cut, 'cam.curve');
+      }
+      st.slotPrefix = CH.slotPrefix(st.cutSeed);
+      return st;
+    }
+
+    // The camera slots of a cut cast again over another history whose rows read the same for its parts (only the
+    // previous shot differs): the slots before them are those of `from` (unsaltedCast, for an unsalted cut).
+    function recastCamera(ctx, cut, hist, from) {
+      const st = stateOf(ctx, cut, hist, false);
+      for (const slot of Object.keys(from.slots)) {
+        if (slot.startsWith('cam.') || slot.startsWith('filter')) continue;
+        st.slots[slot] = from.slots[slot];
+        st.chosen[slot] = from.chosen[slot];
+        if (slot in from.base) st.base[slot] = from.base[slot];
+        if (slot in from.ref) st.ref[slot] = from.ref[slot];
+      }
+      CAM.decideCamera(st);
       return st;
     }
 
@@ -668,6 +767,38 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
         saltedCache.set(salts, set);
       }
       return set;
+    }
+
+    // Whether a salt reaches the stream of the cut's shot: a reroll of the cut or its line, or of their cam.shot field
+    // (a field die on another slot leaves the shot's stream, and so its inheritance, alone).
+    function shotSalted(ctx, cut) {
+      const s = ctx.salts;
+      if (!s) return false;
+      const own = 'cut/' + cut.key, line = cut.line ? 'line/' + cut.line : null;
+      return !!(s[own] || s[own + ':cam.shot'] || (line && (s[line] || s[line + ':cam.shot'])));
+    }
+
+    // Whether a field die of the cut or its line reaches one slot's stream (cut/<key>:<slot>, line/<id>:<slot>).
+    function fieldSalted(ctx, cut, slot) {
+      const s = ctx.salts;
+      if (!s) return false;
+      return !!(s['cut/' + cut.key + ':' + slot] || (cut.line && s['line/' + cut.line + ':' + slot]));
+    }
+
+    // Field dice that cannot change a cut's heir or shadow: slots decided after its lens and shot that neither reads
+    // (cam.zoom, cam.follow and the screen effects, with their parameters; §4.16.2 order). Every other salt of the cut
+    // or its line (a reroll, a die on a part, the orientation, a parameter before them, the shot or the curve) does.
+    const AFTER_HEIR = /^(cam\.zoom|cam\.follow|filter\.count|filter#\d+)(\.|$)/;
+    function saltReachesHeir(ctx, cut) {
+      const own = 'cut/' + cut.key, line = cut.line ? 'line/' + cut.line : null;
+      for (const key of Object.keys(ctx.salts)) {
+        if (!ctx.salts[key]) continue;
+        const i = key.indexOf(':');
+        const scope = i < 0 ? key : key.slice(0, i);
+        if (scope !== own && scope !== line) continue;
+        if (i < 0 || !AFTER_HEIR.test(key.slice(i + 1))) return true;
+      }
+      return false;
     }
 
     function isSalted(ctx, cut) {
@@ -712,17 +843,18 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     // castCut(ctx, cut, hist) → { slots, els, cast, castHit }. cut = skeleton with feat; ctx = { doc, registry, ix,
     // look, chooser, pools, salts, warn, aspect, bpm, trace, casts, castKeys, lockFree }. After the slots come the
     // element pins. The history records each slot's natural and reference picks (see createHistory); for a rerolled
-    // cut the natural pick comes from a second, silent pass without its salts, so a reroll changes only the streams
-    // under its key (§3.7). A cut under lock pins records what it would be without them (another silent pass). A cut
-    // whose inputs did not change since an earlier plan reuses that plan's cast (ctx.casts, see beginCasts); cast is
-    // the cache entry (null without the cache), castHit says whether it was reused.
+    // cut the natural picks of its parts come from a second, silent pass without its salts, so a reroll changes only
+    // the streams under its key (§3.7). Its shot (the natural shot, the heir and the shadow) comes from the cut as it
+    // would be without any salt (unsaltedCast). A cut under lock pins records what it would be without them (another
+    // silent pass). A cut whose inputs did not change since an earlier plan reuses that plan's cast (ctx.casts, see
+    // beginCasts); cast is the cache entry (null without the cache), castHit says whether it was reused.
     function castCut(ctx, cut, hist) {
       const cache = ctx.casts || null;
       const inputs = cache ? castInputs(ctx, cut, hist) : null;
       const hit = cache ? cache.find(cut.key, inputs) : undefined;
       if (hit) {
         for (const w of hit.warnings) ctx.warn(w);
-        hist.push(cut.key, hit.row);
+        hist.push(cut.key, hit.row, cut.feat.repeatOf || cut.key);
         return { slots: Object.assign({}, hit.slots), els: hit.els, cast: hit, castHit: true };
       }
       const warnings = [];
@@ -733,12 +865,21 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
         const els = decideEls(st);
         const free = lockFreeCtx(ctx, cut);
         const view = free ? castSlots(free, cut, hist, false) : st;
-        const nat = isSalted(ctx, cut) ? castSlots(silentCtx(free || ctx), cut, hist, true) : view;
+        const salted = isSalted(ctx, cut);
+        const nat = salted ? castSlots(silentCtx(free || ctx), cut, hist, true) : view;
+        const twins = hist.twinned(cut.feat.repeatOf);
+        const src = unsaltedCast(ctx, cut, hist, view, free, salted, twins);
         const natural = {}, refs = {};
         for (const slot of Object.keys(nat.slots)) natural[slot] = nat.base[slot] || nat.slots[slot].v;
+        natural['cam.shot'] = src.base['cam.shot'] || src.slots['cam.shot'].v;
         for (const slot of Object.keys(view.slots)) refs[slot] = view.ref[slot] || view.slots[slot].v;
         const row = historyRow(view.slots, natural, refs);
-        hist.push(cut.key, row);
+        row.heir = echoed(ctx, cut) ? CAM.heirOf(src, st) : null;
+        const shot = src.slots['cam.shot'];
+        row.shadow = isChoice('cam.shot', shot.v) ? shot.v : null;
+        if (salted) row.free = twinOf(src);
+        else if (twins) { const t = twinOf(src); if (twinDiffers(Object.assign({}, row, { free: t }), TWIN_ALL)) row.free = t; }
+        hist.push(cut.key, row, cut.feat.repeatOf || cut.key);
         let entry = null;
         if (cache) {
           entry = { id: nextEntryId++, inputs, slots: freezeSlots(Object.assign({}, st.slots)), els: deepFreeze(els), warnings,
@@ -751,14 +892,64 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       }
     }
 
+    // unsaltedCast(ctx, cut, hist, view, free, salted, twins) → the cut's cast as it would be without any salt, as far
+    // as what its neighbours read of its shot: the natural shot (the next cuts' near sets), the shadow (the next cut's
+    // heir, below) and the heir (what its repeats inherit, planner/camera heirOf). Its view (without its lock pins, like
+    // the rest of its row, so locking a line changes nothing outside it) when no salt reaches them, else a silent
+    // re-cast up to its camera slots. A salt reaches a later cut's shot through the previous cut's final shot
+    // (×SHOT_RECENT), so each row keeps its shot without salts (row.shadow), and a cut whose salts reach its heir
+    // (saltReachesHeir), or whose previous shadow differs from the previous final shot, is re-cast without its salts
+    // and with that shadow as the previous shot. It reaches the parts of the cuts after it too (the v2 path: their
+    // recency weighs against the salted cut's picks), so a row whose picks differ without salts keeps a twin (row.free,
+    // twinOf): every salted row, and every unsalted row whose own re-cast over the twins came out otherwise. A cut whose
+    // window (the 4 rows before it and its echoed row) holds a twin that differs where it reads (twins: hist.twinned)
+    // is re-cast in full, up to its camera slots, over the twins (hist.unsalted). So the heir, the shadow and the natural
+    // shot of every cut are exactly those of the plan without salts, whatever the salts did to its parts: a first copy
+    // whose layout follows a reroll next to it shows another shot, but passes on the one it shows without the reroll
+    // (round 3 re-cast such a cut's camera alone over its Plan parts, a mix that neither plan shows). Only a changed
+    // span (other features) changes what the plan without salts is. Without twins an unsalted cut's parts read the rows
+    // as its view did, so only its camera is re-cast (recastCamera), and only when the previous shadow differs. The
+    // natural shot comes from the same cast, not from the natural pass (whose parts, without recency, differ from the
+    // view's), so a reroll changes neither the near sets of the cuts after it nor, through them, what a first copy there
+    // passes on (§3.7). The heir also records whether the cut shows that shot and curve in the Plan (st in castCut,
+    // with its salts and lock pins), so a repeat's why says which it matches.
+    function unsaltedCast(ctx, cut, hist, view, free, salted, twins) {
+      const prev = hist.previous('cam.shot'), shadow = hist.unsaltedShot();
+      if (!twins && !(salted && saltReachesHeir(ctx, cut)) && prev === shadow) return view;
+      const base = free || ctx;
+      const quiet = salted ? silentCtx(base) : Object.assign(Object.create(base), { warn: () => {}, trace: null });
+      const read = twins ? hist.unsalted(cut.feat.repeatOf) : hist;
+      const shadowed = Object.assign(Object.create(read), { previous: (slot) => (slot === 'cam.shot' ? shadow : read.previous(slot)) });
+      // Without twins, an unsalted cut's parts read the rows as its view did (only the previous shot differs): its
+      // camera alone.
+      return salted || twins ? castSlots(quiet, cut, shadowed, false, true) : recastCamera(quiet, cut, shadowed, view);
+    }
+
+    // A cut's row as it would be without any salt (row.free), as far as a silent re-cast of a later cut reads it (up to
+    // the camera slots): its natural, reference and final picks in its salt-free cast. The natural pass of a salted cut
+    // (castCut nat) chooses without recency, and its view with its salts, so its row differs from this; an unsalted cut
+    // keeps one only where its re-cast over its neighbours' twins came out otherwise (twinDiffers), so the chain of
+    // twins ends where the salt no longer reaches the parts.
+    function twinOf(src) {
+      const natural = {}, refs = {}, slots = {};
+      for (const slot of Object.keys(src.slots)) {
+        if (slot.startsWith('filter')) continue;
+        slots[slot] = src.slots[slot];
+        natural[slot] = src.base[slot] || src.slots[slot].v;
+        refs[slot] = src.ref[slot] || src.slots[slot].v;
+      }
+      const t = historyRow(slots, natural, refs);
+      return { base: t.base, both: t.both, last: t.last, own: t.own };
+    }
+
     // --- the cast cache (re-planning) ---------------------------------------------------------------------------
 
     // Casting is most of a plan's work, and an edit usually leaves most cuts' inputs as they were. A cut's cast is a
     // pure function of: the look and seed (plan-wide), the pins at the work, its line and its cut key, the salts under
     // its line and cut, its skeleton (key, line, pin key, role, impact) and features, and the history window its
-    // recency reads (createHistory rowsRead). castInputs records them; an entry is reused when they compare equal
-    // (sameInputs). Entries live for the last two plans. Cached decisions are frozen, and a plan gets its own copy of
-    // each slots map (tracks may replace entries).
+    // recency reads (createHistory rowsRead, and whether the previous cut sings the same line cut: follows). castInputs
+    // records them; an entry is reused when they compare equal (sameInputs). Entries live for the last two plans.
+    // Cached decisions are frozen, and a plan gets its own copy of each slots map (tracks may replace entries).
     // The cache is keyed by the base registry (registry.base ?? registry, DESIGN_2_1 §3.9), then by registry.version
     // (the last 4 versions): an effective registry is a new object after every material edit, and an edit that keeps
     // what the planner reads keeps the version, so the casts stay warm (the fingerprints still see the new material
@@ -809,10 +1000,18 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
         look: k.look, work: k.pins(k.work, 'work', ''), line: cut.line ? k.pins(k.line, 'line', cut.line) : '-',
         cut: k.pins(k.cut, 'cut', cut.pinKey || cut.key), salts: k.salts(cut), lineId: cut.line, pinKey: cut.pinKey,
         role: cut.role, impact: !!cut.impact, featId: cut.featId, rows: hist.rowsRead(cut.feat.repeatOf),
+        follows: hist.follows(cut.feat.repeatOf), echoed: echoed(ctx, cut),
       };
     }
 
-    const INPUT_FIELDS = Object.freeze(['look', 'work', 'line', 'cut', 'salts', 'lineId', 'pinKey', 'role', 'impact', 'featId']);
+    // Whether a later cut sings this cut again (it is some cut's feat.repeatOf; ctx.echoed, planner/plan), so its row
+    // needs an heir. Without ctx.echoed (tests casting single cuts) every row gets one.
+    function echoed(ctx, cut) { return !ctx.echoed || ctx.echoed.has(cut.key); }
+
+    // follows: whether the previous cut sings the same line cut (a line sung twice in a row; planner/camera recencyOf);
+    // echoed: whether a later cut sings this one again (its row keeps an heir).
+    const INPUT_FIELDS = Object.freeze(['look', 'work', 'line', 'cut', 'salts', 'lineId', 'pinKey', 'role', 'impact', 'featId',
+      'follows', 'echoed']);
     function sameInputs(a, b) {
       for (const f of INPUT_FIELDS) if (a[f] !== b[f]) return false;
       return sameRows(a.rows, b.rows);

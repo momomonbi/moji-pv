@@ -1,6 +1,6 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-FTX4VUreVaY8YCas28EKl0Em70q4CXhvAyK8tXk4S4o='; style-src 'sha256-C7f+4dHVZFSrPADTL/+9MwqvHeCG8qOUP1K4ARo7x3A=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-XFp6e8WaSoDTJQH5VxpXkkn2QnhZcONeveOP2lwRt8Y='; style-src 'sha256-C7f+4dHVZFSrPADTL/+9MwqvHeCG8qOUP1K4ARo7x3A=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
 <title>Moji PV Maker</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -11812,6 +11812,8 @@ MV.def('i18n/strings', [], () => ({
   'why.recent': ['前のカットと同じにならないように', 'Different from the previous cut'],
   'why.family': ['似た種類が続かないように', 'Avoids repeating a similar kind'],
   'why.echo': ['{cut}と同じ歌詞なのでそろえた', 'Same lyric as {cut}, so it matches'],
+  'why.echo.kept': ['{cut}と同じ歌詞なので、振り直しやロックがないときの動きにそろえた',
+    'Same lyric as {cut}, so it keeps that cut\'s move as it would be without rerolls or locks'],
   'why.lineCut': ['{line}の{cut}', '{cut} of {line}'],
   'why.impact': ['見せ場（!）の行なので強め', 'Impact line (!), so stronger'],
   'why.season': ['歌詞の「{word}」から', 'From "{word}" in the lyrics'],
@@ -13377,6 +13379,8 @@ MV.def('i18n/strings', [], () => ({
   'why.cam.words': ['{n}語あるので歌に合わせて動く', '{n} words, so the camera reads along'],
   'why.cam.long': ['長いカットなので引きで見せる', 'Long cut, so a wide hold'],
   'why.cam.short': ['短いカットなので控えめに', 'Short cut, so kept simple'],
+  'why.cam.shortPull': ['短いカットで引くので、動きを短い間に詰めこむ緩急は避けた',
+    'A short pull-back, so curves that cram the move into a short stretch are left out'],
   'why.cam.section': ['「{section}」の動き', 'Camerawork of "{section}"'],
   'why.cam.sectionStart': ['区画の始まりなので引きから', 'Start of a section, so it opens wide'],
   'why.cam.lens': ['カメラの動き「{key}」と重ならないように', 'Not stacked on the camera move "{key}"'],
@@ -17110,6 +17114,8 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
       outro: Object.freeze({ pullReveal: 1.5, wideHold: 1.5 }),
     });
     const SHOT_RECENT = 0.2, SHOT_NEAR = 0.5, SHOT_ECHO = 40;
+    // A pullReveal the echo gives a cut shorter than this (seconds) takes one curve, hushRushHush (cam.curve).
+    const SHORT_PULL = 1.8;
     const RIG_OFF = 0.15;                           // A below this: no automatic rig
     const RIG_WEIGHTS = Object.freeze({
       chorus: Object.freeze({ slowSwell: 3, climbRise: 2, leanTilt: 0.5, none: 1 }),
@@ -17282,9 +17288,10 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
       return best;
     }
 
-    // weighShots(st, rules, rec, withWhy) → [{ key, w, wBase, why }] over the whole shot pool in sorted order (w = 0
-    // outside the rules' pool). w is q6 of every factor; wBase leaves out the recency factors (the cut's natural pick).
-    // rec = { prev, near, echo } (keys or null / arrays). why is null unless withWhy.
+    // weighShots(st, rules, rec, withWhy) → [{ key, w, wBase, wOwn, why }] over the whole shot pool in sorted order
+    // (w = 0 outside the rules' pool). w is q6 of every factor; wBase leaves out the recency factors, wOwn the echo too
+    // (the cut's natural pick, which the near set of the cuts after it reads; see autoShot). rec = { prev, near, echo,
+    // echoCode } (keys or null / arrays; see recencyOf). why is null unless withWhy.
     function weighShots(st, rules, rec, withWhy) {
       const { ctx, cut } = st;
       const f = cut.feat;
@@ -17299,12 +17306,13 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
       const out = new Array(SHOT_POOL.length);
       for (let i = 0; i < SHOT_POOL.length; i++) {
         const key = SHOT_POOL[i];
-        if (!(rules.bits & (1 << i))) { out[i] = { key, w: 0, wBase: 0, why: withWhy ? [] : null }; continue; }
+        if (!(rules.bits & (1 << i))) { out[i] = { key, w: 0, wBase: 0, wOwn: 0, why: withWhy ? [] : null }; continue; }
         const m = moods[i];
         const sec = bySection && bySection[key] ? bySection[key] : 1;
         const echo = rec.echo === key;
         // Left to right, like the factors are listed in §4.7 (the product is rounded once, by q6).
-        const w = baseWeight(key, f, A, orient, frames) * m * sec * (echo ? SHOT_ECHO : 1);
+        const own = baseWeight(key, f, A, orient, frames) * m * sec;
+        const w = own * (echo ? SHOT_ECHO : 1);
         const wBase = N.q6(w);
         let wr = w;
         if (rec.prev === key) wr *= SHOT_RECENT;
@@ -17314,24 +17322,87 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
           why = baseWhy(key, f, A, orient, lensKey, frames);
           if (m !== 1) { const t = moodWhy(SHOT.SHOTS[key].tags, mood); if (t) why.push(t); }
           if (sec !== 1 && f.section) why.push({ code: 'cam.section', params: { section: f.section } });
-          if (echo) why.push({ code: 'echo', params: { cut: f.repeatOf } });
+          if (echo) why.push({ code: rec.echoCode, params: { cut: f.repeatOf } });
           if (rec.prev && rec.prev !== key) why.push({ code: 'recent', params: { key: rec.prev } });
         }
-        out[i] = { key, w: wr === w ? wBase : N.q6(wr), wBase, why };
+        out[i] = { key, w: wr === w ? wBase : N.q6(wr), wBase, wOwn: echo ? N.q6(own) : wBase, why };
       }
       return out;
     }
 
     // The recency and echo a cut's shot reads (§4.7): the previous cut's final shot (×SHOT_RECENT), the natural shots of
-    // the 3 cuts before it (×SHOT_NEAR) and the natural shot of the cut it echoes (×SHOT_ECHO). The natural pass
-    // (st.natural) weighs without recency, like the part slots.
+    // the 3 cuts before it (×SHOT_NEAR) and the preset the cut it echoes shows (×SHOT_ECHO; its heir, see heirOf). The
+    // natural pass (st.natural) weighs without recency, like the part slots. When the previous cut sings the same line
+    // cut (the cut it echoes or another repeat of it: a line sung twice or more in a row, hist.follows), there is no echo
+    // toward the preset that cut ends on: rule 4 of "Repeated lines" for the weights, so the line does not play the
+    // same move back to back. echoCode: the reason an echoed shot gives, 'echo', or 'echo.kept' when the cut it echoes
+    // shows another shot in the Plan (a reroll or a lock; heirOf).
     function recencyOf(st) {
       const hist = st.hist;
-      const echo = hist.echo(st.cut.feat.repeatOf, 'cam.shot');
-      if (st.natural) return { prev: null, near: EMPTY, echo };
-      return { prev: hist.previous('cam.shot'), near: hist.recent('cam.shot', 'cam.shot', null).near, echo };
+      const rep = st.cut.feat.repeatOf;
+      let echo = hist.echo(rep, 'cam.shot');
+      const heir = echo === null ? null : hist.heir(rep);
+      const echoCode = heir && heir.shows === false ? 'echo.kept' : 'echo';
+      if (st.natural) return { prev: null, near: EMPTY, echo, echoCode };
+      const prev = hist.previous('cam.shot');
+      if (echo !== null && echo === prev && hist.follows(rep)) echo = null;
+      return { prev, near: hist.recent('cam.shot', 'cam.shot', null).near, echo, echoCode };
     }
     const EMPTY = Object.freeze([]);
+
+    // --- repeated lines (§4.7 "Repeated lines") -------------------------------------------------------------------
+
+    // heirOf(st, shown) → what a later copy of this cut's line inherits from it (planner/cast keeps it in the cut's
+    // history row): { v, cause, frames, curve, shows, showsCurve } — its shot (a preset or 'none'; null for a custom
+    // shot), why it has no shot when it has none ('pin': a pinned 'none'; 'frames': its framing lens, the weights chose
+    // 'none' over it; 'other': a layout without camerawork, the camera amount or the section), whether its lens frames,
+    // its curve, and whether the cut as the Plan shows it (shown, default st) has that shot, and that curve on that
+    // shot (not when a reroll or a lock changed them; the repeats' why says so: a curve on another shot, or on 'none',
+    // is not the move they match). st = the cut's cast state after its camera slots.
+    function heirOf(st, shown) {
+      const d = st.slots['cam.shot'];
+      if (!d || typeof d.v !== 'string') return null;
+      const frames = framesAt(st);
+      let cause = 'shot';
+      if (d.v === NONE) {
+        cause = typeof d.from === 'string' && d.from.startsWith('pin') ? 'pin' : d.from === 'auto' && frames ? 'frames' : 'other';
+      }
+      const c = st.slots['cam.curve'];
+      const curve = c && typeof c.v === 'string' ? c.v : null;
+      const out = shown || st;
+      const sd = out.slots['cam.shot'], sc = out.slots['cam.curve'];
+      const shows = !!sd && sd.v === d.v;
+      return Object.freeze({ v: d.v, cause, frames, curve, shows, showsCurve: shows && !!sc && sc.v === curve });
+    }
+
+    function framesAt(st) {
+      const key = st.chosen.lens && st.chosen.lens !== NONE ? st.chosen.lens : null;
+      const lens = key ? st.ctx.registry.get('lens', key) : null;
+      return !!(lens && lens.frames === true);
+    }
+
+    // The shot a cut of a repeated line inherits from the same cut of the line's first sung copy (feat.repeatOf, its
+    // heir), or null (the weights decide, with the heir's preset as the echo). §4.7 "Repeated lines", rules 1–6:
+    // (1) the heir's shot is in this cut's pool and weighs > 0 here (it fits the cut); (2) an impact cut inherits only
+    // snapZoom; (3) onto a framing lens, only a preset the first copy also took over a framing lens; (4) not the preset
+    // the previous cut ends on (the natural pass has no previous cut; when the previous cut sings the same line cut,
+    // recencyOf drops the echo toward it too); (5) 'none' only when it was pinned, or when the weights chose it over the
+    // first copy's framing lens and this cut has one too (never a layout's 'none' or the camera amount's); (6) a cut
+    // whose shot is rerolled (a salt on the cut, its line or their cam.shot field) chooses again.
+    function inheritedShot(st, rules, list) {
+      const rep = st.cut.feat.repeatOf;
+      const heir = rep ? st.hist.heir(rep) : null;
+      if (!heir) return null;
+      const v = heir.v, i = SHOT_POOL.indexOf(v);
+      if (i < 0 || !(rules.bits & (1 << i)) || !(list[i].wBase > 0)) return null; // rule 1
+      if (st.cut.feat.impact && v !== 'snapZoom') return null; // rule 2
+      const frames = framesAt(st);
+      if (v !== NONE && frames && !heir.frames) return null; // rule 3
+      if (v !== NONE && !st.natural && st.hist.previous('cam.shot') === v) return null; // rule 4
+      if (v === NONE && !(heir.cause === 'pin' || (heir.cause === 'frames' && frames))) return null; // rule 5
+      if (st.shotSalted) return null; // rule 6
+      return v;
+    }
 
     // shotWeights(st) → [{ key, w, why }] for the cut in st (tests and tools; the planner picks from the same numbers).
     function shotWeights(st) {
@@ -17344,8 +17415,13 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
       return list.map((c) => ({ key: c.key, w: c.w, why: poolWhy.concat(c.why) }));
     }
 
-    // The automatic shot: { v, from, base, gentle, rule?, why?, candidates?, recent? }. Gumbel-max over q6 weights keyed
-    // by shot key (ties → the smaller key, keys sorted); base = the same argmax without the recency factors. why,
+    // The automatic shot: { v, from, base, gentle, inherited?, rule?, why?, candidates?, recent? }. A repeated line's cut
+    // inherits its first copy's shot where inheritedShot allows it (why: the rules' reasons, then 'echo', then the
+    // key's); else Gumbel-max over q6 weights keyed by shot key (ties → the smaller key, keys sorted). base = the cut's
+    // own pick, the same argmax without the recency factors and without the echo (wOwn): its natural shot, which the
+    // near set (×SHOT_NEAR) of the cuts 2–4 after it reads. A repeat's own pick does not follow its first copy, so an
+    // edit that changes a first copy's shot moves its repeats (the echo) but not, through their near sets, the cuts
+    // around them; the cut right after a repeat still weighs against the shot it shows (×SHOT_RECENT). why,
     // candidates and recent (explain) only with withWhy.
     function autoShot(st, withWhy) {
       const rules = shotRules(st);
@@ -17360,15 +17436,28 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
       const rec = recencyOf(st);
       const list = weighShots(st, rules, rec, withWhy);
       const prefix = CH.gumbelPrefix(seedOf(st, 'cam.shot'));
+      const kept = inheritedShot(st, rules, list);
+      if (kept !== null) {
+        const out = { v: kept, from: 'auto', base: ownPick(list, prefix, kept), gentle: rules.gentle, inherited: true };
+        if (withWhy) {
+          const own = list[SHOT_POOL.indexOf(kept)];
+          const heir = st.hist.heir(st.cut.feat.repeatOf);
+          const echo = { code: heir.shows ? 'echo' : 'echo.kept', params: { cut: st.cut.feat.repeatOf } };
+          out.why = rulesWhy(st, rules).concat([echo], own.why.filter((w) => w.code !== 'echo' && w.code !== 'echo.kept'));
+          out.candidates = list.map((c, i) => ({ key: c.key, w: c.w, masked: maskOf(st, rules, i) }));
+          out.recent = rec;
+        }
+        return out;
+      }
       let best = null, bestScore = -Infinity, base = null, baseScore = -Infinity;
       for (const c of list) {
-        if (!(c.w > 0) && !(c.wBase > 0)) continue;
+        if (!(c.w > 0) && !(c.wOwn > 0)) continue;
         const noise = CH.gumbelAt(prefix, c.key);
         if (c.w > 0) { const s = Math.log(c.w) + noise; if (s > bestScore) { best = c.key; bestScore = s; } }
-        if (c.wBase > 0) { const s = Math.log(c.wBase) + noise; if (s > baseScore) { base = c.key; baseScore = s; } }
+        if (c.wOwn > 0) { const s = Math.log(c.wOwn) + noise; if (s > baseScore) { base = c.key; baseScore = s; } }
       }
       const v = best === null ? NONE : best;
-      const out = { v, from: 'auto', base: base === null ? v : base, gentle: rules.gentle };
+      const out = { v, from: 'auto', base: base === null ? v : base, gentle: rules.gentle, echoed: rec.echo !== null && v === rec.echo };
       if (withWhy) {
         const own = list[SHOT_POOL.indexOf(v)];
         out.why = rulesWhy(st, rules).concat(own.why);
@@ -17377,6 +17466,17 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
         out.recent = rec;
       }
       return out;
+    }
+
+    // The own pick over a weighed list (see autoShot), or `or` when nothing weighs.
+    function ownPick(list, prefix, or) {
+      let base = null, baseScore = -Infinity;
+      for (const c of list) {
+        if (!(c.wOwn > 0)) continue;
+        const s = Math.log(c.wOwn) + CH.gumbelAt(prefix, c.key);
+        if (s > baseScore) { base = c.key; baseScore = s; }
+      }
+      return base === null ? or : base;
     }
 
     function decideShot(st) {
@@ -17396,6 +17496,8 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
         const got = autoShot(st, !!trace);
         d = { v: got.v, from: got.from };
         gentle = !!got.gentle;
+        if (got.inherited) st.heirCurve = inheritedCurve(st);
+        st.echoShot = !!(got.inherited || got.echoed);
         if (got.base !== got.v) st.base[slot] = got.base;
         if (trace) {
           Object.assign(trace, { kind: 'cam.shot', stage: got.from === 'rule' ? 'rule' : 'auto', rule: got.rule || null,
@@ -17405,6 +17507,21 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
       if (trace) trace.decision = d;
       setDecision(st, slot, d);
       return gentle;
+    }
+
+    const CURVES_IMPACT = Object.freeze([Object.freeze(['dashStop', 'holdThenDash']), Object.freeze([3, 2])]);
+    const CURVES_FAST = Object.freeze([Object.freeze(['hushRushHush', 'holdThenDash', 'softEnds']), Object.freeze([3, 2, 1])]);
+    const CURVES_CALM = Object.freeze([Object.freeze(['softEnds', 'fadeBrake', 'slowBloom']), Object.freeze([3, 2, 1])]);
+    // The curve of a short pull the echo gives (SHORT_PULL), whatever the cut's list: hushRushHush. Of the curves that
+    // start and end slowly it has the lowest top speed, 1.4 × the move's mean speed (softEnds 2.5, holdThenDash 2.4);
+    // fadeBrake and slowBloom reach 1.9 × at the first or the last frame, and dashStop (1.2 ×) runs at its top speed
+    // from the cut's first frame into a sudden stop.
+    const CURVES_SHORT_PULL = Object.freeze([Object.freeze(['hushRushHush']), Object.freeze([1])]);
+
+    // The first copy's curve, for a cut whose shot was inherited.
+    function inheritedCurve(st) {
+      const heir = st.hist.heir(st.cut.feat.repeatOf);
+      return heir ? heir.curve : null;
     }
 
     function gentleArrange(st) {
@@ -17438,12 +17555,24 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
       });
       st.decide(st, 'cam.curve', SLOT_SPECS['cam.curve'], (seed, withWhy) => {
         const bias = ctx.look.mood && ctx.look.mood.tagBias ? ctx.look.mood.tagBias.fast : undefined;
-        let v;
-        if (f.impact) v = R.fromSeed(seed).weighted(['dashStop', 'holdThenDash'], [3, 2]);
-        else if (f.energy >= 0.65 || (typeof bias === 'number' && bias > 1.2)) {
-          v = R.fromSeed(seed).weighted(['hushRushHush', 'holdThenDash', 'softEnds'], [3, 2, 1]);
-        } else v = R.fromSeed(seed).weighted(['softEnds', 'fadeBrake', 'slowBloom'], [3, 2, 1]);
-        return withWhy && f.impact ? { v, from: 'auto', why: [{ code: 'cam.impact', params: {} }] } : { v, from: 'auto' };
+        let [keys, weights] = f.impact ? CURVES_IMPACT
+          : f.energy >= 0.65 || (typeof bias === 'number' && bias > 1.2) ? CURVES_FAST : CURVES_CALM;
+        // A pullReveal the echo put on a short cut (inherited, or picked as the ×40 echo) came from a copy that may have
+        // had more time: a curve that bunches the pull would make it a fast zoom-out, so it takes CURVES_SHORT_PULL
+        // (NOTES "Echo of repeated lines", round 5).
+        const calmed = shot === 'pullReveal' && st.echoShot && f.dur < SHORT_PULL;
+        if (calmed) [keys, weights] = CURVES_SHORT_PULL;
+        // An inherited shot keeps its first copy's curve too, when this cut's own curves include it and its curve is
+        // not rerolled (a die on cam.curve; a reroll of the cut or its line already stops the inheritance, rule 6).
+        const kept = !st.curveSalted && st.heirCurve && keys.includes(st.heirCurve) ? st.heirCurve : null;
+        const v = kept || R.fromSeed(seed).weighted(keys, weights);
+        if (!withWhy) return { v, from: 'auto' };
+        const why = f.impact && !calmed ? [{ code: 'cam.impact', params: {} }] : [];
+        if (kept) {
+          const heir = st.hist.heir(f.repeatOf);
+          why.unshift({ code: heir && heir.showsCurve === false ? 'echo.kept' : 'echo', params: { cut: f.repeatOf } });
+        } else if (calmed) why.push({ code: 'cam.shortPull', params: {} });
+        return why.length ? { v, from: 'auto', why } : { v, from: 'auto' };
       });
       st.decide(st, 'cam.follow', SLOT_SPECS['cam.follow'], () => {
         let x;
@@ -17475,15 +17604,21 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
     // (not a custom object), across a hard cut or a text transition: B's cam.shot becomes a new frozen decision with
     // p.carry = SHOT.lastFraming(A's shot, { zoom: A's cam.zoom }) and pfrom.carry 'rule', so B opens at A's closeness,
     // screen position and roll (a match cut). Skipped when there is nothing to carry (A ends on the frame) or nothing
-    // to carry it into (B opens on the frame). The decision is kept on B's cast entry while its inputs are the same.
+    // to carry it into (B opens on the frame), and for a repeat on its first copy's preset (§4.7 "Repeated lines") when
+    // that copy did not carry: the repeat then opens as its first copy does, so the two play the same move. The decision
+    // is kept on B's cast entry while its inputs are the same.
     function carry(ctx, cuts, seams) {
       const list = seams || ctx.seams || [];
-      for (let j = 1; j < cuts.length; j++) {
-        const A = cuts[j - 1], B = cuts[j];
-        if (!A.line || A.line !== B.line) continue;
+      const byKey = new Map();
+      for (let j = 0; j < cuts.length; j++) {
+        const A = j > 0 ? cuts[j - 1] : null, B = cuts[j];
+        byKey.set(B.key, B);
+        if (!A || !A.line || A.line !== B.line) continue;
         const a = A.slots['cam.shot'], b = B.slots['cam.shot'];
         if (!a || !b || a.v === NONE || typeof b.v !== 'string' || b.v === NONE || !opensOnText(b.v)) continue;
         if (B.seamIn >= 0 && list[B.seamIn] && list[B.seamIn].scope !== 'text') continue;
+        const first = B.feat.repeatOf ? byKey.get(B.feat.repeatOf) : null;
+        if (first && first.slots['cam.shot'] && first.slots['cam.shot'].v === b.v && !carried(first)) continue;
         const zoom = A.slots['cam.zoom'] ? A.slots['cam.zoom'].v : 1;
         const framing = SHOT.lastFraming(a.v, { zoom });
         if (!framing) continue;
@@ -17505,6 +17640,11 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
         const t = tracing(ctx, B.key, 'cam.shot');
         if (t) t.override = { rule: 'carry', decision: d };
       }
+    }
+
+    function carried(cut) {
+      const d = cut.slots['cam.shot'];
+      return !!(d && d.p && d.p.carry);
     }
 
     function deepFreeze(v) {
@@ -17688,8 +17828,8 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
     }
 
     return {
-      SLOT_SPECS, CAM_SLOTS, SHOT_POOL, decideSpeed, applySpeed, decideCamera, shotWeights, carry, rigs,
-      FACTORS: Object.freeze({ AMOUNT_OFF, SHORT_CUT, SHOT_RECENT, SHOT_NEAR, SHOT_ECHO, RIG_OFF, LAST_CHORUS_AMP, AMP_MAX }),
+      SLOT_SPECS, CAM_SLOTS, SHOT_POOL, decideSpeed, applySpeed, decideCamera, shotWeights, carry, rigs, heirOf,
+      FACTORS: Object.freeze({ AMOUNT_OFF, SHORT_CUT, SHOT_RECENT, SHOT_NEAR, SHOT_ECHO, SHORT_PULL, RIG_OFF, LAST_CHORUS_AMP, AMP_MAX }),
     };
   });
 /* 文字PVメーカー v2 — original work. The work-level look: season, mood, theme, amounts, palette, faces, texture (DESIGN §4.16.3). */
@@ -18294,12 +18434,15 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     function createHistory(registry) {
       const rows = [];
       const byCut = new Map();
-      // push(cutKey, row): row = historyRow(…) of the cut.
+      let lastCopyOf = null;
+      // push(cutKey, row, copyOf): row = historyRow(…) of the cut; copyOf = the first sung copy's cut key of the line
+      // cut it sings (its feat.repeatOf, or its own key; see follows).
       // The recency sets asked for since the last push (setsOf), per `which` and group.
       const sets = { both: new Map(), base: new Map() };
-      function push(cutKey, row) {
+      function push(cutKey, row, copyOf) {
         rows.push(row);
         byCut.set(cutKey, row);
+        lastCopyOf = copyOf || null;
         sets.both.clear();
         sets.base.clear();
       }
@@ -18345,12 +18488,46 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
         const v = rows.length ? rows[rows.length - 1].last.get(slot) : undefined;
         return v === undefined ? null : v;
       }
-      // What the earlier identical line's cut picked for this slot (its natural pick).
+      // The previous cut's shot as it would be without any salt (its row's shadow; see castCut), or null.
+      function unsaltedShot() { return rows.length ? rows[rows.length - 1].shadow : null; }
+      // What the earlier identical line's cut picked for this slot: its natural pick; for cam.shot the preset it shows
+      // (its heir, planner/camera heirOf), which its repeats inherit or, where they may not, weigh as the echo.
       function echo(repeatOf, slot) {
         const row = repeatOf ? byCut.get(repeatOf) : null;
-        return row && row.own[slot] ? row.own[slot] : null;
+        if (!row) return null;
+        if (slot === 'cam.shot') return row.heir && row.heir.v !== 'none' ? row.heir.v : null;
+        return row.own[slot] || null;
       }
-      return { push, recent, reference, previous, echo, rowsRead };
+      // What a repeat of that cut inherits from it (planner/camera heirOf), or null.
+      function heir(repeatOf) {
+        const row = repeatOf ? byCut.get(repeatOf) : null;
+        return row ? row.heir : null;
+      }
+      // Whether the previous cut sings the same line cut as a repeat of repeatOf: that cut itself or another repeat of
+      // it (a line sung twice or more in a row).
+      function follows(repeatOf) { return !!repeatOf && lastCopyOf === repeatOf; }
+      // Whether a row the next cut reads (rowsRead) has a salt-free twin (row.free; castCut) that differs from it where
+      // the next cut's parts read that row (TWIN_FIELDS at its place): then the cut's salt-free cast reads the twins.
+      function twinned(repeatOf) {
+        const n = rows.length;
+        for (let i = Math.max(0, n - 4); i < n; i++) if (twinDiffers(rows[i], TWIN_FIELDS[i - n + 4])) return true;
+        const e = repeatOf ? byCut.get(repeatOf) : null;
+        return !!e && twinDiffers(e, TWIN_FIELDS[4]);
+      }
+      // The same reads for the next cut with each row that has a twin replaced by it (the cut's salt-free re-cast,
+      // planner/cast unsaltedCast): a history of just the rows those reads touch.
+      function unsalted(repeatOf) {
+        const h = createHistory(registry);
+        const twin = (row) => (row.free ? Object.assign({}, row, row.free, { free: null }) : row);
+        const n = rows.length;
+        for (let i = Math.max(0, n - 4); i < n; i++) h.push(null, twin(rows[i]), i === n - 1 ? lastCopyOf : null);
+        const e = repeatOf ? byCut.get(repeatOf) : null;
+        if (e) h.name(repeatOf, twin(e));
+        return h;
+      }
+      // Registers a row under a cut key without adding it to the window (unsalted: the echoed row).
+      function name(cutKey, row) { byCut.set(cutKey, row); }
+      return { push, recent, reference, previous, unsaltedShot, echo, heir, follows, rowsRead, twinned, unsalted, name };
     }
 
     const NONE = Object.freeze([]);
@@ -18379,11 +18556,12 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     }
 
     // historyRow(slots, natural, refs) → what a cut leaves in the history: per group its natural picks (base) and its
-    // natural and reference picks (both), per slot its final value (last) and natural pick (own). slots = the cut's
-    // decisions (as its neighbours see them); natural / refs = { slot: pick }. Rows never change, so a cached cast
-    // keeps its row.
+    // natural and reference picks (both), per slot its final value (last) and natural pick (own), and what its repeats
+    // inherit (heir), its shot without salts (shadow) and, for a salted cut or one whose picks the salts reached, the
+    // same four fields as they would be without any salt (free; heir, shadow and free are set by castCut). slots = the cut's decisions (as its neighbours
+    // see them); natural / refs = { slot: pick }. Rows never change, so a cached cast keeps its row.
     function historyRow(slots, natural, refs) {
-      const row = { base: new Map(), both: new Map(), last: new Map(), own: {} };
+      const row = { base: new Map(), both: new Map(), last: new Map(), own: {}, heir: null, shadow: null, free: null };
       for (const slot of Object.keys(natural)) {
         const v = natural[slot];
         if (!isChoice(slot, v)) continue;
@@ -18402,32 +18580,68 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     // Whether two history windows (createHistory rowsRead) lead to the same choices: the same rows, or rows with the
     // same values where the next cut reads them (recency reads memberships, so the order inside a group is free). The
     // three rows before the previous one are read for their natural picks (near); the previous one for its natural
-    // picks (the reference pick weighs against them), both picks (recent) and final values (previous); the echoed
-    // row for its own picks.
-    const ROW_FIELDS = Object.freeze([['base'], ['base'], ['base'], ['base', 'both', 'last'], ['own']]);
+    // picks (the reference pick weighs against them), both picks (recent), final values (previous) and shadow; the
+    // echoed row for its own picks and its heir (the shot its repeats inherit, and whether that cut shows it). A cut's
+    // salt-free re-cast reads the same fields of each row's twin (row.free; unsaltedCast), and whether a twin differs
+    // from its row decides whether it re-casts, so the twins compare too (a row with one never equals a row without).
+    const ROW_FIELDS = Object.freeze([['base'], ['base'], ['base'], ['base', 'both', 'last', 'shadow'], ['own', 'heir']]);
+    const TWIN_FIELDS = Object.freeze([['base'], ['base'], ['base'], ['base', 'both', 'last'], ['own']]);
+    const TWIN_ALL = Object.freeze(['base', 'both', 'last', 'own']);
     function sameRows(a, b) {
       for (let i = 0; i < ROW_FIELDS.length; i++) {
         const x = a[i], y = b[i];
         if (x === y) continue;
-        if (!x || !y) return false;
-        for (const f of ROW_FIELDS[i]) if (!(f === 'own' ? sameRecord(x.own, y.own) : sameMap(x[f], y[f]))) return false;
+        if (!x || !y || !sameFields(x, y, ROW_FIELDS[i])) return false;
+        if (x.free !== y.free && (!x.free || !y.free || !sameFields(x.free, y.free, TWIN_FIELDS[i]))) return false;
       }
       return true;
     }
 
-    function sameMap(a, b) {
-      if (a.size !== b.size) return false;
+    // Whether a row's twin differs from the row in the fields a cut's salt-free re-cast (up to its camera slots) reads
+    // of it. The shot and the screen effects are left out: the re-cast reads the previous shot from the shadow and the
+    // near shots from base, whose shot the twin shares (castCut), and it stops before the screen effects (twinOf has
+    // none).
+    function twinDiffers(row, fields) {
+      const t = row ? row.free : null;
+      if (!t) return false;
+      for (const f of fields) {
+        if (!(f === 'own' ? sameRecord(row.own, t.own, unread) : sameMap(row[f], t[f], unread))) return true;
+      }
+      return false;
+    }
+    function unread(key) { return key === 'cam.shot' || key.startsWith('filter'); }
+
+    function sameFields(x, y, fields) {
+      for (const f of fields) {
+        const same = f === 'own' ? sameRecord(x.own, y.own) : f === 'heir' ? sameHeir(x.heir, y.heir)
+          : f === 'shadow' ? x.shadow === y.shadow : sameMap(x[f], y[f]);
+        if (!same) return false;
+      }
+      return true;
+    }
+
+    // skip(key): the keys left out of the comparison (twinDiffers), or undefined.
+    function sameMap(a, b, skip) {
+      if (skip === undefined && a.size !== b.size) return false;
       for (const [k, v] of a) {
+        if (skip && skip(k)) continue;
         const w = b.get(k);
         if (Array.isArray(v) ? !(Array.isArray(w) && v.length === w.length && v.every((x) => w.includes(x))) : v !== w) return false;
       }
+      if (skip) for (const k of b.keys()) if (!skip(k) && !a.has(k)) return false;
       return true;
     }
 
-    function sameRecord(a, b) {
+    function sameHeir(a, b) {
+      return a === b || (!!a && !!b && a.v === b.v && a.cause === b.cause && a.frames === b.frames && a.curve === b.curve &&
+        a.shows === b.shows && a.showsCurve === b.showsCurve);
+    }
+
+    function sameRecord(a, b, skip) {
       const ka = Object.keys(a);
-      if (ka.length !== Object.keys(b).length) return false;
-      for (const k of ka) if (a[k] !== b[k]) return false;
+      if (skip === undefined && ka.length !== Object.keys(b).length) return false;
+      for (const k of ka) if (!(skip && skip(k)) && a[k] !== b[k]) return false;
+      if (skip) for (const k of Object.keys(b)) if (!skip(k) && !(k in a)) return false;
       return true;
     }
 
@@ -18689,14 +18903,9 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     // arrive → dwell → depart → ornament.count → ornament#i → lens → cam.shot → cam.zoom → cam.curve → cam.follow →
     // filter.count → filter#i. Every slot keeps its own stream, so the camera slots change no part choice. natural =
     // the neighbours' view (no recency, no runner-up rule, no parameters). st.decide = decideValue, for planner/camera.
-    function castSlots(ctx, cut, hist, natural) {
-      const st = {
-        ctx, cut, hist, natural, slots: {}, chosen: {}, base: {}, ref: {},
-        at: { cutKey: cut.key, pinCutKey: cut.pinKey, lineId: cut.line },
-        cutSeed: CH.cutSeed(ctx.doc.look.seed, cut.key, cut.line, ctx.salts), slotPrefix: 0, poolKey: null,
-        cond: lineCond(ctx, cut.line), decide: decideValue,
-      };
-      st.slotPrefix = CH.slotPrefix(st.cutSeed);
+    // camOnly: stop after the camera slots (what a row's natural shot, heir and shadow read; see unsaltedCast).
+    function castSlots(ctx, cut, hist, natural, camOnly) {
+      const st = stateOf(ctx, cut, hist, natural);
       decideOrient(st);
       const arrange = decidePart(st, 'arrange', null);
       decideText(st);
@@ -18708,7 +18917,37 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       decideList(st, 'ornament');
       decidePart(st, 'lens', null);
       CAM.decideCamera(st);
-      decideList(st, 'filter');
+      if (!camOnly) decideList(st, 'filter');
+      return st;
+    }
+
+    function stateOf(ctx, cut, hist, natural) {
+      const st = {
+        ctx, cut, hist, natural, slots: {}, chosen: {}, base: {}, ref: {},
+        at: { cutKey: cut.key, pinCutKey: cut.pinKey, lineId: cut.line },
+        cutSeed: CH.cutSeed(ctx.doc.look.seed, cut.key, cut.line, ctx.salts), slotPrefix: 0, poolKey: null,
+        cond: lineCond(ctx, cut.line), decide: decideValue, shotSalted: false, curveSalted: false, heirCurve: null, echoShot: false,
+      };
+      if (!natural && isSalted(ctx, cut)) {
+        st.shotSalted = shotSalted(ctx, cut);
+        st.curveSalted = fieldSalted(ctx, cut, 'cam.curve');
+      }
+      st.slotPrefix = CH.slotPrefix(st.cutSeed);
+      return st;
+    }
+
+    // The camera slots of a cut cast again over another history whose rows read the same for its parts (only the
+    // previous shot differs): the slots before them are those of `from` (unsaltedCast, for an unsalted cut).
+    function recastCamera(ctx, cut, hist, from) {
+      const st = stateOf(ctx, cut, hist, false);
+      for (const slot of Object.keys(from.slots)) {
+        if (slot.startsWith('cam.') || slot.startsWith('filter')) continue;
+        st.slots[slot] = from.slots[slot];
+        st.chosen[slot] = from.chosen[slot];
+        if (slot in from.base) st.base[slot] = from.base[slot];
+        if (slot in from.ref) st.ref[slot] = from.ref[slot];
+      }
+      CAM.decideCamera(st);
       return st;
     }
 
@@ -18722,6 +18961,38 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
         saltedCache.set(salts, set);
       }
       return set;
+    }
+
+    // Whether a salt reaches the stream of the cut's shot: a reroll of the cut or its line, or of their cam.shot field
+    // (a field die on another slot leaves the shot's stream, and so its inheritance, alone).
+    function shotSalted(ctx, cut) {
+      const s = ctx.salts;
+      if (!s) return false;
+      const own = 'cut/' + cut.key, line = cut.line ? 'line/' + cut.line : null;
+      return !!(s[own] || s[own + ':cam.shot'] || (line && (s[line] || s[line + ':cam.shot'])));
+    }
+
+    // Whether a field die of the cut or its line reaches one slot's stream (cut/<key>:<slot>, line/<id>:<slot>).
+    function fieldSalted(ctx, cut, slot) {
+      const s = ctx.salts;
+      if (!s) return false;
+      return !!(s['cut/' + cut.key + ':' + slot] || (cut.line && s['line/' + cut.line + ':' + slot]));
+    }
+
+    // Field dice that cannot change a cut's heir or shadow: slots decided after its lens and shot that neither reads
+    // (cam.zoom, cam.follow and the screen effects, with their parameters; §4.16.2 order). Every other salt of the cut
+    // or its line (a reroll, a die on a part, the orientation, a parameter before them, the shot or the curve) does.
+    const AFTER_HEIR = /^(cam\.zoom|cam\.follow|filter\.count|filter#\d+)(\.|$)/;
+    function saltReachesHeir(ctx, cut) {
+      const own = 'cut/' + cut.key, line = cut.line ? 'line/' + cut.line : null;
+      for (const key of Object.keys(ctx.salts)) {
+        if (!ctx.salts[key]) continue;
+        const i = key.indexOf(':');
+        const scope = i < 0 ? key : key.slice(0, i);
+        if (scope !== own && scope !== line) continue;
+        if (i < 0 || !AFTER_HEIR.test(key.slice(i + 1))) return true;
+      }
+      return false;
     }
 
     function isSalted(ctx, cut) {
@@ -18766,17 +19037,18 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     // castCut(ctx, cut, hist) → { slots, els, cast, castHit }. cut = skeleton with feat; ctx = { doc, registry, ix,
     // look, chooser, pools, salts, warn, aspect, bpm, trace, casts, castKeys, lockFree }. After the slots come the
     // element pins. The history records each slot's natural and reference picks (see createHistory); for a rerolled
-    // cut the natural pick comes from a second, silent pass without its salts, so a reroll changes only the streams
-    // under its key (§3.7). A cut under lock pins records what it would be without them (another silent pass). A cut
-    // whose inputs did not change since an earlier plan reuses that plan's cast (ctx.casts, see beginCasts); cast is
-    // the cache entry (null without the cache), castHit says whether it was reused.
+    // cut the natural picks of its parts come from a second, silent pass without its salts, so a reroll changes only
+    // the streams under its key (§3.7). Its shot (the natural shot, the heir and the shadow) comes from the cut as it
+    // would be without any salt (unsaltedCast). A cut under lock pins records what it would be without them (another
+    // silent pass). A cut whose inputs did not change since an earlier plan reuses that plan's cast (ctx.casts, see
+    // beginCasts); cast is the cache entry (null without the cache), castHit says whether it was reused.
     function castCut(ctx, cut, hist) {
       const cache = ctx.casts || null;
       const inputs = cache ? castInputs(ctx, cut, hist) : null;
       const hit = cache ? cache.find(cut.key, inputs) : undefined;
       if (hit) {
         for (const w of hit.warnings) ctx.warn(w);
-        hist.push(cut.key, hit.row);
+        hist.push(cut.key, hit.row, cut.feat.repeatOf || cut.key);
         return { slots: Object.assign({}, hit.slots), els: hit.els, cast: hit, castHit: true };
       }
       const warnings = [];
@@ -18787,12 +19059,21 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
         const els = decideEls(st);
         const free = lockFreeCtx(ctx, cut);
         const view = free ? castSlots(free, cut, hist, false) : st;
-        const nat = isSalted(ctx, cut) ? castSlots(silentCtx(free || ctx), cut, hist, true) : view;
+        const salted = isSalted(ctx, cut);
+        const nat = salted ? castSlots(silentCtx(free || ctx), cut, hist, true) : view;
+        const twins = hist.twinned(cut.feat.repeatOf);
+        const src = unsaltedCast(ctx, cut, hist, view, free, salted, twins);
         const natural = {}, refs = {};
         for (const slot of Object.keys(nat.slots)) natural[slot] = nat.base[slot] || nat.slots[slot].v;
+        natural['cam.shot'] = src.base['cam.shot'] || src.slots['cam.shot'].v;
         for (const slot of Object.keys(view.slots)) refs[slot] = view.ref[slot] || view.slots[slot].v;
         const row = historyRow(view.slots, natural, refs);
-        hist.push(cut.key, row);
+        row.heir = echoed(ctx, cut) ? CAM.heirOf(src, st) : null;
+        const shot = src.slots['cam.shot'];
+        row.shadow = isChoice('cam.shot', shot.v) ? shot.v : null;
+        if (salted) row.free = twinOf(src);
+        else if (twins) { const t = twinOf(src); if (twinDiffers(Object.assign({}, row, { free: t }), TWIN_ALL)) row.free = t; }
+        hist.push(cut.key, row, cut.feat.repeatOf || cut.key);
         let entry = null;
         if (cache) {
           entry = { id: nextEntryId++, inputs, slots: freezeSlots(Object.assign({}, st.slots)), els: deepFreeze(els), warnings,
@@ -18805,14 +19086,64 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       }
     }
 
+    // unsaltedCast(ctx, cut, hist, view, free, salted, twins) → the cut's cast as it would be without any salt, as far
+    // as what its neighbours read of its shot: the natural shot (the next cuts' near sets), the shadow (the next cut's
+    // heir, below) and the heir (what its repeats inherit, planner/camera heirOf). Its view (without its lock pins, like
+    // the rest of its row, so locking a line changes nothing outside it) when no salt reaches them, else a silent
+    // re-cast up to its camera slots. A salt reaches a later cut's shot through the previous cut's final shot
+    // (×SHOT_RECENT), so each row keeps its shot without salts (row.shadow), and a cut whose salts reach its heir
+    // (saltReachesHeir), or whose previous shadow differs from the previous final shot, is re-cast without its salts
+    // and with that shadow as the previous shot. It reaches the parts of the cuts after it too (the v2 path: their
+    // recency weighs against the salted cut's picks), so a row whose picks differ without salts keeps a twin (row.free,
+    // twinOf): every salted row, and every unsalted row whose own re-cast over the twins came out otherwise. A cut whose
+    // window (the 4 rows before it and its echoed row) holds a twin that differs where it reads (twins: hist.twinned)
+    // is re-cast in full, up to its camera slots, over the twins (hist.unsalted). So the heir, the shadow and the natural
+    // shot of every cut are exactly those of the plan without salts, whatever the salts did to its parts: a first copy
+    // whose layout follows a reroll next to it shows another shot, but passes on the one it shows without the reroll
+    // (round 3 re-cast such a cut's camera alone over its Plan parts, a mix that neither plan shows). Only a changed
+    // span (other features) changes what the plan without salts is. Without twins an unsalted cut's parts read the rows
+    // as its view did, so only its camera is re-cast (recastCamera), and only when the previous shadow differs. The
+    // natural shot comes from the same cast, not from the natural pass (whose parts, without recency, differ from the
+    // view's), so a reroll changes neither the near sets of the cuts after it nor, through them, what a first copy there
+    // passes on (§3.7). The heir also records whether the cut shows that shot and curve in the Plan (st in castCut,
+    // with its salts and lock pins), so a repeat's why says which it matches.
+    function unsaltedCast(ctx, cut, hist, view, free, salted, twins) {
+      const prev = hist.previous('cam.shot'), shadow = hist.unsaltedShot();
+      if (!twins && !(salted && saltReachesHeir(ctx, cut)) && prev === shadow) return view;
+      const base = free || ctx;
+      const quiet = salted ? silentCtx(base) : Object.assign(Object.create(base), { warn: () => {}, trace: null });
+      const read = twins ? hist.unsalted(cut.feat.repeatOf) : hist;
+      const shadowed = Object.assign(Object.create(read), { previous: (slot) => (slot === 'cam.shot' ? shadow : read.previous(slot)) });
+      // Without twins, an unsalted cut's parts read the rows as its view did (only the previous shot differs): its
+      // camera alone.
+      return salted || twins ? castSlots(quiet, cut, shadowed, false, true) : recastCamera(quiet, cut, shadowed, view);
+    }
+
+    // A cut's row as it would be without any salt (row.free), as far as a silent re-cast of a later cut reads it (up to
+    // the camera slots): its natural, reference and final picks in its salt-free cast. The natural pass of a salted cut
+    // (castCut nat) chooses without recency, and its view with its salts, so its row differs from this; an unsalted cut
+    // keeps one only where its re-cast over its neighbours' twins came out otherwise (twinDiffers), so the chain of
+    // twins ends where the salt no longer reaches the parts.
+    function twinOf(src) {
+      const natural = {}, refs = {}, slots = {};
+      for (const slot of Object.keys(src.slots)) {
+        if (slot.startsWith('filter')) continue;
+        slots[slot] = src.slots[slot];
+        natural[slot] = src.base[slot] || src.slots[slot].v;
+        refs[slot] = src.ref[slot] || src.slots[slot].v;
+      }
+      const t = historyRow(slots, natural, refs);
+      return { base: t.base, both: t.both, last: t.last, own: t.own };
+    }
+
     // --- the cast cache (re-planning) ---------------------------------------------------------------------------
 
     // Casting is most of a plan's work, and an edit usually leaves most cuts' inputs as they were. A cut's cast is a
     // pure function of: the look and seed (plan-wide), the pins at the work, its line and its cut key, the salts under
     // its line and cut, its skeleton (key, line, pin key, role, impact) and features, and the history window its
-    // recency reads (createHistory rowsRead). castInputs records them; an entry is reused when they compare equal
-    // (sameInputs). Entries live for the last two plans. Cached decisions are frozen, and a plan gets its own copy of
-    // each slots map (tracks may replace entries).
+    // recency reads (createHistory rowsRead, and whether the previous cut sings the same line cut: follows). castInputs
+    // records them; an entry is reused when they compare equal (sameInputs). Entries live for the last two plans.
+    // Cached decisions are frozen, and a plan gets its own copy of each slots map (tracks may replace entries).
     // The cache is keyed by the base registry (registry.base ?? registry, DESIGN_2_1 §3.9), then by registry.version
     // (the last 4 versions): an effective registry is a new object after every material edit, and an edit that keeps
     // what the planner reads keeps the version, so the casts stay warm (the fingerprints still see the new material
@@ -18863,10 +19194,18 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
         look: k.look, work: k.pins(k.work, 'work', ''), line: cut.line ? k.pins(k.line, 'line', cut.line) : '-',
         cut: k.pins(k.cut, 'cut', cut.pinKey || cut.key), salts: k.salts(cut), lineId: cut.line, pinKey: cut.pinKey,
         role: cut.role, impact: !!cut.impact, featId: cut.featId, rows: hist.rowsRead(cut.feat.repeatOf),
+        follows: hist.follows(cut.feat.repeatOf), echoed: echoed(ctx, cut),
       };
     }
 
-    const INPUT_FIELDS = Object.freeze(['look', 'work', 'line', 'cut', 'salts', 'lineId', 'pinKey', 'role', 'impact', 'featId']);
+    // Whether a later cut sings this cut again (it is some cut's feat.repeatOf; ctx.echoed, planner/plan), so its row
+    // needs an heir. Without ctx.echoed (tests casting single cuts) every row gets one.
+    function echoed(ctx, cut) { return !ctx.echoed || ctx.echoed.has(cut.key); }
+
+    // follows: whether the previous cut sings the same line cut (a line sung twice in a row; planner/camera recencyOf);
+    // echoed: whether a later cut sings this one again (its row keeps an heir).
+    const INPUT_FIELDS = Object.freeze(['look', 'work', 'line', 'cut', 'salts', 'lineId', 'pinKey', 'role', 'impact', 'featId',
+      'follows', 'echoed']);
     function sameInputs(a, b) {
       for (const f of INPUT_FIELDS) if (a[f] !== b[f]) return false;
       return sameRows(a.rows, b.rows);
@@ -20403,7 +20742,7 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
       timing: Object.assign({}, TM.TIMING_DEFAULTS, doc.timing || {}), pools: new Map(), trace, casts: null,
       lockFree: CA.lockFreeIndex(doc.pins), media: mediaIndex(doc), mediaUsed: new Set(),
       castKeys: null, seams: null, encodings: null, fallbacks: null, lookAxis: null, lineConds: null, workCond: null,
-      shotMood: null,
+      shotMood: null, echoed: null,
     };
     // Traced runs (explain) and fresh runs neither read nor refresh the caches of re-planning.
     if (cached) beginFeatures();
@@ -20456,6 +20795,9 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
       ctx.castKeys = CA.castKeys(ctx, EN.canon([registry.version, look.mood.key, look.theme.key, look.season, look.amounts,
         look.variety, aspect, doc.look.seed, doc.filters || null, ctx.bpm, ctx.media ? ctx.media.key : null]));
     }
+    // The cuts a later cut sings again (their rows keep what the repeats inherit, planner/cast castCut).
+    ctx.echoed = new Set();
+    for (const cut of cuts) if (cut.feat.repeatOf) ctx.echoed.add(cut.feat.repeatOf);
     const hist = CA.createHistory(registry);
     for (const cut of cuts) Object.assign(cut, CA.castCut(ctx, cut, hist));
 

@@ -36,6 +36,8 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
       outro: Object.freeze({ pullReveal: 1.5, wideHold: 1.5 }),
     });
     const SHOT_RECENT = 0.2, SHOT_NEAR = 0.5, SHOT_ECHO = 40;
+    // A pullReveal the echo gives a cut shorter than this (seconds) takes one curve, hushRushHush (cam.curve).
+    const SHORT_PULL = 1.8;
     const RIG_OFF = 0.15;                           // A below this: no automatic rig
     const RIG_WEIGHTS = Object.freeze({
       chorus: Object.freeze({ slowSwell: 3, climbRise: 2, leanTilt: 0.5, none: 1 }),
@@ -208,9 +210,10 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
       return best;
     }
 
-    // weighShots(st, rules, rec, withWhy) → [{ key, w, wBase, why }] over the whole shot pool in sorted order (w = 0
-    // outside the rules' pool). w is q6 of every factor; wBase leaves out the recency factors (the cut's natural pick).
-    // rec = { prev, near, echo } (keys or null / arrays). why is null unless withWhy.
+    // weighShots(st, rules, rec, withWhy) → [{ key, w, wBase, wOwn, why }] over the whole shot pool in sorted order
+    // (w = 0 outside the rules' pool). w is q6 of every factor; wBase leaves out the recency factors, wOwn the echo too
+    // (the cut's natural pick, which the near set of the cuts after it reads; see autoShot). rec = { prev, near, echo,
+    // echoCode } (keys or null / arrays; see recencyOf). why is null unless withWhy.
     function weighShots(st, rules, rec, withWhy) {
       const { ctx, cut } = st;
       const f = cut.feat;
@@ -225,12 +228,13 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
       const out = new Array(SHOT_POOL.length);
       for (let i = 0; i < SHOT_POOL.length; i++) {
         const key = SHOT_POOL[i];
-        if (!(rules.bits & (1 << i))) { out[i] = { key, w: 0, wBase: 0, why: withWhy ? [] : null }; continue; }
+        if (!(rules.bits & (1 << i))) { out[i] = { key, w: 0, wBase: 0, wOwn: 0, why: withWhy ? [] : null }; continue; }
         const m = moods[i];
         const sec = bySection && bySection[key] ? bySection[key] : 1;
         const echo = rec.echo === key;
         // Left to right, like the factors are listed in §4.7 (the product is rounded once, by q6).
-        const w = baseWeight(key, f, A, orient, frames) * m * sec * (echo ? SHOT_ECHO : 1);
+        const own = baseWeight(key, f, A, orient, frames) * m * sec;
+        const w = own * (echo ? SHOT_ECHO : 1);
         const wBase = N.q6(w);
         let wr = w;
         if (rec.prev === key) wr *= SHOT_RECENT;
@@ -240,24 +244,87 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
           why = baseWhy(key, f, A, orient, lensKey, frames);
           if (m !== 1) { const t = moodWhy(SHOT.SHOTS[key].tags, mood); if (t) why.push(t); }
           if (sec !== 1 && f.section) why.push({ code: 'cam.section', params: { section: f.section } });
-          if (echo) why.push({ code: 'echo', params: { cut: f.repeatOf } });
+          if (echo) why.push({ code: rec.echoCode, params: { cut: f.repeatOf } });
           if (rec.prev && rec.prev !== key) why.push({ code: 'recent', params: { key: rec.prev } });
         }
-        out[i] = { key, w: wr === w ? wBase : N.q6(wr), wBase, why };
+        out[i] = { key, w: wr === w ? wBase : N.q6(wr), wBase, wOwn: echo ? N.q6(own) : wBase, why };
       }
       return out;
     }
 
     // The recency and echo a cut's shot reads (§4.7): the previous cut's final shot (×SHOT_RECENT), the natural shots of
-    // the 3 cuts before it (×SHOT_NEAR) and the natural shot of the cut it echoes (×SHOT_ECHO). The natural pass
-    // (st.natural) weighs without recency, like the part slots.
+    // the 3 cuts before it (×SHOT_NEAR) and the preset the cut it echoes shows (×SHOT_ECHO; its heir, see heirOf). The
+    // natural pass (st.natural) weighs without recency, like the part slots. When the previous cut sings the same line
+    // cut (the cut it echoes or another repeat of it: a line sung twice or more in a row, hist.follows), there is no echo
+    // toward the preset that cut ends on: rule 4 of "Repeated lines" for the weights, so the line does not play the
+    // same move back to back. echoCode: the reason an echoed shot gives, 'echo', or 'echo.kept' when the cut it echoes
+    // shows another shot in the Plan (a reroll or a lock; heirOf).
     function recencyOf(st) {
       const hist = st.hist;
-      const echo = hist.echo(st.cut.feat.repeatOf, 'cam.shot');
-      if (st.natural) return { prev: null, near: EMPTY, echo };
-      return { prev: hist.previous('cam.shot'), near: hist.recent('cam.shot', 'cam.shot', null).near, echo };
+      const rep = st.cut.feat.repeatOf;
+      let echo = hist.echo(rep, 'cam.shot');
+      const heir = echo === null ? null : hist.heir(rep);
+      const echoCode = heir && heir.shows === false ? 'echo.kept' : 'echo';
+      if (st.natural) return { prev: null, near: EMPTY, echo, echoCode };
+      const prev = hist.previous('cam.shot');
+      if (echo !== null && echo === prev && hist.follows(rep)) echo = null;
+      return { prev, near: hist.recent('cam.shot', 'cam.shot', null).near, echo, echoCode };
     }
     const EMPTY = Object.freeze([]);
+
+    // --- repeated lines (§4.7 "Repeated lines") -------------------------------------------------------------------
+
+    // heirOf(st, shown) → what a later copy of this cut's line inherits from it (planner/cast keeps it in the cut's
+    // history row): { v, cause, frames, curve, shows, showsCurve } — its shot (a preset or 'none'; null for a custom
+    // shot), why it has no shot when it has none ('pin': a pinned 'none'; 'frames': its framing lens, the weights chose
+    // 'none' over it; 'other': a layout without camerawork, the camera amount or the section), whether its lens frames,
+    // its curve, and whether the cut as the Plan shows it (shown, default st) has that shot, and that curve on that
+    // shot (not when a reroll or a lock changed them; the repeats' why says so: a curve on another shot, or on 'none',
+    // is not the move they match). st = the cut's cast state after its camera slots.
+    function heirOf(st, shown) {
+      const d = st.slots['cam.shot'];
+      if (!d || typeof d.v !== 'string') return null;
+      const frames = framesAt(st);
+      let cause = 'shot';
+      if (d.v === NONE) {
+        cause = typeof d.from === 'string' && d.from.startsWith('pin') ? 'pin' : d.from === 'auto' && frames ? 'frames' : 'other';
+      }
+      const c = st.slots['cam.curve'];
+      const curve = c && typeof c.v === 'string' ? c.v : null;
+      const out = shown || st;
+      const sd = out.slots['cam.shot'], sc = out.slots['cam.curve'];
+      const shows = !!sd && sd.v === d.v;
+      return Object.freeze({ v: d.v, cause, frames, curve, shows, showsCurve: shows && !!sc && sc.v === curve });
+    }
+
+    function framesAt(st) {
+      const key = st.chosen.lens && st.chosen.lens !== NONE ? st.chosen.lens : null;
+      const lens = key ? st.ctx.registry.get('lens', key) : null;
+      return !!(lens && lens.frames === true);
+    }
+
+    // The shot a cut of a repeated line inherits from the same cut of the line's first sung copy (feat.repeatOf, its
+    // heir), or null (the weights decide, with the heir's preset as the echo). §4.7 "Repeated lines", rules 1–6:
+    // (1) the heir's shot is in this cut's pool and weighs > 0 here (it fits the cut); (2) an impact cut inherits only
+    // snapZoom; (3) onto a framing lens, only a preset the first copy also took over a framing lens; (4) not the preset
+    // the previous cut ends on (the natural pass has no previous cut; when the previous cut sings the same line cut,
+    // recencyOf drops the echo toward it too); (5) 'none' only when it was pinned, or when the weights chose it over the
+    // first copy's framing lens and this cut has one too (never a layout's 'none' or the camera amount's); (6) a cut
+    // whose shot is rerolled (a salt on the cut, its line or their cam.shot field) chooses again.
+    function inheritedShot(st, rules, list) {
+      const rep = st.cut.feat.repeatOf;
+      const heir = rep ? st.hist.heir(rep) : null;
+      if (!heir) return null;
+      const v = heir.v, i = SHOT_POOL.indexOf(v);
+      if (i < 0 || !(rules.bits & (1 << i)) || !(list[i].wBase > 0)) return null; // rule 1
+      if (st.cut.feat.impact && v !== 'snapZoom') return null; // rule 2
+      const frames = framesAt(st);
+      if (v !== NONE && frames && !heir.frames) return null; // rule 3
+      if (v !== NONE && !st.natural && st.hist.previous('cam.shot') === v) return null; // rule 4
+      if (v === NONE && !(heir.cause === 'pin' || (heir.cause === 'frames' && frames))) return null; // rule 5
+      if (st.shotSalted) return null; // rule 6
+      return v;
+    }
 
     // shotWeights(st) → [{ key, w, why }] for the cut in st (tests and tools; the planner picks from the same numbers).
     function shotWeights(st) {
@@ -270,8 +337,13 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
       return list.map((c) => ({ key: c.key, w: c.w, why: poolWhy.concat(c.why) }));
     }
 
-    // The automatic shot: { v, from, base, gentle, rule?, why?, candidates?, recent? }. Gumbel-max over q6 weights keyed
-    // by shot key (ties → the smaller key, keys sorted); base = the same argmax without the recency factors. why,
+    // The automatic shot: { v, from, base, gentle, inherited?, rule?, why?, candidates?, recent? }. A repeated line's cut
+    // inherits its first copy's shot where inheritedShot allows it (why: the rules' reasons, then 'echo', then the
+    // key's); else Gumbel-max over q6 weights keyed by shot key (ties → the smaller key, keys sorted). base = the cut's
+    // own pick, the same argmax without the recency factors and without the echo (wOwn): its natural shot, which the
+    // near set (×SHOT_NEAR) of the cuts 2–4 after it reads. A repeat's own pick does not follow its first copy, so an
+    // edit that changes a first copy's shot moves its repeats (the echo) but not, through their near sets, the cuts
+    // around them; the cut right after a repeat still weighs against the shot it shows (×SHOT_RECENT). why,
     // candidates and recent (explain) only with withWhy.
     function autoShot(st, withWhy) {
       const rules = shotRules(st);
@@ -286,15 +358,28 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
       const rec = recencyOf(st);
       const list = weighShots(st, rules, rec, withWhy);
       const prefix = CH.gumbelPrefix(seedOf(st, 'cam.shot'));
+      const kept = inheritedShot(st, rules, list);
+      if (kept !== null) {
+        const out = { v: kept, from: 'auto', base: ownPick(list, prefix, kept), gentle: rules.gentle, inherited: true };
+        if (withWhy) {
+          const own = list[SHOT_POOL.indexOf(kept)];
+          const heir = st.hist.heir(st.cut.feat.repeatOf);
+          const echo = { code: heir.shows ? 'echo' : 'echo.kept', params: { cut: st.cut.feat.repeatOf } };
+          out.why = rulesWhy(st, rules).concat([echo], own.why.filter((w) => w.code !== 'echo' && w.code !== 'echo.kept'));
+          out.candidates = list.map((c, i) => ({ key: c.key, w: c.w, masked: maskOf(st, rules, i) }));
+          out.recent = rec;
+        }
+        return out;
+      }
       let best = null, bestScore = -Infinity, base = null, baseScore = -Infinity;
       for (const c of list) {
-        if (!(c.w > 0) && !(c.wBase > 0)) continue;
+        if (!(c.w > 0) && !(c.wOwn > 0)) continue;
         const noise = CH.gumbelAt(prefix, c.key);
         if (c.w > 0) { const s = Math.log(c.w) + noise; if (s > bestScore) { best = c.key; bestScore = s; } }
-        if (c.wBase > 0) { const s = Math.log(c.wBase) + noise; if (s > baseScore) { base = c.key; baseScore = s; } }
+        if (c.wOwn > 0) { const s = Math.log(c.wOwn) + noise; if (s > baseScore) { base = c.key; baseScore = s; } }
       }
       const v = best === null ? NONE : best;
-      const out = { v, from: 'auto', base: base === null ? v : base, gentle: rules.gentle };
+      const out = { v, from: 'auto', base: base === null ? v : base, gentle: rules.gentle, echoed: rec.echo !== null && v === rec.echo };
       if (withWhy) {
         const own = list[SHOT_POOL.indexOf(v)];
         out.why = rulesWhy(st, rules).concat(own.why);
@@ -303,6 +388,17 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
         out.recent = rec;
       }
       return out;
+    }
+
+    // The own pick over a weighed list (see autoShot), or `or` when nothing weighs.
+    function ownPick(list, prefix, or) {
+      let base = null, baseScore = -Infinity;
+      for (const c of list) {
+        if (!(c.wOwn > 0)) continue;
+        const s = Math.log(c.wOwn) + CH.gumbelAt(prefix, c.key);
+        if (s > baseScore) { base = c.key; baseScore = s; }
+      }
+      return base === null ? or : base;
     }
 
     function decideShot(st) {
@@ -322,6 +418,8 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
         const got = autoShot(st, !!trace);
         d = { v: got.v, from: got.from };
         gentle = !!got.gentle;
+        if (got.inherited) st.heirCurve = inheritedCurve(st);
+        st.echoShot = !!(got.inherited || got.echoed);
         if (got.base !== got.v) st.base[slot] = got.base;
         if (trace) {
           Object.assign(trace, { kind: 'cam.shot', stage: got.from === 'rule' ? 'rule' : 'auto', rule: got.rule || null,
@@ -331,6 +429,21 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
       if (trace) trace.decision = d;
       setDecision(st, slot, d);
       return gentle;
+    }
+
+    const CURVES_IMPACT = Object.freeze([Object.freeze(['dashStop', 'holdThenDash']), Object.freeze([3, 2])]);
+    const CURVES_FAST = Object.freeze([Object.freeze(['hushRushHush', 'holdThenDash', 'softEnds']), Object.freeze([3, 2, 1])]);
+    const CURVES_CALM = Object.freeze([Object.freeze(['softEnds', 'fadeBrake', 'slowBloom']), Object.freeze([3, 2, 1])]);
+    // The curve of a short pull the echo gives (SHORT_PULL), whatever the cut's list: hushRushHush. Of the curves that
+    // start and end slowly it has the lowest top speed, 1.4 × the move's mean speed (softEnds 2.5, holdThenDash 2.4);
+    // fadeBrake and slowBloom reach 1.9 × at the first or the last frame, and dashStop (1.2 ×) runs at its top speed
+    // from the cut's first frame into a sudden stop.
+    const CURVES_SHORT_PULL = Object.freeze([Object.freeze(['hushRushHush']), Object.freeze([1])]);
+
+    // The first copy's curve, for a cut whose shot was inherited.
+    function inheritedCurve(st) {
+      const heir = st.hist.heir(st.cut.feat.repeatOf);
+      return heir ? heir.curve : null;
     }
 
     function gentleArrange(st) {
@@ -364,12 +477,24 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
       });
       st.decide(st, 'cam.curve', SLOT_SPECS['cam.curve'], (seed, withWhy) => {
         const bias = ctx.look.mood && ctx.look.mood.tagBias ? ctx.look.mood.tagBias.fast : undefined;
-        let v;
-        if (f.impact) v = R.fromSeed(seed).weighted(['dashStop', 'holdThenDash'], [3, 2]);
-        else if (f.energy >= 0.65 || (typeof bias === 'number' && bias > 1.2)) {
-          v = R.fromSeed(seed).weighted(['hushRushHush', 'holdThenDash', 'softEnds'], [3, 2, 1]);
-        } else v = R.fromSeed(seed).weighted(['softEnds', 'fadeBrake', 'slowBloom'], [3, 2, 1]);
-        return withWhy && f.impact ? { v, from: 'auto', why: [{ code: 'cam.impact', params: {} }] } : { v, from: 'auto' };
+        let [keys, weights] = f.impact ? CURVES_IMPACT
+          : f.energy >= 0.65 || (typeof bias === 'number' && bias > 1.2) ? CURVES_FAST : CURVES_CALM;
+        // A pullReveal the echo put on a short cut (inherited, or picked as the ×40 echo) came from a copy that may have
+        // had more time: a curve that bunches the pull would make it a fast zoom-out, so it takes CURVES_SHORT_PULL
+        // (NOTES "Echo of repeated lines", round 5).
+        const calmed = shot === 'pullReveal' && st.echoShot && f.dur < SHORT_PULL;
+        if (calmed) [keys, weights] = CURVES_SHORT_PULL;
+        // An inherited shot keeps its first copy's curve too, when this cut's own curves include it and its curve is
+        // not rerolled (a die on cam.curve; a reroll of the cut or its line already stops the inheritance, rule 6).
+        const kept = !st.curveSalted && st.heirCurve && keys.includes(st.heirCurve) ? st.heirCurve : null;
+        const v = kept || R.fromSeed(seed).weighted(keys, weights);
+        if (!withWhy) return { v, from: 'auto' };
+        const why = f.impact && !calmed ? [{ code: 'cam.impact', params: {} }] : [];
+        if (kept) {
+          const heir = st.hist.heir(f.repeatOf);
+          why.unshift({ code: heir && heir.showsCurve === false ? 'echo.kept' : 'echo', params: { cut: f.repeatOf } });
+        } else if (calmed) why.push({ code: 'cam.shortPull', params: {} });
+        return why.length ? { v, from: 'auto', why } : { v, from: 'auto' };
       });
       st.decide(st, 'cam.follow', SLOT_SPECS['cam.follow'], () => {
         let x;
@@ -401,15 +526,21 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
     // (not a custom object), across a hard cut or a text transition: B's cam.shot becomes a new frozen decision with
     // p.carry = SHOT.lastFraming(A's shot, { zoom: A's cam.zoom }) and pfrom.carry 'rule', so B opens at A's closeness,
     // screen position and roll (a match cut). Skipped when there is nothing to carry (A ends on the frame) or nothing
-    // to carry it into (B opens on the frame). The decision is kept on B's cast entry while its inputs are the same.
+    // to carry it into (B opens on the frame), and for a repeat on its first copy's preset (§4.7 "Repeated lines") when
+    // that copy did not carry: the repeat then opens as its first copy does, so the two play the same move. The decision
+    // is kept on B's cast entry while its inputs are the same.
     function carry(ctx, cuts, seams) {
       const list = seams || ctx.seams || [];
-      for (let j = 1; j < cuts.length; j++) {
-        const A = cuts[j - 1], B = cuts[j];
-        if (!A.line || A.line !== B.line) continue;
+      const byKey = new Map();
+      for (let j = 0; j < cuts.length; j++) {
+        const A = j > 0 ? cuts[j - 1] : null, B = cuts[j];
+        byKey.set(B.key, B);
+        if (!A || !A.line || A.line !== B.line) continue;
         const a = A.slots['cam.shot'], b = B.slots['cam.shot'];
         if (!a || !b || a.v === NONE || typeof b.v !== 'string' || b.v === NONE || !opensOnText(b.v)) continue;
         if (B.seamIn >= 0 && list[B.seamIn] && list[B.seamIn].scope !== 'text') continue;
+        const first = B.feat.repeatOf ? byKey.get(B.feat.repeatOf) : null;
+        if (first && first.slots['cam.shot'] && first.slots['cam.shot'].v === b.v && !carried(first)) continue;
         const zoom = A.slots['cam.zoom'] ? A.slots['cam.zoom'].v : 1;
         const framing = SHOT.lastFraming(a.v, { zoom });
         if (!framing) continue;
@@ -431,6 +562,11 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
         const t = tracing(ctx, B.key, 'cam.shot');
         if (t) t.override = { rule: 'carry', decision: d };
       }
+    }
+
+    function carried(cut) {
+      const d = cut.slots['cam.shot'];
+      return !!(d && d.p && d.p.carry);
     }
 
     function deepFreeze(v) {
@@ -614,7 +750,7 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
     }
 
     return {
-      SLOT_SPECS, CAM_SLOTS, SHOT_POOL, decideSpeed, applySpeed, decideCamera, shotWeights, carry, rigs,
-      FACTORS: Object.freeze({ AMOUNT_OFF, SHORT_CUT, SHOT_RECENT, SHOT_NEAR, SHOT_ECHO, RIG_OFF, LAST_CHORUS_AMP, AMP_MAX }),
+      SLOT_SPECS, CAM_SLOTS, SHOT_POOL, decideSpeed, applySpeed, decideCamera, shotWeights, carry, rigs, heirOf,
+      FACTORS: Object.freeze({ AMOUNT_OFF, SHORT_CUT, SHOT_RECENT, SHOT_NEAR, SHOT_ECHO, SHORT_PULL, RIG_OFF, LAST_CHORUS_AMP, AMP_MAX }),
     };
   });

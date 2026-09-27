@@ -7931,3 +7931,906 @@ shot's clamp can leave the safe area (§4.5.4 is FROZEN); giantWhisper's first/l
 
 Checks: `build.py --check` (213 modules); goldens as above; the whole Node suite (1650 pass); every browser test and
 `build_test.py` (see the PR run).
+
+## Echo of repeated lines
+
+The owner asked to take up the open echo target of step (b) (「サビの繰り返しの課題」): DESIGN_2_1 §7.3 asks that repeated lines
+share their shot (≥ 80 %), and step (b) left it at 56 % / 53 % (catalog / synthetic registry, corpus(6)). This section
+covers the diagnosis, the three designs that were prototyped and judged, the one built (a synthesis), the fixes after
+its five reviews, the figures before and after, the stability cost, and what stays open. Only v2.1 camera slots
+changed: no §4.7 constant moved (round 4 added one, `SHORT_PULL`, and round 5 a curve list, `CURVES_SHORT_PULL`), and
+every v2 part choice is as before (frame_hashes_v2 matches).
+
+**Diagnosis** (scratch probes, not kept; the §7.3 metric's cuts: lyric or focus, ≥ 0.8 s, a layout with full
+camerawork, camera amount ≥ 0.1). Of the repeated cuts that missed their first copy's shot (44 % / 47 % of the metric
+on corpus(6), the same on independent samples):
+- 17–25 % of the misses: the first copy is on a layout without camerawork (`cam: 'none'`: edgeBleed, tickerMarquee,
+  gridMosaic, diptychSplit), so it has no shot to share.
+- 25–31 %: the first copy is on `none` by the weights, mostly for its framing lens (+24), a few for a low camera amount.
+  'none' was never an echo (§3.9), so nothing was passed on.
+- 9–16 %, plus 2–7 %: the echo named the first copy's natural shot, and recency made the first copy show another one
+  (or `none`); the repeat echoed a shot nobody saw.
+- 8–10 %: recency at the repeat (×0.2, ×0.5) beat the echo.
+- 22–27 %: other weights and the noise, mostly `none` winning because the repeat's own lens frames.
+
+The copies' layouts and lenses are v2 choices made independently per copy: over the metric's pairs the layouts agree
+in 11–15 % and the lenses in 15–23 %. Upper bounds, measured on scratch patches: a repeat that takes its first copy's
+shot wherever it can reaches 89–92 % but framing lens → `none` falls to 57–66 % (×2.1–2.5, against ≥ 70 % and ×4); an
+echo ×100 of the shown shot without recency reaches 80–85 % and also breaks the ×4. With the framing-lens target kept,
+any rule that acts on the repeats alone stays at about 75–77 % with margin. A decision over each group of copies at
+once (an oracle that knows every copy's lens) reaches 84–87 % with margin; simple majority rules over a group fail the
+framing target.
+
+**Three designs** (prototypes against 382dce0, re-measured by a judge on the same probes; scores out of 30 over the
+echo target honestly measured, the other §7.3 targets and variety, stability, v2 frames and the cast cache, what a
+viewer sees, and simplicity):
+- A, "echo `none` too" (lens-gated: a first copy's `none` becomes an echo where both lenses frame): +2 / +1 points
+  (58 % / 54 %). Nothing else changes. 23.
+- B, "inherit the first copy's shot" (below): 70 % / 67 %; 92 % / 88 % where the lenses agree; the same curve in
+  89 % of the shared shots. It adds a six-condition rule, two history row fields and a silent re-cast near salted cuts,
+  and insertions are less local outside the tested sample. 23.5.
+- C, "echo what the viewer saw" (the shown shot as the echo, the echoed key exempt from the ×0.5 recency): 65 % / 64 %;
+  82 % / 82 % where the lenses agree; it dropped the `all` insertion assertions and counted reroll followers apart. 19.
+
+**Built: B, with C's measure.** B is the only design that makes the repeated chorus visibly more alike. C's measure,
+"where the lenses agree", states what the planner can reach while the v2 parts stay frozen and the framing-lens rule
+holds. A's lens-gated `none` echo is left out: B's rule 5 covers it. C's recency exemption and its removed stability
+assertions are left out too.
+
+**What changed** (DESIGN_2_1 §4.7 "Repeated lines", §3 cast row, §7.3):
+- `planner/camera`: `heirOf(st, shown)` (exported) is what a later copy inherits from a cut: its shot (a preset or
+  `none`; null for a custom shot), why it has none (`pin`, `frames` or `other`), whether its lens frames, its curve,
+  and whether the cut as the Plan shows it has that shot and that curve (`shows`, `showsCurve`). `inheritedShot`
+  applies the rules 1–6 of §4.7: the shot fits the cut and weighs > 0 there; an impact cut takes only `snapZoom`; onto
+  a framing lens only a preset the first copy took over one; never the preset the previous cut ends on; `none` only
+  pinned or from a framing lens onto one; a rerolled shot chooses again. `autoShot` returns the inherited shot with
+  `from: 'auto'` and the why `echo` right after the rules' reasons; `cam.curve` takes the first copy's curve when it
+  is among the cut's own curves and not rerolled. The ×40 echo names the heir's preset (`hist.echo`), and none when the
+  previous cut sings the same line cut and ends on it (`recencyOf`, `hist.follows`). Where the first copy shows another
+  shot or curve than its heir, every one of these reasons is `echo.kept` instead of `echo`. Since round 3 the natural
+  shot a cut leaves (`base`, which the near set of the cuts 2–4 after it reads) leaves out the ×40 echo: a repeat's own
+  pick, whether it inherited or weighed (`wOwn`, `ownPick`).
+- `planner/cast`: each history row keeps `heir` and `shadow` (its shot without salts). `unsaltedCast` re-casts a cut
+  silently, up to its camera slots, when its salts reach its heir or when the previous shadow differs from the previous
+  final shot, so the heir is the shot the cut would show without any salt. Since round 2 the row's natural shot (what
+  the near set reads) comes from that cast too, not from the natural pass; since round 3 it is the cut's own pick,
+  without the echo (`planner/camera` `wOwn`), and a salted cut's row keeps a salt-free twin of its picks (`row.free`)
+  that the re-cast of a salted cut next to it reads (`hist.unsalted`); since round 4 an unsalted cut whose window holds
+  a twin that differs where it reads is re-cast in full over the twins too, and keeps a twin where its picks come out
+  otherwise (`twinDiffers`), so every heir, shadow and natural shot is that of the plan without salts. `ROW_FIELDS`
+  compares both (`shadow` in the previous row, `heir` with its `shows` flags in the echoed row), `TWIN_FIELDS` the
+  twins, `castInputs.follows` records whether the previous cut sings the same line cut (`createHistory` keeps the last
+  pushed cut's `repeatOf`) and `castInputs.echoed` whether a later cut sings this one again (only those rows keep an
+  heir), so the cast cache stays exact. `isChoice` is unchanged. `castSlots` sets `curveSalted` beside `shotSalted`.
+- `i18n/strings`: `why.echo.kept`, 「{cut}と同じ歌詞なので、振り直しやロックがないときの動きにそろえた」 ("Same lyric as
+  {cut}, so it keeps that cut's move as it would be without rerolls or locks"; round 2 named the cut once), and since
+  round 4 `why.cam.shortPull`, since round 5 「短いカットで引くので、動きを短い間に詰めこむ緩急は避けた」 ("A short
+  pull-back, so curves that cram the move into a short stretch are left out"; round 4: 「短いカットで引くので、急がない緩急に」).
+- Round 4 also added two camera rules (`planner/camera`): a `pullReveal` the echo gives a cut under 1.8 s takes no
+  curve that rushes the pull (`SHORT_PULL`; since round 5 it takes `hushRushHush` on every curve list,
+  `CURVES_SHORT_PULL`), and a repeat on its first copy's preset carries (§4.5.7) only when that copy carried (`carry`).
+- Tests (`camera_planner`, with the figures of round 3's code unless noted). The §7.3 test runs on corpus(12) and
+  asserts the 80 % where the lenses agree, the metric's share ≥ 62 % and ≥ 1.8 × unrelated cuts (2 × until round 3),
+  where the echo can act ≥ 72 %, beside the older floors (below for the margins; since round 4 the impact share is
+  counted over corpus(24)). The six rules one at a time on a hand-made cut (hist
+  stubbed), with the curve die and the `echo.kept` reasons. A repeat takes its first copy's shot and curve wherever
+  its rules allow (a model of the rules over corpus(3), documents with doubled lines and documents with a short line
+  sung twice in a row: 3,286 inherited shots, 2,650 with their curve; after a moving shot, a line sung twice in a row
+  repeats the move in 16 of 293 pairs, bound 10 %; round 2: 3,296, 2,660 and 13 of 295). A reroll of a first copy, or
+  a die on its lens, curve or screen effect, leaves its repeats (61 and 183 kept), their why is `echo` only where they
+  match what it shows (6 `echo`, 32 `echo.kept` after rerolls), every salt form that reaches a repeat's shot makes it
+  choose again (20 / 8 / 22 / 11 of 28 within three bumps for `cut/`, `cut/…:cam.shot`, `line/`, `line/…:cam.shot`), a
+  curve die draws the curve again (27 of 28), a pinned first copy passes its shot on (77). Re-planning lines sung
+  twice in a row after an edit of their second copies gives the plan made from scratch, and so does re-planning after
+  an edit that makes a line sung again or no more (round 3). A reroll of a first copy's whole line leaves its repeats
+  (round 3). `planner_determinism` checks that the cast cache tells apart windows that differ only in a row's heir,
+  shadow or twin, or in the line cut before (24 / 9 / 24 / 18 of 24 seeds give another cast). `planner_stability`
+  counts insertion followers and the cut right after each apart (below), checks that a salt, a line reroll too,
+  reaches later shots only through their parts, their span or the shot right before them, and that a first copy whose
+  shot changes moves nothing far away but its repeats and the cuts right after changed cuts. Since round 5 a test plans
+  the sample lyrics with a second サビ and the demo song in four calm moods and checks that every short pull the echo
+  gives takes `hushRushHush`. 382dce0's code fails the new floors and the new camera tests.
+
+**Review fixes, round 1.** A review of the first build found thirteen issues; each fix below is confirmed by a test that
+fails without it (the mutation checks further down), or is a correction of the text.
+- A die on 緩急 did nothing on an inherited repeat: the inherited curve ignored the slot's own salt. Now a die
+  `cut/<key>:cam.curve` or `line/<id>:cam.curve` draws the curve again, and the shot stays inherited. Three bumps on 102
+  repeated moving cuts (corpus seeds 40–43, 16:9 and 9:16) change the curve of 94 / 94 (catalog / synthetic; the first
+  build 56 / 47, 382dce0 95 / 96), 45 of 49 / 48 of 55 where it had been inherited (first build 7 / 1).
+- Rule 6's field forms had no test: `cut/<key>:cam.shot`, `line/<id>` and `line/<id>:cam.shot` now each make a repeat
+  choose again in the reroll test (7, 21 and 9 of 28 repeats on project_long within three bumps; a die still competes
+  with the ×40 echo, so one bump often keeps the shot).
+- The why claimed a match the viewer did not see. The heir is the first copy's shot without salts and lock pins, so
+  after a reroll of the first copy (or of the cut before it), or under a lock, the first copy can show another shot
+  while its repeats keep the heir and said 「{cut}と同じ歌詞なのでそろえた」. Now their reason is `echo.kept`
+  (「…振り直しやロックがないときの動きにそろえた」) wherever the first copy shows another shot or curve, for the
+  inherited shot, the ×40 echo and the curve. On the sample lyrics with a second chorus (6 seeds × 8 moods × 3
+  aspects, every first-chorus cut rerolled in turn), the whys that named `echo` while showing another shot than the
+  rerolled cut fell from 472 (`cut/<key>`) and 355 (`:cam.shot`) to 0 (382dce0: 374 and 268). With every fifth cut
+  rerolled (seeds 40–43), echo claims whose first copy shows another shot fell from 11 / 22 to 0.
+- A line sung twice in a row still played the same move back to back: rule 4 only stopped the inheritance, and the
+  cut then weighed the heir's preset ×40 against the recency ×0.2, a net ×8. Now the echo does not weigh toward the
+  preset the previous cut ends on when the previous cut sings the same line cut (the first copy, or another repeat of
+  it). Measured where the previous cut moves: a short line sung twice after every third lyric line (corpus seeds 0–1,
+  basic and long) repeats the move in 4.2 % / 4.6 % of the pairs (first build 26 % / 36 %, 382dce0 26 % / 31 %; seeds
+  20–29: 4.2 % / 3.2 % against 26 % / 32 %); 「まっすぐに」 sung twice at the end of each chorus of the sample lyrics,
+  5 of 140 without a song and 7 of 147 with a chorus-shaped one (first build 59 and 62, 382dce0 53 and 57); a third
+  copy after the second, 2 of 59 / 7 of 74 (first build 5 / 17). What remains is the chance that any two neighbours
+  pick the same shot: the recency ×0.2 still lets it win now and then, and unrelated neighbours share a moving shot in
+  about 3 %. No `snapZoom` was repeated back to back in these samples (round 2 corrected an earlier claim here). It
+  changed one plan of the corpus (lrc@16:9#6, one cut) and no §7.3 figure of corpus(6).
+- The silent re-cast cost a whole cast. It now stops after the camera slots, and a cut whose only salts are dice on
+  slots after its heir (cam.zoom, cam.follow, the screen effects and their parameters) skips it. Counted on
+  project_long (246 cuts): with 13 rerolled cuts, 276 casts of which 17 up to the camera (the first build: 17 full
+  casts, filters included); with 13 dice on 画面効果, 259 casts, as on 382dce0 (the first build 272). Round 1 called
+  the cold-plan cost within this machine's noise (best of 50 plans, three alternating runs: 13 rerolled cuts 80–89 ms
+  against 79–89 ms on 382dce0 and 85–92 ms for the first build); with more runs it is not: +2–3 % on a document
+  without salts and more with rerolls (round 3, below).
+- The §7.3 test ran on corpus(6), where independent samples of the same size fell under the framing floor (synthetic
+  69.4 %) and the impact floor (catalog 59 %, on 382dce0 too). It now runs on corpus(12), and the floors are checked
+  against independent samples of that size (below). The margins quoted before were pooled figures; the test comment
+  now quotes the lowest block next to each floor.
+- "Over all repeated cuts" was a mislabel: the 67–70 % counts the metric's cuts only. Over every repeated cut, short
+  and special cuts included, 61 % / 61 % share their shot on corpus(12) (53 % / 51 % before). DESIGN §7.3 and the test
+  comment now say so.
+- The curve echo depends on energy (kept as designed, now stated): the curve lists follow each copy's own energy, so a
+  chorus sung softer the second time keeps its shot and takes a curve of its own energy. On the sample lyrics the shared
+  moving shots share their curve in 83–85 % (chorus-shaped song) and 82–83 % (no song), but 39–61 % with the demo song
+  and 34–41 % with a 75 s loop of it, whose later choruses fall on quieter passages (81–87 % where both copies draw
+  from the same list; the calm moods 16–34 %). With the demo song the lyrics matter: on seeds 0–11, 52 % with the
+  sample lyrics with a second chorus (L1) and 61 % with the chorus's first line sung twice at the start of the 大サビ
+  (L2); on seeds 100–102 and 900–902 (the reviews' samples) 39–54 %. With the loop, 40 % / 41 % (L1 / L2, seeds 0–11)
+  and down to 34 % on seeds 100–102. (Round 2 quoted 42–52 % and 34–40 %, leaving out L2; round 3's figures, the same
+  within 0.2 points.) Taking the first copy's curve across lists would put a rush on a quiet passage.
+- The figures vary with the song: the owner-like documents are now part of the samples (table below), and no general
+  margin is quoted any more.
+- What a viewer sees was overstated (below).
+
+**Review fixes, round 2.** A second review found six minor issues. The two code fixes and the string fix are each
+confirmed by a test that fails without them; the rest are corrections of the text and its figures.
+- A reroll could still reach a line's later copies. Each history row keeps its shot without salts for the next cut's
+  heir (the shadow), but a salted cut's natural shot, which the near set of the 3 cuts after the next one reads, came
+  from its natural pass, whose parts are chosen without recency and so differ from its view's. Salting a cut therefore
+  changed the near set of the cuts 2–4 after it, and a first copy there passed its changed shot on to all its repeats.
+  A die on 寄り (`cam.zoom`, a slot after the shot) did the same. Now the row's natural shot comes from the same
+  salt-free cast as its heir and shadow (`planner/cast unsaltedCast`: the view when no salt reaches the shot, else the
+  silent re-cast up to the camera slots), for every cut, so a salt reaches a later cut's shot only through that cut's
+  parts or span (the v2 path, unchanged) or through the final shot of the cut right before it. The worst case of the
+  review (long@9:16#65, reroll of rg~0, raw catalog) now changes 0 other cuts (4dedf02: 10, of them 7 repeats of ri~0 and
+  ri~5; 382dce0: 2). The review's narrower patch (the salted cuts only) measures the same; this one also covers the
+  cut after a salted one, whose view weighs rule 4 against the salted final shot, so the invariant is exact. New test in
+  `planner_stability`: over corpus(2) without lock pins, every reroll and every 寄り die of every tenth cut, wherever no
+  other cut's orientation, layout, lens or span changed, a cut after one that shows the same shot shows the same shot
+  (synthetic / catalog: 429 / 439 of 496 / 498 salts change no other cut's parts or span; 17,638 / 17,695 later cuts
+  checked). 4dedf02 fails it with the catalog (3 cuts), 382dce0 too (13).
+  Over corpus seeds 30–89 (7,446 catalog rerolls), 0.5 % of rerolls change more than 3 other cuts (worst 7), against
+  0.6 % (10) for 4dedf02 and 0.5 % (7) for 382dce0; repeats more than 4 cuts away moved 182 times (202, 247) and all
+  rerolls together changed 1,355 other cuts (1,432, 1,490). The synthetic registry moves by one far repeat (17, against
+  18 and 17). A salt reaches later cuts through the parts path as before (for example long@16:9#58, reroll of rg~0).
+- After a reroll of a first copy, the curve why of a repeat still said `echo` where the first copy showed another shot or
+  `none` with the same curve value (115 of the 317 inherited curves whose shot why said `echo.kept`, on the review's
+  probe: the sample lyrics, 6 seeds × 8 moods × 3 aspects, every first-chorus cut rerolled). The heir now counts the curve as shown only on the shown shot
+  (`showsCurve: shows && …`), so those say `echo.kept` too (0 left). The reroll test of `camera_planner` checks the
+  curve why against the first copy's shown shot and curve (38 `echo.kept`, 6 of them a curve equal to the first copy's
+  on another shot; 4dedf02 said `echo` for those 6), and the hand-made cut test checks `heirOf` directly.
+- `why.echo.kept` named the cut twice (「{cut}と同じ歌詞なので、振り直しやロックがないときの{cut}にそろえた」), three lines
+  in the inspector. It now names it once: 「{cut}と同じ歌詞なので、振り直しやロックがないときの動きにそろえた」 / "Same lyric
+  as {cut}, so it keeps that cut's move as it would be without rerolls or locks". `i18n` checks that a why names each
+  placeholder once.
+- The round-1 note on a line sung twice in a row said the rest was `snapZoom` on impact lines; measured, no `snapZoom`
+  repeated back to back (corpus seeds 0–1 and 20–29, the sample lyrics). Corrected above and in DESIGN_2_1 §4.7 rule 4.
+- The 80 % where the lenses agree does not hold for every mood. Rule 5 (a first copy's `none` chosen by the weights over
+  a plain lens, at a low camera amount, is not passed on) is now named as the third cause, with the shares of the
+  misses, and the per-mood range is stated (below, "Why the metric's share stays under 80 %").
+- Several margins were those of one sample. Each floor's room is now quoted over every 12-seed window of corpus seeds
+  40–219, the curve agreement with the demo song as a range, and the stability figures over corpus seeds 30–89 next to
+  those over 3–29 (tables below).
+
+**Review fixes, round 3.** The final verification of 1dcb103 found seven issues, three of them major. The code
+changes are the salt-free twins, a repeat's natural shot and two cold-plan reductions; each change of behaviour is
+confirmed by a test that fails without it (the mutation checks below), and the reduction that changes no plan by
+equal plans. One proposal was built, measured and dropped; the rest are corrections of the text and its figures.
+Every figure in this list and in the tables below is the round-3 code's unless it says otherwise; the lists of rounds
+1 and 2 above keep their own.
+- A reroll of a first copy's whole line moved its repeats (S2-LINE-REROLL-HEIR). `line/<id>`, what the app's reroll
+  does with a line selected, salts every cut of the line. `unsaltedCast` re-cast each salted cut without its salts but
+  over the real history, where the row before it is the salted cut before it in the line: its parts weighed against
+  that cut's salted picks (`last`, `both`), so the heirs and natural shots of the line's later cuts followed the
+  reroll, and their repeats with them. Now a salted cut's row keeps a twin (`row.free`, `twinOf`: its natural,
+  reference, final and own picks in its salt-free cast), and a salted cut whose window holds a twin (the 4 rows before
+  it, or its echoed row) re-casts over the twins (`hist.unsalted`); the cast cache compares them (`TWIN_FIELDS`). An
+  unsalted cut still reads the rows as they are: its parts are the Plan's (the v2 path). On the review's probes: line
+  salts on corpus(2), raw catalog, 0 later cuts moved of 440 clean line salts (1dcb103: 23; the synthetic registry 0
+  on both); on corpus seeds 600–601, every salt kind (rerolls, line rerolls and dice on 寄り, 緩急, cam.follow, a
+  screen effect, the lens, the layout and the shot) moved 0 of 217,875 / 222,541 later shots (catalog / synthetic; the
+  lock path, left in, 4 of 1,095 as before); a reroll of a first copy's line moved 0 of its 2,660 repeats more than 4
+  cuts away, with either registry (1dcb103: 62 / 65; 382dce0: 156 / 167). Tests: planner_stability's salt test also
+  rerolls every line that holds a first copy and every tenth cut's line (334 / 337 line salts; 1dcb103 fails it with
+  26 later cuts moved, catalog, 25 of them repeats); a new camera_planner test rerolls each of the 69 lines that hold
+  a first copy on long (seed 0, three aspects): 597 repeats more than 4 cuts after the line keep their shots, 349 of
+  them while their first copy moved, and their why says `echo` or `echo.kept` as they match it (1dcb103 fails);
+  planner_determinism tells windows apart by the twin of the previous row (24 of 24 seeds).
+- Insertions were less local outside the tested sample (S2-OWN-LOCALITY), and round 2 understated it. The cause,
+  counted change by change: a follower (a repeat that takes its first copy's new shot) passed its new shot on to the
+  cut after it (×0.2) and, because a repeat's natural shot was the inherited one, to the 3 after that through the
+  near set (×0.5). The second path is removed at its cause: a repeat's natural shot is now its own pick, without
+  recency and without the ×40 echo, whether it inherited or weighed. Scratch variants on seeds 3–29 / 90–119 (`own`
+  windows over the bound, relays counted, of 100 / 112): 1dcb103 12 / 9; the natural shot of inherited cuts only 7 /
+  6; of weighed ones too 7 / 0 (built; 3 on 30–59); with a mirror of rule 4 for the first copy's own neighbour on top,
+  6 / 0 and 5 on 30–59 (not built). It costs the echo nothing measurable (corpus(12): repeats 67.5 → 67.3 % / 66.9 →
+  66.7 %, where the lenses agree 90.4 % / 86.8 → 86.4 %) and variety little (neighbours on one moving shot 2.6 → 2.7 %
+  / 4.0 → 3.9 %; a line sung twice in a row repeats its move in 5.1 % / 5.8 % of the twice() pairs, 4.2 % / 4.6 %
+  before, bound 10 %). What remains is the first path, the cut right after a changed follower (a relay): it weighs
+  ×0.2 against the shot its neighbour now plays so that the two do not play one move back to back, and it was held
+  off the old one the same way. Removing that would give up the no-back-to-back rule, so the count changed instead,
+  and this is the argument: to a user who inserts a line, a first copy near it that changes carries its repeats along
+  in the later choruses (the followers, counted apart since the first build), and the cut next to each repeat moves
+  with it; that is one change in a later chorus, at the repeat, not a change of its own somewhere else.
+  planner_stability's `own` now leaves out a changed cut right after a changed follower; every other change still
+  counts (the cuts 2–4 after a follower too), and no bound value moved. On corpus seeds 3–29, 30–59 and 90–119 (100 +
+  112 + 112 three-seed windows of the test's size, both registries and timings), `own` as now counted goes over its
+  bound in 1 / 0 / 0 windows (worst 8 / 6 / 6 other cuts), 382dce0 in 1 / 0 / 2 (worst 8 / 6 / 9). With the relays
+  counted it goes over in 7 / 3 / 0 (worst 9 / 7 / 6): pooled 10 of 324 against 3 of 324 for 382dce0 (1dcb103: 21,
+  worst 10). That is the locality the inheritance costs insertions, and DESIGN §4.7 Stability and the test comment
+  say so; the test's diagnostic prints both counts. Round 2's "neither range is worse by much" is gone: its seeds
+  30–89 happened to show little cost; 3–29 and 90–119 did not. The reroll diagnostic reports the followers apart too:
+  on the same seeds with the catalog, 0.2 / 0.4 / 0.4 % of rerolls change more than 3 other cuts (worst 8 / 6 / 13;
+  382dce0 0.6 / 0.5 / 0.5 %, worst 8 / 5 / 7; 1dcb103 worst 14), without the followers 0.1 / 0.0 / 0.0 % (worst 5 / 4
+  / 4); two-seed windows over the reroll bound 6 of 84 (382dce0 15, 1dcb103 8). The heaviest, long@16:9#105 rerolling
+  rg~0, changes the next cut's layout; that cut, a first copy, takes another shot, so do two first copies 5 and 6 cuts
+  after the rerolled one (recency), and 10 repeats follow them: the v2 path, through a first copy. A new
+  planner_stability test pins each first copy's shot to another preset (corpus(1), both registries) and checks that
+  far from it nothing moves but its repeats and the cuts right after changed cuts (1dcb103 moves 31 / 16 other cuts
+  there); the hand-made cut test checks the natural shot directly.
+- A few new fast zoom-outs, even in calm moods (VR2-2): measured, the proposal dropped, not changed. Counted as the
+  review did (zoom rate over 3 outside `snapZoom`; Node's text measurer; the 576 plans of the sample lyrics with the
+  chorus-shaped song): 308 on 382dce0, 314 on 1dcb103 and 314 now (20 new, 14 gone; quietHush 26 → 32 on 1dcb103, 30
+  now). The 20 new ones are 11 cuts, 9 of them in both L1 and L2: 14 are repeats that show their first copy's shot,
+  8 of them echoing a first copy that is that fast itself; 4 are relays (another shot); 2 keep their shot with another
+  curve or opening. The review's proposal was built and measured: a `pullReveal` is inherited only onto the first copy's
+  layout, and weighs with the ×40 echo elsewhere. It leaves the count at 314 (17 new, 11 gone): on the other layouts
+  the ×40 echo still picks `pullReveal`, now with the repeat's own curve. It costs the echo about 1 point (corpus(12):
+  where the echo can act 77.7 → 76.6 % / 84.3 → 82.8 %, where the lenses agree 90.4 → 89.6 % / 86.4 → 85.2 %) and
+  takes the catalog's echo share under its 72 % floor on 2 of 398 independent 12-seed windows (71.4 %, 71.7 %). Also
+  dropping the ×40 echo toward a `pullReveal` on another layout brings the count to 301 but puts corpus(12) itself on
+  the floor (72.0 %). Restricting the inherited curve to the same layout, on top of the proposal, leaves 314. Neither
+  was kept. A `pullReveal` passed on is often not the same visible move (the review: an inherited `pullReveal`'s camera
+  path matches its first copy's in 34 % of pairs, against 53 % over all shared shots), and 20 new fast moves and 14
+  gone over 576 videos is the size of the side effect. What makes them is
+  `pullReveal` on a short cut (1.0–1.3 s) over a small-text layout, whatever chose it (212 of the 308 before the
+  inheritance are `pullReveal`); the echo makes it a little more common on repeats (96 repeat pairs on it, 67 before).
+  A fix belongs to `pullReveal` itself (for example not on cuts under 1.5 s), which changes the camera slots of every
+  document: for the owner (Open).
+- The ratio floor was a fit (S2-RATIO-FLOOR). "Repeats share ≥ 2 × unrelated cuts" failed on an independent 12-seed
+  window (seeds 596–607: 1.99; its unrelated cuts share 34 %, against 29–31 % elsewhere), and 382dce0 reaches 2.01 on
+  another window, so it never told the builds apart. It is now ≥ 1.8, below every independent window (lowest 1.99 over
+  the 398 windows of seeds 40–219 and 500–739), and the test comment calls it a sanity floor; the repeats floor
+  (62 %; 382dce0 ≤ 58.8 %) tells the builds apart. Round 2's "every floor holds on every window" is corrected below.
+- Cold plans are slower than round 1 said (S2-COLD-PLAN-COST). Measured again with more runs, 382dce0 and this code
+  alternately, 8 pairs of 30 cold plans each (10th percentile per run, then the median over the runs): a 246-cut corpus
+  document (long, seed 140) 71.0 → 71.9 ms (+2 %, slower in 7 of 8 pairs), the same with a chorus 73.3 → 75.4 ms
+  (+3 %), with 13 rerolled cuts 89.4 → 91.5 ms (+2–5 %, slower in 5 of 8), with 6 rerolled lines 86.3 → 91.9 ms
+  (+7 %, 8 of 8). Two cheap reductions were made: only a cut that a later cut sings again works out an heir
+  (`castInputs.echoed`, so the cache still tells the cases apart; a new re-plan test fails without it), and a cut
+  re-cast only because the previous shadow differs from the previous final shot re-casts its camera slots alone
+  (`recastCamera`; its parts read the same rows; plans unchanged over 1,824 raw and salted plans of corpus(2)). The
+  rest is the salt-free re-cast of salted cuts, up to the camera slots, and over a rerolled line of each of its cuts
+  against the twins. Re-plans from the cast cache cost about the same (the speed test, run alternately with 382dce0:
+  best 14.1–15.1 ms against 13.7–14.7 ms; Checks below).
+- The curve echo with the demo song was understated (VR2-3): the quoted 42–52 % left out L2 (61 %). Corrected in the
+  round-1 note above and in DESIGN §4.7: 39–61 % with the demo song, 34–41 % with the 75 s loop.
+- The second chorus still rarely looks like the first (VR2-1, not a code bug). The wording under "What a viewer sees"
+  and in DESIGN §7.3 now says so in its first sentence, with the review's chorus-sheet figures. The opt-in
+  「くり返しの行をそろえる」 is not built; the owner has not decided.
+
+**Review fixes, round 4.** The final verification of 669aa12 found six issues, one of them major. The code changes are
+the chain of salt-free twins across unsalted cuts, a curve rule for short pulls the echo gives, and the carry of a
+repeat; each is confirmed by a test that fails without it (the mutation checks below). The rest are corrections of
+floors and text. Every figure in this list is round 4's code's unless it says otherwise.
+- `echo.kept` named a shot that neither plan shows (VR3-KEPT-FALSE). After a reroll next to a first copy, not of it, the
+  first copy's layout or lens can follow the reroll (the v2 path: its parts weigh against the rerolled cut's new picks).
+  Round 3 re-cast such an unsalted first copy's camera alone, over its Plan parts and the previous cut's shadow, which
+  was itself such a mix, so its heir existed in neither plan, and a repeat that kept it said 「…振り直しやロックがないときの動きにそろえた」
+  for a shot the first copy shows with neither the reroll nor without it. On the review's probe (the sample lyrics with
+  a second chorus and a chorus-shaped song, 288 documents, every cut and line of the first サビ rerolled: 3,744 plans;
+  scratch `echo/r3-fix4/heirtruth.js`), 18 of 2,800 such claims were false (11 after cut rerolls, 7 after line rerolls)
+  and the salts changed 425 heirs. The fix is the review's, made exact and cheaper: a cut whose window (the 4 rows
+  before it and its echoed row) holds a twin that differs from its row where the cut reads it (`twinDiffers`) is re-cast
+  in full, up to its camera slots, over the twins, whether it is salted or not; an unsalted cut keeps a twin where its
+  salt-free picks come out otherwise (`planner/cast castCut`), so the chain ends where the salt no longer reaches the
+  parts. The comparison leaves out the shot (the re-cast reads the previous shot from the shadow, and the twin's natural
+  shot is the row's) and the screen effects (the re-cast stops before them): with them compared, every re-cast cut kept
+  a twin and the chain ran on (1,907 camera re-casts instead of 582 on 36 corpus plans with a reroll every 19th cut; the
+  hashes of 96 salted corpus plans are the same either way). Now every heir, shadow and natural shot is that of the plan
+  without salts, as long as no span changed: 0 false claims of 2,993 and 0 heirs changed by the 3,744 salts; with the
+  chain cut after one cut (a mutation), 13 heirs still change. A reroll therefore no longer moves the repeats of a first
+  copy whose layout or lens followed it (Stability above): on corpus seeds 170–171, a reroll of the cut before a first
+  copy moved 153 of its 2,660 far repeats in round 3 and moves 2 now (both where a span changed); other far repeats
+  moved by cut, line, lens-die and cut-before rerolls, 217 / 155 / 133 / 66 in round 3, are 2 / 0 / 0 / 0. Tests: a new
+  camera_planner test rerolls every cut and line of the first サビ of the sample lyrics with a second サビ (no song, four
+  looks, 52 plans): a repeat whose why says `echo.kept` shows its first copy's shot without salts, one that shows
+  neither shot names no echo, and a cut whose own parts and previous shot are as before keeps its shot (669aa12 fails at
+  9:16 quietHush, cut/ri~0: ru~9 says `echo.kept` for `settle` while ri~9 shows `none` with and without the reroll; the
+  chain cut after one cut fails at 9:16 dashSprint, cut/rf~3 → rs~0). planner_stability's salt test now checks every cut
+  whose own orientation, layout and lens are unchanged, also where the salt changed other cuts' parts (before, such
+  salts were left out): 143 / 169 of the 829 / 826 salts without a span change do, and 12,823 / 13,056 later cuts are
+  checked beside such a change (catalog / synthetic); 669aa12 fails it with 31 later cuts, 27 of them after line
+  rerolls. The review's cheaper variant (re-cast only where the previous shadow differs) is not exact (90 repeats still
+  moved), so it was not taken. The cost is the salt-free re-cast of the cut after each salted one and of the few after
+  it (the cold-plan item below); plans without salts do not pay it.
+- A few new fast zoom-outs, most in the calmest mood (VR3-WHIPS; VR2-2 of round 2). Counted as the review did (zoom
+  rate over 3 outside `snapZoom`, the 576 plans per song of the sample lyrics, L1 and L2 × 12 seeds × 8 moods × 3
+  aspects), but with Node's text measurer (`echo/r3-fix4/nodewhip.js`; the review's browser counts differ by a few):
+  382dce0 / round 3 / round 4, over all moods and in quietHush:
+
+  | song | all moods | quietHush |
+  |---|---|---|
+  | the chorus-shaped song (75 s) | 308 / 314 / 302 | 26 / 30 / 30 |
+  | the demo song (60 s) | 362 / 370 / 361 | 33 / 40 / 40 |
+  | no song | 337 / 346 / 334 | 29 / 31 / 31 |
+  | the demo song looped (75 s) | 288 / 297 / 280 | 33 / 37 / 37 |
+
+  The echo-scoped curve rule the review proposed is built: a `pullReveal` the echo gives a cut under 1.8 s (inherited,
+  or picked with the ×40 echo toward it) draws its curve without `holdThenDash` and `softEnds`, which put most of the
+  pull into a short stretch (why `cam.shortPull`). It changes no shot (the §7.3 figures are the same but the curve
+  agreement, 2–4 points lower) and 47 curves of the 35,712 cuts of the chorus-shaped song's plans. It takes every song
+  under 382dce0's count, but not quietHush: its extra fast moves are pulls on cuts of about 1 s with calm curves (a
+  first copy's `pullReveal` inherited onto a 0.97–1.05 s repeat) and weighed pulls next to a changed neighbour, which no
+  curve slows enough. quietHush stays at +15 % over the review's three songs (88 → 101), and the demo song shows it most
+  (33 → 40). The root cause is `pullReveal` on short cuts, whatever chose it: the same curve rule for every `pullReveal`
+  under 1.8 s (measured, not built, on round 4's code without the carry rule: it changes the camera slots of every
+  document) brings the three songs to 153 / 202 / 197 (552 in all, against 1,007 on 382dce0) and quietHush to 12 / 24 /
+  17, and it raises the curve agreement of the shared moving shots a little. That is for the owner (Open). (Round 5
+  replaces the rule: such a pull takes `hushRushHush` on every list, since the calm list's `fadeBrake` and `slowBloom`
+  bunch the pull too; and it counts the fast pans, which round 4 left out. See its list.)
+- Repeats on the same preset often did not make the same move (VR3-CARRY-MATCH): the carry (§4.5.7) opened a repeat at
+  the previous cut's closeness where its first copy had not carried, or the reverse. Now a repeat on its first copy's
+  preset carries only when that copy carried (`planner/camera carry`); the reverse cannot be helped (the repeat's
+  previous cut has no shot or a transition that is not a text seam). Measured with the shot's own pose over each cut
+  (`echo/r3-fix4/nodemotion.js`, Node, the review's match measure: motion relative to the start, rms distance under
+  half the larger one; the chorus-shaped song's 576 plans), 507 repeat pairs on one moving shot and one layout: the
+  same move 150 → 168, both nearly still 156 → 171, another move 201 → 168 (the same or still 60.4 % → 66.9 %). The 75
+  pairs where only the repeat carried go to 0; 47 where only the first copy carried stay. 339 of the 3,786 carries of
+  those plans go (a repeat that followed the cut before it now opens on its own preset's first framing, as its first
+  copy did), and the fast zoom-outs rise by 3 / 2 (chorus-shaped song / demo song). The carry test models the rule
+  (309 repeats held back on corpus(3) and doubled lines); without it the test fails.
+- The impact floor was not a floor (R3S-IMPACT-FLOOR-FRESH). On the review's seeds 800–1039 four 12-seed windows
+  (seeds 870–885) give 57.4–58.6 %, and 382dce0 exactly the same: about 95 impact cuts per window is too few for a
+  floor 14 points under the mean. The 60 % stays; the test counts the impact cuts over corpus(24) (200 / 257 cuts,
+  75.5 % / 81.3 %), and over every 24-seed window of seeds 40–219, 500–739 and 800–1039 the lowest is 63.7 % / 73.0 %
+  (382dce0: 63.7 % / 73.5 % on 800–1039). The test comment, the table above and Open say so; round 3's "1.9 points of
+  room" and "every other floor holds on all 398 windows" are corrected. The test takes about 8 s longer.
+- Cold plans of a small document with a rerolled line cost more than the one long document showed
+  (R3S-COLD-COST-SMALL-DOC), and round 4's chain adds to it. Measured again, 382dce0, 669aa12 and round 4 in turn over
+  8 rounds (each run the 10th percentile of 20 cold plans of a long document or 80 of a small one, then the median over
+  the rounds; `echo/r3-fix4/bench.js`, `bench_r4.log`):
+
+  | document | 382dce0 | round 3 | round 4 | round 4 against 382dce0 |
+  |---|---|---|---|---|
+  | long (246 cuts), no salts | 68.9 ms | 70.3 ms | 70.3 ms | +1.4 ms, +2 % (slower in 7 of 8 rounds) |
+  | long, one rerolled line | 85.3 ms | 86.4 ms | 87.2 ms | +1.9 ms, +2 % |
+  | long, 13 rerolled cuts | 86.4 ms | 89.8 ms | 93.2 ms | +6.8 ms, +8 % (8 of 8) |
+  | long, 6 rerolled lines | 85.8 ms | 88.0 ms | 91.9 ms | +6.0 ms, +7 % (8 of 8) |
+  | project_vertical 9:16 (16 cuts; a line reroll, a depart die, 7 lock pins) | 7.13 ms | 7.62 ms | 8.75 ms | +1.6 ms, +23 % (8 of 8) |
+  | … without its salts | 5.64 ms | 5.70 ms | 5.74 ms | +0.1 ms, +2 % |
+  | lrc 1:1 (28 cuts) with one rerolled line | 10.38 ms | 11.18 ms | 11.43 ms | +1.1 ms, +10 % (8 of 8) |
+  | basic 9:16 (19 cuts) with one rerolled line | 7.86 ms | 8.47 ms | 8.23 ms | +0.4 ms, +5 % |
+
+  So a salt costs about 0.4–1.1 ms more cold than on 382dce0 per rerolled line of a small document, up to +23 % on the
+  vertical sample with its locks, and about 0.5 ms per rerolled cut on the long one (round 5 measured more per
+  rerolled cut on other documents, and on small documents with several: see its list); round 4 adds half to two thirds
+  of that (13 rerolled cuts +3.4 ms over round 3, the vertical sample +1.1 ms). A document without salts costs about 2 %
+  more. (On 382dce0 itself one salt makes the long document's cold plan about 16 ms slower, for reasons older than this
+  work.) The re-cast of a cut next to a salted one cannot be skipped without giving up the exact heir; comparing the
+  twins only where the next cut reads them (the shot and the screen effects left out) is what keeps the chain short.
+  Re-plans from the cast cache cost the same as on 382dce0 (the speed test run alternately three times: best 12.3–13.0
+  ms against 12.4–12.9 ms; typing 26.4–28.2 against 26.8–27.8 ms; cast reuse 96 % on both). The round-3 figures quoted
+  above (+2–3 %, +2–5 %, +7 %) were one long document's; this table replaces them.
+- "Never" was too strong (R3S-REROLL-SPAN-NEVER): a reroll changes a first copy's heir where it changes a span (other
+  features, so another plan without salts). §4.7 Stability now says so with both samples: seeds 170–171, 2 of 2,660
+  pairs after a reroll of the first copy, 2 after one of its line, all span; seeds 600–601, none.
+
+**Review fixes, round 5.** The final verification of 341d470 found six issues, one of them major. The code change is
+the curve of the short pulls the echo gives, with its why; tests that fail without it confirm it (the mutation checks
+below). The rest are corrections of the text, measured again on fresh samples. Every figure in this list is round 5's
+code's unless it says otherwise. The browser figures are the review's measure (scratch `echo/r5/vis.py qa`: 30 fps,
+the full view with lens and rig; a fast zoom-out is a zoom rate over 3 outside `snapZoom`, a fast pan the focus point
+faster than 1.5 frame widths a second); the Node figures use Node's text measurer (`echo/r5/nodeqa.js`, `cand.js`).
+- The why of the short-pull rule said the opposite of the curve shown above it (VR4-SHORTPULL-WHY, major), and on
+  calm lists the rule still left curves that bunch the pull (VR4-SHORTPULL-FADEBRAKE). Round 4's why,
+  「短いカットで引くので、急がない緩急に」 ("A short pull-back, so a curve that does not rush it"), stood under
+  `hushRushHush`, shown as 「一瞬ゆっくり→すごく速く→一瞬ゆっくり」, on the fast list, and under `fadeBrake`, which starts
+  at its top speed, on the calm list. That list kept `fadeBrake` (weight 2) and `slowBloom`, and turned some `softEnds`
+  pulls into faster `fadeBrake` ones. Measured first: each of the 374 pulls the rule calms in the sample-lyrics plans
+  (four songs × 576 plans; 238 on the fast list, 136 on the calm list, none on the impact list), drawn with every
+  curve (Node, `cand.js`; the speeds are the curve's own, relative to its mean speed):
+
+  | curve | top speed | speed at the start | mean zoom rate | zoom rate > 3 | pan > 1.5 |
+  |---|---|---|---|---|---|
+  | `hushRushHush` | 1.42 | 0.12 | 1.63 | 20 | 67 |
+  | `dashStop` | 1.19 | 1.19 | 1.36 | 3 | 56 |
+  | `fadeBrake` | 1.92 | 1.91 | 2.00 | 97 | 103 |
+  | `slowBloom` | 1.92 | 0.09 | 2.06 | 99 | 22 |
+  | `holdThenDash` | 2.40 | 0.00 | 2.57 | 157 | 128 |
+  | `softEnds` | 2.50 | 0.01 | 2.76 | 168 | 78 |
+  | `linear` (an ease, in no list) | 1.00 | 1.00 | 1.18 | 0 | 40 |
+  | round 4's picks | – | – | 1.77 | 48 | 76 |
+
+  Of the fast and calm lists' curves, `hushRushHush` has the lowest zoom rate on 370 of the 374 cuts, and the lowest
+  mean on every song and on both lists. Only `dashStop` and `linear` go lower, and both run at their top speed from the
+  cut's first frame (`dashStop`, the impact list's accent, into a sudden stop). `slowBloom` makes few fast pans but as
+  many fast zoom-outs as `fadeBrake`, and ends at its top speed. So the rule now gives every such pull `hushRushHush`,
+  whatever its list (`CURVES_SHORT_PULL`), and keeps its first copy's curve only where that is `hushRushHush` too (why
+  `echo`). The why says what the rule does: 「短いカットで引くので、動きを短い間に詰めこむ緩急は避けた」 / "A short pull-back, so curves that cram the
+  move into a short stretch are left out". That is true of the one curve it leaves, which moves at an even speed through
+  the middle 56 % of its time, while the curves left out peak at 1.9–2.5 × their mean (and `dashStop` starts at its
+  top). It no longer claims a calm result: on cuts of about 1 s even `hushRushHush` zooms out fast now and then. An
+  impact cut's curve why no longer names the impact, since its curve no longer comes from the impact list (1 such pull
+  in the 1,152 corpus plans of seeds 0–47, none in the sample-lyrics plans). A die on 緩急 leaves such a pull's curve, the
+  rule having one value; on the fast and impact lists that was so since round 4.
+
+  In the browser, the 374 calmed pulls, 382dce0 (other shots there) / round 4 / round 5: fast zoom-outs 57 / 47 / 20
+  (calm lists 33 / 29 / 2), mean zoom rate 1.53 / 1.77 / 1.63 (calm lists 1.53 / 1.96 / 1.57), fast pans 57 / 76 / 67
+  (calm lists 18 / 31 / 22). The demo song's 95 had 25 fast zoom-outs in round 4 and have 5. Whole plans (576 per
+  song, the sample lyrics L1 and L2 × 12 seeds × 8 moods × 3 aspects), 382dce0 / round 4 / round 5:
+
+  | song | fast zoom-outs, all moods | … quietHush | fast pans, all moods | … quietHush |
+  |---|---|---|---|---|
+  | the chorus-shaped song (75 s) | 309 / 303 / 303 | 26 / 30 / 30 | 261 / 254 / 254 | 18 / 20 / 20 |
+  | the demo song (60 s) | 360 / 358 / 338 | 33 / 40 / 37 | 271 / 279 / 277 | 26 / 34 / 32 |
+  | no song | 333 / 330 / 330 | 29 / 31 / 31 | 257 / 251 / 251 | 19 / 21 / 21 |
+  | the demo song looped (75 s) | 286 / 276 / 269 | 33 / 35 / 35 | 262 / 265 / 258 | 28 / 32 / 32 |
+  | all four | 1,288 / 1,267 / 1,240 | 121 / 136 / 133 | 1,051 / 1,049 / 1,040 | 91 / 107 / 105 |
+
+  Against 382dce0, 32 fast zoom-outs are new and 80 gone (round 4: 44 and 65), and 38 fast pans new and 49 gone
+  (round 4: 42 and 44). Node's counts (the round-4 table's measure) agree: 1,295 / 1,277 / 1,249 fast zoom-outs
+  (chorus-shaped 308 / 302 / 302, demo 362 / 361 / 340, no song 337 / 334 / 334, loop 288 / 280 / 273), quietHush 121 /
+  138 / 135, fast pans 1,067 / 1,065 / 1,056. The chorus-shaped song and no song do not change: every pull the rule
+  calms there was on the fast list already. The rule changes no shot and nothing but those 136 curves in these plans.
+  The shared moving shots share their curve a little more often with the demo song and the loop: 51.1 → 52.1 % and
+  60.4 → 60.1 % (L1 / L2), 39.5 → 40.7 % and 39.8 → 40.8 %. On the corpus it changes 8 curves in 6 plans of seeds
+  40–219 (the shared curve 83.3 % / 85.7 → 85.6 %) and one of corpus(12) (synthetic 1,902 → 1,901 of 2,170, 87.6 %
+  either way), and no other §7.3 figure. Tests: the hand-made cut test draws the short pull after each curve at a calm
+  and a high energy and expects `hushRushHush` with the why `cam.shortPull` (`echo` after `hushRushHush`), also for a
+  pull picked with the ×40 echo, on an impact cut and under a curve die; the corpus test expects `hushRushHush` on every
+  inherited short pull (149, 91 of them after a first copy on another curve); a new test plans the sample lyrics with a
+  second サビ and the demo song in four calm moods (48 plans) and checks through explain that each of the 13 short pulls
+  the echo gives takes `hushRushHush` with that why (all 13 on a calm list), and that the 16 other short pulls on
+  repeats keep their own lists. 341d470 fails all three (`fadeBrake`).
+- The calmest mood gains fast pans as well as fast zoom-outs (VR4-QUIETHUSH-PANS), and round 4 counted only the
+  zoom-outs. quietHush has 91 → 107 fast pans in round 4 (+18 %) and 105 now (+15 %), beside 121 → 136 (+12 %) and
+  133 (+10 %) fast zoom-outs; over the fourth review's three songs 88 → 101 → 98 zoom-outs (+11 %). Against 382dce0, 14
+  of its fast pans are new and none gone (round 4: 16 and 0):
+  - 8 are one relay on every song, L1 and L2 at 16:9, quietHush, seed 1, ru~0: the cut before, rt~6, changes from
+    `pullReveal` to `settle`, so ru~0 weighs its way to a `pullReveal` on a cut of 0.95–1.0 s. The echo did not give
+    it, so it keeps its own curve (zoom rate 3.1–5.3).
+  - 4 are pulls the echo gives on the demo song, rw~8 of L1 and L2 at 9:16, seeds 1 and 10 (0.97–1.05 s).
+    `hushRushHush` slows them (pan 2.1–4.0 against 2.6–4.9 with `fadeBrake`, zoom rate 2.9–3.3 against 3.5–4.1), but
+    not under the bounds.
+  - 2 are the loop's rr~8 of L1 and L2 at 1:1, seed 10: the same shot and curve as on 382dce0, but no longer carried
+    (round 4's carry rule: its first copy did not carry), so the pull starts closer and moves further (pan 2.33
+    against 1.03).
+  The 2 gone since round 4 are rr~8 at 9:16, seed 1, on the demo song (pan 1.63 / 1.80 → 1.30 / 1.45). DESIGN §4.7
+  Parameters now states the pans beside the zoom-outs. What would hold the calm mood is still the owner's call (Open):
+  the rule for every short `pullReveal`, or no `pullReveal` passed on to a cut under about 1.1 s.
+- Cold plans with several rerolled cuts cost more than round 4 wrote (VR4-COLD-COST-PER-CUT). Round 4 quoted about
+  0.5 ms per rerolled cut of the 246-cut document (+8 % with 13) and measured small documents with one rerolled line
+  only. The review measured up to about 1.3 ms per cut, and +12 % on small documents with a few rerolled cuts (2 or 3,
+  not the 6 its labels said: its script salted every tenth cut). Measured again on fresh documents (corpus seeds
+  1401–1403, catalog; 382dce0 and round 5 in turn over 8 rounds, the order swapped every round; each run the 10th
+  percentile of 20 cold plans of a long document or 80 of a small one, then the median over the rounds; the rerolled
+  cuts spread evenly over the lyric cuts; scratch `echo/r5/bench5.js`, `bench5.log`), 382dce0 → round 5:
+
+  | document | no salts | 1 rerolled cut | 3 or 6 rerolled cuts | 6 or 13 rerolled cuts | 1 rerolled line |
+  |---|---|---|---|---|---|
+  | long 16:9 (246 cuts) | 72.2 → 74.9 ms (+4 %) | 91.8 → 94.9 ms (+3 %) | 6: 91.9 → 97.8 ms (+6 %) | 13: 91.3 → 102.1 ms (+12 %) | 91.2 → 96.7 ms (+6 %) |
+  | long 9:16 (246 cuts) | 67.5 → 67.4 ms (0 %) | 81.8 → 82.9 ms (+1 %) | 6: 83.4 → 93.1 ms (+12 %) | 13: 83.1 → 92.4 ms (+11 %) | 82.4 → 89.0 ms (+8 %) |
+  | lrc 1:1 (29 cuts) | 10.1 → 10.1 ms (0 %) | 11.9 → 13.0 ms (+10 %) | 3: 11.9 → 14.1 ms (+19 %) | 6: 12.5 → 15.5 ms (+24 %) | 11.8 → 13.3 ms (+13 %) |
+  | basic 16:9 (19 cuts) | 6.1 → 6.3 ms (+3 %) | 7.4 → 8.0 ms (+7 %) | 3: 7.6 → 9.0 ms (+19 %) | 6: 7.7 → 10.3 ms (+34 %) | – (no repeats) |
+  | basic 9:16 (19 cuts) | 6.5 → 6.6 ms (+1 %) | 8.0 → 8.6 ms (+8 %) | 3: 8.1 → 9.3 ms (+15 %) | 6: 8.1 → 10.7 ms (+32 %) | – (no repeats) |
+
+  Every salted row was slower in 8 of 8 rounds but four: one rerolled cut of long 9:16 (5 of 8), of basic 16:9 (6) and
+  of basic 9:16 (7), and the rerolled line of long 16:9 (7). Per rerolled cut, after the difference without salts, a
+  salt costs 0.3–1.6 ms more cold than on 382dce0: 0.5–1.6 ms on the long documents (+6–12 % with 6 or 13 rerolled
+  cuts), 0.3–1.2 ms on the small ones, where that is +7–10 % for one rerolled cut, +15–19 % for three and +24–34 %
+  (2.5–3.0 ms) for six, a third of the lyric cuts. Without salts the cost is 0 to +4 % (−0.1 to +2.7 ms). It is all
+  rounds 3 and 4's exact heirs, the silent re-cast of each salted cut and the chain of twins after it; round 5 changes
+  nothing in it. Re-plans from the cast cache are not affected (the speed test, Checks below). DESIGN §4.7 Stability and
+  Open now give these ranges.
+- The ×4 of the framing lenses has less room than round 4 wrote (VR4-FRX-MARGIN). The camera_planner comment and the
+  table above quoted ×4.10 / ×4.80 as the lowest windows and named only the catalog's ×4 as short of room. On the
+  fifth review's seeds 1100–1339 and on fresh seeds 1400–1639 (`floors2.js`, the table above), the lowest 12-seed
+  windows are ×4.42 / ×4.32 and ×4.01 / ×4.82 (catalog / synthetic). The catalog's ×4.01 is the window and the block of
+  seeds 1520–1531, where 382dce0 gives ×3.89; 382dce0 falls under the ×4 on 4 windows of that range. The floor holds on
+  every window, with 0.01 of room on the catalog and 0.32 on the synthetic registry. The synthetic framing share also
+  comes close (70.1 % on seeds 1594–1605, floor 70 %). No bound changed; the test comment and the table say so.
+- The variety test's "over 0.6 in ≤ 5 % of plans" (VR4-VARIETY-CLAUSE; older than the echo) has no margin on
+  independent samples of the test's size, and its comment did not say so. On the test's corpus(6) it holds (1 of 63 /
+  1 of 70 plans). Over every 6-seed window (235 per range; `variety.js`), catalog / synthetic, the windows over it are
+  9 / 8 (seeds 800–1039), 17 / 9 (1100–1339) and 18 / 6 (1400–1639), up to 9.7 % of a window's plans. 382dce0 has
+  13 / 18, 22 / 13 and 31 / 14 (up to 9.1 %), and it also breaks the longest run on 34 synthetic windows and the
+  neighbours bound on 3. The other clauses hold on every window (median ≤ 0.442, neighbours ≤ 5.3 %, longest run 6
+  at most). The echo makes the failures rarer, not rare. The test comment now says so. The clause is neither loosened
+  nor removed; a floor with margin would need the test on corpus(12) and the bound derived again there (the owner's).
+
+**Mutation checks**, each failing a test:
+- First build: HEAD's `camera.js` and `cast.js` (the §7.3 floors and the new tests); without rule 2, 4 or 6 (the
+  hand-made cut); without rule 3 or 5 (the §7.3 test and the hand-made cut); without the inherited curve; the heir read
+  from the natural pass (§7.3 and both corpus tests); without the shadow re-cast (the reroll bound of
+  `planner_stability`, both registries); `heir` or `shadow` left out of `ROW_FIELDS` (the cache test; the re-plan =
+  fresh test over edits did not catch it).
+- Review fixes: a curve die ignored on inherited repeats (the hand-made cut and the reroll test); rule 6 on
+  `cut/<key>` only (the reroll test); `echo` in every case, for the inherited shot (the hand-made cut and the reroll
+  test), the ×40 echo (the weights test) or the curve (the hand-made cut and the reroll test); the `shows` flags read
+  from the salt-free cast instead of the Plan's (the reroll test); without the twice-in-a-row rule (the weights test
+  and the corpus test); that rule only after the first copy itself, not after another repeat (the corpus test);
+  `follows` left out of the cast inputs (the cache test); the cache-hit path pushing no `repeatOf` (the new re-plan
+  test; no older test caught it); no re-cast for salts at all (the reroll test); dice on the lens and the curve taken
+  as unable to reach the heir (the reroll test's dice). Scripts and logs: scratch `echo/fix/mutate.py`, `mutate.log`.
+- Round 2: a salted cut's natural shot taken from its natural pass again (the new `planner_stability` salt test,
+  catalog); `showsCurve` without `shows` (the hand-made cut and the reroll test); `why.echo.kept` naming its cut twice
+  (`i18n`). The review's narrower patch (the natural shot from the salt-free cast for salted cuts only) fails no test:
+  it differs from this fix only where the cut after a salted one weighs rule 4, or the twice-in-a-row echo, against the
+  salted final shot, and the tests' samples reach no such case. Every
+  mutation of round 1 and of the first build above was run again on the new code and still fails a test (without the
+  shadow re-cast: both reroll tests and the salt test of `planner_stability`; `heir` or `shadow` out of `ROW_FIELDS`:
+  the cache test; without rule 3 or 5: the §7.3 test and the hand-made cut; without rule 4: the hand-made cut and the
+  corpus test). Scripts and logs: scratch `echo/r2/mutate.py`, `mutate_r2.log`, `mutate_old.log`.
+- Round 3: no salted cut re-cast over its neighbours' twins, or re-cast over the salted rows (the salt test of
+  `planner_stability`, catalog, and the new line-reroll test); the twins left out of the cache's comparison (the cache
+  test); a repeat's natural shot the inherited one again, or a weighed repeat's with the ×40 echo (the hand-made cut
+  and the new pin test of `planner_stability`, both registries); `echoed` left out of the cast inputs (the new re-plan
+  test; no older test caught it, since without a song whether a line is sung again changes its cut's energy and so its
+  features). Giving every row an heir again changes no plan (a control: the re-plan test passes). Every mutation of
+  rounds 1 and 2 and of the first build was run again on the round-3 code and still fails a test, except the review's
+  narrower round-2 patch, which failed none then either (above). Scripts and logs: scratch `echo/r3-fixer2/mutate.py`,
+  `mutate.log`, `mutate_old.py`, `mutate_old.log`.
+- Round 4: the re-cast over the twins for salted cuts only (669aa12's rule), no twin kept on an unsalted cut (the chain
+  cut after one cut), or the camera alone re-cast over the twins (the new `echo.kept` test of camera_planner; the first
+  and the third also the salt test of `planner_stability`, catalog); without the short-pull rule (the hand-made cut and
+  the corpus test); that rule for inherited pulls only, not for pulls picked with the ×40 echo (the hand-made cut);
+  without the carry rule (the carry test). Comparing the twins with the shot and the screen effects too changes no plan
+  (a control: every test passes). Every mutation of rounds 1 to 3 and of the first build (without the shadow re-cast;
+  `heir` or `shadow` out of `ROW_FIELDS`; without rule 3, 4 or 5) was run again on the round-4 code, each in a fresh
+  copy with the tests that should catch it, and still fails a test, except the round-3 control (every row gets an
+  heir), which changes no plan: 36 mutations, 34 failing, the 2 controls passing. The review's narrower round-2 patch
+  now fails two tests (the salt test of `planner_stability` and the new `echo.kept` test). Scripts and logs: scratch
+  `echo/r3-fix4/mutate.py`, `mutate.log`, `mutate_all.py`, `mutate_all.log`.
+- Round 5: round 4's curve rule (341d470's `camera.js`, the calm list without `softEnds` and `holdThenDash`) fails the
+  hand-made cut test, the corpus test and the new calm-list test; the impact kept in a calmed impact pull's curve why
+  fails the hand-made cut test; the rule for inherited pulls only, not for pulls picked with the ×40 echo, fails the
+  hand-made cut test and the calm-list test. Copies in scratch `echo/r5/headt`, `mut2`, `mut3`.
+
+**§7.3 figures** (the metric's cuts unless noted; catalog / synthetic):
+
+| figure | before, corpus(6) | after, corpus(6) | before, corpus(12) | after, corpus(12) (the test) | before, seeds 40–219 | after, seeds 40–219 |
+|---|---|---|---|---|---|---|
+| impact → `snapZoom` ≥ 60 % | 88 % / 88 % | 90 % / 85 % | 73.9 % / 86.7 % | 75.0 % / 85.0 % | 74.7 % / 81.6 % | 75.1 % / 81.7 % |
+| `snapZoom` on other cuts < 2 % | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+| framing lens → `none` ≥ 70 % and ≥ 4 × | 80 % / 78 % (×5.4 / ×6.3) | 77 % / 77 % (×5.3 / ×6.5) | 78.8 % / 77.8 % (×5.2 / ×5.6) | 76.0 % / 77.4 % (×5.2 / ×5.8) | 78.2 % / 75.6 % (×4.9 / ×5.2) | 76.4 % / 74.7 % (×5.0 / ×5.5) |
+| repeats share their shot | 56 % / 53 % | 69 % / 67 % | 55.1 % / 52.8 % | 67.3 % / 66.7 % | 56.2 % / 53.5 % | 67.8 % / 67.1 % |
+| … where the echo can act | 62 % / 65 % | 79 % / 85 % | 60.6 % / 64.1 % | 77.7 % / 84.3 % | 60.8 % / 64.6 % | 77.1 % / 84.6 % |
+| … where the lenses agree (≥ 80 %) | 69 % / 66 % | 92 % / 88 % | 68.3 % / 65.1 % | 90.4 % / 86.4 % | 69.1 % / 65.6 % | 90.6 % / 86.6 % |
+| every repeated cut (not only the metric's) | – | – | 53.1 % / 51.1 % | 60.8 % / 61.3 % | 53.0 % / 51.5 % | 60.5 % / 61.6 % |
+| unrelated cuts | 30 % / 22 % | 30 % / 22 % | 30.6 % / 22.7 % | 30.7 % / 22.6 % | 30.1 % / 22.0 % | 30.0 % / 22.0 % |
+| same curve where the shot is shared | 39 % / 39 % | 87 % / 86 % | 39.0 % / 39.8 % | 85.5 % / 87.6 % | 38.6 % / 38.6 % | 83.3 % / 85.6 % |
+| variety: neighbours on one moving shot; longest run | 3.5 % / 5.9 %; 4 / 5 | 2.7 % / 3.9 %; 3 / 3 | 3.5 % / 5.9 %; 4 / 5 | 2.6 % / 4.0 %; 3 / 4 | 3.7 % / 5.7 %; 5 / 7 | 2.8 % / 3.9 %; 4 / 5 |
+
+- The "after" columns are round 5's code. They equal round 3's everywhere but in the curve row, where the short-pull
+  rule of round 4 (§4.7 Parameters) lowers the share by 2–4 points (round 3: 89 % / 90 %, 87.7 % / 90.5 %, 86.2 % /
+  89.6 %); round 5's form of that rule changes one curve of corpus(12) and 8 of seeds 40–219 (synthetic 85.7 → 85.6 %
+  there; everything else as round 4). The round-4 test counts the impact cuts over corpus(24): 75.5 % / 81.3 %. Round
+  2's (1dcb103) were within 0.5 points of round 3's everywhere but corpus(6) (repeats 70 % / 67 %, where the echo can
+  act 80 % / 85 %, impact 90 % / 88 %) and the synthetic registry's impact share on corpus(12) (86.7 %): the natural
+  shot a repeat leaves for its neighbours changed, and with it a few picks near repeats.
+
+- The seeds 40–219 are 2,160 documents per registry, none of them in the test (round 2 widened the round-1 sample,
+  seeds 40–87; corpus(12) gives the same figures in round 1 and round 2).
+  The first build's independent samples (corpus seeds 20–39, corpus(20), the registry's moods pinned) gave repeats
+  67–68 % / 67–68 %, where the echo can act 77 % / 84–85 %, where the lenses agree 89–91 % / 86–87 %, framing lens →
+  `none` 77 % (×4.6–5.1) / 75–76 % (×5.6–5.7), impact 68–77 % / 79–82 %, against 55–56 % / 54 %, 59–61 % / 64–65 %,
+  67–70 % / 65–66 % before.
+- Where the lenses agree: the first copy's layout has camerawork and both copies' lenses frame, or neither does (1,641
+  / 2,501 pairs on corpus(12), 46 % / 56 % of the metric).
+- Why the metric's share stays under 80 % (measured on round 2's code). Over seeds 40–219, of the metric's repeated
+  cuts that differ from their first copy (17,390 / 21,967): exactly one lens frames in 56 % / 51 % (45–50 % of such
+  pairs share by chance), the first copy is on a layout without camerawork in 31 % / 27 % (about half share by
+  chance), and in 9 % / 18 % the first copy is on a `none` the weights chose over a plain lens, mostly at a low camera
+  amount, which rule 5 does not pass on (a first copy's `none` passes on only when pinned or chosen over a framing
+  lens onto one). Rule 4 (not the shot the cut before ends on) is 3 % / 4 %, the impact rule and the rest under 1 %.
+  The first two are the v2 layout and lens rules at work; the third is rule 5 keeping the framing-lens ×4. **Proposal,
+  for the owner to confirm** (DESIGN_2_1 §7.3): read "repeated lines share shots (≥ 80 %)" over the pairs where the
+  rules allow the same camerawork, and keep a floor on the metric's share.
+- Per mood, where the lenses agree (round 2's code; 12 seeds × 4 projects × 3 aspects, the mood pinned): catalog
+  85.8 % (printColumn)
+  to 95.8 % (silverReel), quietHush 86.2 %, dreamHaze 88.5 %; synthetic 79.2 % (quietHush), 80.9 % (synMoodCalm), 84.3–
+  93.4 % for the others. The calm moods miss the 80 % on the synthetic registry because of rule 5: of the quietHush
+  misses, 501 of 557 are a first copy's `none` on a plain lens at a camera amount under 0.35. Their framing-lens ratio
+  is under ×4 on its own already (catalog printColumn ×3.0, quietHush ×3.3, dreamHaze ×3.9; synthetic quietHush ×3.6,
+  synMoodCalm ×3.7), so the ×4 is a target of the corpus mix, not of every mood. Measured, not built: letting rule 5
+  pass on such a `none` (neither lens frames, camera amount < 0.35) lifts those moods to 98 % where the lenses agree
+  and 75–80 % over the metric, but takes their framing-lens ratio to ×2.5–2.7 and that of corpus(12) from ×5.1 / ×5.7
+  to ×4.6 / ×4.7; the other moods do not change. That trade is the owner's to make.
+
+**Test-sized samples** (independent: every 12-seed window of corpus seeds 40–219, 500–739, 800–1039, 1100–1339 (the
+fifth review's) and 1400–1639 (round 5's), 169 + 4 × 229 of them, overlapping, and the 15 + 4 × 20 disjoint 12-seed
+blocks; catalog / synthetic; the lowest, round 4's code on the first three ranges and round 5's on the last two, which
+has the same shots; 382dce0 the highest in the four echo rows and the lowest in the others, over the same windows):
+
+| figure (floor) | lowest window, 40–219 | 500–739 | 800–1039 | 1100–1339 | 1400–1639 | lowest block | 382dce0, window |
+|---|---|---|---|---|---|---|---|
+| repeats share (≥ 62 %) | 65.5 % / 64.5 % | 65.8 % / 63.7 % | 65.1 % / 65.2 % | 65.8 % / 64.9 % | 66.2 % / 65.0 % | 65.5 % / 63.9 % | 59.0 % / 55.9 % (highest) |
+| … ratio to unrelated cuts (≥ 1.8; 2 until round 3) | 2.06 / 2.76 | 1.99 / 2.70 | 2.06 / 2.78 | 2.11 / 2.71 | 2.05 / 2.82 | 1.99 / 2.70 | 2.04 / 2.73 (highest); 1.65 / 2.12 lowest |
+| where the echo can act (≥ 72 %) | 73.0 % / 82.8 % | 73.9 % / 82.6 % | 73.2 % / 81.6 % | 73.4 % / 82.5 % | 74.4 % / 81.9 % | 74.7 % / 82.0 % | 66.1 % / 68.6 % (highest) |
+| where the lenses agree (≥ 80 %) | 87.9 % / 84.0 % | 87.8 % / 82.6 % | 87.4 % / 83.2 % | 88.6 % / 82.7 % | 87.8 % / 83.5 % | 87.4 % / 83.0 % | 74.0 % / 69.2 % (highest) |
+| impact → `snapZoom` over 12 seeds (no floor at this size) | 61.9 % / 69.2 % | 62.7 % / 70.0 % | 57.4 % / 68.2 % | 61.3 % / 67.4 % | 59.8 % / 72.7 % | 58.6 % / 69.5 % | 57.4 % / 66.9 % |
+| impact → `snapZoom` over 24-seed windows (≥ 60 %; the test counts corpus(24)) | 67.2 % / 76.8 % | 65.9 % / 73.0 % | 63.7 % / 74.2 % | 67.3 % / 71.0 % | 63.4 % / 77.2 % | 65.3 % / 73.9 % | 63.7 % / 72.4 % |
+| framing lens → `none` (≥ 70 %) | 73.5 % / 71.0 % | 72.4 % / 71.9 % | 73.3 % / 71.9 % | 74.4 % / 71.1 % | 73.9 % / 70.1 % | 74.0 % / 71.6 % | 75.2 % / 71.8 % |
+| … × other lenses (≥ 4) | 4.10 / 4.81 | 4.27 / 4.80 | 4.28 / 4.90 | 4.42 / 4.32 | 4.01 / 4.82 | 4.01 / 4.63 | 3.89 / 4.16 |
+
+Round 2 wrote here that every floor holds on every window, and round 3 that every floor but the ratio's does. Neither
+was so. The ratio floor (2 until round 3) failed on seeds 596–607 (1.99) and never told the builds apart (382dce0
+reaches 2.01); since round 3 it is 1.8, a sanity floor below every window, and the repeats floor tells the builds apart
+(7 points between them). The impact floor failed on the fourth review's seeds 800–1039: four 12-seed windows of seeds
+870–885 give 57.4–58.6 % (and the block 872–883, 58.6 %), with exactly the same values on 382dce0. A 12-seed window
+holds about 95 of the catalog's impact cuts, so its share is noise of about ±5 points around 74 %, and round 3's "1.9
+points of room" was the luck of two samples. Since round 4 the test counts the impact cuts over corpus(24) (200 / 257
+cuts: 75.5 % / 81.3 %), and over the 24-seed windows of the five ranges the lowest is 63.4 % / 71.0 % (floor 60 %).
+Every other floor holds on all 1,085 windows of 12 seeds, some with little room. The ×4 has little on both registries,
+not only the catalog as round 4 wrote: ×4.01 on the catalog (seeds 1520–1531, window and block; 382dce0 gives ×3.89
+there and falls under the floor on 4 windows of that range) and ×4.32 on the synthetic registry (seeds 1212–1223;
+382dce0 ×4.16 on the next window). The synthetic framing share has 0.1 point (70.1 % on seeds 1594–1605; 382dce0
+71.9 %) and the catalog's echo floor 1.0 point. The echo floors separate the two builds on every window.
+Inheriting a preset onto a framing lens (rule 3) costs the framing share 1–2 points. The reviewer's variant that
+inherits no preset onto a framing lens gets them back (round 2, seeds 40–75, 12-seed blocks: 78.9 % / 74.2 % lowest)
+but costs the echo about as much (where the lenses agree 83.2 % / 85.8 %, repeats 66.3 % / 65.3 %), so rule 3 stays.
+At corpus(6) the floors did not hold on independent blocks (synthetic framing 69.4 %, catalog ×3.85, on 382dce0 too),
+which is why the test runs on corpus(12).
+
+**The sample lyrics with a second chorus** (the app's sample lyrics with a second サビ before the 大サビ, L1, and with
+the chorus's first line sung twice at the start of the 大サビ, L2; catalog, 12 seeds × 8 moods × 3 aspects = 288
+plans per row; 382dce0 → round 3's code; 1dcb103 within 1.1 points of it everywhere; rounds 4 and 5 change no shot of
+these documents, which have no salts):
+
+| song | lyrics | repeats share | where the echo can act | where the lenses agree | every repeated cut |
+|---|---|---|---|---|---|
+| the demo song (60 s) | L1 | 48.5 → 60.7 % | 61.8 → 79.9 % | 60.0 → 81.1 % | 51.2 → 58.6 % |
+| | L2 | 52.6 → 66.4 % | 61.1 → 80.7 % | 68.0 → 92.6 % | 54.2 → 60.5 % |
+| a chorus-shaped song (75 s) | L1 | 53.6 → 67.1 % | 69.3 → 85.7 % | 66.7 → 92.2 % | 49.9 → 57.1 % |
+| | L2 | 53.4 → 66.7 % | 68.3 → 84.7 % | 66.7 → 91.6 % | 50.0 → 57.0 % |
+| no song | L1 | 55.1 → 68.3 % | 69.4 → 84.9 % | 67.3 → 93.3 % | 53.2 → 60.5 % |
+| | L2 | 55.0 → 68.7 % | 69.6 → 85.9 % | 68.0 → 93.9 % | 53.1 → 60.5 % |
+| the demo song looped (75 s) | L1 | 52.2 → 64.4 % | 58.8 → 73.2 % | 65.8 → 88.4 % | 50.6 → 58.3 % |
+| | L2 | 52.9 → 64.9 % | 59.4 → 73.6 % | 66.3 → 88.5 % | 51.2 → 58.7 % |
+
+Framing lens → `none` is 81–84 % on every row, before and after. The figures move with the song's energy and beats:
+with the demo song the repeats share 61 % (under the corpus floor of 62 %) and the lenses agree in 81 %, 1 point over
+the target. The shared moving shots share their curve in 52 % / 60 % with the demo song, 83 % / 83 % with the
+chorus-shaped one, 82 % / 82 % without a song and 41 % / 41 % with the loop (L1 / L2; round 4: 51 / 60, 83 / 83,
+82 / 82 and 40 / 40 %; round 3: 52 / 61, 85 / 85, 83 / 83 and 40 / 41 %, before the short-pull rule).
+
+**Stability** (planner_stability's own insertion and reroll procedures, the two registries, outside the tested sample;
+share of cases over the bound, worst in brackets). Rounds 3 and 4 measured corpus seeds 3–29, 30–59 and 90–119 (the
+third review's ranges; 972 / 1,080 / 1,080 insertions per registry and timing, 3,356 / 3,732 / 3,705 rerolls per
+registry) on 382dce0, 1dcb103 (the review's runs), round 3's code and round 4's; three figures per cell are the three
+ranges. Round 4 changes no insertion figure (its changes reach only documents with salts, and the curve and the carry,
+which these probes do not count).
+
+| probe | 382dce0 | 1dcb103 | round 3 | round 4 |
+|---|---|---|---|---|
+| 3-seed windows over the `own` bound, relays counted (of 100 / 112 / 112) | 1 / 0 / 2 (worst 8 / 6 / 9) | 12 / 0 / 9 (10 / 6 / 9) | 7 / 3 / 0 (9 / 7 / 6) | the same |
+| … relays apart, as the test counts since round 3 | 1 / 0 / 2 (8 / 6 / 9) | 6 / 0 / 9 (8 / 6 / 8) | 1 / 0 / 0 (8 / 6 / 6) | the same |
+| … pooled, relays counted / apart (of 324) | 3 / 3 | 21 / 15 | 10 / 1 | the same |
+| 3-seed windows over the `all` bound (382dce0: every changed cut; since: the inheritors apart) | 22 / 27 / 26 | 20 / 3 / 15 | 8 / 3 / 6 | the same |
+| `own` over 4 on seeds 3–29, relays apart: synthetic pinned / automatic, catalog pinned / automatic | 0.4 % (5) / 0.1 % (5), 0.9 % (6) / 0.3 % (8) | 0.2 % (5) / 0.2 % (5), 1.0 % (8) / 0.4 % (8) | 0.1 % (5) / 0.1 % (5), 0.7 % (6) / 0.3 % (8) | the same |
+| … relays counted | 0.4 % (5) / 0.1 % (5), 1.0 % (6) / 0.3 % (8) | 0.4 % (6) / 0.3 % (6), 1.3 % (8) / 0.6 % (10) | 0.1 % (5) / 0.2 % (6), 1.1 % (7) / 0.4 % (9) | the same |
+| followers on seeds 3–29 (same order) | 166 / 33, 123 / 88 | 355 / 168, 212 / 176 | 351 / 165, 208 / 174 | the same |
+| relays on seeds 3–29 (same order) | 11 / 6, 11 / 10 | 18 / 11, 24 / 24 | 14 / 13, 23 / 22 | the same |
+| rerolls over 3 other cuts, catalog | 19 / 17 / 17: 0.6 / 0.5 / 0.5 % (8 / 5 / 7) | 0.3 / 0.5 / 0.4 % (8 / 7 / 14) | 8 / 14 / 15: 0.2 / 0.4 / 0.4 % (8 / 6 / 13) | 1 / 0 / 1: 0.0 / 0.0 / 0.0 % (4 / 3 / 4) |
+| … without the followers | 0.2 / 0.1 / 0.1 % (5 / 4 / 5) | 0.1 / 0.1 / 0.1 % (5 / 4 / 5) | 0.1 / 0.0 / 0.0 % (5 / 4 / 4) | 0.0 / 0.0 / 0.0 % (4 / 3 / 4) |
+| followers of the catalog's rerolls | 79 / 75 / 95 | – | 52 / 69 / 75 | 4 / 2 / 5 |
+| rerolls over 3 other cuts, synthetic | 0.0 / 0.1 / 0.2 % (4 / 5 / 4) | 0.1 / 0.1 / 0.2 % (4 / 5 / 4) | 0.0 / 0.1 / 0.2 % (4 / 5 / 4) | the same |
+| 2-seed windows over the reroll bound (of 26 / 29 / 29) | 7 / 0 / 8 | 3 / 2 / 3 | 2 / 2 / 2 | 0 / 0 / 0 |
+| repeats more than 4 cuts from the rerolled cut that moved: catalog; synthetic | 132 / 107 / 149; 8 / 11 / 6 | 82 / 91 / 100; 9 / 11 / 8 | 74 / 81 / 101; 9 / 12 / 8 | 7 / 4 / 10; 9 / 12 / 8 |
+| other cuts changed by all the catalog's rerolls | 685 / 709 / 794 | 599 / 668 / 712 | 593 / 650 / 712 | 507 / 548 / 604 |
+
+- The followers are counted apart and, since round 3, so is the cut right after a changed follower (a relay; the
+  argument is in round 3's list above); no bound value changed. The followers that show their first copy's new shot
+  count in neither `all` nor `own` (a line sung five times with two cuts per line moves 8 cuts with its first copy:
+  that is §7.3 at work); the other followers count in `all`.
+- The cost, plainly: counted with the relays, `own` goes over its bound in 10 of the 324 windows, 382dce0 in 3.
+  1dcb103 went over in 21, since its near sets relayed too; round 3 removed that path (the natural shot) and counts the
+  cut right after a follower apart. The tested sample passes either way: insertions synthetic 0 of 108 over (worst 4
+  / 4), catalog 1 of 108 with starts pinned (worst 5) and 0 with automatic timing; rerolls 0 of 248 / 249 (worst 3 /
+  2). Rounds 1 and 2 read the cost as depending on the sample ("neither range is worse by much"): their seeds 30–89
+  showed little, 3–29 and 90–119 do not.
+- Rerolls stay local without counting anything apart: what the cuts after a cut read of its shot is its shot without
+  salts (round 2 added the natural shot to the heir and the shadow, round 3 the twins over a rerolled line, round 4
+  the twins of the unsalted cuts whose parts the reroll reached), so since round 4 every heir, shadow and natural shot
+  is that of the plan without salts. Until round 3 a repeat still followed its first copy where the reroll changed
+  what that copy shows through its parts (the next cut's layout or lens weighs against the rerolled cut's new picks),
+  and those followers made the tail (round 3's worst, long@16:9#105, changed 13 other cuts, 10 of them followers).
+  Now only a changed span changes a heir: 4 / 2 / 5 followers over the three ranges, and the worst reroll changes 4
+  other cuts. A reroll of a first copy, of its line or of the cut before it moves its own far repeats only where a span
+  changed (seeds 170–171: 2, 2 and 2 of 2,660 pairs, all span; round 3: 2, 2 and 153; seeds 600–601: 0, 0 and 0;
+  round 3: 0, 0 and 122).
+- The 2-seed reroll windows over the bound, 7 / 0 / 8 on 382dce0, 2 / 2 / 2 in round 3 and none since round 4, depend
+  on the sample too (round 2 saw 8 on all three trees over seeds 30–89).
+
+Round 2's tables (corpus seeds 3–29 and 30–89; replaced by the one above, kept for the record; its `own` counted the
+relays), seeds 3–29:
+
+| probe | 382dce0 | first build and round 1 | round 2 |
+|---|---|---|---|
+| synthetic, starts pinned: `all` (since the first build: without the inheritors) / `own` | 3.5 % (7) / 0.4 % (5) | 1.6 % (8) / 0.4 % (6) | the same |
+| synthetic, automatic timing | 0.4 % (6) / 0.1 % (5) | 0.4 % (9) / 0.3 % (6) | the same |
+| catalog, starts pinned | 2.7 % (15) / 1.0 % (6) | 1.9 % (13) / 1.3 % (8) | the same |
+| catalog, automatic timing | 2.0 % (12) / 0.3 % (8) | 1.3 % (13) / 0.6 % (10) | the same |
+| every changed cut, the inheritors included (pinned / automatic; synthetic, catalog) | 3.5 / 0.4 %, 2.7 / 2.0 % | 5.8 / 2.9 %, 4.1 / 2.9 % (worst 19–30) | the same |
+| followers (synthetic pinned / automatic, catalog pinned / automatic) | 166 / 33, 123 / 88 | 355 / 168, 212 / 176 | the same |
+| rerolls over 3 other cuts: synthetic, catalog | 0.0 % (4), 0.6 % (8) | 0.1 % (4), 0.3 % (8) | the same |
+| repeats more than 4 cuts from the rerolled cut that moved: catalog, synthetic | 132, 8 | 84, 9 | 82, 9 |
+| 3-seed windows of seeds 0–29 over the `all` bound (of 112) | 22 | 20 | 20 |
+| … over the `own` bound (of 112) | 1 | 12 (catalog pinned 6, catalog automatic 4, synthetic automatic 2) | 12 |
+| 2-seed windows over the reroll bound | 7 (of 58, seeds 0–29) | 3 (of 58) | 3 (of 52, seeds 3–29) |
+
+Round 2, corpus seeds 30–89 (2,160 insertions per registry and timing, about 7,450 rerolls per registry):
+
+| probe | 382dce0 | first build and round 1 | round 2 |
+|---|---|---|---|
+| synthetic, starts pinned: `all` / `own` | 4.3 % (11) / 0.6 % (8) | 1.7 % (8) / 0.6 % (6) | the same |
+| synthetic, automatic timing | 0.4 % (7) / 0.2 % (6) | 0.6 % (8) / 0.3 % (6) | the same |
+| catalog, starts pinned | 2.0 % (13) / 0.5 % (7) | 1.0 % (8) / 0.5 % (6) | the same |
+| catalog, automatic timing | 1.5 % (10) / 0.2 % (6) | 0.9 % (8) / 0.4 % (6) | the same |
+| every changed cut (pinned / automatic; synthetic, catalog) | 4.3 / 0.4 %, 2.0 / 1.5 % | 6.1 / 2.9 %, 2.9 / 2.6 % (worst 12–22) | 6.1 / 2.9 %, 3.0 / 2.6 % |
+| followers (synthetic pinned / automatic, catalog pinned / automatic) | 439 / 74, 243 / 174 | 815 / 364, 393 / 338 | the same |
+| rerolls over 3 other cuts: synthetic, catalog | 0.1 % (5), 0.5 % (7) | 0.2 % (5), 0.6 % (10) | 0.1 % (5), 0.5 % (7) |
+| cuts changed by the catalog's 7,446 rerolls, the rerolled ones aside | 1,490 | 1,432 | 1,355 |
+| repeats more than 4 cuts from the rerolled cut that moved: catalog, synthetic | 247, 17 | 202, 18 | 182, 17 |
+| 3-seed windows over the `all` bound (of 232) | 75 | 12 | 12 |
+| … over the `own` bound (of 232) | 6 | 1 | 1 |
+| 2-seed windows over the reroll bound (of 118) | 8 | 8 | 8 |
+
+**What a viewer sees.** The second chorus still rarely looks like the first: the echo is real but small next to the
+layouts and lenses, which each copy chooses on its own. The third review's chorus sheets (48 documents, 576 repeat
+cells, the sample lyrics with a chorus-shaped song, 382dce0 against 1dcb103) show it: the same shot in 49.7 → 61.8 %
+of the cells and the same moving shot in 27.3 → 35.8 %, but the same layout in 13.9 % and the same lens in 18.4 % on
+both, and the cells with the same layout, lens and shot, which a viewer would call the same shot again, 9 → 13 of 576
+(1.6 → 2.3 %). Over whole videos 1.28 of about 62 cuts change per video, and a later chorus newly shares a moving shot
+with the first in 0.66 cuts per video. Round 3 changes the shot or curve of 172 of the 35,712 cuts of the 576 plans
+with that song (114 of them repeats), so these figures stand. Less than the label share suggests, and the owner should
+know it. What a repeated chorus looks like is decided mostly by its layout, lens and background, v2 choices made per
+copy (on the sample lyrics with a chorus-shaped song, 288 plans: the same layout in 14 % of the repeat pairs, the same
+lens in 21 %, both in 2.7 %). Of the 1,979 shared shots there, 911 are `none` and 448 `settle`; a distinctive move
+(neither) is shared on 17.9 % of the repeated cuts (13.5 % before). The same shot is not always the same visible move
+either: its size and direction follow each copy's layout (for pairs on the same moving shot the camera path matches in
+53 %, `pushWord` is flat on one layout and a large corner zoom on another), and with the lens included 11.8 % of the
+pairs move the same way (10.4 % before). Even on the same layout the carry used to split them: where only one copy
+carried (§4.5.7), the same preset opened at another closeness, and about a quarter of the same-layout inherited moves
+opened differently (the fourth review). Since round 4 a repeat on its first copy's preset carries only when that copy
+did; over the same 576 plans, of 507 repeat pairs on one moving shot and one layout, the shot's own path now matches in
+168 (150 before) and is nearly still in both in 171 (156), 67 % together (60 %), measured with Node's text measurer.
+Round 4 changes no shot of these plans, 47 curves (the short-pull rule) and 339 of their 3,786 carries, and round 5 no
+shot and no curve of them (their short pulls were all on the fast list), so the chorus-sheet figures above stand.
+Between 382dce0 and the first build, the chorus contact sheets differ in about 2.6 of their 12 repeat cells, and the two
+サビ of the reels look unrelated in both. (The second review measured these on the first build; rounds 1 and 2 left the
+plans of these documents as they were.) So this step alone gives a subtle echo: a later chorus sometimes replays the
+move of the first, with its curve where the energy allows, and a line sung twice in a row no longer repeats its move
+back to back. The lever for 「サビの繰り返し」 is the v2 layout and lens (open, below).
+
+**Goldens.** `node tests/update_golden.js --check` reported `frame_hashes_v2.json: matches` and
+`project_media.json: matches` before and after both builds; both files are byte-identical to 382dce0. The first build
+regenerated plan_hashes (102 of 240 plans against 382dce0) and frame_hashes (7 of 160 frames: lrc 29, 30; long 12, 20,
+24, 25, 35). The round-1 fixes change one plan once more (lrc@16:9#6, one cut after a line sung twice in a row) and no
+frame. The round-2 fixes change three plans with salts (vertical@16:9#18, vertical@9:16#7, vertical@9:16#12; 105 of
+240 against 382dce0) and no frame. plan_hashes was regenerated on purpose each time; frame_hashes_v2, frame_hashes and
+project_media are unchanged by round 2. Round 3 changes 68 plans against 1dcb103 (105 of 240 against 382dce0: the
+natural shot of repeats moves picks near them, the twins change salted plans) and two frames of frame_hashes (long 20
+and 24; against 382dce0 now lrc 29, 30 and long 12, 24, 25, 35); plan_hashes and frame_hashes were regenerated on
+purpose, and frame_hashes_v2 and project_media are still byte-identical to 382dce0. Round 4 changes 73 plans against
+669aa12 (110 of 240 against 382dce0): the carry rule and the short-pull curves change plans of documents with repeats
+(72), the chain of twins one salted plan (vertical@1:1#2, the only change with the chain alone). It changes one frame of
+frame_hashes (lrc 30, back to its 382dce0 value; against 382dce0 now lrc 29 and long 12, 24, 25, 35). plan_hashes and
+frame_hashes were regenerated on purpose; `update_golden.js --check` reports frame_hashes_v2 and project_media as
+matching, and `git diff 382dce0` is empty for both. Round 5 changes no plan of the golden corpus (no short pull the echo
+gives falls on a calm curve list there): `update_golden.js --check` reports all four files as matching with nothing
+regenerated, and `git diff 382dce0` is still empty for frame_hashes_v2 and project_media.
+
+**Checks.** After the review fixes: `build.py --check` (213 modules); the whole Node suite
+(`--test-concurrency=1`): 1,654 of 1,655 pass, the one failure being the load-bound re-plan speed test, which 382dce0
+and the first build fail the same way on this machine in the same session (best 13.0–13.7 ms, against 12.4–12.8 ms on
+382dce0 and 12.9–13.2 ms for the first build, bound 10; typing reuse 96 % on all three); `update_golden.js --check`
+with all four files matching; pages rebuilt (`build.py`, `build.py --lab`); browser `determinism.py`,
+`contact_sheet.py` (self-check, 13 kinds) and `ui_flows.py` (44 flows) pass. `perf.py`, once: basic, vertical, long,
+long+camera and media over twice the budget (software raster), and the same rows over it for 382dce0's pages in the
+same session (for example long p50 22.7 ms here, 22.8 ms there). The first build's checks were the same, with 1,653
+of 1,654 Node tests (a first `ui_flows.py` run then missed its random おまかせ photo check, which reads no camera slot;
+the rerun passed). Round 2: `build.py --check` (213 modules); the whole Node suite, 1,657 of 1,658 (the same speed
+test fails, and 4dedf02 fails it the same way in the same session, run alternately: best 13.3–14.3 ms there, 13.9–14.5
+ms here, typing reuse 96 % on both); `update_golden.js --check` with all four files matching after the regeneration;
+pages rebuilt; `determinism.py`, `contact_sheet.py` (self-check, 13 kinds) and `ui_flows.py` (44 flows) pass;
+`perf.py`, once, over twice the budget on the same five rows as 382dce0's pages run right after it (basic p50 22.3 ms
+on both, long 26.1 / 24.5 ms). Round 3: `build.py --check` (213 modules); the whole Node suite, 1,661 of 1,662 (the
+same speed test fails; 382dce0 in the same session, run alternately three times: best 13.7–14.7 ms there, 14.1–15.1 ms
+here, typing 27.9–29.2 / 29.1–30.5 ms, cast reuse 96 % on both); `update_golden.js --check` with all four files
+matching after the regeneration, and `git diff 382dce0` empty for frame_hashes_v2 and project_media; pages rebuilt
+(`build.py`, `build.py --lab`); `determinism.py`, `contact_sheet.py` (self-check, 13 kinds) and `ui_flows.py` (44
+flows) pass. `perf.py` was not run: round 3 changes planning, not drawing. Round 4: `build.py --check` (213 modules);
+the whole Node suite, 1,662 of 1,663 (the same speed test fails, best 11.2 ms with the mutation runs beside it, bound
+10; 382dce0 in the same session, run alternately three times with nothing else running: best 12.4–12.9 ms there,
+12.3–13.0 ms here, typing 26.8–27.8 / 26.4–28.2 ms, cast reuse 96 % on both); `update_golden.js --check` with all four
+files matching after the regeneration, and `git diff 382dce0` empty for frame_hashes_v2 and project_media; pages
+rebuilt (`build.py`, `build.py --lab`); `determinism.py`, `contact_sheet.py` (self-check, 13 kinds) and `ui_flows.py`
+(44 flows) pass. `perf.py` was not run: round 4 changes camera slots and curves (one frame of frame_hashes), not how a
+frame is drawn.
+
+**Open.**
+- 80 % over the metric's repeated cuts needs a decision over each group of copies at once, knowing every copy's layout
+  and lens: that means a v2 sweep before the camera sweep in the planner. The group oracle above reaches 84–87 % with
+  margin; simple majority rules fail the framing-lens target. Not built. The §7.3 reading over the pairs where the
+  lenses agree is a proposal until the owner confirms it.
+- For the owner: an opt-in setting such as 「くり返しの行をそろえる」 (off by default, so documents without it keep their
+  v2 frames), with which a repeat takes its first copy's layout and lens and then its shot, would make a repeated chorus
+  look repeated. It changes v2 part choices for the documents that turn it on, so it needs the owner's decision and its
+  own design. Not built.
+- For the owner: should rerolling a first copy carry to its repeats? Today it does not (a reroll stays local, §3.7):
+  after rerolls of the first chorus's cuts that changed their shots, all 1,136 repeats kept theirs, and the 650 of
+  them that had matched their first copy no longer do. Their why now says so (`echo.kept`).
+- The v2 parts' own `echo` reason (planner/explain factorWhy) names the first copy's natural pick, which a reroll or
+  recency can make differ from what that copy shows. This is older than the camera work and unchanged here.
+- Insertion locality outside the tested sample: counted with the relays (the cut right after a changed follower),
+  `own` exceeds its bound in 10 of 324 independent windows against 3 before the inheritance (Stability above); the test
+  counts the relays apart since round 3, and no bound value changed. Keeping a repeat's neighbour still would mean it
+  ignores what the repeat now plays, which gives up the no-back-to-back rule; not pursued.
+- The 80 % where the lenses agree holds on the corpus mix, not for every mood: the synthetic registry's calm moods reach
+  79–81 %, for rule 5. Letting rule 5 pass on a low camera amount's `none` would lift them to 98 % but lower the
+  framing-lens ratio (measured above); for the owner to decide, together with whether the ×4 is meant per mood.
+- Some floors have little room on independent samples, over the 1,085 12-seed windows of seeds 40–219, 500–739,
+  800–1039, 1100–1339 and 1400–1639: the ×4 on both registries (catalog ×4.01, synthetic ×4.32; 382dce0 falls under it
+  on the catalog), the synthetic framing share 0.1 point and the catalog's echo floor 1.0 point. The impact share is no
+  floor at 12 seeds: it falls to 57.4 % on seeds 870–885 (382dce0 the same), so since round 4 the test counts it over
+  corpus(24), whose independent windows stay at 63.4 % or more. The ratio floor, a fit at 2, is 1.8 since round 3, a
+  sanity floor. A future change to the camera weights should be measured against those windows, not only against the
+  test.
+- The variety test's "over 0.6 in ≤ 5 % of plans" is a fit of corpus(6): 3–8 % of independent 6-seed windows go over it
+  (382dce0 6–13 %). Moving the variety test to corpus(12) and deriving that bound again as a floor is for the owner; the
+  clause is kept as it is meanwhile (round-5 list).
+- Fast zoom-outs and fast pans: `pullReveal` on a short cut (1.0–1.3 s) over a small-text layout zooms out fast,
+  whatever chose it (212 of the 308 such moves over the 576 sample-lyrics plans with the chorus-shaped song before the
+  inheritance). Since round 5 a `pullReveal` the echo gives a cut under 1.8 s takes `hushRushHush` (round 4: no
+  `softEnds` or `holdThenDash`), and every song is under 382dce0's count in the browser (303 / 338 / 330 / 269 against
+  309 / 360 / 333 / 286, chorus-shaped, demo, none, loop; fast pans 1,040 against 1,051), but not the calmest mood:
+  quietHush has 133 fast zoom-outs over the four songs against 121 (+10 %; round 4 136) and 105 fast pans against 91
+  (+15 %; round 4 107), from a relay onto a 1.0 s cut, from pulls the echo gives cuts of about 1 s that no curve slows
+  enough, and from round 4's carry rule (round-5 list). The same rule for every `pullReveal` under 1.8 s
+  (measured in round 4 with round 4's curves, not built) brought the first three songs to 552 in all (1,007 on 382dce0)
+  and quietHush to 53; it changes the camera slots of every document, so it is the owner's to decide. A rule that gives
+  no `pullReveal` to a cut under about 1.1 s at all would also take the remaining pulls, and the echo's floor with them
+  where the echo gives it (the fourth review: a 1.5 s gate on the echo alone put the catalog's "where the echo can act"
+  at 70.4 % on corpus(12), under its 72 % floor).
+- Cold plans cost 0–4 % more than on 382dce0 without salts, and with salts 0.3–1.6 ms more per rerolled cut or line:
+  +6–12 % with 6 or 13 rerolled cuts of a 246-cut document; on a small one (19–29 cuts) +7–13 % with one rerolled cut
+  or line, +15–19 % with three rerolled cuts and +24–34 % (2.5–3.0 ms) with six; the vertical sample with its locks
+  +23 % with one rerolled line (rounds 4 and 5). Round 4's exact heirs cost half to two thirds of that (round-4 list).
+  Cached re-plans cost the same. A cheaper exact chain would need to know, without casting, whether a salted neighbour's
+  picks change a cut's own; no such shortcut was found.
+
+## Lead: integrating the echo of repeated lines
+
+The echo work (the section above, review fixes rounds 1–5) applied to main 382dce0 without conflicts. The regenerated
+goldens and the rebuilt pages are byte for byte the ones of the work's own branch; frame_hashes_v2.json and
+project_media.json are unchanged from 382dce0, so no v2 part choice moved.
+
+**Decisions:**
+
+- The inherit rule (a repeat takes its first copy's salt-free shot and curve under rules 1–6) is accepted. The camera
+  echo is honest but small to a viewer: layouts and lenses (v2 parts) differ per copy, so the second chorus still
+  rarely looks like the first. The section above says so.
+- Reading §7.3's 80 % over the pairs whose layouts and lenses allow the same camerawork is a proposal the owner has
+  not confirmed. Over every repeated cut the share goes from about 53 % to about 61 %; the text keeps both figures.
+- Asked of the owner and not built: an opt-in 「くり返しの行をそろえる」 that lets a repeat inherit its first copy's
+  layout, lens and shot (what a viewer would see as a repeated chorus), and a calm curve for every short pull-back
+  (the calmest mood still has about 10 % more fast zoom-outs and 15 % more fast pans than 382dce0).
+
+Checks: `build.py --check` (213 modules); goldens as above; the whole Node suite; every browser test and
+`build_test.py` (see the PR run).
