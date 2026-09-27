@@ -22,6 +22,12 @@ MV.def('ui/extreme', ['ui/dom', 'core/pins', 'core/paths', 'core/shot', 'planner
       return list.every((v) => v === list[0]) ? list[0] : null;
     }
 
+    // linesOn(doc, scopes) → how many lines have their own switch on under these scopes (the whole video's row says so
+    // while its own switch is off: 「3 行で EXTREME がオンです」).
+    function linesOn(doc, scopes) {
+      return new Set(scopes.flatMap((s) => XT.lineSwitches(doc, s))).size;
+    }
+
     // scopeOfPath(path) → the switch scope a pin path belongs to: its line for a cut of a line, else the whole video.
     function scopeOfPath(path, plan) {
       const key = P.scopeKey(path);
@@ -74,16 +80,24 @@ MV.def('ui/extreme', ['ui/dom', 'core/pins', 'core/paths', 'core/shot', 'planner
       });
     }
 
-    // offChoice(app, n) → Promise<'keep' | 'remove' | null>: 「手で選んだ EXTREME の動きが n か所あります。これも元に戻しますか？」
-    // [残す] [元に戻す] (the focus on 元に戻す); null when the dialog is closed (nothing changes then).
-    function offChoice(app, n) {
+    // offChoice(app, { moves, lines }) → Promise<'keep' | 'remove' | null>: what else turning the switch off would leave
+    // on — moves picked by hand or by the AI (「手で選んだ EXTREME の動きが n か所あります。これも元に戻しますか？」), lines
+    // whose own switch is on under the whole video's (「EXTREME がオンの行が n 行あります。これもオフにしますか？」), or both
+    // (one question, with the two counts) — [残す] [元に戻す] with the focus on 元に戻す; null when the dialog is closed
+    // (nothing changes then). A number n stands for { moves: n }.
+    function offChoice(app, what) {
       if (!app.dialogs) return Promise.resolve('remove');
       const t = app.t;
+      const o = typeof what === 'number' ? { moves: what, lines: 0 } : Object.assign({ moves: 0, lines: 0 }, what);
+      const n = o.moves + o.lines;
       return app.dialogs.open((body, done) => {
         const keep = h('button', { class: 'btn', type: 'button', 'data-x': 'keep', on: { click: () => done('keep') } }, t('x.off.keep', { n }));
         const remove = h('button', { class: 'btn primary', type: 'button', 'data-autofocus': '1', 'data-x': 'remove',
           on: { click: () => done('remove') } }, t('x.off.remove', { n }));
-        body.appendChild(h('div', { class: 'x-off' }, h('p', { class: 'dlg-text', text: t('x.off.text', { n }) }),
+        const text = o.lines && o.moves ? t('x.off.both') : o.lines ? t('x.off.lines', { n: o.lines }) : t('x.off.text', { n: o.moves });
+        const counts = o.lines && o.moves ? h('ul', { class: 'x-off-counts' },
+          h('li', { text: t('x.off.countLines', { n: o.lines }) }), h('li', { text: t('x.off.countMoves', { n: o.moves }) })) : null;
+        body.appendChild(h('div', { class: 'x-off' }, h('p', { class: 'dlg-text', text }), counts,
           h('div', { class: 'dlg-actions' }, keep, remove)));
       }, { title: t('x.off.title') }).then((v) => (v === 'keep' || v === 'remove' ? v : null));
     }
@@ -109,8 +123,9 @@ MV.def('ui/extreme', ['ui/dom', 'core/pins', 'core/paths', 'core/shot', 'planner
 
     // setSwitch(app, { scopes, v, meta }) → Promise<boolean>: turns EXTREME on at the strength v (1 = 最大, 0.75, 0.5) or
     // off (v 0) at every scope, as one undo step (meta: its label). Turning it on where it was off asks the notice first;
-    // turning it off where moves were picked by hand or by the AI asks whether to remove them too (元に戻す preselected;
-    // lock pins stay). false when the user cancelled (nothing changed).
+    // turning it off where moves were picked by hand or by the AI, or (for the whole video) where lines have their own
+    // switch on, asks whether to turn those back too (元に戻す preselected: EXTREME is then off everywhere; lock pins
+    // stay). false when the user cancelled (nothing changed).
     async function setSwitch(app, o) {
       const scopes = [...new Set(o.scopes || [])];
       if (!scopes.length) return false;
@@ -122,9 +137,10 @@ MV.def('ui/extreme', ['ui/dom', 'core/pins', 'core/paths', 'core/shot', 'planner
         return true;
       }
       const picked = new Set(scopes.flatMap((s) => XT.handPicked(app.doc, s)));
+      const lines = new Set(scopes.flatMap((s) => XT.lineSwitches(app.doc, s)));
       let remove = false;
-      if (picked.size) {
-        const choice = await offChoice(app, picked.size);
+      if (picked.size || lines.size) {
+        const choice = await offChoice(app, { moves: picked.size, lines: lines.size });
         if (!choice) return false;
         remove = choice === 'remove';
       }
@@ -147,5 +163,5 @@ MV.def('ui/extreme', ['ui/dom', 'core/pins', 'core/paths', 'core/shot', 'planner
       return !!d && d.v !== null && d.v !== undefined && SHOT.isExtreme(d.v);
     }
 
-    return { valueOf, scopesValue, scopeOfPath, areaValue, notice, offChoice, setSwitch, pickShot, isXCut };
+    return { valueOf, scopesValue, linesOn, scopeOfPath, areaValue, notice, offChoice, setSwitch, pickShot, isXCut };
   });

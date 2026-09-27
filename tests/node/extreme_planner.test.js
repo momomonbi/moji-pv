@@ -121,7 +121,9 @@ test('pins win: a pinned shot, zoom or follow is kept; a hand-picked EXTREME sho
   assert.equal(h.slots['cam.shot'].v, 'whipPan~m');
   assert.equal(h.slots['cam.extreme'], undefined);
   assert.equal(hand.grounds[h.ground].x, true);
-  assert.equal(hand.grounds.filter((g) => g.x).length, 1);
+  // its own segment, and any other one on screen while it is (phase F: its a … b)
+  assert.deepEqual(hand.grounds.map((g, i) => (g.x ? i : -1)).filter((i) => i >= 0),
+    hand.grounds.map((g, i) => (i === h.ground || (g.t0 < h.b && g.t1 > h.a) ? i : -1)).filter((i) => i >= 0));
   // with the switch on, a hand-picked EXTREME shot also frames at the neutral zoom (automatic zoom and follow)
   const handOn = run(withPins(doc, Object.assign({}, ON, { 'cut/r5~0:cam.shot': { v: 'whipPan~m', by: 'user', sig: cut.text } })));
   const ho = handOn.cuts.find((c) => c.key === 'r5~0');
@@ -267,10 +269,16 @@ test('rerolls: a cut\'s shot die rerolls its EXTREME pick; it reaches few other 
 
 // --- grounds, rigs, fingerprints, determinism --------------------------------------------------------------------------
 
-test('grounds[i].x marks exactly the segments with an EXTREME cut; EXTREME runs raise their automatic rig', () => {
+// Phase F: a segment that starts at the next cut's a is drawn with an EXTREME cut's camera until the next cut's t0 (the
+// QA found its ground edge behind a dutch swing), so every segment on screen while an EXTREME cut is (its a … b) is
+// marked, not only the cut's own.
+test('grounds[i].x marks exactly the segments on screen while an EXTREME cut is; EXTREME runs raise their automatic rig', () => {
+  let others = 0;
   for (const { name, doc } of corpus.corpus(2)) {
     const off = run(doc), p = run(withPins(doc, ON));
-    const want = new Set(p.cuts.filter(xOf).map((c) => c.ground));
+    const xs = p.cuts.filter(xOf);
+    const want = new Set(xs.map((c) => c.ground));
+    p.grounds.forEach((g, i) => { if (!want.has(i) && xs.some((c) => g.t0 < c.b && g.t1 > c.a)) { want.add(i); others++; } });
     p.grounds.forEach((g, i) => assert.equal(g.x === true, want.has(i), name + ' ground ' + i));
     p.grounds.forEach((g, i) => { if (!want.has(i)) assert.equal('x' in g, false); });
     const A = p.look.amounts.camera;
@@ -288,6 +296,7 @@ test('grounds[i].x marks exactly the segments with an EXTREME cut; EXTREME runs 
       assert.ok(amp >= o.rig.p.amp, 'EXTREME raises the amplitude');
     });
   }
+  assert.ok(others > 0, 'segments marked because an EXTREME cut drives them before the next cut: ' + others);
   // a pinned rig and a run whose first cut has the switch off keep theirs
   const doc = corpus.project('basic').doc;
   const chorus = run(XD.chorusOnly()), base = run(doc);
@@ -415,6 +424,35 @@ test('explain: an EXTREME pick names the rule, the switch and its reasons, with 
   const bare = corpus.project('basic').doc;
   const none = EX.explain(bare, PL.plan(bare, { registry: CAT }), 'work:cam.extreme', { registry: CAT });
   assert.deepEqual([none.value, none.from, none.why], [0, 'auto', []]);
+});
+
+// Phase F: a cut EXTREME leaves as it was (a layout made for a still camera, a cut without words) says so in its why,
+// instead of the normal camera's own reason; the words read as words (the layout's name).
+test('explain: a cut EXTREME leaves on its normal shot says why (a still layout, no words)', () => {
+  const doc = withPins(corpus.project('v21').doc, ON);
+  const p = PL.plan(doc, { registry: CAT });
+  const still = p.cuts.find((c) => typeof c.text === 'string' && c.text.trim() && CAT.get('arrange', c.slots.arrange.v).cam === 'none'
+    && c.slots['cam.shot'].from !== 'pin:line' && !String(c.slots['cam.shot'].from).startsWith('pin'));
+  assert.ok(still, 'a lyric cut on a still layout');
+  const e = EX.explain(doc, p, 'cut/' + still.key + ':cam.shot', { registry: CAT });
+  assert.deepEqual([e.value, e.why], ['none', [{ code: 'cam.extreme', params: { x: 1 } }, { code: 'cam.xStill', params: { key: still.slots.arrange.v } }]]);
+  const gap = p.cuts.find((c) => !(typeof c.text === 'string' && c.text.trim()) && c.slots['cam.shot'] && !String(c.slots['cam.shot'].from).startsWith('pin'));
+  assert.ok(gap, 'a cut without words');
+  const g = EX.explain(doc, p, 'cut/' + gap.key + ':cam.shot', { registry: CAT });
+  assert.ok(!SHOT.isExtreme(g.value));
+  assert.deepEqual(g.why, [{ code: 'cam.extreme', params: { x: 1 } }, { code: 'cam.xNoText', params: {} }]);
+  // as the inspector shows them
+  const T = MV.use('i18n/t'), STRINGS = MV.use('i18n/strings');
+  const UF = MV.use('ui/fields');
+  const ja = T.createT('ja', STRINGS, CAT, { strict: true }), en = T.createT('en', STRINGS, CAT, { strict: true });
+  const said = UF.whyParts(e, 'cut/' + still.key + ':cam.shot', ja, p);
+  assert.equal(said.length, 2);
+  assert.ok(said[1].includes(ja.part('arrange', still.slots.arrange.v)) && said[1].includes('EXTREME'), said[1]);
+  assert.ok(UF.whyParts(g, 'cut/' + gap.key + ':cam.shot', en, p)[1].startsWith('But a cut without words'));
+  // without the switch the normal reason stays
+  const bare = corpus.project('v21').doc;
+  const off = EX.explain(bare, PL.plan(bare, { registry: CAT }), 'cut/' + still.key + ':cam.shot', { registry: CAT });
+  assert.deepEqual(off.why, [{ code: 'cam.arrange', params: { key: still.slots.arrange.v } }]);
 });
 
 test('fields: the switch shows its pin and scope (line or work, never a cut), inherited on lines, a line 0 pinned', () => {

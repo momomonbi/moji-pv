@@ -318,7 +318,10 @@ MV.def('ai/direct', ['core/pins', 'core/paths', 'core/curve', 'core/shot', 'core
     const arriveText = arrive ? arrive.v + '(' + (arrive.p && isNumber(arrive.p.dur) ? String(round2(arrive.p.dur)).replace(/^0\./, '.') + 's, ' : '')
       + 'curve=' + curveShort(arrive.p && arrive.p.ease) + ')' : '-';
     const shot = decision(cut, 'cam.shot');
-    const shotText = shot ? (typeof shot.v === 'string' ? shot.v : 'custom') + (shot.from === 'auto' ? '(auto)' : '') : '-';
+    // an EXTREME move (the overlay's pick, a hand or AI pin) is 'custom' outside the 「EXTREME」 request: its vocabulary
+    // cannot name it, and a normal request stays as it was (phase F)
+    const named = shot && typeof shot.v === 'string' && (ctx.extreme || !SHOT.isExtreme(shot.v));
+    const shotText = shot ? (named ? shot.v : 'custom') + (shot.from === 'auto' ? '(auto)' : '') : '-';
     const orn = [0, 1, 2].map((i) => v('ornament#' + i)).filter((x) => x !== undefined && x !== 'none');
     const g = cut && plan.grounds && Number.isInteger(cut.ground) ? plan.grounds[cut.ground] : null;
     let ground = g && g.ground ? shortValue(g.ground.v) : '-';

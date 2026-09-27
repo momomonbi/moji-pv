@@ -47,7 +47,7 @@ test('shotTrack adds x, gz and hit for an x-track; a normal track keeps its fiel
   const tr = engine.shotTrack(engine.plan.cuts[0].key);
   assert.equal(tr.x, true);
   assert.deepEqual(Object.keys(tr.keys[0]).sort(), ['aim', 'gz', 'hit', 't', 'x', 'y', 'roll', 'zoom'].sort());
-  assert.equal(tr.keys[2].hit, 0.8);
+  assert.equal(tr.keys[2].hit, 1);
   engine.setPlan(FAC.samplePlan(REG, { kind: 'shot', key: 'snapZoom' }, { text: TEXT }));
   const n = engine.shotTrack(engine.plan.cuts[0].key);
   assert.equal(n.x, undefined);

@@ -19,10 +19,12 @@ MV.def('core/shot', ['core/num', 'core/curve'], (N, CV) => {
   });
   // EXTREME (DESIGN_EXTREME §1.1): the limits of an x-shot, next to LIMITS (which stays as it is). Every field of LIMITS
   // is here too (the keyframe editor reads either through limitsOf); `mods` holds the shot-level beat modulators.
+  // (Phase F: the beat zoom up to 0.25 and the ground zoom up to 1.6, so 最大 is plainly stronger than the normal shots;
+  // docs/NOTES.md "カメラ EXTREME".)
   const XLIMITS = deepFreeze(Object.assign(JSON.parse(JSON.stringify(LIMITS)), {
     fill: [0.1, 0.95], ox: [-0.6, 0.6], oy: [-0.6, 0.6], roll: [-360, 360],
-    hit: [0, 1], gz: [1, 1.35], hop: [0, 0.35], whip: [0, 0.4], blur: [0, 1],
-    mods: { zoom: [0, 0.1], roll: [0, 20], shake: [0, 1], every: [1, 2, 4] },
+    hit: [0, 1], gz: [1, 1.6], hop: [0, 0.35], whip: [0, 0.4], blur: [0, 1],
+    mods: { zoom: [0, 0.25], roll: [0, 20], shake: [0, 1], every: [1, 2, 4] },
   }));
   const DEFAULTS = Object.freeze({ dt: 0, fill: 0.6, zoom: 1, px: 0.5, py: 0.5, roll: 0 });
   const ANCHORS = Object.freeze(['a', 'rest', 'sung', 'mid', 'end', 'out', 'b', 'emph']);
@@ -286,39 +288,40 @@ MV.def('core/shot', ['core/num', 'core/curve'], (N, CV) => {
     return deepFreeze(sortedObject(out));
   }
 
-  // The twelve presets (§1.2 table, FROZEN once accepted). ⇆ = MIRRORS (a "~m" suffix flips ox and roll). jumpRead's
-  // second reading key carries hop 0 too, so both reading keys cut from word to word (the table's intent).
+  // The twelve presets (§1.2 table, FROZEN once accepted; the values tuned by the phase F visual QA so each is plainly
+  // stronger than the normal shots at 最大, docs/NOTES.md "カメラ EXTREME"). ⇆ = MIRRORS (a "~m" suffix flips ox and roll).
+  // jumpRead's second reading key carries hop 0 too, so both reading keys cut from word to word (the table's intent).
   const XSHOT_DATA = {
-    crashZoom: { tags: ['hard', 'fast', 'bold'], blur: 1, keys: [k('a', 'block', { fill: 0.52 }),
-      k('accent', 'block', { dt: -0.04, fill: 0.52, curve: 'linear' }), k('accent', 'emph', { dt: 0.05, fill: 0.9, curve: 'dashStop', hit: 0.7 }),
+    crashZoom: { tags: ['hard', 'fast', 'bold'], blur: 1, keys: [k('a', 'block', { fill: 0.46 }),
+      k('accent', 'block', { dt: -0.04, fill: 0.46, curve: 'linear' }), k('accent', 'emph', { dt: 0.05, fill: 0.9, curve: 'dashStop', hit: 1 }),
       k('accentEnd', 'emph', { fill: 0.9, curve: 'linear' }), k('accentEnd', 'block', { dt: 0.12, fill: 0.66, curve: 'dashStop' }),
       k('b', 'block', { fill: 0.7, curve: 'linear' })] },
-    punchHit: { tags: ['hard', 'fast'], blur: 0.6, keys: [k('a', 'block', { fill: 0.6 }),
-      k('sung', 'block', { dt: -0.02, fill: 0.6, curve: 'linear' }), k('sung', 'block', { dt: 0.05, fill: 0.76, curve: 'dashStop', hit: 0.8 }),
+    punchHit: { tags: ['hard', 'fast'], blur: 0.8, keys: [k('a', 'block', { fill: 0.44 }),
+      k('sung', 'block', { dt: -0.02, fill: 0.44, curve: 'linear' }), k('sung', 'block', { dt: 0.06, fill: 0.86, curve: 'dashStop', hit: 1 }),
       k('b', 'block', { fill: 0.72, curve: 'fadeBrake' })] },
-    whipPan: { tags: ['fast', 'bold'], blur: 1, keys: [k('a', 'block', { fill: 0.64, ox: 0.45 }),
+    whipPan: { tags: ['fast', 'bold'], blur: 1, keys: [k('a', 'block', { fill: 0.64, ox: 0.5 }),
       k('a', 'block', { dt: 0.1, fill: 0.64, curve: 'dashStop' }), k('b', 'block', { dt: -0.37, fill: 0.64, curve: 'linear' }),
-      k('b', 'block', { dt: -0.25, fill: 0.64, ox: -0.45, curve: 'slowBloom' })] },
+      k('b', 'block', { dt: -0.25, fill: 0.64, ox: -0.5, curve: 'slowBloom' })] },
     whipRead: { tags: ['fast', 'playful'], blur: 1, keys: [k('a', 'first', { fill: 0.8 }),
-      k('sung', 'reading', { fill: 0.8, hop: 0.12, whip: 0.25 }), k('end', 'block', { dt: 0.02, fill: 0.62, curve: 'dashStop' })] },
-    jumpRead: { tags: ['hard', 'digital'], blur: 0, keys: [k('a', 'block', { fill: 0.55 }),
-      k('sung', 'block', { dt: -0.006, fill: 0.55, curve: 'linear' }), k('sung', 'reading', { fill: 0.82, hop: 0 }),
-      k('end', 'reading', { dt: 0.002, fill: 0.82, hop: 0 }), k('end', 'block', { dt: 0.008, fill: 0.6 })] },
+      k('sung', 'reading', { fill: 0.8, hop: 0.12, whip: 0.3 }), k('end', 'block', { dt: 0.02, fill: 0.62, curve: 'dashStop' })] },
+    jumpRead: { tags: ['hard', 'digital'], blur: 0, keys: [k('a', 'block', { fill: 0.5 }),
+      k('sung', 'block', { dt: -0.006, fill: 0.5, curve: 'linear' }), k('sung', 'reading', { fill: 0.85, hop: 0 }),
+      k('end', 'reading', { dt: 0.002, fill: 0.85, hop: 0 }), k('end', 'block', { dt: 0.008, fill: 0.56 })] },
     spinIn: { tags: ['playful', 'bold'], blur: 1, keys: [k('a', 'block', { fill: 0.45, roll: -180 }),
-      k('sung', 'block', { dt: 0.2, fill: 0.68, curve: 'dashStop', hit: 0.4 }), k('b', 'block', { fill: 0.7, curve: 'linear' })] },
+      k('sung', 'block', { dt: 0.2, fill: 0.68, curve: 'dashStop', hit: 0.6 }), k('b', 'block', { fill: 0.7, curve: 'linear' })] },
     spinOut: { tags: ['playful'], blur: 1, keys: [k('a', 'block', { fill: 0.62 }),
       k('end', 'block', { dt: 0.02, fill: 0.66, curve: 'linear' }), k('b', 'block', { fill: 0.5, roll: 360, curve: 'slowBloom' })] },
-    dutchSwing: { tags: ['bold', 'playful'], blur: 0.5, beat: { roll: 14, every: 1 }, keys: [k('a', 'block', { fill: 0.66, roll: -10 }),
-      k('b', 'block', { fill: 0.7, roll: 10, curve: 'linear' })] },
-    shakeHits: { tags: ['hard', 'bold'], blur: 0.4, beat: { shake: 0.8, zoom: 0.03, every: 2 }, keys: [k('a', 'block', { fill: 0.66 }),
+    dutchSwing: { tags: ['bold', 'playful'], blur: 0.6, beat: { roll: 18, zoom: 0.08, every: 1 }, keys: [k('a', 'block', { fill: 0.66, roll: -14 }),
+      k('b', 'block', { fill: 0.7, roll: 14, curve: 'linear' })] },
+    shakeHits: { tags: ['hard', 'bold'], blur: 0.5, beat: { shake: 1, zoom: 0.06, every: 1 }, keys: [k('a', 'block', { fill: 0.66 }),
       k('b', 'block', { fill: 0.72, curve: 'linear' })] },
-    beatCrash: { tags: ['fast', 'bold'], blur: 0.6, beat: { zoom: 0.09, every: 1 }, keys: [k('a', 'block', { fill: 0.58 }),
+    beatCrash: { tags: ['fast', 'bold'], blur: 0.8, beat: { zoom: 0.2, every: 1 }, keys: [k('a', 'block', { fill: 0.58 }),
       k('b', 'block', { fill: 0.62, curve: 'linear' })] },
-    vertigo: { tags: ['serious', 'slow'], blur: 0, keys: [k('a', 'block', { fill: 0.62, gz: 1 }),
-      k('b', 'block', { fill: 0.7, gz: 1.35, curve: 'slowBloom' })] },
-    orbit: { tags: ['airy', 'slow'], blur: 0.3, keys: [k('a', 'block', { fill: 0.6, roll: -16, ox: -0.1, oy: 0.03, gz: 1.12 }),
-      k('mid', 'block', { fill: 0.64, ox: 0, oy: -0.03, gz: 1, curve: 'linear' }),
-      k('b', 'block', { fill: 0.6, roll: 16, ox: 0.1, oy: 0.03, gz: 1.12, curve: 'linear' })] },
+    vertigo: { tags: ['serious', 'slow'], blur: 0, keys: [k('a', 'block', { fill: 0.72, gz: 1 }),
+      k('b', 'block', { fill: 0.56, gz: 1.6, curve: 'slowBloom' })] },
+    orbit: { tags: ['airy', 'slow'], blur: 0.4, keys: [k('a', 'block', { fill: 0.58, roll: -24, ox: -0.16, oy: 0.04, gz: 1.2 }),
+      k('mid', 'block', { fill: 0.66, ox: 0, oy: -0.04, gz: 1, curve: 'linear' }),
+      k('b', 'block', { fill: 0.58, roll: 24, ox: 0.16, oy: 0.04, gz: 1.2, curve: 'linear' })] },
   };
   const MIRRORS = Object.freeze(['dutchSwing', 'orbit', 'spinIn', 'spinOut', 'whipPan']);
   const MIRROR_SUFFIX = '~m';
@@ -443,10 +446,23 @@ MV.def('core/shot', ['core/num', 'core/curve'], (N, CV) => {
     return isFiniteNumber(extreme) ? Math.max(0.3, N.clamp(extreme, 0, 1)) : 1;
   }
 
+  // The intensity g also scales closeness and placement (phase F: 強め / かなり / 最大 then differ in every preset, not only
+  // in its tilts, hits and beats): a text key's fill moves toward X_FILL_MID by g (the crash, the punch and the pull-back
+  // are shallower at 強め), an offset within X_AWAY (it frames the words) is multiplied by g, and one beyond it (the
+  // words leave the frame on purpose: a whip) keeps X_AWAY and scales its excess, so it still leaves the frame.
+  const X_FILL_MID = 0.62;
+  const X_AWAY = 0.25;
+  function xOffset(v, g) {
+    if (!isFiniteNumber(v)) return v;
+    const a = Math.abs(v);
+    return a > X_AWAY ? Math.sign(v) * (X_AWAY + (a - X_AWAY) * g) : v * g;
+  }
+
   // The x branch of expandShot (DESIGN_EXTREME §1.4): { x: 1, keys, follow, beat: { zoom, roll, shake, every }, blur, g,
   // m } with every field of every key explicit (hop null = the reading hop rule). The mirror ("~m") is already in the
-  // keys (m = −1 records it for the hits); roll, hit, gz − 1, whip and the beat amplitudes are multiplied by g; fills
-  // (times cam.zoom, clamped to XLIMITS), positions and timing are not. `carry` is ignored.
+  // keys (m = −1 records it for the hits); roll, hit, gz − 1, whip and the beat amplitudes are multiplied by g; a text
+  // key's fill is X_FILL_MID + (fill − X_FILL_MID)·g, times cam.zoom, clamped to XLIMITS; ox and oy scale by g as xOffset
+  // says; timing is not scaled. `carry` is ignored.
   function expandX(ref, o) {
     const v = coerceShot(ref);
     const x = typeof v === 'string' ? xKeyOf(v) : null;
@@ -459,14 +475,16 @@ MV.def('core/shot', ['core/num', 'core/curve'], (N, CV) => {
     const keys = src.keys.map((key) => {
       const kind = aimKind(key.aim);
       const out = { at: key.at, dt: key.dt || 0, aim: key.aim };
-      if (kind === 'text') out.fill = clampTo((key.fill === undefined ? DEFAULTS.fill : key.fill) * zoom, L.fill);
-      else out.zoom = clampTo(1 + ((key.zoom === undefined ? 1 : key.zoom) - 1) * zoom, L.zoom);
+      if (kind === 'text') {
+        const f = key.fill === undefined ? DEFAULTS.fill : key.fill;
+        out.fill = clampTo((X_FILL_MID + (f - X_FILL_MID) * g) * zoom, L.fill);
+      } else out.zoom = clampTo(1 + ((key.zoom === undefined ? 1 : key.zoom) - 1) * zoom, L.zoom);
       if (kind === 'point') {
         out.px = key.px === undefined ? DEFAULTS.px : key.px;
         out.py = key.py === undefined ? DEFAULTS.py : key.py;
       }
-      if (key.ox !== undefined) out.ox = key.ox;
-      if (key.oy !== undefined) out.oy = key.oy;
+      if (key.ox !== undefined) out.ox = xOffset(key.ox, g);
+      if (key.oy !== undefined) out.oy = xOffset(key.oy, g);
       out.roll = (key.roll || 0) * g;
       out.curve = key.curve === undefined ? curve : key.curve;
       out.hit = (key.hit || 0) * g;
@@ -626,33 +644,33 @@ MV.def('core/shot', ['core/num', 'core/curve'], (N, CV) => {
         const rin = -(90 + 270 * p), rout = 360 * p;
         const keys = [];
         if (timing === 'depart') keys.push(at('a', F, f1));
-        else keys.push(at('a', F, f0, { roll: rin }), at('sung', F, f1, { dt: 0.2, curve: 'dashStop', hit: 0.4 }));
+        else keys.push(at('a', F, f0, { roll: rin }), at('sung', F, f1, { dt: 0.2, curve: 'dashStop', hit: 0.6 }));
         if (timing === 'arrive') keys.push(at('b', F, up(f1, 0.02), { curve: 'linear' }));
         else keys.push(at('end', F, f1, { dt: 0.02, curve: 'linear' }), at('b', F, f0, { roll: rout, curve: 'slowBloom' }));
         shot = { blur: 1, keys };
         break;
       }
       case 'dutch': {
-        const r = 6 + 8 * p;
-        shot = { blur: 0.5, beat: { roll: 8 + 12 * p, every: 1 }, keys: [at('a', F, f1, { roll: -r }),
+        const r = 8 + 6 * p;
+        shot = { blur: 0.6, beat: { roll: 10 + 8 * p, zoom: 0.03 + 0.05 * p, every: 1 }, keys: [at('a', F, f1, { roll: -r }),
           at('b', F, up(f1, 0.04), { roll: r, curve: 'linear' })] };
         break;
       }
       case 'shake':
-        shot = { blur: 0.4, beat: { shake: p, zoom: 0.03, every: 2 }, keys: [at('a', F, f1), at('b', F, up(f1, 0.06), { curve: 'linear' })] };
+        shot = { blur: 0.5, beat: { shake: p, zoom: 0.06, every: 1 }, keys: [at('a', F, f1), at('b', F, up(f1, 0.06), { curve: 'linear' })] };
         break;
       case 'vertigo':
-        shot = { blur: 0, keys: [at('a', F, f0), at('b', F, f1, { gz: 1 + 0.35 * p, curve: 'slowBloom' })] };
+        shot = { blur: 0, keys: [at('a', F, f1), at('b', F, f0, { gz: 1 + 0.6 * p, curve: 'slowBloom' })] };
         break;
       case 'orbit': {
-        const r = 8 + 16 * p;
-        shot = { blur: 0.3, keys: [at('a', F, up(f1, -0.04), { roll: -r, ox: -0.1, oy: 0.03, gz: 1.1 }),
-          at('mid', F, f1, { ox: 0, oy: -0.03, curve: 'linear' }),
-          at('b', F, up(f1, -0.04), { roll: r, ox: 0.1, oy: 0.03, gz: 1.1, curve: 'linear' })] };
+        const r = 12 + 12 * p;
+        shot = { blur: 0.4, keys: [at('a', F, up(f1, -0.06), { roll: -r, ox: -0.16, oy: 0.04, gz: 1.2 }),
+          at('mid', F, f1, { ox: 0, oy: -0.04, curve: 'linear' }),
+          at('b', F, up(f1, -0.06), { roll: r, ox: 0.16, oy: 0.04, gz: 1.2, curve: 'linear' })] };
         break;
       }
       case 'pulse':
-        shot = { blur: 0.6, beat: { zoom: 0.04 + 0.06 * p, every: 1 }, keys: [at('a', F, f1), at('b', F, up(f1, 0.04), { curve: 'linear' })] };
+        shot = { blur: 0.8, beat: { zoom: 0.08 + 0.14 * p, every: 1 }, keys: [at('a', F, f1), at('b', F, up(f1, 0.04), { curve: 'linear' })] };
         break;
       default: {                                   // jump
         const keys = [at('a', 'block', 0.55), at('sung', 'block', 0.55, { dt: -0.006, curve: 'linear' }),
@@ -693,7 +711,7 @@ MV.def('core/shot', ['core/num', 'core/curve'], (N, CV) => {
     SHOTS, SHOT_KEYS, RIGS, RIG_KEYS, MOVES, FOCI, TIMINGS, LIMITS,
     coerceShot, coerceRig, isCustom, expandShot, lastFraming, maxFill, expandRig, fromMove, usesBeats, label, rigLabel,
     // EXTREME (DESIGN_EXTREME §1)
-    XSHOTS, XSHOT_KEYS, XLIMITS, XMOVES, DIRS, MIRRORS, X_ANCHORS,
+    XSHOTS, XSHOT_KEYS, XLIMITS, XMOVES, DIRS, MIRRORS, X_ANCHORS, X_AWAY, X_FILL_MID,
     isExtreme, xKeyOf, presetOf, limitsOf, fromXMove, xIntensity,
   };
 });

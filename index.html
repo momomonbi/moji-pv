@@ -1,6 +1,6 @@
 <!doctype html><html lang="ja"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-kZTbWAX/Wg8TT6D60WXzGBvnJvTmjBK7zPZ7mQS2/U4='; style-src 'sha256-0WHZ2IKSn2mhFs9fvgY9w7F9noDzYoCZwwlZTUoAVyY=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-RBNeMua0n6v9oHzdp+1Q294UnyLU4eRQcVKrHrEiAAA='; style-src 'sha256-3Tx+LCwk/Uu7HY8EnoPqOy4/YsLD+fZCf0yr12KFIKo=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
 <title>文字PVメーカー</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -1302,6 +1302,8 @@ details.ai-group > summary { cursor: pointer; list-style-position: inside; }
 .ke-x { padding-top: 5px; border-top: 1px dashed var(--line); }
 .x-notice, .x-off { display: flex; flex-direction: column; gap: 10px; max-width: 34em; }
 .x-reduced { padding: 6px 8px; border-left: 3px solid var(--gold); background: rgba(240, 182, 77, 0.06); }
+.x-off-counts { margin: 0; padding-left: 1.4em; display: flex; flex-direction: column; gap: 2px; }
+.w-xlines { margin: 0; overflow-wrap: anywhere; }
 @media (forced-colors: active) { .ai-xchip[aria-pressed="true"] { outline: 2px solid Highlight; } }
 /* 激しさ is the switch's second row: the switch's own row carries the state tag, × and ⋯ */
 .frow[data-field*="/cam.extreme.power"] .fr-top > :not(.fr-label):not(.grow) { display: none; }
@@ -4282,10 +4284,12 @@ MV.def('core/shot', ['core/num', 'core/curve'], (N, CV) => {
   });
   // EXTREME (DESIGN_EXTREME §1.1): the limits of an x-shot, next to LIMITS (which stays as it is). Every field of LIMITS
   // is here too (the keyframe editor reads either through limitsOf); `mods` holds the shot-level beat modulators.
+  // (Phase F: the beat zoom up to 0.25 and the ground zoom up to 1.6, so 最大 is plainly stronger than the normal shots;
+  // docs/NOTES.md "カメラ EXTREME".)
   const XLIMITS = deepFreeze(Object.assign(JSON.parse(JSON.stringify(LIMITS)), {
     fill: [0.1, 0.95], ox: [-0.6, 0.6], oy: [-0.6, 0.6], roll: [-360, 360],
-    hit: [0, 1], gz: [1, 1.35], hop: [0, 0.35], whip: [0, 0.4], blur: [0, 1],
-    mods: { zoom: [0, 0.1], roll: [0, 20], shake: [0, 1], every: [1, 2, 4] },
+    hit: [0, 1], gz: [1, 1.6], hop: [0, 0.35], whip: [0, 0.4], blur: [0, 1],
+    mods: { zoom: [0, 0.25], roll: [0, 20], shake: [0, 1], every: [1, 2, 4] },
   }));
   const DEFAULTS = Object.freeze({ dt: 0, fill: 0.6, zoom: 1, px: 0.5, py: 0.5, roll: 0 });
   const ANCHORS = Object.freeze(['a', 'rest', 'sung', 'mid', 'end', 'out', 'b', 'emph']);
@@ -4549,39 +4553,40 @@ MV.def('core/shot', ['core/num', 'core/curve'], (N, CV) => {
     return deepFreeze(sortedObject(out));
   }
 
-  // The twelve presets (§1.2 table, FROZEN once accepted). ⇆ = MIRRORS (a "~m" suffix flips ox and roll). jumpRead's
-  // second reading key carries hop 0 too, so both reading keys cut from word to word (the table's intent).
+  // The twelve presets (§1.2 table, FROZEN once accepted; the values tuned by the phase F visual QA so each is plainly
+  // stronger than the normal shots at 最大, docs/NOTES.md "カメラ EXTREME"). ⇆ = MIRRORS (a "~m" suffix flips ox and roll).
+  // jumpRead's second reading key carries hop 0 too, so both reading keys cut from word to word (the table's intent).
   const XSHOT_DATA = {
-    crashZoom: { tags: ['hard', 'fast', 'bold'], blur: 1, keys: [k('a', 'block', { fill: 0.52 }),
-      k('accent', 'block', { dt: -0.04, fill: 0.52, curve: 'linear' }), k('accent', 'emph', { dt: 0.05, fill: 0.9, curve: 'dashStop', hit: 0.7 }),
+    crashZoom: { tags: ['hard', 'fast', 'bold'], blur: 1, keys: [k('a', 'block', { fill: 0.46 }),
+      k('accent', 'block', { dt: -0.04, fill: 0.46, curve: 'linear' }), k('accent', 'emph', { dt: 0.05, fill: 0.9, curve: 'dashStop', hit: 1 }),
       k('accentEnd', 'emph', { fill: 0.9, curve: 'linear' }), k('accentEnd', 'block', { dt: 0.12, fill: 0.66, curve: 'dashStop' }),
       k('b', 'block', { fill: 0.7, curve: 'linear' })] },
-    punchHit: { tags: ['hard', 'fast'], blur: 0.6, keys: [k('a', 'block', { fill: 0.6 }),
-      k('sung', 'block', { dt: -0.02, fill: 0.6, curve: 'linear' }), k('sung', 'block', { dt: 0.05, fill: 0.76, curve: 'dashStop', hit: 0.8 }),
+    punchHit: { tags: ['hard', 'fast'], blur: 0.8, keys: [k('a', 'block', { fill: 0.44 }),
+      k('sung', 'block', { dt: -0.02, fill: 0.44, curve: 'linear' }), k('sung', 'block', { dt: 0.06, fill: 0.86, curve: 'dashStop', hit: 1 }),
       k('b', 'block', { fill: 0.72, curve: 'fadeBrake' })] },
-    whipPan: { tags: ['fast', 'bold'], blur: 1, keys: [k('a', 'block', { fill: 0.64, ox: 0.45 }),
+    whipPan: { tags: ['fast', 'bold'], blur: 1, keys: [k('a', 'block', { fill: 0.64, ox: 0.5 }),
       k('a', 'block', { dt: 0.1, fill: 0.64, curve: 'dashStop' }), k('b', 'block', { dt: -0.37, fill: 0.64, curve: 'linear' }),
-      k('b', 'block', { dt: -0.25, fill: 0.64, ox: -0.45, curve: 'slowBloom' })] },
+      k('b', 'block', { dt: -0.25, fill: 0.64, ox: -0.5, curve: 'slowBloom' })] },
     whipRead: { tags: ['fast', 'playful'], blur: 1, keys: [k('a', 'first', { fill: 0.8 }),
-      k('sung', 'reading', { fill: 0.8, hop: 0.12, whip: 0.25 }), k('end', 'block', { dt: 0.02, fill: 0.62, curve: 'dashStop' })] },
-    jumpRead: { tags: ['hard', 'digital'], blur: 0, keys: [k('a', 'block', { fill: 0.55 }),
-      k('sung', 'block', { dt: -0.006, fill: 0.55, curve: 'linear' }), k('sung', 'reading', { fill: 0.82, hop: 0 }),
-      k('end', 'reading', { dt: 0.002, fill: 0.82, hop: 0 }), k('end', 'block', { dt: 0.008, fill: 0.6 })] },
+      k('sung', 'reading', { fill: 0.8, hop: 0.12, whip: 0.3 }), k('end', 'block', { dt: 0.02, fill: 0.62, curve: 'dashStop' })] },
+    jumpRead: { tags: ['hard', 'digital'], blur: 0, keys: [k('a', 'block', { fill: 0.5 }),
+      k('sung', 'block', { dt: -0.006, fill: 0.5, curve: 'linear' }), k('sung', 'reading', { fill: 0.85, hop: 0 }),
+      k('end', 'reading', { dt: 0.002, fill: 0.85, hop: 0 }), k('end', 'block', { dt: 0.008, fill: 0.56 })] },
     spinIn: { tags: ['playful', 'bold'], blur: 1, keys: [k('a', 'block', { fill: 0.45, roll: -180 }),
-      k('sung', 'block', { dt: 0.2, fill: 0.68, curve: 'dashStop', hit: 0.4 }), k('b', 'block', { fill: 0.7, curve: 'linear' })] },
+      k('sung', 'block', { dt: 0.2, fill: 0.68, curve: 'dashStop', hit: 0.6 }), k('b', 'block', { fill: 0.7, curve: 'linear' })] },
     spinOut: { tags: ['playful'], blur: 1, keys: [k('a', 'block', { fill: 0.62 }),
       k('end', 'block', { dt: 0.02, fill: 0.66, curve: 'linear' }), k('b', 'block', { fill: 0.5, roll: 360, curve: 'slowBloom' })] },
-    dutchSwing: { tags: ['bold', 'playful'], blur: 0.5, beat: { roll: 14, every: 1 }, keys: [k('a', 'block', { fill: 0.66, roll: -10 }),
-      k('b', 'block', { fill: 0.7, roll: 10, curve: 'linear' })] },
-    shakeHits: { tags: ['hard', 'bold'], blur: 0.4, beat: { shake: 0.8, zoom: 0.03, every: 2 }, keys: [k('a', 'block', { fill: 0.66 }),
+    dutchSwing: { tags: ['bold', 'playful'], blur: 0.6, beat: { roll: 18, zoom: 0.08, every: 1 }, keys: [k('a', 'block', { fill: 0.66, roll: -14 }),
+      k('b', 'block', { fill: 0.7, roll: 14, curve: 'linear' })] },
+    shakeHits: { tags: ['hard', 'bold'], blur: 0.5, beat: { shake: 1, zoom: 0.06, every: 1 }, keys: [k('a', 'block', { fill: 0.66 }),
       k('b', 'block', { fill: 0.72, curve: 'linear' })] },
-    beatCrash: { tags: ['fast', 'bold'], blur: 0.6, beat: { zoom: 0.09, every: 1 }, keys: [k('a', 'block', { fill: 0.58 }),
+    beatCrash: { tags: ['fast', 'bold'], blur: 0.8, beat: { zoom: 0.2, every: 1 }, keys: [k('a', 'block', { fill: 0.58 }),
       k('b', 'block', { fill: 0.62, curve: 'linear' })] },
-    vertigo: { tags: ['serious', 'slow'], blur: 0, keys: [k('a', 'block', { fill: 0.62, gz: 1 }),
-      k('b', 'block', { fill: 0.7, gz: 1.35, curve: 'slowBloom' })] },
-    orbit: { tags: ['airy', 'slow'], blur: 0.3, keys: [k('a', 'block', { fill: 0.6, roll: -16, ox: -0.1, oy: 0.03, gz: 1.12 }),
-      k('mid', 'block', { fill: 0.64, ox: 0, oy: -0.03, gz: 1, curve: 'linear' }),
-      k('b', 'block', { fill: 0.6, roll: 16, ox: 0.1, oy: 0.03, gz: 1.12, curve: 'linear' })] },
+    vertigo: { tags: ['serious', 'slow'], blur: 0, keys: [k('a', 'block', { fill: 0.72, gz: 1 }),
+      k('b', 'block', { fill: 0.56, gz: 1.6, curve: 'slowBloom' })] },
+    orbit: { tags: ['airy', 'slow'], blur: 0.4, keys: [k('a', 'block', { fill: 0.58, roll: -24, ox: -0.16, oy: 0.04, gz: 1.2 }),
+      k('mid', 'block', { fill: 0.66, ox: 0, oy: -0.04, gz: 1, curve: 'linear' }),
+      k('b', 'block', { fill: 0.58, roll: 24, ox: 0.16, oy: 0.04, gz: 1.2, curve: 'linear' })] },
   };
   const MIRRORS = Object.freeze(['dutchSwing', 'orbit', 'spinIn', 'spinOut', 'whipPan']);
   const MIRROR_SUFFIX = '~m';
@@ -4706,10 +4711,23 @@ MV.def('core/shot', ['core/num', 'core/curve'], (N, CV) => {
     return isFiniteNumber(extreme) ? Math.max(0.3, N.clamp(extreme, 0, 1)) : 1;
   }
 
+  // The intensity g also scales closeness and placement (phase F: 強め / かなり / 最大 then differ in every preset, not only
+  // in its tilts, hits and beats): a text key's fill moves toward X_FILL_MID by g (the crash, the punch and the pull-back
+  // are shallower at 強め), an offset within X_AWAY (it frames the words) is multiplied by g, and one beyond it (the
+  // words leave the frame on purpose: a whip) keeps X_AWAY and scales its excess, so it still leaves the frame.
+  const X_FILL_MID = 0.62;
+  const X_AWAY = 0.25;
+  function xOffset(v, g) {
+    if (!isFiniteNumber(v)) return v;
+    const a = Math.abs(v);
+    return a > X_AWAY ? Math.sign(v) * (X_AWAY + (a - X_AWAY) * g) : v * g;
+  }
+
   // The x branch of expandShot (DESIGN_EXTREME §1.4): { x: 1, keys, follow, beat: { zoom, roll, shake, every }, blur, g,
   // m } with every field of every key explicit (hop null = the reading hop rule). The mirror ("~m") is already in the
-  // keys (m = −1 records it for the hits); roll, hit, gz − 1, whip and the beat amplitudes are multiplied by g; fills
-  // (times cam.zoom, clamped to XLIMITS), positions and timing are not. `carry` is ignored.
+  // keys (m = −1 records it for the hits); roll, hit, gz − 1, whip and the beat amplitudes are multiplied by g; a text
+  // key's fill is X_FILL_MID + (fill − X_FILL_MID)·g, times cam.zoom, clamped to XLIMITS; ox and oy scale by g as xOffset
+  // says; timing is not scaled. `carry` is ignored.
   function expandX(ref, o) {
     const v = coerceShot(ref);
     const x = typeof v === 'string' ? xKeyOf(v) : null;
@@ -4722,14 +4740,16 @@ MV.def('core/shot', ['core/num', 'core/curve'], (N, CV) => {
     const keys = src.keys.map((key) => {
       const kind = aimKind(key.aim);
       const out = { at: key.at, dt: key.dt || 0, aim: key.aim };
-      if (kind === 'text') out.fill = clampTo((key.fill === undefined ? DEFAULTS.fill : key.fill) * zoom, L.fill);
-      else out.zoom = clampTo(1 + ((key.zoom === undefined ? 1 : key.zoom) - 1) * zoom, L.zoom);
+      if (kind === 'text') {
+        const f = key.fill === undefined ? DEFAULTS.fill : key.fill;
+        out.fill = clampTo((X_FILL_MID + (f - X_FILL_MID) * g) * zoom, L.fill);
+      } else out.zoom = clampTo(1 + ((key.zoom === undefined ? 1 : key.zoom) - 1) * zoom, L.zoom);
       if (kind === 'point') {
         out.px = key.px === undefined ? DEFAULTS.px : key.px;
         out.py = key.py === undefined ? DEFAULTS.py : key.py;
       }
-      if (key.ox !== undefined) out.ox = key.ox;
-      if (key.oy !== undefined) out.oy = key.oy;
+      if (key.ox !== undefined) out.ox = xOffset(key.ox, g);
+      if (key.oy !== undefined) out.oy = xOffset(key.oy, g);
       out.roll = (key.roll || 0) * g;
       out.curve = key.curve === undefined ? curve : key.curve;
       out.hit = (key.hit || 0) * g;
@@ -4889,33 +4909,33 @@ MV.def('core/shot', ['core/num', 'core/curve'], (N, CV) => {
         const rin = -(90 + 270 * p), rout = 360 * p;
         const keys = [];
         if (timing === 'depart') keys.push(at('a', F, f1));
-        else keys.push(at('a', F, f0, { roll: rin }), at('sung', F, f1, { dt: 0.2, curve: 'dashStop', hit: 0.4 }));
+        else keys.push(at('a', F, f0, { roll: rin }), at('sung', F, f1, { dt: 0.2, curve: 'dashStop', hit: 0.6 }));
         if (timing === 'arrive') keys.push(at('b', F, up(f1, 0.02), { curve: 'linear' }));
         else keys.push(at('end', F, f1, { dt: 0.02, curve: 'linear' }), at('b', F, f0, { roll: rout, curve: 'slowBloom' }));
         shot = { blur: 1, keys };
         break;
       }
       case 'dutch': {
-        const r = 6 + 8 * p;
-        shot = { blur: 0.5, beat: { roll: 8 + 12 * p, every: 1 }, keys: [at('a', F, f1, { roll: -r }),
+        const r = 8 + 6 * p;
+        shot = { blur: 0.6, beat: { roll: 10 + 8 * p, zoom: 0.03 + 0.05 * p, every: 1 }, keys: [at('a', F, f1, { roll: -r }),
           at('b', F, up(f1, 0.04), { roll: r, curve: 'linear' })] };
         break;
       }
       case 'shake':
-        shot = { blur: 0.4, beat: { shake: p, zoom: 0.03, every: 2 }, keys: [at('a', F, f1), at('b', F, up(f1, 0.06), { curve: 'linear' })] };
+        shot = { blur: 0.5, beat: { shake: p, zoom: 0.06, every: 1 }, keys: [at('a', F, f1), at('b', F, up(f1, 0.06), { curve: 'linear' })] };
         break;
       case 'vertigo':
-        shot = { blur: 0, keys: [at('a', F, f0), at('b', F, f1, { gz: 1 + 0.35 * p, curve: 'slowBloom' })] };
+        shot = { blur: 0, keys: [at('a', F, f1), at('b', F, f0, { gz: 1 + 0.6 * p, curve: 'slowBloom' })] };
         break;
       case 'orbit': {
-        const r = 8 + 16 * p;
-        shot = { blur: 0.3, keys: [at('a', F, up(f1, -0.04), { roll: -r, ox: -0.1, oy: 0.03, gz: 1.1 }),
-          at('mid', F, f1, { ox: 0, oy: -0.03, curve: 'linear' }),
-          at('b', F, up(f1, -0.04), { roll: r, ox: 0.1, oy: 0.03, gz: 1.1, curve: 'linear' })] };
+        const r = 12 + 12 * p;
+        shot = { blur: 0.4, keys: [at('a', F, up(f1, -0.06), { roll: -r, ox: -0.16, oy: 0.04, gz: 1.2 }),
+          at('mid', F, f1, { ox: 0, oy: -0.04, curve: 'linear' }),
+          at('b', F, up(f1, -0.06), { roll: r, ox: 0.16, oy: 0.04, gz: 1.2, curve: 'linear' })] };
         break;
       }
       case 'pulse':
-        shot = { blur: 0.6, beat: { zoom: 0.04 + 0.06 * p, every: 1 }, keys: [at('a', F, f1), at('b', F, up(f1, 0.04), { curve: 'linear' })] };
+        shot = { blur: 0.8, beat: { zoom: 0.08 + 0.14 * p, every: 1 }, keys: [at('a', F, f1), at('b', F, up(f1, 0.04), { curve: 'linear' })] };
         break;
       default: {                                   // jump
         const keys = [at('a', 'block', 0.55), at('sung', 'block', 0.55, { dt: -0.006, curve: 'linear' }),
@@ -4956,7 +4976,7 @@ MV.def('core/shot', ['core/num', 'core/curve'], (N, CV) => {
     SHOTS, SHOT_KEYS, RIGS, RIG_KEYS, MOVES, FOCI, TIMINGS, LIMITS,
     coerceShot, coerceRig, isCustom, expandShot, lastFraming, maxFill, expandRig, fromMove, usesBeats, label, rigLabel,
     // EXTREME (DESIGN_EXTREME §1)
-    XSHOTS, XSHOT_KEYS, XLIMITS, XMOVES, DIRS, MIRRORS, X_ANCHORS,
+    XSHOTS, XSHOT_KEYS, XLIMITS, XMOVES, DIRS, MIRRORS, X_ANCHORS, X_AWAY, X_FILL_MID,
     isExtreme, xKeyOf, presetOf, limitsOf, fromXMove, xIntensity,
   };
 });
@@ -13181,7 +13201,7 @@ MV.def('i18n/strings', [], () => ({
   'shot.blurb.dutchSwing': ['大きく傾き、拍ごとに振れる', 'A strong tilt that swings on the beat'],
   'shot.blurb.shakeHits': ['拍に合わせて画面が揺れる', 'The frame shakes on the beat'],
   'shot.blurb.beatCrash': ['拍ごとにぐっと寄る', 'Punches in on every beat'],
-  'shot.blurb.vertigo': ['文字はそのまま、背景だけが迫ってくる', 'The words hold while the background swells'],
+  'shot.blurb.vertigo': ['文字は少し遠のき、背景が大きく迫ってくる', 'The words pull back a little while the background swells'],
   'shot.blurb.orbit': ['文字のまわりを回り込む', 'Circles around the words'],
   'shot.mirrored': ['左右反転', 'Mirrored'],
   'keys.hit': ['衝撃', 'Hit'],
@@ -13197,6 +13217,13 @@ MV.def('i18n/strings', [], () => ({
   'x.notice.again': ['次から表示しない', 'Don\'t show this again'],
   'x.off.title': ['EXTREME をオフにする', 'Turn EXTREME off'],
   'x.off.text': ['手で選んだ EXTREME の動きが {n} か所あります。これも元に戻しますか？', 'There is {n} EXTREME move chosen by hand. Remove it too?|There are {n} EXTREME moves chosen by hand. Remove them too?'],
+  'x.off.lines': ['EXTREME をオンにしている行が {n} 行あります。これもオフにしますか？',
+    'EXTREME is also on for {n} line of its own. Turn it off too?|EXTREME is also on for {n} lines of their own. Turn them off too?'],
+  'x.off.both': ['行ごとにオンにした EXTREME と、手で選んだ EXTREME の動きがあります。これもまとめて元に戻しますか？',
+    'Some lines have EXTREME on of their own, and some EXTREME moves were chosen by hand. Turn them all back too?'],
+  'x.off.countLines': ['EXTREME がオンの行：{n} 行', 'Lines with EXTREME on: {n}'],
+  'x.off.countMoves': ['手で選んだ動き：{n} か所', 'Moves chosen by hand: {n}'],
+  'fld.camExtreme.lines': ['{n} 行で EXTREME がオンです（行ごとの設定）', 'EXTREME is on for {n} line of its own|EXTREME is on for {n} lines of their own'],
   'x.off.keep': ['残す', 'Keep it|Keep them'],
   'x.off.remove': ['元に戻す', 'Remove it|Remove them'],
   'ai.camera.extreme': ['EXTREME', 'EXTREME'],
@@ -13424,6 +13451,9 @@ MV.def('i18n/strings', [], () => ({
   'why.cam.amount': ['カメラワークの強さ {x}', 'Camerawork amount {x}'],
   'why.cam.extreme': ['EXTREME がオン（{x}）', 'EXTREME is on ({x})'],
   'whyRule.extreme': ['EXTREME の動きを選んだ', 'Picked an EXTREME move'],
+  'why.cam.xStill': ['ただし構図「{key}」はカメラを動かさない作りなので、このカットは EXTREME の動きなし',
+    'But the layout "{key}" is made for a still camera, so this cut gets no EXTREME move'],
+  'why.cam.xNoText': ['ただし文字のないカットには EXTREME の動きを付けない', 'But a cut without words gets no EXTREME move'],
   'why.rig.section': ['「{section}」のカメラ', 'Section camera of "{section}"'],
   'why.rig.lastChorus': ['最後のサビなので大きく', 'Last chorus, so stronger'],
   'why.season.line': ['この行の季節（{season}）', 'Season of this line ({season})'],
@@ -18006,14 +18036,20 @@ MV.def('planner/extreme', ['core/hash', 'core/num', 'core/pins', 'core/paths', '
     return { pool: XPOOL, mask: null, why: [] };
   }
 
+  // Whether a cut can be read word by word (whipRead, jumpRead): ≥ READ_WORDS words over ≥ READ_DUR s. (Phase F: 3 words
+  // over 1.6 s let no cut of the sample lyrics take them — a Japanese lyric line is usually cut in two, of 1–2 words
+  // and about a second each; 2 words over 1.2 s gives each word ≥ 0.4 s, the jump spacing.)
+  const READ_WORDS = 2, READ_DUR = 1.2;
+  function reads(f) { return f.words >= READ_WORDS && f.dur >= READ_DUR; }
+
   // The §2.3.3 base weight of one EXTREME preset. f = the cut's features, orient its orientation, nextStart whether the
   // next cut starts a section, beats whether the plan has a tempo.
   function baseWeight(key, f, orient, nextStart, beats) {
     switch (key) {
       case 'crashZoom': return (f.impact ? 30 : f.emph ? 4 : f.onBeat ? 1.5 : 0.6) * (0.6 + f.energy);
       case 'punchHit': return f.impact ? 6 : 0.5;
-      case 'whipRead': return (f.words >= 3 && f.dur >= 1.6 ? 2.5 : 0) * (orient === 'v' ? 0.8 : 1);
-      case 'jumpRead': return f.words >= 3 && f.dur >= 1.6 ? 1.5 : 0;
+      case 'whipRead': return (reads(f) ? 2.5 : 0) * (orient === 'v' ? 0.8 : 1);
+      case 'jumpRead': return reads(f) ? 1.5 : 0;
       case 'whipPan': return 1.2;
       case 'spinIn': return f.sectionStart ? 3 : 0.4;
       case 'spinOut': return nextStart ? 2 : 0.4;
@@ -18031,7 +18067,7 @@ MV.def('planner/extreme', ['core/hash', 'core/num', 'core/pins', 'core/paths', '
     switch (key) {
       case 'crashZoom': return f.impact ? [{ code: 'cam.impact', params: {} }] : f.emph ? [{ code: 'cam.emph', params: {} }] : [];
       case 'punchHit': return f.impact ? [{ code: 'cam.impact', params: {} }] : [];
-      case 'whipRead': case 'jumpRead': return f.words >= 3 && f.dur >= 1.6 ? [{ code: 'cam.words', params: { n: f.words } }] : [];
+      case 'whipRead': case 'jumpRead': return reads(f) ? [{ code: 'cam.words', params: { n: f.words } }] : [];
       default: return [];
     }
   }
@@ -18231,7 +18267,16 @@ MV.def('planner/extreme', ['core/hash', 'core/num', 'core/pins', 'core/paths', '
       if (write) cut.slots[SLOT] = xd;
       const t = write ? tracing(ctx, cut.key, 'cam.shot') : null;
       const rules = rulesOf(ctx, cut);
-      if (!rules.pool) { win.push(cut, null, false, null); continue; }
+      if (!rules.pool) {
+        // the cut keeps its normal shot: explain says why EXTREME leaves it (a layout made for a still camera, a cut
+        // without words) instead of the normal camera's own reason (phase F)
+        if (t) {
+          t.why = [{ code: 'cam.extreme', params: { x } }].concat(rules.why.length
+            ? [{ code: 'cam.xStill', params: rules.why[0].params }] : [{ code: 'cam.xNoText', params: {} }]);
+        }
+        win.push(cut, null, false, null);
+        continue;
+      }
       const rec = recencyOf(win, cut, j + 1 < cuts.length ? cuts[j + 1] : null, free);
       const list = weigh(ctx, cut, rules, rec, !!t);
       const prefix = shotPrefix(ctx, cut, salts);
@@ -18265,14 +18310,18 @@ MV.def('planner/extreme', ['core/hash', 'core/num', 'core/pins', 'core/paths', '
   // --- stage 6b: grounds and rigs ----------------------------------------------------------------------------------------
 
   // tracks(ctx, cuts, grounds, rigs) (stage 6, after planner/plan markZoomed): grounds[i].x = true for every segment
-  // that holds a cut with an EXTREME shot (the overlay's pick, a user or AI pin; the field is absent otherwise, so
-  // other plans keep their hash); and where the switch is pinned, every rig run whose first cut has it on and whose
-  // rig is automatic (not 'none') gets amp = q2(min(AMP_MAX, (AMP_BASE + AMP_SLOPE·A)·(last chorus ? 1.25 : 1))).
+  // whose ground an EXTREME cut's camera can drive — the cut's own segment and every other one on screen while the cut
+  // is (its a … b: a segment starting at the next cut's a is drawn with this cut's camera until the next cut's t0;
+  // phase F, the QA found the ground edge of such a segment behind a dutch swing) — for an EXTREME shot of the overlay,
+  // a user or the AI (the field is absent otherwise, so other plans keep their hash); and where the switch is pinned,
+  // every rig run whose first cut has it on and whose rig is automatic (not 'none') gets
+  // amp = q2(min(AMP_MAX, (AMP_BASE + AMP_SLOPE·A)·(last chorus ? 1.25 : 1))).
   function tracks(ctx, cuts, grounds, rigs) {
     for (const c of cuts) {
       const d = c.slots['cam.shot'];
       if (!d || d.v === null || d.v === undefined || !SHOT.isExtreme(d.v)) continue;
       if (c.ground >= 0 && c.ground < grounds.length) grounds[c.ground].x = true;
+      grounds.forEach((g, i) => { if (g && g.t0 < c.b && g.t1 > c.a) grounds[i].x = true; });
     }
     if (!PA.pinned(ctx.ix, SLOT) || !Array.isArray(rigs)) return;
     const byKey = new Map(cuts.map((c) => [c.key, c]));
@@ -18318,11 +18367,25 @@ MV.def('planner/extreme', ['core/hash', 'core/num', 'core/pins', 'core/paths', '
     });
   }
 
+  // lineSwitches(doc, scope) → the paths of the lines' own switches that are on (line pins > 0 by 'user' or 'ai', e.g.
+  // the rows an EXTREME request of the AI panel turned on for an area), sorted — under 'work' only: what turning the
+  // whole video's switch off asks about besides the moves picked by hand (phase F). A line has none under it.
+  const LINE_SWITCH = /^line\/[^:]+:cam\.extreme$/;
+  function lineSwitches(doc, scope) {
+    if (scope !== 'work') return [];
+    const pins = (doc && doc.pins) || {};
+    return Object.keys(pins).filter((path) => {
+      const pin = pins[path];
+      return LINE_SWITCH.test(path) && !!pin && (pin.by === 'user' || pin.by === 'ai') && typeof pin.v === 'number' && pin.v > 0;
+    }).sort();
+  }
+
   // switchCommands(doc, scope, v, { remove, by }) → the commands of one switch change at a scope ('work' or
   // 'line/<id>'), for one batch (one undo step): v > 0 pins the strength (1 = on, STEPS); v 0 or null turns it off —
   // at work the pin is cleared; at a line it is cleared, or pinned 0 when the work still has the switch on (the line is
-  // exempted). remove: also clear the EXTREME shots picked by hand or by the AI under the scope (handPicked). by: the pin
-  // author (default 'user').
+  // exempted). remove: also clear the EXTREME shots picked by hand or by the AI under the scope (handPicked) and, at
+  // work, the lines' own switches that are on (lineSwitches), so EXTREME is off everywhere. by: the pin author (default
+  // 'user').
   function switchCommands(doc, scope, v, opts) {
     const o = opts || {};
     const by = o.by || 'user';
@@ -18335,13 +18398,16 @@ MV.def('planner/extreme', ['core/hash', 'core/num', 'core/pins', 'core/paths', '
       if (work && work.v > 0) out.push({ t: 'pin.set', path, v: 0, by });
       else out.push({ t: 'pin.clear', path });
     }
-    if (o.remove && !(typeof v === 'number' && v > 0)) for (const p of handPicked(doc, scope)) out.push({ t: 'pin.clear', path: p });
+    if (o.remove && !(typeof v === 'number' && v > 0)) {
+      for (const p of lineSwitches(doc, scope)) out.push({ t: 'pin.clear', path: p });
+      for (const p of handPicked(doc, scope)) out.push({ t: 'pin.clear', path: p });
+    }
     return out;
   }
 
   return {
-    SLOT, SLOT_SPECS, STEPS, ON, XPOOL, shots, tracks, weights, resolve, valueAt, handPicked, switchCommands,
-    FACTORS: Object.freeze({ SHORT_CUT, RECENT, NEAR, ECHO, PAIR, XZOOM, AMP_BASE, AMP_SLOPE, AMP_MAX, LAST_CHORUS_AMP }),
+    SLOT, SLOT_SPECS, STEPS, ON, XPOOL, shots, tracks, weights, resolve, valueAt, handPicked, lineSwitches, switchCommands,
+    FACTORS: Object.freeze({ SHORT_CUT, RECENT, NEAR, ECHO, PAIR, XZOOM, AMP_BASE, AMP_SLOPE, AMP_MAX, LAST_CHORUS_AMP, READ_WORDS, READ_DUR }),
     POOLS: Object.freeze({ gentle: GENTLE_POOL, short: SHORT_POOL, roles: ROLE_POOLS }),
   };
 });
@@ -27627,14 +27693,14 @@ MV.def('engine/scene/xshot', ['core/num', 'core/hash', 'core/curve', 'core/shot'
   const XROLL_SUNG = 30;          // |roll| of a key inside the sung span (degrees)
   const XSPIN_LAND = 180;         // |Δroll| of a segment that lands inside the sung span from before it
   const XSPIN_INSIDE = 60;        // |Δroll| of a segment that overlaps the sung span otherwise
-  const XROT_SPEED = 540;         // degrees per second, average per segment
+  const XROT_SPEED = 720;         // degrees per second, average per segment, at 最大 (× (0.5 + 0.5·g); the recipe's spin cap)
   const XZOOM_SPEED = 12;         // |Δ ln Z| per second, average per segment
   const XTRAVEL_SPEED = 10;       // frame widths per second of the aim's on-screen travel, average per segment
   const XJUMP_GAP = 0.4;          // deliberate jumps at least this far apart and from the cut's start a
   const XSNAP = 0.08;             // a jump that comes too early becomes a move of this length
-  const PULSE_GAP = 1 / 3, PULSE_ATTACK = 0.035, PULSE_DECAY = 0.14, DOWNBEAT = 1.3;
+  const PULSE_GAP = 1 / 3, PULSE_ATTACK = 0.035, PULSE_DECAY = 0.16, DOWNBEAT = 1.3;
   const SWING_GAP = 0.5, SWING_FLIP = 0.16;
-  const HIT_GAP = 0.5, HIT_HZ = 5, HIT_DECAY = 0.09, HIT_DU = 0.018, HIT_ROLL = 1.2, HIT_WINDOW = 6;
+  const HIT_GAP = 0.5, HIT_HZ = 5, HIT_DECAY = 0.11, HIT_DU = 0.05, HIT_ROLL = 3, HIT_WINDOW = 6;
   const CALM = 0.3;               // the modulators under 「激しいカメラを抑える」 (preview only, §3.6)
   const GENTLE = Object.freeze({ roll: 6, beatRoll: 4, off: 0.12, gz: 1.1, hop: 0.2 });   // arrange cam 'gentle' / 'none' (X7)
   const OFF_MAX = 0.6;            // outside the sung span the aim may go this far from the centre (whips leave the frame)
@@ -27642,7 +27708,11 @@ MV.def('engine/scene/xshot', ['core/num', 'core/hash', 'core/curve', 'core/shot'
   const HOP_SHARE = 0.6;
   const SHUTTER = 1 / 48;         // the motion blur shutter at blur 1, g 1 (seconds; engine/render/xblur)
   const XLEAVE = 0.2;             // a reading path is left over the last XLEAVE s before the next (non-reading) key
-  const XAWAY = 0.25;             // a key outside the sung span placed farther off the centre (|ox| or |oy|) leaves on purpose
+  const XAWAY = SHOT.X_AWAY;      // a key outside the sung span placed farther off the centre (|ox| or |oy|) leaves on purpose
+  // The zoom floor of text keys on layouts that take every move: below the normal 0.9, so a large layout still has room
+  // to crash, punch and pulse (phase F; at 0.82 the near layer, parallax 1.2, still shows no more than its ornaments'
+  // 0.15 margin beyond the frame; the grounds are limited by engine/scene/cover). Gentle and still layouts keep 0.9.
+  const XZ_FLOOR = 0.82;
   const JUMP = SS.JUMP;
   const XL = SHOT.XLIMITS;
   const Z_MIN = XL.frameZoom[0], Z_MAX = XL.frameZoom[1];
@@ -27935,6 +28005,8 @@ MV.def('engine/scene/xshot', ['core/num', 'core/hash', 'core/curve', 'core/shot'
     const D = env.D, W = D.w, Hh = D.h;
     const tm = env.times, end = SS.spanOf(env);
     const trait = o.trait === 'gentle' || o.trait === 'none' ? o.trait : 'any';
+    const zmin = trait === 'any' ? XZ_FLOOR : Z_MIN;
+    const rotSpeed = XROT_SPEED * (0.5 + 0.5 * shot.g);
     const { keys: lk, beat } = layoutKeys(shot, trait);
     const sh = { beat };
     const raw = lk.map((key, i) => ({ key, i, t: anchorTime(env, target, key.at, key.dt) }));
@@ -27995,7 +28067,7 @@ MV.def('engine/scene/xshot', ['core/num', 'core/hash', 'core/curve', 'core/shot'
     // X5 roll fence, X6 rotation cap (degrees)
     const R = key.map((k) => k.roll);
     for (let i = 0; i < n; i++) if (inSung(t[i])) R[i] = clamp(R[i], -XROLL_SUNG, XROLL_SUNG);
-    capScalar(R, rules, jump, (i) => Math.min(rules[i].fence, XROT_SPEED * (t[i] - t[i - 1])), none);
+    capScalar(R, rules, jump, (i) => Math.min(rules[i].fence, rotSpeed * (t[i] - t[i - 1])), none);
 
     // boxes and aim centres
     const box = new Array(n).fill(null);
@@ -28022,18 +28094,18 @@ MV.def('engine/scene/xshot', ['core/num', 'core/hash', 'core/curve', 'core/shot'
         let f = Infinity;
         for (const b of units.boxes) f = Math.min(f, zfit(D, extOf(b, R[i]), env2));
         fit[i] = f;
-        Z[i] = Math.max(Z_MIN, Math.min(clamp(k.fill * Math.min(W / e[0], Hh / e[1]), Z_MIN, Z_MAX), f));
+        Z[i] = Math.max(zmin, Math.min(clamp(k.fill * Math.min(W / e[0], Hh / e[1]), zmin, Z_MAX), f));
         continue;
       }
       const e = extOf(box[i], R[i]);
-      Z[i] = clamp(k.fill * Math.min(W / e[0], Hh / e[1]), Z_MIN, Z_MAX);
-      if (holds(i)) { fit[i] = zfit(D, e, env2); Z[i] = Math.max(Z_MIN, Math.min(Z[i], fit[i])); }
+      Z[i] = clamp(k.fill * Math.min(W / e[0], Hh / e[1]), zmin, Z_MAX);
+      if (holds(i)) { fit[i] = zfit(D, e, env2); Z[i] = Math.max(zmin, Math.min(Z[i], fit[i])); }
     }
     const lz = Array.from(Z, Math.log);
     capScalar(lz, rules, jump, (i) => XZOOM_SPEED * (t[i] - t[i - 1]), none);
     for (let i = 0; i < n; i++) {
-      Z[i] = clamp(Math.exp(lz[i]), Z_MIN, Z_MAX);
-      if (fit[i] < Infinity) Z[i] = Math.max(Z_MIN, Math.min(Z[i], fit[i]));
+      Z[i] = clamp(Math.exp(lz[i]), kind[i] === 'text' || kind[i] === 'reading' ? zmin : Z_MIN, Z_MAX);
+      if (fit[i] < Infinity) Z[i] = Math.max(zmin, Math.min(Z[i], fit[i]));
     }
 
     // X4 on-screen positions (reading keys: their path at the key's time, fixed through the travel cap)
@@ -28067,7 +28139,7 @@ MV.def('engine/scene/xshot', ['core/num', 'core/hash', 'core/curve', 'core/shot'
     for (let i = 0; i < n; i++) if (kind[i] !== 'reading') place(i);
 
     // the track
-    const track = { x: true, a: tm.a, b: tm.b, n, W, H: Hh, short: D.short, gentle: trait !== 'any', trait, keys: [],
+    const track = { x: true, a: tm.a, b: tm.b, n, W, H: Hh, short: D.short, gentle: trait !== 'any', trait, zmin, keys: [],
       t: Float64Array.from(t), lz: new Float64Array(n), cx: Float64Array.from(cx), cy: Float64Array.from(cy),
       px: Float64Array.from(px), py: Float64Array.from(py), R: new Float64Array(n), lgz: new Float64Array(n),
       curve: key.map((k) => CV.fn(k.curve)), paths, reading: units, Zread: null,
@@ -28185,7 +28257,7 @@ MV.def('engine/scene/xshot', ['core/num', 'core/hash', 'core/curve', 'core/shot'
   // The camera of pose q: Z = e^lz, X = c − Rot(θ)·P/Z (+ the whip's overshoot), clamped to the bleed in gentle layouts;
   // ax, ay = where the aim centre shows (from the frame centre, after the roll).
   function write(track, q, out) {
-    const Z = clamp(Math.exp(q.lz), Z_MIN, Z_MAX);
+    const Z = clamp(Math.exp(q.lz), track.zmin, Z_MAX);
     const c = Math.cos(q.R), s = Math.sin(q.R);
     let X = q.cx - (c * q.px - s * q.py) / Z + q.wx;
     let Y = q.cy - (s * q.px + c * q.py) / Z + q.wy;
@@ -28288,7 +28360,7 @@ MV.def('engine/scene/xshot', ['core/num', 'core/hash', 'core/curve', 'core/shot'
   return {
     XSAFE, XROLL_SUNG, XSPIN_LAND, XSPIN_INSIDE, XROT_SPEED, XZOOM_SPEED, XTRAVEL_SPEED, XJUMP_GAP, XSNAP, PULSE_GAP,
     PULSE_ATTACK, PULSE_DECAY, DOWNBEAT, SWING_GAP, SWING_FLIP, HIT_GAP, HIT_HZ, HIT_DECAY, HIT_DU, HIT_ROLL, CALM, GENTLE,
-    OFF_MAX, SHUTTER, XLEAVE,
+    OFF_MAX, SHUTTER, XLEAVE, XZ_FLOOR,
     isX, makeShot, anchorTime, poseAt, modAt, camAt, runShot, rotExtent, schedule, segmentRule,
   };
 });
@@ -28302,13 +28374,18 @@ MV.def('engine/render/xblur', ['core/mat', 'engine/scene/frame', 'engine/scene/x
   // Taps: the camera at t_j = t − SH·j/(n − 1) is cam(t) + Δ_j, Δ_j the difference of the closed-form camera (the x-track
   // pose with its modulators, the rig, the impulses) between t_j and t; the lens deltas are held (no scene is evaluated
   // again). The displacement d is the largest |V(t_j)·V(t)⁻¹·p − p| over the frame centre and four inset corners (design
-  // units, at the last tap); n = clamp(ceil(d / MIN_DU), 2, taps). Tap j draws the frame (copied once) onto itself with
-  // D·V(t_j)·V(t)⁻¹·D⁻¹ and globalAlpha 1/(j + 1): a running average over the base (uncovered borders keep the base).
-  // A clear backdrop (alpha outputs) is cleared, then every copy is added with 'lighter' and alpha 1/n (a true
-  // premultiplied average). No pixel reads, no ctx.filter. Allocation-free after the first call.
+  // units, at the last tap); n = clamp(ceil(d / MIN_DU), 2, taps). The n − 1 moved copies are averaged on a pooled
+  // surface of half the frame's size (phase F: the full-size copies made a blurred frame cost about three times a still
+  // one): the base drawn there first (where no copy reaches, the average keeps it), then tap j of the frame with
+  // S·D·V(t_j)·V(t)⁻¹·D⁻¹ (S = the half scale) and globalAlpha 1 for the first, 1/j after (a running average). That
+  // average is drawn back over the frame with globalAlpha (n − 1)/n, so the frame is the mean of the sharp base and the
+  // copies. A clear backdrop (alpha outputs): the copies are added with 'lighter' and alpha 1/(n − 1) on a cleared half
+  // surface, the frame is scaled by 1/n ('destination-out' at 1 − 1/n) and the average added with 'lighter' at
+  // (n − 1)/n (a true premultiplied mean). No pixel reads, no ctx.filter. Allocation-free after the first call.
 
   const TAPS_EXPORT = 6, TAPS_PREVIEW = 4, TAPS_ADAPT = 3, OFF_LEVEL = 3;
-  const MIN_DU = 12;
+  const MIN_DU = 16;               // below this displacement over the shutter a frame is not blurred (phase F: was 12)
+  const HALF = 0.5;                // the copies' surface, as a share of the frame
   const INSET = 0.1;
 
   // The most copies (base included) a frame may take: export 6; preview 4 at adaptive level 0, 3 at levels 1–2, none
@@ -28381,36 +28458,47 @@ MV.def('engine/render/xblur', ['core/mat', 'engine/scene/frame', 'engine/scene/x
 
   const DI = new Float32Array(6), DM = new Float32Array(6), MQ = new Float32Array(6);
 
-  // draw(g, frame, pool, tp, D, clear): the taps onto the frame surface (g = frame.ctx) through a pooled copy of it.
-  // D = the design → device transform of the frame.
+  // draw(g, frame, pool, tp, D, clear): the taps onto the frame surface (g = frame.ctx) through a pooled half-size
+  // surface. D = the design → device transform of the frame.
   function draw(g, frame, pool, tp, D, clear) {
-    const copy = pool.take(frame.w, frame.h);
-    copy.ctx.drawImage(frame.canvas, 0, 0);
+    const n = tp.n, fw = frame.w, fh = frame.h;
+    const hw = Math.max(1, Math.ceil(fw * HALF)), hh = Math.max(1, Math.ceil(fh * HALF));
+    const sx = hw / fw, sy = hh / fh;
+    const acc = pool.take(hw, hh);
+    const a = acc.ctx;
     MAT.invert(DI, D);
-    const n = tp.n;
-    g.save();
-    g.setTransform(1, 0, 0, 1, 0, 0);
-    if (clear) {
-      g.globalAlpha = 1;
-      g.globalCompositeOperation = 'source-over';
-      g.clearRect(0, 0, frame.w, frame.h);
-      g.globalCompositeOperation = 'lighter';
-      g.globalAlpha = 1 / n;
-      g.drawImage(copy.canvas, 0, 0);
-    } else g.globalCompositeOperation = 'source-over';
+    a.save();
+    a.globalCompositeOperation = clear ? 'lighter' : 'source-over';
+    if (!clear) {
+      a.setTransform(sx, 0, 0, sy, 0, 0);
+      a.globalAlpha = 1;
+      a.drawImage(frame.canvas, 0, 0);
+    }
     for (let j = 1; j < n; j++) {
       for (let q = 0; q < 6; q++) MQ[q] = tp.M[(j - 1) * 6 + q];
       MAT.mul(DM, D, MQ);
       MAT.mul(DM, DM, DI);
-      g.setTransform(DM[0], DM[1], DM[2], DM[3], DM[4], DM[5]);
-      g.globalAlpha = clear ? 1 / n : 1 / (j + 1);
-      g.drawImage(copy.canvas, 0, 0);
+      a.setTransform(DM[0] * sx, DM[1] * sy, DM[2] * sx, DM[3] * sy, DM[4] * sx, DM[5] * sy);
+      a.globalAlpha = clear ? 1 / (n - 1) : j === 1 ? 1 : 1 / j;
+      a.drawImage(frame.canvas, 0, 0);
     }
+    a.restore();
+    g.save();
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    if (clear) {
+      g.globalCompositeOperation = 'destination-out';
+      g.globalAlpha = 1 - 1 / n;
+      g.fillStyle = '#000000';
+      g.fillRect(0, 0, fw, fh);
+      g.globalCompositeOperation = 'lighter';
+    } else g.globalCompositeOperation = 'source-over';
+    g.globalAlpha = (n - 1) / n;
+    g.drawImage(acc.canvas, 0, 0, hw, hh, 0, 0, fw, fh);
     g.restore();
-    pool.give(copy);
+    pool.give(acc);
   }
 
-  return { TAPS_EXPORT, TAPS_PREVIEW, TAPS_ADAPT, OFF_LEVEL, MIN_DU, maxTaps, taps, draw, displacement };
+  return { TAPS_EXPORT, TAPS_PREVIEW, TAPS_ADAPT, OFF_LEVEL, MIN_DU, HALF, maxTaps, taps, draw, displacement };
 });
 /* 文字PVメーカー v2 — original work. The renderer: one frame of a Plan — evaluate, draw the layers per world, seams, post, picks (DESIGN §4.19.2–4, §7.4; DESIGN_2_1 §4.4, §4.8, §11.3.7). */
 MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/media', 'core/shot', 'engine/scene/table',
@@ -28440,8 +28528,9 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
 
   // Per plan (cached by identity; plans are immutable): null when no cut has an EXTREME shot and no ground is marked
   // (grounds[i].x), so every other plan takes none of the paths below. Else { seg: the ground segments whose items take
-  // the coverage limiter, bounds: the hard boundaries between consecutive EXTREME cuts of one segment with no seam into
-  // the later one, sorted by the later cut's t0, bt: their times }.
+  // the coverage limiter (the marked ones, and every one on screen while an EXTREME cut is), bounds: the hard boundaries
+  // between consecutive EXTREME cuts of one segment with no seam into the later one, sorted by the later cut's t0, bt:
+  // their times }.
   const X_INDEX = new WeakMap();
   function xIndexOf(plan) {
     let x = X_INDEX.get(plan);
@@ -28458,6 +28547,8 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
       if (!d || d.v === undefined || d.v === null || !SHOT.isExtreme(d.v)) return;
       isX[i] = 1; any = true;
       if (c.ground >= 0 && c.ground < seg.length) seg[c.ground] = 1;
+      // every segment on screen while the cut is (its a … b), as planner/extreme marks them
+      grounds.forEach((g, k) => { if (g && g.t0 < c.b && g.t1 > c.a) seg[k] = 1; });
     });
     grounds.forEach((g, i) => { if (g && g.x === true) { seg[i] = 1; any = true; } });
     if (!any) return null;
@@ -46046,7 +46137,10 @@ MV.def('ai/direct', ['core/pins', 'core/paths', 'core/curve', 'core/shot', 'core
     const arriveText = arrive ? arrive.v + '(' + (arrive.p && isNumber(arrive.p.dur) ? String(round2(arrive.p.dur)).replace(/^0\./, '.') + 's, ' : '')
       + 'curve=' + curveShort(arrive.p && arrive.p.ease) + ')' : '-';
     const shot = decision(cut, 'cam.shot');
-    const shotText = shot ? (typeof shot.v === 'string' ? shot.v : 'custom') + (shot.from === 'auto' ? '(auto)' : '') : '-';
+    // an EXTREME move (the overlay's pick, a hand or AI pin) is 'custom' outside the 「EXTREME」 request: its vocabulary
+    // cannot name it, and a normal request stays as it was (phase F)
+    const named = shot && typeof shot.v === 'string' && (ctx.extreme || !SHOT.isExtreme(shot.v));
+    const shotText = shot ? (named ? shot.v : 'custom') + (shot.from === 'auto' ? '(auto)' : '') : '-';
     const orn = [0, 1, 2].map((i) => v('ornament#' + i)).filter((x) => x !== undefined && x !== 'none');
     const g = cut && plan.grounds && Number.isInteger(cut.ground) ? plan.grounds[cut.ground] : null;
     let ground = g && g.ground ? shortValue(g.ground.v) : '-';
@@ -53917,6 +54011,12 @@ MV.def('ui/extreme', ['ui/dom', 'core/pins', 'core/paths', 'core/shot', 'planner
       return list.every((v) => v === list[0]) ? list[0] : null;
     }
 
+    // linesOn(doc, scopes) → how many lines have their own switch on under these scopes (the whole video's row says so
+    // while its own switch is off: 「3 行で EXTREME がオンです」).
+    function linesOn(doc, scopes) {
+      return new Set(scopes.flatMap((s) => XT.lineSwitches(doc, s))).size;
+    }
+
     // scopeOfPath(path) → the switch scope a pin path belongs to: its line for a cut of a line, else the whole video.
     function scopeOfPath(path, plan) {
       const key = P.scopeKey(path);
@@ -53969,16 +54069,24 @@ MV.def('ui/extreme', ['ui/dom', 'core/pins', 'core/paths', 'core/shot', 'planner
       });
     }
 
-    // offChoice(app, n) → Promise<'keep' | 'remove' | null>: 「手で選んだ EXTREME の動きが n か所あります。これも元に戻しますか？」
-    // [残す] [元に戻す] (the focus on 元に戻す); null when the dialog is closed (nothing changes then).
-    function offChoice(app, n) {
+    // offChoice(app, { moves, lines }) → Promise<'keep' | 'remove' | null>: what else turning the switch off would leave
+    // on — moves picked by hand or by the AI (「手で選んだ EXTREME の動きが n か所あります。これも元に戻しますか？」), lines
+    // whose own switch is on under the whole video's (「EXTREME がオンの行が n 行あります。これもオフにしますか？」), or both
+    // (one question, with the two counts) — [残す] [元に戻す] with the focus on 元に戻す; null when the dialog is closed
+    // (nothing changes then). A number n stands for { moves: n }.
+    function offChoice(app, what) {
       if (!app.dialogs) return Promise.resolve('remove');
       const t = app.t;
+      const o = typeof what === 'number' ? { moves: what, lines: 0 } : Object.assign({ moves: 0, lines: 0 }, what);
+      const n = o.moves + o.lines;
       return app.dialogs.open((body, done) => {
         const keep = h('button', { class: 'btn', type: 'button', 'data-x': 'keep', on: { click: () => done('keep') } }, t('x.off.keep', { n }));
         const remove = h('button', { class: 'btn primary', type: 'button', 'data-autofocus': '1', 'data-x': 'remove',
           on: { click: () => done('remove') } }, t('x.off.remove', { n }));
-        body.appendChild(h('div', { class: 'x-off' }, h('p', { class: 'dlg-text', text: t('x.off.text', { n }) }),
+        const text = o.lines && o.moves ? t('x.off.both') : o.lines ? t('x.off.lines', { n: o.lines }) : t('x.off.text', { n: o.moves });
+        const counts = o.lines && o.moves ? h('ul', { class: 'x-off-counts' },
+          h('li', { text: t('x.off.countLines', { n: o.lines }) }), h('li', { text: t('x.off.countMoves', { n: o.moves }) })) : null;
+        body.appendChild(h('div', { class: 'x-off' }, h('p', { class: 'dlg-text', text }), counts,
           h('div', { class: 'dlg-actions' }, keep, remove)));
       }, { title: t('x.off.title') }).then((v) => (v === 'keep' || v === 'remove' ? v : null));
     }
@@ -54004,8 +54112,9 @@ MV.def('ui/extreme', ['ui/dom', 'core/pins', 'core/paths', 'core/shot', 'planner
 
     // setSwitch(app, { scopes, v, meta }) → Promise<boolean>: turns EXTREME on at the strength v (1 = 最大, 0.75, 0.5) or
     // off (v 0) at every scope, as one undo step (meta: its label). Turning it on where it was off asks the notice first;
-    // turning it off where moves were picked by hand or by the AI asks whether to remove them too (元に戻す preselected;
-    // lock pins stay). false when the user cancelled (nothing changed).
+    // turning it off where moves were picked by hand or by the AI, or (for the whole video) where lines have their own
+    // switch on, asks whether to turn those back too (元に戻す preselected: EXTREME is then off everywhere; lock pins
+    // stay). false when the user cancelled (nothing changed).
     async function setSwitch(app, o) {
       const scopes = [...new Set(o.scopes || [])];
       if (!scopes.length) return false;
@@ -54017,9 +54126,10 @@ MV.def('ui/extreme', ['ui/dom', 'core/pins', 'core/paths', 'core/shot', 'planner
         return true;
       }
       const picked = new Set(scopes.flatMap((s) => XT.handPicked(app.doc, s)));
+      const lines = new Set(scopes.flatMap((s) => XT.lineSwitches(app.doc, s)));
       let remove = false;
-      if (picked.size) {
-        const choice = await offChoice(app, picked.size);
+      if (picked.size || lines.size) {
+        const choice = await offChoice(app, { moves: picked.size, lines: lines.size });
         if (!choice) return false;
         remove = choice === 'remove';
       }
@@ -54042,7 +54152,7 @@ MV.def('ui/extreme', ['ui/dom', 'core/pins', 'core/paths', 'core/shot', 'planner
       return !!d && d.v !== null && d.v !== undefined && SHOT.isExtreme(d.v);
     }
 
-    return { valueOf, scopesValue, scopeOfPath, areaValue, notice, offChoice, setSwitch, pickShot, isXCut };
+    return { valueOf, scopesValue, linesOn, scopeOfPath, areaValue, notice, offChoice, setSwitch, pickShot, isXCut };
   });
 /* 文字PVメーカー v2 — original work. Original line icons drawn with createElementNS (24-unit grid, currentColor strokes). */
 MV.def('ui/icons', ['ui/dom'], (dom) => {
@@ -60199,7 +60309,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
 
     // The part kind a why code's `key` names when it is not the path's own part: the lens or the layout a shot keeps
     // clear of (planner/camera).
-    const WHY_KEY_KIND = Object.freeze({ 'cam.lens': 'lens', 'cam.arrange': 'arrange' });
+    const WHY_KEY_KIND = Object.freeze({ 'cam.lens': 'lens', 'cam.arrange': 'arrange', 'cam.xStill': 'arrange' });
 
     // whyParts(ex, path, t, plan) → the reasons of an explain() result as display text. Every code or id in the params
     // becomes words (mood and part keys → their labels; tag, scope, by, amount, rule → their strings; a cut key → its
@@ -69286,21 +69396,36 @@ MV.def('ui/widgets', ['ui/dom', 'ui/icons', 'i18n/t', 'core/color', 'ui/playbar'
       };
     }
     const box = h('input', { class: 'w-xbox', type: 'checkbox', role: 'switch', 'aria-label': env.label });
-    const warn = h('p', { class: 'w-xwarn', role: 'note', hidden: true, id: 'xwarn-' + field.id.replace(/[^A-Za-z0-9_-]/g, '_'),
-      text: t('fld.camExtreme.warn') });
-    box.setAttribute('aria-describedby', warn.id);
+    const id = field.id.replace(/[^A-Za-z0-9_-]/g, '_');
+    const warn = h('p', { class: 'w-xwarn', role: 'note', hidden: true, id: 'xwarn-' + id, text: t('fld.camExtreme.warn') });
+    // off here while lines have their own switch on (the whole video's row): 「3 行で EXTREME がオンです」
+    const lines = h('p', { class: 'w-xlines muted small', role: 'note', hidden: true, id: 'xlines-' + id });
+    box.setAttribute('aria-describedby', warn.id + ' ' + lines.id);
     const toggleEl = h('label', { class: 'w-toggle w-xtoggle' }, box, h('span', { class: 'w-switch', 'aria-hidden': 'true' }));
-    const el = h('div', { class: 'w-xswitch' }, toggleEl, warn);
-    box.addEventListener('change', () => env.commit(box.checked ? field.onValue || 1 : 0));
+    const el = h('div', { class: 'w-xswitch' }, toggleEl, warn, lines);
+    let shown = null;
+    const show = (v) => {
+      box.indeterminate = v === null;
+      box.checked = typeof v === 'number' && v > 0;
+      el.classList.toggle('is-on', box.checked);
+      warn.hidden = !(box.checked || v === null);
+    };
+    // The click asks first (the notice, or the question about what else is on): the switch keeps showing what the scope
+    // has until the change is made, and stays so when the dialog is cancelled (phase F).
+    box.addEventListener('change', () => {
+      const want = box.checked;
+      show(shown);
+      env.commit(want ? field.onValue || 1 : 0);
+    });
     return {
       el, focus: () => dom.focus(box),
       update(st) {
-        const v = st.mixed ? null : valueOf(st);
-        box.indeterminate = v === null;
-        box.checked = typeof v === 'number' && v > 0;
+        shown = st.mixed ? null : valueOf(st);
+        show(shown);
         box.disabled = !!st.readOnly;
-        el.classList.toggle('is-on', box.checked);
-        warn.hidden = !(box.checked || v === null);
+        const n = st.extra && typeof st.extra.lines === 'number' ? st.extra.lines : 0;
+        lines.hidden = !(shown === 0 && n > 0);
+        lines.textContent = n > 0 ? t('fld.camExtreme.lines', { n }) : '';
       },
     };
   }
@@ -71394,7 +71519,10 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
     function extraFor(field, fs, ctx, row) {
       const p = plan();
       // カメラ EXTREME: what its scope(s) have (null when the selected lines differ), DESIGN_EXTREME §2.6
-      if (field.widget === 'extreme') return { v: XU.scopesValue(doc(), (row ? row.paths : pathsOf(field, ctx)).map((x) => P.scopeKey(x))) };
+      if (field.widget === 'extreme') {
+        const scopes = (row ? row.paths : pathsOf(field, ctx)).map((x) => P.scopeKey(x));
+        return { v: XU.scopesValue(doc(), scopes), lines: XU.linesOn(doc(), scopes) };
+      }
       if (field.widget === 'trim') {
         const id = MW.sourcesOf(ctx, field.media)[0] || null;
         return { out: row && row.fsOut ? row.fsOut.value : 0, entry: id ? MI.entryOf(doc(), id) : null };

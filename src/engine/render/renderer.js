@@ -26,8 +26,9 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
 
   // Per plan (cached by identity; plans are immutable): null when no cut has an EXTREME shot and no ground is marked
   // (grounds[i].x), so every other plan takes none of the paths below. Else { seg: the ground segments whose items take
-  // the coverage limiter, bounds: the hard boundaries between consecutive EXTREME cuts of one segment with no seam into
-  // the later one, sorted by the later cut's t0, bt: their times }.
+  // the coverage limiter (the marked ones, and every one on screen while an EXTREME cut is), bounds: the hard boundaries
+  // between consecutive EXTREME cuts of one segment with no seam into the later one, sorted by the later cut's t0, bt:
+  // their times }.
   const X_INDEX = new WeakMap();
   function xIndexOf(plan) {
     let x = X_INDEX.get(plan);
@@ -44,6 +45,8 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
       if (!d || d.v === undefined || d.v === null || !SHOT.isExtreme(d.v)) return;
       isX[i] = 1; any = true;
       if (c.ground >= 0 && c.ground < seg.length) seg[c.ground] = 1;
+      // every segment on screen while the cut is (its a … b), as planner/extreme marks them
+      grounds.forEach((g, k) => { if (g && g.t0 < c.b && g.t1 > c.a) seg[k] = 1; });
     });
     grounds.forEach((g, i) => { if (g && g.x === true) { seg[i] = 1; any = true; } });
     if (!any) return null;

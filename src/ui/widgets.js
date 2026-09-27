@@ -619,21 +619,36 @@ MV.def('ui/widgets', ['ui/dom', 'ui/icons', 'i18n/t', 'core/color', 'ui/playbar'
       };
     }
     const box = h('input', { class: 'w-xbox', type: 'checkbox', role: 'switch', 'aria-label': env.label });
-    const warn = h('p', { class: 'w-xwarn', role: 'note', hidden: true, id: 'xwarn-' + field.id.replace(/[^A-Za-z0-9_-]/g, '_'),
-      text: t('fld.camExtreme.warn') });
-    box.setAttribute('aria-describedby', warn.id);
+    const id = field.id.replace(/[^A-Za-z0-9_-]/g, '_');
+    const warn = h('p', { class: 'w-xwarn', role: 'note', hidden: true, id: 'xwarn-' + id, text: t('fld.camExtreme.warn') });
+    // off here while lines have their own switch on (the whole video's row): 「3 行で EXTREME がオンです」
+    const lines = h('p', { class: 'w-xlines muted small', role: 'note', hidden: true, id: 'xlines-' + id });
+    box.setAttribute('aria-describedby', warn.id + ' ' + lines.id);
     const toggleEl = h('label', { class: 'w-toggle w-xtoggle' }, box, h('span', { class: 'w-switch', 'aria-hidden': 'true' }));
-    const el = h('div', { class: 'w-xswitch' }, toggleEl, warn);
-    box.addEventListener('change', () => env.commit(box.checked ? field.onValue || 1 : 0));
+    const el = h('div', { class: 'w-xswitch' }, toggleEl, warn, lines);
+    let shown = null;
+    const show = (v) => {
+      box.indeterminate = v === null;
+      box.checked = typeof v === 'number' && v > 0;
+      el.classList.toggle('is-on', box.checked);
+      warn.hidden = !(box.checked || v === null);
+    };
+    // The click asks first (the notice, or the question about what else is on): the switch keeps showing what the scope
+    // has until the change is made, and stays so when the dialog is cancelled (phase F).
+    box.addEventListener('change', () => {
+      const want = box.checked;
+      show(shown);
+      env.commit(want ? field.onValue || 1 : 0);
+    });
     return {
       el, focus: () => dom.focus(box),
       update(st) {
-        const v = st.mixed ? null : valueOf(st);
-        box.indeterminate = v === null;
-        box.checked = typeof v === 'number' && v > 0;
+        shown = st.mixed ? null : valueOf(st);
+        show(shown);
         box.disabled = !!st.readOnly;
-        el.classList.toggle('is-on', box.checked);
-        warn.hidden = !(box.checked || v === null);
+        const n = st.extra && typeof st.extra.lines === 'number' ? st.extra.lines : 0;
+        lines.hidden = !(shown === 0 && n > 0);
+        lines.textContent = n > 0 ? t('fld.camExtreme.lines', { n }) : '';
       },
     };
   }

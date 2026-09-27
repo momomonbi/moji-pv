@@ -43,7 +43,8 @@ const TABLE = {
   'shot.beatCrash': ['拍ごとに寄る', 'Beat crash'],
   'shot.blurb.beatCrash': ['拍ごとにぐっと寄る', 'Punches in on every beat'],
   'shot.vertigo': ['めまい', 'Vertigo'],
-  'shot.blurb.vertigo': ['文字はそのまま、背景だけが迫ってくる', 'The words hold while the background swells'],
+  // phase F: vertigo's words pull back a little while the background swells (the preset's text keys .72 → .56)
+  'shot.blurb.vertigo': ['文字は少し遠のき、背景が大きく迫ってくる', 'The words pull back a little while the background swells'],
   'shot.orbit': ['回り込む', 'Orbit'],
   'shot.blurb.orbit': ['文字のまわりを回り込む', 'Circles around the words'],
   'shot.mirrored': ['左右反転', 'Mirrored'],

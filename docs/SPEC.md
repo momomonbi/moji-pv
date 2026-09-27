@@ -88,6 +88,13 @@ and Filmora-ready output; how they are built is in `docs/DESIGN_2_1.md`.
   singing word by word, reframes between phrases, and drifts slowly over a whole area (区画のカメラ). Its strength is at
   作品全体 › 強さ › カメラワーク; presets and a closeness slider are one level deeper, keyframes the deepest. Pinnable at
   every scope, like every automatic choice.
+- **カメラ EXTREME (intense camerawork)**: one switch at 作品全体 › 強さ (also per area and per line) turns the automatic
+  camerawork intense — crash zooms, whips, spins, jump cuts to the sung word, beat pulses, shakes, dutch swings,
+  vertigo and orbits — at 強め / かなり / 最大 (最大 when switched on). The 12 moves can also be picked by hand in the
+  shot picker's EXTREME group. Every word stays readable while it is sung; no flash is added and hard cuts count in
+  step ④'s flash check. Turning it on shows a motion-sickness notice (「激しいカメラワークについて」); turning it off asks
+  whether to turn back the lines and moves that would keep it. ≡ › 表示 › 激しいカメラを抑える（プレビュー） tones the
+  preview down (on at first where the device asks for reduced motion); the export is unchanged.
 - **Speed curves (緩急, v2.1)** wherever something moves over time: entrances and exits and their stagger, holds, camera
   moves and transitions. Presets such as 「一瞬ゆっくり→すごく速く→一瞬ゆっくり」, a two-slider form, or a custom curve in a
   small editor. **動きの速さ** (×0.25–×4) gives slow or fast motion per line or cut.
@@ -142,7 +149,8 @@ Everything works without AI. On the v2 data model:
   URLs or error texts.
 - Tools: 歌詞の下ごしらえ; AI 演出3案 (season-aware); **指示** (v2.1, replaces ひとこと修正): an instruction for the whole
   video, the selected lines or an area (a song section, a `#` heading block, a blank-line block, one cut), and
-  区画ごとに指示 for up to 8 areas at once. カメラワークをAIに任せる changes camera fields only. With
+  区画ごとに指示 for up to 8 areas at once. カメラワークをAIに任せる changes camera fields only; with its chip
+  「EXTREME」 the AI picks intense moves and turns カメラ EXTREME on for the area (a row of the review). With
   新しい素材を作ってもよい the AI may make new materials; with 写真・動画をAIが使ってよい it may place the user's photos and
   videos. **素材づくり** makes or remakes one material. **写真の説明** (Google Gemini only) describes photos and videos and
   suggests their 動きと重なり. With the user's consent, the song features (transcribe with times, align lines, analyze

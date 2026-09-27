@@ -5010,6 +5010,8 @@ async def flow_extreme(f, lang):
     if not await f.until("() => !!document.querySelector('dialog.dlg[open] .x-notice')", 'turning EXTREME on shows the notice'):
         return
     await f.shot('notice')
+    st = await page.evaluate(X_STATE)
+    f.check(st['checked'] is False and not st['warn'], 'while the notice is open the switch still shows off: %r' % st)
     txt = await page.evaluate("() => document.querySelector('dialog.dlg[open]').textContent")
     f.check(lang != 'ja' or ('乗り物酔い' in txt and '次から表示しない' in txt and 'オンにする' in txt), 'the notice text: %r' % txt[:120])
     await page.click('dialog.dlg [data-x="cancel"]')
@@ -5083,8 +5085,12 @@ async def flow_extreme(f, lang):
     await f.until('([p, n]) => window.__mv.store.list().filter((e) => e.done).length === n', '左右反転 is one entry', [path, done + 2])
     after = await page.evaluate("(p) => window.__mv.doc.pins[p].v", path)
     f.check(after['x'] == 1 and [(-(r) if r else 0) for r in ox] == [k.get('roll', 0) for k in after['keys']], '左右反転 negates the rolls: %r' % after)
-    # Off at 作品全体: the move picked by hand → the question; 元に戻す removes it (one entry); undo and redo.
+    # Off at 作品全体: the move picked by hand and a line's own switch (as the AI panel's area row makes it) → one question
+    # with both counts; the switch stays on while it is open; 元に戻す removes both (one entry); undo and redo.
     await page.keyboard.press('Escape')
+    await f.settle(2)
+    line_sw = await page.evaluate("() => 'line/' + window.__mv.plan.lines[1].id + ':cam.extreme'")
+    await page.evaluate("(p) => window.__mv.dispatch({ t: 'pin.set', path: p, v: 1, by: 'ai' }, { label: ['undo.unpin', {}] })", line_sw)
     await f.settle(2)
     await open_work(f)
     done = await page.evaluate(DONE)
@@ -5092,13 +5098,15 @@ async def flow_extreme(f, lang):
     if not await f.until("() => !!document.querySelector('dialog.dlg[open] .x-off')", 'turning off asks about the moves picked by hand'):
         return
     txt = await page.evaluate("() => document.querySelector('dialog.dlg[open]').textContent")
-    f.check(lang != 'ja' or '1 か所' in txt, 'the question counts the move: %r' % txt)
+    f.check(lang != 'ja' or ('1 か所' in txt and '1 行' in txt), 'the question counts the move and the line: %r' % txt)
+    f.check((await page.evaluate(X_STATE))['checked'] is True, 'while the question is open the switch still shows on')
     focus = await page.evaluate("() => document.activeElement.dataset.x")
     f.check(focus == 'remove', '元に戻す is preselected: %r' % focus)
     await f.shot('off')
     before = await page.evaluate(DOC)
     await page.keyboard.press('Enter')
-    await f.until("(p) => !window.__mv.doc.pins['work:cam.extreme'] && !window.__mv.doc.pins[p]", '元に戻す clears the switch and the move', path)
+    await f.until("([p, l]) => !window.__mv.doc.pins['work:cam.extreme'] && !window.__mv.doc.pins[p] && !window.__mv.doc.pins[l]",
+                  '元に戻す clears the switch, the move and the line\'s switch', [path, line_sw])
     f.check(await page.evaluate(DONE) == done + 1, 'turning off is one entry')
     st = await page.evaluate(X_STATE)
     f.check(st['xcuts'] == 0 and st['checked'] is False and not st['warn'], 'no EXTREME cut once off: %r' % st)

@@ -216,15 +216,17 @@ test('XSHOTS: the twelve presets in canonical form (x: 1, tags, sorted keys, def
     assert.ok(!SHOT.SHOT_KEYS.includes(key), 'not in the normal pool');
   }
   assert.deepEqual(SHOT.XSHOTS.crashZoom.keys.map((k) => k.at), ['a', 'accent', 'accent', 'accentEnd', 'accentEnd', 'b']);
-  assert.deepEqual(SHOT.XSHOTS.crashZoom.keys[2], { aim: 'emph', at: 'accent', curve: 'dashStop', dt: 0.05, fill: 0.9, hit: 0.7 });
-  assert.deepEqual(SHOT.XSHOTS.dutchSwing.beat, { roll: 14 }, 'every 1 is the default');
-  assert.equal(SHOT.XSHOTS.dutchSwing.blur, 0.5);
+  // (the values of the phase F tuning, docs/NOTES.md "カメラ EXTREME")
+  assert.deepEqual(SHOT.XSHOTS.crashZoom.keys[2], { aim: 'emph', at: 'accent', curve: 'dashStop', dt: 0.05, fill: 0.9, hit: 1 });
+  assert.deepEqual(SHOT.XSHOTS.dutchSwing.beat, { roll: 18, zoom: 0.08 }, 'every 1 is the default');
+  assert.equal(SHOT.XSHOTS.dutchSwing.blur, 0.6);
   assert.equal(SHOT.XSHOTS.whipPan.blur, undefined, 'blur 1 is the default');
-  assert.deepEqual(SHOT.XSHOTS.shakeHits.beat, { every: 2, shake: 0.8, zoom: 0.03 });
+  assert.deepEqual(SHOT.XSHOTS.shakeHits.beat, { shake: 1, zoom: 0.06 });
+  assert.deepEqual(SHOT.XSHOTS.beatCrash.beat, { zoom: 0.2 });
   assert.deepEqual(SHOT.XSHOTS.spinIn.keys[0], { aim: 'block', at: 'a', fill: 0.45, roll: -180 });
-  assert.deepEqual(SHOT.XSHOTS.vertigo.keys.map((k) => k.gz), [undefined, 1.35], 'gz 1 omitted');
+  assert.deepEqual(SHOT.XSHOTS.vertigo.keys.map((k) => [k.fill, k.gz]), [[0.72, undefined], [0.56, 1.6]], 'gz 1 omitted; the words pull back');
   assert.deepEqual(SHOT.XSHOTS.jumpRead.keys.filter((k) => k.aim === 'reading').map((k) => k.hop), [0, 0], 'hop 0 kept');
-  assert.deepEqual(SHOT.XSHOTS.whipRead.keys[1], { aim: 'reading', at: 'sung', fill: 0.8, hop: 0.12, whip: 0.25 });
+  assert.deepEqual(SHOT.XSHOTS.whipRead.keys[1], { aim: 'reading', at: 'sung', fill: 0.8, hop: 0.12, whip: 0.3 });
   assert.deepEqual(SHOT.MIRRORS, ['dutchSwing', 'orbit', 'spinIn', 'spinOut', 'whipPan']);
 });
 
@@ -240,9 +242,9 @@ test('coerceShot: x-keys (with "~m") and x-objects by XLIMITS; every non-x value
     { at: 'b', aim: 'frame', zoom: 1.2, gz: 1.2, hop: 0.1 },
     { at: 'mid', aim: 'point', px: 0.2, gz: 1.3, oy: -0.7 },
   ] });
-  assert.deepEqual(v, { beat: { every: 4, roll: 20, zoom: 0.1 }, keys: [
+  assert.deepEqual(v, { beat: { every: 4, roll: 20, zoom: 0.25 }, keys: [
     { aim: 'block', at: 'accent', fill: 0.95, ox: 0.6, roll: 360 },
-    { aim: 'reading', at: 'accentEnd', fill: 0.1, gz: 1.35, hit: 1, hop: 0, whip: 0.4 },
+    { aim: 'reading', at: 'accentEnd', fill: 0.1, gz: 1.6, hit: 1, hop: 0, whip: 0.4 },
     { aim: 'frame', at: 'b', gz: 1.2, zoom: 1.2 },
     { aim: 'point', at: 'mid', oy: -0.6, px: 0.2 },
   ], x: 1 });
@@ -262,8 +264,8 @@ test('coerceShot: x-keys (with "~m") and x-objects by XLIMITS; every non-x value
   assert.equal(SHOT.coerceShot({ keys: [{ at: 'accent', aim: 'block' }, { at: 'b', aim: 'block' }] }), undefined, 'accent is x only');
   assert.deepEqual(SHOT.LIMITS.roll, [-15, 15]);
   assert.deepEqual(SHOT.LIMITS.fill, [0.1, 1.2]);
-  assert.deepEqual([SHOT.XLIMITS.roll, SHOT.XLIMITS.fill, SHOT.XLIMITS.ox, SHOT.XLIMITS.gz], [[-360, 360], [0.1, 0.95], [-0.6, 0.6], [1, 1.35]]);
-  assert.deepEqual(SHOT.XLIMITS.mods, { zoom: [0, 0.1], roll: [0, 20], shake: [0, 1], every: [1, 2, 4] });
+  assert.deepEqual([SHOT.XLIMITS.roll, SHOT.XLIMITS.fill, SHOT.XLIMITS.ox, SHOT.XLIMITS.gz], [[-360, 360], [0.1, 0.95], [-0.6, 0.6], [1, 1.6]]);
+  assert.deepEqual(SHOT.XLIMITS.mods, { zoom: [0, 0.25], roll: [0, 20], shake: [0, 1], every: [1, 2, 4] });
   assert.deepEqual(SHOT.XLIMITS.rig, SHOT.LIMITS.rig, 'rig limits unchanged');
 });
 
@@ -280,7 +282,7 @@ test('isExtreme, limitsOf, presetOf, xKeyOf', () => {
   assert.equal(SHOT.presetOf('settle'), SHOT.SHOTS.settle);
   assert.equal(SHOT.presetOf('orbit'), SHOT.XSHOTS.orbit);
   const m = SHOT.presetOf('orbit~m');
-  assert.deepEqual(m.keys.map((k) => [k.ox, k.roll]), [[0.1, 16], [0, undefined], [-0.1, -16]], 'mirrored: ox and roll negated');
+  assert.deepEqual(m.keys.map((k) => [k.ox, k.roll]), [[0.16, 24], [0, undefined], [-0.16, -24]], 'mirrored: ox and roll negated');
   assert.equal(SHOT.presetOf('orbit~m'), m, 'one frozen record');
   assert.deepEqual(m.tags, SHOT.XSHOTS.orbit.tags);
   for (const v of ['none', 'nope', { x: 1 }]) assert.equal(SHOT.presetOf(v), null);
@@ -289,26 +291,38 @@ test('isExtreme, limitsOf, presetOf, xKeyOf', () => {
   assert.equal(SHOT.xKeyOf('settle'), null);
 });
 
+function deepEqualClose(a, b) {
+  assert.equal(JSON.stringify(a, (k, v) => (typeof v === 'number' ? Math.round(v * 1e9) / 1e9 : v)),
+    JSON.stringify(b, (k, v) => (typeof v === 'number' ? Math.round(v * 1e9) / 1e9 : v)));
+}
+
 test('expandShot of an x-ref: mirror, intensity g on roll/hit/gz−1/whip/beat, fills × cam.zoom within XLIMITS, carry ignored', () => {
   const e = SHOT.expandShot('whipPan~m', { g: 0.5, zoom: 2, curve: 'linear', carry: { fill: 0.3, roll: 5 } });
   assert.equal(e.x, 1);
   assert.equal(e.m, -1);
   assert.equal(e.g, 0.5);
-  assert.deepEqual(e.keys.map((k) => k.ox), [-0.45, undefined, undefined, 0.45], 'mirrored, not scaled');
+  // an offset beyond X_AWAY (a whip: the words leave the frame) keeps X_AWAY and scales its excess by g (phase F)
+  assert.deepEqual(e.keys.map((k) => k.ox), [-0.375, undefined, undefined, 0.375], 'mirrored; 0.25 + (0.5 − 0.25)·g');
+  assert.deepEqual(SHOT.expandShot('whipPan', { g: 1 }).keys.map((k) => k.ox), [0.5, undefined, undefined, -0.5], 'at 最大 the preset');
   assert.deepEqual(e.keys.map((k) => k.fill), [0.95, 0.95, 0.95, 0.95], 'fill · zoom clamped to 0.95');
+  // a fill moves toward X_FILL_MID by g; an offset within X_AWAY scales by g
+  const c = SHOT.expandShot('crashZoom', { g: 0.5 });
+  approx(c.keys.map((k) => k.fill), [0.54, 0.54, 0.76, 0.76, 0.64, 0.66], 1e-12);
+  deepEqualClose(SHOT.expandShot('orbit', { g: 0.5 }).keys.map((k) => [k.ox, k.oy]), [[-0.08, 0.02], [0, -0.02], [0.08, 0.02]]);
+  deepEqualClose(SHOT.expandShot('crashZoom', { g: 1 }).keys.map((k) => k.fill), SHOT.XSHOTS.crashZoom.keys.map((k) => k.fill));
   assert.deepEqual(e.keys.map((k) => k.curve), ['linear', 'dashStop', 'linear', 'slowBloom']);
   assert.equal(e.blur, 1);
   const d = SHOT.expandShot('dutchSwing', { g: 0.5 });
-  assert.deepEqual(d.keys.map((k) => k.roll), [-5, 5]);
-  assert.deepEqual(d.beat, { zoom: 0, roll: 7, shake: 0, every: 1 });
-  assert.equal(d.blur, 0.5);
+  assert.deepEqual(d.keys.map((k) => k.roll), [-7, 7]);
+  assert.deepEqual(d.beat, { zoom: 0.04, roll: 9, shake: 0, every: 1 });
+  assert.equal(d.blur, 0.6);
   const v = SHOT.expandShot('vertigo', { g: 0.5 });
-  assert.deepEqual(v.keys.map((k) => k.gz), [1, 1.175]);
+  approx(v.keys.map((k) => k.gz), [1, 1.3], 1e-12);
   const w = SHOT.expandShot('whipRead', {});
   assert.equal(w.g, 1, 'no g → 1');
-  assert.deepEqual(w.keys.map((k) => [k.hop, k.whip]), [[null, 0], [0.12, 0.25], [null, 0]]);
+  assert.deepEqual(w.keys.map((k) => [k.hop, k.whip]), [[null, 0], [0.12, 0.3], [null, 0]]);
   const p = SHOT.expandShot('punchHit', { g: 0.3 });
-  approx(p.keys[2].hit, 0.24, 1e-12);
+  approx(p.keys[2].hit, 0.3, 1e-12);
   assert.equal(SHOT.expandShot('spinIn', { follow: 0.4 }).follow, 0.4);
   assert.ok(Object.isFrozen(e.keys[0]) && Object.isFrozen(e.beat));
   // the intensity of a cam.extreme value: max(0.3, v), 1 without a decision
@@ -329,7 +343,7 @@ test('lastFraming of an x-ref is null (no carry reaches or leaves an EXTREME cut
   for (const key of SHOT.SHOT_KEYS) assert.equal(SHOT.usesBeats(key), false, key);
   assert.equal(SHOT.lastFraming({ x: 1, keys: [{ at: 'a', aim: 'block' }, { at: 'b', aim: 'block', fill: 0.8 }] }), null);
   assert.equal(SHOT.maxFill('crashZoom'), 0.9);
-  assert.equal(SHOT.maxFill('vertigo~m'), 0.7);
+  assert.equal(SHOT.maxFill('vertigo~m'), 0.72);
   assert.deepEqual(SHOT.label({ x: 1, keys: [{ at: 'a', aim: 'block' }, { at: 'b', aim: 'block' }] }), ['shot.custom', { n: 2 }]);
   const STRINGS = MV.use('i18n/strings');
   for (const key of SHOT.XSHOT_KEYS) assert.ok(('shot.' + key) in STRINGS && ('shot.blurb.' + key) in STRINGS, key);
@@ -374,11 +388,13 @@ test('fromXMove: every move × focus × timing × power × dir gives a canonical
   approx(SHOT.fromXMove({ move: 'spin', timing: 'arrive', power: 1 }).keys[0].roll, -360, 1e-12);
   approx(SHOT.fromXMove({ move: 'spin', timing: 'depart', power: 0.5 }).keys[2].roll, 180, 1e-12);
   const dutch = SHOT.fromXMove({ move: 'dutch', power: 0.5 });
-  assert.deepEqual([dutch.keys[0].roll, dutch.beat.roll], [-10, 14]);
-  assert.deepEqual(SHOT.fromXMove({ move: 'shake', power: 0.6 }).beat, { every: 2, shake: 0.6, zoom: 0.03 });
-  assert.equal(SHOT.fromXMove({ move: 'vertigo', power: 1 }).keys[1].gz, 1.35);
-  assert.equal(SHOT.fromXMove({ move: 'pulse', power: 1 }).beat.zoom, 0.1);
-  approx(SHOT.fromXMove({ move: 'pulse' }).beat.zoom, 0.04 + 0.06 * 0.8, 1e-12, 'no power → 0.8');
+  assert.deepEqual([dutch.keys[0].roll, dutch.beat.roll], [-11, 14]);
+  approx(dutch.beat.zoom, 0.055, 1e-12);
+  assert.deepEqual(SHOT.fromXMove({ move: 'shake', power: 0.6 }).beat, { shake: 0.6, zoom: 0.06 });
+  const vertigo = SHOT.fromXMove({ move: 'vertigo', power: 1, fill: 0.8 });
+  assert.deepEqual(vertigo.keys.map((k) => [k.fill, k.gz]), [[0.8, undefined], [0.55, 1.6]], 'the words pull back, the ground swells');
+  approx(SHOT.fromXMove({ move: 'pulse', power: 1 }).beat.zoom, 0.22, 1e-12);
+  approx(SHOT.fromXMove({ move: 'pulse' }).beat.zoom, 0.08 + 0.14 * 0.8, 1e-12, 'no power → 0.8');
   assert.equal(SHOT.fromXMove({ move: 'jump', timing: 'depart' }).keys.length, 4, 'no jump back to wide');
   assert.equal(SHOT.fromXMove({ move: 'jump' }).keys.length, 5);
 });

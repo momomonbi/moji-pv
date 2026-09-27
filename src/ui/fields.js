@@ -843,7 +843,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
 
     // The part kind a why code's `key` names when it is not the path's own part: the lens or the layout a shot keeps
     // clear of (planner/camera).
-    const WHY_KEY_KIND = Object.freeze({ 'cam.lens': 'lens', 'cam.arrange': 'arrange' });
+    const WHY_KEY_KIND = Object.freeze({ 'cam.lens': 'lens', 'cam.arrange': 'arrange', 'cam.xStill': 'arrange' });
 
     // whyParts(ex, path, t, plan) → the reasons of an explain() result as display text. Every code or id in the params
     // becomes words (mood and part keys → their labels; tag, scope, by, amount, rule → their strings; a cut key → its

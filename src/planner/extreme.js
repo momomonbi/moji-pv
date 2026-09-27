@@ -136,14 +136,20 @@ MV.def('planner/extreme', ['core/hash', 'core/num', 'core/pins', 'core/paths', '
     return { pool: XPOOL, mask: null, why: [] };
   }
 
+  // Whether a cut can be read word by word (whipRead, jumpRead): ≥ READ_WORDS words over ≥ READ_DUR s. (Phase F: 3 words
+  // over 1.6 s let no cut of the sample lyrics take them — a Japanese lyric line is usually cut in two, of 1–2 words
+  // and about a second each; 2 words over 1.2 s gives each word ≥ 0.4 s, the jump spacing.)
+  const READ_WORDS = 2, READ_DUR = 1.2;
+  function reads(f) { return f.words >= READ_WORDS && f.dur >= READ_DUR; }
+
   // The §2.3.3 base weight of one EXTREME preset. f = the cut's features, orient its orientation, nextStart whether the
   // next cut starts a section, beats whether the plan has a tempo.
   function baseWeight(key, f, orient, nextStart, beats) {
     switch (key) {
       case 'crashZoom': return (f.impact ? 30 : f.emph ? 4 : f.onBeat ? 1.5 : 0.6) * (0.6 + f.energy);
       case 'punchHit': return f.impact ? 6 : 0.5;
-      case 'whipRead': return (f.words >= 3 && f.dur >= 1.6 ? 2.5 : 0) * (orient === 'v' ? 0.8 : 1);
-      case 'jumpRead': return f.words >= 3 && f.dur >= 1.6 ? 1.5 : 0;
+      case 'whipRead': return (reads(f) ? 2.5 : 0) * (orient === 'v' ? 0.8 : 1);
+      case 'jumpRead': return reads(f) ? 1.5 : 0;
       case 'whipPan': return 1.2;
       case 'spinIn': return f.sectionStart ? 3 : 0.4;
       case 'spinOut': return nextStart ? 2 : 0.4;
@@ -161,7 +167,7 @@ MV.def('planner/extreme', ['core/hash', 'core/num', 'core/pins', 'core/paths', '
     switch (key) {
       case 'crashZoom': return f.impact ? [{ code: 'cam.impact', params: {} }] : f.emph ? [{ code: 'cam.emph', params: {} }] : [];
       case 'punchHit': return f.impact ? [{ code: 'cam.impact', params: {} }] : [];
-      case 'whipRead': case 'jumpRead': return f.words >= 3 && f.dur >= 1.6 ? [{ code: 'cam.words', params: { n: f.words } }] : [];
+      case 'whipRead': case 'jumpRead': return reads(f) ? [{ code: 'cam.words', params: { n: f.words } }] : [];
       default: return [];
     }
   }
@@ -361,7 +367,16 @@ MV.def('planner/extreme', ['core/hash', 'core/num', 'core/pins', 'core/paths', '
       if (write) cut.slots[SLOT] = xd;
       const t = write ? tracing(ctx, cut.key, 'cam.shot') : null;
       const rules = rulesOf(ctx, cut);
-      if (!rules.pool) { win.push(cut, null, false, null); continue; }
+      if (!rules.pool) {
+        // the cut keeps its normal shot: explain says why EXTREME leaves it (a layout made for a still camera, a cut
+        // without words) instead of the normal camera's own reason (phase F)
+        if (t) {
+          t.why = [{ code: 'cam.extreme', params: { x } }].concat(rules.why.length
+            ? [{ code: 'cam.xStill', params: rules.why[0].params }] : [{ code: 'cam.xNoText', params: {} }]);
+        }
+        win.push(cut, null, false, null);
+        continue;
+      }
       const rec = recencyOf(win, cut, j + 1 < cuts.length ? cuts[j + 1] : null, free);
       const list = weigh(ctx, cut, rules, rec, !!t);
       const prefix = shotPrefix(ctx, cut, salts);
@@ -395,14 +410,18 @@ MV.def('planner/extreme', ['core/hash', 'core/num', 'core/pins', 'core/paths', '
   // --- stage 6b: grounds and rigs ----------------------------------------------------------------------------------------
 
   // tracks(ctx, cuts, grounds, rigs) (stage 6, after planner/plan markZoomed): grounds[i].x = true for every segment
-  // that holds a cut with an EXTREME shot (the overlay's pick, a user or AI pin; the field is absent otherwise, so
-  // other plans keep their hash); and where the switch is pinned, every rig run whose first cut has it on and whose
-  // rig is automatic (not 'none') gets amp = q2(min(AMP_MAX, (AMP_BASE + AMP_SLOPE·A)·(last chorus ? 1.25 : 1))).
+  // whose ground an EXTREME cut's camera can drive — the cut's own segment and every other one on screen while the cut
+  // is (its a … b: a segment starting at the next cut's a is drawn with this cut's camera until the next cut's t0;
+  // phase F, the QA found the ground edge of such a segment behind a dutch swing) — for an EXTREME shot of the overlay,
+  // a user or the AI (the field is absent otherwise, so other plans keep their hash); and where the switch is pinned,
+  // every rig run whose first cut has it on and whose rig is automatic (not 'none') gets
+  // amp = q2(min(AMP_MAX, (AMP_BASE + AMP_SLOPE·A)·(last chorus ? 1.25 : 1))).
   function tracks(ctx, cuts, grounds, rigs) {
     for (const c of cuts) {
       const d = c.slots['cam.shot'];
       if (!d || d.v === null || d.v === undefined || !SHOT.isExtreme(d.v)) continue;
       if (c.ground >= 0 && c.ground < grounds.length) grounds[c.ground].x = true;
+      grounds.forEach((g, i) => { if (g && g.t0 < c.b && g.t1 > c.a) grounds[i].x = true; });
     }
     if (!PA.pinned(ctx.ix, SLOT) || !Array.isArray(rigs)) return;
     const byKey = new Map(cuts.map((c) => [c.key, c]));
@@ -448,11 +467,25 @@ MV.def('planner/extreme', ['core/hash', 'core/num', 'core/pins', 'core/paths', '
     });
   }
 
+  // lineSwitches(doc, scope) → the paths of the lines' own switches that are on (line pins > 0 by 'user' or 'ai', e.g.
+  // the rows an EXTREME request of the AI panel turned on for an area), sorted — under 'work' only: what turning the
+  // whole video's switch off asks about besides the moves picked by hand (phase F). A line has none under it.
+  const LINE_SWITCH = /^line\/[^:]+:cam\.extreme$/;
+  function lineSwitches(doc, scope) {
+    if (scope !== 'work') return [];
+    const pins = (doc && doc.pins) || {};
+    return Object.keys(pins).filter((path) => {
+      const pin = pins[path];
+      return LINE_SWITCH.test(path) && !!pin && (pin.by === 'user' || pin.by === 'ai') && typeof pin.v === 'number' && pin.v > 0;
+    }).sort();
+  }
+
   // switchCommands(doc, scope, v, { remove, by }) → the commands of one switch change at a scope ('work' or
   // 'line/<id>'), for one batch (one undo step): v > 0 pins the strength (1 = on, STEPS); v 0 or null turns it off —
   // at work the pin is cleared; at a line it is cleared, or pinned 0 when the work still has the switch on (the line is
-  // exempted). remove: also clear the EXTREME shots picked by hand or by the AI under the scope (handPicked). by: the pin
-  // author (default 'user').
+  // exempted). remove: also clear the EXTREME shots picked by hand or by the AI under the scope (handPicked) and, at
+  // work, the lines' own switches that are on (lineSwitches), so EXTREME is off everywhere. by: the pin author (default
+  // 'user').
   function switchCommands(doc, scope, v, opts) {
     const o = opts || {};
     const by = o.by || 'user';
@@ -465,13 +498,16 @@ MV.def('planner/extreme', ['core/hash', 'core/num', 'core/pins', 'core/paths', '
       if (work && work.v > 0) out.push({ t: 'pin.set', path, v: 0, by });
       else out.push({ t: 'pin.clear', path });
     }
-    if (o.remove && !(typeof v === 'number' && v > 0)) for (const p of handPicked(doc, scope)) out.push({ t: 'pin.clear', path: p });
+    if (o.remove && !(typeof v === 'number' && v > 0)) {
+      for (const p of lineSwitches(doc, scope)) out.push({ t: 'pin.clear', path: p });
+      for (const p of handPicked(doc, scope)) out.push({ t: 'pin.clear', path: p });
+    }
     return out;
   }
 
   return {
-    SLOT, SLOT_SPECS, STEPS, ON, XPOOL, shots, tracks, weights, resolve, valueAt, handPicked, switchCommands,
-    FACTORS: Object.freeze({ SHORT_CUT, RECENT, NEAR, ECHO, PAIR, XZOOM, AMP_BASE, AMP_SLOPE, AMP_MAX, LAST_CHORUS_AMP }),
+    SLOT, SLOT_SPECS, STEPS, ON, XPOOL, shots, tracks, weights, resolve, valueAt, handPicked, lineSwitches, switchCommands,
+    FACTORS: Object.freeze({ SHORT_CUT, RECENT, NEAR, ECHO, PAIR, XZOOM, AMP_BASE, AMP_SLOPE, AMP_MAX, LAST_CHORUS_AMP, READ_WORDS, READ_DUR }),
     POOLS: Object.freeze({ gentle: GENTLE_POOL, short: SHORT_POOL, roles: ROLE_POOLS }),
   };
 });

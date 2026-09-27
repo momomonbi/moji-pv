@@ -15,14 +15,14 @@ MV.def('engine/scene/xshot', ['core/num', 'core/hash', 'core/curve', 'core/shot'
   const XROLL_SUNG = 30;          // |roll| of a key inside the sung span (degrees)
   const XSPIN_LAND = 180;         // |Δroll| of a segment that lands inside the sung span from before it
   const XSPIN_INSIDE = 60;        // |Δroll| of a segment that overlaps the sung span otherwise
-  const XROT_SPEED = 540;         // degrees per second, average per segment
+  const XROT_SPEED = 720;         // degrees per second, average per segment, at 最大 (× (0.5 + 0.5·g); the recipe's spin cap)
   const XZOOM_SPEED = 12;         // |Δ ln Z| per second, average per segment
   const XTRAVEL_SPEED = 10;       // frame widths per second of the aim's on-screen travel, average per segment
   const XJUMP_GAP = 0.4;          // deliberate jumps at least this far apart and from the cut's start a
   const XSNAP = 0.08;             // a jump that comes too early becomes a move of this length
-  const PULSE_GAP = 1 / 3, PULSE_ATTACK = 0.035, PULSE_DECAY = 0.14, DOWNBEAT = 1.3;
+  const PULSE_GAP = 1 / 3, PULSE_ATTACK = 0.035, PULSE_DECAY = 0.16, DOWNBEAT = 1.3;
   const SWING_GAP = 0.5, SWING_FLIP = 0.16;
-  const HIT_GAP = 0.5, HIT_HZ = 5, HIT_DECAY = 0.09, HIT_DU = 0.018, HIT_ROLL = 1.2, HIT_WINDOW = 6;
+  const HIT_GAP = 0.5, HIT_HZ = 5, HIT_DECAY = 0.11, HIT_DU = 0.05, HIT_ROLL = 3, HIT_WINDOW = 6;
   const CALM = 0.3;               // the modulators under 「激しいカメラを抑える」 (preview only, §3.6)
   const GENTLE = Object.freeze({ roll: 6, beatRoll: 4, off: 0.12, gz: 1.1, hop: 0.2 });   // arrange cam 'gentle' / 'none' (X7)
   const OFF_MAX = 0.6;            // outside the sung span the aim may go this far from the centre (whips leave the frame)
@@ -30,7 +30,11 @@ MV.def('engine/scene/xshot', ['core/num', 'core/hash', 'core/curve', 'core/shot'
   const HOP_SHARE = 0.6;
   const SHUTTER = 1 / 48;         // the motion blur shutter at blur 1, g 1 (seconds; engine/render/xblur)
   const XLEAVE = 0.2;             // a reading path is left over the last XLEAVE s before the next (non-reading) key
-  const XAWAY = 0.25;             // a key outside the sung span placed farther off the centre (|ox| or |oy|) leaves on purpose
+  const XAWAY = SHOT.X_AWAY;      // a key outside the sung span placed farther off the centre (|ox| or |oy|) leaves on purpose
+  // The zoom floor of text keys on layouts that take every move: below the normal 0.9, so a large layout still has room
+  // to crash, punch and pulse (phase F; at 0.82 the near layer, parallax 1.2, still shows no more than its ornaments'
+  // 0.15 margin beyond the frame; the grounds are limited by engine/scene/cover). Gentle and still layouts keep 0.9.
+  const XZ_FLOOR = 0.82;
   const JUMP = SS.JUMP;
   const XL = SHOT.XLIMITS;
   const Z_MIN = XL.frameZoom[0], Z_MAX = XL.frameZoom[1];
@@ -323,6 +327,8 @@ MV.def('engine/scene/xshot', ['core/num', 'core/hash', 'core/curve', 'core/shot'
     const D = env.D, W = D.w, Hh = D.h;
     const tm = env.times, end = SS.spanOf(env);
     const trait = o.trait === 'gentle' || o.trait === 'none' ? o.trait : 'any';
+    const zmin = trait === 'any' ? XZ_FLOOR : Z_MIN;
+    const rotSpeed = XROT_SPEED * (0.5 + 0.5 * shot.g);
     const { keys: lk, beat } = layoutKeys(shot, trait);
     const sh = { beat };
     const raw = lk.map((key, i) => ({ key, i, t: anchorTime(env, target, key.at, key.dt) }));
@@ -383,7 +389,7 @@ MV.def('engine/scene/xshot', ['core/num', 'core/hash', 'core/curve', 'core/shot'
     // X5 roll fence, X6 rotation cap (degrees)
     const R = key.map((k) => k.roll);
     for (let i = 0; i < n; i++) if (inSung(t[i])) R[i] = clamp(R[i], -XROLL_SUNG, XROLL_SUNG);
-    capScalar(R, rules, jump, (i) => Math.min(rules[i].fence, XROT_SPEED * (t[i] - t[i - 1])), none);
+    capScalar(R, rules, jump, (i) => Math.min(rules[i].fence, rotSpeed * (t[i] - t[i - 1])), none);
 
     // boxes and aim centres
     const box = new Array(n).fill(null);
@@ -410,18 +416,18 @@ MV.def('engine/scene/xshot', ['core/num', 'core/hash', 'core/curve', 'core/shot'
         let f = Infinity;
         for (const b of units.boxes) f = Math.min(f, zfit(D, extOf(b, R[i]), env2));
         fit[i] = f;
-        Z[i] = Math.max(Z_MIN, Math.min(clamp(k.fill * Math.min(W / e[0], Hh / e[1]), Z_MIN, Z_MAX), f));
+        Z[i] = Math.max(zmin, Math.min(clamp(k.fill * Math.min(W / e[0], Hh / e[1]), zmin, Z_MAX), f));
         continue;
       }
       const e = extOf(box[i], R[i]);
-      Z[i] = clamp(k.fill * Math.min(W / e[0], Hh / e[1]), Z_MIN, Z_MAX);
-      if (holds(i)) { fit[i] = zfit(D, e, env2); Z[i] = Math.max(Z_MIN, Math.min(Z[i], fit[i])); }
+      Z[i] = clamp(k.fill * Math.min(W / e[0], Hh / e[1]), zmin, Z_MAX);
+      if (holds(i)) { fit[i] = zfit(D, e, env2); Z[i] = Math.max(zmin, Math.min(Z[i], fit[i])); }
     }
     const lz = Array.from(Z, Math.log);
     capScalar(lz, rules, jump, (i) => XZOOM_SPEED * (t[i] - t[i - 1]), none);
     for (let i = 0; i < n; i++) {
-      Z[i] = clamp(Math.exp(lz[i]), Z_MIN, Z_MAX);
-      if (fit[i] < Infinity) Z[i] = Math.max(Z_MIN, Math.min(Z[i], fit[i]));
+      Z[i] = clamp(Math.exp(lz[i]), kind[i] === 'text' || kind[i] === 'reading' ? zmin : Z_MIN, Z_MAX);
+      if (fit[i] < Infinity) Z[i] = Math.max(zmin, Math.min(Z[i], fit[i]));
     }
 
     // X4 on-screen positions (reading keys: their path at the key's time, fixed through the travel cap)
@@ -455,7 +461,7 @@ MV.def('engine/scene/xshot', ['core/num', 'core/hash', 'core/curve', 'core/shot'
     for (let i = 0; i < n; i++) if (kind[i] !== 'reading') place(i);
 
     // the track
-    const track = { x: true, a: tm.a, b: tm.b, n, W, H: Hh, short: D.short, gentle: trait !== 'any', trait, keys: [],
+    const track = { x: true, a: tm.a, b: tm.b, n, W, H: Hh, short: D.short, gentle: trait !== 'any', trait, zmin, keys: [],
       t: Float64Array.from(t), lz: new Float64Array(n), cx: Float64Array.from(cx), cy: Float64Array.from(cy),
       px: Float64Array.from(px), py: Float64Array.from(py), R: new Float64Array(n), lgz: new Float64Array(n),
       curve: key.map((k) => CV.fn(k.curve)), paths, reading: units, Zread: null,
@@ -573,7 +579,7 @@ MV.def('engine/scene/xshot', ['core/num', 'core/hash', 'core/curve', 'core/shot'
   // The camera of pose q: Z = e^lz, X = c − Rot(θ)·P/Z (+ the whip's overshoot), clamped to the bleed in gentle layouts;
   // ax, ay = where the aim centre shows (from the frame centre, after the roll).
   function write(track, q, out) {
-    const Z = clamp(Math.exp(q.lz), Z_MIN, Z_MAX);
+    const Z = clamp(Math.exp(q.lz), track.zmin, Z_MAX);
     const c = Math.cos(q.R), s = Math.sin(q.R);
     let X = q.cx - (c * q.px - s * q.py) / Z + q.wx;
     let Y = q.cy - (s * q.px + c * q.py) / Z + q.wy;
@@ -676,7 +682,7 @@ MV.def('engine/scene/xshot', ['core/num', 'core/hash', 'core/curve', 'core/shot'
   return {
     XSAFE, XROLL_SUNG, XSPIN_LAND, XSPIN_INSIDE, XROT_SPEED, XZOOM_SPEED, XTRAVEL_SPEED, XJUMP_GAP, XSNAP, PULSE_GAP,
     PULSE_ATTACK, PULSE_DECAY, DOWNBEAT, SWING_GAP, SWING_FLIP, HIT_GAP, HIT_HZ, HIT_DECAY, HIT_DU, HIT_ROLL, CALM, GENTLE,
-    OFF_MAX, SHUTTER, XLEAVE,
+    OFF_MAX, SHUTTER, XLEAVE, XZ_FLOOR,
     isX, makeShot, anchorTime, poseAt, modAt, camAt, runShot, rotExtent, schedule, segmentRule,
   };
 });

@@ -8834,3 +8834,179 @@ project_media.json are unchanged from 382dce0, so no v2 part choice moved.
 
 Checks: `build.py --check` (213 modules); goldens as above; the whole Node suite; every browser test and
 `build_test.py` (see the PR run).
+
+## カメラ EXTREME
+
+The owner's request: 「AIに頼むカメラワークですが、EXTREMEモードとしてかなり激しめなカメラワークも考えてもらいたい」.
+EXTREME is intense camerawork for the automatic camerawork, for 「カメラワークをAIに任せる」 and by hand; the contract is
+DESIGN_2_1 §14 (written from the design document, updated to what was built). Owner defaults accepted: 最大 when the
+switch is turned on; turning it off asks, with 元に戻す preselected; motion blur on; no chip per area on the 区画ごと board.
+
+**What was built, per phase**
+
+- **A + B (contracts and engine).** `core/shot`: the twelve x-presets (`XSHOTS`), `XLIMITS`, the x grammar and its
+  coercion (every non-x value exactly as before), `isExtreme`, `presetOf`, `limitsOf`, `xKeyOf`, `xIntensity`, the x
+  branch of `expandShot`, `fromXMove`; `lastFraming` null and `usesBeats` true for x-values. New modules
+  `engine/scene/xshot` (the x-track), `engine/scene/cover` (the ground coverage limiter and ground zoom) and
+  `engine/render/xblur` (camera motion blur); `build`, `frame`, `renderer` and `facade` take them behind data only
+  EXTREME documents hold. Beyond the design: a text key outside the sung span that does not leave on purpose is framed
+  like a key inside it (DESIGN_2_1 §14.4 X3'; without it 8.2 % of the words of planned corpus documents missed R2, with
+  it 0.04 %); an `emph` aim frames the whole words the emphasis touches; a reading path is left `XLEAVE` = 0.2 s before
+  the next key. The lab's kind `xshot` and `contact_sheet.py --kind xshot --sentinel`.
+- **C (planner).** `planner/extreme`: the overlay (`shots` before the carry, `tracks` after `markZoomed`), three small
+  edits of `planner/plan`, `planner/fields` and `planner/explain` for the slot, `NOT_CUT` in `core/commands`,
+  `LINE_WORK_NAMES` in `ui/fields`; the golden `project_extreme.json` (fixture `tests/helpers/extreme_docs.js`). Tuned
+  there: the automatic `cam.zoom` of an EXTREME cut is 1 (`XZOOM`; the normal 0.8–0.9 put 57–80 % of the block keys at
+  the zoom floor), and the echo never weighs toward the previous cut's pick (neighbours sharing an EXTREME move: 11.3 %
+  → 5.9 % of pairs; repeats still share 68 %), read from a salt-free pass so a reroll of a first copy leaves its
+  repeats.
+- **D + E (AI and UI).** The 「EXTREME」 chip and request (`SCHEMAS.cameraX`, the lists, the line states, the system
+  texts, the switch rows, `ai.warn.xLayout`); the widget `extreme` (switch, 激しさ), the notice and the turn-off
+  question (`ui/extreme`), the shot picker's EXTREME group, the keyframe editor on x-shots, the AI chip, the timeline's
+  ⚡, the preference 激しいカメラを抑える（プレビュー）, step ④'s `extreme-motion` and the jumps in the flash check; three
+  `ui_flows` flows, `ui_layout`, `csp`, `i18n_pages`.
+- **F (this round).** Tuning, the motion blur's cost, four loose ends, the documents and the visual QA below.
+
+**Tuning (phase F).** Frames of the beat moves and the mild presets looked still (beatCrash's 9 % pulse, shakeHits'
+shake of 1.8 % of the short side, punchHit, dutchSwing, vertigo, orbit), block presets sat at the zoom floor on large
+layouts, and 強め / かなり / 最大 drew the same frames for five presets. Measure: the QA documents below (the sample
+lyrics on the `basic` fixture, 3 seeds × 8 moods × 16:9, 9:16, 1:1, with and without the song, fake measurer); for every
+lyric cut, the text camera (lens, shot, rig, impulses) at 60 Hz over a … b moves five world points (the screen centre
+and the inset corners at the sung start): **speed** = the mean screen speed of the fastest point (short sides per
+second; a step capped at 0.5 short, so a jump counts once), **extent** = the largest trajectory extent (short sides),
+the roll range and, for vertigo, the ground layer's scale range ln(max/min). Medians:
+
+| shot (最大) | speed before → after | extent before → after | roll range | note |
+|---|---|---|---|---|
+| normal shots, the strongest (pullReveal / snapZoom / pushWord) | 0.28 / 0.26 / 0.22 | 0.41 / 0.23 / 0.28 | ≤ 2° | EXTREME off |
+| beatCrash | 0.29 → 0.62 | 0.13 → 0.23 | 0° | beat zoom .09 → .20, decay 0.14 → 0.16 s |
+| shakeHits | 0.14 → 0.50 | 0.11 → 0.16 | 1.1° → 3.9° | shake 0.8 → 1 every beat (was every 2), 0.018 → 0.05·short, jolt 1.2° → 3°, zoom .03 → .06 |
+| punchHit | 0.24 → 0.66 | 0.21 → 0.48 | | wide .6 → .44, punch .76 → .86, hit .8 → 1 |
+| dutchSwing | 0.73 → 1.02 | 0.48 → 0.65 | 40° → 54° | keys ±10° → ±14°, swing 14° → 18°, a beat zoom .08 |
+| orbit | 0.49 → 0.76 | 0.61 → 0.85 | 32° → 48° | roll ±16° → ±24°, ox ±.1 → ±.16, gz 1.12 → 1.2 |
+| vertigo | 0.09 → 0.15 (ground 0.33 → 0.40) | 0.12 → 0.19 | | the words pull back (.72 → .56) while gz goes to 1.6 (was 1.35) |
+| crashZoom | 0.50 → 0.57 | 0.36 → 0.37 | | wide .52 → .46, hit .7 → 1 |
+| whipPan | 0.67 → 0.75 | 0.93 → 1.04 | | ox .45 → .5 |
+| spinIn / spinOut | 1.87 → 2.03 / 1.12 → 1.48 | 2.04 → 2.07 / 1.44 → 1.73 | 173° → 181° / 114° → 151° | rotation cap 540 → 720°/s at 最大 (the recipe's spin cap) |
+| whipRead / jumpRead | — → 1.15 / — → 0.94 | — → 1.00 / — → 0.83 | | picked for the first time (below) |
+
+- Every EXTREME preset but vertigo now moves at 最大 at least 1.7× the strongest normal shot's median speed (the mildest
+  is dutchSwing on the gentle layouts, capped at ±10°: 0.48, helped by the beat zoom added to its swing); vertigo moves
+  its ground (0.40; the strongest normal shot 0.15) rather than its words (0.15).
+- **Large layouts.** 30–58 % of an x-track's text keys sat at the zoom floor 0.9 (a large layout wants less), so their
+  block keys did not move. The floor of text keys on layouts that take every move is now `XZ_FLOOR` = 0.82 (the near
+  layer, parallax 1.2, then shows at most its ornaments' 0.15 margin beyond the frame; grounds are limited as before);
+  gentle and still layouts keep 0.9. Most of those keys still sit at the (lower) floor, so on large layouts the stronger
+  pulses and hits, which need no room below it, carry the moves.
+- **whipRead and jumpRead** needed ≥ 3 words over ≥ 1.6 s, which no cut of the sample lyrics has (a Japanese line is
+  usually cut in two, of 1–2 words and about a second each). Now ≥ 2 words over ≥ 1.2 s (each word ≥ 0.4 s, the jump
+  spacing): 2 % and 1 % of the EXTREME cuts.
+- **The three strengths.** g scaled only angles, hits, gz − 1, whip and the beat amplitudes; crashZoom, punchHit,
+  whipPan, vertigo and spinOut drew the same frames at 強め, かなり and 最大. Now a text key's fill moves toward 0.62 by g,
+  an offset scales by g (one beyond 0.25, a whip, keeps 0.25 and scales its excess, so it still leaves the frame), and
+  the rotation cap is 720°/s × (0.5 + 0.5·g). Median speeds 強め / かなり / 最大: crashZoom 0.42 / 0.54 / 0.57, punchHit
+  0.40 / 0.57 / 0.66, whipPan 0.59 / 0.67 / 0.75 (extent 0.78 / 0.91 / 1.04), spinOut 1.05 / 1.29 / 1.48 (roll 114° /
+  132° / 151°), beatCrash 0.32 / 0.47 / 0.62, shakeHits 0.26 / 0.38 / 0.50, dutchSwing 0.52 / 0.76 / 1.02, vertigo's
+  ground 0.23 / 0.32 / 0.40. 強め is the mild step: its beat moves are about the strongest normal shot's.
+- **Safety kept** (same documents, fake measurer): words readable (all glyphs in the frame, roll ≤ 45°) for ≥ 50 % of
+  their sung window 99.85 % → 99.87 % at 最大 and 99.86 % → 99.92 % at 強め (10,380 words); words readable at every x-track
+  key inside their sung window 99.35 % → 99.45 %. The caps hold by construction and in `xshot.test.js`: pulses ≤ 3 Hz
+  (now ≤ +33 %), swing flips ≥ 0.5 s, hits 5 Hz and ≥ 0.5 s apart, jumps ≥ 0.4 s apart; `cover.test.js` and
+  `xblur.test.js` keep the ground covered.
+
+**Motion blur cost.** On this shared machine perf.py's long+extreme row had p95 ≈ 75–82 ms against the long row's
+44–52 ms (blurred frames p50 ≈ 70 ms: a full-size copy and up to five full-size transformed draws). Now the moved
+copies are averaged on a half-size pooled surface and drawn back once (DESIGN_2_1 §14.6), and a frame is blurred only
+from 16 design units of displacement over the shutter (was 12). Alternating fresh runs (`__lab.perf`, 10 s from 20 s,
+720p, the four runs each): phase E long 44.0–53.7 / long+extreme 71.1–81.7 ms p95 (blurred frames p50 67–74 ms); now
+long 47.2–51.0 / long+extreme 48.6–61.7 ms p95 (blurred frames p50 38–46 ms), with more blurred frames (49 of 300,
+was 44) since the moves are stronger. `perf.py` itself, run alone and alternately with main 1c303e6 (twice each):
+long+extreme p50 24.6 / 26.5 ms, p95 51.7 / 51.7 ms (blurred frames p50 42.4 / 39.8 ms) against this branch's long row
+p95 51.4 / 45.9 ms and main's 50.1 / 48.3 ms (phase E: long+extreme p95 77.8 ms against long 48.2 ms). Every row is
+over twice the budget on this machine, main's too; where the normal rows pass (the CI runner), the EXTREME row now
+costs about what the long row does.
+
+**Loose ends from phases D and E**
+
+- **The switch showed on while the notice was open** (a checkbox flips on click). The widget now shows what the scope
+  has until the change is made: it stays off while the notice is open and after やめる, and on while the turn-off
+  question is open (`ui_flows` extreme checks both).
+- **Turning EXTREME off at 作品全体 left the lines' own switches on** (e.g. the AI's area rows), and the whole video's row
+  then showed off while those lines kept moving. Decided for beginners: the turn-off question also counts lines whose
+  own switch is on (`planner/extreme.lineSwitches`: line pins > 0 by the user or the AI), in one question with the
+  counts, 元に戻す preselected; 元に戻す turns EXTREME off everywhere (the switch, those line switches, the moves picked by
+  hand), one undo step; 残す keeps them and the whole video's row then says 「3 行で EXTREME がオンです（行ごとの設定）」.
+  Exemptions (line pins 0) and lock pins stay. Tests: `ui_extreme.test.js`, the `extreme` flow.
+- **A normal AI request could show EXTREME moves in a line's state** (`shot=crashZoom(auto)`) that its vocabulary cannot
+  answer. Every request that is not the EXTREME one now prints them as `custom` (`custom(auto)` for the overlay's
+  picks); the normal requests' system texts, schemas and lists stay byte for byte those of main (the sha snapshots of
+  `ai_direct.test.js`), and documents without EXTREME give the same prompts.
+- **Cuts that stay without an EXTREME move** with the switch on: the layouts made for a still camera (`cam: 'none'`) and
+  cuts without words. Their explain gave the normal camera's reason (「構図「…」に合わせて控えめに」), which does not say
+  why EXTREME left them. Now: 「EXTREME がオン（1）」 + 「ただし構図「…」はカメラを動かさない作りなので、このカットは
+  EXTREME の動きなし」 (or 「ただし文字のないカットには EXTREME の動きを付けない」). Their share: see the QA.
+
+**Visual QA (phase F).** Two scratch tools (not kept) on the lab page, catalog registry, fallback fonts (canvas
+measurer): the sample lyrics with a second サビ (「紙ひこうきの朝」, the app's sample, 26 lines cut in two: 50 cuts) on the
+`basic` fixture with its 60 s song (120 BPM) and without it, 12 seeds × 8 moods (pinned) × 16:9, 9:16 and 1:1, EXTREME
+on at 最大: 576 videos, 28,800 lyric cuts. Per cut 8 frames over a … b in export quality with the scene backdrop filled
+with #FF00FF (the frame-border pixels showing it counted: 230,400 frames); per word of every EXTREME cut its sung window
+at 30 Hz with the full camera, and the x-track keys inside it; a contact sheet per mood and aspect of seed 0 with the song
+(24) and 16:9 without (8): one row per cut, a, sung, 1/3, 2/3, end, b, the XSAFE area drawn; dense strips of the worst
+cuts; and the preview with 激しいカメラを抑える (preview quality, calm) for 2 seeds × 8 moods × 3 aspects.
+
+| check (576 videos) | result |
+|---|---|
+| lyric cuts with an EXTREME move | 22,373 (77.7 %); per aspect 77.2–78.0 %; per mood 70.3 % (glitchFracture) to 84.1 % (dreamHaze) |
+| … without one (explain says why) | 6,427 (22.3 %), all on the four layouts made for a still camera: gridMosaic 2,083, edgeBleed 1,654, tickerMarquee 1,562, diptychSplit 1,128 (this sample has no lyric cut without words) |
+| EXTREME presets | dutchSwing 26.4 %, beatCrash 21.9 %, shakeHits 21.2 % (the pool of gentle layouts and framing lenses, 44 % of the lyric cuts), whipPan 7.2, crashZoom 6.2, punchHit 4.3, spinIn 3.0, spinOut 2.5, vertigo 2.2, orbit 2.1, whipRead 2.0, jumpRead 1.0 % |
+| the most common preset's share of a video | median 0.30, p90 0.37, max 0.49 |
+| words readable ≥ 50 % of their sung window | 99.87 % of 41,700 (per mood 99.74–99.95 %) |
+| words readable at every key inside their sung window | 99.61 % of 5,897 |
+| frames with a ground edge | 0 of 230,400 (the first run: 2 frames, one case, fixed below) |
+| deliberate jumps in any second | ≤ 2 |
+| motion-blurred frames | 7.8 % (song 6.3 %, without 9.2 %) |
+| preview with 激しいカメラを抑える (48 videos) | 0 blurred frames, 0 ground edges, words readable 99.88 % |
+
+What the scans, sheets and strips showed:
+- **One ground edge, fixed.** dashSprint 9:16 without the song: a `dutchSwing~m` cut on sidebarIndex (rolled −26° at its
+  end) is followed by a cut whose ground segment starts at that cut's a. For those 0.12 s the new segment is drawn
+  with the rolled EXTREME camera, and it was not marked, so the limiter did not run: a magenta corner. Every segment on
+  screen while an EXTREME cut is (its a … b) is now marked (`planner/extreme.tracks`, and the renderer's own index);
+  the second run of all 576 videos found no edge.
+- **The words below R2** (53): 38 are `spinIn` on echoStack — spinIn lands 0.2 s after the sung start, and echoStack's
+  sung fractions spread over its fading copies give the main line's first word about 0.1 s (「パンの匂いの」: 0.12 s);
+  the strips show the line settled at 0.2–0.25 s and readable after it. 7 are `whipPan` on cornerNote at 9:16: a thin
+  corner column zoomed to 3 stays in its corner and the lens's push after the clamp takes its last glyphs past the
+  bottom edge (the lens-after-clamp remainder of step (b)). The rest are single cases of whipPan, dutchSwing and
+  vertigo on small corner or side layouts.
+- **The frames move.** beatCrash's pulses and shakeHits' hits show in dense strips (15 frames over 0.5 s: before the
+  tuning they were nearly identical); dutchSwing tilts 20–30° on the beat with a blurred flip; the ground swells behind
+  vertigo; whips and spins blur. At a `swishCut` seam the sides show the scene backdrop for a frame or two with EXTREME on
+  and off alike (the seam slides the world; the backdrop is the theme's ground colour then); the counter, which needs
+  the exact sentinel colour, does not count these blended pixels.
+- Sheets and strips are kept outside the repository (the scratch folder of this round).
+
+**Goldens.** `node tests/update_golden.js --check` reported `frame_hashes_v2.json`, `plan_hashes.json`,
+`frame_hashes.json` and `project_media.json`: matches, and `project_extreme.json`: DIFFERS (the tuning). Only
+`project_extreme.json` was regenerated, on purpose.
+
+**Decisions** (asked of the lead):
+
+- The preset values, XLIMITS (beat zoom ≤ 0.25, gz ≤ 1.6), the hit, pulse and rotation constants and the zoom floor of
+  §14.4 are the phase F values; the owner's review of four videos (§14.13) is still to come before the tables are
+  FROZEN.
+- The strength g now scales fills and offsets too (DESIGN_2_1 §14.3), so the three steps differ in every preset.
+- Pulses may now reach +33 % (the design capped them at +10 %); they stay ≤ 3 Hz and add no luminance flash.
+- Turning EXTREME off at 作品全体 turns the lines' own switches off too when the user keeps 元に戻す.
+
+**Open items**
+
+- About a fifth of the lyric cuts stay on a still layout (QA); a pulse-only move there (zoom-in only, which cannot
+  uncover a full-frame paint) would be a later addition, as a rule change of §14.8.2.
+- dutchSwing on gentle layouts tilts ≤ 10° (the GENTLE caps keep hanging tags and cards from showing their edges).
+- The full browser `extreme_check.py` of the design was not written; its checks run in `xshot.test.js` (R1, R2, caps),
+  `cover.test.js` and `xblur.test.js` (coverage), and in the scratch QA tools of this round.
+- The owner's review of four videos (a ballad, an upbeat song, 9:16, the chorus only).
+
+CHECKS_PLACEHOLDER

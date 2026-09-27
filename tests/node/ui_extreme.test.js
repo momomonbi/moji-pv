@@ -101,6 +101,46 @@ test('turning it off asks about the moves picked by hand or by the AI (元に戻
   assert.equal(XU.valueOf(line.doc, 'line/r4'), 0);
 });
 
+// Phase F: lines can have their own switch on under the whole video's (the AI panel's EXTREME rows for an area, the area
+// page). Turning the whole video off asks about them too, 元に戻す preselected: then EXTREME is off everywhere; 残す
+// keeps them, and the whole video's row says how many lines still have it on.
+test('turning the whole video off also offers to turn the lines\' own switches off (元に戻す: off everywhere; 残す: they stay)', async () => {
+  const pins = { 'work:cam.extreme': { v: 1, by: 'user' }, 'line/r4:cam.extreme': { v: 1, by: 'ai' },
+    'line/r5:cam.extreme': { v: 0.5, by: 'user' }, 'line/r6:cam.extreme': { v: 0, by: 'user' }, 'line/r7:cam.extreme': { v: 1, by: 'lock' } };
+  const doc = Object.assign({}, BASIC, { pins: Object.assign({}, BASIC.pins, pins) });
+  assert.deepEqual(XT.lineSwitches(doc, 'work'), ['line/r4:cam.extreme', 'line/r5:cam.extreme'], 'on, by the user or the AI');
+  assert.deepEqual(XT.lineSwitches(doc, 'line/r4'), [], 'a line has none under it');
+  assert.equal(XU.linesOn(doc, ['work']), 2);
+  const remove = fakeApp(doc, ['remove']);
+  assert.equal(await XU.setSwitch(remove, { scopes: ['work'], v: 0, meta: META }), true);
+  assert.deepEqual(remove.asked, [remove.t('x.off.title')], 'one question');
+  assert.equal(remove.store.list().length, 1, 'one undo entry');
+  for (const id of ['r4', 'r5', 'r6', 'r8']) assert.equal(XU.valueOf(remove.doc, 'line/' + id), 0, id + ' is off');
+  assert.deepEqual(Object.keys(remove.doc.pins).filter((p) => p.endsWith(':cam.extreme')).sort(), ['line/r6:cam.extreme', 'line/r7:cam.extreme'],
+    'the exemption (0) and the lock stay');
+  assert.equal(XU.linesOn(remove.doc, ['work']), 0);
+  const keep = fakeApp(doc, ['keep']);
+  assert.equal(await XU.setSwitch(keep, { scopes: ['work'], v: 0, meta: META }), true);
+  assert.equal(XU.valueOf(keep.doc, 'work'), 0);
+  assert.deepEqual([XU.valueOf(keep.doc, 'line/r4'), XU.valueOf(keep.doc, 'line/r5')], [1, 0.5], '残す: the lines keep theirs');
+  assert.equal(XU.linesOn(keep.doc, ['work']), 2, 'the whole video\'s row says so');
+  // lines and a move picked by hand: one question; 元に戻す clears both
+  const both = Object.assign({}, doc, { pins: Object.assign({}, doc.pins, { 'cut/r8~0:cam.shot': { v: 'crashZoom', by: 'user', sig: 'x' } }) });
+  const app = fakeApp(both, ['remove']);
+  assert.equal(await XU.setSwitch(app, { scopes: ['work'], v: 0, meta: META }), true);
+  assert.equal(app.asked.length, 1);
+  assert.equal(app.doc.pins['cut/r8~0:cam.shot'], undefined);
+  assert.equal(XU.linesOn(app.doc, ['work']), 0);
+  // the commands themselves: without remove only the switch
+  assert.deepEqual(XT.switchCommands(doc, 'work', 0, {}), [{ t: 'pin.clear', path: 'work:cam.extreme' }]);
+  assert.deepEqual(XT.switchCommands(doc, 'work', 0, { remove: true }).map((c) => c.path),
+    ['work:cam.extreme', 'line/r4:cam.extreme', 'line/r5:cam.extreme']);
+  for (const k of ['x.off.lines', 'x.off.both', 'x.off.countLines', 'x.off.countMoves', 'fld.camExtreme.lines']) assert.ok(k in STRINGS, k);
+  const en = T.createT('en', STRINGS, REG, { strict: true });
+  assert.equal(en('x.off.lines', { n: 1 }), 'EXTREME is also on for 1 line of its own. Turn it off too?');
+  assert.equal(en('fld.camExtreme.lines', { n: 3 }), 'EXTREME is on for 3 lines of their own');
+});
+
 test('an EXTREME preset picked by hand where the switch is off asks the notice first (この動きを使う); normal presets never', async () => {
   const app = fakeApp(BASIC, [false, true]);
   assert.equal(await XU.pickShot(app, ['cut/r4~0:cam.shot'], 'pushWord'), true);

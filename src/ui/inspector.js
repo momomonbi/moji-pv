@@ -245,7 +245,10 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
     function extraFor(field, fs, ctx, row) {
       const p = plan();
       // カメラ EXTREME: what its scope(s) have (null when the selected lines differ), DESIGN_EXTREME §2.6
-      if (field.widget === 'extreme') return { v: XU.scopesValue(doc(), (row ? row.paths : pathsOf(field, ctx)).map((x) => P.scopeKey(x))) };
+      if (field.widget === 'extreme') {
+        const scopes = (row ? row.paths : pathsOf(field, ctx)).map((x) => P.scopeKey(x));
+        return { v: XU.scopesValue(doc(), scopes), lines: XU.linesOn(doc(), scopes) };
+      }
       if (field.widget === 'trim') {
         const id = MW.sourcesOf(ctx, field.media)[0] || null;
         return { out: row && row.fsOut ? row.fsOut.value : 0, entry: id ? MI.entryOf(doc(), id) : null };

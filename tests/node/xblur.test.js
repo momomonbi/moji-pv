@@ -142,24 +142,45 @@ test('renderFrame: blurred frames report their copies (≤ 6 in export, ≤ 4 / 
   assert.deepEqual(run('export', 0, { calm: true }).map((f) => f.hash), exp.map((f) => f.hash), 'export ignores calm');
 });
 
+// The copies are averaged on a half-size pooled surface and drawn back over the frame (phase F): the frame is then the
+// mean of the sharp base and the n − 1 copies.
 test('a clear backdrop averages the copies with lighter; other backdrops keep a running average over the base', () => {
-  const plan = xPlan('whipPan', { backdrop: 'clear' });
-  const { rec, engine } = engineOf();
-  engine.setPlan(plan);
-  const surface = surfaceOf(rec, plan, 360, true);
-  let lighter = 0, blurred = 0;
-  for (let t = 0; t < plan.duration; t += 1 / 30) {
-    const m = rec.mark();
-    const st = engine.renderFrame(surface, t, { quality: 'export', pick: false, scale: surface.w / plan.design.w, backdrop: 'clear' });
-    if (!st.blur) continue;
-    blurred++;
-    const ops = rec.ops().slice(m);
-    if (ops.some((o) => o[1] === 'set:globalCompositeOperation' && o[2] === 'lighter')) lighter++;
-    const alphas = ops.filter((o) => o[1] === 'set:globalAlpha').map((o) => o[2]);
-    approx(alphas.filter((a) => Math.abs(a - 1 / st.blur) < 1e-3).length >= st.blur ? 1 : 0, 1, 0, 'n copies at 1/n');
+  const near = (a, b) => Math.abs(a - b) < 1e-3;
+  for (const backdrop of ['clear', 'scene']) {
+    const plan = xPlan('whipPan', { backdrop });
+    const { rec, engine } = engineOf();
+    engine.setPlan(plan);
+    const surface = surfaceOf(rec, plan, 360, backdrop === 'clear');
+    let lighter = 0, blurred = 0;
+    for (let t = 0; t < plan.duration; t += 1 / 30) {
+      const m = rec.mark();
+      const st = engine.renderFrame(surface, t, { quality: 'export', pick: false, scale: surface.w / plan.design.w, backdrop });
+      if (!st.blur) continue;
+      blurred++;
+      const n = st.blur;
+      const ops = rec.ops().slice(m);
+      if (ops.some((o) => o[1] === 'set:globalCompositeOperation' && o[2] === 'lighter')) lighter++;
+      // the copies: drawImage calls of a whole surface onto the half-size one
+      const half = ops.filter((o) => o[1] === 'drawImage' && o.length === 5);
+      const alphas = ops.filter((o) => o[1] === 'set:globalAlpha').map((o) => o[2]);
+      if (backdrop === 'clear') {
+        assert.ok(alphas.filter((a) => near(a, 1 / (n - 1))).length >= n - 1, 'n − 1 copies at 1/(n − 1)');
+        assert.ok(ops.some((o) => o[1] === 'set:globalCompositeOperation' && o[2] === 'destination-out'), 'the base scaled by 1/n');
+        assert.ok(alphas.some((a) => near(a, 1 - 1 / n)), 'destination-out at 1 − 1/n');
+      } else {
+        const want = [1].concat(Array.from({ length: n - 2 }, (_, j) => 1 / (j + 2)));
+        for (const w of want) assert.ok(alphas.some((a) => near(a, w)), 'a running average: ' + w);
+      }
+      assert.ok(alphas.some((a) => near(a, (n - 1) / n)), 'the average drawn back at (n − 1)/n');
+      // the average comes back with one scaled draw of the half-size surface over the whole frame
+      const back = ops.filter((o) => o[1] === 'drawImage' && o.length === 11 && o[9] === surface.w && o[10] === surface.h);
+      assert.ok(back.length >= 1, 'drawn back over the frame');
+      assert.ok(half.length >= n - 1, 'the copies');
+    }
+    engine.dispose();
+    assert.ok(blurred >= 3, backdrop + ': blurred frames');
+    if (backdrop === 'clear') assert.equal(lighter, blurred);
   }
-  engine.dispose();
-  assert.ok(blurred >= 3 && lighter === blurred);
 });
 
 test('no blur while a seam is active', () => {

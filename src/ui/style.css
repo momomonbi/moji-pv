@@ -1299,6 +1299,8 @@ details.ai-group > summary { cursor: pointer; list-style-position: inside; }
 .ke-x { padding-top: 5px; border-top: 1px dashed var(--line); }
 .x-notice, .x-off { display: flex; flex-direction: column; gap: 10px; max-width: 34em; }
 .x-reduced { padding: 6px 8px; border-left: 3px solid var(--gold); background: rgba(240, 182, 77, 0.06); }
+.x-off-counts { margin: 0; padding-left: 1.4em; display: flex; flex-direction: column; gap: 2px; }
+.w-xlines { margin: 0; overflow-wrap: anywhere; }
 @media (forced-colors: active) { .ai-xchip[aria-pressed="true"] { outline: 2px solid Highlight; } }
 /* 激しさ is the switch's second row: the switch's own row carries the state tag, × and ⋯ */
 .frow[data-field*="/cam.extreme.power"] .fr-top > :not(.fr-label):not(.grow) { display: none; }

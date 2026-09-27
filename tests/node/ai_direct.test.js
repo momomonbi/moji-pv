@@ -958,6 +958,30 @@ test('EXTREME: the normal camera and area requests stay byte-identical (system, 
   assert.equal(DI.directSchema({ mode: 'all', extreme: true }), DI.directSchema({ mode: 'all' }));
 });
 
+// Phase F: the plan's EXTREME moves (the overlay's automatic picks, a hand or AI pin) are values a normal request's
+// vocabulary cannot name; its line states print them as 'custom', so the request stays answerable and its text, schema and
+// lists stay those of main. The 「EXTREME」 request names them.
+test('EXTREME: a normal request prints a line\'s EXTREME move as custom; the EXTREME request names it', () => {
+  const on = CMD.reduce(CMD.reduce(DOC, { t: 'pin.set', path: 'work:cam.extreme', v: 1, by: 'user' }),
+    { t: 'pin.set', path: 'line/rc:cam.shot', v: 'spinIn~m', by: 'ai' });
+  const plan = planOf(on);
+  const first = (id) => plan.cuts.find((c) => c.line === id);
+  assert.ok(['r4', 'r5', 'r7', 'r8'].every((id) => first(id).slots['cam.shot'].from === 'auto' && SHOT.isExtreme(first(id).slots['cam.shot'].v)),
+    'the verse shows the overlay\'s EXTREME picks');
+  const shots = (prompt) => prompt.split('\n').filter((l) => /^\d+: /.test(l)).map((l) => (/ shot=([^ ]+)/.exec(l) || [])[1]);
+  const xname = (v) => SHOT.xKeyOf(String(v).replace(/\(auto\)$/, '')) !== null;
+  for (const lang of ['ja', 'en']) {
+    for (const mode of ['camera', 'all']) {
+      const req = (ref) => DI.directRequests(on, plan, reg, { briefs: [{ ref, instruction: 'お願い' }], uiLang: lang, mode })[0];
+      deepEqual(shots(req(VERSE).prompt), ['custom(auto)', 'custom(auto)', 'custom(auto)', 'custom(auto)'], lang + ' ' + mode + ': automatic picks');
+      deepEqual(shots(req(CHORUS).prompt), ['pushWord', 'custom'], lang + ' ' + mode + ': the AI\'s EXTREME pin is custom, a normal pin named');
+    }
+    const x = (ref) => shots(camRequest(on, ref, { uiLang: lang, extreme: true }).prompt);
+    assert.ok(x(VERSE).every((v) => xname(v) && v.endsWith('(auto)')), lang + ': the EXTREME request names the picks: ' + x(VERSE));
+    deepEqual(x(CHORUS), ['pushWord', 'spinIn~m']);
+  }
+});
+
 test('EXTREME: its own frozen schema (move words, power, dir), the intense system text, medium effort, lists and line states', () => {
   const x = DI.directSchema({ mode: 'camera', extreme: true });
   const n = DI.directSchema({ mode: 'camera' });

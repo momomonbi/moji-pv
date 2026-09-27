@@ -125,7 +125,7 @@ test('every preset × text × layout × aspect: R1 in the sung span, the roll fe
             if (i === 0 || jumpAt(i)) continue;
             const dt = tr.t[i] - tr.t[i - 1], rule = XS.segmentRule(tr.t[i - 1], tr.t[i], span);
             const dR = Math.abs(tr.R[i] - tr.R[i - 1]) / DEG;
-            assert.ok(dR <= Math.min(rule.fence, XS.XROT_SPEED * dt) + 1e-6, name + ': rotation of segment ' + i + ' ' + dR);
+            assert.ok(dR <= Math.min(rule.fence, XS.XROT_SPEED * (0.5 + 0.5 * tr.g) * dt) + 1e-6, name + ': rotation of segment ' + i + ' ' + dR);
             assert.ok(Math.abs(tr.lz[i] - tr.lz[i - 1]) <= XS.XZOOM_SPEED * dt + 1e-6, name + ': zoom rate of segment ' + i);
             if (!tr.paths[i] && !tr.paths[i - 1]) {
               const dp = Math.hypot(k.sx - tr.keys[i - 1].sx, k.sy - tr.keys[i - 1].sy);
@@ -216,13 +216,20 @@ test('R2: every word is readable for at least half of its sung window', () => {
   assert.deepEqual(low, [], 'words below R2');
 });
 
-test('the rotation cap turns spinIn\'s −180° into ≤ 173° before the landing and spinOut\'s tail into ≤ 540°/s', () => {
+// The rotation cap is XROT_SPEED (720°/s) at 最大 and scales by 0.5 + 0.5·g (phase F: at 540°/s every strength spun the
+// same 135° out of a 0.25 s tail).
+test('the rotation cap (720°/s at 最大, × (0.5 + 0.5·g)): spinIn lands its −180°, spinOut\'s tail spins as far as the cap lets it', () => {
+  const cap = (tr, i) => XS.XROT_SPEED * (0.5 + 0.5 * tr.g) * (tr.t[i] - tr.t[i - 1]);
   const inx = xScene({ shot: 'spinIn' }).tr;
-  approx(inx.R[0] / DEG, -XS.XROT_SPEED * (inx.t[1] - inx.t[0]), 1e-6, 'excess removed from the earlier key');
+  approx(inx.R[0] / DEG, -Math.min(180, XS.XSPIN_LAND, cap(inx, 1)), 1e-6, 'the whole half turn fits the cap at 最大');
   assert.equal(inx.R[1], 0, 'the landing is kept');
+  const slow = xScene({ shot: 'spinIn', extreme: 0.3 }).tr;
+  approx(slow.R[0] / DEG, -Math.min(180 * 0.3, cap(slow, 1)), 1e-6);
   const out = xScene({ shot: 'spinOut' }).tr;
   assert.equal(out.R[1], 0, 'the key inside the span is kept');
-  approx(out.R[2] / DEG, XS.XROT_SPEED * (out.t[2] - out.t[1]), 1e-6, 'an exit gives way at its later key');
+  approx(out.R[2] / DEG, Math.min(360, cap(out, 2)), 1e-6, 'an exit gives way at its later key');
+  const outs = [0.5, 0.75, 1].map((extreme) => xScene({ shot: 'spinOut', extreme }).tr.R[2] / DEG);
+  assert.ok(outs[0] < outs[1] && outs[1] < outs[2], 'the three strengths spin out differently: ' + outs.map((x) => x.toFixed(0)));
   // the rules
   assert.deepEqual(XS.segmentRule(-0.3, -0.1, 2), { fence: Infinity, later: false });
   assert.deepEqual(XS.segmentRule(2.1, 2.3, 2), { fence: Infinity, later: true });
@@ -306,9 +313,14 @@ test('mirror and intensity: "~m" flips ox and roll; cam.extreme scales roll, hit
   const low = xScene({ shot: 'dutchSwing', extreme: 0.1 }).tr;
   approx(low.swing.amp, 0.3 * d.swing.amp, 1e-12, 'g = max(0.3, cam.extreme)');
   const v = xScene({ shot: 'vertigo', extreme: 0.5 }).tr;
-  approx(v.keys[1].gz, 1 + 0.35 * 0.5, 1e-9);
+  approx(v.keys[1].gz, 1 + 0.6 * 0.5, 1e-9);
   const p = xScene({ shot: 'punchHit', extreme: 0.5 }).tr;
-  approx(p.hits.amp[0], 0.8 * 0.5, 1e-12);
+  approx(p.hits.amp[0], 1 * 0.5, 1e-12);
+  // phase F: g scales the placement too — a whip's offset beyond X_AWAY and the closeness (fills toward X_FILL_MID)
+  const w5 = xScene({ shot: 'whipPan', extreme: 0.5 }).tr;
+  assert.ok(Math.abs(w5.keys[0].sx) < Math.abs(a.keys[0].sx) && Math.abs(w5.keys[0].sx) > SHOT.X_AWAY * a.W, 'a shorter whip that still leaves');
+  const zs = [0.5, 0.75, 1].map((extreme) => { const tr = xScene({ shot: 'punchHit', extreme }).tr; return tr.keys[2].Z / tr.keys[0].Z; });
+  assert.ok(zs[0] < zs[1] && zs[1] < zs[2], 'the punch deepens with the strength: ' + zs.map((x) => x.toFixed(2)));
   // blur shutter in seconds: blur · g / 48
   approx(xScene({ shot: 'whipPan', extreme: 0.75 }).tr.shutter, 0.75 / 48, 1e-12);
   assert.equal(xScene({ shot: 'jumpRead' }).tr.shutter, 0, 'jumpRead is never blurred');
@@ -344,7 +356,7 @@ test('modulator schedules: pulses ≤ 3 Hz, swing flips ≥ 0.5 s apart (≤ 1 H
       }
       assert.ok(onsets <= 3 * T + 1, shot + ' ' + bpm + ': ' + onsets + ' pulse onsets in ' + T.toFixed(2) + ' s');
       assert.ok(crossings <= 2 * XS.HIT_HZ * T + 2, shot + ' ' + bpm + ': ' + crossings + ' zero crossings');
-      assert.ok(maxPulse <= 0.1 * XS.DOWNBEAT + 1e-9, shot + ': pulse ≤ +13 %');
+      assert.ok(maxPulse <= SHOT.XLIMITS.mods.zoom[1] * XS.DOWNBEAT + 1e-9, shot + ': pulse ≤ +33 %');
       assert.ok(maxSwing <= 20 * DEG + 1e-9, shot + ': swing ≤ 20°');
     }
   }

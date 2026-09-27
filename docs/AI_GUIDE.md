@@ -74,6 +74,9 @@ AI タブの **指示** の欄に、してほしいことを書いて **送る**
   - **新しい素材を作ってもよい**: オンにすると、AI が新しい素材（マイ素材）を作って使うことがあります（6 を見てください）。「素材を作る」のボタンを押すとオンになります。
   - **写真・動画をAIが使ってよい**: 写真・動画がこの端末にあるときだけ出ます。はじめはオンです。オンのとき、AI があなたの写真・動画を背景などに使うことがあります（7 を見てください）。オフのときは、写真・動画の番号・種類・大きさ・長さ・形・説明を送りません（背景などが写真・動画かどうかは、部品の名前として伝わります）。
 - **カメラワークをAIに任せる**: カメラの動き（寄る・引く・区画のカメラ・緩急など）だけを AI に決めてもらいます。指示の文は空でもかまいません。
+  - **EXTREME**（そのすぐ右のボタン）: 押してから頼むと、激しいカメラワーク（一瞬で寄る・振って入る・回転・拍で揺れる・歌う言葉の寄りに切る など）を AI が選びます。はじめは、対象で「カメラ EXTREME」がオンなら押された状態です。まだオフの場所に頼むと、先に「激しいカメラワークについて」の注意が出ます（**オンにする** で続けます）。結果の一覧には、選んだ動きと、その区画の「カメラ EXTREME」をオンにする行が入ります（その行のチェックを外すと、AI が選んだ動きだけが残ります）。歌っている言葉は読めるように動き、点滅は増えません。
+  - 例: 「サビを激しく」「サビは一瞬で寄って、Aメロは拍で揺らす」「回転は控えめに」「最後のサビだけ振り抜いて」
+  - 送るものは「カメラワークをAIに任せる」と同じ種類です（歌詞、指示、設定の値と名前）。EXTREME のときは、各行で EXTREME がオンかどうかと、その行の構図がカメラを動かせるかどうかも、設定の値として送ります。
 - 意味があいまいなときは、何も変えずに聞き返します（「AIからの質問: …」。区画ごとに頼んだときは「サビ1: …」のように区画の名前が付きます）。
   伝わらなかったときは「指示がうまく伝わりませんでした。言い方を変えて試してください。」と出ます。
 - 詳細の **この行をAIに頼む…** / **この区画をAIに頼む…** / **このカットをAIに頼む…** を押すと、その場所を対象にした状態で指示の欄が開きます。
@@ -295,6 +298,15 @@ the tool's own button (**Prepare lyrics**, **Send**, **Make**, **Send and descri
   device; on by default). **Let AI do the camerawork** changes camera fields only. If the request is unclear, the AI
   asks back ("The AI asks: …") instead of guessing. Changes stay inside the target; anything outside it is grouped
   under "Outside the section (whole video)" and starts unchecked.
+- **EXTREME** — the chip right of **Let AI do the camerawork**. Press it, then ask, and the AI picks intense camerawork
+  (crash zooms, whips, spins, shakes on the beat, cuts to a close-up of each sung word …). It starts pressed where
+  **Camera EXTREME** is already on for the target. Where it is still off, the notice "About intense camerawork" comes
+  first (**Turn on** goes on). The review lists the moves and a row that turns **Camera EXTREME** on for the area
+  (uncheck it and only the AI's moves stay). Every word stays readable while it is sung, and no flashing is added.
+  Examples: "Make the chorus intense", "Crash in on the chorus, shake the verse on the beat", "Fewer spins", "Whip
+  through the last chorus only". It sends the same kind of data as camerawork (lyrics, the instruction, setting values
+  and names); with EXTREME, also whether each line has EXTREME on and whether its layout can move the camera, as
+  setting values.
 - **Instructions per section** — **Ask per section…** opens one line per section (up to 120 characters each; drafts
   are kept in the project). **+ Use the selected lines as a section** adds one. **Send all** sends up to 8 sections at
   once ("Up to 8 sections per request"). It follows the same **AI may use photos and videos** setting as Instruction.

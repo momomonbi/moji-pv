@@ -8,13 +8,18 @@ MV.def('engine/render/xblur', ['core/mat', 'engine/scene/frame', 'engine/scene/x
   // Taps: the camera at t_j = t − SH·j/(n − 1) is cam(t) + Δ_j, Δ_j the difference of the closed-form camera (the x-track
   // pose with its modulators, the rig, the impulses) between t_j and t; the lens deltas are held (no scene is evaluated
   // again). The displacement d is the largest |V(t_j)·V(t)⁻¹·p − p| over the frame centre and four inset corners (design
-  // units, at the last tap); n = clamp(ceil(d / MIN_DU), 2, taps). Tap j draws the frame (copied once) onto itself with
-  // D·V(t_j)·V(t)⁻¹·D⁻¹ and globalAlpha 1/(j + 1): a running average over the base (uncovered borders keep the base).
-  // A clear backdrop (alpha outputs) is cleared, then every copy is added with 'lighter' and alpha 1/n (a true
-  // premultiplied average). No pixel reads, no ctx.filter. Allocation-free after the first call.
+  // units, at the last tap); n = clamp(ceil(d / MIN_DU), 2, taps). The n − 1 moved copies are averaged on a pooled
+  // surface of half the frame's size (phase F: the full-size copies made a blurred frame cost about three times a still
+  // one): the base drawn there first (where no copy reaches, the average keeps it), then tap j of the frame with
+  // S·D·V(t_j)·V(t)⁻¹·D⁻¹ (S = the half scale) and globalAlpha 1 for the first, 1/j after (a running average). That
+  // average is drawn back over the frame with globalAlpha (n − 1)/n, so the frame is the mean of the sharp base and the
+  // copies. A clear backdrop (alpha outputs): the copies are added with 'lighter' and alpha 1/(n − 1) on a cleared half
+  // surface, the frame is scaled by 1/n ('destination-out' at 1 − 1/n) and the average added with 'lighter' at
+  // (n − 1)/n (a true premultiplied mean). No pixel reads, no ctx.filter. Allocation-free after the first call.
 
   const TAPS_EXPORT = 6, TAPS_PREVIEW = 4, TAPS_ADAPT = 3, OFF_LEVEL = 3;
-  const MIN_DU = 12;
+  const MIN_DU = 16;               // below this displacement over the shutter a frame is not blurred (phase F: was 12)
+  const HALF = 0.5;                // the copies' surface, as a share of the frame
   const INSET = 0.1;
 
   // The most copies (base included) a frame may take: export 6; preview 4 at adaptive level 0, 3 at levels 1–2, none
@@ -87,34 +92,45 @@ MV.def('engine/render/xblur', ['core/mat', 'engine/scene/frame', 'engine/scene/x
 
   const DI = new Float32Array(6), DM = new Float32Array(6), MQ = new Float32Array(6);
 
-  // draw(g, frame, pool, tp, D, clear): the taps onto the frame surface (g = frame.ctx) through a pooled copy of it.
-  // D = the design → device transform of the frame.
+  // draw(g, frame, pool, tp, D, clear): the taps onto the frame surface (g = frame.ctx) through a pooled half-size
+  // surface. D = the design → device transform of the frame.
   function draw(g, frame, pool, tp, D, clear) {
-    const copy = pool.take(frame.w, frame.h);
-    copy.ctx.drawImage(frame.canvas, 0, 0);
+    const n = tp.n, fw = frame.w, fh = frame.h;
+    const hw = Math.max(1, Math.ceil(fw * HALF)), hh = Math.max(1, Math.ceil(fh * HALF));
+    const sx = hw / fw, sy = hh / fh;
+    const acc = pool.take(hw, hh);
+    const a = acc.ctx;
     MAT.invert(DI, D);
-    const n = tp.n;
-    g.save();
-    g.setTransform(1, 0, 0, 1, 0, 0);
-    if (clear) {
-      g.globalAlpha = 1;
-      g.globalCompositeOperation = 'source-over';
-      g.clearRect(0, 0, frame.w, frame.h);
-      g.globalCompositeOperation = 'lighter';
-      g.globalAlpha = 1 / n;
-      g.drawImage(copy.canvas, 0, 0);
-    } else g.globalCompositeOperation = 'source-over';
+    a.save();
+    a.globalCompositeOperation = clear ? 'lighter' : 'source-over';
+    if (!clear) {
+      a.setTransform(sx, 0, 0, sy, 0, 0);
+      a.globalAlpha = 1;
+      a.drawImage(frame.canvas, 0, 0);
+    }
     for (let j = 1; j < n; j++) {
       for (let q = 0; q < 6; q++) MQ[q] = tp.M[(j - 1) * 6 + q];
       MAT.mul(DM, D, MQ);
       MAT.mul(DM, DM, DI);
-      g.setTransform(DM[0], DM[1], DM[2], DM[3], DM[4], DM[5]);
-      g.globalAlpha = clear ? 1 / n : 1 / (j + 1);
-      g.drawImage(copy.canvas, 0, 0);
+      a.setTransform(DM[0] * sx, DM[1] * sy, DM[2] * sx, DM[3] * sy, DM[4] * sx, DM[5] * sy);
+      a.globalAlpha = clear ? 1 / (n - 1) : j === 1 ? 1 : 1 / j;
+      a.drawImage(frame.canvas, 0, 0);
     }
+    a.restore();
+    g.save();
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    if (clear) {
+      g.globalCompositeOperation = 'destination-out';
+      g.globalAlpha = 1 - 1 / n;
+      g.fillStyle = '#000000';
+      g.fillRect(0, 0, fw, fh);
+      g.globalCompositeOperation = 'lighter';
+    } else g.globalCompositeOperation = 'source-over';
+    g.globalAlpha = (n - 1) / n;
+    g.drawImage(acc.canvas, 0, 0, hw, hh, 0, 0, fw, fh);
     g.restore();
-    pool.give(copy);
+    pool.give(acc);
   }
 
-  return { TAPS_EXPORT, TAPS_PREVIEW, TAPS_ADAPT, OFF_LEVEL, MIN_DU, maxTaps, taps, draw, displacement };
+  return { TAPS_EXPORT, TAPS_PREVIEW, TAPS_ADAPT, OFF_LEVEL, MIN_DU, HALF, maxTaps, taps, draw, displacement };
 });
