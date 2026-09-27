@@ -1,8 +1,8 @@
 /* 文字PVメーカー v2 — original work. The renderer: one frame of a Plan — evaluate, draw the layers per world, seams, post, picks (DESIGN §4.19.2–4, §7.4; DESIGN_2_1 §4.4, §4.8, §11.3.7). */
-MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/media', 'engine/scene/table', 'engine/scene/frame',
-  'engine/render/surface', 'engine/render/sprites', 'engine/render/shapes', 'engine/render/draw', 'engine/render/post',
-  'engine/render/seam', 'engine/render/pick'],
-(H, C, N, MEDIA, T, F, SF, SP, SH, DR, PO, SE, PK) => {
+MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/media', 'core/shot', 'engine/scene/table',
+  'engine/scene/frame', 'engine/render/surface', 'engine/render/sprites', 'engine/render/shapes', 'engine/render/draw',
+  'engine/render/post', 'engine/render/seam', 'engine/render/pick', 'engine/render/xblur'],
+(H, C, N, MEDIA, SHOT, T, F, SF, SP, SH, DR, PO, SE, PK, XB) => {
   'use strict';
 
   const L = T.LAYER_INDEX;
@@ -20,6 +20,42 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
   const NO_FEATURES = Object.freeze({});
   const OVERSAMPLE = 1.25;         // static ground rasters of a segment the shots zoom into (DESIGN_2_1 §4.8)
   const SEAM_SURFACES = 6;         // frame surfaces a seam frame takes at once (a text seam: both sides and sumiSeep's 4)
+  const X_BLEND = 0.06;            // EXTREME grounds ease from A's camera to B's over B.t0 ± this at a hard boundary
+
+  // --- EXTREME (DESIGN_EXTREME §1.5, §1.6) ---------------------------------------------------------------------------
+
+  // Per plan (cached by identity; plans are immutable): null when no cut has an EXTREME shot and no ground is marked
+  // (grounds[i].x), so every other plan takes none of the paths below. Else { seg: the ground segments whose items take
+  // the coverage limiter, bounds: the hard boundaries between consecutive EXTREME cuts of one segment with no seam into
+  // the later one, sorted by the later cut's t0, bt: their times }.
+  const X_INDEX = new WeakMap();
+  function xIndexOf(plan) {
+    let x = X_INDEX.get(plan);
+    if (x === undefined) { x = buildXIndex(plan); X_INDEX.set(plan, x); }
+    return x;
+  }
+
+  function buildXIndex(plan) {
+    const cuts = plan.cuts || [], grounds = plan.grounds || [];
+    const seg = new Uint8Array(grounds.length), isX = new Uint8Array(cuts.length);
+    let any = false;
+    cuts.forEach((c, i) => {
+      const d = c.slots && c.slots['cam.shot'];
+      if (!d || d.v === undefined || d.v === null || !SHOT.isExtreme(d.v)) return;
+      isX[i] = 1; any = true;
+      if (c.ground >= 0 && c.ground < seg.length) seg[c.ground] = 1;
+    });
+    grounds.forEach((g, i) => { if (g && g.x === true) { seg[i] = 1; any = true; } });
+    if (!any) return null;
+    const into = new Set((plan.seams || []).map((sm) => sm.into || sm.b));
+    const order = cuts.map((c, i) => i).sort((p, q) => cuts[p].t0 - cuts[q].t0 || p - q);
+    const bounds = [];
+    for (let k = 1; k < order.length; k++) {
+      const a = order[k - 1], b = order[k];
+      if (isX[a] && isX[b] && cuts[a].ground === cuts[b].ground && !into.has(cuts[b].key)) bounds.push({ t: cuts[b].t0, a, b });
+    }
+    return { seg, bounds, bt: Float64Array.from(bounds, (e) => e.t) };
+  }
 
   // mediaEntries(scene) → frozen [{ id, time, size, headroom, blur, softBlur }]: a scene's media nodes as mediaAt needs
   // them — size = the box's long side (design units; size × output scale × headroom = the px its draw asks for), blur
@@ -43,6 +79,9 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
   //   (DESIGN_2_1, additive) setRegistry(registry) · mediaAt(plan, source, t, out, scale) (source.media(kind, i)
   //   optional) · lastScale() · opts.layers 'all' | 'ground' · opts.thumb (posters only) · FrameStats.media
   //   { drawn, waiting } and mediaError (export quality)
+  //   (DESIGN_EXTREME, additive) opts.calm (preview only: the EXTREME modulators ×0.3, no motion blur); FrameStats.blur
+  //   (the copies of a motion-blurred frame, only on such frames; FrameStats.passes counts them too); opts.sentinel (lab
+  //   only: the scene backdrop's fill)
   //   (lab only, additive) opts.flush(frame): called with the frame surface once the world is drawn, before the post
   //   stack, and timed with the draw stage. The lab reads one pixel there, so the time the canvas spends rasterizing the
   //   world is charged to 'draw' and not to 'post' (NOTES "Perf: camerawork + materials row", MEAS-1). Never set by
@@ -70,7 +109,7 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
     let fontKey = null;
     const adapt = { level: 0, ema: 0, slow: 0, fast: 0 };
     // The latest frame's time, device scale, backdrop, glyph path and probe (sprite warm-up draws what it would draw).
-    const lastLook = { t: NaN, scale: 0, backdrop: 'scene', glyphPath: 'auto', probe: null, fw: 0, fh: 0 };
+    const lastLook = { t: NaN, scale: 0, backdrop: 'scene', glyphPath: 'auto', probe: null, fw: 0, fh: 0, calm: false };
     const last = { ms: 0, behave: 0, draw: 0, post: 0, passes: 0 };
     const palettes = new WeakMap();                // palette → { black, ids }
     let palSeq = 0;
@@ -87,6 +126,11 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
     const cams = [];
     const used = [];
     const seamCam = { x: 0, y: 0, zoom: 1, roll: 0, shakeX: 0, shakeY: 0, fz: 1 };   // the grounds' camera in a text seam
+    const edgeCam = { x: 0, y: 0, zoom: 1, roll: 0, shakeX: 0, shakeY: 0, fz: 1, gz: 1 };   // … at an EXTREME boundary
+    const coverCams = [];                          // pooled limited copies of the grounds' cameras (EXTREME segments)
+    const evalOpts = { calm: false };              // evaluate() options of the frame being drawn
+    let sentinel = null;                           // lab only: the scene backdrop's fill (ground edge checks)
+    const tapsOut = { n: 0, d: 0, M: new Float64Array(6 * (XB.TAPS_EXPORT - 1)) };
     const gapCam = { x: 0, y: 0, zoom: 1, roll: 0, shakeX: 0, shakeY: 0, fz: 1 };    // … and while no cut is on screen
     let framePlan = null;                          // the plan of the frame being drawn (zoomed grounds)
 
@@ -131,7 +175,7 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
       used.push(scene);
       const it = item(nItems++);
       it.scene = scene; it.cut = i; it.ground = -1; it.tl = t - plan.cuts[i].t0; it.side = side || 0;
-      F.evaluate(scene, it.tl);
+      F.evaluate(scene, it.tl, evalOpts);
       it.cam = F.cameraAt(scene, plan, t, camOut(nItems - 1));
     }
 
@@ -141,7 +185,7 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
       used.push(scene);
       const it = item(nItems++);
       it.scene = scene; it.cut = -1; it.ground = i; it.tl = t - plan.grounds[i].t0; it.side = side || 0; it.cam = IDENTITY;
-      F.evaluate(scene, it.tl);
+      F.evaluate(scene, it.tl, evalOpts);
     }
 
     function gather(plan, source, t) {
@@ -169,6 +213,47 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
         const want = it.side === 1 && seam ? lastOf(seam.aCuts) : it.side === 2 && seam ? seam.bCuts[0] : cur;
         it.cam = camOfCut(want) || gap || (gap = F.rigCamera(plan, t, gapCam));
       }
+      const xi = xIndexOf(plan);
+      if (xi) coverGrounds(xi, t, seam);
+    }
+
+    // EXTREME segments (DESIGN_EXTREME §1.5): their ground items see a pooled copy of their camera with `cover` set (the
+    // view then takes the coverage limiter); at a hard boundary between two EXTREME cuts of the segment the copy eases
+    // from A's camera to B's over B.t0 ± X_BLEND (the textSeamCam math), so a whip's end does not jump the ground.
+    function coverGrounds(xi, t, seam) {
+      let edge = null;
+      if (!seam && xi.bounds.length) {
+        let lo = 0, hi = xi.bt.length;
+        while (lo < hi) { const mid = (lo + hi) >> 1; if (xi.bt[mid] <= t + X_BLEND) lo = mid + 1; else hi = mid; }
+        const k = lo - 1;
+        if (k >= 0 && t >= xi.bt[k] - X_BLEND && t < xi.bt[k] + X_BLEND) {
+          const A = camOfCut(xi.bounds[k].a), B = camOfCut(xi.bounds[k].b);
+          if (A && B) edge = mixCams(A, B, N.smooth((t - (xi.bt[k] - X_BLEND)) / (2 * X_BLEND)), edgeCam);
+        }
+      }
+      for (let k = 0, c = 0; k < nItems; k++) {
+        const it = items[k];
+        if (it.ground < 0 || !xi.seg[it.ground]) continue;
+        const src = edge && !it.side ? edge : it.cam;
+        const out = coverCams[c] || (coverCams[c] = { x: 0, y: 0, zoom: 1, roll: 0, shakeX: 0, shakeY: 0, fz: 1, gz: 1, cover: 1 });
+        c++;
+        out.x = src.x; out.y = src.y; out.zoom = src.zoom; out.roll = src.roll; out.shakeX = src.shakeX; out.shakeY = src.shakeY;
+        out.fz = src.fz === undefined ? 1 : src.fz; out.gz = src.gz > 0 ? src.gz : 1; out.cover = 1;
+        it.cam = out;
+      }
+    }
+
+    // A's camera eased into B's with weight w (as textSeamCam: the framing zoom in log space), plus the ground zoom.
+    function mixCams(A, B, w, c) {
+      const v = 1 - w;
+      const afz = A.fz === undefined ? 1 : A.fz, bfz = B.fz === undefined ? 1 : B.fz;
+      const fz = Math.exp(Math.log(afz) * v + Math.log(bfz) * w);
+      c.x = A.x * v + B.x * w; c.y = A.y * v + B.y * w; c.roll = A.roll * v + B.roll * w;
+      c.zoom = fz * ((A.zoom / afz) * v + (B.zoom / bfz) * w);
+      c.shakeX = A.shakeX * v + B.shakeX * w; c.shakeY = A.shakeY * v + B.shakeY * w;
+      c.fz = fz;
+      c.gz = Math.exp(Math.log(A.gz > 0 ? A.gz : 1) * v + Math.log(B.gz > 0 ? B.gz : 1) * w);
+      return c;
     }
 
     function camOfCut(i) {
@@ -191,6 +276,8 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
       c.zoom = fz * ((A.zoom / A.fz) * v + (B.zoom / B.fz) * w);
       c.shakeX = A.shakeX * v + B.shakeX * w; c.shakeY = A.shakeY * v + B.shakeY * w;
       c.fz = fz;
+      if (A.gz !== undefined || B.gz !== undefined) c.gz = Math.exp(Math.log(A.gz > 0 ? A.gz : 1) * v + Math.log(B.gz > 0 ? B.gz : 1) * w);
+      else if (c.gz !== undefined) c.gz = 1;
       return c;
     }
 
@@ -331,14 +418,16 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
       SF.resetState(g);
       const fill = F.backdropFill(backdrop);
       if (backdrop === 'clear') { g.clearRect(0, 0, w, h); return; }
-      g.fillStyle = fill || pal.ground;
+      g.fillStyle = fill || sentinel || pal.ground;
       g.fillRect(0, 0, w, h);
     }
 
-    // A complete world (all layers, hud last) of one side into g.
-    function drawWorld(g, w, h, side, backdrop) {
+    // A complete world (all layers, hud last) of one side into g. With taps (an EXTREME frame in motion, engine/render/
+    // xblur), the world layers are blurred along the camera's motion before the hud: g is the frame surface's context.
+    function drawWorld(g, w, h, side, backdrop, taps, frame) {
       fillBackdrop(g, w, h, backdrop, dc.pal);
       for (const Lk of WORLD_LAYERS) drawSideLayer(g, Lk, side, true, true);
+      if (taps) { XB.draw(g, frame, pool, taps, dc.D, backdrop === 'clear'); dc.g = g; }
       drawSideLayer(g, L.hud, side, true, true);
     }
 
@@ -491,7 +580,7 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
       for (let n = 0; n < nItems; n++) {
         const it = items[n];
         if (it.ground >= 0) continue;
-        F.evaluate(it.scene, it.tl - dt);
+        F.evaluate(it.scene, it.tl - dt, evalOpts);
         dc.ghostTl = it.tl;
         for (const Lk of SE.TEXT_LAYERS) DR.drawLayer(dc, it.scene, Lk, view(it.cam, Lk), it.tl - dt, -1);
       }
@@ -527,6 +616,8 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
       const sw = surface.w || surface.canvas.width, sh = surface.h || surface.canvas.height;
       const scale = ro.scale > 0 ? ro.scale : Math.min(sw / W, sh / Hd);
       const level = exporting ? 0 : adapt.level;
+      evalOpts.calm = !exporting && ro.calm === true;       // 「激しいカメラを抑える」: preview only (DESIGN_EXTREME §3.6)
+      sentinel = typeof ro.sentinel === 'string' ? ro.sentinel : null;
       // adaptive level 3 draws at 0.75 of the output, but not below 720p: the stage already steps its backing down to
       // 720p at that level, and a second step would only add an upscale (ui-data perf-5)
       const dpr = level >= 3 && Math.min(sw, sh) > DPR_FLOOR ? DPR_STEP : 1;
@@ -549,7 +640,7 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
       dc.meter = ro.meter && typeof ro.meter === 'object' ? ro.meter : null;
       q.draft = quality === 'draft' || (!exporting && level >= 2);
       q.scale = dc.scale; q.pal = pal;
-      lastLook.t = t; lastLook.scale = dc.scale; lastLook.backdrop = backdrop;
+      lastLook.t = t; lastLook.scale = dc.scale; lastLook.backdrop = backdrop; lastLook.calm = evalOpts.calm;
       lastLook.glyphPath = dc.glyphPath; lastLook.probe = dc.probe;
       dc.paintKey = paintKeyOf(dc.scale, palId(pal), q.draft);
       dc.overKey = paintKeyState.over;
@@ -570,7 +661,19 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
       fi.plan = plan; fi.w = fw; fi.h = fh; fi.unit = scale * dpr; fi.quality = quality; fi.alpha = backdrop === 'clear';
       fi.textAt = textAt; fi.flashScale = !exporting && ro.reduceFlash ? REDUCED_FLASH : 1; fi.pal = pal; fi.backdrop = backdrop;
       ctl.frame(fi);
-      const direct = post.length === 0 && dpr === 1;
+      // EXTREME motion blur (DESIGN_EXTREME §1.6): the current cut's x-track in motion, no seam, not toned down; such a
+      // frame never takes the direct path (the taps copy the frame surface)
+      const xi = xIndexOf(plan);
+      let taps = null;
+      if (xi && !fg.seam && !evalOpts.calm && currentCut >= 0) {
+        for (let k = 0; k < nItems; k++) {
+          const it = items[k];
+          if (it.cut !== currentCut) continue;
+          taps = XB.taps(it.scene, plan, t, it.cam, W, Hd, XB.maxTaps(quality, level), tapsOut);
+          break;
+        }
+      }
+      const direct = post.length === 0 && dpr === 1 && !taps;
       const frame = direct ? surface : pool.take(fw, fh);
       const g = frame.ctx;
       dc.g = g;
@@ -580,7 +683,7 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
         const part = SE.seamPart(plan, registry, seam.i);
         if (seam.scope === 'world') drawWorldSeam(g, fw, fh, backdrop, part, seam.u);
         else drawTextSeam(g, fw, fh, backdrop, part, seam.u);
-      } else drawWorld(g, fw, fh, 0, backdrop);     // (a text seam mixes only text layers: none with layers 'ground')
+      } else drawWorld(g, fw, fh, 0, backdrop, taps, frame);   // (a text seam mixes only text layers: none with layers 'ground')
       if (typeof ro.flush === 'function') ro.flush(frame);
       const tDraw = clock();
 
@@ -605,6 +708,7 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
         g.setTransform(1, 0, 0, 1, 0, 0);
         g.globalAlpha = 1;
       }
+      if (taps) passes += taps.n;                    // (DESIGN_EXTREME §4) the motion blur's copies count as passes
       pool.end();
       const end = clock();
 
@@ -617,6 +721,7 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
         provisional, level, media: { drawn: c.media, waiting: dc.mediaWaiting, fallback: c.mediaFallback } };
       // export quality never draws a substitute: the facade turns this into EngineError('media-not-ready' | 'media-missing')
       if (dc.mediaError) stats.mediaError = dc.mediaError;
+      if (taps) stats.blur = taps.n;                 // (DESIGN_EXTREME §1.6) the copies of a motion-blurred frame
       return stats;
     }
 
@@ -662,6 +767,7 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
     // engine.prepare): the caller yields and walks the same t again, finding the sprites made so far.
     function warmAt(plan, source, t, stop) {
       if (!(lastLook.scale > 0) || !plan) return 0;
+      evalOpts.calm = lastLook.calm;
       fg = F.frameAt(plan, t, fg);
       nItems = 0;
       used.length = 0;

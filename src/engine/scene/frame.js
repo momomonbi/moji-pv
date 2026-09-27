@@ -1,7 +1,7 @@
 /* 文字PVメーカー v2 — original work. frameAt(plan, t) → FrameGraph, scene evaluation, cameras and rigs, closed-form time lookups (DESIGN §4.19; DESIGN_2_1 §4.4, §4.6). */
 MV.def('engine/scene/frame', ['core/num', 'core/hash', 'core/noise', 'core/mat', 'core/beats', 'core/curve', 'core/shot',
-  'audio/digest', 'engine/scene/table', 'engine/scene/behave', 'engine/scene/shot'],
-(N, H, NZ, MAT, BEATS, CV, SHOT, DIG, T, BH, SS) => {
+  'audio/digest', 'engine/scene/table', 'engine/scene/behave', 'engine/scene/shot', 'engine/scene/cover'],
+(N, H, NZ, MAT, BEATS, CV, SHOT, DIG, T, BH, SS, CO) => {
   'use strict';
 
   // Everything here is a pure function of its arguments. Per-plan indexes are derived data cached by plan identity
@@ -13,6 +13,7 @@ MV.def('engine/scene/frame', ['core/num', 'core/hash', 'core/noise', 'core/mat',
   const SHAKE_RATE = 23;
   const PUNCH = 0.04;
   const SHAKE_SEED = H.hash32('impulse', 'shake');
+  const CALM = 0.3;              // EXTREME modulators under 「激しいカメラを抑える」 (DESIGN_EXTREME §3.6)
   const ENV_HZ = 20;
   const BACKDROP_FILL = Object.freeze({ chroma: '#00B140', black: '#000000', clear: null, scene: null });
   const FILTER_STAGES = Object.freeze(['shape', 'tone', 'light', 'optic', 'film']);
@@ -332,10 +333,13 @@ MV.def('engine/scene/frame', ['core/num', 'core/hash', 'core/noise', 'core/mat',
 
   // --- evaluating a scene -----------------------------------------------------------------------------------------
 
-  // evaluate(scene, tl) → scene.table with the live pose of local time tl solved (reset → behaviours → world → the
-  // shot's follow lean on the camera, DESIGN_2_1 §4.5.6). Pure in (scene, tl): nothing survives from an earlier call.
-  function evaluate(scene, tl) {
+  // evaluate(scene, tl, opts?) → scene.table with the live pose of local time tl solved (reset → behaviours → world →
+  // the shot's follow lean on the camera, DESIGN_2_1 §4.5.6). Pure in (scene, tl, opts): nothing survives from an
+  // earlier call. opts.calm (DESIGN_EXTREME §3.6, preview only) tones an EXTREME track's beat modulators down; it is
+  // written on the x-track before the behaviours run, so a scene without one is untouched.
+  function evaluate(scene, tl, opts) {
     const table = scene.table;
+    if (scene.shot && scene.shot.x === true) scene.shot.calm = opts && opts.calm === true ? CALM : 1;
     T.resetLive(table);
     BH.runBehaviours(table.live, scene.behaviours, tl);
     T.solve(table);
@@ -346,12 +350,15 @@ MV.def('engine/scene/frame', ['core/num', 'core/hash', 'core/noise', 'core/mat',
   // --- cameras (§4.19.3; DESIGN_2_1 §4.4) ----------------------------------------------------------------------------
 
   // cutCamera(scene, out) → out { x, y, zoom, roll, jx, jy, fz }: the camera node of an evaluated scene (lens ∘ shot ∘
-  // lean) before the rig and the impulses; fz = the shot's own zoom at this evaluation (1 without a shot).
+  // lean) before the rig and the impulses; fz = the shot's own zoom at this evaluation (1 without a shot). An EXTREME
+  // track adds gz, its ground zoom (DESIGN_EXTREME §1.5.2); a reused `out` that had one gets gz 1 back.
   function cutCamera(scene, out) {
     const o = out || { x: 0, y: 0, zoom: 1, roll: 0, jx: 0, jy: 0, fz: 1 };
     const P = scene.table.live, c = scene.cam;
     o.x = P.x[c]; o.y = P.y[c]; o.zoom = P.sx[c]; o.roll = P.rot[c]; o.jx = P.jx[c]; o.jy = P.jy[c];
     o.fz = scene.shot ? scene.shot.live.zoom : 1;
+    if (scene.shot && scene.shot.x === true) o.gz = scene.shot.live.gz;
+    else if (o.gz !== undefined) o.gz = 1;
     return o;
   }
 
@@ -374,6 +381,8 @@ MV.def('engine/scene/frame', ['core/num', 'core/hash', 'core/noise', 'core/mat',
     o.shakeX = k.jx + (shake ? (shake * (NZ.noise2(SHAKE_SEED, t * SHAKE_RATE, 0) - 0.5) * SHAKE_DU) / fz : 0);
     o.shakeY = k.jy + (shake ? (shake * (NZ.noise2(SHAKE_SEED, t * SHAKE_RATE, 1) - 0.5) * SHAKE_DU) / fz : 0);
     o.fz = fz;
+    if (k.gz !== undefined && k.gz !== 1) o.gz = k.gz;          // EXTREME ground zoom passes through (§1.5.2)
+    else if (o.gz !== undefined) o.gz = 1;
     return o;
   }
 
@@ -395,10 +404,13 @@ MV.def('engine/scene/frame', ['core/num', 'core/hash', 'core/noise', 'core/mat',
   // depthCam(cam, f, out) → CamPose: the camera a photo or video at camera factor f sees (DESIGN_2_1 §11.9.3; the kit
   // exports it as K.depthCam): x, y, roll and the shakes times f, zoom' = exp(f · ln zoom) (the framing zoom alike).
   // f = 1 is the camera itself (exactly), f = 0 no camera at all; a factor above 1 is lowered so the zoom stays ≤ 4.
+  // An EXTREME ground camera (DESIGN_EXTREME §1.5.1) passes on `cover` and scales its ground zoom `gz` like the zoom;
+  // a reused `out` that had them gets them cleared.
   const DEPTH_ZOOM_MAX = 4;
   function depthCam(cam, f, out) {
     const o = out || { x: 0, y: 0, zoom: 1, roll: 0, shakeX: 0, shakeY: 0, fz: 1 };
     const fz = cam.fz === undefined ? 1 : cam.fz;
+    if (cam.cover || o.cover) depthExtreme(cam, f, o);
     if (f === 1) {
       o.x = cam.x; o.y = cam.y; o.zoom = cam.zoom; o.roll = cam.roll; o.shakeX = cam.shakeX; o.shakeY = cam.shakeY; o.fz = fz;
       return o;
@@ -413,13 +425,22 @@ MV.def('engine/scene/frame', ['core/num', 'core/hash', 'core/noise', 'core/mat',
     o.zoom = Math.exp(k * Math.log(cam.zoom));
     o.shakeX = k * cam.shakeX; o.shakeY = k * cam.shakeY;
     o.fz = Math.exp(k * Math.log(fz));
+    if (o.cover) o.gz = Math.exp(k * Math.log(o.gz));
     return o;
+  }
+
+  function depthExtreme(cam, f, o) {
+    o.cover = cam.cover && f > 0 ? 1 : 0;
+    o.gz = o.cover && cam.gz > 0 ? cam.gz : 1;
   }
 
   const V1 = new Float32Array(6), V2 = new Float32Array(6);
 
   // view(k) = T(W/2, H/2) · S(1 + (zoom − 1)·k) · R(−roll·k) · T(−W/2 − (camX + shakeX)·k, −H/2 − (camY + shakeY)·k)
+  // A camera with `cover` set (the ground items of an EXTREME segment, DESIGN_EXTREME §1.5.1) takes the coverage limiter
+  // (engine/scene/cover) instead; every other camera takes this code path unchanged.
   function viewMatrix(out, cam, k, W, H) {
+    if (cam.cover) return CO.coverView(out, cam, k, W, H);
     const s = 1 + (cam.zoom - 1) * k;
     MAT.compose(V1, W / 2, H / 2, -cam.roll * k, 0, 0, s, s, 0, 0);
     MAT.ident(V2);

@@ -6,6 +6,8 @@
         [--backdrop scene] [--cell 320] [--fonts] [--params '{"amount":0.55,"when":"impact"}'] [--impact]
         [--impulses flash@0.6,shake@1.2:0.8] --out /tmp/sheet.png
     python3 tests/browser/contact_sheet.py --kind shot [--keys pushWord,readAlong] …   # camera presets (also --kind rig)
+    python3 tests/browser/contact_sheet.py --kind xshot [--keys whipPan,spinIn~m] [--params '{"extreme":0.5}']
+        [--sentinel '#FF00FF'] …                             # EXTREME presets (DESIGN_EXTREME), ground edges counted
     python3 tests/browser/contact_sheet.py --list          # the parts each registry has
     python3 tests/browser/contact_sheet.py                 # self-check (CI): one small sheet per kind, nothing written
 
@@ -13,7 +15,9 @@ One row per part, one column per time. A time u (0..1) is normalized over the pa
 depart → its exit, dwell → the hold between them, seam → the transition, every other kind → the whole visible cut.
 Each cell is the canned sample cut of engine/facade.samplePlan (the part in its slot, fallback parts elsewhere). The kinds
 shot and rig show the camera presets of core/shot (a shot on the cut, or a rig over the whole sample plan; --params sets
-zoom, curve and follow, or amp and curve).
+zoom, curve and follow, or amp and curve). The kind xshot shows the EXTREME presets (a "~m" key is mirrored) on the cut with
+EXTREME on (--params also sets extreme = cam.extreme). --sentinel fills the scene backdrop with a colour (lab only) and
+counts, per cell, the frame-border pixels that show it: a ground edge on screen.
 --params sets the part's params (JSON; the rest stay auto). --impact makes the sample cut an impact (「!」) cut with the
 impulses the planner gives one (flash, shake, slip at its sung start; amounts from the mood, at least 0.6 / 0.5 / 0.3 so
 the sheet shows them). --impulses adds impulses kind@seconds[:amp] (flash shake slip punch) to the sample plan.
@@ -23,7 +27,7 @@ Parts come from parts/catalog when it exists, else from the test fixtures (tests
 stub_parts.js). Google Fonts are blocked unless --fonts is given, so the sheet is fast and uses fallback faces.
 Open the PNG with any image viewer (or the Read tool). Exit status 1 when a cell failed to render.
 Without --kind (CI runs every browser test with its default arguments) it checks itself instead: for every kind of the
-default registry, and for the shot and rig presets, a sheet of two of that kind's parts at two times, kept in memory; it fails when a
+default registry, and for the shot, rig and xshot presets, a sheet of two of that kind's parts at two times, kept in memory; it fails when a
 cell fails, the page reports an error or a CSP violation, or a sheet comes back empty.
 
 This file also holds the lab-page helpers the other engine browser tests import (parts_gallery.py, glyph_parity.py,
@@ -140,7 +144,7 @@ SHEET_JS = r"""async (o) => {
   const FAC = MV.use('engine/facade'), HC = MV.use('engine/host/canvas'), HM = MV.use('engine/host/measure');
   const HF = MV.use('engine/host/fonts'), DOC = MV.use('core/doc'), REG = MV.use('core/registry'), K = MV.use('parts/kit');
   const SHOT = MV.use('core/shot');
-  const camera = o.kind === 'shot' || o.kind === 'rig';          // camera presets: a shot on the cut, a rig over the plan
+  const camera = o.kind === 'shot' || o.kind === 'rig' || o.kind === 'xshot';   // camera presets: a shot on the cut, a rig over the plan
   const fx = globalThis.MVLabFixtures || {};
   const registryOf = (source) => {
     if (source === 'catalog') return MV.use('parts/catalog').defaultRegistry();
@@ -149,7 +153,8 @@ SHEET_JS = r"""async (o) => {
     return REG.createRegistry(fx.examples.exampleParts(K).concat(fallbacks));
   };
   const reg = registryOf(o.parts);
-  const all = camera ? (o.kind === 'shot' ? SHOT.SHOT_KEYS : SHOT.RIG_KEYS).slice() : reg.keys(o.kind);
+  const all = camera ? (o.kind === 'shot' ? SHOT.SHOT_KEYS : o.kind === 'xshot' ? SHOT.XSHOT_KEYS : SHOT.RIG_KEYS).slice() : reg.keys(o.kind);
+  const known = (key) => all.includes(key) || (o.kind === 'xshot' && SHOT.xKeyOf(key) !== null);
   const keys = (o.keys && o.keys.length ? o.keys : all).filter((k) => !!k);
   const times = o.times && o.times.length ? o.times : [0.1, 0.3, 0.6, 0.9];
   const aspect = DOC.DESIGN_SIZE[o.aspect] ? o.aspect : '16:9';
@@ -187,7 +192,21 @@ SHEET_JS = r"""async (o) => {
     if (o.kind === 'seam' && plan.seams.length) { const sm = plan.seams[0]; return [sm.at - sm.dur / 2, sm.at + sm.dur / 2 - 0.001]; }
     return [cut.a, end];
   };
-  const errors = [], means = [];
+  const errors = [], means = [], edges = [];
+  // frame-border pixels (a 2 px ring) that show the sentinel colour
+  const sentinelRGB = o.sentinel ? [1, 3, 5].map((i) => parseInt(o.sentinel.slice(i, i + 2), 16)) : null;
+  const edgeCount = (ctx, w, h) => {
+    const d = ctx.getImageData(0, 0, w, h).data;
+    let n = 0;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        if (x > 1 && x < w - 2 && y > 1 && y < h - 2) { x = w - 3; continue; }
+        const i = (y * w + x) * 4;
+        if (Math.abs(d[i] - sentinelRGB[0]) + Math.abs(d[i + 1] - sentinelRGB[1]) + Math.abs(d[i + 2] - sentinelRGB[2]) < 60) n++;
+      }
+    }
+    return n;
+  };
   let cells = 0, covered = 0;
   // mean luminance of a surface (for the self-check's impact comparison)
   const meanOf = (ctx, x, y, w, h) => {
@@ -197,9 +216,9 @@ SHEET_JS = r"""async (o) => {
     return sum / (d.length / 4) / 255;
   };
   for (let r = 0; r < keys.length; r++) {
-    means.push([]);
+    means.push([]); edges.push([]);
     const key = keys[r], y = headH + r * (cellH + capH + gap);
-    const def = camera ? (all.includes(key) ? { label: { ja: o.kind, en: o.kind } } : null) : reg.get(o.kind, key);
+    const def = camera ? (known(key) ? { label: { ja: o.kind, en: o.kind } } : null) : reg.get(o.kind, key);
     g.fillStyle = '#e8e8e8'; g.font = '600 13px system-ui, sans-serif';
     g.fillText(key, gap, y + 4);
     g.font = '12px system-ui, sans-serif'; g.fillStyle = '#aaa';
@@ -232,7 +251,8 @@ SHEET_JS = r"""async (o) => {
         if (!plan) throw new Error('no sample plan');
         const [t0, t1] = windowOf(plan), t = t0 + (t1 - t0) * Math.min(1, Math.max(0, times[c]));
         engine.renderFrame(cell, t, { quality: 'export', pick: false, scale: Math.min(cellW / plan.design.w, cellH / plan.design.h),
-          backdrop: o.backdrop });
+          backdrop: o.backdrop, sentinel: o.sentinel || undefined });
+        if (sentinelRGB) edges[r].push(edgeCount(cell.ctx, cellW, cellH));
         g.drawImage(cell.canvas, x, y);
         g.fillStyle = '#aaa'; g.font = '11px system-ui, sans-serif';
         g.fillText('t=' + t.toFixed(2) + 's', x + 3, y + cellH + 2);
@@ -254,7 +274,7 @@ SHEET_JS = r"""async (o) => {
   }
   for (const e of engine.warnings()) if (e.code === 'part-error') errors.push(e.detail);
   engine.dispose();
-  return { png: sheet.toDataURL('image/png'), cells, errors, width: W, height: H, means, covered };
+  return { png: sheet.toDataURL('image/png'), cells, errors, width: W, height: H, means, covered, edges };
 }"""
 
 
@@ -303,13 +323,20 @@ async def run(args):
                     'times': parse_list(args.times, float), 'text': args.text or None, 'theme': args.theme or None,
                     'orient': args.orient or None, 'parts': args.parts or info['sources'][0], 'backdrop': args.backdrop,
                     'cell': args.cell, 'fonts': bool(args.fonts), 'params': json.loads(args.params) if args.params else None,
-                    'impact': bool(args.impact), 'impulses': parse_impulses(args.impulses)}
+                    'impact': bool(args.impact), 'impulses': parse_impulses(args.impulses), 'sentinel': args.sentinel or None}
             result = await render_sheet(page, opts)
             data = base64.b64decode(result['png'].split(',', 1)[1])
             out = Path(args.out)
             out.parent.mkdir(parents=True, exist_ok=True)
             out.write_bytes(data)
             print('contact_sheet: wrote %s (%dx%d, %d cells)' % (out, result['width'], result['height'], result['cells']))
+            if args.sentinel:
+                keys = opts['keys'] or []
+                for r, row in enumerate(result['edges']):
+                    if any(row):
+                        print('  ground edge (sentinel pixels on the frame border) in row %s: %s' % (
+                            keys[r] if r < len(keys) else r, row))
+                print('contact_sheet: %d cells show a ground edge' % sum(1 for row in result['edges'] for v in row if v))
             problems = result['errors'] + page.lab_errors + await csp_violations(page)
             for msg in problems:
                 print('  ' + msg)
@@ -328,7 +355,7 @@ async def self_check(page, info):
         pick = keys[:1] + keys[len(keys) // 2:len(keys) // 2 + 1] if len(keys) > 1 else keys
         opts = {'kind': kind, 'keys': pick, 'aspect': '16:9', 'times': [0.3, 0.7], 'text': None, 'theme': None,
                 'orient': None, 'parts': source, 'backdrop': 'scene', 'cell': 160, 'fonts': False, 'params': None,
-                'impact': False, 'impulses': []}
+                'impact': False, 'impulses': [], 'sentinel': None}
         result = await render_sheet(page, opts)
         sheets += 1
         if result['cells'] != len(pick) * 2 or not result['png'].startswith('data:image/png'):
@@ -336,17 +363,19 @@ async def self_check(page, info):
         if result['covered']:
             failures.append('%s: %d cells have something drawn over their bottom-left corner' % (kind, result['covered']))
         failures.extend('%s: %s' % (kind, msg) for msg in result['errors'])
-    for kind in ('shot', 'rig'):
+    for kind in ('shot', 'rig', 'xshot'):
         keys = info['camera'][kind]
         pick = [keys[0], keys[len(keys) // 2]]
         opts = {'kind': kind, 'keys': pick, 'aspect': '9:16' if kind == 'shot' else '16:9', 'times': [0.3, 0.7], 'text': None,
                 'theme': None, 'orient': None, 'parts': source, 'backdrop': 'scene', 'cell': 160, 'fonts': False,
-                'params': None, 'impact': False, 'impulses': []}
+                'params': None, 'impact': False, 'impulses': [], 'sentinel': '#FF00FF' if kind == 'xshot' else None}
         result = await render_sheet(page, opts)
         sheets += 1
         if result['cells'] != len(pick) * 2 or not result['png'].startswith('data:image/png'):
             failures.append('%s: %d cells for %d presets × 2 times' % (kind, result['cells'], len(pick)))
         failures.extend('%s: %s' % (kind, msg) for msg in result['errors'])
+        if kind == 'xshot' and any(v for row in result['edges'] for v in row):
+            failures.append('xshot: a ground edge shows on the frame border %s' % result['edges'])
     failures.extend(await check_options(page, info, source))
     failures.extend(page.lab_errors + await csp_violations(page))
     for msg in failures:
@@ -363,7 +392,7 @@ async def check_options(page, info, source):
     dark = 'nightTram' if 'nightTram' in info['parts'][source].get('theme', []) else None
     base = {'kind': 'filter', 'keys': ['flashPop'], 'aspect': '16:9', 'times': [0.05, 0.9], 'text': None, 'theme': dark,
             'orient': None, 'parts': source, 'backdrop': 'scene', 'cell': 160, 'fonts': False,
-            'params': {'amount': 0.9, 'when': 'impact'}, 'impact': False, 'impulses': []}
+            'params': {'amount': 0.9, 'when': 'impact'}, 'impact': False, 'impulses': [], 'sentinel': None}
     plain = await render_sheet(page, base)
     hit = await render_sheet(page, dict(base, impact=True))
     out = ['options: %s' % m for m in plain['errors'] + hit['errors']]
@@ -381,7 +410,7 @@ async def check_options(page, info, source):
 def main(argv=None):
     ap = argparse.ArgumentParser(description='Render a contact sheet of parts through the lab page.')
     ap.add_argument('--kind', help='part kind: arrange arrive dwell depart ground ornament lens filter seam theme mood, '
-                    'or the camera presets shot and rig (without it: the self-check)')
+                    'or the camera presets shot, rig and xshot (without it: the self-check)')
     ap.add_argument('--keys', default='', help='comma-separated part keys (default: every part or preset of the kind)')
     ap.add_argument('--aspect', default='16:9')
     ap.add_argument('--times', default='0.1,0.3,0.6,0.9', help='normalized times, comma-separated')
@@ -395,6 +424,8 @@ def main(argv=None):
     ap.add_argument('--params', default='', help='the part\'s params as JSON, e.g. \'{"amount":0.55,"when":"impact"}\'')
     ap.add_argument('--impact', action='store_true', help='make the sample cut an impact cut, with its impulses')
     ap.add_argument('--impulses', default='', help='extra impulses kind@seconds[:amp], comma-separated (flash shake slip punch)')
+    ap.add_argument('--sentinel', default='', help='fill the scene backdrop with this #RRGGBB colour and count the frame-border '
+                    'pixels that show it (ground edges)')
     ap.add_argument('--list', action='store_true', help='list the parts and exit')
     ap.add_argument('--out', default='/tmp/sheet.png')
     args = ap.parse_args(argv)

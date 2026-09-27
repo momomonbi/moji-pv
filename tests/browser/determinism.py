@@ -15,7 +15,8 @@ The windows cover entrances, exits, a seam and the texture filter. Two targeted 
 6. DESIGN_2_1 camerawork: shots (reading and pushing ones with a follow lean) and rigs on the sample cut: frame N
    directly equals frame N after 0 … N−1, and the 30- and 60-step runs agree at their shared times. Project v21 (a
    project with materials: an entrance, a hold and an atmosphere of its own, and shot pins) runs checks 1–3 over the
-   materials' lines.
+   materials' lines. DESIGN_EXTREME: the EXTREME presets that move the most (whips, spins, jumps, beat modulators; motion
+   blur on, its shutter fixed in seconds) take the same checks.
 7. DESIGN_2_1 §11.8.3 (media, in the built app page with the real AssetStore: tests/www/media_parts.js): a project with
    a video ground (the VP9 counter of media_gen.js, clock song), a photo frame of the alpha WebM (clock show) and a still
    photo frame, the automatic camerawork on, in export quality (each frame awaited with mediaReady): frame N of a fresh
@@ -52,7 +53,10 @@ WINDOWS = {'v21': (13.6, 15.6)}   # v21: line r7 enters with material myMat1, r8
 # emphasized word and then hold; settle and driftOff sit at the 0.9 floor on its wide line: neither would show a history
 # leak.)
 CAMERA = (('shot', 'readAlong', {'follow': 0.6}), ('shot', 'tiltHold', {'follow': 0.5}), ('shot', 'sweepAcross', None),
-          ('shot', 'wideHold', {'follow': 0.3}), ('rig', 'climbRise', None), ('rig', 'leanTilt', {'amp': 1.5}))
+          ('shot', 'wideHold', {'follow': 0.3}), ('rig', 'climbRise', None), ('rig', 'leanTilt', {'amp': 1.5}),
+          ('xshot', 'whipPan', None), ('xshot', 'spinIn~m', None), ('xshot', 'crashZoom', None), ('xshot', 'orbit~m', None),
+          ('xshot', 'whipRead', None), ('xshot', 'dutchSwing', {'extreme': 0.75}), ('xshot', 'shakeHits', None),
+          ('xshot', 'beatCrash', None))
 CAMERA_STEPS = 30
 CAMERA_PROBES = (7, 19, 29)
 FPS = 30
@@ -171,7 +175,7 @@ async def check_camera(page, src, failures):
         if len(set(seq)) < 5:
             failures.append('%s: only %d distinct frames (does the camera move?)' % (where, len(set(seq))))
             bad += 1
-    print('%s %s: %d camera presets (shots with follow, rigs): frame N alone = after 0..N−1, 30 = 60 steps' % (
+    print('%s %s: %d camera presets (shots with follow, rigs, EXTREME): frame N alone = after 0..N−1, 30 = 60 steps' % (
         'FAIL' if bad else 'ok  ', src, len(CAMERA)))
 
 

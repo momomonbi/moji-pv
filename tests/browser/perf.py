@@ -17,6 +17,9 @@ The behave stage (evaluation and world solve) must stay ≤ 0.8 ms p50 at 720p a
 Material particles are drawn by paints, so their budget is read from the chosen definitions (Σ mine.cost.particles,
 scaled by env.mixShare to ≤ 400), not from FrameStats.drawn.particles. The glyph budget (§5.9.5) is read from the scenes:
 no material phase may add more than its share of glyph cover while a mask is left to put on.
+DESIGN_EXTREME §4, §5.3 (+): project_long with EXTREME camerawork on every line (the twelve x-presets in turn, pinned per
+line, under the slowSwell rig), 10 s at 30 fps at 720p: frame p50 / p95 as above (judged at twice the budget), and the
+motion-blurred frames (engine/render/xblur, ≤ 6 copies in export) reported apart; the behave stage p50 is printed.
 DESIGN_2_1 §11.8.3 (+): project_basic with a 1080p30 video ground (VP9, clock song, depth auto: 'back', so the
 video is blurred) and a still photoFrame (a 1600×1200 JPEG), 10 s at 30 fps at 720p, in the built app page with the real
 AssetStore (tests/www/media_parts.js). The timed frame is the whole iteration a player or an exporter runs: `await
@@ -91,6 +94,8 @@ async def run(args):
                     failures.append('%s: p50 %.2f ms / p95 %.2f ms is above twice the budget' % (project, r['p50'], r['p95']))
             if args.camera:
                 await check_camerawork(page, info, args, failures)
+            if args.extreme:
+                await check_extreme(page, info, args, failures)
             if page.lab_errors:
                 failures.append('page errors: %r' % page.lab_errors[:10])
             if args.media:
@@ -139,6 +144,33 @@ async def check_camerawork(page, info, args, failures):
               r['behaveP50'], st['behave'], r['p50'], r['p95'], r['max'], r['shots'], r['rigs'], r['particles'],
               r['mixShare'], gb['phases'], gb['masked'], gb['fitted'], gb['share']))
     failures.extend('long+camera: ' + b for b in bad)
+
+
+async def check_extreme(page, info, args, failures):
+    """project_long with EXTREME shots on every line; the motion-blurred frames apart (DESIGN_EXTREME §5.3)."""
+    src = 'catalog' if 'catalog' in info['sources'] else None
+    if src is None:
+        print('SKIP  extreme: no catalog on the lab page')
+        return
+    runs = []
+    for _ in range(max(2, args.runs)):
+        runs.append(await page.evaluate('(o) => window.__lab.perf(o)', {
+            'parts': src, 'project': 'long', 'seconds': args.seconds, 'fps': 30, 'short': 720, 'start': START['long'],
+            'extreme': True}))
+    runs.sort(key=lambda x: x['p95'])
+    r = runs[0]
+    bad = []
+    if r['p50'] > 2 * TARGET_MS or r['p95'] > 2 * HARD_MS:
+        bad.append('p50 %.2f ms / p95 %.2f ms is above twice the budget' % (r['p50'], r['p95']))
+    if r['xshots'] < 1:
+        bad.append('no EXTREME shot was drawn')
+    b = r['blur']
+    st = r['stages']
+    print('%s long+extreme %dx%d, %d frames: p50 %.2f ms, p95 %.2f ms, max %.2f ms (behave p50 %.2f, draw %.2f, post %.2f); '
+          '%d x-tracks; %d motion-blurred frames: p50 %.2f ms, p95 %.2f ms' % (
+              'FAIL' if bad else 'ok  ', r['w'], r['h'], r['frames'], r['p50'], r['p95'], r['max'], r['behaveP50'], st['draw'],
+              st['post'], r['xshots'], b['frames'], b['p50'], b['p95']))
+    failures.extend('long+extreme: ' + x for x in bad)
 
 
 async def check_media(browser, args, failures):
@@ -226,6 +258,8 @@ def main():
     ap.add_argument('--runs', type=int, default=2, help='fresh-engine runs per project; the least disturbed one is judged')
     ap.add_argument('--no-camera', dest='camera', action='store_false',
                     help='skip the camerawork + materials run of project_long (DESIGN_2_1 §7.4)')
+    ap.add_argument('--no-extreme', dest='extreme', action='store_false',
+                    help='skip the EXTREME camerawork run of project_long (DESIGN_EXTREME §5.3)')
     ap.add_argument('--no-media', dest='media', action='store_false',
                     help='skip the photos-and-videos run of project_basic (DESIGN_2_1 §11.8.3)')
     ap.add_argument('--media-rows', action='store_true', help='also measure the other §11.5.12 rows once (NOTES)')

@@ -1,6 +1,6 @@
 <!doctype html><html lang="ja"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-KkzyHKpCmVnvHvpbTWKiF0uAnC+8+N370zGcykwXoMg='; style-src 'sha256-C7f+4dHVZFSrPADTL/+9MwqvHeCG8qOUP1K4ARo7x3A=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-MOay+Hd4aPGRu36A0iDKJ/87LAmVGvtOQ8NNB8evE8w='; style-src 'sha256-C7f+4dHVZFSrPADTL/+9MwqvHeCG8qOUP1K4ARo7x3A=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
 <title>文字PVメーカー</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -4257,8 +4257,16 @@ MV.def('core/shot', ['core/num', 'core/curve'], (N, CV) => {
     rig: { u: [0, 1], zoom: [0.95, 1.15], x: [-0.05, 0.05], y: [-0.05, 0.05], roll: [-4, 4] },
     frameZoom: [0.9, 3],                          // the camera zoom a key may reach (§4.5.4, §1.4 #17)
   });
+  // EXTREME (DESIGN_EXTREME §1.1): the limits of an x-shot, next to LIMITS (which stays as it is). Every field of LIMITS
+  // is here too (the keyframe editor reads either through limitsOf); `mods` holds the shot-level beat modulators.
+  const XLIMITS = deepFreeze(Object.assign(JSON.parse(JSON.stringify(LIMITS)), {
+    fill: [0.1, 0.95], ox: [-0.6, 0.6], oy: [-0.6, 0.6], roll: [-360, 360],
+    hit: [0, 1], gz: [1, 1.35], hop: [0, 0.35], whip: [0, 0.4], blur: [0, 1],
+    mods: { zoom: [0, 0.1], roll: [0, 20], shake: [0, 1], every: [1, 2, 4] },
+  }));
   const DEFAULTS = Object.freeze({ dt: 0, fill: 0.6, zoom: 1, px: 0.5, py: 0.5, roll: 0 });
   const ANCHORS = Object.freeze(['a', 'rest', 'sung', 'mid', 'end', 'out', 'b', 'emph']);
+  const X_ANCHORS = Object.freeze(ANCHORS.concat(['accent', 'accentEnd']));
   const TEXT_AIMS = Object.freeze(['block', 'emph', 'first', 'last', 'reading']);
   const PLACE_AIMS = Object.freeze(['frame', 'point']);
   const MOVES = Object.freeze(['drift', 'follow', 'panDown', 'panLeft', 'panRight', 'panUp', 'pullOut', 'punch', 'pushIn', 'tilt']);
@@ -4390,8 +4398,13 @@ MV.def('core/shot', ['core/num', 'core/curve'], (N, CV) => {
     return deepFreeze(sortedObject(out));
   }
 
+  // A ShotRef in canonical form, or undefined. EXTREME forms (an x-preset key with an optional "~m", an object with
+  // x === 1) are read by their own grammar; every other value exactly as before.
   function coerceShot(v) {
-    if (typeof v === 'string') return v === 'none' || Object.prototype.hasOwnProperty.call(SHOT_DATA, v) ? v : undefined;
+    if (typeof v === 'string') {
+      return v === 'none' || Object.prototype.hasOwnProperty.call(SHOT_DATA, v) || xKeyOf(v) !== null ? v : undefined;
+    }
+    if (isObject(v) && v.x === 1) return coerceXShotObject(v);
     return coerceShotObject(v);
   }
 
@@ -4427,6 +4440,147 @@ MV.def('core/shot', ['core/num', 'core/curve'], (N, CV) => {
 
   function isCustom(ref) { return isObject(ref); }
 
+  // --- EXTREME shots (DESIGN_EXTREME §1.1–§1.2) ----------------------------------------------------------------------
+
+  // XShot := { x: 1, keys: XKey[2..6], follow?, beat?: { zoom?, roll?, shake?, every? }, blur? }. An XKey is a Key with
+  // the XLIMITS ranges, the anchors accent / accentEnd, and hit (every aim), gz (text and frame aims), hop and whip
+  // (reading aims). Canonical like a Shot; defaults omitted: hit 0, gz 1, whip 0, beat.every 1, blur 1 (hop is kept at 0:
+  // absent means the reading hop rule). Only objects with x === 1 are read this way; every other value is coerced
+  // exactly as before.
+  function coerceXAt(v) {
+    if (typeof v === 'string' && X_ANCHORS.includes(v)) return v;
+    return coerceAt(v);
+  }
+
+  function coerceXKey(v) {
+    if (!isObject(v)) return undefined;
+    const at = coerceXAt(v.at), aim = coerceAim(v.aim);
+    if (at === undefined || aim === undefined) return undefined;
+    const kind = aimKind(aim);
+    const L = XLIMITS;
+    const out = { at, aim };
+    const num = (name, range, applies, dflt) => {
+      if (!applies || !isFiniteNumber(v[name])) return;
+      const x = clampTo(v[name], range);
+      if (dflt === undefined || x !== dflt) out[name] = x;
+    };
+    num('dt', L.dt, true, DEFAULTS.dt);
+    num('fill', L.fill, kind === 'text', DEFAULTS.fill);
+    num('zoom', L.zoom, kind !== 'text', DEFAULTS.zoom);
+    num('px', L.px, kind === 'point', DEFAULTS.px);
+    num('py', L.py, kind === 'point', DEFAULTS.py);
+    num('ox', L.ox, true);
+    num('oy', L.oy, true);
+    num('roll', L.roll, true, DEFAULTS.roll);
+    num('hit', L.hit, true, 0);
+    num('gz', L.gz, kind === 'text' || kind === 'frame', 1);
+    num('hop', L.hop, aim === 'reading');
+    num('whip', L.whip, aim === 'reading', 0);
+    if (v.curve !== undefined) {
+      const c = CV.coerce(v.curve);
+      if (c !== undefined) out.curve = c;
+    }
+    return sortedObject(out);
+  }
+
+  // every ∈ {1, 2, 4}: a number reads as the nearest of them.
+  function coerceEvery(v) {
+    if (!isFiniteNumber(v)) return undefined;
+    return v < 1.5 ? 1 : v < 3 ? 2 : 4;
+  }
+
+  function coerceBeat(v) {
+    if (!isObject(v)) return undefined;
+    const M = XLIMITS.mods;
+    const out = {};
+    for (const name of ['zoom', 'roll', 'shake']) {
+      if (!isFiniteNumber(v[name])) continue;
+      const x = clampTo(v[name], M[name]);
+      if (x !== 0) out[name] = x;
+    }
+    const every = coerceEvery(v.every);
+    if (every !== undefined && every !== 1) out.every = every;
+    return Object.keys(out).length ? sortedObject(out) : undefined;
+  }
+
+  function coerceXShotObject(v) {
+    if (!isObject(v) || v.x !== 1 || !Array.isArray(v.keys)) return undefined;
+    const keys = [];
+    for (const key of v.keys) {
+      const c = coerceXKey(key);
+      if (c !== undefined) keys.push(c);
+      if (keys.length === XLIMITS.keys[1]) break;
+    }
+    if (keys.length < XLIMITS.keys[0]) return undefined;
+    const out = { keys, x: 1 };
+    if (isFiniteNumber(v.follow)) {
+      const f = clampTo(v.follow, XLIMITS.follow);
+      if (f !== 0) out.follow = f;
+    }
+    const beat = coerceBeat(v.beat);
+    if (beat) out.beat = beat;
+    if (isFiniteNumber(v.blur)) {
+      const b = clampTo(v.blur, XLIMITS.blur);
+      if (b !== 1) out.blur = b;
+    }
+    return deepFreeze(sortedObject(out));
+  }
+
+  // The twelve presets (§1.2 table, FROZEN once accepted). ⇆ = MIRRORS (a "~m" suffix flips ox and roll). jumpRead's
+  // second reading key carries hop 0 too, so both reading keys cut from word to word (the table's intent).
+  const XSHOT_DATA = {
+    crashZoom: { tags: ['hard', 'fast', 'bold'], blur: 1, keys: [k('a', 'block', { fill: 0.52 }),
+      k('accent', 'block', { dt: -0.04, fill: 0.52, curve: 'linear' }), k('accent', 'emph', { dt: 0.05, fill: 0.9, curve: 'dashStop', hit: 0.7 }),
+      k('accentEnd', 'emph', { fill: 0.9, curve: 'linear' }), k('accentEnd', 'block', { dt: 0.12, fill: 0.66, curve: 'dashStop' }),
+      k('b', 'block', { fill: 0.7, curve: 'linear' })] },
+    punchHit: { tags: ['hard', 'fast'], blur: 0.6, keys: [k('a', 'block', { fill: 0.6 }),
+      k('sung', 'block', { dt: -0.02, fill: 0.6, curve: 'linear' }), k('sung', 'block', { dt: 0.05, fill: 0.76, curve: 'dashStop', hit: 0.8 }),
+      k('b', 'block', { fill: 0.72, curve: 'fadeBrake' })] },
+    whipPan: { tags: ['fast', 'bold'], blur: 1, keys: [k('a', 'block', { fill: 0.64, ox: 0.45 }),
+      k('a', 'block', { dt: 0.1, fill: 0.64, curve: 'dashStop' }), k('b', 'block', { dt: -0.37, fill: 0.64, curve: 'linear' }),
+      k('b', 'block', { dt: -0.25, fill: 0.64, ox: -0.45, curve: 'slowBloom' })] },
+    whipRead: { tags: ['fast', 'playful'], blur: 1, keys: [k('a', 'first', { fill: 0.8 }),
+      k('sung', 'reading', { fill: 0.8, hop: 0.12, whip: 0.25 }), k('end', 'block', { dt: 0.02, fill: 0.62, curve: 'dashStop' })] },
+    jumpRead: { tags: ['hard', 'digital'], blur: 0, keys: [k('a', 'block', { fill: 0.55 }),
+      k('sung', 'block', { dt: -0.006, fill: 0.55, curve: 'linear' }), k('sung', 'reading', { fill: 0.82, hop: 0 }),
+      k('end', 'reading', { dt: 0.002, fill: 0.82, hop: 0 }), k('end', 'block', { dt: 0.008, fill: 0.6 })] },
+    spinIn: { tags: ['playful', 'bold'], blur: 1, keys: [k('a', 'block', { fill: 0.45, roll: -180 }),
+      k('sung', 'block', { dt: 0.2, fill: 0.68, curve: 'dashStop', hit: 0.4 }), k('b', 'block', { fill: 0.7, curve: 'linear' })] },
+    spinOut: { tags: ['playful'], blur: 1, keys: [k('a', 'block', { fill: 0.62 }),
+      k('end', 'block', { dt: 0.02, fill: 0.66, curve: 'linear' }), k('b', 'block', { fill: 0.5, roll: 360, curve: 'slowBloom' })] },
+    dutchSwing: { tags: ['bold', 'playful'], blur: 0.5, beat: { roll: 14, every: 1 }, keys: [k('a', 'block', { fill: 0.66, roll: -10 }),
+      k('b', 'block', { fill: 0.7, roll: 10, curve: 'linear' })] },
+    shakeHits: { tags: ['hard', 'bold'], blur: 0.4, beat: { shake: 0.8, zoom: 0.03, every: 2 }, keys: [k('a', 'block', { fill: 0.66 }),
+      k('b', 'block', { fill: 0.72, curve: 'linear' })] },
+    beatCrash: { tags: ['fast', 'bold'], blur: 0.6, beat: { zoom: 0.09, every: 1 }, keys: [k('a', 'block', { fill: 0.58 }),
+      k('b', 'block', { fill: 0.62, curve: 'linear' })] },
+    vertigo: { tags: ['serious', 'slow'], blur: 0, keys: [k('a', 'block', { fill: 0.62, gz: 1 }),
+      k('b', 'block', { fill: 0.7, gz: 1.35, curve: 'slowBloom' })] },
+    orbit: { tags: ['airy', 'slow'], blur: 0.3, keys: [k('a', 'block', { fill: 0.6, roll: -16, ox: -0.1, oy: 0.03, gz: 1.12 }),
+      k('mid', 'block', { fill: 0.64, ox: 0, oy: -0.03, gz: 1, curve: 'linear' }),
+      k('b', 'block', { fill: 0.6, roll: 16, ox: 0.1, oy: 0.03, gz: 1.12, curve: 'linear' })] },
+  };
+  const MIRRORS = Object.freeze(['dutchSwing', 'orbit', 'spinIn', 'spinOut', 'whipPan']);
+  const MIRROR_SUFFIX = '~m';
+
+  // 'key' | 'key~m' of an x preset → { key, m } (m = true when mirrored); null for anything else.
+  function xKeyOf(v) {
+    if (typeof v !== 'string') return null;
+    const m = v.endsWith(MIRROR_SUFFIX);
+    const key = m ? v.slice(0, -MIRROR_SUFFIX.length) : v;
+    return Object.prototype.hasOwnProperty.call(XSHOT_DATA, key) ? { key, m } : null;
+  }
+
+  // Keys with ox and roll negated (left ↔ right).
+  function mirrorKeys(keys) {
+    return keys.map((key) => {
+      const out = Object.assign({}, key);
+      if (out.ox !== undefined) out.ox = out.ox === 0 ? 0 : -out.ox;
+      if (out.roll !== undefined) out.roll = -out.roll;
+      return sortedObject(out);
+    });
+  }
+
   // --- presets in canonical form -----------------------------------------------------------------------------------
 
   const SHOTS = deepFreeze(Object.fromEntries(Object.keys(SHOT_DATA).sort().map((key) => {
@@ -4440,12 +4594,43 @@ MV.def('core/shot', ['core/num', 'core/curve'], (N, CV) => {
     return [key, { tags: d.tags.slice(), curve: d.curve, keys: coerceRig({ keys: d.keys }).keys }];
   })));
   const RIG_KEYS = Object.freeze(Object.keys(RIGS));
+  const XSHOTS = deepFreeze(Object.fromEntries(Object.keys(XSHOT_DATA).sort().map((key) => {
+    const d = XSHOT_DATA[key];
+    const shot = coerceXShotObject({ x: 1, keys: d.keys, beat: d.beat, blur: d.blur });
+    return [key, Object.assign({ tags: d.tags.slice() }, shot)];
+  })));
+  const XSHOT_KEYS = Object.freeze(Object.keys(XSHOTS));
 
-  // The Shot (keys, follow) of a ShotRef; null for 'none' and unreadable values.
+  // isExtreme(ref): an x-preset key (with an optional "~m") or a readable object with x: 1.
+  function isExtreme(ref) {
+    if (typeof ref === 'string') return xKeyOf(ref) !== null;
+    return isObject(ref) && ref.x === 1 && coerceXShotObject(ref) !== undefined;
+  }
+
+  // presetOf(v) → the preset record a ShotRef names ({ tags, keys, … } as SHOTS / XSHOTS hold it; a mirrored x-preset
+  // with its keys mirrored), or null for 'none', objects and unknown values.
+  const XSHOTS_MIRRORED = deepFreeze(Object.fromEntries(XSHOT_KEYS.map((key) => [key,
+    Object.assign({}, XSHOTS[key], { tags: XSHOTS[key].tags.slice(), keys: mirrorKeys(XSHOTS[key].keys) })])));
+  function presetOf(v) {
+    if (typeof v !== 'string') return null;
+    if (Object.prototype.hasOwnProperty.call(SHOTS, v)) return SHOTS[v];
+    const x = xKeyOf(v);
+    if (!x) return null;
+    return x.m ? XSHOTS_MIRRORED[x.key] : XSHOTS[x.key];
+  }
+
+  // limitsOf(shot) → XLIMITS for an EXTREME value, else LIMITS.
+  function limitsOf(ref) { return isExtreme(ref) ? XLIMITS : LIMITS; }
+
+  // The Shot (keys, follow) of a ShotRef; null for 'none' and unreadable values. (An x-shot's keys; a mirrored x-preset's
+  // keys mirrored.)
   function shotOf(ref) {
     const v = coerceShot(ref);
     if (v === undefined || v === 'none') return null;
-    if (typeof v === 'string') return { keys: SHOTS[v].keys, follow: SHOTS[v].follow || 0 };
+    if (typeof v === 'string') {
+      const p = presetOf(v);
+      return { keys: p.keys, follow: p.follow || 0 };
+    }
     return { keys: v.keys, follow: v.follow || 0 };
   }
 
@@ -4457,6 +4642,7 @@ MV.def('core/shot', ['core/num', 'core/curve'], (N, CV) => {
   // key 0 is at 'a' and aims at the text; `follow` (not null) replaces the shot's follow.
   function expandShot(ref, opts) {
     const o = opts || {};
+    if (isExtreme(ref)) return expandX(ref, o);
     const shot = shotOf(ref);
     if (!shot) return null;
     const zoom = isFiniteNumber(o.zoom) ? o.zoom : 1;
@@ -4491,9 +4677,56 @@ MV.def('core/shot', ['core/num', 'core/curve'], (N, CV) => {
     return deepFreeze({ keys, follow: clampTo(isFiniteNumber(follow) ? follow : 0, LIMITS.follow) });
   }
 
+  // xIntensity(extreme) → g, the EXTREME intensity (DESIGN_EXTREME §1.4): max(0.3, cam.extreme) for a number, 1 without
+  // a decision (a hand-picked x-preset with the switch off).
+  function xIntensity(extreme) {
+    return isFiniteNumber(extreme) ? Math.max(0.3, N.clamp(extreme, 0, 1)) : 1;
+  }
+
+  // The x branch of expandShot (DESIGN_EXTREME §1.4): { x: 1, keys, follow, beat: { zoom, roll, shake, every }, blur, g,
+  // m } with every field of every key explicit (hop null = the reading hop rule). The mirror ("~m") is already in the
+  // keys (m = −1 records it for the hits); roll, hit, gz − 1, whip and the beat amplitudes are multiplied by g; fills
+  // (times cam.zoom, clamped to XLIMITS), positions and timing are not. `carry` is ignored.
+  function expandX(ref, o) {
+    const v = coerceShot(ref);
+    const x = typeof v === 'string' ? xKeyOf(v) : null;
+    const src = typeof v === 'string' ? presetOf(v) : v;
+    const g = isFiniteNumber(o.g) ? N.clamp(o.g, 0, 1) : 1;
+    const zoom = isFiniteNumber(o.zoom) ? o.zoom : 1;
+    const curveIn = o.curve === undefined ? 'softEnds' : o.curve;
+    const curve = CV.coerce(curveIn) === undefined ? 'softEnds' : CV.coerce(curveIn);
+    const L = XLIMITS;
+    const keys = src.keys.map((key) => {
+      const kind = aimKind(key.aim);
+      const out = { at: key.at, dt: key.dt || 0, aim: key.aim };
+      if (kind === 'text') out.fill = clampTo((key.fill === undefined ? DEFAULTS.fill : key.fill) * zoom, L.fill);
+      else out.zoom = clampTo(1 + ((key.zoom === undefined ? 1 : key.zoom) - 1) * zoom, L.zoom);
+      if (kind === 'point') {
+        out.px = key.px === undefined ? DEFAULTS.px : key.px;
+        out.py = key.py === undefined ? DEFAULTS.py : key.py;
+      }
+      if (key.ox !== undefined) out.ox = key.ox;
+      if (key.oy !== undefined) out.oy = key.oy;
+      out.roll = (key.roll || 0) * g;
+      out.curve = key.curve === undefined ? curve : key.curve;
+      out.hit = (key.hit || 0) * g;
+      out.gz = 1 + ((key.gz === undefined ? 1 : key.gz) - 1) * g;
+      out.hop = key.hop === undefined ? null : key.hop;
+      out.whip = (key.whip || 0) * g;
+      return out;
+    });
+    const b = src.beat || {};
+    const follow = o.follow === null || o.follow === undefined ? src.follow || 0 : o.follow;
+    return deepFreeze({ x: 1, keys, follow: clampTo(isFiniteNumber(follow) ? follow : 0, L.follow),
+      beat: { zoom: (b.zoom || 0) * g, roll: (b.roll || 0) * g, shake: (b.shake || 0) * g, every: b.every || 1 },
+      blur: src.blur === undefined ? 1 : src.blur, g, m: x && x.m ? -1 : 1 });
+  }
+
   // The symbolic framing of the shot's last key in data order (carry, §4.5.7): { fill, ox?, oy?, roll }, with the
-  // closeness scaled like expandShot. null for 'none' and when the last key does not aim at the text.
+  // closeness scaled like expandShot. null for 'none' and when the last key does not aim at the text. null for EXTREME
+  // values: the carry never reaches or leaves an EXTREME cut (DESIGN_EXTREME §1.4).
   function lastFraming(ref, opts) {
+    if (isExtreme(ref)) return null;
     const shot = shotOf(ref);
     if (!shot) return null;
     const last = shot.keys[shot.keys.length - 1];
@@ -4579,16 +4812,113 @@ MV.def('core/shot', ['core/num', 'core/curve'], (N, CV) => {
     return coerceShot(shot);
   }
 
+  // --- the AI's EXTREME vocabulary (DESIGN_EXTREME §1.7, FROZEN table once accepted) ------------------------------------
+
+  const XMOVES = Object.freeze(['crash', 'dutch', 'jump', 'orbit', 'pulse', 'shake', 'spin', 'vertigo', 'whip']);
+  const DIRS = Object.freeze(['auto', 'left', 'right']);
+
+  // fromXMove({ move, focus, timing, fill, power, dir }) → a canonical XShot (x: 1), or undefined for an unknown move.
+  // fill as fromMove (f1, f0 = f1 − 0.25); power p ∈ [0.3, 1] (a negative or missing power reads 0.8); dir: 'left' = the
+  // words travel left (the presets' own direction, as 'auto'), 'right' mirrors the keys. An unknown focus reads as
+  // 'text', an unknown timing as 'whole'. The crash is word-anchored: emphasis → accent … accentEnd (the preset); text
+  // and center → beat:0 … end; first → sung … word:1; last → word:−1 … end (a single word is never held while the
+  // other words are sung, §3.1 R3).
+  function fromXMove(m) {
+    const o = isObject(m) ? m : {};
+    if (!XMOVES.includes(o.move)) return undefined;
+    const timing = TIMINGS.includes(o.timing) ? o.timing : 'whole';
+    const focus = FOCI.includes(o.focus) ? o.focus : 'text';
+    const F = FOCUS_AIM[focus];
+    const f1 = isFiniteNumber(o.fill) && o.fill >= 0 ? N.clamp(o.fill, 0.3, 0.95) : 0.75;
+    const f0 = Math.max(0.3, f1 - 0.25);
+    const p = isFiniteNumber(o.power) && o.power >= 0 ? N.clamp(o.power, 0.3, 1) : 0.8;
+    const mirror = o.dir === 'right';
+    const at = (when, aim, f, extra) => Object.assign({ at: when, aim },
+      aim === 'frame' ? { zoom: 1 + 0.25 * (f - 0.3) / 0.8 } : { fill: f }, extra || {});
+    const up = (f, d) => Math.min(0.95, Math.max(0.3, f + d));
+    let shot;
+    switch (o.move) {
+      case 'crash': {
+        const [T1, T2] = focus === 'emphasis' ? ['accent', 'accentEnd'] : focus === 'first' ? ['sung', 'word:1']
+          : focus === 'last' ? ['word:-1', 'end'] : ['beat:0', 'end'];
+        shot = { blur: 1, keys: [at('a', 'block', 0.52), at(T1, 'block', 0.52, { dt: -0.04, curve: 'linear' }),
+          at(T1, F, f1, { dt: 0.05, curve: 'dashStop', hit: 0.5 + 0.5 * p }), at(T2, F, f1, { curve: 'linear' }),
+          at(T2, 'block', 0.66, { dt: 0.12, curve: 'dashStop' }), at('b', 'block', 0.7, { curve: 'linear' })] };
+        break;
+      }
+      case 'whip': {
+        if (timing === 'hold') {
+          shot = { blur: 1, keys: [at('a', 'first', f1), at('sung', 'reading', f1, { hop: 0.12, whip: 0.15 + 0.25 * p }),
+            at('end', 'block', up(f1, -0.18), { dt: 0.02, curve: 'dashStop' })] };
+          break;
+        }
+        const ox = 0.3 + 0.3 * p;
+        const keys = [];
+        keys.push(at('a', F, f1, timing === 'depart' ? {} : { ox }));
+        if (timing !== 'depart') keys.push(at('a', F, f1, { dt: 0.1, curve: 'dashStop' }));
+        if (timing !== 'arrive') {
+          keys.push(at('b', F, f1, { dt: -0.37, curve: 'linear' }), at('b', F, f1, { dt: -0.25, ox: -ox, curve: 'slowBloom' }));
+        } else keys.push(at('b', F, f1, { curve: 'linear' }));
+        shot = { blur: 1, keys };
+        break;
+      }
+      case 'spin': {
+        const rin = -(90 + 270 * p), rout = 360 * p;
+        const keys = [];
+        if (timing === 'depart') keys.push(at('a', F, f1));
+        else keys.push(at('a', F, f0, { roll: rin }), at('sung', F, f1, { dt: 0.2, curve: 'dashStop', hit: 0.4 }));
+        if (timing === 'arrive') keys.push(at('b', F, up(f1, 0.02), { curve: 'linear' }));
+        else keys.push(at('end', F, f1, { dt: 0.02, curve: 'linear' }), at('b', F, f0, { roll: rout, curve: 'slowBloom' }));
+        shot = { blur: 1, keys };
+        break;
+      }
+      case 'dutch': {
+        const r = 6 + 8 * p;
+        shot = { blur: 0.5, beat: { roll: 8 + 12 * p, every: 1 }, keys: [at('a', F, f1, { roll: -r }),
+          at('b', F, up(f1, 0.04), { roll: r, curve: 'linear' })] };
+        break;
+      }
+      case 'shake':
+        shot = { blur: 0.4, beat: { shake: p, zoom: 0.03, every: 2 }, keys: [at('a', F, f1), at('b', F, up(f1, 0.06), { curve: 'linear' })] };
+        break;
+      case 'vertigo':
+        shot = { blur: 0, keys: [at('a', F, f0), at('b', F, f1, { gz: 1 + 0.35 * p, curve: 'slowBloom' })] };
+        break;
+      case 'orbit': {
+        const r = 8 + 16 * p;
+        shot = { blur: 0.3, keys: [at('a', F, up(f1, -0.04), { roll: -r, ox: -0.1, oy: 0.03, gz: 1.1 }),
+          at('mid', F, f1, { ox: 0, oy: -0.03, curve: 'linear' }),
+          at('b', F, up(f1, -0.04), { roll: r, ox: 0.1, oy: 0.03, gz: 1.1, curve: 'linear' })] };
+        break;
+      }
+      case 'pulse':
+        shot = { blur: 0.6, beat: { zoom: 0.04 + 0.06 * p, every: 1 }, keys: [at('a', F, f1), at('b', F, up(f1, 0.04), { curve: 'linear' })] };
+        break;
+      default: {                                   // jump
+        const keys = [at('a', 'block', 0.55), at('sung', 'block', 0.55, { dt: -0.006, curve: 'linear' }),
+          at('sung', 'reading', f1, { hop: 0 }), at('end', 'reading', f1, { dt: 0.002, hop: 0 })];
+        if (timing !== 'depart') keys.push(at('end', 'block', 0.6, { dt: 0.008 }));
+        shot = { blur: 0, keys };
+      }
+    }
+    if (mirror) shot.keys = mirrorKeys(shot.keys);
+    return coerceShot(Object.assign({ x: 1 }, shot));
+  }
+
+  // Whether the shot's times depend on the beat grid: beat:n anchors; every EXTREME value (accent falls back to the
+  // first beat, and the beat modulators run on the grid).
   function usesBeats(ref) {
+    if (isExtreme(ref)) return true;
     const shot = shotOf(ref);
     return !!shot && shot.keys.some((key) => typeof key.at === 'string' && key.at.startsWith('beat:'));
   }
 
-  // [stringKey, params]: 'shot.<preset>', 'shot.none' (also for unreadable values), 'shot.custom' { n keys }.
+  // [stringKey, params]: 'shot.<preset>' (an x-preset too, mirrored or not), 'shot.none' (also for unreadable values),
+  // 'shot.custom' { n keys } (an x-shot object too).
   function label(ref) {
     const v = coerceShot(ref);
     if (v === undefined || v === 'none') return ['shot.none', {}];
-    if (typeof v === 'string') return ['shot.' + v, {}];
+    if (typeof v === 'string') { const x = xKeyOf(v); return ['shot.' + (x ? x.key : v), {}]; }
     return ['shot.custom', { n: v.keys.length }];
   }
 
@@ -4602,6 +4932,9 @@ MV.def('core/shot', ['core/num', 'core/curve'], (N, CV) => {
   return {
     SHOTS, SHOT_KEYS, RIGS, RIG_KEYS, MOVES, FOCI, TIMINGS, LIMITS,
     coerceShot, coerceRig, isCustom, expandShot, lastFraming, maxFill, expandRig, fromMove, usesBeats, label, rigLabel,
+    // EXTREME (DESIGN_EXTREME §1)
+    XSHOTS, XSHOT_KEYS, XLIMITS, XMOVES, DIRS, MIRRORS, X_ANCHORS,
+    isExtreme, xKeyOf, presetOf, limitsOf, fromXMove, xIntensity,
   };
 });
 /* 文字PVメーカー v2 — original work. Parameter specs: coercion, AutoSpec evaluation, descriptions and validation (DESIGN §4.2, DESIGN_2_1 §3.5, §11.2.3). */
@@ -12789,6 +13122,63 @@ MV.def('i18n/strings', [], () => ({
   'shot.blurb.tiltHold': ['少し傾けて構える', 'Holds at a slight tilt'],
   'shot.blurb.driftOff': ['文字を中心から外して置く', 'Keeps the words off center'],
   'shot.blurb.wideHold': ['引いたまま全体を見せる', 'Stays wide on the whole frame'],
+  // EXTREME camerawork (DESIGN_EXTREME Appendix B)
+  'fld.camExtreme': ['カメラ EXTREME', 'Camera EXTREME'],
+  'fld.camExtremePower': ['激しさ', 'Intensity'],
+  'opt.extreme.strong': ['強め', 'Strong'],
+  'opt.extreme.very': ['かなり', 'Very strong'],
+  'opt.extreme.max': ['最大', 'Maximum'],
+  'fld.camExtreme.warn': ['⚠ 回転・急なズーム・揺れが増えます', '⚠ More spins, sudden zooms and shakes'],
+  'shot.group.extreme': ['EXTREME', 'EXTREME'],
+  'shot.group.extremeNote': ['激しい動きです。EXTREME がオフでも、ここで選んだカットはこの動きになります。',
+    'Intense moves. Even with EXTREME off, a cut you set here keeps this move.'],
+  'shot.crashZoom': ['一瞬で寄る', 'Crash zoom'],
+  'shot.punchHit': ['短く叩く', 'Punch hit'],
+  'shot.whipPan': ['振って入る・抜ける', 'Whip pan'],
+  'shot.whipRead': ['言葉を振り抜く', 'Whip read'],
+  'shot.jumpRead': ['寄りで切る', 'Jump read'],
+  'shot.spinIn': ['回って入る', 'Spin in'],
+  'shot.spinOut': ['回って抜ける', 'Spin out'],
+  'shot.dutchSwing': ['拍で傾く', 'Dutch swing'],
+  'shot.shakeHits': ['拍で揺れる', 'Shake hits'],
+  'shot.beatCrash': ['拍ごとに寄る', 'Beat crash'],
+  'shot.vertigo': ['めまい', 'Vertigo'],
+  'shot.orbit': ['回り込む', 'Orbit'],
+  'shot.blurb.crashZoom': ['拍に合わせて強調へ一瞬で寄り、次の言葉で戻る', 'Crashes in on the beat to the emphasis, back out at the next word'],
+  'shot.blurb.punchHit': ['歌い出しで強く寄って揺れる', 'A hard punch-in and a hit at the sung start'],
+  'shot.blurb.whipPan': ['横に勢いよく振って入り、振って抜ける', 'Whips in from the side and whips out'],
+  'shot.blurb.whipRead': ['歌う言葉へ次々と振っていく', 'Whips from word to word as they are sung'],
+  'shot.blurb.jumpRead': ['歌う言葉の寄りに切り替えていく', 'Cuts to a close-up of each word as it is sung'],
+  'shot.blurb.spinIn': ['回転しながら入って止まる', 'Spins in and lands'],
+  'shot.blurb.spinOut': ['歌い終わりに回転して抜ける', 'Spins away after the line'],
+  'shot.blurb.dutchSwing': ['大きく傾き、拍ごとに振れる', 'A strong tilt that swings on the beat'],
+  'shot.blurb.shakeHits': ['拍に合わせて画面が揺れる', 'The frame shakes on the beat'],
+  'shot.blurb.beatCrash': ['拍ごとにぐっと寄る', 'Punches in on every beat'],
+  'shot.blurb.vertigo': ['文字はそのまま、背景だけが迫ってくる', 'The words hold while the background swells'],
+  'shot.blurb.orbit': ['文字のまわりを回り込む', 'Circles around the words'],
+  'shot.mirrored': ['左右反転', 'Mirrored'],
+  'keys.hit': ['衝撃', 'Hit'],
+  'keys.groundZoom': ['背景の寄り', 'Background zoom'],
+  'keys.mirror': ['左右反転', 'Mirror'],
+  'x.notice.title': ['激しいカメラワークについて', 'About intense camerawork'],
+  'x.notice.text': ['EXTREME にすると、急なズームや回転、画面の揺れが多くなります。見る人によっては乗り物酔いのように気分が悪くなることがあります。編集中はときどき休み、公開するときは「激しい動きがあります」とひとこと添えることをおすすめします。点滅は増えません。',
+    'EXTREME adds sudden zooms, spins and screen shakes. Some viewers may feel motion sick. Take breaks while editing, and when you publish, consider noting that the video contains intense motion. It adds no flashing.'],
+  'x.notice.reduced': ['お使いの端末は「視差効果を減らす」設定です。プレビューでは揺れと拍の動きを弱めて表示します（書き出しは変わりません）。',
+    'Your device asks for reduced motion. The preview tones down shakes and beat moves (the export is unchanged).'],
+  'x.notice.ok': ['オンにする', 'Turn on'],
+  'x.notice.cancel': ['やめる', 'Cancel'],
+  'x.notice.again': ['次から表示しない', 'Don\'t show this again'],
+  'x.off.title': ['EXTREME をオフにする', 'Turn EXTREME off'],
+  'x.off.text': ['手で選んだ EXTREME の動きが {n} か所あります。これも元に戻しますか？', 'There are {n} EXTREME moves chosen by hand. Remove them too?'],
+  'x.off.keep': ['残す', 'Keep them'],
+  'x.off.remove': ['元に戻す', 'Remove them'],
+  'ai.camera.extreme': ['EXTREME', 'EXTREME'],
+  'ai.camera.extremeHint': ['激しいカメラワークを頼む', 'Ask for intense camerawork'],
+  'ai.warn.xLayout': ['この行のレイアウトは激しい動きに向かないので、その動きは使いませんでした', 'This line\'s layout cannot take intense moves, so they were left out'],
+  'pref.calmCamera': ['激しいカメラを抑える（プレビュー）', 'Tone down intense camera (preview)'],
+  'cmd.pref.calmCamera': ['激しいカメラを抑える（プレビュー）', 'Tone down intense camera (preview)'],
+  'exp.pre.extreme-motion': ['激しいカメラワーク（EXTREME）が {n} カットにあります。公開するときは「激しい動きがあります」と添えることをおすすめします。',
+    'Intense camerawork (EXTREME) in {n} cuts. When you publish, consider noting that the video contains intense motion.'],
   'rig.none': ['なし', 'None'],
   'rig.slowSwell': ['じわじわ寄る', 'Slow swell'],
   'rig.climbRise': ['持ち上がる', 'Rising'],
@@ -12992,6 +13382,8 @@ MV.def('i18n/strings', [], () => ({
   'why.cam.lens': ['カメラの動き「{key}」と重ならないように', 'Not stacked on the camera move "{key}"'],
   'why.cam.arrange': ['構図「{key}」に合わせて控えめに', 'Gentle for the layout "{key}"'],
   'why.cam.amount': ['カメラワークの強さ {x}', 'Camerawork amount {x}'],
+  'why.cam.extreme': ['EXTREME がオン（{x}）', 'EXTREME is on ({x})'],
+  'whyRule.extreme': ['EXTREME の動きを選んだ', 'Picked an EXTREME move'],
   'why.rig.section': ['「{section}」のカメラ', 'Section camera of "{section}"'],
   'why.rig.lastChorus': ['最後のサビなので大きく', 'Last chorus, so stronger'],
   'why.season.line': ['この行の季節（{season}）', 'Season of this line ({season})'],
@@ -21366,6 +21758,84 @@ MV.def('engine/scene/cache', [], () => {
 
   return { MAX, createSceneCache };
 });
+/* 文字PVメーカー v2 — original work. Ground coverage limiter: the view of a ground-scene layer under an EXTREME camera, limited so the painted rectangle always covers the frame (DESIGN_EXTREME §1.5). */
+MV.def('engine/scene/cover', ['core/mat'], (MAT) => {
+  'use strict';
+
+  // Grounds paint the frame ± BLEED·(W, H) (parts/kit GROUND_BLEED, every ground's BLEED, static rasters' pad). A layer
+  // with parallax k sees the camera through
+  //   view(k) = T(C)·S(s)·R(−θ)·T(−C − T),   s = (1 + (Z − 1)·k)·gz,  θ = roll·k,  T = (x + shakeX, y + shakeY)·k.
+  // The frame's preimage is a rotated rectangle centred on C + T with half extents e(θ)/s; it lies inside the painted
+  // rectangle exactly when, per axis,
+  //   ex(θ)/s + |Tx| ≤ (½ + b)·W − m     ex(θ) = (W|cos θ| + H|sin θ|)/2
+  //   ey(θ)/s + |Ty| ≤ (½ + b)·H − m     ey(θ) = (W|sin θ| + H|cos θ|)/2          m = 0.004·short
+  // The limiter keeps both true: θ' = sign θ · knee(|θ|, θmax) with θmax the largest |θ| that leaves RESERVE·(W, H) for
+  // the translation, then T' = sign T · knee(|T|, A) per axis with A = (½ + b)·L − m − e(θ')/s. knee is the identity
+  // below 0.8 of its limit and C¹ everywhere, so a limited ground never jerks. Pure; allocation-free.
+
+  const BLEED = 0.15;
+  const MARGIN = 0.004;
+  const RESERVE = 0.02;
+  const KNEE = 0.8;
+  const HALF_PI = Math.PI / 2;
+
+  // knee(v, L) = v for v ≤ 0.8·L, else 0.8·L + 0.2·L·tanh((v − 0.8·L)/(0.2·L)): ≤ L, continuous with a continuous slope.
+  function knee(v, L) {
+    if (!(L > 0)) return 0;
+    const a = KNEE * L;
+    if (v <= a) return v;
+    const r = L - a;
+    return a + r * Math.tanh((v - a) / r);
+  }
+
+  // The largest |θ| in [0, π/2] with e(θ)/s ≤ L' on both axes (L' = (½ + b)·L − m − RESERVE·L): with R = √(W² + H²),
+  // ex(θ) = (R/2)·sin(θ + atan2(W, H)) and ey(θ) = (R/2)·sin(θ + atan2(H, W)) rise until they peak, so each bound is
+  // asin(2·L'·s/R) − φ, or π/2 when 2·L'·s ≥ R.
+  function thetaMax(s, W, H) {
+    const m = MARGIN * Math.min(W, H), R = Math.sqrt(W * W + H * H);
+    const lx = ((0.5 + BLEED - RESERVE) * W - m) * s, ly = ((0.5 + BLEED - RESERVE) * H - m) * s;
+    const bound = (L, phi) => {
+      const q = (2 * L) / R;
+      return q >= 1 ? HALF_PI : Math.max(0, Math.asin(q) - phi);
+    };
+    return Math.min(bound(lx, Math.atan2(W, H)), bound(ly, Math.atan2(H, W)));
+  }
+
+  // limit(cam, k, W, H, out) → out { s, theta, tx, ty }: the limited scale, rotation and translation of layer k.
+  function limit(cam, k, W, H, out) {
+    const o = out || { s: 1, theta: 0, tx: 0, ty: 0 };
+    const gz = k > 0 && cam.gz > 0 ? cam.gz : 1;
+    const s = (1 + (cam.zoom - 1) * k) * gz;
+    const m = MARGIN * Math.min(W, H);
+    const th = cam.roll * k;
+    const lim = thetaMax(s, W, H);
+    const t = Math.sign(th) * knee(Math.abs(th), lim);
+    const c = Math.abs(Math.cos(t)), n = Math.abs(Math.sin(t));
+    const ax = (0.5 + BLEED) * W - m - (W * c + H * n) / 2 / s;
+    const ay = (0.5 + BLEED) * H - m - (W * n + H * c) / 2 / s;
+    const tx = (cam.x + (cam.shakeX || 0)) * k, ty = (cam.y + (cam.shakeY || 0)) * k;
+    o.s = s; o.theta = t;
+    o.tx = Math.sign(tx) * knee(Math.abs(tx), ax);
+    o.ty = Math.sign(ty) * knee(Math.abs(ty), ay);
+    return o;
+  }
+
+  const LIM = { s: 1, theta: 0, tx: 0, ty: 0 };
+  const V1 = new Float32Array(6), V2 = new Float32Array(6);
+
+  // coverView(out, cam, k, W, H): the view of a ground-scene layer with parallax k under cam (a CamPose with cover set),
+  //   T(W/2, H/2) · S(s) · R(−θ') · T(−W/2 − T'x, −H/2 − T'y)
+  function coverView(out, cam, k, W, H) {
+    const L = limit(cam, k, W, H, LIM);
+    MAT.compose(V1, W / 2, H / 2, -L.theta, 0, 0, L.s, L.s, 0, 0);
+    MAT.ident(V2);
+    V2[4] = -W / 2 - L.tx;
+    V2[5] = -H / 2 - L.ty;
+    return MAT.mul(out, V1, V2);
+  }
+
+  return { BLEED, MARGIN, RESERVE, knee, thetaMax, limit, coverView };
+});
 /* 文字PVメーカー v2 — original work. Stagger: ranking motion units by order, sung timing, and unit pivots (DESIGN §4.17.4). */
 MV.def('engine/scene/stagger', ['core/rng', 'core/script', 'core/schema'], (RNG, S, SCH) => {
   'use strict';
@@ -24112,12 +24582,15 @@ MV.def('engine/scene/shot', ['core/num', 'core/curve', 'core/shot', 'core/script
     P.y[c] += (L.follow * ly * k) / z;
   }
 
-  return { makeShot, aimBox, anchorTime, frame, poseAt, runShot, leanInto, bleedLimit, JUMP, FLOOR, SAFE };
+  // (additive, DESIGN_EXTREME §1.4) the helpers the x-track (engine/scene/xshot) reuses, so this track is not changed:
+  // readingUnits, unitsOf, emphRun, sungOf, leanOf, spanOf, textGlyphs, aimable, HOP_MAX.
+  return { makeShot, aimBox, anchorTime, frame, poseAt, runShot, leanInto, bleedLimit, JUMP, FLOOR, SAFE,
+    readingUnits, unitsOf, emphRun, sungOf, leanOf, spanOf, textGlyphs, aimable, HOP_MAX };
 });
 /* 文字PVメーカー v2 — original work. frameAt(plan, t) → FrameGraph, scene evaluation, cameras and rigs, closed-form time lookups (DESIGN §4.19; DESIGN_2_1 §4.4, §4.6). */
 MV.def('engine/scene/frame', ['core/num', 'core/hash', 'core/noise', 'core/mat', 'core/beats', 'core/curve', 'core/shot',
-  'audio/digest', 'engine/scene/table', 'engine/scene/behave', 'engine/scene/shot'],
-(N, H, NZ, MAT, BEATS, CV, SHOT, DIG, T, BH, SS) => {
+  'audio/digest', 'engine/scene/table', 'engine/scene/behave', 'engine/scene/shot', 'engine/scene/cover'],
+(N, H, NZ, MAT, BEATS, CV, SHOT, DIG, T, BH, SS, CO) => {
   'use strict';
 
   // Everything here is a pure function of its arguments. Per-plan indexes are derived data cached by plan identity
@@ -24129,6 +24602,7 @@ MV.def('engine/scene/frame', ['core/num', 'core/hash', 'core/noise', 'core/mat',
   const SHAKE_RATE = 23;
   const PUNCH = 0.04;
   const SHAKE_SEED = H.hash32('impulse', 'shake');
+  const CALM = 0.3;              // EXTREME modulators under 「激しいカメラを抑える」 (DESIGN_EXTREME §3.6)
   const ENV_HZ = 20;
   const BACKDROP_FILL = Object.freeze({ chroma: '#00B140', black: '#000000', clear: null, scene: null });
   const FILTER_STAGES = Object.freeze(['shape', 'tone', 'light', 'optic', 'film']);
@@ -24448,10 +24922,13 @@ MV.def('engine/scene/frame', ['core/num', 'core/hash', 'core/noise', 'core/mat',
 
   // --- evaluating a scene -----------------------------------------------------------------------------------------
 
-  // evaluate(scene, tl) → scene.table with the live pose of local time tl solved (reset → behaviours → world → the
-  // shot's follow lean on the camera, DESIGN_2_1 §4.5.6). Pure in (scene, tl): nothing survives from an earlier call.
-  function evaluate(scene, tl) {
+  // evaluate(scene, tl, opts?) → scene.table with the live pose of local time tl solved (reset → behaviours → world →
+  // the shot's follow lean on the camera, DESIGN_2_1 §4.5.6). Pure in (scene, tl, opts): nothing survives from an
+  // earlier call. opts.calm (DESIGN_EXTREME §3.6, preview only) tones an EXTREME track's beat modulators down; it is
+  // written on the x-track before the behaviours run, so a scene without one is untouched.
+  function evaluate(scene, tl, opts) {
     const table = scene.table;
+    if (scene.shot && scene.shot.x === true) scene.shot.calm = opts && opts.calm === true ? CALM : 1;
     T.resetLive(table);
     BH.runBehaviours(table.live, scene.behaviours, tl);
     T.solve(table);
@@ -24462,12 +24939,15 @@ MV.def('engine/scene/frame', ['core/num', 'core/hash', 'core/noise', 'core/mat',
   // --- cameras (§4.19.3; DESIGN_2_1 §4.4) ----------------------------------------------------------------------------
 
   // cutCamera(scene, out) → out { x, y, zoom, roll, jx, jy, fz }: the camera node of an evaluated scene (lens ∘ shot ∘
-  // lean) before the rig and the impulses; fz = the shot's own zoom at this evaluation (1 without a shot).
+  // lean) before the rig and the impulses; fz = the shot's own zoom at this evaluation (1 without a shot). An EXTREME
+  // track adds gz, its ground zoom (DESIGN_EXTREME §1.5.2); a reused `out` that had one gets gz 1 back.
   function cutCamera(scene, out) {
     const o = out || { x: 0, y: 0, zoom: 1, roll: 0, jx: 0, jy: 0, fz: 1 };
     const P = scene.table.live, c = scene.cam;
     o.x = P.x[c]; o.y = P.y[c]; o.zoom = P.sx[c]; o.roll = P.rot[c]; o.jx = P.jx[c]; o.jy = P.jy[c];
     o.fz = scene.shot ? scene.shot.live.zoom : 1;
+    if (scene.shot && scene.shot.x === true) o.gz = scene.shot.live.gz;
+    else if (o.gz !== undefined) o.gz = 1;
     return o;
   }
 
@@ -24490,6 +24970,8 @@ MV.def('engine/scene/frame', ['core/num', 'core/hash', 'core/noise', 'core/mat',
     o.shakeX = k.jx + (shake ? (shake * (NZ.noise2(SHAKE_SEED, t * SHAKE_RATE, 0) - 0.5) * SHAKE_DU) / fz : 0);
     o.shakeY = k.jy + (shake ? (shake * (NZ.noise2(SHAKE_SEED, t * SHAKE_RATE, 1) - 0.5) * SHAKE_DU) / fz : 0);
     o.fz = fz;
+    if (k.gz !== undefined && k.gz !== 1) o.gz = k.gz;          // EXTREME ground zoom passes through (§1.5.2)
+    else if (o.gz !== undefined) o.gz = 1;
     return o;
   }
 
@@ -24511,10 +24993,13 @@ MV.def('engine/scene/frame', ['core/num', 'core/hash', 'core/noise', 'core/mat',
   // depthCam(cam, f, out) → CamPose: the camera a photo or video at camera factor f sees (DESIGN_2_1 §11.9.3; the kit
   // exports it as K.depthCam): x, y, roll and the shakes times f, zoom' = exp(f · ln zoom) (the framing zoom alike).
   // f = 1 is the camera itself (exactly), f = 0 no camera at all; a factor above 1 is lowered so the zoom stays ≤ 4.
+  // An EXTREME ground camera (DESIGN_EXTREME §1.5.1) passes on `cover` and scales its ground zoom `gz` like the zoom;
+  // a reused `out` that had them gets them cleared.
   const DEPTH_ZOOM_MAX = 4;
   function depthCam(cam, f, out) {
     const o = out || { x: 0, y: 0, zoom: 1, roll: 0, shakeX: 0, shakeY: 0, fz: 1 };
     const fz = cam.fz === undefined ? 1 : cam.fz;
+    if (cam.cover || o.cover) depthExtreme(cam, f, o);
     if (f === 1) {
       o.x = cam.x; o.y = cam.y; o.zoom = cam.zoom; o.roll = cam.roll; o.shakeX = cam.shakeX; o.shakeY = cam.shakeY; o.fz = fz;
       return o;
@@ -24529,13 +25014,22 @@ MV.def('engine/scene/frame', ['core/num', 'core/hash', 'core/noise', 'core/mat',
     o.zoom = Math.exp(k * Math.log(cam.zoom));
     o.shakeX = k * cam.shakeX; o.shakeY = k * cam.shakeY;
     o.fz = Math.exp(k * Math.log(fz));
+    if (o.cover) o.gz = Math.exp(k * Math.log(o.gz));
     return o;
+  }
+
+  function depthExtreme(cam, f, o) {
+    o.cover = cam.cover && f > 0 ? 1 : 0;
+    o.gz = o.cover && cam.gz > 0 ? cam.gz : 1;
   }
 
   const V1 = new Float32Array(6), V2 = new Float32Array(6);
 
   // view(k) = T(W/2, H/2) · S(1 + (zoom − 1)·k) · R(−roll·k) · T(−W/2 − (camX + shakeX)·k, −H/2 − (camY + shakeY)·k)
+  // A camera with `cover` set (the ground items of an EXTREME segment, DESIGN_EXTREME §1.5.1) takes the coverage limiter
+  // (engine/scene/cover) instead; every other camera takes this code path unchanged.
   function viewMatrix(out, cam, k, W, H) {
+    if (cam.cover) return CO.coverView(out, cam, k, W, H);
     const s = 1 + (cam.zoom - 1) * k;
     MAT.compose(V1, W / 2, H / 2, -cam.roll * k, 0, 0, s, s, 0, 0);
     MAT.ident(V2);
@@ -26048,740 +26542,6 @@ MV.def('engine/render/seam', ['core/hash', 'core/curve', 'engine/scene/table', '
 
   return { TEXT_LAYERS, seamPart, mix };
 });
-/* 文字PVメーカー v2 — original work. The renderer: one frame of a Plan — evaluate, draw the layers per world, seams, post, picks (DESIGN §4.19.2–4, §7.4; DESIGN_2_1 §4.4, §4.8, §11.3.7). */
-MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/media', 'engine/scene/table', 'engine/scene/frame',
-  'engine/render/surface', 'engine/render/sprites', 'engine/render/shapes', 'engine/render/draw', 'engine/render/post',
-  'engine/render/seam', 'engine/render/pick'],
-(H, C, N, MEDIA, T, F, SF, SP, SH, DR, PO, SE, PK) => {
-  'use strict';
-
-  const L = T.LAYER_INDEX;
-  const WORLD_LAYERS = Object.freeze([L.ground, L.far, L.mid, L.text, L.near]);
-  const BASE_LAYERS = Object.freeze([L.ground, L.far, L.mid]);
-  const WARM_LAYERS = Object.freeze(WORLD_LAYERS.concat([L.hud]));
-  const EMA_ALPHA = 0.1;
-  const SLOW_MS = 14, FAST_MS = 9, SLOW_FRAMES = 30, FAST_FRAMES = 60, MAX_LEVEL = 4;   // adaptive preview (§7.4)
-  const DPR_STEP = 0.75;
-  const DPR_FLOOR = 720;           // the step applies only to outputs whose short side is above this
-  const REDUCED_FLASH = 0.3;
-  const STATIC_MAX = 8;
-  const STATIC_BUDGET = 48 * 1024 * 1024;
-  const IDENTITY = Object.freeze({ x: 0, y: 0, zoom: 1, roll: 0, shakeX: 0, shakeY: 0, fz: 1 });
-  const NO_FEATURES = Object.freeze({});
-  const OVERSAMPLE = 1.25;         // static ground rasters of a segment the shots zoom into (DESIGN_2_1 §4.8)
-  const SEAM_SURFACES = 6;         // frame surfaces a seam frame takes at once (a text seam: both sides and sumiSeep's 4)
-
-  // mediaEntries(scene) → frozen [{ id, time, size, headroom, blur, softBlur }]: a scene's media nodes as mediaAt needs
-  // them — size = the box's long side (design units; size × output scale × headroom = the px its draw asks for), blur
-  // and the soft copy's blur (−1 without one) in design units. Small, so the facade keeps them by fingerprint.
-  const NO_MEDIA_ENTRIES = Object.freeze([]);
-  function mediaEntries(scene) {
-    const ms = scene && scene.media;
-    if (!ms || ms.length === 0) return NO_MEDIA_ENTRIES;
-    return Object.freeze(ms.map((e) => {
-      const rec = scene.stores.image[scene.table.payload[e.node]];
-      return Object.freeze({ id: e.id, time: e.time, size: Math.max(rec.box.w, rec.box.h), headroom: rec.headroom, blur: rec.blur,
-        softBlur: rec.soft ? rec.softBlur : -1 });
-    }));
-  }
-
-  // createRenderer({ canvas: CanvasFactory, registry, assets, now?, strict?, spriteBudget?, postCopy? }) → Renderer
-  // (postCopy: lab and tests only — fx.own copies, the post stack as it drew before filters could draw in place)
-  //   render(surface, plan, t, opts, source) → FrameStats   source = { cut(i), ground(i), fresh(kind, i), fontKey, face }
-  //   warmAt(plan, source, t) · beginWarm() · warmBytes() · lastTime() · hitTest(x, y) · boxes() · stats() · level
-  //   · setSpriteBudget(bytes) · clear() · dispose()
-  //   (DESIGN_2_1, additive) setRegistry(registry) · mediaAt(plan, source, t, out, scale) (source.media(kind, i)
-  //   optional) · lastScale() · opts.layers 'all' | 'ground' · opts.thumb (posters only) · FrameStats.media
-  //   { drawn, waiting } and mediaError (export quality)
-  //   (lab only, additive) opts.flush(frame): called with the frame surface once the world is drawn, before the post
-  //   stack, and timed with the draw stage. The lab reads one pixel there, so the time the canvas spends rasterizing the
-  //   world is charged to 'draw' and not to 'post' (NOTES "Perf: camerawork + materials row", MEAS-1). Never set by
-  //   the app or an export: the readback itself costs time.
-  // `now` (ms clock) comes from the host; without it frame times read 0 and the adaptive preview stays at level 0.
-  function createRenderer(o) {
-    const factory = o.canvas;
-    let registry = o.registry;
-    const now = typeof o.now === 'function' ? o.now : null;
-    const pool = SF.createPool(factory);
-    const sprites = SP.createSpriteCache(factory, { budget: o.spriteBudget });
-    const paints = SH.createPaintCache(factory);
-    const tiles = PO.createTileBank(factory);
-    const ctl = PO.createFx({ pool, tiles, copy: o.postCopy === true });
-    const scratch = SF.surfaceOf(factory, SP.MAX_SIDE, SP.MAX_SIDE, true);
-    const dc = DR.createDrawContext({ sprites, paints, scratch, pool, blurred: (src, px) => PO.blurred(pool, src, px, ctl.caps) });
-    const picks = PK.createPickList();
-    const statics = new Map();                     // static layers: scene → [raster per layer] (LRU)
-    const errors = [];
-    const q = { draft: false, scale: 1, pal: null,                       // the paints' helpers (§4.17.3)
-      rgba: (ink, a) => C.rgba(DR.inkOf(q.pal, ink), a), tile: (name, seed) => tiles.tile(name, seed) };
-    dc.q = q;
-
-    let fg = null;
-    let fontKey = null;
-    const adapt = { level: 0, ema: 0, slow: 0, fast: 0 };
-    // The latest frame's time, device scale, backdrop, glyph path and probe (sprite warm-up draws what it would draw).
-    const lastLook = { t: NaN, scale: 0, backdrop: 'scene', glyphPath: 'auto', probe: null, fw: 0, fh: 0 };
-    const last = { ms: 0, behave: 0, draw: 0, post: 0, passes: 0 };
-    const palettes = new WeakMap();                // palette → { black, ids }
-    let palSeq = 0;
-    const palIds = new WeakMap();
-
-    // Pooled per-frame lists (no allocation per frame once warm).
-    const items = [];                              // { scene, tl, cut, ground, cam, side }
-    let nItems = 0;
-    const entries = [];                            // post entries (pooled objects)
-    const postList = [];
-    const axPool = { f: {}, look: { amounts: {}, mood: null, bpm: null } };
-    const frameInfo = { plan: null, w: 0, h: 0, unit: 1, quality: 'preview', alpha: false, textAt: null, flashScale: 1, pal: null,
-      backdrop: 'scene' };
-    const cams = [];
-    const used = [];
-    const seamCam = { x: 0, y: 0, zoom: 1, roll: 0, shakeX: 0, shakeY: 0, fz: 1 };   // the grounds' camera in a text seam
-    const gapCam = { x: 0, y: 0, zoom: 1, roll: 0, shakeX: 0, shakeY: 0, fz: 1 };    // … and while no cut is on screen
-    let framePlan = null;                          // the plan of the frame being drawn (zoomed grounds)
-
-    function clock() { return now ? now() : 0; }
-
-    // The key of cached paint and static-layer rasters: output scale, palette and draft mode (recomputed on change only);
-    // `over` is the key of the same rasters oversampled for a zoomed ground (dc.overKey).
-    const paintKeyState = { scale: NaN, pal: 0, draft: false, key: 0, over: 0 };
-    function paintKeyOf(scale, pal, draft) {
-      const s = paintKeyState;
-      if (s.scale !== scale || s.pal !== pal || s.draft !== draft) {
-        s.scale = scale; s.pal = pal; s.draft = draft; s.key = H.hash32(scale, pal, draft ? 1 : 0);
-        s.over = H.hash32(s.key, 'over', OVERSAMPLE);
-      }
-      return s.key;
-    }
-
-    function paletteOf(pal, backdrop) {
-      if (backdrop !== 'black') return pal;
-      let v = palettes.get(pal);
-      if (!v) { v = F.paletteFor(pal, 'black'); palettes.set(pal, v); }
-      return v;
-    }
-
-    function palId(pal) {
-      let id = palIds.get(pal);
-      if (!id) { id = ++palSeq; palIds.set(pal, id); }
-      return id;
-    }
-
-    function camOut(k) { return cams[k] || (cams[k] = { x: 0, y: 0, zoom: 1, roll: 0, shakeX: 0, shakeY: 0, fz: 1 }); }
-
-    function item(k) { return items[k] || (items[k] = { scene: null, tl: 0, cut: -1, ground: -1, cam: IDENTITY, side: 0, skip: false }); }
-
-    // --- gathering the active scenes -------------------------------------------------------------------------------
-
-    function addCut(plan, source, i, t, side) {
-      for (let k = 0; k < nItems; k++) if (items[k].cut === i) { if (side) items[k].side = side; return; }
-      let scene = source.cut(i);
-      if (!scene) return;
-      if (used.includes(scene) && source.fresh) scene = source.fresh('cut', i) || scene;   // two cuts share one cached scene
-      used.push(scene);
-      const it = item(nItems++);
-      it.scene = scene; it.cut = i; it.ground = -1; it.tl = t - plan.cuts[i].t0; it.side = side || 0;
-      F.evaluate(scene, it.tl);
-      it.cam = F.cameraAt(scene, plan, t, camOut(nItems - 1));
-    }
-
-    function addGround(plan, source, i, t, side) {
-      const scene = source.ground(i);
-      if (!scene) return;
-      used.push(scene);
-      const it = item(nItems++);
-      it.scene = scene; it.cut = -1; it.ground = i; it.tl = t - plan.grounds[i].t0; it.side = side || 0; it.cam = IDENTITY;
-      F.evaluate(scene, it.tl);
-    }
-
-    function gather(plan, source, t) {
-      nItems = 0;
-      used.length = 0;
-      const seam = fg.seam;
-      for (const c of fg.cuts) addCut(plan, source, c.i, t, 0);
-      if (seam) {
-        for (const i of seam.aCuts) addCut(plan, source, i, t, 1);
-        for (const i of seam.bCuts) addCut(plan, source, i, t, 2);
-        for (let k = 0; k < nItems; k++) if (items[k].side === 0) items[k].side = items[k].cut < seam.bCuts[0] ? 1 : 2;
-      }
-      const split = seam && seam.scope === 'world' && seam.aGround !== seam.bGround;   // one shared ground: both worlds
-      for (const e of fg.grounds) addGround(plan, source, e.i, t, split ? (e.i === seam.aGround ? 1 : e.i === seam.bGround ? 2 : 0) : 0);
-      // grounds follow the camera of the current cut; during a world seam, of their side's own cut (A or B); during a
-      // text seam, a blend that moves from A's camera to B's over the window (switching at u = 0.5 made the ground jump
-      // by the difference of two moving cameras in one frame); while no cut is on screen, the rig alone (DESIGN_2_1 §4.4)
-      const cur = F.currentCut(plan, t, fg);
-      const blend = seam && seam.scope !== 'world' ? textSeamCam(seam) : null;
-      let gap = null;
-      for (let k = 0; k < nItems; k++) {
-        const it = items[k];
-        if (it.ground < 0) continue;
-        if (blend && !it.side) { it.cam = blend; continue; }
-        const want = it.side === 1 && seam ? lastOf(seam.aCuts) : it.side === 2 && seam ? seam.bCuts[0] : cur;
-        it.cam = camOfCut(want) || gap || (gap = F.rigCamera(plan, t, gapCam));
-      }
-    }
-
-    function camOfCut(i) {
-      for (let j = 0; j < nItems; j++) if (items[j].ground < 0 && items[j].cut === i) return items[j].cam;
-      return null;
-    }
-
-    // A's camera (the last cut before the seam) eased into B's (the first after it): smoothstep in u, so the ground
-    // leaves A's motion and joins B's without a jump or a kink. The framing zoom (shot and rig, fz) blends in log space
-    // (DESIGN_2_1 §4.4); the rest of the zoom (the lens, the punch) and everything else linearly, as in v2, so a plan
-    // without shots and rigs blends exactly as before. Null when either cut is not on screen.
-    function textSeamCam(seam) {
-      const a = lastOf(seam.aCuts), b = seam.bCuts.length ? seam.bCuts[0] : -1;
-      if (a < 0 || b < 0) return null;
-      const A = camOfCut(a), B = camOfCut(b);
-      if (!A || !B) return null;
-      const w = N.smooth(seam.u), v = 1 - w, c = seamCam;
-      const fz = Math.exp(Math.log(A.fz) * v + Math.log(B.fz) * w);
-      c.x = A.x * v + B.x * w; c.y = A.y * v + B.y * w; c.roll = A.roll * v + B.roll * w;
-      c.zoom = fz * ((A.zoom / A.fz) * v + (B.zoom / B.fz) * w);
-      c.shakeX = A.shakeX * v + B.shakeX * w; c.shakeY = A.shakeY * v + B.shakeY * w;
-      c.fz = fz;
-      return c;
-    }
-
-    function lastOf(list) { return list.length ? list[list.length - 1] : -1; }
-
-    // An item is on `side` when it belongs to that side or to both (side 0); side 0 asks for every item.
-    function onSide(it, side) { return !side || !it.side || it.side === side; }
-
-    // --- layers -------------------------------------------------------------------------------------------------------
-
-    const VIEW = new Float32Array(6);
-
-    // The camera view of a layer; the draw context keeps the camera and the parallax, so a medium at another camera factor
-    // (DESIGN_2_1 §11.9.3) can take its own view of the same camera.
-    function view(cam, Lk) {
-      dc.cam = cam; dc.layerK = T.LAYERS[Lk].parallax;
-      return F.viewMatrix(VIEW, cam, T.LAYERS[Lk].parallax, dc.W, dc.H);
-    }
-
-    // The oversampling of an item's still rasters: ×1.25 for a ground whose segment the shots zoom into (plan
-    // grounds[i].zoomed, DESIGN_2_1 §4.8), so the magnified ground stays sharp; a function of the plan only.
-    function overOf(it) {
-      const seg = it.ground >= 0 && framePlan && framePlan.grounds ? framePlan.grounds[it.ground] : null;
-      return seg && seg.zoomed === true ? OVERSAMPLE : 1;
-    }
-
-    // The raster of a static layer (cache: 'static'): drawn once per (scene, layer, scale, palette, oversampling) without
-    // the camera, then placed with the view like a paint (§4.19.6).
-    function staticRaster(scene, Lk, it) {
-      const key = scene;
-      let byL = statics.get(key);
-      const stamp = dc.paintKey;
-      const over = overOf(it);
-      if (byL && byL[Lk] && byL[Lk].stamp === stamp && byL[Lk].over === over) {
-        statics.delete(key); statics.set(key, byL); return byL[Lk];
-      }
-      const pad = 0.15;
-      const s = dc.scale * over;
-      const padX = Math.ceil(pad * dc.W * s), padY = Math.ceil(pad * dc.H * s);
-      const w = Math.ceil(dc.W * s) + 2 * padX, h = Math.ceil(dc.H * s) + 2 * padY;
-      if (w * h * 4 > STATIC_BUDGET / 2 || w > 8192 || h > 8192) return null;
-      while (statics.size >= STATIC_MAX) statics.delete(statics.keys().next().value);
-      const made = factory.create(w, h, { alpha: true });
-      const g0 = dc.g, D0 = Float32Array.from(dc.D), pick = dc.pick;
-      dc.g = made.ctx; dc.pick = null;
-      dc.D[0] = s; dc.D[1] = 0; dc.D[2] = 0; dc.D[3] = s; dc.D[4] = padX; dc.D[5] = padY;
-      F.viewMatrix(VIEW, IDENTITY, 1, dc.W, dc.H);
-      DR.drawLayer(dc, scene, Lk, VIEW, it.tl, it.cut);
-      dc.g = g0; dc.D.set(D0); dc.pick = pick;
-      const r = { stamp, over, canvas: made.canvas, x: -padX / s, y: -padY / s, w: w / s, h: h / s };
-      if (!byL) byL = [];
-      byL[Lk] = r;
-      statics.set(key, byL);
-      return r;
-    }
-
-    function drawIsolated(g, it, Lk, spec) {
-      if (spec.cache === 'static' && !spec.mask && !spec.filter && !DR.hasMedia(it.scene, Lk)) {
-        const r = staticRaster(it.scene, Lk, it);
-        if (r) {
-          const V = view(it.cam, Lk);
-          g.save();
-          const D = dc.D;
-          g.setTransform(D[0], D[1], D[2], D[3], D[4], D[5]);
-          g.transform(V[0], V[1], V[2], V[3], V[4], V[5]);
-          g.globalAlpha = spec.opacity;
-          g.globalCompositeOperation = spec.blend;
-          g.drawImage(r.canvas, r.x, r.y, r.w, r.h);
-          g.restore();
-          return;
-        }
-      }
-      const S = pool.take();
-      dc.g = S.ctx;
-      DR.drawLayer(dc, it.scene, Lk, view(it.cam, Lk), it.tl, pickCut(it));
-      if (spec.mask) {
-        const M = pool.take();
-        const pick = dc.pick;
-        dc.g = M.ctx; dc.pick = null;
-        const mL = L[spec.mask.layer];
-        DR.drawLayer(dc, it.scene, mL, view(it.cam, mL), it.tl, it.cut);
-        dc.pick = pick;
-        S.ctx.setTransform(1, 0, 0, 1, 0, 0);
-        S.ctx.globalCompositeOperation = spec.mask.invert ? 'destination-out' : 'destination-in';
-        S.ctx.drawImage(M.canvas, 0, 0);
-        S.ctx.globalCompositeOperation = 'source-over';
-        pool.give(M);
-      }
-      let src = S;
-      if (spec.filter && spec.filter.blur > 0) { src = PO.blurred(pool, S, spec.filter.blur * dc.scale, ctl.caps); pool.give(S); }
-      dc.g = g;
-      g.save();
-      g.setTransform(1, 0, 0, 1, 0, 0);
-      g.globalAlpha = spec.opacity;
-      g.globalCompositeOperation = spec.blend;
-      g.drawImage(src.canvas, 0, 0);
-      g.restore();
-      pool.give(src);
-    }
-
-    function drawItemLayer(g, it, Lk) {
-      if (!DR.hasLayer(it.scene, Lk)) return;
-      dc.over = overOf(it);
-      const spec = it.scene.layers[Lk];
-      if (spec && T.isIsolated(spec)) drawIsolated(g, it, Lk, spec);
-      else {
-        dc.g = g;
-        DR.drawLayer(dc, it.scene, Lk, view(it.cam, Lk), it.tl, pickCut(it));
-      }
-      dc.over = 1;
-    }
-
-    // Picks of ground scenes belong to the current cut (the one the camera follows).
-    let currentCut = -1;
-    function pickCut(it) { return it.cut >= 0 ? it.cut : currentCut; }
-
-    // Every item on `side` (0 = all) for one layer: grounds first, then cuts in `a` order.
-    function drawSideLayer(g, Lk, side, groundsToo, cutsToo) {
-      if (Lk === L.ground && !dc.groundOn) return;
-      if (dc.groundOnly && Lk !== L.ground) return;          // opts.layers 'ground' (DESIGN_2_1 §13.7)
-      // the ground layer's `still` media leave a world seam only through a shared ground (drawWorldSeam); elsewhere
-      // they take part like any node
-      const mode = dc.stillMode;
-      if (Lk === L.ground && mode === 1) dc.stillMode = 0;
-      for (let pass = 0; pass < 2; pass++) {
-        if (pass === 0 ? !groundsToo : !cutsToo) continue;
-        for (let k = 0; k < nItems; k++) {
-          const it = items[k];
-          if (it.skip && Lk === L.ground) continue;
-          if ((it.ground >= 0) === (pass === 0) && onSide(it, side)) drawItemLayer(g, it, Lk);
-        }
-      }
-      dc.stillMode = mode;
-    }
-
-    // The target is reset first (the caller's surface keeps whatever state the last frame left on it).
-    function fillBackdrop(g, w, h, backdrop, pal) {
-      SF.resetState(g);
-      const fill = F.backdropFill(backdrop);
-      if (backdrop === 'clear') { g.clearRect(0, 0, w, h); return; }
-      g.fillStyle = fill || pal.ground;
-      g.fillRect(0, 0, w, h);
-    }
-
-    // A complete world (all layers, hud last) of one side into g.
-    function drawWorld(g, w, h, side, backdrop) {
-      fillBackdrop(g, w, h, backdrop, dc.pal);
-      for (const Lk of WORLD_LAYERS) drawSideLayer(g, Lk, side, true, true);
-      drawSideLayer(g, L.hud, side, true, true);
-    }
-
-    // No seam, or a text seam: the ground and the far layers once; A's and B's text/near layers mixed by the seam part.
-    // `still` media of the mixed layers (DESIGN_2_1 §11.9.3) stay out of the mix and are drawn after it, like the hud.
-    function drawTextSeam(g, w, h, backdrop, part, u) {
-      fillBackdrop(g, w, h, backdrop, dc.pal);
-      for (const Lk of BASE_LAYERS) drawSideLayer(g, Lk, 0, true, true);
-      drawSideLayer(g, L.text, 0, true, false);
-      const still = anyStill(SE.TEXT_LAYERS, false);
-      const a = pool.take(), b = pool.take();
-      if (still) dc.stillMode = 1;
-      for (const Lk of SE.TEXT_LAYERS) { drawSideLayer(a.ctx, Lk, 1, false, true); drawSideLayer(b.ctx, Lk, 2, false, true); }
-      dc.stillMode = 0;
-      const out = SE.mix(ctl, pool, part, a, b, u, onPartError);
-      g.setTransform(1, 0, 0, 1, 0, 0);
-      g.globalAlpha = 1;
-      g.drawImage(out.canvas, 0, 0);
-      if (out !== a && out !== b) pool.give(out);
-      pool.give(a); pool.give(b);
-      dc.g = g;
-      if (still) stillPass(g, SE.TEXT_LAYERS, false);
-      drawSideLayer(g, L.near, 0, true, false);
-      drawSideLayer(g, L.hud, 0, true, true);
-    }
-
-    // Whether an item on screen holds a `still` medium in one of these layers (grounds too when asked).
-    function anyStill(layers, grounds) {
-      for (let k = 0; k < nItems; k++) {
-        const it = items[k];
-        if (it.ground >= 0 && !grounds) continue;
-        for (const Lk of layers) if (DR.hasStill(it.scene, Lk)) return true;
-      }
-      return false;
-    }
-
-    // Only the `still` media of these layers, every side, on the target (after the composite).
-    function stillPass(g, layers, grounds) {
-      dc.stillMode = 2;
-      for (const Lk of layers) drawSideLayer(g, Lk, 0, grounds, true);
-      dc.stillMode = 0;
-    }
-
-    // A world seam: two complete worlds mixed. A `still` medium stays out of the mix (DESIGN_2_1 §11.9.3): a shared
-    // ground holding one is drawn once under the composite (its whole ground layer, so the medium keeps its place and
-    // stays under the text), the worlds are drawn on clear surfaces without it, and the `still` media of the other
-    // layers come after the composite. Without still media this is the v2 path.
-    const NON_GROUND = Object.freeze([L.far, L.mid, L.text, L.near]);
-
-    function drawWorldSeam(g, w, h, backdrop, part, u) {
-      const under = sharedStillGround();
-      const still = anyStill(NON_GROUND, true);
-      const a = pool.take(), b = pool.take();
-      if (still) dc.stillMode = 1;
-      if (under) under.skip = true;
-      drawWorld(a.ctx, w, h, 1, under ? 'clear' : backdrop);
-      drawWorld(b.ctx, w, h, 2, under ? 'clear' : backdrop);
-      if (under) under.skip = false;
-      dc.stillMode = 0;
-      const out = SE.mix(ctl, pool, part, a, b, u, onPartError);
-      fillBackdrop(g, w, h, backdrop, dc.pal);        // whatever the mix leaves transparent shows the backdrop
-      if (under) {
-        dc.g = g;
-        if (dc.groundOn) drawItemLayer(g, under, L.ground);
-        g.setTransform(1, 0, 0, 1, 0, 0);
-        g.globalAlpha = 1;
-      }
-      g.drawImage(out.canvas, 0, 0);
-      if (out !== a && out !== b) pool.give(out);
-      pool.give(a); pool.give(b);
-      if (still) { dc.g = g; stillPass(g, NON_GROUND, true); }
-    }
-
-    // The ground item both worlds share (side 0) when its ground layer holds a `still` medium, else null.
-    function sharedStillGround() {
-      for (let k = 0; k < nItems; k++) {
-        const it = items[k];
-        if (it.ground >= 0 && !it.side && DR.hasStill(it.scene, L.ground)) return it;
-      }
-      return null;
-    }
-
-    function onPartError(part, err) {
-      if (o.strict) throw err;
-      const who = part.def ? part.def.kind + '/' + part.def.key : '?';
-      if (errors.length < 32) errors.push({ code: 'part-error', detail: who + ': ' + String(err && err.message) });
-    }
-
-    // --- post ----------------------------------------------------------------------------------------------------------
-
-    function entry(k) {
-      return entries[k] || (entries[k] = { def: null, p: null, seed: 0, cut: null, info: { tl: 0, dur: 0, impact: false, energy: 0.5 },
-        tl: 0, times: null, order: 0, slot: '' });
-    }
-
-    function sceneOfCut(i) {
-      for (let k = 0; k < nItems; k++) if (items[k].cut === i) return items[k].scene;
-      return null;
-    }
-
-    function collectPost(plan, backdrop, list) {
-      list.length = 0;
-      let n = 0;
-      const tex = fg.post.texture;
-      const ax = axPool;
-      ax.f = NO_FEATURES; ax.look.amounts = plan.look.amounts || {}; ax.look.bpm = plan.beats ? plan.beats.bpm : null;
-      if (tex) {
-        const def = registry.get('filter', tex.v);
-        if (def && F.filterAllowed(def, backdrop)) {
-          const e = entry(n++);
-          e.def = def; e.seed = H.hash32('fx', 'texture', def.key); e.p = PO.paramsFor(registry, def, tex, e.seed, ax);
-          e.cut = null; e.tl = fg.t; e.times = null; e.order = 0; e.slot = 'texture';
-          list.push(e);
-        }
-      }
-      for (const acc of fg.post.accents) {
-        if (dc.groundOnly) break;                            // the ground layers alone keep the work texture only
-        const cut = plan.cuts[acc.cut];
-        const d = cut.slots[acc.slot];
-        const def = d ? registry.get('filter', d.v) : null;
-        if (!def || !F.filterAllowed(def, backdrop)) continue;
-        const e = entry(n++);
-        e.def = def; e.seed = H.hash32('fx', cut.key, acc.slot, def.key);
-        ax.f = cut.feat || {};
-        e.p = PO.paramsFor(registry, def, d, e.seed, ax);
-        const info = e.info, f = cut.feat || {};
-        info.tl = acc.tl; info.dur = typeof f.dur === 'number' ? f.dur : cut.t1 - cut.t0;
-        info.impact = !!(cut.impact || f.impact); info.energy = typeof f.energy === 'number' ? f.energy : 0.5;
-        e.cut = info; e.tl = acc.tl; e.order = 1; e.slot = acc.slot;
-        const sc = sceneOfCut(acc.cut);
-        e.times = sc ? sc.times : null;
-        list.push(e);
-      }
-      return PO.sortEntries(list);
-    }
-
-    // fx.textAt(dt): the visible cuts' text and near layers again at t − dt, into a pooled surface the size the FxContext
-    // has now (a filter running at half resolution gets a half-size copy drawn at half scale, like its other surfaces).
-    // A photo or video in those layers (文字の中に, a frame or overlay in front) keeps the media frame of the frame's own
-    // time (dc.ghostTl): mediaAt / mediaReady list only that one, and an export frame draws exact frames only.
-    const D_SAVED = new Float32Array(6);
-    function textAt(dt) {
-      const fx = ctl.fx;
-      const s = pool.take(fx.w, fx.h);
-      const g0 = dc.g, pick = dc.pick;
-      const k = fx.unit / frameInfo.unit;
-      D_SAVED.set(dc.D);
-      if (k !== 1) for (let j = 0; j < 6; j++) dc.D[j] *= k;
-      dc.g = s.ctx; dc.pick = null;
-      for (let n = 0; n < nItems; n++) {
-        const it = items[n];
-        if (it.ground >= 0) continue;
-        F.evaluate(it.scene, it.tl - dt);
-        dc.ghostTl = it.tl;
-        for (const Lk of SE.TEXT_LAYERS) DR.drawLayer(dc, it.scene, Lk, view(it.cam, Lk), it.tl - dt, -1);
-      }
-      dc.D.set(D_SAVED);
-      dc.g = g0; dc.pick = pick; dc.ghostTl = null;
-      return s;
-    }
-
-    // --- adaptive preview (§7.4) --------------------------------------------------------------------------------------
-
-    function adaptTo(ms) {
-      adapt.ema = adapt.ema === 0 ? ms : adapt.ema + EMA_ALPHA * (ms - adapt.ema);
-      const slow = adapt.ema > SLOW_MS, fast = adapt.ema < FAST_MS;
-      adapt.slow = slow ? adapt.slow + 1 : 0;
-      adapt.fast = fast ? adapt.fast + 1 : 0;
-      if (adapt.slow >= SLOW_FRAMES && adapt.level < MAX_LEVEL) { adapt.level++; adapt.slow = 0; adapt.ema = 0; }
-      if (adapt.fast >= FAST_FRAMES && adapt.level > 0) { adapt.level--; adapt.fast = 0; }
-    }
-
-    // --- one frame --------------------------------------------------------------------------------------------------
-
-    // A frame is rendered once more with every filter copying its input (fx.own copies) when a filter threw after it had
-    // drawn on its input in place (PO.run's torn): the frame then shows what it would have shown had that filter never
-    // run, as every skipped filter did before fx.own. Errors are reported by the first pass.
-    let copyPass = false;
-    function render(surface, plan, t, opts, source) {
-      const start = clock();
-      const ro = opts || {};
-      const quality = ro.quality === 'export' || ro.quality === 'draft' ? ro.quality : 'preview';
-      const exporting = quality === 'export';
-      const backdrop = ro.backdrop || plan.look.backdrop || 'scene';
-      const W = plan.design.w, Hd = plan.design.h;
-      const sw = surface.w || surface.canvas.width, sh = surface.h || surface.canvas.height;
-      const scale = ro.scale > 0 ? ro.scale : Math.min(sw / W, sh / Hd);
-      const level = exporting ? 0 : adapt.level;
-      // adaptive level 3 draws at 0.75 of the output, but not below 720p: the stage already steps its backing down to
-      // 720p at that level, and a second step would only add an upscale (ui-data perf-5)
-      const dpr = level >= 3 && Math.min(sw, sh) > DPR_FLOOR ? DPR_STEP : 1;
-      if (source.fontKey !== fontKey) { if (fontKey !== null) sprites.clear(); fontKey = source.fontKey; }
-
-      fg = F.frameAt(plan, t, fg);
-      framePlan = plan;
-      gather(plan, source, t);
-      currentCut = F.currentCut(plan, t, fg);
-      const tBehave = clock();
-
-      // draw context for this frame
-      const pal = paletteOf(plan.look.palette, backdrop);
-      dc.pal = pal; dc.W = W; dc.H = Hd; dc.scale = scale * dpr; dc.assets = o.assets || null; dc.face = source.face || null;
-      dc.groundOn = F.groundVisible(backdrop);
-      dc.groundOnly = ro.layers === 'ground';
-      dc.t = t; dc.backdrop = backdrop; dc.quality = quality; dc.thumb = ro.thumb === true;
-      dc.glyphPath = !exporting && (ro.glyphPath === 'sprite' || ro.glyphPath === 'direct') ? ro.glyphPath : 'auto';
-      dc.probe = !exporting && ro.probe ? ro.probe : null;
-      dc.meter = ro.meter && typeof ro.meter === 'object' ? ro.meter : null;
-      q.draft = quality === 'draft' || (!exporting && level >= 2);
-      q.scale = dc.scale; q.pal = pal;
-      lastLook.t = t; lastLook.scale = dc.scale; lastLook.backdrop = backdrop;
-      lastLook.glyphPath = dc.glyphPath; lastLook.probe = dc.probe;
-      dc.paintKey = paintKeyOf(dc.scale, palId(pal), q.draft);
-      dc.overKey = paintKeyState.over;
-      DR.resetCounts(dc);
-      const ox = (sw - W * scale) / 2, oy = (sh - Hd * scale) / 2;
-      dc.D[0] = scale * dpr; dc.D[1] = 0; dc.D[2] = 0; dc.D[3] = scale * dpr; dc.D[4] = ox * dpr; dc.D[5] = oy * dpr;
-      const vis = dc.visible;                        // the frame on the device (media edges draw only what shows)
-      vis[0] = dc.D[4]; vis[1] = dc.D[5]; vis[2] = dc.D[4] + W * dc.D[0]; vis[3] = dc.D[5] + Hd * dc.D[3];
-      const fw = dpr === 1 ? sw : Math.max(1, Math.round(sw * dpr)), fh = dpr === 1 ? sh : Math.max(1, Math.round(sh * dpr));
-      pool.frame(fw, fh);
-      pool.begin();
-      lastLook.fw = fw; lastLook.fh = fh;
-      dc.pick = ro.pick ? picks : null;
-      if (ro.pick) picks.begin(plan);
-
-      const post = collectPost(plan, backdrop, postList);
-      const fi = frameInfo;
-      fi.plan = plan; fi.w = fw; fi.h = fh; fi.unit = scale * dpr; fi.quality = quality; fi.alpha = backdrop === 'clear';
-      fi.textAt = textAt; fi.flashScale = !exporting && ro.reduceFlash ? REDUCED_FLASH : 1; fi.pal = pal; fi.backdrop = backdrop;
-      ctl.frame(fi);
-      const direct = post.length === 0 && dpr === 1;
-      const frame = direct ? surface : pool.take(fw, fh);
-      const g = frame.ctx;
-      dc.g = g;
-
-      const seam = fg.seam;
-      if (seam && (seam.scope === 'world' || !dc.groundOnly)) {
-        const part = SE.seamPart(plan, registry, seam.i);
-        if (seam.scope === 'world') drawWorldSeam(g, fw, fh, backdrop, part, seam.u);
-        else drawTextSeam(g, fw, fh, backdrop, part, seam.u);
-      } else drawWorld(g, fw, fh, 0, backdrop);     // (a text seam mixes only text layers: none with layers 'ground')
-      if (typeof ro.flush === 'function') ro.flush(frame);
-      const tDraw = clock();
-
-      let passes = 0;
-      if (!direct) {
-        let out = frame;
-        if (post.length) {
-          const res = PO.run(ctl, pool, frame, post, t, level, copyPass ? null : onFilterError, copyPass);
-          if (res.torn && !copyPass) {
-            pool.end();
-            copyPass = true;
-            try { return render(surface, plan, t, opts, source); } finally { copyPass = false; }
-          }
-          out = res.out; passes = res.passes;
-        }
-        // The target is prepared first (cleared, or filled with the backdrop), so whatever a filter leaves transparent
-        // shows the backdrop, never what an earlier frame left on the caller's surface.
-        const tg = surface.ctx;
-        fillBackdrop(tg, sw, sh, backdrop, pal);
-        tg.drawImage(out.canvas, 0, 0, out.w, out.h, 0, 0, sw, sh);
-      } else {
-        g.setTransform(1, 0, 0, 1, 0, 0);
-        g.globalAlpha = 1;
-      }
-      pool.end();
-      const end = clock();
-
-      let provisional = dc.mediaWaiting > 0;         // a media frame still decoding is provisional too (§11.4.5)
-      for (let k = 0; k < nItems; k++) if (items[k].scene.provisional) provisional = true;
-      last.ms = end - start; last.behave = tBehave - start; last.draw = tDraw - tBehave; last.post = end - tDraw; last.passes = passes;
-      if (quality === 'preview' && now) adaptTo(last.ms);
-      const c = dc.counts;
-      const stats = { ms: last.ms, drawn: { glyphs: c.glyphs, shapes: c.shapes, paints: c.paints, particles: c.particles }, passes,
-        provisional, level, media: { drawn: c.media, waiting: dc.mediaWaiting, fallback: c.mediaFallback } };
-      // export quality never draws a substitute: the facade turns this into EngineError('media-not-ready' | 'media-missing')
-      if (dc.mediaError) stats.mediaError = dc.mediaError;
-      return stats;
-    }
-
-    // mediaAt(plan, source, t, out, scale) → out: [{ id, m }] of the media nodes of the scenes active at absolute time
-    // t, with their media times (closed form, the drawing's own rule); no behaviour runs. Unsorted; the facade sorts.
-    // With an output scale, every medium also carries the px and blur its draw will ask the store for (shapes.frameFor:
-    // the box's long side × scale × headroom, blur × scale; a 'soft' fit adds its blurred copy), so the store readies
-    // exactly that still tier, and bakes exactly that blur of a video or animation frame (DESIGN_2_1 §11.4.6). The
-    // products are shapes.frameFor's, in its order, so the store's keys match bit for bit. The media of a scene come
-    // from source.media(kind, i) (the facade's memo by fingerprint, so no scene is kept or rebuilt for this) when the
-    // source has it, else from the built scene (mediaEntries).
-    const mediaGraph = { fg: null };
-    function mediaAt(plan, source, t, out, scale) {
-      const list = out || [];
-      list.length = 0;
-      if (!plan) return list;
-      const g = mediaGraph.fg = F.frameAt(plan, t, mediaGraph.fg);
-      const entries = (kind, i) => (source.media ? source.media(kind, i) : mediaEntries(kind === 'cut' ? source.cut(i) : source.ground(i)));
-      const add = (ms, tl) => {
-        for (const e of ms) {
-          const m = e.time ? MEDIA.mapTime(e.time, e.time.clock === 'song' ? t : tl) : 0;
-          if (!(scale > 0)) { list.push({ id: e.id, m }); continue; }
-          const px = e.size * scale * e.headroom;                    // shapes.frameFor's product, in its order
-          list.push({ id: e.id, m, px, blur: e.blur * scale });
-          if (e.softBlur >= 0) list.push({ id: e.id, m, px, blur: e.softBlur * scale });
-        }
-      };
-      const seen = new Set();
-      const cut = (i) => { if (!seen.has(i)) { seen.add(i); add(entries('cut', i), t - plan.cuts[i].t0); } };
-      for (const c of g.cuts) cut(c.i);
-      if (g.seam) { for (const i of g.seam.aCuts) cut(i); for (const i of g.seam.bCuts) cut(i); }
-      for (const e of g.grounds) add(entries('ground', e.i), t - plan.grounds[e.i].t0);
-      return list;
-    }
-
-    // warmAt(plan, source, t) → glyphs visited: makes the glyph sprites the frame at t will draw, at the output scale,
-    // backdrop, adaptive level and glyph path of the latest frame, without drawing (§7.4: a frame should not rasterize).
-    // The cuts are gathered and evaluated as render() does, with their cameras, and every glyph off the direct path
-    // looks up exactly the keys drawGlyph asks for (draw.warmLayer). Grounds are skipped (their text, if any, takes
-    // the direct path), and so are static layers (drawn once into their raster). Nothing happens before the first frame.
-    // stop (optional) is asked after each glyph that made a new sprite; when it answers true the walk ends there (a host
-    // canvas rasterizes each sprite as it is made, so a frame of large blurred glyphs is more work than one slice of
-    // engine.prepare): the caller yields and walks the same t again, finding the sprites made so far.
-    function warmAt(plan, source, t, stop) {
-      if (!(lastLook.scale > 0) || !plan) return 0;
-      fg = F.frameAt(plan, t, fg);
-      nItems = 0;
-      used.length = 0;
-      for (const c of fg.cuts) addCut(plan, source, c.i, t, 0);
-      if (fg.seam) {
-        for (const i of fg.seam.aCuts) addCut(plan, source, i, t, 0);
-        for (const i of fg.seam.bCuts) addCut(plan, source, i, t, 0);
-        // a seam draws each side on a frame surface and mixes them on more: on a host canvas those are made (and
-        // rasterized once) now, so the seam's first frame does not make them. The recorder has no settle: its canvas
-        // ids, and so its op streams, stay as they were. stop() is asked after each surface, as after each glyph that
-        // made a sprite: a warm-up slice makes at most one more surface once it is due.
-        if (typeof factory.settle === 'function' && lastLook.fw > 0) {
-          pool.frame(lastLook.fw, lastLook.fh);
-          pool.warm(SEAM_SURFACES, (sf) => factory.settle(sf.canvas), stop);
-        }
-      }
-      const s = lastLook.scale;
-      dc.pal = paletteOf(plan.look.palette, lastLook.backdrop);
-      dc.W = plan.design.w; dc.H = plan.design.h; dc.scale = s;
-      dc.glyphPath = lastLook.glyphPath; dc.probe = lastLook.probe;
-      dc.D[0] = s; dc.D[1] = 0; dc.D[2] = 0; dc.D[3] = s; dc.D[4] = 0; dc.D[5] = 0;
-      let n = 0;
-      walk: for (let k = 0; k < nItems; k++) {
-        const it = items[k];
-        for (const Lk of WARM_LAYERS) {
-          if (!DR.hasLayer(it.scene, Lk)) continue;
-          const spec = it.scene.layers[Lk];
-          if (spec && T.isIsolated(spec) && spec.cache === 'static' && !spec.mask && !spec.filter) continue;
-          const got = DR.warmLayer(dc, it.scene, Lk, view(it.cam, Lk), stop);
-          if (got < 0) { n += -got - 1; break walk; }
-          n += got;
-        }
-      }
-      nItems = 0;
-      return n;
-    }
-
-    function onFilterError(e, err) {
-      if (o.strict) throw err;
-      if (errors.length < 32) errors.push({ code: 'part-error', detail: 'filter/' + e.def.key + ': ' + String(err && err.message) });
-    }
-
-    return {
-      render, warmAt, mediaAt,
-      // setRegistry(registry) (DESIGN_2_1 §3.10): the registry filters and seams are looked up in (the effective one)
-      setRegistry(next) { if (next && typeof next.get === 'function') registry = next; },
-      get registry() { return registry; },
-      // beginWarm() starts counting the sprite working set; warmBytes() → { used, budget }: the bytes of the distinct
-      // sprites found or made since (frames drawn meanwhile count too) and the sprite budget.
-      beginWarm() { sprites.beginSpan(); },
-      warmBytes: () => ({ used: sprites.spanBytes, budget: sprites.budget }),
-      lastTime: () => (Number.isFinite(lastLook.t) ? lastLook.t : null),
-      lastScale: () => lastLook.scale,
-      hitTest: (x, y) => picks.hitTest(x, y),
-      boxes: () => picks.boxes(),
-      stats: () => ({ frameMs: last.ms, stageMs: { behave: last.behave, draw: last.draw, post: last.post },
-        spriteBytes: sprites.bytes, spritesMade: sprites.made, surfaces: pool.stats().live, surfaceBytes: pool.stats().bytes, passes: last.passes,
-        level: adapt.level, ema: adapt.ema }),
-      errors: () => errors.slice(),
-      clearErrors() { errors.length = 0; },
-      get level() { return adapt.level; },
-      setLevel(v) { adapt.level = Math.max(0, Math.min(MAX_LEVEL, v | 0)); adapt.slow = 0; adapt.fast = 0; },
-      setSpriteBudget(bytes) { sprites.setBudget(bytes); },
-      clear() { sprites.clear(); paints.clear(); statics.clear(); tiles.clear(); },
-      dispose() { sprites.clear(); paints.clear(); statics.clear(); tiles.clear(); pool.drop(); items.length = 0; nItems = 0; },
-    };
-  }
-
-  return { createRenderer, mediaEntries, WORLD_LAYERS };
-});
 /* 文字PVメーカー v2 — original work. The glyph budget of a cut: what drawing its glyphs covers, sampled over each material phase, and the masks that keep a material within its share (DESIGN_2_1 §5.9.5). */
 MV.def('engine/scene/budget', ['core/mat', 'engine/scene/table', 'engine/scene/behave', 'engine/scene/frame', 'engine/render/draw'],
 (MAT, T, BH, F, DR) => {
@@ -26970,10 +26730,1644 @@ MV.def('engine/scene/budget', ['core/mat', 'engine/scene/table', 'engine/scene/b
 
   return { SHARE, SLACK, STEP, MAX_SAMPLES, HOLD_SAMPLES, LADDER, coverAt, samplesOf, fit };
 });
+/* 文字PVメーカー v2 — original work. EXTREME shots: the x-track — rotation-aware safe framing, the roll fence, speed caps, jump spacing and beat-locked modulators (DESIGN_EXTREME §1.4). */
+MV.def('engine/scene/xshot', ['core/num', 'core/hash', 'core/curve', 'core/shot', 'engine/scene/behave', 'engine/scene/shot'],
+(N, H, CV, SHOT, BH, SS) => {
+  'use strict';
+
+  // An EXTREME cam.shot (SHOT.isExtreme) becomes, at build, an x-track: keys sorted by time, each a framing (aim centre c,
+  // on-screen position P of that centre after the roll, zoom Z, roll R, ground zoom gz), reading paths, the kept
+  // deliberate jumps, and the beat modulators as closed-form schedules. One camera behaviour (phase LENS, after the lens
+  // parts, like engine/scene/shot) composes the pose with the lens deltas and adds the modulators. Everything per frame is
+  // a closed-form lookup with pooled scratch objects (no allocation). The normal track (engine/scene/shot) is not
+  // changed: the scene build sends only EXTREME shots here.
+
+  const DEG = N.DEG;
+  const XSAFE = 0.08;             // share of the short side kept free on every edge in the sung span
+  const XROLL_SUNG = 30;          // |roll| of a key inside the sung span (degrees)
+  const XSPIN_LAND = 180;         // |Δroll| of a segment that lands inside the sung span from before it
+  const XSPIN_INSIDE = 60;        // |Δroll| of a segment that overlaps the sung span otherwise
+  const XROT_SPEED = 540;         // degrees per second, average per segment
+  const XZOOM_SPEED = 12;         // |Δ ln Z| per second, average per segment
+  const XTRAVEL_SPEED = 10;       // frame widths per second of the aim's on-screen travel, average per segment
+  const XJUMP_GAP = 0.4;          // deliberate jumps at least this far apart and from the cut's start a
+  const XSNAP = 0.08;             // a jump that comes too early becomes a move of this length
+  const PULSE_GAP = 1 / 3, PULSE_ATTACK = 0.035, PULSE_DECAY = 0.14, DOWNBEAT = 1.3;
+  const SWING_GAP = 0.5, SWING_FLIP = 0.16;
+  const HIT_GAP = 0.5, HIT_HZ = 5, HIT_DECAY = 0.09, HIT_DU = 0.018, HIT_ROLL = 1.2, HIT_WINDOW = 6;
+  const CALM = 0.3;               // the modulators under 「激しいカメラを抑える」 (preview only, §3.6)
+  const GENTLE = Object.freeze({ roll: 6, beatRoll: 4, off: 0.12, gz: 1.1, hop: 0.2 });   // arrange cam 'gentle' / 'none' (X7)
+  const OFF_MAX = 0.6;            // outside the sung span the aim may go this far from the centre (whips leave the frame)
+  const BEAT_STEP = 0.5;          // schedules without a beat grid step every half second
+  const HOP_SHARE = 0.6;
+  const SHUTTER = 1 / 48;         // the motion blur shutter at blur 1, g 1 (seconds; engine/render/xblur)
+  const XLEAVE = 0.2;             // a reading path is left over the last XLEAVE s before the next (non-reading) key
+  const JUMP = SS.JUMP;
+  const XL = SHOT.XLIMITS;
+  const Z_MIN = XL.frameZoom[0], Z_MAX = XL.frameZoom[1];
+  const PLACE_ZOOM = XL.zoom;
+  const EPS = 1e-9;
+  const TAU = 2 * Math.PI;
+  const DASH = CV.fn('dashStop');
+
+  function finite(v) { return typeof v === 'number' && Number.isFinite(v); }
+  function clamp(x, lo, hi) { return x < lo ? lo : x > hi ? hi : x; }
+
+  // isX(inputs) → whether the scene build sends the cut's shot here (its cam.shot value is EXTREME).
+  function isX(inputs) { return !!(inputs && inputs.shot && inputs.shot.v !== undefined && SHOT.isExtreme(inputs.shot.v)); }
+
+  // --- anchors (X1) --------------------------------------------------------------------------------------------------
+
+  // The first glyph after glyph `last` that starts another word (−1 when none).
+  function nextWordGlyph(target, last) {
+    const n = target.to - target.from, word = target.unitOf.word[last];
+    for (let j = last + 1; j < n; j++) if (target.cls[j] !== 'space' && target.unitOf.word[j] !== word) return j;
+    return -1;
+  }
+
+  // anchorTime plus accent (the sung start of the emphasized word; without emphasis the first beat at or after the sung
+  // start) and accentEnd (the sung start of the first word after the emphasized run; without emphasis `end`).
+  function anchorTime(env, target, at, dt) {
+    if (at !== 'accent' && at !== 'accentEnd') return SS.anchorTime(env, target, at, dt);
+    const run = target ? SS.emphRun(target) : null;
+    if (!run) return SS.anchorTime(env, target, at === 'accent' ? 'beat:0' : 'end', dt);
+    let t = SS.spanOf(env);
+    if (at === 'accent') t = SS.sungOf(env, target, run[0]);
+    else {
+      const j = nextWordGlyph(target, run[1]);
+      if (j >= 0) t = SS.sungOf(env, target, j);
+    }
+    t += finite(dt) ? dt : 0;
+    return clamp(t, env.times.a, env.times.b);
+  }
+
+  // --- aims ----------------------------------------------------------------------------------------------------------
+
+  // An x-track's 'emph' aim with an emphasis frames the whole words the emphasized run touches (a run inside a word
+  // would crop the rest of that word while it is sung, §3.1 R3); floored like engine/scene/shot's boxes. null without one.
+  function emphWordsBox(D, target) {
+    const run = SS.emphRun(target);
+    if (!run) return null;
+    const words = new Set();
+    for (let j = run[0]; j <= run[1]; j++) if (target.emph[j] && target.cls[j] !== 'space') words.add(target.unitOf.word[j]);
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    const b = target.box;
+    for (let j = 0; j < target.to - target.from; j++) {
+      if (target.cls[j] === 'space' || !SS.aimable(target, j) || !words.has(target.unitOf.word[j])) continue;
+      x0 = Math.min(x0, b[j * 4]); y0 = Math.min(y0, b[j * 4 + 1]); x1 = Math.max(x1, b[j * 4 + 2]); y1 = Math.max(y1, b[j * 4 + 3]);
+    }
+    if (!(x0 <= x1)) return null;
+    const m = SS.FLOOR * D.short, w = Math.max(x1 - x0, m), h = Math.max(y1 - y0, m);
+    return { x: (x0 + x1) / 2 - w / 2, y: (y0 + y1) / 2 - h / 2, w, h };
+  }
+
+  function aimBoxOf(env, target, key) {
+    const own = key.aim === 'emph' ? emphWordsBox(env.D, target) : null;
+    return own || SS.aimBox(env, target, key.aim, key) || SS.aimBox(env, target, 'block', key);
+  }
+
+  // --- geometry ------------------------------------------------------------------------------------------------------
+
+  // Whether some θ = ±c + kπ lies in [lo, hi].
+  function crosses(c, lo, hi) {
+    for (const x of [c, -c]) {
+      const k = Math.ceil((lo - x) / Math.PI - 1e-12);
+      if (x + k * Math.PI <= hi + 1e-12) return true;
+    }
+    return false;
+  }
+
+  // The largest on-screen extents [w', h'] of a w × h box rotated by any angle in [lo, hi] (radians): w' = w|cos| + h|sin|
+  // peaks (√(w² + h²)) at ±atan2(h, w) + kπ, h' at ±atan2(w, h) + kπ; otherwise the ends decide.
+  function rotExtent(w, h, lo, hi) {
+    const at = (th) => { const c = Math.abs(Math.cos(th)), s = Math.abs(Math.sin(th)); return [w * c + h * s, w * s + h * c]; };
+    const A = at(lo), B = at(hi), r = Math.sqrt(w * w + h * h);
+    return [crosses(Math.atan2(h, w), lo, hi) ? r : Math.max(A[0], B[0]), crosses(Math.atan2(w, h), lo, hi) ? r : Math.max(A[1], B[1])];
+  }
+
+  // The key's safe-area constants (X3, X4): s = XSAFE·short, hd = the largest hit displacement, pz = the largest pulse,
+  // e = the modulated tilt on top of a key's roll (swing and jolt), σ = sin e.
+  function envelopeOf(D, shot, hmax) {
+    const e = Math.min(Math.PI / 2, (shot.beat.roll + HIT_ROLL * hmax) * DEG);
+    return { s: XSAFE * D.short, hd: HIT_DU * D.short * hmax, pz: shot.beat.zoom * DOWNBEAT, e, sigma: Math.sin(e) };
+  }
+
+  // Zfit: the largest zoom at which a box of rotated extents [w', h'] fits the XSAFE area under the pulse and the hits.
+  function zfit(D, ext, env) {
+    const zw = ext[0] > 0 ? (D.w - 2 * env.s - 2 * env.hd) / ext[0] : Infinity;
+    const zh = ext[1] > 0 ? (D.h - 2 * env.s - 2 * env.hd) / ext[1] : Infinity;
+    return Math.min(zw, zh) / (1 + env.pz);
+  }
+
+  // Clamps the on-screen position p = [x, y] of an aim of zoomed extents [w', h']·Z into the XSAFE area, with the pulse,
+  // the hits and the swing (which turns p about the frame centre by up to e): |px| + σ|py| ≤ AX and |py| + σ|px| ≤ AY.
+  function safeClamp(D, p, ext, Z, env) {
+    const AX = Math.max(0, (D.w / 2 - env.s - env.hd) / (1 + env.pz) - (Z * ext[0]) / 2);
+    const AY = Math.max(0, (D.h / 2 - env.s - env.hd) / (1 + env.pz) - (Z * ext[1]) / 2);
+    let x = clamp(p[0], -AX, AX), y = clamp(p[1], -AY, AY);
+    const ax = Math.abs(x), ay = Math.abs(y), sg = env.sigma;
+    const need = Math.max((ax + sg * ay) / (AX || EPS), (ay + sg * ax) / (AY || EPS));
+    if (need > 1) { x /= need; y /= need; }
+    if (!(AX > 0)) x = 0;
+    if (!(AY > 0)) y = 0;
+    p[0] = x; p[1] = y;
+    return p;
+  }
+
+  // The camera offset that shows aim centre c at on-screen p under zoom Z and roll θ: X = c − Rot(θ)·p/Z.
+  function cameraOf(cx, cy, px, py, Z, th, out) {
+    const c = Math.cos(th), s = Math.sin(th);
+    out[0] = cx - (c * px - s * py) / Z;
+    out[1] = cy - (s * px + c * py) / Z;
+    return out;
+  }
+
+  // Gentle layouts keep the §4.5.4 bleed clamp: the camera is clamped and p recomputed from it (p = Z·Rot(−θ)·(c − X)).
+  function bleedClamp(D, cx, cy, p, Z, th) {
+    const X = cameraOf(cx, cy, p[0], p[1], Z, th, [0, 0]);
+    const lx = SS.bleedLimit(D.w, Z), ly = SS.bleedLimit(D.h, Z);
+    const x = clamp(X[0], -lx, lx), y = clamp(X[1], -ly, ly);
+    if (x === X[0] && y === X[1]) return p;
+    const c = Math.cos(th), s = Math.sin(th), dx = cx - x, dy = cy - y;
+    p[0] = Z * (c * dx + s * dy); p[1] = Z * (-s * dx + c * dy);
+    return p;
+  }
+
+  // --- segments (X5, X6) ---------------------------------------------------------------------------------------------
+
+  // How segment (t0 → t1) is capped: the key kept is the one closer to the sung span [0, end): { fence (degrees), later
+  // (true: the later key gives way) }.
+  function segmentRule(t0, t1, end) {
+    const in0 = t0 >= -EPS && t0 < end - 1e-6, in1 = t1 >= -EPS && t1 < end - 1e-6;
+    if (t1 < -EPS) return { fence: Infinity, later: false };                 // wholly before the singing
+    if (t0 >= end - 1e-6) return { fence: Infinity, later: true };           // wholly after it
+    if (t0 < -EPS && in1) return { fence: XSPIN_LAND, later: false };         // lands in it
+    if (in0 && !in1) return { fence: XSPIN_INSIDE, later: true };             // leaves it
+    return { fence: XSPIN_INSIDE, later: false };                            // inside, or across it
+  }
+
+  // Caps |v_i − v_{i−1}| ≤ cap(i) (deliberate jumps exempt): a backward pass for the segments whose earlier key gives
+  // way, then a forward pass for those whose later key does, so the keys nearest the sung span are kept.
+  function capScalar(v, rules, jump, cap, fixed) {
+    const n = v.length;
+    for (let i = n - 1; i >= 1; i--) {
+      if (jump[i] || rules[i].later || fixed[i - 1]) continue;
+      const d = v[i - 1] - v[i], c = cap(i);
+      if (Math.abs(d) > c) v[i - 1] = v[i] + Math.sign(d) * c;
+    }
+    for (let i = 1; i < n; i++) {
+      if (jump[i] || !rules[i].later || fixed[i]) continue;
+      const d = v[i] - v[i - 1], c = cap(i);
+      if (Math.abs(d) > c) v[i] = v[i - 1] + Math.sign(d) * c;
+    }
+  }
+
+  function capVector(px, py, rules, jump, cap, fixed) {
+    const n = px.length;
+    const pull = (from, to, c) => {
+      const dx = px[from] - px[to], dy = py[from] - py[to], d = Math.sqrt(dx * dx + dy * dy);
+      if (d > c) { px[from] = px[to] + (dx * c) / d; py[from] = py[to] + (dy * c) / d; }
+    };
+    for (let i = n - 1; i >= 1; i--) if (!jump[i] && !rules[i].later && !fixed[i - 1]) pull(i - 1, i, cap(i));
+    for (let i = 1; i < n; i++) if (!jump[i] && rules[i].later && !fixed[i]) pull(i, i - 1, cap(i));
+  }
+
+  // --- modulator schedules (X8, X9) ------------------------------------------------------------------------------------
+
+  // Beats every `every`-th beat of the grid (or every 0.5 s without one), thinned ×2 until they are ≥ gap apart, from
+  // the first at or after a to b: { first, step, count, n0 (beat index of the first), E (beats per step), meter }.
+  function schedule(grid, a, b, every, gap) {
+    const has = grid && grid.period > 0;
+    const P = has ? grid.period : BEAT_STEP, origin = has ? grid.offset : 0, meter = has ? grid.meter : 4;
+    let E = every > 0 ? every : 1;
+    while (E * P < gap - 1e-9) E *= 2;
+    const step = E * P;
+    let n0 = Math.ceil((a - origin) / P - 1e-9);
+    n0 = Math.ceil(n0 / E) * E;
+    const first = origin + n0 * P;
+    const count = first > b ? 0 : Math.floor((b - first) / step + 1e-9) + 1;
+    return { first, step, count, n0, E, meter };
+  }
+
+  // The index of the last entry of a sorted array ≤ t (−1 before the first).
+  function lastAt(arr, n, t) {
+    let lo = 0, hi = n;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (arr[mid] <= t) lo = mid + 1; else hi = mid; }
+    return lo - 1;
+  }
+
+  // pulse(t) = beat.zoom · acc · (since < A ? since/A : exp(−(since − A)/DECAY)), acc = 1.3 on a bar's first beat; the
+  // two latest pulses add (so a pulse starting never cuts the previous one's tail off), capped at beat.zoom · 1.3.
+  function pulseAt(pl, t) {
+    if (!pl || pl.count === 0) return 0;
+    const j = Math.min(pl.count - 1, Math.floor((t - pl.first) / pl.step + 1e-9));
+    if (j < 0) return 0;
+    let sum = 0;
+    for (let q = j; q >= 0 && q >= j - 1; q--) {
+      const since = t - (pl.first + q * pl.step);
+      if (since < 0) continue;
+      const idx = pl.n0 + q * pl.E;
+      const acc = ((idx % pl.meter) + pl.meter) % pl.meter === 0 ? DOWNBEAT : 1;
+      sum += acc * (since < PULSE_ATTACK ? since / PULSE_ATTACK : Math.exp(-(since - PULSE_ATTACK) / PULSE_DECAY));
+    }
+    return Math.min(pl.amp * sum, pl.amp * DOWNBEAT);
+  }
+
+  // swing(t) = beat.roll · s(t), s ∈ {−1, +1} flipping at each scheduled beat with a dashStop ease over SWING_FLIP.
+  function swingAt(sw, t) {
+    if (!sw) return 0;
+    const j = sw.count === 0 ? -1 : Math.min(sw.count - 1, Math.floor((t - sw.first) / sw.step + 1e-9));
+    if (j < 0) return sw.amp * sw.s0;
+    const prev = j % 2 === 0 ? sw.s0 : -sw.s0, next = -prev;
+    const u = (t - (sw.first + j * sw.step)) / SWING_FLIP;
+    return sw.amp * (u >= 1 ? next : prev + (next - prev) * DASH(u < 0 ? 0 : u));
+  }
+
+  // hits: a damped 5 Hz oscillation from 0 along a hashed direction (and a jolt of the roll), the two latest summed:
+  //   hit(t) = HIT_DU·short·amp·e^{−τ/0.09}·sin(2π·5·τ)·(cos φ, sin φ),  jolt(t) = HIT_ROLL·amp·e^{−τ/0.09}·sin(2π·5·τ)·±1
+  function hitAt(hs, t, out) {
+    out.hx = 0; out.hy = 0; out.jolt = 0;
+    if (!hs) return out;
+    const j = lastAt(hs.t, hs.n, t);
+    for (let q = j; q >= 0 && q >= j - 1; q--) {
+      const tau = t - hs.t[q];
+      if (!(tau >= 0) || tau >= HIT_WINDOW * HIT_DECAY) continue;
+      const v = hs.amp[q] * Math.exp(-tau / HIT_DECAY) * Math.sin(TAU * HIT_HZ * tau);
+      out.hx += hs.du * v * hs.cx[q];
+      out.hy += hs.du * v * hs.cy[q];
+      out.jolt += HIT_ROLL * DEG * v * hs.sr[q];
+    }
+    return out;
+  }
+
+  // modAt(track, t, out) → out { pulse, swing (radians), jolt (radians), hx, hy (du) }: the modulators at cut-local t.
+  function modAt(track, t, out) {
+    const o = out || { pulse: 0, swing: 0, jolt: 0, hx: 0, hy: 0 };
+    o.pulse = pulseAt(track.pulse, t);
+    o.swing = swingAt(track.swing, t);
+    hitAt(track.hits, t, o);
+    return o;
+  }
+
+  // --- build -------------------------------------------------------------------------------------------------------------
+
+  // The keys of the expanded shot with the layout caps (X7): 'gentle' → small tilts and offsets, no whip, small ground
+  // zoom, hops ≥ 0.2; 'none' → two holds at key 0's framing (a, b), then the gentle caps (only the modulators move).
+  function layoutKeys(shot, trait) {
+    let keys = shot.keys.map((k) => Object.assign({}, k));
+    const beat = Object.assign({}, shot.beat);
+    if (trait === 'none') {
+      const k0 = Object.assign({}, keys[0], { dt: 0, hit: 0, whip: 0, hop: null });
+      if (k0.aim === 'reading') k0.aim = 'block';
+      keys = [Object.assign({}, k0, { at: 'a' }), Object.assign({}, k0, { at: 'b', curve: 'linear' })];
+    }
+    if (trait !== 'any') {
+      for (const k of keys) {
+        k.roll = clamp(k.roll, -GENTLE.roll, GENTLE.roll);
+        if (k.ox !== undefined) k.ox = clamp(k.ox, -GENTLE.off, GENTLE.off);
+        if (k.oy !== undefined) k.oy = clamp(k.oy, -GENTLE.off, GENTLE.off);
+        k.whip = 0;
+        k.gz = Math.min(k.gz, GENTLE.gz);
+        if (k.hop !== null) k.hop = Math.max(GENTLE.hop, k.hop);
+      }
+      beat.roll = Math.min(beat.roll, GENTLE.beatRoll);
+    }
+    return { keys, beat };
+  }
+
+  function kindOf(aim) {
+    if (aim === 'reading') return 'reading';
+    if (aim === 'frame' || aim === 'point') return aim;
+    return 'text';
+  }
+
+  // The hashed direction and jolt sign of hit i, from what the cut's fingerprint covers (the shot value and the text), so
+  // two cuts that share one cached scene share their hits too.
+  function hitPhase(seed, i) {
+    const phi = (H.hash32('xhit', seed, i, 0) / 4294967296) * TAU;
+    return [Math.cos(phi), Math.sin(phi), H.hash32('xhit', seed, i, 2) & 1 ? 1 : -1];
+  }
+
+  // buildTrack(env, target, shot, o) → Track (see makeShot). shot = SHOT.expandShot of an EXTREME value; o = { trait,
+  // seed }.
+  function buildTrack(env, target, shot, o) {
+    const D = env.D, W = D.w, Hh = D.h;
+    const tm = env.times, end = SS.spanOf(env);
+    const trait = o.trait === 'gentle' || o.trait === 'none' ? o.trait : 'any';
+    const { keys: lk, beat } = layoutKeys(shot, trait);
+    const sh = { beat };
+    const raw = lk.map((key, i) => ({ key, i, t: anchorTime(env, target, key.at, key.dt) }));
+    raw.sort((p, q) => p.t - q.t || p.i - q.i);
+    const n = raw.length;
+    const t = raw.map((r) => r.t);
+    const key = raw.map((r) => r.key);
+    const kind = key.map((k) => kindOf(k.aim));
+    const inSung = (x) => x >= -EPS && x < end - 1e-6;
+    let hmax = beat.shake;
+    for (const k of key) hmax = Math.max(hmax, k.hit);
+    const env2 = envelopeOf(D, sh, hmax);
+
+    // reading units (shared by the reading keys), their sung starts τ
+    const units = kind.includes('reading') ? SS.readingUnits(env, target) : null;
+
+    // X2: deliberate jumps (keys < 1/120 s apart; reading units with hop 0) at least XJUMP_GAP apart and from a
+    const cands = [];
+    for (let i = 1; i < n; i++) if (t[i] - t[i - 1] < JUMP) cands.push({ t: t[i], i, k: -1 });
+    const unitJump = new Uint8Array(units ? units.n : 0);
+    if (units) {
+      for (let r = 0; r < n; r++) {
+        if (kind[r] !== 'reading' || key[r].hop !== 0) continue;
+        const lo = r > 0 ? t[r - 1] : tm.a, hi = r < n - 1 ? t[r + 1] : tm.b;
+        for (let k = 1; k < units.n; k++) {
+          if (unitJump[k] || units.tau[k] < lo || units.tau[k] > hi) continue;
+          unitJump[k] = 1;
+          cands.push({ t: units.tau[k], i: -1, k });
+        }
+      }
+    }
+    cands.sort((p, q) => p.t - q.t || (p.i < 0) - (q.i < 0) || p.i - q.i || p.k - q.k);
+    const snapUnit = new Uint8Array(units ? units.n : 0);
+    const jumps = [];
+    let last = tm.a;
+    for (const c of cands) {
+      if (c.t - last >= XJUMP_GAP - 1e-9) { jumps.push(c.t); last = c.t; continue; }
+      if (c.i >= 0) {
+        const lo = c.i >= 2 ? t[c.i - 2] + JUMP : tm.a;
+        const at = Math.max(lo, t[c.i] - XSNAP);
+        if (at <= t[c.i] - JUMP) t[c.i - 1] = at;
+        else { jumps.push(c.t); last = c.t; }         // no room to turn it into a move: it stays a jump
+      } else snapUnit[c.k] = 1;
+    }
+    const jump = new Uint8Array(n);
+    for (let i = 1; i < n; i++) jump[i] = t[i] - t[i - 1] < JUMP ? 1 : 0;
+    const rules = [null];
+    for (let i = 1; i < n; i++) rules.push(segmentRule(t[i - 1], t[i], end));
+    const none = new Uint8Array(n);
+
+    // X5 roll fence, X6 rotation cap (degrees)
+    const R = key.map((k) => k.roll);
+    for (let i = 0; i < n; i++) if (inSung(t[i])) R[i] = clamp(R[i], -XROLL_SUNG, XROLL_SUNG);
+    capScalar(R, rules, jump, (i) => Math.min(rules[i].fence, XROT_SPEED * (t[i] - t[i - 1])), none);
+
+    // boxes and aim centres
+    const box = new Array(n).fill(null);
+    const cx = new Float64Array(n), cy = new Float64Array(n);
+    for (let i = 0; i < n; i++) {
+      if (kind[i] === 'reading') continue;
+      const b = aimBoxOf(env, target, key[i]);
+      box[i] = b;
+      cx[i] = b.x + b.w / 2 - W / 2; cy[i] = b.y + b.h / 2 - Hh / 2;
+    }
+    const extOf = (b, rDeg) => {
+      const r = Math.abs(rDeg) * DEG;
+      return rotExtent(Math.max(b.w, SS.FLOOR * D.short), Math.max(b.h, SS.FLOOR * D.short), r - env2.e, r + env2.e);
+    };
+
+    // X3 zoom; reading keys: the median-area unit's zoom capped by every unit's Zfit (the path's zoom is constant)
+    const Z = new Float64Array(n), fit = new Float64Array(n).fill(Infinity);
+    for (let i = 0; i < n; i++) {
+      const k = key[i];
+      if (kind[i] === 'frame' || kind[i] === 'point') { Z[i] = clamp(finite(k.zoom) ? k.zoom : 1, PLACE_ZOOM[0], PLACE_ZOOM[1]); continue; }
+      if (kind[i] === 'reading') {
+        const byArea = units.boxes.map((b, j) => [b.w * b.h, j]).sort((p, q) => p[0] - q[0] || p[1] - q[1]);
+        const e = extOf(units.boxes[byArea[Math.floor(byArea.length / 2)][1]], R[i]);
+        let f = Infinity;
+        for (const b of units.boxes) f = Math.min(f, zfit(D, extOf(b, R[i]), env2));
+        fit[i] = f;
+        Z[i] = Math.max(Z_MIN, Math.min(clamp(k.fill * Math.min(W / e[0], Hh / e[1]), Z_MIN, Z_MAX), f));
+        continue;
+      }
+      const e = extOf(box[i], R[i]);
+      Z[i] = clamp(k.fill * Math.min(W / e[0], Hh / e[1]), Z_MIN, Z_MAX);
+      if (inSung(t[i])) { fit[i] = zfit(D, e, env2); Z[i] = Math.max(Z_MIN, Math.min(Z[i], fit[i])); }
+    }
+    const lz = Array.from(Z, Math.log);
+    capScalar(lz, rules, jump, (i) => XZOOM_SPEED * (t[i] - t[i - 1]), none);
+    for (let i = 0; i < n; i++) {
+      Z[i] = clamp(Math.exp(lz[i]), Z_MIN, Z_MAX);
+      if (fit[i] < Infinity) Z[i] = Math.max(Z_MIN, Math.min(Z[i], fit[i]));
+    }
+
+    // X4 on-screen positions (reading keys: their path at the key's time, fixed through the travel cap)
+    const px = new Array(n).fill(0), py = new Array(n).fill(0);
+    const fixed = Uint8Array.from(kind, (k) => (k === 'reading' ? 1 : 0));
+    const place = (i) => {
+      const k = key[i], p = [px[i], py[i]], th = R[i] * DEG;
+      if (inSung(t[i])) {
+        const ext = kind[i] === 'text' ? extOf(box[i], R[i]) : [0, 0];
+        safeClamp(D, p, ext, Z[i], env2);
+      } else { p[0] = clamp(p[0], -OFF_MAX * W, OFF_MAX * W); p[1] = clamp(p[1], -OFF_MAX * Hh, OFF_MAX * Hh); }
+      if (trait !== 'any') bleedClamp(D, cx[i], cy[i], p, Z[i], th);
+      px[i] = p[0]; py[i] = p[1];
+      return k;
+    };
+    const paths = new Array(n).fill(null);
+    for (let i = 0; i < n; i++) {
+      if (kind[i] === 'reading') continue;
+      const k = key[i];
+      px[i] = k.ox !== undefined ? k.ox * W : cx[i];
+      py[i] = k.oy !== undefined ? k.oy * Hh : cy[i];
+      place(i);
+    }
+    for (let i = 0; i < n; i++) {
+      if (kind[i] !== 'reading') continue;
+      paths[i] = readingPath(D, units, key[i], Z[i], R[i] * DEG, env2, trait, (j) => extOf(units.boxes[j], R[i]), snapUnit);
+      const q = pathAt(paths[i], t[i], {});
+      cx[i] = q.cx; cy[i] = q.cy; px[i] = q.px; py[i] = q.py;
+    }
+    capVector(px, py, rules, jump, (i) => XTRAVEL_SPEED * W * (t[i] - t[i - 1]), fixed);
+    for (let i = 0; i < n; i++) if (kind[i] !== 'reading') place(i);
+
+    // the track
+    const track = { x: true, a: tm.a, b: tm.b, n, W, H: Hh, short: D.short, gentle: trait !== 'any', trait, keys: [],
+      t: Float64Array.from(t), lz: new Float64Array(n), cx: Float64Array.from(cx), cy: Float64Array.from(cy),
+      px: Float64Array.from(px), py: Float64Array.from(py), R: new Float64Array(n), lgz: new Float64Array(n),
+      curve: key.map((k) => CV.fn(k.curve)), paths, reading: units, Zread: null,
+      jumps: Float64Array.from(jumps), pulse: null, swing: null, hits: null,
+      blur: shot.blur, g: shot.g, shutter: shot.blur * shot.g * SHUTTER, calm: 1,
+      live: { x: 0, y: 0, zoom: 1, roll: 0, ax: 0, ay: 0, gz: 1 },
+      mod: { pulse: 0, swing: 0, jolt: 0, hx: 0, hy: 0 } };
+    for (let i = 0; i < n; i++) {
+      track.lz[i] = Math.log(Z[i]); track.R[i] = R[i] * DEG; track.lgz[i] = Math.log(Math.max(1, key[i].gz));
+      if (paths[i] && track.Zread === null) track.Zread = paths[i].Z;
+    }
+
+    // X8, X9: the modulators
+    const grid = env.grid;
+    if (beat.zoom > 0) track.pulse = Object.assign(schedule(grid, tm.a, tm.b, beat.every, PULSE_GAP), { amp: beat.zoom });
+    if (beat.roll > 0) {
+      const s0 = R[0] < 0 ? -1 : R[0] > 0 ? 1 : shot.m;
+      track.swing = Object.assign(schedule(grid, tm.a, tm.b, beat.every, SWING_GAP), { amp: beat.roll * DEG, s0 });
+    }
+    const list = [];
+    for (let i = 0; i < n; i++) if (key[i].hit > 0) list.push({ t: t[i], amp: key[i].hit, o: 0 });
+    if (beat.shake > 0) {
+      const s = schedule(grid, tm.a, tm.b, beat.every, HIT_GAP);
+      for (let j = 0; j < s.count; j++) list.push({ t: s.first + j * s.step, amp: beat.shake, o: 1 });
+    }
+    list.sort((p, q) => p.t - q.t || p.o - q.o);
+    const kept = [];
+    for (const h of list) if (!kept.length || h.t - kept[kept.length - 1].t >= HIT_GAP - 1e-9) kept.push(h);
+    if (kept.length) {
+      const hs = { n: kept.length, t: new Float64Array(kept.length), amp: new Float64Array(kept.length), cx: new Float64Array(kept.length),
+        cy: new Float64Array(kept.length), sr: new Float64Array(kept.length), du: HIT_DU * D.short };
+      kept.forEach((h, i) => {
+        const [c, s, r] = hitPhase(o.seed, i);
+        hs.t[i] = h.t; hs.amp[i] = h.amp; hs.cx[i] = c * shot.m; hs.cy[i] = s; hs.sr[i] = r * shot.m;
+      });
+      track.hits = hs;
+    }
+
+    // the keys as they frame (the facade's shotTrack, the stage overlay)
+    const pose = { x: 0, y: 0, zoom: 1, roll: 0, ax: 0, ay: 0, gz: 1 };
+    for (let i = 0; i < n; i++) {
+      write(track, keyPose(track, i, t[i], QA), pose);
+      const b = box[i] || (units ? units.boxes[Math.max(0, unitAt(paths[i].start, units.n, t[i]))] : null);
+      track.keys.push(Object.freeze({ t: t[i], X: pose.x, Y: pose.y, Z: pose.zoom, R: pose.roll, cx: cx[i], cy: cy[i], sx: px[i], sy: py[i],
+        aim: key[i].aim, box: b ? Object.freeze({ x: b.x, y: b.y, w: b.w, h: b.h }) : null, gz: pose.gz, hit: key[i].hit }));
+    }
+    return track;
+  }
+
+  // --- reading paths (X10) -----------------------------------------------------------------------------------------------
+
+  // A reading key's path over the units: its zoom Z (constant), each unit's on-screen position (the frame centre, so every
+  // word is centred while it is sung (X10), or the key's ox/oy; clamped into the XSAFE area), the hops
+  // h_k = min(hop, 0.6·(τ_k − τ_{k−1})) (hop absent: 0.35; hop 0: a jump, unless X2 made it a XSNAP move), the whip w
+  // and each hop's direction.
+  function readingPath(D, units, key, Zr, th, env2, trait, extOf, snapUnit) {
+    const n = units.n;
+    const px = new Float64Array(n), py = new Float64Array(n), start = new Float64Array(n);
+    const dx = new Float64Array(n), dy = new Float64Array(n);
+    const hop = key.hop === null || key.hop === undefined ? SS.HOP_MAX : key.hop;
+    for (let k = 0; k < n; k++) {
+      const p = [key.ox !== undefined ? key.ox * D.w : 0, key.oy !== undefined ? key.oy * D.h : 0];
+      safeClamp(D, p, extOf(k), Zr, env2);
+      if (trait !== 'any') bleedClamp(D, units.cx[k], units.cy[k], p, Zr, th);
+      px[k] = p[0]; py[k] = p[1];
+      if (k === 0) { start[k] = units.tau[0]; continue; }
+      const gap = units.tau[k] - units.tau[k - 1];
+      const h = snapUnit[k] && hop === 0 ? Math.min(XSNAP, gap) : Math.min(hop, HOP_SHARE * gap);
+      start[k] = units.tau[k] - h;
+      const ddx = units.cx[k] - units.cx[k - 1], ddy = units.cy[k] - units.cy[k - 1], d = Math.sqrt(ddx * ddx + ddy * ddy);
+      if (d > 0) { dx[k] = ddx / d; dy[k] = ddy / d; }
+    }
+    return { units, Z: Zr, lz: Math.log(Zr), px, py, start, dx, dy, whip: key.whip * D.w, curve: CV.fn(key.curve), R: th,
+      lgz: Math.log(Math.max(1, key.gz)) };
+  }
+
+  function unitAt(start, n, t) { return lastAt(start, n, t); }
+
+  // Fills q { cx, cy, px, py, lz, R, lgz, wx, wy } with the reading pose at t: holding a unit, or hopping into it (the
+  // camera centre overshoots along the hop by whip·4f(1 − f)/Z: the words swing past and settle).
+  function pathAt(path, t, q) {
+    const u = path.units;
+    const k = Math.max(0, unitAt(path.start, u.n, t));
+    q.lz = path.lz; q.R = path.R; q.lgz = path.lgz; q.wx = 0; q.wy = 0;
+    if (k > 0 && t < u.tau[k]) {
+      const h = u.tau[k] - path.start[k];
+      const f = h > 0 ? path.curve((t - path.start[k]) / h) : 1;
+      q.cx = u.cx[k - 1] + (u.cx[k] - u.cx[k - 1]) * f; q.cy = u.cy[k - 1] + (u.cy[k] - u.cy[k - 1]) * f;
+      q.px = path.px[k - 1] + (path.px[k] - path.px[k - 1]) * f; q.py = path.py[k - 1] + (path.py[k] - path.py[k - 1]) * f;
+      if (path.whip > 0) {
+        const bump = (path.whip * 4 * f * (1 - f)) / path.Z;
+        q.wx = bump * path.dx[k]; q.wy = bump * path.dy[k];
+      }
+      return q;
+    }
+    q.cx = u.cx[k]; q.cy = u.cy[k]; q.px = path.px[k]; q.py = path.py[k];
+    return q;
+  }
+
+  // --- pose (§1.4.2) -------------------------------------------------------------------------------------------------------
+
+  const QA = { cx: 0, cy: 0, px: 0, py: 0, lz: 0, R: 0, lgz: 0, wx: 0, wy: 0 };
+  const QB = { cx: 0, cy: 0, px: 0, py: 0, lz: 0, R: 0, lgz: 0, wx: 0, wy: 0 };
+
+  function keyPose(track, i, t, q) {
+    const path = track.paths[i];
+    if (path) return pathAt(path, t, q);
+    q.cx = track.cx[i]; q.cy = track.cy[i]; q.px = track.px[i]; q.py = track.py[i]; q.lz = track.lz[i]; q.R = track.R[i];
+    q.lgz = track.lgz[i]; q.wx = 0; q.wy = 0;
+    return q;
+  }
+
+  function keyAt(track, t) { return lastAt(track.t, track.n, t); }
+
+  // The camera of pose q: Z = e^lz, X = c − Rot(θ)·P/Z (+ the whip's overshoot), clamped to the bleed in gentle layouts;
+  // ax, ay = where the aim centre shows (from the frame centre, after the roll).
+  function write(track, q, out) {
+    const Z = clamp(Math.exp(q.lz), Z_MIN, Z_MAX);
+    const c = Math.cos(q.R), s = Math.sin(q.R);
+    let X = q.cx - (c * q.px - s * q.py) / Z + q.wx;
+    let Y = q.cy - (s * q.px + c * q.py) / Z + q.wy;
+    if (track.gentle) {
+      const lx = SS.bleedLimit(track.W, Z), ly = SS.bleedLimit(track.H, Z);
+      X = clamp(X, -lx, lx); Y = clamp(Y, -ly, ly);
+    }
+    out.x = X; out.y = Y; out.zoom = Z; out.roll = q.R; out.gz = Math.exp(q.lgz);
+    const dx = q.cx - X, dy = q.cy - Y;
+    out.ax = Z * (c * dx + s * dy);
+    out.ay = Z * (-s * dx + c * dy);
+    return out;
+  }
+
+  // poseAt(track, t, out) → out { x, y, zoom, roll, ax, ay, gz }: the x-track camera at cut-local t, without the
+  // modulators. Between keys i → j: f = curve_j(u); ln Z, the aim centre c, its on-screen position P, the roll and ln gz
+  // lerped (a reading key is its path at t); then X = c − Rot(θ)·P/Z, so the aimed words travel straight on screen even
+  // while rolling. A reading key followed by another aim keeps reading until XLEAVE s before that key, then moves (so
+  // every word is centred while it is sung, X10). Held before the first key and after the last; keys closer than
+  // 1/120 s jump at the later key's time.
+  function poseAt(track, t, out) {
+    const o = out || { x: 0, y: 0, zoom: 1, roll: 0, ax: 0, ay: 0, gz: 1 };
+    const n = track.n;
+    const i = keyAt(track, t);
+    if (i < 0) return write(track, keyPose(track, 0, track.t[0], QA), o);
+    if (i >= n - 1) return write(track, keyPose(track, n - 1, t, QA), o);
+    const t0 = track.t[i], t1 = track.t[i + 1];
+    const A = keyPose(track, i, t, QA);
+    if (t1 - t0 < JUMP) return write(track, A, o);
+    const leave = track.paths[i] && !track.paths[i + 1] ? Math.max(t0, t1 - XLEAVE) : t0;
+    if (t < leave) return write(track, A, o);
+    const B = keyPose(track, i + 1, track.paths[i + 1] ? t : t1, QB);
+    const f = track.curve[i + 1]((t - leave) / (t1 - leave));
+    A.lz += (B.lz - A.lz) * f;
+    A.cx += (B.cx - A.cx) * f; A.cy += (B.cy - A.cy) * f;
+    A.px += (B.px - A.px) * f; A.py += (B.py - A.py) * f;
+    A.R += (B.R - A.R) * f;
+    A.lgz += (B.lgz - A.lgz) * f;
+    A.wx += (B.wx - A.wx) * f; A.wy += (B.wy - A.wy) * f;
+    return write(track, A, o);
+  }
+
+  // --- the camera behaviour (§1.4.3) ---------------------------------------------------------------------------------------
+
+  // runShot(P, t, b): the shot pose composed with the lens deltas as engine/scene/shot.runShot does, then the modulators
+  // (k = track.calm: 1, or CALM in a toned-down preview):
+  //   sx, sy ×= 1 + pulse·k;  rot += (swing + jolt)·k;  jx += hit.x·k/Z;  jy += hit.y·k/Z
+  function runShot(P, t, b) {
+    const tr = b.track;
+    const pose = poseAt(tr, t, tr.live);
+    const c = b.from, Z = pose.zoom, zl = P.sx[c];
+    P.x[c] = pose.x + P.x[c] / Z;
+    P.y[c] = pose.y + P.y[c] / Z;
+    P.sx[c] = Z * zl;
+    P.sy[c] = Z * zl;
+    P.rot[c] = pose.roll + P.rot[c];
+    P.jx[c] /= Z;
+    P.jy[c] /= Z;
+    const m = modAt(tr, t, tr.mod), k = tr.calm;
+    if (m.pulse !== 0) { P.sx[c] *= 1 + m.pulse * k; P.sy[c] *= 1 + m.pulse * k; }
+    P.rot[c] += (m.swing + m.jolt) * k;
+    P.jx[c] += (m.hx * k) / Z;
+    P.jy[c] += (m.hy * k) / Z;
+  }
+
+  // camAt(track, t, out) → out { x, y, zoom, roll, jx, jy, fz, gz }: the closed-form part of the cut camera at cut-local
+  // t (the pose with the modulators, lens deltas held at identity) — what engine/render/xblur differentiates. Uses its
+  // own scratch, so track.live keeps the latest evaluation.
+  const CAM_POSE = { x: 0, y: 0, zoom: 1, roll: 0, ax: 0, ay: 0, gz: 1 };
+  const CAM_MOD = { pulse: 0, swing: 0, jolt: 0, hx: 0, hy: 0 };
+  function camAt(track, t, out) {
+    const o = out || { x: 0, y: 0, zoom: 1, roll: 0, jx: 0, jy: 0, fz: 1, gz: 1 };
+    const p = poseAt(track, t, CAM_POSE), m = modAt(track, t, CAM_MOD), k = track.calm;
+    o.x = p.x; o.y = p.y; o.zoom = p.zoom * (1 + m.pulse * k); o.roll = p.roll + (m.swing + m.jolt) * k;
+    o.jx = (m.hx * k) / p.zoom; o.jy = (m.hy * k) / p.zoom; o.fz = p.zoom; o.gz = p.gz;
+    return o;
+  }
+
+  // makeShot(env, cam, target, d) → { behaviours, lean, track } | null, like engine/scene/shot.makeShot for an EXTREME
+  // cam.shot. d = { shot, zoom, curve, follow, extreme (cam.extreme or null), camTrait ('any' | 'gentle' | 'none') }.
+  // Track = the normal track's fields (a, b, n, W, H, keys, t, lz, cx, cy, R, curve, paths, reading, Zread, live) plus
+  // x: true, px, py (on-screen positions), lgz, gentle, trait, jumps (cut-local times of the deliberate jumps kept),
+  // pulse / swing / hits (schedules), blur, g, shutter (seconds), calm (evaluate sets it), live.gz, mod.
+  function makeShot(env, cam, target, d) {
+    const dd = d || {};
+    const decision = dd.shot || null;
+    const ref = decision ? decision.v : undefined;
+    if (ref === undefined || !SHOT.isExtreme(ref) || SS.textGlyphs(target) === 0) return null;
+    const shot = SHOT.expandShot(ref, { zoom: finite(dd.zoom) ? dd.zoom : 1, curve: dd.curve === null ? undefined : dd.curve,
+      follow: finite(dd.follow) ? dd.follow : null, g: SHOT.xIntensity(dd.extreme) });
+    if (!shot) return null;
+    const cut = env.cut || {};
+    const seed = H.hash32(typeof ref === 'string' ? ref : H.hashJSON(ref), cut.text === undefined ? '' : cut.text);
+    const track = buildTrack(env, target, shot, { trait: dd.camTrait, seed });
+    const behaviour = { phase: BH.PH.LENS, live: 'always', from: cam, to: cam + 1, t0: env.times.a, t1: env.times.b,
+      run: runShot, track };
+    return { behaviours: [behaviour], lean: shot.follow > 0 ? SS.leanOf(env, cam, target, shot.follow) : null, track };
+  }
+
+  return {
+    XSAFE, XROLL_SUNG, XSPIN_LAND, XSPIN_INSIDE, XROT_SPEED, XZOOM_SPEED, XTRAVEL_SPEED, XJUMP_GAP, XSNAP, PULSE_GAP,
+    PULSE_ATTACK, PULSE_DECAY, DOWNBEAT, SWING_GAP, SWING_FLIP, HIT_GAP, HIT_HZ, HIT_DECAY, HIT_DU, HIT_ROLL, CALM, GENTLE,
+    OFF_MAX, SHUTTER, XLEAVE,
+    isX, makeShot, anchorTime, poseAt, modAt, camAt, runShot, rotExtent, schedule, segmentRule,
+  };
+});
+/* 文字PVメーカー v2 — original work. Camera motion blur of EXTREME cuts: the frame reprojected along the camera's own motion over a shutter in seconds (DESIGN_EXTREME §1.6). */
+MV.def('engine/render/xblur', ['core/mat', 'engine/scene/frame', 'engine/scene/xshot'], (MAT, F, XS) => {
+  'use strict';
+
+  // When: the current cut has an x-track with blur > 0, no seam is active, the preview is not toned down (calm), and
+  // the frame moves ≥ MIN_DU design units over the shutter. The shutter SH = track.shutter = blur·g/48 s is fixed in
+  // seconds, so 30 and 60 fps sample the same function of t.
+  // Taps: the camera at t_j = t − SH·j/(n − 1) is cam(t) + Δ_j, Δ_j the difference of the closed-form camera (the x-track
+  // pose with its modulators, the rig, the impulses) between t_j and t; the lens deltas are held (no scene is evaluated
+  // again). The displacement d is the largest |V(t_j)·V(t)⁻¹·p − p| over the frame centre and four inset corners (design
+  // units, at the last tap); n = clamp(ceil(d / MIN_DU), 2, taps). Tap j draws the frame (copied once) onto itself with
+  // D·V(t_j)·V(t)⁻¹·D⁻¹ and globalAlpha 1/(j + 1): a running average over the base (uncovered borders keep the base).
+  // A clear backdrop (alpha outputs) is cleared, then every copy is added with 'lighter' and alpha 1/n (a true
+  // premultiplied average). No pixel reads, no ctx.filter. Allocation-free after the first call.
+
+  const TAPS_EXPORT = 6, TAPS_PREVIEW = 4, TAPS_ADAPT = 3, OFF_LEVEL = 3;
+  const MIN_DU = 12;
+  const INSET = 0.1;
+
+  // The most copies (base included) a frame may take: export 6; preview 4 at adaptive level 0, 3 at levels 1–2, none
+  // from level 3 on.
+  function maxTaps(quality, level) {
+    if (quality === 'export') return TAPS_EXPORT;
+    if (level >= OFF_LEVEL) return 0;
+    return level >= 1 ? TAPS_ADAPT : TAPS_PREVIEW;
+  }
+
+  const KC = { x: 0, y: 0, zoom: 1, roll: 0, jx: 0, jy: 0, fz: 1, gz: 1 };
+  const RIG = { x: 0, y: 0, zoom: 1, roll: 0 };
+  const C0 = { x: 0, y: 0, zoom: 1, roll: 0, shakeX: 0, shakeY: 0, fz: 1 };
+  const CJ = { x: 0, y: 0, zoom: 1, roll: 0, shakeX: 0, shakeY: 0, fz: 1 };
+  const CAM = { x: 0, y: 0, zoom: 1, roll: 0, shakeX: 0, shakeY: 0, fz: 1 };
+  const VT = new Float32Array(6), VI = new Float32Array(6), VJ = new Float32Array(6), MJ = new Float32Array(6);
+
+  // The closed-form camera of the cut at absolute time t: the x-track with its modulators, the rig, the impulses.
+  function closedAt(track, plan, t, t0, out) {
+    return F.composeCamera(XS.camAt(track, t - t0, KC), F.rigAt(plan, t, RIG), plan, t, out);
+  }
+
+  // cam ⊕ (C ⊖ C0): the drawn camera moved by the closed-form difference.
+  function moved(cam, c, c0, out) {
+    out.x = cam.x + (c.x - c0.x); out.y = cam.y + (c.y - c0.y);
+    out.zoom = (cam.zoom * c.zoom) / c0.zoom; out.roll = cam.roll + (c.roll - c0.roll);
+    out.shakeX = cam.shakeX + (c.shakeX - c0.shakeX); out.shakeY = cam.shakeY + (c.shakeY - c0.shakeY);
+    return out;
+  }
+
+  // The largest displacement of the centre and the four inset corners under M (design units).
+  function displacement(M, W, H) {
+    let d = 0;
+    const at = (x, y) => {
+      const dx = M[0] * x + M[2] * y + M[4] - x, dy = M[1] * x + M[3] * y + M[5] - y;
+      d = Math.max(d, Math.sqrt(dx * dx + dy * dy));
+    };
+    at(W / 2, H / 2);
+    at(INSET * W, INSET * H); at((1 - INSET) * W, INSET * H); at((1 - INSET) * W, (1 - INSET) * H); at(INSET * W, (1 - INSET) * H);
+    return d;
+  }
+
+  // The reprojection of tap time tt into MJ: V(t_j)·V(t)⁻¹ (design units); returns MJ.
+  function tapMatrix(track, plan, tt, t0, cam, W, H) {
+    closedAt(track, plan, tt, t0, CJ);
+    F.viewMatrix(VJ, moved(cam, CJ, C0, CAM), 1, W, H);
+    return MAT.mul(MJ, VJ, VI);
+  }
+
+  // taps(scene, plan, t, cam, W, H, most, out) → out { n, d, M: Float64Array(6·(most − 1)) } for a blurred frame, else
+  // null. scene = the current cut's evaluated scene, cam = its drawn CamPose (text layer, parallax 1), most = maxTaps.
+  function taps(scene, plan, t, cam, W, H, most, out) {
+    const track = scene && scene.shot;
+    if (!track || track.x !== true || !(track.blur > 0) || !(track.shutter > 0) || !(most >= 2)) return null;
+    const o = out || { n: 0, d: 0, M: new Float64Array(6 * (TAPS_EXPORT - 1)) };
+    const t0 = scene.t0, sh = track.shutter;
+    closedAt(track, plan, t, t0, C0);
+    F.viewMatrix(VT, cam, 1, W, H);
+    if (!MAT.invert(VI, VT)) return null;
+    const d = displacement(tapMatrix(track, plan, t - sh, t0, cam, W, H), W, H);
+    if (!(d >= MIN_DU)) return null;
+    const n = Math.max(2, Math.min(most, Math.ceil(d / MIN_DU)));
+    for (let j = 1; j < n; j++) {
+      const M = tapMatrix(track, plan, t - (sh * j) / (n - 1), t0, cam, W, H);
+      for (let q = 0; q < 6; q++) o.M[(j - 1) * 6 + q] = M[q];
+    }
+    o.n = n; o.d = d;
+    return o;
+  }
+
+  const DI = new Float32Array(6), DM = new Float32Array(6), MQ = new Float32Array(6);
+
+  // draw(g, frame, pool, tp, D, clear): the taps onto the frame surface (g = frame.ctx) through a pooled copy of it.
+  // D = the design → device transform of the frame.
+  function draw(g, frame, pool, tp, D, clear) {
+    const copy = pool.take(frame.w, frame.h);
+    copy.ctx.drawImage(frame.canvas, 0, 0);
+    MAT.invert(DI, D);
+    const n = tp.n;
+    g.save();
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    if (clear) {
+      g.globalAlpha = 1;
+      g.globalCompositeOperation = 'source-over';
+      g.clearRect(0, 0, frame.w, frame.h);
+      g.globalCompositeOperation = 'lighter';
+      g.globalAlpha = 1 / n;
+      g.drawImage(copy.canvas, 0, 0);
+    } else g.globalCompositeOperation = 'source-over';
+    for (let j = 1; j < n; j++) {
+      for (let q = 0; q < 6; q++) MQ[q] = tp.M[(j - 1) * 6 + q];
+      MAT.mul(DM, D, MQ);
+      MAT.mul(DM, DM, DI);
+      g.setTransform(DM[0], DM[1], DM[2], DM[3], DM[4], DM[5]);
+      g.globalAlpha = clear ? 1 / n : 1 / (j + 1);
+      g.drawImage(copy.canvas, 0, 0);
+    }
+    g.restore();
+    pool.give(copy);
+  }
+
+  return { TAPS_EXPORT, TAPS_PREVIEW, TAPS_ADAPT, OFF_LEVEL, MIN_DU, maxTaps, taps, draw, displacement };
+});
+/* 文字PVメーカー v2 — original work. The renderer: one frame of a Plan — evaluate, draw the layers per world, seams, post, picks (DESIGN §4.19.2–4, §7.4; DESIGN_2_1 §4.4, §4.8, §11.3.7). */
+MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/media', 'core/shot', 'engine/scene/table',
+  'engine/scene/frame', 'engine/render/surface', 'engine/render/sprites', 'engine/render/shapes', 'engine/render/draw',
+  'engine/render/post', 'engine/render/seam', 'engine/render/pick', 'engine/render/xblur'],
+(H, C, N, MEDIA, SHOT, T, F, SF, SP, SH, DR, PO, SE, PK, XB) => {
+  'use strict';
+
+  const L = T.LAYER_INDEX;
+  const WORLD_LAYERS = Object.freeze([L.ground, L.far, L.mid, L.text, L.near]);
+  const BASE_LAYERS = Object.freeze([L.ground, L.far, L.mid]);
+  const WARM_LAYERS = Object.freeze(WORLD_LAYERS.concat([L.hud]));
+  const EMA_ALPHA = 0.1;
+  const SLOW_MS = 14, FAST_MS = 9, SLOW_FRAMES = 30, FAST_FRAMES = 60, MAX_LEVEL = 4;   // adaptive preview (§7.4)
+  const DPR_STEP = 0.75;
+  const DPR_FLOOR = 720;           // the step applies only to outputs whose short side is above this
+  const REDUCED_FLASH = 0.3;
+  const STATIC_MAX = 8;
+  const STATIC_BUDGET = 48 * 1024 * 1024;
+  const IDENTITY = Object.freeze({ x: 0, y: 0, zoom: 1, roll: 0, shakeX: 0, shakeY: 0, fz: 1 });
+  const NO_FEATURES = Object.freeze({});
+  const OVERSAMPLE = 1.25;         // static ground rasters of a segment the shots zoom into (DESIGN_2_1 §4.8)
+  const SEAM_SURFACES = 6;         // frame surfaces a seam frame takes at once (a text seam: both sides and sumiSeep's 4)
+  const X_BLEND = 0.06;            // EXTREME grounds ease from A's camera to B's over B.t0 ± this at a hard boundary
+
+  // --- EXTREME (DESIGN_EXTREME §1.5, §1.6) ---------------------------------------------------------------------------
+
+  // Per plan (cached by identity; plans are immutable): null when no cut has an EXTREME shot and no ground is marked
+  // (grounds[i].x), so every other plan takes none of the paths below. Else { seg: the ground segments whose items take
+  // the coverage limiter, bounds: the hard boundaries between consecutive EXTREME cuts of one segment with no seam into
+  // the later one, sorted by the later cut's t0, bt: their times }.
+  const X_INDEX = new WeakMap();
+  function xIndexOf(plan) {
+    let x = X_INDEX.get(plan);
+    if (x === undefined) { x = buildXIndex(plan); X_INDEX.set(plan, x); }
+    return x;
+  }
+
+  function buildXIndex(plan) {
+    const cuts = plan.cuts || [], grounds = plan.grounds || [];
+    const seg = new Uint8Array(grounds.length), isX = new Uint8Array(cuts.length);
+    let any = false;
+    cuts.forEach((c, i) => {
+      const d = c.slots && c.slots['cam.shot'];
+      if (!d || d.v === undefined || d.v === null || !SHOT.isExtreme(d.v)) return;
+      isX[i] = 1; any = true;
+      if (c.ground >= 0 && c.ground < seg.length) seg[c.ground] = 1;
+    });
+    grounds.forEach((g, i) => { if (g && g.x === true) { seg[i] = 1; any = true; } });
+    if (!any) return null;
+    const into = new Set((plan.seams || []).map((sm) => sm.into || sm.b));
+    const order = cuts.map((c, i) => i).sort((p, q) => cuts[p].t0 - cuts[q].t0 || p - q);
+    const bounds = [];
+    for (let k = 1; k < order.length; k++) {
+      const a = order[k - 1], b = order[k];
+      if (isX[a] && isX[b] && cuts[a].ground === cuts[b].ground && !into.has(cuts[b].key)) bounds.push({ t: cuts[b].t0, a, b });
+    }
+    return { seg, bounds, bt: Float64Array.from(bounds, (e) => e.t) };
+  }
+
+  // mediaEntries(scene) → frozen [{ id, time, size, headroom, blur, softBlur }]: a scene's media nodes as mediaAt needs
+  // them — size = the box's long side (design units; size × output scale × headroom = the px its draw asks for), blur
+  // and the soft copy's blur (−1 without one) in design units. Small, so the facade keeps them by fingerprint.
+  const NO_MEDIA_ENTRIES = Object.freeze([]);
+  function mediaEntries(scene) {
+    const ms = scene && scene.media;
+    if (!ms || ms.length === 0) return NO_MEDIA_ENTRIES;
+    return Object.freeze(ms.map((e) => {
+      const rec = scene.stores.image[scene.table.payload[e.node]];
+      return Object.freeze({ id: e.id, time: e.time, size: Math.max(rec.box.w, rec.box.h), headroom: rec.headroom, blur: rec.blur,
+        softBlur: rec.soft ? rec.softBlur : -1 });
+    }));
+  }
+
+  // createRenderer({ canvas: CanvasFactory, registry, assets, now?, strict?, spriteBudget?, postCopy? }) → Renderer
+  // (postCopy: lab and tests only — fx.own copies, the post stack as it drew before filters could draw in place)
+  //   render(surface, plan, t, opts, source) → FrameStats   source = { cut(i), ground(i), fresh(kind, i), fontKey, face }
+  //   warmAt(plan, source, t) · beginWarm() · warmBytes() · lastTime() · hitTest(x, y) · boxes() · stats() · level
+  //   · setSpriteBudget(bytes) · clear() · dispose()
+  //   (DESIGN_2_1, additive) setRegistry(registry) · mediaAt(plan, source, t, out, scale) (source.media(kind, i)
+  //   optional) · lastScale() · opts.layers 'all' | 'ground' · opts.thumb (posters only) · FrameStats.media
+  //   { drawn, waiting } and mediaError (export quality)
+  //   (DESIGN_EXTREME, additive) opts.calm (preview only: the EXTREME modulators ×0.3, no motion blur); FrameStats.blur
+  //   (the copies of a motion-blurred frame, only on such frames; FrameStats.passes counts them too); opts.sentinel (lab
+  //   only: the scene backdrop's fill)
+  //   (lab only, additive) opts.flush(frame): called with the frame surface once the world is drawn, before the post
+  //   stack, and timed with the draw stage. The lab reads one pixel there, so the time the canvas spends rasterizing the
+  //   world is charged to 'draw' and not to 'post' (NOTES "Perf: camerawork + materials row", MEAS-1). Never set by
+  //   the app or an export: the readback itself costs time.
+  // `now` (ms clock) comes from the host; without it frame times read 0 and the adaptive preview stays at level 0.
+  function createRenderer(o) {
+    const factory = o.canvas;
+    let registry = o.registry;
+    const now = typeof o.now === 'function' ? o.now : null;
+    const pool = SF.createPool(factory);
+    const sprites = SP.createSpriteCache(factory, { budget: o.spriteBudget });
+    const paints = SH.createPaintCache(factory);
+    const tiles = PO.createTileBank(factory);
+    const ctl = PO.createFx({ pool, tiles, copy: o.postCopy === true });
+    const scratch = SF.surfaceOf(factory, SP.MAX_SIDE, SP.MAX_SIDE, true);
+    const dc = DR.createDrawContext({ sprites, paints, scratch, pool, blurred: (src, px) => PO.blurred(pool, src, px, ctl.caps) });
+    const picks = PK.createPickList();
+    const statics = new Map();                     // static layers: scene → [raster per layer] (LRU)
+    const errors = [];
+    const q = { draft: false, scale: 1, pal: null,                       // the paints' helpers (§4.17.3)
+      rgba: (ink, a) => C.rgba(DR.inkOf(q.pal, ink), a), tile: (name, seed) => tiles.tile(name, seed) };
+    dc.q = q;
+
+    let fg = null;
+    let fontKey = null;
+    const adapt = { level: 0, ema: 0, slow: 0, fast: 0 };
+    // The latest frame's time, device scale, backdrop, glyph path and probe (sprite warm-up draws what it would draw).
+    const lastLook = { t: NaN, scale: 0, backdrop: 'scene', glyphPath: 'auto', probe: null, fw: 0, fh: 0, calm: false };
+    const last = { ms: 0, behave: 0, draw: 0, post: 0, passes: 0 };
+    const palettes = new WeakMap();                // palette → { black, ids }
+    let palSeq = 0;
+    const palIds = new WeakMap();
+
+    // Pooled per-frame lists (no allocation per frame once warm).
+    const items = [];                              // { scene, tl, cut, ground, cam, side }
+    let nItems = 0;
+    const entries = [];                            // post entries (pooled objects)
+    const postList = [];
+    const axPool = { f: {}, look: { amounts: {}, mood: null, bpm: null } };
+    const frameInfo = { plan: null, w: 0, h: 0, unit: 1, quality: 'preview', alpha: false, textAt: null, flashScale: 1, pal: null,
+      backdrop: 'scene' };
+    const cams = [];
+    const used = [];
+    const seamCam = { x: 0, y: 0, zoom: 1, roll: 0, shakeX: 0, shakeY: 0, fz: 1 };   // the grounds' camera in a text seam
+    const edgeCam = { x: 0, y: 0, zoom: 1, roll: 0, shakeX: 0, shakeY: 0, fz: 1, gz: 1 };   // … at an EXTREME boundary
+    const coverCams = [];                          // pooled limited copies of the grounds' cameras (EXTREME segments)
+    const evalOpts = { calm: false };              // evaluate() options of the frame being drawn
+    let sentinel = null;                           // lab only: the scene backdrop's fill (ground edge checks)
+    const tapsOut = { n: 0, d: 0, M: new Float64Array(6 * (XB.TAPS_EXPORT - 1)) };
+    const gapCam = { x: 0, y: 0, zoom: 1, roll: 0, shakeX: 0, shakeY: 0, fz: 1 };    // … and while no cut is on screen
+    let framePlan = null;                          // the plan of the frame being drawn (zoomed grounds)
+
+    function clock() { return now ? now() : 0; }
+
+    // The key of cached paint and static-layer rasters: output scale, palette and draft mode (recomputed on change only);
+    // `over` is the key of the same rasters oversampled for a zoomed ground (dc.overKey).
+    const paintKeyState = { scale: NaN, pal: 0, draft: false, key: 0, over: 0 };
+    function paintKeyOf(scale, pal, draft) {
+      const s = paintKeyState;
+      if (s.scale !== scale || s.pal !== pal || s.draft !== draft) {
+        s.scale = scale; s.pal = pal; s.draft = draft; s.key = H.hash32(scale, pal, draft ? 1 : 0);
+        s.over = H.hash32(s.key, 'over', OVERSAMPLE);
+      }
+      return s.key;
+    }
+
+    function paletteOf(pal, backdrop) {
+      if (backdrop !== 'black') return pal;
+      let v = palettes.get(pal);
+      if (!v) { v = F.paletteFor(pal, 'black'); palettes.set(pal, v); }
+      return v;
+    }
+
+    function palId(pal) {
+      let id = palIds.get(pal);
+      if (!id) { id = ++palSeq; palIds.set(pal, id); }
+      return id;
+    }
+
+    function camOut(k) { return cams[k] || (cams[k] = { x: 0, y: 0, zoom: 1, roll: 0, shakeX: 0, shakeY: 0, fz: 1 }); }
+
+    function item(k) { return items[k] || (items[k] = { scene: null, tl: 0, cut: -1, ground: -1, cam: IDENTITY, side: 0, skip: false }); }
+
+    // --- gathering the active scenes -------------------------------------------------------------------------------
+
+    function addCut(plan, source, i, t, side) {
+      for (let k = 0; k < nItems; k++) if (items[k].cut === i) { if (side) items[k].side = side; return; }
+      let scene = source.cut(i);
+      if (!scene) return;
+      if (used.includes(scene) && source.fresh) scene = source.fresh('cut', i) || scene;   // two cuts share one cached scene
+      used.push(scene);
+      const it = item(nItems++);
+      it.scene = scene; it.cut = i; it.ground = -1; it.tl = t - plan.cuts[i].t0; it.side = side || 0;
+      F.evaluate(scene, it.tl, evalOpts);
+      it.cam = F.cameraAt(scene, plan, t, camOut(nItems - 1));
+    }
+
+    function addGround(plan, source, i, t, side) {
+      const scene = source.ground(i);
+      if (!scene) return;
+      used.push(scene);
+      const it = item(nItems++);
+      it.scene = scene; it.cut = -1; it.ground = i; it.tl = t - plan.grounds[i].t0; it.side = side || 0; it.cam = IDENTITY;
+      F.evaluate(scene, it.tl, evalOpts);
+    }
+
+    function gather(plan, source, t) {
+      nItems = 0;
+      used.length = 0;
+      const seam = fg.seam;
+      for (const c of fg.cuts) addCut(plan, source, c.i, t, 0);
+      if (seam) {
+        for (const i of seam.aCuts) addCut(plan, source, i, t, 1);
+        for (const i of seam.bCuts) addCut(plan, source, i, t, 2);
+        for (let k = 0; k < nItems; k++) if (items[k].side === 0) items[k].side = items[k].cut < seam.bCuts[0] ? 1 : 2;
+      }
+      const split = seam && seam.scope === 'world' && seam.aGround !== seam.bGround;   // one shared ground: both worlds
+      for (const e of fg.grounds) addGround(plan, source, e.i, t, split ? (e.i === seam.aGround ? 1 : e.i === seam.bGround ? 2 : 0) : 0);
+      // grounds follow the camera of the current cut; during a world seam, of their side's own cut (A or B); during a
+      // text seam, a blend that moves from A's camera to B's over the window (switching at u = 0.5 made the ground jump
+      // by the difference of two moving cameras in one frame); while no cut is on screen, the rig alone (DESIGN_2_1 §4.4)
+      const cur = F.currentCut(plan, t, fg);
+      const blend = seam && seam.scope !== 'world' ? textSeamCam(seam) : null;
+      let gap = null;
+      for (let k = 0; k < nItems; k++) {
+        const it = items[k];
+        if (it.ground < 0) continue;
+        if (blend && !it.side) { it.cam = blend; continue; }
+        const want = it.side === 1 && seam ? lastOf(seam.aCuts) : it.side === 2 && seam ? seam.bCuts[0] : cur;
+        it.cam = camOfCut(want) || gap || (gap = F.rigCamera(plan, t, gapCam));
+      }
+      const xi = xIndexOf(plan);
+      if (xi) coverGrounds(xi, t, seam);
+    }
+
+    // EXTREME segments (DESIGN_EXTREME §1.5): their ground items see a pooled copy of their camera with `cover` set (the
+    // view then takes the coverage limiter); at a hard boundary between two EXTREME cuts of the segment the copy eases
+    // from A's camera to B's over B.t0 ± X_BLEND (the textSeamCam math), so a whip's end does not jump the ground.
+    function coverGrounds(xi, t, seam) {
+      let edge = null;
+      if (!seam && xi.bounds.length) {
+        let lo = 0, hi = xi.bt.length;
+        while (lo < hi) { const mid = (lo + hi) >> 1; if (xi.bt[mid] <= t + X_BLEND) lo = mid + 1; else hi = mid; }
+        const k = lo - 1;
+        if (k >= 0 && t >= xi.bt[k] - X_BLEND && t < xi.bt[k] + X_BLEND) {
+          const A = camOfCut(xi.bounds[k].a), B = camOfCut(xi.bounds[k].b);
+          if (A && B) edge = mixCams(A, B, N.smooth((t - (xi.bt[k] - X_BLEND)) / (2 * X_BLEND)), edgeCam);
+        }
+      }
+      for (let k = 0, c = 0; k < nItems; k++) {
+        const it = items[k];
+        if (it.ground < 0 || !xi.seg[it.ground]) continue;
+        const src = edge && !it.side ? edge : it.cam;
+        const out = coverCams[c] || (coverCams[c] = { x: 0, y: 0, zoom: 1, roll: 0, shakeX: 0, shakeY: 0, fz: 1, gz: 1, cover: 1 });
+        c++;
+        out.x = src.x; out.y = src.y; out.zoom = src.zoom; out.roll = src.roll; out.shakeX = src.shakeX; out.shakeY = src.shakeY;
+        out.fz = src.fz === undefined ? 1 : src.fz; out.gz = src.gz > 0 ? src.gz : 1; out.cover = 1;
+        it.cam = out;
+      }
+    }
+
+    // A's camera eased into B's with weight w (as textSeamCam: the framing zoom in log space), plus the ground zoom.
+    function mixCams(A, B, w, c) {
+      const v = 1 - w;
+      const afz = A.fz === undefined ? 1 : A.fz, bfz = B.fz === undefined ? 1 : B.fz;
+      const fz = Math.exp(Math.log(afz) * v + Math.log(bfz) * w);
+      c.x = A.x * v + B.x * w; c.y = A.y * v + B.y * w; c.roll = A.roll * v + B.roll * w;
+      c.zoom = fz * ((A.zoom / afz) * v + (B.zoom / bfz) * w);
+      c.shakeX = A.shakeX * v + B.shakeX * w; c.shakeY = A.shakeY * v + B.shakeY * w;
+      c.fz = fz;
+      c.gz = Math.exp(Math.log(A.gz > 0 ? A.gz : 1) * v + Math.log(B.gz > 0 ? B.gz : 1) * w);
+      return c;
+    }
+
+    function camOfCut(i) {
+      for (let j = 0; j < nItems; j++) if (items[j].ground < 0 && items[j].cut === i) return items[j].cam;
+      return null;
+    }
+
+    // A's camera (the last cut before the seam) eased into B's (the first after it): smoothstep in u, so the ground
+    // leaves A's motion and joins B's without a jump or a kink. The framing zoom (shot and rig, fz) blends in log space
+    // (DESIGN_2_1 §4.4); the rest of the zoom (the lens, the punch) and everything else linearly, as in v2, so a plan
+    // without shots and rigs blends exactly as before. Null when either cut is not on screen.
+    function textSeamCam(seam) {
+      const a = lastOf(seam.aCuts), b = seam.bCuts.length ? seam.bCuts[0] : -1;
+      if (a < 0 || b < 0) return null;
+      const A = camOfCut(a), B = camOfCut(b);
+      if (!A || !B) return null;
+      const w = N.smooth(seam.u), v = 1 - w, c = seamCam;
+      const fz = Math.exp(Math.log(A.fz) * v + Math.log(B.fz) * w);
+      c.x = A.x * v + B.x * w; c.y = A.y * v + B.y * w; c.roll = A.roll * v + B.roll * w;
+      c.zoom = fz * ((A.zoom / A.fz) * v + (B.zoom / B.fz) * w);
+      c.shakeX = A.shakeX * v + B.shakeX * w; c.shakeY = A.shakeY * v + B.shakeY * w;
+      c.fz = fz;
+      if (A.gz !== undefined || B.gz !== undefined) c.gz = Math.exp(Math.log(A.gz > 0 ? A.gz : 1) * v + Math.log(B.gz > 0 ? B.gz : 1) * w);
+      else if (c.gz !== undefined) c.gz = 1;
+      return c;
+    }
+
+    function lastOf(list) { return list.length ? list[list.length - 1] : -1; }
+
+    // An item is on `side` when it belongs to that side or to both (side 0); side 0 asks for every item.
+    function onSide(it, side) { return !side || !it.side || it.side === side; }
+
+    // --- layers -------------------------------------------------------------------------------------------------------
+
+    const VIEW = new Float32Array(6);
+
+    // The camera view of a layer; the draw context keeps the camera and the parallax, so a medium at another camera factor
+    // (DESIGN_2_1 §11.9.3) can take its own view of the same camera.
+    function view(cam, Lk) {
+      dc.cam = cam; dc.layerK = T.LAYERS[Lk].parallax;
+      return F.viewMatrix(VIEW, cam, T.LAYERS[Lk].parallax, dc.W, dc.H);
+    }
+
+    // The oversampling of an item's still rasters: ×1.25 for a ground whose segment the shots zoom into (plan
+    // grounds[i].zoomed, DESIGN_2_1 §4.8), so the magnified ground stays sharp; a function of the plan only.
+    function overOf(it) {
+      const seg = it.ground >= 0 && framePlan && framePlan.grounds ? framePlan.grounds[it.ground] : null;
+      return seg && seg.zoomed === true ? OVERSAMPLE : 1;
+    }
+
+    // The raster of a static layer (cache: 'static'): drawn once per (scene, layer, scale, palette, oversampling) without
+    // the camera, then placed with the view like a paint (§4.19.6).
+    function staticRaster(scene, Lk, it) {
+      const key = scene;
+      let byL = statics.get(key);
+      const stamp = dc.paintKey;
+      const over = overOf(it);
+      if (byL && byL[Lk] && byL[Lk].stamp === stamp && byL[Lk].over === over) {
+        statics.delete(key); statics.set(key, byL); return byL[Lk];
+      }
+      const pad = 0.15;
+      const s = dc.scale * over;
+      const padX = Math.ceil(pad * dc.W * s), padY = Math.ceil(pad * dc.H * s);
+      const w = Math.ceil(dc.W * s) + 2 * padX, h = Math.ceil(dc.H * s) + 2 * padY;
+      if (w * h * 4 > STATIC_BUDGET / 2 || w > 8192 || h > 8192) return null;
+      while (statics.size >= STATIC_MAX) statics.delete(statics.keys().next().value);
+      const made = factory.create(w, h, { alpha: true });
+      const g0 = dc.g, D0 = Float32Array.from(dc.D), pick = dc.pick;
+      dc.g = made.ctx; dc.pick = null;
+      dc.D[0] = s; dc.D[1] = 0; dc.D[2] = 0; dc.D[3] = s; dc.D[4] = padX; dc.D[5] = padY;
+      F.viewMatrix(VIEW, IDENTITY, 1, dc.W, dc.H);
+      DR.drawLayer(dc, scene, Lk, VIEW, it.tl, it.cut);
+      dc.g = g0; dc.D.set(D0); dc.pick = pick;
+      const r = { stamp, over, canvas: made.canvas, x: -padX / s, y: -padY / s, w: w / s, h: h / s };
+      if (!byL) byL = [];
+      byL[Lk] = r;
+      statics.set(key, byL);
+      return r;
+    }
+
+    function drawIsolated(g, it, Lk, spec) {
+      if (spec.cache === 'static' && !spec.mask && !spec.filter && !DR.hasMedia(it.scene, Lk)) {
+        const r = staticRaster(it.scene, Lk, it);
+        if (r) {
+          const V = view(it.cam, Lk);
+          g.save();
+          const D = dc.D;
+          g.setTransform(D[0], D[1], D[2], D[3], D[4], D[5]);
+          g.transform(V[0], V[1], V[2], V[3], V[4], V[5]);
+          g.globalAlpha = spec.opacity;
+          g.globalCompositeOperation = spec.blend;
+          g.drawImage(r.canvas, r.x, r.y, r.w, r.h);
+          g.restore();
+          return;
+        }
+      }
+      const S = pool.take();
+      dc.g = S.ctx;
+      DR.drawLayer(dc, it.scene, Lk, view(it.cam, Lk), it.tl, pickCut(it));
+      if (spec.mask) {
+        const M = pool.take();
+        const pick = dc.pick;
+        dc.g = M.ctx; dc.pick = null;
+        const mL = L[spec.mask.layer];
+        DR.drawLayer(dc, it.scene, mL, view(it.cam, mL), it.tl, it.cut);
+        dc.pick = pick;
+        S.ctx.setTransform(1, 0, 0, 1, 0, 0);
+        S.ctx.globalCompositeOperation = spec.mask.invert ? 'destination-out' : 'destination-in';
+        S.ctx.drawImage(M.canvas, 0, 0);
+        S.ctx.globalCompositeOperation = 'source-over';
+        pool.give(M);
+      }
+      let src = S;
+      if (spec.filter && spec.filter.blur > 0) { src = PO.blurred(pool, S, spec.filter.blur * dc.scale, ctl.caps); pool.give(S); }
+      dc.g = g;
+      g.save();
+      g.setTransform(1, 0, 0, 1, 0, 0);
+      g.globalAlpha = spec.opacity;
+      g.globalCompositeOperation = spec.blend;
+      g.drawImage(src.canvas, 0, 0);
+      g.restore();
+      pool.give(src);
+    }
+
+    function drawItemLayer(g, it, Lk) {
+      if (!DR.hasLayer(it.scene, Lk)) return;
+      dc.over = overOf(it);
+      const spec = it.scene.layers[Lk];
+      if (spec && T.isIsolated(spec)) drawIsolated(g, it, Lk, spec);
+      else {
+        dc.g = g;
+        DR.drawLayer(dc, it.scene, Lk, view(it.cam, Lk), it.tl, pickCut(it));
+      }
+      dc.over = 1;
+    }
+
+    // Picks of ground scenes belong to the current cut (the one the camera follows).
+    let currentCut = -1;
+    function pickCut(it) { return it.cut >= 0 ? it.cut : currentCut; }
+
+    // Every item on `side` (0 = all) for one layer: grounds first, then cuts in `a` order.
+    function drawSideLayer(g, Lk, side, groundsToo, cutsToo) {
+      if (Lk === L.ground && !dc.groundOn) return;
+      if (dc.groundOnly && Lk !== L.ground) return;          // opts.layers 'ground' (DESIGN_2_1 §13.7)
+      // the ground layer's `still` media leave a world seam only through a shared ground (drawWorldSeam); elsewhere
+      // they take part like any node
+      const mode = dc.stillMode;
+      if (Lk === L.ground && mode === 1) dc.stillMode = 0;
+      for (let pass = 0; pass < 2; pass++) {
+        if (pass === 0 ? !groundsToo : !cutsToo) continue;
+        for (let k = 0; k < nItems; k++) {
+          const it = items[k];
+          if (it.skip && Lk === L.ground) continue;
+          if ((it.ground >= 0) === (pass === 0) && onSide(it, side)) drawItemLayer(g, it, Lk);
+        }
+      }
+      dc.stillMode = mode;
+    }
+
+    // The target is reset first (the caller's surface keeps whatever state the last frame left on it).
+    function fillBackdrop(g, w, h, backdrop, pal) {
+      SF.resetState(g);
+      const fill = F.backdropFill(backdrop);
+      if (backdrop === 'clear') { g.clearRect(0, 0, w, h); return; }
+      g.fillStyle = fill || sentinel || pal.ground;
+      g.fillRect(0, 0, w, h);
+    }
+
+    // A complete world (all layers, hud last) of one side into g. With taps (an EXTREME frame in motion, engine/render/
+    // xblur), the world layers are blurred along the camera's motion before the hud: g is the frame surface's context.
+    function drawWorld(g, w, h, side, backdrop, taps, frame) {
+      fillBackdrop(g, w, h, backdrop, dc.pal);
+      for (const Lk of WORLD_LAYERS) drawSideLayer(g, Lk, side, true, true);
+      if (taps) { XB.draw(g, frame, pool, taps, dc.D, backdrop === 'clear'); dc.g = g; }
+      drawSideLayer(g, L.hud, side, true, true);
+    }
+
+    // No seam, or a text seam: the ground and the far layers once; A's and B's text/near layers mixed by the seam part.
+    // `still` media of the mixed layers (DESIGN_2_1 §11.9.3) stay out of the mix and are drawn after it, like the hud.
+    function drawTextSeam(g, w, h, backdrop, part, u) {
+      fillBackdrop(g, w, h, backdrop, dc.pal);
+      for (const Lk of BASE_LAYERS) drawSideLayer(g, Lk, 0, true, true);
+      drawSideLayer(g, L.text, 0, true, false);
+      const still = anyStill(SE.TEXT_LAYERS, false);
+      const a = pool.take(), b = pool.take();
+      if (still) dc.stillMode = 1;
+      for (const Lk of SE.TEXT_LAYERS) { drawSideLayer(a.ctx, Lk, 1, false, true); drawSideLayer(b.ctx, Lk, 2, false, true); }
+      dc.stillMode = 0;
+      const out = SE.mix(ctl, pool, part, a, b, u, onPartError);
+      g.setTransform(1, 0, 0, 1, 0, 0);
+      g.globalAlpha = 1;
+      g.drawImage(out.canvas, 0, 0);
+      if (out !== a && out !== b) pool.give(out);
+      pool.give(a); pool.give(b);
+      dc.g = g;
+      if (still) stillPass(g, SE.TEXT_LAYERS, false);
+      drawSideLayer(g, L.near, 0, true, false);
+      drawSideLayer(g, L.hud, 0, true, true);
+    }
+
+    // Whether an item on screen holds a `still` medium in one of these layers (grounds too when asked).
+    function anyStill(layers, grounds) {
+      for (let k = 0; k < nItems; k++) {
+        const it = items[k];
+        if (it.ground >= 0 && !grounds) continue;
+        for (const Lk of layers) if (DR.hasStill(it.scene, Lk)) return true;
+      }
+      return false;
+    }
+
+    // Only the `still` media of these layers, every side, on the target (after the composite).
+    function stillPass(g, layers, grounds) {
+      dc.stillMode = 2;
+      for (const Lk of layers) drawSideLayer(g, Lk, 0, grounds, true);
+      dc.stillMode = 0;
+    }
+
+    // A world seam: two complete worlds mixed. A `still` medium stays out of the mix (DESIGN_2_1 §11.9.3): a shared
+    // ground holding one is drawn once under the composite (its whole ground layer, so the medium keeps its place and
+    // stays under the text), the worlds are drawn on clear surfaces without it, and the `still` media of the other
+    // layers come after the composite. Without still media this is the v2 path.
+    const NON_GROUND = Object.freeze([L.far, L.mid, L.text, L.near]);
+
+    function drawWorldSeam(g, w, h, backdrop, part, u) {
+      const under = sharedStillGround();
+      const still = anyStill(NON_GROUND, true);
+      const a = pool.take(), b = pool.take();
+      if (still) dc.stillMode = 1;
+      if (under) under.skip = true;
+      drawWorld(a.ctx, w, h, 1, under ? 'clear' : backdrop);
+      drawWorld(b.ctx, w, h, 2, under ? 'clear' : backdrop);
+      if (under) under.skip = false;
+      dc.stillMode = 0;
+      const out = SE.mix(ctl, pool, part, a, b, u, onPartError);
+      fillBackdrop(g, w, h, backdrop, dc.pal);        // whatever the mix leaves transparent shows the backdrop
+      if (under) {
+        dc.g = g;
+        if (dc.groundOn) drawItemLayer(g, under, L.ground);
+        g.setTransform(1, 0, 0, 1, 0, 0);
+        g.globalAlpha = 1;
+      }
+      g.drawImage(out.canvas, 0, 0);
+      if (out !== a && out !== b) pool.give(out);
+      pool.give(a); pool.give(b);
+      if (still) { dc.g = g; stillPass(g, NON_GROUND, true); }
+    }
+
+    // The ground item both worlds share (side 0) when its ground layer holds a `still` medium, else null.
+    function sharedStillGround() {
+      for (let k = 0; k < nItems; k++) {
+        const it = items[k];
+        if (it.ground >= 0 && !it.side && DR.hasStill(it.scene, L.ground)) return it;
+      }
+      return null;
+    }
+
+    function onPartError(part, err) {
+      if (o.strict) throw err;
+      const who = part.def ? part.def.kind + '/' + part.def.key : '?';
+      if (errors.length < 32) errors.push({ code: 'part-error', detail: who + ': ' + String(err && err.message) });
+    }
+
+    // --- post ----------------------------------------------------------------------------------------------------------
+
+    function entry(k) {
+      return entries[k] || (entries[k] = { def: null, p: null, seed: 0, cut: null, info: { tl: 0, dur: 0, impact: false, energy: 0.5 },
+        tl: 0, times: null, order: 0, slot: '' });
+    }
+
+    function sceneOfCut(i) {
+      for (let k = 0; k < nItems; k++) if (items[k].cut === i) return items[k].scene;
+      return null;
+    }
+
+    function collectPost(plan, backdrop, list) {
+      list.length = 0;
+      let n = 0;
+      const tex = fg.post.texture;
+      const ax = axPool;
+      ax.f = NO_FEATURES; ax.look.amounts = plan.look.amounts || {}; ax.look.bpm = plan.beats ? plan.beats.bpm : null;
+      if (tex) {
+        const def = registry.get('filter', tex.v);
+        if (def && F.filterAllowed(def, backdrop)) {
+          const e = entry(n++);
+          e.def = def; e.seed = H.hash32('fx', 'texture', def.key); e.p = PO.paramsFor(registry, def, tex, e.seed, ax);
+          e.cut = null; e.tl = fg.t; e.times = null; e.order = 0; e.slot = 'texture';
+          list.push(e);
+        }
+      }
+      for (const acc of fg.post.accents) {
+        if (dc.groundOnly) break;                            // the ground layers alone keep the work texture only
+        const cut = plan.cuts[acc.cut];
+        const d = cut.slots[acc.slot];
+        const def = d ? registry.get('filter', d.v) : null;
+        if (!def || !F.filterAllowed(def, backdrop)) continue;
+        const e = entry(n++);
+        e.def = def; e.seed = H.hash32('fx', cut.key, acc.slot, def.key);
+        ax.f = cut.feat || {};
+        e.p = PO.paramsFor(registry, def, d, e.seed, ax);
+        const info = e.info, f = cut.feat || {};
+        info.tl = acc.tl; info.dur = typeof f.dur === 'number' ? f.dur : cut.t1 - cut.t0;
+        info.impact = !!(cut.impact || f.impact); info.energy = typeof f.energy === 'number' ? f.energy : 0.5;
+        e.cut = info; e.tl = acc.tl; e.order = 1; e.slot = acc.slot;
+        const sc = sceneOfCut(acc.cut);
+        e.times = sc ? sc.times : null;
+        list.push(e);
+      }
+      return PO.sortEntries(list);
+    }
+
+    // fx.textAt(dt): the visible cuts' text and near layers again at t − dt, into a pooled surface the size the FxContext
+    // has now (a filter running at half resolution gets a half-size copy drawn at half scale, like its other surfaces).
+    // A photo or video in those layers (文字の中に, a frame or overlay in front) keeps the media frame of the frame's own
+    // time (dc.ghostTl): mediaAt / mediaReady list only that one, and an export frame draws exact frames only.
+    const D_SAVED = new Float32Array(6);
+    function textAt(dt) {
+      const fx = ctl.fx;
+      const s = pool.take(fx.w, fx.h);
+      const g0 = dc.g, pick = dc.pick;
+      const k = fx.unit / frameInfo.unit;
+      D_SAVED.set(dc.D);
+      if (k !== 1) for (let j = 0; j < 6; j++) dc.D[j] *= k;
+      dc.g = s.ctx; dc.pick = null;
+      for (let n = 0; n < nItems; n++) {
+        const it = items[n];
+        if (it.ground >= 0) continue;
+        F.evaluate(it.scene, it.tl - dt, evalOpts);
+        dc.ghostTl = it.tl;
+        for (const Lk of SE.TEXT_LAYERS) DR.drawLayer(dc, it.scene, Lk, view(it.cam, Lk), it.tl - dt, -1);
+      }
+      dc.D.set(D_SAVED);
+      dc.g = g0; dc.pick = pick; dc.ghostTl = null;
+      return s;
+    }
+
+    // --- adaptive preview (§7.4) --------------------------------------------------------------------------------------
+
+    function adaptTo(ms) {
+      adapt.ema = adapt.ema === 0 ? ms : adapt.ema + EMA_ALPHA * (ms - adapt.ema);
+      const slow = adapt.ema > SLOW_MS, fast = adapt.ema < FAST_MS;
+      adapt.slow = slow ? adapt.slow + 1 : 0;
+      adapt.fast = fast ? adapt.fast + 1 : 0;
+      if (adapt.slow >= SLOW_FRAMES && adapt.level < MAX_LEVEL) { adapt.level++; adapt.slow = 0; adapt.ema = 0; }
+      if (adapt.fast >= FAST_FRAMES && adapt.level > 0) { adapt.level--; adapt.fast = 0; }
+    }
+
+    // --- one frame --------------------------------------------------------------------------------------------------
+
+    // A frame is rendered once more with every filter copying its input (fx.own copies) when a filter threw after it had
+    // drawn on its input in place (PO.run's torn): the frame then shows what it would have shown had that filter never
+    // run, as every skipped filter did before fx.own. Errors are reported by the first pass.
+    let copyPass = false;
+    function render(surface, plan, t, opts, source) {
+      const start = clock();
+      const ro = opts || {};
+      const quality = ro.quality === 'export' || ro.quality === 'draft' ? ro.quality : 'preview';
+      const exporting = quality === 'export';
+      const backdrop = ro.backdrop || plan.look.backdrop || 'scene';
+      const W = plan.design.w, Hd = plan.design.h;
+      const sw = surface.w || surface.canvas.width, sh = surface.h || surface.canvas.height;
+      const scale = ro.scale > 0 ? ro.scale : Math.min(sw / W, sh / Hd);
+      const level = exporting ? 0 : adapt.level;
+      evalOpts.calm = !exporting && ro.calm === true;       // 「激しいカメラを抑える」: preview only (DESIGN_EXTREME §3.6)
+      sentinel = typeof ro.sentinel === 'string' ? ro.sentinel : null;
+      // adaptive level 3 draws at 0.75 of the output, but not below 720p: the stage already steps its backing down to
+      // 720p at that level, and a second step would only add an upscale (ui-data perf-5)
+      const dpr = level >= 3 && Math.min(sw, sh) > DPR_FLOOR ? DPR_STEP : 1;
+      if (source.fontKey !== fontKey) { if (fontKey !== null) sprites.clear(); fontKey = source.fontKey; }
+
+      fg = F.frameAt(plan, t, fg);
+      framePlan = plan;
+      gather(plan, source, t);
+      currentCut = F.currentCut(plan, t, fg);
+      const tBehave = clock();
+
+      // draw context for this frame
+      const pal = paletteOf(plan.look.palette, backdrop);
+      dc.pal = pal; dc.W = W; dc.H = Hd; dc.scale = scale * dpr; dc.assets = o.assets || null; dc.face = source.face || null;
+      dc.groundOn = F.groundVisible(backdrop);
+      dc.groundOnly = ro.layers === 'ground';
+      dc.t = t; dc.backdrop = backdrop; dc.quality = quality; dc.thumb = ro.thumb === true;
+      dc.glyphPath = !exporting && (ro.glyphPath === 'sprite' || ro.glyphPath === 'direct') ? ro.glyphPath : 'auto';
+      dc.probe = !exporting && ro.probe ? ro.probe : null;
+      dc.meter = ro.meter && typeof ro.meter === 'object' ? ro.meter : null;
+      q.draft = quality === 'draft' || (!exporting && level >= 2);
+      q.scale = dc.scale; q.pal = pal;
+      lastLook.t = t; lastLook.scale = dc.scale; lastLook.backdrop = backdrop; lastLook.calm = evalOpts.calm;
+      lastLook.glyphPath = dc.glyphPath; lastLook.probe = dc.probe;
+      dc.paintKey = paintKeyOf(dc.scale, palId(pal), q.draft);
+      dc.overKey = paintKeyState.over;
+      DR.resetCounts(dc);
+      const ox = (sw - W * scale) / 2, oy = (sh - Hd * scale) / 2;
+      dc.D[0] = scale * dpr; dc.D[1] = 0; dc.D[2] = 0; dc.D[3] = scale * dpr; dc.D[4] = ox * dpr; dc.D[5] = oy * dpr;
+      const vis = dc.visible;                        // the frame on the device (media edges draw only what shows)
+      vis[0] = dc.D[4]; vis[1] = dc.D[5]; vis[2] = dc.D[4] + W * dc.D[0]; vis[3] = dc.D[5] + Hd * dc.D[3];
+      const fw = dpr === 1 ? sw : Math.max(1, Math.round(sw * dpr)), fh = dpr === 1 ? sh : Math.max(1, Math.round(sh * dpr));
+      pool.frame(fw, fh);
+      pool.begin();
+      lastLook.fw = fw; lastLook.fh = fh;
+      dc.pick = ro.pick ? picks : null;
+      if (ro.pick) picks.begin(plan);
+
+      const post = collectPost(plan, backdrop, postList);
+      const fi = frameInfo;
+      fi.plan = plan; fi.w = fw; fi.h = fh; fi.unit = scale * dpr; fi.quality = quality; fi.alpha = backdrop === 'clear';
+      fi.textAt = textAt; fi.flashScale = !exporting && ro.reduceFlash ? REDUCED_FLASH : 1; fi.pal = pal; fi.backdrop = backdrop;
+      ctl.frame(fi);
+      // EXTREME motion blur (DESIGN_EXTREME §1.6): the current cut's x-track in motion, no seam, not toned down; such a
+      // frame never takes the direct path (the taps copy the frame surface)
+      const xi = xIndexOf(plan);
+      let taps = null;
+      if (xi && !fg.seam && !evalOpts.calm && currentCut >= 0) {
+        for (let k = 0; k < nItems; k++) {
+          const it = items[k];
+          if (it.cut !== currentCut) continue;
+          taps = XB.taps(it.scene, plan, t, it.cam, W, Hd, XB.maxTaps(quality, level), tapsOut);
+          break;
+        }
+      }
+      const direct = post.length === 0 && dpr === 1 && !taps;
+      const frame = direct ? surface : pool.take(fw, fh);
+      const g = frame.ctx;
+      dc.g = g;
+
+      const seam = fg.seam;
+      if (seam && (seam.scope === 'world' || !dc.groundOnly)) {
+        const part = SE.seamPart(plan, registry, seam.i);
+        if (seam.scope === 'world') drawWorldSeam(g, fw, fh, backdrop, part, seam.u);
+        else drawTextSeam(g, fw, fh, backdrop, part, seam.u);
+      } else drawWorld(g, fw, fh, 0, backdrop, taps, frame);   // (a text seam mixes only text layers: none with layers 'ground')
+      if (typeof ro.flush === 'function') ro.flush(frame);
+      const tDraw = clock();
+
+      let passes = 0;
+      if (!direct) {
+        let out = frame;
+        if (post.length) {
+          const res = PO.run(ctl, pool, frame, post, t, level, copyPass ? null : onFilterError, copyPass);
+          if (res.torn && !copyPass) {
+            pool.end();
+            copyPass = true;
+            try { return render(surface, plan, t, opts, source); } finally { copyPass = false; }
+          }
+          out = res.out; passes = res.passes;
+        }
+        // The target is prepared first (cleared, or filled with the backdrop), so whatever a filter leaves transparent
+        // shows the backdrop, never what an earlier frame left on the caller's surface.
+        const tg = surface.ctx;
+        fillBackdrop(tg, sw, sh, backdrop, pal);
+        tg.drawImage(out.canvas, 0, 0, out.w, out.h, 0, 0, sw, sh);
+      } else {
+        g.setTransform(1, 0, 0, 1, 0, 0);
+        g.globalAlpha = 1;
+      }
+      if (taps) passes += taps.n;                    // (DESIGN_EXTREME §4) the motion blur's copies count as passes
+      pool.end();
+      const end = clock();
+
+      let provisional = dc.mediaWaiting > 0;         // a media frame still decoding is provisional too (§11.4.5)
+      for (let k = 0; k < nItems; k++) if (items[k].scene.provisional) provisional = true;
+      last.ms = end - start; last.behave = tBehave - start; last.draw = tDraw - tBehave; last.post = end - tDraw; last.passes = passes;
+      if (quality === 'preview' && now) adaptTo(last.ms);
+      const c = dc.counts;
+      const stats = { ms: last.ms, drawn: { glyphs: c.glyphs, shapes: c.shapes, paints: c.paints, particles: c.particles }, passes,
+        provisional, level, media: { drawn: c.media, waiting: dc.mediaWaiting, fallback: c.mediaFallback } };
+      // export quality never draws a substitute: the facade turns this into EngineError('media-not-ready' | 'media-missing')
+      if (dc.mediaError) stats.mediaError = dc.mediaError;
+      if (taps) stats.blur = taps.n;                 // (DESIGN_EXTREME §1.6) the copies of a motion-blurred frame
+      return stats;
+    }
+
+    // mediaAt(plan, source, t, out, scale) → out: [{ id, m }] of the media nodes of the scenes active at absolute time
+    // t, with their media times (closed form, the drawing's own rule); no behaviour runs. Unsorted; the facade sorts.
+    // With an output scale, every medium also carries the px and blur its draw will ask the store for (shapes.frameFor:
+    // the box's long side × scale × headroom, blur × scale; a 'soft' fit adds its blurred copy), so the store readies
+    // exactly that still tier, and bakes exactly that blur of a video or animation frame (DESIGN_2_1 §11.4.6). The
+    // products are shapes.frameFor's, in its order, so the store's keys match bit for bit. The media of a scene come
+    // from source.media(kind, i) (the facade's memo by fingerprint, so no scene is kept or rebuilt for this) when the
+    // source has it, else from the built scene (mediaEntries).
+    const mediaGraph = { fg: null };
+    function mediaAt(plan, source, t, out, scale) {
+      const list = out || [];
+      list.length = 0;
+      if (!plan) return list;
+      const g = mediaGraph.fg = F.frameAt(plan, t, mediaGraph.fg);
+      const entries = (kind, i) => (source.media ? source.media(kind, i) : mediaEntries(kind === 'cut' ? source.cut(i) : source.ground(i)));
+      const add = (ms, tl) => {
+        for (const e of ms) {
+          const m = e.time ? MEDIA.mapTime(e.time, e.time.clock === 'song' ? t : tl) : 0;
+          if (!(scale > 0)) { list.push({ id: e.id, m }); continue; }
+          const px = e.size * scale * e.headroom;                    // shapes.frameFor's product, in its order
+          list.push({ id: e.id, m, px, blur: e.blur * scale });
+          if (e.softBlur >= 0) list.push({ id: e.id, m, px, blur: e.softBlur * scale });
+        }
+      };
+      const seen = new Set();
+      const cut = (i) => { if (!seen.has(i)) { seen.add(i); add(entries('cut', i), t - plan.cuts[i].t0); } };
+      for (const c of g.cuts) cut(c.i);
+      if (g.seam) { for (const i of g.seam.aCuts) cut(i); for (const i of g.seam.bCuts) cut(i); }
+      for (const e of g.grounds) add(entries('ground', e.i), t - plan.grounds[e.i].t0);
+      return list;
+    }
+
+    // warmAt(plan, source, t) → glyphs visited: makes the glyph sprites the frame at t will draw, at the output scale,
+    // backdrop, adaptive level and glyph path of the latest frame, without drawing (§7.4: a frame should not rasterize).
+    // The cuts are gathered and evaluated as render() does, with their cameras, and every glyph off the direct path
+    // looks up exactly the keys drawGlyph asks for (draw.warmLayer). Grounds are skipped (their text, if any, takes
+    // the direct path), and so are static layers (drawn once into their raster). Nothing happens before the first frame.
+    // stop (optional) is asked after each glyph that made a new sprite; when it answers true the walk ends there (a host
+    // canvas rasterizes each sprite as it is made, so a frame of large blurred glyphs is more work than one slice of
+    // engine.prepare): the caller yields and walks the same t again, finding the sprites made so far.
+    function warmAt(plan, source, t, stop) {
+      if (!(lastLook.scale > 0) || !plan) return 0;
+      evalOpts.calm = lastLook.calm;
+      fg = F.frameAt(plan, t, fg);
+      nItems = 0;
+      used.length = 0;
+      for (const c of fg.cuts) addCut(plan, source, c.i, t, 0);
+      if (fg.seam) {
+        for (const i of fg.seam.aCuts) addCut(plan, source, i, t, 0);
+        for (const i of fg.seam.bCuts) addCut(plan, source, i, t, 0);
+        // a seam draws each side on a frame surface and mixes them on more: on a host canvas those are made (and
+        // rasterized once) now, so the seam's first frame does not make them. The recorder has no settle: its canvas
+        // ids, and so its op streams, stay as they were. stop() is asked after each surface, as after each glyph that
+        // made a sprite: a warm-up slice makes at most one more surface once it is due.
+        if (typeof factory.settle === 'function' && lastLook.fw > 0) {
+          pool.frame(lastLook.fw, lastLook.fh);
+          pool.warm(SEAM_SURFACES, (sf) => factory.settle(sf.canvas), stop);
+        }
+      }
+      const s = lastLook.scale;
+      dc.pal = paletteOf(plan.look.palette, lastLook.backdrop);
+      dc.W = plan.design.w; dc.H = plan.design.h; dc.scale = s;
+      dc.glyphPath = lastLook.glyphPath; dc.probe = lastLook.probe;
+      dc.D[0] = s; dc.D[1] = 0; dc.D[2] = 0; dc.D[3] = s; dc.D[4] = 0; dc.D[5] = 0;
+      let n = 0;
+      walk: for (let k = 0; k < nItems; k++) {
+        const it = items[k];
+        for (const Lk of WARM_LAYERS) {
+          if (!DR.hasLayer(it.scene, Lk)) continue;
+          const spec = it.scene.layers[Lk];
+          if (spec && T.isIsolated(spec) && spec.cache === 'static' && !spec.mask && !spec.filter) continue;
+          const got = DR.warmLayer(dc, it.scene, Lk, view(it.cam, Lk), stop);
+          if (got < 0) { n += -got - 1; break walk; }
+          n += got;
+        }
+      }
+      nItems = 0;
+      return n;
+    }
+
+    function onFilterError(e, err) {
+      if (o.strict) throw err;
+      if (errors.length < 32) errors.push({ code: 'part-error', detail: 'filter/' + e.def.key + ': ' + String(err && err.message) });
+    }
+
+    return {
+      render, warmAt, mediaAt,
+      // setRegistry(registry) (DESIGN_2_1 §3.10): the registry filters and seams are looked up in (the effective one)
+      setRegistry(next) { if (next && typeof next.get === 'function') registry = next; },
+      get registry() { return registry; },
+      // beginWarm() starts counting the sprite working set; warmBytes() → { used, budget }: the bytes of the distinct
+      // sprites found or made since (frames drawn meanwhile count too) and the sprite budget.
+      beginWarm() { sprites.beginSpan(); },
+      warmBytes: () => ({ used: sprites.spanBytes, budget: sprites.budget }),
+      lastTime: () => (Number.isFinite(lastLook.t) ? lastLook.t : null),
+      lastScale: () => lastLook.scale,
+      hitTest: (x, y) => picks.hitTest(x, y),
+      boxes: () => picks.boxes(),
+      stats: () => ({ frameMs: last.ms, stageMs: { behave: last.behave, draw: last.draw, post: last.post },
+        spriteBytes: sprites.bytes, spritesMade: sprites.made, surfaces: pool.stats().live, surfaceBytes: pool.stats().bytes, passes: last.passes,
+        level: adapt.level, ema: adapt.ema }),
+      errors: () => errors.slice(),
+      clearErrors() { errors.length = 0; },
+      get level() { return adapt.level; },
+      setLevel(v) { adapt.level = Math.max(0, Math.min(MAX_LEVEL, v | 0)); adapt.slow = 0; adapt.fast = 0; },
+      setSpriteBudget(bytes) { sprites.setBudget(bytes); },
+      clear() { sprites.clear(); paints.clear(); statics.clear(); tiles.clear(); },
+      dispose() { sprites.clear(); paints.clear(); statics.clear(); tiles.clear(); pool.drop(); items.length = 0; nItems = 0; },
+    };
+  }
+
+  return { createRenderer, mediaEntries, WORLD_LAYERS };
+});
 /* 文字PVメーカー v2 — original work. Scene build: one Plan cut (or ground segment) → node table + behaviours (DESIGN §4.17.5; DESIGN_2_1 §3.10, §5.9.4, §11.3.7). */
 MV.def('engine/scene/build', ['core/hash', 'core/rng', 'core/schema', 'engine/scene/table', 'engine/scene/builder',
-  'engine/scene/behave', 'engine/scene/frame', 'engine/scene/shot', 'engine/scene/budget'],
-(H, RNG, SCH, T, B, BH, F, SHOT, BG) => {
+  'engine/scene/behave', 'engine/scene/frame', 'engine/scene/shot', 'engine/scene/budget', 'engine/scene/xshot'],
+(H, RNG, SCH, T, B, BH, F, SHOT, BG, XS) => {
   'use strict';
 
   const SAFE = 0.05;              // safe margin: 5% of the short side on every edge
@@ -27091,10 +28485,13 @@ MV.def('engine/scene/build', ['core/hash', 'core/rng', 'core/schema', 'engine/sc
     return mixShareOf(defs, MIX_BUDGET.cut);
   }
 
-  // The shot inputs of a cut (DESIGN_2_1 §3.10): the cam.shot decision and the cam.zoom, cam.curve, cam.follow values.
-  function shotInputs(slots) {
+  // The shot inputs of a cut (DESIGN_2_1 §3.10): the cam.shot decision and the cam.zoom, cam.curve, cam.follow values;
+  // for EXTREME shots (DESIGN_EXTREME §1.4) also the cam.extreme value (null without a decision) and the arrange's camera
+  // trait (def.cam: 'any' | 'gentle' | 'none').
+  function shotInputs(slots, arrangeDef) {
     return { shot: decisionOf(slots, 'cam.shot'), zoom: valueOf(slots, 'cam.zoom', 1), curve: valueOf(slots, 'cam.curve', null),
-      follow: valueOf(slots, 'cam.follow', null) };
+      follow: valueOf(slots, 'cam.follow', null), extreme: valueOf(slots, 'cam.extreme', null),
+      camTrait: (arrangeDef && arrangeDef.cam) || 'any' };
   }
 
   function partEnv(base, builder, def, slot, decision, subject, owner, hints, extra) {
@@ -27295,8 +28692,10 @@ MV.def('engine/scene/build', ['core/hash', 'core/rng', 'core/schema', 'engine/sc
     const hints = { focus, free, lines: at.lines, emphLines: at.emphLines, emph: at.emph };
     buildOrnaments(builder, base, slots, els, reg, cut, hints, warnings, where, ax);
     // the camera: the shot is resolved first, so the lens sees the text and the track (read-only); the lens behaviours
-    // run first and the shot's after them, composing with their deltas (DESIGN_2_1 §4.4)
-    const shot = SHOT.makeShot(base, cam, target, shotInputs(slots));
+    // run first and the shot's after them, composing with their deltas (DESIGN_2_1 §4.4). An EXTREME shot builds an
+    // x-track instead (engine/scene/xshot); every other shot takes the normal track as before.
+    const inputs = shotInputs(slots, arrange.def);
+    const shot = (XS.isX(inputs) ? XS.makeShot : SHOT.makeShot)(base, cam, target, inputs);
     const lens = part('lens', 'lens');
     const lensEnv = partEnv(base, builder, lens.def, 'lens', lens.d, cut.text, 'lens', hints,
       { target, shot: shot ? shot.track : null });
@@ -44820,6 +46219,7 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
   const THUMB_PLANS = 8;
   const MEDIA_MEMO = 4096;          // scenes whose media lists mediaAt remembers (tiny entries; cleared when full)
   const SAMPLE_TEXT = 'はじまりの朝';
+  const CALM_EVAL = Object.freeze({ calm: true });
   const SAMPLE_TEXT_B = '光のなかへ';
 
   class EngineError extends Error {
@@ -44877,10 +46277,12 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
   // them; the second shows textB (else SAMPLE_TEXT_B), so a page in another language can pass both lines.
   // DESIGN_2_1 (additive): kind 'shot' puts a shot preset (key; params { zoom, curve, follow } = cam.zoom, cam.curve,
   // cam.follow) on the cut, kind 'rig' a rig preset (params { amp, curve }) on one run over the whole plan (plan v 2);
-  // material keys of an extended registry work like any part key.
+  // material keys of an extended registry work like any part key. DESIGN_EXTREME (additive): kind 'xshot' puts an
+  // EXTREME preset (key, "~m" mirrors it; params as 'shot' plus extreme = cam.extreme, default 1) on the cut and marks
+  // its ground segment EXTREME (grounds[0].x), as the planner does.
   function samplePlan(registry, ref, opts) {
     const kind = ref && ref.kind;
-    if (kind === 'shot' || kind === 'rig') return cameraSamplePlan(registry, ref, opts);
+    if (kind === 'shot' || kind === 'rig' || kind === 'xshot') return cameraSamplePlan(registry, ref, opts);
     const o = opts || {};
     const key = ref && ref.key;
     const def = kind && key ? registry.get(kind, key) : null;
@@ -44984,15 +46386,19 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
     const p = (ref && ref.params) || {};
     const plan = Object.assign({}, base, { v: 2 });
     const cut = Object.assign({}, base.cuts[0]);
-    if (ref.kind === 'shot') {
-      const shot = SHOT.coerceShot(ref.key);
+    const xshot = ref.kind === 'xshot';
+    if (ref.kind === 'shot' || xshot) {
+      const shot = xshot ? (SHOT.isExtreme(ref.key) ? SHOT.coerceShot(ref.key) : undefined) : SHOT.coerceShot(ref.key);
       const slots = Object.assign({}, cut.slots, { 'cam.shot': { v: shot === undefined ? 'none' : shot, from: 'auto' },
         'cam.zoom': { v: Number.isFinite(p.zoom) ? p.zoom : 1, from: 'auto' } });
       if (p.curve !== undefined) slots['cam.curve'] = { v: p.curve, from: 'auto' };
       if (Number.isFinite(p.follow)) slots['cam.follow'] = { v: p.follow, from: 'auto' };
+      if (xshot) slots['cam.extreme'] = { v: Number.isFinite(p.extreme) ? Math.min(1, Math.max(0, p.extreme)) : 1, from: 'pin:work' };
       cut.slots = slots;
-      cut.fp = H.hashJSON({ base: base.cuts[0].fp, shot: slots['cam.shot'].v, zoom: slots['cam.zoom'].v, curve: p.curve || null,
-        follow: Number.isFinite(p.follow) ? p.follow : null });
+      const fpOf = { base: base.cuts[0].fp, shot: slots['cam.shot'].v, zoom: slots['cam.zoom'].v, curve: p.curve || null,
+        follow: Number.isFinite(p.follow) ? p.follow : null };
+      if (xshot) fpOf.extreme = slots['cam.extreme'].v;
+      cut.fp = H.hashJSON(fpOf);
     }
     cut.rig = 0;
     plan.cuts = [cut];
@@ -45001,7 +46407,8 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
     plan.rigs = [{ blend: null, cuts: [cut.key], curve: { from: 'auto', v: p.curve !== undefined ? p.curve : preset ? preset.curve : 'linear' },
       key: 'k' + cut.key, rig: { from: 'auto', p: { amp: Number.isFinite(p.amp) ? p.amp : 1 }, v: rig === undefined ? 'none' : rig },
       t0: 0, t1: base.duration }];
-    plan.grounds = base.grounds.map((g) => Object.assign({}, g, { zoomed: ref.kind === 'shot' && cut.slots['cam.shot'].v !== 'none' }));
+    plan.grounds = base.grounds.map((g) => Object.assign({}, g, { zoomed: (ref.kind === 'shot' || xshot) && cut.slots['cam.shot'].v !== 'none' },
+      xshot && cut.slots['cam.shot'].v !== 'none' ? { x: true } : {}));
     plan.hash = '';
     plan.hash = H.hashJSON(plan);
     Object.defineProperty(plan, 'env', { enumerable: false, value: base.env });
@@ -45103,7 +46510,8 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
   // fx.own drew in place (the pixel-identity check of that change).
   // DESIGN_2_1 additive members: registry (getter: the effective registry, parts/mix registryFor of the base registry
   // and the document's materials and media), shotTrack(cutKey), viewAt(t), mediaAt(t), mediaReady(t, opts),
-  // fork({ assets }); thumb() also takes the kinds 'shot' and 'rig'. Internal options: `effective` (a fork's registry)
+  // fork({ assets }); thumb() also takes the kinds 'shot' and 'rig' (and 'xshot'); DESIGN_EXTREME additive members:
+  // xJumps(t0, t1), viewAt(t, { calm }). Internal options: `effective` (a fork's registry)
   // and `ownAssets` (the fork made its asset store and disposes it).
   function createEngine(opts) {
     const o = opts || {};
@@ -45416,7 +46824,8 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
     }
 
     // renderFrame(surface, t, opts) → FrameStats (§4.19.2). Additive options (DESIGN_2_1 §11.3.7): layers 'all' |
-    // 'ground'. FrameStats gains media { drawn, waiting }. In export quality a media frame that is not exact (or not on
+    // 'ground'; (DESIGN_EXTREME §3.6) calm: the preview's 「激しいカメラを抑える」 (EXTREME modulators ×0.3, no motion
+    // blur; export quality ignores it); sentinel (lab only): a colour the scene backdrop is filled with. FrameStats gains media { drawn, waiting }. In export quality a media frame that is not exact (or not on
     // this device) is a programming error: exporters await mediaReady(t) first, so this throws EngineError
     // ('media-not-ready' | 'media-missing') instead of letting a substitute frame be encoded.
     function renderFrame(surface, t, ropts) {
@@ -45500,7 +46909,8 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
 
     // shotTrack(cutKey) → { a, b, keys: [{ t, x, y, zoom, roll, aim: Box | null }] } | null: the cut's resolved shot from
     // its built scene (times absolute; x, y the camera offset in du; roll in radians; aim the aimed rest box), for the
-    // stage overlay and the timeline. null without a shot.
+    // stage overlay and the timeline. null without a shot. An EXTREME track (DESIGN_EXTREME §2.4) adds x: true, and gz
+    // (ground zoom) and hit on every key.
     function shotTrack(cutKey) {
       alive();
       const i = cutIndexOf(cutKey);
@@ -45509,14 +46919,37 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
       const tr = scene && scene.shot;
       if (!tr) return null;
       const t0 = plan.cuts[i].t0;
+      if (tr.x === true) {
+        return { a: t0 + tr.a, b: t0 + tr.b, x: true,
+          keys: tr.keys.map((k) => ({ t: t0 + k.t, x: k.X, y: k.Y, zoom: k.Z, roll: k.R, aim: k.box, gz: k.gz, hit: k.hit })) };
+      }
       return { a: t0 + tr.a, b: t0 + tr.b,
         keys: tr.keys.map((k) => ({ t: t0 + k.t, x: k.X, y: k.Y, zoom: k.Z, roll: k.R, aim: k.box })) };
     }
 
-    // viewAt(t) → { x, y, zoom, roll }: the text layer's camera at t — the current cut's camera composed with the rig
-    // (and the impulses, as drawn; x/y include the shake) — or the rig alone while no cut is on screen. The stage inverts
-    // drags with it.
-    function viewAt(t) {
+    // xJumps(t0, t1) → [times]: the deliberate jumps (hard cuts inside a cut) of the EXTREME tracks of the cuts that
+    // overlap [t0, t1), absolute and sorted — the export's flash check counts them (DESIGN_EXTREME §3.4). Builds the
+    // scenes of those cuts only (the EXTREME ones); [] for a plan without EXTREME shots.
+    function xJumps(t0, t1) {
+      alive();
+      const out = [];
+      if (!plan) return out;
+      const lo = Number.isFinite(t0) ? t0 : 0, hi = Number.isFinite(t1) ? t1 : plan.duration;
+      for (let i = 0; i < plan.cuts.length; i++) {
+        const c = plan.cuts[i], d = c.slots && c.slots['cam.shot'];
+        if (!(c.b > lo && c.a < hi) || !d || d.v === undefined || d.v === null || !SHOT.isExtreme(d.v)) continue;
+        const scene = sceneFor('cut', i);
+        const tr = scene && scene.shot;
+        if (!tr || tr.x !== true) continue;
+        for (const tj of tr.jumps) if (c.t0 + tj >= lo && c.t0 + tj < hi) out.push(c.t0 + tj);
+      }
+      return out.sort((a, b) => a - b);
+    }
+
+    // viewAt(t, { calm }?) → { x, y, zoom, roll }: the text layer's camera at t — the current cut's camera composed with
+    // the rig (and the impulses, as drawn; x/y include the shake) — or the rig alone while no cut is on screen. The stage
+    // inverts drags with it. calm (DESIGN_EXTREME §3.6): the preview's 「激しいカメラを抑える」, as renderFrame takes it.
+    function viewAt(t, vopts) {
       alive();
       if (!plan) return { x: 0, y: 0, zoom: 1, roll: 0 };
       const fg = F.frameAt(plan, t);
@@ -45524,7 +46957,7 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
       let cam;
       if (i >= 0) {
         const scene = sceneFor('cut', i);
-        F.evaluate(scene, t - plan.cuts[i].t0);
+        F.evaluate(scene, t - plan.cuts[i].t0, vopts && vopts.calm === true ? CALM_EVAL : undefined);
         cam = F.cameraAt(scene, plan, t);
       } else cam = F.rigCamera(plan, t);
       return { x: cam.x + cam.shakeX, y: cam.y + cam.shakeY, zoom: cam.zoom, roll: cam.roll };
@@ -45634,7 +47067,7 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
       boxes: () => renderer.boxes(),
       thumb, warnings, fork, stats, dispose,
       get registry() { return registry; },
-      shotTrack, viewAt, mediaAt, mediaReady,
+      shotTrack, viewAt, mediaAt, mediaReady, xJumps,
       setPlan, fontUsage,
       scene: (kind, i) => (plan ? sceneFor(kind, i) : null),
       setLevel: (v) => renderer.setLevel(v),
@@ -52676,6 +54109,8 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core
   //   #text:<sample>@v                    the sample laid out in every theme face with the real measurer (WP2)
   //   #shot:<key>@<aspect>&t=…            a shot preset on the canned cut (DESIGN_2_1 §3.10; params zoom, curve, follow)
   //   #rig:<key>@<aspect>&t=…             a rig preset over the whole sample plan (§3.10; params amp, curve)
+  //   #xshot:<key>@<aspect>&t=…           an EXTREME preset ("~m" mirrors it) on the canned cut, EXTREME on (DESIGN_EXTREME
+  //                                       §5.3; params as shot plus extreme = cam.extreme)
   //   #media:<kind>/<key>@<aspect>&asset=fixture:<name>&t=…   a part with a media param, showing a fixture asset of the
   //                                       fake store (tests/helpers/fake_media.js; §11.5.7). Test pages only: the store
   //                                       and its test parts come with the fixtures (MVLabFixtures.media).
@@ -52687,7 +54122,7 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core
 
   const ASPECTS = DOC.ASPECTS;
   const KINDS = REG.KINDS;
-  const CAM_KINDS = Object.freeze(['shot', 'rig']);     // camera presets (core/shot), shown like parts
+  const CAM_KINDS = Object.freeze(['shot', 'rig', 'xshot']);   // camera presets (core/shot), shown like parts
   const FIXTURE = 'fixture:';
   const VIEW_W = 960, VIEW_H = 540;
   const POSE_COLS = ['x', 'y', 'z', 'rot', 'rx', 'ry', 'sx', 'sy', 'alpha', 'blur', 'reveal', 'tint', 'glow', 'shard', 'echo', 'pixel'];
@@ -52799,7 +54234,14 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core
     return REG.extend(base, defs);
   }
 
-  function cameraKeys(kind) { return kind === 'shot' ? SHOT.SHOT_KEYS : kind === 'rig' ? SHOT.RIG_KEYS : []; }
+  function cameraKeys(kind) {
+    return kind === 'shot' ? SHOT.SHOT_KEYS : kind === 'rig' ? SHOT.RIG_KEYS : kind === 'xshot' ? SHOT.XSHOT_KEYS : [];
+  }
+
+  // Whether key names a preset of a camera kind (an EXTREME preset may carry the mirror suffix "~m").
+  function cameraKeyOk(kind, key) {
+    return kind === 'xshot' ? SHOT.xKeyOf(key) !== null : cameraKeys(kind).includes(key);
+  }
 
   // --- media mode: the fake store and its test parts (test pages only) -------------------------------------------------
 
@@ -52925,7 +54367,8 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core
   // theme, orient, backdrop, w, h, fonts, surface, glyphPath, probe, quality, fresh (a new engine: no history),
   // level (adaptive preview level to render at), prefill (a colour the surface holds before the frame), textScale (the
   // cut's text.scale), using (an engine record from engineFor to render with), asset (media mode: a fixture of the fake
-  // store, 'fixture:<name>', put in the part's media param) }. kind 'shot' / 'rig' shows a camera preset (key).
+  // store, 'fixture:<name>', put in the part's media param), calm (the preview's 「激しいカメラを抑える」), sentinel (a
+  // colour the scene backdrop is filled with: ground edge checks) }. kind 'shot' / 'rig' / 'xshot' shows a camera preset.
   async function renderPart(o) {
     const source = o.parts || defaultSource();
     if (!source) throw new Error('lab: no parts registry on this page');
@@ -52940,7 +54383,7 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core
       params = Object.assign({}, o.params, { [param]: asset.id });
     }
     const ref = o.kind && o.key ? { kind: o.kind, key: o.key, params } : {};
-    if (camera && !cameraKeys(o.kind).includes(o.key)) throw new Error('lab: unknown ' + o.kind + ' preset ' + o.key);
+    if (camera && !cameraKeyOk(o.kind, o.key)) throw new Error('lab: unknown ' + o.kind + ' preset ' + o.key);
     if (ref.kind && !camera && !reg.get(ref.kind, ref.key)) throw new Error('lab: unknown part ' + ref.kind + '/' + ref.key + ' in ' + source);
     const plan = FAC.samplePlan(reg, ref, { text: o.text, theme: o.theme, aspect: o.aspect, orient: o.orient, backdrop: o.backdrop,
       textScale: o.textScale });
@@ -52958,7 +54401,7 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core
     if (Number.isInteger(o.level)) rec.engine.setLevel(o.level);
     const stats = rec.engine.renderFrame(surface, t, { quality: o.quality || 'preview', pick: true,
       scale: Math.min(surface.w / plan.design.w, surface.h / plan.design.h), glyphPath: o.glyphPath, probe: o.probe,
-      backdrop: o.backdrop });
+      backdrop: o.backdrop, calm: o.calm === true, sentinel: typeof o.sentinel === 'string' ? o.sentinel : undefined });
     return { plan, t, stats, surface, engine: rec.engine, registry: reg };
   }
 
@@ -53478,12 +54921,22 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core
 
   // The plan perf() and compare() render: the fixture project, o.camera true → work:rig pinned to slowSwell (the
   // planner's automatic shots stay), 'off' → the camerawork pinned off (work:cam.shot and work:rig 'none': the v2
-  // frames); o.materials → the sample materials in every slot (withMaterials). Set on the engine.
+  // frames); o.extreme → EXTREME camerawork (DESIGN_EXTREME §5.3): every line's cam.shot pinned to the x-presets in
+  // turn (as the planner's overlay would give them), under the slowSwell rig; o.materials → the sample materials in
+  // every slot (withMaterials). Set on the engine.
   function projectPlan(engine, o) {
-    const doc = projectDoc(o.project);
+    let doc = projectDoc(o.project);
     if (o.camera === 'off') {
       doc.pins = Object.assign({}, doc.pins, { 'work:cam.shot': { v: 'none', by: 'user' }, 'work:rig': { v: 'none', by: 'user' } });
-    } else if (o.camera) doc.pins = Object.assign({}, doc.pins, { 'work:rig': { v: 'slowSwell', by: 'user' } });
+    } else if (o.camera || o.extreme) doc.pins = Object.assign({}, doc.pins, { 'work:rig': { v: 'slowSwell', by: 'user' } });
+    if (o.extreme) {
+      engine.setDoc(doc);
+      const pins = Object.assign({}, doc.pins);
+      engine.plan.lines.forEach((line, i) => {
+        pins['line/' + line.id + ':cam.shot'] = { v: SHOT.XSHOT_KEYS[i % SHOT.XSHOT_KEYS.length], by: 'user' };
+      });
+      doc = Object.assign({}, doc, { pins });          // a new document: setDoc of the same one is a no-op
+    }
     engine.setDoc(doc);
     let plan = engine.plan;
     if (o.materials) plan = withMaterials(plan, engine.registry);
@@ -53638,7 +55091,9 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core
   // surface is read once the world is drawn (render option `flush`), so 'draw' holds the canvas's raster time of the
   // world and 'post' only the post stack's; `stages.rest` is the time after the render call (the final readback).
   // o.recipes ({ kind: recipe } or 'heaviest'): those sample materials replaced by materials of these recipes
-  // (recipesRegistry). `budget` summarizes the glyph budget records of the cuts in the window (§5.9.5).
+  // (recipesRegistry). `budget` summarizes the glyph budget records of the cuts in the window (§5.9.5). o.extreme
+  // (DESIGN_EXTREME): EXTREME shots on every line (projectPlan); `xshots` counts the cut scenes in the window with an
+  // x-track and `blur` { frames, p50, p95 } times the motion-blurred frames apart.
   // The result also carries `times`, the frame times in order (per-frame comparisons across runs), and `slices`: the
   // longest stretch of work engine.prepare did between two yields to the host, and how many yields it made.
   // o.meter (a diagnostic, never in perf.py's judgement): `cover`, per frame [the frame share the glyph sprite draws
@@ -53685,17 +55140,18 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core
     if (resumed >= 0) slices.max = Math.max(slices.max, performance.now() - resumed);
     resumed = -1;
     for (let i = 0; i < 5; i++) { rec.engine.renderFrame(s, start + i / fps, ropts); s.ctx.getImageData(0, 0, 1, 1); }
-    const times = [], behave = [], drawMs = [];
+    const times = [], behave = [], drawMs = [], blurred = [];
     const stages = { behave: 0, draw: 0, post: 0, rest: 0 };
     const n = Math.round(seconds * fps);
-    let shots = 0, share = 1;
+    let shots = 0, xshots = 0, share = 1;
     if (meter) ropts.meter = meter;
     for (let i = 0; i < n; i++) {
       if (meter) { meter.px = 0; meter.n = 0; }
       const t0 = performance.now();
-      rec.engine.renderFrame(s, start + i / fps, ropts);
+      const fs = rec.engine.renderFrame(s, start + i / fps, ropts);
       s.ctx.getImageData(0, 0, 1, 1);
       times.push(performance.now() - t0);
+      if (fs.blur) blurred.push(times[i]);
       if (meter) cover.push([meter.px / (w * h), meter.n, modelCover(rec.engine, plan, start + i / fps)]);
       const st = rec.engine.stats().stageMs;
       drawMs.push([st.behave, st.draw, st.post]);
@@ -53710,6 +55166,7 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core
       if (c.b < start || c.a > start + seconds) return;
       const scene = rec.engine.scene('cut', i);
       if (scene && scene.shot) shots++;
+      if (scene && scene.shot && scene.shot.x) xshots++;
       let sum = 0;
       for (const [slot, d] of Object.entries(c.slots)) {
         const kind = slot.split('#')[0];
@@ -53739,11 +55196,13 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core
     });
     const sorted = times.slice().sort((a, b) => a - b);
     const mean = times.reduce((a, b) => a + b, 0) / Math.max(1, times.length);
+    blurred.sort((a, b) => a - b);
     for (const k of Object.keys(stages)) stages[k] /= Math.max(1, n);
     return { frames: n, p50: percentile(sorted, 0.5), p95: percentile(sorted, 0.95), max: sorted[sorted.length - 1] || 0, mean,
       stages, behaveP50: percentile(behave.sort((a, b) => a - b), 0.5), w, h, scenes: rec.engine.stats().scenes, shots,
       rigs: (plan.rigs || []).filter((r) => r.rig && r.rig.v !== 'none').length, particles, mixShare: share, times, slices,
-      cover: meter ? cover : null, drawMs: meter || o.flushStages ? drawMs : null, budget };
+      cover: meter ? cover : null, drawMs: meter || o.flushStages ? drawMs : null, budget,
+      xshots, blur: { frames: blurred.length, p50: percentile(blurred, 0.5), p95: percentile(blurred, 0.95) } };
   }
 
   // cuts(o) → [{ i, key, a, b, t0, times, slots, glyphs, em, cellArea, spriteBudget }]: the cuts of a fixture project
@@ -53811,10 +55270,10 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core
   }
 
   // info() → { sources, parts: { source: { kind: keys } }, notes: { source: text }, problems: { source: [...] }, aspects,
-  //   camera: { shot: keys, rig: keys }, media: { parts: { source: [{ kind, key, param, accept }] }, fixtures: [names] } | null }
+  //   camera: { shot: keys, rig: keys, xshot: keys }, media: { parts: { source: [{ kind, key, param, accept }] }, fixtures: [names] } | null }
   function info() {
     const out = { sources: sources(), parts: {}, notes: {}, problems: {}, aspects: ASPECTS.slice(),
-      camera: { shot: SHOT.SHOT_KEYS.slice(), rig: SHOT.RIG_KEYS.slice() }, media: null };
+      camera: { shot: SHOT.SHOT_KEYS.slice(), rig: SHOT.RIG_KEYS.slice(), xshot: SHOT.XSHOT_KEYS.slice() }, media: null };
     if (hasMediaFixtures()) {
       out.media = { parts: {}, fixtures: mediaFixtures().FIXTURES.map((a) => a.name) };
       for (const src of out.sources) {
