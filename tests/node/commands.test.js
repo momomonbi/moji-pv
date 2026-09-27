@@ -530,6 +530,37 @@ test('v2.1 pin.copy copies motion.speed and cam.*, not rig*, season or avoid', (
   }
 });
 
+// ---- EXTREME (DESIGN_EXTREME §2.2): the cam.extreme switch belongs to an area -------------------------------------------
+
+test('EXTREME: cut/…:cam.extreme is refused (pin.set, lock.set); line and work are fine; paste look leaves it; line → work', () => {
+  const doc = fresh('basic');
+  throwsCode(() => reduce(doc, { t: 'pin.set', path: 'cut/r4~0:cam.extreme', v: 1, by: 'user', sig: '始発の' }), 'payload');
+  throwsCode(() => reduce(doc, { t: 'lock.set', lineId: 'r4', pins: { 'cut/r4~0:cam.extreme': { v: 1, by: 'lock', sig: '始発の' } } }),
+    'payload');
+  let out = doc;
+  for (const [path, v, by] of [['work:cam.extreme', 1, 'user'], ['line/r4:cam.extreme', 0.75, 'ai'], ['line/r5:cam.extreme', 0, 'user'],
+    ['line/r6:cam.extreme', 0.5, 'user']]) {
+    out = reduce(out, { t: 'pin.set', path, v, by });
+    assert.deepEqual(out.pins[path], { v, by }, path);
+  }
+  // ⋯ › 見た目を貼り付け copies cam.* but not the switch (like rig and season)
+  const withShot = reduce(out, { t: 'pin.set', path: 'line/r4:cam.shot', v: 'crashZoom', by: 'user' });
+  const copied = reduce(withShot, { t: 'pin.copy', from: 'line/r4', to: ['line/r7', 'cut/ra~0'], sigs: { 'ra~0': 'x' } });
+  assert.deepEqual(copied.pins['line/r7:cam.shot'], { v: 'crashZoom', by: 'user' });
+  assert.equal(copied.pins['line/r7:cam.extreme'], undefined);
+  assert.equal(copied.pins['cut/ra~0:cam.extreme'], undefined);
+  // promote: a line switch may become the video's; a (stray) cut pin never moves
+  const up = reduce(out, { t: 'pin.promote', path: 'line/r4:cam.extreme', to: 'work' });
+  assert.deepEqual(up.pins['work:cam.extreme'], { v: 0.75, by: 'ai' });
+  assert.equal(up.pins['line/r4:cam.extreme'], undefined);
+  const stray = Object.assign({}, doc, { pins: Object.assign({}, doc.pins, { 'cut/r4~0:cam.extreme': { v: 1, by: 'user', sig: '始発の' } }) });
+  throwsCode(() => reduce(stray, { t: 'pin.promote', path: 'cut/r4~0:cam.extreme', to: 'line' }), 'payload');
+  throwsCode(() => reduce(stray, { t: 'pin.promote', path: 'cut/r4~0:cam.extreme', to: 'work' }), 'payload');
+  // clearing the switch (the widget's off) is one command; a batch of them is one step
+  const off = reduce(out, { t: 'batch', cmds: [{ t: 'pin.clear', path: 'work:cam.extreme' }, { t: 'pin.clear', path: 'line/r4:cam.extreme' }] });
+  assert.deepEqual(Object.keys(off.pins).filter((p) => p.endsWith(':cam.extreme')).sort(), ['line/r5:cam.extreme', 'line/r6:cam.extreme']);
+});
+
 test('v2.1 output: formats kit and webmAlpha; output.set kit takes the whole object of five booleans', () => {
   const doc = D.normalize(fresh('basic'));
   assert.deepEqual(doc.output.kit, { overlay: true, bg: false, green: false, srt: true, lrc: false });

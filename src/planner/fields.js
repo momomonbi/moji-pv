@@ -1,7 +1,8 @@
 /* 文字PVメーカー v2 — original work. Inspector field states, lock payloads and plan-value readers (DESIGN §4.16.8, §3.13, §3.6; DESIGN_2_1 §3.9). */
 MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyrics', 'core/schema', 'core/timing',
-  'core/curve', 'core/shot', 'planner/params', 'planner/cast', 'planner/look', 'planner/segment', 'planner/plan'],
-(P, PINS, REG, LY, S, TM, CV, SHOT, PA, CA, LK, SG, PL) => {
+  'core/curve', 'core/shot', 'planner/params', 'planner/cast', 'planner/look', 'planner/segment', 'planner/plan',
+  'planner/extreme'],
+(P, PINS, REG, LY, S, TM, CV, SHOT, PA, CA, LK, SG, PL, XT) => {
   'use strict';
 
   const LOOK_NAMES = new Set(['mood', 'theme', 'season', 'bpm', 'beatOffset', 'readRate', 'length', 'titleCard']);
@@ -70,8 +71,11 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
 
   // The Decision a cut holds for a part/value/count slot (seams: the boundary into the cut; grounds: its segment;
   // rig and rig.curve: its rig run). A boundary without a seam entry is the hard cut (registry.fallback('seam')).
-  function decisionAt(plan, cut, parsed, registry) {
+  // cam.extreme (DESIGN_EXTREME §2.3.6) is on a cut only where it is on; elsewhere the pin that turns it off (a line or
+  // work pin 0, read with the pin index ix when given), else { v: 0, from: 'auto' }.
+  function decisionAt(plan, cut, parsed, registry, ix) {
     const part = parsed.part;
+    if (parsed.slot === XT.SLOT && !part) return extremeAt(cut, ix);
     if (RIG_SLOTS.has(parsed.slot)) {
       const run = plan.rigs && cut.rig !== undefined ? plan.rigs[cut.rig] : null;
       return run ? (parsed.slot === 'rig' ? run.rig : run.curve) : null;
@@ -84,6 +88,14 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
     }
     const slot = part ? (part.param === 'count' && part.idx === null ? part.kind + '.count' : choiceSlot(part)) : parsed.slot;
     return (cut.slots && cut.slots[slot]) || null;
+  }
+
+  const X_OFF = Object.freeze({ v: 0, from: 'auto' });
+  function extremeAt(cut, ix) {
+    const d = cut.slots && cut.slots[XT.SLOT];
+    if (d) return d;
+    const pin = ix ? XT.resolve(ix, { cutKey: cut.key, pinCutKey: cut.pinKey || cut.key, lineId: cut.line || null }) : null;
+    return pin ? { v: pin.v, from: pin.from, by: pin.by } : X_OFF;
   }
 
   // The rule behind the automatic depth of a media part at a cut (DESIGN_2_1 §11.9.2): 'ai' | 'overlay' | 'frame' |
@@ -202,7 +214,7 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
       const e = cut.els && cut.els[parsed.el.owner];
       return e && e[parsed.el.field] !== undefined ? e[parsed.el.field] : EL_DEFAULT[parsed.el.field];
     }
-    const d = decisionAt(plan, cut, parsed, registry);
+    const d = decisionAt(plan, cut, parsed, registry, ix);
     if (cat === 'count') return d ? d.v : 0;
     if (cat === 'part') return d ? d.v : 'none';
     if (cat === 'param') {
@@ -247,7 +259,7 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
       return { type: 'part', kind, of: keys, none };
     }
     if (cat === 'param') return paramSpec(registry, plan, parsed, cuts);
-    return CA.SLOT_SPECS[slot] || null;
+    return CA.SLOT_SPECS[slot] || XT.SLOT_SPECS[slot] || null;
   }
 
   // The ParamSpec of a part parameter: of the named part, else of the part chosen at the first covered cut, else the
@@ -277,6 +289,8 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
     const kind = parsed.scope.kind;
     if (kind === 'work') return ['work'];
     if (kind === 'line') return ['line', 'work'];
+    // the EXTREME switch belongs to an area: line or work, never one cut (DESIGN_EXTREME §2.2)
+    if (parsed.slot === XT.SLOT) return parsed.scope.lineId ? ['line', 'work'] : ['work'];
     return parsed.scope.lineId ? ['cut', 'line', 'work'] : ['cut', 'work'];
   }
 
@@ -295,7 +309,7 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
       const hard = hardCutSource(plan, cut, registry, ix, at);
       if (hard) return hard;
     }
-    const d = decisionAt(plan, cut, parsed, registry);
+    const d = decisionAt(plan, cut, parsed, registry, ix);
     if (!d) return { from: 'auto' };
     if (cat === 'param') {
       const from = d.pfrom && d.pfrom[parsed.part.param] ? d.pfrom[parsed.part.param] : 'auto';
@@ -311,7 +325,9 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
       const probe = run && run.cuts.length ? cutOf(plan, run.cuts[0])
         : parsed.part && TRACK_KINDS.has(parsed.part.kind) && parsed.part.kind !== 'seam' && plan.grounds[cut.ground]
           ? cutOf(plan, plan.grounds[cut.ground].cuts[0]) : cut;
-      const pat = { cutKey: probe.key, pinCutKey: probe.pinKey || probe.key, lineId: probe.line };
+      // (the EXTREME switch never reads a cut pin: a stray one does not apply, planner/extreme resolve)
+      const pat = slot === XT.SLOT ? { cutKey: null, pinCutKey: null, lineId: probe.line || null }
+        : { cutKey: probe.key, pinCutKey: probe.pinKey || probe.key, lineId: probe.line };
       const hit = PINS.lookup(ix, pat, slot);
       if (hit) src.at = hit.at;
     }

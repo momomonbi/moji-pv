@@ -30,6 +30,7 @@ MV.def('engine/scene/xshot', ['core/num', 'core/hash', 'core/curve', 'core/shot'
   const HOP_SHARE = 0.6;
   const SHUTTER = 1 / 48;         // the motion blur shutter at blur 1, g 1 (seconds; engine/render/xblur)
   const XLEAVE = 0.2;             // a reading path is left over the last XLEAVE s before the next (non-reading) key
+  const XAWAY = 0.25;             // a key outside the sung span placed farther off the centre (|ox| or |oy|) leaves on purpose
   const JUMP = SS.JUMP;
   const XL = SHOT.XLIMITS;
   const Z_MIN = XL.frameZoom[0], Z_MAX = XL.frameZoom[1];
@@ -331,6 +332,13 @@ MV.def('engine/scene/xshot', ['core/num', 'core/hash', 'core/curve', 'core/shot'
     const key = raw.map((r) => r.key);
     const kind = key.map((k) => kindOf(k.aim));
     const inSung = (x) => x >= -EPS && x < end - 1e-6;
+    // A text key outside the sung span that does not leave the frame on purpose (an entrance or exit placed off the
+    // centre, |ox| or |oy| > XAWAY, or a spin, |roll| > XROLL_SUNG) frames its words like a key inside it (X3 Zfit, X4
+    // XSAFE): the two-key presets hold a … b around the whole span and orbit, crashZoom and whipPan hold into it, so
+    // what is sung is interpolated between such keys (without this, words of small or off-centre layouts were off the
+    // frame for most of the span: 8.2 % of the words of planned corpus documents missed R2, 0.04 % with it).
+    const away = (k) => Math.abs(k.ox || 0) > XAWAY || Math.abs(k.oy || 0) > XAWAY || Math.abs(k.roll) > XROLL_SUNG;
+    const holds = (i) => inSung(t[i]) || (kind[i] === 'text' && !away(key[i]));
     let hmax = beat.shake;
     for (const k of key) hmax = Math.max(hmax, k.hit);
     const env2 = envelopeOf(D, sh, hmax);
@@ -407,7 +415,7 @@ MV.def('engine/scene/xshot', ['core/num', 'core/hash', 'core/curve', 'core/shot'
       }
       const e = extOf(box[i], R[i]);
       Z[i] = clamp(k.fill * Math.min(W / e[0], Hh / e[1]), Z_MIN, Z_MAX);
-      if (inSung(t[i])) { fit[i] = zfit(D, e, env2); Z[i] = Math.max(Z_MIN, Math.min(Z[i], fit[i])); }
+      if (holds(i)) { fit[i] = zfit(D, e, env2); Z[i] = Math.max(Z_MIN, Math.min(Z[i], fit[i])); }
     }
     const lz = Array.from(Z, Math.log);
     capScalar(lz, rules, jump, (i) => XZOOM_SPEED * (t[i] - t[i - 1]), none);
@@ -421,7 +429,7 @@ MV.def('engine/scene/xshot', ['core/num', 'core/hash', 'core/curve', 'core/shot'
     const fixed = Uint8Array.from(kind, (k) => (k === 'reading' ? 1 : 0));
     const place = (i) => {
       const k = key[i], p = [px[i], py[i]], th = R[i] * DEG;
-      if (inSung(t[i])) {
+      if (holds(i)) {
         const ext = kind[i] === 'text' ? extOf(box[i], R[i]) : [0, 0];
         safeClamp(D, p, ext, Z[i], env2);
       } else { p[0] = clamp(p[0], -OFF_MAX * W, OFF_MAX * W); p[1] = clamp(p[1], -OFF_MAX * Hh, OFF_MAX * Hh); }

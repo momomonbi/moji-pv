@@ -16,7 +16,9 @@ The windows cover entrances, exits, a seam and the texture filter. Two targeted 
    directly equals frame N after 0 … N−1, and the 30- and 60-step runs agree at their shared times. Project v21 (a
    project with materials: an entrance, a hold and an atmosphere of its own, and shot pins) runs checks 1–3 over the
    materials' lines. DESIGN_EXTREME: the EXTREME presets that move the most (whips, spins, jumps, beat modulators; motion
-   blur on, its shutter fixed in seconds) take the same checks.
+   blur on, its shutter fixed in seconds) take the same checks, and so do planned EXTREME documents (the fixture projects
+   basic, with its song, and vertical, without one, with the switch on: work:cam.extreme 1, the planner's picks) as
+   checks 1–3 over their first lyric cuts.
 7. DESIGN_2_1 §11.8.3 (media, in the built app page with the real AssetStore: tests/www/media_parts.js): a project with
    a video ground (the VP9 counter of media_gen.js, clock song), a photo frame of the alpha WebM (clock show) and a still
    photo frame, the automatic camerawork on, in export quality (each frame awaited with mediaReady): frame N of a fresh
@@ -49,6 +51,8 @@ from playwright.async_api import async_playwright  # noqa: E402
 
 WINDOW = (2.6, 4.6)          # seconds: the first lyric cuts, a seam and their filters in the fixture projects
 WINDOWS = {'v21': (13.6, 15.6)}   # v21: line r7 enters with material myMat1, r8 holds with myMat2
+EXTREME_PINS = {'work:cam.extreme': {'v': 1, 'by': 'user'}}   # DESIGN_EXTREME: the switch on, the planner's picks
+EXTREME_PROJECTS = ('basic', 'vertical')                      # with a song (a beat grid) and without one
 # Presets that keep moving over the sample cut. (pushWord and snapZoom reach the 3× framing limit on its short
 # emphasized word and then hold; settle and driftOff sit at the 0.9 floor on its wide line: neither would show a history
 # leak.)
@@ -84,32 +88,35 @@ async def render(page, **o):
     return await page.evaluate('(o) => window.__lab.render(o)', o)
 
 
-async def check_project(page, src, project, failures):
+async def check_project(page, src, project, failures, pins=None):
+    """Checks 1–3 on a fixture project (pins: merged into its pins, e.g. the EXTREME switch)."""
     t0, t1 = WINDOWS.get(project, WINDOW)
     at30 = times_at(FPS, t0, t1)
     at60 = times_at(2 * FPS, t0, t1)
-    seq30 = await frames(page, parts=src, project=project, times=at30, fresh=True)
-    seq60 = await frames(page, parts=src, project=project, times=at60, fresh=True)
+    extra = {'pins': pins} if pins else {}
+    label = project + (' +EXTREME' if pins else '')
+    seq30 = await frames(page, parts=src, project=project, times=at30, fresh=True, **extra)
+    seq60 = await frames(page, parts=src, project=project, times=at60, fresh=True, **extra)
     bad = 0
     for n in PROBES:
-        alone = await frames(page, parts=src, project=project, times=[at30[n]], fresh=True)
+        alone = await frames(page, parts=src, project=project, times=[at30[n]], fresh=True, **extra)
         if alone[0] != seq30[n]:
-            failures.append('%s %s: frame %d (t=%.3f) alone differs from the same frame after 0..%d' % (src, project, n, at30[n], n - 1))
+            failures.append('%s %s: frame %d (t=%.3f) alone differs from the same frame after 0..%d' % (src, label, n, at30[n], n - 1))
             bad += 1
     for i, t in enumerate(at30):
         if seq60[2 * i] != seq30[i]:
-            failures.append('%s %s: t=%.4f differs between the 30 fps and the 60 fps run' % (src, project, t))
+            failures.append('%s %s: t=%.4f differs between the 30 fps and the 60 fps run' % (src, label, t))
             bad += 1
             break
-    again = await frames(page, parts=src, project=project, times=at30, fresh=True)
+    again = await frames(page, parts=src, project=project, times=at30, fresh=True, **extra)
     if again != seq30:
-        failures.append('%s %s: two fresh engines differ' % (src, project))
+        failures.append('%s %s: two fresh engines differ' % (src, label))
         bad += 1
     changing = len(set(seq30))
     if changing < 5:
-        failures.append('%s %s: only %d distinct frames in %.1f s (nothing moves?)' % (src, project, changing, t1 - t0))
+        failures.append('%s %s: only %d distinct frames in %.1f s (nothing moves?)' % (src, label, changing, t1 - t0))
         bad += 1
-    print('%s %s %s: %d frames at 30 fps, %d at 60 fps, %d distinct' % ('FAIL' if bad else 'ok  ', src, project, len(at30),
+    print('%s %s %s: %d frames at 30 fps, %d at 60 fps, %d distinct' % ('FAIL' if bad else 'ok  ', src, label, len(at30),
                                                                         len(at60), changing))
 
 
@@ -298,6 +305,9 @@ async def run(args):
                 print('registry: %s (%s)' % (src, info['notes'].get(src, 'complete')))
                 for project in [x for x in args.projects.split(',') if x]:
                     await check_project(page, src, project, failures)
+                if src == 'catalog':
+                    for project in EXTREME_PROJECTS:
+                        await check_project(page, src, project, failures, pins=EXTREME_PINS)
                 await check_prefill(page, src, info, failures)
                 await check_mixed_em(page, src, failures)
                 if src == 'catalog':

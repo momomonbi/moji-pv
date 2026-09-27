@@ -127,6 +127,32 @@ test('v2.1 slots: the scope table of DESIGN_2_1 §2.3 (camerawork, speed, sectio
   assert.equal(ok('cut/r1~0:cam.shot', 'pushWord'), true);
 });
 
+// DESIGN_EXTREME §2.2: the EXTREME switch is an area's (the whole video or a line), like the line season.
+test('EXTREME: cam.extreme may be pinned at work and line scope only, and core/commands agrees', () => {
+  assert.deepEqual(F.slotScopes('cam.extreme'), ['work', 'line']);
+  assert.deepEqual(F.slotScopes('cam.extremes'), []);
+  const CMD = MV.use('core/commands');
+  const D0 = MV.use('core/doc').defaultDoc();
+  const ok = (path, v) => {
+    const cmd = { t: 'pin.set', path, v, by: 'user' };
+    if (path.startsWith('cut/')) cmd.sig = 's';
+    try { CMD.reduce(D0, cmd); return true; } catch (e) { return false; }
+  };
+  for (const scope of F.slotScopes('cam.extreme')) {
+    for (const v of [1, 0.75, 0.5, 0]) assert.equal(ok((scope === 'work' ? 'work' : 'line/r1') + ':cam.extreme', v), true, scope + ' ' + v);
+  }
+  assert.equal(ok('cut/r1~0:cam.extreme', 1), false, 'never at a cut');
+  // the widget's writes (planner/extreme switchCommands) are commands the reducer takes
+  const XT = MV.use('planner/extreme');
+  const on = CMD.reduce(D0, { t: 'batch', cmds: XT.switchCommands(D0, 'work', XT.ON) });
+  assert.deepEqual(on.pins['work:cam.extreme'], { v: 1, by: 'user' });
+  for (const v of XT.STEPS) assert.equal(CMD.reduce(on, { t: 'batch', cmds: XT.switchCommands(on, 'work', v) }).pins['work:cam.extreme'].v, v);
+  const exempt = CMD.reduce(on, { t: 'batch', cmds: XT.switchCommands(on, 'line/r1', 0) });
+  assert.deepEqual(exempt.pins['line/r1:cam.extreme'], { v: 0, by: 'user' }, 'a line off under the video\'s switch is pinned 0');
+  const off = CMD.reduce(exempt, { t: 'batch', cmds: XT.switchCommands(exempt, 'work', 0) });
+  assert.equal(off.pins['work:cam.extreme'], undefined);
+});
+
 test('v2.1 widgets: curve, shot, rig and partRefs specs map to their widgets; every new field has one', () => {
   assert.equal(F.widgetFor({ type: 'curve' }), 'curve');
   assert.equal(F.widgetFor({ type: 'shot' }), 'shot');

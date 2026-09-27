@@ -421,3 +421,38 @@ test('a follow lean works on x-tracks; frame and point aims keep their zoom rang
     assert.deepEqual(a.hits && Array.from(a.hits.cx), b.hits && Array.from(b.hits.cx), key);
   }
 });
+
+// A key outside the sung span that holds the words (not an entrance or exit placed off the centre, |ox| or |oy| > 0.25,
+// nor a spin, |roll| > 30°) frames them inside the safe area like a key in the span: the two-key presets hold a … b
+// around the whole span, and orbit, crashZoom and whipPan hold into it. An off-centre, small layout (cornerNote) is where
+// such a key, left unclamped, cropped the sung words (zoomed toward 3 × about its corner).
+test('keys that hold the words outside the sung span frame them inside the safe area; entrances and exits stay free', () => {
+  let held = 0, free = 0;
+  for (const shot of SHOT.XSHOT_KEYS) {
+    const ex = SHOT.expandShot(shot, { g: 1 });
+    for (const text of [TEXTS.three, TEXTS.short]) {
+      for (const aspect of ASPECTS) {
+        const { tr, W, H, short, span } = xScene({ shot, text, aspect, arrange: 'cornerNote' });
+        const name = [shot, text.slice(0, 6), aspect].join(' ');
+        const env = envelope(tr, short);
+        assert.equal(tr.n, ex.keys.length, name);
+        for (let i = 0; i < tr.n; i++) {
+          const k = tr.keys[i], d = ex.keys[i];
+          assert.equal(k.aim, d.aim, name + ': the keys keep their order');
+          if (inSung(k.t, span) || !k.box || d.aim === 'reading' || d.aim === 'frame' || d.aim === 'point') continue;
+          if (Math.abs(d.ox || 0) > 0.25 || Math.abs(d.oy || 0) > 0.25 || Math.abs(d.roll) > XS.XROLL_SUNG) { free++; continue; }
+          held++;
+          const pose = XS.poseAt(tr, k.t, {});
+          for (const dd of [-env.e, 0, env.e]) {
+            for (const [x, y] of cornersOnScreen(pose, k.box, W, H, dd)) {
+              const lim = (L) => L / 2 - env.s - env.hd + 0.5;
+              assert.ok(Math.abs(x) * (1 + env.pz) <= lim(W) && Math.abs(y) * (1 + env.pz) <= lim(H),
+                name + ': held key ' + i + ' at ' + k.t.toFixed(2) + ' leaves the safe area: ' + x.toFixed(1) + ',' + y.toFixed(1));
+            }
+          }
+        }
+      }
+    }
+  }
+  assert.ok(held > 100 && free > 10, 'checked ' + held + ' held keys (' + free + ' entrances and exits left free)');
+});

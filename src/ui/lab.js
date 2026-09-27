@@ -755,13 +755,18 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core
   const projectEngines = new Map();
 
   // frames(o) → { hashes, duration }: pixel hashes of a fixture project at the given times; fresh = a new engine.
+  // o.pins (additive): pins merged into the project's (DESIGN_EXTREME: the cam.extreme switch, so a planned EXTREME
+  // document takes the determinism checks).
   async function frames(o) {
     const source = o.parts || defaultSource();
-    let rec = !o.fresh && projectEngines.get(source + '|' + o.project);
+    const id = source + '|' + o.project + (o.pins ? '|' + JSON.stringify(o.pins) : '');
+    let rec = !o.fresh && projectEngines.get(id);
     if (!rec) {
       rec = engineFor(source, false, true);
-      rec.engine.setDoc(projectDoc(o.project));
-      if (!o.fresh) projectEngines.set(source + '|' + o.project, rec);
+      const doc = projectDoc(o.project);
+      if (o.pins) doc.pins = Object.assign({}, doc.pins, o.pins);
+      rec.engine.setDoc(doc);
+      if (!o.fresh) projectEngines.set(id, rec);
     }
     const plan = rec.engine.plan;
     const w = o.w || 640, h = o.h || Math.round((w * plan.design.h) / plan.design.w);

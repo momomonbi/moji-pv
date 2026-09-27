@@ -40,7 +40,8 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
     // is a line value that may also be pinned for the whole video (the existing work:season).
     const CUT_NAMES = new Set(['orient', 'text.face', 'text.scale', 'text.ink', 'text.style', 'motion.speed', 'cam.shot',
       'cam.zoom', 'cam.curve', 'cam.follow', 'rig', 'rig.curve']);
-    const LINE_WORK_NAMES = new Set(['season']);
+    // The EXTREME switch (DESIGN_EXTREME §2.2) is an area's too: a line or the whole video.
+    const LINE_WORK_NAMES = new Set(['season', 'cam.extreme']);
 
     function sharedNames(kind) {
       if (kind === 'atmos') return ['amount'];
