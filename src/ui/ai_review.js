@@ -306,6 +306,7 @@ MV.def('ui/ai_review', ['ui/dom', 'ui/icons', 'ai/changes', 'i18n/t', 'ui/ai_con
     'cam.follow': 'fld.camFollow', rig: 'fld.rig', 'rig.curve': 'fld.rigCurve', season: 'fld.lineSeason', avoid: 'fld.avoid',
     'arrive.flow': 'fld.flow', 'depart.flow': 'fld.flow', 'lens.curve': 'fld.lensCurve', 'dwell.curve': 'fld.holdCurve',
     'seam.curve': 'fld.seamCurve', atmos: 'fld.atmos', 'ornament.count': 'fld.count', 'filter.count': 'fld.count',
+    'cam.extreme': 'fld.camExtreme',
   });
   const CURVE_SLOT = /(^|\.)(ease|flow|curve)$/;
   const PCT_SLOTS = new Set(['motion.speed', 'cam.zoom', 'cam.follow']);
@@ -336,7 +337,11 @@ MV.def('ui/ai_review', ['ui/dom', 'ui/icons', 'ai/changes', 'i18n/t', 'ui/ai_con
       const kind = c.partKind || (slot === 'atmos' ? 'ornament' : (/^([a-z]+)/.exec(slot) || [])[1]);
       return t('ai.review.mine', { name: kind ? t.part(kind, v) : v });
     }
-    if (slot === 'cam.shot') return t.label(SHOT.label(v));
+    if (slot === 'cam.shot') {
+      const x = SHOT.xKeyOf(v);
+      return x && x.m ? t('shot.mirroredOf', { name: t.label(SHOT.label(v)) }) : t.label(SHOT.label(v));
+    }
+    if (slot === 'cam.extreme') return t(v > 0 ? 'val.on' : 'val.off');          // the EXTREME switch (DESIGN_EXTREME §2.5)
     if (slot === 'rig') return t.label(SHOT.rigLabel(v));
     if (CURVE_SLOT.test(slot) && CV.isCurve(v)) return CW.curveText(t, v);
     if (PCT_SLOTS.has(slot) && typeof v === 'number') return Math.round(v * 100) + '%';

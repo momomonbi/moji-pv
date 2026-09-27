@@ -912,3 +912,169 @@ test('I18N-1 / I18N-2: the en review names an AI material in English and lists a
   const text = CH.describe(avoid.changes.find((c) => c.path === 'line/rc:avoid'), en);
   assert.ok(text.includes('; ') && !text.includes('・'), text);
 });
+
+// ---- 「EXTREME」 camera requests (DESIGN_EXTREME §2.5) -------------------------------------------------------------------
+
+const XT = MV.use('planner/extreme');
+const crypto = require('node:crypto');
+const sha = (x) => crypto.createHash('sha256').update(typeof x === 'string' ? x : JSON.stringify(x)).digest('hex').slice(0, 16);
+const camRequest = (doc, ref, o) => DI.directRequests(doc, doc === DOC ? PLAN : planOf(doc), reg,
+  Object.assign({ briefs: [{ ref, instruction: '' }], uiLang: 'ja', mode: 'camera' }, o))[0];
+const XCAM = (x) => Object.assign(CAM(), { power: -1, dir: 'auto' }, x);
+const XANSWER = (s, x) => Object.assign({ s, understood: true, summary: '激しく', question: '', all: { rig: '', rigCurve: CURVE(''), camera: XCAM() },
+  lines: [], cuts: [] }, x);
+function xdirect(doc, ref, answers, o) {
+  const plan = doc === DOC ? PLAN : planOf(doc);
+  const req = camRequest(doc, ref, Object.assign({ extreme: true }, o));
+  return Object.assign({ plan, req }, DI.directChanges(doc, plan, reg, { answers }, { rev: 5, sent: req.sent }));
+}
+
+test('EXTREME: the normal camera and area requests stay byte-identical (system, schema, lists; snapshots of main)', () => {
+  // sha256 prefixes of main 1c303e6 (before EXTREME): the camera and 'all' system texts, their schemas and the camera lists
+  const SNAP = { camSys: { ja: 'c9dd9fd5eb88fa02', en: '6ea43b3d650bded8' }, camSchema: 'f4bbc247008f2623',
+    allSys: { ja: '722c7877b8aa97d9', en: '77e804ef7882bf72' }, allSchema: 'a2437c69ad58deb7',
+    lists: { ja: 'c82d807a2ecb9df8', en: 'd3ef99984a750859' } };
+  for (const lang of ['ja', 'en']) {
+    const cam = camRequest(DOC, WORKREF, { uiLang: lang });
+    assert.equal(sha(cam.system), SNAP.camSys[lang], lang + ': the camera system text');
+    assert.equal(sha(cam.schema), SNAP.camSchema, 'the camera schema');
+    assert.equal(cam.effort, 'low');
+    assert.equal(sha(CAT.cameraText(lang)), SNAP.lists[lang], lang + ': the camera lists');
+    assert.ok(cam.prompt.endsWith('Camera:\n' + CAT.cameraText(lang)), 'the prompt ends with the lists');
+    const all = DI.directRequests(DOC, PLAN, reg, { briefs: [{ ref: CHORUS, instruction: 'お願い' }], uiLang: lang, mode: 'all' })[0];
+    assert.equal(sha(all.system), SNAP.allSys[lang], lang + ': the area system text');
+    assert.equal(sha(all.schema), SNAP.allSchema, 'the area schema');
+    // extreme is read by camera requests only; false or absent is the same request
+    for (const o of [{ extreme: false }, {}]) deepEqual(camRequest(DOC, CHORUS, Object.assign({ uiLang: lang }, o)), camRequest(DOC, CHORUS, { uiLang: lang }));
+    deepEqual(DI.directRequests(DOC, PLAN, reg, { briefs: [{ ref: CHORUS, instruction: 'お願い' }], uiLang: lang, mode: 'all', extreme: true }),
+      DI.directRequests(DOC, PLAN, reg, { briefs: [{ ref: CHORUS, instruction: 'お願い' }], uiLang: lang, mode: 'all' }));
+  }
+  // with the switch on, a normal request shows nothing of EXTREME (the plan's own EXTREME picks are just values)
+  const on = CMD.reduce(DOC, { t: 'pin.set', path: 'work:cam.extreme', v: 1, by: 'user' });
+  const q = camRequest(on, CHORUS);
+  for (const w of [' x=on', ' cam=gentle', ' cam=none', '[extreme', 'EXTREME']) assert.ok(!q.prompt.includes(w) && !q.system.includes(w), w);
+  assert.equal(q.sent.extreme, undefined);
+  assert.equal(DI.directSchema({ mode: 'camera' }), DI.directSchema({ mode: 'camera', extreme: false }));
+  assert.equal(DI.directSchema({ mode: 'all', extreme: true }), DI.directSchema({ mode: 'all' }));
+});
+
+test('EXTREME: its own frozen schema (move words, power, dir), the intense system text, medium effort, lists and line states', () => {
+  const x = DI.directSchema({ mode: 'camera', extreme: true });
+  const n = DI.directSchema({ mode: 'camera' });
+  assert.notEqual(x, n);
+  assert.ok(Object.isFrozen(x) && Object.isFrozen(x.properties.answers.items.properties.lines.items.properties.camera.properties.dir));
+  const camOf = (s) => s.properties.answers.items.properties.all.properties.camera.properties;
+  deepEqual(Object.keys(camOf(x)), Object.keys(camOf(n)).concat(['power', 'dir']));
+  deepEqual(camOf(x).move.enum, SHOT.MOVES.concat(SHOT.XMOVES));
+  deepEqual(camOf(n).move.enum, SHOT.MOVES, 'the normal schema keeps its words');
+  deepEqual(camOf(x).dir.enum, ['auto', 'left', 'right']);
+  for (const part of ['all', 'lines', 'cuts']) {
+    const p = x.properties.answers.items.properties[part];
+    const cam = (p.items || p).properties.camera;
+    assert.equal(cam, x.properties.answers.items.properties.all.properties.camera, part + ' shares the EXTREME camera');
+  }
+  // the chorus on (rb pinned on, rc by the whole video off): x=on marks rb; confettiWords is a gentle layout
+  const doc = CMD.reduce(DOC, { t: 'pin.set', path: 'line/rb:cam.extreme', v: 1, by: 'user' });
+  for (const lang of ['ja', 'en']) {
+    const q = camRequest(doc, CHORUS, { uiLang: lang, extreme: true });
+    assert.equal(q.schema, x);
+    assert.equal(q.effort, 'medium');
+    assert.equal(q.sent.extreme, true);
+    assert.ok(q.system.includes('camera (EXTREME): shot = a shot preset, an extreme shot preset (append "~m" to mirror left and right)'));
+    assert.ok(q.system.includes('EXTREME mode: the user asked for intense, high-energy camerawork.'));
+    assert.ok(q.system.includes('Lines marked cam=gentle take only pulse, shake or dutch; lines marked cam=none cannot move.'));
+    assert.ok(!q.system.includes('Choose camerawork that serves the lyrics'), 'the calm camera mode is replaced');
+    assert.ok(q.system.includes('closer multiplies how close every shot is'), 'closer, follow and rig stay described');
+    assert.ok(q.prompt.includes('[extreme shots] beatCrash=' + (lang === 'en' ? 'Beat crash' : '拍ごとに寄る')));
+    assert.ok(q.prompt.includes(' · mirror with ~m: dutchSwing orbit spinIn spinOut whipPan'));
+    assert.ok(q.prompt.includes('[extreme moves] move: crash dutch jump orbit pulse shake spin vertigo whip · power 0.3-1 · dir: auto left right'));
+    const rows = q.prompt.split('\n').filter((l) => /^\d+: /.test(l));
+    assert.equal(rows.length, 2);
+    assert.ok(rows[0].endsWith('locked:no cam=gentle x=on'), rows[0]);
+    assert.ok(rows[1].endsWith('locked:no cam=gentle'), rows[1]);
+    assert.equal(CAT.cameraText(lang, { extreme: true }).split('\n').length, CAT.cameraText(lang).split('\n').length + 2);
+  }
+});
+
+test('EXTREME: cameraFromAi reads EXTREME presets and move words only for an EXTREME request', () => {
+  const k = DI.cameraFromAi;
+  const X = { extreme: true };
+  for (const shot of ['crashZoom', 'whipPan~m', 'crash', 'spin']) assert.equal(k(XCAM({ shot })).badShot, true, shot + ' is unreadable without EXTREME');
+  assert.equal(k(XCAM({ shot: 'custom', move: 'whip' })).badShot, true);
+  assert.equal(k(XCAM({ shot: 'crashZoom' }), X).shot, 'crashZoom');
+  assert.equal(k(XCAM({ shot: 'whipPan~m' }), X).shot, 'whipPan~m');
+  assert.equal(k(XCAM({ shot: 'pushWord' }), X).shot, 'pushWord', 'the normal presets stay');
+  deepEqual(k(XCAM({ shot: 'spin', timing: 'arrive', power: 0.5, dir: 'right' }), X).shot,
+    SHOT.fromXMove({ move: 'spin', focus: 'text', timing: 'arrive', fill: -1, power: 0.5, dir: 'right' }));
+  const custom = k(XCAM({ shot: 'custom', move: 'crash', focus: 'emphasis', fill: 0.9, power: 1 }), X).shot;
+  assert.ok(SHOT.isExtreme(custom) && custom.x === 1, 'a custom EXTREME move is an x-shot');
+  assert.ok(!SHOT.isExtreme(k(XCAM({ shot: 'custom', move: 'pushIn' }), X).shot), 'a normal move word stays normal');
+  assert.equal(k(XCAM({ shot: 'wobble' }), X).badShot, true);
+  assert.equal(k(XCAM({ shot: 'whipPan~x' }), X).badShot, true);
+});
+
+test('EXTREME: the answer pins its moves and turns the switch on for the area as one reviewable (aggregate) row', () => {
+  const t = T.createT('ja', STRINGS, reg, { strict: true });
+  const r = xdirect(DOC, CHORUS, [XANSWER(0, { all: { rig: '', rigCurve: CURVE(''), camera: XCAM({ shot: 'custom', move: 'pulse', power: 0.6 }) },
+    lines: [{ i: 0, camera: XCAM({ shot: 'crashZoom' }) }] })]);
+  deepEqual(r.warnings, []);
+  const p = byPath(r.changes);
+  assert.equal(p['line/rb:cam.shot'].to, 'crashZoom', 'lines[] wins over all');
+  assert.ok(SHOT.isExtreme(p['line/rc:cam.shot'].to), 'all gives the other line the custom EXTREME move');
+  const sw = r.changes.filter((c) => c.slot === 'cam.extreme');
+  deepEqual(sw.map((c) => [c.path, c.from, c.to, c.agg, c.group, c.field, c.checked]),
+    [['line/rb:cam.extreme', 0, 1, 'song:2@24-40|cam.extreme', 'area', 'fld.camExtreme', true],
+      ['line/rc:cam.extreme', 0, 1, 'song:2@24-40|cam.extreme', 'area', 'fld.camExtreme', true]]);
+  assert.equal(CH.describeAgg(sw, t), t('ai.ch.agg', { field: 'カメラ EXTREME', from: 'オフ', to: 'オン', n: 2 }));
+  assert.equal(CH.describe(sw[0], t), t('ai.ch.value', { where: t('area.linesOne', { a: sw[0].n }), field: 'カメラ EXTREME', from: '自動（オフ）', to: 'オン' }));
+  // apply: pins by the AI, one batch; the plan has the switch on and the moves
+  const doc1 = CH.apply(DOC, r.plan, r.changes);
+  deepEqual(doc1.pins['line/rb:cam.extreme'], { v: 1, by: 'ai' });
+  deepEqual(doc1.pins['line/rb:cam.shot'], { v: 'crashZoom', by: 'ai' });
+  const plan1 = planOf(doc1);
+  assert.ok(plan1.cuts.filter((c) => c.line === 'rb' || c.line === 'rc').every((c) => c.slots['cam.extreme'] && c.slots['cam.extreme'].v === 1));
+  // turning EXTREME off there later asks about these AI moves (planner/extreme.handPicked)
+  deepEqual(XT.handPicked(doc1, 'line/rb'), ['line/rb:cam.shot']);
+  // unchecking the switch keeps the AI's moves (a pinned move needs no switch)
+  const kept = CH.apply(DOC, r.plan, r.changes.map((c) => (c.slot === 'cam.extreme' ? Object.assign({}, c, { checked: false }) : c)));
+  assert.equal(kept.pins['line/rb:cam.extreme'], undefined);
+  assert.equal(kept.pins['line/rb:cam.shot'].v, 'crashZoom');
+});
+
+test('EXTREME: the whole video gets one work switch; a line or area already on gets none; locked lines and cut areas none', () => {
+  const w = xdirect(DOC, WORKREF, [XANSWER(0)]);
+  deepEqual(w.changes.map((c) => [c.path, c.to, c.agg]), [['work:cam.extreme', 1, undefined]]);
+  const on = CMD.reduce(DOC, { t: 'pin.set', path: 'work:cam.extreme', v: 0.75, by: 'user' });
+  deepEqual(xdirect(on, WORKREF, [XANSWER(0)]).changes, [], 'already on (at another strength): no row');
+  deepEqual(xdirect(on, CHORUS, [XANSWER(0)]).changes, [], 'every line of the area is on');
+  const one = CMD.reduce(on, { t: 'pin.set', path: 'line/rc:cam.extreme', v: 0, by: 'user' });
+  deepEqual(xdirect(one, CHORUS, [XANSWER(0)]).changes.map((c) => [c.path, c.from, c.fromSource]), [['line/rc:cam.extreme', 0, 'pin:line']],
+    'a line exempted by hand is asked for again');
+  const locked = CMD.reduce(DOC, MV.use('planner/fields').lockPayload(DOC, PLAN, 'rc', { registry: reg }));
+  deepEqual(xdirect(locked, CHORUS, [XANSWER(0)]).changes.map((c) => c.path), ['line/rb:cam.extreme'], 'a locked line is left alone');
+  const cutKey = PLAN.lines.find((l) => l.id === 'rb').cuts[1];
+  deepEqual(xdirect(DOC, { kind: 'cut', key: cutKey }, [XANSWER(0, { cuts: [{ i: 0, j: 0, camera: XCAM({ shot: 'spinIn' }) }] })]).changes
+    .map((c) => [c.path.replace(/~\d+/, '~n'), c.to]), [['cut/rb~n:cam.shot', 'spinIn']], 'a cut area: its move, no switch');
+  // a plain camera request never adds the switch, and reads no EXTREME word
+  const plain = DI.directChanges(DOC, PLAN, reg, { answers: [XANSWER(0, { lines: [{ i: 0, camera: XCAM({ shot: 'crashZoom' }) }] })] },
+    { rev: 1, sent: camRequest(DOC, CHORUS).sent });
+  deepEqual(plain.changes, []);
+  assert.ok(hasWarn(plain.warnings, 'ai.warn.badShot'));
+});
+
+test('EXTREME: a move for a line whose layout has no camerawork is left out (ai.warn.xLayout); gentle layouts keep theirs', () => {
+  const doc = CMD.reduce(DOC, { t: 'pin.set', path: 'line/rc:arrange', v: 'edgeBleed', by: 'user' });
+  const plan = planOf(doc);
+  assert.ok(plan.cuts.filter((c) => c.line === 'rc').every((c) => c.slots.arrange.v === 'edgeBleed'));
+  const r = xdirect(doc, CHORUS, [XANSWER(0, { lines: [{ i: 0, camera: XCAM({ shot: 'spinIn~m', closer: 1.2 }) },
+    { i: 1, camera: XCAM({ shot: 'whipPan', closer: 0.7 }) }] })]);
+  const p = byPath(r.changes);
+  assert.equal(p['line/rb:cam.shot'].to, 'spinIn~m', 'confettiWords is gentle: the engine tames the move');
+  assert.ok(CH.describe(p['line/rb:cam.shot'], T.createT('ja', STRINGS, reg, { strict: true })).endsWith('回って入る（左右反転）'),
+    'a mirrored move says so in the review');
+  assert.equal(p['line/rc:cam.shot'], undefined);
+  assert.equal(p['line/rc:cam.zoom'].to, 0.7, 'the rest of its camera stays');
+  assert.ok(hasWarn(r.warnings, 'ai.warn.xLayout'));
+  assert.ok(r.req.prompt.split('\n').some((l) => /^1: /.test(l) && l.includes(' cam=none')), 'the request marked the line cam=none');
+  for (const lang of ['ja', 'en']) assert.ok(CH.warningText(['ai.warn.xLayout', {}], T.createT(lang, STRINGS, reg, { strict: true })));
+});

@@ -1,6 +1,7 @@
 /* 文字PVメーカー v2 — original work. Timeline drawer: beat / song / line / cut rows, drags that write time pins, zoom, snap, keyboard nudges, a11y proxies, area bands and key diamonds (DESIGN §6.4.13; DESIGN_2_1 §6.7, §6.8). */
-MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/t', 'core/paths', 'core/doc', 'planner/areas'],
-  (dom, I, S, F, T, P, D, AREAS) => {
+MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/t', 'core/paths', 'core/doc', 'planner/areas',
+  'ui/extreme'],
+  (dom, I, S, F, T, P, D, AREAS, XU) => {
   'use strict';
 
   const { h } = dom;
@@ -248,8 +249,10 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
         g.fillRect(x0, r[0] + 3, Math.max(1, x1 - x0 - 1), r[1] - r[0] - 6);
         const line = c.line ? p.lines.find((l) => l.id === c.line) : null;
         const k = line ? line.cuts.indexOf(c.key) + 1 : 0;
-        label(line ? line.index + 1 + '-' + k : t.label(S.crumbs({ level: 'cut', key: c.key }, p).slice(-1)[0].label), x0 + 3,
-          (r[0] + r[1]) / 2, x1 - x0 - 6, COLORS.muted);
+        // ⚡ before the name of a cut with EXTREME camerawork (DESIGN_EXTREME §2.6)
+        const x = XU.isXCut(c);
+        label((x ? t('shot.xBadge') : '') + (line ? line.index + 1 + '-' + k : t.label(S.crumbs({ level: 'cut', key: c.key }, p).slice(-1)[0].label)),
+          x0 + 3, (r[0] + r[1]) / 2, x1 - x0 - 6, x ? COLORS.key : COLORS.muted);
         if (line && k > 1) edge(x0, r[0], r[1], app.doc.pins[F.writePath('cut/' + c.key + ':t0', p)] ? 'pin' : 'auto', false);
       });
       drawKeys(r);

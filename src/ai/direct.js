@@ -1,7 +1,8 @@
-/* 文字PVメーカー v2 — original work. The direct tool (指示): area instructions → requests, the portable answer schema, answer → checked changes (DESIGN_2_1 §5.2–§5.6, §5.11, §11.6.1, §11.9.4). */
+/* 文字PVメーカー v2 — original work. The direct tool (指示): area instructions → requests, the portable answer schema, answer → checked changes (DESIGN_2_1 §5.2–§5.6, §5.11, §11.6.1, §11.9.4; DESIGN_EXTREME §2.5). */
 MV.def('ai/direct', ['core/pins', 'core/paths', 'core/curve', 'core/shot', 'core/schema', 'core/media', 'planner/areas',
-  'planner/plan', 'engine/scene/frame', 'ai/catalog', 'ai/changes', 'ai/looks', 'ai/recipe', 'i18n/t', 'i18n/strings'],
-  (PINS, P, CV, SHOT, S, MEDIA, AREAS, PL, FR, CAT, CH, LOOKS, RECIPE, I18N, STRINGS) => {
+  'planner/plan', 'engine/scene/frame', 'ai/catalog', 'ai/changes', 'ai/looks', 'ai/recipe', 'i18n/t', 'i18n/strings',
+  'planner/extreme'],
+  (PINS, P, CV, SHOT, S, MEDIA, AREAS, PL, FR, CAT, CH, LOOKS, RECIPE, I18N, STRINGS, XT) => {
   'use strict';
 
   // One tool for every area instruction: the instruction box (one brief), the 区画ごと board (up to 8 briefs) and
@@ -32,7 +33,7 @@ MV.def('ai/direct', ['core/pins', 'core/paths', 'core/curve', 'core/shot', 'core
     'cam.follow': 'fld.camFollow', rig: 'fld.rig', 'rig.curve': 'fld.rigCurve', season: 'fld.lineSeason', avoid: 'fld.avoid',
     'arrive.ease': ['fld.speedCurve', 'arrive'], 'depart.ease': ['fld.speedCurve', 'depart'], 'arrive.flow': 'fld.flow',
     'lens.curve': 'fld.lensCurve', 'ornament.count': ['fld.count', 'ornament'], 'filter.count': ['fld.count', 'filter'],
-    atmos: 'fld.atmos',
+    atmos: 'fld.atmos', 'cam.extreme': 'fld.camExtreme',
   });
   const MEDIA_FIELDS = Object.freeze({ image: 'fld.media', src: 'fld.media', fit: 'fld.fit', blur: 'fld.blur', veil: 'fld.veil',
     clipIn: 'fld.trim', speed: 'fld.speed', depth: 'param.depth' });
@@ -59,6 +60,11 @@ MV.def('ai/direct', ['core/pins', 'core/paths', 'core/curve', 'core/shot', 'core
   const SEASON_AI = RECIPE.SEASON_AI;
   const CAMERA_AI = closed({ shot: STR, move: en(SHOT.MOVES), focus: en(SHOT.FOCI), timing: en(SHOT.TIMINGS), fill: NUM,
     closer: NUM, follow: NUM, curve: CURVE_AI });
+  // The 「EXTREME」 camera request (DESIGN_EXTREME §2.5): the camera fields, the EXTREME move words and power (how violent,
+  // 0.3–1; −1 = 0.8) and dir (the way the words travel). Its own frozen schema: CAMERA_AI and every other schema stay
+  // as they are.
+  const CAMERA_X_AI = closed(Object.assign({}, CAMERA_AI.properties, { move: en(SHOT.MOVES.concat(SHOT.XMOVES)), power: NUM,
+    dir: en(SHOT.DIRS) }));
   // use: '' keep | 'none' (remove media the AI placed in the area) | 'asset:<n>'; blur, veil, from, speed: −1 keep;
   // depth (§11.9.4): 'keep', or how the media takes part in the animation (the placed one, or with use '' the one the
   // area shows as `as`)
@@ -102,20 +108,26 @@ MV.def('ai/direct', ['core/pins', 'core/paths', 'core/curve', 'core/shot', 'core
     return deepFreeze(closed(props));
   }
 
-  // Built once (the schemas are FROZEN data): 'all' × allowMaterials × media, and the camera schema.
+  function cameraSchema(cam) {
+    return deepFreeze(closed({ answers: arr(closed({ s: INT, understood: BOOL, summary: STR, question: STR,
+      all: closed({ rig: STR, rigCurve: CURVE_AI, camera: cam }),
+      lines: arr(closed({ i: INT, camera: cam })),
+      cuts: arr(closed({ i: INT, j: INT, camera: cam })) })) }));
+  }
+
+  // Built once (the schemas are FROZEN data): 'all' × allowMaterials × media, the camera schema and its EXTREME variant.
   const SCHEMAS = Object.freeze({
     all: buildSchema(false, false), allMat: buildSchema(true, false), allMedia: buildSchema(false, true),
     allMatMedia: buildSchema(true, true),
-    camera: deepFreeze(closed({ answers: arr(closed({ s: INT, understood: BOOL, summary: STR, question: STR,
-      all: closed({ rig: STR, rigCurve: CURVE_AI, camera: CAMERA_AI }),
-      lines: arr(closed({ i: INT, camera: CAMERA_AI })),
-      cuts: arr(closed({ i: INT, j: INT, camera: CAMERA_AI })) })) })),
+    camera: cameraSchema(CAMERA_AI),
+    cameraX: cameraSchema(CAMERA_X_AI),
   });
 
-  // directSchema({ mode, allowMaterials, media }) → the frozen answer schema of a request.
+  // directSchema({ mode, allowMaterials, media, extreme }) → the frozen answer schema of a request (extreme: the camera
+  // request's 「EXTREME」, DESIGN_EXTREME §2.5).
   function directSchema(opts) {
     const o = opts || {};
-    if (o.mode === 'camera') return SCHEMAS.camera;
+    if (o.mode === 'camera') return o.extreme ? SCHEMAS.cameraX : SCHEMAS.camera;
     return SCHEMAS['all' + (o.allowMaterials ? 'Mat' : '') + (o.media ? 'Media' : '')];
   }
 
@@ -131,15 +143,26 @@ MV.def('ai/direct', ['core/pins', 'core/paths', 'core/curve', 'core/shot', 'core
   // curveFromAi(x) → Curve | undefined (keep) | null (unreadable) (§5.4; ai/recipe).
   const curveFromAi = RECIPE.curveFromAi;
 
-  // cameraFromAi(CAMERA_AI value) → { shot?, zoom?, follow?, curve?, badShot, badCurve }: the cut slots cam.shot (a
-  // preset, 'none', or a custom shot from the move words through core/shot.fromMove), cam.zoom (closer, 0.5–2),
-  // cam.follow (0–1) and cam.curve. Absent fields keep; −1 keeps a number.
-  function cameraFromAi(x) {
+  // cameraFromAi(CAMERA_AI value, { extreme }?) → { shot?, zoom?, follow?, curve?, badShot, badCurve }: the cut slots
+  // cam.shot (a preset, 'none', or a custom shot from the move words through core/shot.fromMove), cam.zoom (closer,
+  // 0.5–2), cam.follow (0–1) and cam.curve. Absent fields keep; −1 keeps a number. With extreme (the 「EXTREME」 camera
+  // request, DESIGN_EXTREME §2.5) an EXTREME preset (with "~m") and the EXTREME move words (through core/shot.fromXMove,
+  // with power and dir) are read too; without it they are unreadable (badShot), exactly as before.
+  const XOPT = Object.freeze({ extreme: true });
+  function cameraFromAi(x, opts) {
     const c = isObject(x) ? x : {};
+    const extreme = !!(opts && opts.extreme);
     const out = { badShot: false, badCurve: false };
     const shot = str(c.shot);
+    const xmove = extreme && (SHOT.XMOVES.includes(shot) || (shot === 'custom' && SHOT.XMOVES.includes(c.move)));
     if (shot === 'none' || SHOT.SHOT_KEYS.includes(shot)) out.shot = shot;
-    else if (shot === 'custom' || SHOT.MOVES.includes(shot)) {
+    else if (extreme && SHOT.xKeyOf(shot)) out.shot = shot;
+    else if (xmove) {
+      const ref = SHOT.fromXMove({ move: shot === 'custom' ? c.move : shot, focus: c.focus, timing: c.timing, fill: c.fill,
+        power: c.power, dir: c.dir });
+      if (ref === undefined) out.badShot = true;
+      else out.shot = ref;
+    } else if (shot === 'custom' || SHOT.MOVES.includes(shot)) {
       const ref = SHOT.fromMove({ move: shot === 'custom' ? c.move : shot, focus: c.focus, timing: c.timing, fill: c.fill });
       if (ref === undefined) out.badShot = true;
       else out.shot = ref;
@@ -193,15 +216,30 @@ MV.def('ai/direct', ['core/pins', 'core/paths', 'core/curve', 'core/shot', 'core
     + '"背景も一緒に動かして" = anim).';
   const SYSTEM_CAMERA_MODE = 'Choose camerawork that serves the lyrics: push to emphasized words, read along long lines, snap '
     + 'on impact lines (!), calm shots in quiet parts, and use the song\'s highlights if given.';
+  // The 「EXTREME」 camera request (DESIGN_EXTREME §2.5): these two replace SYSTEM_CAMERA_MODE.
+  const SYSTEM_CAMERA_X = 'camera (EXTREME): shot = a shot preset, an extreme shot preset (append "~m" to mirror left and '
+    + 'right), "none", or "custom" (then move, focus, timing, fill, power and dir describe it). Extreme moves: crash = a very '
+    + 'fast zoom onto the focus on the beat; whip = a fast sideways move (arrive: the line flies in, depart: it flies out, '
+    + 'whole: both, hold: from word to word); spin = the frame rotates in (arrive) or out (depart); dutch = a strong tilt '
+    + 'that swings on the beat; shake = shake hits on the beat; vertigo = the background swells behind still words; orbit = '
+    + 'the camera circles the words; pulse = a zoom punch on every beat; jump = hard cuts to close-ups of each word as it is '
+    + 'sung. power = how violent (0.3 strong ... 1 wildest). closer, follow, curve and rig as above.';
+  const SYSTEM_CAMERA_XMODE = 'EXTREME mode: the user asked for intense, high-energy camerawork. Be bold and rhythmic: the '
+    + 'strongest moves (crash, whip, spin, jump) on impact lines (!), emphasized words, the chorus and the song\'s highlights; '
+    + 'lighter extreme moves (dutch, pulse, orbit, vertigo) in verses and quiet parts so the video still breathes. Do not '
+    + 'give the same extreme move to more than two lines in a row, and let a repeated line repeat its move. Every word must '
+    + 'stay readable while it is sung: the engine times each move around the words, so match the focus and timing to the '
+    + 'lyric (whip-in and spin-in happen before a line, whip-out and spin-out after it, jump and whip on hold follow the '
+    + 'words). Lines marked cam=gentle take only pulse, shake or dutch; lines marked cam=none cannot move.';
 
   function outLang(lang) { return lang === 'en' ? 'English' : 'Japanese'; }
 
-  function systemText(mode, lang, media) {
+  function systemText(mode, lang, media, extreme) {
     const understood = 'If a brief is unclear or impossible, set understood=false for it and ask in "question".';
     const write = 'Write "summary" (one sentence) and "question" in ' + outLang(lang) + '.';
     if (mode === 'camera') {
-      return SYSTEM.slice(0, 3).concat([SYSTEM_CURVES, SYSTEM_CAMERA, 'Locked lines keep their look.', SYSTEM_CAMERA_MODE,
-        understood, write]).join('\n');
+      return SYSTEM.slice(0, 3).concat([SYSTEM_CURVES, SYSTEM_CAMERA, 'Locked lines keep their look.'],
+        extreme ? [SYSTEM_CAMERA_X, SYSTEM_CAMERA_XMODE] : [SYSTEM_CAMERA_MODE], [understood, write]).join('\n');
     }
     return SYSTEM.concat([SYSTEM_CURVES, SYSTEM_CAMERA], SYSTEM_REST, media ? [SYSTEM_MEDIA] : [], [understood, write]).join('\n');
   }
@@ -297,7 +335,17 @@ MV.def('ai/direct', ['core/pins', 'core/paths', 'core/curve', 'core/shot', 'core
       + curveShort(v('cam.curve')) + ' speed=' + (isNumber(speed) ? speed : 1) + ' · orn=' + (orn.length ? orn.join(',') : '-')
       + ' · atmos=' + (g && g.atmos ? shortValue(g.atmos.v) : '-') + ' ground=' + ground + ' · season='
       + (season && season.from === 'pin:line' ? season.v : '-') + ' rig=' + (rig ? shortValue(rig.v) : '-') + ' · locked:'
-      + (line && line.locked ? 'yes' : 'no');
+      + (line && line.locked ? 'yes' : 'no') + (ctx.extreme ? extremeState(ctx, line, cut) : '');
+  }
+
+  // The 「EXTREME」 camera request's additions to a line's state (DESIGN_EXTREME §2.5): its layout's camera trait when it
+  // takes only gentle moves or none (' cam=gentle' / ' cam=none'), and ' x=on' where the EXTREME switch is on.
+  function extremeState(ctx, line, cut) {
+    const d = decision(cut, 'arrange');
+    const def = d && typeof d.v === 'string' ? ctx.registry.get('arrange', d.v) : null;
+    const trait = def && (def.cam === 'gentle' || def.cam === 'none') ? ' cam=' + def.cam : '';
+    const lineId = line ? line.id : cut && cut.line ? cut.line : null;
+    return trait + (XT.valueAt(ctx.ix, { lineId }) > 0 ? ' x=on' : '');
   }
 
   const AREA_WORDS = Object.freeze({ head: 'lyric heading', para: 'block of lines', lines: 'selected lines', cut: 'one cut' });
@@ -349,7 +397,7 @@ MV.def('ai/direct', ['core/pins', 'core/paths', 'core/curve', 'core/shot', 'core
 
   function listsText(ctx, anyWork) {
     const { doc, registry, lang } = ctx;
-    if (ctx.mode === 'camera') return 'Camera:\n' + CAT.cameraText(lang);
+    if (ctx.mode === 'camera') return 'Camera:\n' + (ctx.extreme ? CAT.cameraText(lang, { extreme: true }) : CAT.cameraText(lang));
     const parts = CAT.catalog(registry, doc, ['arrange', 'arrive', 'dwell', 'depart', 'ornament', 'ground', 'lens', 'filter', 'atmos'],
       lang, { mine: false, cutOrnaments: true });
     const out = ['Parts (key=name{season}(mood tags)):', CAT.catalogText(parts)];
@@ -363,20 +411,24 @@ MV.def('ai/direct', ['core/pins', 'core/paths', 'core/curve', 'core/shot', 'core
   }
 
   // directRequests(doc, plan, registry, { briefs: [{ ref, instruction }], uiLang, mode: 'all' | 'camera', allowMaterials,
-  // media }) → [{ system, prompt, schema, effort, sent }], one per window of ≤ 200 area lines (§5.2). media: true offers
-  // the whole library, a list of asset ids only those (the ones whose bytes are on this device); false or absent
+  // media, extreme }) → [{ system, prompt, schema, effort, sent }], one per window of ≤ 200 area lines (§5.2). media: true
+  // offers the whole library, a list of asset ids only those (the ones whose bytes are on this device); false or absent
   // offers none. Only lyric text, the instructions, setting values and the assets' numbers, sizes and vision text are
-  // sent (never a file name, §11.6.4).
+  // sent (never a file name, §11.6.4). extreme (mode 'camera' only; DESIGN_EXTREME §2.5): the 「EXTREME」 request — its
+  // own schema (SCHEMAS.cameraX), the EXTREME vocabulary, the intense system text, medium effort, and the lines' camera
+  // traits and switch; `sent.extreme` makes its answer turn the switch on for the area. Without it every request is
+  // exactly as before.
   function directRequests(doc, plan, registry, opts) {
     const o = opts || {};
     const mode = o.mode === 'camera' ? 'camera' : 'all';
+    const extreme = mode === 'camera' && !!o.extreme;
     const lang = o.uiLang === 'en' ? 'en' : 'ja';
     const allowMaterials = mode === 'all' && !!o.allowMaterials;
     const media = mode === 'all' && o.media ? RECIPE.mediaSent(doc, { only: Array.isArray(o.media) ? o.media : null, lang }) : [];
     const cutByKey = new Map((plan.cuts || []).map((c) => [c.key, c]));
     const lineById = new Map((plan.lines || []).map((l) => [l.id, l]));
     const items = cleanBriefs(doc, plan, o.briefs, mode).map((b) => Object.assign(b, { rows: briefLines(plan, b.area, cutByKey, lineById) }));
-    const ctx = { doc, plan, registry, lang, mode, allowMaterials, media, cutByKey, ix: PINS.index(doc.pins) };
+    const ctx = { doc, plan, registry, lang, mode, allowMaterials, media, cutByKey, ix: PINS.index(doc.pins), extreme };
     const t = textsOf(lang);
     const windows = windowsOf(items);
     return windows.map((win, k) => {
@@ -388,10 +440,12 @@ MV.def('ai/direct', ['core/pins', 'core/paths', 'core/curve', 'core/shot', 'core
       });
       const anyWork = win.some((it) => it.area.kind === 'work');
       const prompt = [LH.lookContext(doc, plan), '', texts.join('\n\n'), '', listsText(ctx, anyWork)].join('\n');
-      const schema = directSchema({ mode, allowMaterials, media: media.length > 0 });
+      const schema = directSchema({ mode, allowMaterials, media: media.length > 0, extreme });
+      const sent = { window: k, windows: windows.length, mode, allowMaterials, uiLang: lang, media, briefs };
+      if (extreme) sent.extreme = true;
       return {
-        system: systemText(mode, lang, media.length > 0), prompt, schema, effort: mode === 'camera' ? 'low' : 'medium',
-        sent: { window: k, windows: windows.length, mode, allowMaterials, uiLang: lang, media, briefs },
+        system: systemText(mode, lang, media.length > 0, extreme), prompt, schema,
+        effort: mode === 'camera' && !extreme ? 'low' : 'medium', sent,
       };
     });
   }
@@ -740,7 +794,53 @@ MV.def('ai/direct', ['core/pins', 'core/paths', 'core/curve', 'core/shot', 'core
     if (cam.badShot) run.warn(['ai.warn.badShot', {}]);
     if (cam.badCurve) run.warn(['ai.warn.badCurve', {}]);
     const slots = { shot: 'cam.shot', zoom: 'cam.zoom', follow: 'cam.follow', curve: 'cam.curve' };
-    for (const k of Object.keys(slots)) if (cam[k] && cam[k].v !== undefined) valueTo(run, b, T, slots[k], cam[k].v, cam[k]);
+    for (const k of Object.keys(slots)) {
+      if (!cam[k] || cam[k].v === undefined) continue;
+      // an EXTREME move on a line whose layout has no camerawork (DESIGN_EXTREME §2.5, X7): left out, said once
+      if (k === 'shot' && SHOT.isExtreme(cam[k].v) && stillLayout(run, T)) { run.warn(['ai.warn.xLayout', {}]); continue; }
+      valueTo(run, b, T, slots[k], cam[k].v, cam[k]);
+    }
+  }
+
+  // Whether the cuts a target's cam.shot reaches all stand on a layout without camerawork (arrange trait cam: 'none'):
+  // the cut itself, or every cut of a line that is not pinned by cut; never the whole video.
+  function stillLayout(run, T) {
+    const cuts = T.scope === 'cut' ? [T.cut] : T.scope === 'line' ? cutsOf(run, T.line).filter((c) => {
+      const hit = PINS.lookup(run.ix, cutAt(c), 'cam.shot');
+      return !hit || hit.from !== 'pin:cut';
+    }) : [];
+    return cuts.length > 0 && cuts.every((c) => {
+      const d = c && c.slots ? c.slots.arrange : null;
+      const def = d && typeof d.v === 'string' ? run.registry.get('arrange', d.v) : null;
+      return !!def && def.cam === 'none';
+    });
+  }
+
+  // The 「EXTREME」 camera request turns the switch on for its area (DESIGN_EXTREME §2.5): a whole-video brief pins
+  // work:cam.extreme 1 when the whole video does not have it on; another area pins line/<id>:cam.extreme 1 on each of its
+  // (unlocked) lines where it is off, as one aggregate row. Checked like every row; unchecked, the AI's own EXTREME moves
+  // stay (a pinned move needs no switch) but the automatic ones do not come. A cut area has no switch of its own.
+  function extremeSwitch(run, b) {
+    const area = b.area;
+    if (area.kind === 'cut') return;
+    const targets = area.kind === 'work' ? (b.brief.chunk && b.brief.chunk[0] > 0 ? [] : [workTarget(run)])
+      : b.lineTargets.map((x) => lineTarget(run, x.line)).filter((T) => !T.line.locked);
+    for (const T of targets) {
+      const on = XT.valueAt(run.ix, { lineId: T.line ? T.line.id : null });
+      if (on > 0) continue;
+      const path = T.key + ':' + XT.SLOT;
+      if (run.byPath.has(path)) continue;
+      const pin = run.doc.pins[path];
+      const fields = {
+        id: b.prefix + path, kind: 'value', scope: T.scope, path, slot: XT.SLOT, from: 0, fromSource: pin ? 'pin:' + T.scope : 'auto',
+        to: XT.ON, group: 'area', areaKey: b.key, field: FIELDS[XT.SLOT],
+        label: ['ai.ch.value', { where: T.where, field: FIELDS[XT.SLOT], from: 0, to: XT.ON }],
+      };
+      if (T.line) Object.assign(fields, { lineId: T.line.id, rowId: T.line.row, n: T.n, agg: b.key + '|' + XT.SLOT });
+      const c = CH.make(run.doc, fields, run.make);
+      run.byPath.set(path, c);
+      run.changes.push(c);
+    }
   }
 
   function rigTo(run, b, T, e) {
@@ -962,9 +1062,9 @@ MV.def('ai/direct', ['core/pins', 'core/paths', 'core/curve', 'core/shot', 'core
 
   // ---- merging edits -------------------------------------------------------------------------------------------------
 
-  // The fields an edit sets, as { field: { v, fromAll } }: '' / [] / −1 are left out. `camera` becomes its four slots,
-  // `media` stays whole (set when use is not '').
-  function setFields(e, fromAll) {
+  // The fields an edit sets, as { field: { v, fromAll } }: '' / [] / −1 are left out. `camera` becomes its four slots
+  // (read with the EXTREME vocabulary when `extreme`), `media` stays whole (set when use is not '').
+  function setFields(e, fromAll, extreme) {
     const out = {};
     if (!isObject(e)) return out;
     const put = (k, v) => { out[k] = { v, fromAll }; };
@@ -974,7 +1074,7 @@ MV.def('ai/direct', ['core/pins', 'core/paths', 'core/curve', 'core/shot', 'core
     if (isNumber(e.speed) && e.speed >= 0) put('speed', e.speed);
     for (const k of Object.keys(CURVE_FIELDS).concat(['rigCurve'])) if (isObject(e[k]) && str(e[k].name)) put(k, e[k]);
     if (isObject(e.camera)) {
-      const cam = cameraFromAi(e.camera);
+      const cam = cameraFromAi(e.camera, extreme ? XOPT : undefined);
       out.camera = { badShot: cam.badShot, badCurve: cam.badCurve };
       for (const k of ['shot', 'zoom', 'follow', 'curve']) if (cam[k] !== undefined) out.camera[k] = { v: cam[k], fromAll };
       // an unreadable shot or curve is still set: it overrides the area's (and gives no change)
@@ -1080,13 +1180,13 @@ MV.def('ai/direct', ['core/pins', 'core/paths', 'core/curve', 'core/shot', 'core
     if (!res.understood) return res;
     const b = { s: a.s, brief, area, key: area.key, prefix: run.prefix + 's' + a.s + ':', lineTargets: [] };
     run.briefCtx.set(a.s, b);
-    const allSet = setFields(a.all, true);
+    const allSet = setFields(a.all, true, run.extreme);
     const lineSets = new Map();
     for (const l of list(a.lines)) if (isObject(l) && !lineSets.has(l.i)) lineSets.set(l.i, l);
     if (area.kind === 'cut') {
       const cut = run.cutByKey.get(area.cutKeys[0]);
       const cutEdit = list(a.cuts).find((c) => isObject(c) && c.i === 0 && c.j === 0);
-      const e = merged(merged(allSet, setFields(lineSets.get(0), false)), cutOnly(setFields(cutEdit, false)));
+      const e = merged(merged(allSet, setFields(lineSets.get(0), false, run.extreme)), cutOnly(setFields(cutEdit, false, run.extreme)));
       if (cut) applyEdit(run, b, cutTarget(run, cut), e);
     } else {
       linesOfBrief(run, b, allSet, lineSets);
@@ -1097,7 +1197,7 @@ MV.def('ai/direct', ['core/pins', 'core/paths', 'core/curve', 'core/shot', 'core
       }
       const lyric = [];
       for (const { line, i } of b.lineTargets) {
-        const own = setFields(lineSets.get(i), false);
+        const own = setFields(lineSets.get(i), false, run.extreme);
         const e = area.kind === 'work' ? own : merged(allSet, own);
         applyEdit(run, b, lineTarget(run, line), e);
         const imp = own.impact || allSet.impact;
@@ -1113,11 +1213,12 @@ MV.def('ai/direct', ['core/pins', 'core/paths', 'core/curve', 'core/shot', 'core
         LH.lyricChanges(run.lctx(b, 'lyric'), lyric, run.warn, out);
         for (const c of out) run.push(Object.assign(c, { areaKey: b.key }));
       }
+      if (run.extreme) extremeSwitch(run, b);
       for (const c of list(a.cuts)) {
         if (!isObject(c)) continue;
         const r = sentCut(run, b, c.i, c.j);
         if (r.warn) { run.warn(r.warn); continue; }
-        applyEdit(run, b, cutTarget(run, r.cut), cutOnly(setFields(c, false)));
+        applyEdit(run, b, cutTarget(run, r.cut), cutOnly(setFields(c, false, run.extreme)));
       }
     }
     if (run.mode !== 'camera') workChanges(run, b, a.work, area.kind === 'work' && allSet.season ? allSet.season.v : '');
@@ -1170,7 +1271,8 @@ MV.def('ai/direct', ['core/pins', 'core/paths', 'core/curve', 'core/shot', 'core
   // directChanges(doc, plan, registry, json, { rev, sent, allowMaterials, materialsBefore? }) → { results: [{ s, areaKey,
   // understood, summary, question }], changes, warnings }. Validate against the doc and plan the request was built from
   // (§5.5); change ids start with 'w<window>:'. materialsBefore: the material changes of the earlier windows of the same
-  // request (they take room in doc.materials first).
+  // request (they take room in doc.materials first). A 「EXTREME」 camera request (sent.extreme) reads the EXTREME
+  // vocabulary and adds the switch rows of its areas (DESIGN_EXTREME §2.5).
   function directChanges(doc, plan, registry, json, opts) {
     const o = opts || {};
     const sent = isObject(o.sent) ? o.sent : { briefs: [] };
@@ -1185,6 +1287,7 @@ MV.def('ai/direct', ['core/pins', 'core/paths', 'core/curve', 'core/shot', 'core
     const prefix = 'w' + (Number.isInteger(sent.window) ? sent.window : 0) + ':';
     const run = {
       doc, plan, registry, sent, prefix, warn, warnOnce: warn, mode: sent.mode === 'camera' ? 'camera' : 'all',
+      extreme: sent.mode === 'camera' && sent.extreme === true,
       briefs: list(sent.briefs), ix: shared.ix, cutByKey: shared.cutByKey,
       cutByPinKey: new Map((plan.cuts || []).map((c) => [c.pinKey || c.key, c])),
       lineById: new Map((plan.lines || []).map((l) => [l.id, l])),

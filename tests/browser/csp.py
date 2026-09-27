@@ -8,7 +8,8 @@ that Chromium accepts every hash the build computed for it. WP8 extends it to ev
 new pages on the v21 project (curve widget, keyframes, マイ素材, the AI area list and board, 区画 bands) and the photo and
 video flows (import incl. SVG, playback, scrubbing, the crop overlay, the library and asset page, a vision request to a
 faked Gemini, a PNG export and a package saved and opened; package G.4), and the editor-ready output (package H.3): a
-透過動画（WebM）, the Filmora set into a folder and as a ZIP with its guide, and 字幕（.srt） saved both ways. Google Fonts
+透過動画（WebM）, the Filmora set into a folder and as a ZIP with its guide, and 字幕（.srt） saved both ways; カメラ EXTREME (its
+switch and notice, EXTREME shots playing, the picker's group, キーフレーム, the AI chip, step ④). Google Fonts
 requests are blocked here, so the test never waits on the network and passes with fallback fonts.
 Run: PW_EXECUTABLE=/opt/pw-browsers/chromium python3 tests/browser/csp.py   (CI: PW_CHANNEL=chrome)
 """
@@ -155,6 +156,73 @@ async def check_v21(browser, base, rel, lang):
     seen = {s for step in shown for s in step}
     if not {'.w-curve .cw-canvas', '.ke-page', '.mat-page', '.ai-board', '.tl-canvas'} <= seen:
         problems.append('not every new page was shown: %r' % shown)
+    if violations or console_csp:
+        problems.append('CSP violations: %r %r' % (violations, console_csp))
+    if errors:
+        problems.append('page errors: %r' % errors)
+    return problems
+
+
+# カメラ EXTREME (DESIGN_EXTREME §5.3): the switch and its notice, the preview playing EXTREME shots (motion blur, the ground
+# limiter), 激しいカメラを抑える, the shot picker's EXTREME group (its thumbnails), キーフレーム on an x-shot, the AI chip and
+# its notice, the drawer's ⚡ marks and step ④'s item: 0 violations.
+X_STEPS = [
+    """async (text) => { const a = window.__mv; a.view.setPref('autoplay', false);
+      await a.io.openFiles([new File([text], 'v21.json', { type: 'application/json' })]); a.pause();
+      a.openPanel('details'); a.select({ level: 'work' }, { from: 'crumbs', open: true });
+      await new Promise((r) => setTimeout(r, 300));
+      document.querySelector('.frow[data-field="work/energy/cam.extreme"] .w-toggle').click();
+      await new Promise((r) => setTimeout(r, 300));
+      document.querySelector('dialog.dlg[open] [data-x="ok"]').click(); }""",
+    """async () => { const a = window.__mv; a.view.set({ drawer: true }); a.seek(24); a.play(); await new Promise((r) => setTimeout(r, 1500));
+      a.view.setPref('calmCamera', true); await new Promise((r) => setTimeout(r, 600)); a.pause(); a.view.setPref('calmCamera', false); }""",
+    """async () => { const a = window.__mv; a.select({ level: 'el', scope: 'cut/' + a.plan.lines[1].cuts[0], el: 'lens' }, { from: 'crumbs', open: true });
+      await new Promise((r) => setTimeout(r, 300)); document.querySelector('.frow[data-slot="cam.shot"] .w-shot').click();
+      await new Promise((r) => setTimeout(r, 300)); document.querySelector('.pb-group').scrollIntoView();
+      const tile = document.querySelector('.pb-tile[data-key="whipPan"]'); tile.dispatchEvent(new PointerEvent('pointerover', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 800)); }""",
+    """async () => { document.querySelector('.pb-tile[data-key="whipPan"]').click();
+      await new Promise((r) => setTimeout(r, 300)); document.querySelector('[data-custom="camKeys"] button').click();
+      await new Promise((r) => setTimeout(r, 300)); document.querySelector('.ke-mirror').click(); }""",
+    """async () => { const a = window.__mv; a.openPanel('ai'); await new Promise((r) => setTimeout(r, 300));
+      document.querySelector('.ai-direct [data-target="area"]').click(); await new Promise((r) => setTimeout(r, 200));
+      const opt = document.querySelector('#ai-area-list [role="option"]'); if (opt) opt.click();
+      const chip = document.querySelector('.ai-direct [data-ctl="extreme"]'); if (chip.getAttribute('aria-pressed') !== 'true') chip.click();
+      a.view.setPref('hintExtreme', true); MV.use('ui/extreme').notice(a); await new Promise((r) => setTimeout(r, 300));
+      document.querySelector('dialog.dlg[open] [data-x="cancel"]').click(); }""",
+    """async () => { const a = window.__mv; a.goStep('export'); await new Promise((r) => setTimeout(r, 400)); }""",
+]
+
+
+async def check_extreme(browser, base, rel, lang):
+    page = await new_page(browser, viewport={'width': 1440, 'height': 900})
+    errors, console_csp = [], []
+    page.on('pageerror', lambda e: errors.append(str(e)))
+    page.on('console', lambda m: console_csp.append(m.text) if 'Content Security Policy' in m.text else None)
+    for host in FONT_HOSTS:
+        await page.route(host, lambda route: route.abort())
+    await page.add_init_script(RECORD_VIOLATIONS)
+    await page.goto(base + rel + '?fresh=1&test=1', wait_until='load')
+    await page.wait_for_function('() => window.__mv && window.__mv.ready')
+    await page.evaluate('async () => { await window.__mv.ready; }')
+    shown = []
+    for i, js in enumerate(X_STEPS):
+        await page.evaluate(js, V21_TEXT) if i == 0 else await page.evaluate(js)
+        await page.wait_for_timeout(400)
+        shown.append(await page.evaluate("""() => ['.w-xwarn', '.pb-group', '.ke-x', '.ai-xchip[aria-pressed="true"]', '.tl-canvas', '.step-export']
+          .filter((s) => { const el = document.querySelector(s); return !!el && el.getClientRects().length > 0; })"""))
+    state = await page.evaluate("""() => { const a = window.__mv, p = a.doc.pins['work:cam.extreme'];
+      return { on: !!p && p.v === 1, x: a.plan.cuts.filter((c) => MV.use('ui/extreme').isXCut(c)).length,
+        item: (a.exportChecks ? a.exportChecks() : []).some((c) => c.code === 'extreme-motion') }; }""")
+    violations = await page.evaluate('window.__cspViolations')
+    await page.close()
+    problems = []
+    seen = {s for step in shown for s in step}
+    want = {'.w-xwarn', '.pb-group', '.ke-x', '.ai-xchip[aria-pressed="true"]', '.tl-canvas', '.step-export'}
+    if not want <= seen:
+        problems.append('not every EXTREME page was shown: %r' % shown)
+    if not (state['on'] and state['x'] > 0 and state['item']):
+        problems.append('EXTREME did not take: %r' % state)
     if violations or console_csp:
         problems.append('CSP violations: %r %r' % (violations, console_csp))
     if errors:
@@ -395,6 +463,10 @@ async def main():
                     problems = await check_v21(browser, base, rel, lang)
                     print('%s %s v2.1 pages' % ('FAIL' if problems else 'ok  ', rel))
                     failures += ['%s v2.1 pages: %s' % (rel, msg) for msg in problems]
+                for rel, lang in PAGES[:2]:
+                    problems = await check_extreme(browser, base, rel, lang)
+                    print('%s %s カメラ EXTREME' % ('FAIL' if problems else 'ok  ', rel))
+                    failures += ['%s EXTREME: %s' % (rel, msg) for msg in problems]
                 for rel, lang in PAGES[:2]:
                     problems = await check_output(browser, base, rel, lang)
                     print('%s %s WebM, Filmora set, subtitles' % ('FAIL' if problems else 'ok  ', rel))

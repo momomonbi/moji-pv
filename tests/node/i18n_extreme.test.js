@@ -11,7 +11,7 @@ const T = MV.use('i18n/t');
 
 const JAPANESE = /[　-〿぀-ヿㇰ-ㇿ㐀-䶿一-鿿＀-￯]/;
 
-// Appendix B, verbatim.
+// Appendix B, verbatim (the English of exp.pre.extreme-motion and the x.off texts with their singulars: 'one|other', §4.24).
 const TABLE = {
   'fld.camExtreme': ['カメラ EXTREME', 'Camera EXTREME'],
   'fld.camExtremePower': ['激しさ', 'Intensity'],
@@ -59,9 +59,9 @@ const TABLE = {
   'x.notice.cancel': ['やめる', 'Cancel'],
   'x.notice.again': ['次から表示しない', 'Don\'t show this again'],
   'x.off.title': ['EXTREME をオフにする', 'Turn EXTREME off'],
-  'x.off.text': ['手で選んだ EXTREME の動きが {n} か所あります。これも元に戻しますか？', 'There are {n} EXTREME moves chosen by hand. Remove them too?'],
-  'x.off.keep': ['残す', 'Keep them'],
-  'x.off.remove': ['元に戻す', 'Remove them'],
+  'x.off.text': ['手で選んだ EXTREME の動きが {n} か所あります。これも元に戻しますか？', 'There is {n} EXTREME move chosen by hand. Remove it too?|There are {n} EXTREME moves chosen by hand. Remove them too?'],
+  'x.off.keep': ['残す', 'Keep it|Keep them'],
+  'x.off.remove': ['元に戻す', 'Remove it|Remove them'],
   'ai.camera.extreme': ['EXTREME', 'EXTREME'],
   'ai.camera.extremeHint': ['激しいカメラワークを頼む', 'Ask for intense camerawork'],
   'ai.warn.xLayout': ['この行のレイアウトは激しい動きに向かないので、その動きは使いませんでした', 'This line\'s layout cannot take intense moves, so they were left out'],
@@ -70,7 +70,7 @@ const TABLE = {
   'pref.calmCamera': ['激しいカメラを抑える（プレビュー）', 'Tone down intense camera (preview)'],
   'cmd.pref.calmCamera': ['激しいカメラを抑える（プレビュー）', 'Tone down intense camera (preview)'],
   'exp.pre.extreme-motion': ['激しいカメラワーク（EXTREME）が {n} カットにあります。公開するときは「激しい動きがあります」と添えることをおすすめします。',
-    'Intense camerawork (EXTREME) in {n} cuts. When you publish, consider noting that the video contains intense motion.'],
+    'Intense camerawork (EXTREME) in {n} cut. When you publish, consider noting that the video contains intense motion.|Intense camerawork (EXTREME) in {n} cuts. When you publish, consider noting that the video contains intense motion.'],
 };
 
 test('every EXTREME string of Appendix B exists with the design\'s ja and en texts', () => {
@@ -80,12 +80,14 @@ test('every EXTREME string of Appendix B exists with the design\'s ja and en tex
 
 test('every x-preset has a name and a blurb; the English texts have no Japanese; placeholders match', () => {
   for (const key of SHOT.XSHOT_KEYS) assert.ok(('shot.' + key) in STRINGS && ('shot.blurb.' + key) in STRINGS, key);
-  const ph = (s) => [...s.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort();
+  const ph = (s) => [...new Set([...s.matchAll(/\{(\w+)\}/g)].map((m) => m[1]))].sort();
   for (const [key, [ja, en]] of Object.entries(TABLE)) {
     assert.ok(!JAPANESE.test(en), key + ': the English text is English');
     assert.deepEqual(ph(ja), ph(en), key + ': placeholders');
   }
   const t = T.createT('en', STRINGS);
   assert.equal(t('x.off.text', { n: 3 }), 'There are 3 EXTREME moves chosen by hand. Remove them too?');
+  assert.equal(t('x.off.text', { n: 1 }), 'There is 1 EXTREME move chosen by hand. Remove it too?');
+  assert.deepEqual([t('x.off.keep', { n: 1 }), t('x.off.remove', { n: 2 })], ['Keep it', 'Remove them']);
   assert.equal(T.createT('ja', STRINGS)(...SHOT.label('whipPan~m')), '振って入る・抜ける');
 });

@@ -340,6 +340,12 @@ test('every AI schema is portable (objects closed, all properties required, no n
       for (const media of [false, true]) walk(DI.directSchema({ mode, allowMaterials, media }), 'direct ' + [mode, allowMaterials, media].join('/'));
     }
   }
+  // the 「EXTREME」 camera request (DESIGN_EXTREME §2.5): its own schema, portable too, nesting ≤ 5
+  const cameraX = DI.directSchema({ mode: 'camera', extreme: true });
+  assert.notEqual(cameraX, DI.directSchema({ mode: 'camera' }));
+  walk(cameraX, 'direct camera EXTREME');
+  const depth = (x) => (x.type === 'object' ? 1 + Math.max(0, ...Object.values(x.properties).map(depth)) : x.type === 'array' ? depth(x.items) : 0);
+  assert.ok(depth(cameraX) <= 5, 'nesting ' + depth(cameraX));
   walk(RECIPE.MATERIAL_SCHEMA, 'material');
   walk(RECIPE.MATERIAL_SCHEMA_MEDIA, 'material (media)');
   walk(MV.use('ai/vision').VISION_SCHEMA, 'vision');

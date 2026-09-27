@@ -555,12 +555,19 @@ MV.def('ai/changes', ['core/commands', 'core/lyrics', 'core/doc', 'core/hash', '
     return t(label[0], p);
   }
 
+  // An EXTREME preset mirrored ("~m") says so: 「回って入る（左右反転）」 (DESIGN_EXTREME §2.6).
+  function mirrored(t, v, name) {
+    const x = SHOT.xKeyOf(v);
+    return x && x.m && t.has('shot.mirroredOf') ? t('shot.mirroredOf', { name }) : name;
+  }
+
   // A value of a `value` change as text, by the slot it is pinned to.
   function valueText(t, c, v) {
     const slot = c.slot || slotOf(c.path);
     const param = slot.replace(PARAM_OF, '');
     if (c.toName && c.to === v) return c.toName;
-    if (slot === 'cam.shot') return labelText(t, SHOT.label(v));
+    if (slot === 'cam.shot') return mirrored(t, v, labelText(t, SHOT.label(v)));
+    if (slot === 'cam.extreme') return t(v > 0 ? 'val.on' : 'val.off');          // the EXTREME switch (DESIGN_EXTREME §2.5)
     if (slot === 'rig') return labelText(t, SHOT.rigLabel(v));
     if (CURVE_SLOT.test(slot)) return labelText(t, CV.label(v));
     if (slot === 'motion.speed') return Math.round(v * 100) + '%';

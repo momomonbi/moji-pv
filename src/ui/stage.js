@@ -22,6 +22,7 @@ MV.def('ui/stage', ['ui/dom', 'ui/selection', 'ui/output', 'i18n/t', 'ui/shot_ed
   const LOOK_AHEAD = 8;                   // while playing, the store is asked for the frames at t + k / 30, k = 1…8 (assets.want)
   const CROP_DIM = 'rgba(0, 0, 0, 0.4)';  // §11.7.6: everything outside the chosen crop is dimmed at 40 %
   const CROP_STEP = 0.01, CROP_STEP_BIG = 0.1;   // arrow keys move the focus by 1 % (Shift 10 %)
+  const CALM = Object.freeze({ calm: true });     // engine.viewAt under 激しいカメラを抑える (as the frame is drawn)
   const CROP_WHEEL = 1.05;                // the wheel zooms ×1.05 per notch
   const CROP_SNAP = 0.02;                 // the focus snaps to the centre and the thirds within this share (not with Alt)
   const CROP_WHEEL_END_MS = 400;          // a wheel gesture ends after this pause
@@ -156,6 +157,7 @@ MV.def('ui/stage', ['ui/dom', 'ui/selection', 'ui/output', 'i18n/t', 'ui/shot_ed
         if (sharp && typeof app.engine.setLevel === 'function') app.engine.setLevel(0);   // きれい優先: never steps down
         const stats = app.engine.renderFrame(surface, tNow, {
           scale: surface.w / plan.design.w, pick: true, quality: 'preview', reduceFlash: app.view.state.prefs.reduceFlash, backdrop,
+          calm: !!app.view.state.prefs.calmCamera,           // 激しいカメラを抑える (DESIGN_EXTREME §3.6)
         });
         if (stats && stats.provisional && !app.view.state.playing) retrySoon(); else retries = 0;
         adaptBacking(sharp ? 0 : levelOf(stats));
@@ -488,7 +490,7 @@ MV.def('ui/stage', ['ui/dom', 'ui/selection', 'ui/output', 'i18n/t', 'ui/shot_ed
     }
 
     // The camera at this moment ({ x, y, zoom, roll } of engine.viewAt: the current cut's camera composed with the rig).
-    function viewNow() { return app.engine.viewAt(app.time()); }
+    function viewNow() { return app.engine.viewAt(app.time(), app.view.state.prefs.calmCamera ? CALM : undefined); }
 
     wrap.addEventListener('pointerup', (ev) => {
       if (crop && crop.drag) { cropUp(); return; }

@@ -1,7 +1,7 @@
 /* 文字PVメーカー v2 — original work. Inspector field catalogue: FieldSpecs per page and section, and sectionsFor (DESIGN §6.4.4–§6.4.9, §4.23). */
 MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color', 'core/ease', 'core/doc', 'ui/selection',
-  'core/curve', 'core/shot', 'core/media', 'ui/media_widgets'],
-  (P, R, SC, C, E, D, S, CV, SHOT, MEDIA, MW) => {
+  'core/curve', 'core/shot', 'core/media', 'ui/media_widgets', 'planner/extreme'],
+  (P, R, SC, C, E, D, S, CV, SHOT, MEDIA, MW, XT) => {
     'use strict';
 
     // A FieldSpec (§4.23) is one row of the inspector: { id, path, scopes, el?, section, widget, label, hint?, basic,
@@ -19,7 +19,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
     const LINE = Object.freeze(['line']);
     const CUT = Object.freeze(['cut']);
     const WIDGETS = Object.freeze(['part', 'choice', 'number', 'time', 'color', 'font', 'toggle', 'words', 'cutpoints',
-      'text', 'slots', 'curve', 'shot', 'rig', 'partRefs', 'media', 'trim', 'crop']);
+      'text', 'slots', 'curve', 'shot', 'rig', 'partRefs', 'media', 'trim', 'crop', 'extreme']);
     const FACE_ROLES = Object.freeze(['display', 'serif', 'body']);
     const FACE_SCRIPTS = Object.freeze(['ja', 'latin', 'ko', 'zhHant', 'zhHans']);
     const LIST_KINDS = Object.freeze(['ornament', 'filter']);
@@ -247,6 +247,24 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
     const avoidField = () => F({ path: 'avoid', scopes: LINE, widget: 'partRefs', label: 'fld.avoid', spec: SPEC.partRefs, basic: false });
     const hasArea = (ctx) => !!ctx.area;
 
+    // カメラ EXTREME (DESIGN_EXTREME §2.6): the switch, and under 詳しい設定 its 激しさ [強め | かなり | 最大]; both write
+    // through ui/extreme (the notice when it turns on, the question when it turns off with moves picked by hand). The
+    // whole video's and a line's own; on a cut's page the switch is the cut's line's (`lineOf`, 「この行」). `xpart`
+    // tells the two rows apart (they share the slot).
+    const X_STEP_NAMES = Object.freeze({ 0.5: 'strong', 0.75: 'very', 1: 'max' });
+    const X_OPTIONS = Object.freeze(XT.STEPS.map((v) => Object.freeze({ v, label: 'opt.extreme.' + X_STEP_NAMES[v] })));
+    function extremeFields(extra) {
+      const x = extra || {};
+      const at = x.lineOf ? '.line' : '';
+      return [
+        F(Object.assign({ key: XT.SLOT + at, path: XT.SLOT, widget: 'extreme', label: x.lineOf ? 'fld.camExtremeLine' : 'fld.camExtreme',
+          spec: XT.SLOT_SPECS[XT.SLOT], xpart: 'switch', onValue: XT.ON }, x)),
+        F(Object.assign({ key: XT.SLOT + '.power' + at, path: XT.SLOT, widget: 'extreme', label: 'fld.camExtremePower',
+          spec: XT.SLOT_SPECS[XT.SLOT], xpart: 'power', options: X_OPTIONS, basic: false }, x)),
+      ];
+    }
+    const cutHasLine = (ctx) => !!(ctx.cut && ctx.cut.line);
+
     // --- pages ----------------------------------------------------------------------------------------------------
 
     const PAGES = {
@@ -266,9 +284,9 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
         sec('colors', false, C.TOKENS.map((tok) => F({ path: 'color.' + tok, scopes: WORK, widget: 'color',
           label: 'fld.color.' + tok, spec: SPEC.color })), { custom: 'colorsReset' }),
         sec('type', false, faceFields.concat([textScaleField('fld.textScaleAll')]), { custom: 'fontBanner', customTop: true }),
-        sec('energy', true, SC.AMOUNT_KEYS.map((k) => F({ path: 'amount.' + k, scopes: WORK,
+        sec('energy', true, SC.AMOUNT_KEYS.flatMap((k) => [F({ path: 'amount.' + k, scopes: WORK,
           widget: k === 'flash' ? 'toggle' : 'number', label: 'fld.amount.' + k, spec: SPEC.unit, scale: 100,
-          flashToggle: k === 'flash' })), { custom: 'amountsReset' }),
+          flashToggle: k === 'flash' })].concat(k === 'camera' ? extremeFields({ scopes: WORK }) : [])), { custom: 'amountsReset' }),
         sec('parts', false, [], { custom: 'parts' }),
         sec('title', false, [
           F({ cmd: { t: 'meta.set', key: 'title' }, scopes: WORK, widget: 'text', label: 'fld.title', spec: SPEC.text }),
@@ -324,8 +342,9 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
       lines: [
         sec('multi', true, [], { custom: 'multi' }),
         sec('direction', true, directionFields()),
-        // An area selection (区画, DESIGN_2_1 §6.5) adds its section camera; its runs are split at the area's edges.
-        sec('rig', true, rigFields(), { when: hasArea }),
+        // An area selection (区画, DESIGN_2_1 §6.5) adds its section camera; its runs are split at the area's edges. With
+        // it, カメラ EXTREME for the area (a line pin on every selected line, DESIGN_EXTREME §2.6).
+        sec('rig', true, rigFields().concat(extremeFields({ scopes: LINE })), { when: hasArea }),
         sec('colortype', false, [textFaceField(), textInkField(), textStyleField(), textScaleField()]),
         sec('shift', true, [], { custom: 'shift' }),
       ],
@@ -374,7 +393,8 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
           F({ path: 'cam.zoom', widget: 'number', label: 'fld.camZoom', spec: SPEC.camZoom, scale: 100 }),
           F({ path: 'cam.curve', widget: 'curve', label: 'fld.camCurve', spec: SPEC.curve }),
           F({ path: 'cam.follow', widget: 'number', label: 'fld.camFollow', spec: SPEC.follow, scale: 100, basic: false }),
-        ], { custom: 'camKeys' }),
+        ].concat(extremeFields({ scopes: ['work', 'line'] }), extremeFields({ scopes: CUT, lineOf: true, when: cutHasLine })),
+        { custom: 'camKeys' }),
         sec('camtexture', true, [partField('lens', 'fld.lensMove'), sharedField('lens', 'curve', 'fld.lensCurve', { basic: false })]),
         sec('rig', false, rigFields(), { custom: 'rigRun', customTop: true }),
       ],
@@ -658,9 +678,11 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
     }
 
     // pathsFor(field, ctx) → the full paths a row writes: the page scope; every selected line on the several-lines
-    // page; the first cut of the line(s) for firstCut fields.
+    // page; the first cut of the line(s) for firstCut fields; the cut's line for lineOf fields.
     function pathsFor(field, ctx) {
       if (!field.path) return [];
+      // a line's own setting shown on its cut's page (カメラ EXTREME's 「この行」)
+      if (field.lineOf) return ctx.cut && ctx.cut.line ? ['line/' + ctx.cut.line + ':' + field.path] : [];
       if (field.firstCut && ctx.lineIds.length) return ctx.lineIds.map((id) => firstCutScope(ctx, id) + ':' + field.path);
       if (ctx.page === 'lines') return ctx.lineIds.map((id) => 'line/' + id + ':' + field.path);
       return [ctx.scope + ':' + field.path];

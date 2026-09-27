@@ -102,7 +102,8 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
 
   function createApp(svc) {
     const lang = MV.LANG === 'en' ? 'en' : 'ja';
-    const view = V.createView({ storage: safeStorage('localStorage') });
+    // 激しいカメラを抑える starts as this device asks (prefers-reduced-motion, DESIGN_EXTREME §3.6)
+    const view = V.createView({ storage: safeStorage('localStorage'), defaults: { calmCamera: dom.prefersReducedMotion() } });
     const store = ST.createStore({ doc: D.defaultDoc(), side: D.defaultSide(), reduce: svc.reduce, now: () => Date.now() });
     // The AssetStore (DESIGN_2_1 §11.3.6): bytes from ui/project_io's device store (IndexedDB, or this tab's memory),
     // metadata from every library entry this tab has seen. Ids name content, so an entry seen once stays right for the
@@ -587,11 +588,15 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
       const pr = app.exportProbe() || {};
       // DESIGN_2_1 §13.10: the VP9 probe (透過動画 and the set's overlay), whether a folder can be written (the set; else
       // one ZIP) and the effective registry (which screen effects the set's layers leave out, layers-approx).
+      // DESIGN_EXTREME §3.4: the hard cuts inside EXTREME shots (engine.xJumps) count with the flashes
+      const range = ex().schedule.exportRange(app.doc, app.plan);
+      let jumps = [];
+      try { jumps = typeof app.engine.xJumps === 'function' ? app.engine.xJumps(range.t0, range.t1) : []; } catch (e) { jumps = []; }
       const items = ex().schedule.preflight(app.doc, app.plan, {
         webcodecs: typeof VideoEncoder === 'function', codec: pr.codec, audioCodec: pr.audioCodec, anyCodec: pr.anyCodec,
         vp9Codec: pr.vp9Codec, fontsReady: fontsReady(),
         fsAccess: ex().sink.canStream(), dirAccess: ex().sink.canDirectory(), songReady: !app.doc.song || app.songReady(),
-        warnings: app.warnings(), registry: app.reg,
+        warnings: app.warnings(), registry: app.reg, jumps,
       });
       // photos and videos (DESIGN_2_1 §11.7.8): an asset not on this device blocks, with [つなぎ直す]
       const media = app.media ? app.media.preflight() : [];

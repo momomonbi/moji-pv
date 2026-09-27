@@ -1,5 +1,6 @@
-/* 文字PVメーカー v2 — original work. Export math (frames, timestamps, audio length, sizes, codecs), formats, the Filmora kit's files and pre-flight (§4.21; DESIGN_2_1 §13). */
-MV.def('export/schedule', ['core/script', 'core/doc', 'audio/wav', 'media/samples', 'engine/scene/frame'], (script, D, WAV, SM, F) => {
+/* 文字PVメーカー v2 — original work. Export math (frames, timestamps, audio length, sizes, codecs), formats, the Filmora kit's files and pre-flight (§4.21; DESIGN_2_1 §13; DESIGN_EXTREME §3.4). */
+MV.def('export/schedule', ['core/script', 'core/doc', 'audio/wav', 'media/samples', 'engine/scene/frame', 'core/shot'],
+  (script, D, WAV, SM, F, SHOT) => {
   'use strict';
 
   class ExportError extends Error {
@@ -375,9 +376,11 @@ MV.def('export/schedule', ['core/script', 'core/doc', 'audio/wav', 'media/sample
     }
   }
 
-  // flashEvents(plan) → sorted times of full-frame flashes: strong `flash` impulses, flash seams and flash filters.
-  function flashEvents(plan) {
-    const times = [];
+  // flashEvents(plan, extra?) → sorted times of full-frame flashes: strong `flash` impulses, flash seams and flash filters;
+  // extra: more event times (DESIGN_EXTREME §3.4: the deliberate jumps of EXTREME shots, engine.xJumps, which can change
+  // the frame's brightness at once).
+  function flashEvents(plan, extra) {
+    const times = Array.isArray(extra) ? extra.filter((x) => typeof x === 'number' && Number.isFinite(x)) : [];
     const cuts = plan.cuts || [];
     for (const imp of plan.impulses || []) if (imp.kind === 'flash' && imp.amp > FLASH_SAFE_AMP) times.push(imp.t);
     for (const seam of plan.seams || []) if (seam.slot && FLASH_PARTS.seam.includes(seam.slot.v)) times.push(seam.at);
@@ -390,15 +393,24 @@ MV.def('export/schedule', ['core/script', 'core/doc', 'audio/wav', 'media/sample
     return merged;
   }
 
-  // flashRate(plan) → { count, at }: the most flashes inside any 1 s window and where that window starts.
-  function flashRate(plan) {
-    const times = flashEvents(plan);
+  // flashRate(plan, extra?) → { count, at }: the most flashes (with the extra events) inside any 1 s window and where that
+  // window starts.
+  function flashRate(plan, extra) {
+    const times = flashEvents(plan, extra);
     let count = 0, at = null;
     for (let i = 0, j = 0; i < times.length; i++) {
       while (j < times.length && times[j] - times[i] < 1) j++;
       if (j - i > count) { count = j - i; at = times[i]; }
     }
     return { count, at };
+  }
+
+  // extremeCuts(plan, t0, t1) → the cuts in [t0, t1) whose camerawork is EXTREME (DESIGN_EXTREME §3.4).
+  function extremeCuts(plan, t0, t1) {
+    return (plan.cuts || []).filter((c) => {
+      const d = c.slots ? c.slots['cam.shot'] : null;
+      return !!d && d.v !== null && d.v !== undefined && SHOT.isExtreme(d.v) && c.t1 > t0 && c.t0 < t1;
+    });
   }
 
   function lineNumber(plan, lineId) {
@@ -441,7 +453,9 @@ MV.def('export/schedule', ['core/script', 'core/doc', 'audio/wav', 'media/sample
   //   encoder at any size; undefined: not checked), vp9Codec (probe().vp9Codec: the first VP9 or VP8 string that encodes,
   //   null = none, undefined = not checked), fontsReady, fsAccess (a file can be written: showSaveFilePicker),
   //   dirAccess (a folder can be written, for the kit: showDirectoryPicker; default fsAccess), songReady (decoded audio
-  //   available), registry (the effective registry, for layers-approx), warnings (engine.warnings(); default plan.warnings) }
+  //   available), registry (the effective registry, for layers-approx), warnings (engine.warnings(); default plan.warnings),
+  //   jumps (DESIGN_EXTREME §3.4: engine.xJumps of the range, counted with the flashes) }
+  // EXTREME camerawork in the range gives the info extreme-motion { n: its cuts } (§3.4).
   // A browser without any H.264 encoder (a Chromium build without proprietary codecs) gets `no-h264` rather than
   // `no-codec`: a smaller size or frame rate would not help there. The formats (FORMATS):
   //   mp4        H.264; AAC, else Opus in MP4 with the note opus-audio, else no sound (no-audio-codec)
@@ -494,11 +508,13 @@ MV.def('export/schedule', ['core/script', 'core/doc', 'audio/wav', 'media/sample
         if (diffs.keys.length || diffs.seams) items.push({ code: 'layers-approx', level: 'info', params: diffs });
       }
     }
-    const flash = flashRate(plan);
+    const flash = flashRate(plan, e.jumps);
     if (flash.count > FLASH_LIMIT) {
       items.push({ code: 'flash-rate', level: 'warn', params: { n: flash.count, at: flash.at }, jump: { t: flash.at },
         fix: Object.assign({}, FLASH_FIX) });
     }
+    const xcuts = extremeCuts(plan, t0, t1);
+    if (xcuts.length) items.push({ code: 'extreme-motion', level: 'info', params: { n: xcuts.length }, jump: { t: xcuts[0].t0 } });
     warningItems(plan, e.warnings || plan.warnings || [], items);
     return items;
   }
@@ -509,6 +525,6 @@ MV.def('export/schedule', ['core/script', 'core/doc', 'audio/wav', 'media/sample
     frameCount, ts, frameDur, audioFrames, keyInterval, audioChunkCount, audioChunk, fillPlanar, mixMatrix,
     outputSize, bitrate, alphaBitrate, estimateBytes, estimateWebmBytes, estimatePngBytes, eta, pickAvc, pickVp9,
     exportRange, backdropFor, renderScale, fileName, frameName, kitOptions, kitBase, kitFolder, kitFiles, layerDiffs,
-    flashEvents, flashRate, preflight,
+    flashEvents, flashRate, extremeCuts, preflight,
   };
 });

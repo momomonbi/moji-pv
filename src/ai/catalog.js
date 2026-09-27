@@ -126,18 +126,26 @@ MV.def('ai/catalog', ['core/doc', 'core/ease', 'core/curve', 'core/shot', 'core/
 
   // The camera vocabulary of the direct tool: shot presets with their blurbs, the move words of a custom shot, rig
   // presets, curve presets and ease names. Names and blurbs are in the UI language; keys are what the AI answers.
-  function cameraText(lang = 'ja') {
+  // opts.extreme (DESIGN_EXTREME §2.5, the 「EXTREME」 camera request only): the EXTREME presets with their blurbs (and
+  // the ones "~m" mirrors) and the EXTREME move words of a custom shot. Without it the text is exactly as before.
+  function cameraText(lang = 'ja', opts) {
     const t = textsOf(lang);
     const shots = SHOT.SHOT_KEYS.map((k) => k + '=' + t('shot.' + k) + ': ' + t('shot.blurb.' + k)).join('; ');
     const rigs = SHOT.RIG_KEYS.map((k) => k + '=' + t('rig.' + k)).join(', ');
     const curves = CV.PRESET_KEYS.map((k) => k + '=' + t('curve.' + k)).join(', ');
+    const extreme = opts && opts.extreme ? [
+      '[extreme shots] ' + SHOT.XSHOT_KEYS.map((k) => k + '=' + t('shot.' + k) + ': ' + t('shot.blurb.' + k)).join('; ')
+        + ' · mirror with ~m: ' + SHOT.MIRRORS.join(' '),
+      '[extreme moves] move: ' + SHOT.XMOVES.join(' ') + ' · power 0.3-1 · dir: ' + SHOT.DIRS.join(' '),
+    ] : [];
     return [
       '[shots] ' + shots + '; none=' + t('shot.none'),
       '[custom shot] move: ' + SHOT.MOVES.join(' ') + ' · focus: ' + SHOT.FOCI.join(' ') + ' · timing: ' + SHOT.TIMINGS.join(' '),
+    ].concat(extreme, [
       '[rigs] ' + rigs + ', none=' + t('rig.none'),
       '[curves] ' + curves,
       '[eases] ' + E.EASES.join(' '),
-    ].join('\n');
+    ]).join('\n');
   }
 
   // What a material recipe may hold, generated from core/recipe (so the prompt and the validator cannot drift apart).
