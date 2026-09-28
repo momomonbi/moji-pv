@@ -6,6 +6,9 @@ MV.def('ai/looks', ['core/color', 'core/doc', 'core/pins', 'core/lyrics', 'plann
   const AI_AMOUNTS = Object.freeze(['motion', 'glitch', 'chroma', 'ornament', 'density', 'texture', 'groundSwitch']);
   const SEASON_ENUM = Object.freeze(['spring', 'summer', 'autumn', 'winter', 'none', 'any']);
   const KEEP_ON_OFF = Object.freeze(['keep', 'on', 'off']);
+  // キメ (PV22 P3, DESIGN_2_2 §3): a proposal may mark one line (its punchline) as a キメ line: "on" marks it, "off"
+  // removes a mark, "" keeps the line as it is.
+  const KIME_VALUES = Object.freeze(['', 'on', 'off']);
   const HEX = /^#[0-9a-fA-F]{6}$/;
   const MAX_FILTER_REFS = 40;
   const MAX_EMPHASIS = 2;
@@ -20,12 +23,13 @@ MV.def('ai/looks', ['core/color', 'core/doc', 'core/pins', 'core/lyrics', 'plann
   const PALETTE_SCHEMA = { type: 'object', additionalProperties: false, required: ['accent', 'shiftA', 'shiftB'],
     properties: { accent: { type: 'string' }, shiftA: { type: 'string' }, shiftB: { type: 'string' } } };
   const STRINGS = { type: 'array', items: { type: 'string' } };
-  const PROPOSAL_LINE = { type: 'object', additionalProperties: false, required: ['i', 'arrange', 'arrive', 'depart', 'dwell'],
-    properties: { i: { type: 'integer' }, arrange: { type: 'string' }, arrive: { type: 'string' }, depart: { type: 'string' },
-      dwell: { type: 'string' } } };
+  const LINE_PARTS = { i: { type: 'integer' }, arrange: { type: 'string' }, arrive: { type: 'string' }, depart: { type: 'string' },
+    dwell: { type: 'string' } };
+  const PROPOSAL_LINE = { type: 'object', additionalProperties: false, required: ['i', 'arrange', 'arrive', 'depart', 'dwell', 'kime'],
+    properties: Object.assign({}, LINE_PARTS, { kime: { type: 'string', enum: KIME_VALUES.slice() } }) };
   const EDIT_LINE = { type: 'object', additionalProperties: false,
     required: ['i', 'arrange', 'arrive', 'depart', 'dwell', 'impact', 'emphasis'],
-    properties: Object.assign({}, PROPOSAL_LINE.properties, { impact: { type: 'string', enum: KEEP_ON_OFF.slice() }, emphasis: STRINGS }) };
+    properties: Object.assign({}, LINE_PARTS, { impact: { type: 'string', enum: KEEP_ON_OFF.slice() }, emphasis: STRINGS }) };
 
   const PROPOSALS_SCHEMA = deepFreeze({
     type: 'object', additionalProperties: false, required: ['topic', 'season', 'proposals'],
@@ -150,6 +154,8 @@ MV.def('ai/looks', ['core/color', 'core/doc', 'core/pins', 'core/lyrics', 'plann
         + 'parts to avoid because they clash with the meaning (e.g. glitch effects for a quiet ballad), and for 2-6 key lines '
         + '(the hook / chorus / climax) a composition (arrange), entrance (arrive), exit (depart) and hold (dwell) from the '
         + 'lists ("" = keep).',
+      'kime: at most one line per proposal, the punchline, may be "on"; it is shown boldly in one cut and never flashes. '
+        + '"off" removes an existing kime mark, "" keeps the line as it is.',
       LOOK_RULES,
       'Write "topic" (what the lyrics are about), "title" (a few words) and "concept" (one or two sentences that tie the look '
         + 'to the lyrics) in ' + outLang(uiLang) + '.',
@@ -427,6 +433,39 @@ MV.def('ai/looks', ['core/color', 'core/doc', 'core/pins', 'core/lyrics', 'plann
     return lyric;
   }
 
+  // キメ (PV22 P3, DESIGN_2_2 §3) of a proposal's lines → value changes of the line pin `line/<id>:kime` (by 'ai' on
+  // apply; "off" clears a mark). At most one "on" per proposal: later ones are dropped with a warning. A locked line keeps
+  // its look (warned once with its other picks); a line already marked, or "off" on a line without a mark, changes
+  // nothing.
+  function kimeChanges(ctx, lines, warn, out) {
+    let on = 0;
+    const seen = new Set();
+    for (const l of Array.isArray(lines) ? lines : []) {
+      const want = l && (l.kime === 'on' || l.kime === 'off') ? l.kime : '';
+      const i = l && Number.isInteger(l.i) ? l.i : -1;
+      if (!want || seen.has(i)) continue;
+      const found = ctx.lineAt(i);
+      if (found.warn) continue;                                      // lineChanges said so already
+      seen.add(i);
+      const line = found.line;
+      if (ctx.target && !ctx.target.includes(line.id)) continue;
+      if (line.locked) {
+        if (!CAT.LINE_KINDS.some((kind) => String(l[kind] || '').trim())) warn(['ai.warn.locked', { n: i + 1 }]);
+        continue;
+      }
+      const path = 'line/' + line.id + ':kime';
+      const own = ctx.doc.pins[path];
+      const marked = !!own && own.v === true;
+      if (want === 'on') {
+        if (on++ >= 1) { warn(['ai.warn.kimeOne', { n: i + 1 }]); continue; }
+        if (marked) continue;
+      } else if (!own) continue;
+      out.push(CH.make(ctx.doc, { id: 'kime:' + line.id, kind: 'value', scope: 'line', lineId: line.id, rowId: line.row, n: i + 1,
+        path, field: 'fld.kime', from: own ? own.v : null, fromSource: own ? 'pin:line' : 'auto', to: want === 'on' ? true : null,
+        label: [want === 'on' ? 'ai.ch.kime.on' : 'ai.ch.kime.off', { n: i + 1 }] }, ctx.opts));
+    }
+  }
+
   // Impact / emphasis requests → lyric changes on the lines' rows, each checked with the row's earlier accepted edits so
   // the words never change. Requests that change nothing are dropped.
   function lyricChanges(ctx, reqs, warn, out) {
@@ -512,7 +551,9 @@ MV.def('ai/looks', ['core/color', 'core/doc', 'core/pins', 'core/lyrics', 'plann
     const list = ((json && Array.isArray(json.proposals)) ? json.proposals : []).slice(0, 3).map((p, k) => {
       const w = [];
       const a = Object.assign({}, p, { season, flash: !!(p && p.flash), allow: [] });
-      const res = lookChanges(contextOf(doc, plan, registry, opts, shared, 'p' + k + ':', true), a, (x) => { w.push(x); });
+      const ctx = contextOf(doc, plan, registry, opts, shared, 'p' + k + ':', true);
+      const res = lookChanges(ctx, a, (x) => { w.push(x); });
+      kimeChanges(ctx, a.lines, (x) => { w.push(x); }, res.changes);
       warnings.push(...w);
       const named = (kind) => (res.changes.find((c) => c.kind === kind) || {}).to || null;
       return {

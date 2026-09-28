@@ -1,6 +1,6 @@
 <!doctype html><html lang="ja"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-CIhKmmLoBC+GU+WsEoWCzIwE/vlDGJAk4upFZKmLh5w='; style-src 'sha256-CBzRvq4sWr3CF69hafDp1l8UkHnSy18JQMXGJJhPDYI=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-vfYaE2f+NoS3D5TroLP5FMAGfxrjrE0TX3pUYddrSok='; style-src 'sha256-bqU91oJqdJJ1KHUzYFa+dZ+egQxVjNFQtuHCW7/O8oo=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
 <title>文字PVメーカー</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -291,6 +291,7 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent);
 .tok-emphText { color: #ffd98f; }
 .tok-impact { color: var(--error); }
 .tok-note { color: #8fd3c1; }
+.tok-cutOff { color: #5d6573; }
 /* The same colours as highlights over a row's one text node (lyric_editor.js), where the engine has them. Rules of
    their own: an engine that does not know ::highlight() drops the whole rule. */
 .le-row::highlight(tok-comment) { color: #7c8596; }
@@ -300,6 +301,8 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent);
 .le-row::highlight(tok-emphText) { color: #ffd98f; }
 .le-row::highlight(tok-impact) { color: var(--error); }
 .le-row::highlight(tok-note) { color: #8fd3c1; }
+/* A '/' with no effect: a キメ line that plays as one cut (PV22 P3). */
+.le-row::highlight(tok-cutOff) { color: #5d6573; }
 .le-g {
   position: absolute; left: 0; width: 74px; box-sizing: border-box; display: flex; align-items: flex-start; gap: 3px; pointer-events: auto;
   padding: 0 4px 0 7px; font: 10.5px/var(--le-lh) var(--mono); color: var(--muted); cursor: pointer; white-space: nowrap; overflow: hidden;
@@ -310,6 +313,7 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent);
 .g-time.is-lrc { color: #8fc8ff; }
 .g-badge { font-size: 8px; color: #8fc8ff; }
 .g-lock { color: var(--gold); font-weight: 700; }
+.g-kime { color: var(--accent); font-weight: 800; }
 .g-pins { color: #ffb3a3; }
 .g-warn { color: var(--error); font-weight: 800; }
 .g-heading { color: #7c8596; }
@@ -665,6 +669,7 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent);
 .ell { min-width: 0; }
 .mono { font-family: var(--mono); font-size: 11.5px; }
 .insp-other, .insp-shift, .insp-note { display: flex; flex-direction: column; gap: 8px; }
+.insp-kime { display: flex; flex-direction: column; gap: 4px; margin: -2px 0 8px; }
 .insp-orphan { display: flex; align-items: center; gap: 8px; font-size: 12px; }
 .sub-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
 .sub-title { margin: 0; font-size: 14px; font-weight: 800; }
@@ -14012,6 +14017,23 @@ MV.def('i18n/strings', [], () => ({
   'whyRule.kime.x': ['キメの行なので一番強い動き', 'The strongest move for a kime line'],
   'whyRule.kime.noFlash': ['キメの行からは光らずに切り替える', 'No flash on the way out of a kime line'],
   'whyRule.kime.set': ['キメの行なので、大胆な見せ方の最初の候補にした', 'A kime line, so the first of the bold choices'],
+  'fld.kime': ['キメ', 'Kime'],
+  'fld.kime.note': ['この行を1カットで大胆に見せます。大きな構図・見出しの書体・強い入り・長めの止めで、直前のカットは静かにします。見せ場（!）と違って光や揺れは加えません（両方つけることもできます）。/ で分けていても1カットで見せます（長すぎる行は分けたまま、一番大事なカットを大胆にします）。',
+    'Shows this line boldly in one cut: a big layout, the heading face, a strong entrance and a longer hold, with the cuts before it kept quiet. Unlike Impact (!) it adds no flash or shake (a line can have both). It plays as one cut even with / marks (a very long line keeps its cuts and makes its key cut bold).'],
+  'fld.kime.count': ['この作品のキメ: {n}行', 'Kime lines in this video: {n}'],
+  'fld.kime.many': ['キメが多すぎると、どれも目立たなくなります（目安は{max}行まで）', 'With too many kime lines none stands out (about {max} at most)'],
+  'fld.kime.same': ['同じ歌詞の行（{n}行）もキメにする', 'Make the same lyric a kime line too ({n} line)|Make the same lyric a kime line too ({n} lines)'],
+  'fld.kime.split': ['この行は長いので、カットは分けたまま「{text}」を大胆に見せます', 'This line is long, so it keeps its cuts and shows “{text}” boldly'],
+  'fld.kimeCalm': ['キメの前を静かにする', 'Quiet cuts before a kime'],
+  'fld.kimeCalm.note': ['キメの直前の1〜2カットの飾り・画面効果・動きを控えめにして、キメを引き立てます。',
+    'Keeps decorations, screen effects and motion down on the one or two cuts before a kime line, so it stands out.'],
+  'lyr.kimeBadge': ['キ', 'K'],
+  'syn.kime.mark': ['キメ', 'Kime'],
+  'syn.kime': ['一行を大胆に見せる印（見た目 › 行 で付けます）', 'Shows one line boldly (set it in Look › Line)'],
+  'undo.kimeSame': ['同じ歌詞の行をキメに（{n}行）', 'Kime on the same lyric ({n} line)|Kime on the same lyric ({n} lines)'],
+  'ai.ch.kime.on': ['{n}行 · キメにする', 'Line {n} · make it a kime line'],
+  'ai.ch.kime.off': ['{n}行 · キメをやめる', 'Line {n} · no longer a kime line'],
+  'ai.warn.kimeOne': ['{n}行はキメにしませんでした（キメは1案に1行まで）', 'Line {n} was not made a kime line (one kime line per proposal)'],
 
   // --- PV22 P4 (モーフ・太さ) ---
 
@@ -46440,6 +46462,9 @@ MV.def('ai/looks', ['core/color', 'core/doc', 'core/pins', 'core/lyrics', 'plann
   const AI_AMOUNTS = Object.freeze(['motion', 'glitch', 'chroma', 'ornament', 'density', 'texture', 'groundSwitch']);
   const SEASON_ENUM = Object.freeze(['spring', 'summer', 'autumn', 'winter', 'none', 'any']);
   const KEEP_ON_OFF = Object.freeze(['keep', 'on', 'off']);
+  // キメ (PV22 P3, DESIGN_2_2 §3): a proposal may mark one line (its punchline) as a キメ line: "on" marks it, "off"
+  // removes a mark, "" keeps the line as it is.
+  const KIME_VALUES = Object.freeze(['', 'on', 'off']);
   const HEX = /^#[0-9a-fA-F]{6}$/;
   const MAX_FILTER_REFS = 40;
   const MAX_EMPHASIS = 2;
@@ -46454,12 +46479,13 @@ MV.def('ai/looks', ['core/color', 'core/doc', 'core/pins', 'core/lyrics', 'plann
   const PALETTE_SCHEMA = { type: 'object', additionalProperties: false, required: ['accent', 'shiftA', 'shiftB'],
     properties: { accent: { type: 'string' }, shiftA: { type: 'string' }, shiftB: { type: 'string' } } };
   const STRINGS = { type: 'array', items: { type: 'string' } };
-  const PROPOSAL_LINE = { type: 'object', additionalProperties: false, required: ['i', 'arrange', 'arrive', 'depart', 'dwell'],
-    properties: { i: { type: 'integer' }, arrange: { type: 'string' }, arrive: { type: 'string' }, depart: { type: 'string' },
-      dwell: { type: 'string' } } };
+  const LINE_PARTS = { i: { type: 'integer' }, arrange: { type: 'string' }, arrive: { type: 'string' }, depart: { type: 'string' },
+    dwell: { type: 'string' } };
+  const PROPOSAL_LINE = { type: 'object', additionalProperties: false, required: ['i', 'arrange', 'arrive', 'depart', 'dwell', 'kime'],
+    properties: Object.assign({}, LINE_PARTS, { kime: { type: 'string', enum: KIME_VALUES.slice() } }) };
   const EDIT_LINE = { type: 'object', additionalProperties: false,
     required: ['i', 'arrange', 'arrive', 'depart', 'dwell', 'impact', 'emphasis'],
-    properties: Object.assign({}, PROPOSAL_LINE.properties, { impact: { type: 'string', enum: KEEP_ON_OFF.slice() }, emphasis: STRINGS }) };
+    properties: Object.assign({}, LINE_PARTS, { impact: { type: 'string', enum: KEEP_ON_OFF.slice() }, emphasis: STRINGS }) };
 
   const PROPOSALS_SCHEMA = deepFreeze({
     type: 'object', additionalProperties: false, required: ['topic', 'season', 'proposals'],
@@ -46584,6 +46610,8 @@ MV.def('ai/looks', ['core/color', 'core/doc', 'core/pins', 'core/lyrics', 'plann
         + 'parts to avoid because they clash with the meaning (e.g. glitch effects for a quiet ballad), and for 2-6 key lines '
         + '(the hook / chorus / climax) a composition (arrange), entrance (arrive), exit (depart) and hold (dwell) from the '
         + 'lists ("" = keep).',
+      'kime: at most one line per proposal, the punchline, may be "on"; it is shown boldly in one cut and never flashes. '
+        + '"off" removes an existing kime mark, "" keeps the line as it is.',
       LOOK_RULES,
       'Write "topic" (what the lyrics are about), "title" (a few words) and "concept" (one or two sentences that tie the look '
         + 'to the lyrics) in ' + outLang(uiLang) + '.',
@@ -46861,6 +46889,39 @@ MV.def('ai/looks', ['core/color', 'core/doc', 'core/pins', 'core/lyrics', 'plann
     return lyric;
   }
 
+  // キメ (PV22 P3, DESIGN_2_2 §3) of a proposal's lines → value changes of the line pin `line/<id>:kime` (by 'ai' on
+  // apply; "off" clears a mark). At most one "on" per proposal: later ones are dropped with a warning. A locked line keeps
+  // its look (warned once with its other picks); a line already marked, or "off" on a line without a mark, changes
+  // nothing.
+  function kimeChanges(ctx, lines, warn, out) {
+    let on = 0;
+    const seen = new Set();
+    for (const l of Array.isArray(lines) ? lines : []) {
+      const want = l && (l.kime === 'on' || l.kime === 'off') ? l.kime : '';
+      const i = l && Number.isInteger(l.i) ? l.i : -1;
+      if (!want || seen.has(i)) continue;
+      const found = ctx.lineAt(i);
+      if (found.warn) continue;                                      // lineChanges said so already
+      seen.add(i);
+      const line = found.line;
+      if (ctx.target && !ctx.target.includes(line.id)) continue;
+      if (line.locked) {
+        if (!CAT.LINE_KINDS.some((kind) => String(l[kind] || '').trim())) warn(['ai.warn.locked', { n: i + 1 }]);
+        continue;
+      }
+      const path = 'line/' + line.id + ':kime';
+      const own = ctx.doc.pins[path];
+      const marked = !!own && own.v === true;
+      if (want === 'on') {
+        if (on++ >= 1) { warn(['ai.warn.kimeOne', { n: i + 1 }]); continue; }
+        if (marked) continue;
+      } else if (!own) continue;
+      out.push(CH.make(ctx.doc, { id: 'kime:' + line.id, kind: 'value', scope: 'line', lineId: line.id, rowId: line.row, n: i + 1,
+        path, field: 'fld.kime', from: own ? own.v : null, fromSource: own ? 'pin:line' : 'auto', to: want === 'on' ? true : null,
+        label: [want === 'on' ? 'ai.ch.kime.on' : 'ai.ch.kime.off', { n: i + 1 }] }, ctx.opts));
+    }
+  }
+
   // Impact / emphasis requests → lyric changes on the lines' rows, each checked with the row's earlier accepted edits so
   // the words never change. Requests that change nothing are dropped.
   function lyricChanges(ctx, reqs, warn, out) {
@@ -46946,7 +47007,9 @@ MV.def('ai/looks', ['core/color', 'core/doc', 'core/pins', 'core/lyrics', 'plann
     const list = ((json && Array.isArray(json.proposals)) ? json.proposals : []).slice(0, 3).map((p, k) => {
       const w = [];
       const a = Object.assign({}, p, { season, flash: !!(p && p.flash), allow: [] });
-      const res = lookChanges(contextOf(doc, plan, registry, opts, shared, 'p' + k + ':', true), a, (x) => { w.push(x); });
+      const ctx = contextOf(doc, plan, registry, opts, shared, 'p' + k + ':', true);
+      const res = lookChanges(ctx, a, (x) => { w.push(x); });
+      kimeChanges(ctx, a.lines, (x) => { w.push(x); }, res.changes);
       warnings.push(...w);
       const named = (kind) => (res.changes.find((c) => c.kind === kind) || {}).to || null;
       return {
@@ -60671,8 +60734,8 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
   });
 /* 文字PVメーカー v2 — original work. Inspector field catalogue: FieldSpecs per page and section, and sectionsFor (DESIGN §6.4.4–§6.4.9, §4.23). */
 MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color', 'core/ease', 'core/doc', 'ui/selection',
-  'core/curve', 'core/shot', 'core/media', 'ui/media_widgets', 'planner/extreme'],
-  (P, R, SC, C, E, D, S, CV, SHOT, MEDIA, MW, XT) => {
+  'core/curve', 'core/shot', 'core/media', 'ui/media_widgets', 'planner/extreme', 'planner/kime'],
+  (P, R, SC, C, E, D, S, CV, SHOT, MEDIA, MW, XT, KI) => {
     'use strict';
 
     // A FieldSpec (§4.23) is one row of the inspector: { id, path, scopes, el?, section, widget, label, hint?, basic,
@@ -60684,7 +60747,10 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
     // generated part parameter; its `label` is 'fld.param' = '{name}'), `param` (generated part parameters),
     // `firstCut` (the line page's 切り替え: written at the line's first cut, §6.4.6), `pinnedOnly` (a pinned parameter
     // of a part that is no longer chosen, shown as 無効), `note` (a string key shown under the row), `offClears` (a toggle
-    // whose off is 自動: turning it off clears the pin), `noDice` (a setting, not drawn: no 振り直し).
+    // whose off is 自動: turning it off clears the pin), `onClears` (a toggle that is on by default, whose on is 自動:
+    // turning it on clears the pin, off pins false; 「キメの前を静かにする」), `noDice` (a setting, not drawn: no 振り直し),
+    // `after` (a custom block the inspector draws right under the row: 「キメ」's count and buttons), `readEach` (a row of
+    // the several-lines page that reads every selected line's value and shows いろいろ when they differ).
 
     const ALL = Object.freeze(['work', 'line', 'cut']);
     const WORK = Object.freeze(['work']);
@@ -60706,8 +60772,10 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
 
     // --- the slot catalogue (§3.4.1–§3.4.3): which scopes a slot is valid at --------------------------------------
 
-    const WORK_NAMES = new Set(['mood', 'theme', 'bpm', 'beatOffset', 'readRate', 'length', 'titleCard']);
-    const LINE_NAMES = new Set(['start', 'end', 'split', 'lang', 'avoid']);
+    // キメ (PV22 P3, DESIGN_2_2 §3): the mark of a line (`kime`, line only) and 「キメの前を静かにする」 (`kime.calm`, the
+    // whole video only).
+    const WORK_NAMES = new Set(['mood', 'theme', 'bpm', 'beatOffset', 'readRate', 'length', 'titleCard', 'kime.calm']);
+    const LINE_NAMES = new Set(['start', 'end', 'split', 'lang', 'avoid', 'kime']);
     // v2.1 (DESIGN_2_1 §2.3): camerawork, motion speed and the section camera cascade cut > line > work; the line season
     // is a line value that may also be pinned for the whole video (the existing work:season).
     const CUT_NAMES = new Set(['orient', 'text.face', 'text.scale', 'text.ink', 'text.style', 'motion.speed', 'cam.shot',
@@ -60961,6 +61029,10 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
           // on pins true for the whole video; off clears the pin (off is the default).
           F({ path: REPEAT_SAME, scopes: WORK, widget: 'toggle', label: 'fld.repeatSame', spec: { type: 'bool' },
             note: 'fld.repeatSame.note', offClears: true, noDice: true }),
+          // キメ (DESIGN_2_2 §3): on unless the user turns it off (off pins false; on clears the pin); it acts only next to
+          // a line marked キメ.
+          F({ path: 'kime.calm', scopes: WORK, widget: 'toggle', label: 'fld.kimeCalm', spec: { type: 'bool' },
+            note: 'fld.kimeCalm.note', onClears: true, noDice: true, basic: false }),
         ]),
         // 写真・動画 (DESIGN_2_1 §11.7.3): the library, open when it holds something.
         sec('media', (ctx) => ctx.mediaCount > 0, [], { custom: 'media' }),
@@ -61011,6 +61083,10 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
         sec('marks', true, [
           F({ cmd: { t: 'lyrics.row', key: 'emph' }, scopes: LINE, widget: 'words', label: 'fld.emph' }),
           F({ cmd: { t: 'lyrics.row', key: 'impact' }, scopes: LINE, widget: 'toggle', label: 'fld.impact' }),
+          // キメ (DESIGN_2_2 §3): a line pin (on pins true, off clears it); under it the work's count, the too-many hint,
+          // 「同じ歌詞の行もキメにする」 and the long-line note (the inspector's custom block kimeInfo).
+          F({ path: 'kime', scopes: LINE, widget: 'toggle', label: 'fld.kime', spec: { type: 'bool' }, note: 'fld.kime.note',
+            offClears: true, noDice: true, after: 'kimeInfo' }),
           F({ path: 'split', scopes: LINE, widget: 'cutpoints', label: 'fld.split' }),
           F({ cmd: { t: 'lyrics.row', key: 'note' }, scopes: LINE, widget: 'text', label: 'fld.note', spec: SPEC.text }),
           F({ path: 'lang', scopes: LINE, widget: 'choice', label: 'fld.lang', spec: enumSpec(LANGS),
@@ -61588,11 +61664,38 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
       return bare ? areaLabel(t, area) : t('area.title', { area: areaLabel(t, area), n: area.n });
     }
 
+    // --- キメ (PV22 P3, DESIGN_2_2 §3.4 j) ------------------------------------------------------------------------------
+
+    // kimeInfo(plan, doc, lineId) → what 行 › 文字の記号 shows under 「キメ」: { n, max, many, on, same, split }. `n` counts
+    // the work's キメ lines as the Plan shows them (a line with a キメ cut, feat.kime: a stale or refused pin counts none),
+    // `max` is the guideline (planner/kime guideline: max(3, 15 % of the lyric lines)) and `many` says n exceeds it (a
+    // hint, not a Plan warning). `on`: this line is キメ. `same`: the ids of the other lines that sing the same words
+    // without their own mark (「同じ歌詞の行もキメにする」; only while this line is キメ). `split`: the text of the キメ cut
+    // when this line is too long for one cut and keeps several (else null).
+    function kimeInfo(plan, doc, lineId) {
+      const lines = plan && Array.isArray(plan.lines) ? plan.lines : [];
+      const kimeCut = (l) => {
+        for (const k of l.cuts || []) {
+          const c = cutByKey(plan, k);
+          if (c && c.feat && c.feat.kime) return c;
+        }
+        return null;
+      };
+      const n = lines.filter((l) => kimeCut(l)).length;
+      const line = lines.find((l) => l.id === lineId) || null;
+      const own = line ? kimeCut(line) : null;
+      const pins = (doc && doc.pins) || {};
+      const marked = (id) => !!pins['line/' + id + ':kime'] && pins['line/' + id + ':kime'].v === true;
+      const same = own ? lines.filter((l) => l !== line && l.text === line.text && !marked(l.id)).map((l) => l.id) : [];
+      const max = KI.guideline(lines.length);
+      return { n, max, many: n > max, on: !!own, same, split: own && line.cuts.length > 1 ? own.text : null };
+    }
+
     return {
       WIDGETS, FIELDS, PAGES: PAGE_SECTIONS, FACE_ROLES, FACE_SCRIPTS, LIST_KINDS, SLOT_KINDS, COMMANDS_USED, SNAPS, SEASONS,
       PARAM_LABEL, sectionsFor, contextOf, pageOf, paramFields, widgetFor, optionsFor, slotScopes, fieldPath, decisionsOf, freeIndex,
       agreedKey, sharedNames, pathsFor, clearPathsFor, firstCutScope, pinnedSlots, withPinnedParams, writePath, writeScope,
-      pinCmd, whyParts, whyRuleKey, areaLabel, areaTitle,
+      pinCmd, whyParts, whyRuleKey, areaLabel, areaTitle, kimeInfo,
     };
   });
 /* 文字PVメーカー v2 — original work. 区画ごとに指示: the board sub-page of the AI tab, one instruction per area, sent together (DESIGN_2_1 §6.3). */
@@ -61814,13 +61917,17 @@ MV.def('ui/lyric_editor', ['ui/dom', 'ui/selection', 'i18n/t', 'core/lyrics', 'p
   const GUTTER_MARGIN_PX = 240;           // gutter entries are built for the visible rows plus this much above and below
   const STAMP = /^\[\d{1,3}:\d{1,2}(?:[.:]\d{1,3})?\]/;
   const WARN_CODES = new Set(['overfull', 'orphan-pin', 'shadowed-pin', 'lock-partial', 'pin-not-applicable', 'time-order']);
-  const TOKENS = ['tok-comment', 'tok-meta', 'tok-stamp', 'tok-cut', 'tok-emph', 'tok-emphText', 'tok-impact', 'tok-note'];
+  // tok-cutOff (PV22 P3, DESIGN_2_2 §3): a '/' that has no effect, on a キメ line that plays as one cut (drawn dimmed)
+  const TOKENS = ['tok-comment', 'tok-meta', 'tok-stamp', 'tok-cut', 'tok-emph', 'tok-emphText', 'tok-impact', 'tok-note',
+    'tok-cutOff'];
 
   // --- mark tinting (display only; the parser is core/lyrics) --------------------------------------------------
 
   // Splits one row into [text, className] segments whose concatenation is exactly the row, so the mirror keeps the
-  // textarea's metrics (only colours change, never widths).
-  function segments(src) {
+  // textarea's metrics (only colours change, never widths). opts.cutOff: the row's '/' marks have no effect (a キメ line
+  // that plays as one cut), so they are tok-cutOff instead of tok-cut.
+  function segments(src, opts) {
+    const cutCls = opts && opts.cutOff ? 'tok-cutOff' : 'tok-cut';
     const trimmed = src.trim();
     if (!trimmed) return [[src, '']];
     if (trimmed[0] === '#') return [[src, 'tok-comment']];
@@ -61841,7 +61948,7 @@ MV.def('ui/lyric_editor', ['ui/dom', 'ui/selection', 'i18n/t', 'core/lyrics', 'p
       if (i === bang) { flush(emph ? 'tok-emphText' : ''); out.push([ch, 'tok-impact']); continue; }
       if (ch === '/' || ch === '*') {
         flush(emph ? 'tok-emphText' : '');
-        out.push([ch, ch === '/' ? 'tok-cut' : 'tok-emph']);
+        out.push([ch, ch === '/' ? cutCls : 'tok-emph']);
         if (ch === '*') emph = !emph;
         continue;
       }
@@ -62014,7 +62121,7 @@ MV.def('ui/lyric_editor', ['ui/dom', 'ui/selection', 'i18n/t', 'core/lyrics', 'p
     // --- mirror and gutter -------------------------------------------------------------------------------------
 
     const inks = tokenInks();               // token class → Highlight, or null (spans)
-    const inked = new Map();                // mirror row → its highlight ranges, as [class, range]
+    const inked = new Map();                // mirror row → { ranges: [class, range], off: whether its '/' are tok-cutOff }
 
     // A row is as tall as its own line boxes, like the textarea's line. A blank row ends with <br>, as the textarea's
     // line ends with '\n', so it still has one line box. The row's text is one text node, as the textarea's line is
@@ -62034,18 +62141,25 @@ MV.def('ui/lyric_editor', ['ui/dom', 'ui/selection', 'i18n/t', 'core/lyrics', 'p
     // Highlight ranges only for the rows in and near the editor's viewport (the gutter's rows). WebKit walks every
     // registered range for each line of text it paints (MarkedText::collectForHighlights), so their number stays that
     // of a screenful however long the lyrics are.
-    function inkRows(from, to) {
+    // offAt(i) → whether row i's '/' marks have no effect (a キメ line in one cut); a row inked the other way is inked
+    // again.
+    function inkRows(from, to, offAt) {
       if (!inks) return;
       const keep = new Set(rowEls.slice(from, to));
       for (const el of inked.keys()) if (!keep.has(el)) unink(el);
-      for (let i = from; i < to; i++) if (!inked.has(rowEls[i])) ink(rowEls[i], rowSrcs[i]);
+      for (let i = from; i < to; i++) {
+        const off = !!(offAt && offAt(i));
+        const had = inked.get(rowEls[i]);
+        if (had && had.off !== off) unink(rowEls[i]);
+        if (!inked.has(rowEls[i])) ink(rowEls[i], rowSrcs[i], off);
+      }
     }
 
-    function ink(el, src) {
+    function ink(el, src, off) {
       const node = el.firstChild;
       const ranges = [];
       let at = 0;
-      for (const [text, cls] of segments(src)) {
+      for (const [text, cls] of segments(src, { cutOff: off })) {
         if (cls && node && node.nodeType === 3) {
           const range = new StaticRange({ startContainer: node, startOffset: at, endContainer: node, endOffset: at + text.length });
           inks.get(cls).add(range);
@@ -62053,13 +62167,13 @@ MV.def('ui/lyric_editor', ['ui/dom', 'ui/selection', 'i18n/t', 'core/lyrics', 'p
         }
         at += text.length;
       }
-      inked.set(el, ranges);
+      inked.set(el, { ranges, off: !!off });
     }
 
     function unink(el) {
-      const ranges = inked.get(el);
-      if (!ranges) return;
-      for (const [cls, range] of ranges) inks.get(cls).delete(range);
+      const had = inked.get(el);
+      if (!had) return;
+      for (const [cls, range] of had.ranges) inks.get(cls).delete(range);
       inked.delete(el);
     }
 
@@ -62114,13 +62228,28 @@ MV.def('ui/lyric_editor', ['ui/dom', 'ui/selection', 'i18n/t', 'core/lyrics', 'p
       onTime(app.time ? app.time() : 0);
     }
 
+    // Pins per row (lock pins and キメ marks aside: the lock and the キ badge show those).
     function pinCounts(doc) {
       const counts = new Map();
       for (const path of Object.keys(doc.pins)) {
         const m = /^(?:line|cut)\/(r[0-9a-z]+)(?:[.~:]|$)/.exec(path);
-        if (m && doc.pins[path].by !== 'lock') counts.set(m[1], (counts.get(m[1]) || 0) + 1);
+        if (m && doc.pins[path].by !== 'lock' && !path.endsWith(':kime')) counts.set(m[1], (counts.get(m[1]) || 0) + 1);
       }
       return counts;
+    }
+
+    // The rows whose '/' marks have no effect: every line of the row is a キメ line that plays as one cut (its cut has
+    // feat.kime, DESIGN_2_2 §3). A row sung again (r5, r5.1) counts only when all of its lines are.
+    function cutOffRows(plan) {
+      const out = new Map();
+      if (!plan) return out;
+      const cutKime = new Set(plan.cuts.filter((c) => c.feat && c.feat.kime).map((c) => c.key));
+      for (const l of plan.lines) {
+        const row = l.row || l.id.split('.')[0];
+        const one = l.cuts.length === 1 && cutKime.has(l.cuts[0]);
+        out.set(row, (out.has(row) ? out.get(row) : true) && one);
+      }
+      return out;
     }
 
     function scheduleGutter() {
@@ -62177,7 +62306,9 @@ MV.def('ui/lyric_editor', ['ui/dom', 'ui/selection', 'i18n/t', 'core/lyrics', 'p
         frag.appendChild(entry);
       }
       dom.replace(gutter, frag);
-      if (root.clientHeight) inkRows(first, end);     // hidden (another step), rows have no positions: onShow re-renders
+      const off = aligned ? cutOffRows(plan) : null;
+      const offAt = off ? (i) => { const row = doc.sheet.rows[i]; return !!row && off.get(row.id) === true; } : null;
+      if (root.clientHeight) inkRows(first, end, offAt);   // hidden (another step), rows have no positions: onShow re-renders
     }
 
     function fillEntry(entry, line, doc, pins, warn) {
@@ -62187,10 +62318,14 @@ MV.def('ui/lyric_editor', ['ui/dom', 'ui/selection', 'i18n/t', 'core/lyrics', 'p
       entry.append(time);
       if (by === 'lrc') entry.append(h('span', { class: 'g-badge', text: 'LRC' }));
       if (doc.locks[line.id]) entry.append(h('span', { class: 'g-lock', title: t('state.locked'), text: 'L' }));
+      // キメ (DESIGN_2_2 §3): the line's mark, which the lyric text does not show
+      const kime = !!doc.pins['line/' + line.id + ':kime'] && doc.pins['line/' + line.id + ':kime'].v === true;
+      if (kime) entry.append(h('span', { class: 'g-kime', title: t('fld.kime'), text: t('lyr.kimeBadge') }));
       if (pins) entry.append(h('span', { class: 'g-pins', title: t('lyr.pinCount', { n: pins }), text: '●' + pins }));
       if (warn) entry.append(h('span', { class: 'g-warn', title: t('warn.' + warn), text: '!' }));
       const words = [T.fmtTime(line.t0), t('state.' + (by === 'pin' ? 'pinned' : by === 'lrc' ? 'mark' : 'auto'))];
       if (doc.locks[line.id]) words.push(t('state.locked'));
+      if (kime) words.push(t('fld.kime'));
       if (pins) words.push(t('lyr.pinCount', { n: pins }));
       entry.setAttribute('aria-label', t('lyr.gutterEntry', { n: line.index + 1, what: words.join(', ') }));
       entry.tabIndex = -1;
@@ -67677,7 +67812,9 @@ MV.def('ui/step_lyrics', ['ui/dom', 'ui/icons', 'ui/lyric_editor', 'i18n/t'], (d
   'use strict';
 
   const { h } = dom;
-  const SYNTAX = ['syn.line', 'syn.blank', 'syn.cut', 'syn.emph', 'syn.impact', 'syn.note', 'syn.comment', 'syn.time', 'syn.meta'];
+  // syn.kime (PV22 P3): the キメ mark is not in the lyric text; the row says where it is set.
+  const SYNTAX = ['syn.line', 'syn.blank', 'syn.cut', 'syn.emph', 'syn.impact', 'syn.kime', 'syn.note', 'syn.comment', 'syn.time',
+    'syn.meta'];
 
   function mount(app) {
     const t = app.t;
@@ -72509,7 +72646,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
   const REF_KINDS = ['arrange', 'arrive', 'dwell', 'depart', 'ornament', 'ground', 'lens', 'filter', 'seam'];
   const ELEMENTS = ['text', 'ornament', 'ground', 'lens', 'filter', 'seam'];
   // Custom sections redrawn even while they hold focus (their buttons change state); focus is put back (§6.12).
-  const REDRAW_FOCUSED = new Set(['looks', 'colorsReset', 'amountsReset', 'lockPartial', 'multi', 'media']);
+  const REDRAW_FOCUSED = new Set(['looks', 'colorsReset', 'amountsReset', 'lockPartial', 'multi', 'media', 'kimeInfo']);
   // Part rows whose browser offers the 写真・動画 tab (DESIGN_2_1 §11.7.5): the kind's media part and its source param.
   const MEDIA_TAB = Object.freeze({ ground: 'ground', ornament: 'frame', atmos: 'overlay' });
 
@@ -72582,11 +72719,12 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
     // --- field states ----------------------------------------------------------------------------------------------
 
     // FieldStates per row (keyed by the row's first path). A row that writes several cut paths (切り替え on the
-    // several-lines page) reads each of them and shows いろいろ when they differ.
+    // several-lines page) reads each of them and shows いろいろ when they differ; so does a readEach row (「キメ」 on the
+    // several-lines page: one line pin per selected line).
     function statesFor(rows, ctx) {
       const withPath = rows.filter((r) => r.path);
       if (!withPath.length) return new Map();
-      const readPaths = (r) => (r.field.firstCut && r.paths.length > 1 ? r.paths : [r.path]);
+      const readPaths = (r) => ((r.field.firstCut || r.field.readEach) && r.paths.length > 1 ? r.paths : [r.path]);
       // a trim row also reads its out handle (clipOut), kept in row.fsOut
       const all = [...new Set(withPath.flatMap(readPaths).concat(withPath.filter((r) => r.outPath).map((r) => r.outPath)))];
       let list = null;
@@ -72988,6 +73126,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
 
     function valueFor(field, v, fs) {
       if (field.offClears && !v) return W.AUTO;
+      if (field.onClears && v) return W.AUTO;             // 「キメの前を静かにする」: on is the default (自動)
       if (field.flashToggle) {
         const p = plan();
         const mood = p ? app.reg.get('mood', p.look.mood.v) : null;
@@ -73785,11 +73924,16 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
         const impact = { key: 'impact', widget: 'toggle', cmd: { t: 'lyrics.row', key: 'impact' }, label: 'fld.impact', id: 'lines/shift/impact' };
         const row = makeRow(impact, ctx);
         page.rows.push(row);
+        // キメ (DESIGN_2_2 §3): one line pin per selected line in one step; いろいろ while the lines differ
+        const kime = { key: 'kime', widget: 'toggle', path: 'kime', spec: { type: 'bool' }, offClears: true, noDice: true, readEach: true,
+          label: 'fld.kime', id: 'lines/shift/kime', scopes: ['line'], basic: true };
+        const kimeRow = makeRow(kime, ctx);
+        page.rows.push(kimeRow);
         return h('div', { class: 'insp-shift' },
           h('div', { class: 'field-row' }, h('span', { class: 'field-label inline', text: t('insp.shiftAll') }),
             h('button', { class: 'btn small', type: 'button', title: t('insp.shiftTip'), on: { click: (ev) => nudgeBy(ev, -1) } }, '−'),
             h('button', { class: 'btn small', type: 'button', title: t('insp.shiftTip'), on: { click: (ev) => nudgeBy(ev, 1) } }, '+')),
-          row.el);
+          row.el, kimeRow.el);
       },
       groundRun(ctx) {
         const seg = plan() && ctx.cuts[0] ? plan().grounds[ctx.cuts[0].ground] : null;
@@ -73815,6 +73959,24 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       fontBanner() {
         if (!allWarnings().some((w) => w.code === 'font-fallback')) return null;
         return h('p', { class: 'insp-banner', role: 'status' }, I.icon('warn', { size: 14 }), t('insp.fontFailed'));
+      },
+      // 行 › 文字の記号 › キメ (DESIGN_2_2 §3.4 j): the work's count (only when it has a キメ line), the too-many hint, the
+      // long-line note and 「同じ歌詞の行（n行）もキメにする」 (one pin per line, one undo step).
+      kimeInfo(ctx) {
+        const line = ctx.line;
+        if (!line || !plan()) return null;
+        const info = F.kimeInfo(plan(), doc(), line.id);
+        const out = [];
+        if (info.n > 0) out.push(h('p', { class: 'note subtle', 'data-kime': 'count', text: t('fld.kime.count', { n: info.n }) }));
+        if (info.many) out.push(h('p', { class: 'note is-skip', role: 'note', 'data-kime': 'many', text: t('fld.kime.many', { max: info.max }) }));
+        if (info.split !== null) out.push(h('p', { class: 'note subtle', 'data-kime': 'split', text: t('fld.kime.split', { text: info.split }) }));
+        if (info.same.length) {
+          const ids = info.same.slice();
+          out.push(h('div', { class: 'row-actions' }, h('button', { class: 'link', type: 'button', 'data-kime': 'same',
+            on: { click: () => run(ids.map((id) => pinCmd('line/' + id + ':kime', true)), { label: ['undo.kimeSame', { n: ids.length }] }) } },
+          t('fld.kime.same', { n: ids.length }))));
+        }
+        return out.length ? h('div', { class: 'insp-kime' }, out) : null;
       },
       // 行 › 文字の記号: a locked line whose frozen split no longer fits (§3.6, §6.11) → tag + [ロックし直す].
       lockPartial(ctx) {
@@ -74039,6 +74201,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
         });
         const basic = [], advanced = [];
         let group = null;
+        const afters = [];
         for (const f of s.fields) {
           const row = makeRow(f, ctx);
           rows.push(row);
@@ -74048,6 +74211,12 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
             (f.basic ? basic : advanced).push(h('div', { class: 'isec-group', text: t('kind.' + f.group) + (key ? ' · ' + app.label(f.group, key) : '') }));
           }
           (f.basic ? basic : advanced).push(row.el);
+          // a custom block right under its row (「キメ」's kimeInfo), redrawn with the section's customs
+          if (f.after) {
+            const slotEl = h('div', { class: 'isec-custom', 'data-custom': f.after });
+            (f.basic ? basic : advanced).push(slotEl);
+            afters.push(slotEl);
+          }
         }
         body.append(...basic);
         if (advanced.length) {
@@ -74059,6 +74228,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
           if (s.customTop) body.prepend(slotEl); else body.appendChild(slotEl);
           page.customs.push({ id: s.custom, el: slotEl, body, head });
         }
+        for (const slotEl of afters) page.customs.push({ id: slotEl.dataset.custom, el: slotEl, body, head });
         return h('section', { class: 'isec', 'data-sec': s.id }, head, body);
       });
       if (!els.length) els.push(h('p', { class: 'note subtle', text: t('insp.nothing') }));

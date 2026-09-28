@@ -1,7 +1,7 @@
 /* 文字PVメーカー v2 — original work. Inspector field catalogue: FieldSpecs per page and section, and sectionsFor (DESIGN §6.4.4–§6.4.9, §4.23). */
 MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color', 'core/ease', 'core/doc', 'ui/selection',
-  'core/curve', 'core/shot', 'core/media', 'ui/media_widgets', 'planner/extreme'],
-  (P, R, SC, C, E, D, S, CV, SHOT, MEDIA, MW, XT) => {
+  'core/curve', 'core/shot', 'core/media', 'ui/media_widgets', 'planner/extreme', 'planner/kime'],
+  (P, R, SC, C, E, D, S, CV, SHOT, MEDIA, MW, XT, KI) => {
     'use strict';
 
     // A FieldSpec (§4.23) is one row of the inspector: { id, path, scopes, el?, section, widget, label, hint?, basic,
@@ -13,7 +13,10 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
     // generated part parameter; its `label` is 'fld.param' = '{name}'), `param` (generated part parameters),
     // `firstCut` (the line page's 切り替え: written at the line's first cut, §6.4.6), `pinnedOnly` (a pinned parameter
     // of a part that is no longer chosen, shown as 無効), `note` (a string key shown under the row), `offClears` (a toggle
-    // whose off is 自動: turning it off clears the pin), `noDice` (a setting, not drawn: no 振り直し).
+    // whose off is 自動: turning it off clears the pin), `onClears` (a toggle that is on by default, whose on is 自動:
+    // turning it on clears the pin, off pins false; 「キメの前を静かにする」), `noDice` (a setting, not drawn: no 振り直し),
+    // `after` (a custom block the inspector draws right under the row: 「キメ」's count and buttons), `readEach` (a row of
+    // the several-lines page that reads every selected line's value and shows いろいろ when they differ).
 
     const ALL = Object.freeze(['work', 'line', 'cut']);
     const WORK = Object.freeze(['work']);
@@ -35,8 +38,10 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
 
     // --- the slot catalogue (§3.4.1–§3.4.3): which scopes a slot is valid at --------------------------------------
 
-    const WORK_NAMES = new Set(['mood', 'theme', 'bpm', 'beatOffset', 'readRate', 'length', 'titleCard']);
-    const LINE_NAMES = new Set(['start', 'end', 'split', 'lang', 'avoid']);
+    // キメ (PV22 P3, DESIGN_2_2 §3): the mark of a line (`kime`, line only) and 「キメの前を静かにする」 (`kime.calm`, the
+    // whole video only).
+    const WORK_NAMES = new Set(['mood', 'theme', 'bpm', 'beatOffset', 'readRate', 'length', 'titleCard', 'kime.calm']);
+    const LINE_NAMES = new Set(['start', 'end', 'split', 'lang', 'avoid', 'kime']);
     // v2.1 (DESIGN_2_1 §2.3): camerawork, motion speed and the section camera cascade cut > line > work; the line season
     // is a line value that may also be pinned for the whole video (the existing work:season).
     const CUT_NAMES = new Set(['orient', 'text.face', 'text.scale', 'text.ink', 'text.style', 'motion.speed', 'cam.shot',
@@ -290,6 +295,10 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
           // on pins true for the whole video; off clears the pin (off is the default).
           F({ path: REPEAT_SAME, scopes: WORK, widget: 'toggle', label: 'fld.repeatSame', spec: { type: 'bool' },
             note: 'fld.repeatSame.note', offClears: true, noDice: true }),
+          // キメ (DESIGN_2_2 §3): on unless the user turns it off (off pins false; on clears the pin); it acts only next to
+          // a line marked キメ.
+          F({ path: 'kime.calm', scopes: WORK, widget: 'toggle', label: 'fld.kimeCalm', spec: { type: 'bool' },
+            note: 'fld.kimeCalm.note', onClears: true, noDice: true, basic: false }),
         ]),
         // 写真・動画 (DESIGN_2_1 §11.7.3): the library, open when it holds something.
         sec('media', (ctx) => ctx.mediaCount > 0, [], { custom: 'media' }),
@@ -340,6 +349,10 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
         sec('marks', true, [
           F({ cmd: { t: 'lyrics.row', key: 'emph' }, scopes: LINE, widget: 'words', label: 'fld.emph' }),
           F({ cmd: { t: 'lyrics.row', key: 'impact' }, scopes: LINE, widget: 'toggle', label: 'fld.impact' }),
+          // キメ (DESIGN_2_2 §3): a line pin (on pins true, off clears it); under it the work's count, the too-many hint,
+          // 「同じ歌詞の行もキメにする」 and the long-line note (the inspector's custom block kimeInfo).
+          F({ path: 'kime', scopes: LINE, widget: 'toggle', label: 'fld.kime', spec: { type: 'bool' }, note: 'fld.kime.note',
+            offClears: true, noDice: true, after: 'kimeInfo' }),
           F({ path: 'split', scopes: LINE, widget: 'cutpoints', label: 'fld.split' }),
           F({ cmd: { t: 'lyrics.row', key: 'note' }, scopes: LINE, widget: 'text', label: 'fld.note', spec: SPEC.text }),
           F({ path: 'lang', scopes: LINE, widget: 'choice', label: 'fld.lang', spec: enumSpec(LANGS),
@@ -917,10 +930,37 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
       return bare ? areaLabel(t, area) : t('area.title', { area: areaLabel(t, area), n: area.n });
     }
 
+    // --- キメ (PV22 P3, DESIGN_2_2 §3.4 j) ------------------------------------------------------------------------------
+
+    // kimeInfo(plan, doc, lineId) → what 行 › 文字の記号 shows under 「キメ」: { n, max, many, on, same, split }. `n` counts
+    // the work's キメ lines as the Plan shows them (a line with a キメ cut, feat.kime: a stale or refused pin counts none),
+    // `max` is the guideline (planner/kime guideline: max(3, 15 % of the lyric lines)) and `many` says n exceeds it (a
+    // hint, not a Plan warning). `on`: this line is キメ. `same`: the ids of the other lines that sing the same words
+    // without their own mark (「同じ歌詞の行もキメにする」; only while this line is キメ). `split`: the text of the キメ cut
+    // when this line is too long for one cut and keeps several (else null).
+    function kimeInfo(plan, doc, lineId) {
+      const lines = plan && Array.isArray(plan.lines) ? plan.lines : [];
+      const kimeCut = (l) => {
+        for (const k of l.cuts || []) {
+          const c = cutByKey(plan, k);
+          if (c && c.feat && c.feat.kime) return c;
+        }
+        return null;
+      };
+      const n = lines.filter((l) => kimeCut(l)).length;
+      const line = lines.find((l) => l.id === lineId) || null;
+      const own = line ? kimeCut(line) : null;
+      const pins = (doc && doc.pins) || {};
+      const marked = (id) => !!pins['line/' + id + ':kime'] && pins['line/' + id + ':kime'].v === true;
+      const same = own ? lines.filter((l) => l !== line && l.text === line.text && !marked(l.id)).map((l) => l.id) : [];
+      const max = KI.guideline(lines.length);
+      return { n, max, many: n > max, on: !!own, same, split: own && line.cuts.length > 1 ? own.text : null };
+    }
+
     return {
       WIDGETS, FIELDS, PAGES: PAGE_SECTIONS, FACE_ROLES, FACE_SCRIPTS, LIST_KINDS, SLOT_KINDS, COMMANDS_USED, SNAPS, SEASONS,
       PARAM_LABEL, sectionsFor, contextOf, pageOf, paramFields, widgetFor, optionsFor, slotScopes, fieldPath, decisionsOf, freeIndex,
       agreedKey, sharedNames, pathsFor, clearPathsFor, firstCutScope, pinnedSlots, withPinnedParams, writePath, writeScope,
-      pinCmd, whyParts, whyRuleKey, areaLabel, areaTitle,
+      pinCmd, whyParts, whyRuleKey, areaLabel, areaTitle, kimeInfo,
     };
   });

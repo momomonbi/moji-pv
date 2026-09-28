@@ -18,7 +18,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
   const REF_KINDS = ['arrange', 'arrive', 'dwell', 'depart', 'ornament', 'ground', 'lens', 'filter', 'seam'];
   const ELEMENTS = ['text', 'ornament', 'ground', 'lens', 'filter', 'seam'];
   // Custom sections redrawn even while they hold focus (their buttons change state); focus is put back (§6.12).
-  const REDRAW_FOCUSED = new Set(['looks', 'colorsReset', 'amountsReset', 'lockPartial', 'multi', 'media']);
+  const REDRAW_FOCUSED = new Set(['looks', 'colorsReset', 'amountsReset', 'lockPartial', 'multi', 'media', 'kimeInfo']);
   // Part rows whose browser offers the 写真・動画 tab (DESIGN_2_1 §11.7.5): the kind's media part and its source param.
   const MEDIA_TAB = Object.freeze({ ground: 'ground', ornament: 'frame', atmos: 'overlay' });
 
@@ -91,11 +91,12 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
     // --- field states ----------------------------------------------------------------------------------------------
 
     // FieldStates per row (keyed by the row's first path). A row that writes several cut paths (切り替え on the
-    // several-lines page) reads each of them and shows いろいろ when they differ.
+    // several-lines page) reads each of them and shows いろいろ when they differ; so does a readEach row (「キメ」 on the
+    // several-lines page: one line pin per selected line).
     function statesFor(rows, ctx) {
       const withPath = rows.filter((r) => r.path);
       if (!withPath.length) return new Map();
-      const readPaths = (r) => (r.field.firstCut && r.paths.length > 1 ? r.paths : [r.path]);
+      const readPaths = (r) => ((r.field.firstCut || r.field.readEach) && r.paths.length > 1 ? r.paths : [r.path]);
       // a trim row also reads its out handle (clipOut), kept in row.fsOut
       const all = [...new Set(withPath.flatMap(readPaths).concat(withPath.filter((r) => r.outPath).map((r) => r.outPath)))];
       let list = null;
@@ -497,6 +498,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
 
     function valueFor(field, v, fs) {
       if (field.offClears && !v) return W.AUTO;
+      if (field.onClears && v) return W.AUTO;             // 「キメの前を静かにする」: on is the default (自動)
       if (field.flashToggle) {
         const p = plan();
         const mood = p ? app.reg.get('mood', p.look.mood.v) : null;
@@ -1294,11 +1296,16 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
         const impact = { key: 'impact', widget: 'toggle', cmd: { t: 'lyrics.row', key: 'impact' }, label: 'fld.impact', id: 'lines/shift/impact' };
         const row = makeRow(impact, ctx);
         page.rows.push(row);
+        // キメ (DESIGN_2_2 §3): one line pin per selected line in one step; いろいろ while the lines differ
+        const kime = { key: 'kime', widget: 'toggle', path: 'kime', spec: { type: 'bool' }, offClears: true, noDice: true, readEach: true,
+          label: 'fld.kime', id: 'lines/shift/kime', scopes: ['line'], basic: true };
+        const kimeRow = makeRow(kime, ctx);
+        page.rows.push(kimeRow);
         return h('div', { class: 'insp-shift' },
           h('div', { class: 'field-row' }, h('span', { class: 'field-label inline', text: t('insp.shiftAll') }),
             h('button', { class: 'btn small', type: 'button', title: t('insp.shiftTip'), on: { click: (ev) => nudgeBy(ev, -1) } }, '−'),
             h('button', { class: 'btn small', type: 'button', title: t('insp.shiftTip'), on: { click: (ev) => nudgeBy(ev, 1) } }, '+')),
-          row.el);
+          row.el, kimeRow.el);
       },
       groundRun(ctx) {
         const seg = plan() && ctx.cuts[0] ? plan().grounds[ctx.cuts[0].ground] : null;
@@ -1324,6 +1331,24 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       fontBanner() {
         if (!allWarnings().some((w) => w.code === 'font-fallback')) return null;
         return h('p', { class: 'insp-banner', role: 'status' }, I.icon('warn', { size: 14 }), t('insp.fontFailed'));
+      },
+      // 行 › 文字の記号 › キメ (DESIGN_2_2 §3.4 j): the work's count (only when it has a キメ line), the too-many hint, the
+      // long-line note and 「同じ歌詞の行（n行）もキメにする」 (one pin per line, one undo step).
+      kimeInfo(ctx) {
+        const line = ctx.line;
+        if (!line || !plan()) return null;
+        const info = F.kimeInfo(plan(), doc(), line.id);
+        const out = [];
+        if (info.n > 0) out.push(h('p', { class: 'note subtle', 'data-kime': 'count', text: t('fld.kime.count', { n: info.n }) }));
+        if (info.many) out.push(h('p', { class: 'note is-skip', role: 'note', 'data-kime': 'many', text: t('fld.kime.many', { max: info.max }) }));
+        if (info.split !== null) out.push(h('p', { class: 'note subtle', 'data-kime': 'split', text: t('fld.kime.split', { text: info.split }) }));
+        if (info.same.length) {
+          const ids = info.same.slice();
+          out.push(h('div', { class: 'row-actions' }, h('button', { class: 'link', type: 'button', 'data-kime': 'same',
+            on: { click: () => run(ids.map((id) => pinCmd('line/' + id + ':kime', true)), { label: ['undo.kimeSame', { n: ids.length }] }) } },
+          t('fld.kime.same', { n: ids.length }))));
+        }
+        return out.length ? h('div', { class: 'insp-kime' }, out) : null;
       },
       // 行 › 文字の記号: a locked line whose frozen split no longer fits (§3.6, §6.11) → tag + [ロックし直す].
       lockPartial(ctx) {
@@ -1548,6 +1573,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
         });
         const basic = [], advanced = [];
         let group = null;
+        const afters = [];
         for (const f of s.fields) {
           const row = makeRow(f, ctx);
           rows.push(row);
@@ -1557,6 +1583,12 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
             (f.basic ? basic : advanced).push(h('div', { class: 'isec-group', text: t('kind.' + f.group) + (key ? ' · ' + app.label(f.group, key) : '') }));
           }
           (f.basic ? basic : advanced).push(row.el);
+          // a custom block right under its row (「キメ」's kimeInfo), redrawn with the section's customs
+          if (f.after) {
+            const slotEl = h('div', { class: 'isec-custom', 'data-custom': f.after });
+            (f.basic ? basic : advanced).push(slotEl);
+            afters.push(slotEl);
+          }
         }
         body.append(...basic);
         if (advanced.length) {
@@ -1568,6 +1600,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
           if (s.customTop) body.prepend(slotEl); else body.appendChild(slotEl);
           page.customs.push({ id: s.custom, el: slotEl, body, head });
         }
+        for (const slotEl of afters) page.customs.push({ id: slotEl.dataset.custom, el: slotEl, body, head });
         return h('section', { class: 'isec', 'data-sec': s.id }, head, body);
       });
       if (!els.length) els.push(h('p', { class: 'note subtle', text: t('insp.nothing') }));

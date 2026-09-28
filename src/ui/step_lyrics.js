@@ -3,7 +3,9 @@ MV.def('ui/step_lyrics', ['ui/dom', 'ui/icons', 'ui/lyric_editor', 'i18n/t'], (d
   'use strict';
 
   const { h } = dom;
-  const SYNTAX = ['syn.line', 'syn.blank', 'syn.cut', 'syn.emph', 'syn.impact', 'syn.note', 'syn.comment', 'syn.time', 'syn.meta'];
+  // syn.kime (PV22 P3): the キメ mark is not in the lyric text; the row says where it is set.
+  const SYNTAX = ['syn.line', 'syn.blank', 'syn.cut', 'syn.emph', 'syn.impact', 'syn.kime', 'syn.note', 'syn.comment', 'syn.time',
+    'syn.meta'];
 
   function mount(app) {
     const t = app.t;

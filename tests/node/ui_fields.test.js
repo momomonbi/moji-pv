@@ -1344,3 +1344,72 @@ test('an enum with optKey labels its options from its own key group (depth: back
   const W = MV.use('ui/widgets');
   assert.equal(W.optionText(t, field.options.find((o) => o.v === 'back')), '後ろに下げる');
 });
+
+// --- PV22 P3 キメ (DESIGN_2_2 §3) -------------------------------------------------------------------------------------
+
+test('キメ: the line toggle, the multi-line toggle\'s slot and 「キメの前を静かにする」 are rows core/commands accepts', () => {
+  assert.deepEqual(F.slotScopes('kime'), ['line']);
+  assert.deepEqual(F.slotScopes('kime.calm'), ['work']);
+  const kime = F.FIELDS.find((f) => f.id === 'line/marks/kime');
+  assert.ok(kime, '行 › 文字の記号 › キメ');
+  assert.deepEqual([kime.widget, kime.label, kime.note, kime.offClears, kime.noDice, kime.after, kime.basic],
+    ['toggle', 'fld.kime', 'fld.kime.note', true, true, 'kimeInfo', true]);
+  const marks = F.PAGES.line.find((s) => s.id === 'marks').fields.map((f) => f.key);
+  assert.equal(marks.indexOf('kime'), marks.indexOf('lyrics.row.impact') + 1, 'right under 見せ場（!）');
+  const calm = F.FIELDS.find((f) => f.id === 'work/look/kime.calm');
+  assert.ok(calm, '作品全体 › 見た目 › 詳しい設定');
+  assert.deepEqual([calm.widget, calm.label, calm.note, calm.onClears, calm.offClears, calm.noDice, calm.basic],
+    ['toggle', 'fld.kimeCalm', 'fld.kimeCalm.note', true, undefined, true, false]);
+  const CMD = MV.use('core/commands');
+  const D0 = MV.use('core/doc').defaultDoc();
+  const ok = (path, v) => {
+    const cmd = { t: 'pin.set', path, v, by: 'user' };
+    if (path.startsWith('cut/')) cmd.sig = 's';
+    try { CMD.reduce(D0, cmd); return true; } catch (e) { return false; }
+  };
+  assert.equal(ok('line/r1:kime', true), true);
+  assert.equal(ok('work:kime', true), false);
+  assert.equal(ok('cut/r1~0:kime', true), false);
+  assert.equal(ok('work:kime.calm', false), true);
+  assert.equal(ok('line/r1:kime.calm', false), false);
+});
+
+test('キメ: kimeInfo counts the work\'s キメ lines from the Plan, offers the same lyric and names a long line\'s キメ cut', () => {
+  const PL = MV.use('planner/plan');
+  const D = MV.use('core/doc');
+  const reg = catalogRegistry();
+  if (!reg) return;
+  const lyric = ['あさやけの', 'ひかりのなかで', 'ぼくらはうたう', 'あさやけの',
+    'とおくのまちのあかりがひとつずつきえてゆくまでずっとここでまっている', 'ぼくらはうたう'];
+  const doc = D.defaultDoc();
+  doc.sheet = { next: lyric.length + 1, rows: lyric.map((src, i) => ({ id: 'r' + (i + 1), src })) };
+  doc.look = Object.assign({}, doc.look, { aspect: '9:16', seed: 4242 });
+  const on = { v: true, by: 'user' };
+  const planOf = (pins) => PL.plan(Object.assign({}, doc, { pins }), { registry: reg });
+  // no mark: nothing to say
+  const none = F.kimeInfo(planOf({}), doc, 'r1');
+  assert.deepEqual(none, { n: 0, max: 3, many: false, on: false, same: [], split: null });
+  // r1 marked: the same words sung again (r4) are offered; r2 is not キメ, so it offers nothing
+  const pins1 = { 'line/r1:kime': on };
+  const p1 = planOf(pins1);
+  const d1 = Object.assign({}, doc, { pins: pins1 });
+  assert.deepEqual(F.kimeInfo(p1, d1, 'r1'), { n: 1, max: 3, many: false, on: true, same: ['r4'], split: null });
+  assert.deepEqual(F.kimeInfo(p1, d1, 'r2').same, []);
+  // the long line keeps its cuts in 9:16 (> 16 cells): its キメ cut's text is named
+  const pins2 = Object.assign({}, pins1, { 'line/r4:kime': on, 'line/r5:kime': on, 'line/r3:kime': on });
+  const p2 = planOf(pins2);
+  const d2 = Object.assign({}, doc, { pins: pins2 });
+  const long = F.kimeInfo(p2, d2, 'r5');
+  const line5 = p2.lines.find((l) => l.id === 'r5');
+  assert.ok(line5.cuts.length > 1, 'a 35-cell line keeps its cuts in 9:16');
+  const kimeCut = line5.cuts.map((k) => p2.cuts.find((c) => c.key === k)).find((c) => c.feat.kime);
+  assert.equal(long.split, kimeCut.text);
+  // four キメ lines of six: over the guideline max(3, ceil(0.15 · 6)) = 3
+  assert.deepEqual([long.n, long.max, long.many], [4, 3, true]);
+  // every copy marked: nothing more to offer; r3's copy r6 is still offered
+  assert.deepEqual(F.kimeInfo(p2, d2, 'r1').same, []);
+  assert.deepEqual(F.kimeInfo(p2, d2, 'r3').same, ['r6']);
+  // a stale pin (not true) does not count: the Plan decides
+  const bad = { 'line/r1:kime': { v: 'yes', by: 'user' } };
+  assert.equal(F.kimeInfo(planOf(bad), Object.assign({}, doc, { pins: bad }), 'r1').n, 0);
+});

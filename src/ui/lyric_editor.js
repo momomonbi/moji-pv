@@ -8,13 +8,17 @@ MV.def('ui/lyric_editor', ['ui/dom', 'ui/selection', 'i18n/t', 'core/lyrics', 'p
   const GUTTER_MARGIN_PX = 240;           // gutter entries are built for the visible rows plus this much above and below
   const STAMP = /^\[\d{1,3}:\d{1,2}(?:[.:]\d{1,3})?\]/;
   const WARN_CODES = new Set(['overfull', 'orphan-pin', 'shadowed-pin', 'lock-partial', 'pin-not-applicable', 'time-order']);
-  const TOKENS = ['tok-comment', 'tok-meta', 'tok-stamp', 'tok-cut', 'tok-emph', 'tok-emphText', 'tok-impact', 'tok-note'];
+  // tok-cutOff (PV22 P3, DESIGN_2_2 §3): a '/' that has no effect, on a キメ line that plays as one cut (drawn dimmed)
+  const TOKENS = ['tok-comment', 'tok-meta', 'tok-stamp', 'tok-cut', 'tok-emph', 'tok-emphText', 'tok-impact', 'tok-note',
+    'tok-cutOff'];
 
   // --- mark tinting (display only; the parser is core/lyrics) --------------------------------------------------
 
   // Splits one row into [text, className] segments whose concatenation is exactly the row, so the mirror keeps the
-  // textarea's metrics (only colours change, never widths).
-  function segments(src) {
+  // textarea's metrics (only colours change, never widths). opts.cutOff: the row's '/' marks have no effect (a キメ line
+  // that plays as one cut), so they are tok-cutOff instead of tok-cut.
+  function segments(src, opts) {
+    const cutCls = opts && opts.cutOff ? 'tok-cutOff' : 'tok-cut';
     const trimmed = src.trim();
     if (!trimmed) return [[src, '']];
     if (trimmed[0] === '#') return [[src, 'tok-comment']];
@@ -35,7 +39,7 @@ MV.def('ui/lyric_editor', ['ui/dom', 'ui/selection', 'i18n/t', 'core/lyrics', 'p
       if (i === bang) { flush(emph ? 'tok-emphText' : ''); out.push([ch, 'tok-impact']); continue; }
       if (ch === '/' || ch === '*') {
         flush(emph ? 'tok-emphText' : '');
-        out.push([ch, ch === '/' ? 'tok-cut' : 'tok-emph']);
+        out.push([ch, ch === '/' ? cutCls : 'tok-emph']);
         if (ch === '*') emph = !emph;
         continue;
       }
@@ -208,7 +212,7 @@ MV.def('ui/lyric_editor', ['ui/dom', 'ui/selection', 'i18n/t', 'core/lyrics', 'p
     // --- mirror and gutter -------------------------------------------------------------------------------------
 
     const inks = tokenInks();               // token class → Highlight, or null (spans)
-    const inked = new Map();                // mirror row → its highlight ranges, as [class, range]
+    const inked = new Map();                // mirror row → { ranges: [class, range], off: whether its '/' are tok-cutOff }
 
     // A row is as tall as its own line boxes, like the textarea's line. A blank row ends with <br>, as the textarea's
     // line ends with '\n', so it still has one line box. The row's text is one text node, as the textarea's line is
@@ -228,18 +232,25 @@ MV.def('ui/lyric_editor', ['ui/dom', 'ui/selection', 'i18n/t', 'core/lyrics', 'p
     // Highlight ranges only for the rows in and near the editor's viewport (the gutter's rows). WebKit walks every
     // registered range for each line of text it paints (MarkedText::collectForHighlights), so their number stays that
     // of a screenful however long the lyrics are.
-    function inkRows(from, to) {
+    // offAt(i) → whether row i's '/' marks have no effect (a キメ line in one cut); a row inked the other way is inked
+    // again.
+    function inkRows(from, to, offAt) {
       if (!inks) return;
       const keep = new Set(rowEls.slice(from, to));
       for (const el of inked.keys()) if (!keep.has(el)) unink(el);
-      for (let i = from; i < to; i++) if (!inked.has(rowEls[i])) ink(rowEls[i], rowSrcs[i]);
+      for (let i = from; i < to; i++) {
+        const off = !!(offAt && offAt(i));
+        const had = inked.get(rowEls[i]);
+        if (had && had.off !== off) unink(rowEls[i]);
+        if (!inked.has(rowEls[i])) ink(rowEls[i], rowSrcs[i], off);
+      }
     }
 
-    function ink(el, src) {
+    function ink(el, src, off) {
       const node = el.firstChild;
       const ranges = [];
       let at = 0;
-      for (const [text, cls] of segments(src)) {
+      for (const [text, cls] of segments(src, { cutOff: off })) {
         if (cls && node && node.nodeType === 3) {
           const range = new StaticRange({ startContainer: node, startOffset: at, endContainer: node, endOffset: at + text.length });
           inks.get(cls).add(range);
@@ -247,13 +258,13 @@ MV.def('ui/lyric_editor', ['ui/dom', 'ui/selection', 'i18n/t', 'core/lyrics', 'p
         }
         at += text.length;
       }
-      inked.set(el, ranges);
+      inked.set(el, { ranges, off: !!off });
     }
 
     function unink(el) {
-      const ranges = inked.get(el);
-      if (!ranges) return;
-      for (const [cls, range] of ranges) inks.get(cls).delete(range);
+      const had = inked.get(el);
+      if (!had) return;
+      for (const [cls, range] of had.ranges) inks.get(cls).delete(range);
       inked.delete(el);
     }
 
@@ -308,13 +319,28 @@ MV.def('ui/lyric_editor', ['ui/dom', 'ui/selection', 'i18n/t', 'core/lyrics', 'p
       onTime(app.time ? app.time() : 0);
     }
 
+    // Pins per row (lock pins and キメ marks aside: the lock and the キ badge show those).
     function pinCounts(doc) {
       const counts = new Map();
       for (const path of Object.keys(doc.pins)) {
         const m = /^(?:line|cut)\/(r[0-9a-z]+)(?:[.~:]|$)/.exec(path);
-        if (m && doc.pins[path].by !== 'lock') counts.set(m[1], (counts.get(m[1]) || 0) + 1);
+        if (m && doc.pins[path].by !== 'lock' && !path.endsWith(':kime')) counts.set(m[1], (counts.get(m[1]) || 0) + 1);
       }
       return counts;
+    }
+
+    // The rows whose '/' marks have no effect: every line of the row is a キメ line that plays as one cut (its cut has
+    // feat.kime, DESIGN_2_2 §3). A row sung again (r5, r5.1) counts only when all of its lines are.
+    function cutOffRows(plan) {
+      const out = new Map();
+      if (!plan) return out;
+      const cutKime = new Set(plan.cuts.filter((c) => c.feat && c.feat.kime).map((c) => c.key));
+      for (const l of plan.lines) {
+        const row = l.row || l.id.split('.')[0];
+        const one = l.cuts.length === 1 && cutKime.has(l.cuts[0]);
+        out.set(row, (out.has(row) ? out.get(row) : true) && one);
+      }
+      return out;
     }
 
     function scheduleGutter() {
@@ -371,7 +397,9 @@ MV.def('ui/lyric_editor', ['ui/dom', 'ui/selection', 'i18n/t', 'core/lyrics', 'p
         frag.appendChild(entry);
       }
       dom.replace(gutter, frag);
-      if (root.clientHeight) inkRows(first, end);     // hidden (another step), rows have no positions: onShow re-renders
+      const off = aligned ? cutOffRows(plan) : null;
+      const offAt = off ? (i) => { const row = doc.sheet.rows[i]; return !!row && off.get(row.id) === true; } : null;
+      if (root.clientHeight) inkRows(first, end, offAt);   // hidden (another step), rows have no positions: onShow re-renders
     }
 
     function fillEntry(entry, line, doc, pins, warn) {
@@ -381,10 +409,14 @@ MV.def('ui/lyric_editor', ['ui/dom', 'ui/selection', 'i18n/t', 'core/lyrics', 'p
       entry.append(time);
       if (by === 'lrc') entry.append(h('span', { class: 'g-badge', text: 'LRC' }));
       if (doc.locks[line.id]) entry.append(h('span', { class: 'g-lock', title: t('state.locked'), text: 'L' }));
+      // キメ (DESIGN_2_2 §3): the line's mark, which the lyric text does not show
+      const kime = !!doc.pins['line/' + line.id + ':kime'] && doc.pins['line/' + line.id + ':kime'].v === true;
+      if (kime) entry.append(h('span', { class: 'g-kime', title: t('fld.kime'), text: t('lyr.kimeBadge') }));
       if (pins) entry.append(h('span', { class: 'g-pins', title: t('lyr.pinCount', { n: pins }), text: '●' + pins }));
       if (warn) entry.append(h('span', { class: 'g-warn', title: t('warn.' + warn), text: '!' }));
       const words = [T.fmtTime(line.t0), t('state.' + (by === 'pin' ? 'pinned' : by === 'lrc' ? 'mark' : 'auto'))];
       if (doc.locks[line.id]) words.push(t('state.locked'));
+      if (kime) words.push(t('fld.kime'));
       if (pins) words.push(t('lyr.pinCount', { n: pins }));
       entry.setAttribute('aria-label', t('lyr.gutterEntry', { n: line.index + 1, what: words.join(', ') }));
       entry.tabIndex = -1;

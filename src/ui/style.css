@@ -288,6 +288,7 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent);
 .tok-emphText { color: #ffd98f; }
 .tok-impact { color: var(--error); }
 .tok-note { color: #8fd3c1; }
+.tok-cutOff { color: #5d6573; }
 /* The same colours as highlights over a row's one text node (lyric_editor.js), where the engine has them. Rules of
    their own: an engine that does not know ::highlight() drops the whole rule. */
 .le-row::highlight(tok-comment) { color: #7c8596; }
@@ -297,6 +298,8 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent);
 .le-row::highlight(tok-emphText) { color: #ffd98f; }
 .le-row::highlight(tok-impact) { color: var(--error); }
 .le-row::highlight(tok-note) { color: #8fd3c1; }
+/* A '/' with no effect: a キメ line that plays as one cut (PV22 P3). */
+.le-row::highlight(tok-cutOff) { color: #5d6573; }
 .le-g {
   position: absolute; left: 0; width: 74px; box-sizing: border-box; display: flex; align-items: flex-start; gap: 3px; pointer-events: auto;
   padding: 0 4px 0 7px; font: 10.5px/var(--le-lh) var(--mono); color: var(--muted); cursor: pointer; white-space: nowrap; overflow: hidden;
@@ -307,6 +310,7 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent);
 .g-time.is-lrc { color: #8fc8ff; }
 .g-badge { font-size: 8px; color: #8fc8ff; }
 .g-lock { color: var(--gold); font-weight: 700; }
+.g-kime { color: var(--accent); font-weight: 800; }
 .g-pins { color: #ffb3a3; }
 .g-warn { color: var(--error); font-weight: 800; }
 .g-heading { color: #7c8596; }
@@ -662,6 +666,7 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent);
 .ell { min-width: 0; }
 .mono { font-family: var(--mono); font-size: 11.5px; }
 .insp-other, .insp-shift, .insp-note { display: flex; flex-direction: column; gap: 8px; }
+.insp-kime { display: flex; flex-direction: column; gap: 4px; margin: -2px 0 8px; }
 .insp-orphan { display: flex; align-items: center; gap: 8px; font-size: 12px; }
 .sub-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
 .sub-title { margin: 0; font-size: 14px; font-weight: 800; }

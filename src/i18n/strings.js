@@ -2197,6 +2197,23 @@ MV.def('i18n/strings', [], () => ({
   'whyRule.kime.x': ['キメの行なので一番強い動き', 'The strongest move for a kime line'],
   'whyRule.kime.noFlash': ['キメの行からは光らずに切り替える', 'No flash on the way out of a kime line'],
   'whyRule.kime.set': ['キメの行なので、大胆な見せ方の最初の候補にした', 'A kime line, so the first of the bold choices'],
+  'fld.kime': ['キメ', 'Kime'],
+  'fld.kime.note': ['この行を1カットで大胆に見せます。大きな構図・見出しの書体・強い入り・長めの止めで、直前のカットは静かにします。見せ場（!）と違って光や揺れは加えません（両方つけることもできます）。/ で分けていても1カットで見せます（長すぎる行は分けたまま、一番大事なカットを大胆にします）。',
+    'Shows this line boldly in one cut: a big layout, the heading face, a strong entrance and a longer hold, with the cuts before it kept quiet. Unlike Impact (!) it adds no flash or shake (a line can have both). It plays as one cut even with / marks (a very long line keeps its cuts and makes its key cut bold).'],
+  'fld.kime.count': ['この作品のキメ: {n}行', 'Kime lines in this video: {n}'],
+  'fld.kime.many': ['キメが多すぎると、どれも目立たなくなります（目安は{max}行まで）', 'With too many kime lines none stands out (about {max} at most)'],
+  'fld.kime.same': ['同じ歌詞の行（{n}行）もキメにする', 'Make the same lyric a kime line too ({n} line)|Make the same lyric a kime line too ({n} lines)'],
+  'fld.kime.split': ['この行は長いので、カットは分けたまま「{text}」を大胆に見せます', 'This line is long, so it keeps its cuts and shows “{text}” boldly'],
+  'fld.kimeCalm': ['キメの前を静かにする', 'Quiet cuts before a kime'],
+  'fld.kimeCalm.note': ['キメの直前の1〜2カットの飾り・画面効果・動きを控えめにして、キメを引き立てます。',
+    'Keeps decorations, screen effects and motion down on the one or two cuts before a kime line, so it stands out.'],
+  'lyr.kimeBadge': ['キ', 'K'],
+  'syn.kime.mark': ['キメ', 'Kime'],
+  'syn.kime': ['一行を大胆に見せる印（見た目 › 行 で付けます）', 'Shows one line boldly (set it in Look › Line)'],
+  'undo.kimeSame': ['同じ歌詞の行をキメに（{n}行）', 'Kime on the same lyric ({n} line)|Kime on the same lyric ({n} lines)'],
+  'ai.ch.kime.on': ['{n}行 · キメにする', 'Line {n} · make it a kime line'],
+  'ai.ch.kime.off': ['{n}行 · キメをやめる', 'Line {n} · no longer a kime line'],
+  'ai.warn.kimeOne': ['{n}行はキメにしませんでした（キメは1案に1行まで）', 'Line {n} was not made a kime line (one kime line per proposal)'],
 
   // --- PV22 P4 (モーフ・太さ) ---
 

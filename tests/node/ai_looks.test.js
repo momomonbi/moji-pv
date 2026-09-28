@@ -223,6 +223,61 @@ test('applying a proposal: one batch, AI pins and filters, lyrics untouched, no 
   assert.equal(store.doc, doc);
 });
 
+// ---- キメ in 演出3案 (PV22 P3, DESIGN_2_2 §3) -------------------------------------------------------------------------
+
+test('proposals: kime marks one line per proposal as a value change of line/<id>:kime; the request says so', () => {
+  const doc = docOf(PLAIN_SONG);
+  const plan = planOf(doc);
+  const q = LK.proposalsRequest(doc, plan, reg, 'ja');
+  assert.ok(q.system.includes('kime: at most one line per proposal'), 'the prompt names the field');
+  deepEqual(LK.PROPOSALS_SCHEMA.properties.proposals.items.properties.lines.items.properties.kime.enum, ['', 'on', 'off']);
+  assert.ok(!('kime' in LK.EDIT_SCHEMA.properties.changes.properties.lines.items.properties), 'ひとこと修正 has no kime field');
+  const line = (i, kime, extra) => Object.assign({ i, arrange: '', arrive: '', depart: '', dwell: '', kime }, extra || {});
+  const pc = LK.proposalChanges(doc, plan, reg, { topic: '', season: 'any', proposals: [
+    proposal({ lines: [line(2, 'on'), line(3, 'on'), line(1, '')] }),
+    proposal({ lines: [line(0, 'off'), line(9, 'on')] }),
+  ] });
+  const a = pc.proposals[0];
+  const kime = a.changes.filter((c) => c.path && c.path.endsWith(':kime'));
+  deepEqual(kime.map((c) => [c.kind, c.path, c.from, c.to, c.label[0], c.label[1].n]),
+    [['value', 'line/' + plan.lines[2].id + ':kime', null, true, 'ai.ch.kime.on', 3]]);
+  assert.ok(a.warnings.some((w) => w[0] === 'ai.warn.kimeOne' && w[1].n === 4), 'the second "on" is dropped with a warning');
+  assert.equal(CH.groupOf(kime[0]), 'lines');
+  // "off" on a line without a mark changes nothing; an unknown line warns once (lineChanges)
+  const b = pc.proposals[1];
+  assert.ok(!b.changes.some((c) => c.path && c.path.endsWith(':kime')));
+  assert.equal(b.warnings.filter((w) => w[0] === 'ai.warn.notLine').length, 1);
+  // applied: a pin by 'ai' in one step; 「AIの固定を外す」 removes it, 「すべての固定を外す」 keeps it (a setting)
+  const cmds = CH.toCommands(doc, plan, kime);
+  deepEqual(cmds, [{ t: 'pin.set', path: 'line/' + plan.lines[2].id + ':kime', v: true, by: 'ai' }]);
+  const marked = CMD.reduce(doc, { t: 'batch', cmds });
+  assert.equal(CMD.reduce(marked, { t: 'pin.clearUnder', scope: 'work' }).pins['line/' + plan.lines[2].id + ':kime'].v, true);
+  assert.equal(CMD.reduce(marked, { t: 'pin.clearUnder', scope: 'work', by: 'ai' }).pins['line/' + plan.lines[2].id + ':kime'], undefined);
+  // with the mark in place: "on" again changes nothing, "off" clears it
+  const again = LK.proposalChanges(marked, planOf(marked), reg, { topic: '', season: 'any', proposals: [
+    proposal({ lines: [line(2, 'on')] }), proposal({ lines: [line(2, 'off')] })] });
+  assert.ok(!again.proposals[0].changes.some((c) => c.path && c.path.endsWith(':kime')));
+  const off = again.proposals[1].changes.filter((c) => c.path && c.path.endsWith(':kime'));
+  deepEqual(off.map((c) => [c.from, c.to, c.label[0]]), [[true, null, 'ai.ch.kime.off']]);
+  deepEqual(CH.toCommands(marked, planOf(marked), off), [{ t: 'pin.clear', path: 'line/' + plan.lines[2].id + ':kime' }]);
+  // the review row reads as a sentence in both languages
+  const ja = T.createT('ja', MV.use('i18n/strings'), reg);
+  const en = T.createT('en', MV.use('i18n/strings'), reg);
+  assert.equal(CH.describe(kime[0], ja), '3行 · キメにする');
+  assert.equal(CH.describe(kime[0], en), 'Line 3 · make it a kime line');
+});
+
+test('proposals: kime on a locked line is not written (the line keeps its look)', () => {
+  const doc = docOf(PLAIN_SONG);
+  const plan0 = planOf(doc);
+  const locked = CMD.reduce(doc, { t: 'lock.set', lineId: plan0.lines[1].id, pins: {}, n: 1 });
+  const plan = planOf(locked);
+  const pc = LK.proposalChanges(locked, plan, reg, { topic: '', season: 'any', proposals: [
+    proposal({ lines: [{ i: 1, arrange: '', arrive: '', depart: '', dwell: '', kime: 'on' }] })] });
+  assert.ok(!pc.proposals[0].changes.some((c) => c.path && c.path.endsWith(':kime')));
+  assert.ok(pc.proposals[0].warnings.some((w) => w[0] === 'ai.warn.locked'));
+});
+
 // ---- ひとこと修正 ----------------------------------------------------------------------------------------------------
 
 test('editRequest: instruction, settings, pinned lines, parts turned off, selected lines, lyrics with what they show', () => {
@@ -629,8 +684,9 @@ test('building the commands stays linear in the number of rows and changes', () 
 
 // ---- the helpers export (DESIGN_2_1 §3.13) ------------------------------------------------------------------------
 
-// core/hash.hashJSON of the two look schemas as v2 shipped them (v2.1 adds the helpers export and nothing else here)
-const PROPOSALS_HASH = '9b39b409';
+// core/hash.hashJSON of the two look schemas as v2 shipped them (v2.1 adds the helpers export and nothing else here);
+// PV22 P3 adds the proposal line field `kime` (DESIGN_2_2 §3; v2's hash was 9b39b409). ひとこと修正's schema is unchanged.
+const PROPOSALS_HASH = 'e1adf857';
 const EDIT_HASH = '273c02f1';
 
 test('helpers: the validators ai/direct reuses are exported; the look schemas and answers are unchanged', () => {
