@@ -137,6 +137,10 @@ test('fromAi: variants read params through the base part\'s specs; arrive/depart
     assert.equal(r.entry, null, base);
     assert.ok(r.warnings.some((w) => w[0] === 'ai.warn.unknown' && w[1].key === base) && r.warnings.some((w) => w[0] === 'ai.warn.matEmpty'));
   }
+  // v2.2: a late part (pin-only, rule-picked or opt-in) is never a base
+  const late = RECIPE.fromAi(ai({ kind: 'arrive', base: 'weightGrow', layers: [] }), reg);
+  assert.ok(!late.entry || late.entry.recipe.base !== 'weightGrow', 'weightGrow is not a base');
+  assert.ok(late.warnings.some((w) => w[0] === 'ai.warn.unknown' && w[1].key === 'weightGrow'));
   assert.equal(RECIPE.fromAi(ai({ kind: 'arrange', base: '' }), reg).entry, null, 'arrange is a variant only');
   assert.equal(RECIPE.fromAi(ai({ kind: 'seam', base: '' }), reg).entry, null, 'seam is a variant only');
   assert.equal(RECIPE.fromAi(ai({ kind: 'dwell' }), reg, 'ornament').entry.kind, 'ornament', 'the kind asked for wins');

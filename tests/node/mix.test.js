@@ -520,6 +520,7 @@ test('derive refuses what core/recipe, the base registry or the kit refuse; reco
     assert.ok(codes(got).includes(code), code + ' in ' + JSON.stringify(got.problems));
   };
   refused('arrive', { base: 'noSuchPart' }, 'no-base');
+  refused('arrive', { base: 'weightGrow' }, 'no-base');            // v2.2: a late part is never a material's base
   refused('seam', { base: 'whiteFlash' }, 'flash-base');
   refused('filter', { base: 'invertBlink' }, 'flash-base');
   refused('filter', { parts: [{ key: 'flashPop', params: {} }], mix: [1] }, 'empty');
