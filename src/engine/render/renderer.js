@@ -8,6 +8,7 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
   const L = T.LAYER_INDEX;
   const WORLD_LAYERS = Object.freeze([L.ground, L.far, L.mid, L.text, L.near]);
   const BASE_LAYERS = Object.freeze([L.ground, L.far, L.mid]);
+  const STILL_BASE = Object.freeze([L.far, L.mid]);     // base layers whose still media a glyph seam keeps out of its mix
   const WARM_LAYERS = Object.freeze(WORLD_LAYERS.concat([L.hud]));
   const EMA_ALPHA = 0.1;
   const SLOW_MS = 14, FAST_MS = 9, SLOW_FRAMES = 30, FAST_FRAMES = 60, MAX_LEVEL = 4;   // adaptive preview (§7.4)
@@ -457,14 +458,28 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
     // `still` media of the mixed layers (DESIGN_2_1 §11.9.3) stay out of the mix and are drawn after it, like the hud.
     // A glyph seam (v2.2, DESIGN_2_2 §4): the letters the two lines share are left out of both sides (dc.skip) and drawn
     // after the mix, travelling (engine/render/morph) — above both cuts' text and near layers, under the still pass, the
-    // grounds' near layer and the hud.
+    // grounds' near layer and the hud. Its cuts' base layers are mixed too (each side under its text layers), so for the
+    // length of the window they lie above the grounds' mid and text layers.
     function drawTextSeam(g, w, h, backdrop, part, u) {
       fillBackdrop(g, w, h, backdrop, dc.pal);
-      for (const Lk of BASE_LAYERS) drawSideLayer(g, Lk, 0, true, true);
+      // A glyph seam replaces B's entrance and A's exit, so both cuts rest across the window: the cuts' own base layers
+      // (an echo stack's copies, rays) are mixed with their text layers (sides 1 and 2) rather than drawn once at full
+      // strength, so they melt with the rest; the grounds are drawn once as ever. Still media stay out of the mix.
+      const glyph = part.def.glyphs === true;
+      const baseStill = glyph && anyStill(STILL_BASE, false);
+      for (const Lk of BASE_LAYERS) {
+        drawSideLayer(g, Lk, 0, true, !glyph);
+        if (baseStill && Lk !== L.ground) stillOnly(g, Lk);
+      }
       drawSideLayer(g, L.text, 0, true, false);
       const still = anyStill(SE.TEXT_LAYERS, false);
-      const mv = part.def.glyphs === true ? glyphSeam(framePlan) : null;
+      const mv = glyph ? glyphSeam(framePlan) : null;
       const a = pool.take(), b = pool.take();
+      if (glyph) {
+        if (baseStill) dc.stillMode = 1;
+        for (const Lk of BASE_LAYERS) { drawSideLayer(a.ctx, Lk, 1, false, true); drawSideLayer(b.ctx, Lk, 2, false, true); }
+        dc.stillMode = 0;
+      }
       if (still) dc.stillMode = 1;
       if (mv) dc.skip = mv.skip;
       try {
@@ -494,6 +509,13 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
         for (const Lk of layers) if (DR.hasStill(it.scene, Lk)) return true;
       }
       return false;
+    }
+
+    // The `still` media of the cuts' layer Lk, every side, on the target (a glyph seam's base layers, which it mixes).
+    function stillOnly(g, Lk) {
+      dc.stillMode = 2;
+      drawSideLayer(g, Lk, 0, false, true);
+      dc.stillMode = 0;
     }
 
     // Only the `still` media of these layers, every side, on the target (after the composite).

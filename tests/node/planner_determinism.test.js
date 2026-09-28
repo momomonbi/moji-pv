@@ -222,10 +222,18 @@ function checkShape(name, plan, reg, doc) {
     assert.notEqual(s.slot.v, hard, name + ' only non-hard-cut seams are listed');
     const B = plan.cuts.find((c) => c.key === s.into), A = plan.cuts.find((c) => c.key === s.a);
     const def = reg.get('seam', s.slot.v);
-    // a glyph seam (v2.2): its window ends at B.a (`ends`), takes up to half the shorter cut (`share`) and lists its
-    // letter pairs; every other seam is centred on B.a, takes up to 0.4 and lists none
+    // a glyph seam (v2.2): its window ends as B's voice starts, never starting after B.a (`ends`), takes up to half the
+    // shorter cut (`share`), starts inside A, after the previous transition and at most 0.5 s before A's sung end (never
+    // cut below 0.25 s by that), and lists its letter pairs; every other seam is centred on B.a, takes up to 0.4 and
+    // lists none
     const glyph = def.glyphs === true;
-    assert.equal(s.at, glyph ? B.a - s.dur / 2 : B.a);
+    assert.equal(s.at, glyph ? Math.min(B.t0, B.a + s.dur) - s.dur / 2 : B.a);
+    if (glyph) {
+      const lo = s.at - s.dur / 2, prev = plan.seams[plan.seams.indexOf(s) - 1];
+      assert.ok(lo >= A.a - 1e-9, name + ' ' + B.key + ': the morph starts with A on screen');
+      if (prev) assert.ok(lo >= prev.at + prev.dur / 2 - 1e-9, name + ' ' + B.key + ': after the transition before it');
+      assert.ok(lo >= Math.min(A.t1 - 0.5, s.at + s.dur / 2 - 0.25) - 1e-9, name + ' ' + B.key + ': not long before A\'s sung end');
+    }
     assert.equal(Array.isArray(s.glyphs), glyph, name + ' glyphs only on a glyph seam');
     assert.equal(plan.cuts.indexOf(A) + 1, plan.cuts.indexOf(B), 'a seam joins neighbouring cuts');
     const ai = plan.cuts.indexOf(A), bi = ai + 1;

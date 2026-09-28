@@ -8,14 +8,15 @@ MV.def('parts/seam/morph', ['parts/kit'], (K) => {
 
   // A glyph seam (`glyphs: true`): the planner writes the letters the two lines share into the seam entry, and the
   // renderer holds those glyphs out of the two side surfaces and draws them itself, travelling from the old line's
-  // place to the new line's (engine/render/morph). mix() melts what is left: the old line's other letters soften and
-  // fade over [0, OLD_OUT], the new line's come into focus over [NEW_IN, NEW_FULL]; both at once only in the middle,
-  // each blurred while it is faint, so neither reads as a second line printed over the first. The window ends at the
-  // new line's start (`ends`) and takes up to half the shorter cut (`share`); the old line's exit and the new line's
-  // entrance are the transition itself (`replaces`).
-  const OLD_OUT = 0.6, NEW_IN = 0.35, NEW_FULL = 0.95, SOFTEN_PEAK = 1.4;
+  // place to the new line's (engine/render/morph). mix() melts what is left: the old line's other letters (and the
+  // cuts' own base layers: an echo stack's copies) soften and fade over [OLD_FROM, OLD_OUT] — the old line may still be
+  // sung as the window starts, so they hold at first — and the new line's come into focus over [NEW_IN, NEW_FULL]; both
+  // at once only in the middle, each blurred while it is faint, so neither reads as a second line printed over the
+  // first. The window ends at the new line's start (`ends`) and takes up to half the shorter cut (`share`); the old
+  // line's exit and the new line's entrance are the transition itself (`replaces`).
+  const OLD_FROM = 0.3, OLD_OUT = 0.8, NEW_IN = 0.4, NEW_FULL = 0.95, SOFTEN_PEAK = 1.4;
   function meltRest(fx, a, b, u, p) {
-    const eo = SINE(clamp(u / OLD_OUT)), en = SINE(clamp((u - NEW_IN) / (NEW_FULL - NEW_IN)));
+    const eo = SINE(clamp((u - OLD_FROM) / (OLD_OUT - OLD_FROM))), en = SINE(clamp((u - NEW_IN) / (NEW_FULL - NEW_IN)));
     const out = fx.take(), g = out.ctx;
     const pa = p.soften * SOFTEN_PEAK * eo * fx.unit, pb = p.soften * SOFTEN_PEAK * (1 - en) * fx.unit;
     const oldS = pa >= 1 && eo < 1 ? fx.blurred(a, pa) : a;
@@ -37,7 +38,7 @@ MV.def('parts/seam/morph', ['parts/kit'], (K) => {
       'Letters the two lines share glide to their new places; the others melt into the new text'),
     tags: ['soft', 'literary'], family: 'morph', scope: 'text', replaces: { depart: true, arrive: true },
     pool: false, late: true, glyphs: true, share: 0.5, ends: true,
-    shared: { dur: { auto: { range: [0.5, 0.9], follow: '-energy' } } },
+    shared: { dur: { auto: { range: [0.4, 0.7], follow: '-energy' } } },
     params: {
       arc: { type: 'num', min: 0, max: 0.5, step: 0.01, unit: 'frac', label: L('弧', 'Arc'), auto: { value: 0.12 } },
       spread: { type: 'num', min: 0, max: 0.6, step: 0.01, unit: 'frac', label: L('ずらし', 'Stagger'),

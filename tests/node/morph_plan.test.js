@@ -88,9 +88,11 @@ test('rule: in a new work, lines that share letters in one background are joined
     assert.deepEqual([s.slot.v, s.slot.from, s.scope], [MORPH, 'rule', 'text']);
     assert.deepEqual([A.slots.depart.v, A.slots.depart.from, B.slots.arrive.v, B.slots.arrive.from],
       ['instantHide', 'rule', 'instantShow', 'rule'], s.into + ': the transition is both the exit and the entrance');
-    assert.equal(s.at, B.a - s.dur / 2, s.into + ': the window ends at B.a');
+    assert.equal(s.at, Math.min(B.t0, B.a + s.dur) - s.dur / 2, s.into + ': the window ends as B\'s voice starts');
+    assert.ok(s.at - s.dur / 2 >= A.t1 - TR.ENDS_EARLY - 1e-9, s.into + ': and starts at most ENDS_EARLY before A\'s sung end');
+    assert.ok(s.at - s.dur / 2 >= A.a - 1e-9, s.into + ': A is on screen as it starts');
     assert.deepEqual(s.glyphs, MO.pairsOf(A.text, B.text, s.slot.p.melt), s.into + ' pairs');
-    assert.ok(s.dur > 0 && s.dur <= 0.9, s.into + ' dur');
+    assert.ok(s.dur >= TR.ENDS_MIN && s.dur <= 0.7, s.into + ' dur');
     const old = planOf(G.morphDoc(GROUND, { gen: undefined }));
     const i = plan.cuts.indexOf(A);
     const cutterB = (c, next) => (next && !['title', 'interlude', 'outro'].includes(next.role) ? Math.max(c.t1, next.t0) : c.t1) + 0.25;
@@ -119,7 +121,8 @@ test('rule: an older work never evaluates it — its plan is the plan of a regis
 
 // --- 3. the hand-over ------------------------------------------------------------------------------------------------------
 
-// Every glyph seam hands A over: A ends with the window (even before its sung end), and nothing of A is drawn from B.a on.
+// Every glyph seam hands A over: A ends with the window (even before its sung end), and nothing of A is drawn from the
+// window's end on.
 function checkHandover(name, plan) {
   let n = 0;
   for (const s of morphs(plan)) {
@@ -127,8 +130,7 @@ function checkHandover(name, plan) {
     const end = s.at + s.dur / 2;
     assert.ok(A.b <= end + 1e-9, name + ' ' + s.a + ' ends with the window');
     assert.equal(A.b, floor6(end), name + ' ' + s.a + ': exactly the window end (the sung end does not hold it)');
-    for (const t of [B.a, (B.a + B.t0) / 2, B.t0 - 1e-3]) {
-      if (t < B.a) continue;
+    for (const t of [floor6(end), (end + B.t1) / 2, B.t1 - 1e-3]) {
       assert.ok(!F.frameAt(plan, t).cuts.some((e) => plan.cuts[e.i].key === s.a), name + ' ' + s.a + ' gone at ' + t);
     }
     const ai = plan.cuts.indexOf(A);
@@ -138,12 +140,13 @@ function checkHandover(name, plan) {
   return n;
 }
 
-test('hand-over: A ends with the morph window, before its sung end; no frame after B.a shows it', () => {
+test('hand-over: A ends with the morph window, before its sung end; no frame after the window shows it', () => {
   const plan = planOf(G.morphDoc(GROUND));
   assert.equal(checkHandover('rule', plan), 4);
-  // A's sung end lies after the window end: the window ends at B.a = B.t0 − lead, and A.t1 = B.t0
+  // lines that touch: the window ends as B's voice starts (B.t0 = A.t1), so A ends with its voice
   const s = seamInto(plan, 'r4~0');
-  assert.ok(cutOf(plan, 'r3~0').t1 > s.at + s.dur / 2);
+  assert.equal(cutOf(plan, 'r3~0').b, floor6(cutOf(plan, 'r3~0').t1));
+  assert.ok(Math.abs(s.at + s.dur / 2 - cutOf(plan, 'r4~0').t0) < 1e-9);
   // pinned morphs hand over too, even between overlapping lines
   const base = planOf(G.morphDoc(GROUND, { gen: undefined }));
   const r9 = cutOf(base, 'r9~0');
@@ -152,6 +155,41 @@ test('hand-over: A ends with the morph window, before its sung end; no frame aft
   const A = cutOf(over, 'r9~0'), B = cutOf(over, 'ra~0');
   assert.ok(A.t1 > B.t0, 'the lines overlap');
   assert.equal(checkHandover('pinned', over), 1);
+});
+
+// Lines tapped STEP s apart: a transition pinned into r4 (青い空へ, short) and a morph out of it into r5 (青い海へ).
+function shortDoc(step, morphPin) {
+  const rows = ['[ti:テスト]', '# サビ', '光る窓の外', '青い空へ', '青い海へ', '夜の町を歩く'];
+  const pins = { 'cut/r4~0:seam': pin('blendDissolve', { sig: '青い空へ' }) };
+  if (morphPin) pins['cut/r5~0:seam'] = pin(MORPH, { sig: '青い海へ' });
+  const T = [18, 20, 20 + step, 20 + 2 * step + 1];
+  ['r3', 'r4', 'r5', 'r6'].forEach((id, i) => { pins['line/' + id + ':start'] = { v: T[i], by: 'tap' }; });
+  return G.morphDoc(GROUND, { rows, pins });
+}
+
+test('window: a morph starts inside A and after the transition into A; short lines get none by the rule', () => {
+  for (const step of [0.7, 0.5, 0.35, 0.2]) {
+    for (const pinned of [false, true]) {
+      const plan = planOf(shortDoc(step, pinned));
+      const d = seamInto(plan, 'r4~0'), m = seamInto(plan, 'r5~0'), A = cutOf(plan, 'r4~0');
+      const tag = 'step ' + step + (pinned ? ' pinned' : ' rule');
+      if (!pinned && !(m && m.slot.v === MORPH)) continue;          // the rule stands aside (below)
+      assert.equal(m.slot.v, MORPH, tag);
+      assert.ok(pinned || m.dur >= TR.ENDS_MIN, tag + ': the rule takes a window of ENDS_MIN at least');
+      const lo = m.at - m.dur / 2;
+      assert.ok(lo >= A.a - 1e-9, tag + ': starts with A on screen');
+      assert.ok(lo >= d.at + d.dur / 2 - 1e-9, tag + ': starts after the transition into A');
+      // the transition into A plays to its end: every frame of its window shows it
+      for (let t = d.at - d.dur / 2 + 1e-3; t < d.at + d.dur / 2; t += 0.02) {
+        const fg = F.frameAt(plan, t);
+        assert.ok(fg.seam && plan.seams[fg.seam.i] === d, tag + ' ' + t.toFixed(3) + ': the transition into A is shown');
+      }
+    }
+  }
+  // the rule joins lines 0.7 s long, not lines 0.2 s long (less than ENDS_MIN of room after the transition into A)
+  assert.equal(seamInto(planOf(shortDoc(0.7, false)), 'r5~0').slot.v, MORPH);
+  const short = seamInto(planOf(shortDoc(0.2, false)), 'r5~0');
+  assert.ok(!short || short.slot.v !== MORPH, 'lines 0.2 s long: no automatic morph');
 });
 
 // --- 4. where the rule stays off ----------------------------------------------------------------------------------------
@@ -222,6 +260,26 @@ test('rule off: layouts that move the text themselves; the hooks of the other pa
   assert.equal(TR.morphRule(ctx(), locked(a, 'depart', 'instantHide'), locked(b, 'arrive', 'instantShow')), true);
   assert.equal(TR.morphRule(ctx(), locked(a, 'depart', 'fogOut'), b), false);
   assert.equal(TR.morphRule(ctx(), Object.assign({}, a, { slots: Object.assign({}, a.slots, { depart: { v: 'instantHide', from: 'pin:line', by: 'user' } }) }), b), false);
+});
+
+test('reroll: a die pressed on the transition into B makes the rule stand aside, so the chance roll picks one', () => {
+  const doc = G.morphDoc(GROUND);
+  const plan = planOf(doc);
+  assert.equal(seamInto(plan, 'r4~0').slot.v, MORPH);
+  for (const key of ['cut/r4~0:seam', 'line/r4:seam']) {
+    const salted = Object.assign({}, doc, { salts: Object.assign({}, doc.salts, { [key]: 1 }) });
+    const p = planOf(salted);
+    const s = seamInto(p, 'r4~0');
+    assert.ok(!s || (s.slot.v !== MORPH && s.slot.from === 'auto'), key + ': ' + (s && s.slot.v));
+    assert.notEqual(cutOf(p, 'r4~0').slots.arrive.from, 'rule', key + ': B plays its own entrance again');
+    assert.notEqual(cutOf(p, 'r3~0').slots.depart.from, 'rule', key + ': A plays its own exit again');
+    assert.equal(seamInto(p, 'r6~0').slot.v, MORPH, key + ': the other boundaries keep theirs');
+    assert.equal(p.hash, PL.run(salted, CAT, { fresh: true }).hash, key + ': re-plan');
+  }
+  // a pinned morph is the user's choice: the die on it re-rolls its parameters only
+  const pinned = Object.assign({}, doc, { pins: Object.assign({}, doc.pins, { 'cut/r4~0:seam': pin(MORPH, { sig: '青い海へ' }) }),
+    salts: { 'cut/r4~0:seam': 1 } });
+  assert.equal(seamInto(planOf(pinned), 'r4~0').slot.v, MORPH);
 });
 
 // --- 5. pins ---------------------------------------------------------------------------------------------------------------
@@ -309,6 +367,10 @@ test('memo: re-planning after edits around a morph gives exactly the plan made f
     (d) => withPins(d, { 'line/r3:end': undefined }),
     (d) => withPins(d, { 'cut/r6~0:seam': pin(MORPH, { sig: '朝の町を歩く' }) }),
     (d) => setRow(d, 'r5', '夜の町を走る'),
+    (d) => Object.assign({}, d, { salts: { 'cut/r4~0:seam': 1 } }),   // a die on a rule-picked morph: the rule stands aside
+    (d) => Object.assign({}, d, { salts: {} }),
+    (d) => Object.assign({}, d, { look: Object.assign({}, d.look, { gen: undefined }) }),   // the marker gone: both switches off
+    (d) => Object.assign({}, d, { look: Object.assign({}, d.look, { gen: 1 }) }),
   ];
   let edits = 0;
   for (const step of steps) {

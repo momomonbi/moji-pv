@@ -1,8 +1,9 @@
 /* 文字PVメーカー v2 — original work. Engine facade: plan + scenes + renderer behind the FROZEN §4.20 API, plus sample plans for thumbnails and the lab (DESIGN_2_1 §3.10, §11.3.7 additions). */
 MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 'core/doc', 'core/pins', 'core/shot',
   'engine/text/service', 'engine/text/faces', 'engine/scene/build', 'engine/scene/cache', 'engine/scene/frame',
-  'engine/render/renderer', 'engine/render/sprites', 'parts/mix', 'planner/plan', 'planner/look', 'planner/morph'],
-(H, RNG, SCH, S, DOC, PINS, SHOT, TS, FACES, BUILD, CACHE, F, R, SP, MIX, PL, LOOK, MO) => {
+  'engine/render/renderer', 'engine/render/sprites', 'parts/mix', 'planner/plan', 'planner/look', 'planner/morph',
+  'planner/tracks'],
+(H, RNG, SCH, S, DOC, PINS, SHOT, TS, FACES, BUILD, CACHE, F, R, SP, MIX, PL, LOOK, MO, TR) => {
   'use strict';
 
   const SCENE_MAX = 16;             // §7.3
@@ -131,14 +132,12 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
     seg.fp = H.hashJSON({ ground, atmos, aspect, palette, span: duration });
     const seams = [];
     if (glyphSeam) {
-      // as planner/tracks.seams: the part's share of the shorter cut, the window [B.a − dur, B.a], the shared letters,
-      // and A handed over at the window's end (its fingerprint follows its window)
+      // as planner/tracks.seams: the part's share of the shorter cut, the window [B.a − dur, B.a] (inside A, from no
+      // earlier than tracks.ENDS_EARLY before A's sung end), the shared letters, and A handed over at the window's end
+      // (its fingerprint follows its window)
       const A = cuts[0], Bc = cuts[1];
       const slot = decisionOf(registry, 'seam', key, { f: Bc.feat, look: ax.look }, seed, params, 0);
-      const share = def.share > 0 ? def.share : 0.4;
-      let dur = Math.min(slot.p.dur || 0.5, share * Math.min(A.b - A.a, Bc.b - Bc.a));
-      dur = Math.floor(Math.max(0, dur) * 1e6) / 1e6;
-      const at = def.ends === true ? Bc.a - dur / 2 : Bc.a;
+      const { dur, at } = TR.seamWindow(def, slot, A, Bc, -Infinity);
       seams.push({ into: Bc.key, at, dur, scope: 'text', a: A.key, b: Bc.key, slot,
         glyphs: MO.pairsOf(A.text, Bc.text, slot.p.melt) });
       const stop = Math.floor((at + dur / 2) * 1e6) / 1e6;

@@ -218,6 +218,25 @@ MV.def('engine/render/morph', ['core/mat', 'core/num', 'engine/scene/table', 'en
     DR.pickNode(dc, it.scene, i, VW, it.cut, -rec.w / 2, -rec.h / 2, rec.w / 2, rec.h / 2);
   }
 
+  // A pair's own eased clock at warped progress w, staggered by its rank (0 … 1 in the new line's order) over `spread`.
+  function clockOf(w, spread, rank) {
+    const s = Math.min(spread > 0 ? spread : 0, SPREAD_MAX);
+    return SINE(N.clamp((w - s * rank) / (1 - s)));
+  }
+
+  // A swap's two versions at clock k, as factors: [old alpha, new alpha, old blur, new blur] (of the pair's alpha and of
+  // `soften`). The old letter keeps its full strength until SWAP_OLD (the old line may still be sung while its letters
+  // travel), then softens and fades; the new one comes into focus from SWAP_NEW.
+  const SWAP_OLD = 0.45, SWAP_NEW = 0.55, SWAP_FADE = 0.4, SWAP_BLUR = 0.45;
+  function swapOf(k, out) {
+    out[0] = 1 - sm((k - SWAP_OLD) / SWAP_FADE);
+    out[1] = sm((k - SWAP_NEW) / SWAP_FADE);
+    out[2] = sm((k - SWAP_OLD) / SWAP_BLUR);
+    out[3] = 1 - sm((k - SWAP_NEW) / SWAP_BLUR);
+    return out;
+  }
+  const SW = new Float64Array(4);
+
   // draw(dc, mv, A, B, w, p): the travellers of a glyph seam at warped progress w on dc.g (null: only the sprites they
   // would draw are looked up, the warm-up). A, B = the two sides' items { scene, cam, cut } (the cameras of this frame).
   // p = the seam's params { arc, spread, soften }. Each pair moves on its own eased clock, staggered by its rank; a pair
@@ -230,7 +249,6 @@ MV.def('engine/render/morph', ['core/mat', 'core/num', 'engine/scene/table', 'en
     dc.font = null;
     if (g) { g.textAlign = 'center'; g.textBaseline = 'middle'; }
     const ta = A.scene.table, tb = B.scene.table;
-    const s = Math.min(p.spread > 0 ? p.spread : 0, SPREAD_MAX);
     const arc = p.arc > 0 ? p.arc : 0, soften = p.soften > 0 ? p.soften : 0;
     for (let j = 0; j < mv.n; j++) {
       const ia = mv.ia[j], ib = mv.ib[j];
@@ -239,7 +257,7 @@ MV.def('engine/render/morph', ['core/mat', 'core/num', 'engine/scene/table', 'en
       const ra = A.scene.stores.glyph[ta.payload[ia]], rb = B.scene.stores.glyph[tb.payload[ib]];
       glyphFrame(FA, dc, A, ia, ra);
       glyphFrame(FB, dc, B, ib, rb);
-      const k = SINE(N.clamp((w - s * mv.rank[j]) / (1 - s)));
+      const k = clockOf(w, p.spread, mv.rank[j]);
       lerpAffine(FK, FA, FB, k, arc);
       const a = aA + (aB - aA) * k;
       if (mv.same[j] === 1 && mv.look[j] === 1) drawAs(dc, B, ib, rb, FK, a, 0);
@@ -247,13 +265,14 @@ MV.def('engine/render/morph', ['core/mat', 'core/num', 'engine/scene/table', 'en
         drawAs(dc, A, ia, ra, FK, a * (1 - sm((k - 0.4) / 0.6)), 0);
         drawAs(dc, B, ib, rb, FK, a * sm(k / 0.6), 0);
       } else {
-        drawAs(dc, A, ia, ra, FK, a * (1 - sm((k - 0.1) / 0.6)), soften * sm(k / 0.7));
-        drawAs(dc, B, ib, rb, FK, a * sm((k - 0.3) / 0.6), soften * (1 - sm((k - 0.3) / 0.7)));
+        swapOf(k, SW);
+        drawAs(dc, A, ia, ra, FK, a * SW[0], soften * SW[2]);
+        drawAs(dc, B, ib, rb, FK, a * SW[1], soften * SW[3]);
       }
       if (g && dc.pick) pickAs(dc, B, ib, rb, FK);
     }
     if (g) g.globalAlpha = 1;
   }
 
-  return { eligible, restAlpha, offIndex, prepare, draw, lerpAffine, decompose, SPREAD_MAX };
+  return { eligible, restAlpha, offIndex, prepare, draw, clockOf, swapOf, lerpAffine, decompose, SPREAD_MAX };
 });

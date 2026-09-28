@@ -8,6 +8,8 @@ const G = require('../helpers/glyph_docs.js');
 const MV = load();
 const R = MV.use('engine/render/record');
 const MO = MV.use('engine/render/morph');
+const SE = MV.use('engine/render/seam');
+const TR = MV.use('planner/tracks');
 const F = MV.use('engine/scene/frame');
 const REG = MV.use('core/registry');
 const K = MV.use('parts/kit');
@@ -148,23 +150,25 @@ test('a seam that is not a glyph seam renders as before: the pairs of a plan ent
 
 // --- 3. after the window --------------------------------------------------------------------------------------------------
 
-test('after the window: from B.a on, nothing of A is drawn (the hand-over), and B stands where the travellers ended', async () => {
+test('after the window: from its end on, nothing of A is drawn (the hand-over), and B stands where the travellers ended', async () => {
   const { plan, render } = await engineFor(G.morphDoc(GROUND));
   const s = seamInto(plan, 'r4~0');
   const A = plan.cuts[cutIdx(plan, 'r4~0') - 1], B = plan.cuts[cutIdx(plan, 'r4~0')];
-  assert.ok(A.t1 > B.a, 'A is still sung after B.a');
-  for (const t of [B.a, (B.a + B.t0) / 2, B.t0 - 1e-3]) {
+  const hi = Math.floor((s.at + s.dur / 2) * 1e6) / 1e6;
+  assert.ok(A.t1 > B.a && hi > B.a, 'A is still sung after B.a, and the window runs past it (to B\'s voice)');
+  for (const t of [hi, hi + 0.05, B.t1 - 1e-3]) {
     const fg = F.frameAt(plan, t);
-    assert.equal(fg.seam, null, t + ': the seam is over');
-    assert.ok(!fg.cuts.some((e) => e.i === cutIdx(plan, A.key)), t + ': A is off screen');
+    assert.ok(!fg.seam || plan.seams[fg.seam.i] !== s, t + ': the morph is over');
+    const ai = cutIdx(plan, A.key);
+    assert.ok(!fg.cuts.some((e) => e.i === ai) && !(fg.seam && fg.seam.aCuts.concat(fg.seam.bCuts).includes(ai)), t + ': A is off screen');
     const d = render(t).draws;
     assert.ok(!d.some((x) => x.ch === '空'), t + ': 空 (A\'s alone) is not drawn');
   }
-  // continuity: B at B.a is where the travellers stood at the end of the window
-  const end = render(s.at + s.dur / 2 - 1e-7).draws, after = render(B.a).draws;
+  // continuity: B after the window is where the travellers stood at its end
+  const end = render(s.at + s.dur / 2 - 1e-7).draws, after = render(hi).draws;
   for (const ch of ['青', 'い', '海', 'へ']) {
     const x = end.find((d) => d.ch === ch && d.alpha > 0.5), y = after.find((d) => d.ch === ch);
-    sameFrame(x, y, ch + ' at the window end and at B.a');
+    sameFrame(x, y, ch + ' at the window end and after it');
   }
 });
 
@@ -205,6 +209,30 @@ function pinnedMorphDoc(arrange, knockout) {
   }
   return G.morphDoc(GROUND, { gen: undefined, pins });
 }
+
+test('base layers: a glyph seam melts the cuts\' own base layers (an echo stack\'s copies) with the rest of the two lines', async () => {
+  const { plan, render } = await engineFor(pinnedMorphDoc('echoStack', false));
+  const s = seamInto(plan, 'r4~0');                        // 青い空へ → 青い海へ, both in an echo stack (copies on the mid layer)
+  assert.equal(s.slot.v, MORPH);
+  for (const k of ['r3~0', 'r4~0']) assert.equal(plan.cuts[cutIdx(plan, k)].slots.arrange.v, 'echoStack');
+  const hi = s.at + s.dur / 2;
+  // the frame's canvas: where the travellers are drawn (青 at full strength at u = 0; A's main 青 is skipped on its side)
+  const frameOf = (draws) => { const c = canvasesOf(draws.filter((d) => d.alpha > 0.9), ['青']); assert.equal(c.size, 1); return [...c][0]; };
+  // u = 0: B's copies (海 is B's alone) are drawn on its side surface, which the mix does not show yet; nothing of 海
+  // shows on the frame (the swap's new letter starts at alpha 0)
+  const d0 = render(lo(s)).draws, g0 = frameOf(d0);
+  assert.ok(d0.some((d) => d.ch === '海' && d.canvas !== g0 && d.alpha > 0.1), 'B\'s copies are drawn, on its side');
+  assert.deepEqual(d0.filter((d) => d.ch === '海' && d.canvas === g0 && d.alpha > 0.1).map((d) => d.alpha), [], 'u = 0: no copy of B on the frame');
+  // near the end: A's copies (空 is A's alone) have melted away with the rest, so the hand-over at the window end is
+  // continuous (nothing of A after it)
+  const d1 = render(hi - 0.01).draws, g1 = frameOf(render(lo(s) + 0.01).draws);
+  assert.deepEqual(d1.filter((d) => d.ch === '空' && d.canvas === g1 && d.alpha > 0.1).map((d) => d.alpha), [], 'no copy of A on the frame at the window end');
+  assert.ok(!render(hi + 1e-3).draws.some((d) => d.ch === '空'), 'nothing of A after the window');
+  // a plain dissolve at the same place draws the base layers once, on the frame
+  const ref = await engineFor(withSeamPart(plan, 'r4~0', 'blendDissolve'), CAT, true);
+  const r0 = ref.render(s.at - s.dur / 2).draws;
+  assert.ok(r0.some((d) => d.ch === '空' && d.alpha > 0.1), 'dissolve: A\'s copies drawn');
+});
 
 test('eligibility: a knockout (the text layer is a mask at opacity 0) and a half-transparent text layer never travel', async () => {
   for (const [arrange, knockout, reg] of [['edgeBleed', true, CAT], ['halfText', false, TEST_REG]]) {
@@ -292,17 +320,64 @@ test('determinism: the same frame twice, and preview and export, draw the same t
   }
 });
 
-test('paths: a swap melts on the sprite path mid-window and is drawn directly at the ends', async () => {
+// The time in the window of plan.seams[i] at which a pair of rank `rank` reaches its own clock k (bisection on u).
+function timeAtClock(plan, i, rank, k) {
+  const s = plan.seams[i], part = SE.seamPart(plan, CAT, i);
+  let a = 0, b = 1;
+  for (let n = 0; n < 40; n++) {
+    const m = (a + b) / 2;
+    if (MO.clockOf(part.warp(m), part.p.spread, rank) < k) a = m; else b = m;
+  }
+  return lo(s) + ((a + b) / 2) * s.dur;
+}
+
+test('paths: a swap holds sharp, melts on the sprite path, and ends drawn directly', async () => {
   const { plan, render } = await engineFor(G.morphDoc(GROUND));
-  const s = seamInto(plan, 'r4~0');                       // 空 → 海 is a swap (soften > 0)
+  const s = seamInto(plan, 'r4~0');                       // 空 → 海 is a swap (soften > 0); pairs 青 い 空海 へ: rank 2/3
+  const i = plan.seams.indexOf(s);
   assert.ok(s.slot.p.soften > 0);
   const frameOf = (d) => d.find((x) => x.ch === '青').canvas;
   let d = render(lo(s)).draws;
   assert.ok(d.some((x) => x.ch === '空' && x.canvas === frameOf(d)), 'u=0: 空 directly on the frame');
-  d = render(lo(s) + 0.5 * s.dur).draws;
-  assert.ok(!d.some((x) => (x.ch === '空' || x.ch === '海') && x.canvas === frameOf(d)), 'mid-window: 空 and 海 are blurred sprites');
+  d = render(timeAtClock(plan, i, 2 / 3, 0.35)).draws;
+  assert.ok(d.some((x) => x.ch === '空' && x.canvas === frameOf(d) && x.alpha > 0.99), 'k=0.35: 空 still sharp and whole');
+  d = render(timeAtClock(plan, i, 2 / 3, 0.75)).draws;
+  assert.ok(!d.some((x) => (x.ch === '空' || x.ch === '海') && x.canvas === frameOf(d)), 'k=0.75: 空 and 海 are blurred sprites');
   d = render(s.at + s.dur / 2 - 1e-7).draws;
   assert.ok(d.some((x) => x.ch === '海' && x.canvas === frameOf(d)), 'u=1: 海 directly on the frame');
+});
+
+test('readability: a swapped letter of the old line keeps its strength while it is sung (the window starts late enough)', async () => {
+  const MOR = MV.use('planner/morph');
+  let checked = 0;
+  for (const doc of [G.morphDoc(GROUND), G.goldenDocs(GROUND)[0].doc]) {
+    const { plan, engine } = await engineFor(doc);
+    plan.seams.forEach((s, i) => {
+      if (s.slot.v !== MORPH) return;
+      const ia = cutIdx(plan, s.a), ib = cutIdx(plan, s.b), A = plan.cuts[ia];
+      assert.ok(lo(s) >= A.t1 - TR.ENDS_EARLY - 1e-6, s.into + ': the window starts at most ENDS_EARLY before A\'s sung end');
+      assert.ok(s.at + s.dur / 2 <= plan.cuts[ib].t0 + 1e-6, s.into + ': and ends by B\'s sung start');
+      const sa = engine.scene('cut', ia), sb = engine.scene('cut', ib);
+      const mv = MO.prepare(s, sa, sb);
+      if (!mv) return;
+      const part = SE.seamPart(plan, CAT, i);
+      const units = MOR.unitsOf(A.text);                  // the letters, sung one after another over [t0, t1]: a letter
+      // is sung from (t1 − t0) · i / n on (its estimated start)
+      for (let j = 0; j < mv.n; j++) {
+        if (mv.same[j] === 1) continue;
+        const off = sa.stores.glyph[sa.table.payload[mv.ia[j]]].off;
+        const at = units.off.indexOf(off);
+        assert.ok(at >= 0);
+        const sung = A.t0 + ((A.t1 - A.t0) * at) / units.n;
+        const u = Math.min(1, Math.max(0, (sung - lo(s)) / s.dur));
+        const k = MO.clockOf(part.warp(u), part.p.spread, mv.rank[j]);
+        const old = MO.swapOf(k, new Float64Array(4))[0];
+        assert.ok(old >= 0.8, s.into + ' ' + A.text + ' letter ' + units.g[at] + ' at its sung time: ' + old.toFixed(3));
+        checked++;
+      }
+    });
+  }
+  assert.ok(checked >= 3, 'swaps checked: ' + checked);
 });
 
 test('warm-up: the sprites of a morph frame are made ahead (the frame itself makes none)', async () => {
@@ -311,7 +386,7 @@ test('warm-up: the sprites of a morph frame are made ahead (the frame itself mak
   const t0 = lo(s) - 0.2;
   render(t0, { quality: 'preview' });                     // the playhead
   await engine.prepare(t0, t0 + 1.5);                      // preview: warms the frames ahead at 30 fps
-  const t = t0 + 12 / 30;                                  // a warmed frame inside the window
+  const t = t0 + 18 / 30;                                  // a warmed frame inside the window, 空 → 海 melting
   assert.ok(t > lo(s) && t < s.at + s.dur / 2);
   const before = engine.stats().spritesMade;
   render(t, { quality: 'preview' });
@@ -367,7 +442,8 @@ test('thumbnail: the canned morph shows two lines that share letters, its own wi
   const def = CAT.get('seam', MORPH);
   assert.equal(s.slot.v, MORPH);
   assert.ok(s.dur > 0 && s.dur <= def.share * Math.min(A.b - A.a, B.b - B.a) + 1e-9, 'the part\'s share: ' + s.dur);
-  assert.ok(Math.abs(s.at - (B.a - s.dur / 2)) < 1e-9, 'ends: the window is [B.a − dur, B.a]');
+  assert.ok(Math.abs(s.at + s.dur / 2 - Math.min(B.t0, B.a + s.dur)) < 1e-9, 'ends: the window ends as B\'s voice starts');
+  assert.ok(s.at - s.dur / 2 >= A.t1 - 0.5 - 1e-9, 'and starts at most 0.5 s before A\'s sung end');
   assert.deepEqual(s.glyphs, PM.pairsOf(A.text, B.text, s.slot.p.melt), 'the letters the lines share');
   assert.ok(s.glyphs.some((p) => p[2] === 1) && s.glyphs.some((p) => p[2] === 0), 'some travel, some melt');
   assert.equal(A.b, Math.floor((s.at + s.dur / 2) * 1e6) / 1e6, 'A is handed over at the window end');

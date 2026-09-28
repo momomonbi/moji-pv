@@ -862,6 +862,40 @@ test('planner: 太る is chosen on about 10 % of the eligible lyric lines of new
   assert.ok(pulseShare >= 0.02 && pulseShare <= 0.07, '脈打つ太さ on ' + (100 * pulseShare).toFixed(1) + ' % of the eligible lines');
 });
 
+test('planner: automatic weight parts sit only on cuts that can show them (lyric/focus, plain or glow, a face with room)', () => {
+  // the opt-in pools are cached apart from the plain ones ('|w'): a cut without the opt-in never reuses a pool with it
+  let auto = 0;
+  const byKind = { arrive: 0, dwell: 0, depart: 0 };
+  for (const { name, doc } of corpus.corpus(2, ['16:9', '9:16'])) {
+    doc.look.gen = 1;
+    const plan = PL.plan(doc, { registry: CATALOG });
+    for (const c of plan.cuts) {
+      for (const kind of ['arrive', 'dwell', 'depart']) {
+        const d = c.slots[kind];
+        if (!d || d.from !== 'auto' || CATALOG.get(kind, d.v).optIn !== 'weight') continue;
+        auto++; byKind[kind]++;
+        const st = { ctx: { glyph: { weight: true }, look: { plan: plan.look } }, cut: c, slots: c.slots };
+        assert.ok(CA.weightOptIn(st, kind), name + ' ' + c.key + ' ' + kind + ' ' + d.v + ': not eligible');
+      }
+    }
+  }
+  assert.ok(byKind.arrive > 20 && byKind.dwell > 5 && byKind.depart > 5, JSON.stringify(byKind));
+});
+
+test('planner: taking the marker away (look.gen) and back re-plans exactly (the switches are in the cast key)', () => {
+  const doc = basicDoc({ gen: 1, pins: { 'work:theme': pin('monoPress') } });
+  const plan = PL.plan(doc, { registry: CATALOG });
+  const weightCuts = (p) => p.cuts.filter((c) => ['arrive', 'dwell', 'depart'].some((k) => CATALOG.get(k, c.slots[k].v).optIn));
+  assert.ok(weightCuts(plan).length > 0, 'the new work has automatic weight parts');
+  const old = Object.assign({}, doc, { look: Object.assign({}, doc.look) });
+  delete old.look.gen;
+  const p1 = PL.plan(old, { registry: CATALOG });
+  assert.equal(p1.hash, PL.run(old, CATALOG, { fresh: true }).hash, 'the marker gone');
+  assert.equal(weightCuts(p1).length, 0);
+  const p2 = PL.plan(doc, { registry: CATALOG });
+  assert.equal(p2.hash, plan.hash, 'the marker back');
+});
+
 // --- 6. the build: text.weight faces -----------------------------------------------------------------------------------
 
 test('build: text.weight lays out the lyrics of the cut in that weight; notes keep theirs', () => {

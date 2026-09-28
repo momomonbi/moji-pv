@@ -4,7 +4,8 @@
 //   node tests/update_golden.js           recompute and rewrite the golden files that can be computed today
 //   node tests/update_golden.js --check   recompute and compare; exit 1 on a difference; writes nothing
 //   node tests/update_golden.js --v2      also rewrite frame_hashes_v2.json (on purpose only; see below)
-//   node tests/update_golden.js --only=<file>   compute (and write, or with --check compare) that one golden only
+//   node tests/update_golden.js --only=<file>   compute (and write, or with --check compare) that one golden only; a
+//                     writing run still checks the frozen frame_hashes_v2.json first and writes nothing when it differs
 // Plan hashes need planner/plan; frame hashes need engine/facade, engine/render/record and engine/text/fake_measure.
 // A golden whose modules do not exist yet is left as it is (or written as an empty placeholder when missing).
 // Registry: the full catalog (parts/catalog) when it exists, else the stub parts (tests/fixtures/stub_parts.js).
@@ -161,7 +162,8 @@ async function main() {
   let failed = false;
   fs.mkdirSync(GOLDEN, { recursive: true });
   for (const job of jobs) {
-    if (only && job.file !== only) continue;
+    // --only skips the other jobs, but never the frozen check before a write
+    if (only && job.file !== only && !(job.frozen && !check)) continue;
     const missing = job.needs.filter((id) => !MV.has(id));
     const current = readGolden(job.file);
     if (missing.length) {
