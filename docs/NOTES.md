@@ -9327,7 +9327,15 @@ lens_filter_seam (12 seam rows, two replaces). Mutations, each caught: the hand-
 `dropGrowWeight`; the 2-run kana rule; the gap ratio rule; `seamCopy` without the re-check (and re-checking pinned
 sources); no skip mask; eligibility off; the first node instead of the highest rest alpha; `lerpAffine` with the ends
 swapped; the short arc one way; the bow's axes; the glyph turn, its inverse, the tcy squeeze, the world matrix; no
-traveller picks; no traveller warm-up; a swap without its softening; no static-raster bypass.
+traveller picks; no traveller warm-up; a swap without its softening; no static-raster bypass. The six goldens match
+after the planner step and after the renderer step. Node: 1,815 of 1,827 on a run beside the other packages' tests
+(load 10–15 on 4 CPUs); the 12 misses are timing checks only — ten conformance "slowest build > 60 ms" (other parts each
+run; alone, conformance passes but for one different stub part) and the two planning-speed tests. Same-run A/B of the
+planning-speed tests against the base worktree: re-plan after an edit best 13.7 / 13.0 ms here vs 15.1 / 15.1 ms there,
+typing best 27.8 / 24.1 vs 25.2 / 25.7 ms (noise; the rule costs one boolean per boundary in an older work). Browser:
+fx_parts (glyphMorph u = 0 is frame a, u = 1 frame b), parts_gallery, i18n_pages, csp, determinism, glyph_parity,
+ui_flows `weight`, `repeat`, `values`, `pin`, `drill`, `first_look`, `first_run` and the new `morph` flow (the switch, its
+undo, the line row not on the first line, つながない changing only the transition into that line, 自動 clearing it).
 
 
 <!-- PV22 P5 notes -->

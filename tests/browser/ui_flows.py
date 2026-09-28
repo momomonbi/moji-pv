@@ -2505,6 +2505,77 @@ async def flow_weight(f, lang):
     await f.undo_all(done0, doc0)
 
 
+MORPH_LYRICS = '\n'.join(['青い空へ', '青い海へ', '夜の町を歩く', '朝の町を歩く', '君の手', '夢の中'])
+GLYPH_SEAMS = "() => window.__mv.plan.seams.filter((s) => s.slot.v === 'glyphMorph').map((s) => s.into + '/' + s.slot.from)"
+
+
+async def flow_morph(f, lang):
+    """作品全体 › 見た目 › 詳しい設定 「同じ字をつなぐ」 and 行 › 演出 › 詳しい設定 「前の行から字をつなぐ」 (DESIGN_2_2 §4, M4): in
+    a new work, lines in one background that share letters are joined by the モーフ (the rule); the switch reads 自動 (on)
+    with its note; turning it off pins false (one undo entry) and no モーフ is left; undo brings the unpinned state back. The
+    line row is not on the first line; つながない pins the line off, and only the transition into that line changes."""
+    page = f.page
+    done0, doc0 = await with_lyrics(f, MORPH_LYRICS)
+    ground = await page.evaluate("() => window.__mv.reg.fallback('ground')")
+    await page.evaluate("(g) => window.__mv.dispatch({ t: 'pin.set', path: 'work:ground', v: g, by: 'user' }, { label: ['undo.pin', {}] })",
+                        ground)
+    await f.until("() => window.__mv.plan.seams.some((s) => s.slot.v === 'glyphMorph')", 'lines that share letters are joined')
+    await f.settle(2)
+    joined = await page.evaluate(GLYPH_SEAMS)
+    f.check(len(joined) >= 2 and all(j.endswith('/rule') for j in joined), 'the rule joins 青い空へ → 青い海へ and 夜の町 → 朝の町: %r' % joined)
+    await page.evaluate("() => window.__mv.select({ level: 'work' }, { from: 'header', open: true })")
+    await open_section(f, 'look')
+    await page.evaluate("""() => { const d = document.querySelector('[data-mount="inspector"] .isec[data-sec="look"] details.isec-more');
+      if (d) d.open = true; }""")
+    await f.settle(2)
+    row = ROW % 'morph.auto'
+    box = row + ' input[role="switch"]'
+    if not f.check(await page.locator(row).count() == 1, 'the switch is on the work page'):
+        return
+    note = await page.text_content(row + ' .fr-note')
+    f.check(note == await page.evaluate("() => window.__mv.t('fld.morphAuto.note')"), 'the switch says what it does: %r' % note)
+    f.check(await page.is_checked(box), 'on in a new work')
+    f.check(await page.get_attribute(row + ' .state-tag', 'data-state') == 'auto', 'the new-work default reads as 自動')
+    done1 = await page.evaluate(DONE)
+    await page.click(row + ' .w-toggle')
+    await f.until("() => { const p = window.__mv.doc.pins['work:morph.auto']; return !!p && p.v === false; }", 'turning it off pins false')
+    await f.settle(3)
+    f.check(await page.evaluate(DONE) == done1 + 1, 'one undo entry')
+    f.check(await page.evaluate(GLYPH_SEAMS) == [], 'no モーフ is left')
+    await f.blur()
+    await page.keyboard.press('Control+z')
+    await f.until("() => !window.__mv.doc.pins['work:morph.auto']", 'undo brings the unpinned state back')
+    await f.settle(3)
+    f.check(await page.evaluate(GLYPH_SEAMS) == joined, 'the モーフ are back')
+    # 行 › 演出 › 詳しい設定: 前の行から字をつなぐ (not on the first line)
+    lines = await page.evaluate("() => window.__mv.plan.lines.map((l) => l.id)")
+    target = await page.evaluate("() => { const p = window.__mv.plan; const s = p.seams.find((x) => x.slot.v === 'glyphMorph'); "
+                                 "return p.cuts.find((c) => c.key === s.into).line; }")
+    for line_id, expect in ((lines[0], 0), (target, 1)):
+        await page.evaluate("(id) => window.__mv.select({ level: 'line', ids: [id] }, { from: 'crumbs', open: true })", line_id)
+        await f.settle(2)
+        await open_section(f, 'direction')
+        await page.evaluate("""() => { const d = document.querySelector('[data-mount="inspector"] .isec[data-sec="direction"] details.isec-more');
+          if (d) d.open = true; }""")
+        await f.settle(2)
+        f.check(await page.locator(row).count() == expect, 'line %s: the row is %s' % (line_id, 'there' if expect else 'not on the first line'))
+    done2 = await page.evaluate(DONE)
+    await page.click(row + ' .w-seg button.seg:nth-child(3)')
+    await f.until("(id) => { const p = window.__mv.doc.pins['line/' + id + ':morph.auto']; return !!p && p.v === false; }",
+                  'つながない pins the line off', target)
+    await f.settle(3)
+    f.check(await page.evaluate(DONE) == done2 + 1, 'one undo entry')
+    after = await page.evaluate(GLYPH_SEAMS)
+    f.check(len(after) == len(joined) - 1, 'only the transition into that line changes: %r → %r' % (joined, after))
+    await page.evaluate("""() => { const d = document.querySelector('[data-mount="inspector"] .isec[data-sec="direction"] details.isec-more');
+      if (d) d.open = true; }""")
+    await f.settle(2)
+    await page.click(row + ' .w-seg button.seg:nth-child(1)')
+    await f.until("(id) => !window.__mv.doc.pins['line/' + id + ':morph.auto']", '自動 clears the line pin', target)
+    await f.settle(2)
+    await f.undo_all(done0, doc0)
+
+
 async def flow_areas(f, lang):
     """区画 (DESIGN_2_1 §6.8): a band of the drawer's 曲 row selects its lines as the area and opens the 行 page with the area
     header 「サビ（3行）」 and 区画のカメラ; the play bar's lane shows the bands and an area highlight, and a double-click on
@@ -5091,7 +5162,7 @@ FLOWS += [('curve', flow_curve, False), ('keyframes', flow_keyframes, False), ('
 # 「くり返しの行をそろえる」 (DESIGN_2_1 §4.10)
 FLOWS += [('repeat', flow_repeat, False)]
 # 文字PVの定石: 太さを動かす (DESIGN_2_2 §4)
-FLOWS += [('weight', flow_weight, False)]
+FLOWS += [('weight', flow_weight, False), ('morph', flow_morph, False)]
 # v2.1 photos and videos (package G.4, DESIGN_2_1 §11.8.3).
 FLOWS += [('media', flow_media, True), ('library', flow_library, False), ('missing', flow_missing, False), ('package', flow_package, False),
           ('media_device', flow_media_device, False), ('media_song', flow_media_song, False)]
