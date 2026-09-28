@@ -10,7 +10,8 @@ drop label, the library and a row's menu, the asset page, the media rows with th
 picker; asset names are user data) come last, after カメラ EXTREME (the switch, its notice and turn-off question, the
 picker's EXTREME group, キーフレーム, the AI chip, step ④); then the editor-ready output (package H.3): step ④ with Filmora用 and 詳しく,
 「Filmoraで使うには」, その他 › 透過動画（WebM）, and the Filmora set's progress and done state (its exporter stubbed: the
-words are checked here, the files by the flows).
+words are checked here, the files by the flows); last, キメ (PV22 P3): the line page with its count, too-many and
+long-line notes, the same-lyric button, the several-lines toggle, 「キメの前を静かにする」 and the gutter's badge.
 On every screen the visible text and the accessible names (aria-label, title, placeholder, alt) are read and checked:
 
   en page   no Japanese text (kana or kanji) outside the product name 文字PVメーカー and user data (the lyrics here are
@@ -430,6 +431,57 @@ async def kit_screens(w, table, families):
       document.querySelector('.step-export details.more').open = false; }""")
 
 
+# キメ (PV22 P3, DESIGN_2_2 §3): lyrics with a line sung twice and one too long for one cut in 9:16.
+KIME_LYRICS = {
+    'en': '\n'.join(['[ti:Morning Window]', 'Open the window', 'Here we go again today!', 'One small step',
+                     'We keep on walking down the long road until the morning light comes through the rain', 'One small step',
+                     'Let the light in']),
+    'ja': '\n'.join(['[ti:朝の窓]', '窓をあけて', '今日もここから始まる!', '小さな一歩で',
+                     'とおくのまちのあかりがひとつずつきえてゆくまでずっとここでまっている', '小さな一歩で', '光を入れる']),
+}
+
+
+async def kime_screens(w, table, families):
+    """The キメ rows: the line page with the toggle, its note, the work's count, the too-many hint and the long-line note;
+    the same-lyric button; the several-lines toggle; 作品全体 › 詳しい設定 › キメの前を静かにする; the gutter's badge."""
+    page = w.page
+    await w.act('step.go', {'step': 'lyrics'})
+    await w.run("""(text) => { const a = window.__mv; a.dispatch({ t: 'lyrics.set', text }, { label: ['undo.paste', {}] });
+      a.dispatch({ t: 'look.set', key: 'aspect', v: '9:16' }, { label: ['undo.aspect', {}] }); }""", KIME_LYRICS[w.lang])
+    await page.wait_for_function('() => window.__mv.plan && window.__mv.plan.lines.length === 6')
+    await w.run("""() => { const a = window.__mv, ids = a.plan.lines.map((l) => l.id);
+      a.batch({ label: ['undo.kimeSame', { n: 4 }] }, [0, 1, 2, 3].map((i) => ({ t: 'pin.set', path: 'line/' + ids[i] + ':kime', v: true, by: 'user' }))); }""")
+    await w.settle(4)
+    await w.act('panel.details')
+    await w.run("() => { const a = window.__mv; a.select({ level: 'line', ids: [a.plan.lines[3].id] }, { from: 'crumbs', open: true }); }")
+    await w.settle(4)
+    await w.run("() => document.querySelector('.frow[data-field=\"line/marks/kime\"]').scrollIntoView({ block: 'start' })")
+    for what in ('count', 'many', 'split'):
+        if not await page.locator('[data-custom="kimeInfo"] [data-kime="%s"]' % what).count():
+            w.problems.append('キメ: the line page lacks its %s note' % what)
+    await screen(w, 'kime-line', table, families)
+    await w.run("() => { const a = window.__mv; a.select({ level: 'line', ids: [a.plan.lines[2].id] }, { from: 'crumbs', open: true }); }")
+    await w.settle(4)
+    await w.run("() => document.querySelector('.frow[data-field=\"line/marks/kime\"]').scrollIntoView({ block: 'start' })")
+    if not await page.locator('[data-custom="kimeInfo"] [data-kime="same"]').count():
+        w.problems.append('キメ: no same-lyric button')
+    await screen(w, 'kime-same', table, families)
+    await w.run("() => { const a = window.__mv; a.select({ level: 'line', ids: [a.plan.lines[0].id, a.plan.lines[5].id] }, { from: 'crumbs', open: true }); }")
+    await w.settle(4)
+    await w.run("() => document.querySelector('.frow[data-field=\"lines/shift/kime\"]').scrollIntoView({ block: 'center' })")
+    await screen(w, 'kime-lines', table, families)
+    await w.run("() => { const a = window.__mv; a.select({ level: 'work' }, { from: 'crumbs', open: true }); }")
+    await w.settle(4)
+    await w.run("""() => { const r = document.querySelector('.frow[data-field="work/look/kime.calm"]'); const d = r && r.closest('details');
+      if (d) d.open = true; if (r) r.scrollIntoView({ block: 'center' }); }""")
+    if not await page.locator('.frow[data-field="work/look/kime.calm"]').count():
+        w.problems.append('キメ: no calm switch on the work page')
+    await screen(w, 'kime-calm', table, families)
+    await w.act('panel.close')
+    await page.wait_for_function("() => document.querySelectorAll('.le-g .g-kime').length === 4")
+    await screen(w, 'kime-gutter', table, families)
+
+
 async def walk_page(browser, base, lang, shots):
     page = await new_page(browser, viewport={'width': 1440, 'height': 900})
     await page.add_init_script(INSTALL_KEY_LOG)
@@ -510,6 +562,7 @@ async def walk_page(browser, base, lang, shots):
     await v21_screens(w, table, families)
     await x_screens(w, table, families)
     await media_screens(w, table, families)
+    await kime_screens(w, table, families)
 
     used = await w.run('() => [...window.__i18nUsed]')
     for key in sorted(used):
