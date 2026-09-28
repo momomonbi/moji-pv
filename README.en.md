@@ -25,6 +25,10 @@ Click the preview or a lyric line and the **Details** column shows that part. Yo
 - **Lock** — lock a line you like and it keeps its look.
 - **Repeat lines the same way** — turn it on under whole video › Look, and a lyric line sung again (a second chorus)
   looks as it did the first time (off by default).
+- **Typesetting** — whole video › Typesetting has **Tighten kana**, **Small particles, large first letters** and
+  **Larger Latin, spaced from Japanese**. A new work starts with all three on; a work made earlier or opened from a file
+  keeps them off. Their strengths are under **More settings**, and each line can turn them on or off under line ›
+  Color & type.
 - **Look history ◀ ▶** — the ◀ ▶ buttons in the play bar step through the looks you have tried.
 - Every change can be undone, and your work is autosaved in the browser.
 

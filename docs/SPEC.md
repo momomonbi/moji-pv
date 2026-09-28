@@ -80,6 +80,15 @@ and Filmora-ready output; how they are built is in `docs/DESIGN_2_1.md`.
 - **Moods** (≥ 6) bias every choice (e.g. calm / pop / glitch / cinematic / editorial / emotional) and set effect amounts.
 - **Season motifs**: parts whose picture belongs to a season are tagged; `project.season` keeps other seasons out.
 - **Vertical Japanese** done right: rotate ー〜…「」（） and Latin runs, offset small kana and 、。, center punctuation.
+- **Typesetting (文字組み, v2.2)**: 作品全体 › 文字組み has three switches, on in a new work and off in a work made
+  earlier (or opened from a file) until the user turns them on: かなを詰める (hiragana and katakana set closer, a little
+  looser where two words meet, so each word reads as one block; never so tight that neighbouring letters touch),
+  助詞を小さく・頭の字を大きく (particles such as の が を smaller, the first letter of each line larger; 大きくする字 can
+  also enlarge each phrase's first kanji or katakana, or nothing) and 英字を少し大きく・和文との間をあける (Latin words in a
+  Japanese line a little larger, with a little space where they meet Japanese; numbers alone and English lines stay as
+  they are). Their strengths are under 詳しい設定; each line (行 › 色と書体) follows the whole video (自動) or turns a
+  switch on or off for itself (使う / 使わない), e.g. a line whose particles were misread. Compositions that already
+  contrast sizes (大と小, word scatter, magazine heading) keep their own sizes.
 - **Planner**: deterministic from (project, seed). Picks per cut from mood, text length, emphasis, energy and beats;
   avoids repeating the same choice in neighbouring cuts; respects every pinned value and locked line.
 - **Variety controls**: おまかせ (new mood + theme + seed), reroll per line / cut / part, lock per line, "use only these
