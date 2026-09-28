@@ -9289,6 +9289,10 @@ labelled sets, the parts and the planner; then the UI, the docs and the new gold
   cut through the cast, its history row and the encoder; a CPU profile puts it in `castCut`, `setDecision` and
   `planHash`. A re-plan after an edit reuses the casts. The speed test now also bounds a new work's cold plan by the
   same 60 ms.
+- A `?fresh=1` page is a new work, so it now plans and renders with typesetting on (the UI rows come in step 3). The
+  browser runs on it all pass: determinism, glyph_parity, parts_gallery, ui_layout (584 layouts), csp, i18n_pages,
+  ui_flows (48 flows), kit_check, package_io, transparent_check and webm_check. kit_check stalled once while other jobs
+  loaded the machine; it passed on its own in 61 s, as in the base worktree (63 s).
 - Mutation checks, each caught:
   - T2 and the tagger: the を case; the stacked-は rule; `VETO_NEXT が`; `VETO_NEXT2`; `VETO_PAIR`; `KANA_WORDS`;
     okurigana after any hiragana; the `OPENERS` skip; hiragana phrase heads; `MIN_HEAD_CONTENT` 3 → 2; the product
