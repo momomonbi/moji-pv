@@ -9153,7 +9153,66 @@ The owner's list of 14 文字PV conventions (動きと演出, 文字組み, 曲�
 survey with an adversarial check found none fully implemented (9 partial, 5 missing); the contract is
 docs/DESIGN_2_2.md. The packages and their notes follow.
 
-<!-- PV22 P1 notes -->
+### P1 文字組み (T1 かな詰め, T2 助詞と頭の字, T3 英字と和欧間)
+
+Contract: DESIGN_2_2 §1 (the P1 design, revision 2). Built in three steps: the engine (this entry), then the planner,
+the parts and the T2 sizes, then the UI, the docs and the new golden.
+
+**Engine (step 1).**
+
+- New L1 module `engine/text/kumi`. It is metric-free and used only by `engine/text/layout` and `engine/text/service`,
+  so it is not in `build.py PLANNER_TEXT`. It holds:
+  - the T1 tier table: `TRIM`, `WIDE_KANA`, `NARROW_KANA`, `FLAVOR_DAMP`, `BOUNDARY`;
+  - the T3 tables: `LATIN_GROW`, `LATIN_GAP`;
+  - the particle tagger v6 and its frozen tables;
+  - the memos `partsOf` and `hasCjk` (512 entries each, cleared when full);
+  - `normalize`, `key`, `withCut` and `apply`.
+- `RunSpec.kumi` (additive, optional) and `RunLayout.kumi` (additive: one role per grapheme, null without kumi) are in
+  `core/types`. An absent, null or all-zero `kumi` gives a RunLayout equal to the one without the field. This is tested
+  for horizontal, vertical, tcy, Latin, emphasis, English and a sizeGroup pair.
+- `layout.prepare`:
+  - T1 caps each kana cell at `min(natural advance, cap) × k`.
+  - T3 grows Latin words through `k`, with `max` (never the product with emphasis).
+  - T3's gap goes into `trackedWidth` and `place`, never before a line's first grapheme, so breaking, fitting and
+    placing agree.
+- Fit sweep: 6,720 layouts (the 56 sample and mixed cuts × 60 box widths × h and v, every strength at 100 %,
+  maxLines 3). The worst reach beyond the box is 3.03e-5 du, the Float32 rounding the plain engine has too, and every
+  line is centred by its measured width to within 1e-3 du.
+- `TextService`:
+  - `LAYOUT_FIELDS` gains `'kumi'`, and `createTextService` takes `kumi`.
+  - `withKumi(k)` is memoised per value: at most 16 per service, sharing the LRU, and the service itself for its own
+    value.
+  - It has a getter `kumi`, and `withFaces` keeps the setting.
+- `scene/build.buildCutWith` derives the cut's service once in `cutServices`: the P4 weight step goes first, then
+  `withKumi`. That one service goes to the builder, `env.text`, `env.faces` and the scene. `kumiOf(slots)` is exported
+  for tests.
+- Goldens: the six existing files match byte for byte. No fixture carries a kumi slot, so every run takes the old path.
+- Layout time on the sample cuts (fake measurer, uncached, best of 7 on the loaded machine): 14.8–15.1 µs plain and
+  16.0–17.3 µs with 0.7/0.5/0.5, horizontally; vertical is within noise of that. T2's sizes are not in this figure yet.
+- Tests: `kumi.test.js`, `layout_kumi.test.js`, `scene_kumi.test.js` and a service case in `layout.test.js`.
+- Mutation checks, each caught by at least one test:
+  - T1: `TRIM.kana`; `min(nat, cap)`; `BOUNDARY`; the particle seams; `voiced(g)`; `FLAVOR_DAMP`.
+  - T3: `− gap[t0]`; a gap before a line's first glyph; no gap in `place`; scaling by class; keeping the edge spaces;
+    gating on the run text; the product instead of `max`; a gap keyed on phrase units; growing tcy cells.
+  - Service and build: `'kumi'` in `LAYOUT_FIELDS`; the service ignoring its kumi; `withKumi` without its memo;
+    `withCut` ignoring `kumi: null` or `tracking`; `withFaces` dropping kumi; `specKey` keying the raw object; the
+    chain without `withKumi`; `kumiOf` never null.
+
+**Deviations from the design, with reasons.**
+
+- The particle tagger (T2.4) landed with the engine step, not with T2, because the T1 word seams need `partsOf` (a seam
+  after a particle). T2's sizes and heads (`marks`, `JUMP`, `OPENERS`, `MIN_HEAD_CONTENT`) come with the planner step.
+- `specKey` keys `kumi` by its normalized value (`KU.key`) and leaves out a setting that is off.
+  - A part's explicit `{ kana: 0.7 }` and the cut's merged `{ kana: 0.7, jump: 0, head: 'line', latin: 0 }` lay out the
+    same, so they share one LRU entry.
+  - `kumi: null` and `{ kana: 0 }` key like no field.
+  - A spec without `kumi` keys exactly as before. The test compares a stored key computed by the earlier service.
+- `KU.apply` returns `gap: null` when no Latin word meets CJK, so most runs skip the gap arithmetic.
+- The voiced-kana check uses a set precomputed from U+3041–U+30FF with NFD. Other graphemes, such as a kana plus a
+  combining mark, are decomposed when asked.
+- `createTextService` is a thin wrapper over an internal `serviceOf`, so a derived service reuses the faces hash.
+- `cutServices` also sets `env.faces` from the derived service when its faces differ. Only P4's weight step makes them
+  differ, so P4's merge is one line.
 
 <!-- PV22 P2 notes -->
 

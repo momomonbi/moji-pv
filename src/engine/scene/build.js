@@ -274,7 +274,28 @@ MV.def('engine/scene/build', ['core/hash', 'core/rng', 'core/schema', 'engine/sc
     return out;
   }
 
-  function buildCutWith(cut, slots, plan, svc, warnings) {
+  // 文字組み (DESIGN_2_2 §1): the cut's typesetting from its slots, or null (no setting on: the text service as it is).
+  // The planner writes these slots only where a setting is on.
+  function kumiOf(slots) {
+    const kana = valueOf(slots, 'text.kana', 0), jump = valueOf(slots, 'text.jump', 0), latin = valueOf(slots, 'text.latin', 0);
+    if (!(kana > 0 || jump > 0 || latin > 0)) return null;
+    return { kana, jump, latin, head: valueOf(slots, 'text.head', 'line') };
+  }
+
+  // The services of one cut: ONE chain derives the cut's text service from svc.text (a glyph-weight withFaces step of
+  // DESIGN_2_2 §4 goes first, then withKumi), and that one service reaches the builder, env.text, env.faces and the
+  // scene, so a part's pre-measure lays out exactly what the builder commits. withKumi is part of the TextService
+  // contract: no guard, so a service without it fails loudly instead of setting the text plainly.
+  function cutServices(svc, slots) {
+    let text = svc.text;
+    const kumi = kumiOf(slots);
+    if (kumi) text = text.withKumi(kumi);
+    if (text === svc.text) return svc;
+    return Object.assign({}, svc, { text }, text.faces !== svc.text.faces ? { faces: text.faces } : null);
+  }
+
+  function buildCutWith(cut, slots, plan, baseSvc, warnings) {
+    const svc = cutServices(baseSvc, slots);
     const reg = svc.registry;
     const D = designEnv(plan.design);
     const where = { cut: cut.key, line: cut.line };
@@ -487,5 +508,5 @@ MV.def('engine/scene/build', ['core/hash', 'core/rng', 'core/schema', 'engine/sc
     };
   }
 
-  return { SAFE, designEnv, slotSeed, buildCut, buildGround, fallbackSlots };
+  return { SAFE, designEnv, slotSeed, buildCut, buildGround, fallbackSlots, kumiOf };
 });

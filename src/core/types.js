@@ -489,6 +489,9 @@ MV.def('core/types', [], () => {
    * @property {string} [sizeGroup]
    * @property {number} [rot]
    * @property {{ vx: number, vy: number }} [move]
+   * @property {{ kana?: number, jump?: number, head?: 'line'|'phrase'|'none', latin?: number }|null} [kumi] 文字組み
+   *   (DESIGN_2_2 §1, additive): strengths 0–1, 0 = off; absent or null = set as before. A cut-scoped TextService fills
+   *   it in from the cut unless the spec sets `kumi` (an object merges over the cut's, null opts out) or `tracking`.
    */
   /**
    * @typedef {Object} RunLayout
@@ -508,6 +511,8 @@ MV.def('core/types', [], () => {
    * @property {Array<{ from: number, to: number, x: number, y: number, w: number, h: number }>} lines
    * @property {Array<{ from: number, to: number, cx: number, cy: number }>} words
    * @property {boolean} overfull
+   * @property {Uint8Array|null} [kumi] additive (DESIGN_2_2 §1): the 文字組み role per grapheme (engine/text/kumi ROLE:
+   *   0 plain, 1 particle, 2 head, 3 scaled Latin), null when the run has no kumi
    */
 
   // ===== §4.16 Planner ========================================================================================

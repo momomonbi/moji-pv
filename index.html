@@ -1,6 +1,6 @@
 <!doctype html><html lang="ja"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-AJQ6BBoW0Ncea2e1cXNVBDftrSmV3vZSF9kjSX/bqK4='; style-src 'sha256-CBzRvq4sWr3CF69hafDp1l8UkHnSy18JQMXGJJhPDYI=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-hY+jk7HPgmL56GD156unYBCDSzAHTZjGuWLp7df5fn4='; style-src 'sha256-CBzRvq4sWr3CF69hafDp1l8UkHnSy18JQMXGJJhPDYI=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
 <title>文字PVメーカー</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -6767,7 +6767,7 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
     timing: ['snap', 'lead', 'tail', 'leadIn', 'outro', 'tapLatency'],
     song: ['name', 'sha1', 'seconds', 'bpm', 'offset', 'meter', 'bpmConfidence', 'digest', 'info'],
     digest: ['hz', 'loud'],
-    look: ['seed', 'moodSeed', 'aspect', 'backdrop'],
+    look: ['seed', 'moodSeed', 'aspect', 'backdrop', 'gen'],
     pin: ['v', 'by', 'sig'],
     lock: ['n'],
     filter: ['only', 'deny'],
@@ -6807,6 +6807,19 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
       output: { format: 'mp4', short: 1080, fps: 30, quality: 'high', audio: true, range: null, name: null,
         kit: Object.assign({}, KIT_DEFAULT) },
     };
+  }
+
+  // The generation of new documents (look.gen, PV22 / DESIGN_2_2 §0): a document made by newDoc() carries it, and the
+  // 文字PV conventions, typesetting and timing defaults of that generation apply to it unless its own settings say
+  // otherwise (planner/rules). defaultDoc() never carries it: normalize() builds from defaultDoc(), so anything added
+  // there would reach every opened project, and the tests and fixtures plan documents made from it.
+  const GEN = 1;
+
+  // newDoc() → the document of ≡ › 新しい作品, of the first run and of an emptied device: defaultDoc() with look.gen.
+  function newDoc() {
+    const doc = defaultDoc();
+    doc.look.gen = GEN;
+    return doc;
   }
 
   function defaultSide() {
@@ -6919,6 +6932,9 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
     if (!isUint32(look.moodSeed)) bad('look.moodSeed', 'must be a 32-bit unsigned integer');
     if (!ASPECTS.includes(look.aspect)) bad('look.aspect', 'must be one of ' + ASPECTS.join(' '));
     if (!BACKDROPS.includes(look.backdrop)) bad('look.backdrop', 'must be one of ' + BACKDROPS.join(' '));
+    if (look.gen !== undefined && !(Number.isInteger(look.gen) && look.gen >= 0 && look.gen <= 255)) {
+      bad('look.gen', 'must be an integer 0–255');
+    }
   }
 
   function checkPins(pins, bad) {
@@ -7304,8 +7320,8 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
 
   return {
     APP_VERSION, FORMAT, CURRENT_SCHEMA, DESIGN_SIZE, ASPECTS, LANGS, BACKDROPS, PIN_BY, FILTER_KINDS, SECTION_KINDS,
-    OUTPUT_CHOICES, KIT_KEYS, KIT_DEFAULT, ORDER,
-    defaultDoc, defaultSide, validate, songInfoProblems, normalize, normalizeSide, sanitizeSide, sanitizeAsks, touched,
+    OUTPUT_CHOICES, KIT_KEYS, KIT_DEFAULT, ORDER, GEN,
+    defaultDoc, newDoc, defaultSide, validate, songInfoProblems, normalize, normalizeSide, sanitizeSide, sanitizeAsks, touched,
     serialize,
   };
 });
@@ -9149,6 +9165,9 @@ MV.def('core/types', [], () => {
    * @property {string} [sizeGroup]
    * @property {number} [rot]
    * @property {{ vx: number, vy: number }} [move]
+   * @property {{ kana?: number, jump?: number, head?: 'line'|'phrase'|'none', latin?: number }|null} [kumi] 文字組み
+   *   (DESIGN_2_2 §1, additive): strengths 0–1, 0 = off; absent or null = set as before. A cut-scoped TextService fills
+   *   it in from the cut unless the spec sets `kumi` (an object merges over the cut's, null opts out) or `tracking`.
    */
   /**
    * @typedef {Object} RunLayout
@@ -9168,6 +9187,8 @@ MV.def('core/types', [], () => {
    * @property {Array<{ from: number, to: number, x: number, y: number, w: number, h: number }>} lines
    * @property {Array<{ from: number, to: number, cx: number, cy: number }>} words
    * @property {boolean} overfull
+   * @property {Uint8Array|null} [kumi] additive (DESIGN_2_2 §1): the 文字組み role per grapheme (engine/text/kumi ROLE:
+   *   0 plain, 1 particle, 2 head, 3 scaled Latin), null when the run has no kumi
    */
 
   // ===== §4.16 Planner ========================================================================================
@@ -11064,6 +11085,381 @@ MV.def('engine/text/fit', [], () => {
 
   return { fitSize, largestFitting, minSizeOf, MIN_ABS, MIN_SHARE, BELOW_MIN };
 });
+/* 文字PVメーカー v2 — original work. 文字組み (typesetting) of a text run: kana set closer, particles and Latin words sized apart from the Japanese around them (DESIGN_2_2 §1). */
+MV.def('engine/text/kumi', ['core/script', 'engine/text/breaker'], (S, B) => {
+  'use strict';
+
+  // RunSpec.kumi = { kana, jump, head, latin } (DESIGN_2_2 §1): three strengths 0–1, where 0 is off, and which
+  // graphemes grow ('line' | 'phrase' | 'none'). Metric-free: every number below is in em of the run's size and comes
+  // from tables and the breaker's grapheme view (`u`, breaker.analyze); engine/text/layout applies the result.
+  const HEADS = Object.freeze(['line', 'phrase', 'none']);
+  const MEMO_MAX = 512;              // entries per memo below; a full memo is cleared (pure caches: results never change)
+
+  // RunLayout.kumi: one role per grapheme.
+  const ROLE = Object.freeze({ plain: 0, particle: 1, head: 2, latin: 3 });
+
+  // ---- T1 かなを詰める: kana cells narrower than 1 em ------------------------------------------------------------
+
+  // Trim per tier in em at strength 1: the tightest cell the ink allows in gothic and mincho faces (common kana ink
+  // ≤ 0.86 em, the widest and the voiced kana ≤ 0.92, small kana ≈ 0.6, く し り 0.45–0.6). tests/browser/glyph_parity
+  // measures the ink against these cells.
+  const TRIM = Object.freeze({ wide: 0.10, kana: 0.14, narrow: 0.30, small: 0.34, bar: 0.08 });
+  const WIDE_KANA = 'あおすせなぬねのはひふへほまみむめやゆわゐゑを';     // …and every voiced kana (が ぱ ヴ)
+  const NARROW_KANA = 'くぐしじりノトドリ';                               // narrow wins over voiced (ぐ じ ド)
+  // Heavy and brush faces carry more ink per cell: their trim is damped, and again for a layout weight ≥ 800.
+  const FLAVOR_DAMP = Object.freeze({ heavy: 0.6, brush: 0.8 });
+  const HEAVY_WEIGHT = 800;
+  const WEIGHT_DAMP = 0.8;
+  // Where two words meet (a phrase start, or right after a particle), both kana at the seam keep this share of their
+  // trim, so the seam stays a little wider than the inside of a word and the words read as blocks.
+  const BOUNDARY = 0.5;
+
+  const WIDE_SET = new Set(WIDE_KANA);
+  const NARROW_SET = new Set(NARROW_KANA);
+  // The voiced kana of U+3041–U+30FF (a base plus ゛ or ゜ under NFD); other graphemes are decomposed when asked.
+  const VOICED = new Set();
+  for (let cp = 0x3041; cp <= 0x30ff; cp++) {
+    const ch = String.fromCodePoint(cp);
+    if (ch.normalize('NFD').length > 1) VOICED.add(ch);
+  }
+  function voiced(g) { return g.length === 1 ? VOICED.has(g) : g.normalize('NFD').length > 1; }
+
+  // tier(u, i) → 'wide' | 'kana' | 'narrow' | 'small' | 'bar' | null: the trim class of grapheme i. Only full-width
+  // hiragana, katakana, small kana and ー have one; kanji, Latin, digits, punctuation, halfwidth kana, ・ and 々 do not.
+  function tier(u, i) {
+    const g = u.gs[i], c = u.cls[i];
+    if (g === 'ー') return 'bar';
+    if (u.cells[i] !== 1) return null;
+    if (c === 'smallKana') return 'small';
+    if (c !== 'hira' && c !== 'kata') return null;
+    if (NARROW_SET.has(g)) return 'narrow';
+    return WIDE_SET.has(g) || voiced(g) ? 'wide' : 'kana';
+  }
+
+  // The damp of a run's script face (a FontRef: flavor, weight).
+  function faceDamp(face) {
+    if (!face) return 1;
+    const f = Object.prototype.hasOwnProperty.call(FLAVOR_DAMP, face.flavor) ? FLAVOR_DAMP[face.flavor] : 1;
+    return f * (Number(face.weight) >= HEAVY_WEIGHT ? WEIGHT_DAMP : 1);
+  }
+
+  // ---- T3 英字を少し大きく・和文との間をあける -------------------------------------------------------------------
+
+  // Growth of a Latin word at strength 1, by the run's Latin family (faces with a small x-height grow more); and the
+  // space in em added between the word and the CJK next to it.
+  const LATIN_GROW = Object.freeze({ default: 0.20, 'Caveat': 0.30, 'Cormorant Garamond': 0.28 });
+  const LATIN_GAP = 0.30;
+  const CJK = new Set(['han', 'hira', 'kata', 'smallKana', 'hangul']);
+
+  function latinGrow(ref) {
+    const fam = ref && ref.family;
+    return typeof fam === 'string' && fam !== 'default' && Object.prototype.hasOwnProperty.call(LATIN_GROW, fam)
+      ? LATIN_GROW[fam] : LATIN_GROW.default;
+  }
+
+  // ---- the particle tagger (v6; DESIGN_2_2 §1 T2.4) ---------------------------------------------------------------
+
+  // Particles the tagger looks for; sentence-final ones (よ ね な さ か わ), だけ, って and ながら are left alone.
+  const P1 = Object.freeze([...'はがをにでとへもの']);
+  const P2 = Object.freeze(['から', 'まで', 'より']);
+  // A particle right after a particle: only these pairs.
+  const STACK = Object.freeze(['には', 'では', 'とは', 'へは', 'からは', 'までは', 'よりは', 'にも', 'でも', 'とも', 'へも',
+    'からも', 'までも', 'よりも', 'への', 'との', 'での', 'からの', 'までの', 'よりの']);
+  // The grapheme after a particle that makes it a word ending or a word start instead (上がる, 奏でる, 待とう, 積もる).
+  const VETO_NEXT = Object.freeze({
+    'が': 'るれらりろっ', 'で': 'るれろっすし', 'に': 'っ', 'と': 'っうれ', 'の': 'っ', 'は': 'っ',
+    'も': 'うっのえどらしるれりろ', 'へ': 'っ', 'を': '', 'から': 'だっ', 'まで': '', 'より': 'そ',
+  });
+  // The two graphemes after a particle that make it a copula (である) or a suffix (にくい).
+  const VETO_NEXT2 = Object.freeze({ 'で': Object.freeze(['ある', 'あり', 'あれ', 'あろ']),
+    'に': Object.freeze(['くい', 'くく', 'くか', 'くさ', 'くけ']) });
+  // Kanji + kana that begin a verb or adverb ending (the kana is okurigana).
+  const VETO_PAIR = Object.freeze(['死に', '落と', '逃が', '騒が', '急が', '稼が', '塞が', '防が', '泳が', '脱が', '嗅が', '仰が',
+    '注が', '研が', '漕が', '担が', '剥が', '紡が', '繋が', '焦が', '転が', '揺が', '最も', '尤も', '遠の', '奏で', '撫で', '茹で', '詣で',
+    '秀で', '更に', '既に', '共に', '特に', '遂に', '殊に', '常に', '正に', '誠に', '故に', '実に']);
+  // Compounds written with a particle-looking kana inside.
+  const VETO_TRIPLE = Object.freeze(['背のび', '手のひ', '目の当', '木の実']);
+  // Hiragana words a particle may follow (where a word may start).
+  const KANA_WORDS = Object.freeze(['あなた', 'あたし', 'わたし', 'きみ', 'ぼく', 'ぼくら', 'おれ', 'ふたり', 'ひとり', 'みんな',
+    'だれ', 'なに', 'どこ', 'ここ', 'そこ', 'あそこ', 'いま', 'きょう', 'あした', 'あす', 'きのう', 'こと', 'もの', 'とき', 'ゆめ',
+    'そら', 'こえ', 'ひかり', 'ことば', 'こころ', 'なみだ', 'えがお', 'さくら', 'はな', 'ほし', 'つき', 'ゆき', 'あめ', 'かぜ',
+    'うみ', 'よる', 'せかい', 'みらい', 'きもち', 'いのち', 'からだ', 'まま', 'さよなら', 'なか', 'あと', 'そば', 'うそ']);
+  // Short hiragana words after which a word may start (adverbs, demonstratives).
+  const LEAD_WORDS = Object.freeze(['まだ', 'もう', 'ずっと', 'そっと', 'もっと', 'きっと', 'やっと', 'ただ', 'この', 'その',
+    'あの', 'どの', 'こんな', 'そんな', 'あんな']);
+  const MAX_KANA_WORD = 4;
+  // After a kanji and one or two okurigana (思い, 終わり, 来る, 見た): OKURI_FREE particles before anything, OKURI_EDGE
+  // ones only before a non-hiragana grapheme, a space or the end.
+  const OKURI_KANA = 'いりしちきみびぎえけせてねめれくるたらうつ';
+  const OKURI_FREE = Object.freeze(['の', 'を', 'まで', 'から', 'より']);
+  const OKURI_EDGE = Object.freeze(['は', 'も', 'へ', 'に', 'が', 'と']);
+  const CLOSERS = '」』）】〕〉》';
+
+  const P1_SET = new Set(P1), P2_SET = new Set(P2), STACK_SET = new Set(STACK), PAIR_SET = new Set(VETO_PAIR);
+  const TRIPLE_SET = new Set(VETO_TRIPLE), KANA_WORD_SET = new Set(KANA_WORDS), LEAD_SET = new Set(LEAD_WORDS);
+  const OKURI_KANA_SET = new Set(OKURI_KANA), OKURI_FREE_SET = new Set(OKURI_FREE), OKURI_EDGE_SET = new Set(OKURI_EDGE);
+  const CLOSER_SET = new Set(CLOSERS);
+
+  function isHira(u, g) { return g >= 0 && g < u.n && (u.cls[g] === 'hira' || (u.cls[g] === 'smallKana' && u.gs[g] < '゠')); }
+
+  // Content a particle may follow directly: kanji, katakana, Latin, digits, fullwidth letters or a closing bracket.
+  function contentLeft(u, g) {
+    const c = u.cls[g];
+    return c === 'han' || c === 'kata' || (c === 'smallKana' && u.gs[g] >= '゠') || c === 'latin' || c === 'digit'
+      || c === 'fullLatin' || CLOSER_SET.has(u.gs[g]);
+  }
+
+  function hiraWord(u, s, e) {
+    if (s < 0) return null;
+    let w = '';
+    for (let j = s; j <= e; j++) { if (!isHira(u, j)) return null; w += u.gs[j]; }
+    return w;
+  }
+
+  // particleMarks(u) → Uint8Array: 1 on the graphemes of each particle the tagger finds in a breaker.analyze() view.
+  function particleMarks(u) {
+    const mark = new Uint8Array(u.n);
+    // a word may start at s: at the start, after a space, a non-hiragana grapheme or a marked particle, or (one level)
+    // after a LEAD_WORDS word that itself starts a word
+    const startsWord = (s, deep) => {
+      const g = s - 1;
+      if (g < 0 || u.space[g] || !isHira(u, g) || mark[g]) return true;
+      if (!deep) return false;
+      for (let k = 2; k <= MAX_KANA_WORD; k++) {
+        const w = hiraWord(u, s - k, g);
+        if (w && LEAD_SET.has(w) && startsWord(s - k, false)) return true;
+      }
+      return false;
+    };
+    for (let i = 0; i < u.n; i++) {
+      if (u.space[i]) continue;
+      let len = 0, p = null;
+      if (i + 1 < u.n && P2_SET.has(u.gs[i] + u.gs[i + 1])) { len = 2; p = u.gs[i] + u.gs[i + 1]; }
+      else if (P1_SET.has(u.gs[i])) { len = 1; p = u.gs[i]; }
+      if (!len) continue;
+      const L = i - 1;
+      if (L < 0 || u.space[L]) continue;                  // no particle at the start or after a space
+      const R = i + len;
+      const rHira = R < u.n && !u.space[R] && isHira(u, R);
+      let ok = false;
+      if (p === 'を') {
+        ok = true;                                         // を is only ever the object particle
+      } else if (contentLeft(u, L)) {
+        ok = !PAIR_SET.has(u.gs[L] + u.gs[i]) && !(R < u.n && TRIPLE_SET.has(u.gs[L] + p + u.gs[R]));
+      } else if (mark[L]) {
+        let prev = u.gs[L];
+        if (L >= 1 && mark[L - 1] && P2_SET.has(u.gs[L - 1] + u.gs[L])) prev = u.gs[L - 1] + u.gs[L];
+        ok = STACK_SET.has(prev + p);
+        // a stacked は starts no word: before a non-hiragana grapheme, a space, the end or ない (ではない, にはない)
+        if (ok && p === 'は' && rHira && !(u.gs[R] === 'な' && R + 1 < u.n && u.gs[R + 1] === 'い')) ok = false;
+      } else if (isHira(u, L)) {
+        for (let k = 2; k <= MAX_KANA_WORD && !ok; k++) {
+          const w = hiraWord(u, L - k + 1, L);
+          if (w && KANA_WORD_SET.has(w) && startsWord(L - k + 1, true)) ok = true;
+        }
+        if (!ok) {
+          const one = L >= 1 && u.cls[L - 1] === 'han' && OKURI_KANA_SET.has(u.gs[L]);
+          const two = L >= 2 && u.cls[L - 2] === 'han' && isHira(u, L - 1) && !mark[L - 1] && OKURI_KANA_SET.has(u.gs[L]);
+          if ((one || two) && (OKURI_FREE_SET.has(p) || (OKURI_EDGE_SET.has(p) && !rHira))) ok = true;
+        }
+      }
+      if (!ok) continue;
+      if (R < u.n && !u.space[R] && VETO_NEXT[p] && VETO_NEXT[p].includes(u.gs[R])) continue;
+      if (R + 1 < u.n && VETO_NEXT2[p] && VETO_NEXT2[p].includes(u.gs[R] + u.gs[R + 1])) continue;
+      for (let j = i; j < R; j++) mark[j] = 1;
+      i = R - 1;
+    }
+    return mark;
+  }
+
+  // ---- memos ------------------------------------------------------------------------------------------------------
+
+  function remember(memo, key, value) {
+    if (memo.size >= MEMO_MAX) memo.clear();
+    memo.set(key, value);
+    return value;
+  }
+
+  const partsMemo = new Map();
+  // partsOf(text, lang) → { u, part }: the grapheme view of a text and its particle marks (all 0 unless lang is 'ja').
+  // Shared, read-only.
+  function partsOf(text, lang) {
+    const s = String(text === undefined || text === null ? '' : text);
+    const key = lang + '|' + s;
+    const hit = partsMemo.get(key);
+    if (hit) return hit;
+    const u = B.analyze(s);
+    return remember(partsMemo, key, Object.freeze({ u, part: lang === 'ja' ? particleMarks(u) : new Uint8Array(u.n) }));
+  }
+
+  // particles(text, lang) → [[a, b]]: UTF-16 ranges of the particles (stacked ones, such as には, form one range);
+  // [] unless lang is 'ja'.
+  function particles(text, lang) {
+    if (lang !== 'ja') return [];
+    const { u, part } = partsOf(text, lang);
+    const out = [];
+    for (let i = 0; i < u.n; i++) {
+      if (!part[i]) continue;
+      let j = i;
+      while (j < u.n && part[j]) j++;
+      out.push([u.offs[i], u.offs[j]]);
+      i = j - 1;
+    }
+    return out;
+  }
+
+  const cjkMemo = new Map();
+  // hasCjk(text) → whether the text holds a han, kana or hangul grapheme (the T3 gate, read on the cut text).
+  function hasCjk(text) {
+    const s = String(text === undefined || text === null ? '' : text);
+    const hit = cjkMemo.get(s);
+    if (hit !== undefined) return hit;
+    let v = false;
+    for (const g of S.graphemes(s)) if (CJK.has(S.charClass(g))) { v = true; break; }
+    return remember(cjkMemo, s, v);
+  }
+
+  // Index of the grapheme that starts at UTF-16 offset `at` (binary search in u.offs), or -1.
+  function indexAt(offs, n, at) {
+    let lo = 0, hi = n - 1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (offs[mid] === at) return mid;
+      if (offs[mid] < at) lo = mid + 1; else hi = mid - 1;
+    }
+    return -1;
+  }
+
+  // ---- the RunSpec field ------------------------------------------------------------------------------------------
+
+  function strength(v) { return typeof v === 'number' && Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 0; }
+
+  // normalize(k) → frozen { kana, jump, head, latin } | null: strengths clamped to 0–1 (anything else is 0), an
+  // unknown head is 'line', and null when all three strengths are 0 (the run is set as it always was).
+  function normalize(k) {
+    if (!k || typeof k !== 'object') return null;
+    const kana = strength(k.kana), jump = strength(k.jump), latin = strength(k.latin);
+    if (!(kana > 0 || jump > 0 || latin > 0)) return null;
+    return Object.freeze({ kana, jump, head: HEADS.includes(k.head) ? k.head : 'line', latin });
+  }
+
+  // key(k) → a string naming a normalized kumi ('' for null).
+  function key(k) { return k ? 'k' + k.kana + '|j' + k.jump + '|h' + k.head + '|l' + k.latin : ''; }
+
+  // withCut(spec, cut) → the RunSpec a cut-scoped text service lays out (cut = its normalized kumi, or null):
+  //   cut null                      → spec as it is
+  //   spec.kumi === null            → as it is (the part asked for plain text)
+  //   spec.kumi absent, tracking set → as it is (a part that sets its own spacing)
+  //   spec.kumi absent              → { ...spec, kumi: cut }
+  //   spec.kumi an object           → { ...spec, kumi: { ...cut, ...spec.kumi } } (a part's partial override)
+  function withCut(spec, cut) {
+    if (!cut || !spec || typeof spec !== 'object') return spec;
+    const own = spec.kumi;
+    if (own === null) return spec;
+    if (own === undefined) return spec.tracking !== undefined ? spec : Object.assign({}, spec, { kumi: cut });
+    if (typeof own !== 'object') return spec;
+    return Object.assign({}, spec, { kumi: Object.assign({}, cut, own) });
+  }
+
+  // ---- apply ------------------------------------------------------------------------------------------------------
+
+  // The text a run's graphemes come from and the offset of its first one there: the run's own text (spec.text), or
+  // the cut text (the run is a span of it). Marks and gates read the whole source, so a run cut from a line is set
+  // like the same graphemes inside a whole-line run.
+  function sourceOf(o) {
+    return o.own ? { text: o.str, base: 0 } : { text: o.text, base: o.base };
+  }
+
+  // T1: the trim of each grapheme, halved on both sides of a word seam (Japanese runs only).
+  function kanaTrims(s, o) {
+    const { u } = o;
+    const n = u.n;
+    const trim = new Float64Array(n);
+    let any = false;
+    for (let i = 0; i < n; i++) {
+      const t = tier(u, i);
+      if (t) { trim[i] = s * TRIM[t]; any = true; }
+    }
+    if (!any || o.lang !== 'ja' || n < 2) return trim;
+    const bound = new Uint8Array(n);
+    for (const [a] of B.phraseUnits(u, 'ja')) bound[a] = 1;
+    const src = sourceOf(o);
+    const pm = partsOf(src.text, 'ja');
+    for (let i = 1; i < n; i++) {
+      if (bound[i]) continue;
+      const j = indexAt(pm.u.offs, pm.u.n, src.base + u.offs[i]);
+      if (j > 0 && pm.part[j - 1] && !pm.part[j]) bound[i] = 1;
+    }
+    for (let b = 1; b < n; b++) {
+      const p = b - 1;
+      if (!bound[b] || u.space[p] || !(trim[p] > 0) || !(trim[b] > 0)) continue;
+      trim[p] *= BOUNDARY;
+      trim[b] *= BOUNDARY;
+    }
+    return trim;
+  }
+
+  // T3: Latin words (maximal runs on the Latin face holding a letter, without their edge spaces) grow to at least
+  // `grow` and get LATIN_GAP × strength of space where they meet CJK. Vertical tcy cells keep their size.
+  function latinWords(x, o, role, gap) {
+    const { u, font, vert, k } = o;
+    const n = u.n;
+    const grow = 1 + x * latinGrow(o.latin);
+    const add = LATIN_GAP * x;
+    const cjk = (g) => g >= 0 && g < n && !u.space[g] && CJK.has(u.cls[g]);
+    let any = false;
+    for (let i = 0; i < n;) {
+      if (font[i] !== 1) { i++; continue; }
+      let j = i, letter = false;
+      while (j < n && font[j] === 1) { if (u.cls[j] === 'latin') letter = true; j++; }
+      const c0 = u.next[i], c1 = u.prev[j] + 1;          // content bounds: edge spaces are not the word's
+      if (letter && c0 < c1) {
+        for (let g = c0; g < c1; g++) {
+          if (vert && vert.group[g] >= 0 && vert.groups[vert.group[g]].cls === 'tcy') continue;
+          if (k[g] < grow) k[g] = grow;
+          if (!role[g]) role[g] = ROLE.latin;
+        }
+        if (cjk(c0 - 1)) { gap[c0] = add; any = true; }
+        if (cjk(c1)) { gap[c1] = add; any = true; }
+      }
+      i = j;
+    }
+    return any;
+  }
+
+  // apply(kumi, o) → { cap, gap, role }, for engine/text/layout.prepare. kumi: a normalized RunSpec.kumi. o = { u, lang,
+  // font (layout font indices), vert (vert.classify or null), mark (emphasis marks), k (size factors, mutated here),
+  // text (the cut text), str, base (the run's text and its offset in the cut text), own (the run has its own text),
+  // emphScale, face (the run's script FontRef), latin (its Latin FontRef) }.
+  //   cap[i]  the most grapheme i may advance, in em before its size factor (Infinity: no limit)
+  //   gap     em added before grapheme i when it is not the first of its line, or null when none
+  //   role    RunLayout.kumi (ROLE per grapheme)
+  function apply(kumi, o) {
+    const n = o.u.n;
+    const cap = new Float64Array(n).fill(Infinity);
+    const role = new Uint8Array(n);
+    let gap = null;
+    if (kumi.kana > 0) {
+      const trim = kanaTrims(kumi.kana * faceDamp(o.face), o);
+      for (let i = 0; i < n; i++) if (trim[i] > 0) cap[i] = 1 - trim[i];
+    }
+    if (kumi.latin > 0 && o.lang !== 'en' && hasCjk(sourceOf(o).text)) {
+      const g = new Float64Array(n);
+      if (latinWords(kumi.latin, o, role, g)) gap = g;
+    }
+    return { cap, gap, role };
+  }
+
+  // Test hook: empties the memos (results must not depend on them).
+  function clearMemos() { partsMemo.clear(); cjkMemo.clear(); }
+
+  return {
+    normalize, key, withCut, particleMarks, partsOf, particles, hasCjk, tier, apply, clearMemos,
+    HEADS, ROLE, TRIM, WIDE_KANA, NARROW_KANA, FLAVOR_DAMP, HEAVY_WEIGHT, WEIGHT_DAMP, BOUNDARY, LATIN_GROW, LATIN_GAP,
+    P1, P2, STACK, VETO_NEXT, VETO_NEXT2, VETO_PAIR, VETO_TRIPLE, KANA_WORDS, LEAD_WORDS, OKURI_KANA, OKURI_FREE,
+    OKURI_EDGE, CLOSERS, MEMO_MAX,
+  };
+});
 /* 文字PVメーカー v2 — original work. Vertical Japanese: per-character classes, offsets and rotations (DESIGN §4.15.2). */
 MV.def('engine/text/vert', ['core/script'], (S) => {
   'use strict';
@@ -11218,9 +11614,10 @@ MV.def('engine/text/vert', ['core/script'], (S) => {
     classOf, classify, segment, longestLatinRun, offsetFor, rotOf,
   };
 });
-/* 文字PVメーカー v2 — original work. Run layout: horizontal lines and vertical columns, fitted to a box (DESIGN §4.15.4–6). */
-MV.def('engine/text/layout', ['core/script', 'engine/text/vert', 'engine/text/breaker', 'engine/text/fit', 'engine/text/faces'],
-(S, V, B, F, FACES) => {
+/* 文字PVメーカー v2 — original work. Run layout: horizontal lines and vertical columns, fitted to a box (DESIGN §4.15.4–6; 文字組み DESIGN_2_2 §1). */
+MV.def('engine/text/layout', ['core/script', 'engine/text/vert', 'engine/text/breaker', 'engine/text/fit', 'engine/text/faces',
+  'engine/text/kumi'],
+(S, V, B, F, FACES, KU) => {
   'use strict';
 
   // Everything is measured once at a nominal 100 px and scaled (§4.15.1). Advances below are in em (size 1).
@@ -11262,6 +11659,7 @@ MV.def('engine/text/layout', ['core/script', 'engine/text/vert', 'engine/text/br
       breakAt: pick('breakAt', (v) => BREAKS.has(v)),
       emphScale: pick('emphScale', (v) => finite(v) && v > 0),
       box: { x: box.x, y: box.y, w: Math.max(0, box.w), h: Math.max(0, box.h) },
+      kumi: KU.normalize(spec.kumi),                               // 文字組み (DESIGN_2_2 §1); null: set as before
     };
   }
 
@@ -11290,15 +11688,22 @@ MV.def('engine/text/layout', ['core/script', 'engine/text/vert', 'engine/text/br
     const vert = spec.orient === 'v' ? V.classify(u.gs) : null;
     const glue = glueOf(vert, n);
     const nat = naturalAdvances(u, font, refs, measurer, vert);
+    // 文字組み: kana cells capped below 1 em (T1), Latin words grown through k and spaced from CJK by gap (T3)
+    const ku = spec.kumi ? KU.apply(spec.kumi, { u, lang, font, vert, mark, k, text, str, base,
+      own: spec.text !== undefined && spec.text !== null, emphScale: spec.emphScale, face: refs[0], latin: refs[1] }) : null;
     const along = new Float64Array(n);
     const cellStart = new Uint8Array(n);
     for (let i = 0; i < n; i++) {
       cellStart[i] = glue[i] ? 0 : 1;
-      along[i] = alongAdvance(u, vert, nat, i) * (glue[i] ? 0 : groupScale(vert, k, i));
+      let a = alongAdvance(u, vert, nat, i);
+      if (ku && ku.cap[i] < a) a = ku.cap[i];                      // never wider than measured: proportional kana stay
+      along[i] = a * (glue[i] ? 0 : groupScale(vert, k, i));
     }
+    const gap = ku ? ku.gap : null;
     const prep = {
-      spec, str, base, lang, u, n, refs, font, mark, k, vert, glue, nat, along, cellStart, measurer,
-      width: trackedWidth(u, along, cellStart, spec.tracking), opps: new Map(), balanced: new Map(),
+      spec, str, base, lang, u, n, refs, font, mark, k, vert, glue, nat, along, cellStart, measurer, gap,
+      kumi: ku ? ku.role : null,
+      width: trackedWidth(u, along, cellStart, spec.tracking, gap), opps: new Map(), balanced: new Map(),
     };
     prep.shift = baselineShifts(prep);
     Object.assign(prep, lineReach(prep));
@@ -11413,14 +11818,15 @@ MV.def('engine/text/layout', ['core/script', 'engine/text/vert', 'engine/text/br
     return m;
   }
 
-  // Width of a grapheme range in em: trimmed sum of advances plus tracking between cells.
-  function trackedWidth(u, along, cellStart, tracking) {
+  // Width of a grapheme range in em: trimmed sum of advances plus tracking between cells, plus the 文字組み gap before
+  // each grapheme (null: none) except the first of the range, since a line never starts with a gap.
+  function trackedWidth(u, along, cellStart, tracking, gap) {
     const pre = new Float64Array(u.n + 1);
-    for (let i = 0; i < u.n; i++) pre[i + 1] = pre[i] + along[i] + (cellStart[i] ? tracking : 0);
+    for (let i = 0; i < u.n; i++) pre[i + 1] = pre[i] + (gap ? gap[i] : 0) + along[i] + (cellStart[i] ? tracking : 0);
     return (a, b) => {
       const t = B.trimmed(u, a, b);
       if (!t) return 0;
-      return pre[t[1]] - pre[t[0]] - tracking;
+      return pre[t[1]] - pre[t[0]] - tracking - (gap ? gap[t[0]] : 0);
     };
   }
 
@@ -11511,6 +11917,7 @@ MV.def('engine/text/layout', ['core/script', 'engine/text/vert', 'engine/text/br
       for (let i = a; i < b; i++) {
         out.line[i] = j;
         const inside = i >= t[0] && i < t[1];
+        if (inside && i > t[0] && prep.gap) pen += prep.gap[i] * s;     // 文字組み gap (never before a line's first)
         const adv = inside ? prep.along[i] * s : 0;
         const at = pen + adv / 2;
         if (spec.orient === 'v') placeVertical(prep, out, i, axis, at, adv, s);
@@ -11658,6 +12065,8 @@ MV.def('engine/text/layout', ['core/script', 'engine/text/vert', 'engine/text/br
       font: prep.font.slice(), fonts: prep.refs.slice(),
       clip: fitted.overfull ? { ...spec.box } : null,
       fitStep: fitted.step, breakAt: fitted.breakAt, maxLines: fitted.maxLines,
+      // additive (DESIGN_2_2 §1): the 文字組み role per grapheme (engine/text/kumi ROLE), null when the run has none
+      kumi: prep.kumi,
     };
   }
 
@@ -11696,15 +12105,18 @@ MV.def('engine/text/layout', ['core/script', 'engine/text/vert', 'engine/text/br
 
   return { layoutRun, layoutRuns, normalizeSpec, LayoutError, DEFAULTS };
 });
-/* 文字PVメーカー v2 — original work. Text service for scene builds: cached layouts plus the metric-free splitters (DESIGN §4.15.4). */
-MV.def('engine/text/service', ['core/hash', 'core/script', 'engine/text/layout', 'engine/text/breaker', 'engine/text/faces'],
-(H, S, L, B, FACES) => {
+/* 文字PVメーカー v2 — original work. Text service for scene builds: cached layouts plus the metric-free splitters (DESIGN §4.15.4; 文字組み DESIGN_2_2 §1). */
+MV.def('engine/text/service', ['core/hash', 'core/script', 'engine/text/layout', 'engine/text/breaker', 'engine/text/faces',
+  'engine/text/kumi'],
+(H, S, L, B, FACES, KU) => {
   'use strict';
 
   const CACHE_MAX = 2000;          // §7.3: text layouts, LRU by (RunSpec hash, measurer key)
-  // Only these RunSpec fields change a layout; ink, style, reveal, parent and drift do not.
+  const DERIVED_MAX = 16;          // cut-scoped services (withKumi) kept per service; the memo is cleared when full
+  // Only these RunSpec fields change a layout; ink, style, reveal, parent and drift do not. An absent field is not
+  // keyed, so adding `kumi` (DESIGN_2_2 §1) left every earlier key as it was.
   const LAYOUT_FIELDS = ['span', 'text', 'orient', 'face', 'size', 'tracking', 'leading', 'box', 'align', 'valign',
-    'fit', 'maxLines', 'breakAt', 'emph', 'emphScale', 'lang', 'sizeGroup'];
+    'fit', 'maxLines', 'breakAt', 'emph', 'emphScale', 'lang', 'sizeGroup', 'kumi'];
 
   function createLru(max) {
     const map = new Map();
@@ -11726,27 +12138,42 @@ MV.def('engine/text/service', ['core/hash', 'core/script', 'engine/text/layout',
     };
   }
 
+  // The kumi field is keyed by its normalized value (KU.key), so equal settings written differently share one entry
+  // and a setting that is off (null, all strengths 0) keys like no field at all: the layout is the same.
   function specKey(spec) {
     const picked = {};
     for (const f of LAYOUT_FIELDS) if (spec && spec[f] !== undefined) picked[f] = spec[f];
+    if (picked.kumi !== undefined) {
+      const k = KU.key(KU.normalize(picked.kumi));
+      if (k) picked.kumi = k; else delete picked.kumi;
+    }
     return H.hashJSON(picked);
   }
 
-  // createTextService({ measurer, faces }) → TextService. Layout results are shared, read-only objects: callers copy
-  // what they need and never write into the typed arrays. withFaces() gives a service for other faces that shares the
-  // same cache (keys include the faces).
-  function createTextService({ measurer, faces = null, cache = null } = {}) {
+  // createTextService({ measurer, faces, cache?, kumi? }) → TextService. Layout results are shared, read-only objects:
+  // callers copy what they need and never write into the typed arrays. withFaces() gives a service for other faces that
+  // shares the same cache (keys include the faces).
+  //
+  // 文字組み (DESIGN_2_2 §1): `kumi` is a cut's typesetting ({ kana, jump, head, latin }, engine/text/kumi). The service
+  // lays out every RunSpec merged with it by KU.withCut (a spec that sets `kumi` or `tracking` keeps its own), and the
+  // keys hold the merged spec. withKumi(k) gives the service of a cut: memoised per value, sharing the cache; the
+  // getter `kumi` is the service's own (null when off). A service without kumi lays out exactly as before.
+  function createTextService({ measurer, faces = null, cache = null, kumi = null } = {}) {
     if (!measurer || typeof measurer.width !== 'function' || typeof measurer.metrics !== 'function') {
       throw new TypeError('createTextService needs a Measurer { key, width, metrics }');
     }
-    const lru = cache || createLru(CACHE_MAX);
-    const facesKey = H.hashJSON(faces);
+    return serviceOf(measurer, faces, cache || createLru(CACHE_MAX), KU.normalize(kumi), H.hashJSON(faces));
+  }
+
+  function serviceOf(measurer, faces, lru, cutKumi, facesKey) {
     const keyOf = (spec, text) => [measurer.key, facesKey, specKey(spec), text === undefined ? '' : String(text)].join('|');
+    const specOf = (spec) => KU.withCut(spec, cutKumi);
 
     function layout(spec, text) {
-      const key = keyOf(spec, text);
+      const s = specOf(spec);
+      const key = keyOf(s, text);
       let hit = lru.get(key);
-      if (!hit) { hit = L.layoutRun(spec, text, faces, measurer); lru.set(key, hit); }
+      if (!hit) { hit = L.layoutRun(s, text, faces, measurer); lru.set(key, hit); }
       return hit;
     }
 
@@ -11755,13 +12182,28 @@ MV.def('engine/text/service', ['core/hash', 'core/script', 'engine/text/layout',
       if (!items.some((it) => it.spec && typeof it.spec.sizeGroup === 'string' && it.spec.sizeGroup)) {
         return items.map((it) => layout(it.spec, it.text));
       }
-      const key = 'group|' + items.map((it) => keyOf(it.spec, it.text)).join('\n');
+      const list = cutKumi ? items.map((it) => ({ spec: specOf(it.spec), text: it.text })) : items;
+      const key = 'group|' + list.map((it) => keyOf(it.spec, it.text)).join('\n');
       let hit = lru.get(key);
-      if (!hit) { hit = L.layoutRuns(items, faces, measurer); lru.set(key, hit); }
+      if (!hit) { hit = L.layoutRuns(list, faces, measurer); lru.set(key, hit); }
       return hit;
     }
 
-    return {
+    // Services derived from this one, by kumi key: at most DERIVED_MAX, cleared when full.
+    const derived = new Map();
+    function withKumi(k) {
+      const nk = KU.normalize(k), key = KU.key(nk);
+      if (key === KU.key(cutKumi)) return api;
+      let svc = derived.get(key);
+      if (!svc) {
+        if (derived.size >= DERIVED_MAX) derived.clear();
+        svc = serviceOf(measurer, faces, lru, nk, facesKey);
+        derived.set(key, svc);
+      }
+      return svc;
+    }
+
+    const api = {
       layout, layoutAll,
       columns: (text, n, lang) => B.columns(text, n, lang),
       phrases: (text, lang) => B.phrases(text, lang),
@@ -11771,13 +12213,16 @@ MV.def('engine/text/service', ['core/hash', 'core/script', 'engine/text/layout',
       fontFor: (role, script) => FACES.fontFor(faces, role, script),
       faces,
       get key() { return measurer.key; },
-      withFaces: (next) => createTextService({ measurer, faces: next, cache: lru }),
+      get kumi() { return cutKumi; },
+      withFaces: (next) => serviceOf(measurer, next, lru, cutKumi, H.hashJSON(next)),
+      withKumi,
       clear: () => lru.clear(),
       get cached() { return lru.size; },
     };
+    return api;
   }
 
-  return { createTextService, createLru, CACHE_MAX };
+  return { createTextService, createLru, specKey, CACHE_MAX, DERIVED_MAX, LAYOUT_FIELDS };
 });
 /* 文字PVメーカー v2 — original work. The UI string table: one entry per key, [ja, en] (DESIGN §4.24, §6.13; DESIGN_2_1 §6.11, §11.7.11, §12.7, §13.10). */
 MV.def('i18n/strings', [], () => ({
@@ -13953,6 +14398,18 @@ MV.def('i18n/strings', [], () => ({
   'pkg.missing.media': ['写真・動画{n}件', '{n} photos or videos'],
   'pkg.missing.song': ['曲', 'the song'],
   'pkg.missing.and': ['と', ' and '],
+
+  // --- PV22 P1 (文字組み) ---
+
+  // --- PV22 P2 (文字PVの定石) ---
+
+  // --- PV22 P3 (キメ) ---
+
+  // --- PV22 P4 (モーフ・太さ) ---
+
+  // --- PV22 P5 (タイミング) ---
+
+  // --- PV22 P6 (歌ハメ) ---
 }));
 /* 文字PVメーカー v2 — original work. Translation function and formatters over the [ja, en] string table (DESIGN §4.24). */
 MV.def('i18n/t', [], () => {
@@ -20227,6 +20684,126 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       isChoice, alignments, neighboursOf, alignedSource, REPEAT,
     };
   });
+/* 文字PVメーカー v2 — original work. The one table of new-work defaults: switches and strengths whose default depends on the document's generation (look.gen, DESIGN_2_2 §0). */
+MV.def('planner/rules', ['core/pins', 'planner/params'], (PINS, PA) => {
+  'use strict';
+
+  // A document made by core/doc newDoc() carries look.gen (D.GEN = 1); older documents, opened files and every
+  // fixture have none. Each row below says what its slot is when nothing pins it: `on` in a document of generation ≥ 1,
+  // `off` in an older one — or, for a row with a parent, whatever the parent resolves to (a member of a switch group
+  // follows the group's switch). A pin always wins, so 固定を外す returns a switch to the document's default, and
+  // turning a switch on in an older document is one work (or line) pin.
+  //
+  // Row fields: slot; parent (a row slot, or null); scopes (where a pin of the slot may live: 'work', 'line'); spec
+  // (the value's ParamSpec, core/schema); on, off (the defaults; null = automatic, decided elsewhere).
+  // Packages add their rows here (P1 typesetting, P2 conventions, P4 glyph motion, P5 timing, P6 歌ハメ).
+  const BOOL = Object.freeze({ type: 'bool' });
+  const STRENGTH = Object.freeze({ type: 'num', min: 0, max: 1, step: 0.05 });
+  const HEAD = Object.freeze({ type: 'enum', of: Object.freeze(['line', 'phrase', 'none']) });
+  const FX_MAX = Object.freeze({ type: 'int', min: 2, max: 8 });
+  const WORK = Object.freeze(['work']);
+  const WORK_LINE = Object.freeze(['work', 'line']);
+
+  function row(slot, parent, scopes, spec, on, off) {
+    return Object.freeze({ slot, parent, scopes, spec, on, off });
+  }
+
+  const ROWS = Object.freeze([
+    // P2 文字PVの定石: one group switch and its members (DESIGN_2_2 §2)
+    row('pv.rules', null, WORK, BOOL, true, false),
+    row('repeat.same', 'pv.rules', WORK_LINE, BOOL, true, false),
+    row('pv.kit', 'pv.rules', WORK, BOOL, true, false),
+    row('pv.alternate', 'pv.rules', WORK, BOOL, true, false),
+    row('pv.arc', 'pv.rules', WORK, BOOL, true, false),
+    row('pv.fxCap', 'pv.rules', WORK, BOOL, true, false),
+    row('pv.fxMax', null, WORK, FX_MAX, null, null),
+    // P1 文字組み (DESIGN_2_2 §1)
+    row('text.kana', null, WORK_LINE, STRENGTH, 0.7, 0),
+    row('text.jump', null, WORK_LINE, STRENGTH, 0.5, 0),
+    row('text.latin', null, WORK_LINE, STRENGTH, 0.5, 0),
+    row('text.head', null, WORK_LINE, HEAD, 'line', 'line'),
+    // P4 モーフ・太さ (DESIGN_2_2 §4)
+    row('morph.auto', null, WORK_LINE, BOOL, true, false),
+    row('weight.auto', null, WORK, BOOL, true, false),
+  ]);
+
+  const BY_SLOT = new Map(ROWS.map((r) => [r.slot, r]));
+  const SPECS = Object.freeze(Object.fromEntries(ROWS.map((r) => [r.slot, r.spec])));
+
+  function isRule(slot) { return BY_SLOT.has(slot); }
+  function rowOf(slot) { return BY_SLOT.get(slot) || null; }
+  function scopesOf(slot) { const r = BY_SLOT.get(slot); return r ? r.scopes : null; }
+
+  // gen(doc) → the document's generation: look.gen when it is an integer ≥ 0, else 0.
+  function gen(doc) {
+    const g = doc && doc.look ? doc.look.gen : undefined;
+    return Number.isInteger(g) && g >= 0 ? g : 0;
+  }
+
+  // The pin index of a document when the caller has none (planner ctx.ix is preferred: it is cached per document).
+  function indexOf(doc, ix) { return ix || PINS.index((doc && doc.pins) || {}); }
+
+  const accepts = new Map();
+  function acceptOf(slot) {
+    let a = accepts.get(slot);
+    if (!a) {
+      const spec = BY_SLOT.get(slot).spec;
+      // a cut pin never applies (refused by core/commands; a stray one in a hand-edited file is skipped)
+      const coerce = PA.acceptSpec(spec);
+      a = (v, rank) => (rank === 'pin:cut' ? { na: true } : coerce(v));
+      accepts.set(slot, a);
+    }
+    return a;
+  }
+
+  // pinAt(ix, slot, at) → the pin that applies at a place ({ lineId } for a line, nothing for the whole work), coerced by
+  // the row's spec: { v, from, by, at } | null. A line pin counts only where the row allows line scope.
+  function pinAt(ix, slot, at) {
+    const r = BY_SLOT.get(slot);
+    if (!r || !ix || !PA.pinned(ix, slot)) return null;
+    const lineId = at && at.lineId && r.scopes.includes('line') ? at.lineId : null;
+    return PA.resolvePin(ix, { cutKey: null, pinCutKey: null, lineId }, slot, acceptOf(slot), null);
+  }
+
+  // defaultValue(doc, ix, slot) → what the slot is at the whole work without its own pin: the parent's value, else
+  // `on` (generation ≥ 1) or `off`. undefined for a slot that is not in the table.
+  function defaultValue(doc, ix, slot) {
+    const r = BY_SLOT.get(slot);
+    if (!r) return undefined;
+    if (r.parent) return value(doc, ix, r.parent);
+    return gen(doc) >= 1 ? r.on : r.off;
+  }
+
+  // value(doc, ix, slot) → the slot at the whole work: its work pin (coerced), else defaultValue.
+  function value(doc, ix, slot) {
+    const r = BY_SLOT.get(slot);
+    if (!r) return undefined;
+    const pin = pinAt(indexOf(doc, ix), slot, null);
+    return pin ? pin.v : defaultValue(doc, ix, slot);
+  }
+
+  // valueAt(doc, ix, slot, lineId) → the slot at a line: its line pin (where allowed), else value(doc, ix, slot).
+  function valueAt(doc, ix, slot, lineId) {
+    const r = BY_SLOT.get(slot);
+    if (!r) return undefined;
+    const pin = lineId ? pinAt(indexOf(doc, ix), slot, { lineId }) : null;
+    return pin ? pin.v : value(doc, ix, slot);
+  }
+
+  // hasDefault(slot) → whether new and older documents differ for the slot (the inspector says 自動（オン）/自動（オフ）
+  // only for those).
+  function hasDefault(slot) {
+    const r = BY_SLOT.get(slot);
+    if (!r) return false;
+    return r.parent ? hasDefault(r.parent) : r.on !== r.off;
+  }
+
+  function sameValue(a, b) {
+    return typeof a === 'number' && typeof b === 'number' ? Math.abs(a - b) < 1e-9 : a === b;
+  }
+
+  return { ROWS, SPECS, isRule, rowOf, scopesOf, gen, defaultValue, value, valueAt, hasDefault, sameValue };
+});
 /* 文字PVメーカー v2 — original work. The cutter: lines → cut skeletons, special cuts, windows, pin reattachment (DESIGN §4.16.5). */
 MV.def('planner/segment', ['core/script', 'core/num', 'core/pins', 'core/rng', 'engine/text/breaker', 'planner/choose',
   'planner/params'], (S, N, PINS, R, BR, CH, PA) => {
@@ -30079,7 +30656,28 @@ MV.def('engine/scene/build', ['core/hash', 'core/rng', 'core/schema', 'engine/sc
     return out;
   }
 
-  function buildCutWith(cut, slots, plan, svc, warnings) {
+  // 文字組み (DESIGN_2_2 §1): the cut's typesetting from its slots, or null (no setting on: the text service as it is).
+  // The planner writes these slots only where a setting is on.
+  function kumiOf(slots) {
+    const kana = valueOf(slots, 'text.kana', 0), jump = valueOf(slots, 'text.jump', 0), latin = valueOf(slots, 'text.latin', 0);
+    if (!(kana > 0 || jump > 0 || latin > 0)) return null;
+    return { kana, jump, latin, head: valueOf(slots, 'text.head', 'line') };
+  }
+
+  // The services of one cut: ONE chain derives the cut's text service from svc.text (a glyph-weight withFaces step of
+  // DESIGN_2_2 §4 goes first, then withKumi), and that one service reaches the builder, env.text, env.faces and the
+  // scene, so a part's pre-measure lays out exactly what the builder commits. withKumi is part of the TextService
+  // contract: no guard, so a service without it fails loudly instead of setting the text plainly.
+  function cutServices(svc, slots) {
+    let text = svc.text;
+    const kumi = kumiOf(slots);
+    if (kumi) text = text.withKumi(kumi);
+    if (text === svc.text) return svc;
+    return Object.assign({}, svc, { text }, text.faces !== svc.text.faces ? { faces: text.faces } : null);
+  }
+
+  function buildCutWith(cut, slots, plan, baseSvc, warnings) {
+    const svc = cutServices(baseSvc, slots);
     const reg = svc.registry;
     const D = designEnv(plan.design);
     const where = { cut: cut.key, line: cut.line };
@@ -30292,7 +30890,7 @@ MV.def('engine/scene/build', ['core/hash', 'core/rng', 'core/schema', 'engine/sc
     };
   }
 
-  return { SAFE, designEnv, slotSeed, buildCut, buildGround, fallbackSlots };
+  return { SAFE, designEnv, slotSeed, buildCut, buildGround, fallbackSlots, kumiOf };
 });
 /* 文字PVメーカー v2 — original work. The part kit: definition helpers, motion builders and helpers for part authors (DESIGN §4.18.3; DESIGN_2_1 §3.11, §11.5.6). */
 MV.def('parts/kit', ['core/num', 'core/noise', 'core/ease', 'core/curve', 'core/color', 'core/schema', 'core/registry',
@@ -62246,7 +62844,7 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
     }
 
     async function newWork() {
-      await loadFile({ doc: D.defaultDoc(), side: D.defaultSide() });
+      await loadFile({ doc: D.newDoc(), side: D.defaultSide() });
       app.toast(t('io.newDone'), { kind: 'info' });
     }
 
@@ -62812,7 +63410,7 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
       saved = { id: null, text: null };
       used.clear();
       usedMedia.clear();
-      app.loadProject(D.defaultDoc(), D.defaultSide(), { quiet: true });
+      app.loadProject(D.newDoc(), D.defaultSide(), { quiet: true });
       pending.cancel();                                      // the empty work is stored at its first change, not now
       setState('idle');
       app.bus.emit('device', { cleared: true });             // the AssetStore forgets what it held (ui/media_io)
@@ -73593,7 +74191,7 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
     const lang = MV.LANG === 'en' ? 'en' : 'ja';
     // 激しいカメラを抑える starts as this device asks (prefers-reduced-motion, DESIGN_EXTREME §3.6)
     const view = V.createView({ storage: safeStorage('localStorage'), defaults: { calmCamera: dom.prefersReducedMotion() } });
-    const store = ST.createStore({ doc: D.defaultDoc(), side: D.defaultSide(), reduce: svc.reduce, now: () => Date.now() });
+    const store = ST.createStore({ doc: D.newDoc(), side: D.defaultSide(), reduce: svc.reduce, now: () => Date.now() });
     // The AssetStore (DESIGN_2_1 §11.3.6): bytes from ui/project_io's device store (IndexedDB, or this tab's memory),
     // metadata from every library entry this tab has seen. Ids name content, so an entry seen once stays right for the
     // try-on and undo documents that still hold it.

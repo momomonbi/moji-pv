@@ -1,6 +1,7 @@
-/* 文字PVメーカー v2 — original work. Run layout: horizontal lines and vertical columns, fitted to a box (DESIGN §4.15.4–6). */
-MV.def('engine/text/layout', ['core/script', 'engine/text/vert', 'engine/text/breaker', 'engine/text/fit', 'engine/text/faces'],
-(S, V, B, F, FACES) => {
+/* 文字PVメーカー v2 — original work. Run layout: horizontal lines and vertical columns, fitted to a box (DESIGN §4.15.4–6; 文字組み DESIGN_2_2 §1). */
+MV.def('engine/text/layout', ['core/script', 'engine/text/vert', 'engine/text/breaker', 'engine/text/fit', 'engine/text/faces',
+  'engine/text/kumi'],
+(S, V, B, F, FACES, KU) => {
   'use strict';
 
   // Everything is measured once at a nominal 100 px and scaled (§4.15.1). Advances below are in em (size 1).
@@ -42,6 +43,7 @@ MV.def('engine/text/layout', ['core/script', 'engine/text/vert', 'engine/text/br
       breakAt: pick('breakAt', (v) => BREAKS.has(v)),
       emphScale: pick('emphScale', (v) => finite(v) && v > 0),
       box: { x: box.x, y: box.y, w: Math.max(0, box.w), h: Math.max(0, box.h) },
+      kumi: KU.normalize(spec.kumi),                               // 文字組み (DESIGN_2_2 §1); null: set as before
     };
   }
 
@@ -70,15 +72,22 @@ MV.def('engine/text/layout', ['core/script', 'engine/text/vert', 'engine/text/br
     const vert = spec.orient === 'v' ? V.classify(u.gs) : null;
     const glue = glueOf(vert, n);
     const nat = naturalAdvances(u, font, refs, measurer, vert);
+    // 文字組み: kana cells capped below 1 em (T1), Latin words grown through k and spaced from CJK by gap (T3)
+    const ku = spec.kumi ? KU.apply(spec.kumi, { u, lang, font, vert, mark, k, text, str, base,
+      own: spec.text !== undefined && spec.text !== null, emphScale: spec.emphScale, face: refs[0], latin: refs[1] }) : null;
     const along = new Float64Array(n);
     const cellStart = new Uint8Array(n);
     for (let i = 0; i < n; i++) {
       cellStart[i] = glue[i] ? 0 : 1;
-      along[i] = alongAdvance(u, vert, nat, i) * (glue[i] ? 0 : groupScale(vert, k, i));
+      let a = alongAdvance(u, vert, nat, i);
+      if (ku && ku.cap[i] < a) a = ku.cap[i];                      // never wider than measured: proportional kana stay
+      along[i] = a * (glue[i] ? 0 : groupScale(vert, k, i));
     }
+    const gap = ku ? ku.gap : null;
     const prep = {
-      spec, str, base, lang, u, n, refs, font, mark, k, vert, glue, nat, along, cellStart, measurer,
-      width: trackedWidth(u, along, cellStart, spec.tracking), opps: new Map(), balanced: new Map(),
+      spec, str, base, lang, u, n, refs, font, mark, k, vert, glue, nat, along, cellStart, measurer, gap,
+      kumi: ku ? ku.role : null,
+      width: trackedWidth(u, along, cellStart, spec.tracking, gap), opps: new Map(), balanced: new Map(),
     };
     prep.shift = baselineShifts(prep);
     Object.assign(prep, lineReach(prep));
@@ -193,14 +202,15 @@ MV.def('engine/text/layout', ['core/script', 'engine/text/vert', 'engine/text/br
     return m;
   }
 
-  // Width of a grapheme range in em: trimmed sum of advances plus tracking between cells.
-  function trackedWidth(u, along, cellStart, tracking) {
+  // Width of a grapheme range in em: trimmed sum of advances plus tracking between cells, plus the 文字組み gap before
+  // each grapheme (null: none) except the first of the range, since a line never starts with a gap.
+  function trackedWidth(u, along, cellStart, tracking, gap) {
     const pre = new Float64Array(u.n + 1);
-    for (let i = 0; i < u.n; i++) pre[i + 1] = pre[i] + along[i] + (cellStart[i] ? tracking : 0);
+    for (let i = 0; i < u.n; i++) pre[i + 1] = pre[i] + (gap ? gap[i] : 0) + along[i] + (cellStart[i] ? tracking : 0);
     return (a, b) => {
       const t = B.trimmed(u, a, b);
       if (!t) return 0;
-      return pre[t[1]] - pre[t[0]] - tracking;
+      return pre[t[1]] - pre[t[0]] - tracking - (gap ? gap[t[0]] : 0);
     };
   }
 
@@ -291,6 +301,7 @@ MV.def('engine/text/layout', ['core/script', 'engine/text/vert', 'engine/text/br
       for (let i = a; i < b; i++) {
         out.line[i] = j;
         const inside = i >= t[0] && i < t[1];
+        if (inside && i > t[0] && prep.gap) pen += prep.gap[i] * s;     // 文字組み gap (never before a line's first)
         const adv = inside ? prep.along[i] * s : 0;
         const at = pen + adv / 2;
         if (spec.orient === 'v') placeVertical(prep, out, i, axis, at, adv, s);
@@ -438,6 +449,8 @@ MV.def('engine/text/layout', ['core/script', 'engine/text/vert', 'engine/text/br
       font: prep.font.slice(), fonts: prep.refs.slice(),
       clip: fitted.overfull ? { ...spec.box } : null,
       fitStep: fitted.step, breakAt: fitted.breakAt, maxLines: fitted.maxLines,
+      // additive (DESIGN_2_2 §1): the 文字組み role per grapheme (engine/text/kumi ROLE), null when the run has none
+      kumi: prep.kumi,
     };
   }
 

@@ -260,6 +260,57 @@ test('text service: cached layouts keyed by spec, text, faces and measurer key',
   assert.throws(() => createTextService({ faces }), TypeError);
 });
 
+test('text service 文字組み: keys hold kumi, withKumi is memoised and shares the cache, withFaces keeps it', () => {
+  const TS = MV.use('engine/text/service');
+  // a spec without kumi keys exactly as before the field existed (the key computed by the earlier service)
+  const literal = { span: [0, 3], orient: 'v', face: 'serif', size: 100, box: { x: 0, y: 0, w: 600, h: 200 }, emph: [[1, 2]],
+    lang: 'ja', ink: 'ink', style: 'plain' };
+  assert.equal(TS.specKey(literal), '7bc92425');
+  assert.equal(TS.LAYOUT_FIELDS[TS.LAYOUT_FIELDS.length - 1], 'kumi');
+  const svc = createTextService({ measurer, faces });
+  assert.equal(svc.kumi, null);
+  const spec = { span: [0, 6], size: 100, box: { x: 0, y: 0, w: 900, h: 200 }, fit: 'none', lang: 'ja' };
+  const plain = svc.layout(spec, '夜明けのまち');
+  const n0 = svc.cached;
+  const tight = svc.layout({ ...spec, kumi: { kana: 0.7 } }, '夜明けのまち');
+  assert.notEqual(tight, plain);
+  assert.equal(svc.cached, n0 + 1, 'another kumi is another cache entry');
+  assert.equal(svc.layout({ ...spec, kumi: { kana: 0.7 } }, '夜明けのまち'), tight);
+  // withKumi: the cut's service lays out every spec with the cut's setting, from the same cache
+  const cut = svc.withKumi({ kana: 0.7 });
+  assert.deepEqual(cut.kumi, { kana: 0.7, jump: 0, head: 'line', latin: 0 });
+  assert.equal(svc.withKumi({ kana: 0.7, head: 'line' }), cut, 'memoised per value');
+  assert.equal(svc.withKumi(null), svc, 'the service of its own setting is itself');
+  assert.equal(svc.withKumi({ kana: 0 }), svc);
+  assert.equal(cut.withKumi({ kana: 0.7 }), cut);
+  assert.equal(cut.layout(spec, '夜明けのまち'), tight, 'the merged spec keys like the explicit one: one entry');
+  assert.equal(cut.layout({ ...spec, kumi: null }, '夜明けのまち'), svc.layout({ ...spec, kumi: null }, '夜明けのまち'));
+  assert.deepEqual(Array.from(cut.layout({ ...spec, kumi: null }, '夜明けのまち').w), Array.from(plain.w), 'kumi: null opts out');
+  assert.deepEqual(Array.from(cut.layout({ ...spec, tracking: 0 }, '夜明けのまち').w), Array.from(plain.w), 'tracking opts out');
+  assert.equal(svc.withKumi(null), svc);
+  // layoutAll merges too (grouped runs included)
+  const group = [{ spec: { ...spec, sizeGroup: 'g' }, text: '夜明けのまち' }, { spec: { ...spec, sizeGroup: 'g' }, text: 'ひかり' }];
+  assert.deepEqual(Array.from(cut.layoutAll(group)[0].w), Array.from(tight.w));
+  assert.deepEqual(Array.from(svc.layoutAll(group)[0].w), Array.from(plain.w));
+  assert.deepEqual(Array.from(cut.layoutAll([{ spec, text: '夜明けのまち' }])[0].w), Array.from(tight.w));
+  // withFaces keeps the setting; the shared cache holds every service's layouts
+  const other = cut.withFaces(FACES.resolveFaces(null, null, ['ja']));
+  assert.deepEqual(other.kumi, cut.kumi);
+  // (the theme's display face is a brush face, damped; the default faces are gothic: the table's own numbers)
+  assert.deepEqual(Array.from(tight.w, (v) => Math.round(v * 100) / 100), [100, 100, 92.16, 97.2, 97.2, 92.16]);
+  assert.deepEqual(Array.from(other.layout(spec, '夜明けのまち').w, (v) => Math.round(v * 100) / 100),
+    [100, 100, 90.2, 96.5, 96.5, 90.2]);
+  const before = svc.cached;
+  other.layout({ ...spec, size: 80 }, '夜明けのまち');
+  assert.equal(svc.cached, before + 1, 'one shared LRU');
+  // at most DERIVED_MAX derived services per service; a full memo is cleared, and equal values still share one
+  const many = [];
+  for (let i = 1; i <= TS.DERIVED_MAX + 3; i++) many.push(svc.withKumi({ kana: i / 100 }));
+  assert.equal(new Set(many).size, TS.DERIVED_MAX + 3);
+  assert.equal(svc.withKumi({ kana: (TS.DERIVED_MAX + 3) / 100 }), many[many.length - 1]);
+  assert.notEqual(svc.withKumi({ kana: 0.01 }), many[0], 'cleared when full');
+});
+
 test('empty and space-only runs; bad specs are programmer errors', () => {
   const box = { x: 0, y: 0, w: 600, h: 200 };
   const empty = run('', { box });
