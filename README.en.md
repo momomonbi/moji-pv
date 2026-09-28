@@ -45,7 +45,11 @@ the beat.
   for the opening line and the chorus lines (one in three); switch it per line under line › Staging, or for every
   line under whole video › Look.
 - **Tap each character** — under line › Time, the line plays in a loop (slower if you like) and you press Space as each
-  character is sung; the times are kept per character. Word tags in the lyrics (`<00:12.34>`) are used too.
+  character is sung; the times are kept per character. Word tags in the lyrics (`<00:12.34>`) are used too. On the
+  timeline the selected line shows a tick per character that you can drag (double-click gives it back to the
+  estimate), and **Character times by AI** in the AI tab can listen for them.
+- **Color the sung characters** — turn it on under line › Staging (advanced) and, karaoke style, each character takes
+  the accent color as it is sung.
 - Times in the lyrics such as `[00:12.34]` (LRC) are used as they are.
 
 ## Export

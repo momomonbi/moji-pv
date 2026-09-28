@@ -9285,3 +9285,57 @@ Checks: the timing tests `catalog arrange/sidebarIndex` (slowest build) and both
 relative speed test failed once while the browser flows ran beside it and passed twice alone (19.9 / 15.6 ms and
 15.5 / 15.9 ms with and without sung timing); everything else passes. The absolute bound of the design's speed test
 (≤ 10 ms per re-plan) is still not asserted: on this machine a plain re-plan of project_long takes 15 ms.
+
+### P6 歌ハメ (S3): phase 3 — timeline ticks (B), the karaoke fill and AI word times (D)
+
+Built on phase A: the timeline's character ticks (`ui/sung_ticks`, wired into `ui/timeline`), 歌った字に色をのせる (the
+slot `sung.fill`, its fields and the STYLE behaviour of the scene), 曲を使う › AIで字の時間 (`ai/song` words request,
+`ai/changes` time changes with a start), the golden entry D1 and the flows `hame_ticks` and `ai_words`. The design chapter
+is DESIGN_2_2 §6.9–§6.11. Phase C (the song's voice) is not built yet.
+
+Readings and deviations (with the reason):
+
+- **The tick code is a module of its own** (`ui/sung_ticks`: which ticks, where one may move, the pins a drag, a nudge
+  or a double-click writes, the drawing); `ui/timeline` only calls it (its dependency line gains `ui/sung_ticks`). P5
+  draws its own draft marks in the same file, so the timeline diff stays a few hooks.
+- **Ticks are hit only in the bottom band of the bar** (the 7 px ticks and 4 px above them). The design hits a tick
+  within 4 px anywhere on the line row; on a selected line with close units every point of the bar was then a tick,
+  and dragging the line's body (`ui_flows` tools) broke. The rest of the bar still drags the line.
+- **A click on a tick keeps the selection and 詳細 as they are** (a click on the line row selects it and opens 詳細,
+  which narrows the timeline, so the second click of a double-click landed elsewhere).
+- **The first unit has a tick when it is sung after the line's start** (word tags, a tap); at the start it is the start
+  edge. The design draws units 1 … n − 1.
+- **The last unit may move up to the line's span when the end is estimated** (the end is estimated again from the new
+  times), up to the end (− 0.02 s) when it is explicit; the design bounds it by the end in both cases.
+- **The end pair is written for a copied end too** (the design: a pin or a tag). The written pin replaces the copy for
+  that line, so leaving its end out would move the end.
+- **A pair closer than 0.01 s to the one kept before it is left out** of a written pin: `acceptSungTimes` refuses such
+  a pin as a whole, and interpolated neighbours can be that close. The moved unit is always kept.
+- **Snapping** is to the playhead only; the voice peaks come with phase C (there is no `song.voice` in this tree).
+- **Double-click / Delete on a line without a `sung.times` pin do nothing** (tags, copies and estimates have no pair to
+  take back; the design says the unit's pair leaves the pin). Delete and Backspace on a focused tick are always taken by
+  the listbox, so they never reach the inspector's 固定を外す.
+- **The fill leaves a run with its own text (a note, ♪) untouched** (the design: "always sung", which would tint it).
+- **The fill under the glyph budget.** The budget masks only the material phases' behaviours, so the fill's tint was
+  never masked; `build.fillUnderBudget` masks it when any phase of the cut had its tint taken back, and the fill keeps
+  its brightening, as the design intends.
+- **A line timed only for the colour keeps the v2 window over its whole span**, so its last characters take the colour
+  during the exit (the window spans it); with 歌ハメ or 「字の時間を歌に合わせる」 the sung window applies.
+- **`sung.fill` in the tables**: a `planner/rules` row (off in both generations, pin only), the `planner/fields`
+  category `'fill'` (its pin, a work pin inherited at a line, else off), explain like the other 歌ハメ switches.
+- **AI tool key `words`** (strings `ai.tool.words` / `ai.name.words`, as every tool of the controller has; the design's
+  `ai.song.words` is that button's text), `ai.hint.words` as the button's title, `ai.ch.sungCount` for a value shown
+  in a review and `ai.warn.fewWords` for a line with fewer than two words found.
+- **AIで字の時間 without a selection** asks about up to 12 lines from the playhead (the design: selected lines only);
+  a change is stale once the line's times or its start pin changed (the times are relative to that start), and a line
+  edited meanwhile is named by its number in the lyrics.
+
+Mutation checks (each broke a test, then restored): no start pin with a tick drag, no gap filter in a written pin, the
+last unit bounded by an estimated end, the Alt keys handled after the listbox's modifier return (browser), the fill
+tinting accent glyphs, no fill mask under the budget, a fill-only line using the sung sources, the fill on for a false
+pin, no start pin in the AI time change, no word gap, no start pin in the AI change's stale check. One listed
+mutation passed: dropping the role check of `fillAt` changes nothing in the fixtures (every cut of a line is a lyric or
+focus cut there); it is kept for special cuts that carry a line.
+
+Golden: `project_sung.json` gains D1 (A2 with 歌った字に色をのせる for the whole video; 4 documents); the entries A1–A4 are
+byte for byte as before (compared before and after writing the file with `--only=project_sung.json`).

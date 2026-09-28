@@ -62,7 +62,13 @@ and Filmora-ready output; how they are built is in `docs/DESIGN_2_1.md`.
   Backspace steps back, Esc finishes. The line starts at the first mark and its character times are kept (one undo
   step); 「やめる」 writes nothing; at the loop's end playback stops with 決定 and もう一度. 字の時間を消す gives the
   characters back to the estimate. Needs the loaded song.
-- LRC import; AI alignment (see 8).
+- **Character ticks on the timeline (v2.2)**: under each line (with room, or on the selected line) a tick marks when each
+  character is sung (bright: tapped or set by hand; gold: word tags or copied; faint: estimated) and a bracket the end of
+  the singing. On the selected line a tick can be dragged (it snaps to the playhead; Alt: no snap): the line's character
+  times are pinned as they are with that one moved, and an automatic start is pinned where it is, in one undo step
+  「字の時間」. A double-click (or Delete on a focused tick) gives that character back to the estimate. In the timeline's
+  list, Alt+←/→ move among the focused line's ticks, Ctrl+←/→ (Shift ×10) move the focused tick by a frame.
+- LRC import; AI alignment (see 8); AIで字の時間 (the words' times of a few lines, as their character times).
 
 ## 5. Song (optional)
 
@@ -125,7 +131,11 @@ and Filmora-ready output; how they are built is in `docs/DESIGN_2_1.md`.
   line and the chorus lines (one in three), the same way for every repeat of a lyric; in a work made before v2.2: off.
   キメ lines are left to キメ unless their own switch says 歌ハメ. 「字の時間を歌に合わせる」 (作品全体 › タイミング, on in
   new works) lets word tags and repeated lyrics time the characters and the camera, key anchors, 下線 and the cut
-  points of a split line follow the same times.
+  points of a split line follow the same times. **歌った字に色をのせる** (行 › 演出 and 作品全体 › 見た目, 詳しい設定; off
+  by default): the line comes in dimmed with its own entrance and each character takes the accent colour as it is sung
+  (karaoke); characters already in the accent colour (emphasis) brighten instead. On a cut heavy enough for the glyph
+  budget to take back its tint, the colour falls back to the brightening alone. Alone (without 歌ハメ, in a work made
+  before v2.2) it changes only the colour: the cuts and every choice stay as they were.
 - **My materials (マイ素材, v2.1)**: new materials that the AI or the user builds from existing parts and a fixed set of
   primitives (shapes, particles, patterns, motion tracks, oscillators). They are data, never code; they are stored in the
   project and shown under マイ素材 in the part browser. AI-made materials appear only where they are placed, unless
@@ -181,7 +191,8 @@ Everything works without AI. On the v2 data model:
   新しい素材を作ってもよい the AI may make new materials; with 写真・動画をAIが使ってよい it may place the user's photos and
   videos. **素材づくり** makes or remakes one material. **写真の説明** (Google Gemini only) describes photos and videos and
   suggests their 動きと重なり. With the user's consent, the song features (transcribe with times, align lines, analyze
-  sections / mood / tempo). Every AI result is shown as a checked list of changes before anything is applied, and can
+  sections / mood / tempo; v2.2: the words' times of the selected lines as their character times, pinning an
+  automatic start with them). Every AI result is shown as a checked list of changes before anything is applied, and can
   be undone.
 - What is sent, straight from the browser to the chosen service only:
   - lyric text, the instruction and setting values (theme, mood, names of parts and materials, numbers);

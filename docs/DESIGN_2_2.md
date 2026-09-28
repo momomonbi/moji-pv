@@ -69,10 +69,10 @@ Before v2.2 the order 「歌に合わせて」 (`'sung'`) spread a cut's charact
 (`t0 … t1`): there was no per-character timing, no switch, no way to see or set a character's time, and on LRC-timed
 lines the last characters came 1–2 s late. v2.2 adds real character times (taps and enhanced-LRC word tags), a sung
 window, the switch 「歌ハメ」 with a 自動 for new works, and one engine branch that every consumer of sung times takes.
-The work is phased: **A** (this chapter, shipped) — character times, the switch, 1字ずつタップ, the inspector rows and
-the golden; **B** timeline ticks and drag; **C** the song's voice (`doc.song.voice` on P5's `audio/phrases`, both
-constants off until a lab gate passes); **D** 歌った字に色をのせる (karaoke fill) and optional AI word timing. Each phase
-is golden-safe on its own.
+The work is phased: **A** (shipped) — character times, the switch, 1字ずつタップ, the inspector rows and the golden;
+**B** (shipped, 6.9) timeline ticks and drag; **C** the song's voice (`doc.song.voice` on P5's `audio/phrases`, both
+constants off until a lab gate passes; not in this chapter yet); **D** (shipped, 6.10–6.11) 歌った字に色をのせる (karaoke
+fill) and optional AI word timing. Each phase is golden-safe on its own.
 
 ### 6.1 Decisions
 
@@ -83,7 +83,8 @@ is golden-safe on its own.
 | The switch 「歌ハメ」 | Slot `sung.hame` (bool) at the whole video or a line. `hame = linePin ?? (line is キメ ? false : workPin ?? 自動)`. On: the entrance comes from the one-character-at-a-time list, layouts that move the text themselves are left out, and as the last parameter step `order = 'sung'` and `dur = clamp(入りの早さ, 0.06, 0.25)` by rule (`pfrom 'rule:sung'`): each character starts `dur` before it is sung and lands on it. |
 | 自動 | New works (`look.gen ≥ 1`): on for a line with explicit character times (own or copied: `times`) and, while 「字の時間を歌に合わせる」 is on, for a hook line (`hook`: the song's first lyric line, and the chorus lines at run positions 0, 3, 6, …), decided per lyric text so repeats match. Older works: off. |
 | 「字の時間を歌に合わせる」 | Slot `sung.real` (bool, work only), a row of `planner/rules`: on in new works, off in older ones. It lets word tags and copies time a line, and makes the hook lines 歌ハメ. |
-| The fast path | `planner/sung prepare` returns `null` — the v2 plan, byte for byte — unless `sung.real` resolves on or a `sung.times` / `sung.hame` pin exists. No fixture or golden document has either. |
+| The fast path | `planner/sung prepare` returns `null` — the v2 plan, byte for byte — unless `sung.real` resolves on or a `sung.times` / `sung.hame` / `sung.fill` pin exists. No fixture or golden document has either. |
+| 歌った字に色をのせる (D) | Slot `sung.fill` (bool, work / line, pin only; a `planner/rules` row off in every generation). The line's cuts carry the decision `{ v: true, from: 'pin:line' \| 'pin:work', by }`; the scene adds one STYLE behaviour over the text that dims each unsung character and gives it the accent tint as it is sung. |
 
 ### 6.2 Data model (additive)
 
@@ -186,8 +187,12 @@ loop end, in ja and en). **Golden
 plan and 40 frame hashes per document, 16:9 and 9:16, two seeds each, keyed entries — A1 the lrc fixture with
 「字の時間を歌に合わせる」; A2 that plus 歌ハメ for the whole video and one tapped line; A3 the basic fixture as a new work
 (the hook lines r4, ra, rd); A4 the repeat fixture as a new work with its second 飛ばせ… tapped (copies both ways,
-aligned repeats). New-work entries pin the other packages' switches off. Later phases add C1 and D1 without touching
-these. Every existing golden is byte-identical.
+aligned repeats); D1 (phase D) A2 with 歌った字に色をのせる for the whole video. New-work entries pin the other packages'
+switches off. Phase C adds C1 without touching these. Every existing golden is byte-identical. Phase B and D tests:
+`tests/node/ui_sung_ticks.test.js` (which ticks, bounds, the pins a drag, a nudge or a double-click writes),
+`sung.test.js` (the fill gate, the fill behaviour, accent glyphs and the budget), `ai_song.test.js` / `ui_ai.test.js`
+(AIで字の時間), `ui_fields.test.js` (the fill rows); `ui_flows.py` flows `hame_ticks` and `ai_words` and the fill in `hame`;
+`i18n_pages.py` the timeline with a focused tick.
 
 ### 6.7 FROZEN contracts touched
 
@@ -198,6 +203,9 @@ these. Every existing golden is byte-identical.
 | Decision `pfrom` values | `'rule:<name>'` (read through `SU.isRuleTag` / `isRuleFrom` by cast, fields and explain) | new value only on 歌ハメ cuts |
 | Scene target §4.17.5, kit §4.18.3, `engine/scene/shot` | `off`, `sungAt`, `sungEndOf` | additive; `spanOf` unchanged |
 | `core/tap` | the unit reducer | the line reducer unchanged |
+| Cut decisions (D) | `sung.fill` `{ v: true, from: 'pin:line' \| 'pin:work', by }` | only with a `sung.fill` pin |
+| `engine/scene/behave`, `build`, `stagger` (D) | `sungFill`, `runSungFill`, `FILL_*`; `fillUnderBudget`; `sungNextAt` | additive |
+| `ai/changes` `time` kind (D) | optional `field: 'sung.times'` and `start` | absent on every other change |
 | `ORDERS`, POSE, seam mix, SCH enums, slot order, draw's tint | none | — |
 
 ### 6.8 For the other packages
@@ -212,3 +220,55 @@ these. Every existing golden is byte-identical.
   mode lives beside the line tap panel (`ui/tap_units.combine`), so S2's rewrite of `ui/tap` keeps its own file; its
   line context menu takes a 「1字ずつタップ」 item (`tap.units` with `{ lineId }`). Phase C's voice builds on P5's
   `audio/phrases`.
+
+### 6.9 Timeline ticks (phase B, `ui/sung_ticks`, `ui/timeline`)
+
+- **Drawing.** Every line with sung timing (`plan.sung`) draws a 7 px tick at the bottom of its bar for each unit after
+  the first (and for the first when it is sung after the line's start), when the line has ≥ 5 px per unit or is
+  selected; colours by source (tap / hand bright, word tag or copy `COLORS.mark`, voice blue, estimate faint) and a
+  bracket at the sung end. A selected line with ≥ 12 px per unit writes each unit's first character over its tick and
+  its name stops before them. `plan.sung` gains `endSrc` (the source of an explicit end, 0 for an estimate).
+- **Hit test.** A tick within 4 px, in the bottom band of the bar (ticks and 4 px above), of a selected line: after the
+  start / end edges, before the body (the rest of the bar still drags the line). A click on a tick leaves the selection
+  (and 詳細) as it is, so its double-click lands on the same tick.
+- **Drag.** Snaps to the playhead within 7 px (Alt: no snap; the voice peaks come with phase C), clamped 0.02 s from the
+  units around it (the first: not before the line's start; the last: up to an explicit end, else up to the line's span,
+  the end being estimated again). It writes `line/<id>:sung.times` = every unit where it is now with the moved one
+  where it went (a pair closer than 0.01 s to the one kept before it is left out; the moved one never), plus the end
+  pair where the end is explicit (a pin, a word tag or a copy), by `'user'`; on a line whose start is automatic, the
+  same batch pins `line/<id>:start` where it is. One gesture = one undo step 「字の時間」 (`mergeKey 'tl:tick:<line>:<u>'`).
+- **Double-click / Delete** on a tick of a line with a pin: that unit's pairs leave the pin (it is interpolated again);
+  an empty pin is cleared. A line timed by tags or copies has no pin to take a pair from: nothing happens.
+- **Keyboard** (the timeline's listbox): Alt+←/→ move among the focused line's ticks (always taken there, so the browser
+  never goes back a page), Ctrl+←/→ (`timeline.nudge`, Shift ×10) move the focused tick by a frame (same start rule),
+  Delete / Backspace give it back to the estimate (never the inspector's 固定を外す), ←/→ return to the edges; the
+  option reads 「{ch}の時間 {time}」.
+
+### 6.10 歌った字に色をのせる (phase D)
+
+- **Planner.** `prepare` opens its gate for a `sung.fill` pin; a line whose pin resolves on (its own, else the whole
+  work's) has sung timing. Without 「字の時間を歌に合わせる」 or a 歌ハメ pin and with fewer than two anchors, it keeps the v2
+  window over its span and the v2 piece boundaries, so in an older work the colour alone changes no cut and no choice
+  (only `cut.sung` and the decision). `castSlots` keeps the pin as the cut's `sung.fill` decision (lyric and focus cuts
+  of such a line; no chooser stream, never a lock pin). `plan.sung.fill` says it.
+- **Engine.** `BH.sungFill(env, target, same, times)`: per glyph `s = t_sung − 0.03`, `d = clamp(t_next − t_sung, 0.08,
+  0.3)`; `runSungFill` multiplies alpha by `dim + (1 − dim)·smooth((t − s)/d)` (dim 0.55; 0.35 for a glyph inked in the
+  accent) and raises the tint to `0.9·k` except on accent glyphs (draw's tint colour is the accent). A run that shows
+  its own text (a note) is left as it is. No allocation per frame. When the glyph budget took the tint back from one of
+  the cut's material phases, `build.fillUnderBudget` masks the fill's tint too (the brightening stays).
+- **Inspector.** 行 › 演出 (and the several-lines page) and 作品全体 › 見た目: a toggle 「歌った字に色をのせる」 under 詳しい設定,
+  on = pin, off = unpin (`offClears`), `noDice`; a line under a work pin shows 作品で固定 ↑.
+
+### 6.11 AIで字の時間 (phase D, review only)
+
+- `ai/song.wordsRequest(doc, plan, lineIds, uiLang)`: up to 12 of the given lines (in time order), each sent with its
+  number, text and the stretch it is shown in; schema `{ lines: [{ i, words: [{ text, start }] }], note }`.
+- `wordsChanges(doc, plan, json, duration, opts)`: each word is found in order in the line text (NFKC, lower case,
+  spaces ignored; a word not found is skipped) at the grapheme where it begins; `dt = start − t0` is kept in
+  `[0, length + 0.5]` and ≥ 0.02 s after the pair before. A line with ≥ 2 pairs gives one change `{ kind: 'time',
+  field: 'sung.times', path: 'line/<id>:sung.times', from, to: pairs, start }` (`start` = the line's start rounded to
+  the millisecond when it is automatic), label 「{n}行目: {count}か所の時間」; fewer → `ai.warn.fewWords`.
+- `ai/changes`: such a change is stale once the times pin or the line's start pin changed; `toCommands` pins the start
+  (by `'ai'`) before the times; other `time` changes are as before.
+- UI: 曲を使う › **AIで字の時間** (Gemini, the song and consent), for the selected lines, else up to 12 from the playhead.
+

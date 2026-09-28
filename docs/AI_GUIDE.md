@@ -144,18 +144,19 @@ AI に写真・動画を見てもらい、何が写っているか・色・文�
 
 > 曲の音声を 16kHz モノラルにして Google Gemini に送ります（約 7MB・3:42）。この作品ではこのときだけ。
 
-**この内容で送ることに同意する** にチェックを入れると、3つのボタンが使えます。
+**この内容で送ることに同意する** にチェックを入れると、4つのボタンが使えます。
 
 | ボタン | すること | 結果 |
 |---|---|---|
 | 書き起こす | 歌っている歌詞を聞き取ります | 「置き換える」か「後ろに足す」を選びます。「時刻をつける」で行頭に `[分:秒]` が入ります |
 | タイミングを合わせる | 入力済みの歌詞の各行が、曲のどこで始まるかを探します | 行の開始時刻の変更として一覧に出ます（LRC の時刻より優先されます） |
 | 曲を分析する | 雰囲気・テンポ・曲の構成（イントロ・サビなど）・聴きどころを調べます | 「保存する」で作品に保存し、あとの提案と「区画▾」に使います |
+| AIで字の時間 | 選んだ行（なければ再生位置から12行まで）で、言葉ごとに歌い始めの時間を探します（歌ハメ） | 行の「字の時間」の変更として「時間」に出ます。開始が自動の行は、その開始もいまの時刻で固定します（聞き取った時間がずれないように） |
 
 - 同意は、いま開いている作品についてだけ有効です。別の作品を開いたり、ページを読み込み直したりすると、もう一度たずねます。
 - 音声はモノラルの WAV にして送ります。ふつうは 16 kHz（約7分まで）、長い曲は 12 kHz や 8 kHz（約14分まで）に下げて1回で送ります。それより長い曲は 16 kHz のままアップロードしてから使います。送る大きさと長さは、同意のカードに出ます。曲のファイル名は送りません。
 - 送ってよい曲（自分の曲や、権利者の許可がある曲）だけに使ってください。公開されている歌詞と判断されると書き起こせません。そのときは歌詞を貼って「タイミングを合わせる」を使ってください。
-- 時刻は目安です。ずれていたら、詳細やタップ合わせで直してください。
+- 時刻は目安です。ずれていたら、詳細やタップ合わせで直してください。字の時間は、タイムラインの目盛りをドラッグするか「1字ずつタップ」で直せます。
 - サービスBでは、曲の音声は送れません（「Google Gemini のときだけ使えます」）。
 
 ## 9. 結果の確かめ方と取り消し
@@ -340,8 +341,10 @@ the tool's own button (**Prepare lyrics**, **Send**, **Make**, **Send and descri
 - **Use the song** (Google Gemini only) — after the consent card ("The song's audio will be sent to Google Gemini as
   16 kHz mono (about 7 MB, 3:42), this time only.") and **I agree to send it as described**: **Transcribe** (then
   **Replace** or **Add after**, optionally **Include the times**), **Match timing** (new line start times, which override
-  LRC times) and **Analyze the song** (mood, tempo, sections, highlights; **Save** keeps it for later suggestions and
-  for **Section ▾**). Consent covers the open project only and is asked again after opening another project or
+  LRC times), **Analyze the song** (mood, tempo, sections, highlights; **Save** keeps it for later suggestions and
+  for **Section ▾**) and **Character times by AI** (sung reveal: when each word of the selected lines — or of up to 12
+  lines from the playhead — begins; a row per line under Timing sets the line's character times and, where the line
+  starts automatically, pins that start where it is, so the times stay where the AI heard them). Consent covers the open project only and is asked again after opening another project or
   reloading. Audio goes as mono WAV: 16 kHz up to about 7 min, 12 or 8 kHz up to about 14 min, longer songs at 16 kHz
   through an upload; the consent card shows the size and length. The song's file name is not sent. Only send songs you
   may send; published lyrics cannot be transcribed — paste them and use Match timing.
