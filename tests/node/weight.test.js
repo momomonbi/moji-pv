@@ -372,6 +372,44 @@ test('FontBook: a draw-only load that fails is failed only for its newest sheet 
   assert.equal(book.epoch, 0);
 });
 
+// The newest stylesheet (in the order they were added) whose wght list declares `weight` for Noto Sans JP.
+function newestSheetOf(links, weight) {
+  const hits = links.map((l) => decodeURIComponent(l.href)).filter((u) => /family=Noto\+Sans\+JP:wght@/.test(u)
+    && /wght@([0-9;]+)/.exec(u)[1].split(';').map(Number).includes(weight));
+  return hits[hits.length - 1] || null;
+}
+const sheetText = (url) => /text=([^&]+)/.exec(url)[1];
+
+test('FontBook: when a family\'s draw-only characters grow, every draw-only weight it has is declared with all of them', async () => {
+  const { doc, links } = fakeDocument();
+  const book = createFontBook({ document: doc, timeoutMs: 2000 });
+  await book.ready([NOTO], { 'Noto Sans JP': '青い空夜の町' });              // the main path owns 500
+  const r = (w) => FACES.atWeight(NOTO, w);
+  const A = [100, 200, 300, 400], B = [600, 700, 800];
+  // 太る on 青い空 asks for 100–400; then 脈打つ太さ on 夜の町 asks for 600–800 with new characters
+  await book.ready(A.map(r), { 'Noto Sans JP': '青い空' }, { drawOnly: true });
+  book.request(B.map(r), { 'Noto Sans JP': '夜の町' }, { drawOnly: true });
+  for (const w of A) {
+    const url = newestSheetOf(links, w);
+    assert.ok(url && [...'夜の町'].every((c) => sheetText(url).includes(c)), w + ': the newest sheet declaring it has the new characters');
+    assert.equal(book.drawStatus(r(w)), 'loading', w + ': loading again until that sheet is in');
+  }
+  await book.ready(B.map(r), { 'Noto Sans JP': '' }, { drawOnly: true });
+  for (const w of [...A, ...B]) assert.equal(book.drawStatus(r(w)), 'ready', String(w));
+  // the main weight is never declared by a draw-only sheet
+  for (const l of links.slice(1)) assert.ok(!/wght@([0-9;]*;)?500(;|&)/.test(decodeURIComponent(l.href)), 'a draw-only sheet declares 500: ' + l.href);
+  // the same weights and characters again: no new sheet
+  const n = links.length;
+  book.request([...A, ...B].map(r), { 'Noto Sans JP': '空町' }, { drawOnly: true });
+  assert.equal(links.length, n, 'nothing new to declare');
+  // a new weight without new characters: a sheet for it alone
+  book.request([r(900)], { 'Noto Sans JP': '夜' }, { drawOnly: true });
+  assert.equal(links.length, n + 1);
+  assert.match(decodeURIComponent(links[n].href), /wght@900&/);
+  assert.equal(book.drawStatus(r(100)), 'ready', 'the others keep their sheet');
+  assert.equal(book.epoch, 1);
+});
+
 // --- 3. the parts 太る and 細る -----------------------------------------------------------------------------------------
 
 const CATALOG = MV.use('parts/catalog').defaultRegistry();
@@ -634,6 +672,40 @@ test('facade: export waits for the draw-only faces of the range', async () => {
   await e2.prepare(0, p2.duration, { export: true });
   assert.equal(other.readies.filter((r) => r.drawOnly).length, 0);
   assert.equal(other.calls.filter((c) => c.drawOnly).length, 0);
+});
+
+test('facade + FontBook: a rung asked for by an earlier scene is ready only with a later scene\'s characters', async () => {
+  const { doc, links } = fakeDocument();
+  const book = createFontBook({ document: doc, timeoutMs: 2000 });
+  const { engine } = engineWith(book);
+  const tick = () => new Promise((resolve) => setImmediate(resolve));
+  const build = (text, thin) => {
+    engine.setPlan(FAC.samplePlan(CATALOG, { kind: 'arrive', key: 'weightGrow', params: { thin } }, { faces: NOTO_FACES, text }));
+    return engine.scene('cut', 0);
+  };
+  // 1. 太る on 青い空 (rungs 100–700); 2. a shorter 太る on 夜の町 (500–700, new characters); 3. 太る on 夜の町 again
+  // (100–700: every rung and character was asked for before, so the facade asks for nothing new)
+  build('青い空', 1);
+  for (let i = 0; i < 4; i++) await tick();
+  build('夜の町', 0.35);
+  for (let i = 0; i < 4; i++) await tick();
+  const n = links.length;
+  const scene = build('夜の町', 1);
+  for (let i = 0; i < 6; i++) await tick();
+  assert.equal(links.length, n, 'the third scene needs no new sheet');
+  const rungs = [];
+  for (const g of scene.stores.glyph) {
+    if (g.cls === 'space' || g.font.family !== 'Noto Sans JP') continue;
+    for (const w of FACES.rungsBetween(g.font, ...scene.wtReach)) if (w !== g.font.weight && !rungs.includes(w)) rungs.push(w);
+  }
+  assert.ok(rungs.includes(100) && rungs.includes(400), 'rungs ' + rungs);
+  for (const w of rungs) {
+    const ref = FACES.atWeight(scene.stores.glyph.find((g) => g.font.family === 'Noto Sans JP').font, w);
+    if (book.drawStatus(ref) !== 'ready') continue;
+    const url = newestSheetOf(links, w);
+    assert.ok(url && [...'夜の町'].every((c) => sheetText(url).includes(c)), w + ' is ready while its newest sheet lacks 夜の町: ' + url);
+  }
+  assert.equal(book.drawStatus(FACES.atWeight(NOTO, 100)), 'ready');
 });
 
 // --- 5. the planner: opt-in pools, text.weight, the grow rule, warnings, the rate ----------------------------------------

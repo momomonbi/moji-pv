@@ -27,6 +27,7 @@ MV.def('engine/host/fonts', ['engine/text/faces'], (FACES) => {
     const drawStates = new Map();      // ref.key → 'loading' | 'ready' | 'failed' (draw-only faces)
     const drawUrl = new Map();         // ref.key → the newest stylesheet URL that declares it (draw-only)
     const drawChars = new Map();       // family → the characters asked for draw-only faces (apart from `chars`)
+    const drawKnown = new Map();       // family → Map(ref.key → ref): its draw-only weights asked for so far
     const drawWatches = new Map();     // ref.key + url + load text → Promise<boolean>
     const drawListeners = new Set();
     let epoch = 0;
@@ -146,17 +147,33 @@ MV.def('engine/host/fonts', ['engine/text/faces'], (FACES) => {
     }
 
     // Starts the draw-only loads of the refs the main path does not own; returns [{ ref, url }].
+    // A family's draw-only weights share its draw-only characters. When the characters grow, every draw-only weight the
+    // family has (not only this call's) is declared again in one sheet with all of them, so the newest sheet of every
+    // weight carries every character asked for so far; else only the weights never declared (or failed) get a sheet.
     function startDraw(refs, text) {
       const jobs = [];
       for (const [family, all] of groupRefs(refs)) {
         const list = all.filter((r) => !states.has(r.key));            // a weight the main path owns is never redeclared
         if (!list.length) continue;
-        const merged = FACES.uniqueChars((drawChars.get(family) || '') + textFor(text, family));
+        const had = drawChars.get(family) || '';
+        const merged = FACES.uniqueChars(had + textFor(text, family));
         drawChars.set(family, merged);
-        const [url] = FACES.cssUrls(list, { [family]: merged });
+        let fam = drawKnown.get(family);
+        if (!fam) { fam = new Map(); drawKnown.set(family, fam); }
+        for (const ref of list) fam.set(ref.key, ref);
+        const declare = merged !== had
+          ? [...fam.values()].filter((r) => !states.has(r.key))
+          : list.filter((r) => !drawUrl.has(r.key) || drawStates.get(r.key) === 'failed');
+        if (declare.length) {
+          const [url] = FACES.cssUrls(declare, { [family]: merged });
+          for (const ref of declare) {
+            // the newest declaration is the one a canvas draws with: a newer sheet means loading again until it is in
+            if (drawUrl.get(ref.key) !== url) { drawUrl.set(ref.key, url); drawStates.set(ref.key, 'loading'); }
+            watchDraw(ref, url);
+          }
+        }
         for (const ref of list) {
-          // the newest declaration is the one a canvas draws with: a newer sheet means loading again until it is in
-          if (drawUrl.get(ref.key) !== url) { drawUrl.set(ref.key, url); drawStates.set(ref.key, 'loading'); }
+          const url = drawUrl.get(ref.key);
           jobs.push({ ref, url });
           watchDraw(ref, url);
         }
