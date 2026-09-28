@@ -9160,7 +9160,8 @@ docs/DESIGN_2_2.md. The packages and their notes follow.
 ### P3 キメ (M3)
 
 Contract: DESIGN_2_2 §3. Phase 1 is the planner (and the core commands of the mark); phase 2 the UI, the optional AI
-path, the browser flows and the visual QA (below, after phase 1's notes).
+path, the browser flows and the visual QA (below, after phase 1's notes). The review fixes (round 1, at the end) changed
+several rules; where a phase-1 or phase-2 paragraph and the review fixes disagree, the review fixes are current.
 
 **What landed (phase 1).** `planner/kime` (new, L2: the constants, `isKime`, `calmLevels`, `calmFactor`, `shotFor`,
 `xshotFor`, `hold`, `landEach`, `guideline`); the line pin read in stage 1 (`planner/plan withKimePins`); one cut and
@@ -9168,7 +9169,8 @@ the piece-pin shadowing (`planner/segment piecesOf`, `kimeAttach`); the hold (`c
 `windows`); `feat.kime` / `feat.calm` (`planner/features`, present only where set); the calm factor in the chooser
 (`planner/choose preWeight`); the キメ sets, rules and parameters (`planner/cast kimeRule`, `moves`, `kimeParams`,
 `decideText`, `decideList`, `onlyKeys`, alignments); the shot rule and `kimeShot` (`planner/camera`); the seams
-(`planner/tracks`: hard cut in, no flash out, memo `quiet`, no seam copy into a キメ cut or a flashing one out of it);
+(`planner/tracks`: hard cut in, no flash out — since the review fixes the hard cut out, memo key `kimeOut` — no seam
+copy into a キメ cut or out of it);
 EXTREME (`planner/extreme`: `crashZoom` / `punchHit`, calm weights); explain and fields (`kime` a line value read from
 the plan, `kime.calm` a work value); the commands (`kime` line only, `kime.calm` work only, never promoted, kept by
 unpin-all without `by`); why strings; `tests/node/kime.test.js`, a 大と小 size test in `arrange_dwell.test.js`, the
@@ -9382,6 +9384,16 @@ no-flash predicate (`kime.noFlashSeam`) is replaced by the hard cut out. The re-
 the line comes back in two pieces after the mark goes, and the cut after the キメ cut now reads a different shot. The
 review asked to measure "the largest run"; the tests measure the largest *lyric* run (a sidebar's index number is a
 decoration, not the lyric).
+
+**Checks (review fixes).** `python3 build.py --check`: 220 modules OK; pages rebuilt (`build.py`, `--lab`) and
+committed. `node tests/update_golden.js --check`: the six older goldens match; `project_kime.json` (rewritten by its job's
+function alone, nothing else written) matches. Full Node suite: 1750 of 1802 under a load average of 13–17; the 52
+failures are conformance build-time budgets (60 ms, measured 90–170 ms), the known "planning speed: re-planning
+project_long after an edit" and "typing in a lyric row" (timing); re-run at a load of 8, `planner_determinism` and
+`conformance` pass 264 of 265 (only the known one fails). Browser: `ui_flows.py` first_run (ja, en), pin, values, keys,
+drill, cutkeys, repeat, areas, ai_looks and kime (ja, en) ok; `i18n_pages.py` OK (57 screens per page); `csp.py` OK;
+`ui_layout.py` OK (584 layouts) — twice under a load above 10 its "paused provisional frame redrawn within 0.9 s" check
+saw 2–3 renders (the base commit's pages, in a scratch copy, passed at that moment; this tree passed on the rerun).
 
 <!-- PV22 P4 notes -->
 
