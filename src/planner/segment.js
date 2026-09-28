@@ -1,6 +1,6 @@
 /* 文字PVメーカー v2 — original work. The cutter: lines → cut skeletons, special cuts, windows, pin reattachment (DESIGN §4.16.5). */
 MV.def('planner/segment', ['core/script', 'core/num', 'core/pins', 'core/rng', 'engine/text/breaker', 'planner/choose',
-  'planner/params'], (S, N, PINS, R, BR, CH, PA) => {
+  'planner/params', 'planner/sung'], (S, N, PINS, R, BR, CH, PA, SU) => {
   'use strict';
 
   const BASE = Object.freeze({ '16:9': 14, '21:9': 16, '4:3': 12, '1:1': 10, '4:5': 10, '3:4': 9, '9:16': 8 });
@@ -194,6 +194,9 @@ MV.def('planner/segment', ['core/script', 'core/num', 'core/pins', 'core/rng', '
   // pinned ones, snapped to the beat grid when timing.snap is on), t1. The inner boundaries lie inside
   // [t0, spanEnd): a line whose pinned end runs past the next line's start shares only the time before that start
   // among its pieces, and its last piece keeps the rest, so the cuts stay in time order (§3.12).
+  // A line with sung timing (planner/sung, DESIGN_2_2 §6; not one timed only for the colour fill) starts each piece
+  // when its first character is sung, between the pinned boundaries around it, keeping every piece of such a run
+  // ≥ MIN_PIECE (a run that cannot is shared by morae as before), and these boundaries are not snapped to the beat.
   function pieceTimes(ctx, line, starts, pinKeys, spanEnd) {
     const n = starts.length;
     const T = new Float64Array(n + 1);
@@ -210,9 +213,12 @@ MV.def('planner/segment', ['core/script', 'core/num', 'core/pins', 'core/rng', '
       if (pin) { T[i] = pin.v; pinned[i] = true; last = pin.v; }
     }
     const w = weightsOf(line.text, starts, line.lang);
+    const ls = n > 1 && ctx.sung ? ctx.sung.lines.get(line.id) : null;
+    const sungB = ls && (ls.sourcesOK || ls.anchored >= 2) ? new Uint8Array(n + 1) : null;
     let a = 0;
     for (let b = 1; b <= n; b++) {
       if (!pinned[b]) continue;
+      if (sungB && b - a > 1 && sungRun(line, ls, starts, T, a, b, sungB)) { a = b; continue; }
       let span = 0;
       for (let k = a; k < b; k++) span += w[k];
       let acc = 0;
@@ -222,17 +228,33 @@ MV.def('planner/segment', ['core/script', 'core/num', 'core/pins', 'core/rng', '
       }
       a = b;
     }
-    snapInner(ctx, T, pinned);
+    snapInner(ctx, T, pinned, sungB);
     T[n] = line.t1;
     return T;
   }
 
-  function snapInner(ctx, T, pinned) {
+  // The inner boundaries of the run (a, b) between two pinned ones from sung times: each at its piece's first sung
+  // character, kept ≥ MIN_PIECE (+ ε) after the one before and early enough for the rest of the run; false (nothing
+  // changed) when the run is too short for that.
+  function sungRun(line, ls, starts, T, a, b, sungB) {
+    const g = SU.C.MIN_PIECE + SU.C.PIECE_EPS;
+    if (T[b] - T[a] < g * (b - a)) return false;
+    for (let k = a + 1; k < b; k++) {
+      const want = line.t0 + SU.timeOf(ls, starts[k]);
+      const lo = T[k - 1] + g, hi = T[b] - g * (b - k);
+      T[k] = q6(want < lo ? lo : want > hi ? hi : want);
+      sungB[k] = 1;
+    }
+    return true;
+  }
+
+  // skip: boundaries that come from sung times (a sung time is more precise than the beat grid).
+  function snapInner(ctx, T, pinned, skip) {
     const g = ctx.grid;
     if (!g || ctx.timing.snap === 'off') return;
     const tol = Math.min(0.12, g.period / 4);
     for (let i = 1; i < T.length - 1; i++) {
-      if (pinned[i]) continue;
+      if (pinned[i] || (skip && skip[i])) continue;
       const s = g.snap(T[i], ctx.timing.snap, tol);
       if (s > T[i - 1] && s < T[i + 1]) T[i] = s;
     }
@@ -296,17 +318,24 @@ MV.def('planner/segment', ['core/script', 'core/num', 'core/pins', 'core/rng', '
     const att = attach(ctx, line, starts);
     for (const key of att.orphans) reportPins(ctx, 'orphan-pin', key, line.id);
     for (const key of att.shadowed) reportPins(ctx, 'shadowed-pin', key, line.id);
+    const ls = ctx.sung ? ctx.sung.lines.get(line.id) : null;
     const cuts = starts.map((a, i) => {
       const b = i + 1 < starts.length ? starts[i + 1] : text.length;
       const key = line.id + '~' + a;
       const focus = a === pieces.focus || fullyEmphasized(text, line.emph || [], a, b);
-      return {
+      const cut = {
         key, line: line.id, role: focus ? 'focus' : 'lyric', text: pieceText(text, a, b),
         emph: pieceEmph(line.emph || [], a, b), impact: !!line.impact && i === starts.length - 1,
         note: i === starts.length - 1 ? line.note || null : null,
         t0: q6(T[i]), t1: q6(T[i + 1]), lang: line.lang, off: [a, b], pinKey: att.map[key] || null,
         heading: line.heading || null, splitFrom: pieces.from,
       };
+      // 歌ハメ (DESIGN_2_2 §6): the sung units of this piece, when the line has sung timing
+      if (ls) {
+        const sung = SU.sliceCut(ls, a, b, cut.t0, cut.t1, line.t0);
+        if (sung) cut.sung = sung;
+      }
+      return cut;
     });
     checkLock(ctx, line, pieces, starts, att, cuts);
     return cuts;

@@ -172,9 +172,21 @@ MV.def('engine/scene/shot', ['core/num', 'core/curve', 'core/shot', 'core/script
     return cut && finite(cut.t1) && finite(cut.t0) ? Math.max(0, cut.t1 - cut.t0) : Math.max(0, env.times.b);
   }
 
+  // Where the cut's singing ends (cut-local): its sung units' end (歌ハメ, DESIGN_2_2 §6), else its span.
+  function sungEndOf(env) {
+    const s = env.cut ? env.cut.sung : null;
+    return s && finite(s.end) ? s.end : spanOf(env);
+  }
+
   // Cut-local sung start of glyph j's word; words' sung fractions are computed once per target and cached on a side table.
-  const sungCache = new WeakMap();
+  // With the cut's sung units (DESIGN_2_2 §6): the word's sung time, cached under its own table.
+  const sungCache = new WeakMap(), sungTimeCache = new WeakMap();
   function sungOf(env, target, j) {
+    if (env.cut && env.cut.sung) {
+      let st = sungTimeCache.get(target);
+      if (st === undefined) { st = STG.sungTimes(env, target, 'word'); sungTimeCache.set(target, st); }
+      if (st) return st[j];
+    }
     let frac = sungCache.get(target);
     if (!frac) { frac = STG.sungFractions(env, target, 'word'); sungCache.set(target, frac); }
     return frac[j] * spanOf(env);
@@ -186,8 +198,9 @@ MV.def('engine/scene/shot', ['core/num', 'core/curve', 'core/shot', 'core/script
   }
 
   // anchorTime(env, target, at, dt) → cut-local seconds (sung start = 0), dt added, clamped to [times.a, times.b].
+  // With the cut's sung units, 'mid' and 'end' (and 'emph' without an emphasis) read the singing's end instead of t1.
   function anchorTime(env, target, at, dt) {
-    const tm = env.times, span = spanOf(env);
+    const tm = env.times, span = sungEndOf(env);
     let t;
     if (finite(at)) t = tm.a + at * (tm.b - tm.a);
     else if (at === 'a' || at === 'rest' || at === 'out' || at === 'b') t = tm[at];
@@ -282,9 +295,18 @@ MV.def('engine/scene/shot', ['core/num', 'core/curve', 'core/shot', 'core/script
       for (let c = 0; c < k; c++) { times.push(total > 0 ? (acc / total) * span : (c / k) * span); acc += mor[c]; }
     } else {
       const unit = words.length > WORDS_MAX ? 'line' : 'word';
-      const frac = STG.sungFractions(env, target, unit);
       for (const u of unitsOf(target, unit)) groups.push(glyphs.filter((j) => target.unitOf[unit][j] === u));
-      times = groups.map((g) => frac[g[0]] * span);
+      const st = env.cut && env.cut.sung ? STG.sungTimes(env, target, unit) : null;
+      if (st) times = groups.map((g) => st[g[0]]);
+      else {
+        const frac = STG.sungFractions(env, target, unit);
+        times = groups.map((g) => frac[g[0]] * span);
+      }
+    }
+    // the chunks of one long word, with the cut's sung units: each at its first glyph's sung time (DESIGN_2_2 §6)
+    if (words.length === 1 && glyphs.length >= CHUNK_MIN && env.cut && env.cut.sung) {
+      const st = STG.sungTimes(env, target, 'glyph');
+      if (st) times = groups.map((g) => st[g[0]]);
     }
     const m = FLOOR * env.D.short;
     const n = groups.length;
@@ -517,5 +539,5 @@ MV.def('engine/scene/shot', ['core/num', 'core/curve', 'core/shot', 'core/script
   // (additive, DESIGN_EXTREME §1.4) the helpers the x-track (engine/scene/xshot) reuses, so this track is not changed:
   // readingUnits, unitsOf, emphRun, sungOf, leanOf, spanOf, textGlyphs, aimable, HOP_MAX.
   return { makeShot, aimBox, anchorTime, frame, poseAt, runShot, leanInto, bleedLimit, JUMP, FLOOR, SAFE,
-    readingUnits, unitsOf, emphRun, sungOf, leanOf, spanOf, textGlyphs, aimable, HOP_MAX };
+    readingUnits, unitsOf, emphRun, sungOf, leanOf, spanOf, textGlyphs, aimable, HOP_MAX, sungEndOf };
 });

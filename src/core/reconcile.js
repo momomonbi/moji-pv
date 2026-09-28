@@ -419,6 +419,10 @@ MV.def('core/reconcile', ['core/lyrics', 'core/script', 'core/paths'], (L, S, P)
         value = remapSplit(value, ctx.tableOf(row), ctx.after.get(row).text.length);
         if (value === null) { changed = true; continue; }
       }
+      if (isEdited && isPins && at.off === null && !at.gap && key.endsWith(':sung.times')) {
+        value = remapSungTimes(value, ctx.tableOf(row), ctx.before.get(row).text, ctx.after.get(row).text.length);
+        if (value === null) { changed = true; continue; }
+      }
       if (to !== key || value !== map[key]) changed = true;
       moves.push({ key, to, off: at.off === null ? -1 : at.off, value });
     }
@@ -454,6 +458,37 @@ MV.def('core/reconcile', ['core/lyrics', 'core/script', 'core/paths'], (L, S, P)
     return Object.assign({}, pin, { v: out });
   }
 
+  // Maps a line's character times (DESIGN_2_2 §6: [[off, dt], …], strictly increasing offsets; a last pair at the text's
+  // length is where the singing ends) through the offset table: a pair whose character was deleted is dropped (its
+  // character is interpolated again), a pair that would no longer come after the one before is dropped, the end pair
+  // moves to the new end; null when no pair remains. A value that is not such a list is kept for the planner to refuse.
+  function remapSungTimes(pin, table, oldText, newLength) {
+    if (!pin || !Array.isArray(pin.v)) return pin;
+    const v = pin.v;
+    if (!v.every((x) => Array.isArray(x) && x.length === 2 && Number.isInteger(x[0]) && x[0] >= 0)) return pin;
+    const offs = S.graphemeOffsets(oldText);
+    const ends = new Map();
+    for (let k = 0; k + 1 < offs.length; k++) ends.set(offs[k], offs[k + 1]);
+    const last = table.length - 1;
+    const out = [];
+    for (const [off, dt] of v) {
+      let y;
+      if (off >= oldText.length) y = newLength;
+      else {
+        const e = ends.has(off) ? ends.get(off) : off + 1;
+        const a = table[Math.min(off, last)], b = table[Math.min(e, last)];
+        if (a === b) continue;                     // the character is gone
+        y = a;
+      }
+      if (out.length && y <= out[out.length - 1][0]) continue;
+      if (y === newLength && off < oldText.length) continue;
+      out.push([y, dt]);
+    }
+    if (out.length === 0) return null;
+    if (out.length === v.length && out.every((x, i) => x[0] === v[i][0])) return pin;
+    return Object.assign({}, pin, { v: out });
+  }
+
   function dropLocks(locks, ctx) {
     let out = locks;
     for (const id of Object.keys(locks)) {
@@ -473,5 +508,8 @@ MV.def('core/reconcile', ['core/lyrics', 'core/script', 'core/paths'], (L, S, P)
     return res;
   }
 
-  return { reconcile, offsetMap, remapKeyed, rowInfo, lcsPairs, splitRows, rowKey: (src) => describe(src).key };
+  return {
+    reconcile, offsetMap, remapKeyed, rowInfo, lcsPairs, splitRows, rowKey: (src) => describe(src).key, remapSungTimes,
+    offsetTable,
+  };
 });

@@ -254,7 +254,8 @@ MV.def('planner/encode', ['core/hash'], (H) => {
       if (tail !== '') parts.push(tail);
       parts.push(sep ? V[i][0] : V[i][1]);
     }
-    parts.push('},' + JSON.stringify({ t0: cut.t0, t1: cut.t1, text: cut.text }).slice(1));
+    // `sung` (DESIGN_2_2 §6) sits between slots and t0 in key order; JSON drops it where it is absent
+    parts.push('},' + JSON.stringify({ sung: cut.sung, t0: cut.t0, t1: cut.t1, text: cut.text }).slice(1));
     return parts;
   }
 
@@ -285,6 +286,7 @@ MV.def('planner/encode', ['core/hash'], (H) => {
     if (cut.rig !== undefined) put('rig', canon(cut.rig));
     put('role', t.role); put('seamIn', canon(cut.seamIn));
     put('slots', slotsParts(cut.slots, keys, 'full'));
+    if (cut.sung !== undefined) put('sung', canon(cut.sung));
     put('t0', canon(cut.t0)); put('t1', canon(cut.t1)); put('text', t.text);
     parts.push(pending + '}');
     return { fp, parts };

@@ -143,6 +143,7 @@ MV.def('ui/menus', ['ui/dom', 'ui/icons', 'ui/keys', 'export/subtitles', 'export
   }
 
   // 時刻を歌詞に書き込む (§3.5): one lyrics.set that bakes every effective start into LRC stamps and clears the start pins.
+  // A row's word tags are kept, shifted with its new first stamp (DESIGN_2_2 §6).
   function bakeTimes(app) {
     const L = MV.has('core/lyrics') ? MV.use('core/lyrics') : null;
     const plan = app.plan;
@@ -157,7 +158,9 @@ MV.def('ui/menus', ['ui/dom', 'ui/icons', 'ui/keys', 'export/subtitles', 'export
       const stamps = byRow.get(r.id);
       if (!stamps) return r.src;
       const parsed = L.parseRow(r.src);
-      return L.renderRow(Object.assign({}, parsed, { stamps: stamps.sort((x, y) => x - y) }));
+      const sorted = stamps.sort((x, y) => x - y);
+      // word tags (DESIGN_2_2 §6) keep their place in the line: they move with its first stamp
+      return L.renderRow(Object.assign({}, parsed, { stamps: sorted, words: L.shiftWords(parsed, sorted[0]) }));
     }).join('\n');
     const clears = Object.keys(app.doc.pins).filter((p) => /^line\/[^:]+:start$/.test(p)).map((path) => ({ t: 'pin.clear', path }));
     app.batch({ label: ['undo.bakeTimes', {}] }, clears.concat([{ t: 'lyrics.set', text }]));

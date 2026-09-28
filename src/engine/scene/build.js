@@ -154,13 +154,17 @@ MV.def('engine/scene/build', ['core/hash', 'core/rng', 'core/schema', 'engine/sc
       ch: new Array(n), cls: new Array(n), em: new Float32Array(n), x: new Float32Array(n), y: new Float32Array(n),
       wx: new Float32Array(n), wy: new Float32Array(n), w: new Float32Array(n), h: new Float32Array(n),
       cx: new Float32Array(n), cy: new Float32Array(n), box: new Float32Array(n * 4), lang, arrived: null,
+      // additive (DESIGN_2_2 §6): each glyph's offset in cut.text, −1 for a run that shows its own text (a note, ♪)
+      off: new Int32Array(n),
     };
     const fx = focus.x + focus.w / 2, fy = focus.y + focus.h / 2;
     let wordBase = 0, lineBase = 0;
     runs.forEach((r, ri) => {
       let words = 0, lines = 0;
+      const own = r.spec && r.spec.text !== undefined && r.spec.text !== null;
       for (let i = r.from; i < r.to; i++) {
         const j = i - range.from, g = stores.glyph[table.payload[i]];
+        t.off[j] = own ? -1 : g.off;
         t.unitOf.word[j] = wordBase + g.word; t.unitOf.line[j] = lineBase + g.line; t.unitOf.run[j] = ri;
         words = Math.max(words, g.word + 1); lines = Math.max(lines, g.line + 1);
         t.emph[j] = g.emph ? 1 : 0; t.ch[j] = g.ch; t.cls[j] = g.cls; t.em[j] = g.em; t.w[j] = g.w; t.h[j] = g.h;

@@ -578,3 +578,34 @@ test('v2.1 output: formats kit and webmAlpha; output.set kit takes the whole obj
   assert.deepEqual(D.validate(raw), [], 'and still validates (normalize fills it)');
   assert.deepEqual(reduce(raw, { t: 'output.set', key: 'kit', v: kit }).output.kit, kit);
 });
+
+test('歌ハメ pins (DESIGN_2_2 §6): sung.times at a line only, sung.real at the work only, sung.hame never at a cut', () => {
+  const doc = fresh('basic');
+  const set = (path, v) => reduce(doc, { t: 'pin.set', path, v, by: 'user', sig: '始発の' });
+  for (const path of ['cut/r4~0:sung.hame', 'work:sung.times', 'cut/r4~0:sung.times', 'line/r4:sung.real', 'cut/r4~0:sung.real',
+    'cut/r4~0:sung.fill']) {
+    throwsCode(() => set(path, path.endsWith('times') ? [[0, 0], [1, 0.3]] : true), 'payload');
+  }
+  const ok = reduce(reduce(reduce(reduce(doc, { t: 'pin.set', path: 'line/r4:sung.times', v: [[0, 0], [1, 0.3]], by: 'tap' }),
+    { t: 'pin.set', path: 'work:sung.hame', v: true, by: 'user' }), { t: 'pin.set', path: 'work:sung.real', v: false, by: 'user' }),
+  { t: 'pin.set', path: 'line/r4:sung.hame', v: false, by: 'user' });
+  assert.deepEqual(ok.pins['line/r4:sung.times'], { v: [[0, 0], [1, 0.3]], by: 'tap' });
+  assert.equal(ok.pins['work:sung.hame'].v, true);
+  assert.equal(ok.pins['work:sung.real'].v, false);
+  // a line's character times never move to the whole work; 歌ハメ may, like the season
+  throwsCode(() => reduce(ok, { t: 'pin.promote', path: 'line/r4:sung.times', to: 'work' }), 'payload');
+  const promoted = reduce(ok, { t: 'pin.promote', path: 'line/r4:sung.hame', to: 'work' });
+  assert.equal(promoted.pins['work:sung.hame'].v, false);
+  assert.equal(promoted.pins['line/r4:sung.hame'], undefined);
+  // 固定を外す of the line clears its character times with its start and end
+  const cleared = reduce(ok, { t: 'pin.clearUnder', scope: 'line/r4' });
+  assert.equal(cleared.pins['line/r4:sung.times'], undefined);
+});
+
+test('歌ハメ: lyrics.set keeps a line\'s character times on their characters (reconcile remapSungTimes)', () => {
+  let doc = fresh('basic');
+  doc = reduce(doc, { t: 'pin.set', path: 'line/r4:sung.times', v: [[0, 0], [2, 0.5], [4, 0.9], [10, 1.8]], by: 'tap' });
+  const rows = doc.sheet.rows.map((r) => (r.id === 'r4' ? '新しい始発のホームに/白い息' : r.src));
+  const after = reduce(doc, { t: 'lyrics.set', text: rows.join('\n') });
+  assert.deepEqual(after.pins['line/r4:sung.times'].v, [[0, 0], [5, 0.5], [7, 0.9], [13, 1.8]], 'insert: pairs move, the end with it');
+});

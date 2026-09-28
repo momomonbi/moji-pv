@@ -300,6 +300,18 @@ MV.def('engine/scene/behave', ['core/num', 'core/curve', 'core/rng', 'core/motio
     if (order === 'sung') {
       const dur = Math.min(finite(p.dur) ? Math.max(0, p.dur) : 0, kind === 'arrive' ? span : share * span);
       const room = Math.max(0, (kind === 'arrive' ? span : share * span) - dur);
+      // 歌ハメ (DESIGN_2_2 §6): with the cut's sung units, glyph j starts dur before its sung time and lands on it
+      // (times.a is cut-local, −lead; a glyph with no room before that lands late). An exit keeps the v2 spread.
+      const st = kind === 'arrive' && env.cut && env.cut.sung ? STG.sungTimes(env, target, unit) : null;
+      if (st) {
+        const delay = new Float64Array(st.length);
+        let last = 0;
+        for (let j = 0; j < st.length; j++) {
+          delay[j] = Math.min(Math.max(0, st[j] - STG.SUNG_AHEAD - dur - times.a), room);
+          if (delay[j] > last) last = delay[j];
+        }
+        return { rank: R.rank, delay, dur, total: last + dur };
+      }
       const cutSpan = env.cut ? Math.max(0, env.cut.t1 - env.cut.t0) : 0;
       const delay = Float64Array.from(STG.sungFractions(env, target, unit));
       let last = 0;

@@ -170,6 +170,83 @@ MV.def('engine/scene/stagger', ['core/rng', 'core/script', 'core/schema'], (RNG,
     return rank;
   }
 
+  // --- sub-line sung timing (歌ハメ, DESIGN_2_2 §6) ---------------------------------------------------------------
+
+  // A 歌ハメ glyph lands on its sung time (0 s ahead): P5's 出そろい leaves sung-order cuts alone.
+  const SUNG_AHEAD = 0;
+  const LETTER_STEP = 0.06, LETTER_SHARE = 0.8;
+
+  // sungTimeAt(sung, off) → cut-local seconds of the sung unit that starts at or before text offset `off` (the first
+  // unit's time before it). sung = cut.sung { at, t, end }.
+  function sungTimeAt(sung, off) {
+    const at = sung.at;
+    if (!at.length) return 0;
+    let lo = 0, hi = at.length - 1;
+    if (off < at[0]) return sung.t[0];
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (at[mid] <= off) lo = mid; else hi = mid - 1;
+    }
+    return sung.t[lo];
+  }
+
+  function unitIndexAt(at, off) {
+    let lo = 0, hi = at.length - 1;
+    if (hi < 0 || off < at[0]) return 0;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (at[mid] <= off) lo = mid; else hi = mid - 1;
+    }
+    return lo;
+  }
+
+  function isLetterCls(c) { return c === 'latin' || c === 'fullLatin'; }
+
+  // sungTimes(env, target, unit) → Float64Array per glyph: when it is sung (cut-local seconds from t0), or null when the
+  // cut has no sung units (env.cut.sung). A glyph takes its sung unit's time (target.off = its offset in cut.text; a run
+  // that shows its own text, off < 0, is sung at 0). The k ≥ 2 letters of a Latin word spread over its start:
+  // letter i at t_u + (i / k) · min(0.8 · (t_next − t_u), 0.06 · k) (t_next = the cut's sung end after its last unit).
+  // For a motion unit other than 'glyph', every glyph of a word, line or run takes the earliest time in it.
+  function sungTimes(env, target, unit) {
+    const sung = env && env.cut ? env.cut.sung : null;
+    if (!sung || !sung.at || !sung.at.length || !target || !target.off) return null;
+    const n = glyphCount(target);
+    const out = new Float64Array(n);
+    const at = sung.at, t = sung.t, m = at.length;
+    // the glyphs of each unit that are letters (for the Latin spread): count per unit, then index in reading order
+    const unitOf = new Int32Array(n).fill(-1);
+    const letters = new Int32Array(m);
+    for (let j = 0; j < n; j++) {
+      const off = target.off[j];
+      if (off < 0) continue;
+      const u = unitIndexAt(at, off);
+      unitOf[j] = u;
+      if (isLetterCls(target.cls[j])) letters[u]++;
+    }
+    const seen = new Int32Array(m);
+    for (let j = 0; j < n; j++) {
+      const u = unitOf[j];
+      if (u < 0) { out[j] = 0; continue; }
+      const tu = t[u], k = letters[u];
+      if (k < 2) { out[j] = tu; continue; }
+      // a Latin word: its letters one after another; a glyph before them (an opening quote) with the first, one after
+      // them (a comma, a space) with the last
+      const next = u + 1 < m ? t[u + 1] : sung.end;
+      const step = Math.min(LETTER_SHARE * Math.max(0, next - tu), LETTER_STEP * k) / k;
+      let i;
+      if (isLetterCls(target.cls[j])) { i = Math.min(seen[u], k - 1); seen[u]++; } else i = Math.max(0, seen[u] - 1);
+      out[j] = tu + i * step;
+    }
+    if (unit !== undefined && unit !== 'glyph') {
+      const idx = unitIndex(target, unit);
+      const count = unitCountOf(idx);
+      const min = new Float64Array(count).fill(Infinity);
+      for (let j = 0; j < n; j++) if (out[j] < min[idx[j]]) min[idx[j]] = out[j];
+      for (let j = 0; j < n; j++) out[j] = min[idx[j]];
+    }
+    return out;
+  }
+
   // pivots(env, target, unit) → { px, py }: each glyph's offset from its own centre to its unit's centre (local du),
   // so rotation and scale can happen about the word, line or run. All zero for unit 'glyph'.
   function pivots(env, target, unit) {
@@ -182,5 +259,5 @@ MV.def('engine/scene/stagger', ['core/rng', 'core/script', 'core/schema'], (RNG,
     return { px, py };
   }
 
-  return { ORDERS, UNITS, StaggerError, unitIndex, ranksOf, sungFractions, staggerOf, pivots };
+  return { ORDERS, UNITS, StaggerError, unitIndex, ranksOf, sungFractions, staggerOf, pivots, SUNG_AHEAD, sungTimeAt, sungTimes };
 });

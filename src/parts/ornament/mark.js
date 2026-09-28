@@ -308,8 +308,11 @@ MV.def('parts/ornament/mark', ['parts/kit'], (K) => {
       const g = sb.group({ layer: 'text', x, y, owner: env.owner });
       sb.shape({ parent: g, layer: 'text', owner: env.owner, fill: p.ink, alpha: 0.75 + 0.25 * p.amount,
         path: vertical ? K.shape.rect(0, 0, p.thick, len) : K.shape.rect(0, 0, len, p.thick) });
-      // the sweep lands as the emphasized word is sung (its share of the characters of the line's time), once the text is in
-      const sung = sungShare(env) * Math.max(0, (env.cut ? env.cut.t1 - env.cut.t0 : 0));
+      // the sweep lands as the emphasized word is sung (its sung time when the cut has sung units, else its share of the
+      // characters of the line's time), once the text is in
+      const em = env.cut && env.cut.emph;
+      const at = K.sungAt(env, Array.isArray(em) && em.length ? em[0][0] : 0);
+      const sung = at !== null ? at : sungShare(env) * Math.max(0, (env.cut ? env.cut.t1 - env.cut.t0 : 0));
       const s = K.math.clamp(Math.max(T.rest, sung) + p.delay, T.a, Math.max(T.a, T.b - 0.6));
       const w = windows(env, 0.35);
       behave(env, runSweep, [g], { axis: vertical ? 1 : 0, len, s, d: 0.32, o: Math.max(w.o, s + 0.32), od: w.od });

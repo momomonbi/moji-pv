@@ -1,8 +1,9 @@
 /* 文字PVメーカー v2 — original work. plan(doc, { registry }) → Plan: the planner's stages in their FROZEN order (DESIGN §4.16.1–§4.16.2, §3.12; DESIGN_2_1 §2.7, §5.9.3, §11.2.6). */
 MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'core/timing', 'core/beats', 'core/motion',
   'core/doc', 'core/schema', 'core/script', 'core/media', 'core/shot', 'planner/choose', 'planner/params', 'planner/look',
-  'planner/segment', 'planner/features', 'planner/cast', 'planner/tracks', 'planner/camera', 'planner/encode', 'planner/extreme'],
-(H, N, PINS, LY, TM, B, MO, D, S, SC, MEDIA, SHOT, CH, PA, LK, SG, FE, CA, TR, CAM, EN, XT) => {
+  'planner/segment', 'planner/features', 'planner/cast', 'planner/tracks', 'planner/camera', 'planner/encode', 'planner/extreme',
+  'planner/sung'],
+(H, N, PINS, LY, TM, B, MO, D, S, SC, MEDIA, SHOT, CH, PA, LK, SG, FE, CA, TR, CAM, EN, XT, SU) => {
   'use strict';
 
   // v2: rigs, cut.rig, grounds[].zoomed, feat.sectionStart, media, the camera slots (DESIGN_2_1 §2.7, §11.2.6).
@@ -74,7 +75,8 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
       const t = solved.times[i];
       return Object.assign({}, line, { t0: t.t0, t1: t.t1, by: t.by });
     });
-    return { timed, duration: solved.duration, bpm, grid, beats: bpm ? { bpm, offset, meter } : null };
+    const readRate = TM.readRateOf({ readRate: ratePin ? ratePin.v : null, bpm });
+    return { timed, duration: solved.duration, bpm, grid, beats: bpm ? { bpm, offset, meter } : null, readRate };
   }
 
   // The time kept free for the title card before the first automatic line (§4.11 ctx.titleCard; SPEC §6: a title
@@ -279,14 +281,20 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
   // plan's fingerprint and parts; one that only moved in time (the same scene at other absolute times, as every
   // automatic line after an edited one) reuses the fingerprint and the printed decisions (planner/encode retimeCut).
   function planCut(ctx, c, shared, beats) {
-    const repT = N.q6(MO.heroTime({ a: c.a, b: c.b }, instantOf(ctx, 'arrive', c.slots.arrive),
-      instantOf(ctx, 'depart', c.slots.depart), unitCount(ctx, c)));
+    const arriveI = instantOf(ctx, 'arrive', c.slots.arrive), departI = instantOf(ctx, 'depart', c.slots.depart);
+    // 歌ハメ (DESIGN_2_2 §6): an entrance that follows sung times ends when the last character lands on its syllable.
+    const repT = N.q6(c.sung && arriveI && SU.isSungCut(c) ? SU.heroSung(c, arriveI, departI, unitCount(ctx, c))
+      : MO.heroTime({ a: c.a, b: c.b }, arriveI, departI, unitCount(ctx, c)));
     const out = {
       key: c.key, line: c.line, role: c.role, text: c.text, emph: c.emph, impact: c.impact, note: c.note,
       t0: c.t0, t1: c.t1, a: c.a, b: c.b, repT, lang: c.lang, feat: c.feat, fp: '', slots: c.slots,
       els: c.els, ground: c.ground, rig: c.rig, seamIn: c.seamIn,
     };
     if (c.pinKey && c.pinKey !== c.key) out.pinKey = c.pinKey;
+    // the cut's sung units (planner/sung sliceCut), only where the line has sung timing: printed and fingerprinted
+    // only where present, so every other cut keeps its bytes
+    const sungText = c.sung ? EN.canon(c.sung) : '';
+    if (c.sung) out.sung = c.sung;
     const slotKeys = Object.keys(c.slots).sort();
     const partSlots = slotKeys.filter((s) => s.indexOf('.') < 0 && s !== 'orient');
     const decisions = partSlots.map((s) => [slotKind(s), c.slots[s]]);
@@ -302,7 +310,7 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
     if (used) for (const id of used.ids) ctx.mediaUsed.add(id);
     const mine = mineText(ctx, used);
     // A cut whose cast was not reused is made of new objects: nothing to look up (its encoding is kept next time).
-    const key = ctx.encodings && c.castHit ? encodingKey(out, c.cast, shared, beat, level, mine) : null;
+    const key = ctx.encodings && c.castHit ? encodingKey(out, c.cast, shared, beat, level, mine) + sungText : null;
     const hit = key !== null ? ctx.encodings.get(key) : undefined;
     if (hit) {
       out.fp = hit.fp;
@@ -315,6 +323,7 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
     }
     const extra = [EN.objectCanon(c.els), N.q6(c.t0 - c.a), N.q6(c.b - c.a), shared.text, beat, level];
     if (mine) extra.push(mine);
+    if (sungText) extra.push(sungText);
     const enc = EN.encodeCut(out, slotKeys, extra);
     out.fp = enc.fp;
     if (key !== null) {
@@ -513,7 +522,7 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
       timing: Object.assign({}, TM.TIMING_DEFAULTS, doc.timing || {}), pools: new Map(), trace, casts: null,
       lockFree: CA.lockFreeIndex(doc.pins), media: mediaIndex(doc), mediaUsed: new Set(),
       castKeys: null, seams: null, encodings: null, fallbacks: null, lookAxis: null, lineConds: null, workCond: null,
-      shotMood: null, echoed: null, align: null, alignNear: null,
+      shotMood: null, echoed: null, align: null, alignNear: null, readRate: 7, sung: null,
     };
     // Traced runs (explain) and fresh runs neither read nor refresh the caches of re-planning.
     if (cached) beginFeatures();
@@ -526,6 +535,9 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
     const { timed, duration, grid } = timing;
     ctx.bpm = timing.bpm;
     ctx.grid = grid;
+    ctx.readRate = timing.readRate;
+    // 1b. sung timing of the lines (歌ハメ, DESIGN_2_2 §6): null (the v2 plan) without its switch or a sung.* pin
+    ctx.sung = SU.prepare(ctx, timed);
     const digest = doc.song && doc.song.digest;
     ctx.env = LK.envOf(digest);
     ctx.digestId = digest && typeof digest.loud === 'string' ? H.hashJSON(digest) : null;
@@ -559,6 +571,8 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
       cut.feat = got.feat;
       cut.featId = got.id;
     });
+    // 4b. which lines are 歌ハメ (planner/sung; nothing without sung timing)
+    SU.decideHame(ctx, cuts, timed);
 
     // 5. cast, in time order (a cut whose inputs did not change reuses its cast, planner/cast castCut)
     if (cached) {
@@ -612,6 +626,9 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
     const castHits = cuts.reduce((n, c) => n + (c.castHit ? 1 : 0), 0);
     const reuse = Object.freeze({ cuts: cuts.length, casts: castHits });
     Object.defineProperty(plan, 'reuse', { value: reuse, enumerable: false });
+    // Each line's sung timing and 歌ハメ state (planner/sung summary; null without sung timing), for the inspector and
+    // the timeline; not part of the Plan.
+    Object.defineProperty(plan, 'sung', { value: SU.summary(ctx, timed), enumerable: false });
     return plan;
   }
 

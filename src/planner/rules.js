@@ -39,6 +39,10 @@ MV.def('planner/rules', ['core/pins', 'planner/params'], (PINS, PA) => {
     // P4 モーフ・太さ (DESIGN_2_2 §4)
     row('morph.auto', null, WORK_LINE, BOOL, true, false),
     row('weight.auto', null, WORK, BOOL, true, false),
+    // P6 歌ハメ (DESIGN_2_2 §6): 「字の時間を歌に合わせる」, and 歌ハメ itself, whose default (自動) planner/sung decides
+    // per line (lines with character times and the hook lines of a new work; off in an older one).
+    row('sung.real', null, WORK, BOOL, true, false),
+    row('sung.hame', null, WORK_LINE, BOOL, null, null),
   ]);
 
   const BY_SLOT = new Map(ROWS.map((r) => [r.slot, r]));

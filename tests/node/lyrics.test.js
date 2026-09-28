@@ -292,3 +292,81 @@ test('the other standard LRC ID tags are meta rows too (final fixes, flows-10 / 
   assert.equal(L.parseRow(src).kind, 'lyric');
   assert.equal(L.parseRow(src).text, '[au:x]');
 });
+
+// ---- enhanced-LRC word tags kept as data (DESIGN_2_2 §6) ------------------------------------------------------------
+
+test('word tags: parsed into words at grapheme starts of the text; the text and marks are as before', () => {
+  const r = L.parseRow('[00:08.50]Good <00:09.10>morning, <00:10.00>little bird');
+  assert.equal(r.text, 'Good morning, little bird');
+  assert.deepEqual(r.words, [[5, 9.1], [14, 10]]);
+  assert.deepEqual(L.parseRow('<00:01.00>きみの<00:01.62>声が<00:02.30>きこえた<00:03.20>').words,
+    [[0, 1], [3, 1.62], [5, 2.3], [9, 3.2]], 'a tag after the last character is where the singing ends');
+  const piece = L.parseRow('[00:10.00]a / <00:10.50>b!|note');
+  assert.deepEqual([piece.text, piece.pieces, piece.words, piece.impact, piece.note], ['a b', [[0, 2], [2, 3]], [[2, 10.5]], true, 'note'],
+    'a tag right after "/ " lands on the next piece');
+  const marks = L.parseRow(' <00:01.00> x *y<00:02.00>z* <00:03.00>');
+  assert.deepEqual([marks.text, marks.emph, marks.words], ['x yz', [[2, 4]], [[0, 1], [3, 2], [4, 3]]]);
+  assert.deepEqual(L.parseRow('😀<00:01.00>😀x').words, [[2, 1]]);
+  assert.deepEqual(L.parseRow('a<00:01:05>b').words, [[1, 1.05]], 'the colon form of the fraction too');
+  // rows without tags keep their exact keys (the key test above); a tagged row only adds `words`
+  assert.deepEqual(Object.keys(L.parseRow('Good <00:09.10>morning')), ['kind', 'stamps', 'text', 'pieces', 'emph', 'impact',
+    'note', 'heading', 'script', 'tag', 'value', 'words']);
+  assert.equal('words' in L.parseRow('[00:01.00]no tags'), false);
+});
+
+test('word tags: lines carry them with the time they count from (first stamp, else first tag)', () => {
+  const sheet = L.parseSheet([{ id: 'r1', src: '[00:05.00][00:20.00]あ<00:05.50>い' }, { id: 'r2', src: 'う<00:30.00>え<00:30.40>お' },
+    { id: 'r3', src: 'かき' }]);
+  const lines = L.linesOf(sheet);
+  assert.deepEqual(lines.map((l) => [l.id, l.words || null, l.wordsRef === undefined ? null : l.wordsRef]),
+    [['r1', [[1, 5.5]], 5], ['r1.1', [[1, 5.5]], 5], ['r2', [[1, 30], [2, 30.4]], 30], ['r3', null, null]]);
+  assert.equal(lines[0].words, lines[1].words, 'every occurrence shares the array');
+  assert.equal('words' in lines[3], false);
+});
+
+test('word tags: renderRow writes them back; roundTrip keeps them on a mark edit and drops them on a text edit', () => {
+  const tagged = '[00:08.50]Good <00:09.10>morning, *little* bird';
+  const parsed = L.parseRow(tagged);
+  assert.equal(L.renderRow(parsed), tagged);
+  // the inspector's path (強調, 見せ場, ふりがな …): the row's fields with one of them changed
+  assert.equal(L.renderRow(Object.assign({}, parsed, { emph: [[0, 4]] })), '[00:08.50]*Good* <00:09.10>morning, little bird');
+  const emph = L.roundTrip(parsed, { emph: [] });
+  assert.deepEqual(emph, { src: '[00:08.50]Good <00:09.10>morning, little bird', ok: true });
+  assert.deepEqual(L.parseRow(emph.src).words, [[5, 9.1]]);
+  const text = L.roundTrip(parsed, { text: 'Good evening, little bird', emph: [] });
+  assert.equal(text.ok, true);
+  assert.equal(L.parseRow(text.src).words, undefined, 'a new text drops the tags');
+  const moved = L.roundTrip(parsed, { stamps: [10] });
+  assert.equal(moved.src, '[00:10.00]Good <00:10.60>morning, *little* bird', 'the tags move with the first stamp');
+  assert.deepEqual(L.shiftWords(L.parseRow('Good <00:09.10>morn<00:09.50>ing'), 3), [[5, 3], [9, 3.4]],
+    'an unstamped row counts from its first tag');
+  assert.equal(L.shiftWords(L.parseRow('no tags'), 3), null);
+  assert.equal(L.renderRow({ text: 'abc', pieces: [[0, 3]], words: [[3, 1.234]] }), 'abc<00:01.234>/', 'an end tag before the "/"');
+  assert.ok(L.FIELD_KEYS.includes('words'));
+});
+
+test('renderRow ∘ parseRow is the identity with word tags too', () => {
+  const chars = ['あ', 'い', 'A', 'b', ' ', '*', '/', '漢', '😀', 'é'];
+  const rng = stream('render-fuzz-words');
+  for (let n = 0; n < 1500; n++) {
+    const gs = [];
+    const len = rng.int(1, 9);
+    for (let i = 0; i < len; i++) gs.push(rng.pick(chars));
+    const src0 = gs.join('');
+    const probe = L.parseRow(src0);
+    if (probe.kind !== 'lyric' || !probe.text || !L.roundTrip(probe, {}).ok) continue;   // writable fields only
+    const text = probe.text;
+    const offs = Array.from(S.graphemeOffsets(text));
+    const words = [];
+    let t = rng.int(0, 500) / 100;
+    for (const o of offs) if (rng.chance(0.3) && !/\s/.test(text[o] || '')) { words.push([o, t]); t = Math.round((t + rng.int(1, 90) / 100) * 100) / 100; }
+    const want = Object.assign({}, probe, { words: words.length ? words : null, stamps: rng.chance(0.5) ? [rng.int(0, 5999) / 100] : [] });
+    const src = L.renderRow(want);
+    const again = L.parseRow(src);
+    assert.equal(again.text, want.text, src);
+    assert.deepEqual(again.pieces, want.pieces, src);
+    assert.deepEqual(again.emph, want.emph, src);
+    assert.deepEqual(again.words || null, want.words, src);
+    assert.equal(L.roundTrip(again, {}).ok, true, src);
+  }
+});

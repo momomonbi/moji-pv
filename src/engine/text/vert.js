@@ -147,8 +147,9 @@ MV.def('engine/text/vert', ['core/script'], (S) => {
     return TABLE[cls] ? TABLE[cls].rot : 0;
   }
 
+  // MAX_TCY_DIGITS (additive, DESIGN_2_2 §6): a digit run this short is one tate-chu-yoko cell (planner/sung units).
   return {
     VCLS, CODE, TABLE, FACE_ADJUST, CORNER, CENTRED, ROTATED, MIRRORED,
-    classOf, classify, segment, longestLatinRun, offsetFor, rotOf,
+    classOf, classify, segment, longestLatinRun, offsetFor, rotOf, MAX_TCY_DIGITS,
   };
 });

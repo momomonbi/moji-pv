@@ -591,6 +591,13 @@ MV.def('parts/kit', ['core/num', 'core/noise', 'core/ease', 'core/curve', 'core/
     return out;
   }
 
+  // sungAt(env, off) → cut-local seconds when the character at text offset `off` is sung, from the cut's sung units
+  // (歌ハメ, DESIGN_2_2 §6), or null when the cut has none (a part then keeps its own estimate).
+  function sungAt(env, off) {
+    const s = env && env.cut ? env.cut.sung : null;
+    return s && s.at && s.at.length ? STG.sungTimeAt(s, off) : null;
+  }
+
   return {
     arrange: KINDS.arrange, arrive: KINDS.arrive, dwell: KINDS.dwell, depart: KINDS.depart, ground: KINDS.ground,
     ornament: KINDS.ornament, lens: KINDS.lens, filter: KINDS.filter, seam: KINDS.seam, theme: KINDS.theme, mood: KINDS.mood,
@@ -598,6 +605,6 @@ MV.def('parts/kit', ['core/num', 'core/noise', 'core/ease', 'core/curve', 'core/
     PH: BH.PH, ORDERS: SCH.ORDERS, EASES: E.EASES, ease, staggerOf: STG.staggerOf, pivots: STG.pivots,
     shape, math, color, pickOf, rangeOf, KitError,
     curve, warp, CURVES: CV.PRESET_KEYS, warped: BH.warped, aimBox, frameBox,
-    media, mediaParams, MEDIA: MEDIA_KIT, runKenBurns, depthCam,
+    media, mediaParams, MEDIA: MEDIA_KIT, runKenBurns, depthCam, sungAt,
   };
 });

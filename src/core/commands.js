@@ -229,7 +229,12 @@ MV.def('core/commands', ['core/doc', 'core/paths', 'core/pins', 'core/lyrics', '
     }
 
     // Slots that make sense only at one scope (§3.4.1–3.4.3), so they are never promoted or copied.
-    const LINE_ONLY = new Set(['start', 'end', 'split', 'lang', 'avoid']);
+    // 'sung.times' (DESIGN_2_2 §6): a line's character times, relative to its start.
+    const LINE_ONLY = new Set(['start', 'end', 'split', 'lang', 'avoid', 'sung.times']);
+    // Switches of the whole video only (DESIGN_2_2 §6: 「字の時間を歌に合わせる」).
+    const WORK_ONLY = new Set(['sung.real']);
+    // Switches of an area (work or line), never of a cut (DESIGN_2_2 §6: 歌ハメ, 歌った字に色をのせる).
+    const AREA_ONLY = new Set(['sung.hame', 'sung.fill']);
     const CUT_ONLY = new Set(['t0']);
     const TEXT_SLOTS = new Set(['orient', 'text.face', 'text.scale', 'text.ink', 'text.style']);
     // v2.1 (DESIGN_2_1 §2.3, §3.7): line slots that are area-level, never pinned at a cut; `avoid` is line-only. The
@@ -241,10 +246,15 @@ MV.def('core/commands', ['core/doc', 'core/paths', 'core/pins', 'core/lyrics', '
 
     // Refuses `cut/…:season`, `cut/…:avoid`, `cut/…:cam.extreme`, `cut/…:repeat.same` and `work:avoid` (payload).
     // 「くり返しの行をそろえる」 (DESIGN_2_1 §4.10) is a setting of the whole video or of a line, like the line season.
+    // 歌ハメ (DESIGN_2_2 §6): `sung.times` only at a line, `sung.real` only at the work, `sung.hame` / `sung.fill` never
+    // at a cut.
     function checkSlotScope(parsed) {
       need(!(parsed.scope.kind === 'cut' && (NOT_CUT.has(parsed.slot) || parsed.slot === 'repeat.same')),
         parsed.slot + ' cannot be pinned at cut scope');
       need(!(parsed.scope.kind === 'work' && parsed.slot === 'avoid'), 'avoid cannot be pinned at work scope');
+      need(!(parsed.slot === 'sung.times' && parsed.scope.kind !== 'line'), 'sung.times can be pinned only at line scope');
+      need(!(WORK_ONLY.has(parsed.slot) && parsed.scope.kind !== 'work'), parsed.slot + ' can be pinned only at work scope');
+      need(!(parsed.scope.kind === 'cut' && AREA_ONLY.has(parsed.slot)), parsed.slot + ' cannot be pinned at cut scope');
     }
 
     function pinPromote(doc, cmd) {

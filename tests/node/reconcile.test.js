@@ -397,3 +397,29 @@ test('parse + reconcile + remap of 300 rows is fast: local edits and a full repl
   assert.ok(edits < 5 * 3, `local edits: median ${edits.toFixed(2)} ms (budget 5 ms, CI margin ×3)`);
   assert.ok(replace < 5 * 3, `full replacement: median ${replace.toFixed(2)} ms (budget 5 ms, CI margin ×3)`);
 });
+
+// ---- 歌ハメ: a line's character times (DESIGN_2_2 §6) -------------------------------------------------------------
+
+test('remapSungTimes: insert, delete (the pair is dropped), the end pair, replace-all (the pin is dropped)', () => {
+  const pin = (v) => ({ v, by: 'tap' });
+  const remap = (oldText, newText, v) => R.remapSungTimes(pin(v), R.offsetTable(oldText, newText), oldText, newText.length);
+  const times = [[0, 0], [2, 0.4], [3, 0.6], [5, 1.2]];
+  assert.deepEqual(remap('きみの声が', 'ねえきみの声が', times).v, [[0, 0], [4, 0.4], [5, 0.6], [7, 1.2]], 'insert before');
+  assert.deepEqual(remap('きみの声が', 'きみ声が', times).v, [[0, 0], [2, 0.6], [4, 1.2]], 'a deleted character loses its time');
+  assert.deepEqual(remap('きみの声が', 'きみのうたが', times).v, [[0, 0], [2, 0.4], [6, 1.2]], 'replaced: its time goes');
+  assert.equal(remap('きみの声が', 'ぜんぶちがう', [[1, 0.2], [2, 0.4]]), null, 'no pair left: no pin');
+  const same = pin(times);
+  assert.equal(R.remapSungTimes(same, R.offsetTable('きみの声が', 'きみの声が'), 'きみの声が', 5), same, 'unchanged: the same pin');
+  assert.deepEqual(remap('😀あい', 'x😀あい', [[0, 0], [2, 0.3]]).v, [[0, 0], [3, 0.3]], 'surrogate pairs move whole');
+  const odd = pin('not a list');
+  assert.equal(R.remapSungTimes(odd, R.offsetTable('ab', 'b'), 'ab', 1), odd, 'a value that is not a list is left to the planner');
+});
+
+test('remapKeyed: line/<id>:sung.times follows its row\'s edit; other lines keep theirs', () => {
+  const rows = sheetOf(['きみの声が', 'まだ遠い空']);
+  const keyed = { pins: { 'line/r1:sung.times': { v: [[0, 0], [3, 0.8]], by: 'tap' }, 'line/r2:sung.times': { v: [[0, 0], [1, 0.2]], by: 'user' } },
+    salts: {}, locks: {} };
+  const { out } = remapAfter(rows, 'ねえきみの声が\nまだ遠い空', keyed);
+  assert.deepEqual(out.pins['line/r1:sung.times'].v, [[0, 0], [5, 0.8]]);
+  assert.equal(out.pins['line/r2:sung.times'], keyed.pins['line/r2:sung.times']);
+});

@@ -1,6 +1,6 @@
 /* 文字PVメーカー v2 — original work. Casting: every cut slot in the FROZEN order, from pins, rules or the chooser (DESIGN §4.16.2, §3.4.3; DESIGN_2_1 §3.9, §4.9). */
 MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 'core/pins', 'core/paths', 'planner/choose',
-  'planner/params', 'planner/look', 'planner/camera'], (S, REG, R, N, PINS, P, CH, PA, LK, CAM) => {
+  'planner/params', 'planner/look', 'planner/camera', 'planner/sung'], (S, REG, R, N, PINS, P, CH, PA, LK, CAM, SU) => {
     'use strict';
 
     const LIST_KINDS = Object.freeze(['ornament', 'filter']);
@@ -190,11 +190,12 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       };
       const sub = req.poolId !== undefined ? req.poolId
         : (req.role || '') + '|' + (req.orient || '') + '|' + (req.script || '') + '|' + (ctx.aspect || '');
-      const full = poolEntry(ctx, req.kind, sub, req.role, req.orient, req.script, ctx.aspect, req.scope, cond);
+      const full = restricted(poolEntry(ctx, req.kind, sub, req.role, req.orient, req.script, ctx.aspect, req.scope, cond),
+        req.restrict);
       if (trace) trace.cond = cond;
       for (let stage = 0; stage < 3; stage++) {
-        const entry = stage < 2 ? full
-          : poolEntry(ctx, req.kind, (req.role || '') + '|||', req.role, undefined, undefined, undefined, req.scope, cond);
+        const entry = stage < 2 ? full : restricted(poolEntry(ctx, req.kind, (req.role || '') + '|||', req.role, undefined,
+          undefined, undefined, req.scope, cond), req.restrict);
         const keys = entry.keys;
         if (!keys.length) continue;
         ask.keys = keys;
@@ -226,6 +227,95 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       }
       if (trace) trace.stage = 'fallback';
       return { v: fb, from: 'fallback', stage: 'fallback' };
+    }
+
+    // A pool entry with a rule's restriction (req.restrict = { only: Set | null, except: Set | null }, DESIGN_2_2 §6:
+    // 歌ハメ keeps the entrances that show one character at a time and leaves out layouts that move the text), made once
+    // per entry and restriction. The chooser's seeds and history are unchanged.
+    const restrictedOf = new WeakMap();
+    function restricted(entry, r) {
+      if (!r) return entry;
+      let m = restrictedOf.get(entry);
+      if (!m) { m = new Map(); restrictedOf.set(entry, m); }
+      let out = m.get(r);
+      if (!out) {
+        out = { keys: entry.keys.filter((k) => (!r.only || r.only.has(k)) && (!r.except || !r.except.has(k))),
+          relaxed: entry.relaxed };
+        m.set(r, out);
+      }
+      return out;
+    }
+
+    // --- 歌ハメ (DESIGN_2_2 §6) ---------------------------------------------------------------------------------
+
+    const HAME_ONLY = Object.freeze({ only: new Set(SU.HAME_ARRIVE), except: null });
+    const HAME_ONLY_LATIN = Object.freeze({ only: new Set(SU.HAME_ARRIVE_LATIN), except: null });
+    // The layouts that move the text themselves (def.motion === 'own'), per registry.
+    const ownMotion = new WeakMap();
+    function ownMotionOf(registry) {
+      let r = ownMotion.get(registry);
+      if (!r) {
+        const keys = registry.keys('arrange').filter((k) => { const d = registry.get('arrange', k); return d && d.motion === 'own'; });
+        r = Object.freeze({ only: null, except: new Set(keys) });
+        ownMotion.set(registry, r);
+      }
+      return r;
+    }
+
+    // The part a 歌ハメ entrance takes when no entrance of the list can be used here (filters, avoid lists, season, role
+    // or traits removed them all): 打鍵 when it serves the cut and the filters allow it, else the kind's fallback.
+    // null when the list's pool is not empty.
+    function hameForce(st, kind, restrict) {
+      const { ctx, cut } = st;
+      const sub = poolIdOf(st);
+      const scope = kind === 'ornament' ? 'cut' : null;
+      if (restricted(poolEntry(ctx, kind, sub, cut.role, st.chosen.orient, cut.feat.script, ctx.aspect, scope, st.cond), restrict)
+        .keys.length) return null;
+      if (restricted(poolEntry(ctx, kind, (cut.role || '') + '|||', cut.role, undefined, undefined, undefined, scope, st.cond),
+        restrict).keys.length) return null;
+      const want = 'typeOn';
+      const ok = ctx.registry.has(kind, want) && 'v' in acceptPart(ctx, kind, cut.role)(want) &&
+        filterAllows(ctx.doc.filters, kind, want);
+      if (!st.natural) ctx.warn({ code: 'hame-empty', cut: cut.key, line: cut.line || undefined });
+      return ok ? want : ctx.registry.fallback(kind);
+    }
+
+    // The 歌ハメ rule on an entrance's parameters, the last step of decidePart (after the aligned copy, P2's flips and
+    // P3's キメ rules): each character comes in with its sung time (order 'sung') and lands on it (dur = 入りの早さ,
+    // clamped); a pinned order or dur stays. d.p and d.pfrom are copied (decisions may be shared or frozen).
+    function hameParams(st, kind, d) {
+      const { ctx } = st;
+      if (kind !== 'arrive' || !st.hame || !d.p || d.v === 'none' || d.v === ctx.registry.fallback(kind)) return d;
+      const pfrom = d.pfrom || null;
+      const pinnedAt = (name) => !!pfrom && typeof pfrom[name] === 'string' && pfrom[name].startsWith('pin');
+      const setOrder = 'order' in d.p && !pinnedAt('order') && !(d.p.order === 'sung' && pfrom && pfrom.order === RULE_SUNG);
+      const lead = N.clamp(ctx.timing ? ctx.timing.lead : 0.12, SU.C.HAME_DUR_MIN, SU.C.HAME_DUR_MAX);
+      const durSpec = 'dur' in d.p && !pinnedAt('dur') ? paramSpec(ctx.registry, kind, d.v, 'dur') : null;
+      const dur = durSpec ? S.coerce(durSpec, lead) : undefined;
+      const setDur = dur !== undefined && !(d.p.dur === dur && pfrom && pfrom.dur === RULE_SUNG);
+      if (!setOrder && !setDur) return d;
+      const p = Object.assign({}, d.p);
+      const pf = Object.assign({}, pfrom || {});
+      if (setOrder) { p.order = 'sung'; pf.order = RULE_SUNG; }
+      if (setDur) { p.dur = dur; pf.dur = RULE_SUNG; }
+      const out = { v: d.v, from: d.from };
+      if (d.by !== undefined) out.by = d.by;
+      out.p = p;
+      out.pfrom = sortedCopy(pf);
+      return out;
+    }
+    const RULE_SUNG = 'rule:sung';
+
+    function paramSpec(registry, kind, key, name) {
+      const list = registry.params(kind, key) || [];
+      for (const x of list) if (x.name === name) return x.spec;
+      return null;
+    }
+
+    function sortedCopy(o) {
+      const out = {};
+      for (const k of Object.keys(o).sort()) out[k] = o[k];
+      return out;
     }
 
     // --- history (recency and echo) -----------------------------------------------------------------------------
@@ -587,11 +677,13 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     // orientation, script, aspect and line conditions) whose fits does not give 0; a pinned or locked part where it
     // serves the cut's role and orientation (a pin wins over the pools there too); 'none' of a list slot. A rule's or a
     // fallback's value is left to the cut's own rules.
-    function alignedPart(st, kind, slot, list) {
+    // only (a Set, 歌ハメ's entrances): a source value outside it is not taken.
+    function alignedPart(st, kind, slot, list, only) {
       const ad = alignedDecision(st, slot);
       if (!ad || typeof ad.v !== 'string') return null;
       const { ctx, cut } = st;
       if (ad.v === 'none') return list && (ad.from === 'auto' || pinnedFrom(ad)) ? ad : null;
+      if (only && !only.has(ad.v)) return null;
       if (!ctx.registry.has(kind, ad.v)) return null;
       const scope = kind === 'ornament' ? 'cut' : null;
       const traits = ctx.registry.traits(kind, ad.v);
@@ -620,6 +712,9 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       for (const { name, shared } of ctx.registry.params(kind, d.v) || []) {
         if (!(name in d.p) || !(name in ad.p)) continue;
         const from = pfrom ? pfrom[name] : undefined;
+        // a value a named rule set (the cut's own or the source's, 'rule:sung') is neither copied nor dropped: the rule
+        // decides it for each cut (歌ハメ, DESIGN_2_2 §6)
+        if (SU.isRuleTag(from) || (ad.pfrom && SU.isRuleTag(ad.pfrom[name]))) continue;
         if (from !== undefined && from !== 'rule') continue;
         if (ctx.salts && fieldSalted(ctx, cut, P.slotParamPath(kind, idx, d.v, name, shared))) continue;
         (p || (p = Object.assign({}, d.p)))[name] = ad.p[name];
@@ -671,6 +766,8 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     function pinDecision(pin) { return { v: pin.v, from: pin.from, by: pin.by }; }
 
     // A part slot: pin (cut > line > work) → rule (forced value) → chooser; then its parameters.
+    // opts: { force, rule } (a forced value) or { restrict, rule } (the chooser's pool restricted by a rule: 歌ハメ,
+    // DESIGN_2_2 §6; an aligned source value outside `restrict.only` is not taken, and an empty list forces hameForce).
     function decidePart(st, kind, idx, opts) {
       const o = opts || {};
       const { ctx, cut, at } = st;
@@ -680,7 +777,8 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       const trace = tracing(st, slot);
       const pin = !PA.pinned(ctx.ix, slot) ? null : PA.resolvePin(ctx.ix, at, slot, o.force ? () => ({ na: true })
         : acceptPart(ctx, kind, cut.role, { none: list, scope: kind === 'ornament' ? 'cut' : null }), ctx.warn);
-      let d, ad = null;
+      const restrict = o.restrict || null;
+      let d, ad = null, forced = null;
       if (pin) {
         pinWarnings(ctx, kind, pin.v, pin, st.cond);
         d = pinDecision(pin);
@@ -688,7 +786,10 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       } else if (o.force) {
         d = { v: o.force, from: 'rule' };
         if (trace) Object.assign(shadow(st, kind, slot, seed, list, trace), { kind, stage: 'rule', rule: o.rule });
-      } else if (st.align && (ad = alignedPart(st, kind, slot, list)) !== null) {
+      } else if (restrict && restrict.only && (forced = hameForce(st, kind, restrict)) !== null) {
+        d = { v: forced, from: 'rule' };
+        if (trace) Object.assign(shadow(st, kind, slot, seed, list, trace), { kind, stage: 'rule', rule: 'hame-empty' });
+      } else if (st.align && (ad = alignedPart(st, kind, slot, list, restrict ? restrict.only : null)) !== null) {
         d = { v: ad.v, from: 'auto' };
         if (trace) Object.assign(shadow(st, kind, slot, seed, list, trace), { kind, stage: 'auto', why: [alignWhy(st)] });
       } else {
@@ -701,12 +802,13 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
           kind, slot, path: 'cut/' + cut.key + ':' + slot, feat: cut.feat, role: cut.role, orient: st.chosen.orient,
           script: cut.feat.script, scope: kind === 'ornament' ? 'cut' : null, chosen: st.chosen, seed, recent, echo,
           list, cutKey: cut.key, trace, silent: st.natural, ref, poolId: poolIdOf(st), cond: st.cond,
-          avoid: AVOID_REPEAT.has(kind) && !st.natural ? avoidOf(st, slot) : null,
+          avoid: AVOID_REPEAT.has(kind) && !st.natural ? avoidOf(st, slot) : null, restrict,
         });
         d = { v: got.v, from: got.from };
         if (got.base && got.base !== got.v) st.base[slot] = got.base;
         if (got.ref && got.ref !== got.v) st.ref[slot] = got.ref;
         if (trace && got.rule) trace.rule = got.rule;
+        else if (trace && restrict && o.rule) trace.rule = o.rule;
       }
       if (d.v !== 'none' && !st.natural) {
         const def = ctx.registry.get(kind, d.v);
@@ -720,6 +822,8 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
         // layout that moves the text itself forces the same motions).
         const same = ad || (st.align && !pin ? alignedDecision(st, slot) : null);
         if (same && same.v === d.v) d = copyParams(st, kind, idx, d, same);
+        // 歌ハメ's order and dur, last (DESIGN_2_2 §6)
+        if (st.hame) d = hameParams(st, kind, d);
       }
       if (trace) trace.decision = d;
       setDecision(st, slot, d);
@@ -909,12 +1013,14 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       const st = stateOf(ctx, cut, hist, natural);
       decideRepeat(st);
       decideOrient(st);
-      const arrange = decidePart(st, 'arrange', null);
+      // 歌ハメ (DESIGN_2_2 §6): no layout that moves the text itself, and an entrance that shows one character at a time
+      const arrange = decidePart(st, 'arrange', null, st.hame ? { restrict: ownMotionOf(ctx.registry), rule: 'sung.arrange' } : null);
       decideText(st);
       CAM.decideSpeed(st);
       const own = ctx.registry.get('arrange', arrange.v).motion === 'own';
       for (const kind of MOTION_KINDS) {
-        decidePart(st, kind, null, own ? { force: ctx.registry.fallback(kind), rule: 'motion-own' } : null);
+        decidePart(st, kind, null, own ? { force: ctx.registry.fallback(kind), rule: 'motion-own' }
+          : kind === 'arrive' && st.hame ? { restrict: st.hame.latin ? HAME_ONLY_LATIN : HAME_ONLY, rule: 'sung.hame' } : null);
       }
       decideList(st, 'ornament');
       decidePart(st, 'lens', null);
@@ -931,6 +1037,7 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
         cond: lineCond(ctx, cut.line), decide: decideValue, shotSalted: false, curveSalted: false, heirCurve: null,
         align: ctx.align ? ctx.align.get(cut.key) || null : null, rerolled: false, aligned: alignedDecision, shotAligned: false,
         ahead: ctx.alignNear ? ctx.alignNear.ahead.get(cut.key) || null : null,
+        hame: ctx.sung ? ctx.sung.hameAt(cut) : null,
       };
       if (st.align && ctx.salts) st.rerolled = !!(ctx.salts['cut/' + cut.key] || (cut.line && ctx.salts['line/' + cut.line]));
       if (!natural && isSalted(ctx, cut)) {
@@ -1200,7 +1307,7 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
         cut: k.pins(k.cut, 'cut', cut.pinKey || cut.key), salts: k.salts(cut), lineId: cut.line, pinKey: cut.pinKey,
         role: cut.role, impact: !!cut.impact, featId: cut.featId, rows: hist.rowsRead(cut.feat.repeatOf),
         follows: hist.follows(cut.feat.repeatOf), echoed: echoed(ctx, cut), aligned: alignedId(ctx.align, cut),
-        ahead: alignedId(ctx.alignNear && ctx.alignNear.ahead, cut),
+        ahead: alignedId(ctx.alignNear && ctx.alignNear.ahead, cut), hame: ctx.sung ? ctx.sung.idOf(cut) : '',
       };
     }
 
@@ -1219,8 +1326,9 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     // follows: whether the previous cut sings the same line cut (a line sung twice in a row; planner/camera recencyOf);
     // echoed: whether a later cut sings this one again (its row keeps an heir).
     // aligned: the source's cast entry under 「くり返しの行をそろえる」, ahead: that of the next cut's source (alignedId).
+    // hame: what 歌ハメ adds (planner/sung idOf; '' without it).
     const INPUT_FIELDS = Object.freeze(['look', 'work', 'line', 'cut', 'salts', 'lineId', 'pinKey', 'role', 'impact', 'featId',
-      'follows', 'echoed', 'aligned', 'ahead']);
+      'follows', 'echoed', 'aligned', 'ahead', 'hame']);
     function sameInputs(a, b) {
       for (const f of INPUT_FIELDS) if (a[f] !== b[f]) return false;
       return sameRows(a.rows, b.rows);
