@@ -1,7 +1,7 @@
 /* 文字PVメーカー v2 — original work. Scene build: one Plan cut (or ground segment) → node table + behaviours (DESIGN §4.17.5; DESIGN_2_1 §3.10, §5.9.4, §11.3.7). */
-MV.def('engine/scene/build', ['core/hash', 'core/rng', 'core/schema', 'engine/scene/table', 'engine/scene/builder',
-  'engine/scene/behave', 'engine/scene/frame', 'engine/scene/shot', 'engine/scene/budget', 'engine/scene/xshot'],
-(H, RNG, SCH, T, B, BH, F, SHOT, BG, XS) => {
+MV.def('engine/scene/build', ['core/hash', 'core/rng', 'core/schema', 'core/motion', 'engine/scene/table', 'engine/scene/builder',
+  'engine/scene/behave', 'engine/scene/frame', 'engine/scene/shot', 'engine/scene/budget', 'engine/scene/xshot', 'engine/scene/stagger'],
+(H, RNG, SCH, MO, T, B, BH, F, SHOT, BG, XS, STG) => {
   'use strict';
 
   const SAFE = 0.05;              // safe margin: 5% of the short side on every edge
@@ -227,10 +227,27 @@ MV.def('engine/scene/build', ['core/hash', 'core/rng', 'core/schema', 'engine/sc
     return { a: cut.a - cut.t0, rest: cut.a - cut.t0, out: cut.b - cut.t0, b: cut.b - cut.t0 };
   }
 
+  // 歌ハメ (DESIGN_2_2 §6): when the entrance follows the cut's sung units and the exit would start before the last
+  // character lands, the exit is shortened (dur and each scaled, depart.p replaced) to STG.SUNG_EXIT of the time left
+  // after that landing, at least MIN_DUR; every other cut is fitted as before.
+  const WIDE_TIMES = Object.freeze({ a: 0, rest: 0, out: 1e4, b: 1e4 });
   function fitTimes(times, target, arrive, arriveEnv, depart, departEnv) {
     const A = BH.motionTotal(arriveEnv, target, arrive.p, 'arrive', arrive.def.unit);
-    const L = BH.motionTotal(departEnv, target, depart.p, 'depart', depart.def.unit);
+    let L = BH.motionTotal(departEnv, target, depart.p, 'depart', depart.def.unit);
     times.rest = times.a + A;
+    const cut = arriveEnv.cut;
+    if (cut && cut.sung && arrive.p && arrive.p.order === 'sung' && L > 0 && times.b - L < times.rest) {
+      const want = Math.max(MO.MIN_DUR, STG.SUNG_EXIT * (times.b - times.rest));
+      // the exit's own length (dur + each·gaps, before it is fitted into the window) scaled down to `want`
+      const wide = Object.assign({}, departEnv, { times: WIDE_TIMES });
+      const raw = L > want ? BH.motionTotal(wide, target, depart.p, 'depart', depart.def.unit) : 0;
+      if (raw > 0) {
+        const f = want / raw, p = depart.p;
+        const q = Object.assign({}, p, { dur: (Number.isFinite(p.dur) ? p.dur : 0) * f, each: (Number.isFinite(p.each) ? p.each : 0) * f });
+        const next = BH.motionTotal(departEnv, target, q, 'depart', depart.def.unit);
+        if (next < L - 1e-9) { depart.p = q; L = next; }   // an exit whose length does not follow dur and each stays as it is
+      }
+    }
     times.out = times.b - L;
     if (times.out < times.rest) times.rest = times.out;    // the exit still ends at b; there is no calm stretch
   }

@@ -12,6 +12,7 @@ MV.def('planner/sung', ['core/script', 'core/num', 'core/motion', 'engine/text/v
     MIN_PIECE: 0.35, PIECE_EPS: 1e-6,   // = planner/segment MIN_PIECE: sung-derived piece boundaries keep every piece ≥ it
     HOOK_EVERY: 3,         // a chorus run's lines at positions 0, 3, 6, … are hook lines
     HAME_DUR_MIN: 0.06, HAME_DUR_MAX: 0.25,
+    EXIT_SHARE: 0.8,       // = engine/scene/stagger SUNG_EXIT: an exit squeezed after the last sung character takes this share
     LETTER_STEP: 0.06, LETTER_SHARE: 0.8,
     PIN_MAX: 400, DT_MAX: 600, DT_GAP: 0.01,
     // Phase C (off until the lab gate passes):
@@ -316,7 +317,7 @@ MV.def('planner/sung', ['core/script', 'core/num', 'core/motion', 'engine/text/v
       own[i] = {
         line, need, units, span, sourcesOK, pin, anchors, kime, hamePinOn,
         hameFrom: linePin ? 'pin:line' : kime ? 'kime' : workPin ? 'pin:work' : 'auto',
-        best: anchors && anchors.list.length ? Math.max(...anchors.list.map((a) => a.src)) : 0,
+        best: bestSource(anchors),
       };
     }
     // group sources: per lyric text, the occurrence with the best own explicit anchors (pin > word tags; ties: earliest)
@@ -328,10 +329,14 @@ MV.def('planner/sung', ['core/script', 'core/num', 'core/motion', 'engine/text/v
       if (!cur || o.best > cur.best) source.set(o.line.text, o);
     }
     const lines = new Map(), meta = new Map();
-    const timingOf = (o, anchors, endRel, copyKey) => filled(JSON.stringify([o.line.text, o.line.lang, N.q6(o.span),
-      anchors.map((a) => [a.u, a.dt, a.src]), endRel === undefined ? null : endRel, o.sourcesOK, rate,
-      o.line.by && o.line.by.start !== 'auto', copyKey]), () => fillLine({ units: o.units, anchors, endRel, span: o.span,
-      rate, sourcesOK: o.sourcesOK, anchoredStart: !!(o.line.by && o.line.by.start !== 'auto') }));
+    const timingOf = (o, anchors, endRel, copyKey) => {
+      const anchoredStart = !!(o.line.by && o.line.by.start !== 'auto');
+      let key = o.line.lang + '|' + N.q6(o.span) + '|' + (o.sourcesOK ? 1 : 0) + '|' + rate + '|' + (anchoredStart ? 1 : 0) + '|' +
+        (endRel === undefined ? '' : endRel) + '|' + (copyKey || '') + '|';
+      for (const a of anchors) key += a.u + ',' + a.dt + ',' + a.src + ';';
+      return filled(key + '|' + o.line.text, () => fillLine({ units: o.units, anchors, endRel, span: o.span, rate,
+        sourcesOK: o.sourcesOK, anchoredStart }));
+    };
     // sources first (their sung end scales the copies)
     const done = new Map();
     for (const src of source.values()) done.set(src, timingOf(src, src.anchors.list, src.anchors.endRel, null));
@@ -372,6 +377,12 @@ MV.def('planner/sung', ['core/script', 'core/num', 'core/motion', 'engine/text/v
     };
   }
   const HAME_PLAIN = Object.freeze({ latin: false }), HAME_LATIN = Object.freeze({ latin: true });
+
+  function bestSource(anchors) {
+    let best = 0;
+    if (anchors) for (const a of anchors.list) if (a.src > best) best = a.src;
+    return best;
+  }
 
   // --- (d2) decideHame: plan stage 4b, after the features (and P2's ctx.pv), before casting ----------------------
 
@@ -431,19 +442,33 @@ MV.def('planner/sung', ['core/script', 'core/num', 'core/motion', 'engine/text/v
 
   // sliceCut(ls, a, b, cutT0, cutT1, lineT0) → cut.sung { at, end, t } | null: the units starting inside the piece
   // [a, b) of the line text, at = offsets in the cut's text, t = seconds after the cut's t0 (≥ 0), end = where the cut's
-  // singing ends (≤ its t1, after its last unit).
+  // singing ends (≤ its t1, after its last unit). Computed from the cut's times relative to the line's start (to 1 µs),
+  // so a cut that only moved in time gets the same frozen object again (its encoding is reused, planner/plan).
+  const slices = new WeakMap();
   function sliceCut(ls, a, b, cutT0, cutT1, lineT0) {
     if (!ls) return null;
+    const d0 = N.q6(cutT0 - lineT0), d1 = N.q6(cutT1 - lineT0);
+    let m = slices.get(ls);
+    if (!m) { m = new Map(); slices.set(ls, m); }
+    // the last slice made for each piece start of this timing, reused while the piece and its times are the same
+    const e = m.get(a);
+    if (e !== undefined && e.b === b && e.d0 === d0 && e.d1 === d1) return e.out;
+    const out = makeSlice(ls, a, b, d0, d1);
+    m.set(a, { b, d0, d1, out });
+    return out;
+  }
+
+  function makeSlice(ls, a, b, d0, d1) {
     const at = [], t = [];
     for (let k = 0; k < ls.n; k++) {
       const off = ls.at[k];
       if (off < a || off >= b) continue;
       at.push(off - a);
-      t.push(Math.max(0, q3(lineT0 + ls.t[k] - cutT0)));
+      t.push(Math.max(0, q3(ls.t[k] - d0)));
     }
     if (!at.length) return null;
     const last = t[t.length - 1];
-    const end = Math.max(q3(Math.min(lineT0 + ls.end, cutT1) - cutT0), q3(last + 0.02));
+    const end = Math.max(q3(Math.min(ls.end, d1) - d0), q3(last + 0.02));
     return Object.freeze({ at: Object.freeze(at), end, t: Object.freeze(t) });
   }
 
@@ -457,20 +482,32 @@ MV.def('planner/sung', ['core/script', 'core/num', 'core/motion', 'engine/text/v
 
   // repT of a cut whose entrance follows sung times (DESIGN_2_2 §6.4 g): the last character lands on its sung time
   // (or after its dur), then 10 % of the calm stretch before the exit, clamped to [a, b) like core/motion heroTime.
+  // An exit that would start before that landing is shortened by the scene to EXIT_SHARE of the time left after it
+  // (engine/scene/build fitTimes), so the calm stretch is never negative there either.
   // arrive / depart = { dur, each } (null = instant); count = number of stagger units.
   function heroSung(c, arrive, depart, count) {
     const a = c.a, b = c.b, window = b - a;
-    const t = c.sung.t;
     const dur = arrive ? Math.max(0, arrive.dur) : 0;
-    const A = Math.min(window, Math.max(dur, c.t0 + t[t.length - 1] - a));
-    const L = MO.fitMotion({ dur: depart ? depart.dur : 0, each: depart ? depart.each : 0, count, window,
+    const A = Math.min(window, Math.max(dur, c.t0 + lastLanding(c) - a));
+    let L = MO.fitMotion({ dur: depart ? depart.dur : 0, each: depart ? depart.each : 0, count, window,
       share: MO.SHARE.depart }).total;
+    if (L > 0 && b - L < a + A) L = Math.min(L, Math.max(MO.MIN_DUR, C.EXIT_SHARE * (b - (a + A))));
     const x = a + A + 0.1 * Math.max(0, (b - L) - (a + A));
     if (!(b > a)) return a;
     if (x < a) return a;
     if (x < b) return x;
     const below = b - Math.max(Math.abs(b), 1) * Number.EPSILON;
     return below >= a ? below : a;
+  }
+
+  // When the cut's last character is sung (seconds after t0): its last unit's time, plus the spread of the letters of a
+  // Latin word there (engine/scene/stagger sungTimes: letter i of k at t_u + (i / k) · min(0.8 · (end − t_u), 0.06 · k)).
+  function lastLanding(c) {
+    const s = c.sung, t = s.t, last = t[t.length - 1];
+    let k = 0;
+    for (const g of S.graphemes(String(c.text || '').slice(s.at[s.at.length - 1]))) if (isLetter(S.charClass(g))) k++;
+    if (k < 2) return last;
+    return last + ((k - 1) / k) * Math.min(C.LETTER_SHARE * Math.max(0, s.end - last), C.LETTER_STEP * k);
   }
 
   // plan.sung (non-enumerable): Map<lineId, LineSung> for the inspector and the timeline, times absolute.

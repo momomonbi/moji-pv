@@ -147,6 +147,9 @@ MV.def('core/types', [], () => {
    * @property {string|null} note          text after '|'
    * @property {string|null} heading       for comments: the text after '#'
    * @property {Lang} script               dominant script of text
+   * @property {Array<[number, number]>} [words]   enhanced-LRC word tags <mm:ss.xx> (DESIGN_2_2 §6): [offset in text
+   *                                       (a grapheme start; text.length = where the singing ends), seconds]; only
+   *                                       on a lyric row with tags
    */
   /**
    * @typedef {Object} Line                one per sung occurrence, in time order (§4.9.3)
@@ -163,6 +166,8 @@ MV.def('core/types', [], () => {
    * @property {number|null} stamp         the stamp of this occurrence
    * @property {number} pauseBefore        blank rows directly above the row (first occurrence only)
    * @property {string|null} heading       nearest '#' comment above, within 3 rows
+   * @property {Array<[number, number]>} [words]   the row's word tags (DESIGN_2_2 §6), the same array on every occurrence
+   * @property {number} [wordsRef]         the time the tags count from: the row's first stamp, else its first tag
    */
 
   // ===== §3.12 The Plan (not saved) ===========================================================================
@@ -228,6 +233,9 @@ MV.def('core/types', [], () => {
    * @property {Object<string, Object>} els                element pins: owner → { nudge?, fill?, hide? }
    * @property {number} ground             index into plan.grounds
    * @property {number} seamIn             index into plan.seams, or −1
+   * @property {{ at: number[], end: number, t: number[] }} [sung]   歌ハメ (DESIGN_2_2 §6): the sung units starting in
+   *                                       the cut (offsets in text) and their times after t0, and where its singing
+   *                                       ends; only on a cut of a line with sung timing
    */
   /**
    * @typedef {Object} GroundSegment
@@ -278,7 +286,7 @@ MV.def('core/types', [], () => {
    * @typedef {Object} Warning
    * @property {'pin-bad-value'|'pin-not-applicable'|'pin-filtered'|'pin-off-season'|'orphan-pin'|'shadowed-pin'|
    *   'lock-partial'|'pool-empty'|'time-order'|'time-compressed'|'title-skipped'|'overfull'|'font-fallback'|
-   *   'piece-merged'} code
+   *   'piece-merged'|'sung-words'|'hame-empty'} code
    * @property {string} [path]
    * @property {string} [line]
    * @property {string} [cut]

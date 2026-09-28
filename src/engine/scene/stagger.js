@@ -174,6 +174,10 @@ MV.def('engine/scene/stagger', ['core/rng', 'core/script', 'core/schema'], (RNG,
 
   // A 歌ハメ glyph lands on its sung time (0 s ahead): P5's 出そろい leaves sung-order cuts alone.
   const SUNG_AHEAD = 0;
+  // An exit that would start before the last sung character lands is shortened to this share of the time left after
+  // that landing (at least core/motion MIN_DUR), so the words are all there before they leave (engine/scene/build
+  // fitTimes; planner/sung heroSung uses the same share, C.EXIT_SHARE).
+  const SUNG_EXIT = 0.8;
   const LETTER_STEP = 0.06, LETTER_SHARE = 0.8;
 
   // sungTimeAt(sung, off) → cut-local seconds of the sung unit that starts at or before text offset `off` (the first
@@ -259,5 +263,7 @@ MV.def('engine/scene/stagger', ['core/rng', 'core/script', 'core/schema'], (RNG,
     return { px, py };
   }
 
-  return { ORDERS, UNITS, StaggerError, unitIndex, ranksOf, sungFractions, staggerOf, pivots, SUNG_AHEAD, sungTimeAt, sungTimes };
+  return {
+    ORDERS, UNITS, StaggerError, unitIndex, ranksOf, sungFractions, staggerOf, pivots, SUNG_AHEAD, SUNG_EXIT, sungTimeAt, sungTimes,
+  };
 });

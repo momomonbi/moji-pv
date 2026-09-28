@@ -1,6 +1,6 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-YJwuew/Dd4gjWUfJGkrsY6hXjfcfs65FGuOjIo80ZNk='; style-src 'sha256-CBzRvq4sWr3CF69hafDp1l8UkHnSy18JQMXGJJhPDYI=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-M1PaaCqTDntp4O65BG6F0R8XpD3b24XqAvFxZHsv4zU='; style-src 'sha256-CBzRvq4sWr3CF69hafDp1l8UkHnSy18JQMXGJJhPDYI=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
 <title>Moji PV Maker</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -8960,6 +8960,9 @@ MV.def('core/types', [], () => {
    * @property {string|null} note          text after '|'
    * @property {string|null} heading       for comments: the text after '#'
    * @property {Lang} script               dominant script of text
+   * @property {Array<[number, number]>} [words]   enhanced-LRC word tags <mm:ss.xx> (DESIGN_2_2 §6): [offset in text
+   *                                       (a grapheme start; text.length = where the singing ends), seconds]; only
+   *                                       on a lyric row with tags
    */
   /**
    * @typedef {Object} Line                one per sung occurrence, in time order (§4.9.3)
@@ -8976,6 +8979,8 @@ MV.def('core/types', [], () => {
    * @property {number|null} stamp         the stamp of this occurrence
    * @property {number} pauseBefore        blank rows directly above the row (first occurrence only)
    * @property {string|null} heading       nearest '#' comment above, within 3 rows
+   * @property {Array<[number, number]>} [words]   the row's word tags (DESIGN_2_2 §6), the same array on every occurrence
+   * @property {number} [wordsRef]         the time the tags count from: the row's first stamp, else its first tag
    */
 
   // ===== §3.12 The Plan (not saved) ===========================================================================
@@ -9041,6 +9046,9 @@ MV.def('core/types', [], () => {
    * @property {Object<string, Object>} els                element pins: owner → { nudge?, fill?, hide? }
    * @property {number} ground             index into plan.grounds
    * @property {number} seamIn             index into plan.seams, or −1
+   * @property {{ at: number[], end: number, t: number[] }} [sung]   歌ハメ (DESIGN_2_2 §6): the sung units starting in
+   *                                       the cut (offsets in text) and their times after t0, and where its singing
+   *                                       ends; only on a cut of a line with sung timing
    */
   /**
    * @typedef {Object} GroundSegment
@@ -9091,7 +9099,7 @@ MV.def('core/types', [], () => {
    * @typedef {Object} Warning
    * @property {'pin-bad-value'|'pin-not-applicable'|'pin-filtered'|'pin-off-season'|'orphan-pin'|'shadowed-pin'|
    *   'lock-partial'|'pool-empty'|'time-order'|'time-compressed'|'title-skipped'|'overfull'|'font-fallback'|
-   *   'piece-merged'} code
+   *   'piece-merged'|'sung-words'|'hame-empty'} code
    * @property {string} [path]
    * @property {string} [line]
    * @property {string} [cut]
@@ -16553,8 +16561,9 @@ MV.def('planner/encode', ['core/hash'], (H) => {
       if (tail !== '') parts.push(tail);
       parts.push(sep ? V[i][0] : V[i][1]);
     }
-    // `sung` (DESIGN_2_2 §6) sits between slots and t0 in key order; JSON drops it where it is absent
-    parts.push('},' + JSON.stringify({ sung: cut.sung, t0: cut.t0, t1: cut.t1, text: cut.text }).slice(1));
+    // `sung` (DESIGN_2_2 §6) sits between slots and t0 in key order, only where present (its text is kept per object)
+    const tail = JSON.stringify({ t0: cut.t0, t1: cut.t1, text: cut.text }).slice(1);
+    parts.push(cut.sung !== undefined ? '},"sung":' + objectCanon(cut.sung) + ',' + tail : '},' + tail);
     return parts;
   }
 
@@ -19224,6 +19233,7 @@ MV.def('planner/sung', ['core/script', 'core/num', 'core/motion', 'engine/text/v
     MIN_PIECE: 0.35, PIECE_EPS: 1e-6,   // = planner/segment MIN_PIECE: sung-derived piece boundaries keep every piece ≥ it
     HOOK_EVERY: 3,         // a chorus run's lines at positions 0, 3, 6, … are hook lines
     HAME_DUR_MIN: 0.06, HAME_DUR_MAX: 0.25,
+    EXIT_SHARE: 0.8,       // = engine/scene/stagger SUNG_EXIT: an exit squeezed after the last sung character takes this share
     LETTER_STEP: 0.06, LETTER_SHARE: 0.8,
     PIN_MAX: 400, DT_MAX: 600, DT_GAP: 0.01,
     // Phase C (off until the lab gate passes):
@@ -19528,7 +19538,7 @@ MV.def('planner/sung', ['core/script', 'core/num', 'core/motion', 'engine/text/v
       own[i] = {
         line, need, units, span, sourcesOK, pin, anchors, kime, hamePinOn,
         hameFrom: linePin ? 'pin:line' : kime ? 'kime' : workPin ? 'pin:work' : 'auto',
-        best: anchors && anchors.list.length ? Math.max(...anchors.list.map((a) => a.src)) : 0,
+        best: bestSource(anchors),
       };
     }
     // group sources: per lyric text, the occurrence with the best own explicit anchors (pin > word tags; ties: earliest)
@@ -19540,10 +19550,14 @@ MV.def('planner/sung', ['core/script', 'core/num', 'core/motion', 'engine/text/v
       if (!cur || o.best > cur.best) source.set(o.line.text, o);
     }
     const lines = new Map(), meta = new Map();
-    const timingOf = (o, anchors, endRel, copyKey) => filled(JSON.stringify([o.line.text, o.line.lang, N.q6(o.span),
-      anchors.map((a) => [a.u, a.dt, a.src]), endRel === undefined ? null : endRel, o.sourcesOK, rate,
-      o.line.by && o.line.by.start !== 'auto', copyKey]), () => fillLine({ units: o.units, anchors, endRel, span: o.span,
-      rate, sourcesOK: o.sourcesOK, anchoredStart: !!(o.line.by && o.line.by.start !== 'auto') }));
+    const timingOf = (o, anchors, endRel, copyKey) => {
+      const anchoredStart = !!(o.line.by && o.line.by.start !== 'auto');
+      let key = o.line.lang + '|' + N.q6(o.span) + '|' + (o.sourcesOK ? 1 : 0) + '|' + rate + '|' + (anchoredStart ? 1 : 0) + '|' +
+        (endRel === undefined ? '' : endRel) + '|' + (copyKey || '') + '|';
+      for (const a of anchors) key += a.u + ',' + a.dt + ',' + a.src + ';';
+      return filled(key + '|' + o.line.text, () => fillLine({ units: o.units, anchors, endRel, span: o.span, rate,
+        sourcesOK: o.sourcesOK, anchoredStart }));
+    };
     // sources first (their sung end scales the copies)
     const done = new Map();
     for (const src of source.values()) done.set(src, timingOf(src, src.anchors.list, src.anchors.endRel, null));
@@ -19584,6 +19598,12 @@ MV.def('planner/sung', ['core/script', 'core/num', 'core/motion', 'engine/text/v
     };
   }
   const HAME_PLAIN = Object.freeze({ latin: false }), HAME_LATIN = Object.freeze({ latin: true });
+
+  function bestSource(anchors) {
+    let best = 0;
+    if (anchors) for (const a of anchors.list) if (a.src > best) best = a.src;
+    return best;
+  }
 
   // --- (d2) decideHame: plan stage 4b, after the features (and P2's ctx.pv), before casting ----------------------
 
@@ -19643,19 +19663,33 @@ MV.def('planner/sung', ['core/script', 'core/num', 'core/motion', 'engine/text/v
 
   // sliceCut(ls, a, b, cutT0, cutT1, lineT0) → cut.sung { at, end, t } | null: the units starting inside the piece
   // [a, b) of the line text, at = offsets in the cut's text, t = seconds after the cut's t0 (≥ 0), end = where the cut's
-  // singing ends (≤ its t1, after its last unit).
+  // singing ends (≤ its t1, after its last unit). Computed from the cut's times relative to the line's start (to 1 µs),
+  // so a cut that only moved in time gets the same frozen object again (its encoding is reused, planner/plan).
+  const slices = new WeakMap();
   function sliceCut(ls, a, b, cutT0, cutT1, lineT0) {
     if (!ls) return null;
+    const d0 = N.q6(cutT0 - lineT0), d1 = N.q6(cutT1 - lineT0);
+    let m = slices.get(ls);
+    if (!m) { m = new Map(); slices.set(ls, m); }
+    // the last slice made for each piece start of this timing, reused while the piece and its times are the same
+    const e = m.get(a);
+    if (e !== undefined && e.b === b && e.d0 === d0 && e.d1 === d1) return e.out;
+    const out = makeSlice(ls, a, b, d0, d1);
+    m.set(a, { b, d0, d1, out });
+    return out;
+  }
+
+  function makeSlice(ls, a, b, d0, d1) {
     const at = [], t = [];
     for (let k = 0; k < ls.n; k++) {
       const off = ls.at[k];
       if (off < a || off >= b) continue;
       at.push(off - a);
-      t.push(Math.max(0, q3(lineT0 + ls.t[k] - cutT0)));
+      t.push(Math.max(0, q3(ls.t[k] - d0)));
     }
     if (!at.length) return null;
     const last = t[t.length - 1];
-    const end = Math.max(q3(Math.min(lineT0 + ls.end, cutT1) - cutT0), q3(last + 0.02));
+    const end = Math.max(q3(Math.min(ls.end, d1) - d0), q3(last + 0.02));
     return Object.freeze({ at: Object.freeze(at), end, t: Object.freeze(t) });
   }
 
@@ -19669,20 +19703,32 @@ MV.def('planner/sung', ['core/script', 'core/num', 'core/motion', 'engine/text/v
 
   // repT of a cut whose entrance follows sung times (DESIGN_2_2 §6.4 g): the last character lands on its sung time
   // (or after its dur), then 10 % of the calm stretch before the exit, clamped to [a, b) like core/motion heroTime.
+  // An exit that would start before that landing is shortened by the scene to EXIT_SHARE of the time left after it
+  // (engine/scene/build fitTimes), so the calm stretch is never negative there either.
   // arrive / depart = { dur, each } (null = instant); count = number of stagger units.
   function heroSung(c, arrive, depart, count) {
     const a = c.a, b = c.b, window = b - a;
-    const t = c.sung.t;
     const dur = arrive ? Math.max(0, arrive.dur) : 0;
-    const A = Math.min(window, Math.max(dur, c.t0 + t[t.length - 1] - a));
-    const L = MO.fitMotion({ dur: depart ? depart.dur : 0, each: depart ? depart.each : 0, count, window,
+    const A = Math.min(window, Math.max(dur, c.t0 + lastLanding(c) - a));
+    let L = MO.fitMotion({ dur: depart ? depart.dur : 0, each: depart ? depart.each : 0, count, window,
       share: MO.SHARE.depart }).total;
+    if (L > 0 && b - L < a + A) L = Math.min(L, Math.max(MO.MIN_DUR, C.EXIT_SHARE * (b - (a + A))));
     const x = a + A + 0.1 * Math.max(0, (b - L) - (a + A));
     if (!(b > a)) return a;
     if (x < a) return a;
     if (x < b) return x;
     const below = b - Math.max(Math.abs(b), 1) * Number.EPSILON;
     return below >= a ? below : a;
+  }
+
+  // When the cut's last character is sung (seconds after t0): its last unit's time, plus the spread of the letters of a
+  // Latin word there (engine/scene/stagger sungTimes: letter i of k at t_u + (i / k) · min(0.8 · (end − t_u), 0.06 · k)).
+  function lastLanding(c) {
+    const s = c.sung, t = s.t, last = t[t.length - 1];
+    let k = 0;
+    for (const g of S.graphemes(String(c.text || '').slice(s.at[s.at.length - 1]))) if (isLetter(S.charClass(g))) k++;
+    if (k < 2) return last;
+    return last + ((k - 1) / k) * Math.min(C.LETTER_SHARE * Math.max(0, s.end - last), C.LETTER_STEP * k);
   }
 
   // plan.sung (non-enumerable): Map<lineId, LineSung> for the inspector and the timeline, times absolute.
@@ -22488,7 +22534,7 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
     if (c.pinKey && c.pinKey !== c.key) out.pinKey = c.pinKey;
     // the cut's sung units (planner/sung sliceCut), only where the line has sung timing: printed and fingerprinted
     // only where present, so every other cut keeps its bytes
-    const sungText = c.sung ? EN.canon(c.sung) : '';
+    const sungText = c.sung ? EN.objectCanon(c.sung) : '';
     if (c.sung) out.sung = c.sung;
     const slotKeys = Object.keys(c.slots).sort();
     const partSlots = slotKeys.filter((s) => s.indexOf('.') < 0 && s !== 'orient');
@@ -22822,8 +22868,11 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
     const reuse = Object.freeze({ cuts: cuts.length, casts: castHits });
     Object.defineProperty(plan, 'reuse', { value: reuse, enumerable: false });
     // Each line's sung timing and 歌ハメ state (planner/sung summary; null without sung timing), for the inspector and
-    // the timeline; not part of the Plan.
-    Object.defineProperty(plan, 'sung', { value: SU.summary(ctx, timed), enumerable: false });
+    // the timeline; not part of the Plan. Made when first read.
+    const sungOf = { sung: ctx.sung }, sungLines = timed;
+    let sungSummary;
+    Object.defineProperty(plan, 'sung', { enumerable: false,
+      get: () => (sungSummary !== undefined ? sungSummary : (sungSummary = SU.summary(sungOf, sungLines))) });
     return plan;
   }
 
@@ -24363,6 +24412,10 @@ MV.def('engine/scene/stagger', ['core/rng', 'core/script', 'core/schema'], (RNG,
 
   // A 歌ハメ glyph lands on its sung time (0 s ahead): P5's 出そろい leaves sung-order cuts alone.
   const SUNG_AHEAD = 0;
+  // An exit that would start before the last sung character lands is shortened to this share of the time left after
+  // that landing (at least core/motion MIN_DUR), so the words are all there before they leave (engine/scene/build
+  // fitTimes; planner/sung heroSung uses the same share, C.EXIT_SHARE).
+  const SUNG_EXIT = 0.8;
   const LETTER_STEP = 0.06, LETTER_SHARE = 0.8;
 
   // sungTimeAt(sung, off) → cut-local seconds of the sung unit that starts at or before text offset `off` (the first
@@ -24448,7 +24501,9 @@ MV.def('engine/scene/stagger', ['core/rng', 'core/script', 'core/schema'], (RNG,
     return { px, py };
   }
 
-  return { ORDERS, UNITS, StaggerError, unitIndex, ranksOf, sungFractions, staggerOf, pivots, SUNG_AHEAD, sungTimeAt, sungTimes };
+  return {
+    ORDERS, UNITS, StaggerError, unitIndex, ranksOf, sungFractions, staggerOf, pivots, SUNG_AHEAD, SUNG_EXIT, sungTimeAt, sungTimes,
+  };
 });
 /* 文字PVメーカー v2 — original work. Behaviours: the scheduler, the dwell envelope, time warps and the kit's motion adapters (DESIGN §4.17.4, §4.18.3; DESIGN_2_1 §3.10, §4.2). */
 MV.def('engine/scene/behave', ['core/num', 'core/curve', 'core/rng', 'core/motion', 'core/schema', 'engine/scene/stagger'],
@@ -30860,9 +30915,9 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
   return { createRenderer, mediaEntries, WORLD_LAYERS };
 });
 /* 文字PVメーカー v2 — original work. Scene build: one Plan cut (or ground segment) → node table + behaviours (DESIGN §4.17.5; DESIGN_2_1 §3.10, §5.9.4, §11.3.7). */
-MV.def('engine/scene/build', ['core/hash', 'core/rng', 'core/schema', 'engine/scene/table', 'engine/scene/builder',
-  'engine/scene/behave', 'engine/scene/frame', 'engine/scene/shot', 'engine/scene/budget', 'engine/scene/xshot'],
-(H, RNG, SCH, T, B, BH, F, SHOT, BG, XS) => {
+MV.def('engine/scene/build', ['core/hash', 'core/rng', 'core/schema', 'core/motion', 'engine/scene/table', 'engine/scene/builder',
+  'engine/scene/behave', 'engine/scene/frame', 'engine/scene/shot', 'engine/scene/budget', 'engine/scene/xshot', 'engine/scene/stagger'],
+(H, RNG, SCH, MO, T, B, BH, F, SHOT, BG, XS, STG) => {
   'use strict';
 
   const SAFE = 0.05;              // safe margin: 5% of the short side on every edge
@@ -31088,10 +31143,27 @@ MV.def('engine/scene/build', ['core/hash', 'core/rng', 'core/schema', 'engine/sc
     return { a: cut.a - cut.t0, rest: cut.a - cut.t0, out: cut.b - cut.t0, b: cut.b - cut.t0 };
   }
 
+  // 歌ハメ (DESIGN_2_2 §6): when the entrance follows the cut's sung units and the exit would start before the last
+  // character lands, the exit is shortened (dur and each scaled, depart.p replaced) to STG.SUNG_EXIT of the time left
+  // after that landing, at least MIN_DUR; every other cut is fitted as before.
+  const WIDE_TIMES = Object.freeze({ a: 0, rest: 0, out: 1e4, b: 1e4 });
   function fitTimes(times, target, arrive, arriveEnv, depart, departEnv) {
     const A = BH.motionTotal(arriveEnv, target, arrive.p, 'arrive', arrive.def.unit);
-    const L = BH.motionTotal(departEnv, target, depart.p, 'depart', depart.def.unit);
+    let L = BH.motionTotal(departEnv, target, depart.p, 'depart', depart.def.unit);
     times.rest = times.a + A;
+    const cut = arriveEnv.cut;
+    if (cut && cut.sung && arrive.p && arrive.p.order === 'sung' && L > 0 && times.b - L < times.rest) {
+      const want = Math.max(MO.MIN_DUR, STG.SUNG_EXIT * (times.b - times.rest));
+      // the exit's own length (dur + each·gaps, before it is fitted into the window) scaled down to `want`
+      const wide = Object.assign({}, departEnv, { times: WIDE_TIMES });
+      const raw = L > want ? BH.motionTotal(wide, target, depart.p, 'depart', depart.def.unit) : 0;
+      if (raw > 0) {
+        const f = want / raw, p = depart.p;
+        const q = Object.assign({}, p, { dur: (Number.isFinite(p.dur) ? p.dur : 0) * f, each: (Number.isFinite(p.each) ? p.each : 0) * f });
+        const next = BH.motionTotal(departEnv, target, q, 'depart', depart.def.unit);
+        if (next < L - 1e-9) { depart.p = q; L = next; }   // an exit whose length does not follow dur and each stays as it is
+      }
+    }
     times.out = times.b - L;
     if (times.out < times.rest) times.rest = times.out;    // the exit still ends at b; there is no calm stretch
   }

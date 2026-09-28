@@ -507,6 +507,34 @@ test('shot and underSweep: anchors read the sung times; the framing span stays t
   }
 });
 
+test('exits wait for the last sung character: shortened to 80 % of the time after it; repT falls in the calm', () => {
+  assert.equal(STG.SUNG_EXIT, SU.C.EXIT_SHARE, 'the planner and the scene use one share');
+  const MO = MV.use('core/motion');
+  let n = 0, squeezed = 0;
+  for (const { doc } of corpus.corpus(1, ['16:9', '9:16'], ['basic', 'lrc'])) {
+    const p = plan(withPins(doc, { 'work:sung.hame': pin(true) }));
+    const svc = svcOf(p);
+    for (const c of p.cuts.filter(hameCut)) {
+      const sc = BUILD.buildCut(c, p, svc);
+      const tm = sc.times;
+      n++;
+      const room = tm.b - tm.rest;
+      if (room * SU.C.EXIT_SHARE >= MO.MIN_DUR) assert.ok(tm.out >= tm.rest - 1e-9, c.key + ': the exit starts after the last landing');
+      const dep = sc.behaviours.find((x) => x.phase === BH.PH.MOTION && x.exit);
+      if (dep && c.slots.depart.p && dep.dur < Math.min(c.slots.depart.p.dur, 0.35 * (tm.b - tm.a)) - 1e-9) squeezed++;
+      const rt = c.repT - c.t0;
+      assert.ok(rt >= tm.rest - 0.03 && rt <= tm.out + 1e-6, c.key + ': repT ' + rt + ' in [' + tm.rest + ', ' + tm.out + ']');
+    }
+  }
+  assert.ok(n > 20 && squeezed > 0, n + ' cuts, ' + squeezed + ' exits shortened');
+  // a cut whose entrance does not follow sung times keeps its exit
+  const plainP = plan(corpus.project('basic').doc);
+  const c0 = plainP.cuts.find((c) => c.role === 'lyric');
+  const s0 = BUILD.buildCut(c0, plainP, svcOf(plainP));
+  const d0 = s0.behaviours.find((x) => x.phase === BH.PH.MOTION && x.exit);
+  if (d0) approx(d0.dur, Math.min(c0.slots.depart.p.dur, 0.35 * (s0.times.b - s0.times.a)), 0.2);
+});
+
 test('repT: a 歌ハメ cut is the hero once its last character has landed', () => {
   const p = plan(old('basic', { 'work:sung.hame': pin(true) }));
   for (const c of p.cuts.filter(hameCut)) {
@@ -574,4 +602,50 @@ test('≡ › 時刻を歌詞に書き込む keeps a row\'s word tags, moved wit
   assert.deepEqual(row.stamps, [q3(t0)]);
   assert.deepEqual(row.words, [[5, q3(t0)]], 'an unstamped row counted from its first tag: that tag is now its start');
   assert.deepEqual(row.emph, [[14, 20]], 'the marks stay');
+});
+
+// Re-planning a new work with sung timing costs about what the same work costs without it (the three edit kinds of
+// planner_determinism's speed test, and typing in a lyric row). The runs are interleaved and the best batches compared,
+// so a loaded machine slows both alike; the absolute bound of §7.4 is planner_determinism's (on the same document).
+test('planning speed: sung timing adds little to re-planning a new work', (t) => {
+  const STUB = corpus.stubRegistry(MV);
+  const make = (real) => {
+    const doc = JSON.parse(JSON.stringify(corpus.project('long').doc));
+    doc.look.gen = 1;
+    doc.pins = Object.assign({}, doc.pins, OTHER_OFF, { 'work:sung.real': pin(real) });
+    return doc;
+  };
+  const runs = { on: { doc: make(true), n: 0, best: Infinity }, off: { doc: make(false), n: 0, best: Infinity } };
+  for (const r of Object.values(runs)) r.first = PL.plan(r.doc, { registry: STUB });
+  for (let b = 0; b < 10; b++) {
+    for (const r of b % 2 ? [runs.off, runs.on] : [runs.on, runs.off]) {
+      const start = process.hrtime.bigint();
+      for (let i = 0; i < 6; i++, r.n++) {
+        const line = r.first.lines[(r.n * 17) % r.first.lines.length];
+        const cut = line.cuts[0];
+        const edits = [
+          { ['cut/' + cut + ':arrive.dur']: { v: 0.3 + 0.01 * r.n, by: 'user', sig: PL.pinSig(r.first, cut) } },
+          { ['line/' + line.id + ':dwell']: { v: r.n % 2 ? 'stubBob' : 'stillHold', by: 'user' } },
+          { ['line/' + line.id + ':start']: { v: line.t0 + 0.05, by: 'tap' } },
+        ];
+        r.doc = Object.assign({}, r.doc, { pins: Object.assign({}, r.doc.pins, edits[r.n % 3]) });
+        PL.plan(r.doc, { registry: STUB });
+      }
+      r.best = Math.min(r.best, Number(process.hrtime.bigint() - start) / 1e6 / 6);
+    }
+  }
+  t.diagnostic('re-plan after an edit: sung timing ' + runs.on.best.toFixed(2) + ' ms, without ' + runs.off.best.toFixed(2) + ' ms');
+  assert.ok(runs.on.best <= 1.25 * runs.off.best + 1, runs.on.best.toFixed(2) + ' vs ' + runs.off.best.toFixed(2) + ' ms');
+  // typing: the casts of the cuts that only moved are reused as without sung timing
+  const C2 = MV.use('core/commands');
+  let doc = make(true);
+  const first = PL.plan(doc, { registry: REG });
+  const rowId = first.lines[30].id;
+  let least = 1;
+  for (let n = 0; n < 12; n++) {
+    doc = C2.reduce(doc, { t: 'lyrics.set', text: doc.sheet.rows.map((r) => (r.id === rowId ? r.src + 'かぜのなか'[n % 5] : r.src)).join('\n') });
+    const p = PL.plan(doc, { registry: REG });
+    least = Math.min(least, p.reuse.casts / p.reuse.cuts);
+  }
+  assert.ok(least >= 0.9, 'casts reused while typing: ' + least.toFixed(3));
 });

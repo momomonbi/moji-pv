@@ -254,8 +254,9 @@ MV.def('planner/encode', ['core/hash'], (H) => {
       if (tail !== '') parts.push(tail);
       parts.push(sep ? V[i][0] : V[i][1]);
     }
-    // `sung` (DESIGN_2_2 §6) sits between slots and t0 in key order; JSON drops it where it is absent
-    parts.push('},' + JSON.stringify({ sung: cut.sung, t0: cut.t0, t1: cut.t1, text: cut.text }).slice(1));
+    // `sung` (DESIGN_2_2 §6) sits between slots and t0 in key order, only where present (its text is kept per object)
+    const tail = JSON.stringify({ t0: cut.t0, t1: cut.t1, text: cut.text }).slice(1);
+    parts.push(cut.sung !== undefined ? '},"sung":' + objectCanon(cut.sung) + ',' + tail : '},' + tail);
     return parts;
   }
 

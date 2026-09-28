@@ -9203,9 +9203,16 @@ Readings and deviations (with the reason):
   units; its framing fence (`spanOf`) and its with-emphasis default are unchanged.
 - **Latin letters.** Inside a Latin unit, a glyph that is not a letter takes the time of the letter before it (an
   opening quote the first letter's).
-- **Exits on short pieces.** Pieces now start when their first character is sung, so an earlier piece can be short;
-  when its fitted exit starts before its last character lands, `build.fitTimes` ends the entrance at the exit (as it
-  does for every overlapping entrance and exit): the last characters appear as the piece begins to leave.
+- **Exits wait for the last sung character (an addition).** Pieces now start when their first character is sung, so
+  a piece's last character lands shortly before the piece ends: measured on the corpus with 歌ハメ on, 725 of 1,010
+  such cuts had their fitted exit start before that landing (by 0.13 s on average; v2 never does, its entrance and
+  exit shares leave a calm stretch). The last characters then appeared while the piece was already leaving, and the
+  hero frame (`repT`) caught the words mid-exit (this failed `ui_flows` media's overlay check in a new work). The
+  design does not cover exits. `build.fitTimes` now shortens such an exit (its `dur` and `each` scaled, from its own
+  length before fitting) to `STG.SUNG_EXIT` = 0.8 of the time left after the last landing, at least `MIN_DUR`; only
+  cuts whose entrance follows sung units are touched. `SU.heroSung` uses the same share (`C.EXIT_SHARE`) and the letter
+  spread of a Latin last word, so `repT` falls in the calm between the last landing and the exit (all 164 sung cuts of
+  the probe; `sung.test.js` checks both).
 - **Shared locality predicate.** The design's cast-locality predicate lives in `tests/helpers/locality.js`; `planner_stability`
   uses it for its "6 cuts after, own-motion relay" part and keeps its insertion-only "line before" clause.
 

@@ -293,7 +293,7 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
     if (c.pinKey && c.pinKey !== c.key) out.pinKey = c.pinKey;
     // the cut's sung units (planner/sung sliceCut), only where the line has sung timing: printed and fingerprinted
     // only where present, so every other cut keeps its bytes
-    const sungText = c.sung ? EN.canon(c.sung) : '';
+    const sungText = c.sung ? EN.objectCanon(c.sung) : '';
     if (c.sung) out.sung = c.sung;
     const slotKeys = Object.keys(c.slots).sort();
     const partSlots = slotKeys.filter((s) => s.indexOf('.') < 0 && s !== 'orient');
@@ -627,8 +627,11 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
     const reuse = Object.freeze({ cuts: cuts.length, casts: castHits });
     Object.defineProperty(plan, 'reuse', { value: reuse, enumerable: false });
     // Each line's sung timing and 歌ハメ state (planner/sung summary; null without sung timing), for the inspector and
-    // the timeline; not part of the Plan.
-    Object.defineProperty(plan, 'sung', { value: SU.summary(ctx, timed), enumerable: false });
+    // the timeline; not part of the Plan. Made when first read.
+    const sungOf = { sung: ctx.sung }, sungLines = timed;
+    let sungSummary;
+    Object.defineProperty(plan, 'sung', { enumerable: false,
+      get: () => (sungSummary !== undefined ? sungSummary : (sungSummary = SU.summary(sungOf, sungLines))) });
     return plan;
   }
 
