@@ -555,9 +555,10 @@ MV.def('ai/changes', ['core/commands', 'core/lyrics', 'core/doc', 'core/hash', '
     return t(label[0], p);
   }
 
-  // An EXTREME preset mirrored ("~m") says so: 「回って入る（左右反転）」 (DESIGN_EXTREME §2.6).
+  // An EXTREME preset mirrored ("~m") says so: 「回って入る（左右反転）」 (DESIGN_EXTREME §2.6); so does a framed shot
+  // 文字PVの定石 turned ('driftOff~m', 'tiltHold~m').
   function mirrored(t, v, name) {
-    const x = SHOT.xKeyOf(v);
+    const x = SHOT.mirrorOf(v);
     return x && x.m && t.has('shot.mirroredOf') ? t('shot.mirroredOf', { name }) : name;
   }
 

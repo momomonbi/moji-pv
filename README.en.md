@@ -24,7 +24,8 @@ Click the preview or a lyric line and the **Details** column shows that part. Yo
   **Unpin** makes it automatic again.
 - **Lock** — lock a line you like and it keeps its look.
 - **Lyric-video conventions** — a switch under whole video › Look, on in a new work: each song part keeps one set of
-  looks wherever it comes back (verse, chorus…), directions alternate from cut to cut, motion builds toward the
+  looks wherever it comes back (verse, chorus…), directions alternate from cut to cut (the camera's push-ins and
+  pull-backs and the side of a framed shot too), motion builds toward the
   chorus with the last chorus strongest, and effects do not pile up on the lettering (a busy cut gets fewer decorations
   and screen effects; the guide number is under Advanced). Each can be turned off under Advanced; selecting a section of
   the song lets you reroll its set of looks. Works made before this feature start with it off.

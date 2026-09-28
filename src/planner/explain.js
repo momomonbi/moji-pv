@@ -335,7 +335,9 @@ MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media
       return trace.kind === 'cam.extreme' && trace.why ? pinned.concat(trace.why) : pinned;
     }
     if (trace.override && trace.override.rule === 'carry') {
-      return (trace.why || []).concat([{ code: 'rule', params: { rule: 'carry' } }]);
+      // a framed shot 文字PVの定石 turned before the carry says so too (planner/flow mirrorShots)
+      const turned = trace.mirrored ? [{ code: 'rule', params: { rule: trace.mirrored } }] : [];
+      return (trace.why || []).concat(turned, [{ code: 'rule', params: { rule: 'carry' } }]);
     }
     // an override (a rule that replaced the decision after casting) with its own reasons: the EXTREME overlay's
     if (trace.override) return [{ code: 'rule', params: { rule: trace.override.rule } }].concat(trace.override.why || []);

@@ -143,9 +143,12 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core
     return kind === 'shot' ? SHOT.SHOT_KEYS : kind === 'rig' ? SHOT.RIG_KEYS : kind === 'xshot' ? SHOT.XSHOT_KEYS : [];
   }
 
-  // Whether key names a preset of a camera kind (an EXTREME preset may carry the mirror suffix "~m").
+  // Whether key names a preset of a camera kind (an EXTREME preset may carry the mirror suffix "~m", and so may the two
+  // framed shots 文字PVの定石 turns: 'driftOff~m', 'tiltHold~m').
   function cameraKeyOk(kind, key) {
-    return kind === 'xshot' ? SHOT.xKeyOf(key) !== null : cameraKeys(kind).includes(key);
+    if (kind === 'xshot') return SHOT.xKeyOf(key) !== null;
+    const m = kind === 'shot' ? SHOT.mirrorOf(key) : null;
+    return m ? cameraKeys(kind).includes(m.key) : cameraKeys(kind).includes(key);
   }
 
   // --- media mode: the fake store and its test parts (test pages only) -------------------------------------------------

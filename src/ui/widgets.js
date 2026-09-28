@@ -560,8 +560,9 @@ MV.def('ui/widgets', ['ui/dom', 'ui/icons', 'i18n/t', 'core/color', 'ui/playbar'
       focus: () => dom.focus(btn),
       update(st) {
         const v = SHOT.coerceShot(st.value);
-        const x = !st.mixed && v !== undefined && SHOT.isExtreme(v) ? SHOT.xKeyOf(v) : null;
-        // an EXTREME move carries its ⚡ (DESIGN_EXTREME §2.6), a mirrored one says so
+        const x = !st.mixed && v !== undefined ? SHOT.mirrorOf(v) : null;
+        // an EXTREME move carries its ⚡ (DESIGN_EXTREME §2.6), a mirrored one says so (an EXTREME move, or a framed
+        // shot 文字PVの定石 turned the other way: 'driftOff~m', 'tiltHold~m')
         const base = st.mixed ? t('state.mixed') : t.label(SHOT.label(v === undefined ? 'none' : v));
         const text = x && x.m ? t('shot.mirroredOf', { name: base }) : base;
         name.textContent = text;

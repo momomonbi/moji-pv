@@ -924,6 +924,14 @@ test('spec-5: なぜ turns planner ids into words (rules, families, cuts), in ja
         }
       }
       assert.ok(extra.length >= 2, 'a trimmed count and a turned direction');
+      // phase C: framed shots mirrored against the cut before and with the rest of their cut, and the moves after them
+      const mirrored = plan.cuts.filter((c) => c.slots['cam.shot'] && c.slots['cam.shot'].from === 'auto'
+        && /^(driftOff|tiltHold)~m$/.test(String(c.slots['cam.shot'].v)));
+      assert.ok(mirrored.length >= 2, 'mirrored framed shots');
+      for (const c of mirrored.slice(0, 6)) extra.push('cut/' + c.key + ':cam.shot');
+      for (const c of plan.cuts.filter((x) => ['pullReveal', 'wideHold', 'settle', 'pushWord'].includes(x.slots['cam.shot'] && x.slots['cam.shot'].v)).slice(0, 8)) {
+        extra.push('cut/' + c.key + ':cam.shot');
+      }
     }
     const sels = [{ level: 'work' }];
     for (const l of plan.lines.slice(0, 4)) sels.push({ level: 'line', ids: [l.id] });
@@ -949,6 +957,23 @@ test('spec-5: なぜ turns planner ids into words (rules, families, cuts), in ja
       }
     }
   }
+  // phase C: framed shots mirrored against the cut before, in new works of the basic project
+  for (const { doc: d0 } of corpus.corpus(2, ['16:9', '9:16'], ['basic'])) {
+    if (rules.has('whyRule.pv.mirror')) break;
+    const doc = Object.assign({}, d0, { look: Object.assign({}, d0.look, { gen: 1 }) });
+    const plan = PL.plan(doc, { registry: reg });
+    for (const c of plan.cuts.filter((x) => x.slots['cam.shot'] && x.slots['cam.shot'].from === 'auto'
+      && /^(driftOff|tiltHold)~m$/.test(String(x.slots['cam.shot'].v)))) {
+      const path = 'cut/' + c.key + ':cam.shot';
+      const ex = EX.explain(doc, plan, path, { registry: reg });
+      for (const w of ex.why) if (w.code === 'rule') rules.add(F.whyRuleKey(w.params.rule, 'cam.shot'));
+      for (const lang of ['ja', 'en']) {
+        for (const text of F.whyParts(ex, path, ts[lang], plan)) {
+          if (CODE.test(text) || (lang === 'ja' && latinIn(text))) bad.push(lang + ' ' + path + ': ' + text);
+        }
+      }
+    }
+  }
   assert.ok(n > 200, 'the corpus explains many values (' + n + ')');
   assert.deepEqual(bad, []);
   // D's section, season and part keys in the camera and line reasons read as words (NOTES v2.1-D)
@@ -960,7 +985,9 @@ test('spec-5: なぜ turns planner ids into words (rules, families, cuts), in ja
   assert.equal(said('cam.arrange', { key: 'edgeBleed' }, 'work:cam.shot'), '構図「' + ts.ja.part('arrange', 'edgeBleed') + '」に合わせて控えめに');
   assert.equal(said('cam.section', { section: 'nowhere' }, 'work:cam.shot'), undefined, 'an unknown section is left out');
   assert.deepEqual([...rules].filter((k) => !(k in STRINGS)).sort(), [], 'every rule the planner names has its own words');
-  for (const k of ['whyRule.pv.fx', 'whyRule.pv.alt']) assert.ok(rules.has(k), k + ' is reached');
+  for (const k of ['whyRule.pv.fx', 'whyRule.pv.alt', 'whyRule.pv.mirror', 'whyRule.pv.mirrorSame', 'whyRule.pv.mirrorCopy']) {
+    assert.ok(rules.has(k), k + ' is reached');
+  }
 
   // The params the old view printed raw: a cut key, a family id, a rule id.
   const plan = corpus.planBasic();

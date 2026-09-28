@@ -115,8 +115,10 @@ and Filmora-ready output; how they are built is in `docs/DESIGN_2_1.md`.
   with one entrance and one exit as its signature, the same set wherever the part comes back; a 区画 of the song shows
   「この区画の演出セット」 and its die 「演出セットを振り直す」 (one undo step); **動きの向きを交互にする** — sideways moves,
   spins, the side the text sits on and sideways transitions turn the other way from the previous cut, while one cut's
-  moves share a direction (horizontal text only for sides; a text entrance changes side only on a one-word cut); a
-  turned direction stays 自動, a pin, a lock or its own die keeps it; **曲の山に合わせて強弱をつける** — verses calmer,
+  moves share a direction (horizontal text only for sides; a text entrance changes side only on a one-word cut); the
+  camera too: the framed shots 外して置く and 斜めに構える switch sides (shown as 「…（左右反転）」), a push-in is more
+  often followed by a pull-back and the other way round, and under カメラ EXTREME consecutive mirrored moves turn the
+  other way round; a turned direction stays 自動, a pin, a lock or its own die keeps it; **曲の山に合わせて強弱をつける** — verses calmer,
   choruses stronger, the last chorus strongest, a hold right before a chorus; **効果を重ねすぎない** — the letters never
   carry two effects of the same kind (no glowing move or glow effect on glowing text, no after-image on outlined or
   two-tone text, never more than two effects on the letters at once), and a cut that is still too busy chooses fewer

@@ -2551,6 +2551,74 @@ async def flow_conventions(f, lang):
     f.check(auto == await page.evaluate("() => window.__mv.t('rule.auto.old')"), 'the note of an older work: %r' % auto)
 
 
+async def flow_conventions_camera(f, lang):
+    """文字PVの定石's camera (DESIGN_2_2 §2.5, phase C): in a new work a framed shot the alternation turned shows
+    「…（左右反転）」 on its カメラワーク row, is still 自動, and its なぜ says why; 動きの向きを交互にする off (詳しい設定, one
+    undo step, a work pin false) shows the plain preset again."""
+    page = f.page
+    # the sample lyrics (a new work's first run): several framed shots, some of them turned
+    done0, doc0 = await with_lyrics(f, await page.evaluate('() => window.__mv.svc.sample(window.__mv.lang)'))
+    find = """() => { const p = window.__mv.plan; const c = p.cuts.find((x) => x.line && x.slots['cam.shot'] && x.slots['cam.shot'].from === 'auto'
+      && /^(driftOff|tiltHold)~m$/.test(String(x.slots['cam.shot'].v))); return c ? { key: c.key, v: c.slots['cam.shot'].v } : null; }"""
+    hit = await page.evaluate(find)
+    for mood in ('dashSprint', 'popFizz'):
+        if hit:
+            break
+        # a lively mood tilts the frame more often (tiltHold)
+        await page.evaluate("""(m) => window.__mv.dispatch({ t: 'pin.set', path: 'work:mood', v: m, by: 'user' },
+          { label: ['undo.pin', { field: '', scope: '' }] })""", mood)
+        await f.until("(m) => window.__mv.plan && window.__mv.plan.look.mood.v === m", 'a lively mood', mood)
+        await f.settle(3)
+        hit = await page.evaluate(find)
+    if not f.check(bool(hit), 'a new work turns a framed shot the other way'):
+        await f.undo_all(done0, doc0)
+        return
+    scope = 'cut/' + hit['key']
+    base = hit['v'][:-2]
+    shot_row = ROW % 'cam.shot'
+
+    async def camera_page():
+        await page.evaluate("(s) => window.__mv.select({ level: 'el', scope: s, el: 'lens' }, { from: 'crumbs', open: true })", scope)
+        await f.settle(3)
+        return await f.until('(s) => !!document.querySelector(s)', 'the カメラワーク row', shot_row + ' .w-shot')
+
+    if not await camera_page():
+        return
+    name = await page.evaluate("(k) => window.__mv.t('shot.' + k)", base)
+    mirrored = await page.evaluate("(n) => window.__mv.t('shot.mirroredOf', { name: n })", name)
+    label = await page.text_content(shot_row + ' .w-shot')
+    f.check(mirrored in label, 'the row names the mirrored shot: %r' % label)
+    f.check(await page.get_attribute(shot_row + ' .state-tag', 'data-state') == 'auto', 'still 自動')
+    await page.click(shot_row + ' button[aria-haspopup="menu"]')
+    await f.until("() => !!document.querySelector('.popover.menu .menu-item')", 'the field menu opens')
+    await page.evaluate("""(k) => [...document.querySelectorAll('.popover.menu .menu-item')].find((b) => b.textContent.startsWith(window.__mv.t(k))).click()""", 'fm.why')
+    await f.until("(s) => { const r = document.querySelector(s); return !!r && !r.hidden && r.textContent.length > 3; }", 'なぜ shows', shot_row + ' .fr-why')
+    why = await page.text_content(shot_row + ' .fr-why')
+    words = await page.evaluate("() => ['whyRule.pv.mirror', 'whyRule.pv.mirrorSame', 'whyRule.pv.mirrorCopy'].map((k) => window.__mv.t(k))")
+    f.check(any(w in why for w in words), 'なぜ says the shot was mirrored: %r' % why)
+    await f.shot('camera-mirrored')
+    # 動きの向きを交互にする off: one undo step, a work pin false; the shot shows its plain form
+    await page.evaluate("() => window.__mv.select({ level: 'work' }, { from: 'header', open: true })")
+    await open_section(f, 'look')
+    await page.evaluate("""() => { const d = document.querySelector('[data-mount="inspector"] .isec[data-sec="look"] details.isec-more');
+      if (d) d.open = true; }""")
+    await f.settle(2)
+    alt = RULE_ROW % 'pv.alternate'
+    await f.until("(s) => !!document.querySelector(s)", '動きの向きを交互にする is a row of 詳しい設定', alt)
+    f.check(await page.is_checked(alt + ' input[role="switch"]'), 'on in a new work')
+    done1 = await page.evaluate(DONE)
+    await page.click(alt + ' .w-toggle')
+    await f.until("() => { const p = window.__mv.doc.pins['work:pv.alternate']; return !!p && p.v === false; }", 'off is a pin')
+    await f.settle(3)
+    f.check(await page.evaluate(DONE) == done1 + 1, 'one undo step')
+    v = await page.evaluate("(k) => { const c = window.__mv.plan.cuts.find((x) => x.key === k); return c ? c.slots['cam.shot'].v : null; }", hit['key'])
+    f.check(v == base, 'the plain preset again: %r' % v)
+    if await camera_page():
+        label = await page.text_content(shot_row + ' .w-shot')
+        f.check(mirrored not in label and name in label, 'the row names the plain shot: %r' % label)
+    await f.undo_all(done0, doc0)
+
+
 async def flow_repeat_legacy(f, lang):
     """作品全体 › 見た目 › くり返しの行をそろえる (DESIGN_2_1 §4.10) in a work made before v2.2: off by default, with its note
     under it; turning it on pins it for the whole video (one undo entry) and the second サビ then shows the first one's
@@ -5185,7 +5253,8 @@ FLOWS += [('curve', flow_curve, False), ('keyframes', flow_keyframes, False), ('
 # 「くり返しの行をそろえる」 (DESIGN_2_1 §4.10)
 FLOWS += [('repeat', flow_repeat_legacy, False)]
 # 文字PVの定石 (DESIGN_2_2 §2)
-FLOWS += [('repeat_new', flow_repeat_new, False), ('conventions', flow_conventions, False)]
+FLOWS += [('repeat_new', flow_repeat_new, False), ('conventions', flow_conventions, False),
+          ('conventions_camera', flow_conventions_camera, False)]
 # v2.1 photos and videos (package G.4, DESIGN_2_1 §11.8.3).
 FLOWS += [('media', flow_media, True), ('library', flow_library, False), ('missing', flow_missing, False), ('package', flow_package, False),
           ('media_device', flow_media_device, False), ('media_song', flow_media_song, False)]

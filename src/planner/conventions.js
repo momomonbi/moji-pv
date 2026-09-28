@@ -50,7 +50,9 @@ MV.def('planner/conventions', ['core/num', 'core/shot', 'planner/arc', 'planner/
     function prepare(ctx, cuts, timed, opts) {
       const o = opts || {};
       const rules = ctx.rules;
-      const on = Object.freeze({ kit: !!rules.kit, alt: !!rules.alt, arc: !!rules.arc, fx: !!rules.fx, camAlt: false });
+      // camAlt: the camera's share of 「動きの向きを交互にする」 (phase C: mirrored framed shots, push-ins and pull-backs,
+      // EXTREME's mirrors), on with the rest of it
+      const on = Object.freeze({ kit: !!rules.kit, alt: !!rules.alt, arc: !!rules.arc, fx: !!rules.fx, camAlt: !!rules.alt });
       const cached = !!o.cached;
       const film = typeof o.film === 'number' ? o.film : 0;
       if (cached) { beginBlends(); beginWeights(); }
@@ -228,13 +230,35 @@ MV.def('planner/conventions', ['core/num', 'core/shot', 'planner/arc', 'planner/
         }
       }
 
-      // The arc's factor on a shot preset (planner/camera weighShots, on the cut's own weights): a function of the shot
-      // key, or null. 'none' counts as calm.
-      function shotFactors(st) {
-        if (!arcOn || !st.part) return null;
-        const drive = st.part.drive;
-        return (key) => arcFactor(key === 'none' ? -1 : ARC.strength(SHOT.SHOTS[key] || null, null), drive);
+      // shotFactors(st, rec) → the factors 文字PVの定石 puts on the shot presets of a cut (planner/camera weighShots), or
+      // null: { own(key) → the arc's factor on the preset's strength ('none' counts as calm; part of the cut's own weight,
+      // its natural pick), zoom(key) → the push-in / pull-back alternation after the previous cut's move (rec.prev, a
+      // recency factor on the final weight only; not in the natural pass, which has no previous cut, and not on a cut
+      // with a marked word, whose push-in weighs ×3 there), zoomWhy(key) → explain's reason for a raised key or null }.
+      // One frozen object per (drive, previous class).
+      const shotFx = new Map();
+      function shotFactors(st, rec) {
+        const drive = arcOn && st.part ? st.part.drive : null;
+        const f = st.feat || st.cut.feat;
+        const prev = on.camAlt && rec && !st.natural && !f.emph ? FL.zoomClass(rec.prev) : null;
+        if (drive === null && prev === null) return null;
+        const id = drive + '|' + prev;
+        let x = shotFx.get(id);
+        if (!x) {
+          const own = drive === null ? one
+            : (key) => arcFactor(key === 'none' ? -1 : ARC.strength(SHOT.SHOTS[key] || null, null), drive);
+          const zoom = prev === null ? one : (key) => FL.zoomFactor(prev, key);
+          const zoomWhy = prev === null ? none : (key) => (FL.zoomFactor(prev, key) > 1
+            ? { code: prev === 'in' ? 'pv.zoomOut' : 'pv.zoomIn', params: {} } : null);
+          x = Object.freeze({ own, zoom, zoomWhy, arc: drive !== null, alt: prev !== null });
+          shotFx.set(id, x);
+        }
+        return x;
       }
+      function none() { return null; }
+
+      // 「動きの向きを交互にする」 for the camera (stage 6, planner/plan): the mirrored framed shots (planner/flow).
+      function mirrorShots(cuts, trace) { if (on.camAlt) FL.mirrorShots(ctx, cuts, partOf, trace || null); }
 
       // arcWhy(st, factor) → the reason the arc gives a pick its factor x at the cut (explain): the last chorus (the
       // peak), the hold before a chorus, or the part's kind favouring stronger (drive above 0.5) or calmer moves; null
@@ -267,6 +291,7 @@ MV.def('planner/conventions', ['core/num', 'core/shot', 'planner/arc', 'planner/
       return {
         on, arcOn, partOf, featOf, seamEnergy, idOf, partFactor, groundFactor, faceBoost, avoidAlso, flipParams, dirOf,
         flipSeam, seamDir, shotFactors, arcWhy, kimeAt: ARC.kimeAt, summary, kitOf, trimLists, seamGate, castDone,
+        mirrorShots,
       };
     }
 

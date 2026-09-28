@@ -73,7 +73,7 @@ AI タブの **指示** の欄に、してほしいことを書いて **送る**
 - **▸ 詳しく** を開くと、次の2つを選べます。
   - **新しい素材を作ってもよい**: オンにすると、AI が新しい素材（マイ素材）を作って使うことがあります（6 を見てください）。「素材を作る」のボタンを押すとオンになります。
   - **写真・動画をAIが使ってよい**: 写真・動画がこの端末にあるときだけ出ます。はじめはオンです。オンのとき、AI があなたの写真・動画を背景などに使うことがあります（7 を見てください）。オフのときは、写真・動画の番号・種類・大きさ・長さ・形・説明を送りません（背景などが写真・動画かどうかは、部品の名前として伝わります）。
-- **カメラワークをAIに任せる**: カメラの動き（寄る・引く・区画のカメラ・緩急など）だけを AI に決めてもらいます。指示の文は空でもかまいません。
+- **カメラワークをAIに任せる**: カメラの動き（寄る・引く・区画のカメラ・緩急など）だけを AI に決めてもらいます。指示の文は空でもかまいません。「文字PVの定石」で左右反転したカメラの構え（「外して置く（左右反転）」など）は、反転しない名前のまま送ります。AI が左右反転の構えを選ぶことはありません。
   - **EXTREME**（そのすぐ右のボタン）: 押してから頼むと、激しいカメラワーク（一瞬で寄る・振って入る・回転・拍で揺れる・歌う言葉の寄りに切る など）を AI が選びます。はじめは、対象で「カメラ EXTREME」がオンなら押された状態です。まだオフの場所に頼むと、先に「激しいカメラワークについて」の注意が出ます（**オンにする** で続けます）。結果の一覧には、選んだ動きと、その区画の「カメラ EXTREME」をオンにする行が入ります（その行のチェックを外すと、AI が選んだ動きだけが残ります）。**くり返しの行をそろえる** がオンなら、2回目以降のサビは1回目に選んだ動きにそろいます（「カメラ EXTREME」をオンにする行は、2回目以降の行にもそのまま入ります）。歌っている言葉は読めるように動き、点滅は増えません。
   - 例: 「サビを激しく」「サビは一瞬で寄って、Aメロは拍で揺らす」「回転は控えめに」「最後のサビだけ振り抜いて」
   - 送るものは「カメラワークをAIに任せる」と同じ種類です（歌詞、指示、設定の値と名前）。EXTREME のときは、各行で EXTREME がオンかどうかと、その行の構図がカメラを動かせるかどうかも、設定の値として送ります。
@@ -303,7 +303,9 @@ the tool's own button (**Prepare lyrics**, **Send**, **Make**, **Send and descri
   Look; on from the start in a new work, as part of **Lyric-video conventions**), a change to the first chorus shows in
   the later ones too: where a proposal changes the same thing on the
   first copy and on a later copy, only the first copy's change is kept ("Lines sung again follow their first copy, …");
-  a change to a later copy alone applies to that line. The AI never switches this setting.
+  a change to a later copy alone applies to that line. The AI never switches this setting. A framed shot that
+  **Lyric-video conventions** mirrored ("Off-center drift (mirrored)" and the like) is sent under its plain name; the
+  AI never picks a mirrored framed shot itself.
 - **EXTREME** — the chip right of **Let AI do the camerawork**. Press it, then ask, and the AI picks intense camerawork
   (crash zooms, whips, spins, shakes on the beat, cuts to a close-up of each sung word …). It starts pressed where
   **Camera EXTREME** is already on for the target. Where it is still off, the notice "About intense camerawork" comes

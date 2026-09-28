@@ -104,7 +104,8 @@ read `ctx.rules` / `ctx.pv` only, which are all-off / `null` for an older docume
 `ctx.pv` (planner stage 4, when `ctx.rules.any`): `on`, `partOf(cut)`, `featOf(cut)` (the arc's blended features),
 `seamEnergy(B)`, `idOf(cut)` (what P2 adds to a cut's cast inputs: its part, run start, drive and kit id; `castInputs.pv`),
 `partFactor(st, kind, idx)` (`{ f, member, block }` for the chooser), `groundFactor(first)`, `faceBoost(st)`,
-`avoidAlso(kind)`, `flipParams(…)`, `dirOf(st)`, `flipSeam(…)`, `seamDir(d)`, `shotFactors(st)`, `arcWhy`, `trimLists(st,
+`avoidAlso(kind)`, `flipParams(…)`, `dirOf(st)`, `flipSeam(…)`, `seamDir(d)`, `shotFactors(st, rec)` (phase C: `{ own,
+zoom, zoomWhy, arc, alt }`, §2.5), `mirrorShots(cuts, trace)` (phase C, stage 6), `arcWhy`, `trimLists(st,
 needF)`, `seamGate(B, world)`, `castDone(cuts)`, `kimeAt(cut)` (P3's mark, `cut.kime` or `feat.kime`), `summary()` → the
 non-enumerable `plan.pv = { on, pseudo, neutral, kits, parts, loads }` (the inspector's 区画 page and tests; not hashed).
 `plan.run` hands `prepare` the look's screen-effect drive (`planner/cast filterDrive`, exported) and calls
@@ -193,6 +194,32 @@ non-enumerable `plan.pv = { on, pseudo, neutral, kits, parts, loads }` (the insp
   memo compares it.
 - A change travels along consecutive directional cuts and stops at a cut without a direction for two rows, a part run's
   first cut, a special cut or a restart (expected ≤ 4 cuts; parameters only).
+- **The camera (phase C)**, part of 「動きの向きを交互にする」 (`ctx.pv.on.camAlt` = `alt`):
+  - *Mirrored framed shots.* `core/shot` accepts `'driftOff~m'` and `'tiltHold~m'` (`NMIRRORS`; the presets with `ox`
+    and `roll` negated, `SHOTS_MIRRORED`; `label` names the preset; `isExtreme` stays false; `mirrorOf(v)` reads both a
+    normal and an EXTREME mirror). Their direction is the engine's (`planner/flow SHOT_DIR`, checked against the camera
+    by `pv_flow.test.js`): plain `driftOff` sets the text off to the right (side +1), plain `tiltHold` leans it
+    clockwise (rot +1, as `tiltedCard`'s positive tilt); `~m` the other way. Stage 6, after the EXTREME overlay and
+    before the carry, `mirrorShots` walks the cuts in time order: an automatic plain `driftOff` / `tiltHold` takes the
+    side of its aligned source when that source shows the same preset (「くり返しの行をそろえる」), else the direction the
+    rest of the cut already has on the shot's axis (its parts, `cut.dir` as the Plan shows it), else, unless the cut
+    restarts (`restartAt`), the opposite of the first nonzero final sign of the two cuts before; it becomes `'~m'` where
+    that is the other side (one interned `{ from: 'auto', v }` per value). A pinned, locked or ruled framed shot keeps
+    its value and still gives its cut the direction, so a lock changes no neighbour. No stream: the overlay is
+    deterministic. Explain: rule `pv.mirror` (against the cuts before), `pv.mirrorSame` (with the rest of the cut) or
+    `pv.mirrorCopy` (like the aligned source), before the carry's own reason when a carry follows. The AI brief names a
+    mirrored normal shot by its preset (the vocabulary is `SHOT_KEYS`, so an AI never writes one); the shot widget, the
+    shot picker (keeps the mirror when the current tile is picked again), the AI review and the lab read `mirrorOf`.
+    `opensOnText` and the `cam.follow` auto read `presetOf` for normal presets (identical for every older value).
+  - *Push-ins and pull-backs.* `ZOOM_CLASS`: `pushWord`, `snapZoom`, `settle` are `in`; `pullReveal`, `readAlong`,
+    `wideHold` `out`. After a cut whose final shot is `in`, the `out` presets weigh ×3.5 and the `in` presets ×0.4;
+    after `out`, `in` ×2.5 and `out` ×0.5. A recency factor (`weighShots`: on `w` only, not `wBase` or `wOwn`), not in
+    the natural pass and not on a cut with a marked word (its push-in weighs ×3 there). Explain: `pv.zoomOut` /
+    `pv.zoomIn` on a raised key. Echoes and aligned shots are decided before the weights, so repeats keep their move.
+  - *EXTREME.* `planner/extreme mirrorOf(key, rec, prefix, alt)` with `alt = ctx.rules.alt && ctx.pv.on.camAlt` (read
+    once per pass; a stub ctx without rules gives false): after the whipPan pair and a repeat's echo (unchanged), a ⇆
+    pick right after a cut that shows a ⇆ preset takes the other mirror (`!rec.last.m`); else the old `hash32('xmirror')`
+    coin. Only works with both the EXTREME pin and the rule see a change.
 
 ### 2.6 T5: the lettering rule and the cut budget (`planner/fxcap`, phase B)
 
@@ -251,6 +278,9 @@ T5 has two layers, both behind `pv.fxCap` (on in a new work through 文字PVの�
   candidate weighs 0 in `weigh` and in explain's alternatives).
 - Decision `pfrom` gains the value `'alt'` (documented next to `'rule'`).
 - History rows and seam entries gain `dir`; `ROW_FIELDS` and `INPUT_FIELDS` gain entries (internal).
+- The `core/shot` grammar (phase C) is **extended**, not changed: `'driftOff~m'` and `'tiltHold~m'` become ShotRefs by
+  the `~m` suffix EXTREME uses; `SHOT_KEYS`, `MIRRORS` and `XSHOT_KEYS` are unchanged, and every older value coerces as
+  before (DESIGN_2_1 §4.5.1, §14.2 say so).
 - Not touched: the FROZEN slot order, the Plan shape (`plan.pv` is non-enumerable), POSE columns, the seam contract.
 
 ### 2.8 Strings (phase A)
@@ -300,7 +330,21 @@ Every existing golden is unchanged (no fixture carries the marker or a `pv.*` pi
 null as before, and no chooser call carries `pv`, so neither the lettering block nor the budget can act).
 `tests/golden/project_pv.json` is the repeat fixture as a new work without its 「くり返しの行をそろえる」 pin and with the
 other packages' switches pinned off (`OTHER_OFF` in `tests/update_golden.js`): registry, measurer, plan hash and 40 frame
-hashes, checked by `section_kit.test.js`. It changes only with this package and is regenerated once per phase.
+hashes, checked by `section_kit.test.js`. It changes only with this package and is regenerated once per phase (phase C
+added mirrored framed shots and the push-in / pull-back weights to it).
+
+### 2.11 Strings (phase C)
+
+| Key | ja | en |
+|---|---|---|
+| `fld.pvAlternate.note` (+) | …寄りと引き、カメラの構えの左右も交互にします。 | … Push-ins and pull-backs, and the side of a framed shot, alternate too. |
+| `why.pv.zoomOut` | 前のカットが寄りなので、引きの動きを選びやすくした | The previous cut moved in close, so pulling back is favored |
+| `why.pv.zoomIn` | 前のカットが引きなので、寄りの動きを選びやすくした | The previous cut pulled back, so moving in close is favored |
+| `whyRule.pv.mirror` | 前のカットと逆向きになるよう左右反転した | Mirrored to go the opposite way to the previous cut |
+| `whyRule.pv.mirrorSame` | このカットの動きの向きにそろえて左右反転した | Mirrored to match the direction of the rest of this cut |
+| `whyRule.pv.mirrorCopy` | くり返しの元のカットと同じく左右反転した | Mirrored like the cut this line repeats |
+
+`shot.mirroredOf` (「{name}（左右反転）」, EXTREME) names a mirrored framed shot too.
 
 <!-- PV22 P3 chapter -->
 

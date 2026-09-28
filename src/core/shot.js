@@ -161,10 +161,12 @@ MV.def('core/shot', ['core/num', 'core/curve'], (N, CV) => {
   }
 
   // A ShotRef in canonical form, or undefined. EXTREME forms (an x-preset key with an optional "~m", an object with
-  // x === 1) are read by their own grammar; every other value exactly as before.
+  // x === 1) are read by their own grammar; so are the two mirrored normal presets 'driftOff~m' and 'tiltHold~m'
+  // (NMIRRORS, PV22 文字PVの定石); every other value exactly as before.
   function coerceShot(v) {
     if (typeof v === 'string') {
-      return v === 'none' || Object.prototype.hasOwnProperty.call(SHOT_DATA, v) || xKeyOf(v) !== null ? v : undefined;
+      return v === 'none' || Object.prototype.hasOwnProperty.call(SHOT_DATA, v) || xKeyOf(v) !== null || nKeyOf(v) !== null
+        ? v : undefined;
     }
     if (isObject(v) && v.x === 1) return coerceXShotObject(v);
     return coerceShotObject(v);
@@ -334,6 +336,29 @@ MV.def('core/shot', ['core/num', 'core/curve'], (N, CV) => {
     return Object.prototype.hasOwnProperty.call(XSHOT_DATA, key) ? { key, m } : null;
   }
 
+  // The normal presets that take the mirror suffix too (PV22 文字PVの定石, 「動きの向きを交互にする」): the text set off to
+  // one side (driftOff) and the tilted frame (tiltHold). sweepAcross is not one: it travels from the first word to the
+  // last, the reading direction, which negating ox would not reverse.
+  const NMIRRORS = Object.freeze(['driftOff', 'tiltHold']);
+
+  // 'driftOff~m' | 'tiltHold~m' → { key, m: true }; null for anything else (the plain keys are ordinary presets).
+  function nKeyOf(v) {
+    if (typeof v !== 'string' || !v.endsWith(MIRROR_SUFFIX)) return null;
+    const key = v.slice(0, -MIRROR_SUFFIX.length);
+    return NMIRRORS.includes(key) ? { key, m: true } : null;
+  }
+
+  // mirrorOf(v) → { key, m } for a value that names a preset with a mirror: an x-preset (as xKeyOf reads it, with an
+  // optional "~m") or a normal preset of NMIRRORS (plain or "~m"); null for anything else. Labels of a mirrored shot of
+  // either kind go through it.
+  function mirrorOf(v) {
+    if (typeof v !== 'string') return null;
+    const x = xKeyOf(v);
+    if (x) return x;
+    if (NMIRRORS.includes(v)) return { key: v, m: false };
+    return nKeyOf(v);
+  }
+
   // Keys with ox and roll negated (left ↔ right).
   function mirrorKeys(keys) {
     return keys.map((key) => {
@@ -374,9 +399,14 @@ MV.def('core/shot', ['core/num', 'core/curve'], (N, CV) => {
   // with its keys mirrored), or null for 'none', objects and unknown values.
   const XSHOTS_MIRRORED = deepFreeze(Object.fromEntries(XSHOT_KEYS.map((key) => [key,
     Object.assign({}, XSHOTS[key], { tags: XSHOTS[key].tags.slice(), keys: mirrorKeys(XSHOTS[key].keys) })])));
+  // The mirrored normal presets (NMIRRORS) likewise: ox and roll negated.
+  const SHOTS_MIRRORED = deepFreeze(Object.fromEntries(NMIRRORS.map((key) => [key,
+    Object.assign({}, SHOTS[key], { tags: SHOTS[key].tags.slice(), keys: mirrorKeys(SHOTS[key].keys) })])));
   function presetOf(v) {
     if (typeof v !== 'string') return null;
     if (Object.prototype.hasOwnProperty.call(SHOTS, v)) return SHOTS[v];
+    const n = nKeyOf(v);
+    if (n) return SHOTS_MIRRORED[n.key];
     const x = xKeyOf(v);
     if (!x) return null;
     return x.m ? XSHOTS_MIRRORED[x.key] : XSHOTS[x.key];
@@ -691,12 +721,12 @@ MV.def('core/shot', ['core/num', 'core/curve'], (N, CV) => {
     return !!shot && shot.keys.some((key) => typeof key.at === 'string' && key.at.startsWith('beat:'));
   }
 
-  // [stringKey, params]: 'shot.<preset>' (an x-preset too, mirrored or not), 'shot.none' (also for unreadable values),
-  // 'shot.custom' { n keys } (an x-shot object too).
+  // [stringKey, params]: 'shot.<preset>' (an x-preset or a normal preset, mirrored or not), 'shot.none' (also for
+  // unreadable values), 'shot.custom' { n keys } (an x-shot object too).
   function label(ref) {
     const v = coerceShot(ref);
     if (v === undefined || v === 'none') return ['shot.none', {}];
-    if (typeof v === 'string') { const x = xKeyOf(v); return ['shot.' + (x ? x.key : v), {}]; }
+    if (typeof v === 'string') { const x = mirrorOf(v); return ['shot.' + (x ? x.key : v), {}]; }
     return ['shot.custom', { n: v.keys.length }];
   }
 
@@ -713,5 +743,7 @@ MV.def('core/shot', ['core/num', 'core/curve'], (N, CV) => {
     // EXTREME (DESIGN_EXTREME §1)
     XSHOTS, XSHOT_KEYS, XLIMITS, XMOVES, DIRS, MIRRORS, X_ANCHORS, X_AWAY, X_FILL_MID,
     isExtreme, xKeyOf, presetOf, limitsOf, fromXMove, xIntensity,
+    // PV22 文字PVの定石: the mirrored normal presets
+    NMIRRORS, SHOTS_MIRRORED, mirrorOf,
   };
 });

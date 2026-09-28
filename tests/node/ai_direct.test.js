@@ -1153,3 +1153,23 @@ test('EXTREME: a move for a line whose layout has no camerawork is left out (ai.
   assert.ok(r.req.prompt.split('\n').some((l) => /^1: /.test(l) && l.includes(' cam=none')), 'the request marked the line cam=none');
   for (const lang of ['ja', 'en']) assert.ok(CH.warningText(['ai.warn.xLayout', {}], T.createT(lang, STRINGS, reg, { strict: true })));
 });
+
+// PV22 文字PVの定石 (phase C): a framed shot the alternation mirrored ('driftOff~m') goes to the AI by its preset's name —
+// the vocabulary is SHOT_KEYS, so an AI never writes a mirrored normal shot — and a review names it with 「（左右反転）」.
+test('a mirrored framed shot: the brief names its preset, the AI cannot write it, the review says it is mirrored', () => {
+  const doc = CMD.reduce(DOC, { t: 'pin.set', path: 'line/rc:cam.shot', v: 'tiltHold~m', by: 'user' });
+  const plan = planOf(doc);
+  assert.ok(plan.cuts.filter((c) => c.line === 'rc').every((c) => c.slots['cam.shot'].v === 'tiltHold~m'), 'the pin shows');
+  const shots = (prompt) => prompt.split('\n').filter((l) => /^\d+: /.test(l)).map((l) => (/ shot=([^ ]+)/.exec(l) || [])[1]);
+  for (const mode of ['camera', 'all']) {
+    const req = DI.directRequests(doc, plan, reg, { briefs: [{ ref: CHORUS, instruction: 'お願い' }], uiLang: 'ja', mode })[0];
+    assert.equal(shots(req.prompt)[1], 'tiltHold', mode);
+    assert.ok(!req.prompt.includes('tiltHold~m'), mode);
+  }
+  assert.equal(DI.cameraFromAi(CAM({ shot: 'tiltHold~m' })).badShot, true, 'not in the AI vocabulary');
+  const change = (to) => ({ kind: 'value', path: 'line/rc:cam.shot', slot: 'cam.shot', from: 'settle', to,
+    label: ['ai.ch.value', { where: ['area.linesOne', { a: 2 }], field: 'fld.camShot', from: 'settle', to }] });
+  const ja = T.createT('ja', STRINGS, reg, { strict: true });
+  assert.ok(CH.describe(change('driftOff~m'), ja).endsWith('外して置く（左右反転）'), CH.describe(change('driftOff~m'), ja));
+  assert.ok(!CH.describe(change('driftOff'), ja).includes('左右反転'));
+});

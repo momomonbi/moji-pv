@@ -373,6 +373,8 @@ Curve    := EaseName                                   // core/ease EASES
 ShotRef  := ShotPresetKey | "none" | Shot              // presets: settle pushWord readAlong snapZoom pullReveal sweepAcross
                                                        //          tiltHold driftOff wideHold
                                                        // (EXTREME forms — x-preset keys with "~m", { "x": 1, … }: §14.2)
+                                                       // driftOff and tiltHold accept the mirror suffix "~m" (PV22,
+                                                       // 文字PVの定石: ox and roll negated; DESIGN_2_2 §2.5)
 Shot     := { "keys": Key[2..6], "follow"?: 0..1 }
 Key      := { "at": 0..1 | Anchor, "dt"?: −2..2 (s), "aim": Aim,
               "fill"?: 0.1..1.2    (text aims; default 0.6: the aimed box's larger side fills this share of the frame),
@@ -1087,6 +1089,9 @@ Tags feed `moodBias` exactly like part tags. `ox` absent means "keep" (§4.5.4).
 | `tiltHold` | 斜めに構える / Tilted hold | playful bold | a → block .64 roll −4 ; b → block .68 roll −2 |
 | `driftOff` | 外して置く / Off-center drift | literary airy slow | a → block .5 ox .18 ; b → block .52 ox .12 `linear` |
 | `wideHold` | 引きで見せる / Wide hold | slow airy minimal | a → frame zoom .94 ; b → frame zoom .98 `linear` |
+
+`driftOff` and `tiltHold` accept the mirror suffix `~m` (PV22, 文字PVの定石; `core/shot NMIRRORS`): `'driftOff~m'`,
+`'tiltHold~m'` are the presets with `ox` and `roll` negated, named by their preset. `SHOT_KEYS` is unchanged.
 
 #### 4.5.2 Anchors
 
@@ -5474,7 +5479,8 @@ formulas stay).
 
 A value is EXTREME (`SHOT.isExtreme(ref)`) iff it is an x-preset key, optionally with the mirror suffix `~m`, or a
 readable object with `x: 1`. Nothing else is read differently: a non-x custom shot is coerced exactly as in §2.4 (a
-`roll: 30` still clamps to 15; an `accent` anchor is refused outside an x-shot).
+`roll: 30` still clamps to 15; an `accent` anchor is refused outside an x-shot). The one exception since PV22: the two
+mirrored normal presets `'driftOff~m'` and `'tiltHold~m'` (§4.5.1; not EXTREME).
 
 ```
 ShotRef  := … (§2.4)
@@ -5815,7 +5821,7 @@ export does. Export never reads the preference.
 
 | File | Asserts |
 |---|---|
-| `shot.test.js` (+) | XSHOTS canonical; x coercion by XLIMITS; non-x values exactly as before; isExtreme, presetOf, limitsOf; expandShot's g on angles, amplitudes, fills and offsets, mirror; lastFraming, usesBeats, labels; fromXMove for every move × focus × timing × power × dir |
+| `shot.test.js` (+) | XSHOTS canonical; x coercion by XLIMITS; non-x values exactly as before (PV22: except the two mirrored normal presets, §4.5.1); isExtreme, presetOf, limitsOf; expandShot's g on angles, amplitudes, fills and offsets, mirror; lastFraming, usesBeats, labels; fromXMove for every move × focus × timing × power × dir |
 | `xshot.test.js` (new) | every preset × 3 texts × 3 layouts × 3 aspects: R1, roll fence, g-scaled rotation cap, zoom and travel caps, jump spacing, layout caps; R2; anchors; reading paths; mirror and intensity; schedules at BPM 60–240 (pulses ≤ 3 Hz, ≤ +33 %; flips; hits); continuity at 240 Hz; lens composition and calm; holds |
 | `cover.test.js` (new) | knee; θmax; 10k random cameras × 7 aspects × 4 parallaxes covered; identity below the knee; C¹; old path without cover |
 | `xblur.test.js` (new) | taps from the displacement; the shutter in seconds; maxTaps; the half-size average (running over the base, `lighter` for clear); no blur in seams and with calm; whole frames covered; the boundary blend |

@@ -218,8 +218,9 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
       const { ctx, cut } = st;
       // the features as the cut's choices weigh them (文字PVの定石's arc blends the energy; hand-made states have none)
       const f = st.feat || cut.feat;
-      // 「曲の山に合わせて強弱をつける」: the arc's factor on each preset's strength, part of the cut's own weight
-      const pvf = ctx.pv ? ctx.pv.shotFactors(st) : null;
+      // 文字PVの定石: 「曲の山に合わせて強弱をつける」's factor on each preset's strength (part of the cut's own weight) and
+      // 「動きの向きを交互にする」's push-in / pull-back alternation after the previous cut's move (a recency factor)
+      const pvf = ctx.pv ? ctx.pv.shotFactors(st, rec) : null;
       const A = ctx.look.amounts.camera;
       const mood = ctx.look.mood;
       const orient = st.chosen.orient;
@@ -237,12 +238,13 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
         const echo = rec.echo === key;
         // Left to right, like the factors are listed in §4.7 (the product is rounded once, by q6).
         let own = baseWeight(key, f, A, orient, frames) * m * sec;
-        if (pvf) own *= pvf(key);
+        if (pvf && pvf.arc) own *= pvf.own(key);
         const w = own * (echo ? SHOT_ECHO : 1);
         const wBase = N.q6(w);
         let wr = w;
         if (rec.prev === key) wr *= SHOT_RECENT;
         if (rec.near.includes(key)) wr *= SHOT_NEAR;
+        if (pvf && pvf.alt) wr *= pvf.zoom(key);
         let why = null;
         if (withWhy) {
           why = baseWhy(key, f, A, orient, lensKey, frames);
@@ -250,7 +252,8 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
           if (sec !== 1 && f.section) why.push({ code: 'cam.section', params: { section: f.section } });
           if (echo) why.push({ code: rec.echoCode, params: { cut: f.repeatOf } });
           if (rec.prev && rec.prev !== key) why.push({ code: 'recent', params: { key: rec.prev } });
-          if (pvf) { const w = ctx.pv.arcWhy(st, pvf(key)); if (w) why.push(w); }
+          if (pvf && pvf.arc) { const w = ctx.pv.arcWhy(st, pvf.own(key)); if (w) why.push(w); }
+          if (pvf && pvf.alt) { const w = pvf.zoomWhy(key); if (w) why.push(w); }
         }
         out[i] = { key, w: wr === w ? wBase : N.q6(wr), wBase, wOwn: echo ? N.q6(own) : wBase, why };
       }
@@ -566,7 +569,9 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
         let x;
         if (shot === NONE || shot === 'wideHold') x = 0;
         else {
-          const own = typeof shot === 'string' ? SHOT.SHOTS[shot] && SHOT.SHOTS[shot].follow : shot && shot.follow;
+          // a normal preset, mirrored or not ('driftOff~m', 文字PVの定石); an EXTREME key has none here
+          const preset = typeof shot === 'string' && !SHOT.isExtreme(shot) ? SHOT.presetOf(shot) : null;
+          const own = typeof shot === 'string' ? preset && preset.follow : shot && shot.follow;
           if (typeof own === 'number' && own > 0) x = own;
           else {
             const arrive = st.chosen.arrive ? ctx.registry.get('arrive', st.chosen.arrive) : null;
@@ -580,9 +585,10 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
 
     // --- carry (§4.5.7; stage 6, after the seams) ------------------------------------------------------------------
 
-    // Whether a shot starts by framing the text at the cut's start (the key expandShot's carry replaces).
+    // Whether a shot starts by framing the text at the cut's start (the key expandShot's carry replaces): a normal preset,
+    // mirrored or not ('driftOff~m', 文字PVの定石); never an EXTREME key.
     function opensOnText(v) {
-      const shot = typeof v === 'string' ? SHOT.SHOTS[v] : null;
+      const shot = typeof v === 'string' && !SHOT.isExtreme(v) ? SHOT.presetOf(v) : null;
       if (!shot) return false;
       const k0 = shot.keys[0];
       return k0.at === 'a' && k0.aim !== 'frame' && k0.aim !== 'point';

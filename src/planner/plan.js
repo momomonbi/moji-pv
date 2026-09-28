@@ -589,6 +589,9 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
     const seams = TR.seams(ctx, cuts);
     ctx.seams = seams;
     XT.shots(ctx, cuts);
+    // 文字PVの定石's 「動きの向きを交互にする」: the framed shots driftOff and tiltHold turn to the other side where the
+    // alternation asks (their "~m" forms; planner/flow mirrorShots)
+    if (ctx.pv && ctx.pv.on.camAlt) ctx.pv.mirrorShots(cuts, ctx.trace ? (cut) => shotTrace(ctx, cut) : null);
     CAM.carry(ctx, cuts, seams);
     const rigs = CAM.rigs(ctx, cuts, seams, duration);
     const impulses = TR.impulses(ctx, cuts, duration);
@@ -623,6 +626,14 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
     // 文字PVの定石's parts and sets of looks (the inspector's 区画 page and tests; not part of the Plan)
     Object.defineProperty(plan, 'pv', { value: ctx.pv ? ctx.pv.summary() : null, enumerable: false });
     return plan;
+  }
+
+  // The trace of a cut's cam.shot when that is the traced slot (explain; as planner/camera tracing), else null.
+  function shotTrace(ctx, cut) {
+    const t = ctx.trace;
+    if (!t || t.cutKey !== cut.key || t.slot !== 'cam.shot') return null;
+    t.hit = true;
+    return t.out;
   }
 
   // --- entry points ---------------------------------------------------------------------------------------------

@@ -24,6 +24,9 @@ const FR = MV.use('engine/scene/frame');
 const { createTextService } = MV.use('engine/text/service');
 const { fakeMeasurer } = MV.use('engine/text/fake_measure');
 const CAT = MV.use('parts/catalog').defaultRegistry();
+const SHOT = MV.use('core/shot');
+const MAT = MV.use('core/mat');
+const XD = require('../helpers/extreme_docs.js');
 
 const clone = (x) => JSON.parse(JSON.stringify(x));
 const ON = (v) => ({ v, by: 'user' });
@@ -458,6 +461,294 @@ test('re-planning with directions gives exactly the plan made from scratch (rero
       const c = rng.pick(p.cuts);
       const key = rng.pick(['cut/' + c.key, 'cut/' + c.key + ':arrive', 'cut/' + c.key + ':arrive@twirlArrive.dir', 'line/' + (c.line || 'x')]);
       doc = Object.assign({}, doc, { salts: Object.assign({}, doc.salts, { [key]: ((doc.salts || {})[key] || 0) + 1 }) });
+    }
+  }
+});
+
+// --- phase C: the camera ---------------------------------------------------------------------------------------------
+
+// The text's centre on screen (from the frame's centre, du) and the lean of its baseline (degrees, + = clockwise on the
+// y-down screen) at u of a one-cut scene with these slots: the glyphs' world positions through the cut camera's view.
+function onScreen(slots, u) {
+  const plan = FAC.samplePlan(CAT, { kind: 'arrive', key: 'instantShow' }, { text: 'ことばのかぜ' });
+  const cut = plan.cuts[0];
+  Object.assign(cut.slots, slots);
+  const scene = BUILD.buildCut(cut, plan, { registry: CAT, text: createTextService({ measurer: MEASURER, faces: plan.look.faces }), strict: true });
+  FR.evaluate(scene, (cut.b - cut.a) * u);
+  const k = FR.cutCamera(scene);
+  const V = FR.viewMatrix(new Float32Array(6), { x: k.x, y: k.y, zoom: k.zoom, roll: k.roll, shakeX: k.jx, shakeY: k.jy }, 1,
+    plan.design.w, plan.design.h);
+  const pts = [];
+  for (let j = scene.target.from; j < scene.target.to; j++) pts.push(MAT.apply(V, scene.table.m[j * 6 + 4], scene.table.m[j * 6 + 5], [0, 0]));
+  const a = pts[0], b = pts[pts.length - 1];
+  return { x: pts.reduce((s, q) => s + q[0], 0) / pts.length - plan.design.w / 2, lean: Math.atan2(b[1] - a[1], b[0] - a[0]) * 180 / Math.PI };
+}
+
+// planner/flow SHOT_DIR against the engine: driftOff sets the text off to the right (side +1), tiltHold leans it
+// clockwise (rot +1, the way tiltedCard's positive tilt leans it, the table's +1 on that axis); "~m" the other way.
+test('the framed shots\' sides are the engine\'s: driftOff sets the text right, tiltHold leans it clockwise; "~m" the other way', () => {
+  const shot = (v) => ({ 'cam.shot': { v, from: 'auto' }, 'cam.zoom': { v: 1, from: 'auto' } });
+  for (const u of [0.3, 0.5, 0.7]) {
+    const none = onScreen(shot('none'), u);
+    for (const v of ['driftOff', 'driftOff~m']) {
+      const sd = FL.shotDir(v);
+      assert.equal(sd.axis, 'side');
+      assert.equal(Math.sign(onScreen(shot(v), u).x - none.x), sd.s, v + ' at ' + u);
+    }
+    for (const v of ['tiltHold', 'tiltHold~m']) {
+      const sd = FL.shotDir(v);
+      assert.equal(sd.axis, 'rot');
+      assert.equal(Math.sign(onScreen(shot(v), u).lean - none.lean), sd.s, v + ' at ' + u);
+    }
+    const card = (tilt) => ({ arrange: FAC.samplePlan(CAT, { kind: 'arrange', key: 'tiltedCard', params: { tilt } }, {}).cuts[0].slots.arrange });
+    for (const tilt of [4, -4]) {
+      const e = FL.entryOf('arrange', 'tiltedCard');
+      assert.equal(Math.sign(onScreen(card(tilt), u).lean - none.lean), e.sign({ tilt }), 'tiltedCard ' + tilt + ': the same axis');
+    }
+  }
+  assert.equal(FL.shotDir('sweepAcross'), null);
+  assert.equal(FL.shotDir('spinIn~m'), null, 'EXTREME mirrors are their own');
+});
+
+// The Plan's view of the rule: the cut's direction on each axis from its parts (directions), then its framed shot.
+function shotRule(p, doc, al) {
+  const out = { alt: [0, 0], same: [0, 0], copy: [0, 0], restart: 0, mirrored: 0, shots: 0 };
+  const finals = [];
+  const shown = new Map();
+  for (const c of p.cuts) {
+    const own = Object.assign({}, directions(c).own);
+    const d = c.slots['cam.shot'];
+    const sd = d ? FL.shotDir(d.v) : null;
+    if (sd) {
+      out.shots++;
+      if (d.v.endsWith('~m')) out.mirrored++;
+      const part = p.pv.parts.get(c.key) || null;
+      const src = al.get(c.key);
+      const ss = src ? FL.shotDir(shown.get(src.key)) : null;
+      if (d.from !== 'auto') { /* a pinned shot only gives the direction */ }
+      else if (ss && ss.key === sd.key) { out.copy[1]++; if (ss.s === sd.s) out.copy[0]++; }
+      else if (own[sd.axis] !== 0) { out.same[1]++; if (own[sd.axis] === sd.s) out.same[0]++; }
+      else if (FL.restartAt(doc.look.seed, part, c.key)) out.restart++;
+      else {
+        let prev = 0;
+        for (let k = 1; k <= FL.LOOKBACK && !prev; k++) prev = finals.length >= k ? finals[finals.length - k][sd.axis] : 0;
+        if (prev) { out.alt[1]++; if (sd.s === -prev) out.alt[0]++; }
+      }
+      if (!own[sd.axis]) own[sd.axis] = sd.s;
+    }
+    finals.push(own);
+    shown.set(c.key, d ? d.v : null);
+  }
+  return out;
+}
+
+test('the framed shots alternate their side against the cuts before them, follow the rest of their cut, and an aligned copy its source', (t) => {
+  const sum = { alt: [0, 0], same: [0, 0], copy: [0, 0], restart: 0, mirrored: 0, shots: 0 };
+  let offMirrored = 0;
+  for (const { doc } of corpus.corpus(6, ['16:9', '9:16', '1:1'])) {
+    for (const d of [gen1(doc), gen1(doc, {}, true)]) {
+      const p = fresh(d);
+      const al = CA.alignments({ ix: PINS.index(d.pins), doc: d }, p.cuts) || new Map();
+      const r = shotRule(p, d, al);
+      for (const k of ['alt', 'same', 'copy']) { sum[k][0] += r[k][0]; sum[k][1] += r[k][1]; }
+      sum.restart += r.restart; sum.mirrored += r.mirrored; sum.shots += r.shots;
+    }
+    const off = fresh(gen1(doc, { 'work:pv.alternate': ON(false) }));
+    offMirrored += off.cuts.filter((c) => c.slots['cam.shot'] && typeof c.slots['cam.shot'].v === 'string' && FL.shotDir(c.slots['cam.shot'].v)
+      && c.slots['cam.shot'].v.endsWith('~m')).length;
+  }
+  const rate = (x) => x[0] / x[1];
+  t.diagnostic('framed shots ' + sum.shots + ', mirrored ' + sum.mirrored + '; against the cuts before ' + sum.alt.join('/') + ', with the cut '
+    + sum.same.join('/') + ', aligned copies ' + sum.copy.join('/') + ', restarts ' + sum.restart);
+  assert.ok(sum.alt[1] >= 50 && rate(sum.alt) >= 0.9, 'alternation ' + sum.alt.join('/'));
+  assert.ok(sum.same[1] >= 20 && rate(sum.same) >= 0.9, 'within the cut ' + sum.same.join('/'));
+  assert.ok(sum.copy[1] >= 5 && rate(sum.copy) === 1, 'aligned copies ' + sum.copy.join('/'));
+  assert.ok(sum.mirrored > 50);
+  assert.equal(offMirrored, 0, 'without the switch no framed shot is mirrored');
+});
+
+test('no older work shows a mirrored framed shot; the grammar accepts one only by a pin there', () => {
+  for (const { name, doc } of corpus.corpus(4, ['16:9', '9:16', '1:1'], corpus.ALL_PROJECTS)) {
+    const p = PL.plan(doc, { registry: CAT });
+    for (const c of p.cuts) {
+      const v = c.slots['cam.shot'] && c.slots['cam.shot'].v;
+      assert.ok(!(typeof v === 'string' && FL.shotDir(v) && v.endsWith('~m')), name + ' ' + c.key);
+    }
+  }
+  const doc = corpus.project('basic').doc;
+  const p = fresh(Object.assign({}, doc, { pins: Object.assign({}, doc.pins, { 'line/r5:cam.shot': ON('driftOff~m') }) }));
+  assert.ok(p.cuts.filter((c) => c.line === 'r5').every((c) => c.slots['cam.shot'].v === 'driftOff~m' && c.slots['cam.shot'].from === 'pin:line'));
+  assert.deepEqual(p.warnings.filter((w) => w.path === 'line/r5:cam.shot'), []);
+});
+
+// A lock pins the mirrored shot as the Plan shows it, and a pinned framed shot still gives its cut its side: locking a
+// line changes no other cut's shot.
+test('a lock keeps a mirrored framed shot; nothing else moves', () => {
+  let checked = 0;
+  for (const { doc } of corpus.corpus(4, ['16:9', '9:16'], ['basic', 'long'])) {
+    const d0 = gen1(doc);
+    const p0 = PL.plan(d0, { registry: CAT });
+    const cut = p0.cuts.find((c) => c.line && c.slots['cam.shot'].from === 'auto' && typeof c.slots['cam.shot'].v === 'string'
+      && c.slots['cam.shot'].v.endsWith('~m') && !SHOT.isExtreme(c.slots['cam.shot'].v));
+    if (!cut) continue;
+    const payload = FI.lockPayload(d0, p0, cut.line, { registry: CAT });
+    const p1 = fresh(CMD.reduce(d0, payload));
+    const shots = (p) => p.cuts.map((c) => c.key + '=' + JSON.stringify(c.slots['cam.shot'] && c.slots['cam.shot'].v));
+    assert.deepEqual(shots(p1), shots(p0), 'the shots as they were');
+    assert.ok(p1.cuts.find((c) => c.key === cut.key).slots['cam.shot'].from.startsWith('pin'));
+    checked++;
+  }
+  assert.ok(checked >= 3, 'locked ' + checked);
+});
+
+// A reroll of a first copy reaches a repeat's mirror only through the chain right after it (≤ 4 cuts), never through
+// the repeat relation; and a reroll turns the framed shots of a few cuts after it at most.
+test('rerolls: a first copy\'s reroll leaves the mirrors of its far repeats; a reroll turns few framed shots after it', (t) => {
+  const sideOf = (c) => { const d = c.slots['cam.shot']; const sd = d ? FL.shotDir(d.v) : null; return sd ? sd.key + sd.s : null; };
+  let far = 0;
+  for (const { doc } of corpus.corpus(3, ['16:9', '9:16'], ['repeat', 'long'])) {
+    const d0 = gen1(doc, { 'work:repeat.same': ON(false) });
+    const p0 = fresh(d0);
+    const idx = new Map(p0.cuts.map((c, i) => [c.key, i]));
+    const firsts = [...new Set(p0.cuts.filter((c) => c.feat.repeatOf).map((c) => c.feat.repeatOf))]
+      .filter((first) => p0.cuts.some((x) => x.feat.repeatOf === first && idx.get(x.key) - idx.get(first) > 4 && sideOf(x)));
+    for (const first of firsts.slice(0, 8)) {
+      const p1 = fresh(Object.assign({}, d0, { salts: Object.assign({}, d0.salts, { ['cut/' + first]: 1 }) }));
+      const by1 = new Map(p1.cuts.map((c) => [c.key, c]));
+      for (const c of p0.cuts.filter((x) => x.feat.repeatOf === first && idx.get(x.key) - idx.get(first) > 4)) {
+        const a = sideOf(c), b = sideOf(by1.get(c.key));
+        if (!a || !b || a.slice(0, -2) !== b.slice(0, -2)) continue;          // the same preset in both plans
+        far++;
+        assert.equal(b, a, c.key + ' far from the rerolled ' + first);
+      }
+    }
+  }
+  assert.ok(far >= 10, 'far repeats with a framed shot: ' + far);
+  const moved = [];
+  for (const { doc } of corpus.corpus(2, ['16:9'], ['basic', 'long'])) {
+    const d = gen1(doc);
+    const q0 = fresh(d);
+    const before = new Map(q0.cuts.map((c) => [c.key, sideOf(c)]));
+    for (const c of q0.cuts.filter((x) => x.line).slice(0, 20)) {
+      const q1 = fresh(Object.assign({}, d, { salts: Object.assign({}, d.salts, { ['cut/' + c.key]: 1 }) }));
+      const at = q0.cuts.indexOf(c);
+      // a later framed shot of the same preset whose side turned
+      moved.push(q1.cuts.filter((x, i) => i > at && before.get(x.key) && sideOf(x) && before.get(x.key) !== sideOf(x)
+        && before.get(x.key).slice(0, -2) === sideOf(x).slice(0, -2)).length);
+    }
+  }
+  const ok = moved.filter((m) => m <= 2).length / moved.length;
+  t.diagnostic('far repeats checked ' + far + '; rerolls turning ≤ 2 later framed shots ' + (100 * ok).toFixed(1) + ' % of ' + moved.length
+    + ', worst ' + Math.max(...moved));
+  assert.ok(ok >= 0.95, ok);
+});
+
+// Push-ins and pull-backs: after a push-in a pull-back is picked clearly more often than without the switch (and a
+// push-in after a pull-back); cuts with a marked word keep their push-in weight.
+test('push-ins and pull-backs alternate (≥ 10 points more often); marked words keep their push-in', (t) => {
+  const measure = (extra) => {
+    const z = { inOut: 0, in: 0, outIn: 0, out: 0, emph: 0, push: 0 };
+    for (const { doc } of corpus.corpus(6, ['16:9', '9:16', '1:1'])) {
+      const p = fresh(gen1(doc, extra));
+      let prev = null;
+      for (const c of p.cuts) {
+        const d = c.slots['cam.shot'];
+        const cls = d ? FL.zoomClass(d.v) : null;
+        if (c.line && c.feat.emph) { z.emph++; if (d && d.v === 'pushWord') z.push++; }
+        else if (c.line && d && d.from === 'auto') {
+          if (prev === 'in') { z.in++; if (cls === 'out') z.inOut++; }
+          else if (prev === 'out') { z.out++; if (cls === 'in') z.outIn++; }
+        }
+        prev = cls;
+      }
+    }
+    return z;
+  };
+  const on = measure({}), off = measure({ 'work:pv.alternate': ON(false) });
+  const pct = (a, b) => 100 * a / b;
+  t.diagnostic('pull-back after a push-in ' + pct(on.inOut, on.in).toFixed(1) + ' / ' + pct(off.inOut, off.in).toFixed(1) + ' %, push-in after a pull-back '
+    + pct(on.outIn, on.out).toFixed(1) + ' / ' + pct(off.outIn, off.out).toFixed(1) + ' %, pushWord on marked words ' + pct(on.push, on.emph).toFixed(1)
+    + ' / ' + pct(off.push, off.emph).toFixed(1) + ' %');
+  assert.ok(on.in >= 300 && pct(on.inOut, on.in) - pct(off.inOut, off.in) >= 10, 'pull-backs after push-ins');
+  assert.ok(on.out >= 100 && pct(on.outIn, on.out) - pct(off.outIn, off.out) >= 10, 'push-ins after pull-backs');
+  assert.ok(on.emph >= 100 && Math.abs(pct(on.push, on.emph) - pct(off.push, off.emph)) <= 3, 'marked words');
+  assert.equal(FL.zoomFactor(null, 'pullReveal'), 1);
+  assert.equal(FL.zoomFactor('in', 'none'), 1);
+  assert.ok(FL.zoomFactor('in', 'pullReveal') > 1 && FL.zoomFactor('in', 'settle') < 1 && FL.zoomFactor('out', 'pushWord') > 1);
+});
+
+// EXTREME (「カメラ EXTREME」 with 文字PVの定石): consecutive ⇆ moves turn the other way round, except a whipPan pair and
+// a repeat playing its first copy's move; without the rule they keep the old coin; older works are untouched.
+test('EXTREME: consecutive mirrored moves alternate under the rule; the old coin without it; older works as before', () => {
+  const X = { 'work:cam.extreme': ON(1) };
+  const count = (extra) => {
+    let pairs = 0, alt = 0;
+    for (const { doc } of corpus.corpus(4)) {
+      const p = fresh(gen1(doc, Object.assign({}, X, extra)));
+      for (let j = 1; j < p.cuts.length; j++) {
+        const A = p.cuts[j - 1], B = p.cuts[j];
+        const a = A.slots['cam.shot'] && SHOT.xKeyOf(A.slots['cam.shot'].v), b = B.slots['cam.shot'] && SHOT.xKeyOf(B.slots['cam.shot'].v);
+        if (!a || !b || !SHOT.MIRRORS.includes(a.key) || !SHOT.MIRRORS.includes(b.key) || B.slots['cam.shot'].from !== 'auto') continue;
+        if (b.key === 'whipPan' && a.key === 'whipPan' && A.feat.section === B.feat.section && !(B.seamIn >= 0)) continue;
+        if (B.feat.repeatOf) continue;
+        pairs++;
+        if (a.m !== b.m) alt++;
+      }
+    }
+    return [alt, pairs];
+  };
+  const on = count({}), off = count({ 'work:pv.alternate': ON(false) });
+  assert.ok(on[1] >= 50 && on[0] === on[1], 'alternating ' + on.join('/'));
+  assert.ok(off[0] / off[1] > 0.3 && off[0] / off[1] < 0.75, 'the coin ' + off.join('/'));
+  // the golden EXTREME documents as a new work with 文字PVの定石 off plan exactly as they are
+  for (const { name, doc } of XD.goldenDocs()) {
+    const g = Object.assign({}, doc, { look: Object.assign({}, doc.look, { gen: D.GEN }),
+      pins: Object.assign({}, doc.pins, OTHER_OFF, { 'work:pv.rules': ON(false) }) });
+    assert.equal(fresh(g).hash, fresh(doc).hash, name);
+  }
+});
+
+test('explain: a mirrored framed shot names its rule, before a carry too; a raised push-in or pull-back says why', () => {
+  const rules = new Set(), zoom = new Set();
+  let carried = 0;
+  for (const { doc } of corpus.corpus(2, ['16:9', '9:16'], ['basic', 'long'])) {
+    const d = gen1(doc);
+    const p = PL.plan(d, { registry: CAT });
+    for (const c of p.cuts) {
+      const s = c.slots['cam.shot'];
+      if (!s || typeof s.v !== 'string') continue;
+      if (FL.shotDir(s.v) && s.v.endsWith('~m') && s.from === 'auto') {
+        const why = EX.explain(d, p, 'cut/' + c.key + ':cam.shot', { registry: CAT }).why;
+        const r = why.find((w) => w.code === 'rule' && String(w.params.rule).startsWith('pv.mirror'));
+        assert.ok(r, c.key + ' ' + JSON.stringify(why));
+        rules.add(r.params.rule);
+        if (s.p && s.p.carry) { carried++; assert.equal(why[why.length - 1].params.rule, 'carry'); }
+        const fs = FI.fieldState(d, p, { level: 'cut', key: c.key }, 'cut/' + c.key + ':cam.shot', { registry: CAT });
+        assert.equal(fs.state, 'auto', 'a mirrored shot is still automatic');
+      } else if (FL.zoomClass(s.v) && zoom.size < 2) {
+        for (const w of EX.explain(d, p, 'cut/' + c.key + ':cam.shot', { registry: CAT }).why) {
+          if (w.code === 'pv.zoomOut' || w.code === 'pv.zoomIn') zoom.add(w.code);
+        }
+      }
+    }
+  }
+  assert.ok(rules.has('pv.mirror') && rules.has('pv.mirrorSame'), [...rules].join());
+  assert.ok(carried >= 1, 'a mirrored shot carried');
+  assert.ok(zoom.size >= 1, [...zoom].join());
+});
+
+test('re-planning with mirrored shots and alternating moves gives exactly the plan made from scratch', () => {
+  const R = MV.use('core/rng');
+  for (const { doc } of corpus.corpus(2, ['16:9'], ['basic', 'long'])) {
+    let d = gen1(doc, { 'work:cam.extreme': ON(0.5) });
+    const rng = R.stream('pvcam', d.look.seed);
+    for (let i = 0; i < 14; i++) {
+      const p = PL.plan(d, { registry: CAT });
+      assert.equal(p.hash, fresh(d).hash, 'step ' + i);
+      const c = rng.pick(p.cuts);
+      const key = rng.pick(['cut/' + c.key, 'cut/' + c.key + ':cam.shot', 'cut/' + c.key + ':arrange', 'line/' + (c.line || 'x')]);
+      d = Object.assign({}, d, { salts: Object.assign({}, d.salts, { [key]: ((d.salts || {})[key] || 0) + 1 }) });
+      if (i === 7) d = Object.assign({}, d, { pins: Object.assign({}, d.pins, { 'work:cam.extreme': ON(0) }) });
     }
   }
 });

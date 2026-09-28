@@ -230,12 +230,18 @@ test('XSHOTS: the twelve presets in canonical form (x: 1, tags, sorted keys, def
   assert.deepEqual(SHOT.MIRRORS, ['dutchSwing', 'orbit', 'spinIn', 'spinOut', 'whipPan']);
 });
 
-test('coerceShot: x-keys (with "~m") and x-objects by XLIMITS; every non-x value exactly as before', () => {
+test('coerceShot: x-keys (with "~m"), the two mirrored normal presets, and x-objects by XLIMITS; every other value exactly as before', () => {
   for (const key of SHOT.XSHOT_KEYS) {
     assert.equal(SHOT.coerceShot(key), key);
     assert.equal(SHOT.coerceShot(key + '~m'), key + '~m');
   }
-  for (const bad of ['settle~m', 'none~m', 'crashZoom~x', '~m', 'CrashZoom']) assert.equal(SHOT.coerceShot(bad), undefined, bad);
+  // PV22 文字PVの定石: driftOff and tiltHold take the mirror suffix (NMIRRORS); sweepAcross does not (it travels the
+  // reading way), nor does any other normal preset
+  assert.deepEqual(SHOT.NMIRRORS, ['driftOff', 'tiltHold']);
+  for (const key of SHOT.NMIRRORS) assert.equal(SHOT.coerceShot(key + '~m'), key + '~m');
+  for (const bad of ['settle~m', 'sweepAcross~m', 'none~m', 'crashZoom~x', '~m', 'CrashZoom', 'driftOff~m~m', 'driftOff~M']) {
+    assert.equal(SHOT.coerceShot(bad), undefined, bad);
+  }
   const v = SHOT.coerceShot({ x: 1, blur: 1, follow: 0, beat: { zoom: 0.5, roll: 30, shake: -1, every: 3 }, keys: [
     { at: 'accent', aim: 'block', fill: 1.1, roll: 720, ox: 0.9, hit: 0, gz: 1, hop: 0.1, whip: 0.2 },
     { at: 'accentEnd', aim: 'reading', fill: 0.05, hop: 0, whip: 0.9, gz: 2, hit: 2 },
@@ -397,4 +403,34 @@ test('fromXMove: every move × focus × timing × power × dir gives a canonical
   approx(SHOT.fromXMove({ move: 'pulse' }).beat.zoom, 0.08 + 0.14 * 0.8, 1e-12, 'no power → 0.8');
   assert.equal(SHOT.fromXMove({ move: 'jump', timing: 'depart' }).keys.length, 4, 'no jump back to wide');
   assert.equal(SHOT.fromXMove({ move: 'jump' }).keys.length, 5);
+});
+
+// PV22 文字PVの定石 (「動きの向きを交互にする」): the mirrored framed shots are the presets with ox and roll negated, named by
+// their preset; mirrorOf reads both kinds of mirror.
+test('mirrored normal presets: keys, expansion, framing, labels and mirrorOf', () => {
+  const neg = (keys) => keys.map((k) => Object.fromEntries(Object.entries(k).map(([n, v]) => [n, (n === 'ox' || n === 'roll') && v !== 0 ? -v : v])));
+  for (const key of SHOT.NMIRRORS) {
+    const m = SHOT.presetOf(key + '~m');
+    assert.deepEqual(m.keys, neg(SHOT.SHOTS[key].keys), key);
+    assert.deepEqual(m.tags, SHOT.SHOTS[key].tags);
+    assert.ok(Object.isFrozen(m) && Object.isFrozen(m.keys[0]));
+    assert.deepEqual(SHOT.label(key + '~m'), ['shot.' + key, {}]);
+    assert.equal(SHOT.isExtreme(key + '~m'), false);
+    assert.equal(SHOT.usesBeats(key + '~m'), SHOT.usesBeats(key));
+    assert.equal(SHOT.maxFill(key + '~m'), SHOT.maxFill(key));
+    assert.deepEqual(SHOT.mirrorOf(key), { key, m: false });
+    assert.deepEqual(SHOT.mirrorOf(key + '~m'), { key, m: true });
+    assert.deepEqual(SHOT.limitsOf(key + '~m'), SHOT.LIMITS);
+  }
+  const roll = (v) => SHOT.expandShot(v).keys.map((k) => k.roll);
+  assert.deepEqual(roll('tiltHold~m'), roll('tiltHold').map((r) => -r), 'tiltHold~m rolls the other way');
+  assert.ok(roll('tiltHold').every((r) => r < 0));
+  const ox = (v) => SHOT.expandShot(v).keys.map((k) => k.ox);
+  assert.deepEqual(ox('driftOff~m'), ox('driftOff').map((x) => -x));
+  assert.deepEqual(SHOT.lastFraming('driftOff~m'), Object.assign({}, SHOT.lastFraming('driftOff'), { ox: -SHOT.lastFraming('driftOff').ox }));
+  assert.deepEqual(SHOT.mirrorOf('whipPan~m'), { key: 'whipPan', m: true });
+  assert.deepEqual(SHOT.mirrorOf('crashZoom'), { key: 'crashZoom', m: false }, 'an x-preset as xKeyOf reads it');
+  for (const v of ['settle', 'none', 'sweepAcross~m', null, { keys: [] }]) assert.equal(SHOT.mirrorOf(v), null, JSON.stringify(v));
+  // SHOT_KEYS (FROZEN) is untouched: the mirror is a suffix
+  assert.ok(!SHOT.SHOT_KEYS.some((k) => k.includes('~')));
 });

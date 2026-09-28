@@ -1,6 +1,6 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-XYZ0RkSBdT9p01KYWsEpBLzR9PWntAjhFeSbX9Y7Of0='; style-src 'sha256-CBzRvq4sWr3CF69hafDp1l8UkHnSy18JQMXGJJhPDYI=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-L5pU3cK0apLuGPtdei//RcensaY8298z5mSWx5XdR14='; style-src 'sha256-CBzRvq4sWr3CF69hafDp1l8UkHnSy18JQMXGJJhPDYI=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
 <title>Moji PV Maker</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -4428,10 +4428,12 @@ MV.def('core/shot', ['core/num', 'core/curve'], (N, CV) => {
   }
 
   // A ShotRef in canonical form, or undefined. EXTREME forms (an x-preset key with an optional "~m", an object with
-  // x === 1) are read by their own grammar; every other value exactly as before.
+  // x === 1) are read by their own grammar; so are the two mirrored normal presets 'driftOff~m' and 'tiltHold~m'
+  // (NMIRRORS, PV22 文字PVの定石); every other value exactly as before.
   function coerceShot(v) {
     if (typeof v === 'string') {
-      return v === 'none' || Object.prototype.hasOwnProperty.call(SHOT_DATA, v) || xKeyOf(v) !== null ? v : undefined;
+      return v === 'none' || Object.prototype.hasOwnProperty.call(SHOT_DATA, v) || xKeyOf(v) !== null || nKeyOf(v) !== null
+        ? v : undefined;
     }
     if (isObject(v) && v.x === 1) return coerceXShotObject(v);
     return coerceShotObject(v);
@@ -4601,6 +4603,29 @@ MV.def('core/shot', ['core/num', 'core/curve'], (N, CV) => {
     return Object.prototype.hasOwnProperty.call(XSHOT_DATA, key) ? { key, m } : null;
   }
 
+  // The normal presets that take the mirror suffix too (PV22 文字PVの定石, 「動きの向きを交互にする」): the text set off to
+  // one side (driftOff) and the tilted frame (tiltHold). sweepAcross is not one: it travels from the first word to the
+  // last, the reading direction, which negating ox would not reverse.
+  const NMIRRORS = Object.freeze(['driftOff', 'tiltHold']);
+
+  // 'driftOff~m' | 'tiltHold~m' → { key, m: true }; null for anything else (the plain keys are ordinary presets).
+  function nKeyOf(v) {
+    if (typeof v !== 'string' || !v.endsWith(MIRROR_SUFFIX)) return null;
+    const key = v.slice(0, -MIRROR_SUFFIX.length);
+    return NMIRRORS.includes(key) ? { key, m: true } : null;
+  }
+
+  // mirrorOf(v) → { key, m } for a value that names a preset with a mirror: an x-preset (as xKeyOf reads it, with an
+  // optional "~m") or a normal preset of NMIRRORS (plain or "~m"); null for anything else. Labels of a mirrored shot of
+  // either kind go through it.
+  function mirrorOf(v) {
+    if (typeof v !== 'string') return null;
+    const x = xKeyOf(v);
+    if (x) return x;
+    if (NMIRRORS.includes(v)) return { key: v, m: false };
+    return nKeyOf(v);
+  }
+
   // Keys with ox and roll negated (left ↔ right).
   function mirrorKeys(keys) {
     return keys.map((key) => {
@@ -4641,9 +4666,14 @@ MV.def('core/shot', ['core/num', 'core/curve'], (N, CV) => {
   // with its keys mirrored), or null for 'none', objects and unknown values.
   const XSHOTS_MIRRORED = deepFreeze(Object.fromEntries(XSHOT_KEYS.map((key) => [key,
     Object.assign({}, XSHOTS[key], { tags: XSHOTS[key].tags.slice(), keys: mirrorKeys(XSHOTS[key].keys) })])));
+  // The mirrored normal presets (NMIRRORS) likewise: ox and roll negated.
+  const SHOTS_MIRRORED = deepFreeze(Object.fromEntries(NMIRRORS.map((key) => [key,
+    Object.assign({}, SHOTS[key], { tags: SHOTS[key].tags.slice(), keys: mirrorKeys(SHOTS[key].keys) })])));
   function presetOf(v) {
     if (typeof v !== 'string') return null;
     if (Object.prototype.hasOwnProperty.call(SHOTS, v)) return SHOTS[v];
+    const n = nKeyOf(v);
+    if (n) return SHOTS_MIRRORED[n.key];
     const x = xKeyOf(v);
     if (!x) return null;
     return x.m ? XSHOTS_MIRRORED[x.key] : XSHOTS[x.key];
@@ -4958,12 +4988,12 @@ MV.def('core/shot', ['core/num', 'core/curve'], (N, CV) => {
     return !!shot && shot.keys.some((key) => typeof key.at === 'string' && key.at.startsWith('beat:'));
   }
 
-  // [stringKey, params]: 'shot.<preset>' (an x-preset too, mirrored or not), 'shot.none' (also for unreadable values),
-  // 'shot.custom' { n keys } (an x-shot object too).
+  // [stringKey, params]: 'shot.<preset>' (an x-preset or a normal preset, mirrored or not), 'shot.none' (also for
+  // unreadable values), 'shot.custom' { n keys } (an x-shot object too).
   function label(ref) {
     const v = coerceShot(ref);
     if (v === undefined || v === 'none') return ['shot.none', {}];
-    if (typeof v === 'string') { const x = xKeyOf(v); return ['shot.' + (x ? x.key : v), {}]; }
+    if (typeof v === 'string') { const x = mirrorOf(v); return ['shot.' + (x ? x.key : v), {}]; }
     return ['shot.custom', { n: v.keys.length }];
   }
 
@@ -4980,6 +5010,8 @@ MV.def('core/shot', ['core/num', 'core/curve'], (N, CV) => {
     // EXTREME (DESIGN_EXTREME §1)
     XSHOTS, XSHOT_KEYS, XLIMITS, XMOVES, DIRS, MIRRORS, X_ANCHORS, X_AWAY, X_FILL_MID,
     isExtreme, xKeyOf, presetOf, limitsOf, fromXMove, xIntensity,
+    // PV22 文字PVの定石: the mirrored normal presets
+    NMIRRORS, SHOTS_MIRRORED, mirrorOf,
   };
 });
 /* 文字PVメーカー v2 — original work. Parameter specs: coercion, AutoSpec evaluation, descriptions and validation (DESIGN §4.2, DESIGN_2_1 §3.5, §11.2.3). */
@@ -13988,8 +14020,8 @@ MV.def('i18n/strings', [], () => ({
   'fld.pvKit.note': ['Aメロ・Bメロ・サビなどのパートごとに、構図・入り・抜け・装飾・背景の候補をいくつかにしぼり、入りと抜けはひとつを目立たせます。同じパートは曲のどこでも同じセットを使います。',
     'Each song part (verse, pre-chorus, chorus…) draws its layouts, entrances, exits, decorations and backgrounds from a small set, with one entrance and one exit as its signature, and keeps that set wherever it comes back.'],
   'fld.pvAlternate': ['動きの向きを交互にする', 'Alternate directions'],
-  'fld.pvAlternate.note': ['横の動き・回転・文字を寄せる側を、前のカットと逆にします（横書きのとき。縦書きでは回転とカメラの動きだけ）。同じカットの中の動きは同じ向きにそろえます。文字の入りは読む向きを守るため、一語だけのカットでだけ左右を入れ替えます。',
-    'Sideways moves, spins and the side the text sits on alternate from cut to cut (in horizontal text; vertical text alternates spins and camera moves only). Moves within one cut share a direction. To keep the words readable, text slides in from the other side only on one-word cuts.'],
+  'fld.pvAlternate.note': ['横の動き・回転・文字を寄せる側を、前のカットと逆にします（横書きのとき。縦書きでは回転とカメラの動きだけ）。同じカットの中の動きは同じ向きにそろえます。文字の入りは読む向きを守るため、一語だけのカットでだけ左右を入れ替えます。寄りと引き、カメラの構えの左右も交互にします。',
+    'Sideways moves, spins and the side the text sits on alternate from cut to cut (in horizontal text; vertical text alternates spins and camera moves only). Moves within one cut share a direction. To keep the words readable, text slides in from the other side only on one-word cuts. Push-ins and pull-backs, and the side of a framed shot, alternate too.'],
   'fld.pvArc': ['曲の山に合わせて強弱をつける', 'Follow the song\'s build'],
   'fld.pvArc.note': ['Aメロは落ち着かせ、サビで強く、最後のサビを一番強くします。サビの直前は少しためます。パートは見出し（# サビ など）か曲の分析から読み取ります。',
     'Verses stay calmer, choruses get stronger and the last chorus strongest, with a short hold right before a chorus. Song parts come from headings (such as "# Chorus") or the song analysis.'],
@@ -14021,6 +14053,11 @@ MV.def('i18n/strings', [], () => ({
   'why.pv.fx': ['効果が重なりすぎないように減らした', 'Reduced so effects do not pile up'],
   'why.pv.letter': ['文字に同じ種類の効果が重ならないようにした', 'Keeps the lettering from stacking the same kind of effect'],
   'whyRule.pv.alt': ['前のカットと逆向きにした', 'Opposite direction to the previous cut'],
+  'why.pv.zoomOut': ['前のカットが寄りなので、引きの動きを選びやすくした', 'The previous cut moved in close, so pulling back is favored'],
+  'why.pv.zoomIn': ['前のカットが引きなので、寄りの動きを選びやすくした', 'The previous cut pulled back, so moving in close is favored'],
+  'whyRule.pv.mirror': ['前のカットと逆向きになるよう左右反転した', 'Mirrored to go the opposite way to the previous cut'],
+  'whyRule.pv.mirrorSame': ['このカットの動きの向きにそろえて左右反転した', 'Mirrored to match the direction of the rest of this cut'],
+  'whyRule.pv.mirrorCopy': ['くり返しの元のカットと同じく左右反転した', 'Mirrored like the cut this line repeats'],
   'whyRule.pv.fx': ['効果が重なりすぎないように数を減らした', 'Fewer, so effects do not pile up'],
   'whyRule.pv.group': ['「文字PVの定石」に合わせた', 'Follows "Lyric-video conventions"'],
   'whyRule.gen.new': ['新しい作品の標準', 'Default for new works'],
@@ -17198,7 +17235,7 @@ MV.def('planner/areas', ['core/paths', 'core/lyrics', 'planner/features'], (P, L
   return { AREA_KINDS, keyOf, areasOf, resolve, inArea, ofLines, bands, sameRef };
 });
 /* 文字PVメーカー v2 — original work. Directions of 文字PVの定石: which parameters point which way, and the alternation of 「動きの向きを交互にする」 (DESIGN_2_2 §2.2.4). */
-MV.def('planner/flow', ['core/hash', 'core/rng', 'core/num', 'core/schema', 'core/paths'], (H, R, N, S, P) => {
+MV.def('planner/flow', ['core/hash', 'core/rng', 'core/num', 'core/schema', 'core/paths', 'core/shot'], (H, R, N, S, P, SHOT) => {
   'use strict';
 
   // Three axes: h = the on-screen travel of what the viewer sees (+1 = rightward), side = where the text sits (+1 =
@@ -17440,9 +17477,109 @@ MV.def('planner/flow', ['core/hash', 'core/rng', 'core/num', 'core/schema', 'cor
     return sorted;
   }
 
+  // --- the camera (phase C) -------------------------------------------------------------------------------------------
+
+  // The two framed shots that take a mirror (core/shot NMIRRORS) and where their plain form points, as the engine draws
+  // it (pv_flow.test.js checks it against the camera): driftOff sets the text off to the right of the frame (the camera
+  // moves left: side +1), tiltHold tilts the frame so the text leans clockwise (the camera rolls the other way: rot +1).
+  // The "~m" form points the other way.
+  const SHOT_DIR = Object.freeze({ driftOff: Object.freeze({ axis: 'side', sign: 1 }), tiltHold: Object.freeze({ axis: 'rot', sign: 1 }) });
+
+  // shotDir(v) → { key, axis, s } for a shot value that is one of them (plain or "~m"), else null.
+  function shotDir(v) {
+    const m = typeof v === 'string' ? SHOT.mirrorOf(v) : null;
+    const e = m ? SHOT_DIR[m.key] : null;
+    return e && !SHOT.isExtreme(v) ? { key: m.key, axis: e.axis, s: m.m ? -e.sign : e.sign } : null;
+  }
+
+  // Push-ins and pull-backs: the class of a normal preset's move ('in' closes on the words, 'out' opens out from them).
+  const ZOOM_CLASS = Object.freeze({ pushWord: 'in', snapZoom: 'in', settle: 'in', pullReveal: 'out', readAlong: 'out', wideHold: 'out' });
+  // After a push-in the pull-backs weigh ×3.5 and the push-ins ×0.4; after a pull-back the push-ins ×2.5 and the
+  // pull-backs ×0.5 (a recency factor: on the cut's final weight, not its own). The pull-backs are rare picks (about 5 %
+  // of the lyric cuts), so milder factors hardly show: ×1.6 / ×0.6 raised a pull-back after a push-in from 7.6 to 9.9 %,
+  // these from 7.6 to 22.8 % (corpus(6) × 3 aspects; docs/NOTES.md, PV22 P2 phase C).
+  const ZOOM_AFTER = Object.freeze({
+    in: Object.freeze({ out: 3.5, in: 0.4 }),
+    out: Object.freeze({ in: 2.5, out: 0.5 }),
+  });
+
+  // zoomClass(v) → 'in' | 'out' | null for a shot value (a mirrored preset by its key; custom and EXTREME shots none).
+  function zoomClass(v) {
+    if (typeof v !== 'string' || SHOT.isExtreme(v)) return null;
+    const m = SHOT.mirrorOf(v);
+    return ZOOM_CLASS[m ? m.key : v] || null;
+  }
+
+  // zoomFactor(prevClass, key) → the factor on a shot key after a cut whose move had that class.
+  function zoomFactor(prevClass, key) {
+    const row = prevClass ? ZOOM_AFTER[prevClass] : null;
+    const c = row ? zoomClass(key) : null;
+    return c ? row[c] : 1;
+  }
+
+  // One frozen automatic decision per mirrored value (planner/encode's identity test stays warm).
+  const interned = new Map();
+  function autoShot(v) {
+    let d = interned.get(v);
+    if (!d) { d = Object.freeze({ from: 'auto', v }); interned.set(v, d); }
+    return d;
+  }
+
+  // mirrorShots(ctx, cuts, partOf, trace) (stage 6, after the EXTREME overlay and before the carry): per cut in time
+  // order, an automatic driftOff or tiltHold turns to its "~m" form where the alternation asks for the other side: an
+  // aligned copy (「くり返しの行をそろえる」) of a cut that shows the same preset points the way that cut shows it; else the
+  // way the rest of the cut points on the shot's axis (its parts' directions, cut.dir); else, unless the cut restarts
+  // (planner/flow restartAt), against the previous LOOKBACK cuts' final directions. A pinned, locked or ruled shot keeps
+  // its value but still gives the cut its direction. The cuts' final directions include their shots. No stream: the
+  // overlay is deterministic. trace(cut) → the explain trace of the cut's cam.shot, or null.
+  function mirrorShots(ctx, cuts, partOf, trace) {
+    const finals = [];
+    const byKey = new Map();
+    const seed = ctx.doc.look.seed;
+    for (const cut of cuts) {
+      const own = unpack(cut.dir);
+      const d = cut.slots['cam.shot'];
+      const sd = d ? shotDir(d.v) : null;
+      if (sd) {
+        let s = sd.s;
+        if (d.from === 'auto' && s === SHOT_DIR[sd.key].sign && typeof d.v === 'string' && d.v === sd.key) {
+          const src = ctx.align ? ctx.align.get(cut.key) || null : null;
+          const shown = src ? byKey.get(src.key) : null;
+          const ss = shown ? shotDir(shown.v) : null;
+          let want, why;
+          if (ss && ss.key === sd.key) { want = ss.s; why = 'pv.mirrorCopy'; }
+          else if (own[sd.axis] !== 0) { want = own[sd.axis]; why = 'pv.mirrorSame'; }
+          else if (restartAt(seed, partOf(cut), cut.key)) { want = 0; why = null; }
+          else { want = -finalSign(finals, sd.axis); why = 'pv.mirror'; }
+          if (want !== 0 && want !== s) {
+            const m = autoShot(sd.key + '~m');
+            cut.slots['cam.shot'] = m;
+            s = want;
+            const t = trace ? trace(cut) : null;
+            if (t) { t.override = { rule: why, decision: m, why: (t.why || []).slice() }; t.mirrored = why; }
+          }
+        }
+        if (own[sd.axis] === 0) own[sd.axis] = s;
+      }
+      finals.push(own);
+      byKey.set(cut.key, cut.slots['cam.shot'] || null);
+    }
+  }
+
+  // The first nonzero sign on an axis among the last LOOKBACK final directions, else 0.
+  function finalSign(finals, axis) {
+    for (let k = 1; k <= LOOKBACK; k++) {
+      const own = finals[finals.length - k];
+      if (own && own[axis] !== 0) return own[axis];
+    }
+    return 0;
+  }
+
   return {
     TABLE, DIR, AXES, P_FLIP, LOOKBACK, RESTART_MASK, NO_DIR, entryOf, signOf, flipValue, pack, unpack, axisOf, restartAt,
     flipParams, prevSign, seamDir, flipSeam, wrapAngle,
+    // phase C: the camera
+    SHOT_DIR, ZOOM_CLASS, ZOOM_AFTER, shotDir, zoomClass, zoomFactor, mirrorShots,
   };
 });
 /* 文字PVメーカー v2 — original work. The set of looks of a song part (演出セット) for 「パートごとに演出をそろえる」 (DESIGN_2_2 §2.1.4). */
@@ -18031,8 +18168,9 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
       const { ctx, cut } = st;
       // the features as the cut's choices weigh them (文字PVの定石's arc blends the energy; hand-made states have none)
       const f = st.feat || cut.feat;
-      // 「曲の山に合わせて強弱をつける」: the arc's factor on each preset's strength, part of the cut's own weight
-      const pvf = ctx.pv ? ctx.pv.shotFactors(st) : null;
+      // 文字PVの定石: 「曲の山に合わせて強弱をつける」's factor on each preset's strength (part of the cut's own weight) and
+      // 「動きの向きを交互にする」's push-in / pull-back alternation after the previous cut's move (a recency factor)
+      const pvf = ctx.pv ? ctx.pv.shotFactors(st, rec) : null;
       const A = ctx.look.amounts.camera;
       const mood = ctx.look.mood;
       const orient = st.chosen.orient;
@@ -18050,12 +18188,13 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
         const echo = rec.echo === key;
         // Left to right, like the factors are listed in §4.7 (the product is rounded once, by q6).
         let own = baseWeight(key, f, A, orient, frames) * m * sec;
-        if (pvf) own *= pvf(key);
+        if (pvf && pvf.arc) own *= pvf.own(key);
         const w = own * (echo ? SHOT_ECHO : 1);
         const wBase = N.q6(w);
         let wr = w;
         if (rec.prev === key) wr *= SHOT_RECENT;
         if (rec.near.includes(key)) wr *= SHOT_NEAR;
+        if (pvf && pvf.alt) wr *= pvf.zoom(key);
         let why = null;
         if (withWhy) {
           why = baseWhy(key, f, A, orient, lensKey, frames);
@@ -18063,7 +18202,8 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
           if (sec !== 1 && f.section) why.push({ code: 'cam.section', params: { section: f.section } });
           if (echo) why.push({ code: rec.echoCode, params: { cut: f.repeatOf } });
           if (rec.prev && rec.prev !== key) why.push({ code: 'recent', params: { key: rec.prev } });
-          if (pvf) { const w = ctx.pv.arcWhy(st, pvf(key)); if (w) why.push(w); }
+          if (pvf && pvf.arc) { const w = ctx.pv.arcWhy(st, pvf.own(key)); if (w) why.push(w); }
+          if (pvf && pvf.alt) { const w = pvf.zoomWhy(key); if (w) why.push(w); }
         }
         out[i] = { key, w: wr === w ? wBase : N.q6(wr), wBase, wOwn: echo ? N.q6(own) : wBase, why };
       }
@@ -18379,7 +18519,9 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
         let x;
         if (shot === NONE || shot === 'wideHold') x = 0;
         else {
-          const own = typeof shot === 'string' ? SHOT.SHOTS[shot] && SHOT.SHOTS[shot].follow : shot && shot.follow;
+          // a normal preset, mirrored or not ('driftOff~m', 文字PVの定石); an EXTREME key has none here
+          const preset = typeof shot === 'string' && !SHOT.isExtreme(shot) ? SHOT.presetOf(shot) : null;
+          const own = typeof shot === 'string' ? preset && preset.follow : shot && shot.follow;
           if (typeof own === 'number' && own > 0) x = own;
           else {
             const arrive = st.chosen.arrive ? ctx.registry.get('arrive', st.chosen.arrive) : null;
@@ -18393,9 +18535,10 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
 
     // --- carry (§4.5.7; stage 6, after the seams) ------------------------------------------------------------------
 
-    // Whether a shot starts by framing the text at the cut's start (the key expandShot's carry replaces).
+    // Whether a shot starts by framing the text at the cut's start (the key expandShot's carry replaces): a normal preset,
+    // mirrored or not ('driftOff~m', 文字PVの定石); never an EXTREME key.
     function opensOnText(v) {
-      const shot = typeof v === 'string' ? SHOT.SHOTS[v] : null;
+      const shot = typeof v === 'string' && !SHOT.isExtreme(v) ? SHOT.presetOf(v) : null;
       if (!shot) return false;
       const k0 = shot.keys[0];
       return k0.at === 'a' && k0.aim !== 'frame' && k0.aim !== 'point';
@@ -18951,11 +19094,14 @@ MV.def('planner/extreme', ['core/hash', 'core/num', 'core/pins', 'core/paths', '
   }
 
   // The mirror of a pick (§2.3.4): only the ⇆ presets; the pair rule keeps the previous whipPan's direction, a repeat
-  // that plays its first copy's preset plays it in the same direction, else hash32('xmirror', prefix) & 1.
-  function mirrorOf(key, rec, prefix) {
+  // that plays its first copy's preset plays it in the same direction; under 「動きの向きを交互にする」 (alt, PV22
+  // 文字PVの定石) a pick right after a cut that shows a ⇆ preset goes the other way round; else hash32('xmirror',
+  // prefix) & 1.
+  function mirrorOf(key, rec, prefix, alt) {
     if (!SHOT.MIRRORS.includes(key)) return false;
     if (key === 'whipPan' && rec.pair) return rec.last.m;
     if (rec.echoRow && rec.echoRow.key === key) return rec.echoRow.m;
+    if (alt && rec.last && rec.last.key && SHOT.MIRRORS.includes(rec.last.key)) return !rec.last.m;
     return (H.hash32('xmirror', prefix) & 1) === 1;
   }
 
@@ -19012,6 +19158,9 @@ MV.def('planner/extreme', ['core/hash', 'core/num', 'core/pins', 'core/paths', '
   // salt-free window the echo reads (null: this pass's own); write: set the decisions and traces (the real pass).
   function pass(ctx, cuts, pins, salts, free, write) {
     const win = createWindow();
+    // 「動きの向きを交互にする」 (PV22 文字PVの定石): consecutive ⇆ moves turn the other way round (stub contexts have no
+    // rules: false)
+    const alt = !!(ctx.rules && ctx.rules.alt && ctx.pv && ctx.pv.on.camAlt);
     for (let j = 0; j < cuts.length; j++) {
       const cut = cuts[j];
       const { x, xd } = pins[j];
@@ -19049,7 +19198,7 @@ MV.def('planner/extreme', ['core/hash', 'core/num', 'core/pins', 'core/paths', '
       const same = sameAs(win, src, rec.prev, list);
       const got = same ? { key: same.key, nat: same.key } : argmax(list, prefix);
       if (got.key === null) { win.push(cut, null, false, null); continue; }
-      const m = same ? same.m : mirrorOf(got.key, rec, prefix);
+      const m = same ? same.m : mirrorOf(got.key, rec, prefix, alt);
       win.push(cut, got.key, m, got.nat);
       if (!write) continue;
       const d = intern('auto', null, got.key + (m ? '~m' : ''));
@@ -21434,7 +21583,9 @@ MV.def('planner/conventions', ['core/num', 'core/shot', 'planner/arc', 'planner/
     function prepare(ctx, cuts, timed, opts) {
       const o = opts || {};
       const rules = ctx.rules;
-      const on = Object.freeze({ kit: !!rules.kit, alt: !!rules.alt, arc: !!rules.arc, fx: !!rules.fx, camAlt: false });
+      // camAlt: the camera's share of 「動きの向きを交互にする」 (phase C: mirrored framed shots, push-ins and pull-backs,
+      // EXTREME's mirrors), on with the rest of it
+      const on = Object.freeze({ kit: !!rules.kit, alt: !!rules.alt, arc: !!rules.arc, fx: !!rules.fx, camAlt: !!rules.alt });
       const cached = !!o.cached;
       const film = typeof o.film === 'number' ? o.film : 0;
       if (cached) { beginBlends(); beginWeights(); }
@@ -21612,13 +21763,35 @@ MV.def('planner/conventions', ['core/num', 'core/shot', 'planner/arc', 'planner/
         }
       }
 
-      // The arc's factor on a shot preset (planner/camera weighShots, on the cut's own weights): a function of the shot
-      // key, or null. 'none' counts as calm.
-      function shotFactors(st) {
-        if (!arcOn || !st.part) return null;
-        const drive = st.part.drive;
-        return (key) => arcFactor(key === 'none' ? -1 : ARC.strength(SHOT.SHOTS[key] || null, null), drive);
+      // shotFactors(st, rec) → the factors 文字PVの定石 puts on the shot presets of a cut (planner/camera weighShots), or
+      // null: { own(key) → the arc's factor on the preset's strength ('none' counts as calm; part of the cut's own weight,
+      // its natural pick), zoom(key) → the push-in / pull-back alternation after the previous cut's move (rec.prev, a
+      // recency factor on the final weight only; not in the natural pass, which has no previous cut, and not on a cut
+      // with a marked word, whose push-in weighs ×3 there), zoomWhy(key) → explain's reason for a raised key or null }.
+      // One frozen object per (drive, previous class).
+      const shotFx = new Map();
+      function shotFactors(st, rec) {
+        const drive = arcOn && st.part ? st.part.drive : null;
+        const f = st.feat || st.cut.feat;
+        const prev = on.camAlt && rec && !st.natural && !f.emph ? FL.zoomClass(rec.prev) : null;
+        if (drive === null && prev === null) return null;
+        const id = drive + '|' + prev;
+        let x = shotFx.get(id);
+        if (!x) {
+          const own = drive === null ? one
+            : (key) => arcFactor(key === 'none' ? -1 : ARC.strength(SHOT.SHOTS[key] || null, null), drive);
+          const zoom = prev === null ? one : (key) => FL.zoomFactor(prev, key);
+          const zoomWhy = prev === null ? none : (key) => (FL.zoomFactor(prev, key) > 1
+            ? { code: prev === 'in' ? 'pv.zoomOut' : 'pv.zoomIn', params: {} } : null);
+          x = Object.freeze({ own, zoom, zoomWhy, arc: drive !== null, alt: prev !== null });
+          shotFx.set(id, x);
+        }
+        return x;
       }
+      function none() { return null; }
+
+      // 「動きの向きを交互にする」 for the camera (stage 6, planner/plan): the mirrored framed shots (planner/flow).
+      function mirrorShots(cuts, trace) { if (on.camAlt) FL.mirrorShots(ctx, cuts, partOf, trace || null); }
 
       // arcWhy(st, factor) → the reason the arc gives a pick its factor x at the cut (explain): the last chorus (the
       // peak), the hold before a chorus, or the part's kind favouring stronger (drive above 0.5) or calmer moves; null
@@ -21651,6 +21824,7 @@ MV.def('planner/conventions', ['core/num', 'core/shot', 'planner/arc', 'planner/
       return {
         on, arcOn, partOf, featOf, seamEnergy, idOf, partFactor, groundFactor, faceBoost, avoidAlso, flipParams, dirOf,
         flipSeam, seamDir, shotFactors, arcWhy, kimeAt: ARC.kimeAt, summary, kitOf, trimLists, seamGate, castDone,
+        mirrorShots,
       };
     }
 
@@ -23306,6 +23480,9 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
     const seams = TR.seams(ctx, cuts);
     ctx.seams = seams;
     XT.shots(ctx, cuts);
+    // 文字PVの定石's 「動きの向きを交互にする」: the framed shots driftOff and tiltHold turn to the other side where the
+    // alternation asks (their "~m" forms; planner/flow mirrorShots)
+    if (ctx.pv && ctx.pv.on.camAlt) ctx.pv.mirrorShots(cuts, ctx.trace ? (cut) => shotTrace(ctx, cut) : null);
     CAM.carry(ctx, cuts, seams);
     const rigs = CAM.rigs(ctx, cuts, seams, duration);
     const impulses = TR.impulses(ctx, cuts, duration);
@@ -23340,6 +23517,14 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
     // 文字PVの定石's parts and sets of looks (the inspector's 区画 page and tests; not part of the Plan)
     Object.defineProperty(plan, 'pv', { value: ctx.pv ? ctx.pv.summary() : null, enumerable: false });
     return plan;
+  }
+
+  // The trace of a cut's cam.shot when that is the traced slot (explain; as planner/camera tracing), else null.
+  function shotTrace(ctx, cut) {
+    const t = ctx.trace;
+    if (!t || t.cutKey !== cut.key || t.slot !== 'cam.shot') return null;
+    t.hit = true;
+    return t.out;
   }
 
   // --- entry points ---------------------------------------------------------------------------------------------
@@ -24320,7 +24505,9 @@ MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media
       return trace.kind === 'cam.extreme' && trace.why ? pinned.concat(trace.why) : pinned;
     }
     if (trace.override && trace.override.rule === 'carry') {
-      return (trace.why || []).concat([{ code: 'rule', params: { rule: 'carry' } }]);
+      // a framed shot 文字PVの定石 turned before the carry says so too (planner/flow mirrorShots)
+      const turned = trace.mirrored ? [{ code: 'rule', params: { rule: trace.mirrored } }] : [];
+      return (trace.why || []).concat(turned, [{ code: 'rule', params: { rule: 'carry' } }]);
     }
     // an override (a rule that replaced the decision after casting) with its own reasons: the EXTREME overlay's
     if (trace.override) return [{ code: 'rule', params: { rule: trace.override.rule } }].concat(trace.override.why || []);
@@ -45794,9 +45981,10 @@ MV.def('ai/changes', ['core/commands', 'core/lyrics', 'core/doc', 'core/hash', '
     return t(label[0], p);
   }
 
-  // An EXTREME preset mirrored ("~m") says so: 「回って入る（左右反転）」 (DESIGN_EXTREME §2.6).
+  // An EXTREME preset mirrored ("~m") says so: 「回って入る（左右反転）」 (DESIGN_EXTREME §2.6); so does a framed shot
+  // 文字PVの定石 turned ('driftOff~m', 'tiltHold~m').
   function mirrored(t, v, name) {
-    const x = SHOT.xKeyOf(v);
+    const x = SHOT.mirrorOf(v);
     return x && x.m && t.has('shot.mirroredOf') ? t('shot.mirroredOf', { name }) : name;
   }
 
@@ -48145,7 +48333,9 @@ MV.def('ai/direct', ['core/pins', 'core/paths', 'core/curve', 'core/shot', 'core
     // an EXTREME move (the overlay's pick, a hand or AI pin) is 'custom' outside the 「EXTREME」 request: its vocabulary
     // cannot name it, and a normal request stays as it was (phase F)
     const named = shot && typeof shot.v === 'string' && (ctx.extreme || !SHOT.isExtreme(shot.v));
-    const shotText = shot ? (named ? shot.v : 'custom') + (shot.from === 'auto' ? '(auto)' : '') : '-';
+    // a framed shot 文字PVの定石 turned ('driftOff~m') goes by its preset's name: the AI's vocabulary is SHOT_KEYS
+    const shotName = named && !SHOT.isExtreme(shot.v) && SHOT.mirrorOf(shot.v) ? SHOT.mirrorOf(shot.v).key : named ? shot.v : 'custom';
+    const shotText = shot ? shotName + (shot.from === 'auto' ? '(auto)' : '') : '-';
     const orn = [0, 1, 2].map((i) => v('ornament#' + i)).filter((x) => x !== undefined && x !== 'none');
     const g = cut && plan.grounds && Number.isInteger(cut.ground) ? plan.grounds[cut.ground] : null;
     let ground = g && g.ground ? shortValue(g.ground.v) : '-';
@@ -57558,9 +57748,12 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core
     return kind === 'shot' ? SHOT.SHOT_KEYS : kind === 'rig' ? SHOT.RIG_KEYS : kind === 'xshot' ? SHOT.XSHOT_KEYS : [];
   }
 
-  // Whether key names a preset of a camera kind (an EXTREME preset may carry the mirror suffix "~m").
+  // Whether key names a preset of a camera kind (an EXTREME preset may carry the mirror suffix "~m", and so may the two
+  // framed shots 文字PVの定石 turns: 'driftOff~m', 'tiltHold~m').
   function cameraKeyOk(kind, key) {
-    return kind === 'xshot' ? SHOT.xKeyOf(key) !== null : cameraKeys(kind).includes(key);
+    if (kind === 'xshot') return SHOT.xKeyOf(key) !== null;
+    const m = kind === 'shot' ? SHOT.mirrorOf(key) : null;
+    return m ? cameraKeys(kind).includes(m.key) : cameraKeys(kind).includes(key);
   }
 
   // --- media mode: the fake store and its test parts (test pages only) -------------------------------------------------
@@ -71416,8 +71609,9 @@ MV.def('ui/widgets', ['ui/dom', 'ui/icons', 'i18n/t', 'core/color', 'ui/playbar'
       focus: () => dom.focus(btn),
       update(st) {
         const v = SHOT.coerceShot(st.value);
-        const x = !st.mixed && v !== undefined && SHOT.isExtreme(v) ? SHOT.xKeyOf(v) : null;
-        // an EXTREME move carries its ⚡ (DESIGN_EXTREME §2.6), a mirrored one says so
+        const x = !st.mixed && v !== undefined ? SHOT.mirrorOf(v) : null;
+        // an EXTREME move carries its ⚡ (DESIGN_EXTREME §2.6), a mirrored one says so (an EXTREME move, or a framed
+        // shot 文字PVの定石 turned the other way: 'driftOff~m', 'tiltHold~m')
         const base = st.mixed ? t('state.mixed') : t.label(SHOT.label(v === undefined ? 'none' : v));
         const text = x && x.m ? t('shot.mirroredOf', { name: base }) : base;
         name.textContent = text;
@@ -72338,7 +72532,7 @@ MV.def('ui/ai_review', ['ui/dom', 'ui/icons', 'ai/changes', 'i18n/t', 'ui/ai_con
       return t('ai.review.mine', { name: kind ? t.part(kind, v) : v });
     }
     if (slot === 'cam.shot') {
-      const x = SHOT.xKeyOf(v);
+      const x = SHOT.mirrorOf(v);
       return x && x.m ? t('shot.mirroredOf', { name: t.label(SHOT.label(v)) }) : t.label(SHOT.label(v));
     }
     if (slot === 'cam.extreme') return t(v > 0 ? 'val.on' : 'val.off');          // the EXTREME switch (DESIGN_EXTREME §2.5)
@@ -74326,7 +74520,9 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
         return d;
       };
       const value = row.fs && row.fs.state !== 'mixed' && typeof row.fs.value === 'string' ? row.fs.value : null;
-      const xNow = value ? SHOT.xKeyOf(value) : null;
+      // the preset shown with its mirror (an EXTREME move, or a framed shot 文字PVの定石 turned: 'driftOff~m'): picking
+      // the current tile keeps its mirror
+      const xNow = value ? SHOT.mirrorOf(value) : null;
       const xOwn = (key) => (xNow && xNow.key === key ? value : key);
       const info = (k) => {
         if (SHOT.XSHOTS[k]) return { text: t('shot.' + k), blurb: t('shot.blurb.' + k), tags: SHOT.XSHOTS[k].tags.slice() };
@@ -74339,7 +74535,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
         groups: [{ id: 'extreme', label: t('shot.group.extreme'), note: t('shot.group.extremeNote'), keys: SHOT.XSHOT_KEYS.slice(), kind: 'xshot',
           badge: (k) => t('shot.xBadge') + (xNow && xNow.key === k && xNow.m ? ' ' + t('shot.mirrored') : '') }],
         onPick: (key) => {
-          if (key === null || !SHOT.isExtreme(key)) { pop(); if (key === null) unpin(row); else commit(row, key); return; }
+          if (key === null || !SHOT.isExtreme(key)) { pop(); if (key === null) unpin(row); else commit(row, xOwn(key)); return; }
           const v = xOwn(key);
           XU.pickShot(app, paths, v).then((ok) => { if (ok && stack.length && stack[stack.length - 1].id === 'pick:' + row.path) { pop(); commit(row, v); } });
         },

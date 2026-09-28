@@ -1,5 +1,5 @@
 /* 文字PVメーカー v2 — original work. Directions of 文字PVの定石: which parameters point which way, and the alternation of 「動きの向きを交互にする」 (DESIGN_2_2 §2.2.4). */
-MV.def('planner/flow', ['core/hash', 'core/rng', 'core/num', 'core/schema', 'core/paths'], (H, R, N, S, P) => {
+MV.def('planner/flow', ['core/hash', 'core/rng', 'core/num', 'core/schema', 'core/paths', 'core/shot'], (H, R, N, S, P, SHOT) => {
   'use strict';
 
   // Three axes: h = the on-screen travel of what the viewer sees (+1 = rightward), side = where the text sits (+1 =
@@ -241,8 +241,108 @@ MV.def('planner/flow', ['core/hash', 'core/rng', 'core/num', 'core/schema', 'cor
     return sorted;
   }
 
+  // --- the camera (phase C) -------------------------------------------------------------------------------------------
+
+  // The two framed shots that take a mirror (core/shot NMIRRORS) and where their plain form points, as the engine draws
+  // it (pv_flow.test.js checks it against the camera): driftOff sets the text off to the right of the frame (the camera
+  // moves left: side +1), tiltHold tilts the frame so the text leans clockwise (the camera rolls the other way: rot +1).
+  // The "~m" form points the other way.
+  const SHOT_DIR = Object.freeze({ driftOff: Object.freeze({ axis: 'side', sign: 1 }), tiltHold: Object.freeze({ axis: 'rot', sign: 1 }) });
+
+  // shotDir(v) → { key, axis, s } for a shot value that is one of them (plain or "~m"), else null.
+  function shotDir(v) {
+    const m = typeof v === 'string' ? SHOT.mirrorOf(v) : null;
+    const e = m ? SHOT_DIR[m.key] : null;
+    return e && !SHOT.isExtreme(v) ? { key: m.key, axis: e.axis, s: m.m ? -e.sign : e.sign } : null;
+  }
+
+  // Push-ins and pull-backs: the class of a normal preset's move ('in' closes on the words, 'out' opens out from them).
+  const ZOOM_CLASS = Object.freeze({ pushWord: 'in', snapZoom: 'in', settle: 'in', pullReveal: 'out', readAlong: 'out', wideHold: 'out' });
+  // After a push-in the pull-backs weigh ×3.5 and the push-ins ×0.4; after a pull-back the push-ins ×2.5 and the
+  // pull-backs ×0.5 (a recency factor: on the cut's final weight, not its own). The pull-backs are rare picks (about 5 %
+  // of the lyric cuts), so milder factors hardly show: ×1.6 / ×0.6 raised a pull-back after a push-in from 7.6 to 9.9 %,
+  // these from 7.6 to 22.8 % (corpus(6) × 3 aspects; docs/NOTES.md, PV22 P2 phase C).
+  const ZOOM_AFTER = Object.freeze({
+    in: Object.freeze({ out: 3.5, in: 0.4 }),
+    out: Object.freeze({ in: 2.5, out: 0.5 }),
+  });
+
+  // zoomClass(v) → 'in' | 'out' | null for a shot value (a mirrored preset by its key; custom and EXTREME shots none).
+  function zoomClass(v) {
+    if (typeof v !== 'string' || SHOT.isExtreme(v)) return null;
+    const m = SHOT.mirrorOf(v);
+    return ZOOM_CLASS[m ? m.key : v] || null;
+  }
+
+  // zoomFactor(prevClass, key) → the factor on a shot key after a cut whose move had that class.
+  function zoomFactor(prevClass, key) {
+    const row = prevClass ? ZOOM_AFTER[prevClass] : null;
+    const c = row ? zoomClass(key) : null;
+    return c ? row[c] : 1;
+  }
+
+  // One frozen automatic decision per mirrored value (planner/encode's identity test stays warm).
+  const interned = new Map();
+  function autoShot(v) {
+    let d = interned.get(v);
+    if (!d) { d = Object.freeze({ from: 'auto', v }); interned.set(v, d); }
+    return d;
+  }
+
+  // mirrorShots(ctx, cuts, partOf, trace) (stage 6, after the EXTREME overlay and before the carry): per cut in time
+  // order, an automatic driftOff or tiltHold turns to its "~m" form where the alternation asks for the other side: an
+  // aligned copy (「くり返しの行をそろえる」) of a cut that shows the same preset points the way that cut shows it; else the
+  // way the rest of the cut points on the shot's axis (its parts' directions, cut.dir); else, unless the cut restarts
+  // (planner/flow restartAt), against the previous LOOKBACK cuts' final directions. A pinned, locked or ruled shot keeps
+  // its value but still gives the cut its direction. The cuts' final directions include their shots. No stream: the
+  // overlay is deterministic. trace(cut) → the explain trace of the cut's cam.shot, or null.
+  function mirrorShots(ctx, cuts, partOf, trace) {
+    const finals = [];
+    const byKey = new Map();
+    const seed = ctx.doc.look.seed;
+    for (const cut of cuts) {
+      const own = unpack(cut.dir);
+      const d = cut.slots['cam.shot'];
+      const sd = d ? shotDir(d.v) : null;
+      if (sd) {
+        let s = sd.s;
+        if (d.from === 'auto' && s === SHOT_DIR[sd.key].sign && typeof d.v === 'string' && d.v === sd.key) {
+          const src = ctx.align ? ctx.align.get(cut.key) || null : null;
+          const shown = src ? byKey.get(src.key) : null;
+          const ss = shown ? shotDir(shown.v) : null;
+          let want, why;
+          if (ss && ss.key === sd.key) { want = ss.s; why = 'pv.mirrorCopy'; }
+          else if (own[sd.axis] !== 0) { want = own[sd.axis]; why = 'pv.mirrorSame'; }
+          else if (restartAt(seed, partOf(cut), cut.key)) { want = 0; why = null; }
+          else { want = -finalSign(finals, sd.axis); why = 'pv.mirror'; }
+          if (want !== 0 && want !== s) {
+            const m = autoShot(sd.key + '~m');
+            cut.slots['cam.shot'] = m;
+            s = want;
+            const t = trace ? trace(cut) : null;
+            if (t) { t.override = { rule: why, decision: m, why: (t.why || []).slice() }; t.mirrored = why; }
+          }
+        }
+        if (own[sd.axis] === 0) own[sd.axis] = s;
+      }
+      finals.push(own);
+      byKey.set(cut.key, cut.slots['cam.shot'] || null);
+    }
+  }
+
+  // The first nonzero sign on an axis among the last LOOKBACK final directions, else 0.
+  function finalSign(finals, axis) {
+    for (let k = 1; k <= LOOKBACK; k++) {
+      const own = finals[finals.length - k];
+      if (own && own[axis] !== 0) return own[axis];
+    }
+    return 0;
+  }
+
   return {
     TABLE, DIR, AXES, P_FLIP, LOOKBACK, RESTART_MASK, NO_DIR, entryOf, signOf, flipValue, pack, unpack, axisOf, restartAt,
     flipParams, prevSign, seamDir, flipSeam, wrapAngle,
+    // phase C: the camera
+    SHOT_DIR, ZOOM_CLASS, ZOOM_AFTER, shotDir, zoomClass, zoomFactor, mirrorShots,
   };
 });

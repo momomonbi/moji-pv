@@ -338,7 +338,7 @@ MV.def('ui/ai_review', ['ui/dom', 'ui/icons', 'ai/changes', 'i18n/t', 'ui/ai_con
       return t('ai.review.mine', { name: kind ? t.part(kind, v) : v });
     }
     if (slot === 'cam.shot') {
-      const x = SHOT.xKeyOf(v);
+      const x = SHOT.mirrorOf(v);
       return x && x.m ? t('shot.mirroredOf', { name: t.label(SHOT.label(v)) }) : t.label(SHOT.label(v));
     }
     if (slot === 'cam.extreme') return t(v > 0 ? 'val.on' : 'val.off');          // the EXTREME switch (DESIGN_EXTREME §2.5)

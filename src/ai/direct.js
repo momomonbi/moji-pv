@@ -321,7 +321,9 @@ MV.def('ai/direct', ['core/pins', 'core/paths', 'core/curve', 'core/shot', 'core
     // an EXTREME move (the overlay's pick, a hand or AI pin) is 'custom' outside the 「EXTREME」 request: its vocabulary
     // cannot name it, and a normal request stays as it was (phase F)
     const named = shot && typeof shot.v === 'string' && (ctx.extreme || !SHOT.isExtreme(shot.v));
-    const shotText = shot ? (named ? shot.v : 'custom') + (shot.from === 'auto' ? '(auto)' : '') : '-';
+    // a framed shot 文字PVの定石 turned ('driftOff~m') goes by its preset's name: the AI's vocabulary is SHOT_KEYS
+    const shotName = named && !SHOT.isExtreme(shot.v) && SHOT.mirrorOf(shot.v) ? SHOT.mirrorOf(shot.v).key : named ? shot.v : 'custom';
+    const shotText = shot ? shotName + (shot.from === 'auto' ? '(auto)' : '') : '-';
     const orn = [0, 1, 2].map((i) => v('ornament#' + i)).filter((x) => x !== undefined && x !== 'none');
     const g = cut && plan.grounds && Number.isInteger(cut.ground) ? plan.grounds[cut.ground] : null;
     let ground = g && g.ground ? shortValue(g.ground.v) : '-';

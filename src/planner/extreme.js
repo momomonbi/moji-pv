@@ -290,11 +290,14 @@ MV.def('planner/extreme', ['core/hash', 'core/num', 'core/pins', 'core/paths', '
   }
 
   // The mirror of a pick (§2.3.4): only the ⇆ presets; the pair rule keeps the previous whipPan's direction, a repeat
-  // that plays its first copy's preset plays it in the same direction, else hash32('xmirror', prefix) & 1.
-  function mirrorOf(key, rec, prefix) {
+  // that plays its first copy's preset plays it in the same direction; under 「動きの向きを交互にする」 (alt, PV22
+  // 文字PVの定石) a pick right after a cut that shows a ⇆ preset goes the other way round; else hash32('xmirror',
+  // prefix) & 1.
+  function mirrorOf(key, rec, prefix, alt) {
     if (!SHOT.MIRRORS.includes(key)) return false;
     if (key === 'whipPan' && rec.pair) return rec.last.m;
     if (rec.echoRow && rec.echoRow.key === key) return rec.echoRow.m;
+    if (alt && rec.last && rec.last.key && SHOT.MIRRORS.includes(rec.last.key)) return !rec.last.m;
     return (H.hash32('xmirror', prefix) & 1) === 1;
   }
 
@@ -351,6 +354,9 @@ MV.def('planner/extreme', ['core/hash', 'core/num', 'core/pins', 'core/paths', '
   // salt-free window the echo reads (null: this pass's own); write: set the decisions and traces (the real pass).
   function pass(ctx, cuts, pins, salts, free, write) {
     const win = createWindow();
+    // 「動きの向きを交互にする」 (PV22 文字PVの定石): consecutive ⇆ moves turn the other way round (stub contexts have no
+    // rules: false)
+    const alt = !!(ctx.rules && ctx.rules.alt && ctx.pv && ctx.pv.on.camAlt);
     for (let j = 0; j < cuts.length; j++) {
       const cut = cuts[j];
       const { x, xd } = pins[j];
@@ -388,7 +394,7 @@ MV.def('planner/extreme', ['core/hash', 'core/num', 'core/pins', 'core/paths', '
       const same = sameAs(win, src, rec.prev, list);
       const got = same ? { key: same.key, nat: same.key } : argmax(list, prefix);
       if (got.key === null) { win.push(cut, null, false, null); continue; }
-      const m = same ? same.m : mirrorOf(got.key, rec, prefix);
+      const m = same ? same.m : mirrorOf(got.key, rec, prefix, alt);
       win.push(cut, got.key, m, got.nat);
       if (!write) continue;
       const d = intern('auto', null, got.key + (m ? '~m' : ''));

@@ -971,7 +971,9 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
         return d;
       };
       const value = row.fs && row.fs.state !== 'mixed' && typeof row.fs.value === 'string' ? row.fs.value : null;
-      const xNow = value ? SHOT.xKeyOf(value) : null;
+      // the preset shown with its mirror (an EXTREME move, or a framed shot 文字PVの定石 turned: 'driftOff~m'): picking
+      // the current tile keeps its mirror
+      const xNow = value ? SHOT.mirrorOf(value) : null;
       const xOwn = (key) => (xNow && xNow.key === key ? value : key);
       const info = (k) => {
         if (SHOT.XSHOTS[k]) return { text: t('shot.' + k), blurb: t('shot.blurb.' + k), tags: SHOT.XSHOTS[k].tags.slice() };
@@ -984,7 +986,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
         groups: [{ id: 'extreme', label: t('shot.group.extreme'), note: t('shot.group.extremeNote'), keys: SHOT.XSHOT_KEYS.slice(), kind: 'xshot',
           badge: (k) => t('shot.xBadge') + (xNow && xNow.key === k && xNow.m ? ' ' + t('shot.mirrored') : '') }],
         onPick: (key) => {
-          if (key === null || !SHOT.isExtreme(key)) { pop(); if (key === null) unpin(row); else commit(row, key); return; }
+          if (key === null || !SHOT.isExtreme(key)) { pop(); if (key === null) unpin(row); else commit(row, xOwn(key)); return; }
           const v = xOwn(key);
           XU.pickShot(app, paths, v).then((ok) => { if (ok && stack.length && stack[stack.length - 1].id === 'pick:' + row.path) { pop(); commit(row, v); } });
         },
