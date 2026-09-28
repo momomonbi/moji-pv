@@ -9339,3 +9339,18 @@ focus cut there); it is kept for special cuts that carry a line.
 
 Golden: `project_sung.json` gains D1 (A2 with 歌った字に色をのせる for the whole video; 4 documents); the entries A1–A4 are
 byte for byte as before (compared before and after writing the file with `--only=project_sung.json`).
+
+Resumed run (checks and one gap). Re-running the listed mutations in a copy of the tree showed that "no fill mask under
+the budget" was only caught inside `build.fillUnderBudget`: taking out its call in `buildCut` failed no test, since the
+existing test calls the function directly and no golden cut reaches the tint rung. `sung.test.js` now builds the lyric
+cuts of project_long (10–40 s) with 歌った字に色をのせる and budget.test's heaviest arrive and hold materials. It checks
+that each cut has one fill behaviour, masked exactly when a phase of its budget took back the tint, and then with the
+tint columns only. Both mutations fail it: no call, and masking the ladder's first three groups instead of the tint.
+
+Checks on the final tree: `build.py --check` OK (222 modules); the full Node suite 1822 of 1824 (the two failures are
+timing bounds on this loaded machine: the known `planning speed: re-planning project_long after an edit`, and
+`catalog depart/instantHide` "slowest build 69 ms > 60 ms", which passes alone); `update_golden.js --check`: all seven
+files match (the six existing ones and project_sung.json with D1); the rebuilt pages equal the committed ones; browser
+ui_flows OK (51 flows, with `hame`, `hame_ticks` and `ai_words`), i18n_pages OK (57 screens), ui_layout OK (584
+layouts), csp OK, determinism OK, glyph_parity OK. `sung.test.js`'s relative speed test failed once while the browser
+tests ran beside it and once alone at a load average of 8 on 4 CPUs (15.9 vs 11.0 ms), then passed (15.2 vs 12.2 ms).

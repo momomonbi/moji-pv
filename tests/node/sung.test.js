@@ -875,6 +875,54 @@ test('engine: accent-inked characters dim deeper and only brighten; under the gl
   assert.ok(light.behaviours.includes(b), 'within the budget: the fill as made');
 });
 
+test('engine: a cut built with heavy text materials gives up the fill\'s tint exactly where its budget took the tint back', () => {
+  // the heaviest text materials budget.test.js builds (one per text kind), on every lyric cut of project_long with
+  // 歌った字に色をのせる for the whole video: buildCut runs the budget, then masks the fill where a phase lost its tint
+  const MIX = MV.use('parts/mix'), SCH = MV.use('core/schema'), RNG = MV.use('core/rng'), REGM = MV.use('core/registry');
+  const tr = (col, from, to) => ({ col, from, to });
+  const HEAVY = {
+    arrive: { knobs: [{ what: 'amp' }], parts: [{ key: 'ghostConverge' }], motion: { unit: 'glyph', curve: 'expoOut', tracks: [
+      tr('y', 0.6, 0), tr('alpha', 0, 1), tr('blur', 0.6, 0), tr('glow', 1, 0), tr('tint', 1, 0), tr('sx', 2, 1), tr('sy', 2, 1), tr('rot', -30, 0)] } },
+    dwell: { knobs: [{ what: 'amp' }], parts: [{ key: 'shimmerSweep' }], osc: [{ col: 'glow', amp: 1, hz: 0, wave: 'beat' },
+      { col: 'tint', amp: 1, hz: 0.5, wave: 'sine' }, { col: 'rot', amp: 30, hz: 0.3, wave: 'sine' }, { col: 'sx', amp: 0.3, hz: 0.5, wave: 'sine' }] },
+  };
+  const defs = Object.keys(HEAVY).map((kind) => {
+    const got = MIX.derive({ id: 'mh' + kind, kind, by: 'user', name: { ja: kind, en: kind }, tags: ['soft'], season: null, pool: true,
+      rv: 1, recipe: HEAVY[kind] }, REG);
+    assert.ok(got.def, JSON.stringify(got.problems));
+    return got.def;
+  });
+  const reg = REGM.extend(REG, defs);
+  const p = plan(old('long', { 'work:sung.fill': pin(true) }));
+  const svc = { registry: reg, text: createTextService({ measurer: fakeMeasurer(), faces: p.look.faces }), strict: true };
+  const isFill = (x) => x.run === BH.runSungFill || (x.run === BH.runMasked && x.of && x.of.run === BH.runSungFill);
+  let masked = 0, kept = 0;
+  p.cuts.forEach((c, i) => {
+    if (!c.sung || !c.slots['sung.fill'] || !(c.b >= 20 && c.a <= 40)) return;
+    const slots = Object.assign({}, c.slots);
+    for (const d of defs) {
+      const pr = {};
+      for (const { name, spec } of reg.params(d.kind, d.key)) {
+        pr[name] = SCH.autoValue(spec, { f: c.feat, look: { amounts: p.look.amounts, mood: null, bpm: 120 },
+          rng: RNG.stream(i, 'param', d.kind, d.key, name) });
+      }
+      slots[d.kind] = { v: d.key, p: pr, from: 'auto' };
+    }
+    const scene = BUILD.buildCut(Object.assign({}, c, { slots }), p, svc);
+    const fills = scene.behaviours.filter(isFill);
+    assert.equal(fills.length, 1, c.key + ': one fill behaviour');
+    const rec = scene.spriteBudget;
+    const tintTaken = !!rec && ['arrive', 'dwell', 'depart'].some((ph) => rec[ph] && rec[ph].masks.includes('tint'));
+    const f = fills[0];
+    assert.equal(f.run === BH.runMasked, tintTaken, c.key + ': the fill is masked exactly when a phase lost its tint');
+    if (tintTaken) {
+      assert.deepEqual([...f.cols].sort(), [...BH.MASK_GROUPS.tint].sort(), c.key + ': only the tint is taken from the fill');
+      masked++;
+    } else kept++;
+  });
+  assert.ok(masked > 0, 'some cut is heavy enough to lose its tint: ' + JSON.stringify({ masked, kept }));
+});
+
 // --- the golden ------------------------------------------------------------------------------------------------------
 
 test('the 歌ハメ golden: its documents plan and render the golden frames (tests/golden/project_sung.json)', async () => {
