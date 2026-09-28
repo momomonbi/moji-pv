@@ -32,6 +32,7 @@ MV.def('ui/steps', ['ui/dom', 'ui/icons', 'ui/step_lyrics', 'ui/step_song', 'ui/
       const bodies = {};
       for (const step of STEPS) bodies[step] = MODULES[step].mount(app);
       const tapPanel = app.tap;
+      const draftPanel = app.draft;                   // 曲から下書き's review (PV22 S1), in the step column like tap mode
 
       const tabs = STEPS.map((step, i) => h('button', {
         class: 'step-tab', type: 'button', role: 'tab', id: 'step-tab-' + step, 'data-step': step,
@@ -77,7 +78,7 @@ MV.def('ui/steps', ['ui/dom', 'ui/icons', 'ui/step_lyrics', 'ui/step_song', 'ui/
       let shown = null;
       function showBody() {
         const vs = app.view.state;
-        const want = vs.mode === 'tap' ? tapPanel : bodies[vs.step];
+        const want = vs.mode === 'tap' ? tapPanel : vs.mode === 'draft' && draftPanel ? draftPanel : bodies[vs.step];
         if (shown !== want) {
           dom.replace(bodyHost, want.root);
           shown = want;
@@ -85,9 +86,10 @@ MV.def('ui/steps', ['ui/dom', 'ui/icons', 'ui/step_lyrics', 'ui/step_song', 'ui/
         }
         bodyHost.setAttribute('aria-labelledby', 'step-tab-' + vs.step);
         const at = STEPS.indexOf(vs.step);
-        const extra = vs.mode !== 'tap' && bodies[vs.step].footer ? bodies[vs.step].footer : null;
+        const modal = vs.mode === 'tap' || vs.mode === 'draft';
+        const extra = !modal && bodies[vs.step].footer ? bodies[vs.step].footer : null;
         if (extra) dom.replace(footerExtra, extra);
-        else if (vs.mode === 'tap') dom.clear(footerExtra);
+        else if (modal) dom.clear(footerExtra);
         else {
           // ② without a song: 「曲なしで次へ」 (§6.11 — the song is optional).
           const label = vs.step === 'song' && !app.doc.song ? t('step.nextNoSong') : t('step.next', { step: t('step.' + STEPS[at + 1]) });

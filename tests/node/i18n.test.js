@@ -234,6 +234,7 @@ test('UI keys built at run time exist for every value they can take', () => {
   each('state.', ['auto', 'pinned', 'mark', 'locked']);
   each('err.song.', ['decode', 'empty', 'unsupported', 'cancelled']);
   each('err.exp.', ['cancelled', 'encode', 'sink']);
+  each('draft.conf.', MV.use('core/draft').CONF);            // 曲から下書き's confidence marks (PV22 S1)
   // INT-UI: backdrop rules and the UI's own pre-flight items, their fixes and the export error keys (ui/output).
   const OUT = MV.use('ui/output');
   each('insp.fxRule.', OUT.BACKDROPS.filter((b) => b !== 'scene'));

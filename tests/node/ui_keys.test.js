@@ -56,6 +56,21 @@ test('the single-key switch turns off character keys only', () => {
   assert.equal(cmd(ev('e'), { mode: 'tap', singleKeys: false }), 'tap.end');
 });
 
+// 曲から下書き (PV22 S1): the review owns the keyboard like tap mode.
+test('draft mode: Space plays, arrows move a second, Esc discards; every other shortcut is swallowed', () => {
+  const draft = { mode: 'draft', singleKeys: true };
+  assert.equal(cmd(ev(' '), draft), 'play.toggle');
+  assert.deepEqual(K.resolveKey(ev('ArrowLeft'), draft), { cmd: 'seek.step', args: { seconds: -1 } });
+  assert.deepEqual(K.resolveKey(ev('ArrowRight'), draft), { cmd: 'seek.step', args: { seconds: 1 } });
+  assert.equal(cmd(ev('Escape'), draft), 'draft.cancel');
+  for (const key of ['t', 'r', 'Delete', 'Enter', 'ArrowUp', ',', '[']) assert.equal(cmd(ev(key), draft), 'noop', key + ' is swallowed');
+  assert.equal(cmd(ev('z', { ctrlKey: true }), draft), 'noop', 'undo waits until the draft is applied or discarded');
+  assert.equal(K.resolveKey(ev('F5'), draft), null, 'browser keys keep their meaning');
+  assert.equal(cmd(ev('t'), { mode: 'draft', singleKeys: false }), 'noop');
+  assert.ok(K.CONTEXTS.includes('draft'));
+  assert.deepEqual(K.keysFor('draft.cancel', 'draft'), ['Escape']);
+});
+
 test('tap mode swallows every other shortcut', () => {
   const tap = { mode: 'tap', singleKeys: true };
   assert.equal(cmd(ev(' '), tap), 'tap.mark');

@@ -1,6 +1,6 @@
 <!doctype html><html lang="ja"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-gW71xL3u9E7wrD9Tagg1PpNJl85frVX+me8crHkTggY='; style-src 'sha256-CBzRvq4sWr3CF69hafDp1l8UkHnSy18JQMXGJJhPDYI=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-QmPiN0ugXW4tBg7bPPQarNG4hBwJYvmrUh0a8ErEBRo='; style-src 'sha256-viabA3ghxnLnMj3kZBfSZjhMo2xhNoHCfVsVyLmuU3I=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
 <title>文字PVメーカー</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -441,6 +441,27 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent);
 .tap-keys dt { display: flex; gap: 4px; }
 .tap-keys dd { margin: 0; color: var(--text-2); }
 .step-tap.is-paused .tap-now { opacity: 0.6; }
+
+/* 曲から下書き (PV22 S1): the review of drafted line starts */
+.step-draft .step-head > .icon { color: var(--focus); }
+.step-draft .step-title:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 4px; }
+.draft-body { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.draft-head { margin: 0; font-weight: 700; }
+.draft-body .note { margin: 0; }
+.draft-rows { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; max-height: 42vh; overflow-y: auto;
+  border: 1px solid var(--line); border-radius: 9px; background: var(--panel-2); }
+.draft-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; column-gap: 8px; padding: 4px 6px 5px 9px;
+  border-bottom: 1px solid var(--line); }
+.draft-row:last-child { border-bottom: 0; }
+.draft-check { min-width: 0; font-size: 12.5px; }
+.draft-when { font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.draft-conf { font-size: 12px; white-space: nowrap; }
+.draft-row[data-conf="high"] .draft-conf { color: var(--ok); }
+.draft-row[data-conf="mid"] .draft-conf { color: var(--gold); }
+.draft-row[data-conf="low"] .draft-conf { color: var(--muted); }
+.draft-text { grid-column: 1 / -1; padding-left: 25px; font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; }
+.draft-body .link { align-self: flex-start; }
 
 /* ---- detail column (placeholder mounts for UI part 2) ------------------------------------------------------ */
 
@@ -1444,6 +1465,211 @@ MV.def('core/beats', [], () => {
   }
 
   return { grid, UNITS };
+});
+/* 文字PVメーカー v2 — original work. 曲から下書き: places line starts on the song's phrase-start candidates with a monotone alignment and a gap prior from the lyrics (DESIGN_2_2 §5.2). */
+MV.def('core/draft', [], () => {
+  'use strict';
+
+  const DRAFT = Object.freeze({
+    WS: 1, WD: 0.6, WF: 0.15, WB: 0.1,         // weights: candidate score, gap prior, first-line pull, beat bonus
+    FILL_S: -0.15, FILL_STEP: 0.25,            // filler candidates (a line may sit where no onset was found)
+    MIN_GAP: 0.12,                             // = core/tap MIN_GAP (timing's ANCHOR_GAP 0.1 plus rounding room)
+    REACH: 5, REACH_PAD: 2,                    // a gap longer than REACH·prior + REACH_PAD is not considered
+    SNAP_TOL: 0.06, MOVE_MIN: 0.05,            // beat snap tolerance; smaller moves are not proposed
+    HIGH_S: 0.4, RATIO: Object.freeze([0.5, 2]),   // 確か needs a phrase candidate ≥ HIGH_S whose gap is within ×0.5…×2 of its prior
+    AGREE_S: 0.3,                              // the agreement readout's tolerance
+    BONUS_REACH: 0.07,                         // the beat bonus fades out over min(this, period / 8) from a half beat
+  });
+  const CONF = Object.freeze(['low', 'mid', 'high']);
+  const INF = Infinity;
+
+  function q2(x) { return Math.round(x * 100) / 100; }
+  function q3(x) { return Math.round(x * 1000) / 1000; }
+  function sq(x) { return x * x; }
+
+  // The candidates of one run: the song's in [lo, hi) plus fillers every FILL_STEP from lo (every half beat of the
+  // grid when there is one), sorted by time, then by strength; each with its beat bonus.
+  function candidatesOf(cands, lo, hi, grid) {
+    const out = [];
+    for (const c of cands) if (c.t >= lo && c.t < hi) out.push({ t: c.t, s: c.s, kind: c.kind, bonus: 0 });
+    if (grid) {
+      const half = grid.period / 2;
+      for (let k = Math.ceil((lo - grid.offset) / half - 1e-9); ; k++) {
+        const t = q3(grid.offset + k * half);
+        if (t >= hi) break;
+        if (t >= lo) out.push({ t, s: DRAFT.FILL_S, kind: 'filler', bonus: 0 });
+      }
+    } else {
+      for (let k = 0; ; k++) {
+        const t = q3(lo + k * DRAFT.FILL_STEP);
+        if (t >= hi) break;
+        out.push({ t, s: DRAFT.FILL_S, kind: 'filler', bonus: 0 });
+      }
+    }
+    out.sort((a, b) => a.t - b.t || b.s - a.s);
+    if (grid) {
+      const half = grid.period / 2;
+      const reach = Math.min(DRAFT.BONUS_REACH, grid.period / 8);
+      for (const c of out) {
+        const near = grid.offset + Math.round((c.t - grid.offset) / half) * half;
+        c.bonus = DRAFT.WB * Math.max(0, 1 - Math.abs(c.t - near) / reach);
+      }
+    }
+    return out;
+  }
+
+  // One run of lines to draft between the anchor before it (p: { t, w } or null) and after it (q: { t } or null).
+  // → [{ c: candidate, gapIn: prior-relative gap into it or null }] per run line, or null when no placement fits.
+  // The step cost WD·ln²(Δ/g) reads ln Δ from a table over whole milliseconds (candidate times are on a 1 ms grid),
+  // which keeps 80 lines × 1 300 candidates well under 0.1 s.
+  function alignRun(run, p, q, span, C, pull) {
+    const m = run.length, M = C.length;
+    if (!M) return null;
+    let W = p ? p.w : 0;
+    for (const l of run) W += l.w;
+    const scale = (span.hi - span.lo) / Math.max(1e-9, W);
+    const g = run.map((l) => Math.max(1e-6, scale * l.w));
+    const gp = p ? Math.max(1e-6, scale * p.w) : null;
+    const ts = new Float64Array(M), gain = new Float64Array(M);
+    for (let i = 0; i < M; i++) { ts[i] = C[i].t; gain[i] = DRAFT.WS * C[i].s + C[i].bonus; }
+    let gmax = 0;
+    for (let r = 0; r + 1 < m; r++) gmax = Math.max(gmax, g[r]);
+    const lnMs = new Float64Array(Math.ceil((DRAFT.REACH * gmax + DRAFT.REACH_PAD) * 1000) + 2);
+    for (let k = 1; k < lnMs.length; k++) lnMs[k] = Math.log(k / 1000);
+    let prev = new Float64Array(M);
+    for (let i = 0; i < M; i++) {
+      const prior = p ? DRAFT.WD * sq(Math.log((ts[i] - p.t) / gp)) : DRAFT.WF * Math.abs(ts[i] - pull) / Math.max(1, g[0]);
+      prev[i] = prior - gain[i];
+    }
+    const back = [null];
+    for (let r = 1; r < m; r++) {
+      const cur = new Float64Array(M).fill(INF), bk = new Int32Array(M).fill(-1);
+      const lg = Math.log(g[r - 1]), reach = DRAFT.REACH * g[r - 1] + DRAFT.REACH_PAD;
+      let lo = 0, first = 0;
+      while (first < M && prev[first] === INF) first++;
+      for (let i = first + 1; i < M; i++) {
+        const t = ts[i];
+        while (lo < i && t - ts[lo] > reach) lo++;
+        let best = INF, arg = -1;
+        for (let j = Math.max(lo, first); j < i; j++) {
+          const d = t - ts[j];
+          if (d < DRAFT.MIN_GAP) break;             // sorted by time: every later j is closer still
+          const pj = prev[j];
+          if (pj === INF) continue;
+          const x = lnMs[Math.round(d * 1000)] - lg;
+          const v = pj + DRAFT.WD * x * x;
+          if (v < best) { best = v; arg = j; }
+        }
+        if (arg >= 0) { cur[i] = best - gain[i]; bk[i] = arg; }
+      }
+      prev = cur;
+      back.push(bk);
+    }
+    let best = INF, arg = -1;
+    const gl = g[m - 1];
+    for (let i = 0; i < M; i++) {
+      if (prev[i] === INF) continue;
+      const t = ts[i];
+      let end;
+      if (q) end = q.t - t >= DRAFT.MIN_GAP - 1e-9 ? DRAFT.WD * sq(Math.log((q.t - t) / gl)) : INF;
+      else end = span.R > t ? DRAFT.WD * sq(Math.log((span.R - t) / gl)) : INF;
+      const v = prev[i] + end;
+      if (v < best) { best = v; arg = i; }
+    }
+    if (arg < 0) return null;
+    const idx = new Array(m);
+    for (let r = m - 1; r >= 0; r--) { idx[r] = arg; arg = r > 0 ? back[r][arg] : -1; }
+    return idx.map((i, r) => {
+      const c = C[i];
+      let gapIn = null;
+      if (r > 0) gapIn = (c.t - C[idx[r - 1]].t) / g[r - 1];
+      else if (p) gapIn = (c.t - p.t) / gp;
+      return { c, gapIn };
+    });
+  }
+
+  function confOf(c, gapIn, digest) {
+    let conf = c.kind === 'filler' ? 'low' : 'mid';
+    if (c.kind === 'phrase' && c.s >= DRAFT.HIGH_S && (gapIn === null || (gapIn >= DRAFT.RATIO[0] && gapIn <= DRAFT.RATIO[1]))) {
+      conf = 'high';
+    }
+    if (digest && conf === 'high') conf = 'mid';
+    return conf;
+  }
+
+  // draftStarts({ lines, cands, voiced, duration, grid, snap, digest }) → { proposals, kept, skipped }
+  //   lines: [{ id, t0, draft, w }] in line order (w: core/timing gapWeights; draft: to be drafted, else an anchor);
+  //   cands: [{ t, s, kind: 'phrase' | 'weak' }] in time order (audio/voice candidatesIn or fromDigest);
+  //   voiced: { t0, t1 } | null (where singing starts and ends); grid: a core/beats grid or null; snap: timing.snap;
+  //   digest: the candidates came from the loudness alone (確か is capped at たぶん).
+  //   proposals: [{ lineId, from, to, conf: 'high' | 'mid' | 'low', kind }] for drafted lines that move MOVE_MIN or more;
+  //   kept: the same for drafted lines that stay (a smaller move); skipped: line ids of runs with no room.
+  // Starts are strictly increasing, at least MIN_GAP apart and never cross an anchor. Deterministic: no state survives.
+  function draftStarts(input) {
+    const o = input || {};
+    const lines = o.lines || [];
+    const cands = o.cands || [];
+    const duration = typeof o.duration === 'number' && o.duration > 0 ? o.duration : 0;
+    const voiced = o.voiced && typeof o.voiced.t0 === 'number' ? o.voiced : null;
+    const grid = o.grid || null;
+    const snapUnit = o.snap && o.snap !== 'off' && grid ? o.snap : null;
+    const L = voiced ? Math.max(0, voiced.t0 - 1) : 0;
+    const R = voiced && typeof voiced.t1 === 'number' ? Math.min(duration, voiced.t1) : duration;
+    const pull = voiced ? voiced.t0 : L;
+    const proposals = [], kept = [], skipped = [];
+    const placed = new Map();                   // lineId → { to, conf, kind }
+    let i = 0;
+    while (i < lines.length) {
+      if (!lines[i].draft) { i++; continue; }
+      let j = i;
+      while (j < lines.length && lines[j].draft) j++;
+      const run = lines.slice(i, j);
+      const pl = i > 0 ? lines[i - 1] : null, ql = j < lines.length ? lines[j] : null;
+      const p = pl ? { t: pl.t0, w: pl.w } : null, q = ql ? { t: ql.t0 } : null;
+      const lo = (p ? p.t : L) + DRAFT.MIN_GAP;
+      const hi = q ? q.t - DRAFT.MIN_GAP : R;
+      const got = hi - lo >= DRAFT.MIN_GAP * run.length
+        ? alignRun(run, p, q, { lo, hi, R }, candidatesOf(cands, lo, hi, grid), pull) : null;
+      if (!got) { for (const l of run) skipped.push(l.id); i = j; continue; }
+      run.forEach((l, r) => placed.set(l.id, { to: q2(got[r].c.t), conf: confOf(got[r].c, got[r].gapIn, !!o.digest), kind: got[r].c.kind }));
+      i = j;
+    }
+    // beat snapping, only where the order stays strict (MIN_GAP from both neighbours' final starts)
+    const at = (k) => (placed.has(lines[k].id) ? placed.get(lines[k].id).to : lines[k].t0);
+    if (snapUnit) {
+      for (let k = 0; k < lines.length; k++) {
+        const x = placed.get(lines[k].id);
+        if (!x) continue;
+        const s = q3(grid.snap(x.to, snapUnit, DRAFT.SNAP_TOL));
+        if (s === x.to) continue;
+        const okPrev = k === 0 ? s >= 0 : s - at(k - 1) >= DRAFT.MIN_GAP - 1e-9;
+        const okNext = k + 1 === lines.length || at(k + 1) - s >= DRAFT.MIN_GAP - 1e-9;
+        if (okPrev && okNext) x.to = s;
+      }
+    }
+    for (const l of lines) {
+      const x = placed.get(l.id);
+      if (!x) continue;
+      const row = { lineId: l.id, from: l.t0, to: x.to, conf: x.conf, kind: x.kind };
+      (Math.abs(x.to - l.t0) < DRAFT.MOVE_MIN ? kept : proposals).push(row);
+    }
+    return { proposals, kept, skipped };
+  }
+
+  // agreement(res, tapped) → { k, n }: over the drafted lines whose start was tapped (tapped: a Set of line ids; their
+  // `from` is the tapped time), how many the draft puts within AGREE_S of it (a kept line agrees).
+  function agreement(res, tapped) {
+    let k = 0, n = 0;
+    for (const x of res.kept) if (tapped.has(x.lineId)) { n++; k++; }
+    for (const x of res.proposals) {
+      if (!tapped.has(x.lineId)) continue;
+      n++;
+      if (Math.abs(x.to - x.from) <= DRAFT.AGREE_S + 1e-9) k++;
+    }
+    return { k, n };
+  }
+
+  return { DRAFT, CONF, draftStarts, agreement };
 });
 /* 文字PVメーカー v2 — original work. Easing curves by name, their time-reversed names and cubic Béziers (DESIGN §4.1.4). */
 MV.def('core/ease', [], () => {
@@ -6776,8 +7002,9 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
     sheet: ['next', 'rows'],
     row: ['id', 'src'],
     timing: ['snap', 'lead', 'tail', 'leadIn', 'outro', 'tapLatency', 'enter', 'readCheck'],
-    song: ['name', 'sha1', 'seconds', 'bpm', 'offset', 'meter', 'bpmConfidence', 'digest', 'info'],
+    song: ['name', 'sha1', 'seconds', 'bpm', 'offset', 'meter', 'bpmConfidence', 'digest', 'voice', 'info'],
     digest: ['hz', 'loud'],
+    voice: ['v', 'hz', 'act', 'peaks', 'phrases'],   // doc.song.voice (audio/voice, PV22 P5 + P6, DESIGN_2_2 §5.2)
     look: ['seed', 'moodSeed', 'aspect', 'backdrop', 'gen'],
     pin: ['v', 'by', 'sig'],
     lock: ['n'],
@@ -6915,6 +7142,13 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
     const d = song.digest;
     if (d !== null && (!isObject(d) || !isNumber(d.hz) || d.hz <= 0 || typeof d.loud !== 'string')) {
       bad('song.digest', 'must be { hz, loud: base64 } or null');
+    }
+    // The song's voice (optional; audio/voice, DESIGN_2_2 §5.2): { v: 1, hz, act, peaks } plus the phrase stream of
+    // 曲から下書き. Never filled by normalize (not in SONG_DEFAULTS).
+    const v = song.voice;
+    if (v !== undefined && v !== null && (!isObject(v) || v.v !== 1 || !isNumber(v.hz) || v.hz <= 0 || typeof v.act !== 'string'
+      || typeof v.peaks !== 'string' || (v.phrases !== undefined && typeof v.phrases !== 'string'))) {
+      bad('song.voice', 'must be { v: 1, hz, act, peaks } or null');
     }
     if (song.info !== null) for (const p of songInfoProblems(song.info)) bad('song.info' + p.where, p.what);
   }
@@ -7286,7 +7520,8 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
         case 'sheet': return ordered(v, ORDER.sheet, (sk, sv) => (sk === 'rows' && Array.isArray(sv)
           ? sv.map((row) => ordered(row, ORDER.row)) : sv));
         case 'timing': return ordered(v, ORDER.timing);
-        case 'song': return ordered(v, ORDER.song, (sk, sv) => (sk === 'digest' ? ordered(sv, ORDER.digest) : sv));
+        case 'song': return ordered(v, ORDER.song, (sk, sv) => (sk === 'digest' ? ordered(sv, ORDER.digest)
+          : sk === 'voice' ? ordered(sv, ORDER.voice) : sv));
         case 'look': return ordered(v, ORDER.look);
         case 'pins': return sortedMap(v, (pin) => ordered(pin, ORDER.pin));
         case 'salts': return sortedMap(v);
@@ -7890,6 +8125,20 @@ MV.def('core/timing', ['core/pins', 'core/script', 'core/num', 'core/beats'], (P
     return { times, duration: N.q6(duration), warnings };
   }
 
+  // gapWeights(lines, { readRate, bpm }) → Float64Array: w[i] = the nominal time from line i's start to line i+1's start
+  // (its reading plus the pause above the next line; the last line: its reading), the gap(k) of solveTimes. Only the
+  // proportions matter to 曲から下書き (core/draft, PV22 S1).
+  function gapWeights(lines, ctx) {
+    const spm = 1 / readRateOf(ctx || {});
+    const n = lines.length;
+    const w = new Float64Array(n);
+    for (let i = 0; i < n; i++) {
+      const read = Math.max(MIN_READ, S.morae(lines[i].text, lines[i].lang) * spm);
+      w[i] = read + (i + 1 < n ? PAUSE_WEIGHT * (lines[i + 1].pauseBefore || 0) : 0);
+    }
+    return w;
+  }
+
   function lengthOf(c, warnings) {
     if (c.lengthPin === null || c.lengthPin === undefined) return null;
     if (typeof c.lengthPin === 'number' && c.lengthPin > 0 && Number.isFinite(c.lengthPin)) return c.lengthPin;
@@ -7958,7 +8207,7 @@ MV.def('core/timing', ['core/pins', 'core/script', 'core/num', 'core/beats'], (P
     }
   }
 
-  return { solveTimes, readRateOf, TIMING_DEFAULTS, MIN_LEN };
+  return { solveTimes, readRateOf, gapWeights, TIMING_DEFAULTS, MIN_LEN };
 });
 /* 文字PVメーカー v2 — original work. Command reducers: the only way the document changes (DESIGN §3.6, §3.9, §4.12; DESIGN_2_1 §2.6, §11.2.5, §13.3). */
 MV.def('core/commands', ['core/doc', 'core/paths', 'core/pins', 'core/lyrics', 'core/reconcile', 'core/num', 'core/hash',
@@ -8442,6 +8691,22 @@ MV.def('core/commands', ['core/doc', 'core/paths', 'core/pins', 'core/lyrics', '
 
     function songClear(doc) { return put(doc, 'song', null); }
 
+    // song.voice { sha1, voice }: the song's voice read (曲の声を読む, DESIGN_2_2 §5.2) — only for the song it was read
+    // from (another song meanwhile: CommandError 'stale'); voice null removes it. Validated by core/doc.
+    function songVoice(doc, cmd) {
+      if (!doc.song || typeof cmd.sha1 !== 'string' || doc.song.sha1 !== cmd.sha1) throw new CommandError('stale', 'the song changed');
+      need(cmd.voice === null || isObject(cmd.voice), 'voice must be an object or null');
+      if (cmd.voice === null) {
+        if (doc.song.voice === undefined || doc.song.voice === null) return doc;
+        return put(doc, 'song', without(doc.song, ['voice']));
+      }
+      if (sameJSON(doc.song.voice, cmd.voice)) return doc;
+      const out = put(doc, 'song', Object.assign({}, doc.song, { voice: copyJSON(cmd.voice, 'voice') }));
+      const problems = problemsIn(out, 'song.voice');
+      need(problems.length === 0, problems.join('; '));
+      return out;
+    }
+
     function songInfo(doc, cmd) {
       need(doc.song !== null, 'there is no song');
       // the same rule as D.validate, so a document the store holds always saves and opens again
@@ -8714,7 +8979,7 @@ MV.def('core/commands', ['core/doc', 'core/paths', 'core/pins', 'core/lyrics', '
       ['pin.copy', pinCopy], ['salt.bump', saltBump], ['look.omakase', lookOmakase], ['look.seed', lookSeed],
       ['look.restore', lookRestore], ['look.set', lookSet], ['lock.set', lockSet], ['lock.clear', lockClear],
       ['filter.set', filterSet], ['time.shift', timeShift], ['time.tap', timeTap], ['timing.set', timingSet],
-      ['song.set', songSet], ['song.clear', songClear], ['song.info', songInfo], ['output.set', outputSet],
+      ['song.set', songSet], ['song.clear', songClear], ['song.info', songInfo], ['song.voice', songVoice], ['output.set', outputSet],
       ['material.put', materialPut], ['material.meta', materialMeta], ['material.remove', materialRemove],
       ['media.put', mediaPut], ['media.meta', mediaMeta], ['media.move', mediaMove], ['media.remove', mediaRemove],
       ['media.relink', mediaRelink],
@@ -8796,7 +9061,16 @@ MV.def('core/types', [], () => {
    * @property {number} meter
    * @property {number} bpmConfidence
    * @property {{ hz: 20, loud: string }} digest   base64 of a Uint8Array loudness envelope (0..255)
+   * @property {SongVoice|null} [voice]            the song's voice (audio/voice, DESIGN_2_2 §5.2); absent: not read
    * @property {Object|null} info                  AI song analysis (§4.22)
+   */
+  /**
+   * @typedef {Object} SongVoice     one record shared by 曲から下書き (PV22 P5) and 歌ハメ (PV22 P6)
+   * @property {1} v
+   * @property {25} hz                 the stored activity's frame rate
+   * @property {string} act            base64 of u8[]: the vocal activity per 40 ms frame (0..255)
+   * @property {string} peaks          base64 of (Δ centiseconds LEB128, strength 0..255) records: vocal peaks
+   * @property {string} [phrases]      base64 of (Δ centiseconds LEB128, bit 7 phrase | strength 0..127) records
    */
   /**
    * @typedef {Object} LookSettings
@@ -8863,6 +9137,7 @@ MV.def('core/types', [], () => {
    *   | { t: 'time.tap', marks: Array<{ lineId: string, start?: number, end?: number }> }
    *   | { t: 'timing.set', key: string, v: * }
    *   | { t: 'song.set', song: Song } | { t: 'song.clear' } | { t: 'song.info', info: Object }
+   *   | { t: 'song.voice', sha1: string, voice: SongVoice|null }
    *   | { t: 'output.set', key: string, v: * }
    *   | { t: 'batch', cmds: Command[] }} Command
    */
@@ -10213,6 +10488,383 @@ MV.def('audio/peaks', [], () => {
   }
 
   return { BASE_SPP, peaks, levelFor };
+});
+/* 文字PVメーカー v2 — original work. The song's voice: one pass over the decoded song gives the vocal activity and vocal peaks (歌ハメ) and the phrase-start candidates (曲から下書き), stored as doc.song.voice (DESIGN_2_2 §5, §6). */
+MV.def('audio/voice', ['audio/fft', 'audio/digest'], (fft, DG) => {
+  'use strict';
+
+  // The joint contract of PV22 P5 (曲から下書き) and P6 (歌ハメ), DESIGN_2_2 §5.2: one module, one record.
+  const VC = Object.freeze({
+    HZ: 100, WIN: 1024, BAND: Object.freeze([250, 3500]),   // frames per second (hop 10 ms), FFT window, vocal band (Hz)
+    SIDE: 1,                                      // centred power per bin: max(0, |M|² − SIDE·|S|²)
+    MED: 4,                                       // median filter half-width (±40 ms): drops drum hits
+    FLOOR_P: 0.10, TOP_P: 0.95,                   // activity 0 at the song's 10th percentile, 1 at its 95th
+    LOW: 0.35, HIGH: 0.55,                        // hysteresis on the activity
+    GAP_S: 0.15, AFTER_S: 0.3, FULL_GAP_S: 0.5,   // pause before a phrase start; look-ahead; the pause for a full score
+    REFINE: Object.freeze([-6, 3]),               // frames around the rise searched for the strongest band flux
+    WEAK: 0.3, WEAK_MIN: 0.5, WEAK_SEP_S: 0.25,   // weak candidates: band-flux peaks inside voiced stretches
+    STORE_HZ: 25,                                 // the stored activity (mean of 4 frames)
+    PEAK_MIN: 0.2, PEAK_REACH: 3, PEAK_SEP_S: 0.06, VFLUX_FLOOR: 10,   // the vocal peaks (歌ハメ)
+    STRONG: 0.4, TAIL_S: 0.5,                     // 曲から下書き's voiced span
+    COMPRESS: 1000, DEFAULT_STEP: 1500,
+    DIGEST_MED: 1,                                // fromDigest: the median half-width at 20 Hz
+  });
+  const DB_FLOOR = -60;                           // −60 dB → 0, 0 dB → 1 (as audio/analyze)
+  const RECORD_V = 1;
+
+  function inputError(message) {
+    const e = new TypeError(message);
+    e.code = 'input';
+    return e;
+  }
+
+  function formatError(message) {
+    const e = new TypeError(message);
+    e.code = 'format';
+    return e;
+  }
+
+  function checkInput(channels, sampleRate) {
+    if (!Array.isArray(channels) || channels.length === 0) throw inputError('voice: channels must be a non-empty array');
+    for (const c of channels) if (!(c instanceof Float32Array)) throw inputError('voice: each channel must be a Float32Array');
+    if (!(Number.isFinite(sampleRate) && sampleRate > 0)) throw inputError('voice: sampleRate must be a positive number');
+  }
+
+  function dbToUnit(power) {
+    if (!(power > 0)) return 0;
+    const u = (10 * Math.log10(power) - DB_FLOOR) / -DB_FLOOR;
+    return u < 0 ? 0 : u > 1 ? 1 : u;
+  }
+
+  // percentile(values, p) → sorted[min(n − 1, floor(p·n))]; 0 for an empty list.
+  function percentile(values, p) {
+    if (!values.length) return 0;
+    const sorted = Float32Array.from(values).sort();
+    return sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))];
+  }
+
+  // The running median over ±r frames (the window shrinks at the ends; the upper median of an even count).
+  function median(a, r) {
+    const n = a.length, out = new Float32Array(n), w = new Float32Array(2 * r + 1);
+    for (let i = 0; i < n; i++) {
+      const lo = Math.max(0, i - r), hi = Math.min(n - 1, i + r);
+      const m = hi - lo + 1;
+      for (let j = 0; j < m; j++) w[j] = a[lo + j];
+      const s = w.subarray(0, m).sort();
+      out[i] = s[m >> 1];
+    }
+    return out;
+  }
+
+  // The mean over ±r frames (the window shrinks at the ends).
+  function boxMean(a, r) {
+    const n = a.length, out = new Float32Array(n), pre = new Float64Array(n + 1);
+    for (let i = 0; i < n; i++) pre[i + 1] = pre[i] + a[i];
+    for (let i = 0; i < n; i++) {
+      const x = Math.max(0, i - r), y = Math.min(n, i + r + 1);
+      out[i] = (pre[y] - pre[x]) / (y - x);
+    }
+    return out;
+  }
+
+  // The activity 0 at the song's FLOOR_P percentile and 1 at its TOP_P percentile (not clamped at 1).
+  function normalizeActivity(a0) {
+    const lo = percentile(a0, VC.FLOOR_P);
+    const span = Math.max(1e-3, percentile(a0, VC.TOP_P) - lo);
+    const a = new Float32Array(a0.length);
+    for (let i = 0; i < a0.length; i++) a[i] = Math.max(0, (a0[i] - lo) / span);
+    return a;
+  }
+
+  // Phrase starts: a rise of the activity to LOW after at least GAP_S below it that reaches HIGH within AFTER_S. Its
+  // time is the strongest band flux in REFINE frames around the rise (fx given), else the rise itself; its strength is
+  // how much the activity rose, times how long the pause was (full at FULL_GAP_S). → [{ k (frame), s }]
+  function phraseStarts(a, hz, fx) {
+    const n = a.length, gapF = Math.round(VC.GAP_S * hz), afterF = Math.round(VC.AFTER_S * hz);
+    const out = [];
+    let quiet = 0;
+    for (let k = 0; k < n; k++) {
+      if (a[k] < VC.LOW) { quiet++; continue; }
+      if (quiet >= gapF) {
+        const end = Math.min(n, k + afterF);
+        let peak = 0;
+        for (let j = k; j < end; j++) if (a[j] > peak) peak = a[j];
+        if (peak >= VC.HIGH) {
+          let best = k;
+          if (fx) {
+            let bf = -1;
+            for (let j = Math.max(0, k + VC.REFINE[0]); j <= Math.min(n - 1, k + VC.REFINE[1]); j++) if (fx[j] > bf) { bf = fx[j]; best = j; }
+          }
+          let mb = 0;
+          for (let j = k - quiet; j < k; j++) mb += a[j];
+          mb /= Math.max(1, quiet);
+          let ma = 0;
+          for (let j = k; j < end; j++) ma += a[j];
+          ma /= Math.max(1, end - k);
+          const rise = Math.max(0, Math.min(1, ma - mb));
+          out.push({ k: best, s: rise * Math.min(1, quiet / hz / VC.FULL_GAP_S) });
+        }
+      }
+      quiet = 0;
+    }
+    return out;
+  }
+
+  // analyze(channels, sampleRate, { step }) → Generator yielding progress 0..1 and returning the VoiceResult
+  //   { hz: 100, a: Float32Array (activity), phrases: [{ t, s, phrase }], peaks: [{ t, s }] }.
+  // Per 10 ms frame (Hann window centred on the frame, the first frame primed with k = −1), from mid M = (L + R)/2
+  // and side S = (L − R)/2 (mono: S = 0) over the vocal band: the centred power per bin c_b = max(0, |M_b|² − |S_b|²),
+  // raw = level of Σ c_b × (1 − spectral flatness of c_b), and the band flux of log(1 + C·|M_b|). The activity is raw
+  // median-filtered (±MED) and normalized to the song. Deterministic on the PCM (fixed order, no randomness).
+  function* analyze(channels, sampleRate, opts) {
+    checkInput(channels, sampleRate);
+    const step = Math.max(1, Math.floor((opts && opts.step) || VC.DEFAULT_STEP));
+    const HZ = VC.HZ, WIN = VC.WIN;
+    const Lc = channels[0], Rc = channels.length > 1 ? channels[1] : channels[0];
+    const mono = Lc === Rc;
+    const n = Math.min(Lc.length, Rc.length);
+    const frames = Math.max(0, Math.ceil((n * HZ) / sampleRate - 1e-9));
+    const real = fft.createRealFFT(WIN);
+    const hann = new Float64Array(WIN);
+    let sum = 0;
+    for (let i = 0; i < WIN; i++) { hann[i] = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / WIN); sum += hann[i]; }
+    const norm = 2 / sum;                        // a full-scale sine gives a magnitude of about 1 (audio/analyze)
+    const fm = new Float64Array(WIN), fs = new Float64Array(WIN);
+    const mm = new Float64Array(real.bins), ms = new Float64Array(real.bins);
+    const binHz = sampleRate / WIN;
+    const k0 = Math.max(1, Math.ceil(VC.BAND[0] / binHz)), k1 = Math.min(real.bins - 1, Math.floor(VC.BAND[1] / binHz));
+    const nb = Math.max(1, k1 - k0 + 1);
+    const raw = new Float32Array(frames), vflux = new Float32Array(frames);
+    let prev = new Float64Array(real.bins), cur = new Float64Array(real.bins);
+    for (let k = -1; k < frames; k++) {
+      const c = Math.round((k * sampleRate) / HZ) - WIN / 2;
+      for (let i = 0; i < WIN; i++) {
+        const j = c + i;
+        const l = j >= 0 && j < n ? Lc[j] : 0;
+        const r = mono ? l : j >= 0 && j < n ? Rc[j] : 0;
+        fm[i] = 0.5 * (l + r) * hann[i];
+        fs[i] = 0.5 * (l - r) * hann[i];
+      }
+      real.magnitudes(fm, mm);
+      if (!mono) real.magnitudes(fs, ms);
+      let em = 0, lg = 0, fl = 0;
+      for (let b = k0; b <= k1; b++) {
+        const pm = (norm * mm[b]) ** 2;
+        const ps = mono ? 0 : (norm * ms[b]) ** 2;
+        const cb = Math.max(0, pm - VC.SIDE * ps);
+        em += cb;
+        lg += Math.log(cb + 1e-10);
+        cur[b] = Math.log(1 + VC.COMPRESS * norm * mm[b]);
+        const d = cur[b] - prev[b];
+        if (d > 0) fl += d;
+      }
+      const swap = prev; prev = cur; cur = swap;
+      if (k < 0) continue;
+      const flat = em > 0 ? Math.exp(lg / nb) / (em / nb) : 1;
+      raw[k] = dbToUnit(em) * (1 - Math.min(1, flat));
+      vflux[k] = fl;
+      if ((k + 1) % step === 0 && k + 1 < frames) yield (0.9 * (k + 1)) / frames;
+    }
+    yield 0.9;
+    const a = normalizeActivity(median(raw, VC.MED));
+    const fx = boxMean(vflux, 1);
+    const found = phraseStarts(a, HZ, fx);
+    const phrases = found.map((p) => ({ t: p.k / HZ, s: p.s, phrase: true }));
+    // weak candidates: band-flux peaks inside voiced stretches, away from every phrase start
+    const fref = Math.max(1e-6, percentile(fx, 0.99));
+    const sepF = Math.round(VC.WEAK_SEP_S * HZ);
+    let at = 0;
+    for (let j = 2; j < frames - 2; j++) {
+      const v = fx[j] / fref;
+      if (v < VC.WEAK_MIN || fx[j] < fx[j - 1] || fx[j] < fx[j + 1] || a[j] < VC.LOW) continue;
+      while (at < found.length && found[at].k <= j - sepF) at++;
+      if (at < found.length && Math.abs(found[at].k - j) < sepF) continue;
+      phrases.push({ t: j / HZ, s: VC.WEAK * Math.min(1, v), phrase: false });
+    }
+    phrases.sort((x, y) => x.t - y.t || (x.phrase === y.phrase ? 0 : x.phrase ? -1 : 1));
+    yield 0.95;
+    // the vocal peaks (歌ハメ): local maxima of the band onset times the activity over ±PEAK_REACH frames
+    const ref = Math.max(percentile(vflux, 0.99), VC.VFLUX_FLOOR);
+    const pv = new Float32Array(frames);
+    for (let k = 0; k < frames; k++) pv[k] = Math.min(1, vflux[k] / ref) * Math.min(1, a[k]);
+    const peaks = [];
+    const peakSep = Math.round(VC.PEAK_SEP_S * HZ);
+    let lastK = -Infinity;
+    for (let k = 0; k < frames; k++) {
+      const v = pv[k];
+      if (v < VC.PEAK_MIN) continue;
+      let top = true;
+      for (let j = Math.max(0, k - VC.PEAK_REACH); j <= Math.min(frames - 1, k + VC.PEAK_REACH); j++) {
+        if (pv[j] > v || (pv[j] === v && j < k)) { top = false; break; }
+      }
+      if (!top || k - lastK < peakSep) continue;
+      peaks.push({ t: k / HZ, s: v });
+      lastK = k;
+    }
+    return { hz: HZ, a, phrases, peaks };
+  }
+
+  // Runs analyze() to the end (Node tests, short clips); hosts step the generator between idle callbacks instead.
+  function analyzeSync(channels, sampleRate, opts) {
+    const gen = analyze(channels, sampleRate, opts);
+    for (;;) {
+      const r = gen.next();
+      if (r.done) return r.value;
+    }
+  }
+
+  // --- the stored record -------------------------------------------------------------------------------------------
+
+  function leb128(out, v) {
+    let x = Math.max(0, Math.floor(v));
+    for (;;) {
+      const byte = x & 0x7f;
+      x = Math.floor(x / 128);
+      if (x) out.push(byte | 0x80); else { out.push(byte); return; }
+    }
+  }
+
+  // Centiseconds of a time (the stream's unit).
+  function cs(t) { return Math.max(0, Math.round(t * 100)); }
+
+  // encode(res) → doc.song.voice = { v: 1, hz: 25, act, peaks, phrases } (base64 byte streams):
+  //   act[j] = round(255 · min(1, mean of the activity frames 4j … 4j+3));
+  //   peaks = records (Δ centiseconds since the previous peak as unsigned LEB128, round(255·s));
+  //   phrases = records (Δ centiseconds as LEB128, one byte: bit 7 = phrase candidate, bits 0–6 = round(127·s)).
+  function encode(res) {
+    const per = Math.round(res.hz / VC.STORE_HZ);
+    const a = res.a;
+    const count = Math.ceil(a.length / per);
+    const act = new Uint8Array(count);
+    for (let j = 0; j < count; j++) {
+      let s = 0, c = 0;
+      for (let k = per * j; k < Math.min(a.length, per * j + per); k++) { s += a[k]; c++; }
+      act[j] = Math.round(255 * Math.min(1, s / Math.max(1, c)));
+    }
+    const peaks = [];
+    let last = 0;
+    for (const p of res.peaks) {
+      const t = cs(p.t);
+      leb128(peaks, t - last);
+      peaks.push(Math.round(255 * Math.max(0, Math.min(1, p.s))));
+      last = t;
+    }
+    const phrases = [];
+    last = 0;
+    for (const p of res.phrases) {
+      const t = cs(p.t);
+      leb128(phrases, t - last);
+      phrases.push((p.phrase ? 0x80 : 0) | Math.round(127 * Math.max(0, Math.min(1, p.s))));
+      last = t;
+    }
+    return { v: RECORD_V, hz: VC.STORE_HZ, act: DG.toBase64(act), peaks: DG.toBase64(Uint8Array.from(peaks)),
+      phrases: DG.toBase64(Uint8Array.from(phrases)) };
+  }
+
+  // Reads (Δ LEB128, byte) records → { t: Float64Array (s), b: Uint8Array }.
+  function readRecords(text) {
+    const bytes = DG.fromBase64(text);
+    const ts = [], bs = [];
+    let i = 0, at = 0;
+    while (i < bytes.length) {
+      let v = 0, mul = 1, byte;
+      do {
+        if (i >= bytes.length) throw formatError('voice: cut-off record');
+        byte = bytes[i++];
+        v += (byte & 0x7f) * mul;
+        mul *= 128;
+      } while (byte & 0x80 && mul < 2 ** 42);
+      if (i >= bytes.length) throw formatError('voice: record without a value');
+      at += v;
+      ts.push(at / 100);
+      bs.push(bytes[i++]);
+    }
+    return { t: Float64Array.from(ts), b: Uint8Array.from(bs) };
+  }
+
+  // decode(v) → { hz, act: Float32Array 0..1, pt: Float64Array, ps: Float32Array, ph: { t, s, phrase } | null }
+  // (ph is null for a record without phrases: 曲から下書き reads that as "voice not read"). Memoized by object identity;
+  // a damaged record throws code 'format'.
+  const decoded = new WeakMap();
+  function decode(v) {
+    if (v && typeof v === 'object' && decoded.has(v)) return decoded.get(v);
+    if (!isRecord(v)) throw formatError('voice: expected { v: 1, hz, act, peaks }');
+    const actBytes = DG.fromBase64(v.act);
+    const act = new Float32Array(actBytes.length);
+    for (let i = 0; i < actBytes.length; i++) act[i] = actBytes[i] / 255;
+    const pk = readRecords(v.peaks);
+    const ps = new Float32Array(pk.b.length);
+    for (let i = 0; i < ps.length; i++) ps[i] = pk.b[i] / 255;
+    let ph = null;
+    if (typeof v.phrases === 'string') {
+      const r = readRecords(v.phrases);
+      const s = new Float32Array(r.b.length), phrase = new Uint8Array(r.b.length);
+      for (let i = 0; i < s.length; i++) { s[i] = (r.b[i] & 0x7f) / 127; phrase[i] = r.b[i] & 0x80 ? 1 : 0; }
+      ph = { t: r.t, s, phrase };
+    }
+    const out = Object.freeze({ hz: v.hz, act, pt: pk.t, ps, ph });
+    decoded.set(v, out);
+    return out;
+  }
+
+  function isRecord(v) {
+    return !!v && typeof v === 'object' && v.v === RECORD_V && typeof v.hz === 'number' && v.hz > 0
+      && typeof v.act === 'string' && typeof v.peaks === 'string' && (v.phrases === undefined || typeof v.phrases === 'string');
+  }
+
+  // hasPhrases(v) → whether a stored record carries the phrase stream 曲から下書き reads.
+  function hasPhrases(v) { return isRecord(v) && typeof v.phrases === 'string'; }
+
+  // candidatesIn(dec, a, b) → [{ t, s, kind: 'phrase' | 'weak' }] with a ≤ t < b, in time order.
+  function candidatesIn(dec, a, b) {
+    const ph = dec && dec.ph;
+    const out = [];
+    if (!ph) return out;
+    for (let i = 0; i < ph.t.length; i++) {
+      const t = ph.t[i];
+      if (t >= a && t < b) out.push({ t, s: ph.s[i], kind: ph.phrase[i] ? 'phrase' : 'weak' });
+    }
+    return out;
+  }
+
+  // peaksIn(dec, a, b) → [{ t, s }] with a ≤ t < b (歌ハメ's vocal peaks).
+  function peaksIn(dec, a, b) {
+    const out = [];
+    if (!dec) return out;
+    for (let i = 0; i < dec.pt.length; i++) if (dec.pt[i] >= a && dec.pt[i] < b) out.push({ t: dec.pt[i], s: dec.ps[i] });
+    return out;
+  }
+
+  // voiced(cands, act, hz) → { t0, t1 } | null: where singing starts (the first phrase candidate of strength ≥ STRONG,
+  // else the first candidate) and ends (the last activity frame ≥ LOW, + TAIL_S); null without candidates.
+  function voiced(cands, act, hz) {
+    if (!cands || !cands.length) return null;
+    const strong = cands.find((c) => c.kind === 'phrase' && c.s >= VC.STRONG);
+    const t0 = (strong || cands[0]).t;
+    let last = act.length - 1;
+    while (last >= 0 && act[last] < VC.LOW) last--;
+    const t1 = last >= 0 ? (last + 1) / hz + VC.TAIL_S : null;
+    return { t0, t1: t1 !== null && t1 > t0 ? t1 : null };
+  }
+
+  // digestActivity(digest) → { hz: 20, act }: the persisted loudness digest (full mix) as an activity, with the same
+  // median (±DIGEST_MED) and normalization as the voice (never stored).
+  function digestActivity(digest) {
+    const env = DG.envFromDigest(digest);
+    return { hz: env.hz, act: normalizeActivity(median(env.loud, VC.DIGEST_MED)) };
+  }
+
+  // fromDigest(digest) → [{ t, s, kind: 'phrase' }]: phrase starts from the loudness digest alone (a song imported by
+  // an older build whose file is not linked): the same phrase rule at 20 Hz, no refinement, no weak candidates, every
+  // strength halved.
+  function fromDigest(digest) {
+    const d = digestActivity(digest);
+    return phraseStarts(d.act, d.hz, null).map((p) => ({ t: p.k / d.hz, s: p.s / 2, kind: 'phrase' }));
+  }
+
+  // (歌ハメ, PV22 P6, adds activityEnd(dec, a, b, C) here: where the voice stops, by its own constants.)
+  return { VC, analyze, analyzeSync, encode, decode, hasPhrases, isRecord, candidatesIn, peaksIn, voiced, digestActivity,
+    fromDigest };
 });
 /* 文字PVメーカー v2 — original work. WAV encoders: 16-bit mono for the AI song features (§4.13), 16-bit PCM of the export range for the Filmora kit, and the export down-mix (§4.21; DESIGN_2_1 §13.4). */
 MV.def('audio/wav', [], () => {
@@ -14105,6 +14757,53 @@ MV.def('i18n/strings', [], () => ({
   'tl.lineMenu.retap': ['この行だけタップで打ち直す', 'Re-tap this line only'],
   'tl.lineMenu.tapFrom': ['この行からタップで合わせる', 'Tap to sync from this line'],
   'tl.lineMenu.unpinStart': ['開始の固定を外す', 'Unpin the start'],
+  // S1 曲から行の頭を自動で下書き
+  'song.draft': ['曲から下書き', 'Draft from the song'],
+  'song.draftBeta': ['曲から下書き（試験的）', 'Draft from the song (experimental)'],
+  'song.draftTip': ['曲の声の出だしを探して、行の開始時刻を下書きします（AIなし）',
+    'Finds where the voice starts phrases and drafts line start times (no AI)'],
+  'cmd.time.draft': ['曲から行の頭を下書き', 'Draft line starts from the song'],
+  'cmd.draft.cancel': ['下書きをやめる', 'Discard the draft'],
+  'draft.title': ['曲から下書き', 'Draft from the song'],
+  'draft.needVoice': ['曲の声をまだ読んでいません。読むと声の出だしから下書きできます。',
+    'The song\'s voice has not been read yet. Read it to draft from where the voice starts.'],
+  'draft.readVoice': ['声を読んで下書き', 'Read the voice and draft'],
+  'draft.relink': ['曲をつなぎ直す', 'Link the song'],
+  'draft.loudOnly': ['音量だけで下書き（精度は低め）', 'Draft from loudness only (less accurate)'],
+  'draft.listening': ['曲の声を読んでいます… {pct}%', 'Reading the voice… {pct}%'],
+  'draft.cancel': ['中止', 'Cancel'],
+  'draft.cancelled': ['下書きを中止しました', 'Draft cancelled'],
+  'draft.voiceFailed': ['曲の声を読めませんでした', 'Could not read the voice'],
+  'draft.head': ['{n}行の開始を下書きしました', 'Drafted the start of {n} line|Drafted the starts of {n} lines'],
+  'draft.counts': ['確か {a}・たぶん {b}・自信なし {c}', 'Sure {a} · Likely {b} · Unsure {c}'],
+  'draft.conf.high': ['確か', 'Sure'],
+  'draft.conf.mid': ['たぶん', 'Likely'],
+  'draft.conf.low': ['自信なし', 'Unsure'],
+  'draft.row': ['{n}行 {from} → {to}', 'Line {n} {from} → {to}'],
+  'draft.play': ['この時刻から聞く', 'Listen from here'],
+  'draft.needSongToPlay': ['曲のファイルをつなぐと聞けます', 'Link the song file to listen'],
+  'draft.all': ['すべて選ぶ', 'Select all'],
+  'draft.sure': ['確かなものだけ', 'Sure ones only'],
+  'draft.apply': ['適用', 'Apply'],
+  'draft.stop': ['やめる', 'Discard'],
+  'draft.tryOn': ['当てて見る', 'Preview on the stage'],
+  'draft.redo': ['固定・タップした行も下書きし直す', 'Also redraft pinned and tapped lines'],
+  'draft.redoTip': ['開始をタップや手で決めた行も下書きします。LRCの時刻、AIの時刻、ロックした行はそのままです',
+    'Also drafts lines whose start was tapped or set by hand. LRC times, AI times and locked lines stay'],
+  'draft.agree': ['タップした時刻との差が0.3秒以内: {k}/{n}行', 'Within 0.3 s of the tapped time: {k} of {n} lines'],
+  'draft.strip': ['下書きを試写中', 'Previewing the draft'],
+  'draft.hint': ['ずれている行は、行を選んで「この行だけタップで打ち直す」で直せます。',
+    'To fix a line that is off, select it and use "Re-tap this line only".'],
+  'draft.keys': ['スペースで再生・←→で1秒移動・Escでやめる', 'Space plays · ←→ move 1 s · Esc discards'],
+  'draft.aiBetter': ['AIでタイミング（より正確）', 'AI timing (more accurate)'],
+  'draft.noAuto': ['自動で並んでいる行がありません（すべての行の開始が決まっています）',
+    'No line is timed automatically (every start is already set)'],
+  'draft.noVoice': ['声の出だしが見つかりませんでした', 'No sung phrase starts were found'],
+  'draft.done': ['{n}行の開始を下書きしました', 'Drafted {n} line start|Drafted {n} line starts'],
+  'draft.stale': ['歌詞や時刻が変わったので下書きを合わせ直しました', 'The lyrics or times changed, so the draft was updated'],
+  'undo.draft': ['曲から下書き（{n}行）', 'Draft from the song ({n} line)|Draft from the song ({n} lines)'],
+  // 曲の声を読む: the song.voice command of the voice record shared with 歌ハメ (P6 uses the same key)
+  'undo.songVoice': ['曲の声を読む', 'Read the voice'],
 
   // --- PV22 P6 (歌ハメ) ---
 }));
@@ -50957,12 +51656,14 @@ MV.def('export/package', ['core/doc', 'core/media', 'export/zip'], (D, MEDIA, Z)
   return { PACKAGE_V, MIME, EXT, FORMAT, PROJECT, MANIFEST, MIMETYPE, LIMITS, ROLES, EXTS, extOf, pathOf, layout, archiveSize,
     mimetypeProblem, manifestProblems, readPlan };
 });
-/* 文字PVメーカー v2 — original work. Song decoding (OfflineAudioContext), SHA-1 and chunked analysis in the browser (§4.13). */
-MV.def('audio/host/decode', ['audio/analyze', 'audio/digest', 'audio/peaks'], (A, D, P) => {
+/* 文字PVメーカー v2 — original work. Song decoding (OfflineAudioContext), SHA-1 and chunked analysis in the browser (§4.13; the song's voice, DESIGN_2_2 §5.2). */
+MV.def('audio/host/decode', ['audio/analyze', 'audio/digest', 'audio/peaks', 'audio/voice'], (A, D, P, VO) => {
   'use strict';
 
   const DECODE_RATE = 48000;        // every song is decoded at this rate (AAC export takes it as is)
   const SLICE_MS = 12;              // analysis runs in slices of about this long between yields to the page
+  // loadSong's progress: the tempo analysis, then the voice (audio/voice costs about as much as the analysis)
+  const VOICE_FROM = 0.5;
 
   class DecodeError extends Error {
     constructor(code, message) {
@@ -51011,11 +51712,9 @@ MV.def('audio/host/decode', ['audio/analyze', 'audio/digest', 'audio/peaks'], (A
 
   function pause() { return new Promise((resolve) => setTimeout(resolve, 0)); }
 
-  // analyzeBuffer(buffer, { signal, onProgress }) → Promise<SongAnalysis>: steps the analyze() generator in short slices
-  // so the page stays responsive; onProgress(0..1) after each slice.
-  async function analyzeBuffer(buffer, opts) {
-    const o = opts || {};
-    const gen = A.analyze(channelsOf(buffer), buffer.sampleRate, { step: 200 });
+  // Steps a progress generator (audio/analyze, audio/voice) in slices of about SLICE_MS; onProgress(0..1) after each
+  // slice and 1 at the end. A set signal stops it with DecodeError 'cancelled'.
+  async function stepped(gen, o) {
     let sliceStart = performance.now();
     for (;;) {
       if (o.signal && o.signal.aborted) throw new DecodeError('cancelled', 'analysis cancelled');
@@ -51032,20 +51731,41 @@ MV.def('audio/host/decode', ['audio/analyze', 'audio/digest', 'audio/peaks'], (A
     }
   }
 
+  // Progress reports of a stage mapped onto [a, b] of the whole.
+  function part(o, a, b) {
+    return Object.assign({}, o, { onProgress: o.onProgress ? (p) => o.onProgress(a + (b - a) * p) : null });
+  }
+
+  // analyzeBuffer(buffer, { signal, onProgress }) → Promise<SongAnalysis>: steps the analyze() generator in short slices
+  // so the page stays responsive; onProgress(0..1) after each slice.
+  function analyzeBuffer(buffer, opts) {
+    return stepped(A.analyze(channelsOf(buffer), buffer.sampleRate, { step: 200 }), opts || {});
+  }
+
+  // analyzeVoice(buffer, { signal, onProgress }) → Promise<SongVoice>: the song's voice (audio/voice), encoded for
+  // doc.song.voice. 曲の声を読む runs it for a song imported by an older build.
+  async function analyzeVoice(buffer, opts) {
+    const res = await stepped(VO.analyze(channelsOf(buffer), buffer.sampleRate, { step: 200 }), opts || {});
+    return VO.encode(res);
+  }
+
   // loadSong(file, { signal, onProgress }) → Promise<{ buffer, song, analysis, peaks }>: decode, analyze and build the
-  // doc.song record (for `song.set`) and the waveform peaks in one go.
+  // doc.song record (for `song.set`, with the song's voice) and the waveform peaks in one go.
   async function loadSong(file, opts) {
-    const decoded = await decodeFile(file, opts);
-    const analysis = await analyzeBuffer(decoded.buffer, opts);
+    const o = opts || {};
+    const decoded = await decodeFile(file, o);
+    const analysis = await analyzeBuffer(decoded.buffer, part(o, 0, VOICE_FROM));
+    const voice = await analyzeVoice(decoded.buffer, part(o, VOICE_FROM, 1));
+    const song = Object.assign(D.songRecord({ name: decoded.name, sha1: decoded.sha1 }, analysis), { voice });
     return {
       buffer: decoded.buffer,
       analysis,
-      song: D.songRecord({ name: decoded.name, sha1: decoded.sha1 }, analysis),
+      song,
       peaks: P.peaks(channelsOf(decoded.buffer), decoded.buffer.sampleRate),
     };
   }
 
-  return { DECODE_RATE, DecodeError, sha1Hex, decodeFile, channelsOf, analyzeBuffer, loadSong };
+  return { DECODE_RATE, DecodeError, sha1Hex, decodeFile, channelsOf, analyzeBuffer, analyzeVoice, loadSong };
 });
 /* 文字PVメーカー v2 — original work. Playback clock: the song through Web Audio, or a silent clock without a song (§4.13). */
 MV.def('audio/host/player', [], () => {
@@ -55185,6 +55905,7 @@ MV.def('ui/icons', ['ui/dom'], (dom) => {
     plus: [P('M12 5v14M5 12h14')],
     more: [SOLID('M6 10.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zM12 10.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zM18 10.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z')],
     tap: [['circle', { cx: 12, cy: 12, r: 3 }], ['circle', { cx: 12, cy: 12, r: 7.5 }], P('M12 2.5v2M12 19.5v2')],
+    wave: [P('M3 12h2.5l2-4.5 3 9 3-13 3 15 2-6.5H21')],      // 曲から下書き (PV22 S1)
     help: [['circle', { cx: 12, cy: 12, r: 8.5 }], P('M9.6 9.5a2.5 2.5 0 1 1 3.6 2.3c-.8.4-1.2 1-1.2 1.8v.4'),
       SOLID('M12 16.2a1.1 1.1 0 1 0 0 2.2 1.1 1.1 0 0 0 0-2.2z')],
     file: [P('M7 3.5h7l4.5 4.5v12H7z'), P('M14 3.5V8h4.5')],
@@ -55785,6 +56506,412 @@ MV.def('ui/curve_widget', ['ui/dom', 'ui/icons', 'core/curve', 'core/ease'], (do
     curveText, speedScale,
   };
 });
+/* 文字PVメーカー v2 — original work. 曲から下書き: finds where the song's voice starts phrases and drafts the start of every automatic line; a review in the step column with audition and try-on, applied as one time.tap (DESIGN_2_2 §5.2). */
+MV.def('ui/draft', ['ui/dom', 'ui/icons', 'i18n/t', 'core/draft', 'core/timing', 'core/lyrics', 'core/beats', 'audio/voice'],
+  (dom, I, T, CD, TM, LY, B, VO) => {
+    'use strict';
+
+    const { h } = dom;
+    // The release gate (DESIGN_2_2 §5.2): true labels the ② button 「曲から下書き（試験的）」 when real songs agree
+    // with tapped times less than half the time.
+    const DRAFT_BETA = false;
+    const TRY_MS = 150;                    // the try-on re-plans this long after the last change of the checks
+    const AUDITION = Object.freeze({ BEFORE: 1, LENGTH: 3 });   // [▶] plays from 1 s before the drafted start, for 3 s
+    const AGREE_MIN = 3;                   // the agreement readout needs this many drafted lines with a tapped start
+    const MARK = Object.freeze({ high: '◎', mid: '○', low: '△' });
+    const PREROLL = 2;                     // 再生して確認 starts this long before the first drafted line
+
+    // --- the pure parts (tests/node/ui_draft.test.js) ----------------------------------------------------------------
+
+    // input(doc, plan, { redo }) → { lines: [{ id, t0, draft, w, auto }], tapped: Set<lineId> }: the plan's lines with
+    // their gap weights (core/timing gapWeights: the read rate pin or the tempo, the blank rows above each line). A line
+    // is drafted when its start is automatic; with redo also when its start pin was tapped or set by hand. LRC times,
+    // AI times and lock pins are always anchors. tapped: the lines whose start is a tapped pin (the agreement readout).
+    function input(doc, plan, opts) {
+      const redo = !!(opts && opts.redo);
+      const pins = doc.pins || {};
+      const lang = (doc.meta && doc.meta.lang) || 'auto';
+      let parsed = [];
+      try { parsed = LY.linesOf(LY.parseSheet(doc.sheet.rows), { lang }); } catch (e) { parsed = []; }
+      const pause = new Map(parsed.map((l) => [l.id, l.pauseBefore || 0]));
+      const rate = pins['work:readRate'];
+      const readRate = rate && typeof rate.v === 'number' ? rate.v : null;
+      const w = TM.gapWeights(plan.lines.map((l) => ({ text: l.text, lang: l.lang, pauseBefore: pause.get(l.id) || 0 })),
+        { readRate, bpm: plan.beats ? plan.beats.bpm : null });
+      const tapped = new Set();
+      const lines = plan.lines.map((l, i) => {
+        const pin = pins['line/' + l.id + ':start'];
+        const pinned = !!pin && !!l.by && l.by.start === 'pin';
+        const auto = !!l.by && l.by.start === 'auto';
+        if (pinned && pin.by === 'tap') tapped.add(l.id);
+        const redoable = pinned && (pin.by === 'tap' || pin.by === 'user');
+        return { id: l.id, t0: l.t0, draft: auto || (redo && redoable), w: w[i], auto };
+      });
+      return { lines, tapped };
+    }
+
+    // checkedByDefault(res) → the proposals checked when the review opens: 確か and たぶん (自信なし rows stay as they are).
+    function checkedByDefault(res) {
+      return new Set(res.proposals.filter((x) => x.conf !== 'low').map((x) => x.lineId));
+    }
+
+    // applyCmd(lines, res, checked) → one time.tap (marks in line order) or null: the checked proposals, and the drafted
+    // lines that are already in place (res.kept) on a found onset while their start is automatic, so re-spreading
+    // around the new pins does not move them away from it. The pins are by 'tap' (timed against the song).
+    function applyCmd(lines, res, checked) {
+      const want = new Map();
+      for (const x of res.proposals) if (checked.has(x.lineId)) want.set(x.lineId, x.to);
+      const auto = new Set(lines.filter((l) => l.auto).map((l) => l.id));
+      for (const x of res.kept) if (x.conf !== 'low' && auto.has(x.lineId)) want.set(x.lineId, x.to);
+      const marks = lines.filter((l) => want.has(l.id)).map((l) => ({ lineId: l.id, start: want.get(l.id) }));
+      return marks.length ? { t: 'time.tap', marks } : null;
+    }
+
+    // counts(res) → { a, b, c }: 確か, たぶん and 自信なし among the proposals.
+    function counts(res) {
+      const n = { high: 0, mid: 0, low: 0 };
+      for (const x of res.proposals) n[x.conf]++;
+      return { a: n.high, b: n.mid, c: n.low };
+    }
+
+    // drafted(lines, res) → how many line starts the draft sets: the proposals plus the kept lines applyCmd pins.
+    function drafted(lines, res) {
+      const auto = new Set(lines.filter((l) => l.auto).map((l) => l.id));
+      return res.proposals.length + res.kept.filter((x) => x.conf !== 'low' && auto.has(x.lineId)).length;
+    }
+
+    // --- the panel -------------------------------------------------------------------------------------------------
+
+    function mount(app) {
+      const t = app.t;
+      const body = h('div', { class: 'draft-body' });
+      // The heading takes focus when the panel opens: Tab reaches the controls, and Space still plays (a focused
+      // checkbox would take it).
+      const heading = h('h2', { class: 'step-title', tabindex: '-1', text: t('draft.title') });
+      const root = h('div', { class: 'step step-draft' }, h('div', { class: 'step-head' }, I.icon('wave'), heading), body);
+
+      // The session: phase 'need' (the voice is not read), 'reading' (曲の声を読む runs), 'review'.
+      let S = null;
+      let digestMemo = { digest: null, act: null, cands: null };
+
+      function source(doc) {
+        if (S.source === 'voice') {
+          const cands = VO.candidatesIn(S.dec, 0, Infinity);
+          return { cands, act: S.dec.act, hz: S.dec.hz };
+        }
+        const d = doc.song.digest;
+        if (digestMemo.digest !== d) {
+          const a = VO.digestActivity(d);
+          digestMemo = { digest: d, act: a, cands: VO.fromDigest(d) };
+        }
+        return { cands: digestMemo.cands, act: digestMemo.act.act, hz: digestMemo.act.hz };
+      }
+
+      function decoded(doc) {
+        const v = doc.song && doc.song.voice;
+        if (!VO.hasPhrases(v)) return null;
+        try { return VO.decode(v); } catch (e) { return null; }
+      }
+
+      // start(): one session at a time; not while tapping. Nothing to draft → a toast, and no panel.
+      function start() {
+        const doc = app.doc, plan = app.plan;
+        if (S || app.view.state.mode === 'tap' || !plan || !plan.lines.length || !doc.song) return false;
+        if (!input(doc, plan, {}).lines.some((l) => l.draft)) { app.toast(t('draft.noAuto'), { kind: 'info' }); return false; }
+        app.pause();
+        if (app.goStep) app.goStep(app.view.state.step);          // the step column shows the panel: unfold it
+        S = { phase: 'need', source: null, dec: decoded(doc), redo: false, tryOn: true, userOn: new Set(), userOff: new Set(),
+          lines: [], res: null, tapped: new Set(), checked: new Set(), trial: null, abort: null, progress: 0, audition: null };
+        app.view.set({ mode: 'draft' });
+        if (S.dec) { S.source = 'voice'; propose(true); } else render();
+        app.bus.emit('draft');
+        if (app.shell) app.shell.playbar.updateStrip();
+        return true;
+      }
+
+      // Drafts from the source (the stored voice, or the loudness) for the current document; the user's own checks and
+      // unchecks are kept by line id.
+      function propose(first) {
+        const doc = app.doc, plan = app.plan;
+        if (!S || !plan || !doc.song) { cancel(); return; }
+        const src = source(doc);
+        if (!src.cands.length) { app.toast(t('draft.noVoice'), { kind: 'warn' }); cancel(); return; }
+        const inp = input(doc, plan, { redo: S.redo });
+        const res = CD.draftStarts({ lines: inp.lines, cands: src.cands, voiced: VO.voiced(src.cands, src.act, src.hz),
+          duration: plan.duration, grid: plan.beats ? B.grid(plan.beats) : null, snap: doc.timing.snap, digest: S.source === 'digest' });
+        const before = S.res;
+        S.lines = inp.lines;
+        S.tapped = inp.tapped;
+        S.res = res;
+        S.phase = 'review';
+        const def = checkedByDefault(res);
+        S.checked = new Set(res.proposals.map((x) => x.lineId)
+          .filter((id) => (def.has(id) || S.userOn.has(id)) && !S.userOff.has(id)));
+        if (!first && before) app.toast(t('draft.stale'), { kind: 'info' });
+        render();
+        tryOnSoon();
+        app.bus.emit('draft');
+        if (app.shell) app.shell.playbar.updateStrip();
+      }
+
+      // --- try-on and audition ---------------------------------------------------------------------------------------
+
+      function tryNow() {
+        if (!S || S.phase !== 'review' || !S.tryOn) return;
+        const cmd = applyCmd(S.lines, S.res, S.checked);
+        let trial = null;
+        try { trial = cmd ? app.reduce(app.doc, cmd) : null; } catch (e) { trial = null; }
+        S.trial = trial;
+        app.tryOn(trial, t('draft.strip'));
+      }
+      const tryOnSoon = dom.debounce(tryNow, TRY_MS);
+
+      // Another try-on replaced the draft's (the AI's, the compare view): 当てて見る turns off, the stage is left alone.
+      function tryOnReplaced(doc) {
+        if (!S || !S.trial || doc === S.trial) return;
+        S.trial = null;
+        S.tryOn = false;
+        const box = body.querySelector('[data-draft="tryOn"]');
+        if (box) box.checked = false;
+      }
+
+      function stopAudition() {
+        if (S && S.audition) { S.audition(); S.audition = null; }
+      }
+
+      function audition(to) {
+        if (!S || !app.songReady()) return;
+        stopAudition();
+        const from = Math.max(0, to - AUDITION.BEFORE), until = from + AUDITION.LENGTH;
+        app.seek(from);
+        app.play();
+        S.audition = app.bus.on('time', (tt) => {
+          if (tt < until) return;
+          stopAudition();
+          app.pause();
+        });
+      }
+      app.view.on((changed, st) => { if (S && changed.includes('playing') && !st.playing) stopAudition(); });
+
+      // --- reading the voice (a song imported by an older build) -----------------------------------------------------
+
+      async function readVoice() {
+        if (!S || !app.readVoice) return;
+        S.phase = 'reading';
+        S.progress = 0;
+        S.abort = new AbortController();
+        render();
+        const session = S;
+        const out = await app.readVoice({ signal: S.abort.signal, onProgress: (p) => { if (S === session) { S.progress = p; progress(); } } });
+        if (S !== session) return;                 // the draft ended meanwhile
+        S.abort = null;
+        if (out === 'done') {
+          S.dec = decoded(app.doc);
+          if (S.dec) { S.source = 'voice'; propose(true); return; }
+        }
+        if (out === 'cancelled') { app.toast(t('draft.cancelled')); leave(); return; }
+        app.toast(t('draft.voiceFailed'), { kind: 'error' });
+        S.phase = 'need';
+        render();
+      }
+
+      function fromLoudness() {
+        if (!S || !app.doc.song || !app.doc.song.digest) return;
+        S.source = 'digest';
+        propose(true);
+      }
+
+      // --- leaving ----------------------------------------------------------------------------------------------------
+
+      function leave() {
+        if (!S) return;
+        tryOnSoon.cancel();
+        stopAudition();
+        if (S.abort) S.abort.abort();
+        const mine = S.trial;
+        S = null;
+        if (mine) app.tryOn(null);
+        app.view.set({ mode: 'normal' });
+        app.bus.emit('draft');
+        if (app.shell) app.shell.playbar.updateStrip();
+      }
+
+      // [やめる] / Esc: nothing is recorded (a voice read meanwhile stays, as its own undo entry).
+      function cancel() {
+        if (!S) return false;
+        const reading = S.phase === 'reading';
+        app.pause();
+        leave();
+        if (reading) app.toast(t('draft.cancelled'));
+        return true;
+      }
+
+      // [適用]: one undo entry 「曲から下書き（n行）」.
+      function apply() {
+        if (!S || S.phase !== 'review') return false;
+        const cmd = applyCmd(S.lines, S.res, S.checked);
+        const n = cmd ? cmd.marks.length : 0;
+        app.pause();
+        leave();
+        if (!cmd) return false;
+        app.store.seal();
+        app.dispatch(cmd, { label: ['undo.draft', { n }] });
+        app.store.seal();
+        const from = Math.max(0, cmd.marks[0].start - PREROLL);
+        app.toast(t('draft.done', { n }), { kind: 'ok', action: { label: t('tap.check'), run: () => { app.seek(from); app.play(); } } });
+        return true;
+      }
+
+      // Every document change during the review (an undo, an edit in the timeline): the draft follows the new lines.
+      // Opening another work ends it.
+      app.bus.on('plan', (e) => {
+        if (!S) return;
+        if (e && e.kind === 'load') { leave(); return; }
+        if (S.phase !== 'review') return;
+        if (S.source === 'voice') {
+          S.dec = decoded(app.doc);
+          if (!S.dec) { S.source = null; S.phase = 'need'; render(); app.bus.emit('draft'); return; }
+        }
+        propose(false);
+      });
+      app.bus.on('song', () => { if (S && S.phase === 'need') render(); });
+
+      // --- rendering ----------------------------------------------------------------------------------------------------
+
+      let bar = null, barText = null;
+      function progress() {
+        if (!bar || !S) return;
+        const pct = Math.round(S.progress * 100);
+        dom.setStyle(bar, { width: pct + '%' });
+        barText.textContent = t('draft.listening', { pct });
+      }
+
+      function render() {
+        bar = null;
+        if (!S) { dom.clear(body); return; }
+        if (S.phase === 'need') renderNeed();
+        else if (S.phase === 'reading') renderReading();
+        else renderReview();
+      }
+
+      function button(label, run, cls) {
+        return h('button', { class: cls || 'btn', type: 'button', text: label, on: { click: run } });
+      }
+
+      function renderNeed() {
+        const ready = app.songReady();
+        const acts = ready ? [button(t('draft.readVoice'), () => readVoice(), 'btn primary')]
+          : [button(t('draft.relink'), async () => { await app.pickRelink(); if (S) render(); }, 'btn primary'),
+            button(t('draft.loudOnly'), () => fromLoudness())];
+        acts.push(button(t('draft.stop'), () => cancel()));
+        dom.replace(body, h('p', { class: 'note', text: t('draft.needVoice') }), h('div', { class: 'row-actions' }, acts));
+      }
+
+      function renderReading() {
+        bar = h('div', { class: 'progress-bar' });
+        barText = h('div', { class: 'muted small', role: 'status' });
+        dom.replace(body, h('div', { class: 'progress', role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': '100' }, bar),
+          barText, h('div', { class: 'row-actions' }, button(t('draft.cancel'), () => cancel())));
+        progress();
+      }
+
+      function renderReview() {
+        const res = S.res;
+        const plan = app.plan;
+        const byId = new Map((plan ? plan.lines : []).map((l) => [l.id, l]));
+        const c = counts(res);
+        const head = [h('p', { class: 'draft-head', text: t('draft.head', { n: drafted(S.lines, res) }) }),
+          h('p', { class: 'note subtle', text: t('draft.counts', c) })];
+        const agree = CD.agreement(res, S.tapped);
+        if (agree.n >= AGREE_MIN) head.push(h('p', { class: 'note', 'data-draft': 'agree', text: t('draft.agree', agree) }));
+        const tryBox = h('input', { type: 'checkbox', 'data-draft': 'tryOn', checked: S.tryOn });
+        tryBox.addEventListener('change', () => {
+          S.tryOn = tryBox.checked;
+          if (S.tryOn) tryNow(); else { tryOnSoon.cancel(); const mine = S.trial; S.trial = null; if (mine) app.tryOn(null); }
+          if (app.shell) app.shell.playbar.updateStrip();
+        });
+        const redoBox = h('input', { type: 'checkbox', 'data-draft': 'redo', checked: S.redo });
+        redoBox.addEventListener('change', () => { S.redo = redoBox.checked; propose(true); focusData('redo'); });
+        const songReady = app.songReady();
+        const rows = res.proposals.map((x) => {
+          const line = byId.get(x.lineId);
+          const n = line ? line.index + 1 : 0;
+          const box = h('input', { type: 'checkbox', checked: S.checked.has(x.lineId), 'data-line': x.lineId });
+          box.addEventListener('change', () => {
+            if (box.checked) { S.checked.add(x.lineId); S.userOn.add(x.lineId); S.userOff.delete(x.lineId); }
+            else { S.checked.delete(x.lineId); S.userOff.add(x.lineId); S.userOn.delete(x.lineId); }
+            changed();
+          });
+          const play = h('button', { class: 'icon-btn small', type: 'button', disabled: !songReady,
+            'aria-label': t('draft.play'), title: songReady ? t('draft.play') : t('draft.needSongToPlay'),
+            on: { click: () => audition(x.to) } }, I.icon('play', { size: 14 }));
+          return h('li', { class: 'draft-row', 'data-conf': x.conf },
+            h('label', { class: 'check-row draft-check' }, box,
+              h('span', { class: 'draft-when', text: t('draft.row', { n, from: T.fmtTime(x.from), to: T.fmtTime(x.to) }) })),
+            h('span', { class: 'draft-conf', text: MARK[x.conf] + ' ' + t('draft.conf.' + x.conf) }), play,
+            h('span', { class: 'draft-text', text: line ? line.text : '' }));
+        });
+        const applyBtn = button(t('draft.apply'), () => apply(), 'btn primary');
+        applyBtn.dataset.draft = 'apply';
+        const aiLink = app.view.state.prefs.ai ? h('button', { class: 'link', type: 'button', text: t('draft.aiBetter'),
+          on: { click: () => { cancel(); if (app.actions.has('ai.align')) app.actions.run('ai.align', { from: 'draft' }); } } }) : null;
+        dom.replace(body, ...head,
+          h('label', { class: 'check-row' }, tryBox, h('span', { text: t('draft.tryOn') })),
+          h('label', { class: 'check-row', title: t('draft.redoTip') }, redoBox, h('span', { text: t('draft.redo') })),
+          h('ul', { class: 'draft-rows' }, rows),
+          h('div', { class: 'row-actions' },
+            button(t('draft.all'), () => setAll((x) => true), 'chip-btn'),
+            button(t('draft.sure'), () => setAll((x) => x.conf === 'high'), 'chip-btn')),
+          h('div', { class: 'row-actions' }, applyBtn, button(t('draft.stop'), () => cancel())),
+          h('p', { class: 'note subtle', text: t('draft.keys') }),
+          h('p', { class: 'note subtle', text: t('draft.hint') }), aiLink);
+        applyBtn.disabled = !applyCmd(S.lines, res, S.checked);
+      }
+
+      function focusData(key) {
+        const el = body.querySelector('[data-draft="' + key + '"]');
+        if (el) dom.focus(el);
+      }
+
+      // A check changed: the boxes, 適用 and the try-on follow (the list is not rebuilt, so focus stays).
+      function changed() {
+        for (const box of body.querySelectorAll('input[data-line]')) box.checked = S.checked.has(box.dataset.line);
+        const applyBtn = body.querySelector('[data-draft="apply"]');
+        if (applyBtn) applyBtn.disabled = !applyCmd(S.lines, S.res, S.checked);
+        tryOnSoon();
+        app.bus.emit('draft');
+      }
+
+      function setAll(pick) {
+        if (!S || S.phase !== 'review') return;
+        for (const x of S.res.proposals) {
+          if (pick(x)) { S.checked.add(x.lineId); S.userOn.add(x.lineId); S.userOff.delete(x.lineId); }
+          else { S.checked.delete(x.lineId); S.userOff.add(x.lineId); S.userOn.delete(x.lineId); }
+        }
+        changed();
+      }
+
+      // The timeline's ticks: each proposal on its line row (checked: solid, unchecked: dashed).
+      function marks() {
+        if (!S || S.phase !== 'review') return [];
+        return S.res.proposals.map((x) => ({ lineId: x.lineId, t: x.to, on: S.checked.has(x.lineId), conf: x.conf }));
+      }
+
+      // The play bar's mode strip: 「下書きを試写中 [適用] [やめる]」.
+      function strip() {
+        if (!S) return null;
+        const actions = [];
+        if (S.phase === 'review') actions.push({ label: t('draft.apply'), run: () => apply() });
+        actions.push({ label: t('draft.stop'), run: () => cancel() });
+        return { kind: 'tryon', text: S.trial ? t('draft.strip') : t('draft.title'), actions };
+      }
+
+      return { root, start, cancel, apply, active: () => !!S, marks, strip, tryOnReplaced, phase: () => (S ? S.phase : null),
+        onShow: () => { if (S && !root.contains(document.activeElement)) dom.focus(heading); } };
+    }
+
+    return { mount, input, applyCmd, checkedByDefault, counts, drafted, DRAFT_BETA, AUDITION };
+  });
 /* 文字PVメーカー v2 — original work. The keymap and key resolution: IME guard, text-field guard, modes (DESIGN §6.8). */
 MV.def('ui/keys', [], () => {
   'use strict';
@@ -55883,6 +57010,14 @@ MV.def('ui/keys', [], () => {
     b('T', 'tap', 'tap.finish'),
   ];
 
+  // 曲から下書き (PV22 S1): the review owns the keyboard like tap mode — Space plays, ←/→ move a second, Esc discards.
+  const DRAFT = [
+    b('Space', 'draft', 'play.toggle'),
+    b('ArrowLeft', 'draft', 'seek.step', { seconds: -1 }),
+    b('ArrowRight', 'draft', 'seek.step', { seconds: 1 }),
+    b('Escape', 'draft', 'draft.cancel'),
+  ];
+
   const PICKER = [
     b('ArrowLeft', 'picker', 'picker.move', { dx: -1, dy: 0 }),
     b('ArrowRight', 'picker', 'picker.move', { dx: 1, dy: 0 }),
@@ -55900,8 +57035,8 @@ MV.def('ui/keys', [], () => {
     b('Ctrl+K', 'palette', 'palette.close'),
   ];
 
-  const KEYMAP = Object.freeze([].concat(GLOBAL, TEXT, TAP, PICKER, PALETTE));
-  const CONTEXTS = Object.freeze(['global', 'text', 'tap', 'picker', 'palette']);
+  const KEYMAP = Object.freeze([].concat(GLOBAL, TEXT, TAP, DRAFT, PICKER, PALETTE));
+  const CONTEXTS = Object.freeze(['global', 'text', 'tap', 'draft', 'picker', 'palette']);
 
   const TABLES = new Map(CONTEXTS.map((ctx) => [ctx, new Map(KEYMAP.filter((x) => x.ctx === ctx).map((x) => [x.key, x]))]));
 
@@ -55930,17 +57065,18 @@ MV.def('ui/keys', [], () => {
   function answer(binding) { return { cmd: binding.cmd, args: binding.args ? Object.assign({}, binding.args) : null }; }
 
   // resolveKey(ev, { mode, singleKeys }) → { cmd, args } | null.
-  //   ev.targetKind: 'text' when focus is in a text field/select/contenteditable. mode: 'normal' | 'tap' | 'picker' |
-  //   'palette'. Never fires during IME composition. In tap mode every key that would be an app shortcut is swallowed
-  //   ({ cmd: 'noop' }), so no other shortcut fires; unrelated keys (F5 …) return null and keep their browser meaning.
+  //   ev.targetKind: 'text' when focus is in a text field/select/contenteditable. mode: 'normal' | 'tap' | 'draft' |
+  //   'picker' | 'palette'. Never fires during IME composition. In tap mode (and in the review of 曲から下書き) every key
+  //   that would be an app shortcut is swallowed ({ cmd: 'noop' }), so no other shortcut fires; unrelated keys (F5 …)
+  //   return null and keep their browser meaning.
   function resolveKey(ev, ctx) {
     if (!ev || ev.isComposing || ev.keyCode === 229) return null;
     const combo = comboOf(ev);
     if (!combo) return null;
     const c = ctx || {};
     const mode = c.mode || 'normal';
-    if (mode === 'tap') {
-      const hit = TABLES.get('tap').get(combo);
+    if (mode === 'tap' || mode === 'draft') {
+      const hit = TABLES.get(mode).get(combo);
       if (hit) return answer(hit);
       return TABLES.get('global').has(combo) || TABLES.get('text').has(combo) ? { cmd: 'noop', args: null } : null;
     }
@@ -67652,7 +68788,7 @@ MV.def('ui/step_lyrics', ['ui/dom', 'ui/icons', 'ui/lyric_editor', 'i18n/t'], (d
   return { mount };
 });
 /* 文字PVメーカー v2 — original work. Step ② 曲（任意）: song row or drop zone, tempo, snap to beats, tap-sync entry, AI timing (DESIGN §6.4.3, §6.11). */
-MV.def('ui/step_song', ['ui/dom', 'ui/icons', 'ui/header', 'ui/selection', 'i18n/t'], (dom, I, header, S, T) => {
+MV.def('ui/step_song', ['ui/dom', 'ui/icons', 'ui/header', 'ui/selection', 'i18n/t', 'ui/draft'], (dom, I, header, S, T, DR) => {
   'use strict';
 
   const { h } = dom;
@@ -67683,11 +68819,15 @@ MV.def('ui/step_song', ['ui/dom', 'ui/icons', 'ui/header', 'ui/selection', 'i18n
     const tapLineLabel = h('span');
     const tapLineBtn = h('button', { class: 'chip-btn', type: 'button', 'data-act': 'tap.line', hidden: true,
       title: t('tap.lineBtnHint') }, I.icon('tap', { size: 15 }), tapLineLabel);
+    // 曲から下書き (PV22 S1): with a song, draft the start of every automatic line from where the voice starts phrases.
+    // Like the re-tap chip it belongs to the タップ control (no data-ctl: the step keeps its five controls).
+    const draftBtn = h('button', { class: 'chip-btn', type: 'button', 'data-act': 'time.draft', hidden: true,
+      title: t('song.draftTip') }, I.icon('wave', { size: 15 }), t(DR.DRAFT_BETA ? 'song.draftBeta' : 'song.draft'));
     const aiBtn = h('button', { class: 'chip-btn', type: 'button', 'data-act': 'ai.align', 'data-ctl': 'ai' },
       I.icon('ai', { size: 15 }), t('song.aiTiming'));
     const root = h('div', { class: 'step step-song' },
       h('div', { class: 'step-head' }, h('h2', { class: 'step-title', text: t('song.title') })),
-      songBox, tempo, h('div', { class: 'snap-field' }, snapRow, snapWhy), tapBtn, tapLineBtn, aiBtn);
+      songBox, tempo, h('div', { class: 'snap-field' }, snapRow, snapWhy), tapBtn, tapLineBtn, draftBtn, aiBtn);
 
     dom.on(root, 'click', '[data-act]', (ev, b) => app.actions.run(b.dataset.act, { from: 'song' }));
 
@@ -67843,6 +68983,8 @@ MV.def('ui/step_song', ['ui/dom', 'ui/icons', 'ui/header', 'ui/selection', 'i18n
       const one = sel.level !== 'line' || sel.ids.length === 1;
       tapLineBtn.hidden = !(info && one);
       if (info) tapLineLabel.textContent = t('song.tapLine', { n: info.index + 1 });
+      draftBtn.hidden = !app.doc.song;
+      draftBtn.disabled = !(app.plan && app.plan.lines.length);
       aiBtn.hidden = !app.view.state.prefs.ai;
       aiBtn.disabled = !app.doc.song;
       aiBtn.title = app.doc.song ? '' : t('song.aiNeedsSong');
@@ -67893,6 +69035,7 @@ MV.def('ui/steps', ['ui/dom', 'ui/icons', 'ui/step_lyrics', 'ui/step_song', 'ui/
       const bodies = {};
       for (const step of STEPS) bodies[step] = MODULES[step].mount(app);
       const tapPanel = app.tap;
+      const draftPanel = app.draft;                   // 曲から下書き's review (PV22 S1), in the step column like tap mode
 
       const tabs = STEPS.map((step, i) => h('button', {
         class: 'step-tab', type: 'button', role: 'tab', id: 'step-tab-' + step, 'data-step': step,
@@ -67938,7 +69081,7 @@ MV.def('ui/steps', ['ui/dom', 'ui/icons', 'ui/step_lyrics', 'ui/step_song', 'ui/
       let shown = null;
       function showBody() {
         const vs = app.view.state;
-        const want = vs.mode === 'tap' ? tapPanel : bodies[vs.step];
+        const want = vs.mode === 'tap' ? tapPanel : vs.mode === 'draft' && draftPanel ? draftPanel : bodies[vs.step];
         if (shown !== want) {
           dom.replace(bodyHost, want.root);
           shown = want;
@@ -67946,9 +69089,10 @@ MV.def('ui/steps', ['ui/dom', 'ui/icons', 'ui/step_lyrics', 'ui/step_song', 'ui/
         }
         bodyHost.setAttribute('aria-labelledby', 'step-tab-' + vs.step);
         const at = STEPS.indexOf(vs.step);
-        const extra = vs.mode !== 'tap' && bodies[vs.step].footer ? bodies[vs.step].footer : null;
+        const modal = vs.mode === 'tap' || vs.mode === 'draft';
+        const extra = !modal && bodies[vs.step].footer ? bodies[vs.step].footer : null;
         if (extra) dom.replace(footerExtra, extra);
-        else if (vs.mode === 'tap') dom.clear(footerExtra);
+        else if (modal) dom.clear(footerExtra);
         else {
           // ② without a song: 「曲なしで次へ」 (§6.11 — the song is optional).
           const label = vs.step === 'song' && !app.doc.song ? t('step.nextNoSong') : t('step.next', { step: t('step.' + STEPS[at + 1]) });
@@ -68091,7 +69235,7 @@ MV.def('ui/tap', ['ui/dom', 'ui/icons', 'ui/keys', 'ui/selection', 'i18n/t', 'pl
     // line (the timeline's この行からタップで合わせる); start({ only: lineId }) re-taps that one line (この行だけ打ち直す).
     function start(opts) {
       const ls = app.plan ? app.plan.lines : [];
-      if (!ls.length || session) return false;          // one session at a time (the timeline menu stays reachable)
+      if (!ls.length || session || app.view.state.mode === 'draft') return false;   // one session at a time; not over 曲から下書き
       if (opts && opts.only) return startOnly(opts.only);
       const selLine = opts && opts.from ? opts.from : S.lineOfSel(S.validate(app.view.state.sel, app.plan));
       const tNow = app.time();
@@ -68437,7 +69581,9 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
     text: '#eceae5', muted: '#8e94a1', beat: 'rgba(242,239,232,0.18)', bar: 'rgba(242,239,232,0.45)', play: '#f2efe8',
     range: 'rgba(124,196,255,0.14)', focus: '#7cc4ff', wave: 'rgba(160,168,184,0.35)', section: 'rgba(240,182,77,0.16)',
     highlight: '#f0b64d', mark: '#c9b27a', band: 'rgba(240,182,77,0.16)', band2: 'rgba(124,196,255,0.14)',
-    bandOn: 'rgba(226,85,59,0.34)', key: '#f0b64d', warn: '#ff7a7a' };   // warn: the gutter's --error (読み切れない速さ, PV22 S4)
+    bandOn: 'rgba(226,85,59,0.34)', key: '#f0b64d', warn: '#ff7a7a',   // warn: the gutter's --error (読み切れない速さ, PV22 S4)
+    draft: '#7cc4ff' };                   // 曲から下書き's proposed starts (PV22 S1)
+  const DRAFT_PX = 2;                   // the width of a proposed-start tick
   const WARN_BAR_PX = 3;                // the too-fast bar along the bottom of a line block
   const KEY_PX = 5;                     // half the size of a key diamond ◆
 
@@ -68686,6 +69832,18 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
       });
     }
 
+    // 曲から下書き (PV22 S1): each proposed start as a tick on the line row, solid when checked, dashed when not.
+    function drawDraft(r) {
+      const marks = app.draft && app.draft.active() ? app.draft.marks() : [];
+      g.fillStyle = COLORS.draft;
+      for (const m of marks) {
+        const x = Math.round(xOf(m.t)) - DRAFT_PX / 2;
+        if (x < -DRAFT_PX || x > W + DRAFT_PX) continue;
+        if (m.on) { g.fillRect(x, r[0] + 1, DRAFT_PX, r[1] - r[0] - 2); continue; }
+        for (let y = r[0] + 1; y < r[1] - 1; y += 5) g.fillRect(x, y, DRAFT_PX, Math.min(3, r[1] - 1 - y));
+      }
+    }
+
     function drawCuts(r, sel) {
       const p = app.plan;
       const selCuts = new Set(S.cutsOf(sel, p));
@@ -68773,6 +69931,7 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
         drawLines(r.line, sel);
         drawCuts(r.cut, sel);
       } else label(t('tl.empty'), 8, (r.line[0] + r.cut[1]) / 2, W - 16, COLORS.muted);
+      drawDraft(r.line);
       drawRuler(r.ruler);
       const x = xOf(app.time());
       g.fillStyle = COLORS.play;
@@ -69156,6 +70315,7 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
     app.bus.on('time', (tt) => { if (!host.hidden) { follow(tt); redraw('time'); } });
     app.bus.on('plan', () => { clampView(); if (!host.hidden) { renderProxy(); redraw('plan'); } });
     app.bus.on('shotEdit', () => { if (!host.hidden) redraw('keys'); });
+    app.bus.on('draft', () => { if (!host.hidden) redraw('draft'); });
     app.bus.on('layout', () => { if (!host.hidden) requestAnimationFrame(layout); });
     app.view.on((changed) => {
       if (changed.includes('drawer') && app.view.state.drawer) requestAnimationFrame(() => { renderProxy(); layout(); });
@@ -69548,7 +70708,7 @@ MV.def('ui/palette', ['ui/dom', 'ui/icons', 'ui/keys', 'ui/selection', 'i18n/str
     const HIDDEN = new Set(['tap.mark', 'tap.end', 'tap.back', 'tap.seek', 'tap.pause', 'tap.finish', 'palette.open', 'palette.move',
       'palette.run', 'palette.close', 'picker.move', 'picker.pick', 'picker.back', 'timeline.nudge', 'lyrics.moveRows', 'lyrics.emphasis',
       'view.compare', 'seek.step', 'sel.line', 'sel.cut', 'sel.down', 'sel.up', 'region.next', 'region.prev', 'export.cancel', 'step.go',
-      'view.quality']);
+      'view.quality', 'draft.cancel']);
     const STEPS = ['lyrics', 'song', 'look', 'export'];
     // An empty query lists what a first visit needs first (after the recent commands); settings and the language switch
     // are always last, so Ctrl+K then Enter never flips a setting.
@@ -70086,7 +71246,7 @@ MV.def('ui/view', ['ui/layout', 'ui/selection'], (L, S) => {
 
   const STEPS = Object.freeze(['lyrics', 'song', 'look', 'export']);
   const PANELS = Object.freeze(['details', 'ai']);
-  const MODES = Object.freeze(['normal', 'tap', 'tryon']);
+  const MODES = Object.freeze(['normal', 'tap', 'tryon', 'draft']);   // draft: the review of 曲から下書き (PV22 S1)
   const PREF_KEY = 'mojipv.prefs';
   const DEFAULT_PREFS = Object.freeze({
     singleKeys: true,         // 1文字キーを使う (WCAG 2.1.4)
@@ -74462,9 +75622,9 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
 MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom', 'ui/keys', 'ui/actions',
   'ui/selection', 'ui/looks', 'ui/view', 'ui/shell', 'ui/header', 'ui/tap', 'ui/project_io',
   'ui/inspector', 'ui/timeline', 'ui/palette', 'ui/menus', 'ui/dialogs', 'ui/ai_panel', 'ai/providers',
-  'ui/fields', 'ui/output', 'ui/media_io', 'ui/readcheck'],   // WP8b views, WP8c AI panel, INT-UI output rules, v2.1 photos and videos, PV22 S4
+  'ui/fields', 'ui/output', 'ui/media_io', 'ui/readcheck', 'ui/draft'],   // WP8b views, WP8c AI panel, INT-UI output rules, v2.1 photos and videos, PV22 S4, S1
 (D, ST, T, strings, dom, K, A, S, LK, V, shell, header, tapUi, projectIo, inspector, timeline, palette, menus, dialogs,
-  aiPanel, aiProviders, F, OUT, mediaIo, RC) => {
+  aiPanel, aiProviders, F, OUT, mediaIo, RC, draftUi) => {
   'use strict';
 
   const TYPING_REPLAN_MS = 120;         // typing never waits on the planner (§7.4)
@@ -74810,7 +75970,7 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
       }
     };
     app.goStep = (step) => {
-      if (view.state.mode === 'tap') return;
+      if (view.state.mode === 'tap' || view.state.mode === 'draft') return;
       if (view.state.rail) view.set({ rail: false, railBy: null });
       if (app.layout && (app.layout.layout === 'compact' || app.layout.layout === 'stacked') && view.state.panel) view.closePanel();
       view.set({ step });
@@ -74819,12 +75979,14 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
     app.tryOn = (doc, badge) => {
       if (!app.shell) return;
       if (app.ai) app.ai.tryOnReplaced(doc);                // WP8c: another try-on ends the AI's
+      if (app.draft) app.draft.tryOnReplaced(doc, badge);   // … and 曲から下書き's (PV22 S1)
       if (doc) app.shell.stage.setAlt(doc, badge);
       else if (app.shell.stage.hasAlt() && !view.state.compare) app.shell.stage.setAlt(null);
       app.shell.playbar.updateStrip();
     };
     app.modeStrip = () => {
       if (app.tap && app.tap.active()) return app.tap.strip();
+      if (app.draft && app.draft.active()) return app.draft.strip();   // 下書きを試写中 [適用] [やめる] (PV22 S1)
       // 使う範囲を調整中: the trim widget's peek at a handle's source frame (DESIGN_2_1 §11.7.7)
       if (app.shell && app.shell.stage.peeking && app.shell.stage.peeking()) return { kind: 'peek', text: app.t('media.peek'), actions: [] };
       // 切り抜きを調整中 (§11.7.6): what the mouse does, and [終わる]
@@ -74892,6 +76054,7 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
     // loadProject(doc, side, { quiet }): quiet leaves the toast to the caller (clearing the device says what it did).
     app.loadProject = (doc, side, o) => {
       if (app.tap && app.tap.active()) app.tap.cancel();   // its marks belong to the lines of the work being left
+      if (app.draft && app.draft.active()) app.draft.cancel();
       app.pause();
       store.load(doc, side);
       view.set({ sel: S.WORK, time: 0 });
@@ -74960,6 +76123,25 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
       } finally {
         if (loading === job) loading = null;
       }
+    };
+    // 曲の声を読む (DESIGN_2_2 §5.2): the song's voice for a song imported before audio/voice (a new import reads it
+    // itself), from the linked song, as one undo entry (song.voice, refused when the song changed meanwhile).
+    // readVoice({ signal, onProgress }) → Promise<'done' | 'cancelled' | 'stale' | 'nosong' | 'failed'>.
+    app.readVoice = async (o) => {
+      const docSong = app.doc.song;
+      if (!docSong || !app.songReady()) return 'nosong';
+      const sha1 = docSong.sha1;
+      let voice;
+      try { voice = await app.svc.songs.analyzeVoice(app.buffer, o || {}); } catch (e) {
+        if (e && e.code === 'cancelled') return 'cancelled';
+        if (typeof console !== 'undefined') console.error(e);
+        return 'failed';
+      }
+      if (!app.doc.song || app.doc.song.sha1 !== sha1) return 'stale';
+      store.seal();
+      app.dispatch({ t: 'song.voice', sha1, voice }, { label: ['undo.songVoice', {}] });
+      store.seal();
+      return app.doc.song && app.doc.song.voice ? 'done' : 'failed';
     };
     app.clearSong = () => {
       app.dispatch({ t: 'song.clear' }, { label: ['undo.songClear', {}] });
@@ -75267,6 +76449,9 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
       const id = lineForTap(a);
       return id ? app.tap.start({ only: id }) : false;
     }, { enabled: () => hasLines() && !!lineForTap(null) });
+    // 曲から下書き (PV22 S1): the review of drafted line starts; Esc in it discards.
+    def('time.draft', () => app.draft.start(), { enabled: () => hasLines() && !!app.doc.song && view.state.mode !== 'tap' });
+    def('draft.cancel', () => app.draft.cancel());
     def('tap.mark', (c, a) => app.tap.mark(a));
     def('tap.end', (c, a) => app.tap.end(a));
     def('tap.back', () => app.tap.back());
@@ -75515,7 +76700,8 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
     document.addEventListener('keydown', (ev) => {
       if (ev.key === 'Tab') pressed = null;              // focus moves by keyboard from here on
       if (app.popover) return;
-      const mode = view.state.mode === 'tap' ? 'tap' : app.paletteOpen ? 'palette' : app.pickerOpen ? 'picker' : 'normal';
+      const mode = view.state.mode === 'tap' ? 'tap' : view.state.mode === 'draft' ? 'draft'
+        : app.paletteOpen ? 'palette' : app.pickerOpen ? 'picker' : 'normal';
       const res = K.resolveKey({
         key: ev.key, code: ev.code, ctrlKey: ev.ctrlKey, shiftKey: ev.shiftKey, altKey: ev.altKey, metaKey: ev.metaKey,
         isComposing: ev.isComposing, keyCode: ev.keyCode, targetKind: dom.targetKind(ev.target),
@@ -75524,7 +76710,7 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
       if (res.cmd === 'noop') { ev.preventDefault(); return; }
       // Space / Enter on a focused button keep their native meaning (activation); WP8b: also inside a sub-page (tiles,
       // filter checkboxes), where Enter on a tile picks it through its click.
-      const activation = (ev.key === ' ' || ev.key === 'Enter') && (mode === 'normal' || mode === 'picker') && !ev.ctrlKey && !ev.metaKey
+      const activation = (ev.key === ' ' || ev.key === 'Enter') && (mode === 'normal' || mode === 'picker' || mode === 'draft') && !ev.ctrlKey && !ev.metaKey
         && ev.target instanceof Element && ev.target.closest(ACTIVATES) && !(ev.key === ' ' && pointerFocused(ev.target));
       if (activation) return;
       if (ev.repeat && !REPEATABLE.includes(res.cmd)) { ev.preventDefault(); return; }
@@ -75538,7 +76724,7 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
     // A paste outside the text fields (DESIGN_2_1 §11.7.2, D§6.8): image or video files are imported (ui/media_io);
     // anything else pastes the copied look. The palette and the menus run look.paste directly.
     document.addEventListener('paste', (ev) => {
-      if (app.popover || app.paletteOpen || view.state.mode === 'tap' || dom.targetKind(ev.target) === 'text') return;
+      if (app.popover || app.paletteOpen || view.state.mode === 'tap' || view.state.mode === 'draft' || dom.targetKind(ev.target) === 'text') return;
       const files = mediaIo.pastedFiles(ev.clipboardData);
       if (files.length && app.media) { ev.preventDefault(); app.media.importFiles(files, {}); return; }
       if (app.actions.has('look.paste') && app.actions.run('look.paste', { from: 'key' })) ev.preventDefault();
@@ -75632,6 +76818,7 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
     app.io.begin();
     app.media = mediaIo.mount(app);                                           // photos and videos (DESIGN_2_1 §11.7)
     app.tap = tapUi.mount(app);
+    app.draft = draftUi.mount(app);                                           // 曲から下書き (PV22 S1)
     app.replan();
     app.shell = shell.mount(app, document.getElementById('app'));
     mountDetails(app);                                                        // WP8b views (UI part 2)

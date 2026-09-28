@@ -98,7 +98,7 @@ MV.def('ui/tap', ['ui/dom', 'ui/icons', 'ui/keys', 'ui/selection', 'i18n/t', 'pl
     // line (the timeline's この行からタップで合わせる); start({ only: lineId }) re-taps that one line (この行だけ打ち直す).
     function start(opts) {
       const ls = app.plan ? app.plan.lines : [];
-      if (!ls.length || session) return false;          // one session at a time (the timeline menu stays reachable)
+      if (!ls.length || session || app.view.state.mode === 'draft') return false;   // one session at a time; not over 曲から下書き
       if (opts && opts.only) return startOnly(opts.only);
       const selLine = opts && opts.from ? opts.from : S.lineOfSel(S.validate(app.view.state.sel, app.plan));
       const tNow = app.time();

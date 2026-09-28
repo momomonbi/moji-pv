@@ -4,7 +4,7 @@ MV.def('ui/view', ['ui/layout', 'ui/selection'], (L, S) => {
 
   const STEPS = Object.freeze(['lyrics', 'song', 'look', 'export']);
   const PANELS = Object.freeze(['details', 'ai']);
-  const MODES = Object.freeze(['normal', 'tap', 'tryon']);
+  const MODES = Object.freeze(['normal', 'tap', 'tryon', 'draft']);   // draft: the review of 曲から下書き (PV22 S1)
   const PREF_KEY = 'mojipv.prefs';
   const DEFAULT_PREFS = Object.freeze({
     singleKeys: true,         // 1文字キーを使う (WCAG 2.1.4)

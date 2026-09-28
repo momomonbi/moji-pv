@@ -5540,6 +5540,129 @@ async def flow_retap(f, lang):
 
 FLOWS += [('retap', flow_retap, False)]
 
+# 曲から下書き (S1): six automatic lines (placeholder kana) over a synthetic 30 s stereo song (tests/helpers/song_gen.js,
+# evaluated in the page: its sung phrases are known), written as a 16-bit stereo WAV and loaded as the song.
+DRAFT_LYRICS = '\n'.join(['あいうえおかきく', 'さしすせそたち', 'なにぬねのはひふへ', 'まみむめもや', 'らりるれろわをん', 'がぎぐげござじ'])
+SONG_GEN_JS = (ROOT / 'tests' / 'helpers' / 'song_gen.js').read_text(encoding='utf-8')
+DRAFT_SONG_JS = r"""async (o) => {
+  const g = window.__songGen.song({ seconds: o.seconds, seed: o.seed, rate: 22050 });
+  const [L, R] = g.channels, n = L.length, rate = 22050, buf = new ArrayBuffer(44 + n * 4), v = new DataView(buf);
+  const put = (at, x) => { for (let i = 0; i < x.length; i++) v.setUint8(at + i, x.charCodeAt(i)); };
+  put(0, 'RIFF'); v.setUint32(4, 36 + n * 4, true); put(8, 'WAVE'); put(12, 'fmt '); v.setUint32(16, 16, true);
+  v.setUint16(20, 1, true); v.setUint16(22, 2, true); v.setUint32(24, rate, true); v.setUint32(28, rate * 4, true);
+  v.setUint16(32, 4, true); v.setUint16(34, 16, true); put(36, 'data'); v.setUint32(40, n * 4, true);
+  let peak = 0;
+  for (let i = 0; i < n; i++) peak = Math.max(peak, Math.abs(L[i]), Math.abs(R[i]));
+  const k = peak > 0.98 ? 0.98 / peak : 1;
+  for (let i = 0; i < n; i++) { v.setInt16(44 + i * 4, Math.round(L[i] * k * 32767), true); v.setInt16(46 + i * 4, Math.round(R[i] * k * 32767), true); }
+  window.__draftPhrases = g.phrases.map((p) => p.start);
+  await window.__mv.loadSong(new File([buf], o.name, { type: 'audio/wav' }));
+  return window.__mv.songReady();
+}"""
+DRAFT_STATE = """() => { const a = window.__mv, v = a.doc.song && a.doc.song.voice;
+  return { mode: a.view.state.mode, phase: a.draft.phase(), rows: document.querySelectorAll('.step-draft .draft-row').length,
+    checked: document.querySelectorAll('.step-draft .draft-row input:checked').length, marks: a.draft.marks().length,
+    head: (document.querySelector('.step-draft .draft-head') || {}).textContent || null,
+    need: !!document.querySelector('.step-draft .note') && !document.querySelector('.step-draft .draft-rows'),
+    alt: a.shell.stage.hasAlt(), voice: !!v, phrases: !!(v && typeof v.phrases === 'string'),
+    strip: (document.querySelector('.mode-strip .strip-text, [data-kind] .strip-text') || {}).textContent || null,
+    toasts: [...document.querySelectorAll('.toast-text')].map((x) => x.textContent) }; }"""
+
+
+async def flow_draft(f, lang):
+    """曲から下書き (S1): a song imported with this build carries its voice (doc.song.voice with the phrase stream), so
+    ② 曲's chip opens the review at once: rows with confidence marks, the stage trying the draft on, ticks on the
+    timeline. T and other shortcuts do nothing there; Esc records nothing. 適用 is one undo entry 「曲から下書き（n行）」
+    whose starts are pinned by tap, and 元に戻す restores the work. A work whose song has no voice record (an older
+    import) asks first; 「声を読んで下書き」 reads it as its own undo entry 「曲の声を読む」, then the review opens."""
+    page = f.page
+    await with_lyrics(f, DRAFT_LYRICS)
+    await page.evaluate(SONG_GEN_JS)
+    ok = await page.evaluate(DRAFT_SONG_JS, {'seconds': 30, 'seed': 2, 'name': 'draft.wav'})
+    if not f.check(ok, 'the song is loaded'):
+        return
+    s = await page.evaluate(DRAFT_STATE)
+    f.check(s['voice'] and s['phrases'], 'the import read the voice with its phrase stream: %r' % s)
+    done0, doc0 = await page.evaluate(DONE), await page.evaluate(DOC)
+    await page.evaluate("() => window.__mv.goStep('song')")
+    chip = page.locator('.step-song [data-act="time.draft"]')
+    await chip.wait_for(state='visible', timeout=3000)
+    f.check(await chip.get_attribute('title') == await page.evaluate("() => window.__mv.t('song.draftTip')"), 'the chip has its tooltip')
+    await chip.click()
+    if not await f.until("() => window.__mv.draft.phase() === 'review' && document.querySelectorAll('.step-draft .draft-row').length > 0",
+                         'the review opens with rows'):
+        return
+    await f.settle(3)
+    s = await page.evaluate(DRAFT_STATE)
+    f.check(s['mode'] == 'draft' and s['marks'] == s['rows'], 'draft mode, one tick per row: %r' % s)
+    f.check(await f.until('() => window.__mv.shell.stage.hasAlt()', 'the stage tries the draft on (after 150 ms)'), 'try-on')
+    strip = await page.evaluate("() => document.querySelector('.mode-strip .strip-text').textContent")
+    f.check(strip == await page.evaluate("() => window.__mv.t('draft.strip')"), 'the play bar says 下書きを試写中: %r' % strip)
+    f.check(s['checked'] >= 1, 'rows are checked by default: %r' % s)
+    await page.evaluate("() => window.__mv.view.set({ drawer: true })")
+    await f.settle(4)
+    await f.shot('review')
+    # the drafted rows sit on the song's sung phrases (a synthetic song: 30 s, known starts)
+    near = await page.evaluate("""() => { const ph = window.__draftPhrases, ms = window.__mv.draft.marks();
+      return ms.filter((m) => ph.some((p) => Math.abs(p - m.t) <= 0.15)).length; }""")
+    f.check(near >= 2, 'drafted starts on sung phrases: %d of %d' % (near, s['rows']))
+    # shortcuts other than the review's own do nothing; Esc discards and records nothing
+    await page.focus('.step-draft .step-title')
+    await page.keyboard.press('t')
+    await page.keyboard.press('r')
+    await f.settle(2)
+    s = await page.evaluate(DRAFT_STATE)
+    f.check(s['mode'] == 'draft', 'T does not start tap mode, R does nothing: %r' % s['mode'])
+    await page.keyboard.press('Escape')
+    await f.until("() => window.__mv.view.state.mode === 'normal'", 'Esc leaves the review')
+    await f.settle(2)
+    f.check(await page.evaluate(DONE) == done0 and await page.evaluate(DOC) == doc0, 'Esc recorded nothing')
+    f.check(not await page.evaluate('() => window.__mv.shell.stage.hasAlt()'), 'the try-on ended')
+    # the palette command opens it again; 適用: one undo entry, the starts pinned by tap
+    await page.evaluate("() => window.__mv.actions.run('time.draft')")
+    await f.until("() => window.__mv.draft.phase() === 'review'", 'the palette command opens the review')
+    rows = await page.evaluate("() => window.__mv.draft.marks().filter((m) => m.on).map((m) => [m.lineId, m.t])")
+    await page.locator('.step-draft [data-draft="apply"]').click()
+    await f.until("() => window.__mv.view.state.mode === 'normal'", 'the review closes')
+    await f.settle(3)
+    f.check(await page.evaluate(DONE) == done0 + 1, 'exactly one undo entry')
+    n = await page.evaluate("() => window.__mv.store.list().filter((x) => x.done).pop().label[1].n")
+    label = await page.evaluate(LAST_TEXT)
+    f.check(label == await page.evaluate("(n) => window.__mv.t('undo.draft', { n })", n) and n >= len(rows), 'the entry: %r (%r)' % (label, n))
+    pinned = await page.evaluate("""(rows) => rows.filter(([id, t]) => { const p = window.__mv.doc.pins['line/' + id + ':start'];
+      return p && p.by === 'tap' && Math.abs(p.v - t) < 1e-6; }).length""", rows)
+    f.check(pinned == len(rows), 'the checked starts are pinned by tap: %d of %d' % (pinned, len(rows)))
+    toast = ' '.join((await page.evaluate(DRAFT_STATE))['toasts'])
+    f.check(await page.evaluate("(n) => window.__mv.t('draft.done', { n })", n) in toast, 'the toast: %r' % toast)
+    await f.shot('applied')
+    await page.evaluate('() => window.__mv.store.undo()')
+    await f.settle(2)
+    f.check(await page.evaluate(DOC) == doc0, '元に戻す restores the starts')
+
+    # an older import: no voice record. 声を読んで下書き reads it (its own undo entry), then the review opens
+    await page.evaluate("() => { const a = window.__mv; a.dispatch({ t: 'song.voice', sha1: a.doc.song.sha1, voice: null }, { label: ['undo.songVoice', {}] }); a.store.seal(); }")
+    await f.settle(2)
+    done1 = await page.evaluate(DONE)
+    f.check(not (await page.evaluate(DRAFT_STATE))['voice'], 'the voice record is gone')
+    await page.evaluate("() => window.__mv.actions.run('time.draft')")
+    await f.until("() => window.__mv.draft.phase() === 'need'", 'the review asks to read the voice first')
+    read = page.locator('.step-draft button', has_text=await page.evaluate("() => window.__mv.t('draft.readVoice')"))
+    f.check(await read.count() == 1, 'the linked song offers 声を読んで下書き')
+    await f.shot('need')
+    await read.click()
+    if not await f.until("() => window.__mv.draft.phase() === 'review'", 'the voice is read, then the review opens', timeout=20000):
+        return
+    s = await page.evaluate(DRAFT_STATE)
+    f.check(s['voice'] and s['phrases'] and s['rows'] > 0, 'the voice record is back and rows are drafted: %r' % s)
+    f.check(await page.evaluate(DONE) == done1 + 1, 'reading the voice is one undo entry')
+    f.check(await page.evaluate(LAST_TEXT) == await page.evaluate("() => window.__mv.t('undo.songVoice')"), 'named 曲の声を読む')
+    await page.keyboard.press('Escape')
+    await f.until("() => window.__mv.view.state.mode === 'normal'", 'Esc leaves')
+    f.check(await page.evaluate(DONE) == done1 + 1, 'the read stays, the draft recorded nothing')
+
+
+FLOWS += [('draft', flow_draft, False)]
+
 
 async def run(browser, base, rel, lang, only, shots):
     failures, count = [], 0

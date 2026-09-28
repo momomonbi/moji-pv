@@ -2,9 +2,9 @@
 MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom', 'ui/keys', 'ui/actions',
   'ui/selection', 'ui/looks', 'ui/view', 'ui/shell', 'ui/header', 'ui/tap', 'ui/project_io',
   'ui/inspector', 'ui/timeline', 'ui/palette', 'ui/menus', 'ui/dialogs', 'ui/ai_panel', 'ai/providers',
-  'ui/fields', 'ui/output', 'ui/media_io', 'ui/readcheck'],   // WP8b views, WP8c AI panel, INT-UI output rules, v2.1 photos and videos, PV22 S4
+  'ui/fields', 'ui/output', 'ui/media_io', 'ui/readcheck', 'ui/draft'],   // WP8b views, WP8c AI panel, INT-UI output rules, v2.1 photos and videos, PV22 S4, S1
 (D, ST, T, strings, dom, K, A, S, LK, V, shell, header, tapUi, projectIo, inspector, timeline, palette, menus, dialogs,
-  aiPanel, aiProviders, F, OUT, mediaIo, RC) => {
+  aiPanel, aiProviders, F, OUT, mediaIo, RC, draftUi) => {
   'use strict';
 
   const TYPING_REPLAN_MS = 120;         // typing never waits on the planner (§7.4)
@@ -350,7 +350,7 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
       }
     };
     app.goStep = (step) => {
-      if (view.state.mode === 'tap') return;
+      if (view.state.mode === 'tap' || view.state.mode === 'draft') return;
       if (view.state.rail) view.set({ rail: false, railBy: null });
       if (app.layout && (app.layout.layout === 'compact' || app.layout.layout === 'stacked') && view.state.panel) view.closePanel();
       view.set({ step });
@@ -359,12 +359,14 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
     app.tryOn = (doc, badge) => {
       if (!app.shell) return;
       if (app.ai) app.ai.tryOnReplaced(doc);                // WP8c: another try-on ends the AI's
+      if (app.draft) app.draft.tryOnReplaced(doc, badge);   // … and 曲から下書き's (PV22 S1)
       if (doc) app.shell.stage.setAlt(doc, badge);
       else if (app.shell.stage.hasAlt() && !view.state.compare) app.shell.stage.setAlt(null);
       app.shell.playbar.updateStrip();
     };
     app.modeStrip = () => {
       if (app.tap && app.tap.active()) return app.tap.strip();
+      if (app.draft && app.draft.active()) return app.draft.strip();   // 下書きを試写中 [適用] [やめる] (PV22 S1)
       // 使う範囲を調整中: the trim widget's peek at a handle's source frame (DESIGN_2_1 §11.7.7)
       if (app.shell && app.shell.stage.peeking && app.shell.stage.peeking()) return { kind: 'peek', text: app.t('media.peek'), actions: [] };
       // 切り抜きを調整中 (§11.7.6): what the mouse does, and [終わる]
@@ -432,6 +434,7 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
     // loadProject(doc, side, { quiet }): quiet leaves the toast to the caller (clearing the device says what it did).
     app.loadProject = (doc, side, o) => {
       if (app.tap && app.tap.active()) app.tap.cancel();   // its marks belong to the lines of the work being left
+      if (app.draft && app.draft.active()) app.draft.cancel();
       app.pause();
       store.load(doc, side);
       view.set({ sel: S.WORK, time: 0 });
@@ -500,6 +503,25 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
       } finally {
         if (loading === job) loading = null;
       }
+    };
+    // 曲の声を読む (DESIGN_2_2 §5.2): the song's voice for a song imported before audio/voice (a new import reads it
+    // itself), from the linked song, as one undo entry (song.voice, refused when the song changed meanwhile).
+    // readVoice({ signal, onProgress }) → Promise<'done' | 'cancelled' | 'stale' | 'nosong' | 'failed'>.
+    app.readVoice = async (o) => {
+      const docSong = app.doc.song;
+      if (!docSong || !app.songReady()) return 'nosong';
+      const sha1 = docSong.sha1;
+      let voice;
+      try { voice = await app.svc.songs.analyzeVoice(app.buffer, o || {}); } catch (e) {
+        if (e && e.code === 'cancelled') return 'cancelled';
+        if (typeof console !== 'undefined') console.error(e);
+        return 'failed';
+      }
+      if (!app.doc.song || app.doc.song.sha1 !== sha1) return 'stale';
+      store.seal();
+      app.dispatch({ t: 'song.voice', sha1, voice }, { label: ['undo.songVoice', {}] });
+      store.seal();
+      return app.doc.song && app.doc.song.voice ? 'done' : 'failed';
     };
     app.clearSong = () => {
       app.dispatch({ t: 'song.clear' }, { label: ['undo.songClear', {}] });
@@ -807,6 +829,9 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
       const id = lineForTap(a);
       return id ? app.tap.start({ only: id }) : false;
     }, { enabled: () => hasLines() && !!lineForTap(null) });
+    // 曲から下書き (PV22 S1): the review of drafted line starts; Esc in it discards.
+    def('time.draft', () => app.draft.start(), { enabled: () => hasLines() && !!app.doc.song && view.state.mode !== 'tap' });
+    def('draft.cancel', () => app.draft.cancel());
     def('tap.mark', (c, a) => app.tap.mark(a));
     def('tap.end', (c, a) => app.tap.end(a));
     def('tap.back', () => app.tap.back());
@@ -1055,7 +1080,8 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
     document.addEventListener('keydown', (ev) => {
       if (ev.key === 'Tab') pressed = null;              // focus moves by keyboard from here on
       if (app.popover) return;
-      const mode = view.state.mode === 'tap' ? 'tap' : app.paletteOpen ? 'palette' : app.pickerOpen ? 'picker' : 'normal';
+      const mode = view.state.mode === 'tap' ? 'tap' : view.state.mode === 'draft' ? 'draft'
+        : app.paletteOpen ? 'palette' : app.pickerOpen ? 'picker' : 'normal';
       const res = K.resolveKey({
         key: ev.key, code: ev.code, ctrlKey: ev.ctrlKey, shiftKey: ev.shiftKey, altKey: ev.altKey, metaKey: ev.metaKey,
         isComposing: ev.isComposing, keyCode: ev.keyCode, targetKind: dom.targetKind(ev.target),
@@ -1064,7 +1090,7 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
       if (res.cmd === 'noop') { ev.preventDefault(); return; }
       // Space / Enter on a focused button keep their native meaning (activation); WP8b: also inside a sub-page (tiles,
       // filter checkboxes), where Enter on a tile picks it through its click.
-      const activation = (ev.key === ' ' || ev.key === 'Enter') && (mode === 'normal' || mode === 'picker') && !ev.ctrlKey && !ev.metaKey
+      const activation = (ev.key === ' ' || ev.key === 'Enter') && (mode === 'normal' || mode === 'picker' || mode === 'draft') && !ev.ctrlKey && !ev.metaKey
         && ev.target instanceof Element && ev.target.closest(ACTIVATES) && !(ev.key === ' ' && pointerFocused(ev.target));
       if (activation) return;
       if (ev.repeat && !REPEATABLE.includes(res.cmd)) { ev.preventDefault(); return; }
@@ -1078,7 +1104,7 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
     // A paste outside the text fields (DESIGN_2_1 §11.7.2, D§6.8): image or video files are imported (ui/media_io);
     // anything else pastes the copied look. The palette and the menus run look.paste directly.
     document.addEventListener('paste', (ev) => {
-      if (app.popover || app.paletteOpen || view.state.mode === 'tap' || dom.targetKind(ev.target) === 'text') return;
+      if (app.popover || app.paletteOpen || view.state.mode === 'tap' || view.state.mode === 'draft' || dom.targetKind(ev.target) === 'text') return;
       const files = mediaIo.pastedFiles(ev.clipboardData);
       if (files.length && app.media) { ev.preventDefault(); app.media.importFiles(files, {}); return; }
       if (app.actions.has('look.paste') && app.actions.run('look.paste', { from: 'key' })) ev.preventDefault();
@@ -1172,6 +1198,7 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
     app.io.begin();
     app.media = mediaIo.mount(app);                                           // photos and videos (DESIGN_2_1 §11.7)
     app.tap = tapUi.mount(app);
+    app.draft = draftUi.mount(app);                                           // 曲から下書き (PV22 S1)
     app.replan();
     app.shell = shell.mount(app, document.getElementById('app'));
     mountDetails(app);                                                        // WP8b views (UI part 2)

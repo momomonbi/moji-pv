@@ -1,5 +1,5 @@
 /* 文字PVメーカー v2 — original work. Step ② 曲（任意）: song row or drop zone, tempo, snap to beats, tap-sync entry, AI timing (DESIGN §6.4.3, §6.11). */
-MV.def('ui/step_song', ['ui/dom', 'ui/icons', 'ui/header', 'ui/selection', 'i18n/t'], (dom, I, header, S, T) => {
+MV.def('ui/step_song', ['ui/dom', 'ui/icons', 'ui/header', 'ui/selection', 'i18n/t', 'ui/draft'], (dom, I, header, S, T, DR) => {
   'use strict';
 
   const { h } = dom;
@@ -30,11 +30,15 @@ MV.def('ui/step_song', ['ui/dom', 'ui/icons', 'ui/header', 'ui/selection', 'i18n
     const tapLineLabel = h('span');
     const tapLineBtn = h('button', { class: 'chip-btn', type: 'button', 'data-act': 'tap.line', hidden: true,
       title: t('tap.lineBtnHint') }, I.icon('tap', { size: 15 }), tapLineLabel);
+    // 曲から下書き (PV22 S1): with a song, draft the start of every automatic line from where the voice starts phrases.
+    // Like the re-tap chip it belongs to the タップ control (no data-ctl: the step keeps its five controls).
+    const draftBtn = h('button', { class: 'chip-btn', type: 'button', 'data-act': 'time.draft', hidden: true,
+      title: t('song.draftTip') }, I.icon('wave', { size: 15 }), t(DR.DRAFT_BETA ? 'song.draftBeta' : 'song.draft'));
     const aiBtn = h('button', { class: 'chip-btn', type: 'button', 'data-act': 'ai.align', 'data-ctl': 'ai' },
       I.icon('ai', { size: 15 }), t('song.aiTiming'));
     const root = h('div', { class: 'step step-song' },
       h('div', { class: 'step-head' }, h('h2', { class: 'step-title', text: t('song.title') })),
-      songBox, tempo, h('div', { class: 'snap-field' }, snapRow, snapWhy), tapBtn, tapLineBtn, aiBtn);
+      songBox, tempo, h('div', { class: 'snap-field' }, snapRow, snapWhy), tapBtn, tapLineBtn, draftBtn, aiBtn);
 
     dom.on(root, 'click', '[data-act]', (ev, b) => app.actions.run(b.dataset.act, { from: 'song' }));
 
@@ -190,6 +194,8 @@ MV.def('ui/step_song', ['ui/dom', 'ui/icons', 'ui/header', 'ui/selection', 'i18n
       const one = sel.level !== 'line' || sel.ids.length === 1;
       tapLineBtn.hidden = !(info && one);
       if (info) tapLineLabel.textContent = t('song.tapLine', { n: info.index + 1 });
+      draftBtn.hidden = !app.doc.song;
+      draftBtn.disabled = !(app.plan && app.plan.lines.length);
       aiBtn.hidden = !app.view.state.prefs.ai;
       aiBtn.disabled = !app.doc.song;
       aiBtn.title = app.doc.song ? '' : t('song.aiNeedsSong');

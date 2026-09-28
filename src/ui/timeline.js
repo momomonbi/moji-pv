@@ -16,7 +16,9 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
     text: '#eceae5', muted: '#8e94a1', beat: 'rgba(242,239,232,0.18)', bar: 'rgba(242,239,232,0.45)', play: '#f2efe8',
     range: 'rgba(124,196,255,0.14)', focus: '#7cc4ff', wave: 'rgba(160,168,184,0.35)', section: 'rgba(240,182,77,0.16)',
     highlight: '#f0b64d', mark: '#c9b27a', band: 'rgba(240,182,77,0.16)', band2: 'rgba(124,196,255,0.14)',
-    bandOn: 'rgba(226,85,59,0.34)', key: '#f0b64d', warn: '#ff7a7a' };   // warn: the gutter's --error (読み切れない速さ, PV22 S4)
+    bandOn: 'rgba(226,85,59,0.34)', key: '#f0b64d', warn: '#ff7a7a',   // warn: the gutter's --error (読み切れない速さ, PV22 S4)
+    draft: '#7cc4ff' };                   // 曲から下書き's proposed starts (PV22 S1)
+  const DRAFT_PX = 2;                   // the width of a proposed-start tick
   const WARN_BAR_PX = 3;                // the too-fast bar along the bottom of a line block
   const KEY_PX = 5;                     // half the size of a key diamond ◆
 
@@ -265,6 +267,18 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
       });
     }
 
+    // 曲から下書き (PV22 S1): each proposed start as a tick on the line row, solid when checked, dashed when not.
+    function drawDraft(r) {
+      const marks = app.draft && app.draft.active() ? app.draft.marks() : [];
+      g.fillStyle = COLORS.draft;
+      for (const m of marks) {
+        const x = Math.round(xOf(m.t)) - DRAFT_PX / 2;
+        if (x < -DRAFT_PX || x > W + DRAFT_PX) continue;
+        if (m.on) { g.fillRect(x, r[0] + 1, DRAFT_PX, r[1] - r[0] - 2); continue; }
+        for (let y = r[0] + 1; y < r[1] - 1; y += 5) g.fillRect(x, y, DRAFT_PX, Math.min(3, r[1] - 1 - y));
+      }
+    }
+
     function drawCuts(r, sel) {
       const p = app.plan;
       const selCuts = new Set(S.cutsOf(sel, p));
@@ -352,6 +366,7 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
         drawLines(r.line, sel);
         drawCuts(r.cut, sel);
       } else label(t('tl.empty'), 8, (r.line[0] + r.cut[1]) / 2, W - 16, COLORS.muted);
+      drawDraft(r.line);
       drawRuler(r.ruler);
       const x = xOf(app.time());
       g.fillStyle = COLORS.play;
@@ -735,6 +750,7 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
     app.bus.on('time', (tt) => { if (!host.hidden) { follow(tt); redraw('time'); } });
     app.bus.on('plan', () => { clampView(); if (!host.hidden) { renderProxy(); redraw('plan'); } });
     app.bus.on('shotEdit', () => { if (!host.hidden) redraw('keys'); });
+    app.bus.on('draft', () => { if (!host.hidden) redraw('draft'); });
     app.bus.on('layout', () => { if (!host.hidden) requestAnimationFrame(layout); });
     app.view.on((changed) => {
       if (changed.includes('drawer') && app.view.state.drawer) requestAnimationFrame(() => { renderProxy(); layout(); });

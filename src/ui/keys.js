@@ -96,6 +96,14 @@ MV.def('ui/keys', [], () => {
     b('T', 'tap', 'tap.finish'),
   ];
 
+  // 曲から下書き (PV22 S1): the review owns the keyboard like tap mode — Space plays, ←/→ move a second, Esc discards.
+  const DRAFT = [
+    b('Space', 'draft', 'play.toggle'),
+    b('ArrowLeft', 'draft', 'seek.step', { seconds: -1 }),
+    b('ArrowRight', 'draft', 'seek.step', { seconds: 1 }),
+    b('Escape', 'draft', 'draft.cancel'),
+  ];
+
   const PICKER = [
     b('ArrowLeft', 'picker', 'picker.move', { dx: -1, dy: 0 }),
     b('ArrowRight', 'picker', 'picker.move', { dx: 1, dy: 0 }),
@@ -113,8 +121,8 @@ MV.def('ui/keys', [], () => {
     b('Ctrl+K', 'palette', 'palette.close'),
   ];
 
-  const KEYMAP = Object.freeze([].concat(GLOBAL, TEXT, TAP, PICKER, PALETTE));
-  const CONTEXTS = Object.freeze(['global', 'text', 'tap', 'picker', 'palette']);
+  const KEYMAP = Object.freeze([].concat(GLOBAL, TEXT, TAP, DRAFT, PICKER, PALETTE));
+  const CONTEXTS = Object.freeze(['global', 'text', 'tap', 'draft', 'picker', 'palette']);
 
   const TABLES = new Map(CONTEXTS.map((ctx) => [ctx, new Map(KEYMAP.filter((x) => x.ctx === ctx).map((x) => [x.key, x]))]));
 
@@ -143,17 +151,18 @@ MV.def('ui/keys', [], () => {
   function answer(binding) { return { cmd: binding.cmd, args: binding.args ? Object.assign({}, binding.args) : null }; }
 
   // resolveKey(ev, { mode, singleKeys }) → { cmd, args } | null.
-  //   ev.targetKind: 'text' when focus is in a text field/select/contenteditable. mode: 'normal' | 'tap' | 'picker' |
-  //   'palette'. Never fires during IME composition. In tap mode every key that would be an app shortcut is swallowed
-  //   ({ cmd: 'noop' }), so no other shortcut fires; unrelated keys (F5 …) return null and keep their browser meaning.
+  //   ev.targetKind: 'text' when focus is in a text field/select/contenteditable. mode: 'normal' | 'tap' | 'draft' |
+  //   'picker' | 'palette'. Never fires during IME composition. In tap mode (and in the review of 曲から下書き) every key
+  //   that would be an app shortcut is swallowed ({ cmd: 'noop' }), so no other shortcut fires; unrelated keys (F5 …)
+  //   return null and keep their browser meaning.
   function resolveKey(ev, ctx) {
     if (!ev || ev.isComposing || ev.keyCode === 229) return null;
     const combo = comboOf(ev);
     if (!combo) return null;
     const c = ctx || {};
     const mode = c.mode || 'normal';
-    if (mode === 'tap') {
-      const hit = TABLES.get('tap').get(combo);
+    if (mode === 'tap' || mode === 'draft') {
+      const hit = TABLES.get(mode).get(combo);
       if (hit) return answer(hit);
       return TABLES.get('global').has(combo) || TABLES.get('text').has(combo) ? { cmd: 'noop', args: null } : null;
     }

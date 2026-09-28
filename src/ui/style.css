@@ -439,6 +439,27 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent);
 .tap-keys dd { margin: 0; color: var(--text-2); }
 .step-tap.is-paused .tap-now { opacity: 0.6; }
 
+/* 曲から下書き (PV22 S1): the review of drafted line starts */
+.step-draft .step-head > .icon { color: var(--focus); }
+.step-draft .step-title:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 4px; }
+.draft-body { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.draft-head { margin: 0; font-weight: 700; }
+.draft-body .note { margin: 0; }
+.draft-rows { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; max-height: 42vh; overflow-y: auto;
+  border: 1px solid var(--line); border-radius: 9px; background: var(--panel-2); }
+.draft-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; column-gap: 8px; padding: 4px 6px 5px 9px;
+  border-bottom: 1px solid var(--line); }
+.draft-row:last-child { border-bottom: 0; }
+.draft-check { min-width: 0; font-size: 12.5px; }
+.draft-when { font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.draft-conf { font-size: 12px; white-space: nowrap; }
+.draft-row[data-conf="high"] .draft-conf { color: var(--ok); }
+.draft-row[data-conf="mid"] .draft-conf { color: var(--gold); }
+.draft-row[data-conf="low"] .draft-conf { color: var(--muted); }
+.draft-text { grid-column: 1 / -1; padding-left: 25px; font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; }
+.draft-body .link { align-self: flex-start; }
+
 /* ---- detail column (placeholder mounts for UI part 2) ------------------------------------------------------ */
 
 .panelbox { display: flex; flex-direction: column; height: 100%; min-height: 0; }

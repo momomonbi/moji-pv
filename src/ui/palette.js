@@ -14,7 +14,7 @@ MV.def('ui/palette', ['ui/dom', 'ui/icons', 'ui/keys', 'ui/selection', 'i18n/str
     const HIDDEN = new Set(['tap.mark', 'tap.end', 'tap.back', 'tap.seek', 'tap.pause', 'tap.finish', 'palette.open', 'palette.move',
       'palette.run', 'palette.close', 'picker.move', 'picker.pick', 'picker.back', 'timeline.nudge', 'lyrics.moveRows', 'lyrics.emphasis',
       'view.compare', 'seek.step', 'sel.line', 'sel.cut', 'sel.down', 'sel.up', 'region.next', 'region.prev', 'export.cancel', 'step.go',
-      'view.quality']);
+      'view.quality', 'draft.cancel']);
     const STEPS = ['lyrics', 'song', 'look', 'export'];
     // An empty query lists what a first visit needs first (after the recent commands); settings and the language switch
     // are always last, so Ctrl+K then Enter never flips a setting.
