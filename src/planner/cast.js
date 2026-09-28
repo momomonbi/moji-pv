@@ -788,7 +788,7 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
         if (trace) Object.assign(shadow(st, kind, slot, seed, list, trace), { kind, stage: 'rule', rule: o.rule });
       } else if (restrict && restrict.only && (forced = hameForce(st, kind, restrict)) !== null) {
         d = { v: forced, from: 'rule' };
-        if (trace) Object.assign(shadow(st, kind, slot, seed, list, trace), { kind, stage: 'rule', rule: 'hame-empty' });
+        if (trace) Object.assign(shadow(st, kind, slot, seed, list, trace), { kind, stage: 'rule', rule: o.rule || 'sung.hame' });
       } else if (st.align && (ad = alignedPart(st, kind, slot, list, restrict ? restrict.only : null)) !== null) {
         d = { v: ad.v, from: 'auto' };
         if (trace) Object.assign(shadow(st, kind, slot, seed, list, trace), { kind, stage: 'auto', why: [alignWhy(st)] });

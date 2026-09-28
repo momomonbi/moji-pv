@@ -4,6 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { load } = require('../helpers/load.js');
 const corpus = require('../helpers/corpus.js');
+const LOC = require('../helpers/locality.js');
 
 const MV = load();
 const REG = MV.use('core/registry');
@@ -162,15 +163,12 @@ for (const [RN, SYN] of REGISTRIES) {
       return !!c && SYN.get('arrange', c.slots.arrange.v).motion === 'own';
     };
     const r = insertions('anchored', (b, key, id, a, changed) => {
-      const pos = b.cuts.findIndex((c) => c.line === id);
-      const end = pos + b.cuts.filter((c) => c.line === id).length;
-      const before = pos > 0 ? b.cuts[pos - 1].line : null;
+      const span = LOC.spanOfLine(b, id);
+      const before = span[0] > 0 ? b.cuts[span[0] - 1].line : null;
       const i = b.cuts.findIndex((c) => c.key === key);
-      const relay = changed.some((k) => {
-        const j = b.cuts.findIndex((c) => c.key === k);
-        return j < i && i - j <= 5 && (ownMotion(a, k) || ownMotion(b, k));
-      });
-      return (before && b.cuts[i].line === before) || (i >= end && i - end < 6) || relay;
+      // the shared predicate (tests/helpers/locality.js: the 6 cuts after the new line, and the own-motion relay), plus the
+      // line before it, whose span got shorter
+      return (before && b.cuts[i].line === before) || LOC.near(b, key, [span], changed, (k) => ownMotion(a, k) || ownMotion(b, k));
     });
     report(t, 'starts pinned', r);
     assert.ok(r.pooled >= 0.98, 'kept ' + r.pooled.toFixed(4));

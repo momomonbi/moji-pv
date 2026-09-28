@@ -304,6 +304,7 @@ test('word tags: parsed into words at grapheme starts of the text; the text and 
   const piece = L.parseRow('[00:10.00]a / <00:10.50>b!|note');
   assert.deepEqual([piece.text, piece.pieces, piece.words, piece.impact, piece.note], ['a b', [[0, 2], [2, 3]], [[2, 10.5]], true, 'note'],
     'a tag right after "/ " lands on the next piece');
+  assert.deepEqual(L.parseRow('ab/<00:01.00> cd').words, [[3, 1]], 'also one between the "/" and the spaces it swallows');
   const marks = L.parseRow(' <00:01.00> x *y<00:02.00>z* <00:03.00>');
   assert.deepEqual([marks.text, marks.emph, marks.words], ['x yz', [[2, 4]], [[0, 1], [3, 2], [4, 3]]]);
   assert.deepEqual(L.parseRow('😀<00:01.00>😀x').words, [[2, 1]]);

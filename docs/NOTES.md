@@ -9163,4 +9163,55 @@ docs/DESIGN_2_2.md. The packages and their notes follow.
 
 <!-- PV22 P5 notes -->
 
-<!-- PV22 P6 notes -->
+### P6 歌ハメ (S3): phase A, planner and engine
+
+Built from the P6 design (revision 2), Phase A part 1: `planner/sung` (units, anchors, the sung window, copies, hook
+tiers, `prepare` / `decideHame`), enhanced-LRC word tags kept as `ParsedRow.words`, the `line/<id>:sung.times` pin with
+its scope refusals and `core/reconcile.remapSungTimes`, the `planner/rules` rows `sung.real` and `sung.hame`, the cast
+rule (restricted pools, the empty-list force, `hameParams` last, the rule-tag skip in `copyParams`, the cast-cache input
+`hame`), sung piece boundaries in `planner/segment`, `cut.sung` with its encoding and fingerprint term, and the engine
+branches (`stagger.sungTimes`, the arrive-only branch of `behave.motionTiming`, `target.off`, `shot.sungEndOf` / `sungOf`
+/ `anchorTime` / `readingUnits`, `K.sungAt`, underSweep). Tests: `tests/node/sung.test.js` plus additions to lyrics,
+commands and reconcile; `tests/helpers/locality.js` is the stability predicate shared with `planner_stability`. Every
+existing golden is byte-identical: no fixture has `look.gen` or a `sung.*` pin, so `SU.prepare` returns null.
+
+Readings and deviations (with the reason):
+
+- **Units example.** The design's 「「25時」まで」 has four units (「25, 時」, ま, で), not five: the count in the design is a
+  slip; the listed units are what the code makes.
+- **Anchors after the line's span are not used.** A pin pair or a word tag later than the line's span (its start to the
+  next line's start, or its end) is left out; the design drops tags after `t1` and says nothing of pins. This keeps every
+  character inside the time its line is on screen and the sung end ≤ the span (a pin tapped before the line was
+  shortened would otherwise put the end past it). Dropped tags count in the `sung-words` warning; pins are skipped
+  silently.
+- **The end clamp.** `E = max(min(E, span), min(T[last] + UNIT_MIN·(n − last), span), T[last])`: the design's
+  `clamp(E, lower, span)` has no answer when the lower bound passes the span; the span wins.
+- **Deleted characters always lose their pair** in `remapSungTimes` (the design dropped only a pair that lands on a
+  kept character with a pair of its own). This is what its risk note R4 promises ("deleted characters lose their pair
+  and are interpolated"); detection compares the offset table at the grapheme's start and end. A pair at offset 0 stays at
+  0 when text is inserted before it (the offset table's 0 → 0 rule, as for split pins).
+- **`sung.fill` is not read yet.** The fast path checks `sung.times` and `sung.hame` pins only; the fill (Phase D) adds
+  its own check with its behaviour.
+- **Song parts for the hooks.** `planner/arc` (P2) is not in this tree: hooks use `ctx.pv.partOf` when P2 set it, else
+  runs of the real section kind of the cuts (`feat.section`). The integrator can put `ARC.parts` in between for "P2
+  landed but its rules are off"; on real sections (goldens A3/A4) both give the same runs.
+- **`hameParams` before `copyParams`** gives the same result here (the design lists it as a mutation that fails): a
+  name whose own `pfrom` is a rule tag is never copied, so the order of the two does not matter for `order` and `dur`.
+  Running last matters once P2's `flipParams` and P3's `KI.params` sit between them. The other mutation (dropping the
+  source's rule-tag skip) fails the aligned-repeat test.
+- **xshot `accentEnd` without emphasis** asks `shot.anchorTime('end')`, which now reads the sung end on cuts with sung
+  units; its framing fence (`spanOf`) and its with-emphasis default are unchanged.
+- **Latin letters.** Inside a Latin unit, a glyph that is not a letter takes the time of the letter before it (an
+  opening quote the first letter's).
+- **Exits on short pieces.** Pieces now start when their first character is sung, so an earlier piece can be short;
+  when its fitted exit starts before its last character lands, `build.fitTimes` ends the entrance at the exit (as it
+  does for every overlapping entrance and exit): the last characters appear as the piece begins to leave.
+- **Shared locality predicate.** The design's cast-locality predicate lives in `tests/helpers/locality.js`; `planner_stability`
+  uses it for its "6 cuts after, own-motion relay" part and keeps its insertion-only "line before" clause.
+
+Mutation checks (each broke a test, then restored): small kana starting a unit, an opener joining backward, `25` split,
+interpolation by units, `readRate` with two anchors, first-occurrence-only copies, no upper / no lower bound on sung
+piece boundaries, hooks per line instead of per text, no `only` filter, no source rule-tag skip, measuring from `t0`
+instead of `times.a`, no arrive-only guard, underSweep reading `hints.emph` as ranges, keeping deleted characters' pairs,
+the `sung.times` scope refusal, `sung.times` not line-only for promote, word tags kept on a text edit, a tag between `/`
+and its swallowed spaces mapped to 0.
