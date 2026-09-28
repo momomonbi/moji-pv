@@ -637,6 +637,9 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       const info = field.depth ? iconBtn('info', t('media.depthWhy'), () => showWhy(row, false), { 'data-role': 'why' }) : null;
       const why = h('div', { class: 'fr-why', hidden: true, role: 'note' });
       const note = field.note ? h('p', { class: 'fr-note note subtle', text: t(field.note) }) : null;
+      // 切り替え holding a glyph seam (v2.2 モーフ, DESIGN_2_2 §4) says that the old line is handed over and ends with it
+      const handover = field.widget === 'part' && (field.partKind || field.kind) === 'seam'
+        ? h('p', { class: 'fr-note note subtle', 'data-role': 'handover', text: t('fld.morphHandover.note'), hidden: true }) : null;
       const env = {
         app, t, label, field,
         commit: (v, o) => commit(row, v, o),
@@ -653,8 +656,8 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       };
       const widget = W.make(field, env);
       const el = h('div', { class: 'frow', 'data-widget': field.widget, 'data-slot': field.path || field.key, 'data-field': field.id },
-        h('div', { class: 'fr-top' }, lab, tag, h('span', { class: 'grow' }), info, dice, x, more), widget.el, note, why);
-      Object.assign(row, { el, tag, dice, x, more, why, widget, lab });
+        h('div', { class: 'fr-top' }, lab, tag, h('span', { class: 'grow' }), info, dice, x, more), widget.el, note, handover, why);
+      Object.assign(row, { el, tag, dice, x, more, why, widget, lab, handover });
       // Del / Backspace unpin the focused field (§6.8): the row publishes the paths it may clear while it has focus;
       // ui/boot's pin.clearField removes the ones that hold a pin (never a lock pin).
       el.addEventListener('focusin', () => {
@@ -719,6 +722,10 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       row.fs = fs;
       const st = stateOf(row, fs, ctx);
       row.widget.update(st);
+      if (row.handover) {
+        const def = fs && typeof fs.value === 'string' ? app.reg.get('seam', fs.value) : null;
+        row.handover.hidden = !(def && def.glyphs === true);
+      }
       if (!row.path) { row.tag.hidden = true; return; }
       const shown = tagState(row);
       const state = shown ? shown.state : 'auto';

@@ -62,10 +62,12 @@ MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output', 'ui/media_widgets'
       } else if (ref.key && ref.key !== 'none') {
         try {
           // The sample lines are UI text: in the page's language (the engine's own samples are Japanese); textB is the
-          // line a transition (seam) cuts to.
+          // line a transition (seam) cuts to. A glyph seam (v2.2 モーフ) shows two lines that share letters.
+          const def = ref.kind === 'seam' ? reg.get('seam', ref.key) : null;
+          const glyphs = !!(def && def.glyphs === true);
           app.engine.thumb({ kind: ref.kind, key: ref.key }, { canvas, ctx: g, w: THUMB_W, h: THUMB_H },
-            { t: ref.t !== undefined ? ref.t : STILL_T[ref.kind], text: ref.text || app.t('pb.sampleText'),
-              textB: app.t('pb.sampleTextB'), theme: ref.theme || themeKey(), aspect: app.doc.look.aspect });
+            { t: ref.t !== undefined ? ref.t : STILL_T[ref.kind], text: ref.text || app.t(glyphs ? 'thumb.morphA' : 'pb.sampleText'),
+              textB: app.t(glyphs ? 'thumb.morphB' : 'pb.sampleTextB'), theme: ref.theme || themeKey(), aspect: app.doc.look.aspect });
         } catch (e) { g.fillStyle = '#222'; g.fillRect(0, 0, THUMB_W, THUMB_H); }
       } else {
         g.fillStyle = '#1a1e26';

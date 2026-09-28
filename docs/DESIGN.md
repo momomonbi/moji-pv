@@ -749,6 +749,13 @@ Notes:
   `b = max(t1, min(b, seam.at + seam.dur/2))` (§4.16.6; changed at integration under §9.4: the seam shows only the next
   cut at the end of its window, so the old cut must not be drawn again after it). `repT` = representative "hero" time
   (entrance finished, text fully visible) used for seeking and thumbnails.
+- v2.2 (DESIGN_2_2 §4, additive): a seam entry whose part is a **glyph seam** (`glyphs: true`, the glyph morph
+  `glyphMorph`) also holds `glyphs: [[aOff, bOff, same], …]` — the letters the two cuts share: UTF-16 grapheme offsets into
+  A's and B's `text`, `same` 1 for equal letters (they travel) and 0 for a swap (they melt while travelling), sorted by
+  `bOff`, at most 64, `[]` when nothing pairs. Its window ends at `B.a` (`at = B.a − dur/2`, the part's `ends`) and takes
+  up to `share · min(A.b − A.a, B.b − B.a)` (the part's `share`, 0.5). **Exception to `b`:** a glyph seam hands A's letters
+  over, so the seam's own A gets `b = min(b, at + dur/2)` with no `t1` floor; every cut before A, and every other seam,
+  keep `b = max(t1, min(b, seam.at + seam.dur/2))`. No other seam has these fields; no plan without a glyph seam changes.
 - `fp` (fingerprint) = hash of everything the scene build needs: slots, `els`, text, emph, duration `b − a`, role, palette,
   faces, design size; plus the beat grid seen from the scene's origin (`bpm`, `meter`, origin − offset) when a chosen part
   declares `needs: ['beats']` or the cut's custom shot has a key anchored on a beat (`core/shot.usesBeats`, DESIGN_2_1
@@ -1294,6 +1301,19 @@ Flavor table (fallback families when a theme names only `ja`/`latin`):
 Failure: a face that fails or times out uses `SYSTEM_FALLBACK[flavor]`; the engine reports `font-fallback` (UI banner in
 書体). Export calls `ready()` for every face and character used and never starts before it settles.
 
+**v2.2 addendum (DESIGN_2_2 §4): weight ladders and draw-only faces.** `faces` adds pure helpers over the served weights
+of `FAMILY_ROWS`: `ladderOf(ref)` (a family's served weights; an unknown family has only its own), `atWeight(ref, w)` (the
+same family, script, flavor and role at `w`; one stable object per weight), `weightPair(ref, dw, out)` (the two served
+weights around `ref.weight + dw` and the share `f` of the heavier), `roomOf(ref)` (`{ below, above }`), `growTop(ref)`
+(the heaviest served weight ≤ 800), `rungsBetween(ref, dlo, dhi)` and `reweigh(faces, role, w)` (faces with one role at
+`w`). The FontBook adds **draw-only faces**: `request(refs, text, { drawOnly: true })`, `ready(refs, text, { drawOnly:
+true, timeoutMs })`, `drawStatus(ref)` and `on('draw', fn)`. A draw-only face gets its own stylesheet and characters, is
+never a weight the main path owns (a main weight is never redeclared), never moves `epoch` (no re-layout, no provisional
+scene) and is not listed by `failures()`; a newer sheet with more characters makes it `loading` again until it is in.
+The facade asks for the served weights a scene's weight motion draws (`scene.wtReach`) as draw-only faces, gives the
+renderers `faceReady(ref)` (a weight not loaded yet draws the nearest loaded one), and export waits for them after the
+main faces.
+
 ### 4.15 Text layout: `engine/text/*` (WP2)
 
 #### 4.15.1 Measurer (FROZEN interface)
@@ -1540,6 +1560,19 @@ with the transition and it never reappears after it. Seam lengths are computed f
 boundary's (segment's) winner — its argmax before this rule — while another candidate weighs > 0; the runner-up is
 taken (for seams it may be the hard cut). The hard cut and `none` are exempt. (Added at integration: with only two
 text transitions in the catalog, ×0.03 recency left 13 % of neighbouring text transitions equal.)
+**v2.2: the glyph morph (DESIGN_2_2 §4).** In the unpinned branch, before the chance roll, the rule `morph` picks
+`glyphMorph` (`from: 'rule'`) where 「同じ字をつなぐ」 resolves on at the boundary (`morph.auto`: a line pin counts only
+where A and B are different lines, else the work value; the default is on in works of generation ≥ 1, planner/rules), A
+and B are lyric/focus cuts of one segment, `A.t1 ≤ B.t0`, neither A's exit nor B's entrance is chosen by the user, no
+`motion: 'own'` arrange or knockout is on either side, the other packages' hooks allow it (P3 `cut.kime`, P6
+`ctx.uta.at`, P2 `ctx.pv.seamGate`), and `planner/morph.analyze(A.text, B.text).meaningful` (a run of shared letters that
+means something: weighted LCS, runs of 3, of 2 with a non-kana, or one kanji/katakana/hangul/emoji; m ≥ 2 and a 2-run or
+m ≥ 0.4 of the shorter line). The order of rules in that branch is P3 キメ → P4 morph → P2 gate → chance. `seamOf`'s memo
+keeps `prev` (the guards' result and the two texts) so a re-plan equals a plan from scratch; `seamCopy` copies a
+rule-picked morph only where the rule holds at the copy's boundary. A seam definition's `share` replaces 0.4 in the
+window clamp, `ends: true` places the window at `[B.a − dur, B.a]`, and a glyph seam lists its `glyphs` (§3.12) and hands
+A over (`endWithSeam(…, handover)`: A's `b` = the window end even before its `t1`). Replacing B's entrance also removes a
+`text.weight` the 太る grow rule set on B. Legacy documents read one boolean per boundary; their seams are unchanged.
 
 **Impulses.** For each impact cut: `flash` (amp `amounts.flash`, decay 0.18) if > 0, `shake` (amp `amounts.shake`, decay
 0.4) if > 0, `slip` (amp `amounts.glitch`, decay 0.25) if > 0.2 — all at the cut's `t0`. For each `song.info.highlights`
@@ -1654,6 +1687,9 @@ Behaviour = {
                      // MUST be a function defined once at module (factory) level, never a closure created per build
   ...fields          // precomputed at build (Float32Array delays, pivots, per-glyph randoms)
 }
+// v2.2 (additive, DESIGN_2_2 §4): wt?: [lo ≤ 0, hi ≥ 0] — the weight offsets (pose column `wt`) the behaviour may write;
+// set by the kit option `wt` of K.perGlyph / K.perGlyphHold. The build gathers them as scene.wtReach = null | [lo, hi],
+// which the facade turns into the draw-only faces the scene needs.
 // scheduler, every frame, behaviours pre-sorted by (phase, build order):
 //   'until' runs while t < t1 (before t0 the run function clamps progress to 0 → the start pose is shown)
 //   'after' runs while t > t0;  'during' runs for t0 ≤ t ≤ t1;  'always' always
@@ -1738,6 +1774,9 @@ env = {
   fits: undefined,                       // optional (f, chosen) => number ≥ 0 — prefer traits
   gate: undefined,                       // optional amount key: weight × amounts[gate]; 0 excludes
   pool: true,                            // false = only by pin or rule (e.g. instantShow)
+  late: undefined,                       // v2.2: true = added after v2.1; must be pool: false, never the fallback; signed apart
+                                         //   (registry.version leaves it out, registry.lateVersion covers it)
+  optIn: undefined,                      // v2.2: 'weight' = a pool: false part that joins registry.pool(kind, { optIn: ['weight'] })
   fallback: false,                       // exactly one per part kind
   needs: [],                             // 'blur' 'shard' 'mask' 'depth' 'beats' 'level' 'textAt' (fingerprint, render path, lab)
   shared: {},                            // overrides of the kind's shared params: { dur: { auto: {…}, min, max } }
@@ -1757,6 +1796,7 @@ env = {
 | `lens` | `make(env, cam, p)` | | scene/build | `Behaviour[]` on the camera node |
 | `filter` | `apply(fx, src, p, t)`, `stage: 'shape'\|'tone'\|'light'\|'optic'\|'film'`, `cost` 1–5, `passes` (full-frame draws), `alphaSafe` | `needs: ['textAt']`, `texture: true` (eligible for the work `texture` slot) | render/post | a Surface (`src` = no-op) |
 | `seam` | `mix(fx, a, b, u, p)`, `scope: 'text' \| 'world'` | `replaces: { depart, arrive }` | render/seam | a Surface |
+| `seam` (v2.2 additions) | — | `glyphs: true` (scope `text`; the planner lists the shared letters, the renderer draws them travelling), `share` (0, 0.5] (window share, default 0.4), `ends: true` (the window ends at `B.a`) | planner/tracks, render/renderer | — |
 | `theme` | `swatch` (7 tokens), `faces`, `style`, `dark`, `texture` | `season`, `prefer` | planner/look | — |
 | `mood` | `tagBias`, `amounts`, `themes`, `pace: { seam, focus }`, `variety`, `filters` | `keywords` | planner | — |
 
@@ -1774,6 +1814,10 @@ moves({ unit, tracks, curve?, expose? }) → { unit, make, params, motion }   //
   // expose: ['y', 'blur'] → part params 'yFrom'/'blurFrom' (arrive) or 'yTo'/'blurTo' (depart), auto { value: given }
 perGlyph(fn) → make          // fn(P, g, k, u, p, fc) — arrive/depart; k = eased progress, u = linear (per glyph, after stagger)
 perGlyphHold(fn) → make      // fn(P, g, time, w, p, fc) — dwell; time = seconds since the glyph arrived; w = envelope weight
+perGlyph(fn, { prep, wt }) / perGlyphHold(fn, { prep, wt })   // v2.2 (additive): prep(env, target, p) → p' makes build-time
+  //    params from the target (a copy); wt(p') → [lo, hi] declares the weight reach (behaviour.wt). Carried through K.depart's
+  //    re-wrap (a perGlyph exit runs as an exit), K.mirror and K.variant. weightRoom(target) → { below, above }: the room of
+  //    the face most of the target's glyphs use. P gains wt (weight units, ADD, 0).
   // P: pooled DELTA pose, reset to identity per glyph: x y z (du), rot kx ky rx ry (DEGREES), sx sy alpha reveal (1),
   //    blur (du), tint glow shard echo (0), jx jy (du), pixel (du). The adapter merges P into the columns with §4.17.1 rules.
   // g: pooled glyph view: { index, count, em, cls, rank, word, line, emph, rnd /* 0..1 seeded */, cx, cy /* du from focus centre */, w, h }
@@ -2186,6 +2230,12 @@ FrameGraph = {
 4. Text seam: A's and B's `text`/`near` layers are drawn into two pooled surfaces and composed with `seam.mix`; the ground
    is drawn once underneath. World seam: two complete worlds into two surfaces, then `seam.mix`; the post stack then runs
    once on the result (never per world).
+   v2.2 glyph seam (DESIGN_2_2 §4): the glyphs listed in the seam entry are left out of the two side surfaces (a skip mask
+   per scene; a static text raster is drawn live meanwhile), `mix` melts the rest, and the renderer then draws each pair
+   itself on the frame, its device transform interpolated from A's glyph to B's (short-arc rotation, log scales, a bow of
+   `arc`) with the part's alpha rules — **above** both cuts' text and near layers, below the still pass, the grounds' near
+   layer and the hud (a documented z-order change for the length of the window). Only runs that read the cut's text, in
+   the text or near layer at opacity 1, source-over, unfiltered and unmasked, travel (the most opaque copy of a letter).
 5. Post stack: `texture` then accent filters, sorted by stage (`shape → tone → light → optic → film`) then key; each
    `apply(fx, src, p, t)` ping-pongs pooled surfaces.
 6. Selection outlines are **not** part of `renderFrame`; the UI draws them on its own overlay canvas from `engine.boxes()`.
@@ -2228,6 +2278,10 @@ The path is chosen **only from the glyph's pose state at that frame**, never fro
 - Rotated vertical glyphs (`rot` flag) and tate-chu-yoko cells use the same two paths with the extra local rotation/scale.
 - **Parity requirement** (browser test): at the same transform, the level-0 sprite and the direct path differ by a mean
   absolute error ≤ 2/255 over 20 glyphs at 1080p, so the switch at the start/end of a blur is invisible.
+- **Weight pairs (v2.2, DESIGN_2_2 §4).** A glyph with `wt ≠ 0` never changes the path. It draws the two served weights
+  around face weight + `wt`: the heavier at `a·f`, then the lighter over it at `a(1 − f)/(1 − a·f)` (the core composites
+  to `a`); for `plain` and `glow` lettering only — `outline`, `shadow` and `duo` take the nearest weight (steps). Halo,
+  echo and tint use the nearer face. With `wt = 0` the calls are exactly those of v2.1.
 
 Sprite cache: LRU by bytes, 96 MB (48 MB when the output short side ≥ 1440 and the preview is running at the same time).
 

@@ -355,3 +355,47 @@ test('lerpAffine: exact ends, the short way round, a mirror through zero, the bo
   MO.lerpAffine(out, [1, 0, 0, 1, 0, 0], [1, 0, 1, 1, 0, 0], 0.5, 0);
   assert.ok(Math.abs(out[2] - 0.5) < 1e-9);
 });
+
+// --- 7. the part's thumbnail (engine/facade.samplePlan) ------------------------------------------------------------------
+
+test('thumbnail: the canned morph shows two lines that share letters, its own window, the pairs and the hand-over', async () => {
+  const FAC = MV.use('engine/facade');
+  const PM = MV.use('planner/morph');
+  const sp = FAC.samplePlan(CAT, { kind: 'seam', key: MORPH }, {});
+  assert.deepEqual(sp.cuts.map((c) => c.text), [FAC.SAMPLE_MORPH_A, FAC.SAMPLE_MORPH_B], 'the canned pair 青い空 → 青い海');
+  const [A, B] = sp.cuts, s = sp.seams[0];
+  const def = CAT.get('seam', MORPH);
+  assert.equal(s.slot.v, MORPH);
+  assert.ok(s.dur > 0 && s.dur <= def.share * Math.min(A.b - A.a, B.b - B.a) + 1e-9, 'the part\'s share: ' + s.dur);
+  assert.ok(Math.abs(s.at - (B.a - s.dur / 2)) < 1e-9, 'ends: the window is [B.a − dur, B.a]');
+  assert.deepEqual(s.glyphs, PM.pairsOf(A.text, B.text, s.slot.p.melt), 'the letters the lines share');
+  assert.ok(s.glyphs.some((p) => p[2] === 1) && s.glyphs.some((p) => p[2] === 0), 'some travel, some melt');
+  assert.equal(A.b, Math.floor((s.at + s.dur / 2) * 1e6) / 1e6, 'A is handed over at the window end');
+  assert.deepEqual([A.slots.depart.v, B.slots.arrive.v], [CAT.fallback('depart'), CAT.fallback('arrive')], 'both motions replaced');
+  // the page's own lines when given; A's fingerprint follows its window
+  const en = FAC.samplePlan(CAT, { kind: 'seam', key: MORPH }, { text: 'BLUE SKY', textB: 'BLUE SEA' });
+  assert.deepEqual(en.cuts.map((c) => c.text), ['BLUE SKY', 'BLUE SEA']);
+  assert.ok(en.seams[0].glyphs.length > 0, 'BLUE travels');
+  const plain = FAC.samplePlan(CAT, { kind: 'seam', key: 'blendDissolve' }, {});
+  assert.deepEqual(plain.cuts.map((c) => c.text), ['はじまりの朝', '光のなかへ'], 'another seam keeps the canned pair');
+  assert.equal(plain.seams[0].at, plain.cuts[1].a, 'and its centred window');
+  assert.equal(plain.seams[0].glyphs, undefined);
+  assert.ok(plain.cuts[0].b > plain.seams[0].at + plain.seams[0].dur / 2, 'and no hand-over');
+  // mid-window the thumbnail draws the travellers (a shared letter drawn outside both side surfaces, on the tile)
+  const { render } = await engineFor(sp, CAT, true);
+  const d = render(s.at).draws;
+  const tile = new Set(render(s.at).ops.filter((o) => o[1] === 'drawImage').map((o) => o[0]));
+  assert.ok(d.some((x) => x.ch === '青' && tile.has(x.canvas)), 'a traveller is drawn on the frame itself');
+  // the default still of a seam tile is the middle of its window
+  assert.equal(FAC.sampleTime(sp, 'seam'), s.at);
+});
+
+test('thumbnail: a weight part is shown on the body face at 800 (the display faces of most themes have one weight)', () => {
+  const FAC = MV.use('engine/facade');
+  for (const [kind, key] of [['arrive', 'weightGrow'], ['depart', 'weightThin']]) {
+    const c = FAC.samplePlan(CAT, { kind, key }, {}).cuts[0];
+    assert.deepEqual([c.slots['text.face'].v, c.slots['text.weight'].v], ['body', 800], key);
+  }
+  const c = FAC.samplePlan(CAT, { kind: 'arrive', key: 'fogIn' }, {}).cuts[0];
+  assert.deepEqual([c.slots['text.face'].v, c.slots['text.weight']], ['display', undefined], 'other parts: as before');
+});

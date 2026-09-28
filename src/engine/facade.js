@@ -1,8 +1,8 @@
 /* 文字PVメーカー v2 — original work. Engine facade: plan + scenes + renderer behind the FROZEN §4.20 API, plus sample plans for thumbnails and the lab (DESIGN_2_1 §3.10, §11.3.7 additions). */
 MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 'core/doc', 'core/pins', 'core/shot',
   'engine/text/service', 'engine/text/faces', 'engine/scene/build', 'engine/scene/cache', 'engine/scene/frame',
-  'engine/render/renderer', 'engine/render/sprites', 'parts/mix', 'planner/plan', 'planner/look'],
-(H, RNG, SCH, S, DOC, PINS, SHOT, TS, FACES, BUILD, CACHE, F, R, SP, MIX, PL, LOOK) => {
+  'engine/render/renderer', 'engine/render/sprites', 'parts/mix', 'planner/plan', 'planner/look', 'planner/morph'],
+(H, RNG, SCH, S, DOC, PINS, SHOT, TS, FACES, BUILD, CACHE, F, R, SP, MIX, PL, LOOK, MO) => {
   'use strict';
 
   const SCENE_MAX = 16;             // §7.3
@@ -19,6 +19,11 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
   const SAMPLE_TEXT = 'はじまりの朝';
   const CALM_EVAL = Object.freeze({ calm: true });
   const SAMPLE_TEXT_B = '光のなかへ';
+  // v2.2 (DESIGN_2_2 §4): a glyph seam's canned lines share letters (the UI passes thumb.morphA / thumb.morphB in the
+  // page's language); a weight part's canned cut is laid out in the body face at 800, a face with room to move.
+  const SAMPLE_MORPH_A = '青い空';
+  const SAMPLE_MORPH_B = '青い海';
+  const SAMPLE_WEIGHT = 800;
 
   class EngineError extends Error {
     constructor(code, message) { super(message); this.name = 'EngineError'; this.code = code; }
@@ -73,6 +78,10 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
   // and every other slot holds its kind's fallback. ref = { kind, key, params? }; opts = { text, textB, theme, mood,
   // aspect, orient, backdrop, palette, faces, textScale }. Deterministic. A seam gets two cuts with the transition between
   // them; the second shows textB (else SAMPLE_TEXT_B), so a page in another language can pass both lines.
+  // v2.2 (additive, DESIGN_2_2 §4): a glyph seam (`glyphs: true`) shows SAMPLE_MORPH_A → SAMPLE_MORPH_B unless the caller
+  // passes text / textB; its window follows the part's `share` and `ends` and lists the letters the lines share, and
+  // the first cut ends with the window (the hand-over), as in a planned song. A weight part (`optIn: 'weight'`) is shown
+  // on the body face at SAMPLE_WEIGHT (the display faces of most themes have one weight).
   // DESIGN_2_1 (additive): kind 'shot' puts a shot preset (key; params { zoom, curve, follow } = cam.zoom, cam.curve,
   // cam.follow) on the cut, kind 'rig' a rig preset (params { amp, curve }) on one run over the whole plan (plan v 2);
   // material keys of an extended registry work like any part key. DESIGN_EXTREME (additive): kind 'xshot' puts an
@@ -88,7 +97,8 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
     const [w, h] = DOC.DESIGN_SIZE[aspect];
     const lookPart = (k) => (kind === k && def) || (o[k] && registry.get(k, o[k])) || registry.get(k, registry.fallback(k));
     const theme = lookPart('theme'), mood = lookPart('mood');
-    const text = typeof o.text === 'string' && o.text.trim() ? o.text.trim() : SAMPLE_TEXT;
+    const glyphSeam = !!(kind === 'seam' && def && def.glyphs === true);
+    const text = typeof o.text === 'string' && o.text.trim() ? o.text.trim() : glyphSeam ? SAMPLE_MORPH_A : SAMPLE_TEXT;
     const lang = S.lineScript(text, 'ja');
     const roles = def && ['arrange', 'arrive', 'dwell', 'depart', 'lens'].includes(kind) ? rolesOf(registry, kind, key) : ['lyric'];
     const role = roles.includes('lyric') ? 'lyric' : roles[0];
@@ -105,7 +115,7 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
     const seed = H.hash32('sample', kind || '', key || '', text, aspect, orient);
     const params = (ref && ref.params) || null;
     const isSeam = kind === 'seam' && def;
-    const textB = typeof o.textB === 'string' && o.textB.trim() ? o.textB.trim() : SAMPLE_TEXT_B;
+    const textB = typeof o.textB === 'string' && o.textB.trim() ? o.textB.trim() : glyphSeam ? SAMPLE_MORPH_B : SAMPLE_TEXT_B;
     const texts = isSeam ? [text, textB] : [text];
     const span = isSeam ? 1.5 : SAMPLE.t1 - SAMPLE.t0;
     const textScale = Number.isFinite(o.textScale) && o.textScale > 0 ? o.textScale : 1;
@@ -120,7 +130,21 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
     const seg = { key: 'g' + cuts[0].key, t0: 0, t1: duration, cuts: cuts.map((c) => c.key), ground, atmos, fp: '' };
     seg.fp = H.hashJSON({ ground, atmos, aspect, palette, span: duration });
     const seams = [];
-    if (isSeam) {
+    if (glyphSeam) {
+      // as planner/tracks.seams: the part's share of the shorter cut, the window [B.a − dur, B.a], the shared letters,
+      // and A handed over at the window's end (its fingerprint follows its window)
+      const A = cuts[0], Bc = cuts[1];
+      const slot = decisionOf(registry, 'seam', key, { f: Bc.feat, look: ax.look }, seed, params, 0);
+      const share = def.share > 0 ? def.share : 0.4;
+      let dur = Math.min(slot.p.dur || 0.5, share * Math.min(A.b - A.a, Bc.b - Bc.a));
+      dur = Math.floor(Math.max(0, dur) * 1e6) / 1e6;
+      const at = def.ends === true ? Bc.a - dur / 2 : Bc.a;
+      seams.push({ into: Bc.key, at, dur, scope: 'text', a: A.key, b: Bc.key, slot,
+        glyphs: MO.pairsOf(A.text, Bc.text, slot.p.melt) });
+      const stop = Math.floor((at + dur / 2) * 1e6) / 1e6;
+      if (A.b > stop) { A.b = stop; A.fp = sampleFp(A, look, 0); }
+      Bc.seamIn = 0;
+    } else if (isSeam) {
       const A = cuts[0], Bc = cuts[1];
       const slot = decisionOf(registry, 'seam', key, { f: Bc.feat, look: ax.look }, seed, params, 0);
       const dur = Math.min(slot.p.dur || 0.5, 0.4 * Math.min(A.b - A.a, Bc.b - Bc.a));
@@ -164,6 +188,10 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
       if (!params || params.when === undefined) d.p.when = 'always';
       slots['filter#0'] = d;
     }
+    if (def && def.optIn === 'weight' && own(kind)) {
+      slots['text.face'] = { v: 'body', from: 'auto' };
+      slots['text.weight'] = { v: SAMPLE_WEIGHT, from: 'auto' };
+    }
     if (kind === 'seam' && def && def.replaces) {
       if (def.replaces.depart && n === 0) slots.depart = { v: registry.fallback('depart'), p: slots.depart.p, from: 'rule' };
       if (def.replaces.arrive && n === 1) slots.arrive = { v: registry.fallback('arrive'), p: slots.arrive.p, from: 'rule' };
@@ -172,9 +200,13 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
     const cut = { key: lineId + '~0', line: lineId, role, text: tx, emph: S.graphemes(tx).length > 3 ? [[0, 2]] : [], impact: false,
       note: null, t0: c.t0, t1: c.t1, a: c.t0 - SAMPLE.lead, b: c.t1 + SAMPLE.tail, repT: c.t0 + Math.min(SAMPLE.hero, (c.t1 - c.t0) / 2),
       lang, feat, fp: '', slots, els: {}, ground: 0, seamIn: -1 };
-    cut.fp = H.hashJSON({ slots, text: tx, emph: cut.emph, role, span: cut.b - cut.a, palette: look.palette, faces: look.faces,
-      n, sample: true });
+    cut.fp = sampleFp(cut, look, n);
     return cut;
+  }
+
+  function sampleFp(cut, look, n) {
+    return H.hashJSON({ slots: cut.slots, text: cut.text, emph: cut.emph, role: cut.role, span: cut.b - cut.a, palette: look.palette,
+      faces: look.faces, n, sample: true });
   }
 
   // The canned cut with a shot or a rig (picker tiles, the lab, contact sheets): the fallback parts, plus cam.* slots or
@@ -945,5 +977,5 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
     };
   }
 
-  return { createEngine, samplePlan, sampleTime, EngineError, SAMPLE, SAMPLE_TEXT };
+  return { createEngine, samplePlan, sampleTime, EngineError, SAMPLE, SAMPLE_TEXT, SAMPLE_MORPH_A, SAMPLE_MORPH_B };
 });

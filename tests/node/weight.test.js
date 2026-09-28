@@ -379,7 +379,8 @@ const FAC = MV.use('engine/facade');
 const F = MV.use('engine/scene/frame');
 const { fakeMeasurer } = MV.use('engine/text/fake_measure');
 
-// Faces with Noto Sans JP 500 for display (every role), so a sample cut is laid out in a nine-weight family.
+// Faces with Noto Sans JP 500 for display (every role), so a sample cut is laid out in a nine-weight family. A weight
+// part's sample cut (engine/facade.samplePlan) takes the body face at 800: the parts reach down from 800.
 const NOTO_THEME = { faces: { display: { ja: 'Noto Sans JP', latin: 'Inter', weight: 500, flavor: 'gothic' },
   serif: { ja: 'Noto Sans JP', latin: 'Inter', weight: 500, flavor: 'gothic' },
   body: { ja: 'Noto Sans JP', latin: 'Inter', weight: 500, flavor: 'gothic' } } };
@@ -398,13 +399,15 @@ test('太る and 細る: late, opt-in weight, pool false; 細る is a real exit;
   }
   assert.equal(CATALOG.get('arrive', 'weightGrow').weight, 2.5, 'calibrated to about 10 % of the eligible lines');
   const { engine } = engineWith(null);
-  for (const [kind, key, reach] of [['arrive', 'weightGrow', 400], ['depart', 'weightThin', 400]]) {
-    engine.setPlan(sampleOf(kind, key));
+  for (const [kind, key, reach] of [['arrive', 'weightGrow', 700], ['depart', 'weightThin', 700]]) {
+    const plan = sampleOf(kind, key);
+    assert.deepEqual([plan.cuts[0].slots['text.face'].v, plan.cuts[0].slots['text.weight'].v], ['body', 800], 'the tile: body face at 800');
+    engine.setPlan(plan);
     const scene = engine.scene('cut', 0);
     const own = scene.behaviours.filter((b) => b.wt);
     assert.equal(own.length, 1, key + ': one weight behaviour');
     const b = own[0];
-    assert.deepEqual([...b.wt], [-reach, 0], key + ': the reach is the room below 500');
+    assert.deepEqual([...b.wt], [-reach, 0], key + ': the reach is the room below 800');
     assert.equal(b.p.reach, reach);
     assert.deepEqual([...scene.wtReach], [-reach, 0]);
     if (kind === 'depart') assert.deepEqual([b.exit, b.t0, b.live], [true, scene.times.out, 'after'], '細る runs as an exit');
@@ -412,10 +415,11 @@ test('太る and 細る: late, opt-in weight, pool false; 細る is a real exit;
   }
   // thin 0.5: half the room
   engine.setPlan(sampleOf('arrive', 'weightGrow', { thin: 0.5 }));
-  assert.deepEqual([...engine.scene('cut', 0).wtReach], [-200, 0]);
+  assert.deepEqual([...engine.scene('cut', 0).wtReach], [-350, 0]);
   // a one-weight face: no room, no reach
-  const dela = JSON.parse(JSON.stringify(FACES.resolveFaces({ faces: { display: { ja: 'Dela Gothic One', latin: 'Archivo Black',
-    weight: 400, flavor: 'heavy' }, serif: NOTO_THEME.faces.serif, body: NOTO_THEME.faces.body } }, null, ['ja'])));
+  const heavy = { ja: 'Dela Gothic One', latin: 'Archivo Black', weight: 400, flavor: 'heavy' };
+  const dela = JSON.parse(JSON.stringify(FACES.resolveFaces({ faces: { display: heavy, serif: NOTO_THEME.faces.serif, body: heavy } },
+    null, ['ja'])));
   engine.setPlan(FAC.samplePlan(CATALOG, { kind: 'arrive', key: 'weightGrow' }, { faces: dela }));
   assert.deepEqual([...engine.scene('cut', 0).wtReach], [0, 0]);
 });
@@ -428,7 +432,7 @@ test('太る: every glyph starts at the lightest weight, ends at the face weight
   for (let i = scene.text.from; i < scene.text.to; i++) if (scene.stores.glyph[scene.table.payload[i]].cls !== 'space') glyphs.push(i);
   const b = scene.behaviours.find((x) => x.wt);
   F.evaluate(scene, b.t0 + 1e-6);
-  assert.ok(glyphs.every((i) => close(scene.table.live.wt[i], -400, 0.01)), 'thin at the start');
+  assert.ok(glyphs.every((i) => close(scene.table.live.wt[i], -700, 0.01)), 'thin at the start');
   F.evaluate(scene, b.t1 + 1e-3);
   assert.ok(glyphs.every((i) => scene.table.live.wt[i] === 0), 'exactly the face weight after the entrance');
   engine.setPlan(sampleOf('depart', 'weightThin'));
@@ -438,7 +442,7 @@ test('太る: every glyph starts at the lightest weight, ends at the face weight
   assert.ok([...s2.table.live.wt.subarray(s2.text.from, s2.text.to)].every((v) => v === 0), 'at rest before the exit');
   F.evaluate(s2, x.t1 - 1e-6);
   const g = s2.text.from + [...Array(s2.text.to - s2.text.from).keys()].find((j) => s2.stores.glyph[s2.table.payload[s2.text.from + j]].cls !== 'space');
-  assert.ok(s2.table.live.wt[g] < -390, 'thin at the end: ' + s2.table.live.wt[g]);
+  assert.ok(s2.table.live.wt[g] < -690, 'thin at the end: ' + s2.table.live.wt[g]);
 });
 
 // --- 4. draw-only faces: the facade --------------------------------------------------------------------------------------
@@ -484,14 +488,14 @@ test('facade: a scene with 太る asks for its lighter weights as draw-only face
   const scene = engine.scene('cut', 0);
   assert.equal(scene.provisional, false);
   const main = book.calls.filter((c) => !c.drawOnly).flatMap((c) => c.refs).filter((r) => r.family === 'Noto Sans JP');
-  assert.deepEqual([...new Set(main.map((r) => r.weight))], [500], 'the main usage holds only the face weight');
+  // the main usage: the weight the cut is laid out at (800) and the plan's display face (500, the estimate); no rung
+  assert.deepEqual([...new Set(main.map((r) => r.weight))].sort(), [500, 800], 'the main usage holds only the laid-out faces');
   const draws = book.calls.filter((c) => c.drawOnly);
   assert.equal(draws.length, 1, 'one draw-only request');
-  assert.deepEqual(draws[0].refs.map((r) => r.family + ' ' + r.weight), ['Noto Sans JP 100', 'Noto Sans JP 200', 'Noto Sans JP 300',
-    'Noto Sans JP 400']);
+  assert.deepEqual(draws[0].refs.map((r) => r.family + ' ' + r.weight), [100, 200, 300, 400, 500, 600, 700].map((w) => 'Noto Sans JP ' + w));
   assert.equal(draws[0].text['Noto Sans JP'], FACES.uniqueChars(scene.stores.glyph.filter((g) => g.cls !== 'space').map((g) => g.ch).join('')));
   const [url] = FACES.cssUrls(draws[0].refs, draws[0].text);
-  assert.match(url, /family=Noto\+Sans\+JP:wght@100;200;300;400&text=/);
+  assert.match(url, /family=Noto\+Sans\+JP:wght@100;200;300;400;500;600;700&text=/);
   // building again asks for nothing new
   engine.scene('cut', 0);
   assert.equal(book.calls.filter((c) => c.drawOnly).length, 1);
@@ -504,7 +508,8 @@ test('facade: a scene with 太る asks for its lighter weights as draw-only face
     engine.renderFrame(surf, t, { quality: 'export', pick: false, scale: 640 / plan.design.w });
     return [...new Set(rec.ops().slice(m).filter((op) => op[1] === 'set:font' && /Noto Sans JP/.test(op[2])).map((op) => Number(op[2].split(' ')[0])))].sort();
   };
-  assert.deepEqual(fontsAt(), [500], 'nothing loaded yet: the face weight');
+  // nothing loaded yet: only faces the main path holds (the laid-out 800, and 500 as the plan's display face)
+  assert.deepEqual(fontsAt(), [500, 800], 'nothing loaded yet: main faces only');
   // the rungs arrive: the same scene object, same measurer key, not provisional; the frame draws the rungs
   const key = measurer.key;
   book.complete();
@@ -513,7 +518,7 @@ test('facade: a scene with 太る asks for its lighter weights as draw-only face
   assert.equal(book.epoch, 0);
   assert.equal(scene.provisional, false);
   const drawn = fontsAt();
-  assert.ok(drawn.some((w) => w < 500), 'lighter rungs drawn once loaded: ' + drawn);
+  assert.ok(drawn.some((w) => w !== 500 && w < 800), 'lighter rungs drawn once loaded: ' + drawn);
 });
 
 test('facade: export waits for the draw-only faces of the range', async () => {
@@ -524,7 +529,7 @@ test('facade: export waits for the draw-only faces of the range', async () => {
   await engine.prepare(0, plan.duration, { export: true });
   const drawReady = book.readies.filter((r) => r.drawOnly);
   assert.equal(drawReady.length, 1);
-  assert.deepEqual(drawReady[0].refs.map((r) => r.weight), [100, 200, 300, 400]);
+  assert.deepEqual(drawReady[0].refs.map((r) => r.weight), [100, 200, 300, 400, 500, 600, 700]);
   const mainReady = book.readies.filter((r) => !r.drawOnly);
   assert.ok(mainReady.length >= 1 && book.readies.indexOf(mainReady[0]) < book.readies.indexOf(drawReady[0]), 'main faces first');
   // a plan without weight parts waits for no draw-only face
