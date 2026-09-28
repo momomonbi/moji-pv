@@ -9156,7 +9156,8 @@ docs/DESIGN_2_2.md. The packages and their notes follow.
 ### P1 文字組み (T1 かな詰め, T2 助詞と頭の字, T3 英字と和欧間)
 
 Contract: DESIGN_2_2 §1 (the P1 design, revision 2). Built in three steps: the engine; then T2's sizes, the tagger's
-labelled sets, the parts and the planner; then the UI, the docs and the new golden.
+labelled sets, the parts, the planner and the new golden; then the UI, the ink check and the tuned tables, the tools
+and the docs.
 
 **Engine (step 1).**
 
@@ -9309,6 +9310,145 @@ labelled sets, the parts and the planner; then the UI, the docs and the new gold
   - One mutant is equivalent: letting a Latin word overwrite a T2 role. A Latin-face grapheme is never a particle or a
     head, so no input can tell the two apart.
 
+**The UI, the ink check, the tuned tables and the tools (step 3).**
+
+- UI (`ui/fields`, `ui/widgets`, `ui/inspector`):
+  - 作品全体 › **文字組み** is a section right after 書体, closed like it. Its rows, in order:
+    - the three switches with their notes;
+    - under 詳しい設定, each switch's strength (10–100 %, `unit: 'pct'`), shown only while that switch is on;
+    - 大きくする字 (`autoValue 'line'`), shown only while 助詞を小さく・頭の字を大きく is on.
+  - `contextOf` gives the work page `ctx.kumi`: the three switches as `planner/rules` resolves them, read with one pin
+    index. The rows' `when` reads it.
+  - 行 › 色と書体 and 複数行 › 色と書体 have three rows under 詳しい設定: [自動 | 使う | 使わない], with `inheritAuto`.
+  - `slotScopes` answers from `RU.scopesOf` for every row of the table. This is the same line P2 wrote.
+  - The toggle commits `field.onValue` or `field.offValue` when they are given.
+  - `stateOf` keeps 自動 selected when a value is inherited and the field has `inheritAuto`.
+  - `valueFor` handles `autoDefault` by coercing first and then comparing with `RU.defaultValue`. The code is identical
+    to P2's.
+  - `unpin` now carries the commit's merge. A slider moved back to the document's default inside one drag or one key
+    run therefore unpins within the same undo entry.
+- `ui_fields.test.js` covers:
+  - the new section list;
+  - the scopes of the four slots, with `core/commands` agreeing;
+  - the seven rows in the design's order, and what each commits;
+  - the `when` rules against an older work, a new work and a work pin 0;
+  - the line and lines rows, with their paths.
+
+  `ui_flows.py` has a new flow `kumi`. On a `?fresh=1` page it checks:
+  - the switches are on and 自動, with no pin, and the cuts carry the automatic decisions;
+  - switching off pins 0 in one entry, the cuts lose the decision, 詰める強さ hides, and undo restores all of it;
+  - a keyboard run on ジャンプ率 from 50 % to 60 % and back to 50 % is one entry and leaves no pin;
+  - この行の大小 shows 自動, and 使わない pins 0 on that line only;
+  - under a work pin, この行のかな詰め stays 自動 with the inherited tag;
+  - 「すべて外す」 returns the switches to on;
+  - a work opened from a file shows them off and plans no typesetting, and one switch there pins 0.5.
+- **The ink check found the design's table unsafe.** The lab's `kumiInk` lays out every trimmed kana alone at 100 %
+  and measures its ink. On the CI faces (Noto Sans / Serif CJK JP) the design's table (0.10 / 0.14 / 0.30 / 0.34 /
+  0.08) let neighbours meet badly:
+
+  | Method | gothic h | mincho h | gothic v | mincho v |
+  |---|---|---|---|---|
+  | Whole ink extents, the design's method | 0.140 em | 0.107 em | 0.175 em | 0.200 em |
+  | Scanline by scanline | 0.115 em | 0.087 em | 0.158 em | 0.142 em |
+
+  There are four causes:
+  - small kana pairs are wider than the design assumed (ゕゃ, ゅゃ);
+  - れ ル か ハ, and the voiced marks, reach the edge of the em;
+  - く し り ト ノ are narrow only across a horizontal line; in a column they are tall, and くく met by 0.158 em;
+  - the spacing marks ゛ ゜ are no letters.
+
+  A gate on whole extents cannot be met with a useful trim: ぽ's handakuten reaches 0.50 em from the centre, so the
+  wide tier would have to fall to about 0.02. The check therefore compares the two inks scanline by scanline, since a
+  handakuten high on the right does not meet a stroke at mid height. It subtracts what the face's own ink does at its
+  natural 1 em advance: Dela Gothic One's ハハ already meet by 0.025 em with no trim at all.
+- **Tuning.** I ran a greedy promotion over the tier lists, then a sweep over the trims. The target was 0.015 em, for
+  margin, on the system faces and on the gothic and mincho web faces. The result:
+  - `TRIM = { wide: 0.06, kana: 0.12, narrow: 0.26, small: 0.20, bar: 0.08 }`;
+  - `WIDE_KANA` gains か れ ル ハ ヱ ゟ;
+  - the narrow kana take the wide tier in a vertical column (`tier(u, i, vert)`);
+  - ゛ ゜ are not trimmed;
+  - `FLAVOR_DAMP.heavy` goes from 0.6 to 0.15. Dela Gothic One's ink fills its em, so there is room for little more
+    than 0.02 em.
+
+  At the default 70 %:
+
+  | Tier | Design | Tuned |
+  |---|---|---|
+  | ordinary kana | 0.902 em | 0.916 em |
+  | wide | 0.93 em | 0.958 em |
+  | narrow | 0.79 em | 0.818 em |
+  | small | 0.762 em | 0.86 em |
+  | ー | 0.944 em | unchanged |
+
+  The worked numbers change accordingly. 「夜明けのまち」 is 579 wide (design 573.4). 「ショートケーキ」 at 1 is 602 (design
+  578); ト is 94 in a column. 「きみのこえがきこえた」 is 941.2 (design 927.2). In the combined case of 「始発のホームに」,
+  の is 80.28 wide and the run 657.19. The tests assert the new values; T2 and T3 numbers are unchanged. The trims
+  scale linearly, so the result stays ink-safe at every strength.
+
+  | The trim makes neighbours meet by (em, ≤ 0.02) | gothic h | gothic v | mincho h | mincho v | heavy h | heavy v | brush h | brush v |
+  |---|---|---|---|---|---|---|---|---|
+  | system faces (`glyph_parity.py` check 6, CI) | 0.010 | −0.002 | 0.010 | −0.005 | — | — | — | — |
+  | web faces (`contact_sheet.py --kumi --fonts`) | 0.015 | −0.005 | 0.003 | 0.012 | 0.018 | −0.003 | −0.028 | −0.061 |
+
+  - Worst pairs, system faces: れぶ, ルぜ, けゟ, うえ.
+  - Worst pairs, web faces: しホ (gothic), ササ (mincho), ちも, and for heavy んク and ホホ, whose ink meets by 0.039 em in
+    all, of which 0.021 is the face's own.
+  - Web fonts load unreliably through this machine's proxy (`ERR_TOO_MANY_RETRIES`). The helper now reports `loaded`,
+    and the release check treats a face that did not load as a problem. The table above comes from runs where all eight
+    loaded.
+- The golden `tests/golden/project_kumi.json` was rewritten for each table change. It is this package's own file; the
+  six earlier goldens matched before and after each rewrite.
+- Tools:
+  - The lab has `kumiInk` and an additive `o.look` in `frames`, `perf` and `projectPlan`. `perf` now returns `kumi`,
+    the number of cuts with the setting.
+  - `contact_sheet.py --kumi` draws three columns: older work, new work (70 / 50 / 50 %), and 100 % pinned. It takes
+    `--mood`, `--aspect`, `--orient`, `--face`, `--lines` and `--fonts`.
+  - Its self-check also draws a small kumi sheet, and fails unless the new-work column differs from the older-work one.
+  - The pair measure lives in `contact_sheet.KUMI_PAIRS_JS`, shared with `glyph_parity.py`.
+  - `perf.py` has a `kumi` row (`--no-kumi` skips it). This run: `project_long` p50 15.90 ms as a new work against 15.40
+    ms plain, × 1.03 (limit 1.10), with 246 cuts set.
+  - Both that row's p95 (36.8 ms) and the plain long row are over twice the budget on this machine (load average 7 on
+    4 CPUs). The base worktree wt-pv22 fails the same row the same way (p95 46.1 ms).
+- Visual QA used contact sheets (fallback faces unless noted). I rendered 3 moods (quietHush, popFizz, printColumn)
+  × 16:9 and 9:16 × h and v:
+  - for project basic;
+  - for eight mixed lines (Latin in Japanese lines, brackets, 12月, Loveって, kana-only);
+  - plus one run with the real web faces.
+
+  In every sheet:
+  - particles read smaller and line heads larger;
+  - kana words close up into blocks, with the seams after particles visible;
+  - Latin words grow, and are spaced from Japanese on both sides and in columns;
+  - 12月 and English-only cuts are untouched;
+  - giantWhisper, confettiWords and magazineHead keep their own sizes;
+  - no ink collides;
+  - at 100 % a line sometimes breaks differently or fits on one line, which is expected.
+
+  One composition in 9:16 crops 「飛ばせ」 at the top in all three columns alike. That is the arrange's bleed, not
+  typesetting.
+- Mutation checks, all caught:
+  - 13 at the Node level:
+    - `slotScopes` without the table;
+    - the strength rows always shown;
+    - `ctx.kumi` never set;
+    - the section missing;
+    - the line rows without `inheritAuto`;
+    - the switch committing `false`;
+    - the slider reaching 0;
+    - the column rule;
+    - `kanaTrims` ignoring the column;
+    - the spacing marks trimmed;
+    - `TRIM.kana` 0.14;
+    - か as ordinary;
+    - the heavy damp 0.6.
+  - 6 in the browser, on a scratch copy through `ui_flows.py --root` and check 6:
+    - `stateOf` without `inheritAuto`;
+    - `valueFor` without `autoDefault`;
+    - `unpin` without the merge;
+    - the toggle ignoring `onValue` / `offValue`;
+    - the design's table;
+    - no column rule.
+
 **Deviations from the design, with reasons.**
 
 - The particle tagger (T2.4) landed with the engine step, not with T2, because the T1 word seams need `partsOf` (a seam
@@ -9341,6 +9481,47 @@ labelled sets, the parts and the planner; then the UI, the docs and the new gold
   cut 「Fly high」 holds no CJK, so T3 is checked by the other scene tests.
 - All P1 strings of section Q were added in step 2, although the UI rows come in step 3; explain already uses the two
   `whyRule.kumi.*` strings.
+
+- Step 3, the ink gate:
+  - The ink check measures neighbours scanline by scanline, less the face's own overlap at 1 em. The design's X.2
+    measured whole ink extents.
+  - The design's own table failed that version by 0.14–0.20 em. No trim that keeps T1 visible can pass it, because
+    voiced marks reach the em edge.
+  - The limit (0.02 em), the faces, the orientations and the one-grapheme cells are the design's.
+- Step 3, the tables. They are tuned as X.5 and T1.10 foresee, and the change rewrote only `project_kumi.json`:
+  - `TRIM` 0.06 / 0.12 / 0.26 / 0.20 / 0.08;
+  - `WIDE_KANA` gains か れ ル ハ ヱ ゟ;
+  - `FLAVOR_DAMP.heavy` is 0.15.
+
+  Two structural additions to `tier` go with them:
+  - narrow kana are wide in a vertical column (`tier(u, i, vert)`; `kanaTrims` passes the orientation);
+  - the spacing marks ゛ ゜ get no tier.
+
+  The design's T1 worked numbers and its 70 % cells (0.902 / 0.93 / 0.79 / 0.762) change accordingly; the new ones are
+  above and in DESIGN_2_2 §1.3.
+- `kumiInk` leaves out U+3097 and U+3098 (unassigned) and U+3099 and U+309A (combining marks, part of the grapheme
+  before them). They would otherwise count as standalone glyphs.
+- `contact_sheet.py --kumi` gains `--lines`, which is not in the design. The fixtures split every Latin word into its own
+  cut, and such a cut rightly gets no T3, so T3 could not be seen on them.
+- The `perf.py` row compares the best p50 of at least three interleaved pairs of fresh engines, against the noise of
+  this shared machine.
+- `ui/inspector.unpin` takes the commit's merge. Without it, a slider dragged back to the default would split its drag
+  into two undo entries, against the one-entry rule.
+- `ui/fields` also depends on `core/pins`, so `ctx.kumi` is read with one pin index.
+- The design's visual QA (three moods × two aspects × h and v) was run as scratch runs of the new `--kumi` sheet; the
+  sheets are not in the repository.
+
+**Open items.**
+
+- The independent labelled set `tests/fixtures/kumi_independent.json` (100 or more lines written and labelled by
+  someone other than the tagger's author) for the release gate.
+- The release check `contact_sheet.py --kumi --fonts` should be run again on a machine where Google Fonts load
+  reliably. Here they loaded after retries, and every face passed.
+- Merging with the parallel packages:
+  - P2 also builds the `'rule'` field category. Its `ruleState` (with `autoText`) and P1's work-scope branch should
+    become one.
+  - `slotScopes` and `valueFor` carry the same new lines in both packages.
+  - P4 adds its `withFaces` step in `scene/build.cutServices`, before `withKumi`.
 
 <!-- PV22 P2 notes -->
 
