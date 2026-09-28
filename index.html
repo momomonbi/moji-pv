@@ -1,6 +1,6 @@
 <!doctype html><html lang="ja"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-gJuiTB1ZItVsyF4NLx3tPnFz8kZldJAmz2tsgK1ptOs='; style-src 'sha256-viabA3ghxnLnMj3kZBfSZjhMo2xhNoHCfVsVyLmuU3I=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-gJuiTB1ZItVsyF4NLx3tPnFz8kZldJAmz2tsgK1ptOs='; style-src 'sha256-Zu2r+m8/sIPgwD9OE1fU8xFKVbPnLiBrCjwqgQB+hwo=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
 <title>文字PVメーカー</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -54,7 +54,7 @@ kbd {
 /* One line that ends in "…" when it does not fit: every truncated label shares this rule (a flex item also needs
    min-width: 0, set in its own rule). */
 .ell, .doc-title-text, .song-name, .strip-text, .w-part-name, .w-font-name, .w-font-sample, .pb-name, .pal-text, .fr-label,
-.w-slot-skip, .ai-hud-text { white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+.w-slot-skip, .ai-hud-text, .draft-when, .draft-text { white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
 
 /* ---- shell regions (placed in px by ui/shell from computeLayout) ------------------------------------------ */
 
@@ -454,13 +454,12 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent);
   border-bottom: 1px solid var(--line); }
 .draft-row:last-child { border-bottom: 0; }
 .draft-check { min-width: 0; font-size: 12.5px; }
-.draft-when { font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.draft-when { font-variant-numeric: tabular-nums; }
 .draft-conf { font-size: 12px; white-space: nowrap; }
 .draft-row[data-conf="high"] .draft-conf { color: var(--ok); }
 .draft-row[data-conf="mid"] .draft-conf { color: var(--gold); }
 .draft-row[data-conf="low"] .draft-conf { color: var(--muted); }
-.draft-text { grid-column: 1 / -1; padding-left: 25px; font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis;
-  white-space: nowrap; }
+.draft-text { grid-column: 1 / -1; padding-left: 25px; font-size: 12px; color: var(--muted); }
 .draft-body .link { align-self: flex-start; }
 
 /* ---- detail column (placeholder mounts for UI part 2) ------------------------------------------------------ */

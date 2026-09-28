@@ -9425,6 +9425,21 @@ the panned-lead case (recall 3/12); the median filter removed → the clean reca
 from the stream → the end-to-end case (55/85); `WD = 0` → the distractor case; `MIN_GAP` ignored in the DP → the
 dense-onset case (starts 10.2, 10.26).
 
-<!-- PV22 P5 notes, phase 3: checks -->
+**Checks (phase 3).** `python3 build.py --check` (224 modules); `node tests/update_golden.js --check`: the six files match
+(frame_hashes_v2, plan_hashes, frame_hashes, project_media, project_repeat, project_extreme). Node suite: 1 840 tests,
+1 835 pass; 5 failures: 4 conformance "slowest build > 60 ms" rows (load average 6–10 on 4 CPUs; conformance alone then
+fails 1–2 other rows each run, always on build time; phase 3 touches no part or engine code) and `ux-16: style.css states
+each shared rule once`, which the new panel's CSS broke (the one-line ellipsis rule repeated) and which passes after the
+fix (the draft's two selectors joined the shared rule). The planning-speed test passed this time. Browser: `ui_flows.py`
+full run OK (52 flows, the new `draft` among them; rerun alone after the CSS fix and with the loudness-only case added),
+`ui_layout.py` OK (584 layouts), `i18n_pages.py` OK, `csp.py` OK (0 violations).
+
+**Leftover for the lead.** The S1 release gate (tap at least three real songs, redraft with 固定・タップした行も下書きし直す,
+read the agreement line, record genre / BPM / k/n here; below a 50 % median set `DRAFT_BETA`; also compare `SIDE` 1 and 0
+there). Q1 (new works on 動き始め or 出そろい; the strips above show 出そろい's longer overlap). The optional golden
+`project_ready.json`. At the merge with P6: one `song.voice` reducer and one `undo.songVoice` string; P6 adds
+`activityEnd`, its 曲の声を読む button on `app.readVoice()`, and reads `doc.song.voice` as specified here. P3's
+`planner/kime` replaces the local `isKime` of `planner/plan` (phase 1). P4's morph-target case of
+`timing_ready.test.js` (phase 1).
 
 <!-- PV22 P6 notes -->
