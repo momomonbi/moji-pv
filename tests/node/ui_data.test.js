@@ -86,6 +86,20 @@ test('steps: ③ is done after a look pin or a tried look, not after a tempo or 
   assert.equal(STEPS.statusOf(app({}, [null, 3]), 'look'), 'todo');
 });
 
+test('steps: a new work (typesetting on by its document default, DESIGN_2_2 §1) has no pins, so ③ stays todo', () => {
+  const first = [{ n: 1, seed: 1, moodSeed: 1, salts: {}, scope: 'work', label: ['look.first', {}], star: false }];
+  const app = (doc) => ({ plan: null, exporting: null, doc, store: { side: { looks: { list: first, cap: 50 }, aiLog: [] } } });
+  const fresh = D.newDoc();
+  assert.equal(fresh.look.gen, D.GEN);
+  assert.deepEqual(fresh.pins, {});
+  assert.equal(STEPS.statusOf(app(fresh), 'look'), 'todo');
+  // turning a switch off (or setting a strength) is a look choice
+  for (const p of ['work:text.kana', 'work:text.jump', 'work:text.latin', 'work:text.head']) {
+    const doc = Object.assign({}, fresh, { pins: { [p]: { v: p.endsWith('head') ? 'none' : 0, by: 'user' } } });
+    assert.equal(STEPS.statusOf(app(doc), 'look'), 'done', p);
+  }
+});
+
 test('palette: an empty query starts with the starters, settings and the language are always last (ux-2)', () => {
   const items = ['pref.singleKeys', 'pref.autoplay', 'app.lang', 'file.new', 'look.omakase', 'play.toggle', 'help.keys',
     'step.go:lyrics', 'edit.undo', 'panel.details'].map((id, i) => ({ id, text: String.fromCharCode(0x3041 + (i * 7) % 20) + id }));

@@ -275,3 +275,43 @@ test('a planned new work (look.gen = 1): particles at 0.82 of their run in the b
     for (const r of BUILD.buildCut(cut, legacy, svc).runs) assert.equal(r.layout.kumi, null, cut.key);
   }
 });
+
+// --- the golden ---------------------------------------------------------------------------------------------------------
+
+test('the 文字組み golden: its documents plan and render the golden frames (tests/golden/project_kumi.json)', async () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const KD = require('../helpers/kumi_docs.js');
+  const golden = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'golden', 'project_kumi.json'), 'utf8'));
+  const { createEngine } = MV.use('engine/facade');
+  const { createRecorder } = MV.use('engine/render/record');
+  const H = MV.use('core/hash');
+  const D = MV.use('core/doc');
+  assert.equal(golden.registry.version, REG.version, 'made with the current catalog');
+  assert.deepEqual(Object.keys(golden.docs), ['basic', 'vertical']);
+  for (const { name, doc } of KD.goldenDocs()) {
+    const rec = createRecorder();
+    const engine = createEngine({ registry: REG, canvas: rec.factory, measurer: fakeMeasurer(), fonts: null, assets: null });
+    const { plan } = engine.setDoc(doc);
+    assert.equal(plan.hash, golden.docs[name].plan, name);
+    await engine.prepare(0, plan.duration, { export: true });
+    const [w, h] = D.DESIGN_SIZE[doc.look.aspect];
+    const k = 360 / Math.min(w, h);
+    const made = rec.factory.create(Math.round(w * k), Math.round(h * k), { alpha: false });
+    const surface = { canvas: made.canvas, ctx: made.ctx, w: Math.round(w * k), h: Math.round(h * k) };
+    const frames = [];
+    for (let i = 0; i < 40; i++) {
+      const before = rec.ops().length;
+      engine.renderFrame(surface, (plan.duration * (i + 0.5)) / 40, { quality: 'export', pick: false, scale: surface.w / plan.design.w });
+      frames.push(H.hashJSON(rec.ops().slice(before)));
+    }
+    engine.dispose();
+    assert.deepEqual(frames, golden.docs[name].frames, name);
+  }
+  // the golden exercises the setting: most frames differ from the plain documents' golden frames
+  const plain = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'golden', 'frame_hashes.json'), 'utf8')).frames;
+  for (const name of ['basic', 'vertical']) {
+    const differ = golden.docs[name].frames.filter((x, i) => x !== plain[name][i]).length;
+    assert.ok(differ >= 30, name + ': ' + differ + ' of 40 frames differ');
+  }
+});

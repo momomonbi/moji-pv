@@ -29,6 +29,12 @@
 //                     basic project with the switch on and every EXTREME preset on one cut, and a 9:16 one with the switch
 //                     at 0.5 on the chorus only; rendered like the frames above (motion-blur copies included in the ops).
 //                     Every document without the switch renders as before: the files above match first.
+//   project_kumi.json { "registry": …, "measurer": "fake", "docs": { "<name>": { "plan": "<plan.hash>", "frames": [40] } } }
+//                     文字組み (tests/helpers/kumi_docs.js goldenDocs, DESIGN_2_2 §1 X.3): 'basic' as a new work
+//                     (look.gen = 1, the automatic settings) and 'vertical' with every setting pinned at full strength;
+//                     rendered like the frames above. The job refuses to write (and fails --check) unless every cut of
+//                     'basic' holds the three automatic settings and at least 30 of its 40 frames differ from the same
+//                     document without the marker, so the file cannot silently exercise none of it.
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -36,6 +42,7 @@ const { load } = require('./helpers/load.js');
 const corpus = require('./helpers/corpus.js');
 const FM = require('./helpers/fake_media.js');
 const XD = require('./helpers/extreme_docs.js');
+const KD = require('./helpers/kumi_docs.js');
 
 const MV = load();
 const H = MV.use('core/hash');
@@ -110,6 +117,23 @@ async function extremeGolden(reg, info) {
   return { registry: info, measurer: 'fake', docs };
 }
 
+async function kumiGolden(reg, info) {
+  const docs = {};
+  for (const { name, doc } of KD.goldenDocs()) docs[name] = await renderDoc(reg, doc, null);
+  // refusal conditions: the new-work path is live on every cut, and it shows in the frames
+  const { plan } = MV.use('planner/plan');
+  const basic = KD.newWork();
+  for (const c of plan(basic, { registry: reg }).cuts) {
+    const ok = c.slots['text.kana'] && c.slots['text.kana'].v === 0.7 && c.slots['text.jump'] && c.slots['text.jump'].v === 0.5
+      && c.slots['text.latin'] && c.slots['text.latin'].v === 0.5;
+    if (!ok) throw new Error('project_kumi.json: cut ' + c.key + ' of basic lacks the automatic 文字組み settings');
+  }
+  const plain = await renderDoc(reg, Object.assign({}, basic, { look: Object.assign({}, basic.look, { gen: undefined }) }), null);
+  const differ = docs.basic.frames.filter((h, i) => h !== plain.frames[i]).length;
+  if (differ < 30) throw new Error('project_kumi.json: only ' + differ + ' of 40 frames of basic differ from the plain document');
+  return { registry: info, measurer: 'fake', docs };
+}
+
 function readGolden(file) {
   try { return JSON.parse(fs.readFileSync(path.join(GOLDEN, file), 'utf8')); } catch (e) { return null; }
 }
@@ -135,6 +159,8 @@ async function main() {
       empty: { registry: null, measurer: 'fake', plan: null, frames: [] }, make: () => repeatGolden(reg, info) },
     { file: 'project_extreme.json', needs: ENGINE.concat(['planner/plan', 'planner/extreme', 'engine/scene/xshot']),
       empty: { registry: null, measurer: 'fake', docs: {} }, make: () => extremeGolden(reg, info) },
+    { file: 'project_kumi.json', needs: ENGINE.concat(['planner/plan', 'planner/rules', 'engine/text/kumi']),
+      empty: { registry: null, measurer: 'fake', docs: {} }, make: () => kumiGolden(reg, info) },
   ];
   let failed = false;
   fs.mkdirSync(GOLDEN, { recursive: true });
