@@ -9146,3 +9146,21 @@ figures as before, every one with its margin (the thinnest: framing lens → `no
 window of the catalog); only the curve agreement of shared moving shots rises (catalog 0.830 → 0.865, synthetic
 0.859 → 0.904). It changes the camera curves of existing documents: 121 of the 240 plans of plan_hashes.json and one
 frame of frame_hashes.json; frame_hashes_v2.json and project_media.json are unchanged.
+
+## PV22: 文字PVの定石 (lead)
+
+The owner's list of 14 文字PV conventions (動きと演出, 文字組み, 曲と合わせる), with "skip what is already implemented". A
+survey with an adversarial check found none fully implemented (9 partial, 5 missing); the contract is
+docs/DESIGN_2_2.md. The packages and their notes follow.
+
+<!-- PV22 P1 notes -->
+
+<!-- PV22 P2 notes -->
+
+<!-- PV22 P3 notes -->
+
+<!-- PV22 P4 notes -->
+
+<!-- PV22 P5 notes -->
+
+<!-- PV22 P6 notes -->

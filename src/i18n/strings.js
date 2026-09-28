@@ -2172,4 +2172,16 @@ MV.def('i18n/strings', [], () => ({
   'pkg.missing.media': ['写真・動画{n}件', '{n} photos or videos'],
   'pkg.missing.song': ['曲', 'the song'],
   'pkg.missing.and': ['と', ' and '],
+
+  // --- PV22 P1 (文字組み) ---
+
+  // --- PV22 P2 (文字PVの定石) ---
+
+  // --- PV22 P3 (キメ) ---
+
+  // --- PV22 P4 (モーフ・太さ) ---
+
+  // --- PV22 P5 (タイミング) ---
+
+  // --- PV22 P6 (歌ハメ) ---
 }));
