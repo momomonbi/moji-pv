@@ -58,6 +58,8 @@ AI タブのいちばん上が「AIとの接続」です。
   試写中に **B** キーを押しているあいだは、いまの見た目が見えます。何かを編集すると試写は終わります。
 - **変更を見る** で中身を確かめ、**この案にする** で反映します。
 - 季節に合わない部品（夏の歌に雪など）は使いません。「曲を分析する」で保存した分析があれば、サビの位置も使います。
+- 案ごとに、いちばん決めたい1行を **キメ** にすることがあります（変更の一覧に「3行 · キメにする」と出ます）。キメは1案に
+  1行まで。ロック中の行はそのままです。AI が付けたキメは「AIの固定を外す」で外れます（「すべての固定を外す」では外れません）。
 
 ## 4. 指示（AIに頼む）
 
@@ -293,6 +295,8 @@ the tool's own button (**Prepare lyrics**, **Send**, **Make**, **Send and descri
   (`*word*`) and readings (`|note`). The words themselves never change; hand-set cut points and locked lines stay.
 - **Get 3 looks** — three looks that fit the meaning and the season of the lyrics. **Try on** plays a look in the preview
   ("Trying on look B" with **Apply** / **Stop**; hold **B** to see the current look); **Use this look** applies it.
+  A look may mark one line as **Kime** (shown as "Line 3 · make it a kime line"; at most one per look, never a locked
+  line); **Remove AI pins** removes a kime mark the AI set, **Remove every pin** does not.
 - **Instruction** — write what you want (up to 300 characters; Enter sends) and press **Send**. **Target**: **Whole** /
   **Selected** / **Section ▾** (song sections from the analysis, lyric headings (#), blocks by blank lines, or the
   selection). Phrase buttons: Seasonal / Slower / Speed ramp / Push in / Make a material. Under **Options**:

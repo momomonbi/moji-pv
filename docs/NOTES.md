@@ -9160,7 +9160,7 @@ docs/DESIGN_2_2.md. The packages and their notes follow.
 ### P3 キメ (M3)
 
 Contract: DESIGN_2_2 §3. Phase 1 is the planner (and the core commands of the mark); phase 2 the UI, the optional AI
-path and the browser flows.
+path, the browser flows and the visual QA (below, after phase 1's notes).
 
 **What landed (phase 1).** `planner/kime` (new, L2: the constants, `isKime`, `calmLevels`, `calmFactor`, `shotFor`,
 `xshotFor`, `hold`, `landEach`, `guideline`); the line pin read in stage 1 (`planner/plan withKimePins`); one cut and
@@ -9233,6 +9233,72 @@ test per cut. Interleaved with the base worktree on this loaded machine (32 corp
 against 27.5 / 29.6 ms — within the noise. The suite's "planning speed: re-planning project_long after an edit" fails
 here as it does on the base; the conformance build-time budgets failed once under a load average of 10 and passed on
 the rerun (parts and engine are untouched).
+
+**What landed (phase 2).** The UI of DESIGN_2_2 §3.5: `ui/fields` rows `line/marks/kime` (toggle, note, `offClears`,
+`noDice`, `after: 'kimeInfo'`) and `work/look/kime.calm` (under 詳しい設定, the new flag `onClears`), `kime` and
+`kime.calm` in the slot catalogue (`slotScopes`: line / work), and `kimeInfo(plan, doc, lineId)` (count, guideline,
+too-many, same-lyric lines, long-line text); `ui/inspector`: a field's `after` custom block (drawn under the row and
+refreshed with the customs; `kimeInfo` redraws even with focus), the several-lines toggle in `shift` (flag `readEach`:
+statesFor reads every selected line), `valueFor` for `onClears`, the same-lyric button (one batch, `undo.kimeSame`);
+`ui/lyric_editor`: the 「キ」 badge (`.g-kime`, and キメ in the entry's accessible name), `pinCounts` leaves `:kime` out,
+`segments(src, { cutOff })` and the highlight `tok-cutOff` for rows whose every line plays as one キメ cut (rows are
+re-inked when that changes); `ui/step_lyrics` 記法 row `syn.kime`; `ui/style.css`; `planner/fields`: the 区切り of a
+one-cut キメ line reads 自動, not 記号; `ai/looks`: the proposal line field `kime` and `kimeChanges` (value changes of
+`line/<id>:kime`, one `on` per proposal, `ai.warn.kimeOne`); the strings of DESIGN_2_2 §3.5 plus `ai.warn.kimeOne`;
+tests: `ui_fields.test.js` (rows, scopes, commands agree, `kimeInfo`), `ai_looks.test.js` (the field, the one-`on`
+rule, apply/unpin, locked lines, review text; the proposals schema hash moves to `e1adf857`, ひとこと修正's stays),
+`kime.test.js` (the 区切り state), the `ui_flows.py` flow `kime` and the `i18n_pages.py` キメ screens; SPEC, both
+READMEs and AI_GUIDE.
+
+**Deviations in phase 2 (and why).**
+
+- The count, the too-many hint and the same-lyric button live in one custom block drawn right under the toggle through a
+  new field flag `after`; sections had room for one custom only (文字の記号 already has the lock banner on top).
+- The several-lines toggle needed the new flag `readEach`: a line value is read per line (not per cut), so the page's
+  first path alone could not show いろいろ. Other line-value rows of that page are unchanged.
+- 「この行の固定を外す」/「すべての固定を外す」 keep the mark (phase 1's command rule); the line header's 固定 count still
+  counts it (only the lyric gutter's count leaves it out, as designed).
+- The 区切り row of a one-cut キメ line says 自動 instead of 記号 (the design names only its なぜ, `kime.split`): its `/`
+  marks have no effect there, and a `derived` state would have made the row read-only, though a split pin still wins.
+- The same-lyric button compares the Plan lines' text exactly; it offers only while this line is キメ.
+- AI: only 演出3案 has the field (as designed); a line already marked (by anyone) is not changed by `on`; `off` clears
+  a mark whoever set it (the user reviews every change). A locked line is not marked (its look stays; warned once).
+- The en name of the toggle is "Kime" (the design's); the README calls the section "line › Marks" (its en label).
+
+**Browser checks.** `ui_flows.py --only kime` (ja): the toggle (note, no dice) pins in one entry and the line plays as
+one キメ cut with calm cuts before it; 「この作品のキメ: 1行」 and the same-lyric button (one entry; Ctrl+Z / redo); the
+gutter's キ badge (none on an unmarked line, no pin count for a mark) and the dimmed `/` (two `tok-cutOff` ranges); the
+記法 row; several lines show いろいろ and one click marks both (one entry); a pin made on the second piece before marking
+is reported `shadowed-pin`, does not decide the キメ cut, and 作品全体 › その他 › このカットに付け直す moves it onto the
+キメ cut in one entry; すべての固定を外す keeps the mark; キメの前を静かにする off pins false and removes every
+`feat.calm`, on clears the pin; off returns the line's two cuts; undo-all returns the start document.
+`i18n_pages.py`: 56 screens per page (5 new: the line page with count / too-many / long-line notes, the same-lyric
+button, the several-lines toggle, the calm switch, the gutter), no untranslated text either way.
+Browser mutation checks (each broken, the flow run, restored): `readEach` off (いろいろ and the multi-line click fail),
+`onClears` off (on no longer clears the pin), the `after` block not refreshed (no count), `:kime` counted as a pin (the
+badge check fails), `tok-cutOff` not used (0 dimmed ranges). Node mutations: `kimeInfo` without the marked-copy test,
+without `many`, without `split`; the AI one-`on` rule; the AI `off` without a mark; the 区切り state — each fails a test.
+
+**Visual QA (contact sheets, scratch script on the lab page).** Two lyric sets, each with three marked lines (4, 8 and
+26 cells; and 12, 12 and 10 cells, kana-only and kanji mixed), 8 moods × {16:9, 1:1, 9:16} × {h, v} (orientation
+pinned for the whole video), each キメ cut after landing (t0 + 0.85 s) and at mid-hold: 288 キメ cuts, 576 frames, plus
+large single renders.
+
+- はみ出し (R2): 2–8 cells read clearly as はみ出し in every mood, aspect and orientation; the edge glyph loses about
+  7–20 %. At 12 cells the bleed can split unevenly (kana phrases 8 + 4 cells pass its balance test) and loses about 30 %
+  of the edge glyph in 16:9 h; in vertical text the bottom row is cropped a little more than the top (the ink of the
+  vertical glyphs sits low). Still readable, so `bleedCells` stays [2, 12] here: lowering it to 10 (the design's R2
+  remedy, a worst case of about 22 %) changes `tests/golden/project_kime.json` (8 of its 34 キメ cuts are 12-cell
+  bleeds), which this package may not regenerate — a decision for the lead. 1.08 is not timid: the bleed reads at
+  every size.
+- 大と小: 1–4-cell giants are big (as the size test measures). On long lines the giant is the longest word: with kanji
+  text a 7-cell giant is ≈ 0.18 of the short side in 16:9 h; with vertical text pinned in a landscape frame the giant
+  column is bounded by the frame's height (≈ 0.1 of the short side for 7 cells), no smaller than the pieces of the line
+  would be; kana-only lines get long pseudo-words from the breaker (a 10-cell giant). The one-cut cap does not look at
+  the orientation (as designed and tested); an orientation-aware cap would be a later refinement.
+- R3 (大と小 with an emphasis and 言葉へ寄る): the whispers stayed on frame at mid-hold and late in the hold in every
+  sample. Frames 0.15 s before the end often show the transition out already, which replaces the exit as designed; no
+  flash was seen on a キメ cut without 見せ場.
 
 <!-- PV22 P4 notes -->
 

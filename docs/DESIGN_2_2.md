@@ -152,12 +152,47 @@ filter picks `kime.noFlash`; the seam out: rule `kime.noFlash`; calm factors `ki
   set `hame.arrive`), the entrance set is `KIME.arrive ∩ hame.arrive` when not empty and the `dur`/`each` caps step
   aside; every other キメ rule stays.
 
-### 3.5 FROZEN contracts touched
+### 3.5 Where the user sets it (UI, lyrics, AI)
+
+- **③ 見た目 › 行 › 文字の記号**: the toggle 「キメ」 right under 「見せ場（!）」, with its note. On pins `true`, off
+  clears the pin (`offClears`); no 振り直し (`noDice`). Under it a custom block (the field flag `after: 'kimeInfo'`, drawn
+  and refreshed with the section's customs) shows, from `ui/fields kimeInfo(plan, doc, lineId)`:
+  - 「この作品のキメ: n行」 only when the work has a キメ line (counted from the Plan: a line with a `feat.kime` cut, so
+    a pin that does not apply counts none);
+  - 「キメが多すぎると、どれも目立たなくなります（目安は{max}行まで）」 when n exceeds `guideline(lyric lines)` =
+    max(3, ⌈15 % of the lyric lines⌉) — a hint, not a Plan warning, so no plan hash depends on the count;
+  - 「この行は長いので、カットは分けたまま「…」を大胆に見せます」 when this line is キメ and keeps several cuts;
+  - 「同じ歌詞の行（n行）もキメにする」 when this line is キメ and other lines sing the same words without their own
+    mark: one `pin.set` per line in one batch (one undo step, `undo.kimeSame`).
+- **③ 見た目 › 複数行**: the same toggle next to 見せ場, writing one line pin per selected line in one step. The row reads
+  every selected line's state (the field flag `readEach`) and shows いろいろ (the switch's indeterminate state) while
+  they differ.
+- **③ 見た目 › 作品全体 › 見た目 › 詳しい設定**: 「キメの前を静かにする」, on by default. Off pins `work:kime.calm =
+  false`; on clears the pin (the new field flag `onClears`, the mirror of `offClears`: a default-on toggle whose on is
+  自動).
+- **① 歌詞**: the gutter shows 「キ」 on a line whose `line/<id>:kime` pin is true (its title and accessible name say
+  キメ); the pin count beside it leaves the mark out. The `/` marks of a row whose every line plays as one キメ cut are
+  drawn dimmed (the highlight `tok-cutOff`; rows are re-inked when that changes); the 記法 list gains 「キメ」 —
+  「一行を大胆に見せる印（見た目 › 行 で付けます）」. On such a line the 区切り row reads 自動 (not 記号), and its なぜ
+  says 「キメの行は1カットで見せる」.
+- **Pins on the pieces**: pins a line's pieces had before it was marked are listed in 作品全体 › その他 (the existing
+  list of stray and hidden pins, `shadowed-pin`) with 消す and このカットに付け直す, which moves them onto the キメ cut
+  with its text as the sig; they apply again to their pieces when the mark goes.
+- **Unpin**: すべての固定を外す and この行の固定を外す keep the marks and 「キメの前を静かにする」; AIの固定を外す removes
+  the marks the AI set.
+- **AI (optional; everything works without it)**: each line of an AI 演出3案 proposal has `kime: "" | "on" | "off"`.
+  At most one `on` per proposal (later ones are dropped with 「{n}行はキメにしませんでした（キメは1案に1行まで）」); `on`
+  on a line without the mark and `off` on a marked line become a `value` change of `line/<id>:kime` (`true` / cleared;
+  applied as `pin.set … by: 'ai'` / `pin.clear`), shown as 「{n}行 · キメにする」 / 「{n}行 · キメをやめる」 in the
+  review; a locked line keeps its look. ひとこと修正 and the direct tool have no キメ field (their schemas are unchanged).
+
+### 3.6 FROZEN contracts touched
 
 §4.16.7 CutFeatures (optional `kime`, `calm`); §4.16.4 the chooser (optional `calm` factor and `only` pool
 restriction). Not touched: the row grammar, ParsedRow/Line, POSE columns, the seam mix, SCH enums, the slot order, the
 Plan shape, `planner/encode`, shot presets, stream-seed names. Goldens: every existing one is byte-identical; the new
-`tests/golden/project_kime.json` holds the plan hashes of marked documents.
+`tests/golden/project_kime.json` holds the plan hashes of marked documents. The AI 演出3案 answer schema gains the line
+field `kime` (its hash in `ai_looks.test.js` moves); ひとこと修正's schema is unchanged.
 
 <!-- PV22 P4 chapter -->
 
