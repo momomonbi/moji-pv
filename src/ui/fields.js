@@ -260,6 +260,15 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
       spec: { type: 'bool' }, options: [{ v: true, label: 'opt.repeatSame.on' }, { v: false, label: 'opt.repeatSame.off' }], auto: true,
       basic: false, noDice: true, when: (ctx) => ctx.scopeKind === 'line' && ctx.cuts.some((c) => !!(c.feat && c.feat.repeatOf)) });
     const hasArea = (ctx) => !!ctx.area;
+    // 「前の行から字をつなぐ」 (v2.2, DESIGN_2_2 §4): the glyph morph switch for the boundary into the line('s first cut);
+    // 自動 follows 作品全体. Not on the first line of the song (nothing before it to link).
+    const morphLineField = () => F({ path: 'morph.auto', scopes: LINE, widget: 'choice', label: 'fld.morphLine',
+      note: 'fld.morphLine.note', spec: { type: 'bool' }, options: [{ v: true, label: 'opt.morphLine.on' },
+        { v: false, label: 'opt.morphLine.off' }], auto: true, basic: false, noDice: true, when: notFirstLine });
+    function notFirstLine(ctx) {
+      const lines = ctx.plan && Array.isArray(ctx.plan.lines) ? ctx.plan.lines : [];
+      return ctx.lineIds.length > 0 && !(ctx.lineIds.length === 1 && lines.length > 0 && lines[0].id === ctx.lineIds[0]);
+    }
 
     // カメラ EXTREME (DESIGN_EXTREME §2.6): the switch, and under 詳しい設定 its 激しさ [強め | かなり | 最大]; both write
     // through ui/extreme (the notice when it turns on, the question when it turns off with moves picked by hand). The
@@ -296,6 +305,8 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
           F({ path: REPEAT_SAME, scopes: WORK, widget: 'toggle', label: 'fld.repeatSame', spec: { type: 'bool' },
             note: 'fld.repeatSame.note', offClears: true, noDice: true }),
           // v2.2 (DESIGN_2_2 §4): on in new works, off in older ones (planner/rules); the default clears the pin.
+          F({ path: 'morph.auto', scopes: WORK, widget: 'toggle', label: 'fld.morphAuto', spec: { type: 'bool' },
+            note: 'fld.morphAuto.note', autoDefault: true, noDice: true, basic: false }),
           F({ path: 'weight.auto', scopes: WORK, widget: 'toggle', label: 'fld.weightAuto', spec: { type: 'bool' },
             note: 'fld.weightAuto.note', autoDefault: true, noDice: true, basic: false }),
         ]),
@@ -444,6 +455,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
         speedField(), shotField(),
         // §6.4.6: the transition into the line's first cut (a line-scope seam pin would change every cut boundary).
         partField('seam', 'fld.seamIntoLine', { firstCut: true }),
+        morphLineField(),
         orientField(),
         lineSeasonField(), avoidField(), repeatLineField(),
       ];

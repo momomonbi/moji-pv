@@ -2196,6 +2196,21 @@ MV.def('i18n/strings', [], () => ({
   'rule.auto.old': ['この機能より前に作った作品なので、はじめはオフ', 'Made before this feature, so it starts off'],
   'whyRule.rules.new': ['新しい作品の標準', 'Default for new works'],
   'whyRule.rules.old': ['この機能より前に作った作品なので、はじめはオフ', 'Made before this feature, so it starts off'],
+  // M4 モーフ (glyphMorph, 「同じ字をつなぐ」)
+  'fld.morphAuto': ['同じ字をつなぐ', 'Link shared letters'],
+  'fld.morphAuto.note': ['前の行と同じ字があるとき、その字が次の行の位置へ動き、ほかの字は溶けて入れ替わります（モーフ）。',
+    'When a line shares letters with the one before, those letters glide to their new places and the others melt into the new text (morph).'],
+  'fld.morphLine': ['前の行から字をつなぐ', 'Link letters from the line before'],
+  'fld.morphLine.note': ['前の行からこの行へ変わるところだけに効きます。', 'Applies only where the line before changes into this line.'],
+  'fld.morphHandover.note': ['モーフの間に前の行の字は次の行へ渡され、モーフが終わると前の行は消えます。',
+    'During the morph the letters of the line before pass to the next line; when it ends, the line before is gone.'],
+  'opt.morphLine.on': ['つなぐ', 'Link'],
+  'opt.morphLine.off': ['つながない', 'Do not link'],
+  'opt.melt.swap': ['溶けて変わる', 'Melt into the new letter'],
+  'opt.melt.fade': ['その場で消える', 'Fade where they are'],
+  'whyRule.morph': ['前の行と同じ字があるので、字をつないだ', 'Shares letters with the line before, so they are linked'],
+  'thumb.morphA': ['青い空', 'BLUE SKY'],
+  'thumb.morphB': ['青い海', 'BLUE SEA'],
 
   // --- PV22 P5 (タイミング) ---
 

@@ -61,7 +61,7 @@ const TEXTURES = (/marked `texture: true`: (.+?)\.\s/.exec(section('### 5.8 Scre
 const JAPANESE = /[぀-ヿ㐀-鿿]/;
 
 test('every §5.7–§5.9 part is defined once, with the table’s labels, tags, stage/scope, replace rule and fallback', () => {
-  const counts = { lens: 10, filter: 16, seam: 11 };
+  const counts = { lens: 10, filter: 16, seam: 12 };           // (seam: the 11 of v2 and the v2.2 glyph morph)
   for (const kind of KINDS) {
     const rows = TABLES[kind];
     assert.equal(rows.length, counts[kind], kind + ' rows in DESIGN');
@@ -74,7 +74,8 @@ test('every §5.7–§5.9 part is defined once, with the table’s labels, tags,
       if (kind === 'filter') assert.equal(d.stage, r.Stage, r.key + ' stage');
       if (kind === 'seam') {
         assert.equal(d.scope, r.Scope, r.key + ' scope');
-        assert.deepEqual(Object.keys(d.replaces || {}).filter((k) => d.replaces[k]), r.Replaces === '—' ? [] : [r.Replaces], r.key + ' replaces');
+        assert.deepEqual(Object.keys(d.replaces || {}).filter((k) => d.replaces[k]), r.Replaces === '—' ? [] : r.Replaces.split(/\s+/),
+          r.key + ' replaces');
       }
     }
   }
@@ -122,7 +123,7 @@ test('roles: the calm cameras and effects also serve title, interlude and outro 
     assert.deepEqual(REGISTRY.traits('filter', key).roles, ['lyric', 'focus'], key + ' stays on lyric cuts');
   }
   assert.deepEqual([REGISTRY.pool('seam', { scope: 'world' }).length, REGISTRY.pool('seam', { scope: 'text' }).sort()],
-    [8, ['blendDissolve', 'hardCut', 'sumiSeep']], 'every transition is an auto pick at its scope');
+    [8, ['blendDissolve', 'hardCut', 'sumiSeep']], 'every transition is an auto pick at its scope (the glyph morph, pool: false, only by its rule)');
 });
 
 // --- cameras -------------------------------------------------------------------------------------------------------

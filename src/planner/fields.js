@@ -19,9 +19,12 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
   // (orient, text.*, motion.speed, cam.*, rig, rig.curve); v2.2 'rule': a switch of the new-work table
   // (planner/rules) at work scope — its value is the work pin, else the document's default (repeat.same keeps its v2.1
   // handling here until the conventions package takes it into the table's category).
+  // A switch whose line row is a rule row too (v2.2 「前の行から字をつなぐ」: the line pin, else the work's value).
+  const LINE_RULES = new Set(['morph.auto']);
   function categoryOf(parsed) {
     const slot = parsed.slot;
-    if (parsed.scope.kind === 'work' && !parsed.part && !parsed.el && slot !== CA.REPEAT && RU.isRule(slot)) return 'rule';
+    if (!parsed.part && !parsed.el && slot !== CA.REPEAT && RU.isRule(slot) &&
+      (parsed.scope.kind === 'work' || (parsed.scope.kind === 'line' && LINE_RULES.has(slot)))) return 'rule';
     if (slot === 'season' && parsed.scope.kind !== 'work') return 'line';
     if (LOOK_NAMES.has(slot) || LOOK_PREFIX.test(slot) || (parsed.part && parsed.part.kind === 'texture')) return 'look';
     if (LINE_NAMES.has(slot)) return 'line';
@@ -287,7 +290,8 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
   // at the path's scope and every broader one (special cuts have no line).
   function canPinAt(parsed) {
     const cat = categoryOf(parsed);
-    if (cat === 'look' || cat === 'rule') return ['work'];
+    if (cat === 'rule') return parsed.scope.kind === 'line' ? ['line', 'work'] : ['work'];
+    if (cat === 'look') return ['work'];
     if (cat === 'line') return parsed.slot === 'season' ? ['line', 'work'] : ['line'];
     if (cat === 't0') return ['cut'];
     const kind = parsed.scope.kind;
@@ -432,17 +436,21 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
 
   // A switch of the new-work table (v2.2, DESIGN_2_2 §0): its work pin, else the document's default, which the auto text
   // names (「新しい作品の標準」 / 「この機能より前に作った作品なので、はじめはオフ」).
+  // A line row (LINE_RULES) is the line pin, else 自動: the work's value.
   function ruleState(doc, parsed, path, ix) {
     const slot = parsed.slot;
+    const lineId = parsed.scope.kind === 'line' ? parsed.scope.id : null;
     const pin = (doc.pins || {})[path] || null;
-    const value = RU.value(doc, ix, slot);
+    const value = lineId ? RU.valueAt(doc, ix, slot, lineId) : RU.value(doc, ix, slot);
     const schema = RU.SPECS[slot];
     const fs = {
-      path, value, display: null, state: 'auto', pinnedAt: null, by: null, schema, autoText: null, canPinAt: ['work'],
-      inactiveReason: null, warn: null, pinAt: pin ? path : null,
+      path, value, display: null, state: 'auto', pinnedAt: null, by: null, schema, autoText: null,
+      canPinAt: lineId ? ['line', 'work'] : ['work'], inactiveReason: null, warn: null, pinAt: pin ? path : null,
     };
-    if (pin) Object.assign(fs, { state: pin.by === 'lock' ? 'locked' : pin.by === 'ai' ? 'ai' : 'pinned', pinnedAt: 'work', by: pin.by });
-    else fs.autoText = ['rule.auto.' + (RU.gen(doc) >= 1 ? 'new' : 'old'), {}];
+    if (pin) {
+      Object.assign(fs, { state: pin.by === 'lock' ? 'locked' : pin.by === 'ai' ? 'ai' : 'pinned', pinnedAt: lineId ? 'line' : 'work',
+        by: pin.by });
+    } else if (!lineId) fs.autoText = ['rule.auto.' + (RU.gen(doc) >= 1 ? 'new' : 'old'), {}];
     fs.display = displayOf(parsed, value, null, 'rule', schema, doc);
     return fs;
   }

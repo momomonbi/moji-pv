@@ -2685,6 +2685,7 @@ Textures (the work `texture` slot) are the filters marked `texture: true`: `grai
 | `whiteFlash` | 白飛び | White flash | world | depart | bright hard | Flash to white and back into the new cut. |
 | `shutterSnap` | シャッター | Shutter snap | world | depart | hard fast | Two bars close and open like a shutter. |
 | `swishCut` | 振り | Whip pan | world | depart | fast | A fast motion-blurred pan into the next cut. |
+| `glyphMorph` (pool false) | モーフ | Glyph morph | text | depart arrive | soft literary | Shared letters glide to their new places; the others melt into the new text (v2.2, DESIGN_2_2 §4: late, a glyph seam: `glyphs`, `share` 0.5, `ends`). |
 
 ### 5.10 Themes (`parts/theme/*.js`)
 

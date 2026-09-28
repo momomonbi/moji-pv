@@ -1363,3 +1363,26 @@ test('v2.2: the weight switch and 太さ rows — scopes, pages, autoDefault', (
     assert.deepEqual([f.spec.min, f.spec.max, f.spec.step], [100, 900, 100]);
   }
 });
+
+test('v2.2: 同じ字をつなぐ — the work toggle (autoDefault) and the line row 前の行から字をつなぐ (not on the first line)', () => {
+  const sw = F.FIELDS.find((f) => f.page === 'work' && f.path === 'morph.auto');
+  assert.ok(sw, 'the work page has 同じ字をつなぐ');
+  assert.deepEqual([sw.section, sw.widget, sw.autoDefault, sw.noDice, sw.basic, !!sw.offClears, sw.label, sw.note],
+    ['look', 'toggle', true, true, false, false, 'fld.morphAuto', 'fld.morphAuto.note']);
+  const rows = F.FIELDS.filter((f) => f.path === 'morph.auto' && f.page !== 'work');
+  assert.deepEqual(rows.map((f) => f.page + '/' + f.section).sort(), ['line/direction', 'lines/direction']);
+  for (const f of rows) {
+    assert.deepEqual([f.widget, f.auto, f.basic, f.noDice, f.label, f.note, f.scopes], ['choice', true, false, true, 'fld.morphLine',
+      'fld.morphLine.note', ['line']]);
+    assert.deepEqual(f.options.map((o) => [o.v, o.label]), [[true, 'opt.morphLine.on'], [false, 'opt.morphLine.off']]);
+  }
+  const first = PLAN.lines[0].id, second = PLAN.lines[1].id;
+  assert.ok(!fieldPaths({ level: 'line', ids: [first] }, 'direction').includes('morph.auto'), 'the first line of the song: nothing to link');
+  assert.ok(fieldPaths({ level: 'line', ids: [second] }, 'direction').includes('morph.auto'));
+  assert.ok(fieldPaths({ level: 'line', ids: [first, second] }, 'direction').includes('morph.auto'), 'several lines');
+  // the glyph morph's own strings (its ちがう字 options through optKey 'melt', the reason of its rule, the tile's texts)
+  const STR = MV.use('i18n/strings');
+  for (const k of ['opt.melt.swap', 'opt.melt.fade', 'fld.morphHandover.note', 'whyRule.morph', 'thumb.morphA', 'thumb.morphB']) {
+    assert.ok(Array.isArray(STR[k]) && STR[k].length === 2, k);
+  }
+});

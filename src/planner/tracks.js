@@ -1,6 +1,6 @@
 /* 文字PVメーカー v2 — original work. Tracks: background segments, seams (decided after grounds), rule overrides, impulses (DESIGN §4.16.6; DESIGN_2_1 §4.9, §11.2.6, §11.5.9). */
 MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose', 'planner/params', 'planner/cast',
-  'planner/camera'], (R, N, P, CH, PA, CA, CAM) => {
+  'planner/camera', 'planner/morph', 'planner/rules'], (R, N, P, CH, PA, CA, CAM, MO, RU) => {
     'use strict';
 
     const SPECIAL = new Set(['title', 'interlude', 'outro']);
@@ -11,6 +11,10 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
     const WORLD_MAX = 0.8;          // world seams are clamped to 0.8 s (§7.4)
     const GAP_BREAK = 1.5;
     const MEDIA_MIN_SEGMENT = 3;    // seconds: shorter segments never take a derived media ground (§11.5.9)
+    const MORPH = 'glyphMorph';     // the glyph morph seam (v2.2, DESIGN_2_2 §4): chosen by the rule `morph`
+    const MORPH_SLOT = 'morph.auto';
+    const LYRIC_ROLES = new Set(['lyric', 'focus']);
+    const GROW_KEY = 'weightGrow';
 
     function atOf(cut) { return { cutKey: cut.key, pinCutKey: cut.pinKey, lineId: cut.line }; }
 
@@ -443,6 +447,53 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
       if (t && t.cutKey === cut.key && t.slot === kind) t.out.override = { rule: 'seam', decision: d };
     }
 
+    // --- the glyph morph rule (v2.2, DESIGN_2_2 §4, M4) -----------------------------------------------------------
+
+    // Where 「同じ字をつなぐ」 is on, two lines in one background that share a meaningful run of letters and do not overlap
+    // in time are joined by the glyph morph: the shared letters travel, the others melt. The rule reads the switch at
+    // the boundary (the line pin of B's line only where B is the line's first cut; inside a line, and without a line pin,
+    // the work's value), then guards that keep it where it can work, then the letters (planner/morph). Documents without
+    // the switch (ctx.glyph.maybeMorph false) never evaluate any of it.
+
+    function morphOn(ctx, A, B) {
+      if (A.line !== B.line && B.line && PA.pinned(ctx.ix, MORPH_SLOT)) return RU.valueAt(ctx.doc, ctx.ix, MORPH_SLOT, B.line) === true;
+      return ctx.glyph.morph;
+    }
+
+    // An arrange whose def.motion is 'own' moves the text itself; an edgeBleed knockout makes the text layer a mask.
+    function ownMotion(ctx, c) {
+      const d = c.slots.arrange;
+      const def = d ? ctx.registry.get('arrange', d.v) : null;
+      return !!def && def.motion === 'own';
+    }
+    function knockout(c) { const d = c.slots.arrange; return !!(d && d.p && d.p.knockout === true); }
+    function utaAt(ctx, c) { return !!(ctx.uta && typeof ctx.uta.at === 'function' && ctx.uta.at(c)); }   // 歌ハメ hook
+
+    // A motion the user chose (the rule then keeps away). A lock pin of the kind's fallback is not such a choice: locking
+    // freezes the instant entrance and exit a morph gave its lines, and the rule must find the boundary as before the
+    // lock (locking never changes a plan); a lock pin of any other motion is (it was no morph when the line was locked).
+    function choseMotion(ctx, d, kind) {
+      return isPinned(d) && !(d.by === 'lock' && d.v === ctx.registry.fallback(kind));
+    }
+
+    // Everything the rule reads except the letters (seamOf memoizes on it).
+    function morphGuards(ctx, A, B) {
+      if (!ctx.glyph || !ctx.glyph.maybeMorph || !ctx.registry.has('seam', MORPH)) return false;
+      if (A.ground !== B.ground) return false;                                   // text seams only
+      if (!LYRIC_ROLES.has(A.role) || !LYRIC_ROLES.has(B.role)) return false;
+      if (!morphOn(ctx, A, B)) return false;
+      if (!(A.t1 <= B.t0)) return false;                                         // the lines do not overlap (A is handed over)
+      if (choseMotion(ctx, A.slots.depart, 'depart') || choseMotion(ctx, B.slots.arrive, 'arrive')) return false;
+      if (ownMotion(ctx, A) || ownMotion(ctx, B)) return false;
+      if (knockout(A) || knockout(B)) return false;
+      if (A.kime === true || B.kime === true) return false;                      // キメ cuts (their own hard cut)
+      if (utaAt(ctx, A) || utaAt(ctx, B)) return false;                          // letters that appear as sung
+      if (ctx.pv && typeof ctx.pv.seamGate === 'function' && ctx.pv.seamGate(B)) return false;   // no room for a transition
+      return true;
+    }
+
+    function morphRule(ctx, A, B) { return morphGuards(ctx, A, B) && MO.analyze(A.text, B.text).meaningful; }
+
     // The seam into B → { decision, entry }.
     function decideSeam(ctx, A, B, history) {
       const at = atOf(B);
@@ -466,6 +517,9 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
         CA.pinWarnings(ctx, 'seam', pin.v, pin, cond);
         out = fixed(pinDecision(pin));
         if (trace) shadow(ctx, req, trace, { kind: 'seam', stage: 'pin', pin, recent: rec.recent, echo: null });
+      } else if (morphRule(ctx, A, B)) {
+        out = fixed({ from: 'rule', v: MORPH });
+        if (trace) Object.assign(trace, { kind: 'seam', stage: 'rule', rule: 'morph' });
       } else {
         const chance = world ? WORLD_CHANCE : ctx.look.mood.pace.seam * (0.5 + 0.5 * B.feat.energy);
         if (R.stream(seed, 'chance').next() < chance) {
@@ -498,11 +552,21 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
     // The seam into B with its history entry: { got, entry }. It is a function of B's cast inputs (seed, pins,
     // features, look), whether the background changes and the entries the seam history reads, so it is kept on B's
     // cast entry (planner/cast) and reused while those are the same, its warnings replayed like a cast's.
+    // The glyph morph rule (v2.2) also reads A and values that are not B's cast inputs (A's slots and times, the line
+    // pin, the texts: a cut's features do not hold its text), so the memo keeps `prev`: null where the rule is never
+    // evaluated, '0' where its guards fail (whatever the texts), else '1' with both texts (the rule's result is then a
+    // function of the two texts alone).
+    function morphPrev(ctx, A, B) {
+      if (!ctx.glyph || !ctx.glyph.maybeMorph) return null;
+      return morphGuards(ctx, A, B) ? '1\u0001' + A.text + '\u0001' + B.text : '0';
+    }
+
     function seamOf(ctx, A, B, history) {
       const world = A.ground !== B.ground;
       const read = history.slice(Math.max(0, history.length - 4));
       const memo = B.cast ? B.cast.seam : null;
-      if (memo && memo.world === world && sameEntries(memo.read, read)) {
+      const prev = morphPrev(ctx, A, B);
+      if (memo && memo.world === world && memo.prev === prev && sameEntries(memo.read, read)) {
         for (const w of memo.warnings) ctx.warn(w);
         return memo;
       }
@@ -511,8 +575,8 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
       if (B.cast) ctx.warn = (w) => { warnings.push(w); warn(w); };
       try {
         const got = decideSeam(ctx, A, B, history);
-        const out = { world, read, warnings, got, entry: seamEntry(ctx, A, B, history, got) };
-        if (B.cast) B.cast.seam = { world, read, warnings, got: { decision: CA.deepFreeze(got.decision) }, entry: out.entry };
+        const out = { world, read, prev, warnings, got, entry: seamEntry(ctx, A, B, history, got) };
+        if (B.cast) B.cast.seam = { world, read, prev, warnings, got: { decision: CA.deepFreeze(got.decision) }, entry: out.entry };
         return out;
       } finally {
         ctx.warn = warn;
@@ -548,16 +612,24 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
         const d = got.decision;
         if (d.v !== hard) {
           const def = ctx.registry.get('seam', d.v);
-          const limit = SEAM_SHARE * Math.min(A.b - A.a, B.b - B.a);
+          // a seam's share of the shorter cut (0.4; the glyph morph's own `share`, 0.5)
+          const share = def.share > 0 ? def.share : SEAM_SHARE;
+          const limit = share * Math.min(A.b - A.a, B.b - B.a);
           let dur = Math.min(typeof d.p.dur === 'number' ? d.p.dur : 0.5, limit);
           if (def.scope === 'world') dur = Math.min(dur, WORLD_MAX);
           // Rounded down to 1e-6 s so the window never exceeds its limit.
           dur = Math.floor(Math.max(0, dur) * 1e6) / 1e6;
+          // a seam with `ends` (the glyph morph) ends at B.a, the start of B's window: [B.a − dur, B.a]; others are centred
+          const seamAt = def.ends === true ? B.a - dur / 2 : B.a;
           B.seamIn = out.length;
-          out.push({ a: A.key, at: B.a, b: B.key, dur, into: B.key, scope: def.scope, slot: d });
+          if (def.glyphs === true) {
+            // the letters the two lines share (none when A is not on screen as the window starts: a special cut between)
+            const glyphs = A.text && B.text && A.b > seamAt - dur / 2 ? MO.pairsOf(A.text, B.text, d.p ? d.p.melt : undefined) : [];
+            out.push({ a: A.key, at: seamAt, b: B.key, dur, glyphs, into: B.key, scope: def.scope, slot: d });
+          } else out.push({ a: A.key, at: seamAt, b: B.key, dur, into: B.key, scope: def.scope, slot: d });
           if (def.replaces && def.replaces.depart) replaceMotion(ctx, A, 'depart');
-          if (def.replaces && def.replaces.arrive) replaceMotion(ctx, B, 'arrive');
-          reach = endWithSeam(cuts, j, B.a + dur / 2, reach);
+          if (def.replaces && def.replaces.arrive) { replaceMotion(ctx, B, 'arrive'); dropGrowWeight(B); }
+          reach = endWithSeam(cuts, j, seamAt + dur / 2, reach, def.glyphs === true);
         }
         reach = Math.max(reach, A.b);
       }
@@ -577,6 +649,10 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
       if (PA.pinned(ctx.ix, 'seam') && PA.resolvePin(ctx.ix, atOf(B), 'seam', CA.acceptPart(ctx, 'seam', null, { checkRole: false }), null)) {
         return null;
       }
+      // a glyph morph the rule chose at the source is copied only where the rule holds at this boundary too (v2.2):
+      // else the boundary takes its own seam (seamOf)
+      const srcSlot = src.seamIn >= 0 ? out[src.seamIn].slot : null;
+      if (srcSlot && srcSlot.v === MORPH && srcSlot.from === 'rule' && !morphRule(ctx, A, B)) return null;
       const d = src.seamIn >= 0 ? copied(out[src.seamIn].slot) : { from: 'auto', v: hard };
       const t = tracing(ctx, B.key, 'seam');
       if (t) Object.assign(t, { kind: 'seam', stage: 'auto', world: A.ground !== B.ground, why: [alignWhy(src)], decision: d });
@@ -588,14 +664,24 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
     // never less than its sung end t1 — so its exit is fitted to finish with the transition instead of reappearing
     // after it (with a replaced exit, at full strength). Usually only A reaches that far; `reach` (the latest b before
     // A) skips the scan otherwise. Returns the new reach.
-    function endWithSeam(cuts, j, end, reach) {
+    // handover (v2.2, a glyph seam): the seam hands A's letters to B, so its own A ends with the window even before its
+    // sung end (drawn again after it, A would stand at rest over the new line); the cuts before A keep the rule.
+    function endWithSeam(cuts, j, end, reach, handover) {
       const stop = Math.floor(end * 1e6) / 1e6;
       const clip = (c) => { if (c.b > stop) c.b = Math.max(c.t1, stop); };
-      clip(cuts[j - 1]);
+      const A = cuts[j - 1];
+      if (handover) { if (A.b > stop) A.b = stop; } else clip(A);
       if (reach <= stop) return reach;
       let next = -Infinity;
       for (let k = j - 2; k >= 0; k--) { clip(cuts[k]); next = Math.max(next, cuts[k].b); }
       return next;
+    }
+
+    // The grow rule's bold end weight (planner/cast growWeight) belongs to 太る: a seam that replaced the entrance takes it
+    // away (a pinned 太る is never replaced, and keeps it).
+    function dropGrowWeight(c) {
+      const tw = c.slots['text.weight'];
+      if (tw && tw.from === 'rule' && !(c.slots.arrive && c.slots.arrive.v === GROW_KEY)) delete c.slots['text.weight'];
     }
 
     // --- impulses -------------------------------------------------------------------------------------------------

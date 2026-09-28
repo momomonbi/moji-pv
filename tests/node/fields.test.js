@@ -450,7 +450,8 @@ test('v2.2: the rule category — 太さを動かす at work scope: value, state
   const parsed = P.parse('work:weight.auto');
   assert.equal(F.categoryOf(parsed), 'rule');
   assert.equal(F.categoryOf(P.parse('work:repeat.same')), 'value', 'repeat.same keeps its own handling here');
-  assert.equal(F.categoryOf(P.parse('line/r4:morph.auto')), 'value', 'line scope is not the table category');
+  assert.equal(F.categoryOf(P.parse('line/r4:weight.auto')), 'value', 'line scope is not the table category');
+  assert.equal(F.categoryOf(P.parse('line/r4:morph.auto')), 'rule', '… except a switch with a line row (「前の行から字をつなぐ」)');
   let fs = state(fresh, plan(fresh), 'work:weight.auto');
   assert.deepEqual([fs.value, fs.state, fs.autoText, fs.canPinAt, fs.schema], [true, 'auto', ['rule.auto.new', {}], ['work'], { type: 'bool' }]);
   assert.deepEqual(fs.display, ['val.on', {}]);
@@ -459,4 +460,13 @@ test('v2.2: the rule category — 太さを動かす at work scope: value, state
   const pinned = Object.assign(clone(fresh), { pins: { 'work:weight.auto': user(false) } });
   fs = state(pinned, plan(pinned), 'work:weight.auto');
   assert.deepEqual([fs.value, fs.state, fs.pinnedAt, fs.autoText, fs.pinAt], [false, 'pinned', 'work', null, 'work:weight.auto']);
+  // 「前の行から字をつなぐ」: the line pin, else 自動 (the work's value, no auto text of its own)
+  fs = state(fresh, plan(fresh), 'line/r5:morph.auto');
+  assert.deepEqual([fs.value, fs.state, fs.autoText, fs.canPinAt], [true, 'auto', null, ['line', 'work']]);
+  fs = state(old, plan(old), 'line/r5:morph.auto');
+  assert.deepEqual([fs.value, fs.state], [false, 'auto']);
+  const linePin = Object.assign(clone(old), { pins: { 'line/r5:morph.auto': user(true) } });
+  fs = state(linePin, plan(linePin), 'line/r5:morph.auto');
+  assert.deepEqual([fs.value, fs.state, fs.pinnedAt, fs.pinAt], [true, 'pinned', 'line', 'line/r5:morph.auto']);
+  assert.equal(state(linePin, plan(linePin), 'line/r6:morph.auto').value, false, 'another line keeps the work value');
 });

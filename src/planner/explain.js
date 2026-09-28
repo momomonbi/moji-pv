@@ -320,11 +320,16 @@ MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media
   }
 
   // A switch of the new-work table (v2.2): its work pin, else the document's default (new work or older work).
+  // A line row (v2.2 「前の行から字をつなぐ」): its line pin, else the work's value and reasons.
   function explainRule(doc, parsed) {
     const path = P.format(parsed);
-    const value = RU.value(doc, null, parsed.slot);
+    const lineId = parsed.scope.kind === 'line' ? parsed.scope.id : null;
+    const value = lineId ? RU.valueAt(doc, null, parsed.slot, lineId) : RU.value(doc, null, parsed.slot);
     const pin = (doc.pins || {})[path];
-    if (pin) return { path, value, from: 'pin:work', by: pin.by, why: pinWhy('pin:work', pin.by), alts: [] };
+    const from = lineId ? 'pin:line' : 'pin:work';
+    if (pin) return { path, value, from, by: pin.by, why: pinWhy(from, pin.by), alts: [] };
+    const work = lineId ? (doc.pins || {})['work:' + parsed.slot] : null;
+    if (work) return { path, value, from: 'pin:work', by: work.by, why: pinWhy('pin:work', work.by), alts: [] };
     const rule = 'rules.' + (RU.gen(doc) >= 1 ? 'new' : 'old');
     return { path, value, from: 'auto', by: undefined, why: [{ code: 'rule', params: { rule } }], alts: [] };
   }
