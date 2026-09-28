@@ -9448,6 +9448,26 @@ and the docs.
     - the toggle ignoring `onValue` / `offValue`;
     - the design's table;
     - no column rule.
+- Checks after step 3 (load average 8–17 on 4 CPUs):
+  - `build.py --check` (220 modules). `build.py` and `build.py --lab` leave the committed pages unchanged.
+  - `update_golden.js --check`: the six earlier goldens and `project_kumi.json` match.
+  - The whole Node suite (`--test-concurrency=1`): 1,832 tests, 1,820 pass and 1 todo (the release gate). The 11
+    failures are time bounds only:
+    - the planning-speed test (re-plans of 15–42 ms), known on this machine;
+    - 10 conformance parts, "slowest build > 60 ms".
+
+    Run alone, conformance failed 14 other parts on the same bound. The base worktree wt-pv22, run right after, failed
+    39.
+  - Browser (Chromium), all OK:
+    - ui_flows (49 flows) and ui_layout (584 layouts);
+    - csp, i18n_pages, determinism, parts_gallery and the contact_sheet self-check;
+    - glyph_parity, check 6 as in the table above;
+    - package_io, transparent_check, webm_check, export_check and kit_check (34 s);
+    - media_import, media_alpha, editor_metrics, fx_parts, ground_contrast and materials_gallery.
+  - Timing only:
+    - `perf.py` fails every row on the absolute budget. The kumi row's ratio passes (× 1.03).
+    - `media_exact.py` fails its preview-playback row (1 of 108 frames exact). The base worktree fails the same row the
+      same way (9 of 120).
 
 **Deviations from the design, with reasons.**
 
