@@ -239,3 +239,39 @@ test('one chain with a glyph-weight face step: a service derived by withFaces ke
   assert.ok(Math.abs(heavyK.w[5] / heavyK.em[5] - (1 - 0.14 * 0.7 * 0.8)) < 1e-4, 'heavy ' + heavyK.w[5] / heavyK.em[5]);
   assert.ok(Math.abs(plainK.w[5] / plainK.em[5] - (1 - 0.14 * 0.7)) < 1e-4, 'plain ' + plainK.w[5] / plainK.em[5]);
 });
+
+test('a planned new work (look.gen = 1): particles at 0.82 of their run in the built scenes, heads live too', () => {
+  const corpus = require('../helpers/corpus.js');
+  const PL = MV.use('planner/plan');
+  const doc = JSON.parse(JSON.stringify(corpus.project('basic').doc));
+  doc.look.gen = 1;
+  doc.pins = Object.assign({}, doc.pins, { 'work:arrange': { v: 'centerAnchor', by: 'user' } });
+  const plan = PL.run(doc, REG, { fresh: true });
+  const svc = { registry: REG, text: createTextService({ measurer: fakeMeasurer(), faces: plan.look.faces }), strict: true };
+  const roles = new Set();
+  let particles = 0;
+  for (const cut of plan.cuts) {
+    if (!cut.text.trim()) continue;
+    const scene = BUILD.buildCut(cut, plan, svc);
+    for (const r of scene.runs) {
+      const lay = r.layout;
+      if (!lay.kumi) continue;
+      for (let i = 0; i < lay.n; i++) {
+        roles.add(lay.kumi[i]);
+        if (lay.kumi[i] === 1 && !lay.emph[i]) {
+          assert.ok(Math.abs(lay.em[i] / lay.size - 0.82) < 1e-5, cut.key + ' ' + lay.ch[i] + ' ' + lay.em[i] / lay.size);
+          particles++;
+        }
+      }
+    }
+  }
+  assert.ok(particles >= 10, 'particles ' + particles);
+  // (its Latin cut, 「Fly high」, holds no CJK: T3 leaves it as it is)
+  assert.deepEqual([...roles].sort(), [0, 1, 2], 'plain, particle and head glyphs');
+  // the same document without the marker builds without any role
+  const legacy = PL.run(Object.assign({}, doc, { look: Object.assign({}, doc.look, { gen: undefined }) }), REG, { fresh: true });
+  for (const cut of legacy.cuts) {
+    if (!cut.text.trim()) continue;
+    for (const r of BUILD.buildCut(cut, legacy, svc).runs) assert.equal(r.layout.kumi, null, cut.key);
+  }
+});

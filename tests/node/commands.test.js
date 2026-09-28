@@ -578,3 +578,32 @@ test('v2.1 output: formats kit and webmAlpha; output.set kit takes the whole obj
   assert.deepEqual(D.validate(raw), [], 'and still validates (normalize fills it)');
   assert.deepEqual(reduce(raw, { t: 'output.set', key: 'kit', v: kit }).output.kit, kit);
 });
+
+// ---- 文字組み (DESIGN_2_2 §1): the typesetting settings belong to a line or to the whole video ------------------------
+
+test('文字組み: cut/…:text.kana and the other settings are refused (pin.set, lock.set); line and work are fine; paste look leaves them; line → work', () => {
+  const doc = fresh('basic');
+  for (const [slot, v] of [['text.kana', 0.7], ['text.jump', 0.5], ['text.latin', 0.5], ['text.head', 'phrase']]) {
+    throwsCode(() => reduce(doc, { t: 'pin.set', path: 'cut/r4~0:' + slot, v, by: 'user', sig: '始発の' }), 'payload');
+    throwsCode(() => reduce(doc, { t: 'lock.set', lineId: 'r4', pins: { ['cut/r4~0:' + slot]: { v, by: 'lock', sig: '始発の' } } }),
+      'payload');
+  }
+  let out = doc;
+  for (const [path, v] of [['work:text.kana', 0], ['work:text.head', 'phrase'], ['line/r4:text.jump', 0.5], ['line/r5:text.latin', 0]]) {
+    out = reduce(out, { t: 'pin.set', path, v, by: 'user' });
+    assert.deepEqual(out.pins[path], { v, by: 'user' }, path);
+  }
+  // ⋯ › 見た目を貼り付け copies text.face but not the typesetting
+  const withFace = reduce(out, { t: 'pin.set', path: 'line/r4:text.face', v: 'serif', by: 'user' });
+  const copied = reduce(withFace, { t: 'pin.copy', from: 'line/r4', to: ['line/r7', 'cut/ra~0'], sigs: { 'ra~0': 'x' } });
+  assert.deepEqual(copied.pins['line/r7:text.face'], { v: 'serif', by: 'user' });
+  assert.equal(copied.pins['line/r7:text.jump'], undefined);
+  assert.equal(copied.pins['cut/ra~0:text.jump'], undefined);
+  // promote: a line setting may become the video's
+  const up = reduce(out, { t: 'pin.promote', path: 'line/r4:text.jump', to: 'work' });
+  assert.deepEqual(up.pins['work:text.jump'], { v: 0.5, by: 'user' });
+  assert.equal(up.pins['line/r4:text.jump'], undefined);
+  // 固定を外す on the whole video removes the user's settings (they return to the document's default)
+  const cleared = reduce(out, { t: 'pin.clearUnder', scope: 'work' });
+  for (const k of Object.keys(cleared.pins)) assert.ok(!/:text\.(kana|jump|latin|head)$/.test(k), k);
+});

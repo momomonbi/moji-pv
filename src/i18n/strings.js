@@ -2174,6 +2174,31 @@ MV.def('i18n/strings', [], () => ({
   'pkg.missing.and': ['と', ' and '],
 
   // --- PV22 P1 (文字組み) ---
+  'sec.kumi': ['文字組み', 'Typesetting'],
+  'fld.kumiKana': ['かなを詰める', 'Tighten kana'],
+  'fld.kumiKana.note': ['ひらがな・カタカナの字間を詰めて、言葉をひとかたまりで読ませます。新しい作品でははじめからオンです。',
+    'Sets hiragana and katakana closer so each word reads as one block. New works start with this on.'],
+  'fld.kumiKanaPower': ['詰める強さ', 'Tightness'],
+  'fld.kumiJump': ['助詞を小さく・頭の字を大きく', 'Small particles, large first letters'],
+  'fld.kumiJump.note': ['「の」「が」「を」などの助詞を小さく、行の頭の字を大きくして、大小のメリハリをつけます。かなだけの言葉の中の助詞は見つけられないことがあります。新しい作品でははじめからオンです。',
+    'Makes particles such as no, ga and wo smaller and the first letter of each line larger. Particles inside words written only in kana may be missed. New works start with this on.'],
+  'fld.kumiJumpPower': ['ジャンプ率', 'Size contrast'],
+  'fld.kumiHead': ['大きくする字', 'Letters to enlarge'],
+  'opt.kumiHead.line': ['行の頭', 'Start of each line'],
+  'opt.kumiHead.phrase': ['言葉の頭', 'Start of each phrase'],
+  'opt.kumiHead.none': ['大きくしない', 'None'],
+  'fld.kumiLatin': ['英字を少し大きく・和文との間をあける', 'Larger Latin, spaced from Japanese'],
+  'fld.kumiLatin.note': ['日本語の行の中の英字を少し大きくし、日本語とのあいだを少しあけます。数字だけのところ（12月など）はそのままです。新しい作品でははじめからオンです。',
+    'Sets Latin words in Japanese lines a little larger with a little space around them. Numbers on their own stay as they are. New works start with this on.'],
+  'fld.kumiLatinPower': ['英字の大きさとあき', 'Latin size and spacing'],
+  'fld.kumiKanaLine': ['この行のかな詰め', 'Kana tightening on this line'],
+  'fld.kumiJumpLine': ['この行の大小（助詞・頭の字）', 'Size contrast on this line'],
+  'fld.kumiJumpLine.note': ['助詞の見分けがずれた行は「使わない」にできます。', 'Turn it off for a line whose particles were read wrongly.'],
+  'fld.kumiLatinLine': ['この行の英字', 'Latin on this line'],
+  'opt.kumi.on': ['使う', 'On'],
+  'opt.kumi.off': ['使わない', 'Off'],
+  'whyRule.kumi.gen': ['新しい作品なので、はじめからオン', 'A new work, so it starts on'],
+  'whyRule.kumi.off': ['文字組みは使っていません（作品全体 › 文字組み で入れられます）', 'Not in use (turn it on in Whole video › Typesetting)'],
 
   // --- PV22 P2 (文字PVの定石) ---
 

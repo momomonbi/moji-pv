@@ -1,6 +1,6 @@
 /* 文字PVメーカー v2 — original work. explain(): why a slot has its value, and the alternatives — lazy, never in the Plan (DESIGN §4.16.8; DESIGN_2_1 §2.8, §3.9, §11.2.6). */
 MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media', 'planner/choose', 'planner/look',
-  'planner/plan', 'planner/fields'], (P, PINS, LY, MEDIA, CH, LK, PL, F) => {
+  'planner/plan', 'planner/fields', 'planner/rules'], (P, PINS, LY, MEDIA, CH, LK, PL, F, RU) => {
   'use strict';
 
   const SCOPE_OF = { 'pin:cut': 'cut', 'pin:line': 'line', 'pin:work': 'work' };
@@ -172,6 +172,23 @@ MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media
     return 'theme';
   }
 
+  // --- switches of planner/rules at work scope (the 文字組み settings, DESIGN_2_2 §1) --------------------------------
+
+  // The work pin, else the document's default: on in a new work (whyRule.kumi.gen), off in an older one (kumi.off).
+  // Which graphemes grow (text.head) has the same default in every document and names no rule.
+  function explainRule(doc, parsed) {
+    const slot = parsed.slot;
+    const ix = PINS.index(doc.pins);
+    const value = RU.value(doc, ix, slot);
+    const hit = PINS.lookup(ix, LK.WORK_AT, slot);
+    const pinned = hit && hit.from === 'pin:work';
+    const base = { path: P.format(parsed), value, from: pinned ? hit.from : 'auto', by: pinned ? hit.by : undefined, alts: [] };
+    if (pinned) return Object.assign(base, { why: pinWhy(hit.from, hit.by) });
+    if (!RU.hasDefault(slot)) return Object.assign(base, { why: [] });
+    const rule = RU.defaultValue(doc, ix, slot) > 0 ? 'kumi.gen' : 'kumi.off';
+    return Object.assign(base, { why: [{ code: 'rule', params: { rule } }] });
+  }
+
   // --- line, t0, el and parameter slots (read from the Plan and the pins) ---------------------------------------
 
   function explainRead(doc, plan, parsed, registry, cut) {
@@ -302,7 +319,8 @@ MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media
     const res = PL.trace(doc, { registry }, traceTarget(plan, parsed, cut));
     const p = res.plan, t = res.out;
     const tcut = F.cutOf(p, cut.key) || cut;
-    const ix = parsed.slot === 'cam.extreme' ? PINS.index(doc.pins) : undefined;   // its off state is a pin (planner/fields)
+    // the off state of the EXTREME switch and of the 文字組み settings is a pin, not a decision (planner/fields)
+    const ix = parsed.slot === 'cam.extreme' || F.KUMI_SLOTS.includes(parsed.slot) ? PINS.index(doc.pins) : undefined;
     const value = F.valueAt(p, tcut, parsed, registry, ix);
     const d = F.decisionAt(p, tcut, parsed, registry, ix) || { v: value, from: 'auto' };
     const why = tracedWhy(doc, registry, p, tcut, parsed, t, d, value);
@@ -327,6 +345,7 @@ MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media
     const parsed = P.parse(path);
     const cat = F.categoryOf(parsed);
     if (cat === 'look') return explainLook(doc, plan, parsed, registry);
+    if (cat === 'rule') return explainRule(doc, parsed);
     const cut = cutFor(plan, parsed);
     if (!cut && cat !== 'line') {
       return { path, value: undefined, from: 'auto', by: undefined, why: [], alts: [] };

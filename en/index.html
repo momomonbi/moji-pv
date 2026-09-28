@@ -1,6 +1,6 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-TTGggxK1SPxSlq/dpIR2fBt/dgssBjm9P2WsZXtD9g8='; style-src 'sha256-CBzRvq4sWr3CF69hafDp1l8UkHnSy18JQMXGJJhPDYI=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-YASsTrrjVp8gfWgnmZ/nmCH3+fIiHRDrun0Syb/uEVE='; style-src 'sha256-CBzRvq4sWr3CF69hafDp1l8UkHnSy18JQMXGJJhPDYI=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
 <title>Moji PV Maker</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -7562,11 +7562,14 @@ MV.def('core/commands', ['core/doc', 'core/paths', 'core/pins', 'core/lyrics', '
     // v2.1 (DESIGN_2_1 §2.3, §3.7): line slots that are area-level, never pinned at a cut; `avoid` is line-only. The
     // EXTREME switch (DESIGN_EXTREME §2.2) is an area's too: line or work, never a cut; "paste look" leaves it (it is not
     // in COPY_SLOTS) and it may move line → work like the season.
-    const NOT_CUT = new Set(['season', 'avoid', 'cam.extreme']);
+    // 文字組み (DESIGN_2_2 §1): typesetting is a setting of a line or of the whole video; "paste look" leaves it too
+    // (not in TEXT_SLOTS), and a line pin may move to the work.
+    const NOT_CUT = new Set(['season', 'avoid', 'cam.extreme', 'text.kana', 'text.jump', 'text.latin', 'text.head']);
     // Cut slots that "paste look" copies besides part slots and text.* (CAM_SLOTS and the motion speed).
     const COPY_SLOTS = new Set(['motion.speed', 'cam.shot', 'cam.zoom', 'cam.curve', 'cam.follow']);
 
-    // Refuses `cut/…:season`, `cut/…:avoid`, `cut/…:cam.extreme`, `cut/…:repeat.same` and `work:avoid` (payload).
+    // Refuses `cut/…:season`, `cut/…:avoid`, `cut/…:cam.extreme`, `cut/…:repeat.same`, the 文字組み slots at a cut
+    // (`cut/…:text.kana` and the others of NOT_CUT) and `work:avoid` (payload).
     // 「くり返しの行をそろえる」 (DESIGN_2_1 §4.10) is a setting of the whole video or of a line, like the line season.
     function checkSlotScope(parsed) {
       need(!(parsed.scope.kind === 'cut' && (NOT_CUT.has(parsed.slot) || parsed.slot === 'repeat.same')),
@@ -11143,6 +11146,29 @@ MV.def('engine/text/kumi', ['core/script', 'engine/text/breaker'], (S, B) => {
     return f * (Number(face.weight) >= HEAVY_WEIGHT ? WEIGHT_DAMP : 1);
   }
 
+  // ---- T2 助詞を小さく・頭の字を大きく ---------------------------------------------------------------------------
+
+  // Size factors at strength j: particles 1 − small × j, heads 1 + big × j (0.82 / 1.20 at 0.5; 0.64 / 1.40 at 1).
+  const JUMP = Object.freeze({ small: 0.36, big: 0.40 });
+  // Opening brackets and quotes before a cut's first character: skipped when looking for the line head (「始まり」 → 始).
+  const OPENERS = '「『（【〔〈《"\'(［｛“‘';
+  // A cut with fewer content (non-space) graphemes gets no head: a two-character cut has nothing to lead.
+  const MIN_HEAD_CONTENT = 3;
+  const OPENER_SET = new Set(OPENERS);
+
+  // A line head: the first character where the eye enters the line, whatever its script (kanji, katakana, hiragana),
+  // one cell wide, not ー, not small kana and not a particle.
+  function lineHeadable(u, i, part) {
+    const c = u.cls[i];
+    return (c === 'han' || c === 'kata' || c === 'hira') && u.cells[i] === 1 && u.gs[i] !== 'ー' && !part[i];
+  }
+  // A phrase head inside the line: kanji or katakana only (a hiragana phrase start is mostly a verb tail or a function
+  // word such as ない or して, and enlarging it reads as a mistake).
+  function phraseHeadable(u, i, part) {
+    const c = u.cls[i];
+    return (c === 'han' || c === 'kata') && u.cells[i] === 1 && u.gs[i] !== 'ー' && !part[i];
+  }
+
   // ---- T3 英字を少し大きく・和文との間をあける -------------------------------------------------------------------
 
   // Growth of a Latin word at strength 1, by the run's Latin family (faces with a small x-height grow more); and the
@@ -11308,6 +11334,33 @@ MV.def('engine/text/kumi', ['core/script', 'engine/text/breaker'], (S, B) => {
     return out;
   }
 
+  const marksMemo = new Map();
+  // marks(text, lang, head) → { u, part, heads }: partsOf(text, lang) plus the heads of the text as one cut (T2):
+  //   'line'   the cut's first content grapheme after any opening brackets, when lineHeadable
+  //   'phrase' 'line', plus the first grapheme of every later phrase unit (breaker.phraseUnits) when phraseHeadable
+  //   'none'   no heads
+  // No heads unless lang is 'ja' and the cut holds at least MIN_HEAD_CONTENT content graphemes. Shared, read-only.
+  function marks(text, lang, head) {
+    const s = String(text === undefined || text === null ? '' : text);
+    const h = HEADS.includes(head) ? head : 'line';
+    const key = lang + '|' + h + '|' + s;
+    const hit = marksMemo.get(key);
+    if (hit) return hit;
+    const { u, part } = partsOf(s, lang);
+    const heads = new Uint8Array(u.n);
+    let content = 0;
+    for (let i = 0; i < u.n; i++) if (!u.space[i]) content++;
+    if (lang === 'ja' && h !== 'none' && content >= MIN_HEAD_CONTENT) {
+      let first = u.next[0];
+      while (first < u.n && OPENER_SET.has(u.gs[first])) first = u.next[first + 1];
+      if (first < u.n && lineHeadable(u, first, part)) heads[first] = 1;
+      if (h === 'phrase') {
+        for (const [a] of B.phraseUnits(u, 'ja')) if (a > first && phraseHeadable(u, a, part)) heads[a] = 1;
+      }
+    }
+    return remember(marksMemo, key, Object.freeze({ u, part, heads }));
+  }
+
   const cjkMemo = new Map();
   // hasCjk(text) → whether the text holds a han, kana or hangul grapheme (the T3 gate, read on the cut text).
   function hasCjk(text) {
@@ -11399,6 +11452,22 @@ MV.def('engine/text/kumi', ['core/script', 'engine/text/breaker'], (S, B) => {
     return trim;
   }
 
+  // T2: particles shrink and heads grow, read on the whole cut text (so a particle at a run boundary still sees its
+  // neighbours, and a run cut from the line is set like the same graphemes in a whole-line run). k holds the emphasis
+  // scale (or 1) on entry: a particle inside 強調 shrinks relative to it, and a head takes the larger of the two, never
+  // their product (効果を重ねすぎない).
+  function jumpSizes(kumi, o, role) {
+    const { u, k } = o;
+    const m = marks(o.text, 'ja', kumi.head);
+    const small = 1 - JUMP.small * kumi.jump, big = 1 + JUMP.big * kumi.jump;
+    for (let i = 0; i < u.n; i++) {
+      const j = indexAt(m.u.offs, m.u.n, o.base + u.offs[i]);
+      if (j < 0) continue;
+      if (m.part[j]) { k[i] *= small; role[i] = ROLE.particle; }
+      else if (m.heads[j]) { if (k[i] < big) k[i] = big; role[i] = ROLE.head; }
+    }
+  }
+
   // T3: Latin words (maximal runs on the Latin face holding a letter, without their edge spaces) grow to at least
   // `grow` and get LATIN_GAP × strength of space where they meet CJK. Vertical tcy cells keep their size.
   function latinWords(x, o, role, gap) {
@@ -11428,12 +11497,12 @@ MV.def('engine/text/kumi', ['core/script', 'engine/text/breaker'], (S, B) => {
   }
 
   // apply(kumi, o) → { cap, gap, role }, for engine/text/layout.prepare. kumi: a normalized RunSpec.kumi. o = { u, lang,
-  // font (layout font indices), vert (vert.classify or null), mark (emphasis marks), k (size factors, mutated here),
-  // text (the cut text), str, base (the run's text and its offset in the cut text), own (the run has its own text),
-  // emphScale, face (the run's script FontRef), latin (its Latin FontRef) }.
+  // font (layout font indices), vert (vert.classify or null), mark (emphasis marks), k (size factors: the emphasis
+  // scale or 1 on entry; T2 and T3 write theirs here), text (the cut text), str, base (the run's text and its offset in
+  // the cut text), own (the run has its own text), emphScale, face (the run's script FontRef), latin (its Latin FontRef) }.
   //   cap[i]  the most grapheme i may advance, in em before its size factor (Infinity: no limit)
   //   gap     em added before grapheme i when it is not the first of its line, or null when none
-  //   role    RunLayout.kumi (ROLE per grapheme)
+  //   role    RunLayout.kumi (ROLE per grapheme: particle and head from T2, latin from T3)
   function apply(kumi, o) {
     const n = o.u.n;
     const cap = new Float64Array(n).fill(Infinity);
@@ -11443,6 +11512,7 @@ MV.def('engine/text/kumi', ['core/script', 'engine/text/breaker'], (S, B) => {
       const trim = kanaTrims(kumi.kana * faceDamp(o.face), o);
       for (let i = 0; i < n; i++) if (trim[i] > 0) cap[i] = 1 - trim[i];
     }
+    if (kumi.jump > 0 && o.lang === 'ja' && !o.own) jumpSizes(kumi, o, role);   // own-text runs never get T2
     if (kumi.latin > 0 && o.lang !== 'en' && hasCjk(sourceOf(o).text)) {
       const g = new Float64Array(n);
       if (latinWords(kumi.latin, o, role, g)) gap = g;
@@ -11451,11 +11521,12 @@ MV.def('engine/text/kumi', ['core/script', 'engine/text/breaker'], (S, B) => {
   }
 
   // Test hook: empties the memos (results must not depend on them).
-  function clearMemos() { partsMemo.clear(); cjkMemo.clear(); }
+  function clearMemos() { partsMemo.clear(); marksMemo.clear(); cjkMemo.clear(); }
 
   return {
-    normalize, key, withCut, particleMarks, partsOf, particles, hasCjk, tier, apply, clearMemos,
-    HEADS, ROLE, TRIM, WIDE_KANA, NARROW_KANA, FLAVOR_DAMP, HEAVY_WEIGHT, WEIGHT_DAMP, BOUNDARY, LATIN_GROW, LATIN_GAP,
+    normalize, key, withCut, particleMarks, partsOf, particles, marks, hasCjk, tier, apply, clearMemos,
+    HEADS, ROLE, TRIM, WIDE_KANA, NARROW_KANA, FLAVOR_DAMP, HEAVY_WEIGHT, WEIGHT_DAMP, BOUNDARY, JUMP, OPENERS,
+    MIN_HEAD_CONTENT, LATIN_GROW, LATIN_GAP,
     P1, P2, STACK, VETO_NEXT, VETO_NEXT2, VETO_PAIR, VETO_TRIPLE, KANA_WORDS, LEAD_WORDS, OKURI_KANA, OKURI_FREE,
     OKURI_EDGE, CLOSERS, MEMO_MAX,
   };
@@ -11688,7 +11759,8 @@ MV.def('engine/text/layout', ['core/script', 'engine/text/vert', 'engine/text/br
     const vert = spec.orient === 'v' ? V.classify(u.gs) : null;
     const glue = glueOf(vert, n);
     const nat = naturalAdvances(u, font, refs, measurer, vert);
-    // 文字組み: kana cells capped below 1 em (T1), Latin words grown through k and spaced from CJK by gap (T3)
+    // 文字組み: kana cells capped below 1 em (T1), particles and heads sized through k (T2), Latin words grown through k
+    // and spaced from CJK by gap (T3)
     const ku = spec.kumi ? KU.apply(spec.kumi, { u, lang, font, vert, mark, k, text, str, base,
       own: spec.text !== undefined && spec.text !== null, emphScale: spec.emphScale, face: refs[0], latin: refs[1] }) : null;
     const along = new Float64Array(n);
@@ -14400,6 +14472,31 @@ MV.def('i18n/strings', [], () => ({
   'pkg.missing.and': ['と', ' and '],
 
   // --- PV22 P1 (文字組み) ---
+  'sec.kumi': ['文字組み', 'Typesetting'],
+  'fld.kumiKana': ['かなを詰める', 'Tighten kana'],
+  'fld.kumiKana.note': ['ひらがな・カタカナの字間を詰めて、言葉をひとかたまりで読ませます。新しい作品でははじめからオンです。',
+    'Sets hiragana and katakana closer so each word reads as one block. New works start with this on.'],
+  'fld.kumiKanaPower': ['詰める強さ', 'Tightness'],
+  'fld.kumiJump': ['助詞を小さく・頭の字を大きく', 'Small particles, large first letters'],
+  'fld.kumiJump.note': ['「の」「が」「を」などの助詞を小さく、行の頭の字を大きくして、大小のメリハリをつけます。かなだけの言葉の中の助詞は見つけられないことがあります。新しい作品でははじめからオンです。',
+    'Makes particles such as no, ga and wo smaller and the first letter of each line larger. Particles inside words written only in kana may be missed. New works start with this on.'],
+  'fld.kumiJumpPower': ['ジャンプ率', 'Size contrast'],
+  'fld.kumiHead': ['大きくする字', 'Letters to enlarge'],
+  'opt.kumiHead.line': ['行の頭', 'Start of each line'],
+  'opt.kumiHead.phrase': ['言葉の頭', 'Start of each phrase'],
+  'opt.kumiHead.none': ['大きくしない', 'None'],
+  'fld.kumiLatin': ['英字を少し大きく・和文との間をあける', 'Larger Latin, spaced from Japanese'],
+  'fld.kumiLatin.note': ['日本語の行の中の英字を少し大きくし、日本語とのあいだを少しあけます。数字だけのところ（12月など）はそのままです。新しい作品でははじめからオンです。',
+    'Sets Latin words in Japanese lines a little larger with a little space around them. Numbers on their own stay as they are. New works start with this on.'],
+  'fld.kumiLatinPower': ['英字の大きさとあき', 'Latin size and spacing'],
+  'fld.kumiKanaLine': ['この行のかな詰め', 'Kana tightening on this line'],
+  'fld.kumiJumpLine': ['この行の大小（助詞・頭の字）', 'Size contrast on this line'],
+  'fld.kumiJumpLine.note': ['助詞の見分けがずれた行は「使わない」にできます。', 'Turn it off for a line whose particles were read wrongly.'],
+  'fld.kumiLatinLine': ['この行の英字', 'Latin on this line'],
+  'opt.kumi.on': ['使う', 'On'],
+  'opt.kumi.off': ['使わない', 'Off'],
+  'whyRule.kumi.gen': ['新しい作品なので、はじめからオン', 'A new work, so it starts on'],
+  'whyRule.kumi.off': ['文字組みは使っていません（作品全体 › 文字組み で入れられます）', 'Not in use (turn it on in Whole video › Typesetting)'],
 
   // --- PV22 P2 (文字PVの定石) ---
 
@@ -19390,6 +19487,10 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     const FACE_WEIGHTS = Object.freeze({ display: 3, serif: 2, body: 1 });
     const AVOID_REPEAT = new Set(['arrange', 'arrive']);   // §8.2: no identical adjacent arrange/arrive (see choose.pick)
 
+    // 文字組み (DESIGN_2_2 §1): strengths 0–1 (0 = off) and which graphemes grow; the same specs as planner/rules.
+    const KUMI_SPEC = Object.freeze({ type: 'num', min: 0, max: 1, step: 0.05 });
+    const KUMI_HEAD_SPEC = Object.freeze({ type: 'enum', of: Object.freeze(['line', 'phrase', 'none']) });
+
     // Specs of the non-part cut slots (§3.4.3, and the v2.1 camera slots of planner/camera); pins are coerced through
     // them and planner/fields shows them.
     const SLOT_SPECS = Object.freeze(Object.assign({
@@ -19405,6 +19506,8 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       'el.hide': { type: 'bool' },
       // 「くり返しの行をそろえる」 (DESIGN_2_1 §4.10): pinned at work or line scope, never at a cut (core/commands).
       'repeat.same': { type: 'bool' },
+      // 文字組み (DESIGN_2_2 §1): pinned at work or line scope, never at a cut (core/commands NOT_CUT).
+      'text.kana': KUMI_SPEC, 'text.jump': KUMI_SPEC, 'text.latin': KUMI_SPEC, 'text.head': KUMI_HEAD_SPEC,
     }, CAM.SLOT_SPECS));
     const SEASON_SPEC = LK.LOOK_SPECS.season;
     const AVOID_SPEC = Object.freeze({ type: 'partRefs' });
@@ -20190,6 +20293,46 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       });
     }
 
+    // 文字組み (DESIGN_2_2 §1): typesetting settings, pinned at work or line scope (core/commands NOT_CUT), defaulting to
+    // the document's generation (ctx.kumi, from planner/rules in planner/plan). A cut gets a decision only where a
+    // setting is on; a setting that is off leaves no trace, so documents without the marker and without pins plan
+    // exactly as before. No randomness: no slot stream is read, so no other slot's choice moves.
+    const KUMI_SLOTS = Object.freeze(['text.kana', 'text.jump', 'text.latin', 'text.head']);   // head last: it reads jump
+    const KUMI_ACCEPT = Object.freeze(Object.fromEntries(KUMI_SLOTS.map((slot) => [slot, PA.acceptSpec(SLOT_SPECS[slot])])));
+    const autoKumi = new Map();                        // interned { v, from: 'auto' } per value (planner/plan cache identity)
+    function kumiAuto(v) {
+      let d = autoKumi.get(v);
+      if (!d) { d = Object.freeze({ v, from: 'auto' }); autoKumi.set(v, d); }
+      return d;
+    }
+
+    // Order per slot: the line pin, then the work pin (a stray cut pin never applies), then the document default. A
+    // strength of 0 (a pin that turns it off, or an older document) writes nothing; text.head is written only when a
+    // head pin resolves on a cut whose text.jump is on (its default, 'line', needs no decision).
+    function decideKumi(st) {
+      const { ctx, cut } = st;
+      const at = { cutKey: null, pinCutKey: null, lineId: cut.line || null };
+      for (const slot of KUMI_SLOTS) {
+        const trace = tracing(st, slot);
+        const head = slot === 'text.head';
+        if (head && !st.slots['text.jump']) {
+          if (trace) Object.assign(trace, { stage: 'auto', pin: null, decision: null, rule: slot, why: [] });
+          continue;
+        }
+        const pin = PA.pinned(ctx.ix, slot) ? PA.resolvePin(ctx.ix, at, slot, KUMI_ACCEPT[slot], ctx.warn) : null;
+        const auto = !head && ctx.kumi ? ctx.kumi[slot] : 0;
+        let d = null;
+        if (pin) d = head || pin.v > 0 ? pinDecision(pin) : null;
+        else if (auto > 0) d = kumiAuto(auto);
+        if (d) setDecision(st, slot, d);
+        if (trace) {
+          const rule = pin || head ? slot : auto > 0 ? 'kumi.gen' : 'kumi.off';
+          Object.assign(trace, { stage: pin ? 'pin' : 'auto', pin, decision: d, rule,
+            why: pin ? null : head ? [] : [{ code: 'rule', params: { rule } }] });
+        }
+      }
+    }
+
     // How much a mood wants screen effects on its cuts (filter.count, §4.16.4): its glitch or chroma amount, or its
     // film side — the texture amount times the weight of its favourite screen effect (mood.filters). Glitch and chroma
     // alone left the film moods almost bare although their blurbs promise their effects: silverReel 0.15 effects per
@@ -20277,7 +20420,8 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       return els;
     }
 
-    // The slots of one cut in the FROZEN order (§4.16.2, DESIGN_2_1 §3.9): orient → arrange → text.* → motion.speed →
+    // The slots of one cut in the FROZEN order (§4.16.2, DESIGN_2_1 §3.9): orient → arrange → text.* (then the 文字組み
+    // settings, which read no stream, DESIGN_2_2 §1) → motion.speed →
     // arrive → dwell → depart → ornament.count → ornament#i → lens → cam.shot → cam.zoom → cam.curve → cam.follow →
     // filter.count → filter#i. Every slot keeps its own stream, so the camera slots change no part choice. natural =
     // the neighbours' view (no recency, no runner-up rule, no parameters). st.decide = decideValue, for planner/camera.
@@ -20288,6 +20432,7 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       decideOrient(st);
       const arrange = decidePart(st, 'arrange', null);
       decideText(st);
+      decideKumi(st);
       CAM.decideSpeed(st);
       const own = ctx.registry.get('arrange', arrange.v).motion === 'own';
       for (const kind of MOTION_KINDS) {
@@ -20681,7 +20826,7 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     return {
       SLOT_SPECS, LIST_KINDS, MOTION_KINDS, castCut, createHistory, chooseAuto, poolOf, acceptPart, pinWarnings, serves,
       filterAllows, lookAx, lockFreeCtx, lockFreeIndex, beginCasts, castKeys, intern, deepFreeze, historyRow, lineCond,
-      isChoice, alignments, neighboursOf, alignedSource, REPEAT,
+      isChoice, alignments, neighboursOf, alignedSource, REPEAT, KUMI_SLOTS,
     };
   });
 /* 文字PVメーカー v2 — original work. The one table of new-work defaults: switches and strengths whose default depends on the document's generation (look.gen, DESIGN_2_2 §0). */
@@ -21845,8 +21990,9 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
 /* 文字PVメーカー v2 — original work. plan(doc, { registry }) → Plan: the planner's stages in their FROZEN order (DESIGN §4.16.1–§4.16.2, §3.12; DESIGN_2_1 §2.7, §5.9.3, §11.2.6). */
 MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'core/timing', 'core/beats', 'core/motion',
   'core/doc', 'core/schema', 'core/script', 'core/media', 'core/shot', 'planner/choose', 'planner/params', 'planner/look',
-  'planner/segment', 'planner/features', 'planner/cast', 'planner/tracks', 'planner/camera', 'planner/encode', 'planner/extreme'],
-(H, N, PINS, LY, TM, B, MO, D, S, SC, MEDIA, SHOT, CH, PA, LK, SG, FE, CA, TR, CAM, EN, XT) => {
+  'planner/segment', 'planner/features', 'planner/cast', 'planner/tracks', 'planner/camera', 'planner/encode', 'planner/extreme',
+  'planner/rules'],
+(H, N, PINS, LY, TM, B, MO, D, S, SC, MEDIA, SHOT, CH, PA, LK, SG, FE, CA, TR, CAM, EN, XT, RU) => {
   'use strict';
 
   // v2: rigs, cut.rig, grounds[].zoomed, feat.sectionStart, media, the camera slots (DESIGN_2_1 §2.7, §11.2.6).
@@ -22341,6 +22487,15 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
 
   // run(doc, registry, { trace, fresh }) → Plan. trace = { cutKey, slot, out } records one slot's decision
   // (planner/explain). fresh: plan without the re-planning caches (the same Plan, computed from scratch; tests).
+  // The 文字組み defaults of a document (DESIGN_2_2 §1): three strengths, all 0 without the new-work marker.
+  const KUMI_OFF = Object.freeze({ 'text.kana': 0, 'text.jump': 0, 'text.latin': 0 });
+  function kumiDefaults(doc, ix) {
+    const kana = RU.defaultValue(doc, ix, 'text.kana'), jump = RU.defaultValue(doc, ix, 'text.jump');
+    const latin = RU.defaultValue(doc, ix, 'text.latin');
+    if (!(kana > 0 || jump > 0 || latin > 0)) return KUMI_OFF;
+    return Object.freeze({ 'text.kana': kana, 'text.jump': jump, 'text.latin': latin });
+  }
+
   function run(doc, registry, opts) {
     const warner = createWarner();
     const aspect = D.DESIGN_SIZE[doc.look.aspect] ? doc.look.aspect : '16:9';
@@ -22357,7 +22512,7 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
       timing: Object.assign({}, TM.TIMING_DEFAULTS, doc.timing || {}), pools: new Map(), trace, casts: null,
       lockFree: CA.lockFreeIndex(doc.pins), media: mediaIndex(doc), mediaUsed: new Set(),
       castKeys: null, seams: null, encodings: null, fallbacks: null, lookAxis: null, lineConds: null, workCond: null,
-      shotMood: null, echoed: null, align: null, alignNear: null,
+      shotMood: null, echoed: null, align: null, alignNear: null, kumi: null,
     };
     // Traced runs (explain) and fresh runs neither read nor refresh the caches of re-planning.
     if (cached) beginFeatures();
@@ -22383,6 +22538,9 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
     ctx.amounts = look.amounts;
     ctx.pace = look.mood.pace;
     ctx.chooser = CH.createChooser(registry, { mood: look.mood, theme: look.theme, season: look.season, amounts: look.amounts });
+    // 文字組み (DESIGN_2_2 §1): the document defaults of the three strengths (planner/rules: 0.7 / 0.5 / 0.5 in a new
+    // work, 0 in an older one); planner/cast reads them here and never imports planner/rules.
+    ctx.kumi = kumiDefaults(doc, ctx.ix);
 
     // 3. cutter
     const cuts = SG.cutAll(ctx, timed, sheet.meta, duration);
@@ -22408,7 +22566,7 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
     if (cached) {
       ctx.casts = CA.beginCasts(registry);
       ctx.castKeys = CA.castKeys(ctx, EN.canon([registry.version, look.mood.key, look.theme.key, look.season, look.amounts,
-        look.variety, aspect, doc.look.seed, doc.filters || null, ctx.bpm, ctx.media ? ctx.media.key : null]));
+        look.variety, aspect, doc.look.seed, doc.filters || null, ctx.bpm, ctx.media ? ctx.media.key : null, ctx.kumi]));
     }
     // The cuts a later cut sings again (their rows keep what the repeats inherit, planner/cast castCut).
     ctx.echoed = new Set();
@@ -22494,8 +22652,8 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
 /* 文字PVメーカー v2 — original work. Inspector field states, lock payloads and plan-value readers (DESIGN §4.16.8, §3.13, §3.6; DESIGN_2_1 §3.9). */
 MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyrics', 'core/schema', 'core/timing',
   'core/curve', 'core/shot', 'planner/params', 'planner/cast', 'planner/look', 'planner/segment', 'planner/plan',
-  'planner/extreme'],
-(P, PINS, REG, LY, S, TM, CV, SHOT, PA, CA, LK, SG, PL, XT) => {
+  'planner/extreme', 'planner/rules'],
+(P, PINS, REG, LY, S, TM, CV, SHOT, PA, CA, LK, SG, PL, XT, RU) => {
   'use strict';
 
   const LOOK_NAMES = new Set(['mood', 'theme', 'season', 'bpm', 'beatOffset', 'readRate', 'length', 'titleCard']);
@@ -22508,10 +22666,12 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
   // --- what a path addresses ---------------------------------------------------------------------------------
 
   // 'look' (work-scope slots), 'line' (start/end/split/lang; since v2.1 also avoid, and season at line or cut scope,
-  // which is a line value while work:season stays the look's), 't0', 'el', 'count', 'part', 'param' or 'value'
-  // (orient, text.*, motion.speed, cam.*, rig, rig.curve).
+  // which is a line value while work:season stays the look's), 't0', 'el', 'count', 'part', 'param', 'rule' (a switch of
+  // planner/rules at work scope: the 文字組み settings, DESIGN_2_2 §1) or 'value' (orient, text.*, motion.speed, cam.*,
+  // rig, rig.curve; the 文字組み settings at line or cut scope).
   function categoryOf(parsed) {
     const slot = parsed.slot;
+    if (parsed.scope.kind === 'work' && !parsed.part && !parsed.el && CA.KUMI_SLOTS.includes(slot)) return 'rule';
     if (slot === 'season' && parsed.scope.kind !== 'work') return 'line';
     if (LOOK_NAMES.has(slot) || LOOK_PREFIX.test(slot) || (parsed.part && parsed.part.kind === 'texture')) return 'look';
     if (LINE_NAMES.has(slot)) return 'line';
@@ -22569,6 +22729,7 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
   function decisionAt(plan, cut, parsed, registry, ix) {
     const part = parsed.part;
     if (parsed.slot === XT.SLOT && !part) return extremeAt(cut, ix);
+    if (!part && CA.KUMI_SLOTS.includes(parsed.slot)) return kumiAt(cut, parsed.slot, ix);
     if (RIG_SLOTS.has(parsed.slot)) {
       const run = plan.rigs && cut.rig !== undefined ? plan.rigs[cut.rig] : null;
       return run ? (parsed.slot === 'rig' ? run.rig : run.curve) : null;
@@ -22589,6 +22750,20 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
     if (d) return d;
     const pin = ix ? XT.resolve(ix, { cutKey: cut.key, pinCutKey: cut.pinKey || cut.key, lineId: cut.line || null }) : null;
     return pin ? { v: pin.v, from: pin.from, by: pin.by } : X_OFF;
+  }
+
+  // 文字組み (DESIGN_2_2 §1): a cut holds a decision only where a setting is on. Elsewhere the pin that applies at its
+  // line (a line or work pin 0: it turned the setting off; read with the pin index ix when given), else the frozen
+  // automatic value: 'line' for text.head, 0 (off) for the strengths.
+  const KUMI_HEAD_AUTO = Object.freeze({ v: 'line', from: 'auto' });
+  const KUMI_OFF = Object.freeze({ v: 0, from: 'auto' });
+  function kumiAt(cut, slot, ix) {
+    const d = cut.slots && cut.slots[slot];
+    if (d) return d;
+    const hit = ix && PA.pinned(ix, slot) ? PA.resolvePin(ix, { cutKey: null, pinCutKey: null, lineId: cut.line || null }, slot,
+      PA.acceptSpec(CA.SLOT_SPECS[slot]), null) : null;
+    if (hit) return { v: hit.v, from: hit.from, by: hit.by };
+    return slot === 'text.head' ? KUMI_HEAD_AUTO : KUMI_OFF;
   }
 
   // The rule behind the automatic depth of a media part at a cut (DESIGN_2_1 §11.9.2): 'ai' | 'overlay' | 'frame' |
@@ -22728,6 +22903,7 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
   function schemaOf(registry, plan, parsed, cuts) {
     const cat = categoryOf(parsed);
     const slot = parsed.slot;
+    if (cat === 'rule') return RU.SPECS[slot];
     if (cat === 'look') {
       if (slot === 'mood' || slot === 'theme') return { type: 'part', kind: slot, of: registry.keys(slot), none: false };
       if (parsed.part && !parsed.part.param) {
@@ -22776,21 +22952,22 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
   // at the path's scope and every broader one (special cuts have no line).
   function canPinAt(parsed) {
     const cat = categoryOf(parsed);
-    if (cat === 'look') return ['work'];
+    if (cat === 'look' || cat === 'rule') return ['work'];
     if (cat === 'line') return parsed.slot === 'season' ? ['line', 'work'] : ['line'];
     if (cat === 't0') return ['cut'];
     const kind = parsed.scope.kind;
     if (kind === 'work') return ['work'];
     if (kind === 'line') return ['line', 'work'];
-    // the EXTREME switch belongs to an area: line or work, never one cut (DESIGN_EXTREME §2.2)
-    if (parsed.slot === XT.SLOT) return parsed.scope.lineId ? ['line', 'work'] : ['work'];
+    // the EXTREME switch and the 文字組み settings belong to an area: line or work, never one cut (DESIGN_EXTREME §2.2,
+    // DESIGN_2_2 §1)
+    if (parsed.slot === XT.SLOT || CA.KUMI_SLOTS.includes(parsed.slot)) return parsed.scope.lineId ? ['line', 'work'] : ['work'];
     return parsed.scope.lineId ? ['cut', 'line', 'work'] : ['cut', 'work'];
   }
 
   // The decision source of a path at one cut: { from, by } (pins, marks, rules, auto).
   function sourceAt(doc, plan, cut, parsed, registry, ix) {
     const cat = categoryOf(parsed);
-    if (cat === 'look') return lookSource(plan, parsed, ix);
+    if (cat === 'look' || cat === 'rule') return lookSource(plan, parsed, ix);
     if (cat === 'line') return lineSource(doc, plan, parsed, cut ? cut.line : parsed.scope.lineId, ix);
     if (!cut) return { from: 'auto' };
     const at = { cutKey: cut.key, pinCutKey: cut.pinKey || cut.key, lineId: cut.line };
@@ -22818,8 +22995,8 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
       const probe = run && run.cuts.length ? cutOf(plan, run.cuts[0])
         : parsed.part && TRACK_KINDS.has(parsed.part.kind) && parsed.part.kind !== 'seam' && plan.grounds[cut.ground]
           ? cutOf(plan, plan.grounds[cut.ground].cuts[0]) : cut;
-      // (the EXTREME switch never reads a cut pin: a stray one does not apply, planner/extreme resolve)
-      const pat = slot === XT.SLOT ? { cutKey: null, pinCutKey: null, lineId: probe.line || null }
+      // (the EXTREME switch and the 文字組み settings never read a cut pin: a stray one does not apply)
+      const pat = slot === XT.SLOT || CA.KUMI_SLOTS.includes(slot) ? { cutKey: null, pinCutKey: null, lineId: probe.line || null }
         : { cutKey: probe.key, pinCutKey: probe.pinKey || probe.key, lineId: probe.line };
       const hit = PINS.lookup(ix, pat, slot);
       if (hit) src.at = hit.at;
@@ -22925,9 +23102,12 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
     const parsed = P.parse(path);
     const cat = categoryOf(parsed);
     const ix = pinIndexOf(doc.pins);
-    const perCut = cat !== 'look' && !(cat === 'line' && parsed.scope.kind === 'line');
+    const perCut = cat !== 'look' && cat !== 'rule' && !(cat === 'line' && parsed.scope.kind === 'line');
     const cuts = perCut ? cutsFor(plan, sel, parsed) : [];
-    const values = perCut ? cuts.map((c) => valueAt(plan, c, parsed, registry, ix)) : [valueAt(plan, null, parsed, registry, ix)];
+    // a switch of planner/rules at work scope shows the whole work's value (its work pin, else the document's default),
+    // never a cut's: a line turned off does not flip the work switch
+    const values = cat === 'rule' ? [RU.value(doc, ix, parsed.slot)]
+      : perCut ? cuts.map((c) => valueAt(plan, c, parsed, registry, ix)) : [valueAt(plan, null, parsed, registry, ix)];
     const sources = perCut ? cuts.map((c) => sourceAt(doc, plan, c, parsed, registry, ix))
       : [sourceAt(doc, plan, null, parsed, registry, ix)];
     const own = ownPin(doc, parsed, cuts);
@@ -23024,6 +23204,8 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
       };
       const forced = ownMotion(reg, cut);
       for (const slot of Object.keys(cut.slots)) {
+        // the 文字組み settings live at line or work scope (core/commands refuses them at a cut): never frozen
+        if (CA.KUMI_SLOTS.includes(slot)) continue;
         const d = cut.slots[slot];
         if (isAuto(d) && !(forced && CA.MOTION_KINDS.includes(slot) && d.from === 'rule')) put(slot, d.v);
         if (d.p && d.v !== 'none') putParams(put, slot, d);
@@ -23064,12 +23246,12 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
 
   return {
     fieldState, fieldStates, lockPayload, pinSig: PL.pinSig, valueAt, decisionAt, categoryOf, cutsFor, cutOf, choiceSlot,
-    schemaOf, canPinAt, depthRuleAt,
+    schemaOf, canPinAt, depthRuleAt, KUMI_SLOTS: CA.KUMI_SLOTS,
   };
 });
 /* 文字PVメーカー v2 — original work. explain(): why a slot has its value, and the alternatives — lazy, never in the Plan (DESIGN §4.16.8; DESIGN_2_1 §2.8, §3.9, §11.2.6). */
 MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media', 'planner/choose', 'planner/look',
-  'planner/plan', 'planner/fields'], (P, PINS, LY, MEDIA, CH, LK, PL, F) => {
+  'planner/plan', 'planner/fields', 'planner/rules'], (P, PINS, LY, MEDIA, CH, LK, PL, F, RU) => {
   'use strict';
 
   const SCOPE_OF = { 'pin:cut': 'cut', 'pin:line': 'line', 'pin:work': 'work' };
@@ -23241,6 +23423,23 @@ MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media
     return 'theme';
   }
 
+  // --- switches of planner/rules at work scope (the 文字組み settings, DESIGN_2_2 §1) --------------------------------
+
+  // The work pin, else the document's default: on in a new work (whyRule.kumi.gen), off in an older one (kumi.off).
+  // Which graphemes grow (text.head) has the same default in every document and names no rule.
+  function explainRule(doc, parsed) {
+    const slot = parsed.slot;
+    const ix = PINS.index(doc.pins);
+    const value = RU.value(doc, ix, slot);
+    const hit = PINS.lookup(ix, LK.WORK_AT, slot);
+    const pinned = hit && hit.from === 'pin:work';
+    const base = { path: P.format(parsed), value, from: pinned ? hit.from : 'auto', by: pinned ? hit.by : undefined, alts: [] };
+    if (pinned) return Object.assign(base, { why: pinWhy(hit.from, hit.by) });
+    if (!RU.hasDefault(slot)) return Object.assign(base, { why: [] });
+    const rule = RU.defaultValue(doc, ix, slot) > 0 ? 'kumi.gen' : 'kumi.off';
+    return Object.assign(base, { why: [{ code: 'rule', params: { rule } }] });
+  }
+
   // --- line, t0, el and parameter slots (read from the Plan and the pins) ---------------------------------------
 
   function explainRead(doc, plan, parsed, registry, cut) {
@@ -23371,7 +23570,8 @@ MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media
     const res = PL.trace(doc, { registry }, traceTarget(plan, parsed, cut));
     const p = res.plan, t = res.out;
     const tcut = F.cutOf(p, cut.key) || cut;
-    const ix = parsed.slot === 'cam.extreme' ? PINS.index(doc.pins) : undefined;   // its off state is a pin (planner/fields)
+    // the off state of the EXTREME switch and of the 文字組み settings is a pin, not a decision (planner/fields)
+    const ix = parsed.slot === 'cam.extreme' || F.KUMI_SLOTS.includes(parsed.slot) ? PINS.index(doc.pins) : undefined;
     const value = F.valueAt(p, tcut, parsed, registry, ix);
     const d = F.decisionAt(p, tcut, parsed, registry, ix) || { v: value, from: 'auto' };
     const why = tracedWhy(doc, registry, p, tcut, parsed, t, d, value);
@@ -23396,6 +23596,7 @@ MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media
     const parsed = P.parse(path);
     const cat = F.categoryOf(parsed);
     if (cat === 'look') return explainLook(doc, plan, parsed, registry);
+    if (cat === 'rule') return explainRule(doc, parsed);
     const cut = cutFor(plan, parsed);
     if (!cut && cat !== 'line') {
       return { path, value: undefined, from: 'auto', by: undefined, why: [], alts: [] };
@@ -31276,6 +31477,14 @@ MV.def('parts/kit', ['core/num', 'core/noise', 'core/ease', 'core/curve', 'core/
   function rangeOf(rng, lo, hi) { return rng.range(lo, hi); }
   function ease(name) { return E.get(name); }
 
+  // --- 文字組み (DESIGN_2_2 §1) ----------------------------------------------------------------------------------------
+
+  // kumiFor(env, over) → { kumi: over } when the cut is set with 文字組み (env.text.kumi, DESIGN_2_2 §1), else {}: the
+  // RunSpec fields of a part that opts out of some of it, spread into its specs. `over` is a partial kumi ({ jump: 0 }:
+  // no particle and head sizes, where the part contrasts sizes itself) or null (plain text, such as a grid pitch). A cut
+  // without typesetting gets nothing, so its RunSpecs stay exactly as before.
+  function kumiFor(env, over) { return env && env.text && env.text.kumi ? { kumi: over } : {}; }
+
   // --- speed curves and framing (DESIGN_2_1 §3.11) -------------------------------------------------------------------
 
   // curve(value) → (u) => number: the position curve of any Curve (memoized; call it at build or definition time, never
@@ -31492,7 +31701,7 @@ MV.def('parts/kit', ['core/num', 'core/noise', 'core/ease', 'core/curve', 'core/
     PH: BH.PH, ORDERS: SCH.ORDERS, EASES: E.EASES, ease, staggerOf: STG.staggerOf, pivots: STG.pivots,
     shape, math, color, pickOf, rangeOf, KitError,
     curve, warp, CURVES: CV.PRESET_KEYS, warped: BH.warped, aimBox, frameBox,
-    media, mediaParams, MEDIA: MEDIA_KIT, runKenBurns, depthCam,
+    media, mediaParams, MEDIA: MEDIA_KIT, runKenBurns, depthCam, kumiFor,
   };
 });
 /* 文字PVメーカー v2 — original work. Materials runtime: recipes derived into parts, the effective registry and the fixed interpreters of layers, motion, oscillators and filter stacks (DESIGN_2_1 §3.12, §5.7–§5.9, §11.5.8–§11.5.9). */
@@ -33596,12 +33805,16 @@ MV.def('parts/arrange/core', ['parts/kit'], (K) => {
     return best;
   }
 
+  // 文字組み (DESIGN_2_2 §1): giant and whisper are already a size contrast, so their runs (and the pre-measures, which
+  // must lay out what is committed) take no particle and head sizes; kana tightening and Latin stay.
+  const NO_JUMP = Object.freeze({ jump: 0 });
+
   // The giant's natural width at size em (measured the way the scene will lay it out).
   function giantWidth(env, split, em, room) {
     const { cut, text, textStyle } = env;
     const lay = text.layout({ span: split.giant, orient: 'h', face: textStyle.face, style: textStyle.style, lang: cut.lang,
       size: em, emphScale: 1, box: { x: 0, y: 0, w: room, h: em * 1.3 }, align: 'start', valign: 'center', maxLines: 1,
-      breakAt: 'none', fit: 'shrink' }, cut.text);
+      breakAt: 'none', fit: 'shrink', ...K.kumiFor(env, NO_JUMP) }, cut.text);
     return Math.min(room, lay.box.w);
   }
 
@@ -33649,12 +33862,13 @@ MV.def('parts/arrange/core', ['parts/kit'], (K) => {
 
   function giantRun(g, box, align) {
     return g.env.sb.text({ parent: g.root.node, span: g.split.giant, orient: g.env.orient === 'v' ? 'v' : 'h', size: g.gEm,
-      emphScale: 1, box, align, valign: 'center', maxLines: 1, breakAt: 'none', fit: 'shrink' });
+      emphScale: 1, box, align, valign: 'center', maxLines: 1, breakAt: 'none', fit: 'shrink',
+      ...K.kumiFor(g.env, NO_JUMP) });
   }
 
   function whisperRun(g, span, box, align, valign) {
     return g.env.sb.text({ parent: g.root.node, span, orient: g.env.orient === 'v' ? 'v' : 'h', size: g.wEm, box, align,
-      valign, maxLines: 2, breakAt: 'phrase', fit: 'shrink', leading: 1.25 });
+      valign, maxLines: 2, breakAt: 'phrase', fit: 'shrink', leading: 1.25, ...K.kumiFor(g.env, NO_JUMP) });
   }
 
   // Vertical: the giant column in the middle; the words before it in a thin column to its right (read first), the
@@ -33726,7 +33940,7 @@ MV.def('parts/arrange/core', ['parts/kit'], (K) => {
     const { cut, text, textStyle, orient } = g.env;
     const lay = text.layout({ span, orient: orient === 'v' ? 'v' : 'h', face: textStyle.face, style: textStyle.style,
       lang: cut.lang, size: g.wEm, box: { x: 0, y: 0, w, h }, align: 'start', valign: 'start', maxLines: 2,
-      breakAt: 'phrase', fit: 'shrink', leading: 1.25 }, cut.text);
+      breakAt: 'phrase', fit: 'shrink', leading: 1.25, ...K.kumiFor(g.env, NO_JUMP) }, cut.text);
     return lay.box.w;
   }
 
@@ -34270,6 +34484,10 @@ MV.def('parts/arrange/editorial', ['parts/kit'], (K) => {
     return { head: [0, k], sub: { span: [k, s.str.length] } };
   }
 
+  // 文字組み (DESIGN_2_2 §1): the head and the sub-line are already a size contrast, so they take no particle and head
+  // sizes; kana tightening and Latin stay.
+  const NO_JUMP = Object.freeze({ jump: 0 });
+
   function magazineBuild(env, p) {
     const { D, cut, sb, text, textStyle } = env;
     const root = rootOf(env, p);
@@ -34294,7 +34512,7 @@ MV.def('parts/arrange/editorial', ['parts/kit'], (K) => {
       : p.place === 'lower' ? safe.y + safe.h * 0.94 - total + kick : D.cy - total / 2 + kick;
     const head = sb.text(Object.assign({ parent: root.node, orient: 'h', size: em, box: { x: left, y: top, w: colW, h: headH },
       leading: 1.12, align: 'start', valign: 'start', maxLines: fit.lines, breakAt: 'phrase', fit: 'shrink' },
-    s.own ? { span: split.head } : { text: headStr }));
+    s.own ? { span: split.head } : { text: headStr }, K.kumiFor(env, NO_JUMP)));
     const hb = localBounds(sb, head.node, root);
     const ruleY = hb.y + hb.h + em * 0.26;
     const weight = clamp(em * 0.035, 2, 7);
@@ -34312,7 +34530,7 @@ MV.def('parts/arrange/editorial', ['parts/kit'], (K) => {
       const spec = split.sub.text ? { text: split.sub.text, face: NOTE_FACE, style: 'plain' }
         : { span: split.sub.span, face: 'body' };
       runs.push(sb.text(Object.assign({ parent: root.node, orient: 'h', size: subEm, box, leading: 1.5, align: 'start',
-        valign: 'start', maxLines: 3, breakAt: 'phrase', fit: 'shrink' }, spec)));
+        valign: 'start', maxLines: 3, breakAt: 'phrase', fit: 'shrink' }, spec, K.kumiFor(env, NO_JUMP))));
     }
     return finish(env, root, runs);
   }
@@ -34698,6 +34916,10 @@ MV.def('parts/arrange/scatter', ['parts/kit'], (K) => {
     return s.own ? { span: range } : { text: s.str.slice(range[0], range[1]) };
   }
 
+  // 文字組み (DESIGN_2_2 §1) opt-outs: confetti words already take random per-word sizes (no particle and head sizes on
+  // top), and grid cells keep the grid pitch (plain text).
+  const NO_JUMP = Object.freeze({ jump: 0 });
+
   function rootOf(env, p) {
     const shift = { x: (p.offsetX || 0) * env.D.w, y: (p.offsetY || 0) * env.D.h };
     return { shift, node: env.sb.group({ x: shift.x, y: shift.y }) };
@@ -34872,7 +35094,7 @@ MV.def('parts/arrange/scatter', ['parts/kit'], (K) => {
         const cy = (v ? a : safe.y + c) + it.jy * p.spread * Math.max(0, ch - tb.h) / 2;
         runs.push(sb.text(Object.assign({ parent: root.node, orient: v ? 'v' : 'h', size, rot,
           box: { x: cx - w / 2, y: cy - h / 2, w, h }, align: 'center', valign: 'center', maxLines: 1,
-          breakAt: 'none', fit: 'shrink' }, part(s, it.r))));
+          breakAt: 'none', fit: 'shrink' }, part(s, it.r), K.kumiFor(env, NO_JUMP))));
         pen += len + WORD_GAP * em;
       }
     }
@@ -35347,7 +35569,8 @@ MV.def('parts/arrange/scatter', ['parts/kit'], (K) => {
       const inset = graphemes(s.str, r[0], r[1]).length > 1 ? g.cell * 0.1 : 0;
       runs.push(env.sb.text(Object.assign({ parent: root.node, orient: v ? 'v' : 'h', size: g.em,
         box: { x: g.x0 + col * g.cell + inset, y: g.y0 + row * g.cell + inset, w: g.cell - 2 * inset, h: g.cell - 2 * inset },
-        align: 'center', valign: 'center', emphScale: 1, maxLines: 1, breakAt: 'none', fit: 'shrink' }, part(s, r))));
+        align: 'center', valign: 'center', emphScale: 1, maxLines: 1, breakAt: 'none', fit: 'shrink' }, part(s, r),
+      K.kumiFor(env, null))));
     });
     return runs;
   }

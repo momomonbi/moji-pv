@@ -1,8 +1,8 @@
 /* 文字PVメーカー v2 — original work. Inspector field states, lock payloads and plan-value readers (DESIGN §4.16.8, §3.13, §3.6; DESIGN_2_1 §3.9). */
 MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyrics', 'core/schema', 'core/timing',
   'core/curve', 'core/shot', 'planner/params', 'planner/cast', 'planner/look', 'planner/segment', 'planner/plan',
-  'planner/extreme'],
-(P, PINS, REG, LY, S, TM, CV, SHOT, PA, CA, LK, SG, PL, XT) => {
+  'planner/extreme', 'planner/rules'],
+(P, PINS, REG, LY, S, TM, CV, SHOT, PA, CA, LK, SG, PL, XT, RU) => {
   'use strict';
 
   const LOOK_NAMES = new Set(['mood', 'theme', 'season', 'bpm', 'beatOffset', 'readRate', 'length', 'titleCard']);
@@ -15,10 +15,12 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
   // --- what a path addresses ---------------------------------------------------------------------------------
 
   // 'look' (work-scope slots), 'line' (start/end/split/lang; since v2.1 also avoid, and season at line or cut scope,
-  // which is a line value while work:season stays the look's), 't0', 'el', 'count', 'part', 'param' or 'value'
-  // (orient, text.*, motion.speed, cam.*, rig, rig.curve).
+  // which is a line value while work:season stays the look's), 't0', 'el', 'count', 'part', 'param', 'rule' (a switch of
+  // planner/rules at work scope: the 文字組み settings, DESIGN_2_2 §1) or 'value' (orient, text.*, motion.speed, cam.*,
+  // rig, rig.curve; the 文字組み settings at line or cut scope).
   function categoryOf(parsed) {
     const slot = parsed.slot;
+    if (parsed.scope.kind === 'work' && !parsed.part && !parsed.el && CA.KUMI_SLOTS.includes(slot)) return 'rule';
     if (slot === 'season' && parsed.scope.kind !== 'work') return 'line';
     if (LOOK_NAMES.has(slot) || LOOK_PREFIX.test(slot) || (parsed.part && parsed.part.kind === 'texture')) return 'look';
     if (LINE_NAMES.has(slot)) return 'line';
@@ -76,6 +78,7 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
   function decisionAt(plan, cut, parsed, registry, ix) {
     const part = parsed.part;
     if (parsed.slot === XT.SLOT && !part) return extremeAt(cut, ix);
+    if (!part && CA.KUMI_SLOTS.includes(parsed.slot)) return kumiAt(cut, parsed.slot, ix);
     if (RIG_SLOTS.has(parsed.slot)) {
       const run = plan.rigs && cut.rig !== undefined ? plan.rigs[cut.rig] : null;
       return run ? (parsed.slot === 'rig' ? run.rig : run.curve) : null;
@@ -96,6 +99,20 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
     if (d) return d;
     const pin = ix ? XT.resolve(ix, { cutKey: cut.key, pinCutKey: cut.pinKey || cut.key, lineId: cut.line || null }) : null;
     return pin ? { v: pin.v, from: pin.from, by: pin.by } : X_OFF;
+  }
+
+  // 文字組み (DESIGN_2_2 §1): a cut holds a decision only where a setting is on. Elsewhere the pin that applies at its
+  // line (a line or work pin 0: it turned the setting off; read with the pin index ix when given), else the frozen
+  // automatic value: 'line' for text.head, 0 (off) for the strengths.
+  const KUMI_HEAD_AUTO = Object.freeze({ v: 'line', from: 'auto' });
+  const KUMI_OFF = Object.freeze({ v: 0, from: 'auto' });
+  function kumiAt(cut, slot, ix) {
+    const d = cut.slots && cut.slots[slot];
+    if (d) return d;
+    const hit = ix && PA.pinned(ix, slot) ? PA.resolvePin(ix, { cutKey: null, pinCutKey: null, lineId: cut.line || null }, slot,
+      PA.acceptSpec(CA.SLOT_SPECS[slot]), null) : null;
+    if (hit) return { v: hit.v, from: hit.from, by: hit.by };
+    return slot === 'text.head' ? KUMI_HEAD_AUTO : KUMI_OFF;
   }
 
   // The rule behind the automatic depth of a media part at a cut (DESIGN_2_1 §11.9.2): 'ai' | 'overlay' | 'frame' |
@@ -235,6 +252,7 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
   function schemaOf(registry, plan, parsed, cuts) {
     const cat = categoryOf(parsed);
     const slot = parsed.slot;
+    if (cat === 'rule') return RU.SPECS[slot];
     if (cat === 'look') {
       if (slot === 'mood' || slot === 'theme') return { type: 'part', kind: slot, of: registry.keys(slot), none: false };
       if (parsed.part && !parsed.part.param) {
@@ -283,21 +301,22 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
   // at the path's scope and every broader one (special cuts have no line).
   function canPinAt(parsed) {
     const cat = categoryOf(parsed);
-    if (cat === 'look') return ['work'];
+    if (cat === 'look' || cat === 'rule') return ['work'];
     if (cat === 'line') return parsed.slot === 'season' ? ['line', 'work'] : ['line'];
     if (cat === 't0') return ['cut'];
     const kind = parsed.scope.kind;
     if (kind === 'work') return ['work'];
     if (kind === 'line') return ['line', 'work'];
-    // the EXTREME switch belongs to an area: line or work, never one cut (DESIGN_EXTREME §2.2)
-    if (parsed.slot === XT.SLOT) return parsed.scope.lineId ? ['line', 'work'] : ['work'];
+    // the EXTREME switch and the 文字組み settings belong to an area: line or work, never one cut (DESIGN_EXTREME §2.2,
+    // DESIGN_2_2 §1)
+    if (parsed.slot === XT.SLOT || CA.KUMI_SLOTS.includes(parsed.slot)) return parsed.scope.lineId ? ['line', 'work'] : ['work'];
     return parsed.scope.lineId ? ['cut', 'line', 'work'] : ['cut', 'work'];
   }
 
   // The decision source of a path at one cut: { from, by } (pins, marks, rules, auto).
   function sourceAt(doc, plan, cut, parsed, registry, ix) {
     const cat = categoryOf(parsed);
-    if (cat === 'look') return lookSource(plan, parsed, ix);
+    if (cat === 'look' || cat === 'rule') return lookSource(plan, parsed, ix);
     if (cat === 'line') return lineSource(doc, plan, parsed, cut ? cut.line : parsed.scope.lineId, ix);
     if (!cut) return { from: 'auto' };
     const at = { cutKey: cut.key, pinCutKey: cut.pinKey || cut.key, lineId: cut.line };
@@ -325,8 +344,8 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
       const probe = run && run.cuts.length ? cutOf(plan, run.cuts[0])
         : parsed.part && TRACK_KINDS.has(parsed.part.kind) && parsed.part.kind !== 'seam' && plan.grounds[cut.ground]
           ? cutOf(plan, plan.grounds[cut.ground].cuts[0]) : cut;
-      // (the EXTREME switch never reads a cut pin: a stray one does not apply, planner/extreme resolve)
-      const pat = slot === XT.SLOT ? { cutKey: null, pinCutKey: null, lineId: probe.line || null }
+      // (the EXTREME switch and the 文字組み settings never read a cut pin: a stray one does not apply)
+      const pat = slot === XT.SLOT || CA.KUMI_SLOTS.includes(slot) ? { cutKey: null, pinCutKey: null, lineId: probe.line || null }
         : { cutKey: probe.key, pinCutKey: probe.pinKey || probe.key, lineId: probe.line };
       const hit = PINS.lookup(ix, pat, slot);
       if (hit) src.at = hit.at;
@@ -432,9 +451,12 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
     const parsed = P.parse(path);
     const cat = categoryOf(parsed);
     const ix = pinIndexOf(doc.pins);
-    const perCut = cat !== 'look' && !(cat === 'line' && parsed.scope.kind === 'line');
+    const perCut = cat !== 'look' && cat !== 'rule' && !(cat === 'line' && parsed.scope.kind === 'line');
     const cuts = perCut ? cutsFor(plan, sel, parsed) : [];
-    const values = perCut ? cuts.map((c) => valueAt(plan, c, parsed, registry, ix)) : [valueAt(plan, null, parsed, registry, ix)];
+    // a switch of planner/rules at work scope shows the whole work's value (its work pin, else the document's default),
+    // never a cut's: a line turned off does not flip the work switch
+    const values = cat === 'rule' ? [RU.value(doc, ix, parsed.slot)]
+      : perCut ? cuts.map((c) => valueAt(plan, c, parsed, registry, ix)) : [valueAt(plan, null, parsed, registry, ix)];
     const sources = perCut ? cuts.map((c) => sourceAt(doc, plan, c, parsed, registry, ix))
       : [sourceAt(doc, plan, null, parsed, registry, ix)];
     const own = ownPin(doc, parsed, cuts);
@@ -531,6 +553,8 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
       };
       const forced = ownMotion(reg, cut);
       for (const slot of Object.keys(cut.slots)) {
+        // the 文字組み settings live at line or work scope (core/commands refuses them at a cut): never frozen
+        if (CA.KUMI_SLOTS.includes(slot)) continue;
         const d = cut.slots[slot];
         if (isAuto(d) && !(forced && CA.MOTION_KINDS.includes(slot) && d.from === 'rule')) put(slot, d.v);
         if (d.p && d.v !== 'none') putParams(put, slot, d);
@@ -571,6 +595,6 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
 
   return {
     fieldState, fieldStates, lockPayload, pinSig: PL.pinSig, valueAt, decisionAt, categoryOf, cutsFor, cutOf, choiceSlot,
-    schemaOf, canPinAt, depthRuleAt,
+    schemaOf, canPinAt, depthRuleAt, KUMI_SLOTS: CA.KUMI_SLOTS,
   };
 });

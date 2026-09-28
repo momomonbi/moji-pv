@@ -746,6 +746,16 @@ test('planning speed: re-planning project_long after an edit (§9.1 acceptance, 
     cold.push(Number(process.hrtime.bigint() - t0) / 1e6);
   }
   const coldMs = Math.min(...cold);
+  // a new work (look.gen = 1: the 文字組み settings on, DESIGN_2_2 §1) plans its new cuts within the same bound
+  const genCold = [];
+  for (let k = 7; k <= 9; k++) {
+    const d = reseed(k);
+    d.look = Object.assign({}, d.look, { gen: 1 });
+    const t0 = process.hrtime.bigint();
+    PL.plan(d, { registry: STUB });
+    genCold.push(Number(process.hrtime.bigint() - t0) / 1e6);
+  }
+  const genColdMs = Math.min(...genCold);
   let doc = base;
   const first = PL.plan(doc, { registry: STUB });
   const batches = [];
@@ -767,9 +777,10 @@ test('planning speed: re-planning project_long after an edit (§9.1 acceptance, 
   }
   const best = Math.min(...batches);
   t.diagnostic('re-plan after an edit: best ' + best.toFixed(1) + ' ms (batches ' + batches.map((x) => x.toFixed(1)).join(' ') +
-    '); a plan of new cuts: ' + coldMs.toFixed(1) + ' ms');
+    '); a plan of new cuts: ' + coldMs.toFixed(1) + ' ms (a new work: ' + genColdMs.toFixed(1) + ' ms)');
   assert.ok(best <= 10, 're-plan after an edit: ' + batches.map((x) => x.toFixed(1)).join(' ') + ' ms');
   assert.ok(coldMs < 60, 'a plan of new cuts took ' + coldMs.toFixed(1) + ' ms');
+  assert.ok(genColdMs < 60, 'a plan of new cuts of a new work took ' + genColdMs.toFixed(1) + ' ms');
 });
 
 // Typing in the lyric editor (§7.4: typing never waits on the planner). Each key appends one character to a row

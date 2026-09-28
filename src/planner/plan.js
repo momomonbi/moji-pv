@@ -1,8 +1,9 @@
 /* 文字PVメーカー v2 — original work. plan(doc, { registry }) → Plan: the planner's stages in their FROZEN order (DESIGN §4.16.1–§4.16.2, §3.12; DESIGN_2_1 §2.7, §5.9.3, §11.2.6). */
 MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'core/timing', 'core/beats', 'core/motion',
   'core/doc', 'core/schema', 'core/script', 'core/media', 'core/shot', 'planner/choose', 'planner/params', 'planner/look',
-  'planner/segment', 'planner/features', 'planner/cast', 'planner/tracks', 'planner/camera', 'planner/encode', 'planner/extreme'],
-(H, N, PINS, LY, TM, B, MO, D, S, SC, MEDIA, SHOT, CH, PA, LK, SG, FE, CA, TR, CAM, EN, XT) => {
+  'planner/segment', 'planner/features', 'planner/cast', 'planner/tracks', 'planner/camera', 'planner/encode', 'planner/extreme',
+  'planner/rules'],
+(H, N, PINS, LY, TM, B, MO, D, S, SC, MEDIA, SHOT, CH, PA, LK, SG, FE, CA, TR, CAM, EN, XT, RU) => {
   'use strict';
 
   // v2: rigs, cut.rig, grounds[].zoomed, feat.sectionStart, media, the camera slots (DESIGN_2_1 §2.7, §11.2.6).
@@ -497,6 +498,15 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
 
   // run(doc, registry, { trace, fresh }) → Plan. trace = { cutKey, slot, out } records one slot's decision
   // (planner/explain). fresh: plan without the re-planning caches (the same Plan, computed from scratch; tests).
+  // The 文字組み defaults of a document (DESIGN_2_2 §1): three strengths, all 0 without the new-work marker.
+  const KUMI_OFF = Object.freeze({ 'text.kana': 0, 'text.jump': 0, 'text.latin': 0 });
+  function kumiDefaults(doc, ix) {
+    const kana = RU.defaultValue(doc, ix, 'text.kana'), jump = RU.defaultValue(doc, ix, 'text.jump');
+    const latin = RU.defaultValue(doc, ix, 'text.latin');
+    if (!(kana > 0 || jump > 0 || latin > 0)) return KUMI_OFF;
+    return Object.freeze({ 'text.kana': kana, 'text.jump': jump, 'text.latin': latin });
+  }
+
   function run(doc, registry, opts) {
     const warner = createWarner();
     const aspect = D.DESIGN_SIZE[doc.look.aspect] ? doc.look.aspect : '16:9';
@@ -513,7 +523,7 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
       timing: Object.assign({}, TM.TIMING_DEFAULTS, doc.timing || {}), pools: new Map(), trace, casts: null,
       lockFree: CA.lockFreeIndex(doc.pins), media: mediaIndex(doc), mediaUsed: new Set(),
       castKeys: null, seams: null, encodings: null, fallbacks: null, lookAxis: null, lineConds: null, workCond: null,
-      shotMood: null, echoed: null, align: null, alignNear: null,
+      shotMood: null, echoed: null, align: null, alignNear: null, kumi: null,
     };
     // Traced runs (explain) and fresh runs neither read nor refresh the caches of re-planning.
     if (cached) beginFeatures();
@@ -539,6 +549,9 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
     ctx.amounts = look.amounts;
     ctx.pace = look.mood.pace;
     ctx.chooser = CH.createChooser(registry, { mood: look.mood, theme: look.theme, season: look.season, amounts: look.amounts });
+    // 文字組み (DESIGN_2_2 §1): the document defaults of the three strengths (planner/rules: 0.7 / 0.5 / 0.5 in a new
+    // work, 0 in an older one); planner/cast reads them here and never imports planner/rules.
+    ctx.kumi = kumiDefaults(doc, ctx.ix);
 
     // 3. cutter
     const cuts = SG.cutAll(ctx, timed, sheet.meta, duration);
@@ -564,7 +577,7 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
     if (cached) {
       ctx.casts = CA.beginCasts(registry);
       ctx.castKeys = CA.castKeys(ctx, EN.canon([registry.version, look.mood.key, look.theme.key, look.season, look.amounts,
-        look.variety, aspect, doc.look.seed, doc.filters || null, ctx.bpm, ctx.media ? ctx.media.key : null]));
+        look.variety, aspect, doc.look.seed, doc.filters || null, ctx.bpm, ctx.media ? ctx.media.key : null, ctx.kumi]));
     }
     // The cuts a later cut sings again (their rows keep what the repeats inherit, planner/cast castCut).
     ctx.echoed = new Set();

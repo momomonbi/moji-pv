@@ -13,6 +13,10 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     const FACE_WEIGHTS = Object.freeze({ display: 3, serif: 2, body: 1 });
     const AVOID_REPEAT = new Set(['arrange', 'arrive']);   // §8.2: no identical adjacent arrange/arrive (see choose.pick)
 
+    // 文字組み (DESIGN_2_2 §1): strengths 0–1 (0 = off) and which graphemes grow; the same specs as planner/rules.
+    const KUMI_SPEC = Object.freeze({ type: 'num', min: 0, max: 1, step: 0.05 });
+    const KUMI_HEAD_SPEC = Object.freeze({ type: 'enum', of: Object.freeze(['line', 'phrase', 'none']) });
+
     // Specs of the non-part cut slots (§3.4.3, and the v2.1 camera slots of planner/camera); pins are coerced through
     // them and planner/fields shows them.
     const SLOT_SPECS = Object.freeze(Object.assign({
@@ -28,6 +32,8 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       'el.hide': { type: 'bool' },
       // 「くり返しの行をそろえる」 (DESIGN_2_1 §4.10): pinned at work or line scope, never at a cut (core/commands).
       'repeat.same': { type: 'bool' },
+      // 文字組み (DESIGN_2_2 §1): pinned at work or line scope, never at a cut (core/commands NOT_CUT).
+      'text.kana': KUMI_SPEC, 'text.jump': KUMI_SPEC, 'text.latin': KUMI_SPEC, 'text.head': KUMI_HEAD_SPEC,
     }, CAM.SLOT_SPECS));
     const SEASON_SPEC = LK.LOOK_SPECS.season;
     const AVOID_SPEC = Object.freeze({ type: 'partRefs' });
@@ -813,6 +819,46 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       });
     }
 
+    // 文字組み (DESIGN_2_2 §1): typesetting settings, pinned at work or line scope (core/commands NOT_CUT), defaulting to
+    // the document's generation (ctx.kumi, from planner/rules in planner/plan). A cut gets a decision only where a
+    // setting is on; a setting that is off leaves no trace, so documents without the marker and without pins plan
+    // exactly as before. No randomness: no slot stream is read, so no other slot's choice moves.
+    const KUMI_SLOTS = Object.freeze(['text.kana', 'text.jump', 'text.latin', 'text.head']);   // head last: it reads jump
+    const KUMI_ACCEPT = Object.freeze(Object.fromEntries(KUMI_SLOTS.map((slot) => [slot, PA.acceptSpec(SLOT_SPECS[slot])])));
+    const autoKumi = new Map();                        // interned { v, from: 'auto' } per value (planner/plan cache identity)
+    function kumiAuto(v) {
+      let d = autoKumi.get(v);
+      if (!d) { d = Object.freeze({ v, from: 'auto' }); autoKumi.set(v, d); }
+      return d;
+    }
+
+    // Order per slot: the line pin, then the work pin (a stray cut pin never applies), then the document default. A
+    // strength of 0 (a pin that turns it off, or an older document) writes nothing; text.head is written only when a
+    // head pin resolves on a cut whose text.jump is on (its default, 'line', needs no decision).
+    function decideKumi(st) {
+      const { ctx, cut } = st;
+      const at = { cutKey: null, pinCutKey: null, lineId: cut.line || null };
+      for (const slot of KUMI_SLOTS) {
+        const trace = tracing(st, slot);
+        const head = slot === 'text.head';
+        if (head && !st.slots['text.jump']) {
+          if (trace) Object.assign(trace, { stage: 'auto', pin: null, decision: null, rule: slot, why: [] });
+          continue;
+        }
+        const pin = PA.pinned(ctx.ix, slot) ? PA.resolvePin(ctx.ix, at, slot, KUMI_ACCEPT[slot], ctx.warn) : null;
+        const auto = !head && ctx.kumi ? ctx.kumi[slot] : 0;
+        let d = null;
+        if (pin) d = head || pin.v > 0 ? pinDecision(pin) : null;
+        else if (auto > 0) d = kumiAuto(auto);
+        if (d) setDecision(st, slot, d);
+        if (trace) {
+          const rule = pin || head ? slot : auto > 0 ? 'kumi.gen' : 'kumi.off';
+          Object.assign(trace, { stage: pin ? 'pin' : 'auto', pin, decision: d, rule,
+            why: pin ? null : head ? [] : [{ code: 'rule', params: { rule } }] });
+        }
+      }
+    }
+
     // How much a mood wants screen effects on its cuts (filter.count, §4.16.4): its glitch or chroma amount, or its
     // film side — the texture amount times the weight of its favourite screen effect (mood.filters). Glitch and chroma
     // alone left the film moods almost bare although their blurbs promise their effects: silverReel 0.15 effects per
@@ -900,7 +946,8 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       return els;
     }
 
-    // The slots of one cut in the FROZEN order (§4.16.2, DESIGN_2_1 §3.9): orient → arrange → text.* → motion.speed →
+    // The slots of one cut in the FROZEN order (§4.16.2, DESIGN_2_1 §3.9): orient → arrange → text.* (then the 文字組み
+    // settings, which read no stream, DESIGN_2_2 §1) → motion.speed →
     // arrive → dwell → depart → ornament.count → ornament#i → lens → cam.shot → cam.zoom → cam.curve → cam.follow →
     // filter.count → filter#i. Every slot keeps its own stream, so the camera slots change no part choice. natural =
     // the neighbours' view (no recency, no runner-up rule, no parameters). st.decide = decideValue, for planner/camera.
@@ -911,6 +958,7 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       decideOrient(st);
       const arrange = decidePart(st, 'arrange', null);
       decideText(st);
+      decideKumi(st);
       CAM.decideSpeed(st);
       const own = ctx.registry.get('arrange', arrange.v).motion === 'own';
       for (const kind of MOTION_KINDS) {
@@ -1304,6 +1352,6 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     return {
       SLOT_SPECS, LIST_KINDS, MOTION_KINDS, castCut, createHistory, chooseAuto, poolOf, acceptPart, pinWarnings, serves,
       filterAllows, lookAx, lockFreeCtx, lockFreeIndex, beginCasts, castKeys, intern, deepFreeze, historyRow, lineCond,
-      isChoice, alignments, neighboursOf, alignedSource, REPEAT,
+      isChoice, alignments, neighboursOf, alignedSource, REPEAT, KUMI_SLOTS,
     };
   });

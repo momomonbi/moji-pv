@@ -235,11 +235,14 @@ MV.def('core/commands', ['core/doc', 'core/paths', 'core/pins', 'core/lyrics', '
     // v2.1 (DESIGN_2_1 §2.3, §3.7): line slots that are area-level, never pinned at a cut; `avoid` is line-only. The
     // EXTREME switch (DESIGN_EXTREME §2.2) is an area's too: line or work, never a cut; "paste look" leaves it (it is not
     // in COPY_SLOTS) and it may move line → work like the season.
-    const NOT_CUT = new Set(['season', 'avoid', 'cam.extreme']);
+    // 文字組み (DESIGN_2_2 §1): typesetting is a setting of a line or of the whole video; "paste look" leaves it too
+    // (not in TEXT_SLOTS), and a line pin may move to the work.
+    const NOT_CUT = new Set(['season', 'avoid', 'cam.extreme', 'text.kana', 'text.jump', 'text.latin', 'text.head']);
     // Cut slots that "paste look" copies besides part slots and text.* (CAM_SLOTS and the motion speed).
     const COPY_SLOTS = new Set(['motion.speed', 'cam.shot', 'cam.zoom', 'cam.curve', 'cam.follow']);
 
-    // Refuses `cut/…:season`, `cut/…:avoid`, `cut/…:cam.extreme`, `cut/…:repeat.same` and `work:avoid` (payload).
+    // Refuses `cut/…:season`, `cut/…:avoid`, `cut/…:cam.extreme`, `cut/…:repeat.same`, the 文字組み slots at a cut
+    // (`cut/…:text.kana` and the others of NOT_CUT) and `work:avoid` (payload).
     // 「くり返しの行をそろえる」 (DESIGN_2_1 §4.10) is a setting of the whole video or of a line, like the line season.
     function checkSlotScope(parsed) {
       need(!(parsed.scope.kind === 'cut' && (NOT_CUT.has(parsed.slot) || parsed.slot === 'repeat.same')),
