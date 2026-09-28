@@ -35,7 +35,7 @@
 //                       "docs": { "morph": { "plan", "frames": [40] }, "weight": { "plan", "frames": [40] } } }
 //                     the v2.2 glyph motion fixtures (tests/helpers/glyph_docs.js goldenDocs, DESIGN_2_2 §4): new works
 //                     (look.gen 1) with the glyph morph (four line pairs that share letters, one pinned morph) and with the
-//                     weight parts (太る with and without the grow rule, 脈打つ太さ, 細る, 太る on outline lettering), rendered
+//                     weight parts (太字へ with and without the grow rule, 脈打つ太さ, 細字へ, 太字へ on outline lettering), rendered
 //                     at glyphTimes (32 even times and 8 inside the morphs and weight motions). lateVersion signs the late
 //                     parts, which registry.version leaves out.
 

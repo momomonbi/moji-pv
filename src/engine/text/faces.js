@@ -327,7 +327,7 @@ MV.def('engine/text/faces', ['core/script'], (S) => {
     return { below: ref.weight - L[0], above: L[L.length - 1] - ref.weight };
   }
 
-  // growTop(ref) → the heaviest served weight up to GROW_TOP (the bold end of 太る); the face's own weight when none is.
+  // growTop(ref) → the heaviest served weight up to GROW_TOP (the bold end of 太字へ); the face's own weight when none is.
   const GROW_TOP = 800;
   function growTop(ref) {
     let t = null;

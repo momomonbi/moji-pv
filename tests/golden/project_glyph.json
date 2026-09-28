@@ -7,7 +7,7 @@
  "measurer": "fake",
  "docs": {
   "morph": {
-   "plan": "bc38d3bf",
+   "plan": "de9825d8",
    "frames": [
     "deeba19e",
     "0b1264ec",
@@ -16,7 +16,7 @@
     "0e7a0242",
     "cd291d45",
     "243780fe",
-    "be603fe7",
+    "e30f95fa",
     "539a7a43",
     "0c715aae",
     "1efeda52",
@@ -52,14 +52,14 @@
    ]
   },
   "weight": {
-   "plan": "bc7490bd",
+   "plan": "b9a5c668",
    "frames": [
     "19d67a90",
     "a7f82d64",
     "91b273db",
     "7f018fdd",
     "a5964efc",
-    "c5d8d2a1",
+    "17b985e7",
     "39bc3720",
     "e3f9e3bc",
     "7f15f65a",
@@ -71,7 +71,7 @@
     "10a0d31d",
     "baa97ca1",
     "e70d9d07",
-    "90f03c3a",
+    "5616608e",
     "44a88c43",
     "1bd6cc6c",
     "5deb1674",

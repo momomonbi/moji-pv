@@ -1347,6 +1347,40 @@ test('an enum with optKey labels its options from its own key group (depth: back
 
 // --- v2.2 (DESIGN_2_2 §4): 太さを動かす, 太さ, 同じ字をつなぐ -------------------------------------------------------------
 
+test('v2.2 part browser filter: an opt-in weight part alone never counts as the one part kept (「少なくとも1つは使います」)', () => {
+  const PB = MV.use('ui/part_browser');
+  const reg = catalogRegistry();
+  const t = T.createT('ja', STRINGS, reg);
+  const toasts = [], sent = [];
+  const app = { t, reg, doc: { filters: {} }, toast: (m) => toasts.push(m), dispatch: (cmd) => sent.push(cmd) };
+  assert.equal(PB.setFilter(app, 'arrive', { only: ['weightGrow'], deny: null }), false, 'only 太字へ: refused');
+  assert.deepEqual([toasts, sent], [[t('pb.keepOne')], []]);
+  assert.equal(PB.setFilter(app, 'arrive', { only: ['weightGrow', 'fogIn'], deny: null }), true, 'with a pooled part: kept');
+  assert.deepEqual(sent.map((c) => [c.t, c.only]), [['filter.set', ['fogIn', 'weightGrow']]]);
+  // never using 太字へ alone is fine (the pooled parts stay)
+  assert.equal(PB.setFilter(app, 'arrive', { only: null, deny: ['weightGrow'] }), true);
+});
+
+test('v2.2: 太さ in 自動 rests at the weight the lyrics are drawn at (not the lightest) and says it', () => {
+  installFakeDom();
+  const W = MV.use('ui/widgets');
+  const field = F.FIELDS.find((f) => f.path === 'text.weight' && f.page === 'line');
+  const t = T.createT('ja', STRINGS);
+  const env = { app: {}, t, label: t(field.label), field, commit() {}, gesture: () => ({ set() {}, end() {} }),
+    unpin() {}, open() {}, thumb() {}, slot() {} };
+  const w = W.make(field, env);
+  document.body.appendChild(w.el);
+  const range = w.el.querySelector('.w-range'), box = w.el.querySelector('.w-num');
+  w.update({ value: null, mixed: false, auto: true, readOnly: false, extra: { autoValue: 600 } });
+  assert.deepEqual([range.value, box.value, box.placeholder], ['600', '', t('state.auto') + ' 600']);
+  assert.ok(w.el.classList.contains('is-unset'), 'still drawn as unset');
+  w.update({ value: null, mixed: false, auto: true, readOnly: false, extra: { autoValue: null } });
+  assert.deepEqual([range.value, box.placeholder], ['100', t('state.auto')], 'the cuts differ: as before');
+  w.update({ value: 800, mixed: false, auto: false, readOnly: false, extra: { autoValue: 600 } });
+  assert.deepEqual([range.value, box.value], ['800', '800'], 'a set value wins');
+  w.el.remove();
+});
+
 test('v2.2: the weight switch and 太さ rows — scopes, pages, autoDefault', () => {
   assert.deepEqual(F.slotScopes('weight.auto'), ['work']);
   assert.deepEqual(F.slotScopes('morph.auto'), ['work', 'line']);

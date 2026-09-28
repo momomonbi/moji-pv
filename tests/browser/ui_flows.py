@@ -2502,6 +2502,28 @@ async def flow_weight(f, lang):
       if (d) d.open = true; }""")
     await f.settle(2)
     f.check(await page.locator(ROW % 'text.weight').count() == 1, 'the line page has 太さ')
+    warn_of = ROW % 'text.weight' + ' [data-role="weight-warn"]'
+    f.check(await page.locator(warn_of).is_hidden(), 'no weight note while nothing is pinned')
+    # a pinned 太字へ on a face with one weight (nightTram's 見出し, Dela Gothic One) says why nothing grows: under 太さ, under
+    # 入り, and as the line's mark in the lyric gutter's title
+    await page.evaluate("""(id) => window.__mv.batch({ label: ['undo.pin', { field: 'x', scope: 'y' }] }, [
+      { t: 'pin.set', path: 'work:theme', v: 'nightTram', by: 'user' },
+      { t: 'pin.set', path: 'line/' + id + ':text.face', v: 'display', by: 'user' },
+      { t: 'pin.set', path: 'line/' + id + ':arrive', v: 'weightGrow', by: 'user' }])""", line)
+    await f.until("(id) => window.__mv.plan.warnings.some((w) => w.code === 'weight-flat' && w.line === id)", 'the planner warns weight-flat', line)
+    await f.settle(3)
+    want = await page.evaluate("""(id) => { const w = window.__mv.plan.warnings.find((x) => x.code === 'weight-flat' && x.line === id);
+      return w ? window.__mv.t('warn.weight-flat', { detail: w.detail }) : null; }""", line)
+    f.check(want is not None and 'Dela Gothic One' in want, 'the warning names the face: %r' % want)
+    f.check(await page.locator(warn_of).is_visible() and await page.text_content(warn_of) == want,
+            'under 太さ: %r' % await page.text_content(warn_of))
+    await open_section(f, 'direction')
+    arrive_warn = ROW % 'arrive' + ' [data-role="weight-warn"]'
+    f.check(await page.locator(arrive_warn).count() == 1 and await page.locator(arrive_warn).is_visible()
+            and await page.text_content(arrive_warn) == want, 'under 入り')
+    for kind in ('dwell', 'depart'):
+        other = ROW % kind + ' [data-role="weight-warn"]'
+        f.check(await page.locator(other).count() == 0 or await page.locator(other).is_hidden(), 'not under ' + kind)
     await f.undo_all(done0, doc0)
 
 

@@ -43,8 +43,8 @@ and the export overhead of a 1080p30 video background.
 DESIGN_2_2 §4 (+): rows glyph-morph and glyph-weight — the two documents of tests/golden/project_glyph.json (node
 tests/helpers/glyph_docs.js --perf), 10 s at 30 fps at 720p from 1 s before the first morph window or weight motion:
 judged at twice the budget like every row, plus a same-run A/B against the same document with every glyph seam pinned
-to blendDissolve (morph) or every weight part pinned to a comparable catalog part (太る → fogIn, 脈打つ太さ →
-thumpSwell, 細る → fogOut; no 太さ pins) — played alternately in the same page, the least disturbed run of each judged:
+to blendDissolve (morph) or every weight part pinned to a comparable catalog part (太字へ → fogIn, 脈打つ太さ →
+thumpSwell, 細字へ → fogOut; no 太さ pins) — played alternately in the same page, the least disturbed run of each judged:
 the document's p95 must be ≤ 1.25 × the comparator's.
 The GitHub CI runner (ubuntu-latest, Google Chrome, software raster, no GPU) is the twice-the-budget gate; it is not
 the reference machine. The reference is the mid-range laptop of DESIGN_2_1 §8.7 / §11.5.12.

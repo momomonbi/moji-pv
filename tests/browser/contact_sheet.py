@@ -30,8 +30,8 @@ stub_parts.js). Google Fonts are blocked unless --fonts is given, so the sheet i
 Open the PNG with any image viewer (or the Read tool). Exit status 1 when a cell failed to render.
 --doc (DESIGN_2_2 §4, visual QA): a frame strip per glyph morph (morph: one row per glyph seam of the golden morph
 document, u over its window [at − dur/2, at + dur/2] plus a last column after it, the new line at rest) or per weight
-motion (weight: one row per cut with 太る, 脈打つ太さ or 細る in the golden weight document, u over that motion; then
-太る sample rows in a mincho, a Latin line, a vertical line and a one-weight face). The documents come from
+motion (weight: one row per cut with 太字へ, 脈打つ太さ or 細字へ in the golden weight document, u over that motion; then
+太字へ sample rows in a mincho, a Latin line, a vertical line and a one-weight face). The documents come from
 tests/helpers/glyph_docs.js (node); the catalog registry.
 Without --kind (CI runs every browser test with its default arguments) it checks itself instead: for every kind of the
 default registry, and for the shot, rig and xshot presets, a sheet of two of that kind's parts at two times, kept in memory; it fails when a
@@ -291,12 +291,27 @@ DOC_SHEET_JS = r"""async (o) => {
   const HF = MV.use('engine/host/fonts'), FACES = MV.use('engine/text/faces');
   const reg = MV.use('parts/catalog').defaultRegistry();
   const factory = HC.createCanvasFactory();
-  const fonts = o.fonts ? HF.createFontBook({ document, timeoutMs: 8000 }) : null;
+  // (a proxy can take several seconds per sheet: the faces get 40 s, and the header says how many did not load)
+  const fonts = o.fonts ? HF.createFontBook({ document, timeoutMs: 40000 }) : null;
   const engine = FAC.createEngine({ registry: reg, canvas: factory, measurer: HM.createCanvasMeasurer(factory, fonts), fonts,
     assets: null });
   const times = o.times && o.times.length ? o.times : [0, 0.25, 0.5, 0.75, 1];
   const plan = engine.setDoc(o.doc).plan;
   if (o.fonts) await engine.prepare(0, plan.duration, { export: true });
+  // the faces the cuts lay their letters out in (and the weights they draw), counted when they are not ready
+  let unloaded = 0;
+  if (fonts) {
+    const seen = new Set();
+    plan.cuts.forEach((c, i) => {
+      for (const gl of engine.scene('cut', i).stores.glyph) {
+        const f = gl && gl.font;
+        if (!f || seen.has(f.key)) continue;
+        seen.add(f.key);
+        if (fonts.status(f) !== 'ready') unloaded++;
+      }
+    });
+  }
+  const fontNote = !o.fonts ? ' · fallback faces' : unloaded ? ' · fonts (' + unloaded + ' not loaded)' : ' · fonts';
   const KINDS = ['arrive', 'dwell', 'depart'];
   const weighs = (c, k) => { const d = c.slots[k] && reg.get(k, c.slots[k].v); return !!(d && d.optIn === 'weight'); };
   // rows: { label, sub, plan (null: the document's), t0, t1, after }
@@ -321,7 +336,7 @@ DOC_SHEET_JS = r"""async (o) => {
           plan: null, t0: c.t0 + w[0], t1: c.t0 + w[1], after: null });
       }
     });
-    // the 太る tile in other faces: a mincho, a Latin line, a vertical line, a one-weight face (the body role at 800)
+    // the 太字へ tile in other faces: a mincho, a Latin line, a vertical line, a one-weight face (the body role at 800)
     const faceOf = (ja, latin, weight, flavor) => ({ faces: { display: { ja, latin, weight, flavor }, serif: { ja, latin, weight, flavor },
       body: { ja, latin, weight, flavor } } });
     const samples = [
@@ -334,7 +349,7 @@ DOC_SHEET_JS = r"""async (o) => {
       const lang = text === 'Paper planes' ? 'en' : 'ja';
       const faces = JSON.parse(JSON.stringify(FACES.resolveFaces(theme, null, [lang === 'en' ? 'latin' : 'ja'])));
       const sp = FAC.samplePlan(reg, { kind: 'arrive', key: 'weightGrow' }, { text, orient, faces });
-      rows.push({ label: '太る · ' + name, sub: text + ' · ' + FACES.fontFor(faces, 'body', lang === 'en' ? 'latin' : 'ja').family,
+      rows.push({ label: '太字へ · ' + name, sub: text + ' · ' + FACES.fontFor(faces, 'body', lang === 'en' ? 'latin' : 'ja').family,
         plan: sp, t0: null, t1: null, after: null });
     }
   }
@@ -349,7 +364,7 @@ DOC_SHEET_JS = r"""async (o) => {
   g.fillStyle = '#1b1d22'; g.fillRect(0, 0, W, H);
   g.textBaseline = 'top';
   g.fillStyle = '#e8e8e8'; g.font = '600 15px system-ui, sans-serif';
-  g.fillText('project_glyph ' + o.mode + ' · theme ' + plan.look.theme.v + ' · ' + plan.design.aspect + (o.fonts ? ' · fonts' : ' · fallback faces'), gap, 8);
+  g.fillText('project_glyph ' + o.mode + ' · theme ' + plan.look.theme.v + ' · ' + plan.design.aspect + fontNote, gap, 8);
   g.font = '12px system-ui, sans-serif'; g.fillStyle = '#aaa';
   times.forEach((u, c) => g.fillText('u = ' + Number(u).toFixed(2), labelW + c * (cellW + gap) + 4, 34));
   if (o.mode === 'morph') g.fillText('after (B at rest)', labelW + times.length * (cellW + gap) + 4, 34);
@@ -387,7 +402,7 @@ DOC_SHEET_JS = r"""async (o) => {
   }
   for (const e of engine.warnings()) if (e.code === 'part-error') errors.push(e.detail);
   engine.dispose();
-  return { png: sheet.toDataURL('image/png'), cells, rows: rows.length, errors, width: W, height: H };
+  return { png: sheet.toDataURL('image/png'), cells, rows: rows.length, errors, width: W, height: H, unloaded };
 }"""
 
 
@@ -449,6 +464,8 @@ async def run(args):
                 out.write_bytes(base64.b64decode(result['png'].split(',', 1)[1]))
                 print('contact_sheet: wrote %s (%dx%d, %d rows, %d cells)' % (out, result['width'], result['height'], result['rows'],
                                                                           result['cells']))
+                if args.fonts and result.get('unloaded'):
+                    print('  %d faces did not load: those rows use fallback faces' % result['unloaded'])
                 problems = result['errors'] + page.lab_errors + await csp_violations(page)
                 for msg in problems:
                     print('  ' + msg)

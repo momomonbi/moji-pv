@@ -1,4 +1,4 @@
-/* 文字PVメーカー v2 — original work. Weight entrance (v2.2, DESIGN_2_2 §4): 太る — letters appear thin and grow to the line's weight. */
+/* 文字PVメーカー v2 — original work. Weight entrance (v2.2, DESIGN_2_2 §4): 太字へ — letters appear thin and grow to the line's weight. */
 MV.def('parts/arrive/weight', ['parts/kit'], (K) => {
   'use strict';
 
@@ -21,8 +21,8 @@ MV.def('parts/arrive/weight', ['parts/kit'], (K) => {
 
   const weightGrow = K.arrive({
     key: 'weightGrow',
-    label: { ja: '太る', en: 'Weight grow' },
-    blurb: { ja: '細い字で現れ、太い字へ育っていく', en: 'Letters appear thin and grow bold' },
+    label: { ja: '太字へ', en: 'Weight grow' },
+    blurb: { ja: '細い字で現れ、太い字へ育っていく（太さの種類が多い書体で）', en: 'Letters appear thin and grow bold (on typefaces with many weights)' },
     tags: ['bold', 'slow'], family: 'weight', pool: false, late: true, optIn: 'weight', unit: 'glyph', weight: 2.5,
     traits: { energy: [0.1, 0.85], roles: ['lyric', 'focus', 'title'] },
     shared: {

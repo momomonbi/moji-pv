@@ -2180,13 +2180,13 @@ MV.def('i18n/strings', [], () => ({
   // --- PV22 P3 (キメ) ---
 
   // --- PV22 P4 (モーフ・太さ) ---
-  'fld.weightAuto': ['太さを動かす', 'Animate stroke weight'],
-  'fld.weightAuto.note': ['太さの種類が多い書体の行で、細い字から太い字へ育つ入りや、拍に合わせて太さが脈打つ見せを自動で使います。',
-    'On lines whose typeface has many weights, uses entrances that grow from thin to bold and holds whose weight pulses with the beat.'],
+  'fld.weightAuto': ['字の太さを動かす', 'Animate letter weight'],
+  'fld.weightAuto.note': ['太さの種類が多い書体の行で、細い字から太い字へ育つ入り、拍に合わせて太さが脈打つ見せ、細くなって消える抜けを自動で使います。',
+    'On lines whose typeface has many weights, uses entrances that grow from thin to bold, holds whose weight pulses with the beat and exits that thin out.'],
   'fld.textWeight': ['太さ', 'Weight'],
   'fld.textWeight.note': ['書体にない太さは、いちばん近い太さで表示します。', 'A weight the typeface lacks shows as its nearest weight.'],
   'whyRule.text.weight': ['書体の太さのまま', 'The typeface\'s own weight'],
-  'whyRule.weight.grow': ['太る入りなので、書体のいちばん太い字で終わる', 'Enters growing, so it ends at the typeface\'s boldest weight'],
+  'whyRule.weight.grow': ['太字へ育つ入りなので、書体の太い字（800まで）で終わる', 'Enters growing, so it ends at a bold weight of the typeface (up to 800)'],
   'warn.weight-flat': ['この書体は太さの種類が少ないため、太さの動きが見えません（{detail}）',
     'This typeface has too few weights, so the weight animation does not show ({detail})'],
   'warn.weight-style': ['文字の飾り（縁取り・影・二色）があるため、太さは段階的に変わります（{detail}）',
@@ -2198,10 +2198,11 @@ MV.def('i18n/strings', [], () => ({
   'whyRule.rules.old': ['この機能より前に作った作品なので、はじめはオフ', 'Made before this feature, so it starts off'],
   // M4 モーフ (glyphMorph, 「同じ字をつなぐ」)
   'fld.morphAuto': ['同じ字をつなぐ', 'Link shared letters'],
-  'fld.morphAuto.note': ['前の行と同じ字があるとき、その字が次の行の位置へ動き、ほかの字は溶けて入れ替わります（モーフ）。',
-    'When a line shares letters with the one before, those letters glide to their new places and the others melt into the new text (morph).'],
+  'fld.morphAuto.note': ['前の行と同じ言葉（2字以上）があるとき（同じ背景のとき）、その字が次の行の位置へ動き、ほかの字は溶けて入れ替わります（モーフ）。ほかの行の間でも使うときは、切り替えで「モーフ」を選びます。',
+    'Where a line shares a word of two or more letters with the one before (in the same background), those letters glide to their new places and the others melt into the new text (morph). To use it between other lines, choose Glyph morph as the transition.'],
   'fld.morphLine': ['前の行から字をつなぐ', 'Link letters from the line before'],
-  'fld.morphLine.note': ['前の行からこの行へ変わるところだけに効きます。', 'Applies only where the line before changes into this line.'],
+  'fld.morphLine.note': ['前の行からこの行へ変わるところだけに効きます。つなぐにしても、同じ言葉（2字以上）があり背景が同じときだけモーフになります（いつでもモーフにするなら、切り替えで「モーフ」を選びます）。',
+    'Applies only where the line before changes into this line. Even when linked, the morph happens only where the lines share a word of two or more letters and the background stays the same (to always morph, choose Glyph morph as the transition).'],
   'fld.morphHandover.note': ['モーフの間に前の行の字は次の行へ渡され、モーフが終わると前の行は消えます。',
     'During the morph the letters of the line before pass to the next line; when it ends, the line before is gone.'],
   'opt.morphLine.on': ['つなぐ', 'Link'],
@@ -2210,7 +2211,7 @@ MV.def('i18n/strings', [], () => ({
   'opt.melt.fade': ['その場で消える', 'Fade where they are'],
   'whyRule.morph': ['前の行と同じ字があるので、字をつないだ', 'Shares letters with the line before, so they are linked'],
   'thumb.morphA': ['青い空', 'BLUE SKY'],
-  'thumb.morphB': ['青い海', 'BLUE SEA'],
+  'thumb.morphB': ['あの青い海', 'A DEEP BLUE SEA'],
 
   // --- PV22 P5 (タイミング) ---
 

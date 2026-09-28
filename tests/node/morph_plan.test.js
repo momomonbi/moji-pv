@@ -303,21 +303,21 @@ test('pins: a pinned morph where nothing is shared melts only (gap pairs or none
   assert.deepEqual([cutOf(plan, 'ra~0').slots.arrive.v, cutOf(plan, 'ra~0').slots.arrive.from], ['instantShow', 'rule']);
 });
 
-test('pins: a morph that replaces an entrance with 太る takes the grow rule\'s bold weight away', () => {
-  // find a seed where 光る窓の向こう enters with 太る by itself (the switch of the morph off), then turn the morph on
+test('pins: a morph that replaces an entrance with 太字へ takes the grow rule\'s bold weight away', () => {
+  // find a seed where 光る窓の向こう enters with 太字へ by itself (the switch of the morph off), then turn the morph on
   let found = null;
   for (let seed = 1; seed < 400 && !found; seed++) {
     const p = planOf(G.morphDoc(GROUND, { seed, pins: { 'work:morph.auto': pin(false) } }));
     const c = cutOf(p, 'rc~0');
     if (c.slots.arrive.v === 'weightGrow' && c.slots['text.weight'] && c.slots['text.weight'].from === 'rule') found = seed;
   }
-  assert.ok(found, 'a seed with 太る on 光る窓の向こう');
+  assert.ok(found, 'a seed with 太字へ on 光る窓の向こう');
   const p = planOf(G.morphDoc(GROUND, { seed: found }));
   const c = cutOf(p, 'rc~0');
   assert.equal(seamInto(p, 'rc~0').slot.v, MORPH);
   assert.equal(c.slots.arrive.v, 'instantShow');
-  assert.equal(c.slots['text.weight'], undefined, 'the bold end belongs to 太る');
-  // a pinned 太る is never replaced and keeps it (the pinned entrance also keeps the rule away: a pinned seam here)
+  assert.equal(c.slots['text.weight'], undefined, 'the bold end belongs to 太字へ');
+  // a pinned 太字へ is never replaced and keeps it (the pinned entrance also keeps the rule away: a pinned seam here)
   const kept = planOf(G.morphDoc(GROUND, { seed: found, pins: { 'line/rc:arrive': pin('weightGrow'), 'cut/rc~0:seam': pin(MORPH, { sig: '光る窓の向こう' }) } }));
   assert.equal(cutOf(kept, 'rc~0').slots.arrive.v, 'weightGrow');
   assert.equal(cutOf(kept, 'rc~0').slots['text.weight'].from, 'rule');

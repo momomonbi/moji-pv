@@ -711,8 +711,8 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
       return next;
     }
 
-    // The grow rule's bold end weight (planner/cast growWeight) belongs to 太る: a seam that replaced the entrance takes it
-    // away (a pinned 太る is never replaced, and keeps it).
+    // The grow rule's bold end weight (planner/cast growWeight) belongs to 太字へ: a seam that replaced the entrance takes it
+    // away (a pinned 太字へ is never replaced, and keeps it).
     function dropGrowWeight(c) {
       const tw = c.slots['text.weight'];
       if (tw && tw.from === 'rule' && !(c.slots.arrive && c.slots.arrive.v === GROW_KEY)) delete c.slots['text.weight'];

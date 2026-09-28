@@ -59,7 +59,7 @@ test('weight ladders: ladderOf, atWeight, weightPair, roomOf, growTop, rungsBetw
   assert.equal(FACES.growTop(FACES.faceRef('Dela Gothic One', 400, 'ja')), 400, 'a one-weight family: its weight');
   assert.equal(FACES.growTop(zen), 700, '900 is above the grow top');
   // rungsBetween: the three parts' reaches
-  assert.deepEqual(FACES.rungsBetween(NOTO, -400, 0), [100, 200, 300, 400, 500], '太る/細る from the lightest');
+  assert.deepEqual(FACES.rungsBetween(NOTO, -400, 0), [100, 200, 300, 400, 500], '太字へ/細字へ from the lightest');
   assert.deepEqual(FACES.rungsBetween(NOTO, 0, 250), [500, 600, 700, 800], '脈打つ太さ up 250: to the rung above 750');
   assert.deepEqual(FACES.rungsBetween(NOTO, -150, 0), [300, 400, 500]);
   assert.deepEqual(FACES.rungsBetween(zen, -600, 0), [400, 500, 600, 700], 'clamped to the ladder');
@@ -386,7 +386,7 @@ test('FontBook: when a family\'s draw-only characters grow, every draw-only weig
   await book.ready([NOTO], { 'Noto Sans JP': '青い空夜の町' });              // the main path owns 500
   const r = (w) => FACES.atWeight(NOTO, w);
   const A = [100, 200, 300, 400], B = [600, 700, 800];
-  // 太る on 青い空 asks for 100–400; then 脈打つ太さ on 夜の町 asks for 600–800 with new characters
+  // 太字へ on 青い空 asks for 100–400; then 脈打つ太さ on 夜の町 asks for 600–800 with new characters
   await book.ready(A.map(r), { 'Noto Sans JP': '青い空' }, { drawOnly: true });
   book.request(B.map(r), { 'Noto Sans JP': '夜の町' }, { drawOnly: true });
   for (const w of A) {
@@ -410,7 +410,7 @@ test('FontBook: when a family\'s draw-only characters grow, every draw-only weig
   assert.equal(book.epoch, 1);
 });
 
-// --- 3. the parts 太る and 細る -----------------------------------------------------------------------------------------
+// --- 3. the parts 太字へ and 細字へ -----------------------------------------------------------------------------------------
 
 const CATALOG = MV.use('parts/catalog').defaultRegistry();
 const FAC = MV.use('engine/facade');
@@ -428,7 +428,7 @@ function sampleOf(kind, key, params) {
   return FAC.samplePlan(CATALOG, { kind, key, params: params || null }, { faces: NOTO_FACES });
 }
 
-test('太る and 細る: late, opt-in weight, pool false; 細る is a real exit; reach = thin × room below', () => {
+test('太字へ and 細字へ: late, opt-in weight, pool false; 細字へ is a real exit; reach = thin × room below', () => {
   for (const [kind, key] of [['arrive', 'weightGrow'], ['depart', 'weightThin']]) {
     const def = CATALOG.get(kind, key);
     assert.deepEqual([def.pool, def.late, def.optIn, def.family], [false, true, 'weight', 'weight'], key);
@@ -448,7 +448,7 @@ test('太る and 細る: late, opt-in weight, pool false; 細る is a real exit;
     assert.deepEqual([...b.wt], [-reach, 0], key + ': the reach is the room below 800');
     assert.equal(b.p.reach, reach);
     assert.deepEqual([...scene.wtReach], [-reach, 0]);
-    if (kind === 'depart') assert.deepEqual([b.exit, b.t0, b.live], [true, scene.times.out, 'after'], '細る runs as an exit');
+    if (kind === 'depart') assert.deepEqual([b.exit, b.t0, b.live], [true, scene.times.out, 'after'], '細字へ runs as an exit');
     else assert.deepEqual([b.exit, b.t0, b.live], [false, scene.times.a, 'until']);
   }
   // thin 0.5: half the room
@@ -462,7 +462,7 @@ test('太る and 細る: late, opt-in weight, pool false; 細る is a real exit;
   assert.deepEqual([...engine.scene('cut', 0).wtReach], [0, 0]);
 });
 
-test('太る: every glyph starts at the lightest weight, ends at the face weight (identity), fading in; 細る the reverse', () => {
+test('太字へ: every glyph starts at the lightest weight, ends at the face weight (identity), fading in; 細字へ the reverse', () => {
   const { engine } = engineWith(null);
   engine.setPlan(sampleOf('arrive', 'weightGrow'));
   const scene = engine.scene('cut', 0);
@@ -512,7 +512,8 @@ test('脈打つ太さ: late, opt-in weight; bolder where the face has room for t
     [at(500), { swing: 300 }, 1, 300, 'room both ways: bolder'],
     [at(800), { swing: 200 }, -1, 200, 'above 100 < swing: lighter'],
     [at(700, 'Zen Old Mincho'), { swing: 350 }, -1, 300, 'neither holds the swing: the larger room (below 300), capped by it'],
-    [at(500), { swing: 400, amount: 0 }, 1, 200, '強さ 0: half the swing'],
+    [at(500), { swing: 400, amount: 0 }, 1, 280, '強さ 0: 0.7 of the swing'],
+    [at(500), { swing: 300, amount: 0.5 }, 1, 255, 'the automatic swing moves two rungs or more'],
     [at(400, 'Dela Gothic One'), { swing: 300 }, 1, 0, 'one weight: no pulse'],
     [at(100), { swing: 520 }, 1, 400, 'never past 400 (the jump limit), whatever reaches make'],
   ];
@@ -559,7 +560,7 @@ test('脈打つ太さ: without a beat grid the weight breathes on a cosine of th
   assert.ok(maxStep <= 60, 'largest step ' + maxStep.toFixed(2));
 });
 
-test('脈打つ太さ: a scene declares its reach; with 太る the reach is the union', () => {
+test('脈打つ太さ: a scene declares its reach; with 太字へ the reach is the union', () => {
   const { engine } = engineWith(null);
   const plan = sampleOf('dwell', 'weightPulse');
   assert.deepEqual([plan.cuts[0].slots['text.face'].v, plan.cuts[0].slots['text.weight'].v], ['body', 800]);
@@ -568,7 +569,7 @@ test('脈打つ太さ: a scene declares its reach; with 太る the reach is the 
   const pb = scene.behaviours.find((x) => x.wt);
   assert.equal(pb.p.dirW, -1, 'at 800 of Noto Sans JP only 100 above: it pulses lighter');
   assert.deepEqual([...scene.wtReach], [-pb.p.amp, 0]);
-  // the same cut entering with 太る: the reach runs from the grow's lightest weight
+  // the same cut entering with 太字へ: the reach runs from the grow's lightest weight
   const both = JSON.parse(JSON.stringify(plan));
   Object.defineProperty(both, 'env', { enumerable: false, value: plan.env });
   both.cuts[0].slots.arrive = sampleOf('arrive', 'weightGrow').cuts[0].slots.arrive;
@@ -607,7 +608,7 @@ function engineWith(fonts) {
   return { rec, engine, measurer };
 }
 
-test('facade: a scene with 太る asks for its lighter weights as draw-only faces; they never rebuild or hold up the scene', async () => {
+test('facade: a scene with 太字へ asks for its lighter weights as draw-only faces; they never rebuild or hold up the scene', async () => {
   const book = fakeBook();
   // drawStatus: the main faces are ready; a draw-only face is idle until loaded
   const mainKeys = new Set();
@@ -683,7 +684,7 @@ test('facade + FontBook: a rung asked for by an earlier scene is ready only with
     engine.setPlan(FAC.samplePlan(CATALOG, { kind: 'arrive', key: 'weightGrow', params: { thin } }, { faces: NOTO_FACES, text }));
     return engine.scene('cut', 0);
   };
-  // 1. 太る on 青い空 (rungs 100–700); 2. a shorter 太る on 夜の町 (500–700, new characters); 3. 太る on 夜の町 again
+  // 1. 太字へ on 青い空 (rungs 100–700); 2. a shorter 太字へ on 夜の町 (500–700, new characters); 3. 太字へ on 夜の町 again
   // (100–700: every rung and character was asked for before, so the facade asks for nothing new)
   build('青い空', 1);
   for (let i = 0; i < 4; i++) await tick();
@@ -748,8 +749,8 @@ test('planner: in a new work the weight parts join the pools of cuts whose face 
     return { doc: d, key: c.key };
   };
   let x = withFace('nightTram', 'serif', 1);
-  assert.ok(traceKeys(x.doc, x.key, 'arrive').includes('weightGrow'), 'serif 700 Zen Old Mincho: 太る offered');
-  assert.ok(traceKeys(x.doc, x.key, 'depart').includes('weightThin'), 'serif 700: 細る offered (300 below)');
+  assert.ok(traceKeys(x.doc, x.key, 'arrive').includes('weightGrow'), 'serif 700 Zen Old Mincho: 太字へ offered');
+  assert.ok(traceKeys(x.doc, x.key, 'depart').includes('weightThin'), 'serif 700: 細字へ offered (300 below)');
   x = withFace('nightTram', 'display', 1);
   assert.ok(!traceKeys(x.doc, x.key, 'arrive').includes('weightGrow'), 'Dela Gothic One: no room');
   x = withFace('risoPink', 'body', 1);
@@ -770,7 +771,7 @@ test('planner: in a new work the weight parts join the pools of cuts whose face 
     'lyric and focus cuts only');
 });
 
-test('planner: the grow rule gives 太る the bold end of the face; a 太さ pin wins; motion-own has none', () => {
+test('planner: the grow rule gives 太字へ the bold end of the face; a 太さ pin wins; motion-own has none', () => {
   const base = PL.plan(basicDoc({ gen: 1, pins: { 'work:theme': pin('monoPress') } }), { registry: CATALOG });
   const c = lyricCuts(base)[2];
   const pins = { 'work:theme': pin('monoPress'), ['line/' + c.line + ':text.face']: pin('body'), ['line/' + c.line + ':arrive']: pin('weightGrow') };
@@ -784,7 +785,7 @@ test('planner: the grow rule gives 太る the bold end of the face; a 太さ pin
   plan = PL.plan(basicDoc({ gen: 1, pins: Object.assign({}, pins, { ['line/' + c.line + ':text.weight']: pin(600) }) }), { registry: CATALOG });
   cut = plan.cuts.find((x) => x.key === c.key);
   assert.deepEqual([cut.slots['text.weight'].v, cut.slots['text.weight'].from], [600, 'pin:line']);
-  // the switch off (an older document): the pinned 太る grows to the face's own weight
+  // the switch off (an older document): the pinned 太字へ grows to the face's own weight
   plan = PL.plan(basicDoc({ pins }), { registry: CATALOG });
   assert.equal(plan.cuts.find((x) => x.key === c.key).slots['text.weight'], undefined);
   // a layout that moves the text itself forces the motions: no rule
@@ -801,13 +802,14 @@ test('planner: a pinned weight part where it cannot show warns weight-flat / wei
   const flat = { 'work:theme': pin('nightTram'), ['line/' + c.line + ':text.face']: pin('display'), ['line/' + c.line + ':arrive']: pin('weightGrow') };
   const styled = { 'work:theme': pin('monoPress'), ['line/' + c.line + ':text.face']: pin('body'), ['line/' + c.line + ':text.style']: pin('outline'),
     ['line/' + c.line + ':depart']: pin('weightThin') };
-  for (const [pins, code, family] of [[flat, 'weight-flat', 'Dela Gothic One'], [styled, 'weight-style', 'Noto Sans JP']]) {
+  for (const [pins, code, family, kind] of [[flat, 'weight-flat', 'Dela Gothic One', 'arrive'], [styled, 'weight-style', 'Noto Sans JP', 'depart']]) {
     for (let k = 0; k < 2; k++) {                                  // the second plan takes the casts from the cache
       const plan = PL.plan(basicDoc({ gen: 1, pins }), { registry: CATALOG });
       const w = plan.warnings.filter((x) => x.code === code);
       const own = plan.cuts.filter((x) => x.line === c.line).map((x) => x.key);
       assert.equal(w.length, own.length, code + ' plan ' + k + ': once per cut of the line');
-      assert.ok(w.every((x) => own.includes(x.cut) && x.line === c.line && x.detail === family), JSON.stringify(w));
+      assert.ok(w.every((x) => own.includes(x.cut) && x.line === c.line && x.detail === family && x.path === 'cut/' + x.cut + ':' + kind),
+        JSON.stringify(w));
       if (k === 1) assert.ok(plan.reuse.casts > 0, 'the cast cache was used');
     }
   }
@@ -840,7 +842,7 @@ test('planner: a text.weight pin decides its cuts alone and changes their finger
   assert.ok(CMD.reduce(doc, { t: 'pin.set', path: 'work:weight.auto', v: false, by: 'user' }).pins['work:weight.auto']);
 });
 
-test('planner: 太る is chosen on about 10 % of the eligible lyric lines of new works, 脈打つ太さ on about 4 % (rate)', () => {
+test('planner: 太字へ is chosen on about 10 % of the eligible lyric lines of new works, 脈打つ太さ on about 4 % (rate)', () => {
   let eligible = 0, grow = 0, pulseEligible = 0, pulse = 0;
   for (const { doc } of corpus.corpus(2, ['16:9'])) {
     doc.look.gen = 1;
@@ -855,7 +857,7 @@ test('planner: 太る is chosen on about 10 % of the eligible lyric lines of new
   }
   const share = grow / eligible;
   assert.ok(eligible > 300, 'eligible cuts: ' + eligible);
-  assert.ok(share >= 0.06 && share <= 0.14, '太る on ' + (100 * share).toFixed(1) + ' % of the eligible lines');
+  assert.ok(share >= 0.06 && share <= 0.14, '太字へ on ' + (100 * share).toFixed(1) + ' % of the eligible lines');
   // 脈打つ太さ: weight 0.5 (the dwell pools are about half the size of the entrance pools; weight 1 gave 6.7 %)
   const pulseShare = pulse / pulseEligible;
   assert.ok(pulseEligible > 300, 'eligible for 脈打つ太さ: ' + pulseEligible);

@@ -15,7 +15,7 @@ must all be there) × every aspect × a still and a video fixture of tests/helpe
 blank, no errors, the medium drawn). DESIGN_EXTREME: the twelve EXTREME presets (lab kind xshot) take the camera checks
 too, rendered and as picker thumbnails.
 DESIGN_2_2 §4: the part browser tiles of モーフ (glyphMorph, with the page's own shared-letter lines 青い空 / 青い海) and of
-太る, 脈打つ太さ and 細る animate: over 16 times of the canned 3.2 s sample each tile shows at least 4 different pictures,
+太字へ, 脈打つ太さ and 細字へ animate: over 16 times of the canned 3.2 s sample each tile shows at least 4 different pictures,
 none blank.
 Run: PW_EXECUTABLE=/opt/pw-browsers/chromium python3 tests/browser/parts_gallery.py [--parts examples] [--aspects 16:9,9:16]
 """

@@ -217,7 +217,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
     const textStyleField = () => F({ path: 'text.style', widget: 'choice', label: 'fld.textStyle', spec: enumSpec(TEXT_STYLES),
       options: opts(TEXT_STYLES, 'fld.style.') });
     const textScaleField = (label) => F({ path: 'text.scale', widget: 'number', label: label || 'fld.textScale', spec: SPEC.scale });
-    // 太さ (v2.2, DESIGN_2_2 §4): the weight of the lyric face (自動 = the typeface's, or the bold end of 太る).
+    // 太さ (v2.2, DESIGN_2_2 §4): the weight of the lyric face (自動 = the typeface's, or the bold end of 太字へ).
     const textWeightField = () => F({ path: 'text.weight', widget: 'number', label: 'fld.textWeight', spec: SPEC.weight,
       note: 'fld.textWeight.note', auto: true, basic: false });
     const orientField = () => F({ path: 'orient', widget: 'choice', label: 'fld.orient', spec: enumSpec(['h', 'v']),

@@ -46,8 +46,8 @@ function goldenMorphDoc(ground) {
 }
 
 // weight: the basic fixture as a new work on frostGlass, every line in its display face (Murecho 600, nine weights; plain
-// lettering): 太る with
-// 太さ 800 pinned (r4), 太る taking the grow rule (r5), 脈打つ太さ (r6), 細る (r7), 太る on outline lettering (ra: steps).
+// lettering): 太字へ with
+// 太さ 800 pinned (r4), 太字へ taking the grow rule (r5), 脈打つ太さ (r6), 細字へ (r7), 太字へ on outline lettering (ra: steps).
 function goldenWeightDoc() {
   const doc = corpus.project('basic').doc;
   doc.look = Object.assign({}, doc.look, { gen: 1 });
@@ -72,7 +72,7 @@ const CROSSFADE = new Set(['plain', 'glow']);
 
 // The 40 frame times of a golden document: the 32 times duration · (i + 0.5) / 32, then 8 inside the package's motions,
 // two for each of up to 4 picks: the first 4 glyph seams (plan order), lo + {0.25, 0.75} · dur with lo = at − dur/2; then
-// cuts with a weight part — the first cut of each weight kind, the first 太る on lettering that steps (outline, shadow,
+// cuts with a weight part — the first cut of each weight kind, the first 太字へ on lettering that steps (outline, shadow,
 // duo), then the next weight cuts in plan order — arrive → a + {0.3, 0.6} · p.dur, dwell → t0 + {0.25, 0.5} s, depart →
 // b − {0.7, 0.4} · p.dur. Sorted.
 function glyphTimes(plan, registry) {
@@ -105,7 +105,7 @@ function glyphTimes(plan, registry) {
 // --- perf.py rows glyph-morph and glyph-weight (DESIGN_2_2 §4) ---------------------------------------------------------
 
 // The comparator of a golden document for the same-run A/B: every glyph seam pinned to blendDissolve (morph), or every
-// weight part pinned to a comparable catalog part (太る → fogIn, 脈打つ太さ → thumpSwell, 細る → fogOut) with the 太さ pins
+// weight part pinned to a comparable catalog part (太字へ → fogIn, 脈打つ太さ → thumpSwell, 細字へ → fogOut) with the 太さ pins
 // dropped (weight). Pins can change what the planner picks elsewhere, so it plans again until none is left (≤ 4 rounds).
 const SWAP = Object.freeze({ arrive: 'fogIn', dwell: 'thumpSwell', depart: 'fogOut' });
 

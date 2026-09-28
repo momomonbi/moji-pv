@@ -178,11 +178,14 @@ MV.def('ui/widgets', ['ui/dom', 'ui/icons', 'i18n/t', 'core/color', 'ui/playbar'
         preview(v) { value = clampV(v); range.value = String(value * scale); show(value); } },
       update(st) {
         value = typeof st.value === 'number' && Number.isFinite(st.value) ? st.value : null;
-        // Without a value the slider rests at its start, drawn as unset, and the box is empty with 自動 / いろいろ.
-        if (!g) range.value = String((value === null ? min : value) * scale);
+        // Without a value the slider rests at its start, drawn as unset, and the box is empty with 自動 / いろいろ. A row
+        // that knows its automatic value (extra.autoValue: 太さ, the face's weight) rests there and says it: 自動 600.
+        const av = value === null && !st.mixed && st.auto && st.extra && typeof st.extra.autoValue === 'number' ? st.extra.autoValue : null;
+        if (!g) range.value = String((value === null ? (av !== null ? clampV(av) : min) : value) * scale);
         el.classList.toggle('is-unset', value === null || !!st.mixed);
         if (document.activeElement !== box) { if (st.mixed) box.value = ''; else show(value); }
-        box.placeholder = st.mixed ? t('state.mixed') : value === null ? (st.auto ? t('state.auto') : '—') : '';
+        box.placeholder = st.mixed ? t('state.mixed') : value === null ? (st.auto ? t('state.auto') + (av !== null
+          ? ' ' + numberText(av, scale, shownStep) : '') : '—') : '';
         range.disabled = box.disabled = !!st.readOnly;
         const gv = st.extra && typeof st.extra.ghost === 'number' ? st.extra.ghost : null;
         ghost.hidden = gv === null;

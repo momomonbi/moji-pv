@@ -1,4 +1,4 @@
-/* 文字PVメーカー v2 — original work. Weight exit (v2.2, DESIGN_2_2 §4): 細る — letters thin out and fade. */
+/* 文字PVメーカー v2 — original work. Weight exit (v2.2, DESIGN_2_2 §4): 細字へ — letters thin out and fade. */
 MV.def('parts/depart/weight', ['parts/kit'], (K) => {
   'use strict';
 
@@ -6,7 +6,7 @@ MV.def('parts/depart/weight', ['parts/kit'], (K) => {
   const FADE_IN = K.ease('quadIn');
   const FADE_FROM = 0.6;         // a glyph keeps its alpha for the first 60 % of its motion, then fades out
 
-  // The reach: `thin` of the weight room below the line's face (as 太る, parts/arrive/weight).
+  // The reach: `thin` of the weight room below the line's face (as 太字へ, parts/arrive/weight).
   function thinPrep(env, target, p) {
     return Object.assign({}, p, { reach: Math.round(p.thin * K.weightRoom(target).below) });
   }
@@ -21,8 +21,8 @@ MV.def('parts/depart/weight', ['parts/kit'], (K) => {
 
   const weightThin = K.depart({
     key: 'weightThin',
-    label: { ja: '細る', en: 'Weight thin' },
-    blurb: { ja: '字が細くなりながら消えていく', en: 'Letters thin out and fade' },
+    label: { ja: '細字へ', en: 'Weight thin' },
+    blurb: { ja: '字が細くなりながら消えていく（太さの種類が多い書体で）', en: 'Letters thin out and fade (on typefaces with many weights)' },
     tags: ['soft', 'slow'], family: 'weight', pool: false, late: true, optIn: 'weight', unit: 'glyph',
     traits: { energy: [0.05, 0.7], roles: ['lyric', 'focus', 'title'] },
     shared: {

@@ -651,6 +651,7 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent);
 .state-tag[data-state="mixed"] { border-style: dashed; }
 .frow[data-state="inactive"] > :not(.fr-top):not(.fr-why) { opacity: 0.5; }
 .fr-why { font-size: 11.5px; line-height: 1.55; color: var(--muted); }
+.fr-note.is-warn { color: #ffe2a8; }
 .insp-list { display: flex; flex-direction: column; gap: 2px; }
 .insp-item {
   display: flex; align-items: center; gap: 8px; width: 100%; min-height: 30px; padding: 0 8px; border: 0; border-radius: 7px;

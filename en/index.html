@@ -1,6 +1,6 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-XVSVXY38M4lpqmj37Ltg4o6CeGN/SgxUyckeI7cQnrQ='; style-src 'sha256-CBzRvq4sWr3CF69hafDp1l8UkHnSy18JQMXGJJhPDYI=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-i5/FmJdlimSpsI5SKHascxIGu9DF7LpB/fet7fSmM4c='; style-src 'sha256-ABj6LEK1nsY1s8Ap8XAUq81Z96KOsNbMQS6eY5FCkxU=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
 <title>Moji PV Maker</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -654,6 +654,7 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent);
 .state-tag[data-state="mixed"] { border-style: dashed; }
 .frow[data-state="inactive"] > :not(.fr-top):not(.fr-why) { opacity: 0.5; }
 .fr-why { font-size: 11.5px; line-height: 1.55; color: var(--muted); }
+.fr-note.is-warn { color: #ffe2a8; }
 .insp-list { display: flex; flex-direction: column; gap: 2px; }
 .insp-item {
   display: flex; align-items: center; gap: 8px; width: 100%; min-height: 30px; padding: 0 8px; border: 0; border-radius: 7px;
@@ -10966,7 +10967,7 @@ MV.def('engine/text/faces', ['core/script'], (S) => {
     return { below: ref.weight - L[0], above: L[L.length - 1] - ref.weight };
   }
 
-  // growTop(ref) → the heaviest served weight up to GROW_TOP (the bold end of 太る); the face's own weight when none is.
+  // growTop(ref) → the heaviest served weight up to GROW_TOP (the bold end of 太字へ); the face's own weight when none is.
   const GROW_TOP = 800;
   function growTop(ref) {
     let t = null;
@@ -14096,13 +14097,13 @@ MV.def('i18n/strings', [], () => ({
   // --- PV22 P3 (キメ) ---
 
   // --- PV22 P4 (モーフ・太さ) ---
-  'fld.weightAuto': ['太さを動かす', 'Animate stroke weight'],
-  'fld.weightAuto.note': ['太さの種類が多い書体の行で、細い字から太い字へ育つ入りや、拍に合わせて太さが脈打つ見せを自動で使います。',
-    'On lines whose typeface has many weights, uses entrances that grow from thin to bold and holds whose weight pulses with the beat.'],
+  'fld.weightAuto': ['字の太さを動かす', 'Animate letter weight'],
+  'fld.weightAuto.note': ['太さの種類が多い書体の行で、細い字から太い字へ育つ入り、拍に合わせて太さが脈打つ見せ、細くなって消える抜けを自動で使います。',
+    'On lines whose typeface has many weights, uses entrances that grow from thin to bold, holds whose weight pulses with the beat and exits that thin out.'],
   'fld.textWeight': ['太さ', 'Weight'],
   'fld.textWeight.note': ['書体にない太さは、いちばん近い太さで表示します。', 'A weight the typeface lacks shows as its nearest weight.'],
   'whyRule.text.weight': ['書体の太さのまま', 'The typeface\'s own weight'],
-  'whyRule.weight.grow': ['太る入りなので、書体のいちばん太い字で終わる', 'Enters growing, so it ends at the typeface\'s boldest weight'],
+  'whyRule.weight.grow': ['太字へ育つ入りなので、書体の太い字（800まで）で終わる', 'Enters growing, so it ends at a bold weight of the typeface (up to 800)'],
   'warn.weight-flat': ['この書体は太さの種類が少ないため、太さの動きが見えません（{detail}）',
     'This typeface has too few weights, so the weight animation does not show ({detail})'],
   'warn.weight-style': ['文字の飾り（縁取り・影・二色）があるため、太さは段階的に変わります（{detail}）',
@@ -14114,10 +14115,11 @@ MV.def('i18n/strings', [], () => ({
   'whyRule.rules.old': ['この機能より前に作った作品なので、はじめはオフ', 'Made before this feature, so it starts off'],
   // M4 モーフ (glyphMorph, 「同じ字をつなぐ」)
   'fld.morphAuto': ['同じ字をつなぐ', 'Link shared letters'],
-  'fld.morphAuto.note': ['前の行と同じ字があるとき、その字が次の行の位置へ動き、ほかの字は溶けて入れ替わります（モーフ）。',
-    'When a line shares letters with the one before, those letters glide to their new places and the others melt into the new text (morph).'],
+  'fld.morphAuto.note': ['前の行と同じ言葉（2字以上）があるとき（同じ背景のとき）、その字が次の行の位置へ動き、ほかの字は溶けて入れ替わります（モーフ）。ほかの行の間でも使うときは、切り替えで「モーフ」を選びます。',
+    'Where a line shares a word of two or more letters with the one before (in the same background), those letters glide to their new places and the others melt into the new text (morph). To use it between other lines, choose Glyph morph as the transition.'],
   'fld.morphLine': ['前の行から字をつなぐ', 'Link letters from the line before'],
-  'fld.morphLine.note': ['前の行からこの行へ変わるところだけに効きます。', 'Applies only where the line before changes into this line.'],
+  'fld.morphLine.note': ['前の行からこの行へ変わるところだけに効きます。つなぐにしても、同じ言葉（2字以上）があり背景が同じときだけモーフになります（いつでもモーフにするなら、切り替えで「モーフ」を選びます）。',
+    'Applies only where the line before changes into this line. Even when linked, the morph happens only where the lines share a word of two or more letters and the background stays the same (to always morph, choose Glyph morph as the transition).'],
   'fld.morphHandover.note': ['モーフの間に前の行の字は次の行へ渡され、モーフが終わると前の行は消えます。',
     'During the morph the letters of the line before pass to the next line; when it ends, the line before is gone.'],
   'opt.morphLine.on': ['つなぐ', 'Link'],
@@ -14126,7 +14128,7 @@ MV.def('i18n/strings', [], () => ({
   'opt.melt.fade': ['その場で消える', 'Fade where they are'],
   'whyRule.morph': ['前の行と同じ字があるので、字をつないだ', 'Shares letters with the line before, so they are linked'],
   'thumb.morphA': ['青い空', 'BLUE SKY'],
-  'thumb.morphB': ['青い海', 'BLUE SEA'],
+  'thumb.morphB': ['あの青い海', 'A DEEP BLUE SEA'],
 
   // --- PV22 P5 (タイミング) ---
 
@@ -19284,7 +19286,7 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       'el.hide': { type: 'bool' },
       // 「くり返しの行をそろえる」 (DESIGN_2_1 §4.10): pinned at work or line scope, never at a cut (core/commands).
       'repeat.same': { type: 'bool' },
-      // 太さ (v2.2, DESIGN_2_2 §4): the weight of the cut's lyric face role; a pin, or the grow rule of 太る.
+      // 太さ (v2.2, DESIGN_2_2 §4): the weight of the cut's lyric face role; a pin, or the grow rule of 太字へ.
       'text.weight': { type: 'int', min: 100, max: 900 },
     }, CAM.SLOT_SPECS));
     const SEASON_SPEC = LK.LOOK_SPECS.season;
@@ -20162,11 +20164,11 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       return els;
     }
 
-    // --- weight animation (v2.2, DESIGN_2_2 §4: 太る, 脈打つ太さ, 細る) -------------------------------------------
+    // --- weight animation (v2.2, DESIGN_2_2 §4: 太字へ, 脈打つ太さ, 細字へ) -------------------------------------------
 
     // The weight parts join a cut's pools (opt-in 'weight') only when the work's 「太さを動かす」 is on (ctx.glyph.weight),
     // the cut is a lyric (or focus) cut lettered plain or glowing (the other styles cannot crossfade weights) and its
-    // face has room for the motion; the grow rule gives an entrance with 太る the face's bold end. Documents without the
+    // face has room for the motion; the grow rule gives an entrance with 太字へ the face's bold end. Documents without the
     // switch never reach any of this, so their pools and plans are unchanged.
     const WEIGHT_OPT_IN = Object.freeze(['weight']);
     const GROW_KEY = 'weightGrow';
@@ -20222,7 +20224,7 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       }
     }
 
-    // The grow rule: an entrance with 太る (chosen, pinned or aligned) and no 太さ pin ends at the face's heaviest served
+    // The grow rule: an entrance with 太字へ (chosen, pinned or aligned) and no 太さ pin ends at the face's heaviest served
     // weight up to 800 (FACES.growTop), so the line really goes from thin to bold. Part of the cast, so it is cached and
     // replayed with it. planner/tracks takes it away when a seam replaces the entrance.
     function growWeight(st) {
@@ -20239,7 +20241,8 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
 
     // A weight part a pin or a rule put where it cannot show (the automatic path never picks it there): the face has too
     // few weights (weight-flat), or the lettering's outline, shadow or second colour makes the weight change in steps
-    // (weight-style). detail = the family.
+    // (weight-style). detail = the family; path = the cut's motion slot ('cut/<key>:arrive'), so the inspector shows the
+    // note under that row (and under 太さ).
     function weightWarnings(st) {
       if (st.natural) return;
       for (const kind of MOTION_KINDS) {
@@ -20247,7 +20250,7 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
         const def = d ? st.ctx.registry.get(kind, d.v) : null;
         if (!def || def.optIn !== 'weight') continue;
         const ref = faceOfCut(st);
-        const where = { cut: st.cut.key, line: st.cut.line || undefined, detail: ref.family };
+        const where = { cut: st.cut.key, line: st.cut.line || undefined, detail: ref.family, path: 'cut/' + st.cut.key + ':' + kind };
         if (weightRoom(st, kind, ref) < FLAT_ROOM) st.ctx.warn(Object.assign({ code: 'weight-flat' }, where));
         if (!CROSSFADE.has(styleOf(st))) st.ctx.warn(Object.assign({ code: 'weight-style' }, where));
       }
@@ -21212,6 +21215,11 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
     const MORPH_SLOT = 'morph.auto';
     const LYRIC_ROLES = new Set(['lyric', 'focus']);
     const GROW_KEY = 'weightGrow';
+    // A seam with `ends` (the glyph morph) ends as B's voice starts (B.t0) and starts no earlier than ENDS_EARLY before
+    // A's sung end, so the old line's letters stay put while most of it is sung and a changed letter turns into the new
+    // one around B.a; the rule needs ENDS_MIN s of window at least.
+    const ENDS_EARLY = 0.5;
+    const ENDS_MIN = 0.25;
 
     function atOf(cut) { return { cutKey: cut.key, pinCutKey: cut.pinKey, lineId: cut.line }; }
 
@@ -21673,13 +21681,48 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
       return isPinned(d) && !(d.by === 'lock' && d.v === ctx.registry.fallback(kind));
     }
 
-    // Everything the rule reads except the letters (seamOf memoizes on it).
-    function morphGuards(ctx, A, B) {
+    // A die pressed on the transition into B (its seam salt): the user asked for another transition there, so the rule
+    // stands aside and the chance roll picks one.
+    function seamSalted(ctx, B) {
+      const s = ctx.salts;
+      return !!s && (CH.saltOf(s, 'cut/' + B.key + ':seam') > 0 || (!!B.line && CH.saltOf(s, 'line/' + B.line + ':seam') > 0));
+    }
+
+    // The longest window a seam with `ends` may take into B (before its own length and share): inside A's window,
+    // after the previous transition's window (prevEnd), and from no earlier than ENDS_EARLY before A's sung end — never
+    // cut below ENDS_MIN by that last bound (a pinned morph between lines that overlap is handed over all the same).
+    function endsRoom(A, B, prevEnd) {
+      return Math.min(B.t0 - Math.max(A.a, prevEnd), Math.max(B.t0 - (A.t1 - ENDS_EARLY), ENDS_MIN));
+    }
+
+    // The window of a seam decision d into B: { dur, at } (§4.16.6). A seam takes its part's `share` (else 0.4) of the
+    // shorter cut, a world seam at most WORLD_MAX s; a seam with `ends` (the glyph morph, v2.2) ends as B's voice starts
+    // — [B.t0 − dur, B.t0] within endsRoom, never starting after B.a — others are centred on B.a. Rounded down to 1e-6 s
+    // so the window never exceeds its limit.
+    function seamWindow(def, d, A, B, prevEnd) {
+      const share = def.share > 0 ? def.share : SEAM_SHARE;
+      const limit = share * Math.min(A.b - A.a, B.b - B.a);
+      let dur = Math.min(d.p && typeof d.p.dur === 'number' ? d.p.dur : 0.5, limit);
+      if (def.scope === 'world') dur = Math.min(dur, WORLD_MAX);
+      if (def.ends !== true) return { dur: Math.floor(Math.max(0, dur) * 1e6) / 1e6, at: B.a };
+      dur = Math.min(dur, endsRoom(A, B, prevEnd === undefined ? -Infinity : prevEnd));
+      dur = Math.floor(Math.max(0, dur) * 1e6) / 1e6;
+      return { dur, at: Math.min(B.t0, B.a + dur) - dur / 2 };
+    }
+
+    // Everything the rule reads except the letters (seamOf memoizes on it). prevEnd: the end of the previous listed
+    // transition's window (−Infinity when there is none).
+    function morphGuards(ctx, A, B, prevEnd) {
       if (!ctx.glyph || !ctx.glyph.maybeMorph || !ctx.registry.has('seam', MORPH)) return false;
       if (A.ground !== B.ground) return false;                                   // text seams only
       if (!LYRIC_ROLES.has(A.role) || !LYRIC_ROLES.has(B.role)) return false;
       if (!morphOn(ctx, A, B)) return false;
       if (!(A.t1 <= B.t0)) return false;                                         // the lines do not overlap (A is handed over)
+      if (seamSalted(ctx, B)) return false;                                      // the user rolled this transition again
+      // room for the window: inside A, after the transition into A, half the shorter cut (short lines get none)
+      const share = ctx.registry.get('seam', MORPH).share || SEAM_SHARE;
+      const room = Math.min(endsRoom(A, B, prevEnd === undefined ? -Infinity : prevEnd), share * Math.min(A.b - A.a, B.b - B.a));
+      if (!(room >= ENDS_MIN)) return false;
       if (choseMotion(ctx, A.slots.depart, 'depart') || choseMotion(ctx, B.slots.arrive, 'arrive')) return false;
       if (ownMotion(ctx, A) || ownMotion(ctx, B)) return false;
       if (knockout(A) || knockout(B)) return false;
@@ -21689,10 +21732,10 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
       return true;
     }
 
-    function morphRule(ctx, A, B) { return morphGuards(ctx, A, B) && MO.analyze(A.text, B.text).meaningful; }
+    function morphRule(ctx, A, B, prevEnd) { return morphGuards(ctx, A, B, prevEnd) && MO.analyze(A.text, B.text).meaningful; }
 
     // The seam into B → { decision, entry }.
-    function decideSeam(ctx, A, B, history) {
+    function decideSeam(ctx, A, B, history, prevEnd) {
       const at = atOf(B);
       const seed = CH.slotSeed(CH.cutSeed(ctx.doc.look.seed, B.key, B.line, ctx.salts), B.key, B.line, 'seam',
         ctx.salts);
@@ -21714,7 +21757,7 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
         CA.pinWarnings(ctx, 'seam', pin.v, pin, cond);
         out = fixed(pinDecision(pin));
         if (trace) shadow(ctx, req, trace, { kind: 'seam', stage: 'pin', pin, recent: rec.recent, echo: null });
-      } else if (morphRule(ctx, A, B)) {
+      } else if (morphRule(ctx, A, B, prevEnd)) {
         out = fixed({ from: 'rule', v: MORPH });
         if (trace) Object.assign(trace, { kind: 'seam', stage: 'rule', rule: 'morph' });
       } else {
@@ -21737,11 +21780,11 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
 
     // The seam history's entry for a boundary. A seam frozen by a lock records what the boundary would get without
     // the lock pins, so locking a line never changes the seams after it (§3.6).
-    function seamEntry(ctx, A, B, history, got) {
+    function seamEntry(ctx, A, B, history, got, prevEnd) {
       const d = got.decision;
       if (d.by === 'lock' && isPinned(d)) {
         const free = CA.lockFreeCtx(ctx, B);
-        if (free) return decideSeam(free, A, B, history).entry;
+        if (free) return decideSeam(free, A, B, history, prevEnd).entry;
       }
       return got.entry;
     }
@@ -21753,16 +21796,16 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
     // pin, the texts: a cut's features do not hold its text), so the memo keeps `prev`: null where the rule is never
     // evaluated, '0' where its guards fail (whatever the texts), else '1' with both texts (the rule's result is then a
     // function of the two texts alone).
-    function morphPrev(ctx, A, B) {
+    function morphPrev(ctx, A, B, prevEnd) {
       if (!ctx.glyph || !ctx.glyph.maybeMorph) return null;
-      return morphGuards(ctx, A, B) ? '1\u0001' + A.text + '\u0001' + B.text : '0';
+      return morphGuards(ctx, A, B, prevEnd) ? '1\u0001' + A.text + '\u0001' + B.text : '0';
     }
 
-    function seamOf(ctx, A, B, history) {
+    function seamOf(ctx, A, B, history, prevEnd) {
       const world = A.ground !== B.ground;
       const read = history.slice(Math.max(0, history.length - 4));
       const memo = B.cast ? B.cast.seam : null;
-      const prev = morphPrev(ctx, A, B);
+      const prev = morphPrev(ctx, A, B, prevEnd);
       if (memo && memo.world === world && memo.prev === prev && sameEntries(memo.read, read)) {
         for (const w of memo.warnings) ctx.warn(w);
         return memo;
@@ -21771,8 +21814,8 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
       const warn = ctx.warn;
       if (B.cast) ctx.warn = (w) => { warnings.push(w); warn(w); };
       try {
-        const got = decideSeam(ctx, A, B, history);
-        const out = { world, read, prev, warnings, got, entry: seamEntry(ctx, A, B, history, got) };
+        const got = decideSeam(ctx, A, B, history, prevEnd);
+        const out = { world, read, prev, warnings, got, entry: seamEntry(ctx, A, B, history, got, prevEnd) };
         if (B.cast) B.cast.seam = { world, read, prev, warnings, got: { decision: CA.deepFreeze(got.decision) }, entry: out.entry };
         return out;
       } finally {
@@ -21801,23 +21844,17 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
       cuts.forEach((c) => { c.seamIn = -1; });
       const at = ctx.align ? new Map(cuts.map((c, j) => [c.key, j])) : null;
       let reach = -Infinity;                    // the latest b among the cuts before A
+      let prevEnd = -Infinity;                  // the end of the previous listed transition's window
       for (let j = 1; j < cuts.length; j++) {
         const A = cuts[j - 1], B = cuts[j];
-        const copy = at ? seamCopy(ctx, cuts, at, out, A, B, hard) : null;
-        const { got, entry } = copy || seamOf(ctx, A, B, history);
+        const copy = at ? seamCopy(ctx, cuts, at, out, A, B, hard, prevEnd) : null;
+        const { got, entry } = copy || seamOf(ctx, A, B, history, prevEnd);
         history.push(entry);
         const d = got.decision;
         if (d.v !== hard) {
           const def = ctx.registry.get('seam', d.v);
-          // a seam's share of the shorter cut (0.4; the glyph morph's own `share`, 0.5)
-          const share = def.share > 0 ? def.share : SEAM_SHARE;
-          const limit = share * Math.min(A.b - A.a, B.b - B.a);
-          let dur = Math.min(typeof d.p.dur === 'number' ? d.p.dur : 0.5, limit);
-          if (def.scope === 'world') dur = Math.min(dur, WORLD_MAX);
-          // Rounded down to 1e-6 s so the window never exceeds its limit.
-          dur = Math.floor(Math.max(0, dur) * 1e6) / 1e6;
-          // a seam with `ends` (the glyph morph) ends at B.a, the start of B's window: [B.a − dur, B.a]; others are centred
-          const seamAt = def.ends === true ? B.a - dur / 2 : B.a;
+          const { dur, at: seamAt } = seamWindow(def, d, A, B, prevEnd);
+          prevEnd = seamAt + dur / 2;
           B.seamIn = out.length;
           if (def.glyphs === true) {
             // the letters the two lines share (none when A is not on screen as the window starts: a special cut between)
@@ -21837,7 +21874,7 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
     // the background changes at both boundaries or at neither (the same kind of transition fits), and B has no seam pin
     // of its own (the pin wins). → { got, entry } | null. The copy keeps S's parameters; its window is fitted to B's cuts
     // like any seam's.
-    function seamCopy(ctx, cuts, at, out, A, B, hard) {
+    function seamCopy(ctx, cuts, at, out, A, B, hard, prevEnd) {
       const src = CA.alignedSource(ctx, B, 'seam');
       const j = src ? at.get(src.key) : undefined;
       if (!j) return null;
@@ -21849,7 +21886,7 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
       // a glyph morph the rule chose at the source is copied only where the rule holds at this boundary too (v2.2):
       // else the boundary takes its own seam (seamOf)
       const srcSlot = src.seamIn >= 0 ? out[src.seamIn].slot : null;
-      if (srcSlot && srcSlot.v === MORPH && srcSlot.from === 'rule' && !morphRule(ctx, A, B)) return null;
+      if (srcSlot && srcSlot.v === MORPH && srcSlot.from === 'rule' && !morphRule(ctx, A, B, prevEnd)) return null;
       const d = src.seamIn >= 0 ? copied(out[src.seamIn].slot) : { from: 'auto', v: hard };
       const t = tracing(ctx, B.key, 'seam');
       if (t) Object.assign(t, { kind: 'seam', stage: 'auto', world: A.ground !== B.ground, why: [alignWhy(src)], decision: d });
@@ -21874,8 +21911,8 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
       return next;
     }
 
-    // The grow rule's bold end weight (planner/cast growWeight) belongs to 太る: a seam that replaced the entrance takes it
-    // away (a pinned 太る is never replaced, and keeps it).
+    // The grow rule's bold end weight (planner/cast growWeight) belongs to 太字へ: a seam that replaced the entrance takes it
+    // away (a pinned 太字へ is never replaced, and keeps it).
     function dropGrowWeight(c) {
       const tw = c.slots['text.weight'];
       if (tw && tw.from === 'rule' && !(c.slots.arrive && c.slots.arrive.v === GROW_KEY)) delete c.slots['text.weight'];
@@ -21905,7 +21942,7 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
       return out.sort((x, y) => x.t - y.t || IMPULSE_ORDER[x.kind] - IMPULSE_ORDER[y.kind] || x.amp - y.amp);
     }
 
-    return { grounds, seams, impulses, breakScore, splitSegments, morphRule, morphGuards, MORPH };
+    return { grounds, seams, impulses, breakScore, splitSegments, morphRule, morphGuards, seamWindow, MORPH, ENDS_EARLY, ENDS_MIN };
   });
 /* 文字PVメーカー v2 — original work. plan(doc, { registry }) → Plan: the planner's stages in their FROZEN order (DESIGN §4.16.1–§4.16.2, §3.12; DESIGN_2_1 §2.7, §5.9.3, §11.2.6). */
 MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'core/timing', 'core/beats', 'core/motion',
@@ -29009,6 +29046,25 @@ MV.def('engine/render/morph', ['core/mat', 'core/num', 'engine/scene/table', 'en
     DR.pickNode(dc, it.scene, i, VW, it.cut, -rec.w / 2, -rec.h / 2, rec.w / 2, rec.h / 2);
   }
 
+  // A pair's own eased clock at warped progress w, staggered by its rank (0 … 1 in the new line's order) over `spread`.
+  function clockOf(w, spread, rank) {
+    const s = Math.min(spread > 0 ? spread : 0, SPREAD_MAX);
+    return SINE(N.clamp((w - s * rank) / (1 - s)));
+  }
+
+  // A swap's two versions at clock k, as factors: [old alpha, new alpha, old blur, new blur] (of the pair's alpha and of
+  // `soften`). The old letter keeps its full strength until SWAP_OLD (the old line may still be sung while its letters
+  // travel), then softens and fades; the new one comes into focus from SWAP_NEW.
+  const SWAP_OLD = 0.45, SWAP_NEW = 0.55, SWAP_FADE = 0.4, SWAP_BLUR = 0.45;
+  function swapOf(k, out) {
+    out[0] = 1 - sm((k - SWAP_OLD) / SWAP_FADE);
+    out[1] = sm((k - SWAP_NEW) / SWAP_FADE);
+    out[2] = sm((k - SWAP_OLD) / SWAP_BLUR);
+    out[3] = 1 - sm((k - SWAP_NEW) / SWAP_BLUR);
+    return out;
+  }
+  const SW = new Float64Array(4);
+
   // draw(dc, mv, A, B, w, p): the travellers of a glyph seam at warped progress w on dc.g (null: only the sprites they
   // would draw are looked up, the warm-up). A, B = the two sides' items { scene, cam, cut } (the cameras of this frame).
   // p = the seam's params { arc, spread, soften }. Each pair moves on its own eased clock, staggered by its rank; a pair
@@ -29021,7 +29077,6 @@ MV.def('engine/render/morph', ['core/mat', 'core/num', 'engine/scene/table', 'en
     dc.font = null;
     if (g) { g.textAlign = 'center'; g.textBaseline = 'middle'; }
     const ta = A.scene.table, tb = B.scene.table;
-    const s = Math.min(p.spread > 0 ? p.spread : 0, SPREAD_MAX);
     const arc = p.arc > 0 ? p.arc : 0, soften = p.soften > 0 ? p.soften : 0;
     for (let j = 0; j < mv.n; j++) {
       const ia = mv.ia[j], ib = mv.ib[j];
@@ -29030,7 +29085,7 @@ MV.def('engine/render/morph', ['core/mat', 'core/num', 'engine/scene/table', 'en
       const ra = A.scene.stores.glyph[ta.payload[ia]], rb = B.scene.stores.glyph[tb.payload[ib]];
       glyphFrame(FA, dc, A, ia, ra);
       glyphFrame(FB, dc, B, ib, rb);
-      const k = SINE(N.clamp((w - s * mv.rank[j]) / (1 - s)));
+      const k = clockOf(w, p.spread, mv.rank[j]);
       lerpAffine(FK, FA, FB, k, arc);
       const a = aA + (aB - aA) * k;
       if (mv.same[j] === 1 && mv.look[j] === 1) drawAs(dc, B, ib, rb, FK, a, 0);
@@ -29038,15 +29093,16 @@ MV.def('engine/render/morph', ['core/mat', 'core/num', 'engine/scene/table', 'en
         drawAs(dc, A, ia, ra, FK, a * (1 - sm((k - 0.4) / 0.6)), 0);
         drawAs(dc, B, ib, rb, FK, a * sm(k / 0.6), 0);
       } else {
-        drawAs(dc, A, ia, ra, FK, a * (1 - sm((k - 0.1) / 0.6)), soften * sm(k / 0.7));
-        drawAs(dc, B, ib, rb, FK, a * sm((k - 0.3) / 0.6), soften * (1 - sm((k - 0.3) / 0.7)));
+        swapOf(k, SW);
+        drawAs(dc, A, ia, ra, FK, a * SW[0], soften * SW[2]);
+        drawAs(dc, B, ib, rb, FK, a * SW[1], soften * SW[3]);
       }
       if (g && dc.pick) pickAs(dc, B, ib, rb, FK);
     }
     if (g) g.globalAlpha = 1;
   }
 
-  return { eligible, restAlpha, offIndex, prepare, draw, lerpAffine, decompose, SPREAD_MAX };
+  return { eligible, restAlpha, offIndex, prepare, draw, clockOf, swapOf, lerpAffine, decompose, SPREAD_MAX };
 });
 /* 文字PVメーカー v2 — original work. The glyph budget of a cut: what drawing its glyphs covers, sampled over each material phase, and the masks that keep a material within its share (DESIGN_2_1 §5.9.5). */
 MV.def('engine/scene/budget', ['core/mat', 'engine/scene/table', 'engine/scene/behave', 'engine/scene/frame', 'engine/render/draw'],
@@ -30070,6 +30126,7 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
   const L = T.LAYER_INDEX;
   const WORLD_LAYERS = Object.freeze([L.ground, L.far, L.mid, L.text, L.near]);
   const BASE_LAYERS = Object.freeze([L.ground, L.far, L.mid]);
+  const STILL_BASE = Object.freeze([L.far, L.mid]);     // base layers whose still media a glyph seam keeps out of its mix
   const WARM_LAYERS = Object.freeze(WORLD_LAYERS.concat([L.hud]));
   const EMA_ALPHA = 0.1;
   const SLOW_MS = 14, FAST_MS = 9, SLOW_FRAMES = 30, FAST_FRAMES = 60, MAX_LEVEL = 4;   // adaptive preview (§7.4)
@@ -30519,14 +30576,28 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
     // `still` media of the mixed layers (DESIGN_2_1 §11.9.3) stay out of the mix and are drawn after it, like the hud.
     // A glyph seam (v2.2, DESIGN_2_2 §4): the letters the two lines share are left out of both sides (dc.skip) and drawn
     // after the mix, travelling (engine/render/morph) — above both cuts' text and near layers, under the still pass, the
-    // grounds' near layer and the hud.
+    // grounds' near layer and the hud. Its cuts' base layers are mixed too (each side under its text layers), so for the
+    // length of the window they lie above the grounds' mid and text layers.
     function drawTextSeam(g, w, h, backdrop, part, u) {
       fillBackdrop(g, w, h, backdrop, dc.pal);
-      for (const Lk of BASE_LAYERS) drawSideLayer(g, Lk, 0, true, true);
+      // A glyph seam replaces B's entrance and A's exit, so both cuts rest across the window: the cuts' own base layers
+      // (an echo stack's copies, rays) are mixed with their text layers (sides 1 and 2) rather than drawn once at full
+      // strength, so they melt with the rest; the grounds are drawn once as ever. Still media stay out of the mix.
+      const glyph = part.def.glyphs === true;
+      const baseStill = glyph && anyStill(STILL_BASE, false);
+      for (const Lk of BASE_LAYERS) {
+        drawSideLayer(g, Lk, 0, true, !glyph);
+        if (baseStill && Lk !== L.ground) stillOnly(g, Lk);
+      }
       drawSideLayer(g, L.text, 0, true, false);
       const still = anyStill(SE.TEXT_LAYERS, false);
-      const mv = part.def.glyphs === true ? glyphSeam(framePlan) : null;
+      const mv = glyph ? glyphSeam(framePlan) : null;
       const a = pool.take(), b = pool.take();
+      if (glyph) {
+        if (baseStill) dc.stillMode = 1;
+        for (const Lk of BASE_LAYERS) { drawSideLayer(a.ctx, Lk, 1, false, true); drawSideLayer(b.ctx, Lk, 2, false, true); }
+        dc.stillMode = 0;
+      }
       if (still) dc.stillMode = 1;
       if (mv) dc.skip = mv.skip;
       try {
@@ -30556,6 +30627,13 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
         for (const Lk of layers) if (DR.hasStill(it.scene, Lk)) return true;
       }
       return false;
+    }
+
+    // The `still` media of the cuts' layer Lk, every side, on the target (a glyph seam's base layers, which it mixes).
+    function stillOnly(g, Lk) {
+      dc.stillMode = 2;
+      drawSideLayer(g, Lk, 0, false, true);
+      dc.stillMode = 0;
     }
 
     // Only the `still` media of these layers, every side, on the target (after the composite).
@@ -37152,7 +37230,7 @@ MV.def('parts/arrive/soft', ['parts/kit'], (K) => {
 
   return [inkRise, fogIn, bloomOpen, inkSink];
 });
-/* 文字PVメーカー v2 — original work. Weight entrance (v2.2, DESIGN_2_2 §4): 太る — letters appear thin and grow to the line's weight. */
+/* 文字PVメーカー v2 — original work. Weight entrance (v2.2, DESIGN_2_2 §4): 太字へ — letters appear thin and grow to the line's weight. */
 MV.def('parts/arrive/weight', ['parts/kit'], (K) => {
   'use strict';
 
@@ -37175,8 +37253,8 @@ MV.def('parts/arrive/weight', ['parts/kit'], (K) => {
 
   const weightGrow = K.arrive({
     key: 'weightGrow',
-    label: { ja: '太る', en: 'Weight grow' },
-    blurb: { ja: '細い字で現れ、太い字へ育っていく', en: 'Letters appear thin and grow bold' },
+    label: { ja: '太字へ', en: 'Weight grow' },
+    blurb: { ja: '細い字で現れ、太い字へ育っていく（太さの種類が多い書体で）', en: 'Letters appear thin and grow bold (on typefaces with many weights)' },
     tags: ['bold', 'slow'], family: 'weight', pool: false, late: true, optIn: 'weight', unit: 'glyph', weight: 2.5,
     traits: { energy: [0.1, 0.85], roles: ['lyric', 'focus', 'title'] },
     shared: {
@@ -38007,7 +38085,7 @@ MV.def('parts/depart/type', ['parts/kit'], (K) => {
 
   return [K.variant(bound, { key: 'typeErase', make: withCaret(bound.make) })];
 });
-/* 文字PVメーカー v2 — original work. Weight exit (v2.2, DESIGN_2_2 §4): 細る — letters thin out and fade. */
+/* 文字PVメーカー v2 — original work. Weight exit (v2.2, DESIGN_2_2 §4): 細字へ — letters thin out and fade. */
 MV.def('parts/depart/weight', ['parts/kit'], (K) => {
   'use strict';
 
@@ -38015,7 +38093,7 @@ MV.def('parts/depart/weight', ['parts/kit'], (K) => {
   const FADE_IN = K.ease('quadIn');
   const FADE_FROM = 0.6;         // a glyph keeps its alpha for the first 60 % of its motion, then fades out
 
-  // The reach: `thin` of the weight room below the line's face (as 太る, parts/arrive/weight).
+  // The reach: `thin` of the weight room below the line's face (as 太字へ, parts/arrive/weight).
   function thinPrep(env, target, p) {
     return Object.assign({}, p, { reach: Math.round(p.thin * K.weightRoom(target).below) });
   }
@@ -38030,8 +38108,8 @@ MV.def('parts/depart/weight', ['parts/kit'], (K) => {
 
   const weightThin = K.depart({
     key: 'weightThin',
-    label: { ja: '細る', en: 'Weight thin' },
-    blurb: { ja: '字が細くなりながら消えていく', en: 'Letters thin out and fade' },
+    label: { ja: '細字へ', en: 'Weight thin' },
+    blurb: { ja: '字が細くなりながら消えていく（太さの種類が多い書体で）', en: 'Letters thin out and fade (on typefaces with many weights)' },
     tags: ['soft', 'slow'], family: 'weight', pool: false, late: true, optIn: 'weight', unit: 'glyph',
     traits: { energy: [0.05, 0.7], roles: ['lyric', 'focus', 'title'] },
     shared: {
@@ -38372,12 +38450,13 @@ MV.def('parts/dwell/weight', ['parts/kit'], (K) => {
   const AMP_MAX = 400;           // at most 400 weight units: |d wt/dt| stays ≤ 60 per 1/480 s (conformance)
 
   // Build-time params from the target: the direction (bolder when the face has the room for the swing, else lighter,
-  // else toward the larger room), the amplitude (the swing scaled by 強さ, never past the room or AMP_MAX) and the
-  // time the hold starts (the no-beat breathing is phased from it).
+  // else toward the larger room), the amplitude (the swing scaled by 強さ — 0.7 of it at 強さ 0, all of it at 1 — never
+  // past the room or AMP_MAX) and the time the hold starts (the no-beat breathing is phased from it). With the automatic
+  // swing of 300–400 a pulse moves two rungs or more, so it reads as a pulse, not as a flicker of the edges.
   function pulsePrep(env, target, p) {
     const room = K.weightRoom(target);
     const dirW = room.above >= p.swing ? 1 : room.below >= p.swing ? -1 : (room.above >= room.below ? 1 : -1);
-    const amp = Math.max(0, Math.min(dirW > 0 ? room.above : room.below, Math.round(p.swing * (0.5 + 0.5 * p.amount)), AMP_MAX));
+    const amp = Math.max(0, Math.min(dirW > 0 ? room.above : room.below, Math.round(p.swing * (0.7 + 0.3 * p.amount)), AMP_MAX));
     return Object.assign({}, p, { dirW, amp, rest: env.times.rest });
   }
 
@@ -38397,12 +38476,12 @@ MV.def('parts/dwell/weight', ['parts/kit'], (K) => {
   const weightPulse = K.dwell({
     key: 'weightPulse',
     label: L('脈打つ太さ', 'Weight pulse'),
-    blurb: L('拍ごとに字が太さで脈打つ', 'Letters swell in weight on every beat'),
+    blurb: L('拍ごとに字が太さで脈打つ（太さの種類が多い書体で）', 'Letters swell in weight on every beat (on typefaces with many weights)'),
     tags: ['bold', 'fast'], family: 'weight', pool: false, late: true, optIn: 'weight', needs: ['beats'], weight: 0.5,
     traits: { energy: [0.35, 1], roles: ['lyric', 'focus'] },
     fits: (f) => (f.beat ? 1.2 : 0.4),
     params: {
-      swing: { type: 'int', min: 100, max: 400, step: 25, label: L('振れ幅', 'Swing'), auto: { range: [150, 300], follow: 'energy' } },
+      swing: { type: 'int', min: 100, max: 400, step: 25, label: L('振れ幅', 'Swing'), auto: { range: [300, 400], follow: 'energy' } },
       decay: { type: 'num', min: 0.1, max: 0.5, step: 0.01, unit: 's', label: L('戻り', 'Decay'), auto: { range: [0.12, 0.22], follow: '-tempo' } },
       period: { type: 'num', min: 0.6, max: 4, step: 0.1, unit: 's', label: L('周期', 'Period'), auto: { range: [1.2, 2.2], follow: '-tempo' } },
     },
@@ -43604,14 +43683,15 @@ MV.def('parts/seam/morph', ['parts/kit'], (K) => {
 
   // A glyph seam (`glyphs: true`): the planner writes the letters the two lines share into the seam entry, and the
   // renderer holds those glyphs out of the two side surfaces and draws them itself, travelling from the old line's
-  // place to the new line's (engine/render/morph). mix() melts what is left: the old line's other letters soften and
-  // fade over [0, OLD_OUT], the new line's come into focus over [NEW_IN, NEW_FULL]; both at once only in the middle,
-  // each blurred while it is faint, so neither reads as a second line printed over the first. The window ends at the
-  // new line's start (`ends`) and takes up to half the shorter cut (`share`); the old line's exit and the new line's
-  // entrance are the transition itself (`replaces`).
-  const OLD_OUT = 0.6, NEW_IN = 0.35, NEW_FULL = 0.95, SOFTEN_PEAK = 1.4;
+  // place to the new line's (engine/render/morph). mix() melts what is left: the old line's other letters (and the
+  // cuts' own base layers: an echo stack's copies) soften and fade over [OLD_FROM, OLD_OUT] — the old line may still be
+  // sung as the window starts, so they hold at first — and the new line's come into focus over [NEW_IN, NEW_FULL]; both
+  // at once only in the middle, each blurred while it is faint, so neither reads as a second line printed over the
+  // first. The window ends as the new line's voice starts (`ends`) and takes up to half the shorter cut (`share`); the old
+  // line's exit and the new line's entrance are the transition itself (`replaces`).
+  const OLD_FROM = 0.3, OLD_OUT = 0.8, NEW_IN = 0.4, NEW_FULL = 0.95, SOFTEN_PEAK = 1.4;
   function meltRest(fx, a, b, u, p) {
-    const eo = SINE(clamp(u / OLD_OUT)), en = SINE(clamp((u - NEW_IN) / (NEW_FULL - NEW_IN)));
+    const eo = SINE(clamp((u - OLD_FROM) / (OLD_OUT - OLD_FROM))), en = SINE(clamp((u - NEW_IN) / (NEW_FULL - NEW_IN)));
     const out = fx.take(), g = out.ctx;
     const pa = p.soften * SOFTEN_PEAK * eo * fx.unit, pb = p.soften * SOFTEN_PEAK * (1 - en) * fx.unit;
     const oldS = pa >= 1 && eo < 1 ? fx.blurred(a, pa) : a;
@@ -43633,7 +43713,7 @@ MV.def('parts/seam/morph', ['parts/kit'], (K) => {
       'Letters the two lines share glide to their new places; the others melt into the new text'),
     tags: ['soft', 'literary'], family: 'morph', scope: 'text', replaces: { depart: true, arrive: true },
     pool: false, late: true, glyphs: true, share: 0.5, ends: true,
-    shared: { dur: { auto: { range: [0.5, 0.9], follow: '-energy' } } },
+    shared: { dur: { auto: { range: [0.4, 0.7], follow: '-energy' } } },
     params: {
       arc: { type: 'num', min: 0, max: 0.5, step: 0.01, unit: 'frac', label: L('弧', 'Arc'), auto: { value: 0.12 } },
       spread: { type: 'num', min: 0, max: 0.6, step: 0.01, unit: 'frac', label: L('ずらし', 'Stagger'),
@@ -49192,8 +49272,9 @@ MV.def('ai/vision', ['core/schema', 'core/media', 'ai/changes'], (S, MEDIA, CH) 
 /* 文字PVメーカー v2 — original work. Engine facade: plan + scenes + renderer behind the FROZEN §4.20 API, plus sample plans for thumbnails and the lab (DESIGN_2_1 §3.10, §11.3.7 additions). */
 MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 'core/doc', 'core/pins', 'core/shot',
   'engine/text/service', 'engine/text/faces', 'engine/scene/build', 'engine/scene/cache', 'engine/scene/frame',
-  'engine/render/renderer', 'engine/render/sprites', 'parts/mix', 'planner/plan', 'planner/look', 'planner/morph'],
-(H, RNG, SCH, S, DOC, PINS, SHOT, TS, FACES, BUILD, CACHE, F, R, SP, MIX, PL, LOOK, MO) => {
+  'engine/render/renderer', 'engine/render/sprites', 'parts/mix', 'planner/plan', 'planner/look', 'planner/morph',
+  'planner/tracks'],
+(H, RNG, SCH, S, DOC, PINS, SHOT, TS, FACES, BUILD, CACHE, F, R, SP, MIX, PL, LOOK, MO, TR) => {
   'use strict';
 
   const SCENE_MAX = 16;             // §7.3
@@ -49213,7 +49294,7 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
   // v2.2 (DESIGN_2_2 §4): a glyph seam's canned lines share letters (the UI passes thumb.morphA / thumb.morphB in the
   // page's language); a weight part's canned cut is laid out in the body face at 800, a face with room to move.
   const SAMPLE_MORPH_A = '青い空';
-  const SAMPLE_MORPH_B = '青い海';
+  const SAMPLE_MORPH_B = 'あの青い海';
   const SAMPLE_WEIGHT = 800;
 
   class EngineError extends Error {
@@ -49322,14 +49403,12 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
     seg.fp = H.hashJSON({ ground, atmos, aspect, palette, span: duration });
     const seams = [];
     if (glyphSeam) {
-      // as planner/tracks.seams: the part's share of the shorter cut, the window [B.a − dur, B.a], the shared letters,
-      // and A handed over at the window's end (its fingerprint follows its window)
+      // as planner/tracks.seams: the part's share of the shorter cut, the window [B.a − dur, B.a] (inside A, from no
+      // earlier than tracks.ENDS_EARLY before A's sung end), the shared letters, and A handed over at the window's end
+      // (its fingerprint follows its window)
       const A = cuts[0], Bc = cuts[1];
       const slot = decisionOf(registry, 'seam', key, { f: Bc.feat, look: ax.look }, seed, params, 0);
-      const share = def.share > 0 ? def.share : 0.4;
-      let dur = Math.min(slot.p.dur || 0.5, share * Math.min(A.b - A.a, Bc.b - Bc.a));
-      dur = Math.floor(Math.max(0, dur) * 1e6) / 1e6;
-      const at = def.ends === true ? Bc.a - dur / 2 : Bc.a;
+      const { dur, at } = TR.seamWindow(def, slot, A, Bc, -Infinity);
       seams.push({ into: Bc.key, at, dur, scope: 'text', a: A.key, b: Bc.key, slot,
         glyphs: MO.pairsOf(A.text, Bc.text, slot.p.melt) });
       const stop = Math.floor((at + dur / 2) * 1e6) / 1e6;
@@ -52362,6 +52441,7 @@ MV.def('engine/host/fonts', ['engine/text/faces'], (FACES) => {
     const drawStates = new Map();      // ref.key → 'loading' | 'ready' | 'failed' (draw-only faces)
     const drawUrl = new Map();         // ref.key → the newest stylesheet URL that declares it (draw-only)
     const drawChars = new Map();       // family → the characters asked for draw-only faces (apart from `chars`)
+    const drawKnown = new Map();       // family → Map(ref.key → ref): its draw-only weights asked for so far
     const drawWatches = new Map();     // ref.key + url + load text → Promise<boolean>
     const drawListeners = new Set();
     let epoch = 0;
@@ -52481,17 +52561,33 @@ MV.def('engine/host/fonts', ['engine/text/faces'], (FACES) => {
     }
 
     // Starts the draw-only loads of the refs the main path does not own; returns [{ ref, url }].
+    // A family's draw-only weights share its draw-only characters. When the characters grow, every draw-only weight the
+    // family has (not only this call's) is declared again in one sheet with all of them, so the newest sheet of every
+    // weight carries every character asked for so far; else only the weights never declared (or failed) get a sheet.
     function startDraw(refs, text) {
       const jobs = [];
       for (const [family, all] of groupRefs(refs)) {
         const list = all.filter((r) => !states.has(r.key));            // a weight the main path owns is never redeclared
         if (!list.length) continue;
-        const merged = FACES.uniqueChars((drawChars.get(family) || '') + textFor(text, family));
+        const had = drawChars.get(family) || '';
+        const merged = FACES.uniqueChars(had + textFor(text, family));
         drawChars.set(family, merged);
-        const [url] = FACES.cssUrls(list, { [family]: merged });
+        let fam = drawKnown.get(family);
+        if (!fam) { fam = new Map(); drawKnown.set(family, fam); }
+        for (const ref of list) fam.set(ref.key, ref);
+        const declare = merged !== had
+          ? [...fam.values()].filter((r) => !states.has(r.key))
+          : list.filter((r) => !drawUrl.has(r.key) || drawStates.get(r.key) === 'failed');
+        if (declare.length) {
+          const [url] = FACES.cssUrls(declare, { [family]: merged });
+          for (const ref of declare) {
+            // the newest declaration is the one a canvas draws with: a newer sheet means loading again until it is in
+            if (drawUrl.get(ref.key) !== url) { drawUrl.set(ref.key, url); drawStates.set(ref.key, 'loading'); }
+            watchDraw(ref, url);
+          }
+        }
         for (const ref of list) {
-          // the newest declaration is the one a canvas draws with: a newer sheet means loading again until it is in
-          if (drawUrl.get(ref.key) !== url) { drawUrl.set(ref.key, url); drawStates.set(ref.key, 'loading'); }
+          const url = drawUrl.get(ref.key);
           jobs.push({ ref, url });
           watchDraw(ref, url);
         }
@@ -61783,7 +61879,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
     const textStyleField = () => F({ path: 'text.style', widget: 'choice', label: 'fld.textStyle', spec: enumSpec(TEXT_STYLES),
       options: opts(TEXT_STYLES, 'fld.style.') });
     const textScaleField = (label) => F({ path: 'text.scale', widget: 'number', label: label || 'fld.textScale', spec: SPEC.scale });
-    // 太さ (v2.2, DESIGN_2_2 §4): the weight of the lyric face (自動 = the typeface's, or the bold end of 太る).
+    // 太さ (v2.2, DESIGN_2_2 §4): the weight of the lyric face (自動 = the typeface's, or the bold end of 太字へ).
     const textWeightField = () => F({ path: 'text.weight', widget: 'number', label: 'fld.textWeight', spec: SPEC.weight,
       note: 'fld.textWeight.note', auto: true, basic: false });
     const orientField = () => F({ path: 'orient', widget: 'choice', label: 'fld.orient', spec: enumSpec(['h', 'v']),
@@ -62728,7 +62824,8 @@ MV.def('ui/lyric_editor', ['ui/dom', 'ui/selection', 'i18n/t', 'core/lyrics', 'p
   const FOLLOW_PAUSE_MS = 3000;
   const GUTTER_MARGIN_PX = 240;           // gutter entries are built for the visible rows plus this much above and below
   const STAMP = /^\[\d{1,3}:\d{1,2}(?:[.:]\d{1,3})?\]/;
-  const WARN_CODES = new Set(['overfull', 'orphan-pin', 'shadowed-pin', 'lock-partial', 'pin-not-applicable', 'time-order']);
+  const WARN_CODES = new Set(['overfull', 'orphan-pin', 'shadowed-pin', 'lock-partial', 'pin-not-applicable', 'time-order',
+    'weight-flat', 'weight-style']);
   const TOKENS = ['tok-comment', 'tok-meta', 'tok-stamp', 'tok-cut', 'tok-emph', 'tok-emphText', 'tok-impact', 'tok-note'];
 
   // --- mark tinting (display only; the parser is core/lyrics) --------------------------------------------------
@@ -63064,7 +63161,7 @@ MV.def('ui/lyric_editor', ['ui/dom', 'ui/selection', 'i18n/t', 'core/lyrics', 'p
       const lines = new Map(plan ? plan.lines.filter((l) => l.id === l.row || !l.row).map((l) => [l.id, l]) : []);
       const warns = new Map();
       for (const w of (app.warnings ? app.warnings() : [])) {
-        if (w.line && WARN_CODES.has(w.code) && !warns.has(w.line)) warns.set(w.line, w.code);
+        if (w.line && WARN_CODES.has(w.code) && !warns.has(w.line)) warns.set(w.line, w);
       }
       const counts = pinCounts(doc);
       const sel = S.validate(app.view.state.sel, plan);
@@ -63103,7 +63200,7 @@ MV.def('ui/lyric_editor', ['ui/dom', 'ui/selection', 'i18n/t', 'core/lyrics', 'p
       if (by === 'lrc') entry.append(h('span', { class: 'g-badge', text: 'LRC' }));
       if (doc.locks[line.id]) entry.append(h('span', { class: 'g-lock', title: t('state.locked'), text: 'L' }));
       if (pins) entry.append(h('span', { class: 'g-pins', title: t('lyr.pinCount', { n: pins }), text: '●' + pins }));
-      if (warn) entry.append(h('span', { class: 'g-warn', title: t('warn.' + warn), text: '!' }));
+      if (warn) entry.append(h('span', { class: 'g-warn', title: t('warn.' + warn.code, { detail: warn.detail || '' }), text: '!' }));
       const words = [T.fmtTime(line.t0), t('state.' + (by === 'pin' ? 'pinned' : by === 'lrc' ? 'mark' : 'auto'))];
       if (doc.locks[line.id]) words.push(t('state.locked'));
       if (pins) words.push(t('lyr.pinCount', { n: pins }));
@@ -66573,10 +66670,12 @@ MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output', 'ui/media_widgets'
     return { only, deny };
   }
 
-  // The last usable part of a kind never goes: 「少なくとも1つは使います」 (§3.8, §6.11).
+  // The last usable part of a kind never goes: 「少なくとも1つは使います」 (§3.8, §6.11). An opt-in part (v2.2 weight parts)
+  // does not count as the one: it joins a pool only where its switch is on and the cut can show it, so a filter of opt-in
+  // parts alone would leave the other cuts with nothing (they would all fall back to the kind's standard part).
   function setFilter(app, kind, next) {
     const f = normalize(app, kind, next);
-    const keys = keysFor(app.reg, kind).filter((k) => pooled(app.reg.get(kind, k)));
+    const keys = keysFor(app.reg, kind).filter((k) => app.reg.get(kind, k).pool !== false);
     if (!keys.some((k) => allowedBy(f, k))) { app.toast(app.t('pb.keepOne'), { kind: 'warn' }); return false; }
     app.dispatch({ t: 'filter.set', kind, only: f.only, deny: f.deny }, { label: ['undo.filter', { kind: app.t('kind.' + kind) }] });
     return true;
@@ -71094,11 +71193,14 @@ MV.def('ui/widgets', ['ui/dom', 'ui/icons', 'i18n/t', 'core/color', 'ui/playbar'
         preview(v) { value = clampV(v); range.value = String(value * scale); show(value); } },
       update(st) {
         value = typeof st.value === 'number' && Number.isFinite(st.value) ? st.value : null;
-        // Without a value the slider rests at its start, drawn as unset, and the box is empty with 自動 / いろいろ.
-        if (!g) range.value = String((value === null ? min : value) * scale);
+        // Without a value the slider rests at its start, drawn as unset, and the box is empty with 自動 / いろいろ. A row
+        // that knows its automatic value (extra.autoValue: 太さ, the face's weight) rests there and says it: 自動 600.
+        const av = value === null && !st.mixed && st.auto && st.extra && typeof st.extra.autoValue === 'number' ? st.extra.autoValue : null;
+        if (!g) range.value = String((value === null ? (av !== null ? clampV(av) : min) : value) * scale);
         el.classList.toggle('is-unset', value === null || !!st.mixed);
         if (document.activeElement !== box) { if (st.mixed) box.value = ''; else show(value); }
-        box.placeholder = st.mixed ? t('state.mixed') : value === null ? (st.auto ? t('state.auto') : '—') : '';
+        box.placeholder = st.mixed ? t('state.mixed') : value === null ? (st.auto ? t('state.auto') + (av !== null
+          ? ' ' + numberText(av, scale, shownStep) : '') : '—') : '';
         range.disabled = box.disabled = !!st.readOnly;
         const gv = st.extra && typeof st.extra.ghost === 'number' ? st.extra.ghost : null;
         ghost.hidden = gv === null;
@@ -73414,8 +73516,8 @@ MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/a
 /* 文字PVメーカー v2 — original work. The inspector (詳細): crumbs, level header, sections from FIELDS, field rows, sub-pages (DESIGN §6.4.4–§6.4.9, §6.6; DESIGN_2_1 §6.5–§6.9). */
 MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/part_browser', 'ui/selection', 'ui/looks',
   'ui/output', 'i18n/t', 'core/paths', 'core/pins', 'core/shot', 'planner/areas', 'ui/shot_editor', 'ui/material_page',
-  'ui/media_page', 'ui/media_widgets', 'ui/media_io', 'ui/extreme', 'planner/rules'],
-(dom, I, F, W, PB, S, LK, OUT, T, P, PINS, SHOT, AREAS, KE, MP, MPG, MW, MI, XU, RU) => {
+  'ui/media_page', 'ui/media_widgets', 'ui/media_io', 'ui/extreme', 'planner/rules', 'engine/text/faces'],
+(dom, I, F, W, PB, S, LK, OUT, T, P, PINS, SHOT, AREAS, KE, MP, MPG, MW, MI, XU, RU, FACES) => {
   'use strict';
 
   const { h } = dom;
@@ -73686,7 +73788,25 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
         return { graphemes: graphemesOf(ctx.line.text), cuts, source: pinned ? 'pin' : pr && pr.pieces ? 'mark' : 'auto' };
       }
       if (field.widget === 'slots') return { items: slotItems(field.kind, ctx) };
+      if (field.path === 'text.weight') return { autoValue: autoWeightOf(ctx) };
       return null;
+    }
+
+    // 太さ in 自動 (v2.2): the weight the scope's lyrics are laid out at — the face's own, or the one a decision set (the grow
+    // rule of 太字へ) — so the knob and the box show it rather than the lightest weight; null when the cuts differ.
+    function autoWeightOf(ctx) {
+      const p = plan();
+      if (!p || !p.look || !p.look.faces || !ctx.cuts.length) return null;
+      let w = null;
+      for (const c of ctx.cuts) {
+        if (!c || !c.slots) return null;
+        const ref = FACES.fontFor(p.look.faces, c.slots['text.face'] ? c.slots['text.face'].v : 'display', c.lang);
+        const tw = c.slots['text.weight'];
+        const v = tw ? FACES.snapWeight(ref.family, tw.v) : ref.weight;
+        if (w === null) w = v;
+        else if (w !== v) return null;
+      }
+      return w;
     }
 
     // The ornament / filter list of a scope. A screen effect the backdrop mode leaves out (§4.19.4) is listed greyed
@@ -74053,6 +74173,9 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       // 切り替え holding a glyph seam (v2.2 モーフ, DESIGN_2_2 §4) says that the old line is handed over and ends with it
       const handover = field.widget === 'part' && (field.partKind || field.kind) === 'seam'
         ? h('p', { class: 'fr-note note subtle', 'data-role': 'handover', text: t('fld.morphHandover.note'), hidden: true }) : null;
+      // 入り / 見せ / 抜け and 太さ (v2.2 太さの動き): a weight part where it cannot show says why (weight-flat, weight-style)
+      const weightWarn = weightKindOf(field) !== undefined
+        ? h('p', { class: 'fr-note note is-warn', 'data-role': 'weight-warn', role: 'note', hidden: true }) : null;
       const env = {
         app, t, label, field,
         commit: (v, o) => commit(row, v, o),
@@ -74069,8 +74192,8 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       };
       const widget = W.make(field, env);
       const el = h('div', { class: 'frow', 'data-widget': field.widget, 'data-slot': field.path || field.key, 'data-field': field.id },
-        h('div', { class: 'fr-top' }, lab, tag, h('span', { class: 'grow' }), info, dice, x, more), widget.el, note, handover, why);
-      Object.assign(row, { el, tag, dice, x, more, why, widget, lab, handover });
+        h('div', { class: 'fr-top' }, lab, tag, h('span', { class: 'grow' }), info, dice, x, more), widget.el, note, handover, weightWarn, why);
+      Object.assign(row, { el, tag, dice, x, more, why, widget, lab, handover, weightWarn });
       // Del / Backspace unpin the focused field (§6.8): the row publishes the paths it may clear while it has focus;
       // ui/boot's pin.clearField removes the ones that hold a pin (never a lock pin).
       el.addEventListener('focusin', () => {
@@ -74138,6 +74261,11 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       if (row.handover) {
         const def = fs && typeof fs.value === 'string' ? app.reg.get('seam', fs.value) : null;
         row.handover.hidden = !(def && def.glyphs === true);
+      }
+      if (row.weightWarn) {
+        const text = weightWarnText(row.field, ctx);
+        row.weightWarn.hidden = !text;
+        row.weightWarn.textContent = text;
       }
       if (!row.path) { row.tag.hidden = true; return; }
       const shown = tagState(row);
@@ -74765,6 +74893,30 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
     };
 
     function allWarnings() { return (plan() ? plan().warnings : []).concat(app.warnings()); }
+
+    // The motion kind of a 入り / 見せ / 抜け part row, null for the 太さ row, undefined for any other row.
+    function weightKindOf(field) {
+      if (field.path === 'text.weight') return null;
+      const kind = field.widget === 'part' ? field.partKind || field.kind : null;
+      return kind === 'arrive' || kind === 'dwell' || kind === 'depart' ? kind : undefined;
+    }
+
+    // The planner's weight-flat / weight-style warnings of the scope's cuts, as text (each once): under a motion row only
+    // those of its kind (the warning's path is the cut's motion slot), under 太さ all of them. '' when there are none.
+    function weightWarnText(field, ctx) {
+      const p = plan();
+      if (!p || !p.warnings.length) return '';
+      const kind = weightKindOf(field);
+      const cuts = new Set(ctx.cutKeys);
+      const out = [];
+      for (const w of p.warnings) {
+        if ((w.code !== 'weight-flat' && w.code !== 'weight-style') || !cuts.has(w.cut)) continue;
+        if (kind && !(typeof w.path === 'string' && w.path.endsWith(':' + kind))) continue;
+        const text = t('warn.' + w.code, { detail: w.detail || '' });
+        if (!out.includes(text)) out.push(text);
+      }
+      return out.join(' ');
+    }
 
     function askAi(ref) {
       app.aiTarget = { ref };

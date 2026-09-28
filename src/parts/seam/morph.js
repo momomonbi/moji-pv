@@ -12,7 +12,7 @@ MV.def('parts/seam/morph', ['parts/kit'], (K) => {
   // cuts' own base layers: an echo stack's copies) soften and fade over [OLD_FROM, OLD_OUT] — the old line may still be
   // sung as the window starts, so they hold at first — and the new line's come into focus over [NEW_IN, NEW_FULL]; both
   // at once only in the middle, each blurred while it is faint, so neither reads as a second line printed over the
-  // first. The window ends at the new line's start (`ends`) and takes up to half the shorter cut (`share`); the old
+  // first. The window ends as the new line's voice starts (`ends`) and takes up to half the shorter cut (`share`); the old
   // line's exit and the new line's entrance are the transition itself (`replaces`).
   const OLD_FROM = 0.3, OLD_OUT = 0.8, NEW_IN = 0.4, NEW_FULL = 0.95, SOFTEN_PEAK = 1.4;
   function meltRest(fx, a, b, u, p) {

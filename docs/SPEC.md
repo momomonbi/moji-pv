@@ -109,15 +109,19 @@ and Filmora-ready output; how they are built is in `docs/DESIGN_2_1.md`.
 - **Per line (v2.1)**: its own season (この行の季節) and parts it must not use (この行で使わない部品).
 - **Glyph morph (モーフ, v2.2)**: a transition between two lines in which the letters they share glide from the old
   line's places to the new line's (size, angle, even vertical to horizontal writing) while the other letters melt; it
-  ends as the new line's window starts, and the old line is gone after it. In new works the planner uses it by itself
-  where two lines in one background share a meaningful run of letters (作品全体 › 見た目 › 詳しい設定 「同じ字をつなぐ」,
-  on in new works, off in older ones; per line 「前の行から字をつなぐ」). It can be pinned at any boundary.
-- **Weight animation (太さの動き, v2.2)**: 太る (letters appear thin and grow to the line's weight — in new works, when
+  ends as the new line is sung and starts no earlier than about half a second before the old line's last letter is sung
+  (the old line's letters stay readable while they are sung), and the old line is gone after it. The old and new lines'
+  decorations melt with them. In new works the planner uses it by itself where two lines in one background share a word
+  of two or more letters (作品全体 › 見た目 › 詳しい設定 「同じ字をつなぐ」, on in new works, off in older ones; per line
+  行 › 演出 › 詳しい設定 「前の行から字をつなぐ」). It can be pinned at any boundary; rolling the transition again (the die)
+  gives that boundary another transition.
+- **Weight animation (太さの動き, v2.2)**: 太字へ (letters appear thin and grow to the line's weight — in new works, when
   the line's 太さ is not set, the typeface's heaviest weight up to 800), 脈打つ太さ (the weight swells on every beat) and
-  細る (letters thin out and fade), drawn with the typeface's own served weights (no variable fonts). The planner uses
-  them only on lines whose typeface has room and whose lettering is plain or glowing (「太さを動かす」, on in new works);
-  with an outline, shadow or two-colour lettering the weight changes in steps, and a typeface with too few weights shows
-  a note. 「太さ」 (100–900) can be set per line or cut. Export waits for every weight it draws.
+  細字へ (letters thin out and fade), drawn with the typeface's own served weights (no variable fonts). The planner uses
+  them only on lines whose typeface has room and whose lettering is plain or glowing (「字の太さを動かす」, on in new
+  works); with an outline, shadow or two-colour lettering the weight changes in steps, and a pinned weight part on a
+  typeface with too few weights shows a note under 入り/見せ/抜け and 太さ (and a mark in the lyrics). 「太さ」 (100–900)
+  can be set per line or cut; 自動 shows the weight the line is drawn at. Export waits for every weight it draws.
 - **My materials (マイ素材, v2.1)**: new materials that the AI or the user builds from existing parts and a fixed set of
   primitives (shapes, particles, patterns, motion tracks, oscillators). They are data, never code; they are stored in the
   project and shown under マイ素材 in the part browser. AI-made materials appear only where they are placed, unless

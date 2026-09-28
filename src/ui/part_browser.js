@@ -626,10 +626,12 @@ MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output', 'ui/media_widgets'
     return { only, deny };
   }
 
-  // The last usable part of a kind never goes: 「少なくとも1つは使います」 (§3.8, §6.11).
+  // The last usable part of a kind never goes: 「少なくとも1つは使います」 (§3.8, §6.11). An opt-in part (v2.2 weight parts)
+  // does not count as the one: it joins a pool only where its switch is on and the cut can show it, so a filter of opt-in
+  // parts alone would leave the other cuts with nothing (they would all fall back to the kind's standard part).
   function setFilter(app, kind, next) {
     const f = normalize(app, kind, next);
-    const keys = keysFor(app.reg, kind).filter((k) => pooled(app.reg.get(kind, k)));
+    const keys = keysFor(app.reg, kind).filter((k) => app.reg.get(kind, k).pool !== false);
     if (!keys.some((k) => allowedBy(f, k))) { app.toast(app.t('pb.keepOne'), { kind: 'warn' }); return false; }
     app.dispatch({ t: 'filter.set', kind, only: f.only, deny: f.deny }, { label: ['undo.filter', { kind: app.t('kind.' + kind) }] });
     return true;

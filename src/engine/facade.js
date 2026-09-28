@@ -23,7 +23,7 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
   // v2.2 (DESIGN_2_2 §4): a glyph seam's canned lines share letters (the UI passes thumb.morphA / thumb.morphB in the
   // page's language); a weight part's canned cut is laid out in the body face at 800, a face with room to move.
   const SAMPLE_MORPH_A = '青い空';
-  const SAMPLE_MORPH_B = '青い海';
+  const SAMPLE_MORPH_B = 'あの青い海';
   const SAMPLE_WEIGHT = 800;
 
   class EngineError extends Error {

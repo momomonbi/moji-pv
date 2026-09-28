@@ -77,7 +77,7 @@ from line to line (M4) and a weight that moves (M5), both behind the generation 
 | Behaviours and kit (D§4.17.4, §4.18.3) | Optional `behaviour.wt: [lo, hi]`; `K.perGlyph(fn, { prep, wt })`, `K.perGlyphHold(fn, { prep, wt })` (kept through `K.depart`'s re-wrap, `K.mirror`, `K.variant`); `K.weightRoom(target)`; the kit's DELTA gains `wt` | One-argument calls build exactly the v2.1 behaviours (tested on the catalog). |
 | Glyph drawing (D§4.19.5, FROZEN rule) | A glyph with `wt ≠ 0` draws the two served weights around face weight + `wt` (the heavier at a·f, the lighter over it at a(1 − f)/(1 − a·f)); plain and glow lettering only, outline/shadow/duo take the nearest weight | The path choice is unchanged (only blur, glow, shard and pixel choose it); `wt = 0` makes the v2.1 calls in the v2.1 order. |
 | FontBook (D§4.14) | Draw-only faces: `request/ready(…, { drawOnly: true })`, `drawStatus(ref)`, `on('draw')` | They never move `epoch`, never make a scene provisional and never redeclare a weight the main path owns. |
-| Frame order (D§4.19.2 step 4) | During a glyph seam the travelling letters are drawn after the composite of both sides: above both cuts' text and near layers, below the still pass, the grounds' near layer and the hud | Only glyph seams. |
+| Frame order (D§4.19.2 step 4) | During a glyph seam the travelling letters are drawn after the composite of both sides: above both cuts' text and near layers, below the still pass, the grounds' near layer and the hud; the cuts' own base layers (far, mid) are drawn into the two sides under their text layers, so they melt with the rest (for the window above the grounds' mid and text layers) | Only glyph seams. |
 
 ### 4.2 モーフ (M4)
 
@@ -95,9 +95,18 @@ from line to line (M4) and a weight that moves (M5), both behind the generation 
   (`morph.auto`) resolves on at the boundary (a line pin only where A and B are different lines, else the work value),
   A and B are lyric/focus cuts of one background, `A.t1 ≤ B.t0`, neither A's exit nor B's entrance is the user's choice,
   no `motion: 'own'` arrange or knockout is on either side, the hooks `cut.kime`, `ctx.uta.at(cut)` and
-  `ctx.pv.seamGate(B)` allow it, and the letters are meaningful. Older works read one boolean per boundary.
-- **Window and hand-over.** `dur ≤ 0.5 · min(A.b − A.a, B.b − B.a)`; the window is `[B.a − dur, B.a]` (it ends as the new
-  line's window starts); A ends with the window even before its sung end, so after `B.a` only the new line is on screen.
+  `ctx.pv.seamGate(B)` allow it, there is room for a window of 0.25 s at least (below), no die was pressed on the
+  transition into B (a seam salt of B's cut or line: the rule stands aside and the chance roll picks another transition),
+  and the letters are meaningful. Older works read one boolean per boundary.
+- **Window and hand-over.** `dur ≤ 0.5 · min(A.b − A.a, B.b − B.a)` (automatic 0.4–0.7 s); the window ends as the new
+  line's voice starts — `[B.t0 − dur, B.t0]`, or `[B.a, B.a + dur]` when `dur` is shorter than B's lead — and starts
+  inside A, after the previous transition's window and no earlier than 0.5 s before A's sung end (`tracks.seamWindow`;
+  that last bound never cuts it below 0.25 s). So the old line's letters stand still while most of it is sung, and a
+  changed letter keeps its full strength until about the middle of its own clock (the swap melts over k ∈ [0.45, 0.85]
+  for the old letter, [0.55, 0.95] for the new; the rest of the old line fades over u ∈ [0.3, 0.8]). A ends with the
+  window even before its sung end, so after the window only the new line is on screen. (The design had `[B.a − dur,
+  B.a]` with up to 0.9 s: the owner review measured the morph taking 53–70 % of short lines' sung time and melting a
+  letter while it was sung.)
   Replacing B's entrance also drops a `text.weight` the grow rule set there. `seamOf`'s memo keeps `prev` (the guards'
   result and both texts) so a re-plan equals a plan from scratch; 「くり返しの行をそろえる」 copies a rule-picked morph only
   where the rule holds at the copy.
@@ -108,32 +117,39 @@ from line to line (M4) and a weight that moves (M5), both behind the generation 
   rotation, log scales, a mirror through zero, the shear ratio, a bow of `arc`), staggered by `spread`: alike pairs draw
   once, other equal letters crossfade, swaps melt (the old one softens and fades as the new one sharpens). Picks go to B.
 - **UI.** 作品全体 › 見た目 › 詳しい設定 「同じ字をつなぐ」 (on in new works); 行 › 演出 › 詳しい設定 「前の行から字をつなぐ」
-  [自動 | つなぐ | つながない] (not on the song's first line); the 切り替え row says 「モーフの間に前の行の字は次の行へ渡され、
-  モーフが終わると前の行は消えます。」 when it holds a glyph seam; the part browser tile shows 「青い空」→「青い海」.
+  [自動 | つなぐ | つながない] (not on the song's first line; its note says that つなぐ needs a shared word of two or more
+  letters and one background, and that choosing モーフ as the transition always links); the 切り替え row says
+  「モーフの間に前の行の字は次の行へ渡され、モーフが終わると前の行は消えます。」 when it holds a glyph seam; the part browser
+  tile shows 「青い空」→「あの青い海」 (BLUE SKY → A DEEP BLUE SEA), so the shared letters visibly travel.
 - **Measured.** Over `corpus(2, ['16:9'])` with the marker, 3 of 510 same-background lyric boundaries get the morph
   (0.6 %): rare by design.
 
 ### 4.3 太さの動き (M5)
 
-- **Parts** (all `late`, `pool: false`, `optIn: 'weight'`): 入り「太る」 `weightGrow` (letters appear thin and grow to
+- **Parts** (all `late`, `pool: false`, `optIn: 'weight'`): 入り「太字へ」 `weightGrow` (letters appear thin and grow to
   the line's weight; 始まりの細さ), 見せ「脈打つ太さ」 `weightPulse` (the weight swells on every beat — a 30 ms rise, an
   exponential fall, back to rest before the next beat — or breathes on a cosine without a beat grid; 振れ幅, 戻り, 周期),
-  抜け「細る」 `weightThin` (letters thin out and fade; 終わりの細さ). Their reach is read from the line's face at build
+  抜け「細字へ」 `weightThin` (letters thin out and fade; 終わりの細さ). Their reach is read from the line's face at build
   (`K.weightRoom`).
 - **Ladders** (`engine/text/faces`): `ladderOf`, `atWeight`, `weightPair`, `roomOf`, `growTop` (the heaviest served weight
   ≤ 800), `rungsBetween`, `reweigh`. Only the served static weights of the family are drawn (no variable fonts, no
   stroke emboldening); an unknown family has one weight and never animates.
 - **Planner.** Where 「太さを動かす」 (`weight.auto`) is on, a lyric/focus cut whose lettering is plain or glow and whose
-  face has room (太る: 300 from the lightest weight to its end weight; 細る: 300 below; 脈打つ太さ: 200 either way) draws
+  face has room (太字へ: 300 from the lightest weight to its end weight; 細字へ: 300 below; 脈打つ太さ: 200 either way) draws
   its motions from the opt-in pools. `text.weight` (100–900) is a pin (cut > line > work), else set by the **grow rule**:
-  an entrance with 太る and no 太さ pin ends at `growTop` (`from: 'rule'`, why `whyRule.weight.grow`), so the line really
+  an entrance with 太字へ and no 太さ pin ends at `growTop` (`from: 'rule'`, why `whyRule.weight.grow`), so the line really
   goes thin → bold. Warnings `weight-flat` (too few weights) and `weight-style` (outline, shadow or duo: steps) for a
-  pinned or ruled weight part. Rates over the corpus with the marker: 太る on 10.4 % of the eligible lyric cuts (weight
-  2.5), 脈打つ太さ on about 4 % (weight 0.5), 細る on 3.3 % (weight 1).
+  pinned or ruled weight part. Rates over the corpus with the marker: 太字へ on 10.4 % of the eligible lyric cuts (weight
+  2.5), 脈打つ太さ on about 4 % (weight 0.5), 細字へ on 3.3 % (weight 1). A weight warning carries the cut's motion slot as
+  its `path`, so the inspector shows it as a note under that 入り/見せ/抜け row and under 太さ, and the lyric gutter marks
+  the line. 脈打つ太さ's automatic swing is 300–400 (×0.7–1 by 強さ, capped by the room): two rungs or more.
 - **Fonts.** The weights a motion passes through are draw-only faces (§4.1): requested when a scene with `wtReach` is
   built, drawn once loaded (the nearest loaded weight or the face's own until then), waited for by export.
-- **UI.** 作品全体 › 見た目 › 詳しい設定 「太さを動かす」 (on in new works); 「太さ」 rows (自動 / 100–900) under 行 › 色と書体,
-  複数行 › 色と書体 and カット › 文字; the part browser tiles show the parts on the body face at 800.
+- **UI.** 作品全体 › 見た目 › 詳しい設定 「字の太さを動かす」 (on in new works); 「太さ」 rows (自動 / 100–900) under 行 ›
+  色と書体, 複数行 › 色と書体 and カット › 文字 — in 自動 the knob and the box show the weight the lyrics are drawn at (e.g.
+  「自動 600」); the part browser tiles show the parts on the body face at 800, and their blurbs say they need a typeface
+  with many weights. The parts were first named 太る and 細る; the owner review found 太る reads as "to put on weight", so
+  they are 「太字へ」 and 「細字へ」.
 
 ### 4.4 New works and older works
 
@@ -145,8 +161,8 @@ is not `g00`, so an older document plans exactly as before. The three late parts
 
 - The six existing goldens are byte-identical. The new `tests/golden/project_glyph.json` holds two new works
   (`tests/helpers/glyph_docs.js`): four line pairs that share letters (one vertical → horizontal, one into another face)
-  and a pinned モーフ with no meaningful anchors; and 太る with 太さ pinned, 太る taking the grow rule, 脈打つ太さ, 細る and
-  太る on outline lettering, each at 40 frames (32 even times and 8 inside the morphs and weight motions); its registry
+  and a pinned モーフ with no meaningful anchors; and 太字へ with 太さ pinned, 太字へ taking the grow rule, 脈打つ太さ, 細字へ and
+  太字へ on outline lettering, each at 40 frames (32 even times and 8 inside the morphs and weight motions); its registry
   block carries `lateVersion`.
 - Node: `morph_plan`, `morph_render`, `weight` (plus extensions of registry, frame, conformance with the `wt` jump limit
   60 per 1/480 s, planner_determinism, repeat_same, planner_explain, fields, ui_fields, lens_filter_seam, facade tests).
@@ -158,8 +174,10 @@ is not `g00`, so an older document plans exactly as before. The three late parts
 ### 4.6 Limits
 
 Trail filters (`fx.textAt`) redraw both sides at rest without travellers; an overfull run's clip does not clip its
-travellers; the base layers of both cuts are drawn from the window start as under every text seam (the morph's window
-starts `dur/2` earlier than a centred one); letters in an ineligible layer melt instead of travelling. A weight
+travellers; for the window the cuts' base layers lie above the grounds' mid and text layers (they are mixed with their
+lines); letters in an ineligible layer melt instead of travelling. No automatic モーフ can appear in the first-run sample
+lyrics (their line boundaries share no word; a request to the lead). Locking a line whose motion a seam replaced can still
+change an aligned copy's parameters (a v2.1 behaviour of `replaceMotion`, see NOTES). A weight
 between two served weights is a composite, exact only for a single solid fill (hence the steps for outline, shadow and
 duo); single-weight faces (most 見出し faces) cannot animate; a family that failed to load draws the fallback stack.
 

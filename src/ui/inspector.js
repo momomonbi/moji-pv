@@ -1,8 +1,8 @@
 /* 文字PVメーカー v2 — original work. The inspector (詳細): crumbs, level header, sections from FIELDS, field rows, sub-pages (DESIGN §6.4.4–§6.4.9, §6.6; DESIGN_2_1 §6.5–§6.9). */
 MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/part_browser', 'ui/selection', 'ui/looks',
   'ui/output', 'i18n/t', 'core/paths', 'core/pins', 'core/shot', 'planner/areas', 'ui/shot_editor', 'ui/material_page',
-  'ui/media_page', 'ui/media_widgets', 'ui/media_io', 'ui/extreme', 'planner/rules'],
-(dom, I, F, W, PB, S, LK, OUT, T, P, PINS, SHOT, AREAS, KE, MP, MPG, MW, MI, XU, RU) => {
+  'ui/media_page', 'ui/media_widgets', 'ui/media_io', 'ui/extreme', 'planner/rules', 'engine/text/faces'],
+(dom, I, F, W, PB, S, LK, OUT, T, P, PINS, SHOT, AREAS, KE, MP, MPG, MW, MI, XU, RU, FACES) => {
   'use strict';
 
   const { h } = dom;
@@ -273,7 +273,25 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
         return { graphemes: graphemesOf(ctx.line.text), cuts, source: pinned ? 'pin' : pr && pr.pieces ? 'mark' : 'auto' };
       }
       if (field.widget === 'slots') return { items: slotItems(field.kind, ctx) };
+      if (field.path === 'text.weight') return { autoValue: autoWeightOf(ctx) };
       return null;
+    }
+
+    // 太さ in 自動 (v2.2): the weight the scope's lyrics are laid out at — the face's own, or the one a decision set (the grow
+    // rule of 太字へ) — so the knob and the box show it rather than the lightest weight; null when the cuts differ.
+    function autoWeightOf(ctx) {
+      const p = plan();
+      if (!p || !p.look || !p.look.faces || !ctx.cuts.length) return null;
+      let w = null;
+      for (const c of ctx.cuts) {
+        if (!c || !c.slots) return null;
+        const ref = FACES.fontFor(p.look.faces, c.slots['text.face'] ? c.slots['text.face'].v : 'display', c.lang);
+        const tw = c.slots['text.weight'];
+        const v = tw ? FACES.snapWeight(ref.family, tw.v) : ref.weight;
+        if (w === null) w = v;
+        else if (w !== v) return null;
+      }
+      return w;
     }
 
     // The ornament / filter list of a scope. A screen effect the backdrop mode leaves out (§4.19.4) is listed greyed
@@ -640,6 +658,9 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       // 切り替え holding a glyph seam (v2.2 モーフ, DESIGN_2_2 §4) says that the old line is handed over and ends with it
       const handover = field.widget === 'part' && (field.partKind || field.kind) === 'seam'
         ? h('p', { class: 'fr-note note subtle', 'data-role': 'handover', text: t('fld.morphHandover.note'), hidden: true }) : null;
+      // 入り / 見せ / 抜け and 太さ (v2.2 太さの動き): a weight part where it cannot show says why (weight-flat, weight-style)
+      const weightWarn = weightKindOf(field) !== undefined
+        ? h('p', { class: 'fr-note note is-warn', 'data-role': 'weight-warn', role: 'note', hidden: true }) : null;
       const env = {
         app, t, label, field,
         commit: (v, o) => commit(row, v, o),
@@ -656,8 +677,8 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       };
       const widget = W.make(field, env);
       const el = h('div', { class: 'frow', 'data-widget': field.widget, 'data-slot': field.path || field.key, 'data-field': field.id },
-        h('div', { class: 'fr-top' }, lab, tag, h('span', { class: 'grow' }), info, dice, x, more), widget.el, note, handover, why);
-      Object.assign(row, { el, tag, dice, x, more, why, widget, lab, handover });
+        h('div', { class: 'fr-top' }, lab, tag, h('span', { class: 'grow' }), info, dice, x, more), widget.el, note, handover, weightWarn, why);
+      Object.assign(row, { el, tag, dice, x, more, why, widget, lab, handover, weightWarn });
       // Del / Backspace unpin the focused field (§6.8): the row publishes the paths it may clear while it has focus;
       // ui/boot's pin.clearField removes the ones that hold a pin (never a lock pin).
       el.addEventListener('focusin', () => {
@@ -725,6 +746,11 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       if (row.handover) {
         const def = fs && typeof fs.value === 'string' ? app.reg.get('seam', fs.value) : null;
         row.handover.hidden = !(def && def.glyphs === true);
+      }
+      if (row.weightWarn) {
+        const text = weightWarnText(row.field, ctx);
+        row.weightWarn.hidden = !text;
+        row.weightWarn.textContent = text;
       }
       if (!row.path) { row.tag.hidden = true; return; }
       const shown = tagState(row);
@@ -1352,6 +1378,30 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
     };
 
     function allWarnings() { return (plan() ? plan().warnings : []).concat(app.warnings()); }
+
+    // The motion kind of a 入り / 見せ / 抜け part row, null for the 太さ row, undefined for any other row.
+    function weightKindOf(field) {
+      if (field.path === 'text.weight') return null;
+      const kind = field.widget === 'part' ? field.partKind || field.kind : null;
+      return kind === 'arrive' || kind === 'dwell' || kind === 'depart' ? kind : undefined;
+    }
+
+    // The planner's weight-flat / weight-style warnings of the scope's cuts, as text (each once): under a motion row only
+    // those of its kind (the warning's path is the cut's motion slot), under 太さ all of them. '' when there are none.
+    function weightWarnText(field, ctx) {
+      const p = plan();
+      if (!p || !p.warnings.length) return '';
+      const kind = weightKindOf(field);
+      const cuts = new Set(ctx.cutKeys);
+      const out = [];
+      for (const w of p.warnings) {
+        if ((w.code !== 'weight-flat' && w.code !== 'weight-style') || !cuts.has(w.cut)) continue;
+        if (kind && !(typeof w.path === 'string' && w.path.endsWith(':' + kind))) continue;
+        const text = t('warn.' + w.code, { detail: w.detail || '' });
+        if (!out.includes(text)) out.push(text);
+      }
+      return out.join(' ');
+    }
 
     function askAi(ref) {
       app.aiTarget = { ref };

@@ -9162,12 +9162,12 @@ docs/DESIGN_2_2.md. The packages and their notes follow.
 ### P4: 文字の形が動く (M4 モーフ, M5 太さのアニメーション)
 
 Contract: DESIGN_2_2 §4 (from the package design, revision 2). Built in order: the registry's late parts, the weight
-column and its draw path, the draw-only faces, 太る and 細る, then the planner (opt-in pools, 太さ, the grow rule); then the
+column and its draw path, the draw-only faces, 太字へ and 細字へ, then the planner (opt-in pools, 太さ, the grow rule); then the
 モーフ (M4): the letters two lines share, the rule, the window and hand-over, the renderer's travellers; then (phase 3)
 the thumbnails, the DESIGN addenda, 脈打つ太さ, the package golden, the browser checks, the perf rows and the chapter.
 
 **Registry.** `late: true` definitions (always `pool: false`, never the fallback) are signed apart: `registry.version`
-stays `83c7523d` with 太る and 細る in the catalog; `registry.lateVersion` (their signature over the version) is used
+stays `83c7523d` with 太字へ and 細字へ in the catalog; `registry.lateVersion` (their signature over the version) is used
 only by the package's own golden. `optIn: 'weight'` admits a `pool: false` definition to `registry.pool(kind, { optIn:
 ['weight'] })`. Late parts are never material bases (`ai/recipe.basePart`, `parts/mix` variant → `no-base`); the command
 palette lists them; the part browser's use-only / never-use filter counts opt-in parts.
@@ -9175,7 +9175,7 @@ palette lists them; the part browser's use-only / never-use filter counts opt-in
 **The weight column.** POSE gains `wt` (column 23, ADD, identity 0, SCHEMA 2); the kit's DELTA gains it. `K.perGlyph(fn,
 { prep, wt })` / `K.perGlyphHold(fn, { prep, wt })`: `prep(env, target, p)` makes build-time params from the target
 (a copy; the given params are never changed), `wt(p)` declares the reach, kept as `behaviour.wt` (normalized to
-`[≤ 0, ≥ 0]`, never −0) and gathered as `scene.wtReach`. The options survive `K.depart`'s re-wrap (細る is a real exit:
+`[≤ 0, ≥ 0]`, never −0) and gathered as `scene.wtReach`. The options survive `K.depart`'s re-wrap (細字へ is a real exit:
 `t0 = times.out`, `live: 'after'`), `K.mirror` and `K.variant`. `K.weightRoom(target)` = the room of the face most
 glyphs use.
 
@@ -9193,25 +9193,25 @@ characters, never a weight the main path owns, never an epoch bump (no re-layout
 the main faces, and gives both renderers `faceReady`. The app and the lab repaint on `'draw'`. The thumbnails' renderer
 asks for its own scene's rungs (the weight-part tiles of step 7 rely on it).
 
-**Parts.** 太る `weightGrow` (arrive) and 細る `weightThin` (depart): `late`, `optIn: 'weight'`, reach = 始まりの細さ /
+**Parts.** 太字へ `weightGrow` (arrive) and 細字へ `weightThin` (depart): `late`, `optIn: 'weight'`, reach = 始まりの細さ /
 終わりの細さ × the room below the line's face. DESIGN §5.2 / §5.4 rows added (the catalog tests read them).
 Conformance: the dwell jump limit for `wt` is 60 weight units per 1/480 s.
 
 **Planner.** `ctx.glyph = { morph, weight, maybeMorph, id }` from planner/rules (`morph.auto`, `weight.auto`: work pin,
 else on for `look.gen ≥ 1`); the cast look key gains `|<id>` only when the id is not `g00`, so an older document's key
 text is as before. The motion slots of a lyric/focus cut draw from the opt-in pool when the switch is on, the lettering
-is plain or glow and the face has room (太る 300 from the lightest weight to the end weight, 細る 300 below, 脈打つ太さ
+is plain or glow and the face has room (太字へ 300 from the lightest weight to the end weight, 細字へ 300 below, 脈打つ太さ
 200 either way); the aligned-copy check and explain's shadow pass the same opt-in. `text.weight` (int 100–900) is a pin
-(cut > line > work), else set by the grow rule: an entrance with 太る and no 太さ pin ends at the heaviest served weight
+(cut > line > work), else set by the grow rule: an entrance with 太字へ and no 太さ pin ends at the heaviest served weight
 up to 800 (`from: 'rule'`, trace rule `weight.grow`), inside the cast (cached with it). The build lays the cut's lyric
 face role out at `text.weight` (`FACES.reweigh`; notes of another role keep theirs). Warnings `weight-flat` and
 `weight-style` (`detail` = the family) for a pinned or ruled weight part where it cannot show, once per cut, replayed
 from the cast cache. Explain lists an opt-in part among the alternatives where the traced pool offered it.
 
-**Rate calibration.** Over `corpus(2, ['16:9'])` with `look.gen = 1`: 444 of 600 lyric/focus cuts are eligible for 太る
+**Rate calibration.** Over `corpus(2, ['16:9'])` with `look.gen = 1`: 444 of 600 lyric/focus cuts are eligible for 太字へ
 (as the design's probe). `weight: 2` gave 8.1 % (6 seeds: 8.5 %), 2.25 gave 9.2 %, **2.5 gives 10.4 % (6 seeds: 9.9 %)**,
-so 太る carries `weight: 2.5` (the design's calibration step; test band [0.06, 0.14]). 細る (weight 1): 3.3 % of its
-eligible cuts. Of the 太る cuts 15 of 36 get a grow-rule weight; the others' face is already at its top (Zen Old Mincho 700,
+so 太字へ carries `weight: 2.5` (the design's calibration step; test band [0.06, 0.14]). 細字へ (weight 1): 3.3 % of its
+eligible cuts. Of the 太字へ cuts 15 of 36 get a grow-rule weight; the others' face is already at its top (Zen Old Mincho 700,
 Shippori Mincho B1 800).
 
 **UI.** 作品全体 › 見た目 › 詳しい設定 「太さを動かす」 (toggle, `autoDefault`: the document default unpins, anything
@@ -9264,7 +9264,7 @@ parameters; explain says `whyRule.morph`.
 **モーフ: window, entry, hand-over.** A seam definition's `share` (glyphMorph 0.5) replaces the 0.4 share; `ends: true`
 puts the window at `[B.a − dur, B.a]` (`at = B.a − dur/2`); a glyph seam's entry lists `glyphs` (keys in sorted order).
 `replaces.arrive` turns B's entrance into `instantShow` (the first plan use of that branch) and drops a grow-rule
-`text.weight` from B (`dropGrowWeight`; a pinned 太る keeps it). `endWithSeam(…, handover)`: the seam's own A ends with the
+`text.weight` from B (`dropGrowWeight`; a pinned 太字へ keeps it). `endWithSeam(…, handover)`: the seam's own A ends with the
 window even before its sung end (no `t1` floor); the cuts before A keep the rule. For every existing seam `share`, `ends`,
 `glyphs` are absent, so windows and entries are byte-for-byte as before (the six goldens match).
 
@@ -9359,7 +9359,7 @@ goldens matching; a new `--only=<file>` option wrote this file alone (the other 
 `tests/helpers/glyph_docs.js`: morph = a new work in one background with 青い空へ → 青い海へ (h → v, the planner's choice),
 夜の町を歩く → 朝の町を歩く, ブルーの空へ12 (v, pinned) → ブルーの海へ12 (h, pinned), a pinned モーフ 君の手 → 夢の中 (only の
 shared), 光る窓 → 光る窓の向こう; weight = the basic fixture as a new work on frostGlass in its display face (Murecho 600)
-with 太る + 太さ 800 pinned (r4), 太る taking the grow rule (r5), 脈打つ太さ (r6), 細る (r7), 太る on outline lettering (ra).
+with 太字へ + 太さ 800 pinned (r4), 太字へ taking the grow rule (r5), 脈打つ太さ (r6), 細字へ (r7), 太字へ on outline lettering (ra).
 Frame times `glyphTimes`: 32 even times, then two inside each of up to four motions. morph_render.test.js checks the
 golden (plan hashes, 40 frames each, the registry block, what each document shows).
 
@@ -9367,14 +9367,14 @@ golden (plan hashes, 40 frames each, the registry block, what each document show
 - glyph_parity: weight pairs on the direct path and the level-0 sprite path agree within 2/255 (the lab's probe gains
   `wt`, a lab-only offset like its blur and glow): Shippori Mincho B1 800 − 250 (500/600 at f = 0.5) MAE 1.43/255, − 350
   (400/500, f = 0.5) 1.40/255, − 325 (f = 0.75) 1.40/255; each row also checks that the offset changed the block's ink.
-- parts_gallery: the モーフ, 太る, 脈打つ太さ and 細る tiles animate (4–7 different pictures over 16 times, none blank);
+- parts_gallery: the モーフ, 太字へ, 脈打つ太さ and 細字へ tiles animate (4–7 different pictures over 16 times, none blank);
   every catalog part renders in every aspect as before.
 - contact_sheet: `--doc morph|weight` renders frame strips of every morph window and weight motion of the golden
-  documents (plus 太る rows in a mincho, a Latin line, a vertical line and a one-weight face); the self-check renders
+  documents (plus 太字へ rows in a mincho, a Latin line, a vertical line and a one-weight face); the self-check renders
   both. QA of the strips (fallback faces): the shared letters travel and turn (h → v, v → h with the tate-chu-yoko 12),
   swaps melt, a pinned morph with no anchors shrinks the old line into the new one's place, B stands where the
-  travellers ended; 太る visibly grows (Latin, mincho, vertical), outline lettering steps, the one-weight face only fades
-  in, 細る thins before fading, 脈打つ太さ swells on the beats. Observed: B's far/mid-layer decorations (an echo stack's
+  travellers ended; 太字へ visibly grows (Latin, mincho, vertical), outline lettering steps, the one-weight face only fades
+  in, 細字へ thins before fading, 脈打つ太さ swells on the beats. Observed: B's far/mid-layer decorations (an echo stack's
   faint copies) appear at the window start, as under every text seam (base layers are not mixed), `dur/2` earlier than
   under a centred seam. The real Google Fonts faces could not be checked: the headless browser's requests to
   fonts.googleapis.com fail through this machine's proxy (ERR_TOO_MANY_RETRIES), while curl reaches it.
@@ -9387,7 +9387,7 @@ golden (plan hashes, 40 frames each, the registry block, what each document show
 **Perf (phase 3).** Same run, 720p, 10 s at 30 fps from 1 s before the first morph / weight motion, least disturbed of
 two runs each (load average 4–6 on 4 CPUs): basic p95 26.9 ms; glyph-morph p50 14.5 / p95 33.2 ms against its comparator
 (every glyph seam a dissolve) 15.8 / 33.0 ms: × 1.01 (limit 1.25); glyph-weight p50 9.8 / p95 23.8 ms against the
-comparator (太る → fogIn, 脈打つ太さ → thumpSwell, 細る → fogOut, no 太さ pins) 10.4 / 25.1 ms: × 0.95. The morph row's
+comparator (太字へ → fogIn, 脈打つ太さ → thumpSwell, 細字へ → fogOut, no 太さ pins) 10.4 / 25.1 ms: × 0.95. The morph row's
 absolute p95 sits at the limit (33.4 ms) on this machine because of its look's paper texture (post 12.5 ms), as its
 comparator does.
 
@@ -9398,9 +9398,9 @@ comparator does.
   document draws dotScreen and duoTone in its window, which alone put it and its comparator over twice the budget (p95
   37 / 35 ms against basic's 28.8 ms in the same run), and the comparators' own entrances picked weight parts; the rows
   measure what the package adds. The comparators are planned again until no glyph seam or weight part is left.
-- `glyphTimes` picks the weight motions by kind (the first 太る, 脈打つ太さ and 細る cut, then the first 太る on stepped
+- `glyphTimes` picks the weight motions by kind (the first 太字へ, 脈打つ太さ and 細字へ cut, then the first 太字へ on stepped
   lettering, then more in plan order) instead of "the first four cuts with a weight part": in the golden weight document
-  those were four 太る cuts and no hold or exit. The morph document places its pinned boundary before the last rule pair,
+  those were four 太字へ cuts and no hold or exit. The morph document places its pinned boundary before the last rule pair,
   so the first four glyph seams show each case (h → v, a swap, v → h, the pinned one).
 - `update_golden.js --only=<file>` (additive): writing the new golden with a plain run would have rewritten the six
   existing files with the same bytes; `--only` writes the one file and `--check --only` checks it.

@@ -28,7 +28,7 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       'el.hide': { type: 'bool' },
       // 「くり返しの行をそろえる」 (DESIGN_2_1 §4.10): pinned at work or line scope, never at a cut (core/commands).
       'repeat.same': { type: 'bool' },
-      // 太さ (v2.2, DESIGN_2_2 §4): the weight of the cut's lyric face role; a pin, or the grow rule of 太る.
+      // 太さ (v2.2, DESIGN_2_2 §4): the weight of the cut's lyric face role; a pin, or the grow rule of 太字へ.
       'text.weight': { type: 'int', min: 100, max: 900 },
     }, CAM.SLOT_SPECS));
     const SEASON_SPEC = LK.LOOK_SPECS.season;
@@ -906,11 +906,11 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       return els;
     }
 
-    // --- weight animation (v2.2, DESIGN_2_2 §4: 太る, 脈打つ太さ, 細る) -------------------------------------------
+    // --- weight animation (v2.2, DESIGN_2_2 §4: 太字へ, 脈打つ太さ, 細字へ) -------------------------------------------
 
     // The weight parts join a cut's pools (opt-in 'weight') only when the work's 「太さを動かす」 is on (ctx.glyph.weight),
     // the cut is a lyric (or focus) cut lettered plain or glowing (the other styles cannot crossfade weights) and its
-    // face has room for the motion; the grow rule gives an entrance with 太る the face's bold end. Documents without the
+    // face has room for the motion; the grow rule gives an entrance with 太字へ the face's bold end. Documents without the
     // switch never reach any of this, so their pools and plans are unchanged.
     const WEIGHT_OPT_IN = Object.freeze(['weight']);
     const GROW_KEY = 'weightGrow';
@@ -966,7 +966,7 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       }
     }
 
-    // The grow rule: an entrance with 太る (chosen, pinned or aligned) and no 太さ pin ends at the face's heaviest served
+    // The grow rule: an entrance with 太字へ (chosen, pinned or aligned) and no 太さ pin ends at the face's heaviest served
     // weight up to 800 (FACES.growTop), so the line really goes from thin to bold. Part of the cast, so it is cached and
     // replayed with it. planner/tracks takes it away when a seam replaces the entrance.
     function growWeight(st) {
@@ -983,7 +983,8 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
 
     // A weight part a pin or a rule put where it cannot show (the automatic path never picks it there): the face has too
     // few weights (weight-flat), or the lettering's outline, shadow or second colour makes the weight change in steps
-    // (weight-style). detail = the family.
+    // (weight-style). detail = the family; path = the cut's motion slot ('cut/<key>:arrive'), so the inspector shows the
+    // note under that row (and under 太さ).
     function weightWarnings(st) {
       if (st.natural) return;
       for (const kind of MOTION_KINDS) {
@@ -991,7 +992,7 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
         const def = d ? st.ctx.registry.get(kind, d.v) : null;
         if (!def || def.optIn !== 'weight') continue;
         const ref = faceOfCut(st);
-        const where = { cut: st.cut.key, line: st.cut.line || undefined, detail: ref.family };
+        const where = { cut: st.cut.key, line: st.cut.line || undefined, detail: ref.family, path: 'cut/' + st.cut.key + ':' + kind };
         if (weightRoom(st, kind, ref) < FLAT_ROOM) st.ctx.warn(Object.assign({ code: 'weight-flat' }, where));
         if (!CROSSFADE.has(styleOf(st))) st.ctx.warn(Object.assign({ code: 'weight-style' }, where));
       }

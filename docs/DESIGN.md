@@ -752,8 +752,10 @@ Notes:
 - v2.2 (DESIGN_2_2 §4, additive): a seam entry whose part is a **glyph seam** (`glyphs: true`, the glyph morph
   `glyphMorph`) also holds `glyphs: [[aOff, bOff, same], …]` — the letters the two cuts share: UTF-16 grapheme offsets into
   A's and B's `text`, `same` 1 for equal letters (they travel) and 0 for a swap (they melt while travelling), sorted by
-  `bOff`, at most 64, `[]` when nothing pairs. Its window ends at `B.a` (`at = B.a − dur/2`, the part's `ends`) and takes
-  up to `share · min(A.b − A.a, B.b − B.a)` (the part's `share`, 0.5). **Exception to `b`:** a glyph seam hands A's letters
+  `bOff`, at most 64, `[]` when nothing pairs. Its window ends as B's voice starts (the part's `ends`: `[B.t0 − dur, B.t0]`,
+  or `[B.a, B.a + dur]` when `dur` is shorter than B's lead) and takes up to `share · min(A.b − A.a, B.b − B.a)` (the part's
+  `share`, 0.5), starting inside A, after the previous transition's window and no earlier than 0.5 s before A's sung end
+  (never cut below 0.25 s by that last bound). **Exception to `b`:** a glyph seam hands A's letters
   over, so the seam's own A gets `b = min(b, at + dur/2)` with no `t1` floor; every cut before A, and every other seam,
   keep `b = max(t1, min(b, seam.at + seam.dur/2))`. No other seam has these fields; no plan without a glyph seam changes.
 - `fp` (fingerprint) = hash of everything the scene build needs: slots, `els`, text, emph, duration `b − a`, role, palette,
@@ -1563,16 +1565,20 @@ text transitions in the catalog, ×0.03 recency left 13 % of neighbouring text t
 **v2.2: the glyph morph (DESIGN_2_2 §4).** In the unpinned branch, before the chance roll, the rule `morph` picks
 `glyphMorph` (`from: 'rule'`) where 「同じ字をつなぐ」 resolves on at the boundary (`morph.auto`: a line pin counts only
 where A and B are different lines, else the work value; the default is on in works of generation ≥ 1, planner/rules), A
-and B are lyric/focus cuts of one segment, `A.t1 ≤ B.t0`, neither A's exit nor B's entrance is chosen by the user, no
+and B are lyric/focus cuts of one segment, `A.t1 ≤ B.t0`, there is room for a window of 0.25 s at least (below), no die
+was pressed on the transition into B (a seam salt of B's cut or line: the chance roll picks one instead), neither A's exit
+nor B's entrance is chosen by the user, no
 `motion: 'own'` arrange or knockout is on either side, the other packages' hooks allow it (P3 `cut.kime`, P6
 `ctx.uta.at`, P2 `ctx.pv.seamGate`), and `planner/morph.analyze(A.text, B.text).meaningful` (a run of shared letters that
 means something: weighted LCS, runs of 3, of 2 with a non-kana, or one kanji/katakana/hangul/emoji; m ≥ 2 and a 2-run or
 m ≥ 0.4 of the shorter line). The order of rules in that branch is P3 キメ → P4 morph → P2 gate → chance. `seamOf`'s memo
 keeps `prev` (the guards' result and the two texts) so a re-plan equals a plan from scratch; `seamCopy` copies a
 rule-picked morph only where the rule holds at the copy's boundary. A seam definition's `share` replaces 0.4 in the
-window clamp, `ends: true` places the window at `[B.a − dur, B.a]`, and a glyph seam lists its `glyphs` (§3.12) and hands
+window clamp, `ends: true` ends the window as B's voice starts (`[B.t0 − dur, B.t0]`, never starting after `B.a`; within
+A, after the previous transition's window and from no earlier than 0.5 s before A's sung end, `tracks.seamWindow`), and a
+glyph seam lists its `glyphs` (§3.12) and hands
 A over (`endWithSeam(…, handover)`: A's `b` = the window end even before its `t1`). Replacing B's entrance also removes a
-`text.weight` the 太る grow rule set on B. Legacy documents read one boolean per boundary; their seams are unchanged.
+`text.weight` the 太字へ grow rule set on B. Legacy documents read one boolean per boundary; their seams are unchanged.
 
 **Impulses.** For each impact cut: `flash` (amp `amounts.flash`, decay 0.18) if > 0, `shake` (amp `amounts.shake`, decay
 0.4) if > 0, `slip` (amp `amounts.glitch`, decay 0.25) if > 0.2 — all at the cut's `t0`. For each `song.info.highlights`
@@ -1796,7 +1802,7 @@ env = {
 | `lens` | `make(env, cam, p)` | | scene/build | `Behaviour[]` on the camera node |
 | `filter` | `apply(fx, src, p, t)`, `stage: 'shape'\|'tone'\|'light'\|'optic'\|'film'`, `cost` 1–5, `passes` (full-frame draws), `alphaSafe` | `needs: ['textAt']`, `texture: true` (eligible for the work `texture` slot) | render/post | a Surface (`src` = no-op) |
 | `seam` | `mix(fx, a, b, u, p)`, `scope: 'text' \| 'world'` | `replaces: { depart, arrive }` | render/seam | a Surface |
-| `seam` (v2.2 additions) | — | `glyphs: true` (scope `text`; the planner lists the shared letters, the renderer draws them travelling), `share` (0, 0.5] (window share, default 0.4), `ends: true` (the window ends at `B.a`) | planner/tracks, render/renderer | — |
+| `seam` (v2.2 additions) | — | `glyphs: true` (scope `text`; the planner lists the shared letters, the renderer draws them travelling), `share` (0, 0.5] (window share, default 0.4), `ends: true` (the window ends as B's voice starts, `B.t0`) | planner/tracks, render/renderer | — |
 | `theme` | `swatch` (7 tokens), `faces`, `style`, `dark`, `texture` | `season`, `prefer` | planner/look | — |
 | `mood` | `tagBias`, `amounts`, `themes`, `pace: { seam, focus }`, `variety`, `filters` | `keywords` | planner | — |
 
@@ -2231,7 +2237,10 @@ FrameGraph = {
    is drawn once underneath. World seam: two complete worlds into two surfaces, then `seam.mix`; the post stack then runs
    once on the result (never per world).
    v2.2 glyph seam (DESIGN_2_2 §4): the glyphs listed in the seam entry are left out of the two side surfaces (a skip mask
-   per scene; a static text raster is drawn live meanwhile), `mix` melts the rest, and the renderer then draws each pair
+   per scene; a static text raster is drawn live meanwhile), the cuts' own base layers (`far`, `mid`: an echo stack's
+   copies, rays) are drawn into the two side surfaces under their text layers — so they melt with the rest instead of
+   popping in or out at full strength, and for the window lie above the grounds' mid and text layers; their `still` media
+   stay out of the mix — `mix` melts the rest, and the renderer then draws each pair
    itself on the frame, its device transform interpolated from A's glyph to B's (short-arc rotation, log scales, a bow of
    `arc`) with the part's alpha rules — **above** both cuts' text and near layers, below the still pass, the grounds' near
    layer and the hud (a documented z-order change for the length of the window). Only runs that read the cut's text, in
@@ -2593,7 +2602,7 @@ depends on `parts/kit`.
 | `riseFromFlat` | 起き上がり | Tilt up | playful retro | Glyphs stand up from lying flat on the baseline. |
 | `staticJoin` | 乱入 | Glitch in | digital hard fast | Glyphs jitter sideways with color echoes, then lock in place (gate `glitch`). |
 | `wordPop` | ぽん | Word pop | playful bright | Whole words pop in with overshoot, one word at a time. |
-| `weightGrow` (pool false) | 太る | Weight grow | bold slow | Letters appear thin and grow bold (v2.2, DESIGN_2_2 §4: late, opt-in `weight`). |
+| `weightGrow` (pool false) | 太字へ | Weight grow | bold slow | Letters appear thin and grow bold (v2.2, DESIGN_2_2 §4: late, opt-in `weight`). |
 | `instantShow` (fb, pool false) | 即時 | Instant show | minimal | Appears at once (used by rules and `motion: 'own'`). |
 
 ### 5.3 Holds — `dwell` (`parts/dwell/*.js`)
@@ -2633,7 +2642,7 @@ depends on `parts/kit`.
 | `burnOut` | 燃え尽き | Burn out | bright hard | Glyphs flare in the accent color, glow, and shrink away. |
 | `pileCollapse` | 崩れ | Pile collapse | playful busy | Glyphs drop and pile up at the bottom, then fade. |
 | `pointImplode` | 吸い込み | Point implode | digital fast | Glyphs are pulled into one point and vanish. |
-| `weightThin` (pool false) | 細る | Weight thin | soft slow | Letters thin out and fade (v2.2, DESIGN_2_2 §4: late, opt-in `weight`). |
+| `weightThin` (pool false) | 細字へ | Weight thin | soft slow | Letters thin out and fade (v2.2, DESIGN_2_2 §4: late, opt-in `weight`). |
 | `instantHide` (fb, pool false) | 即消 | Instant hide | minimal | Disappears at once (rules, seams that replace the exit). |
 
 ### 5.5 Backgrounds — `ground` (`parts/ground/*.js`)

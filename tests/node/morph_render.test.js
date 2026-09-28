@@ -437,7 +437,7 @@ test('thumbnail: the canned morph shows two lines that share letters, its own wi
   const FAC = MV.use('engine/facade');
   const PM = MV.use('planner/morph');
   const sp = FAC.samplePlan(CAT, { kind: 'seam', key: MORPH }, {});
-  assert.deepEqual(sp.cuts.map((c) => c.text), [FAC.SAMPLE_MORPH_A, FAC.SAMPLE_MORPH_B], 'the canned pair 青い空 → 青い海');
+  assert.deepEqual(sp.cuts.map((c) => c.text), [FAC.SAMPLE_MORPH_A, FAC.SAMPLE_MORPH_B], 'the canned pair 青い空 → あの青い海');
   const [A, B] = sp.cuts, s = sp.seams[0];
   const def = CAT.get('seam', MORPH);
   assert.equal(s.slot.v, MORPH);
@@ -501,10 +501,10 @@ test('the package golden: the morph and weight documents plan and render the gol
       const orient = (key) => plan.cuts.find((c) => c.key === key).slots.orient.v;
       assert.ok(glyphSeams.some((s) => orient(s.a) === 'v' && orient(s.b) === 'h'), 'one goes from vertical to horizontal writing');
     } else {
-      assert.ok(weighs('arrive').some((c) => c.slots['text.weight'] && c.slots['text.weight'].from === 'rule'), '太る with the grow rule');
-      assert.ok(weighs('arrive').some((c) => c.slots['text.weight'] && c.slots['text.weight'].from.startsWith('pin')), '太る with 太さ pinned');
-      assert.ok(weighs('arrive').some((c) => c.slots['text.style'].v === 'outline'), '太る stepping on outline lettering');
-      assert.ok(weighs('dwell').length > 0 && weighs('depart').length > 0, '脈打つ太さ and 細る');
+      assert.ok(weighs('arrive').some((c) => c.slots['text.weight'] && c.slots['text.weight'].from === 'rule'), '太字へ with the grow rule');
+      assert.ok(weighs('arrive').some((c) => c.slots['text.weight'] && c.slots['text.weight'].from.startsWith('pin')), '太字へ with 太さ pinned');
+      assert.ok(weighs('arrive').some((c) => c.slots['text.style'].v === 'outline'), '太字へ stepping on outline lettering');
+      assert.ok(weighs('dwell').length > 0 && weighs('depart').length > 0, '脈打つ太さ and 細字へ');
     }
     await engine.prepare(0, plan.duration, { export: true });
     const [w, h] = D.DESIGN_SIZE[doc.look.aspect];

@@ -410,8 +410,8 @@ test('the batched Gumbel noise of the chooser equals core/rng.gumbel', () => {
   }
 });
 
-// v2.2 (DESIGN_2_2 §4): an opt-in part (太る) is an alternative where the traced pool offered it, and only there.
-test('explain: an automatically picked 太る lists itself with its weight; a cut without the opt-in lists no weight part', () => {
+// v2.2 (DESIGN_2_2 §4): an opt-in part (太字へ) is an alternative where the traced pool offered it, and only there.
+test('explain: an automatically picked 太字へ lists itself with its weight; a cut without the opt-in lists no weight part', () => {
   const CAT = MV.use('parts/catalog').defaultRegistry();
   let found = null;
   for (const { doc } of corpus.corpus(2, ['16:9'])) {
@@ -420,7 +420,7 @@ test('explain: an automatically picked 太る lists itself with its weight; a cu
     const cut = plan.cuts.find((c) => c.slots.arrive.v === 'weightGrow' && c.slots.arrive.from === 'auto');
     if (cut) { found = { doc, plan, cut }; break; }
   }
-  assert.ok(found, 'a new work picks 太る somewhere');
+  assert.ok(found, 'a new work picks 太字へ somewhere');
   const out = EX.explain(found.doc, found.plan, 'cut/' + found.cut.key + ':arrive', { registry: CAT });
   assert.equal(out.value, 'weightGrow');
   const alt = out.alts.find((a) => a.key === 'weightGrow');

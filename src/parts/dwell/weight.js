@@ -8,12 +8,13 @@ MV.def('parts/dwell/weight', ['parts/kit'], (K) => {
   const AMP_MAX = 400;           // at most 400 weight units: |d wt/dt| stays ≤ 60 per 1/480 s (conformance)
 
   // Build-time params from the target: the direction (bolder when the face has the room for the swing, else lighter,
-  // else toward the larger room), the amplitude (the swing scaled by 強さ, never past the room or AMP_MAX) and the
-  // time the hold starts (the no-beat breathing is phased from it).
+  // else toward the larger room), the amplitude (the swing scaled by 強さ — 0.7 of it at 強さ 0, all of it at 1 — never
+  // past the room or AMP_MAX) and the time the hold starts (the no-beat breathing is phased from it). With the automatic
+  // swing of 300–400 a pulse moves two rungs or more, so it reads as a pulse, not as a flicker of the edges.
   function pulsePrep(env, target, p) {
     const room = K.weightRoom(target);
     const dirW = room.above >= p.swing ? 1 : room.below >= p.swing ? -1 : (room.above >= room.below ? 1 : -1);
-    const amp = Math.max(0, Math.min(dirW > 0 ? room.above : room.below, Math.round(p.swing * (0.5 + 0.5 * p.amount)), AMP_MAX));
+    const amp = Math.max(0, Math.min(dirW > 0 ? room.above : room.below, Math.round(p.swing * (0.7 + 0.3 * p.amount)), AMP_MAX));
     return Object.assign({}, p, { dirW, amp, rest: env.times.rest });
   }
 
@@ -33,12 +34,12 @@ MV.def('parts/dwell/weight', ['parts/kit'], (K) => {
   const weightPulse = K.dwell({
     key: 'weightPulse',
     label: L('脈打つ太さ', 'Weight pulse'),
-    blurb: L('拍ごとに字が太さで脈打つ', 'Letters swell in weight on every beat'),
+    blurb: L('拍ごとに字が太さで脈打つ（太さの種類が多い書体で）', 'Letters swell in weight on every beat (on typefaces with many weights)'),
     tags: ['bold', 'fast'], family: 'weight', pool: false, late: true, optIn: 'weight', needs: ['beats'], weight: 0.5,
     traits: { energy: [0.35, 1], roles: ['lyric', 'focus'] },
     fits: (f) => (f.beat ? 1.2 : 0.4),
     params: {
-      swing: { type: 'int', min: 100, max: 400, step: 25, label: L('振れ幅', 'Swing'), auto: { range: [150, 300], follow: 'energy' } },
+      swing: { type: 'int', min: 100, max: 400, step: 25, label: L('振れ幅', 'Swing'), auto: { range: [300, 400], follow: 'energy' } },
       decay: { type: 'num', min: 0.1, max: 0.5, step: 0.01, unit: 's', label: L('戻り', 'Decay'), auto: { range: [0.12, 0.22], follow: '-tempo' } },
       period: { type: 'num', min: 0.6, max: 4, step: 0.1, unit: 's', label: L('周期', 'Period'), auto: { range: [1.2, 2.2], follow: '-tempo' } },
     },

@@ -7,7 +7,8 @@ MV.def('ui/lyric_editor', ['ui/dom', 'ui/selection', 'i18n/t', 'core/lyrics', 'p
   const FOLLOW_PAUSE_MS = 3000;
   const GUTTER_MARGIN_PX = 240;           // gutter entries are built for the visible rows plus this much above and below
   const STAMP = /^\[\d{1,3}:\d{1,2}(?:[.:]\d{1,3})?\]/;
-  const WARN_CODES = new Set(['overfull', 'orphan-pin', 'shadowed-pin', 'lock-partial', 'pin-not-applicable', 'time-order']);
+  const WARN_CODES = new Set(['overfull', 'orphan-pin', 'shadowed-pin', 'lock-partial', 'pin-not-applicable', 'time-order',
+    'weight-flat', 'weight-style']);
   const TOKENS = ['tok-comment', 'tok-meta', 'tok-stamp', 'tok-cut', 'tok-emph', 'tok-emphText', 'tok-impact', 'tok-note'];
 
   // --- mark tinting (display only; the parser is core/lyrics) --------------------------------------------------
@@ -343,7 +344,7 @@ MV.def('ui/lyric_editor', ['ui/dom', 'ui/selection', 'i18n/t', 'core/lyrics', 'p
       const lines = new Map(plan ? plan.lines.filter((l) => l.id === l.row || !l.row).map((l) => [l.id, l]) : []);
       const warns = new Map();
       for (const w of (app.warnings ? app.warnings() : [])) {
-        if (w.line && WARN_CODES.has(w.code) && !warns.has(w.line)) warns.set(w.line, w.code);
+        if (w.line && WARN_CODES.has(w.code) && !warns.has(w.line)) warns.set(w.line, w);
       }
       const counts = pinCounts(doc);
       const sel = S.validate(app.view.state.sel, plan);
@@ -382,7 +383,7 @@ MV.def('ui/lyric_editor', ['ui/dom', 'ui/selection', 'i18n/t', 'core/lyrics', 'p
       if (by === 'lrc') entry.append(h('span', { class: 'g-badge', text: 'LRC' }));
       if (doc.locks[line.id]) entry.append(h('span', { class: 'g-lock', title: t('state.locked'), text: 'L' }));
       if (pins) entry.append(h('span', { class: 'g-pins', title: t('lyr.pinCount', { n: pins }), text: '●' + pins }));
-      if (warn) entry.append(h('span', { class: 'g-warn', title: t('warn.' + warn), text: '!' }));
+      if (warn) entry.append(h('span', { class: 'g-warn', title: t('warn.' + warn.code, { detail: warn.detail || '' }), text: '!' }));
       const words = [T.fmtTime(line.t0), t('state.' + (by === 'pin' ? 'pinned' : by === 'lrc' ? 'mark' : 'auto'))];
       if (doc.locks[line.id]) words.push(t('state.locked'));
       if (pins) words.push(t('lyr.pinCount', { n: pins }));
