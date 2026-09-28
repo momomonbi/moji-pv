@@ -297,9 +297,9 @@ test('text service 文字組み: keys hold kumi, withKumi is memoised and shares
   const other = cut.withFaces(FACES.resolveFaces(null, null, ['ja']));
   assert.deepEqual(other.kumi, cut.kumi);
   // (the theme's display face is a brush face, damped; the default faces are gothic: the table's own numbers)
-  assert.deepEqual(Array.from(tight.w, (v) => Math.round(v * 100) / 100), [100, 100, 92.16, 97.2, 97.2, 92.16]);
+  assert.deepEqual(Array.from(tight.w, (v) => Math.round(v * 100) / 100), [100, 100, 93.28, 98.32, 98.32, 93.28]);
   assert.deepEqual(Array.from(other.layout(spec, '夜明けのまち').w, (v) => Math.round(v * 100) / 100),
-    [100, 100, 90.2, 96.5, 96.5, 90.2]);
+    [100, 100, 91.6, 97.9, 97.9, 91.6]);
   const before = svc.cached;
   other.layout({ ...spec, size: 80 }, '夜明けのまち');
   assert.equal(svc.cached, before + 1, 'one shared LRU');

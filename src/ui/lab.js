@@ -1,8 +1,9 @@
 /* 文字PVメーカー v2 — original work. Part lab: one part in a canned cut with a pose-column view, contact sheets, a text mode and the browser-test API (DESIGN §6.14, §8.3). */
 MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core/schema', 'core/rng', 'engine/facade',
   'engine/host/canvas', 'engine/host/fonts', 'engine/host/measure', 'engine/text/faces', 'engine/text/service',
-  'engine/render/sprites', 'engine/render/draw', 'engine/scene/budget', 'parts/kit', 'parts/mix', 'i18n/t', 'i18n/strings'],
-(REG, DOC, S, SHOT, SCH, RNG, FAC, HC, HF, HM, FACES, TS, SP, DR, BG, K, MIX, I18N, strings) => {
+  'engine/render/sprites', 'engine/render/draw', 'engine/scene/budget', 'parts/kit', 'parts/mix', 'i18n/t', 'i18n/strings',
+  'engine/text/breaker', 'engine/text/kumi', 'engine/text/vert'],
+(REG, DOC, S, SHOT, SCH, RNG, FAC, HC, HF, HM, FACES, TS, SP, DR, BG, K, MIX, I18N, strings, BR, KU, VT) => {
   'use strict';
 
   // The lab is a developer page (build.py --lab → tests/www/lab.html, MV.DEV = true). It is not shipped, so its control
@@ -752,20 +753,27 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core
     return JSON.parse(JSON.stringify(doc));
   }
 
+  // A fixture project with the additive o.look (merged into doc.look: DESIGN_2_2 §0's look.gen = 1 makes it a new work,
+  // with 文字組み on) and o.pins (merged into its pins).
+  function projectDocOf(o) {
+    const doc = projectDoc(o.project);
+    if (o.look) doc.look = Object.assign({}, doc.look, o.look);
+    if (o.pins) doc.pins = Object.assign({}, doc.pins, o.pins);
+    return doc;
+  }
+
   const projectEngines = new Map();
 
   // frames(o) → { hashes, duration }: pixel hashes of a fixture project at the given times; fresh = a new engine.
   // o.pins (additive): pins merged into the project's (DESIGN_EXTREME: the cam.extreme switch, so a planned EXTREME
-  // document takes the determinism checks).
+  // document takes the determinism checks); o.look (additive, DESIGN_2_2): merged into its look (look.gen).
   async function frames(o) {
     const source = o.parts || defaultSource();
-    const id = source + '|' + o.project + (o.pins ? '|' + JSON.stringify(o.pins) : '');
+    const id = source + '|' + o.project + (o.pins ? '|' + JSON.stringify(o.pins) : '') + (o.look ? '|look' + JSON.stringify(o.look) : '');
     let rec = !o.fresh && projectEngines.get(id);
     if (!rec) {
       rec = engineFor(source, false, true);
-      const doc = projectDoc(o.project);
-      if (o.pins) doc.pins = Object.assign({}, doc.pins, o.pins);
-      rec.engine.setDoc(doc);
+      rec.engine.setDoc(projectDocOf(o));
       if (!o.fresh) projectEngines.set(id, rec);
     }
     const plan = rec.engine.plan;
@@ -835,7 +843,7 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core
   // turn (as the planner's overlay would give them), under the slowSwell rig; o.materials → the sample materials in
   // every slot (withMaterials). Set on the engine.
   function projectPlan(engine, o) {
-    let doc = projectDoc(o.project);
+    let doc = projectDocOf(o);
     if (o.camera === 'off') {
       doc.pins = Object.assign({}, doc.pins, { 'work:cam.shot': { v: 'none', by: 'user' }, 'work:rig': { v: 'none', by: 'user' } });
     } else if (o.camera || o.extreme) doc.pins = Object.assign({}, doc.pins, { 'work:rig': { v: 'slowSwell', by: 'user' } });
@@ -1181,6 +1189,81 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core
 
   // info() → { sources, parts: { source: { kind: keys } }, notes: { source: text }, problems: { source: [...] }, aspects,
   //   camera: { shot: keys, rig: keys, xshot: keys }, media: { parts: { source: [{ kind, key, param, accept }] }, fixtures: [names] } | null }
+  // --- 文字組み ink (DESIGN_2_2 §1; glyph_parity.py check 6, contact_sheet.py --kumi --fonts) -----------------------------
+
+  // The flavours' Japanese faces (the theme families; with Google Fonts blocked their fallback stacks draw: Noto Sans /
+  // Serif CJK JP on the CI system).
+  const KUMI_FACES = Object.freeze({ gothic: ['Noto Sans JP', 500], mincho: ['Shippori Mincho B1', 500], heavy: ['Dela Gothic One', 400],
+    brush: ['Yuji Syuku', 400] });
+  const KUMI_FULL = Object.freeze({ kana: 1, jump: 0, latin: 0, head: 'line' });
+
+  // kumiInk(o) → { font, family, flavor, orient, px, rows: [{ g, tier, cell, before, after, pb, pa }] }: every kana of
+  // U+3041–U+30FF that かな詰め trims (engine/text/kumi tier; not the combining marks U+3099 U+309A, not the unassigned
+  // U+3097 U+3098), laid out alone at 100 % (a one-grapheme run has no word seam: its tightest cell) by the text service
+  // with the canvas measurer, in the flavour's face. In em along the line: `cell` is its advance; `before` / `after`
+  // how far its ink reaches from the cell's centre (horizontally measureText's actualBoundingBoxLeft / Right with
+  // textAlign 'center'; vertically Ascent / Descent with textBaseline 'middle', less the class offset: small kana sit
+  // 0.1 em high; a turned glyph such as ー reads Left / Right); `pb` / `pa` the same per scanline across the line (rows
+  // of the drawn glyph horizontally, columns vertically, o.px of them per em, in the cell's frame, null where the scanline
+  // holds no ink), so two neighbours are compared where their inks really meet (a handakuten high on the right does
+  // not meet a stroke at mid height). o = { flavor: 'gothic' | 'mincho' | 'heavy' | 'brush', orient: 'h' | 'v', family?,
+  // weight?, px (the em in px, default 120), load (await the web face first) }
+  async function kumiInk(o) {
+    const opt = o || {};
+    const flavor = KUMI_FACES[opt.flavor] ? opt.flavor : 'gothic';
+    const family = opt.family || KUMI_FACES[flavor][0], weight = opt.weight || KUMI_FACES[flavor][1];
+    const faces = FACES.resolveFaces({ faces: { display: { ja: family, latin: 'Inter', weight, flavor } } }, null, ['ja']);
+    const ref = FACES.fontFor(faces, 'display', 'ja');
+    const all = [];
+    for (let c = 0x3041; c <= 0x30FF; c++) if (c !== 0x3097 && c !== 0x3098 && c !== 0x3099 && c !== 0x309A) all.push(String.fromCodePoint(c));
+    const kana = all.filter((ch) => { const u = BR.analyze(ch); return u.n === 1 && KU.tier(u, 0) !== null; });
+    if (opt.load && document.fonts) {
+      try { await document.fonts.load(ref.css(100), kana.join('')); } catch (e) { /* the fallback stack draws */ }
+    }
+    const px = opt.px || 120;
+    const svc = TS.createTextService({ measurer: HM.createCanvasMeasurer(factory, null), faces });
+    const v = opt.orient === 'v';
+    const side = px * 2;
+    const surf = makeSurface(side, side, true);
+    const g = surf.ctx;
+    const rows = [];
+    for (const ch of kana) {
+      const lay = svc.layout({ text: ch, orient: v ? 'v' : 'h', face: 'display', size: px, box: { x: 0, y: 0, w: px * 4, h: px * 4 },
+        fit: 'none', maxLines: 1, lang: 'ja', kumi: KUMI_FULL });
+      const em = lay.em[0], rot = lay.rot[0];
+      const font = lay.fonts[lay.font[0]].css(em);
+      const [dx, dy] = v && !rot ? VT.offsetFor(VT.VCLS[lay.vcls[0]], lay.fonts[lay.font[0]].family) : [0, 0];
+      g.setTransform(1, 0, 0, 1, 0, 0);
+      g.clearRect(0, 0, side, side);
+      g.translate(px + dx * em, px + dy * em);
+      if (rot === 2) g.scale(-1, 1);
+      if (rot) g.rotate(Math.PI / 2);
+      g.font = font;
+      g.textAlign = 'center';
+      g.textBaseline = 'middle';
+      g.fillStyle = '#000';
+      g.fillText(ch, 0, 0);
+      const m = g.measureText(ch);
+      g.setTransform(1, 0, 0, 1, 0, 0);
+      let before, after;
+      if (!v || rot) { before = m.actualBoundingBoxLeft; after = m.actualBoundingBoxRight; }
+      else { before = m.actualBoundingBoxAscent - dy * em; after = m.actualBoundingBoxDescent + dy * em; }
+      const d = g.getImageData(0, 0, side, side).data;
+      const pb = new Array(side).fill(null), pa = new Array(side).fill(null);
+      for (let a = 0; a < side; a++) {                  // a: the scanline across the line; b: along it
+        let lo = -1, hi = -1;
+        for (let b = 0; b < side; b++) {
+          const alpha = v ? d[(b * side + a) * 4 + 3] : d[(a * side + b) * 4 + 3];
+          if (alpha >= 128) { if (lo < 0) lo = b; hi = b; }
+        }
+        if (lo >= 0) { pb[a] = (px - lo) / px; pa[a] = (hi + 1 - px) / px; }
+      }
+      const cell = v ? lay.h[0] : lay.w[0];
+      rows.push({ g: ch, tier: KU.tier(BR.analyze(ch), 0, v), cell: cell / em, before: before / em, after: after / em, pb, pa });
+    }
+    return { font: ref.css(100), family: ref.family, flavor: ref.flavor, orient: v ? 'v' : 'h', px, rows };
+  }
+
   function info() {
     const out = { sources: sources(), parts: {}, notes: {}, problems: {}, aspects: ASPECTS.slice(),
       camera: { shot: SHOT.SHOT_KEYS.slice(), rig: SHOT.RIG_KEYS.slice(), xshot: SHOT.XSHOT_KEYS.slice() }, media: null };
@@ -1205,7 +1288,7 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core
     window.addEventListener('error', (e) => pageErrors.push(String(e.message || e.error)));
     window.addEventListener('unhandledrejection', (e) => pageErrors.push(String((e.reason && e.reason.message) || e.reason)));
     window.__lab = Object.freeze({ info, render: renderApi, thumb: thumbApi, sequence, sheet, parity, blurSweep, frames, perf,
-      compare, comparePart, spriteCheck, cuts: cutsApi,
+      compare, comparePart, spriteCheck, cuts: cutsApi, kumiInk,
       errors: () => pageErrors.slice(), page });
   }
 

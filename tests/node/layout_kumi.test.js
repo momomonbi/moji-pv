@@ -65,24 +65,25 @@ test('absent, null or all-zero kumi: the RunLayout equals the one without the fi
 
 test('T1 worked numbers: 夜明けのまち (h and v), ショートケーキ, きみのこえがきこえた', () => {
   let r = run('夜明けのまち', { kumi: { kana: 0.7 } });
-  assert.deepEqual(along(r), [50, 150, 245.1, 338.45, 434.95, 528.3]);
-  assert.deepEqual(size(r), [100, 100, 90.2, 96.5, 96.5, 90.2]);
-  approx(r.box.w, 573.4, 1e-3);
+  assert.deepEqual(along(r), [50, 150, 245.8, 340.55, 438.45, 533.2]);
+  assert.deepEqual(size(r), [100, 100, 91.6, 97.9, 97.9, 91.6]);
+  approx(r.box.w, 579, 1e-3);
   assert.equal(run('夜明けのまち', {}).box.w, 600);
   assert.deepEqual(Array.from(r.em), [100, 100, 100, 100, 100, 100]);    // glyphs keep their size: only the gaps close
   assert.deepEqual(Array.from(r.kumi), [0, 0, 0, 0, 0, 0]);
   r = run('夜明けのまち', { kumi: { kana: 0.7 }, orient: 'v' });
-  assert.deepEqual(along(r, true), [50, 150, 245.1, 338.45, 434.95, 528.3]);
-  assert.deepEqual(size(r, true), [100, 100, 90.2, 96.5, 96.5, 90.2]);
-  approx(r.box.h, 573.4, 1e-3);
+  assert.deepEqual(along(r, true), [50, 150, 245.8, 340.55, 438.45, 533.2]);
+  assert.deepEqual(size(r, true), [100, 100, 91.6, 97.9, 97.9, 91.6]);
+  approx(r.box.h, 579, 1e-3);
   r = run('ショートケーキ', { kumi: { kana: 1 } });
-  assert.deepEqual(size(r), [86, 66, 92, 70, 86, 92, 86]);
-  approx(r.box.w, 578, 1e-3);
-  r = run('ショートケーキ', { kumi: { kana: 1 }, orient: 'v' });           // ー is rotated in vertical text: still a cell
-  assert.deepEqual(size(r, true), [86, 66, 92, 70, 86, 92, 86]);
+  assert.deepEqual(size(r), [88, 78, 92, 72, 88, 92, 88]);
+  approx(r.box.w, 598, 1e-3);
+  // ー is rotated in vertical text: still a cell; ト is narrow across a line only, tall in a column (the wide tier)
+  r = run('ショートケーキ', { kumi: { kana: 1 }, orient: 'v' });
+  assert.deepEqual(size(r, true), [88, 78, 92, 94, 88, 92, 88]);
   r = run('きみのこえがきこえた', { kumi: { kana: 0.7 } });
-  assert.deepEqual(size(r), [90.2, 93, 96.5, 95.1, 90.2, 96.5, 95.1, 90.2, 90.2, 90.2]);
-  approx(r.box.w, 927.2, 1e-3);
+  assert.deepEqual(size(r), [91.6, 95.8, 97.9, 95.8, 91.6, 97.9, 95.8, 91.6, 91.6, 91.6]);
+  approx(r.box.w, 941.2, 1e-3);
 });
 
 test('T1: never wider than measured (proportional kana), and emphasis multiplies the capped cell', () => {
@@ -99,15 +100,15 @@ test('T1: never wider than measured (proportional kana), and emphasis multiplies
     },
     metrics(css) { const k = FACES.cssSize(css) / 100; return { ascent: 88 * k, descent: 12 * k }; },
   };
-  // か: cap 90.2 at 0.7 and 86 at 1 are both above 85, so it stays at 85; く (narrow) is capped at 70 at strength 1
+  // か: cap 91.6 at 0.7 and 88 at 1 are both above 85, so it stays at 85; く (narrow) is capped at 72 at strength 1
   assert.deepEqual(size(run('かかか', { kumi: { kana: 0.7 } }, undefined, prop)), [85, 85, 85]);
   assert.deepEqual(size(run('かかか', { kumi: { kana: 1 } }, undefined, prop)), [85, 85, 85]);
-  assert.deepEqual(size(run('くくく', { kumi: { kana: 1 } }, undefined, prop)), [70, 70, 70]);
+  assert.deepEqual(size(run('くくく', { kumi: { kana: 1 } }, undefined, prop)), [72, 72, 72]);
   // emphasis on a kana: w = cap × emphScale, em = size × emphScale
   const r = run('かかか', { kumi: { kana: 1 }, emph: [[1, 2]], emphScale: 1.15 });
-  approx(r.w[1], 86 * 1.15, 1e-3);
+  approx(r.w[1], 88 * 1.15, 1e-3);
   approx(r.em[1], 115, 1e-3);
-  approx(r.w[0], 86, 1e-3);
+  approx(r.w[0], 88, 1e-3);
 });
 
 // ---- T2 ---------------------------------------------------------------------------------------------------------
@@ -136,11 +137,11 @@ test('T2 worked numbers: 始発のホームに (h and v), a hiragana head, a bra
   r = run('「始まり」の朝', { kumi: { jump: 0.5 } });
   assert.deepEqual(ems(r), [100, 120, 100, 100, 100, 82, 100]);        // the head after the opening bracket
   approx(r.x[1], 160, 1e-3);
-  // all three on at the new-work defaults: の is a seam cell times the particle factor (0.965 × 0.82)
+  // all three on at the new-work defaults: の is a seam cell times the particle factor (0.979 × 0.82)
   r = run('始発のホームに', { kumi: { kana: 0.7, jump: 0.5, latin: 0.5 } });
-  assert.deepEqual([r2(r.w[2]), r2(r.w[6])], [79.13, 73.96]);
+  assert.deepEqual([r2(r.w[2]), r2(r.w[6])], [80.28, 75.11]);
   assert.deepEqual(ems(r), [120, 100, 82, 100, 100, 100, 82]);
-  approx(r.box.w, 652.79, 1e-2);
+  approx(r.box.w, 657.19, 1e-2);
   // at 100 % in a box of exactly 1.3 em the head makes the run shrink (about 7 %); at the default it still fits
   const tight = { box: { x: 0, y: 0, w: 2000, h: 130 }, fit: 'shrink', maxLines: 1 };
   r = run('始発のホームに', { ...tight, kumi: { jump: 1 } });

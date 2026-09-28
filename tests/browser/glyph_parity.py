@@ -21,6 +21,15 @@
    screen (at their own camera) is at least the frame share the sprite draws cover (the lab's sprite meter). The ink the
    model takes (draw.inkEm: 0.66 em either side of the centre, more for the outline, shadow and duo styles, + 2 px at
    720p) holds every level-0 ink rect of check 3, so a direct-path glyph, which the meter does not see, is covered too.
+6. 文字組み ink (DESIGN_2_2 §1): at かな詰め 100 % no two neighbouring kana put their ink into each other. For every kana
+   of U+3041–U+30FF that is trimmed, the lab's kumiInk lays it out alone (its tightest cell: a one-grapheme run has no
+   word seam, and seams only relax cells) and draws it at 120 px; for every ordered pair (a, b) the overlap is how far
+   a's ink after its centre and b's ink before its centre reach past the distance of the two centres, (cell a +
+   cell b) / 2, compared scanline by scanline across the line (a stroke only meets a stroke at the same height). The
+   largest overlap must stay ≤ 0.02 em, horizontally and vertically, in the gothic and mincho faces of the system
+   (fonts are blocked as in the other checks; CI installs Noto Sans / Serif CJK JP). The worst five pairs are printed,
+   with the bounding-box figure (whole ink extents, which count a handakuten high on the right against a stroke at mid
+   height) for reference.
 Registries: the catalog (what ships) and the examples, when the page has them; --parts picks one.
 Google Fonts are blocked (fallback faces), so the result does not depend on the network.
 Run: PW_EXECUTABLE=/opt/pw-browsers/chromium python3 tests/browser/glyph_parity.py [--parts catalog]
@@ -43,6 +52,33 @@ SPIKE_FLOOR = 0.25 / 255
 INK_CHARS = ['空', 'あ', '夜', '明', '街', '光', '「', 'ー', '〜', 'W', 'g', 'j', 'Q', 'R', '12', '!?', '😀', '👨\u200d👩\u200d👧']
 INK_STYLES = ['plain', 'outline', 'shadow', 'glow', 'duo']
 INK_SIZES = [24, 96, 480]
+KUMI_INK_MAX = 0.02            # em: how far two neighbours' inks may meet at 100 %
+KUMI_FLAVORS = ('gothic', 'mincho')
+# The pairs of the kana the lab lays out (window.__lab.kumiInk): the largest scanline overlap, the worst five pairs and
+# the bounding-box figure, computed in the page.
+KUMI_PAIRS_JS = """async (o) => {
+  const r = await window.__lab.kumiInk(o);
+  const rows = r.rows, n = rows.length, m = n ? rows[0].pa.length : 0;
+  const worst = [];
+  let max = -Infinity, bbox = -Infinity, inked = 0;
+  for (const x of rows) if (x.pa.some((v) => v !== null)) inked++;
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j < n; j++) {
+      const a = rows[i], b = rows[j], d = (a.cell + b.cell) / 2;
+      let reach = -Infinity;
+      for (let s = 0; s < m; s++) if (a.pa[s] !== null && b.pb[s] !== null && a.pa[s] + b.pb[s] > reach) reach = a.pa[s] + b.pb[s];
+      const ov = reach - d;
+      if (ov > max) max = ov;
+      bbox = Math.max(bbox, a.after + b.before - d);
+      if (worst.length < 5 || ov > worst[worst.length - 1][0]) {
+        worst.push([ov, a.g + b.g, a.tier + '/' + b.tier]);
+        worst.sort((p, q) => q[0] - p[0]);
+        if (worst.length > 5) worst.pop();
+      }
+    }
+  }
+  return { family: r.family, n, inked, max, bbox, worst };
+}"""
 
 
 def sources_of(info, wanted):
@@ -153,6 +189,19 @@ async def check_ink(page, failures):
             failures.append('the glyph cost model is below what is drawn (%s): %r' % (name, under[:5]))
 
 
+async def check_kumi_ink(page, failures):
+    """Check 6: 文字組み's tightest cells hold the ink of every pair of neighbouring kana."""
+    for flavor in KUMI_FLAVORS:
+        for orient in ('h', 'v'):
+            r = await page.evaluate(KUMI_PAIRS_JS, {'flavor': flavor, 'orient': orient})
+            ok = r['max'] <= KUMI_INK_MAX and r['n'] >= 180 and r['inked'] == r['n']
+            print('%s kumi ink %s %s (%s, %d kana): neighbours meet by at most %.3f em at 100 %% (limit %.2f); worst %s; '
+                  'bounding boxes %.3f em' % ('ok  ' if ok else 'FAIL', flavor, orient, r['family'], r['n'], r['max'], KUMI_INK_MAX,
+                                              ' '.join('%s %.3f (%s)' % (g, v, t) for v, g, t in r['worst']), r['bbox']))
+            if not ok:
+                failures.append('kumi ink %s %s: %r' % (flavor, orient, r))
+
+
 async def run(args):
     failures = []
     async with async_playwright() as p:
@@ -170,6 +219,7 @@ async def run(args):
                 await check_source(page, info, src, failures)
             if 'materials' in info['sources']:
                 await check_ink(page, failures)
+            await check_kumi_ink(page, failures)
             violations = await csp_violations(page)
             if violations:
                 failures.append('CSP violations: %r' % violations)

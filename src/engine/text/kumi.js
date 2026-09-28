@@ -13,12 +13,17 @@ MV.def('engine/text/kumi', ['core/script', 'engine/text/breaker'], (S, B) => {
 
   // ---- T1 かなを詰める: kana cells narrower than 1 em ------------------------------------------------------------
 
-  // Trim per tier in em at strength 1: the tightest cell the ink allows in gothic and mincho faces (common kana ink
-  // ≤ 0.86 em, the widest and the voiced kana ≤ 0.92, small kana ≈ 0.6, く し り 0.45–0.6). tests/browser/glyph_parity
-  // measures the ink against these cells.
-  const TRIM = Object.freeze({ wide: 0.10, kana: 0.14, narrow: 0.30, small: 0.34, bar: 0.08 });
-  const WIDE_KANA = 'あおすせなぬねのはひふへほまみむめやゆわゐゑを';     // …and every voiced kana (が ぱ ヴ)
-  const NARROW_KANA = 'くぐしじりノトドリ';                               // narrow wins over voiced (ぐ じ ド)
+  // Trim per tier in em at strength 1: the tightest cells at which two neighbours' inks stay apart (≤ 0.012 em where
+  // they meet, scanline by scanline) in the gothic and mincho faces, horizontally and vertically; tests/browser/
+  // glyph_parity check 6 measures every pair against these cells (DESIGN_2_2 §1; its numbers in docs/NOTES).
+  const TRIM = Object.freeze({ wide: 0.06, kana: 0.12, narrow: 0.28, small: 0.22, bar: 0.08 });
+  // Wide: a stroke or a voiced mark reaching an edge of the em (…and every voiced kana: が ぱ ヴ; れ ル sweep right).
+  const WIDE_KANA = 'あおすせなぬねのはひふへほまみむめやゆわゐゑをれルゟ';
+  // Narrow across a horizontal line only: in a vertical column く し り … are tall, and take the wide tier there. Narrow
+  // wins over voiced (ぐ じ ド).
+  const NARROW_KANA = 'くぐしじりノトドリ';
+  // The spacing marks ゛ ゜ are no letters (「ア゛」 leans its mark on the kana): never trimmed.
+  const MARKS = '゛゜';
   // Heavy and brush faces carry more ink per cell: their trim is damped, and again for a layout weight ≥ 800.
   const FLAVOR_DAMP = Object.freeze({ heavy: 0.6, brush: 0.8 });
   const HEAVY_WEIGHT = 800;
@@ -29,6 +34,7 @@ MV.def('engine/text/kumi', ['core/script', 'engine/text/breaker'], (S, B) => {
 
   const WIDE_SET = new Set(WIDE_KANA);
   const NARROW_SET = new Set(NARROW_KANA);
+  const MARK_SET = new Set(MARKS);
   // The voiced kana of U+3041–U+30FF (a base plus ゛ or ゜ under NFD); other graphemes are decomposed when asked.
   const VOICED = new Set();
   for (let cp = 0x3041; cp <= 0x30ff; cp++) {
@@ -37,15 +43,17 @@ MV.def('engine/text/kumi', ['core/script', 'engine/text/breaker'], (S, B) => {
   }
   function voiced(g) { return g.length === 1 ? VOICED.has(g) : g.normalize('NFD').length > 1; }
 
-  // tier(u, i) → 'wide' | 'kana' | 'narrow' | 'small' | 'bar' | null: the trim class of grapheme i. Only full-width
-  // hiragana, katakana, small kana and ー have one; kanji, Latin, digits, punctuation, halfwidth kana, ・ and 々 do not.
-  function tier(u, i) {
+  // tier(u, i, vert) → 'wide' | 'kana' | 'narrow' | 'small' | 'bar' | null: the trim class of grapheme i (vert: in a
+  // vertical column). Only full-width hiragana, katakana, small kana and ー have one; kanji, Latin, digits,
+  // punctuation, halfwidth kana, ・, 々 and the spacing marks ゛ ゜ do not.
+  function tier(u, i, vert) {
     const g = u.gs[i], c = u.cls[i];
     if (g === 'ー') return 'bar';
     if (u.cells[i] !== 1) return null;
     if (c === 'smallKana') return 'small';
     if (c !== 'hira' && c !== 'kata') return null;
-    if (NARROW_SET.has(g)) return 'narrow';
+    if (MARK_SET.has(g)) return null;
+    if (NARROW_SET.has(g)) return vert ? 'wide' : 'narrow';
     return WIDE_SET.has(g) || voiced(g) ? 'wide' : 'kana';
   }
 
@@ -340,7 +348,7 @@ MV.def('engine/text/kumi', ['core/script', 'engine/text/breaker'], (S, B) => {
     const trim = new Float64Array(n);
     let any = false;
     for (let i = 0; i < n; i++) {
-      const t = tier(u, i);
+      const t = tier(u, i, !!o.vert);
       if (t) { trim[i] = s * TRIM[t]; any = true; }
     }
     if (!any || o.lang !== 'ja' || n < 2) return trim;
@@ -435,7 +443,7 @@ MV.def('engine/text/kumi', ['core/script', 'engine/text/breaker'], (S, B) => {
 
   return {
     normalize, key, withCut, particleMarks, partsOf, particles, marks, hasCjk, tier, apply, clearMemos,
-    HEADS, ROLE, TRIM, WIDE_KANA, NARROW_KANA, FLAVOR_DAMP, HEAVY_WEIGHT, WEIGHT_DAMP, BOUNDARY, JUMP, OPENERS,
+    HEADS, ROLE, TRIM, WIDE_KANA, NARROW_KANA, MARKS, FLAVOR_DAMP, HEAVY_WEIGHT, WEIGHT_DAMP, BOUNDARY, JUMP, OPENERS,
     MIN_HEAD_CONTENT, LATIN_GROW, LATIN_GAP,
     P1, P2, STACK, VETO_NEXT, VETO_NEXT2, VETO_PAIR, VETO_TRIPLE, KANA_WORDS, LEAD_WORDS, OKURI_KANA, OKURI_FREE,
     OKURI_EDGE, CLOSERS, MEMO_MAX,

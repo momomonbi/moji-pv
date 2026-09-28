@@ -231,13 +231,13 @@ test('one chain with a glyph-weight face step: a service derived by withFaces ke
   assert.equal(run.layout.fonts[0].family, 'Zen Kaku Gothic New');
   assert.equal(Number(run.layout.fonts[0].weight), 900);
   assert.deepEqual(Array.from(run.layout.kumi), [2, 0, 1, 0, 0, 0, 1]);
-  // the weight damp (≥ 800) of T1 reads the layout face: ム (no seam) is trimmed by 0.14 × 0.7 × 0.8 of an em
+  // the weight damp (≥ 800) of T1 reads the layout face: ム (no seam) is trimmed by 0.12 × 0.7 × 0.8 of an em
   const kanaOnly = { 'text.kana': KUMI_SLOTS['text.kana'] };
   const plainK = build('centerAnchor', '始発のホームに', kanaOnly, base, { emph: [] }).scene.runs[0].layout;
   const heavyK = build('centerAnchor', '始発のホームに', kanaOnly, reweighed, { emph: [] }).scene.runs[0].layout;
   assert.equal(heavyK.ch[5], 'ム');
-  assert.ok(Math.abs(heavyK.w[5] / heavyK.em[5] - (1 - 0.14 * 0.7 * 0.8)) < 1e-4, 'heavy ' + heavyK.w[5] / heavyK.em[5]);
-  assert.ok(Math.abs(plainK.w[5] / plainK.em[5] - (1 - 0.14 * 0.7)) < 1e-4, 'plain ' + plainK.w[5] / plainK.em[5]);
+  assert.ok(Math.abs(heavyK.w[5] / heavyK.em[5] - (1 - 0.12 * 0.7 * 0.8)) < 1e-4, 'heavy ' + heavyK.w[5] / heavyK.em[5]);
+  assert.ok(Math.abs(plainK.w[5] / plainK.em[5] - (1 - 0.12 * 0.7)) < 1e-4, 'plain ' + plainK.w[5] / plainK.em[5]);
 });
 
 test('a planned new work (look.gen = 1): particles at 0.82 of their run in the built scenes, heads live too', () => {
