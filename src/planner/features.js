@@ -88,7 +88,8 @@ MV.def('planner/features', ['core/script', 'core/num', 'engine/text/breaker', 'e
 
   // cutFeatures(cut, fx) → CutFeatures (§4.16.7). cut = { key, role, text, emph, impact, t0, t1, lang };
   // fx = { duration, env|null, grid|null, info (song.info)|null, section (heading-derived)|null, repeatOf, repeats,
-  // sectionStart (DESIGN_2_1 §2.7: the first cut, or its section differs from the previous cut's; planner/plan) }.
+  // sectionStart (DESIGN_2_1 §2.7: the first cut, or its section differs from the previous cut's; planner/plan),
+  // calm (0 | 1 | 2, DESIGN_2_2 §3) }; cut.kime (true on a キメ cut) gives feat.kime.
   function cutFeatures(cut, fx) {
     const text = cut.text;
     const gs = S.graphemes(text);
@@ -110,12 +111,26 @@ MV.def('planner/features', ['core/script', 'core/num', 'engine/text/breaker', 'e
       onBeat = Math.min(b.since, fx.grid.period - b.since) < ON_BEAT;
     }
     // Keys in sorted order, so the Plan encoder can print the object natively (planner/encode asIs).
-    return {
+    const out = {
       beat: beat ? r3(beat) : 0, cells, cps: r3(cells / dur), dur: r3(dur), emph: cut.emph.length > 0,
       energy: r3(N.clamp(energy)), graphemes: gs.length, impact: !!cut.impact, latin: r3(latinShare(gs)), onBeat,
       orients: orientsOf(text, script), pos, repeatOf: fx.repeatOf || null, role: cut.role, script,
       section: sectionOf(cut, fx), sectionStart: !!fx.sectionStart, units: { glyph: glyphs, line: 1, word: words }, words,
     };
+    return fx.calm || cut.kime === true ? withKime(out, fx.calm, cut.kime === true) : out;
+  }
+
+  // キメ (PV22 P3, DESIGN_2_2 §3): `calm` (1 | 2: the cuts before a キメ cut, planner/kime calmLevels) and `kime` (true on
+  // the キメ cut) are present only where set, in sorted key order, so every other cut keeps its features, its
+  // fingerprint and the plan its hash.
+  function withKime(f, calm, kime) {
+    const out = {};
+    for (const k of Object.keys(f)) {
+      if (k === 'cells' && calm) out.calm = calm;
+      if (k === 'latin' && kime) out.kime = true;
+      out[k] = f[k];
+    }
+    return out;
   }
 
   // The section of a cut: the song.info section at its t0, else the heading above its line, else null.

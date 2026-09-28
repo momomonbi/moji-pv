@@ -1,6 +1,7 @@
 /* 文字PVメーカー v2 — original work. Casting: every cut slot in the FROZEN order, from pins, rules or the chooser (DESIGN §4.16.2, §3.4.3; DESIGN_2_1 §3.9, §4.9). */
 MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 'core/pins', 'core/paths', 'planner/choose',
-  'planner/params', 'planner/look', 'planner/camera'], (S, REG, R, N, PINS, P, CH, PA, LK, CAM) => {
+  'planner/params', 'planner/look', 'planner/camera', 'planner/kime', 'planner/extreme'],
+  (S, REG, R, N, PINS, P, CH, PA, LK, CAM, KI, XT) => {
     'use strict';
 
     const LIST_KINDS = Object.freeze(['ornament', 'filter']);
@@ -28,6 +29,9 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       'el.hide': { type: 'bool' },
       // 「くり返しの行をそろえる」 (DESIGN_2_1 §4.10): pinned at work or line scope, never at a cut (core/commands).
       'repeat.same': { type: 'bool' },
+      // キメ (DESIGN_2_2 §3): the mark of a line (line scope only) and 「キメの前を静かにする」 (work scope only; absent = on).
+      kime: { type: 'bool' },
+      'kime.calm': { type: 'bool' },
     }, CAM.SLOT_SPECS));
     const SEASON_SPEC = LK.LOOK_SPECS.season;
     const AVOID_SPEC = Object.freeze({ type: 'partRefs' });
@@ -172,7 +176,10 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     // createHistory; win: the winner before req.avoid, which v differs from only when the winner was avoided).
     // req = { kind, slot, path, feat, role, orient, script, scope, chosen, seed, recent, ref, echo, avoid, list, orNone,
     // cutKey, trace, silent, cond (the line conditions of lineCond; default the work's), noMedia (derived media grounds
-    // weigh 0 here, DESIGN_2_1 §11.5.9) }.
+    // weigh 0 here, DESIGN_2_1 §11.5.9), only, calm (キメ, DESIGN_2_2 §3: see onlyKeys; calm = the chooser factor of the
+    // cuts before a キメ cut, planner/kime calmFactor) }.
+    // A set `only` (an array: a キメ set, already filtered by the cut's own pool) whose members all weigh 0 gives its
+    // first member by rule (never the kind's fallback, which the set may not contain).
     // Stages (§4.16.4, §3.8): the full weights; the same pool without traitFit and fits; the pool without the text
     // traits (orient, script, aspect); then the kind's fallback — or 'none' for a list slot whose fallback does not
     // serve the cut's role, and for atmos (orNone). pool-empty is reported on lyric cuts, and elsewhere only when the
@@ -186,7 +193,7 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
         kind: req.kind, keys: null, noFit: false, trace: null, feat: req.feat, chosen: req.chosen, seed: req.seed,
         variety: ctx.look.variety, recent: req.recent, ref: req.ref || null, echo: req.echo,
         moodFilter: req.kind === 'filter', avoid: req.avoid || null, season: cond.season, seasonPinned: cond.pinned,
-        noMedia: !!req.noMedia,
+        noMedia: !!req.noMedia, calm: req.calm || 0,
       };
       const sub = req.poolId !== undefined ? req.poolId
         : (req.role || '') + '|' + (req.orient || '') + '|' + (req.script || '') + '|' + (ctx.aspect || '');
@@ -195,7 +202,7 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       for (let stage = 0; stage < 3; stage++) {
         const entry = stage < 2 ? full
           : poolEntry(ctx, req.kind, (req.role || '') + '|||', req.role, undefined, undefined, undefined, req.scope, cond);
-        const keys = entry.keys;
+        const keys = req.only ? onlyKeys(ctx, req.kind, entry.keys, req.only) : entry.keys;
         if (!keys.length) continue;
         ask.keys = keys;
         ask.noFit = stage > 0;
@@ -215,6 +222,10 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
         if (trace) trace.stage = 'none';
         return { v: 'none', from: 'auto', stage: 'none' };
       }
+      if (Array.isArray(req.only) && req.only.length) {
+        if (trace) trace.stage = 'rule';
+        return { v: req.only[0], from: 'rule', stage: 'rule', rule: 'kime.set' };
+      }
       const fb = ctx.registry.fallback(req.kind);
       if (req.list && !serves(ctx, req.kind, fb, req.role)) {
         if (trace) trace.stage = 'none';
@@ -226,6 +237,25 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       }
       if (trace) trace.stage = 'fallback';
       return { v: fb, from: 'fallback', stage: 'fallback' };
+    }
+
+    // The keys of a pool that `only` lets through: an array (a キメ set) or a predicate with an `id` (the screen effects
+    // and transitions that do not flash, the calm lens); one filtered array per plan, pool array and id (ctx.kimePools,
+    // made by planner/plan when the plan has a キメ cut), so the chooser's per-pool statics stay cached. A predicate
+    // with `keep` (the calm lens) lets the whole pool through where it would leave nothing.
+    function onlyKeys(ctx, kind, keys, only) {
+      const m = ctx.kimePools || (ctx.kimePools = new Map());
+      let byPool = m.get(keys);
+      if (!byPool) { byPool = new Map(); m.set(keys, byPool); }
+      const fn = typeof only === 'function';
+      const id = fn ? only.id : only.join(',');
+      let out = byPool.get(id);
+      if (!out) {
+        out = keys.filter(fn ? only : (k) => only.includes(k));
+        if (!out.length && fn && only.keep) out = keys;
+        byPool.set(id, out);
+      }
+      return out;
     }
 
     // --- history (recency and echo) -----------------------------------------------------------------------------
@@ -471,8 +501,9 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     // run of two). A copy takes the line at its place in the first run of that line: the first copy for a copy sung
     // alone, the second of the first run for the second of a later run; cut by cut, the cut at the same offset. The
     // first run's own copies are chosen (so a line sung twice in a row does not play the same thing back to back), and
-    // so is a copy past the end of the first run. The two cuts must have the same text, role and impact mark (another
-    // split, or an impact the first copy lacks, keeps the cut's own look), and the opt-in must resolve on at the copy.
+    // so is a copy past the end of the first run. The two cuts must have the same text, role, impact mark and キメ mark
+    // (another split, or a mark the first copy lacks, keeps the cut's own look; DESIGN_2_2 §3), and the opt-in must
+    // resolve on at the copy.
     function alignments(ctx, cuts) {
       if (!PA.pinned(ctx.ix, REPEAT)) return null;
       const out = new Map(), byKey = new Map(), runs = new Map();
@@ -496,7 +527,8 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
         }
         if (source === null) continue;
         const src = byKey.get(source + cut.key.slice(cut.key.indexOf('~')));
-        if (!src || src.text !== cut.text || src.role !== cut.role || !!src.impact !== !!cut.impact) continue;
+        if (!src || src.text !== cut.text || src.role !== cut.role || !!src.impact !== !!cut.impact ||
+          KI.isKime(src) !== KI.isKime(cut)) continue;
         const pin = PA.resolvePin(ctx.ix, atOfCut(cut), REPEAT, acceptRepeat, null);
         if (pin && pin.v === true) out.set(cut.key, src);
       }
@@ -671,6 +703,10 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     function pinDecision(pin) { return { v: pin.v, from: pin.from, by: pin.by }; }
 
     // A part slot: pin (cut > line > work) → rule (forced value) → chooser; then its parameters.
+    // キメ (DESIGN_2_2 §3): on a キメ cut the automatic pick stays in the キメ set of the kind (kimeRule; pins and locks
+    // win), a few kinds are forced by rule, and a screen effect never flashes unless the cut is also 見せ場; on the
+    // cuts before a キメ cut the motions and the lens weigh calm (planner/kime calmFactor), and the lens right before it
+    // leaves out the shaking and beat families.
     function decidePart(st, kind, idx, opts) {
       const o = opts || {};
       const { ctx, cut, at } = st;
@@ -680,14 +716,27 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       const trace = tracing(st, slot);
       const pin = !PA.pinned(ctx.ix, slot) ? null : PA.resolvePin(ctx.ix, at, slot, o.force ? () => ({ na: true })
         : acceptPart(ctx, kind, cut.role, { none: list, scope: kind === 'ornament' ? 'cut' : null }), ctx.warn);
+      let force = o.force, rule = o.rule;
+      let km = null, only = null, calm = 0;
+      if (!pin && !force) {
+        if (cut.kime === true) {
+          if (!list) km = kimeRule(st, kind);
+          else if (kind === 'filter' && !cut.impact) only = noFlashOf(ctx.registry);
+          if (km && km.force) { force = km.force; rule = km.rule; km = null; }
+          else if (km && km.only) only = km.only;
+        } else if (cut.feat.calm && !list && KI.calmKind(kind)) {
+          calm = cut.feat.calm;
+          if (calm === 2 && kind === 'lens') only = calmLensOf(ctx.registry);
+        }
+      }
       let d, ad = null;
       if (pin) {
         pinWarnings(ctx, kind, pin.v, pin, st.cond);
         d = pinDecision(pin);
         if (trace) Object.assign(shadow(st, kind, slot, seed, list, trace), { kind, stage: 'pin', pin });
-      } else if (o.force) {
-        d = { v: o.force, from: 'rule' };
-        if (trace) Object.assign(shadow(st, kind, slot, seed, list, trace), { kind, stage: 'rule', rule: o.rule });
+      } else if (force) {
+        d = { v: force, from: 'rule' };
+        if (trace) Object.assign(shadow(st, kind, slot, seed, list, trace), { kind, stage: 'rule', rule });
       } else if (st.align && (ad = alignedPart(st, kind, slot, list)) !== null) {
         d = { v: ad.v, from: 'auto' };
         if (trace) Object.assign(shadow(st, kind, slot, seed, list, trace), { kind, stage: 'auto', why: [alignWhy(st)] });
@@ -696,12 +745,18 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
         const recent = st.natural ? null : st.hist.recent(kind, slot, own);
         const ref = st.natural ? null : st.hist.reference(kind, slot, own);
         const echo = st.hist.echo(cut.feat.repeatOf, slot);
-        if (trace) Object.assign(trace, { kind, recent, echo });
+        if (trace) {
+          Object.assign(trace, { kind, recent, echo });
+          if (km) { trace.kime = true; if (km.limited) trace.kimeLimited = true; }
+          // (the calm lens may let its whole pool through, so its alternatives are not masked by it)
+          if (only && !only.keep) { trace.only = only; if (cut.kime === true && list) trace.noFlash = 'filter'; }
+          if (calm) trace.calm = calm;
+        }
         const got = chooseAuto(ctx, {
           kind, slot, path: 'cut/' + cut.key + ':' + slot, feat: cut.feat, role: cut.role, orient: st.chosen.orient,
           script: cut.feat.script, scope: kind === 'ornament' ? 'cut' : null, chosen: st.chosen, seed, recent, echo,
           list, cutKey: cut.key, trace, silent: st.natural, ref, poolId: poolIdOf(st), cond: st.cond,
-          avoid: AVOID_REPEAT.has(kind) && !st.natural ? avoidOf(st, slot) : null,
+          avoid: AVOID_REPEAT.has(kind) && !st.natural ? avoidOf(st, slot) : null, only, calm,
         });
         d = { v: got.v, from: got.from };
         if (got.base && got.base !== got.v) st.base[slot] = got.base;
@@ -716,6 +771,7 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
         d.p = p;
         if (pfrom) d.pfrom = pfrom;
         if (MOTION_KINDS.includes(kind)) CAM.applySpeed(st, kind, d);
+        if (cut.kime === true) kimeParams(st, kind, d);
         // The source's parameters wherever the cut shows the source's part: taken from it, or given by the same rule (a
         // layout that moves the text itself forces the same motions).
         const same = ad || (st.align && !pin ? alignedDecision(st, slot) : null);
@@ -724,6 +780,132 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       if (trace) trace.decision = d;
       setDecision(st, slot, d);
       return d;
+    }
+
+    // --- キメ (PV22 P3, DESIGN_2_2 §3) ------------------------------------------------------------------------------
+
+    // kimeRule(st, kind) → what a キメ cut's automatic pick of one (non-list) kind is: { only } (the chooser picks inside
+    // the set), { limited: true } (no member is in the cut's own pool — the registry, its role, orientation, script
+    // and aspect, the user's part filters, the gates, the season and the line's avoid list: the usual chooser),
+    // { force, rule } (registry.fallback of the kind, by rule), or null (the kind is left alone). No literal part key is
+    // ever forced, so a registry without the キメ parts plans the cut as usual.
+    function kimeRule(st, kind) {
+      const { ctx, cut } = st;
+      const K = KI.KIME;
+      if (kind === 'arrange') {
+        const c = cut.feat.cells;
+        return restrictTo(st, kind, c >= K.bleedCells[0] && c <= K.bleedCells[1] ? K.arrange : K.bigOnly);
+      }
+      if (kind === 'arrive') return restrictTo(st, kind, hameArrive(st) || K.arrive);
+      if (kind === 'dwell') return restrictTo(st, kind, ctx.bpm ? K.dwellBeats : K.dwell);
+      if (kind === 'depart') return { force: ctx.registry.fallback('depart'), rule: 'kime.depart' };
+      if (kind === 'lens') {
+        // the camera moves (the shot, or EXTREME): the fixed frame, so the camera has one idea; it does not: the 衝撃
+        // punch-in keeps the hit (the lens is decided before the shot, so moves() asks what the shot will be)
+        const r = moves(st) ? null : restrictTo(st, kind, K.lensKick);
+        return r && r.only ? r : { force: ctx.registry.fallback('lens'), rule: 'kime.lens' };
+      }
+      return null;
+    }
+
+    function restrictTo(st, kind, keys) {
+      const { ctx, cut } = st;
+      const pool = poolEntry(ctx, kind, poolIdOf(st), cut.role, st.chosen.orient, cut.feat.script, ctx.aspect, null, st.cond).keys;
+      const only = keys.filter((k) => pool.includes(k));
+      return only.length ? { only } : { limited: true };
+    }
+
+    // 歌ハメ on a キメ line (P6, DESIGN_2_2 §3.4 l): where P6 marks the cut state `hame` with its entrance set
+    // (st.hame.arrive), the キメ entrances that are in it (when any), else null (the キメ set as it is).
+    function hameArrive(st) {
+      const h = st.hame;
+      if (!h || !Array.isArray(h.arrive)) return null;
+      const both = KI.KIME.arrive.filter((k) => h.arrive.includes(k));
+      return both.length ? both : null;
+    }
+
+    // moves(st) → whether the camera will move on this キメ cut: its shot pin (anything but 'none'), else EXTREME on here
+    // on a layout that allows camerawork (the overlay replaces the shot in stage 6), else the shot planner/camera will
+    // give it (CAM.kimeShot, the same function its shot rules use).
+    function moves(st) {
+      const { ctx } = st;
+      const pin = PA.pinned(ctx.ix, 'cam.shot') ? PA.resolvePin(ctx.ix, st.at, 'cam.shot', acceptShotPin, null) : null;
+      if (pin) return pin.v !== 'none';
+      const arrange = st.chosen.arrange ? ctx.registry.get('arrange', st.chosen.arrange) : null;
+      if (XT.valueAt(ctx.ix, st.at) > 0 && !(arrange && arrange.cam === 'none')) return true;
+      return CAM.kimeShot(st) !== 'none';
+    }
+    const acceptShotPin = PA.acceptSpec(CAM.SLOT_SPECS['cam.shot']);
+
+    // The screen effects that do not flash (no gate 'flash'): the pool of a screen effect on a キメ cut without 見せ場.
+    const NO_FLASH = new WeakMap();
+    function noFlashOf(reg) {
+      let f = NO_FLASH.get(reg);
+      if (!f) {
+        f = Object.assign((k) => { const d = reg.get('filter', k); return !d || d.gate !== 'flash'; }, { id: 'kime.noFlash' });
+        NO_FLASH.set(reg, f);
+      }
+      return f;
+    }
+
+    // The lenses of the cut right before a キメ cut (calm level 2): no shaking or beat family (the whole pool where that
+    // leaves nothing).
+    const CALM_LENS = new WeakMap();
+    function calmLensOf(reg) {
+      let f = CALM_LENS.get(reg);
+      if (!f) {
+        f = Object.assign((k) => { const d = reg.get('lens', k); return !d || !KI.CALM.lensDeny.includes(d.family); },
+          { id: 'kime.calm2', keep: true });
+        CALM_LENS.set(reg, f);
+      }
+      return f;
+    }
+
+    // キメ parameters by rule (pfrom 'rule'), where nothing pinned them: a fast landing (dur ≤ 0.4 s, and the whole line
+    // lands within 0.8 s: planner/kime landEach), no shake unless the cut is also 見せ場, a readable bleed (overflow 1.08,
+    // centred) and a strong size contrast with the whispers under the giant. On a cut where 歌ハメ applies (st.hame, P6)
+    // the sung times own the entrance's timing: dur and each are left to it.
+    function kimeParams(st, kind, d) {
+      if (!d.p || d.v === 'none') return;
+      const { ctx, cut } = st;
+      const K = KI.KIME;
+      const specs = ctx.registry.params(kind, d.v) || [];
+      let pfrom = null;
+      const set = (name, v) => {
+        if (!(name in d.p)) return;
+        const from = d.pfrom ? d.pfrom[name] : undefined;
+        if (from !== undefined && from !== 'rule') return;
+        const item = specs.find((e) => e.name === name);
+        const c = item ? S.coerce(item.spec, v) : v;
+        if (c === undefined || c === d.p[name]) return;
+        d.p[name] = c;
+        (pfrom || (pfrom = Object.assign({}, d.pfrom || {})))[name] = 'rule';
+      };
+      if (kind === 'arrive') {
+        const m = K.arriveMax[d.v];
+        if (m && !st.hame) {
+          if (typeof d.p.dur === 'number') set('dur', Math.min(d.p.dur, m.dur));
+          if (typeof d.p.each === 'number') {
+            const def = ctx.registry.get(kind, d.v);
+            const u = cut.feat.units || {};
+            const unit = def && def.unit ? def.unit : 'glyph';
+            const units = unit === 'word' ? u.word : unit === 'line' || unit === 'run' ? u.line : u.glyph;
+            set('each', KI.landEach(d.p.each, d.p.dur, units || 1, m.each));
+          }
+        }
+        if (d.v === 'stampPress' && !cut.impact) set('shake', 0);
+      } else if (kind === 'lens' && d.v === 'impactKick' && !cut.impact) set('shake', 0);
+      else if (kind === 'arrange' && d.v === 'edgeBleed') {
+        set('overflow', K.bleed.overflow);
+        set('anchor', K.bleed.anchor);
+      } else if (kind === 'arrange' && d.v === 'giantWhisper') {
+        if (typeof d.p.ratio === 'number') set('ratio', Math.max(d.p.ratio, K.giant.ratioMin));
+        set('tuck', K.giant.tuck);
+      }
+      if (!pfrom) return;
+      const sorted = {};
+      for (const k of Object.keys(pfrom).sort()) sorted[k] = pfrom[k];
+      d.pfrom = sorted;
     }
 
     // For explain: what the chooser would weigh here if the slot were automatic (alternatives of a pinned slot).
@@ -797,15 +979,33 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       }, (v) => allowed.includes(v));
     }
 
+    // キメ (DESIGN_2_2 §3): a キメ cut takes the heading face by rule, and a size its layout shows big: はみ出し at its
+    // frame-filling ×1 (its overflow cap holds only there), 大と小 never below ×1, any other layout (a pinned one, or one
+    // the キメ set could not give) ×1.3. The cuts before a キメ cut are set slightly smaller (×0.97, ×0.94).
     function decideText(st) {
       const { ctx, cut } = st;
+      const K = KI.KIME;
       decideValue(st, 'text.face', SLOT_SPECS['text.face'], (seed) => {
+        if (cut.kime === true) return { v: K.face, from: 'rule', rule: 'kime.face' };
         const serif = FACE_WEIGHTS.serif * (st.chosen.orient === 'v' ? 2 : 1);
         const v = R.fromSeed(seed).weighted(['display', 'serif', 'body'], [FACE_WEIGHTS.display, serif, FACE_WEIGHTS.body]);
         return { v, from: 'auto' };
       });
-      decideValue(st, 'text.scale', SLOT_SPECS['text.scale'],
-        () => ({ v: S.coerce(SLOT_SPECS['text.scale'], 1 + (cut.feat.energy - 0.5) * 0.2), from: 'auto' }));
+      decideValue(st, 'text.scale', SLOT_SPECS['text.scale'], () => {
+        const auto = 1 + (cut.feat.energy - 0.5) * 0.2;
+        if (cut.kime === true) {
+          const a = st.chosen.arrange;
+          if (a === 'edgeBleed') return { v: S.coerce(SLOT_SPECS['text.scale'], K.scaleFloor), from: 'rule', rule: 'kime.full' };
+          if (a === 'giantWhisper') {
+            const v = S.coerce(SLOT_SPECS['text.scale'], auto);
+            return v < K.scaleFloor ? { v: S.coerce(SLOT_SPECS['text.scale'], K.scaleFloor), from: 'rule', rule: 'kime.full' }
+              : { v, from: 'auto' };
+          }
+          return { v: S.coerce(SLOT_SPECS['text.scale'], K.scalePinned), from: 'rule', rule: 'kime.scale' };
+        }
+        const calm = cut.feat.calm || 0;
+        return { v: S.coerce(SLOT_SPECS['text.scale'], calm ? auto * KI.CALM.scale[calm] : auto), from: 'auto' };
+      });
       decideValue(st, 'text.ink', SLOT_SPECS['text.ink'], () => ({ v: 'ink', from: 'auto' }));
       decideValue(st, 'text.style', SLOT_SPECS['text.style'], () => {
         const style = S.coerce(SLOT_SPECS['text.style'], ctx.look.theme.style);
@@ -825,16 +1025,23 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     }
 
     // ornament.count / filter.count (§4.16.4), raised to i + 1 by a part pinned on slot i (§3.4.3), then the slots.
+    // キメ (DESIGN_2_2 §3): a キメ cut keeps at most one decoration and one screen effect (plus the 見せ場 effect), rule
+    // kime.count; the cuts before it at most one (level 1) or none (level 2), rule kime.calm.
     function decideList(st, kind) {
       const { ctx, cut, at } = st;
       const countSlot = kind + '.count';
       const a = ctx.look.amounts;
       const count = decideValue(st, countSlot, SLOT_SPECS[countSlot], (seed) => {
         const r = R.stream(seed, 'count').next();
-        const v = kind === 'ornament'
+        const base = kind === 'ornament'
           ? Math.min(LIST_MAX, Math.floor(a.ornament * 2.5 + r))
-          : Math.min(2, Math.floor(0.8 * filterDrive(ctx.look) + r)) + (cut.impact && a.flash > 0 ? 1 : 0);
-        return { v, from: 'auto' };
+          : Math.min(2, Math.floor(0.8 * filterDrive(ctx.look) + r));
+        const extra = kind === 'filter' && cut.impact && a.flash > 0 ? 1 : 0;
+        const kime = cut.kime === true, calm = cut.feat.calm || 0;
+        const max = kime ? (kind === 'ornament' ? KI.KIME.ornMax : KI.KIME.filterMax)
+          : calm ? KI.CALM[kind === 'ornament' ? 'ornMax' : 'filterMax'][calm] : Infinity;
+        if (base > max) return { v: max + extra, from: 'rule', rule: kime ? 'kime.count' : 'kime.calm' };
+        return { v: base + extra, from: 'auto' };
       });
       let need = 0;
       let accept = null;
@@ -1304,6 +1511,6 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     return {
       SLOT_SPECS, LIST_KINDS, MOTION_KINDS, castCut, createHistory, chooseAuto, poolOf, acceptPart, pinWarnings, serves,
       filterAllows, lookAx, lockFreeCtx, lockFreeIndex, beginCasts, castKeys, intern, deepFreeze, historyRow, lineCond,
-      isChoice, alignments, neighboursOf, alignedSource, REPEAT,
+      isChoice, alignments, neighboursOf, alignedSource, REPEAT, onlyKeys,
     };
   });

@@ -1,6 +1,6 @@
 /* 文字PVメーカー v2 — original work. Automatic camerawork: motion speed, the shot of each cut, carry between phrases and section rigs (DESIGN_2_1 §3.9, §4.3, §4.5.7, §4.6, §4.7). */
-MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'core/shot', 'planner/choose', 'planner/params'],
-  (H, N, R, S, SHOT, CH, PA) => {
+MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'core/shot', 'planner/choose', 'planner/params',
+  'planner/kime'], (H, N, R, S, SHOT, CH, PA, KI) => {
     'use strict';
 
     // Specs of the v2.1 cut slots (§2.3); planner/cast merges them into its SLOT_SPECS, planner/fields shows them.
@@ -117,9 +117,15 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
     const bitsOf = (keys) => keys.reduce((m, key) => m | (1 << SHOT_POOL.indexOf(key)), 0);
     const ALL_BITS = bitsOf(SHOT_POOL), SHORT_BITS = bitsOf(SHORT_POOL), GENTLE_BITS = bitsOf(GENTLE_POOL);
     const ROLE_BITS = Object.freeze(Object.fromEntries(Object.keys(ROLE_POOLS).map((role) => [role, bitsOf(ROLE_POOLS[role])])));
+    // キメ (PV22 P3, DESIGN_2_2 §3): the quiet shots of the cut right before a キメ cut (calm level 2).
+    const CALM_BITS = bitsOf(KI.CALM.shots);
 
-    // The pool of a cut after the rules and what limited it: { bits, gentle, arrange } or a forced value
+    // The pool of a cut after the rules and what limited it: { bits, gentle, arrange, calm } or a forced value
     // { forced: { v, from, rule }, mask, arrange }. rulesWhy and maskOf give explain's view of them.
+    // キメ (DESIGN_2_2 §3): after the rules that stop the camera (the amount, a layout without camerawork), a キメ cut's
+    // shot is forced (rule kime.shot): the first of KIME.shots its pool allows (planner/kime shotFor; the whole block
+    // snaps in, or the push goes to the emphasized word); the cut right before a キメ cut (calm level 2) keeps to the
+    // quiet shots where its pool has one.
     function shotRules(st) {
       const { ctx, cut } = st;
       const A = ctx.look.amounts.camera;
@@ -131,13 +137,20 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
       if (cut.feat.dur < SHORT_CUT) bits &= SHORT_BITS;
       if (ROLE_BITS[cut.role] !== undefined) bits &= ROLE_BITS[cut.role];
       if (cam === 'gentle') bits &= GENTLE_BITS;
-      return { bits, gentle: cam === 'gentle', arrange };
+      if (KI.isKime(cut)) {
+        const v = KI.shotFor(cut.feat.emph, (key) => !!(bits & (1 << SHOT_POOL.indexOf(key))));
+        return { forced: { v, from: 'rule', rule: 'kime.shot' }, mask: 'kime', arrange };
+      }
+      const calm = cut.feat.calm === 2 && (bits & CALM_BITS) !== 0 && (bits & ~CALM_BITS) !== 0;
+      if (calm) bits &= CALM_BITS;
+      return { bits, gentle: cam === 'gentle', arrange, calm };
     }
 
     // The reasons of the rules (explain), in their order: forced values, then each pool that limited the cut.
     function rulesWhy(st, rules) {
       const A = st.ctx.look.amounts.camera;
       if (rules.forced) {
+        if (rules.forced.rule === 'kime.shot') return [{ code: 'rule', params: { rule: 'kime.shot' } }];
         return rules.forced.rule === 'none-camera'
           ? [{ code: 'rule', params: { rule: 'none-camera' } }, { code: 'cam.amount', params: { x: A } }]
           : [{ code: 'cam.arrange', params: { key: rules.arrange.key } }];
@@ -146,6 +159,7 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
       if (st.cut.feat.dur < SHORT_CUT) why.push({ code: 'cam.short', params: {} });
       if (ROLE_BITS[st.cut.role] !== undefined) why.push({ code: 'rule', params: { rule: 'role' } });
       if (rules.gentle) why.push({ code: 'cam.arrange', params: { key: rules.arrange.key } });
+      if (rules.calm) why.push({ code: 'rule', params: { rule: 'kime.calm' } });
       return why;
     }
 
@@ -154,7 +168,23 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
       const bit = 1 << i;
       if (st.cut.feat.dur < SHORT_CUT && !(SHORT_BITS & bit)) return 'trait';
       if (ROLE_BITS[st.cut.role] !== undefined && !(ROLE_BITS[st.cut.role] & bit)) return 'role';
-      return rules.gentle && !(GENTLE_BITS & bit) ? 'trait' : null;
+      if (rules.gentle && !(GENTLE_BITS & bit)) return 'trait';
+      return rules.calm && !(CALM_BITS & bit) ? 'kime' : null;
+    }
+
+    // kimeShot(st) → the shot a キメ cut ends its cast with (before the EXTREME overlay of stage 6): its pin (a custom
+    // shot object too), else a pinned or locked shot of its source under 「くり返しの行をそろえる」, else the value the
+    // rules force (shotRules: 'none' without camerawork or on a still layout, else the KIME.shots pick). planner/cast
+    // decides the キメ cut's lens from it (the lens comes first in the slot order), so the lens and the shot agree: the
+    // 衝撃 punch-in exactly when the camera does not move.
+    function kimeShot(st) {
+      const { ctx } = st;
+      const pin = PA.pinned(ctx.ix, 'cam.shot') ? PA.resolvePin(ctx.ix, st.at, 'cam.shot', acceptShot, null) : null;
+      if (pin) return pin.v;
+      const al = alignedShot(st);
+      if (al && al.from !== 'auto') return al.v;
+      const rules = shotRules(st);
+      return rules.forced ? rules.forced.v : NONE;
     }
 
     // The §4.7 base weight of one shot key (before mood, section, recency and echo).
@@ -530,7 +560,7 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
       });
       st.decide(st, 'cam.curve', SLOT_SPECS['cam.curve'], (seed, withWhy) => {
         const bias = ctx.look.mood && ctx.look.mood.tagBias ? ctx.look.mood.tagBias.fast : undefined;
-        let [keys, weights] = f.impact ? CURVES_IMPACT
+        let [keys, weights] = f.impact || f.kime ? CURVES_IMPACT
           : f.energy >= 0.65 || (typeof bias === 'number' && bias > 1.2) ? CURVES_FAST : CURVES_CALM;
         // A pullReveal on a short cut, whatever gave it (the weights, the echo, a pin): a curve that bunches the pull would
         // make it a fast zoom-out, so it takes CURVES_SHORT_PULL (NOTES "Echo of repeated lines", round 5, for the pulls
@@ -597,7 +627,8 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
       for (let j = 0; j < cuts.length; j++) {
         const A = j > 0 ? cuts[j - 1] : null, B = cuts[j];
         byKey.set(B.key, B);
-        if (!A || !A.line || A.line !== B.line) continue;
+        // never into a キメ cut: its hit is a fresh framing (DESIGN_2_2 §3)
+        if (!A || !A.line || A.line !== B.line || KI.isKime(B)) continue;
         const a = A.slots['cam.shot'], b = B.slots['cam.shot'];
         if (!a || !b || a.v === NONE || typeof b.v !== 'string' || b.v === NONE || !opensOnText(b.v)) continue;
         if (B.seamIn >= 0 && list[B.seamIn] && list[B.seamIn].scope !== 'text') continue;
@@ -837,7 +868,7 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
     }
 
     return {
-      SLOT_SPECS, CAM_SLOTS, SHOT_POOL, decideSpeed, applySpeed, decideCamera, shotWeights, carry, rigs, heirOf,
+      SLOT_SPECS, CAM_SLOTS, SHOT_POOL, decideSpeed, applySpeed, decideCamera, shotWeights, carry, rigs, heirOf, kimeShot,
       FACTORS: Object.freeze({ AMOUNT_OFF, SHORT_CUT, SHOT_RECENT, SHOT_NEAR, SHOT_ECHO, SHORT_PULL, RIG_OFF, LAST_CHORUS_AMP, AMP_MAX }),
     };
   });

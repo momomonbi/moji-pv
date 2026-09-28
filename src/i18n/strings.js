@@ -2178,6 +2178,25 @@ MV.def('i18n/strings', [], () => ({
   // --- PV22 P2 (文字PVの定石) ---
 
   // --- PV22 P3 (キメ) ---
+  'why.kime': ['キメの行なので、大胆な見せ方から選んだ', 'A kime line, so picked from the bold choices'],
+  'why.kime.calm': ['次のキメを引き立てるため、静かな見せ方を多めに', 'Quieter choices, so the next kime stands out'],
+  'why.kime.limited': ['使える部品の設定でキメ用の部品が使えないため、いつもどおりに選んだ',
+    'The part settings leave no kime choice here, so picked as usual'],
+  'why.kime.noFlash': ['キメの行は光らせない（見せ場の行だけが光ります）', 'A kime line does not flash (only Impact lines do)'],
+  'whyRule.kime.face': ['キメの行は見出しの書体', 'A kime line uses the heading face'],
+  'whyRule.kime.scale': ['キメの行は大きく', 'A kime line is set large'],
+  'whyRule.kime.full': ['キメの行は構図いっぱいの大きさ', 'A kime line fills its layout'],
+  'whyRule.kime.depart': ['キメの行は最後まで見せて、すぱっと切る', 'A kime line holds to the end and cuts out'],
+  'whyRule.kime.lens': ['キメの構図とカメラワークに合わせたカメラ', 'Camera matched to the kime layout and camerawork'],
+  'whyRule.kime.shot': ['キメの構図に合わせて寄る', 'The camera moves in to match the kime layout'],
+  'whyRule.kime.count': ['キメの行は文字が主役なので、飾りを控えめに', 'Words first on a kime line, so fewer extras'],
+  'whyRule.kime.seam': ['キメの行へは切り替えなしで一気に', 'Straight cut into a kime line'],
+  'whyRule.kime.split': ['キメの行は1カットで見せる', 'A kime line plays in one cut'],
+  'whyRule.kime.param': ['キメの行なので素早く・読みやすく', 'Fast and readable for a kime line'],
+  'whyRule.kime.calm': ['次のキメを引き立てるため控えめに', 'Kept down so the next kime stands out'],
+  'whyRule.kime.x': ['キメの行なので一番強い動き', 'The strongest move for a kime line'],
+  'whyRule.kime.noFlash': ['キメの行からは光らずに切り替える', 'No flash on the way out of a kime line'],
+  'whyRule.kime.set': ['キメの行なので、大胆な見せ方の最初の候補にした', 'A kime line, so the first of the bold choices'],
 
   // --- PV22 P4 (モーフ・太さ) ---
 

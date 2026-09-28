@@ -1,6 +1,6 @@
 /* 文字PVメーカー v2 — original work. EXTREME camerawork in the plan: the overlay that turns the cam.extreme switch into EXTREME shots, their mirror, the EXTREME rig amplitude and the grounds it marks (DESIGN_EXTREME §2.3). */
 MV.def('planner/extreme', ['core/hash', 'core/num', 'core/pins', 'core/paths', 'core/shot', 'core/schema', 'planner/choose',
-  'planner/params'], (H, N, PINS, P, SHOT, S, CH, PA) => {
+  'planner/params', 'planner/kime'], (H, N, PINS, P, SHOT, S, CH, PA, KI) => {
   'use strict';
 
   // The switch is a pin, not a document field (DESIGN_EXTREME §2.1): the slot cam.extreme (0–1, 0 = off) pinned at
@@ -198,6 +198,8 @@ MV.def('planner/extreme', ['core/hash', 'core/num', 'core/pins', 'core/paths', '
   // weigh(ctx, cut, rules, rec, withWhy) → [{ key, w, wOwn, why }] over XPOOL (w = 0 outside the pool). w = q6 of every
   // factor; wOwn leaves out the recency, the pair and the echo (the cut's natural pick, which the near set of the cuts
   // 2–4 after it reads). rec = { prev, near, echo, pair, nextStart } (see recencyOf) and ahead (alignedKey).
+  // キメ (PV22 P3, DESIGN_2_2 §3): on the cut right before a キメ cut (calm level 2) the presets tagged hard or fast weigh
+  // ×KI.CALM.xstrong.
   function weigh(ctx, cut, rules, rec, withWhy) {
     const f = cut.feat;
     const mood = ctx.look.mood;
@@ -210,7 +212,8 @@ MV.def('planner/extreme', ['core/hash', 'core/num', 'core/pins', 'core/paths', '
       const key = XPOOL[i];
       if (!rules.pool || !rules.pool.includes(key)) { out[i] = { key, w: 0, wOwn: 0, why: withWhy ? [] : null }; continue; }
       const sec = bySection && bySection[key] ? bySection[key] : 1;
-      const own = baseWeight(key, f, orient, rec.nextStart, beats) * moods[i] * sec;
+      let own = baseWeight(key, f, orient, rec.nextStart, beats) * moods[i] * sec;
+      if (f.calm === 2 && calmStrong(key)) own *= KI.CALM.xstrong;
       let w = own;
       if (rec.pair && key === 'whipPan') w *= PAIR;
       if (rec.echo === key) w *= ECHO;
@@ -228,6 +231,11 @@ MV.def('planner/extreme', ['core/hash', 'core/num', 'core/pins', 'core/paths', '
       out[i] = { key, w: N.q6(w), wOwn: N.q6(own), why };
     }
     return out;
+  }
+
+  function calmStrong(key) {
+    const tags = SHOT.XSHOTS[key].tags || [];
+    return tags.includes('hard') || tags.includes('fast');
   }
 
   // The overlay's own window (its recency and echo read nothing of the cast history): one row per cut in time order,
@@ -385,8 +393,11 @@ MV.def('planner/extreme', ['core/hash', 'core/num', 'core/pins', 'core/paths', '
       const prefix = shotPrefix(ctx, cut, salts);
       // 「くり返しの行をそろえる」: the preset its source shows, where it fits the cut (weighs > 0 there)
       const src = alignedSource(ctx, cut, salts);
-      const same = sameAs(win, src, rec.prev, list);
-      const got = same ? { key: same.key, nat: same.key } : argmax(list, prefix);
+      // キメ (DESIGN_2_2 §3): a キメ cut takes the strongest move its pool has (crashZoom, on a short cut punchHit), as
+      // a fact of the cut (its window row as an aligned pick's); else the usual pick.
+      const xk = KI.isKime(cut) ? KI.xshotFor(rules.pool) : null;
+      const same = xk ? null : sameAs(win, src, rec.prev, list);
+      const got = xk ? { key: xk, nat: xk } : same ? { key: same.key, nat: same.key } : argmax(list, prefix);
       if (got.key === null) { win.push(cut, null, false, null); continue; }
       const m = same ? same.m : mirrorOf(got.key, rec, prefix);
       win.push(cut, got.key, m, got.nat);
@@ -396,7 +407,8 @@ MV.def('planner/extreme', ['core/hash', 'core/num', 'core/pins', 'core/paths', '
       neutral(ctx, cut, x);
       if (t) {
         const own = list[XPOOL.indexOf(got.key)];
-        const why = same ? [{ code: 'repeat.same', params: { cut: src.key } }] : rules.why.concat(own.why);
+        const why = xk ? [{ code: 'rule', params: { rule: 'kime.x' } }]
+          : same ? [{ code: 'repeat.same', params: { cut: src.key } }] : rules.why.concat(own.why);
         t.override = { rule: 'extreme', decision: d, why: [{ code: 'cam.extreme', params: { x } }].concat(why) };
         t.candidates = list.map((c) => ({ key: c.key, w: c.w,
           masked: c.w > 0 || rules.pool.includes(c.key) ? null : rules.mask }));

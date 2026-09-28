@@ -7,6 +7,9 @@ MV.def('core/timing', ['core/pins', 'core/script', 'core/num', 'core/beats'], (P
   const MIN_READ = 1.2;         // the shortest reading slot of a line
   const PAUSE_WEIGHT = 0.8;     // seconds of weight per blank row above a line
   const TIMING_DEFAULTS = Object.freeze({ snap: 'off', lead: 0.12, tail: 0.25, leadIn: 1, outro: 2, tapLatency: 0.06 });
+  // キメ (PV22 P3, DESIGN_2_2 §3): a line the planner marked キメ (line.kime, from its line pin) reads this much longer,
+  // so the next automatic start moves on by it (anchored starts never move).
+  const KIME_HOLD = 0.6;
 
   function isTime(v) { return typeof v === 'number' && Number.isFinite(v) && v >= 0; }
 
@@ -90,7 +93,7 @@ MV.def('core/timing', ['core/pins', 'core/script', 'core/num', 'core/beats'], (P
 
     const read = new Float64Array(n), pause = new Float64Array(n);
     lines.forEach((line, i) => {
-      read[i] = Math.max(MIN_READ, S.morae(line.text, line.lang) * spm);
+      read[i] = Math.max(MIN_READ, S.morae(line.text, line.lang) * spm) + (line.kime === true ? KIME_HOLD : 0);
       pause[i] = PAUSE_WEIGHT * (line.pauseBefore || 0);
     });
     // The time from line k−1's start to line k's start at the nominal rate: its reading plus the pause above line k.
@@ -203,5 +206,5 @@ MV.def('core/timing', ['core/pins', 'core/script', 'core/num', 'core/beats'], (P
     }
   }
 
-  return { solveTimes, readRateOf, TIMING_DEFAULTS };
+  return { solveTimes, readRateOf, TIMING_DEFAULTS, KIME_HOLD };
 });

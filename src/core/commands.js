@@ -220,11 +220,18 @@ MV.def('core/commands', ['core/doc', 'core/paths', 'core/pins', 'core/lyrics', '
       return put(doc, 'pins', without(doc.pins, [cmd.path]));
     }
 
+    // Settings, not look choices (DESIGN_2_2 §3): the キメ mark of a line and 「キメの前を静かにする」. Unpinning everything
+    // under a scope (すべての固定を外す, この行の固定を外す: no `by`) keeps them, like lock pins; with a `by` (AIの固定を外す)
+    // the author decides as for every pin.
+    const SETTING_SLOTS = new Set(['kime', 'kime.calm']);
+    function slotOfPath(path) { const i = path.lastIndexOf(':'); return i < 0 ? '' : path.slice(i + 1); }
+
     function pinClearUnder(doc, cmd) {
       const scope = checkScope(cmd.scope);
       if (cmd.by !== undefined) checkBy(cmd.by);
       const drop = PINS.pinsUnder(doc.pins, scope)
-        .filter((path) => doc.pins[path].by !== 'lock' && (cmd.by === undefined || doc.pins[path].by === cmd.by));
+        .filter((path) => doc.pins[path].by !== 'lock' && (cmd.by === undefined ? !SETTING_SLOTS.has(slotOfPath(path))
+          : doc.pins[path].by === cmd.by));
       return put(doc, 'pins', without(doc.pins, drop));
     }
 
@@ -241,10 +248,13 @@ MV.def('core/commands', ['core/doc', 'core/paths', 'core/pins', 'core/lyrics', '
 
     // Refuses `cut/…:season`, `cut/…:avoid`, `cut/…:cam.extreme`, `cut/…:repeat.same` and `work:avoid` (payload).
     // 「くり返しの行をそろえる」 (DESIGN_2_1 §4.10) is a setting of the whole video or of a line, like the line season.
+    // キメ (DESIGN_2_2 §3): `kime` marks a line (line scope only), `kime.calm` is the whole video's (work scope only).
     function checkSlotScope(parsed) {
       need(!(parsed.scope.kind === 'cut' && (NOT_CUT.has(parsed.slot) || parsed.slot === 'repeat.same')),
         parsed.slot + ' cannot be pinned at cut scope');
       need(!(parsed.scope.kind === 'work' && parsed.slot === 'avoid'), 'avoid cannot be pinned at work scope');
+      need(!(parsed.slot === 'kime' && parsed.scope.kind !== 'line'), 'kime can be pinned only for a line');
+      need(!(parsed.slot === 'kime.calm' && parsed.scope.kind !== 'work'), 'kime.calm can be pinned only for the whole video');
     }
 
     function pinPromote(doc, cmd) {
@@ -257,6 +267,7 @@ MV.def('core/commands', ['core/doc', 'core/paths', 'core/pins', 'core/lyrics', '
         parsed.slot + ' cannot be pinned at ' + cmd.to + ' scope');
       // season and cam.extreme may move line → work; avoid never moves (§2.6); none of them leaves a (stray) cut pin.
       need(parsed.slot !== 'avoid' && !(NOT_CUT.has(parsed.slot) && from === 'cut'), parsed.slot + ' cannot be promoted');
+      need(!SETTING_SLOTS.has(parsed.slot), parsed.slot + ' cannot be promoted');     // a キメ mark stays on its line
       const pin = doc.pins[cmd.path];
       if (!pin) return doc;
       const target = (cmd.to === 'line' ? 'line/' + parsed.scope.lineId : 'work') + ':' + parsed.slot;

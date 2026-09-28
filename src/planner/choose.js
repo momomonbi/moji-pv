@@ -1,5 +1,5 @@
 /* 文字PVメーカー v2 — original work. The chooser: stream seeds, candidate weights and Gumbel-max picks (DESIGN §4.16.4, §4.1.3). */
-MV.def('planner/choose', ['core/hash', 'core/rng', 'core/num'], (H, R, N) => {
+MV.def('planner/choose', ['core/hash', 'core/rng', 'core/num', 'planner/kime'], (H, R, N, KI) => {
   'use strict';
 
   const FIT_FLOOR = 0.15;        // weight a numeric trait falls to at 50 % beyond its range
@@ -219,6 +219,7 @@ MV.def('planner/choose', ['core/hash', 'core/rng', 'core/num'], (H, R, N) => {
     // A candidate's weight before the recency factors (not quantized); with `f` (tracing) the factors are written
     // into it.
     // req.noMedia: a derived ground of the user's media weighs 0 (a segment shorter than 3 s, the title card; §11.5.9).
+    // req.calm (1 | 2, the cuts before a キメ cut, DESIGN_2_2 §3): planner/kime calmFactor (strong parts down, soft up).
     function preWeight(req, key, s, f) {
       let w = s.product;
       let fit = 1, fits = 1, impact = 1, echo = 1, media = 1;
@@ -230,9 +231,12 @@ MV.def('planner/choose', ['core/hash', 'core/rng', 'core/num'], (H, R, N) => {
       if (req.feat && req.feat.impact && s.traits && s.traits.impact) { impact = IMPACT; w *= IMPACT; }
       if (req.echo && req.echo === key) { echo = ECHO; w *= ECHO; }
       if (req.noMedia && s.media) { media = 0; w = 0; }
+      const calm = req.calm ? KI.calmFactor(s.def, s.traits, req.calm) : 1;
+      if (calm !== 1) w *= calm;
       if (f) {
         Object.assign(f, { weight: s.weight, mood: s.mood, gate: s.gate, prefer: s.prefer, season: s.season,
           moodFilter: s.moodFilter, fit, fits, impact, echo, media });
+        if (req.calm) f.calm = calm;
       }
       return w;
     }
@@ -273,7 +277,7 @@ MV.def('planner/choose', ['core/hash', 'core/rng', 'core/num'], (H, R, N) => {
 
     // pick(req) → { v, w, base, ref, avoided? } | null (null when every candidate weighs 0).
     // req = { kind, keys (the pool, sorted), feat, chosen, seed, variety, recent?, ref?, echo?, noFit?, moodFilter?,
-    // avoid?, trace?, season?, seasonPinned?, noMedia? }. score = ln(w) + variety · gumbel(seed, key); argmax, ties → the smaller key (keys arrive sorted).
+    // avoid?, trace?, season?, seasonPinned?, noMedia?, calm? }. score = ln(w) + variety · gumbel(seed, key); argmax, ties → the smaller key (keys arrive sorted).
     // Two more argmaxes share the same noise (planner/cast createHistory): base = without the recency factors (the
     // cut's natural pick) and ref = with the recency `req.ref` (the cut's reference pick).
     // avoid (arrange and arrive, §8.2 "no identical adjacent"): when the winner is the previous cut's value and another

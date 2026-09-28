@@ -29,6 +29,10 @@
 //                     basic project with the switch on and every EXTREME preset on one cut, and a 9:16 one with the switch
 //                     at 0.5 on the chorus only; rendered like the frames above (motion-blur copies included in the ops).
 //                     Every document without the switch renders as before: the files above match first.
+//   project_kime.json { "registry": …, "plans": { "<name>": "<plan.hash>" } }
+//                     キメ (DESIGN_2_2 §3; tests/helpers/kime_docs.js goldenDocs): corpus(4, ['16:9', '9:16'], ['basic', 'lrc'])
+//                     with two lines marked キメ (one of them a 見せ場 line), plus one with 「キメの前を静かにする」 off.
+//                     Plan hashes only (the parts are existing ones); every document without a mark plans as before.
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -36,6 +40,7 @@ const { load } = require('./helpers/load.js');
 const corpus = require('./helpers/corpus.js');
 const FM = require('./helpers/fake_media.js');
 const XD = require('./helpers/extreme_docs.js');
+const KD = require('./helpers/kime_docs.js');
 
 const MV = load();
 const H = MV.use('core/hash');
@@ -110,6 +115,13 @@ async function extremeGolden(reg, info) {
   return { registry: info, measurer: 'fake', docs };
 }
 
+function kimeGolden(reg, info) {
+  const { plan } = MV.use('planner/plan');
+  const plans = {};
+  for (const { name, doc } of KD.goldenDocs()) plans[name] = plan(doc, { registry: reg }).hash;
+  return { registry: info, plans };
+}
+
 function readGolden(file) {
   try { return JSON.parse(fs.readFileSync(path.join(GOLDEN, file), 'utf8')); } catch (e) { return null; }
 }
@@ -135,6 +147,8 @@ async function main() {
       empty: { registry: null, measurer: 'fake', plan: null, frames: [] }, make: () => repeatGolden(reg, info) },
     { file: 'project_extreme.json', needs: ENGINE.concat(['planner/plan', 'planner/extreme', 'engine/scene/xshot']),
       empty: { registry: null, measurer: 'fake', docs: {} }, make: () => extremeGolden(reg, info) },
+    { file: 'project_kime.json', needs: ['planner/plan', 'planner/kime'], empty: { registry: null, plans: {} },
+      make: async () => kimeGolden(reg, info) },
   ];
   let failed = false;
   fs.mkdirSync(GOLDEN, { recursive: true });

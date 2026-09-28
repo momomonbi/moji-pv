@@ -163,6 +163,8 @@ MV.def('core/types', [], () => {
    * @property {number|null} stamp         the stamp of this occurrence
    * @property {number} pauseBefore        blank rows directly above the row (first occurrence only)
    * @property {string|null} heading       nearest '#' comment above, within 3 rows
+   * @property {true} [kime]               set by the planner (stage 1) on a line whose line/<id>:kime pin is true
+   *                                       (DESIGN_2_2 §3); never parsed from the lyrics
    */
 
   // ===== §3.12 The Plan (not saved) ===========================================================================
@@ -531,6 +533,8 @@ MV.def('core/types', [], () => {
    * @property {string|null} repeatOf
    * @property {number} pos
    * @property {string} role
+   * @property {1|2} [calm]                the cuts before a キメ cut (DESIGN_2_2 §3); present only where set
+   * @property {true} [kime]               the キメ cut of a キメ line (DESIGN_2_2 §3); present only where set
    */
   /**
    * @typedef {Object} Explanation

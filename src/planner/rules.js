@@ -39,6 +39,9 @@ MV.def('planner/rules', ['core/pins', 'planner/params'], (PINS, PA) => {
     // P4 モーフ・太さ (DESIGN_2_2 §4)
     row('morph.auto', null, WORK_LINE, BOOL, true, false),
     row('weight.auto', null, WORK, BOOL, true, false),
+    // P3 キメ (DESIGN_2_2 §3): 「キメの前を静かにする」, on in every generation (it acts only next to a line the user marked
+    // キメ, line/<id>:kime, which is a line pin of its own and not a table row)
+    row('kime.calm', null, WORK, BOOL, true, true),
   ]);
 
   const BY_SLOT = new Map(ROWS.map((r) => [r.slot, r]));

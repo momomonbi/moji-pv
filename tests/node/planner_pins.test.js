@@ -780,7 +780,10 @@ test('fuzz: random documents with odd pins never make the planner throw', () => 
     'high', '12', '😀', '한국어', '中文字'];
   const ODD = [['work:arrive', 'nope'], ['work:text.scale', 'x'], ['work:ornament.count', 7], ['work:season', 'monsoon'],
     ['work:mood', 3], ['work:ground', 'synGround01'], ['work:seam', 'synSeam03'], ['work:titleCard', true], ['work:bpm', null],
-    ['work:length', -3], ['work:filter#1', 'synFilter04'], ['line/r2:split', [0, 99]], ['line/r3:start', 'soon']];
+    ['work:length', -3], ['work:filter#1', 'synFilter04'], ['line/r2:split', [0, 99]], ['line/r3:start', 'soon'],
+    // キメ marks (DESIGN_2_2 §3) over a registry that has none of the キメ parts: never forced by name
+    ['line/r2:kime', true], ['line/r3:kime', true], ['line/r4:kime', 'yes'], ['line/r5:kime', true], ['work:kime', true],
+    ['work:kime.calm', false]];
   for (let i = 0; i < 120; i++) {
     const rng = R.stream('robust', i);
     const doc = D.defaultDoc();

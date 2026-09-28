@@ -981,3 +981,21 @@ test('vertical captions: cornerNote columns start at the block top with the mark
   assert.equal(credit.runs[0].layout.lines.length, 2, 'a long title takes two columns');
   assert.ok(credit.runs[0].layout.size >= 1080 * 0.035, 'and keeps a readable size');
 });
+
+// キメ (DESIGN_2_2 §3): a キメ line set as 大と小 takes tuck 'under', ratio ≥ 3 and text.scale ≥ 1 by rule, so its giant is
+// as large as the frame allows. Measured minima (fake measurer): 1–2-cell giants 0.414 of the short side, 3 cells 0.282,
+// 4 cells 0.211; with text.scale 0.9 (no floor) 0.373 / 0.254 / 0.190, and tuck 'beside' in 9:16 h 0.180 for 3 cells.
+// Every text here is invented for the test.
+test('キメ: 大と小 with the キメ parameters sets the giant as large as the frame allows', () => {
+  const CASES = [['ア', 'ア', 0.4], ['夜空', '夜空のむこう', 0.4], ['ひかり', 'ひかりのほう', 0.27], ['まぶしい', 'まぶしいあさ', 0.2]];
+  for (const aspect of ['16:9', '9:16', '1:1']) {
+    for (const orient of ['h', 'v']) {
+      for (const [giant, whole, min] of CASES) {
+        const { plan, scene } = sceneOf({ arrange: 'giantWhisper', aspect, orient, text: whole, emph: [[0, giant.length]], scale: 1,
+          params: { tuck: 'under', ratio: 3 } });
+        const size = Math.max(...scene.runs.map((r) => r.layout.size)) / plan.design.short;
+        assert.ok(size >= min, aspect + ' ' + orient + ' ' + giant + ': ' + size.toFixed(3) + ' < ' + min);
+      }
+    }
+  }
+});

@@ -1,6 +1,7 @@
 /* 文字PVメーカー v2 — original work. explain(): why a slot has its value, and the alternatives — lazy, never in the Plan (DESIGN §4.16.8; DESIGN_2_1 §2.8, §3.9, §11.2.6). */
-MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media', 'planner/choose', 'planner/look',
-  'planner/plan', 'planner/fields'], (P, PINS, LY, MEDIA, CH, LK, PL, F) => {
+MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media', 'core/script', 'planner/choose',
+  'planner/look', 'planner/plan', 'planner/fields', 'planner/segment', 'planner/kime'],
+(P, PINS, LY, MEDIA, SC, CH, LK, PL, F, SG, KI) => {
   'use strict';
 
   const SCOPE_OF = { 'pin:cut': 'cut', 'pin:line': 'line', 'pin:work': 'work' };
@@ -46,11 +47,17 @@ MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media
     return def && def.label ? def.label.ja : key;
   }
 
+  // キメ (PV22 P3, DESIGN_2_2 §3): a pick inside the キメ set says so first (or that the part settings left no set:
+  // kime.limited); a screen effect of a キメ cut says it never flashes; a transition out of one, that it does not
+  // flash; a calm factor that moved the weight, that the next キメ stands out.
   function factorWhy(registry, plan, cut, trace, kind, value, seasonWord, doc) {
     const why = [];
     const cand = (trace.candidates || []).find((c) => c.key === value);
     const def = registry.get(kind, value);
     const cond = trace.cond || null;
+    if (trace.kime) why.push({ code: trace.kimeLimited ? 'kime.limited' : 'kime', params: {} });
+    if (trace.noFlash === 'filter') why.push({ code: 'kime.noFlash', params: {} });
+    if (trace.noFlash === 'seam') why.push({ code: 'rule', params: { rule: 'kime.noFlash' } });
     if (def && def.mine && def.mine.media === true) {
       why.push({ code: 'media.pool', params: { name: mediaName(doc, registry, kind, value) } });
     }
@@ -69,6 +76,7 @@ MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media
       else if (f.season !== 1) why.push({ code: 'season', params: { season: plan.look.season.v, word: seasonWord || '' } });
       if (f.prefer !== 1) why.push({ code: 'theme.prefer', params: { x: r2(f.prefer) } });
       if (def.gate) why.push({ code: 'gate', params: { amount: def.gate } });
+      if (typeof f.calm === 'number' && f.calm !== 1) why.push({ code: 'kime.calm', params: {} });
     }
     const refs = cond && cond.deny ? cond.deny[kind] : null;
     if (refs && refs.length && !trace.avoidRelaxed) why.push({ code: 'avoid', params: { n: refs.length } });
@@ -106,6 +114,8 @@ MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media
     if (ctx.orient && !t.orient.includes(ctx.orient)) return 'trait';
     if (ctx.script && !(t.scripts.includes('*') || t.scripts.includes(ctx.script))) return 'trait';
     if (ctx.aspect && !(t.aspects.includes('*') || t.aspects.includes(ctx.aspect))) return 'trait';
+    // キメ: outside the キメ set, or a flashing effect or transition where a キメ cut does not flash
+    if (ctx.only && !(typeof ctx.only === 'function' ? ctx.only(key) : ctx.only.includes(key))) return 'kime';
     return null;
   }
 
@@ -132,6 +142,7 @@ MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media
         : PINS.lookup(ix, LK.WORK_AT, slot) || { from: 'auto' };
     const base = { path: P.format(parsed), value, from: src.from, by: src.by };
     if (src.from && src.from.startsWith('pin')) return Object.assign(base, { why: pinWhy(src.from, src.by), alts: [] });
+    if (slot === 'kime.calm') return Object.assign(base, { why: [], alts: [] });   // on until the user turns it off
     if (slot === 'season') {
       const scan = LK.scanSeason(LY.parseSheet(doc.sheet.rows));
       const why = scan.word ? [{ code: 'season', params: { season: scan.v, word: scan.word } }]
@@ -189,6 +200,7 @@ MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media
       const hit = lineId ? PINS.lookup(ix, { cutKey: null, pinCutKey: null, lineId }, parsed.slot) : null;
       const line = plan.lines.find((l) => l.id === lineId);
       if (hit && hit.from === 'pin:line') { from = hit.from; by = hit.by; }
+      else if (parsed.slot === 'split' && line && keptWhole(plan, line)) from = 'rule';
       else if (parsed.slot === 'start' && line && line.by.start === 'lrc') from = 'mark';
       else if (parsed.slot === 'split' && line) {
         const row = doc.sheet.rows.find((r) => r.id === line.row);
@@ -212,7 +224,10 @@ MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media
     let why;
     if (from.startsWith('pin')) why = pinWhy(from, by);
     else if (from === 'mark') why = [{ code: 'rule', params: { rule: parsed.slot === 'split' ? 'marks' : 'lrc' } }];
-    else if (from === 'rule') why = [{ code: 'rule', params: { rule: 'speed' } }];     // scaled by motion.speed (§4.3)
+    else if (from === 'rule' && cat === 'line') why = [{ code: 'rule', params: { rule: 'kime.split' } }];
+    // scaled by motion.speed (§4.3), or set by a キメ rule (a fast landing, a readable bleed, the size contrast)
+    else if (from === 'rule') why = [{ code: 'rule', params: { rule: kimeParam(cut, parsed) ? 'kime.param' : 'speed' } }];
+    else if (cat === 'line' && parsed.slot === 'kime') why = [];                     // not marked: nothing decided it
     else why = [{ code: 'rule', params: { rule: cat === 'param' ? 'auto' : parsed.slot } }];
     // The automatic depth of a photo or video: the §11.9.2 rule that decided it.
     const depthRule = cat === 'param' && from === 'auto' ? F.depthRuleAt(doc, plan, cut, parsed, registry) : null;
@@ -226,6 +241,16 @@ MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media
       else why = [{ code: 'media.pool', params: { name } }];
     }
     return { path, value, from, by, why, alts: [] };
+  }
+
+  // キメ: a line kept whole by its mark (planner/segment: one cut up to kimeMaxCells, no split pin of its own).
+  function keptWhole(plan, line) {
+    return line.cuts.length === 1 && F.lineKime(plan, line) && SC.cells(line.text) <= SG.kimeMaxCells(plan.design.aspect);
+  }
+
+  // Whether a parameter a rule set on this cut is one of the キメ parameters (KIME.params) of a キメ cut.
+  function kimeParam(cut, parsed) {
+    return !!cut && KI.isKime(cut) && !!parsed.part && KI.KIME.params.includes(parsed.part.param);
   }
 
   // The line slots season and avoid (DESIGN_2_1 §4.9). A line season follows the work's season unless the line pins
@@ -266,7 +291,8 @@ MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media
   function maskContext(plan, cut, parsed, kind, trace) {
     const slotKind = parsed.part.kind;
     const cond = trace.cond || null;
-    const lineCtx = { season: cond ? cond.season : null, deny: cond && cond.deny && !trace.avoidRelaxed ? cond.deny[kind] || null : null };
+    const lineCtx = { season: cond ? cond.season : null, deny: cond && cond.deny && !trace.avoidRelaxed ? cond.deny[kind] || null : null,
+      only: trace.only || null };
     if (kind === 'ground') return lineCtx;
     if (kind === 'seam') return Object.assign(lineCtx, { scope: trace.world ? 'world' : 'text' });
     if (slotKind === 'atmos') return Object.assign(lineCtx, { scope: 'run' });

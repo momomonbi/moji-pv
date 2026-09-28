@@ -1,6 +1,6 @@
 /* 文字PVメーカー v2 — original work. The cutter: lines → cut skeletons, special cuts, windows, pin reattachment (DESIGN §4.16.5). */
 MV.def('planner/segment', ['core/script', 'core/num', 'core/pins', 'core/rng', 'engine/text/breaker', 'planner/choose',
-  'planner/params'], (S, N, PINS, R, BR, CH, PA) => {
+  'planner/params', 'planner/kime'], (S, N, PINS, R, BR, CH, PA, KI) => {
   'use strict';
 
   const BASE = Object.freeze({ '16:9': 14, '21:9': 16, '4:3': 12, '1:1': 10, '4:5': 10, '3:4': 9, '9:16': 8 });
@@ -12,6 +12,9 @@ MV.def('planner/segment', ['core/script', 'core/num', 'core/pins', 'core/rng', '
   const TITLE_ROOM = 1.5, TITLE_MIN = 0.8, TITLE_GAP = 0.2;
   const INTRO_ROOM = 3, OUTRO_ROOM = 3, GAP_MIN = 2.8;
   const SPECIAL_ROLES = new Set(['title', 'interlude', 'outro']);
+  // キメ (PV22 P3, DESIGN_2_2 §3): a line marked キメ (line.kime, planner/plan withKimePins) plays as one cut up to this
+  // many cells: 16:9 28, 21:9 30, 4:3 24, 1:1 and 4:5 20, 3:4 18, 9:16 16.
+  function kimeMaxCells(aspect) { return Math.min(KI.KIME.cellsCap, 2 * (BASE[aspect] || BASE['16:9'])); }
 
   // Specs of the line- and cut-scope timing slots (§3.4.2, §3.4.3) and the v2.1 line slots season and avoid
   // (DESIGN_2_1 §2.3), shown by planner/fields.
@@ -179,6 +182,9 @@ MV.def('planner/segment', ['core/script', 'core/num', 'core/pins', 'core/rng', '
     const pin = PA.resolvePin(ctx.ix, { pinCutKey: null, lineId: line.id, cutKey: null }, 'split',
       (v, rank) => (rank === 'pin:line' ? acceptSplit(text)(v) : { na: true }), ctx.warn);
     if (pin) return { starts: pin.v, from: pin.from, by: pin.by, focus: givenFocus(ctx, line, pin.v, dur) };
+    // キメ: the whole line at once, whatever its '/' marks or the auto cutter would do (a split pin, the user's or a
+    // lock's, wins above). A longer line keeps its pieces; its focus piece, else its last, is the キメ cut (cutsOfLine).
+    if (line.kime && S.cells(text) <= kimeMaxCells(ctx.aspect)) return { starts: [0], from: 'kime', focus: null };
     if (line.pieces) {
       const starts = line.pieces.map((r) => r[0]);
       return { starts, from: 'mark', focus: givenFocus(ctx, line, starts, dur) };
@@ -294,8 +300,12 @@ MV.def('planner/segment', ['core/script', 'core/num', 'core/pins', 'core/rng', '
     let T = pieceTimes(ctx, line, starts, pinKeys, spanEnd);
     ({ starts, T } = mergeShort(ctx, line, starts, T));
     const att = attach(ctx, line, starts);
+    if (pieces.from === 'kime') kimeAttach(ctx, line, att);
     for (const key of att.orphans) reportPins(ctx, 'orphan-pin', key, line.id);
     for (const key of att.shadowed) reportPins(ctx, 'shadowed-pin', key, line.id);
+    // The キメ cut of a キメ line: its only cut, else the focus piece, else the last piece.
+    const kimeAt = !line.kime ? -1 : pieces.focus !== null && starts.includes(pieces.focus) ? starts.indexOf(pieces.focus)
+      : starts.length - 1;
     const cuts = starts.map((a, i) => {
       const b = i + 1 < starts.length ? starts[i + 1] : text.length;
       const key = line.id + '~' + a;
@@ -305,11 +315,39 @@ MV.def('planner/segment', ['core/script', 'core/num', 'core/pins', 'core/rng', '
         emph: pieceEmph(line.emph || [], a, b), impact: !!line.impact && i === starts.length - 1,
         note: i === starts.length - 1 ? line.note || null : null,
         t0: q6(T[i]), t1: q6(T[i + 1]), lang: line.lang, off: [a, b], pinKey: att.map[key] || null,
-        heading: line.heading || null, splitFrom: pieces.from,
+        heading: line.heading || null, splitFrom: pieces.from, kime: i === kimeAt,
       };
     });
     checkLock(ctx, line, pieces, starts, att, cuts);
     return cuts;
+  }
+
+  // A キメ line kept whole (pieces.from 'kime') keeps only the pins made for the whole line: its own key '<line>~0' whose
+  // pins carry no sig other than the line's text. Pins of the pieces it had before (another key, or '~0' with the first
+  // piece's text) do not take over the キメ look: they are reported as shadowed-pin (付け直す moves them onto the cut)
+  // and attach again to their pieces when the mark is removed (they are never deleted).
+  function kimeAttach(ctx, line, att) {
+    const len = line.text.length;
+    const offsetOf = (k) => Number(k.slice(k.lastIndexOf('~') + 1));
+    const inside = (k) => offsetOf(k) < len;
+    const hidden = att.orphans.filter(inside);
+    if (hidden.length) {
+      att.orphans = att.orphans.filter((k) => !inside(k));
+      for (const k of hidden) att.shadowed.push(k);
+    }
+    const key = line.id + '~0';
+    const owner = att.map[key];
+    if (owner) {
+      const whole = pieceText(line.text, 0, len);
+      const slots = ctx.ix.cut.get(owner);
+      let ok = owner === key;
+      if (ok && slots) for (const pin of slots.values()) if (pin && typeof pin.sig === 'string' && pin.sig !== whole) ok = false;
+      if (!ok) {
+        delete att.map[key];
+        att.shadowed.push(owner);
+      }
+    }
+    att.shadowed.sort((x, y) => offsetOf(x) - offsetOf(y) || (x < y ? -1 : x > y ? 1 : 0));
   }
 
   function reportPins(ctx, code, pinCutKey, lineId) {
@@ -345,7 +383,7 @@ MV.def('planner/segment', ['core/script', 'core/num', 'core/pins', 'core/rng', '
 
   function special(key, role, text, note, t0, t1, lang) {
     return { key, line: null, role, text, emph: [], impact: false, note: note || null, t0: q6(t0), t1: q6(t1), lang,
-      off: null, pinKey: key, heading: null, splitFrom: null };
+      off: null, pinKey: key, heading: null, splitFrom: null, kime: false };
   }
 
   // titleCard slot: work pin, else a title is set and the first line starts ≥ 1.5 s (automatic timing keeps 2 s for
@@ -371,13 +409,15 @@ MV.def('planner/segment', ['core/script', 'core/num', 'core/pins', 'core/rng', '
   // --- windows -----------------------------------------------------------------------------------------------
 
   // a = t0 − lead; b = next cut's start + tail, or t1 + tail when a special cut (or nothing) follows. A line pinned to
-  // end after the next start keeps its text until its own end.
+  // end after the next start keeps its text until its own end. A キメ cut held into a following special cut (cutAll)
+  // stays up until that cut starts: next.t0 + tail.
   function windows(cuts, timing) {
     for (let i = 0; i < cuts.length; i++) {
       const c = cuts[i], next = cuts[i + 1];
       c.a = q6(c.t0 - timing.lead);
       const nextSpecial = !next || SPECIAL_ROLES.has(next.role);
-      c.b = q6((nextSpecial ? c.t1 : Math.max(c.t1, next.t0)) + timing.tail);
+      const held = nextSpecial && !!next && c.kime === true && next.t0 > c.t1;
+      c.b = q6((nextSpecial && !held ? c.t1 : Math.max(c.t1, next.t0)) + timing.tail);
     }
   }
 
@@ -397,16 +437,20 @@ MV.def('planner/segment', ['core/script', 'core/num', 'core/pins', 'core/rng', '
       cuts.push(...own);
       const next = lines[i + 1];
       if (next && next.t0 - line.t1 > Math.max(GAP_MIN, bars)) {
-        cuts.push(special('gap/' + line.id, 'interlude', '', next.heading, line.t1, next.t0, next.lang));
+        // キメ: a line whose last cut is its キメ cut holds into the interlude (KI.hold: ≤ 1.5 s, the interlude keeps ≥ 3 s)
+        const hold = own.length && own[own.length - 1].kime ? KI.hold(next.t0 - line.t1) : 0;
+        cuts.push(special('gap/' + line.id, 'interlude', '', next.heading, line.t1 + hold, next.t0, next.lang));
       }
     });
     const last = lines[lines.length - 1];
     if (last && duration - last.t1 >= OUTRO_ROOM) {
-      cuts.push(special('outro', 'outro', meta.title || '', meta.artist, last.t1, duration, titleLang));
+      const end = cuts[cuts.length - 1];
+      const hold = end && end.line === last.id && end.kime ? KI.hold(duration - last.t1) : 0;
+      cuts.push(special('outro', 'outro', meta.title || '', meta.artist, last.t1 + hold, duration, titleLang));
     }
     windows(cuts, ctx.timing);
     return cuts;
   }
 
-  return { cutAll, autoStarts, bestSplit, weightsOf, pieceText, LINE_SPECS, BASE, SPECIAL_ROLES, windows };
+  return { cutAll, autoStarts, bestSplit, weightsOf, pieceText, LINE_SPECS, BASE, SPECIAL_ROLES, windows, kimeMaxCells };
 });

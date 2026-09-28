@@ -17,7 +17,7 @@ const EN_ALLOW = ['文字PVメーカー'];
 
 // Codes other packages report through the table (DESIGN §3.13, §4.16.8, §4.22.1, §4.4).
 const WHY_CODES = ['mood.tag', 'fit', 'recent', 'family', 'echo', 'echo.kept', 'impact', 'season', 'theme.prefer', 'gate', 'rule',
-  'pin', 'lock'];
+  'pin', 'lock', 'kime', 'kime.calm', 'kime.limited', 'kime.noFlash'];
 // §3.13 codes, plus `part-error` (reported by the scene and the renderer, WP4a).
 const WARN_CODES = ['pin-bad-value', 'pin-not-applicable', 'pin-filtered', 'pin-off-season', 'orphan-pin', 'shadowed-pin',
   'lock-partial', 'pool-empty', 'time-order', 'time-compressed', 'title-skipped', 'overfull', 'font-fallback', 'piece-merged',

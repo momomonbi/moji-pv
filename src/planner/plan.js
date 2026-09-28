@@ -1,8 +1,9 @@
 /* 文字PVメーカー v2 — original work. plan(doc, { registry }) → Plan: the planner's stages in their FROZEN order (DESIGN §4.16.1–§4.16.2, §3.12; DESIGN_2_1 §2.7, §5.9.3, §11.2.6). */
 MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'core/timing', 'core/beats', 'core/motion',
   'core/doc', 'core/schema', 'core/script', 'core/media', 'core/shot', 'planner/choose', 'planner/params', 'planner/look',
-  'planner/segment', 'planner/features', 'planner/cast', 'planner/tracks', 'planner/camera', 'planner/encode', 'planner/extreme'],
-(H, N, PINS, LY, TM, B, MO, D, S, SC, MEDIA, SHOT, CH, PA, LK, SG, FE, CA, TR, CAM, EN, XT) => {
+  'planner/segment', 'planner/features', 'planner/cast', 'planner/tracks', 'planner/camera', 'planner/encode', 'planner/extreme',
+  'planner/kime', 'planner/rules'],
+(H, N, PINS, LY, TM, B, MO, D, S, SC, MEDIA, SHOT, CH, PA, LK, SG, FE, CA, TR, CAM, EN, XT, KI, RU) => {
   'use strict';
 
   // v2: rigs, cut.rig, grounds[].zoomed, feat.sectionStart, media, the camera slots (DESIGN_2_1 §2.7, §11.2.6).
@@ -47,6 +48,26 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
         (v, rank) => (rank !== 'pin:line' ? { na: true } : LANG_SPEC.of.includes(v) ? { v } : { bad: true }), ctx.warn);
       return pin ? Object.assign({}, line, { lang: pin.v }) : line;
     });
+  }
+
+  // キメ (PV22 P3, DESIGN_2_2 §3): a line whose `line/<id>:kime` pin is true (line rank only: a work or cut pin does not
+  // apply; a value that is not a boolean warns pin-bad-value and counts as absent). Without any kime pin the same array
+  // comes back, so a document without the mark plans exactly as before. The timing solver (the hold), the cutter (one
+  // cut) and P6 read line.kime.
+  function withKimePins(ctx, lines) {
+    if (!PA.pinned(ctx.ix, 'kime')) return lines;
+    return lines.map((line) => {
+      const pin = PA.resolvePin(ctx.ix, { pinCutKey: null, lineId: line.id, cutKey: null }, 'kime',
+        (v, rank) => (rank !== 'pin:line' ? { na: true } : typeof v === 'boolean' ? { v } : { bad: true }), ctx.warn);
+      return pin && pin.v === true ? Object.assign({}, line, { kime: true }) : line;
+    });
+  }
+
+  // The calm levels of the cuts before each キメ cut (planner/kime calmLevels), or null: no キメ cut, or
+  // 「キメの前を静かにする」 (work:kime.calm, planner/rules) is off.
+  function calmOf(ctx, cuts) {
+    if (!cuts.some(KI.isKime)) return null;
+    return RU.value(ctx.doc, ctx.ix, 'kime.calm') === false ? null : KI.calmLevels(cuts);
   }
 
   // Lines with times (core/timing.solveTimes, §4.11) and the tempo facts. The solver's context: the tempo (`bpm`
@@ -385,7 +406,7 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
   function featuresOf(cut, fx, songKey, cached) {
     if (!cached) return { feat: FE.cutFeatures(cut, fx), id: null };
     const key = JSON.stringify([cut.text, cut.role, cut.lang, cut.emph.length > 0, !!cut.impact, cut.t0, cut.t1,
-      fx.section, fx.repeatOf, fx.repeats, fx.sectionStart]) + songKey;
+      fx.section, fx.repeatOf, fx.repeats, fx.sectionStart, cut.kime === true ? 1 : 0, fx.calm || 0]) + songKey;
     let e = featCur.get(key);
     if (e === undefined) {
       e = featPrev.get(key);
@@ -513,7 +534,7 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
       timing: Object.assign({}, TM.TIMING_DEFAULTS, doc.timing || {}), pools: new Map(), trace, casts: null,
       lockFree: CA.lockFreeIndex(doc.pins), media: mediaIndex(doc), mediaUsed: new Set(),
       castKeys: null, seams: null, encodings: null, fallbacks: null, lookAxis: null, lineConds: null, workCond: null,
-      shotMood: null, echoed: null, align: null, alignNear: null,
+      shotMood: null, echoed: null, align: null, alignNear: null, kimePools: null,
     };
     // Traced runs (explain) and fresh runs neither read nor refresh the caches of re-planning.
     if (cached) beginFeatures();
@@ -521,7 +542,7 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
 
     // 1. parse and time
     const { sheet, lines: parsed } = parsedSheet(doc);
-    const lines = withLangPins(ctx, parsed);
+    const lines = withKimePins(ctx, withLangPins(ctx, parsed));
     const timing = timeLines(ctx, lines, sheet.meta);
     const { timed, duration, grid } = timing;
     ctx.bpm = timing.bpm;
@@ -542,6 +563,8 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
 
     // 3. cutter
     const cuts = SG.cutAll(ctx, timed, sheet.meta, duration);
+    // キメ: the pools a キメ or calm cut filters (planner/cast onlyKeys), shared by every pass of the plan
+    if (cuts.some(KI.isKime)) ctx.kimePools = new Map();
 
     // 4. features
     const fxOf = featureContexts(timed, cuts);
@@ -550,11 +573,12 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
     const songKey = '|' + CA.intern(EN.canon([duration, loud, timing.beats, info]));
     // sectionStart (DESIGN_2_1 §2.7): the first cut, and every cut whose section differs from the previous cut's.
     let prevSection;
+    const calm = calmOf(ctx, cuts);
     cuts.forEach((cut, i) => {
       const fx = fxOf(cut);
       const section = FE.sectionOf(cut, { info, section: fx.section });
       const got = featuresOf(cut, { duration, env: ctx.env, grid, info, section: fx.section, repeatOf: fx.repeatOf,
-        repeats: fx.repeats, sectionStart: i === 0 || section !== prevSection }, songKey, cached);
+        repeats: fx.repeats, sectionStart: i === 0 || section !== prevSection, calm: calm ? calm[i] : 0 }, songKey, cached);
       prevSection = section;
       cut.feat = got.feat;
       cut.featId = got.id;

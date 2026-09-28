@@ -1,13 +1,14 @@
 /* 文字PVメーカー v2 — original work. Inspector field states, lock payloads and plan-value readers (DESIGN §4.16.8, §3.13, §3.6; DESIGN_2_1 §3.9). */
 MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyrics', 'core/schema', 'core/timing',
   'core/curve', 'core/shot', 'planner/params', 'planner/cast', 'planner/look', 'planner/segment', 'planner/plan',
-  'planner/extreme'],
-(P, PINS, REG, LY, S, TM, CV, SHOT, PA, CA, LK, SG, PL, XT) => {
+  'planner/extreme', 'planner/rules'],
+(P, PINS, REG, LY, S, TM, CV, SHOT, PA, CA, LK, SG, PL, XT, RU) => {
   'use strict';
 
-  const LOOK_NAMES = new Set(['mood', 'theme', 'season', 'bpm', 'beatOffset', 'readRate', 'length', 'titleCard']);
+  // キメ (PV22 P3, DESIGN_2_2 §3): 「キメの前を静かにする」 (kime.calm) is a work value, the キメ mark (kime) a line value.
+  const LOOK_NAMES = new Set(['mood', 'theme', 'season', 'bpm', 'beatOffset', 'readRate', 'length', 'titleCard', 'kime.calm']);
   const LOOK_PREFIX = /^(color|amount|face)\./;
-  const LINE_NAMES = new Set(['start', 'end', 'split', 'lang', 'avoid']);
+  const LINE_NAMES = new Set(['start', 'end', 'split', 'lang', 'avoid', 'kime']);
   const RIG_SLOTS = new Set(['rig', 'rig.curve']);
   const TRACK_KINDS = new Set(['ground', 'atmos', 'seam']);
   const EL_DEFAULT = Object.freeze({ nudge: Object.freeze({ dx: 0, dy: 0, rot: 0, s: 1 }), fill: null, hide: false });
@@ -149,6 +150,7 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
     if (slot === 'readRate') return readRate(plan, ix);
     if (slot === 'length') return plan.duration;
     if (slot === 'titleCard') return plan.cuts.some((c) => c.key === 'title');
+    if (slot === 'kime.calm') return RU.value(null, ix || null, 'kime.calm');
     return undefined;
   }
 
@@ -179,7 +181,14 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
     if (parsed.slot === 'lang') return line.lang;
     if (parsed.slot === 'season') return lineSeason(plan, lineId, ix);
     if (parsed.slot === 'avoid') return lineAvoid(lineId, ix);
+    if (parsed.slot === 'kime') return lineKime(plan, line);
     return line.cuts.map((k) => P.cutOffset(k));        // split
+  }
+
+  // Whether a line is キメ as the Plan shows it: one of its cuts is the キメ cut (feat.kime; a pin that is not true, or
+  // one at another scope, makes none).
+  function lineKime(plan, line) {
+    return line.cuts.some((k) => { const c = cutOf(plan, k); return !!(c && c.feat && c.feat.kime); });
   }
 
   // A line's effective season (DESIGN_2_1 §4.9): its own pin, else the work's season (the look's value, which is the
@@ -235,6 +244,7 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
   function schemaOf(registry, plan, parsed, cuts) {
     const cat = categoryOf(parsed);
     const slot = parsed.slot;
+    if (slot === 'kime' || slot === 'kime.calm') return CA.SLOT_SPECS[slot];
     if (cat === 'look') {
       if (slot === 'mood' || slot === 'theme') return { type: 'part', kind: slot, of: registry.keys(slot), none: false };
       if (parsed.part && !parsed.part.param) {
@@ -570,7 +580,7 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
   }
 
   return {
-    fieldState, fieldStates, lockPayload, pinSig: PL.pinSig, valueAt, decisionAt, categoryOf, cutsFor, cutOf, choiceSlot,
+    fieldState, fieldStates, lockPayload, pinSig: PL.pinSig, valueAt, decisionAt, categoryOf, cutsFor, cutOf, choiceSlot, lineKime,
     schemaOf, canPinAt, depthRuleAt,
   };
 });
