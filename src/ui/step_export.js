@@ -209,6 +209,12 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
       if (Array.isArray(p.keys)) params.list = p.keys.map((k) => app.label('filter', k)).join(t('list.sep'));
       if (Array.isArray(p.families)) { params.family = p.families.join(t('list.sep')); params.n = p.families.length; }
       if (c.code === 'overfull') params.n = p.line;
+      // 読み切れない速さ (PV22 S4): the first five line numbers, then how many more
+      if (c.code === 'too-fast' && Array.isArray(p.lines)) {
+        const shown = p.lines.slice(0, 5).join(t('list.sep'));
+        params.list = p.lines.length > 5 ? t('exp.pre.too-fast.more', { list: shown, m: p.lines.length - 5 })
+          : t('exp.pre.too-fast.lines', { list: shown, n: p.lines.length });
+      }
       // the chosen format by name: as the subject (alpha-backdrop) or inside a sentence (no-webcodecs, no-audio-codec, …)
       if (c.code === 'alpha-backdrop') params.format = t('exp.fmt.' + p.format);
       else if (p.format) params.format = t('exp.fmtIn.' + p.format);

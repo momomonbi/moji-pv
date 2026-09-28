@@ -1360,3 +1360,21 @@ test('作品全体 › タイミング: 入りの早さ has a note, and 入り�
   assert.equal(enter.label, 'fld.enter');
   assert.equal(enter.note, 'fld.enter.note');
 });
+
+// PV22 S4 (DESIGN_2_2 §5): 読み切れない速さの行を知らせる after 入りの基準; the 行 page's 時間 section carries the notes and
+// the quick fixes (custom timeTools).
+test('作品全体 › タイミング: the 読み切れない速さ switch follows 入りの基準; 行 › 時間 has the timeTools section', () => {
+  const timing = F.sectionsFor({ level: 'work' }, PLAN, REG).find((s) => s.id === 'timing').fields;
+  const keys = timing.map((f) => f.path || f.key);
+  const enter = keys.indexOf('timing.set.enter');
+  assert.equal(keys[enter + 1], 'timing.set.readCheck');
+  const row = timing[enter + 1];
+  assert.equal(row.widget, 'toggle');
+  assert.equal(row.label, 'fld.readCheck');
+  assert.equal(row.note, 'fld.readCheck.note');
+  assert.deepEqual(row.scopes, ['work']);
+  const line = PLAN.lines[0];
+  const time = F.sectionsFor({ level: 'line', ids: [line.id] }, PLAN, REG).find((s) => s.id === 'time');
+  assert.equal(time.custom, 'timeTools');
+  assert.deepEqual(time.fields.map((f) => f.path || f.derived), ['start', 'end', 'lineLength']);
+});

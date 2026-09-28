@@ -2,9 +2,9 @@
 MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom', 'ui/keys', 'ui/actions',
   'ui/selection', 'ui/looks', 'ui/view', 'ui/shell', 'ui/header', 'ui/tap', 'ui/project_io',
   'ui/inspector', 'ui/timeline', 'ui/palette', 'ui/menus', 'ui/dialogs', 'ui/ai_panel', 'ai/providers',
-  'ui/fields', 'ui/output', 'ui/media_io'],   // WP8b views, WP8c AI panel, INT-UI output rules, v2.1 photos and videos
+  'ui/fields', 'ui/output', 'ui/media_io', 'ui/readcheck'],   // WP8b views, WP8c AI panel, INT-UI output rules, v2.1 photos and videos, PV22 S4
 (D, ST, T, strings, dom, K, A, S, LK, V, shell, header, tapUi, projectIo, inspector, timeline, palette, menus, dialogs,
-  aiPanel, aiProviders, F, OUT, mediaIo) => {
+  aiPanel, aiProviders, F, OUT, mediaIo, RC) => {
   'use strict';
 
   const TYPING_REPLAN_MS = 120;         // typing never waits on the planner (§7.4)
@@ -137,7 +137,16 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
       get doc() { return store.doc; },
       reduce: (doc, cmd) => svc.reduce(doc, cmd),
       label: (kind, key) => t.part(kind, key),
-      warnings: () => { try { return engine.warnings() || []; } catch (e) { return []; } },
+      // the engine's warnings; with 読み切れない速さの行を知らせる on (ui/readcheck, PV22 S4) also the too-fast notices, and a
+      // squeezed range marked on each of its lines. The lyric editor, the 行 list, the 行 page, the timeline and step ④
+      // all read this one list.
+      warnings: () => {
+        try {
+          const base = engine.warnings() || [];
+          if (!RC.enabled(store.doc)) return base;
+          return RC.expand(base.concat(RC.readWarnings(store.doc, app.plan, regOf())), app.plan);
+        } catch (e) { return []; }
+      },
       titleOf: () => header.titleOf(store.doc),
       inText: () => dom.targetKind(document.activeElement) === 'text',
       env: () => ({ webcodecs: typeof VideoEncoder === 'function', fsAccess: typeof window.showSaveFilePicker === 'function' }),

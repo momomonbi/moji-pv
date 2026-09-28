@@ -420,8 +420,11 @@ MV.def('export/schedule', ['core/script', 'core/doc', 'audio/wav', 'media/sample
 
   function warningItems(plan, warnings, items) {
     const seenLines = new Set(), seenFaces = new Set();
+    const tooFast = [];
     for (const w of warnings) {
-      if (w.code === 'overfull') {
+      if (w.code === 'too-fast') {
+        tooFast.push(w);
+      } else if (w.code === 'overfull') {
         const key = w.line || w.cut || '';
         if (seenLines.has(key)) continue;
         seenLines.add(key);
@@ -432,6 +435,12 @@ MV.def('export/schedule', ['core/script', 'core/doc', 'audio/wav', 'media/sample
         seenFaces.add(family);
         items.push({ code: 'font-fallback', level: 'info', params: { family } });
       }
+    }
+    // 読み切れない速さ (PV22 S4; the UI adds these notices to the warnings when they are on): one item for every line,
+    // [見る] on the first cut
+    if (tooFast.length) {
+      const lines = [...new Set(tooFast.map((w) => lineNumber(plan, w.line)).filter((n) => n !== null))];
+      items.push({ code: 'too-fast', level: 'warn', params: { n: lines.length, lines }, jump: { cut: tooFast[0].cut || null } });
     }
   }
 

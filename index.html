@@ -1,6 +1,6 @@
 <!doctype html><html lang="ja"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-xyEsS3kTFgVKVY2h60FS2CYK8LdAn8XYVpvXroKuEDs='; style-src 'sha256-CBzRvq4sWr3CF69hafDp1l8UkHnSy18JQMXGJJhPDYI=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-S62Btto2Suy9LW3eiQoI9zaiFhqBLVt26EbDfQuf3Ic='; style-src 'sha256-CBzRvq4sWr3CF69hafDp1l8UkHnSy18JQMXGJJhPDYI=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
 <title>文字PVメーカー</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -8976,7 +8976,8 @@ MV.def('core/types', [], () => {
    * @typedef {Object} Warning
    * @property {'pin-bad-value'|'pin-not-applicable'|'pin-filtered'|'pin-off-season'|'orphan-pin'|'shadowed-pin'|
    *   'lock-partial'|'pool-empty'|'time-order'|'time-compressed'|'title-skipped'|'overfull'|'font-fallback'|
-   *   'piece-merged'} code
+   *   'piece-merged'|'too-fast'} code   too-fast (読み切れない速さ, PV22 S4): UI-computed by ui/readcheck from
+   *                                     planner/readable, never in plan.warnings; detail { rate, units, legible, limit }
    * @property {string} [path]
    * @property {string} [line]
    * @property {string} [cut]
@@ -14008,6 +14009,26 @@ MV.def('i18n/strings', [], () => ({
   'fld.enter.ready': ['出そろい（読める）', 'Fully in (readable)'],
   'fld.enter.note': ['動き始め: 入りの動きが始まる時刻を声より前にします。出そろい: 入りの動きを終えて読める時刻を声より前にします（入りの動きは0.45秒までに縮めます）。切り替えで入る行、背景が変わる行、歌に合わせて1字ずつ出る行、見せ場（!）とキメの行はそのままです。',
     'Start: the entrance starts this long before the voice. Fully in: the entrance ends, and the text can be read, this long before the voice (entrances are shortened to 0.45 s at most). Lines that come in with a transition or a new background, lines revealed as they are sung, and impact (!) and kime lines keep their timing.'],
+  // S4 読み切れない速さの行を知らせる
+  'warn.too-fast': ['速すぎて読み切れないかもしれません', 'May be too fast to read'],
+  'warn.too-fast.n': ['速すぎて読み切れないかもしれません（1秒に約{n}音）', 'May be too fast to read (about {n} morae a second)'],
+  'warn.time-compressed.n': ['ここから{n}行の間隔を詰めて収めました',
+    'The {n} line from here was squeezed to fit|The {n} lines from here were squeezed to fit'],
+  'insp.tooFast': ['速すぎて読み切れないかもしれません（1秒に約{n}音・読める時間 {s}秒）',
+    'May be too fast to read (about {n} morae a second, readable for {s} s)'],
+  'insp.squeezed': ['前後の固定に合わせて、行の間隔を詰めています', 'Lines are squeezed to fit between fixed times'],
+  'insp.merged': ['短すぎる区切りを前とまとめました', 'A very short piece was merged into the one before'],
+  'insp.fixMotion': ['動きを速くする', 'Make the motion quicker'],
+  'insp.fixEnd': ['終わりを延ばす', 'Show it longer'],
+  'undo.readFix': ['読みやすくする（動きを速く）', 'Easier to read (quicker motion)'],
+  'undo.readEnd': ['読みやすくする（終わりを延ばす）', 'Easier to read (show longer)'],
+  'fld.readCheck': ['読み切れない速さの行を知らせる', 'Flag lines too fast to read'],
+  'fld.readCheck.note': ['1秒あたりの音数が多すぎる行や、読める時間が短すぎる行に「!」を付けます。新しい作品でははじめからオンです。',
+    'Marks lines with too many morae per second, or too little time to read, with "!". New works start with this on.'],
+  'exp.pre.too-fast': ['読み切れない速さの行が{n}行あります（{list}）',
+    '{n} line may be too fast to read ({list})|{n} lines may be too fast to read ({list})'],
+  'exp.pre.too-fast.lines': ['{list}行目', 'line {list}|lines {list}'],
+  'exp.pre.too-fast.more': ['{list}行目ほか{m}行', 'lines {list} and {m} more'],
 
   // --- PV22 P6 (歌ハメ) ---
 }));
@@ -19735,6 +19756,129 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       isChoice, alignments, neighboursOf, alignedSource, REPEAT,
     };
   });
+/* 文字PVメーカー v2 — original work. 読み切れない速さ: how long each line cut can be read, from a finished Plan — a pure reader, never in the Plan (PV22 S4, DESIGN_2_2 §5). */
+MV.def('planner/readable', ['core/motion', 'core/script'], (MO, S) => {
+  'use strict';
+
+  const READ = Object.freeze({
+    // units (morae; syllables for Latin words) per legible second. en 11, not the design's 9: the automatic timing reads
+    // every language at the same nominal rate and gives English lines up to 10.1 (the app's English sample, NOTES P5)
+    MAX: Object.freeze({ ja: 12, ko: 12, zhHans: 10, zhHant: 10, en: 11 }),
+    MIN_UNITS: 4,          // the rate rule needs at least this many units
+    // a cut with ≥ FLOOR_UNITS units legible for less than this is flagged whatever its rate. 0.25, not the design's 0.3:
+    // a short automatic piece followed by a transition reads 0.265–0.296 s at lead 0.12 in the fixtures (NOTES, P5)
+    MIN_LEGIBLE: 0.25,
+    FLOOR_UNITS: 2,
+    SUNG_AFTER: 0.4,       // a 歌ハメ cut (P6 cut.sung) stays readable this long after its last character
+  });
+  const RATE_MIN_W = 0.05; // the rate of a cut legible for less than this is computed over this (a finite number)
+
+  function units(cut) { return S.morae(cut.text, cut.lang); }
+  function limitOf(lang) { return READ.MAX[lang] || READ.MAX.ja; }
+
+  // The arrive unit count the planner and the scene fit the stagger with (planner/plan unitCount).
+  function countOf(registry, cut) {
+    const d = cut.slots ? cut.slots.arrive : null;
+    const def = d && registry ? registry.get('arrive', d.v) : null;
+    const unit = def && def.unit ? def.unit : 'glyph';
+    const u = cut.feat && cut.feat.units ? cut.feat.units : { glyph: 1, word: 1, line: 1 };
+    return unit === 'word' ? u.word : unit === 'line' || unit === 'run' ? u.line : u.glyph;
+  }
+
+  // The fitted length of a motion slot (s): 0 without one, for the fallback part (instant), and for an entrance revealed
+  // as sung (the text is read as it appears); else core/motion.fitMotion as the scene fits it.
+  function motionTotal(registry, fallbacks, cut, kind, window, cap) {
+    const d = cut.slots ? cut.slots[kind] : null;
+    if (!d || d.v === null || d.v === undefined || d.v === fallbacks[kind]) return 0;
+    const p = d.p || {};
+    if (kind === 'arrive' && p.order === 'sung') return 0;
+    return MO.fitMotion({ dur: p.dur, each: p.each, count: countOf(registry, cut), window, share: MO.SHARE[kind], cap }).total;
+  }
+
+  function fallbacksOf(registry) {
+    return {
+      arrive: registry && typeof registry.fallback === 'function' ? registry.fallback('arrive') : null,
+      depart: registry && typeof registry.fallback === 'function' ? registry.fallback('depart') : null,
+    };
+  }
+
+  // The outgoing transition of each cut (by the cut key of its A side).
+  function seamsOut(plan) {
+    const out = new Map();
+    for (const s of plan.seams || []) if (s && s.a) out.set(s.a, s);
+    return out;
+  }
+
+  // legibleOf(plan, i, registry) → { V, A, L, W } of plan.cuts[i]: the final window V = b − a (after 出そろい, the
+  // hand-over tiers, the neighbour clamp and the seams' clips), the fitted entrance A (capped by `ready`) and exit L, and
+  // the legible time W = V − A/2 − L/2, cut at the start of an outgoing transition (at; at − dur/2 for a transition whose
+  // definition moves the glyphs themselves, P4's モーフ).
+  function legibleOf(plan, i, registry, ctx) {
+    const c = plan.cuts[i];
+    const fb = ctx ? ctx.fallbacks : fallbacksOf(registry);
+    const out = ctx ? ctx.out : seamsOut(plan);
+    const V = c.b - c.a;
+    const cap = typeof c.ready === 'number' ? c.ready - c.a : undefined;
+    const A = motionTotal(registry, fb, c, 'arrive', V, cap);
+    const L = motionTotal(registry, fb, c, 'depart', V);
+    let W = V - A / 2 - L / 2;
+    const seam = out.get(c.key);
+    if (seam && typeof seam.at === 'number') {
+      const def = registry && seam.slot && typeof seam.slot.v === 'string' ? registry.get('seam', seam.slot.v) : null;
+      const readEnd = def && def.glyphs === true ? seam.at - (seam.dur || 0) / 2 : seam.at;
+      W = Math.min(W, readEnd - c.a - A / 2);
+    }
+    return { V, A, L, W };
+  }
+
+  // A 歌ハメ cut (P6: cut.sung = { t: [character times from t0], end }, arrive order 'sung'): read as it is sung, so what
+  // matters is how long it stays after its last character.
+  function sungOf(c) {
+    const s = c.sung;
+    const d = c.slots ? c.slots.arrive : null;
+    if (!s || !Array.isArray(s.t) || !s.t.length || typeof s.end !== 'number') return null;
+    return d && d.p && d.p.order === 'sung' ? s : null;
+  }
+
+  const memo = new WeakMap();
+
+  // check(plan, registry) → frozen [{ cut, line, rate, units, legible, limit }]: the line cuts too fast to read, in plan
+  // order. A cut is flagged when it has ≥ MIN_UNITS units read at more than MAX[lang] units per legible second, or
+  // ≥ FLOOR_UNITS units legible for less than MIN_LEGIBLE seconds; a 歌ハメ cut when it leaves the screen less than
+  // SUNG_AFTER after its last character. Memoized per plan object.
+  function check(plan, registry) {
+    if (!plan || !Array.isArray(plan.cuts)) return Object.freeze([]);
+    const hit = memo.get(plan);
+    if (hit && hit.registry === registry) return hit.list;
+    const ctx = { fallbacks: fallbacksOf(registry), out: seamsOut(plan) };
+    const list = [];
+    plan.cuts.forEach((c, i) => {
+      if (!c.line || !c.text) return;
+      const n = units(c);
+      const limit = limitOf(c.lang);
+      const sung = sungOf(c);
+      if (sung) {
+        const L = motionTotal(registry, ctx.fallbacks, c, 'depart', c.b - c.a);
+        const after = c.b - (c.t0 + sung.end) - L / 2;
+        if (n >= READ.FLOOR_UNITS && after < READ.SUNG_AFTER) {
+          const rate = n / Math.max(RATE_MIN_W, sung.end - sung.t[0]);
+          list.push(Object.freeze({ cut: c.key, line: c.line, rate, units: n, legible: after, limit }));
+        }
+        return;
+      }
+      const { W } = legibleOf(plan, i, registry, ctx);
+      const rate = n / Math.max(RATE_MIN_W, W);
+      if ((n >= READ.MIN_UNITS && rate > limit) || (n >= READ.FLOOR_UNITS && W < READ.MIN_LEGIBLE)) {
+        list.push(Object.freeze({ cut: c.key, line: c.line, rate, units: n, legible: W, limit }));
+      }
+    });
+    const frozen = Object.freeze(list);
+    memo.set(plan, { registry, list: frozen });
+    return frozen;
+  }
+
+  return { READ, check, legibleOf, units, limitOf };
+});
 /* 文字PVメーカー v2 — original work. The one table of new-work defaults: switches and strengths whose default depends on the document's generation (look.gen, DESIGN_2_2 §0). */
 MV.def('planner/rules', ['core/pins', 'planner/params'], (PINS, PA) => {
   'use strict';
@@ -49356,8 +49500,11 @@ MV.def('export/schedule', ['core/script', 'core/doc', 'audio/wav', 'media/sample
 
   function warningItems(plan, warnings, items) {
     const seenLines = new Set(), seenFaces = new Set();
+    const tooFast = [];
     for (const w of warnings) {
-      if (w.code === 'overfull') {
+      if (w.code === 'too-fast') {
+        tooFast.push(w);
+      } else if (w.code === 'overfull') {
         const key = w.line || w.cut || '';
         if (seenLines.has(key)) continue;
         seenLines.add(key);
@@ -49368,6 +49515,12 @@ MV.def('export/schedule', ['core/script', 'core/doc', 'audio/wav', 'media/sample
         seenFaces.add(family);
         items.push({ code: 'font-fallback', level: 'info', params: { family } });
       }
+    }
+    // 読み切れない速さ (PV22 S4; the UI adds these notices to the warnings when they are on): one item for every line,
+    // [見る] on the first cut
+    if (tooFast.length) {
+      const lines = [...new Set(tooFast.map((w) => lineNumber(plan, w.line)).filter((n) => n !== null))];
+      items.push({ code: 'too-fast', level: 'warn', params: { n: lines.length, lines }, jump: { cut: tooFast[0].cut || null } });
     }
   }
 
@@ -58700,6 +58853,130 @@ MV.def('ui/filmora_help', ['ui/dom', 'ui/output', 'export/schedule', 'export/hos
 
   return { planned, written, guide, open };
 });
+/* 文字PVメーカー v2 — original work. 読み切れない速さの行を知らせる: the switch, the too-fast notices and the texts of a line's warnings for the gutter, the 行 list, the timeline and the 行 page (PV22 S4, DESIGN_2_2 §5). */
+MV.def('ui/readcheck', ['planner/readable', 'planner/rules'], (RD, RULES) => {
+  'use strict';
+
+  // The warnings the lyric editor's gutter marks in every work (DESIGN §6.4.14); with the notices on it also marks the
+  // too-fast lines and every line of a squeezed range.
+  const BASE_CODES = Object.freeze(['overfull', 'orphan-pin', 'shadowed-pin', 'lock-partial', 'pin-not-applicable', 'time-order']);
+  const NOTICE_CODES = Object.freeze(['too-fast', 'time-compressed', 'piece-merged']);
+  // A line's mark shows its most severe warning first.
+  const PRIORITY = Object.freeze(['time-order', 'overfull', 'lock-partial', 'orphan-pin', 'shadowed-pin', 'pin-not-applicable',
+    'too-fast', 'time-compressed', 'piece-merged']);
+
+  // On when the work says so (timing.readCheck, the switch), else for the new-work generation (look.gen, DESIGN_2_2 §0).
+  function enabled(doc) {
+    const timing = doc && doc.timing;
+    if (timing && typeof timing.readCheck === 'boolean') return timing.readCheck;
+    return !!doc && RULES.gen(doc) >= 1;
+  }
+
+  // The too-fast notices of a plan ([] when the notices are off): UI-computed, never in plan.warnings or the plan hash.
+  function readWarnings(doc, plan, registry) {
+    if (!enabled(doc) || !plan) return [];
+    return RD.check(plan, registry).map((x) => ({ code: 'too-fast', line: x.line, cut: x.cut,
+      detail: { rate: x.rate, units: x.units, legible: x.legible, limit: x.limit } }));
+  }
+
+  // A time-compressed warning names the first line of its range and how many lines it has (core/timing): repeated for
+  // every line of the range, the later ones with detail.of = the first line.
+  function expand(warnings, plan) {
+    const lines = plan && Array.isArray(plan.lines) ? plan.lines : [];
+    const out = [];
+    for (const w of warnings) {
+      out.push(w);
+      if (!w || w.code !== 'time-compressed' || !w.line || !w.detail || !(w.detail.lines > 1)) continue;
+      const at = lines.findIndex((l) => l.id === w.line);
+      if (at < 0) continue;
+      for (let k = 1; k < w.detail.lines && at + k < lines.length; k++) {
+        out.push(Object.assign({}, w, { line: lines[at + k].id, detail: Object.assign({}, w.detail, { of: w.line }) }));
+      }
+    }
+    return out;
+  }
+
+  function gutterCodes(doc) { return new Set(enabled(doc) ? BASE_CODES.concat(NOTICE_CODES) : BASE_CODES); }
+
+  function rank(code) {
+    const i = PRIORITY.indexOf(code);
+    return i < 0 ? PRIORITY.length : i;
+  }
+
+  // byLine(warnings, plan, codes) → Map<lineId, Warning[]>: the warnings of each line of the plan whose code is in
+  // `codes` (a Set; null = every code), one per code (for too-fast the fastest cut), most severe first.
+  function byLine(warnings, plan, codes) {
+    const known = plan && Array.isArray(plan.lines) ? new Set(plan.lines.map((l) => l.id)) : null;
+    const map = new Map();
+    for (const w of warnings || []) {
+      if (!w || !w.line || (codes && !codes.has(w.code)) || (known && !known.has(w.line))) continue;
+      let list = map.get(w.line);
+      if (!list) { list = []; map.set(w.line, list); }
+      const i = list.findIndex((x) => x.code === w.code);
+      if (i < 0) list.push(w);
+      else if (w.code === 'too-fast' && w.detail && list[i].detail && w.detail.rate > list[i].detail.rate) list[i] = w;
+    }
+    for (const list of map.values()) list.sort((a, b) => rank(a.code) - rank(b.code));
+    return map;
+  }
+
+  // The text of one warning: the too-fast rate, a squeezed range's size on its first line, else warn.<code>.
+  function textOf(t, w) {
+    const d = w.detail || {};
+    if (w.code === 'too-fast') return t('warn.too-fast.n', { n: Math.round(d.rate) });
+    if (w.code === 'time-compressed' && d.lines > 0 && !d.of) return t('warn.time-compressed.n', { n: d.lines });
+    const key = 'warn.' + w.code;
+    return t.has && !t.has(key) ? w.code : t(key);
+  }
+
+  // A tooltip for one line's warnings: one text per row, each once.
+  function titleFor(t, warnings) {
+    return [...new Set((warnings || []).map((w) => textOf(t, w)))].join('\n');
+  }
+
+  // --- the 行 page's quick fixes -------------------------------------------------------------------------------------
+
+  // The fastest too-fast notice of a line, or null.
+  function worstOf(warnings, lineId) {
+    let worst = null;
+    for (const w of warnings || []) {
+      if (w && w.code === 'too-fast' && w.line === lineId && w.detail && (!worst || w.detail.rate > worst.detail.rate)) worst = w;
+    }
+    return worst;
+  }
+
+  // [動きを速くする]: the line's entrance and exit made quick with the shared motion parameters at line scope (they apply
+  // to every piece of the line and to whatever part is chosen), by 'user'.
+  const QUICK = Object.freeze({ 'arrive.dur': 0.2, 'arrive.each': 0.01, 'depart.dur': 0.15, 'depart.each': 0 });
+  function quickerCmds(lineId) {
+    return Object.keys(QUICK).map((slot) => ({ t: 'pin.set', path: 'line/' + lineId + ':' + slot, v: QUICK[slot], by: 'user' }));
+  }
+
+  // [終わりを延ばす]: a later end for a too-fast line whose last cut is followed by a gap, an interlude or the outro (or
+  // by nothing), not by another line. It aims at the time the rate limit (or the legible floor) needs, with some room,
+  // and stays 0.3 s before the next line and 0.5 s before the end. null when that gains less than 0.05 s.
+  const END_ROOM = Object.freeze({ NEXT: 0.3, END: 0.5, FACTOR: 1.25, MIN_GAIN: 0.05 });
+  function endFix(plan, lineId, w) {
+    const lines = plan && Array.isArray(plan.lines) ? plan.lines : [];
+    const i = lines.findIndex((l) => l.id === lineId);
+    if (i < 0 || !w || !w.detail || !lines[i].cuts.length) return null;
+    const line = lines[i];
+    const lastKey = line.cuts[line.cuts.length - 1];
+    const at = plan.cuts.findIndex((c) => c.key === lastKey);
+    const after = at >= 0 ? plan.cuts[at + 1] : null;
+    if (at < 0 || (after && after.line)) return null;
+    const d = w.detail;
+    const need = Math.max(d.units / d.limit, RD.READ.MIN_LEGIBLE);
+    const next = lines[i + 1];
+    const v = Math.min(next ? next.t0 - END_ROOM.NEXT : Infinity, plan.duration - END_ROOM.END,
+      line.t1 + END_ROOM.FACTOR * (need - d.legible));
+    const r = Math.floor(v * 100) / 100;
+    return r - line.t1 >= END_ROOM.MIN_GAIN - 1e-9 ? r : null;
+  }
+
+  return { BASE_CODES, NOTICE_CODES, PRIORITY, QUICK, END_ROOM, enabled, readWarnings, expand, gutterCodes, byLine, textOf,
+    titleFor, worstOf, quickerCmds, endFix };
+});
 /* 文字PVメーカー v2 — original work. The selection: one Sel for the whole app, drill up/down, crumbs, preview picks (DESIGN §6.5, §4.23). */
 MV.def('ui/selection', ['core/paths', 'planner/areas'], (P, AREAS) => {
   'use strict';
@@ -60537,6 +60814,9 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
           // 入りの基準 (PV22 T4, DESIGN_2_2 §5): absent = 動き始め
           F({ cmd: { t: 'timing.set', key: 'enter' }, scopes: WORK, widget: 'choice', label: 'fld.enter',
             options: [{ v: 'start', label: 'fld.enter.start' }, { v: 'ready', label: 'fld.enter.ready' }], note: 'fld.enter.note' }),
+          // 読み切れない速さの行を知らせる (PV22 S4): absent = on for new works (look.gen), off for older ones (ui/readcheck)
+          F({ cmd: { t: 'timing.set', key: 'readCheck' }, scopes: WORK, widget: 'toggle', label: 'fld.readCheck',
+            note: 'fld.readCheck.note' }),
           F({ cmd: { t: 'timing.set', key: 'tail' }, scopes: WORK, widget: 'number', label: 'fld.tail', spec: SPEC.timing }),
           F({ cmd: { t: 'timing.set', key: 'leadIn' }, scopes: WORK, widget: 'number', label: 'fld.leadIn', spec: SPEC.timing }),
           F({ cmd: { t: 'timing.set', key: 'outro' }, scopes: WORK, widget: 'number', label: 'fld.outro', spec: SPEC.timing }),
@@ -60562,7 +60842,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
           F({ path: 'start', scopes: LINE, widget: 'time', label: 'fld.start' }),
           F({ path: 'end', scopes: LINE, widget: 'time', label: 'fld.end' }),
           F({ derived: 'lineLength', scopes: LINE, widget: 'time', label: 'fld.duration', readOnly: true }),
-        ]),
+        ], { custom: 'timeTools' }),       // PV22 S4 読み切れない速さ notes and fixes, S2 この行だけタップで打ち直す
         sec('marks', true, [
           F({ cmd: { t: 'lyrics.row', key: 'emph' }, scopes: LINE, widget: 'words', label: 'fld.emph' }),
           F({ cmd: { t: 'lyrics.row', key: 'impact' }, scopes: LINE, widget: 'toggle', label: 'fld.impact' }),
@@ -61360,7 +61640,8 @@ MV.def('ui/ai_board', ['ui/dom', 'ui/icons', 'planner/areas', 'ui/fields', 'ui/a
   return { rowsOf, stateOf, linesText, mount, STATES };
 });
 /* 文字PVメーカー v2 — original work. Lyric editor: a controlled textarea over a tinted mirror layer, with a gutter of times, locks, pins and warnings. */
-MV.def('ui/lyric_editor', ['ui/dom', 'ui/selection', 'i18n/t', 'core/lyrics', 'planner/areas'], (dom, S, T, L, AREAS) => {
+MV.def('ui/lyric_editor', ['ui/dom', 'ui/selection', 'i18n/t', 'core/lyrics', 'planner/areas', 'ui/readcheck'],
+  (dom, S, T, L, AREAS, RC) => {
   'use strict';
 
   const { h } = dom;
@@ -61368,7 +61649,6 @@ MV.def('ui/lyric_editor', ['ui/dom', 'ui/selection', 'i18n/t', 'core/lyrics', 'p
   const FOLLOW_PAUSE_MS = 3000;
   const GUTTER_MARGIN_PX = 240;           // gutter entries are built for the visible rows plus this much above and below
   const STAMP = /^\[\d{1,3}:\d{1,2}(?:[.:]\d{1,3})?\]/;
-  const WARN_CODES = new Set(['overfull', 'orphan-pin', 'shadowed-pin', 'lock-partial', 'pin-not-applicable', 'time-order']);
   const TOKENS = ['tok-comment', 'tok-meta', 'tok-stamp', 'tok-cut', 'tok-emph', 'tok-emphText', 'tok-impact', 'tok-note'];
 
   // --- mark tinting (display only; the parser is core/lyrics) --------------------------------------------------
@@ -61702,10 +61982,9 @@ MV.def('ui/lyric_editor', ['ui/dom', 'ui/selection', 'i18n/t', 'core/lyrics', 'p
       const plan = app.plan;
       const aligned = textarea.value === docText(doc);
       const lines = new Map(plan ? plan.lines.filter((l) => l.id === l.row || !l.row).map((l) => [l.id, l]) : []);
-      const warns = new Map();
-      for (const w of (app.warnings ? app.warnings() : [])) {
-        if (w.line && WARN_CODES.has(w.code) && !warns.has(w.line)) warns.set(w.line, w.code);
-      }
+      // the gutter's codes (ui/readcheck: today's, plus 読み切れない速さ and the squeezes when the notices are on), most
+      // severe first
+      const warns = RC.byLine(app.warnings ? app.warnings() : [], plan, RC.gutterCodes(doc));
       const counts = pinCounts(doc);
       const sel = S.validate(app.view.state.sel, plan);
       const selected = new Set(sel.level === 'line' ? sel.ids : [S.lineOfSel(sel)].filter(Boolean));
@@ -61743,10 +62022,11 @@ MV.def('ui/lyric_editor', ['ui/dom', 'ui/selection', 'i18n/t', 'core/lyrics', 'p
       if (by === 'lrc') entry.append(h('span', { class: 'g-badge', text: 'LRC' }));
       if (doc.locks[line.id]) entry.append(h('span', { class: 'g-lock', title: t('state.locked'), text: 'L' }));
       if (pins) entry.append(h('span', { class: 'g-pins', title: t('lyr.pinCount', { n: pins }), text: '●' + pins }));
-      if (warn) entry.append(h('span', { class: 'g-warn', title: t('warn.' + warn), text: '!' }));
+      if (warn && warn.length) entry.append(h('span', { class: ['g-warn', 'is-' + warn[0].code], title: RC.titleFor(t, warn), text: '!' }));
       const words = [T.fmtTime(line.t0), t('state.' + (by === 'pin' ? 'pinned' : by === 'lrc' ? 'mark' : 'auto'))];
       if (doc.locks[line.id]) words.push(t('state.locked'));
       if (pins) words.push(t('lyr.pinCount', { n: pins }));
+      if (warn && warn.length) words.push(RC.textOf(t, warn[0]));
       entry.setAttribute('aria-label', t('lyr.gutterEntry', { n: line.index + 1, what: words.join(', ') }));
       entry.tabIndex = -1;
     }
@@ -66881,6 +67161,12 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
       if (Array.isArray(p.keys)) params.list = p.keys.map((k) => app.label('filter', k)).join(t('list.sep'));
       if (Array.isArray(p.families)) { params.family = p.families.join(t('list.sep')); params.n = p.families.length; }
       if (c.code === 'overfull') params.n = p.line;
+      // 読み切れない速さ (PV22 S4): the first five line numbers, then how many more
+      if (c.code === 'too-fast' && Array.isArray(p.lines)) {
+        const shown = p.lines.slice(0, 5).join(t('list.sep'));
+        params.list = p.lines.length > 5 ? t('exp.pre.too-fast.more', { list: shown, m: p.lines.length - 5 })
+          : t('exp.pre.too-fast.lines', { list: shown, n: p.lines.length });
+      }
       // the chosen format by name: as the subject (alpha-backdrop) or inside a sentence (no-webcodecs, no-audio-codec, …)
       if (c.code === 'alpha-backdrop') params.format = t('exp.fmt.' + p.format);
       else if (p.format) params.format = t('exp.fmtIn.' + p.format);
@@ -67816,8 +68102,8 @@ MV.def('ui/tap', ['ui/dom', 'ui/icons', 'ui/keys', 'ui/selection', 'i18n/t'], (d
 });
 /* 文字PVメーカー v2 — original work. Timeline drawer: beat / song / line / cut rows, drags that write time pins, zoom, snap, keyboard nudges, a11y proxies, area bands and key diamonds (DESIGN §6.4.13; DESIGN_2_1 §6.7, §6.8). */
 MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/t', 'core/paths', 'core/doc', 'planner/areas',
-  'ui/extreme'],
-  (dom, I, S, F, T, P, D, AREAS, XU) => {
+  'ui/extreme', 'ui/readcheck'],
+  (dom, I, S, F, T, P, D, AREAS, XU, RC) => {
   'use strict';
 
   const { h } = dom;
@@ -67832,7 +68118,8 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
     text: '#eceae5', muted: '#8e94a1', beat: 'rgba(242,239,232,0.18)', bar: 'rgba(242,239,232,0.45)', play: '#f2efe8',
     range: 'rgba(124,196,255,0.14)', focus: '#7cc4ff', wave: 'rgba(160,168,184,0.35)', section: 'rgba(240,182,77,0.16)',
     highlight: '#f0b64d', mark: '#c9b27a', band: 'rgba(240,182,77,0.16)', band2: 'rgba(124,196,255,0.14)',
-    bandOn: 'rgba(226,85,59,0.34)', key: '#f0b64d' };
+    bandOn: 'rgba(226,85,59,0.34)', key: '#f0b64d', warn: '#ff7a7a' };   // warn: the gutter's --error (読み切れない速さ, PV22 S4)
+  const WARN_BAR_PX = 3;                // the too-fast bar along the bottom of a line block
   const KEY_PX = 5;                     // half the size of a key diamond ◆
 
   function decodeDigest(b64) {
@@ -68037,10 +68324,22 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
       for (const at of marks.highlights) g.fillRect(xOf(at) - 1, r[0], 2, r[1] - r[0]);
     }
 
+    // The lines too fast to read (ui/readcheck, PV22 S4; empty while the notices are off), kept per plan.
+    let fastMemo = { plan: null, doc: null, set: new Set() };
+    function tooFast() {
+      if (fastMemo.plan !== app.plan || fastMemo.doc !== app.doc) {
+        let list = [];
+        try { list = RC.readWarnings(app.doc, app.plan, app.reg); } catch (e) { list = []; }
+        fastMemo = { plan: app.plan, doc: app.doc, set: new Set(list.map((w) => w.line)) };
+      }
+      return fastMemo.set;
+    }
+
     function drawLines(r, sel) {
       const p = app.plan;
       const selLines = new Set(sel.level === 'line' ? sel.ids : [S.lineOfSel(sel)].filter(Boolean));
       const hl = highlighted(app.view.state.highlight);
+      const fast = tooFast();
       p.lines.forEach((l, i) => {
         const x0 = xOf(l.t0), x1 = xOf(l.t1);
         if (x1 < 0 || x0 > W) return;
@@ -68048,7 +68347,20 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
         g.fillStyle = on ? COLORS.sel : i % 2 ? COLORS.line2 : COLORS.line;
         g.fillRect(x0, r[0] + 3, Math.max(1, x1 - x0 - 1), r[1] - r[0] - 6);
         if (l.locked) hatch(x0, x1, r[0] + 3, r[1] - 3);
-        label((i + 1) + ' ' + l.text, Math.max(x0, 0) + 4, (r[0] + r[1]) / 2, x1 - Math.max(x0, 0) - 8);
+        label((i + 1) + ' ' + l.text, Math.max(x0, 0) + 4, (r[0] + r[1]) / 2, x1 - Math.max(x0, 0) - (fast.has(l.id) ? 18 : 8));
+        // 読み切れない速さ: a red bar along the bottom (a dark edge keeps it apart from a selected block) and 「!」 at its end
+        if (fast.has(l.id)) {
+          const w = Math.max(1, x1 - x0 - 1), y = r[1] - 3 - WARN_BAR_PX;
+          g.fillStyle = COLORS.bg;
+          g.fillRect(x0, y - 1, w, WARN_BAR_PX + 1);
+          g.fillStyle = COLORS.warn;
+          g.fillRect(x0, y, w, WARN_BAR_PX);
+          if (w >= 22 && fontCss) {
+            g.font = fontCss;
+            g.textBaseline = 'middle';
+            g.fillText('!', x0 + w - 8, (r[0] + r[1]) / 2);
+          }
+        }
         const f = focus.band === null && focus.lineId === l.id && document.activeElement === proxy;
         edge(x0, r[0], r[1], edgeKind(l.by && l.by.start), f && focus.edge === 'start');
         edge(x1, r[0] + 4, r[1] - 4, edgeKind(l.by && l.by.end), f && focus.edge === 'end');
@@ -68412,6 +68724,7 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
       const parts = [t('tl.proxy', { n: i + 1, t0: T.fmtTime(l.t0), t1: T.fmtTime(l.t1) })];
       if (l.locked) parts.push(t('state.locked'));
       if (pins) parts.push(t('lyr.pinCount', { n: pins }));
+      if (tooFast().has(l.id)) parts.push(t('warn.too-fast'));
       return parts.join(t('tl.proxySep'));
     }
 
@@ -72058,8 +72371,8 @@ MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/a
 /* 文字PVメーカー v2 — original work. The inspector (詳細): crumbs, level header, sections from FIELDS, field rows, sub-pages (DESIGN §6.4.4–§6.4.9, §6.6; DESIGN_2_1 §6.5–§6.9). */
 MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/part_browser', 'ui/selection', 'ui/looks',
   'ui/output', 'i18n/t', 'core/paths', 'core/pins', 'core/shot', 'planner/areas', 'ui/shot_editor', 'ui/material_page',
-  'ui/media_page', 'ui/media_widgets', 'ui/media_io', 'ui/extreme'],
-(dom, I, F, W, PB, S, LK, OUT, T, P, PINS, SHOT, AREAS, KE, MP, MPG, MW, MI, XU) => {
+  'ui/media_page', 'ui/media_widgets', 'ui/media_io', 'ui/extreme', 'ui/readcheck'],
+(dom, I, F, W, PB, S, LK, OUT, T, P, PINS, SHOT, AREAS, KE, MP, MPG, MW, MI, XU, RC) => {
   'use strict';
 
   const { h } = dom;
@@ -72075,7 +72388,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
   const REF_KINDS = ['arrange', 'arrive', 'dwell', 'depart', 'ornament', 'ground', 'lens', 'filter', 'seam'];
   const ELEMENTS = ['text', 'ornament', 'ground', 'lens', 'filter', 'seam'];
   // Custom sections redrawn even while they hold focus (their buttons change state); focus is put back (§6.12).
-  const REDRAW_FOCUSED = new Set(['looks', 'colorsReset', 'amountsReset', 'lockPartial', 'multi', 'media']);
+  const REDRAW_FOCUSED = new Set(['looks', 'colorsReset', 'amountsReset', 'lockPartial', 'multi', 'media', 'timeTools']);
   // Part rows whose browser offers the 写真・動画 tab (DESIGN_2_1 §11.7.5): the kind's media part and its source param.
   const MEDIA_TAB = Object.freeze({ ground: 'ground', ornament: 'frame', atmos: 'overlay' });
 
@@ -72242,7 +72555,12 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       const c = field.cmd;
       if (c.t === 'look.set') return doc().look[c.key];
       if (c.t === 'look.seed') return doc().look.seed;
-      if (c.t === 'timing.set') return c.key === 'enter' ? doc().timing.enter || 'start' : doc().timing[c.key];
+      // absent 入りの基準 reads 動き始め; absent 読み切れない速さの行を知らせる follows the work's generation (ui/readcheck)
+      if (c.t === 'timing.set') {
+        if (c.key === 'enter') return doc().timing.enter || 'start';
+        if (c.key === 'readCheck') return RC.enabled(doc());
+        return doc().timing[c.key];
+      }
       if (c.t === 'meta.set') return metaValue(c.key === 'title' ? 'ti' : 'ar');
       if (c.t === 'lyrics.row') {
         const lines = ctx.lineIds.map((id) => plan().lines.find((l) => l.id === id)).filter(Boolean);
@@ -73389,6 +73707,29 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
         return h('div', { class: 'insp-banner' }, h('span', { class: 'state-tag is-warn' }, I.icon('lock', { size: 12 }), t('insp.lockPartial')),
           h('button', { class: 'chip-btn', type: 'button', on: { click: () => relock(line.id) } }, t('insp.relock')));
       },
+      // 行 › 時間 (PV22 S4): 読み切れない速さ with its quick fixes, and why the line's times were squeezed.
+      timeTools(ctx) {
+        const line = ctx.line;
+        if (!line || ctx.lineIds.length !== 1) return null;
+        const mine = app.warnings().filter((w) => w && w.line === line.id);
+        const kids = [];
+        const worst = RC.worstOf(mine, line.id);
+        if (worst) {
+          const d = worst.detail;
+          const end = RC.endFix(plan(), line.id, worst);
+          kids.push(h('p', { class: 'insp-banner', role: 'note', 'data-note': 'too-fast' }, I.icon('warn', { size: 14 }),
+            h('span', { class: 'banner-text', text: t('insp.tooFast', { n: Math.round(d.rate), s: Math.max(0, d.legible).toFixed(2) }) })));
+          kids.push(h('div', { class: 'row-actions' },
+            h('button', { class: 'chip-btn', type: 'button', 'data-fix': 'motion',
+              on: { click: () => app.batch({ label: ['undo.readFix', {}] }, RC.quickerCmds(line.id)) } }, t('insp.fixMotion')),
+            end !== null ? h('button', { class: 'chip-btn', type: 'button', 'data-fix': 'end',
+              on: { click: () => app.dispatch({ t: 'pin.set', path: 'line/' + line.id + ':end', v: end, by: 'user' }, { label: ['undo.readEnd', {}] }) } },
+            t('insp.fixEnd')) : null));
+        }
+        if (mine.some((w) => w.code === 'time-compressed')) kids.push(h('p', { class: 'note subtle', 'data-note': 'squeezed', text: t('insp.squeezed') }));
+        if (mine.some((w) => w.code === 'piece-merged')) kids.push(h('p', { class: 'note subtle', 'data-note': 'merged', text: t('insp.merged') }));
+        return kids.length ? h('div', { class: 'insp-note insp-time-tools' }, kids) : null;
+      },
       // 画面効果 under グリーンバック / 黒 / 透明 (§4.19.4, §6.4.8): the mode's rule, and the effects of this scope it leaves out.
       backdropNote(ctx) {
         const backdrop = OUT.effectiveBackdrop(doc());
@@ -73472,7 +73813,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       const inner = h('div', { class: 'vl-inner', style: { height: lines.length * LINE_ROW_PX } });
       const box = h('div', { class: 'vl', role: 'listbox', 'aria-label': t('sec.lines'), tabindex: '0',
         style: { height: Math.min(LINES_BOX_PX, Math.max(LINE_ROW_PX, lines.length * LINE_ROW_PX)) } }, inner);
-      const warnLines = new Set(app.warnings().map((w) => w.line).filter(Boolean));
+      const warnLines = RC.byLine(app.warnings(), p, null);
       const pinsOf = (id) => Object.keys(doc().pins).filter((path) => { try { return P.isUnder(path, 'line/' + id) && doc().pins[path].by !== 'lock'; } catch (e) { return false; } }).length;
       function paint() {
         const top = box.scrollTop;
@@ -73494,7 +73835,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
           h('span', { class: 'grow ell', text: l.text }),
           l.locked ? I.icon('lock', { size: 13 }) : null,
           n ? h('span', { class: 'g-pins', text: '●' + n }) : null,
-          warnLines.has(l.id) ? h('span', { class: 'g-warn', text: '!' }) : null));
+          warnLines.has(l.id) ? h('span', { class: 'g-warn', title: RC.titleFor(t, warnLines.get(l.id)), text: '!' }) : null));
         }
         dom.replace(inner, kids);
       }
@@ -73771,9 +74112,9 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
 MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom', 'ui/keys', 'ui/actions',
   'ui/selection', 'ui/looks', 'ui/view', 'ui/shell', 'ui/header', 'ui/tap', 'ui/project_io',
   'ui/inspector', 'ui/timeline', 'ui/palette', 'ui/menus', 'ui/dialogs', 'ui/ai_panel', 'ai/providers',
-  'ui/fields', 'ui/output', 'ui/media_io'],   // WP8b views, WP8c AI panel, INT-UI output rules, v2.1 photos and videos
+  'ui/fields', 'ui/output', 'ui/media_io', 'ui/readcheck'],   // WP8b views, WP8c AI panel, INT-UI output rules, v2.1 photos and videos, PV22 S4
 (D, ST, T, strings, dom, K, A, S, LK, V, shell, header, tapUi, projectIo, inspector, timeline, palette, menus, dialogs,
-  aiPanel, aiProviders, F, OUT, mediaIo) => {
+  aiPanel, aiProviders, F, OUT, mediaIo, RC) => {
   'use strict';
 
   const TYPING_REPLAN_MS = 120;         // typing never waits on the planner (§7.4)
@@ -73906,7 +74247,16 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
       get doc() { return store.doc; },
       reduce: (doc, cmd) => svc.reduce(doc, cmd),
       label: (kind, key) => t.part(kind, key),
-      warnings: () => { try { return engine.warnings() || []; } catch (e) { return []; } },
+      // the engine's warnings; with 読み切れない速さの行を知らせる on (ui/readcheck, PV22 S4) also the too-fast notices, and a
+      // squeezed range marked on each of its lines. The lyric editor, the 行 list, the 行 page, the timeline and step ④
+      // all read this one list.
+      warnings: () => {
+        try {
+          const base = engine.warnings() || [];
+          if (!RC.enabled(store.doc)) return base;
+          return RC.expand(base.concat(RC.readWarnings(store.doc, app.plan, regOf())), app.plan);
+        } catch (e) { return []; }
+      },
       titleOf: () => header.titleOf(store.doc),
       inText: () => dom.targetKind(document.activeElement) === 'text',
       env: () => ({ webcodecs: typeof VideoEncoder === 'function', fsAccess: typeof window.showSaveFilePicker === 'function' }),

@@ -1,5 +1,6 @@
 /* 文字PVメーカー v2 — original work. Lyric editor: a controlled textarea over a tinted mirror layer, with a gutter of times, locks, pins and warnings. */
-MV.def('ui/lyric_editor', ['ui/dom', 'ui/selection', 'i18n/t', 'core/lyrics', 'planner/areas'], (dom, S, T, L, AREAS) => {
+MV.def('ui/lyric_editor', ['ui/dom', 'ui/selection', 'i18n/t', 'core/lyrics', 'planner/areas', 'ui/readcheck'],
+  (dom, S, T, L, AREAS, RC) => {
   'use strict';
 
   const { h } = dom;
@@ -7,7 +8,6 @@ MV.def('ui/lyric_editor', ['ui/dom', 'ui/selection', 'i18n/t', 'core/lyrics', 'p
   const FOLLOW_PAUSE_MS = 3000;
   const GUTTER_MARGIN_PX = 240;           // gutter entries are built for the visible rows plus this much above and below
   const STAMP = /^\[\d{1,3}:\d{1,2}(?:[.:]\d{1,3})?\]/;
-  const WARN_CODES = new Set(['overfull', 'orphan-pin', 'shadowed-pin', 'lock-partial', 'pin-not-applicable', 'time-order']);
   const TOKENS = ['tok-comment', 'tok-meta', 'tok-stamp', 'tok-cut', 'tok-emph', 'tok-emphText', 'tok-impact', 'tok-note'];
 
   // --- mark tinting (display only; the parser is core/lyrics) --------------------------------------------------
@@ -341,10 +341,9 @@ MV.def('ui/lyric_editor', ['ui/dom', 'ui/selection', 'i18n/t', 'core/lyrics', 'p
       const plan = app.plan;
       const aligned = textarea.value === docText(doc);
       const lines = new Map(plan ? plan.lines.filter((l) => l.id === l.row || !l.row).map((l) => [l.id, l]) : []);
-      const warns = new Map();
-      for (const w of (app.warnings ? app.warnings() : [])) {
-        if (w.line && WARN_CODES.has(w.code) && !warns.has(w.line)) warns.set(w.line, w.code);
-      }
+      // the gutter's codes (ui/readcheck: today's, plus 読み切れない速さ and the squeezes when the notices are on), most
+      // severe first
+      const warns = RC.byLine(app.warnings ? app.warnings() : [], plan, RC.gutterCodes(doc));
       const counts = pinCounts(doc);
       const sel = S.validate(app.view.state.sel, plan);
       const selected = new Set(sel.level === 'line' ? sel.ids : [S.lineOfSel(sel)].filter(Boolean));
@@ -382,10 +381,11 @@ MV.def('ui/lyric_editor', ['ui/dom', 'ui/selection', 'i18n/t', 'core/lyrics', 'p
       if (by === 'lrc') entry.append(h('span', { class: 'g-badge', text: 'LRC' }));
       if (doc.locks[line.id]) entry.append(h('span', { class: 'g-lock', title: t('state.locked'), text: 'L' }));
       if (pins) entry.append(h('span', { class: 'g-pins', title: t('lyr.pinCount', { n: pins }), text: '●' + pins }));
-      if (warn) entry.append(h('span', { class: 'g-warn', title: t('warn.' + warn), text: '!' }));
+      if (warn && warn.length) entry.append(h('span', { class: ['g-warn', 'is-' + warn[0].code], title: RC.titleFor(t, warn), text: '!' }));
       const words = [T.fmtTime(line.t0), t('state.' + (by === 'pin' ? 'pinned' : by === 'lrc' ? 'mark' : 'auto'))];
       if (doc.locks[line.id]) words.push(t('state.locked'));
       if (pins) words.push(t('lyr.pinCount', { n: pins }));
+      if (warn && warn.length) words.push(RC.textOf(t, warn[0]));
       entry.setAttribute('aria-label', t('lyr.gutterEntry', { n: line.index + 1, what: words.join(', ') }));
       entry.tabIndex = -1;
     }

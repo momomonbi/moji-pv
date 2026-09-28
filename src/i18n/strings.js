@@ -2189,6 +2189,26 @@ MV.def('i18n/strings', [], () => ({
   'fld.enter.ready': ['出そろい（読める）', 'Fully in (readable)'],
   'fld.enter.note': ['動き始め: 入りの動きが始まる時刻を声より前にします。出そろい: 入りの動きを終えて読める時刻を声より前にします（入りの動きは0.45秒までに縮めます）。切り替えで入る行、背景が変わる行、歌に合わせて1字ずつ出る行、見せ場（!）とキメの行はそのままです。',
     'Start: the entrance starts this long before the voice. Fully in: the entrance ends, and the text can be read, this long before the voice (entrances are shortened to 0.45 s at most). Lines that come in with a transition or a new background, lines revealed as they are sung, and impact (!) and kime lines keep their timing.'],
+  // S4 読み切れない速さの行を知らせる
+  'warn.too-fast': ['速すぎて読み切れないかもしれません', 'May be too fast to read'],
+  'warn.too-fast.n': ['速すぎて読み切れないかもしれません（1秒に約{n}音）', 'May be too fast to read (about {n} morae a second)'],
+  'warn.time-compressed.n': ['ここから{n}行の間隔を詰めて収めました',
+    'The {n} line from here was squeezed to fit|The {n} lines from here were squeezed to fit'],
+  'insp.tooFast': ['速すぎて読み切れないかもしれません（1秒に約{n}音・読める時間 {s}秒）',
+    'May be too fast to read (about {n} morae a second, readable for {s} s)'],
+  'insp.squeezed': ['前後の固定に合わせて、行の間隔を詰めています', 'Lines are squeezed to fit between fixed times'],
+  'insp.merged': ['短すぎる区切りを前とまとめました', 'A very short piece was merged into the one before'],
+  'insp.fixMotion': ['動きを速くする', 'Make the motion quicker'],
+  'insp.fixEnd': ['終わりを延ばす', 'Show it longer'],
+  'undo.readFix': ['読みやすくする（動きを速く）', 'Easier to read (quicker motion)'],
+  'undo.readEnd': ['読みやすくする（終わりを延ばす）', 'Easier to read (show longer)'],
+  'fld.readCheck': ['読み切れない速さの行を知らせる', 'Flag lines too fast to read'],
+  'fld.readCheck.note': ['1秒あたりの音数が多すぎる行や、読める時間が短すぎる行に「!」を付けます。新しい作品でははじめからオンです。',
+    'Marks lines with too many morae per second, or too little time to read, with "!". New works start with this on.'],
+  'exp.pre.too-fast': ['読み切れない速さの行が{n}行あります（{list}）',
+    '{n} line may be too fast to read ({list})|{n} lines may be too fast to read ({list})'],
+  'exp.pre.too-fast.lines': ['{list}行目', 'line {list}|lines {list}'],
+  'exp.pre.too-fast.more': ['{list}行目ほか{m}行', 'lines {list} and {m} more'],
 
   // --- PV22 P6 (歌ハメ) ---
 }));

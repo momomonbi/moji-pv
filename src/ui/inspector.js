@@ -1,8 +1,8 @@
 /* 文字PVメーカー v2 — original work. The inspector (詳細): crumbs, level header, sections from FIELDS, field rows, sub-pages (DESIGN §6.4.4–§6.4.9, §6.6; DESIGN_2_1 §6.5–§6.9). */
 MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/part_browser', 'ui/selection', 'ui/looks',
   'ui/output', 'i18n/t', 'core/paths', 'core/pins', 'core/shot', 'planner/areas', 'ui/shot_editor', 'ui/material_page',
-  'ui/media_page', 'ui/media_widgets', 'ui/media_io', 'ui/extreme'],
-(dom, I, F, W, PB, S, LK, OUT, T, P, PINS, SHOT, AREAS, KE, MP, MPG, MW, MI, XU) => {
+  'ui/media_page', 'ui/media_widgets', 'ui/media_io', 'ui/extreme', 'ui/readcheck'],
+(dom, I, F, W, PB, S, LK, OUT, T, P, PINS, SHOT, AREAS, KE, MP, MPG, MW, MI, XU, RC) => {
   'use strict';
 
   const { h } = dom;
@@ -18,7 +18,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
   const REF_KINDS = ['arrange', 'arrive', 'dwell', 'depart', 'ornament', 'ground', 'lens', 'filter', 'seam'];
   const ELEMENTS = ['text', 'ornament', 'ground', 'lens', 'filter', 'seam'];
   // Custom sections redrawn even while they hold focus (their buttons change state); focus is put back (§6.12).
-  const REDRAW_FOCUSED = new Set(['looks', 'colorsReset', 'amountsReset', 'lockPartial', 'multi', 'media']);
+  const REDRAW_FOCUSED = new Set(['looks', 'colorsReset', 'amountsReset', 'lockPartial', 'multi', 'media', 'timeTools']);
   // Part rows whose browser offers the 写真・動画 tab (DESIGN_2_1 §11.7.5): the kind's media part and its source param.
   const MEDIA_TAB = Object.freeze({ ground: 'ground', ornament: 'frame', atmos: 'overlay' });
 
@@ -185,7 +185,12 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       const c = field.cmd;
       if (c.t === 'look.set') return doc().look[c.key];
       if (c.t === 'look.seed') return doc().look.seed;
-      if (c.t === 'timing.set') return c.key === 'enter' ? doc().timing.enter || 'start' : doc().timing[c.key];
+      // absent 入りの基準 reads 動き始め; absent 読み切れない速さの行を知らせる follows the work's generation (ui/readcheck)
+      if (c.t === 'timing.set') {
+        if (c.key === 'enter') return doc().timing.enter || 'start';
+        if (c.key === 'readCheck') return RC.enabled(doc());
+        return doc().timing[c.key];
+      }
       if (c.t === 'meta.set') return metaValue(c.key === 'title' ? 'ti' : 'ar');
       if (c.t === 'lyrics.row') {
         const lines = ctx.lineIds.map((id) => plan().lines.find((l) => l.id === id)).filter(Boolean);
@@ -1332,6 +1337,29 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
         return h('div', { class: 'insp-banner' }, h('span', { class: 'state-tag is-warn' }, I.icon('lock', { size: 12 }), t('insp.lockPartial')),
           h('button', { class: 'chip-btn', type: 'button', on: { click: () => relock(line.id) } }, t('insp.relock')));
       },
+      // 行 › 時間 (PV22 S4): 読み切れない速さ with its quick fixes, and why the line's times were squeezed.
+      timeTools(ctx) {
+        const line = ctx.line;
+        if (!line || ctx.lineIds.length !== 1) return null;
+        const mine = app.warnings().filter((w) => w && w.line === line.id);
+        const kids = [];
+        const worst = RC.worstOf(mine, line.id);
+        if (worst) {
+          const d = worst.detail;
+          const end = RC.endFix(plan(), line.id, worst);
+          kids.push(h('p', { class: 'insp-banner', role: 'note', 'data-note': 'too-fast' }, I.icon('warn', { size: 14 }),
+            h('span', { class: 'banner-text', text: t('insp.tooFast', { n: Math.round(d.rate), s: Math.max(0, d.legible).toFixed(2) }) })));
+          kids.push(h('div', { class: 'row-actions' },
+            h('button', { class: 'chip-btn', type: 'button', 'data-fix': 'motion',
+              on: { click: () => app.batch({ label: ['undo.readFix', {}] }, RC.quickerCmds(line.id)) } }, t('insp.fixMotion')),
+            end !== null ? h('button', { class: 'chip-btn', type: 'button', 'data-fix': 'end',
+              on: { click: () => app.dispatch({ t: 'pin.set', path: 'line/' + line.id + ':end', v: end, by: 'user' }, { label: ['undo.readEnd', {}] }) } },
+            t('insp.fixEnd')) : null));
+        }
+        if (mine.some((w) => w.code === 'time-compressed')) kids.push(h('p', { class: 'note subtle', 'data-note': 'squeezed', text: t('insp.squeezed') }));
+        if (mine.some((w) => w.code === 'piece-merged')) kids.push(h('p', { class: 'note subtle', 'data-note': 'merged', text: t('insp.merged') }));
+        return kids.length ? h('div', { class: 'insp-note insp-time-tools' }, kids) : null;
+      },
       // 画面効果 under グリーンバック / 黒 / 透明 (§4.19.4, §6.4.8): the mode's rule, and the effects of this scope it leaves out.
       backdropNote(ctx) {
         const backdrop = OUT.effectiveBackdrop(doc());
@@ -1415,7 +1443,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       const inner = h('div', { class: 'vl-inner', style: { height: lines.length * LINE_ROW_PX } });
       const box = h('div', { class: 'vl', role: 'listbox', 'aria-label': t('sec.lines'), tabindex: '0',
         style: { height: Math.min(LINES_BOX_PX, Math.max(LINE_ROW_PX, lines.length * LINE_ROW_PX)) } }, inner);
-      const warnLines = new Set(app.warnings().map((w) => w.line).filter(Boolean));
+      const warnLines = RC.byLine(app.warnings(), p, null);
       const pinsOf = (id) => Object.keys(doc().pins).filter((path) => { try { return P.isUnder(path, 'line/' + id) && doc().pins[path].by !== 'lock'; } catch (e) { return false; } }).length;
       function paint() {
         const top = box.scrollTop;
@@ -1437,7 +1465,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
           h('span', { class: 'grow ell', text: l.text }),
           l.locked ? I.icon('lock', { size: 13 }) : null,
           n ? h('span', { class: 'g-pins', text: '●' + n }) : null,
-          warnLines.has(l.id) ? h('span', { class: 'g-warn', text: '!' }) : null));
+          warnLines.has(l.id) ? h('span', { class: 'g-warn', title: RC.titleFor(t, warnLines.get(l.id)), text: '!' }) : null));
         }
         dom.replace(inner, kids);
       }

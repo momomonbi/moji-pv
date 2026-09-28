@@ -282,7 +282,8 @@ MV.def('core/types', [], () => {
    * @typedef {Object} Warning
    * @property {'pin-bad-value'|'pin-not-applicable'|'pin-filtered'|'pin-off-season'|'orphan-pin'|'shadowed-pin'|
    *   'lock-partial'|'pool-empty'|'time-order'|'time-compressed'|'title-skipped'|'overfull'|'font-fallback'|
-   *   'piece-merged'} code
+   *   'piece-merged'|'too-fast'} code   too-fast (読み切れない速さ, PV22 S4): UI-computed by ui/readcheck from
+   *                                     planner/readable, never in plan.warnings; detail { rate, units, legible, limit }
    * @property {string} [path]
    * @property {string} [line]
    * @property {string} [cut]

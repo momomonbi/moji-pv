@@ -21,7 +21,7 @@ const WHY_CODES = ['mood.tag', 'fit', 'recent', 'family', 'echo', 'echo.kept', '
 // §3.13 codes, plus `part-error` (reported by the scene and the renderer, WP4a).
 const WARN_CODES = ['pin-bad-value', 'pin-not-applicable', 'pin-filtered', 'pin-off-season', 'orphan-pin', 'shadowed-pin',
   'lock-partial', 'pool-empty', 'time-order', 'time-compressed', 'title-skipped', 'overfull', 'font-fallback', 'piece-merged',
-  'part-error'];
+  'part-error', 'too-fast'];
 // §4.22.1 codes; ai/providers.ERROR_CODES adds its own (e.g. `recitation`, WP7), read at test time so new ones are caught.
 const AI_ERRORS = [...new Set(['no_key', 'auth', 'rate', 'model', 'server', 'bad_request', 'network', 'aborted', 'blocked',
   'truncated', 'empty', 'bad_json', 'no_sdk', 'no_audio', 'upload', 'bad_provider', 'bad_edit'].concat(MV.use('ai/providers').ERROR_CODES))];

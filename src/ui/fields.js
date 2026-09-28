@@ -315,6 +315,9 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
           // 入りの基準 (PV22 T4, DESIGN_2_2 §5): absent = 動き始め
           F({ cmd: { t: 'timing.set', key: 'enter' }, scopes: WORK, widget: 'choice', label: 'fld.enter',
             options: [{ v: 'start', label: 'fld.enter.start' }, { v: 'ready', label: 'fld.enter.ready' }], note: 'fld.enter.note' }),
+          // 読み切れない速さの行を知らせる (PV22 S4): absent = on for new works (look.gen), off for older ones (ui/readcheck)
+          F({ cmd: { t: 'timing.set', key: 'readCheck' }, scopes: WORK, widget: 'toggle', label: 'fld.readCheck',
+            note: 'fld.readCheck.note' }),
           F({ cmd: { t: 'timing.set', key: 'tail' }, scopes: WORK, widget: 'number', label: 'fld.tail', spec: SPEC.timing }),
           F({ cmd: { t: 'timing.set', key: 'leadIn' }, scopes: WORK, widget: 'number', label: 'fld.leadIn', spec: SPEC.timing }),
           F({ cmd: { t: 'timing.set', key: 'outro' }, scopes: WORK, widget: 'number', label: 'fld.outro', spec: SPEC.timing }),
@@ -340,7 +343,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
           F({ path: 'start', scopes: LINE, widget: 'time', label: 'fld.start' }),
           F({ path: 'end', scopes: LINE, widget: 'time', label: 'fld.end' }),
           F({ derived: 'lineLength', scopes: LINE, widget: 'time', label: 'fld.duration', readOnly: true }),
-        ]),
+        ], { custom: 'timeTools' }),       // PV22 S4 読み切れない速さ notes and fixes, S2 この行だけタップで打ち直す
         sec('marks', true, [
           F({ cmd: { t: 'lyrics.row', key: 'emph' }, scopes: LINE, widget: 'words', label: 'fld.emph' }),
           F({ cmd: { t: 'lyrics.row', key: 'impact' }, scopes: LINE, widget: 'toggle', label: 'fld.impact' }),

@@ -5322,6 +5322,106 @@ async def flow_enter(f, lang):
 FLOWS += [('enter', flow_enter, False)]
 
 
+# 読み切れない速さ (S4): two automatic lines squeezed between LRC stamps 1.5 s apart (placeholder kana)
+SQUEEZE = '\n'.join(['[00:10.00]あいう', 'さしすせそたちつてとな', 'はひふへほまみむめもや', '[00:11.50]らりるれろ'])
+FAST_STATE = """() => { const a = window.__mv, ids = a.plan.lines.map((l) => l.id);
+  const gut = (id) => { const w = document.querySelector('.le-g[data-row="' + id + '"] .g-warn'); return w ? w.title : null; };
+  const list = [...document.querySelectorAll('.vl-row')].map((r) => { const w = r.querySelector('.g-warn'); return w ? w.title : null; });
+  const opt = (id) => { const o = document.getElementById('tl-opt-' + id); return o ? o.textContent : null; };
+  const note = document.querySelector('[data-mount="inspector"] [data-note="too-fast"]');
+  const check = document.querySelector('.step-export .check[data-code="too-fast"]');
+  return { ids, gutter: ids.map(gut), list, opts: ids.map(opt), note: note ? note.textContent : null,
+    fast: a.warnings().filter((w) => w.code === 'too-fast').map((w) => w.line), check: check ? check.textContent : null,
+    readCheck: a.doc.timing.readCheck === undefined ? null : a.doc.timing.readCheck }; }"""
+
+
+async def flow_readcheck(f, lang):
+    """読み切れない速さ (S4): in a new work the two squeezed lines get 「!」 in the gutter with the rate, a titled 「!」 in the
+    行 list, the timeline's text, the 行 page note with [動きを速くする] (one undo entry), and one item in step ④ whose
+    [見る] selects the cut; the switch turns it all off. An opened older work gets no new marks, only the squeeze tooltip."""
+    page = f.page
+    done0, doc0 = await with_lyrics(f, SQUEEZE)
+    tf = await page.evaluate("() => window.__mv.t('warn.too-fast')")
+    await f.until("() => document.querySelectorAll('.le-g .g-warn').length >= 2", 'the gutter marks the fast lines')
+    s = await page.evaluate(FAST_STATE)
+    ids = s['ids']
+    f.check(s['fast'] == ids[1:3], 'lines 2 and 3 are too fast: %r' % s['fast'])
+    f.check(s['gutter'][0] is None and s['gutter'][3] is None, 'lines 1 and 4 have no mark: %r' % s['gutter'])
+    f.check(all(g and g.startswith(tf) and '（' in g for g in s['gutter'][1:3]) if lang == 'ja' else True,
+            'the gutter tooltip names the rate: %r' % s['gutter'])
+    # 作品全体 › 行: the 「!」 has the same text as its title
+    await page.evaluate("() => { const a = window.__mv; a.openPanel('details'); a.select({ level: 'work' }, { from: 'crumbs', open: true }); }")
+    await f.settle(3)
+    await open_section(f, 'lines')
+    await f.until("() => document.querySelectorAll('.vl-row').length === 4", 'the 行 list fills')
+    s = await page.evaluate(FAST_STATE)
+    f.check(s['list'][0] is None and all(x and x.startswith(tf) for x in s['list'][1:3]), 'the 行 list 「!」 has the text: %r' % s['list'])
+    # the timeline's listbox reads it
+    await page.evaluate("() => window.__mv.view.set({ drawer: true })")
+    await f.until("(id) => { const o = document.getElementById('tl-opt-' + id); return o && o.textContent.length > 0; }", 'the timeline options', ids[1])
+    s = await page.evaluate(FAST_STATE)
+    f.check(tf in (s['opts'][1] or '') and tf not in (s['opts'][0] or ''), 'the timeline label ends with the notice: %r' % s['opts'])
+    await f.shot('timeline')
+    # 行 › 時間: the note and [動きを速くする]
+    await page.evaluate("(id) => window.__mv.select({ level: 'line', ids: [id] }, { from: 'crumbs', open: true })", ids[1])
+    await f.until("() => !!document.querySelector('[data-mount=\"inspector\"] [data-note=\"too-fast\"]')", 'the 行 page note')
+    s = await page.evaluate(FAST_STATE)
+    before = s['note']
+    f.check(before and tf in before, 'the note: %r' % before)
+    await f.shot('note')
+    done1 = await page.evaluate(DONE)
+    await page.locator('[data-mount="inspector"] [data-fix="motion"]').click()
+    await f.until("(id) => !!window.__mv.doc.pins['line/' + id + ':arrive.dur']", 'the motion pins are set', ids[1])
+    await f.settle(3)
+    f.check(await page.evaluate(DONE) == done1 + 1, 'one undo entry for the quick fix')
+    label = await page.evaluate("() => { const e = window.__mv.store.list().filter((x) => x.done).pop(); return window.__mv.t(e.label[0], e.label[1]); }")
+    f.check(label == await page.evaluate("() => window.__mv.t('undo.readFix')"), 'the entry is 読みやすくする（動きを速く）: %r' % label)
+    s = await page.evaluate(FAST_STATE)
+    f.check(s['note'] != before, 'the note follows the new plan: %r → %r' % (before, s['note']))
+    await page.evaluate("() => window.__mv.store.undo()")
+    await f.settle(3)
+    # step ④: one item; [見る] selects the first fast cut
+    await page.evaluate("() => { const a = window.__mv; a.view.closePanel(); a.goStep('export'); }")
+    await f.until("() => !!document.querySelector('.step-export .check[data-code=\"too-fast\"]')", 'step ④ lists the lines')
+    s = await page.evaluate(FAST_STATE)
+    want = await page.evaluate("() => window.__mv.t('exp.pre.too-fast', { n: 2, list: window.__mv.t('exp.pre.too-fast.lines', { n: 2, list: '2' + window.__mv.t('list.sep') + '3' }) })")
+    f.check(s['check'] and want in s['check'], 'the item names lines 2 and 3: %r' % s['check'])
+    await f.shot('export')
+    await page.locator('.step-export .check[data-code="too-fast"] .check-actions button').click()
+    await f.settle(2)
+    sel = await page.evaluate("() => { const a = window.__mv, s = a.view.state.sel; return s.level === 'cut' ? a.plan.cuts.find((c) => c.key === s.key).line : (s.ids || [])[0]; }")
+    f.check(sel == ids[1], '[見る] selects the first fast line\'s cut: %r' % sel)
+    # the switch (作品全体 › タイミング) turns the notices off
+    await page.evaluate("() => { const a = window.__mv; a.goStep('lyrics'); a.select({ level: 'work' }, { from: 'crumbs', open: true }); }")
+    await f.settle(3)
+    await open_section(f, 'timing')
+    box = page.locator(ROW % 'timing.set.readCheck' + ' input')
+    f.check(await box.is_checked(), 'the switch shows on for a new work')
+    done2 = await page.evaluate(DONE)
+    await box.click()
+    await f.until("() => window.__mv.doc.timing.readCheck === false", 'the switch stores off')
+    await f.until("() => !document.querySelector('.le-g .g-warn')", 'the gutter marks go away')
+    s = await page.evaluate(FAST_STATE)
+    f.check(s['fast'] == [] and await page.evaluate(DONE) == done2 + 1, 'no notices, one undo entry: %r' % s['fast'])
+    await f.undo_all(done0, doc0)
+    # an older work (no generation, no switch): nothing new; the squeeze keeps its one 「!」 in the 行 list, with its text
+    await page.evaluate(IO_JS)
+    await page.evaluate("async () => { const a = window.__mv; await a.io.openFiles([window.__project(['あいうえおかきくけこ', 'さしすせそたちつてと', '[00:01.00]はひふへほ'], 'old.json')]); a.pause(); }")
+    await f.until("() => window.__mv.plan && window.__mv.plan.lines.length === 3 && window.__mv.doc.look.gen === undefined", 'the older work is open')
+    await page.evaluate("() => { const a = window.__mv; a.openPanel('details'); a.select({ level: 'work' }, { from: 'crumbs', open: true }); }")
+    await f.settle(3)
+    await open_section(f, 'lines')
+    await f.until("() => document.querySelectorAll('.vl-row').length === 3", 'the 行 list of the older work')
+    s = await page.evaluate(FAST_STATE)
+    squeezed = await page.evaluate("() => window.__mv.t('warn.time-compressed.n', { n: 2 })")
+    f.check(s['fast'] == [] and s['readCheck'] is None, 'no too-fast notices in an older work: %r' % s)
+    f.check(s['gutter'] == [None, None, None], 'the gutter shows no squeeze mark: %r' % s['gutter'])
+    f.check(s['list'] == [squeezed, None, None], 'the 行 list 「!」 has the squeeze text: %r' % s['list'])
+
+
+FLOWS += [('readcheck', flow_readcheck, False)]
+
+
 async def run(browser, base, rel, lang, only, shots):
     failures, count = [], 0
     for name, fn, clipboard in FLOWS:

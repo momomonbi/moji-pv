@@ -444,6 +444,16 @@ test('preflight: overfull (one per line, with a jump) and font-fallback warnings
   assert.deepEqual(codes(S.preflight(doc, fromPlan, Object.assign({}, READY, { warnings: undefined }))), ['overfull']);
 });
 
+test('preflight: 読み切れない速さ (PV22 S4) — one item for every too-fast line, [見る] on the first cut', () => {
+  const doc = sampleDoc();
+  const plan = samplePlan(doc);
+  const [l1, l3] = [plan.lines[0], plan.lines[2]];
+  const fast = (line, k) => ({ code: 'too-fast', line: line.id, cut: line.cuts[k] || line.cuts[0], detail: { rate: 20, units: 11, legible: 0.55, limit: 12 } });
+  const items = S.preflight(doc, plan, Object.assign({}, READY, { warnings: [fast(l1, 0), fast(l1, 1), fast(l3, 0)] }));
+  assert.deepEqual(items, [{ code: 'too-fast', level: 'warn', params: { n: 2, lines: [1, 3] }, jump: { cut: l1.cuts[0] } }]);
+  assert.deepEqual(S.preflight(doc, plan, Object.assign({}, READY, { warnings: [] })), []);
+});
+
 test('ExportError carries a code', () => {
   const e = new S.ExportError('cancelled', 'stopped', { i: 3 });
   assert.ok(e instanceof Error);

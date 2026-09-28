@@ -1,7 +1,7 @@
 /* 文字PVメーカー v2 — original work. Timeline drawer: beat / song / line / cut rows, drags that write time pins, zoom, snap, keyboard nudges, a11y proxies, area bands and key diamonds (DESIGN §6.4.13; DESIGN_2_1 §6.7, §6.8). */
 MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/t', 'core/paths', 'core/doc', 'planner/areas',
-  'ui/extreme'],
-  (dom, I, S, F, T, P, D, AREAS, XU) => {
+  'ui/extreme', 'ui/readcheck'],
+  (dom, I, S, F, T, P, D, AREAS, XU, RC) => {
   'use strict';
 
   const { h } = dom;
@@ -16,7 +16,8 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
     text: '#eceae5', muted: '#8e94a1', beat: 'rgba(242,239,232,0.18)', bar: 'rgba(242,239,232,0.45)', play: '#f2efe8',
     range: 'rgba(124,196,255,0.14)', focus: '#7cc4ff', wave: 'rgba(160,168,184,0.35)', section: 'rgba(240,182,77,0.16)',
     highlight: '#f0b64d', mark: '#c9b27a', band: 'rgba(240,182,77,0.16)', band2: 'rgba(124,196,255,0.14)',
-    bandOn: 'rgba(226,85,59,0.34)', key: '#f0b64d' };
+    bandOn: 'rgba(226,85,59,0.34)', key: '#f0b64d', warn: '#ff7a7a' };   // warn: the gutter's --error (読み切れない速さ, PV22 S4)
+  const WARN_BAR_PX = 3;                // the too-fast bar along the bottom of a line block
   const KEY_PX = 5;                     // half the size of a key diamond ◆
 
   function decodeDigest(b64) {
@@ -221,10 +222,22 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
       for (const at of marks.highlights) g.fillRect(xOf(at) - 1, r[0], 2, r[1] - r[0]);
     }
 
+    // The lines too fast to read (ui/readcheck, PV22 S4; empty while the notices are off), kept per plan.
+    let fastMemo = { plan: null, doc: null, set: new Set() };
+    function tooFast() {
+      if (fastMemo.plan !== app.plan || fastMemo.doc !== app.doc) {
+        let list = [];
+        try { list = RC.readWarnings(app.doc, app.plan, app.reg); } catch (e) { list = []; }
+        fastMemo = { plan: app.plan, doc: app.doc, set: new Set(list.map((w) => w.line)) };
+      }
+      return fastMemo.set;
+    }
+
     function drawLines(r, sel) {
       const p = app.plan;
       const selLines = new Set(sel.level === 'line' ? sel.ids : [S.lineOfSel(sel)].filter(Boolean));
       const hl = highlighted(app.view.state.highlight);
+      const fast = tooFast();
       p.lines.forEach((l, i) => {
         const x0 = xOf(l.t0), x1 = xOf(l.t1);
         if (x1 < 0 || x0 > W) return;
@@ -232,7 +245,20 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
         g.fillStyle = on ? COLORS.sel : i % 2 ? COLORS.line2 : COLORS.line;
         g.fillRect(x0, r[0] + 3, Math.max(1, x1 - x0 - 1), r[1] - r[0] - 6);
         if (l.locked) hatch(x0, x1, r[0] + 3, r[1] - 3);
-        label((i + 1) + ' ' + l.text, Math.max(x0, 0) + 4, (r[0] + r[1]) / 2, x1 - Math.max(x0, 0) - 8);
+        label((i + 1) + ' ' + l.text, Math.max(x0, 0) + 4, (r[0] + r[1]) / 2, x1 - Math.max(x0, 0) - (fast.has(l.id) ? 18 : 8));
+        // 読み切れない速さ: a red bar along the bottom (a dark edge keeps it apart from a selected block) and 「!」 at its end
+        if (fast.has(l.id)) {
+          const w = Math.max(1, x1 - x0 - 1), y = r[1] - 3 - WARN_BAR_PX;
+          g.fillStyle = COLORS.bg;
+          g.fillRect(x0, y - 1, w, WARN_BAR_PX + 1);
+          g.fillStyle = COLORS.warn;
+          g.fillRect(x0, y, w, WARN_BAR_PX);
+          if (w >= 22 && fontCss) {
+            g.font = fontCss;
+            g.textBaseline = 'middle';
+            g.fillText('!', x0 + w - 8, (r[0] + r[1]) / 2);
+          }
+        }
         const f = focus.band === null && focus.lineId === l.id && document.activeElement === proxy;
         edge(x0, r[0], r[1], edgeKind(l.by && l.by.start), f && focus.edge === 'start');
         edge(x1, r[0] + 4, r[1] - 4, edgeKind(l.by && l.by.end), f && focus.edge === 'end');
@@ -596,6 +622,7 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
       const parts = [t('tl.proxy', { n: i + 1, t0: T.fmtTime(l.t0), t1: T.fmtTime(l.t1) })];
       if (l.locked) parts.push(t('state.locked'));
       if (pins) parts.push(t('lyr.pinCount', { n: pins }));
+      if (tooFast().has(l.id)) parts.push(t('warn.too-fast'));
       return parts.join(t('tl.proxySep'));
     }
 
