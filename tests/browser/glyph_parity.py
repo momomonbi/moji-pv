@@ -171,8 +171,10 @@ async def check_kumi_ink(page, failures):
         for orient in ('h', 'v'):
             r = await page.evaluate(KUMI_PAIRS_JS, {'flavor': flavor, 'orient': orient})
             ok = r['max'] <= KUMI_INK_MAX and r['n'] >= 180 and r['inked'] == r['n']
+            # Google Fonts are blocked here, so the theme face's system fallback draws (the CI Japanese faces).
+            face = r['family'] if r.get('loaded') else 'system fallback of ' + r['family']
             print('%s kumi ink %s %s (%s, %d kana): neighbours meet by at most %.3f em at 100 %% (limit %.2f); worst %s; '
-                  'bounding boxes %.3f em' % ('ok  ' if ok else 'FAIL', flavor, orient, r['family'], r['n'], r['max'], KUMI_INK_MAX,
+                  'bounding boxes %.3f em' % ('ok  ' if ok else 'FAIL', flavor, orient, face, r['n'], r['max'], KUMI_INK_MAX,
                                               ' '.join('%s %.3f (%s)' % (g, v, t) for v, g, t in r['worst']), r['bbox']))
             if not ok:
                 failures.append('kumi ink %s %s: %r' % (flavor, orient, r))
