@@ -1,8 +1,8 @@
 /* 文字PVメーカー v2 — original work. The inspector (詳細): crumbs, level header, sections from FIELDS, field rows, sub-pages (DESIGN §6.4.4–§6.4.9, §6.6; DESIGN_2_1 §6.5–§6.9). */
 MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/part_browser', 'ui/selection', 'ui/looks',
   'ui/output', 'i18n/t', 'core/paths', 'core/pins', 'core/shot', 'planner/areas', 'ui/shot_editor', 'ui/material_page',
-  'ui/media_page', 'ui/media_widgets', 'ui/media_io', 'ui/extreme'],
-(dom, I, F, W, PB, S, LK, OUT, T, P, PINS, SHOT, AREAS, KE, MP, MPG, MW, MI, XU) => {
+  'ui/media_page', 'ui/media_widgets', 'ui/media_io', 'ui/extreme', 'planner/rules'],
+(dom, I, F, W, PB, S, LK, OUT, T, P, PINS, SHOT, AREAS, KE, MP, MPG, MW, MI, XU, RU) => {
   'use strict';
 
   const { h } = dom;
@@ -439,7 +439,9 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
         return { value: mixed ? null : v, mixed, auto: false, readOnly: false, extra: extraFor(f, null, ctx, row) };
       }
       if (!f.path) return { value: derivedValue(f, ctx), mixed: false, auto: false, readOnly: true, extra: extraFor(f, null, ctx, row) };
-      return { value: fs ? fs.value : null, mixed: !!fs && fs.state === 'mixed', auto: !fs || fs.state === 'auto' || fs.state === 'mark',
+      // inheritAuto (文字組み's line rows): a value that follows a broader scope's pin keeps 自動 selected
+      const auto = !fs || fs.state === 'auto' || fs.state === 'mark' || (!!f.inheritAuto && fs.state === 'inherited');
+      return { value: fs ? fs.value : null, mixed: !!fs && fs.state === 'mixed', auto,
         readOnly: !!f.readOnly || (!!fs && fs.state === 'derived'), extra: extraFor(f, fs, ctx, row) };
     }
 
@@ -497,6 +499,13 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
 
     function valueFor(field, v, fs) {
       if (field.offClears && !v) return W.AUTO;
+      // a switch of the new-work defaults table (PV22): its document default is 自動 (no pin), any other value is pinned;
+      // compared after coercion, so a slider's 14 × 0.05 is the default 0.7
+      if (field.autoDefault) {
+        const c = field.spec ? MV.use('core/schema').coerce(field.spec, v) : v;
+        const x = c === undefined ? v : c;
+        return RU.sameValue(x, RU.defaultValue(doc(), null, field.path)) ? W.AUTO : x;
+      }
       if (field.flashToggle) {
         const p = plan();
         const mood = p ? app.reg.get('mood', p.look.mood.v) : null;
@@ -522,8 +531,9 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       // なし on a source whose automatic value is none is 自動 (photoPan without a picture is the plain ground)
       if (field.widget === 'media' && v === '' && field.spec && field.spec.auto && field.spec.auto.value === '') { unpin(row); return; }
       const value = valueFor(field, v, row.fs);
-      if (value === W.AUTO) { unpin(row); return; }
       const o = opts || {};
+      // 自動 reached in a slider drag (文字組み's strength at the document's default) stays in the drag's undo entry
+      if (value === W.AUTO) { unpin(row, o); return; }
       const meta = { label: ['undo.pin', { field: labelOf(field), scope: scopeLabel(ctx) }], where: { scope: ctx.scope, field: field.path } };
       if (o.mergeKey) meta.mergeKey = o.mergeKey;
       else if (o.merge) meta.mergeKey = 'field:' + row.path;
@@ -583,10 +593,14 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       };
     }
 
-    function unpin(row) {
+    // o (optional): the merge of commit() (a drag's gesture key, or a slider key's merge)
+    function unpin(row, o) {
       const ctx = page.ctx;
       const cmds = removablePaths(row.clearPaths).map((path) => ({ t: 'pin.clear', path }));
-      run(cmds, { label: ['undo.unpinField', { field: labelOf(row.field) }], where: { scope: ctx.scope, field: row.field.path } });
+      const meta = { label: ['undo.unpinField', { field: labelOf(row.field) }], where: { scope: ctx.scope, field: row.field.path } };
+      if (o && o.mergeKey) meta.mergeKey = o.mergeKey;
+      else if (o && o.merge) meta.mergeKey = 'field:' + row.path;
+      run(cmds, meta);
     }
 
     function removablePaths(paths) { return paths.filter((p) => doc().pins[p] && doc().pins[p].by !== 'lock'); }

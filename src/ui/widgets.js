@@ -387,10 +387,13 @@ MV.def('ui/widgets', ['ui/dom', 'ui/icons', 'i18n/t', 'core/color', 'ui/playbar'
 
   // --- toggle ------------------------------------------------------------------------------------------------------
 
+  // field.onValue / field.offValue: what turning it on / off commits (true / false by default; a strength switch of
+  // 文字組み commits its strength and 0). A number above 0 shows as on.
   function toggle(field, env) {
     const box = h('input', { type: 'checkbox', role: 'switch', 'aria-label': env.label });
     const el = h('label', { class: 'w-toggle' }, box, h('span', { class: 'w-switch', 'aria-hidden': 'true' }));
-    box.addEventListener('change', () => env.commit(box.checked));
+    const on = field.onValue !== undefined ? field.onValue : true, off = field.offValue !== undefined ? field.offValue : false;
+    box.addEventListener('change', () => env.commit(box.checked ? on : off));
     return {
       el, focus: () => dom.focus(box),
       update(st) {

@@ -289,9 +289,10 @@ function fieldPaths(sel, sectionId, plan = PLAN) {
 
 test('sectionsFor: 作品全体 has its §6.4.5 sections with 見た目 and 強さ open', () => {
   const sections = F.sectionsFor({ level: 'work' }, PLAN, REG);
-  // 写真・動画 (DESIGN_2_1 §11.7.3) follows 見た目; it opens once the library holds something.
-  assert.deepEqual(sections.map((s) => s.id), ['look', 'media', 'colors', 'type', 'energy', 'parts', 'title', 'timing', 'lines', 'looks',
-    'defaults', 'other']);
+  // 写真・動画 (DESIGN_2_1 §11.7.3) follows 見た目; it opens once the library holds something. 文字組み (DESIGN_2_2 §1)
+  // follows 書体.
+  assert.deepEqual(sections.map((s) => s.id), ['look', 'media', 'colors', 'type', 'kumi', 'energy', 'parts', 'title', 'timing', 'lines',
+    'looks', 'defaults', 'other']);
   assert.deepEqual(sections.filter((s) => s.open).map((s) => s.id), ['look', 'energy']);
   assert.deepEqual(sections[0].label, ['sec.look', {}]);
   const type = fieldPaths({ level: 'work' }, 'type');
@@ -362,9 +363,11 @@ test('sectionsFor: several lines, no plan, and ids unique within a page', () => 
   assert.deepEqual(sectionIds({ level: 'work' }, null).slice(0, 3), ['look', 'media', 'colors'], 'works before there are lyrics');
   const sels = [{ level: 'work' }, { level: 'line', ids: ['r4'] }, { level: 'cut', key: 'r4~0' },
     { level: 'el', scope: 'cut/r4~0', el: 'text' }, { level: 'el', scope: 'work', el: 'filter', idx: 2 }];
+  // (a new work: 文字組み shows its strengths too)
+  const doc = MV.use('core/doc').newDoc();
   for (const sel of sels) {
-    // (カメラ EXTREME's 激しさ is a second row of its switch's slot: its key names it)
-    const ids = F.sectionsFor(sel, PLAN, REG).flatMap((s) => s.fields.map((f) => (f.xpart === 'power' ? f.key : f.path || f.key)));
+    // (カメラ EXTREME's 激しさ and 文字組み's strengths are second rows of their switch's slot: their key names them)
+    const ids = F.sectionsFor(sel, PLAN, REG, doc).flatMap((s) => s.fields.map((f) => (f.path && f.key !== f.path ? f.key : f.path || f.key)));
     assert.equal(new Set(ids).size, ids.length, JSON.stringify(sel) + ': ' + ids.join(' '));
   }
 });
@@ -1343,4 +1346,103 @@ test('an enum with optKey labels its options from its own key group (depth: back
   const t = T.createT('ja', STRINGS);
   const W = MV.use('ui/widgets');
   assert.equal(W.optionText(t, field.options.find((o) => o.v === 'back')), '後ろに下げる');
+});
+
+// --- PV22 P1 文字組み (DESIGN_2_2 §1): 作品全体 › 文字組み and the line rows ------------------------------------------------
+
+const KUMI_WORK = ['text.kana', 'text.kana.power', 'text.jump', 'text.jump.power', 'text.head', 'text.latin', 'text.latin.power'];
+function kumiRows(sel, doc, section) {
+  const s = F.sectionsFor(sel, PLAN, REG, doc).find((x) => x.id === section);
+  return s ? s.fields : [];
+}
+
+test('文字組み: the four slots may be pinned at work and line scope, never at a cut (core/commands agrees)', () => {
+  for (const slot of ['text.kana', 'text.jump', 'text.latin', 'text.head']) assert.deepEqual(F.slotScopes(slot), ['work', 'line'], slot);
+  assert.deepEqual(F.slotScopes('text.kanaX'), [], 'only the table\'s slots');
+  const CMD = MV.use('core/commands');
+  const D0 = MV.use('core/doc').defaultDoc();
+  const ok = (path, v) => {
+    const cmd = { t: 'pin.set', path, v, by: 'user' };
+    if (path.startsWith('cut/')) cmd.sig = 's';
+    try { CMD.reduce(D0, cmd); return true; } catch (e) { return false; }
+  };
+  assert.equal(ok('work:text.kana', 0.7), true);
+  assert.equal(ok('line/r1:text.head', 'phrase'), true);
+  assert.equal(ok('cut/r1~0:text.jump', 0.5), false);
+});
+
+test('文字組み: a section after 書体 with three switches, their strengths and 大きくする字 in the design\'s order', () => {
+  const D = MV.use('core/doc');
+  const RU = MV.use('planner/rules');
+  const fresh = D.newDoc();
+  const rows = kumiRows({ level: 'work' }, fresh, 'kumi');
+  assert.deepEqual(rows.map((f) => f.key), KUMI_WORK, 'a new work: every row (the switches are on)');
+  assert.ok(rows.every((f) => f.noDice && f.scopes.length === 1 && f.scopes[0] === 'work'), 'settings of the whole video, no 振り直し');
+  const sec = F.sectionsFor({ level: 'work' }, PLAN, REG, fresh).find((s) => s.id === 'kumi');
+  assert.equal(sec.open, false, 'closed like 書体');
+  assert.deepEqual(sec.label, ['sec.kumi', {}]);
+  for (const slot of ['text.kana', 'text.jump', 'text.latin']) {
+    const sw = rows.find((f) => f.key === slot), power = rows.find((f) => f.key === slot + '.power');
+    assert.equal(sw.widget, 'toggle');
+    assert.equal(sw.onValue, RU.rowOf(slot).on, slot + ': on commits the new-work strength');
+    assert.equal(sw.offValue, 0, slot + ': off commits 0');
+    assert.equal(sw.autoDefault, true);
+    assert.equal(sw.note, sw.label + '.note');
+    assert.equal(sw.basic, true);
+    assert.equal(power.widget, 'number');
+    assert.equal(power.path, slot);
+    assert.equal(power.basic, false, '詳しい設定');
+    assert.equal(power.autoDefault, true);
+    assert.deepEqual([power.spec.min, power.spec.max, power.spec.step, power.spec.unit, power.scale], [0.1, 1, 0.05, 'pct', 100],
+      'the slider never reaches off');
+  }
+  assert.deepEqual([rows.find((f) => f.key === 'text.kana').onValue, rows.find((f) => f.key === 'text.jump').onValue,
+    rows.find((f) => f.key === 'text.latin').onValue], [0.7, 0.5, 0.5]);
+  const head = rows.find((f) => f.key === 'text.head');
+  assert.equal(head.widget, 'choice');
+  assert.equal(head.autoValue, 'line', '行の頭 is 自動');
+  assert.equal(head.basic, false);
+  assert.deepEqual(head.options.map((o) => [o.v, o.label]), [['line', 'opt.kumiHead.line'], ['phrase', 'opt.kumiHead.phrase'],
+    ['none', 'opt.kumiHead.none']]);
+  assert.ok(!head.auto, 'no separate 自動 option');
+});
+
+test('文字組み: a strength and 大きくする字 show only while their switch is on (ctx.kumi from planner/rules)', () => {
+  const D = MV.use('core/doc');
+  const keys = (doc) => kumiRows({ level: 'work' }, doc, 'kumi').map((f) => f.key);
+  assert.deepEqual(keys(D.defaultDoc()), ['text.kana', 'text.jump', 'text.latin'], 'an older work: the switches are off');
+  assert.deepEqual(keys(undefined), ['text.kana', 'text.jump', 'text.latin'], 'without a document: nothing is on');
+  const off = D.newDoc();
+  off.pins = { 'work:text.jump': { v: 0, by: 'user' } };
+  assert.deepEqual(keys(off), ['text.kana', 'text.kana.power', 'text.jump', 'text.latin', 'text.latin.power'],
+    'ジャンプ率 and 大きくする字 hide with their switch');
+  const old = D.defaultDoc();
+  old.pins = { 'work:text.latin': { v: 0.35, by: 'user' } };
+  assert.deepEqual(keys(old), ['text.kana', 'text.jump', 'text.latin', 'text.latin.power'], 'an older work with one switch on');
+  const ctx = F.contextOf({ level: 'work' }, PLAN, REG, D.newDoc());
+  assert.deepEqual(ctx.kumi, { 'text.kana': 0.7, 'text.jump': 0.5, 'text.latin': 0.5 });
+  assert.deepEqual(F.contextOf({ level: 'work' }, PLAN, REG, D.defaultDoc()).kumi, { 'text.kana': 0, 'text.jump': 0, 'text.latin': 0 });
+  assert.equal(F.contextOf({ level: 'line', ids: ['r4'] }, PLAN, REG, D.newDoc()).kumi, null, 'only the work page reads it');
+});
+
+test('文字組み: 行 and 複数行 › 色と書体 have a row per switch under 詳しい設定: [自動 | 使う | 使わない], 自動 kept when inherited', () => {
+  const D = MV.use('core/doc');
+  for (const sel of [{ level: 'line', ids: ['r4'] }, { level: 'line', ids: ['r4', 'r5'] }]) {
+    for (const doc of [D.newDoc(), D.defaultDoc()]) {
+      const rows = kumiRows(sel, doc, 'colortype').filter((f) => /^text\.(kana|jump|latin)$/.test(f.path));
+      assert.deepEqual(rows.map((f) => f.path), ['text.kana', 'text.jump', 'text.latin'], JSON.stringify(sel));
+      assert.deepEqual(rows.map((f) => f.label), ['fld.kumiKanaLine', 'fld.kumiJumpLine', 'fld.kumiLatinLine']);
+      for (const f of rows) {
+        assert.equal(f.widget, 'choice');
+        assert.ok(f.auto && f.inheritAuto && f.noDice && !f.basic && !f.autoDefault, f.path);
+        assert.deepEqual(f.options, [{ v: f.path === 'text.kana' ? 0.7 : 0.5, label: 'opt.kumi.on' }, { v: 0, label: 'opt.kumi.off' }]);
+      }
+      assert.equal(rows[1].note, 'fld.kumiJumpLine.note');
+    }
+  }
+  const ctx = F.contextOf({ level: 'line', ids: ['r4', 'r5'] }, PLAN, REG);
+  const row = kumiRows({ level: 'line', ids: ['r4', 'r5'] }, undefined, 'colortype').find((f) => f.path === 'text.jump');
+  assert.deepEqual(F.pathsFor(row, ctx), ['line/r4:text.jump', 'line/r5:text.jump'], 'each selected line');
+  assert.ok(!F.sectionsFor({ level: 'cut', key: 'r4~0' }, PLAN, REG, D.newDoc()).some((s) => s.fields.some((f) => /^text\.(kana|jump|latin|head)$/.test(f.path))),
+    'never on a cut\'s page');
 });

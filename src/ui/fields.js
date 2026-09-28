@@ -1,7 +1,7 @@
 /* 文字PVメーカー v2 — original work. Inspector field catalogue: FieldSpecs per page and section, and sectionsFor (DESIGN §6.4.4–§6.4.9, §4.23). */
 MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color', 'core/ease', 'core/doc', 'ui/selection',
-  'core/curve', 'core/shot', 'core/media', 'ui/media_widgets', 'planner/extreme'],
-  (P, R, SC, C, E, D, S, CV, SHOT, MEDIA, MW, XT) => {
+  'core/curve', 'core/shot', 'core/media', 'ui/media_widgets', 'planner/extreme', 'planner/rules', 'core/pins'],
+  (P, R, SC, C, E, D, S, CV, SHOT, MEDIA, MW, XT, RU, PINS) => {
     'use strict';
 
     // A FieldSpec (§4.23) is one row of the inspector: { id, path, scopes, el?, section, widget, label, hint?, basic,
@@ -13,7 +13,11 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
     // generated part parameter; its `label` is 'fld.param' = '{name}'), `param` (generated part parameters),
     // `firstCut` (the line page's 切り替え: written at the line's first cut, §6.4.6), `pinnedOnly` (a pinned parameter
     // of a part that is no longer chosen, shown as 無効), `note` (a string key shown under the row), `offClears` (a toggle
-    // whose off is 自動: turning it off clears the pin), `noDice` (a setting, not drawn: no 振り直し).
+    // whose off is 自動: turning it off clears the pin), `noDice` (a setting, not drawn: no 振り直し). PV22: `autoDefault`
+    // (a switch of the new-work defaults table, planner/rules: the value equal to the document's default clears the pin,
+    // any other pins it), `onValue` / `offValue` (what a toggle commits when turned on / off; true / false by default)
+    // and `inheritAuto` (a choice whose 自動 stays selected while the value is inherited from a broader scope: the line
+    // rows of 文字組み under a work pin).
 
     const ALL = Object.freeze(['work', 'line', 'cut']);
     const WORK = Object.freeze(['work']);
@@ -70,6 +74,8 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
       try { parsed = P.parse('work:' + slot); } catch (e) { return []; }
       if (parsed.el) return ALL.slice();
       if (parsed.name !== null) {
+        // the switches of the new-work defaults table (PV22): where their row allows a pin
+        if (RU.isRule(slot)) return RU.scopesOf(slot).slice();
         if (workName(slot)) return WORK.slice();
         if (LINE_WORK_NAMES.has(slot) || slot === REPEAT_SAME) return ['work', 'line'];
         if (LINE_NAMES.has(slot)) return LINE.slice();
@@ -274,6 +280,34 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
     }
     const cutHasLine = (ctx) => !!(ctx.cut && ctx.cut.line);
 
+    // 文字組み (DESIGN_2_2 §1): three switches of the whole video (on in a new work, off in an older one: 自動 follows the
+    // document's default, planner/rules), under 詳しい設定 each one's strength (shown while it is on; 10–100 %, so the
+    // slider never turns it off) and 大きくする字 (while 助詞を小さく・頭の字を大きく is on; 行の頭 is 自動). A line or
+    // several lines: [自動 | 使う | 使わない] per switch; 自動 follows 作品全体 (and stays selected under a work pin).
+    const KUMI_SLOTS = Object.freeze(['text.kana', 'text.jump', 'text.latin']);
+    const KUMI_ON = Object.freeze(Object.fromEntries(KUMI_SLOTS.map((slot) => [slot, RU.rowOf(slot).on])));
+    const KUMI_POWER = Object.freeze({ type: 'num', min: 0.1, max: 1, step: 0.05, unit: 'pct' });
+    const KUMI_HEADS = RU.SPECS['text.head'].of;
+    const kumiOn = (slot) => (ctx) => !!ctx.kumi && ctx.kumi[slot] > 0;
+    function kumiWork(slot, label, power) {
+      return [
+        F({ path: slot, scopes: WORK, widget: 'toggle', label, spec: RU.SPECS[slot], onValue: KUMI_ON[slot], offValue: 0,
+          autoDefault: true, note: label + '.note', noDice: true }),
+        F({ key: slot + '.power', path: slot, scopes: WORK, widget: 'number', label: power, spec: KUMI_POWER, scale: 100,
+          autoDefault: true, basic: false, noDice: true, when: kumiOn(slot) }),
+      ];
+    }
+    const kumiLine = (slot, label, note) => F({ path: slot, scopes: LINE, widget: 'choice', label, spec: RU.SPECS[slot],
+      options: [{ v: KUMI_ON[slot], label: 'opt.kumi.on' }, { v: 0, label: 'opt.kumi.off' }], auto: true, inheritAuto: true,
+      basic: false, noDice: true, note });
+    const kumiLines = () => [kumiLine('text.kana', 'fld.kumiKanaLine'), kumiLine('text.jump', 'fld.kumiJumpLine', 'fld.kumiJumpLine.note'),
+      kumiLine('text.latin', 'fld.kumiLatinLine')];
+    // kumiValues(doc) → the three switches at the whole work (a work pin, else the document's default): ctx.kumi
+    function kumiValues(doc) {
+      const ix = PINS.index(doc.pins || {});
+      return Object.freeze(Object.fromEntries(KUMI_SLOTS.map((slot) => [slot, RU.value(doc, ix, slot)])));
+    }
+
     // --- pages ----------------------------------------------------------------------------------------------------
 
     const PAGES = {
@@ -296,6 +330,14 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
         sec('colors', false, C.TOKENS.map((tok) => F({ path: 'color.' + tok, scopes: WORK, widget: 'color',
           label: 'fld.color.' + tok, spec: SPEC.color })), { custom: 'colorsReset' }),
         sec('type', false, faceFields.concat([textScaleField('fld.textScaleAll')]), { custom: 'fontBanner', customTop: true }),
+        sec('kumi', false, [
+          ...kumiWork('text.kana', 'fld.kumiKana', 'fld.kumiKanaPower'),
+          ...kumiWork('text.jump', 'fld.kumiJump', 'fld.kumiJumpPower'),
+          F({ path: 'text.head', scopes: WORK, widget: 'choice', label: 'fld.kumiHead', spec: RU.SPECS['text.head'],
+            options: opts(KUMI_HEADS, 'opt.kumiHead.'), autoValue: RU.rowOf('text.head').on, basic: false, noDice: true,
+            when: kumiOn('text.jump') }),
+          ...kumiWork('text.latin', 'fld.kumiLatin', 'fld.kumiLatinPower'),
+        ]),
         sec('energy', true, SC.AMOUNT_KEYS.flatMap((k) => [F({ path: 'amount.' + k, scopes: WORK,
           widget: k === 'flash' ? 'toggle' : 'number', label: 'fld.amount.' + k, spec: SPEC.unit, scale: 100,
           flashToggle: k === 'flash' })].concat(k === 'camera' ? extremeFields({ scopes: WORK }) : [])), { custom: 'amountsReset' }),
@@ -346,7 +388,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
             options: opts(LANGS, 'lang.'), auto: true, select: true, basic: false }),
         ], { custom: 'lockPartial', customTop: true }),
         sec('direction', true, directionFields()),
-        sec('colortype', false, [textFaceField(), textInkField(), textStyleField(), textScaleField()]),
+        sec('colortype', false, [textFaceField(), textInkField(), textStyleField(), textScaleField()].concat(kumiLines())),
         sec('cuts', false, [], { custom: 'cuts', when: (ctx) => !!ctx.line && ctx.line.cuts.length > 1 }),
         sec('elements', false, [], { custom: 'elements' }),
         sec('ai', false, [], { custom: 'ai' }),
@@ -357,7 +399,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
         // An area selection (区画, DESIGN_2_1 §6.5) adds its section camera; its runs are split at the area's edges. With
         // it, カメラ EXTREME for the area (a line pin on every selected line, DESIGN_EXTREME §2.6).
         sec('rig', true, rigFields().concat(extremeFields({ scopes: LINE })), { when: hasArea }),
-        sec('colortype', false, [textFaceField(), textInkField(), textStyleField(), textScaleField()]),
+        sec('colortype', false, [textFaceField(), textInkField(), textStyleField(), textScaleField()].concat(kumiLines())),
         sec('shift', true, [], { custom: 'shift' }),
       ],
       cut: [
@@ -501,6 +543,8 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
         el: s.level === 'el' ? s.el : null, scripts, orients, area: s.level === 'line' && s.area ? s.area : null,
         materials: mats, mediaCount: doc && doc.media && Array.isArray(doc.media.list) ? doc.media.list.length : 0,
         textFillIdx: null, textFillOn: false,
+        // 文字組み's switches at the whole work (their rows hide the strengths while off)
+        kumi: scopeKind === 'work' && doc ? kumiValues(doc) : null,
       };
       if (page === 'el.text') {
         // the slot 文字の中に写真・動画 manages: the one pinned to textFill at the page's scope (a line or cut that picks

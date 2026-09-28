@@ -1,6 +1,6 @@
 <!doctype html><html lang="ja"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-Uz4Bv0hJ0hVFGuSVomlN0mVW2Br5MDf1fp/82H6hEhk='; style-src 'sha256-CBzRvq4sWr3CF69hafDp1l8UkHnSy18JQMXGJJhPDYI=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-c/80wGq2wufoPZJbTAgxWh2zKSHuMSC4Wl/ojX0V2Ew='; style-src 'sha256-CBzRvq4sWr3CF69hafDp1l8UkHnSy18JQMXGJJhPDYI=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
 <title>文字PVメーカー</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -60778,8 +60778,8 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
   });
 /* 文字PVメーカー v2 — original work. Inspector field catalogue: FieldSpecs per page and section, and sectionsFor (DESIGN §6.4.4–§6.4.9, §4.23). */
 MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color', 'core/ease', 'core/doc', 'ui/selection',
-  'core/curve', 'core/shot', 'core/media', 'ui/media_widgets', 'planner/extreme'],
-  (P, R, SC, C, E, D, S, CV, SHOT, MEDIA, MW, XT) => {
+  'core/curve', 'core/shot', 'core/media', 'ui/media_widgets', 'planner/extreme', 'planner/rules', 'core/pins'],
+  (P, R, SC, C, E, D, S, CV, SHOT, MEDIA, MW, XT, RU, PINS) => {
     'use strict';
 
     // A FieldSpec (§4.23) is one row of the inspector: { id, path, scopes, el?, section, widget, label, hint?, basic,
@@ -60791,7 +60791,11 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
     // generated part parameter; its `label` is 'fld.param' = '{name}'), `param` (generated part parameters),
     // `firstCut` (the line page's 切り替え: written at the line's first cut, §6.4.6), `pinnedOnly` (a pinned parameter
     // of a part that is no longer chosen, shown as 無効), `note` (a string key shown under the row), `offClears` (a toggle
-    // whose off is 自動: turning it off clears the pin), `noDice` (a setting, not drawn: no 振り直し).
+    // whose off is 自動: turning it off clears the pin), `noDice` (a setting, not drawn: no 振り直し). PV22: `autoDefault`
+    // (a switch of the new-work defaults table, planner/rules: the value equal to the document's default clears the pin,
+    // any other pins it), `onValue` / `offValue` (what a toggle commits when turned on / off; true / false by default)
+    // and `inheritAuto` (a choice whose 自動 stays selected while the value is inherited from a broader scope: the line
+    // rows of 文字組み under a work pin).
 
     const ALL = Object.freeze(['work', 'line', 'cut']);
     const WORK = Object.freeze(['work']);
@@ -60848,6 +60852,8 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
       try { parsed = P.parse('work:' + slot); } catch (e) { return []; }
       if (parsed.el) return ALL.slice();
       if (parsed.name !== null) {
+        // the switches of the new-work defaults table (PV22): where their row allows a pin
+        if (RU.isRule(slot)) return RU.scopesOf(slot).slice();
         if (workName(slot)) return WORK.slice();
         if (LINE_WORK_NAMES.has(slot) || slot === REPEAT_SAME) return ['work', 'line'];
         if (LINE_NAMES.has(slot)) return LINE.slice();
@@ -61052,6 +61058,34 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
     }
     const cutHasLine = (ctx) => !!(ctx.cut && ctx.cut.line);
 
+    // 文字組み (DESIGN_2_2 §1): three switches of the whole video (on in a new work, off in an older one: 自動 follows the
+    // document's default, planner/rules), under 詳しい設定 each one's strength (shown while it is on; 10–100 %, so the
+    // slider never turns it off) and 大きくする字 (while 助詞を小さく・頭の字を大きく is on; 行の頭 is 自動). A line or
+    // several lines: [自動 | 使う | 使わない] per switch; 自動 follows 作品全体 (and stays selected under a work pin).
+    const KUMI_SLOTS = Object.freeze(['text.kana', 'text.jump', 'text.latin']);
+    const KUMI_ON = Object.freeze(Object.fromEntries(KUMI_SLOTS.map((slot) => [slot, RU.rowOf(slot).on])));
+    const KUMI_POWER = Object.freeze({ type: 'num', min: 0.1, max: 1, step: 0.05, unit: 'pct' });
+    const KUMI_HEADS = RU.SPECS['text.head'].of;
+    const kumiOn = (slot) => (ctx) => !!ctx.kumi && ctx.kumi[slot] > 0;
+    function kumiWork(slot, label, power) {
+      return [
+        F({ path: slot, scopes: WORK, widget: 'toggle', label, spec: RU.SPECS[slot], onValue: KUMI_ON[slot], offValue: 0,
+          autoDefault: true, note: label + '.note', noDice: true }),
+        F({ key: slot + '.power', path: slot, scopes: WORK, widget: 'number', label: power, spec: KUMI_POWER, scale: 100,
+          autoDefault: true, basic: false, noDice: true, when: kumiOn(slot) }),
+      ];
+    }
+    const kumiLine = (slot, label, note) => F({ path: slot, scopes: LINE, widget: 'choice', label, spec: RU.SPECS[slot],
+      options: [{ v: KUMI_ON[slot], label: 'opt.kumi.on' }, { v: 0, label: 'opt.kumi.off' }], auto: true, inheritAuto: true,
+      basic: false, noDice: true, note });
+    const kumiLines = () => [kumiLine('text.kana', 'fld.kumiKanaLine'), kumiLine('text.jump', 'fld.kumiJumpLine', 'fld.kumiJumpLine.note'),
+      kumiLine('text.latin', 'fld.kumiLatinLine')];
+    // kumiValues(doc) → the three switches at the whole work (a work pin, else the document's default): ctx.kumi
+    function kumiValues(doc) {
+      const ix = PINS.index(doc.pins || {});
+      return Object.freeze(Object.fromEntries(KUMI_SLOTS.map((slot) => [slot, RU.value(doc, ix, slot)])));
+    }
+
     // --- pages ----------------------------------------------------------------------------------------------------
 
     const PAGES = {
@@ -61074,6 +61108,14 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
         sec('colors', false, C.TOKENS.map((tok) => F({ path: 'color.' + tok, scopes: WORK, widget: 'color',
           label: 'fld.color.' + tok, spec: SPEC.color })), { custom: 'colorsReset' }),
         sec('type', false, faceFields.concat([textScaleField('fld.textScaleAll')]), { custom: 'fontBanner', customTop: true }),
+        sec('kumi', false, [
+          ...kumiWork('text.kana', 'fld.kumiKana', 'fld.kumiKanaPower'),
+          ...kumiWork('text.jump', 'fld.kumiJump', 'fld.kumiJumpPower'),
+          F({ path: 'text.head', scopes: WORK, widget: 'choice', label: 'fld.kumiHead', spec: RU.SPECS['text.head'],
+            options: opts(KUMI_HEADS, 'opt.kumiHead.'), autoValue: RU.rowOf('text.head').on, basic: false, noDice: true,
+            when: kumiOn('text.jump') }),
+          ...kumiWork('text.latin', 'fld.kumiLatin', 'fld.kumiLatinPower'),
+        ]),
         sec('energy', true, SC.AMOUNT_KEYS.flatMap((k) => [F({ path: 'amount.' + k, scopes: WORK,
           widget: k === 'flash' ? 'toggle' : 'number', label: 'fld.amount.' + k, spec: SPEC.unit, scale: 100,
           flashToggle: k === 'flash' })].concat(k === 'camera' ? extremeFields({ scopes: WORK }) : [])), { custom: 'amountsReset' }),
@@ -61124,7 +61166,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
             options: opts(LANGS, 'lang.'), auto: true, select: true, basic: false }),
         ], { custom: 'lockPartial', customTop: true }),
         sec('direction', true, directionFields()),
-        sec('colortype', false, [textFaceField(), textInkField(), textStyleField(), textScaleField()]),
+        sec('colortype', false, [textFaceField(), textInkField(), textStyleField(), textScaleField()].concat(kumiLines())),
         sec('cuts', false, [], { custom: 'cuts', when: (ctx) => !!ctx.line && ctx.line.cuts.length > 1 }),
         sec('elements', false, [], { custom: 'elements' }),
         sec('ai', false, [], { custom: 'ai' }),
@@ -61135,7 +61177,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
         // An area selection (区画, DESIGN_2_1 §6.5) adds its section camera; its runs are split at the area's edges. With
         // it, カメラ EXTREME for the area (a line pin on every selected line, DESIGN_EXTREME §2.6).
         sec('rig', true, rigFields().concat(extremeFields({ scopes: LINE })), { when: hasArea }),
-        sec('colortype', false, [textFaceField(), textInkField(), textStyleField(), textScaleField()]),
+        sec('colortype', false, [textFaceField(), textInkField(), textStyleField(), textScaleField()].concat(kumiLines())),
         sec('shift', true, [], { custom: 'shift' }),
       ],
       cut: [
@@ -61279,6 +61321,8 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
         el: s.level === 'el' ? s.el : null, scripts, orients, area: s.level === 'line' && s.area ? s.area : null,
         materials: mats, mediaCount: doc && doc.media && Array.isArray(doc.media.list) ? doc.media.list.length : 0,
         textFillIdx: null, textFillOn: false,
+        // 文字組み's switches at the whole work (their rows hide the strengths while off)
+        kumi: scopeKind === 'work' && doc ? kumiValues(doc) : null,
       };
       if (page === 'el.text') {
         // the slot 文字の中に写真・動画 manages: the one pinned to textFill at the page's scope (a line or cut that picks
@@ -70488,10 +70532,13 @@ MV.def('ui/widgets', ['ui/dom', 'ui/icons', 'i18n/t', 'core/color', 'ui/playbar'
 
   // --- toggle ------------------------------------------------------------------------------------------------------
 
+  // field.onValue / field.offValue: what turning it on / off commits (true / false by default; a strength switch of
+  // 文字組み commits its strength and 0). A number above 0 shows as on.
   function toggle(field, env) {
     const box = h('input', { type: 'checkbox', role: 'switch', 'aria-label': env.label });
     const el = h('label', { class: 'w-toggle' }, box, h('span', { class: 'w-switch', 'aria-hidden': 'true' }));
-    box.addEventListener('change', () => env.commit(box.checked));
+    const on = field.onValue !== undefined ? field.onValue : true, off = field.offValue !== undefined ? field.offValue : false;
+    box.addEventListener('change', () => env.commit(box.checked ? on : off));
     return {
       el, focus: () => dom.focus(box),
       update(st) {
@@ -72599,8 +72646,8 @@ MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/a
 /* 文字PVメーカー v2 — original work. The inspector (詳細): crumbs, level header, sections from FIELDS, field rows, sub-pages (DESIGN §6.4.4–§6.4.9, §6.6; DESIGN_2_1 §6.5–§6.9). */
 MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/part_browser', 'ui/selection', 'ui/looks',
   'ui/output', 'i18n/t', 'core/paths', 'core/pins', 'core/shot', 'planner/areas', 'ui/shot_editor', 'ui/material_page',
-  'ui/media_page', 'ui/media_widgets', 'ui/media_io', 'ui/extreme'],
-(dom, I, F, W, PB, S, LK, OUT, T, P, PINS, SHOT, AREAS, KE, MP, MPG, MW, MI, XU) => {
+  'ui/media_page', 'ui/media_widgets', 'ui/media_io', 'ui/extreme', 'planner/rules'],
+(dom, I, F, W, PB, S, LK, OUT, T, P, PINS, SHOT, AREAS, KE, MP, MPG, MW, MI, XU, RU) => {
   'use strict';
 
   const { h } = dom;
@@ -73037,7 +73084,9 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
         return { value: mixed ? null : v, mixed, auto: false, readOnly: false, extra: extraFor(f, null, ctx, row) };
       }
       if (!f.path) return { value: derivedValue(f, ctx), mixed: false, auto: false, readOnly: true, extra: extraFor(f, null, ctx, row) };
-      return { value: fs ? fs.value : null, mixed: !!fs && fs.state === 'mixed', auto: !fs || fs.state === 'auto' || fs.state === 'mark',
+      // inheritAuto (文字組み's line rows): a value that follows a broader scope's pin keeps 自動 selected
+      const auto = !fs || fs.state === 'auto' || fs.state === 'mark' || (!!f.inheritAuto && fs.state === 'inherited');
+      return { value: fs ? fs.value : null, mixed: !!fs && fs.state === 'mixed', auto,
         readOnly: !!f.readOnly || (!!fs && fs.state === 'derived'), extra: extraFor(f, fs, ctx, row) };
     }
 
@@ -73095,6 +73144,13 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
 
     function valueFor(field, v, fs) {
       if (field.offClears && !v) return W.AUTO;
+      // a switch of the new-work defaults table (PV22): its document default is 自動 (no pin), any other value is pinned;
+      // compared after coercion, so a slider's 14 × 0.05 is the default 0.7
+      if (field.autoDefault) {
+        const c = field.spec ? MV.use('core/schema').coerce(field.spec, v) : v;
+        const x = c === undefined ? v : c;
+        return RU.sameValue(x, RU.defaultValue(doc(), null, field.path)) ? W.AUTO : x;
+      }
       if (field.flashToggle) {
         const p = plan();
         const mood = p ? app.reg.get('mood', p.look.mood.v) : null;
@@ -73120,8 +73176,9 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       // なし on a source whose automatic value is none is 自動 (photoPan without a picture is the plain ground)
       if (field.widget === 'media' && v === '' && field.spec && field.spec.auto && field.spec.auto.value === '') { unpin(row); return; }
       const value = valueFor(field, v, row.fs);
-      if (value === W.AUTO) { unpin(row); return; }
       const o = opts || {};
+      // 自動 reached in a slider drag (文字組み's strength at the document's default) stays in the drag's undo entry
+      if (value === W.AUTO) { unpin(row, o); return; }
       const meta = { label: ['undo.pin', { field: labelOf(field), scope: scopeLabel(ctx) }], where: { scope: ctx.scope, field: field.path } };
       if (o.mergeKey) meta.mergeKey = o.mergeKey;
       else if (o.merge) meta.mergeKey = 'field:' + row.path;
@@ -73181,10 +73238,14 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       };
     }
 
-    function unpin(row) {
+    // o (optional): the merge of commit() (a drag's gesture key, or a slider key's merge)
+    function unpin(row, o) {
       const ctx = page.ctx;
       const cmds = removablePaths(row.clearPaths).map((path) => ({ t: 'pin.clear', path }));
-      run(cmds, { label: ['undo.unpinField', { field: labelOf(row.field) }], where: { scope: ctx.scope, field: row.field.path } });
+      const meta = { label: ['undo.unpinField', { field: labelOf(row.field) }], where: { scope: ctx.scope, field: row.field.path } };
+      if (o && o.mergeKey) meta.mergeKey = o.mergeKey;
+      else if (o && o.merge) meta.mergeKey = 'field:' + row.path;
+      run(cmds, meta);
     }
 
     function removablePaths(paths) { return paths.filter((p) => doc().pins[p] && doc().pins[p].by !== 'lock'); }
