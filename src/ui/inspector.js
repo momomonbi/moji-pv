@@ -185,7 +185,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       const c = field.cmd;
       if (c.t === 'look.set') return doc().look[c.key];
       if (c.t === 'look.seed') return doc().look.seed;
-      if (c.t === 'timing.set') return doc().timing[c.key];
+      if (c.t === 'timing.set') return c.key === 'enter' ? doc().timing.enter || 'start' : doc().timing[c.key];
       if (c.t === 'meta.set') return metaValue(c.key === 'title' ? 'ti' : 'ar');
       if (c.t === 'lyrics.row') {
         const lines = ctx.lineIds.map((id) => plan().lines.find((l) => l.id === id)).filter(Boolean);

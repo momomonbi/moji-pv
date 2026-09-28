@@ -230,18 +230,19 @@ MV.def('planner/encode', ['core/hash'], (H) => {
   }
 
   // retimeCut(cut, keys, enc) → parts | null: the parts of a cut with enc's scene (every fingerprint input equal) at
-  // other absolute times (a, b, t0, t1, repT), reusing enc's printed features and decisions; null when enc was made
+  // other absolute times (a, b, t0, t1, repT, ready), reusing enc's printed features and decisions; null when enc was made
   // by the general path (encodeCutParts), whose pieces are not kept.
   function retimeCut(cut, keys, enc) {
     const q = enc.pieces;
     return q ? cutPieces(cut, keys, enc.fp, q.feat, q.P, q.V) : null;
   }
 
-  // `rig` (the cut's rig run, Plan v2) is printed next to `ground`, in key order.
+  // `rig` (the cut's rig run, Plan v2) is printed next to `ground`, in key order; `ready` (出そろい, PV22 T4) between
+  // `pinKey` and `repT` when the cut has it (JSON.stringify leaves out undefined).
   function cutPieces(cut, keys, fp, feat, P, V) {
     const head = JSON.stringify({ a: cut.a, b: cut.b, els: cut.els, emph: cut.emph });
     const mid = JSON.stringify({ fp, ground: cut.ground, impact: cut.impact, key: cut.key, lang: cut.lang, line: cut.line,
-      note: cut.note, pinKey: cut.pinKey, repT: cut.repT, rig: cut.rig, role: cut.role, seamIn: cut.seamIn });
+      note: cut.note, pinKey: cut.pinKey, ready: cut.ready, repT: cut.repT, rig: cut.rig, role: cut.role, seamIn: cut.seamIn });
     const parts = [head.slice(0, -1) + ',"feat":' + feat + ',' + mid.slice(1, -1) + ',"slots":{'];
     for (let i = 0; i < keys.length; i++) {
       const d = cut.slots[keys[i]];
@@ -281,6 +282,7 @@ MV.def('planner/encode', ['core/hash'], (H) => {
     put('fp', '"' + fp + '"'); put('ground', canon(cut.ground)); put('impact', t.impact); put('key', canon(cut.key));
     put('lang', t.lang); put('line', canon(cut.line)); put('note', t.note);
     if (cut.pinKey !== undefined) put('pinKey', canon(cut.pinKey));
+    if (cut.ready !== undefined) put('ready', canon(cut.ready));
     put('repT', canon(cut.repT));
     if (cut.rig !== undefined) put('rig', canon(cut.rig));
     put('role', t.role); put('seamIn', canon(cut.seamIn));

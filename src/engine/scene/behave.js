@@ -306,7 +306,9 @@ MV.def('engine/scene/behave', ['core/num', 'core/curve', 'core/rng', 'core/motio
       for (let j = 0; j < delay.length; j++) { delay[j] = Math.min(delay[j] * cutSpan, room); if (delay[j] > last) last = delay[j]; }
       return { rank: R.rank, delay, dur, total: last + dur };
     }
-    const fit = MO.fitMotion({ dur: p.dur, each: p.each, count: R.count, window: span, share });
+    // 出そろい (PV22 T4): an entrance of a cut with times.ready ends by then (the planner's heroTime fits it alike)
+    const cap = kind === 'arrive' && typeof times.ready === 'number' ? Math.max(0, times.ready - times.a) : undefined;
+    const fit = MO.fitMotion({ dur: p.dur, each: p.each, count: R.count, window: span, share, cap });
     const delay = new Float64Array(R.rank.length);
     // flow (DESIGN_2_1 §2.3) spreads the stagger: delay_j = W(rank_j / maxRank) · maxRank · each. W(1) = 1, so the last
     // unit leaves when it did and the fitted total is unchanged; linear is the identity (the v2 delays, bit for bit).

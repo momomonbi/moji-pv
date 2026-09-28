@@ -2182,6 +2182,13 @@ MV.def('i18n/strings', [], () => ({
   // --- PV22 P4 (モーフ・太さ) ---
 
   // --- PV22 P5 (タイミング) ---
+  'fld.lead.note': ['声より何秒前に文字を出すか。0.2秒前後が目安です。',
+    'How many seconds before the voice the text comes in. About 0.2 s is a good start.'],
+  'fld.enter': ['入りの基準', 'Lead measured to'],
+  'fld.enter.start': ['動き始め', 'Start of the entrance'],
+  'fld.enter.ready': ['出そろい（読める）', 'Fully in (readable)'],
+  'fld.enter.note': ['動き始め: 入りの動きが始まる時刻を声より前にします。出そろい: 入りの動きを終えて読める時刻を声より前にします（入りの動きは0.45秒までに縮めます）。切り替えで入る行、背景が変わる行、歌に合わせて1字ずつ出る行、見せ場（!）とキメの行はそのままです。',
+    'Start: the entrance starts this long before the voice. Fully in: the entrance ends, and the text can be read, this long before the voice (entrances are shortened to 0.45 s at most). Lines that come in with a transition or a new background, lines revealed as they are sung, and impact (!) and kime lines keep their timing.'],
 
   // --- PV22 P6 (歌ハメ) ---
 }));

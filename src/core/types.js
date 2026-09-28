@@ -38,6 +38,8 @@ MV.def('core/types', [], () => {
    * @property {number} leadIn      first auto line start when nothing anchors it
    * @property {number} outro       seconds after the last line when there is no song
    * @property {number} tapLatency  subtracted from tap times
+   * @property {'start'|'ready'} [enter]  入りの基準 (PV22 T4): 'ready' = the entrance ends `lead` before the sung start
+   * @property {boolean} [readCheck]  読み切れない速さの行を知らせる (PV22 S4); absent: new works on, older works off
    */
   /**
    * @typedef {Object} Song        metadata only; audio bytes live in browser storage keyed by sha1
@@ -218,8 +220,10 @@ MV.def('core/types', [], () => {
    * @property {string|null} note
    * @property {number} t0
    * @property {number} t1
-   * @property {number} a                  visible from (t0 − timing.lead)
+   * @property {number} a                  visible from (t0 − timing.lead; earlier on a cut 出そろい opened)
    * @property {number} b                  visible until (next cut's t0 + timing.tail)
+   * @property {number} [ready]            出そろい: the entrance ends by this time (t0 − timing.lead; PV22 T4, only on the
+   *                                       cuts planner/plan readyWindows opened)
    * @property {number} repT               hero time (core/motion.heroTime)
    * @property {Lang} lang
    * @property {CutFeatures} feat

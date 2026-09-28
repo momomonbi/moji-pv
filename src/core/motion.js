@@ -11,22 +11,29 @@ MV.def('core/motion', [], () => {
 
   // Shrinks the stagger first, then the duration, so that dur + each·(count − 1) fits share·window.
   // Planner (repT) and scene (stagger) both call this, so they always agree.
-  function fitMotion({ dur, each, count, window, share = 1 }) {
+  // cap (s, optional; 出そろい, PV22 T4): the motion also ends within cap — the limit is min(share·window, cap), and
+  // where the cap binds a single duration is the cap itself (the planner guarantees cap ≥ MIN_DUR). Without a cap, or
+  // with one at or above share·window, the results are exactly as before.
+  function fitMotion({ dur, each, count, window, share = 1, cap }) {
     const d = nonNegative(dur), e = nonNegative(each);
     const gaps = Number.isFinite(count) && count > 1 ? Math.floor(count) - 1 : 0;
-    const limit = share * nonNegative(window);
+    const shareLimit = share * nonNegative(window);
+    const capped = typeof cap === 'number' && cap < shareLimit;
+    const limit = capped ? nonNegative(cap) : shareLimit;
     const total = d + e * gaps;
     if (total <= limit) return { dur: d, each: e, total };
     if (d < limit && gaps > 0) return { dur: d, each: (limit - d) / gaps, total: limit };
-    const fitted = Math.max(MIN_DUR, limit);
+    const fitted = capped ? limit : Math.max(MIN_DUR, limit);
     return { dur: fitted, each: 0, total: fitted };
   }
 
   // repT: the moment the entrance has finished, plus 10% of the calm stretch before the exit; clamped to [a, b).
-  // cut = { a, b }; arrive / depart = { dur, each } (null = instant); count = number of stagger units.
+  // cut = { a, b, ready? }; arrive / depart = { dur, each } (null = instant); count = number of stagger units.
+  // ready (absolute, 出そろい): the entrance ends by then (fitMotion's cap, ready − a), as the scene fits it.
   function heroTime(cut, arrive, depart, count) {
     const a = cut.a, b = cut.b, window = b - a;
-    const A = fitMotion({ ...motionOf(arrive), count, window, share: SHARE.arrive }).total;
+    const cap = typeof cut.ready === 'number' ? cut.ready - a : undefined;
+    const A = fitMotion({ ...motionOf(arrive), count, window, share: SHARE.arrive, cap }).total;
     const L = fitMotion({ ...motionOf(depart), count, window, share: SHARE.depart }).total;
     const t = a + A + 0.1 * Math.max(0, (b - L) - (a + A));
     return clampHalfOpen(t, a, b);

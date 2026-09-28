@@ -321,6 +321,13 @@ test('filters, time, timing, song and output commands', () => {
 
   assert.equal(reduce(doc, { t: 'timing.set', key: 'snap', v: 'bar' }).timing.snap, 'bar');
   assert.equal(reduce(doc, { t: 'timing.set', key: 'lead', v: 0.2 }).timing.lead, 0.2);
+  // 入りの基準 and 読み切れない速さの行を知らせる (PV22 T4, S4): optional timing keys, validated by core/doc
+  assert.equal(reduce(doc, { t: 'timing.set', key: 'enter', v: 'ready' }).timing.enter, 'ready');
+  assert.equal(reduce(doc, { t: 'timing.set', key: 'enter', v: 'start' }).timing.enter, 'start');
+  assert.equal(reduce(doc, { t: 'timing.set', key: 'readCheck', v: false }).timing.readCheck, false);
+  for (const [key, v] of [['enter', 'x'], ['enter', null], ['readCheck', 1]]) {
+    assert.throws(() => reduce(doc, { t: 'timing.set', key, v }), (e) => e.name === 'CommandError' && e.code === 'payload', key + ' ' + v);
+  }
   assert.equal(reduce(doc, { t: 'output.set', key: 'fps', v: 60 }).output.fps, 60);
   assert.deepEqual(reduce(doc, { t: 'output.set', key: 'range', v: { t0: 1, t1: 5 } }).output.range, { t0: 1, t1: 5 });
 

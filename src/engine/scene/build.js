@@ -218,9 +218,11 @@ MV.def('engine/scene/build', ['core/hash', 'core/rng', 'core/schema', 'engine/sc
     return { lines, emphLines, emph: lines.length === 1 && emphLines.length === 1 ? emphLines[0] : null };
   }
 
-  // Cut-local times { a, rest, out, b }: the entrance ends at rest, the exit starts at out (§4.17.5).
+  // Cut-local times { a, rest, out, b, ready }: the entrance ends at rest, the exit starts at out (§4.17.5); ready (a cut
+  // opened by 出そろい, PV22 T4: the plan cut's ready) is when the entrance must have ended, else null.
   function timesOf(cut) {
-    return { a: cut.a - cut.t0, rest: cut.a - cut.t0, out: cut.b - cut.t0, b: cut.b - cut.t0 };
+    return { a: cut.a - cut.t0, rest: cut.a - cut.t0, out: cut.b - cut.t0, b: cut.b - cut.t0,
+      ready: typeof cut.ready === 'number' ? cut.ready - cut.t0 : null };
   }
 
   function fitTimes(times, target, arrive, arriveEnv, depart, departEnv) {

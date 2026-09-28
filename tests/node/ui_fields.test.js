@@ -1344,3 +1344,19 @@ test('an enum with optKey labels its options from its own key group (depth: back
   const W = MV.use('ui/widgets');
   assert.equal(W.optionText(t, field.options.find((o) => o.v === 'back')), '後ろに下げる');
 });
+
+// PV22 T4 (DESIGN_2_2 §5): 入りの基準 under 入りの早さ, both with a note.
+test('作品全体 › タイミング: 入りの早さ has a note, and 入りの基準 (a choice of two) follows it', () => {
+  const timing = F.sectionsFor({ level: 'work' }, PLAN, REG).find((s) => s.id === 'timing').fields;
+  const keys = timing.map((f) => f.path || f.key);
+  const lead = keys.indexOf('timing.set.lead');
+  assert.ok(lead >= 0);
+  assert.equal(keys[lead + 1], 'timing.set.enter');
+  assert.equal(timing[lead].note, 'fld.lead.note');
+  const enter = timing[lead + 1];
+  assert.equal(enter.widget, 'choice');
+  assert.deepEqual(enter.options.map((o) => o.v), ['start', 'ready']);
+  assert.deepEqual(enter.options.map((o) => o.label), ['fld.enter.start', 'fld.enter.ready']);
+  assert.equal(enter.label, 'fld.enter');
+  assert.equal(enter.note, 'fld.enter.note');
+});

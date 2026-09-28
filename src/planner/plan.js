@@ -150,6 +150,45 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
     };
   }
 
+  // --- stage 6b: 出そろい (PV22 T4, DESIGN_2_2 §5) -----------------------------------------------------------------
+
+  // 入りの基準 出そろい (doc.timing.enter 'ready'): a line cut's entrance ends `lead` seconds before its sung start, so the
+  // line can be read by then; the entrance is fitted into at most READY.ROOM. The cut gets ready = t0 − lead and its
+  // window opens earlier (a), never before the end of the cut two before it (after the seams' clips), never past its
+  // ground segment. A cut keeps 動き始め (a = t0 − lead) where something else times its entrance: a transition into it
+  // (its seam was placed on the unopened a), a new background starting with it (the segment starts at its a), an
+  // impact (見せ場) or キメ cut (they land on the voice), an entrance revealed as sung (歌に合わせて1字ずつ), and a cut
+  // without an entrance motion (a = t0 − lead already shows it); and where there is no room to open it. Runs after the
+  // seams and before the EXTREME shots, the carry and the rigs (a section camera run starts at its first cut's opened a).
+  const READY = Object.freeze({ ROOM: 0.45 });
+
+  // P3's accessor (planner/kime isKime): the skeleton flag of a キメ cut, or its feature.
+  function isKime(c) { return !!c && (c.kime === true || !!(c.feat && c.feat.kime)); }
+
+  function readyWindows(ctx, cuts) {
+    const lead = ctx.timing.lead;
+    for (let i = 0; i < cuts.length; i++) {
+      const c = cuts[i];
+      if (!c.line) continue;                                   // title, interlude, outro
+      if (c.impact || isKime(c)) continue;                     // 見せ場 and キメ land on the voice
+      if (c.seamIn >= 0) continue;                             // a transition into the cut times its entrance
+      if (i > 0 && c.ground !== cuts[i - 1].ground) continue;  // a new background starts with this cut
+      const d = c.slots.arrive;
+      if (d && d.p && d.p.order === 'sung') continue;          // revealed as sung (P6's 歌ハメ sets this order)
+      const inst = instantOf(ctx, 'arrive', d);
+      if (!inst) continue;                                     // no entrance motion
+      const count = unitCount(ctx, c);
+      const total = inst.dur + inst.each * Math.max(0, count - 1);
+      const A = Math.min(READY.ROOM, Math.max(MO.MIN_DUR, total));
+      const ready = N.q6(c.t0 - lead);
+      const floor = i >= 2 ? cuts[i - 2].b : i === 1 ? Math.max(0, cuts[0].t0) : 0;
+      const a = N.q6(Math.min(ready, Math.max(floor, ready - A)));
+      if (ready - a < MO.MIN_DUR - 1e-9 || a >= c.a - 1e-9) continue;   // no room, or nothing to open: 動き始め
+      c.a = a;
+      c.ready = ready;
+    }
+  }
+
   // --- stage 7: derived values ----------------------------------------------------------------------------------
 
   function instantOf(ctx, kind, d) {
@@ -279,7 +318,7 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
   // plan's fingerprint and parts; one that only moved in time (the same scene at other absolute times, as every
   // automatic line after an edited one) reuses the fingerprint and the printed decisions (planner/encode retimeCut).
   function planCut(ctx, c, shared, beats) {
-    const repT = N.q6(MO.heroTime({ a: c.a, b: c.b }, instantOf(ctx, 'arrive', c.slots.arrive),
+    const repT = N.q6(MO.heroTime({ a: c.a, b: c.b, ready: c.ready }, instantOf(ctx, 'arrive', c.slots.arrive),
       instantOf(ctx, 'depart', c.slots.depart), unitCount(ctx, c)));
     const out = {
       key: c.key, line: c.line, role: c.role, text: c.text, emph: c.emph, impact: c.impact, note: c.note,
@@ -287,6 +326,7 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
       els: c.els, ground: c.ground, rig: c.rig, seamIn: c.seamIn,
     };
     if (c.pinKey && c.pinKey !== c.key) out.pinKey = c.pinKey;
+    if (c.ready !== undefined) out.ready = c.ready;
     const slotKeys = Object.keys(c.slots).sort();
     const partSlots = slotKeys.filter((s) => s.indexOf('.') < 0 && s !== 'orient');
     const decisions = partSlots.map((s) => [slotKind(s), c.slots[s]]);
@@ -315,6 +355,9 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
     }
     const extra = [EN.objectCanon(c.els), N.q6(c.t0 - c.a), N.q6(c.b - c.a), shared.text, beat, level];
     if (mine) extra.push(mine);
+    // 出そろい (PV22 T4): when the entrance must end, relative to t0 (only on cuts the pass opened; a cut whose window
+    // stays at its floor keeps t0 − a and b − a while its cap moves with the lead)
+    if (out.ready !== undefined) extra.push('r' + N.q6(out.t0 - out.ready));
     const enc = EN.encodeCut(out, slotKeys, extra);
     out.fp = enc.fp;
     if (key !== null) {
@@ -323,10 +366,11 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
     return { cut: out, parts: enc.parts };
   }
 
-  // The absolute times a cut's parts print besides its scene.
-  function timesOf(out) { return [out.a, out.b, out.t0, out.t1, out.repT]; }
+  // The absolute times a cut's parts print besides its scene (ready: undefined unless 出そろい opened the cut).
+  function timesOf(out) { return [out.a, out.b, out.t0, out.t1, out.repT, out.ready]; }
   function sameTimes(at, out) {
-    return at[0] === out.a && at[1] === out.b && at[2] === out.t0 && at[3] === out.t1 && at[4] === out.repT;
+    return at[0] === out.a && at[1] === out.b && at[2] === out.t0 && at[3] === out.t1 && at[4] === out.repT &&
+      at[5] === out.ready;
   }
 
   // Everything planCut encodes besides the absolute times: a reused cast entry stands for the key, line, pin key,
@@ -347,7 +391,7 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
   function encodingKey(out, cast, shared, beat, level, mine) {
     return cast.id + idOf(out.slots.arrive) + idOf(out.slots.depart) + idOf(out.slots['cam.shot']) +
       JSON.stringify([out.text, out.emph, out.note, N.q6(out.t0 - out.a), N.q6(out.b - out.a), out.ground, out.rig, out.seamIn,
-        shared.id, beat, level, mine]);
+        shared.id, beat, level, mine, out.ready === undefined ? null : N.q6(out.t0 - out.ready)]);
   }
 
   // A segment's fingerprint: everything a ground scene reads (engine/scene/build buildGround): its ground and atmos
@@ -575,11 +619,13 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
     const hist = CA.createHistory(registry);
     for (const cut of cuts) Object.assign(cut, CA.castCut(ctx, cut, hist));
 
-    // 6. tracks: grounds → seams (and their rule overrides) → EXTREME shots → carry → rigs → impulses (DESIGN_2_1 §3.9;
-    // the EXTREME overlay, DESIGN_EXTREME §2.3, does nothing without a cam.extreme pin)
+    // 6. tracks: grounds → seams (and their rule overrides) → 出そろい → EXTREME shots → carry → rigs → impulses
+    // (DESIGN_2_1 §3.9; the EXTREME overlay, DESIGN_EXTREME §2.3, does nothing without a cam.extreme pin; 出そろい,
+    // DESIGN_2_2 §5, runs only when the document chooses it)
     const grounds = TR.grounds(ctx, cuts, duration);
     const seams = TR.seams(ctx, cuts);
     ctx.seams = seams;
+    if (ctx.timing.enter === 'ready') readyWindows(ctx, cuts);    // 6b: 出そろい (PV22 T4)
     XT.shots(ctx, cuts);
     CAM.carry(ctx, cuts, seams);
     const rigs = CAM.rigs(ctx, cuts, seams, duration);
@@ -645,5 +691,5 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
     return cut ? cut.text : '';
   }
 
-  return { plan, trace, pinSig, run, canon: EN.canon, PLAN_VERSION };
+  return { plan, trace, pinSig, run, canon: EN.canon, PLAN_VERSION, READY };
 });

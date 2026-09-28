@@ -28,6 +28,10 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
   const ASKS_MAX = 40;                         // side.asks: board drafts (§2.1)
   const ASK_TEXT_MAX = 120;
   const TIMING_NUMBERS = Object.freeze(['lead', 'tail', 'leadIn', 'outro', 'tapLatency']);
+  // timing.enter, 入りの基準 (PV22 T4, DESIGN_2_2 §5): 'start' (動き始め: the entrance starts `lead` before the voice; also
+  // when absent) or 'ready' (出そろい: the entrance has ended `lead` before the voice). Optional, like timing.readCheck
+  // (読み切れない速さの行を知らせる, a boolean; absent: the document's generation decides, ui/readcheck).
+  const ENTER_MODES = Object.freeze(['start', 'ready']);
   // Section kinds of the AI song analysis (doc.song.info.sections[].kind, §4.22.4); ai/song builds its schema from it.
   const SECTION_KINDS = Object.freeze(['intro', 'verse', 'prechorus', 'chorus', 'bridge', 'interlude', 'solo', 'outro',
     'other']);
@@ -41,7 +45,7 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
     meta: ['app', 'lang'],
     sheet: ['next', 'rows'],
     row: ['id', 'src'],
-    timing: ['snap', 'lead', 'tail', 'leadIn', 'outro', 'tapLatency'],
+    timing: ['snap', 'lead', 'tail', 'leadIn', 'outro', 'tapLatency', 'enter', 'readCheck'],
     song: ['name', 'sha1', 'seconds', 'bpm', 'offset', 'meter', 'bpmConfidence', 'digest', 'info'],
     digest: ['hz', 'loud'],
     look: ['seed', 'moodSeed', 'aspect', 'backdrop', 'gen'],
@@ -88,11 +92,15 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
 
   // The generation of new documents (look.gen, PV22 / DESIGN_2_2 §0): a document made by newDoc() carries it, and the
   // 文字PV conventions, typesetting and timing defaults of that generation apply to it unless its own settings say
-  // otherwise (planner/rules). defaultDoc() never carries it: normalize() builds from defaultDoc(), so anything added
-  // there would reach every opened project, and the tests and fixtures plan documents made from it.
+  // otherwise: pinned switches through planner/rules, the 読み切れない速さ notices through ui/readcheck. One timing
+  // value is written explicitly, because it is a stored number every document has: timing.lead = NEW_WORK_LEAD.
+  // defaultDoc() never carries either: normalize() builds from defaultDoc(), so anything added there would reach
+  // every opened project, and the tests and fixtures plan documents made from it.
   const GEN = 1;
+  const NEW_WORK_LEAD = 0.2;          // 入りの早さ of a new work (PV22 T4, DESIGN_2_2 §5); defaultDoc() keeps 0.12
 
-  // newDoc() → the document of ≡ › 新しい作品, of the first run and of an emptied device: defaultDoc() with look.gen.
+  // newDoc() → the document of ≡ › 新しい作品, of the first run and of an emptied device: defaultDoc() with look.gen and
+  // the new-work lead.
   function newDoc() {
     const doc = defaultDoc();
     doc.look.gen = GEN;
@@ -159,6 +167,8 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
     if (!isObject(timing)) { bad('timing', 'must be an object'); return; }
     if (!SNAPS.includes(timing.snap)) bad('timing.snap', 'must be one of ' + SNAPS.join(' '));
     for (const k of TIMING_NUMBERS) if (!isNumber(timing[k]) || timing[k] < 0) bad('timing.' + k, 'must be a number ≥ 0');
+    if (timing.enter !== undefined && !ENTER_MODES.includes(timing.enter)) bad('timing.enter', 'must be one of ' + ENTER_MODES.join(' '));
+    if (timing.readCheck !== undefined && typeof timing.readCheck !== 'boolean') bad('timing.readCheck', 'must be a boolean');
   }
 
   function checkSong(song, bad) {
@@ -597,7 +607,7 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
 
   return {
     APP_VERSION, FORMAT, CURRENT_SCHEMA, DESIGN_SIZE, ASPECTS, LANGS, BACKDROPS, PIN_BY, FILTER_KINDS, SECTION_KINDS,
-    OUTPUT_CHOICES, KIT_KEYS, KIT_DEFAULT, ORDER, GEN,
+    OUTPUT_CHOICES, KIT_KEYS, KIT_DEFAULT, ORDER, GEN, NEW_WORK_LEAD, ENTER_MODES,
     defaultDoc, newDoc, defaultSide, validate, songInfoProblems, normalize, normalizeSide, sanitizeSide, sanitizeAsks, touched,
     serialize,
   };
