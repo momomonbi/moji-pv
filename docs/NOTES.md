@@ -9327,6 +9327,81 @@ fogIn and softVeil, and the letters stay crisp; every other cut is the same. The
 caps of 4 (5 on the impact line). The sheet also shows the phase A sets at work: the verse cuts share large horizontal
 type, the chorus cuts boxed and grid compositions with twirls and drops.
 
+### P2 文字PVの定石: phase C (camera alternation)
+
+Contract: DESIGN_2_2 §2.5 "The camera (phase C)" (the P2 design §2.4 d–f). In: `core/shot` `NMIRRORS`, `SHOTS_MIRRORED`,
+`mirrorOf` (`coerceShot`, `presetOf` and `label` read `'driftOff~m'` / `'tiltHold~m'`; `SHOT_KEYS` untouched);
+`planner/flow` `SHOT_DIR`, `shotDir`, `ZOOM_CLASS`, `ZOOM_AFTER`, `zoomClass`, `zoomFactor`, `mirrorShots`;
+`ctx.pv.on.camAlt` (= `alt`), `ctx.pv.shotFactors(st, rec)` → `{ own, zoom, zoomWhy, arc, alt }` (the arc part as before,
+the zoom factor new) and `ctx.pv.mirrorShots(cuts, trace)` in stage 6 between `XT.shots` and `CAM.carry`;
+`planner/extreme mirrorOf(key, rec, prefix, alt)`; `planner/camera` `opensOnText` and the `cam.follow` auto through
+`presetOf` (normal presets only); explain (rules `pv.mirror` / `pv.mirrorSame` / `pv.mirrorCopy`, kept before a carry;
+why codes `pv.zoomOut` / `pv.zoomIn`); every label of a mirrored shot through `mirrorOf` (shot widget, shot picker,
+AI review, `ai/changes`, lab `cameraKeyOk`); the AI brief names a mirrored normal shot by its preset; strings; tests
+(`pv_flow` phase C section, `shot`, `ai_direct`, `ui_fields`, `i18n`); the browser flow `conventions_camera`;
+`project_pv.json` regenerated (only its plan hash and three frames changed; the six other goldens matched first);
+DESIGN_2_1 §4.5.1, §14.2 and the §8 test line say that `driftOff` and `tiltHold` take the mirror suffix.
+
+**Measurements** (catalog; `pv_flow.test.js` prints them):
+
+- Framed shots (corpus(6) × 16:9/9:16/1:1, new works, with and without 「くり返しの行をそろえる」, and with framed shots pinned
+  on every third line): 4 956 driftOff / tiltHold shots, 1 587 of them mirrored (22 % of the automatic ones without the
+  pins). Against the cuts before: 244 of 248 take the other side (the 4 others read a neighbour whose parts the tracks
+  replaced after casting); with the rest of their cut: 153 / 153; aligned copies with their source: 2 068 / 2 068; right
+  after a pinned framed shot: 23 / 23. With 「動きの向きを交互にする」 off: no mirrored shot at all.
+- Push-ins and pull-backs (corpus(6) × 3 aspects): a pull-back right after a push-in 22.8 % (off 7.6 %), a push-in right
+  after a pull-back 43.8 % (24.9 %); pushWord on cuts with a marked word 13.5 % (13.3 %), right after a push-in 25.6 %
+  (25.4 %). Shot shares on lyric cuts on / off: none 50.7 / 51.3, settle 19.3 / 19.8, driftOff 10.8 / 11.8, tiltHold 8.5
+  / 8.7, pullReveal 5.1 / 3.2, pushWord 2.7 / 2.8, wideHold 1.8 / 1.3, snapZoom 1.1 / 1.1 %.
+- EXTREME (the switch on, new works, corpus(4)): consecutive ⇆ moves that are neither a whipPan pair nor a repeat take
+  the other mirror in every pair (on corpus(6): 145 / 145; the old coin: 78 / 145); the golden EXTREME documents plan
+  exactly as before as new works with 文字PVの定石 off.
+- Stability: a reroll turned no later framed shot of the same preset in 74 rerolls (basic, long); a first copy's reroll
+  left the side of all 103 far repeats (more than 4 cuts after it) that kept their preset (repeat, long × 3 seeds × 2
+  aspects, 「くり返しの行をそろえる」 off). Re-planning with shot dice, rerolls and the EXTREME switch gives the plan made
+  from scratch.
+
+**Mutation checks** (each caught by `pv_flow.test.js`, then restored): no mirror at all; a pinned framed shot giving no
+direction; the design's signs (−1 for the plain presets); no zoom factor; the zoom factor on cuts with a marked word; no
+EXTREME alternation branch; no aligned-copy rule; no within-cut rule.
+
+**Deviations from the design** (each with its reason):
+
+1. The signs of the framed shots are the engine's, not the design table's: plain `driftOff` (ox +0.18) sets the text
+   off to the **right** (the camera moves left; side +1) and plain `tiltHold` (roll −4) leans it **clockwise** on the
+   y-down screen (the view turns by −roll; rot +1, the way `tiltedCard`'s positive tilt leans it). The design had both
+   at −1. `SHOT_DIR` holds +1 for both and a test checks them against the camera (and `tiltedCard`); the overlay mirrors
+   where the wanted side is the other one (−1), not where it is +1.
+2. The zoom factors are ×3.5 / ×0.4 after a push-in and ×2.5 / ×0.5 after a pull-back, not ×1.6 / ×0.6 and ×1.4 / ×0.7:
+   pull-backs are about 5 % of the lyric cuts' shots, so the design's factors raised a pull-back after a push-in only
+   from 7.6 to 9.9 % (the acceptance asks ≥ 10 points more); these give 22.8 %, and the shot shares move by at most 2
+   points.
+3. A pinned, locked or ruled framed shot is not mirrored but still gives its cut its direction (the design's overlay
+   only set the direction of automatic ones): otherwise locking a line whose shot the overlay had mirrored would change
+   the side of the next framed shots.
+4. The overlay explains with three rules instead of one: `pv.mirror` (against the cuts before, 「前のカットと逆向きになるよう
+   左右反転した」), `pv.mirrorSame` (with the rest of the cut, 「このカットの動きの向きにそろえて左右反転した」) and
+   `pv.mirrorCopy` (like the aligned source, 「くり返しの元のカットと同じく左右反転した」), so the なぜ is true in each case;
+   a carry that follows keeps the mirror's reason before its own.
+5. `SHOT.mirrorOf(v)` reads every x-preset as `xKeyOf` does (also one outside `MIRRORS`, e.g. an AI's `'crashZoom~m'`), so
+   the labels that used `xKeyOf` keep saying 「（左右反転）」 for every value they did before.
+6. The shot picker also keeps the mirror when the current normal tile is picked again (the design named only
+   `xNow = mirrorOf(value)`; the normal branch of `onPick` now commits `xOwn(key)` like the EXTREME one).
+7. `opensOnText` and the `cam.follow` auto read `presetOf` only for normal presets: `presetOf` also returns the EXTREME
+   presets, which `SHOT.SHOTS[v]` never did, so the carry would have reached EXTREME cuts, which it never did before.
+8. The en why texts avoid hyphenated words ("moved in close", "pulling back"): the why-text scan of `ui_fields.test.js`
+   treats `push-in` as an identifier.
+
+**Browser.** New flow `conventions_camera` (a new work of the sample lyrics): a cut whose framed shot the alternation
+turned shows 「斜めに構える（左右反転）」 (or 外して置く) on its カメラワーク row, 自動, and its なぜ names the mirror;
+「動きの向きを交互にする」 off (詳しい設定) is one undo step and a work pin, after which the row names the plain preset.
+
+**Visual QA** (the app, the sample lyrics as a new work, 16:9 and 9:16, alternation on vs off at each framed shot's
+hold, scratch `work-P2/qa/outc`): the mirrored tilted holds lean the other way from the cut before (結び直して, 始発のベルが,
+紙ひこうき), the text stays whole and readable; a mirrored drift on a wide layout (hangingTags) moves the block only a
+little, because the framing keeps the block inside the safe area; on narrow blocks the text sits on the other side.
+The plan dump lists the shots of both variants cut by cut.
+
 <!-- PV22 P3 notes -->
 
 <!-- PV22 P4 notes -->
