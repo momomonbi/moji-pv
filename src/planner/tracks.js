@@ -471,6 +471,11 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
         CA.pinWarnings(ctx, 'seam', pin.v, pin, cond);
         out = fixed(pinDecision(pin));
         if (trace) shadow(ctx, req, trace, { kind: 'seam', stage: 'pin', pin, recent: rec.recent, echo: null });
+      } else if (ctx.pv && ctx.pv.seamGate(B, world)) {
+        // 「効果を重ねすぎない」 (DESIGN_2_2 §2.3.4 c): B is still over its cap after its trim and keeps its background, so
+        // no transition is added on top
+        out = fixed({ from: 'rule', v: hard });
+        if (trace) Object.assign(trace, { kind: 'seam', stage: 'rule', rule: 'pv.fx', why: [{ code: 'pv.fx', params: {} }] });
       } else {
         // (under 「曲の山に合わせて強弱をつける」 the energy is blended with the part's drive, planner/conventions)
         const energy = ctx.pv ? ctx.pv.seamEnergy(B) : B.feat.energy;

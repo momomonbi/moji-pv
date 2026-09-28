@@ -79,6 +79,11 @@ MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media
           : { code: part.drive > 0.5 ? 'pv.arc.up' : 'pv.arc.down', params: { section: part.kind || 'other' } });
       }
     }
+    // 「効果を重ねすぎない」 (DESIGN_2_2 §2.3.4 d): candidates passed over because they would stack an effect on the
+    // letters (not when every candidate clashed and the pick fell back)
+    if (!trace.letterFallback && (trace.candidates || []).some((c) => c.f && c.f.pvLetter === 0)) {
+      why.push({ code: 'pv.letter', params: {} });
+    }
     const refs = cond && cond.deny ? cond.deny[kind] : null;
     if (refs && refs.length && !trace.avoidRelaxed) why.push({ code: 'avoid', params: { n: refs.length } });
     const recent = trace.recent;

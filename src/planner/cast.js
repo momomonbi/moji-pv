@@ -207,6 +207,7 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
         if (trace) {
           Object.assign(trace, { keys, candidates: ask.trace, noFit: ask.noFit, stage: name,
             avoided: hit ? hit.avoided || null : null, avoidRelaxed: entry.relaxed });
+          if (hit && hit.letterFallback) trace.letterFallback = true;
         }
         if (hit) {
           if (entry.relaxed && !req.silent) ctx.warn({ code: 'avoid-empty', path: 'line/' + cond.line + ':avoid', line: cond.line });
@@ -719,7 +720,7 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
           script: cut.feat.script, scope: kind === 'ornament' ? 'cut' : null, chosen: st.chosen, seed, recent, echo,
           list, cutKey: cut.key, trace, silent: st.natural, ref, poolId: poolIdOf(st), cond: st.cond,
           avoid: avoids(ctx, kind) && !st.natural ? avoidOf(st, slot) : null,
-          pv: ctx.pv ? ctx.pv.partFactor(st, kind) : null,
+          pv: ctx.pv ? ctx.pv.partFactor(st, kind, idx) : null,
         });
         d = { v: got.v, from: got.from };
         if (got.base && got.base !== got.v) st.base[slot] = got.base;
@@ -760,7 +761,7 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       chooseAuto(ctx, { kind, slot, path: 'cut/' + cut.key + ':' + slot, feat: st.feat, role: cut.role,
         orient: st.chosen.orient, script: cut.feat.script, scope: kind === 'ornament' ? 'cut' : null, chosen: st.chosen,
         seed, recent, echo, list, cutKey: cut.key, trace, silent: true, cond: st.cond,
-        pv: ctx.pv ? ctx.pv.partFactor(st, kind) : null });
+        pv: ctx.pv ? ctx.pv.partFactor(st, kind, list ? idx : null) : null });
       return Object.assign(trace, { recent, echo });
     }
 
@@ -856,7 +857,16 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     }
 
     // ornament.count / filter.count (§4.16.4), raised to i + 1 by a part pinned on slot i (§3.4.3), then the slots.
+    // Under 「効果を重ねすぎない」 (DESIGN_2_2 §2.3.4 b) a busy cut lowers its counts after the filter count, before the
+    // filter slots (every slot keeps its own stream, so a lower count changes no other value).
     function decideList(st, kind) {
+      const need = decideCount(st, kind);
+      if (kind === 'filter' && st.ctx.pv) trimLists(st, need);
+      for (let i = 0; i < st.slots[kind + '.count'].v; i++) decidePart(st, kind, i);
+    }
+
+    // The count of a list kind, raised by a pinned index; → the pinned index (need).
+    function decideCount(st, kind) {
       const { ctx, cut, at } = st;
       const countSlot = kind + '.count';
       const a = ctx.look.amounts;
@@ -882,7 +892,28 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
         const trace = tracing(st, countSlot);
         if (trace) Object.assign(trace, { stage: 'rule', rule: 'index', decision: raised });
       }
-      for (let i = 0; i < st.slots[countSlot].v; i++) decidePart(st, kind, i);
+      return need;
+    }
+
+    // 「効果を重ねすぎない」: the lower counts planner/conventions gives a busy cut (decorations first, then screen
+    // effects), from 'rule' (explained as rule pv.fx); the dropped decorations go (the filter slots are not decided yet).
+    function trimLists(st, needF) {
+      const got = st.ctx.pv.trimLists(st, needF);
+      if (!got) return;
+      for (const kind of LIST_KINDS) {
+        const n = got[kind];
+        if (n === undefined) continue;
+        const countSlot = kind + '.count';
+        const old = st.slots[countSlot].v;
+        const d = { v: n, from: 'rule' };
+        setDecision(st, countSlot, d);
+        for (let i = n; i < old; i++) {
+          const slot = kind + '#' + i;
+          delete st.slots[slot]; delete st.chosen[slot]; delete st.base[slot]; delete st.ref[slot];
+        }
+        const trace = tracing(st, countSlot);
+        if (trace) Object.assign(trace, { stage: 'rule', rule: 'pv.fx', decision: d, why: null });
+      }
     }
 
     function acceptEl(field) {
@@ -951,6 +982,9 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       decidePart(st, 'lens', null);
       CAM.decideCamera(st);
       if (!camOnly) decideList(st, 'filter');
+      // a camera-only pass trims its decorations as the full pass does (the rows its neighbours read), so it decides
+      // the screen-effect count too (its own stream), but no screen effect
+      else if (ctx.pv && ctx.pv.on.fx) trimLists(st, decideCount(st, 'filter'));
       return st;
     }
 
@@ -1348,6 +1382,6 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     return {
       SLOT_SPECS, LIST_KINDS, MOTION_KINDS, castCut, createHistory, chooseAuto, poolOf, acceptPart, pinWarnings, serves,
       filterAllows, lookAx, lockFreeCtx, lockFreeIndex, beginCasts, castKeys, intern, deepFreeze, historyRow, lineCond,
-      isChoice, alignments, neighboursOf, alignedSource, REPEAT, fieldSalted,
+      isChoice, alignments, neighboursOf, alignedSource, REPEAT, fieldSalted, filterDrive,
     };
   });

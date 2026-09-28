@@ -563,9 +563,9 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
       cut.featId = got.id;
     });
     // 文字PVの定石: song parts, their sets of looks, the arc and the directions (null unless one of them is on)
-    ctx.pv = ctx.rules.any ? CONV.prepare(ctx, cuts, timed, { sheet, cached, intern: CA.intern, pool: (kind) => (kind === 'ground'
-      ? CA.poolOf(ctx, 'ground', { aspect: ctx.aspect })
-      : CA.poolOf(ctx, kind, { role: 'lyric', scope: kind === 'ornament' ? 'cut' : null })) }) : null;
+    ctx.pv = ctx.rules.any ? CONV.prepare(ctx, cuts, timed, { sheet, cached, intern: CA.intern, film: CA.filterDrive(look),
+      pool: (kind) => (kind === 'ground' ? CA.poolOf(ctx, 'ground', { aspect: ctx.aspect })
+        : CA.poolOf(ctx, kind, { role: 'lyric', scope: kind === 'ornament' ? 'cut' : null })) }) : null;
 
     // 5. cast, in time order (a cut whose inputs did not change reuses its cast, planner/cast castCut)
     if (cached) {
@@ -581,6 +581,7 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
     ctx.alignNear = CA.neighboursOf(ctx.align, cuts);
     const hist = CA.createHistory(registry);
     for (const cut of cuts) Object.assign(cut, CA.castCut(ctx, cut, hist));
+    if (ctx.pv) ctx.pv.castDone(cuts);
 
     // 6. tracks: grounds → seams (and their rule overrides) → EXTREME shots → carry → rigs → impulses (DESIGN_2_1 §3.9;
     // the EXTREME overlay, DESIGN_EXTREME §2.3, does nothing without a cam.extreme pin)

@@ -249,6 +249,13 @@ MV.def('planner/choose', ['core/hash', 'core/rng', 'core/num'], (H, R, N) => {
     let baseW = 0, refW = 0;
     function weigh(req, key, f, st) {
       const s = st || statics(req.kind, key, req.moodFilter, req.season, req.seasonPinned);
+      // 「効果を重ねすぎない」's lettering block (DESIGN_2_2 §2.3.4 d): a candidate that would stack an effect on the
+      // letters weighs 0 (pick passes it over, and takes it only when every candidate is blocked)
+      if (req.pv && req.pv.block && req.pv.block(key)) {
+        if (f) { preWeight(req, key, s, f); f.pvLetter = 0; }
+        baseW = 0; refW = 0;
+        return 0;
+      }
       const w = preWeight(req, key, s, f);
       const q = baseW = N.q6(w);
       if (req.ref) refW = withRecency(w, q, relaxed(req, key, recencyFlags(req.ref, key, s.family)));
@@ -282,6 +289,8 @@ MV.def('planner/choose', ['core/hash', 'core/rng', 'core/num'], (H, R, N) => {
     // req = { kind, keys (the pool, sorted), feat, chosen, seed, variety, recent?, ref?, echo?, noFit?, moodFilter?,
     // avoid?, trace?, season?, seasonPinned?, noMedia?, pv? (文字PVの定石: { f, member, block }, planner/conventions) }.
     // score = ln(w) + variety · gumbel(seed, key); argmax, ties → the smaller key (keys arrive sorted).
+    // pv.block(key) (「効果を重ねすぎない」's lettering rule): a blocked candidate takes part in none of the three argmaxes;
+    // when nothing else weighs > 0 the pick runs again without the block ({ …, letterFallback: true }).
     // Two more argmaxes share the same noise (planner/cast createHistory): base = without the recency factors (the
     // cut's natural pick) and ref = with the recency `req.ref` (the cut's reference pick).
     // avoid (arrange and arrive, §8.2 "no identical adjacent"): when the winner is the previous cut's value and another
@@ -289,6 +298,21 @@ MV.def('planner/choose', ['core/hash', 'core/rng', 'core/num'], (H, R, N) => {
     // possible; a pool of one still returns its part. An array of values (the cut right before a repeat that shows
     // its source's value, planner/cast avoidOf): the best candidate that is none of them.
     function pick(req) {
+      const block = req.pv && req.pv.block ? req.pv.block : null;
+      blocked = false;
+      const got = pickWith(req, block);
+      if (got !== null || !blocked) return got;
+      // 「効果を重ねすぎない」: every candidate that weighs > 0 clashes with the lettering — pick as if nothing were
+      // blocked, so a pool is never emptied (the trace starts over and says so)
+      if (req.trace) req.trace.length = 0;
+      const out = pickWith(req, null);
+      if (out) out.letterFallback = true;
+      return out;
+    }
+
+    // Whether the last pickWith passed over a candidate for the lettering block (pick is never re-entered).
+    let blocked = false;
+    function pickWith(req, block) {
       const variety = num(req.variety, 1);
       let best = null, bestScore = -Infinity, bestW = 0;
       let next = null, nextScore = -Infinity, nextW = 0;
@@ -307,6 +331,12 @@ MV.def('planner/choose', ['core/hash', 'core/rng', 'core/num'], (H, R, N) => {
         const key = keys[i];
         const s = list[i];
         const f = req.trace ? {} : null;
+        if (block !== null && block(key)) {
+          // passed over for the final, natural and reference picks alike (explain shows it with weight 0)
+          blocked = true;
+          if (f) { preWeight(req, key, s, f); f.pvLetter = 0; req.trace.push({ key, w: 0, wBase: 0, score: -Infinity, f }); }
+          continue;
+        }
         const w0 = preWeight(req, key, s, f);
         const wb = N.q6(w0);
         let flags = flagsA[i] | familyFlag(req.recent, s.family);
