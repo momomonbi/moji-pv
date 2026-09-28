@@ -838,7 +838,7 @@ test('the counts before a キメ cut: many decorations are cut to one on the lev
 });
 
 test('the hold with a tempo: a キメ cut\'s hold is one of the still holds that follow the beat', () => {
-  let n = 0;
+  let n = 0, beat = 0;
   for (const { name, doc } of corpus.corpus(2, ['16:9', '9:16'], ['basic', 'lrc'])) {
     const d = withPins(markEvery(doc, 3), { 'work:bpm': { v: 120, by: 'user' } });
     const p = plan(d);
@@ -847,9 +847,10 @@ test('the hold with a tempo: a キメ cut\'s hold is one of the still holds that
       if (lockedLine(d, c) || pinned(c.slots.dwell)) continue;
       assert.ok(K.dwellBeats.includes(c.slots.dwell.v), name + ' ' + c.key + ' ' + c.slots.dwell.v);
       n++;
+      if (c.slots.dwell.v !== K.dwell[0]) beat++;
     }
   }
-  assert.ok(n > 10, String(n));
+  assert.ok(n > 10 && beat > 0, n + ' ' + beat);
 });
 
 test('EXTREME on the cut before a キメ cut: presets tagged hard or fast weigh ×0.2', () => {

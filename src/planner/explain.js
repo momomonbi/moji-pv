@@ -1,7 +1,7 @@
 /* 文字PVメーカー v2 — original work. explain(): why a slot has its value, and the alternatives — lazy, never in the Plan (DESIGN §4.16.8; DESIGN_2_1 §2.8, §3.9, §11.2.6). */
-MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media', 'core/script', 'planner/choose',
+MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media', 'planner/choose',
   'planner/look', 'planner/plan', 'planner/fields', 'planner/segment', 'planner/kime'],
-(P, PINS, LY, MEDIA, SC, CH, LK, PL, F, SG, KI) => {
+(P, PINS, LY, MEDIA, CH, LK, PL, F, SG, KI) => {
   'use strict';
 
   const SCOPE_OF = { 'pin:cut': 'cut', 'pin:line': 'line', 'pin:work': 'work' };
@@ -243,9 +243,13 @@ MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media
     return { path, value, from, by, why, alts: [] };
   }
 
-  // キメ: a line kept whole by its mark (planner/segment: one cut up to kimeMaxCells, no split pin of its own).
+  // キメ: a line kept whole by its mark (planner/segment kimeWhole: one cut where one cut shows it big, no split pin of
+  // its own), read from its one cut (its emphasis and orientation).
   function keptWhole(plan, line) {
-    return line.cuts.length === 1 && F.lineKime(plan, line) && SC.cells(line.text) <= SG.kimeMaxCells(plan.design.aspect);
+    if (line.cuts.length !== 1 || !F.lineKime(plan, line)) return false;
+    const cut = F.cutOf(plan, line.cuts[0]);
+    const orient = cut && cut.slots && cut.slots.orient ? cut.slots.orient.v : 'h';
+    return SG.kimeWhole(plan.design.aspect, { text: line.text, lang: line.lang, emph: cut ? cut.emph : [] }, orient);
   }
 
   // The キメ rule of a parameter a rule set on this cut: 'kime.size' for the size and placement ones (KIME.sizeParams),

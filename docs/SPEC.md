@@ -108,13 +108,16 @@ and Filmora-ready output; how they are built is in `docs/DESIGN_2_1.md`.
   詳細); what is pinned or rerolled on a later copy stays as set there, and rerolling or pinning the first copy carries
   to its copies.
 - **Per line (v2.1)**: its own season (この行の季節) and parts it must not use (この行で使わない部品).
-- **キメ (v2.2)**: 行 › 文字の記号 › キメ marks the line the user wants bold (a line setting, not a lyric mark; the 歌詞
-  gutter shows 「キ」). It plays as one cut (a very long line keeps its cuts and its key cut is bold) in a big layout
-  (はみ出し or 大と小), the heading face, a fast strong entrance, a longer hold and a clean cut out, with the camera matched
-  to the layout; it never flashes or shakes unless it is also 見せ場 (`!`). The cuts before it are kept quiet unless
-  作品全体 › 見た目 › 詳しい設定 › キメの前を静かにする is off. The page shows how many lines of the work are キメ, warns when
-  there are too many, and offers to mark the other lines that sing the same words in one step. No line is キメ until the
-  user marks it; すべての固定を外す keeps the marks.
+- **キメ (v2.2)**: 行 › 文字の記号 › キメ marks the line the user wants bold (a line setting, not a lyric mark or a 固定;
+  the 歌詞 gutter shows 「キ」). It plays as one cut (a line too long to show big in one cut keeps its cuts and its key cut
+  is bold) in a big layout along the frame's long side (はみ出し, or 大と小 when its giant word is big; 強調 chooses that
+  word), larger than the median line of the video and than the cut before it, in the heading face, with a fast strong
+  entrance, a longer hold and a clean cut at the end (a transition only into a 見せ場 line), and the camera matched to the
+  layout (still with a punch-in, or a push to the emphasized word); it never flashes or shakes unless it is also 見せ場
+  (`!`). The cuts before it are kept quiet and smaller unless 作品全体 › 見た目 › 詳しい設定 › キメの前を静かにする is off.
+  The page shows how many lines of the work are キメ, warns when there are too many, and offers to mark the other lines
+  that sing the same words in one step. No line is キメ until the user marks it; すべての固定を外す keeps the marks, and
+  the header's 固定 count leaves them out.
 - **My materials (マイ素材, v2.1)**: new materials that the AI or the user builds from existing parts and a fixed set of
   primitives (shapes, particles, patterns, motion tracks, oscillators). They are data, never code; they are stored in the
   project and shown under マイ素材 in the part browser. AI-made materials appear only where they are placed, unless

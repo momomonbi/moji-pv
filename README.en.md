@@ -25,10 +25,11 @@ Click the preview or a lyric line and the **Details** column shows that part. Yo
 - **Lock** — lock a line you like and it keeps its look.
 - **Repeat lines the same way** — turn it on under whole video › Look, and a lyric line sung again (a second chorus)
   looks as it did the first time (off by default).
-- **Kime** — mark the line you most want to land with **Kime** under line › Marks: it plays boldly in one cut (a
-  big layout, the heading face, a strong entrance and a longer hold), the cuts before it stay quiet, and unlike an impact
-  line (!) it adds no flash or shake. The lyrics gutter shows a K on it; the same lyric sung elsewhere can be marked in
-  one step.
+- **Kime (punchline)** — mark the line you most want to land with **Kime (punchline)** under line › Marks: it plays
+  boldly in one cut (a frame-filling layout, the heading face, a strong entrance, a longer hold and a clean cut at the
+  end), the cuts before it stay quiet and smaller, and unlike an impact line (!) it adds no flash or shake. Emphasize a
+  word (`*word*`) to make it the giant word. The lyrics gutter shows a K on it; the same lyric sung elsewhere can be
+  marked in one step.
 - **Look history ◀ ▶** — the ◀ ▶ buttons in the play bar step through the looks you have tried.
 - Every change can be undone, and your work is autosaved in the browser.
 

@@ -9256,14 +9256,15 @@ READMEs and AI_GUIDE.
   new field flag `after`; sections had room for one custom only (文字の記号 already has the lock banner on top).
 - The several-lines toggle needed the new flag `readEach`: a line value is read per line (not per cut), so the page's
   first path alone could not show いろいろ. Other line-value rows of that page are unchanged.
-- 「この行の固定を外す」/「すべての固定を外す」 keep the mark (phase 1's command rule); the line header's 固定 count still
-  counts it (only the lyric gutter's count leaves it out, as designed).
+- 「この行の固定を外す」/「すべての固定を外す」 keep the mark (phase 1's command rule). Since the review fixes the mark is a
+  setting throughout the inspector (below): the header's 固定 count and menu leave it out, like the lyric gutter.
 - The 区切り row of a one-cut キメ line says 自動 instead of 記号 (the design names only its なぜ, `kime.split`): its `/`
   marks have no effect there, and a `derived` state would have made the row read-only, though a split pin still wins.
 - The same-lyric button compares the Plan lines' text exactly; it offers only while this line is キメ.
 - AI: only 演出3案 has the field (as designed); a line already marked (by anyone) is not changed by `on`; `off` clears
   a mark whoever set it (the user reviews every change). A locked line is not marked (its look stays; warned once).
-- The en name of the toggle is "Kime" (the design's); the README calls the section "line › Marks" (its en label).
+- The en name of the toggle is "Kime (punchline)" since the review fixes (the design's bare "Kime" is not an English
+  word); the other strings keep "kime". The README calls the section "line › Marks" (its en label).
 
 **Browser checks.** `ui_flows.py --only kime` (ja): the toggle (note, no dice) pins in one entry and the line plays as
 one キメ cut with calm cuts before it; 「この作品のキメ: 1行」 and the same-lyric button (one entry; Ctrl+Z / redo); the
@@ -9282,23 +9283,18 @@ without `many`, without `split`; the AI one-`on` rule; the AI `off` without a ma
 **Visual QA (contact sheets, scratch script on the lab page).** Two lyric sets, each with three marked lines (4, 8 and
 26 cells; and 12, 12 and 10 cells, kana-only and kanji mixed), 8 moods × {16:9, 1:1, 9:16} × {h, v} (orientation
 pinned for the whole video), each キメ cut after landing (t0 + 0.85 s) and at mid-hold: 288 キメ cuts, 576 frames, plus
-large single renders.
+large single renders. The review found what these sheets did not show (the sheets pinned the orientation and looked at
+the キメ cuts alone, not against their neighbours): the size findings and their measured answer are in "Review fixes"
+below, which replaces this paragraph's earlier 大と小 conclusions.
 
 - はみ出し (R2): 2–8 cells read clearly as はみ出し in every mood, aspect and orientation; the edge glyph loses about
   7–20 %. At 12 cells the bleed can split unevenly (kana phrases 8 + 4 cells pass its balance test) and loses about 30 %
-  of the edge glyph in 16:9 h; in vertical text the bottom row is cropped a little more than the top (the ink of the
-  vertical glyphs sits low). Still readable, so `bleedCells` stays [2, 12] here: lowering it to 10 (the design's R2
-  remedy, a worst case of about 22 %) changes `tests/golden/project_kime.json` (8 of its 34 キメ cuts are 12-cell
-  bleeds), which this package may not regenerate — a decision for the lead. 1.08 is not timid: the bleed reads at
-  every size.
-- 大と小: 1–4-cell giants are big (as the size test measures). On long lines the giant is the longest word: with kanji
-  text a 7-cell giant is ≈ 0.18 of the short side in 16:9 h; with vertical text pinned in a landscape frame the giant
-  column is bounded by the frame's height (≈ 0.1 of the short side for 7 cells), no smaller than the pieces of the line
-  would be; kana-only lines get long pseudo-words from the breaker (a 10-cell giant). The one-cut cap does not look at
-  the orientation (as designed and tested); an orientation-aware cap would be a later refinement.
+  of the edge glyph in 16:9 h; across the frame's short side (vertical in 16:9) the 12-cell bleed cut the bottom row by
+  half. Decided in the package (review fixes): a キメ cut runs along the frame's long side unless its orientation is
+  pinned, and across the short side はみ出し takes at most 10 cells (`KIME.bleedAcross`), so those crops no longer occur
+  automatically; along the long side 12 cells stay (still readable). 1.08 is not timid: the bleed reads at every size.
 - R3 (大と小 with an emphasis and 言葉へ寄る): the whispers stayed on frame at mid-hold and late in the hold in every
-  sample. Frames 0.15 s before the end often show the transition out already, which replaces the exit as designed; no
-  flash was seen on a キメ cut without 見せ場.
+  sample.
 
 **Checks (phase 2).** `python3 build.py --check`: 220 modules OK; the pages rebuilt from the final sources give no
 diff. `node tests/update_golden.js --check`: the six existing goldens and `project_kime.json` match. Full Node suite:
@@ -9307,6 +9303,85 @@ five conformance build-time budgets (60–90 ms against 60 ms under a load avera
 (243 / 243); parts and engine are untouched. Browser: `ui_flows.py` first_run (ja, en), first_run_keys, drill, pin,
 keys, values, ai_looks, cutkeys, repeat, areas, tap and kime all ok; `ui_layout.py` OK (584 layouts); `csp.py` OK (0
 violations); `i18n_pages.py` OK (56 screens per page).
+
+**Review fixes (round 1).** Every finding was checked against the code with the reviewers' probes (re-run on the fixed
+tree from `scratchpad/pv22/work-P3/fix/`); what changed, finding by finding:
+
+- *Size of 大と小 (blocker).* (1) A キメ cut runs along the frame's long side (`h` in 16:9, 21:9, 4:3; `v` in 9:16, 3:4,
+  4:5 where the script allows it; a square frame as usual), rule `kime.orient`, unless its orientation (or a
+  single-orientation layout) is pinned. (2) `planner/kime` estimates the giant as `giantSplit` does (the emphasis, else
+  the longest word of the breaker) and its size as `giantBuild` does at ×1 (`giantEm`); 大と小 stays in the set only when
+  the giant is ≤ 4 cells or ≥ 0.25 of the short side (`giantBig`), else a 2–12-cell cut takes はみ出し alone; a line that
+  one cut cannot show big (longer than はみ出し and a small giant) keeps its pieces, cut by the auto cutter to at most
+  はみ出し's length, and its focus/last piece is the キメ cut (`segment kimeWhole`). The review asked for 0.2; 0.25 was
+  needed so that the cut before a キメ cut is never as big as it (0.2 let 7-cell giants of 0.225 through, and a 6-cell
+  centred line before them measured 0.235–0.263). (3) New tests: `kime.test.js` "size" (fake measurer, the largest lyric
+  run: every unpinned キメ cut larger than its video's median lyric cut and than the level-2 cut before it, 2 seeds ×
+  3 aspects × the four fixtures) and "long lines" (one cut exactly when `kimeWhole`); `arrange_dwell.test.js`: 5–7-cell
+  giants without an emphasis in five aspects, drawn size within 0.02 of `giantEm` and ≥ 0.25 where `giantBig`. (4)
+  `project_kime.json` rewritten (its own job's output; the six older goldens match). Measured (3 seeds × {16:9, 9:16,
+  1:1} × basic/long/lrc/vertical, every 4th lyric line marked, 315 キメ cuts outside the locked line of `vertical`):
+  none at or below its video's median lyric cut (before: 92 of 324), mean percentile 0.94 (before 0.68); smallest 0.206
+  of the short side (before 0.12); by layout/orientation/aspect every group is 100 % above the median — はみ出し h 16:9
+  57, h 1:1 72, v 1:1 22, v 9:16 65; 大と小 h 16:9 48, v 9:16 37, h 1:1 9, v 1:1 2, h 9:16 3 (Latin lines, which cannot
+  run vertically). The mix moved to はみ出し 216 : 大と小 99 (before about 1 : 2): the size rule prefers the bleed where a
+  giant would be small. Renders (`fix/out/ba_*.png`, the reviewers' strips re-made): 「それでもきみがすき」 is a
+  frame-filling はみ出し in 16:9 and 1:1, 「ずっときみのそばにいる」 a vertical はみ出し or a vertical 大と小 in 9:16.
+- *Camera of 大と小 (major).* 大と小 without an emphasis: shot `none` by rule `kime.still` (「キメの構図が画面いっぱいなので、
+  カメラは止めて入りで打つ」) and so the 衝撃 punch-in; with an emphasis the push to the giant word as before
+  (`kime.shot`); other layouts (pinned or `kime.limited`) unchanged. The lens/shot invariant holds (test "guarantees").
+- *Calm before the hit (major).* Level 2 takes no キメ layout and none tagged bold/fast (`req.only` predicate
+  `kime.calm2arr`, the whole pool where it would leave nothing); level 1 weighs arrange with the calm factor; text ×0.9
+  at level 2 (was 0.94). Measured on the corpus above: the level-2 cut is never as big as the キメ cut (0 of 306; before
+  90 of 324); 0 level-2 はみ出し (before 22). The cut *after* a キメ cut is not calmed (not asked); it is as big in 10 of 324.
+- *The exit (minor).* Out of a キメ cut the hard cut by rule `kime.seamOut` unless the seam is pinned or the next cut is
+  見せ場 (the design's no-flash seam predicate is gone with it); 「くり返しの行をそろえる」 never copies a seam out of a キメ
+  cut. Measured: 28 transitions out of 315 キメ cuts, all into 見せ場 cuts (before 170 of 324). SPEC, DESIGN §3 and the
+  note now say "a clean cut at the end".
+- *Lock (major).* `lockPayload` also pins the parameters a キメ rule set (`KIME.params`, pfrom `'rule'`) on a キメ cut;
+  other rule parameters stay unpinned (their inputs are locked). The reviewers' probe: 0 of 42 locked キメ cuts change
+  when the mark is removed (before 42). Test "lock" (mark → lock → unmark: same slots and parameters).
+- *Alignment × calm (minor).* `shotRules` returns the pool before the calm mask (`allBits`); `autoShot` weighs an aligned
+  copy's shot against it. Probe: 0 of 72 aligned copies at level 2 lose their source's shot (before 10). Test
+  "alignment: a copy right before a キメ cut".
+- *No flash × the part filters (minor).* `chooseAuto`: a predicate `only` on a list slot that empties a pool that had
+  members gives `none` by its rule (`kime.noFlash`), with no `pool-empty` and no fallback part. Probe: 0 screen effects
+  outside the user's filter (before 25 of 44). The seam half of the finding went away with `kime.seamOut`.
+- *UI (major + minor).* The mark and 「キメの前を静かにする」 are settings (`ui/fields` `SETTING_SLOTS`, `isSettingPath`,
+  field flag `setting`): plain switches (no 固定 tag, ×, ⋯ or Del), undo 「キメをオン（{scope}）」/「キメをオフ（{scope}）」 and
+  「キメの前を静かにする: オン/オフ」, and the header's 固定 n and its menu leave them out, so 「すべて外す」 is off on a line whose
+  only pin is the mark. `ui_flows.py` kime checks the label, the missing tag and ×, 固定 n before and after, and the
+  disabled button; it now also runs on the English page.
+- *Discoverability (minor).* `kimeInfo.emph` → 「強調（*言葉*）を付けると、その言葉を特大にします」 under the toggle when the
+  キメ cut is 大と小 without an emphasis (`i18n_pages.py` screen `kime-emph`).
+- *なぜ of size parameters (minor).* `kime.size` 「キメの行なので大きく見せる配置」 for overflow/anchor/ratio/tuck; `kime.param`
+  for dur/each/shake.
+- *English (minor).* "Kime (punchline)".
+- *Tests that missed their rule (minor).* New cases in `kime.test.js`: carry into a later-piece キメ cut (invented long
+  lines with emphasized last pieces), EXTREME ×0.2 on level 2 (explain weights against the unmarked plan), the level-1
+  decoration cap (rule `kime.calm`), the calm text scale, the 4 s span, the beat holds with a tempo (a beat hold is
+  actually chosen), the seam copies into and out of a キメ cut (a pinned seam into the source), the calm lens keep, a
+  sig-less pin on a former piece, the orientation and the across-axis bleed cap, the flash-only filter, the lock. Two
+  are defensive and stay so: the level-1 screen-effect cap (the automatic count is `min(2, ⌊0.8 · drive + r⌋)` with
+  drive ≤ 1, so at most 1 before the 見せ場 extra — the cap cannot bind), and the seam memo key `kimeOut` (a cached seam is
+  reused only with its cut's cast, and marking the cut before changes that cast's history — even for a locked line,
+  whose lock-free view the history reads; the lock-and-mark sequence was added to the cache test anyway).
+
+**Mutation checks (review fixes)** (each on a scratch copy, `kime.test.js` / `arrange_dwell.test.js`, restored): the
+orientation rule, the giant restriction in the cast, the giant condition in `kimeWhole`, the still shot, the level-2 and
+level-1 calm of arrange, the calm scale 0.9, the hard cut out, both seam-copy guards, the lock of キメ parameters, the
+aligned shot's unmasked pool, the no-flash `none`, `kime.size`, `emMin` 0.2, `bleedAcross` 12, the carry, the EXTREME
+×0.2, the calm text scale, the calm lens keep, the 4 s span, `kimeAttach`'s owner check, the beat holds and the level-1
+decoration cap each fail a test other than the golden; the seam memo key does not (above). Browser: 固定 n counting the
+mark, and the setting row showing a tag and × each fail `ui_flows.py --only kime` (ja and en).
+
+**Deviations (review fixes).** The giant floor is 0.25, not the review's 0.2 (above). Where 大と小's giant is small and
+the line is too long for はみ出し, the line keeps its pieces, cut to at most はみ出し's length — a new condition of the
+one-cut rule (`kimeWhole`), which the design's "one cut up to kimeMaxCells" did not have. The design's seam-out
+no-flash predicate (`kime.noFlashSeam`) is replaced by the hard cut out. The re-cast bound of the cache test is 9 (was 8):
+the line comes back in two pieces after the mark goes, and the cut after the キメ cut now reads a different shot. The
+review asked to measure "the largest run"; the tests measure the largest *lyric* run (a sidebar's index number is a
+decoration, not the lyric).
 
 <!-- PV22 P4 notes -->
 
