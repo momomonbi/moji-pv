@@ -165,7 +165,12 @@ function perfDocs(MV) {
 module.exports = { docWith, morphDoc, rowId, MORPH_ROWS, GOLDEN_MORPH_ROWS, goldenDocs, glyphTimes, comparatorOf, perfDocs };
 
 // node tests/helpers/glyph_docs.js --perf → the perf documents as JSON (tests/browser/perf.py)
+// node tests/helpers/glyph_docs.js --golden → { morph, weight }: the golden documents (tests/browser/contact_sheet.py --doc)
 if (require.main === module && process.argv.includes('--perf')) {
   const { load } = require('./load.js');
   process.stdout.write(JSON.stringify(perfDocs(load())));
+} else if (require.main === module && process.argv.includes('--golden')) {
+  const { load } = require('./load.js');
+  const ground = load().use('parts/catalog').defaultRegistry().fallback('ground');
+  process.stdout.write(JSON.stringify(Object.fromEntries(goldenDocs(ground).map((d) => [d.name, d.doc]))));
 }

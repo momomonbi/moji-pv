@@ -1,6 +1,6 @@
 <!doctype html><html lang="ja"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-nPCazS0zd/xJ7bKrgQXQFRcAVLuCq8xnRc8WxfTh0yk='; style-src 'sha256-CBzRvq4sWr3CF69hafDp1l8UkHnSy18JQMXGJJhPDYI=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-0AgytiNqMxZuNj5gUbt7yFetRVp69Mu3394RTQYcDIk='; style-src 'sha256-CBzRvq4sWr3CF69hafDp1l8UkHnSy18JQMXGJJhPDYI=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
 <title>文字PVメーカー</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -58637,7 +58637,9 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core
     const rec = engineFor(o.parts || defaultSource(), false, false);
     const [w, h] = o.w && o.h ? [o.w, o.h] : fitSize(o.aspect || '16:9', 240, 135);
     const surface = makeSurface(w, h, true);
-    const stats = rec.engine.thumb({ kind: o.kind, key: o.key, params: o.params }, surface, { aspect: o.aspect });
+    // t, text, textB (v2.2, browser tests): the tile at that time and with those lines, as the part browser asks for them
+    const stats = rec.engine.thumb({ kind: o.kind, key: o.key, params: o.params }, surface, { aspect: o.aspect, t: o.t, text: o.text,
+      textB: o.textB });
     return { variance: variance(surface), hash: hashPixels(surface), w, h, stats };
   }
 

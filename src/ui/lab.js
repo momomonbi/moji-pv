@@ -1168,7 +1168,9 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core
     const rec = engineFor(o.parts || defaultSource(), false, false);
     const [w, h] = o.w && o.h ? [o.w, o.h] : fitSize(o.aspect || '16:9', 240, 135);
     const surface = makeSurface(w, h, true);
-    const stats = rec.engine.thumb({ kind: o.kind, key: o.key, params: o.params }, surface, { aspect: o.aspect });
+    // t, text, textB (v2.2, browser tests): the tile at that time and with those lines, as the part browser asks for them
+    const stats = rec.engine.thumb({ kind: o.kind, key: o.key, params: o.params }, surface, { aspect: o.aspect, t: o.t, text: o.text,
+      textB: o.textB });
     return { variance: variance(surface), hash: hashPixels(surface), w, h, stats };
   }
 

@@ -14,6 +14,9 @@ param (the fake store's test parts, and the catalog's media parts: photoPan, pho
 must all be there) × every aspect × a still and a video fixture of tests/helpers/fake_media.js, in export quality (not
 blank, no errors, the medium drawn). DESIGN_EXTREME: the twelve EXTREME presets (lab kind xshot) take the camera checks
 too, rendered and as picker thumbnails.
+DESIGN_2_2 §4: the part browser tiles of モーフ (glyphMorph, with the page's own shared-letter lines 青い空 / 青い海) and of
+太る, 脈打つ太さ and 細る animate: over 16 times of the canned 3.2 s sample each tile shows at least 4 different pictures,
+none blank.
 Run: PW_EXECUTABLE=/opt/pw-browsers/chromium python3 tests/browser/parts_gallery.py [--parts examples] [--aspects 16:9,9:16]
 """
 import argparse
@@ -50,6 +53,25 @@ async (o) => {
         out.push({ kind: job.kind, key: job.key, aspect: job.aspect, asset: job.asset || '', u, error: String(e && e.stack || e) });
       }
     }
+  }
+  return out;
+}
+"""
+
+# v2.2: the tiles of the glyph motion parts at several times (engine.thumb at t), as the part browser animates them.
+GLYPH_TILES = (('seam', 'glyphMorph'), ('arrive', 'weightGrow'), ('dwell', 'weightPulse'), ('depart', 'weightThin'))
+TILE_ANIM = """
+async (o) => {
+  const out = [];
+  for (const job of o.jobs) {
+    const frames = [];
+    for (let i = 0; i < 16; i++) {
+      const t = (3.2 * (i + 0.5)) / 16;
+      const r = window.__lab.thumb({ parts: 'catalog', kind: job.kind, key: job.key, aspect: '16:9', w: 240, h: 135, t,
+        text: job.kind === 'seam' ? '青い空' : undefined, textB: job.kind === 'seam' ? '青い海' : undefined });
+      frames.push({ hash: r.hash, variance: r.variance });
+    }
+    out.push({ kind: job.kind, key: job.key, frames });
   }
   return out;
 }
@@ -146,6 +168,16 @@ async def run(args):
                     failures.append(where + ': blank tile (variance %.2f, %d glyphs)' % (r['variance'], r['glyphs']))
                     bad += 1
             print('%s %s camera thumbnails: %d tiles' % ('FAIL' if bad else 'ok  ', src, len(thumbs)))
+            if 'catalog' in sources:
+                tiles = await page.evaluate(TILE_ANIM, {'jobs': [{'kind': k, 'key': key} for k, key in GLYPH_TILES]})
+                for r in tiles:
+                    distinct = len({f['hash'] for f in r['frames']})
+                    blank = sum(1 for f in r['frames'] if not f['variance'] > EPS)
+                    ok = distinct >= 4 and blank == 0
+                    print('%s catalog %s/%s tile animates: %d different pictures over 16 times, %d blank' % (
+                        'ok  ' if ok else 'FAIL', r['kind'], r['key'], distinct, blank))
+                    if not ok:
+                        failures.append('%s/%s tile: %d different pictures, %d blank' % (r['kind'], r['key'], distinct, blank))
             # the media mode (DESIGN_2_1 §11.8.2): parts with a media param × aspects × a still and a video
             media = info.get('media')
             if not media:
