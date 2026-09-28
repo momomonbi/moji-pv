@@ -74,7 +74,8 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
     }));
   }
 
-  // createRenderer({ canvas: CanvasFactory, registry, assets, now?, strict?, spriteBudget?, postCopy? }) → Renderer
+  // createRenderer({ canvas: CanvasFactory, registry, assets, now?, strict?, spriteBudget?, postCopy?, faceReady? }) → Renderer
+  // (faceReady, v2.2: see draw.createDrawContext)
   // (postCopy: lab and tests only — fx.own copies, the post stack as it drew before filters could draw in place)
   //   render(surface, plan, t, opts, source) → FrameStats   source = { cut(i), ground(i), fresh(kind, i), fontKey, face }
   //   warmAt(plan, source, t) · beginWarm() · warmBytes() · lastTime() · hitTest(x, y) · boxes() · stats() · level
@@ -100,7 +101,8 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
     const tiles = PO.createTileBank(factory);
     const ctl = PO.createFx({ pool, tiles, copy: o.postCopy === true });
     const scratch = SF.surfaceOf(factory, SP.MAX_SIDE, SP.MAX_SIDE, true);
-    const dc = DR.createDrawContext({ sprites, paints, scratch, pool, blurred: (src, px) => PO.blurred(pool, src, px, ctl.caps) });
+    const dc = DR.createDrawContext({ sprites, paints, scratch, pool, blurred: (src, px) => PO.blurred(pool, src, px, ctl.caps),
+      faceReady: o.faceReady });
     const picks = PK.createPickList();
     const statics = new Map();                     // static layers: scene → [raster per layer] (LRU)
     const errors = [];

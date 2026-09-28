@@ -8,9 +8,9 @@ MV.def('engine/scene/behave', ['core/num', 'core/curve', 'core/rng', 'core/motio
   const DEG = N.DEG;
 
   // The pooled DELTA pose of K.perGlyph / K.perGlyphHold / K.moves: angles in DEGREES (§4.18.3). No px/py: pivots are
-  // set by the adapter from the motion's unit.
+  // set by the adapter from the motion's unit. `wt` (v2.2) is a weight offset in CSS weight units (ADD, scale 1).
   const DELTA = Object.freeze(['x', 'y', 'z', 'rot', 'kx', 'ky', 'rx', 'ry', 'sx', 'sy', 'alpha', 'reveal', 'blur', 'tint',
-    'glow', 'shard', 'echo', 'jx', 'jy', 'pixel']);
+    'glow', 'shard', 'echo', 'jx', 'jy', 'pixel', 'wt']);
   const MUL = Object.freeze(['sx', 'sy', 'alpha', 'reveal']);
   const ADD = Object.freeze(DELTA.filter((c) => !MUL.includes(c)));
   const ANGLE = Object.freeze(['rot', 'kx', 'ky', 'rx', 'ry']);
@@ -168,7 +168,7 @@ MV.def('engine/scene/behave', ['core/num', 'core/curve', 'core/rng', 'core/motio
 
   function resetDelta() {
     D.x = 0; D.y = 0; D.z = 0; D.rot = 0; D.kx = 0; D.ky = 0; D.rx = 0; D.ry = 0; D.sx = 1; D.sy = 1; D.alpha = 1;
-    D.reveal = 1; D.blur = 0; D.tint = 0; D.glow = 0; D.shard = 0; D.echo = 0; D.jx = 0; D.jy = 0; D.pixel = 0;
+    D.reveal = 1; D.blur = 0; D.tint = 0; D.glow = 0; D.shard = 0; D.echo = 0; D.jx = 0; D.jy = 0; D.pixel = 0; D.wt = 0;
   }
 
   function mergeDelta(P, i) {
@@ -242,7 +242,7 @@ MV.def('engine/scene/behave', ['core/num', 'core/curve', 'core/rng', 'core/motio
   // --- building motion behaviours ------------------------------------------------------------------------------
 
   const TRACK_UNITS = Object.freeze({ x: 'em', y: 'em', z: 'em', rot: 'deg', kx: 'deg', ky: 'deg', rx: 'deg', ry: 'deg',
-    blur: 'em' });
+    blur: 'em', wt: '' });
   const UNIT_KINDS = Object.freeze(['', 'em', 'du', 'deg', 'rad', 'x']);
 
   function identityOf(col) { return MUL.includes(col) ? 1 : 0; }
@@ -346,11 +346,13 @@ MV.def('engine/scene/behave', ['core/num', 'core/curve', 'core/rng', 'core/motio
   // The per-glyph progress curve of an `ease` param: any Curve (an unreadable value is linear, never an error).
   function easeOf(v) { return CV.fn(v); }
 
-  // make for arrive/depart parts built by K.perGlyph(fn) or K.moves(spec). kind = 'arrive' | 'depart'.
+  // make for arrive/depart parts built by K.perGlyph(fn, opts) or K.moves(spec). kind = 'arrive' | 'depart'.
+  // v2.2 (DESIGN_2_2 §4): source.prep(env, target, p) → p' adds build-time params from the target (it must not change
+  // the given object); source.wt(p') → [lo, hi] declares the weight offsets the behaviour may write (behaviour.wt).
   function glyphMotionMaker(kind, source) {
     return function make(env, target, p) {
       if (!target || target.to <= target.from) return [];
-      const params = p || {};
+      const params = source.prep ? source.prep(env, target, p || {}) : (p || {});
       const unit = source.unit || 'glyph';
       const tm = motionTiming(env, target, params, kind, unit);
       const t0 = kind === 'arrive' ? env.times.a : env.times.out;
@@ -361,8 +363,17 @@ MV.def('engine/scene/behave', ['core/num', 'core/curve', 'core/rng', 'core/motio
         fn: source.fn || null, tracks: source.motion ? tracksFor(source.motion, kind, params) : null,
         pivot: unit === 'glyph' ? null : STG.pivots(env, target, unit),
       });
+      if (source.wt) b.wt = reachOf(source.wt(params));
       return [b];
     };
+  }
+
+  // A declared weight reach [lo, hi] (lo ≤ 0 ≤ hi, finite), frozen; throws for a malformed one (a part bug).
+  function reachOf(r) {
+    if (!(Array.isArray(r) && r.length === 2 && finite(r[0]) && finite(r[1]) && r[0] <= r[1])) {
+      throw new BehaviourError('bad-behaviour', 'wt must be [lo, hi] weight offsets');
+    }
+    return Object.freeze([Math.min(0, r[0]), Math.max(0, r[1])]);
   }
 
   function tracksFor(motion, kind, p) {
@@ -385,18 +396,19 @@ MV.def('engine/scene/behave', ['core/num', 'core/curve', 'core/rng', 'core/motio
     return out;
   }
 
-  // make for dwell parts built by K.perGlyphHold(fn). A `curve` param that is not linear warps the hold clock over
-  // [rest, out] (DESIGN_2_1 §2.3 dwell.curve).
-  function holdMaker(fn) {
+  // make for dwell parts built by K.perGlyphHold(fn, opts). A `curve` param that is not linear warps the hold clock over
+  // [rest, out] (DESIGN_2_1 §2.3 dwell.curve). opts (v2.2) = { prep, wt } as for glyphMotionMaker.
+  function holdMaker(fn, opts) {
     return function make(env, target, p) {
       if (!target || target.to <= target.from) return [];
       const n = target.to - target.from;
-      const params = p || {};
+      const params = opts && opts.prep ? opts.prep(env, target, p || {}) : (p || {});
       const arrived = target.arrived || new Float32Array(n).fill(env.times.rest);
       const hold = Object.assign(baseFields(env, target, params), {
         phase: PH.REST, live: 'during', from: target.from, to: target.to, t0: env.times.rest, t1: env.times.out,
         run: runHold, fn, rest: env.times.rest, out: env.times.out, arrived, rank: identityRanks(n),
       });
+      if (opts && opts.wt) hold.wt = reachOf(opts.wt(params));       // warped and masked copies keep it
       return [warped(hold, params.curve, env.times.rest, env.times.out)];
     };
   }

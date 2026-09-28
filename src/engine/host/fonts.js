@@ -10,6 +10,12 @@ MV.def('engine/host/fonts', ['engine/text/faces'], (FACES) => {
   //   epoch: +1 whenever a requested face finishes loading.  status(ref)  on('epoch', fn) → off
   // A family's characters accumulate: when new ones arrive, one new URL carrying all of them is requested, because a
   // later @font-face rule for the same family replaces the earlier one rather than adding to it.
+  // v2.2 draw-only faces (DESIGN_2_2 §4, weight animation): request(refs, text, { drawOnly: true }) and
+  // ready(refs, text, { drawOnly: true, timeoutMs }) load extra served weights that are only drawn, never laid out:
+  // they never move the epoch (no scene is rebuilt or re-measured), have their own stylesheets and characters, are
+  // never declared for a weight the main path owns, and are not listed by failures(). drawStatus(ref) → the main state
+  // of a main face, else the draw-only state ('idle' | 'loading' | 'ready' | 'failed'); on('draw', fn) → off is called
+  // when a draw-only face becomes ready.
   function createFontBook({ document: doc, timeoutMs: defaultTimeout = DEFAULT_TIMEOUT_MS } = {}) {
     const sheets = new Map();          // url → Promise<boolean> (stylesheet loaded)
     const chars = new Map();           // family → characters requested so far (sorted, unique)
@@ -18,6 +24,11 @@ MV.def('engine/host/fonts', ['engine/text/faces'], (FACES) => {
     const watches = new Map();         // ref.key + url + load text → Promise<boolean> (pending or loaded; failures drop out)
     const listeners = new Set();
     const known = new Map();           // ref.key → ref (for failures())
+    const drawStates = new Map();      // ref.key → 'loading' | 'ready' | 'failed' (draw-only faces)
+    const drawUrl = new Map();         // ref.key → the newest stylesheet URL that declares it (draw-only)
+    const drawChars = new Map();       // family → the characters asked for draw-only faces (apart from `chars`)
+    const drawWatches = new Map();     // ref.key + url + load text → Promise<boolean>
+    const drawListeners = new Set();
     let epoch = 0;
 
     function addSheet(url) {
@@ -122,7 +133,71 @@ MV.def('engine/host/fonts', ['engine/text/faces'], (FACES) => {
       return jobs;
     }
 
-    function request(refs, textByFamily = {}) { start(refs, textByFamily); }
+    // --- draw-only faces (v2.2) ---
+
+    function groupRefs(refs) {
+      const out = new Map();
+      for (const entry of refs || []) {
+        const ref = toRef(entry);
+        if (!out.has(ref.family)) out.set(ref.family, []);
+        out.get(ref.family).push(ref);
+      }
+      return out;
+    }
+
+    // Starts the draw-only loads of the refs the main path does not own; returns [{ ref, url }].
+    function startDraw(refs, text) {
+      const jobs = [];
+      for (const [family, all] of groupRefs(refs)) {
+        const list = all.filter((r) => !states.has(r.key));            // a weight the main path owns is never redeclared
+        if (!list.length) continue;
+        const merged = FACES.uniqueChars((drawChars.get(family) || '') + textFor(text, family));
+        drawChars.set(family, merged);
+        const [url] = FACES.cssUrls(list, { [family]: merged });
+        for (const ref of list) {
+          // the newest declaration is the one a canvas draws with: a newer sheet means loading again until it is in
+          if (drawUrl.get(ref.key) !== url) { drawUrl.set(ref.key, url); drawStates.set(ref.key, 'loading'); }
+          jobs.push({ ref, url });
+          watchDraw(ref, url);
+        }
+      }
+      return jobs;
+    }
+
+    function watchDraw(ref, url) {
+      const text = FACES.loadText(ref, drawChars.get(ref.family) || '');
+      const id = ref.key + '\u0000' + url + '\u0000' + text;
+      if (drawWatches.has(id)) return drawWatches.get(id);
+      const p = addSheet(url).then((sheetOk) => {
+        if (!sheetOk) return false;
+        const fonts = doc && doc.fonts;
+        if (!fonts || typeof fonts.load !== 'function') return true;
+        return fonts.load(ref.css(100), text || undefined).then((list) => familyLoaded(list, ref.family), () => false);
+      }).then((ok) => {
+        const newest = drawUrl.get(ref.key) === url;
+        if (ok && newest) {
+          const was = drawStates.get(ref.key);
+          drawStates.set(ref.key, 'ready');
+          if (was !== 'ready') for (const fn of [...drawListeners]) fn({ ref });
+        } else if (!ok) {
+          if (newest && drawStates.get(ref.key) !== 'ready') drawStates.set(ref.key, 'failed');
+          if (drawWatches.get(id) === p) drawWatches.delete(id);
+        }
+        return ok;
+      });
+      drawWatches.set(id, p);
+      return p;
+    }
+
+    function drawStatus(ref) {
+      if (!ref) return 'idle';
+      return states.has(ref.key) ? states.get(ref.key) : (drawStates.get(ref.key) || 'idle');
+    }
+
+    function request(refs, textByFamily = {}, opts) {
+      if (opts && opts.drawOnly) startDraw(refs, textByFamily);
+      else start(refs, textByFamily);
+    }
 
     function withTimeout(p, ms) {
       return new Promise((resolve) => {
@@ -131,7 +206,8 @@ MV.def('engine/host/fonts', ['engine/text/faces'], (FACES) => {
       });
     }
 
-    async function ready(refs, text = '', { timeoutMs = defaultTimeout } = {}) {
+    async function ready(refs, text = '', { timeoutMs = defaultTimeout, drawOnly = false } = {}) {
+      if (drawOnly) return readyDraw(refs, text, timeoutMs);
       const jobs = start(refs, text);
       const results = await Promise.all(jobs.map(({ ref, url }) => withTimeout(watch(ref, url), timeoutMs)));
       const loaded = [], failed = [];
@@ -142,14 +218,37 @@ MV.def('engine/host/fonts', ['engine/text/faces'], (FACES) => {
       return { loaded, failed };
     }
 
+    // ready() of draw-only faces: a ref the main path owns counts as loaded when its main face is.
+    async function readyDraw(refs, text, timeoutMs) {
+      const jobs = startDraw(refs, text);
+      const results = await Promise.all(jobs.map(({ ref, url }) => withTimeout(watchDraw(ref, url), timeoutMs)));
+      const loaded = [], failed = [];
+      const seen = new Set();
+      jobs.forEach(({ ref, url }, i) => {
+        seen.add(ref.key);
+        if (results[i] || drawStatus(ref) === 'ready') loaded.push(ref);
+        else { failed.push(ref); if (drawUrl.get(ref.key) === url && drawStates.get(ref.key) !== 'ready') drawStates.set(ref.key, 'failed'); }
+      });
+      for (const entry of refs || []) {
+        const ref = toRef(entry);
+        if (seen.has(ref.key)) continue;
+        seen.add(ref.key);
+        (states.get(ref.key) === 'ready' ? loaded : failed).push(ref);
+      }
+      return { loaded, failed };
+    }
+
     return {
       request,
       ready,
+      drawStatus,
       get epoch() { return epoch; },
       status: (ref) => (ref && states.get(ref.key)) || 'idle',
       failures: () => [...known.values()].filter((ref) => states.get(ref.key) === 'failed'),
       on(event, fn) {
-        if (event !== 'epoch' || typeof fn !== 'function') return () => {};
+        if (typeof fn !== 'function') return () => {};
+        if (event === 'draw') { drawListeners.add(fn); return () => drawListeners.delete(fn); }
+        if (event !== 'epoch') return () => {};
         listeners.add(fn);
         return () => listeners.delete(fn);
       },

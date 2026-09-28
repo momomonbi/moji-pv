@@ -1,7 +1,7 @@
 /* 文字PVメーカー v2 — original work. Drawing an evaluated scene layer: glyphs on the direct or sprite path, shapes, paints, particles, images, picks (DESIGN §4.19.5–7). */
 MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'engine/scene/frame', 'engine/render/sprites',
-  'engine/render/shapes'],
-(C, MAT, T, F, SP, SH) => {
+  'engine/render/shapes', 'engine/text/faces'],
+(C, MAT, T, F, SP, SH, FACES) => {
   'use strict';
 
   // The glyph path is chosen from the glyph's pose at this frame only — never from its size or the output scale — so
@@ -14,6 +14,11 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
   const SHARDS = 6;
   const FLIP_SHADE = 0.35;
   const TYPE = T.TYPE;
+  // Weight pairs (v2.2, DESIGN_2_2 §4): a glyph whose pose has wt ≠ 0 draws the two served weights around its face's
+  // weight + wt, the heavier at a·f and the lighter over it at a(1 − f)/(1 − a·f), so the core keeps alpha a. That holds
+  // for one solid fill: the styles whose body is a fill (and the glow style, whose halo is drawn once, under it). The
+  // others (outline, shadow, duo) take the nearest served weight: the weight changes in steps.
+  const CROSSFADE_STYLES = new Set(['plain', 'glow']);
 
   // --- colours -----------------------------------------------------------------------------------------------------
 
@@ -73,7 +78,9 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
   //   parallax of the layer being drawn: a medium at another camera factor gets its own view, §11.9.3), stillMode
   //   (0 every node, 1 all but `still` media, 2 only `still` media: those are drawn outside a seam composite) and
   //   ghostTl (null, or while fx.textAt draws the text layers at an earlier time, the scene time of the frame itself:
-  //   media on the show clock keep that frame's media time)
+  //   media on the show clock keep that frame's media time); v2.2: faceReady (null, or (FontRef) → whether a served
+  //   weight other than the scene's own faces is loaded: weight pairs draw only loaded weights; null counts every one as
+  //   loaded) and recX, recHi, recLo (pooled glyph records of a weight pair)
   function createDrawContext(o) {
     return {
       g: null, D: new Float32Array([1, 0, 0, 1, 0, 0]), pal: null, W: 0, H: 0, scale: 1, q: null, assets: null,
@@ -86,6 +93,7 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
       pool: o.pool || null, blurred: o.blurred || null, over: 1, overKey: 0,
       cam: null, layerK: 1, stillMode: 0, ghostTl: null, depthCam: { x: 0, y: 0, zoom: 1, roll: 0, shakeX: 0, shakeY: 0, fz: 1 },
       VM: new Float32Array(6),
+      faceReady: typeof o.faceReady === 'function' ? o.faceReady : null, recX: {}, recHi: {}, recLo: {},
     };
   }
 
@@ -158,6 +166,82 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
       g.fillStyle = pal.accent;
       g.fillText(rec.ch, 0, 0);
     }
+  }
+
+  // --- weight pairs (v2.2) ----------------------------------------------------------------------------------------------
+
+  // A pooled copy of rec with another face (no allocation per frame).
+  function recAs(target, rec, font) {
+    Object.assign(target, rec);
+    target.font = font;
+    return target;
+  }
+
+  // The alpha of the lighter body drawn over the heavier one at a·f, so the covered core composites to a.
+  function lighterAlpha(a, f) { return (a * (1 - f)) / (1 - a * f); }
+
+  // A style that cannot crossfade takes the nearest served weight of the pair.
+  function snapPair(wp, base) {
+    if (wp.hi && wp.f >= 0.5) wp.lo = wp.hi;
+    wp.hi = null;
+    wp.f = 0;
+    wp.plain = wp.lo === base;
+  }
+
+  // Only loaded weights are drawn: a heavier rung that is not ready is dropped, a lighter one is replaced by the nearest
+  // loaded weight toward the face's own (which ends the walk: the scene was built with it).
+  function readyPair(dc, base, wp) {
+    if (wp.hi && !dc.faceReady(wp.hi)) { wp.hi = null; wp.f = 0; }
+    if (wp.lo !== base && !dc.faceReady(wp.lo)) wp.lo = nearestReady(dc, base, wp.lo);
+    wp.plain = !wp.hi && wp.lo === base;
+  }
+
+  function nearestReady(dc, base, from) {
+    const L = FACES.ladderOf(base);
+    const up = from.weight < base.weight;
+    let k = L.indexOf(from.weight);
+    if (k < 0) return base;
+    for (k += up ? 1 : -1; k >= 0 && k < L.length; k += up ? 1 : -1) {
+      const w = L[k];
+      if (up ? w >= base.weight : w <= base.weight) return base;
+      const r = FACES.atWeight(base, w);
+      if (dc.faceReady(r)) return r;
+    }
+    return base;
+  }
+
+  // drawDirect with a weight pair: the echo copies and the tint copy in the face fx (the nearer weight), the body in the
+  // heavier weight at alpha·f, then in the lighter over it (or once, when the pair has no heavier weight).
+  function drawDirectW(dc, g, rec, fx, M, alpha, ink, ink2, tint, echo, wp) {
+    const pal = dc.pal;
+    if (echo > 0) {
+      textSetup(dc, g, cssOf(fx.font, fx.em));
+      const a = 0.5 * echo * alpha, dx = ECHO_SHIFT * echo * fx.em;
+      for (let s = -1; s <= 1; s += 2) {
+        setMatrix(g, M);
+        g.translate(s * dx, 0);
+        localTurn(g, fx);
+        g.globalAlpha = a;
+        g.fillStyle = s < 0 ? pal.shiftB : pal.shiftA;
+        g.fillText(fx.ch, 0, 0);
+      }
+    }
+    if (wp.hi) directBody(dc, g, recAs(dc.recHi, rec, wp.hi), M, alpha * wp.f, ink, ink2);
+    directBody(dc, g, recAs(dc.recLo, rec, wp.lo), M, wp.hi ? lighterAlpha(alpha, wp.f) : alpha, ink, ink2);
+    if (tint > 0) {
+      textSetup(dc, g, cssOf(fx.font, fx.em));
+      g.globalAlpha = alpha * tint;
+      g.fillStyle = pal.accent;
+      g.fillText(fx.ch, 0, 0);
+    }
+  }
+
+  function directBody(dc, g, r, M, alpha, ink, ink2) {
+    textSetup(dc, g, cssOf(r.font, r.em));
+    setMatrix(g, M);
+    localTurn(g, r);
+    g.globalAlpha = alpha;
+    SP.paintStyled(g, r.ch, r.em, ink, r.style, ink2, 0, 0);
   }
 
   // One sprite at the glyph's origin, e du per raster px, drawn whole. A raster that carries its ink rect (sp.ink: a host
@@ -281,18 +365,20 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
     g.globalCompositeOperation = 'source-over';
   }
 
-  function drawSprite(dc, g, rec, M, alpha, ink, ink2, tint, echo, blur, glow, shard, pixel, seed) {
+  // fx = the record whose face draws the halo, echo, tint and pixel/shard copies (rec itself without a weight pair);
+  // wp = null or the weight pair of the body (two bodies when it has a heavier weight).
+  function drawSprite(dc, g, rec, fx, M, alpha, ink, ink2, tint, echo, blur, glow, shard, pixel, seed, wp) {
     const pal = dc.pal;
     const k = SP.bucketOf(rec.em * SH.scaleOf(M));
     SP.levelPair(blur, dc.pair);
-    if (glow > 0) drawHalo(dc, g, rec, M, k, alpha, glow);
+    if (glow > 0) drawHalo(dc, g, fx, M, k, alpha, glow);
     if (echo > 0) {
       const dx = ECHO_SHIFT * echo * rec.em;
-      spritePair(dc, g, rec, M, k, pal.shiftA, 'plain', null, 0.5 * echo * alpha, dx);
-      spritePair(dc, g, rec, M, k, pal.shiftB, 'plain', null, 0.5 * echo * alpha, -dx);
+      spritePair(dc, g, fx, M, k, pal.shiftA, 'plain', null, 0.5 * echo * alpha, dx);
+      spritePair(dc, g, fx, M, k, pal.shiftB, 'plain', null, 0.5 * echo * alpha, -dx);
     }
     if (pixel >= 1 || shard > 0) {
-      const sp = dc.sprites.glyph(rec.font, rec.ch, ink, rec.style, ink2, k, dc.pair.lo, rec.em);
+      const sp = dc.sprites.glyph(fx.font, rec.ch, ink, rec.style, ink2, k, dc.pair.lo, rec.em);
       if (g) {
         const e = rec.em / sp.F;
         setMatrix(g, M);
@@ -300,23 +386,33 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
         if (pixel >= 1) drawPixelated(dc, g, sp, e, alpha, pixel);
         else drawShards(g, sp, e, alpha, shard, rec.em, seed);
       }
+    } else if (wp) {
+      if (wp.hi) spritePair(dc, g, recAs(dc.recHi, rec, wp.hi), M, k, ink, rec.style, ink2, alpha * wp.f, 0);
+      spritePair(dc, g, recAs(dc.recLo, rec, wp.lo), M, k, ink, rec.style, ink2, wp.hi ? lighterAlpha(alpha, wp.f) : alpha, 0);
     } else {
       spritePair(dc, g, rec, M, k, ink, rec.style, ink2, alpha, 0);
     }
-    if (tint > 0) spritePair(dc, g, rec, M, k, pal.accent, 'plain', null, alpha * tint, 0);
+    if (tint > 0) spritePair(dc, g, fx, M, k, pal.accent, 'plain', null, alpha * tint, 0);
   }
 
   // drawGlyph(dc, scene, i, M): one glyph node under the full device transform M. With dc.g null it draws nothing and
   // only looks up the sprites the glyph would draw (warmLayer): the keys come from this one code path.
-  function drawGlyph(dc, scene, i, M) {
+  function drawGlyph(dc, scene, i, M) { return drawGlyphAs(dc, scene, i, M, -1, 0); }
+
+  const WP = { lo: null, hi: null, f: 0, plain: true };        // the pooled weight pair of drawGlyphAs
+
+  // drawGlyphAs(dc, scene, i, M, alphaIn, blurAdd): drawGlyph with an explicit alpha (alphaIn ≥ 0; −1 = the node's
+  // world alpha) and extra blur in du (0 = none); a glyph seam draws its travellers with it (v2.2).
+  function drawGlyphAs(dc, scene, i, M, alphaIn, blurAdd) {
     const table = scene.table, P = table.live;
     const rec = scene.stores.glyph[table.payload[i]];
     if (!rec || !rec.font || rec.cls === 'space') return false;
     const reveal = P.reveal[i];
     if (!(reveal > 0.001)) return false;
-    const alpha = table.wa[i];
+    const alpha = alphaIn < 0 ? table.wa[i] : alphaIn;
     const pr = dc.probe;
-    const blur = P.blur[i] + (pr ? pr.blur || 0 : 0);
+    let blur = P.blur[i] + (pr ? pr.blur || 0 : 0);
+    if (blurAdd !== 0) blur += blurAdd;
     const glow = P.glow[i] + (pr ? pr.glow || 0 : 0);
     const shard = P.shard[i] + (pr ? pr.shard || 0 : 0);
     const pixel = P.pixel[i] + (pr ? pr.pixel || 0 : 0);
@@ -336,12 +432,22 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
     // Text style 'glow' is a style, not a pose: a steady halo under the glyph, while the body takes the path its pose
     // selects (direct at rest).
     const halo = rec.style === 'glow' && glow < STYLE_GLOW ? STYLE_GLOW : glow;
+    // v2.2 weight: the pair of served weights (the path choice is unchanged: only blur, glow, shard, pixel choose it)
+    const dw = P.wt[i];
+    let wp = dw !== 0 ? FACES.weightPair(rec.font, dw, WP) : null;
+    if (wp !== null && wp.hi !== null && !CROSSFADE_STYLES.has(rec.style)) snapPair(wp, rec.font);
+    if (wp !== null && dc.faceReady !== null) readyPair(dc, rec.font, wp);
+    if (wp !== null && wp.plain) wp = null;
+    const fx = wp === null ? rec : recAs(dc.recX, rec, wp.hi !== null && wp.f >= 0.5 ? wp.hi : wp.lo);
     if (direct) {
-      if (halo > 0) drawHalo(dc, g, rec, M, SP.bucketOf(rec.em * SH.scaleOf(M)), alpha, halo);
-      if (g) drawDirect(dc, g, rec, M, alpha, ink, ink2, P.tint[i], P.echo[i]);
+      if (halo > 0) drawHalo(dc, g, fx, M, SP.bucketOf(rec.em * SH.scaleOf(M)), alpha, halo);
+      if (g) {
+        if (wp === null) drawDirect(dc, g, rec, M, alpha, ink, ink2, P.tint[i], P.echo[i]);
+        else drawDirectW(dc, g, rec, fx, M, alpha, ink, ink2, P.tint[i], P.echo[i], wp);
+      }
     } else {
       const seed = rec.run * 7919 + rec.i;
-      drawSprite(dc, g, rec, M, alpha, ink, ink2, P.tint[i], P.echo[i], blur < 0 ? 0 : blur, halo, shard, pixel, seed);
+      drawSprite(dc, g, rec, fx, M, alpha, ink, ink2, P.tint[i], P.echo[i], blur < 0 ? 0 : blur, halo, shard, pixel, seed, wp);
     }
     if (reveal < 1 && g) { g.restore(); dc.font = null; }
     return true;
@@ -373,16 +479,23 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
   const COVER_PAIR = { lo: 0, hi: 0, f: 0 };
 
   // count (optional, tests): { sprites, inks } incremented per sprite and per direct-path ink draw counted.
+  // A glyph drawn as a weight pair (wt ≠ 0, a crossfading style, between two served weights) counts its body twice;
+  // font readiness is not read, so the cost is a function of the scene alone.
+  const COVER_WP = { lo: null, hi: null, f: 0, plain: true };
   function glyphCover(rec, P, i, wa, M, W, H, count) {
     if (!(P.reveal[i] > 0.001) || !(wa >= T.MIN_ALPHA)) return 0;
-    return poseCover(rec, P.blur[i], P.glow[i], P.shard[i], P.pixel[i], P.echo[i], P.tint[i], M, W, H, count);
+    const dw = P.wt ? P.wt[i] : 0;
+    const bodies = dw !== 0 && rec && rec.font && CROSSFADE_STYLES.has(rec.style) &&
+      FACES.weightPair(rec.font, dw, COVER_WP).hi !== null ? 2 : 1;
+    return poseCover(rec, P.blur[i], P.glow[i], P.shard[i], P.pixel[i], P.echo[i], P.tint[i], M, W, H, count, bodies);
   }
 
-  // poseCover(rec, blur, glow, shard, pixel, echo, tint, M, W, H, count?) → glyphCover for a visible glyph with these
-  // pose values.
+  // poseCover(rec, blur, glow, shard, pixel, echo, tint, M, W, H, count?, bodies = 1) → glyphCover for a visible glyph
+  // with these pose values; bodies = how many times the body is drawn (2 for a weight pair).
   let COUNT = null;
-  function poseCover(rec, blurIn, glow, shard, pixel, echo, tint, M, W, H, count) {
+  function poseCover(rec, blurIn, glow, shard, pixel, echo, tint, M, W, H, count, bodiesIn) {
     COUNT = count || null;
+    const bodies = bodiesIn === 2 ? 2 : 1;
     if (!rec || !rec.font || rec.cls === 'space') return 0;
     const blur = blurIn > 0 ? blurIn : 0;
     const halo = rec.style === 'glow' && glow < STYLE_GLOW ? STYLE_GLOW : glow;
@@ -397,6 +510,7 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
     if (direct) {
       if (echo > 0) { const dx = ECHO_SHIFT * echo * rec.em; sum += inkCover(rec, M, dx, W, H) + inkCover(rec, M, -dx, W, H); }
       sum += inkCover(rec, M, 0, W, H);
+      if (bodies === 2) sum += inkCover(rec, M, 0, W, H);
       if (tint > 0) sum += inkCover(rec, M, 0, W, H);
       return sum;
     }
@@ -406,7 +520,10 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
       sum += pairCover(rec, M, pr, dx, W, H) + pairCover(rec, M, pr, -dx, W, H);
     }
     if (pixel >= 1 || shard > 0) sum += rasterCover(rec, M, pr.lo, 0, pixel >= 1 ? 0 : shard, true, W, H);
-    else sum += pairCover(rec, M, pr, 0, W, H);
+    else {
+      sum += pairCover(rec, M, pr, 0, W, H);
+      if (bodies === 2) sum += pairCover(rec, M, pr, 0, W, H);
+    }
     if (tint > 0) sum += pairCover(rec, M, pr, 0, W, H);
     return sum;
   }
@@ -623,6 +740,6 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
     return n;
   }
 
-  return { createDrawContext, resetCounts, drawLayer, warmLayer, drawGlyph, hasLayer, hasMedia, hasStill, nodesByLayer, inkOf,
+  return { createDrawContext, resetCounts, drawLayer, warmLayer, drawGlyph, drawGlyphAs, CROSSFADE_STYLES, hasLayer, hasMedia, hasStill, nodesByLayer, inkOf,
     secondInk, shaded, cssOf, clipReveal, minScaleOf, inkClip, INK_CLIP, glyphCover, poseCover, inkEm, STYLE_GLOW, GLOW_LEVEL };
 });

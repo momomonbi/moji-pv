@@ -333,7 +333,13 @@ test('backdrop modes: palettes, fills and allowed filters (§4.19.4)', () => {
 // --- the node table ----------------------------------------------------------------------------------------------
 
 test('node table: FROZEN columns, local matrix formula, parents, clamps and growth', () => {
-  assert.equal(T.POSE.length, 22);
+  assert.equal(T.POSE.length, 23);
+  // v2.2: `wt` appended (every older index unchanged), additive, identity 0, SCHEMA 2
+  assert.equal(T.POSE[22], 'wt');
+  assert.equal(T.POSE[21], 'py');
+  assert.ok(T.ADD.includes('wt'));
+  assert.equal(T.IDENTITY.wt, 0);
+  assert.equal(T.SCHEMA, 2);
   assert.deepEqual(T.LAYERS.map((l) => [l.name, l.parallax]), [['ground', 0.25], ['far', 0.5], ['mid', 0.8], ['text', 1], ['near', 1.2], ['hud', 0]]);
   const t = T.createTable();
   const root = T.addNode(t, { type: T.TYPE.group });

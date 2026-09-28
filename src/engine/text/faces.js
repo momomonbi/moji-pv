@@ -283,6 +283,93 @@ MV.def('engine/text/faces', ['core/script'], (S) => {
 
   function usesLatinFace(cls) { return LATIN_FACE_CLASSES.has(cls); }
 
+  // ---- weight ladders (v2.2, DESIGN_2_2 §4: 太さのアニメーション) ------------------------------------------------------
+
+  // ladderOf(ref) → the served weights of the ref's family, ascending (a family outside FAMILIES — a user's face pin —
+  // has only its own weight, so it never animates).
+  function ladderOf(ref) {
+    const k = FAMILIES[ref.family];
+    return k ? k.weights : Object.freeze([ref.weight]);
+  }
+
+  // atWeight(ref, w) → the same family, script, flavor and role at the served weight w; one stable object per (ref, w),
+  // so sprite keys and draw-context comparisons stay cheap.
+  const RUNGS = new WeakMap();
+  function atWeight(ref, w) {
+    if (w === ref.weight) return ref;
+    let m = RUNGS.get(ref);
+    if (!m) { m = new Map(); RUNGS.set(ref, m); }
+    let r = m.get(w);
+    if (!r) { r = faceRef(ref.family, w, ref.script, ref.flavor, ref.role); m.set(w, r); }
+    return r;
+  }
+
+  // weightPair(ref, dw, out) → out = { lo, hi, f, plain }: the two served weights around ref.weight + dw (clamped to the
+  // ladder) and how far between them (hi is null when f = 0). A pair within W_EPS of a rung snaps to it; plain = the
+  // face's own weight alone. Allocation-free after the first call per rung.
+  const W_EPS = 1 / 64;
+  function weightPair(ref, dw, out) {
+    const L = ladderOf(ref), w = ref.weight + dw, top = L[L.length - 1];
+    let lo = L[0], hi = L[0], f = 0;
+    if (w >= top) { lo = top; hi = top; }
+    else if (w > L[0]) { let k = 0; while (L[k + 1] <= w) k++; lo = L[k]; hi = L[k + 1]; f = (w - lo) / (hi - lo); }
+    if (f < W_EPS) { hi = lo; f = 0; } else if (f > 1 - W_EPS) { lo = hi; f = 0; }
+    out.lo = atWeight(ref, lo);
+    out.hi = f > 0 ? atWeight(ref, hi) : null;
+    out.f = f;
+    out.plain = f === 0 && lo === ref.weight;
+    return out;
+  }
+
+  // roomOf(ref) → { below, above }: weight units between the face's weight and the lightest / heaviest served weight.
+  function roomOf(ref) {
+    const L = ladderOf(ref);
+    return { below: ref.weight - L[0], above: L[L.length - 1] - ref.weight };
+  }
+
+  // growTop(ref) → the heaviest served weight up to GROW_TOP (the bold end of 太る); the face's own weight when none is.
+  const GROW_TOP = 800;
+  function growTop(ref) {
+    let t = null;
+    for (const w of ladderOf(ref)) if (w <= GROW_TOP) t = w;
+    return t === null ? ref.weight : t;
+  }
+
+  // rungsBetween(ref, dlo, dhi) → the served weights a weight reach [dlo, dhi] can draw (the rungs on both sides of
+  // every weight in the reach), ascending.
+  function rungsBetween(ref, dlo, dhi) {
+    const L = ladderOf(ref), a = ref.weight + dlo, b = ref.weight + dhi;
+    let lo = L[0], hi = L[L.length - 1];
+    for (const w of L) if (w <= a) lo = w;
+    for (let k = L.length - 1; k >= 0; k--) if (L[k] >= b) hi = L[k];
+    return L.filter((w) => w >= lo && w <= hi);
+  }
+
+  // reweigh(faces, role, w) → faces whose `role` entries are the same families at weight w (snapped per family); the
+  // other roles are the same objects. Cached per (faces, role, w), so a cut's layout key stays stable.
+  const REWEIGHED = new WeakMap();
+  function reweigh(faces, role, w) {
+    if (!faces || typeof faces !== 'object') return faces;
+    const r = ROLES.includes(role) ? role : 'display';
+    let m = REWEIGHED.get(faces);
+    if (!m) { m = new Map(); REWEIGHED.set(faces, m); }
+    const id = r + '|' + w;
+    let out = m.get(id);
+    if (!out) {
+      const entry = faces[r] || {};
+      const next = {};
+      for (const script of Object.keys(entry)) {
+        const e = entry[script];
+        if (!e || typeof e.family !== 'string') { next[script] = e; continue; }
+        const scr = typeof e.css === 'function' ? e.script : script;
+        next[script] = faceRef(e.family, w, scr, e.flavor, typeof e.css === 'function' ? e.role || r : r);
+      }
+      out = Object.freeze(Object.assign({}, faces, { [r]: Object.freeze(next) }));
+      m.set(id, out);
+    }
+    return out;
+  }
+
   // ---- Google Fonts URLs ----------------------------------------------------------------------------------------
 
   function uniqueChars(text) {
@@ -374,5 +461,6 @@ MV.def('engine/text/faces', ['core/script'], (S) => {
     ROLES, SCRIPTS, FLAVOR_NAMES, FLAVORS, FAMILIES, SYSTEM_FALLBACK, SCRIPT_FALLBACK,
     resolveFaces, fontFor, cssUrls, fontUsage, faceRef, asRef, snapWeight, usesLatinFace, uniqueChars, cssSize, cssAt,
     isLatinFamily, loadText,
+    ladderOf, atWeight, weightPair, roomOf, growTop, rungsBetween, reweigh, W_EPS, GROW_TOP,
   };
 });

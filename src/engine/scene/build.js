@@ -1,7 +1,8 @@
 /* 文字PVメーカー v2 — original work. Scene build: one Plan cut (or ground segment) → node table + behaviours (DESIGN §4.17.5; DESIGN_2_1 §3.10, §5.9.4, §11.3.7). */
 MV.def('engine/scene/build', ['core/hash', 'core/rng', 'core/schema', 'engine/scene/table', 'engine/scene/builder',
-  'engine/scene/behave', 'engine/scene/frame', 'engine/scene/shot', 'engine/scene/budget', 'engine/scene/xshot'],
-(H, RNG, SCH, T, B, BH, F, SHOT, BG, XS) => {
+  'engine/scene/behave', 'engine/scene/frame', 'engine/scene/shot', 'engine/scene/budget', 'engine/scene/xshot',
+  'engine/text/faces'],
+(H, RNG, SCH, T, B, BH, F, SHOT, BG, XS, FACES) => {
   'use strict';
 
   const SAFE = 0.05;              // safe margin: 5% of the short side on every edge
@@ -274,7 +275,22 @@ MV.def('engine/scene/build', ['core/hash', 'core/rng', 'core/schema', 'engine/sc
     return out;
   }
 
-  function buildCutWith(cut, slots, plan, svc, warnings) {
+  // v2.2 text.weight (DESIGN_2_2 §4): the cut's lyric face role at another weight. The text service for those faces
+  // shares the layout cache (its keys include the faces); one per (service, faces), as reweigh caches the faces.
+  const weighed = new WeakMap();
+  function weightedSvc(svc, plan, slots) {
+    const tw = valueOf(slots, 'text.weight', null);
+    if (typeof tw !== 'number' || !svc.text || typeof svc.text.withFaces !== 'function') return svc;
+    const faces = FACES.reweigh(svc.faces || plan.look.faces, valueOf(slots, 'text.face', 'display'), tw);
+    let m = weighed.get(svc.text);
+    if (!m) { m = new WeakMap(); weighed.set(svc.text, m); }
+    let text = m.get(faces);
+    if (!text) { text = svc.text.withFaces(faces); m.set(faces, text); }
+    return Object.assign({}, svc, { text, faces });
+  }
+
+  function buildCutWith(cut, slots, plan, svcIn, warnings) {
+    const svc = weightedSvc(svcIn, plan, slots);
     const reg = svc.registry;
     const D = designEnv(plan.design);
     const where = { cut: cut.key, line: cut.line };
@@ -470,10 +486,17 @@ MV.def('engine/scene/build', ['core/hash', 'core/rng', 'core/schema', 'engine/sc
   //   shot, lean       (DESIGN_2_1 §3.10) the cut's shot Track and follow Lean, or null
   //   media            (DESIGN_2_1 §11.3.7) [{ node, id, time: TimeSpec | null }] of the media nodes, in node order
   //   spriteBudget     (DESIGN_2_1 §5.9.5, cuts) the glyph budget record of engine/scene/budget.fit, or null
+  //   wtReach          (v2.2) null, or [lo, hi]: the union of the weight offsets its behaviours may write (behaviour.wt);
+  //                    the served weights they reach are loaded as draw-only faces
   function sceneOf(builder, o) {
     const behaviours = builder.seal();
     const glyphKeys = new Set();
     for (const g of builder.stores.glyph) if (g.cls !== 'space' && g.font) glyphKeys.add(g.font.key + '|' + g.ch);
+    let wtReach = null;
+    for (const b of behaviours) {
+      if (!b.wt) continue;
+      wtReach = wtReach ? [Math.min(wtReach[0], b.wt[0]), Math.max(wtReach[1], b.wt[1])] : [b.wt[0], b.wt[1]];
+    }
     return {
       key: o.key, fp: o.fp, kind: o.kind, t0: o.t0,
       table: builder.table, behaviours, layers: builder.layers, cam: o.cam, owners: builder.owners,
@@ -484,6 +507,7 @@ MV.def('engine/scene/build', ['core/hash', 'core/rng', 'core/schema', 'engine/sc
       stores: builder.stores, times: o.times, target: o.target, focus: o.focus,
       fontKey: o.svc.text ? o.svc.text.key : null,
       shot: o.shot || null, lean: o.lean || null, media: builder.mediaList(), spriteBudget: null,
+      wtReach: wtReach ? Object.freeze(wtReach) : null,
     };
   }
 

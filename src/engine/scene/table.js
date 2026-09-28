@@ -3,19 +3,21 @@ MV.def('engine/scene/table', ['core/mat'], (MAT) => {
   'use strict';
 
   // Bump SCHEMA whenever the column list changes (DESIGN §4.17.1 "Changing the column list").
-  const SCHEMA = 1;
+  // 2 (v2.2, DESIGN_2_2 §4): the weight column `wt` appended.
+  const SCHEMA = 2;
   const CHUNK = 256;
 
   const TYPE = Object.freeze({ group: 0, glyph: 1, shape: 2, paint: 3, image: 4, particles: 5, camera: 6 });
   const TYPE_NAMES = Object.freeze(['group', 'glyph', 'shape', 'paint', 'image', 'particles', 'camera']);
   const FLAG = Object.freeze({ hidden: 1, static: 2, pickable: 4, followText: 8 });
 
-  // The 22 pose columns, in the FROZEN order.
+  // The 23 pose columns, in the FROZEN order. `wt` (v2.2) is a weight offset in CSS weight units (identity 0, not
+  // clamped here; the draw path clamps it to the face's served weights).
   const POSE = Object.freeze(['x', 'y', 'z', 'rot', 'sx', 'sy', 'kx', 'ky', 'rx', 'ry', 'alpha', 'blur', 'reveal', 'tint',
-    'glow', 'shard', 'echo', 'jx', 'jy', 'pixel', 'px', 'py']);
+    'glow', 'shard', 'echo', 'jx', 'jy', 'pixel', 'px', 'py', 'wt']);
   // Combination rules: additive (+=), multiplicative (*=), set (last writer in phase order).
   const ADD = Object.freeze(['x', 'y', 'z', 'rot', 'kx', 'ky', 'rx', 'ry', 'blur', 'tint', 'glow', 'shard', 'echo', 'jx', 'jy',
-    'pixel']);
+    'pixel', 'wt']);
   const MUL = Object.freeze(['sx', 'sy', 'alpha', 'reveal']);
   const SET = Object.freeze(['px', 'py']);
   const ANGLES = Object.freeze(['rot', 'kx', 'ky', 'rx', 'ry']);

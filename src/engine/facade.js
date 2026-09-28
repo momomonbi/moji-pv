@@ -233,8 +233,11 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
 
   // --- font usage (§4.14: export waits for every face and character used) ------------------------------------------------
 
-  // A usage record: { refs: Map(key|script → FontRef), chars: Map(family → Set(character)) }.
-  function newUsage() { return { refs: new Map(), chars: new Map() }; }
+  // A usage record: { refs: Map(key|script → FontRef), chars: Map(family → Set(character)) }, plus (v2.2) the draw-only
+  // faces of weight animation: draw (Map(key|script → FontRef): served weights a scene draws but never lays out) and
+  // drawChars (Map(family → Set(character))). The main part alone decides what a scene waits for (provisional, export
+  // layout); the draw part is loaded without moving the FontBook's epoch.
+  function newUsage() { return { refs: new Map(), chars: new Map(), draw: new Map(), drawChars: new Map() }; }
 
   function addChars(u, family, text) {
     let set = u.chars.get(family);
@@ -252,7 +255,35 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
   function mergeUsage(into, u) {
     for (const [id, ref] of u.refs) if (!into.refs.has(id)) into.refs.set(id, ref);
     for (const [family, set] of u.chars) addChars(into, family, [...set].join(''));
+    if (u.draw) {
+      for (const [id, ref] of u.draw) if (!into.draw.has(id)) into.draw.set(id, ref);
+      for (const [family, set] of u.drawChars) addDrawChars(into, family, set);
+    }
     return into;
+  }
+
+  function addDrawChars(u, family, chars) {
+    let set = u.drawChars.get(family);
+    if (!set) { set = new Set(); u.drawChars.set(family, set); }
+    for (const ch of chars) set.add(ch);
+  }
+
+  // Whether `a` already holds every draw-only face and character of `b`.
+  function coversDraw(a, b) {
+    for (const id of b.draw.keys()) if (!a.draw.has(id)) return false;
+    for (const [family, set] of b.drawChars) {
+      const have = a.drawChars.get(family);
+      for (const ch of set) if (!have || !have.has(ch)) return false;
+    }
+    return true;
+  }
+
+  // The FontBook's shape of the draw-only part.
+  function drawUsageOut(u) {
+    const refs = [...u.draw.entries()].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)).map((e) => e[1]);
+    const textByFamily = {};
+    for (const family of [...u.drawChars.keys()].sort()) textByFamily[family] = FACES.uniqueChars([...u.drawChars.get(family)].join(''));
+    return { refs, textByFamily };
   }
 
   // Whether `a` already holds every face and character of `b`.
@@ -275,11 +306,26 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
 
   // What a built scene draws: every glyph's face and grapheme (lyrics, notes and artists, headings, ornament text — in
   // whatever face the part laid them out), and glyph particles ('glyph:<char>') in the display ja face the renderer uses.
+  // v2.2: a scene whose behaviours may write weight offsets (scene.wtReach = [lo, hi]) also draws, for each glyph, the
+  // served weights of its face that reach can draw (FACES.rungsBetween): its draw-only usage.
   function sceneUsage(scene, particleFace) {
     const u = newUsage();
     for (const g of scene.stores.glyph) if (g.font && g.cls !== 'space') addRef(u, g.font, g.ch);
     for (const p of scene.stores.particles) {
       if (particleFace && typeof p.sprite === 'string' && p.sprite.startsWith('glyph:')) addRef(u, particleFace, p.sprite.slice(6));
+    }
+    const reach = scene.wtReach;
+    if (reach) {
+      for (const g of scene.stores.glyph) {
+        if (!g.font || g.cls === 'space') continue;
+        for (const w of FACES.rungsBetween(g.font, reach[0], reach[1])) {
+          if (w === g.font.weight) continue;
+          const ref = FACES.atWeight(g.font, w);
+          const id = ref.key + '|' + ref.script;
+          if (!u.draw.has(id)) u.draw.set(id, ref);
+          addDrawChars(u, ref.family, [g.ch]);
+        }
+      }
     }
     return u;
   }
@@ -323,13 +369,15 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
     const sceneMax = Number.isInteger(o.sceneMax) && o.sceneMax > 0 ? o.sceneMax : SCENE_MAX;
     // the effective registry: the base plus the document's materials (and pooled media); the base until a document
     let registry = o.effective && typeof o.effective.get === 'function' ? o.effective : base;
+    // v2.2: weight pairs draw only the served weights that are loaded (a draw-only face still on its way is left out)
+    const faceReady = fonts && typeof fonts.drawStatus === 'function' ? (ref) => fonts.drawStatus(ref) === 'ready' : null;
     const renderer = R.createRenderer({ canvas: factory, registry, assets, now, strict: !!o.strict, spriteBudget: o.spriteBudget,
-      postCopy: o.postCopy === true });
+      postCopy: o.postCopy === true, faceReady });
     const cache = CACHE.createSceneCache({ max: sceneMax });
     const found = new Map();                         // cut / segment key → { fp, list } of scene warnings
     const scanned = new Set();                       // fps whose warnings are known
     const used = new Map(o.usage || []);             // fp → usage record of the built scene (a function of the fp)
-    const requested = newUsage();                    // what the FontBook has been asked for so far
+    const requested = newUsage();                    // what the FontBook has been asked for so far (draw-only too)
     let plan = null, lastDoc = null, lastResult = null;
     let texts = null;                                // TextService of the current faces
     let face = null;
@@ -364,10 +412,24 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
     function request(u) {
       if (!fonts || typeof fonts.request !== 'function') return;
       const retry = typeof fonts.status === 'function' && [...u.refs.values()].some((r) => fonts.status(r) === 'failed');
-      if (!retry && covers(requested, u)) return;
-      mergeUsage(requested, u);
-      const out = usageOut(u);
-      fonts.request(out.refs, out.textByFamily);
+      if (retry || !covers(requested, u)) {
+        for (const [id, ref] of u.refs) if (!requested.refs.has(id)) requested.refs.set(id, ref);
+        for (const [family, set] of u.chars) addChars(requested, family, [...set].join(''));
+        const out = usageOut(u);
+        fonts.request(out.refs, out.textByFamily);
+      }
+      requestDraw(u);
+    }
+
+    // The draw-only part of a usage (v2.2): asked for once (again for a face that failed), never waited for here.
+    function requestDraw(u) {
+      if (!u.draw.size || !fonts || typeof fonts.drawStatus !== 'function') return;
+      const retry = [...u.draw.values()].some((r) => fonts.drawStatus(r) === 'failed');
+      if (!retry && coversDraw(requested, u)) return;
+      for (const [id, ref] of u.draw) if (!requested.draw.has(id)) requested.draw.set(id, ref);
+      for (const [family, set] of u.drawChars) addDrawChars(requested, family, set);
+      const out = drawUsageOut(u);
+      fonts.request(out.refs, out.textByFamily, { drawOnly: true });
     }
 
     // Scene warnings, font usage and the "already laid out" marks of cuts and segments the plan no longer has.
@@ -543,9 +605,16 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
       if (fonts && typeof fonts.ready === 'function') {
         const unknown = list.filter(([kind, i]) => !used.has((kind === 'cut' ? plan.cuts[i] : plan.grounds[i]).fp));
         if (!(await buildEach(unknown))) return;
-        const out = usageOut(usageOfItems(cuts, grounds));
+        const all = usageOfItems(cuts, grounds);
+        const out = usageOut(all);
         await fonts.ready(out.refs, out.textByFamily);
         if (!slice.live()) return;
+        // v2.2: the served weights weight animation draws (draw-only faces; they never move the measurer key)
+        if (all.draw.size && typeof fonts.drawStatus === 'function') {
+          const drawOut = drawUsageOut(all);
+          await fonts.ready(drawOut.refs, drawOut.textByFamily, { drawOnly: true });
+          if (!slice.live()) return;
+        }
       }
       await buildEach(list);
     }
@@ -790,7 +859,7 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
     function thumb(ref, surface, topts) {
       alive();
       const to = topts || {};
-      if (!thumbs) thumbs = { renderer: R.createRenderer({ canvas: factory, registry, assets, now: null }), plans: new Map() };
+      if (!thumbs) thumbs = { renderer: R.createRenderer({ canvas: factory, registry, assets, now: null, faceReady }), plans: new Map() };
       const theme = to.theme || (plan ? plan.look.theme.v : null);
       const aspect = to.aspect || (plan ? plan.design.aspect : '16:9');
       const id = H.hashJSON({ kind: ref.kind, key: ref.key, params: ref.params || null, text: to.text || null,
@@ -803,10 +872,12 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
         const svc = { registry, text: textService().withFaces(sp.look.faces), assets, pal: sp.look.palette, faces: sp.look.faces,
           strict: !!o.strict, provisional: false, media: sp.media || null };
         const scenes = { cut: [], ground: [] };
+        // a tile of a weight part asks for the served weights it draws (v2.2 draw-only faces)
+        const thumbCut = (i) => { const sc = BUILD.buildCut(sp.cuts[i], sp, svc); if (sc.wtReach) requestDraw(sceneUsage(sc, null)); return sc; };
         entry = {
           plan: sp, fontKey: measurer.key,
           source: {
-            cut: (i) => scenes.cut[i] || (scenes.cut[i] = BUILD.buildCut(sp.cuts[i], sp, svc)),
+            cut: (i) => scenes.cut[i] || (scenes.cut[i] = thumbCut(i)),
             ground: (i) => scenes.ground[i] || (scenes.ground[i] = BUILD.buildGround(sp.grounds[i], sp, svc)),
             fresh: (kind, i) => (kind === 'cut' ? BUILD.buildCut(sp.cuts[i], sp, svc) : BUILD.buildGround(sp.grounds[i], sp, svc)),
             fontKey: measurer.key,

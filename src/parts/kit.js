@@ -1,7 +1,8 @@
 /* 文字PVメーカー v2 — original work. The part kit: definition helpers, motion builders and helpers for part authors (DESIGN §4.18.3; DESIGN_2_1 §3.11, §11.5.6). */
 MV.def('parts/kit', ['core/num', 'core/noise', 'core/ease', 'core/curve', 'core/color', 'core/schema', 'core/registry',
-  'core/media', 'engine/scene/behave', 'engine/scene/stagger', 'engine/scene/builder', 'engine/scene/shot', 'engine/scene/frame'],
-(N, NZ, E, CV, C, SCH, REG, MEDIA, BH, STG, B, SHOT, F) => {
+  'core/media', 'engine/scene/behave', 'engine/scene/stagger', 'engine/scene/builder', 'engine/scene/shot', 'engine/scene/frame',
+  'core/script', 'engine/text/faces'],
+(N, NZ, E, CV, C, SCH, REG, MEDIA, BH, STG, B, SHOT, F, SCRIPT, FACES) => {
   'use strict';
 
   // Parts depend on this module only. The helpers stamp `kind`, fill defaults and check the essentials; they never
@@ -39,7 +40,7 @@ MV.def('parts/kit', ['core/num', 'core/noise', 'core/ease', 'core/curve', 'core/
     kx: ['横の傾き', 'Skew X'], ky: ['縦の傾き', 'Skew Y'], rx: ['縦の反転', 'Flip X'], ry: ['横の反転', 'Flip Y'],
     sx: ['横の大きさ', 'Scale X'], sy: ['縦の大きさ', 'Scale Y'], alpha: ['不透明度', 'Opacity'], reveal: ['見える割合', 'Reveal'],
     blur: ['ぼかし', 'Blur'], tint: ['色づき', 'Tint'], glow: ['光', 'Glow'], shard: ['割れ', 'Shatter'], echo: ['残像', 'Echo'],
-    jx: ['横の揺れ', 'Jitter X'], jy: ['縦の揺れ', 'Jitter Y'], pixel: ['モザイク', 'Pixelate'],
+    jx: ['横の揺れ', 'Jitter X'], jy: ['縦の揺れ', 'Jitter Y'], pixel: ['モザイク', 'Pixelate'], wt: ['太さ', 'Weight'],
   });
   const RANGE_EM = Object.freeze({ x: [-10, 10, 0.01], y: [-10, 10, 0.01], z: [-40, 40, 0.1], blur: [0, 2, 0.005],
     jx: [-4, 4, 0.01], jy: [-4, 4, 0.01], pixel: [0, 2, 0.01] });
@@ -48,12 +49,14 @@ MV.def('parts/kit', ['core/num', 'core/noise', 'core/ease', 'core/curve', 'core/
   const RANGE_ANGLE = Object.freeze({ rot: [-720, 720, 1], kx: [-80, 80, 1], ky: [-80, 80, 1], rx: [-360, 360, 1],
     ry: [-360, 360, 1] });
   const RANGE_UNIT = [0, 1, 0.01];
+  const RANGE_WEIGHT = [-800, 800, 25];              // v2.2: weight offsets in CSS weight units
   const RANGE_SCALE = [0, 8, 0.01];
   const SPEC_UNIT = Object.freeze({ em: 'em', du: 'du', deg: 'deg', rad: '', x: 'x', '': '' });
 
   // Length columns are in em only when the track's unit is 'em' (x y z blur by default, BH.TRACK_UNITS); otherwise
   // they are plain du (jx jy pixel by default, or any length track with unit 'du').
   function rangeFor(col, unit) {
+    if (col === 'wt') return RANGE_WEIGHT;
     if (RANGE_ANGLE[col]) return unit === 'rad' ? [-12.6, 12.6, 0.001] : RANGE_ANGLE[col];
     if (col === 'sx' || col === 'sy') return RANGE_SCALE;
     if (RANGE_EM[col]) return unit === 'em' ? RANGE_EM[col] : RANGE_DU[col];
@@ -146,22 +149,63 @@ MV.def('parts/kit', ['core/num', 'core/noise', 'core/ease', 'core/curve', 'core/
       motion };
   }
 
-  // perGlyph(fn) → make. fn(P, g, k, u, p, fc) writes the pooled delta pose P of one glyph; k = eased progress,
-  // u = linear progress (after the glyph's stagger delay). K.arrive / K.depart bind it to their timing.
-  function perGlyph(fn) {
+  // Options of K.perGlyph / K.perGlyphHold (v2.2, DESIGN_2_2 §4): { prep, wt } — prep(env, target, p) → p' adds
+  // build-time params read from the target (a new object; p itself is never changed), wt(p') → [lo, hi] declares the
+  // weight offsets (pose column wt) the behaviour may write, so the served weights it draws are loaded.
+  function glyphOpts(opts) {
+    if (opts === undefined || opts === null) return null;
+    if (!isObject(opts) || (opts.prep !== undefined && typeof opts.prep !== 'function') ||
+        (opts.wt !== undefined && typeof opts.wt !== 'function')) {
+      throw new KitError('bad-fn', 'K.perGlyph options are { prep, wt }');
+    }
+    return Object.freeze({ prep: opts.prep || null, wt: opts.wt || null });
+  }
+
+  function glyphSource(unit, fn, o) {
+    return { unit, fn, prep: o ? o.prep : null, wt: o ? o.wt : null };
+  }
+
+  // perGlyph(fn, opts?) → make. fn(P, g, k, u, p, fc) writes the pooled delta pose P of one glyph; k = eased progress,
+  // u = linear progress (after the glyph's stagger delay). K.arrive / K.depart bind it to their timing (the options
+  // travel with it).
+  function perGlyph(fn, opts) {
     if (typeof fn !== 'function') throw new KitError('bad-fn', 'K.perGlyph needs a function');
-    const make = BH.glyphMotionMaker('arrive', { unit: 'glyph', fn });
+    const o = glyphOpts(opts);
+    const make = BH.glyphMotionMaker('arrive', glyphSource('glyph', fn, o));
     make.glyphFn = fn;
+    make.glyphOpts = o;
     return make;
   }
 
-  // perGlyphHold(fn) → make for dwell parts. fn(P, g, time, w, p, fc): time = seconds since the glyph arrived;
+  // perGlyphHold(fn, opts?) → make for dwell parts. fn(P, g, time, w, p, fc): time = seconds since the glyph arrived;
   // w = the dwell envelope (multiply every amplitude by it).
-  function perGlyphHold(fn) {
+  function perGlyphHold(fn, opts) {
     if (typeof fn !== 'function') throw new KitError('bad-fn', 'K.perGlyphHold needs a function');
-    const make = BH.holdMaker(fn);
+    const o = glyphOpts(opts);
+    const make = BH.holdMaker(fn, o);
     make.holdFn = fn;
+    make.holdOpts = o;
     return make;
+  }
+
+  // weightRoom(target) → { below, above }: the weight room (engine/text/faces roomOf) of the face most of the target's
+  // non-space glyphs are laid out with (ties: the first face key in code-unit order); { 0, 0 } for an empty target.
+  function weightRoom(target) {
+    const count = new Map();
+    for (const r of (target && target.runs) || []) {
+      const lay = r.layout;
+      if (!lay || !lay.fonts) continue;
+      for (let i = 0; i < lay.n; i++) {
+        if (lay.cls && SCRIPT.CLASSES[lay.cls[i]] === 'space') continue;
+        const f = lay.fonts[lay.font ? lay.font[i] : 0];
+        if (!f) continue;
+        const e = count.get(f.key);
+        if (e) e.n++; else count.set(f.key, { f, n: 1 });
+      }
+    }
+    let best = null;
+    for (const key of [...count.keys()].sort()) { const e = count.get(key); if (!best || e.n > best.n) best = e; }
+    return best ? FACES.roomOf(best.f) : { below: 0, above: 0 };
   }
 
   // --- kind helpers ----------------------------------------------------------------------------------------------
@@ -198,9 +242,10 @@ MV.def('parts/kit', ['core/num', 'core/noise', 'core/ease', 'core/curve', 'core/
         out.make = BH.glyphMotionMaker(kind, { unit, motion: out.motion });
         out.unit = unit;
       } else if (out.make.glyphFn) {
-        const fn = out.make.glyphFn;
-        out.make = BH.glyphMotionMaker(kind, { unit: out.unit || 'glyph', fn });
+        const fn = out.make.glyphFn, o = out.make.glyphOpts || null;
+        out.make = BH.glyphMotionMaker(kind, glyphSource(out.unit || 'glyph', fn, o));
         out.make.glyphFn = fn;
+        out.make.glyphOpts = o;
       }
       if (out.unit !== undefined && !STG.UNITS.includes(out.unit)) fail(kind, def, 'unit must be one of ' + STG.UNITS.join(' '));
       return deepFreeze(out);
@@ -302,7 +347,7 @@ MV.def('parts/kit', ['core/num', 'core/noise', 'core/ease', 'core/curve', 'core/
       def.params = mirroredParams(arriveDef.params, arriveDef.motion);
       def.make = BH.glyphMotionMaker('depart', { unit: def.unit, motion: def.motion });
     } else if (arriveDef.make && arriveDef.make.glyphFn) {
-      def.make = perGlyph(reversedFn(arriveDef.make.glyphFn));
+      def.make = perGlyph(reversedFn(arriveDef.make.glyphFn), arriveDef.make.glyphOpts || undefined);
       def.unit = arriveDef.unit;
       def.params = Object.assign({}, arriveDef.params || {});
     } else {
@@ -594,7 +639,7 @@ MV.def('parts/kit', ['core/num', 'core/noise', 'core/ease', 'core/curve', 'core/
   return {
     arrange: KINDS.arrange, arrive: KINDS.arrive, dwell: KINDS.dwell, depart: KINDS.depart, ground: KINDS.ground,
     ornament: KINDS.ornament, lens: KINDS.lens, filter: KINDS.filter, seam: KINDS.seam, theme: KINDS.theme, mood: KINDS.mood,
-    variant, mirror, moves, perGlyph, perGlyphHold,
+    variant, mirror, moves, perGlyph, perGlyphHold, weightRoom,
     PH: BH.PH, ORDERS: SCH.ORDERS, EASES: E.EASES, ease, staggerOf: STG.staggerOf, pivots: STG.pivots,
     shape, math, color, pickOf, rangeOf, KitError,
     curve, warp, CURVES: CV.PRESET_KEYS, warped: BH.warped, aimBox, frameBox,
