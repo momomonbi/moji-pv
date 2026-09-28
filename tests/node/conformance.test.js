@@ -276,7 +276,8 @@ function checkDwell(scene, where, fine) {
 
 function assertSmallJumps(snap, prev, where, step) {
   for (let k = 0; k < snap.length; k++) {
-    const limit = ['x', 'y', 'z', 'jx', 'jy'].includes(T.POSE[k]) ? 4 : 0.08;
+    // wt (v2.2) is in weight units: a beat-driven weight pulse rises at most ~42 per 1/480 s step (DESIGN_2_2 §4)
+    const limit = ['x', 'y', 'z', 'jx', 'jy'].includes(T.POSE[k]) ? 4 : T.POSE[k] === 'wt' ? 60 : 0.08;
     for (let i = 0; i < snap[k].length; i++) {
       const jump = Math.abs(snap[k][i] - prev[k][i]);
       if (jump > limit) assert.fail(where + ': dwell jumps ' + T.POSE[k] + '[' + i + '] by ' + jump + ' within ' + step.toFixed(4) + ' s');

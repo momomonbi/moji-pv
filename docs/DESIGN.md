@@ -2537,6 +2537,7 @@ depends on `parts/kit`.
 | `riseFromFlat` | 起き上がり | Tilt up | playful retro | Glyphs stand up from lying flat on the baseline. |
 | `staticJoin` | 乱入 | Glitch in | digital hard fast | Glyphs jitter sideways with color echoes, then lock in place (gate `glitch`). |
 | `wordPop` | ぽん | Word pop | playful bright | Whole words pop in with overshoot, one word at a time. |
+| `weightGrow` (pool false) | 太る | Weight grow | bold slow | Letters appear thin and grow bold (v2.2, DESIGN_2_2 §4: late, opt-in `weight`). |
 | `instantShow` (fb, pool false) | 即時 | Instant show | minimal | Appears at once (used by rules and `motion: 'own'`). |
 
 ### 5.3 Holds — `dwell` (`parts/dwell/*.js`)
@@ -2575,6 +2576,7 @@ depends on `parts/kit`.
 | `burnOut` | 燃え尽き | Burn out | bright hard | Glyphs flare in the accent color, glow, and shrink away. |
 | `pileCollapse` | 崩れ | Pile collapse | playful busy | Glyphs drop and pile up at the bottom, then fade. |
 | `pointImplode` | 吸い込み | Point implode | digital fast | Glyphs are pulled into one point and vanish. |
+| `weightThin` (pool false) | 細る | Weight thin | soft slow | Letters thin out and fade (v2.2, DESIGN_2_2 §4: late, opt-in `weight`). |
 | `instantHide` (fb, pool false) | 即消 | Instant hide | minimal | Disappears at once (rules, seams that replace the exit). |
 
 ### 5.5 Backgrounds — `ground` (`parts/ground/*.js`)

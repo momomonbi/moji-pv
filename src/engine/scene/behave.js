@@ -373,7 +373,7 @@ MV.def('engine/scene/behave', ['core/num', 'core/curve', 'core/rng', 'core/motio
     if (!(Array.isArray(r) && r.length === 2 && finite(r[0]) && finite(r[1]) && r[0] <= r[1])) {
       throw new BehaviourError('bad-behaviour', 'wt must be [lo, hi] weight offsets');
     }
-    return Object.freeze([Math.min(0, r[0]), Math.max(0, r[1])]);
+    return Object.freeze([Math.min(0, r[0]) + 0, Math.max(0, r[1]) + 0]);   // (+ 0: never −0)
   }
 
   function tracksFor(motion, kind, p) {
