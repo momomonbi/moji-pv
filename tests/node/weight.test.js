@@ -707,3 +707,32 @@ test('build: text.weight lays out the lyrics of the cut in that weight; notes ke
   engine.setPlan(plan);
   assert.ok(engine.scene('cut', 0).stores.glyph.filter((g) => g.cls !== 'space').every((g) => g.font.weight === 500));
 });
+
+test('planner: re-planning a new work after weight edits gives exactly the plan made from scratch', () => {
+  const R = MV.use('core/rng');
+  const rng = R.stream(7, 'weight-replan');
+  let doc = basicDoc({ gen: 1, pins: { 'work:theme': pin('monoPress') } });
+  let plan = PL.plan(doc, { registry: CATALOG });
+  const EDITS = [
+    (d, c, l) => ({ ['line/' + l + ':text.weight']: pin(rng.pick([300, 600, 900])) }),
+    (d, c, l) => ({ ['line/' + l + ':arrive']: pin('weightGrow') }),
+    (d, c, l) => ({ ['line/' + l + ':depart']: pin('weightThin') }),
+    (d, c, l) => ({ ['line/' + l + ':text.face']: pin(rng.pick(['display', 'serif', 'body'])) }),
+    (d, c, l) => ({ ['line/' + l + ':text.style']: pin(rng.pick(['plain', 'outline', 'glow'])) }),
+    () => ({ 'work:weight.auto': pin(rng.pick([true, false])) }),
+    (d, c) => ({ ['cut/' + c.key + ':text.weight']: Object.assign(pin(800), { sig: c.text }) }),
+  ];
+  for (let i = 0; i < 24; i++) {
+    const cut = rng.pick(lyricCuts(plan));
+    const next = Object.assign({}, doc, { pins: Object.assign({}, doc.pins, rng.pick(EDITS)(doc, cut, cut.line)) });
+    if (rng.chance(0.25) && Object.keys(next.pins).length > 1) {
+      const k = rng.pick(Object.keys(next.pins).filter((x) => x !== 'work:theme'));
+      if (k) delete next.pins[k];
+    }
+    doc = next;
+    plan = PL.plan(doc, { registry: CATALOG });
+    const fresh = PL.run(doc, CATALOG, { fresh: true });
+    assert.equal(plan.hash, fresh.hash, 'edit ' + i);
+    assert.deepEqual(plan.warnings, fresh.warnings, 'edit ' + i + ' warnings');
+  }
+});

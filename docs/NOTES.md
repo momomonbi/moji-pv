@@ -9159,7 +9159,88 @@ docs/DESIGN_2_2.md. The packages and their notes follow.
 
 <!-- PV22 P3 notes -->
 
-<!-- PV22 P4 notes -->
+### P4: 文字の形が動く (M4 モーフ, M5 太さのアニメーション)
+
+Contract: DESIGN_2_2 §4 (from the package design, revision 2). Built in order: the registry's late parts, the weight
+column and its draw path, the draw-only faces, 太る and 細る, then the planner (opt-in pools, 太さ, the grow rule). The
+モーフ (M4) and 脈打つ太さ come next.
+
+**Registry.** `late: true` definitions (always `pool: false`, never the fallback) are signed apart: `registry.version`
+stays `83c7523d` with 太る and 細る in the catalog; `registry.lateVersion` (their signature over the version) is used
+only by the package's own golden. `optIn: 'weight'` admits a `pool: false` definition to `registry.pool(kind, { optIn:
+['weight'] })`. Late parts are never material bases (`ai/recipe.basePart`, `parts/mix` variant → `no-base`); the command
+palette lists them; the part browser's use-only / never-use filter counts opt-in parts.
+
+**The weight column.** POSE gains `wt` (column 23, ADD, identity 0, SCHEMA 2); the kit's DELTA gains it. `K.perGlyph(fn,
+{ prep, wt })` / `K.perGlyphHold(fn, { prep, wt })`: `prep(env, target, p)` makes build-time params from the target
+(a copy; the given params are never changed), `wt(p)` declares the reach, kept as `behaviour.wt` (normalized to
+`[≤ 0, ≥ 0]`, never −0) and gathered as `scene.wtReach`. The options survive `K.depart`'s re-wrap (細る is a real exit:
+`t0 = times.out`, `live: 'after'`), `K.mirror` and `K.variant`. `K.weightRoom(target)` = the room of the face most
+glyphs use.
+
+**Drawing.** `drawGlyph` = `drawGlyphAs(dc, scene, i, M, −1, 0)`; with `wt = 0` it runs today's calls in today's order
+(every golden matches). A glyph with `wt ≠ 0` draws the two served weights around face weight + wt: the heavier at a·f,
+the lighter over it at a(1 − f)/(1 − a·f) (the core composites to a); plain and glow only — outline, shadow and duo take
+the nearest weight (steps). The halo, echo and tint copies use the nearer face. `dc.faceReady` (the FontBook's
+`drawStatus`) drops a heavier weight that is not loaded and walks a lighter one toward the face's own; without it (Node,
+the recorder, the lab) every served weight counts as loaded. `glyphCover` counts a crossfaded body twice.
+
+**Draw-only faces.** `FontBook.request/ready(…, { drawOnly: true })`, `drawStatus`, `on('draw')`: own stylesheets and
+characters, never a weight the main path owns, never an epoch bump (no re-layout, no provisional scene), not in
+`failures()`; a newer sheet (more characters) makes a weight `loading` again until it is in. The facade adds the rungs of
+`scene.wtReach` as the scene's draw usage (`rungsBetween`), asks for them once, waits for them in `prepareExport` after
+the main faces, and gives both renderers `faceReady`. The app and the lab repaint on `'draw'`. The thumbnails' renderer
+asks for its own scene's rungs (the weight-part tiles of step 7 rely on it).
+
+**Parts.** 太る `weightGrow` (arrive) and 細る `weightThin` (depart): `late`, `optIn: 'weight'`, reach = 始まりの細さ /
+終わりの細さ × the room below the line's face. DESIGN §5.2 / §5.4 rows added (the catalog tests read them).
+Conformance: the dwell jump limit for `wt` is 60 weight units per 1/480 s.
+
+**Planner.** `ctx.glyph = { morph, weight, maybeMorph, id }` from planner/rules (`morph.auto`, `weight.auto`: work pin,
+else on for `look.gen ≥ 1`); the cast look key gains `|<id>` only when the id is not `g00`, so an older document's key
+text is as before. The motion slots of a lyric/focus cut draw from the opt-in pool when the switch is on, the lettering
+is plain or glow and the face has room (太る 300 from the lightest weight to the end weight, 細る 300 below, 脈打つ太さ
+200 either way); the aligned-copy check and explain's shadow pass the same opt-in. `text.weight` (int 100–900) is a pin
+(cut > line > work), else set by the grow rule: an entrance with 太る and no 太さ pin ends at the heaviest served weight
+up to 800 (`from: 'rule'`, trace rule `weight.grow`), inside the cast (cached with it). The build lays the cut's lyric
+face role out at `text.weight` (`FACES.reweigh`; notes of another role keep theirs). Warnings `weight-flat` and
+`weight-style` (`detail` = the family) for a pinned or ruled weight part where it cannot show, once per cut, replayed
+from the cast cache. Explain lists an opt-in part among the alternatives where the traced pool offered it.
+
+**Rate calibration.** Over `corpus(2, ['16:9'])` with `look.gen = 1`: 444 of 600 lyric/focus cuts are eligible for 太る
+(as the design's probe). `weight: 2` gave 8.1 % (6 seeds: 8.5 %), 2.25 gave 9.2 %, **2.5 gives 10.4 % (6 seeds: 9.9 %)**,
+so 太る carries `weight: 2.5` (the design's calibration step; test band [0.06, 0.14]). 細る (weight 1): 3.3 % of its
+eligible cuts. Of the 太る cuts 15 of 36 get a grow-rule weight; the others' face is already at its top (Zen Old Mincho 700,
+Shippori Mincho B1 800).
+
+**UI.** 作品全体 › 見た目 › 詳しい設定 「太さを動かす」 (toggle, `autoDefault`: the document default unpins, anything
+else pins — one command, one undo entry); 太さ rows (number 100–900, 自動) under 行 › 色と書体, 複数行 › 色と書体 and カット
+› 文字. `slotScopes`: `weight.auto` work, `morph.auto` work + line, `text.weight` every scope. core/commands: `morph.auto`
+and `weight.auto` are never cut pins, `weight.auto` never a line pin; paste-look copies `text.weight`. ui_flows `weight`.
+
+**Deviations (with reasons).**
+- P2's UI plumbing is also here, in P2's shape, because the switches need it and P2 is built at the same time:
+  planner/fields category `'rule'` (work-scope rows of planner/rules; `repeat.same` keeps its v2.1 handling until P2
+  moves it), `autoText = ['rule.auto.new' | 'rule.auto.old']`, `canPinAt ['work']`, the inspector's `autoDefault` branch
+  in `valueFor`; the strings `rule.auto.new/old` are P2's keys (keep one copy when merging). Not here: P2's rendering of
+  `autoText` under a row and the number widget's placeholder. explain gives a switch `whyRule.rules.new/old` (strings
+  added) instead of failing over to the per-cut path.
+- `warn.weight-style` says "color" (the UI's one English spelling, ui_fields ux-16), not "colour".
+- `weight-flat` / `weight-style` are reported per cut (a line with two cuts warns twice, each with its cut).
+- `ready(…, { drawOnly })` also reports refs the main path owns, by their main state (export asks for the whole draw
+  usage without knowing which weights another scene loads as main faces).
+- The sample plan's 太さ for weight-part tiles (`text.face = 'body'`, `text.weight = 800`) waits for step 7 with the
+  other thumbnail work.
+- The FontBook test double moved from faces.test.js to `tests/helpers/fake_fonts.js` (weight.test.js uses it too).
+
+**Checks.** The six goldens match. Mutations (each fails a test, then restored): late parts signed; the pair drawn
+lighter-first; the lighter at a(1 − f); outline crossfading; `faceReady` ignored; an epoch bump on draw-only loads; no
+`wtReach` usage; the opt-in without its room check or its style check; the registry pool ignoring `optIn`; no grow rule;
+`K.depart` re-wrapping without the options; `altsOf` skipping opt-in parts; warnings not replayed from the cast cache;
+`text.weight` not built; the `'rule'` category off; a late part accepted as a material base (ai/recipe and parts/mix);
+`decideTextWeight` with an automatic branch (all six goldens differ). The conformance "slowest build > 60 ms" checks
+fail now and then on this loaded machine (another package's tests run beside them); they are timing, not the column.
+
 
 <!-- PV22 P5 notes -->
 
