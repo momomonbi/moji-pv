@@ -1,8 +1,9 @@
 /* 文字PVメーカー v2 — original work. plan(doc, { registry }) → Plan: the planner's stages in their FROZEN order (DESIGN §4.16.1–§4.16.2, §3.12; DESIGN_2_1 §2.7, §5.9.3, §11.2.6). */
 MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'core/timing', 'core/beats', 'core/motion',
   'core/doc', 'core/schema', 'core/script', 'core/media', 'core/shot', 'planner/choose', 'planner/params', 'planner/look',
-  'planner/segment', 'planner/features', 'planner/cast', 'planner/tracks', 'planner/camera', 'planner/encode', 'planner/extreme'],
-(H, N, PINS, LY, TM, B, MO, D, S, SC, MEDIA, SHOT, CH, PA, LK, SG, FE, CA, TR, CAM, EN, XT) => {
+  'planner/segment', 'planner/features', 'planner/cast', 'planner/tracks', 'planner/camera', 'planner/encode', 'planner/extreme',
+  'planner/rules', 'planner/conventions'],
+(H, N, PINS, LY, TM, B, MO, D, S, SC, MEDIA, SHOT, CH, PA, LK, SG, FE, CA, TR, CAM, EN, XT, RU, CONV) => {
   'use strict';
 
   // v2: rigs, cut.rig, grounds[].zoomed, feat.sectionStart, media, the camera slots (DESIGN_2_1 §2.7, §11.2.6).
@@ -513,7 +514,7 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
       timing: Object.assign({}, TM.TIMING_DEFAULTS, doc.timing || {}), pools: new Map(), trace, casts: null,
       lockFree: CA.lockFreeIndex(doc.pins), media: mediaIndex(doc), mediaUsed: new Set(),
       castKeys: null, seams: null, encodings: null, fallbacks: null, lookAxis: null, lineConds: null, workCond: null,
-      shotMood: null, echoed: null, align: null, alignNear: null,
+      shotMood: null, echoed: null, align: null, alignNear: null, rules: null, pv: null,
     };
     // Traced runs (explain) and fresh runs neither read nor refresh the caches of re-planning.
     if (cached) beginFeatures();
@@ -539,6 +540,8 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
     ctx.amounts = look.amounts;
     ctx.pace = look.mood.pace;
     ctx.chooser = CH.createChooser(registry, { mood: look.mood, theme: look.theme, season: look.season, amounts: look.amounts });
+    // 文字PVの定石 (DESIGN_2_2 §2): the switches as the whole work resolves them (a new work's defaults, planner/rules)
+    ctx.rules = RU.resolve(ctx);
 
     // 3. cutter
     const cuts = SG.cutAll(ctx, timed, sheet.meta, duration);
@@ -559,12 +562,16 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
       cut.feat = got.feat;
       cut.featId = got.id;
     });
+    // 文字PVの定石: song parts, their sets of looks, the arc and the directions (null unless one of them is on)
+    ctx.pv = ctx.rules.any ? CONV.prepare(ctx, cuts, timed, { sheet, cached, intern: CA.intern, pool: (kind) => (kind === 'ground'
+      ? CA.poolOf(ctx, 'ground', { aspect: ctx.aspect })
+      : CA.poolOf(ctx, kind, { role: 'lyric', scope: kind === 'ornament' ? 'cut' : null })) }) : null;
 
     // 5. cast, in time order (a cut whose inputs did not change reuses its cast, planner/cast castCut)
     if (cached) {
       ctx.casts = CA.beginCasts(registry);
       ctx.castKeys = CA.castKeys(ctx, EN.canon([registry.version, look.mood.key, look.theme.key, look.season, look.amounts,
-        look.variety, aspect, doc.look.seed, doc.filters || null, ctx.bpm, ctx.media ? ctx.media.key : null]));
+        look.variety, aspect, doc.look.seed, doc.filters || null, ctx.bpm, ctx.media ? ctx.media.key : null, ctx.rules.id]));
     }
     // The cuts a later cut sings again (their rows keep what the repeats inherit, planner/cast castCut).
     ctx.echoed = new Set();
@@ -612,6 +619,8 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
     const castHits = cuts.reduce((n, c) => n + (c.castHit ? 1 : 0), 0);
     const reuse = Object.freeze({ cuts: cuts.length, casts: castHits });
     Object.defineProperty(plan, 'reuse', { value: reuse, enumerable: false });
+    // 文字PVの定石's parts and sets of looks (the inspector's 区画 page and tests; not part of the Plan)
+    Object.defineProperty(plan, 'pv', { value: ctx.pv ? ctx.pv.summary() : null, enumerable: false });
     return plan;
   }
 

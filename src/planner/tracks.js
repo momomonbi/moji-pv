@@ -49,9 +49,10 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
       return { prev, near, families };
     }
 
-    // The history entry of a decision; got = the chooser's answer (with its natural and reference picks) or null.
-    function entryOf(d, got) {
-      return { v: d.v, base: (got && got.base) || d.v, ref: (got && got.ref) || d.v, win: (got && got.win) || d.v };
+    // The history entry of a decision; got = the chooser's answer (with its natural and reference picks) or null. dir =
+    // the horizontal sign of a transition under 「動きの向きを交互にする」 (0 otherwise; planner/flow seamDir).
+    function entryOf(d, got, dir) {
+      return { v: d.v, base: (got && got.base) || d.v, ref: (got && got.ref) || d.v, win: (got && got.win) || d.v, dir: dir || 0 };
     }
 
     // coverage: the segment's text coverage, for the depth of a background photo (PA.textCoverage, §11.9.2).
@@ -207,8 +208,11 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
       const trace = tracing(ctx, first.key, 'ground');
       const rec = recentOf(ctx, 'ground', history);
       const cond = CA.lineCond(ctx, first.line);
-      const req = { kind: 'ground', slot: 'ground', path: 'cut/' + first.key + ':ground', feat: first.feat, chosen: {}, seed,
-        recent: rec.recent, ref: rec.ref, echo: null, cutKey: first.key, avoid: avoidOf(history, null), cond, noMedia };
+      // 文字PVの定石: the first cut's features as its choices weigh them (the arc) and its part's set of looks
+      const feat = ctx.pv ? ctx.pv.featOf(first) : first.feat;
+      const req = { kind: 'ground', slot: 'ground', path: 'cut/' + first.key + ':ground', feat, chosen: {}, seed,
+        recent: rec.recent, ref: rec.ref, echo: null, cutKey: first.key, avoid: avoidOf(history, null), cond, noMedia,
+        pv: ctx.pv ? ctx.pv.groundFactor(first) : null };
       let out;
       if (seg.pin) {
         CA.pinWarnings(ctx, 'ground', seg.pin.v, seg.pin, cond);
@@ -224,7 +228,7 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
         out = chosen(ctx, req, trace);
       }
       const d = out.decision = withParams(out.decision, params(ctx, ctx.registry.get('ground', out.decision.v), 'ground',
-        atOf(first), seed, first.feat, 'ground', seg.coverage));
+        atOf(first), seed, feat, 'ground', seg.coverage));
       if (trace) trace.decision = d;
       return out;
     }
@@ -455,9 +459,10 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
       const rec = recentOf(ctx, 'seam', history);
       // The receiving cut's line conditions (season, avoid list; DESIGN_2_1 §4.9).
       const cond = CA.lineCond(ctx, B.line);
+      const feat = ctx.pv ? ctx.pv.featOf(B) : B.feat;
       // A transition does not repeat the one into the previous cut while another candidate weighs > 0 (avoidOf; the
       // runner-up may be the hard cut). Hard cuts repeat freely.
-      const req = { kind: 'seam', slot: 'seam', path: 'cut/' + B.key + ':seam', feat: B.feat, chosen: {}, seed,
+      const req = { kind: 'seam', slot: 'seam', path: 'cut/' + B.key + ':seam', feat, chosen: {}, seed,
         scope: world ? 'world' : 'text', recent: rec.recent, ref: rec.ref, echo: null, cutKey: B.key,
         avoid: avoidOf(history, hard), cond };
       let out;
@@ -467,7 +472,9 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
         out = fixed(pinDecision(pin));
         if (trace) shadow(ctx, req, trace, { kind: 'seam', stage: 'pin', pin, recent: rec.recent, echo: null });
       } else {
-        const chance = world ? WORLD_CHANCE : ctx.look.mood.pace.seam * (0.5 + 0.5 * B.feat.energy);
+        // (under 「曲の山に合わせて強弱をつける」 the energy is blended with the part's drive, planner/conventions)
+        const energy = ctx.pv ? ctx.pv.seamEnergy(B) : B.feat.energy;
+        const chance = world ? WORLD_CHANCE : ctx.look.mood.pace.seam * (0.5 + 0.5 * energy);
         if (R.stream(seed, 'chance').next() < chance) {
           if (trace) Object.assign(trace, { kind: 'seam', recent: rec.recent, echo: null, world });
           out = chosen(ctx, req, trace);
@@ -478,7 +485,13 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
       }
       // The hard cut is not a transition (it is not listed in Plan.seams), so it has no parameters to resolve.
       if (out.decision.v !== hard) {
-        out.decision = withParams(out.decision, params(ctx, ctx.registry.get('seam', out.decision.v), 'seam', at, seed, B.feat));
+        out.decision = withParams(out.decision, params(ctx, ctx.registry.get('seam', out.decision.v), 'seam', at, seed, feat));
+        // 「動きの向きを交互にする」 (DESIGN_2_2 §2.2.4 c): an automatic sideways transition against the previous one
+        if (ctx.pv && !pin) {
+          const d = ctx.pv.flipSeam(B, out.decision, history, seed);
+          if (d !== out.decision) { out.decision = d; if (trace) trace.pvFlip = 'alt'; }
+        }
+        if (ctx.pv) out.entry.dir = ctx.pv.seamDir(out.decision);
       }
       if (trace) trace.decision = out.decision;
       return out;
@@ -523,7 +536,9 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
     function sameEntries(a, b) {
       if (a.length !== b.length) return false;
       for (let i = 0; i < a.length; i++) {
-        if (a[i] !== b[i] && (a[i].win !== b[i].win || a[i].base !== b[i].base || a[i].ref !== b[i].ref)) return false;
+        if (a[i] !== b[i] && (a[i].win !== b[i].win || a[i].base !== b[i].base || a[i].ref !== b[i].ref || a[i].dir !== b[i].dir)) {
+          return false;
+        }
       }
       return true;
     }
@@ -580,7 +595,7 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
       const d = src.seamIn >= 0 ? copied(out[src.seamIn].slot) : { from: 'auto', v: hard };
       const t = tracing(ctx, B.key, 'seam');
       if (t) Object.assign(t, { kind: 'seam', stage: 'auto', world: A.ground !== B.ground, why: [alignWhy(src)], decision: d });
-      return { got: { decision: d }, entry: entryOf(d, null) };
+      return { got: { decision: d }, entry: entryOf(d, null, ctx.pv ? ctx.pv.seamDir(d) : 0) };
     }
 
     // A transition hands the picture over to B: at the end of its window (B.a + dur/2) the seam shows B alone, so

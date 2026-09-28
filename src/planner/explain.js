@@ -1,6 +1,6 @@
 /* 文字PVメーカー v2 — original work. explain(): why a slot has its value, and the alternatives — lazy, never in the Plan (DESIGN §4.16.8; DESIGN_2_1 §2.8, §3.9, §11.2.6). */
 MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media', 'planner/choose', 'planner/look',
-  'planner/plan', 'planner/fields'], (P, PINS, LY, MEDIA, CH, LK, PL, F) => {
+  'planner/plan', 'planner/fields', 'planner/rules', 'planner/flow'], (P, PINS, LY, MEDIA, CH, LK, PL, F, RU, FL) => {
   'use strict';
 
   const SCOPE_OF = { 'pin:cut': 'cut', 'pin:line': 'line', 'pin:work': 'work' };
@@ -69,6 +69,15 @@ MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media
       else if (f.season !== 1) why.push({ code: 'season', params: { season: plan.look.season.v, word: seasonWord || '' } });
       if (f.prefer !== 1) why.push({ code: 'theme.prefer', params: { x: r2(f.prefer) } });
       if (def.gate) why.push({ code: 'gate', params: { amount: def.gate } });
+      // 文字PVの定石 (DESIGN_2_2 §2): the part's set of looks and the song's arc
+      const part = plan.pv && plan.pv.parts ? plan.pv.parts.get(cut.key) : null;
+      if (f.pvKit > 1 && part) {
+        why.push(plan.pv.pseudo ? { code: 'pv.kitBlock', params: {} } : { code: 'pv.kit', params: { section: part.kind || 'other' } });
+      }
+      if (f.pvArc !== undefined && f.pvArc !== 1 && part && part.drive !== 0.5) {
+        why.push(part.peak ? { code: 'pv.peak', params: {} } : part.tame ? { code: 'pv.tame', params: {} }
+          : { code: part.drive > 0.5 ? 'pv.arc.up' : 'pv.arc.down', params: { section: part.kind || 'other' } });
+      }
     }
     const refs = cond && cond.deny ? cond.deny[kind] : null;
     if (refs && refs.length && !trace.avoidRelaxed) why.push({ code: 'avoid', params: { n: refs.length } });
@@ -213,6 +222,8 @@ MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media
     if (from.startsWith('pin')) why = pinWhy(from, by);
     else if (from === 'mark') why = [{ code: 'rule', params: { rule: parsed.slot === 'split' ? 'marks' : 'lrc' } }];
     else if (from === 'rule') why = [{ code: 'rule', params: { rule: 'speed' } }];     // scaled by motion.speed (§4.3)
+    // turned by 「動きの向きを交互にする」 (DESIGN_2_2 §2.2.3): against the previous cut, or with the rest of this cut
+    else if (from === 'alt') why = [{ code: 'rule', params: { rule: 'pv.alt' } }, altWhy(plan, cut, parsed)];
     else why = [{ code: 'rule', params: { rule: cat === 'param' ? 'auto' : parsed.slot } }];
     // The automatic depth of a photo or video: the §11.9.2 rule that decided it.
     const depthRule = cat === 'param' && from === 'auto' ? F.depthRuleAt(doc, plan, cut, parsed, registry) : null;
@@ -226,6 +237,41 @@ MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media
       else why = [{ code: 'media.pool', params: { name } }];
     }
     return { path, value, from, by, why, alts: [] };
+  }
+
+  // Why a turned direction points where it does: with the cut's earlier directional value on the same axis (the
+  // FROZEN slot order: layout, entrance, hold, exit, camera texture), else against the previous cut.
+  const DIR_SLOTS = Object.freeze(['arrange', 'arrive', 'dwell', 'depart', 'lens']);
+  function altWhy(plan, cut, parsed) {
+    const kind = parsed.part.kind;
+    const d = cut.slots[kind];
+    const e = d && typeof d.v === 'string' ? FL.entryOf(kind, d.v) : null;
+    if (!e) return { code: 'pv.alt', params: {} };
+    const s = e.sign(d.p || {});
+    for (const k of DIR_SLOTS) {
+      if (k === kind) break;
+      const o = cut.slots[k];
+      const oe = o && typeof o.v === 'string' ? FL.entryOf(k, o.v) : null;
+      if (!oe || oe.axis !== e.axis) continue;
+      const os = oe.sign(o.p || {});
+      if (os !== 0) return { code: os === s ? 'pv.altSame' : 'pv.alt', params: {} };
+    }
+    return { code: 'pv.alt', params: {} };
+  }
+
+  // A switch of the new-work defaults table at work scope (planner/rules; category 'rule'): its pin, or the group
+  // switch it follows (文字PVの定石), or the generation of the document (a new work, or one made before the feature).
+  function explainRule(doc, plan, parsed) {
+    const slot = parsed.slot;
+    const path = P.format(parsed);
+    const pin = (doc.pins || {})[path];
+    const value = F.fieldState(doc, plan, { level: 'work' }, path, {}).value;
+    if (pin) return { path, value, from: 'pin:work', by: pin.by, why: pinWhy('pin:work', pin.by), alts: [] };
+    const row = RU.rowOf(slot);
+    let rule = 'auto';
+    if (row && row.parent && (doc.pins || {})['work:' + row.parent]) rule = 'pv.group';
+    else if (RU.hasDefault(slot)) rule = RU.gen(doc) >= 1 ? 'gen.new' : 'gen.old';
+    return { path, value, from: 'auto', by: undefined, why: [{ code: 'rule', params: { rule } }], alts: [] };
   }
 
   // The line slots season and avoid (DESIGN_2_1 §4.9). A line season follows the work's season unless the line pins
@@ -327,6 +373,7 @@ MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media
     const parsed = P.parse(path);
     const cat = F.categoryOf(parsed);
     if (cat === 'look') return explainLook(doc, plan, parsed, registry);
+    if (cat === 'rule') return explainRule(doc, plan, parsed);
     const cut = cutFor(plan, parsed);
     if (!cut && cat !== 'line') {
       return { path, value: undefined, from: 'auto', by: undefined, why: [], alts: [] };

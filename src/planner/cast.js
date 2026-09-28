@@ -1,6 +1,6 @@
 /* 文字PVメーカー v2 — original work. Casting: every cut slot in the FROZEN order, from pins, rules or the chooser (DESIGN §4.16.2, §3.4.3; DESIGN_2_1 §3.9, §4.9). */
 MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 'core/pins', 'core/paths', 'planner/choose',
-  'planner/params', 'planner/look', 'planner/camera'], (S, REG, R, N, PINS, P, CH, PA, LK, CAM) => {
+  'planner/params', 'planner/look', 'planner/camera', 'planner/rules'], (S, REG, R, N, PINS, P, CH, PA, LK, CAM, RU) => {
     'use strict';
 
     const LIST_KINDS = Object.freeze(['ornament', 'filter']);
@@ -11,6 +11,8 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     const PER_CUT_ROLES = new Set(['lyric', 'focus']);
     const TALL_ASPECTS = new Set(['9:16', '3:4']);
     const FACE_WEIGHTS = Object.freeze({ display: 3, serif: 2, body: 1 });
+    const FACE_KIT = 8;                                    // the face of the part's set of looks (DESIGN_2_2 §2.1.4)
+    const FACES = Object.freeze(['display', 'serif', 'body']);
     const AVOID_REPEAT = new Set(['arrange', 'arrive']);   // §8.2: no identical adjacent arrange/arrive (see choose.pick)
 
     // Specs of the non-part cut slots (§3.4.3, and the v2.1 camera slots of planner/camera); pins are coerced through
@@ -172,7 +174,7 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     // createHistory; win: the winner before req.avoid, which v differs from only when the winner was avoided).
     // req = { kind, slot, path, feat, role, orient, script, scope, chosen, seed, recent, ref, echo, avoid, list, orNone,
     // cutKey, trace, silent, cond (the line conditions of lineCond; default the work's), noMedia (derived media grounds
-    // weigh 0 here, DESIGN_2_1 §11.5.9) }.
+    // weigh 0 here, DESIGN_2_1 §11.5.9), pv (文字PVの定石's factor of the cut's part, planner/conventions partFactor) }.
     // Stages (§4.16.4, §3.8): the full weights; the same pool without traitFit and fits; the pool without the text
     // traits (orient, script, aspect); then the kind's fallback — or 'none' for a list slot whose fallback does not
     // serve the cut's role, and for atmos (orNone). pool-empty is reported on lyric cuts, and elsewhere only when the
@@ -186,7 +188,7 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
         kind: req.kind, keys: null, noFit: false, trace: null, feat: req.feat, chosen: req.chosen, seed: req.seed,
         variety: ctx.look.variety, recent: req.recent, ref: req.ref || null, echo: req.echo,
         moodFilter: req.kind === 'filter', avoid: req.avoid || null, season: cond.season, seasonPinned: cond.pinned,
-        noMedia: !!req.noMedia,
+        noMedia: !!req.noMedia, pv: req.pv || null,
       };
       const sub = req.poolId !== undefined ? req.poolId
         : (req.role || '') + '|' + (req.orient || '') + '|' + (req.script || '') + '|' + (ctx.aspect || '');
@@ -335,10 +337,16 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       }
       // Registers a row under a cut key without adding it to the window (unsalted: the echoed row).
       function name(cutKey, row) { byCut.set(cutKey, row); }
-      return { push, recent, reference, previous, unsaltedShot, echo, heir, follows, rowsRead, twinned, unsalted, name };
+      // The packed directions of the k-th cut before the next one (文字PVの定石, planner/flow), or NO_DIR (13).
+      function prevDir(k) {
+        const row = rows.length >= k ? rows[rows.length - k] : null;
+        return row && typeof row.dir === 'number' ? row.dir : NO_DIR;
+      }
+      return { push, recent, reference, previous, unsaltedShot, echo, heir, follows, rowsRead, twinned, unsalted, name, prevDir };
     }
 
     const NONE = Object.freeze([]);
+    const NO_DIR = 13;
 
     // The recency group of a slot: its kind for list slots ('ornament#1' → 'ornament'), else the slot itself.
     const groups = new Map();
@@ -369,7 +377,7 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     // same four fields as they would be without any salt (free; heir, shadow and free are set by castCut). slots = the cut's decisions (as its neighbours
     // see them); natural / refs = { slot: pick }. Rows never change, so a cached cast keeps its row.
     function historyRow(slots, natural, refs) {
-      const row = { base: new Map(), both: new Map(), last: new Map(), own: {}, heir: null, shadow: null, free: null };
+      const row = { base: new Map(), both: new Map(), last: new Map(), own: {}, heir: null, shadow: null, free: null, dir: NO_DIR };
       for (const slot of Object.keys(natural)) {
         const v = natural[slot];
         if (!isChoice(slot, v)) continue;
@@ -392,7 +400,8 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     // echoed row for its own picks and its heir (the shot its repeats inherit, and whether that cut shows it). A cut's
     // salt-free re-cast reads the same fields of each row's twin (row.free; unsaltedCast), and whether a twin differs
     // from its row decides whether it re-casts, so the twins compare too (a row with one never equals a row without).
-    const ROW_FIELDS = Object.freeze([['base'], ['base'], ['base'], ['base', 'both', 'last', 'shadow'], ['own', 'heir']]);
+    // (文字PVの定石: the two rows before the next cut also give their packed directions, dir, which its alternation reads.)
+    const ROW_FIELDS = Object.freeze([['base'], ['base'], ['base', 'dir'], ['base', 'both', 'last', 'shadow', 'dir'], ['own', 'heir']]);
     const TWIN_FIELDS = Object.freeze([['base'], ['base'], ['base'], ['base', 'both', 'last'], ['own']]);
     const TWIN_ALL = Object.freeze(['base', 'both', 'last', 'own']);
     function sameRows(a, b) {
@@ -422,7 +431,7 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     function sameFields(x, y, fields) {
       for (const f of fields) {
         const same = f === 'own' ? sameRecord(x.own, y.own) : f === 'heir' ? sameHeir(x.heir, y.heir)
-          : f === 'shadow' ? x.shadow === y.shadow : sameMap(x[f], y[f]);
+          : f === 'shadow' || f === 'dir' ? x[f] === y[f] : sameMap(x[f], y[f]);
         if (!same) return false;
       }
       return true;
@@ -466,15 +475,18 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     function acceptRepeat(v) { return typeof v === 'boolean' ? { v } : { bad: true }; }
     function atOfCut(cut) { return { cutKey: cut.key, pinCutKey: cut.pinKey, lineId: cut.line }; }
 
-    // alignments(ctx, cuts) → Map<cut key, source cut> | null (null when no scope pins the opt-in; plan.run keeps it as
-    // ctx.align before casting). A run is consecutive lines that sing the same line (a line sung twice in a row is a
+    // alignments(ctx, cuts) → Map<cut key, source cut> | null (null when no scope pins the opt-in and it is off by
+    // default; plan.run keeps it as ctx.align before casting). The default is 文字PVの定石's (DESIGN_2_2 §2.1.4 a): on in
+    // a new work unless pinned off (ctx.rules; without it, as planner/rules reads ctx.doc; a stub { ix } is off). A run is consecutive lines that sing the same line (a line sung twice in a row is a
     // run of two). A copy takes the line at its place in the first run of that line: the first copy for a copy sung
     // alone, the second of the first run for the second of a later run; cut by cut, the cut at the same offset. The
     // first run's own copies are chosen (so a line sung twice in a row does not play the same thing back to back), and
     // so is a copy past the end of the first run. The two cuts must have the same text, role and impact mark (another
     // split, or an impact the first copy lacks, keeps the cut's own look), and the opt-in must resolve on at the copy.
     function alignments(ctx, cuts) {
-      if (!PA.pinned(ctx.ix, REPEAT)) return null;
+      const pinnedAny = PA.pinned(ctx.ix, REPEAT);
+      const def = ctx.rules ? ctx.rules.repeatDefault : RU.repeatDefault(ctx.doc || null, ctx.ix);
+      if (!pinnedAny && !def) return null;
       const out = new Map(), byKey = new Map(), runs = new Map();
       let line = null, source = null, open = null, prev = null, pos = 0;
       for (const cut of cuts) {
@@ -497,8 +509,8 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
         if (source === null) continue;
         const src = byKey.get(source + cut.key.slice(cut.key.indexOf('~')));
         if (!src || src.text !== cut.text || src.role !== cut.role || !!src.impact !== !!cut.impact) continue;
-        const pin = PA.resolvePin(ctx.ix, atOfCut(cut), REPEAT, acceptRepeat, null);
-        if (pin && pin.v === true) out.set(cut.key, src);
+        const pin = pinnedAny ? PA.resolvePin(ctx.ix, atOfCut(cut), REPEAT, acceptRepeat, null) : null;
+        if (pin ? pin.v === true : def) out.set(cut.key, src);
       }
       return out;
     }
@@ -602,11 +614,12 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       if (!poolEntry(ctx, kind, poolIdOf(st), cut.role, st.chosen.orient, cut.feat.script, ctx.aspect, scope, st.cond).keys
         .includes(ad.v)) return null;
       const def = ctx.registry.get(kind, ad.v);
-      if (typeof def.fits === 'function' && !(Number(def.fits(cut.feat, st.chosen)) > 0)) return null;
+      if (typeof def.fits === 'function' && !(Number(def.fits(st.feat, st.chosen)) > 0)) return null;
       return ad;
     }
 
-    // An aligned part (or a part a rule gives the cut and its source alike) keeps the source's parameters, except those
+    // An aligned part (or a part a rule gives the cut and its source alike) keeps the source's parameters (a value the
+    // motion speed scaled, 'rule', or 文字PVの定石 turned, 'alt', is the cut's own automatic value), except those
     // pinned at the cut or rerolled there (a die on the
     // parameter, 'cut/<key>:<param path>' or 'line/<id>:<param path>'), which the cut resolved itself (d, after its
     // motion speed). The copies are plain values: the source's motion speed is already in them (the speed is aligned
@@ -620,10 +633,10 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       for (const { name, shared } of ctx.registry.params(kind, d.v) || []) {
         if (!(name in d.p) || !(name in ad.p)) continue;
         const from = pfrom ? pfrom[name] : undefined;
-        if (from !== undefined && from !== 'rule') continue;
+        if (from !== undefined && from !== 'rule' && from !== 'alt') continue;
         if (ctx.salts && fieldSalted(ctx, cut, P.slotParamPath(kind, idx, d.v, name, shared))) continue;
         (p || (p = Object.assign({}, d.p)))[name] = ad.p[name];
-        if (from === 'rule') (dropped || (dropped = new Set())).add(name);
+        if (from === 'rule' || from === 'alt') (dropped || (dropped = new Set())).add(name);
       }
       if (!p) return d;
       const out = { v: d.v, from: d.from, p };
@@ -670,6 +683,10 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
 
     function pinDecision(pin) { return { v: pin.v, from: pin.from, by: pin.by }; }
 
+    // The kinds that pass over the previous cut's value (§8.2), and under 「パートごとに演出をそろえる」 holds and camera
+    // textures too (planner/kit KIT_AVOID).
+    function avoids(ctx, kind) { return AVOID_REPEAT.has(kind) || (!!ctx.pv && ctx.pv.avoidAlso(kind)); }
+
     // A part slot: pin (cut > line > work) → rule (forced value) → chooser; then its parameters.
     function decidePart(st, kind, idx, opts) {
       const o = opts || {};
@@ -698,10 +715,11 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
         const echo = st.hist.echo(cut.feat.repeatOf, slot);
         if (trace) Object.assign(trace, { kind, recent, echo });
         const got = chooseAuto(ctx, {
-          kind, slot, path: 'cut/' + cut.key + ':' + slot, feat: cut.feat, role: cut.role, orient: st.chosen.orient,
+          kind, slot, path: 'cut/' + cut.key + ':' + slot, feat: st.feat, role: cut.role, orient: st.chosen.orient,
           script: cut.feat.script, scope: kind === 'ornament' ? 'cut' : null, chosen: st.chosen, seed, recent, echo,
           list, cutKey: cut.key, trace, silent: st.natural, ref, poolId: poolIdOf(st), cond: st.cond,
-          avoid: AVOID_REPEAT.has(kind) && !st.natural ? avoidOf(st, slot) : null,
+          avoid: avoids(ctx, kind) && !st.natural ? avoidOf(st, slot) : null,
+          pv: ctx.pv ? ctx.pv.partFactor(st, kind) : null,
         });
         d = { v: got.v, from: got.from };
         if (got.base && got.base !== got.v) st.base[slot] = got.base;
@@ -711,7 +729,7 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       if (d.v !== 'none' && !st.natural) {
         const def = ctx.registry.get(kind, d.v);
         const { p, pfrom } = PA.resolveParams(def, kind, idx, at, ctx.ix, {
-          registry: ctx.registry, seed, salts: ctx.salts, warn: ctx.warn, f: cut.feat, look: lookAx(ctx), media: ctx.media,
+          registry: ctx.registry, seed, salts: ctx.salts, warn: ctx.warn, f: st.feat, look: lookAx(ctx), media: ctx.media,
         });
         d.p = p;
         if (pfrom) d.pfrom = pfrom;
@@ -719,7 +737,14 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
         // The source's parameters wherever the cut shows the source's part: taken from it, or given by the same rule (a
         // layout that moves the text itself forces the same motions).
         const same = ad || (st.align && !pin ? alignedDecision(st, slot) : null);
-        if (same && same.v === d.v) d = copyParams(st, kind, idx, d, same);
+        const copied = !!same && same.v === d.v;
+        if (copied) d = copyParams(st, kind, idx, d, same);
+        // 「動きの向きを交互にする」 (DESIGN_2_2 §2.2.4 b): the cut's directional parameters against the previous cut's (an
+        // aligned copy keeps its source's, which still give the cut its direction).
+        if (ctx.pv) {
+          const why = ctx.pv.flipParams(st, kind, idx, seed, d, copied);
+          if (trace && why) trace.pvFlip = why;
+        }
       }
       if (trace) trace.decision = d;
       setDecision(st, slot, d);
@@ -732,9 +757,10 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       const idx = slot.indexOf('#') > 0 ? Number(slot.slice(slot.indexOf('#') + 1)) : 0;
       const recent = st.hist.recent(kind, slot, list ? ownValues(st, kind, idx) : null);
       const echo = st.hist.echo(cut.feat.repeatOf, slot);
-      chooseAuto(ctx, { kind, slot, path: 'cut/' + cut.key + ':' + slot, feat: cut.feat, role: cut.role,
+      chooseAuto(ctx, { kind, slot, path: 'cut/' + cut.key + ':' + slot, feat: st.feat, role: cut.role,
         orient: st.chosen.orient, script: cut.feat.script, scope: kind === 'ornament' ? 'cut' : null, chosen: st.chosen,
-        seed, recent, echo, list, cutKey: cut.key, trace, silent: true, cond: st.cond });
+        seed, recent, echo, list, cutKey: cut.key, trace, silent: true, cond: st.cond,
+        pv: ctx.pv ? ctx.pv.partFactor(st, kind) : null });
       return Object.assign(trace, { recent, echo });
     }
 
@@ -758,8 +784,9 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
         if (c === undefined) return { bad: true };
         return applies && !applies(c) ? { na: true } : { v: c };
       }, ctx.warn);
-      const got = pin ? pinDecision(pin) : (st.align && ALIGN_VALUES.has(slot) && alignedValue(st, slot, spec, applies, !!trace)) ||
-        autoFn(seedOf(st, slot), !!trace);
+      const al = !pin && st.align && ALIGN_VALUES.has(slot) ? alignedValue(st, slot, spec, applies, !!trace) : null;
+      if (al) (st.fromAlign || (st.fromAlign = new Set())).add(slot);
+      const got = pin ? pinDecision(pin) : al || autoFn(seedOf(st, slot), !!trace);
       const d = got.rule !== undefined || got.why !== undefined ? withoutTrace(got) : got;
       if (trace) Object.assign(trace, { stage: pin ? 'pin' : d.from === 'rule' ? 'rule' : 'auto', pin, decision: d,
         rule: d.from === 'rule' ? got.rule || slot : slot, why: pin ? null : got.why || null });
@@ -798,14 +825,18 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     }
 
     function decideText(st) {
-      const { ctx, cut } = st;
+      const { ctx } = st;
       decideValue(st, 'text.face', SLOT_SPECS['text.face'], (seed) => {
         const serif = FACE_WEIGHTS.serif * (st.chosen.orient === 'v' ? 2 : 1);
-        const v = R.fromSeed(seed).weighted(['display', 'serif', 'body'], [FACE_WEIGHTS.display, serif, FACE_WEIGHTS.body]);
+        const w = [FACE_WEIGHTS.display, serif, FACE_WEIGHTS.body];
+        // the face class of the part's set of looks (「パートごとに演出をそろえる」)
+        const kit = ctx.pv ? ctx.pv.faceBoost(st) : null;
+        if (kit) w[FACES.indexOf(kit)] *= FACE_KIT;
+        const v = R.fromSeed(seed).weighted(FACES, w);
         return { v, from: 'auto' };
       });
       decideValue(st, 'text.scale', SLOT_SPECS['text.scale'],
-        () => ({ v: S.coerce(SLOT_SPECS['text.scale'], 1 + (cut.feat.energy - 0.5) * 0.2), from: 'auto' }));
+        () => ({ v: S.coerce(SLOT_SPECS['text.scale'], 1 + (st.feat.energy - 0.5) * 0.2), from: 'auto' }));
       decideValue(st, 'text.ink', SLOT_SPECS['text.ink'], () => ({ v: 'ink', from: 'auto' }));
       decideValue(st, 'text.style', SLOT_SPECS['text.style'], () => {
         const style = S.coerce(SLOT_SPECS['text.style'], ctx.look.theme.style);
@@ -931,6 +962,10 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
         cond: lineCond(ctx, cut.line), decide: decideValue, shotSalted: false, curveSalted: false, heirCurve: null,
         align: ctx.align ? ctx.align.get(cut.key) || null : null, rerolled: false, aligned: alignedDecision, shotAligned: false,
         ahead: ctx.alignNear ? ctx.alignNear.ahead.get(cut.key) || null : null,
+        // 文字PVの定石 (DESIGN_2_2 §2): the features the choices weigh (the arc's blended energy), the cut's song part, its
+        // directions so far (planner/flow) and the value slots it took from its aligned source.
+        feat: ctx.pv ? ctx.pv.featOf(cut) : cut.feat, part: ctx.pv ? ctx.pv.partOf(cut) : null,
+        dirOwn: ctx.pv ? { h: 0, side: 0, rot: 0 } : null, fromAlign: null,
       };
       if (st.align && ctx.salts) st.rerolled = !!(ctx.salts['cut/' + cut.key] || (cut.line && ctx.salts['line/' + cut.line]));
       if (!natural && isSalted(ctx, cut)) {
@@ -1054,7 +1089,9 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       if (hit) {
         for (const w of hit.warnings) ctx.warn(w);
         hist.push(cut.key, hit.row, cut.feat.repeatOf || cut.key);
-        return { slots: Object.assign({}, hit.slots), els: hit.els, cast: hit, castHit: true };
+        const out = { slots: Object.assign({}, hit.slots), els: hit.els, cast: hit, castHit: true };
+        if (ctx.pv) out.dir = hit.dir;
+        return out;
       }
       const warnings = [];
       const warn = ctx.warn;
@@ -1078,14 +1115,20 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
         row.shadow = isChoice('cam.shot', shot.v) ? shot.v : null;
         if (salted) row.free = twinOf(src);
         else if (twins) { const t = twinOf(src); if (twinDiffers(Object.assign({}, row, { free: t }), TWIN_ALL)) row.free = t; }
+        // 文字PVの定石: the directions the next cuts alternate against, from the cut as its neighbours see it (without
+        // its lock pins, like the rest of its row), and the cut's own as the Plan shows it (stage 6).
+        const dir = ctx.pv ? ctx.pv.dirOf(st) : NO_DIR;
+        if (ctx.pv) row.dir = ctx.pv.dirOf(view);
         hist.push(cut.key, row, cut.feat.repeatOf || cut.key);
         let entry = null;
         if (cache) {
           entry = { id: nextEntryId++, inputs, slots: freezeSlots(Object.assign({}, st.slots)), els: deepFreeze(els), warnings,
-            row, rules: null, seam: null };
+            row, rules: null, seam: null, dir };
           cache.add(cut.key, entry);
         }
-        return { slots: st.slots, els, cast: entry, castHit: false };
+        const out = { slots: st.slots, els, cast: entry, castHit: false };
+        if (ctx.pv) out.dir = dir;
+        return out;
       } finally {
         ctx.warn = warn;
       }
@@ -1200,7 +1243,7 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
         cut: k.pins(k.cut, 'cut', cut.pinKey || cut.key), salts: k.salts(cut), lineId: cut.line, pinKey: cut.pinKey,
         role: cut.role, impact: !!cut.impact, featId: cut.featId, rows: hist.rowsRead(cut.feat.repeatOf),
         follows: hist.follows(cut.feat.repeatOf), echoed: echoed(ctx, cut), aligned: alignedId(ctx.align, cut),
-        ahead: alignedId(ctx.alignNear && ctx.alignNear.ahead, cut),
+        ahead: alignedId(ctx.alignNear && ctx.alignNear.ahead, cut), pv: ctx.pv ? ctx.pv.idOf(cut) : '',
       };
     }
 
@@ -1219,8 +1262,9 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     // follows: whether the previous cut sings the same line cut (a line sung twice in a row; planner/camera recencyOf);
     // echoed: whether a later cut sings this one again (its row keeps an heir).
     // aligned: the source's cast entry under 「くり返しの行をそろえる」, ahead: that of the next cut's source (alignedId).
+    // pv: what 文字PVの定石 adds to the cut's inputs (its part, run start, drive and kit; planner/conventions idOf).
     const INPUT_FIELDS = Object.freeze(['look', 'work', 'line', 'cut', 'salts', 'lineId', 'pinKey', 'role', 'impact', 'featId',
-      'follows', 'echoed', 'aligned', 'ahead']);
+      'follows', 'echoed', 'aligned', 'ahead', 'pv']);
     function sameInputs(a, b) {
       for (const f of INPUT_FIELDS) if (a[f] !== b[f]) return false;
       return sameRows(a.rows, b.rows);
@@ -1304,6 +1348,6 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     return {
       SLOT_SPECS, LIST_KINDS, MOTION_KINDS, castCut, createHistory, chooseAuto, poolOf, acceptPart, pinWarnings, serves,
       filterAllows, lookAx, lockFreeCtx, lockFreeIndex, beginCasts, castKeys, intern, deepFreeze, historyRow, lineCond,
-      isChoice, alignments, neighboursOf, alignedSource, REPEAT,
+      isChoice, alignments, neighboursOf, alignedSource, REPEAT, fieldSalted,
     };
   });

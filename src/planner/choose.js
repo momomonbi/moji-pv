@@ -234,8 +234,15 @@ MV.def('planner/choose', ['core/hash', 'core/rng', 'core/num'], (H, R, N) => {
         Object.assign(f, { weight: s.weight, mood: s.mood, gate: s.gate, prefer: s.prefer, season: s.season,
           moodFilter: s.moodFilter, fit, fits, impact, echo, media });
       }
+      // 文字PVの定石 (DESIGN_2_2 §2): the part's set of looks and the song's arc (planner/conventions partFactor); only
+      // under those rules, so every other pick weighs as before.
+      if (req.pv) w *= req.pv.f(key, s, f);
       return w;
     }
+
+    // Recency relax of 「パートごとに演出をそろえる」: a member of the cut's set of looks keeps only the ×0.03 against the
+    // previous cut's value (the near and family factors would work against the set).
+    function relaxed(req, key, flags) { return req.pv && flags && req.pv.member(key) ? flags & PREV : flags; }
 
     // The weight of one candidate; with `f` (tracing) the factors are written into it as well. `baseW` receives the
     // weight without the recency factors and `refW` the weight with the reference recency `req.ref` (see pick).
@@ -244,8 +251,8 @@ MV.def('planner/choose', ['core/hash', 'core/rng', 'core/num'], (H, R, N) => {
       const s = st || statics(req.kind, key, req.moodFilter, req.season, req.seasonPinned);
       const w = preWeight(req, key, s, f);
       const q = baseW = N.q6(w);
-      if (req.ref) refW = withRecency(w, q, recencyFlags(req.ref, key, s.family));
-      const flags = recencyFlags(req.recent, key, s.family);
+      if (req.ref) refW = withRecency(w, q, relaxed(req, key, recencyFlags(req.ref, key, s.family)));
+      const flags = relaxed(req, key, recencyFlags(req.recent, key, s.family));
       if (f) traceRecency(f, flags);
       return withRecency(w, q, flags);
     }
@@ -273,7 +280,8 @@ MV.def('planner/choose', ['core/hash', 'core/rng', 'core/num'], (H, R, N) => {
 
     // pick(req) → { v, w, base, ref, avoided? } | null (null when every candidate weighs 0).
     // req = { kind, keys (the pool, sorted), feat, chosen, seed, variety, recent?, ref?, echo?, noFit?, moodFilter?,
-    // avoid?, trace?, season?, seasonPinned?, noMedia? }. score = ln(w) + variety · gumbel(seed, key); argmax, ties → the smaller key (keys arrive sorted).
+    // avoid?, trace?, season?, seasonPinned?, noMedia?, pv? (文字PVの定石: { f, member, block }, planner/conventions) }.
+    // score = ln(w) + variety · gumbel(seed, key); argmax, ties → the smaller key (keys arrive sorted).
     // Two more argmaxes share the same noise (planner/cast createHistory): base = without the recency factors (the
     // cut's natural pick) and ref = with the recency `req.ref` (the cut's reference pick).
     // avoid (arrange and arrive, §8.2 "no identical adjacent"): when the winner is the previous cut's value and another
@@ -301,9 +309,11 @@ MV.def('planner/choose', ['core/hash', 'core/rng', 'core/num'], (H, R, N) => {
         const f = req.trace ? {} : null;
         const w0 = preWeight(req, key, s, f);
         const wb = N.q6(w0);
-        const flags = flagsA[i] | familyFlag(req.recent, s.family);
+        let flags = flagsA[i] | familyFlag(req.recent, s.family);
+        let flagsRef = req.ref ? flagsB[i] | familyFlag(req.ref, s.family) : 0;
+        if (req.pv && (flags | flagsRef) && req.pv.member(key)) { flags &= PREV; flagsRef &= PREV; }
         const w = withRecency(w0, wb, flags);
-        const wr = req.ref ? withRecency(w0, wb, flagsB[i] | familyFlag(req.ref, s.family)) : 0;
+        const wr = req.ref ? withRecency(w0, wb, flagsRef) : 0;
         if (f) traceRecency(f, flags);
         if (!(wb > 0) && !(w > 0) && !(wr > 0) && !f) continue;     // nothing to score
         const noise = variety * gumbelAt(prefix, key);

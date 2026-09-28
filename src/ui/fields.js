@@ -1,7 +1,7 @@
 /* 文字PVメーカー v2 — original work. Inspector field catalogue: FieldSpecs per page and section, and sectionsFor (DESIGN §6.4.4–§6.4.9, §4.23). */
 MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color', 'core/ease', 'core/doc', 'ui/selection',
-  'core/curve', 'core/shot', 'core/media', 'ui/media_widgets', 'planner/extreme'],
-  (P, R, SC, C, E, D, S, CV, SHOT, MEDIA, MW, XT) => {
+  'core/curve', 'core/shot', 'core/media', 'ui/media_widgets', 'planner/extreme', 'planner/rules'],
+  (P, R, SC, C, E, D, S, CV, SHOT, MEDIA, MW, XT, RU) => {
     'use strict';
 
     // A FieldSpec (§4.23) is one row of the inspector: { id, path, scopes, el?, section, widget, label, hint?, basic,
@@ -13,7 +13,9 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
     // generated part parameter; its `label` is 'fld.param' = '{name}'), `param` (generated part parameters),
     // `firstCut` (the line page's 切り替え: written at the line's first cut, §6.4.6), `pinnedOnly` (a pinned parameter
     // of a part that is no longer chosen, shown as 無効), `note` (a string key shown under the row), `offClears` (a toggle
-    // whose off is 自動: turning it off clears the pin), `noDice` (a setting, not drawn: no 振り直し).
+    // whose off is 自動: turning it off clears the pin), `noDice` (a setting, not drawn: no 振り直し), `autoDefault` (a
+    // switch of the new-work defaults table, planner/rules: choosing the document's default clears the pin, any other
+    // value pins it; PV22).
 
     const ALL = Object.freeze(['work', 'line', 'cut']);
     const WORK = Object.freeze(['work']);
@@ -70,6 +72,8 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
       try { parsed = P.parse('work:' + slot); } catch (e) { return []; }
       if (parsed.el) return ALL.slice();
       if (parsed.name !== null) {
+        // the switches of the new-work defaults table (PV22): where their row allows a pin
+        if (RU.isRule(slot)) return RU.scopesOf(slot).slice();
         if (workName(slot)) return WORK.slice();
         if (LINE_WORK_NAMES.has(slot) || slot === REPEAT_SAME) return ['work', 'line'];
         if (LINE_NAMES.has(slot)) return LINE.slice();
@@ -287,9 +291,19 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
             options: D.ASPECTS.map((v) => ({ v, text: v })), select: true }),
           F({ cmd: { t: 'look.set', key: 'backdrop' }, scopes: WORK, widget: 'choice', label: 'fld.backdrop',
             options: opts(D.BACKDROPS, 'exp.bg.'), select: true }),
-          // on pins true for the whole video; off clears the pin (off is the default).
+          // 文字PVの定石 (DESIGN_2_2 §2): the group switch, 「くり返しの行をそろえる」 (a member of the group for its default)
+          // and, under 詳しい設定, the other members. Each is 自動 while it follows the document's default (on in a new work,
+          // off in an older one; a member follows the group): choosing the default clears the pin, the other value pins it.
+          F({ path: RU.PV.rules, scopes: WORK, widget: 'toggle', label: 'fld.pvRules', spec: { type: 'bool' },
+            note: 'fld.pvRules.note', autoDefault: true, noDice: true }),
           F({ path: REPEAT_SAME, scopes: WORK, widget: 'toggle', label: 'fld.repeatSame', spec: { type: 'bool' },
-            note: 'fld.repeatSame.note', offClears: true, noDice: true }),
+            note: 'fld.repeatSame.note', autoDefault: true, noDice: true }),
+          F({ path: RU.PV.kit, scopes: WORK, widget: 'toggle', label: 'fld.pvKit', spec: { type: 'bool' },
+            note: 'fld.pvKit.note', autoDefault: true, noDice: true, basic: false }),
+          F({ path: RU.PV.alt, scopes: WORK, widget: 'toggle', label: 'fld.pvAlternate', spec: { type: 'bool' },
+            note: 'fld.pvAlternate.note', autoDefault: true, noDice: true, basic: false }),
+          F({ path: RU.PV.arc, scopes: WORK, widget: 'toggle', label: 'fld.pvArc', spec: { type: 'bool' },
+            note: 'fld.pvArc.note', autoDefault: true, noDice: true, basic: false }),
         ]),
         // 写真・動画 (DESIGN_2_1 §11.7.3): the library, open when it holds something.
         sec('media', (ctx) => ctx.mediaCount > 0, [], { custom: 'media' }),
@@ -357,6 +371,8 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
         // An area selection (区画, DESIGN_2_1 §6.5) adds its section camera; its runs are split at the area's edges. With
         // it, カメラ EXTREME for the area (a line pin on every selected line, DESIGN_EXTREME §2.6).
         sec('rig', true, rigFields().concat(extremeFields({ scopes: LINE })), { when: hasArea }),
+        // 演出セット (DESIGN_2_2 §2.1): the set of looks of the area's song part(s), and its die (「パートごとに演出をそろえる」).
+        sec('kit', true, [], { custom: 'kit', when: (ctx) => hasArea(ctx) && !!ctx.kitKeys && ctx.kitKeys.length > 0 }),
         sec('colortype', false, [textFaceField(), textInkField(), textStyleField(), textScaleField()]),
         sec('shift', true, [], { custom: 'shift' }),
       ],
@@ -500,8 +516,17 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
         cut: scopeKind === 'cut' ? byKey.get(scope.slice(4)) || null : null, idx: s.level === 'el' ? s.idx || 0 : null,
         el: s.level === 'el' ? s.el : null, scripts, orients, area: s.level === 'line' && s.area ? s.area : null,
         materials: mats, mediaCount: doc && doc.media && Array.isArray(doc.media.list) ? doc.media.list.length : 0,
-        textFillIdx: null, textFillOn: false,
+        textFillIdx: null, textFillOn: false, kitKeys: null,
       };
+      // the song parts (planner/conventions keys) of an area's cuts, when their sets of looks are in the plan
+      if (ctx.area && plan && plan.pv && plan.pv.parts && plan.pv.kits.some((k) => k.primary)) {
+        const keys = [];
+        for (const c of cuts) {
+          const part = plan.pv.parts.get(c.key);
+          if (part && !keys.includes(part.key)) keys.push(part.key);
+        }
+        ctx.kitKeys = keys;
+      }
       if (page === 'el.text') {
         // the slot 文字の中に写真・動画 manages: the one pinned to textFill at the page's scope (a line or cut that picks
         // another decoration there does not hide it), else the first that shows textFill, else the first free one (§5.5)

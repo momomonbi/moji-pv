@@ -182,7 +182,9 @@ MV.def('ui/widgets', ['ui/dom', 'ui/icons', 'i18n/t', 'core/color', 'ui/playbar'
         if (!g) range.value = String((value === null ? min : value) * scale);
         el.classList.toggle('is-unset', value === null || !!st.mixed);
         if (document.activeElement !== box) { if (st.mixed) box.value = ''; else show(value); }
-        box.placeholder = st.mixed ? t('state.mixed') : value === null ? (st.auto ? t('state.auto') : '—') : '';
+        // 自動 names its value where the planner says it (st.autoText, e.g. 1カットに重ねる効果の目安 「自動（4）」)
+        box.placeholder = st.mixed ? t('state.mixed') : value === null
+          ? (st.auto ? (Array.isArray(st.autoText) ? t(...st.autoText) : t('state.auto')) : '—') : '';
         range.disabled = box.disabled = !!st.readOnly;
         const gv = st.extra && typeof st.extra.ghost === 'number' ? st.extra.ghost : null;
         ghost.hidden = gv === null;

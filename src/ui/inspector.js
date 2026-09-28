@@ -1,8 +1,8 @@
 /* 文字PVメーカー v2 — original work. The inspector (詳細): crumbs, level header, sections from FIELDS, field rows, sub-pages (DESIGN §6.4.4–§6.4.9, §6.6; DESIGN_2_1 §6.5–§6.9). */
 MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/part_browser', 'ui/selection', 'ui/looks',
   'ui/output', 'i18n/t', 'core/paths', 'core/pins', 'core/shot', 'planner/areas', 'ui/shot_editor', 'ui/material_page',
-  'ui/media_page', 'ui/media_widgets', 'ui/media_io', 'ui/extreme'],
-(dom, I, F, W, PB, S, LK, OUT, T, P, PINS, SHOT, AREAS, KE, MP, MPG, MW, MI, XU) => {
+  'ui/media_page', 'ui/media_widgets', 'ui/media_io', 'ui/extreme', 'planner/rules'],
+(dom, I, F, W, PB, S, LK, OUT, T, P, PINS, SHOT, AREAS, KE, MP, MPG, MW, MI, XU, RU) => {
   'use strict';
 
   const { h } = dom;
@@ -440,7 +440,8 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       }
       if (!f.path) return { value: derivedValue(f, ctx), mixed: false, auto: false, readOnly: true, extra: extraFor(f, null, ctx, row) };
       return { value: fs ? fs.value : null, mixed: !!fs && fs.state === 'mixed', auto: !fs || fs.state === 'auto' || fs.state === 'mark',
-        readOnly: !!f.readOnly || (!!fs && fs.state === 'derived'), extra: extraFor(f, fs, ctx, row) };
+        readOnly: !!f.readOnly || (!!fs && fs.state === 'derived'), extra: extraFor(f, fs, ctx, row),
+        autoText: fs && fs.state === 'auto' && fs.autoText ? fs.autoText : null };
     }
 
     // --- writing -------------------------------------------------------------------------------------------------
@@ -497,6 +498,12 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
 
     function valueFor(field, v, fs) {
       if (field.offClears && !v) return W.AUTO;
+      // a switch of the new-work defaults table (PV22): its document default is 自動 (no pin), any other value is pinned
+      if (field.autoDefault) {
+        const c = field.spec ? MV.use('core/schema').coerce(field.spec, v) : v;
+        const x = c === undefined ? v : c;
+        return RU.sameValue(x, RU.defaultValue(doc(), null, field.path)) ? W.AUTO : x;
+      }
       if (field.flashToggle) {
         const p = plan();
         const mood = p ? app.reg.get('mood', p.look.mood.v) : null;
@@ -635,6 +642,8 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       const info = field.depth ? iconBtn('info', t('media.depthWhy'), () => showWhy(row, false), { 'data-role': 'why' }) : null;
       const why = h('div', { class: 'fr-why', hidden: true, role: 'note' });
       const note = field.note ? h('p', { class: 'fr-note note subtle', text: t(field.note) }) : null;
+      // what 自動 means here, when the planner says it (FieldState.autoText): 「新しい作品の標準」, a photo's depth rule…
+      const autoNote = h('p', { class: 'fr-auto note subtle', hidden: true });
       const env = {
         app, t, label, field,
         commit: (v, o) => commit(row, v, o),
@@ -651,8 +660,8 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       };
       const widget = W.make(field, env);
       const el = h('div', { class: 'frow', 'data-widget': field.widget, 'data-slot': field.path || field.key, 'data-field': field.id },
-        h('div', { class: 'fr-top' }, lab, tag, h('span', { class: 'grow' }), info, dice, x, more), widget.el, note, why);
-      Object.assign(row, { el, tag, dice, x, more, why, widget, lab });
+        h('div', { class: 'fr-top' }, lab, tag, h('span', { class: 'grow' }), info, dice, x, more), widget.el, note, autoNote, why);
+      Object.assign(row, { el, tag, dice, x, more, why, widget, lab, autoNote });
       // Del / Backspace unpin the focused field (§6.8): the row publishes the paths it may clear while it has focus;
       // ui/boot's pin.clearField removes the ones that hold a pin (never a lock pin).
       el.addEventListener('focusin', () => {
@@ -732,6 +741,11 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       row.x.hidden = !here;
       if (row.dice) row.dice.disabled = lineLocked(ctx);
       row.el.dataset.state = state;
+      if (row.autoNote) {
+        const auto = fs && fs.state === 'auto' && Array.isArray(fs.autoText) ? t(...fs.autoText) : '';
+        row.autoNote.hidden = !auto;
+        if (row.autoNote.textContent !== auto) row.autoNote.textContent = auto;
+      }
       showInactive(row, fs);
       showSkip(row, fs);
       if (row.whyKind === 'explain' && !row.why.hidden) row.why.textContent = explainText(row);   // follows the value
@@ -1262,6 +1276,9 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       camKeys(ctx) {
         return h('button', { class: 'chip-btn', type: 'button', on: { click: () => openKeys(ctx) } }, t('fld.camKeys'));
       },
+      // 演出セット (DESIGN_2_2 §2.1): the set of looks of the area's song part, from plan.pv, and its die (one undo step,
+      // salt.bump work:kit.<key>); an area over several parts says so, and its die rerolls each of their sets.
+      kit(ctx) { return kitSection(ctx); },
       // 区画のカメラ: the rig run this page's cut belongs to (「サビ1（5行）で続くカメラ」), from plan.rigs.
       rigRun(ctx) {
         const text = rigRunText(ctx);
@@ -1370,6 +1387,49 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       const ref = AREAS.ofLines(doc(), p, lineIds);
       const area = ref.kind !== 'lines' ? AREAS.resolve(doc(), p, ref) : null;
       return t('insp.rigRun', { area: area ? F.areaLabel(t, area) : lines, lines: area ? lines : t('count.lines', { n: lineIds.length }) });
+    }
+
+    // A song part's name: its section kind (「サビ」), or 「まとまり{n}」 for a group of blank-line blocks.
+    function partName(kit) {
+      if (!kit) return '';
+      if (kit.label && kit.label.pseudo && !kit.kind) return t('area.para', { n: kit.label.n });
+      const kind = kit.kind || 'other';
+      return t.has('songSec.' + kind) ? t('songSec.' + kind) : kind;
+    }
+
+    // The names of a kit's groups of one kind: each group (a family) by its first member part.
+    function kitNames(kind, groups) {
+      const reg = app.reg;
+      const all = reg && typeof reg.all === 'function' ? reg.all(kind).filter((d) => d.pool !== false) : [];
+      return (groups || []).map((g) => {
+        const first = all.find((d) => (d.family || d.key) === g);
+        return first ? t.part(kind, first.key) : g;
+      }).join(t('list.sep'));
+    }
+
+    function kitSection(ctx) {
+      const p = plan();
+      const keys = ctx.kitKeys || [];
+      if (!p || !p.pv || !keys.length) return null;
+      const kits = keys.map((k) => p.pv.kits.find((x) => x.key === k)).filter((k) => k && k.primary);
+      if (!kits.length) return null;
+      const box = h('div', { class: 'insp-kit' });
+      const one = kits.length === 1 ? kits[0] : null;
+      const name = one ? partName(one) : t('fld.kitSet.many');
+      box.appendChild(h('div', { class: 'field-row' }, h('span', { class: 'field-label inline', text: t('fld.kitSet') }),
+        h('span', { class: 'grow' }),
+        iconBtn('dice', t('act.kitReroll'), () => {
+          const section = one ? partName(one) : kits.map(partName).join(t('list.sep'));
+          run(kits.map((k) => ({ t: 'salt.bump', key: 'work:kit.' + k.key })), { label: ['undo.kitReroll', { section }] });
+        }, { 'data-role': 'kit-dice' })));
+      for (const k of kits) {
+        box.appendChild(h('p', { class: 'note subtle', 'data-kit': k.key }, h('strong', { text: t('fld.kitSet.of', { section: partName(k) }) }),
+          h('br'), t('fld.kitSet.value', { arrange: kitNames('arrange', k.arrange), arrive: kitNames('arrive', k.arrive),
+            depart: kitNames('depart', k.depart) }),
+          h('br'), t('fld.kitSet.face', { face: t('fld.faceRole.' + k.face) })));
+      }
+      if (!one) box.appendChild(h('p', { class: 'note subtle', text: name }));
+      return box;
     }
 
     function resetButton(prefix, label, undoLabel) {

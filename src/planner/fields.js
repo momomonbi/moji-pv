@@ -1,8 +1,8 @@
 /* 文字PVメーカー v2 — original work. Inspector field states, lock payloads and plan-value readers (DESIGN §4.16.8, §3.13, §3.6; DESIGN_2_1 §3.9). */
 MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyrics', 'core/schema', 'core/timing',
   'core/curve', 'core/shot', 'planner/params', 'planner/cast', 'planner/look', 'planner/segment', 'planner/plan',
-  'planner/extreme'],
-(P, PINS, REG, LY, S, TM, CV, SHOT, PA, CA, LK, SG, PL, XT) => {
+  'planner/extreme', 'planner/rules'],
+(P, PINS, REG, LY, S, TM, CV, SHOT, PA, CA, LK, SG, PL, XT, RU) => {
   'use strict';
 
   const LOOK_NAMES = new Set(['mood', 'theme', 'season', 'bpm', 'beatOffset', 'readRate', 'length', 'titleCard']);
@@ -16,9 +16,12 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
 
   // 'look' (work-scope slots), 'line' (start/end/split/lang; since v2.1 also avoid, and season at line or cut scope,
   // which is a line value while work:season stays the look's), 't0', 'el', 'count', 'part', 'param' or 'value'
-  // (orient, text.*, motion.speed, cam.*, rig, rig.curve).
+  // (orient, text.*, motion.speed, cam.*, rig, rig.curve). PV22: 'rule' for a switch of the new-work defaults table at
+  // work scope (planner/rules: 文字PVの定石 and its members, 「くり返しの行をそろえる」, other packages' switches), whose
+  // value is the work pin or the document's default, never a cut's.
   function categoryOf(parsed) {
     const slot = parsed.slot;
+    if (RU.isWorkRule(parsed)) return 'rule';
     if (slot === 'season' && parsed.scope.kind !== 'work') return 'line';
     if (LOOK_NAMES.has(slot) || LOOK_PREFIX.test(slot) || (parsed.part && parsed.part.kind === 'texture')) return 'look';
     if (LINE_NAMES.has(slot)) return 'line';
@@ -235,6 +238,7 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
   function schemaOf(registry, plan, parsed, cuts) {
     const cat = categoryOf(parsed);
     const slot = parsed.slot;
+    if (cat === 'rule') return RU.SPECS[slot] || null;
     if (cat === 'look') {
       if (slot === 'mood' || slot === 'theme') return { type: 'part', kind: slot, of: registry.keys(slot), none: false };
       if (parsed.part && !parsed.part.param) {
@@ -283,7 +287,7 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
   // at the path's scope and every broader one (special cuts have no line).
   function canPinAt(parsed) {
     const cat = categoryOf(parsed);
-    if (cat === 'look') return ['work'];
+    if (cat === 'look' || cat === 'rule') return ['work'];
     if (cat === 'line') return parsed.slot === 'season' ? ['line', 'work'] : ['line'];
     if (cat === 't0') return ['cut'];
     const kind = parsed.scope.kind;
@@ -312,7 +316,9 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
     const d = decisionAt(plan, cut, parsed, registry, ix);
     if (!d) return { from: 'auto' };
     if (cat === 'param') {
-      const from = d.pfrom && d.pfrom[parsed.part.param] ? d.pfrom[parsed.part.param] : 'auto';
+      const pf = d.pfrom && d.pfrom[parsed.part.param] ? d.pfrom[parsed.part.param] : 'auto';
+      // a direction 文字PVの定石 turned is still automatic (the row stays editable; 'derived' would make it read-only)
+      const from = pf === 'alt' ? 'auto' : pf;
       if (from === 'auto') return { from };
       const hit = PINS.lookup(ix, at, parsed.slot) || PINS.lookup(ix, at, sharedOrPartSlot(parsed, d));
       return { from, by: hit ? hit.by : undefined, at: hit ? hit.at : undefined };
@@ -426,12 +432,38 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
   }
   const EMPTY = Object.freeze({});
 
+  // A switch of the new-work defaults table at work scope (category 'rule', PV22): its value is the work pin or the
+  // document's default (planner/rules value); pinned when a work pin exists, else 自動, with the note of new and older
+  // works (rule.auto.new / rule.auto.old) where the two differ. 1カットに重ねる効果の目安 while automatic shows the
+  // cap the look gives (fld.pvFxMax.auto).
+  function ruleState(doc, plan, parsed, path, ix, registry) {
+    const slot = parsed.slot;
+    const pin = (doc.pins || {})[path] || null;
+    let value = RU.value(doc, ix, slot);
+    let autoText = RU.hasDefault(slot) ? ['rule.auto.' + (RU.gen(doc) >= 1 ? 'new' : 'old'), {}] : null;
+    if (slot === RU.PV.fxMax && (value === null || value === undefined)) {
+      // automatic: no value of its own (the number box shows 自動（n）, n = the cap the look gives)
+      value = null;
+      autoText = ['fld.pvFxMax.auto', { n: RU.baseCap(plan && plan.look ? plan.look.amounts : null) }];
+    }
+    const schema = RU.SPECS[slot];
+    const fs = {
+      path, value, display: null, state: pin ? (pin.by === 'ai' ? 'ai' : 'pinned') : 'auto', pinnedAt: pin ? 'work' : null,
+      by: pin ? pin.by : null, schema, autoText: pin ? null : autoText, canPinAt: ['work'], inactiveReason: null,
+      warn: warnOf(plan, [path]),
+    };
+    fs.display = displayOf(parsed, value, registry, 'rule', schema, doc);
+    fs.pinAt = pin ? path : null;
+    return fs;
+  }
+
   // fieldState(doc, plan, sel, path, { registry }) → FieldState (§3.13).
   function fieldState(doc, plan, sel, path, opts) {
     const registry = opts && opts.registry;
     const parsed = P.parse(path);
     const cat = categoryOf(parsed);
     const ix = pinIndexOf(doc.pins);
+    if (cat === 'rule') return ruleState(doc, plan, parsed, path, ix, registry);
     const perCut = cat !== 'look' && !(cat === 'line' && parsed.scope.kind === 'line');
     const cuts = perCut ? cutsFor(plan, sel, parsed) : [];
     const values = perCut ? cuts.map((c) => valueAt(plan, c, parsed, registry, ix)) : [valueAt(plan, null, parsed, registry, ix)];
@@ -557,14 +589,15 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
     return !!def && def.motion === 'own';
   }
 
-  // Parameters that are not pins: shared ones at 'kind.param' / 'kind#i.param', part ones at 'kind@key.param'.
+  // Parameters that are not pins: shared ones at 'kind.param' / 'kind#i.param', part ones at 'kind@key.param'. A value
+  // 文字PVの定石 turned (pfrom 'alt', DESIGN_2_2 §2.2.3) is an automatic value like any other: the lock pins it as it is.
   function putParams(put, slot, d) {
     const m = /^([a-z]+)(?:#(\d))?$/.exec(slot);
     if (!m) return;
     const kind = m[1], idx = m[2] === undefined ? null : Number(m[2]);
     const shared = REG.SHARED[kind] || {};
     for (const name of Object.keys(d.p)) {
-      if (d.pfrom && d.pfrom[name]) continue;
+      if (d.pfrom && d.pfrom[name] && d.pfrom[name] !== 'alt') continue;
       put(P.slotParamPath(kind, idx, d.v, name, !!shared[name]), d.p[name]);
     }
   }

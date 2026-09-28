@@ -17,7 +17,9 @@ const EN_ALLOW = ['文字PVメーカー'];
 
 // Codes other packages report through the table (DESIGN §3.13, §4.16.8, §4.22.1, §4.4).
 const WHY_CODES = ['mood.tag', 'fit', 'recent', 'family', 'echo', 'echo.kept', 'impact', 'season', 'theme.prefer', 'gate', 'rule',
-  'pin', 'lock'];
+  'pin', 'lock',
+  // 文字PVの定石 (DESIGN_2_2 §2)
+  'pv.kit', 'pv.kitBlock', 'pv.alt', 'pv.altSame', 'pv.arc.up', 'pv.arc.down', 'pv.tame', 'pv.peak'];
 // §3.13 codes, plus `part-error` (reported by the scene and the renderer, WP4a).
 const WARN_CODES = ['pin-bad-value', 'pin-not-applicable', 'pin-filtered', 'pin-off-season', 'orphan-pin', 'shadowed-pin',
   'lock-partial', 'pool-empty', 'time-order', 'time-compressed', 'title-skipped', 'overfull', 'font-fallback', 'piece-merged',
@@ -354,6 +356,25 @@ function designStringRows() {
 // Design keys that live elsewhere in this code base (docs/NOTES.md, v2.1 package A).
 const DESIGN_KEY_HOME = { 'keys.title': 'keys.heading', 'menu.clearDevice': 'cmd.file.clearDevice' };
 
+// The "| Key | ja | en |" tables of one chapter of DESIGN_2_2 (v2.2 wins where it changes a v2.1 text): Map<key, [ja, en]>.
+function design22Strings(chapter) {
+  const lines = fs.readFileSync(path.join(SRC, '..', 'docs', 'DESIGN_2_2.md'), 'utf8').split('\n');
+  const at = lines.findIndex((l) => l.startsWith('## ' + chapter + '. '));
+  assert.ok(at >= 0, 'DESIGN_2_2 chapter ' + chapter);
+  const out = new Map();
+  let inTable = false;
+  for (let i = at + 1; i < lines.length && !/^## /.test(lines[i]); i++) {
+    const row = lines[i].trim();
+    if (!row.startsWith('|')) { inTable = false; continue; }
+    if (/^\|\s*Key\s*\|\s*ja\s*\|\s*en\s*\|$/.test(row)) { inTable = true; continue; }
+    if (!inTable || /^\|[-\s|]+\|$/.test(row)) continue;
+    const cells = row.split('|').slice(1, -1).map((c) => c.trim());
+    const m = /^`([^`]+)`$/.exec(cells[0]);
+    if (m) out.set(m[1], [cells[1], cells[2]]);
+  }
+  return out;
+}
+
 test('every key of the v2.1 string tables exists; single-key rows carry the design text', () => {
   const rows = designStringRows();
   const keys = rows.flatMap((r) => r[0]);
@@ -362,7 +383,8 @@ test('every key of the v2.1 string tables exists; single-key rows carry the desi
   const missing = keys.filter((k) => !k.startsWith('part.')).map((k) => DESIGN_KEY_HOME[k] || k).filter((k) => !(k in STRINGS));
   assert.deepEqual(missing, []);
   const differ = [];
-  for (const [[key], ja, en] of rows.filter((r) => r[0].length === 1 && !/§|table/.test(r[1] + r[2]))) {
+  const newer = design22Strings(2);
+  for (const [[key], ja, en] of rows.filter((r) => r[0].length === 1 && !/§|table/.test(r[1] + r[2]) && !newer.has(r[0][0]))) {
     const pair = STRINGS[DESIGN_KEY_HOME[key] || key];
     if (!pair || key in DESIGN_KEY_HOME || pair[1].includes('|')) continue;
     // the app's English uses American spelling (ux-16), the design sometimes writes "colour"
@@ -405,4 +427,15 @@ test('strings.js defines every key once', () => {
   }
   assert.ok(seen.size === Object.keys(STRINGS).length, 'the scan sees every key (' + seen.size + ' / ' + Object.keys(STRINGS).length + ')');
   assert.deepEqual(dup, []);
+});
+
+test('every key of the 文字PVの定石 string table (DESIGN_2_2 §2) exists with the design text', () => {
+  const rows = design22Strings(2);
+  assert.ok(rows.size >= 20, 'the table is found (' + rows.size + ')');
+  const differ = [];
+  for (const [key, [ja, en]] of rows) {
+    const pair = STRINGS[key];
+    if (!pair || pair[0] !== ja || pair[1] !== en) differ.push([key, pair || null, ja, en]);
+  }
+  assert.deepEqual(differ, []);
 });

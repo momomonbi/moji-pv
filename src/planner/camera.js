@@ -216,7 +216,10 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
     // echoCode } (keys or null / arrays; see recencyOf). why is null unless withWhy.
     function weighShots(st, rules, rec, withWhy) {
       const { ctx, cut } = st;
-      const f = cut.feat;
+      // the features as the cut's choices weigh them (文字PVの定石's arc blends the energy; hand-made states have none)
+      const f = st.feat || cut.feat;
+      // 「曲の山に合わせて強弱をつける」: the arc's factor on each preset's strength, part of the cut's own weight
+      const pvf = ctx.pv ? ctx.pv.shotFactors(st) : null;
       const A = ctx.look.amounts.camera;
       const mood = ctx.look.mood;
       const orient = st.chosen.orient;
@@ -233,7 +236,8 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
         const sec = bySection && bySection[key] ? bySection[key] : 1;
         const echo = rec.echo === key;
         // Left to right, like the factors are listed in §4.7 (the product is rounded once, by q6).
-        const own = baseWeight(key, f, A, orient, frames) * m * sec;
+        let own = baseWeight(key, f, A, orient, frames) * m * sec;
+        if (pvf) own *= pvf(key);
         const w = own * (echo ? SHOT_ECHO : 1);
         const wBase = N.q6(w);
         let wr = w;
@@ -246,6 +250,7 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
           if (sec !== 1 && f.section) why.push({ code: 'cam.section', params: { section: f.section } });
           if (echo) why.push({ code: rec.echoCode, params: { cut: f.repeatOf } });
           if (rec.prev && rec.prev !== key) why.push({ code: 'recent', params: { key: rec.prev } });
+          if (pvf) { const w = ctx.pv.arcWhy(st, pvf(key)); if (w) why.push(w); }
         }
         out[i] = { key, w: wr === w ? wBase : N.q6(wr), wBase, wOwn: echo ? N.q6(own) : wBase, why };
       }
@@ -508,7 +513,7 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
       const gentle = decideShot(st);
       if (st.natural) return;
       const { ctx, cut } = st;
-      const f = cut.feat;
+      const f = st.feat || cut.feat;
       const A = ctx.look.amounts.camera;
       const shot = st.chosen['cam.shot'];
       st.decide(st, 'cam.zoom', SLOT_SPECS['cam.zoom'], (seed, withWhy) => {

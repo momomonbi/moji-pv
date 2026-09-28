@@ -1250,8 +1250,9 @@ MV.def('ai/direct', ['core/pins', 'core/paths', 'core/curve', 'core/shot', 'core
   // copy is left out, so the AI does not undo the switch; a change on the later copy alone stays (a pin wins there).
   // The カメラ EXTREME switch of a line is the area's, like its season: it is not followed (a later chorus keeps it).
   const FOLLOWED = /^(orient|text\.|motion\.speed|cam\.(?!extreme$)|(arrange|arrive|dwell|depart|lens)([.@]|$)|(ornament|filter)(\.count$|#))/;
+  // (In a new work the switch is on by default, 文字PVの定石: the document tells, planner/rules.)
   function followSources(run) {
-    const src = CA.alignments({ ix: run.ix }, run.plan.cuts || []);
+    const src = CA.alignments({ ix: run.ix, doc: run.doc }, run.plan.cuts || []);
     if (!src || !src.size) return;
     const lineOf = new Map();
     for (const line of run.plan.lines || []) {
