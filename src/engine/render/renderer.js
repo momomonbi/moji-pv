@@ -1,8 +1,8 @@
 /* 文字PVメーカー v2 — original work. The renderer: one frame of a Plan — evaluate, draw the layers per world, seams, post, picks (DESIGN §4.19.2–4, §7.4; DESIGN_2_1 §4.4, §4.8, §11.3.7). */
 MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/media', 'core/shot', 'engine/scene/table',
   'engine/scene/frame', 'engine/render/surface', 'engine/render/sprites', 'engine/render/shapes', 'engine/render/draw',
-  'engine/render/post', 'engine/render/seam', 'engine/render/pick', 'engine/render/xblur'],
-(H, C, N, MEDIA, SHOT, T, F, SF, SP, SH, DR, PO, SE, PK, XB) => {
+  'engine/render/post', 'engine/render/seam', 'engine/render/pick', 'engine/render/xblur', 'engine/render/morph'],
+(H, C, N, MEDIA, SHOT, T, F, SF, SP, SH, DR, PO, SE, PK, XB, MO) => {
   'use strict';
 
   const L = T.LAYER_INDEX;
@@ -288,6 +288,22 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
 
     function lastOf(list) { return list.length ? list[list.length - 1] : -1; }
 
+    // The item of the seam's A (the last cut on side 1) or B (the first on side 2), or null.
+    function sideItem(side) {
+      const seam = fg.seam;
+      if (!seam) return null;
+      const i = side === 1 ? lastOf(seam.aCuts) : seam.bCuts.length ? seam.bCuts[0] : -1;
+      if (i < 0) return null;
+      for (let k = 0; k < nItems; k++) if (items[k].ground < 0 && items[k].cut === i) return items[k];
+      return null;
+    }
+
+    // The travellers of the glyph seam on screen (engine/render/morph prepare), or null.
+    function glyphSeam(plan) {
+      const A = sideItem(1), B = sideItem(2);
+      return A && B ? MO.prepare(plan.seams[fg.seam.i], A.scene, B.scene) : null;
+    }
+
     // An item is on `side` when it belongs to that side or to both (side 0); side 0 asks for every item.
     function onSide(it, side) { return !side || !it.side || it.side === side; }
 
@@ -340,7 +356,8 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
     }
 
     function drawIsolated(g, it, Lk, spec) {
-      if (spec.cache === 'static' && !spec.mask && !spec.filter && !DR.hasMedia(it.scene, Lk)) {
+      // (a static raster holds every glyph: while a glyph seam draws some of the scene's itself, the layer is drawn live)
+      if (spec.cache === 'static' && !spec.mask && !spec.filter && !DR.hasMedia(it.scene, Lk) && !(dc.skip !== null && dc.skip.has(it.scene))) {
         const r = staticRaster(it.scene, Lk, it);
         if (r) {
           const V = view(it.cam, Lk);
@@ -438,14 +455,23 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
 
     // No seam, or a text seam: the ground and the far layers once; A's and B's text/near layers mixed by the seam part.
     // `still` media of the mixed layers (DESIGN_2_1 §11.9.3) stay out of the mix and are drawn after it, like the hud.
+    // A glyph seam (v2.2, DESIGN_2_2 §4): the letters the two lines share are left out of both sides (dc.skip) and drawn
+    // after the mix, travelling (engine/render/morph) — above both cuts' text and near layers, under the still pass, the
+    // grounds' near layer and the hud.
     function drawTextSeam(g, w, h, backdrop, part, u) {
       fillBackdrop(g, w, h, backdrop, dc.pal);
       for (const Lk of BASE_LAYERS) drawSideLayer(g, Lk, 0, true, true);
       drawSideLayer(g, L.text, 0, true, false);
       const still = anyStill(SE.TEXT_LAYERS, false);
+      const mv = part.def.glyphs === true ? glyphSeam(framePlan) : null;
       const a = pool.take(), b = pool.take();
       if (still) dc.stillMode = 1;
-      for (const Lk of SE.TEXT_LAYERS) { drawSideLayer(a.ctx, Lk, 1, false, true); drawSideLayer(b.ctx, Lk, 2, false, true); }
+      if (mv) dc.skip = mv.skip;
+      try {
+        for (const Lk of SE.TEXT_LAYERS) { drawSideLayer(a.ctx, Lk, 1, false, true); drawSideLayer(b.ctx, Lk, 2, false, true); }
+      } finally {
+        dc.skip = null;
+      }
       dc.stillMode = 0;
       const out = SE.mix(ctl, pool, part, a, b, u, onPartError);
       g.setTransform(1, 0, 0, 1, 0, 0);
@@ -454,6 +480,7 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
       if (out !== a && out !== b) pool.give(out);
       pool.give(a); pool.give(b);
       dc.g = g;
+      if (mv) MO.draw(dc, mv, sideItem(1), sideItem(2), part.warp ? part.warp(N.clamp(u)) : N.clamp(u), part.p);
       if (still) stillPass(g, SE.TEXT_LAYERS, false);
       drawSideLayer(g, L.near, 0, true, false);
       drawSideLayer(g, L.hud, 0, true, true);
@@ -794,7 +821,7 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
       dc.W = plan.design.w; dc.H = plan.design.h; dc.scale = s;
       dc.glyphPath = lastLook.glyphPath; dc.probe = lastLook.probe;
       dc.D[0] = s; dc.D[1] = 0; dc.D[2] = 0; dc.D[3] = s; dc.D[4] = 0; dc.D[5] = 0;
-      let n = 0;
+      let n = 0, stopped = false;
       walk: for (let k = 0; k < nItems; k++) {
         const it = items[k];
         for (const Lk of WARM_LAYERS) {
@@ -802,12 +829,28 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
           const spec = it.scene.layers[Lk];
           if (spec && T.isIsolated(spec) && spec.cache === 'static' && !spec.mask && !spec.filter) continue;
           const got = DR.warmLayer(dc, it.scene, Lk, view(it.cam, Lk), stop);
-          if (got < 0) { n += -got - 1; break walk; }
+          if (got < 0) { n += -got - 1; stopped = true; break walk; }
           n += got;
         }
       }
+      // a glyph seam's travellers (v2.2): the sprites they draw at this frame (the melt of a swap takes the sprite path)
+      if (!stopped && fg.seam && fg.seam.scope !== 'world') warmTravellers(plan, fg.seam);
       nItems = 0;
       return n;
+    }
+
+    function warmTravellers(plan, seam) {
+      const part = SE.seamPart(plan, registry, seam.i);
+      if (part.def.glyphs !== true) return;
+      const mv = glyphSeam(plan);
+      if (!mv) return;
+      const g0 = dc.g, pick = dc.pick;
+      dc.g = null; dc.pick = null;
+      try {
+        MO.draw(dc, mv, sideItem(1), sideItem(2), part.warp ? part.warp(N.clamp(seam.u)) : N.clamp(seam.u), part.p);
+      } finally {
+        dc.g = g0; dc.pick = pick;
+      }
     }
 
     function onFilterError(e, err) {

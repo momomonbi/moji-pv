@@ -80,7 +80,8 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
   //   ghostTl (null, or while fx.textAt draws the text layers at an earlier time, the scene time of the frame itself:
   //   media on the show clock keep that frame's media time); v2.2: faceReady (null, or (FontRef) → whether a served
   //   weight other than the scene's own faces is loaded: weight pairs draw only loaded weights; null counts every one as
-  //   loaded) and recX, recHi, recLo (pooled glyph records of a weight pair)
+  //   loaded) and recX, recHi, recLo (pooled glyph records of a weight pair); skip (null, or while a glyph seam draws its
+  //   two sides, Map(scene → Uint8Array per node): the glyphs the seam draws itself, which drawLayer leaves out)
   function createDrawContext(o) {
     return {
       g: null, D: new Float32Array([1, 0, 0, 1, 0, 0]), pal: null, W: 0, H: 0, scale: 1, q: null, assets: null,
@@ -94,6 +95,7 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
       cam: null, layerK: 1, stillMode: 0, ghostTl: null, depthCam: { x: 0, y: 0, zoom: 1, roll: 0, shakeX: 0, shakeY: 0, fz: 1 },
       VM: new Float32Array(6),
       faceReady: typeof o.faceReady === 'function' ? o.faceReady : null, recX: {}, recHi: {}, recLo: {},
+      skip: null,
     };
   }
 
@@ -636,8 +638,10 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
     dc.font = null;
     g.textAlign = 'center';
     g.textBaseline = 'middle';
+    const skip = dc.skip !== null && dc.skip !== undefined ? dc.skip.get(scene) : undefined;   // (v2.2 glyph seams)
     for (let k = 0; k < list.length; k++) {
       const i = list[k];
+      if (skip !== undefined && skip[i] === 1) continue;
       if (T.isHidden(t, i)) continue;
       const type = t.type[i];
       // media depth (DESIGN_2_1 §11.9.3): a `still` medium is drawn on its own pass when a seam is on screen, and a
@@ -740,6 +744,6 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
     return n;
   }
 
-  return { createDrawContext, resetCounts, drawLayer, warmLayer, drawGlyph, drawGlyphAs, CROSSFADE_STYLES, hasLayer, hasMedia, hasStill, nodesByLayer, inkOf,
+  return { createDrawContext, resetCounts, drawLayer, warmLayer, drawGlyph, drawGlyphAs, pickNode, CROSSFADE_STYLES, hasLayer, hasMedia, hasStill, nodesByLayer, inkOf,
     secondInk, shaded, cssOf, clipReveal, minScaleOf, inkClip, INK_CLIP, glyphCover, poseCover, inkEm, STYLE_GLOW, GLOW_LEVEL };
 });
