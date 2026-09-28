@@ -45,6 +45,11 @@ the beat.
 - **Entrance lead and Lead measured to** — the text comes in a little before the voice (0.2 s in a new work). Set
   Whole video › Timing › Lead measured to to **Fully in (readable)** and the entrance has ended, so the line can be read,
   by the time the voice comes.
+- **Re-tap this line only** — re-time one line: playback starts 2 s before it and repeats until you press Space, then
+  finishes by itself after the line (the line's Time section, a right-click on the line in the timeline, or step ②). The
+  lines around it keep their times.
+- **Flag lines too fast to read** — lines that go by too fast to read get a "!", and the line's details offer fixes such
+  as Make the motion quicker and Show it longer (on in new works; switch it in Whole video › Timing).
 
 ## Export
 

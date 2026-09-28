@@ -25,9 +25,10 @@ MV.def('ui/step_song', ['ui/dom', 'ui/icons', 'ui/header', 'ui/selection', 'i18n
     const tapHint = h('span', { class: 'btn-hint' });
     const tapBtn = h('button', { class: 'btn wide tall', type: 'button', 'data-act': 'tap.start', 'data-ctl': 'tap' },
       I.icon('tap'), h('span', { class: 'btn-main', text: t('song.tap') }), tapHint);
-    // 「{n}行目だけ打ち直す」 (PV22 S2): with one line selected, re-tap just that line
+    // 「{n}行目だけ打ち直す」 (PV22 S2): with one line selected, re-tap just that line (a part of the タップ control, so no
+    // data-ctl of its own: the step keeps its five controls)
     const tapLineLabel = h('span');
-    const tapLineBtn = h('button', { class: 'chip-btn', type: 'button', 'data-act': 'tap.line', 'data-ctl': 'tapLine', hidden: true,
+    const tapLineBtn = h('button', { class: 'chip-btn', type: 'button', 'data-act': 'tap.line', hidden: true,
       title: t('tap.lineBtnHint') }, I.icon('tap', { size: 15 }), tapLineLabel);
     const aiBtn = h('button', { class: 'chip-btn', type: 'button', 'data-act': 'ai.align', 'data-ctl': 'ai' },
       I.icon('ai', { size: 15 }), t('song.aiTiming'));

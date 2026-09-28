@@ -160,6 +160,131 @@ modes, one hand-made case per tier, the duet), `golden_lead.test.js` (the 253 go
 caches, the fingerprint of a floor-limited cut, the sung skip, the document field), the cap cases in `motion.test.js`,
 the pair gate in `extreme_planner.test.js`, `commands`, `doc` and `ui_fields` cases, and the ui_flows flow `enter`.
 
-<!-- PV22 P5 S1 S2 S4 -->
+<!-- PV22 P5 S1 (§5.2) -->
+
+### 5.3 S2: 1行だけタップで打ち直し
+
+**What the user gets.** 「この行だけタップで打ち直す」 starts the tap panel in a one-line mode on one line, from four
+places: 詳細 › 行 › 時間 (one line selected; hint 「2秒前から再生します。歌い出しでスペース」), the timeline's line menu
+(right-click on a line block, or the menu key / Shift+F10 on a focused line of the timeline's list: 「この行だけタップで
+打ち直す」, 「この行からタップで合わせる」, and 「開始の固定を外す」 while the start is pinned and not by a lock), ② 曲's chip
+「{n}行目だけ打ち直す」 (one line selected; the big button's hint becomes 「{n}行から・スペースで記録・Escで終わる」) and the
+palette (`tap.line`: the selected line, else the line at the playhead). The normal tap mode is unchanged.
+
+The one-line panel: title 「この行だけ打ち直す」, the line's text, the hint 「歌い出しでスペース（またはタップ）。終わりも
+打つなら E」, the checkbox 「前後の行を動かさない」 (on by default; the device preference `prefs.tapKeep`) and the keys
+Space/Enter 開始, E 終わり, Backspace 打ち直す, ←/→ 3 s, P, Esc/T 終わる. Playback starts 2 s before the line's current
+start.
+
+- **Before the mark playback loops:** past `max(line end, next line's start) + 1.5 s` it seeks back to 2 s before the
+  line, at most 5 times; then it rewinds, stops and says 「止めました。もう一度は ▶」. The loop ends for the rest of the
+  session as soon as the user moves the playhead (a jump of the clock by more than 0.5 s that the session did not make:
+  ←/→, a click on the timeline or the play bar) or pauses, so a line sung much later than its current start can be
+  reached by seeking.
+- **One mark** is taken; a second press says 「この行は記録済み。打ち直すなら Backspace」. After the mark the panel
+  counts down 「{s}秒後に自動で終わります（Escで今すぐ・Eで終わりを記録）」: the session ends by itself at
+  `stopAt = min(m + 12, max(m + 1, m + old length + 0.5, next line's old start + 0.5 when still ahead))`, or 0.3 s after
+  E, or at once on Esc / T / 終わる. Backspace forgets the mark and loops again.
+- **The result is one undo entry** 「この行を打ち直す（{n}行目）」: when the line had a paired start and end pin (neither a
+  lock pin) and no E was pressed, `pin.set` of the end moved by the same delta (never past the end of the video; not
+  moved when it would end less than 0.2 s after the start; its `by` kept); the `time.tap` of the mark; and, with 「前後の行を動かさない」, start
+  pins by 'user' that keep the other automatic lines where they were (below). The toast joins what applies (ja without
+  a separator, en with a space): 「{n}行目を打ち直しました。」「{list}行目の開始を今の時刻で固定しました。」「ほかに{m}行の
+  自動の時刻が動きました。」 (warn) 「終わりの固定も同じだけ動かしました。」「終わりの固定を外しました（新しい開始より前だった
+  ため）。」, with 「再生して確認」 and, when lines were pinned, 「ほかの行の固定を外す」 (one undo entry 「ほかの行の固定を外す
+  （{n}行）」 clearing those pins that are still as the re-tap left them).
+
+**`core/tap`.** TapState gains `only`, `from` and `stop` (`from + 1` in the one-line mode, `lineIds.length` otherwise);
+`tapStart(lines, fromLineId, { only })`; `mark` is refused at `cursor ≥ stop`, `back` at `cursor ≤ from` in the one-line
+mode; `done(s)`. `stillPins(before, after, lineId, start)` (before / after: `plan.lines` without and with the re-tap, the
+same ids in the same order): the automatic lines other than the target whose start moved by ≥ `STILL_EPS` (0.005 s)
+form runs; the first and last line of each run are pinned at their old starts when that keeps the order with the new
+start (at least `MIN_GAP` 0.12 s from it). Between two anchors `core/timing` places automatic starts linearly in their
+weights and the fills are linear maps, so pinning a run's ends puts it back; a new anchor can re-compress a forward fill
+and beat snapping can move a start by a grid step, so `ui/tap` repeats with a new trial plan up to three rounds. The
+lines the new start crossed must move and are counted in the toast.
+
+**`core/commands.timeTap` (every tap session and S1's drafts; a bug fix for existing works).** A mark with a start and no
+end removes the line's end pin when it is earlier than `start + MIN_LEN` (0.2 s; `core/timing` exports `MIN_LEN`), unless
+it is a lock pin: before, `core/timing` silently shrank such a line to 0.2 s. Undo restores it.
+
+**`ui/tap`.** `start({ only: lineId })`, `start({ from: lineId })` (the timeline's この行からタップで合わせる); the
+session follows bus `'time'` (every frame while playing, every seek and pause); the pure rules are exported as `TS`
+(`loopAt`, `stopAt`, `userSeek`, `endShift`, `ONLY` constants). `ui/boot` defines `tap.line`; `ui/view` gains
+`prefs.tapKeep`; `ui/fields` gives 行 › 時間 the custom section `timeTools` (with S4's notes, §5.4).
+
+**Tests.** `tap.test.js` (the one-line mode; `stillPins` on runs, order conflicts and different lists),
+`tap_keep.test.js` (5 scenarios × snap off / 120 BPM beat: only the lines the tap crossed move, in at most three rounds;
+after the last anchor one or two rounds are not enough), `tap_session.test.js` (the pure session rules),
+`commands.test.js` (the stale end pin), `ui_fields.test.js` (`timeTools`), the ui_flows flow `retap` (the 行 page button,
+the loop ended by a seek, a mark 5 s late, the refused second press, E, one undo entry, the pinned neighbours and
+「ほかの行の固定を外す」, undo; a paired start and end re-tapped without E; the timeline's line menu by mouse and key).
+
+### 5.4 S4: 読み切れない速さの行を知らせる
+
+**Gating.** `ui/readcheck.enabled(doc)`: an explicit `timing.readCheck`, else `look.gen ≥ 1` — on for new works, off for
+existing works and every fixture, with the switch 作品全体 › タイミング › 「読み切れない速さの行を知らせる」 (a toggle
+after 入りの基準, with a note; `timing.set` writes a boolean, one undo entry named by the field).
+
+| Item | Notices on | Notices off (existing works) |
+|---|---|---|
+| too-fast | gutter 「!」, 行 list 「!」, timeline bar, 行 page note and fixes, step ④ item | not computed |
+| `time-compressed` | a gutter 「!」 on every line of the squeezed range | today's 「!」 in the 行 list on the range's first line |
+| `piece-merged` | a gutter 「!」 | today's 「!」 in the 行 list |
+| texts | tooltips and the 行 page notes | tooltips and the 行 page notes on the marks that exist today |
+
+**The rule — `planner/readable` (L2, a pure reader of a finished Plan, never in the Plan or its hash).** For each line
+cut: `units = S.morae(text, lang)`; `V = b − a` (the final window); `A` / `L` the entrance / exit as the scene fits them
+(`core/motion.fitMotion` with the part's unit count, `SHARE`, and for A the 出そろい cap `ready − a`; 0 for the fallback
+parts and for an entrance revealed as sung); `W = V − A/2 − L/2`, cut to `at − a − A/2` by an outgoing transition
+(`at − dur/2` for one whose definition moves the glyphs themselves, `glyphs: true`, §4). Flagged when `units ≥ 4` and
+`units / W > MAX[lang]` (ja 12, ko 12, zh 10, en 11), or `units ≥ 2` and `W < 0.25 s`. A 歌ハメ cut (§6: `cut.sung` and
+arrive order 'sung') is flagged when it leaves less than 0.4 s after its last character. `check(plan, registry)` is
+memoized per plan object. The fixtures (7 × 3 seeds × 3 aspects) and the app's samples flag nothing: the automatic timing
+reads at most about 10 units per legible second; two automatic lines squeezed between LRC stamps 1.5 s apart read at 20.
+
+**`ui/readcheck` (L7).** `readWarnings(doc, plan, registry)` → `{ code: 'too-fast', line, cut, detail: { rate, units,
+legible, limit } }` (nothing when off); `expand` repeats a `time-compressed` warning on every line of its range (the later
+ones with `detail.of`); `gutterCodes(doc)`; `byLine(warnings, plan, codes)` → per line the warnings of those codes, one per
+code (the fastest too-fast), most severe first (`time-order`, `overfull`, `lock-partial`, `orphan-pin`, `shadowed-pin`,
+`pin-not-applicable`, `too-fast`, `time-compressed`, `piece-merged`); `textOf`, `titleFor`; the quick fixes `quickerCmds`
+and `endFix`. `app.warnings()` adds the notices and the expansion when on, so the lyric editor, the 行 list, the 行 page
+and step ④ read one list; the timeline reads `readWarnings` itself (it draws every frame).
+
+**Where it shows.** The gutter 「!」 (class `is-<code>`, one tooltip row per text, the first text in the aria label);
+the 行 list's 「!」 gets the same tooltip; the timeline draws a red bar (`#ff7a7a`, the gutter's error color, with a dark
+edge) along the bottom of the line block and 「!」 at its end, and the listbox label ends with 「速すぎて読み切れないかも
+しれません」; 行 › 時間 shows 「速すぎて読み切れないかもしれません（1秒に約{n}音・読める時間 {s}秒）」 with
+[動きを速くする] (line pins `arrive.dur 0.2`, `arrive.each 0.01`, `depart.dur 0.15`, `depart.each 0` by 'user', one
+undo entry 「読みやすくする（動きを速く）」) and [終わりを延ばす] (when the line's last cut is followed by a gap, an
+interlude or the outro: `line/<id>:end` at `min(next start − 0.3, end of video − 0.5, t1 + 1.25·(need − W))`, `need =
+max(units / limit, 0.25)`, shown when it gains ≥ 0.05 s), next to S2's 「この行だけタップで打ち直す」; the squeezes
+explain themselves there (「前後の固定に合わせて、行の間隔を詰めています」, 「短すぎる区切りを前とまとめました」). Step ④:
+one warn item 「読み切れない速さの行が{n}行あります（{list}）」 (the first five line numbers, then 「ほか{m}行」) with [見る]
+on the first cut (`export/schedule.warningItems`).
+
+**Tests.** `readable.test.js` (the fixtures and the samples flag nothing; the LRC squeeze; the legible floor before a
+transition; the outgoing transition and a glyph transition; the sung order and `cut.sung`; the English limit and the
+出そろい cap; plan vs scene within ±20 % for ≥ 98 % of cuts; the memo), `ui_readcheck.test.js`, the step ④ item in
+`export_math.test.js`, `ui_fields.test.js`, `i18n.test.js` (`too-fast`), the ui_flows flow `readcheck` (a new work's
+squeezed lines in the gutter, the 行 list, the timeline, the 行 page fix, step ④ and the switch; an opened older work).
+
+### 5.5 Rules of DESIGN and DESIGN_2_1 this chapter changes
+
+This chapter wins over the sections below (the texts there still describe v2 / v2.1; the lead folds them in).
+
+| Section | Change | Here |
+|---|---|---|
+| D§3.1, §3.2 | `timing.enter`, `timing.readCheck` (optional keys after `tapLatency`); `newDoc()` writes `timing.lead` 0.2 | §5.1, §5.4 |
+| D§3.12 | plan cut `ready` (optional), printed between `pinKey` and `repT`; fingerprint term `'r' + q6(t0 − ready)` | §5.1 (e) |
+| D§3.12 b, §4.16.6 | the long-lead hand-over (three tiers; `endWithSeam(…, handover)`) | §5.1 (b) |
+| D§3.13 | warning code `too-fast` (UI-computed, never in `plan.warnings`) | §5.4 |
+| D§4.7 | `fitMotion({ …, cap })`; `heroTime` reads `cut.ready` | §5.1 (d) |
+| D§4.11 | `core/tap`: the one-line mode, `done`, `stillPins`; `time.tap` drops a stale end pin; `core/timing` exports `MIN_LEN` | §5.3 |
+| D§4.16 | stage 6b `readyWindows`; `segment.windows` neighbour clamp | §5.1 (a), (c) |
+| D§4.17.5 | `times.ready`; the arrive capped by it | §5.1 (d) |
+| D§4.21 | step ④ item `too-fast` | §5.4 |
+| D§6.4.5, §6.4.6, §6.4.13, §6.4.14, §6.4.15 | 作品全体 › タイミング rows; 行 › 時間 `timeTools`; the timeline's line menu and too-fast bar; the gutter's codes and tooltips; the one-line tap mode | §5.1, §5.3, §5.4 |
+| DESIGN_2_1 §14 | the EXTREME whipPan pair needs the whips to meet outside legacy documents | §5.1 (f) |
 
 <!-- PV22 P6 chapter -->

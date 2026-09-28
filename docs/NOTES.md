@@ -9242,6 +9242,81 @@ on 4 CPUs: 29 conformance "slowest build > 60 ms" rows and the two planning-spee
 Browser: `ui_flows.py` (every flow; `keyframes` needed the ◆ fix above), `ui_layout.py`, `i18n_pages.py`, `csp.py`,
 `determinism.py` pass.
 
-<!-- PV22 P5 notes, phases 2–3 -->
+**What landed (phase 2: S4 and S2).** S4: `planner/readable` (L2; `READ`, `check` memoized per plan, `legibleOf`,
+`units`, `limitOf`), `ui/readcheck` (L7; `enabled`, `readWarnings`, `expand`, `gutterCodes`, `byLine`, `textOf`,
+`titleFor`, `worstOf`, `quickerCmds`, `endFix`); `app.warnings()` adds the notices and the squeeze expansion when on;
+the lyric editor's gutter (codes from `RC.gutterCodes`, class `is-<code>`, tooltip rows, the first text in the aria
+label), the 行 list's 「!」 tooltip, the timeline's red bar and listbox text, 行 › 時間 `timeTools` (the note, 動きを速く
+する, 終わりを延ばす, the squeeze notes), the 読み切れない速さ toggle after 入りの基準 (`cmdValue` reads `RC.enabled`), step
+④'s `too-fast` item (`export/schedule.warningItems`, `ui/step_export.checkText`), `core/types` code. S2: `core/tap`
+(`only`/`from`/`stop`, `tapStart(…, { only })`, `done`, `stillPins`, `STILL_EPS`), `core/commands.timeTap` stale end pin
+(`core/commands` now depends on `core/timing`, which exports `MIN_LEN`), `ui/tap` one-line session (`start({ only })`,
+`start({ from })`, loop, auto-finish, E, 打ち直す, end shift, up to three rounds of `stillPins` on trial plans, toast with
+ほかの行の固定を外す; pure rules exported as `TS`), `tap.line` in `ui/boot`, the 行 page button, the timeline's line menu
+(right-click; ContextMenu / Shift+F10 in the listbox), ② 曲's 「{n}行目だけ打ち直す」 chip and hint, `prefs.tapKeep`. Strings
+in the P5 block of `i18n/strings.js` (§4.6 and §3.6 tables of the design) plus `song.tapFrom` changed in place. Tests:
+`readable`, `ui_readcheck`, `tap_keep`, `tap_session` (new); cases in `tap`, `commands`, `export_math`, `ui_fields`,
+`i18n` (`too-fast` in `WARN_CODES`); ui_flows flows `readcheck` and `retap`. DESIGN_2_2 §5.3, §5.4 and §5.5 (the table
+of DESIGN / DESIGN_2_1 rules this chapter changes); SPEC §4, both READMEs.
+
+**Deviations from the design (phase 2, and why).**
+
+- `READ.MIN_LEGIBLE` is 0.25 s, not 0.3: short second pieces followed by a transition read 0.265 s (`media` r2~5, 2.7
+  morae) and 0.296 s (`long` r3e~5 and r2m~5, 3 units) at the fixtures' lead 0.12 (7 fixtures × 8 seeds; the reading
+  ends at the transition's `at`), so 0.3 broke the design's own "the fixtures flag nothing". At the new-work lead 0.2
+  the lowest is 0.311 s. Mutation: 0.3 → the corpus case fails.
+- `READ.MAX.en` is 11, not 9: the automatic timing reads every language at the same nominal rate, and the app's
+  English sample (`L.SAMPLE_EN`) reads at up to 10.08 syllables per legible second; with 9, 8 of its 29 cuts were
+  flagged and a new English work showed 「!」 on its first run. Measured maxima of automatic lines: ja 10.13, en 10.08, ko 9.76,
+  zh 9.35 (limits 12 / 11 / 12 / 10). `readable.test.js` checks both samples in a new and an older work.
+- `RC.byLine` returns each line's warnings (one per code, the fastest too-fast kept), not only their codes, so the
+  tooltip is built from the same map; the codes are `list.map((w) => w.code)`.
+- [終わりを延ばす] is offered when the cut after the line's last cut is not a line cut (a gap, an interlude, the outro or
+  nothing), not when "the last cut's b equals t1 + tail": the transition into the gap interlude clips b (10.554 vs 10.75
+  in the probe), so the design's test never held. `need = max(units / limit, MIN_LEGIBLE)` (a line flagged by the floor
+  has `units / limit < W`). One step may not clear the notice: the longer window lets the automatic entrance grow and
+  the transition into the gap starts at the new end − lead (probe: legible 0.35 → 1.10 s, rate 40 → 12.7 against 12);
+  the test asserts the rate halves.
+- Step ④'s line list has its own keys: `exp.pre.too-fast` reads 「読み切れない速さの行が{n}行あります（{list}）」 and
+  `{list}` is `exp.pre.too-fast.lines` (「2・3行目」 / "lines 2; 3") or `exp.pre.too-fast.more` (「1・2・3・4・5行目ほか2行」 /
+  "lines 1; 2; 3; 4; 5 and 2 more"), so the remainder reads inside the parentheses in both languages.
+- The 行 page's この行だけタップで打ち直す is S2's one button in the same section (under the notes), not a second copy
+  inside the too-fast note.
+- The timeline reads `RC.readWarnings` itself (kept per plan and document) instead of `app.warnings()`: it redraws every
+  frame while playing, and `engine.warnings()` walks the scene warnings and the font states.
+- The gutter stays keyed by the line id: a notice on a repeated occurrence (`r7.1`) marks the 行 list and the timeline,
+  not the gutter row (as for every other code today). `ui/lyric_editor`'s `WARN_CODES` moved to `RC.BASE_CODES`.
+- S2: after LOOP_MAX loops the session rewinds to 2 s before the line and stops (the design only stops); that pause is
+  the session's own, so the loop goes on after ▶. `start({ from })` serves the timeline's この行からタップで合わせる. The
+  trial plans are `planner/plan.plan(trial, { registry: app.reg })` (`ui/tap` depends on `planner/plan` and
+  `core/timing`). The one-line key rows reuse 開始 / 終わり (`fld.start`, `fld.end`); the pad hides its 「次の行の開始」
+  hint. 「ほかに{m}行の自動の時刻が動きました」 counts lines that were automatic before the re-tap. `tap.keepTip` says
+  "neighboring" (the string table's US spelling test).
+- The ui_flows flow `retap` presses E about 1 s after the mark, not 6 s: an automatic line is about 1.2 s long, so the
+  session ends by itself at mark + old length + 0.5 s (the 6 s case is `tap_session.test.js`). The paired start and end
+  are set with `pin.set` (what a timeline drag writes), not by dragging.
+- DESIGN.md and DESIGN_2_1 are not edited (the lead's rule allows the P5 placeholders only): DESIGN_2_2 §5.5 lists every
+  rule of theirs that §5 changes, which also settles phase 1's leftover "DESIGN §3.1, §3.12 b, §4.7, §4.16, §4.17.5,
+  DESIGN_2_1 §14 text".
+
+**Measurements (phase 2).** Automatic lines over 7 fixtures × 8 seeds (2 950 line cuts with ≥ 2 units): the fastest
+10.60 units per legible second at lead 0.12, 10.15 at 0.2 and under 出そろい; the shortest legible time 0.265 s at 0.12
+(always a short piece before a transition), 0.311 s at 0.2. `check` over the 63 corpus plans: 2.6 s including planning;
+plan vs scene legible time within ±20 % for ≥ 98 % of the four fixtures' line cuts. S2's keep-still loop over the five
+scenarios × snap off / 120 BPM: at most three rounds; "after the last anchor" needs all three (one or two leave lines 8–9
+moving).
+
+**Mutation checks (phase 2)** (each rule broken, the named test run, restored): `V = t1 − t0` → the corpus, samples,
+squeeze and floor cases; the sung rule dropped → the sung case; `en: 7` / `ja: 7` → the samples and English cases / the
+corpus; the outgoing-seam cut removed → the floor and seam cases; the sung-order `A = 0` removed → the sung case;
+`MIN_LEGIBLE` 0.3 → the corpus; `readWarnings` ungated → `ui_readcheck`; no severity sort → `byLine`; step ④ lines not
+deduplicated → the `export_math` item; `stop` ignored in `mark` → the one-line case; the back refusal at `from` removed
+→ the one-line case; no order check in `stillPins` → the crossing case and `tap_keep`; one round only → `tap_keep`; the
+stale end at `≤ start` → the 11.1 case.
+
+**Checks (phase 2).** `python3 build.py --check` (221 modules); `node tests/update_golden.js --check`: the six files
+match after S4 and after S2; the new and changed Node tests pass; browser: see the phase summary.
+
+<!-- PV22 P5 notes, phase 3 -->
 
 <!-- PV22 P6 notes -->

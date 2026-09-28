@@ -59,6 +59,16 @@ and Filmora-ready output; how they are built is in `docs/DESIGN_2_1.md`.
   in, and readable, that long before the voice; entrances shorten to 0.45 s at most; lines entered by a transition or a
   new background, 見せ場 and キメ lines and lines revealed as sung keep their timing). A transition's window and the
   windows of neighbouring lines adapt to any lead (DESIGN_2_2 §5.1).
+- この行だけタップで打ち直す (詳細 › 行 › 時間, the timeline's line menu, ② 曲 with one line selected, the palette):
+  playback loops from 2 s before the line until it is marked (a seek or a pause ends the loop), one mark is taken, E
+  marks the end, and the session ends by itself after the line; one undo entry. 前後の行を動かさない (on by default) pins
+  the neighbouring automatic starts where they were, and the toast offers ほかの行の固定を外す; a paired start and end pin
+  moves together. A tapped start with no end drops an end pin that now comes less than 0.2 s after it (DESIGN_2_2 §5.3).
+- 読み切れない速さの行を知らせる (on for new works, off for older works until switched on in 作品全体 › タイミング): a line
+  cut with too many morae per second of reading time (Japanese 12, English 11, Chinese 10), or less than 0.25 s to read
+  2 or more, is marked 「!」 in the lyric gutter, the 行 list and the timeline; 行 › 時間 explains it and offers 動きを速くする,
+  終わりを延ばす and この行だけタップで打ち直す; step ④ lists the lines. Lines squeezed between fixed times are marked too
+  (DESIGN_2_2 §5.4).
 
 ## 5. Song (optional)
 

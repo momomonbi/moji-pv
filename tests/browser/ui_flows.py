@@ -5431,7 +5431,7 @@ RETAP_STATE = """(id) => { const a = window.__mv, l = a.plan.lines.find((x) => x
     title: (document.querySelector('.step-tap .step-title') || {}).textContent || null,
     keep: !!document.querySelector('.step-tap .tap-keep:not([hidden]) input:checked'),
     toasts: [...document.querySelectorAll('.toast-text')].map((x) => x.textContent) }; }"""
-LAST_LABEL = "() => { const e = window.__mv.store.list().filter((x) => x.done).pop(); return window.__mv.t(e.label[0], e.label[1]); }"
+LAST_TEXT = "() => { const e = window.__mv.store.list().filter((x) => x.done).pop(); return window.__mv.t(e.label[0], e.label[1]); }"
 
 
 async def flow_retap(f, lang):
@@ -5479,7 +5479,7 @@ async def flow_retap(f, lang):
     f.check(s['start'] and s['start'][1] == 'tap' and abs(s['start'][0] - (T + 5)) < 0.8, 'line 3 starts about 5 s late by tap: %r' % s['start'])
     f.check(s['end'] and s['end'][1] == 'tap' and s['end'][0] > s['start'][0], 'E pinned its end: %r' % s['end'])
     f.check(await page.evaluate(DONE) == done0 + 1, 'exactly one undo entry')
-    label = await page.evaluate(LAST_LABEL)
+    label = await page.evaluate(LAST_TEXT)
     f.check(label == await page.evaluate("() => window.__mv.t('undo.tapLine', { n: 3 })"), 'the entry: %r' % label)
     helpers = await page.evaluate("""(ids) => ids.filter((id) => { const p = window.__mv.doc.pins['line/' + id + ':start']; return p && p.by === 'user'; })""", ids)
     f.check(len(helpers) >= 1, 'neighbours are pinned: %r' % helpers)
@@ -5493,7 +5493,7 @@ async def flow_retap(f, lang):
     await unpin.click()
     await f.until("(ids) => ids.every((id) => !window.__mv.doc.pins['line/' + id + ':start'])", 'ほかの行の固定を外す removes them', helpers)
     f.check(await page.evaluate(DONE) == done0 + 2, 'one more undo entry')
-    f.check(await page.evaluate(LAST_LABEL) == await page.evaluate("(n) => window.__mv.t('undo.unpinHelpers', { n })", len(helpers)), 'named with the count')
+    f.check(await page.evaluate(LAST_TEXT) == await page.evaluate("(n) => window.__mv.t('undo.unpinHelpers', { n })", len(helpers)), 'named with the count')
     await page.evaluate("() => { window.__mv.store.undo(); window.__mv.store.undo(); }")
     await f.settle(2)
     f.check(await page.evaluate(DOC) == doc0, '元に戻す twice restores everything')
