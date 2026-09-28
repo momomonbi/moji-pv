@@ -9315,6 +9315,11 @@ skipped; a `GLYPH` entry removed (burnOut). `pv_rules` "every rule changes the p
 **Browser.** `flow_conventions` also opens 詳しい設定: 「効果を重ねすぎない」 is on in a new work; under quietHush the box of
 「1カットに重ねる効果の目安」 shows 自動（4） (one line only); typing 6 pins it in one undo step.
 
+**Checks.** `node tests/update_golden.js --check`: the six existing files match, `project_pv.json` matches. Full Node
+suite: 1 816 of 1 816 pass on this machine (the speed tests too, this time). Browser: the whole `ui_flows.py` (50 flows,
+the phase A leftover: every flow on the final code) OK; `ui_layout.py` (584 layouts), `i18n_pages.py`, `csp.py` (0
+violations) and `determinism.py` OK.
+
 **Visual QA** (the app, a new work of the flows' two-chorus lyrics under nightTram, a glow theme, and dreamHaze; frames at
 each lyric cut's entrance, hold and exit, budget on and off). Off, two cuts enter with bloomOpen (a glowing bloom on
 glowing letters, the halo doubles and the letters smear) and one prechorus cut adds glowSpill; on, they take rainDrop and
