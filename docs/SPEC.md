@@ -54,6 +54,11 @@ and Filmora-ready output; how they are built is in `docs/DESIGN_2_1.md`.
   end (optional). Works while the song plays.
 - Manual edit of start / end in the inspector (number fields and dragging on the timeline).
 - LRC import; AI alignment (see 8).
+- The text comes in ahead of the voice by 入りの早さ (0.2 s in a new work; older works keep what they store). 入りの基準
+  says what that lead is measured to: the entrance's start (動き始め, the default) or its end (出そろい: the line is fully
+  in, and readable, that long before the voice; entrances shorten to 0.45 s at most; lines entered by a transition or a
+  new background, 見せ場 and キメ lines and lines revealed as sung keep their timing). A transition's window and the
+  windows of neighbouring lines adapt to any lead (DESIGN_2_2 §5.1).
 
 ## 5. Song (optional)
 

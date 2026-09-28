@@ -264,6 +264,17 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
       return edit ? edit.times() : [];
     }
 
+    // The ◆ under x: the nearest within reach; of diamonds at the same place, the one drawn last (on top). Keys at
+    // the same time are common (a key set to 割合 where another key sits), and the first one hid the one on top.
+    function keyAt(x) {
+      let best = null, reach = KEY_PX + 2;
+      for (const m of keyMarks()) {
+        const d = Math.abs(x - xOf(m.t));
+        if (d <= reach) { best = m; reach = d; }
+      }
+      return best;
+    }
+
     function drawKeys(r) {
       const list = keyMarks();
       if (!list.length) return;
@@ -335,7 +346,7 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
       const p = app.plan;
       if (!p) return { row };
       if (row === 'cut') {
-        const key = keyMarks().find((m) => Math.abs(x - xOf(m.t)) <= KEY_PX + 2);
+        const key = keyAt(x);
         if (key) return { row, keyMark: key };
       }
       if (row === 'song') {

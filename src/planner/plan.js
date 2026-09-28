@@ -178,7 +178,7 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
       const inst = instantOf(ctx, 'arrive', d);
       if (!inst) continue;                                     // no entrance motion
       const count = unitCount(ctx, c);
-      const total = inst.dur + inst.each * Math.max(0, count - 1);
+      const total = (inst.dur > 0 ? inst.dur : 0) + (inst.each > 0 ? inst.each : 0) * Math.max(0, count - 1);
       const A = Math.min(READY.ROOM, Math.max(MO.MIN_DUR, total));
       const ready = N.q6(c.t0 - lead);
       const floor = i >= 2 ? cuts[i - 2].b : i === 1 ? Math.max(0, cuts[0].t0) : 0;

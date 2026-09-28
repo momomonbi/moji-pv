@@ -9161,6 +9161,87 @@ docs/DESIGN_2_2.md. The packages and their notes follow.
 
 <!-- PV22 P4 notes -->
 
-<!-- PV22 P5 notes -->
+### P5 タイミング (T4, S1, S2, S4)
+
+Contract: DESIGN_2_2 §5 (the package design). Phase 1 is T4 (the planner fixes, 出そろい, the new-work lead and the
+入りの基準 row); phase 2 S4 and S2; phase 3 S1, the remaining docs and the visual QA.
+
+**What landed (phase 1).** `planner/segment.windows`: the neighbour clamp (`a_i = min(t0_i, b_{i−2})` where it
+reaches further back). `planner/tracks.seams`: the long-lead hand-over in three tiers and `endWithSeam(cuts, j, end,
+reach, handover)` (P4's signature: `handover` ends A with the window without the t1 floor). `planner/extreme`: the
+whipPan pair needs the whips to meet outside legacy documents (`recencyOf(…, prev, legacy)`; new dependency
+`planner/rules`). `core/motion.fitMotion({ …, cap })` and `heroTime` reading `cut.ready`. `planner/plan`: stage 6b
+`readyWindows` (`PL.READY.ROOM` 0.45), `ready` on the plan cut, its fingerprint term, `encodingKey` and the retime
+check; `planner/encode` prints `ready` between `pinKey` and `repT`. `engine/scene/build.timesOf` (`times.ready`) and
+`engine/scene/behave.motionTiming` (the arrive cap). `core/doc`: `ENTER_MODES`, `NEW_WORK_LEAD`, `ORDER.timing +=
+enter, readCheck`, `checkTiming`, `newDoc()` writes `timing.lead = 0.2`. `core/commands.TIMING_KEYS += enter,
+readCheck`. `ui/fields` (入りの早さ's note, the 入りの基準 choice), `ui/inspector.cmdValue` (absent enter reads
+'start'), the strings of DESIGN_2_2 §5 table 1.6. Tests: `seams_lead`, `golden_lead`, `timing_ready` (new), cases in
+`motion`, `commands`, `doc`, `ui_fields`, `extreme_planner`; the ui_flows flow `enter`.
+
+**Gating.** The six goldens match (`node tests/update_golden.js --check`); `golden_lead.test.js` asserts on all 253
+golden documents that no cut is clamped or opened, every centred transition sits at `B.a` with today's length and every
+old cut ends no earlier than its sung end. Stage 6b runs only under `timing.enter === 'ready'`; the plan, the encoder
+and the fingerprint print `ready` only where the pass set it; `fitMotion` without `cap` is the v2 formula (1 000 seeded
+inputs against a frozen copy).
+
+**Deviations from the design (and why).**
+
+- The hand-over tiers apply only where the old line ends by the new line's sung start (`A.t1 ≤ B.t0`). The design's
+  condition alone also fired where A's end is pinned past B's start (a duet): tier 3 cut A's pinned overlap short at
+  the transition, and tiers 1–2 moved `at` although A stays up anyway. The existing test "a line end pinned past the
+  next line keeps the cuts in time order" (`planner_pins.test.js`, seams at `B.a`) caught it; `seams_lead.test.js` has a
+  duet case (lead 0.5, A shown until its pinned end, the window centred on B.a).
+- `planner/kime` (P3) is not in this tree, so `planner/plan` has a local `isKime(c)` reading the same flags as P3's
+  accessor (`c.kime === true` or `c.feat.kime`). At integration: add `planner/kime` to `planner/plan`'s dependencies and
+  call `KI.isKime`; `timing_ready.test.js` already asserts no opened cut has `feat.kime`.
+- The pair-gate test is in `tests/node/extreme_planner.test.js` (the EXTREME planner's test file; there is no
+  `extreme.test.js`). It traces 6 whipPan→whipPan neighbours per variant: they meet in 6/6 at lead 0.12 and 0/6 at 0.2;
+  the pair holds in every legacy variant and only where they meet in a new work or under 出そろい.
+- `timing.readCheck` (S4) is validated, ordered and settable from phase 1 with `enter` (the design adds both keys
+  together in §0.2); nothing reads it yet.
+- The fingerprint case uses LRC lines 0.8 s apart, hard cuts pinned into lines 2 and 3 and the third line's entrance
+  pinned (`fogIn`, `dur` 0.6), not "three lines 0.5 s apart": 0.5 s leaves no room above `MIN_DUR` at lead 0.3, and
+  automatic transitions move the floor with the lead (tier 1). The cut opens to its floor (the end of the first line)
+  at both leads; with the caches, re-planning between the two leads must equal a fresh plan (kills a missing
+  `encodingKey` term: the lrc edit sequence alone did not).
+- `seams_lead`'s "A past the window" allows 2 µs: tier 1 rounds `at` to 1e-6 and `endWithSeam` floors the window end,
+  so an A ended at its t1 can outlive `floor6(at + dur/2)` by 1 µs. `golden_lead` recomputes "today's length" from the
+  plain windows (a = t0 − lead, b by the cutter's rule), because the plan's `b` are after the clips.
+- Not written, because P4 is not in this tree: the P4 morph-target case of `timing_ready.test.js` (a `glyphMorph` B has
+  `seamIn ≥ 0`, which the pass skips; covered by the I4 invariant).
+- DESIGN_2_2 §0's first paragraph should gain "…and `timing.lead = D.NEW_WORK_LEAD` (0.2 s, §5)"; only the P5
+  placeholder is ours to replace, so the chapter says it (§5.1 Gating) and the lead may fold it into §0.
+- The ui_flows flow `enter` (the design's 1.7-9) landed with the row in phase 1.
+- `ui/timeline` (not in the design): a press on the cut row grabs the nearest key diamond ◆ and, of diamonds at the same
+  place, the one drawn last (on top); it took the first within reach. With the new-work lead 0.2 the ui_flows flow
+  `keyframes` set key ① to 割合 exactly where key ② sits, and the drag on key ②'s ◆ moved key ① (the flow failed; it
+  passes in the base tree at lead 0.12). The same happened to anyone whose two keys met.
+
+**Measurements (phase 1, catalog registry).** Transitions over the 6 fixtures × 3 seeds of `seams_lead` (459), tiers
+1 / 2 / 3: none at lead 0.12; 113 / 0 / 0 at 0.2; 316 / 3 / 0 at 0.3; 408 / 0 / 6 at 0.5; 161 / 44 / 239 at 1.0; A
+past the window and B before it: 0 at every lead, both modes. Neighbour clamp: 0 cuts at 0.12, 15 at 0.2, 57 at 0.3,
+99 at 0.5 (of 1 123). 出そろい at lead 0.2 on the stored fixtures (engine times): fully in by t0 − lead 0.00 → 0.47
+(basic, 8 of 17 line cuts opened), 0.11 → 0.37 (lrc, 7 of 27), 0.03 → 0.62 (long, 143 of 245), 0.00 → 0.87 (vertical,
+13 of 15), every opened cut fully in by its `ready` — the design's numbers exactly. Over the 18 plans 515 cuts open at
+lead 0.2.
+
+**Mutation checks** (each rule broken in the tree, the named test run, restored): tier 1 removed → the tier-1 case;
+tier 2 removed → the tier-2 case; tier 3 removed → the corpus invariant and the tier-3 case; tier 1 applied alone (the
+critic's single rule) → "B before its window" at lead 0.3; the duet guard removed → the duet case; the clamp removed →
+the corpus invariant (overlaps the cut two before) and the clamp case; the pair gate off → the pair test; the arrive cap
+in `behave.motionTiming` removed → I5 (rest > ready); the floor removed → I1 and the fingerprint case; the sung skip
+removed → the sung case; the seamIn skip removed → I4 and the hand-over invariant; the ground skip removed → the
+invariant test; the fingerprint term removed → the fingerprint case; the `encodingKey` term removed → the cached
+re-plan in the fingerprint case; the cap in `heroTime` removed → the repT case.
+
+**Checks.** `python3 build.py --check`; `node tests/update_golden.js --check` (six "matches"); the Node suite (1 784
+tests): all pass except build-time budgets while browser tests and other packages' runs loaded the machine (load 8–10
+on 4 CPUs: 29 conformance "slowest build > 60 ms" rows and the two planning-speed tests); `conformance.test.js` and
+`planner_determinism.test.js` alone then pass (one camera row once, then clean; the base tree's copy passes alike).
+Browser: `ui_flows.py` (every flow; `keyframes` needed the ◆ fix above), `ui_layout.py`, `i18n_pages.py`, `csp.py`,
+`determinism.py` pass.
+
+<!-- PV22 P5 notes, phases 2–3 -->
 
 <!-- PV22 P6 notes -->

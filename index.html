@@ -1,6 +1,6 @@
 <!doctype html><html lang="ja"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-A2leRj1ptFmH5zo6BZKKXVfpQKepZHZNs3EzSU9ndmI='; style-src 'sha256-CBzRvq4sWr3CF69hafDp1l8UkHnSy18JQMXGJJhPDYI=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-xyEsS3kTFgVKVY2h60FS2CYK8LdAn8XYVpvXroKuEDs='; style-src 'sha256-CBzRvq4sWr3CF69hafDp1l8UkHnSy18JQMXGJJhPDYI=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
 <title>文字PVメーカー</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -21660,7 +21660,7 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
       const inst = instantOf(ctx, 'arrive', d);
       if (!inst) continue;                                     // no entrance motion
       const count = unitCount(ctx, c);
-      const total = inst.dur + inst.each * Math.max(0, count - 1);
+      const total = (inst.dur > 0 ? inst.dur : 0) + (inst.each > 0 ? inst.each : 0) * Math.max(0, count - 1);
       const A = Math.min(READY.ROOM, Math.max(MO.MIN_DUR, total));
       const ready = N.q6(c.t0 - lead);
       const floor = i >= 2 ? cuts[i - 2].b : i === 1 ? Math.max(0, cuts[0].t0) : 0;
@@ -68080,6 +68080,17 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
       return edit ? edit.times() : [];
     }
 
+    // The ◆ under x: the nearest within reach; of diamonds at the same place, the one drawn last (on top). Keys at
+    // the same time are common (a key set to 割合 where another key sits), and the first one hid the one on top.
+    function keyAt(x) {
+      let best = null, reach = KEY_PX + 2;
+      for (const m of keyMarks()) {
+        const d = Math.abs(x - xOf(m.t));
+        if (d <= reach) { best = m; reach = d; }
+      }
+      return best;
+    }
+
     function drawKeys(r) {
       const list = keyMarks();
       if (!list.length) return;
@@ -68151,7 +68162,7 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
       const p = app.plan;
       if (!p) return { row };
       if (row === 'cut') {
-        const key = keyMarks().find((m) => Math.abs(x - xOf(m.t)) <= KEY_PX + 2);
+        const key = keyAt(x);
         if (key) return { row, keyMark: key };
       }
       if (row === 'song') {

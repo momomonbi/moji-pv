@@ -42,6 +42,9 @@ the beat.
 
 - **Tap to sync** — play the song and press Space when each line starts; the times are recorded line by line.
 - Times in the lyrics such as `[00:12.34]` (LRC) are used as they are.
+- **Entrance lead and Lead measured to** — the text comes in a little before the voice (0.2 s in a new work). Set
+  Whole video › Timing › Lead measured to to **Fully in (readable)** and the entrance has ended, so the line can be read,
+  by the time the voice comes.
 
 ## Export
 
