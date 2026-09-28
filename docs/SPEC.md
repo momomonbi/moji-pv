@@ -43,6 +43,10 @@ and Filmora-ready output; how they are built is in `docs/DESIGN_2_1.md`.
 - Marks inside a line: `/` cut point, `*word*` emphasis, trailing `!` impact (flash + shake), `|note` small annotation
   text, `[mm:ss.xx]` start time (LRC). Lines without a tag get times from their neighbours (a single tag never discards
   the others).
+- Enhanced-LRC word tags `<mm:ss.xx>` inside a line (v2.2) stay in the line as typed or imported and give its
+  characters their times when 「字の時間を歌に合わせる」 is on (below); an unstamped line's tags count from its own start.
+  Editing a tagged line from the inspector (強調, 見せ場, ふりがな, 区切り) or ≡ › 時刻を歌詞に書き込む keeps its tags (before
+  v2.2 they were dropped); changing its text drops them.
 - **Stable line identity**: each line has an id. Editing the lyrics keeps ids on unchanged / slightly edited lines
   (diff by content and position), so per-line times, locks and settings follow the line, not the line number.
 - Language: Japanese, English, Traditional / Simplified Chinese, Korean (auto-detected; fonts per language).
@@ -53,6 +57,11 @@ and Filmora-ready output; how they are built is in `docs/DESIGN_2_1.md`.
 - Tap-sync: start from any line, Space/Enter marks the start, Backspace steps back one line, a second key marks a line's
   end (optional). Works while the song plays.
 - Manual edit of start / end in the inspector (number fields and dragging on the timeline).
+- **1字ずつタップ (v2.2)**: 行 › 時間 (or the command palette) plays the line in a loop, optionally a little slower or slow;
+  Space / Enter / the pad marks each character (区切り 1字) or word (言葉) as it is sung, E where the singing ends,
+  Backspace steps back, Esc finishes. The line starts at the first mark and its character times are kept (one undo
+  step); 「やめる」 writes nothing; at the loop's end playback stops with 決定 and もう一度. 字の時間を消す gives the
+  characters back to the estimate. Needs the loaded song.
 - LRC import; AI alignment (see 8).
 
 ## 5. Song (optional)
@@ -107,6 +116,16 @@ and Filmora-ready output; how they are built is in `docs/DESIGN_2_1.md`.
   詳細); what is pinned or rerolled on a later copy stays as set there, and rerolling or pinning the first copy carries
   to its copies.
 - **Per line (v2.1)**: its own season (この行の季節) and parts it must not use (この行で使わない部品).
+- **歌ハメ (v2.2)**: a line's characters come in one at a time, each landing as it is sung (starting 入りの早さ before it),
+  with entrances that read well one character at a time (打鍵, 切り出し, 墨のぼり, 花開き, 寄せ, 落下, 起き上がり, 粗から;
+  English lines also ぽん and 押印); layouts that move the text themselves are left out. Character times come from
+  1字ずつタップ, word tags in the lyrics or the same lyric timed elsewhere in the song (earlier or later); without any,
+  they are estimated over the singing, never later than the line's whole span. The switch is on 行 › 演出 (自動 / オン /
+  オフ) and 作品全体 › 見た目 (自動 / すべての行 / 使わない). 自動 in a new work: lines with character times, the song's first
+  line and the chorus lines (one in three), the same way for every repeat of a lyric; in a work made before v2.2: off.
+  キメ lines are left to キメ unless their own switch says 歌ハメ. 「字の時間を歌に合わせる」 (作品全体 › タイミング, on in
+  new works) lets word tags and repeated lyrics time the characters and the camera, key anchors, 下線 and the cut
+  points of a split line follow the same times.
 - **My materials (マイ素材, v2.1)**: new materials that the AI or the user builds from existing parts and a fixed set of
   primitives (shapes, particles, patterns, motion tracks, oscillators). They are data, never code; they are stored in the
   project and shown under マイ素材 in the part browser. AI-made materials appear only where they are placed, unless

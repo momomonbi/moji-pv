@@ -41,6 +41,11 @@ step 2 and the app finds the tempo and uses it for the motion. **Snap to beats**
 the beat.
 
 - **Tap to sync** — play the song and press Space when each line starts; the times are recorded line by line.
+- **Sung reveal (歌ハメ)** — the characters come in one at a time with the singing. In a new work it comes on by itself
+  for the opening line and the chorus lines (one in three); switch it per line under line › Staging, or for every
+  line under whole video › Look.
+- **Tap each character** — under line › Time, the line plays in a loop (slower if you like) and you press Space as each
+  character is sung; the times are kept per character. Word tags in the lyrics (`<00:12.34>`) are used too.
 - Times in the lyrics such as `[00:12.34]` (LRC) are used as they are.
 
 ## Export

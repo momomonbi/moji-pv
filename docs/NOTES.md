@@ -9222,3 +9222,62 @@ piece boundaries, hooks per line instead of per text, no `only` filter, no sourc
 instead of `times.a`, no arrive-only guard, underSweep reading `hints.emph` as ranges, keeping deleted characters' pairs,
 the `sung.times` scope refusal, `sung.times` not line-only for promote, word tags kept on a text edit, a tag between `/`
 and its swallowed spaces mapped to 0, no exit squeeze in `fitTimes`, `heroSung` ignoring the shortened exit.
+
+### P6 歌ハメ (S3): phase A, part 2 — 1字ずつタップ, the inspector, the golden
+
+Built on part 1: the unit reducer of `core/tap` (`UNIT_EVENTS`, `UNIT_GAP`, `unitStart`, `unitReduce`, `unitResult`; the
+line reducer unchanged), the 1字ずつタップ mode (`ui/tap_units`), the inspector rows (行 › 演出 「歌ハメ」, 作品全体 ›
+見た目 「歌ハメ」, 作品全体 › タイミング 「字の時間を歌に合わせる」, 行 › 時間 「字の時間」 with [1字ずつタップ] and
+[字の時間を消す]), their field states and なぜ (`planner/fields`, `planner/explain`), the palette action `tap.units`, the
+Phase A strings, the golden `tests/golden/project_sung.json` (A1–A4) and the flow `hame` of `ui_flows.py`. The design
+chapter is DESIGN_2_2 §6.
+
+Readings and deviations (with the reason):
+
+- **The unit mode is a module of its own.** The design puts it in `ui/tap` as a second mode. P5 rewrites `ui/tap` for
+  「この行だけ打ち直す」 at the same time, so the mode lives in `ui/tap_units` and `combine(line, units)` puts both behind
+  the one API boot mounts as `app.tap` (keys, the stage press and the strip go to the running mode; each refuses to
+  start while the other runs; `root` is the running mode's panel, and `ui/steps` now compares the panel's root, not only
+  the object). `ui/tap` itself is untouched, and boot reaches the module through `MV.use` (its dependency line is P5's
+  too). The design's `seekBy` early return is the unit mode's own no-op `seekBy`.
+- **What 自動 decided is a note under the row, not the 自動 button's text.** The design reads 「自動（オン: …）」 on the
+  自動 option; a segmented button that long wraps in the 320 px column, and P2's rows already show a FieldState's
+  `autoText` as a note under the row (`fr-auto`). The line row therefore keeps 自動 / オン / オフ and the note says
+  `sung.auto.times | hook | kime | off`; the work row's note is `fld.hame.autoNote` in a new work and 自動（オフ） in an
+  older one. The inspector code for `autoText`, `autoDefault` and the after-row block is written as P2 and P3 wrote it,
+  so the integrator merges identical lines.
+- **Field categories.** `planner/fields` routes `sung.real` to `'rule'` (a switch of the new-work table: its pin, else
+  `RU.value` — P2 and P4 route every table row there; the integrator keeps one of the three routings), `sung.hame` to
+  `'sung'` (its value from `plan.sung`; an unpinned line under a work pin is 作品で固定 ↑; a キメ line under a work pin is
+  自動（オフ: キメの行）, because the pin does not reach it) and `sung.times` to `'sungTimes'`. `explain` reads the three
+  through `fieldState` (a pin is the reason; 自動's text is the field's). `valueAt` of `'rule'` without the document
+  reads only the work pin (the default needs the document's generation).
+- **Explain of a restricted pick.** `decidePart` records the 歌ハメ rule on the trace (`trace.hame`) for pinned and
+  aligned picks too: a chooser pick explains `whyRule.sung.hame` / `sung.arrange` first, then its factors; a pinned
+  own-motion layout on a 歌ハメ line adds `whyRule.sung.own`; a pinned entrance says only that it is pinned.
+- **「字の時間」 is a derived row** (`derived: 'sungTimes'`, the text widget read-only, an `<output>`) with its buttons in
+  an after-row block (P3's `after`), not a section custom: P5 gives 行 › 時間 its own custom (`timeTools`) and a section
+  holds one. The summary counts the line's units (「11か所」) whatever was tapped; なし without sung timing.
+- **The loop** also restarts when playback is started again at or past its end (▶ or P after the pause), keeping the
+  take, so the session never plays on out of its line. 区切り changes restart the take (the units change).
+- **A take's end** must be `UNIT_GAP` after the last mark (the design: after it), so the end pair always passes the
+  planner's 0.01 s check. A mark after the end takes the end back (the singing went on).
+- **The start of a take** is its first mark, rounded to the millisecond, and every pair is relative to it; the line's
+  start goes through `time.tap` in the same batch. A start that timing drops for time-order (earlier than the line above
+  + 0.1 s) leaves the pairs relative to the automatic start.
+- **Strings.** Only Phase A's (the S3.6 rows marked B, C and D come with their phases); `tapu.keyPause` is the line
+  tap's `tap.keyPause`.
+- **The golden** stores 16 documents (A1–A4 × 16:9 / 9:16 × two corpus seeds) as keyed entries with a plan hash and 40
+  frame hashes each; `tests/update_golden.js` gains `--only=<file>` (as P4 added it) so it was written alone after
+  `--check` matched the six. `sung.test.js` re-renders all 16 (about 10 s).
+- **Timeline context menu.** P5 adds the menu; its 「1字ずつタップ」 item is left to the integration (`tap.units` with
+  `{ lineId }`).
+
+Mutation checks (each broke a test, then restored): marks without the unit gap, a mark keeping a stale end, the loop
+end dropping the take, back skipping the end, 導出 only for plain `rule`, explain without rule tags, explain without the
+restriction's rule, no `sung.own`, no inherited 歌ハメ state, a unit session starting during line tapping, no end pair,
+a first word not at 0 (this one found a bug: the first word start was kept after the inserted 0).
+
+Checks: the timing tests `catalog arrange/sidebarIndex` (slowest build) and both planning-speed tests of
+`planner_determinism` fail under this machine's load in the base worktree too (same runs side by side); everything else
+passes.
