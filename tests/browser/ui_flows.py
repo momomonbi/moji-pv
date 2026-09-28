@@ -66,6 +66,12 @@ v2.1 editor-ready output (package H.3, DESIGN_2_1 §13.12):
 v2.1 「くり返しの行をそろえる」 (DESIGN_2_1 §4.10):
   repeat                     作品全体 › 見た目: the switch (off, its note, no 振り直し) pins the opt-in, the second サビ takes the
                              first one's layouts, lenses and shots, a repeated cut's なぜ names its first copy, off clears it
+v2.2 歌ハメ (DESIGN_2_2 §6):
+  hame                       a new work: the opening line's 歌ハメ reads 自動（オン: 歌い出し・サビの行）; [オン] on another line
+                             (one undo entry, the preview changes as its characters come in); 作品全体's すべての行 / 自動 and
+                             字の時間を歌に合わせる; 1字ずつタップ with the song (←/→ do not seek, 少しゆっくり, Space × n, E, Esc:
+                             one undo entry with the start and the character times; やめる writes nothing; the loop's end
+                             stops and offers 決定 / もう一度)
 It also asserts: no page errors and no CSP violations. The ja page runs every flow; the en page runs the first run.
 The first run exports with the mouse and, in the keyboard flow, with Tab + Enter. Where H.264 encodes, the file's video
 sample count is checked here (stsz or trun); the decoded-frame count of the same export path is WP6's check in
@@ -5271,6 +5277,170 @@ async def flow_ai_extreme(f, lang):
 
 # カメラ EXTREME (DESIGN_EXTREME §5.3).
 FLOWS += [('extreme', flow_extreme, False), ('extreme_keys', flow_extreme_keys, False), ('ai_extreme', flow_ai_extreme, False)]
+
+
+# --- 歌ハメ (PV22 P6, DESIGN_2_2 §6) ------------------------------------------------------------------------------------
+
+# A line's 歌ハメ in the Plan, its first cut's entrance order and the cut's sung units.
+HAME_OF = """(id) => { const a = window.__mv, ls = a.plan.sung ? a.plan.sung.get(id) : null;
+  const c = a.plan.cuts.find((x) => x.line === id);
+  return { hame: !!(ls && ls.hame), why: ls ? ls.hameWhy : null, by: ls ? ls.by : null, n: ls ? ls.at.length : 0,
+    order: c && c.slots.arrive.p ? c.slots.arrive.p.order : null, key: c ? c.key : null, t0: c ? c.t0 : 0,
+    sung: c && c.sung ? { t: c.sung.t.slice(), end: c.sung.end } : null }; }"""
+# The unit session's state (ui/tap_units), or null.
+UNITS = """() => { const s = window.__mv.tap.units.session(); return s ? { lineId: s.lineId, cursor: s.state.cursor, end: s.state.end,
+  paused: s.state.paused, atLoopEnd: s.state.atLoopEnd, rate: window.__mv.player.rate, loop: s.loop,
+  chips: document.querySelectorAll('.step-tapu .tapu-chip').length, shown: !!document.querySelector('.step-body .step-tapu') } : null; }"""
+# The stage canvas as a data URL (two times of one entrance differ while its characters come in one by one).
+STAGE_PIXELS = "() => document.querySelector('.canvas-wrap canvas').toDataURL()"
+
+
+async def flow_hame(f, lang):
+    """歌ハメ (DESIGN_2_2 §6) in a new work: the first line's row reads 自動（オン: 歌い出し・サビの行）; 行 › 演出 › 歌ハメ [オン] on
+    another line makes its entrance follow the singing (one undo entry; the preview changes as the characters come in);
+    作品全体 › 見た目 › 歌ハメ すべての行 / 自動; 作品全体 › タイミング › 字の時間を歌に合わせる (自動 = on: off pins it, on clears it).
+    1字ずつタップ with the song: ←/→ do not seek, 少しゆっくり sets the player's rate, Space × n, E and Esc write the line's
+    start and its character times in one undo entry (字の時間 then reads タップ・手で合わせた時間) and restore the rate;
+    やめる writes nothing; at the loop's end playback stops and 決定 / もう一度 are offered, もう一度 starts again."""
+    page = f.page
+    done0, doc0 = await with_lyrics(f)
+    ids = await page.evaluate('() => window.__mv.plan.lines.map((l) => l.id)')
+    first = await page.evaluate(HAME_OF, ids[0])
+    if not f.check(first['hame'] and first['why'] == 'hook' and first['order'] == 'sung', 'the opening line is 歌ハメ by itself: %r' % first):
+        return
+    await page.evaluate("(id) => window.__mv.select({ level: 'line', ids: [id] }, { from: 'crumbs', open: true })", ids[0])
+    await f.settle(3)
+    row = ROW % 'sung.hame'
+    auto = await page.text_content(row + ' .fr-auto')
+    f.check(auto == await page.evaluate("() => window.__mv.t('sung.auto.hook')"), 'the row says what 自動 decided: %r' % auto)
+    f.check(await page.locator(row + ' [data-role="dice"]').count() == 0, 'a setting, not drawn: no 振り直し')
+    # another line: 歌ハメ [オン]
+    other = await page.evaluate(HAME_OF, ids[1])
+    f.check(not other['hame'] and other['why'] == 'off', 'the second line is not 歌ハメ: %r' % other)
+    await page.evaluate("(id) => window.__mv.select({ level: 'line', ids: [id] }, { from: 'crumbs', open: true })", ids[1])
+    await f.settle(3)
+    done1 = await page.evaluate(DONE)
+    await page.locator(row + ' .seg').nth(1).click()
+    await f.until("(id) => { const p = window.__mv.doc.pins['line/' + id + ':sung.hame']; return !!p && p.v === true; }", 'オン pins the line', ids[1])
+    await f.settle(3)
+    f.check(await page.evaluate(DONE) == done1 + 1, 'one undo entry')
+    on = await page.evaluate(HAME_OF, ids[1])
+    f.check(on['hame'] and on['why'] == 'pin:line' and on['order'] == 'sung' and on['sung'], 'the line comes in with the singing: %r' % on)
+    if on['sung'] and len(on['sung']['t']) > 2:
+        shots = []
+        for tt in (on['t0'] + on['sung']['t'][1] - 0.02, on['t0'] + on['sung']['end']):
+            await page.evaluate('(x) => window.__mv.seek(x)', tt)
+            await f.settle(4)
+            shots.append(await page.evaluate(STAGE_PIXELS))
+        f.check(shots[0] != shots[1], 'the preview changes while the characters come in')
+    await f.shot('hame-line')
+    # 作品全体 › 見た目: すべての行, then 自動
+    await page.evaluate("() => window.__mv.select({ level: 'work' }, { from: 'header', open: true })")
+    await open_section(f, 'look')
+    await page.locator(row + ' .seg').nth(1).click()
+    await f.until("() => { const p = window.__mv.doc.pins['work:sung.hame']; return !!p && p.v === true; }", 'すべての行 pins the whole video')
+    await f.settle(3)
+    every = await page.evaluate("() => window.__mv.plan.lines.every((l) => { const s = window.__mv.plan.sung, x = s && s.get(l.id); return !!(x && x.hame); })")
+    f.check(every, 'every line is 歌ハメ')
+    await page.locator(row + ' .seg').nth(0).click()
+    await f.until("() => !window.__mv.doc.pins['work:sung.hame']", '自動 clears the pin')
+    # 作品全体 › タイミング › 字の時間を歌に合わせる (詳しい設定): on by default in a new work; off pins it; on clears it
+    await open_section(f, 'timing')
+    await page.evaluate("""() => { const d = [...document.querySelectorAll('[data-mount="inspector"] .isec[data-sec="timing"] details.isec-more')];
+      for (const x of d) x.open = true; }""")
+    real = ROW % 'sung.real'
+    box = real + ' input[role="switch"]'
+    f.check(await page.is_checked(box), '字の時間を歌に合わせる shows on (自動) in a new work')
+    await page.click(real + ' .w-toggle')
+    await f.until("() => { const p = window.__mv.doc.pins['work:sung.real']; return !!p && p.v === false; }", 'off pins it')
+    await f.settle(2)
+    f.check(await page.evaluate('() => { const s = window.__mv.plan.sung, l = s && s.get(window.__mv.plan.lines[0].id); return !!(l && l.hame); }') is False,
+            'without it the hook lines are not 歌ハメ')
+    await page.click(real + ' .w-toggle')
+    await f.until("() => !window.__mv.doc.pins['work:sung.real']", 'on clears the pin (自動)')
+    await f.undo_all(done0, doc0)
+
+    # 1字ずつタップ with the song
+    await page.evaluate(AI_WAV_JS)
+    ok = await page.evaluate("async () => { await window.__mv.loadSong(window.__wav(30, 'hame.wav')); return window.__mv.songReady(); }")
+    if not f.check(ok, 'the song is loaded'):
+        return
+    done2 = await page.evaluate(DONE)
+    lid = ids[2]
+    await page.evaluate("(id) => { const a = window.__mv; a.pause(); a.select({ level: 'line', ids: [id] }, { from: 'crumbs', open: true }); }", lid)
+    await f.settle(3)
+    btn = '[data-mount="inspector"] [data-custom="sungTimes"] [data-act="tap.units"]'
+    if not f.check(await page.locator(btn).count() == 1 and not await page.is_disabled(btn), '行 › 時間 offers 1字ずつタップ with the song'):
+        return
+    await page.click(btn)
+    if not await f.until("() => window.__mv.view.state.mode === 'tap' && window.__mv.view.state.playing", '1字ずつタップ plays the loop'):
+        return
+    u = await page.evaluate(UNITS)
+    f.check(u and u['shown'] and u['lineId'] == lid and u['chips'] > 2, 'the panel shows the line as steps: %r' % u)
+    await page.evaluate('() => window.__mv.shell.stage.focus()')
+    t_before = await page.evaluate(NOW)
+    await page.keyboard.press('ArrowRight')
+    t_after = await page.evaluate(NOW)
+    f.check(t_after - t_before < 1.5, '→ does not seek in 1字ずつタップ: %.2f → %.2f' % (t_before, t_after))
+    await page.click('.step-tapu .tapu-controls [data-v="0.75"]')
+    f.check(abs(await page.evaluate('() => window.__mv.player.rate') - 0.75) < 1e-9, '少しゆっくり plays at 0.75')
+    await page.evaluate('() => window.__mv.shell.stage.focus()')
+    await page.wait_for_timeout(900)
+    for _ in range(3):
+        await page.keyboard.press('Space')
+        await page.wait_for_timeout(220)
+    await page.keyboard.press('e')
+    u = await page.evaluate(UNITS)
+    f.check(u and u['cursor'] >= 2, 'the marks are taken: %r' % u)
+    await page.keyboard.press('Escape')
+    await f.until("() => window.__mv.view.state.mode === 'normal'", 'Esc finishes')
+    await f.settle(3)
+    r = await page.evaluate("""(id) => { const a = window.__mv, p = a.doc.pins;
+      return { times: p['line/' + id + ':sung.times'], start: p['line/' + id + ':start'], rate: a.player.rate,
+        entries: a.store.list().filter((e) => e.done).map((e) => e.label[0]) }; }""", lid)
+    f.check(r['times'] and r['times']['by'] == 'tap' and len(r['times']['v']) >= 2 and r['times']['v'][0] == [0, 0],
+            'the character times are pinned, relative to the first mark: %r' % r['times'])
+    f.check(r['start'] and r['start']['by'] == 'tap', 'the line starts at the first mark: %r' % r['start'])
+    f.check(r['entries'][-1] == 'undo.tapUnits' and len(r['entries']) == done2 + 1, 'one undo entry: %r' % r['entries'][done2:])
+    f.check(abs(r['rate'] - 1) < 1e-9, 'finishing restores the rate: %r' % r['rate'])
+    summary = await page.text_content('[data-mount="inspector"] .frow[data-slot="sungTimes"] .w-text-ro')
+    src = await page.evaluate("() => window.__mv.t('sung.src.pin')")
+    f.check(summary and src in summary, '字の時間 names the taps: %r' % summary)
+    f.check(await page.locator('[data-mount="inspector"] [data-custom="sungTimes"] [data-act="sung.clear"]').count() == 1, '字の時間を消す is offered')
+    await f.shot('hame-tapped')
+    # やめる writes nothing
+    done3 = await page.evaluate(DONE)
+    await page.click(btn)
+    await f.until("() => window.__mv.view.state.mode === 'tap'", 'a second session starts')
+    await page.evaluate('() => window.__mv.shell.stage.focus()')
+    await page.wait_for_timeout(300)
+    await page.keyboard.press('Space')
+    await page.wait_for_timeout(200)
+    await page.keyboard.press('Space')
+    await page.click('.step-tapu [data-act="tapu.cancel"]')
+    await f.until("() => window.__mv.view.state.mode === 'normal'", 'やめる ends the session')
+    f.check(await page.evaluate(DONE) == done3, 'やめる writes nothing')
+    # the loop's end: playback stops, 決定 / もう一度; もう一度 starts again
+    await page.click(btn)
+    await f.until("() => window.__mv.view.state.mode === 'tap' && window.__mv.view.state.playing", 'a third session plays')
+    await page.evaluate("() => { const s = window.__mv.tap.units.session(); window.__mv.seek(s.loop.b - 0.3); }")
+    await f.until("() => { const s = window.__mv.tap.units.session(); return !!s && s.state.atLoopEnd && !window.__mv.view.state.playing; }",
+                  'playback stops at the loop\'s end', timeout=6000)
+    strip = await page.evaluate("() => { const s = window.__mv.modeStrip(); return s ? s.actions.map((x) => x.label) : []; }")
+    retry = await page.evaluate("() => window.__mv.t('tapu.retry')")
+    f.check(retry in strip and not await page.is_hidden('.step-tapu [data-act="tapu.retry"]'), 'もう一度 is offered at the loop end: %r' % strip)
+    await page.click('.step-tapu [data-act="tapu.retry"]')
+    await f.until("() => window.__mv.view.state.playing", 'もう一度 plays the loop again')
+    u = await page.evaluate(UNITS)
+    f.check(u and u['cursor'] == 0 and not u['atLoopEnd'] and abs(await page.evaluate(NOW) - u['loop']['a']) < 1.0, 'from the loop\'s start: %r' % u)
+    await page.click('.step-tapu [data-act="tapu.cancel"]')
+    await f.until("() => window.__mv.view.state.mode === 'normal'", 'やめる ends it')
+    f.check(await page.evaluate(DONE) == done3, 'the loop end and もう一度 write nothing')
+    await f.undo_all(done0, doc0)
+
+
+# 歌ハメ (DESIGN_2_2 §6).
+FLOWS += [('hame', flow_hame, False)]
 
 
 async def run(browser, base, rel, lang, only, shots):

@@ -21,7 +21,8 @@ MV.def('ui/tap_units', ['ui/dom', 'ui/icons', 'ui/keys', 'ui/selection', 'i18n/t
     let starts;
     if (step === 'phrase') {
       starts = BR.phrases(s, lang).map((r) => r[0]);
-      if (!starts.length || starts[0] !== 0) starts = [0].concat(starts.filter((a) => a > 0));
+      if (!starts.length) starts = [0];
+      else if (starts[0] !== 0) starts = [0].concat(starts.slice(1));
     } else starts = Array.from(SU.unitsOf(s, lang).at);
     starts = starts.slice(0, MAX_UNITS);
     return starts.map((a, i) => ({ at: a, text: s.slice(a, i + 1 < starts.length ? starts[i + 1] : s.length).trim() || s.slice(a, a + 1) }));

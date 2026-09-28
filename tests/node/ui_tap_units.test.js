@@ -18,9 +18,9 @@ test('steps: 1字 are the sung units, 言葉 the word starts; the first starts a
   assert.deepEqual(mora.map((u) => u.at), Array.from(SU.unitsOf('しゅっぱつ しんこう！', 'ja').at));
   assert.deepEqual(mora.map((u) => u.text), ['しゅ', 'っ', 'ぱ', 'つ', 'し', 'ん', 'こ', 'う！']);
   assert.deepEqual(TU.unitsFor('Hello new world', 'en', 'phrase').map((u) => [u.at, u.text]), [[0, 'Hello'], [6, 'new'], [10, 'world']]);
-  const words = TU.unitsFor('「きみ」の声', 'ja', 'phrase');
-  assert.equal(words[0].at, 0, 'what comes before the first word goes with it');
-  assert.ok(words.length >= 2);
+  const words = TU.unitsFor(' Hello world', 'en', 'phrase');
+  assert.deepEqual(words.map((u) => u.at), [0, 7], 'what comes before the first word goes with it');
+  assert.deepEqual(TU.unitsFor('「きみ」の声', 'ja', 'phrase').map((u) => u.at), [0, 5]);
   assert.ok(TU.unitsFor('あ'.repeat(500), 'ja', 'mora').length <= 399, 'a pin holds at most 400 pairs with the end');
 });
 
