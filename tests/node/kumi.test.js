@@ -1,7 +1,9 @@
-/* 文字PVメーカー v2 — original work. Tests for engine/text/kumi: kana tiers and trims with word seams (T1), Latin words and their gaps (T3), the particle tagger, the RunSpec field and its merge (DESIGN_2_2 §1). */
+/* 文字PVメーカー v2 — original work. Tests for engine/text/kumi: kana tiers and trims with word seams (T1), particles and heads with their sizes (T2) and the tagger's labelled sets, Latin words and their gaps (T3), the RunSpec field and its merge (DESIGN_2_2 §1). */
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const { load } = require('../helpers/load.js');
 const { approx } = require('../helpers/assert_plus.js');
 
@@ -10,6 +12,7 @@ const KU = MV.use('engine/text/kumi');
 const B = MV.use('engine/text/breaker');
 const FACES = MV.use('engine/text/faces');
 const H = MV.use('core/hash');
+const LY = MV.use('core/lyrics');
 
 const GOTHIC = Object.freeze({ family: 'Noto Sans JP', flavor: 'gothic', weight: 500 });
 const INTER = Object.freeze({ family: 'Inter', flavor: 'gothic', weight: 500 });
@@ -223,12 +226,269 @@ test('tagger: named positives and negatives; only Japanese is tagged', () => {
   assert.deepEqual(Array.from(KU.partsOf('始発のホームに', 'en').part), [0, 0, 0, 0, 0, 0, 0]);
 });
 
+// ---- the tagger on labelled lines (tests/fixtures/kumi_particles.json) -----------------------------------------------
+
+const FIXTURES = path.join(__dirname, '..', 'fixtures');
+const LABELLED = JSON.parse(fs.readFileSync(path.join(FIXTURES, 'kumi_particles.json'), 'utf8'));
+const TARGETS = [...KU.P2, ...KU.P1];
+
+// A labelled line → { text, gold }: gold[i] = 1 on the graphemes inside [..].
+function parseLabelled(line) {
+  let text = '', on = false;
+  const flags = [];
+  for (const ch of line) {
+    if (ch === '[') { on = true; continue; }
+    if (ch === ']') { on = false; continue; }
+    text += ch;
+    for (let j = 0; j < ch.length; j++) flags.push(on ? 1 : 0);   // per UTF-16 unit, mapped to graphemes below
+  }
+  const u = B.analyze(text);
+  return { text, u, gold: Array.from({ length: u.n }, (_, i) => flags[u.offs[i]]) };
+}
+
+// Per-grapheme scores of the tagger (KU.particleMarks) on labelled lines.
+function score(lines) {
+  let tp = 0, fp = 0, fn = 0;
+  const wrong = [];
+  for (const line of lines) {
+    const { u, gold } = parseLabelled(line);
+    const got = KU.particleMarks(u);
+    let bad = false;
+    for (let i = 0; i < u.n; i++) {
+      if (got[i] && gold[i]) tp++;
+      else if (got[i]) { fp++; bad = true; }
+      else if (gold[i]) fn++;
+    }
+    if (bad) wrong.push(line);
+  }
+  return { tp, fp, fn, precision: tp + fp ? tp / (tp + fp) : 1, recall: tp + fn ? tp / (tp + fn) : 1, wrong };
+}
+const pct = (v) => (v * 100).toFixed(1) + ' %';
+
+// The rows of the app's sample sheet (lyric rows, cut pieces joined), computed from core/lyrics.SAMPLE_JA.
+function sampleRows() {
+  const rows = [];
+  for (const src of LY.SAMPLE_JA.split('\n')) {
+    const r = LY.parseRow(src, 'ja');
+    if (r.kind === 'lyric' && !rows.includes(r.text)) rows.push(r.text);
+  }
+  return rows;
+}
+
+test('labelled sets: every sample-sheet row has one line, and every label is a run of targeted particles', () => {
+  const gold = new Map(LABELLED.sets.sample.lines.map((l) => [parseLabelled(l).text, l]));
+  const rows = sampleRows();
+  assert.ok(rows.length >= 20);
+  for (const row of rows) assert.ok(gold.has(row), 'no labelled line for the sample row ' + row);
+  assert.equal(gold.size, rows.length, 'the sample set holds only rows of the sheet');
+  for (const [name, set] of Object.entries(LABELLED.sets)) {
+    assert.ok(set.role === 'regression' || set.role === 'heldout', name);
+    assert.equal(new Set(set.lines).size, set.lines.length, name + ': no line twice');
+    for (const line of set.lines) {
+      assert.equal((line.match(/\[/g) || []).length, (line.match(/\]/g) || []).length, line);
+      for (const [, inner] of line.matchAll(/\[([^\]]*)\]/g)) {
+        let rest = inner;
+        while (rest) {
+          const t = TARGETS.find((p) => rest.startsWith(p));
+          assert.ok(t, name + ': ' + line + ' labels ' + inner + ', not a run of targeted particles');
+          rest = rest.slice(t.length);
+        }
+      }
+    }
+  }
+  assert.deepEqual(Object.entries(LABELLED.sets).filter(([, v]) => v.role === 'heldout').map(([k]) => k), ['heldout4']);
+});
+
+// Regression floors on the in-sample sets: no false positive, and recall at most 0.02 below its value at v6. These
+// guard against regressions; they are not evidence of precision (the tables were written while looking at them).
+const FLOORS = { sample: 0.89, formerSample: 0.81, own: 0.72, heldout1: 0.78, heldout2: 0.80, heldout3: 0.89, probes: 0.90 };
+
+for (const [name, floor] of Object.entries(FLOORS)) {
+  test('regression: ' + name, (t) => {
+    const set = LABELLED.sets[name];
+    assert.equal(set.role, 'regression');
+    // the sample set is scored in the order of the sheet's rows (computed from core/lyrics)
+    const lines = name === 'sample'
+      ? sampleRows().map((row) => set.lines.find((l) => parseLabelled(l).text === row)) : set.lines;
+    const r = score(lines);
+    t.diagnostic(`${name}: ${lines.length} lines, TP ${r.tp}, FP ${r.fp}, FN ${r.fn}, precision ${pct(r.precision)}, recall ${pct(r.recall)}`);
+    assert.equal(r.fp, 0, 'false positives in ' + r.wrong.join(' / '));
+    assert.ok(r.recall >= floor, name + ' recall ' + r.recall + ' < ' + floor);
+  });
+}
+
+// The held-out gate: a set written after the tagger was frozen and never used for tuning. The target is the release
+// target (≥ 97 % precision), not 100 %, so a later tagger change is not pushed into overfitting it.
+test('held-out gate: heldout4 precision ≥ 0.97 and recall ≥ 0.85', (t) => {
+  const set = LABELLED.sets.heldout4;
+  assert.equal(set.role, 'heldout');
+  assert.ok(set.lines.length >= 100);
+  const r = score(set.lines);
+  t.diagnostic(`heldout4: ${set.lines.length} lines, TP ${r.tp}, FP ${r.fp}, FN ${r.fn}, precision ${pct(r.precision)}, recall ${pct(r.recall)}`);
+  assert.ok(r.precision >= 0.97, 'precision ' + r.precision + ': ' + r.wrong.join(' / '));
+  assert.ok(r.recall >= 0.85, 'recall ' + r.recall);
+});
+
+// The release gate: at least 100 lines written and labelled by someone other than the tagger's author and never used
+// for tuning, as { "lines": [...] } in the notation above. Pending (a todo that fails) until the file exists.
+const INDEPENDENT = path.join(FIXTURES, 'kumi_independent.json');
+const hasIndependent = fs.existsSync(INDEPENDENT);
+test('release gate: precision ≥ 0.97 on an independent labelled set', {
+  todo: hasIndependent ? false : 'tests/fixtures/kumi_independent.json: 100+ lines labelled by someone other than the tagger\'s author',
+}, (t) => {
+  assert.ok(hasIndependent, 'tests/fixtures/kumi_independent.json is missing');
+  const lines = JSON.parse(fs.readFileSync(INDEPENDENT, 'utf8')).lines;
+  assert.ok(Array.isArray(lines) && lines.length >= 100, 'at least 100 lines');
+  const r = score(lines);
+  t.diagnostic(`independent: ${lines.length} lines, TP ${r.tp}, FP ${r.fp}, FN ${r.fn}, precision ${pct(r.precision)}, recall ${pct(r.recall)}`);
+  assert.ok(r.precision >= 0.97, 'precision ' + r.precision + ': ' + r.wrong.join(' / '));
+});
+
+// ---- T2: heads --------------------------------------------------------------------------------------------------------
+
+// A cut as the marks see it: 【x】 a head, (x) a particle.
+function marked(text, head, lang = 'ja') {
+  const m = KU.marks(text, lang, head);
+  let s = '';
+  for (let i = 0; i < m.u.n; i++) s += m.heads[i] ? '【' + m.u.gs[i] + '】' : m.part[i] ? '(' + m.u.gs[i] + ')' : m.u.gs[i];
+  return s;
+}
+
+// The cuts of the sample sheet, each once, in order.
+function sampleCuts() {
+  const cuts = [];
+  for (const src of LY.SAMPLE_JA.split('\n')) {
+    const r = LY.parseRow(src, 'ja');
+    if (r.kind !== 'lyric') continue;
+    for (const [a, b] of r.pieces) if (!cuts.includes(r.text.slice(a, b))) cuts.push(r.text.slice(a, b));
+  }
+  return cuts;
+}
+
+// Generated by running KU.marks on the sample cuts and reviewed against DESIGN_2_2 §1 (T2.4); never written by hand.
+const SAMPLE_HEADS = {
+  line: [
+    '【始】発(の)ホーム(に)', '【白】い息', '【改】札(の)向こうで', '【朝】(が)ほどける', '【ポ】ケット(の)切符(を)', '【そ】っと握って', '【ま】だ名前(の)ない',
+    '【今】日(へ)行く', '【パ】ン(の)匂い(の)', '【角】(を)曲がれば', '【電】線(の)上(で)', '【ツ】バメ(が)鳴いた', '【小】さな声(で)', 'Good morning',
+    '【窓】(に)映った', '【寝】ぐせ(の)僕(も)', '【悪】くないねと', '【笑】ってみせる', '【飛】ばせ', '【紙】ひこうき', '【空】(の)果て(ま)(で)', '【折】り目(の)数だけ',
+    '【強】くなれる', '【向】かい風(で)(も)', '【か】まわないさ', 'Hello', '【ま】だ見ぬ', '【青】い空', '【信】号待ち(の)', '【交】差点(で)',
+    '【昨】日(の)ため息(を)', '【置】いてきた', '【ビ】ル(の)谷間(に)', '【光】(が)落ちて', '【影】ぼうしが', '【背】のび(を)する', '【約】束(の)丘(へ)', '【続】く坂道',
+    '【遠】回りしても', '【た】どり着ける', 'Fly high', '【ど】こ(ま)(で)(も)', '【ほ】どけた靴ひも(を)', '【結】び直して', '【明】日(の)僕(へ)',
+    '【手】紙(を)書こう', '【始】発(の)ベル(が)', '【鳴】り終わる(ま)(で)',
+  ],
+  phrase: [
+    '【始】発(の)【ホ】ーム(に)', '【白】い息', '【改】札(の)【向】こうで', '【朝】(が)ほどける', '【ポ】ケット(の)【切】符(を)', '【そ】っと【握】って',
+    '【ま】だ名前(の)ない', '【今】日(へ)【行】く', '【パ】ン(の)【匂】い(の)', '【角】(を)【曲】がれば', '【電】線(の)【上】(で)', '【ツ】バメ(が)【鳴】いた',
+    '【小】さな【声】(で)', 'Good morning', '【窓】(に)【映】った', '【寝】ぐせ(の)【僕】(も)', '【悪】くないねと', '【笑】ってみせる', '【飛】ばせ',
+    '【紙】ひこうき', '【空】(の)【果】て(ま)(で)', '【折】り目(の)【数】だけ', '【強】くなれる', '【向】かい風(で)(も)', '【か】まわないさ', 'Hello', '【ま】だ見ぬ',
+    '【青】い空', '【信】号待ち(の)', '【交】差点(で)', '【昨】日(の)ため息(を)', '【置】いてきた', '【ビ】ル(の)【谷】間(に)', '【光】(が)【落】ちて', '【影】ぼうしが',
+    '【背】のび(を)する', '【約】束(の)【丘】(へ)', '【続】く坂道', '【遠】回りしても', '【た】どり着ける', 'Fly high', '【ど】こ(ま)(で)(も)',
+    '【ほ】どけた靴ひも(を)', '【結】び直して', '【明】日(の)【僕】(へ)', '【手】紙(を)【書】こう', '【始】発(の)【ベ】ル(が)', '【鳴】り終わる(ま)(で)',
+  ],
+};
+
+test('heads on the sample cuts: line, phrase and none', () => {
+  const cuts = sampleCuts();
+  assert.deepEqual(cuts.map((c) => marked(c, 'line')), SAMPLE_HEADS.line);
+  assert.deepEqual(cuts.map((c) => marked(c, 'phrase')), SAMPLE_HEADS.phrase);
+  for (const c of cuts) assert.ok(!Array.from(KU.marks(c, 'ja', 'none').heads).some(Boolean), c);
+  // 'none' keeps the particles: only the heads go
+  assert.equal(marked('始発のホームに', 'none'), '始発(の)ホーム(に)');
+});
+
+test('heads: brackets skipped, hiragana at the line start only, too-short cuts and non-Japanese get none', () => {
+  // the eye enters the line at its first character, whatever its script; opening brackets (and spaces) are skipped
+  assert.equal(marked('まだ名前のない', 'line'), '【ま】だ名前(の)ない');
+  assert.equal(marked('「始まり」の朝', 'line'), '「【始】まり」(の)朝');
+  assert.equal(marked('『 夢の中へ』', 'line'), '『 【夢】(の)中(へ)』');
+  assert.equal(marked('（ホーム）', 'line'), '（【ホ】ーム）');
+  // no head at a Latin, digit, punctuation, ー or small-kana start
+  for (const text of ['Hello世界', '12月の空', '…だね', 'ーっとね', 'っていうか', '！いこう']) {
+    assert.ok(!Array.from(KU.marks(text, 'ja', 'line').heads).some(Boolean), text);
+  }
+  // MIN_HEAD_CONTENT content graphemes (spaces do not count)
+  assert.equal(KU.MIN_HEAD_CONTENT, 3);
+  assert.equal(marked('空に', 'line'), '空(に)');
+  assert.equal(marked('き み', 'line'), 'き み');
+  assert.equal(marked('夜空に', 'line'), '【夜】空(に)');
+  // 言葉の頭 grows kanji and katakana phrase starts, never a hiragana one (な of ない) nor a particle
+  assert.equal(marked('まだ名前のない', 'phrase'), '【ま】だ名前(の)ない');
+  assert.equal(marked('始発のホームに', 'phrase'), '【始】発(の)【ホ】ーム(に)');
+  // only Japanese cuts have heads; an unknown head setting reads as 'line'
+  for (const lang of ['en', 'zhHans', 'ko']) assert.ok(!Array.from(KU.marks('始発のホームに', lang, 'phrase').heads).some(Boolean), lang);
+  assert.equal(marked('始発のホームに', 'bogus'), '【始】発(の)ホーム(に)');
+  assert.ok(Object.isFrozen(KU.marks('始発のホームに', 'ja', 'line')));
+  assert.equal(KU.marks('始発のホームに', 'ja', 'line').part, KU.partsOf('始発のホームに', 'ja').part, 'one tagging per cut text');
+});
+
+// ---- T2: sizes and roles in apply -------------------------------------------------------------------------------------
+
+const ks = (r) => Array.from(r.k, (v) => Math.round(v * 1e9) / 1e9);
+
+test('T2 apply: particles 1 − 0.36 j and heads 1 + 0.40 j, roles 1 and 2; emphasis: product for particles, max for heads', () => {
+  let r = applied({ jump: 0.5 }, '始発のホームに');
+  assert.deepEqual(ks(r), [1.2, 1, 0.82, 1, 1, 1, 0.82]);
+  assert.deepEqual(Array.from(r.role), [2, 0, 1, 0, 0, 0, 1]);
+  assert.deepEqual(Array.from(r.cap, (c) => c === Infinity), [true, true, true, true, true, true, true], 'T2 alone trims nothing');
+  assert.equal(r.gap, null);
+  r = applied({ jump: 1 }, '始発のホームに');
+  assert.deepEqual(ks(r), [1.4, 1, 0.64, 1, 1, 1, 0.64]);
+  assert.deepEqual(KU.JUMP, { small: 0.36, big: 0.40 });
+  // a stacked particle shrinks as one: には
+  r = applied({ jump: 0.5 }, '君にはない');
+  assert.deepEqual(ks(r), [1.2, 0.82, 0.82, 1, 1]);
+  // emphasis (1.15): a particle inside it shrinks relative to it; a head takes the larger size, never the product
+  r = applied({ jump: 0.5 }, '始発のホームに', { emph: [0, 1, 2] });
+  assert.deepEqual(ks(r), [1.2, 1.15, 0.943, 1, 1, 1, 0.82]);
+  r = applied({ jump: 0.25 }, '始発のホームに', { emph: [0] });
+  assert.deepEqual(ks(r).slice(0, 1), [1.15], 'max(1.15, 1.10)');
+  // 言葉の頭
+  r = applied({ jump: 0.5, head: 'phrase' }, '始発のホームに');
+  assert.deepEqual(Array.from(r.role), [2, 0, 1, 2, 0, 0, 1]);
+  r = applied({ jump: 0.5, head: 'none' }, '始発のホームに');
+  assert.deepEqual(Array.from(r.role), [0, 0, 1, 0, 0, 0, 1]);
+});
+
+test('T2 apply: read on the cut text; own-text runs and non-Japanese runs get none', () => {
+  // a run cut from the line: に is a particle there, ホ is no head (the cut's head is 始, in the other run)
+  let r = applied({ jump: 0.5 }, 'ホームに', { cut: '始発のホームに', base: 3 });
+  assert.deepEqual(ks(r), [1, 1, 1, 0.82]);
+  assert.deepEqual(Array.from(r.role), [0, 0, 0, 1]);
+  r = applied({ jump: 0.5 }, '始発の', { cut: '始発のホームに', base: 0 });
+  assert.deepEqual(Array.from(r.role), [2, 0, 1]);
+  // tagged alone, 「のホ」 has no particle (nothing comes before の); cut from the line, の is the particle it is there
+  assert.deepEqual(KU.particles('のホ', 'ja'), []);
+  r = applied({ jump: 0.5 }, 'のホ', { cut: '始発のホームに', base: 2 });
+  assert.deepEqual(Array.from(r.role), [1, 0]);
+  // own text (notes, labels, title cards): never T2, whatever the cut text, even one with the same or related words
+  for (const [str, cut] of [['始発のホームに', '夜'], ['始発のホームに', '始発のホームに'], ['ホームに', '始発のホームに']]) {
+    r = applied({ jump: 0.5 }, str, { cut, own: true });
+    assert.ok(ks(r).every((v) => v === 1), str + ' / ' + cut);
+    assert.ok(Array.from(r.role).every((v) => v === 0), str + ' / ' + cut);
+  }
+  // Japanese only
+  for (const lang of ['en', 'zhHans', 'ko']) {
+    r = applied({ jump: 0.5 }, '始発のホームに', { lang });
+    assert.ok(Array.from(r.role).every((v) => v === 0), lang);
+  }
+  // a Latin word keeps its T3 size and role; T2 never touches it
+  r = applied({ jump: 0.5, latin: 0.5 }, '小さな声でGood');
+  assert.deepEqual(ks(r), [1.2, 1, 1, 1, 0.82, 1.1, 1.1, 1.1, 1.1]);
+  assert.deepEqual(Array.from(r.role), [2, 0, 0, 0, 1, 3, 3, 3, 3]);
+});
+
 test('memos: results are equal after the memos are cleared (pure caches)', () => {
   const texts = ['きみのこえがきこえた', '始発のホームに白い息', '小さな声でGood morning', 'Good morning'];
-  const first = texts.map((t) => [Array.from(KU.partsOf(t, 'ja').part), KU.hasCjk(t), caps(applied({ kana: 0.7, latin: 0.5 }, t))]);
+  const all = { kana: 0.7, jump: 0.5, latin: 0.5, head: 'phrase' };
+  const snap = (t) => [Array.from(KU.partsOf(t, 'ja').part), Array.from(KU.marks(t, 'ja', 'phrase').heads), KU.hasCjk(t),
+    caps(applied(all, t)), ks(applied(all, t)), Array.from(applied(all, t).role)];
+  const first = texts.map(snap);
   KU.clearMemos();
-  const again = texts.map((t) => [Array.from(KU.partsOf(t, 'ja').part), KU.hasCjk(t), caps(applied({ kana: 0.7, latin: 0.5 }, t))]);
+  const again = texts.map(snap);
   assert.deepEqual(again, first);
+  // …and in the other order, from cold memos
+  KU.clearMemos();
+  assert.deepEqual(texts.slice().reverse().map(snap).reverse(), first);
   // a memo that fills up is cleared and keeps answering
   for (let i = 0; i < KU.MEMO_MAX + 5; i++) KU.partsOf('きみの' + i, 'ja');
   assert.deepEqual(Array.from(KU.partsOf('きみのこえが', 'ja').part), [0, 0, 1, 0, 0, 1]);

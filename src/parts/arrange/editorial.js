@@ -199,6 +199,10 @@ MV.def('parts/arrange/editorial', ['parts/kit'], (K) => {
     return { head: [0, k], sub: { span: [k, s.str.length] } };
   }
 
+  // 文字組み (DESIGN_2_2 §1): the head and the sub-line are already a size contrast, so they take no particle and head
+  // sizes; kana tightening and Latin stay.
+  const NO_JUMP = Object.freeze({ jump: 0 });
+
   function magazineBuild(env, p) {
     const { D, cut, sb, text, textStyle } = env;
     const root = rootOf(env, p);
@@ -223,7 +227,7 @@ MV.def('parts/arrange/editorial', ['parts/kit'], (K) => {
       : p.place === 'lower' ? safe.y + safe.h * 0.94 - total + kick : D.cy - total / 2 + kick;
     const head = sb.text(Object.assign({ parent: root.node, orient: 'h', size: em, box: { x: left, y: top, w: colW, h: headH },
       leading: 1.12, align: 'start', valign: 'start', maxLines: fit.lines, breakAt: 'phrase', fit: 'shrink' },
-    s.own ? { span: split.head } : { text: headStr }));
+    s.own ? { span: split.head } : { text: headStr }, K.kumiFor(env, NO_JUMP)));
     const hb = localBounds(sb, head.node, root);
     const ruleY = hb.y + hb.h + em * 0.26;
     const weight = clamp(em * 0.035, 2, 7);
@@ -241,7 +245,7 @@ MV.def('parts/arrange/editorial', ['parts/kit'], (K) => {
       const spec = split.sub.text ? { text: split.sub.text, face: NOTE_FACE, style: 'plain' }
         : { span: split.sub.span, face: 'body' };
       runs.push(sb.text(Object.assign({ parent: root.node, orient: 'h', size: subEm, box, leading: 1.5, align: 'start',
-        valign: 'start', maxLines: 3, breakAt: 'phrase', fit: 'shrink' }, spec)));
+        valign: 'start', maxLines: 3, breakAt: 'phrase', fit: 'shrink' }, spec, K.kumiFor(env, NO_JUMP))));
     }
     return finish(env, root, runs);
   }

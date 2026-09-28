@@ -191,12 +191,16 @@ MV.def('parts/arrange/core', ['parts/kit'], (K) => {
     return best;
   }
 
+  // 文字組み (DESIGN_2_2 §1): giant and whisper are already a size contrast, so their runs (and the pre-measures, which
+  // must lay out what is committed) take no particle and head sizes; kana tightening and Latin stay.
+  const NO_JUMP = Object.freeze({ jump: 0 });
+
   // The giant's natural width at size em (measured the way the scene will lay it out).
   function giantWidth(env, split, em, room) {
     const { cut, text, textStyle } = env;
     const lay = text.layout({ span: split.giant, orient: 'h', face: textStyle.face, style: textStyle.style, lang: cut.lang,
       size: em, emphScale: 1, box: { x: 0, y: 0, w: room, h: em * 1.3 }, align: 'start', valign: 'center', maxLines: 1,
-      breakAt: 'none', fit: 'shrink' }, cut.text);
+      breakAt: 'none', fit: 'shrink', ...K.kumiFor(env, NO_JUMP) }, cut.text);
     return Math.min(room, lay.box.w);
   }
 
@@ -244,12 +248,13 @@ MV.def('parts/arrange/core', ['parts/kit'], (K) => {
 
   function giantRun(g, box, align) {
     return g.env.sb.text({ parent: g.root.node, span: g.split.giant, orient: g.env.orient === 'v' ? 'v' : 'h', size: g.gEm,
-      emphScale: 1, box, align, valign: 'center', maxLines: 1, breakAt: 'none', fit: 'shrink' });
+      emphScale: 1, box, align, valign: 'center', maxLines: 1, breakAt: 'none', fit: 'shrink',
+      ...K.kumiFor(g.env, NO_JUMP) });
   }
 
   function whisperRun(g, span, box, align, valign) {
     return g.env.sb.text({ parent: g.root.node, span, orient: g.env.orient === 'v' ? 'v' : 'h', size: g.wEm, box, align,
-      valign, maxLines: 2, breakAt: 'phrase', fit: 'shrink', leading: 1.25 });
+      valign, maxLines: 2, breakAt: 'phrase', fit: 'shrink', leading: 1.25, ...K.kumiFor(g.env, NO_JUMP) });
   }
 
   // Vertical: the giant column in the middle; the words before it in a thin column to its right (read first), the
@@ -321,7 +326,7 @@ MV.def('parts/arrange/core', ['parts/kit'], (K) => {
     const { cut, text, textStyle, orient } = g.env;
     const lay = text.layout({ span, orient: orient === 'v' ? 'v' : 'h', face: textStyle.face, style: textStyle.style,
       lang: cut.lang, size: g.wEm, box: { x: 0, y: 0, w, h }, align: 'start', valign: 'start', maxLines: 2,
-      breakAt: 'phrase', fit: 'shrink', leading: 1.25 }, cut.text);
+      breakAt: 'phrase', fit: 'shrink', leading: 1.25, ...K.kumiFor(g.env, NO_JUMP) }, cut.text);
     return lay.box.w;
   }
 

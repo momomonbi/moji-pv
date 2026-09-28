@@ -56,6 +56,29 @@ MV.def('engine/text/kumi', ['core/script', 'engine/text/breaker'], (S, B) => {
     return f * (Number(face.weight) >= HEAVY_WEIGHT ? WEIGHT_DAMP : 1);
   }
 
+  // ---- T2 助詞を小さく・頭の字を大きく ---------------------------------------------------------------------------
+
+  // Size factors at strength j: particles 1 − small × j, heads 1 + big × j (0.82 / 1.20 at 0.5; 0.64 / 1.40 at 1).
+  const JUMP = Object.freeze({ small: 0.36, big: 0.40 });
+  // Opening brackets and quotes before a cut's first character: skipped when looking for the line head (「始まり」 → 始).
+  const OPENERS = '「『（【〔〈《"\'(［｛“‘';
+  // A cut with fewer content (non-space) graphemes gets no head: a two-character cut has nothing to lead.
+  const MIN_HEAD_CONTENT = 3;
+  const OPENER_SET = new Set(OPENERS);
+
+  // A line head: the first character where the eye enters the line, whatever its script (kanji, katakana, hiragana),
+  // one cell wide, not ー, not small kana and not a particle.
+  function lineHeadable(u, i, part) {
+    const c = u.cls[i];
+    return (c === 'han' || c === 'kata' || c === 'hira') && u.cells[i] === 1 && u.gs[i] !== 'ー' && !part[i];
+  }
+  // A phrase head inside the line: kanji or katakana only (a hiragana phrase start is mostly a verb tail or a function
+  // word such as ない or して, and enlarging it reads as a mistake).
+  function phraseHeadable(u, i, part) {
+    const c = u.cls[i];
+    return (c === 'han' || c === 'kata') && u.cells[i] === 1 && u.gs[i] !== 'ー' && !part[i];
+  }
+
   // ---- T3 英字を少し大きく・和文との間をあける -------------------------------------------------------------------
 
   // Growth of a Latin word at strength 1, by the run's Latin family (faces with a small x-height grow more); and the
@@ -221,6 +244,33 @@ MV.def('engine/text/kumi', ['core/script', 'engine/text/breaker'], (S, B) => {
     return out;
   }
 
+  const marksMemo = new Map();
+  // marks(text, lang, head) → { u, part, heads }: partsOf(text, lang) plus the heads of the text as one cut (T2):
+  //   'line'   the cut's first content grapheme after any opening brackets, when lineHeadable
+  //   'phrase' 'line', plus the first grapheme of every later phrase unit (breaker.phraseUnits) when phraseHeadable
+  //   'none'   no heads
+  // No heads unless lang is 'ja' and the cut holds at least MIN_HEAD_CONTENT content graphemes. Shared, read-only.
+  function marks(text, lang, head) {
+    const s = String(text === undefined || text === null ? '' : text);
+    const h = HEADS.includes(head) ? head : 'line';
+    const key = lang + '|' + h + '|' + s;
+    const hit = marksMemo.get(key);
+    if (hit) return hit;
+    const { u, part } = partsOf(s, lang);
+    const heads = new Uint8Array(u.n);
+    let content = 0;
+    for (let i = 0; i < u.n; i++) if (!u.space[i]) content++;
+    if (lang === 'ja' && h !== 'none' && content >= MIN_HEAD_CONTENT) {
+      let first = u.next[0];
+      while (first < u.n && OPENER_SET.has(u.gs[first])) first = u.next[first + 1];
+      if (first < u.n && lineHeadable(u, first, part)) heads[first] = 1;
+      if (h === 'phrase') {
+        for (const [a] of B.phraseUnits(u, 'ja')) if (a > first && phraseHeadable(u, a, part)) heads[a] = 1;
+      }
+    }
+    return remember(marksMemo, key, Object.freeze({ u, part, heads }));
+  }
+
   const cjkMemo = new Map();
   // hasCjk(text) → whether the text holds a han, kana or hangul grapheme (the T3 gate, read on the cut text).
   function hasCjk(text) {
@@ -312,6 +362,22 @@ MV.def('engine/text/kumi', ['core/script', 'engine/text/breaker'], (S, B) => {
     return trim;
   }
 
+  // T2: particles shrink and heads grow, read on the whole cut text (so a particle at a run boundary still sees its
+  // neighbours, and a run cut from the line is set like the same graphemes in a whole-line run). k holds the emphasis
+  // scale (or 1) on entry: a particle inside 強調 shrinks relative to it, and a head takes the larger of the two, never
+  // their product (効果を重ねすぎない).
+  function jumpSizes(kumi, o, role) {
+    const { u, k } = o;
+    const m = marks(o.text, 'ja', kumi.head);
+    const small = 1 - JUMP.small * kumi.jump, big = 1 + JUMP.big * kumi.jump;
+    for (let i = 0; i < u.n; i++) {
+      const j = indexAt(m.u.offs, m.u.n, o.base + u.offs[i]);
+      if (j < 0) continue;
+      if (m.part[j]) { k[i] *= small; role[i] = ROLE.particle; }
+      else if (m.heads[j]) { if (k[i] < big) k[i] = big; role[i] = ROLE.head; }
+    }
+  }
+
   // T3: Latin words (maximal runs on the Latin face holding a letter, without their edge spaces) grow to at least
   // `grow` and get LATIN_GAP × strength of space where they meet CJK. Vertical tcy cells keep their size.
   function latinWords(x, o, role, gap) {
@@ -341,12 +407,12 @@ MV.def('engine/text/kumi', ['core/script', 'engine/text/breaker'], (S, B) => {
   }
 
   // apply(kumi, o) → { cap, gap, role }, for engine/text/layout.prepare. kumi: a normalized RunSpec.kumi. o = { u, lang,
-  // font (layout font indices), vert (vert.classify or null), mark (emphasis marks), k (size factors, mutated here),
-  // text (the cut text), str, base (the run's text and its offset in the cut text), own (the run has its own text),
-  // emphScale, face (the run's script FontRef), latin (its Latin FontRef) }.
+  // font (layout font indices), vert (vert.classify or null), mark (emphasis marks), k (size factors: the emphasis
+  // scale or 1 on entry; T2 and T3 write theirs here), text (the cut text), str, base (the run's text and its offset in
+  // the cut text), own (the run has its own text), emphScale, face (the run's script FontRef), latin (its Latin FontRef) }.
   //   cap[i]  the most grapheme i may advance, in em before its size factor (Infinity: no limit)
   //   gap     em added before grapheme i when it is not the first of its line, or null when none
-  //   role    RunLayout.kumi (ROLE per grapheme)
+  //   role    RunLayout.kumi (ROLE per grapheme: particle and head from T2, latin from T3)
   function apply(kumi, o) {
     const n = o.u.n;
     const cap = new Float64Array(n).fill(Infinity);
@@ -356,6 +422,7 @@ MV.def('engine/text/kumi', ['core/script', 'engine/text/breaker'], (S, B) => {
       const trim = kanaTrims(kumi.kana * faceDamp(o.face), o);
       for (let i = 0; i < n; i++) if (trim[i] > 0) cap[i] = 1 - trim[i];
     }
+    if (kumi.jump > 0 && o.lang === 'ja' && !o.own) jumpSizes(kumi, o, role);   // own-text runs never get T2
     if (kumi.latin > 0 && o.lang !== 'en' && hasCjk(sourceOf(o).text)) {
       const g = new Float64Array(n);
       if (latinWords(kumi.latin, o, role, g)) gap = g;
@@ -364,11 +431,12 @@ MV.def('engine/text/kumi', ['core/script', 'engine/text/breaker'], (S, B) => {
   }
 
   // Test hook: empties the memos (results must not depend on them).
-  function clearMemos() { partsMemo.clear(); cjkMemo.clear(); }
+  function clearMemos() { partsMemo.clear(); marksMemo.clear(); cjkMemo.clear(); }
 
   return {
-    normalize, key, withCut, particleMarks, partsOf, particles, hasCjk, tier, apply, clearMemos,
-    HEADS, ROLE, TRIM, WIDE_KANA, NARROW_KANA, FLAVOR_DAMP, HEAVY_WEIGHT, WEIGHT_DAMP, BOUNDARY, LATIN_GROW, LATIN_GAP,
+    normalize, key, withCut, particleMarks, partsOf, particles, marks, hasCjk, tier, apply, clearMemos,
+    HEADS, ROLE, TRIM, WIDE_KANA, NARROW_KANA, FLAVOR_DAMP, HEAVY_WEIGHT, WEIGHT_DAMP, BOUNDARY, JUMP, OPENERS,
+    MIN_HEAD_CONTENT, LATIN_GROW, LATIN_GAP,
     P1, P2, STACK, VETO_NEXT, VETO_NEXT2, VETO_PAIR, VETO_TRIPLE, KANA_WORDS, LEAD_WORDS, OKURI_KANA, OKURI_FREE,
     OKURI_EDGE, CLOSERS, MEMO_MAX,
   };

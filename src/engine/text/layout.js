@@ -72,7 +72,8 @@ MV.def('engine/text/layout', ['core/script', 'engine/text/vert', 'engine/text/br
     const vert = spec.orient === 'v' ? V.classify(u.gs) : null;
     const glue = glueOf(vert, n);
     const nat = naturalAdvances(u, font, refs, measurer, vert);
-    // 文字組み: kana cells capped below 1 em (T1), Latin words grown through k and spaced from CJK by gap (T3)
+    // 文字組み: kana cells capped below 1 em (T1), particles and heads sized through k (T2), Latin words grown through k
+    // and spaced from CJK by gap (T3)
     const ku = spec.kumi ? KU.apply(spec.kumi, { u, lang, font, vert, mark, k, text, str, base,
       own: spec.text !== undefined && spec.text !== null, emphScale: spec.emphScale, face: refs[0], latin: refs[1] }) : null;
     const along = new Float64Array(n);

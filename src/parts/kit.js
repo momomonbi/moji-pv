@@ -382,6 +382,14 @@ MV.def('parts/kit', ['core/num', 'core/noise', 'core/ease', 'core/curve', 'core/
   function rangeOf(rng, lo, hi) { return rng.range(lo, hi); }
   function ease(name) { return E.get(name); }
 
+  // --- 文字組み (DESIGN_2_2 §1) ----------------------------------------------------------------------------------------
+
+  // kumiFor(env, over) → { kumi: over } when the cut is set with 文字組み (env.text.kumi, DESIGN_2_2 §1), else {}: the
+  // RunSpec fields of a part that opts out of some of it, spread into its specs. `over` is a partial kumi ({ jump: 0 }:
+  // no particle and head sizes, where the part contrasts sizes itself) or null (plain text, such as a grid pitch). A cut
+  // without typesetting gets nothing, so its RunSpecs stay exactly as before.
+  function kumiFor(env, over) { return env && env.text && env.text.kumi ? { kumi: over } : {}; }
+
   // --- speed curves and framing (DESIGN_2_1 §3.11) -------------------------------------------------------------------
 
   // curve(value) → (u) => number: the position curve of any Curve (memoized; call it at build or definition time, never
@@ -598,6 +606,6 @@ MV.def('parts/kit', ['core/num', 'core/noise', 'core/ease', 'core/curve', 'core/
     PH: BH.PH, ORDERS: SCH.ORDERS, EASES: E.EASES, ease, staggerOf: STG.staggerOf, pivots: STG.pivots,
     shape, math, color, pickOf, rangeOf, KitError,
     curve, warp, CURVES: CV.PRESET_KEYS, warped: BH.warped, aimBox, frameBox,
-    media, mediaParams, MEDIA: MEDIA_KIT, runKenBurns, depthCam,
+    media, mediaParams, MEDIA: MEDIA_KIT, runKenBurns, depthCam, kumiFor,
   };
 });

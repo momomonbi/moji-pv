@@ -31,6 +31,10 @@ MV.def('parts/arrange/scatter', ['parts/kit'], (K) => {
     return s.own ? { span: range } : { text: s.str.slice(range[0], range[1]) };
   }
 
+  // 文字組み (DESIGN_2_2 §1) opt-outs: confetti words already take random per-word sizes (no particle and head sizes on
+  // top), and grid cells keep the grid pitch (plain text).
+  const NO_JUMP = Object.freeze({ jump: 0 });
+
   function rootOf(env, p) {
     const shift = { x: (p.offsetX || 0) * env.D.w, y: (p.offsetY || 0) * env.D.h };
     return { shift, node: env.sb.group({ x: shift.x, y: shift.y }) };
@@ -205,7 +209,7 @@ MV.def('parts/arrange/scatter', ['parts/kit'], (K) => {
         const cy = (v ? a : safe.y + c) + it.jy * p.spread * Math.max(0, ch - tb.h) / 2;
         runs.push(sb.text(Object.assign({ parent: root.node, orient: v ? 'v' : 'h', size, rot,
           box: { x: cx - w / 2, y: cy - h / 2, w, h }, align: 'center', valign: 'center', maxLines: 1,
-          breakAt: 'none', fit: 'shrink' }, part(s, it.r))));
+          breakAt: 'none', fit: 'shrink' }, part(s, it.r), K.kumiFor(env, NO_JUMP))));
         pen += len + WORD_GAP * em;
       }
     }
@@ -680,7 +684,8 @@ MV.def('parts/arrange/scatter', ['parts/kit'], (K) => {
       const inset = graphemes(s.str, r[0], r[1]).length > 1 ? g.cell * 0.1 : 0;
       runs.push(env.sb.text(Object.assign({ parent: root.node, orient: v ? 'v' : 'h', size: g.em,
         box: { x: g.x0 + col * g.cell + inset, y: g.y0 + row * g.cell + inset, w: g.cell - 2 * inset, h: g.cell - 2 * inset },
-        align: 'center', valign: 'center', emphScale: 1, maxLines: 1, breakAt: 'none', fit: 'shrink' }, part(s, r))));
+        align: 'center', valign: 'center', emphScale: 1, maxLines: 1, breakAt: 'none', fit: 'shrink' }, part(s, r),
+      K.kumiFor(env, null))));
     });
     return runs;
   }

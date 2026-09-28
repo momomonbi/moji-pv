@@ -1,4 +1,4 @@
-/* 文字PVメーカー v2 — original work. Tests for 文字組み in engine/text/layout: absent means identical, the worked numbers of T1 and T3 (horizontal and vertical), breaking with gaps and the fit-consistency sweep (DESIGN_2_2 §1). */
+/* 文字PVメーカー v2 — original work. Tests for 文字組み in engine/text/layout: absent means identical, the worked numbers of T1, T2 and T3 (horizontal and vertical), runs split from one cut, breaking with gaps and the fit-consistency sweep (DESIGN_2_2 §1). */
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -110,6 +110,77 @@ test('T1: never wider than measured (proportional kana), and emphasis multiplies
   approx(r.w[0], 86, 1e-3);
 });
 
+// ---- T2 ---------------------------------------------------------------------------------------------------------
+
+const ems = (r) => Array.from(r.em, r2);
+
+test('T2 worked numbers: 始発のホームに (h and v), a hiragana head, a bracket head, and all three at the defaults', () => {
+  let r = run('始発のホームに', { kumi: { jump: 0.5 } });
+  assert.deepEqual(ems(r), [120, 100, 82, 100, 100, 100, 82]);
+  assert.deepEqual([r2(r.x[0]), r2(r.x[2]), r2(r.x[6])], [60, 261, 643]);
+  approx(r.box.w, 684, 1e-3);
+  approx(r.box.h, 120, 1e-3);                                          // the block is as tall as the head
+  assert.equal(run('始発のホームに', {}).box.w, 700);
+  assert.deepEqual(Array.from(r.kumi), [2, 0, 1, 0, 0, 0, 1]);
+  // horizontally every glyph sits on the shared baseline: the head rises above the line, the particles sit on it
+  assert.ok(r.y[0] < r.y[1] && r.y[1] < r.y[2], Array.from(r.y).join(' '));
+  approx(r.y[1], r.y[3], 1e-6);
+  const v = run('始発のホームに', { kumi: { jump: 0.5 }, orient: 'v' });
+  assert.deepEqual(along(v, true), along(r));
+  assert.deepEqual(size(v, true), size(r));
+  assert.deepEqual(ems(v), ems(r));
+  approx(v.box.w, 120, 1e-3);                                          // the column is as wide as its largest glyph
+  assert.ok(Array.from(v.x).every((x) => x === v.x[0]), 'vertical glyphs are centred in the column');
+  r = run('まだ名前のない', { kumi: { jump: 0.5 } });
+  assert.deepEqual(ems(r), [120, 100, 100, 100, 82, 100, 100]);        // a hiragana line head
+  r = run('「始まり」の朝', { kumi: { jump: 0.5 } });
+  assert.deepEqual(ems(r), [100, 120, 100, 100, 100, 82, 100]);        // the head after the opening bracket
+  approx(r.x[1], 160, 1e-3);
+  // all three on at the new-work defaults: の is a seam cell times the particle factor (0.965 × 0.82)
+  r = run('始発のホームに', { kumi: { kana: 0.7, jump: 0.5, latin: 0.5 } });
+  assert.deepEqual([r2(r.w[2]), r2(r.w[6])], [79.13, 73.96]);
+  assert.deepEqual(ems(r), [120, 100, 82, 100, 100, 100, 82]);
+  approx(r.box.w, 652.79, 1e-2);
+  // at 100 % in a box of exactly 1.3 em the head makes the run shrink (about 7 %); at the default it still fits
+  const tight = { box: { x: 0, y: 0, w: 2000, h: 130 }, fit: 'shrink', maxLines: 1 };
+  r = run('始発のホームに', { ...tight, kumi: { jump: 1 } });
+  assert.ok(!r.overfull && r.size < 100 && r.size > 92, 'size ' + r.size);
+  assert.ok(r.box.h <= 130 + 1e-4);
+  assert.equal(run('始発のホームに', { ...tight, kumi: { jump: 0.5 } }).size, 100);
+});
+
+test('T2: an emphasized head takes the larger size, an emphasized particle the product; RunLayout.emph unchanged', () => {
+  const plain = run('始発のホームに', { emph: [[0, 3]], emphScale: 1.15 });
+  const r = run('始発のホームに', { kumi: { jump: 0.5 }, emph: [[0, 3]], emphScale: 1.15 });
+  assert.deepEqual(ems(r), [120, 115, 94.3, 100, 100, 100, 82]);
+  assert.deepEqual(Array.from(r.emph), Array.from(plain.emph));
+  assert.deepEqual(Array.from(r.emph), [1, 1, 1, 0, 0, 0, 0]);
+  const big = run('始発のホームに', { kumi: { jump: 0.5 }, emph: [[0, 1]], emphScale: 1.3 });
+  assert.deepEqual(ems(big).slice(0, 1), [130], 'max(1.3, 1.2), never 1.3 × 1.2');
+  assert.equal(big.kumi[0], 2);
+});
+
+test('T2: runs split from one cut are set like the whole-line run; own-text runs get none', () => {
+  const cut = '始発のホームに';
+  const whole = run(cut, { kumi: { jump: 0.5 } });
+  const a = run('始発の', { span: [0, 3], kumi: { jump: 0.5 } }, cut);
+  const b = run('ホームに', { span: [3, 7], kumi: { jump: 0.5 } }, cut);
+  assert.deepEqual([...ems(a), ...ems(b)], ems(whole));
+  assert.deepEqual([...a.kumi, ...b.kumi], Array.from(whole.kumi));
+  // the other split: の starts the second run and is still the particle it is in the line
+  const c = run('のホームに', { span: [2, 7], kumi: { jump: 0.5 } }, cut);
+  assert.deepEqual(Array.from(c.kumi), [1, 0, 0, 0, 1]);
+  // a run with its own text (a note, a label, a title card) is never sized by T2, even when it repeats the cut text
+  for (const [text, source] of [[cut, '夜'], [cut, cut], ['ホームに', cut]]) {
+    const own = run(text, { text, kumi: { jump: 0.5 } }, source);
+    assert.ok(Array.from(own.em).every((v) => v === 100), text + ' / ' + source);
+    assert.ok(Array.from(own.kumi).every((v) => v === 0), text + ' / ' + source);
+  }
+  // …and neither is a run that is not Japanese
+  const zh = run(cut, { kumi: { jump: 0.5 }, lang: 'zhHans' });
+  assert.ok(Array.from(zh.em).every((v) => v === 100));
+});
+
 // ---- T3 ---------------------------------------------------------------------------------------------------------
 
 test('T3 worked numbers: 夜明けのStationで (h, v, and broken in two lines without edge gaps)', () => {
@@ -214,7 +285,7 @@ function sampleCuts() {
   return out.concat(['声でGood morning 君', 'Hello, 世界', '夜明けのStationで', '2人でStationへ', 'きみのこえがきこえたよるに']);
 }
 
-test('fit consistency: with every setting at 100 %, a fitted run stays in its box and each line is centred by its width', () => {
+test('fit consistency: with every setting at 100 %, a fitted run stays in its box and each line is centred by its width', (t) => {
   const cuts = sampleCuts();
   assert.equal(cuts.length, 56, 'cuts');
   let seed = 7;
@@ -254,6 +325,7 @@ test('fit consistency: with every setting at 100 %, a fitted run stays in its bo
       }
     }
   }
+  t.diagnostic(`${count} layouts, ${fitted} fitted, worst excess ${worst.toExponential(2)}, worst centring skew ${skew.toExponential(2)}`);
   assert.ok(count >= 6720, 'layouts ' + count);
   assert.ok(fitted > count / 2, 'fitted ' + fitted);
   assert.ok(worst <= 1e-4, 'worst excess ' + worst);
