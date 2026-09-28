@@ -50,6 +50,10 @@ the beat.
   lines around it keep their times.
 - **Flag lines too fast to read** — lines that go by too fast to read get a "!", and the line's details offer fixes such
   as Make the motion quicker and Show it longer (on in new works; switch it in Whole video › Timing).
+- **Draft from the song** (no AI) — the button in step ② finds where the song's voice starts phrases and drafts the start
+  of every automatically timed line. Each line shows Sure / Likely / Unsure and ▶ (listen from there); Preview on the
+  stage tries it on, Apply keeps it (one undo). It is a draft: on songs with clear pauses about 8 in 10 lines land within
+  0.15 s, about half with loud accompaniment. Fix the rest with Re-tap this line only.
 
 ## Export
 

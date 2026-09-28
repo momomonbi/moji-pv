@@ -9321,6 +9321,110 @@ always on build time. Browser: `ui_flows.py` passed every flow but `library`, wh
 redefined at module level (renamed `LAST_TEXT`; `library`, `readcheck`, `retap`, `tap` and `song_step` then pass);
 `ui_layout.py` (584 layouts), `i18n_pages.py` and `csp.py` pass.
 
-<!-- PV22 P5 notes, phase 3 -->
+**What landed (phase 3: S1, docs, visual QA).** `audio/voice` (L1, new; the joint record with 歌ハメ, DESIGN_2_2 §5.2:
+`VC`, `analyze` / `analyzeSync`, `encode`, `decode` memoized by identity, `hasPhrases`, `isRecord`, `candidatesIn`,
+`peaksIn`, `voiced`, `digestActivity`, `fromDigest`); `audio/host/decode` (`loadSong` reads the voice after the tempo
+analysis and puts `voice` in the `song.set` record; `analyzeVoice`); `core/doc` (`ORDER.song += 'voice'`, `ORDER.voice`,
+`checkSong` voice); `core/commands` `song.voice { sha1, voice }` (`'stale'` for another song, null removes);
+`core/types` (`SongVoice`, the command); `core/timing.gapWeights`; `core/draft` (L0, new: `DRAFT`, `CONF`,
+`draftStarts`, `agreement`); `ui/draft` (L7, new: the review panel, try-on, audition, the need-voice / reading states;
+pure `input`, `applyCmd`, `checkedByDefault`, `counts`, `drafted`, `DRAFT_BETA`); `ui/boot` (`app.draft`, `time.draft`,
+`draft.cancel`, `app.readVoice`, the `draft` key mode and activation, the try-on hook, the mode strip, the `goStep` and
+paste guards, `loadProject` ends a draft); `ui/keys` (context `draft`), `ui/view` (`MODES += 'draft'`), `ui/steps`,
+`ui/step_song` (the chip), `ui/timeline` (`COLORS.draft`, ticks), `ui/palette` (`draft.cancel` hidden), `ui/icons`
+(`wave`), `ui/tap` (no session over the review), CSS for the panel. Strings: the §2.6 table of the design plus
+`draft.keys`, `draft.voiceFailed` and `undo.songVoice`. Tests: `voice`, `draft`, `ui_draft` (new), `tests/helpers/song_gen.js`
+(new); cases in `doc`, `commands`, `ui_keys`, `i18n`; the ui_flows flow `draft`. Docs: DESIGN_2_2 §5.2 and the S1 rows
+of §5.5; SPEC §4 and §5; both READMEs; AI_GUIDE (the non-AI draft next to AI timing, ja and en).
+
+**The joint record with P6 (for the integration).** P5 owns `audio/voice` and `doc.song.voice` as DESIGN_2_2 §5.2 (the P5
+design's §2.4.1) specifies: per-bin centred activity, its own band flux (`audio/analyze` unchanged, no `onset.vocal`),
+`act` as the mean of 4 frames, `peaks` as P6 specifies them, and the phrase stream. P6's phase C builds on it: it adds
+`activityEnd(dec, a, b, C)` to `audio/voice` (left out here: its reading belongs to P6's voice-end rule), its 曲の声を読む
+button and palette command on `app.readVoice()` (ui/boot; returns 'done' / 'cancelled' / 'stale' / 'nosong' /
+'failed'), `voiceEnd` / `snap` in `planner/sung`. Both packages define `song.voice` (the same reducer contract) and the
+string `undo.songVoice` (「曲の声を読む」): keep one of each at the merge (`strings.js defines every key once` and the
+command-count test in `commands.test.js`, 34 here, will say so). P6's design reads the voice only on demand; the joint
+contract reads it at import (every song imported by this build can be drafted without the file).
+
+**Deviations from the design (phase 3, and why).**
+
+- `loadSong`'s progress is 0–0.5 for the tempo analysis and 0.5–1 for the voice, not 0.9–1.0: measured in Node the voice
+  pass costs about as much as the analysis (0.5–0.9 s against 0.5–0.8 s per 90 s of 48 kHz stereo), so 0.9–1.0 would
+  hold the bar at 90 % for half the load.
+- The per-bin centring (`SIDE` 1) is kept, but the design's mutation claim did not hold: on the synthetic generator the
+  mid alone (no side subtraction) finds as many phrase starts or more (60 s, seeds 1 / 2: 0.94 / 0.89 against 0.82 / 0.84;
+  loud accompaniment 0.82 / 0.84 against 0.65 / 0.68) because the generator's accompaniment is nearly all centred. What
+  centring is for is a panned instrument: a hard-panned lead playing phrases of its own keeps the voice's recall at 1.00
+  with centring and takes none of the lead's 3 starts, while the mid alone falls to 0.25 and takes all 3. `voice.test.js`
+  tests that instead (the mutation fails it). The release gate on real songs should compare `SIDE` 1 and 0 too.
+- A drafted line the aligner leaves in place (moved < 0.05 s, `kept`) on a found onset (not a filler) whose start is
+  automatic is pinned at apply, and counted in the header and the undo label: left automatic, it would be re-spread
+  between the new pins and could move off the voice. △ rows and kept fillers stay automatic as designed.
+- The try-on is removed while nothing is checked (instead of showing the unchanged work under 「下書きを試写中」).
+- The ② chip has no `data-ctl` (like phase 2's re-tap chip): step ② has five controls with a song and AI on, the
+  layout budget (`ui_layout.py`).
+- `core/draft`'s beat bonus names its fade `BONUS_REACH` 0.07 (the design's inline `min(0.07, period/8)`); the DP reads ln
+  of the gap from a table over whole milliseconds (candidate times are on a 1 ms grid), otherwise it is the design's
+  cost. Results equal the per-pair logarithm on the four synthetic 90 s songs.
+- The speed test's bound is 250 ms (design: 100 ms): on this loaded 4-CPU machine a bare loop over the same 9 M steps
+  takes 100–190 ms (11–21 ns a step, about 2–3 ns idle); the aligner runs at that speed (160–260 ms here, about 40 ms
+  idle). The bound still catches a quadratic inner loop (> 10× slower).
+- The digest source's voiced span comes from the digest's own normalized loudness (`digestActivity`); the design names
+  only the decoded record's.
+- [中止] while the voice is read ends the draft (toast 下書きを中止しました), as the string says; a failed read returns
+  to the need-voice state with 「曲の声を読めませんでした」 (`draft.voiceFailed`, a new key).
+- Any document change during the review re-drafts and says 「歌詞や時刻が変わったので下書きを合わせ直しました」, not only a
+  change that drops rows; the need-voice state comes back when an undo removes the voice record.
+- The panel's heading takes focus when it opens (Space still plays; a focused first checkbox would take Space); the
+  key line 「スペースで再生・←→で1秒移動・Escでやめる」 (`draft.keys`, new) replaces a ? sheet group (the sheet labels
+  `seek.step` as 1コマ移動, wrong for the draft's 1 s).
+- 「音量だけで下書き」 shows only when the song record has a loudness digest.
+- The ui_flows flow loads the synthetic song with `app.loadSong(file)` (as every other song flow does) rather than through
+  ② 's file input, and writes a 16-bit stereo WAV in the page: `audio/wav.encodeWav` mixes to mono, which would remove
+  the side channel the voice pass reads. It runs `song_gen.js` with `page.evaluate` (an inline script would break the
+  page's CSP).
+- `draft.test.js` has a dense-onset case: the random-candidate case never tempted two lines closer than 0.12 s, so the
+  design's "Δ < MIN_GAP allowed" mutation passed it.
+- Visual QA used frame strips of the app's own renderer (`app.engine.renderFrame` on an offscreen canvas, scratch script)
+  rather than `contact_sheet.py`, whose cells are single parts on a sample cut (出そろい is a plan-level timing).
+
+**Measurements (phase 3).** Synthetic mixes (`song_gen.js`), 4 seeds × 90 s: phrase starts found within ±0.15 s — clean
+0.82, loud accompaniment 0.60, long reverb 0.91, short pauses 0.95, voice panned 0.5 0.76, legato 0.03 (the design's
+numbers exactly). Lines within ±0.15 s with `core/timing`'s gap weights at 120 BPM (read rate 6, which equals the
+prototype's weights): 0.79 / 0.56 / 0.93 / 0.86 / 0.58 / 0.38; within ±0.3 s 0.86 / 0.67 / 0.97 / 0.87 / 0.65 / 0.45;
+◎ rows within ±0.15 s 0.85 / 0.62 / 0.97 / 1.00 / 0.67 / 1.00 (4 rows), ○ rows 0.54 / 0.44 / 0.78 / 0.70 / 0.37 / 0.36; no
+row was △. At read rate 7 (no tempo) the loud and off-centre cases drop to 0.47 and 0.50. Per 60 s seed (clean): recall
+0.81–0.84, median error 0.009–0.011 s. Without the weak candidates in the stream the three-song end-to-end case falls
+from 0.79 to 0.65 (seed 2 alone 0.68 → 0.29). The stored record: about 4.9 k characters per 90 s (3 k the activity),
+about 13 k for 4 minutes. The aligner: 60–190 ms per 90 s song on the loaded machine. These are synthetic numbers and
+an upper bound; the constants were tuned on the same generator. **The release gate (real songs, the agreement readout,
+`DRAFT_BETA`) is not done: no real song is available to this package.**
+
+**Visual QA (phase 1 leftover and S1).** 出そろい vs 動き始め at lead 0.2 on `basic` (three opened cuts, frames from
+t0 − 0.65 to t0 + 0.25): under 出そろい the new line is fully in and readable by t0 − 0.2 in every strip, under 動き始め it
+is still entering at t0 − 0.1 and settles after t0. The cost shows where the arrangement puts both lines in the same
+place (r4~7 「白い息」 over 「ホームに」, ra~8 「果てまで」 over 「紙ひこうき」): the two share the screen about 0.45 s
+longer, with the old line at full strength until its own exit — the overlap risk of the design's Q1, and a reason to keep
+動き始め as the new-work default. World seams at lead 0.2 in a new work (the five of `basic`, frames from the window's
+start − 0.1 to its end + 0.1): the old line is gone by the window's end and stays gone; none of them needed tier 1
+(`dur/2 ≥ need`), the outro's seam slid by 0.015 s. Tier 1 at work: `long` has 14 and `lrc` 5 world seams that slid at
+lead 0.2 (`vertical` none); the strips of four (swishCut, irisGate, plungeZoom, shoveAcross; from B.a − 0.05 through
+the window to its end + 0.1) show the old line leaving inside the window and not coming back, and the new background and
+line from the window's end on (one plungeZoom strip looked empty only because the sheet cropped `lrc`'s square frames;
+rendered alone, its line is in by t0 + 0.2 at lead 0.2 and by t0 + 0.3 at 0.12). whipPan in a new-work EXTREME document (`basic`, cam.extreme 1,
+lead 0.2): no whipPan follows a whipPan (the pair boost is off at lead 0.2 as designed); the one whipPan (r6~8) whips in
+at a = t0 − 0.2 while the crashZoom line before it is still up and whips out 0.37–0.25 s before its end, over the next
+line's start: the two whips no longer meet, which is what the gate says. The draft review, the need-voice state and the
+applied toast were checked in the flow's screenshots (rows with ◎/○ marks, the blue ticks on the timeline's line row,
+the play-bar strip 「下書きを試写中 [適用] [やめる]」). The optional golden `project_ready.json` is not added (the lead's
+choice).
+
+**Mutation checks (phase 3)** (each rule broken, the named test run, restored): side subtraction removed (`cb = pm`) →
+the panned-lead case (recall 3/12); the median filter removed → the clean recall case (0.53); weak candidates dropped
+from the stream → the end-to-end case (55/85); `WD = 0` → the distractor case; `MIN_GAP` ignored in the DP → the
+dense-onset case (starts 10.2, 10.26).
+
+<!-- PV22 P5 notes, phase 3: checks -->
 
 <!-- PV22 P6 notes -->

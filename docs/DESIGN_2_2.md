@@ -160,7 +160,120 @@ modes, one hand-made case per tier, the duet), `golden_lead.test.js` (the 253 go
 caches, the fingerprint of a floor-limited cut, the sung skip, the document field), the cap cases in `motion.test.js`,
 the pair gate in `extreme_planner.test.js`, `commands`, `doc` and `ui_fields` cases, and the ui_flows flow `enter`.
 
-<!-- PV22 P5 S1 (§5.2) -->
+### 5.2 S1: 曲から行の頭を自動で下書き
+
+**What the user gets.** ② 曲 shows the chip 「曲から下書き」 (icon `wave`) under 「タップで合わせる」 whenever a song is set
+(enabled when the work has lines; tooltip 「曲の声の出だしを探して、行の開始時刻を下書きします（AIなし）」); the palette has
+「曲から行の頭を下書き」 (`time.draft`). It opens a review in the step column (`view.state.mode = 'draft'`), the same
+place as the tap panel:
+
+1. **The voice is read** (`doc.song.voice` with its phrase stream: every song imported by this build): the review opens at
+   once. The song file does not need to be linked.
+2. **Not read yet** (a song imported by an older build): 「曲の声をまだ読んでいません。読むと声の出だしから下書きできます。」
+   With the song linked, **[声を読んで下書き]** runs 曲の声を読む (`app.readVoice`: `song.voice`, its own undo entry
+   「曲の声を読む」, progress 「曲の声を読んでいます… {pct}%」 with [中止], which ends the draft), then the review. Not linked:
+   **[曲をつなぎ直す]** and **[音量だけで下書き（精度は低め）]** (the loudness digest; 確か is capped at たぶん).
+3. **The review:** 「{n}行の開始を下書きしました」, 「確か {a}・たぶん {b}・自信なし {c}」 and, with at least three drafted lines
+   whose start was tapped, 「タップした時刻との差が0.3秒以内: {k}/{n}行」. The checkboxes **当てて見る** (on: the stage
+   plays the work with the checked starts, `app.tryOn`, the play bar says 「下書きを試写中 [適用] [やめる]」; another try-on
+   turns it off) and **固定・タップした行も下書きし直す** (off; `'tap'` and `'user'` start pins are drafted too). One row
+   per moved line: checkbox, 「{n}行 {from} → {to}」, ◎ 確か / ○ たぶん / △ 自信なし, the line's text and [▶] (1 s before the
+   drafted start, for 3 s; disabled with 「曲のファイルをつなぐと聞けます」 while the song is not linked). [すべて選ぶ]
+   [確かなものだけ] [適用] [やめる], the keys line, the hint 「ずれている行は、行を選んで『この行だけタップで打ち直す』で直せま
+   す。」 and, with AI on, 「AIでタイミング（より正確）」 (`ai.align`). The timeline draws each proposal as a blue tick
+   (`COLORS.draft` `#7cc4ff`) on its line row, dashed when unchecked.
+4. **[適用]:** one undo entry 「曲から下書き（{n}行）」 (`time.tap`, pins by `'tap'`, so the stale-end rule of §5.3
+   applies); toast 「{n}行の開始を下書きしました」 with 「再生して確認」. **[やめる] / Esc** record nothing (a voice read in
+   step 2 stays, as its own entry). A document change during the review re-drafts from the new lines (toast
+   「歌詞や時刻が変わったので下書きを合わせ直しました」); opening another work ends it.
+
+Drafted lines: those whose start is automatic; with 固定・タップした行も… also `'tap'` / `'user'` start pins. LRC times, AI
+pins and lock pins are always anchors. Checked by default: ◎ and ○ (△ rows stay automatic, re-spread between the applied
+ones). A drafted line that the aligner leaves in place (moved less than 0.05 s) on a found onset is pinned too, so the
+re-spread around the new pins cannot move it off the voice. Nothing to draft: 「自動で並んでいる行がありません（すべての行の
+開始が決まっています）」.
+
+**Keys.** The context `'draft'` owns the keyboard like tap mode: Space 再生 / 一時停止, ←/→ 1 s, Esc やめる; every other
+app shortcut is swallowed (`noop`: T does not start tap mode, Ctrl+Z waits). Space/Enter on a focused button or checkbox
+keep their meaning; the panel's heading takes focus when it opens, so Space plays until Tab reaches a control.
+
+**How accurate it is (measured; a draft, not a timing).** Synthetic stereo mixes (`tests/helpers/song_gen.js`: centred
+sung phrases of 4–13 syllables with consonant bursts and vibrato over kick, snare, bass, alternating hats and a wide pad),
+4 seeds × 90 s, lines = the true phrases with morae = syllables × 0.8–1.2, gap weights of `core/timing` at 120 BPM:
+
+| case | phrase starts found (±0.15 s) | lines within ±0.15 s | within ±0.3 s | ◎ rows within ±0.15 s |
+|---|---|---|---|---|
+| clean | 0.82 | 0.79 | 0.86 | 0.85 (89 rows) |
+| loud accompaniment | 0.60 | 0.56 | 0.67 | 0.62 (74) |
+| long reverb | 0.91 | 0.93 | 0.97 | 0.97 (90) |
+| short pauses (0.12–0.4 s) | 0.95 | 0.86 | 0.87 | 1.00 (69) |
+| voice panned 0.5 | 0.76 | 0.58 | 0.65 | 0.67 (78) |
+| legato, no pauses | 0.03 | 0.38 | 0.45 | 1.00 (4) |
+
+The constants were tuned on this generator, so these are an upper bound; real songs will do worse, above all with loud
+or centred lead instruments and legato singing. The release gate (tap a real song, redraft with 固定・タップした行も…,
+read the agreement line; below a 50 % median the chip reads 「曲から下書き（試験的）」 by `DRAFT_BETA`) is the lead's.
+
+**`audio/voice` (L1; deps `audio/fft`, `audio/digest`): the joint record with 歌ハメ (P6).** One pass per song gives
+歌ハメ's vocal activity and peaks and this draft's phrase stream from the same spectra; `audio/analyze` is unchanged.
+Per 10 ms frame (Hann 1024, centred, the first frame primed), mid M = (L + R)/2 and side S = (L − R)/2 (mono: S = 0),
+over the band 250–3500 Hz: centred power per bin `c_b = max(0, |M_b|² − |S_b|²)`, `raw = dbToUnit(Σ c_b)·(1 −
+flatness(c_b))`, and the band flux of `ln(1 + 1000·|M_b|)`. The activity `a` is `raw` median-filtered over ±40 ms and
+normalized to the song (0 at its 10th percentile, 1 at its 95th). Phrase starts: a rise to 0.35 after ≥ 0.15 s below it
+that reaches 0.55 within 0.3 s, moved to the strongest band flux in −60…+30 ms, strength = the rise × the pause (full at
+0.5 s). Weak candidates: band-flux peaks ≥ half the 99th percentile inside voiced frames, ≥ 0.25 s from any phrase start,
+strength ≤ 0.3. Vocal peaks (歌ハメ): local maxima over ±30 ms of onset × activity ≥ 0.2, ≥ 60 ms apart.
+
+```js
+doc.song.voice = { v: 1, hz: 25, act, peaks, phrases }   // base64 byte streams
+// act[j]   = round(255 · min(1, mean of the activity frames 4j … 4j+3))              (25 Hz)
+// peaks    = records (Δ centiseconds since the previous as unsigned LEB128, round(255·s))
+// phrases  = records (Δ centiseconds LEB128, one byte: bit 7 phrase candidate, bits 0–6 round(127·s))
+```
+
+About 4.9 k characters per 90 s (3 k of them the activity). `core/doc`: `ORDER.song` gains `'voice'` after `'digest'`,
+`ORDER.voice = ['v', 'hz', 'act', 'peaks', 'phrases']`, `checkSong` accepts an absent or null voice, else `{ v: 1, hz > 0,
+act, peaks: strings, phrases: a string when present }`; not in `SONG_DEFAULTS`. The command `song.voice { sha1, voice }`
+sets it for the song it was read from (another song: `CommandError('stale')`; `voice: null` removes it); `song.set` of a
+new song replaces the record. `audio/host/decode.loadSong` runs the pass after the tempo analysis (progress 0–0.5 the
+analysis, 0.5–1 the voice: the two cost about the same, 0.5–0.9 s per 90 s of 48 kHz stereo in Node) and puts the record
+in the `song.set` record; `analyzeVoice(buffer, { signal, onProgress })` serves 曲の声を読む. Exports: `VC`, `analyze`,
+`analyzeSync`, `encode`, `decode` (memoized by identity; `ph: null` without a phrase stream; a damaged record throws
+`'format'`), `hasPhrases`, `isRecord`, `candidatesIn(dec, a, b)`, `peaksIn(dec, a, b)`, `voiced(cands, act, hz)` (the first
+phrase start ≥ 0.4, else the first candidate; the last active frame + 0.5 s), `digestActivity(digest)`, `fromDigest(digest)`
+(the phrase rule on the 20 Hz loudness, strengths halved). 歌ハメ adds its `activityEnd` here.
+
+Why centred per bin: on the generator (whose accompaniment is nearly all centred) the mid alone finds as many phrase starts
+or more; with a hard-panned lead playing phrases of its own, the centring keeps the voice's recall at 1.00 and takes none
+of the lead's starts, while the mid alone falls to 0.25 and takes all of them (`voice.test.js`).
+
+**`core/timing.gapWeights(lines, { readRate, bpm })`** → `w[i]` = line i's reading plus the pause above line i+1 (the last
+line: its reading): the `gap(k)` of `solveTimes`. **`core/draft` (L0).** `draftStarts({ lines, cands, voiced, duration,
+grid, snap, digest })` aligns each run of drafted lines between its anchors (before the first anchor from `voiced.t0 − 1`,
+after the last to `voiced.t1`) onto the candidates plus fillers (every 0.25 s, or every half beat with a tempo; strength
+−0.15), by a monotone dynamic programme: cost = −strength − beat bonus + 0.6·ln²(gap / prior gap) per step (the prior:
+the run's span shared in the gap weights), the first line of a leading run pulled towards `voiced.t0`, gaps ≥ 0.12 s and ≤ 5
+× the prior + 2 s, first strict minimum on ties. Beat snapping (±0.06 s) only where the order stays strict. `conf`: ◎ for
+a phrase start ≥ 0.4 whose gap is 0.5–2 × its prior, ○ for other onsets, △ for fillers. Moves under 0.05 s are `kept`,
+not proposed; runs without room are `skipped`. `agreement(res, tapped)` counts drafted tapped lines within 0.3 s. 80 lines ×
+300 candidates run at the speed of a bare loop over the same 9 M steps (≈ 40 ms idle; 160–260 ms on the loaded test
+machine).
+
+**`ui/draft` (L7).** Pure: `input(doc, plan, { redo })`, `applyCmd(lines, res, checked)`, `checkedByDefault`, `counts`,
+`drafted`, `DRAFT_BETA`. The panel `mount(app)` → `{ root, start, cancel, apply, active, marks, strip, tryOnReplaced,
+phase }`; `ui/boot` mounts it next to the tap panel and defines `time.draft`, `draft.cancel` and `app.readVoice`; `ui/keys`
+(context `draft`), `ui/view` (`MODES += 'draft'`), `ui/steps` (the panel for the mode), `ui/step_song` (the chip, without a
+`data-ctl`: step ② keeps its five controls), `ui/timeline` (the ticks, redrawn on bus `'draft'`), `ui/palette`
+(`draft.cancel` hidden), `ui/icons` (`wave`), `ui/tap` (no tap session over the review).
+
+**Tests.** `voice.test.js` (recall and median error on 60 s mixes, reverb, the panned lead, determinism and progress, mono
+and silence, the record's round trip and LEB128, windows, the voiced span, `fromDigest`, `audio/analyze` unchanged),
+`draft.test.js` (exact candidates, the distractor, anchors and order under snapping, dense onsets, `MOVE_MIN`, fillers,
+snapping, skipped runs, agreement, speed, end to end on three 90 s mixes through the stored record, `gapWeights`),
+`ui_draft.test.js`, `doc` and `commands` cases (`song.voice`), `ui_keys` (the `draft` context), `i18n` (`draft.conf.*`),
+the ui_flows flow `draft` (a stereo synthetic song loaded into the page: the chip, the review with the voice already read,
+try-on and ticks, T/R swallowed, Esc records nothing, 適用 as one entry with tap pins, undo; a song without a voice record:
+声を読んで下書き as its own entry 「曲の声を読む」, then the review).
 
 ### 5.3 S2: 1行だけタップで打ち直し
 
@@ -286,5 +399,9 @@ This chapter wins over the sections below (the texts there still describe v2 / v
 | D§4.21 | step ④ item `too-fast` | §5.4 |
 | D§6.4.5, §6.4.6, §6.4.13, §6.4.14, §6.4.15 | 作品全体 › タイミング rows; 行 › 時間 `timeTools`; the timeline's line menu and too-fast bar; the gutter's codes and tooltips; the one-line tap mode | §5.1, §5.3, §5.4 |
 | DESIGN_2_1 §14 | the EXTREME whipPan pair needs the whips to meet outside legacy documents | §5.1 (f) |
+| D§3.1 (song), §3.9 | `doc.song.voice` (optional, ordered after `digest`); the command `song.voice` | §5.2 |
+| D§4.11 | `core/timing.gapWeights`; `core/draft` (曲から下書き) | §5.2 |
+| D§4.13 | `audio/voice` (the joint voice pass and record); `loadSong` reads the voice at import; `analyzeVoice` | §5.2 |
+| D§6.4.3, §6.8, §6.4.13 | ② 曲's chip 「曲から下書き」; the key context `draft`; the timeline's draft ticks; the review panel (new) | §5.2 |
 
 <!-- PV22 P6 chapter -->

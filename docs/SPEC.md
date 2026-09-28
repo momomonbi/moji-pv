@@ -69,11 +69,20 @@ and Filmora-ready output; how they are built is in `docs/DESIGN_2_1.md`.
   2 or more, is marked 「!」 in the lyric gutter, the 行 list and the timeline; 行 › 時間 explains it and offers 動きを速くする,
   終わりを延ばす and この行だけタップで打ち直す; step ④ lists the lines. Lines squeezed between fixed times are marked too
   (DESIGN_2_2 §5.4).
+- 曲から下書き (② 曲 with a song; the palette's 曲から行の頭を下書き; no AI): drafts the start of every automatically timed
+  line from where the song's voice starts phrases, as a review in the step column — one row per line with 確か / たぶん /
+  自信なし, [▶] to listen, 当てて見る (the stage plays the draft), 固定・タップした行も下書きし直す; 適用 is one undo entry
+  of tapped starts; Esc discards. LRC, AI and locked starts stay. A draft, not a timing: on synthetic mixes about 8 in 10
+  line starts land within 0.15 s with a clear centred voice, about half with loud accompaniment or an off-centre voice,
+  fewer when the singing never pauses; fix the rest with この行だけタップで打ち直す, or use AI timing (DESIGN_2_2 §5.2).
 
 ## 5. Song (optional)
 
 - Load mp3 / wav / m4a / ogg / flac. Decode in the browser; show a waveform on the timeline.
 - Own analysis: loudness envelope, onsets, tempo (BPM) and beat grid; user can type BPM / offset instead.
+- The song's voice (read at import, stored in the project as `doc.song.voice`): the vocal activity, vocal peaks and
+  phrase starts of the centred voice, for 曲から下書き and 歌ハメ. A song imported by an older build is read on demand
+  (曲の声を読む, one undo entry) with the song file linked (DESIGN_2_2 §5.2).
 - Playback in sync with the preview. The video length follows the song when a song is loaded.
 - An imported video's own sound can become the song (この動画の音を曲にする); otherwise a video's sound is not used.
 

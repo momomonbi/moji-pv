@@ -292,9 +292,10 @@ MV.def('ui/draft', ['ui/dom', 'ui/icons', 'i18n/t', 'core/draft', 'core/timing',
 
       function renderNeed() {
         const ready = app.songReady();
+        const digest = !!(app.doc.song && app.doc.song.digest);
         const acts = ready ? [button(t('draft.readVoice'), () => readVoice(), 'btn primary')]
-          : [button(t('draft.relink'), async () => { await app.pickRelink(); if (S) render(); }, 'btn primary'),
-            button(t('draft.loudOnly'), () => fromLoudness())];
+          : [button(t('draft.relink'), async () => { await app.pickRelink(); if (S) render(); }, 'btn primary')];
+        if (!ready && digest) acts.push(button(t('draft.loudOnly'), () => fromLoudness()));
         acts.push(button(t('draft.stop'), () => cancel()));
         dom.replace(body, h('p', { class: 'note', text: t('draft.needVoice') }), h('div', { class: 'row-actions' }, acts));
       }

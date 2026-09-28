@@ -156,6 +156,7 @@ AI に写真・動画を見てもらい、何が写っているか・色・文�
 - 音声はモノラルの WAV にして送ります。ふつうは 16 kHz（約7分まで）、長い曲は 12 kHz や 8 kHz（約14分まで）に下げて1回で送ります。それより長い曲は 16 kHz のままアップロードしてから使います。送る大きさと長さは、同意のカードに出ます。曲のファイル名は送りません。
 - 送ってよい曲（自分の曲や、権利者の許可がある曲）だけに使ってください。公開されている歌詞と判断されると書き起こせません。そのときは歌詞を貼って「タイミングを合わせる」を使ってください。
 - 時刻は目安です。ずれていたら、詳細やタップ合わせで直してください。
+- AIを使わない方法もあります: ② 曲 の「曲から下書き」は、曲の声の出だしから行の開始時刻を下書きします（曲は送りません。AIの「タイミングを合わせる」より粗く、はっきり区切って歌う曲向き）。下書きの画面にも、AIがオンなら「AIでタイミング（より正確）」が出ます。
 - サービスBでは、曲の音声は送れません（「Google Gemini のときだけ使えます」）。
 
 ## 9. 結果の確かめ方と取り消し
@@ -345,6 +346,9 @@ the tool's own button (**Prepare lyrics**, **Send**, **Make**, **Send and descri
   reloading. Audio goes as mono WAV: 16 kHz up to about 7 min, 12 or 8 kHz up to about 14 min, longer songs at 16 kHz
   through an upload; the consent card shows the size and length. The song's file name is not sent. Only send songs you
   may send; published lyrics cannot be transcribed — paste them and use Match timing.
+  Without AI, **Draft from the song** in step 2 drafts line starts from where the song's voice starts phrases (nothing
+  is sent; rougher than Match timing, best on songs sung with clear pauses); with AI on, its review links to
+  **AI timing (more accurate)**.
 
 ### Review, apply, revert
 

@@ -5660,6 +5660,26 @@ async def flow_draft(f, lang):
     await f.until("() => window.__mv.view.state.mode === 'normal'", 'Esc leaves')
     f.check(await page.evaluate(DONE) == done1 + 1, 'the read stays, the draft recorded nothing')
 
+    # no voice record and the song file not linked: 曲をつなぎ直す, or 音量だけで下書き (たぶん at best, [▶] disabled)
+    await page.evaluate("""() => { const a = window.__mv; a.dispatch({ t: 'song.voice', sha1: a.doc.song.sha1, voice: null },
+      { label: ['undo.songVoice', {}] }); a.store.seal(); a.setSongBuffer(null); }""")
+    await f.settle(2)
+    f.check(not await page.evaluate('() => window.__mv.songReady()'), 'the song is unlinked')
+    await page.evaluate("() => window.__mv.actions.run('time.draft')")
+    await f.until("() => window.__mv.draft.phase() === 'need'", 'the review asks for the voice')
+    texts = await page.evaluate("() => [...document.querySelectorAll('.step-draft .row-actions button')].map((b) => b.textContent)")
+    want = await page.evaluate("() => ['draft.relink', 'draft.loudOnly', 'draft.stop'].map((k) => window.__mv.t(k))")
+    f.check(texts == want, 'unlinked: 曲をつなぎ直す, 音量だけで下書き, やめる: %r' % texts)
+    await page.locator('.step-draft button', has_text=want[1]).click()
+    await f.until("() => window.__mv.draft.phase() === 'review'", 'the loudness draft opens')
+    s = await page.evaluate("""() => ({ rows: document.querySelectorAll('.step-draft .draft-row').length,
+      high: document.querySelectorAll('.step-draft .draft-row[data-conf="high"]').length,
+      play: [...document.querySelectorAll('.step-draft .draft-row .icon-btn')].every((b) => b.disabled) })""")
+    f.check(s['rows'] > 0 and s['high'] == 0 and s['play'], 'rows without 確か, [▶] disabled while unlinked: %r' % s)
+    await f.shot('loudness')
+    await page.keyboard.press('Escape')
+    await f.until("() => window.__mv.view.state.mode === 'normal'", 'Esc leaves the loudness draft')
+
 
 FLOWS += [('draft', flow_draft, False)]
 
