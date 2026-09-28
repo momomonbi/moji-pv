@@ -93,5 +93,92 @@ MV.def('core/tap', [], () => {
     return marks.length ? { t: 'time.tap', marks } : null;
   }
 
-  return { tapStart, tapReduce, tapCommand, TapError, EVENTS, MIN_GAP };
+  // --- 1字ずつタップ: the sung units of one line (歌ハメ, DESIGN_2_2 §6) ------------------------------------------------
+
+  const UNIT_EVENTS = Object.freeze(['mark', 'end', 'back', 'pause', 'resume', 'restart', 'loopEnd']);
+  // A unit mark closer than this to the one before is not taken (a double press); it also keeps every stored time at
+  // least planner/sung's 0.01 s after the one before once rounded to the millisecond.
+  const UNIT_GAP = 0.04;
+
+  // UnitTapState = { units, cursor, times, end, paused, done, atLoopEnd, endOk }
+  //   units: [{ at, text }] (at = the unit's offset in the line text); cursor: the next unit to mark; times: marked times
+  //   per unit (null = not marked); end: where the singing ends (null = not marked); paused: playback is stopped (marks
+  //   are ignored); done: every unit and the end are marked; atLoopEnd: playback stopped at the loop's end (the take is
+  //   kept until 決定 or もう一度); endOk: whether the end may be marked (opts.end, default true).
+  function unitState(units, cursor, times, end, paused, atLoopEnd, endOk) {
+    return { units, cursor, times, end, paused, done: cursor === units.length && end !== null, atLoopEnd, endOk };
+  }
+
+  function unitNext(s, cursor, times, end, paused, atLoopEnd) {
+    return unitState(s.units, cursor, times, end, paused, atLoopEnd, s.endOk);
+  }
+
+  // unitStart(units, { end }) → a session over the units of one line, in text order.
+  function unitStart(units, opts) {
+    if (!Array.isArray(units)) throw new TapError('bad-units', 'unitStart needs a list of units');
+    const list = Object.freeze(units.map((u) => {
+      if (!u || !Number.isInteger(u.at) || u.at < 0) throw new TapError('bad-units', 'each unit needs an offset at');
+      return Object.freeze({ at: u.at, text: typeof u.text === 'string' ? u.text : '' });
+    }));
+    for (let i = 1; i < list.length; i++) {
+      if (list[i].at <= list[i - 1].at) throw new TapError('bad-units', 'unit offsets must increase');
+    }
+    return unitState(list, 0, Object.freeze(new Array(list.length).fill(null)), null, false, false,
+      !(opts && opts.end === false));
+  }
+
+  function lastMark(s) { return s.cursor > 0 ? s.times[s.cursor - 1] : -Infinity; }
+
+  // mark: the next unit (not paused, a unit left, at least UNIT_GAP after the last mark); a mark after the end takes
+  // the end back (the singing went on) · end: where the singing ends (at least one mark, UNIT_GAP after the last) · back:
+  // forget the end, else the last mark · restart: forget everything (もう一度) · loopEnd: playback stopped at the loop's
+  // end: paused, the take kept · pause / resume as tapReduce (resume leaves the loop's end). Returns the same state
+  // when nothing changes.
+  function unitReduce(s, ev) {
+    if (!ev || !UNIT_EVENTS.includes(ev.type)) throw new TapError('bad-event', 'unknown unit tap event ' + (ev && ev.type));
+    switch (ev.type) {
+      case 'mark': {
+        const t = timeOf(ev);
+        if (s.paused || s.cursor >= s.units.length || t < lastMark(s) + UNIT_GAP) return s;
+        const times = s.times.slice();
+        times[s.cursor] = t;
+        return unitNext(s, s.cursor + 1, Object.freeze(times), null, false, false);
+      }
+      case 'end': {
+        const t = timeOf(ev);
+        if (!s.endOk || s.paused || s.cursor === 0 || t < lastMark(s) + UNIT_GAP) return s;
+        return unitNext(s, s.cursor, s.times, t, false, false);
+      }
+      case 'back': {
+        if (s.end !== null) return unitNext(s, s.cursor, s.times, null, s.paused, s.atLoopEnd);
+        if (s.cursor === 0) return s;
+        const times = s.times.slice();
+        times[s.cursor - 1] = null;
+        return unitNext(s, s.cursor - 1, Object.freeze(times), null, s.paused, s.atLoopEnd);
+      }
+      case 'restart':
+        if (s.cursor === 0 && s.end === null && !s.atLoopEnd) return s;
+        return unitNext(s, 0, Object.freeze(new Array(s.units.length).fill(null)), null, s.paused, false);
+      case 'loopEnd':
+        return s.paused && s.atLoopEnd ? s : unitNext(s, s.cursor, s.times, s.end, true, true);
+      case 'pause':
+        return s.paused ? s : unitNext(s, s.cursor, s.times, s.end, true, s.atLoopEnd);
+      default:
+        return s.paused ? unitNext(s, s.cursor, s.times, s.end, false, false) : s;
+    }
+  }
+
+  const q3 = (x) => Math.round(x * 1000) / 1000;
+
+  // unitResult(s) → null (fewer than 2 marks) | { start, times: [[at, dt], …], end: dt | null }: the first mark is the
+  // line's start (unit 0 is always marked first), every time is relative to it, to the millisecond.
+  function unitResult(s) {
+    if (s.cursor < 2) return null;
+    const start = q3(s.times[0]);
+    const times = [];
+    for (let i = 0; i < s.cursor; i++) times.push([s.units[i].at, Math.max(0, q3(s.times[i] - start))]);
+    return { start, times, end: s.end !== null ? q3(s.end - start) : null };
+  }
+
+  return { tapStart, tapReduce, tapCommand, TapError, EVENTS, MIN_GAP, UNIT_EVENTS, UNIT_GAP, unitStart, unitReduce, unitResult };
 });

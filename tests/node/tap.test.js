@@ -104,3 +104,97 @@ test('a mark less than MIN_GAP after the last start is not taken (timing would d
   const first = T.tapStart(LINES, 'r4');
   assert.notEqual(T.tapReduce(first, { type: 'mark', t: 0 }), first, 'nothing above the first mark of a session');
 });
+
+// --- 1字ずつタップ (歌ハメ, DESIGN_2_2 §6) -------------------------------------------------------------------------
+
+const UNITS = [{ at: 0, text: 'き' }, { at: 1, text: 'み' }, { at: 2, text: 'の' }, { at: 3, text: '声' }];
+
+function runUnits(events, opts) {
+  let s = T.unitStart(UNITS, opts);
+  for (const [type, t] of events) s = T.unitReduce(s, { type, t });
+  return s;
+}
+
+test('unit tap: marks in unit order, relative to the first mark; the end is optional', () => {
+  const s = T.unitStart(UNITS);
+  assert.deepEqual([s.cursor, s.end, s.paused, s.done, s.atLoopEnd], [0, null, false, false, false]);
+  assert.deepEqual(s.times, [null, null, null, null]);
+  const m = runUnits([['mark', 12], ['mark', 12.2], ['mark', 12.45]]);
+  assert.deepEqual(T.unitResult(m), { start: 12, times: [[0, 0], [1, 0.2], [2, 0.45]], end: null });
+  const e = T.unitReduce(m, { type: 'end', t: 13.1 });
+  assert.equal(e.end, 13.1);
+  assert.equal(e.done, false, 'a unit is left');
+  assert.deepEqual(T.unitResult(e).end, 1.1);
+  const all = runUnits([['mark', 1], ['mark', 1.3], ['mark', 1.6], ['mark', 2.0004], ['end', 2.5]]);
+  assert.equal(all.done, true, 'every unit and the end');
+  assert.deepEqual(T.unitResult(all), { start: 1, times: [[0, 0], [1, 0.3], [2, 0.6], [3, 1]], end: 1.5 }, 'to the millisecond');
+  assert.equal(T.unitReduce(all, { type: 'mark', t: 3 }), all, 'no unit left to mark');
+});
+
+test('unit tap: a mark closer than UNIT_GAP, and an end not after the last mark, are not taken', () => {
+  const s = runUnits([['mark', 5]]);
+  assert.equal(T.unitReduce(s, { type: 'mark', t: 5 }), s, 'the same time again');
+  assert.equal(T.unitReduce(s, { type: 'mark', t: 5 + T.UNIT_GAP - 0.005 }), s);
+  assert.notEqual(T.unitReduce(s, { type: 'mark', t: 5 + T.UNIT_GAP }), s, 'at the gap');
+  assert.equal(T.unitReduce(s, { type: 'end', t: 5 }), s, 'an end at the last mark');
+  const none = T.unitStart(UNITS);
+  assert.equal(T.unitReduce(none, { type: 'end', t: 3 }), none, 'no end before a mark');
+  const noEnd = runUnits([['mark', 1], ['mark', 2]], { end: false });
+  assert.equal(T.unitReduce(noEnd, { type: 'end', t: 3 }), noEnd, 'opts.end false: the end is not marked');
+});
+
+test('unit tap: a mark after the end takes the end back; back forgets the end, then the last mark', () => {
+  const s = runUnits([['mark', 1], ['mark', 1.5], ['end', 2]]);
+  const on = T.unitReduce(s, { type: 'mark', t: 2.4 });
+  assert.equal(on.end, null, 'the singing went on');
+  assert.deepEqual(T.unitResult(on).times.map((p) => p[1]), [0, 0.5, 1.4]);
+  const b1 = T.unitReduce(s, { type: 'back', t: 3 });
+  assert.deepEqual([b1.cursor, b1.end], [2, null], 'the end first');
+  const b2 = T.unitReduce(b1, { type: 'back', t: 3 });
+  assert.deepEqual([b2.cursor, b2.times], [1, [1, null, null, null]]);
+  const b3 = T.unitReduce(T.unitReduce(b2, { type: 'back', t: 3 }), { type: 'back', t: 3 });
+  assert.equal(b3.cursor, 0);
+  assert.equal(T.unitReduce(b3, { type: 'back', t: 3 }), b3, 'nothing to forget');
+  assert.equal(T.unitResult(b2), null, 'fewer than 2 marks: nothing to record');
+});
+
+test('unit tap: pause, the loop end and restart', () => {
+  const s = runUnits([['mark', 1], ['mark', 1.4]]);
+  const p = T.unitReduce(s, { type: 'pause', t: 2 });
+  assert.equal(p.paused, true);
+  assert.equal(T.unitReduce(p, { type: 'mark', t: 3 }), p, 'marks are ignored while paused');
+  assert.equal(T.unitReduce(p, { type: 'end', t: 3 }), p);
+  assert.equal(T.unitReduce(p, { type: 'pause', t: 3 }), p);
+  const r = T.unitReduce(p, { type: 'resume', t: 3 });
+  assert.equal(r.paused, false);
+  assert.equal(T.unitReduce(r, { type: 'resume', t: 3 }), r);
+  const le = T.unitReduce(s, { type: 'loopEnd', t: 4 });
+  assert.deepEqual([le.paused, le.atLoopEnd], [true, true]);
+  assert.deepEqual(T.unitResult(le), T.unitResult(s), 'the loop end keeps the take');
+  assert.equal(T.unitReduce(le, { type: 'loopEnd', t: 4 }), le);
+  const again = T.unitReduce(le, { type: 'restart', t: 4 });
+  assert.deepEqual([again.cursor, again.end, again.atLoopEnd], [0, null, false]);
+  assert.deepEqual(again.times, [null, null, null, null]);
+  assert.equal(again.paused, true, 'still stopped until playback starts again');
+  const played = T.unitReduce(le, { type: 'resume', t: 4 });
+  assert.deepEqual([played.paused, played.atLoopEnd], [false, false], 'playing again leaves the loop end');
+  const fresh = T.unitStart(UNITS);
+  assert.equal(T.unitReduce(fresh, { type: 'restart', t: 0 }), fresh);
+});
+
+test('unit tap: the reducer never mutates its input; bad units and events throw', () => {
+  const s = runUnits([['mark', 1]]);
+  Object.freeze(s);
+  const next = T.unitReduce(s, { type: 'mark', t: 2 });
+  assert.deepEqual(s.times, [1, null, null, null]);
+  assert.deepEqual(next.times, [1, 2, null, null]);
+  assert.ok(Object.isFrozen(s.times) && Object.isFrozen(s.units));
+  assert.deepEqual(T.unitResult(runUnits([['mark', -0.3], ['mark', 0.2]])).times, [[0, 0], [1, 0.2]], 'negative times clamp to 0');
+  throwsCode(() => T.unitReduce(s, { type: 'jump', t: 1 }), 'bad-event');
+  throwsCode(() => T.unitReduce(s, { type: 'mark' }), 'bad-event');
+  throwsCode(() => T.unitStart(null), 'bad-units');
+  throwsCode(() => T.unitStart([{ at: 1 }, { at: 1 }]), 'bad-units');
+  throwsCode(() => T.unitStart([{ at: -1 }]), 'bad-units');
+  assert.deepEqual(T.UNIT_EVENTS, ['mark', 'end', 'back', 'pause', 'resume', 'restart', 'loopEnd']);
+  assert.deepEqual(T.EVENTS, ['mark', 'end', 'back', 'pause', 'resume'], 'the line tap events are unchanged');
+});
