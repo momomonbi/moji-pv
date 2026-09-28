@@ -488,6 +488,11 @@ MV.def('ui/widgets', ['ui/dom', 'ui/icons', 'i18n/t', 'core/color', 'ui/playbar'
 
   function text(field, env) {
     const t = env.t;
+    // a read-only text (「字の時間」's summary): shown, not edited
+    if (field.readOnly) {
+      const out = h('output', { class: 'w-text-ro' });
+      return { el: out, focus() {}, update(st) { out.textContent = st.mixed ? t('state.mixed') : st.value === null || st.value === undefined ? '' : String(st.value); } };
+    }
     const max = field.spec && field.spec.max ? field.spec.max : 200;
     const box = h('input', { class: 'text-input w-text', type: 'text', maxlength: max, spellcheck: false, 'aria-label': env.label });
     const presets = (field.presets || []).map((o) => h('button', { class: 'chip-btn', type: 'button', on: { click: () => env.commit(o.v) } },

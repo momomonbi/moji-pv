@@ -74,13 +74,15 @@ MV.def('ui/steps', ['ui/dom', 'ui/icons', 'ui/step_lyrics', 'ui/step_song', 'ui/
         if (at < 3) app.goStep(STEPS[at + 1]);
       });
 
-      let shown = null;
+      // (the tap panel's root is the running mode's: line tapping or 1字ずつタップ)
+      let shown = null, shownRoot = null;
       function showBody() {
         const vs = app.view.state;
         const want = vs.mode === 'tap' ? tapPanel : bodies[vs.step];
-        if (shown !== want) {
+        if (shown !== want || shownRoot !== want.root) {
           dom.replace(bodyHost, want.root);
           shown = want;
+          shownRoot = want.root;
           if (want.onShow) want.onShow();
         }
         bodyHost.setAttribute('aria-labelledby', 'step-tab-' + vs.step);

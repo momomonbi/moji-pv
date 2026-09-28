@@ -1,8 +1,8 @@
 /* 文字PVメーカー v2 — original work. The inspector (詳細): crumbs, level header, sections from FIELDS, field rows, sub-pages (DESIGN §6.4.4–§6.4.9, §6.6; DESIGN_2_1 §6.5–§6.9). */
 MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/part_browser', 'ui/selection', 'ui/looks',
   'ui/output', 'i18n/t', 'core/paths', 'core/pins', 'core/shot', 'planner/areas', 'ui/shot_editor', 'ui/material_page',
-  'ui/media_page', 'ui/media_widgets', 'ui/media_io', 'ui/extreme'],
-(dom, I, F, W, PB, S, LK, OUT, T, P, PINS, SHOT, AREAS, KE, MP, MPG, MW, MI, XU) => {
+  'ui/media_page', 'ui/media_widgets', 'ui/media_io', 'ui/extreme', 'planner/rules'],
+(dom, I, F, W, PB, S, LK, OUT, T, P, PINS, SHOT, AREAS, KE, MP, MPG, MW, MI, XU, RU) => {
   'use strict';
 
   const { h } = dom;
@@ -18,7 +18,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
   const REF_KINDS = ['arrange', 'arrive', 'dwell', 'depart', 'ornament', 'ground', 'lens', 'filter', 'seam'];
   const ELEMENTS = ['text', 'ornament', 'ground', 'lens', 'filter', 'seam'];
   // Custom sections redrawn even while they hold focus (their buttons change state); focus is put back (§6.12).
-  const REDRAW_FOCUSED = new Set(['looks', 'colorsReset', 'amountsReset', 'lockPartial', 'multi', 'media']);
+  const REDRAW_FOCUSED = new Set(['looks', 'colorsReset', 'amountsReset', 'lockPartial', 'multi', 'media', 'sungTimes']);
   // Part rows whose browser offers the 写真・動画 tab (DESIGN_2_1 §11.7.5): the kind's media part and its source param.
   const MEDIA_TAB = Object.freeze({ ground: 'ground', ornament: 'frame', atmos: 'overlay' });
 
@@ -91,11 +91,12 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
     // --- field states ----------------------------------------------------------------------------------------------
 
     // FieldStates per row (keyed by the row's first path). A row that writes several cut paths (切り替え on the
-    // several-lines page) reads each of them and shows いろいろ when they differ.
+    // several-lines page) reads each of them and shows いろいろ when they differ; so does a readEach row (「歌ハメ」 on the
+    // several-lines page: one line pin per selected line).
     function statesFor(rows, ctx) {
       const withPath = rows.filter((r) => r.path);
       if (!withPath.length) return new Map();
-      const readPaths = (r) => (r.field.firstCut && r.paths.length > 1 ? r.paths : [r.path]);
+      const readPaths = (r) => ((r.field.firstCut || r.field.readEach) && r.paths.length > 1 ? r.paths : [r.path]);
       // a trim row also reads its out handle (clipOut), kept in row.fsOut
       const all = [...new Set(withPath.flatMap(readPaths).concat(withPath.filter((r) => r.outPath).map((r) => r.outPath)))];
       let list = null;
@@ -198,6 +199,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
 
     function derivedValue(field, ctx) {
       if (field.derived === 'lineLength') return ctx.line ? ctx.line.t1 - ctx.line.t0 : 0;
+      if (field.derived === 'sungTimes') return sungSummary(ctx.line);
       if (field.derived === 'cutEnd') return ctx.cut ? ctx.cut.t1 : 0;
       return null;
     }
@@ -440,7 +442,8 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       }
       if (!f.path) return { value: derivedValue(f, ctx), mixed: false, auto: false, readOnly: true, extra: extraFor(f, null, ctx, row) };
       return { value: fs ? fs.value : null, mixed: !!fs && fs.state === 'mixed', auto: !fs || fs.state === 'auto' || fs.state === 'mark',
-        readOnly: !!f.readOnly || (!!fs && fs.state === 'derived'), extra: extraFor(f, fs, ctx, row) };
+        readOnly: !!f.readOnly || (!!fs && fs.state === 'derived'), extra: extraFor(f, fs, ctx, row),
+        autoText: fs && fs.state === 'auto' && fs.autoText ? fs.autoText : null };
     }
 
     // --- writing -------------------------------------------------------------------------------------------------
@@ -497,6 +500,12 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
 
     function valueFor(field, v, fs) {
       if (field.offClears && !v) return W.AUTO;
+      // a switch of the new-work defaults table (PV22): its document default is 自動 (no pin), any other value is pinned
+      if (field.autoDefault) {
+        const c = field.spec ? MV.use('core/schema').coerce(field.spec, v) : v;
+        const x = c === undefined ? v : c;
+        return RU.sameValue(x, RU.defaultValue(doc(), null, field.path)) ? W.AUTO : x;
+      }
       if (field.flashToggle) {
         const p = plan();
         const mood = p ? app.reg.get('mood', p.look.mood.v) : null;
@@ -635,6 +644,9 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       const info = field.depth ? iconBtn('info', t('media.depthWhy'), () => showWhy(row, false), { 'data-role': 'why' }) : null;
       const why = h('div', { class: 'fr-why', hidden: true, role: 'note' });
       const note = field.note ? h('p', { class: 'fr-note note subtle', text: t(field.note) }) : null;
+      // what 自動 means here, when the planner says it (FieldState.autoText): 「新しい作品の標準」, a photo's depth rule…
+      // (a number box says it in its placeholder, 「自動（4）」, so it gets no second line)
+      const autoNote = field.widget === 'number' ? null : h('p', { class: 'fr-auto note subtle', hidden: true });
       const env = {
         app, t, label, field,
         commit: (v, o) => commit(row, v, o),
@@ -651,8 +663,8 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       };
       const widget = W.make(field, env);
       const el = h('div', { class: 'frow', 'data-widget': field.widget, 'data-slot': field.path || field.key, 'data-field': field.id },
-        h('div', { class: 'fr-top' }, lab, tag, h('span', { class: 'grow' }), info, dice, x, more), widget.el, note, why);
-      Object.assign(row, { el, tag, dice, x, more, why, widget, lab });
+        h('div', { class: 'fr-top' }, lab, tag, h('span', { class: 'grow' }), info, dice, x, more), widget.el, note, autoNote, why);
+      Object.assign(row, { el, tag, dice, x, more, why, widget, lab, autoNote });
       // Del / Backspace unpin the focused field (§6.8): the row publishes the paths it may clear while it has focus;
       // ui/boot's pin.clearField removes the ones that hold a pin (never a lock pin).
       el.addEventListener('focusin', () => {
@@ -732,6 +744,11 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       row.x.hidden = !here;
       if (row.dice) row.dice.disabled = lineLocked(ctx);
       row.el.dataset.state = state;
+      if (row.autoNote) {
+        const auto = fs && fs.state === 'auto' && Array.isArray(fs.autoText) ? t(...fs.autoText) : '';
+        row.autoNote.hidden = !auto;
+        if (row.autoNote.textContent !== auto) row.autoNote.textContent = auto;
+      }
       showInactive(row, fs);
       showSkip(row, fs);
       if (row.whyKind === 'explain' && !row.why.hidden) row.why.textContent = explainText(row);   // follows the value
@@ -1325,6 +1342,9 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
         if (!allWarnings().some((w) => w.code === 'font-fallback')) return null;
         return h('p', { class: 'insp-banner', role: 'status' }, I.icon('warn', { size: 14 }), t('insp.fontFailed'));
       },
+      // 行 › 時間 › 字の時間 (歌ハメ, DESIGN_2_2 §6): [1字ずつタップ] (with the song loaded) and, for a line whose
+      // character times are pinned, [字の時間を消す] (one undo step; a lock pin stays).
+      sungTimes(ctx) { return sungTimesBlock(ctx); },
       // 行 › 文字の記号: a locked line whose frozen split no longer fits (§3.6, §6.11) → tag + [ロックし直す].
       lockPartial(ctx) {
         const line = ctx.line;
@@ -1548,6 +1568,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
         });
         const basic = [], advanced = [];
         let group = null;
+        const afters = [];
         for (const f of s.fields) {
           const row = makeRow(f, ctx);
           rows.push(row);
@@ -1557,6 +1578,12 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
             (f.basic ? basic : advanced).push(h('div', { class: 'isec-group', text: t('kind.' + f.group) + (key ? ' · ' + app.label(f.group, key) : '') }));
           }
           (f.basic ? basic : advanced).push(row.el);
+          // a custom block right under its row (「字の時間」's sungTimes), redrawn with the section's customs
+          if (f.after) {
+            const slotEl = h('div', { class: 'isec-custom', 'data-custom': f.after });
+            (f.basic ? basic : advanced).push(slotEl);
+            afters.push(slotEl);
+          }
         }
         body.append(...basic);
         if (advanced.length) {
@@ -1568,11 +1595,40 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
           if (s.customTop) body.prepend(slotEl); else body.appendChild(slotEl);
           page.customs.push({ id: s.custom, el: slotEl, body, head });
         }
+        for (const slotEl of afters) page.customs.push({ id: slotEl.dataset.custom, el: slotEl, body, head });
         return h('section', { class: 'isec', 'data-sec': s.id }, head, body);
       });
       if (!els.length) els.push(h('p', { class: 'note subtle', text: t('insp.nothing') }));
       dom.replace(bodyEl, els);
       refresh();
+    }
+
+    // --- 歌ハメ: a line's character times (DESIGN_2_2 §6) ------------------------------------------------------------
+
+    // 「9か所 · 歌詞の単語タグ」: the line's steps and where their times come from (plan.sung); なし without sung timing.
+    function sungSummary(line) {
+      const p = plan();
+      const ls = line && p && p.sung ? p.sung.get(line.id) : null;
+      if (!ls) return t('val.none');
+      const src = ls.by === 'pin' && ls.pinBy === 'ai' ? 'ai' : ls.by;
+      return t('sung.summary', { n: ls.at.length, src: t('sung.src.' + src) });
+    }
+
+    function sungTimesBlock(ctx) {
+      const line = ctx.line;
+      if (!line || ctx.lineIds.length !== 1) return null;
+      const path = 'line/' + line.id + ':sung.times';
+      const pin = doc().pins[path];
+      const ready = !!(app.songReady && app.songReady());
+      const can = app.actions && app.actions.has('tap.units');
+      const tap = h('button', { class: 'chip-btn', type: 'button', 'data-act': 'tap.units', disabled: !ready || !can,
+        title: ready ? t('tapu.hint') : t('sung.needSong'),
+        on: { click: () => app.actions.run('tap.units', { lineId: line.id }) } }, I.icon('tap', { size: 14 }), t('sung.tapUnits'));
+      const clear = pin && pin.by !== 'lock' ? h('button', { class: 'chip-btn', type: 'button', 'data-act': 'sung.clear',
+        on: { click: () => app.dispatch({ t: 'pin.clear', path }, { label: ['undo.sungClear', {}], where: { scope: ctx.scope, field: 'sung.times' } }) } },
+      t('sung.clear')) : null;
+      return h('div', { class: 'insp-sung' }, h('div', { class: 'row-actions' }, tap, clear),
+        ready ? null : h('p', { class: 'note subtle', 'data-note': 'needSong', text: t('sung.needSong') }));
     }
 
     // 作品全体 › 写真・動画 is open while the library is not empty (DESIGN_2_1 §11.7.3): it follows the library until the

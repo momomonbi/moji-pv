@@ -13,7 +13,10 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
     // generated part parameter; its `label` is 'fld.param' = '{name}'), `param` (generated part parameters),
     // `firstCut` (the line page's 切り替え: written at the line's first cut, §6.4.6), `pinnedOnly` (a pinned parameter
     // of a part that is no longer chosen, shown as 無効), `note` (a string key shown under the row), `offClears` (a toggle
-    // whose off is 自動: turning it off clears the pin), `noDice` (a setting, not drawn: no 振り直し).
+    // whose off is 自動: turning it off clears the pin), `noDice` (a setting, not drawn: no 振り直し). PV22: `autoDefault` (a
+    // switch of the new-work defaults table, planner/rules: choosing the document's default clears the pin, any other
+    // value pins it), `after` (a custom block the inspector draws right under the row), `readEach` (a row of the
+    // several-lines page that reads every selected line's value and shows いろいろ when they differ).
 
     const ALL = Object.freeze(['work', 'line', 'cut']);
     const WORK = Object.freeze(['work']);
@@ -48,6 +51,10 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
     // line again.
     const REPEAT_SAME = 'repeat.same';
 
+    // 歌ハメ (PV22 P6, DESIGN_2_2 §6): the switch (the whole video or a line), 「字の時間を歌に合わせる」 (the whole video) and a
+    // line's character times (a line pin, written by 1字ずつタップ).
+    const SUNG_SCOPES = Object.freeze({ 'sung.hame': Object.freeze(['work', 'line']), 'sung.real': WORK, 'sung.times': LINE });
+
     function sharedNames(kind) {
       if (kind === 'atmos') return ['amount'];
       const shared = R.SHARED[kind];
@@ -70,6 +77,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
       try { parsed = P.parse('work:' + slot); } catch (e) { return []; }
       if (parsed.el) return ALL.slice();
       if (parsed.name !== null) {
+        if (SUNG_SCOPES[slot]) return SUNG_SCOPES[slot].slice();
         if (workName(slot)) return WORK.slice();
         if (LINE_WORK_NAMES.has(slot) || slot === REPEAT_SAME) return ['work', 'line'];
         if (LINE_NAMES.has(slot)) return LINE.slice();
@@ -255,6 +263,10 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
       spec: { type: 'bool' }, options: [{ v: true, label: 'opt.repeatSame.on' }, { v: false, label: 'opt.repeatSame.off' }], auto: true,
       basic: false, noDice: true, when: (ctx) => ctx.scopeKind === 'line' && ctx.cuts.some((c) => !!(c.feat && c.feat.repeatOf)) });
     const hasArea = (ctx) => !!ctx.area;
+    // 歌ハメ of a line (or of each selected line, one pin each): 自動 says what 自動 decided there (planner/fields autoText)
+    const hameLineField = () => F({ path: 'sung.hame', scopes: LINE, widget: 'choice', label: 'fld.hame', spec: { type: 'bool' },
+      options: [{ v: true, label: 'fld.hame.on' }, { v: false, label: 'fld.hame.off' }], auto: true, note: 'fld.hame.note',
+      noDice: true, readEach: true });
 
     // カメラ EXTREME (DESIGN_EXTREME §2.6): the switch, and under 詳しい設定 its 激しさ [強め | かなり | 最大]; both write
     // through ui/extreme (the notice when it turns on, the question when it turns off with moves picked by hand). The
@@ -290,6 +302,11 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
           // on pins true for the whole video; off clears the pin (off is the default).
           F({ path: REPEAT_SAME, scopes: WORK, widget: 'toggle', label: 'fld.repeatSame', spec: { type: 'bool' },
             note: 'fld.repeatSame.note', offClears: true, noDice: true }),
+          // 歌ハメ (DESIGN_2_2 §6): 自動 (a new work: the lines with character times and the hook lines; an older work: off),
+          // すべての行 or 使わない for the whole video; a line's own pin wins, and キメ lines are left to キメ.
+          F({ path: 'sung.hame', scopes: WORK, widget: 'choice', label: 'fld.hame', spec: { type: 'bool' },
+            options: [{ v: true, label: 'fld.hame.all' }, { v: false, label: 'fld.hame.none' }], auto: true, note: 'fld.hame.note',
+            noDice: true }),
         ]),
         // 写真・動画 (DESIGN_2_1 §11.7.3): the library, open when it holds something.
         sec('media', (ctx) => ctx.mediaCount > 0, [], { custom: 'media' }),
@@ -314,6 +331,9 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
           F({ cmd: { t: 'timing.set', key: 'tail' }, scopes: WORK, widget: 'number', label: 'fld.tail', spec: SPEC.timing }),
           F({ cmd: { t: 'timing.set', key: 'leadIn' }, scopes: WORK, widget: 'number', label: 'fld.leadIn', spec: SPEC.timing }),
           F({ cmd: { t: 'timing.set', key: 'outro' }, scopes: WORK, widget: 'number', label: 'fld.outro', spec: SPEC.timing }),
+          // 字の時間を歌に合わせる (歌ハメ, DESIGN_2_2 §6): 自動 = the document's default (on in a new work, off in an older one)
+          F({ path: 'sung.real', scopes: WORK, widget: 'toggle', label: 'fld.sungReal', spec: { type: 'bool' }, note: 'fld.sungReal.note',
+            autoDefault: true, noDice: true, basic: false }),
           F({ path: 'length', scopes: WORK, widget: 'time', label: 'fld.length' }),
           F({ path: 'bpm', scopes: WORK, widget: 'number', label: 'song.tempo', spec: SPEC.bpm }),
           F({ path: 'beatOffset', scopes: WORK, widget: 'number', label: 'fld.beatOffset', spec: SPEC.offset, basic: false }),
@@ -336,6 +356,10 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
           F({ path: 'start', scopes: LINE, widget: 'time', label: 'fld.start' }),
           F({ path: 'end', scopes: LINE, widget: 'time', label: 'fld.end' }),
           F({ derived: 'lineLength', scopes: LINE, widget: 'time', label: 'fld.duration', readOnly: true }),
+          // 字の時間 (歌ハメ, DESIGN_2_2 §6): how many steps and where their times come from; under it [1字ずつタップ] and,
+          // for a line with tapped times, [字の時間を消す] (the inspector's custom block sungTimes)
+          F({ key: 'sungTimes', derived: 'sungTimes', scopes: LINE, widget: 'text', label: 'fld.sungTimes', readOnly: true,
+            after: 'sungTimes' }),
         ]),
         sec('marks', true, [
           F({ cmd: { t: 'lyrics.row', key: 'emph' }, scopes: LINE, widget: 'words', label: 'fld.emph' }),
@@ -429,7 +453,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
         partField('arrange', 'kind.arrange'),
         partField('arrive', 'kind.arrive'),
         sharedField('arrive', 'dur', 'fld.dur'), sharedField('arrive', 'ease', 'fld.speedCurve'),
-        sharedField('arrive', 'order', 'fld.order'), sharedField('arrive', 'each', 'fld.each'),
+        sharedField('arrive', 'order', 'fld.order'), hameLineField(), sharedField('arrive', 'each', 'fld.each'),
         sharedField('arrive', 'flow', 'fld.flow', { basic: false }),
         partField('dwell', 'kind.dwell'), sharedField('dwell', 'amount', 'fld.amount'),
         partField('depart', 'kind.depart'), sharedField('depart', 'dur', 'fld.dur'), sharedField('depart', 'ease', 'fld.speedCurve'),

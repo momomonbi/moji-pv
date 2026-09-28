@@ -1,6 +1,6 @@
 /* 文字PVメーカー v2 — original work. explain(): why a slot has its value, and the alternatives — lazy, never in the Plan (DESIGN §4.16.8; DESIGN_2_1 §2.8, §3.9, §11.2.6). */
 MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media', 'planner/choose', 'planner/look',
-  'planner/plan', 'planner/fields'], (P, PINS, LY, MEDIA, CH, LK, PL, F) => {
+  'planner/plan', 'planner/fields', 'planner/sung'], (P, PINS, LY, MEDIA, CH, LK, PL, F, SU) => {
   'use strict';
 
   const SCOPE_OF = { 'pin:cut': 'cut', 'pin:line': 'line', 'pin:work': 'work' };
@@ -211,6 +211,8 @@ MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media
     }
     let why;
     if (from.startsWith('pin')) why = pinWhy(from, by);
+    // a value a named rule set (歌ハメ's order and dur, 'rule:sung'): that rule, before the plain 'rule' of motion speed
+    else if (SU.isRuleTag(from)) why = [{ code: 'rule', params: { rule: from.slice(5) } }];
     else if (from === 'mark') why = [{ code: 'rule', params: { rule: parsed.slot === 'split' ? 'marks' : 'lrc' } }];
     else if (from === 'rule') why = [{ code: 'rule', params: { rule: 'speed' } }];     // scaled by motion.speed (§4.3)
     else why = [{ code: 'rule', params: { rule: cat === 'param' ? 'auto' : parsed.slot } }];
@@ -276,7 +278,19 @@ MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media
     });
   }
 
+  // The reasons of a traced slot, with 歌ハメ's (DESIGN_2_2 §6): a chooser pick from its restricted list names the rule
+  // first (whyRule.sung.hame / sung.arrange); a pinned or aligned layout that moves the text itself says that 歌ハメ
+  // cannot be used on the cut (whyRule.sung.own).
   function tracedWhy(doc, registry, plan, cut, parsed, trace, d, value) {
+    const why = tracedWhyOf(doc, registry, plan, cut, parsed, trace, d, value);
+    if (!trace.hame || d.from === 'rule') return why;
+    const def = typeof value === 'string' ? registry.get(trace.kind || (parsed.part ? parsed.part.kind : ''), value) : null;
+    if (trace.hame === 'sung.arrange' && def && def.motion === 'own') return why.concat([{ code: 'rule', params: { rule: 'sung.own' } }]);
+    if (d.from && d.from.startsWith('pin')) return why;
+    return [{ code: 'rule', params: { rule: trace.hame } }].concat(why);
+  }
+
+  function tracedWhyOf(doc, registry, plan, cut, parsed, trace, d, value) {
     if (d.from && d.from.startsWith('pin')) {
       const pinned = pinWhy(d.from, d.by);
       if (trace.override && trace.override.rule === 'carry') return pinned.concat([{ code: 'rule', params: { rule: 'carry' } }]);
@@ -318,6 +332,17 @@ MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media
     return out;
   }
 
+  // 歌ハメ's switches and a line's character times (DESIGN_2_2 §6): read like the inspector reads them; a pin (the
+  // path's own, or the whole work's that a line inherits) is the reason, else nothing is said (自動's own text is the
+  // field's autoText).
+  function explainSetting(doc, plan, parsed, registry) {
+    const path = P.format(parsed);
+    const fs = F.fieldState(doc, plan, { level: 'work' }, path, { registry });
+    const from = fs.state === 'auto' ? 'auto' : fs.pinnedAt ? 'pin:' + fs.pinnedAt : 'auto';
+    const by = from === 'auto' ? undefined : fs.by || undefined;
+    return { path, value: fs.value, from, by, why: from === 'auto' ? [] : pinWhy(from, by), alts: [] };
+  }
+
   // explain(doc, plan, path, { registry }) → { path, value, from, by, why: [{ code, params }], alts: [{ key, w, masked }] }
   // Chooser slots re-run the planner with tracing on for exactly that slot (the same inputs, so the same value as
   // the Plan); other slots are read from the Plan and the pins. Nothing here touches `plan` or `doc`.
@@ -327,6 +352,7 @@ MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media
     const parsed = P.parse(path);
     const cat = F.categoryOf(parsed);
     if (cat === 'look') return explainLook(doc, plan, parsed, registry);
+    if (cat === 'rule' || cat === 'sung' || cat === 'sungTimes') return explainSetting(doc, plan, parsed, registry);
     const cut = cutFor(plan, parsed);
     if (!cut && cat !== 'line') {
       return { path, value: undefined, from: 'auto', by: undefined, why: [], alts: [] };

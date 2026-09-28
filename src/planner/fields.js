@@ -1,8 +1,8 @@
 /* 文字PVメーカー v2 — original work. Inspector field states, lock payloads and plan-value readers (DESIGN §4.16.8, §3.13, §3.6; DESIGN_2_1 §3.9). */
 MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyrics', 'core/schema', 'core/timing',
   'core/curve', 'core/shot', 'planner/params', 'planner/cast', 'planner/look', 'planner/segment', 'planner/plan',
-  'planner/extreme'],
-(P, PINS, REG, LY, S, TM, CV, SHOT, PA, CA, LK, SG, PL, XT) => {
+  'planner/extreme', 'planner/rules', 'planner/sung'],
+(P, PINS, REG, LY, S, TM, CV, SHOT, PA, CA, LK, SG, PL, XT, RU, SU) => {
   'use strict';
 
   const LOOK_NAMES = new Set(['mood', 'theme', 'season', 'bpm', 'beatOffset', 'readRate', 'length', 'titleCard']);
@@ -11,14 +11,18 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
   const RIG_SLOTS = new Set(['rig', 'rig.curve']);
   const TRACK_KINDS = new Set(['ground', 'atmos', 'seam']);
   const EL_DEFAULT = Object.freeze({ nudge: Object.freeze({ dx: 0, dy: 0, rot: 0, s: 1 }), fill: null, hide: false });
+  // 歌ハメ (PV22 P6, DESIGN_2_2 §6): 「字の時間を歌に合わせる」 is a switch of the new-work table at work scope ('rule'), the
+  // 歌ハメ switch a line or work value read from plan.sung ('sung'), a line's character times a line pin ('sungTimes').
+  const SUNG_CATS = Object.freeze({ 'sung.real': 'rule', 'sung.hame': 'sung', 'sung.times': 'sungTimes' });
 
   // --- what a path addresses ---------------------------------------------------------------------------------
 
   // 'look' (work-scope slots), 'line' (start/end/split/lang; since v2.1 also avoid, and season at line or cut scope,
   // which is a line value while work:season stays the look's), 't0', 'el', 'count', 'part', 'param' or 'value'
-  // (orient, text.*, motion.speed, cam.*, rig, rig.curve).
+  // (orient, text.*, motion.speed, cam.*, rig, rig.curve); PV22 'rule', 'sung' and 'sungTimes' (SUNG_CATS).
   function categoryOf(parsed) {
     const slot = parsed.slot;
+    if (!parsed.part && !parsed.el && SUNG_CATS[slot] !== undefined) return SUNG_CATS[slot];
     if (slot === 'season' && parsed.scope.kind !== 'work') return 'line';
     if (LOOK_NAMES.has(slot) || LOOK_PREFIX.test(slot) || (parsed.part && parsed.part.kind === 'texture')) return 'look';
     if (LINE_NAMES.has(slot)) return 'line';
@@ -201,12 +205,87 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
   }
   const NO_REFS = Object.freeze([]);
 
+  // --- 歌ハメ (PV22 P6, DESIGN_2_2 §6) ---------------------------------------------------------------------------
+
+  const BOOL = Object.freeze({ type: 'bool' });
+  const acceptBool = (v) => (typeof v === 'boolean' ? { v } : { bad: true });
+
+  // A switch of the new-work table read without the document: its work pin (coerced), else undefined (the document's
+  // default needs the document: fieldState reads planner/rules value).
+  function ruleValue(parsed, ix) {
+    const spec = RU.SPECS[parsed.slot];
+    const pin = ix && spec ? PINS.lookup(ix, LK.WORK_AT, parsed.slot) : null;
+    return pin && pin.from === 'pin:work' ? S.coerce(spec, pin.v) : undefined;
+  }
+
+  // 歌ハメ at a line: what the Plan decided (plan.sung, planner/sung decideHame); a line without sung timing is off.
+  // At the whole work: its pin (true = すべての行, false = 使わない), else null (自動).
+  function hameValue(plan, parsed, lineId, ix) {
+    if (!lineId) {
+      const pin = ix ? PA.resolvePin(ix, { cutKey: null, pinCutKey: null, lineId: null }, 'sung.hame', acceptBool, null) : null;
+      return pin ? pin.v : null;
+    }
+    const ls = plan && plan.sung ? plan.sung.get(lineId) : null;
+    return ls ? ls.hame : false;
+  }
+
+  // A line's character times as pinned (line/<id>:sung.times), else null.
+  function sungTimesValue(parsed, lineId, ix) {
+    const hit = ix && lineId ? PINS.lookup(ix, { cutKey: null, pinCutKey: null, lineId }, 'sung.times') : null;
+    return hit && hit.from === 'pin:line' ? hit.v : null;
+  }
+
+  function pinnedState(pin) { return pin.by === 'lock' ? 'locked' : pin.by === 'ai' ? 'ai' : 'pinned'; }
+
+  // 「字の時間を歌に合わせる」 (a switch of the new-work table): its work pin, else the document's default (on in a new
+  // work, off in an older one); 自動 while unpinned.
+  function ruleState(doc, parsed, path, ix) {
+    const own = (doc.pins || {})[path] || null;
+    const schema = RU.SPECS[parsed.slot] || null;
+    const value = RU.value(doc, ix, parsed.slot);
+    const fs = { path, value, display: null, state: 'auto', pinnedAt: null, by: null, schema, autoText: null, canPinAt: ['work'],
+      inactiveReason: null, warn: null };
+    if (own) Object.assign(fs, { state: pinnedState(own), pinnedAt: 'work', by: own.by });
+    fs.display = displayOf(parsed, value, null, 'rule', schema, doc);
+    fs.pinAt = own ? path : null;
+    return fs;
+  }
+
+  // 歌ハメ and a line's character times. 歌ハメ at a line: its own pin, else the whole work's (inherited, ↑) where it
+  // reaches the line, else 自動 with what 自動 decided there (autoText sung.auto.times | hook | kime | off). At the whole
+  // work: its pin, else 自動 (in a new work: the lines with character times and the hook lines; in an older one: off).
+  function sungState(doc, plan, parsed, path, ix, cat) {
+    const pins = doc.pins || {};
+    const own = pins[path] || null;
+    const lineId = parsed.scope.kind === 'line' ? parsed.scope.id : null;
+    const schema = cat === 'sung' ? BOOL : null;
+    const fs = {
+      path, value: valueAt(plan, null, parsed, null, ix), display: null, state: 'auto', pinnedAt: null, by: null, schema,
+      autoText: null, canPinAt: canPinAt(parsed), inactiveReason: null, warn: warnOf(plan, [path]),
+    };
+    if (own) Object.assign(fs, { state: pinnedState(own), pinnedAt: parsed.scope.kind, by: own.by });
+    else if (cat === 'sung' && lineId) {
+      const ls = plan && plan.sung ? plan.sung.get(lineId) : null;
+      const why = ls ? ls.hameWhy : 'off';
+      const work = pins['work:sung.hame'];
+      if (why === 'pin:work' && work) Object.assign(fs, { state: 'inherited', pinnedAt: 'work', by: work.by || null });
+      else fs.autoText = ['sung.auto.' + (why === 'times' || why === 'hook' || why === 'kime' ? why : 'off'), {}];
+    } else if (cat === 'sung') fs.autoText = [RU.gen(doc) >= 1 ? 'fld.hame.autoNote' : 'sung.auto.off', {}];
+    fs.display = cat === 'sungTimes' ? (Array.isArray(fs.value) ? String(fs.value.length) : ['val.none', {}])
+      : displayOf(parsed, fs.value, null, cat, schema, doc);
+    fs.pinAt = own ? path : null;
+    return fs;
+  }
+
   // valueAt(plan, cut, parsed, registry, ix?) → the value a path shows at one cut (cut may be null for work/line
   // slots). ix = the document's pin index, for the look values that are requests rather than Plan values (weights,
   // the reading rate) and the line slots season and avoid.
   function valueAt(plan, cut, parsed, registry, ix) {
     const cat = categoryOf(parsed);
     if (cat === 'look') return lookValue(plan, parsed, registry, ix);
+    if (cat === 'rule') return ruleValue(parsed, ix);
+    if (cat === 'sung') return hameValue(plan, parsed, cut ? cut.line : parsed.scope.lineId || null, ix);
+    if (cat === 'sungTimes') return sungTimesValue(parsed, cut ? cut.line : parsed.scope.lineId || null, ix);
     if (cat === 'line') return lineValue(plan, parsed, cut ? cut.line : parsed.scope.lineId, ix);
     if (!cut) return undefined;
     if (cat === 't0') return cut.t0;
@@ -235,6 +314,9 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
   function schemaOf(registry, plan, parsed, cuts) {
     const cat = categoryOf(parsed);
     const slot = parsed.slot;
+    if (cat === 'rule') return RU.SPECS[slot] || null;
+    if (cat === 'sung') return BOOL;
+    if (cat === 'sungTimes') return null;
     if (cat === 'look') {
       if (slot === 'mood' || slot === 'theme') return { type: 'part', kind: slot, of: registry.keys(slot), none: false };
       if (parsed.part && !parsed.part.param) {
@@ -283,7 +365,9 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
   // at the path's scope and every broader one (special cuts have no line).
   function canPinAt(parsed) {
     const cat = categoryOf(parsed);
-    if (cat === 'look') return ['work'];
+    if (cat === 'look' || cat === 'rule') return ['work'];
+    if (cat === 'sung') return parsed.scope.kind === 'work' ? ['work'] : ['line', 'work'];
+    if (cat === 'sungTimes') return ['line'];
     if (cat === 'line') return parsed.slot === 'season' ? ['line', 'work'] : ['line'];
     if (cat === 't0') return ['cut'];
     const kind = parsed.scope.kind;
@@ -432,6 +516,8 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
     const parsed = P.parse(path);
     const cat = categoryOf(parsed);
     const ix = pinIndexOf(doc.pins);
+    if (cat === 'rule') return ruleState(doc, parsed, path, ix);
+    if (cat === 'sung' || cat === 'sungTimes') return sungState(doc, plan, parsed, path, ix, cat);
     const perCut = cat !== 'look' && !(cat === 'line' && parsed.scope.kind === 'line');
     const cuts = perCut ? cutsFor(plan, sel, parsed) : [];
     const values = perCut ? cuts.map((c) => valueAt(plan, c, parsed, registry, ix)) : [valueAt(plan, null, parsed, registry, ix)];
@@ -463,7 +549,8 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
     } else if (sources.length && sources.every((s) => s.from === sources[0].from && s.from.startsWith('pin'))) {
       sharedPin(fs, sources, parsed.scope.kind);
     } else if (sources.length && sources.every((s) => s.from === 'mark')) fs.state = 'mark';
-    else if (sources.length && sources.every((s) => s.from === 'rule')) fs.state = 'derived';
+    // a value a rule sets (motion speed 'rule', or a named rule: 歌ハメ's 'rule:sung') is derived
+    else if (sources.length && sources.every((s) => SU.isRuleFrom(s.from))) fs.state = 'derived';
     else if (sources.some((s) => s.from.startsWith('pin'))) fs.state = 'mixed';
     fs.display = fs.state === 'mixed' ? ['state.mixed', {}] : displayOf(parsed, fs.value, registry, cat, fs.schema, doc);
     // An automatic depth of a photo or video names its rule (DESIGN_2_1 §11.9.2, §11.9.5 「自動: …」).

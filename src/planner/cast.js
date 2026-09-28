@@ -779,6 +779,8 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
         : acceptPart(ctx, kind, cut.role, { none: list, scope: kind === 'ornament' ? 'cut' : null }), ctx.warn);
       const restrict = o.restrict || null;
       let d, ad = null, forced = null;
+      // for explain: the 歌ハメ rule in effect on this slot (a pinned or aligned part still names it)
+      if (trace && restrict && o.rule) trace.hame = o.rule;
       if (pin) {
         pinWarnings(ctx, kind, pin.v, pin, st.cond);
         d = pinDecision(pin);

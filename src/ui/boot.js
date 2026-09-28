@@ -791,6 +791,20 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
     def('tap.seek', (c, a) => app.tap.seekBy(a));
     def('tap.pause', () => app.tap.pause());
     def('tap.finish', () => app.tap.finish());
+    // 1字ずつタップ (歌ハメ, DESIGN_2_2 §6): the given line, else the selected one, else the line at the playhead; it needs
+    // the song (the characters are tapped to the singing)
+    const lineForUnits = (a) => {
+      if (a && a.lineId && app.plan && app.plan.lines.some((l) => l.id === a.lineId)) return a.lineId;
+      const ids = selLines();
+      if (ids.length === 1) return ids[0];
+      const now = app.time();
+      const at = app.plan ? app.plan.lines.find((l) => l.t0 <= now && now < l.t1) : null;
+      return at ? at.id : null;
+    };
+    def('tap.units', (c, a) => {
+      const id = lineForUnits(a);
+      return id ? app.tap.startUnits(id, a || null) : false;
+    }, { enabled: () => hasLines() && !!(app.songReady && app.songReady()) && !!lineForUnits(null) && !(app.tap && app.tap.active()) });
 
     def('time.pinStart', () => {
       const ids = selLines();
@@ -1149,7 +1163,9 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
     app.io = projectIo.create(app);
     app.io.begin();
     app.media = mediaIo.mount(app);                                           // photos and videos (DESIGN_2_1 §11.7)
-    app.tap = tapUi.mount(app);
+    // the tap panel: line tapping (ui/tap) and 1字ずつタップ (ui/tap_units, 歌ハメ DESIGN_2_2 §6) behind one API
+    const tapUnits = MV.use('ui/tap_units');
+    app.tap = tapUnits.combine(tapUi.mount(app), tapUnits.mount(app));
     app.replan();
     app.shell = shell.mount(app, document.getElementById('app'));
     mountDetails(app);                                                        // WP8b views (UI part 2)

@@ -259,6 +259,11 @@ test('UI keys built at run time exist for every value they can take', () => {
   const schedule = fs.readFileSync(path.join(SRC, 'export', 'schedule.js'), 'utf8');
   for (const m of schedule.matchAll(/items\.push\(\{\s*code:\s*'([a-z-]+)'/g)) want.push('exp.pre.' + m[1]);
   want.push('exp.pre.memory.confirm', 'exp.pre.flash-fix', 'exp.pre.overfull', 'exp.pre.font-fallback');
+  // 歌ハメ (DESIGN_2_2 §6): what 自動 decided on a line (planner/fields), and where a line's character times come from
+  each('sung.auto.', ['times', 'hook', 'kime', 'off']);
+  each('sung.src.', MV.use('planner/sung').SRC_NAMES.concat(['ai']));
+  each('tapu.rate.', ['1', '075', '05']);
+  each('tapu.step.', ['mora', 'phrase']);
   const missing = [...new Set(want)].filter((k) => !(k in STRINGS));
   assert.deepEqual(missing, []);
 });

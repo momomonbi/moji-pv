@@ -418,6 +418,81 @@ test('aligned repeats: the 歌ハメ rule runs after the copy, and a rule-set va
   }
 });
 
+// --- explain and the inspector's field states ----------------------------------------------------------------------
+
+test('explain and fields: 歌ハメ names its rule; rule-set values are derived; the switches read the Plan', () => {
+  const EX = MV.use('planner/explain');
+  const F = MV.use('planner/fields');
+  const UF = MV.use('ui/fields');
+  const doc = old('basic', { 'work:sung.hame': pin(true) });
+  const p = plan(doc);
+  const cut = p.cuts.find((c) => c.sung && c.line === 'r5');
+  const ex = (path) => EX.explain(doc, p, path, { registry: REG });
+  const rules = (e) => e.why.filter((w) => w.code === 'rule').map((w) => w.params.rule);
+  // the entrance: picked from the restricted list; its order and dur: the rule
+  assert.equal(rules(ex('cut/' + cut.key + ':arrive'))[0], 'sung.hame');
+  assert.deepEqual(rules(ex('cut/' + cut.key + ':arrive.order')), ['sung']);
+  assert.deepEqual(rules(ex('cut/' + cut.key + ':arrive.dur')), ['sung']);
+  assert.equal(ex('cut/' + cut.key + ':arrive.order').from, 'rule:sung');
+  assert.equal(rules(ex('cut/' + cut.key + ':arrange'))[0], 'sung.arrange');
+  // motion speed's plain 'rule' still explains as speed
+  const sped = old('basic', { 'work:motion.speed': pin(2) });
+  const sp = plan(sped);
+  const sc = sp.cuts.find((c) => c.slots.arrive.pfrom && c.slots.arrive.pfrom.dur === 'rule');
+  assert.ok(sc, 'a cut whose dur motion speed scaled');
+  assert.deepEqual(rules(EX.explain(sped, sp, 'cut/' + sc.key + ':arrive.dur', { registry: REG })), ['speed']);
+  // a pinned layout that moves the text itself: 歌ハメ cannot be used there, and the why says so
+  const tick = old('basic', { 'work:sung.hame': pin(true), 'line/r5:arrange': pin('tickerMarquee') });
+  const tp = plan(tick);
+  const tc = tp.cuts.find((c) => c.line === 'r5');
+  const tw = EX.explain(tick, tp, 'cut/' + tc.key + ':arrange', { registry: REG });
+  assert.equal(tw.why[0].code, 'pin');
+  assert.deepEqual(rules(tw), ['sung.own']);
+  // 文字の出方 / 長さ of a 歌ハメ cut: derived (read-only); of another cut: automatic
+  const fs = (path, d = doc, pl = p) => F.fieldState(d, pl, { level: 'cut', key: cut.key }, path, { registry: REG });
+  assert.equal(fs('cut/' + cut.key + ':arrive.order').state, 'derived');
+  assert.equal(fs('cut/' + cut.key + ':arrive.dur').state, 'derived');
+  const plainDoc = old('basic');
+  const plainPlan = plan(plainDoc);
+  assert.equal(F.fieldState(plainDoc, plainPlan, { level: 'cut', key: cut.key }, 'cut/' + cut.key + ':arrive.order', { registry: REG }).state, 'auto');
+  // the switch at a line: inherited from the whole work; its own pin; 自動 with what 自動 decided
+  const line = fs('line/r5:sung.hame');
+  assert.deepEqual([line.value, line.state, line.pinnedAt], [true, 'inherited', 'work']);
+  const work = fs('work:sung.hame');
+  assert.deepEqual([work.value, work.state, work.pinnedAt], [true, 'pinned', 'work']);
+  const own = old('basic', { 'line/r5:sung.hame': pin(false) });
+  const ownFs = F.fieldState(own, plan(own), { level: 'line', ids: ['r5'] }, 'line/r5:sung.hame', { registry: REG });
+  assert.deepEqual([ownFs.value, ownFs.state, ownFs.pinnedAt], [false, 'pinned', 'line']);
+  const nw = newWork('basic');
+  const np = plan(nw);
+  const auto = (id) => F.fieldState(nw, np, { level: 'line', ids: [id] }, 'line/' + id + ':sung.hame', { registry: REG });
+  assert.deepEqual([auto('r4').value, auto('r4').state, auto('r4').autoText], [true, 'auto', ['sung.auto.hook', {}]]);
+  assert.deepEqual([auto('r5').value, auto('r5').autoText], [false, ['sung.auto.off', {}]]);
+  assert.deepEqual(F.fieldState(nw, np, { level: 'work' }, 'work:sung.hame', { registry: REG }).autoText, ['fld.hame.autoNote', {}]);
+  assert.deepEqual(F.fieldState(plainDoc, plainPlan, { level: 'work' }, 'work:sung.hame', { registry: REG }).autoText, ['sung.auto.off', {}]);
+  assert.deepEqual(F.fieldState(plainDoc, plainPlan, { level: 'line', ids: ['r5'] }, 'line/r5:sung.hame', { registry: REG }).autoText,
+    ['sung.auto.off', {}], 'an older work without sung timing: 自動 is off');
+  const timed = newWork('basic', { 'line/r6:sung.times': pin([[0, 0], [2, 0.5]], 'tap') });
+  const tfs = F.fieldState(timed, plan(timed), { level: 'line', ids: ['r6'] }, 'line/r6:sung.hame', { registry: REG });
+  assert.deepEqual([tfs.value, tfs.autoText], [true, ['sung.auto.times', {}]]);
+  // 「字の時間を歌に合わせる」: the document's default while unpinned, the pin otherwise
+  const real = (d) => F.fieldState(d, plan(d), { level: 'work' }, 'work:sung.real', { registry: REG });
+  assert.deepEqual([real(nw).value, real(nw).state], [true, 'auto']);
+  assert.deepEqual([real(plainDoc).value, real(plainDoc).state], [false, 'auto']);
+  const offReal = newWork('basic', { 'work:sung.real': pin(false) });
+  assert.deepEqual([real(offReal).value, real(offReal).state], [false, 'pinned']);
+  // a line's character times: its pin, set by tapping
+  const st = F.fieldState(timed, plan(timed), { level: 'line', ids: ['r6'] }, 'line/r6:sung.times', { registry: REG });
+  assert.deepEqual([st.value, st.state, st.by, st.canPinAt], [[[0, 0], [2, 0.5]], 'pinned', 'tap', ['line']]);
+  // explain of the switches: the pin, or nothing (自動's text is the field's)
+  assert.equal(EX.explain(doc, p, 'line/r5:sung.hame', { registry: REG }).why[0].params.scope, 'work');
+  assert.deepEqual(EX.explain(nw, np, 'line/r4:sung.hame', { registry: REG }).why, []);
+  // the inspector rows: settings, never drawn (no 振り直し)
+  const rows = UF.FIELDS.filter((f) => f.path === 'sung.hame' || f.path === 'sung.real');
+  assert.ok(rows.length >= 3, rows.map((f) => f.id).join(' '));
+  for (const f of rows) assert.equal(f.noDice, true, f.id);
+});
+
 // --- (g) engine ---------------------------------------------------------------------------------------------------
 
 function hameScene(pins, pick) {

@@ -55,6 +55,7 @@ MV.def('ui/palette', ['ui/dom', 'ui/icons', 'ui/keys', 'ui/selection', 'i18n/str
       'edit.history': 'rireki', 'help.syntax': 'kihou', 'app.lang': 'gengo english nihongo', 'look.details': 'kuwashiku',
       'play.fromLine': 'kono gyou saisei', 'view.foldSteps': 'tatamu', 'pref.safeArea': 'anzen waku', 'ai.prep': 'shitagoshirae',
       'ai.looks': 'sanan', 'ai.align': 'taimingu',
+      'tap.units': 'ichijizutsu tappu utahame',          // 1字ずつタップ (歌ハメ)
       // >写真 finds the photo and video actions by their labels (写真・動画を読み込む… …, DESIGN_2_1 §11.7), and these by romaji.
       'media.import': 'shashin douga yomikomu gazou', 'media.library': 'shashin douga ichiran gazou',
       'media.relink': 'shashin douga tsunaginaosu', 'file.saveLight': 'karui hozon json',
