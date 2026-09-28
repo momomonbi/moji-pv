@@ -4,6 +4,7 @@
 //   node tests/update_golden.js           recompute and rewrite the golden files that can be computed today
 //   node tests/update_golden.js --check   recompute and compare; exit 1 on a difference; writes nothing
 //   node tests/update_golden.js --v2      also rewrite frame_hashes_v2.json (on purpose only; see below)
+//   node tests/update_golden.js --only=<file>   compute (and write, or with --check compare) that one golden only
 // Plan hashes need planner/plan; frame hashes need engine/facade, engine/render/record and engine/text/fake_measure.
 // A golden whose modules do not exist yet is left as it is (or written as an empty placeholder when missing).
 // Registry: the full catalog (parts/catalog) when it exists, else the stub parts (tests/fixtures/stub_parts.js).
@@ -29,6 +30,13 @@
 //                     basic project with the switch on and every EXTREME preset on one cut, and a 9:16 one with the switch
 //                     at 0.5 on the chorus only; rendered like the frames above (motion-blur copies included in the ops).
 //                     Every document without the switch renders as before: the files above match first.
+//   project_sung.json { "registry": …, "measurer": "fake", "docs": { "<key> <fixture>@<aspect>#<seed>": { "plan", "frames": [40] } } }
+//                     歌ハメ (DESIGN_2_2 §6; tests/helpers/sung_docs.js goldenDocs), 16:9 and 9:16, two seeds each, one
+//                     keyed entry per document: A1 the lrc fixture with 「字の時間を歌に合わせる」 (word tags, the estimate,
+//                     sung pieces); A2 that with 歌ハメ for the whole video and one tapped line; A3 the basic fixture as a
+//                     new work (the hook lines); A4 the repeat fixture as a new work with a tapped repeat (copies both
+//                     ways, aligned repeats). New works pin the other packages' switches off. Rendered like the frames
+//                     above; every document without a sung.* pin or look.gen plans as before.
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -36,6 +44,7 @@ const { load } = require('./helpers/load.js');
 const corpus = require('./helpers/corpus.js');
 const FM = require('./helpers/fake_media.js');
 const XD = require('./helpers/extreme_docs.js');
+const SD = require('./helpers/sung_docs.js');
 
 const MV = load();
 const H = MV.use('core/hash');
@@ -110,6 +119,12 @@ async function extremeGolden(reg, info) {
   return { registry: info, measurer: 'fake', docs };
 }
 
+async function sungGolden(reg, info) {
+  const docs = {};
+  for (const { name, doc } of SD.goldenDocs()) docs[name] = await renderDoc(reg, doc, null);
+  return { registry: info, measurer: 'fake', docs };
+}
+
 function readGolden(file) {
   try { return JSON.parse(fs.readFileSync(path.join(GOLDEN, file), 'utf8')); } catch (e) { return null; }
 }
@@ -119,6 +134,8 @@ function text(obj) { return JSON.stringify(obj, null, 1) + '\n'; }
 async function main() {
   const check = process.argv.includes('--check');
   const rewriteV2 = process.argv.includes('--v2');
+  const onlyArg = process.argv.find((a) => a.startsWith('--only='));
+  const only = onlyArg ? onlyArg.slice('--only='.length) : null;
   const { reg, info } = pickRegistry();
   const ENGINE = ['engine/facade', 'engine/render/record', 'engine/text/fake_measure'];
   // The frozen job comes first, so a difference there stops a plain run before any file is written.
@@ -135,10 +152,13 @@ async function main() {
       empty: { registry: null, measurer: 'fake', plan: null, frames: [] }, make: () => repeatGolden(reg, info) },
     { file: 'project_extreme.json', needs: ENGINE.concat(['planner/plan', 'planner/extreme', 'engine/scene/xshot']),
       empty: { registry: null, measurer: 'fake', docs: {} }, make: () => extremeGolden(reg, info) },
+    { file: 'project_sung.json', needs: ENGINE.concat(['planner/plan', 'planner/sung']),
+      empty: { registry: null, measurer: 'fake', docs: {} }, make: () => sungGolden(reg, info) },
   ];
   let failed = false;
   fs.mkdirSync(GOLDEN, { recursive: true });
   for (const job of jobs) {
+    if (only && job.file !== only) continue;
     const missing = job.needs.filter((id) => !MV.has(id));
     const current = readGolden(job.file);
     if (missing.length) {

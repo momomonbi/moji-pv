@@ -726,3 +726,44 @@ test('planning speed: sung timing adds little to re-planning a new work', (t) =>
   }
   assert.ok(least >= 0.9, 'casts reused while typing: ' + least.toFixed(3));
 });
+
+// --- the golden ------------------------------------------------------------------------------------------------------
+
+test('the 歌ハメ golden: its documents plan and render the golden frames (tests/golden/project_sung.json)', async () => {
+  const SD = require('../helpers/sung_docs.js');
+  const golden = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'golden', 'project_sung.json'), 'utf8'));
+  const { createEngine } = MV.use('engine/facade');
+  const { createRecorder } = MV.use('engine/render/record');
+  const { fakeMeasurer } = MV.use('engine/text/fake_measure');
+  const H = MV.use('core/hash');
+  assert.equal(golden.registry.version, REG.version, 'made with the current catalog');
+  const docs = SD.goldenDocs();
+  assert.deepEqual(docs.map((d) => d.name), Object.keys(golden.docs), 'the entries, in order');
+  for (const { name, doc } of docs) {
+    const want = golden.docs[name];
+    const rec = createRecorder();
+    const engine = createEngine({ registry: REG, canvas: rec.factory, measurer: fakeMeasurer(), fonts: null, assets: null });
+    const { plan: p } = engine.setDoc(doc);
+    assert.equal(p.hash, want.plan, name);
+    // each document shows what it is there for
+    const key = name.slice(0, 2);
+    const hame = p.lines.filter((l) => p.sung.get(l.id) && p.sung.get(l.id).hame).map((l) => l.id);
+    if (key === 'A1') assert.ok(p.sung.get('r4').by === 'lrc' && !hame.length, name);
+    if (key === 'A2') assert.ok(p.sung.get('r3').by === 'pin' && hame.length === p.lines.filter((l) => p.sung.get(l.id)).length, name);
+    if (key === 'A3') assert.deepEqual(hame, ['r4', 'ra', 'rd'], name);
+    if (key === 'A4') assert.ok(['ra', 'rm', 'ru', 'rv'].every((id) => hame.includes(id)) && p.sung.get('ra').by === 'copy', name);
+    await engine.prepare(0, p.duration, { export: true });
+    const [w, h] = D.DESIGN_SIZE[doc.look.aspect];
+    const k = 360 / Math.min(w, h);
+    const made = rec.factory.create(Math.round(w * k), Math.round(h * k), { alpha: false });
+    const surface = { canvas: made.canvas, ctx: made.ctx, w: Math.round(w * k), h: Math.round(h * k) };
+    const frames = [];
+    for (let i = 0; i < 40; i++) {
+      const before = rec.ops().length;
+      engine.renderFrame(surface, (p.duration * (i + 0.5)) / 40, { quality: 'export', pick: false, scale: surface.w / p.design.w });
+      frames.push(H.hashJSON(rec.ops().slice(before)));
+    }
+    engine.dispose();
+    assert.deepEqual(frames, want.frames, name);
+  }
+});
