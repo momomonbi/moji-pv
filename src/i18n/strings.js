@@ -2184,4 +2184,12 @@ MV.def('i18n/strings', [], () => ({
   // --- PV22 P5 (タイミング) ---
 
   // --- PV22 P6 (歌ハメ) ---
+  'whyRule.sung.hame': ['歌ハメなので、1字ずつ出る入りから選んだ', 'Sung reveal: chosen from the entrances that show one character at a time'],
+  'whyRule.sung': ['歌ハメなので、歌に合わせて出す', 'Sung reveal: each character comes in with the singing'],
+  'whyRule.sung.arrange': ['歌ハメなので、文字を自分で動かす構図は使わない', 'Sung reveal: layouts that move the text themselves are left out'],
+  'whyRule.sung.own': ['この構図は文字を自分で動かすので、歌ハメは使えません', 'This layout moves the text itself, so sung reveal cannot be used'],
+  'warn.sung-words': ['歌詞の単語タグの一部が行の時間に合わないため、使いませんでした',
+    'Some word tags in the lyrics do not fit the line\'s time and were not used'],
+  'warn.hame-empty': ['1字ずつ出る入りがどれも使えないため、歌ハメにできませんでした',
+    'None of the entrances that show one character at a time can be used here, so sung reveal was not applied'],
 }));
