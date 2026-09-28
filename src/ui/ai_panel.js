@@ -447,7 +447,8 @@ MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/a
       const agree = h('input', { type: 'checkbox', 'data-ctl': 'consent' });
       const consentCard = h('div', { class: 'ai-consent' }, consentText,
         h('label', { class: 'check-row' }, agree, h('span', { text: t('ai.song.agree') })));
-      const songTools = ['transcribe', 'align', 'analyze'].map((tool) => h('button', { class: 'btn small', type: 'button',
+      // AIで字の時間 (歌ハメ, DESIGN_2_2 §6): the selected lines, else up to 12 from the playhead (wordLines)
+      const songTools = ['transcribe', 'align', 'analyze', 'words'].map((tool) => h('button', { class: 'btn small', type: 'button',
         'data-tool': tool, text: t('ai.tool.' + tool) }));
       const song = h('div', { class: 'ai-song' }, h('h4', { class: 'ai-h4' }, I.icon('music', { size: 15 }), t('ai.song.title')),
         songReason, consentCard, h('div', { class: 'row-actions' }, songTools));
@@ -455,13 +456,14 @@ MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/a
         h('h3', { class: 'ai-h', text: t('ai.tools') }), reason, prep, looks, edit, song);
 
       dom.on(root, 'click', '[data-tool]', (ev, b) => {
-        if (b.dataset.tool !== 'direct' && b.dataset.tool !== 'camera') ctl.run(b.dataset.tool);
+        if (b.dataset.tool === 'words') ctl.run('words', { lineIds: wordLines(app) });
+        else if (b.dataset.tool !== 'direct' && b.dataset.tool !== 'camera') ctl.run(b.dataset.tool);
       });
       agree.addEventListener('change', () => ctl.consent(agree.checked));
 
       function setDisabled(btn, why) {
         btn.disabled = !!why;
-        btn.title = why ? t(why) : '';
+        btn.title = why ? t(why) : btn.dataset.tool === 'words' ? t('ai.hint.words') : '';
       }
 
       function update(st) {
@@ -505,6 +507,18 @@ MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/a
       }
 
       return { root, update, focusTool, direct };
+    }
+
+    // The lines AIで字の時間 asks about: the selected ones (a cut's line), else those from the playhead on; at most
+    // SONG.MAX_WORD_LINES (ai/song keeps the first of them).
+    function wordLines(app) {
+      const p = app.plan;
+      if (!p || !p.lines.length) return [];
+      const sel = S.validate(app.view.state.sel, p);
+      const ids = sel.level === 'line' ? sel.ids.slice() : [S.lineOfSel(sel)].filter(Boolean);
+      if (ids.length) return ids;
+      const now = typeof app.time === 'function' ? app.time() : 0;
+      return p.lines.filter((l) => l.t1 > now).slice(0, 12).map((l) => l.id);
     }
 
     // ---- mount ------------------------------------------------------------------------------------------------------------

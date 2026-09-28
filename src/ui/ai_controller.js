@@ -8,8 +8,9 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
     // 'material' (素材づくり) and 'vision' (写真の説明, DESIGN_2_1 §11.6.2). Their request builders and validators are
     // ai/direct, ai/recipe and ai/vision, injected (deps.direct, deps.recipe, deps.vision) so the Node tests can fake the
     // answers.
-    const TOOLS = Object.freeze(['prep', 'looks', 'edit', 'transcribe', 'align', 'analyze', 'direct', 'material', 'vision']);
-    const SONG_TOOLS = Object.freeze(['transcribe', 'align', 'analyze']);
+    const TOOLS = Object.freeze(['prep', 'looks', 'edit', 'transcribe', 'align', 'analyze', 'direct', 'material', 'vision', 'words']);
+    // words: AIで字の時間 (歌ハメ, DESIGN_2_2 §6): when each word of a few lines is sung, as their character times
+    const SONG_TOOLS = Object.freeze(['transcribe', 'align', 'analyze', 'words']);
     // 歌詞 / 全体 / 行ごと / 時間 (§6.4.10.5), then the groups of area instructions (DESIGN_2_1 §5.6; the last four of
     // ai/changes GROUPS): 素材 / 区画 / カット / 区画の外.
     const AREA_GROUP_ORDER = Object.freeze(['materials', 'area', 'cuts', 'outside']);   // headings ai.grp.*
@@ -600,7 +601,7 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
           const why = songBlocked();
           if (why) return why;
           if (!hasConsent()) return 'ai.song.needConsent';
-          if (tool !== 'align') return null;
+          if (tool !== 'align' && tool !== 'words') return null;
         }
         const plan = host.plan;
         return plan && Array.isArray(plan.lines) && plan.lines.length ? null : 'ai.needLines';
@@ -761,6 +762,11 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
           const res = await call(conn, req, signal, [part]);
           return { res, out: SONG.alignChanges(sent.doc, sent.plan, res.json, song.seconds, Object.assign(valid, { lines: req.lines })) };
         }
+        if (tool === 'words') {
+          const req = SONG.wordsRequest(sent.doc, sent.plan, opts.lineIds, lang);
+          const res = await call(conn, req, signal, [part]);
+          return { res, out: SONG.wordsChanges(sent.doc, sent.plan, res.json, song.seconds, Object.assign(valid, { lines: req.lines })) };
+        }
         const res = await call(conn, SONG.analyzeRequest(lang), signal, [part]);
         return { res, out: SONG.analyzeChanges(sent.doc, res.json, song.seconds, valid) };
       }
@@ -839,6 +845,7 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
           o = Object.assign({}, o, { ids });
         }
         if (tool === 'edit' && !String(o.instruction || '').trim()) return false;
+        if (tool === 'words' && !(Array.isArray(o.lineIds) && o.lineIds.length)) return false;
         const ac = new AbortController();
         seq += 1;
         const id = host.now().toString(36) + '-' + seq;

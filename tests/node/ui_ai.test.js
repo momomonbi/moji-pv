@@ -596,6 +596,33 @@ test('曲を使う: Gemini + a song + consent for this project; audio only then;
   assert.equal(ctl.hasConsent(), false, 'consent is for this project only');
 });
 
+test('AIで字の時間 (歌ハメ): a song tool for the chosen lines; its times and the automatic start come back as one review', async () => {
+  const { host, ctl, seen } = setup([]);
+  const line = host.plan.lines[0];
+  const mm = (x) => { const s = Math.max(0, x); return Math.floor(s / 60) + ':' + (s % 60).toFixed(2).padStart(5, '0'); };
+  const answer = { note: '', lines: [{ i: 0, words: [{ text: '夜明けの', start: mm(line.t0 + 0.05) }, { text: '街を', start: mm(line.t0 + 0.6) },
+    { text: '走る', start: mm(line.t0 + 1.1) }] }] };
+  const { host: h2, ctl: c2, seen: s2 } = setup([answer]);
+  assert.equal(ctl.blocked('words'), 'ai.song.noSong');
+  withSong(h2, true);
+  c2.consent(true);
+  assert.equal(c2.blocked('words'), null);
+  assert.equal(await c2.run('words', { lineIds: [] }), false, 'no lines chosen: nothing is sent');
+  assert.equal(s2.length, 0);
+  assert.equal(await c2.run('words', { lineIds: [h2.plan.lines[0].id] }), true);
+  const parts = s2[0].body.contents[0].parts;
+  assert.equal(parts[0].inlineData.mimeType, 'audio/wav');
+  const r = c2.state.review;
+  assertTexts(r);
+  assert.deepEqual(r.changes.map((c) => [c.kind, c.field, c.to.length]), [['time', 'sung.times', 3]]);
+  c2.apply();
+  const l0 = h2.plan.lines[0].id;
+  assert.equal(h2.doc.pins['line/' + l0 + ':sung.times'].by, 'ai');
+  assert.equal(h2.doc.pins['line/' + l0 + ':start'].by, 'ai', 'the automatic start is pinned with the times');
+  assert.deepEqual(h2.store.peek().undo, ['undo.ai', { tool: '字の時間', n: 1 }], 'one undo step');
+  assert.equal(seen.length, 0);
+});
+
 test('曲を使う is Gemini only', () => {
   const { host, ctl } = setup([]);
   withSong(host, true);

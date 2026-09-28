@@ -17,6 +17,7 @@ const TM = MV.use('core/timing');
 const PINS = MV.use('core/pins');
 const CMD = MV.use('core/commands');
 const ST = MV.use('core/store');
+const T = MV.use('i18n/t');
 
 function fakeFetch(status, body, seen, headers) {
   return async (url, init) => {
@@ -318,6 +319,73 @@ test('alignment is allowed over LRC stamps: the pin wins and the review row says
   assert.equal(after.sheet.rows[0].src, '[00:05.00]A行', 'the stamp stays in the text');
   const retimed = CMD.reduce(doc, { t: 'lyrics.row', rowId: doc.sheet.rows[0].id, src: '[00:07.00]A行' });
   assert.equal(CH.markStale(retimed, null, r.changes)[0].stale, true, 'a changed stamp makes the row stale');
+});
+
+// ---- AIで字の時間 (歌ハメ, DESIGN_2_2 §6) -------------------------------------------------------------------------------
+
+test('AIで字の時間: the request sends up to 12 chosen lines, each with where it is on screen', () => {
+  const doc = docOf(Array.from({ length: 14 }, (_, i) => '行' + i).join('\n'));
+  const plan = planOf(doc);
+  const one = SONG.wordsRequest(doc, plan, [plan.lines[2].id], 'en');
+  deepEqual(one.lines, [{ i: 0, lineId: plan.lines[2].id, text: '行2' }]);
+  const mmss = (x) => SONG.lrcTag(x).slice(1, -1);
+  assert.ok(one.prompt.includes('0: 行2 (' + mmss(plan.lines[2].t0) + ' – ' + mmss(plan.lines[2].t1) + ')'), one.prompt);
+  assert.match(one.system, /English/);
+  assert.equal(one.schema, SONG.WORDS_SCHEMA);
+  const all = SONG.wordsRequest(doc, plan, plan.lines.map((l) => l.id).reverse(), 'ja');
+  deepEqual(all.lines.map((l) => l.lineId), plan.lines.slice(0, SONG.MAX_WORD_LINES).map((l) => l.id), 'in time order, at most 12');
+  deepEqual(SONG.wordsRequest(doc, plan, [], 'ja').lines, []);
+});
+
+test('AIで字の時間: words found in order in the line text; bad times dropped; ≥ 2 make one review change', () => {
+  const REG = MV.use('parts/catalog').defaultRegistry();
+  const PL = MV.use('planner/plan');
+  const SU = MV.use('planner/sung');
+  const doc = docOf('A行\nきみの 声が きこえた\n[00:40.00]Hello new world');
+  const plan = planOf(doc);
+  const line = plan.lines[1], en = plan.lines[2];
+  assert.equal(line.by.start, 'auto');
+  const at = (dt) => SONG.lrcTag(line.t0 + dt).slice(1, -1);
+  const q = SONG.wordsRequest(doc, plan, [line.id, en.id], 'ja');
+  const json = { note: 'ok', lines: [
+    { i: 0, words: [{ text: 'きみの', start: at(0.1) }, { text: 'ないよ', start: at(0.3) }, { text: '声が', start: at(0.8) },
+      { text: 'きこえた', start: at(0.81) }] },
+    { i: 1, words: [{ text: 'HELLO', start: '0:40.00' }, { text: 'new', start: '0:40.40' }, { text: 'World', start: '0:39.90' }] },
+    { i: 7, words: [] },
+  ] };
+  const r = SONG.wordsChanges(doc, plan, json, 60, { rev: 3, lines: q.lines });
+  assert.equal(r.note, 'ok');
+  const [c, d] = r.changes;
+  deepEqual([c.kind, c.field, c.lineId, c.path, c.from, c.start], ['time', 'sung.times', line.id, 'line/' + line.id + ':sung.times', null,
+    Math.round(line.t0 * 1000) / 1000]);
+  const t0 = c.start;
+  const q3 = (x) => Math.round(x * 1000) / 1000;
+  const heard = (dt) => q3(SONG.seconds(at(dt)) - t0);
+  deepEqual(c.to, [[0, heard(0.1)], [4, heard(0.8)]], 'not found and too close are left out; spaces skipped');
+  assert.ok(SU.acceptSungTimes(line.text)(c.to, 'pin:line').v, 'the planner accepts the pin');
+  deepEqual([d.lineId, d.start, d.to], [en.id, undefined, [[0, 0], [6, 0.4]]], 'an LRC start is kept; case and width ignored; a word before the start dropped');
+  assert.equal(CH.describe(c, T.createT('en', MV.use('i18n/strings'))), 'Line 2: 2 character times');
+  // applied: the automatic start pinned where it was, then the times, both by ai, one undo step
+  const cmds = CH.toCommands(doc, plan, r.changes);
+  deepEqual(cmds.map((x) => [x.path, x.by]), [['line/' + line.id + ':start', 'ai'], ['line/' + line.id + ':sung.times', 'ai'],
+    ['line/' + en.id + ':sung.times', 'ai']]);
+  const store = ST.createStore({ doc, reduce: CMD.reduce });
+  store.batch({ label: ['undo.ai', { tool: 'words', n: 2 }] }, cmds);
+  const p = PL.plan(store.doc, { registry: REG });
+  const ls = p.sung.get(line.id);
+  deepEqual([ls.by, ls.pinBy], ['pin', 'ai']);
+  assert.ok(Math.abs(ls.t[3] - SONG.seconds(at(0.8))) < 0.002, 'the word 声が lands where the AI heard it');
+  store.undo();
+  assert.equal(store.doc, doc);
+  // stale once the start or the times change; a start time change (align) is as before
+  const moved = CMD.reduce(doc, { t: 'pin.set', path: 'line/' + line.id + ':start', v: 3, by: 'user' });
+  deepEqual(CH.markStale(moved, plan, r.changes).map((x) => x.stale), [true, false]);
+  // too few words: skipped with a warning naming the line; a line edited meanwhile: named by its number
+  const few = SONG.wordsChanges(doc, plan, { lines: [{ i: 0, words: [{ text: 'きみの', start: at(0.1) }] }] }, 60, { lines: q.lines });
+  deepEqual([few.changes, few.warnings], [[], [['ai.warn.fewWords', { n: 2 }]]]);
+  const edited = CMD.reduce(doc, { t: 'lyrics.row', rowId: doc.sheet.rows[1].id, src: 'きみの声' });
+  const late = SONG.wordsChanges(edited, planOf(edited), json, 60, { lines: q.lines });
+  deepEqual(late.warnings, [['ai.warn.changedSince', { n: 2 }]]);
 });
 
 test('song analysis: cleaned and capped; stored with song.info; context lists the lines of each section', () => {

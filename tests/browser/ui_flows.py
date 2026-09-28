@@ -5554,8 +5554,46 @@ async def flow_hame_ticks(f, lang):
     await f.undo_all(done0, doc0)
 
 
+async def flow_ai_words(f, lang):
+    """曲を使う › AIで字の時間 (歌ハメ, DESIGN_2_2 §6): for the selected line, the words' times come back as one review row
+    in 時間; applying it pins the line's character times and its automatic start by ai, one undo entry."""
+    page = f.page
+    done0, doc0 = await with_lyrics(f)
+    await page.evaluate(AI_WAV_JS)
+    ok = await page.evaluate("async () => { await window.__mv.loadSong(window.__wav(12, 'ai.wav')); return window.__mv.songReady(); }")
+    if not f.check(ok, 'the song is loaded'):
+        return
+    line = await page.evaluate("() => { const l = window.__mv.plan.lines[0]; return { id: l.id, t0: l.t0, text: l.text, by: l.by.start }; }")
+    mm = lambda x: '%d:%05.2f' % (int(x // 60), x % 60)
+    words = [w for w in ['窓を', 'あけて', '光を'] if w in line['text']]
+    answers = [{'note': '', 'lines': [{'i': 0, 'words': [{'text': w, 'start': mm(line['t0'] + 0.1 + k * 0.45)} for k, w in enumerate(words)]}]}]
+    await ai_route(f, answers)
+    await page.evaluate("(id) => window.__mv.select({ level: 'line', ids: [id] }, { from: 'crumbs' })", line['id'])
+    await ai_open(f)
+    await page.click('.ai-consent input[type="checkbox"]')
+    await f.until("() => !document.querySelector('[data-tool=\"words\"]').disabled", 'consent enables AIで字の時間')
+    await page.click('[data-tool="words"]')
+    if not await f.until("() => document.querySelectorAll('.ai-review .ai-row').length > 0", 'the review of the character times'):
+        return
+    ai_requests_ok(f, audio=True)
+    body = [s for s in f.ai_seen if s['method'] == 'POST'][0]['body']
+    prompt = body['contents'][0]['parts'][1]['text']
+    f.check(line['text'] in prompt and prompt.count('\n') == 1, 'only the selected line is sent: %r' % prompt)
+    heads = await page.evaluate("() => [...document.querySelectorAll('.ai-group-head')].map((e) => e.textContent)")
+    f.check(lang != 'ja' or heads == ['時間'], 'the row is in 時間: %r' % heads)
+    done = await page.evaluate(DONE)
+    await page.click('.ai-review-foot .btn.primary')
+    await f.until("(id) => { const p = window.__mv.doc.pins['line/' + id + ':sung.times']; return !!p && p.by === 'ai'; }", 'the character times are pinned by ai', line['id'])
+    await f.settle(3)
+    pins = await page.evaluate("(id) => { const p = window.__mv.doc.pins; return { times: p['line/' + id + ':sung.times'], start: p['line/' + id + ':start'] }; }", line['id'])
+    f.check(len(pins['times']['v']) == len(words), 'one pair per word: %r' % pins['times'])
+    f.check(line['by'] != 'auto' or (pins['start'] and pins['start']['by'] == 'ai'), 'the automatic start is pinned with them: %r' % pins['start'])
+    f.check(await page.evaluate(DONE) == done + 1, 'one undo entry')
+    await f.undo_all(done0, doc0)
+
+
 # 歌ハメ (DESIGN_2_2 §6).
-FLOWS += [('hame', flow_hame, False), ('hame_ticks', flow_hame_ticks, False)]
+FLOWS += [('hame', flow_hame, False), ('hame_ticks', flow_hame_ticks, False), ('ai_words', flow_ai_words, False)]
 
 
 async def run(browser, base, rel, lang, only, shots):

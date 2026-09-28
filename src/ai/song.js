@@ -1,6 +1,6 @@
-/* 文字PVメーカー v2 — original work. AI with the song's audio (Gemini only, after consent): transcribe, align, analyze (DESIGN §4.22.4, §4.22.6). */
-MV.def('ai/song', ['audio/wav', 'audio/digest', 'core/doc', 'core/lyrics', 'ai/providers', 'ai/lyricio', 'ai/changes'],
-  (W, DG, D, L, PR, IO, CH) => {
+/* 文字PVメーカー v2 — original work. AI with the song's audio (Gemini only, after consent): transcribe, align, analyze, and the character times of a few lines (DESIGN §4.22.4, §4.22.6; DESIGN_2_2 §6). */
+MV.def('ai/song', ['audio/wav', 'audio/digest', 'core/doc', 'core/lyrics', 'core/script', 'ai/providers', 'ai/lyricio', 'ai/changes'],
+  (W, DG, D, L, SC, PR, IO, CH) => {
     'use strict';
 
     // ---- audio → request part --------------------------------------------------------------------------------------
@@ -297,6 +297,135 @@ MV.def('ai/song', ['audio/wav', 'audio/digest', 'core/doc', 'core/lyrics', 'ai/p
       return { changes, warnings, note: String((json && json.note) || '').slice(0, 200) };
     }
 
+    // ---- 2b) AIで字の時間 (words: the character times of a few lines, 歌ハメ DESIGN_2_2 §6) -----------------------------
+
+    const MAX_WORD_LINES = 12;
+    const WORD_GAP = 0.02;                        // a word must begin at least this long after the one kept before it
+    const WORD_TAIL = 0.5;                        // … and no later than this after the line's end
+    const WORDS_SCHEMA = Object.freeze({
+      type: 'object', additionalProperties: false, required: ['lines', 'note'],
+      properties: {
+        note: { type: 'string' },
+        lines: {
+          type: 'array',
+          items: {
+            type: 'object', additionalProperties: false, required: ['i', 'words'],
+            properties: {
+              i: { type: 'integer' },
+              words: {
+                type: 'array',
+                items: { type: 'object', additionalProperties: false, required: ['text', 'start'], properties: { text: { type: 'string' }, start: TIME } },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    // mm:ss.ss, as the answers give their times
+    function mmss(t) { return lrcTag(t).slice(1, -1); }
+
+    // wordsRequest(doc, plan, lineIds, uiLang) → a request for when each word of up to 12 lines begins (the lines named
+    // by lineIds, in time order; each sent with its number, its text and when it is on screen). `lines` = the sent list
+    // (i → lineId, text), for wordsChanges.
+    function wordsRequest(doc, plan, lineIds, uiLang) {
+      const want = new Set(Array.isArray(lineIds) ? lineIds : []);
+      const lines = plan.lines.filter((l) => want.has(l.id)).slice(0, MAX_WORD_LINES)
+        .map((l, i) => ({ i, lineId: l.id, text: l.text, t0: l.t0, t1: l.t1 }));
+      return {
+        system: [
+          'You time the words of lyric lines to a song for a lyric-video tool that shows each word as it is sung.',
+          'For every line you are given (numbered from 0, with the stretch of the song it is shown in), list its words in '
+            + 'order, exactly as they are written in the line, and when the singing of each word begins, as mm:ss.ss from the '
+            + 'start of the audio, precise to a hundredth of a second where you can.',
+          'For Japanese, a word is a short sung phrase (a few kana or a word with its particle); for English, one word.',
+          'Times must increase within a line. Leave out a word you cannot hear, and leave out a line that is not sung.',
+          '"note": one short sentence about anything uncertain, in ' + outLang(uiLang) + '.',
+        ].join('\n'),
+        prompt: 'Lyric lines (number: text, shown from … to …):\n' + lines.map((l) => l.i + ': ' + l.text + ' (' + mmss(l.t0) + ' – '
+          + mmss(l.t1) + ')').join('\n'),
+        schema: WORDS_SCHEMA, effort: 'medium', lines: lines.map((l) => ({ i: l.i, lineId: l.lineId, text: l.text })),
+      };
+    }
+
+    // The text a word is matched in: NFKC, lower case, without white space; map[k] = the grapheme start (UTF-16 offset in
+    // the line text) of the k-th character.
+    function matchText(text) {
+      const offs = SC.graphemeOffsets(text);
+      let norm = '';
+      const map = [];
+      for (let k = 0; k + 1 < offs.length; k++) {
+        const g = text.slice(offs[k], offs[k + 1]).normalize('NFKC').toLowerCase().replace(/\s+/g, '');
+        for (let q = 0; q < g.length; q++) map.push(offs[k]);
+        norm += g;
+      }
+      return { norm, map };
+    }
+
+    // wordsPairs(line, words, t0) → [[offset, dt], …]: each word found in the line text after the one before it (a word
+    // not found is skipped), at the grapheme where it begins; dt = its start − t0 (seconds), kept when it lies in
+    // [0, line length + 0.5] and at least WORD_GAP after the pair kept before it.
+    function wordsPairs(line, words, t0) {
+      const { norm, map } = matchText(String(line.text));
+      const limit = line.t1 - line.t0 + WORD_TAIL;
+      const out = [];
+      let cursor = 0;
+      for (const w of Array.isArray(words) ? words : []) {
+        const key = String((w && w.text) || '').normalize('NFKC').toLowerCase().replace(/\s+/g, '');
+        if (!key) continue;
+        const k = norm.indexOf(key, cursor);
+        if (k < 0) continue;
+        cursor = k + key.length;
+        const at = map[k];
+        const dt = round(seconds(w.start) - t0, 1000);
+        if (!Number.isFinite(dt) || dt < 0 || dt > limit) continue;
+        const last = out[out.length - 1];
+        if (last && (at <= last[0] || dt < last[1] + WORD_GAP - 1e-9)) continue;
+        out.push([at, dt]);
+      }
+      return out;
+    }
+
+    // wordsChanges(doc, plan, json, duration, opts) → { changes, warnings, note }: per line with ≥ 2 timed words, one
+    // change of kind 'time' (field 'sung.times', path line/<id>:sung.times, `to` = the pairs relative to the line's
+    // start); on a line whose start is automatic it also carries `start` (the start as it is now, pinned with the pairs
+    // so they stay where the AI heard them). opts = { rev, lines } (lines: the request's i → lineId list).
+    function wordsChanges(doc, plan, json, duration, opts) {
+      const o = opts || {};
+      const warnings = [];
+      const changes = [];
+      const lineAt = CH.lineResolver(plan, Array.isArray(o.lines) ? o.lines : null);
+      const changeOpts = { rev: o.rev, srcs: CH.rowSrcs(doc) };
+      const seen = new Set();
+      for (const l of (json && Array.isArray(json.lines)) ? json.lines : []) {
+        const i = l && Number.isInteger(l.i) ? l.i : -1;
+        if (i < 0 || seen.has(i)) continue;
+        const found = lineAt(i);
+        if (found.warn) {
+          // a line edited while the request ran: named by its number in the lyrics (the request numbers only the sent lines)
+          const sentLine = Array.isArray(o.lines) ? o.lines[i] : null;
+          const at = sentLine ? plan.lines.findIndex((x) => x.id === sentLine.lineId) : -1;
+          if (found.warn[0] !== 'ai.warn.notLine') warnings.push(at >= 0 ? [found.warn[0], { n: at + 1 }] : found.warn);
+          continue;
+        }
+        seen.add(i);
+        const line = found.line;
+        const auto = !line.by || line.by.start === 'auto';
+        const t0 = auto ? round(line.t0, 1000) : line.t0;
+        const pairs = wordsPairs(line, (l.words || []).filter((w) => !duration || seconds(w && w.start) <= duration), t0);
+        const n = (Number.isInteger(line.index) ? line.index : plan.lines.indexOf(line)) + 1;
+        if (pairs.length < 2) { warnings.push(['ai.warn.fewWords', { n }]); continue; }
+        const path = 'line/' + line.id + ':sung.times';
+        const pin = doc.pins[path];
+        changes.push(CH.make(doc, {
+          id: 'sung:' + line.id, kind: 'time', scope: 'line', lineId: line.id, rowId: line.row, n, field: 'sung.times', path,
+          from: pin ? pin.v : null, to: pairs, start: auto ? t0 : undefined,
+          label: ['ai.ch.sungTimes', { n, count: pairs.length }],
+        }, changeOpts));
+      }
+      return { changes, warnings, note: String((json && json.note) || '').slice(0, 200) };
+    }
+
     // ---- 3) 曲の分析 (analyze) -----------------------------------------------------------------------------------------
 
     const SECTION_KINDS = D.SECTION_KINDS;       // core/doc validates doc.song.info with the same list
@@ -394,9 +523,10 @@ MV.def('ai/song', ['audio/wav', 'audio/digest', 'core/doc', 'core/lyrics', 'ai/p
 
     return {
       AUDIO_RATE, AUDIO_RATES, INLINE_MAX_BYTES, FILES_UPLOAD, FILES_BASE, SECTION_KINDS,
-      TRANSCRIBE_SCHEMA, ALIGN_SCHEMA, ANALYZE_SCHEMA,
+      TRANSCRIBE_SCHEMA, ALIGN_SCHEMA, ANALYZE_SCHEMA, WORDS_SCHEMA, MAX_WORD_LINES,
       encodeWav: W.encodeWav, pickRate, audioFromChannels, audioFromBuffer, toBase64, audioSize, audioPart, uploadFile,
       seconds, lrcTag, transcribeRequest, transcriptLines, transcriptText, transcriptChange, alignRequest, alignChanges,
+      wordsRequest, wordsPairs, wordsChanges,
       analyzeRequest, songInfo, analyzeChanges, songContext,
     };
   });

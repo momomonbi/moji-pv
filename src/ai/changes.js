@@ -91,6 +91,10 @@ MV.def('ai/changes', ['core/commands', 'core/lyrics', 'core/doc', 'core/hash', '
       return { value };
     }
     if (c.kind === 'avoid' || c.kind === 'allow') return { value: doc.filters[c.filterKind] || null };
+    // a line's character times (歌ハメ): the pin and the line's start pin they are relative to
+    if (c.kind === 'time' && c.field === 'sung.times') {
+      return { value: [pinValue(doc, c.path), pinValue(doc, 'line/' + c.lineId + ':start')], src: rowSrc(doc, c.rowId, srcs) };
+    }
     if (c.kind === 'time') return { value: pinValue(doc, c.path), src: rowSrc(doc, c.rowId, srcs) };
     if (c.kind === 'rows') return { src: IO.sheetText(doc) };
     if (c.kind === 'songInfo') return { value: doc.song ? doc.song.sha1 : null };
@@ -412,8 +416,11 @@ MV.def('ai/changes', ['core/commands', 'core/lyrics', 'core/doc', 'core/hash', '
     for (const c of of('value')) if (lineValue(c)) pin(c);
     for (const c of of('part')) pin(c);
     for (const c of of('value')) if (!lineValue(c)) pin(c);
+    // start times; a line's character times (歌ハメ) pin an automatic start first, where the AI heard them
     for (const c of of('time')) {
-      if (lineKnown(plan, c.lineId)) cmds.push({ t: 'pin.set', path: c.path, v: c.to, by: 'ai' });
+      if (!lineKnown(plan, c.lineId)) continue;
+      if (c.start !== undefined) cmds.push({ t: 'pin.set', path: 'line/' + c.lineId + ':start', v: c.start, by: 'ai' });
+      cmds.push({ t: 'pin.set', path: c.path, v: c.to, by: 'ai' });
     }
     cmds.push(...lyricCmds(doc, of('cut', 'note', 'emphasis', 'impact', 'remove')));
     for (const c of of('rows')) cmds.push(...rowsCmds(doc, c));
@@ -601,6 +608,7 @@ MV.def('ai/changes', ['core/commands', 'core/lyrics', 'core/doc', 'core/hash', '
     if (c.kind === 'value') return valueText(t, c, v);
     if (NAMED[c.kind]) return t.part(NAMED[c.kind], v);
     if (c.kind === 'season') return t('fld.season.' + v);
+    if (c.kind === 'time' && Array.isArray(v)) return t('ai.ch.sungCount', { count: v.length });
     if (c.kind === 'time') return T.fmtTime(v);
     if (typeof v === 'number') return String(Math.round(v * 100) / 100);
     return String(v);

@@ -2253,6 +2253,14 @@ MV.def('i18n/strings', [], () => ({
   'fld.hameFill': ['歌った字に色をのせる', 'Color the sung characters'],
   'fld.hameFill.note': ['文字は先に出て、歌われた字からアクセント色に変わります（カラオケ風）。アクセント色の字は明るくなります',
     'The words show first and each character takes the accent color as it is sung (karaoke style). Characters already in the accent color brighten instead'],
+  // AIで字の時間 (the AI tab's song tools; review-only)
+  'ai.tool.words': ['AIで字の時間', 'Character times by AI'],
+  'ai.name.words': ['字の時間', 'Character times'],
+  'ai.hint.words': ['選んだ行（なければ再生位置から12行まで）の言葉ごとの時間を聞き取ります',
+    'Finds when each word is sung in the selected lines (or up to 12 lines from the playhead)'],
+  'ai.ch.sungTimes': ['{n}行目: {count}か所の時間', 'Line {n}: {count} character times'],
+  'ai.ch.sungCount': ['{count}か所の時間', '{count} character times'],
+  'ai.warn.fewWords': ['{n}行 · 言葉の時間を2か所以上聞き取れなかったので使いません', 'Line {n}: fewer than two word times were found, so it was skipped'],
   // the timeline's character ticks
   'tl.tick': ['{ch}の時間 {time}', '{ch} at {time}'],
   'undo.tick': ['字の時間', 'Character time'],
