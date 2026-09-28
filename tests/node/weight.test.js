@@ -445,6 +445,99 @@ test('太る: every glyph starts at the lightest weight, ends at the face weight
   assert.ok(s2.table.live.wt[g] < -690, 'thin at the end: ' + s2.table.live.wt[g]);
 });
 
+// --- 3b. 脈打つ太さ (weightPulse) -------------------------------------------------------------------------------------------
+
+// A hold of 脈打つ太さ over n glyphs laid out in `ref`, with (or without) a beat grid; → { b, env, sample(t) → wt of glyph 0 }.
+function pulseOf(ref, p, grid, n = 3) {
+  const def = CATALOG.get('dwell', 'weightPulse');
+  const { env, target } = envAndTarget(n);
+  env.times = { a: 0, rest: 1, out: 3, b: 3.4 };
+  if (grid) env.grid = grid;
+  target.runs = [{ layout: { n, fonts: [ref], font: null, cls: null } }];
+  const params = Object.assign({ amount: 1, speed: 1, curve: 'linear', swing: 300, decay: 0.2, period: 1.6 }, p || {});
+  const [b] = def.make(env, target, params);
+  const P = {};
+  for (const c of T.POSE) P[c] = new Float32Array(n).fill(BH.identityOf(c));
+  const sample = (t) => { P.wt.fill(0); b.run(P, t, b); return P.wt[0]; };
+  return { b, env, sample };
+}
+
+test('脈打つ太さ: late, opt-in weight; bolder where the face has room for the swing, else lighter, else toward the larger room', () => {
+  const def = CATALOG.get('dwell', 'weightPulse');
+  assert.deepEqual([def.pool, def.late, def.optIn, def.family, def.needs.includes('beats')], [false, true, 'weight', 'weight', true]);
+  assert.ok(!CATALOG.pool('dwell', {}).includes('weightPulse'));
+  assert.ok(CATALOG.pool('dwell', { optIn: ['weight'], role: 'lyric' }).includes('weightPulse'));
+  const at = (w, family = 'Noto Sans JP') => FACES.faceRef(family, w, 'ja', 'gothic', 'display');
+  const cases = [
+    [at(100), { swing: 300 }, 1, 300, 'room above only'],
+    [at(900), { swing: 300 }, -1, 300, 'room below only'],
+    [at(500), { swing: 300 }, 1, 300, 'room both ways: bolder'],
+    [at(800), { swing: 200 }, -1, 200, 'above 100 < swing: lighter'],
+    [at(700, 'Zen Old Mincho'), { swing: 350 }, -1, 300, 'neither holds the swing: the larger room (below 300), capped by it'],
+    [at(500), { swing: 400, amount: 0 }, 1, 200, '強さ 0: half the swing'],
+    [at(400, 'Dela Gothic One'), { swing: 300 }, 1, 0, 'one weight: no pulse'],
+  ];
+  for (const [ref, p, dir, amp, why] of cases) {
+    const { b } = pulseOf(ref, p, null);
+    assert.deepEqual([b.p.dirW, b.p.amp], [dir, amp], why);
+    assert.deepEqual([...b.wt], dir > 0 ? [0, amp] : [-amp, 0], why + ': the declared reach');
+  }
+});
+
+test('脈打つ太さ: with a 120 BPM grid it swells after each beat and is back at rest before the next, with no jumps', () => {
+  const grid = { offset: 0, period: 0.5, meter: 4 };
+  const ref = FACES.faceRef('Noto Sans JP', 500, 'ja', 'gothic', 'display');
+  // the steepest settings: the largest swing, the shortest decay, the fastest speed — every 1/480 s step ≤ 60
+  const steep = pulseOf(ref, { swing: 400, amount: 1, decay: 0.1, speed: 4 }, grid);
+  assert.equal(steep.b.p.amp, 400);
+  let last = steep.sample(1), maxStep = 0;
+  for (let k = 1; k <= 960; k++) { const v = steep.sample(1 + k / 480); maxStep = Math.max(maxStep, Math.abs(v - last)); last = v; }
+  assert.ok(maxStep <= 60, 'largest step ' + maxStep.toFixed(2));
+  assert.ok(maxStep > 5, 'it does move: ' + maxStep.toFixed(2));
+  // a typical pulse: the peak after every beat inside the hold reaches 0.8·amp·w; it has settled before the next beat
+  const { b, sample } = pulseOf(ref, { swing: 300, amount: 1, decay: 0.2, speed: 1 }, grid);
+  for (let beat = 1.5; beat < 2.8; beat += 0.5) {
+    const w = BH.envelopeWeight(beat + 0.03, b.p.rest, 3);
+    let peak = 0;
+    for (let k = 0; k <= 48; k++) peak = Math.max(peak, sample(beat + k / 480));
+    assert.ok(peak >= 0.8 * b.p.amp * w, 'beat ' + beat + ': peak ' + peak.toFixed(1) + ' vs ' + (0.8 * b.p.amp * w).toFixed(1));
+    assert.ok(sample(beat + 0.49) < 0.05 * b.p.amp, 'beat ' + beat + ': at rest before the next');
+    assert.equal(sample(beat), 0, 'nothing at the beat itself (the swell rises from it)');
+  }
+  // outside the hold (before rest, after out) nothing is written
+  assert.equal(sample(0.9), 0);
+  assert.equal(sample(3.05), 0);
+});
+
+test('脈打つ太さ: without a beat grid the weight breathes on a cosine of the period', () => {
+  const ref = FACES.faceRef('Noto Sans JP', 500, 'ja', 'gothic', 'display');
+  const { b, sample } = pulseOf(ref, { swing: 300, amount: 1, period: 1.6, speed: 1 }, null);
+  const mid = 1 + 0.8;                                       // half a period after the hold starts: the full swell
+  assert.ok(close(sample(mid), b.p.amp * BH.envelopeWeight(mid, 1, 3), 1e-2), 'full swell half a period in');
+  assert.ok(Math.abs(sample(1 + 1.6)) < 1, 'back at rest a whole period in');
+  let last = sample(1), maxStep = 0;
+  for (let k = 1; k <= 960; k++) { const v = sample(1 + k / 480); maxStep = Math.max(maxStep, Math.abs(v - last)); last = v; }
+  assert.ok(maxStep <= 60, 'largest step ' + maxStep.toFixed(2));
+});
+
+test('脈打つ太さ: a scene declares its reach; with 太る the reach is the union', () => {
+  const { engine } = engineWith(null);
+  const plan = sampleOf('dwell', 'weightPulse');
+  assert.deepEqual([plan.cuts[0].slots['text.face'].v, plan.cuts[0].slots['text.weight'].v], ['body', 800]);
+  engine.setPlan(plan);
+  const scene = engine.scene('cut', 0);
+  const pb = scene.behaviours.find((x) => x.wt);
+  assert.equal(pb.p.dirW, -1, 'at 800 of Noto Sans JP only 100 above: it pulses lighter');
+  assert.deepEqual([...scene.wtReach], [-pb.p.amp, 0]);
+  // the same cut entering with 太る: the reach runs from the grow's lightest weight
+  const both = JSON.parse(JSON.stringify(plan));
+  Object.defineProperty(both, 'env', { enumerable: false, value: plan.env });
+  both.cuts[0].slots.arrive = sampleOf('arrive', 'weightGrow').cuts[0].slots.arrive;
+  both.cuts[0].fp = 'union';
+  engine.setPlan(both);
+  assert.deepEqual([...engine.scene('cut', 0).wtReach], [-700, 0], 'the union of [−700, 0] and [−amp, 0]');
+});
+
 // --- 4. draw-only faces: the facade --------------------------------------------------------------------------------------
 
 // A FontBook double: every main face is loaded; draw-only faces are 'idle' until ready() or complete() loads them.
@@ -548,7 +641,7 @@ const corpus = require('../helpers/corpus.js');
 const PL = MV.use('planner/plan');
 const CA = MV.use('planner/cast');
 const CMD = MV.use('core/commands');
-const WEIGHT_KEYS = { arrive: 'weightGrow', depart: 'weightThin' };
+const WEIGHT_KEYS = { arrive: 'weightGrow', dwell: 'weightPulse', depart: 'weightThin' };
 
 function basicDoc(patch) {
   const doc = corpus.project('basic').doc;
@@ -568,7 +661,7 @@ test('planner: an older document never sees a weight part or a text.weight; the 
       for (const kind of ['arrive', 'dwell', 'depart']) assert.ok(!CATALOG.get(kind, c.slots[kind].v).optIn, c.key + ' ' + kind);
     }
     const c = lyricCuts(plan)[0];
-    for (const kind of ['arrive', 'depart']) assert.ok(!traceKeys(doc, c.key, kind).includes(WEIGHT_KEYS[kind]), kind);
+    for (const kind of ['arrive', 'dwell', 'depart']) assert.ok(!traceKeys(doc, c.key, kind).includes(WEIGHT_KEYS[kind]), kind);
   }
 });
 
@@ -674,13 +767,14 @@ test('planner: a text.weight pin decides its cuts alone and changes their finger
   assert.ok(CMD.reduce(doc, { t: 'pin.set', path: 'work:weight.auto', v: false, by: 'user' }).pins['work:weight.auto']);
 });
 
-test('planner: 太る is chosen on about 10 % of the eligible lyric lines of new works (rate)', () => {
-  let eligible = 0, grow = 0;
+test('planner: 太る is chosen on about 10 % of the eligible lyric lines of new works, 脈打つ太さ on about 4 % (rate)', () => {
+  let eligible = 0, grow = 0, pulseEligible = 0, pulse = 0;
   for (const { doc } of corpus.corpus(2, ['16:9'])) {
     doc.look.gen = 1;
     const plan = PL.plan(doc, { registry: CATALOG });
     for (const c of lyricCuts(plan)) {
       const st = { ctx: { glyph: { weight: true }, look: { plan: plan.look } }, cut: c, slots: c.slots };
+      if (CA.weightOptIn(st, 'dwell')) { pulseEligible++; if (c.slots.dwell.v === 'weightPulse') pulse++; }
       if (!CA.weightOptIn(st, 'arrive')) continue;
       eligible++;
       if (c.slots.arrive.v === 'weightGrow') grow++;
@@ -689,6 +783,10 @@ test('planner: 太る is chosen on about 10 % of the eligible lyric lines of new
   const share = grow / eligible;
   assert.ok(eligible > 300, 'eligible cuts: ' + eligible);
   assert.ok(share >= 0.06 && share <= 0.14, '太る on ' + (100 * share).toFixed(1) + ' % of the eligible lines');
+  // 脈打つ太さ: weight 0.5 (the dwell pools are about half the size of the entrance pools; weight 1 gave 6.7 %)
+  const pulseShare = pulse / pulseEligible;
+  assert.ok(pulseEligible > 300, 'eligible for 脈打つ太さ: ' + pulseEligible);
+  assert.ok(pulseShare >= 0.02 && pulseShare <= 0.07, '脈打つ太さ on ' + (100 * pulseShare).toFixed(1) + ' % of the eligible lines');
 });
 
 // --- 6. the build: text.weight faces -----------------------------------------------------------------------------------

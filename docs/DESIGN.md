@@ -2610,6 +2610,7 @@ depends on `parts/kit`.
 | `shimmerSweep` | きらめき | Shimmer | bright playful | A band of accent tint sweeps across the glyphs. |
 | `creepTrack` | にじり | Creep | slow serious | Letter spacing widens very slowly. |
 | `swaySwing` | 揺れ | Sway | soft organic | The line rocks slowly around its centre. |
+| `weightPulse` (pool false) | 脈打つ太さ | Weight pulse | bold fast | Letters swell in weight on every beat (v2.2, DESIGN_2_2 §4: late, opt-in `weight`; needs beats, else breathes). |
 
 ### 5.4 Exits — `depart` (`parts/depart/*.js`, mirrors live next to their entrance)
 

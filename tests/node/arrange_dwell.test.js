@@ -28,7 +28,7 @@ const F = MV.use('engine/scene/frame');
 const T = MV.use('engine/scene/table');
 const PLAN = MV.use('planner/plan');
 
-const MODULES = { arrange: ['core', 'columns', 'editorial', 'scatter', 'special'], dwell: ['calm', 'lively'] };
+const MODULES = { arrange: ['core', 'columns', 'editorial', 'scatter', 'special'], dwell: ['calm', 'lively', 'weight'] };
 const OWN = Object.entries(MODULES).flatMap(([kind, files]) => files.flatMap((f) => MV.use('parts/' + kind + '/' + f)));
 const HOSTS = corpus.minimalFallbacks().filter((d) => d.kind !== 'arrange' && d.kind !== 'dwell');
 const REGISTRY = REG.createRegistry(OWN.concat(HOSTS));
@@ -52,7 +52,7 @@ function tableRows(heading) {
 test('every §5.1 composition and §5.3 hold is defined once, with the table’s labels, tags and fallback', () => {
   for (const [kind, heading] of [['arrange', '### 5.1 Compositions'], ['dwell', '### 5.3 Holds']]) {
     const rows = tableRows(heading);
-    assert.equal(rows.length, kind === 'arrange' ? 21 : 10, heading);
+    assert.equal(rows.length, kind === 'arrange' ? 21 : 11, heading);   // holds: 10 + 脈打つ太さ (v2.2)
     assert.deepEqual(REGISTRY.keys(kind), rows.map((r) => r.key).sort(), kind + ': exactly the table’s keys');
     for (const r of rows) {
       const def = REGISTRY.get(kind, r.key);
