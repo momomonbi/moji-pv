@@ -999,3 +999,27 @@ test('キメ: 大と小 with the キメ parameters sets the giant as large as th
     }
   }
 });
+
+// Without an emphasis the giant is the line's longest word, often 5–7 cells. planner/kime giantEm estimates its size the
+// way giantBuild sets it, and a キメ cut takes 大と小 only where giantBig says the giant is big (≤ 4 cells, or ≥ 0.25 of the
+// short side; else はみ出し, or the line keeps its pieces). The estimate matches the drawn size, and every giant it lets
+// through is drawn at least that big (in the long-axis orientation a キメ cut is set in; a square frame both ways).
+test('キメ: 大と小 without an emphasis — the giant-size estimate matches the drawn giant, and a big one is ≥ 0.25', () => {
+  const KI = MV.use('planner/kime');
+  const CASES = [['雨上がりの坂道', 5], ['ひとりきりの夜', 6], ['ひとりぼっちの夜', 7]];
+  let big = 0, small = 0;
+  for (const aspect of ['16:9', '9:16', '1:1', '4:3', '21:9']) {
+    for (const orient of KI.longAxis(aspect) ? [KI.longAxis(aspect)] : ['h', 'v']) {
+      for (const [text, cells] of CASES) {
+        assert.equal(KI.giantCells(text, [], 'ja'), cells, text);
+        const { plan, scene } = sceneOf({ arrange: 'giantWhisper', aspect, orient, text, scale: 1, params: { tuck: 'under', ratio: 3 } });
+        const size = Math.max(...scene.runs.map((r) => r.layout.size)) / plan.design.short;
+        const est = KI.giantEm(cells, aspect, orient);
+        const where = aspect + ' ' + orient + ' ' + text + ': drawn ' + size.toFixed(3) + ', estimated ' + est.toFixed(3);
+        assert.ok(Math.abs(size - est) <= 0.02, where);
+        if (KI.giantBig(cells, aspect, orient)) { big++; assert.ok(size >= KI.KIME.giant.emMin - 0.005, where); } else small++;
+      }
+    }
+  }
+  assert.ok(big >= 6 && small >= 6, big + ' ' + small);
+});

@@ -88,6 +88,30 @@ function markedCorpus() {
 }
 const lockedLine = (doc, c) => !!(c.line && doc.locks && doc.locks[c.line]);
 
+// A plan line as planner/segment reads it: its text, script and emphasis (the cuts' ranges back at their offsets).
+function lineInfo(p, line) {
+  const emph = [];
+  for (const k of line.cuts) {
+    const off = P.cutOffset(k);
+    for (const [a, b] of cutOf(p, k).emph || []) {
+      const last = emph[emph.length - 1];
+      if (last && last[1] === a + off) last[1] = b + off; else emph.push([a + off, b + off]);
+    }
+  }
+  return { text: line.text, lang: line.lang, emph };
+}
+
+// The largest lyric run of a cut (fake measurer, rest pose, no camera), as a share of the short side; decorative text
+// (a sidebar's index number) is not the lyric.
+const BUILD = MV.use('engine/scene/build');
+const TEXT = MV.use('engine/text/service').createTextService({ measurer: MV.use('engine/text/fake_measure').fakeMeasurer(), faces: null });
+function lyricEm(c, p) {
+  const scene = BUILD.buildCut(c, p, { registry: CAT, text: TEXT });
+  let m = 0;
+  for (const r of scene.runs || []) if (r.layout && r.spec && r.spec.span && r.layout.size > m) m = r.layout.size;
+  return m / p.design.short;
+}
+
 // --- 1. the mark ------------------------------------------------------------------------------------------------------
 
 test('the mark: line/<id>:kime true makes the line and its cut キメ; false, other values and other scopes do not', () => {
@@ -203,8 +227,8 @@ test('registries without the キメ parts: nothing is forced by name; the choose
 
 // --- 4. the guarantees --------------------------------------------------------------------------------------------------
 
-test('guarantees: set picks, rules, landing, hold, counts, hard cut in and the lens/shot pairing on every キメ cut', () => {
-  let n = 0, bleed = 0, giant = 0;
+test('guarantees: set picks, rules, landing, hold, counts, hard cuts in and out and the lens/shot pairing on every キメ cut', () => {
+  let n = 0, bleed = 0, giant = 0, still = 0, out = 0;
   for (const { name, doc, plan: p } of markedCorpus()) {
     const byLine = new Map();
     for (const c of p.cuts) if (c.line) (byLine.get(c.line) || byLine.set(c.line, []).get(c.line)).push(c);
@@ -214,7 +238,16 @@ test('guarantees: set picks, rules, landing, hold, counts, hard cut in and the l
       n++;
       const s = c.slots, where = name + ' ' + c.key;
       const cells = c.feat.cells;
-      assert.ok((cells >= K.bleedCells[0] && cells <= K.bleedCells[1] ? K.arrange : K.bigOnly).includes(s.arrange.v), where + ' arrange');
+      const aspect = p.design.aspect, orient = s.orient.v;
+      // along the frame's long side (a square frame: as usual), unless pinned
+      const long = KI.longAxis(aspect);
+      if (long && c.feat.orients.includes(long) && !pinned(s.orient)) {
+        assert.deepEqual([orient, s.orient.from], [long, 'rule'], where + ' orient');
+      }
+      // はみ出し for 2–12 cells (10 across the short side), 大と小 only where its giant is big, else はみ出し
+      const bleedable = cells >= K.bleedCells[0] && cells <= KI.bleedMax(aspect, orient);
+      const big = KI.giantBig(KI.giantCells(c.text, c.emph, c.lang), aspect, orient);
+      assert.ok((bleedable ? big ? K.arrange : K.bleedOnly : K.bigOnly).includes(s.arrange.v), where + ' arrange ' + s.arrange.v);
       if (s.arrange.v === 'edgeBleed') {
         bleed++;
         assert.equal(s.arrange.p.overflow, K.bleed.overflow, where);
@@ -235,14 +268,25 @@ test('guarantees: set picks, rules, landing, hold, counts, hard cut in and the l
       assert.ok(s['ornament.count'].v <= 1, where);
       assert.ok(s['filter.count'].v <= 1 + (c.impact && flash ? 1 : 0), where);
       assert.equal(c.seamIn, -1, where + ' hard cut in');
+      // the hard cut out, unless the next cut is 見せ場 (its own transition)
+      const next = p.cuts[p.cuts.indexOf(c) + 1];
+      if (next && !next.impact) {
+        assert.ok(next.seamIn < 0 || pinned(p.seams[next.seamIn].slot), where + ' hard cut out');
+        if (next.seamIn < 0) out++;
+      }
       const shot = s['cam.shot'].v;
       assert.equal(s.lens.v === 'impactKick', !moves(shot), where + ' lens/shot ' + s.lens.v + ' ' + JSON.stringify(shot));
       if (moves(shot)) assert.ok(['dashStop', 'holdThenDash'].includes(s['cam.curve'].v), where + ' curve');
+      // 大と小 without an emphasis already fills the frame: the camera holds and the lens punches in
+      if (s.arrange.v === 'giantWhisper' && !c.feat.emph) {
+        assert.deepEqual([shot, s['cam.shot'].from, s.lens.v], ['none', 'rule', 'impactKick'], where + ' still');
+        still++;
+      }
       const line = p.lines.find((l) => l.id === c.line);
-      if (S.cells(line.text) <= SG.kimeMaxCells(p.design.aspect)) assert.equal(byLine.get(c.line).length, 1, where + ' one cut');
+      if (SG.kimeWhole(aspect, lineInfo(p, line), orient)) assert.equal(byLine.get(c.line).length, 1, where + ' one cut');
     }
   }
-  assert.ok(n > 300 && bleed > 30 && giant > 30, n + ' ' + bleed + ' ' + giant);
+  assert.ok(n > 300 && bleed > 30 && giant > 30 && still > 20 && out > 200, [n, bleed, giant, still, out].join(' '));
 });
 
 // --- 5. no flash, no shake -----------------------------------------------------------------------------------------------
@@ -295,10 +339,23 @@ test('camera: a still camera keeps the 衝撃 punch-in; a moving one the fixed f
   assert.deepEqual([still['cam.shot'].v, still.lens.v], ['none', 'impactKick']);
   const noShot = at(withPins(doc, Object.assign({ 'work:cam.shot': { v: 'none', by: 'user' } }, mark)));
   assert.deepEqual([noShot['cam.shot'].v, noShot.lens.v], ['none', 'impactKick']);
-  const dflt = at(withPins(doc, mark));
-  assert.ok(['snapZoom', 'pushWord', 'settle'].includes(dflt['cam.shot'].v), dflt['cam.shot'].v);
-  assert.equal(dflt['cam.shot'].from, 'rule');
-  assert.equal(dflt.lens.v, 'fixedFrame');
+  // 大と小 without an emphasis: the giant is the whole block, which fills the frame — the camera holds (kime.still) and
+  // the lens punches in, with the camera on too
+  const dd = withPins(doc, mark);
+  const dflt = at(dd);
+  assert.deepEqual([dflt.arrange.v, dflt['cam.shot'].v, dflt['cam.shot'].from, dflt.lens.v], ['giantWhisper', 'none', 'rule', 'impactKick']);
+  assert.deepEqual(codes(whyOf(dd, plan(dd), 'cut/r2~0:cam.shot')), ['rule:kime.still']);
+  // with an emphasis the giant is that word: the push goes to it, and the lens stays framed
+  const emDoc = lyricDoc(['あさやけの まちを', 'きみの*ひかり*', 'かぜに のって'], { pins: mark });
+  const em = at(emDoc);
+  assert.equal(em.arrange.v, 'giantWhisper');
+  assert.ok(['pushWord', 'settle'].includes(em['cam.shot'].v), em['cam.shot'].v);
+  assert.deepEqual([em['cam.shot'].from, em.lens.v], ['rule', 'fixedFrame']);
+  assert.deepEqual(codes(whyOf(emDoc, plan(emDoc), 'cut/r2~0:cam.shot')), ['rule:kime.shot']);
+  // a layout outside the キメ set (the part filters leave only 中央): the whole block snaps in
+  const centre = Object.assign(withPins(doc, mark), { filters: { arrange: { only: ['centerAnchor'], deny: null } } });
+  const cs = at(centre);
+  assert.deepEqual([cs.arrange.v, cs['cam.shot'].v, cs['cam.shot'].from, cs.lens.v], ['centerAnchor', 'snapZoom', 'rule', 'fixedFrame']);
   const x = plan(withPins(doc, Object.assign({ 'work:cam.extreme': { v: 1, by: 'user' } }, mark)));
   const xc = cutOf(x, 'r2~0');
   assert.equal(xc.slots['cam.shot'].v, xc.feat.dur < 0.8 ? 'punchHit' : 'crashZoom');
@@ -342,8 +399,9 @@ function lineOf(cells) {
   return Array.from(t).slice(0, cells).join('');
 }
 
-test('long lines: one cut up to the per-aspect limit; longer ones keep their pieces and one キメ cut that lands in time', () => {
+test('long lines: one cut where one cut shows it big; others keep their pieces and one キメ cut that lands in time', () => {
   assert.deepEqual(['16:9', '21:9', '4:3', '1:1', '4:5', '3:4', '9:16'].map(SG.kimeMaxCells), [28, 30, 24, 20, 20, 18, 16]);
+  let wholes = 0, splits = 0;
   for (const n of [12, 13, 16, 17, 24, 28, 29, 30, 31, 35]) {
     const text = lineOf(n);
     for (const aspect of ['16:9', '9:16']) {
@@ -353,8 +411,13 @@ test('long lines: one cut up to the per-aspect limit; longer ones keep their pie
         const p = plan(doc);
         const cs = cutsOfLine(p, 'r2');
         const where = n + ' ' + aspect + ' ' + orient;
-        if (n <= SG.kimeMaxCells(aspect)) assert.equal(cs.length, 1, where);
-        else assert.ok(cs.length >= 2, where);
+        // one cut where one cut shows it big (はみ出し for ≤ 12 cells, 10 across the short side; else a big 大と小 giant)
+        const whole = SG.kimeWhole(aspect, { text, lang: 'ja', emph: [] }, orient);
+        assert.equal(whole, n <= SG.kimeMaxCells(aspect) &&
+          (n <= KI.bleedMax(aspect, orient) || KI.giantBig(KI.giantCells(text, [], 'ja'), aspect, orient)), where);
+        if (whole) assert.equal(cs.length, 1, where);
+        else assert.ok(cs.length >= 2, where + ' ' + cs.length);
+        if (whole) wholes++; else splits++;
         const ks = cs.filter((c) => c.feat.kime);
         assert.equal(ks.length, 1, where);
         const focus = cs.find((c) => c.role === 'focus');
@@ -363,6 +426,7 @@ test('long lines: one cut up to the per-aspect limit; longer ones keep their pie
       }
     }
   }
+  assert.ok(wholes >= 6 && splits >= 20, wholes + ' ' + splits);
   // a split pin that leaves a 35-cell piece: that piece is the キメ cut, 大と小
   const text = lineOf(40);
   const off = Array.from(text).slice(0, 5).join('').length;
@@ -564,7 +628,7 @@ test('alignment: a copy aligns with its source only when both are キメ or neit
 // --- 14. explain --------------------------------------------------------------------------------------------------------------------
 
 test('explain: the キメ reasons, the masked alternatives, the rules of the cut and of the cuts before it', () => {
-  let arranged = 0, bleedParam = 0, calmCount = 0, calmWeigh = 0, flashMask = 0;
+  let arranged = 0, bleedParam = 0, calmCount = 0, calmWeigh = 0, flashMask = 0, landParam = 0, tuckParam = 0;
   for (const { name, doc, plan: p } of markedCorpus().slice(0, 60)) {
     for (const c of kimeCuts(p)) {
       if (lockedLine(doc, c)) continue;
@@ -578,15 +642,29 @@ test('explain: the キメ reasons, the masked alternatives, the rules of the cut
         assert.deepEqual(codes(whyOf(doc, p, at + 'text.face')), ['rule:kime.face']);
         if (p.cuts.indexOf(c) > 0) assert.deepEqual(codes(whyOf(doc, p, at + 'seam')), ['rule:kime.seam']);
         if (c.slots.arrange.v === 'giantWhisper' && c.slots['cam.shot'].from === 'rule') {
-          assert.deepEqual(codes(whyOf(doc, p, at + 'cam.shot')), ['rule:kime.shot']);
+          assert.deepEqual(codes(whyOf(doc, p, at + 'cam.shot')), [c.slots['cam.shot'].v === 'none' ? 'rule:kime.still' : 'rule:kime.shot']);
         }
+        if (c.slots.orient.from === 'rule') assert.deepEqual(codes(whyOf(doc, p, at + 'orient')), ['rule:kime.orient']);
+        const next = p.cuts[p.cuts.indexOf(c) + 1];
+        if (next && !next.impact && next.line) assert.deepEqual(codes(whyOf(doc, p, 'cut/' + next.key + ':seam')), ['rule:kime.seamOut']);
         arranged++;
       }
       if (c.slots.arrange.v === 'edgeBleed' && bleedParam < 2) {
+        // the size and placement parameters: kime.size; the landing: kime.param
         assert.deepEqual(codes(whyOf(doc, p, at + P.slotParamPath('arrange', null, 'edgeBleed', 'overflow', false))),
-          ['rule:kime.param']);
+          ['rule:kime.size']);
         assert.deepEqual(codes(whyOf(doc, p, at + 'text.scale')), ['rule:kime.full']);
+        const a = c.slots.arrive;
+        if (a.pfrom && a.pfrom.each === 'rule') {
+          assert.deepEqual(codes(whyOf(doc, p, at + P.slotParamPath('arrive', null, a.v, 'each', !!MV.use('core/registry').SHARED.arrive.each))),
+            ['rule:kime.param']);
+          landParam++;
+        }
         bleedParam++;
+      }
+      if (c.slots.arrange.v === 'giantWhisper' && c.slots.arrange.pfrom && c.slots.arrange.pfrom.tuck === 'rule' && tuckParam < 1) {
+        assert.deepEqual(codes(whyOf(doc, p, at + P.slotParamPath('arrange', null, 'giantWhisper', 'tuck', false))), ['rule:kime.size']);
+        tuckParam++;
       }
       if (!c.impact && c.slots['filter.count'].v > 0 && p.look.amounts.flash > 0 && flashMask < 2) {
         const ex = whyOf(doc, p, at + 'filter#0');
@@ -611,8 +689,8 @@ test('explain: the キメ reasons, the masked alternatives, the rules of the cut
       }
     }
   }
-  assert.ok(arranged === 3 && bleedParam === 2 && calmCount === 2 && calmWeigh === 2 && flashMask > 0,
-    [arranged, bleedParam, calmCount, calmWeigh, flashMask].join(' '));
+  assert.ok(arranged === 3 && bleedParam === 2 && calmCount === 2 && calmWeigh === 2 && flashMask > 0 && landParam > 0 && tuckParam > 0,
+    [arranged, bleedParam, calmCount, calmWeigh, flashMask, landParam, tuckParam].join(' '));
   // the line kept whole
   const doc = withPins(corpus.project('basic').doc, { 'line/r5:kime': ON });
   const p = plan(doc);
@@ -632,17 +710,315 @@ test('determinism: fresh plans agree; re-planning after a mark goes on or off gi
   for (const { name, doc } of KD.goldenDocs().slice(0, 6)) {
     assert.equal(fresh(clone(doc)).hash, fresh(clone(doc)).hash, name);
   }
-  // an anchored document (the mark moves no time): after toggling a line that no later line sings again, at most 8 casts
-  // are new (the calm cuts, the キメ cut and the cuts whose history reads them); the others after any toggle
+  // an anchored document (the mark moves no time): after toggling a line that no later line sings again, at most 9 casts
+  // are new (the calm cuts, the line's cuts — two when it comes back split — and the cuts whose history reads them); the
+  // others after any toggle. A locked line marked and unmarked: the seam out of it follows the mark (the seam memo keys
+  // on it, since the cut before is not among the next cut's cast inputs).
   const doc = corpus.project('lrc').doc;
+  const locked = CMD.reduce(doc, FI.lockPayload(doc, plan(doc), 'r6', { registry: CAT }));
   const seq = [[doc, false], [withPins(doc, { 'line/r6:kime': ON }), true], [doc, true],
     [withPins(doc, { 'line/r6:kime': ON, 'line/r9:kime': ON }), false], [withPins(doc, { 'line/r9:kime': ON }), false],
-    [withPins(doc, { 'line/r5:kime': ON }), false]];
+    [withPins(doc, { 'line/r5:kime': ON }), false], [locked, false], [withPins(locked, { 'line/r6:kime': ON }), false],
+    [locked, false]];
   for (const [d, local] of seq) {
     const cached = PL.run(clone(d), CAT, null);
-    assert.equal(cached.hash, fresh(clone(d)).hash);
-    if (local) assert.ok(cached.reuse.casts >= cached.reuse.cuts - 8, cached.reuse.casts + ' of ' + cached.reuse.cuts);
+    const scratch = fresh(clone(d));
+    assert.equal(cached.hash, scratch.hash);
+    if (local) assert.ok(cached.reuse.casts >= cached.reuse.cuts - 9, cached.reuse.casts + ' of ' + cached.reuse.cuts);
   }
+  const lk = plan(withPins(locked, { 'line/r6:kime': ON }));
+  const last = cutsOfLine(lk, 'r6').pop(), after = lk.cuts[lk.cuts.indexOf(last) + 1];
+  assert.ok(last.feat.kime && !after.impact && after.seamIn < 0, 'the hard cut out of the locked キメ line');
+});
+
+// --- review fixes: the lock, the size, the calm cuts, the part filters, the rules the other tests do not reach -------------
+
+test('lock: a locked キメ line keeps its look when the mark is removed (the キメ parameters are frozen too)', () => {
+  let n = 0;
+  for (const { name, doc } of corpus.corpus(2, ['16:9', '9:16'], ['basic', 'lrc'])) {
+    const p0 = plan(doc);
+    for (const l of p0.lines.filter((x, i) => i % 3 === 0)) {
+      if (doc.locks && doc.locks[l.id]) continue;
+      const marked = withPins(doc, { ['line/' + l.id + ':kime']: ON });
+      const locked = CMD.reduce(marked, FI.lockPayload(marked, plan(marked), l.id, { registry: CAT }));
+      const pl = plan(locked);
+      const pu = plan(CMD.reduce(locked, { t: 'pin.clear', path: 'line/' + l.id + ':kime' }));
+      for (const c of cutsOfLine(pl, l.id)) {
+        const u = cutOf(pu, c.key);
+        assert.ok(u, name + ' ' + c.key);
+        for (const slot of Object.keys(c.slots)) {
+          if (slot === 'cam.shot') continue;                       // its carry is a stage-6 fact of the cut before
+          assert.deepEqual([u.slots[slot].v, u.slots[slot].p], [c.slots[slot].v, c.slots[slot].p], name + ' ' + c.key + ' ' + slot);
+        }
+        assert.equal(u.slots['cam.shot'].v, c.slots['cam.shot'].v, name + ' ' + c.key + ' cam.shot');
+        if (c.feat.kime) n++;
+      }
+    }
+  }
+  assert.ok(n > 20, String(n));
+});
+
+test('size: every キメ cut is bigger than the median lyric cut of its video and than the quiet cut right before it', () => {
+  let n = 0, calm = 0;
+  for (const { name, doc } of corpus.corpus(2, ['16:9', '9:16', '1:1'], corpus.PROJECTS)) {
+    const d = markEvery(doc, 4);
+    const p = plan(d);
+    const ems = p.cuts.filter((c) => c.line && !c.feat.kime).map((c) => lyricEm(c, p)).sort((a, b) => a - b);
+    const median = ems[ems.length >> 1];
+    p.cuts.forEach((c, i) => {
+      if (!c.feat.kime || lockedLine(d, c) || pinned(c.slots.arrange)) return;
+      n++;
+      const e = lyricEm(c, p), where = name + ' ' + c.key + ' ' + c.slots.arrange.v + '/' + c.slots.orient.v;
+      assert.ok(e > median, where + ': ' + e.toFixed(3) + ' ≤ the median ' + median.toFixed(3));
+      const before = p.cuts[i - 1];
+      if (before && before.feat.calm === 2 && !lockedLine(d, before)) {
+        calm++;
+        const eb = lyricEm(before, p);
+        assert.ok(e > eb, where + ': ' + e.toFixed(3) + ' ≤ the cut before ' + before.key + ' ' + eb.toFixed(3));
+      }
+    });
+  }
+  assert.ok(n > 150 && calm > 120, n + ' ' + calm);
+});
+
+test('calm: the cut before a キメ cut takes no bold or キメ layout; level 1 weighs them down; its text is ×0.9', () => {
+  let n2 = 0, n1 = 0, bold1 = 0, bold0 = 0, n0 = 0;
+  const bold = (k) => K.arrange.includes(k) || (CAT.get('arrange', k).tags || []).some((t) => CALM.arrangeDeny.includes(t));
+  for (const { doc, plan: p } of markedCorpus()) {
+    for (const c of p.cuts) {
+      if (!c.line || lockedLine(doc, c) || pinned(c.slots.arrange) || c.feat.kime) continue;
+      if (c.feat.calm === 2) { n2++; assert.ok(!bold(c.slots.arrange.v), c.key + ' ' + c.slots.arrange.v); }
+      else if (c.feat.calm === 1) { n1++; if (bold(c.slots.arrange.v)) bold1++; }
+      else { n0++; if (bold(c.slots.arrange.v)) bold0++; }
+    }
+  }
+  assert.ok(n2 > 200 && n1 > 200 && bold1 / n1 < bold0 / n0, [n2, n1, bold1 / n1, bold0 / n0].join(' '));
+  // the text scale: ×0.97 at level 1, ×0.9 at level 2 (automatic text only)
+  assert.deepEqual(CALM.scale, [1, 0.97, 0.9]);
+  const srcs = ['あさの ひかり', 'ゆうやけの そら', 'よるの しじま', 'ほしの うた'];
+  const p0 = plan(lyricDoc(srcs)), p1 = plan(lyricDoc(srcs, { pins: { 'line/r4:kime': ON } }));
+  const scaleOf = (p, key) => cutOf(p, key).slots['text.scale'].v;
+  const lv = (key) => cutOf(p1, key).feat.calm;
+  for (const key of ['r2~0', 'r3~0']) {
+    const want = Math.round(scaleOf(p0, key) * CALM.scale[lv(key)] * 100) / 100;
+    assert.ok(Math.abs(scaleOf(p1, key) - want) <= 0.011, key + ' level ' + lv(key) + ': ' + scaleOf(p1, key) + ' vs ' + want);
+  }
+  assert.deepEqual([lv('r2~0'), lv('r3~0')], [1, 2]);
+});
+
+test('calm span: only cuts that start within 4 s before the キメ cut are calmed', () => {
+  // stamped lines 3 s apart: the cut 3 s before is calmed, the one 6 s before is not
+  const d = lyricDoc(['[00:02.00]あさの ひかり', '[00:05.00]ゆうやけの そら', '[00:08.00]よるの しじま'], { pins: { 'line/r3:kime': ON } });
+  const p = plan(d);
+  assert.deepEqual(['r1~0', 'r2~0'].map((k) => cutOf(p, k).feat.calm || 0), [0, 2]);
+  const near = lyricDoc(['[00:03.50]あさの ひかり', '[00:05.20]ゆうやけの そら', '[00:07.00]よるの しじま'], { pins: { 'line/r3:kime': ON } });
+  const q = plan(near);
+  assert.deepEqual(['r1~0', 'r2~0'].map((k) => cutOf(q, k).feat.calm || 0), [1, 2]);
+  assert.equal(CALM.span, 4);
+});
+
+test('the counts before a キメ cut: many decorations are cut to one on the level-1 cut (rule kime.calm)', () => {
+  // (the screen-effect count is at most 1 before the 見せ場 extra — 0.8 · drive + r < 2 — so its level-1 cap of 1 never
+  // binds; the level-2 cap of 0 does, test 10)
+  let capped = 0;
+  for (const { name, doc } of corpus.corpus(2, ['16:9'], ['basic', 'long'])) {
+    const d = withPins(markEvery(doc, 3), { 'work:amount.ornament': { v: 1, by: 'user' } });
+    const p = plan(d);
+    for (const c of p.cuts) {
+      if (c.feat.calm !== 1 || lockedLine(d, c)) continue;
+      const o = c.slots['ornament.count'];
+      assert.ok(o.v <= 1, name + ' ' + c.key + ' ' + o.v);
+      if (o.from === 'rule') {
+        capped++;
+        assert.deepEqual(codes(whyOf(d, p, 'cut/' + c.key + ':ornament.count')), ['rule:kime.calm']);
+      }
+    }
+  }
+  assert.ok(capped > 3, String(capped));
+});
+
+test('the hold with a tempo: a キメ cut\'s hold is one of the still holds that follow the beat', () => {
+  let n = 0;
+  for (const { name, doc } of corpus.corpus(2, ['16:9', '9:16'], ['basic', 'lrc'])) {
+    const d = withPins(markEvery(doc, 3), { 'work:bpm': { v: 120, by: 'user' } });
+    const p = plan(d);
+    assert.ok(p.beats, name + ' has beats');
+    for (const c of kimeCuts(p)) {
+      if (lockedLine(d, c) || pinned(c.slots.dwell)) continue;
+      assert.ok(K.dwellBeats.includes(c.slots.dwell.v), name + ' ' + c.key + ' ' + c.slots.dwell.v);
+      n++;
+    }
+  }
+  assert.ok(n > 10, String(n));
+});
+
+test('EXTREME on the cut before a キメ cut: presets tagged hard or fast weigh ×0.2', () => {
+  const SH = MV.use('core/shot');
+  let seen = 0;
+  for (const { name, doc } of corpus.corpus(2, ['16:9', '9:16'], ['basic', 'lrc'])) {
+    const d0 = withPins(doc, { 'work:cam.extreme': { v: 1, by: 'user' } });
+    const d1 = withPins(markEvery(d0, 3), {});
+    const p1 = plan(d1), p0 = plan(d0);
+    for (const c of p1.cuts) {
+      if (c.feat.calm !== 2 || seen >= 6) continue;
+      const w1 = EX.explain(d1, p1, 'cut/' + c.key + ':cam.shot', { registry: CAT });
+      const w0 = EX.explain(d0, p0, 'cut/' + c.key + ':cam.shot', { registry: CAT });
+      const a1 = new Map((w1.alts || []).map((x) => [x.key, x.w])), a0 = new Map((w0.alts || []).map((x) => [x.key, x.w]));
+      let compared = 0;
+      for (const [key, w] of a1) {
+        if (!SH.XSHOTS[key] || !(a0.get(key) > 0) || !(w > 0)) continue;
+        const tags = SH.XSHOTS[key].tags || [];
+        const strong = tags.includes('hard') || tags.includes('fast');
+        const ratio = w / a0.get(key);
+        compared++;
+        if (strong) assert.ok(ratio < 0.35, name + ' ' + c.key + ' ' + key + ' ×' + ratio.toFixed(3));
+        else assert.ok(ratio > 0.5, name + ' ' + c.key + ' ' + key + ' ×' + ratio.toFixed(3));
+      }
+      if (compared) seen++;
+    }
+  }
+  assert.ok(seen >= 3, String(seen));
+});
+
+test('alignment: a copy right before a キメ cut keeps its source\'s shot (「くり返しの行をそろえる」 copies are not calmed)', () => {
+  let n = 0;
+  for (const { name, doc } of corpus.corpus(3, ['16:9', '9:16'], ['repeat'])) {
+    const p0 = plan(doc);
+    const al0 = CA.alignments({ ix: PINS.index(doc.pins) }, p0.cuts) || new Map();
+    for (let j = 0; j + 1 < p0.cuts.length; j++) {
+      const c = p0.cuts[j], k = p0.cuts[j + 1];
+      const src = al0.get(c.key);
+      if (!src || !k.line || k.line === c.line || k.line === src.line) continue;
+      if (c.slots['cam.shot'].v !== src.slots['cam.shot'].v || c.slots['cam.shot'].v === 'none') continue;
+      const d = withPins(doc, { ['line/' + k.line + ':kime']: ON });
+      const p = plan(d);
+      const c1 = cutOf(p, c.key), s1 = cutOf(p, src.key);
+      if (!c1 || c1.feat.calm !== 2 || s1.feat.calm) continue;
+      assert.deepEqual(c1.slots['cam.shot'].v, s1.slots['cam.shot'].v, name + ' ' + c.key + ' keeps ' + src.key + '\'s shot');
+      if (c.slots.arrange.v === src.slots.arrange.v) assert.equal(c1.slots.arrange.v, s1.slots.arrange.v, name + ' ' + c.key + ' layout');
+      n++;
+    }
+  }
+  assert.ok(n >= 4, String(n));
+});
+
+test('part filters that allow only flashing screen effects: a キメ cut without 見せ場 takes none (no fallback, no pool-empty)', () => {
+  let n = 0;
+  for (const { name, doc } of corpus.corpus(2, ['16:9', '9:16'], ['basic', 'lrc'])) {
+    const d = Object.assign(withPins(markEvery(doc, 2), { 'work:amount.flash': { v: 1, by: 'user' } }),
+      { filters: Object.assign({}, doc.filters, { filter: { only: ['flashPop', 'invertBlink'], deny: null } }) });
+    const p = plan(d);
+    for (const c of kimeCuts(p)) {
+      if (c.impact || lockedLine(d, c)) continue;
+      for (let i = 0; i < c.slots['filter.count'].v; i++) {
+        const f = c.slots['filter#' + i];
+        if (pinned(f)) continue;
+        assert.deepEqual([f.v, f.from], ['none', 'rule'], name + ' ' + c.key + ' filter#' + i);
+        if (n === 0) assert.deepEqual(codes(whyOf(d, p, 'cut/' + c.key + ':filter#' + i)), ['rule:kime.noFlash']);
+        n++;
+      }
+      assert.ok(!p.warnings.some((w) => w.code === 'pool-empty' && w.cut === c.key), name + ' ' + c.key + ' pool-empty');
+    }
+  }
+  assert.ok(n > 5, String(n));
+});
+
+test('the lens right before a キメ cut: where the part filters leave only shaking or beat lenses, one of them (not the fallback)', () => {
+  let n = 0;
+  for (const { name, doc } of corpus.corpus(2, ['16:9'], ['basic', 'lrc'])) {
+    const d = Object.assign(markEvery(doc, 3), { filters: Object.assign({}, doc.filters, { lens: { only: ['handHeld', 'beatZoom'], deny: null } }) });
+    const p = plan(d);
+    for (const c of p.cuts) {
+      if (c.feat.calm !== 2 || lockedLine(d, c) || pinned(c.slots.lens)) continue;
+      assert.ok(['handHeld', 'beatZoom'].includes(c.slots.lens.v) && c.slots.lens.from === 'auto', name + ' ' + c.key + ' ' + c.slots.lens.v);
+      n++;
+    }
+  }
+  assert.ok(n > 5, String(n));
+});
+
+test('carry: the camera never carries a framing into a キメ cut (its hit is a fresh framing)', () => {
+  const LINES = ['あさやけの/まちを/ぬけて/とおくの/うみまで/*はしっていく*', 'かぜにのって/ひかりのなかを/どこまでも/*とんでいけ*',
+    'ゆめのつづきを/みにいこう/あしたの/*むこうがわへ*', 'ちいさな こえで うたう', 'しずかな/よるの/まちかどで/きみを/*まっている*'];
+  let moving = 0;
+  for (let seed = 1; seed <= 12; seed++) {
+    for (const aspect of ['9:16', '1:1']) {
+      const pins = {};
+      LINES.forEach((_, i) => { if (i !== 3) pins['line/r' + (i + 1) + ':kime'] = ON; });
+      const p = plan(lyricDoc(LINES, { aspect, seed: seed * 7777, moodSeed: seed * 31, pins }));
+      p.cuts.forEach((c, j) => {
+        if (!c.feat.kime || j === 0 || p.cuts[j - 1].line !== c.line) return;
+        const s = c.slots['cam.shot'];
+        assert.ok(!(s.p && s.p.carry), aspect + '#' + seed + ' ' + c.key + ' carries a framing');
+        if (moves(s.v) && moves(p.cuts[j - 1].slots['cam.shot'].v)) moving++;
+      });
+    }
+  }
+  assert.ok(moving >= 5, 'second pieces that move after a moving piece: ' + moving);
+});
+
+test('stage 6: the seam of 「くり返しの行をそろえる」 is not copied into a キメ cut or out of one', () => {
+  const doc = corpus.project('repeat').doc;
+  const p0 = plan(doc);
+  const al = CA.alignments({ ix: PINS.index(doc.pins) }, p0.cuts) || new Map();
+  let into = 0, out = 0;
+  for (const B of p0.cuts) {
+    const S0 = al.get(B.key);
+    const i = p0.cuts.indexOf(B);
+    if (!S0 || !B.line || p0.cuts.indexOf(S0) <= 0 || i <= 0) continue;
+    // the source's seam pinned: the copy takes it while nothing is キメ
+    const pinS = { ['cut/' + S0.key + ':seam']: { v: 'blendDissolve', by: 'user', sig: S0.text } };
+    const d0 = withPins(doc, pinS);
+    const q0 = plan(d0);
+    const b0 = cutOf(q0, B.key);
+    if (!b0 || b0.seamIn < 0 || q0.seams[b0.seamIn].slot.v !== 'blendDissolve' || pinned(q0.seams[b0.seamIn].slot)) continue;
+    // both copies キメ: the copy's seam is the hard cut into a キメ cut
+    if (into < 2) {
+      const d1 = withPins(d0, { ['line/' + B.line + ':kime']: ON, ['line/' + S0.line + ':kime']: ON });
+      const q1 = plan(d1);
+      const b1 = cutOf(q1, B.key);
+      if (b1 && b1.feat.kime) {
+        assert.equal(b1.seamIn, -1, B.key + ' copies a transition into a キメ cut');
+        assert.deepEqual(codes(whyOf(d1, q1, 'cut/' + B.key + ':seam')), ['rule:kime.seam']);
+        into++;
+      }
+    }
+    // the cut before the copy marked (another line): the hard cut out of it
+    const A = p0.cuts[i - 1];
+    if (out < 2 && A.line && A.line !== B.line && A.line !== S0.line && !B.impact) {
+      const d2 = withPins(d0, { ['line/' + A.line + ':kime']: ON });
+      const q2 = plan(d2);
+      const b2 = cutOf(q2, B.key), a2 = q2.cuts[q2.cuts.indexOf(b2) - 1];
+      if (b2 && a2 && a2.feat.kime) {
+        assert.equal(b2.seamIn, -1, B.key + ' copies a transition out of a キメ cut');
+        out++;
+      }
+    }
+  }
+  assert.ok(into >= 1 && out >= 1, into + ' ' + out);
+});
+
+test('pins on the pieces: a pin without a sig on a former piece does not take over the キメ cut', () => {
+  const srcs = ['あさの ひかり', 'ゆうやけ/そらの/むこうへ', 'よるの しじま'];
+  const doc = lyricDoc(srcs, { pins: { 'cut/r2~4:arrange': { v: 'centerAnchor', by: 'user' }, 'line/r2:kime': ON } });
+  const p = plan(doc);
+  const c = cutOf(p, 'r2~0');
+  assert.ok(c.feat.kime && K.arrange.includes(c.slots.arrange.v), c.slots.arrange.v);
+  assert.ok(p.warnings.some((w) => w.code === 'shadowed-pin' && w.path === 'cut/r2~4:arrange'));
+});
+
+test('orientation: a pinned orientation wins; across the short side はみ出し takes at most 10 cells', () => {
+  const twelve = 'あおいそらのしたできみを';          // 12 cells, kana: long pseudo-words
+  assert.equal(S.cells(twelve), 12);
+  for (const [aspect, orient] of [['16:9', 'v'], ['9:16', 'h']]) {
+    const d = lyricDoc(['はじまりの うた', twelve, 'おわりの うた'], { aspect, pins: { 'line/r2:kime': ON, 'work:orient': { v: orient, by: 'user' } } });
+    const p = plan(d);
+    const k = kimeCuts(p)[0];
+    assert.equal(k.slots.orient.v, orient, aspect);
+    assert.ok(k.feat.cells <= K.bleedAcross || k.slots.arrange.v !== 'edgeBleed', aspect + ' ' + k.feat.cells + ' ' + k.slots.arrange.v);
+  }
+  assert.deepEqual([KI.bleedMax('16:9', 'h'), KI.bleedMax('16:9', 'v'), KI.bleedMax('9:16', 'v'), KI.bleedMax('9:16', 'h'), KI.bleedMax('1:1', 'v')],
+    [12, 10, 12, 10, 12]);
 });
 
 // --- the golden --------------------------------------------------------------------------------------------------------------------

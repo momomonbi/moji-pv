@@ -1,8 +1,8 @@
 /* 文字PVメーカー v2 — original work. Inspector field states, lock payloads and plan-value readers (DESIGN §4.16.8, §3.13, §3.6; DESIGN_2_1 §3.9). */
 MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyrics', 'core/schema', 'core/timing',
   'core/curve', 'core/shot', 'planner/params', 'planner/cast', 'planner/look', 'planner/segment', 'planner/plan',
-  'planner/extreme', 'planner/rules'],
-(P, PINS, REG, LY, S, TM, CV, SHOT, PA, CA, LK, SG, PL, XT, RU) => {
+  'planner/extreme', 'planner/rules', 'planner/kime'],
+(P, PINS, REG, LY, S, TM, CV, SHOT, PA, CA, LK, SG, PL, XT, RU, KI) => {
   'use strict';
 
   // キメ (PV22 P3, DESIGN_2_2 §3): 「キメの前を静かにする」 (kime.calm) is a work value, the キメ mark (kime) a line value.
@@ -545,7 +545,7 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
       for (const slot of Object.keys(cut.slots)) {
         const d = cut.slots[slot];
         if (isAuto(d) && !(forced && CA.MOTION_KINDS.includes(slot) && d.from === 'rule')) put(slot, d.v);
-        if (d.p && d.v !== 'none') putParams(put, slot, d);
+        if (d.p && d.v !== 'none') putParams(put, slot, d, KI.isKime(cut));
       }
       const seam = cut.seamIn >= 0 ? plan.seams[cut.seamIn].slot : null;
       if (seam) {
@@ -569,14 +569,17 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
     return !!def && def.motion === 'own';
   }
 
-  // Parameters that are not pins: shared ones at 'kind.param' / 'kind#i.param', part ones at 'kind@key.param'.
-  function putParams(put, slot, d) {
+  // Parameters that are not pins: shared ones at 'kind.param' / 'kind#i.param', part ones at 'kind@key.param'. A
+  // parameter a rule set is left out (its inputs are locked: motion.speed), except the キメ parameters of a キメ cut
+  // (KIME.params): their input is the mark, which a lock does not freeze, so a locked キメ line keeps its look when the
+  // mark is removed (DESIGN_2_2 §3.2).
+  function putParams(put, slot, d, kime) {
     const m = /^([a-z]+)(?:#(\d))?$/.exec(slot);
     if (!m) return;
     const kind = m[1], idx = m[2] === undefined ? null : Number(m[2]);
     const shared = REG.SHARED[kind] || {};
     for (const name of Object.keys(d.p)) {
-      if (d.pfrom && d.pfrom[name]) continue;
+      if (d.pfrom && d.pfrom[name] && !(kime && d.pfrom[name] === 'rule' && KI.KIME.params.includes(name))) continue;
       put(P.slotParamPath(kind, idx, d.v, name, !!shared[name]), d.p[name]);
     }
   }

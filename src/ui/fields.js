@@ -16,7 +16,8 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
     // whose off is 自動: turning it off clears the pin), `onClears` (a toggle that is on by default, whose on is 自動:
     // turning it on clears the pin, off pins false; 「キメの前を静かにする」), `noDice` (a setting, not drawn: no 振り直し),
     // `after` (a custom block the inspector draws right under the row: 「キメ」's count and buttons), `readEach` (a row of
-    // the several-lines page that reads every selected line's value and shows いろいろ when they differ).
+    // the several-lines page that reads every selected line's value and shows いろいろ when they differ), `setting`
+    // ({ on, off }: undo labels; a switch whose pin is a setting, not a 固定: no tag, ×, ⋯ or Del, not in 固定 n).
 
     const ALL = Object.freeze(['work', 'line', 'cut']);
     const WORK = Object.freeze(['work']);
@@ -35,6 +36,17 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
     const SNAPS = Object.freeze(['off', 'beat', 'half', 'bar']);
     const COMMANDS_USED = Object.freeze(['look.set', 'look.seed', 'meta.set', 'timing.set', 'lyrics.row']);
     const PARAM_LABEL = 'fld.param';        // '{name}': the label of a generated part parameter (name from labelText)
+
+    // Settings, not look choices (DESIGN_2_2 §3.5): the キメ mark and 「キメの前を静かにする」 are pins that すべての固定を外す
+    // keeps (core/commands). Their rows (field flag `setting`: the undo labels of on and off) are plain switches, and the
+    // 固定 count and menu leave them out (isSettingPath).
+    const SETTING_SLOTS = Object.freeze(['kime', 'kime.calm']);
+    const KIME_SETTING = Object.freeze({ on: 'undo.kimeOn', off: 'undo.kimeOff' });
+    const KIME_CALM_SETTING = Object.freeze({ on: 'undo.kimeCalmOn', off: 'undo.kimeCalmOff' });
+    function isSettingPath(path) {
+      const i = typeof path === 'string' ? path.lastIndexOf(':') : -1;
+      return i >= 0 && SETTING_SLOTS.includes(path.slice(i + 1));
+    }
 
     // --- the slot catalogue (§3.4.1–§3.4.3): which scopes a slot is valid at --------------------------------------
 
@@ -298,7 +310,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
           // キメ (DESIGN_2_2 §3): on unless the user turns it off (off pins false; on clears the pin); it acts only next to
           // a line marked キメ.
           F({ path: 'kime.calm', scopes: WORK, widget: 'toggle', label: 'fld.kimeCalm', spec: { type: 'bool' },
-            note: 'fld.kimeCalm.note', onClears: true, noDice: true, basic: false }),
+            note: 'fld.kimeCalm.note', onClears: true, noDice: true, basic: false, setting: KIME_CALM_SETTING }),
         ]),
         // 写真・動画 (DESIGN_2_1 §11.7.3): the library, open when it holds something.
         sec('media', (ctx) => ctx.mediaCount > 0, [], { custom: 'media' }),
@@ -352,7 +364,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
           // キメ (DESIGN_2_2 §3): a line pin (on pins true, off clears it); under it the work's count, the too-many hint,
           // 「同じ歌詞の行もキメにする」 and the long-line note (the inspector's custom block kimeInfo).
           F({ path: 'kime', scopes: LINE, widget: 'toggle', label: 'fld.kime', spec: { type: 'bool' }, note: 'fld.kime.note',
-            offClears: true, noDice: true, after: 'kimeInfo' }),
+            offClears: true, noDice: true, after: 'kimeInfo', setting: KIME_SETTING }),
           F({ path: 'split', scopes: LINE, widget: 'cutpoints', label: 'fld.split' }),
           F({ cmd: { t: 'lyrics.row', key: 'note' }, scopes: LINE, widget: 'text', label: 'fld.note', spec: SPEC.text }),
           F({ path: 'lang', scopes: LINE, widget: 'choice', label: 'fld.lang', spec: enumSpec(LANGS),
@@ -937,7 +949,8 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
     // `max` is the guideline (planner/kime guideline: max(3, 15 % of the lyric lines)) and `many` says n exceeds it (a
     // hint, not a Plan warning). `on`: this line is キメ. `same`: the ids of the other lines that sing the same words
     // without their own mark (「同じ歌詞の行もキメにする」; only while this line is キメ). `split`: the text of the キメ cut
-    // when this line is too long for one cut and keeps several (else null).
+    // when this line is too long for one cut and keeps several (else null). `emph`: the キメ cut is 大と小 without an
+    // emphasis (the hint that 強調 chooses the giant word).
     function kimeInfo(plan, doc, lineId) {
       const lines = plan && Array.isArray(plan.lines) ? plan.lines : [];
       const kimeCut = (l) => {
@@ -954,13 +967,16 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
       const marked = (id) => !!pins['line/' + id + ':kime'] && pins['line/' + id + ':kime'].v === true;
       const same = own ? lines.filter((l) => l !== line && l.text === line.text && !marked(l.id)).map((l) => l.id) : [];
       const max = KI.guideline(lines.length);
-      return { n, max, many: n > max, on: !!own, same, split: own && line.cuts.length > 1 ? own.text : null };
+      // 大と小 without an emphasis: its giant is the longest word, which may not be the punch word; 強調 chooses it
+      const arrange = own && own.slots && own.slots.arrange ? own.slots.arrange.v : null;
+      const emph = !!own && arrange === 'giantWhisper' && !(Array.isArray(own.emph) && own.emph.length);
+      return { n, max, many: n > max, on: !!own, same, split: own && line.cuts.length > 1 ? own.text : null, emph };
     }
 
     return {
       WIDGETS, FIELDS, PAGES: PAGE_SECTIONS, FACE_ROLES, FACE_SCRIPTS, LIST_KINDS, SLOT_KINDS, COMMANDS_USED, SNAPS, SEASONS,
       PARAM_LABEL, sectionsFor, contextOf, pageOf, paramFields, widgetFor, optionsFor, slotScopes, fieldPath, decisionsOf, freeIndex,
       agreedKey, sharedNames, pathsFor, clearPathsFor, firstCutScope, pinnedSlots, withPinnedParams, writePath, writeScope,
-      pinCmd, whyParts, whyRuleKey, areaLabel, areaTitle, kimeInfo,
+      pinCmd, whyParts, whyRuleKey, areaLabel, areaTitle, kimeInfo, SETTING_SLOTS, KIME_SETTING, isSettingPath,
     };
   });

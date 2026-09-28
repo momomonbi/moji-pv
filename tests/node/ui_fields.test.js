@@ -1360,6 +1360,12 @@ test('キメ: the line toggle, the multi-line toggle\'s slot and 「キメの前
   assert.ok(calm, '作品全体 › 見た目 › 詳しい設定');
   assert.deepEqual([calm.widget, calm.label, calm.note, calm.onClears, calm.offClears, calm.noDice, calm.basic],
     ['toggle', 'fld.kimeCalm', 'fld.kimeCalm.note', true, undefined, true, false]);
+  // settings, not 固定: plain switches with their own undo labels, left out of 固定 n (DESIGN_2_2 §3.5)
+  assert.deepEqual(kime.setting, { on: 'undo.kimeOn', off: 'undo.kimeOff' });
+  assert.deepEqual(calm.setting, { on: 'undo.kimeCalmOn', off: 'undo.kimeCalmOff' });
+  assert.equal(F.FIELDS.filter((f) => f.setting).length, 2, 'no other row is a setting');
+  assert.deepEqual(['line/r1:kime', 'work:kime.calm', 'line/r1:lang', 'cut/r1~0:arrange', 'work:kime', 'bad'].map(F.isSettingPath),
+    [true, true, false, false, true, false]);
   const CMD = MV.use('core/commands');
   const D0 = MV.use('core/doc').defaultDoc();
   const ok = (path, v) => {
@@ -1388,12 +1394,14 @@ test('キメ: kimeInfo counts the work\'s キメ lines from the Plan, offers the
   const planOf = (pins) => PL.plan(Object.assign({}, doc, { pins }), { registry: reg });
   // no mark: nothing to say
   const none = F.kimeInfo(planOf({}), doc, 'r1');
-  assert.deepEqual(none, { n: 0, max: 3, many: false, on: false, same: [], split: null });
+  assert.deepEqual(none, { n: 0, max: 3, many: false, on: false, same: [], split: null, emph: false });
   // r1 marked: the same words sung again (r4) are offered; r2 is not キメ, so it offers nothing
   const pins1 = { 'line/r1:kime': on };
   const p1 = planOf(pins1);
   const d1 = Object.assign({}, doc, { pins: pins1 });
-  assert.deepEqual(F.kimeInfo(p1, d1, 'r1'), { n: 1, max: 3, many: false, on: true, same: ['r4'], split: null });
+  const k1 = p1.cuts.find((c) => c.feat.kime);
+  assert.deepEqual(F.kimeInfo(p1, d1, 'r1'), { n: 1, max: 3, many: false, on: true, same: ['r4'], split: null,
+    emph: k1.slots.arrange.v === 'giantWhisper' });
   assert.deepEqual(F.kimeInfo(p1, d1, 'r2').same, []);
   // the long line keeps its cuts in 9:16 (> 16 cells): its キメ cut's text is named
   const pins2 = Object.assign({}, pins1, { 'line/r4:kime': on, 'line/r5:kime': on, 'line/r3:kime': on });
@@ -1412,4 +1420,13 @@ test('キメ: kimeInfo counts the work\'s キメ lines from the Plan, offers the
   // a stale pin (not true) does not count: the Plan decides
   const bad = { 'line/r1:kime': { v: 'yes', by: 'user' } };
   assert.equal(F.kimeInfo(planOf(bad), Object.assign({}, doc, { pins: bad }), 'r1').n, 0);
+  // 大と小 without an emphasis says that 強調 chooses the giant word; with one (or on はみ出し) it does not
+  const giant = { 'line/r1:kime': on, 'cut/r1~0:arrange': { v: 'giantWhisper', by: 'user', sig: 'あさやけの' } };
+  assert.equal(F.kimeInfo(planOf(giant), Object.assign({}, doc, { pins: giant }), 'r1').emph, true);
+  const bleed = { 'line/r1:kime': on, 'cut/r1~0:arrange': { v: 'edgeBleed', by: 'user', sig: 'あさやけの' } };
+  assert.equal(F.kimeInfo(planOf(bleed), Object.assign({}, doc, { pins: bleed }), 'r1').emph, false);
+  const emDoc = Object.assign({}, doc, { sheet: { next: 3, rows: [{ id: 'r1', src: '*あさ*やけの' }, { id: 'r2', src: 'ひかり' }] } });
+  const emPins = { 'line/r1:kime': on, 'cut/r1~0:arrange': { v: 'giantWhisper', by: 'user', sig: 'あさやけの' } };
+  const emPlan = PL.plan(Object.assign({}, emDoc, { pins: emPins }), { registry: reg });
+  assert.equal(F.kimeInfo(emPlan, Object.assign({}, emDoc, { pins: emPins }), 'r1').emph, false);
 });

@@ -123,9 +123,11 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
     // The pool of a cut after the rules and what limited it: { bits, gentle, arrange, calm } or a forced value
     // { forced: { v, from, rule }, mask, arrange }. rulesWhy and maskOf give explain's view of them.
     // キメ (DESIGN_2_2 §3): after the rules that stop the camera (the amount, a layout without camerawork), a キメ cut's
-    // shot is forced (rule kime.shot): the first of KIME.shots its pool allows (planner/kime shotFor; the whole block
-    // snaps in, or the push goes to the emphasized word); the cut right before a キメ cut (calm level 2) keeps to the
-    // quiet shots where its pool has one.
+    // shot is forced: on 大と小 without an emphasis (the giant is the whole block, which already fills the frame: a move
+    // would not show) 'none', rule kime.still, and the lens punches in; else the first of KIME.shots its pool allows
+    // (planner/kime shotFor; the push goes to the emphasized word), rule kime.shot ('none' there: kime.still). The cut
+    // right before a キメ cut (calm level 2) keeps to the quiet shots where its pool has one; `allBits` is its pool
+    // before that mask (an aligned copy of 「くり返しの行をそろえる」 keeps its source's shot).
     function shotRules(st) {
       const { ctx, cut } = st;
       const A = ctx.look.amounts.camera;
@@ -138,19 +140,23 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
       if (ROLE_BITS[cut.role] !== undefined) bits &= ROLE_BITS[cut.role];
       if (cam === 'gentle') bits &= GENTLE_BITS;
       if (KI.isKime(cut)) {
-        const v = KI.shotFor(cut.feat.emph, (key) => !!(bits & (1 << SHOT_POOL.indexOf(key))));
-        return { forced: { v, from: 'rule', rule: 'kime.shot' }, mask: 'kime', arrange };
+        const still = !cut.feat.emph && !!arrange && KI.KIME.still.includes(arrange.key);
+        const v = still ? NONE : KI.shotFor(cut.feat.emph, (key) => !!(bits & (1 << SHOT_POOL.indexOf(key))));
+        return { forced: { v, from: 'rule', rule: v === NONE ? 'kime.still' : 'kime.shot' }, mask: 'kime', arrange };
       }
+      const allBits = bits;
       const calm = cut.feat.calm === 2 && (bits & CALM_BITS) !== 0 && (bits & ~CALM_BITS) !== 0;
       if (calm) bits &= CALM_BITS;
-      return { bits, gentle: cam === 'gentle', arrange, calm };
+      return { bits, gentle: cam === 'gentle', arrange, calm, allBits };
     }
 
     // The reasons of the rules (explain), in their order: forced values, then each pool that limited the cut.
     function rulesWhy(st, rules) {
       const A = st.ctx.look.amounts.camera;
       if (rules.forced) {
-        if (rules.forced.rule === 'kime.shot') return [{ code: 'rule', params: { rule: 'kime.shot' } }];
+        if (rules.forced.rule === 'kime.shot' || rules.forced.rule === 'kime.still') {
+          return [{ code: 'rule', params: { rule: rules.forced.rule } }];
+        }
         return rules.forced.rule === 'none-camera'
           ? [{ code: 'rule', params: { rule: 'none-camera' } }, { code: 'cam.amount', params: { x: A } }]
           : [{ code: 'cam.arrange', params: { key: rules.arrange.key } }];
@@ -389,7 +395,12 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
       }
       const rec = recencyOf(st);
       const list = weighShots(st, rules, rec, withWhy);
-      if (al && fitsShot(al.v, rules, list)) return alignedOut(st, al.v, rules, withWhy, rec, list);
+      if (al) {
+        // an aligned copy is not calmed (DESIGN_2_2 §3): its source's shot is weighed against the pool before the mask
+        const full = rules.calm ? Object.assign({}, rules, { bits: rules.allBits, calm: false }) : rules;
+        const fl = full === rules ? list : weighShots(st, full, rec, false);
+        if (fitsShot(al.v, full, fl)) return alignedOut(st, al.v, full, withWhy, rec, full === rules ? list : null);
+      }
       const prefix = CH.gumbelPrefix(seedOf(st, 'cam.shot'));
       const kept = inheritedShot(st, rules, list);
       if (kept !== null) {

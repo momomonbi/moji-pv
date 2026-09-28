@@ -179,7 +179,8 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     // weigh 0 here, DESIGN_2_1 §11.5.9), only, calm (キメ, DESIGN_2_2 §3: see onlyKeys; calm = the chooser factor of the
     // cuts before a キメ cut, planner/kime calmFactor) }.
     // A set `only` (an array: a キメ set, already filtered by the cut's own pool) whose members all weigh 0 gives its
-    // first member by rule (never the kind's fallback, which the set may not contain).
+    // first member by rule (never the kind's fallback, which the set may not contain); a predicate `only` on a list slot
+    // (the screen effects of a キメ cut that do not flash) that leaves nothing of a pool gives 'none' by its rule.
     // Stages (§4.16.4, §3.8): the full weights; the same pool without traitFit and fits; the pool without the text
     // traits (orient, script, aspect); then the kind's fallback — or 'none' for a list slot whose fallback does not
     // serve the cut's role, and for atmos (orNone). pool-empty is reported on lyric cuts, and elsewhere only when the
@@ -199,11 +200,12 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
         : (req.role || '') + '|' + (req.orient || '') + '|' + (req.script || '') + '|' + (ctx.aspect || '');
       const full = poolEntry(ctx, req.kind, sub, req.role, req.orient, req.script, ctx.aspect, req.scope, cond);
       if (trace) trace.cond = cond;
+      let emptied = false;          // `only` left nothing of a pool that had members
       for (let stage = 0; stage < 3; stage++) {
         const entry = stage < 2 ? full
           : poolEntry(ctx, req.kind, (req.role || '') + '|||', req.role, undefined, undefined, undefined, req.scope, cond);
         const keys = req.only ? onlyKeys(ctx, req.kind, entry.keys, req.only) : entry.keys;
-        if (!keys.length) continue;
+        if (!keys.length) { if (entry.keys.length) emptied = true; continue; }
         ask.keys = keys;
         ask.noFit = stage > 0;
         ask.trace = trace ? [] : null;
@@ -225,6 +227,12 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       if (Array.isArray(req.only) && req.only.length) {
         if (trace) trace.stage = 'rule';
         return { v: req.only[0], from: 'rule', stage: 'rule', rule: 'kime.set' };
+      }
+      // a predicate (no flash on a キメ cut) that left nothing of the user's pool: no part, by that rule, rather than the
+      // kind's fallback, which the user's part filters may not allow (no pool-empty either: the pool was not empty)
+      if (emptied && req.list && typeof req.only === 'function' && !req.only.keep) {
+        if (trace) trace.stage = 'none';
+        return { v: 'none', from: 'rule', stage: 'none', rule: req.only.id };
       }
       const fb = ctx.registry.fallback(req.kind);
       if (req.list && !serves(ctx, req.kind, fb, req.role)) {
@@ -727,6 +735,7 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
         } else if (cut.feat.calm && !list && KI.calmKind(kind)) {
           calm = cut.feat.calm;
           if (calm === 2 && kind === 'lens') only = calmLensOf(ctx.registry);
+          if (calm === 2 && kind === 'arrange') only = calmArrangeOf(ctx.registry);
         }
       }
       let d, ad = null;
@@ -793,8 +802,16 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       const { ctx, cut } = st;
       const K = KI.KIME;
       if (kind === 'arrange') {
-        const c = cut.feat.cells;
-        return restrictTo(st, kind, c >= K.bleedCells[0] && c <= K.bleedCells[1] ? K.arrange : K.bigOnly);
+        // はみ出し for 2–12 cells (10 across the frame's short side); 大と小 only where its giant is big (planner/kime
+        // giantBig: ≤ 4 cells, or ≥ 0.2 of the short side), else はみ出し alone where it fits
+        const c = cut.feat.cells, o = st.chosen.orient;
+        const bleed = c >= K.bleedCells[0] && c <= KI.bleedMax(ctx.aspect, o);
+        if (!bleed) return restrictTo(st, kind, K.bigOnly);
+        if (!KI.giantBig(KI.giantCells(cut.text, cut.emph, cut.lang), ctx.aspect, o)) {
+          const r = restrictTo(st, kind, K.bleedOnly);
+          if (r.only) return r;
+        }
+        return restrictTo(st, kind, K.arrange);
       }
       if (kind === 'arrive') return restrictTo(st, kind, hameArrive(st) || K.arrive);
       if (kind === 'dwell') return restrictTo(st, kind, ctx.bpm ? K.dwellBeats : K.dwell);
@@ -857,6 +874,22 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
         f = Object.assign((k) => { const d = reg.get('lens', k); return !d || !KI.CALM.lensDeny.includes(d.family); },
           { id: 'kime.calm2', keep: true });
         CALM_LENS.set(reg, f);
+      }
+      return f;
+    }
+
+    // The layouts of the cut right before a キメ cut (calm level 2): no キメ layout (はみ出し, 大と小) and none tagged bold
+    // or fast, so the キメ cut is the biggest thing around (the whole pool where that leaves nothing).
+    const CALM_ARRANGE = new WeakMap();
+    function calmArrangeOf(reg) {
+      let f = CALM_ARRANGE.get(reg);
+      if (!f) {
+        f = Object.assign((k) => {
+          if (KI.KIME.arrange.includes(k)) return false;
+          const d = reg.get('arrange', k);
+          return !d || !(d.tags || []).some((t) => KI.CALM.arrangeDeny.includes(t));
+        }, { id: 'kime.calm2arr', keep: true });
+        CALM_ARRANGE.set(reg, f);
       }
       return f;
     }
@@ -969,6 +1002,10 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
           const only = ctx.registry.traits('arrange', pin.v).orient;
           if (only.length === 1 && allowed.includes(only[0])) return { v: only[0], from: 'rule', rule: 'arrange' };
         }
+        // キメ (DESIGN_2_2 §3): along the frame's long side, where the text can run that way (a square frame: as usual), so
+        // the giant or the bleed has the longest room
+        const long = cut.kime === true ? KI.longAxis(ctx.aspect) : null;
+        if (long && allowed.includes(long)) return { v: long, from: 'rule', rule: 'kime.orient' };
         const aligned = st.align ? alignedValue(st, 'orient', SLOT_SPECS.orient, (v) => allowed.includes(v), withWhy) : null;
         if (aligned) return aligned;
         if (!allowed.includes('v')) return { v: 'h', from: 'auto' };

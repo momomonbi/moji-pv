@@ -1,6 +1,6 @@
 /* 文字PVメーカー v2 — original work. The cutter: lines → cut skeletons, special cuts, windows, pin reattachment (DESIGN §4.16.5). */
 MV.def('planner/segment', ['core/script', 'core/num', 'core/pins', 'core/rng', 'engine/text/breaker', 'planner/choose',
-  'planner/params', 'planner/kime'], (S, N, PINS, R, BR, CH, PA, KI) => {
+  'planner/params', 'planner/kime', 'planner/features'], (S, N, PINS, R, BR, CH, PA, KI, FT) => {
   'use strict';
 
   const BASE = Object.freeze({ '16:9': 14, '21:9': 16, '4:3': 12, '1:1': 10, '4:5': 10, '3:4': 9, '9:16': 8 });
@@ -15,6 +15,25 @@ MV.def('planner/segment', ['core/script', 'core/num', 'core/pins', 'core/rng', '
   // キメ (PV22 P3, DESIGN_2_2 §3): a line marked キメ (line.kime, planner/plan withKimePins) plays as one cut up to this
   // many cells: 16:9 28, 21:9 30, 4:3 24, 1:1 and 4:5 20, 3:4 18, 9:16 16.
   function kimeMaxCells(aspect) { return Math.min(KI.KIME.cellsCap, 2 * (BASE[aspect] || BASE['16:9'])); }
+
+  // kimeWhole(aspect, line, orient) → whether a キメ line plays as one cut: up to kimeMaxCells(aspect) cells, and one cut
+  // shows it big — it is short enough for はみ出し (KI.bleedMax), or the giant 大と小 would make of it (its emphasis, else
+  // its longest word) is big in this orientation (KI.giantBig). line = { text, lang, emph }.
+  function kimeWhole(aspect, line, orient) {
+    const cells = S.cells(line.text);
+    if (cells > kimeMaxCells(aspect)) return false;
+    return cells <= KI.bleedMax(aspect, orient) || KI.giantBig(KI.giantCells(line.text, line.emph, line.lang), aspect, orient);
+  }
+
+  // The orientation a キメ line will be set in (planner/cast decideOrient): its line or work orient pin, else the frame's
+  // long axis where the text can run that way (KI.longAxis), else horizontal.
+  function kimeOrient(ctx, line) {
+    const pin = PA.resolvePin(ctx.ix, { pinCutKey: null, lineId: line.id, cutKey: null }, 'orient',
+      (v) => (v === 'h' || v === 'v' ? { v } : { na: true }), null);
+    if (pin) return pin.v;
+    const l = KI.longAxis(ctx.aspect);
+    return l === 'v' && FT.orientsOf(line.text, line.lang).includes('v') ? 'v' : 'h';
+  }
 
   // Specs of the line- and cut-scope timing slots (§3.4.2, §3.4.3) and the v2.1 line slots season and avoid
   // (DESIGN_2_1 §2.3), shown by planner/fields.
@@ -183,13 +202,19 @@ MV.def('planner/segment', ['core/script', 'core/num', 'core/pins', 'core/rng', '
       (v, rank) => (rank === 'pin:line' ? acceptSplit(text)(v) : { na: true }), ctx.warn);
     if (pin) return { starts: pin.v, from: pin.from, by: pin.by, focus: givenFocus(ctx, line, pin.v, dur) };
     // キメ: the whole line at once, whatever its '/' marks or the auto cutter would do (a split pin, the user's or a
-    // lock's, wins above). A longer line keeps its pieces; its focus piece, else its last, is the キメ cut (cutsOfLine).
-    if (line.kime && S.cells(text) <= kimeMaxCells(ctx.aspect)) return { starts: [0], from: 'kime', focus: null };
+    // lock's, wins above), where one cut can show it big (kimeWhole). Otherwise it keeps its pieces — the auto cutter's
+    // at most as long as a はみ出し — and its focus piece, else its last, is the キメ cut (cutsOfLine).
+    let kimeCap = Infinity;
+    if (line.kime) {
+      const orient = kimeOrient(ctx, line);
+      if (kimeWhole(ctx.aspect, line, orient)) return { starts: [0], from: 'kime', focus: null };
+      kimeCap = KI.bleedMax(ctx.aspect, orient);
+    }
     if (line.pieces) {
       const starts = line.pieces.map((r) => r[0]);
       return { starts, from: 'mark', focus: givenFocus(ctx, line, starts, dur) };
     }
-    const maxCells = (BASE[ctx.aspect] || BASE['16:9']) * N.lerp(1.3, 0.7, ctx.amounts.density);
+    const maxCells = Math.min(kimeCap, (BASE[ctx.aspect] || BASE['16:9']) * N.lerp(1.3, 0.7, ctx.amounts.density));
     const starts = autoStarts(text, line.lang, dur, maxCells);
     return Object.assign({ from: 'auto' }, withFocus(ctx, line, starts, dur));
   }
@@ -452,5 +477,6 @@ MV.def('planner/segment', ['core/script', 'core/num', 'core/pins', 'core/rng', '
     return cuts;
   }
 
-  return { cutAll, autoStarts, bestSplit, weightsOf, pieceText, LINE_SPECS, BASE, SPECIAL_ROLES, windows, kimeMaxCells };
+  return { cutAll, autoStarts, bestSplit, weightsOf, pieceText, LINE_SPECS, BASE, SPECIAL_ROLES, windows, kimeMaxCells,
+    kimeWhole };
 });

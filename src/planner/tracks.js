@@ -443,21 +443,12 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
       if (t && t.cutKey === cut.key && t.slot === kind) t.out.override = { rule: 'seam', decision: d };
     }
 
-    // キメ (PV22 P3, DESIGN_2_2 §3): the transitions that do not flash (no gate 'flash', i.e. no 白く飛ぶ), for the seam out
-    // of a キメ cut without 見せ場 into a cut without 見せ場 (quietSeam).
-    const NO_FLASH_SEAM = new WeakMap();
-    function noFlashSeam(reg) {
-      let f = NO_FLASH_SEAM.get(reg);
-      if (!f) {
-        f = Object.assign((k) => { const d = reg.get('seam', k); return !d || d.gate !== 'flash'; }, { id: 'kime.noFlashSeam' });
-        NO_FLASH_SEAM.set(reg, f);
-      }
-      return f;
-    }
-    function quietSeam(A, B) { return KI.isKime(A) && !A.impact && !B.impact; }
+    // キメ (PV22 P3, DESIGN_2_2 §3): out of a キメ cut into a cut without 見せ場 the hard cut (the キメ line holds to its
+    // end and cuts out; no transition softens or flashes it). Into a 見せ場 cut the transition is decided as usual.
+    function seamOut(A, B) { return KI.isKime(A) && !B.impact; }
 
-    // The seam into B → { decision, entry }. キメ: into a キメ cut the hard cut by rule (kime.seam) unless the seam is
-    // pinned; out of a キメ cut without 見せ場 (into a cut without 見せ場) no flashing transition (kime.noFlash).
+    // The seam into B → { decision, entry }. キメ: into a キメ cut the hard cut by rule (kime.seam), out of one the hard
+    // cut by rule (kime.seamOut, seamOut), unless the seam is pinned.
     function decideSeam(ctx, A, B, history) {
       const at = atOf(B);
       const seed = CH.slotSeed(CH.cutSeed(ctx.doc.look.seed, B.key, B.line, ctx.salts), B.key, B.line, 'seam',
@@ -474,19 +465,15 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
       const req = { kind: 'seam', slot: 'seam', path: 'cut/' + B.key + ':seam', feat: B.feat, chosen: {}, seed,
         scope: world ? 'world' : 'text', recent: rec.recent, ref: rec.ref, echo: null, cutKey: B.key,
         avoid: avoidOf(history, hard), cond };
-      if (quietSeam(A, B)) req.only = noFlashSeam(ctx.registry);
       let out;
-      if (trace) {
-        trace.world = world;
-        if (req.only) { trace.only = req.only; trace.noFlash = 'seam'; }
-      }
+      if (trace) trace.world = world;
       if (pin) {
         CA.pinWarnings(ctx, 'seam', pin.v, pin, cond);
         out = fixed(pinDecision(pin));
         if (trace) shadow(ctx, req, trace, { kind: 'seam', stage: 'pin', pin, recent: rec.recent, echo: null });
-      } else if (KI.isKime(B)) {
+      } else if (KI.isKime(B) || seamOut(A, B)) {
         out = fixed({ from: 'rule', v: hard });
-        if (trace) Object.assign(trace, { kind: 'seam', stage: 'rule', rule: 'kime.seam' });
+        if (trace) Object.assign(trace, { kind: 'seam', stage: 'rule', rule: KI.isKime(B) ? 'kime.seam' : 'kime.seamOut' });
       } else {
         const chance = world ? WORLD_CHANCE : ctx.look.mood.pace.seam * (0.5 + 0.5 * B.feat.energy);
         if (R.stream(seed, 'chance').next() < chance) {
@@ -519,14 +506,14 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
     // The seam into B with its history entry: { got, entry }. It is a function of B's cast inputs (seed, pins,
     // features, look), whether the background changes and the entries the seam history reads, so it is kept on B's
     // cast entry (planner/cast) and reused while those are the same, its warnings replayed like a cast's.
-    // quiet (キメ): the seam out of a キメ cut does not flash (quietSeam); A is not among B's cast inputs, so the memo is
+    // kimeOut (キメ): the seam out of a キメ cut is the hard cut (seamOut); A is not among B's cast inputs, so the memo is
     // reused only when it matches.
     function seamOf(ctx, A, B, history) {
       const world = A.ground !== B.ground;
-      const quiet = quietSeam(A, B);
+      const kimeOut = seamOut(A, B);
       const read = history.slice(Math.max(0, history.length - 4));
       const memo = B.cast ? B.cast.seam : null;
-      if (memo && memo.world === world && memo.quiet === quiet && sameEntries(memo.read, read)) {
+      if (memo && memo.world === world && memo.kimeOut === kimeOut && sameEntries(memo.read, read)) {
         for (const w of memo.warnings) ctx.warn(w);
         return memo;
       }
@@ -535,9 +522,9 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
       if (B.cast) ctx.warn = (w) => { warnings.push(w); warn(w); };
       try {
         const got = decideSeam(ctx, A, B, history);
-        const out = { world, quiet, read, warnings, got, entry: seamEntry(ctx, A, B, history, got) };
+        const out = { world, kimeOut, read, warnings, got, entry: seamEntry(ctx, A, B, history, got) };
         if (B.cast) {
-          B.cast.seam = { world, quiet, read, warnings, got: { decision: CA.deepFreeze(got.decision) }, entry: out.entry };
+          B.cast.seam = { world, kimeOut, read, warnings, got: { decision: CA.deepFreeze(got.decision) }, entry: out.entry };
         }
         return out;
       } finally {
@@ -568,7 +555,7 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
       let reach = -Infinity;                    // the latest b among the cuts before A
       for (let j = 1; j < cuts.length; j++) {
         const A = cuts[j - 1], B = cuts[j];
-        const copy = at && !KI.isKime(B) ? seamCopy(ctx, cuts, at, out, A, B, hard) : null;
+        const copy = at && !KI.isKime(B) && !seamOut(A, B) ? seamCopy(ctx, cuts, at, out, A, B, hard) : null;
         const { got, entry } = copy || seamOf(ctx, A, B, history);
         history.push(entry);
         const d = got.decision;
@@ -592,9 +579,9 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
 
     // The seam into B copied from the seam into its source S (planner/cast alignedSource): where S is not the first cut,
     // the background changes at both boundaries or at neither (the same kind of transition fits), and B has no seam pin
-    // of its own (the pin wins). Not into a キメ cut (its own rule gives the hard cut), and not a flashing one out of a
-    // キメ cut (DESIGN_2_2 §3). → { got, entry } | null. The copy keeps S's parameters; its window is fitted to B's cuts
-    // like any seam's.
+    // of its own (the pin wins). Not into or out of a キメ cut (their own rules give the hard cut, DESIGN_2_2 §3; the
+    // caller skips the copy there). → { got, entry } | null. The copy keeps S's parameters; its window is fitted to B's
+    // cuts like any seam's.
     function seamCopy(ctx, cuts, at, out, A, B, hard) {
       const src = CA.alignedSource(ctx, B, 'seam');
       const j = src ? at.get(src.key) : undefined;
@@ -605,11 +592,6 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
         return null;
       }
       const d = src.seamIn >= 0 ? copied(out[src.seamIn].slot) : { from: 'auto', v: hard };
-      // キメ: a copy never brings a flashing transition out of a キメ cut (the seam is decided as usual instead)
-      if (d.v !== hard && quietSeam(A, B)) {
-        const def = ctx.registry.get('seam', d.v);
-        if (def && def.gate === 'flash') return null;
-      }
       const t = tracing(ctx, B.key, 'seam');
       if (t) Object.assign(t, { kind: 'seam', stage: 'auto', world: A.ground !== B.ground, why: [alignWhy(src)], decision: d });
       return { got: { decision: d }, entry: entryOf(d, null) };

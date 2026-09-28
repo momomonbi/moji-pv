@@ -524,6 +524,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       // なし on a source whose automatic value is none is 自動 (photoPan without a picture is the plain ground)
       if (field.widget === 'media' && v === '' && field.spec && field.spec.auto && field.spec.auto.value === '') { unpin(row); return; }
       const value = valueFor(field, v, row.fs);
+      if (field.setting) { commitSetting(row, v, value); return; }
       if (value === W.AUTO) { unpin(row); return; }
       const o = opts || {};
       const meta = { label: ['undo.pin', { field: labelOf(field), scope: scopeLabel(ctx) }], where: { scope: ctx.scope, field: field.path } };
@@ -531,6 +532,16 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       else if (o.merge) meta.mergeKey = 'field:' + row.path;
       run(pathsOf(field, ctx).map((path) => pinCmd(path, value)), meta);
       reportShadowed(row, ctx);
+    }
+
+    // A setting row (field.setting: 「キメ」, 「キメの前を静かにする」, DESIGN_2_2 §3.5) is a plain on/off like 見せ場: its pin is a
+    // setting, not a 固定 (no tag, no ×, not counted in 固定 n), and its undo entry says what was turned on or off.
+    function commitSetting(row, v, value) {
+      const ctx = page.ctx;
+      const cmds = value === W.AUTO ? removablePaths(row.clearPaths).map((path) => ({ t: 'pin.clear', path }))
+        : pathsOf(row.field, ctx).map((path) => pinCmd(path, value));
+      run(cmds, { label: [v ? row.field.setting.on : row.field.setting.off, { scope: scopeLabel(ctx) }],
+        where: { scope: ctx.scope, field: row.field.path } });
     }
 
     // カメラ EXTREME (DESIGN_EXTREME §2.6): on at a strength, or off, at every scope the row writes, through ui/extreme (the
@@ -630,8 +641,10 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       const tag = h('button', { class: 'state-tag', type: 'button', 'aria-live': 'off' });
       const lab = h('span', { class: 'fr-label', text: label });
       const dice = rerollable(field) ? iconBtn('dice', t('act.rerollField', { field: label }), () => reroll(row), { 'data-role': 'dice' }) : null;
-      const x = path ? iconBtn('close', t('act.unpinField', { field: label }), () => unpin(row), { 'data-role': 'unpin' }) : null;
-      const more = path ? iconBtn('more', t('fld.more', { field: label }), (ev) => openFieldMenu(row, ev.currentTarget),
+      // a setting row (field.setting) has no 固定 tag, × or ⋯ menu: its switch is the whole control
+      const pinRow = !!path && !field.setting;
+      const x = pinRow ? iconBtn('close', t('act.unpinField', { field: label }), () => unpin(row), { 'data-role': 'unpin' }) : null;
+      const more = pinRow ? iconBtn('more', t('fld.more', { field: label }), (ev) => openFieldMenu(row, ev.currentTarget),
         { 'aria-haspopup': 'menu' }) : null;
       // 動きと重なり: ⓘ says why the automatic choice is what it is (DESIGN_2_1 §11.9.5)
       const info = field.depth ? iconBtn('info', t('media.depthWhy'), () => showWhy(row, false), { 'data-role': 'why' }) : null;
@@ -662,9 +675,9 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
         focusRow(row);
       });
       el.addEventListener('focusout', (ev) => { if (!el.contains(ev.relatedTarget)) blurRow(row); });
-      el.addEventListener('contextmenu', (ev) => { if (path) { ev.preventDefault(); openFieldMenu(row, { x: ev.clientX, y: ev.clientY }); } });
+      el.addEventListener('contextmenu', (ev) => { if (pinRow) { ev.preventDefault(); openFieldMenu(row, { x: ev.clientX, y: ev.clientY }); } });
       el.addEventListener('keydown', (ev) => {
-        if (path && (ev.key === 'F10' && ev.shiftKey || ev.key === 'ContextMenu')) { ev.preventDefault(); openFieldMenu(row, more || el); }
+        if (pinRow && (ev.key === 'F10' && ev.shiftKey || ev.key === 'ContextMenu')) { ev.preventDefault(); openFieldMenu(row, more || el); }
       });
       tag.addEventListener('click', () => {
         const fs = tagState(row);
@@ -678,7 +691,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
     let focusedRow = null;
     function focusRow(row) {
       focusedRow = row;
-      const list = row.clearPaths;
+      const list = row.field.setting ? [] : row.clearPaths;     // Del does not clear a setting (its switch does)
       app.view.set({ focusField: !list.length ? null : list.length === 1 ? list[0] : list.slice() });
     }
     function blurRow(row) {
@@ -719,7 +732,11 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       row.fs = fs;
       const st = stateOf(row, fs, ctx);
       row.widget.update(st);
-      if (!row.path) { row.tag.hidden = true; return; }
+      if (!row.path || row.field.setting) {
+        row.tag.hidden = true;
+        if (row.path) row.el.dataset.state = row.fs ? row.fs.state : 'auto';
+        return;
+      }
       const shown = tagState(row);
       const state = shown ? shown.state : 'auto';
       row.tag.hidden = false;
@@ -1078,9 +1095,12 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
 
     function timeRange(a, b) { return T.fmtTime(a) + ' – ' + T.fmtTime(b); }
 
+    // The pins under a scope that 固定 n counts and its menu lists: settings (the キメ mark, 「キメの前を静かにする」:
+    // F.SETTING_SLOTS, which すべて外す keeps) are left out.
     function pinCount(scope) {
       const own = F.writeScope(scope, plan());
-      const all = [...new Set(PINS.pinsUnder(doc().pins, scope).concat(own === scope ? [] : PINS.pinsUnder(doc().pins, own)))];
+      const all = [...new Set(PINS.pinsUnder(doc().pins, scope).concat(own === scope ? [] : PINS.pinsUnder(doc().pins, own)))]
+        .filter((p) => !F.isSettingPath(p));
       return { user: all.filter((p) => doc().pins[p].by !== 'lock'), lock: all.filter((p) => doc().pins[p].by === 'lock') };
     }
 
@@ -1298,7 +1318,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
         page.rows.push(row);
         // キメ (DESIGN_2_2 §3): one line pin per selected line in one step; いろいろ while the lines differ
         const kime = { key: 'kime', widget: 'toggle', path: 'kime', spec: { type: 'bool' }, offClears: true, noDice: true, readEach: true,
-          label: 'fld.kime', id: 'lines/shift/kime', scopes: ['line'], basic: true };
+          label: 'fld.kime', id: 'lines/shift/kime', scopes: ['line'], basic: true, setting: F.KIME_SETTING };
         const kimeRow = makeRow(kime, ctx);
         page.rows.push(kimeRow);
         return h('div', { class: 'insp-shift' },
@@ -1342,6 +1362,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
         if (info.n > 0) out.push(h('p', { class: 'note subtle', 'data-kime': 'count', text: t('fld.kime.count', { n: info.n }) }));
         if (info.many) out.push(h('p', { class: 'note is-skip', role: 'note', 'data-kime': 'many', text: t('fld.kime.many', { max: info.max }) }));
         if (info.split !== null) out.push(h('p', { class: 'note subtle', 'data-kime': 'split', text: t('fld.kime.split', { text: info.split }) }));
+        if (info.emph) out.push(h('p', { class: 'note subtle', 'data-kime': 'emph', text: t('fld.kime.emph') }));
         if (info.same.length) {
           const ids = info.same.slice();
           out.push(h('div', { class: 'row-actions' }, h('button', { class: 'link', type: 'button', 'data-kime': 'same',
