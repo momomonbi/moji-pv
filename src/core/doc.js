@@ -46,8 +46,9 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
     sheet: ['next', 'rows'],
     row: ['id', 'src'],
     timing: ['snap', 'lead', 'tail', 'leadIn', 'outro', 'tapLatency', 'enter', 'readCheck'],
-    song: ['name', 'sha1', 'seconds', 'bpm', 'offset', 'meter', 'bpmConfidence', 'digest', 'info'],
+    song: ['name', 'sha1', 'seconds', 'bpm', 'offset', 'meter', 'bpmConfidence', 'digest', 'voice', 'info'],
     digest: ['hz', 'loud'],
+    voice: ['v', 'hz', 'act', 'peaks', 'phrases'],   // doc.song.voice (audio/voice, PV22 P5 + P6, DESIGN_2_2 §5.2)
     look: ['seed', 'moodSeed', 'aspect', 'backdrop', 'gen'],
     pin: ['v', 'by', 'sig'],
     lock: ['n'],
@@ -185,6 +186,13 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
     const d = song.digest;
     if (d !== null && (!isObject(d) || !isNumber(d.hz) || d.hz <= 0 || typeof d.loud !== 'string')) {
       bad('song.digest', 'must be { hz, loud: base64 } or null');
+    }
+    // The song's voice (optional; audio/voice, DESIGN_2_2 §5.2): { v: 1, hz, act, peaks } plus the phrase stream of
+    // 曲から下書き. Never filled by normalize (not in SONG_DEFAULTS).
+    const v = song.voice;
+    if (v !== undefined && v !== null && (!isObject(v) || v.v !== 1 || !isNumber(v.hz) || v.hz <= 0 || typeof v.act !== 'string'
+      || typeof v.peaks !== 'string' || (v.phrases !== undefined && typeof v.phrases !== 'string'))) {
+      bad('song.voice', 'must be { v: 1, hz, act, peaks } or null');
     }
     if (song.info !== null) for (const p of songInfoProblems(song.info)) bad('song.info' + p.where, p.what);
   }
@@ -556,7 +564,8 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
         case 'sheet': return ordered(v, ORDER.sheet, (sk, sv) => (sk === 'rows' && Array.isArray(sv)
           ? sv.map((row) => ordered(row, ORDER.row)) : sv));
         case 'timing': return ordered(v, ORDER.timing);
-        case 'song': return ordered(v, ORDER.song, (sk, sv) => (sk === 'digest' ? ordered(sv, ORDER.digest) : sv));
+        case 'song': return ordered(v, ORDER.song, (sk, sv) => (sk === 'digest' ? ordered(sv, ORDER.digest)
+          : sk === 'voice' ? ordered(sv, ORDER.voice) : sv));
         case 'look': return ordered(v, ORDER.look);
         case 'pins': return sortedMap(v, (pin) => ordered(pin, ORDER.pin));
         case 'salts': return sortedMap(v);

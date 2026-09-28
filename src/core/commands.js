@@ -480,6 +480,22 @@ MV.def('core/commands', ['core/doc', 'core/paths', 'core/pins', 'core/lyrics', '
 
     function songClear(doc) { return put(doc, 'song', null); }
 
+    // song.voice { sha1, voice }: the song's voice read (曲の声を読む, DESIGN_2_2 §5.2) — only for the song it was read
+    // from (another song meanwhile: CommandError 'stale'); voice null removes it. Validated by core/doc.
+    function songVoice(doc, cmd) {
+      if (!doc.song || typeof cmd.sha1 !== 'string' || doc.song.sha1 !== cmd.sha1) throw new CommandError('stale', 'the song changed');
+      need(cmd.voice === null || isObject(cmd.voice), 'voice must be an object or null');
+      if (cmd.voice === null) {
+        if (doc.song.voice === undefined || doc.song.voice === null) return doc;
+        return put(doc, 'song', without(doc.song, ['voice']));
+      }
+      if (sameJSON(doc.song.voice, cmd.voice)) return doc;
+      const out = put(doc, 'song', Object.assign({}, doc.song, { voice: copyJSON(cmd.voice, 'voice') }));
+      const problems = problemsIn(out, 'song.voice');
+      need(problems.length === 0, problems.join('; '));
+      return out;
+    }
+
     function songInfo(doc, cmd) {
       need(doc.song !== null, 'there is no song');
       // the same rule as D.validate, so a document the store holds always saves and opens again
@@ -752,7 +768,7 @@ MV.def('core/commands', ['core/doc', 'core/paths', 'core/pins', 'core/lyrics', '
       ['pin.copy', pinCopy], ['salt.bump', saltBump], ['look.omakase', lookOmakase], ['look.seed', lookSeed],
       ['look.restore', lookRestore], ['look.set', lookSet], ['lock.set', lockSet], ['lock.clear', lockClear],
       ['filter.set', filterSet], ['time.shift', timeShift], ['time.tap', timeTap], ['timing.set', timingSet],
-      ['song.set', songSet], ['song.clear', songClear], ['song.info', songInfo], ['output.set', outputSet],
+      ['song.set', songSet], ['song.clear', songClear], ['song.info', songInfo], ['song.voice', songVoice], ['output.set', outputSet],
       ['material.put', materialPut], ['material.meta', materialMeta], ['material.remove', materialRemove],
       ['media.put', mediaPut], ['media.meta', mediaMeta], ['media.move', mediaMove], ['media.remove', mediaRemove],
       ['media.relink', mediaRelink],

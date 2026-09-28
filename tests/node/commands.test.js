@@ -25,7 +25,7 @@ const MAY_CHANGE = {
   'pin.promote': ['pins'], 'pin.copy': ['pins'], 'salt.bump': ['salts'], 'look.omakase': ['look'], 'look.seed': ['look'],
   'look.restore': ['look', 'salts'], 'look.set': ['look'], 'lock.set': ['pins', 'locks'], 'lock.clear': ['pins', 'locks'],
   'filter.set': ['filters'], 'time.shift': ['pins'], 'time.tap': ['pins'], 'timing.set': ['timing'], 'song.set': ['song'],
-  'song.clear': ['song'], 'song.info': ['song'], 'output.set': ['output'],
+  'song.clear': ['song'], 'song.info': ['song'], 'song.voice': ['song'], 'output.set': ['output'],
   'material.put': ['materials'], 'material.meta': ['materials'], 'material.remove': ['materials', 'pins'],
   'media.put': ['media'], 'media.meta': ['media'], 'media.move': ['media'], 'media.remove': ['media', 'pins'],
   'media.relink': ['media', 'pins', 'materials'],
@@ -341,6 +341,29 @@ test('filters, time, timing, song and output commands', () => {
   for (const d of [f, shifted, tapped, song, info]) assert.deepEqual(D.validate(d), []);
 });
 
+// 曲の声を読む (PV22 S1, DESIGN_2_2 §5.2): the voice goes to the song it was read from, validated, and null removes it.
+test('song.voice sets the voice of the same song only', () => {
+  const doc = reduce(fresh('basic'), { t: 'song.set', song: { name: 'a.wav', sha1: 'ab', seconds: 12 } });
+  const voice = { v: 1, hz: 25, act: 'AAEC', peaks: 'AQI=', phrases: 'CoA=' };
+  const out = reduce(doc, { t: 'song.voice', sha1: 'ab', voice });
+  assert.deepEqual(out.song.voice, voice);
+  assert.notEqual(out.song.voice, voice, 'the payload is copied');
+  assert.deepEqual(D.validate(out), []);
+  assert.equal(reduce(out, { t: 'song.voice', sha1: 'ab', voice: JSON.parse(JSON.stringify(voice)) }), out, 'same voice: same doc');
+  throwsCode(() => reduce(doc, { t: 'song.voice', sha1: 'cd', voice }), 'stale');
+  throwsCode(() => reduce(Object.assign({}, doc, { song: null }), { t: 'song.voice', sha1: 'ab', voice }), 'stale');
+  throwsCode(() => reduce(doc, { t: 'song.voice', sha1: 'ab', voice: { v: 2, hz: 25, act: '', peaks: '' } }), 'payload');
+  throwsCode(() => reduce(doc, { t: 'song.voice', sha1: 'ab', voice: { v: 1, hz: 25, act: '', peaks: '', phrases: 3 } }), 'payload');
+  const older = Object.assign({}, voice);
+  delete older.phrases;
+  assert.deepEqual(reduce(doc, { t: 'song.voice', sha1: 'ab', voice: older }).song.voice, older, 'a record without phrases is valid');
+  const cleared = reduce(out, { t: 'song.voice', sha1: 'ab', voice: null });
+  assert.equal('voice' in cleared.song, false);
+  assert.equal(reduce(cleared, { t: 'song.voice', sha1: 'ab', voice: null }), cleared);
+  // a new song (song.set without a voice) drops the old one's
+  assert.equal(reduce(out, { t: 'song.set', song: { name: 'b.wav', sha1: 'cd', seconds: 9 } }).song.voice, undefined);
+});
+
 test('batch applies in order', () => {
   const doc = fresh('basic');
   const out = reduce(doc, { t: 'batch', cmds: [
@@ -354,9 +377,9 @@ test('batch applies in order', () => {
 test('effectiveTimes reads start and end from the plan', () => {
   const plan = corpus.planBasic();
   assert.deepEqual(C.effectiveTimes(plan, ['r5', 'ra', 'zz']), { r5: { start: 8.25, end: 12 }, ra: { start: 22.25, end: 27 } });
-  assert.deepEqual(C.COMMANDS.length, 33);
+  assert.deepEqual(C.COMMANDS.length, 34);
   for (const t of ['material.put', 'material.meta', 'material.remove', 'media.put', 'media.meta', 'media.move', 'media.remove',
-    'media.relink']) assert.ok(C.COMMANDS.includes(t), t);
+    'media.relink', 'song.voice']) assert.ok(C.COMMANDS.includes(t), t);
 });
 
 // ---- the property test ----------------------------------------------------------------------------------------------

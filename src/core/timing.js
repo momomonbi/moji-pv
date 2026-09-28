@@ -135,6 +135,20 @@ MV.def('core/timing', ['core/pins', 'core/script', 'core/num', 'core/beats'], (P
     return { times, duration: N.q6(duration), warnings };
   }
 
+  // gapWeights(lines, { readRate, bpm }) → Float64Array: w[i] = the nominal time from line i's start to line i+1's start
+  // (its reading plus the pause above the next line; the last line: its reading), the gap(k) of solveTimes. Only the
+  // proportions matter to 曲から下書き (core/draft, PV22 S1).
+  function gapWeights(lines, ctx) {
+    const spm = 1 / readRateOf(ctx || {});
+    const n = lines.length;
+    const w = new Float64Array(n);
+    for (let i = 0; i < n; i++) {
+      const read = Math.max(MIN_READ, S.morae(lines[i].text, lines[i].lang) * spm);
+      w[i] = read + (i + 1 < n ? PAUSE_WEIGHT * (lines[i + 1].pauseBefore || 0) : 0);
+    }
+    return w;
+  }
+
   function lengthOf(c, warnings) {
     if (c.lengthPin === null || c.lengthPin === undefined) return null;
     if (typeof c.lengthPin === 'number' && c.lengthPin > 0 && Number.isFinite(c.lengthPin)) return c.lengthPin;
@@ -203,5 +217,5 @@ MV.def('core/timing', ['core/pins', 'core/script', 'core/num', 'core/beats'], (P
     }
   }
 
-  return { solveTimes, readRateOf, TIMING_DEFAULTS, MIN_LEN };
+  return { solveTimes, readRateOf, gapWeights, TIMING_DEFAULTS, MIN_LEN };
 });

@@ -51,7 +51,16 @@ MV.def('core/types', [], () => {
    * @property {number} meter
    * @property {number} bpmConfidence
    * @property {{ hz: 20, loud: string }} digest   base64 of a Uint8Array loudness envelope (0..255)
+   * @property {SongVoice|null} [voice]            the song's voice (audio/voice, DESIGN_2_2 §5.2); absent: not read
    * @property {Object|null} info                  AI song analysis (§4.22)
+   */
+  /**
+   * @typedef {Object} SongVoice     one record shared by 曲から下書き (PV22 P5) and 歌ハメ (PV22 P6)
+   * @property {1} v
+   * @property {25} hz                 the stored activity's frame rate
+   * @property {string} act            base64 of u8[]: the vocal activity per 40 ms frame (0..255)
+   * @property {string} peaks          base64 of (Δ centiseconds LEB128, strength 0..255) records: vocal peaks
+   * @property {string} [phrases]      base64 of (Δ centiseconds LEB128, bit 7 phrase | strength 0..127) records
    */
   /**
    * @typedef {Object} LookSettings
@@ -118,6 +127,7 @@ MV.def('core/types', [], () => {
    *   | { t: 'time.tap', marks: Array<{ lineId: string, start?: number, end?: number }> }
    *   | { t: 'timing.set', key: string, v: * }
    *   | { t: 'song.set', song: Song } | { t: 'song.clear' } | { t: 'song.info', info: Object }
+   *   | { t: 'song.voice', sha1: string, voice: SongVoice|null }
    *   | { t: 'output.set', key: string, v: * }
    *   | { t: 'batch', cmds: Command[] }} Command
    */

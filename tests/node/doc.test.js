@@ -126,6 +126,16 @@ test('validate reports structural problems', () => {
   expectProblem((d) => { d.timing.lead = -1; }, 'timing.lead');
   expectProblem((d) => { d.song = { name: 'x' }; }, 'song.sha1');
   expectProblem((d) => { d.song = Object.assign(corpus.songDigest(), { digest: { hz: 20 } }); }, 'song.digest');
+  // the song's voice (DESIGN_2_2 §5.2): { v: 1, hz, act, peaks } with an optional phrase stream
+  const voice = { v: 1, hz: 25, act: 'AA==', peaks: '', phrases: '' };
+  expectProblem((d) => { d.song = Object.assign(corpus.songDigest(), { voice: Object.assign({}, voice, { v: 2 }) }); }, 'song.voice');
+  expectProblem((d) => { d.song = Object.assign(corpus.songDigest(), { voice: Object.assign({}, voice, { act: null }) }); }, 'song.voice');
+  expectProblem((d) => { d.song = Object.assign(corpus.songDigest(), { voice: Object.assign({}, voice, { phrases: 5 }) }); }, 'song.voice');
+  for (const ok of [voice, null, { v: 1, hz: 25, act: '', peaks: '' }]) {
+    assert.deepEqual(D.validate(Object.assign(D.defaultDoc(), { song: Object.assign(corpus.songDigest(), { voice: ok }) })), []);
+  }
+  assert.equal('voice' in D.normalize(Object.assign(D.defaultDoc(), { song: corpus.songDigest() })).song, false,
+    'normalize never writes a voice');
   expectProblem((d) => { d.look.seed = -3; }, 'look.seed');
   expectProblem((d) => { d.look.moodSeed = 2 ** 33; }, 'look.moodSeed');
   expectProblem((d) => { d.look.aspect = '2:1'; }, 'look.aspect');
@@ -262,6 +272,10 @@ test('serialize: round trip, §3.1 key order, sorted maps, unknown keys kept', (
   assert.deepEqual(Object.keys(file.doc.output), ['format', 'short', 'fps', 'quality', 'audio', 'range', 'name', 'kit']);
   assert.deepEqual(Object.keys(file.doc.output.kit), ['overlay', 'bg', 'green', 'srt', 'lrc']);
   assert.deepEqual(Object.keys(file.doc.output.range), ['t0', 't1']);
+  const song = Object.assign({ voice: { phrases: 'p', peaks: 'k', act: 'a', hz: 25, v: 1 } }, corpus.songDigest());
+  const sung = JSON.parse(D.serialize({ doc: Object.assign(D.defaultDoc(), { song }) })).doc.song;
+  assert.deepEqual(Object.keys(sung).slice(-3), ['digest', 'voice', 'info'], 'the voice after the digest');
+  assert.deepEqual(Object.keys(sung.voice), ['v', 'hz', 'act', 'peaks', 'phrases']);
   assert.deepEqual(file.side, D.defaultSide());
   assert.ok(text.startsWith('{\n "format": "mojipv.project",\n "schema": 2,'), 'one-space indent');
   assert.ok(text.endsWith('}\n'));
