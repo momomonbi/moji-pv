@@ -5128,6 +5128,9 @@ async def flow_kime(f, lang):
     f.check(badge == await page.evaluate("() => window.__mv.t('lyr.kimeBadge')"), 'the badge: %r' % badge)
     f.check(await page.locator('.le-g[data-row="%s"] .g-kime' % (await page.evaluate(KIME_STATE, other))['row']).count() == 0,
             'an unmarked line has no badge')
+    brow = (await page.evaluate(KIME_STATE, b))['row']
+    f.check(await page.locator('.le-g[data-row="%s"] .g-kime' % brow).count() == 1 and
+            await page.locator('.le-g[data-row="%s"] .g-pins' % brow).count() == 0, 'the mark is the badge, not a pin count')
     dim = await page.evaluate("() => (typeof CSS !== 'undefined' && CSS.highlights && CSS.highlights.get('tok-cutOff')) ? CSS.highlights.get('tok-cutOff').size : -1")
     f.check(dim == -1 or dim >= 2, 'the / of both one-cut キメ lines are drawn dimmed (%d ranges)' % dim)
     await f.shot('kime-gutter')
