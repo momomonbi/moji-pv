@@ -137,6 +137,11 @@ test('part browser thumbnails pass the transition\'s second line (pb.sampleTextB
       const last = calls[calls.length - 1];
       assert.equal(last.o.text, t('pb.sampleText'));
       assert.equal(last.o.textB, t('pb.sampleTextB'), lang + ': the second line is UI text in the page language');
+      // v2.2: a glyph seam (モーフ) shows two lines that share letters, in the page language
+      const withReg = Object.assign({}, app, { reg: { get: (kind, key) => (key === 'glyphMorph' ? { glyphs: true } : null) } });
+      PB.createThumbs(withReg).draw(canvas(), { kind: 'seam', key: 'glyphMorph' });
+      const morph = calls[calls.length - 1];
+      assert.deepEqual([morph.ref.key, morph.o.text, morph.o.textB], ['glyphMorph', t('thumb.morphA'), t('thumb.morphB')], lang);
     }
   } finally {
     globalThis.document = saved.document;
