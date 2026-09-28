@@ -64,9 +64,10 @@ v2.1 editor-ready output (package H.3, DESIGN_2_1 §13.12):
   ai_extreme                 「カメラワークをAIに任せる」 with the 「EXTREME」 chip: the notice, the EXTREME request, the review's
                              カメラ EXTREME row and moves, apply = one undo step
 キメ (PV22 P3, DESIGN_2_2 §3):
-  kime                       行 › 文字の記号 › キメ: the toggle (one entry, one cut), the count and the same-lyric button (one
-                             entry), the gutter's キ badge and dimmed '/', the 記法 row, いろいろ on several lines, すべての固定を
-                             外す keeps the mark, 作品全体 › キメの前を静かにする off/on
+  kime                       行 › 文字の記号 › キメ: the toggle (one entry, one cut; a setting: no 固定 tag, ×, or 固定 n), the
+                             count and the same-lyric button (one entry), the gutter's キ badge and dimmed '/', the 記法 row,
+                             いろいろ on several lines, すべての固定を外す keeps the mark, 作品全体 › キメの前を静かにする off/on;
+                             also on the English page
 v2.1 「くり返しの行をそろえる」 (DESIGN_2_1 §4.10):
   repeat                     作品全体 › 見た目: the switch (off, its note, no 振り直し) pins the opt-in, the second サビ takes the
                              first one's layouts, lenses and shots, a repeated cut's なぜ names its first copy, off clears it
@@ -5054,6 +5055,9 @@ KIME_LYRICS = '\n'.join([
     '小さな/一歩で', '', '# サビ', '今日も/ここから始まる!', '小さな/一歩で',
 ])
 KIME_ROW = '[data-mount="inspector"] .frow[data-field="%s"]'
+# The line header's 固定 n button (its pin icon), and the last undo entry: [key, params, text].
+KIME_PINS = '[data-mount="inspector"] .lh-actions .lh-btn:has(svg.icon-pin)'
+KIME_LAST = "() => { const e = window.__mv.store.list().filter((x) => x.done).pop(); return [e.label[0], e.label[1] || {}, window.__mv.t(e.label[0], e.label[1])]; }"
 KIME_INFO = '[data-mount="inspector"] [data-custom="kimeInfo"] [data-kime="%s"]'
 # A line's cuts in the plan, whether one is the キメ cut, the pin and the calm levels of the work.
 KIME_STATE = """(id) => { const a = window.__mv, p = a.plan, l = p.lines.find((x) => x.id === id), pin = a.doc.pins['line/' + id + ':kime'];
@@ -5088,15 +5092,25 @@ async def flow_kime(f, lang):
     box = row + ' input[role="switch"]'
     note = await page.text_content(row + ' .fr-note')
     f.check(note == await page.evaluate("() => window.__mv.t('fld.kime.note')"), 'the toggle says what it does: %r' % note[:30])
+    name = (await page.text_content(row + ' .fr-label')).strip()
+    f.check(name == {'ja': 'キメ', 'en': 'Kime (punchline)'}[lang], 'the toggle\'s name in %s: %r' % (lang, name))
     f.check(not await page.is_checked(box), 'off by default')
     f.check(await page.locator(row + ' [data-role="dice"]').count() == 0, 'a mark, not drawn: no 振り直し')
     f.check(await page.locator(KIME_INFO % 'count').count() == 0, 'no count while the work has no キメ line')
+    pins_before = await page.text_content(KIME_PINS)
     done1 = await page.evaluate(DONE)
     await page.click(row + ' .w-toggle')
     await f.until("(id) => { const p = window.__mv.doc.pins['line/' + id + ':kime']; return !!p && p.v === true; }", 'the toggle pins the mark', a)
     await f.settle(3)
     f.check(await page.evaluate(DONE) == done1 + 1, 'one undo entry')
     f.check(await page.is_checked(box), 'the toggle shows on')
+    # a setting, not a 固定: its undo entry says キメ on, the row has no 固定 tag or ×, and the header's 固定 n is unchanged
+    label = await page.evaluate(KIME_LAST)
+    want = await page.evaluate("(s) => window.__mv.t('undo.kimeOn', { scope: s })", label[1].get('scope', ''))
+    f.check(label[0] == 'undo.kimeOn' and label[2] == want, 'the undo entry says キメ on: %r' % label)
+    f.check(await page.locator(row + ' [data-role="unpin"]').count() == 0 and
+            not await page.is_visible(row + ' .state-tag'), 'no 固定 tag or × on the switch')
+    f.check(await page.text_content(KIME_PINS) == pins_before, 'the header\'s 固定 n does not count the mark: %r' % pins_before)
     st = await page.evaluate(KIME_STATE, a)
     f.check(st['cuts'] == 1 and st['kime'] and st['calm'] > 0, 'the line plays as one キメ cut, the cuts before it are calm: %r' % st)
     await f.until("(s) => !!document.querySelector(s)", 'the work\'s count shows', KIME_INFO % 'count')
@@ -5110,6 +5124,10 @@ async def flow_kime(f, lang):
     await f.until("(id) => { const p = window.__mv.doc.pins['line/' + id + ':kime']; return !!p && p.v === true; }", 'the copy is marked', b)
     await f.settle(3)
     f.check(await page.evaluate(DONE) == done1 + 2, 'the same-lyric button is one undo entry')
+    # the copy's line has only the mark: nothing to unpin there (固定 0, the menu button off)
+    await open_line(f, b)
+    f.check(await page.is_disabled(KIME_PINS), 'a line with only the mark has no 固定 to list: %r' % await page.text_content(KIME_PINS))
+    await open_line(f, a)
     f.check(await page.locator(same).count() == 0, 'nothing left to offer once every copy is marked')
     count = await page.text_content(KIME_INFO % 'count')
     f.check(count == await page.evaluate("() => window.__mv.t('fld.kime.count', { n: 2 })"), 'the count follows: %r' % count)
@@ -5197,6 +5215,8 @@ async def flow_kime(f, lang):
         await f.until("() => { const p = window.__mv.doc.pins['work:kime.calm']; return !!p && p.v === false; }", 'off pins false')
         await f.settle(3)
         f.check(await page.evaluate(DONE) == done3 + 1, 'one undo entry')
+        f.check((await page.evaluate(KIME_LAST))[0] == 'undo.kimeCalmOff', 'the undo entry says it was turned off')
+        f.check(await page.locator(crow + ' [data-role="unpin"]').count() == 0, 'a setting: no ×')
         f.check(not await page.is_checked(cbox), 'the switch shows off')
         st = await page.evaluate(KIME_STATE, a)
         f.check(st['calm'] == 0, 'no calm cut while it is off: %r' % st)
@@ -5448,12 +5468,16 @@ FLOWS += [('extreme', flow_extreme, False), ('extreme_keys', flow_extreme_keys, 
 FLOWS += [('kime', flow_kime, False)]
 
 
+# The flows that also run on the English page (the others are language-independent behaviour, checked in Japanese).
+EN_FLOWS = {'first_run', 'kime'}
+
+
 async def run(browser, base, rel, lang, only, shots):
     failures, count = [], 0
     for name, fn, clipboard in FLOWS:
         if only and name != only:
             continue
-        if lang == 'en' and name != 'first_run':
+        if lang == 'en' and name not in EN_FLOWS:
             continue
         page = await open_page(browser, base, rel, clipboard)
         f = Flow(lang + '_' + name, page, shots)

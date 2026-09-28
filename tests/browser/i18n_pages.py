@@ -11,7 +11,8 @@ picker; asset names are user data) come last, after カメラ EXTREME (the switc
 picker's EXTREME group, キーフレーム, the AI chip, step ④); then the editor-ready output (package H.3): step ④ with Filmora用 and 詳しく,
 「Filmoraで使うには」, その他 › 透過動画（WebM）, and the Filmora set's progress and done state (its exporter stubbed: the
 words are checked here, the files by the flows); last, キメ (PV22 P3): the line page with its count, too-many and
-long-line notes, the same-lyric button, the several-lines toggle, 「キメの前を静かにする」 and the gutter's badge.
+long-line notes, the same-lyric button, the emphasis hint, the several-lines toggle, 「キメの前を静かにする」 and the gutter's
+badge.
 On every screen the visible text and the accessible names (aria-label, title, placeholder, alt) are read and checked:
 
   en page   no Japanese text (kana or kanji) outside the product name 文字PVメーカー and user data (the lyrics here are
@@ -466,6 +467,15 @@ async def kime_screens(w, table, families):
     if not await page.locator('[data-custom="kimeInfo"] [data-kime="same"]').count():
         w.problems.append('キメ: no same-lyric button')
     await screen(w, 'kime-same', table, families)
+    # 大と小 without an emphasis: the hint that 強調 chooses the giant word
+    await w.run("""() => { const a = window.__mv, l = a.plan.lines[0], k = l.cuts[0], c = a.plan.cuts.find((x) => x.key === k);
+      a.dispatch({ t: 'pin.set', path: 'cut/' + k + ':arrange', v: 'giantWhisper', by: 'user', sig: c.text }, { label: ['undo.pin', { field: '', scope: '' }] });
+      a.select({ level: 'line', ids: [l.id] }, { from: 'crumbs', open: true }); }""")
+    await w.settle(4)
+    await w.run("() => document.querySelector('.frow[data-field=\"line/marks/kime\"]').scrollIntoView({ block: 'start' })")
+    if not await page.locator('[data-custom="kimeInfo"] [data-kime="emph"]').count():
+        w.problems.append('キメ: no emphasis hint on a 大と小 キメ cut')
+    await screen(w, 'kime-emph', table, families)
     await w.run("() => { const a = window.__mv; a.select({ level: 'line', ids: [a.plan.lines[0].id, a.plan.lines[5].id] }, { from: 'crumbs', open: true }); }")
     await w.settle(4)
     await w.run("() => document.querySelector('.frow[data-field=\"lines/shift/kime\"]').scrollIntoView({ block: 'center' })")
