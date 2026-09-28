@@ -9315,7 +9315,11 @@ deduplicated → the `export_math` item; `stop` ignored in `mark` → the one-li
 stale end at `≤ start` → the 11.1 case.
 
 **Checks (phase 2).** `python3 build.py --check` (221 modules); `node tests/update_golden.js --check`: the six files
-match after S4 and after S2; the new and changed Node tests pass; browser: see the phase summary.
+match after S4 and after S2. Node suite: 1 813 tests, 5 failures, all time limits at load average 11–12 on 4 CPUs (four
+conformance "slowest build > 60 ms" rows and the planning-speed test); conformance alone fails other rows on each run,
+always on build time. Browser: `ui_flows.py` passed every flow but `library`, whose `LAST_LABEL` the new `retap` flow had
+redefined at module level (renamed `LAST_TEXT`; `library`, `readcheck`, `retap`, `tap` and `song_step` then pass);
+`ui_layout.py` (584 layouts), `i18n_pages.py` and `csp.py` pass.
 
 <!-- PV22 P5 notes, phase 3 -->
 
