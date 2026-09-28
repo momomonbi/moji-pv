@@ -34,6 +34,13 @@ chip next to **Let AI do the camerawork**). With **Repeat lines the same way** o
 intense moves as the first. Every word stays readable while it is sung, and no flashing is added. Some viewers may
 feel motion sick, so when you publish, consider noting that the video contains intense motion.
 
+**Glyph morph and weight animation (v2.2)** — in a new work, where a line changes into one that shares letters with it,
+the shared letters glide to their new places and the others melt into the new text (**Glyph morph**; whole video ›
+Look › More settings: **Link shared letters**, per line: **Link letters from the line before**). On lines whose typeface has
+many weights, entrances that grow from thin to bold (**Weight grow**), holds that swell in weight on the beat (**Weight
+pulse**) and exits that thin out (**Weight thin**) join in too (**Animate stroke weight**). Each can be pinned like any
+part, and **Weight** can be set per line or cut. Works made before stay as they were until you switch these on.
+
 ## Song (optional) and tap sync
 
 You can make a video without a song; its length then follows the lyrics. Load an mp3, wav, m4a, ogg or flac file in

@@ -107,6 +107,17 @@ and Filmora-ready output; how they are built is in `docs/DESIGN_2_1.md`.
   詳細); what is pinned or rerolled on a later copy stays as set there, and rerolling or pinning the first copy carries
   to its copies.
 - **Per line (v2.1)**: its own season (この行の季節) and parts it must not use (この行で使わない部品).
+- **Glyph morph (モーフ, v2.2)**: a transition between two lines in which the letters they share glide from the old
+  line's places to the new line's (size, angle, even vertical to horizontal writing) while the other letters melt; it
+  ends as the new line's window starts, and the old line is gone after it. In new works the planner uses it by itself
+  where two lines in one background share a meaningful run of letters (作品全体 › 見た目 › 詳しい設定 「同じ字をつなぐ」,
+  on in new works, off in older ones; per line 「前の行から字をつなぐ」). It can be pinned at any boundary.
+- **Weight animation (太さの動き, v2.2)**: 太る (letters appear thin and grow to the line's weight — in new works, when
+  the line's 太さ is not set, the typeface's heaviest weight up to 800), 脈打つ太さ (the weight swells on every beat) and
+  細る (letters thin out and fade), drawn with the typeface's own served weights (no variable fonts). The planner uses
+  them only on lines whose typeface has room and whose lettering is plain or glowing (「太さを動かす」, on in new works);
+  with an outline, shadow or two-colour lettering the weight changes in steps, and a typeface with too few weights shows
+  a note. 「太さ」 (100–900) can be set per line or cut. Export waits for every weight it draws.
 - **My materials (マイ素材, v2.1)**: new materials that the AI or the user builds from existing parts and a fixed set of
   primitives (shapes, particles, patterns, motion tracks, oscillators). They are data, never code; they are stored in the
   project and shown under マイ素材 in the part browser. AI-made materials appear only where they are placed, unless
