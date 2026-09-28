@@ -553,11 +553,27 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
           if (def.scope === 'world') dur = Math.min(dur, WORLD_MAX);
           // Rounded down to 1e-6 s so the window never exceeds its limit.
           dur = Math.floor(Math.max(0, dur) * 1e6) / 1e6;
+          // The long-lead hand-over (PV22 T4, §3.12 b): a centred window [B.a − dur/2, B.a + dur/2] hands the picture to B
+          // at its end, and A is never ended before its sung end t1; with a lead (入りの早さ) above dur/2 A would outlive
+          // the window and show again after it. Tier 1 slides the window later so that it ends at A.t1; where that would
+          // start it after B.a (B drawn before its transition), tier 2 lengthens it to [B.a, A.t1] within the seam's own
+          // limit; else (tier 3) the window stays and A ends with it, below its t1. Every tier keeps B.a inside the window.
+          // Seams that place their own window (def.ends, P4's glyph seams) are left as they are, and so is a boundary whose
+          // old line is pinned to end after the new line's sung start (a duet: A keeps its text until its own end, §3.12).
+          // (named seamAt: `at` is the alignment map here)
+          let seamAt = B.a, handover = def.glyphs === true;
+          const need = A.t1 - B.a;               // how long A must still be shown after B's window opens
+          if (def.ends !== true && A.t1 <= B.t0 + 1e-9 && dur / 2 < need - 1e-9) {
+            const cap = Math.floor(Math.min(limit, def.scope === 'world' ? WORLD_MAX : Infinity) * 1e6) / 1e6;
+            if (dur >= need - 1e-9) seamAt = N.q6(A.t1 - dur / 2);                                  // tier 1
+            else if (cap >= need - 1e-9) { dur = Math.floor(need * 1e6) / 1e6; seamAt = N.q6(B.a + dur / 2); }  // tier 2
+            else handover = true;                                                                   // tier 3
+          }
           B.seamIn = out.length;
-          out.push({ a: A.key, at: B.a, b: B.key, dur, into: B.key, scope: def.scope, slot: d });
+          out.push({ a: A.key, at: seamAt, b: B.key, dur, into: B.key, scope: def.scope, slot: d });
           if (def.replaces && def.replaces.depart) replaceMotion(ctx, A, 'depart');
           if (def.replaces && def.replaces.arrive) replaceMotion(ctx, B, 'arrive');
-          reach = endWithSeam(cuts, j, B.a + dur / 2, reach);
+          reach = endWithSeam(cuts, j, seamAt + dur / 2, reach, handover);
         }
         reach = Math.max(reach, A.b);
       }
@@ -583,15 +599,17 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
       return { got: { decision: d }, entry: entryOf(d, null) };
     }
 
-    // A transition hands the picture over to B: at the end of its window (B.a + dur/2) the seam shows B alone, so
+    // A transition hands the picture over to B: at the end of its window (at + dur/2) the seam shows B alone, so
     // nothing before B may be drawn after it (§3.12 b). Each cut before B that reaches past the end gets b = the end —
     // never less than its sung end t1 — so its exit is fitted to finish with the transition instead of reappearing
-    // after it (with a replaced exit, at full strength). Usually only A reaches that far; `reach` (the latest b before
-    // A) skips the scan otherwise. Returns the new reach.
-    function endWithSeam(cuts, j, end, reach) {
+    // after it (with a replaced exit, at full strength). With handover (a glyph seam, or the long-lead hand-over's
+    // tier 3 in seams) A itself ends with the window, even before its sung end; the cuts before A keep the rule.
+    // Usually only A reaches that far; `reach` (the latest b before A) skips the scan otherwise. Returns the new reach.
+    function endWithSeam(cuts, j, end, reach, handover) {
       const stop = Math.floor(end * 1e6) / 1e6;
       const clip = (c) => { if (c.b > stop) c.b = Math.max(c.t1, stop); };
-      clip(cuts[j - 1]);
+      const A = cuts[j - 1];
+      if (handover) { if (A.b > stop) A.b = stop; } else clip(A);
       if (reach <= stop) return reach;
       let next = -Infinity;
       for (let k = j - 2; k >= 0; k--) { clip(cuts[k]); next = Math.max(next, cuts[k].b); }

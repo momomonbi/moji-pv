@@ -372,12 +372,20 @@ MV.def('planner/segment', ['core/script', 'core/num', 'core/pins', 'core/rng', '
 
   // a = t0 − lead; b = next cut's start + tail, or t1 + tail when a special cut (or nothing) follows. A line pinned to
   // end after the next start keeps its text until its own end.
+  // A window overlaps only its neighbours' (engine/scene/budget's glyph cover bound relies on it): a cut starts no
+  // earlier than the end of the cut two before it, and never after its own sung start (PV22 T4, DESIGN_2_2 §5). With a
+  // long lead (入りの早さ) and short cuts, a = t0 − lead alone reached into the window of the cut before the previous one.
+  // The clamp never binds at the lead 0.12 of the golden documents (tests/node/golden_lead.test.js).
   function windows(cuts, timing) {
     for (let i = 0; i < cuts.length; i++) {
       const c = cuts[i], next = cuts[i + 1];
       c.a = q6(c.t0 - timing.lead);
       const nextSpecial = !next || SPECIAL_ROLES.has(next.role);
       c.b = q6((nextSpecial ? c.t1 : Math.max(c.t1, next.t0)) + timing.tail);
+    }
+    for (let i = 2; i < cuts.length; i++) {
+      const c = cuts[i], floor = cuts[i - 2].b;
+      if (c.a < floor) c.a = Math.min(c.t0, floor);
     }
   }
 

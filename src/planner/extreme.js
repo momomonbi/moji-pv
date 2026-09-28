@@ -1,6 +1,6 @@
 /* 文字PVメーカー v2 — original work. EXTREME camerawork in the plan: the overlay that turns the cam.extreme switch into EXTREME shots, their mirror, the EXTREME rig amplitude and the grounds it marks (DESIGN_EXTREME §2.3). */
 MV.def('planner/extreme', ['core/hash', 'core/num', 'core/pins', 'core/paths', 'core/shot', 'core/schema', 'planner/choose',
-  'planner/params'], (H, N, PINS, P, SHOT, S, CH, PA) => {
+  'planner/params', 'planner/rules'], (H, N, PINS, P, SHOT, S, CH, PA, RULES) => {
   'use strict';
 
   // The switch is a pin, not a document field (DESIGN_EXTREME §2.1): the slot cam.extreme (0–1, 0 = off) pinned at
@@ -256,10 +256,16 @@ MV.def('planner/extreme', ['core/hash', 'core/num', 'core/pins', 'core/paths', '
   // "Repeated lines"), and neither does a repeat whose neighbour in the first copy took another move (its copy of that
   // neighbour may not, on another layout). ×ECHO beat ×RECENT there: measured on corpus(6) with the switch on,
   // neighbours shared their EXTREME move in 11.3 % of the pairs, 5.9 % with this rule (repeats still share 68 %).
-  function recencyOf(win, cut, next, free) {
+  //
+  // The pair relies on the previous cut's whip-out (b − 0.37 … b − 0.25, the FROZEN preset) meeting this cut's whip-in at
+  // its a, which holds at the lead 0.12 of every older document (739 of 739 hard-cut pairs of one section) and at a lead
+  // of 0.2 never (PV22 T4): outside legacy documents (no generation marker and 入りの基準 動き始め) the pair needs the two
+  // whips to meet (|prev.b − WHIP_OUT − a| ≤ WHIP_MEET). prev = the cut before this one (or null).
+  const WHIP_OUT = 0.37, WHIP_MEET = 0.03;
+  function recencyOf(win, cut, next, free, prev, legacy) {
     const rows = win.rows, n = rows.length;
     const last = n ? rows[n - 1] : null;
-    const prev = last ? last.key : null;
+    const prevKey = last ? last.key : null;
     // the natural picks without salts (a reroll changes the near sets of no cut after it, as the camera's; free has one
     // row per cut too)
     const nats = free ? free.rows : rows;
@@ -268,12 +274,13 @@ MV.def('planner/extreme', ['core/hash', 'core/num', 'core/pins', 'core/paths', '
     const rep = cut.feat.repeatOf;
     const echoRow = rep ? (free || win).byCut.get(rep) || null : null;
     let echo = echoRow && echoRow.key ? echoRow.key : null;
-    if (echo !== null && echo === prev) echo = null;
+    if (echo !== null && echo === prevKey) echo = null;
     // 'echo.kept': the first copy shows another preset than the one it passes on (a reroll or a lock there)
     const shown = free && rep ? win.byCut.get(rep) || null : null;
     const echoCode = shown && echo !== null && shown.key !== echo ? 'echo.kept' : 'echo';
-    const pair = !!last && last.key === 'whipPan' && last.section === cut.feat.section && !(cut.seamIn >= 0);
-    return { prev, near, echo, echoCode, echoRow: echo ? echoRow : null, pair, last,
+    const meets = legacy || (!!prev && Math.abs(prev.b - WHIP_OUT - cut.a) <= WHIP_MEET + 1e-9);
+    const pair = !!last && last.key === 'whipPan' && last.section === cut.feat.section && !(cut.seamIn >= 0) && meets;
+    return { prev: prevKey, near, echo, echoCode, echoRow: echo ? echoRow : null, pair, last,
       nextStart: !!(next && next.feat.sectionStart) };
   }
 
@@ -343,13 +350,16 @@ MV.def('planner/extreme', ['core/hash', 'core/num', 'core/pins', 'core/paths', '
       }
       return { x, xd };
     });
-    const free = ctx.salts ? pass(ctx, cuts, pins, null, null, false) : null;
-    pass(ctx, cuts, pins, ctx.salts, free, true);
+    // older documents keep the whipPan pair as it was (recencyOf)
+    const legacy = RULES.gen(ctx.doc) < 1 && !(ctx.timing && ctx.timing.enter === 'ready');
+    const free = ctx.salts ? pass(ctx, cuts, pins, null, null, false, legacy) : null;
+    pass(ctx, cuts, pins, ctx.salts, free, true, legacy);
   }
 
   // One pass over the cuts → its window. salts: the reroll salts the seeds read (null: the salt-free pass); free: the
-  // salt-free window the echo reads (null: this pass's own); write: set the decisions and traces (the real pass).
-  function pass(ctx, cuts, pins, salts, free, write) {
+  // salt-free window the echo reads (null: this pass's own); write: set the decisions and traces (the real pass);
+  // legacy: the whipPan pair as in older documents (recencyOf).
+  function pass(ctx, cuts, pins, salts, free, write, legacy) {
     const win = createWindow();
     for (let j = 0; j < cuts.length; j++) {
       const cut = cuts[j];
@@ -379,7 +389,7 @@ MV.def('planner/extreme', ['core/hash', 'core/num', 'core/pins', 'core/paths', '
         continue;
       }
       const next = j + 1 < cuts.length ? cuts[j + 1] : null;
-      const rec = recencyOf(win, cut, next, free);
+      const rec = recencyOf(win, cut, next, free, j > 0 ? cuts[j - 1] : null, legacy);
       rec.ahead = alignedKey(ctx, win, next, salts);
       const list = weigh(ctx, cut, rules, rec, !!t);
       const prefix = shotPrefix(ctx, cut, salts);

@@ -233,6 +233,39 @@ test('mirror: ⇆ presets only; a whipPan right after a whipPan of the same sect
   assert.ok(paired >= 3, 'whipPan pairs seen: ' + paired);
 });
 
+// PV22 T4 (DESIGN_2_2 §5): the pair rule relies on the previous whip-out (b − 0.37 s) meeting the next cut's whip-in at its
+// a, as at the lead 0.12 of every older document. A new work (look.gen) or 出そろい needs the two whips to meet; an older
+// document keeps today's rule at any lead.
+test('the whipPan pair: legacy documents keep it; a new work needs the whips to meet (lead 0.2: never)', () => {
+  const variants = [
+    { gen: 0, lead: 0.12, pair: () => true }, { gen: 0, lead: 0.2, pair: () => true },
+    { gen: 1, lead: 0.12, pair: (meets) => meets }, { gen: 1, lead: 0.2, pair: (meets) => meets },
+    { gen: 0, lead: 0.2, enter: 'ready', pair: (meets) => meets },
+  ];
+  for (const v of variants) {
+    let seen = 0, met = 0, paired = 0;
+    for (const { name, doc } of corpus.corpus(3, ['16:9'])) {
+      const d = Object.assign({}, withPins(doc, ON), { timing: Object.assign({}, doc.timing, { lead: v.lead }, v.enter ? { enter: v.enter } : {}),
+        look: Object.assign({}, doc.look, v.gen ? { gen: v.gen } : {}) });
+      const p = run(d);
+      for (let j = 1; j < p.cuts.length && seen < 6; j++) {
+        const A = p.cuts[j - 1], B = p.cuts[j], a = xOf(A);
+        if (!(a && a.key === 'whipPan' && A.feat.section === B.feat.section && !(B.seamIn >= 0))) continue;
+        if (!xOf(B) || B.slots['cam.shot'].from !== 'auto') continue;
+        seen++;
+        const meets = Math.abs(A.b - 0.37 - B.a) <= 0.03 + 1e-9;
+        if (meets) met++;
+        const tr = PL.trace(d, { registry: CAT }, { cutKey: B.key, slot: 'cam.shot' });
+        assert.equal(tr.out.recent.pair, v.pair(meets), name + ' ' + B.key + ' ' + JSON.stringify(v));
+        if (tr.out.recent.pair) paired++;
+      }
+    }
+    assert.equal(seen, 6, 'whipPan neighbours seen ' + JSON.stringify(v));
+    assert.equal(met, v.lead === 0.12 ? 6 : 0, 'the whips meet at lead 0.12 only');
+    assert.equal(paired, v.gen === 0 && !v.enter ? 6 : met);
+  }
+});
+
 test('rerolls: a cut\'s shot die rerolls its EXTREME pick; it reaches few other cuts, and never the repeats of a first copy', () => {
   let tried = 0, changed = 0, runs = 0, local = 0, far = 0;
   for (const { name, doc } of corpus.corpus(2)) {
