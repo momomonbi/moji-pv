@@ -903,9 +903,26 @@ test('spec-5: なぜ turns planner ids into words (rules, families, cuts), in ja
   const bad = [];
   const rules = new Set();
   let n = 0;
-  for (const name of ['basic', 'vertical', 'lrc']) {
-    const doc = corpus.project(name).doc;
+  // (and a new work, 文字PVの定石: a count the effect budget lowered and a direction the alternation turned)
+  for (const name of ['basic', 'vertical', 'lrc', 'long@gen1']) {
+    const doc = name === 'long@gen1'
+      ? Object.assign({}, corpus.project('long').doc, { look: Object.assign({}, corpus.project('long').doc.look, { gen: 1 }),
+        pins: Object.assign({}, corpus.project('long').doc.pins, { 'work:mood': { v: 'printColumn', by: 'user' } }) })
+      : corpus.project(name).doc;
     const plan = PL.plan(doc, { registry: reg });
+    const extra = [];
+    if (name === 'long@gen1') {
+      const trimmed = plan.cuts.find((c) => c.slots['ornament.count'].from === 'rule');
+      extra.push('cut/' + trimmed.key + ':ornament.count');
+      for (const c of plan.cuts) {
+        for (const kind of ['arrange', 'arrive', 'depart', 'dwell', 'lens']) {
+          const d = c.slots[kind];
+          const name2 = d && d.pfrom ? Object.keys(d.pfrom).find((k) => d.pfrom[k] === 'alt') : null;
+          if (name2 && extra.length < 3) extra.push('cut/' + c.key + ':' + P.slotParamPath(kind, null, d.v, name2, false));
+        }
+      }
+      assert.ok(extra.length >= 2, 'a trimmed count and a turned direction');
+    }
     const sels = [{ level: 'work' }];
     for (const l of plan.lines.slice(0, 4)) sels.push({ level: 'line', ids: [l.id] });
     for (const c of plan.cuts.slice(0, 6)) sels.push({ level: 'cut', key: c.key });
@@ -913,7 +930,7 @@ test('spec-5: なぜ turns planner ids into words (rules, families, cuts), in ja
       sels.push({ level: 'el', scope: 'work', el, idx: 0 });
       if (plan.cuts[3]) sels.push({ level: 'el', scope: 'cut/' + plan.cuts[3].key, el, idx: 0 });
     }
-    const paths = new Set();
+    const paths = new Set(extra);
     for (const sel of sels) {
       const ctx = F.contextOf(sel, plan, reg);
       for (const s of F.sectionsFor(sel, plan, reg)) for (const f of s.fields) for (const p of F.pathsFor(f, ctx)) paths.add(p);
@@ -941,6 +958,7 @@ test('spec-5: なぜ turns planner ids into words (rules, families, cuts), in ja
   assert.equal(said('cam.arrange', { key: 'edgeBleed' }, 'work:cam.shot'), '構図「' + ts.ja.part('arrange', 'edgeBleed') + '」に合わせて控えめに');
   assert.equal(said('cam.section', { section: 'nowhere' }, 'work:cam.shot'), undefined, 'an unknown section is left out');
   assert.deepEqual([...rules].filter((k) => !(k in STRINGS)).sort(), [], 'every rule the planner names has its own words');
+  for (const k of ['whyRule.pv.fx', 'whyRule.pv.alt']) assert.ok(rules.has(k), k + ' is reached');
 
   // The params the old view printed raw: a cut key, a family id, a rule id.
   const plan = corpus.planBasic();
@@ -1355,14 +1373,21 @@ test('文字PVの定石: the switches are work rows that follow the document def
   const reg = catalogRegistry();
   const look = F.PAGES.work.find((s) => s.id === 'look').fields;
   const row = (path) => look.find((f) => f.path === path);
-  for (const path of ['pv.rules', 'repeat.same', 'pv.kit', 'pv.alternate', 'pv.arc']) {
+  for (const path of ['pv.rules', 'repeat.same', 'pv.kit', 'pv.alternate', 'pv.arc', 'pv.fxCap']) {
     const f = row(path);
     assert.ok(f && f.widget === 'toggle' && f.autoDefault === true && f.noDice === true && !f.offClears, path);
     assert.deepEqual(f.scopes, ['work'], path);
     assert.ok(f.note && f.note in STRINGS, path + ' has a note');
   }
   assert.equal(row('pv.rules').basic, true, 'the group switch is a basic row');
-  for (const path of ['pv.kit', 'pv.alternate', 'pv.arc']) assert.equal(row(path).basic, false, path + ' under 詳しい設定');
+  for (const path of ['pv.kit', 'pv.alternate', 'pv.arc', 'pv.fxCap', 'pv.fxMax']) assert.equal(row(path).basic, false, path + ' under 詳しい設定');
+  // 1カットに重ねる効果の目安: a number 4–8 with no document default (自動 = the look's cap), no die
+  const fxMax = row('pv.fxMax');
+  assert.ok(fxMax.widget === 'number' && fxMax.noDice === true && !fxMax.autoDefault && fxMax.note in STRINGS);
+  assert.deepEqual([fxMax.spec.type, fxMax.spec.min, fxMax.spec.max], ['int', 4, 8]);
+  assert.deepEqual(F.slotScopes('pv.fxMax'), ['work']);
+  const order = look.map((f) => f.path);
+  assert.ok(order.indexOf('pv.fxMax') === order.indexOf('pv.fxCap') + 1, 'the number follows its switch');
   assert.deepEqual(F.slotScopes('pv.kit'), ['work']);
   assert.deepEqual(F.slotScopes('pv.rules'), ['work']);
   assert.deepEqual(F.slotScopes('repeat.same'), ['work', 'line']);
@@ -1380,6 +1405,17 @@ test('文字PVの定石: the switches are work rows that follow the document def
   assert.equal(m.value, null);
   assert.equal(m.autoText[0], 'fld.pvFxMax.auto');
   assert.ok(Number.isInteger(m.autoText[1].n) && m.autoText[1].n >= 4 && m.autoText[1].n <= 6);
+  // the automatic number follows the mood's cut pace (quietHush 4, dashSprint 6); a pin shows its value
+  const calm = CMD.reduce(fresh, { t: 'pin.set', path: 'work:mood', v: 'quietHush', by: 'user' });
+  assert.deepEqual(at(calm, 'work:pv.fxMax').autoText, ['fld.pvFxMax.auto', { n: 4 }]);
+  const quick = CMD.reduce(fresh, { t: 'pin.set', path: 'work:mood', v: 'dashSprint', by: 'user' });
+  assert.deepEqual(at(quick, 'work:pv.fxMax').autoText, ['fld.pvFxMax.auto', { n: 6 }]);
+  const six = at(CMD.reduce(calm, { t: 'pin.set', path: 'work:pv.fxMax', v: 6, by: 'user' }), 'work:pv.fxMax');
+  assert.deepEqual([six.state, six.value, six.autoText], ['pinned', 6, null]);
+  const T0 = MV.use('i18n/t');
+  assert.equal(T0.createT('ja', STRINGS)('fld.pvFxMax.auto', { n: 4 }), '自動（4）');
+  const fc = at(fresh, 'work:pv.fxCap');
+  assert.deepEqual([fc.state, fc.value, fc.autoText], ['auto', true, ['rule.auto.new', {}]]);
   // the 区画 page: a section of the set of looks when the plan has one
   const song = CMD.reduce(fresh, { t: 'lyrics.set', text: ['# Aメロ', 'あさのひかり', 'まどをあけて', '', '# サビ', 'とべ そらへ', 'とおくまで'].join('\n') });
   const plan = PL.plan(song, { registry: reg });

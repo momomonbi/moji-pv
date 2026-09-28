@@ -29,6 +29,10 @@
 //                     basic project with the switch on and every EXTREME preset on one cut, and a 9:16 one with the switch
 //                     at 0.5 on the chorus only; rendered like the frames above (motion-blur copies included in the ops).
 //                     Every document without the switch renders as before: the files above match first.
+//   project_pv.json  { "registry": …, "measurer": "fake", "plan": "<plan.hash>", "frames": [40 hashes] }
+//                     文字PVの定石 (DESIGN_2_2 §2): the 'repeat' fixture as a new work (look.gen = 1) without its
+//                     「くり返しの行をそろえる」 pin, and every other package's switch of the new-work table pinned to its
+//                     off value (pvDoc, OTHER_OFF), so this file changes only with P2's rules. Rendered like the frames above.
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -104,6 +108,31 @@ async function mediaGolden(reg, info) {
   return { registry: info, measurer: 'fake', media: 'fake', plan: r.plan, frames: r.frames };
 }
 
+// OTHER_OFF: the rows of the new-work table (planner/rules) that are not 文字PVの定石's, pinned to their older-work
+// value, so the golden below shows P2 alone whichever package lands next.
+const P2_SLOTS = ['pv.rules', 'repeat.same', 'pv.kit', 'pv.alternate', 'pv.arc', 'pv.fxCap', 'pv.fxMax'];
+function otherOff() {
+  const out = {};
+  for (const r of MV.use('planner/rules').ROWS) {
+    if (!P2_SLOTS.includes(r.slot) && r.off !== null) out['work:' + r.slot] = { v: r.off, by: 'user' };
+  }
+  return out;
+}
+
+// The document of project_pv.json (also read by tests/node/section_kit.test.js).
+function pvDoc() {
+  const doc = JSON.parse(JSON.stringify(corpus.project('repeat').doc));
+  doc.look.gen = D.GEN;
+  delete doc.pins['work:repeat.same'];
+  doc.pins = Object.assign({}, doc.pins, otherOff());
+  return doc;
+}
+
+async function pvGolden(reg, info) {
+  const r = await renderDoc(reg, pvDoc(), null);
+  return { registry: info, measurer: 'fake', plan: r.plan, frames: r.frames };
+}
+
 async function extremeGolden(reg, info) {
   const docs = {};
   for (const { name, doc } of XD.goldenDocs()) docs[name] = await renderDoc(reg, doc, null);
@@ -135,6 +164,8 @@ async function main() {
       empty: { registry: null, measurer: 'fake', plan: null, frames: [] }, make: () => repeatGolden(reg, info) },
     { file: 'project_extreme.json', needs: ENGINE.concat(['planner/plan', 'planner/extreme', 'engine/scene/xshot']),
       empty: { registry: null, measurer: 'fake', docs: {} }, make: () => extremeGolden(reg, info) },
+    { file: 'project_pv.json', needs: ENGINE.concat(['planner/plan', 'planner/rules', 'planner/conventions']),
+      empty: { registry: null, measurer: 'fake', plan: null, frames: [] }, make: () => pvGolden(reg, info) },
   ];
   let failed = false;
   fs.mkdirSync(GOLDEN, { recursive: true });
@@ -165,4 +196,6 @@ async function main() {
   process.exitCode = failed ? 1 : 0;
 }
 
-main().catch((e) => { console.error(e); process.exitCode = 1; });
+if (require.main === module) main().catch((e) => { console.error(e); process.exitCode = 1; });
+
+module.exports = { pvDoc, otherOff };

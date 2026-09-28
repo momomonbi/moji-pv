@@ -60,10 +60,10 @@ behaviour in pixels add their own golden files.
 M1 パートごとに演出をそろえ、くり返す歌詞は同じ見せ方で戻ってくる, M2 動きの配分や方向の交互など、文字PVの定石を組み込み,
 T5 効果を重ねすぎない. What existed: 「くり返しの行をそろえる」 (DESIGN_2_1 §4.10) as an opt-in, the chooser's recency
 (§4.16.4) and the camera's section weights (DESIGN_2_1 §4.7). What v2.2 adds: the conventions on by default in new works,
-a set of looks per song part, the arc of the song, alternating directions and (phase B) an effect budget. The package ships
-in three gated phases: **A** (this text: the switches, repeats by default, the kit, the arc, directions of parts and
-seams, the UI rows), **B** (T5: the lettering rule, then the cut budget) and **C** (camera alternation: mirrored framed
-shots, push-in / pull-back alternation, EXTREME mirror alternation). Each phase leaves every legacy golden identical.
+a set of looks per song part, the arc of the song, alternating directions and an effect budget. The package ships
+in three gated phases: **A** (the switches, repeats by default, the kit, the arc, directions of parts and seams, the UI
+rows), **B** (T5, §2.6: the lettering rule, then the cut budget) and **C** (camera alternation: mirrored framed shots,
+push-in / pull-back alternation, EXTREME mirror alternation). Each phase leaves every legacy golden identical.
 
 ### 2.1 The switches
 
@@ -97,16 +97,18 @@ without a pin follows the document's generation (§0), so a new work has them on
 ### 2.2 Hooks: `ctx.rules`, `ctx.pv`
 
 New planner modules (L2): `planner/rules` (the table, §0), `planner/arc` (parts, keys, runs, drive, strength),
-`planner/kit` (sets of looks), `planner/flow` (directions), `planner/conventions` (builds `ctx.pv`; phase B adds
-`planner/fxcap`). `planner/camera`, `planner/tracks`, `planner/extreme` and `planner/choose` import none of them: they
+`planner/kit` (sets of looks), `planner/flow` (directions), `planner/fxcap` (the effect budget, §2.6),
+`planner/conventions` (builds `ctx.pv`). `planner/camera`, `planner/tracks`, `planner/extreme` and `planner/choose` import none of them: they
 read `ctx.rules` / `ctx.pv` only, which are all-off / `null` for an older document, so its plan is byte-identical.
 
 `ctx.pv` (planner stage 4, when `ctx.rules.any`): `on`, `partOf(cut)`, `featOf(cut)` (the arc's blended features),
 `seamEnergy(B)`, `idOf(cut)` (what P2 adds to a cut's cast inputs: its part, run start, drive and kit id; `castInputs.pv`),
-`partFactor(st, kind)` (`{ f, member, block }` for the chooser), `groundFactor(first)`, `faceBoost(st)`, `avoidAlso(kind)`,
-`flipParams(…)`, `dirOf(st)`, `flipSeam(…)`, `seamDir(d)`, `shotFactors(st)`, `arcWhy`, `kimeAt(cut)` (P3's mark, `cut.kime`
-or `feat.kime`), `summary()` → the non-enumerable `plan.pv = { on, pseudo, neutral, kits, parts }` (the inspector's 区画
-page and tests; not hashed).
+`partFactor(st, kind, idx)` (`{ f, member, block }` for the chooser), `groundFactor(first)`, `faceBoost(st)`,
+`avoidAlso(kind)`, `flipParams(…)`, `dirOf(st)`, `flipSeam(…)`, `seamDir(d)`, `shotFactors(st)`, `arcWhy`, `trimLists(st,
+needF)`, `seamGate(B, world)`, `castDone(cuts)`, `kimeAt(cut)` (P3's mark, `cut.kime` or `feat.kime`), `summary()` → the
+non-enumerable `plan.pv = { on, pseudo, neutral, kits, parts, loads }` (the inspector's 区画 page and tests; not hashed).
+`plan.run` hands `prepare` the look's screen-effect drive (`planner/cast filterDrive`, exported) and calls
+`castDone(cuts)` right after casting (the loads of the cuts as cast, before the tracks replace motions or shots).
 
 ### 2.3 Song parts and the drive (`planner/arc`)
 
@@ -192,15 +194,65 @@ page and tests; not hashed).
 - A change travels along consecutive directional cuts and stops at a cut without a direction for two rows, a part run's
   first cut, a special cut or a restart (expected ≤ 4 cuts; parameters only).
 
-### 2.6 FROZEN contracts touched
+### 2.6 T5: the lettering rule and the cut budget (`planner/fxcap`, phase B)
+
+T5 has two layers, both behind `pv.fxCap` (on in a new work through 文字PVの定石; off → no block, no trim, no gate):
+
+- **The lettering rule (primary).** The letters never carry two effects of the same kind. Channels: the text style
+  (`STYLE_CH`: outline and duo an `edge`, glow a `glow`, plain and shadow none), each motion part's glyph channels
+  (`GLYPH`, below) and the text screen effects (`TEXT_FILTER_CH`: glowSpill `glow`, afterImage `echo`, chromaSlip
+  `split`). `clash(S, C)` = glow on glow, `echo` on an edge, P4's `wt` on an outline, shadow or duo fill, or more than
+  two channels at once (a colour shift, `tint`, never counts). A motion candidate of arrive / dwell / depart is blocked
+  when it clashes with the cut's `text.style`; a text screen effect when it clashes with the style (and the text screen
+  effects before it in the cut), repeats a channel of one of the cut's entrance, hold or exit, or makes a third channel
+  with one of them (the motions run one after another, so an effect adds to one phase at a time). The block is hard:
+  `choose.pick` passes a blocked candidate over for the final, natural and reference picks alike; only when every other
+  candidate weighs 0 does it pick again without the block (`letterFallback`), so a pool (P3's キメ sets included) is never
+  emptied. It applies to every automatic pick of every cut, whatever its role; pins, locks, rules and aligned copies are
+  not chooser picks.
+- **`GLYPH`** (derived from the engine and locked by `fx_cap.test.js`, which builds each motion part's scene and records
+  the pose columns `glow, echo, tint, blur, shard, pixel` (and P4's `wt`) its letters leave rest in):
+  arrive bloomOpen [glow, tint], fogIn [blur], ghostConverge [echo], inkRise [blur, tint], pixelStep [pixel, tint],
+  rainDrop [blur], shardGather [shard], sliceReveal [tint], stampPress [tint], staticJoin [echo, tint], strobeIn [tint],
+  zoomSettle [blur]; dwell shimmerSweep [tint]; depart burnOut [glow, tint], fogOut [blur], inkSink [blur, tint],
+  meltDown [blur], pointImplode [blur, tint], shardBurst [shard, tint], sliceHide [tint], strobeOut [tint], zoomPast
+  [blur]; P4's weightGrow / weightPulse / weightThin [wt] (inert until they land); every other motion part none.
+- **The cut budget (secondary)**, lyric and focus cuts that are not キメ lines:
+  `cap = (pin pv.fxMax ?? 3 + round(3 · amount.pace)) + (impact ? 1 : 0) + (EXTREME on at the cut ? 1 : 0)`;
+  `load = ornament.count + filter.count + LENS + CAM + MOT + IMP` with LENS = a moving camera texture (not 'none', not
+  the still family, not a framing lens), CAM = 2 under EXTREME, else 1 for a shot other than 'none' or a framing lens,
+  MOT = 1 when an entrance, hold or exit is `hard` or `busy` or made for impacts, IMP = 1 on an impact line. Not counted:
+  the rig, the atmosphere, the work texture, the background.
+- **Trimming** (`cast.decideList('filter')`, after the filter count and its index raise, before the filter slots; and in
+  the camera-only passes of the salt-free re-cast after the camera, which then decide the filter count too, so every
+  pass trims alike): when `load > cap`, the decorations first down to the highest pinned decoration slot, then the
+  screen effects down to max(the pinned index, the keep: 1 for a film mood (`filterDrive ≥ 0.5`) + 1 for the impact
+  line's flash, at most the cut's own count). A count is trimmed only when it is automatic (or raised by an index) and not
+  taken from the aligned source; a lowered count is `{ v, from: 'rule' }` (explain: rule `pv.fx`, 「効果が重なりすぎない
+  ように数を減らした」) and the dropped decoration slots go. Every slot keeps its own stream, so a lower count changes no
+  other value.
+- **The seam gate** (`tracks.decideSeam`, unpinned boundaries only, before the chance roll; copied seams never reach it):
+  when B's load as cast is still over its cap and the background does not change, the boundary is the hard cut (`from:
+  'rule'`; explain `pv.fx`). A new background may always come in with a transition. `seamGate(B, world)` is also the
+  guard P4's morph rule calls (`world` defaults to false).
+- **Never**: a pin, a lock, an aligned count, a camera move or texture, a motion (except by the lettering block), an
+  EXTREME move, a キメ line, a rig, the atmosphere, the ground, a copied or world seam, an impulse. T5 only blocks or
+  removes. So `load ≤ cap` holds for every automatic lyric cut unless nothing trimmable is left (decorations at the
+  pinned floor, screen effects at the keep); a transition is added only where `load ≤ cap` or the background changes.
+- UI: 作品全体 › 見た目 › 詳しい設定 「効果を重ねすぎない」 (toggle, `autoDefault`) and 「1カットに重ねる効果の目安」 (number
+  4–8, no die; while automatic the box shows 自動（n）, n = the look's `baseCap`). A number row shows its automatic value in
+  the box only, not in a second line under it.
+
+### 2.7 FROZEN contracts touched
 
 - The chooser (D§4.16.4) gains optional terms, active only under the rules: the part factor `req.pv.f` in the static
-  weight and the recency relax for kit members (phase B: the lettering block with its fallback).
+  weight, the recency relax for kit members, and the lettering block `req.pv.block(key)` with its fallback (a blocked
+  candidate weighs 0 in `weigh` and in explain's alternatives).
 - Decision `pfrom` gains the value `'alt'` (documented next to `'rule'`).
 - History rows and seam entries gain `dir`; `ROW_FIELDS` and `INPUT_FIELDS` gain entries (internal).
 - Not touched: the FROZEN slot order, the Plan shape (`plan.pv` is non-enumerable), POSE columns, the seam contract.
 
-### 2.7 Strings (phase A)
+### 2.8 Strings (phase A)
 
 | Key | ja | en |
 |---|---|---|
@@ -228,11 +280,26 @@ page and tests; not hashed).
 The notes of the switches (`fld.pvRules.note`, `fld.pvKit.note`, `fld.pvAlternate.note`, `fld.pvArc.note`) say what each
 does and that new works start with it on; `fld.repeatSame.note` above wins over DESIGN_2_1 §6.11.
 
-### 2.8 Goldens
+### 2.9 Strings (phase B)
 
-Every existing golden is unchanged (no fixture carries the marker or a `pv.*` pin: `ctx.pv` is null and
-`alignments` returns null as before). `tests/golden/project_pv.json` (the repeat fixture as a new work without its pin,
-the other packages' switches off) follows with its phase.
+| Key | ja | en |
+|---|---|---|
+| `fld.pvFxCap` | 効果を重ねすぎない | Don't pile up effects |
+| `fld.pvFxCap.note` | 文字に同じ種類の効果（光る文字に光る動き、縁取りの文字に残像など）を重ねません。1カットが混みすぎるときは、自動で選ぶ飾りと画面効果の数を減らします。カメラ・動き・切り替え・見せ場の光や揺れ、固定したもの、カメラ EXTREME、キメの行はそのままです。 | Keeps the lettering from stacking effects of the same kind (a glowing move on glowing text, an after-image on outlined text). When a cut gets too busy, fewer decorations and screen effects are chosen. The camera, motion, transitions, impact flashes and shakes, pins, Camera EXTREME and Kime lines stay as they are. |
+| `fld.pvFxMax` | 1カットに重ねる効果の目安 | Effects per cut (guide) |
+| `fld.pvFxMax.note` | 自動では「カットの速さ」から決まります（落ち着いた雰囲気は4、速い雰囲気は6）。見せ場の行とカメラ EXTREMEのカットは1つ多くなります。減らすのは飾りと画面効果だけなので、カメラや動きの多いカットはこれを超えることがあります。キメの行は別の決まりに従います。 | Automatic: set by Cut pace (4 for calm moods, 6 for the fastest). Impact lines and Camera EXTREME cuts get one more. Only decorations and screen effects are reduced, so a cut with a lot of camera work or motion can go over it. Kime lines follow their own rules. |
+| `fld.pvFxMax.auto` | 自動（{n}） | Auto ({n}) |
+| `why.pv.fx` | 効果が重なりすぎないように減らした | Reduced so effects do not pile up |
+| `why.pv.letter` | 文字に同じ種類の効果が重ならないようにした | Keeps the lettering from stacking the same kind of effect |
+| `whyRule.pv.fx` | 効果が重なりすぎないように数を減らした | Fewer, so effects do not pile up |
+
+### 2.10 Goldens
+
+Every existing golden is unchanged (no fixture carries the marker or a `pv.*` pin: `ctx.pv` is null, `alignments` returns
+null as before, and no chooser call carries `pv`, so neither the lettering block nor the budget can act).
+`tests/golden/project_pv.json` is the repeat fixture as a new work without its 「くり返しの行をそろえる」 pin and with the
+other packages' switches pinned off (`OTHER_OFF` in `tests/update_golden.js`): registry, measurer, plan hash and 40 frame
+hashes, checked by `section_kit.test.js`. It changes only with this package and is regenerated once per phase.
 
 <!-- PV22 P3 chapter -->
 

@@ -643,7 +643,8 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       const why = h('div', { class: 'fr-why', hidden: true, role: 'note' });
       const note = field.note ? h('p', { class: 'fr-note note subtle', text: t(field.note) }) : null;
       // what 自動 means here, when the planner says it (FieldState.autoText): 「新しい作品の標準」, a photo's depth rule…
-      const autoNote = h('p', { class: 'fr-auto note subtle', hidden: true });
+      // (a number box says it in its placeholder, 「自動（4）」, so it gets no second line)
+      const autoNote = field.widget === 'number' ? null : h('p', { class: 'fr-auto note subtle', hidden: true });
       const env = {
         app, t, label, field,
         commit: (v, o) => commit(row, v, o),

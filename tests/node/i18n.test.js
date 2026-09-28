@@ -19,7 +19,7 @@ const EN_ALLOW = ['文字PVメーカー'];
 const WHY_CODES = ['mood.tag', 'fit', 'recent', 'family', 'echo', 'echo.kept', 'impact', 'season', 'theme.prefer', 'gate', 'rule',
   'pin', 'lock',
   // 文字PVの定石 (DESIGN_2_2 §2)
-  'pv.kit', 'pv.kitBlock', 'pv.alt', 'pv.altSame', 'pv.arc.up', 'pv.arc.down', 'pv.tame', 'pv.peak'];
+  'pv.kit', 'pv.kitBlock', 'pv.alt', 'pv.altSame', 'pv.arc.up', 'pv.arc.down', 'pv.tame', 'pv.peak', 'pv.fx', 'pv.letter'];
 // §3.13 codes, plus `part-error` (reported by the scene and the renderer, WP4a).
 const WARN_CODES = ['pin-bad-value', 'pin-not-applicable', 'pin-filtered', 'pin-off-season', 'orphan-pin', 'shadowed-pin',
   'lock-partial', 'pool-empty', 'time-order', 'time-compressed', 'title-skipped', 'overfull', 'font-fallback', 'piece-merged',

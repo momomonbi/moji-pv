@@ -475,3 +475,41 @@ test('re-planning a new work after any edit gives exactly the plan made from scr
   }
   assert.ok(steps >= 72);
 });
+
+// The golden of 文字PVの定石 (DESIGN_2_2 §2.10): the repeat fixture as a new work without its pin, the other packages'
+// switches off (tests/update_golden.js pvDoc), plans and renders tests/golden/project_pv.json.
+test('the 文字PVの定石 golden: a new work of the repeat fixture plans and renders tests/golden/project_pv.json', async () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const { pvDoc } = require('../update_golden.js');
+  const golden = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'golden', 'project_pv.json'), 'utf8'));
+  const doc = pvDoc();
+  assert.equal(doc.look.gen, D.GEN);
+  assert.equal(doc.pins['work:repeat.same'], undefined);
+  for (const r of RU.ROWS) {
+    if (!P2.includes(r.slot) && r.off !== null) assert.deepEqual(doc.pins['work:' + r.slot], ON(r.off), r.slot + ' pinned off');
+  }
+  const { createEngine } = MV.use('engine/facade');
+  const { createRecorder } = MV.use('engine/render/record');
+  const { fakeMeasurer } = MV.use('engine/text/fake_measure');
+  const H = MV.use('core/hash');
+  assert.equal(golden.registry.version, CAT.version, 'made with the current catalog');
+  const rec = createRecorder();
+  const engine = createEngine({ registry: CAT, canvas: rec.factory, measurer: fakeMeasurer(), fonts: null, assets: null });
+  const { plan } = engine.setDoc(doc);
+  assert.equal(plan.hash, golden.plan);
+  assert.ok(plan.pv && plan.pv.kits.some((k) => k.primary), 'the conventions are on');
+  await engine.prepare(0, plan.duration, { export: true });
+  const [w, h] = D.DESIGN_SIZE[doc.look.aspect];
+  const k = 360 / Math.min(w, h);
+  const made = rec.factory.create(Math.round(w * k), Math.round(h * k), { alpha: false });
+  const surface = { canvas: made.canvas, ctx: made.ctx, w: Math.round(w * k), h: Math.round(h * k) };
+  const frames = [];
+  for (let i = 0; i < 40; i++) {
+    const before = rec.ops().length;
+    engine.renderFrame(surface, (plan.duration * (i + 0.5)) / 40, { quality: 'export', pick: false, scale: surface.w / plan.design.w });
+    frames.push(H.hashJSON(rec.ops().slice(before)));
+  }
+  engine.dispose();
+  assert.deepEqual(frames, golden.frames);
+});

@@ -211,7 +211,7 @@ test('every rule of 文字PVの定石 changes the plan on its own', () => {
   const none = gen1(doc, { 'work:pv.rules': ON(false) });
   const h0 = PL.run(none, CAT, { fresh: true }).hash;
   assert.equal(h0, PL.run(doc, CAT, { fresh: true }).hash);
-  for (const slot of ['repeat.same', 'pv.kit', 'pv.alternate', 'pv.arc']) {
+  for (const slot of ['repeat.same', 'pv.kit', 'pv.alternate', 'pv.arc', 'pv.fxCap']) {
     const one = gen1(doc, { 'work:pv.rules': ON(false), ['work:' + slot]: ON(true) });
     assert.notEqual(PL.run(one, CAT, { fresh: true }).hash, h0, slot);
   }

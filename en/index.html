@@ -1,6 +1,6 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-Fbn1uNhGOaso4XVSj3hnpAfKFdgmNnSUTDxXJYXQZtA='; style-src 'sha256-CBzRvq4sWr3CF69hafDp1l8UkHnSy18JQMXGJJhPDYI=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-CAYFpYn7G95MEixmwBgPx81d136Gpsa0nfG+Gep3jsU='; style-src 'sha256-CBzRvq4sWr3CF69hafDp1l8UkHnSy18JQMXGJJhPDYI=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
 <title>Moji PV Maker</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -13993,6 +13993,12 @@ MV.def('i18n/strings', [], () => ({
   'fld.pvArc': ['曲の山に合わせて強弱をつける', 'Follow the song\'s build'],
   'fld.pvArc.note': ['Aメロは落ち着かせ、サビで強く、最後のサビを一番強くします。サビの直前は少しためます。パートは見出し（# サビ など）か曲の分析から読み取ります。',
     'Verses stay calmer, choruses get stronger and the last chorus strongest, with a short hold right before a chorus. Song parts come from headings (such as "# Chorus") or the song analysis.'],
+  'fld.pvFxCap': ['効果を重ねすぎない', 'Don\'t pile up effects'],
+  'fld.pvFxCap.note': ['文字に同じ種類の効果（光る文字に光る動き、縁取りの文字に残像など）を重ねません。1カットが混みすぎるときは、自動で選ぶ飾りと画面効果の数を減らします。カメラ・動き・切り替え・見せ場の光や揺れ、固定したもの、カメラ EXTREME、キメの行はそのままです。',
+    'Keeps the lettering from stacking effects of the same kind (a glowing move on glowing text, an after-image on outlined text). When a cut gets too busy, fewer decorations and screen effects are chosen. The camera, motion, transitions, impact flashes and shakes, pins, Camera EXTREME and Kime lines stay as they are.'],
+  'fld.pvFxMax': ['1カットに重ねる効果の目安', 'Effects per cut (guide)'],
+  'fld.pvFxMax.note': ['自動では「カットの速さ」から決まります（落ち着いた雰囲気は4、速い雰囲気は6）。見せ場の行とカメラ EXTREMEのカットは1つ多くなります。減らすのは飾りと画面効果だけなので、カメラや動きの多いカットはこれを超えることがあります。キメの行は別の決まりに従います。',
+    'Automatic: set by Cut pace (4 for calm moods, 6 for the fastest). Impact lines and Camera EXTREME cuts get one more. Only decorations and screen effects are reduced, so a cut with a lot of camera work or motion can go over it. Kime lines follow their own rules.'],
   'fld.pvFxMax.auto': ['自動（{n}）', 'Auto ({n})'],
   'rule.auto.new': ['新しい作品の標準', 'Default for new works'],
   'rule.auto.old': ['この機能より前に作った作品なので、はじめはオフ', 'Made before this feature, so it starts off'],
@@ -14012,7 +14018,10 @@ MV.def('i18n/strings', [], () => ({
   'why.pv.arc.down': ['{section}なので落ち着いた動きを選びやすくした', '{section}, so calmer moves are favored'],
   'why.pv.tame': ['次がサビなので、ためて抑えた', 'The chorus comes next, so this holds back'],
   'why.pv.peak': ['最後のサビなので一番強くした', 'The last chorus, so it goes strongest'],
+  'why.pv.fx': ['効果が重なりすぎないように減らした', 'Reduced so effects do not pile up'],
+  'why.pv.letter': ['文字に同じ種類の効果が重ならないようにした', 'Keeps the lettering from stacking the same kind of effect'],
   'whyRule.pv.alt': ['前のカットと逆向きにした', 'Opposite direction to the previous cut'],
+  'whyRule.pv.fx': ['効果が重なりすぎないように数を減らした', 'Fewer, so effects do not pile up'],
   'whyRule.pv.group': ['「文字PVの定石」に合わせた', 'Follows "Lyric-video conventions"'],
   'whyRule.gen.new': ['新しい作品の標準', 'Default for new works'],
   'whyRule.gen.old': ['この機能より前に作った作品なので、はじめはオフ', 'Made before this feature, so it starts off'],
@@ -16026,6 +16035,13 @@ MV.def('planner/choose', ['core/hash', 'core/rng', 'core/num'], (H, R, N) => {
     let baseW = 0, refW = 0;
     function weigh(req, key, f, st) {
       const s = st || statics(req.kind, key, req.moodFilter, req.season, req.seasonPinned);
+      // 「効果を重ねすぎない」's lettering block (DESIGN_2_2 §2.3.4 d): a candidate that would stack an effect on the
+      // letters weighs 0 (pick passes it over, and takes it only when every candidate is blocked)
+      if (req.pv && req.pv.block && req.pv.block(key)) {
+        if (f) { preWeight(req, key, s, f); f.pvLetter = 0; }
+        baseW = 0; refW = 0;
+        return 0;
+      }
       const w = preWeight(req, key, s, f);
       const q = baseW = N.q6(w);
       if (req.ref) refW = withRecency(w, q, relaxed(req, key, recencyFlags(req.ref, key, s.family)));
@@ -16059,6 +16075,8 @@ MV.def('planner/choose', ['core/hash', 'core/rng', 'core/num'], (H, R, N) => {
     // req = { kind, keys (the pool, sorted), feat, chosen, seed, variety, recent?, ref?, echo?, noFit?, moodFilter?,
     // avoid?, trace?, season?, seasonPinned?, noMedia?, pv? (文字PVの定石: { f, member, block }, planner/conventions) }.
     // score = ln(w) + variety · gumbel(seed, key); argmax, ties → the smaller key (keys arrive sorted).
+    // pv.block(key) (「効果を重ねすぎない」's lettering rule): a blocked candidate takes part in none of the three argmaxes;
+    // when nothing else weighs > 0 the pick runs again without the block ({ …, letterFallback: true }).
     // Two more argmaxes share the same noise (planner/cast createHistory): base = without the recency factors (the
     // cut's natural pick) and ref = with the recency `req.ref` (the cut's reference pick).
     // avoid (arrange and arrive, §8.2 "no identical adjacent"): when the winner is the previous cut's value and another
@@ -16066,6 +16084,21 @@ MV.def('planner/choose', ['core/hash', 'core/rng', 'core/num'], (H, R, N) => {
     // possible; a pool of one still returns its part. An array of values (the cut right before a repeat that shows
     // its source's value, planner/cast avoidOf): the best candidate that is none of them.
     function pick(req) {
+      const block = req.pv && req.pv.block ? req.pv.block : null;
+      blocked = false;
+      const got = pickWith(req, block);
+      if (got !== null || !blocked) return got;
+      // 「効果を重ねすぎない」: every candidate that weighs > 0 clashes with the lettering — pick as if nothing were
+      // blocked, so a pool is never emptied (the trace starts over and says so)
+      if (req.trace) req.trace.length = 0;
+      const out = pickWith(req, null);
+      if (out) out.letterFallback = true;
+      return out;
+    }
+
+    // Whether the last pickWith passed over a candidate for the lettering block (pick is never re-entered).
+    let blocked = false;
+    function pickWith(req, block) {
       const variety = num(req.variety, 1);
       let best = null, bestScore = -Infinity, bestW = 0;
       let next = null, nextScore = -Infinity, nextW = 0;
@@ -16084,6 +16117,12 @@ MV.def('planner/choose', ['core/hash', 'core/rng', 'core/num'], (H, R, N) => {
         const key = keys[i];
         const s = list[i];
         const f = req.trace ? {} : null;
+        if (block !== null && block(key)) {
+          // passed over for the final, natural and reference picks alike (explain shows it with weight 0)
+          blocked = true;
+          if (f) { preWeight(req, key, s, f); f.pvLetter = 0; req.trace.push({ key, w: 0, wBase: 0, score: -Infinity, f }); }
+          continue;
+        }
         const w0 = preWeight(req, key, s, f);
         const wb = N.q6(w0);
         let flags = flagsA[i] | familyFlag(req.recent, s.family);
@@ -17493,233 +17532,6 @@ MV.def('planner/kit', ['core/hash', 'core/rng', 'core/num', 'planner/choose'], (
 
   return { select, weights, groupOf, factorOf, KIT_KINDS, KIT_SIZE, KIT, KIT_PRIMARY, KIT_AVOID, FACES };
 });
-/* 文字PVメーカー v2 — original work. 文字PVの定石 for one plan: ctx.pv, the hooks casting, tracks and the camera read (DESIGN_2_2 §2.0.3). */
-MV.def('planner/conventions', ['core/num', 'core/shot', 'planner/arc', 'planner/kit', 'planner/flow', 'planner/encode'],
-  (N, SHOT, ARC, KIT, FL, EN) => {
-    'use strict';
-
-    // prepare(ctx, cuts, timed, { sheet, pool, intern, cached }) → ctx.pv, made once per plan (planner/plan stage 4) when
-    // some member of 文字PVの定石 that changes the cast is on (ctx.rules.any); null otherwise, and every caller reads
-    // `ctx.pv ? … : <as before>`, so a document without them plans exactly as before. pool(kind) = the pool a kit draws
-    // from and intern = planner/cast intern (handed in: this module does not import planner/cast).
-    const ARC_KINDS = new Set(['arrange', 'arrive', 'dwell', 'depart', 'lens']);
-    const KIT_PART_KINDS = new Set(['arrange', 'arrive', 'dwell', 'depart', 'lens', 'filter', 'ornament']);
-
-    function q3(x) { return Math.round(x * 1000) / 1000; }
-
-    // The arc's factor for a part of strength s (planner/arc strength) at drive d: strong parts ×(0.4 + 1.2d), calm
-    // ones ×(1.6 − 1.2d); both 1 at d = 0.5.
-    function arcFactor(s, d) { return s > 0 ? 0.4 + 1.2 * d : s < 0 ? 1.6 - 1.2 * d : 1; }
-
-    // Blended features (the arc): a frozen copy of the cut's features whose energy is halfway to its part's drive, kept
-    // for the last two cached plans by features id and drive (planner/plan keeps features the same way).
-    let blendPrev = new Map(), blendCur = new Map();
-    function beginBlends() { if (blendCur.size) { blendPrev = blendCur; blendCur = new Map(); } }
-    function blended(feat, featId, drive, cached) {
-      const make = () => Object.freeze(Object.assign({}, feat, { energy: q3(N.clamp(0.5 * feat.energy + 0.5 * drive)) }));
-      if (!cached || !featId) return make();
-      const key = featId + '|' + drive;
-      let f = blendCur.get(key);
-      if (f === undefined) {
-        f = blendPrev.get(key);
-        if (f === undefined) f = make();
-        blendCur.set(key, f);
-      }
-      return f;
-    }
-
-    // The kit weights (KIT.weights) of the last two cached plans, by what they read: the registry, the look the chooser's
-    // look-only factors come from (as the cast cache keys it: mood, theme, season, amounts), the pools, the beat, the
-    // energy and whether the arc leans them. Typing a line changes none of them.
-    let weightsPrev = new Map(), weightsCur = new Map();
-    function beginWeights() { if (weightsCur.size) { weightsPrev = weightsCur; weightsCur = new Map(); } }
-    function weightsKey(ctx, pool, drive, arcOn) {
-      const look = ctx.look;
-      let text = EN.canon([look.mood ? look.mood.key : null, look.theme ? look.theme.key : null, look.season, look.amounts,
-        ctx.grid ? ctx.grid.period : 0, drive, arcOn]);
-      for (const kind of KIT.KIT_KINDS) text += '|' + pool(kind).join(',');
-      return text;
-    }
-
-    function prepare(ctx, cuts, timed, opts) {
-      const o = opts || {};
-      const rules = ctx.rules;
-      const on = Object.freeze({ kit: !!rules.kit, alt: !!rules.alt, arc: !!rules.arc, fx: !!rules.fx, camAlt: false });
-      const cached = !!o.cached;
-      if (cached) { beginBlends(); beginWeights(); }
-      const intern = o.intern || ((x) => x);
-      const A = ARC.parts(ctx, cuts, timed, o.sheet || null);
-      const arcOn = on.arc && !A.neutral;
-      const kits = new Map();                       // part key → { kit, id }
-      const weights = new Map();                    // drive → the kit weights at that energy (KIT.weights)
-      function kitOf(part) {
-        if (!on.kit || !part) return null;
-        let k = kits.get(part.key);
-        if (!k) {
-          const drive = ARC.driveOfKind(part.kind);
-          let W = weights.get(drive);
-          if (!W) {
-            const key = cached ? weightsKey(ctx, o.pool, drive, arcOn) : null;
-            const hit = key !== null ? weightsCur.get(key) || weightsPrev.get(key) : undefined;
-            if (hit && hit.registry === ctx.registry) W = hit.W;
-            else {
-              // under the arc the set leans the way the part's kind does (its drive; the part's own cuts vary around it)
-              const lean = arcOn ? (kind, def, traits) => (ARC_KINDS.has(kind) ? arcFactor(ARC.strength(def, traits), drive) : 1) : null;
-              W = KIT.weights(ctx, o.pool, drive, lean);
-            }
-            if (key !== null) weightsCur.set(key, { registry: ctx.registry, W });
-            weights.set(drive, W);
-          }
-          const kit = KIT.select(ctx, part, o.pool, drive, null, W);
-          k = { kit, id: intern(EN.canon([kit.key, kit.kind, kit.face, kit.groups, kit.primary])) };
-          kits.set(part.key, k);
-        }
-        return k;
-      }
-
-      function partOf(cut) { return cut ? A.byCut.get(cut.key) || null : null; }
-
-      function featOf(cut) {
-        if (!arcOn) return cut.feat;
-        const part = partOf(cut);
-        return part ? blended(cut.feat, cut.featId, part.drive, cached) : cut.feat;
-      }
-
-      // The energy a transition into B reads (its chance): B's blended energy; a special cut blends with its own drive.
-      function seamEnergy(B) {
-        if (!arcOn) return B.feat.energy;
-        const part = partOf(B);
-        return q3(N.clamp(0.5 * B.feat.energy + 0.5 * (part ? part.drive : ARC.SPECIAL_DRIVE)));
-      }
-
-      // What 文字PVの定石 adds to a cut's cast inputs (planner/cast castInputs): its part, run start, drive and kit.
-      const ids = new Map();
-      function idOf(cut) {
-        const part = partOf(cut);
-        if (!part) return '';
-        let id = ids.get(cut.key);
-        if (id === undefined) {
-          const k = kitOf(part);
-          id = intern(part.key + '|' + (part.first ? 1 : 0) + '|' + (arcOn ? part.drive : '-') + '|' + (k ? k.id : '-'));
-          ids.set(cut.key, id);
-        }
-        return id;
-      }
-
-      // partFactor(st, kind) → { f(key, s, trace) → number, member(key) → bool, block: null } for a lyric cut's part slot:
-      // the kit's factor (KIT_PRIMARY, KIT or 1) × the arc's factor on the part's strength; null when neither applies.
-      // trace (explain) receives pvKit and pvArc.
-      const factors = new Map();
-      function partFactor(st, kind) {
-        const part = st.part;
-        if (!part) return null;
-        const k = KIT_PART_KINDS.has(kind) ? kitOf(part) : null;
-        const drive = arcOn && ARC_KINDS.has(kind) ? part.drive : null;
-        if (!k && drive === null) return null;
-        const id = kind + '|' + part.key + '|' + drive;
-        let fx = factors.get(id);
-        if (!fx) {
-          fx = makeFactor(kind, k ? k.kit : null, drive);
-          factors.set(id, fx);
-        }
-        return fx;
-      }
-
-      function makeFactor(kind, kit, drive) {
-        const byKey = new Map();
-        function parts(key, def, traits) {
-          let x = byKey.get(key);
-          if (x === undefined) {
-            const d = def || ctx.registry.get(kind, key);
-            const kf = kit ? KIT.factorOf(kit, kind, KIT.groupOf(kind, d)) : 1;
-            const af = drive !== null ? arcFactor(ARC.strength(d, traits || ctx.registry.traits(kind, key)), drive) : 1;
-            x = { kf, af, w: kf * af };
-            byKey.set(key, x);
-          }
-          return x;
-        }
-        return Object.freeze({
-          kind,
-          f(key, s, trace) {
-            const x = parts(key, s ? s.def : null, s ? s.traits : null);
-            if (trace) { trace.pvKit = x.kf; trace.pvArc = x.af; }
-            return x.w;
-          },
-          member(key) { return !!kit && parts(key, null, null).kf > 1; },
-          block: null,
-        });
-      }
-
-      // The kit's factor on a segment's background, by the part of the segment's first cut (none for a special one).
-      function groundFactor(first) {
-        const part = partOf(first);
-        const k = part ? kitOf(part) : null;
-        if (!k) return null;
-        const id = 'ground|' + part.key;
-        let fx = factors.get(id);
-        if (!fx) { fx = makeFactor('ground', k.kit, null); factors.set(id, fx); }
-        return fx;
-      }
-
-      function faceBoost(st) {
-        const k = st.part ? kitOf(st.part) : null;
-        return k ? k.kit.face : null;
-      }
-
-      function avoidAlso(kind) { return on.kit && KIT.KIT_AVOID.includes(kind); }
-
-      // Directions (M2): the cast's parameters and the seams.
-      function flipParams(st, kind, idx, seed, d, aligned) {
-        return on.alt ? FL.flipParams(st, kind, idx, seed, d, st.part, aligned) : null;
-      }
-      function dirOf(st) { return on.alt && st && st.dirOwn ? FL.pack(st.dirOwn) : FL.NO_DIR; }
-      function flipSeam(B, d, history, seed) { return on.alt ? FL.flipSeam(ctx, B, d, history, seed) : d; }
-      function seamDir(d) { return on.alt ? FL.seamDir(d) : 0; }
-
-      // The arc's factor on a shot preset (planner/camera weighShots, on the cut's own weights): a function of the shot
-      // key, or null. 'none' counts as calm.
-      function shotFactors(st) {
-        if (!arcOn || !st.part) return null;
-        const drive = st.part.drive;
-        return (key) => arcFactor(key === 'none' ? -1 : ARC.strength(SHOT.SHOTS[key] || null, null), drive);
-      }
-
-      // arcWhy(st, factor) → the reason the arc gives a pick its factor x at the cut (explain): the last chorus (the
-      // peak), the hold before a chorus, or the part's kind favouring stronger (drive above 0.5) or calmer moves; null
-      // when the arc left the pick alone.
-      function arcWhy(st, x) {
-        const part = st ? st.part : null;
-        if (!arcOn || !part || Math.abs(x - 1) < 1e-9 || part.drive === 0.5) return null;
-        if (part.peak) return { code: 'pv.peak', params: {} };
-        if (part.tame) return { code: 'pv.tame', params: {} };
-        return { code: part.drive > 0.5 ? 'pv.arc.up' : 'pv.arc.down', params: { section: part.kind || 'other' } };
-      }
-
-      function summary() {
-        const kitsOut = [];
-        for (const entry of A.keys) {
-          const k = on.kit ? kitOf({ key: entry.key, kind: entry.kind }) : null;
-          const out = { key: entry.key, kind: entry.kind, label: { kind: entry.kind, n: entry.n, pseudo: A.pseudo } };
-          if (k) {
-            for (const kind of KIT.KIT_KINDS) out[kind] = k.kit.groups[kind].slice();
-            out.primary = Object.assign({}, k.kit.primary);
-            out.face = k.kit.face;
-          }
-          kitsOut.push(Object.freeze(out));
-        }
-        const parts = new Map();
-        for (const [key, p] of A.byCut) parts.set(key, Object.freeze({ key: p.key, kind: p.kind, drive: p.drive, tame: p.tame, peak: p.peak, head: p.head }));
-        return Object.freeze({ on, pseudo: A.pseudo, neutral: A.neutral, kits: Object.freeze(kitsOut), parts });
-      }
-
-      return {
-        on, arcOn, partOf, featOf, seamEnergy, idOf, partFactor, groundFactor, faceBoost, avoidAlso, flipParams, dirOf,
-        flipSeam, seamDir, shotFactors, arcWhy, kimeAt: ARC.kimeAt, summary, kitOf,
-      };
-    }
-
-    return { prepare, arcFactor, ARC_KINDS };
-  });
 /* 文字PVメーカー v2 — original work. Ranked pin resolution and part parameters (DESIGN §3.5, §4.16.8; DESIGN_2_1 §11.2.6, §11.9.2). */
 MV.def('planner/params', ['core/pins', 'core/schema', 'core/paths', 'planner/choose'], (PINS, S, P, CH) => {
   'use strict';
@@ -20152,6 +19964,7 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
         if (trace) {
           Object.assign(trace, { keys, candidates: ask.trace, noFit: ask.noFit, stage: name,
             avoided: hit ? hit.avoided || null : null, avoidRelaxed: entry.relaxed });
+          if (hit && hit.letterFallback) trace.letterFallback = true;
         }
         if (hit) {
           if (entry.relaxed && !req.silent) ctx.warn({ code: 'avoid-empty', path: 'line/' + cond.line + ':avoid', line: cond.line });
@@ -20664,7 +20477,7 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
           script: cut.feat.script, scope: kind === 'ornament' ? 'cut' : null, chosen: st.chosen, seed, recent, echo,
           list, cutKey: cut.key, trace, silent: st.natural, ref, poolId: poolIdOf(st), cond: st.cond,
           avoid: avoids(ctx, kind) && !st.natural ? avoidOf(st, slot) : null,
-          pv: ctx.pv ? ctx.pv.partFactor(st, kind) : null,
+          pv: ctx.pv ? ctx.pv.partFactor(st, kind, idx) : null,
         });
         d = { v: got.v, from: got.from };
         if (got.base && got.base !== got.v) st.base[slot] = got.base;
@@ -20705,7 +20518,7 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       chooseAuto(ctx, { kind, slot, path: 'cut/' + cut.key + ':' + slot, feat: st.feat, role: cut.role,
         orient: st.chosen.orient, script: cut.feat.script, scope: kind === 'ornament' ? 'cut' : null, chosen: st.chosen,
         seed, recent, echo, list, cutKey: cut.key, trace, silent: true, cond: st.cond,
-        pv: ctx.pv ? ctx.pv.partFactor(st, kind) : null });
+        pv: ctx.pv ? ctx.pv.partFactor(st, kind, list ? idx : null) : null });
       return Object.assign(trace, { recent, echo });
     }
 
@@ -20801,7 +20614,16 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     }
 
     // ornament.count / filter.count (§4.16.4), raised to i + 1 by a part pinned on slot i (§3.4.3), then the slots.
+    // Under 「効果を重ねすぎない」 (DESIGN_2_2 §2.3.4 b) a busy cut lowers its counts after the filter count, before the
+    // filter slots (every slot keeps its own stream, so a lower count changes no other value).
     function decideList(st, kind) {
+      const need = decideCount(st, kind);
+      if (kind === 'filter' && st.ctx.pv) trimLists(st, need);
+      for (let i = 0; i < st.slots[kind + '.count'].v; i++) decidePart(st, kind, i);
+    }
+
+    // The count of a list kind, raised by a pinned index; → the pinned index (need).
+    function decideCount(st, kind) {
       const { ctx, cut, at } = st;
       const countSlot = kind + '.count';
       const a = ctx.look.amounts;
@@ -20827,7 +20649,28 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
         const trace = tracing(st, countSlot);
         if (trace) Object.assign(trace, { stage: 'rule', rule: 'index', decision: raised });
       }
-      for (let i = 0; i < st.slots[countSlot].v; i++) decidePart(st, kind, i);
+      return need;
+    }
+
+    // 「効果を重ねすぎない」: the lower counts planner/conventions gives a busy cut (decorations first, then screen
+    // effects), from 'rule' (explained as rule pv.fx); the dropped decorations go (the filter slots are not decided yet).
+    function trimLists(st, needF) {
+      const got = st.ctx.pv.trimLists(st, needF);
+      if (!got) return;
+      for (const kind of LIST_KINDS) {
+        const n = got[kind];
+        if (n === undefined) continue;
+        const countSlot = kind + '.count';
+        const old = st.slots[countSlot].v;
+        const d = { v: n, from: 'rule' };
+        setDecision(st, countSlot, d);
+        for (let i = n; i < old; i++) {
+          const slot = kind + '#' + i;
+          delete st.slots[slot]; delete st.chosen[slot]; delete st.base[slot]; delete st.ref[slot];
+        }
+        const trace = tracing(st, countSlot);
+        if (trace) Object.assign(trace, { stage: 'rule', rule: 'pv.fx', decision: d, why: null });
+      }
     }
 
     function acceptEl(field) {
@@ -20896,6 +20739,9 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       decidePart(st, 'lens', null);
       CAM.decideCamera(st);
       if (!camOnly) decideList(st, 'filter');
+      // a camera-only pass trims its decorations as the full pass does (the rows its neighbours read), so it decides
+      // the screen-effect count too (its own stream), but no screen effect
+      else if (ctx.pv && ctx.pv.on.fx) trimLists(st, decideCount(st, 'filter'));
       return st;
     }
 
@@ -21293,8 +21139,520 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     return {
       SLOT_SPECS, LIST_KINDS, MOTION_KINDS, castCut, createHistory, chooseAuto, poolOf, acceptPart, pinWarnings, serves,
       filterAllows, lookAx, lockFreeCtx, lockFreeIndex, beginCasts, castKeys, intern, deepFreeze, historyRow, lineCond,
-      isChoice, alignments, neighboursOf, alignedSource, REPEAT, fieldSalted,
+      isChoice, alignments, neighboursOf, alignedSource, REPEAT, fieldSalted, filterDrive,
     };
+  });
+/* 文字PVメーカー v2 — original work. 「効果を重ねすぎない」 (T5 of 文字PVの定石): the lettering rule and the cut budget (DESIGN_2_2 §2.3). */
+MV.def('planner/fxcap', ['core/num', 'planner/extreme', 'planner/rules'], (N, XT, RU) => {
+  'use strict';
+
+  // Two layers. The lettering rule (primary): the letters never carry two effects of the same kind — no glowing move
+  // on glowing text, no after-image on outlined text, never more than two effect channels at once — a hard block on
+  // the chooser's automatic picks (planner/choose pick, with a fallback when every candidate clashes). The cut budget
+  // (secondary): a cut still too busy chooses fewer decorations, then fewer screen effects, and gets no transition on
+  // top unless the background changes. The camera, the motions (except by the lettering block), impact hits, pins,
+  // locks, aligned copies, EXTREME and キメ lines are never touched.
+
+  const PER_CUT_ROLES = new Set(['lyric', 'focus']);
+  const MOTION_KINDS = Object.freeze(['arrive', 'dwell', 'depart']);
+  // A motion counts in the load (MOT) when it is loud: hard or busy, or made for impacts.
+  const LOUD_TAGS = Object.freeze(['hard', 'busy']);
+
+  // The effect channels of a text style (core/registry TEXT_STYLES): an outline or a two-tone fill is an edge, a glow
+  // style a glow. A shadow is not a stacked effect.
+  const STYLE_CH = Object.freeze({ plain: Object.freeze([]), shadow: Object.freeze([]), outline: Object.freeze(['edge']),
+    duo: Object.freeze(['edge']), glow: Object.freeze(['glow']) });
+  // The styles a weight animation (P4's wt channel) must not run on: their fill is painted in two layers.
+  const WT_STYLES = new Set(['outline', 'shadow', 'duo']);
+
+  // The glyph channels each motion part puts on the letters (the pose columns glow, echo, tint, blur, shard, pixel it
+  // moves away from rest; and wt, P4's weight animation). Derived from the engine and locked by fx_cap.test.js: every
+  // catalog motion part must have exactly the channels its scene shows. Every other motion part has none.
+  const GLYPH = Object.freeze({
+    'arrive/bloomOpen': ['glow', 'tint'], 'arrive/fogIn': ['blur'], 'arrive/ghostConverge': ['echo'],
+    'arrive/inkRise': ['blur', 'tint'], 'arrive/pixelStep': ['pixel', 'tint'], 'arrive/rainDrop': ['blur'],
+    'arrive/shardGather': ['shard'], 'arrive/sliceReveal': ['tint'], 'arrive/stampPress': ['tint'],
+    'arrive/staticJoin': ['echo', 'tint'], 'arrive/strobeIn': ['tint'], 'arrive/zoomSettle': ['blur'],
+    'dwell/shimmerSweep': ['tint'],
+    'depart/burnOut': ['glow', 'tint'], 'depart/fogOut': ['blur'], 'depart/inkSink': ['blur', 'tint'],
+    'depart/meltDown': ['blur'], 'depart/pointImplode': ['blur', 'tint'], 'depart/shardBurst': ['shard', 'tint'],
+    'depart/sliceHide': ['tint'], 'depart/strobeOut': ['tint'], 'depart/zoomPast': ['blur'],
+    // P4's weight parts (太る・脈打つ太さ・細る): inert while they are not in the registry
+    'arrive/weightGrow': ['wt'], 'dwell/weightPulse': ['wt'], 'depart/weightThin': ['wt'],
+  });
+  for (const k of Object.keys(GLYPH)) Object.freeze(GLYPH[k]);
+  const NONE = Object.freeze([]);
+  // The screen effects that act on the lettering as a channel of their own.
+  const TEXT_FILTER_CH = Object.freeze({ glowSpill: 'glow', afterImage: 'echo', chromaSlip: 'split' });
+
+  function glyphOf(kind, key) { return typeof key === 'string' ? GLYPH[kind + '/' + key] || NONE : NONE; }
+
+  // chan(C): the channels that stack (a colour shift, tint, is not a stacked effect).
+  function chan(list) { return list.filter((c) => c !== 'tint'); }
+
+  // clash(S, C, style): the letters of style channels S would carry C on top — glow on glow, an after-image on an
+  // edge, a weight animation on a two-layer fill, or more than two channels at once.
+  function clash(S, C, style) {
+    if (S.includes('glow') && C.includes('glow')) return true;
+    if (S.includes('edge') && C.includes('echo')) return true;
+    if (style && WT_STYLES.has(style) && C.includes('wt')) return true;
+    const all = new Set(S);
+    for (const c of chan(C)) all.add(c);
+    return all.size > 2;
+  }
+
+  // --- the lettering block ---------------------------------------------------------------------------------------
+
+  // letterBlock(kind, style, chosen, prior) → { id, has(key) } | null: which automatic candidates of a motion or screen
+  // effect slot would clash with the cut's lettering. style = the cut's text.style; chosen = the cut's decided values
+  // (its entrance, hold and exit, for a screen effect); prior = the channels of the text screen effects the cut already
+  // has (earlier filter slots). Motions run one after another, so a screen effect adds to one phase at a time.
+  const blocks = new Map();
+  function letterBlock(kind, style, chosen, prior) {
+    const S = STYLE_CH[style] || NONE;
+    if (MOTION_KINDS.includes(kind)) {
+      const id = 'm|' + kind + '|' + style;
+      let b = blocks.get(id);
+      if (b === undefined) {
+        const set = new Set();
+        for (const name of Object.keys(GLYPH)) {
+          const [k, key] = name.split('/');
+          if (k === kind && clash(S, GLYPH[name], style)) set.add(key);
+        }
+        b = set.size ? Object.freeze({ id, has: (key) => set.has(key) }) : null;
+        blocks.set(id, b);
+      }
+      return b;
+    }
+    if (kind !== 'filter') return null;
+    const phases = MOTION_KINDS.map((k) => (chosen ? chosen[k] : null));
+    const pre = prior && prior.length ? prior.slice().sort().join('+') : '';
+    const id = 'f|' + style + '|' + phases.join('|') + '|' + pre;
+    let b = blocks.get(id);
+    if (b === undefined) {
+      const set = new Set();
+      const base = S.concat(prior || NONE);
+      for (const key of Object.keys(TEXT_FILTER_CH)) {
+        const c = TEXT_FILTER_CH[key];
+        let bad = clash(base, [c], style) || base.includes(c);
+        for (let i = 0; i < 3 && !bad; i++) {
+          const G = glyphOf(MOTION_KINDS[i], phases[i]);
+          if (G.includes(c)) bad = true;
+          else {
+            const all = new Set(base);
+            for (const x of chan(G)) all.add(x);
+            all.add(c);
+            if (all.size > 2) bad = true;
+          }
+        }
+        if (bad) set.add(key);
+      }
+      b = set.size ? Object.freeze({ id, has: (key) => set.has(key) }) : null;
+      if (blocks.size > 4096) blocks.clear();
+      blocks.set(id, b);
+    }
+    return b;
+  }
+
+  // The channels of a cut's text screen effects decided before filter slot `idx` (slots filter#0 … filter#idx−1).
+  function priorFilters(slots, idx) {
+    let out = null;
+    for (let i = 0; i < idx; i++) {
+      const d = slots['filter#' + i];
+      const c = d && typeof d.v === 'string' ? TEXT_FILTER_CH[d.v] : undefined;
+      if (c) (out || (out = [])).push(c);
+    }
+    return out;
+  }
+
+  // --- the cut budget -----------------------------------------------------------------------------------------------
+
+  function atOf(cut) { return { cutKey: cut.key, pinCutKey: cut.pinKey || null, lineId: cut.line || null }; }
+
+  // xOn(ctx, cut) → the EXTREME switch resolves on at the cut (its moves are the camera's and never trimmed).
+  function xOn(ctx, cut) { return XT.valueAt(ctx.ix, atOf(cut)) > 0; }
+
+  // capOf(ctx, cut, x) → the cut's budget: 1カットに重ねる効果の目安 (its pin, else 3 + round(3 · cut pace)), one more on
+  // an impact line and one more where EXTREME is on (x = xOn, computed when omitted).
+  function capOf(ctx, cut, x) {
+    const pinned = ctx.rules && typeof ctx.rules.fxMax === 'number' ? ctx.rules.fxMax : null;
+    const base = pinned !== null ? pinned : RU.baseCap(ctx.look ? ctx.look.amounts : null);
+    const on = x === undefined ? xOn(ctx, cut) : x;
+    return base + (cut.impact ? 1 : 0) + (on ? 1 : 0);
+  }
+
+  function countOf(slots, slot) {
+    const d = slots[slot];
+    return d && typeof d.v === 'number' ? d.v : 0;
+  }
+
+  // fixedOf(ctx, slots, cut, x) → the layers T5 never trims: a moving camera texture (LENS), the camera move (CAM: a
+  // shot, or a framing lens, which is the cut's camera move; EXTREME counts 2), a loud motion (MOT) and the hit (IMP).
+  function fixedOf(ctx, slots, cut, x) {
+    const reg = ctx.registry;
+    let lens = 0, frames = false;
+    const l = slots.lens;
+    if (l && typeof l.v === 'string' && l.v !== 'none' && reg.has('lens', l.v)) {
+      const def = reg.get('lens', l.v);
+      frames = !!def.frames;
+      if (!frames && def.family !== 'still') lens = 1;
+    }
+    const shot = slots['cam.shot'];
+    const cam = x ? 2 : (shot && shot.v !== 'none' && shot.v !== undefined && shot.v !== null) || frames ? 1 : 0;
+    let mot = 0;
+    for (const kind of MOTION_KINDS) {
+      const d = slots[kind];
+      if (!d || typeof d.v !== 'string' || d.v === 'none' || !reg.has(kind, d.v)) continue;
+      const def = reg.get(kind, d.v);
+      const traits = reg.traits(kind, d.v);
+      if ((def.tags || []).some((t) => LOUD_TAGS.includes(t)) || (traits && traits.impact)) { mot = 1; break; }
+    }
+    return lens + cam + mot + (cut.impact ? 1 : 0);
+  }
+
+  // loadOf(ctx, slots, cut, x) → the cut's load as cast: decorations + screen effects + the fixed layers. Not counted:
+  // the section rig, the atmosphere, the work texture and the background.
+  function loadOf(ctx, slots, cut, x) {
+    const on = x === undefined ? xOn(ctx, cut) : x;
+    return countOf(slots, 'ornament.count') + countOf(slots, 'filter.count') + fixedOf(ctx, slots, cut, on);
+  }
+
+  // keepOf(ctx, cut, film, fv) → the screen effects a trim keeps: one for a film mood's look (its filter drive ≥ 0.5)
+  // and one for the impact line's flash, at most the cut's own count fv.
+  const FILM = 0.5;
+  function keepOf(ctx, cut, film, fv) {
+    const flash = cut.impact && ctx.look && ctx.look.amounts && ctx.look.amounts.flash > 0 ? 1 : 0;
+    return Math.min(fv, (film >= FILM ? 1 : 0) + flash);
+  }
+
+  // needOf(slots) → the decorations a trim keeps: up to the highest pinned decoration slot.
+  function needOf(slots, count) {
+    let need = 0;
+    for (let i = 0; i < count; i++) {
+      const d = slots['ornament#' + i];
+      if (d && typeof d.from === 'string' && d.from.startsWith('pin')) need = i + 1;
+    }
+    return need;
+  }
+
+  // A count the trim may lower: automatic (or raised by a pinned index, which keeps it at the pin), and not taken from
+  // the cut's aligned source (「くり返しの行をそろえる」).
+  function free(d, slot, fromAlign) {
+    return !!d && (d.from === 'auto' || d.from === 'rule') && !(fromAlign && fromAlign.has(slot));
+  }
+
+  // trim(ctx, st, needF, film, kime) → { ornament?: n, filter?: m } | null: the lower counts that bring the cut under
+  // its cap — decorations first (never below the highest pinned one), then screen effects (never below a pinned index,
+  // the film keep and the hit's flash). Called after the filter count and before the filter slots (planner/cast
+  // decideList), and in the camera-only passes after the camera, so every pass trims alike.
+  function trim(ctx, st, needF, film, kime) {
+    const cut = st.cut;
+    if (kime || !PER_CUT_ROLES.has(cut.role)) return null;
+    const slots = st.slots;
+    const o = slots['ornament.count'], f = slots['filter.count'];
+    if (!o || !f) return null;
+    const x = xOn(ctx, cut);
+    const cap = capOf(ctx, cut, x);
+    let over = fixedOf(ctx, slots, cut, x) + o.v + f.v - cap;
+    if (over <= 0) return null;
+    const out = {};
+    if (free(o, 'ornament.count', st.fromAlign)) {
+      const n = Math.max(needOf(slots, o.v), o.v - over);
+      if (n < o.v) { out.ornament = n; over -= o.v - n; }
+    }
+    if (over > 0 && free(f, 'filter.count', st.fromAlign)) {
+      const m = Math.max(needF || 0, keepOf(ctx, cut, film, f.v), f.v - over);
+      if (m < f.v) out.filter = m;
+    }
+    return out.ornament !== undefined || out.filter !== undefined ? out : null;
+  }
+
+  // gate(ctx, B, slots, world, kime) → whether T5 gives B no automatic transition: B is still over its cap after its
+  // trim and the background does not change (a new background always may come in with a transition).
+  function gate(ctx, B, slots, world, kime) {
+    if (world || kime || !PER_CUT_ROLES.has(B.role)) return false;
+    const x = xOn(ctx, B);
+    return loadOf(ctx, slots, B, x) > capOf(ctx, B, x);
+  }
+
+  return {
+    PER_CUT_ROLES, LOUD_TAGS, STYLE_CH, GLYPH, TEXT_FILTER_CH, MOTION_KINDS, chan, clash, glyphOf, letterBlock, priorFilters,
+    xOn, capOf, fixedOf, loadOf, keepOf, needOf, trim, gate,
+  };
+});
+/* 文字PVメーカー v2 — original work. 文字PVの定石 for one plan: ctx.pv, the hooks casting, tracks and the camera read (DESIGN_2_2 §2.0.3). */
+MV.def('planner/conventions', ['core/num', 'core/shot', 'planner/arc', 'planner/kit', 'planner/flow', 'planner/encode',
+  'planner/fxcap'], (N, SHOT, ARC, KIT, FL, EN, FX) => {
+    'use strict';
+
+    // prepare(ctx, cuts, timed, { sheet, pool, intern, cached, film }) → ctx.pv, made once per plan (planner/plan stage 4)
+    // when some member of 文字PVの定石 that changes the cast is on (ctx.rules.any); null otherwise, and every caller reads
+    // `ctx.pv ? … : <as before>`, so a document without them plans exactly as before. pool(kind) = the pool a kit draws
+    // from, intern = planner/cast intern and film = the look's screen-effect drive (planner/cast filterDrive), handed in:
+    // this module does not import planner/cast.
+    const ARC_KINDS = new Set(['arrange', 'arrive', 'dwell', 'depart', 'lens']);
+    const KIT_PART_KINDS = new Set(['arrange', 'arrive', 'dwell', 'depart', 'lens', 'filter', 'ornament']);
+
+    function q3(x) { return Math.round(x * 1000) / 1000; }
+
+    // The arc's factor for a part of strength s (planner/arc strength) at drive d: strong parts ×(0.4 + 1.2d), calm
+    // ones ×(1.6 − 1.2d); both 1 at d = 0.5.
+    function arcFactor(s, d) { return s > 0 ? 0.4 + 1.2 * d : s < 0 ? 1.6 - 1.2 * d : 1; }
+
+    // Blended features (the arc): a frozen copy of the cut's features whose energy is halfway to its part's drive, kept
+    // for the last two cached plans by features id and drive (planner/plan keeps features the same way).
+    let blendPrev = new Map(), blendCur = new Map();
+    function beginBlends() { if (blendCur.size) { blendPrev = blendCur; blendCur = new Map(); } }
+    function blended(feat, featId, drive, cached) {
+      const make = () => Object.freeze(Object.assign({}, feat, { energy: q3(N.clamp(0.5 * feat.energy + 0.5 * drive)) }));
+      if (!cached || !featId) return make();
+      const key = featId + '|' + drive;
+      let f = blendCur.get(key);
+      if (f === undefined) {
+        f = blendPrev.get(key);
+        if (f === undefined) f = make();
+        blendCur.set(key, f);
+      }
+      return f;
+    }
+
+    // The kit weights (KIT.weights) of the last two cached plans, by what they read: the registry, the look the chooser's
+    // look-only factors come from (as the cast cache keys it: mood, theme, season, amounts), the pools, the beat, the
+    // energy and whether the arc leans them. Typing a line changes none of them.
+    let weightsPrev = new Map(), weightsCur = new Map();
+    function beginWeights() { if (weightsCur.size) { weightsPrev = weightsCur; weightsCur = new Map(); } }
+    function weightsKey(ctx, pool, drive, arcOn) {
+      const look = ctx.look;
+      let text = EN.canon([look.mood ? look.mood.key : null, look.theme ? look.theme.key : null, look.season, look.amounts,
+        ctx.grid ? ctx.grid.period : 0, drive, arcOn]);
+      for (const kind of KIT.KIT_KINDS) text += '|' + pool(kind).join(',');
+      return text;
+    }
+
+    function prepare(ctx, cuts, timed, opts) {
+      const o = opts || {};
+      const rules = ctx.rules;
+      const on = Object.freeze({ kit: !!rules.kit, alt: !!rules.alt, arc: !!rules.arc, fx: !!rules.fx, camAlt: false });
+      const cached = !!o.cached;
+      const film = typeof o.film === 'number' ? o.film : 0;
+      if (cached) { beginBlends(); beginWeights(); }
+      const intern = o.intern || ((x) => x);
+      const A = ARC.parts(ctx, cuts, timed, o.sheet || null);
+      const arcOn = on.arc && !A.neutral;
+      const kits = new Map();                       // part key → { kit, id }
+      const weights = new Map();                    // drive → the kit weights at that energy (KIT.weights)
+      function kitOf(part) {
+        if (!on.kit || !part) return null;
+        let k = kits.get(part.key);
+        if (!k) {
+          const drive = ARC.driveOfKind(part.kind);
+          let W = weights.get(drive);
+          if (!W) {
+            const key = cached ? weightsKey(ctx, o.pool, drive, arcOn) : null;
+            const hit = key !== null ? weightsCur.get(key) || weightsPrev.get(key) : undefined;
+            if (hit && hit.registry === ctx.registry) W = hit.W;
+            else {
+              // under the arc the set leans the way the part's kind does (its drive; the part's own cuts vary around it)
+              const lean = arcOn ? (kind, def, traits) => (ARC_KINDS.has(kind) ? arcFactor(ARC.strength(def, traits), drive) : 1) : null;
+              W = KIT.weights(ctx, o.pool, drive, lean);
+            }
+            if (key !== null) weightsCur.set(key, { registry: ctx.registry, W });
+            weights.set(drive, W);
+          }
+          const kit = KIT.select(ctx, part, o.pool, drive, null, W);
+          k = { kit, id: intern(EN.canon([kit.key, kit.kind, kit.face, kit.groups, kit.primary])) };
+          kits.set(part.key, k);
+        }
+        return k;
+      }
+
+      function partOf(cut) { return cut ? A.byCut.get(cut.key) || null : null; }
+
+      function featOf(cut) {
+        if (!arcOn) return cut.feat;
+        const part = partOf(cut);
+        return part ? blended(cut.feat, cut.featId, part.drive, cached) : cut.feat;
+      }
+
+      // The energy a transition into B reads (its chance): B's blended energy; a special cut blends with its own drive.
+      function seamEnergy(B) {
+        if (!arcOn) return B.feat.energy;
+        const part = partOf(B);
+        return q3(N.clamp(0.5 * B.feat.energy + 0.5 * (part ? part.drive : ARC.SPECIAL_DRIVE)));
+      }
+
+      // What 文字PVの定石 adds to a cut's cast inputs (planner/cast castInputs): its part, run start, drive and kit.
+      const ids = new Map();
+      function idOf(cut) {
+        const part = partOf(cut);
+        if (!part) return '';
+        let id = ids.get(cut.key);
+        if (id === undefined) {
+          const k = kitOf(part);
+          id = intern(part.key + '|' + (part.first ? 1 : 0) + '|' + (arcOn ? part.drive : '-') + '|' + (k ? k.id : '-'));
+          ids.set(cut.key, id);
+        }
+        return id;
+      }
+
+      // partFactor(st, kind, idx) → { f(key, s, trace) → number, member(key) → bool, block(key) → bool | null } for a
+      // cut's part slot: the kit's factor (KIT_PRIMARY, KIT or 1) × the arc's factor on the part's strength (a lyric cut
+      // with a part), and 「効果を重ねすぎない」's lettering block (every cut, motions and screen effects; idx = the
+      // screen effect's index); null when none applies. trace (explain) receives pvKit and pvArc.
+      const factors = new Map();
+      const combos = new Map();
+      function partFactor(st, kind, idx) {
+        const base = kitArcFactor(st, kind);
+        const lb = on.fx ? letterOf(st, kind, idx) : null;
+        if (!lb) return base;
+        const id = (base ? base.id : '-') + '#' + lb.id;
+        let fx = combos.get(id);
+        if (!fx) {
+          fx = Object.freeze({ kind, id, f: base ? base.f : one, member: base ? base.member : no, block: lb.has });
+          combos.set(id, fx);
+        }
+        return fx;
+      }
+      function one() { return 1; }
+      function no() { return false; }
+
+      // The lettering block of a motion or screen effect slot: by the cut's text style (and, for a screen effect, its
+      // entrance, hold and exit and the text screen effects before it); null when nothing clashes.
+      function letterOf(st, kind, idx) {
+        if (kind !== 'filter' && !FX.MOTION_KINDS.includes(kind)) return null;
+        const style = st.chosen['text.style'];
+        return FX.letterBlock(kind, typeof style === 'string' ? style : 'plain', st.chosen,
+          kind === 'filter' ? FX.priorFilters(st.slots, idx || 0) : null);
+      }
+
+      function kitArcFactor(st, kind) {
+        const part = st.part;
+        if (!part) return null;
+        const k = KIT_PART_KINDS.has(kind) ? kitOf(part) : null;
+        const drive = arcOn && ARC_KINDS.has(kind) ? part.drive : null;
+        if (!k && drive === null) return null;
+        const id = kind + '|' + part.key + '|' + drive;
+        let fx = factors.get(id);
+        if (!fx) {
+          fx = makeFactor(kind, k ? k.kit : null, drive, id);
+          factors.set(id, fx);
+        }
+        return fx;
+      }
+
+      function makeFactor(kind, kit, drive, id) {
+        const byKey = new Map();
+        function parts(key, def, traits) {
+          let x = byKey.get(key);
+          if (x === undefined) {
+            const d = def || ctx.registry.get(kind, key);
+            const kf = kit ? KIT.factorOf(kit, kind, KIT.groupOf(kind, d)) : 1;
+            const af = drive !== null ? arcFactor(ARC.strength(d, traits || ctx.registry.traits(kind, key)), drive) : 1;
+            x = { kf, af, w: kf * af };
+            byKey.set(key, x);
+          }
+          return x;
+        }
+        return Object.freeze({
+          kind, id,
+          f(key, s, trace) {
+            const x = parts(key, s ? s.def : null, s ? s.traits : null);
+            if (trace) { trace.pvKit = x.kf; trace.pvArc = x.af; }
+            return x.w;
+          },
+          member(key) { return !!kit && parts(key, null, null).kf > 1; },
+          block: null,
+        });
+      }
+
+      // The kit's factor on a segment's background, by the part of the segment's first cut (none for a special one).
+      function groundFactor(first) {
+        const part = partOf(first);
+        const k = part ? kitOf(part) : null;
+        if (!k) return null;
+        const id = 'ground|' + part.key;
+        let fx = factors.get(id);
+        if (!fx) { fx = makeFactor('ground', k.kit, null, id); factors.set(id, fx); }
+        return fx;
+      }
+
+      function faceBoost(st) {
+        const k = st.part ? kitOf(st.part) : null;
+        return k ? k.kit.face : null;
+      }
+
+      function avoidAlso(kind) { return on.kit && KIT.KIT_AVOID.includes(kind); }
+
+      // Directions (M2): the cast's parameters and the seams.
+      function flipParams(st, kind, idx, seed, d, aligned) {
+        return on.alt ? FL.flipParams(st, kind, idx, seed, d, st.part, aligned) : null;
+      }
+      function dirOf(st) { return on.alt && st && st.dirOwn ? FL.pack(st.dirOwn) : FL.NO_DIR; }
+      function flipSeam(B, d, history, seed) { return on.alt ? FL.flipSeam(ctx, B, d, history, seed) : d; }
+      function seamDir(d) { return on.alt ? FL.seamDir(d) : 0; }
+
+      // 「効果を重ねすぎない」 (T5, DESIGN_2_2 §2.3): the cut budget. trimLists(st, needF) → the lower counts that bring a
+      // lyric cut under its cap ({ ornament?, filter? }, planner/cast applies them) or null; seamGate(B, world) → whether B
+      // gets no automatic transition (still over its cap, and the background stays). キメ lines are left alone.
+      function trimLists(st, needF) { return on.fx ? FX.trim(ctx, st, needF, film, ARC.kimeAt(st.cut)) : null; }
+      function seamGate(B, world) { return on.fx && !!B && !!B.slots && FX.gate(ctx, B, B.slots, !!world, ARC.kimeAt(B)); }
+
+      // The loads and caps of the lyric cuts as cast (before the tracks replace motions or shots), for plan.pv and the
+      // tests (also with the budget off, to compare): { load, cap, kime, aligned }.
+      let loads = null;
+      function castDone(list) {
+        loads = new Map();
+        for (const cut of list) {
+          if (!FX.PER_CUT_ROLES.has(cut.role)) continue;
+          const x = FX.xOn(ctx, cut);
+          loads.set(cut.key, Object.freeze({ load: FX.loadOf(ctx, cut.slots, cut, x), cap: FX.capOf(ctx, cut, x),
+            kime: ARC.kimeAt(cut), aligned: !!(ctx.align && ctx.align.get(cut.key)) }));
+        }
+      }
+
+      // The arc's factor on a shot preset (planner/camera weighShots, on the cut's own weights): a function of the shot
+      // key, or null. 'none' counts as calm.
+      function shotFactors(st) {
+        if (!arcOn || !st.part) return null;
+        const drive = st.part.drive;
+        return (key) => arcFactor(key === 'none' ? -1 : ARC.strength(SHOT.SHOTS[key] || null, null), drive);
+      }
+
+      // arcWhy(st, factor) → the reason the arc gives a pick its factor x at the cut (explain): the last chorus (the
+      // peak), the hold before a chorus, or the part's kind favouring stronger (drive above 0.5) or calmer moves; null
+      // when the arc left the pick alone.
+      function arcWhy(st, x) {
+        const part = st ? st.part : null;
+        if (!arcOn || !part || Math.abs(x - 1) < 1e-9 || part.drive === 0.5) return null;
+        if (part.peak) return { code: 'pv.peak', params: {} };
+        if (part.tame) return { code: 'pv.tame', params: {} };
+        return { code: part.drive > 0.5 ? 'pv.arc.up' : 'pv.arc.down', params: { section: part.kind || 'other' } };
+      }
+
+      function summary() {
+        const kitsOut = [];
+        for (const entry of A.keys) {
+          const k = on.kit ? kitOf({ key: entry.key, kind: entry.kind }) : null;
+          const out = { key: entry.key, kind: entry.kind, label: { kind: entry.kind, n: entry.n, pseudo: A.pseudo } };
+          if (k) {
+            for (const kind of KIT.KIT_KINDS) out[kind] = k.kit.groups[kind].slice();
+            out.primary = Object.assign({}, k.kit.primary);
+            out.face = k.kit.face;
+          }
+          kitsOut.push(Object.freeze(out));
+        }
+        const parts = new Map();
+        for (const [key, p] of A.byCut) parts.set(key, Object.freeze({ key: p.key, kind: p.kind, drive: p.drive, tame: p.tame, peak: p.peak, head: p.head }));
+        return Object.freeze({ on, pseudo: A.pseudo, neutral: A.neutral, kits: Object.freeze(kitsOut), parts, loads });
+      }
+
+      return {
+        on, arcOn, partOf, featOf, seamEnergy, idOf, partFactor, groundFactor, faceBoost, avoidAlso, flipParams, dirOf,
+        flipSeam, seamDir, shotFactors, arcWhy, kimeAt: ARC.kimeAt, summary, kitOf, trimLists, seamGate, castDone,
+      };
+    }
+
+    return { prepare, arcFactor, ARC_KINDS };
   });
 /* 文字PVメーカー v2 — original work. The cutter: lines → cut skeletons, special cuts, windows, pin reattachment (DESIGN §4.16.5). */
 MV.def('planner/segment', ['core/script', 'core/num', 'core/pins', 'core/rng', 'engine/text/breaker', 'planner/choose',
@@ -22181,6 +22539,11 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
         CA.pinWarnings(ctx, 'seam', pin.v, pin, cond);
         out = fixed(pinDecision(pin));
         if (trace) shadow(ctx, req, trace, { kind: 'seam', stage: 'pin', pin, recent: rec.recent, echo: null });
+      } else if (ctx.pv && ctx.pv.seamGate(B, world)) {
+        // 「効果を重ねすぎない」 (DESIGN_2_2 §2.3.4 c): B is still over its cap after its trim and keeps its background, so
+        // no transition is added on top
+        out = fixed({ from: 'rule', v: hard });
+        if (trace) Object.assign(trace, { kind: 'seam', stage: 'rule', rule: 'pv.fx', why: [{ code: 'pv.fx', params: {} }] });
       } else {
         // (under 「曲の山に合わせて強弱をつける」 the energy is blended with the part's drive, planner/conventions)
         const energy = ctx.pv ? ctx.pv.seamEnergy(B) : B.feat.energy;
@@ -22915,9 +23278,9 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
       cut.featId = got.id;
     });
     // 文字PVの定石: song parts, their sets of looks, the arc and the directions (null unless one of them is on)
-    ctx.pv = ctx.rules.any ? CONV.prepare(ctx, cuts, timed, { sheet, cached, intern: CA.intern, pool: (kind) => (kind === 'ground'
-      ? CA.poolOf(ctx, 'ground', { aspect: ctx.aspect })
-      : CA.poolOf(ctx, kind, { role: 'lyric', scope: kind === 'ornament' ? 'cut' : null })) }) : null;
+    ctx.pv = ctx.rules.any ? CONV.prepare(ctx, cuts, timed, { sheet, cached, intern: CA.intern, film: CA.filterDrive(look),
+      pool: (kind) => (kind === 'ground' ? CA.poolOf(ctx, 'ground', { aspect: ctx.aspect })
+        : CA.poolOf(ctx, kind, { role: 'lyric', scope: kind === 'ornament' ? 'cut' : null })) }) : null;
 
     // 5. cast, in time order (a cut whose inputs did not change reuses its cast, planner/cast castCut)
     if (cached) {
@@ -22933,6 +23296,7 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
     ctx.alignNear = CA.neighboursOf(ctx.align, cuts);
     const hist = CA.createHistory(registry);
     for (const cut of cuts) Object.assign(cut, CA.castCut(ctx, cut, hist));
+    if (ctx.pv) ctx.pv.castDone(cuts);
 
     // 6. tracks: grounds → seams (and their rule overrides) → EXTREME shots → carry → rigs → impulses (DESIGN_2_1 §3.9;
     // the EXTREME overlay, DESIGN_EXTREME §2.3, does nothing without a cam.extreme pin)
@@ -23697,6 +24061,11 @@ MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media
         why.push(part.peak ? { code: 'pv.peak', params: {} } : part.tame ? { code: 'pv.tame', params: {} }
           : { code: part.drive > 0.5 ? 'pv.arc.up' : 'pv.arc.down', params: { section: part.kind || 'other' } });
       }
+    }
+    // 「効果を重ねすぎない」 (DESIGN_2_2 §2.3.4 d): candidates passed over because they would stack an effect on the
+    // letters (not when every candidate clashed and the pick fell back)
+    if (!trace.letterFallback && (trace.candidates || []).some((c) => c.f && c.f.pvLetter === 0)) {
+      why.push({ code: 'pv.letter', params: {} });
     }
     const refs = cond && cond.deny ? cond.deny[kind] : null;
     if (refs && refs.length && !trace.avoidRelaxed) why.push({ code: 'avoid', params: { n: refs.length } });
@@ -61436,6 +61805,11 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
             note: 'fld.pvAlternate.note', autoDefault: true, noDice: true, basic: false }),
           F({ path: RU.PV.arc, scopes: WORK, widget: 'toggle', label: 'fld.pvArc', spec: { type: 'bool' },
             note: 'fld.pvArc.note', autoDefault: true, noDice: true, basic: false }),
+          // 「効果を重ねすぎない」 and its guide number (DESIGN_2_2 §2.3): 自動 = 3 + round(3 · カットの速さ), shown in the box
+          F({ path: RU.PV.fx, scopes: WORK, widget: 'toggle', label: 'fld.pvFxCap', spec: { type: 'bool' },
+            note: 'fld.pvFxCap.note', autoDefault: true, noDice: true, basic: false }),
+          F({ path: RU.PV.fxMax, scopes: WORK, widget: 'number', label: 'fld.pvFxMax', spec: RU.SPECS[RU.PV.fxMax],
+            note: 'fld.pvFxMax.note', noDice: true, basic: false }),
         ]),
         // 写真・動画 (DESIGN_2_1 §11.7.3): the library, open when it holds something.
         sec('media', (ctx) => ctx.mediaCount > 0, [], { custom: 'media' }),
@@ -73622,7 +73996,8 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       const why = h('div', { class: 'fr-why', hidden: true, role: 'note' });
       const note = field.note ? h('p', { class: 'fr-note note subtle', text: t(field.note) }) : null;
       // what 自動 means here, when the planner says it (FieldState.autoText): 「新しい作品の標準」, a photo's depth rule…
-      const autoNote = h('p', { class: 'fr-auto note subtle', hidden: true });
+      // (a number box says it in its placeholder, 「自動（4）」, so it gets no second line)
+      const autoNote = field.widget === 'number' ? null : h('p', { class: 'fr-auto note subtle', hidden: true });
       const env = {
         app, t, label, field,
         commit: (v, o) => commit(row, v, o),

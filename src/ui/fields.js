@@ -304,6 +304,11 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
             note: 'fld.pvAlternate.note', autoDefault: true, noDice: true, basic: false }),
           F({ path: RU.PV.arc, scopes: WORK, widget: 'toggle', label: 'fld.pvArc', spec: { type: 'bool' },
             note: 'fld.pvArc.note', autoDefault: true, noDice: true, basic: false }),
+          // 「効果を重ねすぎない」 and its guide number (DESIGN_2_2 §2.3): 自動 = 3 + round(3 · カットの速さ), shown in the box
+          F({ path: RU.PV.fx, scopes: WORK, widget: 'toggle', label: 'fld.pvFxCap', spec: { type: 'bool' },
+            note: 'fld.pvFxCap.note', autoDefault: true, noDice: true, basic: false }),
+          F({ path: RU.PV.fxMax, scopes: WORK, widget: 'number', label: 'fld.pvFxMax', spec: RU.SPECS[RU.PV.fxMax],
+            note: 'fld.pvFxMax.note', noDice: true, basic: false }),
         ]),
         // 写真・動画 (DESIGN_2_1 §11.7.3): the library, open when it holds something.
         sec('media', (ctx) => ctx.mediaCount > 0, [], { custom: 'media' }),
