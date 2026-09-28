@@ -2576,6 +2576,90 @@ async def flow_morph(f, lang):
     await f.undo_all(done0, doc0)
 
 
+async def flow_morph_old(f, lang):
+    """モーフ in a work made before v2.2 (DESIGN_2_2 §4, M4): with no generation marker 「同じ字をつなぐ」 reads 自動 (off) and no
+    モーフ is planned; turning it on pins true (one undo entry) and the rule joins the lines that share letters; the cut's
+    切り替え row then says the line before is handed over, and its なぜ gives the rule's reason; undo removes the pin and
+    the モーフ. The part can be pinned from the command palette on a line (#切り替え モーフ): the transition into that line
+    is a pinned モーフ (one undo entry) whose row carries the hand-over note too."""
+    page = f.page
+    await with_lyrics(f, MORPH_LYRICS)
+    ground = await page.evaluate("() => window.__mv.reg.fallback('ground')")
+    await page.evaluate("(g) => window.__mv.dispatch({ t: 'pin.set', path: 'work:ground', v: g, by: 'user' }, { label: ['undo.pin', {}] })",
+                        ground)
+    # an older work: the same document without the generation marker, opened like a file
+    await page.evaluate("""() => { const a = window.__mv, d = JSON.parse(JSON.stringify(a.doc)); delete d.look.gen;
+      a.loadProject(d, undefined, { quiet: true }); }""")
+    await f.until("() => !('gen' in window.__mv.doc.look) && !!window.__mv.plan && window.__mv.plan.lines.length > 3", 'an older work')
+    await f.settle(3)
+    f.check(await page.evaluate(GLYPH_SEAMS) == [], 'no モーフ in an older work')
+    await page.evaluate("() => window.__mv.select({ level: 'work' }, { from: 'header', open: true })")
+    await open_section(f, 'look')
+    await page.evaluate("""() => { const d = document.querySelector('[data-mount="inspector"] .isec[data-sec="look"] details.isec-more');
+      if (d) d.open = true; }""")
+    await f.settle(2)
+    row = ROW % 'morph.auto'
+    box = row + ' input[role="switch"]'
+    if not f.check(await page.locator(row).count() == 1, 'the switch is on the work page'):
+        return
+    f.check(not await page.is_checked(box), 'off in an older work')
+    f.check(await page.get_attribute(row + ' .state-tag', 'data-state') == 'auto', 'the older default reads as 自動')
+    done1 = await page.evaluate(DONE)
+    await page.click(row + ' .w-toggle')
+    await f.until("() => { const p = window.__mv.doc.pins['work:morph.auto']; return !!p && p.v === true; }", 'turning it on pins true')
+    await f.until("() => window.__mv.plan.seams.some((s) => s.slot.v === 'glyphMorph')", 'the rule joins lines that share letters')
+    await f.settle(3)
+    f.check(await page.evaluate(DONE) == done1 + 1, 'one undo entry')
+    joined = await page.evaluate(GLYPH_SEAMS)
+    f.check(len(joined) >= 2 and all(j.endswith('/rule') for j in joined), 'the rule joins 青い空へ → 青い海へ and 夜の町 → 朝の町: %r' % joined)
+    f.check(await page.is_checked(box), 'the switch shows on')
+    f.check(await page.get_attribute(row + ' .state-tag', 'data-state') == 'pinned', 'the field shows 固定')
+    # the cut the first モーフ leads into: its 切り替え row names the hand-over, and なぜ gives the rule's reason
+    into = joined[0].split('/')[0]
+    await page.evaluate("(k) => window.__mv.select({ level: 'cut', key: k }, { from: 'crumbs', open: true })", into)
+    await f.settle(3)
+    await open_section(f, 'seam')
+    srow = ROW % 'seam'
+    hand = srow + ' [data-role="handover"]'
+    f.check(await page.locator(hand).count() == 1 and await page.is_visible(hand), 'the 切り替え row says the line before is handed over')
+    f.check(await page.text_content(hand) == await page.evaluate("() => window.__mv.t('fld.morphHandover.note')"), 'the hand-over note')
+    await page.click(srow + ' button[aria-haspopup="menu"]')
+    await f.until("() => !!document.querySelector('.popover.menu .menu-item')", 'the field menu opens')
+    await page.evaluate("""(k) => [...document.querySelectorAll('.popover.menu .menu-item')].find((b) => b.textContent.startsWith(window.__mv.t(k))).click()""", 'fm.why')
+    await f.until("(s) => { const r = document.querySelector(s); return !!r && !r.hidden && r.textContent.length > 3; }", 'なぜ shows', srow + ' .fr-why')
+    why = await page.text_content(srow + ' .fr-why')
+    reason = await page.evaluate("() => window.__mv.t('whyRule.morph')")
+    f.check(reason in why, 'なぜ gives the rule\'s reason: %r' % why)
+    await f.shot('morph-why')
+    # undo: the pin and the モーフ are gone
+    await f.blur()
+    await page.keyboard.press('Control+z')
+    await f.until("() => !window.__mv.doc.pins['work:morph.auto']", 'undo removes the pin')
+    await f.settle(3)
+    f.check(await page.evaluate(GLYPH_SEAMS) == [], 'and the モーフ')
+    # the command palette pins モーフ on a line: #切り替え モーフ
+    line = await page.evaluate("() => window.__mv.plan.lines.find((l) => l.text === '夢の中').id")
+    await page.evaluate("(id) => window.__mv.select({ level: 'line', ids: [id] }, { from: 'crumbs', open: true })", line)
+    await f.settle(2)
+    await f.blur()
+    done2 = await page.evaluate(DONE)
+    await page.keyboard.press('Control+k')
+    await f.until('() => window.__mv.paletteOpen', 'Ctrl+K opens the palette')
+    await page.keyboard.type('#切り替え モーフ')
+    await f.until("() => [...document.querySelectorAll('.pal-list .pal-text')].some((x) => x.textContent.includes('モーフ'))",
+                  'the palette lists モーフ')
+    await page.keyboard.press('Enter')
+    await f.until("(id) => { const p = window.__mv.doc.pins['line/' + id + ':seam']; return !!p && p.v === 'glyphMorph'; }",
+                  'the palette pins モーフ on the line', line)
+    await f.settle(3)
+    f.check(await page.evaluate(DONE) == done2 + 1, 'one undo entry')
+    got = await page.evaluate(GLYPH_SEAMS)
+    f.check(len(got) == 1 and got[0].endswith('/pin:line'), 'the transition into 夢の中 is the pinned モーフ: %r' % got)
+    await open_section(f, 'direction')
+    f.check(await page.locator(hand).count() == 1 and await page.is_visible(hand), 'the line page\'s 切り替え row names the hand-over')
+    await f.shot('morph-pinned')
+
+
 async def flow_areas(f, lang):
     """区画 (DESIGN_2_1 §6.8): a band of the drawer's 曲 row selects its lines as the area and opens the 行 page with the area
     header 「サビ（3行）」 and 区画のカメラ; the play bar's lane shows the bands and an area highlight, and a double-click on
@@ -5162,7 +5246,7 @@ FLOWS += [('curve', flow_curve, False), ('keyframes', flow_keyframes, False), ('
 # 「くり返しの行をそろえる」 (DESIGN_2_1 §4.10)
 FLOWS += [('repeat', flow_repeat, False)]
 # 文字PVの定石: 太さを動かす (DESIGN_2_2 §4)
-FLOWS += [('weight', flow_weight, False), ('morph', flow_morph, False)]
+FLOWS += [('weight', flow_weight, False), ('morph', flow_morph, False), ('morph_old', flow_morph_old, False)]
 # v2.1 photos and videos (package G.4, DESIGN_2_1 §11.8.3).
 FLOWS += [('media', flow_media, True), ('library', flow_library, False), ('missing', flow_missing, False), ('package', flow_package, False),
           ('media_device', flow_media_device, False), ('media_song', flow_media_song, False)]
