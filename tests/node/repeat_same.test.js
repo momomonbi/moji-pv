@@ -415,6 +415,51 @@ test('re-planning with the opt-in gives exactly the plan made from scratch', () 
   }
 });
 
+// v2.2 (DESIGN_2_2 §4): a glyph morph the rule chose at the source is copied only where the rule holds at the copy's
+// boundary too, with the letters of the copy's own lines; a pinned one is copied as any seam is.
+test('the glyph morph: a rule-picked one is copied after the rule is checked again, with its own letters; a pinned one as it is', () => {
+  const G = require('../helpers/glyph_docs.js');
+  const MO = MV.use('planner/morph');
+  const rows = ['[ti:ガラスの朝]', '# Aメロ', '青い空へ', '青い海へ', '夜の町を歩く', '# サビ', '青い空へ', '青い海へ', '大きな青い月へ', '青い海へ',
+    'まったく別の言葉', '青い海へ'];
+  const ground = CAT.fallback('ground');
+  const docOf = (gen, pins) => G.morphDoc(ground, { gen, rows, pins: Object.assign({ 'work:repeat.same': ON }, pins || {}) });
+  const seamOf = (p, key) => { const c = p.cuts.find((x) => x.key === key); return c && c.seamIn >= 0 ? p.seams[c.seamIn] : null; };
+  const textOf = (p, key) => p.cuts.find((x) => x.key === key).text;
+  const prevKey = (p, key) => p.cuts[p.cuts.findIndex((x) => x.key === key) - 1].key;
+  // a new work: the source boundary (into r4) is the rule's; its repeats r8, ra, rc take it where the rule holds
+  let doc = docOf(1);
+  let p = PL.plan(doc, { registry: CAT });
+  assert.deepEqual([seamOf(p, 'r4~0').slot.v, seamOf(p, 'r4~0').slot.from], ['glyphMorph', 'rule']);
+  const src = sourcesOf(doc, p);
+  for (const key of ['r8~0', 'ra~0', 'rc~0']) assert.equal(src.get(key).key, 'r4~0', key + ' repeats 青い海へ');
+  for (const key of ['r8~0', 'ra~0']) {
+    const s = seamOf(p, key);
+    assert.deepEqual([s.slot.v, s.slot.from], ['glyphMorph', 'auto'], key + ': copied');
+    assert.deepEqual(s.glyphs, MO.pairsOf(textOf(p, prevKey(p, key)), textOf(p, key), s.slot.p.melt), key + ': its own letters');
+    assert.ok(aligned(whyOf(doc, p, 'cut/' + key + ':seam')), key + ' explains as the first copy\'s');
+  }
+  assert.notDeepEqual(seamOf(p, 'ra~0').glyphs, seamOf(p, 'r4~0').glyphs, '大きな青い月へ → 青い海へ: other offsets');
+  // まったく別の言葉 → 青い海へ shares nothing: the boundary takes its own seam (not a copy)
+  const rc = seamOf(p, 'rc~0');
+  assert.ok(!rc || rc.slot.v !== 'glyphMorph');
+  assert.equal(aligned(whyOf(doc, p, 'cut/rc~0:seam')), null, 'rc: not taken from the first copy');
+  // an exit the user chose before a repeat keeps the rule away there too
+  doc = docOf(1, { 'line/r7:depart': { v: 'fogOut', by: 'user' } });
+  p = PL.plan(doc, { registry: CAT });
+  assert.ok(!seamOf(p, 'r8~0') || seamOf(p, 'r8~0').slot.v !== 'glyphMorph', 'r8: the pinned exit of r7');
+  assert.equal(p.hash, PL.run(doc, CAT, { fresh: true }).hash);
+  // an older work with the morph pinned at the source: every repeat copies it, whatever it shares
+  doc = docOf(undefined, { 'cut/r4~0:seam': { v: 'glyphMorph', by: 'user', sig: '青い海へ' } });
+  p = PL.plan(doc, { registry: CAT });
+  for (const key of ['r8~0', 'ra~0', 'rc~0']) {
+    const s = seamOf(p, key);
+    assert.deepEqual([s.slot.v, s.slot.from], ['glyphMorph', 'auto'], key + ': the pinned morph copied');
+    assert.deepEqual(s.glyphs, MO.pairsOf(textOf(p, prevKey(p, key)), textOf(p, key), s.slot.p.melt), key);
+  }
+  assert.deepEqual(seamOf(p, 'rc~0').glyphs, [[0, 0, 0], [1, 1, 0], [2, 2, 0], [3, 3, 0]], 'nothing shared: the gap pairs melt');
+});
+
 // --- stability ------------------------------------------------------------------------------------------------------
 
 // With the opt-in on, an edit that changes a first copy moves its repeats: that is the switch at work (the followers,

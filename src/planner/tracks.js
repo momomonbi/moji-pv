@@ -708,5 +708,5 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
       return out.sort((x, y) => x.t - y.t || IMPULSE_ORDER[x.kind] - IMPULSE_ORDER[y.kind] || x.amp - y.amp);
     }
 
-    return { grounds, seams, impulses, breakScore, splitSegments };
+    return { grounds, seams, impulses, breakScore, splitSegments, morphRule, morphGuards, MORPH };
   });

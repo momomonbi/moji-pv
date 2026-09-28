@@ -176,6 +176,8 @@ function checkShape(name, plan, reg, doc) {
   for (const role of ['display', 'serif', 'body']) assert.ok(L.faces[role].latin.family && L.faces[role].latin.weight);
   let lastT0 = -Infinity;
   const keys = new Set();
+  // v2.2 glyph seams (DESIGN_2_2 §4) hand their A over: it may end before its sung end (see the seams below)
+  const handed = new Set(plan.seams.filter((s) => reg.get('seam', s.slot.v).glyphs === true).map((s) => s.a));
   plan.cuts.forEach((c, i) => {
     const where = name + ' ' + c.key;
     for (const f of CUT_FIELDS) assert.ok(f in c, where + ' has ' + f);
@@ -184,7 +186,7 @@ function checkShape(name, plan, reg, doc) {
     keys.add(c.key);
     assert.ok(c.t0 >= lastT0 - 1e-9, where + ' in time order');
     lastT0 = c.t0;
-    assert.ok(c.t1 > c.t0 && c.a < c.t0 + 1e-9 && c.b > c.t1 - 1e-9, where + ' window');
+    assert.ok(c.t1 > c.t0 && c.a < c.t0 + 1e-9 && (c.b > c.t1 - 1e-9 || handed.has(c.key)), where + ' window');
     assert.ok(c.repT >= c.a && c.repT < c.b, where + ' repT in [a, b)');
     assert.match(c.fp, /^[0-9a-f]{8}$/);
     assert.ok(c.ground >= 0 && c.ground < plan.grounds.length && plan.grounds[c.ground].cuts.includes(c.key), where + ' ground');
@@ -219,19 +221,26 @@ function checkShape(name, plan, reg, doc) {
   for (const s of plan.seams) {
     assert.notEqual(s.slot.v, hard, name + ' only non-hard-cut seams are listed');
     const B = plan.cuts.find((c) => c.key === s.into), A = plan.cuts.find((c) => c.key === s.a);
-    assert.equal(s.at, B.a);
+    const def = reg.get('seam', s.slot.v);
+    // a glyph seam (v2.2): its window ends at B.a (`ends`), takes up to half the shorter cut (`share`) and lists its
+    // letter pairs; every other seam is centred on B.a, takes up to 0.4 and lists none
+    const glyph = def.glyphs === true;
+    assert.equal(s.at, glyph ? B.a - s.dur / 2 : B.a);
+    assert.equal(Array.isArray(s.glyphs), glyph, name + ' glyphs only on a glyph seam');
     assert.equal(plan.cuts.indexOf(A) + 1, plan.cuts.indexOf(B), 'a seam joins neighbouring cuts');
     const ai = plan.cuts.indexOf(A), bi = ai + 1;
-    const limit = 0.4 * Math.min(cutterEnd(plan, ai, tail) - A.a, cutterEnd(plan, bi, tail) - B.a);
+    const limit = (glyph ? def.share : 0.4) * Math.min(cutterEnd(plan, ai, tail) - A.a, cutterEnd(plan, bi, tail) - B.a);
     assert.ok(s.dur > 0 && s.dur <= limit + 1e-6, name + ' seam window');
-    assert.equal(s.scope, reg.get('seam', s.slot.v).scope);
-    // the seam hands the picture over to B: nothing before B outlives the window (unless its sung end is later)
+    assert.equal(s.scope, def.scope);
+    // the seam hands the picture over to B: nothing before B outlives the window (unless its sung end is later; a glyph
+    // seam's own A not even then)
     const end = s.at + s.dur / 2;
     for (let k = 0; k < bi; k++) {
       const c = plan.cuts[k];
-      assert.ok(c.b <= Math.max(c.t1, end) + 1e-9, name + ' ' + c.key + ' ends with the seam into ' + B.key);
+      assert.ok(c.b <= (glyph && k === ai ? end : Math.max(c.t1, end)) + 1e-9, name + ' ' + c.key + ' ends with the seam into ' + B.key);
     }
-    assert.ok(A.b >= Math.min(cutterEnd(plan, ai, tail), Math.max(A.t1, end)) - 1e-6, name + ' ' + A.key + ' keeps its window up to the seam end');
+    if (glyph) assert.equal(A.b, Math.min(cutterEnd(plan, ai, tail), Math.floor(end * 1e6) / 1e6), name + ' ' + A.key + ' is handed over');
+    else assert.ok(A.b >= Math.min(cutterEnd(plan, ai, tail), Math.max(A.t1, end)) - 1e-6, name + ' ' + A.key + ' keeps its window up to the seam end');
   }
   for (let i = 1; i < plan.impulses.length; i++) assert.ok(plan.impulses[i].t >= plan.impulses[i - 1].t, name + ' impulses sorted');
   for (const line of plan.lines) {
@@ -243,6 +252,23 @@ function checkShape(name, plan, reg, doc) {
 
 test('Plan shape over the corpus (§3.12)', () => {
   for (const { name, doc } of corpus.corpus(2)) checkShape(name, PL.run(doc, STUB, null), STUB, doc);
+});
+
+// v2.2 (DESIGN_2_2 §4): new works with lines that share letters (glyph morphs by the rule and by pins), 3 aspects × 3 seeds.
+test('Plan shape with glyph morphs (§3.12, DESIGN_2_2 §4)', () => {
+  const G = require('../helpers/glyph_docs.js');
+  const reg = MV.use('parts/catalog').defaultRegistry();
+  let glyphSeams = 0;
+  for (const aspect of ['16:9', '9:16', '1:1']) {
+    for (let seed = 1; seed <= 3; seed++) {
+      const doc = G.morphDoc(reg.fallback('ground'), { seed, pins: { 'cut/ra~0:seam': { v: 'glyphMorph', by: 'user', sig: '夢の中' } } });
+      doc.look.aspect = aspect;
+      const plan = PL.run(doc, reg, null);
+      checkShape('morph ' + aspect + ' #' + seed, plan, reg, doc);
+      glyphSeams += plan.seams.filter((s) => s.slot.v === 'glyphMorph').length;
+    }
+  }
+  assert.ok(glyphSeams >= 9 * 4, 'glyph seams checked: ' + glyphSeams);
 });
 
 // §4.16.6: a transition shows only B at the end of its window, so the cuts before B leave the FrameGraph there. Before
@@ -545,6 +571,59 @@ test('re-planning after any edit gives exactly the plan made from scratch', () =
     }
   }
   assert.ok(steps > 150);
+});
+
+// v2.2 (DESIGN_2_2 §4): the same in a new work whose lines share letters — the glyph morph rule reads A and B (their
+// texts, A's exit, B's entrance, their times, the line switch), which the seam memo must notice.
+test('re-planning a new work with glyph morphs after any edit gives exactly the plan made from scratch', () => {
+  const G = require('../helpers/glyph_docs.js');
+  const F = MV.use('planner/fields');
+  const R = MV.use('core/rng');
+  const reg = MV.use('parts/catalog').defaultRegistry();
+  const user = (v, extra) => Object.assign({ v, by: 'user' }, extra || {});
+  // (texts of the same length keep the lines' times, so the casts of the cuts around stay cached: the seam memo is what
+  // must notice)
+  const TEXTS = ['青い空へ', '青い海へ', '赤い海へ', '赤い空へ', '夜の町を歩く', '朝の町を歩く', '夜の森を歩く', '君の手', '夢の中', '青い手'];
+  const edit = (rng, doc, p) => {
+    const d = Object.assign({}, doc, { pins: Object.assign({}, doc.pins) });
+    const lyric = p.cuts.filter((c) => c.role === 'lyric');
+    const cut = rng.pick(lyric), line = cut.line;
+    const r = rng.next();
+    if (r < 0.2) {
+      const same = TEXTS.filter((x) => x.length === cut.text.length && x !== cut.text);
+      const rows = d.sheet.rows.map((x) => (x.id === line && !x.src.includes('/') ? { id: x.id, src: rng.pick(same.length ? same : TEXTS) } : x));
+      d.sheet = Object.assign({}, d.sheet, { rows });
+    } else if (r < 0.3) d.pins['line/' + line + ':morph.auto'] = user(rng.chance(0.5));
+    else if (r < 0.37) d.pins['work:morph.auto'] = user(rng.chance(0.5));
+    else if (r < 0.47) d.pins['line/' + line + ':' + rng.pick(['arrive', 'depart'])] = user(rng.pick(['fogIn', 'fogOut', 'instantShow', 'instantHide']));
+    else if (r < 0.55) d.pins['cut/' + cut.key + ':seam'] = user(rng.pick(['glyphMorph', 'blendDissolve', 'hardCut']), { sig: cut.text });
+    else if (r < 0.62) d.pins['line/' + line + ':end'] = { v: cut.t1 + rng.range(-0.3, 0.6), by: 'tap' };
+    else if (r < 0.7) {
+      Object.assign(d.pins, F.lockPayload(doc, p, line, { registry: reg }).pins);
+      d.locks = Object.assign({}, d.locks, { [line]: { n: 1 } });
+    } else if (r < 0.78) d.pins['line/' + line + ':arrange'] = user(rng.pick(['edgeBleed', 'centerAnchor']));
+    else if (r < 0.85) {
+      const keys = Object.keys(d.pins).filter((k) => k !== 'work:ground');
+      if (keys.length) delete d.pins[rng.pick(keys)];
+    } else if (r < 0.92) d.salts = Object.assign({}, d.salts, { ['cut/' + cut.key]: ((d.salts || {})['cut/' + cut.key] || 0) + 1 });
+    else d.look = Object.assign({}, d.look, { seed: rng.int(0, 1e9) });
+    return d;
+  };
+  let steps = 0, withMorph = 0;
+  for (let s = 0; s < 3; s++) {
+    const rng = R.stream('replan-morph', s);
+    let doc = G.morphDoc(reg.fallback('ground'));
+    const seen = [doc];
+    for (let i = 0; i < 30; i++) {
+      const p = PL.plan(doc, { registry: reg });
+      assert.equal(p.hash, PL.run(doc, reg, { fresh: true }).hash, '#' + s + ' step ' + i);
+      if (p.seams.some((x) => x.slot.v === 'glyphMorph')) withMorph++;
+      steps++;
+      doc = rng.chance(0.15) && seen.length > 2 ? seen[seen.length - 2] : edit(rng, doc, p);
+      seen.push(doc);
+    }
+  }
+  assert.ok(steps === 90 && withMorph > 60, 'plans with a glyph morph: ' + withMorph);
 });
 
 // The cast cache (planner/cast beginCasts) reuses a cast only when the history it reads is the same. The previous
