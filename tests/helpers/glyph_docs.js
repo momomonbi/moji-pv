@@ -102,4 +102,70 @@ function glyphTimes(plan, registry) {
   return out.sort((x, y) => x - y);
 }
 
-module.exports = { docWith, morphDoc, rowId, MORPH_ROWS, GOLDEN_MORPH_ROWS, goldenDocs, glyphTimes };
+// --- perf.py rows glyph-morph and glyph-weight (DESIGN_2_2 §4) ---------------------------------------------------------
+
+// The comparator of a golden document for the same-run A/B: every glyph seam pinned to blendDissolve (morph), or every
+// weight part pinned to a comparable catalog part (太る → fogIn, 脈打つ太さ → thumpSwell, 細る → fogOut) with the 太さ pins
+// dropped (weight). Pins can change what the planner picks elsewhere, so it plans again until none is left (≤ 4 rounds).
+const SWAP = Object.freeze({ arrive: 'fogIn', dwell: 'thumpSwell', depart: 'fogOut' });
+
+function comparatorOf(MV, registry, name, doc) {
+  const PL = MV.use('planner/plan');
+  let out = JSON.parse(JSON.stringify(doc));
+  if (name === 'weight') for (const k of Object.keys(out.pins)) if (/:text\.weight$/.test(k)) delete out.pins[k];
+  for (let round = 0; round < 4; round++) {
+    const plan = PL.plan(out, { registry });
+    const pins = Object.assign({}, out.pins);
+    let left = 0;
+    if (name === 'morph') {
+      for (const s of plan.seams) {
+        const d = registry.get('seam', s.slot.v);
+        if (d && d.glyphs === true) { pins['cut/' + s.into + ':seam'] = { v: 'blendDissolve', by: 'user' }; left++; }
+      }
+    } else {
+      for (const c of plan.cuts) {
+        for (const kind of Object.keys(SWAP)) {
+          const d = c.slots[kind] && registry.get(kind, c.slots[kind].v);
+          if (d && d.optIn === 'weight') { pins['cut/' + c.key + ':' + kind] = { v: SWAP[kind], by: 'user' }; left++; }
+        }
+      }
+    }
+    if (!left) return out;
+    out = Object.assign({}, out, { pins });            // a new document object (the planner keys its memo by it)
+  }
+  throw new Error('glyph_docs: the ' + name + ' comparator still has glyph motion');
+}
+
+// { morph: { doc, comparator, start }, weight: { … } }: start = 1 s before the first morph window or weight motion. The
+// golden documents with the per-cut screen effects off (work filter.count 0) and the other switch of the package off
+// (the morph rows without automatic weight parts, the weight rows without automatic morphs), so that each row and its
+// comparator differ only in the motions it measures, not in the look's accent filters (the morph document draws
+// dotScreen and duoTone in its window, which alone put it and its comparator over twice the budget on a loaded 4-CPU
+// machine) or in weight parts a comparator's own entrances would pick.
+function perfDocs(MV) {
+  const PL = MV.use('planner/plan');
+  const registry = MV.use('parts/catalog').defaultRegistry();
+  const out = {};
+  for (const golden of goldenDocs(registry.fallback('ground'))) {
+    const name = golden.name;
+    const off = { v: false, by: 'user' };
+    const doc = Object.assign({}, golden.doc, { pins: Object.assign({}, golden.doc.pins, { 'work:filter.count': { v: 0, by: 'user' },
+      [name === 'morph' ? 'work:weight.auto' : 'work:morph.auto']: off }) });
+    const plan = PL.plan(doc, { registry });
+    let first = Infinity;
+    for (const s of plan.seams) { const d = registry.get('seam', s.slot.v); if (d && d.glyphs === true) first = Math.min(first, s.at - s.dur / 2); }
+    for (const c of plan.cuts) {
+      for (const kind of Object.keys(SWAP)) { const d = c.slots[kind] && registry.get(kind, c.slots[kind].v); if (d && d.optIn === 'weight') first = Math.min(first, c.a); }
+    }
+    out[name] = { doc, comparator: comparatorOf(MV, registry, name, doc), start: Math.max(0, Math.round((first - 1) * 100) / 100) };
+  }
+  return out;
+}
+
+module.exports = { docWith, morphDoc, rowId, MORPH_ROWS, GOLDEN_MORPH_ROWS, goldenDocs, glyphTimes, comparatorOf, perfDocs };
+
+// node tests/helpers/glyph_docs.js --perf → the perf documents as JSON (tests/browser/perf.py)
+if (require.main === module && process.argv.includes('--perf')) {
+  const { load } = require('./load.js');
+  process.stdout.write(JSON.stringify(perfDocs(load())));
+}

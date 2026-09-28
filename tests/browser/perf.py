@@ -40,12 +40,20 @@ per-frame blur (FrameStats.media.fallback 0 in export quality); project_basic wi
 as the baseline. --media-rows also measures the other §11.5.12 rows once (NOTES): a still and a video ground alone, the
 isolated path (a PNG with alpha), the WebM alpha merge of a 1080p frame, scrubbing a 1080p clip with 2-s key frames,
 and the export overhead of a 1080p30 video background.
+DESIGN_2_2 §4 (+): rows glyph-morph and glyph-weight — the two documents of tests/golden/project_glyph.json (node
+tests/helpers/glyph_docs.js --perf), 10 s at 30 fps at 720p from 1 s before the first morph window or weight motion:
+judged at twice the budget like every row, plus a same-run A/B against the same document with every glyph seam pinned
+to blendDissolve (morph) or every weight part pinned to a comparable catalog part (太る → fogIn, 脈打つ太さ →
+thumpSwell, 細る → fogOut; no 太さ pins) — played alternately in the same page, the least disturbed run of each judged:
+the document's p95 must be ≤ 1.25 × the comparator's.
 The GitHub CI runner (ubuntu-latest, Google Chrome, software raster, no GPU) is the twice-the-budget gate; it is not
 the reference machine. The reference is the mid-range laptop of DESIGN_2_1 §8.7 / §11.5.12.
 Run: PW_EXECUTABLE=/opt/pw-browsers/chromium python3 tests/browser/perf.py [--seconds 10] [--projects basic,long]
 """
 import argparse
 import asyncio
+import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -61,6 +69,7 @@ START = {'basic': 2.0, 'vertical': 1.0, 'lrc': 2.0, 'long': 20.0}
 BEHAVE_MS = 0.8          # DESIGN_2_1 §7.2: behave + solve p50 at 720p with camerawork and materials
 PARTICLES = 400          # D§7.4 draw budget, kept by env.mixShare (DESIGN_2_1 §5.9.4)
 DRAW_MEDIA_MS = 1.0      # DESIGN_2_1 §11.8.3: drawMedia p50 per call at 720p
+GLYPH_AB = 1.25          # DESIGN_2_2 §4: a glyph row's p95 ≤ 1.25 × its comparator's (same run)
 
 
 async def run(args):
@@ -96,6 +105,8 @@ async def run(args):
                 await check_camerawork(page, info, args, failures)
             if args.extreme:
                 await check_extreme(page, info, args, failures)
+            if args.glyph:
+                await check_glyph(page, info, args, failures)
             if page.lab_errors:
                 failures.append('page errors: %r' % page.lab_errors[:10])
             if args.media:
@@ -171,6 +182,38 @@ async def check_extreme(page, info, args, failures):
               'FAIL' if bad else 'ok  ', r['w'], r['h'], r['frames'], r['p50'], r['p95'], r['max'], r['behaveP50'], st['draw'],
               st['post'], r['xshots'], b['frames'], b['p50'], b['p95']))
     failures.extend('long+extreme: ' + x for x in bad)
+
+
+async def check_glyph(page, info, args, failures):
+    """The glyph morph and the weight parts against comparable documents without them, in the same run (DESIGN_2_2 §4)."""
+    if 'catalog' not in info['sources']:
+        print('SKIP  glyph: no catalog on the lab page')
+        return
+    out = subprocess.run(['node', str(ROOT / 'tests' / 'helpers' / 'glyph_docs.js'), '--perf'], cwd=str(ROOT), check=True,
+                         capture_output=True, text=True)
+    docs = json.loads(out.stdout)
+    for name in ('morph', 'weight'):
+        d = docs[name]
+        runs = {'doc': [], 'comparator': []}
+        for _ in range(max(2, args.runs)):                  # alternately, so both sides see the same machine
+            for side in ('doc', 'comparator'):
+                runs[side].append(await page.evaluate('(o) => window.__lab.perf(o)', {
+                    'parts': 'catalog', 'doc': d[side], 'seconds': args.seconds, 'fps': 30, 'short': 720, 'start': d['start']}))
+        a = min(runs['doc'], key=lambda x: x['p95'])
+        b = min(runs['comparator'], key=lambda x: x['p95'])
+        ratio = a['p95'] / max(1e-6, b['p95'])
+        bad = []
+        if a['p50'] > 2 * TARGET_MS or a['p95'] > 2 * HARD_MS:
+            bad.append('p50 %.2f ms / p95 %.2f ms is above twice the budget' % (a['p50'], a['p95']))
+        if ratio > GLYPH_AB:
+            bad.append('p95 %.2f ms is %.2f × the comparator\'s %.2f ms (limit %.2f ×)' % (a['p95'], ratio, b['p95'], GLYPH_AB))
+        st = a['stages']
+        print('%s glyph-%-6s %dx%d, %d frames from %.2f s: p50 %.2f ms, p95 %.2f ms, max %.2f ms (behave %.2f, draw %.2f, post %.2f); '
+              'comparator p50 %.2f ms, p95 %.2f ms: p95 × %.2f (limit %.2f); runs p95 %s / %s' % (
+                  'FAIL' if bad else 'ok  ', name, a['w'], a['h'], a['frames'], d['start'], a['p50'], a['p95'], a['max'], st['behave'],
+                  st['draw'], st['post'], b['p50'], b['p95'], ratio, GLYPH_AB, ', '.join('%.2f' % x['p95'] for x in runs['doc']),
+                  ', '.join('%.2f' % x['p95'] for x in runs['comparator'])))
+        failures.extend('glyph-' + name + ': ' + x for x in bad)
 
 
 async def check_media(browser, args, failures):
@@ -260,6 +303,8 @@ def main():
                     help='skip the camerawork + materials run of project_long (DESIGN_2_1 §7.4)')
     ap.add_argument('--no-extreme', dest='extreme', action='store_false',
                     help='skip the EXTREME camerawork run of project_long (DESIGN_EXTREME §5.3)')
+    ap.add_argument('--no-glyph', dest='glyph', action='store_false',
+                    help='skip the glyph-morph and glyph-weight rows with their same-run A/B (DESIGN_2_2 §4)')
     ap.add_argument('--no-media', dest='media', action='store_false',
                     help='skip the photos-and-videos run of project_basic (DESIGN_2_1 §11.8.3)')
     ap.add_argument('--media-rows', action='store_true', help='also measure the other §11.5.12 rows once (NOTES)')

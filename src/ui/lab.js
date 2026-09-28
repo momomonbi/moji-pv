@@ -840,8 +840,9 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core
   // frames); o.extreme → EXTREME camerawork (DESIGN_EXTREME §5.3): every line's cam.shot pinned to the x-presets in
   // turn (as the planner's overlay would give them), under the slowSwell rig; o.materials → the sample materials in
   // every slot (withMaterials). Set on the engine.
+  // o.doc (v2.2, browser tests): a whole document to plan instead of the fixture project o.project.
   function projectPlan(engine, o) {
-    let doc = projectDoc(o.project);
+    let doc = o.doc ? JSON.parse(JSON.stringify(o.doc)) : projectDoc(o.project);
     if (o.camera === 'off') {
       doc.pins = Object.assign({}, doc.pins, { 'work:cam.shot': { v: 'none', by: 'user' }, 'work:rig': { v: 'none', by: 'user' } });
     } else if (o.camera || o.extreme) doc.pins = Object.assign({}, doc.pins, { 'work:rig': { v: 'slowSwell', by: 'user' } });
