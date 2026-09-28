@@ -9162,8 +9162,9 @@ docs/DESIGN_2_2.md. The packages and their notes follow.
 ### P4: 文字の形が動く (M4 モーフ, M5 太さのアニメーション)
 
 Contract: DESIGN_2_2 §4 (from the package design, revision 2). Built in order: the registry's late parts, the weight
-column and its draw path, the draw-only faces, 太る and 細る, then the planner (opt-in pools, 太さ, the grow rule). The
-モーフ (M4) and 脈打つ太さ come next.
+column and its draw path, the draw-only faces, 太る and 細る, then the planner (opt-in pools, 太さ, the grow rule); then the
+モーフ (M4): the letters two lines share, the rule, the window and hand-over, the renderer's travellers. Thumbnails,
+DESIGN addenda, 脈打つ太さ and the package golden come next.
 
 **Registry.** `late: true` definitions (always `pool: false`, never the fallback) are signed apart: `registry.version`
 stays `83c7523d` with 太る and 細る in the catalog; `registry.lateVersion` (their signature over the version) is used
@@ -9241,6 +9242,92 @@ lighter-first; the lighter at a(1 − f); outline crossfading; `faceReady` ignor
 `decideTextWeight` with an automatic branch (all six goldens differ). Node: 1,798 of 1,798 on a quiet run (8.6 min);
 an earlier run beside other packages' tests missed four conformance "slowest build > 60 ms" checks (68–136 ms) — load,
 they pass alone and on the quiet run. Browser: ui_flows `weight` and `repeat`, i18n_pages, csp, parts_gallery, glyph_parity, determinism.
+
+**モーフ: the letters (planner/morph).** Letter units are graphemes of the classes han, hira, kata, smallKana, hangul,
+latin, digit, fullLatin, emoji (spaces, punctuation and symbols never match), the first 64 of each line, weighted 3
+(kanji, katakana, hangul, emoji), 2 (Latin, digits), 1 (kana). A weighted LCS with a run bonus of 1 and two states per
+cell (E: both last units matched; N: E, skip A, skip B — in that order on ties), scores compared by points and then by
+drift from the diagonal, gives the anchor pairs; runs of 3+, of 2 with a non-kana, or one strong letter are kept. Between
+kept anchors the units pair up in reading order where the gap is about the same size (max ≤ 2·min + 1): same = 1 for equal
+letters, 0 for a swap (melt 'fade': no gap pairs). `pairsOf` → frozen `[[aOff, bOff, same], …]` by bOff (≤ 64);
+`analyze` → `{ m, longest, nA, nB, meaningful }` (m ≥ 2 and a run of 2, or m ≥ 0.4 of the shorter line). One LRU of 256
+text pairs holds both (the same frozen array for the same texts and melt).
+
+**モーフ: the rule (planner/tracks).** `decideSeam`'s unpinned branch asks `morphRule` before the chance roll (the order
+P3 キメ → P4 morph → P2 gate → chance leaves slots for the other packages' branches). Guards: `ctx.glyph.maybeMorph`,
+the registry has `glyphMorph`, one background, lyric/focus on both sides, the switch at the boundary (`morphOn`: the line
+pin of B's line only where A and B are different lines, else the work value), `A.t1 ≤ B.t0`, no motion the user chose
+(A's exit, B's entrance), no `motion: 'own'` arrange, no knockout, and the hooks `cut.kime`, `ctx.uta.at(cut)`,
+`ctx.pv.seamGate(B)` (all absent here). The rule then needs `analyze(A.text, B.text).meaningful`. Legacy documents read
+one boolean per boundary and nothing else. The decision is `{ from: 'rule', v: 'glyphMorph' }` with the seam's own seeded
+parameters; explain says `whyRule.morph`.
+
+**モーフ: window, entry, hand-over.** A seam definition's `share` (glyphMorph 0.5) replaces the 0.4 share; `ends: true`
+puts the window at `[B.a − dur, B.a]` (`at = B.a − dur/2`); a glyph seam's entry lists `glyphs` (keys in sorted order).
+`replaces.arrive` turns B's entrance into `instantShow` (the first plan use of that branch) and drops a grow-rule
+`text.weight` from B (`dropGrowWeight`; a pinned 太る keeps it). `endWithSeam(…, handover)`: the seam's own A ends with the
+window even before its sung end (no `t1` floor); the cuts before A keep the rule. For every existing seam `share`, `ends`,
+`glyphs` are absent, so windows and entries are byte-for-byte as before (the six goldens match).
+
+**モーフ: memo, locks, copies.** `seamOf`'s memo keeps `prev`: null where the rule is never evaluated, '0' where the guards
+fail, else '1' + A's text + B's text. `seamCopy` (「くり返しの行をそろえる」) copies a rule-picked morph only where
+`morphRule` holds at the copy's boundary (else the boundary takes `seamOf`); the copy's letters are its own. Locking a line
+on either side of a morph changes nothing (tested for every line of the test document).
+
+**モーフ: the renderer (engine/render/morph).** `offIndex(scene)`: per offset the glyph node of a run reading the cut text
+(`spec.text` unset), in an eligible layer (text or near; opacity 1, source-over, no filter, no mask, not a mask source), not
+a space, with the highest rest alpha (ties: the lower node). `prepare(entry, sceneA, sceneB)` → the resolved pairs,
+`look` (same face key, ch, style, ink, rot, sx), `rank`, the skip masks; null without pairs (the part only melts).
+`drawTextSeam` sets `dc.skip` while it draws the two side surfaces (drawLayer leaves those nodes out; a static text raster
+is bypassed then), mixes, and draws the travellers on the frame after the composite (above both cuts' text and near
+layers, under the still pass, the grounds' near layer and the hud). Each pair: `F = D · view · world · Turn · S(em)` on
+both sides, eased per pair (`spread` by rank), `lerpAffine` (short-arc rotation, log scales, a mirror through zero, the
+shear ratio, the translation bowed by `arc`), alpha between the sides; alike pairs draw once, other equal letters
+crossfade, swaps melt (the old one softens and fades, the new one sharpens). Picks go to B's cut at the traveller's
+place. `warmAt` walks the travellers with `g = null`. `glyphMorph` (parts/seam/morph): `late`, `pool: false`,
+`glyphs`, `share` 0.5, `ends`, replaces both motions; its `mix` melts the remainder (≤ 5 surfaces).
+
+**モーフ: UI.** 作品全体 › 見た目 › 詳しい設定 「同じ字をつなぐ」 (toggle, `autoDefault`); 行 and 複数行 › 演出 › 詳しい設定
+「前の行から字をつなぐ」 [自動 | つなぐ | つながない] (not on the first line of the song). The strings of M4 are in
+(`fld.morph*`, `opt.morphLine.*`, `opt.melt.*`, `whyRule.morph`, `thumb.morph*`, `fld.morphHandover.note`).
+
+**モーフ: measured.** Over `corpus(2, ['16:9'])` with project_repeat and `look.gen = 1`: 3 of 510 same-background lyric
+boundaries get the morph (0.6 %; the design's probe: 5 of 663); rare by design.
+
+**Deviations in the モーフ (with reasons).**
+- The memo's `prev` holds B's text too: a cut's features do not hold its text (`planner/features` keeps counts only), so
+  B's cast is reused after an edit that keeps the counts (青い海へ → 赤い海へ) and a memo keyed on A's text alone kept a
+  stale morph (a test does exactly that edit).
+- The guards do not count a lock pin of the kind's fallback (`instantHide` / `instantShow`) as a motion the user chose:
+  locking a line freezes the instant exit or entrance a morph gave it, and the rule must find the boundary as before the
+  lock (else locking the old line removed the morph). A lock pin of any other motion counts (no morph was there when the
+  line was locked).
+- `morphOn` reads the line pin through planner/rules `valueAt` (the row's accept refuses cut pins), not `resolvePin` with
+  a local accept: the same value.
+- The line row needed a field state: planner/fields gives `line/<id>:morph.auto` the `'rule'` category (a small
+  `LINE_RULES` set; the line pin, else 自動 = the work value; `canPinAt ['line', 'work']`) and explain gives it the line pin
+  or the work's reasons. Its options use `label` keys (as the repeat line row); `when` is the first-line check (the
+  context has no `firstLineOfSong`).
+- `MO.prepare(entry, sceneA, sceneB)` and `MO.draw(dc, mv, A, B, w, p)` take the scenes and side items (the renderer
+  finds them); prepared pairs are kept in a 4-entry LRU instead of a WeakMap per entry, so a long song's plan does not
+  keep scenes alive that the facade's scene cache has dropped. `draw.pickNode` is exported for the travellers' picks
+  (one per pair, as B, whichever version is drawn).
+- planner/tracks exports `morphRule`, `morphGuards`, `MORPH` (tests drive the hooks with a hand-made context).
+- The window-start check before listing pairs (`A.b > at − dur/2`) is kept from the design but cannot fail in a plan
+  (A's cutter window reaches `B.t0 + tail`), so its mutation is not observable.
+- Still to come with the thumbnails (step 7): `fld.morphHandover.note` under the 切り替え row when the chosen part is a
+  glyph seam, and the tile's own texts and timing in `samplePlan`.
+
+**Checks (モーフ).** New: `tests/node/morph_plan.test.js` (12), `tests/node/morph_render.test.js` (12),
+`tests/helpers/glyph_docs.js`; extended: planner_determinism (`checkShape` for glyph seams over 9 documents, re-planning a
+new work with morphs after random edits), repeat_same (the copy re-check), fields and ui_fields (the rows),
+lens_filter_seam (12 seam rows, two replaces). Mutations, each caught: the hand-over back to `max(t1, stop)`; no
+`memo.prev`; `prev` without B's text; `ends` ignored; the tie order skip-B before skip-A; the rule before the pin check; no
+`A.t1 ≤ B.t0` guard; the line pin read inside a line; no knockout guard; lock pins counted as choices; no
+`dropGrowWeight`; the 2-run kana rule; the gap ratio rule; `seamCopy` without the re-check (and re-checking pinned
+sources); no skip mask; eligibility off; the first node instead of the highest rest alpha; `lerpAffine` with the ends
+swapped; the short arc one way; the bow's axes; the glyph turn, its inverse, the tcy squeeze, the world matrix; no
+traveller picks; no traveller warm-up; a swap without its softening; no static-raster bypass.
 
 
 <!-- PV22 P5 notes -->

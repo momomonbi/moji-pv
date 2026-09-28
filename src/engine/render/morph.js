@@ -72,14 +72,22 @@ MV.def('engine/render/morph', ['core/mat', 'core/num', 'engine/scene/table', 'en
 
   // prepare(entry, sceneA, sceneB) → mv | null: the pairs whose letters both scenes hold, in bOff order, as
   // { n, ia, ib (node indexes), same, look (1 = draw one version), rank (j / (n − 1)), skip: Map(scene → Uint8Array) };
-  // null without pairs. Kept per plan entry while the two scenes are the same objects.
-  const PREP = new WeakMap();
+  // null without pairs. The last few are kept (by plan entry and the two scene objects): a frame draws one seam, and a
+  // longer memo would keep scenes alive that the facade's scene cache has let go.
+  const PREP_MAX = 4;
+  const PREP = [];
   function prepare(entry, sa, sb) {
     if (!entry || !Array.isArray(entry.glyphs) || entry.glyphs.length === 0 || !sa || !sb || sa === sb) return null;
-    const hit = PREP.get(entry);
-    if (hit && hit.sa === sa && hit.sb === sb) return hit.mv;
+    for (let k = 0; k < PREP.length; k++) {
+      const hit = PREP[k];
+      if (hit.entry === entry && hit.sa === sa && hit.sb === sb) {
+        if (k > 0) { PREP.splice(k, 1); PREP.unshift(hit); }
+        return hit.mv;
+      }
+    }
     const mv = build(entry.glyphs, sa, sb);
-    PREP.set(entry, { sa, sb, mv });
+    PREP.unshift({ entry, sa, sb, mv });
+    if (PREP.length > PREP_MAX) PREP.length = PREP_MAX;
     return mv;
   }
 
