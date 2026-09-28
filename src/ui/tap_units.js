@@ -60,7 +60,7 @@ MV.def('ui/tap_units', ['ui/dom', 'ui/icons', 'ui/keys', 'ui/selection', 'i18n/t
       h('label', { class: 'field-label inline', text: t('tapu.rate') }), rateSeg.el);
     const pad = h('button', { class: 'btn primary tap-pad', type: 'button',
       on: { pointerdown: (ev) => { if (ev.button === 0) mark({ timeStamp: ev.timeStamp }); } } },
-    h('span', { class: 'btn-main', text: t('tapu.keyMark') }), h('span', { class: 'btn-hint', text: t('tap.padHint') }));
+    h('span', { class: 'btn-main', text: t('tapu.keyMark') }), h('span', { class: 'btn-hint', text: t('tapu.padHint') }));
     const okBtn = h('button', { class: 'btn primary', type: 'button', 'data-act': 'tapu.ok', text: t('tapu.ok'), on: { click: () => finish() } });
     const retryBtn = h('button', { class: 'btn', type: 'button', 'data-act': 'tapu.retry', text: t('tapu.retry'), on: { click: () => retry() } });
     const cancelBtn = h('button', { class: 'btn', type: 'button', 'data-act': 'tapu.cancel', text: t('tapu.cancel'), on: { click: () => cancel() } });

@@ -1,6 +1,6 @@
 <!doctype html><html lang="ja"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-tXeBsseYPZJKv9QKlomOtYiUzph0mw6/0GiqVOLqiGs='; style-src 'sha256-r4itjKbpHP12JOftFK1QsTGzxZPEZmuZJcB3U9ZIa6k=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-GaE4+vo6qq/STBltY0Gd8CebQNxmUEe82HtjqNkM3QA='; style-src 'sha256-r4itjKbpHP12JOftFK1QsTGzxZPEZmuZJcB3U9ZIa6k=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
 <title>文字PVメーカー</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -14280,6 +14280,7 @@ MV.def('i18n/strings', [], () => ({
   'tapu.ok': ['決定', 'Done'],
   'tapu.cancel': ['やめる', 'Cancel'],
   'tapu.keyMark': ['次の字', 'Next character'],
+  'tapu.padHint': ['字が歌われた瞬間に押す', 'Press as each character is sung'],
   'tapu.keyEnd': ['歌い終わり', 'End of the singing'],
   'tapu.keyBack': ['1字戻る', 'Back one character'],
   'tapu.keyFinish': ['決定（Esc・T）', 'Finish (Esc, T)'],
@@ -69055,7 +69056,7 @@ MV.def('ui/tap_units', ['ui/dom', 'ui/icons', 'ui/keys', 'ui/selection', 'i18n/t
       h('label', { class: 'field-label inline', text: t('tapu.rate') }), rateSeg.el);
     const pad = h('button', { class: 'btn primary tap-pad', type: 'button',
       on: { pointerdown: (ev) => { if (ev.button === 0) mark({ timeStamp: ev.timeStamp }); } } },
-    h('span', { class: 'btn-main', text: t('tapu.keyMark') }), h('span', { class: 'btn-hint', text: t('tap.padHint') }));
+    h('span', { class: 'btn-main', text: t('tapu.keyMark') }), h('span', { class: 'btn-hint', text: t('tapu.padHint') }));
     const okBtn = h('button', { class: 'btn primary', type: 'button', 'data-act': 'tapu.ok', text: t('tapu.ok'), on: { click: () => finish() } });
     const retryBtn = h('button', { class: 'btn', type: 'button', 'data-act': 'tapu.retry', text: t('tapu.retry'), on: { click: () => retry() } });
     const cancelBtn = h('button', { class: 'btn', type: 'button', 'data-act': 'tapu.cancel', text: t('tapu.cancel'), on: { click: () => cancel() } });

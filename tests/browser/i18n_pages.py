@@ -305,6 +305,33 @@ async def x_screens(w, table, families):
     await w.act('step.go', {'step': 'lyrics'})
 
 
+# 歌ハメ (DESIGN_2_2 §6): the line page's 歌ハメ row with what 自動 decided, 行 › 時間 › 字の時間 (without a song: the note
+# that it needs one), 作品全体 › 見た目's 歌ハメ, the 1字ずつタップ panel (started without the song: the silent clock) and its
+# loop end with 決定 / もう一度.
+async def hame_screens(w, table, families):
+    page = w.page
+    await w.act('panel.details')
+    await w.run("() => { const a = window.__mv; a.pause(); a.select({ level: 'line', ids: [a.plan.lines[0].id] }, { from: 'crumbs', open: true }); }")
+    await w.settle(4)
+    await w.run("() => document.querySelector('[data-mount=\"inspector\"] .frow[data-slot=\"sung.hame\"]').scrollIntoView({ block: 'center' })")
+    await screen(w, 'hame-line', table, families)
+    await w.run("() => document.querySelector('[data-mount=\"inspector\"] .frow[data-slot=\"sungTimes\"]').scrollIntoView({ block: 'center' })")
+    await screen(w, 'hame-time', table, families)
+    await w.run("() => window.__mv.select({ level: 'work' }, { from: 'crumbs', open: true })")
+    await w.settle(4)
+    await w.run("() => document.querySelector('[data-mount=\"inspector\"] .frow[data-slot=\"sung.hame\"]').scrollIntoView({ block: 'center' })")
+    await screen(w, 'hame-work', table, families)
+    await w.act('panel.close')
+    await w.run("() => window.__mv.tap.startUnits(window.__mv.plan.lines[0].id)")
+    await page.wait_for_function("() => !!document.querySelector('.step-body .step-tapu')")
+    await screen(w, 'hame-tap', table, families)
+    await w.run("() => { const s = window.__mv.tap.units.session(); window.__mv.seek(s.loop.b - 0.2); }")
+    await page.wait_for_function("() => { const s = window.__mv.tap.units.session(); return !!s && s.state.atLoopEnd; }", timeout=6000)
+    await screen(w, 'hame-tap-end', table, families)
+    await w.run("() => window.__mv.tap.cancel()")
+    await w.settle(3)
+
+
 # v2.1 photos and videos (package G.4, DESIGN_2_1 §11.8.3): a still and a video imported here (names are user data: the en
 # page gets English names), the video as line 2's background, the still as line 1's overlay footage, and a third photo
 # whose bytes are not on this device. Screens: the preview's drop label, 全体 › 写真・動画, a row's ⋯ menu, the asset page,
@@ -509,6 +536,7 @@ async def walk_page(browser, base, lang, shots):
     await w.escape()
     await v21_screens(w, table, families)
     await x_screens(w, table, families)
+    await hame_screens(w, table, families)
     await media_screens(w, table, families)
 
     used = await w.run('() => [...window.__i18nUsed]')

@@ -2240,6 +2240,7 @@ MV.def('i18n/strings', [], () => ({
   'tapu.ok': ['決定', 'Done'],
   'tapu.cancel': ['やめる', 'Cancel'],
   'tapu.keyMark': ['次の字', 'Next character'],
+  'tapu.padHint': ['字が歌われた瞬間に押す', 'Press as each character is sung'],
   'tapu.keyEnd': ['歌い終わり', 'End of the singing'],
   'tapu.keyBack': ['1字戻る', 'Back one character'],
   'tapu.keyFinish': ['決定（Esc・T）', 'Finish (Esc, T)'],
