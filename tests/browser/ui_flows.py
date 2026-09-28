@@ -2503,7 +2503,7 @@ async def flow_weight(f, lang):
     await f.settle(2)
     f.check(await page.locator(ROW % 'text.weight').count() == 1, 'the line page has 太さ')
     warn_of = ROW % 'text.weight' + ' [data-role="weight-warn"]'
-    f.check(await page.locator(warn_of).is_hidden(), 'no weight note while nothing is pinned')
+    f.check(await page.get_attribute(warn_of, 'hidden') is not None, 'no weight note while nothing is pinned')
     # a pinned 太字へ on a face with one weight (nightTram's 見出し, Dela Gothic One) says why nothing grows: under 太さ, under
     # 入り, and as the line's mark in the lyric gutter's title
     await page.evaluate("""(id) => window.__mv.batch({ label: ['undo.pin', { field: 'x', scope: 'y' }] }, [
@@ -2515,15 +2515,17 @@ async def flow_weight(f, lang):
     want = await page.evaluate("""(id) => { const w = window.__mv.plan.warnings.find((x) => x.code === 'weight-flat' && x.line === id);
       return w ? window.__mv.t('warn.weight-flat', { detail: w.detail }) : null; }""", line)
     f.check(want is not None and 'Dela Gothic One' in want, 'the warning names the face: %r' % want)
-    f.check(await page.locator(warn_of).is_visible() and await page.text_content(warn_of) == want,
-            'under 太さ: %r' % await page.text_content(warn_of))
+    shown = await page.evaluate("""(sel) => { const el = document.querySelector(sel); const d = el && el.closest('details');
+      return el ? { hidden: el.hidden, open: d ? d.open : null, visible: !!(el.offsetWidth || el.offsetHeight) } : null; }""", warn_of)
+    f.check(shown is not None and not shown['hidden'] and await page.text_content(warn_of) == want,
+            'under 太さ: %r %r' % (shown, await page.text_content(warn_of)))
     await open_section(f, 'direction')
     arrive_warn = ROW % 'arrive' + ' [data-role="weight-warn"]'
-    f.check(await page.locator(arrive_warn).count() == 1 and await page.locator(arrive_warn).is_visible()
+    f.check(await page.locator(arrive_warn).count() == 1 and await page.get_attribute(arrive_warn, 'hidden') is None
             and await page.text_content(arrive_warn) == want, 'under 入り')
     for kind in ('dwell', 'depart'):
         other = ROW % kind + ' [data-role="weight-warn"]'
-        f.check(await page.locator(other).count() == 0 or await page.locator(other).is_hidden(), 'not under ' + kind)
+        f.check(await page.locator(other).count() == 0 or await page.get_attribute(other, 'hidden') is not None, 'not under ' + kind)
     await f.undo_all(done0, doc0)
 
 
