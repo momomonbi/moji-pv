@@ -476,6 +476,7 @@ test('脈打つ太さ: late, opt-in weight; bolder where the face has room for t
     [at(700, 'Zen Old Mincho'), { swing: 350 }, -1, 300, 'neither holds the swing: the larger room (below 300), capped by it'],
     [at(500), { swing: 400, amount: 0 }, 1, 200, '強さ 0: half the swing'],
     [at(400, 'Dela Gothic One'), { swing: 300 }, 1, 0, 'one weight: no pulse'],
+    [at(100), { swing: 520 }, 1, 400, 'never past 400 (the jump limit), whatever reaches make'],
   ];
   for (const [ref, p, dir, amp, why] of cases) {
     const { b } = pulseOf(ref, p, null);

@@ -9163,8 +9163,8 @@ docs/DESIGN_2_2.md. The packages and their notes follow.
 
 Contract: DESIGN_2_2 §4 (from the package design, revision 2). Built in order: the registry's late parts, the weight
 column and its draw path, the draw-only faces, 太る and 細る, then the planner (opt-in pools, 太さ, the grow rule); then the
-モーフ (M4): the letters two lines share, the rule, the window and hand-over, the renderer's travellers. Thumbnails,
-DESIGN addenda, 脈打つ太さ and the package golden come next.
+モーフ (M4): the letters two lines share, the rule, the window and hand-over, the renderer's travellers; then (phase 3)
+the thumbnails, the DESIGN addenda, 脈打つ太さ, the package golden, the browser checks, the perf rows and the chapter.
 
 **Registry.** `late: true` definitions (always `pool: false`, never the fallback) are signed apart: `registry.version`
 stays `83c7523d` with 太る and 細る in the catalog; `registry.lateVersion` (their signature over the version) is used
@@ -9230,8 +9230,7 @@ and `weight.auto` are never cut pins, `weight.auto` never a line pin; paste-look
 - `weight-flat` / `weight-style` are reported per cut (a line with two cuts warns twice, each with its cut).
 - `ready(…, { drawOnly })` also reports refs the main path owns, by their main state (export asks for the whole draw
   usage without knowing which weights another scene loads as main faces).
-- The sample plan's 太さ for weight-part tiles (`text.face = 'body'`, `text.weight = 800`) waits for step 7 with the
-  other thumbnail work.
+- The weight-part tiles' 太さ (`text.face = 'body'`, `text.weight = 800`) came with the other thumbnails (phase 3).
 - The FontBook test double moved from faces.test.js to `tests/helpers/fake_fonts.js` (weight.test.js uses it too).
 
 **Checks.** The six goldens match. Mutations (each fails a test, then restored): late parts signed; the pair drawn
@@ -9315,8 +9314,8 @@ boundaries get the morph (0.6 %; the design's probe: 5 of 663); rare by design.
 - planner/tracks exports `morphRule`, `morphGuards`, `MORPH` (tests drive the hooks with a hand-made context).
 - The window-start check before listing pairs (`A.b > at − dur/2`) is kept from the design but cannot fail in a plan
   (A's cutter window reaches `B.t0 + tail`), so its mutation is not observable.
-- Still to come with the thumbnails (step 7): `fld.morphHandover.note` under the 切り替え row when the chosen part is a
-  glyph seam, and the tile's own texts and timing in `samplePlan`.
+- `fld.morphHandover.note` under the 切り替え row and the tile's own texts and timing in `samplePlan` came with the
+  thumbnails (phase 3).
 
 **Checks (モーフ).** New: `tests/node/morph_plan.test.js` (12), `tests/node/morph_render.test.js` (12),
 `tests/helpers/glyph_docs.js`; extended: planner_determinism (`checkShape` for glyph seams over 9 documents, re-planning a
@@ -9336,6 +9335,98 @@ typing best 27.8 / 24.1 vs 25.2 / 25.7 ms (noise; the rule costs one boolean per
 fx_parts (glyphMorph u = 0 is frame a, u = 1 frame b), parts_gallery, i18n_pages, csp, determinism, glyph_parity,
 ui_flows `weight`, `repeat`, `values`, `pin`, `drill`, `first_look`, `first_run` and the new `morph` flow (the switch, its
 undo, the line row not on the first line, つながない changing only the transition into that line, 自動 clearing it).
+
+**Thumbnails and the part browser (phase 3, step 7).** `facade.samplePlan` gives a glyph seam its own lines (青い空 →
+青い海 unless the caller passes `text`/`textB`; the part browser passes `thumb.morphA/B` in the page's language), the
+part's `share` and `ends` window (floored to 1e-6 like the planner's), the letter pairs (`planner/morph.pairsOf`) and the
+hand-over (the first cut ends with the window; its fingerprint follows). A weight part's tile is laid out in the body face
+at 800 (the display faces of 11 of 16 themes have one weight; every body face has several). Every other sample plan is
+byte-for-byte as before (tested). The inspector shows `fld.morphHandover.note` under a 切り替え row whenever it holds a
+glyph seam (the cut page's and the line page's). The command palette already listed the late parts (phase 1).
+
+**脈打つ太さ (phase 3, step 8; built, not deferred).** `weightPulse` (`parts/dwell/weight.js`, late, opt-in `weight`,
+`needs: ['beats']`): with a beat grid the envelope of 拍動 (a 30 ms rise, an exponential fall, `1 − phase²` back to rest
+before the next beat), without one a cosine of 周期; the direction is bolder where the face has room for the swing,
+else lighter, else toward the larger room; the amplitude is the swing scaled by 強さ, never past the room or 400. Its
+§5.3 row is in DESIGN. Measured at the steepest settings (swing 400, decay 0.1, speed 4, 120 BPM): the largest `wt` step
+is 19.2 per 1/480 s (the conformance limit is 60). Over `corpus(2, ['16:9'])` × 3 seeds with the marker it was chosen on
+6.7 % of its eligible lyric cuts at weight 1 (5.0 % of all), 5.4 % at 0.75, **4.1 % at 0.5**: it carries `weight: 0.5`
+(the design's ≈ 4 %; the hold pools are about half the size of the entrance pools); the rate test asserts [0.02, 0.07].
+
+**The package golden (phase 3, step 9).** `tests/golden/project_glyph.json` (`{ registry: { kind, version, lateVersion },
+measurer, docs: { morph, weight } }`), written by a new job of `tests/update_golden.js` after `--check` reported the six
+goldens matching; a new `--only=<file>` option wrote this file alone (the other six were not rewritten). Documents in
+`tests/helpers/glyph_docs.js`: morph = a new work in one background with 青い空へ → 青い海へ (h → v, the planner's choice),
+夜の町を歩く → 朝の町を歩く, ブルーの空へ12 (v, pinned) → ブルーの海へ12 (h, pinned), a pinned モーフ 君の手 → 夢の中 (only の
+shared), 光る窓 → 光る窓の向こう; weight = the basic fixture as a new work on frostGlass in its display face (Murecho 600)
+with 太る + 太さ 800 pinned (r4), 太る taking the grow rule (r5), 脈打つ太さ (r6), 細る (r7), 太る on outline lettering (ra).
+Frame times `glyphTimes`: 32 even times, then two inside each of up to four motions. morph_render.test.js checks the
+golden (plan hashes, 40 frames each, the registry block, what each document shows).
+
+**Browser checks and QA (phase 3).**
+- glyph_parity: weight pairs on the direct path and the level-0 sprite path agree within 2/255 (the lab's probe gains
+  `wt`, a lab-only offset like its blur and glow): Shippori Mincho B1 800 − 250 (500/600 at f = 0.5) MAE 1.43/255, − 350
+  (400/500, f = 0.5) 1.40/255, − 325 (f = 0.75) 1.40/255; each row also checks that the offset changed the block's ink.
+- parts_gallery: the モーフ, 太る, 脈打つ太さ and 細る tiles animate (4–7 different pictures over 16 times, none blank);
+  every catalog part renders in every aspect as before.
+- contact_sheet: `--doc morph|weight` renders frame strips of every morph window and weight motion of the golden
+  documents (plus 太る rows in a mincho, a Latin line, a vertical line and a one-weight face); the self-check renders
+  both. QA of the strips (fallback faces): the shared letters travel and turn (h → v, v → h with the tate-chu-yoko 12),
+  swaps melt, a pinned morph with no anchors shrinks the old line into the new one's place, B stands where the
+  travellers ended; 太る visibly grows (Latin, mincho, vertical), outline lettering steps, the one-weight face only fades
+  in, 細る thins before fading, 脈打つ太さ swells on the beats. Observed: B's far/mid-layer decorations (an echo stack's
+  faint copies) appear at the window start, as under every text seam (base layers are not mixed), `dur/2` earlier than
+  under a centred seam. The real Google Fonts faces could not be checked: the headless browser's requests to
+  fonts.googleapis.com fail through this machine's proxy (ERR_TOO_MANY_RETRIES), while curl reaches it.
+- perf.py rows `glyph-morph` and `glyph-weight` with the same-run A/B (below).
+- ui_flows `morph_old`: in an older work (the marker removed, opened like a file) the switch reads 自動 (off) and there is
+  no モーフ; turning it on pins true (one undo entry) and the rule joins the lines; the cut's 切り替え row shows the
+  hand-over note and its なぜ gives `whyRule.morph`; undo removes pin and モーフ; the palette (#切り替え モーフ) pins the part
+  on 夢の中's line (one undo entry) and the line page's 切り替え row shows the note.
+
+**Perf (phase 3).** Same run, 720p, 10 s at 30 fps from 1 s before the first morph / weight motion, least disturbed of
+two runs each (load average 4–6 on 4 CPUs): basic p95 26.9 ms; glyph-morph p50 14.5 / p95 33.2 ms against its comparator
+(every glyph seam a dissolve) 15.8 / 33.0 ms: × 1.01 (limit 1.25); glyph-weight p50 9.8 / p95 23.8 ms against the
+comparator (太る → fogIn, 脈打つ太さ → thumpSwell, 細る → fogOut, no 太さ pins) 10.4 / 25.1 ms: × 0.95. The morph row's
+absolute p95 sits at the limit (33.4 ms) on this machine because of its look's paper texture (post 12.5 ms), as its
+comparator does.
+
+**Deviations in phase 3 (with reasons).**
+- 脈打つ太さ carries `weight: 0.5`, not 1: at 1 it took 6.7 % of its eligible cuts, the design expected ≈ 4 %.
+- The perf rows plan the golden documents with the per-cut screen effects off (work `filter.count` 0) and the package's
+  other switch off (no automatic weight parts in the morph rows, no automatic morphs in the weight rows): the morph
+  document draws dotScreen and duoTone in its window, which alone put it and its comparator over twice the budget (p95
+  37 / 35 ms against basic's 28.8 ms in the same run), and the comparators' own entrances picked weight parts; the rows
+  measure what the package adds. The comparators are planned again until no glyph seam or weight part is left.
+- `glyphTimes` picks the weight motions by kind (the first 太る, 脈打つ太さ and 細る cut, then the first 太る on stepped
+  lettering, then more in plan order) instead of "the first four cuts with a weight part": in the golden weight document
+  those were four 太る cuts and no hold or exit. The morph document places its pinned boundary before the last rule pair,
+  so the first four glyph seams show each case (h → v, a swap, v → h, the pinned one).
+- `update_golden.js --only=<file>` (additive): writing the new golden with a plain run would have rewritten the six
+  existing files with the same bytes; `--only` writes the one file and `--check --only` checks it.
+- The lab: `parity(o)` takes `probe` (and reports the block's mean ink), `thumb(o)` takes `t`, `text`, `textB`,
+  `projectPlan` takes a whole `doc` (browser tests only). The draw path adds the probe's `wt` only when a probe is set
+  (preview with the lab's probe; never in export).
+- The weight tests of phase 1 that planned sample cuts now expect the tile's 800 (reach 700 instead of 400, rungs 100–700).
+- No separate `weight` contact sheet over theme faces: the weight strip's sample rows cover a mincho, a Latin line, a
+  vertical line and a one-weight face; outline lettering and a nine-weight gothic come from the golden document.
+
+**Checks (phase 3).** `python3 build.py --check` 225 modules OK; `build.py` and `build.py --lab` run, pages committed.
+`node tests/update_golden.js --check`: the six goldens match (checked after the thumbnails, after 脈打つ太さ, before the new
+job) and so does `project_glyph.json` (written with `--only`, then checked twice). Node, full suite beside the other
+packages' runs: 1,830 of 1,835; the misses: the planning-speed test (known), three conformance "slowest build > 60 ms"
+(typeErase, creepTrack, stillHold) and release.test.js's part-browser thumbnail test, which caught a real bug (the tile
+code read `app.reg.get` where a caller has no registry; fixed, and the test now also checks the モーフ tile's lines). A
+later run of release, weight, morph_render, facade and conformance at load average 17 passed but for 74 conformance
+"slowest build" checks, stub parts included (a stub that does nothing took 249 ms): load. Browser: glyph_parity,
+parts_gallery, contact_sheet self-check, perf (basic + glyph rows), i18n_pages, csp, determinism, ui_flows `weight`,
+`morph`, `morph_old`, `repeat`, `pin`, `values`, `first_run` (ja, en) OK. ui_layout: one check, "a paused provisional
+frame was not redrawn" (it counts renders within 900 ms), fails here under load and fails the same way on the base
+worktree wt-pv22 in the same conditions (a 1 s gap between renders in `en`), so it is not this package's.
+Mutations (each failed a test, then restored): the sample plan's hand-over, its letter pairs, its `ends` window, the
+weight tile's 800; 脈打つ太さ without its 30 ms rise (a 400 jump at the beat), always bolder, without its 400 cap (a new
+case with an out-of-range swing made this one observable); the handover note always hidden (ui_flows `morph_old`); the
+travellers' bow amplitude (the package golden).
 
 
 <!-- PV22 P5 notes -->
