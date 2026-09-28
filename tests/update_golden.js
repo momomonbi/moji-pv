@@ -4,6 +4,7 @@
 //   node tests/update_golden.js           recompute and rewrite the golden files that can be computed today
 //   node tests/update_golden.js --check   recompute and compare; exit 1 on a difference; writes nothing
 //   node tests/update_golden.js --v2      also rewrite frame_hashes_v2.json (on purpose only; see below)
+//   node tests/update_golden.js --only=<file>   compute (and write, or with --check compare) that one golden only
 // Plan hashes need planner/plan; frame hashes need engine/facade, engine/render/record and engine/text/fake_measure.
 // A golden whose modules do not exist yet is left as it is (or written as an empty placeholder when missing).
 // Registry: the full catalog (parts/catalog) when it exists, else the stub parts (tests/fixtures/stub_parts.js).
@@ -29,6 +30,13 @@
 //                     basic project with the switch on and every EXTREME preset on one cut, and a 9:16 one with the switch
 //                     at 0.5 on the chorus only; rendered like the frames above (motion-blur copies included in the ops).
 //                     Every document without the switch renders as before: the files above match first.
+//   project_glyph.json { "registry": { kind, version, lateVersion }, "measurer": "fake",
+//                       "docs": { "morph": { "plan", "frames": [40] }, "weight": { "plan", "frames": [40] } } }
+//                     the v2.2 glyph motion fixtures (tests/helpers/glyph_docs.js goldenDocs, DESIGN_2_2 §4): new works
+//                     (look.gen 1) with the glyph morph (four line pairs that share letters, one pinned morph) and with the
+//                     weight parts (太る with and without the grow rule, 脈打つ太さ, 細る, 太る on outline lettering), rendered
+//                     at glyphTimes (32 even times and 8 inside the morphs and weight motions). lateVersion signs the late
+//                     parts, which registry.version leaves out.
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -36,6 +44,7 @@ const { load } = require('./helpers/load.js');
 const corpus = require('./helpers/corpus.js');
 const FM = require('./helpers/fake_media.js');
 const XD = require('./helpers/extreme_docs.js');
+const GD = require('./helpers/glyph_docs.js');
 
 const MV = load();
 const H = MV.use('core/hash');
@@ -66,8 +75,9 @@ function outputSize(aspect) {
   return [Math.round(w * k), Math.round(h * k)];
 }
 
-// The plan hash and the FRAMES frame hashes of one document (an engine of its own; assets: an AssetStore or null).
-async function renderDoc(reg, doc, assets) {
+// The plan hash and the FRAMES frame hashes of one document (an engine of its own; assets: an AssetStore or null;
+// timesOf(plan) → the frame times, else FRAMES even times).
+async function renderDoc(reg, doc, assets, timesOf) {
   const { createEngine } = MV.use('engine/facade');
   const { createRecorder } = MV.use('engine/render/record');
   const { fakeMeasurer } = MV.use('engine/text/fake_measure');
@@ -79,9 +89,11 @@ async function renderDoc(reg, doc, assets) {
   const made = rec.factory.create(w, h, { alpha: false });
   const surface = { canvas: made.canvas, ctx: made.ctx, w, h };
   const list = [];
+  const times = timesOf ? timesOf(plan) : null;
   for (let i = 0; i < FRAMES; i++) {
     const before = rec.ops().length;
-    engine.renderFrame(surface, (plan.duration * (i + 0.5)) / FRAMES, { quality: 'export', pick: false, scale: w / plan.design.w });
+    const t = times ? times[i] : (plan.duration * (i + 0.5)) / FRAMES;
+    engine.renderFrame(surface, t, { quality: 'export', pick: false, scale: w / plan.design.w });
     list.push(H.hashJSON(rec.ops().slice(before)));
   }
   engine.dispose();
@@ -110,6 +122,12 @@ async function extremeGolden(reg, info) {
   return { registry: info, measurer: 'fake', docs };
 }
 
+async function glyphGolden(reg, info) {
+  const docs = {};
+  for (const { name, doc } of GD.goldenDocs(reg.fallback('ground'))) docs[name] = await renderDoc(reg, doc, null, (plan) => GD.glyphTimes(plan, reg));
+  return { registry: { kind: info.kind, version: reg.version, lateVersion: reg.lateVersion }, measurer: 'fake', docs };
+}
+
 function readGolden(file) {
   try { return JSON.parse(fs.readFileSync(path.join(GOLDEN, file), 'utf8')); } catch (e) { return null; }
 }
@@ -119,6 +137,8 @@ function text(obj) { return JSON.stringify(obj, null, 1) + '\n'; }
 async function main() {
   const check = process.argv.includes('--check');
   const rewriteV2 = process.argv.includes('--v2');
+  const onlyArg = process.argv.find((a) => a.startsWith('--only='));
+  const only = onlyArg ? onlyArg.slice('--only='.length) : null;
   const { reg, info } = pickRegistry();
   const ENGINE = ['engine/facade', 'engine/render/record', 'engine/text/fake_measure'];
   // The frozen job comes first, so a difference there stops a plain run before any file is written.
@@ -135,10 +155,13 @@ async function main() {
       empty: { registry: null, measurer: 'fake', plan: null, frames: [] }, make: () => repeatGolden(reg, info) },
     { file: 'project_extreme.json', needs: ENGINE.concat(['planner/plan', 'planner/extreme', 'engine/scene/xshot']),
       empty: { registry: null, measurer: 'fake', docs: {} }, make: () => extremeGolden(reg, info) },
+    { file: 'project_glyph.json', needs: ENGINE.concat(['planner/plan', 'planner/morph', 'engine/render/morph']),
+      empty: { registry: null, measurer: 'fake', docs: {} }, make: () => glyphGolden(reg, info) },
   ];
   let failed = false;
   fs.mkdirSync(GOLDEN, { recursive: true });
   for (const job of jobs) {
+    if (only && job.file !== only) continue;
     const missing = job.needs.filter((id) => !MV.has(id));
     const current = readGolden(job.file);
     if (missing.length) {

@@ -399,3 +399,50 @@ test('thumbnail: a weight part is shown on the body face at 800 (the display fac
   const c = FAC.samplePlan(CAT, { kind: 'arrive', key: 'fogIn' }, {}).cuts[0];
   assert.deepEqual([c.slots['text.face'].v, c.slots['text.weight']], ['display', undefined], 'other parts: as before');
 });
+
+// --- 8. the package golden -----------------------------------------------------------------------------------------------
+
+test('the package golden: the morph and weight documents plan and render the golden frames (tests/golden/project_glyph.json)', async () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const H = MV.use('core/hash');
+  const D = MV.use('core/doc');
+  const golden = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'golden', 'project_glyph.json'), 'utf8'));
+  assert.deepEqual(golden.registry, { kind: 'catalog', version: CAT.version, lateVersion: CAT.lateVersion }, 'made with the current catalog');
+  assert.notEqual(golden.registry.lateVersion, golden.registry.version, 'the late parts are signed in lateVersion');
+  const docs = G.goldenDocs(GROUND);
+  assert.deepEqual(docs.map((d) => d.name), Object.keys(golden.docs));
+  for (const { name, doc } of docs) {
+    const rec = R.createRecorder();
+    const engine = createEngine({ registry: CAT, canvas: rec.factory, measurer: fakeMeasurer(), fonts: null, assets: null });
+    const { plan } = engine.setDoc(doc);
+    assert.equal(plan.hash, golden.docs[name].plan, name + ': plan');
+    // what the documents show
+    const glyphSeams = plan.seams.filter((s) => CAT.get('seam', s.slot.v).glyphs === true);
+    const weighs = (k) => plan.cuts.filter((c) => { const d = CAT.get(k, c.slots[k].v); return !!(d && d.optIn === 'weight'); });
+    if (name === 'morph') {
+      assert.ok(glyphSeams.length >= 5 && glyphSeams.some((s) => s.slot.from.startsWith('pin')), 'four rule morphs and a pinned one');
+      const orient = (key) => plan.cuts.find((c) => c.key === key).slots.orient.v;
+      assert.ok(glyphSeams.some((s) => orient(s.a) === 'v' && orient(s.b) === 'h'), 'one goes from vertical to horizontal writing');
+    } else {
+      assert.ok(weighs('arrive').some((c) => c.slots['text.weight'] && c.slots['text.weight'].from === 'rule'), '太る with the grow rule');
+      assert.ok(weighs('arrive').some((c) => c.slots['text.weight'] && c.slots['text.weight'].from.startsWith('pin')), '太る with 太さ pinned');
+      assert.ok(weighs('arrive').some((c) => c.slots['text.style'].v === 'outline'), '太る stepping on outline lettering');
+      assert.ok(weighs('dwell').length > 0 && weighs('depart').length > 0, '脈打つ太さ and 細る');
+    }
+    await engine.prepare(0, plan.duration, { export: true });
+    const [w, h] = D.DESIGN_SIZE[doc.look.aspect];
+    const k = 360 / Math.min(w, h);
+    const made = rec.factory.create(Math.round(w * k), Math.round(h * k), { alpha: false });
+    const surface = { canvas: made.canvas, ctx: made.ctx, w: Math.round(w * k), h: Math.round(h * k) };
+    const frames = [];
+    for (const t of G.glyphTimes(plan, CAT)) {
+      const before = rec.ops().length;
+      engine.renderFrame(surface, t, { quality: 'export', pick: false, scale: surface.w / plan.design.w });
+      frames.push(H.hashJSON(rec.ops().slice(before)));
+    }
+    engine.dispose();
+    assert.equal(frames.length, 40);
+    assert.deepEqual(frames, golden.docs[name].frames, name + ': frames');
+  }
+});
