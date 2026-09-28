@@ -154,7 +154,9 @@ SHEET_JS = r"""async (o) => {
   };
   const reg = registryOf(o.parts);
   const all = camera ? (o.kind === 'shot' ? SHOT.SHOT_KEYS : o.kind === 'xshot' ? SHOT.XSHOT_KEYS : SHOT.RIG_KEYS).slice() : reg.keys(o.kind);
-  const known = (key) => all.includes(key) || (o.kind === 'xshot' && SHOT.xKeyOf(key) !== null);
+  // an EXTREME preset may carry the mirror suffix "~m", and so may the framed shots driftOff and tiltHold (文字PVの定石)
+  const known = (key) => all.includes(key) || (o.kind === 'xshot' && SHOT.xKeyOf(key) !== null)
+    || (o.kind === 'shot' && !!SHOT.mirrorOf(key) && all.includes(SHOT.mirrorOf(key).key));
   const keys = (o.keys && o.keys.length ? o.keys : all).filter((k) => !!k);
   const times = o.times && o.times.length ? o.times : [0.1, 0.3, 0.6, 0.9];
   const aspect = DOC.DESIGN_SIZE[o.aspect] ? o.aspect : '16:9';
