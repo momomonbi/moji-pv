@@ -9238,8 +9238,9 @@ lighter-first; the lighter at a(1 − f); outline crossfading; `faceReady` ignor
 `wtReach` usage; the opt-in without its room check or its style check; the registry pool ignoring `optIn`; no grow rule;
 `K.depart` re-wrapping without the options; `altsOf` skipping opt-in parts; warnings not replayed from the cast cache;
 `text.weight` not built; the `'rule'` category off; a late part accepted as a material base (ai/recipe and parts/mix);
-`decideTextWeight` with an automatic branch (all six goldens differ). The conformance "slowest build > 60 ms" checks
-fail now and then on this loaded machine (another package's tests run beside them); they are timing, not the column.
+`decideTextWeight` with an automatic branch (all six goldens differ). Node: 1,798 of 1,798 on a quiet run (8.6 min);
+an earlier run beside other packages' tests missed four conformance "slowest build > 60 ms" checks (68–136 ms) — load,
+they pass alone and on the quiet run. Browser: ui_flows `weight` and `repeat`, i18n_pages, csp, parts_gallery, glyph_parity, determinism.
 
 
 <!-- PV22 P5 notes -->
