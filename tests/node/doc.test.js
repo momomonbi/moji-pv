@@ -38,6 +38,42 @@ test('defaultDoc and defaultSide follow §4.4 and validate', () => {
   assert.notEqual(D.defaultDoc(), D.defaultDoc(), 'fresh objects every call');
 });
 
+test('newDoc is defaultDoc with the generation marker look.gen; nothing else writes it (DESIGN_2_2 §0)', () => {
+  const doc = D.newDoc();
+  assert.equal(D.GEN, 1);
+  assert.equal(doc.look.gen, D.GEN);
+  assert.deepEqual(D.validate(doc), []);
+  const plain = D.defaultDoc();
+  assert.equal(plain.look.gen, undefined, 'defaultDoc never carries the marker');
+  delete doc.look.gen;
+  assert.deepEqual(doc, plain, 'newDoc is defaultDoc apart from the marker');
+  // normalize (every opened file and autosave) never adds it, and keeps it where it is
+  const old = D.normalize({ look: { seed: 3, moodSeed: 4, aspect: '9:16', backdrop: 'scene' } });
+  assert.equal(old.look.gen, undefined);
+  const kept = D.normalize(D.newDoc());
+  assert.equal(kept.look.gen, D.GEN);
+  // the file keeps it last in look, and a file without it has no gen key at all
+  assert.ok(D.serialize({ doc: D.newDoc() }).includes('"backdrop": "scene",\n   "gen": 1\n'));
+  assert.ok(!D.serialize({ doc: D.defaultDoc() }).includes('"gen"'));
+  const back = M.parseFile(D.serialize({ doc: D.newDoc() }));
+  assert.equal(back.doc.look.gen, D.GEN);
+  // validation: an integer 0–255
+  for (const bad of [-1, 256, 1.5, '1', null, true]) expectProblem((d) => { d.look.gen = bad; }, 'look.gen');
+  for (const ok of [0, 1, 255]) assert.deepEqual(problemsOf((d) => { d.look.gen = ok; }), []);
+});
+
+test('the look commands keep the generation marker', () => {
+  const CMD = MV.use('core/commands');
+  let doc = D.newDoc();
+  doc = CMD.reduce(doc, { t: 'look.omakase', seed: 5, moodSeed: 6 });
+  doc = CMD.reduce(doc, { t: 'look.seed', seed: 7 });
+  doc = CMD.reduce(doc, { t: 'look.restore', seed: 8, moodSeed: 9, salts: {} });
+  doc = CMD.reduce(doc, { t: 'look.set', key: 'aspect', v: '1:1' });
+  assert.equal(doc.look.seed, 8);
+  assert.equal(doc.look.aspect, '1:1');
+  assert.equal(doc.look.gen, D.GEN);
+});
+
 test('DESIGN_SIZE has the seven aspects with a short side of 1080', () => {
   assert.deepEqual(Object.keys(D.DESIGN_SIZE), ['16:9', '9:16', '1:1', '4:5', '4:3', '3:4', '21:9']);
   for (const [w, h] of Object.values(D.DESIGN_SIZE)) assert.equal(Math.min(w, h), 1080);

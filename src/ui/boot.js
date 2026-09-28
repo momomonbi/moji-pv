@@ -104,7 +104,7 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
     const lang = MV.LANG === 'en' ? 'en' : 'ja';
     // 激しいカメラを抑える starts as this device asks (prefers-reduced-motion, DESIGN_EXTREME §3.6)
     const view = V.createView({ storage: safeStorage('localStorage'), defaults: { calmCamera: dom.prefersReducedMotion() } });
-    const store = ST.createStore({ doc: D.defaultDoc(), side: D.defaultSide(), reduce: svc.reduce, now: () => Date.now() });
+    const store = ST.createStore({ doc: D.newDoc(), side: D.defaultSide(), reduce: svc.reduce, now: () => Date.now() });
     // The AssetStore (DESIGN_2_1 §11.3.6): bytes from ui/project_io's device store (IndexedDB, or this tab's memory),
     // metadata from every library entry this tab has seen. Ids name content, so an entry seen once stays right for the
     // try-on and undo documents that still hold it.

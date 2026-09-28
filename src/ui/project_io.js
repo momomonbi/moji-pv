@@ -607,7 +607,7 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
     }
 
     async function newWork() {
-      await loadFile({ doc: D.defaultDoc(), side: D.defaultSide() });
+      await loadFile({ doc: D.newDoc(), side: D.defaultSide() });
       app.toast(t('io.newDone'), { kind: 'info' });
     }
 
@@ -1173,7 +1173,7 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
       saved = { id: null, text: null };
       used.clear();
       usedMedia.clear();
-      app.loadProject(D.defaultDoc(), D.defaultSide(), { quiet: true });
+      app.loadProject(D.newDoc(), D.defaultSide(), { quiet: true });
       pending.cancel();                                      // the empty work is stored at its first change, not now
       setState('idle');
       app.bus.emit('device', { cleared: true });             // the AssetStore forgets what it held (ui/media_io)

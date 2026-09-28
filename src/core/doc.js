@@ -44,7 +44,7 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
     timing: ['snap', 'lead', 'tail', 'leadIn', 'outro', 'tapLatency'],
     song: ['name', 'sha1', 'seconds', 'bpm', 'offset', 'meter', 'bpmConfidence', 'digest', 'info'],
     digest: ['hz', 'loud'],
-    look: ['seed', 'moodSeed', 'aspect', 'backdrop'],
+    look: ['seed', 'moodSeed', 'aspect', 'backdrop', 'gen'],
     pin: ['v', 'by', 'sig'],
     lock: ['n'],
     filter: ['only', 'deny'],
@@ -84,6 +84,19 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
       output: { format: 'mp4', short: 1080, fps: 30, quality: 'high', audio: true, range: null, name: null,
         kit: Object.assign({}, KIT_DEFAULT) },
     };
+  }
+
+  // The generation of new documents (look.gen, PV22 / DESIGN_2_2 §0): a document made by newDoc() carries it, and the
+  // 文字PV conventions, typesetting and timing defaults of that generation apply to it unless its own settings say
+  // otherwise (planner/rules). defaultDoc() never carries it: normalize() builds from defaultDoc(), so anything added
+  // there would reach every opened project, and the tests and fixtures plan documents made from it.
+  const GEN = 1;
+
+  // newDoc() → the document of ≡ › 新しい作品, of the first run and of an emptied device: defaultDoc() with look.gen.
+  function newDoc() {
+    const doc = defaultDoc();
+    doc.look.gen = GEN;
+    return doc;
   }
 
   function defaultSide() {
@@ -196,6 +209,9 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
     if (!isUint32(look.moodSeed)) bad('look.moodSeed', 'must be a 32-bit unsigned integer');
     if (!ASPECTS.includes(look.aspect)) bad('look.aspect', 'must be one of ' + ASPECTS.join(' '));
     if (!BACKDROPS.includes(look.backdrop)) bad('look.backdrop', 'must be one of ' + BACKDROPS.join(' '));
+    if (look.gen !== undefined && !(Number.isInteger(look.gen) && look.gen >= 0 && look.gen <= 255)) {
+      bad('look.gen', 'must be an integer 0–255');
+    }
   }
 
   function checkPins(pins, bad) {
@@ -581,8 +597,8 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
 
   return {
     APP_VERSION, FORMAT, CURRENT_SCHEMA, DESIGN_SIZE, ASPECTS, LANGS, BACKDROPS, PIN_BY, FILTER_KINDS, SECTION_KINDS,
-    OUTPUT_CHOICES, KIT_KEYS, KIT_DEFAULT, ORDER,
-    defaultDoc, defaultSide, validate, songInfoProblems, normalize, normalizeSide, sanitizeSide, sanitizeAsks, touched,
+    OUTPUT_CHOICES, KIT_KEYS, KIT_DEFAULT, ORDER, GEN,
+    defaultDoc, newDoc, defaultSide, validate, songInfoProblems, normalize, normalizeSide, sanitizeSide, sanitizeAsks, touched,
     serialize,
   };
 });
