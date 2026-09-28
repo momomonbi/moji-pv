@@ -9157,7 +9157,82 @@ docs/DESIGN_2_2.md. The packages and their notes follow.
 
 <!-- PV22 P2 notes -->
 
-<!-- PV22 P3 notes -->
+### P3 キメ (M3)
+
+Contract: DESIGN_2_2 §3. Phase 1 is the planner (and the core commands of the mark); phase 2 the UI, the optional AI
+path and the browser flows.
+
+**What landed (phase 1).** `planner/kime` (new, L2: the constants, `isKime`, `calmLevels`, `calmFactor`, `shotFor`,
+`xshotFor`, `hold`, `landEach`, `guideline`); the line pin read in stage 1 (`planner/plan withKimePins`); one cut and
+the piece-pin shadowing (`planner/segment piecesOf`, `kimeAttach`); the hold (`core/timing KIME_HOLD`, `cutAll`,
+`windows`); `feat.kime` / `feat.calm` (`planner/features`, present only where set); the calm factor in the chooser
+(`planner/choose preWeight`); the キメ sets, rules and parameters (`planner/cast kimeRule`, `moves`, `kimeParams`,
+`decideText`, `decideList`, `onlyKeys`, alignments); the shot rule and `kimeShot` (`planner/camera`); the seams
+(`planner/tracks`: hard cut in, no flash out, memo `quiet`, no seam copy into a キメ cut or a flashing one out of it);
+EXTREME (`planner/extreme`: `crashZoom` / `punchHit`, calm weights); explain and fields (`kime` a line value read from
+the plan, `kime.calm` a work value); the commands (`kime` line only, `kime.calm` work only, never promoted, kept by
+unpin-all without `by`); why strings; `tests/node/kime.test.js`, a 大と小 size test in `arrange_dwell.test.js`, the
+fuzz rows in `planner_pins.test.js`, `tests/helpers/kime_docs.js` and the golden `tests/golden/project_kime.json`.
+
+**Gating.** Without a `kime` pin nothing changes: `withKimePins` returns the same array when no `kime` slot is pinned,
+every new branch sits behind `line.kime`, `cut.kime`, `feat.kime` or `feat.calm`, the new chooser inputs (`only`,
+`calm`) are absent on every existing call, the seam memo's `quiet` is false and the timing term is `+ 0`. `node
+tests/update_golden.js --check` matches all six existing goldens (frame_hashes_v2.json, plan_hashes.json,
+frame_hashes.json, project_media.json, project_repeat.json, project_extreme.json); a `work:kime.calm` pin alone
+changes no plan hash (kime.test.js).
+
+**Deviations from the design (and why).**
+
+- `kime.calm` is a row of `planner/rules` (`on = off = true`: the same in every generation, so the table says
+  自動 and never 自動（オン）/自動（オフ）) and the planner reads it with `RU.value`. The design read it with a pin
+  lookup that warns `pin-bad-value`; like every table slot a value that is not a boolean now falls back to on without
+  a warning. One table of work switches was the lead's rule for new slots.
+- The first-member fallback of a キメ set (every member weighed 0 in all three chooser stages) is taken inside
+  `chooseAuto` (from `'rule'`, rule `kime.set`, a new `whyRule.kime.set` string) instead of after it in `decidePart`,
+  so no spurious `pool-empty` warning is reported for a set that has members.
+- `planner/fields` reads `line/<id>:kime` from the Plan (a line is キメ when one of its cuts has `feat.kime`), not
+  from the pin, so a pin that does not apply (not `true`) shows off; `work:kime.calm` from `planner/rules`.
+- The golden marks `r7` and `rd` in `basic` (the 4th and 8th lyric lines, as designed) but `r6` and `rd` in `lrc`: its
+  8th line is not a 見せ場 line, and the design wants one cut that is both in every marked document.
+- 「くり返しの行をそろえる」 seam copies (`planner/tracks seamCopy`) are not taken into a キメ cut (its own rule gives the
+  hard cut) nor where they would bring a flashing transition out of a キメ cut; the design did not name the copy path.
+- The calm shot mask of level 2 applies only where it removes something and leaves something (the explain reason
+  `kime.calm` then says so); the picks are those of the design.
+- Test sizes, to keep the suite's time on this machine: the marked corpus of the guarantee, flash and calm tests is 3
+  seeds × {16:9, 9:16} × the four v2 fixtures × half of the 8 moods (96 plans, 400+ キメ cuts); the cache test asserts
+  `reuse.casts ≥ cuts − 8` only after toggling a line no later line sings again (a toggle of a line with later copies
+  re-casts those copies and their neighbours through the echo, as every look change does: 11 of 29 cuts in `lrc`), and
+  equality with the plan made from scratch after every toggle.
+- Not written yet, because the packages are not in this tree: the P2 contract test (its `ctx.pv` hooks), the 歌ハメ
+  test (P6 sets `st.hame`, whose `arrive` list the キメ entrance set is intersected with; nothing sets it yet) and the
+  P4 weight rule.
+
+**Measurements (kime.test.js, catalog registry).** On the marked corpus (96 plans, every 4th lyric line marked) every
+キメ cut outside the locked line of the `vertical` fixture keeps every guarantee of DESIGN_2_2 §3.3 (c): the set picks
+(はみ出し and 大と小 both common), the rule values and parameters, the landing within 0.8 s, the exit, the counts, the hard
+cut in, and the lens/shot pairing (衝撃 exactly when the shot is `none`); no flashing screen effect, no flashing
+transition out of a キメ cut without 見せ場, no shake. Level-2 calm cuts take strong entrances at under half the rate of
+unmarked cuts. With the stub registry (none of the キメ parts) nothing is forced by name: the sets are empty
+(`kime.limited`), the exit and lens are the registry's fallbacks, the text is set ×1.3. With the part filters leaving
+only 中央 (`centerAnchor`), it is used. Long lines: 16:9 keeps lines up to 28 cells whole, 9:16 up to 16; longer ones keep
+their pieces and exactly one キメ cut (the focus piece, else the last), which lands within 0.8 s.
+
+**Mutation checks** (each rule broken on a copy of the tree, `kime.test.js` run, restored): the arrange set, the exit
+force, the count caps, the landing cap, the shot rule, the no-flash screen effects, the no-flash seam out, `kimeAttach`,
+the level-2 screen-effect cap, a literal part forced by name (throws with the stub registry), the unpin-all keep rule,
+the hold (`KIME_HOLD` 0; no hold into an interlude), the alignment equality, the EXTREME pick, the lens's EXTREME
+check, the one-cut rule, the calm lens, the face rule, the bleed parameters and the explain reason each fail at least
+one test other than the golden. The 大と小 size test fails with text.scale 0.9 (16:9 h, 1 cell: 0.373 < 0.40) and with
+tuck `beside` (9:16 h, 3 cells: 0.180 < 0.27). One key is defensive and not reached by a plan-level test: the seam
+memo's `quiet` (a cached seam into B is reused only when B's cast is, and B re-casts whenever the キメ cut before it
+changes its picks, which marking it does unless every slot of that cut is pinned).
+
+**Cost.** Documents without a mark pay one pinned-slot test in stage 1, one `cuts.some(isKime)` per plan and a flag
+test per cut. Interleaved with the base worktree on this loaded machine (32 corpus documents × 3 rounds of fresh plans;
+15 re-plans of `long` after a text edit): fresh plans 18.9–26.9 ms against 20.8–30.3 ms, re-plan medians 29.3 / 29.6 ms
+against 27.5 / 29.6 ms — within the noise. The suite's "planning speed: re-planning project_long after an edit" fails
+here as it does on the base; the conformance build-time budgets failed once under a load average of 10 and passed on
+the rerun (parts and engine are untouched).
 
 <!-- PV22 P4 notes -->
 

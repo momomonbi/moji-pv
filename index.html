@@ -1,6 +1,6 @@
 <!doctype html><html lang="ja"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-AJQ6BBoW0Ncea2e1cXNVBDftrSmV3vZSF9kjSX/bqK4='; style-src 'sha256-CBzRvq4sWr3CF69hafDp1l8UkHnSy18JQMXGJJhPDYI=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-CIhKmmLoBC+GU+WsEoWCzIwE/vlDGJAk4upFZKmLh5w='; style-src 'sha256-CBzRvq4sWr3CF69hafDp1l8UkHnSy18JQMXGJJhPDYI=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
 <title>文字PVメーカー</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -6767,7 +6767,7 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
     timing: ['snap', 'lead', 'tail', 'leadIn', 'outro', 'tapLatency'],
     song: ['name', 'sha1', 'seconds', 'bpm', 'offset', 'meter', 'bpmConfidence', 'digest', 'info'],
     digest: ['hz', 'loud'],
-    look: ['seed', 'moodSeed', 'aspect', 'backdrop'],
+    look: ['seed', 'moodSeed', 'aspect', 'backdrop', 'gen'],
     pin: ['v', 'by', 'sig'],
     lock: ['n'],
     filter: ['only', 'deny'],
@@ -6807,6 +6807,19 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
       output: { format: 'mp4', short: 1080, fps: 30, quality: 'high', audio: true, range: null, name: null,
         kit: Object.assign({}, KIT_DEFAULT) },
     };
+  }
+
+  // The generation of new documents (look.gen, PV22 / DESIGN_2_2 §0): a document made by newDoc() carries it, and the
+  // 文字PV conventions, typesetting and timing defaults of that generation apply to it unless its own settings say
+  // otherwise (planner/rules). defaultDoc() never carries it: normalize() builds from defaultDoc(), so anything added
+  // there would reach every opened project, and the tests and fixtures plan documents made from it.
+  const GEN = 1;
+
+  // newDoc() → the document of ≡ › 新しい作品, of the first run and of an emptied device: defaultDoc() with look.gen.
+  function newDoc() {
+    const doc = defaultDoc();
+    doc.look.gen = GEN;
+    return doc;
   }
 
   function defaultSide() {
@@ -6919,6 +6932,9 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
     if (!isUint32(look.moodSeed)) bad('look.moodSeed', 'must be a 32-bit unsigned integer');
     if (!ASPECTS.includes(look.aspect)) bad('look.aspect', 'must be one of ' + ASPECTS.join(' '));
     if (!BACKDROPS.includes(look.backdrop)) bad('look.backdrop', 'must be one of ' + BACKDROPS.join(' '));
+    if (look.gen !== undefined && !(Number.isInteger(look.gen) && look.gen >= 0 && look.gen <= 255)) {
+      bad('look.gen', 'must be an integer 0–255');
+    }
   }
 
   function checkPins(pins, bad) {
@@ -7304,8 +7320,8 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
 
   return {
     APP_VERSION, FORMAT, CURRENT_SCHEMA, DESIGN_SIZE, ASPECTS, LANGS, BACKDROPS, PIN_BY, FILTER_KINDS, SECTION_KINDS,
-    OUTPUT_CHOICES, KIT_KEYS, KIT_DEFAULT, ORDER,
-    defaultDoc, defaultSide, validate, songInfoProblems, normalize, normalizeSide, sanitizeSide, sanitizeAsks, touched,
+    OUTPUT_CHOICES, KIT_KEYS, KIT_DEFAULT, ORDER, GEN,
+    defaultDoc, newDoc, defaultSide, validate, songInfoProblems, normalize, normalizeSide, sanitizeSide, sanitizeAsks, touched,
     serialize,
   };
 });
@@ -7531,11 +7547,18 @@ MV.def('core/commands', ['core/doc', 'core/paths', 'core/pins', 'core/lyrics', '
       return put(doc, 'pins', without(doc.pins, [cmd.path]));
     }
 
+    // Settings, not look choices (DESIGN_2_2 §3): the キメ mark of a line and 「キメの前を静かにする」. Unpinning everything
+    // under a scope (すべての固定を外す, この行の固定を外す: no `by`) keeps them, like lock pins; with a `by` (AIの固定を外す)
+    // the author decides as for every pin.
+    const SETTING_SLOTS = new Set(['kime', 'kime.calm']);
+    function slotOfPath(path) { const i = path.lastIndexOf(':'); return i < 0 ? '' : path.slice(i + 1); }
+
     function pinClearUnder(doc, cmd) {
       const scope = checkScope(cmd.scope);
       if (cmd.by !== undefined) checkBy(cmd.by);
       const drop = PINS.pinsUnder(doc.pins, scope)
-        .filter((path) => doc.pins[path].by !== 'lock' && (cmd.by === undefined || doc.pins[path].by === cmd.by));
+        .filter((path) => doc.pins[path].by !== 'lock' && (cmd.by === undefined ? !SETTING_SLOTS.has(slotOfPath(path))
+          : doc.pins[path].by === cmd.by));
       return put(doc, 'pins', without(doc.pins, drop));
     }
 
@@ -7552,10 +7575,13 @@ MV.def('core/commands', ['core/doc', 'core/paths', 'core/pins', 'core/lyrics', '
 
     // Refuses `cut/…:season`, `cut/…:avoid`, `cut/…:cam.extreme`, `cut/…:repeat.same` and `work:avoid` (payload).
     // 「くり返しの行をそろえる」 (DESIGN_2_1 §4.10) is a setting of the whole video or of a line, like the line season.
+    // キメ (DESIGN_2_2 §3): `kime` marks a line (line scope only), `kime.calm` is the whole video's (work scope only).
     function checkSlotScope(parsed) {
       need(!(parsed.scope.kind === 'cut' && (NOT_CUT.has(parsed.slot) || parsed.slot === 'repeat.same')),
         parsed.slot + ' cannot be pinned at cut scope');
       need(!(parsed.scope.kind === 'work' && parsed.slot === 'avoid'), 'avoid cannot be pinned at work scope');
+      need(!(parsed.slot === 'kime' && parsed.scope.kind !== 'line'), 'kime can be pinned only for a line');
+      need(!(parsed.slot === 'kime.calm' && parsed.scope.kind !== 'work'), 'kime.calm can be pinned only for the whole video');
     }
 
     function pinPromote(doc, cmd) {
@@ -7568,6 +7594,7 @@ MV.def('core/commands', ['core/doc', 'core/paths', 'core/pins', 'core/lyrics', '
         parsed.slot + ' cannot be pinned at ' + cmd.to + ' scope');
       // season and cam.extreme may move line → work; avoid never moves (§2.6); none of them leaves a (stray) cut pin.
       need(parsed.slot !== 'avoid' && !(NOT_CUT.has(parsed.slot) && from === 'cut'), parsed.slot + ' cannot be promoted');
+      need(!SETTING_SLOTS.has(parsed.slot), parsed.slot + ' cannot be promoted');     // a キメ mark stays on its line
       const pin = doc.pins[cmd.path];
       if (!pin) return doc;
       const target = (cmd.to === 'line' ? 'line/' + parsed.scope.lineId : 'work') + ':' + parsed.slot;
@@ -8460,6 +8487,9 @@ MV.def('core/timing', ['core/pins', 'core/script', 'core/num', 'core/beats'], (P
   const MIN_READ = 1.2;         // the shortest reading slot of a line
   const PAUSE_WEIGHT = 0.8;     // seconds of weight per blank row above a line
   const TIMING_DEFAULTS = Object.freeze({ snap: 'off', lead: 0.12, tail: 0.25, leadIn: 1, outro: 2, tapLatency: 0.06 });
+  // キメ (PV22 P3, DESIGN_2_2 §3): a line the planner marked キメ (line.kime, from its line pin) reads this much longer,
+  // so the next automatic start moves on by it (anchored starts never move).
+  const KIME_HOLD = 0.6;
 
   function isTime(v) { return typeof v === 'number' && Number.isFinite(v) && v >= 0; }
 
@@ -8543,7 +8573,7 @@ MV.def('core/timing', ['core/pins', 'core/script', 'core/num', 'core/beats'], (P
 
     const read = new Float64Array(n), pause = new Float64Array(n);
     lines.forEach((line, i) => {
-      read[i] = Math.max(MIN_READ, S.morae(line.text, line.lang) * spm);
+      read[i] = Math.max(MIN_READ, S.morae(line.text, line.lang) * spm) + (line.kime === true ? KIME_HOLD : 0);
       pause[i] = PAUSE_WEIGHT * (line.pauseBefore || 0);
     });
     // The time from line k−1's start to line k's start at the nominal rate: its reading plus the pause above line k.
@@ -8656,7 +8686,7 @@ MV.def('core/timing', ['core/pins', 'core/script', 'core/num', 'core/beats'], (P
     }
   }
 
-  return { solveTimes, readRateOf, TIMING_DEFAULTS };
+  return { solveTimes, readRateOf, TIMING_DEFAULTS, KIME_HOLD };
 });
 /* 文字PVメーカー v2 — original work. JSDoc type definitions mirroring DESIGN §3 (data model) and §4 (interfaces), with the DESIGN_2_1 additions. */
 MV.def('core/types', [], () => {
@@ -8823,6 +8853,8 @@ MV.def('core/types', [], () => {
    * @property {number|null} stamp         the stamp of this occurrence
    * @property {number} pauseBefore        blank rows directly above the row (first occurrence only)
    * @property {string|null} heading       nearest '#' comment above, within 3 rows
+   * @property {true} [kime]               set by the planner (stage 1) on a line whose line/<id>:kime pin is true
+   *                                       (DESIGN_2_2 §3); never parsed from the lyrics
    */
 
   // ===== §3.12 The Plan (not saved) ===========================================================================
@@ -9191,6 +9223,8 @@ MV.def('core/types', [], () => {
    * @property {string|null} repeatOf
    * @property {number} pos
    * @property {string} role
+   * @property {1|2} [calm]                the cuts before a キメ cut (DESIGN_2_2 §3); present only where set
+   * @property {true} [kime]               the キメ cut of a キメ line (DESIGN_2_2 §3); present only where set
    */
   /**
    * @typedef {Object} Explanation
@@ -13953,6 +13987,37 @@ MV.def('i18n/strings', [], () => ({
   'pkg.missing.media': ['写真・動画{n}件', '{n} photos or videos'],
   'pkg.missing.song': ['曲', 'the song'],
   'pkg.missing.and': ['と', ' and '],
+
+  // --- PV22 P1 (文字組み) ---
+
+  // --- PV22 P2 (文字PVの定石) ---
+
+  // --- PV22 P3 (キメ) ---
+  'why.kime': ['キメの行なので、大胆な見せ方から選んだ', 'A kime line, so picked from the bold choices'],
+  'why.kime.calm': ['次のキメを引き立てるため、静かな見せ方を多めに', 'Quieter choices, so the next kime stands out'],
+  'why.kime.limited': ['使える部品の設定でキメ用の部品が使えないため、いつもどおりに選んだ',
+    'The part settings leave no kime choice here, so picked as usual'],
+  'why.kime.noFlash': ['キメの行は光らせない（見せ場の行だけが光ります）', 'A kime line does not flash (only Impact lines do)'],
+  'whyRule.kime.face': ['キメの行は見出しの書体', 'A kime line uses the heading face'],
+  'whyRule.kime.scale': ['キメの行は大きく', 'A kime line is set large'],
+  'whyRule.kime.full': ['キメの行は構図いっぱいの大きさ', 'A kime line fills its layout'],
+  'whyRule.kime.depart': ['キメの行は最後まで見せて、すぱっと切る', 'A kime line holds to the end and cuts out'],
+  'whyRule.kime.lens': ['キメの構図とカメラワークに合わせたカメラ', 'Camera matched to the kime layout and camerawork'],
+  'whyRule.kime.shot': ['キメの構図に合わせて寄る', 'The camera moves in to match the kime layout'],
+  'whyRule.kime.count': ['キメの行は文字が主役なので、飾りを控えめに', 'Words first on a kime line, so fewer extras'],
+  'whyRule.kime.seam': ['キメの行へは切り替えなしで一気に', 'Straight cut into a kime line'],
+  'whyRule.kime.split': ['キメの行は1カットで見せる', 'A kime line plays in one cut'],
+  'whyRule.kime.param': ['キメの行なので素早く・読みやすく', 'Fast and readable for a kime line'],
+  'whyRule.kime.calm': ['次のキメを引き立てるため控えめに', 'Kept down so the next kime stands out'],
+  'whyRule.kime.x': ['キメの行なので一番強い動き', 'The strongest move for a kime line'],
+  'whyRule.kime.noFlash': ['キメの行からは光らずに切り替える', 'No flash on the way out of a kime line'],
+  'whyRule.kime.set': ['キメの行なので、大胆な見せ方の最初の候補にした', 'A kime line, so the first of the bold choices'],
+
+  // --- PV22 P4 (モーフ・太さ) ---
+
+  // --- PV22 P5 (タイミング) ---
+
+  // --- PV22 P6 (歌ハメ) ---
 }));
 /* 文字PVメーカー v2 — original work. Translation function and formatters over the [ja, en] string table (DESIGN §4.24). */
 MV.def('i18n/t', [], () => {
@@ -15704,365 +15769,6 @@ MV.def('media/yuv', [], () => {
 
   return { FORMATS, MATRICES, SIGMA_STEP, supports, factorFor, sigmaFor, padFor, coefficients, toRgba };
 });
-/* 文字PVメーカー v2 — original work. The chooser: stream seeds, candidate weights and Gumbel-max picks (DESIGN §4.16.4, §4.1.3). */
-MV.def('planner/choose', ['core/hash', 'core/rng', 'core/num'], (H, R, N) => {
-  'use strict';
-
-  const FIT_FLOOR = 0.15;        // weight a numeric trait falls to at 50 % beyond its range
-  const RECENT_PREV = 0.03;      // same value as the previous cut
-  const RECENT_NEAR = 0.35;      // same value in the 3 cuts before that
-  const SAME_FAMILY = 0.5;       // same family as the previous cut
-  const ECHO = 2.5;              // what the first sung copy of a repeated line used
-  const IMPACT = 6;              // impact cut and a part made for impacts
-  const MOOD_FILTER_DEFAULT = 0.2;
-  // The mood factor is the geometric mean of the tag biases raised to this power. Averaged over a part's tags and
-  // under the Gumbel noise and recency, the plain mean left moods picking alike (QA-LOOK: quietHush took fast-tagged
-  // parts in 6 % of picks against dashSprint's 13 %; every composition got 6–10 % of picks under every mood).
-  const MOOD_POWER = 1.5;
-  // Seasonal parts under the season 'any' (no season pinned or found in the lyrics): ×0.5 when they are the theme's
-  // own season (a seasonal theme is its season's picture; its prefer map damps the other seasons), else ×0.25 — under
-  // a non-seasonal theme a stray petal wash or maple paper reads as a mistake (QA-LOOK). Themes themselves ×0.5.
-  const SEASON_ANY = 0.5, SEASON_ANY_STRAY = 0.25, SEASON_MATCH = 1.5;
-  // A line's own season (the line slot 'season', DESIGN_2_1 §4.9) that matches a part's season.
-  const SECTION_SEASON = 2.5;
-  // The smallest scale "50 % beyond" a numeric trait is measured against (so a bound of 0 still has a slope).
-  const CELLS_SCALE = 2, ENERGY_SCALE = 0.2;
-
-  // --- stream seeds (FROZEN names, §4.1.3) ---------------------------------------------------------------------
-
-  function saltOf(salts, key) { return (salts && salts[key]) || 0; }
-
-  // cutSeed = hash32('cut', look.seed, cutKey, salts['line/'+lineId] or 0, salts['cut/'+cutKey] or 0);
-  // special cuts have no line, so their line salt is 0.
-  function cutSeed(seed, cutKey, lineId, salts) {
-    return H.hash32('cut', seed, cutKey, lineId ? saltOf(salts, 'line/' + lineId) : 0, saltOf(salts, 'cut/' + cutKey));
-  }
-
-  // slotSeed = hash32('slot', cutSeed, slot, salts['cut/'+cutKey+':'+slot] or 0, salts['line/'+lineId+':'+slot] or 0)
-  function slotSeed(cutSeedValue, cutKey, lineId, slot, salts) {
-    return H.hash32('slot', cutSeedValue, slot, saltOf(salts, 'cut/' + cutKey + ':' + slot),
-      lineId ? saltOf(salts, 'line/' + lineId + ':' + slot) : 0);
-  }
-
-  // The same slot seed from slotPrefix(cutSeed) (the hash state after 'slot' and the cut seed, made once per cut).
-  function slotPrefix(cutSeedValue) { return fnvPart(fnvPart(0x811c9dc5, 'slot'), String(cutSeedValue)); }
-  function slotSeedAt(prefix, cutKey, lineId, slot, salts) {
-    const a = salts ? saltOf(salts, 'cut/' + cutKey + ':' + slot) : 0;
-    const b = salts && lineId ? saltOf(salts, 'line/' + lineId + ':' + slot) : 0;
-    return fmix(fnvPart(fnvPart(fnvPart(prefix, slot), String(a)), String(b)));
-  }
-
-  // A background segment's seed; slot seeds of the segment use it in place of the cut seed of its first cut.
-  function segSeed(seed, firstCutKey, salts) {
-    return H.hash32('seg', seed, firstCutKey, saltOf(salts, 'cut/' + firstCutKey));
-  }
-
-  // The stream of one parameter's auto: stream(slotSeed, 'param', name). A field-dice salt on the parameter itself
-  // ('cut/<key>:arrive.dur') is appended only when present, so unsalted streams keep the frozen labels. The hash of
-  // the common prefix (slotSeed, 'param') is shared by all parameters of a slot (paramPrefix), as in gumbelAt.
-  function paramStream(seedValue, name, salt, prefix) {
-    let h = fnvPart(prefix === undefined ? paramPrefix(seedValue) : prefix, name);
-    if (salt) h = fnvPart(h, String(salt));
-    return R.fromSeed(fmix(h));
-  }
-
-  function paramPrefix(seedValue) { return fnvPart(fnvPart(0x811c9dc5, String(seedValue)), 'param'); }
-
-  // --- Gumbel noise for a whole pool ------------------------------------------------------------------------------
-
-  // gumbel(seed, key) of core/rng for every key of a pool: -ln(-ln((hash32('gumbel', seed, key) + 0.5) / 2^32)).
-  // hash32 is FNV-1a with a separator after each part and an fmix32 finaliser, so the state after the common prefix
-  // ('gumbel', seed) is computed once per pick instead of once per candidate. Same numbers as core/rng.gumbel
-  // (tests/node/planner_explain.test.js checks it).
-  function fnvPart(h, s) {
-    for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); }
-    h ^= 0x1f;
-    return Math.imul(h, 0x01000193);
-  }
-
-  // The murmur3 fmix32 finaliser of hash32, as an unsigned 32-bit integer.
-  function fmix(h) {
-    h ^= h >>> 16; h = Math.imul(h, 0x85ebca6b); h ^= h >>> 13; h = Math.imul(h, 0xc2b2ae35); h ^= h >>> 16;
-    return h >>> 0;
-  }
-
-  function gumbelPrefix(seed) { return fnvPart(fnvPart(0x811c9dc5, 'gumbel'), String(seed)); }
-
-  function gumbelAt(prefix, key) {
-    return -Math.log(-Math.log((fmix(fnvPart(prefix, key)) + 0.5) / 4294967296));
-  }
-
-  // --- factors -------------------------------------------------------------------------------------------------
-
-  function num(v, dflt) { return typeof v === 'number' && Number.isFinite(v) ? v : dflt; }
-
-  // Geometric mean of the mood's tag bias over the part's tags, to the power MOOD_POWER (1 without tags); a zero bias
-  // zeroes the part.
-  function moodBias(tags, mood) {
-    if (!Array.isArray(tags) || tags.length === 0) return 1;
-    const bias = (mood && mood.tagBias) || {};
-    let logSum = 0;
-    for (const tag of tags) {
-      const b = num(bias[tag], 1);
-      if (!(b > 0)) return 0;
-      logSum += Math.log(b);
-    }
-    return Math.exp(MOOD_POWER * logSum / tags.length);
-  }
-
-  // The season factor of a part (§3.8). home = the theme's season (null for a non-seasonal theme) when a part slot is
-  // weighed; undefined when a theme itself is. lineSeason: the season comes from a line's own season pin, and a match
-  // then weighs SECTION_SEASON (DESIGN_2_1 §4.9).
-  function seasonFactor(partSeason, season, home, lineSeason) {
-    if (!partSeason) return 1;
-    if (season === partSeason) return lineSeason ? SECTION_SEASON : SEASON_MATCH;
-    if (season !== 'any') return 1;                     // other seasons never reach the pool
-    return home === undefined || home === partSeason ? SEASON_ANY : SEASON_ANY_STRAY;
-  }
-
-  // One numeric trait: 1 inside [lo, hi]; outside, linear down to 0.15 at 50 % beyond the bound (0.15 further out).
-  function rangeFit(range, x, scale) {
-    if (!range || typeof x !== 'number') return 1;
-    const lo = range[0], hi = range[1];
-    let excess, span;
-    if (x < lo) { excess = lo - x; span = 0.5 * Math.max(Math.abs(lo), scale); }
-    else if (x > hi) { excess = x - hi; span = 0.5 * Math.max(Math.abs(hi), scale); }
-    else return 1;
-    return Math.max(FIT_FLOOR, 1 - (1 - FIT_FLOOR) * Math.min(1, excess / span));
-  }
-
-  // The product over the numeric traits (cells, energy).
-  function traitFit(traits, feat) {
-    if (!traits || !feat) return 1;
-    return rangeFit(traits.cells, feat.cells, CELLS_SCALE) * rangeFit(traits.energy, feat.energy, ENERGY_SCALE);
-  }
-
-  // --- the chooser -------------------------------------------------------------------------------------------
-
-  // createChooser(registry, look) → { pick, statics, weigh }. look = { mood: MoodDef, theme: ThemeDef, season,
-  // amounts }. The look-only factors of each candidate are computed once per plan and season (a line may pin its own
-  // season, DESIGN_2_1 §4.9).
-  function createChooser(registry, look) {
-    const cache = new Map();
-
-    // Factors that depend only on the look and the season: base weight, mood tag bias, gate, theme preference, season
-    // and (filter slots only) the mood's filter weights. season / lineSeason: the cut's effective season and whether it
-    // comes from a line pin (default: the look's season).
-    function statics(kind, key, moodFilter, season, lineSeason) {
-      const id = kind + '/' + key + (moodFilter ? '#f' : '') + seasonTag(season, lineSeason);
-      let s = cache.get(id);
-      if (s) return s;
-      s = makeStatics(kind, key, moodFilter, season === undefined ? look.season : season, !!lineSeason);
-      cache.set(id, s);
-      return s;
-    }
-
-    function seasonTag(season, lineSeason) {
-      return season === undefined || (season === look.season && !lineSeason) ? '' : '|' + season + (lineSeason ? '!' : '');
-    }
-
-    // The statics of a whole pool, cached per pool array (pools are cached per plan, so this is one lookup per pick).
-    const byPool = new WeakMap();
-    function poolStatics(kind, keys, moodFilter, season, lineSeason) {
-      let m = byPool.get(keys);
-      if (!m) { m = new Map(); byPool.set(keys, m); }
-      const id = kind + (moodFilter ? '#f' : '') + seasonTag(season, lineSeason);
-      let list = m.get(id);
-      if (!list) { list = keys.map((key) => statics(kind, key, moodFilter, season, lineSeason)); m.set(id, list); }
-      return list;
-    }
-
-    function makeStatics(kind, key, moodFilter, season, lineSeason) {
-      const def = registry.get(kind, key);
-      const prefer = look.theme && look.theme.prefer && look.theme.prefer[kind];
-      const s = {
-        def,
-        fits: typeof def.fits === 'function' ? def.fits : null,
-        family: def.family,
-        traits: registry.traits(kind, key),
-        weight: num(def.weight, 1),
-        mood: moodBias(def.tags, look.mood),
-        gate: def.gate ? num(look.amounts[def.gate], 0) : 1,
-        prefer: prefer ? num(prefer[key], 1) : 1,
-        season: seasonFactor(def.season, season, look.theme ? look.theme.season || null : null, lineSeason),
-        moodFilter: moodFilter ? filterWeight(look.mood, key) : 1,
-        media: !!(def.mine && def.mine.media === true),         // a derived ground of the user's media (§11.5.9)
-      };
-      s.product = s.weight * s.mood * s.gate * s.prefer * s.season * s.moodFilter;
-      return s;
-    }
-
-    function filterWeight(mood, key) {
-      const w = mood && mood.filters ? mood.filters[key] : undefined;
-      return num(w, MOOD_FILTER_DEFAULT);
-    }
-
-    // Recency factors (§4.16.4) as flags: the previous cut's value, one of the 3 cuts before it, the previous cut's
-    // family. rec = { prev, near, families } (small arrays).
-    const PREV = 1, NEAR = 2, FAMILY = 4;
-
-    // w × the flagged factors, in their fixed order, quantized; q = q6(w) is the answer when no flag is set.
-    function withRecency(w, q, flags) {
-      if (flags === 0) return q;
-      let x = w;
-      if (flags & PREV) x *= RECENT_PREV;
-      if (flags & NEAR) x *= RECENT_NEAR;
-      if (flags & FAMILY) x *= SAME_FAMILY;
-      return N.q6(x);
-    }
-
-    function recencyFlags(rec, key, family) {
-      if (!rec) return 0;
-      return (rec.prev.includes(key) ? PREV : 0) | (rec.near.includes(key) ? NEAR : 0) |
-        (family && rec.families.includes(family) ? FAMILY : 0);
-    }
-
-    function traceRecency(f, flags) {
-      Object.assign(f, { recent: flags & PREV ? RECENT_PREV : 1, near: flags & NEAR ? RECENT_NEAR : 1,
-        family: flags & FAMILY ? SAME_FAMILY : 1 });
-    }
-
-    // A candidate's weight before the recency factors (not quantized); with `f` (tracing) the factors are written
-    // into it.
-    // req.noMedia: a derived ground of the user's media weighs 0 (a segment shorter than 3 s, the title card; §11.5.9).
-    function preWeight(req, key, s, f) {
-      let w = s.product;
-      let fit = 1, fits = 1, impact = 1, echo = 1, media = 1;
-      if (!req.noFit) {
-        fit = traitFit(s.traits, req.feat);
-        if (s.fits !== null) fits = Math.max(0, num(s.fits(req.feat, req.chosen || {}), 0));
-        w *= fit * fits;
-      }
-      if (req.feat && req.feat.impact && s.traits && s.traits.impact) { impact = IMPACT; w *= IMPACT; }
-      if (req.echo && req.echo === key) { echo = ECHO; w *= ECHO; }
-      if (req.noMedia && s.media) { media = 0; w = 0; }
-      if (f) {
-        Object.assign(f, { weight: s.weight, mood: s.mood, gate: s.gate, prefer: s.prefer, season: s.season,
-          moodFilter: s.moodFilter, fit, fits, impact, echo, media });
-      }
-      return w;
-    }
-
-    // The weight of one candidate; with `f` (tracing) the factors are written into it as well. `baseW` receives the
-    // weight without the recency factors and `refW` the weight with the reference recency `req.ref` (see pick).
-    let baseW = 0, refW = 0;
-    function weigh(req, key, f, st) {
-      const s = st || statics(req.kind, key, req.moodFilter, req.season, req.seasonPinned);
-      const w = preWeight(req, key, s, f);
-      const q = baseW = N.q6(w);
-      if (req.ref) refW = withRecency(w, q, recencyFlags(req.ref, key, s.family));
-      const flags = recencyFlags(req.recent, key, s.family);
-      if (f) traceRecency(f, flags);
-      return withRecency(w, q, flags);
-    }
-
-    // Positions of a pool's keys, per pool array (pools are cached per plan).
-    const positions = new WeakMap();
-    function positionsOf(keys) {
-      let m = positions.get(keys);
-      if (!m) { m = new Map(keys.map((k, i) => [k, i])); positions.set(keys, m); }
-      return m;
-    }
-
-    // Per-candidate PREV / NEAR flags of `rec` over a pool, in a reused array (pick is never re-entered).
-    let flagsA = new Uint8Array(64), flagsB = new Uint8Array(64);
-    function markFlags(out, n, rec, at) {
-      out.fill(0, 0, n);
-      if (!rec) return;
-      for (const key of rec.prev) { const i = at.get(key); if (i !== undefined) out[i] |= PREV; }
-      for (const key of rec.near) { const i = at.get(key); if (i !== undefined) out[i] |= NEAR; }
-    }
-
-    function familyFlag(rec, family) {
-      return rec && family && rec.families.length && rec.families.includes(family) ? FAMILY : 0;
-    }
-
-    // pick(req) → { v, w, base, ref, avoided? } | null (null when every candidate weighs 0).
-    // req = { kind, keys (the pool, sorted), feat, chosen, seed, variety, recent?, ref?, echo?, noFit?, moodFilter?,
-    // avoid?, trace?, season?, seasonPinned?, noMedia? }. score = ln(w) + variety · gumbel(seed, key); argmax, ties → the smaller key (keys arrive sorted).
-    // Two more argmaxes share the same noise (planner/cast createHistory): base = without the recency factors (the
-    // cut's natural pick) and ref = with the recency `req.ref` (the cut's reference pick).
-    // avoid (arrange and arrive, §8.2 "no identical adjacent"): when the winner is the previous cut's value and another
-    // candidate weighs > 0, the runner-up is taken. The ×0.03 recency factor alone leaves such repeats rare but
-    // possible; a pool of one still returns its part. An array of values (the cut right before a repeat that shows
-    // its source's value, planner/cast avoidOf): the best candidate that is none of them.
-    function pick(req) {
-      const variety = num(req.variety, 1);
-      let best = null, bestScore = -Infinity, bestW = 0;
-      let next = null, nextScore = -Infinity, nextW = 0;
-      const avoids = Array.isArray(req.avoid) ? req.avoid : null;
-      let alt = null, altScore = -Infinity, altW = 0;
-      let base = null, baseScore = -Infinity;
-      let ref = null, refScore = -Infinity;
-      const keys = req.keys, n = keys.length;
-      const list = poolStatics(req.kind, keys, req.moodFilter, req.season, req.seasonPinned);
-      const prefix = gumbelPrefix(req.seed);
-      if (flagsA.length < n) { flagsA = new Uint8Array(n); flagsB = new Uint8Array(n); }
-      const at = positionsOf(keys);
-      markFlags(flagsA, n, req.recent, at);
-      if (req.ref) markFlags(flagsB, n, req.ref, at);
-      for (let i = 0; i < n; i++) {
-        const key = keys[i];
-        const s = list[i];
-        const f = req.trace ? {} : null;
-        const w0 = preWeight(req, key, s, f);
-        const wb = N.q6(w0);
-        const flags = flagsA[i] | familyFlag(req.recent, s.family);
-        const w = withRecency(w0, wb, flags);
-        const wr = req.ref ? withRecency(w0, wb, flagsB[i] | familyFlag(req.ref, s.family)) : 0;
-        if (f) traceRecency(f, flags);
-        if (!(wb > 0) && !(w > 0) && !(wr > 0) && !f) continue;     // nothing to score
-        const noise = variety * gumbelAt(prefix, key);
-        // The three weights are usually equal (no recency factor applies), so their logs are shared.
-        const lw = w > 0 ? Math.log(w) : -Infinity;
-        const score = w > 0 ? lw + noise : -Infinity;
-        if (f) req.trace.push({ key, w, wBase: wb, score, f });
-        if (wb > 0) {
-          const sb = (wb === w ? lw : Math.log(wb)) + noise;
-          if (sb > baseScore) { base = key; baseScore = sb; }
-        }
-        if (wr > 0) {
-          const sr = (wr === w ? lw : wr === wb ? Math.log(wb) : Math.log(wr)) + noise;
-          if (sr > refScore) { ref = key; refScore = sr; }
-        }
-        if (!(w > 0)) continue;
-        if (score > bestScore) {
-          next = best; nextScore = bestScore; nextW = bestW;
-          best = key; bestScore = score; bestW = w;
-        } else if (score > nextScore) { next = key; nextScore = score; nextW = w; }
-        if (avoids && score > altScore && !avoids.includes(key)) { alt = key; altScore = score; altW = w; }
-      }
-      if (best === null) return null;
-      if (!req.ref || ref === null) ref = best;
-      if (avoids) {
-        return avoids.includes(best) && alt !== null ? { v: alt, w: altW, base, ref, avoided: best } : { v: best, w: bestW, base, ref };
-      }
-      if (req.avoid && best === req.avoid && next !== null) return { v: next, w: nextW, base, ref, avoided: best };
-      return { v: best, w: bestW, base, ref };
-    }
-
-    return { pick, statics, weigh };
-  }
-
-  // Gumbel-max over a plain weight table (moods and themes): keys sorted, weights q6, ties → the smaller key.
-  function pickWeighted(keys, weightOf, seed, trace) {
-    let best = null, bestScore = -Infinity;
-    for (const key of keys) {
-      const w = N.q6(weightOf(key));
-      const score = w > 0 ? Math.log(w) + R.gumbel(seed, key) : -Infinity;
-      if (trace) trace.push({ key, w, score });
-      if (w > 0 && score > bestScore) { best = key; bestScore = score; }
-    }
-    return best;
-  }
-
-  return {
-    cutSeed, slotSeed, slotPrefix, slotSeedAt, segSeed, paramStream, saltOf, moodBias, seasonFactor, traitFit, createChooser, pickWeighted,
-    gumbelPrefix, gumbelAt, paramPrefix,
-    FACTORS: Object.freeze({ RECENT_PREV, RECENT_NEAR, SAME_FAMILY, ECHO, IMPACT, MOOD_FILTER_DEFAULT, FIT_FLOOR,
-      MOOD_POWER, SEASON_ANY, SEASON_ANY_STRAY, SEASON_MATCH, SECTION_SEASON }),
-  };
-});
 /* 文字PVメーカー v2 — original work. diff(planA, planB, scope?): what changed after おまかせ, a reroll or an undo (DESIGN §4.16.1, §6.7). */
 MV.def('planner/diff', ['core/paths'], (P) => {
   'use strict';
@@ -16566,7 +16272,8 @@ MV.def('planner/features', ['core/script', 'core/num', 'engine/text/breaker', 'e
 
   // cutFeatures(cut, fx) → CutFeatures (§4.16.7). cut = { key, role, text, emph, impact, t0, t1, lang };
   // fx = { duration, env|null, grid|null, info (song.info)|null, section (heading-derived)|null, repeatOf, repeats,
-  // sectionStart (DESIGN_2_1 §2.7: the first cut, or its section differs from the previous cut's; planner/plan) }.
+  // sectionStart (DESIGN_2_1 §2.7: the first cut, or its section differs from the previous cut's; planner/plan),
+  // calm (0 | 1 | 2, DESIGN_2_2 §3) }; cut.kime (true on a キメ cut) gives feat.kime.
   function cutFeatures(cut, fx) {
     const text = cut.text;
     const gs = S.graphemes(text);
@@ -16588,12 +16295,26 @@ MV.def('planner/features', ['core/script', 'core/num', 'engine/text/breaker', 'e
       onBeat = Math.min(b.since, fx.grid.period - b.since) < ON_BEAT;
     }
     // Keys in sorted order, so the Plan encoder can print the object natively (planner/encode asIs).
-    return {
+    const out = {
       beat: beat ? r3(beat) : 0, cells, cps: r3(cells / dur), dur: r3(dur), emph: cut.emph.length > 0,
       energy: r3(N.clamp(energy)), graphemes: gs.length, impact: !!cut.impact, latin: r3(latinShare(gs)), onBeat,
       orients: orientsOf(text, script), pos, repeatOf: fx.repeatOf || null, role: cut.role, script,
       section: sectionOf(cut, fx), sectionStart: !!fx.sectionStart, units: { glyph: glyphs, line: 1, word: words }, words,
     };
+    return fx.calm || cut.kime === true ? withKime(out, fx.calm, cut.kime === true) : out;
+  }
+
+  // キメ (PV22 P3, DESIGN_2_2 §3): `calm` (1 | 2: the cuts before a キメ cut, planner/kime calmLevels) and `kime` (true on
+  // the キメ cut) are present only where set, in sorted key order, so every other cut keeps its features, its
+  // fingerprint and the plan its hash.
+  function withKime(f, calm, kime) {
+    const out = {};
+    for (const k of Object.keys(f)) {
+      if (k === 'cells' && calm) out.calm = calm;
+      if (k === 'latin' && kime) out.kime = true;
+      out[k] = f[k];
+    }
+    return out;
   }
 
   // The section of a cut: the song.info section at its t0, else the heading above its line, else null.
@@ -16885,6 +16606,490 @@ MV.def('planner/areas', ['core/paths', 'core/lyrics', 'planner/features'], (P, L
 
   return { AREA_KINDS, keyOf, areasOf, resolve, inArea, ofLines, bands, sameRef };
 });
+/* 文字PVメーカー v2 — original work. キメ (PV22 P3): the constants of a キメ line, the one accessor isKime, the calm levels of the cuts before a キメ cut and their chooser factor (DESIGN_2_2 §3). */
+MV.def('planner/kime', ['core/num'], (N) => {
+  'use strict';
+
+  // A line is キメ when its `line/<id>:kime` pin is true (planner/plan withKimePins sets line.kime). Absent is off, so a
+  // document without the pin plans exactly as before: every キメ path below is behind cut.kime, feat.kime or feat.calm.
+
+  function deepFreeze(v) {
+    if (v && typeof v === 'object' && !Object.isFrozen(v)) {
+      Object.freeze(v);
+      for (const k of Object.keys(v)) deepFreeze(v[k]);
+    }
+    return v;
+  }
+
+  // What a キメ cut may pick and the values it gets by rule (DESIGN_2_2 §3.4). Every set is filtered by the cut's own
+  // pool (registry, role, orientation, script, aspect, the user's part filters, gates, season, the line's avoid list)
+  // before the chooser sees it; an empty set leaves the slot to the chooser (kime.limited). No part key is forced
+  // literally: forced parts are registry.fallback(kind).
+  const KIME = deepFreeze({
+    cellsCap: 30,                           // one cut up to maxCells(aspect) = min(cellsCap, 2 · BASE[aspect])
+    tail: 1.5, keep: 3,                     // s: hold into a following interlude / outro, which keeps ≥ keep s
+    arrange: ['edgeBleed', 'giantWhisper'], bleedCells: [2, 12], bigOnly: ['giantWhisper'],
+    arrive: ['stampPress', 'zoomSettle'],
+    arriveMax: { stampPress: { dur: 0.4, each: 0.1 }, zoomSettle: { dur: 0.4, each: 0.03 } },
+    landBy: 0.8,                            // s: dur + (units − 1) · each ≤ landBy
+    dwell: ['stillHold'], dwellBeats: ['stillHold', 'thumpSwell'],
+    lensKick: ['impactKick'],
+    shots: { plain: ['snapZoom', 'pushWord', 'settle', 'none'], emph: ['pushWord', 'settle', 'none'] },
+    xshots: ['crashZoom', 'punchHit'],
+    face: 'display', scalePinned: 1.3, scaleFloor: 1,
+    ornMax: 1, filterMax: 1,
+    bleed: { overflow: 1.08, anchor: 'center' },
+    giant: { ratioMin: 3, tuck: 'under' },
+    params: ['dur', 'each', 'shake', 'overflow', 'anchor', 'ratio', 'tuck'],   // explain: rule kime.param
+    manyMin: 3, manyShare: 0.15,            // UI guideline: max(3, ceil(0.15 · lyric lines))
+  });
+
+  // The cuts right before a キメ cut (level 2: the one right before, level 1: the one before that), within `span` s of
+  // its start: fewer decorations and effects, softer motion, a quiet shot, slightly smaller text.
+  const CALM = deepFreeze({
+    cuts: 2, span: 4,
+    ornMax: [Infinity, 1, 0], filterMax: [Infinity, 1, 0],   // by level
+    strong: [1, 0.5, 0.15], soft: [1, 1.5, 2.5],              // chooser factors by level
+    scale: [1, 0.97, 0.94],
+    lensDeny: ['shake', 'beat'],                              // level 2
+    shots: ['none', 'settle', 'driftOff', 'wideHold'],        // level 2
+    xstrong: 0.2,                                             // level 2: EXTREME presets tagged hard or fast
+    kinds: ['arrive', 'dwell', 'depart', 'lens'],             // the part kinds the chooser factor applies to
+  });
+  const STRONG_TAGS = Object.freeze(['fast', 'hard', 'bold', 'busy']);
+  const SOFT_TAGS = Object.freeze(['soft', 'slow', 'minimal', 'airy']);
+  const CALM_KINDS = new Set(CALM.kinds);
+
+  // isKime(cut) → whether a cut is the キメ cut of a キメ line: the skeleton flag during stages 3–6 (planner/segment),
+  // feat.kime on a Plan cut. The one way other packages ask (a long line's pin does not make every piece キメ).
+  function isKime(cut) { return !!cut && (cut.kime === true || !!(cut.feat && cut.feat.kime)); }
+
+  // calmLevels(cuts) → [0 | 1 | 2] per cut, or null when no cut is キメ. A level lands only on lyric cuts (not across a
+  // special cut) that start within CALM.span s before the キメ cut's start; a キメ cut is never calmed, so two キメ
+  // lines in a row both stay bold. (The caller skips it when 「キメの前を静かにする」 is off.)
+  function calmLevels(cuts) {
+    if (!cuts.some(isKime)) return null;
+    const out = new Array(cuts.length).fill(0);
+    for (let j = 0; j < cuts.length; j++) {
+      const k = cuts[j];
+      if (!isKime(k)) continue;
+      for (let i = j - 1; i >= 0 && j - i <= CALM.cuts; i--) {
+        const c = cuts[i];
+        if (isKime(c) || !c.line || k.t0 - c.t0 > CALM.span) break;
+        out[i] = Math.max(out[i], j - i === 1 ? 2 : 1);
+      }
+    }
+    return out;
+  }
+
+  // calmFactor(def, traits, level) → the chooser factor of a candidate on a calm cut: strong parts (made for impacts,
+  // or a tag in STRONG_TAGS) down, soft ones (a tag in SOFT_TAGS) up; both or neither: 1.
+  function calmFactor(def, traits, level) {
+    if (!level) return 1;
+    const tags = (def && def.tags) || [];
+    const strong = !!(traits && traits.impact) || tags.some((t) => STRONG_TAGS.includes(t));
+    const soft = tags.some((t) => SOFT_TAGS.includes(t));
+    return strong && !soft ? CALM.strong[level] : soft && !strong ? CALM.soft[level] : 1;
+  }
+
+  // Whether the chooser factor applies to a part kind.
+  function calmKind(kind) { return CALM_KINDS.has(kind); }
+
+  // shotFor(emph, allowed) → the shot of a キメ cut: the first of KIME.shots (emph or plain) the cut's pool allows
+  // (allowed(key) → bool), else 'none'.
+  function shotFor(emph, allowed) {
+    for (const key of emph ? KIME.shots.emph : KIME.shots.plain) if (allowed(key)) return key;
+    return 'none';
+  }
+
+  // xshotFor(pool) → the EXTREME preset of a キメ cut: the first of KIME.xshots in the cut's EXTREME pool, or null.
+  function xshotFor(pool) {
+    if (!pool) return null;
+    for (const key of KIME.xshots) if (pool.includes(key)) return key;
+    return null;
+  }
+
+  // guideline(lyricLines) → how many キメ lines a work should have at most (the UI hint; no Plan warning).
+  function guideline(lyricLines) { return Math.max(KIME.manyMin, Math.ceil(KIME.manyShare * Math.max(0, lyricLines || 0))); }
+
+  // hold(room) → how long a キメ cut stays into a following interlude or outro of `room` s: up to KIME.tail, and the
+  // special cut keeps ≥ KIME.keep s.
+  function hold(room) { return N.clamp(Math.min(KIME.tail, room - KIME.keep), 0, KIME.tail); }
+
+  // landEach(each, dur, units, max) → the stagger of a キメ entrance: at most `max` and small enough that the whole line
+  // lands within KIME.landBy (dur + (units − 1) · each), floored to the 0.005 s step.
+  function landEach(each, dur, units, max) {
+    let x = Math.min(each, max);
+    if (units > 1) x = Math.min(x, Math.max(0, KIME.landBy - dur) / (units - 1));
+    return Math.floor(x * 200 + 1e-9) / 200;
+  }
+
+  return { KIME, CALM, STRONG_TAGS, SOFT_TAGS, isKime, calmLevels, calmFactor, calmKind, shotFor, xshotFor, guideline,
+    hold, landEach };
+});
+/* 文字PVメーカー v2 — original work. The chooser: stream seeds, candidate weights and Gumbel-max picks (DESIGN §4.16.4, §4.1.3). */
+MV.def('planner/choose', ['core/hash', 'core/rng', 'core/num', 'planner/kime'], (H, R, N, KI) => {
+  'use strict';
+
+  const FIT_FLOOR = 0.15;        // weight a numeric trait falls to at 50 % beyond its range
+  const RECENT_PREV = 0.03;      // same value as the previous cut
+  const RECENT_NEAR = 0.35;      // same value in the 3 cuts before that
+  const SAME_FAMILY = 0.5;       // same family as the previous cut
+  const ECHO = 2.5;              // what the first sung copy of a repeated line used
+  const IMPACT = 6;              // impact cut and a part made for impacts
+  const MOOD_FILTER_DEFAULT = 0.2;
+  // The mood factor is the geometric mean of the tag biases raised to this power. Averaged over a part's tags and
+  // under the Gumbel noise and recency, the plain mean left moods picking alike (QA-LOOK: quietHush took fast-tagged
+  // parts in 6 % of picks against dashSprint's 13 %; every composition got 6–10 % of picks under every mood).
+  const MOOD_POWER = 1.5;
+  // Seasonal parts under the season 'any' (no season pinned or found in the lyrics): ×0.5 when they are the theme's
+  // own season (a seasonal theme is its season's picture; its prefer map damps the other seasons), else ×0.25 — under
+  // a non-seasonal theme a stray petal wash or maple paper reads as a mistake (QA-LOOK). Themes themselves ×0.5.
+  const SEASON_ANY = 0.5, SEASON_ANY_STRAY = 0.25, SEASON_MATCH = 1.5;
+  // A line's own season (the line slot 'season', DESIGN_2_1 §4.9) that matches a part's season.
+  const SECTION_SEASON = 2.5;
+  // The smallest scale "50 % beyond" a numeric trait is measured against (so a bound of 0 still has a slope).
+  const CELLS_SCALE = 2, ENERGY_SCALE = 0.2;
+
+  // --- stream seeds (FROZEN names, §4.1.3) ---------------------------------------------------------------------
+
+  function saltOf(salts, key) { return (salts && salts[key]) || 0; }
+
+  // cutSeed = hash32('cut', look.seed, cutKey, salts['line/'+lineId] or 0, salts['cut/'+cutKey] or 0);
+  // special cuts have no line, so their line salt is 0.
+  function cutSeed(seed, cutKey, lineId, salts) {
+    return H.hash32('cut', seed, cutKey, lineId ? saltOf(salts, 'line/' + lineId) : 0, saltOf(salts, 'cut/' + cutKey));
+  }
+
+  // slotSeed = hash32('slot', cutSeed, slot, salts['cut/'+cutKey+':'+slot] or 0, salts['line/'+lineId+':'+slot] or 0)
+  function slotSeed(cutSeedValue, cutKey, lineId, slot, salts) {
+    return H.hash32('slot', cutSeedValue, slot, saltOf(salts, 'cut/' + cutKey + ':' + slot),
+      lineId ? saltOf(salts, 'line/' + lineId + ':' + slot) : 0);
+  }
+
+  // The same slot seed from slotPrefix(cutSeed) (the hash state after 'slot' and the cut seed, made once per cut).
+  function slotPrefix(cutSeedValue) { return fnvPart(fnvPart(0x811c9dc5, 'slot'), String(cutSeedValue)); }
+  function slotSeedAt(prefix, cutKey, lineId, slot, salts) {
+    const a = salts ? saltOf(salts, 'cut/' + cutKey + ':' + slot) : 0;
+    const b = salts && lineId ? saltOf(salts, 'line/' + lineId + ':' + slot) : 0;
+    return fmix(fnvPart(fnvPart(fnvPart(prefix, slot), String(a)), String(b)));
+  }
+
+  // A background segment's seed; slot seeds of the segment use it in place of the cut seed of its first cut.
+  function segSeed(seed, firstCutKey, salts) {
+    return H.hash32('seg', seed, firstCutKey, saltOf(salts, 'cut/' + firstCutKey));
+  }
+
+  // The stream of one parameter's auto: stream(slotSeed, 'param', name). A field-dice salt on the parameter itself
+  // ('cut/<key>:arrive.dur') is appended only when present, so unsalted streams keep the frozen labels. The hash of
+  // the common prefix (slotSeed, 'param') is shared by all parameters of a slot (paramPrefix), as in gumbelAt.
+  function paramStream(seedValue, name, salt, prefix) {
+    let h = fnvPart(prefix === undefined ? paramPrefix(seedValue) : prefix, name);
+    if (salt) h = fnvPart(h, String(salt));
+    return R.fromSeed(fmix(h));
+  }
+
+  function paramPrefix(seedValue) { return fnvPart(fnvPart(0x811c9dc5, String(seedValue)), 'param'); }
+
+  // --- Gumbel noise for a whole pool ------------------------------------------------------------------------------
+
+  // gumbel(seed, key) of core/rng for every key of a pool: -ln(-ln((hash32('gumbel', seed, key) + 0.5) / 2^32)).
+  // hash32 is FNV-1a with a separator after each part and an fmix32 finaliser, so the state after the common prefix
+  // ('gumbel', seed) is computed once per pick instead of once per candidate. Same numbers as core/rng.gumbel
+  // (tests/node/planner_explain.test.js checks it).
+  function fnvPart(h, s) {
+    for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+    h ^= 0x1f;
+    return Math.imul(h, 0x01000193);
+  }
+
+  // The murmur3 fmix32 finaliser of hash32, as an unsigned 32-bit integer.
+  function fmix(h) {
+    h ^= h >>> 16; h = Math.imul(h, 0x85ebca6b); h ^= h >>> 13; h = Math.imul(h, 0xc2b2ae35); h ^= h >>> 16;
+    return h >>> 0;
+  }
+
+  function gumbelPrefix(seed) { return fnvPart(fnvPart(0x811c9dc5, 'gumbel'), String(seed)); }
+
+  function gumbelAt(prefix, key) {
+    return -Math.log(-Math.log((fmix(fnvPart(prefix, key)) + 0.5) / 4294967296));
+  }
+
+  // --- factors -------------------------------------------------------------------------------------------------
+
+  function num(v, dflt) { return typeof v === 'number' && Number.isFinite(v) ? v : dflt; }
+
+  // Geometric mean of the mood's tag bias over the part's tags, to the power MOOD_POWER (1 without tags); a zero bias
+  // zeroes the part.
+  function moodBias(tags, mood) {
+    if (!Array.isArray(tags) || tags.length === 0) return 1;
+    const bias = (mood && mood.tagBias) || {};
+    let logSum = 0;
+    for (const tag of tags) {
+      const b = num(bias[tag], 1);
+      if (!(b > 0)) return 0;
+      logSum += Math.log(b);
+    }
+    return Math.exp(MOOD_POWER * logSum / tags.length);
+  }
+
+  // The season factor of a part (§3.8). home = the theme's season (null for a non-seasonal theme) when a part slot is
+  // weighed; undefined when a theme itself is. lineSeason: the season comes from a line's own season pin, and a match
+  // then weighs SECTION_SEASON (DESIGN_2_1 §4.9).
+  function seasonFactor(partSeason, season, home, lineSeason) {
+    if (!partSeason) return 1;
+    if (season === partSeason) return lineSeason ? SECTION_SEASON : SEASON_MATCH;
+    if (season !== 'any') return 1;                     // other seasons never reach the pool
+    return home === undefined || home === partSeason ? SEASON_ANY : SEASON_ANY_STRAY;
+  }
+
+  // One numeric trait: 1 inside [lo, hi]; outside, linear down to 0.15 at 50 % beyond the bound (0.15 further out).
+  function rangeFit(range, x, scale) {
+    if (!range || typeof x !== 'number') return 1;
+    const lo = range[0], hi = range[1];
+    let excess, span;
+    if (x < lo) { excess = lo - x; span = 0.5 * Math.max(Math.abs(lo), scale); }
+    else if (x > hi) { excess = x - hi; span = 0.5 * Math.max(Math.abs(hi), scale); }
+    else return 1;
+    return Math.max(FIT_FLOOR, 1 - (1 - FIT_FLOOR) * Math.min(1, excess / span));
+  }
+
+  // The product over the numeric traits (cells, energy).
+  function traitFit(traits, feat) {
+    if (!traits || !feat) return 1;
+    return rangeFit(traits.cells, feat.cells, CELLS_SCALE) * rangeFit(traits.energy, feat.energy, ENERGY_SCALE);
+  }
+
+  // --- the chooser -------------------------------------------------------------------------------------------
+
+  // createChooser(registry, look) → { pick, statics, weigh }. look = { mood: MoodDef, theme: ThemeDef, season,
+  // amounts }. The look-only factors of each candidate are computed once per plan and season (a line may pin its own
+  // season, DESIGN_2_1 §4.9).
+  function createChooser(registry, look) {
+    const cache = new Map();
+
+    // Factors that depend only on the look and the season: base weight, mood tag bias, gate, theme preference, season
+    // and (filter slots only) the mood's filter weights. season / lineSeason: the cut's effective season and whether it
+    // comes from a line pin (default: the look's season).
+    function statics(kind, key, moodFilter, season, lineSeason) {
+      const id = kind + '/' + key + (moodFilter ? '#f' : '') + seasonTag(season, lineSeason);
+      let s = cache.get(id);
+      if (s) return s;
+      s = makeStatics(kind, key, moodFilter, season === undefined ? look.season : season, !!lineSeason);
+      cache.set(id, s);
+      return s;
+    }
+
+    function seasonTag(season, lineSeason) {
+      return season === undefined || (season === look.season && !lineSeason) ? '' : '|' + season + (lineSeason ? '!' : '');
+    }
+
+    // The statics of a whole pool, cached per pool array (pools are cached per plan, so this is one lookup per pick).
+    const byPool = new WeakMap();
+    function poolStatics(kind, keys, moodFilter, season, lineSeason) {
+      let m = byPool.get(keys);
+      if (!m) { m = new Map(); byPool.set(keys, m); }
+      const id = kind + (moodFilter ? '#f' : '') + seasonTag(season, lineSeason);
+      let list = m.get(id);
+      if (!list) { list = keys.map((key) => statics(kind, key, moodFilter, season, lineSeason)); m.set(id, list); }
+      return list;
+    }
+
+    function makeStatics(kind, key, moodFilter, season, lineSeason) {
+      const def = registry.get(kind, key);
+      const prefer = look.theme && look.theme.prefer && look.theme.prefer[kind];
+      const s = {
+        def,
+        fits: typeof def.fits === 'function' ? def.fits : null,
+        family: def.family,
+        traits: registry.traits(kind, key),
+        weight: num(def.weight, 1),
+        mood: moodBias(def.tags, look.mood),
+        gate: def.gate ? num(look.amounts[def.gate], 0) : 1,
+        prefer: prefer ? num(prefer[key], 1) : 1,
+        season: seasonFactor(def.season, season, look.theme ? look.theme.season || null : null, lineSeason),
+        moodFilter: moodFilter ? filterWeight(look.mood, key) : 1,
+        media: !!(def.mine && def.mine.media === true),         // a derived ground of the user's media (§11.5.9)
+      };
+      s.product = s.weight * s.mood * s.gate * s.prefer * s.season * s.moodFilter;
+      return s;
+    }
+
+    function filterWeight(mood, key) {
+      const w = mood && mood.filters ? mood.filters[key] : undefined;
+      return num(w, MOOD_FILTER_DEFAULT);
+    }
+
+    // Recency factors (§4.16.4) as flags: the previous cut's value, one of the 3 cuts before it, the previous cut's
+    // family. rec = { prev, near, families } (small arrays).
+    const PREV = 1, NEAR = 2, FAMILY = 4;
+
+    // w × the flagged factors, in their fixed order, quantized; q = q6(w) is the answer when no flag is set.
+    function withRecency(w, q, flags) {
+      if (flags === 0) return q;
+      let x = w;
+      if (flags & PREV) x *= RECENT_PREV;
+      if (flags & NEAR) x *= RECENT_NEAR;
+      if (flags & FAMILY) x *= SAME_FAMILY;
+      return N.q6(x);
+    }
+
+    function recencyFlags(rec, key, family) {
+      if (!rec) return 0;
+      return (rec.prev.includes(key) ? PREV : 0) | (rec.near.includes(key) ? NEAR : 0) |
+        (family && rec.families.includes(family) ? FAMILY : 0);
+    }
+
+    function traceRecency(f, flags) {
+      Object.assign(f, { recent: flags & PREV ? RECENT_PREV : 1, near: flags & NEAR ? RECENT_NEAR : 1,
+        family: flags & FAMILY ? SAME_FAMILY : 1 });
+    }
+
+    // A candidate's weight before the recency factors (not quantized); with `f` (tracing) the factors are written
+    // into it.
+    // req.noMedia: a derived ground of the user's media weighs 0 (a segment shorter than 3 s, the title card; §11.5.9).
+    // req.calm (1 | 2, the cuts before a キメ cut, DESIGN_2_2 §3): planner/kime calmFactor (strong parts down, soft up).
+    function preWeight(req, key, s, f) {
+      let w = s.product;
+      let fit = 1, fits = 1, impact = 1, echo = 1, media = 1;
+      if (!req.noFit) {
+        fit = traitFit(s.traits, req.feat);
+        if (s.fits !== null) fits = Math.max(0, num(s.fits(req.feat, req.chosen || {}), 0));
+        w *= fit * fits;
+      }
+      if (req.feat && req.feat.impact && s.traits && s.traits.impact) { impact = IMPACT; w *= IMPACT; }
+      if (req.echo && req.echo === key) { echo = ECHO; w *= ECHO; }
+      if (req.noMedia && s.media) { media = 0; w = 0; }
+      const calm = req.calm ? KI.calmFactor(s.def, s.traits, req.calm) : 1;
+      if (calm !== 1) w *= calm;
+      if (f) {
+        Object.assign(f, { weight: s.weight, mood: s.mood, gate: s.gate, prefer: s.prefer, season: s.season,
+          moodFilter: s.moodFilter, fit, fits, impact, echo, media });
+        if (req.calm) f.calm = calm;
+      }
+      return w;
+    }
+
+    // The weight of one candidate; with `f` (tracing) the factors are written into it as well. `baseW` receives the
+    // weight without the recency factors and `refW` the weight with the reference recency `req.ref` (see pick).
+    let baseW = 0, refW = 0;
+    function weigh(req, key, f, st) {
+      const s = st || statics(req.kind, key, req.moodFilter, req.season, req.seasonPinned);
+      const w = preWeight(req, key, s, f);
+      const q = baseW = N.q6(w);
+      if (req.ref) refW = withRecency(w, q, recencyFlags(req.ref, key, s.family));
+      const flags = recencyFlags(req.recent, key, s.family);
+      if (f) traceRecency(f, flags);
+      return withRecency(w, q, flags);
+    }
+
+    // Positions of a pool's keys, per pool array (pools are cached per plan).
+    const positions = new WeakMap();
+    function positionsOf(keys) {
+      let m = positions.get(keys);
+      if (!m) { m = new Map(keys.map((k, i) => [k, i])); positions.set(keys, m); }
+      return m;
+    }
+
+    // Per-candidate PREV / NEAR flags of `rec` over a pool, in a reused array (pick is never re-entered).
+    let flagsA = new Uint8Array(64), flagsB = new Uint8Array(64);
+    function markFlags(out, n, rec, at) {
+      out.fill(0, 0, n);
+      if (!rec) return;
+      for (const key of rec.prev) { const i = at.get(key); if (i !== undefined) out[i] |= PREV; }
+      for (const key of rec.near) { const i = at.get(key); if (i !== undefined) out[i] |= NEAR; }
+    }
+
+    function familyFlag(rec, family) {
+      return rec && family && rec.families.length && rec.families.includes(family) ? FAMILY : 0;
+    }
+
+    // pick(req) → { v, w, base, ref, avoided? } | null (null when every candidate weighs 0).
+    // req = { kind, keys (the pool, sorted), feat, chosen, seed, variety, recent?, ref?, echo?, noFit?, moodFilter?,
+    // avoid?, trace?, season?, seasonPinned?, noMedia?, calm? }. score = ln(w) + variety · gumbel(seed, key); argmax, ties → the smaller key (keys arrive sorted).
+    // Two more argmaxes share the same noise (planner/cast createHistory): base = without the recency factors (the
+    // cut's natural pick) and ref = with the recency `req.ref` (the cut's reference pick).
+    // avoid (arrange and arrive, §8.2 "no identical adjacent"): when the winner is the previous cut's value and another
+    // candidate weighs > 0, the runner-up is taken. The ×0.03 recency factor alone leaves such repeats rare but
+    // possible; a pool of one still returns its part. An array of values (the cut right before a repeat that shows
+    // its source's value, planner/cast avoidOf): the best candidate that is none of them.
+    function pick(req) {
+      const variety = num(req.variety, 1);
+      let best = null, bestScore = -Infinity, bestW = 0;
+      let next = null, nextScore = -Infinity, nextW = 0;
+      const avoids = Array.isArray(req.avoid) ? req.avoid : null;
+      let alt = null, altScore = -Infinity, altW = 0;
+      let base = null, baseScore = -Infinity;
+      let ref = null, refScore = -Infinity;
+      const keys = req.keys, n = keys.length;
+      const list = poolStatics(req.kind, keys, req.moodFilter, req.season, req.seasonPinned);
+      const prefix = gumbelPrefix(req.seed);
+      if (flagsA.length < n) { flagsA = new Uint8Array(n); flagsB = new Uint8Array(n); }
+      const at = positionsOf(keys);
+      markFlags(flagsA, n, req.recent, at);
+      if (req.ref) markFlags(flagsB, n, req.ref, at);
+      for (let i = 0; i < n; i++) {
+        const key = keys[i];
+        const s = list[i];
+        const f = req.trace ? {} : null;
+        const w0 = preWeight(req, key, s, f);
+        const wb = N.q6(w0);
+        const flags = flagsA[i] | familyFlag(req.recent, s.family);
+        const w = withRecency(w0, wb, flags);
+        const wr = req.ref ? withRecency(w0, wb, flagsB[i] | familyFlag(req.ref, s.family)) : 0;
+        if (f) traceRecency(f, flags);
+        if (!(wb > 0) && !(w > 0) && !(wr > 0) && !f) continue;     // nothing to score
+        const noise = variety * gumbelAt(prefix, key);
+        // The three weights are usually equal (no recency factor applies), so their logs are shared.
+        const lw = w > 0 ? Math.log(w) : -Infinity;
+        const score = w > 0 ? lw + noise : -Infinity;
+        if (f) req.trace.push({ key, w, wBase: wb, score, f });
+        if (wb > 0) {
+          const sb = (wb === w ? lw : Math.log(wb)) + noise;
+          if (sb > baseScore) { base = key; baseScore = sb; }
+        }
+        if (wr > 0) {
+          const sr = (wr === w ? lw : wr === wb ? Math.log(wb) : Math.log(wr)) + noise;
+          if (sr > refScore) { ref = key; refScore = sr; }
+        }
+        if (!(w > 0)) continue;
+        if (score > bestScore) {
+          next = best; nextScore = bestScore; nextW = bestW;
+          best = key; bestScore = score; bestW = w;
+        } else if (score > nextScore) { next = key; nextScore = score; nextW = w; }
+        if (avoids && score > altScore && !avoids.includes(key)) { alt = key; altScore = score; altW = w; }
+      }
+      if (best === null) return null;
+      if (!req.ref || ref === null) ref = best;
+      if (avoids) {
+        return avoids.includes(best) && alt !== null ? { v: alt, w: altW, base, ref, avoided: best } : { v: best, w: bestW, base, ref };
+      }
+      if (req.avoid && best === req.avoid && next !== null) return { v: next, w: nextW, base, ref, avoided: best };
+      return { v: best, w: bestW, base, ref };
+    }
+
+    return { pick, statics, weigh };
+  }
+
+  // Gumbel-max over a plain weight table (moods and themes): keys sorted, weights q6, ties → the smaller key.
+  function pickWeighted(keys, weightOf, seed, trace) {
+    let best = null, bestScore = -Infinity;
+    for (const key of keys) {
+      const w = N.q6(weightOf(key));
+      const score = w > 0 ? Math.log(w) + R.gumbel(seed, key) : -Infinity;
+      if (trace) trace.push({ key, w, score });
+      if (w > 0 && score > bestScore) { best = key; bestScore = score; }
+    }
+    return best;
+  }
+
+  return {
+    cutSeed, slotSeed, slotPrefix, slotSeedAt, segSeed, paramStream, saltOf, moodBias, seasonFactor, traitFit, createChooser, pickWeighted,
+    gumbelPrefix, gumbelAt, paramPrefix,
+    FACTORS: Object.freeze({ RECENT_PREV, RECENT_NEAR, SAME_FAMILY, ECHO, IMPACT, MOOD_FILTER_DEFAULT, FIT_FLOOR,
+      MOOD_POWER, SEASON_ANY, SEASON_ANY_STRAY, SEASON_MATCH, SECTION_SEASON }),
+  };
+});
 /* 文字PVメーカー v2 — original work. Ranked pin resolution and part parameters (DESIGN §3.5, §4.16.8; DESIGN_2_1 §11.2.6, §11.9.2). */
 MV.def('planner/params', ['core/pins', 'core/schema', 'core/paths', 'planner/choose'], (PINS, S, P, CH) => {
   'use strict';
@@ -17165,8 +17370,8 @@ MV.def('planner/params', ['core/pins', 'core/schema', 'core/paths', 'planner/cho
   };
 });
 /* 文字PVメーカー v2 — original work. Automatic camerawork: motion speed, the shot of each cut, carry between phrases and section rigs (DESIGN_2_1 §3.9, §4.3, §4.5.7, §4.6, §4.7). */
-MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'core/shot', 'planner/choose', 'planner/params'],
-  (H, N, R, S, SHOT, CH, PA) => {
+MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'core/shot', 'planner/choose', 'planner/params',
+  'planner/kime'], (H, N, R, S, SHOT, CH, PA, KI) => {
     'use strict';
 
     // Specs of the v2.1 cut slots (§2.3); planner/cast merges them into its SLOT_SPECS, planner/fields shows them.
@@ -17283,9 +17488,15 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
     const bitsOf = (keys) => keys.reduce((m, key) => m | (1 << SHOT_POOL.indexOf(key)), 0);
     const ALL_BITS = bitsOf(SHOT_POOL), SHORT_BITS = bitsOf(SHORT_POOL), GENTLE_BITS = bitsOf(GENTLE_POOL);
     const ROLE_BITS = Object.freeze(Object.fromEntries(Object.keys(ROLE_POOLS).map((role) => [role, bitsOf(ROLE_POOLS[role])])));
+    // キメ (PV22 P3, DESIGN_2_2 §3): the quiet shots of the cut right before a キメ cut (calm level 2).
+    const CALM_BITS = bitsOf(KI.CALM.shots);
 
-    // The pool of a cut after the rules and what limited it: { bits, gentle, arrange } or a forced value
+    // The pool of a cut after the rules and what limited it: { bits, gentle, arrange, calm } or a forced value
     // { forced: { v, from, rule }, mask, arrange }. rulesWhy and maskOf give explain's view of them.
+    // キメ (DESIGN_2_2 §3): after the rules that stop the camera (the amount, a layout without camerawork), a キメ cut's
+    // shot is forced (rule kime.shot): the first of KIME.shots its pool allows (planner/kime shotFor; the whole block
+    // snaps in, or the push goes to the emphasized word); the cut right before a キメ cut (calm level 2) keeps to the
+    // quiet shots where its pool has one.
     function shotRules(st) {
       const { ctx, cut } = st;
       const A = ctx.look.amounts.camera;
@@ -17297,13 +17508,20 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
       if (cut.feat.dur < SHORT_CUT) bits &= SHORT_BITS;
       if (ROLE_BITS[cut.role] !== undefined) bits &= ROLE_BITS[cut.role];
       if (cam === 'gentle') bits &= GENTLE_BITS;
-      return { bits, gentle: cam === 'gentle', arrange };
+      if (KI.isKime(cut)) {
+        const v = KI.shotFor(cut.feat.emph, (key) => !!(bits & (1 << SHOT_POOL.indexOf(key))));
+        return { forced: { v, from: 'rule', rule: 'kime.shot' }, mask: 'kime', arrange };
+      }
+      const calm = cut.feat.calm === 2 && (bits & CALM_BITS) !== 0 && (bits & ~CALM_BITS) !== 0;
+      if (calm) bits &= CALM_BITS;
+      return { bits, gentle: cam === 'gentle', arrange, calm };
     }
 
     // The reasons of the rules (explain), in their order: forced values, then each pool that limited the cut.
     function rulesWhy(st, rules) {
       const A = st.ctx.look.amounts.camera;
       if (rules.forced) {
+        if (rules.forced.rule === 'kime.shot') return [{ code: 'rule', params: { rule: 'kime.shot' } }];
         return rules.forced.rule === 'none-camera'
           ? [{ code: 'rule', params: { rule: 'none-camera' } }, { code: 'cam.amount', params: { x: A } }]
           : [{ code: 'cam.arrange', params: { key: rules.arrange.key } }];
@@ -17312,6 +17530,7 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
       if (st.cut.feat.dur < SHORT_CUT) why.push({ code: 'cam.short', params: {} });
       if (ROLE_BITS[st.cut.role] !== undefined) why.push({ code: 'rule', params: { rule: 'role' } });
       if (rules.gentle) why.push({ code: 'cam.arrange', params: { key: rules.arrange.key } });
+      if (rules.calm) why.push({ code: 'rule', params: { rule: 'kime.calm' } });
       return why;
     }
 
@@ -17320,7 +17539,23 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
       const bit = 1 << i;
       if (st.cut.feat.dur < SHORT_CUT && !(SHORT_BITS & bit)) return 'trait';
       if (ROLE_BITS[st.cut.role] !== undefined && !(ROLE_BITS[st.cut.role] & bit)) return 'role';
-      return rules.gentle && !(GENTLE_BITS & bit) ? 'trait' : null;
+      if (rules.gentle && !(GENTLE_BITS & bit)) return 'trait';
+      return rules.calm && !(CALM_BITS & bit) ? 'kime' : null;
+    }
+
+    // kimeShot(st) → the shot a キメ cut ends its cast with (before the EXTREME overlay of stage 6): its pin (a custom
+    // shot object too), else a pinned or locked shot of its source under 「くり返しの行をそろえる」, else the value the
+    // rules force (shotRules: 'none' without camerawork or on a still layout, else the KIME.shots pick). planner/cast
+    // decides the キメ cut's lens from it (the lens comes first in the slot order), so the lens and the shot agree: the
+    // 衝撃 punch-in exactly when the camera does not move.
+    function kimeShot(st) {
+      const { ctx } = st;
+      const pin = PA.pinned(ctx.ix, 'cam.shot') ? PA.resolvePin(ctx.ix, st.at, 'cam.shot', acceptShot, null) : null;
+      if (pin) return pin.v;
+      const al = alignedShot(st);
+      if (al && al.from !== 'auto') return al.v;
+      const rules = shotRules(st);
+      return rules.forced ? rules.forced.v : NONE;
     }
 
     // The §4.7 base weight of one shot key (before mood, section, recency and echo).
@@ -17696,7 +17931,7 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
       });
       st.decide(st, 'cam.curve', SLOT_SPECS['cam.curve'], (seed, withWhy) => {
         const bias = ctx.look.mood && ctx.look.mood.tagBias ? ctx.look.mood.tagBias.fast : undefined;
-        let [keys, weights] = f.impact ? CURVES_IMPACT
+        let [keys, weights] = f.impact || f.kime ? CURVES_IMPACT
           : f.energy >= 0.65 || (typeof bias === 'number' && bias > 1.2) ? CURVES_FAST : CURVES_CALM;
         // A pullReveal on a short cut, whatever gave it (the weights, the echo, a pin): a curve that bunches the pull would
         // make it a fast zoom-out, so it takes CURVES_SHORT_PULL (NOTES "Echo of repeated lines", round 5, for the pulls
@@ -17763,7 +17998,8 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
       for (let j = 0; j < cuts.length; j++) {
         const A = j > 0 ? cuts[j - 1] : null, B = cuts[j];
         byKey.set(B.key, B);
-        if (!A || !A.line || A.line !== B.line) continue;
+        // never into a キメ cut: its hit is a fresh framing (DESIGN_2_2 §3)
+        if (!A || !A.line || A.line !== B.line || KI.isKime(B)) continue;
         const a = A.slots['cam.shot'], b = B.slots['cam.shot'];
         if (!a || !b || a.v === NONE || typeof b.v !== 'string' || b.v === NONE || !opensOnText(b.v)) continue;
         if (B.seamIn >= 0 && list[B.seamIn] && list[B.seamIn].scope !== 'text') continue;
@@ -18003,13 +18239,13 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
     }
 
     return {
-      SLOT_SPECS, CAM_SLOTS, SHOT_POOL, decideSpeed, applySpeed, decideCamera, shotWeights, carry, rigs, heirOf,
+      SLOT_SPECS, CAM_SLOTS, SHOT_POOL, decideSpeed, applySpeed, decideCamera, shotWeights, carry, rigs, heirOf, kimeShot,
       FACTORS: Object.freeze({ AMOUNT_OFF, SHORT_CUT, SHOT_RECENT, SHOT_NEAR, SHOT_ECHO, SHORT_PULL, RIG_OFF, LAST_CHORUS_AMP, AMP_MAX }),
     };
   });
 /* 文字PVメーカー v2 — original work. EXTREME camerawork in the plan: the overlay that turns the cam.extreme switch into EXTREME shots, their mirror, the EXTREME rig amplitude and the grounds it marks (DESIGN_EXTREME §2.3). */
 MV.def('planner/extreme', ['core/hash', 'core/num', 'core/pins', 'core/paths', 'core/shot', 'core/schema', 'planner/choose',
-  'planner/params'], (H, N, PINS, P, SHOT, S, CH, PA) => {
+  'planner/params', 'planner/kime'], (H, N, PINS, P, SHOT, S, CH, PA, KI) => {
   'use strict';
 
   // The switch is a pin, not a document field (DESIGN_EXTREME §2.1): the slot cam.extreme (0–1, 0 = off) pinned at
@@ -18207,6 +18443,8 @@ MV.def('planner/extreme', ['core/hash', 'core/num', 'core/pins', 'core/paths', '
   // weigh(ctx, cut, rules, rec, withWhy) → [{ key, w, wOwn, why }] over XPOOL (w = 0 outside the pool). w = q6 of every
   // factor; wOwn leaves out the recency, the pair and the echo (the cut's natural pick, which the near set of the cuts
   // 2–4 after it reads). rec = { prev, near, echo, pair, nextStart } (see recencyOf) and ahead (alignedKey).
+  // キメ (PV22 P3, DESIGN_2_2 §3): on the cut right before a キメ cut (calm level 2) the presets tagged hard or fast weigh
+  // ×KI.CALM.xstrong.
   function weigh(ctx, cut, rules, rec, withWhy) {
     const f = cut.feat;
     const mood = ctx.look.mood;
@@ -18219,7 +18457,8 @@ MV.def('planner/extreme', ['core/hash', 'core/num', 'core/pins', 'core/paths', '
       const key = XPOOL[i];
       if (!rules.pool || !rules.pool.includes(key)) { out[i] = { key, w: 0, wOwn: 0, why: withWhy ? [] : null }; continue; }
       const sec = bySection && bySection[key] ? bySection[key] : 1;
-      const own = baseWeight(key, f, orient, rec.nextStart, beats) * moods[i] * sec;
+      let own = baseWeight(key, f, orient, rec.nextStart, beats) * moods[i] * sec;
+      if (f.calm === 2 && calmStrong(key)) own *= KI.CALM.xstrong;
       let w = own;
       if (rec.pair && key === 'whipPan') w *= PAIR;
       if (rec.echo === key) w *= ECHO;
@@ -18237,6 +18476,11 @@ MV.def('planner/extreme', ['core/hash', 'core/num', 'core/pins', 'core/paths', '
       out[i] = { key, w: N.q6(w), wOwn: N.q6(own), why };
     }
     return out;
+  }
+
+  function calmStrong(key) {
+    const tags = SHOT.XSHOTS[key].tags || [];
+    return tags.includes('hard') || tags.includes('fast');
   }
 
   // The overlay's own window (its recency and echo read nothing of the cast history): one row per cut in time order,
@@ -18394,8 +18638,11 @@ MV.def('planner/extreme', ['core/hash', 'core/num', 'core/pins', 'core/paths', '
       const prefix = shotPrefix(ctx, cut, salts);
       // 「くり返しの行をそろえる」: the preset its source shows, where it fits the cut (weighs > 0 there)
       const src = alignedSource(ctx, cut, salts);
-      const same = sameAs(win, src, rec.prev, list);
-      const got = same ? { key: same.key, nat: same.key } : argmax(list, prefix);
+      // キメ (DESIGN_2_2 §3): a キメ cut takes the strongest move its pool has (crashZoom, on a short cut punchHit), as
+      // a fact of the cut (its window row as an aligned pick's); else the usual pick.
+      const xk = KI.isKime(cut) ? KI.xshotFor(rules.pool) : null;
+      const same = xk ? null : sameAs(win, src, rec.prev, list);
+      const got = xk ? { key: xk, nat: xk } : same ? { key: same.key, nat: same.key } : argmax(list, prefix);
       if (got.key === null) { win.push(cut, null, false, null); continue; }
       const m = same ? same.m : mirrorOf(got.key, rec, prefix);
       win.push(cut, got.key, m, got.nat);
@@ -18405,7 +18652,8 @@ MV.def('planner/extreme', ['core/hash', 'core/num', 'core/pins', 'core/paths', '
       neutral(ctx, cut, x);
       if (t) {
         const own = list[XPOOL.indexOf(got.key)];
-        const why = same ? [{ code: 'repeat.same', params: { cut: src.key } }] : rules.why.concat(own.why);
+        const why = xk ? [{ code: 'rule', params: { rule: 'kime.x' } }]
+          : same ? [{ code: 'repeat.same', params: { cut: src.key } }] : rules.why.concat(own.why);
         t.override = { rule: 'extreme', decision: d, why: [{ code: 'cam.extreme', params: { x } }].concat(why) };
         t.candidates = list.map((c) => ({ key: c.key, w: c.w,
           masked: c.w > 0 || rules.pool.includes(c.key) ? null : rules.mask }));
@@ -18920,7 +19168,8 @@ MV.def('planner/look', ['core/hash', 'core/color', 'core/num', 'core/schema', 'c
 });
 /* 文字PVメーカー v2 — original work. Casting: every cut slot in the FROZEN order, from pins, rules or the chooser (DESIGN §4.16.2, §3.4.3; DESIGN_2_1 §3.9, §4.9). */
 MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 'core/pins', 'core/paths', 'planner/choose',
-  'planner/params', 'planner/look', 'planner/camera'], (S, REG, R, N, PINS, P, CH, PA, LK, CAM) => {
+  'planner/params', 'planner/look', 'planner/camera', 'planner/kime', 'planner/extreme'],
+  (S, REG, R, N, PINS, P, CH, PA, LK, CAM, KI, XT) => {
     'use strict';
 
     const LIST_KINDS = Object.freeze(['ornament', 'filter']);
@@ -18948,6 +19197,9 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       'el.hide': { type: 'bool' },
       // 「くり返しの行をそろえる」 (DESIGN_2_1 §4.10): pinned at work or line scope, never at a cut (core/commands).
       'repeat.same': { type: 'bool' },
+      // キメ (DESIGN_2_2 §3): the mark of a line (line scope only) and 「キメの前を静かにする」 (work scope only; absent = on).
+      kime: { type: 'bool' },
+      'kime.calm': { type: 'bool' },
     }, CAM.SLOT_SPECS));
     const SEASON_SPEC = LK.LOOK_SPECS.season;
     const AVOID_SPEC = Object.freeze({ type: 'partRefs' });
@@ -19092,7 +19344,10 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     // createHistory; win: the winner before req.avoid, which v differs from only when the winner was avoided).
     // req = { kind, slot, path, feat, role, orient, script, scope, chosen, seed, recent, ref, echo, avoid, list, orNone,
     // cutKey, trace, silent, cond (the line conditions of lineCond; default the work's), noMedia (derived media grounds
-    // weigh 0 here, DESIGN_2_1 §11.5.9) }.
+    // weigh 0 here, DESIGN_2_1 §11.5.9), only, calm (キメ, DESIGN_2_2 §3: see onlyKeys; calm = the chooser factor of the
+    // cuts before a キメ cut, planner/kime calmFactor) }.
+    // A set `only` (an array: a キメ set, already filtered by the cut's own pool) whose members all weigh 0 gives its
+    // first member by rule (never the kind's fallback, which the set may not contain).
     // Stages (§4.16.4, §3.8): the full weights; the same pool without traitFit and fits; the pool without the text
     // traits (orient, script, aspect); then the kind's fallback — or 'none' for a list slot whose fallback does not
     // serve the cut's role, and for atmos (orNone). pool-empty is reported on lyric cuts, and elsewhere only when the
@@ -19106,7 +19361,7 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
         kind: req.kind, keys: null, noFit: false, trace: null, feat: req.feat, chosen: req.chosen, seed: req.seed,
         variety: ctx.look.variety, recent: req.recent, ref: req.ref || null, echo: req.echo,
         moodFilter: req.kind === 'filter', avoid: req.avoid || null, season: cond.season, seasonPinned: cond.pinned,
-        noMedia: !!req.noMedia,
+        noMedia: !!req.noMedia, calm: req.calm || 0,
       };
       const sub = req.poolId !== undefined ? req.poolId
         : (req.role || '') + '|' + (req.orient || '') + '|' + (req.script || '') + '|' + (ctx.aspect || '');
@@ -19115,7 +19370,7 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       for (let stage = 0; stage < 3; stage++) {
         const entry = stage < 2 ? full
           : poolEntry(ctx, req.kind, (req.role || '') + '|||', req.role, undefined, undefined, undefined, req.scope, cond);
-        const keys = entry.keys;
+        const keys = req.only ? onlyKeys(ctx, req.kind, entry.keys, req.only) : entry.keys;
         if (!keys.length) continue;
         ask.keys = keys;
         ask.noFit = stage > 0;
@@ -19135,6 +19390,10 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
         if (trace) trace.stage = 'none';
         return { v: 'none', from: 'auto', stage: 'none' };
       }
+      if (Array.isArray(req.only) && req.only.length) {
+        if (trace) trace.stage = 'rule';
+        return { v: req.only[0], from: 'rule', stage: 'rule', rule: 'kime.set' };
+      }
       const fb = ctx.registry.fallback(req.kind);
       if (req.list && !serves(ctx, req.kind, fb, req.role)) {
         if (trace) trace.stage = 'none';
@@ -19146,6 +19405,25 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       }
       if (trace) trace.stage = 'fallback';
       return { v: fb, from: 'fallback', stage: 'fallback' };
+    }
+
+    // The keys of a pool that `only` lets through: an array (a キメ set) or a predicate with an `id` (the screen effects
+    // and transitions that do not flash, the calm lens); one filtered array per plan, pool array and id (ctx.kimePools,
+    // made by planner/plan when the plan has a キメ cut), so the chooser's per-pool statics stay cached. A predicate
+    // with `keep` (the calm lens) lets the whole pool through where it would leave nothing.
+    function onlyKeys(ctx, kind, keys, only) {
+      const m = ctx.kimePools || (ctx.kimePools = new Map());
+      let byPool = m.get(keys);
+      if (!byPool) { byPool = new Map(); m.set(keys, byPool); }
+      const fn = typeof only === 'function';
+      const id = fn ? only.id : only.join(',');
+      let out = byPool.get(id);
+      if (!out) {
+        out = keys.filter(fn ? only : (k) => only.includes(k));
+        if (!out.length && fn && only.keep) out = keys;
+        byPool.set(id, out);
+      }
+      return out;
     }
 
     // --- history (recency and echo) -----------------------------------------------------------------------------
@@ -19391,8 +19669,9 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     // run of two). A copy takes the line at its place in the first run of that line: the first copy for a copy sung
     // alone, the second of the first run for the second of a later run; cut by cut, the cut at the same offset. The
     // first run's own copies are chosen (so a line sung twice in a row does not play the same thing back to back), and
-    // so is a copy past the end of the first run. The two cuts must have the same text, role and impact mark (another
-    // split, or an impact the first copy lacks, keeps the cut's own look), and the opt-in must resolve on at the copy.
+    // so is a copy past the end of the first run. The two cuts must have the same text, role, impact mark and キメ mark
+    // (another split, or a mark the first copy lacks, keeps the cut's own look; DESIGN_2_2 §3), and the opt-in must
+    // resolve on at the copy.
     function alignments(ctx, cuts) {
       if (!PA.pinned(ctx.ix, REPEAT)) return null;
       const out = new Map(), byKey = new Map(), runs = new Map();
@@ -19416,7 +19695,8 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
         }
         if (source === null) continue;
         const src = byKey.get(source + cut.key.slice(cut.key.indexOf('~')));
-        if (!src || src.text !== cut.text || src.role !== cut.role || !!src.impact !== !!cut.impact) continue;
+        if (!src || src.text !== cut.text || src.role !== cut.role || !!src.impact !== !!cut.impact ||
+          KI.isKime(src) !== KI.isKime(cut)) continue;
         const pin = PA.resolvePin(ctx.ix, atOfCut(cut), REPEAT, acceptRepeat, null);
         if (pin && pin.v === true) out.set(cut.key, src);
       }
@@ -19591,6 +19871,10 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     function pinDecision(pin) { return { v: pin.v, from: pin.from, by: pin.by }; }
 
     // A part slot: pin (cut > line > work) → rule (forced value) → chooser; then its parameters.
+    // キメ (DESIGN_2_2 §3): on a キメ cut the automatic pick stays in the キメ set of the kind (kimeRule; pins and locks
+    // win), a few kinds are forced by rule, and a screen effect never flashes unless the cut is also 見せ場; on the
+    // cuts before a キメ cut the motions and the lens weigh calm (planner/kime calmFactor), and the lens right before it
+    // leaves out the shaking and beat families.
     function decidePart(st, kind, idx, opts) {
       const o = opts || {};
       const { ctx, cut, at } = st;
@@ -19600,14 +19884,27 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       const trace = tracing(st, slot);
       const pin = !PA.pinned(ctx.ix, slot) ? null : PA.resolvePin(ctx.ix, at, slot, o.force ? () => ({ na: true })
         : acceptPart(ctx, kind, cut.role, { none: list, scope: kind === 'ornament' ? 'cut' : null }), ctx.warn);
+      let force = o.force, rule = o.rule;
+      let km = null, only = null, calm = 0;
+      if (!pin && !force) {
+        if (cut.kime === true) {
+          if (!list) km = kimeRule(st, kind);
+          else if (kind === 'filter' && !cut.impact) only = noFlashOf(ctx.registry);
+          if (km && km.force) { force = km.force; rule = km.rule; km = null; }
+          else if (km && km.only) only = km.only;
+        } else if (cut.feat.calm && !list && KI.calmKind(kind)) {
+          calm = cut.feat.calm;
+          if (calm === 2 && kind === 'lens') only = calmLensOf(ctx.registry);
+        }
+      }
       let d, ad = null;
       if (pin) {
         pinWarnings(ctx, kind, pin.v, pin, st.cond);
         d = pinDecision(pin);
         if (trace) Object.assign(shadow(st, kind, slot, seed, list, trace), { kind, stage: 'pin', pin });
-      } else if (o.force) {
-        d = { v: o.force, from: 'rule' };
-        if (trace) Object.assign(shadow(st, kind, slot, seed, list, trace), { kind, stage: 'rule', rule: o.rule });
+      } else if (force) {
+        d = { v: force, from: 'rule' };
+        if (trace) Object.assign(shadow(st, kind, slot, seed, list, trace), { kind, stage: 'rule', rule });
       } else if (st.align && (ad = alignedPart(st, kind, slot, list)) !== null) {
         d = { v: ad.v, from: 'auto' };
         if (trace) Object.assign(shadow(st, kind, slot, seed, list, trace), { kind, stage: 'auto', why: [alignWhy(st)] });
@@ -19616,12 +19913,18 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
         const recent = st.natural ? null : st.hist.recent(kind, slot, own);
         const ref = st.natural ? null : st.hist.reference(kind, slot, own);
         const echo = st.hist.echo(cut.feat.repeatOf, slot);
-        if (trace) Object.assign(trace, { kind, recent, echo });
+        if (trace) {
+          Object.assign(trace, { kind, recent, echo });
+          if (km) { trace.kime = true; if (km.limited) trace.kimeLimited = true; }
+          // (the calm lens may let its whole pool through, so its alternatives are not masked by it)
+          if (only && !only.keep) { trace.only = only; if (cut.kime === true && list) trace.noFlash = 'filter'; }
+          if (calm) trace.calm = calm;
+        }
         const got = chooseAuto(ctx, {
           kind, slot, path: 'cut/' + cut.key + ':' + slot, feat: cut.feat, role: cut.role, orient: st.chosen.orient,
           script: cut.feat.script, scope: kind === 'ornament' ? 'cut' : null, chosen: st.chosen, seed, recent, echo,
           list, cutKey: cut.key, trace, silent: st.natural, ref, poolId: poolIdOf(st), cond: st.cond,
-          avoid: AVOID_REPEAT.has(kind) && !st.natural ? avoidOf(st, slot) : null,
+          avoid: AVOID_REPEAT.has(kind) && !st.natural ? avoidOf(st, slot) : null, only, calm,
         });
         d = { v: got.v, from: got.from };
         if (got.base && got.base !== got.v) st.base[slot] = got.base;
@@ -19636,6 +19939,7 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
         d.p = p;
         if (pfrom) d.pfrom = pfrom;
         if (MOTION_KINDS.includes(kind)) CAM.applySpeed(st, kind, d);
+        if (cut.kime === true) kimeParams(st, kind, d);
         // The source's parameters wherever the cut shows the source's part: taken from it, or given by the same rule (a
         // layout that moves the text itself forces the same motions).
         const same = ad || (st.align && !pin ? alignedDecision(st, slot) : null);
@@ -19644,6 +19948,132 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       if (trace) trace.decision = d;
       setDecision(st, slot, d);
       return d;
+    }
+
+    // --- キメ (PV22 P3, DESIGN_2_2 §3) ------------------------------------------------------------------------------
+
+    // kimeRule(st, kind) → what a キメ cut's automatic pick of one (non-list) kind is: { only } (the chooser picks inside
+    // the set), { limited: true } (no member is in the cut's own pool — the registry, its role, orientation, script
+    // and aspect, the user's part filters, the gates, the season and the line's avoid list: the usual chooser),
+    // { force, rule } (registry.fallback of the kind, by rule), or null (the kind is left alone). No literal part key is
+    // ever forced, so a registry without the キメ parts plans the cut as usual.
+    function kimeRule(st, kind) {
+      const { ctx, cut } = st;
+      const K = KI.KIME;
+      if (kind === 'arrange') {
+        const c = cut.feat.cells;
+        return restrictTo(st, kind, c >= K.bleedCells[0] && c <= K.bleedCells[1] ? K.arrange : K.bigOnly);
+      }
+      if (kind === 'arrive') return restrictTo(st, kind, hameArrive(st) || K.arrive);
+      if (kind === 'dwell') return restrictTo(st, kind, ctx.bpm ? K.dwellBeats : K.dwell);
+      if (kind === 'depart') return { force: ctx.registry.fallback('depart'), rule: 'kime.depart' };
+      if (kind === 'lens') {
+        // the camera moves (the shot, or EXTREME): the fixed frame, so the camera has one idea; it does not: the 衝撃
+        // punch-in keeps the hit (the lens is decided before the shot, so moves() asks what the shot will be)
+        const r = moves(st) ? null : restrictTo(st, kind, K.lensKick);
+        return r && r.only ? r : { force: ctx.registry.fallback('lens'), rule: 'kime.lens' };
+      }
+      return null;
+    }
+
+    function restrictTo(st, kind, keys) {
+      const { ctx, cut } = st;
+      const pool = poolEntry(ctx, kind, poolIdOf(st), cut.role, st.chosen.orient, cut.feat.script, ctx.aspect, null, st.cond).keys;
+      const only = keys.filter((k) => pool.includes(k));
+      return only.length ? { only } : { limited: true };
+    }
+
+    // 歌ハメ on a キメ line (P6, DESIGN_2_2 §3.4 l): where P6 marks the cut state `hame` with its entrance set
+    // (st.hame.arrive), the キメ entrances that are in it (when any), else null (the キメ set as it is).
+    function hameArrive(st) {
+      const h = st.hame;
+      if (!h || !Array.isArray(h.arrive)) return null;
+      const both = KI.KIME.arrive.filter((k) => h.arrive.includes(k));
+      return both.length ? both : null;
+    }
+
+    // moves(st) → whether the camera will move on this キメ cut: its shot pin (anything but 'none'), else EXTREME on here
+    // on a layout that allows camerawork (the overlay replaces the shot in stage 6), else the shot planner/camera will
+    // give it (CAM.kimeShot, the same function its shot rules use).
+    function moves(st) {
+      const { ctx } = st;
+      const pin = PA.pinned(ctx.ix, 'cam.shot') ? PA.resolvePin(ctx.ix, st.at, 'cam.shot', acceptShotPin, null) : null;
+      if (pin) return pin.v !== 'none';
+      const arrange = st.chosen.arrange ? ctx.registry.get('arrange', st.chosen.arrange) : null;
+      if (XT.valueAt(ctx.ix, st.at) > 0 && !(arrange && arrange.cam === 'none')) return true;
+      return CAM.kimeShot(st) !== 'none';
+    }
+    const acceptShotPin = PA.acceptSpec(CAM.SLOT_SPECS['cam.shot']);
+
+    // The screen effects that do not flash (no gate 'flash'): the pool of a screen effect on a キメ cut without 見せ場.
+    const NO_FLASH = new WeakMap();
+    function noFlashOf(reg) {
+      let f = NO_FLASH.get(reg);
+      if (!f) {
+        f = Object.assign((k) => { const d = reg.get('filter', k); return !d || d.gate !== 'flash'; }, { id: 'kime.noFlash' });
+        NO_FLASH.set(reg, f);
+      }
+      return f;
+    }
+
+    // The lenses of the cut right before a キメ cut (calm level 2): no shaking or beat family (the whole pool where that
+    // leaves nothing).
+    const CALM_LENS = new WeakMap();
+    function calmLensOf(reg) {
+      let f = CALM_LENS.get(reg);
+      if (!f) {
+        f = Object.assign((k) => { const d = reg.get('lens', k); return !d || !KI.CALM.lensDeny.includes(d.family); },
+          { id: 'kime.calm2', keep: true });
+        CALM_LENS.set(reg, f);
+      }
+      return f;
+    }
+
+    // キメ parameters by rule (pfrom 'rule'), where nothing pinned them: a fast landing (dur ≤ 0.4 s, and the whole line
+    // lands within 0.8 s: planner/kime landEach), no shake unless the cut is also 見せ場, a readable bleed (overflow 1.08,
+    // centred) and a strong size contrast with the whispers under the giant. On a cut where 歌ハメ applies (st.hame, P6)
+    // the sung times own the entrance's timing: dur and each are left to it.
+    function kimeParams(st, kind, d) {
+      if (!d.p || d.v === 'none') return;
+      const { ctx, cut } = st;
+      const K = KI.KIME;
+      const specs = ctx.registry.params(kind, d.v) || [];
+      let pfrom = null;
+      const set = (name, v) => {
+        if (!(name in d.p)) return;
+        const from = d.pfrom ? d.pfrom[name] : undefined;
+        if (from !== undefined && from !== 'rule') return;
+        const item = specs.find((e) => e.name === name);
+        const c = item ? S.coerce(item.spec, v) : v;
+        if (c === undefined || c === d.p[name]) return;
+        d.p[name] = c;
+        (pfrom || (pfrom = Object.assign({}, d.pfrom || {})))[name] = 'rule';
+      };
+      if (kind === 'arrive') {
+        const m = K.arriveMax[d.v];
+        if (m && !st.hame) {
+          if (typeof d.p.dur === 'number') set('dur', Math.min(d.p.dur, m.dur));
+          if (typeof d.p.each === 'number') {
+            const def = ctx.registry.get(kind, d.v);
+            const u = cut.feat.units || {};
+            const unit = def && def.unit ? def.unit : 'glyph';
+            const units = unit === 'word' ? u.word : unit === 'line' || unit === 'run' ? u.line : u.glyph;
+            set('each', KI.landEach(d.p.each, d.p.dur, units || 1, m.each));
+          }
+        }
+        if (d.v === 'stampPress' && !cut.impact) set('shake', 0);
+      } else if (kind === 'lens' && d.v === 'impactKick' && !cut.impact) set('shake', 0);
+      else if (kind === 'arrange' && d.v === 'edgeBleed') {
+        set('overflow', K.bleed.overflow);
+        set('anchor', K.bleed.anchor);
+      } else if (kind === 'arrange' && d.v === 'giantWhisper') {
+        if (typeof d.p.ratio === 'number') set('ratio', Math.max(d.p.ratio, K.giant.ratioMin));
+        set('tuck', K.giant.tuck);
+      }
+      if (!pfrom) return;
+      const sorted = {};
+      for (const k of Object.keys(pfrom).sort()) sorted[k] = pfrom[k];
+      d.pfrom = sorted;
     }
 
     // For explain: what the chooser would weigh here if the slot were automatic (alternatives of a pinned slot).
@@ -19717,15 +20147,33 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       }, (v) => allowed.includes(v));
     }
 
+    // キメ (DESIGN_2_2 §3): a キメ cut takes the heading face by rule, and a size its layout shows big: はみ出し at its
+    // frame-filling ×1 (its overflow cap holds only there), 大と小 never below ×1, any other layout (a pinned one, or one
+    // the キメ set could not give) ×1.3. The cuts before a キメ cut are set slightly smaller (×0.97, ×0.94).
     function decideText(st) {
       const { ctx, cut } = st;
+      const K = KI.KIME;
       decideValue(st, 'text.face', SLOT_SPECS['text.face'], (seed) => {
+        if (cut.kime === true) return { v: K.face, from: 'rule', rule: 'kime.face' };
         const serif = FACE_WEIGHTS.serif * (st.chosen.orient === 'v' ? 2 : 1);
         const v = R.fromSeed(seed).weighted(['display', 'serif', 'body'], [FACE_WEIGHTS.display, serif, FACE_WEIGHTS.body]);
         return { v, from: 'auto' };
       });
-      decideValue(st, 'text.scale', SLOT_SPECS['text.scale'],
-        () => ({ v: S.coerce(SLOT_SPECS['text.scale'], 1 + (cut.feat.energy - 0.5) * 0.2), from: 'auto' }));
+      decideValue(st, 'text.scale', SLOT_SPECS['text.scale'], () => {
+        const auto = 1 + (cut.feat.energy - 0.5) * 0.2;
+        if (cut.kime === true) {
+          const a = st.chosen.arrange;
+          if (a === 'edgeBleed') return { v: S.coerce(SLOT_SPECS['text.scale'], K.scaleFloor), from: 'rule', rule: 'kime.full' };
+          if (a === 'giantWhisper') {
+            const v = S.coerce(SLOT_SPECS['text.scale'], auto);
+            return v < K.scaleFloor ? { v: S.coerce(SLOT_SPECS['text.scale'], K.scaleFloor), from: 'rule', rule: 'kime.full' }
+              : { v, from: 'auto' };
+          }
+          return { v: S.coerce(SLOT_SPECS['text.scale'], K.scalePinned), from: 'rule', rule: 'kime.scale' };
+        }
+        const calm = cut.feat.calm || 0;
+        return { v: S.coerce(SLOT_SPECS['text.scale'], calm ? auto * KI.CALM.scale[calm] : auto), from: 'auto' };
+      });
       decideValue(st, 'text.ink', SLOT_SPECS['text.ink'], () => ({ v: 'ink', from: 'auto' }));
       decideValue(st, 'text.style', SLOT_SPECS['text.style'], () => {
         const style = S.coerce(SLOT_SPECS['text.style'], ctx.look.theme.style);
@@ -19745,16 +20193,23 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     }
 
     // ornament.count / filter.count (§4.16.4), raised to i + 1 by a part pinned on slot i (§3.4.3), then the slots.
+    // キメ (DESIGN_2_2 §3): a キメ cut keeps at most one decoration and one screen effect (plus the 見せ場 effect), rule
+    // kime.count; the cuts before it at most one (level 1) or none (level 2), rule kime.calm.
     function decideList(st, kind) {
       const { ctx, cut, at } = st;
       const countSlot = kind + '.count';
       const a = ctx.look.amounts;
       const count = decideValue(st, countSlot, SLOT_SPECS[countSlot], (seed) => {
         const r = R.stream(seed, 'count').next();
-        const v = kind === 'ornament'
+        const base = kind === 'ornament'
           ? Math.min(LIST_MAX, Math.floor(a.ornament * 2.5 + r))
-          : Math.min(2, Math.floor(0.8 * filterDrive(ctx.look) + r)) + (cut.impact && a.flash > 0 ? 1 : 0);
-        return { v, from: 'auto' };
+          : Math.min(2, Math.floor(0.8 * filterDrive(ctx.look) + r));
+        const extra = kind === 'filter' && cut.impact && a.flash > 0 ? 1 : 0;
+        const kime = cut.kime === true, calm = cut.feat.calm || 0;
+        const max = kime ? (kind === 'ornament' ? KI.KIME.ornMax : KI.KIME.filterMax)
+          : calm ? KI.CALM[kind === 'ornament' ? 'ornMax' : 'filterMax'][calm] : Infinity;
+        if (base > max) return { v: max + extra, from: 'rule', rule: kime ? 'kime.count' : 'kime.calm' };
+        return { v: base + extra, from: 'auto' };
       });
       let need = 0;
       let accept = null;
@@ -20224,12 +20679,135 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     return {
       SLOT_SPECS, LIST_KINDS, MOTION_KINDS, castCut, createHistory, chooseAuto, poolOf, acceptPart, pinWarnings, serves,
       filterAllows, lookAx, lockFreeCtx, lockFreeIndex, beginCasts, castKeys, intern, deepFreeze, historyRow, lineCond,
-      isChoice, alignments, neighboursOf, alignedSource, REPEAT,
+      isChoice, alignments, neighboursOf, alignedSource, REPEAT, onlyKeys,
     };
   });
+/* 文字PVメーカー v2 — original work. The one table of new-work defaults: switches and strengths whose default depends on the document's generation (look.gen, DESIGN_2_2 §0). */
+MV.def('planner/rules', ['core/pins', 'planner/params'], (PINS, PA) => {
+  'use strict';
+
+  // A document made by core/doc newDoc() carries look.gen (D.GEN = 1); older documents, opened files and every
+  // fixture have none. Each row below says what its slot is when nothing pins it: `on` in a document of generation ≥ 1,
+  // `off` in an older one — or, for a row with a parent, whatever the parent resolves to (a member of a switch group
+  // follows the group's switch). A pin always wins, so 固定を外す returns a switch to the document's default, and
+  // turning a switch on in an older document is one work (or line) pin.
+  //
+  // Row fields: slot; parent (a row slot, or null); scopes (where a pin of the slot may live: 'work', 'line'); spec
+  // (the value's ParamSpec, core/schema); on, off (the defaults; null = automatic, decided elsewhere).
+  // Packages add their rows here (P1 typesetting, P2 conventions, P4 glyph motion, P5 timing, P6 歌ハメ).
+  const BOOL = Object.freeze({ type: 'bool' });
+  const STRENGTH = Object.freeze({ type: 'num', min: 0, max: 1, step: 0.05 });
+  const HEAD = Object.freeze({ type: 'enum', of: Object.freeze(['line', 'phrase', 'none']) });
+  const FX_MAX = Object.freeze({ type: 'int', min: 2, max: 8 });
+  const WORK = Object.freeze(['work']);
+  const WORK_LINE = Object.freeze(['work', 'line']);
+
+  function row(slot, parent, scopes, spec, on, off) {
+    return Object.freeze({ slot, parent, scopes, spec, on, off });
+  }
+
+  const ROWS = Object.freeze([
+    // P2 文字PVの定石: one group switch and its members (DESIGN_2_2 §2)
+    row('pv.rules', null, WORK, BOOL, true, false),
+    row('repeat.same', 'pv.rules', WORK_LINE, BOOL, true, false),
+    row('pv.kit', 'pv.rules', WORK, BOOL, true, false),
+    row('pv.alternate', 'pv.rules', WORK, BOOL, true, false),
+    row('pv.arc', 'pv.rules', WORK, BOOL, true, false),
+    row('pv.fxCap', 'pv.rules', WORK, BOOL, true, false),
+    row('pv.fxMax', null, WORK, FX_MAX, null, null),
+    // P1 文字組み (DESIGN_2_2 §1)
+    row('text.kana', null, WORK_LINE, STRENGTH, 0.7, 0),
+    row('text.jump', null, WORK_LINE, STRENGTH, 0.5, 0),
+    row('text.latin', null, WORK_LINE, STRENGTH, 0.5, 0),
+    row('text.head', null, WORK_LINE, HEAD, 'line', 'line'),
+    // P4 モーフ・太さ (DESIGN_2_2 §4)
+    row('morph.auto', null, WORK_LINE, BOOL, true, false),
+    row('weight.auto', null, WORK, BOOL, true, false),
+    // P3 キメ (DESIGN_2_2 §3): 「キメの前を静かにする」, on in every generation (it acts only next to a line the user marked
+    // キメ, line/<id>:kime, which is a line pin of its own and not a table row)
+    row('kime.calm', null, WORK, BOOL, true, true),
+  ]);
+
+  const BY_SLOT = new Map(ROWS.map((r) => [r.slot, r]));
+  const SPECS = Object.freeze(Object.fromEntries(ROWS.map((r) => [r.slot, r.spec])));
+
+  function isRule(slot) { return BY_SLOT.has(slot); }
+  function rowOf(slot) { return BY_SLOT.get(slot) || null; }
+  function scopesOf(slot) { const r = BY_SLOT.get(slot); return r ? r.scopes : null; }
+
+  // gen(doc) → the document's generation: look.gen when it is an integer ≥ 0, else 0.
+  function gen(doc) {
+    const g = doc && doc.look ? doc.look.gen : undefined;
+    return Number.isInteger(g) && g >= 0 ? g : 0;
+  }
+
+  // The pin index of a document when the caller has none (planner ctx.ix is preferred: it is cached per document).
+  function indexOf(doc, ix) { return ix || PINS.index((doc && doc.pins) || {}); }
+
+  const accepts = new Map();
+  function acceptOf(slot) {
+    let a = accepts.get(slot);
+    if (!a) {
+      const spec = BY_SLOT.get(slot).spec;
+      // a cut pin never applies (refused by core/commands; a stray one in a hand-edited file is skipped)
+      const coerce = PA.acceptSpec(spec);
+      a = (v, rank) => (rank === 'pin:cut' ? { na: true } : coerce(v));
+      accepts.set(slot, a);
+    }
+    return a;
+  }
+
+  // pinAt(ix, slot, at) → the pin that applies at a place ({ lineId } for a line, nothing for the whole work), coerced by
+  // the row's spec: { v, from, by, at } | null. A line pin counts only where the row allows line scope.
+  function pinAt(ix, slot, at) {
+    const r = BY_SLOT.get(slot);
+    if (!r || !ix || !PA.pinned(ix, slot)) return null;
+    const lineId = at && at.lineId && r.scopes.includes('line') ? at.lineId : null;
+    return PA.resolvePin(ix, { cutKey: null, pinCutKey: null, lineId }, slot, acceptOf(slot), null);
+  }
+
+  // defaultValue(doc, ix, slot) → what the slot is at the whole work without its own pin: the parent's value, else
+  // `on` (generation ≥ 1) or `off`. undefined for a slot that is not in the table.
+  function defaultValue(doc, ix, slot) {
+    const r = BY_SLOT.get(slot);
+    if (!r) return undefined;
+    if (r.parent) return value(doc, ix, r.parent);
+    return gen(doc) >= 1 ? r.on : r.off;
+  }
+
+  // value(doc, ix, slot) → the slot at the whole work: its work pin (coerced), else defaultValue.
+  function value(doc, ix, slot) {
+    const r = BY_SLOT.get(slot);
+    if (!r) return undefined;
+    const pin = pinAt(indexOf(doc, ix), slot, null);
+    return pin ? pin.v : defaultValue(doc, ix, slot);
+  }
+
+  // valueAt(doc, ix, slot, lineId) → the slot at a line: its line pin (where allowed), else value(doc, ix, slot).
+  function valueAt(doc, ix, slot, lineId) {
+    const r = BY_SLOT.get(slot);
+    if (!r) return undefined;
+    const pin = lineId ? pinAt(indexOf(doc, ix), slot, { lineId }) : null;
+    return pin ? pin.v : value(doc, ix, slot);
+  }
+
+  // hasDefault(slot) → whether new and older documents differ for the slot (the inspector says 自動（オン）/自動（オフ）
+  // only for those).
+  function hasDefault(slot) {
+    const r = BY_SLOT.get(slot);
+    if (!r) return false;
+    return r.parent ? hasDefault(r.parent) : r.on !== r.off;
+  }
+
+  function sameValue(a, b) {
+    return typeof a === 'number' && typeof b === 'number' ? Math.abs(a - b) < 1e-9 : a === b;
+  }
+
+  return { ROWS, SPECS, isRule, rowOf, scopesOf, gen, defaultValue, value, valueAt, hasDefault, sameValue };
+});
 /* 文字PVメーカー v2 — original work. The cutter: lines → cut skeletons, special cuts, windows, pin reattachment (DESIGN §4.16.5). */
 MV.def('planner/segment', ['core/script', 'core/num', 'core/pins', 'core/rng', 'engine/text/breaker', 'planner/choose',
-  'planner/params'], (S, N, PINS, R, BR, CH, PA) => {
+  'planner/params', 'planner/kime'], (S, N, PINS, R, BR, CH, PA, KI) => {
   'use strict';
 
   const BASE = Object.freeze({ '16:9': 14, '21:9': 16, '4:3': 12, '1:1': 10, '4:5': 10, '3:4': 9, '9:16': 8 });
@@ -20241,6 +20819,9 @@ MV.def('planner/segment', ['core/script', 'core/num', 'core/pins', 'core/rng', '
   const TITLE_ROOM = 1.5, TITLE_MIN = 0.8, TITLE_GAP = 0.2;
   const INTRO_ROOM = 3, OUTRO_ROOM = 3, GAP_MIN = 2.8;
   const SPECIAL_ROLES = new Set(['title', 'interlude', 'outro']);
+  // キメ (PV22 P3, DESIGN_2_2 §3): a line marked キメ (line.kime, planner/plan withKimePins) plays as one cut up to this
+  // many cells: 16:9 28, 21:9 30, 4:3 24, 1:1 and 4:5 20, 3:4 18, 9:16 16.
+  function kimeMaxCells(aspect) { return Math.min(KI.KIME.cellsCap, 2 * (BASE[aspect] || BASE['16:9'])); }
 
   // Specs of the line- and cut-scope timing slots (§3.4.2, §3.4.3) and the v2.1 line slots season and avoid
   // (DESIGN_2_1 §2.3), shown by planner/fields.
@@ -20408,6 +20989,9 @@ MV.def('planner/segment', ['core/script', 'core/num', 'core/pins', 'core/rng', '
     const pin = PA.resolvePin(ctx.ix, { pinCutKey: null, lineId: line.id, cutKey: null }, 'split',
       (v, rank) => (rank === 'pin:line' ? acceptSplit(text)(v) : { na: true }), ctx.warn);
     if (pin) return { starts: pin.v, from: pin.from, by: pin.by, focus: givenFocus(ctx, line, pin.v, dur) };
+    // キメ: the whole line at once, whatever its '/' marks or the auto cutter would do (a split pin, the user's or a
+    // lock's, wins above). A longer line keeps its pieces; its focus piece, else its last, is the キメ cut (cutsOfLine).
+    if (line.kime && S.cells(text) <= kimeMaxCells(ctx.aspect)) return { starts: [0], from: 'kime', focus: null };
     if (line.pieces) {
       const starts = line.pieces.map((r) => r[0]);
       return { starts, from: 'mark', focus: givenFocus(ctx, line, starts, dur) };
@@ -20523,8 +21107,12 @@ MV.def('planner/segment', ['core/script', 'core/num', 'core/pins', 'core/rng', '
     let T = pieceTimes(ctx, line, starts, pinKeys, spanEnd);
     ({ starts, T } = mergeShort(ctx, line, starts, T));
     const att = attach(ctx, line, starts);
+    if (pieces.from === 'kime') kimeAttach(ctx, line, att);
     for (const key of att.orphans) reportPins(ctx, 'orphan-pin', key, line.id);
     for (const key of att.shadowed) reportPins(ctx, 'shadowed-pin', key, line.id);
+    // The キメ cut of a キメ line: its only cut, else the focus piece, else the last piece.
+    const kimeAt = !line.kime ? -1 : pieces.focus !== null && starts.includes(pieces.focus) ? starts.indexOf(pieces.focus)
+      : starts.length - 1;
     const cuts = starts.map((a, i) => {
       const b = i + 1 < starts.length ? starts[i + 1] : text.length;
       const key = line.id + '~' + a;
@@ -20534,11 +21122,39 @@ MV.def('planner/segment', ['core/script', 'core/num', 'core/pins', 'core/rng', '
         emph: pieceEmph(line.emph || [], a, b), impact: !!line.impact && i === starts.length - 1,
         note: i === starts.length - 1 ? line.note || null : null,
         t0: q6(T[i]), t1: q6(T[i + 1]), lang: line.lang, off: [a, b], pinKey: att.map[key] || null,
-        heading: line.heading || null, splitFrom: pieces.from,
+        heading: line.heading || null, splitFrom: pieces.from, kime: i === kimeAt,
       };
     });
     checkLock(ctx, line, pieces, starts, att, cuts);
     return cuts;
+  }
+
+  // A キメ line kept whole (pieces.from 'kime') keeps only the pins made for the whole line: its own key '<line>~0' whose
+  // pins carry no sig other than the line's text. Pins of the pieces it had before (another key, or '~0' with the first
+  // piece's text) do not take over the キメ look: they are reported as shadowed-pin (付け直す moves them onto the cut)
+  // and attach again to their pieces when the mark is removed (they are never deleted).
+  function kimeAttach(ctx, line, att) {
+    const len = line.text.length;
+    const offsetOf = (k) => Number(k.slice(k.lastIndexOf('~') + 1));
+    const inside = (k) => offsetOf(k) < len;
+    const hidden = att.orphans.filter(inside);
+    if (hidden.length) {
+      att.orphans = att.orphans.filter((k) => !inside(k));
+      for (const k of hidden) att.shadowed.push(k);
+    }
+    const key = line.id + '~0';
+    const owner = att.map[key];
+    if (owner) {
+      const whole = pieceText(line.text, 0, len);
+      const slots = ctx.ix.cut.get(owner);
+      let ok = owner === key;
+      if (ok && slots) for (const pin of slots.values()) if (pin && typeof pin.sig === 'string' && pin.sig !== whole) ok = false;
+      if (!ok) {
+        delete att.map[key];
+        att.shadowed.push(owner);
+      }
+    }
+    att.shadowed.sort((x, y) => offsetOf(x) - offsetOf(y) || (x < y ? -1 : x > y ? 1 : 0));
   }
 
   function reportPins(ctx, code, pinCutKey, lineId) {
@@ -20574,7 +21190,7 @@ MV.def('planner/segment', ['core/script', 'core/num', 'core/pins', 'core/rng', '
 
   function special(key, role, text, note, t0, t1, lang) {
     return { key, line: null, role, text, emph: [], impact: false, note: note || null, t0: q6(t0), t1: q6(t1), lang,
-      off: null, pinKey: key, heading: null, splitFrom: null };
+      off: null, pinKey: key, heading: null, splitFrom: null, kime: false };
   }
 
   // titleCard slot: work pin, else a title is set and the first line starts ≥ 1.5 s (automatic timing keeps 2 s for
@@ -20600,13 +21216,15 @@ MV.def('planner/segment', ['core/script', 'core/num', 'core/pins', 'core/rng', '
   // --- windows -----------------------------------------------------------------------------------------------
 
   // a = t0 − lead; b = next cut's start + tail, or t1 + tail when a special cut (or nothing) follows. A line pinned to
-  // end after the next start keeps its text until its own end.
+  // end after the next start keeps its text until its own end. A キメ cut held into a following special cut (cutAll)
+  // stays up until that cut starts: next.t0 + tail.
   function windows(cuts, timing) {
     for (let i = 0; i < cuts.length; i++) {
       const c = cuts[i], next = cuts[i + 1];
       c.a = q6(c.t0 - timing.lead);
       const nextSpecial = !next || SPECIAL_ROLES.has(next.role);
-      c.b = q6((nextSpecial ? c.t1 : Math.max(c.t1, next.t0)) + timing.tail);
+      const held = nextSpecial && !!next && c.kime === true && next.t0 > c.t1;
+      c.b = q6((nextSpecial && !held ? c.t1 : Math.max(c.t1, next.t0)) + timing.tail);
     }
   }
 
@@ -20626,22 +21244,26 @@ MV.def('planner/segment', ['core/script', 'core/num', 'core/pins', 'core/rng', '
       cuts.push(...own);
       const next = lines[i + 1];
       if (next && next.t0 - line.t1 > Math.max(GAP_MIN, bars)) {
-        cuts.push(special('gap/' + line.id, 'interlude', '', next.heading, line.t1, next.t0, next.lang));
+        // キメ: a line whose last cut is its キメ cut holds into the interlude (KI.hold: ≤ 1.5 s, the interlude keeps ≥ 3 s)
+        const hold = own.length && own[own.length - 1].kime ? KI.hold(next.t0 - line.t1) : 0;
+        cuts.push(special('gap/' + line.id, 'interlude', '', next.heading, line.t1 + hold, next.t0, next.lang));
       }
     });
     const last = lines[lines.length - 1];
     if (last && duration - last.t1 >= OUTRO_ROOM) {
-      cuts.push(special('outro', 'outro', meta.title || '', meta.artist, last.t1, duration, titleLang));
+      const end = cuts[cuts.length - 1];
+      const hold = end && end.line === last.id && end.kime ? KI.hold(duration - last.t1) : 0;
+      cuts.push(special('outro', 'outro', meta.title || '', meta.artist, last.t1 + hold, duration, titleLang));
     }
     windows(cuts, ctx.timing);
     return cuts;
   }
 
-  return { cutAll, autoStarts, bestSplit, weightsOf, pieceText, LINE_SPECS, BASE, SPECIAL_ROLES, windows };
+  return { cutAll, autoStarts, bestSplit, weightsOf, pieceText, LINE_SPECS, BASE, SPECIAL_ROLES, windows, kimeMaxCells };
 });
 /* 文字PVメーカー v2 — original work. Tracks: background segments, seams (decided after grounds), rule overrides, impulses (DESIGN §4.16.6; DESIGN_2_1 §4.9, §11.2.6, §11.5.9). */
 MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose', 'planner/params', 'planner/cast',
-  'planner/camera'], (R, N, P, CH, PA, CA, CAM) => {
+  'planner/camera', 'planner/kime'], (R, N, P, CH, PA, CA, CAM, KI) => {
     'use strict';
 
     const SPECIAL = new Set(['title', 'interlude', 'outro']);
@@ -21084,7 +21706,21 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
       if (t && t.cutKey === cut.key && t.slot === kind) t.out.override = { rule: 'seam', decision: d };
     }
 
-    // The seam into B → { decision, entry }.
+    // キメ (PV22 P3, DESIGN_2_2 §3): the transitions that do not flash (no gate 'flash', i.e. no 白く飛ぶ), for the seam out
+    // of a キメ cut without 見せ場 into a cut without 見せ場 (quietSeam).
+    const NO_FLASH_SEAM = new WeakMap();
+    function noFlashSeam(reg) {
+      let f = NO_FLASH_SEAM.get(reg);
+      if (!f) {
+        f = Object.assign((k) => { const d = reg.get('seam', k); return !d || d.gate !== 'flash'; }, { id: 'kime.noFlashSeam' });
+        NO_FLASH_SEAM.set(reg, f);
+      }
+      return f;
+    }
+    function quietSeam(A, B) { return KI.isKime(A) && !A.impact && !B.impact; }
+
+    // The seam into B → { decision, entry }. キメ: into a キメ cut the hard cut by rule (kime.seam) unless the seam is
+    // pinned; out of a キメ cut without 見せ場 (into a cut without 見せ場) no flashing transition (kime.noFlash).
     function decideSeam(ctx, A, B, history) {
       const at = atOf(B);
       const seed = CH.slotSeed(CH.cutSeed(ctx.doc.look.seed, B.key, B.line, ctx.salts), B.key, B.line, 'seam',
@@ -21101,12 +21737,19 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
       const req = { kind: 'seam', slot: 'seam', path: 'cut/' + B.key + ':seam', feat: B.feat, chosen: {}, seed,
         scope: world ? 'world' : 'text', recent: rec.recent, ref: rec.ref, echo: null, cutKey: B.key,
         avoid: avoidOf(history, hard), cond };
+      if (quietSeam(A, B)) req.only = noFlashSeam(ctx.registry);
       let out;
-      if (trace) trace.world = world;
+      if (trace) {
+        trace.world = world;
+        if (req.only) { trace.only = req.only; trace.noFlash = 'seam'; }
+      }
       if (pin) {
         CA.pinWarnings(ctx, 'seam', pin.v, pin, cond);
         out = fixed(pinDecision(pin));
         if (trace) shadow(ctx, req, trace, { kind: 'seam', stage: 'pin', pin, recent: rec.recent, echo: null });
+      } else if (KI.isKime(B)) {
+        out = fixed({ from: 'rule', v: hard });
+        if (trace) Object.assign(trace, { kind: 'seam', stage: 'rule', rule: 'kime.seam' });
       } else {
         const chance = world ? WORLD_CHANCE : ctx.look.mood.pace.seam * (0.5 + 0.5 * B.feat.energy);
         if (R.stream(seed, 'chance').next() < chance) {
@@ -21139,11 +21782,14 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
     // The seam into B with its history entry: { got, entry }. It is a function of B's cast inputs (seed, pins,
     // features, look), whether the background changes and the entries the seam history reads, so it is kept on B's
     // cast entry (planner/cast) and reused while those are the same, its warnings replayed like a cast's.
+    // quiet (キメ): the seam out of a キメ cut does not flash (quietSeam); A is not among B's cast inputs, so the memo is
+    // reused only when it matches.
     function seamOf(ctx, A, B, history) {
       const world = A.ground !== B.ground;
+      const quiet = quietSeam(A, B);
       const read = history.slice(Math.max(0, history.length - 4));
       const memo = B.cast ? B.cast.seam : null;
-      if (memo && memo.world === world && sameEntries(memo.read, read)) {
+      if (memo && memo.world === world && memo.quiet === quiet && sameEntries(memo.read, read)) {
         for (const w of memo.warnings) ctx.warn(w);
         return memo;
       }
@@ -21152,8 +21798,10 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
       if (B.cast) ctx.warn = (w) => { warnings.push(w); warn(w); };
       try {
         const got = decideSeam(ctx, A, B, history);
-        const out = { world, read, warnings, got, entry: seamEntry(ctx, A, B, history, got) };
-        if (B.cast) B.cast.seam = { world, read, warnings, got: { decision: CA.deepFreeze(got.decision) }, entry: out.entry };
+        const out = { world, quiet, read, warnings, got, entry: seamEntry(ctx, A, B, history, got) };
+        if (B.cast) {
+          B.cast.seam = { world, quiet, read, warnings, got: { decision: CA.deepFreeze(got.decision) }, entry: out.entry };
+        }
         return out;
       } finally {
         ctx.warn = warn;
@@ -21183,7 +21831,7 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
       let reach = -Infinity;                    // the latest b among the cuts before A
       for (let j = 1; j < cuts.length; j++) {
         const A = cuts[j - 1], B = cuts[j];
-        const copy = at ? seamCopy(ctx, cuts, at, out, A, B, hard) : null;
+        const copy = at && !KI.isKime(B) ? seamCopy(ctx, cuts, at, out, A, B, hard) : null;
         const { got, entry } = copy || seamOf(ctx, A, B, history);
         history.push(entry);
         const d = got.decision;
@@ -21207,7 +21855,8 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
 
     // The seam into B copied from the seam into its source S (planner/cast alignedSource): where S is not the first cut,
     // the background changes at both boundaries or at neither (the same kind of transition fits), and B has no seam pin
-    // of its own (the pin wins). → { got, entry } | null. The copy keeps S's parameters; its window is fitted to B's cuts
+    // of its own (the pin wins). Not into a キメ cut (its own rule gives the hard cut), and not a flashing one out of a
+    // キメ cut (DESIGN_2_2 §3). → { got, entry } | null. The copy keeps S's parameters; its window is fitted to B's cuts
     // like any seam's.
     function seamCopy(ctx, cuts, at, out, A, B, hard) {
       const src = CA.alignedSource(ctx, B, 'seam');
@@ -21219,6 +21868,11 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
         return null;
       }
       const d = src.seamIn >= 0 ? copied(out[src.seamIn].slot) : { from: 'auto', v: hard };
+      // キメ: a copy never brings a flashing transition out of a キメ cut (the seam is decided as usual instead)
+      if (d.v !== hard && quietSeam(A, B)) {
+        const def = ctx.registry.get('seam', d.v);
+        if (def && def.gate === 'flash') return null;
+      }
       const t = tracing(ctx, B.key, 'seam');
       if (t) Object.assign(t, { kind: 'seam', stage: 'auto', world: A.ground !== B.ground, why: [alignWhy(src)], decision: d });
       return { got: { decision: d }, entry: entryOf(d, null) };
@@ -21268,8 +21922,9 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
 /* 文字PVメーカー v2 — original work. plan(doc, { registry }) → Plan: the planner's stages in their FROZEN order (DESIGN §4.16.1–§4.16.2, §3.12; DESIGN_2_1 §2.7, §5.9.3, §11.2.6). */
 MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'core/timing', 'core/beats', 'core/motion',
   'core/doc', 'core/schema', 'core/script', 'core/media', 'core/shot', 'planner/choose', 'planner/params', 'planner/look',
-  'planner/segment', 'planner/features', 'planner/cast', 'planner/tracks', 'planner/camera', 'planner/encode', 'planner/extreme'],
-(H, N, PINS, LY, TM, B, MO, D, S, SC, MEDIA, SHOT, CH, PA, LK, SG, FE, CA, TR, CAM, EN, XT) => {
+  'planner/segment', 'planner/features', 'planner/cast', 'planner/tracks', 'planner/camera', 'planner/encode', 'planner/extreme',
+  'planner/kime', 'planner/rules'],
+(H, N, PINS, LY, TM, B, MO, D, S, SC, MEDIA, SHOT, CH, PA, LK, SG, FE, CA, TR, CAM, EN, XT, KI, RU) => {
   'use strict';
 
   // v2: rigs, cut.rig, grounds[].zoomed, feat.sectionStart, media, the camera slots (DESIGN_2_1 §2.7, §11.2.6).
@@ -21314,6 +21969,26 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
         (v, rank) => (rank !== 'pin:line' ? { na: true } : LANG_SPEC.of.includes(v) ? { v } : { bad: true }), ctx.warn);
       return pin ? Object.assign({}, line, { lang: pin.v }) : line;
     });
+  }
+
+  // キメ (PV22 P3, DESIGN_2_2 §3): a line whose `line/<id>:kime` pin is true (line rank only: a work or cut pin does not
+  // apply; a value that is not a boolean warns pin-bad-value and counts as absent). Without any kime pin the same array
+  // comes back, so a document without the mark plans exactly as before. The timing solver (the hold), the cutter (one
+  // cut) and P6 read line.kime.
+  function withKimePins(ctx, lines) {
+    if (!PA.pinned(ctx.ix, 'kime')) return lines;
+    return lines.map((line) => {
+      const pin = PA.resolvePin(ctx.ix, { pinCutKey: null, lineId: line.id, cutKey: null }, 'kime',
+        (v, rank) => (rank !== 'pin:line' ? { na: true } : typeof v === 'boolean' ? { v } : { bad: true }), ctx.warn);
+      return pin && pin.v === true ? Object.assign({}, line, { kime: true }) : line;
+    });
+  }
+
+  // The calm levels of the cuts before each キメ cut (planner/kime calmLevels), or null: no キメ cut, or
+  // 「キメの前を静かにする」 (work:kime.calm, planner/rules) is off.
+  function calmOf(ctx, cuts) {
+    if (!cuts.some(KI.isKime)) return null;
+    return RU.value(ctx.doc, ctx.ix, 'kime.calm') === false ? null : KI.calmLevels(cuts);
   }
 
   // Lines with times (core/timing.solveTimes, §4.11) and the tempo facts. The solver's context: the tempo (`bpm`
@@ -21652,7 +22327,7 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
   function featuresOf(cut, fx, songKey, cached) {
     if (!cached) return { feat: FE.cutFeatures(cut, fx), id: null };
     const key = JSON.stringify([cut.text, cut.role, cut.lang, cut.emph.length > 0, !!cut.impact, cut.t0, cut.t1,
-      fx.section, fx.repeatOf, fx.repeats, fx.sectionStart]) + songKey;
+      fx.section, fx.repeatOf, fx.repeats, fx.sectionStart, cut.kime === true ? 1 : 0, fx.calm || 0]) + songKey;
     let e = featCur.get(key);
     if (e === undefined) {
       e = featPrev.get(key);
@@ -21780,7 +22455,7 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
       timing: Object.assign({}, TM.TIMING_DEFAULTS, doc.timing || {}), pools: new Map(), trace, casts: null,
       lockFree: CA.lockFreeIndex(doc.pins), media: mediaIndex(doc), mediaUsed: new Set(),
       castKeys: null, seams: null, encodings: null, fallbacks: null, lookAxis: null, lineConds: null, workCond: null,
-      shotMood: null, echoed: null, align: null, alignNear: null,
+      shotMood: null, echoed: null, align: null, alignNear: null, kimePools: null,
     };
     // Traced runs (explain) and fresh runs neither read nor refresh the caches of re-planning.
     if (cached) beginFeatures();
@@ -21788,7 +22463,7 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
 
     // 1. parse and time
     const { sheet, lines: parsed } = parsedSheet(doc);
-    const lines = withLangPins(ctx, parsed);
+    const lines = withKimePins(ctx, withLangPins(ctx, parsed));
     const timing = timeLines(ctx, lines, sheet.meta);
     const { timed, duration, grid } = timing;
     ctx.bpm = timing.bpm;
@@ -21809,6 +22484,8 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
 
     // 3. cutter
     const cuts = SG.cutAll(ctx, timed, sheet.meta, duration);
+    // キメ: the pools a キメ or calm cut filters (planner/cast onlyKeys), shared by every pass of the plan
+    if (cuts.some(KI.isKime)) ctx.kimePools = new Map();
 
     // 4. features
     const fxOf = featureContexts(timed, cuts);
@@ -21817,11 +22494,12 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
     const songKey = '|' + CA.intern(EN.canon([duration, loud, timing.beats, info]));
     // sectionStart (DESIGN_2_1 §2.7): the first cut, and every cut whose section differs from the previous cut's.
     let prevSection;
+    const calm = calmOf(ctx, cuts);
     cuts.forEach((cut, i) => {
       const fx = fxOf(cut);
       const section = FE.sectionOf(cut, { info, section: fx.section });
       const got = featuresOf(cut, { duration, env: ctx.env, grid, info, section: fx.section, repeatOf: fx.repeatOf,
-        repeats: fx.repeats, sectionStart: i === 0 || section !== prevSection }, songKey, cached);
+        repeats: fx.repeats, sectionStart: i === 0 || section !== prevSection, calm: calm ? calm[i] : 0 }, songKey, cached);
       prevSection = section;
       cut.feat = got.feat;
       cut.featId = got.id;
@@ -21917,13 +22595,14 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
 /* 文字PVメーカー v2 — original work. Inspector field states, lock payloads and plan-value readers (DESIGN §4.16.8, §3.13, §3.6; DESIGN_2_1 §3.9). */
 MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyrics', 'core/schema', 'core/timing',
   'core/curve', 'core/shot', 'planner/params', 'planner/cast', 'planner/look', 'planner/segment', 'planner/plan',
-  'planner/extreme'],
-(P, PINS, REG, LY, S, TM, CV, SHOT, PA, CA, LK, SG, PL, XT) => {
+  'planner/extreme', 'planner/rules'],
+(P, PINS, REG, LY, S, TM, CV, SHOT, PA, CA, LK, SG, PL, XT, RU) => {
   'use strict';
 
-  const LOOK_NAMES = new Set(['mood', 'theme', 'season', 'bpm', 'beatOffset', 'readRate', 'length', 'titleCard']);
+  // キメ (PV22 P3, DESIGN_2_2 §3): 「キメの前を静かにする」 (kime.calm) is a work value, the キメ mark (kime) a line value.
+  const LOOK_NAMES = new Set(['mood', 'theme', 'season', 'bpm', 'beatOffset', 'readRate', 'length', 'titleCard', 'kime.calm']);
   const LOOK_PREFIX = /^(color|amount|face)\./;
-  const LINE_NAMES = new Set(['start', 'end', 'split', 'lang', 'avoid']);
+  const LINE_NAMES = new Set(['start', 'end', 'split', 'lang', 'avoid', 'kime']);
   const RIG_SLOTS = new Set(['rig', 'rig.curve']);
   const TRACK_KINDS = new Set(['ground', 'atmos', 'seam']);
   const EL_DEFAULT = Object.freeze({ nudge: Object.freeze({ dx: 0, dy: 0, rot: 0, s: 1 }), fill: null, hide: false });
@@ -22065,6 +22744,7 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
     if (slot === 'readRate') return readRate(plan, ix);
     if (slot === 'length') return plan.duration;
     if (slot === 'titleCard') return plan.cuts.some((c) => c.key === 'title');
+    if (slot === 'kime.calm') return RU.value(null, ix || null, 'kime.calm');
     return undefined;
   }
 
@@ -22095,7 +22775,14 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
     if (parsed.slot === 'lang') return line.lang;
     if (parsed.slot === 'season') return lineSeason(plan, lineId, ix);
     if (parsed.slot === 'avoid') return lineAvoid(lineId, ix);
+    if (parsed.slot === 'kime') return lineKime(plan, line);
     return line.cuts.map((k) => P.cutOffset(k));        // split
+  }
+
+  // Whether a line is キメ as the Plan shows it: one of its cuts is the キメ cut (feat.kime; a pin that is not true, or
+  // one at another scope, makes none).
+  function lineKime(plan, line) {
+    return line.cuts.some((k) => { const c = cutOf(plan, k); return !!(c && c.feat && c.feat.kime); });
   }
 
   // A line's effective season (DESIGN_2_1 §4.9): its own pin, else the work's season (the look's value, which is the
@@ -22151,6 +22838,7 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
   function schemaOf(registry, plan, parsed, cuts) {
     const cat = categoryOf(parsed);
     const slot = parsed.slot;
+    if (slot === 'kime' || slot === 'kime.calm') return CA.SLOT_SPECS[slot];
     if (cat === 'look') {
       if (slot === 'mood' || slot === 'theme') return { type: 'part', kind: slot, of: registry.keys(slot), none: false };
       if (parsed.part && !parsed.part.param) {
@@ -22486,13 +23174,14 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
   }
 
   return {
-    fieldState, fieldStates, lockPayload, pinSig: PL.pinSig, valueAt, decisionAt, categoryOf, cutsFor, cutOf, choiceSlot,
+    fieldState, fieldStates, lockPayload, pinSig: PL.pinSig, valueAt, decisionAt, categoryOf, cutsFor, cutOf, choiceSlot, lineKime,
     schemaOf, canPinAt, depthRuleAt,
   };
 });
 /* 文字PVメーカー v2 — original work. explain(): why a slot has its value, and the alternatives — lazy, never in the Plan (DESIGN §4.16.8; DESIGN_2_1 §2.8, §3.9, §11.2.6). */
-MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media', 'planner/choose', 'planner/look',
-  'planner/plan', 'planner/fields'], (P, PINS, LY, MEDIA, CH, LK, PL, F) => {
+MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media', 'core/script', 'planner/choose',
+  'planner/look', 'planner/plan', 'planner/fields', 'planner/segment', 'planner/kime'],
+(P, PINS, LY, MEDIA, SC, CH, LK, PL, F, SG, KI) => {
   'use strict';
 
   const SCOPE_OF = { 'pin:cut': 'cut', 'pin:line': 'line', 'pin:work': 'work' };
@@ -22538,11 +23227,17 @@ MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media
     return def && def.label ? def.label.ja : key;
   }
 
+  // キメ (PV22 P3, DESIGN_2_2 §3): a pick inside the キメ set says so first (or that the part settings left no set:
+  // kime.limited); a screen effect of a キメ cut says it never flashes; a transition out of one, that it does not
+  // flash; a calm factor that moved the weight, that the next キメ stands out.
   function factorWhy(registry, plan, cut, trace, kind, value, seasonWord, doc) {
     const why = [];
     const cand = (trace.candidates || []).find((c) => c.key === value);
     const def = registry.get(kind, value);
     const cond = trace.cond || null;
+    if (trace.kime) why.push({ code: trace.kimeLimited ? 'kime.limited' : 'kime', params: {} });
+    if (trace.noFlash === 'filter') why.push({ code: 'kime.noFlash', params: {} });
+    if (trace.noFlash === 'seam') why.push({ code: 'rule', params: { rule: 'kime.noFlash' } });
     if (def && def.mine && def.mine.media === true) {
       why.push({ code: 'media.pool', params: { name: mediaName(doc, registry, kind, value) } });
     }
@@ -22561,6 +23256,7 @@ MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media
       else if (f.season !== 1) why.push({ code: 'season', params: { season: plan.look.season.v, word: seasonWord || '' } });
       if (f.prefer !== 1) why.push({ code: 'theme.prefer', params: { x: r2(f.prefer) } });
       if (def.gate) why.push({ code: 'gate', params: { amount: def.gate } });
+      if (typeof f.calm === 'number' && f.calm !== 1) why.push({ code: 'kime.calm', params: {} });
     }
     const refs = cond && cond.deny ? cond.deny[kind] : null;
     if (refs && refs.length && !trace.avoidRelaxed) why.push({ code: 'avoid', params: { n: refs.length } });
@@ -22598,6 +23294,8 @@ MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media
     if (ctx.orient && !t.orient.includes(ctx.orient)) return 'trait';
     if (ctx.script && !(t.scripts.includes('*') || t.scripts.includes(ctx.script))) return 'trait';
     if (ctx.aspect && !(t.aspects.includes('*') || t.aspects.includes(ctx.aspect))) return 'trait';
+    // キメ: outside the キメ set, or a flashing effect or transition where a キメ cut does not flash
+    if (ctx.only && !(typeof ctx.only === 'function' ? ctx.only(key) : ctx.only.includes(key))) return 'kime';
     return null;
   }
 
@@ -22624,6 +23322,7 @@ MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media
         : PINS.lookup(ix, LK.WORK_AT, slot) || { from: 'auto' };
     const base = { path: P.format(parsed), value, from: src.from, by: src.by };
     if (src.from && src.from.startsWith('pin')) return Object.assign(base, { why: pinWhy(src.from, src.by), alts: [] });
+    if (slot === 'kime.calm') return Object.assign(base, { why: [], alts: [] });   // on until the user turns it off
     if (slot === 'season') {
       const scan = LK.scanSeason(LY.parseSheet(doc.sheet.rows));
       const why = scan.word ? [{ code: 'season', params: { season: scan.v, word: scan.word } }]
@@ -22681,6 +23380,7 @@ MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media
       const hit = lineId ? PINS.lookup(ix, { cutKey: null, pinCutKey: null, lineId }, parsed.slot) : null;
       const line = plan.lines.find((l) => l.id === lineId);
       if (hit && hit.from === 'pin:line') { from = hit.from; by = hit.by; }
+      else if (parsed.slot === 'split' && line && keptWhole(plan, line)) from = 'rule';
       else if (parsed.slot === 'start' && line && line.by.start === 'lrc') from = 'mark';
       else if (parsed.slot === 'split' && line) {
         const row = doc.sheet.rows.find((r) => r.id === line.row);
@@ -22704,7 +23404,10 @@ MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media
     let why;
     if (from.startsWith('pin')) why = pinWhy(from, by);
     else if (from === 'mark') why = [{ code: 'rule', params: { rule: parsed.slot === 'split' ? 'marks' : 'lrc' } }];
-    else if (from === 'rule') why = [{ code: 'rule', params: { rule: 'speed' } }];     // scaled by motion.speed (§4.3)
+    else if (from === 'rule' && cat === 'line') why = [{ code: 'rule', params: { rule: 'kime.split' } }];
+    // scaled by motion.speed (§4.3), or set by a キメ rule (a fast landing, a readable bleed, the size contrast)
+    else if (from === 'rule') why = [{ code: 'rule', params: { rule: kimeParam(cut, parsed) ? 'kime.param' : 'speed' } }];
+    else if (cat === 'line' && parsed.slot === 'kime') why = [];                     // not marked: nothing decided it
     else why = [{ code: 'rule', params: { rule: cat === 'param' ? 'auto' : parsed.slot } }];
     // The automatic depth of a photo or video: the §11.9.2 rule that decided it.
     const depthRule = cat === 'param' && from === 'auto' ? F.depthRuleAt(doc, plan, cut, parsed, registry) : null;
@@ -22718,6 +23421,16 @@ MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media
       else why = [{ code: 'media.pool', params: { name } }];
     }
     return { path, value, from, by, why, alts: [] };
+  }
+
+  // キメ: a line kept whole by its mark (planner/segment: one cut up to kimeMaxCells, no split pin of its own).
+  function keptWhole(plan, line) {
+    return line.cuts.length === 1 && F.lineKime(plan, line) && SC.cells(line.text) <= SG.kimeMaxCells(plan.design.aspect);
+  }
+
+  // Whether a parameter a rule set on this cut is one of the キメ parameters (KIME.params) of a キメ cut.
+  function kimeParam(cut, parsed) {
+    return !!cut && KI.isKime(cut) && !!parsed.part && KI.KIME.params.includes(parsed.part.param);
   }
 
   // The line slots season and avoid (DESIGN_2_1 §4.9). A line season follows the work's season unless the line pins
@@ -22758,7 +23471,8 @@ MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media
   function maskContext(plan, cut, parsed, kind, trace) {
     const slotKind = parsed.part.kind;
     const cond = trace.cond || null;
-    const lineCtx = { season: cond ? cond.season : null, deny: cond && cond.deny && !trace.avoidRelaxed ? cond.deny[kind] || null : null };
+    const lineCtx = { season: cond ? cond.season : null, deny: cond && cond.deny && !trace.avoidRelaxed ? cond.deny[kind] || null : null,
+      only: trace.only || null };
     if (kind === 'ground') return lineCtx;
     if (kind === 'seam') return Object.assign(lineCtx, { scope: trace.world ? 'world' : 'text' });
     if (slotKind === 'atmos') return Object.assign(lineCtx, { scope: 'run' });
@@ -62246,7 +62960,7 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
     }
 
     async function newWork() {
-      await loadFile({ doc: D.defaultDoc(), side: D.defaultSide() });
+      await loadFile({ doc: D.newDoc(), side: D.defaultSide() });
       app.toast(t('io.newDone'), { kind: 'info' });
     }
 
@@ -62812,7 +63526,7 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
       saved = { id: null, text: null };
       used.clear();
       usedMedia.clear();
-      app.loadProject(D.defaultDoc(), D.defaultSide(), { quiet: true });
+      app.loadProject(D.newDoc(), D.defaultSide(), { quiet: true });
       pending.cancel();                                      // the empty work is stored at its first change, not now
       setState('idle');
       app.bus.emit('device', { cleared: true });             // the AssetStore forgets what it held (ui/media_io)
@@ -73593,7 +74307,7 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
     const lang = MV.LANG === 'en' ? 'en' : 'ja';
     // 激しいカメラを抑える starts as this device asks (prefers-reduced-motion, DESIGN_EXTREME §3.6)
     const view = V.createView({ storage: safeStorage('localStorage'), defaults: { calmCamera: dom.prefersReducedMotion() } });
-    const store = ST.createStore({ doc: D.defaultDoc(), side: D.defaultSide(), reduce: svc.reduce, now: () => Date.now() });
+    const store = ST.createStore({ doc: D.newDoc(), side: D.defaultSide(), reduce: svc.reduce, now: () => Date.now() });
     // The AssetStore (DESIGN_2_1 §11.3.6): bytes from ui/project_io's device store (IndexedDB, or this tab's memory),
     // metadata from every library entry this tab has seen. Ids name content, so an entry seen once stays right for the
     // try-on and undo documents that still hold it.

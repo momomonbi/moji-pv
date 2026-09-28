@@ -303,6 +303,23 @@ test('camera: a still camera keeps the 衝撃 punch-in; a moving one the fixed f
   const xc = cutOf(x, 'r2~0');
   assert.equal(xc.slots['cam.shot'].v, xc.feat.dur < 0.8 ? 'punchHit' : 'crashZoom');
   assert.equal(xc.slots.lens.v, 'fixedFrame');
+  // EXTREME replaces a still camera's 'none' (the amount is below 10 %): the lens knows the camera will move
+  const xs = cutOf(plan(withPins(doc, Object.assign({ 'work:cam.extreme': { v: 1, by: 'user' },
+    'work:amount.camera': { v: 0, by: 'user' } }, mark))), 'r2~0');
+  assert.ok(['crashZoom', 'punchHit'].includes(xs.slots['cam.shot'].v), JSON.stringify(xs.slots['cam.shot'].v));
+  assert.equal(xs.slots.lens.v, 'fixedFrame');
+  // every キメ cut of a document with EXTREME on takes the strongest move its pool has
+  let strongest = 0;
+  for (const { name, doc: d } of corpus.corpus(3, ['16:9', '9:16'], ['basic', 'lrc'])) {
+    const p = plan(withPins(markEvery(d, 2), { 'work:cam.extreme': { v: 1, by: 'user' } }));
+    for (const c of kimeCuts(p)) {
+      if (c.slots.arrange.v === 'edgeBleed') continue;
+      assert.equal(c.slots['cam.shot'].v, c.feat.dur < 0.8 ? 'punchHit' : 'crashZoom', name + ' ' + c.key);
+      assert.equal(c.slots.lens.v, 'fixedFrame', name + ' ' + c.key);
+      strongest++;
+    }
+  }
+  assert.ok(strongest > 20, String(strongest));
   // はみ出し stays framed with EXTREME on: no EXTREME move, the punch-in
   const bleedDoc = XD.withPins(corpus.project('basic').doc, { 'work:cam.extreme': { v: 1, by: 'user' } });
   let found = 0;
