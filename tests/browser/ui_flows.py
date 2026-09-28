@@ -66,6 +66,9 @@ v2.1 editor-ready output (package H.3, DESIGN_2_1 §13.12):
 v2.1 「くり返しの行をそろえる」 (DESIGN_2_1 §4.10):
   repeat                     作品全体 › 見た目: the switch (off, its note, no 振り直し) pins the opt-in, the second サビ takes the
                              first one's layouts, lenses and shots, a repeated cut's なぜ names its first copy, off clears it
+PV22 P5 タイミング (DESIGN_2_2 §5):
+  enter                      a new work: 入りの早さ 0.2, 入りの基準 動き始め (作品全体 › タイミング); 出そろい = one undo entry
+                             named 入りの基準, the plan and the stage open the entrances; 元に戻す returns to 動き始め
 It also asserts: no page errors and no CSP violations. The ja page runs every flow; the en page runs the first run.
 The first run exports with the mouse and, in the keyboard flow, with Tab + Enter. Where H.264 encodes, the file's video
 sample count is checked here (stsz or trun); the decoded-frame count of the same export path is WP6's check in
@@ -5271,6 +5274,52 @@ async def flow_ai_extreme(f, lang):
 
 # カメラ EXTREME (DESIGN_EXTREME §5.3).
 FLOWS += [('extreme', flow_extreme, False), ('extreme_keys', flow_extreme_keys, False), ('ai_extreme', flow_ai_extreme, False)]
+
+
+# --- PV22 P5 タイミング (DESIGN_2_2 §5) ------------------------------------------------------------------------------------
+
+ENTER_STATE = """() => { const a = window.__mv, seg = document.querySelector('[data-mount="inspector"] .frow[data-slot="timing.set.enter"]');
+  const lead = document.querySelector('[data-mount="inspector"] .frow[data-slot="timing.set.lead"] input');
+  return { lead: a.doc.timing.lead, enter: a.doc.timing.enter === undefined ? null : a.doc.timing.enter, gen: a.doc.look.gen,
+    shown: lead ? Number(lead.value) : null, checked: seg ? [...seg.querySelectorAll('.seg')].map((b) => b.getAttribute('aria-checked')) : null,
+    note: seg ? !!seg.querySelector('.fr-note') : null, opened: a.plan.cuts.filter((c) => c.ready !== undefined).length,
+    staged: a.engine.plan ? a.engine.plan.cuts.filter((c) => c.ready !== undefined).length : -1 }; }"""
+
+
+async def flow_enter(f, lang):
+    """入りの基準 (T4): a new work shows 入りの早さ 0.2 and 入りの基準 動き始め under 作品全体 › タイミング; 出そろい is one
+    undo entry named 入りの基準, the plan and the stage open the entrances; 元に戻す returns to 動き始め."""
+    page = f.page
+    done0, doc0 = await with_lyrics(f)
+    await page.evaluate("() => { const a = window.__mv; a.openPanel('details'); a.select({ level: 'work' }, { from: 'crumbs', open: true }); }")
+    await f.settle(4)
+    await open_section(f, 'timing')
+    s = await page.evaluate(ENTER_STATE)
+    f.check(s['lead'] == 0.2 and s['enter'] is None and s['gen'] == 1, 'a new work: lead 0.2, no 入りの基準 stored, look.gen 1: %r' % s)
+    f.check(s['shown'] == 0.2, '入りの早さ shows 0.2: %r' % s['shown'])
+    f.check(s['checked'] == ['true', 'false'], '入りの基準 shows 動き始め: %r' % s['checked'])
+    f.check(s['note'] is True and s['opened'] == 0, 'the row has its note; nothing is opened: %r' % s)
+    await page.locator(ROW % 'timing.set.enter' + ' .seg').nth(1).click()
+    await f.until("() => window.__mv.doc.timing.enter === 'ready'", '出そろい is stored')
+    await f.until("() => window.__mv.engine.plan && window.__mv.engine.plan.cuts.some((c) => c.ready !== undefined)",
+                  'the stage plays the opened entrances')
+    await f.settle(2)
+    s = await page.evaluate(ENTER_STATE)
+    f.check(s['checked'] == ['false', 'true'] and s['opened'] > 0, '出そろい is chosen and entrances open: %r' % s)
+    await page.evaluate("(s) => document.querySelector(s).scrollIntoView({ block: 'center' })", ROW % 'timing.set.enter')
+    await f.shot('ready')
+    f.check(await page.evaluate(DONE) == done0 + 1, 'one undo entry')
+    label = await page.evaluate("() => { const e = window.__mv.store.list().filter((x) => x.done).pop(); return window.__mv.t(e.label[0], e.label[1]); }")
+    f.check(label == await page.evaluate("() => window.__mv.t('fld.enter')"), 'the entry is named by the field: %r' % label)
+    await page.evaluate("() => window.__mv.store.undo()")
+    await f.until("() => window.__mv.doc.timing.enter === undefined", '元に戻す removes 入りの基準')
+    await f.settle(2)
+    s = await page.evaluate(ENTER_STATE)
+    f.check(s['checked'] == ['true', 'false'] and s['opened'] == 0, '元に戻す returns to 動き始め: %r' % s)
+    f.check(await page.evaluate(DOC) == doc0, 'the document is as before')
+
+
+FLOWS += [('enter', flow_enter, False)]
 
 
 async def run(browser, base, rel, lang, only, shots):

@@ -104,6 +104,7 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
   function newDoc() {
     const doc = defaultDoc();
     doc.look.gen = GEN;
+    doc.timing.lead = NEW_WORK_LEAD;
     return doc;
   }
 

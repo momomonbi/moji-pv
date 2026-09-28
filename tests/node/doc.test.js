@@ -45,8 +45,23 @@ test('newDoc is defaultDoc with the generation marker look.gen; nothing else wri
   assert.deepEqual(D.validate(doc), []);
   const plain = D.defaultDoc();
   assert.equal(plain.look.gen, undefined, 'defaultDoc never carries the marker');
+  // the new-work 入りの早さ (PV22 T4, DESIGN_2_2 §5) is written explicitly; defaultDoc keeps 0.12
+  assert.equal(D.NEW_WORK_LEAD, 0.2);
+  assert.equal(doc.timing.lead, D.NEW_WORK_LEAD);
+  assert.equal(plain.timing.lead, 0.12);
   delete doc.look.gen;
-  assert.deepEqual(doc, plain, 'newDoc is defaultDoc apart from the marker');
+  doc.timing.lead = plain.timing.lead;
+  assert.deepEqual(doc, plain, 'newDoc is defaultDoc apart from look.gen and timing.lead');
+  // a file without a lead gets 0.12 even when it carries the marker (normalize fills from defaultDoc)
+  const marked = D.normalize({ look: { seed: 3, moodSeed: 4, aspect: '9:16', backdrop: 'scene', gen: 1 }, timing: { snap: 'off' } });
+  assert.equal(marked.timing.lead, 0.12);
+  assert.equal(D.normalize(D.newDoc()).timing.lead, D.NEW_WORK_LEAD, 'a saved new work keeps its lead');
+  // the optional timing keys: 入りの基準 and 読み切れない速さの行を知らせる
+  expectProblem((d) => { d.timing.enter = 'x'; }, 'timing.enter');
+  expectProblem((d) => { d.timing.readCheck = 1; }, 'timing.readCheck');
+  assert.deepEqual(problemsOf((d) => { d.timing.enter = 'ready'; d.timing.readCheck = true; }), []);
+  assert.ok(!D.serialize({ doc: D.newDoc() }).includes('"enter"'), 'no new work writes 入りの基準');
+  assert.ok(!D.serialize({ doc: D.defaultDoc() }).includes('"readCheck"'));
   // normalize (every opened file and autosave) never adds it, and keeps it where it is
   const old = D.normalize({ look: { seed: 3, moodSeed: 4, aspect: '9:16', backdrop: 'scene' } });
   assert.equal(old.look.gen, undefined);

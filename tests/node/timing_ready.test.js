@@ -174,6 +174,8 @@ function floorDoc(lead) {
 
 test('出そろい: the fingerprint follows ready where the window stays at its floor', () => {
   const [p2, p3] = [0.2, 0.3].map((lead) => fresh(floorDoc(lead)));
+  // re-planning with the caches (the encoding of the unchanged window is looked up by planner/plan encodingKey)
+  for (const lead of [0.2, 0.3, 0.2]) assert.equal(PL.plan(floorDoc(lead), { registry: BASE }).hash, fresh(floorDoc(lead)).hash, 'cached at ' + lead);
   const c2 = p2.cuts.find((c) => c.key === 'r3~0'), c3 = p3.cuts.find((c) => c.key === 'r3~0');
   const first = p2.cuts.find((c) => c.key === 'r1~0');
   assert.equal(c2.a, first.b, 'opened to the end of the cut two before');
