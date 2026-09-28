@@ -524,6 +524,8 @@ test('exits wait for the last sung character: shortened to 80 % of the time afte
       if (dep && c.slots.depart.p && dep.dur < Math.min(c.slots.depart.p.dur, 0.35 * (tm.b - tm.a)) - 1e-9) squeezed++;
       const rt = c.repT - c.t0;
       assert.ok(rt >= tm.rest - 0.03 && rt <= tm.out + 1e-6, c.key + ': repT ' + rt + ' in [' + tm.rest + ', ' + tm.out + ']');
+      // inside the calm, not on the landing: heroSung knows the exit is shortened (10 % of the calm, as heroTime)
+      if (tm.out - tm.rest > 0.05) assert.ok(rt >= tm.rest + 0.03 * (tm.out - tm.rest) - 1e-6, c.key + ': repT in the calm');
     }
   }
   assert.ok(n > 20 && squeezed > 0, n + ' cuts, ' + squeezed + ' exits shortened');

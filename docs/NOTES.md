@@ -9221,4 +9221,4 @@ interpolation by units, `readRate` with two anchors, first-occurrence-only copie
 piece boundaries, hooks per line instead of per text, no `only` filter, no source rule-tag skip, measuring from `t0`
 instead of `times.a`, no arrive-only guard, underSweep reading `hints.emph` as ranges, keeping deleted characters' pairs,
 the `sung.times` scope refusal, `sung.times` not line-only for promote, word tags kept on a text edit, a tag between `/`
-and its swallowed spaces mapped to 0.
+and its swallowed spaces mapped to 0, no exit squeeze in `fitTimes`, `heroSung` ignoring the shortened exit.
