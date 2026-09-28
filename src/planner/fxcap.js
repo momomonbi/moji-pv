@@ -191,8 +191,8 @@ MV.def('planner/fxcap', ['core/num', 'planner/extreme', 'planner/rules'], (N, XT
     return need;
   }
 
-  // A count the trim may lower: automatic (or raised by a pinned index, which keeps it at the pin), and not taken from
-  // the cut's aligned source (「くり返しの行をそろえる」).
+  // A count the trim may lower: automatic (or raised by a pinned index, 'rule', which keeps it at the pin), and not taken
+  // from the cut's aligned source (「くり返しの行をそろえる」).
   function free(d, slot, fromAlign) {
     return !!d && (d.from === 'auto' || d.from === 'rule') && !(fromAlign && fromAlign.has(slot));
   }

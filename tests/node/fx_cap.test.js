@@ -200,6 +200,18 @@ test('the chooser: a blocked candidate is passed over for every pick; a pool tha
 
 // --- the cut budget -------------------------------------------------------------------------------------------------
 
+// The cuts whose decorations or screen effects the budget lowered: fewer than in the same plan without it (a count's
+// automatic value reads only its own stream, the look and the impact mark, so the plan without the budget shows it as
+// drawn). A lowered count stays an automatic value (the row stays editable).
+function lowered(on, off) {
+  const byKey = new Map(off.cuts.map((c) => [c.key, c]));
+  return on.cuts.filter((c) => {
+    const o = byKey.get(c.key);
+    return o && PER_CUT.has(c.role) && (count(c, 'ornament.count') < count(o, 'ornament.count') ||
+      count(c, 'filter.count') < count(o, 'filter.count'));
+  });
+}
+
 // Checks the cut budget on one plan: every automatic lyric cut (no pinned or aligned count, not キメ) is at its cap or
 // under it after its trim, or has nothing left to trim; a transition comes in only where the cut has room, the
 // background changes, the seam is pinned or copied, or the cut is a キメ line. → the number of cuts checked.
@@ -243,10 +255,10 @@ test('the cut budget holds as specified for automatic lyric cuts; transitions on
   for (const mood of MOODS) {
     for (const { name, doc } of corpus.corpus(1, ['16:9', '9:16'])) {
       const d = gen1(doc, { 'work:mood': ON(mood) });
-      const p = fresh(d);
+      const p = fresh(d), off = fresh(fxOff(d));
       checked += checkBudget(d, p, mood + ' ' + name);
-      for (const c of p.cuts) if (c.slots['ornament.count'] && c.slots['ornament.count'].from === 'rule') trimmed++;
-      for (const [, L] of fresh(fxOff(d)).pv.loads) if (L.load > L.cap) over++;
+      trimmed += lowered(p, off).length;
+      for (const [, L] of off.pv.loads) if (L.load > L.cap) over++;
     }
   }
   assert.ok(checked > 1000, 'cuts checked: ' + checked);
@@ -313,7 +325,7 @@ test('how strong: per mood each element drops ≤ 15 % on cuts at most one over 
           a.oOff1 += count(c, 'ornament.count'); a.oOn1 += count(o, 'ornament.count');
           a.fOff1 += count(c, 'filter.count'); a.fOn1 += count(o, 'filter.count');
         }
-        if (o.slots['ornament.count'].from === 'rule' || o.slots['filter.count'].from === 'rule') a.trim++;
+        if (count(o, 'ornament.count') < count(c, 'ornament.count') || count(o, 'filter.count') < count(c, 'filter.count')) a.trim++;
         if (L.load > L.cap) a.overOff++;
         if (on.pv.loads.get(c.key).load > on.pv.loads.get(c.key).cap) a.overOn++;
       }
@@ -442,11 +454,16 @@ test('キメ lines and cuts without lyrics are never trimmed or gated', () => {
 test('explain: a reduced count says pv.fx, a gated seam says pv.fx, a blocked pick names pv.letter', () => {
   const doc = gen1(corpus.project('long').doc, { 'work:mood': ON('printColumn') });
   const p = fresh(doc);
-  const cut = p.cuts.find((c) => c.slots['ornament.count'] && c.slots['ornament.count'].from === 'rule');
+  const cut = lowered(p, fresh(fxOff(doc))).find((c) => c.slots['ornament.count'].v > 0) || lowered(p, fresh(fxOff(doc)))[0];
   assert.ok(cut, 'a trimmed cut');
   const e = EX.explain(doc, p, 'cut/' + cut.key + ':ornament.count', { registry: CAT });
   assert.equal(e.value, cut.slots['ornament.count'].v);
   assert.deepEqual(e.why, [{ code: 'rule', params: { rule: 'pv.fx' } }]);
+  // still an automatic value: 自動, editable, and a pin wins
+  const FI = MV.use('planner/fields');
+  const fs = FI.fieldState(doc, p, { level: 'cut', key: cut.key }, 'cut/' + cut.key + ':ornament.count', { registry: CAT });
+  assert.equal(fs.state, 'auto');
+  assert.equal(cut.slots['ornament.count'].from, 'auto');
   // a gated seam
   const gd = gen1(corpus.project('basic').doc, BUSY);
   const gp = fresh(gd), gOff = fresh(fxOff(gd));

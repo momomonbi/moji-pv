@@ -2476,6 +2476,37 @@ async def flow_conventions(f, lang):
     f.check(auto == await page.evaluate("() => window.__mv.t('rule.auto.new')"), 'the note of a new work: %r' % auto)
     f.check(await page.locator(row + ' [data-role="dice"]').count() == 0, 'a setting, not drawn: no 振り直し')
     await f.shot('conventions-on')
+    # 効果を重ねすぎない and 1カットに重ねる効果の目安 under 詳しい設定 (DESIGN_2_2 §2.6): on, and the box names its
+    # automatic value (自動（4） for a calm mood); typing a number pins it (one undo step)
+    await page.evaluate("""() => { const d = document.querySelector('[data-mount="inspector"] .isec[data-sec="look"] details.isec-more');
+      if (d) d.open = true; }""")
+    await f.settle(2)
+    fx, mx = RULE_ROW % 'pv.fxCap', RULE_ROW % 'pv.fxMax'
+    await f.until("(s) => !!document.querySelector(s)", '効果を重ねすぎない is a row of 詳しい設定', fx)
+    f.check(await page.is_checked(fx + ' input[role="switch"]'), '効果を重ねすぎない is on in a new work')
+    done_m = await page.evaluate(DONE)
+    await page.evaluate("""() => window.__mv.dispatch({ t: 'pin.set', path: 'work:mood', v: 'quietHush', by: 'user' },
+      { label: ['undo.pin', { field: '', scope: '' }] })""")
+    await f.until("() => window.__mv.plan && window.__mv.plan.look.mood.v === 'quietHush'", 'a calm mood')
+    await f.settle(3)
+    want = await page.evaluate("() => window.__mv.t('fld.pvFxMax.auto', { n: 4 })")
+    num = mx + ' input.w-num'
+    await f.until("(x) => { const b = document.querySelector(x.s); return !!b && b.placeholder === x.w; }",
+                  'the box shows %s' % want, {'s': num, 'w': want})
+    f.check(await page.locator(mx + ' .fr-auto').count() == 0, 'a number says 自動（4） once, in its box')
+    done_n = await page.evaluate(DONE)
+    await page.fill(num, '6')
+    await page.press(num, 'Enter')
+    await f.until("() => { const p = window.__mv.doc.pins['work:pv.fxMax']; return !!p && p.v === 6; }", 'the number pins 6')
+    await f.settle(2)
+    f.check(await page.evaluate(DONE) == done_n + 1, 'one undo step')
+    await f.shot('conventions-fx')
+    await page.evaluate("() => window.__mv.actions.run('edit.undo')")
+    await f.until("() => !window.__mv.doc.pins['work:pv.fxMax']", 'undo the number')
+    await page.evaluate("() => window.__mv.actions.run('edit.undo')")
+    await f.until("() => !window.__mv.doc.pins['work:mood']", 'undo the mood')
+    await f.settle(2)
+    f.check(await page.evaluate(DONE) == done_m, 'back where it was')
     done1 = await page.evaluate(DONE)
     await page.click(row + ' .w-toggle')
     await f.until("() => { const p = window.__mv.doc.pins['work:pv.rules']; return !!p && p.v === false; }", 'off is a pin')

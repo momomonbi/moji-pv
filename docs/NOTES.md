@@ -9163,8 +9163,8 @@ Contract: DESIGN_2_2 §2 (from the P2 design, revision 2). Phase A is in: the sw
 new works (with `ai/direct.followSources` passing the document), the set of looks per song part, the arc, directions of
 parts and seams (pfrom `'alt'`), the UI rows (作品全体 › 見た目: 文字PVの定石 + 詳しい設定 members; the 区画 page's
 演出セット with its die), the auto note line (`p.fr-auto`), the number box's 自動（n） placeholder, strings, explain.
-Phase B (T5: 効果を重ねすぎない, 1カットに重ねる効果の目安) and phase C (camera alternation) and `tests/golden/project_pv.json`
-follow. Every existing golden matches (`node tests/update_golden.js --check`: the six files), and
+Phase B (T5: 効果を重ねすぎない, 1カットに重ねる効果の目安) and `tests/golden/project_pv.json` came next (below); phase C
+(camera alternation) follows. Every existing golden matches (`node tests/update_golden.js --check`: the six files), and
 `pv_rules.test.js` checks a generation-1 work with 文字PVの定石 off against the golden plan hashes themselves.
 
 **Measurements** (catalog; `tests/node/section_kit.test.js`, `pv_flow.test.js` print them):
@@ -9231,6 +9231,96 @@ and `determinism.py` are OK.
 Known: the planner speed test "re-planning project_long after an edit" and a few conformance build-time checks fail on
 this loaded machine (they fail on the base too); the two typing tests (older and new work, ≤ 30 ms best batch) sit at
 the edge of their bound here (load average 6–10 on 4 cores) and each failed once in these runs.
+
+### P2 文字PVの定石: phase B (T5 効果を重ねすぎない)
+
+Contract: DESIGN_2_2 §2.6 (the P2 design §3). In: `planner/fxcap` (the channel tables, `clash`, `letterBlock`, `capOf`,
+`loadOf`, `trim`, `gate`); the lettering block through `ctx.pv.partFactor(st, kind, idx).block` into `choose.pick`
+(passed over for the final, natural and reference picks; `letterFallback` when every candidate is blocked) and
+`choose.weigh`; the trim in `cast.decideList('filter')` (after the count and its index raise, before the filter slots)
+and in the camera-only passes; the seam gate in `tracks.decideSeam` (unpinned boundaries, before the chance roll);
+`ctx.pv.castDone(cuts)` → the non-enumerable `plan.pv.loads` (the cuts' loads and caps as cast); explain (`rule pv.fx` for
+a lowered count, `pv.fx` for a gated seam, `pv.letter` when a candidate was blocked); the rows 「効果を重ねすぎない」 and
+「1カットに重ねる効果の目安」 (作品全体 › 見た目 › 詳しい設定); strings; `tests/node/fx_cap.test.js`; the golden
+`tests/golden/project_pv.json` (the repeat fixture as a new work, its job in `tests/update_golden.js`, checked by
+`section_kit.test.js`). The six existing goldens match (`--check`); the new file was written only after that.
+
+**Measurements** (catalog; `fx_cap.test.js` prints the table):
+
+- The lettering, every mood × every text style (basic, vertical, lrc; 16:9 and 9:16): 0 clashing automatic picks over
+  1 698 cuts with the rule, 140 without. Every glowing entrance (bloomOpen) and exit (burnOut) is passed over on glowing
+  text; the explain alternatives show them at weight 0.
+- The cut budget on new works, corpus(1) × 16:9/9:16 × 8 moods, budget on vs off (loads as cast; decorations and screen
+  effects counted on all cuts / on cuts at most one over the cap):
+
+  | mood | cap | cuts trimmed | decorations | screen effects | transitions | impulses | cuts above cap |
+  |---|---|---|---|---|---|---|---|
+  | dashSprint | 6 | 0 % | −0 % / −0 % | −0 % / −0 % | 0 % | 0 % | 0 % → 0 % |
+  | dreamHaze | 4 | 3 % | −9 % / −8 % | −0 % / −0 % | 0 % | 0 % | 10 % → 0 % |
+  | glitchFracture | 5 | 1 % | −3 % / −3 % | −0 % / −0 % | 0 % | 0 % | 4 % → 0 % |
+  | heartAche | 4 | 3 % | −10 % / −6 % | −0 % / −0 % | 0 % | 0 % | 9 % → 0 % |
+  | popFizz | 5 | 1 % | −2 % / −2 % | −0 % / −0 % | 0 % | 0 % | 3 % → 0 % |
+  | printColumn | 4 | 5 % | −11 % / −11 % | −0 % / −0 % | 0 % | 0 % | 15 % → 0 % |
+  | quietHush | 4 | 1 % | −4 % / −4 % | −0 % / −0 % | 0 % | 0 % | 3 % → 0 % |
+  | silverReel | 4 | 2 % | −9 % / −9 % | −0 % / −0 % | 0 % | 0 % | 7 % → 0 % |
+
+  Every element stays within the design's ≤ 15 % per mood. Decorations alone bring every automatic cut under its cap, so
+  the seam gate never fires on these works; it acts where counts cannot be trimmed (pinned decorations and screen effects
+  under a calm mood, basic and long × 2 seeds: 1 text transition, into the outro card, against 110 without the budget;
+49 transitions into a new background stay; `fx_cap` "the seam gate"). The loads are
+  lower than the design's A.1 (3–23 % of legacy cuts over the cap) because A.1 also counted every lens texture and the
+  transition into the cut; the load here is the design's formula (a still or framing lens is not a moving texture).
+- Moods keep their identity on new works (sample lyrics, 2 seeds × 3 aspects): screen effects per cut silverReel 0.56,
+  printColumn 0.23, quietHush 0.34 (letterbox bars 0.195); the pick distributions calm vs glitch 0.48, calm vs pop 0.45
+  (thresholds 0.4 / 0.15 / 0.2 / 0.08 and 0.15 / 0.1, as `catalog.test.js`). Budget on or off changes none of them by
+  more than 0.01.
+- The camera: on 898 of 1 016 cuts whose layout, motions and lens are the same with the budget on and off (glow text, so
+  the block acts), shot, zoom, curve and follow are the same on every one; impulses are identical in every plan.
+
+**Mutation checks** (each caught by `fx_cap.test.js`, then restored): the lettering block dropped (`partFactor` without
+`letterOf`); the fallback dropped (`pick` returns null when all is blocked); the decoration trim skipped; the seam gate
+skipped; a `GLYPH` entry removed (burnOut). `pv_rules` "every rule changes the plan on its own" now includes `pv.fxCap`.
+
+**Deviations from the design** (each with its reason):
+
+1. `GLYPH` is the engine's, not the design's source scan: the derivation test found four more entries — depart
+   burnOut [glow, tint], pointImplode [blur, tint], shardBurst [shard, tint], strobeOut [tint] — and they are in the
+   table. P4's weightGrow / weightPulse / weightThin are pre-filled with [wt] (inert until they land; the test allows
+   exactly those three names outside the catalog).
+2. P4's weight channel: P4's final design makes the weight animation motion parts, so `wt` enters through `GLYPH`, not
+   through a cut flag on the style side; P4's rule "no `wt` on an outline, shadow or duo fill" is in `clash`
+   (`WT_STYLES`).
+3. `seamGate(B, world)` instead of `(A, B, world)`: P4's morph rule calls `ctx.pv.seamGate(B)` in its guards (world
+   defaults to false; a morph stays in one background); there is no `exempt` argument (P4 withdrew it).
+4. A gated seam explains as the why code `pv.fx` (「効果が重なりすぎないように減らした」), not `whyRule.pv.fx`, whose text
+   (「…数を減らした」) is about a count. Lowered counts explain as `rule pv.fx` → `whyRule.pv.fx`.
+5. The lettering block applies to every cut's automatic picks (title and focus cuts too), not only to lyric cuts with a
+   song part: it is about the letters wherever they are. The cut budget and the gate stay on lyric and focus cuts.
+6. A text screen effect is also blocked by the text screen effects chosen before it in the same cut (earlier filter
+   slots), so two of them never make a third channel with the style.
+7. Impulses: the phase brief mentions trimming impulses; the design (revision 2, critique #6) never trims them — an
+   impact line counts once in the load (IMP) and gets one more in its cap. Followed the design; impulses are identical
+   with the budget on and off (tested).
+8. `plan.pv.loads` is recorded whenever `ctx.pv` exists (also with the budget off), so tests compare loads with and
+   without the budget.
+9. A number row gets no `fr-auto` line: its box's placeholder already says 自動（4）; toggles keep the line.
+10. A lowered count is `{ v, from: 'auto' }`, not `from: 'rule'`: `planner/fields` shows a `'rule'` value as derived and
+    makes the row read-only (the same reason the design gave the turned directions `'alt'` instead of `'rule'`), and the
+    user must be able to pin a count. Explain still names the rule `pv.fx` (from the trace); tests find lowered counts by
+    comparing with the plan without the budget (a count's automatic value reads only its own stream).
+11. `OTHER_OFF` in `tests/update_golden.js` is computed from the `planner/rules` table (every row that is not P2's, pinned
+    to its `off` value) instead of a hand-kept list, so a package that adds a row is covered without editing the file;
+    `update_golden.js` exports `pvDoc()` for `section_kit.test.js`.
+
+**Browser.** `flow_conventions` also opens 詳しい設定: 「効果を重ねすぎない」 is on in a new work; under quietHush the box of
+「1カットに重ねる効果の目安」 shows 自動（4） (one line only); typing 6 pins it in one undo step.
+
+**Visual QA** (the app, a new work of the flows' two-chorus lyrics under nightTram, a glow theme, and dreamHaze; frames at
+each lyric cut's entrance, hold and exit, budget on and off). Off, two cuts enter with bloomOpen (a glowing bloom on
+glowing letters, the halo doubles and the letters smear) and one prechorus cut adds glowSpill; on, they take rainDrop and
+fogIn and softVeil, and the letters stay crisp; every other cut is the same. The loads of the ten cuts are 2–5 against
+caps of 4 (5 on the impact line). The sheet also shows the phase A sets at work: the verse cuts share large horizontal
+type, the chorus cuts boxed and grid compositions with twirls and drops.
 
 <!-- PV22 P3 notes -->
 

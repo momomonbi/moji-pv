@@ -912,7 +912,9 @@ test('spec-5: なぜ turns planner ids into words (rules, families, cuts), in ja
     const plan = PL.plan(doc, { registry: reg });
     const extra = [];
     if (name === 'long@gen1') {
-      const trimmed = plan.cuts.find((c) => c.slots['ornament.count'].from === 'rule');
+      const offDoc = Object.assign({}, doc, { pins: Object.assign({}, doc.pins, { 'work:pv.fxCap': { v: false, by: 'user' } }) });
+      const offCuts = new Map(PL.plan(offDoc, { registry: reg }).cuts.map((c) => [c.key, c]));
+      const trimmed = plan.cuts.find((c) => offCuts.has(c.key) && c.slots['ornament.count'].v < offCuts.get(c.key).slots['ornament.count'].v);
       extra.push('cut/' + trimmed.key + ':ornament.count');
       for (const c of plan.cuts) {
         for (const kind of ['arrange', 'arrive', 'depart', 'dwell', 'lens']) {

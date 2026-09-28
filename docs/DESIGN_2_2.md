@@ -228,9 +228,10 @@ T5 has two layers, both behind `pv.fxCap` (on in a new work through 文字PVの�
   pass trims alike): when `load > cap`, the decorations first down to the highest pinned decoration slot, then the
   screen effects down to max(the pinned index, the keep: 1 for a film mood (`filterDrive ≥ 0.5`) + 1 for the impact
   line's flash, at most the cut's own count). A count is trimmed only when it is automatic (or raised by an index) and not
-  taken from the aligned source; a lowered count is `{ v, from: 'rule' }` (explain: rule `pv.fx`, 「効果が重なりすぎない
-  ように数を減らした」) and the dropped decoration slots go. Every slot keeps its own stream, so a lower count changes no
-  other value.
+  taken from the aligned source; a lowered count stays an automatic value, `{ v, from: 'auto' }` (a `'rule'` count reads
+  as derived and makes the row read-only; the user must be able to pin a count), explained from the trace as rule
+  `pv.fx` (「効果が重なりすぎないように数を減らした」), and the dropped decoration slots go. Every slot keeps its own
+  stream, so a lower count changes no other value.
 - **The seam gate** (`tracks.decideSeam`, unpinned boundaries only, before the chance roll; copied seams never reach it):
   when B's load as cast is still over its cap and the background does not change, the boundary is the hard cut (`from:
   'rule'`; explain `pv.fx`). A new background may always come in with a transition. `seamGate(B, world)` is also the

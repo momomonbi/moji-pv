@@ -117,8 +117,15 @@ and Filmora-ready output; how they are built is in `docs/DESIGN_2_1.md`.
   spins, the side the text sits on and sideways transitions turn the other way from the previous cut, while one cut's
   moves share a direction (horizontal text only for sides; a text entrance changes side only on a one-word cut); a
   turned direction stays 自動, a pin, a lock or its own die keeps it; **曲の山に合わせて強弱をつける** — verses calmer,
-  choruses stronger, the last chorus strongest, a hold right before a chorus. Nothing is filtered away: these weigh the
-  automatic choices, and pins, locks and rules win. (効果を重ねすぎない and 1カットに重ねる効果の目安 follow.)
+  choruses stronger, the last chorus strongest, a hold right before a chorus; **効果を重ねすぎない** — the letters never
+  carry two effects of the same kind (no glowing move or glow effect on glowing text, no after-image on outlined or
+  two-tone text, never more than two effects on the letters at once), and a cut that is still too busy chooses fewer
+  decorations, then fewer screen effects (never below a film mood's look or the impact line's flash), and gets no
+  transition on top unless the background changes. **1カットに重ねる効果の目安** (4–8, 自動 = from カットの速さ: 4 for calm
+  moods, 6 for the fastest; the box shows 自動（4）) is that budget; an impact line and a カメラ EXTREME cut get one more.
+  It is a guide: the camera, the motions, impact flashes and shakes, pins, locks, repeats that follow their first copy,
+  EXTREME and キメ lines are never trimmed. Nothing is filtered away by the other rules: they weigh the automatic
+  choices, and pins, locks and rules win.
 - **Per line (v2.1)**: its own season (この行の季節) and parts it must not use (この行で使わない部品).
 - **My materials (マイ素材, v2.1)**: new materials that the AI or the user builds from existing parts and a fixed set of
   primitives (shapes, particles, patterns, motion tracks, oscillators). They are data, never code; they are stored in the

@@ -896,7 +896,9 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     }
 
     // 「効果を重ねすぎない」: the lower counts planner/conventions gives a busy cut (decorations first, then screen
-    // effects), from 'rule' (explained as rule pv.fx); the dropped decorations go (the filter slots are not decided yet).
+    // effects); the dropped decorations go (the filter slots are not decided yet). A lowered count is still an automatic
+    // value ('auto': the row stays editable and a pin wins; 'rule' would make it a read-only derived value); explain
+    // names the rule pv.fx from the trace.
     function trimLists(st, needF) {
       const got = st.ctx.pv.trimLists(st, needF);
       if (!got) return;
@@ -905,7 +907,7 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
         if (n === undefined) continue;
         const countSlot = kind + '.count';
         const old = st.slots[countSlot].v;
-        const d = { v: n, from: 'rule' };
+        const d = { v: n, from: 'auto' };
         setDecision(st, countSlot, d);
         for (let i = n; i < old; i++) {
           const slot = kind + '#' + i;
