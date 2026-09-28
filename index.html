@@ -1,6 +1,6 @@
 <!doctype html><html lang="ja"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-1hTcG881wjUQZey2hHtQXyEK2EZi/UBl36L1CKfbVAo='; style-src 'sha256-r4itjKbpHP12JOftFK1QsTGzxZPEZmuZJcB3U9ZIa6k=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-9unyOWpS7iNSY/Bg2QgTJP+eBU+nQzwAkBrtcOjyakw='; style-src 'sha256-r4itjKbpHP12JOftFK1QsTGzxZPEZmuZJcB3U9ZIa6k=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
 <title>文字PVメーカー</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -14289,6 +14289,9 @@ MV.def('i18n/strings', [], () => ({
   'undo.tapUnits': ['1字ずつタップ（{n}か所）', 'Tap each character ({n})'],
   'undo.sungClear': ['字の時間を消す', 'Clear character times'],
   'cmd.tap.units': ['1字ずつタップ', 'Tap each character'],
+  // the timeline's character ticks
+  'tl.tick': ['{ch}の時間 {time}', '{ch} at {time}'],
+  'undo.tick': ['字の時間', 'Character time'],
 }));
 /* 文字PVメーカー v2 — original work. Translation function and formatters over the [ja, en] string table (DESIGN §4.24). */
 MV.def('i18n/t', [], () => {
@@ -19562,9 +19565,9 @@ MV.def('planner/sung', ['core/script', 'core/num', 'core/motion', 'engine/text/v
         taken.add(u);
         list.push({ u, dt, src: SRC.pin });
       }
-      return { list, endRel, dropped };
+      return { list, endRel, dropped, endSrc: SRC.pin };
     }
-    if (!sourcesOK || !Array.isArray(line.words) || !line.words.length) return { list, endRel, dropped };
+    if (!sourcesOK || !Array.isArray(line.words) || !line.words.length) return { list, endRel, dropped, endSrc: SRC.est };
     const ref = typeof line.wordsRef === 'number' ? line.wordsRef : line.words[0][1];
     const len = units.text.length;
     let prev = null;
@@ -19580,13 +19583,14 @@ MV.def('planner/sung', ['core/script', 'core/num', 'core/motion', 'engine/text/v
       list.push({ u, dt, src: SRC.lrc });
       prev = dt;
     }
-    return { list, endRel, dropped };
+    return { list, endRel, dropped, endSrc: SRC.lrc };
   }
 
   // --- (c) filling a line ---------------------------------------------------------------------------------------
 
-  // fillLine({ units, anchors, endRel, span, rate, sourcesOK, anchoredStart }) → LineTiming (relative to the line's
-  // start; frozen): { at, t, end, src, by, explicit, anchored, sourcesOK }. Unit 0 starts with the line unless anchored.
+  // fillLine({ units, anchors, endRel, endSrc, span, rate, sourcesOK, anchoredStart }) → LineTiming (relative to the
+  // line's start; frozen): { at, t, end, endSrc, src, by, explicit, anchored, sourcesOK } (endSrc: the source of an
+  // explicit end, SRC.est for an estimated one). Unit 0 starts with the line unless anchored.
   // The sung end: the end anchor, else (with ≥ 2 anchors or the sources on) the last anchor plus the rest of the line's
   // morae at its own measured rate (≥ 2 anchors) or the reading rate, × EST_SLACK, else the span (the v2 window, for a
   // line timed only for the colour fill); at least UNIT_MIN per unit after the last anchor, never past the span.
@@ -19641,7 +19645,7 @@ MV.def('planner/sung', ['core/script', 'core/num', 'core/motion', 'engine/text/v
     let best = 0;
     for (let u = 0; u < n; u++) if (src[u] > best) best = src[u];
     return Object.freeze({
-      at: units.at, t, end: q3(E), src, by: SRC_NAMES[best], explicit: o.anchors.some((a) => a.src >= SRC.copy),
+      at: units.at, t, end: q3(E), endSrc: o.endRel === undefined ? SRC.est : o.endSrc || SRC.est, src, by: SRC_NAMES[best], explicit: o.anchors.some((a) => a.src >= SRC.copy),
       anchored: count, sourcesOK: !!o.sourcesOK, n, units,
     });
   }
@@ -19712,17 +19716,17 @@ MV.def('planner/sung', ['core/script', 'core/num', 'core/motion', 'engine/text/v
       if (!cur || o.best > cur.best) source.set(o.line.text, o);
     }
     const lines = new Map(), meta = new Map();
-    const timingOf = (o, anchors, endRel, copyKey) => {
+    const timingOf = (o, anchors, endRel, endSrc, copyKey) => {
       const anchoredStart = !!(o.line.by && o.line.by.start !== 'auto');
       let key = o.line.lang + '|' + N.q6(o.span) + '|' + (o.sourcesOK ? 1 : 0) + '|' + rate + '|' + (anchoredStart ? 1 : 0) + '|' +
-        (endRel === undefined ? '' : endRel) + '|' + (copyKey || '') + '|';
+        (endRel === undefined ? '' : endRel + ',' + endSrc) + '|' + (copyKey || '') + '|';
       for (const a of anchors) key += a.u + ',' + a.dt + ',' + a.src + ';';
-      return filled(key + '|' + o.line.text, () => fillLine({ units: o.units, anchors, endRel, span: o.span, rate,
+      return filled(key + '|' + o.line.text, () => fillLine({ units: o.units, anchors, endRel, endSrc, span: o.span, rate,
         sourcesOK: o.sourcesOK, anchoredStart }));
     };
     // sources first (their sung end scales the copies)
     const done = new Map();
-    for (const src of source.values()) done.set(src, timingOf(src, src.anchors.list, src.anchors.endRel, null));
+    for (const src of source.values()) done.set(src, timingOf(src, src.anchors.list, src.anchors.endRel, src.anchors.endSrc, null));
     for (let i = 0; i < n; i++) {
       const o = own[i];
       const line = o.line;
@@ -19735,8 +19739,8 @@ MV.def('planner/sung', ['core/script', 'core/num', 'core/motion', 'engine/text/v
           const k = srcLs.end > 0 ? Math.min(1, o.span / srcLs.end) : 1;
           const anchors = src.anchors.list.map((a) => ({ u: a.u, dt: q3(a.dt * k), src: SRC.copy }));
           const endRel = src.anchors.endRel === undefined ? undefined : q3(src.anchors.endRel * k);
-          ls = timingOf(o, anchors, endRel, src.line.id + ':' + k);
-        } else ls = timingOf(o, o.anchors.list, o.anchors.endRel, null);
+          ls = timingOf(o, anchors, endRel, SRC.copy, src.line.id + ':' + k);
+        } else ls = timingOf(o, o.anchors.list, o.anchors.endRel, o.anchors.endSrc, null);
       }
       lines.set(line.id, ls);
       meta.set(line.id, { hamePinOn: o.hamePinOn, kime: o.kime, hameFrom: o.hameFrom,
@@ -19905,7 +19909,7 @@ MV.def('planner/sung', ['core/script', 'core/num', 'core/motion', 'engine/text/v
       const t = new Float64Array(ls.n);
       for (let u = 0; u < ls.n; u++) t[u] = N.q6(line.t0 + ls.t[u]);
       out.set(line.id, Object.freeze({
-        at: ls.at, t, end: N.q6(line.t0 + ls.end), src: ls.src, by: ls.by, pinBy: m.pinBy, explicit: ls.explicit,
+        at: ls.at, t, end: N.q6(line.t0 + ls.end), endSrc: ls.endSrc, src: ls.src, by: ls.by, pinBy: m.pinBy, explicit: ls.explicit,
         hame: h.hame, hameWhy: h.why, fill: false, dropped: m.dropped,
       }));
     }
@@ -68805,6 +68809,185 @@ MV.def('ui/steps', ['ui/dom', 'ui/icons', 'ui/step_lyrics', 'ui/step_song', 'ui/
 
     return { mount, STEPS, statusOf, LOOK_PIN };
   });
+/* 文字PVメーカー v2 — original work. 歌ハメ on the timeline: a line's character times as ticks under its bar, and the pins a tick drag, a double-click or a nudge writes (DESIGN_2_2 §6). */
+MV.def('ui/sung_ticks', ['planner/sung', 'i18n/t'], (SU, T) => {
+  'use strict';
+
+  const TICK_PX = 7;            // a tick's height, at the bottom of the line's bar
+  const HIT_PX = 4;             // a tick within this many px of the pointer is hit (selected lines only)
+  const MIN_UNIT_PX = 5;        // ticks are drawn from this many px per unit (always on a selected line)
+  const CHAR_UNIT_PX = 12;      // … and a selected line's characters above them from this many
+  const GAP = 0.02;             // a moved tick keeps this far from its neighbours and the end (seconds)
+  const CHAR_FONT = 9;
+  // By source (planner/sung SRC: est, voice, copy, lrc, pin): a time set by hand or a tap bright, a word tag or a copy
+  // like an LRC stamp, the voice blue, an estimate faint.
+  const SRC_COLORS = Object.freeze(['rgba(242,239,232,0.35)', 'rgba(124,196,255,0.8)', '#c9b27a', '#c9b27a', '#f2efe8']);
+  const FOCUS = '#7cc4ff';
+  const CHAR_INK = 'rgba(242,239,232,0.85)';
+
+  const q3 = (x) => Math.round(x * 1000) / 1000;
+
+  // spanEndOf(lines, i) → where line i's characters must be sung by: its end, or the next line's start when earlier
+  // (the span planner/sung reads; a pair after it is not used).
+  function spanEndOf(lines, i) {
+    const l = lines[i], next = lines[i + 1];
+    return next && next.t0 > l.t0 ? Math.min(l.t1, next.t0) : l.t1;
+  }
+
+  // ticksOf(ls, line) → [{ u, t, src }]: a tick for every unit after the first, and for the first when it is sung
+  // after the line's start (at the start it is the start edge). ls = plan.sung.get(line.id); times absolute.
+  function ticksOf(ls, line) {
+    const out = [];
+    if (!ls) return out;
+    for (let u = 0; u < ls.t.length; u++) {
+      if (u === 0 && !(ls.t[0] > line.t0 + 0.0005)) continue;
+      out.push({ u, t: ls.t[u], src: ls.src[u] });
+    }
+    return out;
+  }
+
+  // shown(ls, line, xOf, selected) → whether the line's ticks are drawn: always on a selected line, else with room.
+  function shown(ls, line, xOf, selected) {
+    if (!ls || !ls.t.length) return false;
+    return !!selected || (xOf(ls.end) - xOf(line.t0)) / ls.t.length >= MIN_UNIT_PX;
+  }
+
+  // hit(ls, line, x, xOf) → the unit whose tick is nearest to x within HIT_PX, or -1.
+  function hit(ls, line, x, xOf) {
+    let best = -1, dist = HIT_PX + 1e-9;
+    for (const k of ticksOf(ls, line)) {
+      const d = Math.abs(xOf(k.t) - x);
+      if (d <= dist) { dist = d; best = k.u; }
+    }
+    return best;
+  }
+
+  // bounds(ls, line, u, spanEnd) → { lo, hi } (absolute seconds): where unit u may move — GAP after the unit before it
+  // (the line's start for the first), GAP before the unit after it; the last unit up to the sung end when that is
+  // explicit (a pin, a word tag or a copy), else up to the line's span (the end is estimated again from the new times).
+  function bounds(ls, line, u, spanEnd) {
+    const n = ls.t.length;
+    const lo = u > 0 ? ls.t[u - 1] + GAP : line.t0;
+    const hi = u + 1 < n ? ls.t[u + 1] - GAP : (ls.endSrc > 0 ? ls.end : spanEnd) - GAP;
+    return { lo, hi: Math.max(lo, hi) };
+  }
+
+  // movedPin(ls, line, t0, u, t) → the line's sung.times value with unit u at t (absolute) and every other unit where it
+  // is now (so nothing else moves), relative to t0; plus the end pair where the end is explicit. A pair closer than
+  // the planner's DT_GAP to the one kept before it is left out (it is interpolated again); the moved unit is always
+  // kept. null when u lies past the pin's size.
+  function movedPin(ls, line, t0, u, t) {
+    const n = Math.min(ls.t.length, SU.C.PIN_MAX - 1);
+    if (u >= n) return null;
+    const out = [];
+    const gapOK = (dt) => !out.length || dt >= out[out.length - 1][1] + SU.C.DT_GAP - 1e-9;
+    for (let k = 0; k < n; k++) {
+      const dt = Math.max(0, q3((k === u ? t : ls.t[k]) - t0));
+      if (k === u) while (!gapOK(dt)) out.pop();
+      else if (!gapOK(dt)) continue;
+      out.push([ls.at[k], dt]);
+    }
+    if (ls.endSrc > 0) {
+      const e = q3(ls.end - t0);
+      if (gapOK(e) && e <= SU.C.DT_MAX) out.push([String(line.text).length, e]);
+    }
+    return out;
+  }
+
+  // moveCmds(ls, line, u, t) → the commands of one tick move: the line's automatic start pinned where it is now (the
+  // characters' times are relative to it, and a floating start would carry them off the voice when lines above
+  // change), then the pin. null when nothing can be written.
+  function moveCmds(ls, line, u, t) {
+    const auto = !line.by || line.by.start === 'auto';
+    const t0 = auto ? q3(line.t0) : line.t0;
+    const v = movedPin(ls, line, t0, u, t);
+    if (!v) return null;
+    const cmds = [];
+    if (auto) cmds.push({ t: 'pin.set', path: 'line/' + line.id + ':start', v: t0, by: 'user' });
+    cmds.push({ t: 'pin.set', path: 'line/' + line.id + ':sung.times', v, by: 'user' });
+    return cmds;
+  }
+
+  // removeCmd(line, u, pin) → the command that gives unit u back to the estimate: the pin without the pairs on that
+  // unit, cleared when nothing is left; null when the line has no pin or the unit no pair in it.
+  function removeCmd(line, u, pin) {
+    if (!pin || !Array.isArray(pin.v)) return null;
+    const path = 'line/' + line.id + ':sung.times';
+    const text = String(line.text), units = SU.unitsOf(text, line.lang);
+    const keep = pin.v.filter((p) => !Array.isArray(p) || p[0] >= text.length || SU.unitAt(units, p[0]) !== u);
+    if (keep.length === pin.v.length) return null;
+    return keep.length ? { t: 'pin.set', path, v: keep, by: 'user' } : { t: 'pin.clear', path };
+  }
+
+  // unitText(ls, line, u) → what unit u sings (trimmed), for the listbox and the characters above the ticks.
+  function unitText(ls, line, u) {
+    const text = String(line.text);
+    const s = text.slice(ls.at[u], u + 1 < ls.at.length ? ls.at[u + 1] : text.length).trim();
+    return s || text.slice(ls.at[u], ls.at[u] + 1);
+  }
+
+  // label(t, ls, line, u) → 「きの時間 0:12.41」 (the listbox reads it for a focused tick).
+  function label(t, ls, line, u) {
+    return t('tl.tick', { ch: unitText(ls, line, u), time: T.fmtTime(ls.t[u]) });
+  }
+
+  // step(ls, line, u, d) → the tick d (±1) from unit u, or the first / last tick when u is not a tick; -1 when none.
+  function step(ls, line, u, d) {
+    const list = ticksOf(ls, line).map((k) => k.u);
+    if (!list.length) return -1;
+    const i = list.indexOf(u);
+    if (i < 0) return d > 0 ? list[0] : list[list.length - 1];
+    return list[Math.max(0, Math.min(list.length - 1, i + d))];
+  }
+
+  // charsFrom(ls, line, xOf, selected) → the x where a selected line's characters over its ticks begin (its name is
+  // drawn before it), Infinity when they are not drawn.
+  function charsFrom(ls, line, xOf, selected) {
+    if (!selected || !ls || (xOf(ls.end) - xOf(line.t0)) / Math.max(1, ls.t.length) < CHAR_UNIT_PX) return Infinity;
+    const first = ticksOf(ls, line)[0];
+    return first ? xOf(first.t) - CHAR_UNIT_PX / 2 : Infinity;
+  }
+
+  let fontCss = null;
+  // draw(g, o): a line's ticks at the bottom of its bar (y1), the end bracket, and on a selected line with room each
+  // unit's first character above its tick. o = { ls, line, xOf, y1, selected, focus (unit or -1), W }.
+  function draw(g, o) {
+    const { ls, line, xOf, y1 } = o;
+    const list = ticksOf(ls, line);
+    const room = (xOf(ls.end) - xOf(line.t0)) / Math.max(1, ls.t.length);
+    const chars = o.selected && room >= CHAR_UNIT_PX;
+    g.save();
+    if (chars) {
+      if (!fontCss) fontCss = CHAR_FONT + 'px ' + getComputedStyle(document.body).fontFamily;
+      g.font = fontCss;
+      g.textBaseline = 'bottom';
+      g.textAlign = 'center';
+    }
+    for (const k of list) {
+      const x = Math.round(xOf(k.t)) + 0.5;
+      if (x < -4 || x > o.W + 4) continue;
+      const focused = k.u === o.focus;
+      g.fillStyle = focused ? FOCUS : SRC_COLORS[k.src] || SRC_COLORS[0];
+      g.fillRect(x - (focused ? 1.5 : 0.5), y1 - TICK_PX, focused ? 3 : 1, TICK_PX);
+      if (chars) {
+        g.fillStyle = focused ? FOCUS : CHAR_INK;
+        g.fillText([...unitText(ls, line, k.u)][0] || '', x, y1 - TICK_PX - 1);
+      }
+    }
+    // the sung end: a small bracket ⌋
+    const xe = Math.round(xOf(ls.end)) + 0.5;
+    if (xe >= -4 && xe <= o.W + 4) {
+      g.fillStyle = SRC_COLORS[ls.endSrc] || SRC_COLORS[0];
+      g.fillRect(xe - 0.5, y1 - TICK_PX, 1, TICK_PX);
+      g.fillRect(xe - 3.5, y1 - 1, 3, 1);
+      g.fillRect(xe - 3.5, y1 - TICK_PX, 3, 1);
+    }
+    g.restore();
+  }
+
+  return { TICK_PX, HIT_PX, MIN_UNIT_PX, CHAR_UNIT_PX, GAP, SRC_COLORS, spanEndOf, ticksOf, shown, hit, bounds, movedPin,
+    moveCmds, removeCmd, unitText, label, step, charsFrom, draw };
+});
 /* 文字PVメーカー v2 — original work. Tap mode: Space/Enter, the tap button or a press on the preview marks line starts while the song plays; one time.tap on finish (DESIGN §4.11, §6.4.15). */
 MV.def('ui/tap', ['ui/dom', 'ui/icons', 'ui/keys', 'ui/selection', 'i18n/t'], (dom, I, K, S, T) => {
   'use strict';
@@ -69321,10 +69504,10 @@ MV.def('ui/tap_units', ['ui/dom', 'ui/icons', 'ui/keys', 'ui/selection', 'i18n/t
 
   return { mount, combine, unitsFor, loopOf, pinOf, LOOP_BEFORE, LOOP_AFTER, RATES };
 });
-/* 文字PVメーカー v2 — original work. Timeline drawer: beat / song / line / cut rows, drags that write time pins, zoom, snap, keyboard nudges, a11y proxies, area bands and key diamonds (DESIGN §6.4.13; DESIGN_2_1 §6.7, §6.8). */
+/* 文字PVメーカー v2 — original work. Timeline drawer: beat / song / line / cut rows, drags that write time pins, zoom, snap, keyboard nudges, a11y proxies, area bands, key diamonds and character ticks (DESIGN §6.4.13; DESIGN_2_1 §6.7, §6.8; DESIGN_2_2 §6). */
 MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/t', 'core/paths', 'core/doc', 'planner/areas',
-  'ui/extreme'],
-  (dom, I, S, F, T, P, D, AREAS, XU) => {
+  'ui/extreme', 'ui/sung_ticks'],
+  (dom, I, S, F, T, P, D, AREAS, XU, TK) => {
   'use strict';
 
   const { h } = dom;
@@ -69401,7 +69584,7 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
     let W = 0, H = 0, dpr = 1;
     let view = { t0: 0, span: 0 };               // visible window; span 0 = fit
     let press = null;
-    let focus = { lineId: null, edge: 'start', band: null }; // the edge Ctrl+←/→ nudges
+    let focus = { lineId: null, edge: 'start', band: null, tick: -1 }; // the edge (or character tick) Ctrl+←/→ nudges
     let digest = { key: null, data: null };
 
     // --- geometry -----------------------------------------------------------------------------------------------
@@ -69555,11 +69738,28 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
         g.fillStyle = on ? COLORS.sel : i % 2 ? COLORS.line2 : COLORS.line;
         g.fillRect(x0, r[0] + 3, Math.max(1, x1 - x0 - 1), r[1] - r[0] - 6);
         if (l.locked) hatch(x0, x1, r[0] + 3, r[1] - 3);
-        label((i + 1) + ' ' + l.text, Math.max(x0, 0) + 4, (r[0] + r[1]) / 2, x1 - Math.max(x0, 0) - 8);
+        // 歌ハメ (DESIGN_2_2 §6): the line's character times as ticks at the bottom of its bar; where a selected line
+        // shows its characters over them, its name stops before the first one
+        const ls = sungOf(l.id), picked = selLines.has(l.id), ticks = TK.shown(ls, l, xOf, picked);
+        const nameEnd = ticks ? Math.min(x1, TK.charsFrom(ls, l, xOf, picked)) : x1;
+        label((i + 1) + ' ' + l.text, Math.max(x0, 0) + 4, (r[0] + r[1]) / 2, nameEnd - Math.max(x0, 0) - 8);
         const f = focus.band === null && focus.lineId === l.id && document.activeElement === proxy;
         edge(x0, r[0], r[1], edgeKind(l.by && l.by.start), f && focus.edge === 'start');
         edge(x1, r[0] + 4, r[1] - 4, edgeKind(l.by && l.by.end), f && focus.edge === 'end');
+        if (ticks) TK.draw(g, { ls, line: l, xOf, y1: r[1] - 3, selected: picked, W, focus: f && focus.edge === 'tick' ? focus.tick : -1 });
       });
+    }
+
+    // A line's sung timing (planner/sung summary, absolute times), or null.
+    function sungOf(id) {
+      const s = app.plan ? app.plan.sung : null;
+      return s ? s.get(id) || null : null;
+    }
+
+    // The lines whose ticks take the pointer: the selected ones (a cut's line when a cut is selected).
+    function selectedLines() {
+      const sel = S.validate(app.view.state.sel, app.plan);
+      return new Set(sel.level === 'line' ? sel.ids : [S.lineOfSel(sel)].filter(Boolean));
     }
 
     function drawCuts(r, sel) {
@@ -69671,6 +69871,14 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
           if (Math.abs(x - x0) <= EDGE_PX) return { row, line: l, edge: 'start' };
           if (Math.abs(x - x1) <= EDGE_PX) return { row, line: l, edge: 'end' };
         }
+        // a character tick of a selected line, in the bottom band of the bar where the ticks are (before the body,
+        // after the edges; the rest of the bar still drags the line)
+        const band = rows().line[1] - 3 - TK.TICK_PX - TK.HIT_PX;
+        for (const id of y >= band ? selectedLines() : []) {
+          const tl = p.lines.find((x2) => x2.id === id);
+          const u = tl ? TK.hit(sungOf(id), tl, x, xOf) : -1;
+          if (u >= 0) return { row, line: tl, edge: null, tick: u };
+        }
         const l = p.lines.find((x2) => x >= xOf(x2.t0) && x < xOf(x2.t1));
         return l ? { row, line: l, edge: null } : { row };
       }
@@ -69737,7 +69945,12 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
         }
         return;
       }
-      if (hit.row === 'line' && hit.line && hit.edge === 'start') {
+      if (hit.tick !== undefined) {
+        const k = press.tick;
+        if (!k || !k.ls) return;
+        const b = TK.bounds(k.ls, k.line, hit.tick, k.spanEnd);
+        moveTick(k.ls, k.line, hit.tick, Math.max(b.lo, Math.min(b.hi, snapTick(tt, ev.altKey))), press.mergeKey);
+      } else if (hit.row === 'line' && hit.line && hit.edge === 'start') {
         pinTime('line/' + hit.line.id + ':start', Math.max(0, Math.min(hit.line.t1 - MIN_LEN, snapTime(tt, hit.line.id, ev.altKey))));
       } else if (hit.row === 'line' && hit.line && hit.edge === 'end') {
         pinTime('line/' + hit.line.id + ':end', Math.max(hit.line.t0 + MIN_LEN, snapTime(tt, hit.line.id, ev.altKey)));
@@ -69755,19 +69968,58 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
       }
     }
 
+    // --- character ticks (歌ハメ, DESIGN_2_2 §6) ------------------------------------------------------------------------
+
+    // A tick snaps to the playhead within SNAP_PX (Alt: no snap).
+    function snapTick(tt, alt) {
+      if (alt) return tt;
+      const play = app.time();
+      return Math.abs(play - tt) < SNAP_PX / Math.max(1, W) * win().span ? play : tt;
+    }
+
+    // What a tick gesture reads: the line and its timing when it began (every move of the gesture writes against them).
+    function tickState(line) {
+      const i = app.plan.lines.findIndex((l) => l.id === line.id);
+      return { line, ls: sungOf(line.id), spanEnd: TK.spanEndOf(app.plan.lines, i) };
+    }
+
+    // Moves unit u of the line to t (absolute): its sung.times pin, and its automatic start pinned where it is, in one
+    // undo entry 「字の時間」.
+    function moveTick(ls, line, u, t, mergeKey) {
+      const cmds = TK.moveCmds(ls, line, u, Math.round(t * 1000) / 1000);
+      if (!cmds) return false;
+      app.batch({ label: ['undo.tick', {}], mergeKey, where: { scope: 'line/' + line.id, field: 'sungTimes' } }, cmds);
+      return true;
+    }
+
+    // Gives unit u back to the estimate (double-click, Delete on a focused tick).
+    function removeTick(line, u) {
+      const cmd = TK.removeCmd(line, u, app.doc.pins['line/' + line.id + ':sung.times']);
+      if (!cmd) return false;
+      app.dispatch(cmd, { label: ['undo.tick', {}], where: { scope: 'line/' + line.id, field: 'sungTimes' } });
+      return true;
+    }
+
     canvas.addEventListener('pointerdown', (ev) => {
       if (ev.button !== 0) return;
       const pt = localPoint(ev);
       const hit = hitAt(pt.x, pt.y);
-      press = { x: pt.x, t: tOf(pt.x), hit, range: hit.row === 'ruler' && ev.shiftKey, gesture: null, moved: false };
-      if (hit.line) focus = { lineId: hit.line.id, edge: hit.edge === 'end' ? 'end' : 'start', band: null };
+      press = { x: pt.x, t: tOf(pt.x), hit, range: hit.row === 'ruler' && ev.shiftKey, gesture: null, moved: false,
+        tick: hit.tick !== undefined ? tickState(hit.line) : null };
+      if (hit.line) focus = { lineId: hit.line.id, edge: hit.tick !== undefined ? 'tick' : hit.edge === 'end' ? 'end' : 'start', band: null,
+        tick: hit.tick !== undefined ? hit.tick : -1 };
       canvas.setPointerCapture(ev.pointerId);
+    });
+    canvas.addEventListener('dblclick', (ev) => {
+      const pt = localPoint(ev);
+      const hit = hitAt(pt.x, pt.y);
+      if (hit.tick !== undefined && removeTick(hit.line, hit.tick)) ev.preventDefault();
     });
     canvas.addEventListener('pointermove', (ev) => {
       const pt = localPoint(ev);
       if (!press) {
         const hit = hitAt(pt.x, pt.y);
-        canvas.style.cursor = hit.edge ? 'ew-resize' : hit.line && hit.row === 'line' ? 'grab' : 'default';
+        canvas.style.cursor = hit.edge || hit.tick !== undefined ? 'ew-resize' : hit.line && hit.row === 'line' ? 'grab' : 'default';
         return;
       }
       if (!press.moved && Math.abs(pt.x - press.x) < DRAG_PX) return;
@@ -69781,7 +70033,8 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
       if (!draggable) return;
       if (!press.moved) {
         press.moved = true;
-        startGesture(press.range ? 'range' : 'time', press.range ? 'range' : (press.hit.line ? press.hit.line.id : '') + (press.hit.edge || 'body'));
+        startGesture(press.range ? 'range' : 'time', press.range ? 'range' : press.hit.tick !== undefined ? 'tick:' + press.hit.line.id + ':' + press.hit.tick
+          : (press.hit.line ? press.hit.line.id : '') + (press.hit.edge || 'body'));
       }
       dragTo(pt, ev);
     });
@@ -69834,6 +70087,8 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
     function clickAt(p) {
       const hit = p.hit;
       if (hit.row === 'song' && hit.band) { selectBand(hit.band); return; }
+      // a character tick of the selected line: the line stays as it is (its double-click lands on the same tick)
+      if (hit.tick !== undefined) { draw(); return; }
       if (hit.row === 'line' && hit.line) {
         app.select({ level: 'line', ids: [hit.line.id] }, { from: 'timeline', open: true });
       } else if (hit.row === 'cut' && hit.cut) {
@@ -69908,6 +70163,9 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
       const parts = [t('tl.proxy', { n: i + 1, t0: T.fmtTime(l.t0), t1: T.fmtTime(l.t1) })];
       if (l.locked) parts.push(t('state.locked'));
       if (pins) parts.push(t('lyr.pinCount', { n: pins }));
+      // a focused character tick: 「きの時間 0:12.41」
+      const ls = focus.edge === 'tick' && focus.lineId === l.id ? sungOf(l.id) : null;
+      if (ls && focus.tick >= 0 && focus.tick < ls.t.length) parts.push(TK.label(t, ls, l, focus.tick));
       return parts.join(t('tl.proxySep'));
     }
 
@@ -69932,13 +70190,30 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
       const lines = app.plan ? app.plan.lines : [];
       if (!focus.lineId && lines.length) {
         const own = S.lineOfSel(S.validate(app.view.state.sel, app.plan));
-        focus = { lineId: own || lines[0].id, edge: 'start', band: null };
+        focus = { lineId: own || lines[0].id, edge: 'start', band: null, tick: -1 };
       }
       renderProxy();
       draw();
     });
     proxy.addEventListener('blur', () => draw());
     proxy.addEventListener('keydown', (ev) => {
+      // Alt+←/→ move among the focused line's character ticks (歌ハメ); taken here so the browser never goes back a page
+      // while the timeline has focus. Delete on a focused tick gives it back to the estimate.
+      if (ev.altKey && !ev.ctrlKey && !ev.metaKey && (ev.key === 'ArrowLeft' || ev.key === 'ArrowRight')) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        const line = focus.band === null && app.plan ? app.plan.lines.find((l) => l.id === focus.lineId) : null;
+        const u = line ? TK.step(sungOf(line.id), line, focus.edge === 'tick' ? focus.tick : -1, ev.key === 'ArrowRight' ? 1 : -1) : -1;
+        if (u >= 0) { focus = { lineId: line.id, edge: 'tick', band: null, tick: u }; renderProxy(); draw(); }
+        return;
+      }
+      if ((ev.key === 'Delete' || ev.key === 'Backspace') && !ev.ctrlKey && !ev.metaKey && !ev.altKey && focus.edge === 'tick' && focus.band === null) {
+        const line = app.plan ? app.plan.lines.find((l) => l.id === focus.lineId) : null;
+        if (line) removeTick(line, focus.tick);
+        ev.preventDefault();                                     // never the focused inspector row's 固定を外す
+        ev.stopPropagation();
+        return;
+      }
       if (ev.ctrlKey || ev.metaKey || ev.altKey) return;         // Ctrl+←/→ is the timeline.nudge action
       const lines = app.plan ? app.plan.lines : [];
       if (!lines.length) return;
@@ -69950,7 +70225,7 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
         if (ev.key === 'ArrowUp') focus.band = Math.max(0, focus.band - 1);
         else if (ev.key === 'ArrowDown') {
           if (focus.band < list.length - 1) focus.band += 1;
-          else focus = { lineId: lines[0].id, edge: focus.edge || 'start', band: null };
+          else focus = { lineId: lines[0].id, edge: focus.edge === 'end' ? 'end' : 'start', band: null, tick: -1 };
         } else if (ev.key === 'Enter') selectBand(list[focus.band]);
         else if (ev.key === 'ContextMenu' || (ev.key === 'F10' && ev.shiftKey)) bandMenu(list[focus.band], proxy);
         else done = false;
@@ -69959,14 +70234,15 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
       }
       const at = Math.max(0, lines.findIndex((l) => l.id === focus.lineId));
       let handled = true;
+      const edgeNow = focus.edge === 'end' ? 'end' : 'start';        // a focused tick belongs to its line only
       if (ev.key === 'ArrowUp' && at === 0 && list.length) {
-        focus = { lineId: focus.lineId, edge: focus.edge, band: list.length - 1 };
+        focus = { lineId: focus.lineId, edge: edgeNow, band: list.length - 1, tick: -1 };
       } else if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
         const to = Math.max(0, Math.min(lines.length - 1, at + (ev.key === 'ArrowDown' ? 1 : -1)));
-        focus = { lineId: lines[to].id, edge: focus.edge, band: null };
+        focus = { lineId: lines[to].id, edge: edgeNow, band: null, tick: -1 };
         app.select({ level: 'line', ids: [lines[to].id] }, { from: 'timeline' });
       } else if (ev.key === 'ArrowLeft' || ev.key === 'ArrowRight') {
-        focus = { lineId: lines[at].id, edge: ev.key === 'ArrowLeft' ? 'start' : 'end', band: null };
+        focus = { lineId: lines[at].id, edge: ev.key === 'ArrowLeft' ? 'start' : 'end', band: null, tick: -1 };
       } else if (ev.key === 'Enter') {
         app.select({ level: 'line', ids: [lines[at].id] }, { from: 'timeline', open: true });
       } else handled = false;
@@ -69980,6 +70256,13 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
         const line = app.plan.lines.find((l) => l.id === focus.lineId);
         if (!line) return false;
         const d = ((a && a.frames) || 1) / (app.doc.output.fps || 30);
+        if (focus.edge === 'tick') {                              // a character tick moves by the frame (歌ハメ)
+          const k = tickState(line);
+          if (!k.ls || focus.tick < 0 || focus.tick >= k.ls.t.length) return false;
+          const b = TK.bounds(k.ls, line, focus.tick, k.spanEnd);
+          moveTick(k.ls, line, focus.tick, Math.max(b.lo, Math.min(b.hi, k.ls.t[focus.tick] + d)), 'nudge:' + line.id + ':tick:' + focus.tick);
+          return true;
+        }
         const slot = focus.edge === 'end' ? 'end' : 'start';
         const cur = slot === 'end' ? line.t1 : line.t0;
         const v = Math.max(0, Math.round((cur + d) * 1000) / 1000);

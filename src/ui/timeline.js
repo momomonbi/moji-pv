@@ -1,7 +1,7 @@
-/* 文字PVメーカー v2 — original work. Timeline drawer: beat / song / line / cut rows, drags that write time pins, zoom, snap, keyboard nudges, a11y proxies, area bands and key diamonds (DESIGN §6.4.13; DESIGN_2_1 §6.7, §6.8). */
+/* 文字PVメーカー v2 — original work. Timeline drawer: beat / song / line / cut rows, drags that write time pins, zoom, snap, keyboard nudges, a11y proxies, area bands, key diamonds and character ticks (DESIGN §6.4.13; DESIGN_2_1 §6.7, §6.8; DESIGN_2_2 §6). */
 MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/t', 'core/paths', 'core/doc', 'planner/areas',
-  'ui/extreme'],
-  (dom, I, S, F, T, P, D, AREAS, XU) => {
+  'ui/extreme', 'ui/sung_ticks'],
+  (dom, I, S, F, T, P, D, AREAS, XU, TK) => {
   'use strict';
 
   const { h } = dom;
@@ -78,7 +78,7 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
     let W = 0, H = 0, dpr = 1;
     let view = { t0: 0, span: 0 };               // visible window; span 0 = fit
     let press = null;
-    let focus = { lineId: null, edge: 'start', band: null }; // the edge Ctrl+←/→ nudges
+    let focus = { lineId: null, edge: 'start', band: null, tick: -1 }; // the edge (or character tick) Ctrl+←/→ nudges
     let digest = { key: null, data: null };
 
     // --- geometry -----------------------------------------------------------------------------------------------
@@ -232,11 +232,28 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
         g.fillStyle = on ? COLORS.sel : i % 2 ? COLORS.line2 : COLORS.line;
         g.fillRect(x0, r[0] + 3, Math.max(1, x1 - x0 - 1), r[1] - r[0] - 6);
         if (l.locked) hatch(x0, x1, r[0] + 3, r[1] - 3);
-        label((i + 1) + ' ' + l.text, Math.max(x0, 0) + 4, (r[0] + r[1]) / 2, x1 - Math.max(x0, 0) - 8);
+        // 歌ハメ (DESIGN_2_2 §6): the line's character times as ticks at the bottom of its bar; where a selected line
+        // shows its characters over them, its name stops before the first one
+        const ls = sungOf(l.id), picked = selLines.has(l.id), ticks = TK.shown(ls, l, xOf, picked);
+        const nameEnd = ticks ? Math.min(x1, TK.charsFrom(ls, l, xOf, picked)) : x1;
+        label((i + 1) + ' ' + l.text, Math.max(x0, 0) + 4, (r[0] + r[1]) / 2, nameEnd - Math.max(x0, 0) - 8);
         const f = focus.band === null && focus.lineId === l.id && document.activeElement === proxy;
         edge(x0, r[0], r[1], edgeKind(l.by && l.by.start), f && focus.edge === 'start');
         edge(x1, r[0] + 4, r[1] - 4, edgeKind(l.by && l.by.end), f && focus.edge === 'end');
+        if (ticks) TK.draw(g, { ls, line: l, xOf, y1: r[1] - 3, selected: picked, W, focus: f && focus.edge === 'tick' ? focus.tick : -1 });
       });
+    }
+
+    // A line's sung timing (planner/sung summary, absolute times), or null.
+    function sungOf(id) {
+      const s = app.plan ? app.plan.sung : null;
+      return s ? s.get(id) || null : null;
+    }
+
+    // The lines whose ticks take the pointer: the selected ones (a cut's line when a cut is selected).
+    function selectedLines() {
+      const sel = S.validate(app.view.state.sel, app.plan);
+      return new Set(sel.level === 'line' ? sel.ids : [S.lineOfSel(sel)].filter(Boolean));
     }
 
     function drawCuts(r, sel) {
@@ -348,6 +365,14 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
           if (Math.abs(x - x0) <= EDGE_PX) return { row, line: l, edge: 'start' };
           if (Math.abs(x - x1) <= EDGE_PX) return { row, line: l, edge: 'end' };
         }
+        // a character tick of a selected line, in the bottom band of the bar where the ticks are (before the body,
+        // after the edges; the rest of the bar still drags the line)
+        const band = rows().line[1] - 3 - TK.TICK_PX - TK.HIT_PX;
+        for (const id of y >= band ? selectedLines() : []) {
+          const tl = p.lines.find((x2) => x2.id === id);
+          const u = tl ? TK.hit(sungOf(id), tl, x, xOf) : -1;
+          if (u >= 0) return { row, line: tl, edge: null, tick: u };
+        }
         const l = p.lines.find((x2) => x >= xOf(x2.t0) && x < xOf(x2.t1));
         return l ? { row, line: l, edge: null } : { row };
       }
@@ -414,7 +439,12 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
         }
         return;
       }
-      if (hit.row === 'line' && hit.line && hit.edge === 'start') {
+      if (hit.tick !== undefined) {
+        const k = press.tick;
+        if (!k || !k.ls) return;
+        const b = TK.bounds(k.ls, k.line, hit.tick, k.spanEnd);
+        moveTick(k.ls, k.line, hit.tick, Math.max(b.lo, Math.min(b.hi, snapTick(tt, ev.altKey))), press.mergeKey);
+      } else if (hit.row === 'line' && hit.line && hit.edge === 'start') {
         pinTime('line/' + hit.line.id + ':start', Math.max(0, Math.min(hit.line.t1 - MIN_LEN, snapTime(tt, hit.line.id, ev.altKey))));
       } else if (hit.row === 'line' && hit.line && hit.edge === 'end') {
         pinTime('line/' + hit.line.id + ':end', Math.max(hit.line.t0 + MIN_LEN, snapTime(tt, hit.line.id, ev.altKey)));
@@ -432,19 +462,58 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
       }
     }
 
+    // --- character ticks (歌ハメ, DESIGN_2_2 §6) ------------------------------------------------------------------------
+
+    // A tick snaps to the playhead within SNAP_PX (Alt: no snap).
+    function snapTick(tt, alt) {
+      if (alt) return tt;
+      const play = app.time();
+      return Math.abs(play - tt) < SNAP_PX / Math.max(1, W) * win().span ? play : tt;
+    }
+
+    // What a tick gesture reads: the line and its timing when it began (every move of the gesture writes against them).
+    function tickState(line) {
+      const i = app.plan.lines.findIndex((l) => l.id === line.id);
+      return { line, ls: sungOf(line.id), spanEnd: TK.spanEndOf(app.plan.lines, i) };
+    }
+
+    // Moves unit u of the line to t (absolute): its sung.times pin, and its automatic start pinned where it is, in one
+    // undo entry 「字の時間」.
+    function moveTick(ls, line, u, t, mergeKey) {
+      const cmds = TK.moveCmds(ls, line, u, Math.round(t * 1000) / 1000);
+      if (!cmds) return false;
+      app.batch({ label: ['undo.tick', {}], mergeKey, where: { scope: 'line/' + line.id, field: 'sungTimes' } }, cmds);
+      return true;
+    }
+
+    // Gives unit u back to the estimate (double-click, Delete on a focused tick).
+    function removeTick(line, u) {
+      const cmd = TK.removeCmd(line, u, app.doc.pins['line/' + line.id + ':sung.times']);
+      if (!cmd) return false;
+      app.dispatch(cmd, { label: ['undo.tick', {}], where: { scope: 'line/' + line.id, field: 'sungTimes' } });
+      return true;
+    }
+
     canvas.addEventListener('pointerdown', (ev) => {
       if (ev.button !== 0) return;
       const pt = localPoint(ev);
       const hit = hitAt(pt.x, pt.y);
-      press = { x: pt.x, t: tOf(pt.x), hit, range: hit.row === 'ruler' && ev.shiftKey, gesture: null, moved: false };
-      if (hit.line) focus = { lineId: hit.line.id, edge: hit.edge === 'end' ? 'end' : 'start', band: null };
+      press = { x: pt.x, t: tOf(pt.x), hit, range: hit.row === 'ruler' && ev.shiftKey, gesture: null, moved: false,
+        tick: hit.tick !== undefined ? tickState(hit.line) : null };
+      if (hit.line) focus = { lineId: hit.line.id, edge: hit.tick !== undefined ? 'tick' : hit.edge === 'end' ? 'end' : 'start', band: null,
+        tick: hit.tick !== undefined ? hit.tick : -1 };
       canvas.setPointerCapture(ev.pointerId);
+    });
+    canvas.addEventListener('dblclick', (ev) => {
+      const pt = localPoint(ev);
+      const hit = hitAt(pt.x, pt.y);
+      if (hit.tick !== undefined && removeTick(hit.line, hit.tick)) ev.preventDefault();
     });
     canvas.addEventListener('pointermove', (ev) => {
       const pt = localPoint(ev);
       if (!press) {
         const hit = hitAt(pt.x, pt.y);
-        canvas.style.cursor = hit.edge ? 'ew-resize' : hit.line && hit.row === 'line' ? 'grab' : 'default';
+        canvas.style.cursor = hit.edge || hit.tick !== undefined ? 'ew-resize' : hit.line && hit.row === 'line' ? 'grab' : 'default';
         return;
       }
       if (!press.moved && Math.abs(pt.x - press.x) < DRAG_PX) return;
@@ -458,7 +527,8 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
       if (!draggable) return;
       if (!press.moved) {
         press.moved = true;
-        startGesture(press.range ? 'range' : 'time', press.range ? 'range' : (press.hit.line ? press.hit.line.id : '') + (press.hit.edge || 'body'));
+        startGesture(press.range ? 'range' : 'time', press.range ? 'range' : press.hit.tick !== undefined ? 'tick:' + press.hit.line.id + ':' + press.hit.tick
+          : (press.hit.line ? press.hit.line.id : '') + (press.hit.edge || 'body'));
       }
       dragTo(pt, ev);
     });
@@ -511,6 +581,8 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
     function clickAt(p) {
       const hit = p.hit;
       if (hit.row === 'song' && hit.band) { selectBand(hit.band); return; }
+      // a character tick of the selected line: the line stays as it is (its double-click lands on the same tick)
+      if (hit.tick !== undefined) { draw(); return; }
       if (hit.row === 'line' && hit.line) {
         app.select({ level: 'line', ids: [hit.line.id] }, { from: 'timeline', open: true });
       } else if (hit.row === 'cut' && hit.cut) {
@@ -585,6 +657,9 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
       const parts = [t('tl.proxy', { n: i + 1, t0: T.fmtTime(l.t0), t1: T.fmtTime(l.t1) })];
       if (l.locked) parts.push(t('state.locked'));
       if (pins) parts.push(t('lyr.pinCount', { n: pins }));
+      // a focused character tick: 「きの時間 0:12.41」
+      const ls = focus.edge === 'tick' && focus.lineId === l.id ? sungOf(l.id) : null;
+      if (ls && focus.tick >= 0 && focus.tick < ls.t.length) parts.push(TK.label(t, ls, l, focus.tick));
       return parts.join(t('tl.proxySep'));
     }
 
@@ -609,13 +684,30 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
       const lines = app.plan ? app.plan.lines : [];
       if (!focus.lineId && lines.length) {
         const own = S.lineOfSel(S.validate(app.view.state.sel, app.plan));
-        focus = { lineId: own || lines[0].id, edge: 'start', band: null };
+        focus = { lineId: own || lines[0].id, edge: 'start', band: null, tick: -1 };
       }
       renderProxy();
       draw();
     });
     proxy.addEventListener('blur', () => draw());
     proxy.addEventListener('keydown', (ev) => {
+      // Alt+←/→ move among the focused line's character ticks (歌ハメ); taken here so the browser never goes back a page
+      // while the timeline has focus. Delete on a focused tick gives it back to the estimate.
+      if (ev.altKey && !ev.ctrlKey && !ev.metaKey && (ev.key === 'ArrowLeft' || ev.key === 'ArrowRight')) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        const line = focus.band === null && app.plan ? app.plan.lines.find((l) => l.id === focus.lineId) : null;
+        const u = line ? TK.step(sungOf(line.id), line, focus.edge === 'tick' ? focus.tick : -1, ev.key === 'ArrowRight' ? 1 : -1) : -1;
+        if (u >= 0) { focus = { lineId: line.id, edge: 'tick', band: null, tick: u }; renderProxy(); draw(); }
+        return;
+      }
+      if ((ev.key === 'Delete' || ev.key === 'Backspace') && !ev.ctrlKey && !ev.metaKey && !ev.altKey && focus.edge === 'tick' && focus.band === null) {
+        const line = app.plan ? app.plan.lines.find((l) => l.id === focus.lineId) : null;
+        if (line) removeTick(line, focus.tick);
+        ev.preventDefault();                                     // never the focused inspector row's 固定を外す
+        ev.stopPropagation();
+        return;
+      }
       if (ev.ctrlKey || ev.metaKey || ev.altKey) return;         // Ctrl+←/→ is the timeline.nudge action
       const lines = app.plan ? app.plan.lines : [];
       if (!lines.length) return;
@@ -627,7 +719,7 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
         if (ev.key === 'ArrowUp') focus.band = Math.max(0, focus.band - 1);
         else if (ev.key === 'ArrowDown') {
           if (focus.band < list.length - 1) focus.band += 1;
-          else focus = { lineId: lines[0].id, edge: focus.edge || 'start', band: null };
+          else focus = { lineId: lines[0].id, edge: focus.edge === 'end' ? 'end' : 'start', band: null, tick: -1 };
         } else if (ev.key === 'Enter') selectBand(list[focus.band]);
         else if (ev.key === 'ContextMenu' || (ev.key === 'F10' && ev.shiftKey)) bandMenu(list[focus.band], proxy);
         else done = false;
@@ -636,14 +728,15 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
       }
       const at = Math.max(0, lines.findIndex((l) => l.id === focus.lineId));
       let handled = true;
+      const edgeNow = focus.edge === 'end' ? 'end' : 'start';        // a focused tick belongs to its line only
       if (ev.key === 'ArrowUp' && at === 0 && list.length) {
-        focus = { lineId: focus.lineId, edge: focus.edge, band: list.length - 1 };
+        focus = { lineId: focus.lineId, edge: edgeNow, band: list.length - 1, tick: -1 };
       } else if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
         const to = Math.max(0, Math.min(lines.length - 1, at + (ev.key === 'ArrowDown' ? 1 : -1)));
-        focus = { lineId: lines[to].id, edge: focus.edge, band: null };
+        focus = { lineId: lines[to].id, edge: edgeNow, band: null, tick: -1 };
         app.select({ level: 'line', ids: [lines[to].id] }, { from: 'timeline' });
       } else if (ev.key === 'ArrowLeft' || ev.key === 'ArrowRight') {
-        focus = { lineId: lines[at].id, edge: ev.key === 'ArrowLeft' ? 'start' : 'end', band: null };
+        focus = { lineId: lines[at].id, edge: ev.key === 'ArrowLeft' ? 'start' : 'end', band: null, tick: -1 };
       } else if (ev.key === 'Enter') {
         app.select({ level: 'line', ids: [lines[at].id] }, { from: 'timeline', open: true });
       } else handled = false;
@@ -657,6 +750,13 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
         const line = app.plan.lines.find((l) => l.id === focus.lineId);
         if (!line) return false;
         const d = ((a && a.frames) || 1) / (app.doc.output.fps || 30);
+        if (focus.edge === 'tick') {                              // a character tick moves by the frame (歌ハメ)
+          const k = tickState(line);
+          if (!k.ls || focus.tick < 0 || focus.tick >= k.ls.t.length) return false;
+          const b = TK.bounds(k.ls, line, focus.tick, k.spanEnd);
+          moveTick(k.ls, line, focus.tick, Math.max(b.lo, Math.min(b.hi, k.ls.t[focus.tick] + d)), 'nudge:' + line.id + ':tick:' + focus.tick);
+          return true;
+        }
         const slot = focus.edge === 'end' ? 'end' : 'start';
         const cur = slot === 'end' ? line.t1 : line.t0;
         const v = Math.max(0, Math.round((cur + d) * 1000) / 1000);

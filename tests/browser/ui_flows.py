@@ -5439,8 +5439,108 @@ async def flow_hame(f, lang):
     await f.undo_all(done0, doc0)
 
 
+# The drag target on the timeline: the first character tick of a line with room to move 0.22 s later (away from the
+# line's edges), with its CSS point and the timeline's px per second.
+TICK_TARGET = """(id) => { const a = window.__mv, tl = a.timeline, TK = MV.use('ui/sung_ticks');
+  const l = a.plan.lines.find((x) => x.id === id), ls = a.plan.sung.get(id), i = a.plan.lines.indexOf(l);
+  const r = document.querySelector('.tl-canvas').getBoundingClientRect(), rows = tl.rows(), end = TK.spanEndOf(a.plan.lines, i);
+  for (let u = 1; u < ls.t.length; u++) {
+    const b = TK.bounds(ls, l, u, end), x = tl.xOf(ls.t[u]);
+    if (b.hi - ls.t[u] >= 0.22 && x - tl.xOf(l.t0) > 12 && tl.xOf(l.t1) - x > 12 && x > 10 && x < r.width - 60) {
+      return { u, x: r.left + x, y: r.top + rows.line[1] - 6, t: ls.t[u], px: tl.xOf(ls.t[u] + 1) - x, n: ls.t.length };
+    }
+  }
+  return null; }"""
+# A line's unit times, sources and pins (歌ハメ ticks).
+TICK_STATE = """(id) => { const a = window.__mv, ls = a.plan.sung.get(id), p = a.doc.pins;
+  return { t: Array.from(ls.t), src: Array.from(ls.src), times: p['line/' + id + ':sung.times'] || null, start: p['line/' + id + ':start'] || null,
+    by: a.plan.lines.find((l) => l.id === id).by.start, last: (a.store.list().filter((e) => e.done).slice(-1)[0] || {}).label }; }"""
+
+
+async def flow_hame_ticks(f, lang):
+    """歌ハメ on the timeline (DESIGN_2_2 §6): the selected line shows its character ticks; dragging one 0.2 s pins the
+    line's character times and its automatic start, one undo entry 字の時間; a double-click gives it back to the estimate;
+    in the listbox Alt+→ focuses a tick (the page does not go back or forward), Ctrl+→ moves it by a frame and Delete
+    gives it back."""
+    page = f.page
+    done0, doc0 = await with_lyrics(f)
+    lid = (await page.evaluate('() => window.__mv.plan.lines.map((l) => l.id)'))[1]
+    await f.blur()
+    await page.keyboard.press('Shift+T')
+    if not await f.until('() => window.__mv.view.state.drawer', 'Shift+T opens the timeline drawer'):
+        return
+    await page.evaluate("""(id) => { const a = window.__mv, l = a.plan.lines.find((x) => x.id === id);
+      a.select({ level: 'line', ids: [id] }, { from: 'timeline' }); a.seek(l.t0 + 0.5); }""", lid)
+    await f.settle(3)
+    for _ in range(6):
+        await page.click('.timeline .tl-zoom button:last-child')
+    await page.evaluate("(id) => { const a = window.__mv, l = a.plan.lines.find((x) => x.id === id); a.seek(Math.max(0, l.t0 - 0.3)); }", lid)
+    await f.settle(3)
+    before = await page.evaluate(TICK_STATE, lid)
+    f.check(before['times'] is None and before['by'] == 'auto' and len(before['t']) > 3, 'an estimated line with an automatic start: %r' % before)
+    k = await page.evaluate(TICK_TARGET, lid)
+    if not f.check(k is not None, 'a tick to drag on the selected line'):
+        return
+    hit = await page.evaluate("(p) => { const r = document.querySelector('.tl-canvas').getBoundingClientRect(); return window.__mv.timeline.hitAt(p.x - r.left, p.y - r.top).tick; }", k)
+    f.check(hit == k['u'], 'the tick is hit: %r' % hit)
+    await f.shot('ticks')
+    done = await page.evaluate(DONE)
+    await page.mouse.move(k['x'], k['y'])
+    await page.mouse.down()
+    for i in range(1, 6):
+        await page.mouse.move(k['x'] + i * 0.2 * k['px'] / 5, k['y'])
+    await page.mouse.up()
+    await f.settle(3)
+    moved = await page.evaluate(TICK_STATE, lid)
+    f.check(moved['times'] and moved['times']['by'] == 'user' and len(moved['times']['v']) == k['n'], 'the drag pins the character times: %r' % moved['times'])
+    f.check(moved['start'] and moved['start']['by'] == 'user' and abs(moved['start']['v'] - (await page.evaluate("(id) => window.__mv.plan.lines.find((l) => l.id === id).t0", lid))) < 0.002,
+            'and the automatic start where it was: %r' % moved['start'])
+    f.check(abs(moved['t'][k['u']] - (k['t'] + 0.2)) < 0.03, 'the character moved 0.2 s: %.3f → %.3f' % (k['t'], moved['t'][k['u']]))
+    f.check(all(abs(moved['t'][u] - before['t'][u]) < 0.002 for u in range(len(before['t'])) if u != k['u']), 'the other characters stay')
+    f.check(await page.evaluate(DONE) == done + 1 and moved['last'] and moved['last'][0] == 'undo.tick', 'one undo entry 字の時間: %r' % moved['last'])
+    # a double-click gives it back to the estimate
+    x = await page.evaluate("(p) => { const tl = window.__mv.timeline; return document.querySelector('.tl-canvas').getBoundingClientRect().left + tl.xOf(p.t); }",
+                            {'t': moved['t'][k['u']]})
+    await page.mouse.dblclick(x, k['y'])
+    await f.settle(3)
+    back = await page.evaluate(TICK_STATE, lid)
+    f.check(back['times'] and len(back['times']['v']) == k['n'] - 1 and back['src'][k['u']] == 0,
+            'double-click: the character is estimated again: %r %r' % (back['times'], back['src']))
+    f.check(await page.evaluate(DONE) == done + 2, 'one more undo entry')
+    # the keyboard: ← (the start edge), Alt+→ the first tick, Ctrl+→ one frame later, Delete back to the estimate
+    url = page.url
+    await page.evaluate('() => window.__mv.timeline.focus()')
+    await page.keyboard.press('ArrowLeft')
+    await page.keyboard.press('Alt+ArrowRight')
+    await f.settle(2)
+    label = await page.evaluate("""(id) => { const a = window.__mv, TK = MV.use('ui/sung_ticks'), l = a.plan.lines.find((x) => x.id === id);
+      const o = document.getElementById(document.querySelector('.tl-proxy').getAttribute('aria-activedescendant'));
+      return { text: o ? o.textContent : '', want: TK.label(a.t, a.plan.sung.get(id), l, 1) }; }""", lid)
+    f.check(label['want'] in label['text'], 'Alt+→ focuses the first tick and the listbox names it: %r' % label)
+    await f.settle(2)
+    f.check(page.url == url, 'Alt+→ does not leave the page')
+    t1 = (await page.evaluate(TICK_STATE, lid))['t'][1]
+    await page.keyboard.press('Control+ArrowRight')
+    await f.settle(3)
+    nudged = await page.evaluate(TICK_STATE, lid)
+    fps = await page.evaluate('() => window.__mv.doc.output.fps || 30')
+    f.check(abs(nudged['t'][1] - (t1 + 1 / fps)) < 0.002 and nudged['src'][1] == 4, 'Ctrl+→ moves the tick by a frame: %.3f → %.3f' % (t1, nudged['t'][1]))
+    f.check(await page.evaluate(DONE) == done + 3, 'the nudge is one undo entry')
+    await page.keyboard.press('Delete')
+    await f.settle(3)
+    gone = await page.evaluate(TICK_STATE, lid)
+    f.check(gone['src'][1] == 0 and await page.evaluate(DONE) == done + 4, 'Delete gives the focused tick back to the estimate: %r' % gone['src'][:3])
+    await page.keyboard.press('ArrowRight')
+    await f.settle(2)
+    after = await page.evaluate("""(id) => { const a = window.__mv, TK = MV.use('ui/sung_ticks'), l = a.plan.lines.find((x) => x.id === id);
+      const o = document.getElementById(document.querySelector('.tl-proxy').getAttribute('aria-activedescendant'));
+      return { text: o ? o.textContent : '', tick: TK.label(a.t, a.plan.sung.get(id), l, 1) }; }""", lid)
+    f.check(after['tick'] not in after['text'], '→ goes back to the line\'s edges: %r' % after)
+    await f.undo_all(done0, doc0)
+
+
 # 歌ハメ (DESIGN_2_2 §6).
-FLOWS += [('hame', flow_hame, False)]
+FLOWS += [('hame', flow_hame, False), ('hame_ticks', flow_hame_ticks, False)]
 
 
 async def run(browser, base, rel, lang, only, shots):

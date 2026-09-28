@@ -2249,4 +2249,7 @@ MV.def('i18n/strings', [], () => ({
   'undo.tapUnits': ['1字ずつタップ（{n}か所）', 'Tap each character ({n})'],
   'undo.sungClear': ['字の時間を消す', 'Clear character times'],
   'cmd.tap.units': ['1字ずつタップ', 'Tap each character'],
+  // the timeline's character ticks
+  'tl.tick': ['{ch}の時間 {time}', '{ch} at {time}'],
+  'undo.tick': ['字の時間', 'Character time'],
 }));

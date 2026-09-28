@@ -179,9 +179,9 @@ MV.def('planner/sung', ['core/script', 'core/num', 'core/motion', 'engine/text/v
         taken.add(u);
         list.push({ u, dt, src: SRC.pin });
       }
-      return { list, endRel, dropped };
+      return { list, endRel, dropped, endSrc: SRC.pin };
     }
-    if (!sourcesOK || !Array.isArray(line.words) || !line.words.length) return { list, endRel, dropped };
+    if (!sourcesOK || !Array.isArray(line.words) || !line.words.length) return { list, endRel, dropped, endSrc: SRC.est };
     const ref = typeof line.wordsRef === 'number' ? line.wordsRef : line.words[0][1];
     const len = units.text.length;
     let prev = null;
@@ -197,13 +197,14 @@ MV.def('planner/sung', ['core/script', 'core/num', 'core/motion', 'engine/text/v
       list.push({ u, dt, src: SRC.lrc });
       prev = dt;
     }
-    return { list, endRel, dropped };
+    return { list, endRel, dropped, endSrc: SRC.lrc };
   }
 
   // --- (c) filling a line ---------------------------------------------------------------------------------------
 
-  // fillLine({ units, anchors, endRel, span, rate, sourcesOK, anchoredStart }) → LineTiming (relative to the line's
-  // start; frozen): { at, t, end, src, by, explicit, anchored, sourcesOK }. Unit 0 starts with the line unless anchored.
+  // fillLine({ units, anchors, endRel, endSrc, span, rate, sourcesOK, anchoredStart }) → LineTiming (relative to the
+  // line's start; frozen): { at, t, end, endSrc, src, by, explicit, anchored, sourcesOK } (endSrc: the source of an
+  // explicit end, SRC.est for an estimated one). Unit 0 starts with the line unless anchored.
   // The sung end: the end anchor, else (with ≥ 2 anchors or the sources on) the last anchor plus the rest of the line's
   // morae at its own measured rate (≥ 2 anchors) or the reading rate, × EST_SLACK, else the span (the v2 window, for a
   // line timed only for the colour fill); at least UNIT_MIN per unit after the last anchor, never past the span.
@@ -258,7 +259,7 @@ MV.def('planner/sung', ['core/script', 'core/num', 'core/motion', 'engine/text/v
     let best = 0;
     for (let u = 0; u < n; u++) if (src[u] > best) best = src[u];
     return Object.freeze({
-      at: units.at, t, end: q3(E), src, by: SRC_NAMES[best], explicit: o.anchors.some((a) => a.src >= SRC.copy),
+      at: units.at, t, end: q3(E), endSrc: o.endRel === undefined ? SRC.est : o.endSrc || SRC.est, src, by: SRC_NAMES[best], explicit: o.anchors.some((a) => a.src >= SRC.copy),
       anchored: count, sourcesOK: !!o.sourcesOK, n, units,
     });
   }
@@ -329,17 +330,17 @@ MV.def('planner/sung', ['core/script', 'core/num', 'core/motion', 'engine/text/v
       if (!cur || o.best > cur.best) source.set(o.line.text, o);
     }
     const lines = new Map(), meta = new Map();
-    const timingOf = (o, anchors, endRel, copyKey) => {
+    const timingOf = (o, anchors, endRel, endSrc, copyKey) => {
       const anchoredStart = !!(o.line.by && o.line.by.start !== 'auto');
       let key = o.line.lang + '|' + N.q6(o.span) + '|' + (o.sourcesOK ? 1 : 0) + '|' + rate + '|' + (anchoredStart ? 1 : 0) + '|' +
-        (endRel === undefined ? '' : endRel) + '|' + (copyKey || '') + '|';
+        (endRel === undefined ? '' : endRel + ',' + endSrc) + '|' + (copyKey || '') + '|';
       for (const a of anchors) key += a.u + ',' + a.dt + ',' + a.src + ';';
-      return filled(key + '|' + o.line.text, () => fillLine({ units: o.units, anchors, endRel, span: o.span, rate,
+      return filled(key + '|' + o.line.text, () => fillLine({ units: o.units, anchors, endRel, endSrc, span: o.span, rate,
         sourcesOK: o.sourcesOK, anchoredStart }));
     };
     // sources first (their sung end scales the copies)
     const done = new Map();
-    for (const src of source.values()) done.set(src, timingOf(src, src.anchors.list, src.anchors.endRel, null));
+    for (const src of source.values()) done.set(src, timingOf(src, src.anchors.list, src.anchors.endRel, src.anchors.endSrc, null));
     for (let i = 0; i < n; i++) {
       const o = own[i];
       const line = o.line;
@@ -352,8 +353,8 @@ MV.def('planner/sung', ['core/script', 'core/num', 'core/motion', 'engine/text/v
           const k = srcLs.end > 0 ? Math.min(1, o.span / srcLs.end) : 1;
           const anchors = src.anchors.list.map((a) => ({ u: a.u, dt: q3(a.dt * k), src: SRC.copy }));
           const endRel = src.anchors.endRel === undefined ? undefined : q3(src.anchors.endRel * k);
-          ls = timingOf(o, anchors, endRel, src.line.id + ':' + k);
-        } else ls = timingOf(o, o.anchors.list, o.anchors.endRel, null);
+          ls = timingOf(o, anchors, endRel, SRC.copy, src.line.id + ':' + k);
+        } else ls = timingOf(o, o.anchors.list, o.anchors.endRel, o.anchors.endSrc, null);
       }
       lines.set(line.id, ls);
       meta.set(line.id, { hamePinOn: o.hamePinOn, kime: o.kime, hameFrom: o.hameFrom,
@@ -522,7 +523,7 @@ MV.def('planner/sung', ['core/script', 'core/num', 'core/motion', 'engine/text/v
       const t = new Float64Array(ls.n);
       for (let u = 0; u < ls.n; u++) t[u] = N.q6(line.t0 + ls.t[u]);
       out.set(line.id, Object.freeze({
-        at: ls.at, t, end: N.q6(line.t0 + ls.end), src: ls.src, by: ls.by, pinBy: m.pinBy, explicit: ls.explicit,
+        at: ls.at, t, end: N.q6(line.t0 + ls.end), endSrc: ls.endSrc, src: ls.src, by: ls.by, pinBy: m.pinBy, explicit: ls.explicit,
         hame: h.hame, hameWhy: h.why, fill: false, dropped: m.dropped,
       }));
     }

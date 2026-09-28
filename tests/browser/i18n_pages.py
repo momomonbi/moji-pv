@@ -307,7 +307,7 @@ async def x_screens(w, table, families):
 
 # 歌ハメ (DESIGN_2_2 §6): the line page's 歌ハメ row with what 自動 decided, 行 › 時間 › 字の時間 (without a song: the note
 # that it needs one), 作品全体 › 見た目's 歌ハメ, the 1字ずつタップ panel (started without the song: the silent clock) and its
-# loop end with 決定 / もう一度.
+# loop end with 決定 / もう一度, and the timeline with a character tick focused.
 async def hame_screens(w, table, families):
     page = w.page
     await w.act('panel.details')
@@ -330,6 +330,15 @@ async def hame_screens(w, table, families):
     await screen(w, 'hame-tap-end', table, families)
     await w.run("() => window.__mv.tap.cancel()")
     await w.settle(3)
+    # the timeline's character ticks: the first line's first tick focused in the listbox (Alt+→)
+    await w.act('timeline.toggle')
+    await w.run("() => { const a = window.__mv; a.select({ level: 'line', ids: [a.plan.lines[0].id] }, { from: 'timeline' }); a.timeline.focus(); }")
+    await w.settle(3)
+    await page.keyboard.press('Alt+ArrowRight')
+    await w.settle(2)
+    await screen(w, 'hame-ticks', table, families)
+    await w.act('timeline.toggle')
+    await w.settle(2)
 
 
 # v2.1 photos and videos (package G.4, DESIGN_2_1 §11.8.3): a still and a video imported here (names are user data: the en
