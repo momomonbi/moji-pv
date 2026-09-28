@@ -191,6 +191,17 @@ test('gate: generation 1 with 文字PVの定石 off plans byte-identically to th
     const off = gen1(doc, { 'work:pv.rules': ON(false) });
     assert.equal(PL.run(off, CAT, { fresh: true }).hash, PL.run(doc, CAT, { fresh: true }).hash, name);
   }
+  // and against the golden plan hashes (planned before PV22), so a leak into older documents is caught too
+  const golden = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'golden', 'plan_hashes.json'), 'utf8'));
+  let n = 0;
+  if (golden.registry && golden.registry.version === CAT.version) {
+    for (const { name, doc } of corpus.corpus(3)) {
+      if (!golden.plans[name]) continue;
+      assert.equal(PL.run(gen1(doc, { 'work:pv.rules': ON(false) }), CAT, { fresh: true }).hash, golden.plans[name], name);
+      n++;
+    }
+  }
+  assert.ok(n >= 30, 'golden plans compared: ' + n);
 });
 
 // Every rule is live (item 5): each alone changes the plan of the repeat fixture without its pin.

@@ -47,7 +47,10 @@ MV.def('planner/conventions', ['core/num', 'core/shot', 'planner/arc', 'planner/
         if (!on.kit || !part) return null;
         let k = kits.get(part.key);
         if (!k) {
-          const kit = KIT.select(ctx, part, o.pool, ARC.driveOfKind(part.kind));
+          const drive = ARC.driveOfKind(part.kind);
+          // under the arc the set leans the way the part's kind does (its drive; the part's own cuts vary around it)
+          const lean = arcOn ? (kind, def, traits) => (ARC_KINDS.has(kind) ? arcFactor(ARC.strength(def, traits), drive) : 1) : null;
+          const kit = KIT.select(ctx, part, o.pool, drive, lean);
           k = { kit, id: intern(EN.canon([kit.key, kit.kind, kit.face, kit.groups, kit.primary])) };
           kits.set(part.key, k);
         }

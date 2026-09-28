@@ -301,6 +301,15 @@ test('repeat.same: an answer that changes a first copy and its later copy alike 
   assert.ok(a.warnings.some((w) => w[0] === 'ai.warn.repeatSame' && w[1].n === 1), JSON.stringify(a.warnings));
   const b = run(off, both);
   assert.ok(b.p['line/' + later + ':arrive'] && !hasWarn(b.warnings, 'ai.warn.repeatSame'), 'without the opt-in every change stays');
+  // A new work (DESIGN_2_2 §2.4) has the switch on without a pin: the same as pinning it; with 文字PVの定石 pinned off,
+  // every change stays again.
+  const fresh = Object.assign({}, off, { look: Object.assign({}, off.look, { gen: 1 }) });
+  const c = run(fresh, both);
+  assert.ok(c.p['line/' + first + ':arrive'] && !c.p['line/' + later + ':arrive'], 'a new work follows the first copy');
+  assert.ok(c.p['line/' + alone + ':depart'] && hasWarn(c.warnings, 'ai.warn.repeatSame'));
+  const noRules = CMD.reduce(fresh, { t: 'pin.set', path: 'work:pv.rules', v: false, by: 'user' });
+  const d = run(noRules, both);
+  assert.ok(d.p['line/' + later + ':arrive'] && !hasWarn(d.warnings, 'ai.warn.repeatSame'), '文字PVの定石 off: every change stays');
 });
 
 test('ground and atmos: part pins; atmos is a run ornament or none; the season gate', () => {

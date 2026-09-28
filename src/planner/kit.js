@@ -9,9 +9,9 @@ MV.def('planner/kit', ['core/hash', 'core/rng', 'core/num', 'planner/choose'], (
   const KIT_KINDS = Object.freeze(['arrange', 'arrive', 'dwell', 'depart', 'lens', 'filter', 'ornament', 'ground']);
   const KIT_SIZE = Object.freeze({ arrange: 3, arrive: 3, depart: 3, dwell: 2, lens: 2, filter: 2, ornament: 4, ground: 2 });
   const KIT = 8, KIT_PRIMARY = 16;
-  // Under the kit, holds and camera textures also pass over the previous cut's value (planner/cast avoidOf), like
+  // Under the kit, holds, exits and camera textures also pass over the previous cut's value (planner/cast avoidOf), like
   // layouts and entrances: the members' recency relax would otherwise let them repeat back to back.
-  const KIT_AVOID = Object.freeze(['dwell', 'lens']);
+  const KIT_AVOID = Object.freeze(['dwell', 'depart', 'lens']);
   const NO_FAMILY = new Set(['ornament', 'ground']);
   const FACES = Object.freeze(['display', 'serif', 'body']);
   const FACE_WEIGHTS = Object.freeze([3, 2, 1]);
@@ -28,7 +28,9 @@ MV.def('planner/kit', ['core/hash', 'core/rng', 'core/num', 'planner/choose'], (
   // look-only chooser factors × the fit of the part's energy range to the part's target energy; the groups are ranked
   // by ln W + Gumbel(seed, group) with seed = hash32('kit', look seed, part key, kind, salt of work:kit.<key>), ties to
   // the smaller name. The seed has no cut key, so no edit elsewhere changes a kit; a salt rerolls its own part only.
-  function select(ctx, part, poolOf, energy) {
+  // lean(kind, def, traits) (optional): a further factor on each part, the song's arc under 「曲の山に合わせて強弱をつける」
+  // (planner/conventions), so a chorus's set leans to strong parts and a verse's to calm ones.
+  function select(ctx, part, poolOf, energy, lean) {
     const reg = ctx.registry;
     const salt = (ctx.salts && ctx.salts['work:kit.' + part.key]) || 0;
     const seed0 = ctx.doc.look.seed;
@@ -46,7 +48,7 @@ MV.def('planner/kit', ['core/hash', 'core/rng', 'core/num', 'planner/choose'], (
         if (!g) continue;
         const s = ctx.chooser.statics(kind, key, kind === 'filter');
         const fits = typeof def.fits === 'function' ? Math.max(0, Number(def.fits(typical, {})) || 0) : 1;
-        const w = s.product * CH.traitFit(reg.traits(kind, key), want) * fits;
+        const w = s.product * CH.traitFit(reg.traits(kind, key), want) * fits * (lean ? lean(kind, def, reg.traits(kind, key)) : 1);
         if (w > 0) W.set(g, (W.get(g) || 0) + w);
       }
       const seed = H.hash32('kit', seed0, part.key, kind, salt);

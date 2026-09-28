@@ -486,8 +486,9 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
       // The hard cut is not a transition (it is not listed in Plan.seams), so it has no parameters to resolve.
       if (out.decision.v !== hard) {
         out.decision = withParams(out.decision, params(ctx, ctx.registry.get('seam', out.decision.v), 'seam', at, seed, feat));
-        // 「動きの向きを交互にする」 (DESIGN_2_2 §2.2.4 c): an automatic sideways transition against the previous one
-        if (ctx.pv && !pin) {
+        // 「動きの向きを交互にする」 (DESIGN_2_2 §2.2.4 c): a sideways transition against the previous one (a pinned
+        // transition too, where its direction is automatic; a pinned or rerolled direction stays)
+        if (ctx.pv) {
           const d = ctx.pv.flipSeam(B, out.decision, history, seed);
           if (d !== out.decision) { out.decision = d; if (trace) trace.pvFlip = 'alt'; }
         }

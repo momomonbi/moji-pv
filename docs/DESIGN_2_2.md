@@ -136,13 +136,15 @@ page and tests; not hashed).
 - **Kit selection** (`planner/kit select`, once per part key and plan): for each of arrange, arrive, dwell, depart, lens,
   filter, ornament and ground, the groups (a family, or the part key for decorations and backgrounds) of the part pool
   (`CA.poolOf` as a lyric cut sees it) weigh Σ statics × traitFit(energy = DRIVE of the part's kind) × the part's own fits
-  on a typical cut (energy, the song's beat, not an impact, two words, eight cells, no composition chosen); ranked by
+  on a typical cut (energy, the song's beat, not an impact, two words, eight cells, no composition chosen) × (under the
+  arc, for layouts, entrances, holds, exits and camera textures) the arc's factor at that drive, so a chorus's set leans
+  strong and a verse's calm; ranked by
   `ln W + gumbel(hash32('kit', look.seed, key, kind, salt))` (ties to the smaller name), salt = `work:kit.<key>`. The kit
   keeps the best 3 layouts, 3 entrances, 3 exits, 2 holds, 2 camera textures, 2 screen effects, 4 decorations and 2
   backgrounds; the best group of each kind is its **primary**. The face class is drawn 3:2:1 display/serif/body.
 - **Weighting** (a new chooser term, only under the rules): a primary member ×16, another member ×8; a member keeps only
   the ×0.03 against the previous cut's value (the near and family factors are dropped for it, final and reference pick
-  alike); holds and camera textures also pass over the previous cut's value (the §8.2 runner-up rule, `KIT_AVOID`); the
+  alike); holds, exits and camera textures also pass over the previous cut's value (the §8.2 runner-up rule, `KIT_AVOID`); the
   automatic face weighs ×8 for the kit's class; a segment's background weighs by its first cut's part. A kit never
   filters a pool.
 - Precedence: pins and locks > rules > the aligned source of 「くり返しの行をそろえる」 > the kit-weighted chooser.
@@ -215,8 +217,8 @@ page and tests; not hashed).
 | `why.pv.kitBlock` | このまとまりの演出セットに合わせた | Matches the set of looks for this block |
 | `why.pv.alt` | 前のカットと逆向きにした | Opposite direction to the previous cut |
 | `why.pv.altSame` | このカットの動きの向きにそろえた | Same direction as the rest of this cut |
-| `why.pv.arc.up` | {section}なので強い動きを選びやすくした | {section}, so stronger moves are favoured |
-| `why.pv.arc.down` | {section}なので落ち着いた動きを選びやすくした | {section}, so calmer moves are favoured |
+| `why.pv.arc.up` | {section}なので強い動きを選びやすくした | {section}, so stronger moves are favored |
+| `why.pv.arc.down` | {section}なので落ち着いた動きを選びやすくした | {section}, so calmer moves are favored |
 | `why.pv.tame` | 次がサビなので、ためて抑えた | The chorus comes next, so this holds back |
 | `why.pv.peak` | 最後のサビなので一番強くした | The last chorus, so it goes strongest |
 

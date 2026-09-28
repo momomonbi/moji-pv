@@ -363,7 +363,11 @@ test('the inspector shows the switch: pinned at work, inherited on a line, a lin
   delete off.pins['work:repeat.same'];
   const po = PL.run(off, CAT, null);
   const fs0 = FI.fieldState(off, po, { level: 'work' }, 'work:repeat.same', { registry: CAT });
-  assert.deepEqual([fs0.state, fs0.value, fs0.schema], ['auto', undefined, { type: 'bool' }]);
+  // a switch of the whole work (DESIGN_2_2 §2.1): its value is the document's default, off in a work made before PV22
+  assert.deepEqual([fs0.state, fs0.value, fs0.schema, fs0.autoText], ['auto', false, { type: 'bool' }, ['rule.auto.old', {}]]);
+  const newWork = Object.assign(clone(off), { look: Object.assign({}, off.look, { gen: 1 }) });
+  const fsN = FI.fieldState(newWork, PL.run(newWork, CAT, null), { level: 'work' }, 'work:repeat.same', { registry: CAT });
+  assert.deepEqual([fsN.state, fsN.value, fsN.autoText], ['auto', true, ['rule.auto.new', {}]], 'on in a new work');
   const p = PL.run(doc, CAT, null);
   const fs1 = FI.fieldState(doc, p, { level: 'work' }, 'work:repeat.same', { registry: CAT });
   assert.deepEqual([fs1.state, fs1.value, fs1.pinnedAt], ['pinned', true, 'work']);

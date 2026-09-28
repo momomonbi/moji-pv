@@ -1344,3 +1344,57 @@ test('an enum with optKey labels its options from its own key group (depth: back
   const W = MV.use('ui/widgets');
   assert.equal(W.optionText(t, field.options.find((o) => o.v === 'back')), '後ろに下げる');
 });
+
+// --- PV22 P2: 文字PVの定石 (DESIGN_2_2 §2.1) ---------------------------------------------------------------------------
+
+test('文字PVの定石: the switches are work rows that follow the document default; the 区画 page shows the set of looks', () => {
+  const D0 = MV.use('core/doc');
+  const FI = MV.use('planner/fields');
+  const PL = MV.use('planner/plan');
+  const CMD = MV.use('core/commands');
+  const reg = catalogRegistry();
+  const look = F.PAGES.work.find((s) => s.id === 'look').fields;
+  const row = (path) => look.find((f) => f.path === path);
+  for (const path of ['pv.rules', 'repeat.same', 'pv.kit', 'pv.alternate', 'pv.arc']) {
+    const f = row(path);
+    assert.ok(f && f.widget === 'toggle' && f.autoDefault === true && f.noDice === true && !f.offClears, path);
+    assert.deepEqual(f.scopes, ['work'], path);
+    assert.ok(f.note && f.note in STRINGS, path + ' has a note');
+  }
+  assert.equal(row('pv.rules').basic, true, 'the group switch is a basic row');
+  for (const path of ['pv.kit', 'pv.alternate', 'pv.arc']) assert.equal(row(path).basic, false, path + ' under 詳しい設定');
+  assert.deepEqual(F.slotScopes('pv.kit'), ['work']);
+  assert.deepEqual(F.slotScopes('pv.rules'), ['work']);
+  assert.deepEqual(F.slotScopes('repeat.same'), ['work', 'line']);
+  // the field state: 自動 with the note of new and older works; a pin; the number box names its automatic value
+  const fresh = D0.newDoc(), old = D0.defaultDoc();
+  const at = (doc, path) => FI.fieldState(doc, PL.plan(doc, { registry: reg }), { level: 'work' }, path, { registry: reg });
+  const a = at(fresh, 'work:pv.kit'), b = at(old, 'work:pv.kit');
+  assert.deepEqual([a.state, a.value, a.autoText, a.canPinAt], ['auto', true, ['rule.auto.new', {}], ['work']]);
+  assert.deepEqual([b.state, b.value, b.autoText], ['auto', false, ['rule.auto.old', {}]]);
+  const pinned = CMD.reduce(fresh, { t: 'pin.set', path: 'work:pv.rules', v: false, by: 'user' });
+  const c = at(pinned, 'work:pv.rules'), d = at(pinned, 'work:pv.arc');
+  assert.deepEqual([c.state, c.value, c.autoText], ['pinned', false, null]);
+  assert.deepEqual([d.state, d.value], ['auto', false], 'a member follows the pinned group switch');
+  const m = at(fresh, 'work:pv.fxMax');
+  assert.equal(m.value, null);
+  assert.equal(m.autoText[0], 'fld.pvFxMax.auto');
+  assert.ok(Number.isInteger(m.autoText[1].n) && m.autoText[1].n >= 4 && m.autoText[1].n <= 6);
+  // the 区画 page: a section of the set of looks when the plan has one
+  const song = CMD.reduce(fresh, { t: 'lyrics.set', text: ['# Aメロ', 'あさのひかり', 'まどをあけて', '', '# サビ', 'とべ そらへ', 'とおくまで'].join('\n') });
+  const plan = PL.plan(song, { registry: reg });
+  assert.ok(plan.pv && plan.pv.kits.length === 2);
+  const AREAS = MV.use('planner/areas');
+  const ref = { kind: 'head', rowId: song.sheet.rows.find((r) => r.src === '# サビ').id };
+  const area = AREAS.resolve(song, plan, ref);
+  const sel = { level: 'line', ids: area.lineIds, area: ref };
+  const ctx = F.contextOf(sel, plan, reg, song);
+  assert.deepEqual(ctx.kitKeys, ['chorus']);
+  assert.ok(F.sectionsFor(sel, plan, reg, song).some((s) => s.id === 'kit' && s.custom === 'kit'));
+  // an older work has no set of looks: no section
+  const oldSong = CMD.reduce(old, { t: 'lyrics.set', text: ['# Aメロ', 'あさのひかり', '', '# サビ', 'とべ そらへ'].join('\n') });
+  const op = PL.plan(oldSong, { registry: reg });
+  const oref = { kind: 'head', rowId: oldSong.sheet.rows.find((r) => r.src === '# サビ').id };
+  const osel = { level: 'line', ids: AREAS.resolve(oldSong, op, oref).lineIds, area: oref };
+  assert.ok(!F.sectionsFor(osel, op, reg, oldSong).some((s) => s.id === 'kit'));
+});
