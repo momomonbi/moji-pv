@@ -1358,7 +1358,12 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
         }
         if (mine.some((w) => w.code === 'time-compressed')) kids.push(h('p', { class: 'note subtle', 'data-note': 'squeezed', text: t('insp.squeezed') }));
         if (mine.some((w) => w.code === 'piece-merged')) kids.push(h('p', { class: 'note subtle', 'data-note': 'merged', text: t('insp.merged') }));
-        return kids.length ? h('div', { class: 'insp-note insp-time-tools' }, kids) : null;
+        // この行だけタップで打ち直す (PV22 S2), also the too-fast note's re-tap fix
+        kids.push(h('div', { class: 'row-actions' }, h('button', { class: 'chip-btn', type: 'button', 'data-act': 'tap.line',
+          disabled: !app.actions.has('tap.line'), title: t('tap.lineBtnHint'),
+          on: { click: () => app.actions.run('tap.line', { lineId: line.id, from: 'inspector' }) } }, I.icon('tap', { size: 14 }), t('tap.lineBtn'))));
+        kids.push(h('p', { class: 'note subtle', text: t('tap.lineBtnHint') }));
+        return h('div', { class: 'insp-note insp-time-tools' }, kids);
       },
       // 画面効果 under グリーンバック / 黒 / 透明 (§4.19.4, §6.4.8): the mode's rule, and the effects of this scope it leaves out.
       backdropNote(ctx) {

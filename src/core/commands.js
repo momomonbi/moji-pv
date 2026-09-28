@@ -1,7 +1,7 @@
 /* 文字PVメーカー v2 — original work. Command reducers: the only way the document changes (DESIGN §3.6, §3.9, §4.12; DESIGN_2_1 §2.6, §11.2.5, §13.3). */
 MV.def('core/commands', ['core/doc', 'core/paths', 'core/pins', 'core/lyrics', 'core/reconcile', 'core/num', 'core/hash',
-  'core/recipe', 'core/media'],
-  (D, P, PINS, L, R, N, H, RC, MEDIA) => {
+  'core/recipe', 'core/media', 'core/timing'],
+  (D, P, PINS, L, R, N, H, RC, MEDIA, TM) => {
     'use strict';
 
     class CommandError extends Error {
@@ -431,6 +431,14 @@ MV.def('core/commands', ['core/doc', 'core/paths', 'core/pins', 'core/lyrics', '
         need(m.start !== undefined || m.end !== undefined, 'a mark needs start or end');
         if (m.start !== undefined) pins = timePin(pins, m.lineId, 'start', checkTime(m.start, 'start'), 'tap');
         if (m.end !== undefined) pins = timePin(pins, m.lineId, 'end', checkTime(m.end, 'end'), 'tap');
+        // A new start and no end: an end pin earlier than start + MIN_LEN is stale (core/timing would shrink the line to
+        // 0.2 s) and is removed, unless it is a lock pin (PV22 S2, DESIGN_2_2 §5).
+        if (m.start !== undefined && m.end === undefined) {
+          const endPath = 'line/' + m.lineId + ':end', end = pins[endPath];
+          if (end && end.by !== 'lock' && isFiniteNumber(end.v) && end.v < checkTime(m.start, 'start') + TM.MIN_LEN - 1e-9) {
+            pins = without(pins, [endPath]);
+          }
+        }
       }
       return put(doc, 'pins', pins);
     }

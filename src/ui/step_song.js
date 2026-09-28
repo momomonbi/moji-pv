@@ -25,11 +25,15 @@ MV.def('ui/step_song', ['ui/dom', 'ui/icons', 'ui/header', 'ui/selection', 'i18n
     const tapHint = h('span', { class: 'btn-hint' });
     const tapBtn = h('button', { class: 'btn wide tall', type: 'button', 'data-act': 'tap.start', 'data-ctl': 'tap' },
       I.icon('tap'), h('span', { class: 'btn-main', text: t('song.tap') }), tapHint);
+    // 「{n}行目だけ打ち直す」 (PV22 S2): with one line selected, re-tap just that line
+    const tapLineLabel = h('span');
+    const tapLineBtn = h('button', { class: 'chip-btn', type: 'button', 'data-act': 'tap.line', 'data-ctl': 'tapLine', hidden: true,
+      title: t('tap.lineBtnHint') }, I.icon('tap', { size: 15 }), tapLineLabel);
     const aiBtn = h('button', { class: 'chip-btn', type: 'button', 'data-act': 'ai.align', 'data-ctl': 'ai' },
       I.icon('ai', { size: 15 }), t('song.aiTiming'));
     const root = h('div', { class: 'step step-song' },
       h('div', { class: 'step-head' }, h('h2', { class: 'step-title', text: t('song.title') })),
-      songBox, tempo, h('div', { class: 'snap-field' }, snapRow, snapWhy), tapBtn, aiBtn);
+      songBox, tempo, h('div', { class: 'snap-field' }, snapRow, snapWhy), tapBtn, tapLineBtn, aiBtn);
 
     dom.on(root, 'click', '[data-act]', (ev, b) => app.actions.run(b.dataset.act, { from: 'song' }));
 
@@ -182,6 +186,9 @@ MV.def('ui/step_song', ['ui/dom', 'ui/icons', 'ui/header', 'ui/selection', 'i18n
       const info = line && app.plan ? app.plan.lines.find((l) => l.id === line) : null;
       tapHint.textContent = info ? t('song.tapFrom', { n: info.index + 1 }) : t('song.tapFromStart');
       tapBtn.disabled = !(app.plan && app.plan.lines.length);
+      const one = sel.level !== 'line' || sel.ids.length === 1;
+      tapLineBtn.hidden = !(info && one);
+      if (info) tapLineLabel.textContent = t('song.tapLine', { n: info.index + 1 });
       aiBtn.hidden = !app.view.state.prefs.ai;
       aiBtn.disabled = !app.doc.song;
       aiBtn.title = app.doc.song ? '' : t('song.aiNeedsSong');

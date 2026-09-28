@@ -1,4 +1,4 @@
-/* 文字PVメーカー v2 — original work. Tap-sync as a pure reducer: marks, ends, stepping back, one command (DESIGN §4.11). */
+/* 文字PVメーカー v2 — original work. Tap-sync as a pure reducer: marks, ends, stepping back, one command; the one-line mode and the pins that keep the other lines still (DESIGN §4.11; DESIGN_2_2 §5). */
 MV.def('core/tap', [], () => {
   'use strict';
 
@@ -12,25 +12,40 @@ MV.def('core/tap', [], () => {
     constructor(code, message) { super(message || code); this.name = 'TapError'; this.code = code; }
   }
 
-  // TapState = { lineIds, cursor, current, starts, ends, paused, next, active }
+  // A start that moved less than this between two plans has not moved (stillPins).
+  const STILL_EPS = 0.005;
+
+  // TapState = { lineIds, cursor, current, starts, ends, paused, next, active, only, from, stop }
   //   cursor: index of the next line to mark; current: index of the line whose start was marked last (−1 = none);
-  //   starts / ends: marked times per line (null = not marked); next / active: the lines at cursor / current, as ids.
-  function state(lineIds, cursor, current, starts, ends, paused) {
+  //   starts / ends: marked times per line (null = not marked); next / active: the lines at cursor / current, as ids;
+  //   only: the one-line mode (この行だけ打ち直す, PV22 S2) — from is the session's line and stop = from + 1, so one mark
+  //   is taken; in the normal mode stop = lineIds.length (the session runs through the song).
+  function state(lineIds, cursor, current, starts, ends, paused, only, from, stop) {
     return {
-      lineIds, cursor, current, starts, ends, paused,
-      next: cursor < lineIds.length ? lineIds[cursor] : null,
+      lineIds, cursor, current, starts, ends, paused, only, from, stop,
+      next: cursor < stop ? lineIds[cursor] : null,
       active: current >= 0 ? lineIds[current] : null,
     };
   }
 
+  // A state like s with other marks and positions (the mode, first line and stop are kept).
+  function next(s, cursor, current, starts, ends, paused) {
+    return state(s.lineIds, cursor, current, starts, ends, paused, s.only, s.from, s.stop);
+  }
+
   // Starts a session at `fromLineId` (the first line when it is null or unknown). `lines` are Line objects or ids.
-  function tapStart(lines, fromLineId) {
+  // opts.only: the one-line mode — exactly that line is marked (DESIGN_2_2 §5, S2).
+  function tapStart(lines, fromLineId, opts) {
     if (!Array.isArray(lines)) throw new TapError('bad-lines', 'tapStart needs a list of lines');
     const lineIds = Object.freeze(lines.map((l) => (typeof l === 'string' ? l : l.id)));
     const at = Math.max(0, lineIds.indexOf(fromLineId));
+    const only = !!(opts && opts.only) && lineIds.length > 0;
     const empty = new Array(lineIds.length).fill(null);
-    return state(lineIds, at, -1, empty, empty.slice(), false);
+    return state(lineIds, at, -1, empty, empty.slice(), false, only, at, only ? at + 1 : lineIds.length);
   }
+
+  // Every line the session may mark is marked.
+  function done(s) { return s.cursor >= s.stop; }
 
   function timeOf(ev) {
     const ok = typeof ev.t === 'number' && Number.isFinite(ev.t);
@@ -50,33 +65,34 @@ MV.def('core/tap', [], () => {
     return out;
   }
 
-  // mark: start of the next line (and advance); a mark less than MIN_GAP after the last start is ignored · end: end of the
-  // current line · back: forget the last line's marks and step back one line · pause / resume: marks are ignored while
-  // paused. Returns the same state when nothing changes.
+  // mark: start of the next line (and advance); a mark less than MIN_GAP after the last start is ignored, and so is a
+  // mark past the session's stop (the one-line mode takes one) · end: end of the current line · back: forget the last
+  // line's marks and step back one line (never above the one-line mode's line) · pause / resume: marks are ignored
+  // while paused. Returns the same state when nothing changes.
   function tapReduce(s, ev) {
     if (!ev || !EVENTS.includes(ev.type)) throw new TapError('bad-event', 'unknown tap event ' + (ev && ev.type));
     switch (ev.type) {
       case 'mark': {
         const t = timeOf(ev);
-        if (s.paused || s.cursor >= s.lineIds.length || t < lastStart(s) + MIN_GAP) return s;
+        if (s.paused || s.cursor >= s.stop || t < lastStart(s) + MIN_GAP) return s;
         const starts = withTime(s.starts, s.cursor, t);
-        return state(s.lineIds, s.cursor + 1, s.cursor, starts, withTime(s.ends, s.cursor, null), false);
+        return next(s, s.cursor + 1, s.cursor, starts, withTime(s.ends, s.cursor, null), false);
       }
       case 'end': {
         const t = timeOf(ev);
         if (s.paused || s.current < 0 || !(t > s.starts[s.current])) return s;
-        return state(s.lineIds, s.cursor, s.current, s.starts, withTime(s.ends, s.current, t), false);
+        return next(s, s.cursor, s.current, s.starts, withTime(s.ends, s.current, t), false);
       }
       case 'back': {
-        if (s.cursor === 0) return s;
+        if (s.cursor === 0 || (s.only && s.cursor <= s.from)) return s;
         const i = s.cursor - 1;
         const prev = i - 1 >= 0 && s.starts[i - 1] !== null ? i - 1 : -1;
-        return state(s.lineIds, i, prev, withTime(s.starts, i, null), withTime(s.ends, i, null), s.paused);
+        return next(s, i, prev, withTime(s.starts, i, null), withTime(s.ends, i, null), s.paused);
       }
       case 'pause':
-        return s.paused ? s : state(s.lineIds, s.cursor, s.current, s.starts, s.ends, true);
+        return s.paused ? s : next(s, s.cursor, s.current, s.starts, s.ends, true);
       default:
-        return s.paused ? state(s.lineIds, s.cursor, s.current, s.starts, s.ends, false) : s;
+        return s.paused ? next(s, s.cursor, s.current, s.starts, s.ends, false) : s;
     }
   }
 
@@ -93,5 +109,32 @@ MV.def('core/tap', [], () => {
     return marks.length ? { t: 'time.tap', marks } : null;
   }
 
-  return { tapStart, tapReduce, tapCommand, TapError, EVENTS, MIN_GAP };
+  // stillPins(before, after, lineId, start) → [{ lineId, start }]: the start pins that keep the automatic lines where
+  // they were (「前後の行を動かさない」, PV22 S2). before / after: plan.lines of the document before the re-tap and of a
+  // trial with it (the same ids in the same order, else []). The automatic lines other than lineId that moved form
+  // runs; pinning the two ends of each run at their old starts puts the run back (between two anchors the automatic
+  // starts are linear in their weights, and the fills are linear maps), as long as the pin keeps the order with the
+  // new start (at least MIN_GAP from it). Callers repeat with a new trial until nothing is added (at most 3 rounds).
+  function stillPins(before, after, lineId, start) {
+    if (!Array.isArray(before) || !Array.isArray(after) || before.length !== after.length) return [];
+    if (before.some((l, k) => l.id !== after[k].id)) return [];
+    const target = before.findIndex((l) => l.id === lineId);
+    if (target < 0) return [];
+    const moved = before.map((l, k) => k !== target && l.by && l.by.start === 'auto' &&
+      Math.abs(after[k].t0 - l.t0) >= STILL_EPS);
+    const picks = [];
+    for (let k = 0; k < moved.length; k++) {
+      if (!moved[k]) continue;
+      let e = k;
+      while (e + 1 < moved.length && moved[e + 1]) e++;
+      for (const i of e === k ? [k] : [k, e]) {
+        const t0 = before[i].t0;
+        if (i < target ? t0 <= start - MIN_GAP : t0 >= start + MIN_GAP) picks.push({ lineId: before[i].id, start: t0 });
+      }
+      k = e;
+    }
+    return picks;
+  }
+
+  return { tapStart, tapReduce, tapCommand, done, stillPins, TapError, EVENTS, MIN_GAP, STILL_EPS };
 });

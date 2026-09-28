@@ -104,3 +104,63 @@ test('a mark less than MIN_GAP after the last start is not taken (timing would d
   const first = T.tapStart(LINES, 'r4');
   assert.notEqual(T.tapReduce(first, { type: 'mark', t: 0 }), first, 'nothing above the first mark of a session');
 });
+
+// --- PV22 S2: the one-line mode and the pins that keep the other lines still (DESIGN_2_2 §5) ---------------------------
+
+test('one-line mode: one mark is taken; back re-arms the same line and stops there; the command has one mark', () => {
+  const s = T.tapStart(LINES, 'r5', { only: true });
+  assert.deepEqual([s.only, s.from, s.stop, s.next, T.done(s)], [true, 2, 3, 'r5', false]);
+  const marked = T.tapReduce(s, { type: 'mark', t: 20 });
+  assert.deepEqual([marked.next, marked.active, T.done(marked)], [null, 'r5', true]);
+  assert.equal(T.tapReduce(marked, { type: 'mark', t: 22 }), marked, 'a second mark does nothing');
+  const ended = T.tapReduce(marked, { type: 'end', t: 24 });
+  assert.deepEqual(T.tapCommand(ended), { t: 'time.tap', marks: [{ lineId: 'r5', start: 20, end: 24 }] });
+  const again = T.tapReduce(ended, { type: 'back', t: 25 });
+  assert.deepEqual([again.next, again.active, T.done(again), again.only, again.stop], ['r5', null, false, true, 3]);
+  assert.equal(T.tapCommand(again), null);
+  assert.equal(T.tapReduce(again, { type: 'back', t: 26 }), again, 'never above the line');
+  const redo = T.tapReduce(again, { type: 'mark', t: 21 });
+  assert.deepEqual(T.tapCommand(redo).marks, [{ lineId: 'r5', start: 21 }]);
+  // paused / resumed keep the mode
+  const paused = T.tapReduce(s, { type: 'pause', t: 1 });
+  assert.deepEqual([paused.only, paused.stop], [true, 3]);
+  assert.equal(T.tapReduce(paused, { type: 'mark', t: 2 }), paused);
+  // the normal mode runs to the end of the song as before
+  const normal = T.tapStart(LINES, 'r5');
+  assert.deepEqual([normal.only, normal.stop], [false, LINES.length]);
+  assert.equal(T.done(run('r7.1', [['mark', 50]])), true);
+  assert.equal(T.tapStart([], null, { only: true }).only, false, 'no lines: nothing to mark');
+});
+
+// plan.lines-like rows: ids, starts and how each start was set
+function rows(spec) { return spec.map(([id, t0, by]) => ({ id, t0, by: { start: by || 'auto', end: 'auto' } })); }
+
+test('stillPins: the ends of each run of moved automatic lines, pinned at their old starts', () => {
+  const before = rows([['a', 1], ['b', 2], ['c', 3], ['d', 4, 'pin'], ['e', 5], ['f', 6], ['g', 7]]);
+  // the target d moved to 4.5; b, c and e, f, g moved with it; a did not
+  const after = rows([['a', 1], ['b', 2.2], ['c', 3.3], ['d', 4.5, 'pin'], ['e', 5.4], ['f', 6.3], ['g', 7.1]]);
+  assert.deepEqual(T.stillPins(before, after, 'd', 4.5), [{ lineId: 'b', start: 2 }, { lineId: 'c', start: 3 },
+    { lineId: 'e', start: 5 }, { lineId: 'g', start: 7 }]);
+  // one moved line: pinned once
+  const one = rows([['a', 1], ['b', 2.3], ['c', 3], ['d', 4.5, 'pin'], ['e', 5], ['f', 6], ['g', 7]]);
+  assert.deepEqual(T.stillPins(before, one, 'd', 4.5), [{ lineId: 'b', start: 2 }]);
+  // moves under STILL_EPS are not moves; pins, LRC and the target itself are never candidates
+  const tiny = rows([['a', 1.004], ['b', 2], ['c', 3], ['d', 4.5, 'pin'], ['e', 5], ['f', 6], ['g', 7]]);
+  assert.deepEqual(T.stillPins(before, tiny, 'd', 4.5), []);
+  const fixed = rows([['a', 1, 'lrc'], ['b', 2, 'pin'], ['c', 3], ['d', 4, 'pin'], ['e', 5], ['f', 6], ['g', 7]]);
+  const shiftAll = rows([['a', 1.5, 'lrc'], ['b', 2.5, 'pin'], ['c', 3.5], ['d', 4.5, 'pin'], ['e', 5.5], ['f', 6.5], ['g', 7.5]]);
+  assert.deepEqual(T.stillPins(fixed, shiftAll, 'd', 4.5).map((x) => x.lineId), ['c', 'e', 'g']);
+});
+
+test('stillPins: a pin that would cross the new start is skipped; different line lists give nothing', () => {
+  const before = rows([['a', 1], ['b', 2], ['c', 3], ['d', 4], ['e', 5]]);
+  // c re-tapped at 4.6: d (old start 4) would come before it, so d is not pinned; e is
+  const after = rows([['a', 1], ['b', 2], ['c', 4.6], ['d', 5.0], ['e', 5.4]]);
+  assert.deepEqual(T.stillPins(before, after, 'c', 4.6), [{ lineId: 'e', start: 5 }]);
+  // b re-tapped earlier than a: a is not pinned
+  const early = rows([['a', 0.7], ['b', 0.8], ['c', 3], ['d', 4], ['e', 5]]);
+  assert.deepEqual(T.stillPins(before, early, 'b', 0.8), []);
+  assert.deepEqual(T.stillPins(before, after.slice(1), 'c', 4.6), []);
+  assert.deepEqual(T.stillPins(before, rows([['a', 1], ['x', 2], ['c', 3], ['d', 4], ['e', 5]]), 'c', 4.6), []);
+  assert.deepEqual(T.stillPins(before, after, 'zz', 4.6), []);
+});

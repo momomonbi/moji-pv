@@ -5422,6 +5422,125 @@ async def flow_readcheck(f, lang):
 FLOWS += [('readcheck', flow_readcheck, False)]
 
 
+# この行だけ打ち直す (S2): six automatic lines (placeholder kana) over a 30 s song
+RETAP_LYRICS = '\n'.join(['あいうえおかき', 'さしすせそたち', 'なにぬねのはひ', 'まみむめもやゆ', 'らりるれろわを', 'がぎぐげござじ'])
+RETAP_STATE = """(id) => { const a = window.__mv, l = a.plan.lines.find((x) => x.id === id), p = a.doc.pins;
+  const pin = (k) => (p[k] ? [p[k].v, p[k].by] : null);
+  return { mode: a.view.state.mode, playing: a.view.state.playing, time: a.time(), t0: l.t0, t1: l.t1, by: l.by,
+    start: pin('line/' + id + ':start'), end: pin('line/' + id + ':end'),
+    title: (document.querySelector('.step-tap .step-title') || {}).textContent || null,
+    keep: !!document.querySelector('.step-tap .tap-keep:not([hidden]) input:checked'),
+    toasts: [...document.querySelectorAll('.toast-text')].map((x) => x.textContent) }; }"""
+LAST_LABEL = "() => { const e = window.__mv.store.list().filter((x) => x.done).pop(); return window.__mv.t(e.label[0], e.label[1]); }"
+
+
+async def flow_retap(f, lang):
+    """この行だけタップで打ち直す (S2): from 行 › 時間 the one-line mode plays 2 s before line 3; a seek ends the loop so the
+    line can be marked 5 s late; a second Space is refused; E finishes it 0.3 s later as one undo entry 「この行を打ち直す
+    （3行目）」 with the neighbours pinned (named in the toast; 「ほかの行の固定を外す」 is one more entry). A line with a
+    pinned start and end keeps its length when re-tapped without E (the session ends by itself). The timeline's line
+    menu offers the three items, by mouse and by the menu key."""
+    page = f.page
+    done0, doc0 = await with_lyrics(f, RETAP_LYRICS)
+    await page.evaluate(AI_WAV_JS)
+    ok = await page.evaluate("async () => { await window.__mv.loadSong(window.__wav(30, 'retap.wav')); return window.__mv.songReady(); }")
+    if not f.check(ok, 'the song is loaded'):
+        return
+    done0, doc0 = await page.evaluate(DONE), await page.evaluate(DOC)
+    ids = await page.evaluate('() => window.__mv.plan.lines.map((l) => l.id)')
+    old = await page.evaluate('() => window.__mv.plan.lines.map((l) => l.t0)')
+    s = await page.evaluate(RETAP_STATE, ids[2])
+    f.check(s['by']['start'] == 'auto', 'line 3 starts automatically: %r' % s['by'])
+    T = s['t0']
+    await page.evaluate("(id) => window.__mv.select({ level: 'line', ids: [id] }, { from: 'crumbs', open: true, seek: false })", ids[2])
+    btn = page.locator('[data-mount="inspector"] .insp-time-tools [data-act="tap.line"]')
+    await btn.wait_for(state='visible', timeout=3000)
+    await btn.click()
+    if not await f.until("() => window.__mv.view.state.mode === 'tap' && window.__mv.view.state.playing", 'the one-line mode plays'):
+        return
+    s = await page.evaluate(RETAP_STATE, ids[2])
+    f.check(abs(s['time'] - (T - 2)) < 0.6, 'playback starts 2 s before the line: %.2f vs %.2f' % (s['time'], T - 2))
+    f.check(s['title'] == await page.evaluate("() => window.__mv.t('tap.onlyTitle')") and s['keep'], 'the one-line head, 前後の行を動かさない on: %r' % s)
+    await f.shot('only')
+    await page.keyboard.press('ArrowRight')           # a seek by the user: the loop stops
+    await f.until('(x) => window.__mv.time() > x', 'the clock passes the line + 5 s', T + 5, timeout=9000)
+    await page.keyboard.press('Space')
+    await f.settle(2)
+    m = await page.evaluate("() => window.__mv.tap.update && (window.__mv.player.now() - (window.__mv.doc.timing.tapLatency || 0))")
+    await page.wait_for_timeout(300)
+    await page.keyboard.press('Space')                # refused: the line is marked
+    once = await page.evaluate("() => document.querySelector('.step-tap .tap-last').textContent")
+    f.check(once == await page.evaluate("() => window.__mv.t('tap.onlyDone')"), 'a second press is refused: %r' % once)
+    await page.wait_for_timeout(700)
+    await page.keyboard.press('e')
+    await f.until("() => window.__mv.view.state.mode === 'normal'", 'the session ends 0.3 s after E', timeout=2000)
+    await f.settle(3)
+    s = await page.evaluate(RETAP_STATE, ids[2])
+    f.check(s['start'] and s['start'][1] == 'tap' and abs(s['start'][0] - (T + 5)) < 0.8, 'line 3 starts about 5 s late by tap: %r' % s['start'])
+    f.check(s['end'] and s['end'][1] == 'tap' and s['end'][0] > s['start'][0], 'E pinned its end: %r' % s['end'])
+    f.check(await page.evaluate(DONE) == done0 + 1, 'exactly one undo entry')
+    label = await page.evaluate(LAST_LABEL)
+    f.check(label == await page.evaluate("() => window.__mv.t('undo.tapLine', { n: 3 })"), 'the entry: %r' % label)
+    helpers = await page.evaluate("""(ids) => ids.filter((id) => { const p = window.__mv.doc.pins['line/' + id + ':start']; return p && p.by === 'user'; })""", ids)
+    f.check(len(helpers) >= 1, 'neighbours are pinned: %r' % helpers)
+    kept = [h for h in helpers if abs(await page.evaluate("(id) => window.__mv.doc.pins['line/' + id + ':start'].v", h) - old[ids.index(h)]) < 1e-6]
+    f.check(kept == helpers, 'at their old starts: %r' % helpers)
+    toast = ' '.join(s['toasts'])
+    f.check(await page.evaluate("() => window.__mv.t('tap.lineDone', { n: 3 })") in toast and '固定しました' in toast if lang == 'ja' else True,
+            'the toast names the pinned lines: %r' % toast)
+    await f.shot('done')
+    unpin = page.locator('.toast .toast-act', has_text=await page.evaluate("() => window.__mv.t('tap.unpinHelpers')"))
+    await unpin.click()
+    await f.until("(ids) => ids.every((id) => !window.__mv.doc.pins['line/' + id + ':start'])", 'ほかの行の固定を外す removes them', helpers)
+    f.check(await page.evaluate(DONE) == done0 + 2, 'one more undo entry')
+    f.check(await page.evaluate(LAST_LABEL) == await page.evaluate("(n) => window.__mv.t('undo.unpinHelpers', { n })", len(helpers)), 'named with the count')
+    await page.evaluate("() => { window.__mv.store.undo(); window.__mv.store.undo(); }")
+    await f.settle(2)
+    f.check(await page.evaluate(DOC) == doc0, '元に戻す twice restores everything')
+
+    # a pinned start and end (what a drag on the timeline writes): re-tapped without E, the end moves with the start
+    await page.evaluate("""(id) => { const a = window.__mv, l = a.plan.lines.find((x) => x.id === id);
+      a.batch({ label: ['undo.time', {}] }, [{ t: 'pin.set', path: 'line/' + id + ':start', v: Math.round(l.t0 * 100) / 100, by: 'user' },
+        { t: 'pin.set', path: 'line/' + id + ':end', v: Math.round((l.t0 + 1.5) * 100) / 100, by: 'user' }]); }""", ids[3])
+    s4 = await page.evaluate(RETAP_STATE, ids[3])
+    await page.evaluate("(id) => window.__mv.actions.run('tap.line', { lineId: id })", ids[3])
+    await f.until("() => window.__mv.view.state.mode === 'tap' && window.__mv.view.state.playing", 'the palette command starts it')
+    await f.until('(x) => window.__mv.time() > x', 'the clock passes the old start + 0.8 s', s4['t0'] + 0.8, timeout=6000)
+    await page.keyboard.press('Space')
+    await f.until("() => window.__mv.view.state.mode === 'normal'", 'the session ends by itself after the line', timeout=8000)
+    await f.settle(3)
+    s = await page.evaluate(RETAP_STATE, ids[3])
+    delta = s['start'][0] - s4['start'][0] if s['start'] else None
+    f.check(delta is not None and abs((s['end'][0] - s['start'][0]) - (s4['end'][0] - s4['start'][0])) < 0.02,
+            'the end moved by the same delta (%r): %r → %r' % (delta, s4, s))
+    toast = ' '.join(s['toasts'])
+    f.check(await page.evaluate("() => window.__mv.t('tap.endShifted')") in toast, 'the toast says the end moved: %r' % toast)
+
+    # the timeline's line menu: three items (the start is pinned now), by mouse and by the menu key
+    await page.evaluate("() => window.__mv.view.set({ drawer: true })")
+    await f.settle(4)
+    pt = await page.evaluate("""(id) => { const a = window.__mv, tl = a.timeline, l = a.plan.lines.find((x) => x.id === id);
+      const r = document.querySelector('.tl-canvas').getBoundingClientRect(), rows = tl.rows();
+      return { x: r.left + (tl.xOf(l.t0) + tl.xOf(l.t1)) / 2, y: r.top + (rows.line[0] + rows.line[1]) / 2 }; }""", ids[3])
+    await page.mouse.click(pt['x'], pt['y'], button='right')
+    await f.settle(2)
+    items = await page.evaluate("() => [...document.querySelectorAll('.menu-item .menu-label')].map((x) => x.textContent)")
+    want = await page.evaluate("() => ['tl.lineMenu.retap', 'tl.lineMenu.tapFrom', 'tl.lineMenu.unpinStart'].map((k) => window.__mv.t(k))")
+    f.check(items == want, 'the line menu: %r' % items)
+    await f.shot('menu')
+    await page.keyboard.press('Escape')
+    await f.settle(2)
+    await page.focus('.tl-proxy')
+    await page.keyboard.press('Shift+F10')
+    await f.settle(2)
+    items = await page.evaluate("() => [...document.querySelectorAll('.menu-item .menu-label')].map((x) => x.textContent)")
+    f.check(items[:2] == want[:2], 'the menu key opens it too: %r' % items)
+    await page.keyboard.press('Escape')
+
+
+FLOWS += [('retap', flow_retap, False)]
+
+
 async def run(browser, base, rel, lang, only, shots):
     failures, count = [], 0
     for name, fn, clipboard in FLOWS:

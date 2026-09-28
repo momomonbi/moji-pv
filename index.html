@@ -1,6 +1,6 @@
 <!doctype html><html lang="ja"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-S62Btto2Suy9LW3eiQoI9zaiFhqBLVt26EbDfQuf3Ic='; style-src 'sha256-CBzRvq4sWr3CF69hafDp1l8UkHnSy18JQMXGJJhPDYI=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-N0ZW43QGhBlyk4A0snC/pQq0zFm0QDThRVkEWDLWmBA='; style-src 'sha256-CBzRvq4sWr3CF69hafDp1l8UkHnSy18JQMXGJJhPDYI=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
 <title>文字PVメーカー</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -7343,10 +7343,627 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
     serialize,
   };
 });
+/* 文字PVメーカー v2 — original work. Reading project files: JSON, schema upgrades, defaults, validation (DESIGN §3.2, §4.4; DESIGN_2_1 §2.2). */
+MV.def('core/migrate', ['core/doc'], (D) => {
+  'use strict';
+
+  const CURRENT_SCHEMA = D.CURRENT_SCHEMA;
+
+  // MIGRATIONS[n] turns a schema-n file into a schema-(n+1) file. Each step is pure and touches nothing else.
+  // 1 → 2 (v2.1, DESIGN_2_1 §2.2): the material list and the media library, both empty. Pins, rows and every other
+  // field stay as they are; normalize fills output.kit and side.asks.
+  const MIGRATIONS = Object.freeze({
+    1: (file) => Object.assign({}, file, {
+      schema: 2,
+      doc: Object.assign({}, file.doc, { materials: { next: 1, list: [] }, media: { list: [] } }),
+    }),
+  });
+
+  class MigrateError extends Error {
+    constructor(code, message, problems) {
+      super(message || code);
+      this.name = 'MigrateError';
+      this.code = code;                       // 'bad-json' | 'not-a-project' | 'newer' | 'invalid'
+      this.problems = problems || [];
+    }
+  }
+
+  function isObject(v) { return v !== null && typeof v === 'object' && !Array.isArray(v); }
+
+  // Upgrades a parsed project file to CURRENT_SCHEMA and returns its { doc, side } (not yet normalized).
+  function migrate(json) {
+    if (!isObject(json) || json.format !== D.FORMAT) throw new MigrateError('not-a-project', 'not a Moji PV project file');
+    let schema = json.schema;
+    if (!Number.isInteger(schema) || schema < 1) throw new MigrateError('not-a-project', 'missing or bad schema number');
+    if (schema > CURRENT_SCHEMA) {
+      throw new MigrateError('newer', 'made by a newer version (schema ' + schema + ' > ' + CURRENT_SCHEMA + ')');
+    }
+    if (!isObject(json.doc)) throw new MigrateError('not-a-project', 'the file has no document');
+    let file = json;
+    while (schema < CURRENT_SCHEMA) {
+      const step = MIGRATIONS[schema];
+      if (!step) throw new MigrateError('invalid', 'no migration from schema ' + schema);
+      file = step(file);
+      schema += 1;
+    }
+    if (!isObject(file.doc)) throw new MigrateError('not-a-project', 'the file has no document');
+    return { doc: file.doc, side: file.side };
+  }
+
+  // Project file text → { doc, side }, ready for the store. Throws MigrateError. The doc is refused when invalid; the
+  // side (history only, not undoable) is cleaned instead (D.sanitizeSide), so a damaged history never reaches the UI.
+  function parseFile(text) {
+    let json;
+    try {
+      json = JSON.parse(text);
+    } catch (e) {
+      throw new MigrateError('bad-json', 'the file is not JSON: ' + e.message);
+    }
+    const { doc, side } = migrate(json);
+    const out = { doc: D.normalize(doc), side: D.sanitizeSide(side) };
+    const problems = D.validate(out.doc);
+    if (problems.length) throw new MigrateError('invalid', 'the project has ' + problems.length + ' problem(s)', problems);
+    return out;
+  }
+
+  return { CURRENT_SCHEMA, MIGRATIONS, MigrateError, migrate, parseFile };
+});
+/* 文字PVメーカー v2 — original work. The store: the only mutable state; history and undo by snapshot swap (DESIGN §3.10, §4.5). */
+MV.def('core/store', ['core/doc'], (D) => {
+  'use strict';
+
+  const DEFAULT_LIMIT = 300;
+  const MERGE_WINDOW_MS = 2000;                 // same mergeKey within 2 s coalesces (typing bursts)
+  const DEFAULT_LABEL = Object.freeze(['undo.edit', Object.freeze({})]);
+  const EVENTS = ['doc', 'side'];
+
+  class StoreError extends Error {
+    constructor(code, message) { super(message || code); this.name = 'StoreError'; this.code = code; }
+  }
+
+  function deepFreeze(v) {
+    if (v === null || typeof v !== 'object' || Object.isFrozen(v) || ArrayBuffer.isView(v)) return v;
+    Object.freeze(v);
+    for (const k of Object.keys(v)) deepFreeze(v[k]);
+    return v;
+  }
+
+  function devMode() { return typeof MV !== 'undefined' && MV.DEV === true; }
+
+  // createStore({ doc, side, reduce, limit = 300 }) plus two optional hooks:
+  //   now()  → milliseconds, for the 2 s typing window (the store itself never reads a clock; without it only seal()
+  //            and gestures end a coalescing run); meta.at (ms) overrides it per dispatch.
+  //   freeze → deep-freeze documents (default: MV.DEV).
+  function createStore(opts) {
+    if (!opts || typeof opts.reduce !== 'function') throw new StoreError('bad-options', 'createStore needs { doc, reduce }');
+    const reduce = opts.reduce;
+    const limit = opts.limit === undefined ? DEFAULT_LIMIT : opts.limit;
+    if (!Number.isInteger(limit) || limit < 1) throw new StoreError('bad-options', 'limit must be a positive integer');
+    const clock = typeof opts.now === 'function' ? opts.now : null;
+    const freeze = opts.freeze === undefined ? devMode() : !!opts.freeze;
+    const listeners = { doc: [], side: [] };
+
+    let doc = freeze ? deepFreeze(opts.doc) : opts.doc;
+    let side = opts.side === undefined ? D.defaultSide() : opts.side;
+    let rev = 0;
+    let entries = [];          // history, oldest first
+    let pos = 0;               // entries[0 .. pos) are applied; the rest can be redone
+    let counter = 0;           // entry numbers (n) are never reused
+    let gesture = null;        // { key } while a gesture is open
+
+    function emit(event, payload) {
+      let failure = null;
+      for (const fn of listeners[event].slice()) {
+        try { fn(payload); } catch (e) { if (!failure) failure = e; }
+      }
+      if (failure) throw failure;
+    }
+
+    function timeOf(meta) {
+      if (typeof meta.at === 'number') return meta.at;
+      return clock ? clock() : null;
+    }
+
+    function canMerge(top, key, at) {
+      if (!top || !top.open || key === undefined || key === null || top.mergeKey !== key || pos !== entries.length) return false;
+      if (gesture && top.gesture === gesture) return true;
+      return at === null || top.at === null || at - top.at <= MERGE_WINDOW_MS;
+    }
+
+    function record(before, after, meta, cmds, at) {
+      const sel = meta.sel || {};
+      const top = pos > 0 ? entries[pos - 1] : null;
+      const key = meta.mergeKey;
+      if (canMerge(top, key, at)) {
+        top.after = after;
+        top.at = at;
+        top.cmds.push(...cmds);
+        if ('after' in sel) top.selAfter = sel.after;
+        if (top.after === top.before) { entries.pop(); pos -= 1; }   // the run cancelled itself out
+        return;
+      }
+      if (top) top.open = false;
+      entries.length = pos;
+      entries.push({
+        n: ++counter, before, after, label: meta.label || DEFAULT_LABEL, where: meta.where === undefined ? null : meta.where,
+        mergeKey: key === undefined ? null : key, selBefore: 'before' in sel ? sel.before : null,
+        selAfter: 'after' in sel ? sel.after : null, cmds: cmds.slice(), open: key !== undefined && key !== null,
+        gesture: gesture && gesture.key === key ? gesture : null, at,
+      });
+      while (entries.length > limit) entries.shift();
+      pos = entries.length;
+    }
+
+    function apply(cmd, meta, cmds) {
+      const m = meta || {};
+      const before = doc;
+      const after = reduce(before, cmd);
+      if (after === before) return rev;
+      if (freeze) deepFreeze(after);
+      record(before, after, m, cmds, timeOf(m));
+      doc = after;
+      rev += 1;
+      const sel = m.sel && 'after' in m.sel ? m.sel.after : null;
+      emit('doc', { rev, kind: 'do', cmds, touched: D.touched(before, after), where: m.where === undefined ? null : m.where, sel });
+      return rev;
+    }
+
+    function dispatch(cmd, meta) {
+      if (!cmd || typeof cmd.t !== 'string') throw new StoreError('bad-command', 'a command needs a string t');
+      return apply(cmd, meta, [cmd]);
+    }
+
+    function batch(meta, cmds) {
+      if (!Array.isArray(cmds)) throw new StoreError('bad-command', 'batch needs a list of commands');
+      if (cmds.length === 0) return rev;
+      return apply({ t: 'batch', cmds }, meta, cmds);
+    }
+
+    function seal() {
+      if (pos > 0) entries[pos - 1].open = false;
+    }
+
+    function openGesture(mergeKey) {
+      seal();
+      const token = { key: mergeKey };
+      gesture = token;
+      return {
+        end() {
+          if (gesture !== token) return;
+          gesture = null;
+          seal();
+        },
+      };
+    }
+
+    // Moves to the state where the first `target` entries are applied; one 'doc' event.
+    function moveTo(target, kind) {
+      const prev = doc;
+      const crossed = kind === 'undo' ? entries.slice(target, pos).reverse() : entries.slice(pos, target);
+      const edge = kind === 'undo' ? entries[target] : entries[target - 1];
+      seal();
+      doc = target === 0 ? entries[0].before : entries[target - 1].after;
+      pos = target;
+      rev += 1;
+      const sel = kind === 'undo' ? edge.selBefore : edge.selAfter;
+      const cmds = [].concat(...crossed.map((e) => e.cmds));
+      emit('doc', { rev, kind, cmds, touched: D.touched(prev, doc), where: edge.where, sel });
+      return { where: edge.where, sel };
+    }
+
+    function undo() { return pos === 0 ? null : moveTo(pos - 1, 'undo'); }
+    function redo() { return pos === entries.length ? null : moveTo(pos + 1, 'redo'); }
+
+    // jump(n): the state right after entry n (n = 0: before every entry).
+    function jump(n) {
+      const i = n === 0 ? -1 : entries.findIndex((e) => e.n === n);
+      if (n !== 0 && i < 0) throw new StoreError('unknown-entry', 'no history entry ' + n);
+      const target = i + 1;
+      if (target === pos) return null;
+      return moveTo(target, target < pos ? 'undo' : 'redo');
+    }
+
+    function peek() {
+      return {
+        undo: pos > 0 ? entries[pos - 1].label : null,
+        redo: pos < entries.length ? entries[pos].label : null,
+      };
+    }
+
+    function list() {
+      return entries.map((e, i) => ({ n: e.n, label: e.label, done: i < pos }));
+    }
+
+    function setSide(fn) {
+      const next = fn(side);
+      if (next === side) return;
+      side = next;
+      emit('side', { side });
+    }
+
+    function load(nextDoc, nextSide) {
+      const prev = doc;
+      doc = freeze ? deepFreeze(nextDoc) : nextDoc;
+      side = nextSide === undefined ? D.defaultSide() : nextSide;
+      entries = [];
+      pos = 0;
+      gesture = null;
+      rev += 1;
+      const touched = Object.assign(D.touched(prev, doc), { rows: 'all' });
+      emit('doc', { rev, kind: 'load', cmds: [], touched, where: null, sel: null });
+      emit('side', { side });
+    }
+
+    function on(event, fn) {
+      if (!EVENTS.includes(event)) throw new StoreError('bad-event', 'unknown store event ' + event);
+      listeners[event].push(fn);
+      return () => {
+        const i = listeners[event].indexOf(fn);
+        if (i >= 0) listeners[event].splice(i, 1);
+      };
+    }
+
+    return Object.freeze({
+      get doc() { return doc; },
+      get side() { return side; },
+      get rev() { return rev; },
+      dispatch, batch, gesture: openGesture, seal, undo, redo, peek, list, jump, setSide, load, on,
+    });
+  }
+
+  return { createStore, deepFreeze, StoreError, DEFAULT_LIMIT, MERGE_WINDOW_MS };
+});
+/* 文字PVメーカー v2 — original work. Tap-sync as a pure reducer: marks, ends, stepping back, one command; the one-line mode and the pins that keep the other lines still (DESIGN §4.11; DESIGN_2_2 §5). */
+MV.def('core/tap', [], () => {
+  'use strict';
+
+  const EVENTS = Object.freeze(['mark', 'end', 'back', 'pause', 'resume']);
+  // core/timing drops a start less than 0.1 s after the start above it (time-order): such a mark would be recorded and
+  // then never used, so it is not taken (as with the frozen clock of stopped playback, where every mark is equal).
+  // A little more than 0.1 s, so that rounding the stored times can never bring two marks under timing's gap.
+  const MIN_GAP = 0.12;
+
+  class TapError extends Error {
+    constructor(code, message) { super(message || code); this.name = 'TapError'; this.code = code; }
+  }
+
+  // A start that moved less than this between two plans has not moved (stillPins).
+  const STILL_EPS = 0.005;
+
+  // TapState = { lineIds, cursor, current, starts, ends, paused, next, active, only, from, stop }
+  //   cursor: index of the next line to mark; current: index of the line whose start was marked last (−1 = none);
+  //   starts / ends: marked times per line (null = not marked); next / active: the lines at cursor / current, as ids;
+  //   only: the one-line mode (この行だけ打ち直す, PV22 S2) — from is the session's line and stop = from + 1, so one mark
+  //   is taken; in the normal mode stop = lineIds.length (the session runs through the song).
+  function state(lineIds, cursor, current, starts, ends, paused, only, from, stop) {
+    return {
+      lineIds, cursor, current, starts, ends, paused, only, from, stop,
+      next: cursor < stop ? lineIds[cursor] : null,
+      active: current >= 0 ? lineIds[current] : null,
+    };
+  }
+
+  // A state like s with other marks and positions (the mode, first line and stop are kept).
+  function next(s, cursor, current, starts, ends, paused) {
+    return state(s.lineIds, cursor, current, starts, ends, paused, s.only, s.from, s.stop);
+  }
+
+  // Starts a session at `fromLineId` (the first line when it is null or unknown). `lines` are Line objects or ids.
+  // opts.only: the one-line mode — exactly that line is marked (DESIGN_2_2 §5, S2).
+  function tapStart(lines, fromLineId, opts) {
+    if (!Array.isArray(lines)) throw new TapError('bad-lines', 'tapStart needs a list of lines');
+    const lineIds = Object.freeze(lines.map((l) => (typeof l === 'string' ? l : l.id)));
+    const at = Math.max(0, lineIds.indexOf(fromLineId));
+    const only = !!(opts && opts.only) && lineIds.length > 0;
+    const empty = new Array(lineIds.length).fill(null);
+    return state(lineIds, at, -1, empty, empty.slice(), false, only, at, only ? at + 1 : lineIds.length);
+  }
+
+  // Every line the session may mark is marked.
+  function done(s) { return s.cursor >= s.stop; }
+
+  function timeOf(ev) {
+    const ok = typeof ev.t === 'number' && Number.isFinite(ev.t);
+    if (!ok) throw new TapError('bad-event', 'a tap event needs a time t');
+    return Math.max(0, ev.t);
+  }
+
+  // The latest start marked above the cursor (−Infinity when none).
+  function lastStart(s) {
+    for (let i = s.cursor - 1; i >= 0; i--) if (s.starts[i] !== null) return s.starts[i];
+    return -Infinity;
+  }
+
+  function withTime(list, i, t) {
+    const out = list.slice();
+    out[i] = t;
+    return out;
+  }
+
+  // mark: start of the next line (and advance); a mark less than MIN_GAP after the last start is ignored, and so is a
+  // mark past the session's stop (the one-line mode takes one) · end: end of the current line · back: forget the last
+  // line's marks and step back one line (never above the one-line mode's line) · pause / resume: marks are ignored
+  // while paused. Returns the same state when nothing changes.
+  function tapReduce(s, ev) {
+    if (!ev || !EVENTS.includes(ev.type)) throw new TapError('bad-event', 'unknown tap event ' + (ev && ev.type));
+    switch (ev.type) {
+      case 'mark': {
+        const t = timeOf(ev);
+        if (s.paused || s.cursor >= s.stop || t < lastStart(s) + MIN_GAP) return s;
+        const starts = withTime(s.starts, s.cursor, t);
+        return next(s, s.cursor + 1, s.cursor, starts, withTime(s.ends, s.cursor, null), false);
+      }
+      case 'end': {
+        const t = timeOf(ev);
+        if (s.paused || s.current < 0 || !(t > s.starts[s.current])) return s;
+        return next(s, s.cursor, s.current, s.starts, withTime(s.ends, s.current, t), false);
+      }
+      case 'back': {
+        if (s.cursor === 0 || (s.only && s.cursor <= s.from)) return s;
+        const i = s.cursor - 1;
+        const prev = i - 1 >= 0 && s.starts[i - 1] !== null ? i - 1 : -1;
+        return next(s, i, prev, withTime(s.starts, i, null), withTime(s.ends, i, null), s.paused);
+      }
+      case 'pause':
+        return s.paused ? s : next(s, s.cursor, s.current, s.starts, s.ends, true);
+      default:
+        return s.paused ? next(s, s.cursor, s.current, s.starts, s.ends, false) : s;
+    }
+  }
+
+  // One time.tap command for the whole session, in line order; null when nothing was marked.
+  function tapCommand(s) {
+    const marks = [];
+    s.lineIds.forEach((lineId, i) => {
+      if (s.starts[i] === null && s.ends[i] === null) return;
+      const m = { lineId };
+      if (s.starts[i] !== null) m.start = s.starts[i];
+      if (s.ends[i] !== null) m.end = s.ends[i];
+      marks.push(m);
+    });
+    return marks.length ? { t: 'time.tap', marks } : null;
+  }
+
+  // stillPins(before, after, lineId, start) → [{ lineId, start }]: the start pins that keep the automatic lines where
+  // they were (「前後の行を動かさない」, PV22 S2). before / after: plan.lines of the document before the re-tap and of a
+  // trial with it (the same ids in the same order, else []). The automatic lines other than lineId that moved form
+  // runs; pinning the two ends of each run at their old starts puts the run back (between two anchors the automatic
+  // starts are linear in their weights, and the fills are linear maps), as long as the pin keeps the order with the
+  // new start (at least MIN_GAP from it). Callers repeat with a new trial until nothing is added (at most 3 rounds).
+  function stillPins(before, after, lineId, start) {
+    if (!Array.isArray(before) || !Array.isArray(after) || before.length !== after.length) return [];
+    if (before.some((l, k) => l.id !== after[k].id)) return [];
+    const target = before.findIndex((l) => l.id === lineId);
+    if (target < 0) return [];
+    const moved = before.map((l, k) => k !== target && l.by && l.by.start === 'auto' &&
+      Math.abs(after[k].t0 - l.t0) >= STILL_EPS);
+    const picks = [];
+    for (let k = 0; k < moved.length; k++) {
+      if (!moved[k]) continue;
+      let e = k;
+      while (e + 1 < moved.length && moved[e + 1]) e++;
+      for (const i of e === k ? [k] : [k, e]) {
+        const t0 = before[i].t0;
+        if (i < target ? t0 <= start - MIN_GAP : t0 >= start + MIN_GAP) picks.push({ lineId: before[i].id, start: t0 });
+      }
+      k = e;
+    }
+    return picks;
+  }
+
+  return { tapStart, tapReduce, tapCommand, done, stillPins, TapError, EVENTS, MIN_GAP, STILL_EPS };
+});
+/* 文字PVメーカー v2 — original work. Line timing solver: anchors, fills, snapping, ends, duration (DESIGN §4.11). */
+MV.def('core/timing', ['core/pins', 'core/script', 'core/num', 'core/beats'], (PINS, S, N, B) => {
+  'use strict';
+
+  const ANCHOR_GAP = 0.1;       // an anchor closer than this to the previous one is out of order
+  const MIN_LEN = 0.2;          // t1 ≥ t0 + 0.2
+  const MIN_READ = 1.2;         // the shortest reading slot of a line
+  const PAUSE_WEIGHT = 0.8;     // seconds of weight per blank row above a line
+  const TIMING_DEFAULTS = Object.freeze({ snap: 'off', lead: 0.12, tail: 0.25, leadIn: 1, outro: 2, tapLatency: 0.06 });
+
+  function isTime(v) { return typeof v === 'number' && Number.isFinite(v) && v >= 0; }
+
+  // readRate slot (pin) → clamp(bpm / 20, 3, 14) with a BPM → 7 morae per second.
+  function readRateOf(ctx) {
+    if (typeof ctx.readRate === 'number' && ctx.readRate > 0 && Number.isFinite(ctx.readRate)) {
+      return N.clamp(ctx.readRate, 3, 14);
+    }
+    if (typeof ctx.bpm === 'number' && ctx.bpm > 0) return N.clamp(ctx.bpm / 20, 3, 14);
+    return 7;
+  }
+
+  // Accepts a PinIndex (core/pins.index) or a plain pins map.
+  function pinIndexOf(pins) {
+    if (pins && pins.line instanceof Map) return pins;
+    return PINS.index(pins || {});
+  }
+
+  // Line-scope time pins ('start' / 'end'); a bad value is ignored with pin-bad-value.
+  function linePin(ix, lineId, slot, warnings) {
+    const hit = PINS.lookup(ix, { cutKey: null, pinCutKey: null, lineId }, slot);
+    if (!hit || hit.from !== 'pin:line') return null;
+    if (isTime(hit.v)) return hit.v;
+    warnings.push({ code: 'pin-bad-value', path: hit.at, line: lineId });
+    return null;
+  }
+
+  // Rule 1: anchors in line order; an anchor < previous anchor + 0.1 is demoted (LRC before pins; between two pins the
+  // later one). The lines above the first anchor also need 0.1 s each from time 0, as forward-fill compression keeps:
+  // a first anchor earlier than that (e.g. '[00:00.00]' below untagged rows, or a tap clamped to 0) is demoted too, so
+  // starts stay strictly increasing. Returns start[i] (NaN = auto), kind[i] ('pin' | 'lrc' | 'auto') and the anchors.
+  function chooseAnchors(lines, pinStart, warnings) {
+    const n = lines.length;
+    const start = new Float64Array(n).fill(NaN);
+    const kind = new Array(n).fill('auto');
+    const stack = [];
+    const demote = (i) => {
+      warnings.push(kind[i] === 'pin'
+        ? { code: 'time-order', line: lines[i].id, path: 'line/' + lines[i].id + ':start' }
+        : { code: 'time-order', line: lines[i].id });
+      start[i] = NaN;
+      kind[i] = 'auto';
+    };
+    for (let i = 0; i < n; i++) {
+      if (pinStart[i] !== null) [start[i], kind[i]] = [pinStart[i], 'pin'];
+      else if (isTime(lines[i].stamp)) [start[i], kind[i]] = [lines[i].stamp, 'lrc'];
+      else continue;
+      const pops = conflictsWon(i, stack, start, kind);
+      if (pops < 0 || (pops === stack.length && start[i] < roomBefore(i))) { demote(i); continue; }
+      for (let p = 0; p < pops; p++) demote(stack.pop());
+      stack.push(i);
+    }
+    return { start, kind, anchors: stack };
+  }
+
+  // How many anchors at the top of the stack conflict with candidate i and lose to it (only LRC anchors lose to a
+  // pin); −1 when i loses instead. Nothing is demoted when i loses, so an anchor that cannot stand never costs another.
+  function conflictsWon(i, stack, start, kind) {
+    let pops = 0;
+    while (pops < stack.length) {
+      const top = stack[stack.length - 1 - pops];
+      if (start[i] >= start[top] + ANCHOR_GAP) break;
+      if (kind[i] !== 'pin' || kind[top] !== 'lrc') return -1;
+      pops++;
+    }
+    return pops;
+  }
+
+  // The earliest start of a first anchor with `count` lines above it: 0.1 s each (with a tolerance for float noise).
+  function roomBefore(count) { return ANCHOR_GAP * count - 1e-9; }
+
+  function solveTimes(lines, ctx) {
+    const c = ctx || {};
+    const timing = Object.assign({}, TIMING_DEFAULTS, c.timing || {});
+    const warnings = [];
+    const n = lines.length;
+    const ix = pinIndexOf(c.pins);
+    const song = typeof c.songSeconds === 'number' && c.songSeconds > 0 ? c.songSeconds : null;
+    const titleCard = typeof c.titleCard === 'number' && c.titleCard > 0 ? c.titleCard : 0;
+    const spm = 1 / readRateOf(c);
+
+    const read = new Float64Array(n), pause = new Float64Array(n);
+    lines.forEach((line, i) => {
+      read[i] = Math.max(MIN_READ, S.morae(line.text, line.lang) * spm);
+      pause[i] = PAUSE_WEIGHT * (line.pauseBefore || 0);
+    });
+    // The time from line k−1's start to line k's start at the nominal rate: its reading plus the pause above line k.
+    const gap = (k) => read[k - 1] + pause[k];
+
+    const pinStart = lines.map((l) => linePin(ix, l.id, 'start', warnings));
+    const pinEnd = lines.map((l) => linePin(ix, l.id, 'end', warnings));
+    const { start, kind, anchors } = chooseAnchors(lines, pinStart, warnings);
+    const t0 = Float64Array.from(start);
+
+    if (anchors.length === 0) {
+      if (n) forwardFill(t0, 0, Math.max(titleCard, timing.leadIn), gap, read, song, timing, lines, warnings);
+    } else {
+      backFill(t0, anchors[0], gap, titleCard, lines, warnings);
+      for (let a = 0; a + 1 < anchors.length; a++) spread(t0, anchors[a], anchors[a + 1], gap);
+      const last = anchors[anchors.length - 1];
+      forwardFill(t0, last, t0[last], gap, read, song, timing, lines, warnings);
+    }
+    snapAutoStarts(t0, kind, c, timing);
+
+    const lengthPin = lengthOf(c, warnings);
+    const known = lengthPin !== null ? lengthPin : song;
+    // Rule 7: the end pin, else before the next line (minus a breath when blank rows separate them), else by the
+    // duration; never later than the natural length t0 + max(4, 1.5·w).
+    const autoEnd = (i) => {
+      const natural = t0[i] + Math.max(4, 1.5 * (read[i] + pause[i]));
+      if (i + 1 < n) {
+        const pb = lines[i + 1].pauseBefore || 0;
+        return Math.min(t0[i + 1] - (pb ? Math.min(0.4 * pb, 1.2) : 0), natural);
+      }
+      return known !== null ? Math.min(known - timing.outro * 0.5, natural) : natural;
+    };
+    const t1 = new Float64Array(n);
+    const endBy = pinEnd.map((pin) => (pin !== null ? 'pin' : 'auto'));
+    for (let i = 0; i < n; i++) t1[i] = Math.max(pinEnd[i] !== null ? pinEnd[i] : autoEnd(i), t0[i] + MIN_LEN);
+    const duration = known !== null ? known
+      : n ? t1[n - 1] + timing.outro : Math.max(titleCard, timing.leadIn) + timing.outro;
+
+    const times = lines.map((line, i) => ({
+      id: line.id, t0: N.q6(t0[i]), t1: N.q6(t1[i]), by: { start: kind[i], end: endBy[i] },
+    }));
+    return { times, duration: N.q6(duration), warnings };
+  }
+
+  function lengthOf(c, warnings) {
+    if (c.lengthPin === null || c.lengthPin === undefined) return null;
+    if (typeof c.lengthPin === 'number' && c.lengthPin > 0 && Number.isFinite(c.lengthPin)) return c.lengthPin;
+    warnings.push({ code: 'pin-bad-value', path: 'work:length' });
+    return null;
+  }
+
+  // Rule 4: lines before the first anchor, back-filled at the nominal rate; compressed into [titleCard, anchor]
+  // when they would start before max(titleCard, 0). When the title card leaves them less than 0.1 s each, they
+  // compress into [0, anchor] instead (chooseAnchors keeps at least that much room).
+  function backFill(t0, first, gap, titleCard, lines, warnings) {
+    if (first === 0) return;
+    for (let k = first - 1; k >= 0; k--) t0[k] = t0[k + 1] - gap(k + 1);
+    const lo = Math.max(titleCard, 0);
+    if (t0[0] >= lo) return;
+    const anchor = t0[first];
+    mapSpan(t0, 0, first, [t0[0], anchor], [anchor - lo >= roomBefore(first) ? lo : 0, anchor]);
+    warnings.push({ code: 'time-compressed', line: lines[0].id, detail: { lines: first } });
+  }
+
+  // Rule 3: starts between two anchors, proportional to the cumulative gaps.
+  function spread(t0, p, q, gap) {
+    if (q - p < 2) return;
+    let total = 0;
+    for (let k = p + 1; k <= q; k++) total += gap(k);
+    let acc = 0;
+    for (let k = p + 1; k < q; k++) {
+      acc += gap(k);
+      t0[k] = t0[p] + (t0[q] - t0[p]) * (acc / total);
+    }
+  }
+
+  // Rule 5: from line `from` (at time `at`) onwards at the nominal rate; with a song, compressed so the fill ends by
+  // songSeconds − outro.
+  function forwardFill(t0, from, at, gap, read, song, timing, lines, warnings) {
+    const n = t0.length;
+    t0[from] = at;
+    for (let k = from + 1; k < n; k++) t0[k] = t0[k - 1] + gap(k);
+    if (song === null || from === n - 1) return;
+    const end = t0[n - 1] + read[n - 1];
+    const limit = song - timing.outro;
+    if (end <= limit) return;
+    const room = Math.max(limit - at, ANCHOR_GAP * (n - 1 - from));
+    mapSpan(t0, from + 1, n, [at, end], [at, at + room]);
+    warnings.push({ code: 'time-compressed', line: lines[from + 1].id, detail: { lines: n - 1 - from } });
+  }
+
+  // Maps t0[a..b) linearly from the span [x0, x1] onto [y0, y1].
+  function mapSpan(t0, a, b, [x0, x1], [y0, y1]) {
+    if (!(x1 > x0)) return;
+    for (let k = a; k < b; k++) t0[k] = y0 + (y1 - y0) * ((t0[k] - x0) / (x1 - x0));
+  }
+
+  // Rule 6: auto starts move to the nearest grid time within ±min(0.12, period / 4), keeping the order strict.
+  function snapAutoStarts(t0, kind, c, timing) {
+    if (timing.snap === 'off') return;
+    const g = c.grid || B.grid({ bpm: c.bpm, offset: c.beatOffset || 0, meter: c.meter || 4 });
+    if (!g) return;
+    const tol = Math.min(0.12, g.period / 4);
+    for (let i = 0; i < t0.length; i++) {
+      if (kind[i] !== 'auto') continue;
+      const s = g.snap(t0[i], timing.snap, tol);
+      const prevOk = i === 0 ? s >= 0 : s > t0[i - 1];
+      const nextOk = i + 1 === t0.length || s < t0[i + 1];
+      if (prevOk && nextOk) t0[i] = s;
+    }
+  }
+
+  return { solveTimes, readRateOf, TIMING_DEFAULTS, MIN_LEN };
+});
 /* 文字PVメーカー v2 — original work. Command reducers: the only way the document changes (DESIGN §3.6, §3.9, §4.12; DESIGN_2_1 §2.6, §11.2.5, §13.3). */
 MV.def('core/commands', ['core/doc', 'core/paths', 'core/pins', 'core/lyrics', 'core/reconcile', 'core/num', 'core/hash',
-  'core/recipe', 'core/media'],
-  (D, P, PINS, L, R, N, H, RC, MEDIA) => {
+  'core/recipe', 'core/media', 'core/timing'],
+  (D, P, PINS, L, R, N, H, RC, MEDIA, TM) => {
     'use strict';
 
     class CommandError extends Error {
@@ -7776,6 +8393,14 @@ MV.def('core/commands', ['core/doc', 'core/paths', 'core/pins', 'core/lyrics', '
         need(m.start !== undefined || m.end !== undefined, 'a mark needs start or end');
         if (m.start !== undefined) pins = timePin(pins, m.lineId, 'start', checkTime(m.start, 'start'), 'tap');
         if (m.end !== undefined) pins = timePin(pins, m.lineId, 'end', checkTime(m.end, 'end'), 'tap');
+        // A new start and no end: an end pin earlier than start + MIN_LEN is stale (core/timing would shrink the line to
+        // 0.2 s) and is removed, unless it is a lock pin (PV22 S2, DESIGN_2_2 §5).
+        if (m.start !== undefined && m.end === undefined) {
+          const endPath = 'line/' + m.lineId + ':end', end = pins[endPath];
+          if (end && end.by !== 'lock' && isFiniteNumber(end.v) && end.v < checkTime(m.start, 'start') + TM.MIN_LEN - 1e-9) {
+            pins = without(pins, [endPath]);
+          }
+        }
       }
       return put(doc, 'pins', pins);
     }
@@ -8118,580 +8743,6 @@ MV.def('core/commands', ['core/doc', 'core/paths', 'core/pins', 'core/lyrics', '
 
     return { reduce, effectiveTimes, CommandError, COMMANDS };
   });
-/* 文字PVメーカー v2 — original work. Reading project files: JSON, schema upgrades, defaults, validation (DESIGN §3.2, §4.4; DESIGN_2_1 §2.2). */
-MV.def('core/migrate', ['core/doc'], (D) => {
-  'use strict';
-
-  const CURRENT_SCHEMA = D.CURRENT_SCHEMA;
-
-  // MIGRATIONS[n] turns a schema-n file into a schema-(n+1) file. Each step is pure and touches nothing else.
-  // 1 → 2 (v2.1, DESIGN_2_1 §2.2): the material list and the media library, both empty. Pins, rows and every other
-  // field stay as they are; normalize fills output.kit and side.asks.
-  const MIGRATIONS = Object.freeze({
-    1: (file) => Object.assign({}, file, {
-      schema: 2,
-      doc: Object.assign({}, file.doc, { materials: { next: 1, list: [] }, media: { list: [] } }),
-    }),
-  });
-
-  class MigrateError extends Error {
-    constructor(code, message, problems) {
-      super(message || code);
-      this.name = 'MigrateError';
-      this.code = code;                       // 'bad-json' | 'not-a-project' | 'newer' | 'invalid'
-      this.problems = problems || [];
-    }
-  }
-
-  function isObject(v) { return v !== null && typeof v === 'object' && !Array.isArray(v); }
-
-  // Upgrades a parsed project file to CURRENT_SCHEMA and returns its { doc, side } (not yet normalized).
-  function migrate(json) {
-    if (!isObject(json) || json.format !== D.FORMAT) throw new MigrateError('not-a-project', 'not a Moji PV project file');
-    let schema = json.schema;
-    if (!Number.isInteger(schema) || schema < 1) throw new MigrateError('not-a-project', 'missing or bad schema number');
-    if (schema > CURRENT_SCHEMA) {
-      throw new MigrateError('newer', 'made by a newer version (schema ' + schema + ' > ' + CURRENT_SCHEMA + ')');
-    }
-    if (!isObject(json.doc)) throw new MigrateError('not-a-project', 'the file has no document');
-    let file = json;
-    while (schema < CURRENT_SCHEMA) {
-      const step = MIGRATIONS[schema];
-      if (!step) throw new MigrateError('invalid', 'no migration from schema ' + schema);
-      file = step(file);
-      schema += 1;
-    }
-    if (!isObject(file.doc)) throw new MigrateError('not-a-project', 'the file has no document');
-    return { doc: file.doc, side: file.side };
-  }
-
-  // Project file text → { doc, side }, ready for the store. Throws MigrateError. The doc is refused when invalid; the
-  // side (history only, not undoable) is cleaned instead (D.sanitizeSide), so a damaged history never reaches the UI.
-  function parseFile(text) {
-    let json;
-    try {
-      json = JSON.parse(text);
-    } catch (e) {
-      throw new MigrateError('bad-json', 'the file is not JSON: ' + e.message);
-    }
-    const { doc, side } = migrate(json);
-    const out = { doc: D.normalize(doc), side: D.sanitizeSide(side) };
-    const problems = D.validate(out.doc);
-    if (problems.length) throw new MigrateError('invalid', 'the project has ' + problems.length + ' problem(s)', problems);
-    return out;
-  }
-
-  return { CURRENT_SCHEMA, MIGRATIONS, MigrateError, migrate, parseFile };
-});
-/* 文字PVメーカー v2 — original work. The store: the only mutable state; history and undo by snapshot swap (DESIGN §3.10, §4.5). */
-MV.def('core/store', ['core/doc'], (D) => {
-  'use strict';
-
-  const DEFAULT_LIMIT = 300;
-  const MERGE_WINDOW_MS = 2000;                 // same mergeKey within 2 s coalesces (typing bursts)
-  const DEFAULT_LABEL = Object.freeze(['undo.edit', Object.freeze({})]);
-  const EVENTS = ['doc', 'side'];
-
-  class StoreError extends Error {
-    constructor(code, message) { super(message || code); this.name = 'StoreError'; this.code = code; }
-  }
-
-  function deepFreeze(v) {
-    if (v === null || typeof v !== 'object' || Object.isFrozen(v) || ArrayBuffer.isView(v)) return v;
-    Object.freeze(v);
-    for (const k of Object.keys(v)) deepFreeze(v[k]);
-    return v;
-  }
-
-  function devMode() { return typeof MV !== 'undefined' && MV.DEV === true; }
-
-  // createStore({ doc, side, reduce, limit = 300 }) plus two optional hooks:
-  //   now()  → milliseconds, for the 2 s typing window (the store itself never reads a clock; without it only seal()
-  //            and gestures end a coalescing run); meta.at (ms) overrides it per dispatch.
-  //   freeze → deep-freeze documents (default: MV.DEV).
-  function createStore(opts) {
-    if (!opts || typeof opts.reduce !== 'function') throw new StoreError('bad-options', 'createStore needs { doc, reduce }');
-    const reduce = opts.reduce;
-    const limit = opts.limit === undefined ? DEFAULT_LIMIT : opts.limit;
-    if (!Number.isInteger(limit) || limit < 1) throw new StoreError('bad-options', 'limit must be a positive integer');
-    const clock = typeof opts.now === 'function' ? opts.now : null;
-    const freeze = opts.freeze === undefined ? devMode() : !!opts.freeze;
-    const listeners = { doc: [], side: [] };
-
-    let doc = freeze ? deepFreeze(opts.doc) : opts.doc;
-    let side = opts.side === undefined ? D.defaultSide() : opts.side;
-    let rev = 0;
-    let entries = [];          // history, oldest first
-    let pos = 0;               // entries[0 .. pos) are applied; the rest can be redone
-    let counter = 0;           // entry numbers (n) are never reused
-    let gesture = null;        // { key } while a gesture is open
-
-    function emit(event, payload) {
-      let failure = null;
-      for (const fn of listeners[event].slice()) {
-        try { fn(payload); } catch (e) { if (!failure) failure = e; }
-      }
-      if (failure) throw failure;
-    }
-
-    function timeOf(meta) {
-      if (typeof meta.at === 'number') return meta.at;
-      return clock ? clock() : null;
-    }
-
-    function canMerge(top, key, at) {
-      if (!top || !top.open || key === undefined || key === null || top.mergeKey !== key || pos !== entries.length) return false;
-      if (gesture && top.gesture === gesture) return true;
-      return at === null || top.at === null || at - top.at <= MERGE_WINDOW_MS;
-    }
-
-    function record(before, after, meta, cmds, at) {
-      const sel = meta.sel || {};
-      const top = pos > 0 ? entries[pos - 1] : null;
-      const key = meta.mergeKey;
-      if (canMerge(top, key, at)) {
-        top.after = after;
-        top.at = at;
-        top.cmds.push(...cmds);
-        if ('after' in sel) top.selAfter = sel.after;
-        if (top.after === top.before) { entries.pop(); pos -= 1; }   // the run cancelled itself out
-        return;
-      }
-      if (top) top.open = false;
-      entries.length = pos;
-      entries.push({
-        n: ++counter, before, after, label: meta.label || DEFAULT_LABEL, where: meta.where === undefined ? null : meta.where,
-        mergeKey: key === undefined ? null : key, selBefore: 'before' in sel ? sel.before : null,
-        selAfter: 'after' in sel ? sel.after : null, cmds: cmds.slice(), open: key !== undefined && key !== null,
-        gesture: gesture && gesture.key === key ? gesture : null, at,
-      });
-      while (entries.length > limit) entries.shift();
-      pos = entries.length;
-    }
-
-    function apply(cmd, meta, cmds) {
-      const m = meta || {};
-      const before = doc;
-      const after = reduce(before, cmd);
-      if (after === before) return rev;
-      if (freeze) deepFreeze(after);
-      record(before, after, m, cmds, timeOf(m));
-      doc = after;
-      rev += 1;
-      const sel = m.sel && 'after' in m.sel ? m.sel.after : null;
-      emit('doc', { rev, kind: 'do', cmds, touched: D.touched(before, after), where: m.where === undefined ? null : m.where, sel });
-      return rev;
-    }
-
-    function dispatch(cmd, meta) {
-      if (!cmd || typeof cmd.t !== 'string') throw new StoreError('bad-command', 'a command needs a string t');
-      return apply(cmd, meta, [cmd]);
-    }
-
-    function batch(meta, cmds) {
-      if (!Array.isArray(cmds)) throw new StoreError('bad-command', 'batch needs a list of commands');
-      if (cmds.length === 0) return rev;
-      return apply({ t: 'batch', cmds }, meta, cmds);
-    }
-
-    function seal() {
-      if (pos > 0) entries[pos - 1].open = false;
-    }
-
-    function openGesture(mergeKey) {
-      seal();
-      const token = { key: mergeKey };
-      gesture = token;
-      return {
-        end() {
-          if (gesture !== token) return;
-          gesture = null;
-          seal();
-        },
-      };
-    }
-
-    // Moves to the state where the first `target` entries are applied; one 'doc' event.
-    function moveTo(target, kind) {
-      const prev = doc;
-      const crossed = kind === 'undo' ? entries.slice(target, pos).reverse() : entries.slice(pos, target);
-      const edge = kind === 'undo' ? entries[target] : entries[target - 1];
-      seal();
-      doc = target === 0 ? entries[0].before : entries[target - 1].after;
-      pos = target;
-      rev += 1;
-      const sel = kind === 'undo' ? edge.selBefore : edge.selAfter;
-      const cmds = [].concat(...crossed.map((e) => e.cmds));
-      emit('doc', { rev, kind, cmds, touched: D.touched(prev, doc), where: edge.where, sel });
-      return { where: edge.where, sel };
-    }
-
-    function undo() { return pos === 0 ? null : moveTo(pos - 1, 'undo'); }
-    function redo() { return pos === entries.length ? null : moveTo(pos + 1, 'redo'); }
-
-    // jump(n): the state right after entry n (n = 0: before every entry).
-    function jump(n) {
-      const i = n === 0 ? -1 : entries.findIndex((e) => e.n === n);
-      if (n !== 0 && i < 0) throw new StoreError('unknown-entry', 'no history entry ' + n);
-      const target = i + 1;
-      if (target === pos) return null;
-      return moveTo(target, target < pos ? 'undo' : 'redo');
-    }
-
-    function peek() {
-      return {
-        undo: pos > 0 ? entries[pos - 1].label : null,
-        redo: pos < entries.length ? entries[pos].label : null,
-      };
-    }
-
-    function list() {
-      return entries.map((e, i) => ({ n: e.n, label: e.label, done: i < pos }));
-    }
-
-    function setSide(fn) {
-      const next = fn(side);
-      if (next === side) return;
-      side = next;
-      emit('side', { side });
-    }
-
-    function load(nextDoc, nextSide) {
-      const prev = doc;
-      doc = freeze ? deepFreeze(nextDoc) : nextDoc;
-      side = nextSide === undefined ? D.defaultSide() : nextSide;
-      entries = [];
-      pos = 0;
-      gesture = null;
-      rev += 1;
-      const touched = Object.assign(D.touched(prev, doc), { rows: 'all' });
-      emit('doc', { rev, kind: 'load', cmds: [], touched, where: null, sel: null });
-      emit('side', { side });
-    }
-
-    function on(event, fn) {
-      if (!EVENTS.includes(event)) throw new StoreError('bad-event', 'unknown store event ' + event);
-      listeners[event].push(fn);
-      return () => {
-        const i = listeners[event].indexOf(fn);
-        if (i >= 0) listeners[event].splice(i, 1);
-      };
-    }
-
-    return Object.freeze({
-      get doc() { return doc; },
-      get side() { return side; },
-      get rev() { return rev; },
-      dispatch, batch, gesture: openGesture, seal, undo, redo, peek, list, jump, setSide, load, on,
-    });
-  }
-
-  return { createStore, deepFreeze, StoreError, DEFAULT_LIMIT, MERGE_WINDOW_MS };
-});
-/* 文字PVメーカー v2 — original work. Tap-sync as a pure reducer: marks, ends, stepping back, one command (DESIGN §4.11). */
-MV.def('core/tap', [], () => {
-  'use strict';
-
-  const EVENTS = Object.freeze(['mark', 'end', 'back', 'pause', 'resume']);
-  // core/timing drops a start less than 0.1 s after the start above it (time-order): such a mark would be recorded and
-  // then never used, so it is not taken (as with the frozen clock of stopped playback, where every mark is equal).
-  // A little more than 0.1 s, so that rounding the stored times can never bring two marks under timing's gap.
-  const MIN_GAP = 0.12;
-
-  class TapError extends Error {
-    constructor(code, message) { super(message || code); this.name = 'TapError'; this.code = code; }
-  }
-
-  // TapState = { lineIds, cursor, current, starts, ends, paused, next, active }
-  //   cursor: index of the next line to mark; current: index of the line whose start was marked last (−1 = none);
-  //   starts / ends: marked times per line (null = not marked); next / active: the lines at cursor / current, as ids.
-  function state(lineIds, cursor, current, starts, ends, paused) {
-    return {
-      lineIds, cursor, current, starts, ends, paused,
-      next: cursor < lineIds.length ? lineIds[cursor] : null,
-      active: current >= 0 ? lineIds[current] : null,
-    };
-  }
-
-  // Starts a session at `fromLineId` (the first line when it is null or unknown). `lines` are Line objects or ids.
-  function tapStart(lines, fromLineId) {
-    if (!Array.isArray(lines)) throw new TapError('bad-lines', 'tapStart needs a list of lines');
-    const lineIds = Object.freeze(lines.map((l) => (typeof l === 'string' ? l : l.id)));
-    const at = Math.max(0, lineIds.indexOf(fromLineId));
-    const empty = new Array(lineIds.length).fill(null);
-    return state(lineIds, at, -1, empty, empty.slice(), false);
-  }
-
-  function timeOf(ev) {
-    const ok = typeof ev.t === 'number' && Number.isFinite(ev.t);
-    if (!ok) throw new TapError('bad-event', 'a tap event needs a time t');
-    return Math.max(0, ev.t);
-  }
-
-  // The latest start marked above the cursor (−Infinity when none).
-  function lastStart(s) {
-    for (let i = s.cursor - 1; i >= 0; i--) if (s.starts[i] !== null) return s.starts[i];
-    return -Infinity;
-  }
-
-  function withTime(list, i, t) {
-    const out = list.slice();
-    out[i] = t;
-    return out;
-  }
-
-  // mark: start of the next line (and advance); a mark less than MIN_GAP after the last start is ignored · end: end of the
-  // current line · back: forget the last line's marks and step back one line · pause / resume: marks are ignored while
-  // paused. Returns the same state when nothing changes.
-  function tapReduce(s, ev) {
-    if (!ev || !EVENTS.includes(ev.type)) throw new TapError('bad-event', 'unknown tap event ' + (ev && ev.type));
-    switch (ev.type) {
-      case 'mark': {
-        const t = timeOf(ev);
-        if (s.paused || s.cursor >= s.lineIds.length || t < lastStart(s) + MIN_GAP) return s;
-        const starts = withTime(s.starts, s.cursor, t);
-        return state(s.lineIds, s.cursor + 1, s.cursor, starts, withTime(s.ends, s.cursor, null), false);
-      }
-      case 'end': {
-        const t = timeOf(ev);
-        if (s.paused || s.current < 0 || !(t > s.starts[s.current])) return s;
-        return state(s.lineIds, s.cursor, s.current, s.starts, withTime(s.ends, s.current, t), false);
-      }
-      case 'back': {
-        if (s.cursor === 0) return s;
-        const i = s.cursor - 1;
-        const prev = i - 1 >= 0 && s.starts[i - 1] !== null ? i - 1 : -1;
-        return state(s.lineIds, i, prev, withTime(s.starts, i, null), withTime(s.ends, i, null), s.paused);
-      }
-      case 'pause':
-        return s.paused ? s : state(s.lineIds, s.cursor, s.current, s.starts, s.ends, true);
-      default:
-        return s.paused ? state(s.lineIds, s.cursor, s.current, s.starts, s.ends, false) : s;
-    }
-  }
-
-  // One time.tap command for the whole session, in line order; null when nothing was marked.
-  function tapCommand(s) {
-    const marks = [];
-    s.lineIds.forEach((lineId, i) => {
-      if (s.starts[i] === null && s.ends[i] === null) return;
-      const m = { lineId };
-      if (s.starts[i] !== null) m.start = s.starts[i];
-      if (s.ends[i] !== null) m.end = s.ends[i];
-      marks.push(m);
-    });
-    return marks.length ? { t: 'time.tap', marks } : null;
-  }
-
-  return { tapStart, tapReduce, tapCommand, TapError, EVENTS, MIN_GAP };
-});
-/* 文字PVメーカー v2 — original work. Line timing solver: anchors, fills, snapping, ends, duration (DESIGN §4.11). */
-MV.def('core/timing', ['core/pins', 'core/script', 'core/num', 'core/beats'], (PINS, S, N, B) => {
-  'use strict';
-
-  const ANCHOR_GAP = 0.1;       // an anchor closer than this to the previous one is out of order
-  const MIN_LEN = 0.2;          // t1 ≥ t0 + 0.2
-  const MIN_READ = 1.2;         // the shortest reading slot of a line
-  const PAUSE_WEIGHT = 0.8;     // seconds of weight per blank row above a line
-  const TIMING_DEFAULTS = Object.freeze({ snap: 'off', lead: 0.12, tail: 0.25, leadIn: 1, outro: 2, tapLatency: 0.06 });
-
-  function isTime(v) { return typeof v === 'number' && Number.isFinite(v) && v >= 0; }
-
-  // readRate slot (pin) → clamp(bpm / 20, 3, 14) with a BPM → 7 morae per second.
-  function readRateOf(ctx) {
-    if (typeof ctx.readRate === 'number' && ctx.readRate > 0 && Number.isFinite(ctx.readRate)) {
-      return N.clamp(ctx.readRate, 3, 14);
-    }
-    if (typeof ctx.bpm === 'number' && ctx.bpm > 0) return N.clamp(ctx.bpm / 20, 3, 14);
-    return 7;
-  }
-
-  // Accepts a PinIndex (core/pins.index) or a plain pins map.
-  function pinIndexOf(pins) {
-    if (pins && pins.line instanceof Map) return pins;
-    return PINS.index(pins || {});
-  }
-
-  // Line-scope time pins ('start' / 'end'); a bad value is ignored with pin-bad-value.
-  function linePin(ix, lineId, slot, warnings) {
-    const hit = PINS.lookup(ix, { cutKey: null, pinCutKey: null, lineId }, slot);
-    if (!hit || hit.from !== 'pin:line') return null;
-    if (isTime(hit.v)) return hit.v;
-    warnings.push({ code: 'pin-bad-value', path: hit.at, line: lineId });
-    return null;
-  }
-
-  // Rule 1: anchors in line order; an anchor < previous anchor + 0.1 is demoted (LRC before pins; between two pins the
-  // later one). The lines above the first anchor also need 0.1 s each from time 0, as forward-fill compression keeps:
-  // a first anchor earlier than that (e.g. '[00:00.00]' below untagged rows, or a tap clamped to 0) is demoted too, so
-  // starts stay strictly increasing. Returns start[i] (NaN = auto), kind[i] ('pin' | 'lrc' | 'auto') and the anchors.
-  function chooseAnchors(lines, pinStart, warnings) {
-    const n = lines.length;
-    const start = new Float64Array(n).fill(NaN);
-    const kind = new Array(n).fill('auto');
-    const stack = [];
-    const demote = (i) => {
-      warnings.push(kind[i] === 'pin'
-        ? { code: 'time-order', line: lines[i].id, path: 'line/' + lines[i].id + ':start' }
-        : { code: 'time-order', line: lines[i].id });
-      start[i] = NaN;
-      kind[i] = 'auto';
-    };
-    for (let i = 0; i < n; i++) {
-      if (pinStart[i] !== null) [start[i], kind[i]] = [pinStart[i], 'pin'];
-      else if (isTime(lines[i].stamp)) [start[i], kind[i]] = [lines[i].stamp, 'lrc'];
-      else continue;
-      const pops = conflictsWon(i, stack, start, kind);
-      if (pops < 0 || (pops === stack.length && start[i] < roomBefore(i))) { demote(i); continue; }
-      for (let p = 0; p < pops; p++) demote(stack.pop());
-      stack.push(i);
-    }
-    return { start, kind, anchors: stack };
-  }
-
-  // How many anchors at the top of the stack conflict with candidate i and lose to it (only LRC anchors lose to a
-  // pin); −1 when i loses instead. Nothing is demoted when i loses, so an anchor that cannot stand never costs another.
-  function conflictsWon(i, stack, start, kind) {
-    let pops = 0;
-    while (pops < stack.length) {
-      const top = stack[stack.length - 1 - pops];
-      if (start[i] >= start[top] + ANCHOR_GAP) break;
-      if (kind[i] !== 'pin' || kind[top] !== 'lrc') return -1;
-      pops++;
-    }
-    return pops;
-  }
-
-  // The earliest start of a first anchor with `count` lines above it: 0.1 s each (with a tolerance for float noise).
-  function roomBefore(count) { return ANCHOR_GAP * count - 1e-9; }
-
-  function solveTimes(lines, ctx) {
-    const c = ctx || {};
-    const timing = Object.assign({}, TIMING_DEFAULTS, c.timing || {});
-    const warnings = [];
-    const n = lines.length;
-    const ix = pinIndexOf(c.pins);
-    const song = typeof c.songSeconds === 'number' && c.songSeconds > 0 ? c.songSeconds : null;
-    const titleCard = typeof c.titleCard === 'number' && c.titleCard > 0 ? c.titleCard : 0;
-    const spm = 1 / readRateOf(c);
-
-    const read = new Float64Array(n), pause = new Float64Array(n);
-    lines.forEach((line, i) => {
-      read[i] = Math.max(MIN_READ, S.morae(line.text, line.lang) * spm);
-      pause[i] = PAUSE_WEIGHT * (line.pauseBefore || 0);
-    });
-    // The time from line k−1's start to line k's start at the nominal rate: its reading plus the pause above line k.
-    const gap = (k) => read[k - 1] + pause[k];
-
-    const pinStart = lines.map((l) => linePin(ix, l.id, 'start', warnings));
-    const pinEnd = lines.map((l) => linePin(ix, l.id, 'end', warnings));
-    const { start, kind, anchors } = chooseAnchors(lines, pinStart, warnings);
-    const t0 = Float64Array.from(start);
-
-    if (anchors.length === 0) {
-      if (n) forwardFill(t0, 0, Math.max(titleCard, timing.leadIn), gap, read, song, timing, lines, warnings);
-    } else {
-      backFill(t0, anchors[0], gap, titleCard, lines, warnings);
-      for (let a = 0; a + 1 < anchors.length; a++) spread(t0, anchors[a], anchors[a + 1], gap);
-      const last = anchors[anchors.length - 1];
-      forwardFill(t0, last, t0[last], gap, read, song, timing, lines, warnings);
-    }
-    snapAutoStarts(t0, kind, c, timing);
-
-    const lengthPin = lengthOf(c, warnings);
-    const known = lengthPin !== null ? lengthPin : song;
-    // Rule 7: the end pin, else before the next line (minus a breath when blank rows separate them), else by the
-    // duration; never later than the natural length t0 + max(4, 1.5·w).
-    const autoEnd = (i) => {
-      const natural = t0[i] + Math.max(4, 1.5 * (read[i] + pause[i]));
-      if (i + 1 < n) {
-        const pb = lines[i + 1].pauseBefore || 0;
-        return Math.min(t0[i + 1] - (pb ? Math.min(0.4 * pb, 1.2) : 0), natural);
-      }
-      return known !== null ? Math.min(known - timing.outro * 0.5, natural) : natural;
-    };
-    const t1 = new Float64Array(n);
-    const endBy = pinEnd.map((pin) => (pin !== null ? 'pin' : 'auto'));
-    for (let i = 0; i < n; i++) t1[i] = Math.max(pinEnd[i] !== null ? pinEnd[i] : autoEnd(i), t0[i] + MIN_LEN);
-    const duration = known !== null ? known
-      : n ? t1[n - 1] + timing.outro : Math.max(titleCard, timing.leadIn) + timing.outro;
-
-    const times = lines.map((line, i) => ({
-      id: line.id, t0: N.q6(t0[i]), t1: N.q6(t1[i]), by: { start: kind[i], end: endBy[i] },
-    }));
-    return { times, duration: N.q6(duration), warnings };
-  }
-
-  function lengthOf(c, warnings) {
-    if (c.lengthPin === null || c.lengthPin === undefined) return null;
-    if (typeof c.lengthPin === 'number' && c.lengthPin > 0 && Number.isFinite(c.lengthPin)) return c.lengthPin;
-    warnings.push({ code: 'pin-bad-value', path: 'work:length' });
-    return null;
-  }
-
-  // Rule 4: lines before the first anchor, back-filled at the nominal rate; compressed into [titleCard, anchor]
-  // when they would start before max(titleCard, 0). When the title card leaves them less than 0.1 s each, they
-  // compress into [0, anchor] instead (chooseAnchors keeps at least that much room).
-  function backFill(t0, first, gap, titleCard, lines, warnings) {
-    if (first === 0) return;
-    for (let k = first - 1; k >= 0; k--) t0[k] = t0[k + 1] - gap(k + 1);
-    const lo = Math.max(titleCard, 0);
-    if (t0[0] >= lo) return;
-    const anchor = t0[first];
-    mapSpan(t0, 0, first, [t0[0], anchor], [anchor - lo >= roomBefore(first) ? lo : 0, anchor]);
-    warnings.push({ code: 'time-compressed', line: lines[0].id, detail: { lines: first } });
-  }
-
-  // Rule 3: starts between two anchors, proportional to the cumulative gaps.
-  function spread(t0, p, q, gap) {
-    if (q - p < 2) return;
-    let total = 0;
-    for (let k = p + 1; k <= q; k++) total += gap(k);
-    let acc = 0;
-    for (let k = p + 1; k < q; k++) {
-      acc += gap(k);
-      t0[k] = t0[p] + (t0[q] - t0[p]) * (acc / total);
-    }
-  }
-
-  // Rule 5: from line `from` (at time `at`) onwards at the nominal rate; with a song, compressed so the fill ends by
-  // songSeconds − outro.
-  function forwardFill(t0, from, at, gap, read, song, timing, lines, warnings) {
-    const n = t0.length;
-    t0[from] = at;
-    for (let k = from + 1; k < n; k++) t0[k] = t0[k - 1] + gap(k);
-    if (song === null || from === n - 1) return;
-    const end = t0[n - 1] + read[n - 1];
-    const limit = song - timing.outro;
-    if (end <= limit) return;
-    const room = Math.max(limit - at, ANCHOR_GAP * (n - 1 - from));
-    mapSpan(t0, from + 1, n, [at, end], [at, at + room]);
-    warnings.push({ code: 'time-compressed', line: lines[from + 1].id, detail: { lines: n - 1 - from } });
-  }
-
-  // Maps t0[a..b) linearly from the span [x0, x1] onto [y0, y1].
-  function mapSpan(t0, a, b, [x0, x1], [y0, y1]) {
-    if (!(x1 > x0)) return;
-    for (let k = a; k < b; k++) t0[k] = y0 + (y1 - y0) * ((t0[k] - x0) / (x1 - x0));
-  }
-
-  // Rule 6: auto starts move to the nearest grid time within ±min(0.12, period / 4), keeping the order strict.
-  function snapAutoStarts(t0, kind, c, timing) {
-    if (timing.snap === 'off') return;
-    const g = c.grid || B.grid({ bpm: c.bpm, offset: c.beatOffset || 0, meter: c.meter || 4 });
-    if (!g) return;
-    const tol = Math.min(0.12, g.period / 4);
-    for (let i = 0; i < t0.length; i++) {
-      if (kind[i] !== 'auto') continue;
-      const s = g.snap(t0[i], timing.snap, tol);
-      const prevOk = i === 0 ? s >= 0 : s > t0[i - 1];
-      const nextOk = i + 1 === t0.length || s < t0[i + 1];
-      if (prevOk && nextOk) t0[i] = s;
-    }
-  }
-
-  return { solveTimes, readRateOf, TIMING_DEFAULTS };
-});
 /* 文字PVメーカー v2 — original work. JSDoc type definitions mirroring DESIGN §3 (data model) and §4 (interfaces), with the DESIGN_2_1 additions. */
 MV.def('core/types', [], () => {
   'use strict';
@@ -12111,7 +12162,7 @@ MV.def('i18n/strings', [], () => ({
   'song.snap': ['拍に合わせる', 'Snap to beats'],
   'song.snapNeedsBpm': ['テンポが分かると使えます', 'Needs a tempo'],
   'song.tap': ['タップで合わせる', 'Tap to sync'],
-  'song.tapFrom': ['{n}行から・スペースで記録', 'From line {n} · Space marks'],
+  'song.tapFrom': ['{n}行から・スペースで記録・Escで終わる', 'From line {n} · Space marks · Esc finishes'],
   'song.tapFromStart': ['1行目から・スペースで記録', 'From line 1 · Space marks'],
   'song.aiTiming': ['AIでタイミング', 'AI timing'],
   'song.aiNeedsSong': ['曲を読み込むと使えます', 'Load a song first'],
@@ -14029,6 +14080,31 @@ MV.def('i18n/strings', [], () => ({
     '{n} line may be too fast to read ({list})|{n} lines may be too fast to read ({list})'],
   'exp.pre.too-fast.lines': ['{list}行目', 'line {list}|lines {list}'],
   'exp.pre.too-fast.more': ['{list}行目ほか{m}行', 'lines {list} and {m} more'],
+  // S2 1行だけタップで打ち直し
+  'tap.lineBtn': ['この行だけタップで打ち直す', 'Re-tap this line only'],
+  'tap.lineBtnHint': ['2秒前から再生します。歌い出しでスペース', 'Plays from 2 s before. Press Space where the line starts'],
+  'cmd.tap.line': ['この行だけタップで打ち直す', 'Re-tap this line only'],
+  'song.tapLine': ['{n}行目だけ打ち直す', 'Re-tap line {n} only'],
+  'tap.onlyTitle': ['この行だけ打ち直す', 'Re-tap one line'],
+  'tap.onlyHint': ['歌い出しでスペース（またはタップ）。終わりも打つなら E', 'Press Space (or tap) where it is sung. E marks the end'],
+  'tap.onlyDone': ['この行は記録済み。打ち直すなら Backspace', 'This line is marked. Backspace to redo it'],
+  'tap.autoEnd': ['{s}秒後に自動で終わります（Escで今すぐ・Eで終わりを記録）', 'Finishes by itself in {s} s (Esc: now · E: mark the end)'],
+  'tap.keep': ['前後の行を動かさない', 'Keep the other lines where they are'],
+  'tap.keepTip': ['前後の自動の行の開始を、今の時刻で固定します', 'Pins the neighboring automatic starts at their current times'],
+  'tap.looped': ['止めました。もう一度は ▶', 'Stopped. Press ▶ to try again'],
+  'tap.keyRetry': ['打ち直す', 'Redo'],
+  'tap.lineDone': ['{n}行目を打ち直しました。', 'Re-tapped line {n}.'],
+  'tap.lineKeptList': ['{list}行目の開始を今の時刻で固定しました。',
+    'Pinned the start of line {list} at its current time.|Pinned the starts of lines {list} at their current times.'],
+  'tap.lineMoved': ['ほかに{m}行の自動の時刻が動きました。', '{m} automatic line also moved.|{m} automatic lines also moved.'],
+  'tap.endShifted': ['終わりの固定も同じだけ動かしました。', 'The pinned end moved with it.'],
+  'tap.endCleared': ['終わりの固定を外しました（新しい開始より前だったため）。', 'Removed the pinned end (it came before the new start).'],
+  'tap.unpinHelpers': ['ほかの行の固定を外す', 'Unpin the other lines'],
+  'undo.unpinHelpers': ['ほかの行の固定を外す（{n}行）', 'Unpin the other lines ({n} line)|Unpin the other lines ({n} lines)'],
+  'undo.tapLine': ['この行を打ち直す（{n}行目）', 'Re-tap line {n}'],
+  'tl.lineMenu.retap': ['この行だけタップで打ち直す', 'Re-tap this line only'],
+  'tl.lineMenu.tapFrom': ['この行からタップで合わせる', 'Tap to sync from this line'],
+  'tl.lineMenu.unpinStart': ['開始の固定を外す', 'Unpin the start'],
 
   // --- PV22 P6 (歌ハメ) ---
 }));
@@ -67602,11 +67678,15 @@ MV.def('ui/step_song', ['ui/dom', 'ui/icons', 'ui/header', 'ui/selection', 'i18n
     const tapHint = h('span', { class: 'btn-hint' });
     const tapBtn = h('button', { class: 'btn wide tall', type: 'button', 'data-act': 'tap.start', 'data-ctl': 'tap' },
       I.icon('tap'), h('span', { class: 'btn-main', text: t('song.tap') }), tapHint);
+    // 「{n}行目だけ打ち直す」 (PV22 S2): with one line selected, re-tap just that line
+    const tapLineLabel = h('span');
+    const tapLineBtn = h('button', { class: 'chip-btn', type: 'button', 'data-act': 'tap.line', 'data-ctl': 'tapLine', hidden: true,
+      title: t('tap.lineBtnHint') }, I.icon('tap', { size: 15 }), tapLineLabel);
     const aiBtn = h('button', { class: 'chip-btn', type: 'button', 'data-act': 'ai.align', 'data-ctl': 'ai' },
       I.icon('ai', { size: 15 }), t('song.aiTiming'));
     const root = h('div', { class: 'step step-song' },
       h('div', { class: 'step-head' }, h('h2', { class: 'step-title', text: t('song.title') })),
-      songBox, tempo, h('div', { class: 'snap-field' }, snapRow, snapWhy), tapBtn, aiBtn);
+      songBox, tempo, h('div', { class: 'snap-field' }, snapRow, snapWhy), tapBtn, tapLineBtn, aiBtn);
 
     dom.on(root, 'click', '[data-act]', (ev, b) => app.actions.run(b.dataset.act, { from: 'song' }));
 
@@ -67759,6 +67839,9 @@ MV.def('ui/step_song', ['ui/dom', 'ui/icons', 'ui/header', 'ui/selection', 'i18n
       const info = line && app.plan ? app.plan.lines.find((l) => l.id === line) : null;
       tapHint.textContent = info ? t('song.tapFrom', { n: info.index + 1 }) : t('song.tapFromStart');
       tapBtn.disabled = !(app.plan && app.plan.lines.length);
+      const one = sel.level !== 'line' || sel.ids.length === 1;
+      tapLineBtn.hidden = !(info && one);
+      if (info) tapLineLabel.textContent = t('song.tapLine', { n: info.index + 1 });
       aiBtn.hidden = !app.view.state.prefs.ai;
       aiBtn.disabled = !app.doc.song;
       aiBtn.title = app.doc.song ? '' : t('song.aiNeedsSong');
@@ -67907,8 +67990,8 @@ MV.def('ui/steps', ['ui/dom', 'ui/icons', 'ui/step_lyrics', 'ui/step_song', 'ui/
 
     return { mount, STEPS, statusOf, LOOK_PIN };
   });
-/* 文字PVメーカー v2 — original work. Tap mode: Space/Enter, the tap button or a press on the preview marks line starts while the song plays; one time.tap on finish (DESIGN §4.11, §6.4.15). */
-MV.def('ui/tap', ['ui/dom', 'ui/icons', 'ui/keys', 'ui/selection', 'i18n/t'], (dom, I, K, S, T) => {
+/* 文字PVメーカー v2 — original work. Tap mode: Space/Enter, the tap button or a press on the preview marks line starts while the song plays; one time.tap on finish. The one-line mode re-taps a single line: it loops until the line is marked, finishes by itself after it and keeps the other lines still (DESIGN §4.11, §6.4.15; DESIGN_2_2 §5). */
+MV.def('ui/tap', ['ui/dom', 'ui/icons', 'ui/keys', 'ui/selection', 'i18n/t', 'planner/plan', 'core/timing'], (dom, I, K, S, T, PL, TM) => {
   'use strict';
 
   const { h } = dom;
@@ -67916,29 +67999,84 @@ MV.def('ui/tap', ['ui/dom', 'ui/icons', 'ui/keys', 'ui/selection', 'i18n/t'], (d
   const SEEK_STEP = 3;
   const KEY_ROWS = [['tap.mark', 'tap.keyMark'], ['tap.end', 'tap.keyEnd'], ['tap.back', 'tap.keyBack'],
     ['tap.seek', 'tap.keySeek'], ['tap.pause', 'tap.keyPause'], ['tap.finish', 'tap.keyFinish']];
+  // この行だけ打ち直す (PV22 S2): the key rows of the one-line mode (Space = 開始, E = 終わり, Backspace = 打ち直す)
+  const ONLY_ROWS = [['tap.mark', 'fld.start'], ['tap.end', 'fld.end'], ['tap.back', 'tap.keyRetry'],
+    ['tap.seek', 'tap.keySeek'], ['tap.pause', 'tap.keyPause'], ['tap.finish', 'tap.keyFinish']];
+
+  // The one-line session (PV22 S2, DESIGN_2_2 §5): before the mark playback loops from PREROLL before the line to
+  // LOOP_PAD after the later of its end and the next line's start (LOOP_MAX times, then it rewinds and stops); a jump of
+  // the clock by more than JUMP that the session did not make, or a pause, is the user taking over and ends the loop.
+  // After the mark the session ends by itself at stopAt, or END_PAD after E.
+  const ONLY = Object.freeze({ LOOP_PAD: 1.5, LOOP_MAX: 5, JUMP: 0.5, OWN_EPS: 0.05, STOP_MIN: 1, STOP_PAD: 0.5, STOP_MAX: 12,
+    END_PAD: 0.3, MOVED: 0.05, ROUNDS: 3 });
+
+  // --- the session rules, pure (tests/node/tap_session.test.js) ------------------------------------------------------
+
+  // loopAt(line, next) → the time past which the loop seeks back (line and next: plan lines; next may be null).
+  function loopAt(line, next) { return Math.max(line.t1, next ? next.t0 : line.t1) + ONLY.LOOP_PAD; }
+
+  // stopAt(m, old, nextOld) → when a session marked at m ends by itself: after the line's old length, and after the
+  // next line's old start when that is still ahead; at least STOP_MIN, at most STOP_MAX after the mark.
+  function stopAt(m, old, nextOld) {
+    return Math.min(m + ONLY.STOP_MAX, Math.max(m + ONLY.STOP_MIN, m + (old.t1 - old.t0) + ONLY.STOP_PAD,
+      nextOld !== null && nextOld > m ? nextOld + ONLY.STOP_PAD : -Infinity));
+  }
+
+  // userSeek(last, t, own) → whether the clock jumped (last → t) without the session asking for it (own: the time
+  // the session's own last seek went to, or null).
+  function userSeek(last, t, own) {
+    return last !== null && Math.abs(t - last) > ONLY.JUMP && !(own !== null && Math.abs(t - own) < ONLY.OWN_EPS);
+  }
+
+  // endShift(pins, lineId, start, oldT0, duration) → the new end pin value when the line has a paired start and end pin
+  // (a length the user set; neither a lock pin): the end moves with the start. null for a lone end, a lock pin, or an
+  // end that would come less than MIN_LEN after the start.
+  function endShift(pins, lineId, start, oldT0, duration) {
+    const sp = pins['line/' + lineId + ':start'], ep = pins['line/' + lineId + ':end'];
+    if (!sp || !ep || sp.by === 'lock' || ep.by === 'lock' || typeof ep.v !== 'number' || !Number.isFinite(ep.v)) return null;
+    const v = Math.round(Math.min(duration, ep.v + (start - oldT0)) * 100) / 100;
+    return v >= start + TM.MIN_LEN - 1e-9 ? v : null;
+  }
+
+  const TS = Object.freeze({ loopAt, stopAt, userSeek, endShift, ONLY });
 
   function mount(app) {
     const t = app.t;
     const count = h('span', { class: 'tap-count' });
+    const title = h('h2', { class: 'step-title', text: t('tap.title') });
     const nowLine = h('div', { class: 'tap-now' });
     const nextLine = h('div', { class: 'tap-next' });
     const last = h('div', { class: 'tap-last', role: 'status', 'aria-live': 'polite' });
     // For the mouse and touch: a press is a tap at the press's own time (pointerdown, not the later click). Keys never
     // reach it as a click: in tap mode Space and Enter are the tap.mark shortcut.
+    const padHint = h('span', { class: 'btn-hint', text: t('tap.padHint') });
     const pad = h('button', { class: 'btn primary tap-pad', type: 'button',
       on: { pointerdown: (ev) => { if (ev.button === 0) mark({ timeStamp: ev.timeStamp }); } } },
-    h('span', { class: 'btn-main', text: t('tap.pad') }), h('span', { class: 'btn-hint', text: t('tap.padHint') }));
-    const keys = h('dl', { class: 'tap-keys' }, KEY_ROWS.map(([cmd, label]) => [
-      h('dt', {}, K.keysFor(cmd, 'tap').map((k) => h('kbd', { text: K.display(k, { space: t('key.space'), enter: 'Enter' }) }))),
-      h('dd', { text: t(label) })]));
+    h('span', { class: 'btn-main', text: t('tap.pad') }), padHint);
+    const keys = h('dl', { class: 'tap-keys' });
+    // 前後の行を動かさない (the one-line mode; a device preference)
+    const keepBox = h('input', { type: 'checkbox', id: 'tap-keep' });
+    const keepRow = h('label', { class: 'check-row tap-keep', htmlFor: 'tap-keep', title: t('tap.keepTip'), hidden: true },
+      keepBox, h('span', { text: t('tap.keep') }));
+    keepBox.addEventListener('change', () => app.view.setPref('tapKeep', keepBox.checked));
+    const backBtn = h('button', { class: 'btn', type: 'button', text: t('tap.backBtn'), on: { click: () => back() } });
     const root = h('div', { class: 'step step-tap' },
-      h('div', { class: 'step-head' }, h('h2', { class: 'step-title', text: t('tap.title') }), h('span', { class: 'grow' }), count),
-      nowLine, nextLine, pad, last, keys,
-      h('div', { class: 'row-actions' },
-        h('button', { class: 'btn', type: 'button', text: t('tap.backBtn'), on: { click: () => back() } }),
+      h('div', { class: 'step-head' }, title, h('span', { class: 'grow' }), count),
+      nowLine, nextLine, keepRow, pad, last, keys,
+      h('div', { class: 'row-actions' }, backBtn,
         h('button', { class: 'btn primary', type: 'button', text: t('tap.finishBtn'), on: { click: () => finish() } })));
 
-    let session = null;              // { state (core/tap TapState), byId: Map<lineId, line> }
+    let session = null;              // { state (core/tap TapState), byId: Map<lineId, line>, only: OnlyState | null }
+    let keyMode = null;
+
+    function fillKeys(only) {
+      if (keyMode === only) return;
+      keyMode = only;
+      dom.replace(keys, (only ? ONLY_ROWS : KEY_ROWS).map(([cmd, label]) => [
+        h('dt', {}, K.keysFor(cmd, 'tap').map((k) => h('kbd', { text: K.display(k, { space: t('key.space'), enter: 'Enter' }) }))),
+        h('dd', { text: t(label) })]));
+    }
+    fillKeys(false);
 
     function eventTime(args) {
       const stamp = args && typeof args.timeStamp === 'number' ? args.timeStamp : null;
@@ -67948,16 +68086,18 @@ MV.def('ui/tap', ['ui/dom', 'ui/icons', 'ui/keys', 'ui/selection', 'i18n/t'], (d
 
     const lineAt = (i) => (session && i >= 0 && i < session.state.lineIds.length ? session.byId.get(session.state.lineIds[i]) : null);
 
-    // Starts at the selected line, else the line at the playhead, else line 1.
-    function start() {
+    // start() starts at the selected line, else the line at the playhead, else line 1; start({ from: lineId }) at that
+    // line (the timeline's この行からタップで合わせる); start({ only: lineId }) re-taps that one line (この行だけ打ち直す).
+    function start(opts) {
       const ls = app.plan ? app.plan.lines : [];
       if (!ls.length) return false;
-      const selLine = S.lineOfSel(S.validate(app.view.state.sel, app.plan));
+      if (opts && opts.only) return startOnly(opts.only);
+      const selLine = opts && opts.from ? opts.from : S.lineOfSel(S.validate(app.view.state.sel, app.plan));
       const tNow = app.time();
       let at = selLine ? ls.findIndex((l) => l.id === selLine) : -1;
       if (at < 0) at = ls.findIndex((l) => l.t0 <= tNow && tNow < l.t1);
       if (at < 0) at = 0;
-      session = { state: app.tapCore.tapStart(ls, ls[at].id), byId: new Map(ls.map((l) => [l.id, l])) };
+      session = { state: app.tapCore.tapStart(ls, ls[at].id), byId: new Map(ls.map((l) => [l.id, l])), only: null };
       app.pause();                   // stopped, the player takes the tap clock's length (open-ended without a song)
       if (app.goStep) app.goStep(app.view.state.step);   // the step column shows this panel: unfold it
       last.textContent = '';
@@ -67968,6 +68108,34 @@ MV.def('ui/tap', ['ui/dom', 'ui/icons', 'ui/keys', 'ui/selection', 'i18n/t'], (d
       return true;
     }
 
+    function startOnly(lineId) {
+      const ls = app.plan.lines;
+      const at = ls.findIndex((l) => l.id === lineId);
+      if (at < 0) return false;
+      const line = ls[at], next = ls[at + 1] || null;
+      app.pause();                   // before the session: stopping earlier playback is not the user pausing the loop
+      if (app.goStep) app.goStep(app.view.state.step);
+      session = {
+        state: app.tapCore.tapStart(ls, line.id, { only: true }), byId: new Map(ls.map((l) => [l.id, l])),
+        only: { lineId: line.id, n: line.index + 1, oldPlan: app.plan, old: { t0: line.t0, t1: line.t1 },
+          nextOld: next ? next.t0 : null, loopAt: loopAt(line, next), looping: true, loops: 0, last: null, own: null,
+          stopAt: Infinity, pausing: false, shown: null },
+      };
+      last.textContent = '';
+      app.view.set({ mode: 'tap' });
+      ownSeek(Math.max(0, line.t0 - PREROLL));
+      app.play();
+      update();
+      return true;
+    }
+
+    // A seek the session makes itself (the loop, 打ち直す): not the user taking over.
+    function ownSeek(x) {
+      const O = session.only;
+      O.own = x;
+      app.seek(x);
+    }
+
     function reduce(type, tt) {
       const before = session.state;
       session.state = app.tapCore.tapReduce(session.state, { type, t: tt });
@@ -67975,11 +68143,48 @@ MV.def('ui/tap', ['ui/dom', 'ui/icons', 'ui/keys', 'ui/selection', 'i18n/t'], (d
     }
 
     // The session is paused exactly while playback is stopped, however it stopped or started again (P, ▶ in the play
-    // bar, 1行戻る, the song's end): after P then ▶ the marks count again.
+    // bar, 1行戻る, the song's end): after P then ▶ the marks count again. In the one-line mode a pause the session did
+    // not make itself ends the loop.
     app.view.on((changed, st) => {
       if (!session || !changed.includes('playing')) return;
+      if (session.only && !st.playing) {
+        if (session.only.pausing) session.only.pausing = false; else session.only.looping = false;
+      }
       if (reduce(st.playing ? 'resume' : 'pause', app.player.now())) update();
     });
+
+    // The one-line session follows the clock (bus 'time': every frame while playing, and every seek and pause).
+    function tick(tt) {
+      const O = session && session.only;
+      if (!O) return;
+      if (userSeek(O.last, tt, O.own)) O.looping = false;
+      O.own = null;
+      O.last = tt;
+      if (!app.view.state.playing) return;
+      if (!app.tapCore.done(session.state)) {
+        if (!O.looping || tt <= O.loopAt) return;
+        const from = Math.max(0, O.old.t0 - PREROLL);
+        if (O.loops < ONLY.LOOP_MAX) { O.loops += 1; ownSeek(from); return; }
+        // after LOOP_MAX rounds: back to the start and stopped; ▶ tries again
+        O.loops = 0;
+        O.pausing = true;
+        app.pause();
+        ownSeek(from);
+        last.textContent = t('tap.looped');
+        return;
+      }
+      if (tt >= O.stopAt) { finish(); return; }
+      countdown(tt);
+    }
+    app.bus.on('time', tick);
+
+    function countdown(tt) {
+      const O = session.only;
+      const s = Math.max(0, Math.ceil(O.stopAt - tt));
+      if (O.shown === s) return;
+      O.shown = s;
+      nextLine.textContent = t('tap.autoEnd', { s });
+    }
 
     // While playback is stopped (▶, P, a click elsewhere) the clock stands still: a mark would give every line the same
     // time, so none is taken and the panel says why.
@@ -67993,21 +68198,38 @@ MV.def('ui/tap', ['ui/dom', 'ui/icons', 'ui/keys', 'ui/selection', 'i18n/t'], (d
       if (!session || stopped()) return;
       const s = session.state;
       const tt = eventTime(args);
-      if (reduce('mark', tt)) announce('tap.marked', lineAt(session.state.current), tt);
-      else if (!s.paused && s.cursor < s.lineIds.length) last.textContent = t('tap.tooSoon');
+      if (session.only && app.tapCore.done(s)) { last.textContent = t('tap.onlyDone'); return; }
+      if (reduce('mark', tt)) {
+        announce('tap.marked', lineAt(session.state.current), tt);
+        if (session.only) session.only.stopAt = stopAt(tt, session.only.old, session.only.nextOld);
+      } else if (!s.paused && s.cursor < s.stop) last.textContent = t('tap.tooSoon');
       update();
     }
 
     function end(args) {
       if (!session || stopped()) return;
       const tt = eventTime(args);
-      if (reduce('end', tt)) announce('tap.endMarked', lineAt(session.state.current), tt);
+      if (reduce('end', tt)) {
+        announce('tap.endMarked', lineAt(session.state.current), tt);
+        if (session.only) session.only.stopAt = tt + ONLY.END_PAD;
+      }
       update();
     }
 
-    // Backspace: forget the last line's mark and step back; playback seeks 2 s before that line.
+    // Backspace: forget the last line's mark and step back; playback seeks 2 s before that line. In the one-line mode
+    // (打ち直す) it forgets the mark and loops again from 2 s before the line.
     function back() {
-      if (!session || !reduce('back', app.player.now())) return;
+      if (!session) return;
+      if (session.only) {
+        const O = session.only;
+        reduce('back', app.player.now());
+        Object.assign(O, { stopAt: Infinity, looping: true, loops: 0, shown: null });
+        ownSeek(Math.max(0, O.old.t0 - PREROLL));
+        if (!app.view.state.playing) app.play();
+        update();
+        return;
+      }
+      if (!reduce('back', app.player.now())) return;
       const line = lineAt(session.state.cursor);
       if (line) app.seek(Math.max(0, line.t0 - PREROLL));
       if (!app.view.state.playing) app.play();
@@ -68028,6 +68250,7 @@ MV.def('ui/tap', ['ui/dom', 'ui/icons', 'ui/keys', 'ui/selection', 'i18n/t'], (d
     // Esc / T / [終わる]: one time.tap (one undo entry); nothing is recorded without marks.
     function finish() {
       if (!session) return;
+      if (session.only) { finishOnly(); return; }
       const cmd = app.tapCore.tapCommand(session.state);
       const n = cmd ? cmd.marks.length : 0;
       session = null;
@@ -68039,6 +68262,80 @@ MV.def('ui/tap', ['ui/dom', 'ui/icons', 'ui/keys', 'ui/selection', 'i18n/t'], (d
         report(cmd);
       }
       if (app.shell) app.shell.playbar.updateStrip();
+    }
+
+    // The one-line result, one undo entry 「この行を打ち直す（n行目）」: a paired end pin moved with the start, the
+    // time.tap, and (前後の行を動かさない) the start pins that keep the other automatic lines where they were.
+    function finishOnly() {
+      const O = session.only;
+      const cmd = app.tapCore.tapCommand(session.state);
+      session = null;
+      app.pause();
+      app.view.set({ mode: 'normal' });
+      if (app.shell) app.shell.playbar.updateStrip();
+      if (!cmd) return;
+      const doc = app.doc, id = O.lineId, m = cmd.marks[0];
+      const cmds = [];
+      let shifted = false;
+      if (m.start !== undefined && m.end === undefined) {
+        const v = endShift(doc.pins, id, m.start, O.old.t0, O.oldPlan.duration);
+        if (v !== null) { cmds.push({ t: 'pin.set', path: 'line/' + id + ':end', v, by: doc.pins['line/' + id + ':end'].by }); shifted = true; }
+      }
+      cmds.push(cmd);
+      const helpers = [];
+      if (app.view.state.prefs.tapKeep && m.start !== undefined) {
+        try {
+          for (let round = 0; round < ONLY.ROUNDS; round++) {
+            const trial = app.reduce(doc, { t: 'batch', cmds });
+            const after = PL.plan(trial, { registry: app.reg }).lines;
+            const add = app.tapCore.stillPins(O.oldPlan.lines, after, id, m.start)
+              .filter((x) => x.lineId !== id && !helpers.some((y) => y.lineId === x.lineId));
+            if (!add.length) break;
+            for (const x of add) {
+              cmds.push({ t: 'pin.set', path: 'line/' + x.lineId + ':start', v: x.start, by: 'user' });
+              helpers.push(x);
+            }
+          }
+        } catch (e) { /* a trial that cannot be planned: no helper pins */ }
+      }
+      const endBefore = doc.pins['line/' + id + ':end'];
+      app.store.seal();
+      app.batch({ label: ['undo.tapLine', { n: O.n }] }, cmds);
+      const cleared = !shifted && !!endBefore && !app.doc.pins['line/' + id + ':end'];
+      reportOnly(O, helpers, shifted, cleared);
+    }
+
+    function reportOnly(O, helpers, shifted, cleared) {
+      const p = app.plan;
+      const now = new Map((p ? p.lines : []).map((l) => [l.id, l]));
+      const kept = new Set(helpers.map((x) => x.lineId));
+      const moved = O.oldPlan.lines.filter((l) => l.id !== O.lineId && !kept.has(l.id) && l.by && l.by.start === 'auto' &&
+        now.has(l.id) && Math.abs(now.get(l.id).t0 - l.t0) >= ONLY.MOVED).length;
+      const num = (lineId) => (now.has(lineId) ? now.get(lineId).index + 1 : null);
+      const parts = [t('tap.lineDone', { n: O.n })];
+      if (helpers.length) {
+        const list = helpers.map((x) => num(x.lineId)).filter((n) => n !== null).join(t('list.sep'));
+        parts.push(t('tap.lineKeptList', { list, n: helpers.length }));
+      }
+      if (moved) parts.push(t('tap.lineMoved', { m: moved }));
+      if (shifted) parts.push(t('tap.endShifted'));
+      if (cleared) parts.push(t('tap.endCleared'));
+      const line = now.get(O.lineId);
+      const from = line ? Math.max(0, line.t0 - PREROLL) : null;
+      if (from !== null) app.seek(from);
+      const action = from === null ? null : { label: t('tap.check'), run: () => { app.seek(from); app.play(); } };
+      const actions = helpers.length ? [{ label: t('tap.unpinHelpers'), run: () => unpinHelpers(helpers) }] : [];
+      app.toast(parts.join(app.lang === 'ja' ? '' : ' '), { kind: moved ? 'warn' : 'ok', action, actions });
+    }
+
+    // ほかの行の固定を外す: one undo entry removing the helper pins that are still as the re-tap left them.
+    function unpinHelpers(helpers) {
+      const pins = app.doc.pins;
+      const cmds = helpers.filter((x) => {
+        const pin = pins['line/' + x.lineId + ':start'];
+        return pin && pin.by === 'user' && pin.v === x.start;
+      }).map((x) => ({ t: 'pin.clear', path: 'line/' + x.lineId + ':start' }));
+      if (cmds.length) app.batch({ label: ['undo.unpinHelpers', { n: cmds.length }] }, cmds);
     }
 
     // After the command, from the new plan: how many marked starts the timing really uses (a mark earlier than a pin or
@@ -68078,27 +68375,48 @@ MV.def('ui/tap', ['ui/dom', 'ui/icons', 'ui/keys', 'ui/selection', 'i18n/t'], (d
 
     function update() {
       if (!session) return;
-      count.textContent = t('tap.progress', position());
-      const cur = lineAt(session.state.current);
-      const nxt = lineAt(session.state.cursor);
-      nowLine.textContent = cur ? cur.text : t('tap.ready');
-      nextLine.textContent = nxt ? t('tap.nextLine', { text: nxt.text }) : t('tap.allMarked');
-      pad.disabled = !nxt;
+      const O = session.only;
+      fillKeys(!!O);
+      title.textContent = t(O ? 'tap.onlyTitle' : 'tap.title');
+      count.hidden = !!O;
+      keepRow.hidden = !O;
+      padHint.hidden = !!O;
+      backBtn.textContent = t(O ? 'tap.keyRetry' : 'tap.backBtn');
+      if (O) {
+        keepBox.checked = !!app.view.state.prefs.tapKeep;
+        const line = session.byId.get(O.lineId);
+        const marked = app.tapCore.done(session.state);
+        nowLine.textContent = line ? line.text : '';
+        O.shown = null;
+        if (marked) countdown(app.time()); else nextLine.textContent = t('tap.onlyHint');
+        pad.disabled = marked;
+      } else {
+        count.textContent = t('tap.progress', position());
+        const cur = lineAt(session.state.current);
+        const nxt = lineAt(session.state.cursor);
+        nowLine.textContent = cur ? cur.text : t('tap.ready');
+        nextLine.textContent = nxt ? t('tap.nextLine', { text: nxt.text }) : t('tap.allMarked');
+        pad.disabled = !nxt;
+      }
       root.classList.toggle('is-paused', !!session.state.paused);
+      root.classList.toggle('is-only', !!O);
       if (app.shell) app.shell.playbar.updateStrip();
     }
 
-    // The play-bar mode strip while tapping: 「タップ中 12/40 [1行戻る] [終わる]」.
+    // The play-bar mode strip while tapping: 「タップ中 12/40 [1行戻る] [終わる]」; one line: 「この行だけ打ち直す
+    // [打ち直す] [終わる]」.
     function strip() {
       if (!session) return null;
-      return { kind: 'tap', text: t('tap.strip', position()),
-        actions: [{ label: t('tap.backBtn'), run: () => back() }, { label: t('tap.finishBtn'), run: () => finish() }] };
+      const O = session.only;
+      return { kind: 'tap', text: O ? t('tap.onlyTitle') : t('tap.strip', position()),
+        actions: [{ label: t(O ? 'tap.keyRetry' : 'tap.backBtn'), run: () => back() }, { label: t('tap.finishBtn'), run: () => finish() }] };
     }
 
-    return { root, start, mark, end, back, seekBy, pause, finish, cancel, strip, active: () => !!session, update };
+    return { root, start, mark, end, back, seekBy, pause, finish, cancel, strip, active: () => !!session,
+      only: () => (session && session.only ? session.only.lineId : null), update };
   }
 
-  return { mount, PREROLL };
+  return { mount, PREROLL, TS };
 });
 /* 文字PVメーカー v2 — original work. Timeline drawer: beat / song / line / cut rows, drags that write time pins, zoom, snap, keyboard nudges, a11y proxies, area bands and key diamonds (DESIGN §6.4.13; DESIGN_2_1 §6.7, §6.8). */
 MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/t', 'core/paths', 'core/doc', 'planner/areas',
@@ -68638,9 +68956,32 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
       ]);
     }
 
+    // A line's menu (PV22 S2): この行だけタップで打ち直す, この行からタップで合わせる, and 開始の固定を外す while the start is
+    // pinned (not by a lock).
+    function lineMenu(line, at) {
+      if (!app.menus || !line) return;
+      const path = 'line/' + line.id + ':start';
+      const pin = app.doc.pins[path];
+      const items = [
+        { label: t('tl.lineMenu.retap'), disabled: !app.actions.has('tap.line'), run: () => app.actions.run('tap.line', { lineId: line.id, from: 'timeline' }) },
+        { label: t('tl.lineMenu.tapFrom'), run: () => { if (app.tap) app.tap.start({ from: line.id }); } },
+      ];
+      if (pin && pin.by !== 'lock' && !app.doc.locks[line.id]) {
+        items.push({ label: t('tl.lineMenu.unpinStart'), run: () => app.dispatch({ t: 'pin.clear', path }, { label: ['undo.unpin', {}] }) });
+      }
+      app.menus.context(at, items);
+    }
+
+    // The point under a line's block, for the keyboard's menu key.
+    function linePoint(line) {
+      const r = canvas.getBoundingClientRect(), rr = rows();
+      return { clientX: r.left + Math.min(W - 4, Math.max(0, xOf(line.t0)) + 8), clientY: r.top + (rr.line[0] + rr.line[1]) / 2 };
+    }
+
     canvas.addEventListener('contextmenu', (ev) => {
       const pt = localPoint(ev);
       const hit = hitAt(pt.x, pt.y);
+      if (hit.row === 'line' && hit.line) { ev.preventDefault(); lineMenu(hit.line, ev); return; }
       if (!hit.band) return;
       ev.preventDefault();
       bandMenu(hit.band, ev);
@@ -68786,6 +69127,8 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
         focus = { lineId: lines[at].id, edge: ev.key === 'ArrowLeft' ? 'start' : 'end', band: null };
       } else if (ev.key === 'Enter') {
         app.select({ level: 'line', ids: [lines[at].id] }, { from: 'timeline', open: true });
+      } else if (ev.key === 'ContextMenu' || (ev.key === 'F10' && ev.shiftKey)) {
+        lineMenu(lines[at], linePoint(lines[at]));
       } else handled = false;
       if (handled) { ev.preventDefault(); ev.stopPropagation(); renderProxy(); draw(); }
     });
@@ -69759,6 +70102,7 @@ MV.def('ui/view', ['ui/layout', 'ui/selection'], (L, S) => {
     hintOmakase: true,        // the first-time おまかせ hint is still to be shown
     hintStacked: true,        // the one-time narrow-window note is still to be shown
     hintExtreme: true,        // the EXTREME motion-sickness notice is still shown (次から表示しない turns it off, §3.5)
+    tapKeep: true,            // この行だけ打ち直す: 前後の行を動かさない (PV22 S2)
   });
 
   // Whether the preview sound is off: the stored preference, or the one-off first-run autoplay mute.
@@ -73728,7 +74072,12 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
         }
         if (mine.some((w) => w.code === 'time-compressed')) kids.push(h('p', { class: 'note subtle', 'data-note': 'squeezed', text: t('insp.squeezed') }));
         if (mine.some((w) => w.code === 'piece-merged')) kids.push(h('p', { class: 'note subtle', 'data-note': 'merged', text: t('insp.merged') }));
-        return kids.length ? h('div', { class: 'insp-note insp-time-tools' }, kids) : null;
+        // この行だけタップで打ち直す (PV22 S2), also the too-fast note's re-tap fix
+        kids.push(h('div', { class: 'row-actions' }, h('button', { class: 'chip-btn', type: 'button', 'data-act': 'tap.line',
+          disabled: !app.actions.has('tap.line'), title: t('tap.lineBtnHint'),
+          on: { click: () => app.actions.run('tap.line', { lineId: line.id, from: 'inspector' }) } }, I.icon('tap', { size: 14 }), t('tap.lineBtn'))));
+        kids.push(h('p', { class: 'note subtle', text: t('tap.lineBtnHint') }));
+        return h('div', { class: 'insp-note insp-time-tools' }, kids);
       },
       // 画面効果 under グリーンバック / 黒 / 透明 (§4.19.4, §6.4.8): the mode's rule, and the effects of this scope it leaves out.
       backdropNote(ctx) {
@@ -74904,6 +75253,19 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
     def('look.paste', () => pasteLook(app), { enabled: () => !!app.clipboard });
 
     def('tap.start', () => app.tap.start(), { enabled: hasLines });
+    // この行だけタップで打ち直す (PV22 S2): the given line, else the selected one, else the line at the playhead
+    const lineForTap = (a) => {
+      if (a && a.lineId && app.plan && app.plan.lines.some((l) => l.id === a.lineId)) return a.lineId;
+      const ids = selLines();
+      if (ids.length === 1) return ids[0];
+      const now = app.time();
+      const at = app.plan ? app.plan.lines.find((l) => l.t0 <= now && now < l.t1) : null;
+      return at ? at.id : null;
+    };
+    def('tap.line', (c, a) => {
+      const id = lineForTap(a);
+      return id ? app.tap.start({ only: id }) : false;
+    }, { enabled: () => hasLines() && !!lineForTap(null) });
     def('tap.mark', (c, a) => app.tap.mark(a));
     def('tap.end', (c, a) => app.tap.end(a));
     def('tap.back', () => app.tap.back());

@@ -794,6 +794,19 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
     def('look.paste', () => pasteLook(app), { enabled: () => !!app.clipboard });
 
     def('tap.start', () => app.tap.start(), { enabled: hasLines });
+    // この行だけタップで打ち直す (PV22 S2): the given line, else the selected one, else the line at the playhead
+    const lineForTap = (a) => {
+      if (a && a.lineId && app.plan && app.plan.lines.some((l) => l.id === a.lineId)) return a.lineId;
+      const ids = selLines();
+      if (ids.length === 1) return ids[0];
+      const now = app.time();
+      const at = app.plan ? app.plan.lines.find((l) => l.t0 <= now && now < l.t1) : null;
+      return at ? at.id : null;
+    };
+    def('tap.line', (c, a) => {
+      const id = lineForTap(a);
+      return id ? app.tap.start({ only: id }) : false;
+    }, { enabled: () => hasLines() && !!lineForTap(null) });
     def('tap.mark', (c, a) => app.tap.mark(a));
     def('tap.end', (c, a) => app.tap.end(a));
     def('tap.back', () => app.tap.back());

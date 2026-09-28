@@ -585,3 +585,21 @@ test('v2.1 output: formats kit and webmAlpha; output.set kit takes the whole obj
   assert.deepEqual(D.validate(raw), [], 'and still validates (normalize fills it)');
   assert.deepEqual(reduce(raw, { t: 'output.set', key: 'kit', v: kit }).output.kit, kit);
 });
+
+// PV22 S2 (DESIGN_2_2 §5): a tapped start with no end drops an end pin that now comes before start + MIN_LEN (0.2 s);
+// a lock pin stays, and a mark with both start and end sets both.
+test('time.tap: a stale end pin (before the new start + 0.2 s) is removed; lock pins and later ends stay', () => {
+  const base = fresh('basic');
+  const withEnd = (v, by) => Object.assign({}, base, { pins: Object.assign({}, base.pins, { 'line/r4:end': { v, by: by || 'user' } }) });
+  const tap = (doc, start, end) => reduce(doc, { t: 'time.tap', marks: [Object.assign({ lineId: 'r4', start }, end === undefined ? {} : { end })] });
+  assert.equal(tap(withEnd(10.5), 11).pins['line/r4:end'], undefined, 'an end before the start');
+  assert.deepEqual(tap(withEnd(12), 11).pins['line/r4:end'], { v: 12, by: 'user' }, 'a later end stays');
+  assert.equal(tap(withEnd(11.1), 11).pins['line/r4:end'], undefined, 'an end less than 0.2 s after the start');
+  assert.deepEqual(tap(withEnd(11.2), 11).pins['line/r4:end'], { v: 11.2, by: 'user' }, 'exactly 0.2 s after stays');
+  assert.deepEqual(tap(withEnd(10.5, 'lock'), 11).pins['line/r4:end'], { v: 10.5, by: 'lock' }, 'a lock pin stays');
+  const both = tap(withEnd(10.5), 11, 13);
+  assert.deepEqual([both.pins['line/r4:start'], both.pins['line/r4:end']], [{ v: 11, by: 'tap' }, { v: 13, by: 'tap' }]);
+  // other lines' end pins are not touched
+  const other = reduce(withEnd(10.5), { t: 'time.tap', marks: [{ lineId: 'r5', start: 11 }] });
+  assert.deepEqual(other.pins['line/r4:end'], { v: 10.5, by: 'user' });
+});

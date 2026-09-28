@@ -203,5 +203,5 @@ MV.def('core/timing', ['core/pins', 'core/script', 'core/num', 'core/beats'], (P
     }
   }
 
-  return { solveTimes, readRateOf, TIMING_DEFAULTS };
+  return { solveTimes, readRateOf, TIMING_DEFAULTS, MIN_LEN };
 });

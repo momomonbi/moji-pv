@@ -21,6 +21,7 @@ MV.def('ui/view', ['ui/layout', 'ui/selection'], (L, S) => {
     hintOmakase: true,        // the first-time おまかせ hint is still to be shown
     hintStacked: true,        // the one-time narrow-window note is still to be shown
     hintExtreme: true,        // the EXTREME motion-sickness notice is still shown (次から表示しない turns it off, §3.5)
+    tapKeep: true,            // この行だけ打ち直す: 前後の行を動かさない (PV22 S2)
   });
 
   // Whether the preview sound is off: the stored preference, or the one-off first-run autoplay mute.

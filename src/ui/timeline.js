@@ -536,9 +536,32 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
       ]);
     }
 
+    // A line's menu (PV22 S2): この行だけタップで打ち直す, この行からタップで合わせる, and 開始の固定を外す while the start is
+    // pinned (not by a lock).
+    function lineMenu(line, at) {
+      if (!app.menus || !line) return;
+      const path = 'line/' + line.id + ':start';
+      const pin = app.doc.pins[path];
+      const items = [
+        { label: t('tl.lineMenu.retap'), disabled: !app.actions.has('tap.line'), run: () => app.actions.run('tap.line', { lineId: line.id, from: 'timeline' }) },
+        { label: t('tl.lineMenu.tapFrom'), run: () => { if (app.tap) app.tap.start({ from: line.id }); } },
+      ];
+      if (pin && pin.by !== 'lock' && !app.doc.locks[line.id]) {
+        items.push({ label: t('tl.lineMenu.unpinStart'), run: () => app.dispatch({ t: 'pin.clear', path }, { label: ['undo.unpin', {}] }) });
+      }
+      app.menus.context(at, items);
+    }
+
+    // The point under a line's block, for the keyboard's menu key.
+    function linePoint(line) {
+      const r = canvas.getBoundingClientRect(), rr = rows();
+      return { clientX: r.left + Math.min(W - 4, Math.max(0, xOf(line.t0)) + 8), clientY: r.top + (rr.line[0] + rr.line[1]) / 2 };
+    }
+
     canvas.addEventListener('contextmenu', (ev) => {
       const pt = localPoint(ev);
       const hit = hitAt(pt.x, pt.y);
+      if (hit.row === 'line' && hit.line) { ev.preventDefault(); lineMenu(hit.line, ev); return; }
       if (!hit.band) return;
       ev.preventDefault();
       bandMenu(hit.band, ev);
@@ -684,6 +707,8 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
         focus = { lineId: lines[at].id, edge: ev.key === 'ArrowLeft' ? 'start' : 'end', band: null };
       } else if (ev.key === 'Enter') {
         app.select({ level: 'line', ids: [lines[at].id] }, { from: 'timeline', open: true });
+      } else if (ev.key === 'ContextMenu' || (ev.key === 'F10' && ev.shiftKey)) {
+        lineMenu(lines[at], linePoint(lines[at]));
       } else handled = false;
       if (handled) { ev.preventDefault(); ev.stopPropagation(); renderProxy(); draw(); }
     });
