@@ -23,6 +23,9 @@ MV.def('core/registry', ['core/schema', 'core/color', 'core/hash'], (S, C, H) =>
   const MINE_KEY = /^(?:myMat[0-9a-z]+|myMed[0-9a-f]{10})$/;
   const MINE_PREFIX = /^my(?:Mat|Med)/;
   const CAM_VALUES = Object.freeze(['any', 'gentle', 'none']);
+  // Opt-in pools (DESIGN_2_2 §4): a pool: false definition with `optIn` joins an automatic pool only when the caller
+  // passes the same name in `opts.optIn` (the planner does so where the document's switch allows it).
+  const OPT_INS = Object.freeze(['weight']);
   const KEY_MAX = 32;                         // PARTKEY of the slot path grammar (§3.4): a longer key could not be pinned
   const PARAM = /^[a-z][A-Za-z0-9]{0,31}$/;
   const RESERVED_PARAMS = Object.freeze({ ornament: ['count'], filter: ['count'] });
@@ -163,6 +166,13 @@ MV.def('core/registry', ['core/schema', 'core/color', 'core/hash'], (S, C, H) =>
     if (def.gate !== undefined && !AMOUNT_KEYS.includes(def.gate)) bad('gate must be an amount key');
     if (def.needs !== undefined && !isList(def.needs, NEEDS)) bad('needs must list only ' + NEEDS.join(' '));
     if (def.traits !== undefined) checkTraits(def.traits, bad);
+    // v2.2 (DESIGN_2_2 §4.1): a late definition is left out of registry.version; it is never in an automatic pool
+    // except through an opt-in, so only a pin, a planner rule or an opted-in pool can reach a plan.
+    if (def.late !== undefined && def.late !== true) bad('late must be true when present');
+    if (def.late === true && def.pool !== false) bad('a late definition must be pool: false');
+    if (def.late === true && def.fallback === true) bad('a late definition cannot be the fallback');
+    if (def.optIn !== undefined && !OPT_INS.includes(def.optIn)) bad('optIn must be one of ' + OPT_INS.join(' '));
+    if (def.optIn !== undefined && def.pool !== false) bad('optIn is only for pool: false definitions');
   }
 
   function checkTraits(t, bad) {
@@ -260,6 +270,11 @@ MV.def('core/registry', ['core/schema', 'core/color', 'core/hash'], (S, C, H) =>
       const r = def.replaces;
       if (r !== undefined && !(isObject(r) && Object.keys(r).every((k) => (k === 'depart' || k === 'arrive') &&
           typeof r[k] === 'boolean'))) bad('replaces must be { depart?, arrive? } booleans');
+      // v2.2 glyph seams (DESIGN_2_2 §4): the planner writes the letter correspondence into the seam entry
+      if (def.glyphs !== undefined && def.glyphs !== true) bad('glyphs must be true when present');
+      if (def.glyphs === true && def.scope !== 'text') bad('glyphs needs scope text');
+      if (def.share !== undefined && !(isNumber(def.share) && def.share > 0 && def.share <= 0.5)) bad('share must be in (0, 0.5]');
+      if (def.ends !== undefined && typeof def.ends !== 'boolean') bad('ends must be a boolean');
     },
     theme: checkTheme,
     mood: checkMood,
@@ -372,6 +387,7 @@ MV.def('core/registry', ['core/schema', 'core/color', 'core/hash'], (S, C, H) =>
     const defsOf = new Map();
     const params = new Map();
     const signature = [];
+    const lateSig = [];
     for (const kind of KINDS) {
       const keys = [...byKind.get(kind).keys()].sort(compare);
       keysOf.set(kind, Object.freeze(keys));
@@ -379,17 +395,22 @@ MV.def('core/registry', ['core/schema', 'core/color', 'core/hash'], (S, C, H) =>
       for (const key of keys) {
         const def = byKind.get(kind).get(key);
         params.set(kind + '/' + key, paramListOf(def));
-        signature.push([kind, key, Object.keys(def.params || {}).sort(compare)]);
+        // A late definition (v2.2) is signed apart, so adding one keeps `version` and every fingerprint made from it.
+        (def.late === true ? lateSig : signature).push([kind, key, Object.keys(def.params || {}).sort(compare)]);
       }
     }
     const version = H.hashJSON(signature);
     return makeRegistry({
-      keysOf, defsOf, params, version, problems,
+      keysOf, defsOf, params, version, problems, lateSig: deepFreeze(lateSig),
       get: (kind, key) => { const m = byKind.get(kind); return (m && m.get(key)) || null; },
       baseParams: () => null,
       extras: { base: null, baseVersion: version, extra: Object.freeze({}), mine: () => NO_KEYS },
     });
   }
+
+  // lateVersion: `version` plus the signature of the late definitions (DESIGN_2_2 §4.1). Used only by the golden that
+  // shows the late parts; never a cache key.
+  function lateVersionOf(version, lateSig) { return lateSig.length ? H.hashJSON([version, lateSig]) : version; }
 
   const NO_KEYS = Object.freeze([]);
 
@@ -417,7 +438,8 @@ MV.def('core/registry', ['core/schema', 'core/color', 'core/hash'], (S, C, H) =>
       if (!def || !def.blurb) return '';
       return (lang === 'en' ? def.blurb.en : def.blurb.ja) || '';
     }
-    // Keys eligible for AUTO picks, sorted. opts: { role, season, filters, orient, script, aspect, scope, texture, amounts }
+    // Keys eligible for AUTO picks, sorted. opts: { role, season, filters, orient, script, aspect, scope, texture, amounts,
+    // optIn } — `optIn` (a list of OPT_INS names) also admits the pool: false definitions that opt in by that name.
     function pool(kind, opts) {
       const o = opts || {};
       const f = o.filters && o.filters[kind];
@@ -426,7 +448,7 @@ MV.def('core/registry', ['core/schema', 'core/color', 'core/hash'], (S, C, H) =>
       const out = [];
       for (const def of defsOf.get(kind) || []) {
         const key = def.key;
-        if (def.pool === false) continue;
+        if (def.pool === false && !(o.optIn && def.optIn !== undefined && o.optIn.includes(def.optIn))) continue;
         if (only && !only.includes(key)) continue;
         if (deny && deny.includes(key)) continue;
         if (!seasonOk(def.season, o.season)) continue;
@@ -437,12 +459,16 @@ MV.def('core/registry', ['core/schema', 'core/color', 'core/hash'], (S, C, H) =>
       }
       return out;
     }
-    return Object.freeze(Object.assign({
+    const lateSig = src.lateSig || NO_KEYS;
+    const out = Object.assign({
       version: src.version, problems: Object.freeze(src.problems.slice()),
       get, has: (kind, key) => get(kind, key) !== null, keys, all, pool, fallback, label, blurb,
       params: (kind, key) => params.get(kind + '/' + key) || src.baseParams(kind, key) || null,
       traits: (kind, key) => { const d = get(kind, key); return d ? traitsOf(d) : null; },
-    }, src.extras));
+      lateVersion: lateVersionOf(src.version, lateSig),
+    }, src.extras);
+    Object.defineProperty(out, 'lateSig', { value: lateSig, enumerable: false });
+    return Object.freeze(out);
   }
 
   // What the planner reads from a definition, so a change to it changes an extended registry's version (§3.6).
@@ -525,6 +551,7 @@ MV.def('core/registry', ['core/schema', 'core/color', 'core/hash'], (S, C, H) =>
     }
     return makeRegistry({
       keysOf, defsOf, params, version: H.hashJSON([baseVersion, signature]), problems: problems.concat(own),
+      lateSig: base.lateSig || NO_KEYS,
       get: (kind, key) => { const m = added.get(kind); return (m && m.get(key)) || base.get(kind, key); },
       baseParams: (kind, key) => base.params(kind, key),
       extras: { base, baseVersion, extra: Object.freeze(extra), mine: (kind) => mineOf.get(kind) || NO_KEYS },
@@ -543,6 +570,6 @@ MV.def('core/registry', ['core/schema', 'core/color', 'core/hash'], (S, C, H) =>
 
   return {
     KINDS, PART_KINDS, TAGS, AMOUNT_KEYS, SEASONS, ROLES, NEEDS, STAGES, TEXT_STYLES, TRAIT_DEFAULTS, SHARED,
-    CAM_VALUES, MINE_KEY, RegistryError, createRegistry, checkDef, extend,
+    CAM_VALUES, MINE_KEY, OPT_INS, RegistryError, createRegistry, checkDef, extend,
   };
 });

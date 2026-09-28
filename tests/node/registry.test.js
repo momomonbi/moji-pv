@@ -437,3 +437,76 @@ test('extend: a frozen definition is checked and hashed once; an unfrozen one ag
   open.mine = undefined;
   assert.match(R.extend(base, [open]).problems.join('\n'), /ornament\/myMat6: mine must be an object/);
 });
+
+// --- v2.2 (DESIGN_2_2 §4): late definitions, opt-in pools, glyph seam fields ---------------------------------------
+
+// The catalog's registry version is part of every fingerprint and every golden: late parts must keep it.
+test('v2.2: the catalog registry version stays 83c7523d (late parts are signed apart)', () => {
+  const reg = MV.use('parts/catalog').defaultRegistry();
+  assert.equal(reg.version, '83c7523d');
+  const late = reg.all().filter((d) => d.late === true);
+  if (late.length) {
+    assert.notEqual(reg.lateVersion, reg.version, 'lateVersion shows the late parts');
+    for (const d of late) assert.equal(d.pool, false, d.key);
+  } else assert.equal(reg.lateVersion, reg.version);
+});
+
+function lateStub(patch) {
+  const fade = corpus.allStubParts().find((d) => d.key === 'stubFade');
+  return Object.assign({}, fade, { key: 'stubLate', label: { ja: '遅', en: 'Late' }, pool: false, late: true }, patch || {});
+}
+
+test('v2.2: a late definition keeps registry.version; its params show only in lateVersion', () => {
+  const base = corpus.stubRegistry(MV);
+  const withLate = R.createRegistry(corpus.allStubParts().concat([lateStub()]));
+  assert.deepEqual(withLate.problems, []);
+  assert.ok(withLate.has('arrive', 'stubLate'));
+  assert.equal(withLate.version, base.version, 'a late part does not change the version');
+  assert.equal(base.lateVersion, base.version, 'no late parts: lateVersion = version');
+  assert.notEqual(withLate.lateVersion, withLate.version);
+  const spec = { type: 'num', min: 0, max: 1, label: { ja: 'あ', en: 'A' }, auto: { value: 0 } };
+  const withParam = R.createRegistry(corpus.allStubParts().concat([lateStub({ params: { lift: spec } })]));
+  assert.equal(withParam.version, base.version);
+  assert.notEqual(withParam.lateVersion, withLate.lateVersion, 'a late part param changes lateVersion');
+  // extend (materials): the base version and the late signature carry over
+  const ext = R.extend(withLate, [mat('ornament', 'myMat3')]);
+  assert.equal(ext.baseVersion, withLate.version);
+  assert.notEqual(ext.lateVersion, withLate.lateVersion, 'an extended registry has its own lateVersion');
+  assert.notEqual(ext.lateVersion, ext.version);
+  assert.equal(R.extend(base, [mat('ornament', 'myMat3')]).lateVersion, R.extend(base, [mat('ornament', 'myMat3')]).version);
+  assert.ok(!Object.keys(withLate).includes('lateSig'), 'lateSig is not enumerable');
+});
+
+test('v2.2: late and optIn validation', () => {
+  expectProblem('arrive', 'stubFade', (d) => { d.late = false; d.pool = false; }, 'late must be true');
+  expectProblem('arrive', 'stubFade', (d) => { d.late = true; }, 'a late definition must be pool: false');
+  expectProblem('arrive', 'instantShow', (d) => { d.late = true; d.pool = false; }, 'cannot be the fallback');
+  expectProblem('arrive', 'stubFade', (d) => { d.optIn = 'color'; d.pool = false; }, 'optIn must be one of weight');
+  expectProblem('arrive', 'stubFade', (d) => { d.optIn = 'weight'; }, 'optIn is only for pool: false');
+  assert.deepEqual(problemsWith('arrive', 'stubFade', (d) => { d.late = true; d.pool = false; d.optIn = 'weight'; }), []);
+});
+
+test('v2.2: opt-in pools admit a pool: false definition only for its own opt-in name', () => {
+  const defs = corpus.allStubParts().concat([lateStub({ optIn: 'weight' }), lateStub({ key: 'stubPinOnly' })]);
+  const reg = R.createRegistry(defs);
+  assert.deepEqual(reg.problems, []);
+  assert.ok(!reg.pool('arrive', {}).includes('stubLate'), 'no opt-in: not pooled');
+  assert.ok(!reg.pool('arrive', { optIn: [] }).includes('stubLate'));
+  assert.ok(reg.pool('arrive', { optIn: ['weight'] }).includes('stubLate'), 'opt-in: pooled');
+  assert.ok(!reg.pool('arrive', { optIn: ['weight'] }).includes('stubPinOnly'), 'pool: false without optIn stays out');
+  assert.deepEqual(reg.pool('arrive', { optIn: ['weight'] }).filter((k) => k !== 'stubLate'), reg.pool('arrive', {}));
+  // the other pool filters still apply to an opted-in definition
+  assert.ok(!reg.pool('arrive', { optIn: ['weight'], role: 'outro' }).includes('stubLate'));
+  assert.ok(!reg.pool('arrive', { optIn: ['weight'], filters: { arrive: { deny: ['stubLate'] } } }).includes('stubLate'));
+});
+
+test('v2.2: glyph seam fields (glyphs, share, ends)', () => {
+  expectProblem('seam', 'stubCross', (d) => { d.glyphs = 1; }, 'glyphs must be true');
+  expectProblem('seam', 'stubCross', (d) => { d.glyphs = true; d.scope = 'world'; }, 'glyphs needs scope text');
+  expectProblem('seam', 'stubCross', (d) => { d.share = 0.7; }, 'share must be in (0, 0.5]');
+  expectProblem('seam', 'stubCross', (d) => { d.share = 0; }, 'share must be in (0, 0.5]');
+  expectProblem('seam', 'stubCross', (d) => { d.ends = 'yes'; }, 'ends must be a boolean');
+  assert.deepEqual(problemsWith('seam', 'stubCross', (d) => {
+    d.glyphs = true; d.scope = 'text'; d.share = 0.5; d.ends = true;
+  }), []);
+});

@@ -139,7 +139,8 @@ MV.def('ui/palette', ['ui/dom', 'ui/icons', 'ui/keys', 'ui/selection', 'i18n/str
           if (kw && !kindHay.includes(kw)) continue;
           for (const key of reg.keys(kind)) {
             const def = reg.get(kind, key);
-            if (def.pool === false || (kind === 'ornament' && def.scope === 'run')) continue;
+            // late parts (v2.2) are pool: false yet meant to be pinned like any part
+            if ((def.pool === false && def.late !== true) || (kind === 'ornament' && def.scope === 'run')) continue;
             if (pw && !norm([def.label.ja, def.label.en, key].join(' ')).includes(pw)) continue;
             out.push({ text: t('pal.pin', { kind: kindText, part: app.label(kind, key) }), run: () => pinPart(kind, key) });
             if (out.length >= LIMIT) return out;

@@ -599,19 +599,23 @@ MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output', 'ui/media_widgets'
 
   // --- filters ("use only these", §6.4.5 部品) -------------------------------------------------------------------------
 
+  // A part the automatic picks may use: pooled, or opted in to a pool by a switch (v2.2 weight parts), so
+  // 「これだけ使う／使わない」 can switch it off alone.
+  function pooled(def) { return def.pool !== false || def.optIn !== undefined; }
+
   function filterOf(app, kind) {
     const f = app.doc.filters[kind];
     return { only: f && Array.isArray(f.only) ? f.only.slice() : null, deny: f && Array.isArray(f.deny) ? f.deny.slice() : null };
   }
 
   function counts(app, kind) {
-    const keys = keysFor(app.reg, kind).filter((k) => app.reg.get(kind, k).pool !== false);
+    const keys = keysFor(app.reg, kind).filter((k) => pooled(app.reg.get(kind, k)));
     const f = app.doc.filters[kind] || null;
     return { on: keys.filter((k) => allowedBy(f, k)).length, total: keys.length };
   }
 
   function normalize(app, kind, f) {
-    const keys = keysFor(app.reg, kind).filter((k) => app.reg.get(kind, k).pool !== false);
+    const keys = keysFor(app.reg, kind).filter((k) => pooled(app.reg.get(kind, k)));
     let only = f.only && f.only.length ? [...new Set(f.only)].sort() : null;
     let deny = f.deny && f.deny.length ? [...new Set(f.deny)].sort() : null;
     if (only && keys.every((k) => only.includes(k))) only = null;
@@ -623,7 +627,7 @@ MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output', 'ui/media_widgets'
   // The last usable part of a kind never goes: 「少なくとも1つは使います」 (§3.8, §6.11).
   function setFilter(app, kind, next) {
     const f = normalize(app, kind, next);
-    const keys = keysFor(app.reg, kind).filter((k) => app.reg.get(kind, k).pool !== false);
+    const keys = keysFor(app.reg, kind).filter((k) => pooled(app.reg.get(kind, k)));
     if (!keys.some((k) => allowedBy(f, k))) { app.toast(app.t('pb.keepOne'), { kind: 'warn' }); return false; }
     app.dispatch({ t: 'filter.set', kind, only: f.only, deny: f.deny }, { label: ['undo.filter', { kind: app.t('kind.' + kind) }] });
     return true;
@@ -643,7 +647,7 @@ MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output', 'ui/media_widgets'
 
   function presetOf(app, kind, preset) {
     const reg = app.reg;
-    const keys = keysFor(reg, kind).filter((k) => reg.get(kind, k).pool !== false);
+    const keys = keysFor(reg, kind).filter((k) => pooled(reg.get(kind, k)));
     if (preset === 'all') return { only: null, deny: null };
     if (preset === 'mood') {
       const mood = app.plan && app.plan.look ? reg.get('mood', app.plan.look.mood.v) : null;
@@ -668,7 +672,7 @@ MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output', 'ui/media_widgets'
     const count = h('div', { class: 'pb-count', role: 'status' });
     const grid = h('div', { class: 'pb-grid is-filter', role: 'group', 'aria-label': t('kind.' + kind) });
     const el = h('div', { class: 'pb-page' }, h('p', { class: 'note subtle', text: t('pb.filterHelp') }), presets, search, seasons, count, grid);
-    const keys = keysFor(reg, kind).filter((k) => reg.get(kind, k).pool !== false);
+    const keys = keysFor(reg, kind).filter((k) => pooled(reg.get(kind, k)));
     const hasSeasons = keys.some((k) => reg.get(kind, k).season);
 
     function render() {

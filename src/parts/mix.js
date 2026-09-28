@@ -1114,7 +1114,8 @@ MV.def('parts/mix', ['core/num', 'core/hash', 'core/rng', 'core/noise', 'core/cu
   // shared specs (as the base narrows them).
   function variantDef(kind, recipe, base, fields, probs) {
     const baseDef = base.get(kind, recipe.base);
-    if (!baseDef) { probs.push(problem('base', 'no-base', { key: recipe.base })); return null; }
+    // A late part (v2.2, DESIGN_2_2 §4.1) is never a base: a material is poolable, a late part is not.
+    if (!baseDef || baseDef.late === true) { probs.push(problem('base', 'no-base', { key: recipe.base })); return null; }
     if (baseDef.gate === 'flash') { probs.push(problem('base', 'flash-base', { key: recipe.base })); return null; }
     const params = {};
     for (const name of Object.keys(recipe.params)) {

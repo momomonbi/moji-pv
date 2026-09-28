@@ -162,10 +162,10 @@ MV.def('ai/recipe', ['core/num', 'core/hash', 'core/color', 'core/curve', 'core/
       return out;
     }
 
-    // Existing parts of the base registry: never a material, never a flash-gated effect.
+    // Existing parts of the base registry: never a material, never a flash-gated effect, never a late (v2.2) part.
     function basePart(base, kind, key) {
       const def = typeof key === 'string' && key ? base.get(kind, key) : null;
-      if (!def || def.gate === 'flash' || key.startsWith('myMat') || key.startsWith('myMed')) return null;
+      if (!def || def.gate === 'flash' || def.late === true || key.startsWith('myMat') || key.startsWith('myMed')) return null;
       return def;
     }
 
