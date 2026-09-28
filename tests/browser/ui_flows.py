@@ -2450,6 +2450,61 @@ async def flow_repeat(f, lang):
     await f.undo_all(done0, doc0)
 
 
+WEIGHT_PARTS = """() => window.__mv.plan.cuts.filter((c) => ['arrive', 'dwell', 'depart'].some((k) => c.slots[k] &&
+  ['weightGrow', 'weightPulse', 'weightThin'].includes(c.slots[k].v)) || !!c.slots['text.weight']).length"""
+
+
+async def flow_weight(f, lang):
+    """作品全体 › 見た目 › 詳しい設定 「太さを動かす」 (DESIGN_2_2 §4): on in a new work, shown as 自動 with its note; turning it
+    off pins false for the whole video (one undo entry) and no cut keeps a weight part or a 太さ from the grow rule; undo
+    brings the unpinned state back; turning it on again clears the pin. A line's 太さ is a number row under 色と書体."""
+    page = f.page
+    done0, doc0 = await with_lyrics(f)
+    await page.evaluate("() => window.__mv.select({ level: 'work' }, { from: 'header', open: true })")
+    await open_section(f, 'look')
+    await page.evaluate("""() => { const d = document.querySelector('[data-mount="inspector"] .isec[data-sec="look"] details.isec-more');
+      if (d) d.open = true; }""")
+    await f.settle(2)
+    row = ROW % 'weight.auto'
+    box = row + ' input[role="switch"]'
+    if not f.check(await page.locator(row).count() == 1, 'the switch is on the work page'):
+        return
+    note = await page.text_content(row + ' .fr-note')
+    f.check(note == await page.evaluate("() => window.__mv.t('fld.weightAuto.note')"), 'the switch says what it does: %r' % note)
+    f.check(await page.is_checked(box), 'on in a new work')
+    f.check(await page.get_attribute(row + ' .state-tag', 'data-state') == 'auto', 'the new-work default reads as 自動')
+    f.check(await page.locator(row + ' [data-role="dice"]').count() == 0, 'a setting, not drawn: no 振り直し')
+    done1 = await page.evaluate(DONE)
+    await page.click(row + ' .w-toggle')
+    await f.until("() => { const p = window.__mv.doc.pins['work:weight.auto']; return !!p && p.v === false; }", 'turning it off pins false')
+    await f.settle(3)
+    f.check(await page.evaluate(DONE) == done1 + 1, 'one undo entry')
+    f.check(not await page.is_checked(box), 'the switch shows off')
+    f.check(await page.get_attribute(row + ' .state-tag', 'data-state') == 'pinned', 'the field shows 固定')
+    f.check(await page.evaluate(WEIGHT_PARTS) == 0, 'no cut keeps a weight part or a grown 太さ')
+    await f.blur()
+    await page.keyboard.press('Control+z')
+    await f.until("() => !window.__mv.doc.pins['work:weight.auto']", 'undo brings the unpinned state back')
+    await f.settle(3)
+    f.check(await page.is_checked(box), 'on again after undo')
+    await page.click(row + ' .w-toggle')
+    await f.until("() => !!window.__mv.doc.pins['work:weight.auto']", 'off again')
+    await f.settle(2)
+    await page.click(row + ' .w-toggle')
+    await f.until("() => !window.__mv.doc.pins['work:weight.auto']", 'turning it on again clears the pin (the default)')
+    await f.settle(2)
+    # 行 › 色と書体 › 詳しい設定: 太さ
+    line = await page.evaluate("() => window.__mv.plan.cuts.find((c) => c.role === 'lyric').line")
+    await page.evaluate("(id) => window.__mv.select({ level: 'line', ids: [id] }, { from: 'crumbs', open: true })", line)
+    await f.settle(2)
+    await open_section(f, 'colortype')
+    await page.evaluate("""() => { const d = document.querySelector('[data-mount="inspector"] .isec[data-sec="colortype"] details.isec-more');
+      if (d) d.open = true; }""")
+    await f.settle(2)
+    f.check(await page.locator(ROW % 'text.weight').count() == 1, 'the line page has 太さ')
+    await f.undo_all(done0, doc0)
+
+
 async def flow_areas(f, lang):
     """区画 (DESIGN_2_1 §6.8): a band of the drawer's 曲 row selects its lines as the area and opens the 行 page with the area
     header 「サビ（3行）」 and 区画のカメラ; the play bar's lane shows the bands and an area highlight, and a double-click on
@@ -5035,6 +5090,8 @@ FLOWS += [('curve', flow_curve, False), ('keyframes', flow_keyframes, False), ('
           ('materials', flow_materials, False), ('material_scope', flow_material_scope, False)]
 # 「くり返しの行をそろえる」 (DESIGN_2_1 §4.10)
 FLOWS += [('repeat', flow_repeat, False)]
+# 文字PVの定石: 太さを動かす (DESIGN_2_2 §4)
+FLOWS += [('weight', flow_weight, False)]
 # v2.1 photos and videos (package G.4, DESIGN_2_1 §11.8.3).
 FLOWS += [('media', flow_media, True), ('library', flow_library, False), ('missing', flow_missing, False), ('package', flow_package, False),
           ('media_device', flow_media_device, False), ('media_song', flow_media_song, False)]

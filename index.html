@@ -1,6 +1,6 @@
 <!doctype html><html lang="ja"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-AJQ6BBoW0Ncea2e1cXNVBDftrSmV3vZSF9kjSX/bqK4='; style-src 'sha256-CBzRvq4sWr3CF69hafDp1l8UkHnSy18JQMXGJJhPDYI=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-unr2w34wp9fojMNFFLeqpGs+crfO1B977TyqU+4IslI='; style-src 'sha256-CBzRvq4sWr3CF69hafDp1l8UkHnSy18JQMXGJJhPDYI=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
 <title>文字PVメーカー</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -5395,6 +5395,9 @@ MV.def('core/registry', ['core/schema', 'core/color', 'core/hash'], (S, C, H) =>
   const MINE_KEY = /^(?:myMat[0-9a-z]+|myMed[0-9a-f]{10})$/;
   const MINE_PREFIX = /^my(?:Mat|Med)/;
   const CAM_VALUES = Object.freeze(['any', 'gentle', 'none']);
+  // Opt-in pools (DESIGN_2_2 §4): a pool: false definition with `optIn` joins an automatic pool only when the caller
+  // passes the same name in `opts.optIn` (the planner does so where the document's switch allows it).
+  const OPT_INS = Object.freeze(['weight']);
   const KEY_MAX = 32;                         // PARTKEY of the slot path grammar (§3.4): a longer key could not be pinned
   const PARAM = /^[a-z][A-Za-z0-9]{0,31}$/;
   const RESERVED_PARAMS = Object.freeze({ ornament: ['count'], filter: ['count'] });
@@ -5535,6 +5538,13 @@ MV.def('core/registry', ['core/schema', 'core/color', 'core/hash'], (S, C, H) =>
     if (def.gate !== undefined && !AMOUNT_KEYS.includes(def.gate)) bad('gate must be an amount key');
     if (def.needs !== undefined && !isList(def.needs, NEEDS)) bad('needs must list only ' + NEEDS.join(' '));
     if (def.traits !== undefined) checkTraits(def.traits, bad);
+    // v2.2 (DESIGN_2_2 §4.1): a late definition is left out of registry.version; it is never in an automatic pool
+    // except through an opt-in, so only a pin, a planner rule or an opted-in pool can reach a plan.
+    if (def.late !== undefined && def.late !== true) bad('late must be true when present');
+    if (def.late === true && def.pool !== false) bad('a late definition must be pool: false');
+    if (def.late === true && def.fallback === true) bad('a late definition cannot be the fallback');
+    if (def.optIn !== undefined && !OPT_INS.includes(def.optIn)) bad('optIn must be one of ' + OPT_INS.join(' '));
+    if (def.optIn !== undefined && def.pool !== false) bad('optIn is only for pool: false definitions');
   }
 
   function checkTraits(t, bad) {
@@ -5632,6 +5642,11 @@ MV.def('core/registry', ['core/schema', 'core/color', 'core/hash'], (S, C, H) =>
       const r = def.replaces;
       if (r !== undefined && !(isObject(r) && Object.keys(r).every((k) => (k === 'depart' || k === 'arrive') &&
           typeof r[k] === 'boolean'))) bad('replaces must be { depart?, arrive? } booleans');
+      // v2.2 glyph seams (DESIGN_2_2 §4): the planner writes the letter correspondence into the seam entry
+      if (def.glyphs !== undefined && def.glyphs !== true) bad('glyphs must be true when present');
+      if (def.glyphs === true && def.scope !== 'text') bad('glyphs needs scope text');
+      if (def.share !== undefined && !(isNumber(def.share) && def.share > 0 && def.share <= 0.5)) bad('share must be in (0, 0.5]');
+      if (def.ends !== undefined && typeof def.ends !== 'boolean') bad('ends must be a boolean');
     },
     theme: checkTheme,
     mood: checkMood,
@@ -5744,6 +5759,7 @@ MV.def('core/registry', ['core/schema', 'core/color', 'core/hash'], (S, C, H) =>
     const defsOf = new Map();
     const params = new Map();
     const signature = [];
+    const lateSig = [];
     for (const kind of KINDS) {
       const keys = [...byKind.get(kind).keys()].sort(compare);
       keysOf.set(kind, Object.freeze(keys));
@@ -5751,17 +5767,22 @@ MV.def('core/registry', ['core/schema', 'core/color', 'core/hash'], (S, C, H) =>
       for (const key of keys) {
         const def = byKind.get(kind).get(key);
         params.set(kind + '/' + key, paramListOf(def));
-        signature.push([kind, key, Object.keys(def.params || {}).sort(compare)]);
+        // A late definition (v2.2) is signed apart, so adding one keeps `version` and every fingerprint made from it.
+        (def.late === true ? lateSig : signature).push([kind, key, Object.keys(def.params || {}).sort(compare)]);
       }
     }
     const version = H.hashJSON(signature);
     return makeRegistry({
-      keysOf, defsOf, params, version, problems,
+      keysOf, defsOf, params, version, problems, lateSig: deepFreeze(lateSig),
       get: (kind, key) => { const m = byKind.get(kind); return (m && m.get(key)) || null; },
       baseParams: () => null,
       extras: { base: null, baseVersion: version, extra: Object.freeze({}), mine: () => NO_KEYS },
     });
   }
+
+  // lateVersion: `version` plus the signature of the late definitions (DESIGN_2_2 §4.1). Used only by the golden that
+  // shows the late parts; never a cache key.
+  function lateVersionOf(version, lateSig) { return lateSig.length ? H.hashJSON([version, lateSig]) : version; }
 
   const NO_KEYS = Object.freeze([]);
 
@@ -5789,7 +5810,8 @@ MV.def('core/registry', ['core/schema', 'core/color', 'core/hash'], (S, C, H) =>
       if (!def || !def.blurb) return '';
       return (lang === 'en' ? def.blurb.en : def.blurb.ja) || '';
     }
-    // Keys eligible for AUTO picks, sorted. opts: { role, season, filters, orient, script, aspect, scope, texture, amounts }
+    // Keys eligible for AUTO picks, sorted. opts: { role, season, filters, orient, script, aspect, scope, texture, amounts,
+    // optIn } — `optIn` (a list of OPT_INS names) also admits the pool: false definitions that opt in by that name.
     function pool(kind, opts) {
       const o = opts || {};
       const f = o.filters && o.filters[kind];
@@ -5798,7 +5820,7 @@ MV.def('core/registry', ['core/schema', 'core/color', 'core/hash'], (S, C, H) =>
       const out = [];
       for (const def of defsOf.get(kind) || []) {
         const key = def.key;
-        if (def.pool === false) continue;
+        if (def.pool === false && !(o.optIn && def.optIn !== undefined && o.optIn.includes(def.optIn))) continue;
         if (only && !only.includes(key)) continue;
         if (deny && deny.includes(key)) continue;
         if (!seasonOk(def.season, o.season)) continue;
@@ -5809,12 +5831,16 @@ MV.def('core/registry', ['core/schema', 'core/color', 'core/hash'], (S, C, H) =>
       }
       return out;
     }
-    return Object.freeze(Object.assign({
+    const lateSig = src.lateSig || NO_KEYS;
+    const out = Object.assign({
       version: src.version, problems: Object.freeze(src.problems.slice()),
       get, has: (kind, key) => get(kind, key) !== null, keys, all, pool, fallback, label, blurb,
       params: (kind, key) => params.get(kind + '/' + key) || src.baseParams(kind, key) || null,
       traits: (kind, key) => { const d = get(kind, key); return d ? traitsOf(d) : null; },
-    }, src.extras));
+      lateVersion: lateVersionOf(src.version, lateSig),
+    }, src.extras);
+    Object.defineProperty(out, 'lateSig', { value: lateSig, enumerable: false });
+    return Object.freeze(out);
   }
 
   // What the planner reads from a definition, so a change to it changes an extended registry's version (§3.6).
@@ -5897,6 +5923,7 @@ MV.def('core/registry', ['core/schema', 'core/color', 'core/hash'], (S, C, H) =>
     }
     return makeRegistry({
       keysOf, defsOf, params, version: H.hashJSON([baseVersion, signature]), problems: problems.concat(own),
+      lateSig: base.lateSig || NO_KEYS,
       get: (kind, key) => { const m = added.get(kind); return (m && m.get(key)) || base.get(kind, key); },
       baseParams: (kind, key) => base.params(kind, key),
       extras: { base, baseVersion, extra: Object.freeze(extra), mine: (kind) => mineOf.get(kind) || NO_KEYS },
@@ -5915,7 +5942,7 @@ MV.def('core/registry', ['core/schema', 'core/color', 'core/hash'], (S, C, H) =>
 
   return {
     KINDS, PART_KINDS, TAGS, AMOUNT_KEYS, SEASONS, ROLES, NEEDS, STAGES, TEXT_STYLES, TRAIT_DEFAULTS, SHARED,
-    CAM_VALUES, MINE_KEY, RegistryError, createRegistry, checkDef, extend,
+    CAM_VALUES, MINE_KEY, OPT_INS, RegistryError, createRegistry, checkDef, extend,
   };
 });
 /* 文字PVメーカー v2 — original work. Material recipes: vocabularies, normalization, limits, cost, the flash rule and knobs (DESIGN_2_1 §5.7, §5.8, §11.5.8). */
@@ -6767,7 +6794,7 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
     timing: ['snap', 'lead', 'tail', 'leadIn', 'outro', 'tapLatency'],
     song: ['name', 'sha1', 'seconds', 'bpm', 'offset', 'meter', 'bpmConfidence', 'digest', 'info'],
     digest: ['hz', 'loud'],
-    look: ['seed', 'moodSeed', 'aspect', 'backdrop'],
+    look: ['seed', 'moodSeed', 'aspect', 'backdrop', 'gen'],
     pin: ['v', 'by', 'sig'],
     lock: ['n'],
     filter: ['only', 'deny'],
@@ -6807,6 +6834,19 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
       output: { format: 'mp4', short: 1080, fps: 30, quality: 'high', audio: true, range: null, name: null,
         kit: Object.assign({}, KIT_DEFAULT) },
     };
+  }
+
+  // The generation of new documents (look.gen, PV22 / DESIGN_2_2 §0): a document made by newDoc() carries it, and the
+  // 文字PV conventions, typesetting and timing defaults of that generation apply to it unless its own settings say
+  // otherwise (planner/rules). defaultDoc() never carries it: normalize() builds from defaultDoc(), so anything added
+  // there would reach every opened project, and the tests and fixtures plan documents made from it.
+  const GEN = 1;
+
+  // newDoc() → the document of ≡ › 新しい作品, of the first run and of an emptied device: defaultDoc() with look.gen.
+  function newDoc() {
+    const doc = defaultDoc();
+    doc.look.gen = GEN;
+    return doc;
   }
 
   function defaultSide() {
@@ -6919,6 +6959,9 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
     if (!isUint32(look.moodSeed)) bad('look.moodSeed', 'must be a 32-bit unsigned integer');
     if (!ASPECTS.includes(look.aspect)) bad('look.aspect', 'must be one of ' + ASPECTS.join(' '));
     if (!BACKDROPS.includes(look.backdrop)) bad('look.backdrop', 'must be one of ' + BACKDROPS.join(' '));
+    if (look.gen !== undefined && !(Number.isInteger(look.gen) && look.gen >= 0 && look.gen <= 255)) {
+      bad('look.gen', 'must be an integer 0–255');
+    }
   }
 
   function checkPins(pins, bad) {
@@ -7304,8 +7347,8 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
 
   return {
     APP_VERSION, FORMAT, CURRENT_SCHEMA, DESIGN_SIZE, ASPECTS, LANGS, BACKDROPS, PIN_BY, FILTER_KINDS, SECTION_KINDS,
-    OUTPUT_CHOICES, KIT_KEYS, KIT_DEFAULT, ORDER,
-    defaultDoc, defaultSide, validate, songInfoProblems, normalize, normalizeSide, sanitizeSide, sanitizeAsks, touched,
+    OUTPUT_CHOICES, KIT_KEYS, KIT_DEFAULT, ORDER, GEN,
+    defaultDoc, newDoc, defaultSide, validate, songInfoProblems, normalize, normalizeSide, sanitizeSide, sanitizeAsks, touched,
     serialize,
   };
 });
@@ -7542,19 +7585,23 @@ MV.def('core/commands', ['core/doc', 'core/paths', 'core/pins', 'core/lyrics', '
     // Slots that make sense only at one scope (§3.4.1–3.4.3), so they are never promoted or copied.
     const LINE_ONLY = new Set(['start', 'end', 'split', 'lang', 'avoid']);
     const CUT_ONLY = new Set(['t0']);
-    const TEXT_SLOTS = new Set(['orient', 'text.face', 'text.scale', 'text.ink', 'text.style']);
+    const TEXT_SLOTS = new Set(['orient', 'text.face', 'text.scale', 'text.ink', 'text.style', 'text.weight']);
     // v2.1 (DESIGN_2_1 §2.3, §3.7): line slots that are area-level, never pinned at a cut; `avoid` is line-only. The
     // EXTREME switch (DESIGN_EXTREME §2.2) is an area's too: line or work, never a cut; "paste look" leaves it (it is not
     // in COPY_SLOTS) and it may move line → work like the season.
-    const NOT_CUT = new Set(['season', 'avoid', 'cam.extreme']);
+    const NOT_CUT = new Set(['season', 'avoid', 'cam.extreme', 'morph.auto', 'weight.auto']);
+    // v2.2 (DESIGN_2_2 §4): switches of the whole video only — never at a line (nor at a cut, NOT_CUT).
+    const WORK_ONLY = new Set(['weight.auto']);
     // Cut slots that "paste look" copies besides part slots and text.* (CAM_SLOTS and the motion speed).
     const COPY_SLOTS = new Set(['motion.speed', 'cam.shot', 'cam.zoom', 'cam.curve', 'cam.follow']);
 
     // Refuses `cut/…:season`, `cut/…:avoid`, `cut/…:cam.extreme`, `cut/…:repeat.same` and `work:avoid` (payload).
     // 「くり返しの行をそろえる」 (DESIGN_2_1 §4.10) is a setting of the whole video or of a line, like the line season.
+    // v2.2: 「同じ字をつなぐ」 (morph.auto) work or line, 「太さを動かす」 (weight.auto) work only.
     function checkSlotScope(parsed) {
       need(!(parsed.scope.kind === 'cut' && (NOT_CUT.has(parsed.slot) || parsed.slot === 'repeat.same')),
         parsed.slot + ' cannot be pinned at cut scope');
+      need(!(parsed.scope.kind === 'line' && WORK_ONLY.has(parsed.slot)), parsed.slot + ' cannot be pinned at line scope');
       need(!(parsed.scope.kind === 'work' && parsed.slot === 'avoid'), 'avoid cannot be pinned at work scope');
     }
 
@@ -10875,6 +10922,93 @@ MV.def('engine/text/faces', ['core/script'], (S) => {
 
   function usesLatinFace(cls) { return LATIN_FACE_CLASSES.has(cls); }
 
+  // ---- weight ladders (v2.2, DESIGN_2_2 §4: 太さのアニメーション) ------------------------------------------------------
+
+  // ladderOf(ref) → the served weights of the ref's family, ascending (a family outside FAMILIES — a user's face pin —
+  // has only its own weight, so it never animates).
+  function ladderOf(ref) {
+    const k = FAMILIES[ref.family];
+    return k ? k.weights : Object.freeze([ref.weight]);
+  }
+
+  // atWeight(ref, w) → the same family, script, flavor and role at the served weight w; one stable object per (ref, w),
+  // so sprite keys and draw-context comparisons stay cheap.
+  const RUNGS = new WeakMap();
+  function atWeight(ref, w) {
+    if (w === ref.weight) return ref;
+    let m = RUNGS.get(ref);
+    if (!m) { m = new Map(); RUNGS.set(ref, m); }
+    let r = m.get(w);
+    if (!r) { r = faceRef(ref.family, w, ref.script, ref.flavor, ref.role); m.set(w, r); }
+    return r;
+  }
+
+  // weightPair(ref, dw, out) → out = { lo, hi, f, plain }: the two served weights around ref.weight + dw (clamped to the
+  // ladder) and how far between them (hi is null when f = 0). A pair within W_EPS of a rung snaps to it; plain = the
+  // face's own weight alone. Allocation-free after the first call per rung.
+  const W_EPS = 1 / 64;
+  function weightPair(ref, dw, out) {
+    const L = ladderOf(ref), w = ref.weight + dw, top = L[L.length - 1];
+    let lo = L[0], hi = L[0], f = 0;
+    if (w >= top) { lo = top; hi = top; }
+    else if (w > L[0]) { let k = 0; while (L[k + 1] <= w) k++; lo = L[k]; hi = L[k + 1]; f = (w - lo) / (hi - lo); }
+    if (f < W_EPS) { hi = lo; f = 0; } else if (f > 1 - W_EPS) { lo = hi; f = 0; }
+    out.lo = atWeight(ref, lo);
+    out.hi = f > 0 ? atWeight(ref, hi) : null;
+    out.f = f;
+    out.plain = f === 0 && lo === ref.weight;
+    return out;
+  }
+
+  // roomOf(ref) → { below, above }: weight units between the face's weight and the lightest / heaviest served weight.
+  function roomOf(ref) {
+    const L = ladderOf(ref);
+    return { below: ref.weight - L[0], above: L[L.length - 1] - ref.weight };
+  }
+
+  // growTop(ref) → the heaviest served weight up to GROW_TOP (the bold end of 太る); the face's own weight when none is.
+  const GROW_TOP = 800;
+  function growTop(ref) {
+    let t = null;
+    for (const w of ladderOf(ref)) if (w <= GROW_TOP) t = w;
+    return t === null ? ref.weight : t;
+  }
+
+  // rungsBetween(ref, dlo, dhi) → the served weights a weight reach [dlo, dhi] can draw (the rungs on both sides of
+  // every weight in the reach), ascending.
+  function rungsBetween(ref, dlo, dhi) {
+    const L = ladderOf(ref), a = ref.weight + dlo, b = ref.weight + dhi;
+    let lo = L[0], hi = L[L.length - 1];
+    for (const w of L) if (w <= a) lo = w;
+    for (let k = L.length - 1; k >= 0; k--) if (L[k] >= b) hi = L[k];
+    return L.filter((w) => w >= lo && w <= hi);
+  }
+
+  // reweigh(faces, role, w) → faces whose `role` entries are the same families at weight w (snapped per family); the
+  // other roles are the same objects. Cached per (faces, role, w), so a cut's layout key stays stable.
+  const REWEIGHED = new WeakMap();
+  function reweigh(faces, role, w) {
+    if (!faces || typeof faces !== 'object') return faces;
+    const r = ROLES.includes(role) ? role : 'display';
+    let m = REWEIGHED.get(faces);
+    if (!m) { m = new Map(); REWEIGHED.set(faces, m); }
+    const id = r + '|' + w;
+    let out = m.get(id);
+    if (!out) {
+      const entry = faces[r] || {};
+      const next = {};
+      for (const script of Object.keys(entry)) {
+        const e = entry[script];
+        if (!e || typeof e.family !== 'string') { next[script] = e; continue; }
+        const scr = typeof e.css === 'function' ? e.script : script;
+        next[script] = faceRef(e.family, w, scr, e.flavor, typeof e.css === 'function' ? e.role || r : r);
+      }
+      out = Object.freeze(Object.assign({}, faces, { [r]: Object.freeze(next) }));
+      m.set(id, out);
+    }
+    return out;
+  }
+
   // ---- Google Fonts URLs ----------------------------------------------------------------------------------------
 
   function uniqueChars(text) {
@@ -10966,6 +11100,7 @@ MV.def('engine/text/faces', ['core/script'], (S) => {
     ROLES, SCRIPTS, FLAVOR_NAMES, FLAVORS, FAMILIES, SYSTEM_FALLBACK, SCRIPT_FALLBACK,
     resolveFaces, fontFor, cssUrls, fontUsage, faceRef, asRef, snapWeight, usesLatinFace, uniqueChars, cssSize, cssAt,
     isLatinFamily, loadText,
+    ladderOf, atWeight, weightPair, roomOf, growTop, rungsBetween, reweigh, W_EPS, GROW_TOP,
   };
 });
 /* 文字PVメーカー v2 — original work. Deterministic stand-in measurer for Node tests and golden frames (DESIGN §4.15.1). */
@@ -13953,6 +14088,34 @@ MV.def('i18n/strings', [], () => ({
   'pkg.missing.media': ['写真・動画{n}件', '{n} photos or videos'],
   'pkg.missing.song': ['曲', 'the song'],
   'pkg.missing.and': ['と', ' and '],
+
+  // --- PV22 P1 (文字組み) ---
+
+  // --- PV22 P2 (文字PVの定石) ---
+
+  // --- PV22 P3 (キメ) ---
+
+  // --- PV22 P4 (モーフ・太さ) ---
+  'fld.weightAuto': ['太さを動かす', 'Animate stroke weight'],
+  'fld.weightAuto.note': ['太さの種類が多い書体の行で、細い字から太い字へ育つ入りや、拍に合わせて太さが脈打つ見せを自動で使います。',
+    'On lines whose typeface has many weights, uses entrances that grow from thin to bold and holds whose weight pulses with the beat.'],
+  'fld.textWeight': ['太さ', 'Weight'],
+  'fld.textWeight.note': ['書体にない太さは、いちばん近い太さで表示します。', 'A weight the typeface lacks shows as its nearest weight.'],
+  'whyRule.text.weight': ['書体の太さのまま', 'The typeface\'s own weight'],
+  'whyRule.weight.grow': ['太る入りなので、書体のいちばん太い字で終わる', 'Enters growing, so it ends at the typeface\'s boldest weight'],
+  'warn.weight-flat': ['この書体は太さの種類が少ないため、太さの動きが見えません（{detail}）',
+    'This typeface has too few weights, so the weight animation does not show ({detail})'],
+  'warn.weight-style': ['文字の飾り（縁取り・影・二色）があるため、太さは段階的に変わります（{detail}）',
+    'The lettering has an outline, shadow or second color, so the weight changes in steps ({detail})'],
+  // the automatic value of a switch of the new-work table (planner/rules; the same keys as PV22 P2 — keep one copy)
+  'rule.auto.new': ['新しい作品の標準', 'Default for new works'],
+  'rule.auto.old': ['この機能より前に作った作品なので、はじめはオフ', 'Made before this feature, so it starts off'],
+  'whyRule.rules.new': ['新しい作品の標準', 'Default for new works'],
+  'whyRule.rules.old': ['この機能より前に作った作品なので、はじめはオフ', 'Made before this feature, so it starts off'],
+
+  // --- PV22 P5 (タイミング) ---
+
+  // --- PV22 P6 (歌ハメ) ---
 }));
 /* 文字PVメーカー v2 — original work. Translation function and formatters over the [ja, en] string table (DESIGN §4.24). */
 MV.def('i18n/t', [], () => {
@@ -18920,7 +19083,7 @@ MV.def('planner/look', ['core/hash', 'core/color', 'core/num', 'core/schema', 'c
 });
 /* 文字PVメーカー v2 — original work. Casting: every cut slot in the FROZEN order, from pins, rules or the chooser (DESIGN §4.16.2, §3.4.3; DESIGN_2_1 §3.9, §4.9). */
 MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 'core/pins', 'core/paths', 'planner/choose',
-  'planner/params', 'planner/look', 'planner/camera'], (S, REG, R, N, PINS, P, CH, PA, LK, CAM) => {
+  'planner/params', 'planner/look', 'planner/camera', 'engine/text/faces'], (S, REG, R, N, PINS, P, CH, PA, LK, CAM, FACES) => {
     'use strict';
 
     const LIST_KINDS = Object.freeze(['ornament', 'filter']);
@@ -18948,6 +19111,8 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       'el.hide': { type: 'bool' },
       // 「くり返しの行をそろえる」 (DESIGN_2_1 §4.10): pinned at work or line scope, never at a cut (core/commands).
       'repeat.same': { type: 'bool' },
+      // 太さ (v2.2, DESIGN_2_2 §4): the weight of the cut's lyric face role; a pin, or the grow rule of 太る.
+      'text.weight': { type: 'int', min: 100, max: 900 },
     }, CAM.SLOT_SPECS));
     const SEASON_SPEC = LK.LOOK_SPECS.season;
     const AVOID_SPEC = Object.freeze({ type: 'partRefs' });
@@ -19018,16 +19183,19 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     // A cut's screen effects never take the work texture again (it already runs over the whole video: risoPink's
     // dotScreen texture plus a dotScreen effect doubled the dots); a pin still can. The line's avoid list is added to
     // the kind's deny filter; when that would empty a pool that is not empty without it, the avoid list is relaxed for
-    // that kind (relaxed: the chooser reports avoid-empty).
-    function poolEntry(ctx, kind, sub, role, orient, script, aspect, scope, cond) {
+    // that kind (relaxed: the chooser reports avoid-empty). optIn (v2.2, DESIGN_2_2 §4): the opt-in pools the cut may
+    // draw from as well (registry.pool optIn; ['weight'] where the weight parts suit the cut, weightOptIn), or null.
+    function poolEntry(ctx, kind, sub, role, orient, script, aspect, scope, cond, optIn) {
       const c = cond || workCond(ctx);
       let byKind = ctx.pools.get(kind);
       if (!byKind) { byKind = new Map(); ctx.pools.set(kind, byKind); }
-      const id = (scope ? sub + '|' + scope : sub) + (c.id ? '|' + c.id : '');
+      const id = (scope ? sub + '|' + scope : sub) + (c.id ? '|' + c.id : '') + (optIn ? '|w' : '');
       let entry = byKind.get(id);
       if (!entry) {
-        let keys = ctx.registry.pool(kind, { role, orient, script, aspect, scope, season: c.season, filters: ctx.doc.filters,
-          amounts: LK.gateAmounts(ctx.look.amounts, ctx.doc.look.backdrop, kind) });
+        const o = { role, orient, script, aspect, scope, season: c.season, filters: ctx.doc.filters,
+          amounts: LK.gateAmounts(ctx.look.amounts, ctx.doc.look.backdrop, kind) };
+        if (optIn) o.optIn = optIn;
+        let keys = ctx.registry.pool(kind, o);
         const texture = kind === 'filter' && ctx.look.plan && ctx.look.plan.texture ? ctx.look.plan.texture.v : null;
         if (texture && keys.includes(texture)) keys = keys.filter((k) => k !== texture);
         let relaxed = false;
@@ -19092,7 +19260,7 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     // createHistory; win: the winner before req.avoid, which v differs from only when the winner was avoided).
     // req = { kind, slot, path, feat, role, orient, script, scope, chosen, seed, recent, ref, echo, avoid, list, orNone,
     // cutKey, trace, silent, cond (the line conditions of lineCond; default the work's), noMedia (derived media grounds
-    // weigh 0 here, DESIGN_2_1 §11.5.9) }.
+    // weigh 0 here, DESIGN_2_1 §11.5.9), optIn (v2.2: the opt-in pools, both stages; null or absent: none) }.
     // Stages (§4.16.4, §3.8): the full weights; the same pool without traitFit and fits; the pool without the text
     // traits (orient, script, aspect); then the kind's fallback — or 'none' for a list slot whose fallback does not
     // serve the cut's role, and for atmos (orNone). pool-empty is reported on lyric cuts, and elsewhere only when the
@@ -19110,11 +19278,12 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       };
       const sub = req.poolId !== undefined ? req.poolId
         : (req.role || '') + '|' + (req.orient || '') + '|' + (req.script || '') + '|' + (ctx.aspect || '');
-      const full = poolEntry(ctx, req.kind, sub, req.role, req.orient, req.script, ctx.aspect, req.scope, cond);
+      const optIn = req.optIn || null;
+      const full = poolEntry(ctx, req.kind, sub, req.role, req.orient, req.script, ctx.aspect, req.scope, cond, optIn);
       if (trace) trace.cond = cond;
       for (let stage = 0; stage < 3; stage++) {
         const entry = stage < 2 ? full
-          : poolEntry(ctx, req.kind, (req.role || '') + '|||', req.role, undefined, undefined, undefined, req.scope, cond);
+          : poolEntry(ctx, req.kind, (req.role || '') + '|||', req.role, undefined, undefined, undefined, req.scope, cond, optIn);
         const keys = entry.keys;
         if (!keys.length) continue;
         ask.keys = keys;
@@ -19519,8 +19688,8 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       if (pinnedFrom(ad)) return 'v' in acceptPart(ctx, kind, cut.role, { none: list, scope })(ad.v) ? ad : null;
       if (ad.from !== 'auto') return null;
       if (AVOID_REPEAT.has(kind) && !st.natural && nearClash(st, slot, ad.v)) return null;
-      if (!poolEntry(ctx, kind, poolIdOf(st), cut.role, st.chosen.orient, cut.feat.script, ctx.aspect, scope, st.cond).keys
-        .includes(ad.v)) return null;
+      if (!poolEntry(ctx, kind, poolIdOf(st), cut.role, st.chosen.orient, cut.feat.script, ctx.aspect, scope, st.cond,
+        weightOptIn(st, kind)).keys.includes(ad.v)) return null;
       const def = ctx.registry.get(kind, ad.v);
       if (typeof def.fits === 'function' && !(Number(def.fits(cut.feat, st.chosen)) > 0)) return null;
       return ad;
@@ -19621,7 +19790,7 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
           kind, slot, path: 'cut/' + cut.key + ':' + slot, feat: cut.feat, role: cut.role, orient: st.chosen.orient,
           script: cut.feat.script, scope: kind === 'ornament' ? 'cut' : null, chosen: st.chosen, seed, recent, echo,
           list, cutKey: cut.key, trace, silent: st.natural, ref, poolId: poolIdOf(st), cond: st.cond,
-          avoid: AVOID_REPEAT.has(kind) && !st.natural ? avoidOf(st, slot) : null,
+          avoid: AVOID_REPEAT.has(kind) && !st.natural ? avoidOf(st, slot) : null, optIn: weightOptIn(st, kind),
         });
         d = { v: got.v, from: got.from };
         if (got.base && got.base !== got.v) st.base[slot] = got.base;
@@ -19654,7 +19823,7 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       const echo = st.hist.echo(cut.feat.repeatOf, slot);
       chooseAuto(ctx, { kind, slot, path: 'cut/' + cut.key + ':' + slot, feat: cut.feat, role: cut.role,
         orient: st.chosen.orient, script: cut.feat.script, scope: kind === 'ornament' ? 'cut' : null, chosen: st.chosen,
-        seed, recent, echo, list, cutKey: cut.key, trace, silent: true, cond: st.cond });
+        seed, recent, echo, list, cutKey: cut.key, trace, silent: true, cond: st.cond, optIn: weightOptIn(st, kind) });
       return Object.assign(trace, { recent, echo });
     }
 
@@ -19820,6 +19989,97 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       return els;
     }
 
+    // --- weight animation (v2.2, DESIGN_2_2 §4: 太る, 脈打つ太さ, 細る) -------------------------------------------
+
+    // The weight parts join a cut's pools (opt-in 'weight') only when the work's 「太さを動かす」 is on (ctx.glyph.weight),
+    // the cut is a lyric (or focus) cut lettered plain or glowing (the other styles cannot crossfade weights) and its
+    // face has room for the motion; the grow rule gives an entrance with 太る the face's bold end. Documents without the
+    // switch never reach any of this, so their pools and plans are unchanged.
+    const WEIGHT_OPT_IN = Object.freeze(['weight']);
+    const GROW_KEY = 'weightGrow';
+    const TEXT_WEIGHT = 'text.weight';
+    const GROW_ROOM = 300, PULSE_ROOM = 200, FLAT_ROOM = 100;
+    const WEIGHT_ROOMS = Object.freeze({ grow: GROW_ROOM, pulse: PULSE_ROOM, flat: FLAT_ROOM });
+    const CROSSFADE = new Set(['plain', 'glow']);
+
+    // The FontRef the cut's lyrics are laid out with: its text.face role in the look's faces, at the cut's text.weight.
+    function faceOfCut(st) {
+      const role = st.slots['text.face'] ? st.slots['text.face'].v : 'display';
+      const ref = FACES.fontFor(st.ctx.look.plan.faces, role, st.cut.lang);
+      const tw = st.slots[TEXT_WEIGHT];
+      return tw ? FACES.atWeight(ref, FACES.snapWeight(ref.family, tw.v)) : ref;
+    }
+
+    function styleOf(st) { return st.slots['text.style'] ? st.slots['text.style'].v : 'plain'; }
+
+    // The room a weight part of a kind needs (arrive: from the lightest weight up to the end weight — a pinned 太さ or
+    // the grow rule's bold end; depart: below the face's weight; dwell: up or down).
+    function weightRoom(st, kind, ref) {
+      const L = FACES.ladderOf(ref);
+      if (kind === 'arrive') return (st.slots[TEXT_WEIGHT] ? ref.weight : FACES.growTop(ref)) - L[0];
+      if (kind === 'depart') return ref.weight - L[0];
+      const r = FACES.roomOf(ref);
+      return Math.max(r.below, r.above);
+    }
+
+    // weightOptIn(st, kind) → ['weight'] when the weight parts may be picked automatically for this motion slot, else null.
+    function weightOptIn(st, kind) {
+      const g = st.ctx.glyph;
+      if (!g || !g.weight || !MOTION_KINDS.includes(kind) || !PER_CUT_ROLES.has(st.cut.role)) return null;
+      if (!CROSSFADE.has(styleOf(st))) return null;
+      return weightRoom(st, kind, faceOfCut(st)) >= (kind === 'dwell' ? PULSE_ROOM : GROW_ROOM) ? WEIGHT_OPT_IN : null;
+    }
+
+    function acceptWeight(v) {
+      const c = S.coerce(SLOT_SPECS[TEXT_WEIGHT], v);
+      return c === undefined ? { bad: true } : { v: c };
+    }
+
+    // text.weight: a pin (cut > line > work). Without one the slot is absent (the face's own weight), unless the grow
+    // rule sets it after the entrance is chosen.
+    function decideTextWeight(st) {
+      const { ctx, at } = st;
+      if (!PA.pinned(ctx.ix, TEXT_WEIGHT)) return;
+      const trace = tracing(st, TEXT_WEIGHT);
+      const pin = PA.resolvePin(ctx.ix, at, TEXT_WEIGHT, acceptWeight, ctx.warn);
+      if (pin) setDecision(st, TEXT_WEIGHT, pinDecision(pin));
+      if (trace) {
+        Object.assign(trace, { stage: pin ? 'pin' : 'auto', pin, decision: pin ? st.slots[TEXT_WEIGHT] : null, rule: TEXT_WEIGHT,
+          why: pin ? null : [{ code: 'rule', params: { rule: TEXT_WEIGHT } }] });
+      }
+    }
+
+    // The grow rule: an entrance with 太る (chosen, pinned or aligned) and no 太さ pin ends at the face's heaviest served
+    // weight up to 800 (FACES.growTop), so the line really goes from thin to bold. Part of the cast, so it is cached and
+    // replayed with it. planner/tracks takes it away when a seam replaces the entrance.
+    function growWeight(st) {
+      const { ctx } = st;
+      const a = st.slots.arrive;
+      if (!ctx.glyph || !ctx.glyph.weight || !a || a.v !== GROW_KEY || st.slots[TEXT_WEIGHT]) return;
+      const ref = faceOfCut(st), top = FACES.growTop(ref);
+      if (!(top > ref.weight)) return;
+      const d = { v: top, from: 'rule' };
+      setDecision(st, TEXT_WEIGHT, d);
+      const trace = tracing(st, TEXT_WEIGHT);
+      if (trace) Object.assign(trace, { stage: 'rule', rule: 'weight.grow', decision: d, pin: null, why: null });
+    }
+
+    // A weight part a pin or a rule put where it cannot show (the automatic path never picks it there): the face has too
+    // few weights (weight-flat), or the lettering's outline, shadow or second colour makes the weight change in steps
+    // (weight-style). detail = the family.
+    function weightWarnings(st) {
+      if (st.natural) return;
+      for (const kind of MOTION_KINDS) {
+        const d = st.slots[kind];
+        const def = d ? st.ctx.registry.get(kind, d.v) : null;
+        if (!def || def.optIn !== 'weight') continue;
+        const ref = faceOfCut(st);
+        const where = { cut: st.cut.key, line: st.cut.line || undefined, detail: ref.family };
+        if (weightRoom(st, kind, ref) < FLAT_ROOM) st.ctx.warn(Object.assign({ code: 'weight-flat' }, where));
+        if (!CROSSFADE.has(styleOf(st))) st.ctx.warn(Object.assign({ code: 'weight-style' }, where));
+      }
+    }
+
     // The slots of one cut in the FROZEN order (§4.16.2, DESIGN_2_1 §3.9): orient → arrange → text.* → motion.speed →
     // arrive → dwell → depart → ornament.count → ornament#i → lens → cam.shot → cam.zoom → cam.curve → cam.follow →
     // filter.count → filter#i. Every slot keeps its own stream, so the camera slots change no part choice. natural =
@@ -19831,11 +20091,14 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       decideOrient(st);
       const arrange = decidePart(st, 'arrange', null);
       decideText(st);
+      decideTextWeight(st);
       CAM.decideSpeed(st);
       const own = ctx.registry.get('arrange', arrange.v).motion === 'own';
       for (const kind of MOTION_KINDS) {
         decidePart(st, kind, null, own ? { force: ctx.registry.fallback(kind), rule: 'motion-own' } : null);
+        if (kind === 'arrive' && !own) growWeight(st);
       }
+      weightWarnings(st);
       decideList(st, 'ornament');
       decidePart(st, 'lens', null);
       CAM.decideCamera(st);
@@ -20224,9 +20487,129 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     return {
       SLOT_SPECS, LIST_KINDS, MOTION_KINDS, castCut, createHistory, chooseAuto, poolOf, acceptPart, pinWarnings, serves,
       filterAllows, lookAx, lockFreeCtx, lockFreeIndex, beginCasts, castKeys, intern, deepFreeze, historyRow, lineCond,
-      isChoice, alignments, neighboursOf, alignedSource, REPEAT,
+      isChoice, alignments, neighboursOf, alignedSource, REPEAT, weightOptIn, faceOfCut, WEIGHT_ROOMS,
     };
   });
+/* 文字PVメーカー v2 — original work. The one table of new-work defaults: switches and strengths whose default depends on the document's generation (look.gen, DESIGN_2_2 §0). */
+MV.def('planner/rules', ['core/pins', 'planner/params'], (PINS, PA) => {
+  'use strict';
+
+  // A document made by core/doc newDoc() carries look.gen (D.GEN = 1); older documents, opened files and every
+  // fixture have none. Each row below says what its slot is when nothing pins it: `on` in a document of generation ≥ 1,
+  // `off` in an older one — or, for a row with a parent, whatever the parent resolves to (a member of a switch group
+  // follows the group's switch). A pin always wins, so 固定を外す returns a switch to the document's default, and
+  // turning a switch on in an older document is one work (or line) pin.
+  //
+  // Row fields: slot; parent (a row slot, or null); scopes (where a pin of the slot may live: 'work', 'line'); spec
+  // (the value's ParamSpec, core/schema); on, off (the defaults; null = automatic, decided elsewhere).
+  // Packages add their rows here (P1 typesetting, P2 conventions, P4 glyph motion, P5 timing, P6 歌ハメ).
+  const BOOL = Object.freeze({ type: 'bool' });
+  const STRENGTH = Object.freeze({ type: 'num', min: 0, max: 1, step: 0.05 });
+  const HEAD = Object.freeze({ type: 'enum', of: Object.freeze(['line', 'phrase', 'none']) });
+  const FX_MAX = Object.freeze({ type: 'int', min: 2, max: 8 });
+  const WORK = Object.freeze(['work']);
+  const WORK_LINE = Object.freeze(['work', 'line']);
+
+  function row(slot, parent, scopes, spec, on, off) {
+    return Object.freeze({ slot, parent, scopes, spec, on, off });
+  }
+
+  const ROWS = Object.freeze([
+    // P2 文字PVの定石: one group switch and its members (DESIGN_2_2 §2)
+    row('pv.rules', null, WORK, BOOL, true, false),
+    row('repeat.same', 'pv.rules', WORK_LINE, BOOL, true, false),
+    row('pv.kit', 'pv.rules', WORK, BOOL, true, false),
+    row('pv.alternate', 'pv.rules', WORK, BOOL, true, false),
+    row('pv.arc', 'pv.rules', WORK, BOOL, true, false),
+    row('pv.fxCap', 'pv.rules', WORK, BOOL, true, false),
+    row('pv.fxMax', null, WORK, FX_MAX, null, null),
+    // P1 文字組み (DESIGN_2_2 §1)
+    row('text.kana', null, WORK_LINE, STRENGTH, 0.7, 0),
+    row('text.jump', null, WORK_LINE, STRENGTH, 0.5, 0),
+    row('text.latin', null, WORK_LINE, STRENGTH, 0.5, 0),
+    row('text.head', null, WORK_LINE, HEAD, 'line', 'line'),
+    // P4 モーフ・太さ (DESIGN_2_2 §4)
+    row('morph.auto', null, WORK_LINE, BOOL, true, false),
+    row('weight.auto', null, WORK, BOOL, true, false),
+  ]);
+
+  const BY_SLOT = new Map(ROWS.map((r) => [r.slot, r]));
+  const SPECS = Object.freeze(Object.fromEntries(ROWS.map((r) => [r.slot, r.spec])));
+
+  function isRule(slot) { return BY_SLOT.has(slot); }
+  function rowOf(slot) { return BY_SLOT.get(slot) || null; }
+  function scopesOf(slot) { const r = BY_SLOT.get(slot); return r ? r.scopes : null; }
+
+  // gen(doc) → the document's generation: look.gen when it is an integer ≥ 0, else 0.
+  function gen(doc) {
+    const g = doc && doc.look ? doc.look.gen : undefined;
+    return Number.isInteger(g) && g >= 0 ? g : 0;
+  }
+
+  // The pin index of a document when the caller has none (planner ctx.ix is preferred: it is cached per document).
+  function indexOf(doc, ix) { return ix || PINS.index((doc && doc.pins) || {}); }
+
+  const accepts = new Map();
+  function acceptOf(slot) {
+    let a = accepts.get(slot);
+    if (!a) {
+      const spec = BY_SLOT.get(slot).spec;
+      // a cut pin never applies (refused by core/commands; a stray one in a hand-edited file is skipped)
+      const coerce = PA.acceptSpec(spec);
+      a = (v, rank) => (rank === 'pin:cut' ? { na: true } : coerce(v));
+      accepts.set(slot, a);
+    }
+    return a;
+  }
+
+  // pinAt(ix, slot, at) → the pin that applies at a place ({ lineId } for a line, nothing for the whole work), coerced by
+  // the row's spec: { v, from, by, at } | null. A line pin counts only where the row allows line scope.
+  function pinAt(ix, slot, at) {
+    const r = BY_SLOT.get(slot);
+    if (!r || !ix || !PA.pinned(ix, slot)) return null;
+    const lineId = at && at.lineId && r.scopes.includes('line') ? at.lineId : null;
+    return PA.resolvePin(ix, { cutKey: null, pinCutKey: null, lineId }, slot, acceptOf(slot), null);
+  }
+
+  // defaultValue(doc, ix, slot) → what the slot is at the whole work without its own pin: the parent's value, else
+  // `on` (generation ≥ 1) or `off`. undefined for a slot that is not in the table.
+  function defaultValue(doc, ix, slot) {
+    const r = BY_SLOT.get(slot);
+    if (!r) return undefined;
+    if (r.parent) return value(doc, ix, r.parent);
+    return gen(doc) >= 1 ? r.on : r.off;
+  }
+
+  // value(doc, ix, slot) → the slot at the whole work: its work pin (coerced), else defaultValue.
+  function value(doc, ix, slot) {
+    const r = BY_SLOT.get(slot);
+    if (!r) return undefined;
+    const pin = pinAt(indexOf(doc, ix), slot, null);
+    return pin ? pin.v : defaultValue(doc, ix, slot);
+  }
+
+  // valueAt(doc, ix, slot, lineId) → the slot at a line: its line pin (where allowed), else value(doc, ix, slot).
+  function valueAt(doc, ix, slot, lineId) {
+    const r = BY_SLOT.get(slot);
+    if (!r) return undefined;
+    const pin = lineId ? pinAt(indexOf(doc, ix), slot, { lineId }) : null;
+    return pin ? pin.v : value(doc, ix, slot);
+  }
+
+  // hasDefault(slot) → whether new and older documents differ for the slot (the inspector says 自動（オン）/自動（オフ）
+  // only for those).
+  function hasDefault(slot) {
+    const r = BY_SLOT.get(slot);
+    if (!r) return false;
+    return r.parent ? hasDefault(r.parent) : r.on !== r.off;
+  }
+
+  function sameValue(a, b) {
+    return typeof a === 'number' && typeof b === 'number' ? Math.abs(a - b) < 1e-9 : a === b;
+  }
+
+  return { ROWS, SPECS, isRule, rowOf, scopesOf, gen, defaultValue, value, valueAt, hasDefault, sameValue };
+});
 /* 文字PVメーカー v2 — original work. The cutter: lines → cut skeletons, special cuts, windows, pin reattachment (DESIGN §4.16.5). */
 MV.def('planner/segment', ['core/script', 'core/num', 'core/pins', 'core/rng', 'engine/text/breaker', 'planner/choose',
   'planner/params'], (S, N, PINS, R, BR, CH, PA) => {
@@ -21268,8 +21651,9 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
 /* 文字PVメーカー v2 — original work. plan(doc, { registry }) → Plan: the planner's stages in their FROZEN order (DESIGN §4.16.1–§4.16.2, §3.12; DESIGN_2_1 §2.7, §5.9.3, §11.2.6). */
 MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'core/timing', 'core/beats', 'core/motion',
   'core/doc', 'core/schema', 'core/script', 'core/media', 'core/shot', 'planner/choose', 'planner/params', 'planner/look',
-  'planner/segment', 'planner/features', 'planner/cast', 'planner/tracks', 'planner/camera', 'planner/encode', 'planner/extreme'],
-(H, N, PINS, LY, TM, B, MO, D, S, SC, MEDIA, SHOT, CH, PA, LK, SG, FE, CA, TR, CAM, EN, XT) => {
+  'planner/segment', 'planner/features', 'planner/cast', 'planner/tracks', 'planner/camera', 'planner/encode', 'planner/extreme',
+  'planner/rules'],
+(H, N, PINS, LY, TM, B, MO, D, S, SC, MEDIA, SHOT, CH, PA, LK, SG, FE, CA, TR, CAM, EN, XT, RU) => {
   'use strict';
 
   // v2: rigs, cut.rig, grounds[].zoomed, feat.sectionStart, media, the camera slots (DESIGN_2_1 §2.7, §11.2.6).
@@ -21760,6 +22144,19 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
     grounds.forEach((g, i) => { g.zoomed = zoomed[i]; });
   }
 
+  // --- glyph motion switches (v2.2, DESIGN_2_2 §4) ------------------------------------------------------------------
+
+  // ctx.glyph = { morph, weight, maybeMorph, id }: 「同じ字をつなぐ」 and 「太さを動かす」 for the whole work (planner/rules:
+  // the work pin, else on in a document made by newDoc()), whether any line may turn the morph on (a morph.auto pin
+  // anywhere), and their id for the cast key. Both off and nothing pinned: 'g00', the key text of every older document.
+  const GLYPH_OFF = 'g00';
+  function glyphSwitches(doc, ix) {
+    const morph = RU.value(doc, ix, 'morph.auto') === true;
+    const weight = RU.value(doc, ix, 'weight.auto') === true;
+    const maybeMorph = morph || PA.pinned(ix, 'morph.auto');
+    return Object.freeze({ morph, weight, maybeMorph, id: 'g' + (+morph) + (+weight) + (maybeMorph ? 'p' : '') });
+  }
+
   // --- the pipeline ---------------------------------------------------------------------------------------------
 
   // run(doc, registry, { trace, fresh }) → Plan. trace = { cutKey, slot, out } records one slot's decision
@@ -21780,7 +22177,7 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
       timing: Object.assign({}, TM.TIMING_DEFAULTS, doc.timing || {}), pools: new Map(), trace, casts: null,
       lockFree: CA.lockFreeIndex(doc.pins), media: mediaIndex(doc), mediaUsed: new Set(),
       castKeys: null, seams: null, encodings: null, fallbacks: null, lookAxis: null, lineConds: null, workCond: null,
-      shotMood: null, echoed: null, align: null, alignNear: null,
+      shotMood: null, echoed: null, align: null, alignNear: null, glyph: null,
     };
     // Traced runs (explain) and fresh runs neither read nor refresh the caches of re-planning.
     if (cached) beginFeatures();
@@ -21806,6 +22203,7 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
     ctx.amounts = look.amounts;
     ctx.pace = look.mood.pace;
     ctx.chooser = CH.createChooser(registry, { mood: look.mood, theme: look.theme, season: look.season, amounts: look.amounts });
+    ctx.glyph = glyphSwitches(doc, ctx.ix);
 
     // 3. cutter
     const cuts = SG.cutAll(ctx, timed, sheet.meta, duration);
@@ -21830,8 +22228,10 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
     // 5. cast, in time order (a cut whose inputs did not change reuses its cast, planner/cast castCut)
     if (cached) {
       ctx.casts = CA.beginCasts(registry);
+      // (the glyph switches join the key only when one is on or pinned, so an older document's key text is as before)
       ctx.castKeys = CA.castKeys(ctx, EN.canon([registry.version, look.mood.key, look.theme.key, look.season, look.amounts,
-        look.variety, aspect, doc.look.seed, doc.filters || null, ctx.bpm, ctx.media ? ctx.media.key : null]));
+        look.variety, aspect, doc.look.seed, doc.filters || null, ctx.bpm, ctx.media ? ctx.media.key : null]) +
+        (ctx.glyph.id !== GLYPH_OFF ? '|' + ctx.glyph.id : ''));
     }
     // The cuts a later cut sings again (their rows keep what the repeats inherit, planner/cast castCut).
     ctx.echoed = new Set();
@@ -21917,8 +22317,8 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
 /* 文字PVメーカー v2 — original work. Inspector field states, lock payloads and plan-value readers (DESIGN §4.16.8, §3.13, §3.6; DESIGN_2_1 §3.9). */
 MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyrics', 'core/schema', 'core/timing',
   'core/curve', 'core/shot', 'planner/params', 'planner/cast', 'planner/look', 'planner/segment', 'planner/plan',
-  'planner/extreme'],
-(P, PINS, REG, LY, S, TM, CV, SHOT, PA, CA, LK, SG, PL, XT) => {
+  'planner/extreme', 'planner/rules'],
+(P, PINS, REG, LY, S, TM, CV, SHOT, PA, CA, LK, SG, PL, XT, RU) => {
   'use strict';
 
   const LOOK_NAMES = new Set(['mood', 'theme', 'season', 'bpm', 'beatOffset', 'readRate', 'length', 'titleCard']);
@@ -21932,9 +22332,12 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
 
   // 'look' (work-scope slots), 'line' (start/end/split/lang; since v2.1 also avoid, and season at line or cut scope,
   // which is a line value while work:season stays the look's), 't0', 'el', 'count', 'part', 'param' or 'value'
-  // (orient, text.*, motion.speed, cam.*, rig, rig.curve).
+  // (orient, text.*, motion.speed, cam.*, rig, rig.curve); v2.2 'rule': a switch of the new-work table
+  // (planner/rules) at work scope — its value is the work pin, else the document's default (repeat.same keeps its v2.1
+  // handling here until the conventions package takes it into the table's category).
   function categoryOf(parsed) {
     const slot = parsed.slot;
+    if (parsed.scope.kind === 'work' && !parsed.part && !parsed.el && slot !== CA.REPEAT && RU.isRule(slot)) return 'rule';
     if (slot === 'season' && parsed.scope.kind !== 'work') return 'line';
     if (LOOK_NAMES.has(slot) || LOOK_PREFIX.test(slot) || (parsed.part && parsed.part.kind === 'texture')) return 'look';
     if (LINE_NAMES.has(slot)) return 'line';
@@ -22151,6 +22554,7 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
   function schemaOf(registry, plan, parsed, cuts) {
     const cat = categoryOf(parsed);
     const slot = parsed.slot;
+    if (cat === 'rule') return RU.SPECS[slot];
     if (cat === 'look') {
       if (slot === 'mood' || slot === 'theme') return { type: 'part', kind: slot, of: registry.keys(slot), none: false };
       if (parsed.part && !parsed.part.param) {
@@ -22199,7 +22603,7 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
   // at the path's scope and every broader one (special cuts have no line).
   function canPinAt(parsed) {
     const cat = categoryOf(parsed);
-    if (cat === 'look') return ['work'];
+    if (cat === 'look' || cat === 'rule') return ['work'];
     if (cat === 'line') return parsed.slot === 'season' ? ['line', 'work'] : ['line'];
     if (cat === 't0') return ['cut'];
     const kind = parsed.scope.kind;
@@ -22342,12 +22746,30 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
   }
   const EMPTY = Object.freeze({});
 
+  // A switch of the new-work table (v2.2, DESIGN_2_2 §0): its work pin, else the document's default, which the auto text
+  // names (「新しい作品の標準」 / 「この機能より前に作った作品なので、はじめはオフ」).
+  function ruleState(doc, parsed, path, ix) {
+    const slot = parsed.slot;
+    const pin = (doc.pins || {})[path] || null;
+    const value = RU.value(doc, ix, slot);
+    const schema = RU.SPECS[slot];
+    const fs = {
+      path, value, display: null, state: 'auto', pinnedAt: null, by: null, schema, autoText: null, canPinAt: ['work'],
+      inactiveReason: null, warn: null, pinAt: pin ? path : null,
+    };
+    if (pin) Object.assign(fs, { state: pin.by === 'lock' ? 'locked' : pin.by === 'ai' ? 'ai' : 'pinned', pinnedAt: 'work', by: pin.by });
+    else fs.autoText = ['rule.auto.' + (RU.gen(doc) >= 1 ? 'new' : 'old'), {}];
+    fs.display = displayOf(parsed, value, null, 'rule', schema, doc);
+    return fs;
+  }
+
   // fieldState(doc, plan, sel, path, { registry }) → FieldState (§3.13).
   function fieldState(doc, plan, sel, path, opts) {
     const registry = opts && opts.registry;
     const parsed = P.parse(path);
     const cat = categoryOf(parsed);
     const ix = pinIndexOf(doc.pins);
+    if (cat === 'rule') return ruleState(doc, parsed, path, ix);
     const perCut = cat !== 'look' && !(cat === 'line' && parsed.scope.kind === 'line');
     const cuts = perCut ? cutsFor(plan, sel, parsed) : [];
     const values = perCut ? cuts.map((c) => valueAt(plan, c, parsed, registry, ix)) : [valueAt(plan, null, parsed, registry, ix)];
@@ -22492,7 +22914,7 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
 });
 /* 文字PVメーカー v2 — original work. explain(): why a slot has its value, and the alternatives — lazy, never in the Plan (DESIGN §4.16.8; DESIGN_2_1 §2.8, §3.9, §11.2.6). */
 MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media', 'planner/choose', 'planner/look',
-  'planner/plan', 'planner/fields'], (P, PINS, LY, MEDIA, CH, LK, PL, F) => {
+  'planner/plan', 'planner/fields', 'planner/rules'], (P, PINS, LY, MEDIA, CH, LK, PL, F, RU) => {
   'use strict';
 
   const SCOPE_OF = { 'pin:cut': 'cut', 'pin:line': 'line', 'pin:work': 'work' };
@@ -22605,7 +23027,8 @@ MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media
     const weights = new Map((trace.candidates || []).map((c) => [c.key, c.w]));
     const out = [];
     for (const def of registry.all(kind)) {
-      if (def.pool === false) continue;
+      // an opt-in part (v2.2 weight parts) is an alternative where the traced pool offered it
+      if (def.pool === false && !(def.optIn !== undefined && weights.has(def.key))) continue;
       const masked = maskOf(registry, doc, plan, kind, def.key, mctx);
       out.push({ key: def.key, w: masked ? 0 : weights.has(def.key) ? weights.get(def.key) : 0, masked });
     }
@@ -22810,6 +23233,16 @@ MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media
     return out;
   }
 
+  // A switch of the new-work table (v2.2): its work pin, else the document's default (new work or older work).
+  function explainRule(doc, parsed) {
+    const path = P.format(parsed);
+    const value = RU.value(doc, null, parsed.slot);
+    const pin = (doc.pins || {})[path];
+    if (pin) return { path, value, from: 'pin:work', by: pin.by, why: pinWhy('pin:work', pin.by), alts: [] };
+    const rule = 'rules.' + (RU.gen(doc) >= 1 ? 'new' : 'old');
+    return { path, value, from: 'auto', by: undefined, why: [{ code: 'rule', params: { rule } }], alts: [] };
+  }
+
   // explain(doc, plan, path, { registry }) → { path, value, from, by, why: [{ code, params }], alts: [{ key, w, masked }] }
   // Chooser slots re-run the planner with tracing on for exactly that slot (the same inputs, so the same value as
   // the Plan); other slots are read from the Plan and the pins. Nothing here touches `plan` or `doc`.
@@ -22819,6 +23252,7 @@ MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media
     const parsed = P.parse(path);
     const cat = F.categoryOf(parsed);
     if (cat === 'look') return explainLook(doc, plan, parsed, registry);
+    if (cat === 'rule') return explainRule(doc, parsed);
     const cut = cutFor(plan, parsed);
     if (!cut && cat !== 'line') {
       return { path, value: undefined, from: 'auto', by: undefined, why: [], alts: [] };
@@ -23438,9 +23872,9 @@ MV.def('engine/scene/behave', ['core/num', 'core/curve', 'core/rng', 'core/motio
   const DEG = N.DEG;
 
   // The pooled DELTA pose of K.perGlyph / K.perGlyphHold / K.moves: angles in DEGREES (§4.18.3). No px/py: pivots are
-  // set by the adapter from the motion's unit.
+  // set by the adapter from the motion's unit. `wt` (v2.2) is a weight offset in CSS weight units (ADD, scale 1).
   const DELTA = Object.freeze(['x', 'y', 'z', 'rot', 'kx', 'ky', 'rx', 'ry', 'sx', 'sy', 'alpha', 'reveal', 'blur', 'tint',
-    'glow', 'shard', 'echo', 'jx', 'jy', 'pixel']);
+    'glow', 'shard', 'echo', 'jx', 'jy', 'pixel', 'wt']);
   const MUL = Object.freeze(['sx', 'sy', 'alpha', 'reveal']);
   const ADD = Object.freeze(DELTA.filter((c) => !MUL.includes(c)));
   const ANGLE = Object.freeze(['rot', 'kx', 'ky', 'rx', 'ry']);
@@ -23598,7 +24032,7 @@ MV.def('engine/scene/behave', ['core/num', 'core/curve', 'core/rng', 'core/motio
 
   function resetDelta() {
     D.x = 0; D.y = 0; D.z = 0; D.rot = 0; D.kx = 0; D.ky = 0; D.rx = 0; D.ry = 0; D.sx = 1; D.sy = 1; D.alpha = 1;
-    D.reveal = 1; D.blur = 0; D.tint = 0; D.glow = 0; D.shard = 0; D.echo = 0; D.jx = 0; D.jy = 0; D.pixel = 0;
+    D.reveal = 1; D.blur = 0; D.tint = 0; D.glow = 0; D.shard = 0; D.echo = 0; D.jx = 0; D.jy = 0; D.pixel = 0; D.wt = 0;
   }
 
   function mergeDelta(P, i) {
@@ -23672,7 +24106,7 @@ MV.def('engine/scene/behave', ['core/num', 'core/curve', 'core/rng', 'core/motio
   // --- building motion behaviours ------------------------------------------------------------------------------
 
   const TRACK_UNITS = Object.freeze({ x: 'em', y: 'em', z: 'em', rot: 'deg', kx: 'deg', ky: 'deg', rx: 'deg', ry: 'deg',
-    blur: 'em' });
+    blur: 'em', wt: '' });
   const UNIT_KINDS = Object.freeze(['', 'em', 'du', 'deg', 'rad', 'x']);
 
   function identityOf(col) { return MUL.includes(col) ? 1 : 0; }
@@ -23776,11 +24210,13 @@ MV.def('engine/scene/behave', ['core/num', 'core/curve', 'core/rng', 'core/motio
   // The per-glyph progress curve of an `ease` param: any Curve (an unreadable value is linear, never an error).
   function easeOf(v) { return CV.fn(v); }
 
-  // make for arrive/depart parts built by K.perGlyph(fn) or K.moves(spec). kind = 'arrive' | 'depart'.
+  // make for arrive/depart parts built by K.perGlyph(fn, opts) or K.moves(spec). kind = 'arrive' | 'depart'.
+  // v2.2 (DESIGN_2_2 §4): source.prep(env, target, p) → p' adds build-time params from the target (it must not change
+  // the given object); source.wt(p') → [lo, hi] declares the weight offsets the behaviour may write (behaviour.wt).
   function glyphMotionMaker(kind, source) {
     return function make(env, target, p) {
       if (!target || target.to <= target.from) return [];
-      const params = p || {};
+      const params = source.prep ? source.prep(env, target, p || {}) : (p || {});
       const unit = source.unit || 'glyph';
       const tm = motionTiming(env, target, params, kind, unit);
       const t0 = kind === 'arrive' ? env.times.a : env.times.out;
@@ -23791,8 +24227,17 @@ MV.def('engine/scene/behave', ['core/num', 'core/curve', 'core/rng', 'core/motio
         fn: source.fn || null, tracks: source.motion ? tracksFor(source.motion, kind, params) : null,
         pivot: unit === 'glyph' ? null : STG.pivots(env, target, unit),
       });
+      if (source.wt) b.wt = reachOf(source.wt(params));
       return [b];
     };
+  }
+
+  // A declared weight reach [lo, hi] (lo ≤ 0 ≤ hi, finite), frozen; throws for a malformed one (a part bug).
+  function reachOf(r) {
+    if (!(Array.isArray(r) && r.length === 2 && finite(r[0]) && finite(r[1]) && r[0] <= r[1])) {
+      throw new BehaviourError('bad-behaviour', 'wt must be [lo, hi] weight offsets');
+    }
+    return Object.freeze([Math.min(0, r[0]) + 0, Math.max(0, r[1]) + 0]);   // (+ 0: never −0)
   }
 
   function tracksFor(motion, kind, p) {
@@ -23815,18 +24260,19 @@ MV.def('engine/scene/behave', ['core/num', 'core/curve', 'core/rng', 'core/motio
     return out;
   }
 
-  // make for dwell parts built by K.perGlyphHold(fn). A `curve` param that is not linear warps the hold clock over
-  // [rest, out] (DESIGN_2_1 §2.3 dwell.curve).
-  function holdMaker(fn) {
+  // make for dwell parts built by K.perGlyphHold(fn, opts). A `curve` param that is not linear warps the hold clock over
+  // [rest, out] (DESIGN_2_1 §2.3 dwell.curve). opts (v2.2) = { prep, wt } as for glyphMotionMaker.
+  function holdMaker(fn, opts) {
     return function make(env, target, p) {
       if (!target || target.to <= target.from) return [];
       const n = target.to - target.from;
-      const params = p || {};
+      const params = opts && opts.prep ? opts.prep(env, target, p || {}) : (p || {});
       const arrived = target.arrived || new Float32Array(n).fill(env.times.rest);
       const hold = Object.assign(baseFields(env, target, params), {
         phase: PH.REST, live: 'during', from: target.from, to: target.to, t0: env.times.rest, t1: env.times.out,
         run: runHold, fn, rest: env.times.rest, out: env.times.out, arrived, rank: identityRanks(n),
       });
+      if (opts && opts.wt) hold.wt = reachOf(opts.wt(params));       // warped and masked copies keep it
       return [warped(hold, params.curve, env.times.rest, env.times.out)];
     };
   }
@@ -23850,19 +24296,21 @@ MV.def('engine/scene/table', ['core/mat'], (MAT) => {
   'use strict';
 
   // Bump SCHEMA whenever the column list changes (DESIGN §4.17.1 "Changing the column list").
-  const SCHEMA = 1;
+  // 2 (v2.2, DESIGN_2_2 §4): the weight column `wt` appended.
+  const SCHEMA = 2;
   const CHUNK = 256;
 
   const TYPE = Object.freeze({ group: 0, glyph: 1, shape: 2, paint: 3, image: 4, particles: 5, camera: 6 });
   const TYPE_NAMES = Object.freeze(['group', 'glyph', 'shape', 'paint', 'image', 'particles', 'camera']);
   const FLAG = Object.freeze({ hidden: 1, static: 2, pickable: 4, followText: 8 });
 
-  // The 22 pose columns, in the FROZEN order.
+  // The 23 pose columns, in the FROZEN order. `wt` (v2.2) is a weight offset in CSS weight units (identity 0, not
+  // clamped here; the draw path clamps it to the face's served weights).
   const POSE = Object.freeze(['x', 'y', 'z', 'rot', 'sx', 'sy', 'kx', 'ky', 'rx', 'ry', 'alpha', 'blur', 'reveal', 'tint',
-    'glow', 'shard', 'echo', 'jx', 'jy', 'pixel', 'px', 'py']);
+    'glow', 'shard', 'echo', 'jx', 'jy', 'pixel', 'px', 'py', 'wt']);
   // Combination rules: additive (+=), multiplicative (*=), set (last writer in phase order).
   const ADD = Object.freeze(['x', 'y', 'z', 'rot', 'kx', 'ky', 'rx', 'ry', 'blur', 'tint', 'glow', 'shard', 'echo', 'jx', 'jy',
-    'pixel']);
+    'pixel', 'wt']);
   const MUL = Object.freeze(['sx', 'sy', 'alpha', 'reveal']);
   const SET = Object.freeze(['px', 'py']);
   const ANGLES = Object.freeze(['rot', 'kx', 'ky', 'rx', 'ry']);
@@ -26479,8 +26927,8 @@ MV.def('engine/scene/frame', ['core/num', 'core/hash', 'core/noise', 'core/mat',
 });
 /* 文字PVメーカー v2 — original work. Drawing an evaluated scene layer: glyphs on the direct or sprite path, shapes, paints, particles, images, picks (DESIGN §4.19.5–7). */
 MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'engine/scene/frame', 'engine/render/sprites',
-  'engine/render/shapes'],
-(C, MAT, T, F, SP, SH) => {
+  'engine/render/shapes', 'engine/text/faces'],
+(C, MAT, T, F, SP, SH, FACES) => {
   'use strict';
 
   // The glyph path is chosen from the glyph's pose at this frame only — never from its size or the output scale — so
@@ -26493,6 +26941,11 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
   const SHARDS = 6;
   const FLIP_SHADE = 0.35;
   const TYPE = T.TYPE;
+  // Weight pairs (v2.2, DESIGN_2_2 §4): a glyph whose pose has wt ≠ 0 draws the two served weights around its face's
+  // weight + wt, the heavier at a·f and the lighter over it at a(1 − f)/(1 − a·f), so the core keeps alpha a. That holds
+  // for one solid fill: the styles whose body is a fill (and the glow style, whose halo is drawn once, under it). The
+  // others (outline, shadow, duo) take the nearest served weight: the weight changes in steps.
+  const CROSSFADE_STYLES = new Set(['plain', 'glow']);
 
   // --- colours -----------------------------------------------------------------------------------------------------
 
@@ -26552,7 +27005,9 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
   //   parallax of the layer being drawn: a medium at another camera factor gets its own view, §11.9.3), stillMode
   //   (0 every node, 1 all but `still` media, 2 only `still` media: those are drawn outside a seam composite) and
   //   ghostTl (null, or while fx.textAt draws the text layers at an earlier time, the scene time of the frame itself:
-  //   media on the show clock keep that frame's media time)
+  //   media on the show clock keep that frame's media time); v2.2: faceReady (null, or (FontRef) → whether a served
+  //   weight other than the scene's own faces is loaded: weight pairs draw only loaded weights; null counts every one as
+  //   loaded) and recX, recHi, recLo (pooled glyph records of a weight pair)
   function createDrawContext(o) {
     return {
       g: null, D: new Float32Array([1, 0, 0, 1, 0, 0]), pal: null, W: 0, H: 0, scale: 1, q: null, assets: null,
@@ -26565,6 +27020,7 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
       pool: o.pool || null, blurred: o.blurred || null, over: 1, overKey: 0,
       cam: null, layerK: 1, stillMode: 0, ghostTl: null, depthCam: { x: 0, y: 0, zoom: 1, roll: 0, shakeX: 0, shakeY: 0, fz: 1 },
       VM: new Float32Array(6),
+      faceReady: typeof o.faceReady === 'function' ? o.faceReady : null, recX: {}, recHi: {}, recLo: {},
     };
   }
 
@@ -26637,6 +27093,82 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
       g.fillStyle = pal.accent;
       g.fillText(rec.ch, 0, 0);
     }
+  }
+
+  // --- weight pairs (v2.2) ----------------------------------------------------------------------------------------------
+
+  // A pooled copy of rec with another face (no allocation per frame).
+  function recAs(target, rec, font) {
+    Object.assign(target, rec);
+    target.font = font;
+    return target;
+  }
+
+  // The alpha of the lighter body drawn over the heavier one at a·f, so the covered core composites to a.
+  function lighterAlpha(a, f) { return (a * (1 - f)) / (1 - a * f); }
+
+  // A style that cannot crossfade takes the nearest served weight of the pair.
+  function snapPair(wp, base) {
+    if (wp.hi && wp.f >= 0.5) wp.lo = wp.hi;
+    wp.hi = null;
+    wp.f = 0;
+    wp.plain = wp.lo === base;
+  }
+
+  // Only loaded weights are drawn: a heavier rung that is not ready is dropped, a lighter one is replaced by the nearest
+  // loaded weight toward the face's own (which ends the walk: the scene was built with it).
+  function readyPair(dc, base, wp) {
+    if (wp.hi && !dc.faceReady(wp.hi)) { wp.hi = null; wp.f = 0; }
+    if (wp.lo !== base && !dc.faceReady(wp.lo)) wp.lo = nearestReady(dc, base, wp.lo);
+    wp.plain = !wp.hi && wp.lo === base;
+  }
+
+  function nearestReady(dc, base, from) {
+    const L = FACES.ladderOf(base);
+    const up = from.weight < base.weight;
+    let k = L.indexOf(from.weight);
+    if (k < 0) return base;
+    for (k += up ? 1 : -1; k >= 0 && k < L.length; k += up ? 1 : -1) {
+      const w = L[k];
+      if (up ? w >= base.weight : w <= base.weight) return base;
+      const r = FACES.atWeight(base, w);
+      if (dc.faceReady(r)) return r;
+    }
+    return base;
+  }
+
+  // drawDirect with a weight pair: the echo copies and the tint copy in the face fx (the nearer weight), the body in the
+  // heavier weight at alpha·f, then in the lighter over it (or once, when the pair has no heavier weight).
+  function drawDirectW(dc, g, rec, fx, M, alpha, ink, ink2, tint, echo, wp) {
+    const pal = dc.pal;
+    if (echo > 0) {
+      textSetup(dc, g, cssOf(fx.font, fx.em));
+      const a = 0.5 * echo * alpha, dx = ECHO_SHIFT * echo * fx.em;
+      for (let s = -1; s <= 1; s += 2) {
+        setMatrix(g, M);
+        g.translate(s * dx, 0);
+        localTurn(g, fx);
+        g.globalAlpha = a;
+        g.fillStyle = s < 0 ? pal.shiftB : pal.shiftA;
+        g.fillText(fx.ch, 0, 0);
+      }
+    }
+    if (wp.hi) directBody(dc, g, recAs(dc.recHi, rec, wp.hi), M, alpha * wp.f, ink, ink2);
+    directBody(dc, g, recAs(dc.recLo, rec, wp.lo), M, wp.hi ? lighterAlpha(alpha, wp.f) : alpha, ink, ink2);
+    if (tint > 0) {
+      textSetup(dc, g, cssOf(fx.font, fx.em));
+      g.globalAlpha = alpha * tint;
+      g.fillStyle = pal.accent;
+      g.fillText(fx.ch, 0, 0);
+    }
+  }
+
+  function directBody(dc, g, r, M, alpha, ink, ink2) {
+    textSetup(dc, g, cssOf(r.font, r.em));
+    setMatrix(g, M);
+    localTurn(g, r);
+    g.globalAlpha = alpha;
+    SP.paintStyled(g, r.ch, r.em, ink, r.style, ink2, 0, 0);
   }
 
   // One sprite at the glyph's origin, e du per raster px, drawn whole. A raster that carries its ink rect (sp.ink: a host
@@ -26760,18 +27292,20 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
     g.globalCompositeOperation = 'source-over';
   }
 
-  function drawSprite(dc, g, rec, M, alpha, ink, ink2, tint, echo, blur, glow, shard, pixel, seed) {
+  // fx = the record whose face draws the halo, echo, tint and pixel/shard copies (rec itself without a weight pair);
+  // wp = null or the weight pair of the body (two bodies when it has a heavier weight).
+  function drawSprite(dc, g, rec, fx, M, alpha, ink, ink2, tint, echo, blur, glow, shard, pixel, seed, wp) {
     const pal = dc.pal;
     const k = SP.bucketOf(rec.em * SH.scaleOf(M));
     SP.levelPair(blur, dc.pair);
-    if (glow > 0) drawHalo(dc, g, rec, M, k, alpha, glow);
+    if (glow > 0) drawHalo(dc, g, fx, M, k, alpha, glow);
     if (echo > 0) {
       const dx = ECHO_SHIFT * echo * rec.em;
-      spritePair(dc, g, rec, M, k, pal.shiftA, 'plain', null, 0.5 * echo * alpha, dx);
-      spritePair(dc, g, rec, M, k, pal.shiftB, 'plain', null, 0.5 * echo * alpha, -dx);
+      spritePair(dc, g, fx, M, k, pal.shiftA, 'plain', null, 0.5 * echo * alpha, dx);
+      spritePair(dc, g, fx, M, k, pal.shiftB, 'plain', null, 0.5 * echo * alpha, -dx);
     }
     if (pixel >= 1 || shard > 0) {
-      const sp = dc.sprites.glyph(rec.font, rec.ch, ink, rec.style, ink2, k, dc.pair.lo, rec.em);
+      const sp = dc.sprites.glyph(fx.font, rec.ch, ink, rec.style, ink2, k, dc.pair.lo, rec.em);
       if (g) {
         const e = rec.em / sp.F;
         setMatrix(g, M);
@@ -26779,23 +27313,33 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
         if (pixel >= 1) drawPixelated(dc, g, sp, e, alpha, pixel);
         else drawShards(g, sp, e, alpha, shard, rec.em, seed);
       }
+    } else if (wp) {
+      if (wp.hi) spritePair(dc, g, recAs(dc.recHi, rec, wp.hi), M, k, ink, rec.style, ink2, alpha * wp.f, 0);
+      spritePair(dc, g, recAs(dc.recLo, rec, wp.lo), M, k, ink, rec.style, ink2, wp.hi ? lighterAlpha(alpha, wp.f) : alpha, 0);
     } else {
       spritePair(dc, g, rec, M, k, ink, rec.style, ink2, alpha, 0);
     }
-    if (tint > 0) spritePair(dc, g, rec, M, k, pal.accent, 'plain', null, alpha * tint, 0);
+    if (tint > 0) spritePair(dc, g, fx, M, k, pal.accent, 'plain', null, alpha * tint, 0);
   }
 
   // drawGlyph(dc, scene, i, M): one glyph node under the full device transform M. With dc.g null it draws nothing and
   // only looks up the sprites the glyph would draw (warmLayer): the keys come from this one code path.
-  function drawGlyph(dc, scene, i, M) {
+  function drawGlyph(dc, scene, i, M) { return drawGlyphAs(dc, scene, i, M, -1, 0); }
+
+  const WP = { lo: null, hi: null, f: 0, plain: true };        // the pooled weight pair of drawGlyphAs
+
+  // drawGlyphAs(dc, scene, i, M, alphaIn, blurAdd): drawGlyph with an explicit alpha (alphaIn ≥ 0; −1 = the node's
+  // world alpha) and extra blur in du (0 = none); a glyph seam draws its travellers with it (v2.2).
+  function drawGlyphAs(dc, scene, i, M, alphaIn, blurAdd) {
     const table = scene.table, P = table.live;
     const rec = scene.stores.glyph[table.payload[i]];
     if (!rec || !rec.font || rec.cls === 'space') return false;
     const reveal = P.reveal[i];
     if (!(reveal > 0.001)) return false;
-    const alpha = table.wa[i];
+    const alpha = alphaIn < 0 ? table.wa[i] : alphaIn;
     const pr = dc.probe;
-    const blur = P.blur[i] + (pr ? pr.blur || 0 : 0);
+    let blur = P.blur[i] + (pr ? pr.blur || 0 : 0);
+    if (blurAdd !== 0) blur += blurAdd;
     const glow = P.glow[i] + (pr ? pr.glow || 0 : 0);
     const shard = P.shard[i] + (pr ? pr.shard || 0 : 0);
     const pixel = P.pixel[i] + (pr ? pr.pixel || 0 : 0);
@@ -26815,12 +27359,22 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
     // Text style 'glow' is a style, not a pose: a steady halo under the glyph, while the body takes the path its pose
     // selects (direct at rest).
     const halo = rec.style === 'glow' && glow < STYLE_GLOW ? STYLE_GLOW : glow;
+    // v2.2 weight: the pair of served weights (the path choice is unchanged: only blur, glow, shard, pixel choose it)
+    const dw = P.wt[i];
+    let wp = dw !== 0 ? FACES.weightPair(rec.font, dw, WP) : null;
+    if (wp !== null && wp.hi !== null && !CROSSFADE_STYLES.has(rec.style)) snapPair(wp, rec.font);
+    if (wp !== null && dc.faceReady !== null) readyPair(dc, rec.font, wp);
+    if (wp !== null && wp.plain) wp = null;
+    const fx = wp === null ? rec : recAs(dc.recX, rec, wp.hi !== null && wp.f >= 0.5 ? wp.hi : wp.lo);
     if (direct) {
-      if (halo > 0) drawHalo(dc, g, rec, M, SP.bucketOf(rec.em * SH.scaleOf(M)), alpha, halo);
-      if (g) drawDirect(dc, g, rec, M, alpha, ink, ink2, P.tint[i], P.echo[i]);
+      if (halo > 0) drawHalo(dc, g, fx, M, SP.bucketOf(rec.em * SH.scaleOf(M)), alpha, halo);
+      if (g) {
+        if (wp === null) drawDirect(dc, g, rec, M, alpha, ink, ink2, P.tint[i], P.echo[i]);
+        else drawDirectW(dc, g, rec, fx, M, alpha, ink, ink2, P.tint[i], P.echo[i], wp);
+      }
     } else {
       const seed = rec.run * 7919 + rec.i;
-      drawSprite(dc, g, rec, M, alpha, ink, ink2, P.tint[i], P.echo[i], blur < 0 ? 0 : blur, halo, shard, pixel, seed);
+      drawSprite(dc, g, rec, fx, M, alpha, ink, ink2, P.tint[i], P.echo[i], blur < 0 ? 0 : blur, halo, shard, pixel, seed, wp);
     }
     if (reveal < 1 && g) { g.restore(); dc.font = null; }
     return true;
@@ -26852,16 +27406,23 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
   const COVER_PAIR = { lo: 0, hi: 0, f: 0 };
 
   // count (optional, tests): { sprites, inks } incremented per sprite and per direct-path ink draw counted.
+  // A glyph drawn as a weight pair (wt ≠ 0, a crossfading style, between two served weights) counts its body twice;
+  // font readiness is not read, so the cost is a function of the scene alone.
+  const COVER_WP = { lo: null, hi: null, f: 0, plain: true };
   function glyphCover(rec, P, i, wa, M, W, H, count) {
     if (!(P.reveal[i] > 0.001) || !(wa >= T.MIN_ALPHA)) return 0;
-    return poseCover(rec, P.blur[i], P.glow[i], P.shard[i], P.pixel[i], P.echo[i], P.tint[i], M, W, H, count);
+    const dw = P.wt ? P.wt[i] : 0;
+    const bodies = dw !== 0 && rec && rec.font && CROSSFADE_STYLES.has(rec.style) &&
+      FACES.weightPair(rec.font, dw, COVER_WP).hi !== null ? 2 : 1;
+    return poseCover(rec, P.blur[i], P.glow[i], P.shard[i], P.pixel[i], P.echo[i], P.tint[i], M, W, H, count, bodies);
   }
 
-  // poseCover(rec, blur, glow, shard, pixel, echo, tint, M, W, H, count?) → glyphCover for a visible glyph with these
-  // pose values.
+  // poseCover(rec, blur, glow, shard, pixel, echo, tint, M, W, H, count?, bodies = 1) → glyphCover for a visible glyph
+  // with these pose values; bodies = how many times the body is drawn (2 for a weight pair).
   let COUNT = null;
-  function poseCover(rec, blurIn, glow, shard, pixel, echo, tint, M, W, H, count) {
+  function poseCover(rec, blurIn, glow, shard, pixel, echo, tint, M, W, H, count, bodiesIn) {
     COUNT = count || null;
+    const bodies = bodiesIn === 2 ? 2 : 1;
     if (!rec || !rec.font || rec.cls === 'space') return 0;
     const blur = blurIn > 0 ? blurIn : 0;
     const halo = rec.style === 'glow' && glow < STYLE_GLOW ? STYLE_GLOW : glow;
@@ -26876,6 +27437,7 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
     if (direct) {
       if (echo > 0) { const dx = ECHO_SHIFT * echo * rec.em; sum += inkCover(rec, M, dx, W, H) + inkCover(rec, M, -dx, W, H); }
       sum += inkCover(rec, M, 0, W, H);
+      if (bodies === 2) sum += inkCover(rec, M, 0, W, H);
       if (tint > 0) sum += inkCover(rec, M, 0, W, H);
       return sum;
     }
@@ -26885,7 +27447,10 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
       sum += pairCover(rec, M, pr, dx, W, H) + pairCover(rec, M, pr, -dx, W, H);
     }
     if (pixel >= 1 || shard > 0) sum += rasterCover(rec, M, pr.lo, 0, pixel >= 1 ? 0 : shard, true, W, H);
-    else sum += pairCover(rec, M, pr, 0, W, H);
+    else {
+      sum += pairCover(rec, M, pr, 0, W, H);
+      if (bodies === 2) sum += pairCover(rec, M, pr, 0, W, H);
+    }
     if (tint > 0) sum += pairCover(rec, M, pr, 0, W, H);
     return sum;
   }
@@ -27102,7 +27667,7 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
     return n;
   }
 
-  return { createDrawContext, resetCounts, drawLayer, warmLayer, drawGlyph, hasLayer, hasMedia, hasStill, nodesByLayer, inkOf,
+  return { createDrawContext, resetCounts, drawLayer, warmLayer, drawGlyph, drawGlyphAs, CROSSFADE_STYLES, hasLayer, hasMedia, hasStill, nodesByLayer, inkOf,
     secondInk, shaded, cssOf, clipReveal, minScaleOf, inkClip, INK_CLIP, glyphCover, poseCover, inkEm, STYLE_GLOW, GLOW_LEVEL };
 });
 /* 文字PVメーカー v2 — original work. Post stack: the FxContext, texture tiles, blurs and the ordered screen-effect passes (DESIGN §4.18.11, §4.19.2). */
@@ -29036,7 +29601,8 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
     }));
   }
 
-  // createRenderer({ canvas: CanvasFactory, registry, assets, now?, strict?, spriteBudget?, postCopy? }) → Renderer
+  // createRenderer({ canvas: CanvasFactory, registry, assets, now?, strict?, spriteBudget?, postCopy?, faceReady? }) → Renderer
+  // (faceReady, v2.2: see draw.createDrawContext)
   // (postCopy: lab and tests only — fx.own copies, the post stack as it drew before filters could draw in place)
   //   render(surface, plan, t, opts, source) → FrameStats   source = { cut(i), ground(i), fresh(kind, i), fontKey, face }
   //   warmAt(plan, source, t) · beginWarm() · warmBytes() · lastTime() · hitTest(x, y) · boxes() · stats() · level
@@ -29062,7 +29628,8 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
     const tiles = PO.createTileBank(factory);
     const ctl = PO.createFx({ pool, tiles, copy: o.postCopy === true });
     const scratch = SF.surfaceOf(factory, SP.MAX_SIDE, SP.MAX_SIDE, true);
-    const dc = DR.createDrawContext({ sprites, paints, scratch, pool, blurred: (src, px) => PO.blurred(pool, src, px, ctl.caps) });
+    const dc = DR.createDrawContext({ sprites, paints, scratch, pool, blurred: (src, px) => PO.blurred(pool, src, px, ctl.caps),
+      faceReady: o.faceReady });
     const picks = PK.createPickList();
     const statics = new Map();                     // static layers: scene → [raster per layer] (LRU)
     const errors = [];
@@ -29805,8 +30372,9 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
 });
 /* 文字PVメーカー v2 — original work. Scene build: one Plan cut (or ground segment) → node table + behaviours (DESIGN §4.17.5; DESIGN_2_1 §3.10, §5.9.4, §11.3.7). */
 MV.def('engine/scene/build', ['core/hash', 'core/rng', 'core/schema', 'engine/scene/table', 'engine/scene/builder',
-  'engine/scene/behave', 'engine/scene/frame', 'engine/scene/shot', 'engine/scene/budget', 'engine/scene/xshot'],
-(H, RNG, SCH, T, B, BH, F, SHOT, BG, XS) => {
+  'engine/scene/behave', 'engine/scene/frame', 'engine/scene/shot', 'engine/scene/budget', 'engine/scene/xshot',
+  'engine/text/faces'],
+(H, RNG, SCH, T, B, BH, F, SHOT, BG, XS, FACES) => {
   'use strict';
 
   const SAFE = 0.05;              // safe margin: 5% of the short side on every edge
@@ -30079,7 +30647,22 @@ MV.def('engine/scene/build', ['core/hash', 'core/rng', 'core/schema', 'engine/sc
     return out;
   }
 
-  function buildCutWith(cut, slots, plan, svc, warnings) {
+  // v2.2 text.weight (DESIGN_2_2 §4): the cut's lyric face role at another weight. The text service for those faces
+  // shares the layout cache (its keys include the faces); one per (service, faces), as reweigh caches the faces.
+  const weighed = new WeakMap();
+  function weightedSvc(svc, plan, slots) {
+    const tw = valueOf(slots, 'text.weight', null);
+    if (typeof tw !== 'number' || !svc.text || typeof svc.text.withFaces !== 'function') return svc;
+    const faces = FACES.reweigh(svc.faces || plan.look.faces, valueOf(slots, 'text.face', 'display'), tw);
+    let m = weighed.get(svc.text);
+    if (!m) { m = new WeakMap(); weighed.set(svc.text, m); }
+    let text = m.get(faces);
+    if (!text) { text = svc.text.withFaces(faces); m.set(faces, text); }
+    return Object.assign({}, svc, { text, faces });
+  }
+
+  function buildCutWith(cut, slots, plan, svcIn, warnings) {
+    const svc = weightedSvc(svcIn, plan, slots);
     const reg = svc.registry;
     const D = designEnv(plan.design);
     const where = { cut: cut.key, line: cut.line };
@@ -30275,10 +30858,17 @@ MV.def('engine/scene/build', ['core/hash', 'core/rng', 'core/schema', 'engine/sc
   //   shot, lean       (DESIGN_2_1 §3.10) the cut's shot Track and follow Lean, or null
   //   media            (DESIGN_2_1 §11.3.7) [{ node, id, time: TimeSpec | null }] of the media nodes, in node order
   //   spriteBudget     (DESIGN_2_1 §5.9.5, cuts) the glyph budget record of engine/scene/budget.fit, or null
+  //   wtReach          (v2.2) null, or [lo, hi]: the union of the weight offsets its behaviours may write (behaviour.wt);
+  //                    the served weights they reach are loaded as draw-only faces
   function sceneOf(builder, o) {
     const behaviours = builder.seal();
     const glyphKeys = new Set();
     for (const g of builder.stores.glyph) if (g.cls !== 'space' && g.font) glyphKeys.add(g.font.key + '|' + g.ch);
+    let wtReach = null;
+    for (const b of behaviours) {
+      if (!b.wt) continue;
+      wtReach = wtReach ? [Math.min(wtReach[0], b.wt[0]), Math.max(wtReach[1], b.wt[1])] : [b.wt[0], b.wt[1]];
+    }
     return {
       key: o.key, fp: o.fp, kind: o.kind, t0: o.t0,
       table: builder.table, behaviours, layers: builder.layers, cam: o.cam, owners: builder.owners,
@@ -30289,6 +30879,7 @@ MV.def('engine/scene/build', ['core/hash', 'core/rng', 'core/schema', 'engine/sc
       stores: builder.stores, times: o.times, target: o.target, focus: o.focus,
       fontKey: o.svc.text ? o.svc.text.key : null,
       shot: o.shot || null, lean: o.lean || null, media: builder.mediaList(), spriteBudget: null,
+      wtReach: wtReach ? Object.freeze(wtReach) : null,
     };
   }
 
@@ -30296,8 +30887,9 @@ MV.def('engine/scene/build', ['core/hash', 'core/rng', 'core/schema', 'engine/sc
 });
 /* 文字PVメーカー v2 — original work. The part kit: definition helpers, motion builders and helpers for part authors (DESIGN §4.18.3; DESIGN_2_1 §3.11, §11.5.6). */
 MV.def('parts/kit', ['core/num', 'core/noise', 'core/ease', 'core/curve', 'core/color', 'core/schema', 'core/registry',
-  'core/media', 'engine/scene/behave', 'engine/scene/stagger', 'engine/scene/builder', 'engine/scene/shot', 'engine/scene/frame'],
-(N, NZ, E, CV, C, SCH, REG, MEDIA, BH, STG, B, SHOT, F) => {
+  'core/media', 'engine/scene/behave', 'engine/scene/stagger', 'engine/scene/builder', 'engine/scene/shot', 'engine/scene/frame',
+  'core/script', 'engine/text/faces'],
+(N, NZ, E, CV, C, SCH, REG, MEDIA, BH, STG, B, SHOT, F, SCRIPT, FACES) => {
   'use strict';
 
   // Parts depend on this module only. The helpers stamp `kind`, fill defaults and check the essentials; they never
@@ -30335,7 +30927,7 @@ MV.def('parts/kit', ['core/num', 'core/noise', 'core/ease', 'core/curve', 'core/
     kx: ['横の傾き', 'Skew X'], ky: ['縦の傾き', 'Skew Y'], rx: ['縦の反転', 'Flip X'], ry: ['横の反転', 'Flip Y'],
     sx: ['横の大きさ', 'Scale X'], sy: ['縦の大きさ', 'Scale Y'], alpha: ['不透明度', 'Opacity'], reveal: ['見える割合', 'Reveal'],
     blur: ['ぼかし', 'Blur'], tint: ['色づき', 'Tint'], glow: ['光', 'Glow'], shard: ['割れ', 'Shatter'], echo: ['残像', 'Echo'],
-    jx: ['横の揺れ', 'Jitter X'], jy: ['縦の揺れ', 'Jitter Y'], pixel: ['モザイク', 'Pixelate'],
+    jx: ['横の揺れ', 'Jitter X'], jy: ['縦の揺れ', 'Jitter Y'], pixel: ['モザイク', 'Pixelate'], wt: ['太さ', 'Weight'],
   });
   const RANGE_EM = Object.freeze({ x: [-10, 10, 0.01], y: [-10, 10, 0.01], z: [-40, 40, 0.1], blur: [0, 2, 0.005],
     jx: [-4, 4, 0.01], jy: [-4, 4, 0.01], pixel: [0, 2, 0.01] });
@@ -30344,12 +30936,14 @@ MV.def('parts/kit', ['core/num', 'core/noise', 'core/ease', 'core/curve', 'core/
   const RANGE_ANGLE = Object.freeze({ rot: [-720, 720, 1], kx: [-80, 80, 1], ky: [-80, 80, 1], rx: [-360, 360, 1],
     ry: [-360, 360, 1] });
   const RANGE_UNIT = [0, 1, 0.01];
+  const RANGE_WEIGHT = [-800, 800, 25];              // v2.2: weight offsets in CSS weight units
   const RANGE_SCALE = [0, 8, 0.01];
   const SPEC_UNIT = Object.freeze({ em: 'em', du: 'du', deg: 'deg', rad: '', x: 'x', '': '' });
 
   // Length columns are in em only when the track's unit is 'em' (x y z blur by default, BH.TRACK_UNITS); otherwise
   // they are plain du (jx jy pixel by default, or any length track with unit 'du').
   function rangeFor(col, unit) {
+    if (col === 'wt') return RANGE_WEIGHT;
     if (RANGE_ANGLE[col]) return unit === 'rad' ? [-12.6, 12.6, 0.001] : RANGE_ANGLE[col];
     if (col === 'sx' || col === 'sy') return RANGE_SCALE;
     if (RANGE_EM[col]) return unit === 'em' ? RANGE_EM[col] : RANGE_DU[col];
@@ -30442,22 +31036,63 @@ MV.def('parts/kit', ['core/num', 'core/noise', 'core/ease', 'core/curve', 'core/
       motion };
   }
 
-  // perGlyph(fn) → make. fn(P, g, k, u, p, fc) writes the pooled delta pose P of one glyph; k = eased progress,
-  // u = linear progress (after the glyph's stagger delay). K.arrive / K.depart bind it to their timing.
-  function perGlyph(fn) {
+  // Options of K.perGlyph / K.perGlyphHold (v2.2, DESIGN_2_2 §4): { prep, wt } — prep(env, target, p) → p' adds
+  // build-time params read from the target (a new object; p itself is never changed), wt(p') → [lo, hi] declares the
+  // weight offsets (pose column wt) the behaviour may write, so the served weights it draws are loaded.
+  function glyphOpts(opts) {
+    if (opts === undefined || opts === null) return null;
+    if (!isObject(opts) || (opts.prep !== undefined && typeof opts.prep !== 'function') ||
+        (opts.wt !== undefined && typeof opts.wt !== 'function')) {
+      throw new KitError('bad-fn', 'K.perGlyph options are { prep, wt }');
+    }
+    return Object.freeze({ prep: opts.prep || null, wt: opts.wt || null });
+  }
+
+  function glyphSource(unit, fn, o) {
+    return { unit, fn, prep: o ? o.prep : null, wt: o ? o.wt : null };
+  }
+
+  // perGlyph(fn, opts?) → make. fn(P, g, k, u, p, fc) writes the pooled delta pose P of one glyph; k = eased progress,
+  // u = linear progress (after the glyph's stagger delay). K.arrive / K.depart bind it to their timing (the options
+  // travel with it).
+  function perGlyph(fn, opts) {
     if (typeof fn !== 'function') throw new KitError('bad-fn', 'K.perGlyph needs a function');
-    const make = BH.glyphMotionMaker('arrive', { unit: 'glyph', fn });
+    const o = glyphOpts(opts);
+    const make = BH.glyphMotionMaker('arrive', glyphSource('glyph', fn, o));
     make.glyphFn = fn;
+    make.glyphOpts = o;
     return make;
   }
 
-  // perGlyphHold(fn) → make for dwell parts. fn(P, g, time, w, p, fc): time = seconds since the glyph arrived;
+  // perGlyphHold(fn, opts?) → make for dwell parts. fn(P, g, time, w, p, fc): time = seconds since the glyph arrived;
   // w = the dwell envelope (multiply every amplitude by it).
-  function perGlyphHold(fn) {
+  function perGlyphHold(fn, opts) {
     if (typeof fn !== 'function') throw new KitError('bad-fn', 'K.perGlyphHold needs a function');
-    const make = BH.holdMaker(fn);
+    const o = glyphOpts(opts);
+    const make = BH.holdMaker(fn, o);
     make.holdFn = fn;
+    make.holdOpts = o;
     return make;
+  }
+
+  // weightRoom(target) → { below, above }: the weight room (engine/text/faces roomOf) of the face most of the target's
+  // non-space glyphs are laid out with (ties: the first face key in code-unit order); { 0, 0 } for an empty target.
+  function weightRoom(target) {
+    const count = new Map();
+    for (const r of (target && target.runs) || []) {
+      const lay = r.layout;
+      if (!lay || !lay.fonts) continue;
+      for (let i = 0; i < lay.n; i++) {
+        if (lay.cls && SCRIPT.CLASSES[lay.cls[i]] === 'space') continue;
+        const f = lay.fonts[lay.font ? lay.font[i] : 0];
+        if (!f) continue;
+        const e = count.get(f.key);
+        if (e) e.n++; else count.set(f.key, { f, n: 1 });
+      }
+    }
+    let best = null;
+    for (const key of [...count.keys()].sort()) { const e = count.get(key); if (!best || e.n > best.n) best = e; }
+    return best ? FACES.roomOf(best.f) : { below: 0, above: 0 };
   }
 
   // --- kind helpers ----------------------------------------------------------------------------------------------
@@ -30494,9 +31129,10 @@ MV.def('parts/kit', ['core/num', 'core/noise', 'core/ease', 'core/curve', 'core/
         out.make = BH.glyphMotionMaker(kind, { unit, motion: out.motion });
         out.unit = unit;
       } else if (out.make.glyphFn) {
-        const fn = out.make.glyphFn;
-        out.make = BH.glyphMotionMaker(kind, { unit: out.unit || 'glyph', fn });
+        const fn = out.make.glyphFn, o = out.make.glyphOpts || null;
+        out.make = BH.glyphMotionMaker(kind, glyphSource(out.unit || 'glyph', fn, o));
         out.make.glyphFn = fn;
+        out.make.glyphOpts = o;
       }
       if (out.unit !== undefined && !STG.UNITS.includes(out.unit)) fail(kind, def, 'unit must be one of ' + STG.UNITS.join(' '));
       return deepFreeze(out);
@@ -30598,7 +31234,7 @@ MV.def('parts/kit', ['core/num', 'core/noise', 'core/ease', 'core/curve', 'core/
       def.params = mirroredParams(arriveDef.params, arriveDef.motion);
       def.make = BH.glyphMotionMaker('depart', { unit: def.unit, motion: def.motion });
     } else if (arriveDef.make && arriveDef.make.glyphFn) {
-      def.make = perGlyph(reversedFn(arriveDef.make.glyphFn));
+      def.make = perGlyph(reversedFn(arriveDef.make.glyphFn), arriveDef.make.glyphOpts || undefined);
       def.unit = arriveDef.unit;
       def.params = Object.assign({}, arriveDef.params || {});
     } else {
@@ -30890,7 +31526,7 @@ MV.def('parts/kit', ['core/num', 'core/noise', 'core/ease', 'core/curve', 'core/
   return {
     arrange: KINDS.arrange, arrive: KINDS.arrive, dwell: KINDS.dwell, depart: KINDS.depart, ground: KINDS.ground,
     ornament: KINDS.ornament, lens: KINDS.lens, filter: KINDS.filter, seam: KINDS.seam, theme: KINDS.theme, mood: KINDS.mood,
-    variant, mirror, moves, perGlyph, perGlyphHold,
+    variant, mirror, moves, perGlyph, perGlyphHold, weightRoom,
     PH: BH.PH, ORDERS: SCH.ORDERS, EASES: E.EASES, ease, staggerOf: STG.staggerOf, pivots: STG.pivots,
     shape, math, color, pickOf, rangeOf, KitError,
     curve, warp, CURVES: CV.PRESET_KEYS, warped: BH.warped, aimBox, frameBox,
@@ -32013,7 +32649,8 @@ MV.def('parts/mix', ['core/num', 'core/hash', 'core/rng', 'core/noise', 'core/cu
   // shared specs (as the base narrows them).
   function variantDef(kind, recipe, base, fields, probs) {
     const baseDef = base.get(kind, recipe.base);
-    if (!baseDef) { probs.push(problem('base', 'no-base', { key: recipe.base })); return null; }
+    // A late part (v2.2, DESIGN_2_2 §4.1) is never a base: a material is poolable, a late part is not.
+    if (!baseDef || baseDef.late === true) { probs.push(problem('base', 'no-base', { key: recipe.base })); return null; }
     if (baseDef.gate === 'flash') { probs.push(problem('base', 'flash-base', { key: recipe.base })); return null; }
     const params = {};
     for (const name of Object.keys(recipe.params)) {
@@ -35937,6 +36574,47 @@ MV.def('parts/arrive/soft', ['parts/kit'], (K) => {
 
   return [inkRise, fogIn, bloomOpen, inkSink];
 });
+/* 文字PVメーカー v2 — original work. Weight entrance (v2.2, DESIGN_2_2 §4): 太る — letters appear thin and grow to the line's weight. */
+MV.def('parts/arrive/weight', ['parts/kit'], (K) => {
+  'use strict';
+
+  const { clamp } = K.math;
+  const FADE = K.ease('quadOut');
+  const FADE_SHARE = 0.3;        // a glyph fades in over the first 30 % of its motion (it starts at its thinnest)
+
+  // The reach of the motion: `thin` of the weight room below the face the line is laid out with (the face most of its
+  // glyphs use; with the planner's grow rule that face is the bold end weight). Read at build, from the target.
+  function thinPrep(env, target, p) {
+    return Object.assign({}, p, { reach: Math.round(p.thin * K.weightRoom(target).below) });
+  }
+  const THIN_OPTS = { prep: thinPrep, wt: (p) => [-p.reach, 0] };
+
+  // wt runs from −reach to 0 (the face's own weight) on the eased progress; exactly 0 and alpha × 1 at u = 1.
+  function grow(P, g, k, u, p) {
+    P.wt -= p.reach * (1 - k);
+    P.alpha *= FADE(clamp(u / FADE_SHARE));
+  }
+
+  const weightGrow = K.arrive({
+    key: 'weightGrow',
+    label: { ja: '太る', en: 'Weight grow' },
+    blurb: { ja: '細い字で現れ、太い字へ育っていく', en: 'Letters appear thin and grow bold' },
+    tags: ['bold', 'slow'], family: 'weight', pool: false, late: true, optIn: 'weight', unit: 'glyph', weight: 2.5,
+    traits: { energy: [0.1, 0.85], roles: ['lyric', 'focus', 'title'] },
+    shared: {
+      dur: { auto: { range: [0.7, 1.3], follow: '-energy' } }, each: { auto: { range: [0.02, 0.05] } },
+      order: { auto: { pick: ['lead', 'core'], weights: [3, 1] } },
+      ease: { auto: { pick: ['cubicOut', 'sineInOut'], weights: [2, 1] } },
+    },
+    params: {
+      thin: { type: 'num', min: 0.2, max: 1, step: 0.05, unit: 'frac', label: { ja: '始まりの細さ', en: 'Start thinness' },
+        auto: { value: 1 } },
+    },
+    make: K.perGlyph(grow, THIN_OPTS),
+  });
+
+  return [weightGrow];
+});
 /* 文字PVメーカー v2 — original work. Wipe and shear entrances (slice reveal, curtain rise, seam join) and their mirrors. */
 MV.def('parts/arrive/wipe', ['parts/kit'], (K) => {
   'use strict';
@@ -36750,6 +37428,47 @@ MV.def('parts/depart/type', ['parts/kit'], (K) => {
   });
 
   return [K.variant(bound, { key: 'typeErase', make: withCaret(bound.make) })];
+});
+/* 文字PVメーカー v2 — original work. Weight exit (v2.2, DESIGN_2_2 §4): 細る — letters thin out and fade. */
+MV.def('parts/depart/weight', ['parts/kit'], (K) => {
+  'use strict';
+
+  const { clamp } = K.math;
+  const FADE_IN = K.ease('quadIn');
+  const FADE_FROM = 0.6;         // a glyph keeps its alpha for the first 60 % of its motion, then fades out
+
+  // The reach: `thin` of the weight room below the line's face (as 太る, parts/arrive/weight).
+  function thinPrep(env, target, p) {
+    return Object.assign({}, p, { reach: Math.round(p.thin * K.weightRoom(target).below) });
+  }
+  const THIN_OPTS = { prep: thinPrep, wt: (p) => [-p.reach, 0] };
+
+  // wt runs from 0 to −reach; at u = 0 exactly the rest pose (K.depart re-wraps the maker as an exit: it starts at
+  // times.out and runs after it).
+  function thin(P, g, k, u, p) {
+    P.wt -= p.reach * k;
+    P.alpha *= 1 - FADE_IN(clamp((u - FADE_FROM) / (1 - FADE_FROM)));
+  }
+
+  const weightThin = K.depart({
+    key: 'weightThin',
+    label: { ja: '細る', en: 'Weight thin' },
+    blurb: { ja: '字が細くなりながら消えていく', en: 'Letters thin out and fade' },
+    tags: ['soft', 'slow'], family: 'weight', pool: false, late: true, optIn: 'weight', unit: 'glyph',
+    traits: { energy: [0.05, 0.7], roles: ['lyric', 'focus', 'title'] },
+    shared: {
+      dur: { auto: { range: [0.5, 0.9], follow: '-energy' } }, each: { auto: { range: [0.01, 0.03] } },
+      order: { auto: { pick: ['lead', 'tail'], weights: [2, 1] } },
+      ease: { auto: { pick: ['sineIn', 'quadIn'], weights: [2, 1] } },
+    },
+    params: {
+      thin: { type: 'num', min: 0.2, max: 1, step: 0.05, unit: 'frac', label: { ja: '終わりの細さ', en: 'End thinness' },
+        auto: { value: 1 } },
+    },
+    make: K.perGlyph(thin, THIN_OPTS),
+  });
+
+  return [weightThin];
 });
 /* 文字PVメーカー v2 — original work. Calm holds: still, breathe, slow drift, sway, creep. */
 MV.def('parts/dwell/calm', ['parts/kit'], (K) => {
@@ -44722,10 +45441,10 @@ MV.def('ai/recipe', ['core/num', 'core/hash', 'core/color', 'core/curve', 'core/
       return out;
     }
 
-    // Existing parts of the base registry: never a material, never a flash-gated effect.
+    // Existing parts of the base registry: never a material, never a flash-gated effect, never a late (v2.2) part.
     function basePart(base, kind, key) {
       const def = typeof key === 'string' && key ? base.get(kind, key) : null;
-      if (!def || def.gate === 'flash' || key.startsWith('myMat') || key.startsWith('myMed')) return null;
+      if (!def || def.gate === 'flash' || def.late === true || key.startsWith('myMat') || key.startsWith('myMed')) return null;
       return def;
     }
 
@@ -48026,8 +48745,11 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
 
   // --- font usage (§4.14: export waits for every face and character used) ------------------------------------------------
 
-  // A usage record: { refs: Map(key|script → FontRef), chars: Map(family → Set(character)) }.
-  function newUsage() { return { refs: new Map(), chars: new Map() }; }
+  // A usage record: { refs: Map(key|script → FontRef), chars: Map(family → Set(character)) }, plus (v2.2) the draw-only
+  // faces of weight animation: draw (Map(key|script → FontRef): served weights a scene draws but never lays out) and
+  // drawChars (Map(family → Set(character))). The main part alone decides what a scene waits for (provisional, export
+  // layout); the draw part is loaded without moving the FontBook's epoch.
+  function newUsage() { return { refs: new Map(), chars: new Map(), draw: new Map(), drawChars: new Map() }; }
 
   function addChars(u, family, text) {
     let set = u.chars.get(family);
@@ -48045,7 +48767,35 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
   function mergeUsage(into, u) {
     for (const [id, ref] of u.refs) if (!into.refs.has(id)) into.refs.set(id, ref);
     for (const [family, set] of u.chars) addChars(into, family, [...set].join(''));
+    if (u.draw) {
+      for (const [id, ref] of u.draw) if (!into.draw.has(id)) into.draw.set(id, ref);
+      for (const [family, set] of u.drawChars) addDrawChars(into, family, set);
+    }
     return into;
+  }
+
+  function addDrawChars(u, family, chars) {
+    let set = u.drawChars.get(family);
+    if (!set) { set = new Set(); u.drawChars.set(family, set); }
+    for (const ch of chars) set.add(ch);
+  }
+
+  // Whether `a` already holds every draw-only face and character of `b`.
+  function coversDraw(a, b) {
+    for (const id of b.draw.keys()) if (!a.draw.has(id)) return false;
+    for (const [family, set] of b.drawChars) {
+      const have = a.drawChars.get(family);
+      for (const ch of set) if (!have || !have.has(ch)) return false;
+    }
+    return true;
+  }
+
+  // The FontBook's shape of the draw-only part.
+  function drawUsageOut(u) {
+    const refs = [...u.draw.entries()].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)).map((e) => e[1]);
+    const textByFamily = {};
+    for (const family of [...u.drawChars.keys()].sort()) textByFamily[family] = FACES.uniqueChars([...u.drawChars.get(family)].join(''));
+    return { refs, textByFamily };
   }
 
   // Whether `a` already holds every face and character of `b`.
@@ -48068,11 +48818,26 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
 
   // What a built scene draws: every glyph's face and grapheme (lyrics, notes and artists, headings, ornament text — in
   // whatever face the part laid them out), and glyph particles ('glyph:<char>') in the display ja face the renderer uses.
+  // v2.2: a scene whose behaviours may write weight offsets (scene.wtReach = [lo, hi]) also draws, for each glyph, the
+  // served weights of its face that reach can draw (FACES.rungsBetween): its draw-only usage.
   function sceneUsage(scene, particleFace) {
     const u = newUsage();
     for (const g of scene.stores.glyph) if (g.font && g.cls !== 'space') addRef(u, g.font, g.ch);
     for (const p of scene.stores.particles) {
       if (particleFace && typeof p.sprite === 'string' && p.sprite.startsWith('glyph:')) addRef(u, particleFace, p.sprite.slice(6));
+    }
+    const reach = scene.wtReach;
+    if (reach) {
+      for (const g of scene.stores.glyph) {
+        if (!g.font || g.cls === 'space') continue;
+        for (const w of FACES.rungsBetween(g.font, reach[0], reach[1])) {
+          if (w === g.font.weight) continue;
+          const ref = FACES.atWeight(g.font, w);
+          const id = ref.key + '|' + ref.script;
+          if (!u.draw.has(id)) u.draw.set(id, ref);
+          addDrawChars(u, ref.family, [g.ch]);
+        }
+      }
     }
     return u;
   }
@@ -48116,13 +48881,15 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
     const sceneMax = Number.isInteger(o.sceneMax) && o.sceneMax > 0 ? o.sceneMax : SCENE_MAX;
     // the effective registry: the base plus the document's materials (and pooled media); the base until a document
     let registry = o.effective && typeof o.effective.get === 'function' ? o.effective : base;
+    // v2.2: weight pairs draw only the served weights that are loaded (a draw-only face still on its way is left out)
+    const faceReady = fonts && typeof fonts.drawStatus === 'function' ? (ref) => fonts.drawStatus(ref) === 'ready' : null;
     const renderer = R.createRenderer({ canvas: factory, registry, assets, now, strict: !!o.strict, spriteBudget: o.spriteBudget,
-      postCopy: o.postCopy === true });
+      postCopy: o.postCopy === true, faceReady });
     const cache = CACHE.createSceneCache({ max: sceneMax });
     const found = new Map();                         // cut / segment key → { fp, list } of scene warnings
     const scanned = new Set();                       // fps whose warnings are known
     const used = new Map(o.usage || []);             // fp → usage record of the built scene (a function of the fp)
-    const requested = newUsage();                    // what the FontBook has been asked for so far
+    const requested = newUsage();                    // what the FontBook has been asked for so far (draw-only too)
     let plan = null, lastDoc = null, lastResult = null;
     let texts = null;                                // TextService of the current faces
     let face = null;
@@ -48157,10 +48924,24 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
     function request(u) {
       if (!fonts || typeof fonts.request !== 'function') return;
       const retry = typeof fonts.status === 'function' && [...u.refs.values()].some((r) => fonts.status(r) === 'failed');
-      if (!retry && covers(requested, u)) return;
-      mergeUsage(requested, u);
-      const out = usageOut(u);
-      fonts.request(out.refs, out.textByFamily);
+      if (retry || !covers(requested, u)) {
+        for (const [id, ref] of u.refs) if (!requested.refs.has(id)) requested.refs.set(id, ref);
+        for (const [family, set] of u.chars) addChars(requested, family, [...set].join(''));
+        const out = usageOut(u);
+        fonts.request(out.refs, out.textByFamily);
+      }
+      requestDraw(u);
+    }
+
+    // The draw-only part of a usage (v2.2): asked for once (again for a face that failed), never waited for here.
+    function requestDraw(u) {
+      if (!u.draw.size || !fonts || typeof fonts.drawStatus !== 'function') return;
+      const retry = [...u.draw.values()].some((r) => fonts.drawStatus(r) === 'failed');
+      if (!retry && coversDraw(requested, u)) return;
+      for (const [id, ref] of u.draw) if (!requested.draw.has(id)) requested.draw.set(id, ref);
+      for (const [family, set] of u.drawChars) addDrawChars(requested, family, set);
+      const out = drawUsageOut(u);
+      fonts.request(out.refs, out.textByFamily, { drawOnly: true });
     }
 
     // Scene warnings, font usage and the "already laid out" marks of cuts and segments the plan no longer has.
@@ -48336,9 +49117,16 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
       if (fonts && typeof fonts.ready === 'function') {
         const unknown = list.filter(([kind, i]) => !used.has((kind === 'cut' ? plan.cuts[i] : plan.grounds[i]).fp));
         if (!(await buildEach(unknown))) return;
-        const out = usageOut(usageOfItems(cuts, grounds));
+        const all = usageOfItems(cuts, grounds);
+        const out = usageOut(all);
         await fonts.ready(out.refs, out.textByFamily);
         if (!slice.live()) return;
+        // v2.2: the served weights weight animation draws (draw-only faces; they never move the measurer key)
+        if (all.draw.size && typeof fonts.drawStatus === 'function') {
+          const drawOut = drawUsageOut(all);
+          await fonts.ready(drawOut.refs, drawOut.textByFamily, { drawOnly: true });
+          if (!slice.live()) return;
+        }
       }
       await buildEach(list);
     }
@@ -48583,7 +49371,7 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
     function thumb(ref, surface, topts) {
       alive();
       const to = topts || {};
-      if (!thumbs) thumbs = { renderer: R.createRenderer({ canvas: factory, registry, assets, now: null }), plans: new Map() };
+      if (!thumbs) thumbs = { renderer: R.createRenderer({ canvas: factory, registry, assets, now: null, faceReady }), plans: new Map() };
       const theme = to.theme || (plan ? plan.look.theme.v : null);
       const aspect = to.aspect || (plan ? plan.design.aspect : '16:9');
       const id = H.hashJSON({ kind: ref.kind, key: ref.key, params: ref.params || null, text: to.text || null,
@@ -48596,10 +49384,12 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
         const svc = { registry, text: textService().withFaces(sp.look.faces), assets, pal: sp.look.palette, faces: sp.look.faces,
           strict: !!o.strict, provisional: false, media: sp.media || null };
         const scenes = { cut: [], ground: [] };
+        // a tile of a weight part asks for the served weights it draws (v2.2 draw-only faces)
+        const thumbCut = (i) => { const sc = BUILD.buildCut(sp.cuts[i], sp, svc); if (sc.wtReach) requestDraw(sceneUsage(sc, null)); return sc; };
         entry = {
           plan: sp, fontKey: measurer.key,
           source: {
-            cut: (i) => scenes.cut[i] || (scenes.cut[i] = BUILD.buildCut(sp.cuts[i], sp, svc)),
+            cut: (i) => scenes.cut[i] || (scenes.cut[i] = thumbCut(i)),
             ground: (i) => scenes.ground[i] || (scenes.ground[i] = BUILD.buildGround(sp.grounds[i], sp, svc)),
             fresh: (kind, i) => (kind === 'cut' ? BUILD.buildCut(sp.cuts[i], sp, svc) : BUILD.buildGround(sp.grounds[i], sp, svc)),
             fontKey: measurer.key,
@@ -50844,6 +51634,12 @@ MV.def('engine/host/fonts', ['engine/text/faces'], (FACES) => {
   //   epoch: +1 whenever a requested face finishes loading.  status(ref)  on('epoch', fn) → off
   // A family's characters accumulate: when new ones arrive, one new URL carrying all of them is requested, because a
   // later @font-face rule for the same family replaces the earlier one rather than adding to it.
+  // v2.2 draw-only faces (DESIGN_2_2 §4, weight animation): request(refs, text, { drawOnly: true }) and
+  // ready(refs, text, { drawOnly: true, timeoutMs }) load extra served weights that are only drawn, never laid out:
+  // they never move the epoch (no scene is rebuilt or re-measured), have their own stylesheets and characters, are
+  // never declared for a weight the main path owns, and are not listed by failures(). drawStatus(ref) → the main state
+  // of a main face, else the draw-only state ('idle' | 'loading' | 'ready' | 'failed'); on('draw', fn) → off is called
+  // when a draw-only face becomes ready.
   function createFontBook({ document: doc, timeoutMs: defaultTimeout = DEFAULT_TIMEOUT_MS } = {}) {
     const sheets = new Map();          // url → Promise<boolean> (stylesheet loaded)
     const chars = new Map();           // family → characters requested so far (sorted, unique)
@@ -50852,6 +51648,11 @@ MV.def('engine/host/fonts', ['engine/text/faces'], (FACES) => {
     const watches = new Map();         // ref.key + url + load text → Promise<boolean> (pending or loaded; failures drop out)
     const listeners = new Set();
     const known = new Map();           // ref.key → ref (for failures())
+    const drawStates = new Map();      // ref.key → 'loading' | 'ready' | 'failed' (draw-only faces)
+    const drawUrl = new Map();         // ref.key → the newest stylesheet URL that declares it (draw-only)
+    const drawChars = new Map();       // family → the characters asked for draw-only faces (apart from `chars`)
+    const drawWatches = new Map();     // ref.key + url + load text → Promise<boolean>
+    const drawListeners = new Set();
     let epoch = 0;
 
     function addSheet(url) {
@@ -50956,7 +51757,71 @@ MV.def('engine/host/fonts', ['engine/text/faces'], (FACES) => {
       return jobs;
     }
 
-    function request(refs, textByFamily = {}) { start(refs, textByFamily); }
+    // --- draw-only faces (v2.2) ---
+
+    function groupRefs(refs) {
+      const out = new Map();
+      for (const entry of refs || []) {
+        const ref = toRef(entry);
+        if (!out.has(ref.family)) out.set(ref.family, []);
+        out.get(ref.family).push(ref);
+      }
+      return out;
+    }
+
+    // Starts the draw-only loads of the refs the main path does not own; returns [{ ref, url }].
+    function startDraw(refs, text) {
+      const jobs = [];
+      for (const [family, all] of groupRefs(refs)) {
+        const list = all.filter((r) => !states.has(r.key));            // a weight the main path owns is never redeclared
+        if (!list.length) continue;
+        const merged = FACES.uniqueChars((drawChars.get(family) || '') + textFor(text, family));
+        drawChars.set(family, merged);
+        const [url] = FACES.cssUrls(list, { [family]: merged });
+        for (const ref of list) {
+          // the newest declaration is the one a canvas draws with: a newer sheet means loading again until it is in
+          if (drawUrl.get(ref.key) !== url) { drawUrl.set(ref.key, url); drawStates.set(ref.key, 'loading'); }
+          jobs.push({ ref, url });
+          watchDraw(ref, url);
+        }
+      }
+      return jobs;
+    }
+
+    function watchDraw(ref, url) {
+      const text = FACES.loadText(ref, drawChars.get(ref.family) || '');
+      const id = ref.key + '\u0000' + url + '\u0000' + text;
+      if (drawWatches.has(id)) return drawWatches.get(id);
+      const p = addSheet(url).then((sheetOk) => {
+        if (!sheetOk) return false;
+        const fonts = doc && doc.fonts;
+        if (!fonts || typeof fonts.load !== 'function') return true;
+        return fonts.load(ref.css(100), text || undefined).then((list) => familyLoaded(list, ref.family), () => false);
+      }).then((ok) => {
+        const newest = drawUrl.get(ref.key) === url;
+        if (ok && newest) {
+          const was = drawStates.get(ref.key);
+          drawStates.set(ref.key, 'ready');
+          if (was !== 'ready') for (const fn of [...drawListeners]) fn({ ref });
+        } else if (!ok) {
+          if (newest && drawStates.get(ref.key) !== 'ready') drawStates.set(ref.key, 'failed');
+          if (drawWatches.get(id) === p) drawWatches.delete(id);
+        }
+        return ok;
+      });
+      drawWatches.set(id, p);
+      return p;
+    }
+
+    function drawStatus(ref) {
+      if (!ref) return 'idle';
+      return states.has(ref.key) ? states.get(ref.key) : (drawStates.get(ref.key) || 'idle');
+    }
+
+    function request(refs, textByFamily = {}, opts) {
+      if (opts && opts.drawOnly) startDraw(refs, textByFamily);
+      else start(refs, textByFamily);
+    }
 
     function withTimeout(p, ms) {
       return new Promise((resolve) => {
@@ -50965,7 +51830,8 @@ MV.def('engine/host/fonts', ['engine/text/faces'], (FACES) => {
       });
     }
 
-    async function ready(refs, text = '', { timeoutMs = defaultTimeout } = {}) {
+    async function ready(refs, text = '', { timeoutMs = defaultTimeout, drawOnly = false } = {}) {
+      if (drawOnly) return readyDraw(refs, text, timeoutMs);
       const jobs = start(refs, text);
       const results = await Promise.all(jobs.map(({ ref, url }) => withTimeout(watch(ref, url), timeoutMs)));
       const loaded = [], failed = [];
@@ -50976,14 +51842,37 @@ MV.def('engine/host/fonts', ['engine/text/faces'], (FACES) => {
       return { loaded, failed };
     }
 
+    // ready() of draw-only faces: a ref the main path owns counts as loaded when its main face is.
+    async function readyDraw(refs, text, timeoutMs) {
+      const jobs = startDraw(refs, text);
+      const results = await Promise.all(jobs.map(({ ref, url }) => withTimeout(watchDraw(ref, url), timeoutMs)));
+      const loaded = [], failed = [];
+      const seen = new Set();
+      jobs.forEach(({ ref, url }, i) => {
+        seen.add(ref.key);
+        if (results[i] || drawStatus(ref) === 'ready') loaded.push(ref);
+        else { failed.push(ref); if (drawUrl.get(ref.key) === url && drawStates.get(ref.key) !== 'ready') drawStates.set(ref.key, 'failed'); }
+      });
+      for (const entry of refs || []) {
+        const ref = toRef(entry);
+        if (seen.has(ref.key)) continue;
+        seen.add(ref.key);
+        (states.get(ref.key) === 'ready' ? loaded : failed).push(ref);
+      }
+      return { loaded, failed };
+    }
+
     return {
       request,
       ready,
+      drawStatus,
       get epoch() { return epoch; },
       status: (ref) => (ref && states.get(ref.key)) || 'idle',
       failures: () => [...known.values()].filter((ref) => states.get(ref.key) === 'failed'),
       on(event, fn) {
-        if (event !== 'epoch' || typeof fn !== 'function') return () => {};
+        if (typeof fn !== 'function') return () => {};
+        if (event === 'draw') { drawListeners.add(fn); return () => drawListeners.delete(fn); }
+        if (event !== 'epoch') return () => {};
         listeners.add(fn);
         return () => listeners.delete(fn);
       },
@@ -56474,6 +57363,7 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core
       }
     };
     fonts.on('epoch', paint);
+    fonts.on('draw', paint);            // v2.2: a draw-only weight arrived
     for (const card of cards) {
       const usage = FACES.fontUsage(card.faces, [{ role: card.role, lang, text: sample }]);
       fonts.request(usage.refs, usage.textByFamily);
@@ -59970,7 +60860,9 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
     // generated part parameter; its `label` is 'fld.param' = '{name}'), `param` (generated part parameters),
     // `firstCut` (the line page's 切り替え: written at the line's first cut, §6.4.6), `pinnedOnly` (a pinned parameter
     // of a part that is no longer chosen, shown as 無効), `note` (a string key shown under the row), `offClears` (a toggle
-    // whose off is 自動: turning it off clears the pin), `noDice` (a setting, not drawn: no 振り直し).
+    // whose off is 自動: turning it off clears the pin), `noDice` (a setting, not drawn: no 振り直し), `autoDefault`
+    // (v2.2: a switch of the new-work table, planner/rules — the value equal to the document's default clears the pin,
+    // any other value pins it).
 
     const ALL = Object.freeze(['work', 'line', 'cut']);
     const WORK = Object.freeze(['work']);
@@ -59992,14 +60884,14 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
 
     // --- the slot catalogue (§3.4.1–§3.4.3): which scopes a slot is valid at --------------------------------------
 
-    const WORK_NAMES = new Set(['mood', 'theme', 'bpm', 'beatOffset', 'readRate', 'length', 'titleCard']);
+    const WORK_NAMES = new Set(['mood', 'theme', 'bpm', 'beatOffset', 'readRate', 'length', 'titleCard', 'weight.auto']);
     const LINE_NAMES = new Set(['start', 'end', 'split', 'lang', 'avoid']);
     // v2.1 (DESIGN_2_1 §2.3): camerawork, motion speed and the section camera cascade cut > line > work; the line season
     // is a line value that may also be pinned for the whole video (the existing work:season).
-    const CUT_NAMES = new Set(['orient', 'text.face', 'text.scale', 'text.ink', 'text.style', 'motion.speed', 'cam.shot',
-      'cam.zoom', 'cam.curve', 'cam.follow', 'rig', 'rig.curve']);
-    // The EXTREME switch (DESIGN_EXTREME §2.2) is an area's too: a line or the whole video.
-    const LINE_WORK_NAMES = new Set(['season', 'cam.extreme']);
+    const CUT_NAMES = new Set(['orient', 'text.face', 'text.scale', 'text.ink', 'text.style', 'text.weight', 'motion.speed',
+      'cam.shot', 'cam.zoom', 'cam.curve', 'cam.follow', 'rig', 'rig.curve']);
+    // The EXTREME switch (DESIGN_EXTREME §2.2) is an area's too: a line or the whole video. v2.2: 「同じ字をつなぐ」 too.
+    const LINE_WORK_NAMES = new Set(['season', 'cam.extreme', 'morph.auto']);
 
     // 「くり返しの行をそろえる」 (DESIGN_2_1 §4.10): a switch of the whole video, and a choice of a line that sings an earlier
     // line again.
@@ -60172,6 +61064,9 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
     const textStyleField = () => F({ path: 'text.style', widget: 'choice', label: 'fld.textStyle', spec: enumSpec(TEXT_STYLES),
       options: opts(TEXT_STYLES, 'fld.style.') });
     const textScaleField = (label) => F({ path: 'text.scale', widget: 'number', label: label || 'fld.textScale', spec: SPEC.scale });
+    // 太さ (v2.2, DESIGN_2_2 §4): the weight of the lyric face (自動 = the typeface's, or the bold end of 太る).
+    const textWeightField = () => F({ path: 'text.weight', widget: 'number', label: 'fld.textWeight', spec: SPEC.weight,
+      note: 'fld.textWeight.note', auto: true, basic: false });
     const orientField = () => F({ path: 'orient', widget: 'choice', label: 'fld.orient', spec: enumSpec(['h', 'v']),
       options: opts(['h', 'v'], 'fld.orient.'), auto: true, when: (ctx) => ctx.orients.includes('v') || ctx.scopeKind === 'work' });
 
@@ -60247,6 +61142,9 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
           // on pins true for the whole video; off clears the pin (off is the default).
           F({ path: REPEAT_SAME, scopes: WORK, widget: 'toggle', label: 'fld.repeatSame', spec: { type: 'bool' },
             note: 'fld.repeatSame.note', offClears: true, noDice: true }),
+          // v2.2 (DESIGN_2_2 §4): on in new works, off in older ones (planner/rules); the default clears the pin.
+          F({ path: 'weight.auto', scopes: WORK, widget: 'toggle', label: 'fld.weightAuto', spec: { type: 'bool' },
+            note: 'fld.weightAuto.note', autoDefault: true, noDice: true, basic: false }),
         ]),
         // 写真・動画 (DESIGN_2_1 §11.7.3): the library, open when it holds something.
         sec('media', (ctx) => ctx.mediaCount > 0, [], { custom: 'media' }),
@@ -60303,7 +61201,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
             options: opts(LANGS, 'lang.'), auto: true, select: true, basic: false }),
         ], { custom: 'lockPartial', customTop: true }),
         sec('direction', true, directionFields()),
-        sec('colortype', false, [textFaceField(), textInkField(), textStyleField(), textScaleField()]),
+        sec('colortype', false, [textFaceField(), textInkField(), textStyleField(), textScaleField(), textWeightField()]),
         sec('cuts', false, [], { custom: 'cuts', when: (ctx) => !!ctx.line && ctx.line.cuts.length > 1 }),
         sec('elements', false, [], { custom: 'elements' }),
         sec('ai', false, [], { custom: 'ai' }),
@@ -60314,7 +61212,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
         // An area selection (区画, DESIGN_2_1 §6.5) adds its section camera; its runs are split at the area's edges. With
         // it, カメラ EXTREME for the area (a line pin on every selected line, DESIGN_EXTREME §2.6).
         sec('rig', true, rigFields().concat(extremeFields({ scopes: LINE })), { when: hasArea }),
-        sec('colortype', false, [textFaceField(), textInkField(), textStyleField(), textScaleField()]),
+        sec('colortype', false, [textFaceField(), textInkField(), textStyleField(), textScaleField(), textWeightField()]),
         sec('shift', true, [], { custom: 'shift' }),
       ],
       cut: [
@@ -60341,7 +61239,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
       ],
       'el.text': [
         sec('text', true, [textFaceField(), textScaleField(), textInkField(),
-          F({ path: 'el.text.fill', widget: 'color', label: 'fld.emphInk', spec: SPEC.ink }), textStyleField(), orientField(),
+          F({ path: 'el.text.fill', widget: 'color', label: 'fld.emphInk', spec: SPEC.ink }), textStyleField(), textWeightField(), orientField(),
           F({ path: 'el.text.nudge', widget: 'number', label: 'fld.nudgeFull', spec: SPEC.nudge }),
           F({ path: 'el.text.hide', widget: 'toggle', label: 'fld.hide' }),
           sharedField('arrive', 'order', 'fld.order'), sharedField('arrive', 'each', 'fld.each')].concat(textMediaFields())),
@@ -62246,7 +63144,7 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
     }
 
     async function newWork() {
-      await loadFile({ doc: D.defaultDoc(), side: D.defaultSide() });
+      await loadFile({ doc: D.newDoc(), side: D.defaultSide() });
       app.toast(t('io.newDone'), { kind: 'info' });
     }
 
@@ -62812,7 +63710,7 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
       saved = { id: null, text: null };
       used.clear();
       usedMedia.clear();
-      app.loadProject(D.defaultDoc(), D.defaultSide(), { quiet: true });
+      app.loadProject(D.newDoc(), D.defaultSide(), { quiet: true });
       pending.cancel();                                      // the empty work is stored at its first change, not now
       setState('idle');
       app.bus.emit('device', { cleared: true });             // the AssetStore forgets what it held (ui/media_io)
@@ -64917,19 +65815,23 @@ MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output', 'ui/media_widgets'
 
   // --- filters ("use only these", §6.4.5 部品) -------------------------------------------------------------------------
 
+  // A part the automatic picks may use: pooled, or opted in to a pool by a switch (v2.2 weight parts), so
+  // 「これだけ使う／使わない」 can switch it off alone.
+  function pooled(def) { return def.pool !== false || def.optIn !== undefined; }
+
   function filterOf(app, kind) {
     const f = app.doc.filters[kind];
     return { only: f && Array.isArray(f.only) ? f.only.slice() : null, deny: f && Array.isArray(f.deny) ? f.deny.slice() : null };
   }
 
   function counts(app, kind) {
-    const keys = keysFor(app.reg, kind).filter((k) => app.reg.get(kind, k).pool !== false);
+    const keys = keysFor(app.reg, kind).filter((k) => pooled(app.reg.get(kind, k)));
     const f = app.doc.filters[kind] || null;
     return { on: keys.filter((k) => allowedBy(f, k)).length, total: keys.length };
   }
 
   function normalize(app, kind, f) {
-    const keys = keysFor(app.reg, kind).filter((k) => app.reg.get(kind, k).pool !== false);
+    const keys = keysFor(app.reg, kind).filter((k) => pooled(app.reg.get(kind, k)));
     let only = f.only && f.only.length ? [...new Set(f.only)].sort() : null;
     let deny = f.deny && f.deny.length ? [...new Set(f.deny)].sort() : null;
     if (only && keys.every((k) => only.includes(k))) only = null;
@@ -64941,7 +65843,7 @@ MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output', 'ui/media_widgets'
   // The last usable part of a kind never goes: 「少なくとも1つは使います」 (§3.8, §6.11).
   function setFilter(app, kind, next) {
     const f = normalize(app, kind, next);
-    const keys = keysFor(app.reg, kind).filter((k) => app.reg.get(kind, k).pool !== false);
+    const keys = keysFor(app.reg, kind).filter((k) => pooled(app.reg.get(kind, k)));
     if (!keys.some((k) => allowedBy(f, k))) { app.toast(app.t('pb.keepOne'), { kind: 'warn' }); return false; }
     app.dispatch({ t: 'filter.set', kind, only: f.only, deny: f.deny }, { label: ['undo.filter', { kind: app.t('kind.' + kind) }] });
     return true;
@@ -64961,7 +65863,7 @@ MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output', 'ui/media_widgets'
 
   function presetOf(app, kind, preset) {
     const reg = app.reg;
-    const keys = keysFor(reg, kind).filter((k) => reg.get(kind, k).pool !== false);
+    const keys = keysFor(reg, kind).filter((k) => pooled(reg.get(kind, k)));
     if (preset === 'all') return { only: null, deny: null };
     if (preset === 'mood') {
       const mood = app.plan && app.plan.look ? reg.get('mood', app.plan.look.mood.v) : null;
@@ -64986,7 +65888,7 @@ MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output', 'ui/media_widgets'
     const count = h('div', { class: 'pb-count', role: 'status' });
     const grid = h('div', { class: 'pb-grid is-filter', role: 'group', 'aria-label': t('kind.' + kind) });
     const el = h('div', { class: 'pb-page' }, h('p', { class: 'note subtle', text: t('pb.filterHelp') }), presets, search, seasons, count, grid);
-    const keys = keysFor(reg, kind).filter((k) => reg.get(kind, k).pool !== false);
+    const keys = keysFor(reg, kind).filter((k) => pooled(reg.get(kind, k)));
     const hasSeasons = keys.some((k) => reg.get(kind, k).season);
 
     function render() {
@@ -68736,7 +69638,8 @@ MV.def('ui/palette', ['ui/dom', 'ui/icons', 'ui/keys', 'ui/selection', 'i18n/str
           if (kw && !kindHay.includes(kw)) continue;
           for (const key of reg.keys(kind)) {
             const def = reg.get(kind, key);
-            if (def.pool === false || (kind === 'ornament' && def.scope === 'run')) continue;
+            // late parts (v2.2) are pool: false yet meant to be pinned like any part
+            if ((def.pool === false && def.late !== true) || (kind === 'ornament' && def.scope === 'run')) continue;
             if (pw && !norm([def.label.ja, def.label.en, key].join(' ')).includes(pw)) continue;
             out.push({ text: t('pal.pin', { kind: kindText, part: app.label(kind, key) }), run: () => pinPart(kind, key) });
             if (out.length >= LIMIT) return out;
@@ -71778,8 +72681,8 @@ MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/a
 /* 文字PVメーカー v2 — original work. The inspector (詳細): crumbs, level header, sections from FIELDS, field rows, sub-pages (DESIGN §6.4.4–§6.4.9, §6.6; DESIGN_2_1 §6.5–§6.9). */
 MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/part_browser', 'ui/selection', 'ui/looks',
   'ui/output', 'i18n/t', 'core/paths', 'core/pins', 'core/shot', 'planner/areas', 'ui/shot_editor', 'ui/material_page',
-  'ui/media_page', 'ui/media_widgets', 'ui/media_io', 'ui/extreme'],
-(dom, I, F, W, PB, S, LK, OUT, T, P, PINS, SHOT, AREAS, KE, MP, MPG, MW, MI, XU) => {
+  'ui/media_page', 'ui/media_widgets', 'ui/media_io', 'ui/extreme', 'planner/rules'],
+(dom, I, F, W, PB, S, LK, OUT, T, P, PINS, SHOT, AREAS, KE, MP, MPG, MW, MI, XU, RU) => {
   'use strict';
 
   const { h } = dom;
@@ -72274,6 +73177,8 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
 
     function valueFor(field, v, fs) {
       if (field.offClears && !v) return W.AUTO;
+      // a switch of the new-work table (v2.2): its document default is 自動 (unpinned), anything else a pin
+      if (field.autoDefault && RU.sameValue(v, RU.defaultValue(doc(), null, field.path))) return W.AUTO;
       if (field.flashToggle) {
         const p = plan();
         const mood = p ? app.reg.get('mood', p.look.mood.v) : null;
@@ -73593,7 +74498,7 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
     const lang = MV.LANG === 'en' ? 'en' : 'ja';
     // 激しいカメラを抑える starts as this device asks (prefers-reduced-motion, DESIGN_EXTREME §3.6)
     const view = V.createView({ storage: safeStorage('localStorage'), defaults: { calmCamera: dom.prefersReducedMotion() } });
-    const store = ST.createStore({ doc: D.defaultDoc(), side: D.defaultSide(), reduce: svc.reduce, now: () => Date.now() });
+    const store = ST.createStore({ doc: D.newDoc(), side: D.defaultSide(), reduce: svc.reduce, now: () => Date.now() });
     // The AssetStore (DESIGN_2_1 §11.3.6): bytes from ui/project_io's device store (IndexedDB, or this tab's memory),
     // metadata from every library entry this tab has seen. Ids name content, so an entry seen once stays right for the
     // try-on and undo documents that still hold it.
@@ -74590,6 +75495,8 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
     const repaint = () => { if (app.shell) app.shell.stage.invalidate(); };
     const fonts = app.svc.fonts ? app.svc.fonts() : null;
     if (fonts && typeof fonts.on === 'function') fonts.on('epoch', () => { repaint(); app.bus.emit('fonts'); });
+    // a served weight of weight animation arrived (v2.2 draw-only face): only a repaint, nothing is laid out again
+    if (fonts && typeof fonts.on === 'function') fonts.on('draw', () => { repaint(); });
     const engine = app.engine;
     if (typeof engine.prepare !== 'function') return;
     let center = null;                            // the playhead time the last prepare was centred on
