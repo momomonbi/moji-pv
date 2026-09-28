@@ -1,6 +1,6 @@
 <!doctype html><html lang="ja"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-neJ4sDr622SVMhYhRw9oqAld4tss5t6QbQgtTuLKAZc='; style-src 'sha256-CBzRvq4sWr3CF69hafDp1l8UkHnSy18JQMXGJJhPDYI=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-gXcXWp1cPWT4fQjeb01wuSzZgAk0S4n5zOIU11wJqJs='; style-src 'sha256-CBzRvq4sWr3CF69hafDp1l8UkHnSy18JQMXGJJhPDYI=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
 <title>文字PVメーカー</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -11103,19 +11103,20 @@ MV.def('engine/text/kumi', ['core/script', 'engine/text/breaker'], (S, B) => {
 
   // ---- T1 かなを詰める: kana cells narrower than 1 em ------------------------------------------------------------
 
-  // Trim per tier in em at strength 1: the tightest cells at which two neighbours' inks stay apart (≤ 0.012 em where
-  // they meet, scanline by scanline) in the gothic and mincho faces, horizontally and vertically; tests/browser/
-  // glyph_parity check 6 measures every pair against these cells (DESIGN_2_2 §1; its numbers in docs/NOTES).
-  const TRIM = Object.freeze({ wide: 0.06, kana: 0.12, narrow: 0.28, small: 0.22, bar: 0.08 });
-  // Wide: a stroke or a voiced mark reaching an edge of the em (…and every voiced kana: が ぱ ヴ; れ ル sweep right).
-  const WIDE_KANA = 'あおすせなぬねのはひふへほまみむめやゆわゐゑをれルゟ';
+  // Trim per tier in em at strength 1: the tightest cells at which two neighbours' inks stay apart (≤ 0.015 em where
+  // they meet, scanline by scanline) in the gothic and mincho faces, horizontally and vertically, both the system faces
+  // (tests/browser/glyph_parity check 6, CI) and the web faces (contact_sheet.py --kumi --fonts); numbers in docs/NOTES.
+  const TRIM = Object.freeze({ wide: 0.06, kana: 0.12, narrow: 0.26, small: 0.20, bar: 0.08 });
+  // Wide: a stroke or a voiced mark reaching an edge of the em (…and every voiced kana: が ぱ ヴ; か れ ル ハ reach out).
+  const WIDE_KANA = 'あおすせなぬねのはひふへほまみむめやゆわゐゑをかれルハヱゟ';
   // Narrow across a horizontal line only: in a vertical column く し り … are tall, and take the wide tier there. Narrow
   // wins over voiced (ぐ じ ド).
   const NARROW_KANA = 'くぐしじりノトドリ';
   // The spacing marks ゛ ゜ are no letters (「ア゛」 leans its mark on the kana): never trimmed.
   const MARKS = '゛゜';
-  // Heavy and brush faces carry more ink per cell: their trim is damped, and again for a layout weight ≥ 800.
-  const FLAVOR_DAMP = Object.freeze({ heavy: 0.6, brush: 0.8 });
+  // Heavy and brush faces carry more ink per cell: their trim is damped, and again for a layout weight ≥ 800. A heavy
+  // face's ink fills its em (Dela Gothic One's own neighbours meet at their natural advance), so it keeps little.
+  const FLAVOR_DAMP = Object.freeze({ heavy: 0.15, brush: 0.8 });
   const HEAVY_WEIGHT = 800;
   const WEIGHT_DAMP = 0.8;
   // Where two words meet (a phrase start, or right after a particle), both kana at the seam keep this share of their
@@ -57818,7 +57819,8 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core
       stages, behaveP50: percentile(behave.sort((a, b) => a - b), 0.5), w, h, scenes: rec.engine.stats().scenes, shots,
       rigs: (plan.rigs || []).filter((r) => r.rig && r.rig.v !== 'none').length, particles, mixShare: share, times, slices,
       cover: meter ? cover : null, drawMs: meter || o.flushStages ? drawMs : null, budget,
-      xshots, blur: { frames: blurred.length, p50: percentile(blurred, 0.5), p95: percentile(blurred, 0.95) } };
+      xshots, blur: { frames: blurred.length, p50: percentile(blurred, 0.5), p95: percentile(blurred, 0.95) },
+      kumi: plan.cuts.filter((c) => c.slots && c.slots['text.kana']).length };
   }
 
   // cuts(o) → [{ i, key, a, b, t0, times, slots, glyphs, em, cellArea, spriteBudget }]: the cuts of a fixture project
@@ -57905,7 +57907,7 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core
   // of the drawn glyph horizontally, columns vertically, o.px of them per em, in the cell's frame, null where the scanline
   // holds no ink), so two neighbours are compared where their inks really meet (a handakuten high on the right does
   // not meet a stroke at mid height). o = { flavor: 'gothic' | 'mincho' | 'heavy' | 'brush', orient: 'h' | 'v', family?,
-  // weight?, px (the em in px, default 120), load (await the web face first) }
+  // weight?, px (the em in px, default 120), load (load the web face first; `loaded` says whether it came) }
   async function kumiInk(o) {
     const opt = o || {};
     const flavor = KUMI_FACES[opt.flavor] ? opt.flavor : 'gothic';
@@ -57915,8 +57917,10 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core
     const all = [];
     for (let c = 0x3041; c <= 0x30FF; c++) if (c !== 0x3097 && c !== 0x3098 && c !== 0x3099 && c !== 0x309A) all.push(String.fromCodePoint(c));
     const kana = all.filter((ch) => { const u = BR.analyze(ch); return u.n === 1 && KU.tier(u, 0) !== null; });
-    if (opt.load && document.fonts) {
-      try { await document.fonts.load(ref.css(100), kana.join('')); } catch (e) { /* the fallback stack draws */ }
+    // the web face through the font book, as the engine loads it (Google Fonts); `loaded` says whether it drew
+    let loaded = false;
+    if (opt.load) {
+      try { loaded = (await HF.createFontBook({ document, timeoutMs: 15000 }).ready([ref], kana.join(''))).loaded.length > 0; } catch (e) { loaded = false; }
     }
     const px = opt.px || 120;
     const svc = TS.createTextService({ measurer: HM.createCanvasMeasurer(factory, null), faces });
@@ -57959,7 +57963,7 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core
       const cell = v ? lay.h[0] : lay.w[0];
       rows.push({ g: ch, tier: KU.tier(BR.analyze(ch), 0, v), cell: cell / em, before: before / em, after: after / em, pb, pa });
     }
-    return { font: ref.css(100), family: ref.family, flavor: ref.flavor, orient: v ? 'v' : 'h', px, rows };
+    return { font: ref.css(100), family: ref.family, flavor: ref.flavor, orient: v ? 'v' : 'h', px, loaded, rows };
   }
 
   function info() {

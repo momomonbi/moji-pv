@@ -1120,7 +1120,8 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core
       stages, behaveP50: percentile(behave.sort((a, b) => a - b), 0.5), w, h, scenes: rec.engine.stats().scenes, shots,
       rigs: (plan.rigs || []).filter((r) => r.rig && r.rig.v !== 'none').length, particles, mixShare: share, times, slices,
       cover: meter ? cover : null, drawMs: meter || o.flushStages ? drawMs : null, budget,
-      xshots, blur: { frames: blurred.length, p50: percentile(blurred, 0.5), p95: percentile(blurred, 0.95) } };
+      xshots, blur: { frames: blurred.length, p50: percentile(blurred, 0.5), p95: percentile(blurred, 0.95) },
+      kumi: plan.cuts.filter((c) => c.slots && c.slots['text.kana']).length };
   }
 
   // cuts(o) → [{ i, key, a, b, t0, times, slots, glyphs, em, cellArea, spriteBudget }]: the cuts of a fixture project
@@ -1207,7 +1208,7 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core
   // of the drawn glyph horizontally, columns vertically, o.px of them per em, in the cell's frame, null where the scanline
   // holds no ink), so two neighbours are compared where their inks really meet (a handakuten high on the right does
   // not meet a stroke at mid height). o = { flavor: 'gothic' | 'mincho' | 'heavy' | 'brush', orient: 'h' | 'v', family?,
-  // weight?, px (the em in px, default 120), load (await the web face first) }
+  // weight?, px (the em in px, default 120), load (load the web face first; `loaded` says whether it came) }
   async function kumiInk(o) {
     const opt = o || {};
     const flavor = KUMI_FACES[opt.flavor] ? opt.flavor : 'gothic';
@@ -1217,8 +1218,10 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core
     const all = [];
     for (let c = 0x3041; c <= 0x30FF; c++) if (c !== 0x3097 && c !== 0x3098 && c !== 0x3099 && c !== 0x309A) all.push(String.fromCodePoint(c));
     const kana = all.filter((ch) => { const u = BR.analyze(ch); return u.n === 1 && KU.tier(u, 0) !== null; });
-    if (opt.load && document.fonts) {
-      try { await document.fonts.load(ref.css(100), kana.join('')); } catch (e) { /* the fallback stack draws */ }
+    // the web face through the font book, as the engine loads it (Google Fonts); `loaded` says whether it drew
+    let loaded = false;
+    if (opt.load) {
+      try { loaded = (await HF.createFontBook({ document, timeoutMs: 15000 }).ready([ref], kana.join(''))).loaded.length > 0; } catch (e) { loaded = false; }
     }
     const px = opt.px || 120;
     const svc = TS.createTextService({ measurer: HM.createCanvasMeasurer(factory, null), faces });
@@ -1261,7 +1264,7 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core
       const cell = v ? lay.h[0] : lay.w[0];
       rows.push({ g: ch, tier: KU.tier(BR.analyze(ch), 0, v), cell: cell / em, before: before / em, after: after / em, pb, pa });
     }
-    return { font: ref.css(100), family: ref.family, flavor: ref.flavor, orient: v ? 'v' : 'h', px, rows };
+    return { font: ref.css(100), family: ref.family, flavor: ref.flavor, orient: v ? 'v' : 'h', px, loaded, rows };
   }
 
   function info() {

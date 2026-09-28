@@ -25,8 +25,9 @@
    of U+3041–U+30FF that is trimmed, the lab's kumiInk lays it out alone (its tightest cell: a one-grapheme run has no
    word seam, and seams only relax cells) and draws it at 120 px; for every ordered pair (a, b) the overlap is how far
    a's ink after its centre and b's ink before its centre reach past the distance of the two centres, (cell a +
-   cell b) / 2, compared scanline by scanline across the line (a stroke only meets a stroke at the same height). The
-   largest overlap must stay ≤ 0.02 em, horizontally and vertically, in the gothic and mincho faces of the system
+   cell b) / 2, compared scanline by scanline across the line (a stroke only meets a stroke at the same height), less
+   what the face's own ink does at its natural advance of 1 em (nothing, for these faces). The largest must stay
+   ≤ 0.02 em, horizontally and vertically, in the gothic and mincho faces of the system
    (fonts are blocked as in the other checks; CI installs Noto Sans / Serif CJK JP). The worst five pairs are printed,
    with the bounding-box figure (whole ink extents, which count a handakuten high on the right against a stroke at mid
    height) for reference.
@@ -42,6 +43,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from contact_sheet import launch, open_lab, csp_violations, japanese_font_missing  # noqa: E402  (lab-page helpers)
+from contact_sheet import KUMI_PAIRS_JS, KUMI_INK_MAX  # noqa: E402  (文字組み ink pairs, check 6)
 from playwright.async_api import async_playwright  # noqa: E402
 
 PARITY_MAX = 2 / 255
@@ -52,33 +54,7 @@ SPIKE_FLOOR = 0.25 / 255
 INK_CHARS = ['空', 'あ', '夜', '明', '街', '光', '「', 'ー', '〜', 'W', 'g', 'j', 'Q', 'R', '12', '!?', '😀', '👨\u200d👩\u200d👧']
 INK_STYLES = ['plain', 'outline', 'shadow', 'glow', 'duo']
 INK_SIZES = [24, 96, 480]
-KUMI_INK_MAX = 0.02            # em: how far two neighbours' inks may meet at 100 %
 KUMI_FLAVORS = ('gothic', 'mincho')
-# The pairs of the kana the lab lays out (window.__lab.kumiInk): the largest scanline overlap, the worst five pairs and
-# the bounding-box figure, computed in the page.
-KUMI_PAIRS_JS = """async (o) => {
-  const r = await window.__lab.kumiInk(o);
-  const rows = r.rows, n = rows.length, m = n ? rows[0].pa.length : 0;
-  const worst = [];
-  let max = -Infinity, bbox = -Infinity, inked = 0;
-  for (const x of rows) if (x.pa.some((v) => v !== null)) inked++;
-  for (let i = 0; i < n; i++) {
-    for (let j = 0; j < n; j++) {
-      const a = rows[i], b = rows[j], d = (a.cell + b.cell) / 2;
-      let reach = -Infinity;
-      for (let s = 0; s < m; s++) if (a.pa[s] !== null && b.pb[s] !== null && a.pa[s] + b.pb[s] > reach) reach = a.pa[s] + b.pb[s];
-      const ov = reach - d;
-      if (ov > max) max = ov;
-      bbox = Math.max(bbox, a.after + b.before - d);
-      if (worst.length < 5 || ov > worst[worst.length - 1][0]) {
-        worst.push([ov, a.g + b.g, a.tier + '/' + b.tier]);
-        worst.sort((p, q) => q[0] - p[0]);
-        if (worst.length > 5) worst.pop();
-      }
-    }
-  }
-  return { family: r.family, n, inked, max, bbox, worst };
-}"""
 
 
 def sources_of(info, wanted):

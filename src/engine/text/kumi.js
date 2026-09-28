@@ -13,19 +13,20 @@ MV.def('engine/text/kumi', ['core/script', 'engine/text/breaker'], (S, B) => {
 
   // ---- T1 かなを詰める: kana cells narrower than 1 em ------------------------------------------------------------
 
-  // Trim per tier in em at strength 1: the tightest cells at which two neighbours' inks stay apart (≤ 0.012 em where
-  // they meet, scanline by scanline) in the gothic and mincho faces, horizontally and vertically; tests/browser/
-  // glyph_parity check 6 measures every pair against these cells (DESIGN_2_2 §1; its numbers in docs/NOTES).
-  const TRIM = Object.freeze({ wide: 0.06, kana: 0.12, narrow: 0.28, small: 0.22, bar: 0.08 });
-  // Wide: a stroke or a voiced mark reaching an edge of the em (…and every voiced kana: が ぱ ヴ; れ ル sweep right).
-  const WIDE_KANA = 'あおすせなぬねのはひふへほまみむめやゆわゐゑをれルゟ';
+  // Trim per tier in em at strength 1: the tightest cells at which two neighbours' inks stay apart (≤ 0.015 em where
+  // they meet, scanline by scanline) in the gothic and mincho faces, horizontally and vertically, both the system faces
+  // (tests/browser/glyph_parity check 6, CI) and the web faces (contact_sheet.py --kumi --fonts); numbers in docs/NOTES.
+  const TRIM = Object.freeze({ wide: 0.06, kana: 0.12, narrow: 0.26, small: 0.20, bar: 0.08 });
+  // Wide: a stroke or a voiced mark reaching an edge of the em (…and every voiced kana: が ぱ ヴ; か れ ル ハ reach out).
+  const WIDE_KANA = 'あおすせなぬねのはひふへほまみむめやゆわゐゑをかれルハヱゟ';
   // Narrow across a horizontal line only: in a vertical column く し り … are tall, and take the wide tier there. Narrow
   // wins over voiced (ぐ じ ド).
   const NARROW_KANA = 'くぐしじりノトドリ';
   // The spacing marks ゛ ゜ are no letters (「ア゛」 leans its mark on the kana): never trimmed.
   const MARKS = '゛゜';
-  // Heavy and brush faces carry more ink per cell: their trim is damped, and again for a layout weight ≥ 800.
-  const FLAVOR_DAMP = Object.freeze({ heavy: 0.6, brush: 0.8 });
+  // Heavy and brush faces carry more ink per cell: their trim is damped, and again for a layout weight ≥ 800. A heavy
+  // face's ink fills its em (Dela Gothic One's own neighbours meet at their natural advance), so it keeps little.
+  const FLAVOR_DAMP = Object.freeze({ heavy: 0.15, brush: 0.8 });
   const HEAVY_WEIGHT = 800;
   const WEIGHT_DAMP = 0.8;
   // Where two words meet (a phrase start, or right after a particle), both kana at the seam keep this share of their

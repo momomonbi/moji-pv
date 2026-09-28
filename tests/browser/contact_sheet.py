@@ -8,6 +8,8 @@
     python3 tests/browser/contact_sheet.py --kind shot [--keys pushWord,readAlong] …   # camera presets (also --kind rig)
     python3 tests/browser/contact_sheet.py --kind xshot [--keys whipPan,spinIn~m] [--params '{"extreme":0.5}']
         [--sentinel '#FF00FF'] …                             # EXTREME presets (DESIGN_EXTREME), ground edges counted
+    python3 tests/browser/contact_sheet.py --kumi [--mood quietHush] [--aspect 9:16] [--orient v] [--face mincho]
+        [--project basic] [--fonts] --out /tmp/kumi.png                # 文字組み (DESIGN_2_2 §1): off / new work / 100 %
     python3 tests/browser/contact_sheet.py --list          # the parts each registry has
     python3 tests/browser/contact_sheet.py                 # self-check (CI): one small sheet per kind, nothing written
 
@@ -26,9 +28,17 @@ corner, cornerNote or creditFold, stays visible).
 Parts come from parts/catalog when it exists, else from the test fixtures (tests/fixtures/example_parts.js and
 stub_parts.js). Google Fonts are blocked unless --fonts is given, so the sheet is fast and uses fallback faces.
 Open the PNG with any image viewer (or the Read tool). Exit status 1 when a cell failed to render.
+--kumi (文字組み, DESIGN_2_2 §1 X.5) renders a fixture project (--project, default basic) three times side by side: as
+an older work (no look.gen: typesetting off), as a new work (look.gen = 1: かな詰め 70 %, 助詞・頭の字 50 %, 英字 50 %) and
+with the three switches pinned at 100 %; one row per line, each at the middle of its first cut's hold. --mood, --orient
+and --aspect pin the look; --face (gothic mincho heavy brush) pins every role's Japanese face to that flavour's theme
+face; --lines 'row|row|…' replaces the project's lyrics (Latin inside Japanese lines for 英字). With --fonts the real web faces draw, and the ink of every pair of neighbouring kana at 100 % is measured in the
+four flavours' faces (glyph_parity.py check 6 on the system faces is the CI gate; this is the release check): a pair
+whose inks meet by more than 0.02 em is a FAIL row.
 Without --kind (CI runs every browser test with its default arguments) it checks itself instead: for every kind of the
-default registry, and for the shot, rig and xshot presets, a sheet of two of that kind's parts at two times, kept in memory; it fails when a
-cell fails, the page reports an error or a CSP violation, or a sheet comes back empty.
+default registry, and for the shot, rig and xshot presets, a sheet of two of that kind's parts at two times, kept in memory,
+and a small --kumi sheet whose new-work column differs from its older-work column; it fails when a cell fails, the page
+reports an error or a CSP violation, or a sheet comes back empty.
 
 This file also holds the lab-page helpers the other engine browser tests import (parts_gallery.py, glyph_parity.py,
 determinism.py, perf.py): lab_html() assembles the lab page in memory from the current sources the way build.py does
@@ -278,6 +288,127 @@ SHEET_JS = r"""async (o) => {
 }"""
 
 
+# 文字組み (DESIGN_2_2 §1): a fixture project as an older work, as a new work and at 100 %, one row per line (its first
+# cut, mid-hold). o = { project, aspect, orient, mood, face, fonts, rows, cell, parts, lines (rows in place of the project's) }
+KUMI_SHEET_JS = r"""async (o) => {
+  const FAC = MV.use('engine/facade'), HC = MV.use('engine/host/canvas'), HM = MV.use('engine/host/measure');
+  const HF = MV.use('engine/host/fonts'), DOC = MV.use('core/doc'), REG = MV.use('core/registry'), K = MV.use('parts/kit');
+  const fx = globalThis.MVLabFixtures || {};
+  const reg = o.parts === 'catalog' ? MV.use('parts/catalog').defaultRegistry() : o.parts === 'stub'
+    ? REG.createRegistry(fx.stub.allStubParts())
+    : REG.createRegistry(fx.examples.exampleParts(K).concat(fx.stub.fallbackParts().filter((d) => d.kind !== 'theme' && d.kind !== 'mood')));
+  const FACE = { gothic: ['Noto Sans JP', 500], mincho: ['Shippori Mincho B1', 500], heavy: ['Dela Gothic One', 400], brush: ['Yuji Syuku', 400] };
+  const aspect = DOC.DESIGN_SIZE[o.aspect] ? o.aspect : '16:9';
+  const [dw, dh] = DOC.DESIGN_SIZE[aspect];
+  const cellW = Math.max(80, Math.min(640, o.cell || (dw >= dh ? 320 : 170))), cellH = Math.round((cellW * dh) / dw);
+  const base = JSON.parse(JSON.stringify(fx.projects[o.project || 'basic']));
+  base.look = Object.assign({}, base.look, { aspect });
+  if (o.lines && o.lines.length) base.sheet = { next: o.lines.length + 1, rows: o.lines.map((src, i) => ({ id: 'k' + (i + 1), src })) };
+  const pins = Object.assign({}, base.pins);
+  const pin = (slot, v) => { pins['work:' + slot] = { v, by: 'user' }; };
+  if (o.orient) pin('orient', o.orient);
+  if (o.mood) pin('mood', o.mood);
+  if (o.face && FACE[o.face]) for (const role of ['display', 'serif', 'body']) { pin('face.' + role + '.ja', FACE[o.face][0]); pin('face.' + role + '.weight', FACE[o.face][1]); }
+  const variants = [
+    { label: 'older work: off', look: {}, pins: {} },
+    { label: 'new work: 70 / 50 / 50 %', look: { gen: 1 }, pins: {} },
+    { label: 'pinned 100 %', look: {}, pins: { 'work:text.kana': { v: 1, by: 'user' }, 'work:text.jump': { v: 1, by: 'user' },
+      'work:text.latin': { v: 1, by: 'user' } } },
+  ];
+  const factory = HC.createCanvasFactory();
+  const fonts = o.fonts ? HF.createFontBook({ document, timeoutMs: 8000 }) : null;
+  const made = factory.create(cellW, cellH, { alpha: false });
+  const cell = { canvas: made.canvas, ctx: made.ctx, w: cellW, h: cellH };
+  const errors = [], hashes = [];
+  let rows = null, times = null, labels = null, theme = '', mood = '';
+  const labelW = 170, headH = 58, gap = 6;
+  const cols = variants.length;
+  const sheet = document.createElement('canvas');
+  const g = sheet.getContext('2d');
+  for (let c = 0; c < cols; c++) {
+    const v = variants[c];
+    const doc = Object.assign({}, base, { look: Object.assign({}, base.look, v.look), pins: Object.assign({}, pins, v.pins) });
+    const engine = FAC.createEngine({ registry: reg, canvas: factory, measurer: HM.createCanvasMeasurer(factory, fonts), fonts, assets: null });
+    try {
+      engine.setDoc(doc);
+      const plan = engine.plan;
+      if (!rows) {
+        rows = plan.lines.slice(0, o.rows || 12).map((l) => plan.cuts.findIndex((x) => x.key === l.cuts[0])).filter((i) => i >= 0);
+        labels = rows.map((i) => plan.cuts[i].text || '');
+        times = rows.map((i) => {
+          const cut = plan.cuts[i], sc = engine.scene('cut', i);
+          const tm = sc ? sc.times : { rest: (cut.t1 - cut.t0) * 0.3, out: (cut.t1 - cut.t0) * 0.8 };
+          return cut.t0 + (tm.rest + tm.out) / 2;
+        });
+        theme = plan.look.theme.v; mood = plan.look.mood.v;
+        sheet.width = labelW + cols * (cellW + gap) + gap;
+        sheet.height = headH + rows.length * (cellH + gap) + gap;
+        g.fillStyle = '#1b1d22'; g.fillRect(0, 0, sheet.width, sheet.height);
+        g.textBaseline = 'top';
+        g.fillStyle = '#e8e8e8'; g.font = '600 15px system-ui, sans-serif';
+        g.fillText('文字組み · ' + aspect + ' · ' + (o.orient || 'auto') + ' · mood ' + mood + ' · theme ' + theme + (o.face ? ' · face ' + o.face : '')
+          + (o.lines && o.lines.length ? ' · own lines' : ' · project ' + (o.project || 'basic')), gap, 8);
+      }
+      if (o.fonts) await engine.prepare(0, plan.duration, { export: true });
+      g.fillStyle = '#aaa'; g.font = '12px system-ui, sans-serif';
+      g.fillText(v.label, labelW + c * (cellW + gap) + 4, 36);
+      hashes.push([]);
+      for (let r = 0; r < rows.length; r++) {
+        const x = labelW + c * (cellW + gap), y = headH + r * (cellH + gap);
+        engine.renderFrame(cell, times[r], { quality: 'export', pick: false, scale: Math.min(cellW / plan.design.w, cellH / plan.design.h) });
+        g.drawImage(cell.canvas, x, y);
+        const d = cell.ctx.getImageData(0, 0, cellW, cellH).data;
+        let hsh = 0;
+        for (let i = 0; i < d.length; i += 7) hsh = (hsh * 31 + d[i]) >>> 0;
+        hashes[c].push(hsh);
+        if (c === 0) {
+          g.fillStyle = '#e8e8e8'; g.font = '12px system-ui, sans-serif';
+          g.fillText(String(labels[r]).slice(0, 14), gap, y + 4);
+          g.fillStyle = '#888'; g.fillText('t=' + times[r].toFixed(2) + 's', gap, y + 22);
+        }
+      }
+    } catch (e) {
+      errors.push(v.label + ': ' + (e && e.message));
+    }
+    for (const w of engine.warnings()) if (w.code === 'part-error') errors.push(w.detail);
+    engine.dispose();
+  }
+  const differ = hashes.length === cols ? hashes[1].filter((h, i) => h !== hashes[0][i]).length : 0;
+  return { png: sheet.toDataURL('image/png'), rows: rows ? rows.length : 0, errors, width: sheet.width, height: sheet.height, differ, theme, mood };
+}"""
+
+# The ink of every ordered pair of neighbouring kana at かな詰め 100 % (window.__lab.kumiInk), computed in the page
+# (glyph_parity.py check 6; --kumi --fonts): `max` = the most the trim makes two inks meet, in em — the scanline overlap
+# less what the face's own ink does at its natural advance (1 em: a heavy display face's neighbours already meet there),
+# `overlap` = the scanline overlap itself, the worst five pairs (by `max`), and the bounding-box figure.
+KUMI_PAIRS_JS = """async (o) => {
+  const r = await window.__lab.kumiInk(o);
+  const rows = r.rows, n = rows.length, m = n ? rows[0].pa.length : 0;
+  const worst = [];
+  let max = -Infinity, overlap = -Infinity, bbox = -Infinity, inked = 0;
+  for (const x of rows) if (x.pa.some((v) => v !== null)) inked++;
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j < n; j++) {
+      const a = rows[i], b = rows[j], d = (a.cell + b.cell) / 2;
+      let reach = -Infinity;
+      for (let s = 0; s < m; s++) if (a.pa[s] !== null && b.pb[s] !== null && a.pa[s] + b.pb[s] > reach) reach = a.pa[s] + b.pb[s];
+      const ov = reach - d, own = ov - Math.max(reach - 1, 0);
+      if (ov > overlap) overlap = ov;
+      if (own > max) max = own;
+      bbox = Math.max(bbox, a.after + b.before - d);
+      if (worst.length < 5 || own > worst[worst.length - 1][0]) {
+        worst.push([own, a.g + b.g, a.tier + '/' + b.tier]);
+        worst.sort((p, q) => q[0] - p[0]);
+        if (worst.length > 5) worst.pop();
+      }
+    }
+  }
+  return { family: r.family, loaded: r.loaded, n, inked, max, overlap, bbox, worst };
+}"""
+KUMI_INK_MAX = 0.02            # em: how far two neighbours' inks may meet at 100 %
+KUMI_FACES = ('gothic', 'mincho', 'heavy', 'brush')
+
+
 IMPULSE_KINDS = ('flash', 'shake', 'slip', 'punch')
 
 
@@ -317,6 +448,8 @@ async def run(args):
             if not info['sources']:
                 print('contact_sheet: no parts (no parts/catalog and no fixtures)', file=sys.stderr)
                 return 1
+            if args.kumi:
+                return await kumi_sheet(page, info, args)
             if not args.kind:
                 return await self_check(page, info)
             opts = {'kind': args.kind, 'keys': parse_list(args.keys), 'aspect': args.aspect,
@@ -343,6 +476,34 @@ async def run(args):
             return 1 if problems else 0
         finally:
             await browser.close()
+
+
+async def kumi_sheet(page, info, args):
+    """--kumi: the 文字組み sheet, and with --fonts the ink of neighbouring kana in the four flavours' web faces."""
+    opts = {'project': args.project, 'aspect': args.aspect, 'orient': args.orient or None, 'mood': args.mood or None,
+            'face': args.face or None, 'fonts': bool(args.fonts), 'rows': 12, 'cell': args.cell,
+            'parts': args.parts or info['sources'][0], 'lines': [x for x in args.lines.split('|') if x] if args.lines else None}
+    result = await page.evaluate(KUMI_SHEET_JS, opts)
+    out = Path(args.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_bytes(base64.b64decode(result['png'].split(',', 1)[1]))
+    print('contact_sheet: wrote %s (%dx%d, %d lines × off / new work / 100 %%; mood %s, theme %s; %d rows differ from off)' % (
+        out, result['width'], result['height'], result['rows'], result['mood'], result['theme'], result['differ']))
+    problems = list(result['errors'])
+    if args.fonts:
+        for flavor in KUMI_FACES:
+            for orient in ('h', 'v'):
+                r = await page.evaluate(KUMI_PAIRS_JS, {'flavor': flavor, 'orient': orient, 'load': True})
+                ok = r['max'] <= KUMI_INK_MAX and r['inked'] == r['n']
+                if not r['loaded']:
+                    problems.append('kumi ink %s %s: the web face %s did not load (the fallback stack drew)' % (flavor, orient, r['family']))
+                print('%s kumi ink %s %s (%s%s, %d kana): the trim makes inks meet by %.3f em (limit %.2f; overlap %.3f); worst %s' % (
+                    'ok  ' if ok else 'FAIL', flavor, orient, r['family'], '' if r['loaded'] else ', NOT LOADED', r['n'], r['max'],
+                    KUMI_INK_MAX, r['overlap'], ' '.join('%s %.3f (%s)' % (g, v, t) for v, g, t in r['worst'])))
+    problems += page.lab_errors + await csp_violations(page)
+    for msg in problems:
+        print('  ' + msg)
+    return 1 if problems else 0
 
 
 async def self_check(page, info):
@@ -377,6 +538,13 @@ async def self_check(page, info):
         if kind == 'xshot' and any(v for row in result['edges'] for v in row):
             failures.append('xshot: a ground edge shows on the frame border %s' % result['edges'])
     failures.extend(await check_options(page, info, source))
+    # 文字組み: a small sheet; the new work's typesetting must reach the frames (its column differs from the older work's)
+    kumi = await page.evaluate(KUMI_SHEET_JS, {'project': 'basic', 'aspect': '16:9', 'orient': None, 'mood': None, 'face': None,
+                                               'fonts': False, 'rows': 3, 'cell': 160, 'parts': source})
+    sheets += 1
+    if kumi['rows'] != 3 or not kumi['png'].startswith('data:image/png') or kumi['differ'] < 2:
+        failures.append('--kumi: %d rows, %d differ from the older work' % (kumi['rows'], kumi['differ']))
+    failures.extend('--kumi: %s' % msg for msg in kumi['errors'])
     failures.extend(page.lab_errors + await csp_violations(page))
     for msg in failures:
         print('FAIL ' + msg)
@@ -426,6 +594,11 @@ def main(argv=None):
     ap.add_argument('--impulses', default='', help='extra impulses kind@seconds[:amp], comma-separated (flash shake slip punch)')
     ap.add_argument('--sentinel', default='', help='fill the scene backdrop with this #RRGGBB colour and count the frame-border '
                     'pixels that show it (ground edges)')
+    ap.add_argument('--kumi', action='store_true', help='文字組み: a fixture project off / as a new work / at 100 %% (DESIGN_2_2 §1)')
+    ap.add_argument('--project', default='basic', help='--kumi: the fixture project (basic vertical lrc long v21)')
+    ap.add_argument('--mood', default='', help='--kumi: pin this mood')
+    ap.add_argument('--lines', default='', help='--kumi: lyric rows in place of the project\'s, separated by |')
+    ap.add_argument('--face', default='', choices=['', 'gothic', 'mincho', 'heavy', 'brush'], help='--kumi: pin every role\'s Japanese face')
     ap.add_argument('--list', action='store_true', help='list the parts and exit')
     ap.add_argument('--out', default='/tmp/sheet.png')
     args = ap.parse_args(argv)

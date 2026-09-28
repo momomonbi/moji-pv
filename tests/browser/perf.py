@@ -40,6 +40,9 @@ per-frame blur (FrameStats.media.fallback 0 in export quality); project_basic wi
 as the baseline. --media-rows also measures the other §11.5.12 rows once (NOTES): a still and a video ground alone, the
 isolated path (a PNG with alpha), the WebM alpha merge of a 1080p frame, scrubbing a 1080p clip with 2-s key frames,
 and the export overhead of a 1080p30 video background.
+DESIGN_2_2 §1 (+): project_long as a new work (look.gen = 1: 文字組み on at 70 / 50 / 50 %), 10 s at 30 fps at 720p, judged at
+twice the budget like the other rows and, besides, its p50 against the plain project_long of the same run: ≤ 1.10 × (each
+played on fresh engines in turn, --runs pairs, at least 3; the best p50 of each side is compared). --no-kumi skips it.
 The GitHub CI runner (ubuntu-latest, Google Chrome, software raster, no GPU) is the twice-the-budget gate; it is not
 the reference machine. The reference is the mid-range laptop of DESIGN_2_1 §8.7 / §11.5.12.
 Run: PW_EXECUTABLE=/opt/pw-browsers/chromium python3 tests/browser/perf.py [--seconds 10] [--projects basic,long]
@@ -96,6 +99,8 @@ async def run(args):
                 await check_camerawork(page, info, args, failures)
             if args.extreme:
                 await check_extreme(page, info, args, failures)
+            if args.kumi:
+                await check_kumi(page, info, args, failures)
             if page.lab_errors:
                 failures.append('page errors: %r' % page.lab_errors[:10])
             if args.media:
@@ -144,6 +149,33 @@ async def check_camerawork(page, info, args, failures):
               r['behaveP50'], st['behave'], r['p50'], r['p95'], r['max'], r['shots'], r['rigs'], r['particles'],
               r['mixShare'], gb['phases'], gb['masked'], gb['fitted'], gb['share']))
     failures.extend('long+camera: ' + b for b in bad)
+
+
+KUMI_RATIO = 1.10       # DESIGN_2_2 §1 X.4: a new work's p50 against the plain document's
+
+
+async def check_kumi(page, info, args, failures):
+    """project_long as a new work (文字組み on) against the plain project_long, fresh engines in turn (DESIGN_2_2 §1)."""
+    src = args.parts or ('catalog' if 'catalog' in info['sources'] else 'examples')
+    base = {'parts': src, 'project': 'long', 'seconds': args.seconds, 'fps': 30, 'short': 720, 'start': START['long']}
+    plain, kumi = [], []
+    for _ in range(max(3, args.runs)):
+        plain.append(await page.evaluate('(o) => window.__lab.perf(o)', base))
+        kumi.append(await page.evaluate('(o) => window.__lab.perf(o)', dict(base, look={'gen': 1})))
+    p50p = min(x['p50'] for x in plain)
+    r = min(kumi, key=lambda x: x['p95'])
+    p50k = min(x['p50'] for x in kumi)
+    bad = []
+    if r['p50'] > 2 * TARGET_MS or r['p95'] > 2 * HARD_MS:
+        bad.append('p50 %.2f ms / p95 %.2f ms is above twice the budget' % (r['p50'], r['p95']))
+    if p50k > KUMI_RATIO * p50p:
+        bad.append('p50 %.2f ms is above %.2f × the plain document\'s %.2f ms' % (p50k, KUMI_RATIO, p50p))
+    if r['kumi'] < 1:
+        bad.append('no cut carries 文字組み: the row measured a plain document')
+    print('%s long+kumi %dx%d, %d frames: p50 %.2f ms (plain %.2f ms: × %.2f, limit %.2f), p95 %.2f ms, max %.2f ms; %d cuts with 文字組み' % (
+        'FAIL' if bad else 'ok  ', r['w'], r['h'], r['frames'], p50k, p50p, p50k / max(1e-9, p50p), KUMI_RATIO, r['p95'], r['max'],
+        r['kumi']))
+    failures.extend('long+kumi: ' + b for b in bad)
 
 
 async def check_extreme(page, info, args, failures):
@@ -260,6 +292,8 @@ def main():
                     help='skip the camerawork + materials run of project_long (DESIGN_2_1 §7.4)')
     ap.add_argument('--no-extreme', dest='extreme', action='store_false',
                     help='skip the EXTREME camerawork run of project_long (DESIGN_EXTREME §5.3)')
+    ap.add_argument('--no-kumi', dest='kumi', action='store_false',
+                    help='skip the 文字組み run of project_long as a new work (DESIGN_2_2 §1)')
     ap.add_argument('--no-media', dest='media', action='store_false',
                     help='skip the photos-and-videos run of project_basic (DESIGN_2_1 §11.8.3)')
     ap.add_argument('--media-rows', action='store_true', help='also measure the other §11.5.12 rows once (NOTES)')

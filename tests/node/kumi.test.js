@@ -52,7 +52,7 @@ const caps = (r) => Array.from(r.cap, (c) => (c === Infinity ? 1 : Math.round(c 
 
 const SMALL = new Set([...'ぁぃぅぇぉっゃゅょゎゕゖァィゥェォッャュョヮヵヶ']);
 const NARROW = new Set([...'くぐしじりノトドリ']);
-const WIDE = new Set([...'あおすせなぬねのはひふへほまみむめやゆわゐゑをれルゟ']);
+const WIDE = new Set([...'あおすせなぬねのはひふへほまみむめやゆわゐゑをかれルハヱゟ']);
 const VOICED = new Set([...'がぎぐげござじずぜぞだぢづでどばびぶべぼぱぴぷぺぽゔゞガギグゲゴザジズゼゾダヂヅデドバビブベボパピプペポヴヷヸヹヺヾ']);
 
 test('T1 tiers: every kana of U+3041–U+30FF by the table; voiced kana are wide, ぐ じ ド narrow (wide in a column)', () => {
@@ -76,7 +76,7 @@ test('T1 tiers: every kana of U+3041–U+30FF by the table; voiced kana are wide
   for (const g of ['々', '・', 'ｱ', 'ｰ', '〜', '漢', 'A', '1', '。', '「', ' ', 'ㅎ']) assert.equal(t(g), null, g);
   assert.equal(t('ㇰ'), 'small');                                  // small katakana extension
   assert.equal(t('が'), 'wide');                            // a kana with a combining voiced mark
-  for (const g of 'れルゟ') assert.equal(t(g), 'wide', g + ': its stroke sweeps to the edge of the em');
+  for (const g of 'かれルハヱゟ') assert.equal(t(g), 'wide', g + ': its stroke reaches the edge of the em');
   for (const g of '゛゜') assert.equal(t(g), null, g + ': a spacing mark is no letter');
 });
 
@@ -84,22 +84,23 @@ test('T1 tiers: every kana of U+3041–U+30FF by the table; voiced kana are wide
 
 test('T1 trims: one grapheme at strength 0.7 and 1 equals the table; heavy, brush and weight ≥ 800 damp it', () => {
   const one = (g, s, face) => applied({ kana: s }, g, { face }).cap[0];
-  const cases = [['あ', 'wide'], ['か', 'kana'], ['く', 'narrow'], ['ゃ', 'small'], ['ー', 'bar'], ['ヴ', 'wide']];
+  const cases = [['あ', 'wide'], ['さ', 'kana'], ['く', 'narrow'], ['ゃ', 'small'], ['ー', 'bar'], ['ヴ', 'wide'], ['か', 'wide']];
   for (const [g, tier] of cases) {
     approx(one(g, 0.7), 1 - 0.7 * KU.TRIM[tier], 1e-12, g + ' 0.7');
     approx(one(g, 1), 1 - KU.TRIM[tier], 1e-12, g + ' 1');
   }
   // the table tuned on the ink check (glyph_parity.py check 6, docs/NOTES)
-  assert.deepEqual(KU.TRIM, { wide: 0.06, kana: 0.12, narrow: 0.28, small: 0.22, bar: 0.08 });
-  // at strength 1: ordinary kana 0.88, wide 0.94, narrow 0.72, small 0.78, ー 0.92 (the ink-safe cells)
-  assert.deepEqual(['か', 'あ', 'く', 'ゃ', 'ー'].map((g) => Math.round(one(g, 1) * 100) / 100), [0.88, 0.94, 0.72, 0.78, 0.92]);
-  // at the default 70 %: 0.916, 0.958, 0.804, 0.846, 0.944
-  assert.deepEqual(['か', 'あ', 'く', 'ゃ', 'ー'].map((g) => Math.round(one(g, 0.7) * 1000) / 1000), [0.916, 0.958, 0.804, 0.846, 0.944]);
-  approx(one('か', 1, { flavor: 'heavy', weight: 400 }), 1 - 0.12 * 0.6, 1e-12);
-  approx(one('か', 1, { flavor: 'brush', weight: 400 }), 1 - 0.12 * 0.8, 1e-12);
-  approx(one('か', 1, { flavor: 'gothic', weight: 900 }), 1 - 0.12 * 0.8, 1e-12);
-  approx(one('か', 1, { flavor: 'heavy', weight: 800 }), 1 - 0.12 * 0.6 * 0.8, 1e-12);
-  approx(one('か', 1, { flavor: 'mincho', weight: 700 }), 0.88, 1e-12);
+  assert.deepEqual(KU.TRIM, { wide: 0.06, kana: 0.12, narrow: 0.26, small: 0.20, bar: 0.08 });
+  assert.deepEqual(KU.FLAVOR_DAMP, { heavy: 0.15, brush: 0.8 });
+  // at strength 1: ordinary kana 0.88, wide 0.94, narrow 0.74, small 0.80, ー 0.92 (the ink-safe cells)
+  assert.deepEqual(['さ', 'あ', 'く', 'ゃ', 'ー'].map((g) => Math.round(one(g, 1) * 100) / 100), [0.88, 0.94, 0.74, 0.8, 0.92]);
+  // at the default 70 %: 0.916, 0.958, 0.818, 0.86, 0.944
+  assert.deepEqual(['さ', 'あ', 'く', 'ゃ', 'ー'].map((g) => Math.round(one(g, 0.7) * 1000) / 1000), [0.916, 0.958, 0.818, 0.86, 0.944]);
+  approx(one('さ', 1, { flavor: 'heavy', weight: 400 }), 1 - 0.12 * 0.15, 1e-12);
+  approx(one('さ', 1, { flavor: 'brush', weight: 400 }), 1 - 0.12 * 0.8, 1e-12);
+  approx(one('さ', 1, { flavor: 'gothic', weight: 900 }), 1 - 0.12 * 0.8, 1e-12);
+  approx(one('さ', 1, { flavor: 'heavy', weight: 800 }), 1 - 0.12 * 0.15 * 0.8, 1e-12);
+  approx(one('さ', 1, { flavor: 'mincho', weight: 700 }), 0.88, 1e-12);
   // a column trims く as wide (applied with a vertical classification)
   const u = B.analyze('く');
   const colCap = KU.apply(KU.normalize({ kana: 1 }), { u, lang: 'ja', font: new Uint8Array(1), vert: MV.use('engine/text/vert').classify(u.gs),

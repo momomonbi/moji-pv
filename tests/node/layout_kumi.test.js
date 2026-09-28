@@ -76,11 +76,11 @@ test('T1 worked numbers: 夜明けのまち (h and v), ショートケーキ, �
   assert.deepEqual(size(r, true), [100, 100, 91.6, 97.9, 97.9, 91.6]);
   approx(r.box.h, 579, 1e-3);
   r = run('ショートケーキ', { kumi: { kana: 1 } });
-  assert.deepEqual(size(r), [88, 78, 92, 72, 88, 92, 88]);
-  approx(r.box.w, 598, 1e-3);
+  assert.deepEqual(size(r), [88, 80, 92, 74, 88, 92, 88]);
+  approx(r.box.w, 602, 1e-3);
   // ー is rotated in vertical text: still a cell; ト is narrow across a line only, tall in a column (the wide tier)
   r = run('ショートケーキ', { kumi: { kana: 1 }, orient: 'v' });
-  assert.deepEqual(size(r, true), [88, 78, 92, 94, 88, 92, 88]);
+  assert.deepEqual(size(r, true), [88, 80, 92, 94, 88, 92, 88]);
   r = run('きみのこえがきこえた', { kumi: { kana: 0.7 } });
   assert.deepEqual(size(r), [91.6, 95.8, 97.9, 95.8, 91.6, 97.9, 95.8, 91.6, 91.6, 91.6]);
   approx(r.box.w, 941.2, 1e-3);
@@ -100,12 +100,12 @@ test('T1: never wider than measured (proportional kana), and emphasis multiplies
     },
     metrics(css) { const k = FACES.cssSize(css) / 100; return { ascent: 88 * k, descent: 12 * k }; },
   };
-  // か: cap 91.6 at 0.7 and 88 at 1 are both above 85, so it stays at 85; く (narrow) is capped at 72 at strength 1
-  assert.deepEqual(size(run('かかか', { kumi: { kana: 0.7 } }, undefined, prop)), [85, 85, 85]);
-  assert.deepEqual(size(run('かかか', { kumi: { kana: 1 } }, undefined, prop)), [85, 85, 85]);
-  assert.deepEqual(size(run('くくく', { kumi: { kana: 1 } }, undefined, prop)), [72, 72, 72]);
+  // さ: cap 91.6 at 0.7 and 88 at 1 are both above 85, so it stays at 85; く (narrow) is capped at 74 at strength 1
+  assert.deepEqual(size(run('さささ', { kumi: { kana: 0.7 } }, undefined, prop)), [85, 85, 85]);
+  assert.deepEqual(size(run('さささ', { kumi: { kana: 1 } }, undefined, prop)), [85, 85, 85]);
+  assert.deepEqual(size(run('くくく', { kumi: { kana: 1 } }, undefined, prop)), [74, 74, 74]);
   // emphasis on a kana: w = cap × emphScale, em = size × emphScale
-  const r = run('かかか', { kumi: { kana: 1 }, emph: [[1, 2]], emphScale: 1.15 });
+  const r = run('さささ', { kumi: { kana: 1 }, emph: [[1, 2]], emphScale: 1.15 });
   approx(r.w[1], 88 * 1.15, 1e-3);
   approx(r.em[1], 115, 1e-3);
   approx(r.w[0], 88, 1e-3);
