@@ -1585,16 +1585,18 @@ chunks of 256, only at build time.
 | Group | Columns | Type |
 |---|---|---|
 | structure | `type` (0 group, 1 glyph, 2 shape, 3 paint, 4 image, 5 particles, 6 camera), `parent` (−1 = root), `layer` (index in LAYERS), `owner` (index in `scene.owners`), `payload` (index into the per-type store), `flags` (bit0 hidden, bit1 static, bit2 pickable, bit3 followText) | Uint8 / Int32 / Uint8 / Uint16 / Int32 / Uint8 |
-| pose (base + live) | `x y z rot sx sy kx ky rx ry alpha blur reveal tint glow shard echo jx jy pixel px py` (22) | Float32 |
+| pose (base + live) | `x y z rot sx sy kx ky rx ry alpha blur reveal tint glow shard echo jx jy pixel px py wt` (23; `wt` since v2.2, `table.SCHEMA` 2) | Float32 |
 | world | `m` (6 per node), `wa` (world alpha), `quad` (8 per node, for picking) | Float32 |
 
 Pose meaning and identity: `x y` position (du; the base is the node's rest position, e.g. a glyph's cell centre); `z` depth
 (du, perspective `s = 1600 / (1600 + max(z, −1400))`); `rot kx ky rx ry` radians (rx/ry = pseudo-3D flip); `sx sy`
 scale (1); `alpha` (1); `blur` du (0); `reveal` 0..1 visible share (1); `tint` 0..1 toward the accent ink (0); `glow`
 0..1 (0); `shard` 0..1 break-up (0); `echo` 0..1 ghost copies (0); `jx jy` jitter/shake offsets du (0); `pixel` mosaic
-block size du (0 = off); `px py` pivot offset from the node's centre (0).
+block size du (0 = off); `px py` pivot offset from the node's centre (0); `wt` (v2.2, DESIGN_2_2 §4) weight offset in
+CSS weight units (0): a glyph with `wt ≠ 0` is drawn at its face's weight + `wt` as a pair of served weights (plain and
+glow lettering crossfade them, the others take the nearest); not clamped at solve.
 
-Combination rules (FROZEN): additive (`+=`): `x y z rot kx ky rx ry blur tint glow shard echo jx jy pixel`;
+Combination rules (FROZEN): additive (`+=`): `x y z rot kx ky rx ry blur tint glow shard echo jx jy pixel wt`;
 multiplicative (`*=`): `sx sy alpha reveal`; set (last writer in phase order): `px py`. At solve, `alpha reveal tint glow
 shard echo` clamp to [0, 1], `blur pixel` to ≥ 0.
 
