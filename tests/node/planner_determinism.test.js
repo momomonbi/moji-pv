@@ -812,6 +812,36 @@ test('planning speed: typing in a lyric row reuses the casts of the cuts that on
   assert.ok(p.cuts.some((c) => c.line === rowId && src.endsWith(c.text)), 'the plan holds the swapped text');
 });
 
+// The same in a new work (DESIGN_2_2 §2): 文字PVの定石 on — part keys and kits do not move when a line is typed, so the
+// casts of the cuts that only moved are reused as before.
+test('planning speed: typing in a new work keeps reusing the casts (文字PVの定石 on)', (t) => {
+  const C = MV.use('core/commands');
+  const CAT = MV.use('parts/catalog').defaultRegistry();
+  let doc = JSON.parse(JSON.stringify(corpus.project('long').doc));
+  doc.look.gen = MV.use('core/doc').GEN;
+  const first = PL.plan(doc, { registry: CAT });
+  assert.ok(first.pv, 'the conventions are on');
+  const rowId = first.lines[30].id;
+  const typeKey = (d, ch) => C.reduce(d, { t: 'lyrics.set', text: d.sheet.rows.map((r) => (r.id === rowId ? r.src + ch : r.src)).join('\n') });
+  const KEYS = 'かぜのなかでひかりをあつめてはしりだすあさ';
+  const batches = [];
+  let least = 1, n = 0;
+  for (let b = 0; b < 8; b++) {
+    const start = process.hrtime.bigint();
+    for (let i = 0; i < 5; i++, n++) {
+      doc = typeKey(doc, KEYS[n % KEYS.length]);
+      const p = PL.plan(doc, { registry: CAT });
+      least = Math.min(least, p.reuse.casts / p.reuse.cuts);
+    }
+    batches.push(Number(process.hrtime.bigint() - start) / 1e6 / 5);
+    assert.equal(PL.plan(doc, { registry: CAT }).hash, PL.run(doc, CAT, { fresh: true }).hash, 'after key ' + n);
+  }
+  t.diagnostic('typing re-plan in a new work: best ' + Math.min(...batches).toFixed(1) + ' ms; least cast reuse ' +
+    (100 * least).toFixed(0) + ' %');
+  assert.ok(least >= 0.6, 'casts reused after a key: ' + (100 * least).toFixed(0) + ' %');
+  assert.ok(Math.min(...batches) <= 30, 'typing re-plan: ' + batches.map((x) => x.toFixed(1)).join(' ') + ' ms');
+});
+
 // A retired mood (pool: false, §4.18.1, §7.1.9) is only ever chosen by a pin.
 test('retired moods and themes are never picked automatically, nor offered as alternatives', () => {
   const REG = MV.use('core/registry');

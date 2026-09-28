@@ -393,6 +393,40 @@ test('a reroll turns the directions of a few cuts after it at most', (t) => {
   assert.ok(ok >= 0.95, ok);
 });
 
+// A reroll of a first copy reaches its repeats' directions only through the alternation chain right after it, never
+// through the repeat relation; with 「くり返しの行をそろえる」 on, an aligned repeat shows its source's directions as the Plan
+// shows them, after the reroll too.
+test('repeats vs rerolls: a first copy\'s reroll turns no far repeat; aligned repeats keep following their source', () => {
+  for (const keep of [false, true]) {
+    // (a pinned part keeps its own parameters, aligned or not: the far-repeat check pins the spins, the aligned one does not)
+    const d0 = gen1(corpus.project('repeat').doc, keep ? {}
+      : { 'work:arrive': ON('twirlArrive'), 'work:depart': ON('twirlDepart'), 'work:repeat.same': ON(false) });
+    const p0 = fresh(d0);
+    const idx = new Map(p0.cuts.map((c, i) => [c.key, i]));
+    const firsts = [...new Set(p0.cuts.filter((c) => c.feat.repeatOf).map((c) => c.feat.repeatOf))].slice(0, 6);
+    for (const first of firsts) {
+      const d = Object.assign({}, d0, { salts: Object.assign({}, d0.salts, { ['cut/' + first]: 1 }) });
+      const p1 = fresh(d);
+      const al = keep ? CA.alignments({ ix: PINS.index(d.pins), doc: d }, p1.cuts) : null;
+      const by1 = new Map(p1.cuts.map((c) => [c.key, c]));
+      for (const c of p0.cuts.filter((x) => x.feat.repeatOf === first)) {
+        const c1 = by1.get(c.key);
+        if (keep && al.has(c.key)) {
+          const src = by1.get(al.get(c.key).key);
+          for (const k of KINDS) {
+            const d = c1.slots[k], sd = src.slots[k];
+            const e = d && d.p && d.from === 'auto' && sd && sd.v === d.v ? FL.entryOf(k, d.v) : null;
+            if (!e) continue;
+            for (const n of e.names) assert.deepEqual(d.p[n], sd.p[n], c.key + ' ' + k + '.' + n + ' follows its source');
+          }
+        } else if (!keep && idx.get(c.key) - idx.get(first) > 4) {
+          assert.deepEqual(directions(c1).own, directions(c).own, c.key + ' far from the rerolled ' + first);
+        }
+      }
+    }
+  }
+});
+
 test('explain: a turned direction says so; an arc-weighted pick names the part', () => {
   const d = spinDoc()[0];
   const p = PL.plan(d, { registry: CAT });

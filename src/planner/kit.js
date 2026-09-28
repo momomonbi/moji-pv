@@ -22,24 +22,16 @@ MV.def('planner/kit', ['core/hash', 'core/rng', 'core/num', 'planner/choose'], (
     return NO_FAMILY.has(kind) ? def.key : def.family || def.key;
   }
 
-  // select(ctx, part, poolOf, energy) → the kit of one part: frozen { key, kind, face, groups: { kind: [group] } (sorted
-  // by name), primary: { kind: group } }. poolOf(kind) = the part pool the kit draws from (mood gates, filters,
-  // season, backdrop and texture exclusion applied, planner/cast poolOf). A group weighs the sum over its parts of the
-  // look-only chooser factors × the fit of the part's energy range to the part's target energy; the groups are ranked
-  // by ln W + Gumbel(seed, group) with seed = hash32('kit', look seed, part key, kind, salt of work:kit.<key>), ties to
-  // the smaller name. The seed has no cut key, so no edit elsewhere changes a kit; a salt rerolls its own part only.
-  // lean(kind, def, traits) (optional): a further factor on each part, the song's arc under 「曲の山に合わせて強弱をつける」
-  // (planner/conventions), so a chorus's set leans to strong parts and a verse's to calm ones.
-  function select(ctx, part, poolOf, energy, lean) {
+  // weights(ctx, poolOf, energy, lean) → { kind: Map<group, W> }: what select ranks. It reads no part key, so the parts
+  // of one kind (the same energy target) share it (planner/conventions keeps it per energy for one plan).
+  function weights(ctx, poolOf, energy, lean) {
     const reg = ctx.registry;
-    const salt = (ctx.salts && ctx.salts['work:kit.' + part.key]) || 0;
-    const seed0 = ctx.doc.look.seed;
     const e = typeof energy === 'number' ? energy : 0.5;
     const want = { energy: e };
     // a typical cut of the part for the parts' own fits (no composition chosen yet): a part that needs a beat weighs
     // little in a song without a tempo, one made for impact lines a quarter
     const typical = { energy: e, beat: ctx.grid ? ctx.grid.period : 0, impact: false, emph: false, words: 2, cells: 8 };
-    const groups = {}, primary = {};
+    const out = {};
     for (const kind of KIT_KINDS) {
       const W = new Map();
       for (const key of poolOf(kind)) {
@@ -51,6 +43,27 @@ MV.def('planner/kit', ['core/hash', 'core/rng', 'core/num', 'planner/choose'], (
         const w = s.product * CH.traitFit(reg.traits(kind, key), want) * fits * (lean ? lean(kind, def, reg.traits(kind, key)) : 1);
         if (w > 0) W.set(g, (W.get(g) || 0) + w);
       }
+      out[kind] = W;
+    }
+    return out;
+  }
+
+  // select(ctx, part, poolOf, energy, lean, W) → the kit of one part: frozen { key, kind, face, groups: { kind: [group] }
+  // (sorted by name), primary: { kind: group } }. poolOf(kind) = the part pool the kit draws from (mood gates, filters,
+  // season, backdrop and texture exclusion applied, planner/cast poolOf). A group weighs the sum over its parts of the
+  // look-only chooser factors × the fit of the part's energy range to the part's target energy; the groups are ranked
+  // by ln W + Gumbel(seed, group) with seed = hash32('kit', look seed, part key, kind, salt of work:kit.<key>), ties to
+  // the smaller name. The seed has no cut key, so no edit elsewhere changes a kit; a salt rerolls its own part only.
+  // lean(kind, def, traits) (optional): a further factor on each part, the song's arc under 「曲の山に合わせて強弱をつける」
+  // (planner/conventions), so a chorus's set leans to strong parts and a verse's to calm ones. W (optional): the
+  // weights(ctx, poolOf, energy, lean) already made for this energy.
+  function select(ctx, part, poolOf, energy, lean, W0) {
+    const salt = (ctx.salts && ctx.salts['work:kit.' + part.key]) || 0;
+    const seed0 = ctx.doc.look.seed;
+    const all = W0 || weights(ctx, poolOf, energy, lean);
+    const groups = {}, primary = {};
+    for (const kind of KIT_KINDS) {
+      const W = all[kind];
       const seed = H.hash32('kit', seed0, part.key, kind, salt);
       const ranked = [...W.keys()].sort()
         .map((g) => ({ g, score: Math.log(W.get(g)) + R.gumbel(seed, g) }))
@@ -70,5 +83,5 @@ MV.def('planner/kit', ['core/hash', 'core/rng', 'core/num', 'planner/choose'], (
     return list && list.includes(group) ? KIT : 1;
   }
 
-  return { select, groupOf, factorOf, KIT_KINDS, KIT_SIZE, KIT, KIT_PRIMARY, KIT_AVOID, FACES };
+  return { select, weights, groupOf, factorOf, KIT_KINDS, KIT_SIZE, KIT, KIT_PRIMARY, KIT_AVOID, FACES };
 });

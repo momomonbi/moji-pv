@@ -141,7 +141,10 @@ page and tests; not hashed).
   strong and a verse's calm; ranked by
   `ln W + gumbel(hash32('kit', look.seed, key, kind, salt))` (ties to the smaller name), salt = `work:kit.<key>`. The kit
   keeps the best 3 layouts, 3 entrances, 3 exits, 2 holds, 2 camera textures, 2 screen effects, 4 decorations and 2
-  backgrounds; the best group of each kind is its **primary**. The face class is drawn 3:2:1 display/serif/body.
+  backgrounds; the best group of each kind is its **primary**. The face class is drawn 3:2:1 display/serif/body. The
+  group weights read no part key: the parts of one kind share them, and a cached re-plan keeps them from the last two
+  plans by what they read (registry, mood, theme, season, amounts, the pools, the beat, the drive, the arc), so typing a
+  line recomputes none.
 - **Weighting** (a new chooser term, only under the rules): a primary member ×16, another member ×8; a member keeps only
   the ×0.03 against the previous cut's value (the near and family factors are dropped for it, final and reference pick
   alike); holds, exits and camera textures also pass over the previous cut's value (the §8.2 runner-up rule, `KIT_AVOID`); the

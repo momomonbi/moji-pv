@@ -2404,11 +2404,129 @@ REPEAT_SAME = """() => {
 }"""
 
 
-async def flow_repeat(f, lang):
-    """作品全体 › 見た目 › くり返しの行をそろえる (DESIGN_2_1 §4.10): off by default, with its note under it; turning it on pins it
-    for the whole video (one undo entry) and the second サビ then shows the first one's layouts, lenses and shots; the なぜ of
-    a repeated cut's layout says it was taken from the first copy; turning it off clears the pin."""
+# A work made before v2.2 (no look.gen, DESIGN_2_2 §0): the flows that test what such a work does load one first; a
+# ?fresh=1 page is a new work.
+async def load_legacy(f):
+    await f.page.evaluate("""() => { const D = MV.use('core/doc');
+      window.__mv.loadProject(D.defaultDoc(), D.defaultSide(), { quiet: true }); }""")
+    await f.until('() => !window.__mv.doc.look.gen', 'a work made before v2.2')
+    await f.settle(2)
+
+
+RULE_ROW = '[data-mount="inspector"] .frow[data-field="work/look/%s"]'
+
+
+async def flow_repeat_new(f, lang):
+    """A new work (DESIGN_2_2 §2.4): くり返しの行をそろえる is on without a pin (自動, with the note 「新しい作品の標準」) and the
+    second サビ already shows the first one's layouts, lenses and shots; one click turns it off (a work pin false, one undo
+    entry); 作品全体 › 固定を外す removes the pin (one undo entry) and it is on again."""
     page = f.page
+    done0, doc0 = await with_lyrics(f, REPEAT_LYRICS)
+    f.check(await page.evaluate('() => window.__mv.doc.look.gen') == 1, 'a ?fresh=1 page is a new work')
+    now = await page.evaluate(REPEAT_SAME)
+    if not f.check(now['n'] >= 6 and now['same'] == now['n'], 'a new work repeats its lines the same way: %r' % now):
+        return
+    await page.evaluate("() => window.__mv.select({ level: 'work' }, { from: 'header', open: true })")
+    await open_section(f, 'look')
+    row = ROW % 'repeat.same'
+    box = row + ' input[role="switch"]'
+    f.check(await page.is_checked(box), 'on by default in a new work')
+    f.check(await page.get_attribute(row + ' .state-tag', 'data-state') == 'auto', 'the field shows 自動')
+    auto = await page.text_content(row + ' .fr-auto')
+    f.check(auto == await page.evaluate("() => window.__mv.t('rule.auto.new')"), 'the note under it: %r' % auto)
+    done1 = await page.evaluate(DONE)
+    await page.click(row + ' .w-toggle')
+    await f.until("() => { const p = window.__mv.doc.pins['work:repeat.same']; return !!p && p.v === false; }", 'off is a pin')
+    await f.settle(3)
+    f.check(await page.evaluate(DONE) == done1 + 1, 'one undo entry')
+    f.check(not await page.is_checked(box), 'the switch shows off')
+    f.check(await page.get_attribute(row + ' .state-tag', 'data-state') == 'pinned', 'the field shows 固定')
+    off = await page.evaluate(REPEAT_SAME)
+    f.check(off['same'] < off['n'], 'the repeats choose on their own: %r' % off)
+    await page.evaluate("() => window.__mv.actions.run('pin.clearSelection', { from: 'inspector' })")
+    await f.until("() => !window.__mv.doc.pins['work:repeat.same']", '固定を外す removes the pin')
+    await f.settle(3)
+    f.check(await page.evaluate(DONE) == done1 + 2, 'one more undo entry')
+    f.check(await page.is_checked(box), 'on again: the default of a new work')
+    back = await page.evaluate(REPEAT_SAME)
+    f.check(back['same'] == back['n'], 'and the repeats follow their first copy again: %r' % back)
+    await f.undo_all(done0, doc0)
+
+
+# The set of looks of the selected area (plan.pv, DESIGN_2_2 §2.4).
+KIT_OF = """(key) => { const p = window.__mv.plan; const k = p.pv ? p.pv.kits.find((x) => x.key === key) : null;
+  return k ? JSON.stringify([k.arrange, k.arrive, k.depart, k.primary, k.face]) : null; }"""
+
+
+async def flow_conventions(f, lang):
+    """文字PVの定石 (DESIGN_2_2 §2.1): a new work shows the switch on (自動, 「新しい作品の標準」); turning it off is one undo
+    step and a work pin false, which turns its members off; 固定を外す brings it back on. A work made before v2.2 shows it
+    off with 「この機能より前に作った作品なので、はじめはオフ」. The サビ area's page shows 「この区画の演出セット」, and its die
+    rerolls the set (one undo step, a work:kit.chorus salt)."""
+    page = f.page
+    done0, doc0 = await with_lyrics(f, REPEAT_LYRICS)
+    await page.evaluate("() => window.__mv.select({ level: 'work' }, { from: 'header', open: true })")
+    await open_section(f, 'look')
+    row = RULE_ROW % 'pv.rules'
+    box = row + ' input[role="switch"]'
+    await f.until("(s) => !!document.querySelector(s)", 'the switch is a row of 見た目', row)
+    f.check(await page.is_checked(box), 'on in a new work')
+    f.check(await page.get_attribute(row + ' .state-tag', 'data-state') == 'auto', '自動')
+    auto = await page.text_content(row + ' .fr-auto')
+    f.check(auto == await page.evaluate("() => window.__mv.t('rule.auto.new')"), 'the note of a new work: %r' % auto)
+    f.check(await page.locator(row + ' [data-role="dice"]').count() == 0, 'a setting, not drawn: no 振り直し')
+    await f.shot('conventions-on')
+    done1 = await page.evaluate(DONE)
+    await page.click(row + ' .w-toggle')
+    await f.until("() => { const p = window.__mv.doc.pins['work:pv.rules']; return !!p && p.v === false; }", 'off is a pin')
+    await f.settle(3)
+    f.check(await page.evaluate(DONE) == done1 + 1, 'one undo entry')
+    f.check(await page.evaluate('() => window.__mv.plan.pv') is None, 'every member is off')
+    f.check(not await page.is_checked(ROW % 'repeat.same' + ' input[role="switch"]'), 'くり返しの行をそろえる follows it')
+    await page.evaluate("() => window.__mv.actions.run('pin.clearSelection', { from: 'inspector' })")
+    await f.until("() => !window.__mv.doc.pins['work:pv.rules']", '固定を外す removes the pin')
+    await f.settle(3)
+    f.check(await page.is_checked(box), 'on again')
+    # the サビ area: its set of looks and the die
+    ids = await page.evaluate("""() => { const a = window.__mv, rows = a.doc.sheet.rows;
+      const head = rows.find((r) => r.src.trim() === '# サビ'); return head ? head.id : null; }""")
+    area = await page.evaluate("""(rowId) => { const AR = MV.use('planner/areas'), a = window.__mv;
+      const ar = AR.resolve(a.doc, a.plan, { kind: 'head', rowId }); return ar ? ar.lineIds : null; }""", ids)
+    if f.check(bool(ids and area), 'the サビ area: %r %r' % (ids, area)):
+        await page.evaluate("(x) => window.__mv.select({ level: 'line', ids: x.ids, area: { kind: 'head', rowId: x.rowId } }, { from: 'crumbs', open: true })",
+                            {'ids': area, 'rowId': ids})
+        await f.settle(3)
+        kit = '[data-mount="inspector"] .isec[data-sec="kit"]'
+        await f.until("(s) => !!document.querySelector(s)", 'the area page shows 演出セット', kit)
+        text = await page.text_content(kit)
+        f.check((await page.evaluate("() => window.__mv.t('fld.kitSet')")) in text, 'この区画の演出セット: %r' % text[:80])
+        before = await page.evaluate(KIT_OF, 'chorus')
+        done2 = await page.evaluate(DONE)
+        await page.click(kit + ' [data-role="kit-dice"]')
+        await f.until("() => (window.__mv.doc.salts['work:kit.chorus'] || 0) === 1", 'the die bumps the set\'s salt')
+        await f.settle(3)
+        f.check(await page.evaluate(DONE) == done2 + 1, 'one undo step')
+        f.check(await page.evaluate(KIT_OF, 'chorus') != before, 'the set changes')
+        await f.shot('conventions-kit')
+    await f.undo_all(done0, doc0)
+    # a work made before v2.2: off, and says why
+    await load_legacy(f)
+    await with_lyrics(f, REPEAT_LYRICS)
+    await page.evaluate("() => window.__mv.select({ level: 'work' }, { from: 'header', open: true })")
+    await open_section(f, 'look')
+    await f.until("(s) => !!document.querySelector(s)", 'the switch', row)
+    f.check(not await page.is_checked(box), 'off in a work made before v2.2')
+    auto = await page.text_content(row + ' .fr-auto')
+    f.check(auto == await page.evaluate("() => window.__mv.t('rule.auto.old')"), 'the note of an older work: %r' % auto)
+
+
+async def flow_repeat_legacy(f, lang):
+    """作品全体 › 見た目 › くり返しの行をそろえる (DESIGN_2_1 §4.10) in a work made before v2.2: off by default, with its note
+    under it; turning it on pins it for the whole video (one undo entry) and the second サビ then shows the first one's
+    layouts, lenses and shots; the なぜ of a repeated cut's layout says it was taken from the first copy; turning it off
+    clears the pin (the document's default is off, DESIGN_2_2 §2.1)."""
+    page = f.page
+    await load_legacy(f)
     done0, doc0 = await with_lyrics(f, REPEAT_LYRICS)
     before = await page.evaluate(REPEAT_SAME)
     if not f.check(before['n'] >= 6, 'the second サビ repeats the first: %r' % before):
@@ -5034,7 +5152,9 @@ FLOWS += [('curve', flow_curve, False), ('keyframes', flow_keyframes, False), ('
           ('ai_area', flow_ai_area, False), ('ai_board', flow_ai_board, False), ('ai_media', flow_ai_media, False),
           ('materials', flow_materials, False), ('material_scope', flow_material_scope, False)]
 # 「くり返しの行をそろえる」 (DESIGN_2_1 §4.10)
-FLOWS += [('repeat', flow_repeat, False)]
+FLOWS += [('repeat', flow_repeat_legacy, False)]
+# 文字PVの定石 (DESIGN_2_2 §2)
+FLOWS += [('repeat_new', flow_repeat_new, False), ('conventions', flow_conventions, False)]
 # v2.1 photos and videos (package G.4, DESIGN_2_1 §11.8.3).
 FLOWS += [('media', flow_media, True), ('library', flow_library, False), ('missing', flow_missing, False), ('package', flow_package, False),
           ('media_device', flow_media_device, False), ('media_song', flow_media_song, False)]
@@ -5106,7 +5226,10 @@ async def flow_extreme(f, lang):
     checked = await page.evaluate("(s) => [...document.querySelectorAll(s + ' .seg')].map((b) => b.getAttribute('aria-checked'))", X_POWER)
     f.check(checked == ['false', 'true', 'false'], 'かなり is checked: %r' % checked)
     # The shot picker's EXTREME group on a cut's camera page.
-    key = await page.evaluate("() => window.__mv.plan.lines[3].cuts[0]")
+    # (a cut whose layout lets the camera move: a new work's parts differ from a legacy one's, DESIGN_2_2 §2.4)
+    key = await page.evaluate("""() => { const p = window.__mv.plan;
+      const free = (k) => { const c = p.cuts.find((x) => x.key === k); return !!c && !!c.slots['cam.shot'] && c.slots['cam.shot'].from !== 'rule'; };
+      return p.lines.slice(3).concat(p.lines.slice(0, 3)).map((l) => l.cuts[0]).find(free) || p.lines[3].cuts[0]; }""")
     scope = 'cut/' + key
     await page.evaluate("(s) => window.__mv.select({ level: 'el', scope: s, el: 'lens' }, { from: 'crumbs', open: true })", scope)
     await f.settle(4)

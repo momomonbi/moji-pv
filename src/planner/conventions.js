@@ -33,24 +33,49 @@ MV.def('planner/conventions', ['core/num', 'core/shot', 'planner/arc', 'planner/
       return f;
     }
 
+    // The kit weights (KIT.weights) of the last two cached plans, by what they read: the registry, the look the chooser's
+    // look-only factors come from (as the cast cache keys it: mood, theme, season, amounts), the pools, the beat, the
+    // energy and whether the arc leans them. Typing a line changes none of them.
+    let weightsPrev = new Map(), weightsCur = new Map();
+    function beginWeights() { if (weightsCur.size) { weightsPrev = weightsCur; weightsCur = new Map(); } }
+    function weightsKey(ctx, pool, drive, arcOn) {
+      const look = ctx.look;
+      let text = EN.canon([look.mood ? look.mood.key : null, look.theme ? look.theme.key : null, look.season, look.amounts,
+        ctx.grid ? ctx.grid.period : 0, drive, arcOn]);
+      for (const kind of KIT.KIT_KINDS) text += '|' + pool(kind).join(',');
+      return text;
+    }
+
     function prepare(ctx, cuts, timed, opts) {
       const o = opts || {};
       const rules = ctx.rules;
       const on = Object.freeze({ kit: !!rules.kit, alt: !!rules.alt, arc: !!rules.arc, fx: !!rules.fx, camAlt: false });
       const cached = !!o.cached;
-      if (cached) beginBlends();
+      if (cached) { beginBlends(); beginWeights(); }
       const intern = o.intern || ((x) => x);
       const A = ARC.parts(ctx, cuts, timed, o.sheet || null);
       const arcOn = on.arc && !A.neutral;
       const kits = new Map();                       // part key → { kit, id }
+      const weights = new Map();                    // drive → the kit weights at that energy (KIT.weights)
       function kitOf(part) {
         if (!on.kit || !part) return null;
         let k = kits.get(part.key);
         if (!k) {
           const drive = ARC.driveOfKind(part.kind);
-          // under the arc the set leans the way the part's kind does (its drive; the part's own cuts vary around it)
-          const lean = arcOn ? (kind, def, traits) => (ARC_KINDS.has(kind) ? arcFactor(ARC.strength(def, traits), drive) : 1) : null;
-          const kit = KIT.select(ctx, part, o.pool, drive, lean);
+          let W = weights.get(drive);
+          if (!W) {
+            const key = cached ? weightsKey(ctx, o.pool, drive, arcOn) : null;
+            const hit = key !== null ? weightsCur.get(key) || weightsPrev.get(key) : undefined;
+            if (hit && hit.registry === ctx.registry) W = hit.W;
+            else {
+              // under the arc the set leans the way the part's kind does (its drive; the part's own cuts vary around it)
+              const lean = arcOn ? (kind, def, traits) => (ARC_KINDS.has(kind) ? arcFactor(ARC.strength(def, traits), drive) : 1) : null;
+              W = KIT.weights(ctx, o.pool, drive, lean);
+            }
+            if (key !== null) weightsCur.set(key, { registry: ctx.registry, W });
+            weights.set(drive, W);
+          }
+          const kit = KIT.select(ctx, part, o.pool, drive, null, W);
           k = { kit, id: intern(EN.canon([kit.key, kit.kind, kit.face, kit.groups, kit.primary])) };
           kits.set(part.key, k);
         }

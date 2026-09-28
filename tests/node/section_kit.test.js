@@ -375,14 +375,71 @@ test('explain agrees with the plan for kit-weighted picks and names the set', ()
   assert.ok(checked > 10 && named > checked / 3, named + ' of ' + checked);
 });
 
+// The sets' weights are kept between cached plans (planner/conventions), keyed by the look they read: every mood, with
+// and without decorations, on each backdrop and with part filters, re-plans to the plan made from scratch (and the
+// sets do change).
+test('the sets follow the look in a re-plan: mood, amounts, backdrop and part filters', () => {
+  let n = 0, changed = 0;
+  for (const name of ['basic', 'repeat']) {
+    const base = gen1(corpus.project(name).doc);
+    let prev = null;
+    CAT.keys('mood').forEach((mood, i) => {
+      for (const amt of [0, 1]) {
+        const d = clone(base);
+        d.pins = Object.assign({}, d.pins, { 'work:mood': ON(mood), 'work:amount.ornament': ON(amt) });
+        d.look.backdrop = ['scene', 'chroma', 'black', 'clear'][(i + amt) % 4];
+        const p = PL.plan(d, { registry: CAT });
+        const f = fresh(d);
+        assert.equal(p.hash, f.hash, name + ' ' + mood + ' ' + amt + ' ' + d.look.backdrop);
+        const k = JSON.stringify(f.pv.kits);
+        if (prev !== null && k !== prev) changed++;
+        prev = k;
+        n++;
+      }
+    });
+    // the part filters (doc.filters) change the pools and nothing else of the look: deny each set's primary families
+    let d = clone(base);
+    for (let i = 0; i < 4; i++) {
+      const before = fresh(d);
+      d = clone(d);
+      d.filters = clone(d.filters || {});
+      for (const kind of ['arrange', 'arrive', 'depart']) {
+        const g = before.pv.kits[0].primary[kind];
+        const deny = CAT.keys(kind).filter((key) => KIT.groupOf(kind, CAT.get(kind, key)) === g);
+        const f = d.filters[kind] || { only: null, deny: [] };
+        d.filters[kind] = { only: null, deny: [...new Set((f.deny || []).concat(deny))].sort() };
+      }
+      const p = PL.plan(d, { registry: CAT });
+      const f = fresh(d);
+      assert.equal(p.hash, f.hash, name + ' filters ' + i);
+      assert.notDeepEqual(f.pv.kits[0].primary, before.pv.kits[0].primary, 'a denied family leaves the set');
+      n++;
+    }
+  }
+  assert.ok(n >= 40 && changed >= n / 4, n + ' plans, the sets changed ' + changed + ' times');
+});
+
 // Re-planning a new work from the cast cache gives the plan made from scratch, through the edits P2 adds to the menu:
-// a set's die, the switches pinned and cleared, a blank row, a heading, a reroll next to a directional cut.
+// a set's die, the switches pinned and cleared, a blank row, a heading, a reroll next to a directional cut; and through
+// the look's own edits (mood, theme, season, an amount, the backdrop), which the sets' weights kept between plans read.
 test('re-planning a new work after any edit gives exactly the plan made from scratch', () => {
   const SW = ['pv.rules', 'pv.kit', 'pv.alternate', 'pv.arc', 'repeat.same'];
+  const LOOK = [['mood', CAT.keys('mood')], ['theme', CAT.keys('theme')], ['season', ['spring', 'summer', 'autumn', 'winter']],
+    ['amount.camera', [0, 0.5, 1]], ['amount.ornament', [0, 1]], ['amount.glitch', [0, 1]]];
+  const BACKDROPS = ['scene', 'chroma', 'black', 'clear'];
   const edit = (rng, doc, p) => {
     const d = Object.assign({}, doc);
     const cut = rng.pick(p.cuts);
     const r = rng.next();
+    if (r < 0.12) {
+      const [slot, values] = rng.pick(LOOK);
+      d.pins = Object.assign({}, d.pins, { ['work:' + slot]: ON(rng.pick(values)) });
+      return d;
+    }
+    if (r < 0.16) {
+      d.look = Object.assign({}, d.look, { backdrop: rng.pick(BACKDROPS) });
+      return d;
+    }
     if (r < 0.2) {
       const key = rng.pick(p.pv ? p.pv.kits.map((k) => k.key) : ['chorus']);
       d.salts = Object.assign({}, d.salts, { ['work:kit.' + key]: ((d.salts || {})['work:kit.' + key] || 0) + 1 });
@@ -409,12 +466,12 @@ test('re-planning a new work after any edit gives exactly the plan made from scr
   for (const name of ['basic', 'repeat', 'lrc']) {
     const rng = R.stream('pvreplan', name);
     let doc = gen1(corpus.project(name).doc);
-    for (let i = 0; i < 18; i++) {
+    for (let i = 0; i < 24; i++) {
       const p = PL.plan(doc, { registry: CAT });
       assert.equal(p.hash, fresh(doc).hash, name + ' step ' + i);
       steps++;
       doc = edit(rng, doc, p);
     }
   }
-  assert.ok(steps >= 54);
+  assert.ok(steps >= 72);
 });

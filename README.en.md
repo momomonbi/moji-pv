@@ -23,8 +23,12 @@ Click the preview or a lyric line and the **Details** column shows that part. Yo
 - **Auto / Pinned** — everything starts as Auto. A value you pick yourself is Pinned: New look and reroll leave it alone.
   **Unpin** makes it automatic again.
 - **Lock** — lock a line you like and it keeps its look.
-- **Repeat lines the same way** — turn it on under whole video › Look, and a lyric line sung again (a second chorus)
-  looks as it did the first time (off by default).
+- **Lyric-video conventions** — a switch under whole video › Look, on in a new work: each song part keeps one set of
+  looks wherever it comes back (verse, chorus…), directions alternate from cut to cut, and motion builds toward the
+  chorus with the last chorus strongest. Each can be turned off under Advanced; selecting a section of the song lets you
+  reroll its set of looks. Works made before this feature start with it off.
+- **Repeat lines the same way** — a lyric line sung again (a second chorus) looks as it did the first time; on in a new
+  work (part of the conventions), and a line can opt out.
 - **Look history ◀ ▶** — the ◀ ▶ buttons in the play bar step through the looks you have tried.
 - Every change can be undone, and your work is autosaved in the browser.
 

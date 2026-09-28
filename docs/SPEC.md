@@ -100,12 +100,25 @@ and Filmora-ready output; how they are built is in `docs/DESIGN_2_1.md`.
 - **Speed curves (緩急, v2.1)** wherever something moves over time: entrances and exits and their stagger, holds, camera
   moves and transitions. Presets such as 「一瞬ゆっくり→すごく速く→一瞬ゆっくり」, a two-slider form, or a custom curve in a
   small editor. **動きの速さ** (×0.25–×4) gives slow or fast motion per line or cut.
-- **Repeat lines the same way (くり返しの行をそろえる, v2.1)**: one switch in 作品全体 › 見た目, off by default. When it is
+- **Repeat lines the same way (くり返しの行をそろえる, v2.1)**: one switch in 作品全体 › 見た目, on in a new work (v2.2:
+  a member of 文字PVの定石 below) and off in a work made before v2.2. When it is
   on, a lyric line sung again (a second サビ) looks as it did the first time: its layout, text, motions, decorations,
   lens, camerawork, background and transition (a line sung twice in a row still varies the second time, and no two
   neighbouring cuts share a layout or an entrance). A line can opt out or in on its own (行 › 演出 ›
   詳細); what is pinned or rerolled on a later copy stays as set there, and rerolling or pinning the first copy carries
   to its copies.
+- **Lyric-video conventions (文字PVの定石, v2.2)**: one switch in 作品全体 › 見た目, on in a new work and off in a work made
+  before v2.2 (the row says which: 「新しい作品の標準」 or 「この機能より前に作った作品なので、はじめはオフ」; 固定を外す
+  returns to that default). It turns on くり返しの行をそろえる and, under 詳しい設定, each of: **パートごとに演出をそろえる** —
+  each song part (Aメロ, サビ… from the headings or the song analysis, else from blank-line blocks that come back) draws
+  its layouts, entrances, exits, holds, camera textures, decorations, screen effects and backgrounds from a small set
+  with one entrance and one exit as its signature, the same set wherever the part comes back; a 区画 of the song shows
+  「この区画の演出セット」 and its die 「演出セットを振り直す」 (one undo step); **動きの向きを交互にする** — sideways moves,
+  spins, the side the text sits on and sideways transitions turn the other way from the previous cut, while one cut's
+  moves share a direction (horizontal text only for sides; a text entrance changes side only on a one-word cut); a
+  turned direction stays 自動, a pin, a lock or its own die keeps it; **曲の山に合わせて強弱をつける** — verses calmer,
+  choruses stronger, the last chorus strongest, a hold right before a chorus. Nothing is filtered away: these weigh the
+  automatic choices, and pins, locks and rules win. (効果を重ねすぎない and 1カットに重ねる効果の目安 follow.)
 - **Per line (v2.1)**: its own season (この行の季節) and parts it must not use (この行で使わない部品).
 - **My materials (マイ素材, v2.1)**: new materials that the AI or the user builds from existing parts and a fixed set of
   primitives (shapes, particles, patterns, motion tracks, oscillators). They are data, never code; they are stored in the

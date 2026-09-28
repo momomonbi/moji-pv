@@ -9155,7 +9155,82 @@ docs/DESIGN_2_2.md. The packages and their notes follow.
 
 <!-- PV22 P1 notes -->
 
-<!-- PV22 P2 notes -->
+### P2 文字PVの定石 (M1, M2, T5): phase A
+
+Contract: DESIGN_2_2 §2 (from the P2 design, revision 2). Phase A is in: the switches (`pv.rules` and its members
+`repeat.same`, `pv.kit`, `pv.alternate`, `pv.arc`) resolved by `planner/rules resolve(ctx)` → `ctx.rules`, the new modules
+`planner/arc`, `planner/kit`, `planner/flow`, `planner/conventions` (→ `ctx.pv`), 「くり返しの行をそろえる」 on by default in
+new works (with `ai/direct.followSources` passing the document), the set of looks per song part, the arc, directions of
+parts and seams (pfrom `'alt'`), the UI rows (作品全体 › 見た目: 文字PVの定石 + 詳しい設定 members; the 区画 page's
+演出セット with its die), the auto note line (`p.fr-auto`), the number box's 自動（n） placeholder, strings, explain.
+Phase B (T5: 効果を重ねすぎない, 1カットに重ねる効果の目安) and phase C (camera alternation) and `tests/golden/project_pv.json`
+follow. Every existing golden matches (`node tests/update_golden.js --check`: the six files), and
+`pv_rules.test.js` checks a generation-1 work with 文字PVの定石 off against the golden plan hashes themselves.
+
+**Measurements** (catalog; `tests/node/section_kit.test.js`, `pv_flow.test.js` print them):
+
+- Set of looks, top-2 family coverage per part over automatic picks (basic, long, repeat × 16:9/9:16 × 3 seeds × 4
+  moods), on / off: arrange 68.1 / 38.7, arrive 60.8 / 33.7, dwell 67.8 / 50.6, depart 66.2 / 41.5, lens 72.3 / 48.6 %.
+  Identical neighbours on / older works: arrange 0 / 0, arrive 0 / 0, dwell 0.03 / 1.23, depart 0 / 0.29, lens 0.10 /
+  1.35 %. A repeat's family matches its first copy's (repeat.same off) arrange 33.3 vs 17.2 %, arrive 30.2 vs 14.2 %.
+  Member share of the picks (the set's groups): arrange 57, arrive 55, dwell 47, depart 67, lens 47 %.
+- Alternation over consecutive cuts of one run whose value could turn (not a restart, not an aligned repeat, not
+  guarded; corpus(10) × 3 aspects): h 95.5, side 95.4, rot 90.7 % (177 / 65 / 54 pairs); off 46.9 / 44.6 / 40.7 %. With
+  aligned repeats counted, h 77 / side 76 / rot 70 %: an aligned repeat keeps its first copy's directions (the §4.10 rule
+  wins). Spins in and out of one cut agree 100 % (off 54 %). A reroll turns the directions of ≤ 4 later cuts in 100 % of
+  51 rerolls (worst 4). Seams (swishCut pinned, direction automatic): ≥ 80 % alternate.
+- Arc, strong share of automatic picks (basic + repeat, 6 moods, 3 seeds, 2 aspects, repeat.same off): layouts verse 32.3
+  / chorus 45.8 / last chorus 49.1 / hold before a chorus 25.0 %; entrances 30.5 / 53.0 / 52.1 / 32.0 %; exits 26.5 /
+  45.8 / 43.0 / 22.2 %. Off: layouts 39.7 / 36.4 / 33.5 / 36.1 %.
+- Planning (project_long, this loaded machine): cold 55–78 ms (older work 62–65), re-plan after a reroll 30–40 ms (20–30):
+  a reroll changes the directions of the next few cuts, so a few more casts miss. Typing in a new work keeps ≥ 91 % of
+  the casts (older work 96 %). The sets' weights were first made per part and plan (8 % of a typing re-plan, best 25–27
+  vs 22–24 ms); they are now shared by the parts of one kind and kept between cached plans (`section_kit`: every mood,
+  amount, backdrop and part filter re-plans to the fresh plan; dropping the look or the pools from their key fails it),
+  and typing costs the same in both (best 23–24 vs 23–29 ms).
+
+**Deviations from the design** (each with its reason):
+
+1. `pv.fxMax`'s spec is `int 4–8` (the lead's table had 2–8; the design's critique #7). Rule pins are strict: a switch
+   takes only true / false and `pv.fxMax` only an integer of its range (so `3` warns `pin-bad-value` instead of clamping
+   to 4, as the design's test asks).
+2. The kit's group weight also multiplies each part's own `fits` on a typical cut (energy, the song's beat, not an impact,
+   two words, eight cells, no layout chosen): without it a group such as `scale` (breathePulse, thumpSwell: beat-only)
+   was chosen for 142 of 640 sets in songs without a tempo and could hardly be picked (dwell member share 44 %).
+3. Under the arc, the kit's selection leans with the part's drive (the arc's factor on each part's strength): with the kit's
+   ×16 / ×8 on a set drawn without it, the chorus − verse strong-layout gap was 6.6 points (< 10 asked); with the lean it
+   is 13.5. Without the kit the arc alone gives 20.
+4. `KIT_AVOID` also covers exits (`depart`): with the members' recency relax, identical neighbouring exits rose from 0.29
+   to 1.49 % (> legacy + 1 point asked); with it 0 %, coverage 66 %.
+5. Dwell's coverage margin is 15 points, not 20, and its floor 62 %, not 72 %: the measured 67.8 / 50.6 % (the prototype's
+   82 % is not reached; its dwell pool is small, gated by the layout, and the ×0.03 against the previous value keeps the
+   primary from repeating; KIT = 12 would give 70.4). The other floors are the measurement − 5 (arrange 63, arrive 55,
+   depart 61, lens 67).
+6. The flip runs after an aligned copy's parameters (`copyParams`), and treats a copied value as fixed (same result as
+   flipping before the copy: the copy keeps its source's values, which set the cut's direction).
+7. A pinned transition part with an automatic direction alternates too (the design's "pinned params … are left alone":
+   a pinned `dir` or a die on it stays).
+8. `shotFactors(st)` is a function of the shot key (the arc's own factor), not `{ rec, why }` (phase C adds the rest).
+9. The 区画 kit row names each group by its first member part (two per group read as a list of lists).
+10. Explain for a turned direction gives `[rule pv.alt, pv.alt | pv.altSame]` (altSame when an earlier slot of the cut
+    has the same sign on that axis); the rule fields at work scope explain as `whyRule.gen.new` / `gen.old` /
+    `pv.group`.
+11. The alternation test excludes aligned repeats and guarded values (the design's ≥ 80 % counted every pair; with
+    repeats on by default an aligned repeat keeps its source's direction).
+
+**Browser (G0 and phase A).** `?fresh=1` pages are new works (boot.js `D.newDoc()`), so every `ui_flows.py` flow now
+runs with the conventions on. `flow_repeat` became `flow_repeat_legacy` (a work made before v2.2 loaded first, the old
+assertions) and `flow_repeat_new` (on without a pin, 自動 「新しい作品の標準」, off is a pin, 固定を外す brings it back);
+`flow_conventions` checks the group switch, its note in new and older works, and the 区画 page's 演出セット and die.
+G0 (the whole `ui_flows.py` before the flow changes, ja and en): every flow passes but two that assumed an older work,
+the old `repeat` (off by default) and `extreme` (its cut `lines[3]` now gets a layout that holds the camera still, so
+カメラワーク is read-only there; the flow now takes the first cut whose layout lets the camera move). After the changes
+`repeat`, `repeat_new`, `conventions` and `extreme` pass, and `ui_layout.py` (584 layouts), `i18n_pages.py`, `csp.py`
+and `determinism.py` are OK.
+
+Known: the planner speed test "re-planning project_long after an edit" and a few conformance build-time checks fail on
+this loaded machine (they fail on the base too); the two typing tests (older and new work, ≤ 30 ms best batch) sit at
+the edge of their bound here (load average 6–10 on 4 cores) and each failed once in these runs.
 
 <!-- PV22 P3 notes -->
 

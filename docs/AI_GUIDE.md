@@ -83,7 +83,7 @@ AI タブの **指示** の欄に、してほしいことを書いて **送る**
 
 変更はその対象の中だけに入ります。対象の外も変わる提案は「区画の外（作品全体）」にまとまり、はじめはチェックが外れています（「区画の外も変わります」）。
 
-作品全体 › 見た目 の **くり返しの行をそろえる** がオンのときは、1回目のサビへの変更が2回目以降にもそのまま表れます。1回目と2回目以降の同じ所を一度に変える提案は1回目の分だけが残り、「くり返しの行は1回目にそろうので…」と表示されます。2回目以降だけを変える提案は、その行にだけ入ります。AI がこの設定を切り替えることはありません。
+作品全体 › 見た目 の **くり返しの行をそろえる** がオンのとき（新しい作品でははじめからオン。「文字PVの定石」の一部です）は、1回目のサビへの変更が2回目以降にもそのまま表れます。1回目と2回目以降の同じ所を一度に変える提案は1回目の分だけが残り、「くり返しの行は1回目にそろうので…」と表示されます。2回目以降だけを変える提案は、その行にだけ入ります。AI がこの設定を切り替えることはありません。
 
 ## 5. 区画ごとに指示
 
@@ -300,7 +300,8 @@ the tool's own button (**Prepare lyrics**, **Send**, **Make**, **Send and descri
   device; on by default). **Let AI do the camerawork** changes camera fields only. If the request is unclear, the AI
   asks back ("The AI asks: …") instead of guessing. Changes stay inside the target; anything outside it is grouped
   under "Outside the section (whole video)" and starts unchecked. With **Repeat lines the same way** on (whole video ›
-  Look), a change to the first chorus shows in the later ones too: where a proposal changes the same thing on the
+  Look; on from the start in a new work, as part of **Lyric-video conventions**), a change to the first chorus shows in
+  the later ones too: where a proposal changes the same thing on the
   first copy and on a later copy, only the first copy's change is kept ("Lines sung again follow their first copy, …");
   a change to a later copy alone applies to that line. The AI never switches this setting.
 - **EXTREME** — the chip right of **Let AI do the camerawork**. Press it, then ask, and the AI picks intense camerawork
