@@ -1,8 +1,8 @@
 /* 文字PVメーカー v2 — original work. Inspector field states, lock payloads and plan-value readers (DESIGN §4.16.8, §3.13, §3.6; DESIGN_2_1 §3.9). */
 MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyrics', 'core/schema', 'core/timing',
   'core/curve', 'core/shot', 'planner/params', 'planner/cast', 'planner/look', 'planner/segment', 'planner/plan',
-  'planner/extreme'],
-(P, PINS, REG, LY, S, TM, CV, SHOT, PA, CA, LK, SG, PL, XT) => {
+  'planner/extreme', 'planner/rules'],
+(P, PINS, REG, LY, S, TM, CV, SHOT, PA, CA, LK, SG, PL, XT, RU) => {
   'use strict';
 
   const LOOK_NAMES = new Set(['mood', 'theme', 'season', 'bpm', 'beatOffset', 'readRate', 'length', 'titleCard']);
@@ -16,9 +16,12 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
 
   // 'look' (work-scope slots), 'line' (start/end/split/lang; since v2.1 also avoid, and season at line or cut scope,
   // which is a line value while work:season stays the look's), 't0', 'el', 'count', 'part', 'param' or 'value'
-  // (orient, text.*, motion.speed, cam.*, rig, rig.curve).
+  // (orient, text.*, motion.speed, cam.*, rig, rig.curve); v2.2 'rule': a switch of the new-work table
+  // (planner/rules) at work scope — its value is the work pin, else the document's default (repeat.same keeps its v2.1
+  // handling here until the conventions package takes it into the table's category).
   function categoryOf(parsed) {
     const slot = parsed.slot;
+    if (parsed.scope.kind === 'work' && !parsed.part && !parsed.el && slot !== CA.REPEAT && RU.isRule(slot)) return 'rule';
     if (slot === 'season' && parsed.scope.kind !== 'work') return 'line';
     if (LOOK_NAMES.has(slot) || LOOK_PREFIX.test(slot) || (parsed.part && parsed.part.kind === 'texture')) return 'look';
     if (LINE_NAMES.has(slot)) return 'line';
@@ -235,6 +238,7 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
   function schemaOf(registry, plan, parsed, cuts) {
     const cat = categoryOf(parsed);
     const slot = parsed.slot;
+    if (cat === 'rule') return RU.SPECS[slot];
     if (cat === 'look') {
       if (slot === 'mood' || slot === 'theme') return { type: 'part', kind: slot, of: registry.keys(slot), none: false };
       if (parsed.part && !parsed.part.param) {
@@ -283,7 +287,7 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
   // at the path's scope and every broader one (special cuts have no line).
   function canPinAt(parsed) {
     const cat = categoryOf(parsed);
-    if (cat === 'look') return ['work'];
+    if (cat === 'look' || cat === 'rule') return ['work'];
     if (cat === 'line') return parsed.slot === 'season' ? ['line', 'work'] : ['line'];
     if (cat === 't0') return ['cut'];
     const kind = parsed.scope.kind;
@@ -426,12 +430,30 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
   }
   const EMPTY = Object.freeze({});
 
+  // A switch of the new-work table (v2.2, DESIGN_2_2 §0): its work pin, else the document's default, which the auto text
+  // names (「新しい作品の標準」 / 「この機能より前に作った作品なので、はじめはオフ」).
+  function ruleState(doc, parsed, path, ix) {
+    const slot = parsed.slot;
+    const pin = (doc.pins || {})[path] || null;
+    const value = RU.value(doc, ix, slot);
+    const schema = RU.SPECS[slot];
+    const fs = {
+      path, value, display: null, state: 'auto', pinnedAt: null, by: null, schema, autoText: null, canPinAt: ['work'],
+      inactiveReason: null, warn: null, pinAt: pin ? path : null,
+    };
+    if (pin) Object.assign(fs, { state: pin.by === 'lock' ? 'locked' : pin.by === 'ai' ? 'ai' : 'pinned', pinnedAt: 'work', by: pin.by });
+    else fs.autoText = ['rule.auto.' + (RU.gen(doc) >= 1 ? 'new' : 'old'), {}];
+    fs.display = displayOf(parsed, value, null, 'rule', schema, doc);
+    return fs;
+  }
+
   // fieldState(doc, plan, sel, path, { registry }) → FieldState (§3.13).
   function fieldState(doc, plan, sel, path, opts) {
     const registry = opts && opts.registry;
     const parsed = P.parse(path);
     const cat = categoryOf(parsed);
     const ix = pinIndexOf(doc.pins);
+    if (cat === 'rule') return ruleState(doc, parsed, path, ix);
     const perCut = cat !== 'look' && !(cat === 'line' && parsed.scope.kind === 'line');
     const cuts = perCut ? cutsFor(plan, sel, parsed) : [];
     const values = perCut ? cuts.map((c) => valueAt(plan, c, parsed, registry, ix)) : [valueAt(plan, null, parsed, registry, ix)];

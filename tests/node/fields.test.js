@@ -442,3 +442,21 @@ test('lockPayload freezes the camera slots and motion.speed of a line; locking c
     assert.deepEqual(q.rigs, p.rigs, 'the rigs are as before');
   }
 });
+
+// v2.2 (DESIGN_2_2 §0, §4): a switch of the new-work table reads its work pin, else the document's default.
+test('v2.2: the rule category — 太さを動かす at work scope: value, state, auto text, pin', () => {
+  const old = clone(corpus.project('basic').doc);
+  const fresh = Object.assign(clone(old), { look: Object.assign({}, old.look, { gen: 1 }) });
+  const parsed = P.parse('work:weight.auto');
+  assert.equal(F.categoryOf(parsed), 'rule');
+  assert.equal(F.categoryOf(P.parse('work:repeat.same')), 'value', 'repeat.same keeps its own handling here');
+  assert.equal(F.categoryOf(P.parse('line/r4:morph.auto')), 'value', 'line scope is not the table category');
+  let fs = state(fresh, plan(fresh), 'work:weight.auto');
+  assert.deepEqual([fs.value, fs.state, fs.autoText, fs.canPinAt, fs.schema], [true, 'auto', ['rule.auto.new', {}], ['work'], { type: 'bool' }]);
+  assert.deepEqual(fs.display, ['val.on', {}]);
+  fs = state(old, plan(old), 'work:weight.auto');
+  assert.deepEqual([fs.value, fs.state, fs.autoText], [false, 'auto', ['rule.auto.old', {}]]);
+  const pinned = Object.assign(clone(fresh), { pins: { 'work:weight.auto': user(false) } });
+  fs = state(pinned, plan(pinned), 'work:weight.auto');
+  assert.deepEqual([fs.value, fs.state, fs.pinnedAt, fs.autoText, fs.pinAt], [false, 'pinned', 'work', null, 'work:weight.auto']);
+});

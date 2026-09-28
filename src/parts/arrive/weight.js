@@ -23,7 +23,7 @@ MV.def('parts/arrive/weight', ['parts/kit'], (K) => {
     key: 'weightGrow',
     label: { ja: '太る', en: 'Weight grow' },
     blurb: { ja: '細い字で現れ、太い字へ育っていく', en: 'Letters appear thin and grow bold' },
-    tags: ['bold', 'slow'], family: 'weight', pool: false, late: true, optIn: 'weight', unit: 'glyph', weight: 2,
+    tags: ['bold', 'slow'], family: 'weight', pool: false, late: true, optIn: 'weight', unit: 'glyph', weight: 2.5,
     traits: { energy: [0.1, 0.85], roles: ['lyric', 'focus', 'title'] },
     shared: {
       dur: { auto: { range: [0.7, 1.3], follow: '-energy' } }, each: { auto: { range: [0.02, 0.05] } },

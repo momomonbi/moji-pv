@@ -2180,6 +2180,22 @@ MV.def('i18n/strings', [], () => ({
   // --- PV22 P3 (キメ) ---
 
   // --- PV22 P4 (モーフ・太さ) ---
+  'fld.weightAuto': ['太さを動かす', 'Animate stroke weight'],
+  'fld.weightAuto.note': ['太さの種類が多い書体の行で、細い字から太い字へ育つ入りや、拍に合わせて太さが脈打つ見せを自動で使います。',
+    'On lines whose typeface has many weights, uses entrances that grow from thin to bold and holds whose weight pulses with the beat.'],
+  'fld.textWeight': ['太さ', 'Weight'],
+  'fld.textWeight.note': ['書体にない太さは、いちばん近い太さで表示します。', 'A weight the typeface lacks shows as its nearest weight.'],
+  'whyRule.text.weight': ['書体の太さのまま', 'The typeface\'s own weight'],
+  'whyRule.weight.grow': ['太る入りなので、書体のいちばん太い字で終わる', 'Enters growing, so it ends at the typeface\'s boldest weight'],
+  'warn.weight-flat': ['この書体は太さの種類が少ないため、太さの動きが見えません（{detail}）',
+    'This typeface has too few weights, so the weight animation does not show ({detail})'],
+  'warn.weight-style': ['文字の飾り（縁取り・影・二色）があるため、太さは段階的に変わります（{detail}）',
+    'The lettering has an outline, shadow or second color, so the weight changes in steps ({detail})'],
+  // the automatic value of a switch of the new-work table (planner/rules; the same keys as PV22 P2 — keep one copy)
+  'rule.auto.new': ['新しい作品の標準', 'Default for new works'],
+  'rule.auto.old': ['この機能より前に作った作品なので、はじめはオフ', 'Made before this feature, so it starts off'],
+  'whyRule.rules.new': ['新しい作品の標準', 'Default for new works'],
+  'whyRule.rules.old': ['この機能より前に作った作品なので、はじめはオフ', 'Made before this feature, so it starts off'],
 
   // --- PV22 P5 (タイミング) ---
 

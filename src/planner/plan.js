@@ -1,8 +1,9 @@
 /* 文字PVメーカー v2 — original work. plan(doc, { registry }) → Plan: the planner's stages in their FROZEN order (DESIGN §4.16.1–§4.16.2, §3.12; DESIGN_2_1 §2.7, §5.9.3, §11.2.6). */
 MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'core/timing', 'core/beats', 'core/motion',
   'core/doc', 'core/schema', 'core/script', 'core/media', 'core/shot', 'planner/choose', 'planner/params', 'planner/look',
-  'planner/segment', 'planner/features', 'planner/cast', 'planner/tracks', 'planner/camera', 'planner/encode', 'planner/extreme'],
-(H, N, PINS, LY, TM, B, MO, D, S, SC, MEDIA, SHOT, CH, PA, LK, SG, FE, CA, TR, CAM, EN, XT) => {
+  'planner/segment', 'planner/features', 'planner/cast', 'planner/tracks', 'planner/camera', 'planner/encode', 'planner/extreme',
+  'planner/rules'],
+(H, N, PINS, LY, TM, B, MO, D, S, SC, MEDIA, SHOT, CH, PA, LK, SG, FE, CA, TR, CAM, EN, XT, RU) => {
   'use strict';
 
   // v2: rigs, cut.rig, grounds[].zoomed, feat.sectionStart, media, the camera slots (DESIGN_2_1 §2.7, §11.2.6).
@@ -493,6 +494,19 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
     grounds.forEach((g, i) => { g.zoomed = zoomed[i]; });
   }
 
+  // --- glyph motion switches (v2.2, DESIGN_2_2 §4) ------------------------------------------------------------------
+
+  // ctx.glyph = { morph, weight, maybeMorph, id }: 「同じ字をつなぐ」 and 「太さを動かす」 for the whole work (planner/rules:
+  // the work pin, else on in a document made by newDoc()), whether any line may turn the morph on (a morph.auto pin
+  // anywhere), and their id for the cast key. Both off and nothing pinned: 'g00', the key text of every older document.
+  const GLYPH_OFF = 'g00';
+  function glyphSwitches(doc, ix) {
+    const morph = RU.value(doc, ix, 'morph.auto') === true;
+    const weight = RU.value(doc, ix, 'weight.auto') === true;
+    const maybeMorph = morph || PA.pinned(ix, 'morph.auto');
+    return Object.freeze({ morph, weight, maybeMorph, id: 'g' + (+morph) + (+weight) + (maybeMorph ? 'p' : '') });
+  }
+
   // --- the pipeline ---------------------------------------------------------------------------------------------
 
   // run(doc, registry, { trace, fresh }) → Plan. trace = { cutKey, slot, out } records one slot's decision
@@ -513,7 +527,7 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
       timing: Object.assign({}, TM.TIMING_DEFAULTS, doc.timing || {}), pools: new Map(), trace, casts: null,
       lockFree: CA.lockFreeIndex(doc.pins), media: mediaIndex(doc), mediaUsed: new Set(),
       castKeys: null, seams: null, encodings: null, fallbacks: null, lookAxis: null, lineConds: null, workCond: null,
-      shotMood: null, echoed: null, align: null, alignNear: null,
+      shotMood: null, echoed: null, align: null, alignNear: null, glyph: null,
     };
     // Traced runs (explain) and fresh runs neither read nor refresh the caches of re-planning.
     if (cached) beginFeatures();
@@ -539,6 +553,7 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
     ctx.amounts = look.amounts;
     ctx.pace = look.mood.pace;
     ctx.chooser = CH.createChooser(registry, { mood: look.mood, theme: look.theme, season: look.season, amounts: look.amounts });
+    ctx.glyph = glyphSwitches(doc, ctx.ix);
 
     // 3. cutter
     const cuts = SG.cutAll(ctx, timed, sheet.meta, duration);
@@ -563,8 +578,10 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
     // 5. cast, in time order (a cut whose inputs did not change reuses its cast, planner/cast castCut)
     if (cached) {
       ctx.casts = CA.beginCasts(registry);
+      // (the glyph switches join the key only when one is on or pinned, so an older document's key text is as before)
       ctx.castKeys = CA.castKeys(ctx, EN.canon([registry.version, look.mood.key, look.theme.key, look.season, look.amounts,
-        look.variety, aspect, doc.look.seed, doc.filters || null, ctx.bpm, ctx.media ? ctx.media.key : null]));
+        look.variety, aspect, doc.look.seed, doc.filters || null, ctx.bpm, ctx.media ? ctx.media.key : null]) +
+        (ctx.glyph.id !== GLYPH_OFF ? '|' + ctx.glyph.id : ''));
     }
     // The cuts a later cut sings again (their rows keep what the repeats inherit, planner/cast castCut).
     ctx.echoed = new Set();

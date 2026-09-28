@@ -409,3 +409,32 @@ test('the batched Gumbel noise of the chooser equals core/rng.gumbel', () => {
     assert.equal(CH.gumbelAt(CH.gumbelPrefix(seed), key), R.gumbel(seed, key));
   }
 });
+
+// v2.2 (DESIGN_2_2 §4): an opt-in part (太る) is an alternative where the traced pool offered it, and only there.
+test('explain: an automatically picked 太る lists itself with its weight; a cut without the opt-in lists no weight part', () => {
+  const CAT = MV.use('parts/catalog').defaultRegistry();
+  let found = null;
+  for (const { doc } of corpus.corpus(2, ['16:9'])) {
+    doc.look.gen = 1;
+    const plan = PL.plan(doc, { registry: CAT });
+    const cut = plan.cuts.find((c) => c.slots.arrive.v === 'weightGrow' && c.slots.arrive.from === 'auto');
+    if (cut) { found = { doc, plan, cut }; break; }
+  }
+  assert.ok(found, 'a new work picks 太る somewhere');
+  const out = EX.explain(found.doc, found.plan, 'cut/' + found.cut.key + ':arrive', { registry: CAT });
+  assert.equal(out.value, 'weightGrow');
+  const alt = out.alts.find((a) => a.key === 'weightGrow');
+  assert.ok(alt && alt.w > 0 && !alt.masked, 'listed with its weight');
+  const why = EX.explain(found.doc, found.plan, 'cut/' + found.cut.key + ':text.weight', { registry: CAT });
+  if (found.cut.slots['text.weight']) assert.deepEqual(why.why, [{ code: 'rule', params: { rule: 'weight.grow' } }]);
+  // the same document as an older work: no weight part among the alternatives
+  const old = Object.assign({}, found.doc, { look: Object.assign({}, found.doc.look) });
+  delete old.look.gen;
+  const oldPlan = PL.plan(old, { registry: CAT });
+  const o = EX.explain(old, oldPlan, 'cut/' + found.cut.key + ':arrive', { registry: CAT });
+  assert.ok(!o.alts.some((a) => CAT.get('arrive', a.key).optIn), 'no opt-in part');
+  // the switch itself explains as the document default
+  const sw = EX.explain(found.doc, found.plan, 'work:weight.auto', { registry: CAT });
+  assert.deepEqual([sw.value, sw.from, sw.why], [true, 'auto', [{ code: 'rule', params: { rule: 'rules.new' } }]]);
+  assert.deepEqual(EX.explain(old, oldPlan, 'work:weight.auto', { registry: CAT }).why, [{ code: 'rule', params: { rule: 'rules.old' } }]);
+});

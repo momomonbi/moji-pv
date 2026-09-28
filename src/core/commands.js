@@ -231,19 +231,23 @@ MV.def('core/commands', ['core/doc', 'core/paths', 'core/pins', 'core/lyrics', '
     // Slots that make sense only at one scope (§3.4.1–3.4.3), so they are never promoted or copied.
     const LINE_ONLY = new Set(['start', 'end', 'split', 'lang', 'avoid']);
     const CUT_ONLY = new Set(['t0']);
-    const TEXT_SLOTS = new Set(['orient', 'text.face', 'text.scale', 'text.ink', 'text.style']);
+    const TEXT_SLOTS = new Set(['orient', 'text.face', 'text.scale', 'text.ink', 'text.style', 'text.weight']);
     // v2.1 (DESIGN_2_1 §2.3, §3.7): line slots that are area-level, never pinned at a cut; `avoid` is line-only. The
     // EXTREME switch (DESIGN_EXTREME §2.2) is an area's too: line or work, never a cut; "paste look" leaves it (it is not
     // in COPY_SLOTS) and it may move line → work like the season.
-    const NOT_CUT = new Set(['season', 'avoid', 'cam.extreme']);
+    const NOT_CUT = new Set(['season', 'avoid', 'cam.extreme', 'morph.auto', 'weight.auto']);
+    // v2.2 (DESIGN_2_2 §4): switches of the whole video only — never at a line (nor at a cut, NOT_CUT).
+    const WORK_ONLY = new Set(['weight.auto']);
     // Cut slots that "paste look" copies besides part slots and text.* (CAM_SLOTS and the motion speed).
     const COPY_SLOTS = new Set(['motion.speed', 'cam.shot', 'cam.zoom', 'cam.curve', 'cam.follow']);
 
     // Refuses `cut/…:season`, `cut/…:avoid`, `cut/…:cam.extreme`, `cut/…:repeat.same` and `work:avoid` (payload).
     // 「くり返しの行をそろえる」 (DESIGN_2_1 §4.10) is a setting of the whole video or of a line, like the line season.
+    // v2.2: 「同じ字をつなぐ」 (morph.auto) work or line, 「太さを動かす」 (weight.auto) work only.
     function checkSlotScope(parsed) {
       need(!(parsed.scope.kind === 'cut' && (NOT_CUT.has(parsed.slot) || parsed.slot === 'repeat.same')),
         parsed.slot + ' cannot be pinned at cut scope');
+      need(!(parsed.scope.kind === 'line' && WORK_ONLY.has(parsed.slot)), parsed.slot + ' cannot be pinned at line scope');
       need(!(parsed.scope.kind === 'work' && parsed.slot === 'avoid'), 'avoid cannot be pinned at work scope');
     }
 

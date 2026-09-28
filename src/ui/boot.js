@@ -1101,6 +1101,8 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
     const repaint = () => { if (app.shell) app.shell.stage.invalidate(); };
     const fonts = app.svc.fonts ? app.svc.fonts() : null;
     if (fonts && typeof fonts.on === 'function') fonts.on('epoch', () => { repaint(); app.bus.emit('fonts'); });
+    // a served weight of weight animation arrived (v2.2 draw-only face): only a repaint, nothing is laid out again
+    if (fonts && typeof fonts.on === 'function') fonts.on('draw', () => { repaint(); });
     const engine = app.engine;
     if (typeof engine.prepare !== 'function') return;
     let center = null;                            // the playhead time the last prepare was centred on

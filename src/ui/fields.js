@@ -13,7 +13,9 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
     // generated part parameter; its `label` is 'fld.param' = '{name}'), `param` (generated part parameters),
     // `firstCut` (the line page's 切り替え: written at the line's first cut, §6.4.6), `pinnedOnly` (a pinned parameter
     // of a part that is no longer chosen, shown as 無効), `note` (a string key shown under the row), `offClears` (a toggle
-    // whose off is 自動: turning it off clears the pin), `noDice` (a setting, not drawn: no 振り直し).
+    // whose off is 自動: turning it off clears the pin), `noDice` (a setting, not drawn: no 振り直し), `autoDefault`
+    // (v2.2: a switch of the new-work table, planner/rules — the value equal to the document's default clears the pin,
+    // any other value pins it).
 
     const ALL = Object.freeze(['work', 'line', 'cut']);
     const WORK = Object.freeze(['work']);
@@ -35,14 +37,14 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
 
     // --- the slot catalogue (§3.4.1–§3.4.3): which scopes a slot is valid at --------------------------------------
 
-    const WORK_NAMES = new Set(['mood', 'theme', 'bpm', 'beatOffset', 'readRate', 'length', 'titleCard']);
+    const WORK_NAMES = new Set(['mood', 'theme', 'bpm', 'beatOffset', 'readRate', 'length', 'titleCard', 'weight.auto']);
     const LINE_NAMES = new Set(['start', 'end', 'split', 'lang', 'avoid']);
     // v2.1 (DESIGN_2_1 §2.3): camerawork, motion speed and the section camera cascade cut > line > work; the line season
     // is a line value that may also be pinned for the whole video (the existing work:season).
-    const CUT_NAMES = new Set(['orient', 'text.face', 'text.scale', 'text.ink', 'text.style', 'motion.speed', 'cam.shot',
-      'cam.zoom', 'cam.curve', 'cam.follow', 'rig', 'rig.curve']);
-    // The EXTREME switch (DESIGN_EXTREME §2.2) is an area's too: a line or the whole video.
-    const LINE_WORK_NAMES = new Set(['season', 'cam.extreme']);
+    const CUT_NAMES = new Set(['orient', 'text.face', 'text.scale', 'text.ink', 'text.style', 'text.weight', 'motion.speed',
+      'cam.shot', 'cam.zoom', 'cam.curve', 'cam.follow', 'rig', 'rig.curve']);
+    // The EXTREME switch (DESIGN_EXTREME §2.2) is an area's too: a line or the whole video. v2.2: 「同じ字をつなぐ」 too.
+    const LINE_WORK_NAMES = new Set(['season', 'cam.extreme', 'morph.auto']);
 
     // 「くり返しの行をそろえる」 (DESIGN_2_1 §4.10): a switch of the whole video, and a choice of a line that sings an earlier
     // line again.
@@ -215,6 +217,9 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
     const textStyleField = () => F({ path: 'text.style', widget: 'choice', label: 'fld.textStyle', spec: enumSpec(TEXT_STYLES),
       options: opts(TEXT_STYLES, 'fld.style.') });
     const textScaleField = (label) => F({ path: 'text.scale', widget: 'number', label: label || 'fld.textScale', spec: SPEC.scale });
+    // 太さ (v2.2, DESIGN_2_2 §4): the weight of the lyric face (自動 = the typeface's, or the bold end of 太る).
+    const textWeightField = () => F({ path: 'text.weight', widget: 'number', label: 'fld.textWeight', spec: SPEC.weight,
+      note: 'fld.textWeight.note', auto: true, basic: false });
     const orientField = () => F({ path: 'orient', widget: 'choice', label: 'fld.orient', spec: enumSpec(['h', 'v']),
       options: opts(['h', 'v'], 'fld.orient.'), auto: true, when: (ctx) => ctx.orients.includes('v') || ctx.scopeKind === 'work' });
 
@@ -290,6 +295,9 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
           // on pins true for the whole video; off clears the pin (off is the default).
           F({ path: REPEAT_SAME, scopes: WORK, widget: 'toggle', label: 'fld.repeatSame', spec: { type: 'bool' },
             note: 'fld.repeatSame.note', offClears: true, noDice: true }),
+          // v2.2 (DESIGN_2_2 §4): on in new works, off in older ones (planner/rules); the default clears the pin.
+          F({ path: 'weight.auto', scopes: WORK, widget: 'toggle', label: 'fld.weightAuto', spec: { type: 'bool' },
+            note: 'fld.weightAuto.note', autoDefault: true, noDice: true, basic: false }),
         ]),
         // 写真・動画 (DESIGN_2_1 §11.7.3): the library, open when it holds something.
         sec('media', (ctx) => ctx.mediaCount > 0, [], { custom: 'media' }),
@@ -346,7 +354,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
             options: opts(LANGS, 'lang.'), auto: true, select: true, basic: false }),
         ], { custom: 'lockPartial', customTop: true }),
         sec('direction', true, directionFields()),
-        sec('colortype', false, [textFaceField(), textInkField(), textStyleField(), textScaleField()]),
+        sec('colortype', false, [textFaceField(), textInkField(), textStyleField(), textScaleField(), textWeightField()]),
         sec('cuts', false, [], { custom: 'cuts', when: (ctx) => !!ctx.line && ctx.line.cuts.length > 1 }),
         sec('elements', false, [], { custom: 'elements' }),
         sec('ai', false, [], { custom: 'ai' }),
@@ -357,7 +365,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
         // An area selection (区画, DESIGN_2_1 §6.5) adds its section camera; its runs are split at the area's edges. With
         // it, カメラ EXTREME for the area (a line pin on every selected line, DESIGN_EXTREME §2.6).
         sec('rig', true, rigFields().concat(extremeFields({ scopes: LINE })), { when: hasArea }),
-        sec('colortype', false, [textFaceField(), textInkField(), textStyleField(), textScaleField()]),
+        sec('colortype', false, [textFaceField(), textInkField(), textStyleField(), textScaleField(), textWeightField()]),
         sec('shift', true, [], { custom: 'shift' }),
       ],
       cut: [
@@ -384,7 +392,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
       ],
       'el.text': [
         sec('text', true, [textFaceField(), textScaleField(), textInkField(),
-          F({ path: 'el.text.fill', widget: 'color', label: 'fld.emphInk', spec: SPEC.ink }), textStyleField(), orientField(),
+          F({ path: 'el.text.fill', widget: 'color', label: 'fld.emphInk', spec: SPEC.ink }), textStyleField(), textWeightField(), orientField(),
           F({ path: 'el.text.nudge', widget: 'number', label: 'fld.nudgeFull', spec: SPEC.nudge }),
           F({ path: 'el.text.hide', widget: 'toggle', label: 'fld.hide' }),
           sharedField('arrive', 'order', 'fld.order'), sharedField('arrive', 'each', 'fld.each')].concat(textMediaFields())),

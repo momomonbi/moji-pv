@@ -1,6 +1,6 @@
 /* 文字PVメーカー v2 — original work. Casting: every cut slot in the FROZEN order, from pins, rules or the chooser (DESIGN §4.16.2, §3.4.3; DESIGN_2_1 §3.9, §4.9). */
 MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 'core/pins', 'core/paths', 'planner/choose',
-  'planner/params', 'planner/look', 'planner/camera'], (S, REG, R, N, PINS, P, CH, PA, LK, CAM) => {
+  'planner/params', 'planner/look', 'planner/camera', 'engine/text/faces'], (S, REG, R, N, PINS, P, CH, PA, LK, CAM, FACES) => {
     'use strict';
 
     const LIST_KINDS = Object.freeze(['ornament', 'filter']);
@@ -28,6 +28,8 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       'el.hide': { type: 'bool' },
       // 「くり返しの行をそろえる」 (DESIGN_2_1 §4.10): pinned at work or line scope, never at a cut (core/commands).
       'repeat.same': { type: 'bool' },
+      // 太さ (v2.2, DESIGN_2_2 §4): the weight of the cut's lyric face role; a pin, or the grow rule of 太る.
+      'text.weight': { type: 'int', min: 100, max: 900 },
     }, CAM.SLOT_SPECS));
     const SEASON_SPEC = LK.LOOK_SPECS.season;
     const AVOID_SPEC = Object.freeze({ type: 'partRefs' });
@@ -98,16 +100,19 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     // A cut's screen effects never take the work texture again (it already runs over the whole video: risoPink's
     // dotScreen texture plus a dotScreen effect doubled the dots); a pin still can. The line's avoid list is added to
     // the kind's deny filter; when that would empty a pool that is not empty without it, the avoid list is relaxed for
-    // that kind (relaxed: the chooser reports avoid-empty).
-    function poolEntry(ctx, kind, sub, role, orient, script, aspect, scope, cond) {
+    // that kind (relaxed: the chooser reports avoid-empty). optIn (v2.2, DESIGN_2_2 §4): the opt-in pools the cut may
+    // draw from as well (registry.pool optIn; ['weight'] where the weight parts suit the cut, weightOptIn), or null.
+    function poolEntry(ctx, kind, sub, role, orient, script, aspect, scope, cond, optIn) {
       const c = cond || workCond(ctx);
       let byKind = ctx.pools.get(kind);
       if (!byKind) { byKind = new Map(); ctx.pools.set(kind, byKind); }
-      const id = (scope ? sub + '|' + scope : sub) + (c.id ? '|' + c.id : '');
+      const id = (scope ? sub + '|' + scope : sub) + (c.id ? '|' + c.id : '') + (optIn ? '|w' : '');
       let entry = byKind.get(id);
       if (!entry) {
-        let keys = ctx.registry.pool(kind, { role, orient, script, aspect, scope, season: c.season, filters: ctx.doc.filters,
-          amounts: LK.gateAmounts(ctx.look.amounts, ctx.doc.look.backdrop, kind) });
+        const o = { role, orient, script, aspect, scope, season: c.season, filters: ctx.doc.filters,
+          amounts: LK.gateAmounts(ctx.look.amounts, ctx.doc.look.backdrop, kind) };
+        if (optIn) o.optIn = optIn;
+        let keys = ctx.registry.pool(kind, o);
         const texture = kind === 'filter' && ctx.look.plan && ctx.look.plan.texture ? ctx.look.plan.texture.v : null;
         if (texture && keys.includes(texture)) keys = keys.filter((k) => k !== texture);
         let relaxed = false;
@@ -172,7 +177,7 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     // createHistory; win: the winner before req.avoid, which v differs from only when the winner was avoided).
     // req = { kind, slot, path, feat, role, orient, script, scope, chosen, seed, recent, ref, echo, avoid, list, orNone,
     // cutKey, trace, silent, cond (the line conditions of lineCond; default the work's), noMedia (derived media grounds
-    // weigh 0 here, DESIGN_2_1 §11.5.9) }.
+    // weigh 0 here, DESIGN_2_1 §11.5.9), optIn (v2.2: the opt-in pools, both stages; null or absent: none) }.
     // Stages (§4.16.4, §3.8): the full weights; the same pool without traitFit and fits; the pool without the text
     // traits (orient, script, aspect); then the kind's fallback — or 'none' for a list slot whose fallback does not
     // serve the cut's role, and for atmos (orNone). pool-empty is reported on lyric cuts, and elsewhere only when the
@@ -190,11 +195,12 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       };
       const sub = req.poolId !== undefined ? req.poolId
         : (req.role || '') + '|' + (req.orient || '') + '|' + (req.script || '') + '|' + (ctx.aspect || '');
-      const full = poolEntry(ctx, req.kind, sub, req.role, req.orient, req.script, ctx.aspect, req.scope, cond);
+      const optIn = req.optIn || null;
+      const full = poolEntry(ctx, req.kind, sub, req.role, req.orient, req.script, ctx.aspect, req.scope, cond, optIn);
       if (trace) trace.cond = cond;
       for (let stage = 0; stage < 3; stage++) {
         const entry = stage < 2 ? full
-          : poolEntry(ctx, req.kind, (req.role || '') + '|||', req.role, undefined, undefined, undefined, req.scope, cond);
+          : poolEntry(ctx, req.kind, (req.role || '') + '|||', req.role, undefined, undefined, undefined, req.scope, cond, optIn);
         const keys = entry.keys;
         if (!keys.length) continue;
         ask.keys = keys;
@@ -599,8 +605,8 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       if (pinnedFrom(ad)) return 'v' in acceptPart(ctx, kind, cut.role, { none: list, scope })(ad.v) ? ad : null;
       if (ad.from !== 'auto') return null;
       if (AVOID_REPEAT.has(kind) && !st.natural && nearClash(st, slot, ad.v)) return null;
-      if (!poolEntry(ctx, kind, poolIdOf(st), cut.role, st.chosen.orient, cut.feat.script, ctx.aspect, scope, st.cond).keys
-        .includes(ad.v)) return null;
+      if (!poolEntry(ctx, kind, poolIdOf(st), cut.role, st.chosen.orient, cut.feat.script, ctx.aspect, scope, st.cond,
+        weightOptIn(st, kind)).keys.includes(ad.v)) return null;
       const def = ctx.registry.get(kind, ad.v);
       if (typeof def.fits === 'function' && !(Number(def.fits(cut.feat, st.chosen)) > 0)) return null;
       return ad;
@@ -701,7 +707,7 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
           kind, slot, path: 'cut/' + cut.key + ':' + slot, feat: cut.feat, role: cut.role, orient: st.chosen.orient,
           script: cut.feat.script, scope: kind === 'ornament' ? 'cut' : null, chosen: st.chosen, seed, recent, echo,
           list, cutKey: cut.key, trace, silent: st.natural, ref, poolId: poolIdOf(st), cond: st.cond,
-          avoid: AVOID_REPEAT.has(kind) && !st.natural ? avoidOf(st, slot) : null,
+          avoid: AVOID_REPEAT.has(kind) && !st.natural ? avoidOf(st, slot) : null, optIn: weightOptIn(st, kind),
         });
         d = { v: got.v, from: got.from };
         if (got.base && got.base !== got.v) st.base[slot] = got.base;
@@ -734,7 +740,7 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       const echo = st.hist.echo(cut.feat.repeatOf, slot);
       chooseAuto(ctx, { kind, slot, path: 'cut/' + cut.key + ':' + slot, feat: cut.feat, role: cut.role,
         orient: st.chosen.orient, script: cut.feat.script, scope: kind === 'ornament' ? 'cut' : null, chosen: st.chosen,
-        seed, recent, echo, list, cutKey: cut.key, trace, silent: true, cond: st.cond });
+        seed, recent, echo, list, cutKey: cut.key, trace, silent: true, cond: st.cond, optIn: weightOptIn(st, kind) });
       return Object.assign(trace, { recent, echo });
     }
 
@@ -900,6 +906,97 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       return els;
     }
 
+    // --- weight animation (v2.2, DESIGN_2_2 §4: 太る, 脈打つ太さ, 細る) -------------------------------------------
+
+    // The weight parts join a cut's pools (opt-in 'weight') only when the work's 「太さを動かす」 is on (ctx.glyph.weight),
+    // the cut is a lyric (or focus) cut lettered plain or glowing (the other styles cannot crossfade weights) and its
+    // face has room for the motion; the grow rule gives an entrance with 太る the face's bold end. Documents without the
+    // switch never reach any of this, so their pools and plans are unchanged.
+    const WEIGHT_OPT_IN = Object.freeze(['weight']);
+    const GROW_KEY = 'weightGrow';
+    const TEXT_WEIGHT = 'text.weight';
+    const GROW_ROOM = 300, PULSE_ROOM = 200, FLAT_ROOM = 100;
+    const WEIGHT_ROOMS = Object.freeze({ grow: GROW_ROOM, pulse: PULSE_ROOM, flat: FLAT_ROOM });
+    const CROSSFADE = new Set(['plain', 'glow']);
+
+    // The FontRef the cut's lyrics are laid out with: its text.face role in the look's faces, at the cut's text.weight.
+    function faceOfCut(st) {
+      const role = st.slots['text.face'] ? st.slots['text.face'].v : 'display';
+      const ref = FACES.fontFor(st.ctx.look.plan.faces, role, st.cut.lang);
+      const tw = st.slots[TEXT_WEIGHT];
+      return tw ? FACES.atWeight(ref, FACES.snapWeight(ref.family, tw.v)) : ref;
+    }
+
+    function styleOf(st) { return st.slots['text.style'] ? st.slots['text.style'].v : 'plain'; }
+
+    // The room a weight part of a kind needs (arrive: from the lightest weight up to the end weight — a pinned 太さ or
+    // the grow rule's bold end; depart: below the face's weight; dwell: up or down).
+    function weightRoom(st, kind, ref) {
+      const L = FACES.ladderOf(ref);
+      if (kind === 'arrive') return (st.slots[TEXT_WEIGHT] ? ref.weight : FACES.growTop(ref)) - L[0];
+      if (kind === 'depart') return ref.weight - L[0];
+      const r = FACES.roomOf(ref);
+      return Math.max(r.below, r.above);
+    }
+
+    // weightOptIn(st, kind) → ['weight'] when the weight parts may be picked automatically for this motion slot, else null.
+    function weightOptIn(st, kind) {
+      const g = st.ctx.glyph;
+      if (!g || !g.weight || !MOTION_KINDS.includes(kind) || !PER_CUT_ROLES.has(st.cut.role)) return null;
+      if (!CROSSFADE.has(styleOf(st))) return null;
+      return weightRoom(st, kind, faceOfCut(st)) >= (kind === 'dwell' ? PULSE_ROOM : GROW_ROOM) ? WEIGHT_OPT_IN : null;
+    }
+
+    function acceptWeight(v) {
+      const c = S.coerce(SLOT_SPECS[TEXT_WEIGHT], v);
+      return c === undefined ? { bad: true } : { v: c };
+    }
+
+    // text.weight: a pin (cut > line > work). Without one the slot is absent (the face's own weight), unless the grow
+    // rule sets it after the entrance is chosen.
+    function decideTextWeight(st) {
+      const { ctx, at } = st;
+      if (!PA.pinned(ctx.ix, TEXT_WEIGHT)) return;
+      const trace = tracing(st, TEXT_WEIGHT);
+      const pin = PA.resolvePin(ctx.ix, at, TEXT_WEIGHT, acceptWeight, ctx.warn);
+      if (pin) setDecision(st, TEXT_WEIGHT, pinDecision(pin));
+      if (trace) {
+        Object.assign(trace, { stage: pin ? 'pin' : 'auto', pin, decision: pin ? st.slots[TEXT_WEIGHT] : null, rule: TEXT_WEIGHT,
+          why: pin ? null : [{ code: 'rule', params: { rule: TEXT_WEIGHT } }] });
+      }
+    }
+
+    // The grow rule: an entrance with 太る (chosen, pinned or aligned) and no 太さ pin ends at the face's heaviest served
+    // weight up to 800 (FACES.growTop), so the line really goes from thin to bold. Part of the cast, so it is cached and
+    // replayed with it. planner/tracks takes it away when a seam replaces the entrance.
+    function growWeight(st) {
+      const { ctx } = st;
+      const a = st.slots.arrive;
+      if (!ctx.glyph || !ctx.glyph.weight || !a || a.v !== GROW_KEY || st.slots[TEXT_WEIGHT]) return;
+      const ref = faceOfCut(st), top = FACES.growTop(ref);
+      if (!(top > ref.weight)) return;
+      const d = { v: top, from: 'rule' };
+      setDecision(st, TEXT_WEIGHT, d);
+      const trace = tracing(st, TEXT_WEIGHT);
+      if (trace) Object.assign(trace, { stage: 'rule', rule: 'weight.grow', decision: d, pin: null, why: null });
+    }
+
+    // A weight part a pin or a rule put where it cannot show (the automatic path never picks it there): the face has too
+    // few weights (weight-flat), or the lettering's outline, shadow or second colour makes the weight change in steps
+    // (weight-style). detail = the family.
+    function weightWarnings(st) {
+      if (st.natural) return;
+      for (const kind of MOTION_KINDS) {
+        const d = st.slots[kind];
+        const def = d ? st.ctx.registry.get(kind, d.v) : null;
+        if (!def || def.optIn !== 'weight') continue;
+        const ref = faceOfCut(st);
+        const where = { cut: st.cut.key, line: st.cut.line || undefined, detail: ref.family };
+        if (weightRoom(st, kind, ref) < FLAT_ROOM) st.ctx.warn(Object.assign({ code: 'weight-flat' }, where));
+        if (!CROSSFADE.has(styleOf(st))) st.ctx.warn(Object.assign({ code: 'weight-style' }, where));
+      }
+    }
+
     // The slots of one cut in the FROZEN order (§4.16.2, DESIGN_2_1 §3.9): orient → arrange → text.* → motion.speed →
     // arrive → dwell → depart → ornament.count → ornament#i → lens → cam.shot → cam.zoom → cam.curve → cam.follow →
     // filter.count → filter#i. Every slot keeps its own stream, so the camera slots change no part choice. natural =
@@ -911,11 +1008,14 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       decideOrient(st);
       const arrange = decidePart(st, 'arrange', null);
       decideText(st);
+      decideTextWeight(st);
       CAM.decideSpeed(st);
       const own = ctx.registry.get('arrange', arrange.v).motion === 'own';
       for (const kind of MOTION_KINDS) {
         decidePart(st, kind, null, own ? { force: ctx.registry.fallback(kind), rule: 'motion-own' } : null);
+        if (kind === 'arrive' && !own) growWeight(st);
       }
+      weightWarnings(st);
       decideList(st, 'ornament');
       decidePart(st, 'lens', null);
       CAM.decideCamera(st);
@@ -1304,6 +1404,6 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     return {
       SLOT_SPECS, LIST_KINDS, MOTION_KINDS, castCut, createHistory, chooseAuto, poolOf, acceptPart, pinWarnings, serves,
       filterAllows, lookAx, lockFreeCtx, lockFreeIndex, beginCasts, castKeys, intern, deepFreeze, historyRow, lineCond,
-      isChoice, alignments, neighboursOf, alignedSource, REPEAT,
+      isChoice, alignments, neighboursOf, alignedSource, REPEAT, weightOptIn, faceOfCut, WEIGHT_ROOMS,
     };
   });

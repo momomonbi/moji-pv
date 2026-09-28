@@ -1,6 +1,6 @@
 /* 文字PVメーカー v2 — original work. explain(): why a slot has its value, and the alternatives — lazy, never in the Plan (DESIGN §4.16.8; DESIGN_2_1 §2.8, §3.9, §11.2.6). */
 MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media', 'planner/choose', 'planner/look',
-  'planner/plan', 'planner/fields'], (P, PINS, LY, MEDIA, CH, LK, PL, F) => {
+  'planner/plan', 'planner/fields', 'planner/rules'], (P, PINS, LY, MEDIA, CH, LK, PL, F, RU) => {
   'use strict';
 
   const SCOPE_OF = { 'pin:cut': 'cut', 'pin:line': 'line', 'pin:work': 'work' };
@@ -113,7 +113,8 @@ MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media
     const weights = new Map((trace.candidates || []).map((c) => [c.key, c.w]));
     const out = [];
     for (const def of registry.all(kind)) {
-      if (def.pool === false) continue;
+      // an opt-in part (v2.2 weight parts) is an alternative where the traced pool offered it
+      if (def.pool === false && !(def.optIn !== undefined && weights.has(def.key))) continue;
       const masked = maskOf(registry, doc, plan, kind, def.key, mctx);
       out.push({ key: def.key, w: masked ? 0 : weights.has(def.key) ? weights.get(def.key) : 0, masked });
     }
@@ -318,6 +319,16 @@ MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media
     return out;
   }
 
+  // A switch of the new-work table (v2.2): its work pin, else the document's default (new work or older work).
+  function explainRule(doc, parsed) {
+    const path = P.format(parsed);
+    const value = RU.value(doc, null, parsed.slot);
+    const pin = (doc.pins || {})[path];
+    if (pin) return { path, value, from: 'pin:work', by: pin.by, why: pinWhy('pin:work', pin.by), alts: [] };
+    const rule = 'rules.' + (RU.gen(doc) >= 1 ? 'new' : 'old');
+    return { path, value, from: 'auto', by: undefined, why: [{ code: 'rule', params: { rule } }], alts: [] };
+  }
+
   // explain(doc, plan, path, { registry }) → { path, value, from, by, why: [{ code, params }], alts: [{ key, w, masked }] }
   // Chooser slots re-run the planner with tracing on for exactly that slot (the same inputs, so the same value as
   // the Plan); other slots are read from the Plan and the pins. Nothing here touches `plan` or `doc`.
@@ -327,6 +338,7 @@ MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media
     const parsed = P.parse(path);
     const cat = F.categoryOf(parsed);
     if (cat === 'look') return explainLook(doc, plan, parsed, registry);
+    if (cat === 'rule') return explainRule(doc, parsed);
     const cut = cutFor(plan, parsed);
     if (!cut && cat !== 'line') {
       return { path, value: undefined, from: 'auto', by: undefined, why: [], alts: [] };

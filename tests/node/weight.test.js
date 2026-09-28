@@ -396,7 +396,7 @@ test('太る and 細る: late, opt-in weight, pool false; 細る is a real exit;
     assert.ok(!CATALOG.pool(kind, {}).includes(key), key + ' is in no automatic pool');
     assert.ok(CATALOG.pool(kind, { optIn: ['weight'], role: 'lyric' }).includes(key), key + ' joins the opted-in pool');
   }
-  assert.equal(CATALOG.get('arrive', 'weightGrow').weight, 2);
+  assert.equal(CATALOG.get('arrive', 'weightGrow').weight, 2.5, 'calibrated to about 10 % of the eligible lines');
   const { engine } = engineWith(null);
   for (const [kind, key, reach] of [['arrive', 'weightGrow', 400], ['depart', 'weightThin', 400]]) {
     engine.setPlan(sampleOf(kind, key));
@@ -535,4 +535,175 @@ test('facade: export waits for the draw-only faces of the range', async () => {
   await e2.prepare(0, p2.duration, { export: true });
   assert.equal(other.readies.filter((r) => r.drawOnly).length, 0);
   assert.equal(other.calls.filter((c) => c.drawOnly).length, 0);
+});
+
+// --- 5. the planner: opt-in pools, text.weight, the grow rule, warnings, the rate ----------------------------------------
+
+const corpus = require('../helpers/corpus.js');
+const PL = MV.use('planner/plan');
+const CA = MV.use('planner/cast');
+const CMD = MV.use('core/commands');
+const WEIGHT_KEYS = { arrive: 'weightGrow', depart: 'weightThin' };
+
+function basicDoc(patch) {
+  const doc = corpus.project('basic').doc;
+  if (patch && patch.gen !== undefined) doc.look = Object.assign({}, doc.look, { gen: patch.gen });
+  if (patch && patch.pins) doc.pins = Object.assign({}, doc.pins, patch.pins);
+  return doc;
+}
+const pin = (v) => ({ v, by: 'user' });
+const lyricCuts = (plan) => plan.cuts.filter((c) => c.role === 'lyric' || c.role === 'focus');
+const traceKeys = (doc, cutKey, slot) => PL.trace(doc, { registry: CATALOG }, { cutKey, slot }).out.keys || [];
+
+test('planner: an older document never sees a weight part or a text.weight; the switch off in a new work neither', () => {
+  for (const doc of [basicDoc(), basicDoc({ gen: 1, pins: { 'work:weight.auto': pin(false) } })]) {
+    const plan = PL.plan(doc, { registry: CATALOG });
+    for (const c of plan.cuts) {
+      assert.equal(c.slots['text.weight'], undefined, c.key);
+      for (const kind of ['arrive', 'dwell', 'depart']) assert.ok(!CATALOG.get(kind, c.slots[kind].v).optIn, c.key + ' ' + kind);
+    }
+    const c = lyricCuts(plan)[0];
+    for (const kind of ['arrive', 'depart']) assert.ok(!traceKeys(doc, c.key, kind).includes(WEIGHT_KEYS[kind]), kind);
+  }
+});
+
+test('planner: in a new work the weight parts join the pools of cuts whose face has room and whose lettering crossfades', () => {
+  // nightTram: display Dela Gothic One (one weight), serif Zen Old Mincho 700 (400–900), lettering glow
+  const withFace = (theme, face, gen) => {
+    const doc = basicDoc({ gen, pins: { 'work:theme': pin(theme) } });
+    const plan = PL.plan(doc, { registry: CATALOG });
+    const c = lyricCuts(plan)[1];
+    const d = basicDoc({ gen, pins: { 'work:theme': pin(theme), ['line/' + c.line + ':text.face']: pin(face) } });
+    return { doc: d, key: c.key };
+  };
+  let x = withFace('nightTram', 'serif', 1);
+  assert.ok(traceKeys(x.doc, x.key, 'arrive').includes('weightGrow'), 'serif 700 Zen Old Mincho: 太る offered');
+  assert.ok(traceKeys(x.doc, x.key, 'depart').includes('weightThin'), 'serif 700: 細る offered (300 below)');
+  x = withFace('nightTram', 'display', 1);
+  assert.ok(!traceKeys(x.doc, x.key, 'arrive').includes('weightGrow'), 'Dela Gothic One: no room');
+  x = withFace('risoPink', 'body', 1);
+  assert.ok(!traceKeys(x.doc, x.key, 'arrive').includes('weightGrow'), 'duo lettering: never automatic');
+  x = withFace('nightTram', 'serif', 0);
+  assert.ok(!traceKeys(x.doc, x.key, 'arrive').includes('weightGrow'), 'an older document: never');
+  // weightOptIn itself: the style and the room
+  const plan = PL.plan(basicDoc({ gen: 1, pins: { 'work:theme': pin('monoPress') } }), { registry: CATALOG });
+  const cut = lyricCuts(plan)[0];
+  const st = (slots, weight) => ({ ctx: { glyph: { weight }, look: { plan: plan.look } }, cut, slots });
+  const face = (v, style) => ({ 'text.face': { v, from: 'auto' }, 'text.style': { v: style || 'plain', from: 'auto' } });
+  assert.deepEqual(CA.weightOptIn(st(face('body'), true), 'arrive'), ['weight'], 'Noto Sans JP 500: 100 → 800');
+  assert.equal(CA.weightOptIn(st(face('body'), false), 'arrive'), null, 'switch off');
+  assert.equal(CA.weightOptIn(st(face('body', 'outline'), true), 'arrive'), null, 'outline');
+  assert.deepEqual(CA.weightOptIn(st(face('body', 'glow'), true), 'dwell'), ['weight']);
+  assert.equal(CA.weightOptIn(st(face('display'), true), 'depart'), ['weight'].length ? CA.weightOptIn(st(face('display'), true), 'depart') : null);
+  assert.equal(CA.weightOptIn(Object.assign(st(face('body'), true), { cut: Object.assign({}, cut, { role: 'title' }) }), 'arrive'), null,
+    'lyric and focus cuts only');
+});
+
+test('planner: the grow rule gives 太る the bold end of the face; a 太さ pin wins; motion-own has none', () => {
+  const base = PL.plan(basicDoc({ gen: 1, pins: { 'work:theme': pin('monoPress') } }), { registry: CATALOG });
+  const c = lyricCuts(base)[2];
+  const pins = { 'work:theme': pin('monoPress'), ['line/' + c.line + ':text.face']: pin('body'), ['line/' + c.line + ':arrive']: pin('weightGrow') };
+  let plan = PL.plan(basicDoc({ gen: 1, pins }), { registry: CATALOG });
+  let cut = plan.cuts.find((x) => x.key === c.key);
+  assert.equal(cut.slots.arrive.v, 'weightGrow');
+  assert.deepEqual(cut.slots['text.weight'], { v: 800, from: 'rule' }, 'Noto Sans JP 500 grows to 800');
+  const traced = PL.trace(basicDoc({ gen: 1, pins }), { registry: CATALOG }, { cutKey: c.key, slot: 'text.weight' });
+  assert.equal(traced.out.rule, 'weight.grow');
+  // a 太さ pin wins
+  plan = PL.plan(basicDoc({ gen: 1, pins: Object.assign({}, pins, { ['line/' + c.line + ':text.weight']: pin(600) }) }), { registry: CATALOG });
+  cut = plan.cuts.find((x) => x.key === c.key);
+  assert.deepEqual([cut.slots['text.weight'].v, cut.slots['text.weight'].from], [600, 'pin:line']);
+  // the switch off (an older document): the pinned 太る grows to the face's own weight
+  plan = PL.plan(basicDoc({ pins }), { registry: CATALOG });
+  assert.equal(plan.cuts.find((x) => x.key === c.key).slots['text.weight'], undefined);
+  // a layout that moves the text itself forces the motions: no rule
+  const own = CATALOG.all('arrange').find((d) => d.motion === 'own' && CATALOG.traits('arrange', d.key).roles.includes('lyric'));
+  plan = PL.plan(basicDoc({ gen: 1, pins: Object.assign({}, pins, { ['line/' + c.line + ':arrange']: pin(own.key) }) }), { registry: CATALOG });
+  cut = plan.cuts.find((x) => x.key === c.key);
+  assert.notEqual(cut.slots.arrive.v, 'weightGrow');
+  assert.equal(cut.slots['text.weight'], undefined);
+});
+
+test('planner: a pinned weight part where it cannot show warns weight-flat / weight-style, also from the cast cache', () => {
+  const base = PL.plan(basicDoc({ gen: 1, pins: { 'work:theme': pin('nightTram') } }), { registry: CATALOG });
+  const c = lyricCuts(base)[1];
+  const flat = { 'work:theme': pin('nightTram'), ['line/' + c.line + ':text.face']: pin('display'), ['line/' + c.line + ':arrive']: pin('weightGrow') };
+  const styled = { 'work:theme': pin('monoPress'), ['line/' + c.line + ':text.face']: pin('body'), ['line/' + c.line + ':text.style']: pin('outline'),
+    ['line/' + c.line + ':depart']: pin('weightThin') };
+  for (const [pins, code, family] of [[flat, 'weight-flat', 'Dela Gothic One'], [styled, 'weight-style', 'Noto Sans JP']]) {
+    for (let k = 0; k < 2; k++) {                                  // the second plan takes the casts from the cache
+      const plan = PL.plan(basicDoc({ gen: 1, pins }), { registry: CATALOG });
+      const w = plan.warnings.filter((x) => x.code === code);
+      const own = plan.cuts.filter((x) => x.line === c.line).map((x) => x.key);
+      assert.equal(w.length, own.length, code + ' plan ' + k + ': once per cut of the line');
+      assert.ok(w.every((x) => own.includes(x.cut) && x.line === c.line && x.detail === family), JSON.stringify(w));
+      if (k === 1) assert.ok(plan.reuse.casts > 0, 'the cast cache was used');
+    }
+  }
+  // the automatic path never warns
+  const auto = PL.plan(basicDoc({ gen: 1 }), { registry: CATALOG });
+  assert.ok(!auto.warnings.some((x) => x.code === 'weight-flat' || x.code === 'weight-style'));
+});
+
+test('planner: a text.weight pin decides its cuts alone and changes their fingerprints; commands scope the switches', () => {
+  const doc = basicDoc();
+  const plan = PL.plan(doc, { registry: CATALOG });
+  const c = lyricCuts(plan)[1];
+  const pinned = PL.plan(basicDoc({ pins: { ['line/' + c.line + ':text.weight']: pin(700) } }), { registry: CATALOG });
+  for (const cut of pinned.cuts) {
+    const before = plan.cuts.find((x) => x.key === cut.key);
+    if (cut.line === c.line) {
+      assert.deepEqual([cut.slots['text.weight'].v, cut.slots['text.weight'].from], [700, 'pin:line']);
+      assert.notEqual(cut.fp, before.fp, 'the scene changes');
+    } else assert.equal(cut.fp, before.fp, cut.key + ' unchanged');
+  }
+  // commands: 太さ is copied by paste-look; the switches are refused where they do not belong
+  const lines = plan.lines.map((l) => l.id);
+  let d = CMD.reduce(doc, { t: 'pin.set', path: 'line/' + lines[1] + ':text.weight', v: 700, by: 'user' });
+  d = CMD.reduce(d, { t: 'pin.copy', from: 'line/' + lines[1], to: ['line/' + lines[2]] });
+  assert.equal(d.pins['line/' + lines[2] + ':text.weight'].v, 700);
+  assert.throws(() => CMD.reduce(doc, { t: 'pin.set', path: 'cut/' + c.key + ':weight.auto', v: true, by: 'user', sig: c.text }));
+  assert.throws(() => CMD.reduce(doc, { t: 'pin.set', path: 'line/' + c.line + ':weight.auto', v: true, by: 'user' }));
+  assert.throws(() => CMD.reduce(doc, { t: 'pin.set', path: 'cut/' + c.key + ':morph.auto', v: true, by: 'user', sig: c.text }));
+  assert.ok(CMD.reduce(doc, { t: 'pin.set', path: 'line/' + c.line + ':morph.auto', v: true, by: 'user' }).pins['line/' + c.line + ':morph.auto']);
+  assert.ok(CMD.reduce(doc, { t: 'pin.set', path: 'work:weight.auto', v: false, by: 'user' }).pins['work:weight.auto']);
+});
+
+test('planner: 太る is chosen on about 10 % of the eligible lyric lines of new works (rate)', () => {
+  let eligible = 0, grow = 0;
+  for (const { doc } of corpus.corpus(2, ['16:9'])) {
+    doc.look.gen = 1;
+    const plan = PL.plan(doc, { registry: CATALOG });
+    for (const c of lyricCuts(plan)) {
+      const st = { ctx: { glyph: { weight: true }, look: { plan: plan.look } }, cut: c, slots: c.slots };
+      if (!CA.weightOptIn(st, 'arrive')) continue;
+      eligible++;
+      if (c.slots.arrive.v === 'weightGrow') grow++;
+    }
+  }
+  const share = grow / eligible;
+  assert.ok(eligible > 300, 'eligible cuts: ' + eligible);
+  assert.ok(share >= 0.06 && share <= 0.14, '太る on ' + (100 * share).toFixed(1) + ' % of the eligible lines');
+});
+
+// --- 6. the build: text.weight faces -----------------------------------------------------------------------------------
+
+test('build: text.weight lays out the lyrics of the cut in that weight; notes keep theirs', () => {
+  const { engine } = engineWith(null);
+  const plan = sampleOf('arrive', 'fogIn');
+  const cut = Object.assign({}, plan.cuts[0], { fp: plan.cuts[0].fp + 'w', note: 'ノート', slots: Object.assign({}, plan.cuts[0].slots,
+    { 'text.face': { v: 'display', from: 'pin:cut' }, 'text.weight': { v: 800, from: 'pin:cut' } }) });
+  const heavy = Object.assign({}, plan, { cuts: [cut].concat(plan.cuts.slice(1)) });
+  // the notes are laid out in the body role: give it another family to tell them apart
+  heavy.look = Object.assign({}, plan.look, { faces: Object.assign({}, plan.look.faces, { body: { ja: { family: 'Zen Kaku Gothic New', weight: 500 },
+    latin: { family: 'Inter', weight: 500 } } }) });
+  engine.setPlan(heavy);
+  const scene = engine.scene('cut', 0);
+  const lyric = scene.stores.glyph.filter((g) => g.cls !== 'space' && g.font.family === 'Noto Sans JP');
+  assert.ok(lyric.length > 0);
+  assert.ok(lyric.every((g) => g.font.weight === 800), 'the lyrics at 800');
+  const notes = scene.stores.glyph.filter((g) => g.font.family === 'Zen Kaku Gothic New');
+  assert.ok(notes.length > 0 && notes.every((g) => g.font.weight === 500), 'a note keeps its weight');
+  engine.setPlan(plan);
+  assert.ok(engine.scene('cut', 0).stores.glyph.filter((g) => g.cls !== 'space').every((g) => g.font.weight === 500));
 });

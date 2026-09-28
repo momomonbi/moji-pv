@@ -1,8 +1,8 @@
 /* 文字PVメーカー v2 — original work. The inspector (詳細): crumbs, level header, sections from FIELDS, field rows, sub-pages (DESIGN §6.4.4–§6.4.9, §6.6; DESIGN_2_1 §6.5–§6.9). */
 MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/part_browser', 'ui/selection', 'ui/looks',
   'ui/output', 'i18n/t', 'core/paths', 'core/pins', 'core/shot', 'planner/areas', 'ui/shot_editor', 'ui/material_page',
-  'ui/media_page', 'ui/media_widgets', 'ui/media_io', 'ui/extreme'],
-(dom, I, F, W, PB, S, LK, OUT, T, P, PINS, SHOT, AREAS, KE, MP, MPG, MW, MI, XU) => {
+  'ui/media_page', 'ui/media_widgets', 'ui/media_io', 'ui/extreme', 'planner/rules'],
+(dom, I, F, W, PB, S, LK, OUT, T, P, PINS, SHOT, AREAS, KE, MP, MPG, MW, MI, XU, RU) => {
   'use strict';
 
   const { h } = dom;
@@ -497,6 +497,8 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
 
     function valueFor(field, v, fs) {
       if (field.offClears && !v) return W.AUTO;
+      // a switch of the new-work table (v2.2): its document default is 自動 (unpinned), anything else a pin
+      if (field.autoDefault && RU.sameValue(v, RU.defaultValue(doc(), null, field.path))) return W.AUTO;
       if (field.flashToggle) {
         const p = plan();
         const mood = p ? app.reg.get('mood', p.look.mood.v) : null;

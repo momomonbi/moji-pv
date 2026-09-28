@@ -605,6 +605,7 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core
       }
     };
     fonts.on('epoch', paint);
+    fonts.on('draw', paint);            // v2.2: a draw-only weight arrived
     for (const card of cards) {
       const usage = FACES.fontUsage(card.faces, [{ role: card.role, lang, text: sample }]);
       fonts.request(usage.refs, usage.textByFamily);

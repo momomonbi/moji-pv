@@ -1344,3 +1344,22 @@ test('an enum with optKey labels its options from its own key group (depth: back
   const W = MV.use('ui/widgets');
   assert.equal(W.optionText(t, field.options.find((o) => o.v === 'back')), '後ろに下げる');
 });
+
+// --- v2.2 (DESIGN_2_2 §4): 太さを動かす, 太さ, 同じ字をつなぐ -------------------------------------------------------------
+
+test('v2.2: the weight switch and 太さ rows — scopes, pages, autoDefault', () => {
+  assert.deepEqual(F.slotScopes('weight.auto'), ['work']);
+  assert.deepEqual(F.slotScopes('morph.auto'), ['work', 'line']);
+  assert.deepEqual(F.slotScopes('text.weight'), ['work', 'line', 'cut']);
+  const sw = F.FIELDS.find((f) => f.page === 'work' && f.path === 'weight.auto');
+  assert.ok(sw, 'the work page has 太さを動かす');
+  assert.deepEqual([sw.section, sw.widget, sw.autoDefault, sw.noDice, sw.basic, !!sw.offClears], ['look', 'toggle', true, true, false, false]);
+  assert.equal(sw.label, 'fld.weightAuto');
+  assert.equal(sw.note, 'fld.weightAuto.note');
+  const rows = F.FIELDS.filter((f) => f.path === 'text.weight');
+  assert.deepEqual(rows.map((f) => f.page + '/' + f.section).sort(), ['el.text/text', 'line/colortype', 'lines/colortype']);
+  for (const f of rows) {
+    assert.deepEqual([f.widget, f.auto, f.basic, f.label, f.note], ['number', true, false, 'fld.textWeight', 'fld.textWeight.note']);
+    assert.deepEqual([f.spec.min, f.spec.max, f.spec.step], [100, 900, 100]);
+  }
+});
