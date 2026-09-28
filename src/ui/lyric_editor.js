@@ -7,6 +7,8 @@ MV.def('ui/lyric_editor', ['ui/dom', 'ui/selection', 'i18n/t', 'core/lyrics', 'p
   const FOLLOW_PAUSE_MS = 3000;
   const GUTTER_MARGIN_PX = 240;           // gutter entries are built for the visible rows plus this much above and below
   const STAMP = /^\[\d{1,3}:\d{1,2}(?:[.:]\d{1,3})?\]/;
+  // An enhanced-LRC word tag inside a line (歌ハメ, DESIGN_2_2 §6): kept in the row, muted like a stamp.
+  const WORD_TAG = /^<\d{1,3}:\d{1,2}(?:[.:]\d{1,3})?>/;
   const WARN_CODES = new Set(['overfull', 'orphan-pin', 'shadowed-pin', 'lock-partial', 'pin-not-applicable', 'time-order',
     'sung-words', 'hame-empty']);
   const TOKENS = ['tok-comment', 'tok-meta', 'tok-stamp', 'tok-cut', 'tok-emph', 'tok-emphText', 'tok-impact', 'tok-note'];
@@ -32,6 +34,8 @@ MV.def('ui/lyric_editor', ['ui/dom', 'ui/selection', 'i18n/t', 'core/lyrics', 'p
     for (; i < src.length; i++) {
       const ch = src[i];
       if (ch === '\\' && i + 1 < src.length) { buf += ch + src[i + 1]; i++; continue; }
+      const tag = ch === '<' ? WORD_TAG.exec(src.slice(i)) : null;
+      if (tag) { flush(emph ? 'tok-emphText' : ''); out.push([tag[0], 'tok-stamp']); i += tag[0].length - 1; continue; }
       if (ch === '|') { flush(emph ? 'tok-emphText' : ''); out.push([src.slice(i), 'tok-note']); return out; }
       if (i === bang) { flush(emph ? 'tok-emphText' : ''); out.push([ch, 'tok-impact']); continue; }
       if (ch === '/' || ch === '*') {

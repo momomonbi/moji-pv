@@ -666,6 +666,16 @@ test('encoding: cut.sung is printed between slots and t0 and fingerprinted; the 
   assert.equal(a.cuts.find((c) => c.key === 'r5~0').fp, b.cuts.find((c) => c.key === 'r5~0').fp);
 });
 
+test('the lyric editor mutes word tags like stamps; the marks around them keep their tints', () => {
+  const LE = MV.use('ui/lyric_editor');
+  const src = '[00:08.50]Good <00:09.10>morning, *lit<00:10.00>tle* swallow';
+  const segs = LE.segments(src);
+  assert.equal(segs.map((x) => x[0]).join(''), src, 'the mirror keeps the row exactly');
+  assert.deepEqual(segs.filter((x) => x[1] === 'tok-stamp').map((x) => x[0]), ['[00:08.50]', '<00:09.10>', '<00:10.00>']);
+  assert.deepEqual(segs.filter((x) => x[1] === 'tok-emphText').map((x) => x[0]), ['lit', 'tle']);
+  assert.deepEqual(LE.segments('a<b <1:2> c'), [['a<b ', ''], ['<1:2>', 'tok-stamp'], [' c', '']], 'a plain < stays text');
+});
+
 test('≡ › 時刻を歌詞に書き込む keeps a row\'s word tags, moved with its new first stamp', () => {
   const MENUS = MV.use('ui/menus');
   const doc = docOf(['Good <00:09.10>morning, *little* bird', '[00:20.00]つぎ']);

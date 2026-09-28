@@ -150,6 +150,7 @@ time left after it (at least `MIN_DUR`).
 | 作品全体 › 見た目 (after くり返しの行をそろえる) | 「歌ハメ」 [自動 \| すべての行 \| 使わない]; 自動's note: new works `fld.hame.autoNote`, older works 自動（オフ）. |
 | 作品全体 › タイミング (詳しい設定) | 「字の時間を歌に合わせる」: shows the document's default while unpinned (`autoDefault`: choosing the default clears the pin, the other value pins it). |
 | 行 › 時間 (under 長さ) | 「字の時間」 = 「11か所 · タップ・手で合わせた時間」 (units and the best source; なし without sung timing); [1字ずつタップ] (disabled without the loaded song: 曲を読み込むと使えます); [字の時間を消す] for a pinned line (one undo step). |
+| ① 歌詞 | Word tags stay in the row as typed or imported and are drawn muted like stamps; the gutter's warnings include `sung-words` and `hame-empty`. |
 | なぜ | 入り `whyRule.sung.hame`, 文字の出方 / 長さ `whyRule.sung` (rule tags explain before motion speed's plain `rule`), 構図 `whyRule.sung.arrange`, a pinned own-motion layout `whyRule.sung.own`. 文字の出方 and 長さ of a 歌ハメ cut are 導出 (read-only). |
 
 ### 6.5 1字ずつタップ
@@ -177,8 +178,10 @@ it).
 `tests/node/sung.test.js` (units, pins, fill, word tags, copies, pieces, gates, 自動 and キメ, cast, aligned repeats,
 explain and fields, engine, shot and underSweep, exits, repT, determinism, encoding, speed, the golden),
 `tests/node/tap.test.js` (the unit reducer), `tests/node/ui_tap_units.test.js` (steps, loop, the pin a take writes and
-the planner accepts, the two-mode panel), additions to lyrics, commands, reconcile, i18n and planner_stability (the shared
-locality predicate `tests/helpers/locality.js`); `tests/browser/ui_flows.py` flow `hame`. **Golden
+the planner accepts, the two-mode panel), additions to lyrics, commands, reconcile, i18n, ui_fields (the rows, their
+places and flags) and planner_stability (the shared locality predicate `tests/helpers/locality.js`);
+`tests/browser/ui_flows.py` flow `hame`, and `i18n_pages.py`'s 歌ハメ screens (the rows, 字の時間, the unit panel and its
+loop end, in ja and en). **Golden
 `tests/golden/project_sung.json`** (`tests/helpers/sung_docs.js`, `node tests/update_golden.js --only=project_sung.json`):
 plan and 40 frame hashes per document, 16:9 and 9:16, two seeds each, keyed entries — A1 the lrc fixture with
 「字の時間を歌に合わせる」; A2 that plus 歌ハメ for the whole video and one tapped line; A3 the basic fixture as a new work

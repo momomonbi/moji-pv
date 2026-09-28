@@ -9270,14 +9270,18 @@ Readings and deviations (with the reason):
 - **The golden** stores 16 documents (A1–A4 × 16:9 / 9:16 × two corpus seeds) as keyed entries with a plan hash and 40
   frame hashes each; `tests/update_golden.js` gains `--only=<file>` (as P4 added it) so it was written alone after
   `--check` matched the six. `sung.test.js` re-renders all 16 (about 10 s).
+- **① 歌詞** draws a word tag `<mm:ss.xx>` muted like a stamp (`tok-stamp`); a `<` that does not start a tag stays text.
 - **Timeline context menu.** P5 adds the menu; its 「1字ずつタップ」 item is left to the integration (`tap.units` with
   `{ lineId }`).
 
 Mutation checks (each broke a test, then restored): marks without the unit gap, a mark keeping a stale end, the loop
 end dropping the take, back skipping the end, 導出 only for plain `rule`, explain without rule tags, explain without the
 restriction's rule, no `sung.own`, no inherited 歌ハメ state, a unit session starting during line tapping, no end pair,
-a first word not at 0 (this one found a bug: the first word start was kept after the inserted 0).
+a first word not at 0 (this one found a bug: the first word start was kept after the inserted 0), word tags not
+muted in the lyric editor.
 
 Checks: the timing tests `catalog arrange/sidebarIndex` (slowest build) and both planning-speed tests of
-`planner_determinism` fail under this machine's load in the base worktree too (same runs side by side); everything else
-passes.
+`planner_determinism` fail under this machine's load in the base worktree too (same runs side by side); `sung.test.js`'s
+relative speed test failed once while the browser flows ran beside it and passed twice alone (19.9 / 15.6 ms and
+15.5 / 15.9 ms with and without sung timing); everything else passes. The absolute bound of the design's speed test
+(≤ 10 ms per re-plan) is still not asserted: on this machine a plain re-plan of project_long takes 15 ms.

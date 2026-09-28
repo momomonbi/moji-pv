@@ -1344,3 +1344,29 @@ test('an enum with optKey labels its options from its own key group (depth: back
   const W = MV.use('ui/widgets');
   assert.equal(W.optionText(t, field.options.find((o) => o.v === 'back')), '後ろに下げる');
 });
+
+// 歌ハメ (PV22 P6, DESIGN_2_2 §6.4)
+test('歌ハメ rows: where they sit, their scopes and what writing them means', () => {
+  assert.deepEqual(F.slotScopes('sung.hame'), ['work', 'line']);
+  assert.deepEqual(F.slotScopes('sung.real'), ['work']);
+  assert.deepEqual(F.slotScopes('sung.times'), ['line']);
+  const line = { level: 'line', ids: ['r4'] };
+  const dir = fieldPaths(line, 'direction');
+  assert.equal(dir.indexOf('sung.hame'), dir.indexOf('arrive.order') + 1, '行 › 演出: right after 文字の出方');
+  assert.deepEqual(fieldPaths(line, 'time'), ['start', 'end', 'lineLength', 'sungTimes'], '行 › 時間: 字の時間 under 長さ');
+  assert.ok(fieldPaths({ level: 'line', ids: ['r4', 'r5'] }, 'direction').includes('sung.hame'), 'the several-lines page too');
+  const look = fieldPaths({ level: 'work' }, 'look');
+  assert.equal(look.indexOf('sung.hame'), look.indexOf('repeat.same') + 1, '作品全体 › 見た目: after くり返しの行をそろえる');
+  assert.ok(fieldPaths({ level: 'work' }, 'timing').includes('sung.real'));
+  const byId = (id) => F.FIELDS.find((f) => f.id === id);
+  const lineRow = byId('line/direction/sung.hame'), workRow = byId('work/look/sung.hame'), real = byId('work/timing/sung.real');
+  const times = byId('line/time/sungTimes');
+  assert.deepEqual(lineRow.options.map((o) => [o.v, o.label]), [[true, 'fld.hame.on'], [false, 'fld.hame.off']]);
+  assert.ok(lineRow.auto && lineRow.readEach && lineRow.noDice && lineRow.basic && lineRow.note === 'fld.hame.note');
+  assert.deepEqual(workRow.options.map((o) => [o.v, o.label]), [[true, 'fld.hame.all'], [false, 'fld.hame.none']]);
+  assert.ok(workRow.auto && workRow.noDice);
+  assert.ok(real.autoDefault && real.noDice && real.basic === false && real.widget === 'toggle' && real.note === 'fld.sungReal.note');
+  assert.ok(times.readOnly && times.derived === 'sungTimes' && times.after === 'sungTimes' && times.path === null);
+  for (const k of ['fld.hame', 'fld.hame.note', 'fld.hame.autoNote', 'fld.sungReal', 'fld.sungTimes', 'sung.tapUnits', 'sung.clear',
+    'sung.needSong', 'sung.summary']) assert.ok(STRINGS[k] && STRINGS[k][0] && STRINGS[k][1], k);
+});
