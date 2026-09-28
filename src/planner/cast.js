@@ -28,6 +28,8 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       'el.hide': { type: 'bool' },
       // 「くり返しの行をそろえる」 (DESIGN_2_1 §4.10): pinned at work or line scope, never at a cut (core/commands).
       'repeat.same': { type: 'bool' },
+      // 歌った字に色をのせる (歌ハメ, DESIGN_2_2 §6): pinned at work or line scope, never at a cut (core/commands).
+      'sung.fill': { type: 'bool' },
     }, CAM.SLOT_SPECS));
     const SEASON_SPEC = LK.LOOK_SPECS.season;
     const AVOID_SPEC = Object.freeze({ type: 'partRefs' });
@@ -606,6 +608,14 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       }
     }
 
+    // 歌った字に色をのせる (DESIGN_2_2 §6): the pin that turns it on for the cut's line, kept among its decisions (no
+    // chooser stream); nothing when no pin turns it on.
+    const FILL = 'sung.fill';
+    function decideFill(st) {
+      const f = st.ctx.sung ? st.ctx.sung.fillAt(st.cut) : null;
+      if (f) setDecision(st, FILL, pinDecision(f));
+    }
+
     // The source's decision of one slot, or null: no source, the cut or its line rerolled (st.rerolled), or a die on
     // the slot. st.aligned = this, for planner/camera.
     function alignedDecision(st, slot) {
@@ -1014,6 +1024,7 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     function castSlots(ctx, cut, hist, natural, camOnly) {
       const st = stateOf(ctx, cut, hist, natural);
       decideRepeat(st);
+      decideFill(st);
       decideOrient(st);
       // 歌ハメ (DESIGN_2_2 §6): no layout that moves the text itself, and an entrance that shows one character at a time
       const arrange = decidePart(st, 'arrange', null, st.hame ? { restrict: ownMotionOf(ctx.registry), rule: 'sung.arrange' } : null);

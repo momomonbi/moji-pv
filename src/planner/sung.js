@@ -289,13 +289,16 @@ MV.def('planner/sung', ['core/script', 'core/num', 'core/motion', 'engine/text/v
   function acceptBool(v) { return typeof v === 'boolean' ? { v } : { bad: true }; }
 
   // prepare(ctx, timed) → SungContext | null. null (the v2 plan, exactly) unless 「字の時間を歌に合わせる」 resolves on
-  // or a sung.times / sung.hame pin exists. ctx = { doc, ix, warn, timing, readRate }. Every timed line gets a timing
-  // when it has a sung.times pin, or 「字の時間を歌に合わせる」 is on, or its 歌ハメ pin resolves on; the others get null.
+  // or a sung.times / sung.hame / sung.fill pin exists. ctx = { doc, ix, warn, timing, readRate }. Every timed line gets
+  // a timing when it has a sung.times pin, or 「字の時間を歌に合わせる」 is on, or its 歌ハメ or 歌った字に色をのせる pin
+  // resolves on; the others get null. A line timed only for the colour (no sources, fewer than two anchors) keeps the
+  // v2 window over its span and the v2 piece boundaries, so the colour alone changes only colour.
   function prepare(ctx, timed) {
     const { doc, ix } = ctx;
     const real = RU.value(doc, ix, 'sung.real') === true;
     const pinnedTimes = PA.pinned(ix, 'sung.times'), pinnedHame = PA.pinned(ix, 'sung.hame');
-    if (!real && !pinnedTimes && !pinnedHame) return null;
+    const pinnedFill = PA.pinned(ix, 'sung.fill');
+    if (!real && !pinnedTimes && !pinnedHame && !pinnedFill) return null;
     const g = gen(doc);
     const rate = typeof ctx.readRate === 'number' && ctx.readRate > 0 ? ctx.readRate : 7;
     const n = timed.length;
@@ -309,14 +312,17 @@ MV.def('planner/sung', ['core/script', 'core/num', 'core/motion', 'engine/text/v
       const kime = !!line.kime;
       const hamePinOn = linePin ? linePin.v : kime ? false : workPin ? workPin.v : null;
       const pin = pinnedTimes ? PA.resolvePin(ix, at, 'sung.times', acceptSungTimes(line.text), ctx.warn) : null;
+      // 歌った字に色をのせる: pin only (the line's, else the whole work's), off without one
+      const fp = pinnedFill ? PA.resolvePin(ix, at, 'sung.fill', acceptBool, ctx.warn) : null;
+      const fill = fp !== null && fp.v === true;
       const sourcesOK = real || hamePinOn === true;
-      const need = !!pin || real || hamePinOn === true;
+      const need = !!pin || real || hamePinOn === true || fill;
       const units = unitsOf(line.text, line.lang);
       const span = Math.max(0, spanEnd - line.t0);
       const anchors = need ? ownAnchors(units, pin ? pin.v : null, line, span, sourcesOK) : null;
       if (anchors && anchors.dropped > 0) ctx.warn({ code: 'sung-words', line: line.id, detail: { n: anchors.dropped } });
       own[i] = {
-        line, need, units, span, sourcesOK, pin, anchors, kime, hamePinOn,
+        line, need, units, span, sourcesOK, pin, anchors, kime, hamePinOn, fill, fillPin: fill ? fp : null,
         hameFrom: linePin ? 'pin:line' : kime ? 'kime' : workPin ? 'pin:work' : 'auto',
         best: bestSource(anchors),
       };
@@ -358,7 +364,8 @@ MV.def('planner/sung', ['core/script', 'core/num', 'core/motion', 'engine/text/v
       }
       lines.set(line.id, ls);
       meta.set(line.id, { hamePinOn: o.hamePinOn, kime: o.kime, hameFrom: o.hameFrom,
-        pinBy: o.pin && ls.by === 'pin' ? o.pin.by || null : null, dropped: o.anchors.dropped });
+        pinBy: o.pin && ls.by === 'pin' ? o.pin.by || null : null, dropped: o.anchors.dropped,
+        fill: o.fill, fillPin: o.fillPin });
     }
     const hame = new Map();
     const lead = ctx.timing ? ctx.timing.lead : 0.12;
@@ -374,6 +381,13 @@ MV.def('planner/sung', ['core/script', 'core/num', 'core/motion', 'engine/text/v
       idOf(cut) {
         const h = this.hameAt(cut);
         return h ? 'h' + (h.latin ? 'l' : '') + ':' + lead : '';
+      },
+      // 歌った字に色をのせる on a lyric or focus cut of a line with sung timing: the pin that turns it on ({ v, from, by }),
+      // or null (planner/cast keeps it among the cut's decisions, slot sung.fill)
+      fillAt(cut) {
+        if (!cut || !cut.line || (cut.role !== 'lyric' && cut.role !== 'focus')) return null;
+        const m = meta.get(cut.line);
+        return m && m.fill && lines.get(cut.line) ? m.fillPin : null;
       },
     };
   }
@@ -524,7 +538,7 @@ MV.def('planner/sung', ['core/script', 'core/num', 'core/motion', 'engine/text/v
       for (let u = 0; u < ls.n; u++) t[u] = N.q6(line.t0 + ls.t[u]);
       out.set(line.id, Object.freeze({
         at: ls.at, t, end: N.q6(line.t0 + ls.end), endSrc: ls.endSrc, src: ls.src, by: ls.by, pinBy: m.pinBy, explicit: ls.explicit,
-        hame: h.hame, hameWhy: h.why, fill: false, dropped: m.dropped,
+        hame: h.hame, hameWhy: h.why, fill: !!m.fill, dropped: m.dropped,
       }));
     }
     return out;

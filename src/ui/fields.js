@@ -53,7 +53,9 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
 
     // 歌ハメ (PV22 P6, DESIGN_2_2 §6): the switch (the whole video or a line), 「字の時間を歌に合わせる」 (the whole video) and a
     // line's character times (a line pin, written by 1字ずつタップ).
-    const SUNG_SCOPES = Object.freeze({ 'sung.hame': Object.freeze(['work', 'line']), 'sung.real': WORK, 'sung.times': LINE });
+    // 歌った字に色をのせる (the whole video or a line; a pin only).
+    const SUNG_SCOPES = Object.freeze({ 'sung.hame': Object.freeze(['work', 'line']), 'sung.real': WORK, 'sung.times': LINE,
+      'sung.fill': Object.freeze(['work', 'line']) });
 
     function sharedNames(kind) {
       if (kind === 'atmos') return ['amount'];
@@ -267,6 +269,9 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
     const hameLineField = () => F({ path: 'sung.hame', scopes: LINE, widget: 'choice', label: 'fld.hame', spec: { type: 'bool' },
       options: [{ v: true, label: 'fld.hame.on' }, { v: false, label: 'fld.hame.off' }], auto: true, note: 'fld.hame.note',
       noDice: true, readEach: true });
+    // 歌った字に色をのせる of a line (or of each selected line): on pins it, off clears the line's pin (off is the default)
+    const fillLineField = () => F({ path: 'sung.fill', scopes: LINE, widget: 'toggle', label: 'fld.hameFill', spec: { type: 'bool' },
+      note: 'fld.hameFill.note', offClears: true, noDice: true, basic: false, readEach: true });
 
     // カメラ EXTREME (DESIGN_EXTREME §2.6): the switch, and under 詳しい設定 its 激しさ [強め | かなり | 最大]; both write
     // through ui/extreme (the notice when it turns on, the question when it turns off with moves picked by hand). The
@@ -307,6 +312,9 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
           F({ path: 'sung.hame', scopes: WORK, widget: 'choice', label: 'fld.hame', spec: { type: 'bool' },
             options: [{ v: true, label: 'fld.hame.all' }, { v: false, label: 'fld.hame.none' }], auto: true, note: 'fld.hame.note',
             noDice: true }),
+          // 歌った字に色をのせる for the whole video: on pins it, off clears the pin (off is the default)
+          F({ path: 'sung.fill', scopes: WORK, widget: 'toggle', label: 'fld.hameFill', spec: { type: 'bool' }, note: 'fld.hameFill.note',
+            offClears: true, noDice: true, basic: false }),
         ]),
         // 写真・動画 (DESIGN_2_1 §11.7.3): the library, open when it holds something.
         sec('media', (ctx) => ctx.mediaCount > 0, [], { custom: 'media' }),
@@ -453,7 +461,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
         partField('arrange', 'kind.arrange'),
         partField('arrive', 'kind.arrive'),
         sharedField('arrive', 'dur', 'fld.dur'), sharedField('arrive', 'ease', 'fld.speedCurve'),
-        sharedField('arrive', 'order', 'fld.order'), hameLineField(), sharedField('arrive', 'each', 'fld.each'),
+        sharedField('arrive', 'order', 'fld.order'), hameLineField(), fillLineField(), sharedField('arrive', 'each', 'fld.each'),
         sharedField('arrive', 'flow', 'fld.flow', { basic: false }),
         partField('dwell', 'kind.dwell'), sharedField('dwell', 'amount', 'fld.amount'),
         partField('depart', 'kind.depart'), sharedField('depart', 'dur', 'fld.dur'), sharedField('depart', 'ease', 'fld.speedCurve'),

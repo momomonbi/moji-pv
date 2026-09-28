@@ -12,8 +12,9 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
   const TRACK_KINDS = new Set(['ground', 'atmos', 'seam']);
   const EL_DEFAULT = Object.freeze({ nudge: Object.freeze({ dx: 0, dy: 0, rot: 0, s: 1 }), fill: null, hide: false });
   // 歌ハメ (PV22 P6, DESIGN_2_2 §6): 「字の時間を歌に合わせる」 is a switch of the new-work table at work scope ('rule'), the
-  // 歌ハメ switch a line or work value read from plan.sung ('sung'), a line's character times a line pin ('sungTimes').
-  const SUNG_CATS = Object.freeze({ 'sung.real': 'rule', 'sung.hame': 'sung', 'sung.times': 'sungTimes' });
+  // 歌ハメ switch a line or work value read from plan.sung ('sung'), a line's character times a line pin ('sungTimes'),
+  // 歌った字に色をのせる a pin-only line or work switch ('fill': off without a pin).
+  const SUNG_CATS = Object.freeze({ 'sung.real': 'rule', 'sung.hame': 'sung', 'sung.times': 'sungTimes', 'sung.fill': 'fill' });
 
   // --- what a path addresses ---------------------------------------------------------------------------------
 
@@ -229,6 +230,12 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
     return ls ? ls.hame : false;
   }
 
+  // 歌った字に色をのせる at a line (its pin, else the whole work's) or at the whole work (its pin): off without one.
+  function fillValue(lineId, ix) {
+    const pin = ix ? PA.resolvePin(ix, { cutKey: null, pinCutKey: null, lineId: lineId || null }, 'sung.fill', acceptBool, null) : null;
+    return pin ? pin.v : false;
+  }
+
   // A line's character times as pinned (line/<id>:sung.times), else null.
   function sungTimesValue(parsed, lineId, ix) {
     const hit = ix && lineId ? PINS.lookup(ix, { cutKey: null, pinCutKey: null, lineId }, 'sung.times') : null;
@@ -251,14 +258,15 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
     return fs;
   }
 
-  // 歌ハメ and a line's character times. 歌ハメ at a line: its own pin, else the whole work's (inherited, ↑) where it
-  // reaches the line, else 自動 with what 自動 decided there (autoText sung.auto.times | hook | kime | off). At the whole
-  // work: its pin, else 自動 (in a new work: the lines with character times and the hook lines; in an older one: off).
+  // 歌ハメ, 歌った字に色をのせる and a line's character times. 歌ハメ at a line: its own pin, else the whole work's
+  // (inherited, ↑) where it reaches the line, else 自動 with what 自動 decided there (autoText sung.auto.times | hook |
+  // kime | off). At the whole work: its pin, else 自動 (in a new work: the lines with character times and the hook lines;
+  // in an older one: off). 歌った字に色をのせる: the line's pin, else the whole work's (inherited), else off (自動).
   function sungState(doc, plan, parsed, path, ix, cat) {
     const pins = doc.pins || {};
     const own = pins[path] || null;
     const lineId = parsed.scope.kind === 'line' ? parsed.scope.id : null;
-    const schema = cat === 'sung' ? BOOL : null;
+    const schema = cat === 'sung' || cat === 'fill' ? BOOL : null;
     const fs = {
       path, value: valueAt(plan, null, parsed, null, ix), display: null, state: 'auto', pinnedAt: null, by: null, schema,
       autoText: null, canPinAt: canPinAt(parsed), inactiveReason: null, warn: warnOf(plan, [path]),
@@ -271,6 +279,9 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
       if (why === 'pin:work' && work) Object.assign(fs, { state: 'inherited', pinnedAt: 'work', by: work.by || null });
       else fs.autoText = ['sung.auto.' + (why === 'times' || why === 'hook' || why === 'kime' ? why : 'off'), {}];
     } else if (cat === 'sung') fs.autoText = [RU.gen(doc) >= 1 ? 'fld.hame.autoNote' : 'sung.auto.off', {}];
+    else if (cat === 'fill' && lineId && pins['work:sung.fill']) {
+      Object.assign(fs, { state: 'inherited', pinnedAt: 'work', by: pins['work:sung.fill'].by || null });
+    }
     fs.display = cat === 'sungTimes' ? (Array.isArray(fs.value) ? String(fs.value.length) : ['val.none', {}])
       : displayOf(parsed, fs.value, null, cat, schema, doc);
     fs.pinAt = own ? path : null;
@@ -286,6 +297,7 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
     if (cat === 'rule') return ruleValue(parsed, ix);
     if (cat === 'sung') return hameValue(plan, parsed, cut ? cut.line : parsed.scope.lineId || null, ix);
     if (cat === 'sungTimes') return sungTimesValue(parsed, cut ? cut.line : parsed.scope.lineId || null, ix);
+    if (cat === 'fill') return fillValue(cut ? cut.line : parsed.scope.lineId || null, ix);
     if (cat === 'line') return lineValue(plan, parsed, cut ? cut.line : parsed.scope.lineId, ix);
     if (!cut) return undefined;
     if (cat === 't0') return cut.t0;
@@ -315,7 +327,7 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
     const cat = categoryOf(parsed);
     const slot = parsed.slot;
     if (cat === 'rule') return RU.SPECS[slot] || null;
-    if (cat === 'sung') return BOOL;
+    if (cat === 'sung' || cat === 'fill') return BOOL;
     if (cat === 'sungTimes') return null;
     if (cat === 'look') {
       if (slot === 'mood' || slot === 'theme') return { type: 'part', kind: slot, of: registry.keys(slot), none: false };
@@ -366,7 +378,7 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
   function canPinAt(parsed) {
     const cat = categoryOf(parsed);
     if (cat === 'look' || cat === 'rule') return ['work'];
-    if (cat === 'sung') return parsed.scope.kind === 'work' ? ['work'] : ['line', 'work'];
+    if (cat === 'sung' || cat === 'fill') return parsed.scope.kind === 'work' ? ['work'] : ['line', 'work'];
     if (cat === 'sungTimes') return ['line'];
     if (cat === 'line') return parsed.slot === 'season' ? ['line', 'work'] : ['line'];
     if (cat === 't0') return ['cut'];
@@ -517,7 +529,7 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
     const cat = categoryOf(parsed);
     const ix = pinIndexOf(doc.pins);
     if (cat === 'rule') return ruleState(doc, parsed, path, ix);
-    if (cat === 'sung' || cat === 'sungTimes') return sungState(doc, plan, parsed, path, ix, cat);
+    if (cat === 'sung' || cat === 'sungTimes' || cat === 'fill') return sungState(doc, plan, parsed, path, ix, cat);
     const perCut = cat !== 'look' && !(cat === 'line' && parsed.scope.kind === 'line');
     const cuts = perCut ? cutsFor(plan, sel, parsed) : [];
     const values = perCut ? cuts.map((c) => valueAt(plan, c, parsed, registry, ix)) : [valueAt(plan, null, parsed, registry, ix)];

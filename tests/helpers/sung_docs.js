@@ -14,12 +14,14 @@ const A2_TAP = Object.freeze({ 'line/r3:sung.times': pin([[0, 0], [2, 0.45], [5,
 // A4: the repeat fixture's second 飛ばせ/*紙ひこうき*/空の果てまで (rm) tapped; ra, ru and rv copy it.
 const A4_TAP = Object.freeze({ 'line/rm:sung.times': pin([[0, 0], [3, 0.52], [8, 1.3], [14, 2.1]], 'tap') });
 
-// The entries: [key, fixture, generation, pins]. A later phase adds its own keys (C1, D1) without touching these.
+// The entries: [key, fixture, generation, pins]. A later phase adds its own keys (C1) without touching these.
+// D1 (phase D): A2 with 歌った字に色をのせる for the whole video (the karaoke fill on every line, with 歌ハメ).
 const ENTRIES = Object.freeze([
   ['A1', 'lrc', 0, { 'work:sung.real': pin(true) }],
   ['A2', 'lrc', 0, Object.assign({ 'work:sung.real': pin(true), 'work:sung.hame': pin(true) }, A2_TAP)],
   ['A3', 'basic', 1, OTHER_OFF],
   ['A4', 'repeat', 1, Object.assign({}, OTHER_OFF, A4_TAP)],
+  ['D1', 'lrc', 0, Object.assign({ 'work:sung.real': pin(true), 'work:sung.hame': pin(true), 'work:sung.fill': pin(true) }, A2_TAP)],
 ]);
 const ASPECTS = Object.freeze(['16:9', '9:16']);
 const SEEDS = 2;

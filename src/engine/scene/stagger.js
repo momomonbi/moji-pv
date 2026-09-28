@@ -194,6 +194,13 @@ MV.def('engine/scene/stagger', ['core/rng', 'core/script', 'core/schema'], (RNG,
     return sung.t[lo];
   }
 
+  // sungNextAt(sung, off) → cut-local seconds when the unit after the one containing text offset `off` is sung (the
+  // cut's sung end after its last unit).
+  function sungNextAt(sung, off) {
+    const u = unitIndexAt(sung.at, off);
+    return u + 1 < sung.at.length ? sung.t[u + 1] : sung.end;
+  }
+
   function unitIndexAt(at, off) {
     let lo = 0, hi = at.length - 1;
     if (hi < 0 || off < at[0]) return 0;
@@ -265,5 +272,6 @@ MV.def('engine/scene/stagger', ['core/rng', 'core/script', 'core/schema'], (RNG,
 
   return {
     ORDERS, UNITS, StaggerError, unitIndex, ranksOf, sungFractions, staggerOf, pivots, SUNG_AHEAD, SUNG_EXIT, sungTimeAt, sungTimes,
+    sungNextAt,
   };
 });

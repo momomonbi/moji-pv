@@ -5297,8 +5297,8 @@ STAGE_PIXELS = "() => document.querySelector('.canvas-wrap canvas').toDataURL()"
 
 async def flow_hame(f, lang):
     """歌ハメ (DESIGN_2_2 §6) in a new work: the first line's row reads 自動（オン: 歌い出し・サビの行）; 行 › 演出 › 歌ハメ [オン] on
-    another line makes its entrance follow the singing (one undo entry; the preview changes as the characters come in);
-    作品全体 › 見た目 › 歌ハメ すべての行 / 自動; 作品全体 › タイミング › 字の時間を歌に合わせる (自動 = on: off pins it, on clears it).
+    another line makes its entrance follow the singing (one undo entry; the preview changes as the characters come in), and
+    its 歌った字に色をのせる (詳しい設定) pins the karaoke fill (one undo entry); 作品全体 › 見た目 › 歌ハメ すべての行 / 自動; 作品全体 › タイミング › 字の時間を歌に合わせる (自動 = on: off pins it, on clears it).
     1字ずつタップ with the song: ←/→ do not seek, 少しゆっくり sets the player's rate, Space × n, E and Esc write the line's
     start and its character times in one undo entry (字の時間 then reads タップ・手で合わせた時間) and restore the rate;
     やめる writes nothing; at the loop's end playback stops and 決定 / もう一度 are offered, もう一度 starts again."""
@@ -5334,6 +5334,21 @@ async def flow_hame(f, lang):
             shots.append(await page.evaluate(STAGE_PIXELS))
         f.check(shots[0] != shots[1], 'the preview changes while the characters come in')
     await f.shot('hame-line')
+    # 歌った字に色をのせる (詳しい設定): on pins the line and its cuts carry the fill; one undo entry
+    await page.evaluate("""() => { for (const x of document.querySelectorAll('[data-mount="inspector"] .isec[data-sec="direction"] details.isec-more')) x.open = true; }""")
+    fill = ROW % 'sung.fill'
+    done_f = await page.evaluate(DONE)
+    await page.click(fill + ' .w-toggle')
+    await f.until("(id) => { const p = window.__mv.doc.pins['line/' + id + ':sung.fill']; return !!p && p.v === true; }", '歌った字に色をのせる pins the line', ids[1])
+    await f.settle(3)
+    f.check(await page.evaluate(DONE) == done_f + 1, 'the fill is one undo entry')
+    got = await page.evaluate("""(id) => { const a = window.__mv, c = a.plan.cuts.find((x) => x.line === id);
+      return { slot: c.slots['sung.fill'] || null, fill: a.plan.sung.get(id).fill }; }""", ids[1])
+    f.check(got['slot'] and got['slot']['v'] is True and got['fill'], 'the line\'s cuts carry the fill: %r' % got)
+    if on['sung'] and len(on['sung']['t']) > 2:
+        await page.evaluate('(x) => window.__mv.seek(x)', on['t0'] + on['sung']['t'][len(on['sung']['t']) // 2])
+        await f.settle(4)
+        await f.shot('hame-fill')
     # 作品全体 › 見た目: すべての行, then 自動
     await page.evaluate("() => window.__mv.select({ level: 'work' }, { from: 'header', open: true })")
     await open_section(f, 'look')

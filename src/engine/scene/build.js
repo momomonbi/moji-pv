@@ -340,6 +340,10 @@ MV.def('engine/scene/build', ['core/hash', 'core/rng', 'core/schema', 'core/moti
     target.arrived = arrivals(arriveEnv, target, arrive, arriveB);
     const dwellB = checked(dwell.def.make(envOf(dwell, 'dwell'), target, dwell.p), 'dwell/' + dwell.def.key);
     for (const b of arriveB.concat(dwellB, departB)) builder.sb.behave(b);
+    // 歌った字に色をのせる (歌ハメ, DESIGN_2_2 §6): each character dimmed until it is sung, then in the accent tint
+    const fillB = valueOf(slots, 'sung.fill', false) === true && cut.sung ? BH.sungFill(arriveEnv, target, accentInks(builder, target), times)
+      : null;
+    if (fillB) builder.sb.behave(fillB);
 
     // decorations and cameras see where the text is: its block (focus), the free areas, each line's box and the
     // emphasized word's box (measured after a text nudge pin, so they move with the words)
@@ -369,7 +373,30 @@ MV.def('engine/scene/build', ['core/hash', 'core/rng', 'core/schema', 'core/moti
       { phase: 'depart', def: depart.def, list: departB }];
     scene.spriteBudget = BG.fit(scene, D, phases);
     Object.defineProperty(scene, 'budgetPhases', { value: Object.freeze(phases), enumerable: false });
+    if (fillB) fillUnderBudget(scene, fillB);
     return scene;
+  }
+
+  // Which glyphs of the target are inked in the accent colour (their karaoke fill brightens instead of tinting).
+  function accentInks(builder, target) {
+    const { table, stores } = builder;
+    const n = target.to - target.from, out = new Uint8Array(n);
+    for (let j = 0; j < n; j++) {
+      const i = target.from + j;
+      const rec = table.type[i] === T.TYPE.glyph ? stores.glyph[table.payload[i]] : null;
+      out[j] = rec && rec.ink === 'accent' ? 1 : 0;
+    }
+    return out;
+  }
+
+  // Where the glyph budget took the tint back from a phase of the cut (a heavy cut), the karaoke fill gives up its
+  // tint too and keeps only the dimming ramp.
+  function fillUnderBudget(scene, fillB) {
+    const rec = scene.spriteBudget;
+    const tint = !!rec && ['arrive', 'dwell', 'depart'].some((ph) => rec[ph] && rec[ph].masks.includes('tint'));
+    if (!tint) return;
+    const at = scene.behaviours.indexOf(fillB);
+    if (at >= 0) scene.behaviours[at] = BH.masked(fillB, ['tint'], scene.text.from, scene.text.to);
   }
 
   function buildOrnaments(builder, base, slots, els, reg, cut, hints, warnings, where, ax) {
@@ -508,5 +535,5 @@ MV.def('engine/scene/build', ['core/hash', 'core/rng', 'core/schema', 'core/moti
     };
   }
 
-  return { SAFE, designEnv, slotSeed, buildCut, buildGround, fallbackSlots };
+  return { SAFE, designEnv, slotSeed, buildCut, buildGround, fallbackSlots, fillUnderBudget };
 });

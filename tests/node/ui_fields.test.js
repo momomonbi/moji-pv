@@ -1370,3 +1370,18 @@ test('歌ハメ rows: where they sit, their scopes and what writing them means',
   for (const k of ['fld.hame', 'fld.hame.note', 'fld.hame.autoNote', 'fld.sungReal', 'fld.sungTimes', 'sung.tapUnits', 'sung.clear',
     'sung.needSong', 'sung.summary']) assert.ok(STRINGS[k] && STRINGS[k][0] && STRINGS[k][1], k);
 });
+
+test('歌った字に色をのせる rows: after 歌ハメ on the line, several-lines and whole-video pages; a pin-only toggle', () => {
+  assert.deepEqual(F.slotScopes('sung.fill'), ['work', 'line']);
+  const dir = fieldPaths({ level: 'line', ids: ['r4'] }, 'direction');
+  assert.equal(dir.indexOf('sung.fill'), dir.indexOf('sung.hame') + 1, '行 › 演出: right after 歌ハメ');
+  assert.ok(fieldPaths({ level: 'line', ids: ['r4', 'r5'] }, 'direction').includes('sung.fill'), 'the several-lines page too');
+  const look = fieldPaths({ level: 'work' }, 'look');
+  assert.equal(look.indexOf('sung.fill'), look.indexOf('sung.hame') + 1, '作品全体 › 見た目: after 歌ハメ');
+  const byId = (id) => F.FIELDS.find((f) => f.id === id);
+  for (const row of [byId('line/direction/sung.fill'), byId('work/look/sung.fill')]) {
+    assert.ok(row.widget === 'toggle' && row.offClears && row.noDice && row.basic === false && row.note === 'fld.hameFill.note', row.id);
+  }
+  assert.ok(byId('line/direction/sung.fill').readEach);
+  for (const k of ['fld.hameFill', 'fld.hameFill.note']) assert.ok(STRINGS[k] && STRINGS[k][0] && STRINGS[k][1], k);
+});

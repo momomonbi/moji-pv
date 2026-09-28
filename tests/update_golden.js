@@ -35,8 +35,9 @@
 //                     keyed entry per document: A1 the lrc fixture with 「字の時間を歌に合わせる」 (word tags, the estimate,
 //                     sung pieces); A2 that with 歌ハメ for the whole video and one tapped line; A3 the basic fixture as a
 //                     new work (the hook lines); A4 the repeat fixture as a new work with a tapped repeat (copies both
-//                     ways, aligned repeats). New works pin the other packages' switches off. Rendered like the frames
-//                     above; every document without a sung.* pin or look.gen plans as before.
+//                     ways, aligned repeats); D1 A2 with 歌った字に色をのせる for the whole video (the karaoke fill). New
+//                     works pin the other packages' switches off. Rendered like the frames above; every document without
+//                     a sung.* pin or look.gen plans as before.
 
 const fs = require('node:fs');
 const path = require('node:path');

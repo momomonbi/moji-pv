@@ -2249,6 +2249,10 @@ MV.def('i18n/strings', [], () => ({
   'undo.tapUnits': ['1字ずつタップ（{n}か所）', 'Tap each character ({n})'],
   'undo.sungClear': ['字の時間を消す', 'Clear character times'],
   'cmd.tap.units': ['1字ずつタップ', 'Tap each character'],
+  // 歌った字に色をのせる (the karaoke fill)
+  'fld.hameFill': ['歌った字に色をのせる', 'Color the sung characters'],
+  'fld.hameFill.note': ['文字は先に出て、歌われた字からアクセント色に変わります（カラオケ風）。アクセント色の字は明るくなります',
+    'The words show first and each character takes the accent color as it is sung (karaoke style). Characters already in the accent color brighten instead'],
   // the timeline's character ticks
   'tl.tick': ['{ch}の時間 {time}', '{ch} at {time}'],
   'undo.tick': ['字の時間', 'Character time'],

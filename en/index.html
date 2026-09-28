@@ -1,6 +1,6 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-6zBlJ0AVlZX8YRKavRkYglXnV0S6FDYRdNaHyChi5TI='; style-src 'sha256-r4itjKbpHP12JOftFK1QsTGzxZPEZmuZJcB3U9ZIa6k=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-l/FVu2Hg/vbXifDO/Aygx2RFWkLkoOqkY+Tm2NNliyY='; style-src 'sha256-r4itjKbpHP12JOftFK1QsTGzxZPEZmuZJcB3U9ZIa6k=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
 <title>Moji PV Maker</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -14289,6 +14289,10 @@ MV.def('i18n/strings', [], () => ({
   'undo.tapUnits': ['1字ずつタップ（{n}か所）', 'Tap each character ({n})'],
   'undo.sungClear': ['字の時間を消す', 'Clear character times'],
   'cmd.tap.units': ['1字ずつタップ', 'Tap each character'],
+  // 歌った字に色をのせる (the karaoke fill)
+  'fld.hameFill': ['歌った字に色をのせる', 'Color the sung characters'],
+  'fld.hameFill.note': ['文字は先に出て、歌われた字からアクセント色に変わります（カラオケ風）。アクセント色の字は明るくなります',
+    'The words show first and each character takes the accent color as it is sung (karaoke style). Characters already in the accent color brighten instead'],
   // the timeline's character ticks
   'tl.tick': ['{ch}の時間 {time}', '{ch} at {time}'],
   'undo.tick': ['字の時間', 'Character time'],
@@ -19305,6 +19309,8 @@ MV.def('planner/rules', ['core/pins', 'planner/params'], (PINS, PA) => {
     // per line (lines with character times and the hook lines of a new work; off in an older one).
     row('sung.real', null, WORK, BOOL, true, false),
     row('sung.hame', null, WORK_LINE, BOOL, null, null),
+    // 歌った字に色をのせる (karaoke fill): pin only, off in every document
+    row('sung.fill', null, WORK_LINE, BOOL, false, false),
   ]);
 
   const BY_SLOT = new Map(ROWS.map((r) => [r.slot, r]));
@@ -19675,13 +19681,16 @@ MV.def('planner/sung', ['core/script', 'core/num', 'core/motion', 'engine/text/v
   function acceptBool(v) { return typeof v === 'boolean' ? { v } : { bad: true }; }
 
   // prepare(ctx, timed) → SungContext | null. null (the v2 plan, exactly) unless 「字の時間を歌に合わせる」 resolves on
-  // or a sung.times / sung.hame pin exists. ctx = { doc, ix, warn, timing, readRate }. Every timed line gets a timing
-  // when it has a sung.times pin, or 「字の時間を歌に合わせる」 is on, or its 歌ハメ pin resolves on; the others get null.
+  // or a sung.times / sung.hame / sung.fill pin exists. ctx = { doc, ix, warn, timing, readRate }. Every timed line gets
+  // a timing when it has a sung.times pin, or 「字の時間を歌に合わせる」 is on, or its 歌ハメ or 歌った字に色をのせる pin
+  // resolves on; the others get null. A line timed only for the colour (no sources, fewer than two anchors) keeps the
+  // v2 window over its span and the v2 piece boundaries, so the colour alone changes only colour.
   function prepare(ctx, timed) {
     const { doc, ix } = ctx;
     const real = RU.value(doc, ix, 'sung.real') === true;
     const pinnedTimes = PA.pinned(ix, 'sung.times'), pinnedHame = PA.pinned(ix, 'sung.hame');
-    if (!real && !pinnedTimes && !pinnedHame) return null;
+    const pinnedFill = PA.pinned(ix, 'sung.fill');
+    if (!real && !pinnedTimes && !pinnedHame && !pinnedFill) return null;
     const g = gen(doc);
     const rate = typeof ctx.readRate === 'number' && ctx.readRate > 0 ? ctx.readRate : 7;
     const n = timed.length;
@@ -19695,14 +19704,17 @@ MV.def('planner/sung', ['core/script', 'core/num', 'core/motion', 'engine/text/v
       const kime = !!line.kime;
       const hamePinOn = linePin ? linePin.v : kime ? false : workPin ? workPin.v : null;
       const pin = pinnedTimes ? PA.resolvePin(ix, at, 'sung.times', acceptSungTimes(line.text), ctx.warn) : null;
+      // 歌った字に色をのせる: pin only (the line's, else the whole work's), off without one
+      const fp = pinnedFill ? PA.resolvePin(ix, at, 'sung.fill', acceptBool, ctx.warn) : null;
+      const fill = fp !== null && fp.v === true;
       const sourcesOK = real || hamePinOn === true;
-      const need = !!pin || real || hamePinOn === true;
+      const need = !!pin || real || hamePinOn === true || fill;
       const units = unitsOf(line.text, line.lang);
       const span = Math.max(0, spanEnd - line.t0);
       const anchors = need ? ownAnchors(units, pin ? pin.v : null, line, span, sourcesOK) : null;
       if (anchors && anchors.dropped > 0) ctx.warn({ code: 'sung-words', line: line.id, detail: { n: anchors.dropped } });
       own[i] = {
-        line, need, units, span, sourcesOK, pin, anchors, kime, hamePinOn,
+        line, need, units, span, sourcesOK, pin, anchors, kime, hamePinOn, fill, fillPin: fill ? fp : null,
         hameFrom: linePin ? 'pin:line' : kime ? 'kime' : workPin ? 'pin:work' : 'auto',
         best: bestSource(anchors),
       };
@@ -19744,7 +19756,8 @@ MV.def('planner/sung', ['core/script', 'core/num', 'core/motion', 'engine/text/v
       }
       lines.set(line.id, ls);
       meta.set(line.id, { hamePinOn: o.hamePinOn, kime: o.kime, hameFrom: o.hameFrom,
-        pinBy: o.pin && ls.by === 'pin' ? o.pin.by || null : null, dropped: o.anchors.dropped });
+        pinBy: o.pin && ls.by === 'pin' ? o.pin.by || null : null, dropped: o.anchors.dropped,
+        fill: o.fill, fillPin: o.fillPin });
     }
     const hame = new Map();
     const lead = ctx.timing ? ctx.timing.lead : 0.12;
@@ -19760,6 +19773,13 @@ MV.def('planner/sung', ['core/script', 'core/num', 'core/motion', 'engine/text/v
       idOf(cut) {
         const h = this.hameAt(cut);
         return h ? 'h' + (h.latin ? 'l' : '') + ':' + lead : '';
+      },
+      // 歌った字に色をのせる on a lyric or focus cut of a line with sung timing: the pin that turns it on ({ v, from, by }),
+      // or null (planner/cast keeps it among the cut's decisions, slot sung.fill)
+      fillAt(cut) {
+        if (!cut || !cut.line || (cut.role !== 'lyric' && cut.role !== 'focus')) return null;
+        const m = meta.get(cut.line);
+        return m && m.fill && lines.get(cut.line) ? m.fillPin : null;
       },
     };
   }
@@ -19910,7 +19930,7 @@ MV.def('planner/sung', ['core/script', 'core/num', 'core/motion', 'engine/text/v
       for (let u = 0; u < ls.n; u++) t[u] = N.q6(line.t0 + ls.t[u]);
       out.set(line.id, Object.freeze({
         at: ls.at, t, end: N.q6(line.t0 + ls.end), endSrc: ls.endSrc, src: ls.src, by: ls.by, pinBy: m.pinBy, explicit: ls.explicit,
-        hame: h.hame, hameWhy: h.why, fill: false, dropped: m.dropped,
+        hame: h.hame, hameWhy: h.why, fill: !!m.fill, dropped: m.dropped,
       }));
     }
     return out;
@@ -19951,6 +19971,8 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       'el.hide': { type: 'bool' },
       // 「くり返しの行をそろえる」 (DESIGN_2_1 §4.10): pinned at work or line scope, never at a cut (core/commands).
       'repeat.same': { type: 'bool' },
+      // 歌った字に色をのせる (歌ハメ, DESIGN_2_2 §6): pinned at work or line scope, never at a cut (core/commands).
+      'sung.fill': { type: 'bool' },
     }, CAM.SLOT_SPECS));
     const SEASON_SPEC = LK.LOOK_SPECS.season;
     const AVOID_SPEC = Object.freeze({ type: 'partRefs' });
@@ -20529,6 +20551,14 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       }
     }
 
+    // 歌った字に色をのせる (DESIGN_2_2 §6): the pin that turns it on for the cut's line, kept among its decisions (no
+    // chooser stream); nothing when no pin turns it on.
+    const FILL = 'sung.fill';
+    function decideFill(st) {
+      const f = st.ctx.sung ? st.ctx.sung.fillAt(st.cut) : null;
+      if (f) setDecision(st, FILL, pinDecision(f));
+    }
+
     // The source's decision of one slot, or null: no source, the cut or its line rerolled (st.rerolled), or a die on
     // the slot. st.aligned = this, for planner/camera.
     function alignedDecision(st, slot) {
@@ -20937,6 +20967,7 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     function castSlots(ctx, cut, hist, natural, camOnly) {
       const st = stateOf(ctx, cut, hist, natural);
       decideRepeat(st);
+      decideFill(st);
       decideOrient(st);
       // 歌ハメ (DESIGN_2_2 §6): no layout that moves the text itself, and an entrance that shows one character at a time
       const arrange = decidePart(st, 'arrange', null, st.hame ? { restrict: ownMotionOf(ctx.registry), rule: 'sung.arrange' } : null);
@@ -23090,8 +23121,9 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
   const TRACK_KINDS = new Set(['ground', 'atmos', 'seam']);
   const EL_DEFAULT = Object.freeze({ nudge: Object.freeze({ dx: 0, dy: 0, rot: 0, s: 1 }), fill: null, hide: false });
   // 歌ハメ (PV22 P6, DESIGN_2_2 §6): 「字の時間を歌に合わせる」 is a switch of the new-work table at work scope ('rule'), the
-  // 歌ハメ switch a line or work value read from plan.sung ('sung'), a line's character times a line pin ('sungTimes').
-  const SUNG_CATS = Object.freeze({ 'sung.real': 'rule', 'sung.hame': 'sung', 'sung.times': 'sungTimes' });
+  // 歌ハメ switch a line or work value read from plan.sung ('sung'), a line's character times a line pin ('sungTimes'),
+  // 歌った字に色をのせる a pin-only line or work switch ('fill': off without a pin).
+  const SUNG_CATS = Object.freeze({ 'sung.real': 'rule', 'sung.hame': 'sung', 'sung.times': 'sungTimes', 'sung.fill': 'fill' });
 
   // --- what a path addresses ---------------------------------------------------------------------------------
 
@@ -23307,6 +23339,12 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
     return ls ? ls.hame : false;
   }
 
+  // 歌った字に色をのせる at a line (its pin, else the whole work's) or at the whole work (its pin): off without one.
+  function fillValue(lineId, ix) {
+    const pin = ix ? PA.resolvePin(ix, { cutKey: null, pinCutKey: null, lineId: lineId || null }, 'sung.fill', acceptBool, null) : null;
+    return pin ? pin.v : false;
+  }
+
   // A line's character times as pinned (line/<id>:sung.times), else null.
   function sungTimesValue(parsed, lineId, ix) {
     const hit = ix && lineId ? PINS.lookup(ix, { cutKey: null, pinCutKey: null, lineId }, 'sung.times') : null;
@@ -23329,14 +23367,15 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
     return fs;
   }
 
-  // 歌ハメ and a line's character times. 歌ハメ at a line: its own pin, else the whole work's (inherited, ↑) where it
-  // reaches the line, else 自動 with what 自動 decided there (autoText sung.auto.times | hook | kime | off). At the whole
-  // work: its pin, else 自動 (in a new work: the lines with character times and the hook lines; in an older one: off).
+  // 歌ハメ, 歌った字に色をのせる and a line's character times. 歌ハメ at a line: its own pin, else the whole work's
+  // (inherited, ↑) where it reaches the line, else 自動 with what 自動 decided there (autoText sung.auto.times | hook |
+  // kime | off). At the whole work: its pin, else 自動 (in a new work: the lines with character times and the hook lines;
+  // in an older one: off). 歌った字に色をのせる: the line's pin, else the whole work's (inherited), else off (自動).
   function sungState(doc, plan, parsed, path, ix, cat) {
     const pins = doc.pins || {};
     const own = pins[path] || null;
     const lineId = parsed.scope.kind === 'line' ? parsed.scope.id : null;
-    const schema = cat === 'sung' ? BOOL : null;
+    const schema = cat === 'sung' || cat === 'fill' ? BOOL : null;
     const fs = {
       path, value: valueAt(plan, null, parsed, null, ix), display: null, state: 'auto', pinnedAt: null, by: null, schema,
       autoText: null, canPinAt: canPinAt(parsed), inactiveReason: null, warn: warnOf(plan, [path]),
@@ -23349,6 +23388,9 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
       if (why === 'pin:work' && work) Object.assign(fs, { state: 'inherited', pinnedAt: 'work', by: work.by || null });
       else fs.autoText = ['sung.auto.' + (why === 'times' || why === 'hook' || why === 'kime' ? why : 'off'), {}];
     } else if (cat === 'sung') fs.autoText = [RU.gen(doc) >= 1 ? 'fld.hame.autoNote' : 'sung.auto.off', {}];
+    else if (cat === 'fill' && lineId && pins['work:sung.fill']) {
+      Object.assign(fs, { state: 'inherited', pinnedAt: 'work', by: pins['work:sung.fill'].by || null });
+    }
     fs.display = cat === 'sungTimes' ? (Array.isArray(fs.value) ? String(fs.value.length) : ['val.none', {}])
       : displayOf(parsed, fs.value, null, cat, schema, doc);
     fs.pinAt = own ? path : null;
@@ -23364,6 +23406,7 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
     if (cat === 'rule') return ruleValue(parsed, ix);
     if (cat === 'sung') return hameValue(plan, parsed, cut ? cut.line : parsed.scope.lineId || null, ix);
     if (cat === 'sungTimes') return sungTimesValue(parsed, cut ? cut.line : parsed.scope.lineId || null, ix);
+    if (cat === 'fill') return fillValue(cut ? cut.line : parsed.scope.lineId || null, ix);
     if (cat === 'line') return lineValue(plan, parsed, cut ? cut.line : parsed.scope.lineId, ix);
     if (!cut) return undefined;
     if (cat === 't0') return cut.t0;
@@ -23393,7 +23436,7 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
     const cat = categoryOf(parsed);
     const slot = parsed.slot;
     if (cat === 'rule') return RU.SPECS[slot] || null;
-    if (cat === 'sung') return BOOL;
+    if (cat === 'sung' || cat === 'fill') return BOOL;
     if (cat === 'sungTimes') return null;
     if (cat === 'look') {
       if (slot === 'mood' || slot === 'theme') return { type: 'part', kind: slot, of: registry.keys(slot), none: false };
@@ -23444,7 +23487,7 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
   function canPinAt(parsed) {
     const cat = categoryOf(parsed);
     if (cat === 'look' || cat === 'rule') return ['work'];
-    if (cat === 'sung') return parsed.scope.kind === 'work' ? ['work'] : ['line', 'work'];
+    if (cat === 'sung' || cat === 'fill') return parsed.scope.kind === 'work' ? ['work'] : ['line', 'work'];
     if (cat === 'sungTimes') return ['line'];
     if (cat === 'line') return parsed.slot === 'season' ? ['line', 'work'] : ['line'];
     if (cat === 't0') return ['cut'];
@@ -23595,7 +23638,7 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
     const cat = categoryOf(parsed);
     const ix = pinIndexOf(doc.pins);
     if (cat === 'rule') return ruleState(doc, parsed, path, ix);
-    if (cat === 'sung' || cat === 'sungTimes') return sungState(doc, plan, parsed, path, ix, cat);
+    if (cat === 'sung' || cat === 'sungTimes' || cat === 'fill') return sungState(doc, plan, parsed, path, ix, cat);
     const perCut = cat !== 'look' && !(cat === 'line' && parsed.scope.kind === 'line');
     const cuts = perCut ? cutsFor(plan, sel, parsed) : [];
     const values = perCut ? cuts.map((c) => valueAt(plan, c, parsed, registry, ix)) : [valueAt(plan, null, parsed, registry, ix)];
@@ -24093,7 +24136,7 @@ MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media
     const parsed = P.parse(path);
     const cat = F.categoryOf(parsed);
     if (cat === 'look') return explainLook(doc, plan, parsed, registry);
-    if (cat === 'rule' || cat === 'sung' || cat === 'sungTimes') return explainSetting(doc, plan, parsed, registry);
+    if (cat === 'rule' || cat === 'sung' || cat === 'sungTimes' || cat === 'fill') return explainSetting(doc, plan, parsed, registry);
     const cut = cutFor(plan, parsed);
     if (!cut && cat !== 'line') {
       return { path, value: undefined, from: 'auto', by: undefined, why: [], alts: [] };
@@ -24713,6 +24756,13 @@ MV.def('engine/scene/stagger', ['core/rng', 'core/script', 'core/schema'], (RNG,
     return sung.t[lo];
   }
 
+  // sungNextAt(sung, off) → cut-local seconds when the unit after the one containing text offset `off` is sung (the
+  // cut's sung end after its last unit).
+  function sungNextAt(sung, off) {
+    const u = unitIndexAt(sung.at, off);
+    return u + 1 < sung.at.length ? sung.t[u + 1] : sung.end;
+  }
+
   function unitIndexAt(at, off) {
     let lo = 0, hi = at.length - 1;
     if (hi < 0 || off < at[0]) return 0;
@@ -24784,6 +24834,7 @@ MV.def('engine/scene/stagger', ['core/rng', 'core/script', 'core/schema'], (RNG,
 
   return {
     ORDERS, UNITS, StaggerError, unitIndex, ranksOf, sungFractions, staggerOf, pivots, SUNG_AHEAD, SUNG_EXIT, sungTimeAt, sungTimes,
+    sungNextAt,
   };
 });
 /* 文字PVメーカー v2 — original work. Behaviours: the scheduler, the dwell envelope, time warps and the kit's motion adapters (DESIGN §4.17.4, §4.18.3; DESIGN_2_1 §3.10, §4.2). */
@@ -24878,6 +24929,47 @@ MV.def('engine/scene/behave', ['core/num', 'core/curve', 'core/rng', 'core/motio
   function runFollow(P, t, b) {
     const k = followWeight(t, b.times);
     for (let r = 0; r < b.roots.length; r++) P.alpha[b.roots[r]] *= k;
+  }
+
+  // --- 歌った字に色をのせる: the karaoke fill (歌ハメ, DESIGN_2_2 §6) -----------------------------------------------
+
+  // Each character comes in dimmed with the text's own entrance and turns to the accent tint as it is sung: from
+  // FILL_EARLY before its sung time over its syllable (the time to the next unit, clamped to [FILL_D_MIN, FILL_D_MAX]).
+  // A glyph already inked in the accent colour (an emphasized word) is dimmed deeper and only brightens (draw's tint
+  // colour is the accent). A run that shows its own text (a note, ♪: target.off < 0) is left as it is.
+  const FILL_EARLY = 0.03, FILL_D_MIN = 0.08, FILL_D_MAX = 0.3;
+  const FILL_DIM = 0.55, FILL_DIM_SAME = 0.35, FILL_TINT = 0.9;
+
+  // sungFill(env, target, same, times) → the STYLE behaviour over the text, or null without sung units (env.cut.sung).
+  // same = Uint8Array per glyph: 1 where its ink is the accent. Made at build; runSungFill allocates nothing.
+  function sungFill(env, target, same, times) {
+    const st = STG.sungTimes(env, target, 'glyph');
+    if (!st) return null;
+    const sung = env.cut.sung, n = st.length;
+    const s = new Float64Array(n), d = new Float64Array(n), on = new Uint8Array(n), acc = new Uint8Array(n);
+    for (let j = 0; j < n; j++) {
+      if (target.off[j] < 0) continue;
+      on[j] = 1;
+      acc[j] = same && same[j] ? 1 : 0;
+      s[j] = st[j] - FILL_EARLY;
+      const next = STG.sungNextAt(sung, target.off[j]);
+      const dd = next - st[j];
+      d[j] = dd < FILL_D_MIN ? FILL_D_MIN : dd > FILL_D_MAX ? FILL_D_MAX : dd;
+    }
+    return { phase: PH.STYLE, live: 'always', from: target.from, to: target.to, t0: times.a, t1: times.b, run: runSungFill,
+      s, d, on, same: acc };
+  }
+
+  function runSungFill(P, t, b) {
+    const n = b.to - b.from;
+    for (let j = 0; j < n; j++) {
+      if (!b.on[j]) continue;
+      const i = b.from + j;
+      const k = N.smooth((t - b.s[j]) / b.d[j]);
+      const dim = b.same[j] ? FILL_DIM_SAME : FILL_DIM;
+      P.alpha[i] *= dim + (1 - dim) * k;
+      if (!b.same[j] && FILL_TINT * k > P.tint[i]) P.tint[i] = FILL_TINT * k;
+    }
   }
 
   // --- time warps (DESIGN_2_1 §3.10) --------------------------------------------------------------------------
@@ -25211,6 +25303,7 @@ MV.def('engine/scene/behave', ['core/num', 'core/curve', 'core/rng', 'core/motio
     PH, LIVE, DELTA, BehaviourError, RAMP_IN, RAMP_OUT,
     check, sortBehaviours, isActive, runBehaviours, envelopeWeight, followWeight, beatInto,
     runDrift, runFollow, runGlyphMotion, runHold, runWarped, warped, MASK_GROUPS, runMasked, masked,
+    FILL_EARLY, FILL_D_MIN, FILL_D_MAX, FILL_DIM, FILL_DIM_SAME, FILL_TINT, sungFill, runSungFill,
     compileMoves, directionOf, exposedName, identityOf, motionTiming, motionTotal, glyphMotionMaker, holdMaker, easeOf,
     TRACK_UNITS,
   };
@@ -31537,6 +31630,10 @@ MV.def('engine/scene/build', ['core/hash', 'core/rng', 'core/schema', 'core/moti
     target.arrived = arrivals(arriveEnv, target, arrive, arriveB);
     const dwellB = checked(dwell.def.make(envOf(dwell, 'dwell'), target, dwell.p), 'dwell/' + dwell.def.key);
     for (const b of arriveB.concat(dwellB, departB)) builder.sb.behave(b);
+    // 歌った字に色をのせる (歌ハメ, DESIGN_2_2 §6): each character dimmed until it is sung, then in the accent tint
+    const fillB = valueOf(slots, 'sung.fill', false) === true && cut.sung ? BH.sungFill(arriveEnv, target, accentInks(builder, target), times)
+      : null;
+    if (fillB) builder.sb.behave(fillB);
 
     // decorations and cameras see where the text is: its block (focus), the free areas, each line's box and the
     // emphasized word's box (measured after a text nudge pin, so they move with the words)
@@ -31566,7 +31663,30 @@ MV.def('engine/scene/build', ['core/hash', 'core/rng', 'core/schema', 'core/moti
       { phase: 'depart', def: depart.def, list: departB }];
     scene.spriteBudget = BG.fit(scene, D, phases);
     Object.defineProperty(scene, 'budgetPhases', { value: Object.freeze(phases), enumerable: false });
+    if (fillB) fillUnderBudget(scene, fillB);
     return scene;
+  }
+
+  // Which glyphs of the target are inked in the accent colour (their karaoke fill brightens instead of tinting).
+  function accentInks(builder, target) {
+    const { table, stores } = builder;
+    const n = target.to - target.from, out = new Uint8Array(n);
+    for (let j = 0; j < n; j++) {
+      const i = target.from + j;
+      const rec = table.type[i] === T.TYPE.glyph ? stores.glyph[table.payload[i]] : null;
+      out[j] = rec && rec.ink === 'accent' ? 1 : 0;
+    }
+    return out;
+  }
+
+  // Where the glyph budget took the tint back from a phase of the cut (a heavy cut), the karaoke fill gives up its
+  // tint too and keeps only the dimming ramp.
+  function fillUnderBudget(scene, fillB) {
+    const rec = scene.spriteBudget;
+    const tint = !!rec && ['arrive', 'dwell', 'depart'].some((ph) => rec[ph] && rec[ph].masks.includes('tint'));
+    if (!tint) return;
+    const at = scene.behaviours.indexOf(fillB);
+    if (at >= 0) scene.behaviours[at] = BH.masked(fillB, ['tint'], scene.text.from, scene.text.to);
   }
 
   function buildOrnaments(builder, base, slots, els, reg, cut, hints, warnings, where, ax) {
@@ -31705,7 +31825,7 @@ MV.def('engine/scene/build', ['core/hash', 'core/rng', 'core/schema', 'core/moti
     };
   }
 
-  return { SAFE, designEnv, slotSeed, buildCut, buildGround, fallbackSlots };
+  return { SAFE, designEnv, slotSeed, buildCut, buildGround, fallbackSlots, fillUnderBudget };
 });
 /* 文字PVメーカー v2 — original work. The part kit: definition helpers, motion builders and helpers for part authors (DESIGN §4.18.3; DESIGN_2_1 §3.11, §11.5.6). */
 MV.def('parts/kit', ['core/num', 'core/noise', 'core/ease', 'core/curve', 'core/color', 'core/schema', 'core/registry',
@@ -61436,7 +61556,9 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
 
     // 歌ハメ (PV22 P6, DESIGN_2_2 §6): the switch (the whole video or a line), 「字の時間を歌に合わせる」 (the whole video) and a
     // line's character times (a line pin, written by 1字ずつタップ).
-    const SUNG_SCOPES = Object.freeze({ 'sung.hame': Object.freeze(['work', 'line']), 'sung.real': WORK, 'sung.times': LINE });
+    // 歌った字に色をのせる (the whole video or a line; a pin only).
+    const SUNG_SCOPES = Object.freeze({ 'sung.hame': Object.freeze(['work', 'line']), 'sung.real': WORK, 'sung.times': LINE,
+      'sung.fill': Object.freeze(['work', 'line']) });
 
     function sharedNames(kind) {
       if (kind === 'atmos') return ['amount'];
@@ -61650,6 +61772,9 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
     const hameLineField = () => F({ path: 'sung.hame', scopes: LINE, widget: 'choice', label: 'fld.hame', spec: { type: 'bool' },
       options: [{ v: true, label: 'fld.hame.on' }, { v: false, label: 'fld.hame.off' }], auto: true, note: 'fld.hame.note',
       noDice: true, readEach: true });
+    // 歌った字に色をのせる of a line (or of each selected line): on pins it, off clears the line's pin (off is the default)
+    const fillLineField = () => F({ path: 'sung.fill', scopes: LINE, widget: 'toggle', label: 'fld.hameFill', spec: { type: 'bool' },
+      note: 'fld.hameFill.note', offClears: true, noDice: true, basic: false, readEach: true });
 
     // カメラ EXTREME (DESIGN_EXTREME §2.6): the switch, and under 詳しい設定 its 激しさ [強め | かなり | 最大]; both write
     // through ui/extreme (the notice when it turns on, the question when it turns off with moves picked by hand). The
@@ -61690,6 +61815,9 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
           F({ path: 'sung.hame', scopes: WORK, widget: 'choice', label: 'fld.hame', spec: { type: 'bool' },
             options: [{ v: true, label: 'fld.hame.all' }, { v: false, label: 'fld.hame.none' }], auto: true, note: 'fld.hame.note',
             noDice: true }),
+          // 歌った字に色をのせる for the whole video: on pins it, off clears the pin (off is the default)
+          F({ path: 'sung.fill', scopes: WORK, widget: 'toggle', label: 'fld.hameFill', spec: { type: 'bool' }, note: 'fld.hameFill.note',
+            offClears: true, noDice: true, basic: false }),
         ]),
         // 写真・動画 (DESIGN_2_1 §11.7.3): the library, open when it holds something.
         sec('media', (ctx) => ctx.mediaCount > 0, [], { custom: 'media' }),
@@ -61836,7 +61964,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
         partField('arrange', 'kind.arrange'),
         partField('arrive', 'kind.arrive'),
         sharedField('arrive', 'dur', 'fld.dur'), sharedField('arrive', 'ease', 'fld.speedCurve'),
-        sharedField('arrive', 'order', 'fld.order'), hameLineField(), sharedField('arrive', 'each', 'fld.each'),
+        sharedField('arrive', 'order', 'fld.order'), hameLineField(), fillLineField(), sharedField('arrive', 'each', 'fld.each'),
         sharedField('arrive', 'flow', 'fld.flow', { basic: false }),
         partField('dwell', 'kind.dwell'), sharedField('dwell', 'amount', 'fld.amount'),
         partField('depart', 'kind.depart'), sharedField('depart', 'dur', 'fld.dur'), sharedField('depart', 'ease', 'fld.speedCurve'),

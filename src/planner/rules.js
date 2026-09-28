@@ -43,6 +43,8 @@ MV.def('planner/rules', ['core/pins', 'planner/params'], (PINS, PA) => {
     // per line (lines with character times and the hook lines of a new work; off in an older one).
     row('sung.real', null, WORK, BOOL, true, false),
     row('sung.hame', null, WORK_LINE, BOOL, null, null),
+    // 歌った字に色をのせる (karaoke fill): pin only, off in every document
+    row('sung.fill', null, WORK_LINE, BOOL, false, false),
   ]);
 
   const BY_SLOT = new Map(ROWS.map((r) => [r.slot, r]));

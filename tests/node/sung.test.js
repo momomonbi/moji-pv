@@ -635,6 +635,9 @@ test('determinism and re-planning: fresh and cached plans agree through toggles,
     (d) => C.reduce(d, { t: 'pin.set', path: 'line/rm:sung.times', v: [[0, 0], [3, 0.6], [8, 1.3]], by: 'tap' }),
     (d) => C.reduce(d, { t: 'lyrics.row', rowId: 'rm', src: '飛ばせ/*紙ひこうき*/空のはてまで' }),
     (d) => C.reduce(d, { t: 'pin.set', path: 'work:sung.hame', v: false, by: 'user' }),
+    (d) => C.reduce(d, { t: 'pin.set', path: 'line/rb:sung.fill', v: true, by: 'user' }),
+    (d) => C.reduce(d, { t: 'pin.set', path: 'work:sung.fill', v: true, by: 'user' }),
+    (d) => C.reduce(d, { t: 'pin.clear', path: 'line/rb:sung.fill' }),
   ];
   plan(doc);
   for (const step of steps) {
@@ -737,6 +740,141 @@ test('planning speed: sung timing adds little to re-planning a new work', (t) =>
   assert.ok(least >= 0.9, 'casts reused while typing: ' + least.toFixed(3));
 });
 
+// --- (D) 歌った字に色をのせる: the karaoke fill ----------------------------------------------------------------------
+
+test('fill gate: an older work with only 歌った字に色をのせる gets sung times and the fill decision; nothing else is chosen differently', () => {
+  const base = plan(old('basic'));
+  const fill = plan(old('basic', { 'work:sung.fill': pin(true) }));
+  assert.ok(fill.sung, 'the pin opens the gate');
+  for (const l of fill.lines) {
+    const s = fill.sung.get(l.id);
+    assert.ok(s && s.fill && !s.hame && s.by === 'est', l.id);
+  }
+  assert.deepEqual(fill.cuts.map((c) => [c.key, c.t0, c.t1]), base.cuts.map((c) => [c.key, c.t0, c.t1]), 'the same cuts (v2 pieces)');
+  for (let i = 0; i < base.cuts.length; i++) {
+    const a = base.cuts[i], b = fill.cuts[i];
+    const rest = Object.assign({}, b.slots);
+    delete rest['sung.fill'];
+    assert.deepEqual(rest, a.slots, 'every decision as before: ' + a.key);
+    const lyric = !!b.line && (b.role === 'lyric' || b.role === 'focus');
+    assert.equal(!!b.sung, lyric, b.key);
+    assert.deepEqual(b.slots['sung.fill'], lyric ? { v: true, from: 'pin:work', by: 'user' } : undefined, b.key);
+  }
+  // a line's own pin: that line only; off on a line under the whole work's on: not that line
+  const one = plan(old('basic', { 'line/r5:sung.fill': pin(true) }));
+  assert.deepEqual([...new Set(one.cuts.filter((c) => c.slots['sung.fill']).map((c) => c.line))], ['r5']);
+  assert.equal(one.cuts.find((c) => c.line === 'r5').slots['sung.fill'].from, 'pin:line');
+  const but = plan(old('basic', { 'work:sung.fill': pin(true), 'line/r5:sung.fill': pin(false) }));
+  assert.ok(but.cuts.filter((c) => c.line === 'r5').every((c) => !c.slots['sung.fill'] && !c.sung));
+  assert.ok(but.cuts.some((c) => c.line === 'r4' && c.slots['sung.fill']));
+  // with 歌ハメ too: the same timing, and both
+  const both = plan(old('basic', { 'work:sung.fill': pin(true), 'work:sung.hame': pin(true) }));
+  assert.ok(both.cuts.some((c) => c.slots['sung.fill'] && SU.isSungCut(c)));
+  // a cut pin is refused (core/commands), and the fields read the pins
+  assert.throws(() => C.reduce(old('basic'), { t: 'pin.set', path: 'cut/' + base.cuts[1].key + ':sung.fill', v: true, by: 'user' }));
+  const F = MV.use('planner/fields');
+  const EX = MV.use('planner/explain');
+  const d = old('basic', { 'work:sung.fill': pin(true) });
+  const fs = (path) => F.fieldState(d, fill, { level: 'line', ids: ['r5'] }, path, { registry: REG });
+  assert.deepEqual([fs('line/r5:sung.fill').value, fs('line/r5:sung.fill').state, fs('line/r5:sung.fill').pinnedAt], [true, 'inherited', 'work']);
+  assert.deepEqual([fs('work:sung.fill').value, fs('work:sung.fill').state], [true, 'pinned']);
+  const none = F.fieldState(old('basic'), base, { level: 'line', ids: ['r5'] }, 'line/r5:sung.fill', { registry: REG });
+  assert.deepEqual([none.value, none.state], [false, 'auto']);
+  assert.equal(EX.explain(d, fill, 'line/r5:sung.fill', { registry: REG }).why[0].params.scope, 'work');
+  // a lock keeps the fill a pin of the whole work (never a refused cut pin)
+  const lock = F.lockPayload(d, fill, 'r5', { registry: REG });
+  assert.ok(Object.keys(lock.pins).every((k) => !k.endsWith(':sung.fill')));
+});
+
+// The scenes of one cut with the karaoke fill and without it (the same cut, its slots without sung.fill).
+function fillScenes(pins, pick) {
+  const p = plan(old('basic', Object.assign({ 'work:sung.fill': pin(true) }, pins || {})));
+  const cut = p.cuts.find(pick || ((c) => c.sung && c.text.length >= 4));
+  const slots = Object.assign({}, cut.slots);
+  delete slots['sung.fill'];
+  const on = BUILD.buildCut(cut, p, svcOf(p));
+  const off = BUILD.buildCut(Object.assign({}, cut, { slots }), p, svcOf(p));
+  return { p, cut, on, off, b: on.behaviours.find((x) => x.run === BH.runSungFill) };
+}
+
+// alpha and tint of the target's glyphs at cut-local time t
+function poseAt(scene, t) {
+  const FR = MV.use('engine/scene/frame');
+  const table = FR.evaluate(scene, t);
+  const n = scene.target.to - scene.target.from;
+  const alpha = [], tint = [];
+  for (let j = 0; j < n; j++) { alpha.push(table.live.alpha[scene.target.from + j]); tint.push(table.live.tint[scene.target.from + j]); }
+  return { alpha, tint };
+}
+
+test('engine: 歌った字に色をのせる dims each character until it is sung, then gives it the accent tint', () => {
+  const { cut, on, off, b } = fillScenes();
+  assert.ok(b, 'a STYLE behaviour over the text');
+  assert.equal(b.phase, BH.PH.STYLE);
+  assert.equal(off.behaviours.find((x) => x.run === BH.runSungFill), undefined, 'without the slot: none');
+  const st = STG.sungTimes({ cut, times: on.times }, on.target, 'glyph');
+  const n = st.length;
+  for (let j = 0; j < n; j++) {
+    approx(b.s[j], st[j] - BH.FILL_EARLY, 1e-9);
+    assert.ok(b.d[j] >= BH.FILL_D_MIN - 1e-9 && b.d[j] <= BH.FILL_D_MAX + 1e-9);
+  }
+  // after the entrance, before the last characters are sung: those are dimmed, untinted; the sung ones tinted
+  const t = on.times.rest + 0.01;
+  const A = poseAt(on, t), B = poseAt(off, t);
+  let unsung = 0;
+  for (let j = 0; j < n; j++) {
+    const k = MV.use('core/num').smooth((t - b.s[j]) / b.d[j]);
+    const dim = b.same[j] ? BH.FILL_DIM_SAME : BH.FILL_DIM;
+    approx(A.alpha[j], B.alpha[j] * (dim + (1 - dim) * k), 1e-6, 'alpha ' + j);
+    if (!b.same[j]) approx(A.tint[j], Math.max(B.tint[j], BH.FILL_TINT * k), 1e-6, 'tint ' + j);
+    else approx(A.tint[j], B.tint[j], 1e-9, 'an accent glyph keeps its tint');
+    if (k === 0 && B.alpha[j] > 0) unsung++;
+  }
+  assert.ok(unsung > 0, 'some characters are still to be sung');
+  assert.ok(A.alpha.some((a, j) => Math.abs(a - B.alpha[j]) > 1e-3), 'the frames differ from the unfilled scene');
+  // every character sung: the tint converges, the alpha is the unfilled scene's (here already in the exit: a line
+  // timed only for the colour keeps the v2 window over its whole span)
+  const late = Math.max(...Array.from(b.s, (x, j) => x + b.d[j])) + 0.01;
+  assert.ok(late < on.times.b, 'within the cut');
+  const L = poseAt(on, late), M = poseAt(off, late);
+  for (let j = 0; j < n; j++) {
+    approx(L.alpha[j], M.alpha[j], 1e-6);
+    if (!b.same[j]) approx(L.tint[j], Math.max(M.tint[j], BH.FILL_TINT), 1e-6);
+  }
+});
+
+test('engine: accent-inked characters dim deeper and only brighten; under the glyph budget the fill keeps only its dimming', () => {
+  const { on, off, b } = fillScenes(null, (c) => c.sung && c.emph.length > 0);
+  const ink = on.target;
+  const accent = [];
+  for (let j = 0; j < b.same.length; j++) if (b.same[j]) accent.push(j);
+  assert.ok(accent.length > 0 && accent.every((j) => ink.emph[j] === 1), 'the emphasized word is inked in the accent colour');
+  const t = on.times.rest + 0.01;
+  const A = poseAt(on, t), B = poseAt(off, t);
+  const sungAll = Math.max(...Array.from(b.s, (x, j) => x + b.d[j])) + 0.01;
+  const Z = poseAt(on, sungAll), Y = poseAt(off, sungAll);
+  for (const j of accent) {
+    const k = MV.use('core/num').smooth((t - b.s[j]) / b.d[j]);
+    approx(A.alpha[j], B.alpha[j] * (BH.FILL_DIM_SAME + (1 - BH.FILL_DIM_SAME) * k), 1e-6);
+    approx(A.tint[j], B.tint[j], 1e-9);
+    approx(Z.alpha[j], Y.alpha[j], 1e-6, 'sung: as bright as without the fill');
+    approx(Z.tint[j], Y.tint[j], 1e-9, 'sung: never tinted (draw\'s tint is the accent itself)');
+  }
+  // a cut whose budget took the tint back from a phase: the fill's tint goes too, the dimming stays
+  const heavy = Object.assign({}, on, { behaviours: on.behaviours.slice(), spriteBudget: { arrive: { masks: ['tint'] } } });
+  BUILD.fillUnderBudget(heavy, b);
+  assert.equal(heavy.behaviours.includes(b), false, 'the fill is replaced by a masked one');
+  const late = on.times.out - 0.01;
+  const H1 = poseAt(heavy, late), N1 = poseAt(off, late), F1 = poseAt(on, late);
+  for (let j = 0; j < b.same.length; j++) {
+    approx(H1.tint[j], N1.tint[j], 1e-9, 'no fill tint ' + j);
+    approx(H1.alpha[j], F1.alpha[j], 1e-9, 'the same dimming ' + j);
+  }
+  const light = Object.assign({}, on, { behaviours: on.behaviours.slice(), spriteBudget: { arrive: { masks: [] } } });
+  BUILD.fillUnderBudget(light, b);
+  assert.ok(light.behaviours.includes(b), 'within the budget: the fill as made');
+});
+
 // --- the golden ------------------------------------------------------------------------------------------------------
 
 test('the 歌ハメ golden: its documents plan and render the golden frames (tests/golden/project_sung.json)', async () => {
@@ -762,6 +900,10 @@ test('the 歌ハメ golden: its documents plan and render the golden frames (tes
     if (key === 'A2') assert.ok(p.sung.get('r3').by === 'pin' && hame.length === p.lines.filter((l) => p.sung.get(l.id)).length, name);
     if (key === 'A3') assert.deepEqual(hame, ['r4', 'ra', 'rd'], name);
     if (key === 'A4') assert.ok(['ra', 'rm', 'ru', 'rv'].every((id) => hame.includes(id)) && p.sung.get('ra').by === 'copy', name);
+    if (key === 'D1') {
+      assert.ok(p.lines.every((l) => !p.sung.get(l.id) || p.sung.get(l.id).fill), name);
+      assert.ok(p.cuts.some((c) => c.slots['sung.fill'] && SU.isSungCut(c)), name + ': the fill on 歌ハメ cuts');
+    }
     await engine.prepare(0, p.duration, { export: true });
     const [w, h] = D.DESIGN_SIZE[doc.look.aspect];
     const k = 360 / Math.min(w, h);

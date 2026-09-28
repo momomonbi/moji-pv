@@ -92,6 +92,47 @@ MV.def('engine/scene/behave', ['core/num', 'core/curve', 'core/rng', 'core/motio
     for (let r = 0; r < b.roots.length; r++) P.alpha[b.roots[r]] *= k;
   }
 
+  // --- 歌った字に色をのせる: the karaoke fill (歌ハメ, DESIGN_2_2 §6) -----------------------------------------------
+
+  // Each character comes in dimmed with the text's own entrance and turns to the accent tint as it is sung: from
+  // FILL_EARLY before its sung time over its syllable (the time to the next unit, clamped to [FILL_D_MIN, FILL_D_MAX]).
+  // A glyph already inked in the accent colour (an emphasized word) is dimmed deeper and only brightens (draw's tint
+  // colour is the accent). A run that shows its own text (a note, ♪: target.off < 0) is left as it is.
+  const FILL_EARLY = 0.03, FILL_D_MIN = 0.08, FILL_D_MAX = 0.3;
+  const FILL_DIM = 0.55, FILL_DIM_SAME = 0.35, FILL_TINT = 0.9;
+
+  // sungFill(env, target, same, times) → the STYLE behaviour over the text, or null without sung units (env.cut.sung).
+  // same = Uint8Array per glyph: 1 where its ink is the accent. Made at build; runSungFill allocates nothing.
+  function sungFill(env, target, same, times) {
+    const st = STG.sungTimes(env, target, 'glyph');
+    if (!st) return null;
+    const sung = env.cut.sung, n = st.length;
+    const s = new Float64Array(n), d = new Float64Array(n), on = new Uint8Array(n), acc = new Uint8Array(n);
+    for (let j = 0; j < n; j++) {
+      if (target.off[j] < 0) continue;
+      on[j] = 1;
+      acc[j] = same && same[j] ? 1 : 0;
+      s[j] = st[j] - FILL_EARLY;
+      const next = STG.sungNextAt(sung, target.off[j]);
+      const dd = next - st[j];
+      d[j] = dd < FILL_D_MIN ? FILL_D_MIN : dd > FILL_D_MAX ? FILL_D_MAX : dd;
+    }
+    return { phase: PH.STYLE, live: 'always', from: target.from, to: target.to, t0: times.a, t1: times.b, run: runSungFill,
+      s, d, on, same: acc };
+  }
+
+  function runSungFill(P, t, b) {
+    const n = b.to - b.from;
+    for (let j = 0; j < n; j++) {
+      if (!b.on[j]) continue;
+      const i = b.from + j;
+      const k = N.smooth((t - b.s[j]) / b.d[j]);
+      const dim = b.same[j] ? FILL_DIM_SAME : FILL_DIM;
+      P.alpha[i] *= dim + (1 - dim) * k;
+      if (!b.same[j] && FILL_TINT * k > P.tint[i]) P.tint[i] = FILL_TINT * k;
+    }
+  }
+
   // --- time warps (DESIGN_2_1 §3.10) --------------------------------------------------------------------------
 
   // A warped behaviour runs its inner function on a warped clock inside [w0, w0 + span]: s = (t − w0)/span, and the
@@ -423,6 +464,7 @@ MV.def('engine/scene/behave', ['core/num', 'core/curve', 'core/rng', 'core/motio
     PH, LIVE, DELTA, BehaviourError, RAMP_IN, RAMP_OUT,
     check, sortBehaviours, isActive, runBehaviours, envelopeWeight, followWeight, beatInto,
     runDrift, runFollow, runGlyphMotion, runHold, runWarped, warped, MASK_GROUPS, runMasked, masked,
+    FILL_EARLY, FILL_D_MIN, FILL_D_MAX, FILL_DIM, FILL_DIM_SAME, FILL_TINT, sungFill, runSungFill,
     compileMoves, directionOf, exposedName, identityOf, motionTiming, motionTotal, glyphMotionMaker, holdMaker, easeOf,
     TRACK_UNITS,
   };

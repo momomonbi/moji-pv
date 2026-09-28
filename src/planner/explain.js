@@ -352,7 +352,7 @@ MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media
     const parsed = P.parse(path);
     const cat = F.categoryOf(parsed);
     if (cat === 'look') return explainLook(doc, plan, parsed, registry);
-    if (cat === 'rule' || cat === 'sung' || cat === 'sungTimes') return explainSetting(doc, plan, parsed, registry);
+    if (cat === 'rule' || cat === 'sung' || cat === 'sungTimes' || cat === 'fill') return explainSetting(doc, plan, parsed, registry);
     const cut = cutFor(plan, parsed);
     if (!cut && cat !== 'line') {
       return { path, value: undefined, from: 'auto', by: undefined, why: [], alts: [] };
