@@ -16,6 +16,10 @@
    perf.py camerawork + materials window at 720p (the sample and the heaviest materials) and basic, vertical, lrc, long
    and v21 at 640 px, and the sample cut with blur, glow, shards and the mosaic (preview probes) at 360p and 1080p:
    every pixel equal.
+6. Weight pairs (v2.2, DESIGN_2_2 §4): a glyph between two served weights draws both bodies (the heavier at a·f, the
+   lighter over it); the direct and the level-0 sprite paths must still agree within the parity bound. The sample cut in
+   monoPress (display Shippori Mincho B1 800, Bodoni Moda 800 for the Latin run) with every glyph's weight offset by
+   −250 (550: 500/600 at f = 0.5), −350 (450: 400/500 at f = 0.5) and −325 (475: f = 0.75).
 5. The glyph cost model of DESIGN_2_1 §5.9.5 (draw.glyphCover) covers what is drawn: over the perf.py camerawork +
    materials window at 720p (the sample and the heaviest materials), for every frame the model's cover of the cuts on
    screen (at their own camera) is at least the frame share the sprite draws cover (the lab's sprite meter). The ink the
@@ -77,6 +81,19 @@ async def check_source(page, info, src, failures):
           ('ok  ' if ok else 'FAIL', src, label, v['mae'] * 255, v['glyphs']))
     if not ok:
         failures.append('%s vertical parity: %r' % (src, v))
+
+    if src == 'catalog':
+        plain = await page.evaluate('(o) => window.__lab.parity(o)', {'parts': src, 'theme': 'monoPress', 'short': 1080})
+        for wt, label in ((-250, '550: 500/600 at f = 0.5'), (-350, '450: 400/500 at f = 0.5'), (-325, '475: 400/500 at f = 0.75')):
+            r = await page.evaluate('(o) => window.__lab.parity(o)', {'parts': src, 'theme': 'monoPress', 'probe': {'wt': wt}, 'short': 1080})
+            # the offset must change the drawing (the block's mean ink moves), else the pair was never drawn
+            moved = abs(r['ink'] - plain['ink']) * 255
+            ok = r['mae'] <= PARITY_MAX and r['glyphs'] >= 20 and r['spriteGlyphs'] == r['glyphs'] and moved > 0.05
+            print('%s %s weight pair parity at 1080p (Shippori Mincho B1 800 %+d = %s): MAE %.3f/255 (max %.0f/255) over %d '
+                  'glyphs (limit 2/255); the block\'s mean ink moved %.2f/255 from 800' % ('ok  ' if ok else 'FAIL', src, wt, label,
+                                                                                      r['mae'] * 255, r['max'] * 255, r['glyphs'], moved))
+            if not ok:
+                failures.append('%s weight pair parity %+d: %r' % (src, wt, r))
 
     sweep = await page.evaluate('(s) => window.__lab.blurSweep({ parts: s, from: 0, to: 4.5, step: 0.05 })', src)
     steps = sweep['steps'][1:]

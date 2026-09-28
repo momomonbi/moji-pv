@@ -1,6 +1,6 @@
 <!doctype html><html lang="ja"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-SNZ2vnNquILqfGLLiRqYRX9q2qrM4q2oFIQpgggByiI='; style-src 'sha256-CBzRvq4sWr3CF69hafDp1l8UkHnSy18JQMXGJJhPDYI=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-M9wTLrnJBRZiwP3uo6MnntV2AemxorXVuKZ9+hlSdew='; style-src 'sha256-CBzRvq4sWr3CF69hafDp1l8UkHnSy18JQMXGJJhPDYI=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
 <title>文字PVメーカー</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -27268,7 +27268,7 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
 
   // createDrawContext({ sprites, paints, scratch, pool?, blurred? }) → dc, mutated per frame by the renderer:
   //   g (current target), D (device matrix), pal, W, H, scale (device px per du), q (paint helpers), assets, pick,
-  //   glyphPath ('auto' | 'sprite' | 'direct'), probe ({ blur, glow, shard, pixel } added to glyph poses; lab only),
+  //   glyphPath ('auto' | 'sprite' | 'direct'), probe ({ blur, glow, shard, pixel, wt } added to glyph poses; lab only),
   //   face (FontRef for glyph particles), counts { glyphs, shapes, paints, particles, media, mediaFallback (blurred
   //   timed media drawn with the per-frame blur: the store handed out a frame without its baked blur, §11.5.4) }
   //   (DESIGN_2_1) t (absolute frame time, for media on the song clock), backdrop, quality, thumb (posters only),
@@ -27634,7 +27634,7 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
     // selects (direct at rest).
     const halo = rec.style === 'glow' && glow < STYLE_GLOW ? STYLE_GLOW : glow;
     // v2.2 weight: the pair of served weights (the path choice is unchanged: only blur, glow, shard, pixel choose it)
-    const dw = P.wt[i];
+    const dw = pr !== null && pr.wt ? P.wt[i] + pr.wt : P.wt[i];      // (the lab's probe may add a weight offset)
     let wp = dw !== 0 ? FACES.weightPair(rec.font, dw, WP) : null;
     if (wp !== null && wp.hi !== null && !CROSSFADE_STYLES.has(rec.style)) snapPair(wp, rec.font);
     if (wp !== null && dc.faceReady !== null) readyPair(dc, rec.font, wp);
@@ -58179,19 +58179,24 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core
   }
 
   // parity(o) → { mae, max, glyphs, box }: the same frame with every glyph on the direct path and on the level-0 sprite
-  // path (§4.19.5), compared over the text block. o = { parts, kind, key, orient, aspect, short, text, theme }
+  // path (§4.19.5), compared over the text block. o = { parts, kind, key, orient, aspect, short, text, theme, probe } —
+  // probe (v2.2) adds to every glyph's pose, e.g. { wt: −450 }: a weight between two served weights (two bodies).
   async function parity(o) {
     const opt = o || {};
     const aspect = opt.aspect || '16:9';
     const [w, h] = sizeFor(aspect, opt.short || 1080);
     const base = { parts: opt.parts, kind: opt.kind, key: opt.key, orient: opt.orient, aspect, text: opt.text || PARITY_TEXT,
-      theme: opt.theme, w, h, quality: 'preview', level: 0 };
+      theme: opt.theme, w, h, quality: 'preview', level: 0, probe: opt.probe || undefined };
     const a = await renderPart(Object.assign({}, base, { glyphPath: 'direct', surface: makeSurface(w, h, false) }));
     const box = textBox(a.engine, a.surface, w / a.plan.design.w);
     const b = await renderPart(Object.assign({}, base, { glyphPath: 'sprite', surface: makeSurface(w, h, false) }));
     if (!box) return { mae: 1, max: 1, glyphs: 0, box: null };
-    const r = meanAbs(region(a.surface, box), region(b.surface, box));
-    return { mae: r.mae, max: r.max, glyphs: a.stats.drawn.glyphs, spriteGlyphs: b.stats.drawn.glyphs, box };
+    const ra = region(a.surface, box);
+    const r = meanAbs(ra, region(b.surface, box));
+    let ink = 0;
+    for (let i = 0; i < ra.length; i += 4) ink += ra[i] + ra[i + 1] + ra[i + 2];
+    // ink: the mean channel value of the direct frame's text block (a probe that changes the weight changes it)
+    return { mae: r.mae, max: r.max, glyphs: a.stats.drawn.glyphs, spriteGlyphs: b.stats.drawn.glyphs, box, ink: ink / (ra.length * 0.75) / 255 };
   }
 
   // blurSweep(o) → { steps: [{ blur, diff }], box }: the text block at increasing blur (du, added to every glyph);

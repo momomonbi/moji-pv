@@ -710,19 +710,24 @@ MV.def('ui/lab', ['core/registry', 'core/doc', 'core/script', 'core/shot', 'core
   }
 
   // parity(o) → { mae, max, glyphs, box }: the same frame with every glyph on the direct path and on the level-0 sprite
-  // path (§4.19.5), compared over the text block. o = { parts, kind, key, orient, aspect, short, text, theme }
+  // path (§4.19.5), compared over the text block. o = { parts, kind, key, orient, aspect, short, text, theme, probe } —
+  // probe (v2.2) adds to every glyph's pose, e.g. { wt: −450 }: a weight between two served weights (two bodies).
   async function parity(o) {
     const opt = o || {};
     const aspect = opt.aspect || '16:9';
     const [w, h] = sizeFor(aspect, opt.short || 1080);
     const base = { parts: opt.parts, kind: opt.kind, key: opt.key, orient: opt.orient, aspect, text: opt.text || PARITY_TEXT,
-      theme: opt.theme, w, h, quality: 'preview', level: 0 };
+      theme: opt.theme, w, h, quality: 'preview', level: 0, probe: opt.probe || undefined };
     const a = await renderPart(Object.assign({}, base, { glyphPath: 'direct', surface: makeSurface(w, h, false) }));
     const box = textBox(a.engine, a.surface, w / a.plan.design.w);
     const b = await renderPart(Object.assign({}, base, { glyphPath: 'sprite', surface: makeSurface(w, h, false) }));
     if (!box) return { mae: 1, max: 1, glyphs: 0, box: null };
-    const r = meanAbs(region(a.surface, box), region(b.surface, box));
-    return { mae: r.mae, max: r.max, glyphs: a.stats.drawn.glyphs, spriteGlyphs: b.stats.drawn.glyphs, box };
+    const ra = region(a.surface, box);
+    const r = meanAbs(ra, region(b.surface, box));
+    let ink = 0;
+    for (let i = 0; i < ra.length; i += 4) ink += ra[i] + ra[i + 1] + ra[i + 2];
+    // ink: the mean channel value of the direct frame's text block (a probe that changes the weight changes it)
+    return { mae: r.mae, max: r.max, glyphs: a.stats.drawn.glyphs, spriteGlyphs: b.stats.drawn.glyphs, box, ink: ink / (ra.length * 0.75) / 255 };
   }
 
   // blurSweep(o) → { steps: [{ blur, diff }], box }: the text block at increasing blur (du, added to every glyph);

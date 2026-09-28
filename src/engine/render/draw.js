@@ -69,7 +69,7 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
 
   // createDrawContext({ sprites, paints, scratch, pool?, blurred? }) → dc, mutated per frame by the renderer:
   //   g (current target), D (device matrix), pal, W, H, scale (device px per du), q (paint helpers), assets, pick,
-  //   glyphPath ('auto' | 'sprite' | 'direct'), probe ({ blur, glow, shard, pixel } added to glyph poses; lab only),
+  //   glyphPath ('auto' | 'sprite' | 'direct'), probe ({ blur, glow, shard, pixel, wt } added to glyph poses; lab only),
   //   face (FontRef for glyph particles), counts { glyphs, shapes, paints, particles, media, mediaFallback (blurred
   //   timed media drawn with the per-frame blur: the store handed out a frame without its baked blur, §11.5.4) }
   //   (DESIGN_2_1) t (absolute frame time, for media on the song clock), backdrop, quality, thumb (posters only),
@@ -435,7 +435,7 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
     // selects (direct at rest).
     const halo = rec.style === 'glow' && glow < STYLE_GLOW ? STYLE_GLOW : glow;
     // v2.2 weight: the pair of served weights (the path choice is unchanged: only blur, glow, shard, pixel choose it)
-    const dw = P.wt[i];
+    const dw = pr !== null && pr.wt ? P.wt[i] + pr.wt : P.wt[i];      // (the lab's probe may add a weight offset)
     let wp = dw !== 0 ? FACES.weightPair(rec.font, dw, WP) : null;
     if (wp !== null && wp.hi !== null && !CROSSFADE_STYLES.has(rec.style)) snapPair(wp, rec.font);
     if (wp !== null && dc.faceReady !== null) readyPair(dc, rec.font, wp);
