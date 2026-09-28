@@ -63,6 +63,11 @@ v2.1 editor-ready output (package H.3, DESIGN_2_1 §13.12):
   extreme_keys               the same by keyboard only (Space, Enter, Esc, the 激しさ radios, 次から表示しない)
   ai_extreme                 「カメラワークをAIに任せる」 with the 「EXTREME」 chip: the notice, the EXTREME request, the review's
                              カメラ EXTREME row and moves, apply = one undo step
+文字組み (DESIGN_2_2 §1):
+  kumi                       作品全体 › 文字組み in a new work (on, 自動, no pin) and in a work opened from a file (off); a
+                             switch off pins 0 (one entry) and hides its strength; a strength by keyboard back to the
+                             default unpins in the same entry; 行 › 色と書体 › この行の大小 [自動 | 使う | 使わない], 自動 kept
+                             under a work pin; 「すべて外す」 returns the switches to on
 v2.1 「くり返しの行をそろえる」 (DESIGN_2_1 §4.10):
   repeat                     作品全体 › 見た目: the switch (off, its note, no 振り直し) pins the opt-in, the second サビ takes the
                              first one's layouts, lenses and shots, a repeated cut's なぜ names its first copy, off clears it
@@ -5271,6 +5276,165 @@ async def flow_ai_extreme(f, lang):
 
 # カメラ EXTREME (DESIGN_EXTREME §5.3).
 FLOWS += [('extreme', flow_extreme, False), ('extreme_keys', flow_extreme_keys, False), ('ai_extreme', flow_ai_extreme, False)]
+
+
+# --- 文字組み (DESIGN_2_2 §1, PV22 P1) -------------------------------------------------------------------------------
+
+K_ROW = '[data-mount="inspector"] .frow[data-field="%s"]'
+KUMI_LYRICS = LYRICS + '\n君とStationで/待ち合わせ'
+# The typesetting decisions of the plan's cuts: per slot, how many cuts hold one and their values; per line, which do.
+KUMI_PLAN = """() => { const a = window.__mv, cs = a.plan.cuts, out = { n: cs.length };
+  for (const s of ['text.kana', 'text.jump', 'text.latin', 'text.head']) {
+    const on = cs.filter((c) => c.slots && c.slots[s]);
+    out[s] = { on: on.length, v: [...new Set(on.map((c) => c.slots[s].v))], from: [...new Set(on.map((c) => c.slots[s].from))] };
+  }
+  out.lines = Object.fromEntries(a.plan.lines.map((l) => [l.id, l.cuts.map((k) => cs.find((c) => c.key === k))
+    .filter((c) => c && c.slots['text.jump']).length]));
+  return out; }"""
+# A row: its tag state, a toggle's checked state, the segmented options that are checked.
+K_STATE = """(s) => { const r = document.querySelector(s); if (!r) return null;
+  const box = r.querySelector('input[role="switch"]'), tag = r.querySelector('.state-tag');
+  return { state: tag ? tag.dataset.state : null, checked: box ? box.checked : null,
+    segs: [...r.querySelectorAll('.seg')].map((b) => b.getAttribute('aria-checked') === 'true'),
+    note: (r.querySelector('.fr-note') || {}).textContent || null, dice: !!r.querySelector('[data-role="dice"]') }; }"""
+
+
+async def open_details_of(f, sel):
+    await f.page.evaluate("(s) => { const r = document.querySelector(s); const d = r && r.closest('details'); if (d) d.open = true; }", sel)
+    await f.settle(2)
+
+
+async def open_kumi(f):
+    await f.page.evaluate("() => { const a = window.__mv; a.openPanel('details'); a.select({ level: 'work' }, { from: 'crumbs', open: true }); }")
+    await f.settle(3)
+    await open_section(f, 'kumi')
+
+
+async def flow_kumi(f, lang):
+    """作品全体 › 文字組み: a new work starts with the three switches on as 自動 and no pin, and its cuts carry the
+    automatic decisions; turning かなを詰める off pins 0 (one entry), its cuts lose it and 詰める強さ hides; undo brings it
+    back; ジャンプ率 by keyboard pins and returns to 自動 at 50 % in one entry; 行 › 色と書体 › この行の大小: 自動 selected,
+    使わない pins 0 on that line only; under a work pin the line row keeps 自動 selected (inherited); 「すべて外す」 returns
+    the switches to on; a work opened from a file (no look.gen) shows them off and plans no typesetting."""
+    page = f.page
+    done0, doc0 = await with_lyrics(f, KUMI_LYRICS)
+    head = await page.evaluate("() => ({ gen: window.__mv.doc.look.gen, pins: Object.keys(window.__mv.doc.pins).length })")
+    f.check(head == {'gen': 1, 'pins': 0}, 'a fresh page is a new work without pins: %r' % head)
+    pl = await page.evaluate(KUMI_PLAN)
+    f.check(pl['text.kana'] == {'on': pl['n'], 'v': [0.7], 'from': ['auto']} and pl['text.jump']['v'] == [0.5]
+            and pl['text.latin']['v'] == [0.5] and pl['text.head']['on'] == 0,
+            'every cut carries the automatic typesetting: %r' % {k: pl[k] for k in ('n', 'text.kana', 'text.jump', 'text.latin', 'text.head')})
+    await open_kumi(f)
+    kana, kana_power = K_ROW % 'work/kumi/text.kana', K_ROW % 'work/kumi/text.kana.power'
+    jump_power = K_ROW % 'work/kumi/text.jump.power'
+    for slot in ('text.kana', 'text.jump', 'text.latin'):
+        st = await page.evaluate(K_STATE, K_ROW % ('work/kumi/' + slot))
+        f.check(st and st['checked'] is True and st['state'] == 'auto' and not st['dice'], '%s is on and 自動: %r' % (slot, st))
+    st = await page.evaluate(K_STATE, kana)
+    f.check(st['note'] == await page.evaluate("() => window.__mv.t('fld.kumiKana.note')"), 'the switch says what it does: %r' % st['note'])
+    head = await page.evaluate(K_STATE, K_ROW % 'work/kumi/text.head')
+    f.check(head and head['segs'] == [True, False, False], '大きくする字 shows 行の頭 (自動): %r' % head)
+    await f.shot('kumi-new')
+    # かなを詰める off: work:text.kana = 0, one entry; the cuts lose it; 詰める強さ hides
+    done1 = await page.evaluate(DONE)
+    await page.click(kana + ' .w-toggle')
+    await f.until("() => { const p = window.__mv.doc.pins['work:text.kana']; return !!p && p.v === 0 && p.by === 'user'; }",
+                  'turning it off pins 0 for the whole video')
+    await f.until("() => window.__mv.plan.cuts.every((c) => !c.slots['text.kana'])", 'the cuts lose かな詰め')
+    await f.settle(3)
+    f.check(await page.evaluate(DONE) == done1 + 1, 'one undo entry')
+    st = await page.evaluate(K_STATE, kana)
+    f.check(st['checked'] is False and st['state'] == 'pinned', 'the switch shows off and 固定: %r' % st)
+    f.check(await page.locator(kana_power).count() == 0, '詰める強さ hides while the switch is off')
+    await f.blur()
+    await page.keyboard.press('Control+z')
+    await f.until("() => !window.__mv.doc.pins['work:text.kana'] && window.__mv.plan.cuts.every((c) => !!c.slots['text.kana'])",
+                  'undo brings かな詰め back')
+    await f.settle(3)
+    f.check((await page.evaluate(K_STATE, kana))['checked'] is True and await page.locator(kana_power).count() == 1,
+            'the switch and 詰める強さ are back')
+    # ジャンプ率 by keyboard: 50 → 60 % pins 0.6, back to 50 % is 自動 again; the whole run is one entry
+    await open_details_of(f, jump_power)
+    done2 = await page.evaluate(DONE)
+    await page.focus(jump_power + ' .w-range')
+    for _ in range(2):
+        await page.keyboard.press('ArrowRight')
+    await f.until("() => { const p = window.__mv.doc.pins['work:text.jump']; return !!p && Math.abs(p.v - 0.6) < 1e-9; }",
+                  'ジャンプ率 60 % pins 0.6')
+    await f.until("() => window.__mv.plan.cuts.every((c) => c.slots['text.jump'] && Math.abs(c.slots['text.jump'].v - 0.6) < 1e-9)",
+                  'the cuts follow the pin')
+    for _ in range(2):
+        await page.keyboard.press('ArrowLeft')
+    await f.until("() => !window.__mv.doc.pins['work:text.jump']", 'back at 50 % the strength is the default again: no pin')
+    await f.settle(3)
+    f.check(await page.evaluate(DONE) == done2 + 1, 'the keyboard run is one undo entry: %d' % (await page.evaluate(DONE) - done2))
+    # 行 › 色と書体 › この行の大小: 自動 selected; 使わない pins 0 on this line only
+    line_id = await page.evaluate("() => window.__mv.plan.lines[1].id")
+    await open_line(f, line_id)
+    await open_section(f, 'colortype')
+    ljump, lkana = K_ROW % 'line/colortype/text.jump', K_ROW % 'line/colortype/text.kana'
+    await open_details_of(f, ljump)
+    st = await page.evaluate(K_STATE, ljump)
+    f.check(st and st['segs'] == [True, False, False] and st['state'] == 'auto', 'この行の大小 shows 自動: %r' % st)
+    f.check(st['note'] == await page.evaluate("() => window.__mv.t('fld.kumiJumpLine.note')"), 'its note: %r' % st['note'])
+    done3 = await page.evaluate(DONE)
+    await page.locator(ljump + ' .seg').nth(2).click()
+    path = 'line/%s:text.jump' % line_id
+    await f.until('(p) => { const x = window.__mv.doc.pins[p]; return !!x && x.v === 0; }', '使わない pins 0 on the line', path)
+    await f.until("(id) => { const a = window.__mv; return a.plan.cuts.every((c) => (c.line === id) === !c.slots['text.jump']); }",
+                  'only that line loses 助詞・頭の字', line_id)
+    await f.settle(3)
+    f.check(await page.evaluate(DONE) == done3 + 1, 'one undo entry')
+    st = await page.evaluate(K_STATE, ljump)
+    f.check(st['segs'] == [False, False, True] and st['state'] == 'pinned', '使わない is selected and 固定: %r' % st)
+    await f.shot('kumi-line')
+    # under a work pin (かな詰め 90 %), the line's かな詰め keeps 自動 selected and shows where the value comes from
+    await page.evaluate("() => window.__mv.dispatch({ t: 'pin.set', path: 'work:text.kana', v: 0.9, by: 'user' }, { label: ['undo.pin', {}] })")
+    await f.settle(4)
+    st = await page.evaluate(K_STATE, lkana)
+    f.check(st and st['segs'] == [True, False, False] and st['state'] == 'inherited', 'この行のかな詰め: 自動 while inherited: %r' % st)
+    # 「すべて外す」 on 作品全体 returns every switch to the new work's default
+    await open_kumi(f)
+    f.check((await page.evaluate(K_STATE, kana))['state'] == 'pinned', 'かなを詰める shows the work pin')
+    await page.evaluate("(l) => [...document.querySelectorAll('.lh-btn[aria-haspopup=\"menu\"]')].find((b) => b.textContent.includes(l)).click()",
+                        await page.evaluate("() => window.__mv.t('lh.pins', { n: 2 })"))
+    await f.until("() => !!document.querySelector('.popover.menu .menu-item')", 'the pins menu opens')
+    await page.evaluate("(l) => [...document.querySelectorAll('.popover.menu .menu-item')].find((x) => x.textContent.trim() === l).click()",
+                        await page.evaluate("() => window.__mv.t('lh.unpinAll')"))
+    await f.until("() => Object.keys(window.__mv.doc.pins).length === 0", 'すべて外す clears the pins')
+    await f.until("() => window.__mv.plan.cuts.every((c) => c.slots['text.kana'] && c.slots['text.kana'].v === 0.7 && c.slots['text.jump'])",
+                  'the cuts are back to the new work\'s typesetting')
+    await f.settle(3)
+    st = await page.evaluate(K_STATE, kana)
+    f.check(st['checked'] is True and st['state'] == 'auto', 'the switch is on and 自動 again: %r' % st)
+    await f.undo_all(done0, doc0)
+    # a work opened from a file carries no look.gen: typesetting is off, and so are its switches
+    await page.evaluate("""async () => { const D = MV.use('core/doc'), C = MV.use('core/commands');
+      const doc = C.reduce(D.defaultDoc(), { t: 'lyrics.set', text: '君の声が聞こえる\\nStationで待つ\\n夜明けまで' });
+      await window.__mv.io.openFiles([new File([D.serialize({ doc, side: D.defaultSide() })], 'older.json', { type: 'application/json' })]);
+      window.__mv.pause(); }""")
+    await f.until("() => window.__mv.doc.sheet.rows[0].src === '君の声が聞こえる' && window.__mv.plan && window.__mv.plan.lines.length === 3",
+                  'the older work opens', timeout=10000)
+    f.check(await page.evaluate("() => window.__mv.doc.look.gen") is None, 'no look.gen in an opened file')
+    pl = await page.evaluate(KUMI_PLAN)
+    f.check(all(pl[s]['on'] == 0 for s in ('text.kana', 'text.jump', 'text.latin', 'text.head')), 'no typesetting is planned: %r' % pl)
+    await open_kumi(f)
+    for slot in ('text.kana', 'text.jump', 'text.latin'):
+        st = await page.evaluate(K_STATE, K_ROW % ('work/kumi/' + slot))
+        f.check(st and st['checked'] is False and st['state'] == 'auto', '%s is off (自動) in an older work: %r' % (slot, st))
+    f.check(await page.locator(kana_power).count() == 0 and await page.locator(K_ROW % 'work/kumi/text.head').count() == 0,
+            'no strength and no 大きくする字 while off')
+    await f.shot('kumi-older')
+    # one switch on in the older work: a work pin at the new-work strength, one entry
+    done4 = await page.evaluate(DONE)
+    await page.click(K_ROW % 'work/kumi/text.latin' + ' .w-toggle')
+    await f.until("() => { const p = window.__mv.doc.pins['work:text.latin']; return !!p && p.v === 0.5; }", 'on in an older work pins 0.5')
+    await f.settle(3)
+    f.check(await page.evaluate(DONE) == done4 + 1, 'one undo entry')
+    f.check(await page.locator(K_ROW % 'work/kumi/text.latin.power').count() == 1, 'its strength shows')
+
+
+FLOWS += [('kumi', flow_kumi, False)]
 
 
 async def run(browser, base, rel, lang, only, shots):
