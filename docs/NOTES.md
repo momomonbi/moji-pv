@@ -9300,6 +9300,14 @@ large single renders.
   sample. Frames 0.15 s before the end often show the transition out already, which replaces the exit as designed; no
   flash was seen on a キメ cut without 見せ場.
 
+**Checks (phase 2).** `python3 build.py --check`: 220 modules OK; the pages rebuilt from the final sources give no
+diff. `node tests/update_golden.js --check`: the six existing goldens and `project_kime.json` match. Full Node suite:
+1781 of 1787 pass; the failures are "planning speed: re-planning project_long after an edit" (fails on the base too) and
+five conformance build-time budgets (60–90 ms against 60 ms under a load average of 6–8), which pass on the rerun
+(243 / 243); parts and engine are untouched. Browser: `ui_flows.py` first_run (ja, en), first_run_keys, drill, pin,
+keys, values, ai_looks, cutkeys, repeat, areas, tap and kime all ok; `ui_layout.py` OK (584 layouts); `csp.py` OK (0
+violations); `i18n_pages.py` OK (56 screens per page).
+
 <!-- PV22 P4 notes -->
 
 <!-- PV22 P5 notes -->
