@@ -618,6 +618,12 @@ test('explain: the キメ reasons, the masked alternatives, the rules of the cut
   const p = plan(doc);
   assert.deepEqual(codes(whyOf(doc, p, 'line/r5:split')), ['rule:kime.split']);
   assert.deepEqual(codes(whyOf(doc, p, 'line/r4:split')), ['rule:marks']);
+  // the inspector's 区切り: automatic on the line kept whole (its '/' marks have no effect there), 記号 elsewhere
+  const sel = (id) => ({ level: 'line', ids: [id] });
+  assert.equal(FI.fieldState(doc, p, sel('r5'), 'line/r5:split', { registry: CAT }).state, 'auto');
+  assert.equal(FI.fieldState(doc, p, sel('r4'), 'line/r4:split', { registry: CAT }).state, 'mark');
+  const unmarked = corpus.project('basic').doc;
+  assert.equal(FI.fieldState(unmarked, plan(unmarked), sel('r5'), 'line/r5:split', { registry: CAT }).state, 'mark');
 });
 
 // --- 15. determinism and the re-planning caches ----------------------------------------------------------------------------------

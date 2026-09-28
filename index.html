@@ -1,6 +1,6 @@
 <!doctype html><html lang="ja"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-vfYaE2f+NoS3D5TroLP5FMAGfxrjrE0TX3pUYddrSok='; style-src 'sha256-bqU91oJqdJJ1KHUzYFa+dZ+egQxVjNFQtuHCW7/O8oo=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-blng8R5XekIHRiAWoZCds1sSuiX2qxzuv+nUpF9Fo40='; style-src 'sha256-bqU91oJqdJJ1KHUzYFa+dZ+egQxVjNFQtuHCW7/O8oo=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
 <title>文字PVメーカー</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -23003,6 +23003,8 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
     const line = cutIndex(plan).lines.get(lineId);
     if (parsed.slot === 'start' && line && line.by && line.by.start === 'lrc') return { from: 'mark' };
     if (parsed.slot === 'split' && line) {
+      // キメ (DESIGN_2_2 §3): a キメ line that plays as one cut ignores its '/' marks (automatic; なぜ: kime.split)
+      if (line.cuts.length === 1 && lineKime(plan, line)) return { from: 'auto' };
       const row = doc.sheet.rows.find((r) => r.id === line.row);
       if (row && LY.parseRow(row.src).pieces) return { from: 'mark' };
     }

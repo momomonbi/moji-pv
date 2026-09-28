@@ -387,6 +387,8 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
     const line = cutIndex(plan).lines.get(lineId);
     if (parsed.slot === 'start' && line && line.by && line.by.start === 'lrc') return { from: 'mark' };
     if (parsed.slot === 'split' && line) {
+      // キメ (DESIGN_2_2 §3): a キメ line that plays as one cut ignores its '/' marks (automatic; なぜ: kime.split)
+      if (line.cuts.length === 1 && lineKime(plan, line)) return { from: 'auto' };
       const row = doc.sheet.rows.find((r) => r.id === line.row);
       if (row && LY.parseRow(row.src).pieces) return { from: 'mark' };
     }

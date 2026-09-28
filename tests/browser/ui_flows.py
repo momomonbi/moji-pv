@@ -63,6 +63,10 @@ v2.1 editor-ready output (package H.3, DESIGN_2_1 §13.12):
   extreme_keys               the same by keyboard only (Space, Enter, Esc, the 激しさ radios, 次から表示しない)
   ai_extreme                 「カメラワークをAIに任せる」 with the 「EXTREME」 chip: the notice, the EXTREME request, the review's
                              カメラ EXTREME row and moves, apply = one undo step
+キメ (PV22 P3, DESIGN_2_2 §3):
+  kime                       行 › 文字の記号 › キメ: the toggle (one entry, one cut), the count and the same-lyric button (one
+                             entry), the gutter's キ badge and dimmed '/', the 記法 row, いろいろ on several lines, すべての固定を
+                             外す keeps the mark, 作品全体 › キメの前を静かにする off/on
 v2.1 「くり返しの行をそろえる」 (DESIGN_2_1 §4.10):
   repeat                     作品全体 › 見た目: the switch (off, its note, no 振り直し) pins the opt-in, the second サビ takes the
                              first one's layouts, lenses and shots, a repeated cut's なぜ names its first copy, off clears it
@@ -5042,6 +5046,172 @@ FLOWS += [('media', flow_media, True), ('library', flow_library, False), ('missi
 FLOWS += [('kit', flow_kit, False), ('kit_keys', flow_kit_keys, False), ('webm', flow_webm, False), ('subtitles', flow_subtitles, False)]
 
 
+# --- キメ (PV22 P3, DESIGN_2_2 §3) -------------------------------------------------------------------------------------
+
+# The lyrics of the キメ flow: a line cut in two by '/' that is sung again later (the same-lyric button).
+KIME_LYRICS = '\n'.join([
+    '[ti:朝の窓]', '# Aメロ', '窓をあけて/光を入れる', 'まだ眠い街に/*おはよう*', '坂道を下って/駅まで歩く', '', '# サビ', '今日も/ここから始まる!',
+    '小さな/一歩で', '', '# サビ', '今日も/ここから始まる!', '小さな/一歩で',
+])
+KIME_ROW = '[data-mount="inspector"] .frow[data-field="%s"]'
+KIME_INFO = '[data-mount="inspector"] [data-custom="kimeInfo"] [data-kime="%s"]'
+# A line's cuts in the plan, whether one is the キメ cut, the pin and the calm levels of the work.
+KIME_STATE = """(id) => { const a = window.__mv, p = a.plan, l = p.lines.find((x) => x.id === id), pin = a.doc.pins['line/' + id + ':kime'];
+  const cuts = l.cuts.map((k) => p.cuts.find((c) => c.key === k));
+  return { cuts: cuts.length, kime: cuts.some((c) => c.feat.kime), pin: pin ? pin.v : null, by: pin ? pin.by : null, row: l.row,
+    calm: p.cuts.filter((c) => c.feat.calm).length }; }"""
+
+
+async def flow_kime(f, lang):
+    """行 › 文字の記号 › キメ (DESIGN_2_2 §3): the toggle (its note, no 振り直し) pins the line in one undo entry and the line
+    plays as one cut; the work's count appears under it and 「同じ歌詞の行もキメにする」 marks the other copy in one entry (Ctrl+Z
+    takes both back together); the gutter's キ badge and the dimmed '/' of the one-cut line; the 記法 row; several lines show
+    いろいろ and one click marks them all (one entry); すべての固定を外す keeps the mark; 作品全体 › 見た目 › 詳しい設定 ›
+    キメの前を静かにする (on by default: off pins false and the calm levels go, on clears the pin); turning キメ off returns
+    the line's cuts."""
+    page = f.page
+    done0, doc0 = await with_lyrics(f, KIME_LYRICS)
+    ids = await page.evaluate("() => window.__mv.plan.lines.filter((l) => l.text === '小さな一歩で').map((l) => l.id)")
+    other = await page.evaluate("() => window.__mv.plan.lines.find((l) => l.text === '窓をあけて光を入れる').id")
+    if not f.check(len(ids) == 2, 'the line is sung twice: %r' % ids):
+        return
+    a, b = ids
+    st = await page.evaluate(KIME_STATE, a)
+    f.check(st['cuts'] == 2 and not st['kime'], 'before the mark the / splits the line: %r' % st)
+    # a pin on the second piece (its layout): hidden once the mark joins the pieces, listed with 付け直す
+    piece = await page.evaluate("""(id) => { const a = window.__mv, l = a.plan.lines.find((x) => x.id === id), key = l.cuts[1];
+      a.dispatch({ t: 'pin.set', path: 'cut/' + key + ':arrange', v: 'centerAnchor', by: 'user', sig: a.svc.pinSig(a.plan, key) },
+        { label: ['undo.pin', { field: '', scope: '' }] });
+      return key; }""", a)
+    await open_line(f, a)
+    row = KIME_ROW % 'line/marks/kime'
+    box = row + ' input[role="switch"]'
+    note = await page.text_content(row + ' .fr-note')
+    f.check(note == await page.evaluate("() => window.__mv.t('fld.kime.note')"), 'the toggle says what it does: %r' % note[:30])
+    f.check(not await page.is_checked(box), 'off by default')
+    f.check(await page.locator(row + ' [data-role="dice"]').count() == 0, 'a mark, not drawn: no 振り直し')
+    f.check(await page.locator(KIME_INFO % 'count').count() == 0, 'no count while the work has no キメ line')
+    done1 = await page.evaluate(DONE)
+    await page.click(row + ' .w-toggle')
+    await f.until("(id) => { const p = window.__mv.doc.pins['line/' + id + ':kime']; return !!p && p.v === true; }", 'the toggle pins the mark', a)
+    await f.settle(3)
+    f.check(await page.evaluate(DONE) == done1 + 1, 'one undo entry')
+    f.check(await page.is_checked(box), 'the toggle shows on')
+    st = await page.evaluate(KIME_STATE, a)
+    f.check(st['cuts'] == 1 and st['kime'] and st['calm'] > 0, 'the line plays as one キメ cut, the cuts before it are calm: %r' % st)
+    await f.until("(s) => !!document.querySelector(s)", 'the work\'s count shows', KIME_INFO % 'count')
+    count = await page.text_content(KIME_INFO % 'count')
+    f.check(count == await page.evaluate("() => window.__mv.t('fld.kime.count', { n: 1 })"), 'この作品のキメ: 1行 — %r' % count)
+    same = KIME_INFO % 'same'
+    label = await page.text_content(same) if await page.locator(same).count() else None
+    f.check(label == await page.evaluate("() => window.__mv.t('fld.kime.same', { n: 1 })"), 'the same lyric is offered: %r' % label)
+    await f.shot('kime-on')
+    await page.click(same)
+    await f.until("(id) => { const p = window.__mv.doc.pins['line/' + id + ':kime']; return !!p && p.v === true; }", 'the copy is marked', b)
+    await f.settle(3)
+    f.check(await page.evaluate(DONE) == done1 + 2, 'the same-lyric button is one undo entry')
+    f.check(await page.locator(same).count() == 0, 'nothing left to offer once every copy is marked')
+    count = await page.text_content(KIME_INFO % 'count')
+    f.check(count == await page.evaluate("() => window.__mv.t('fld.kime.count', { n: 2 })"), 'the count follows: %r' % count)
+    await f.blur()
+    await page.keyboard.press('Control+z')
+    await f.until("(id) => !window.__mv.doc.pins['line/' + id + ':kime']", 'Ctrl+Z takes the copy\'s mark back', b)
+    st = await page.evaluate(KIME_STATE, a)
+    f.check(st['pin'] is True, 'the first mark stays: %r' % st)
+    await page.keyboard.press('Control+Shift+z')
+    await f.until("(id) => !!window.__mv.doc.pins['line/' + id + ':kime']", 'redo marks the copy again', b)
+    # ① 歌詞: the gutter's キ badge and the dimmed '/' of a one-cut キメ line; the 記法 row
+    await page.evaluate("() => window.__mv.goStep('lyrics')")
+    await f.until("(r) => !!document.querySelector('.le-g[data-row=\"' + r + '\"] .g-kime')", 'the gutter shows キ', st['row'])
+    await f.settle(3)
+    badge = await page.text_content('.le-g[data-row="%s"] .g-kime' % st['row'])
+    f.check(badge == await page.evaluate("() => window.__mv.t('lyr.kimeBadge')"), 'the badge: %r' % badge)
+    f.check(await page.locator('.le-g[data-row="%s"] .g-kime' % (await page.evaluate(KIME_STATE, other))['row']).count() == 0,
+            'an unmarked line has no badge')
+    dim = await page.evaluate("() => (typeof CSS !== 'undefined' && CSS.highlights && CSS.highlights.get('tok-cutOff')) ? CSS.highlights.get('tok-cutOff').size : -1")
+    f.check(dim == -1 or dim >= 2, 'the / of both one-cut キメ lines are drawn dimmed (%d ranges)' % dim)
+    await f.shot('kime-gutter')
+    await page.click('[data-ctl="syntax"]')
+    marks = await page.evaluate("() => [...document.querySelectorAll('#syntax-help dt')].map((x) => x.textContent)")
+    f.check(await page.evaluate("() => window.__mv.t('syn.kime.mark')") in marks, 'the 記法 list names キメ: %r' % marks)
+    await page.click('[data-ctl="syntax"]')
+    # several lines: いろいろ, then one click marks every selected line (one entry); Ctrl+Z takes it back
+    await page.evaluate("(ids) => window.__mv.select({ level: 'line', ids }, { from: 'crumbs', open: true })", [a, other])
+    await f.until("() => window.__mv.view.state.panel === 'details'", '詳細 opens')
+    await f.settle(3)
+    mrow = KIME_ROW % 'lines/shift/kime'
+    mbox = mrow + ' input[role="switch"]'
+    await f.until("(s) => !!document.querySelector(s)", 'the several-lines page has the キメ toggle', mbox)
+    f.check(await page.evaluate("(s) => document.querySelector(s).indeterminate", mbox), 'mixed lines show いろいろ')
+    done2 = await page.evaluate(DONE)
+    await page.click(mrow + ' .w-toggle')
+    await f.until("(id) => !!window.__mv.doc.pins['line/' + id + ':kime']", 'one click marks every selected line', other)
+    await f.settle(3)
+    f.check(await page.evaluate(DONE) == done2 + 1, 'one undo entry for the lines')
+    f.check(await page.is_checked(mbox) and not await page.evaluate("(s) => document.querySelector(s).indeterminate", mbox),
+            'the toggle shows on for all')
+    await f.blur()
+    await page.keyboard.press('Control+z')
+    await f.until("(id) => !window.__mv.doc.pins['line/' + id + ':kime']", 'Ctrl+Z takes the lines back', other)
+    # the piece's pin is hidden (not applied to the キメ cut) and listed under 作品全体 › その他 with 付け直す
+    hidden = await page.evaluate("""(k) => window.__mv.plan.warnings.filter((w) => w.code === 'shadowed-pin' && w.path === 'cut/' + k + ':arrange').length""", piece)
+    f.check(hidden == 1, 'the piece\'s pin is reported as hidden (%d)' % hidden)
+    one = await page.evaluate("(id) => { const p = window.__mv.plan, l = p.lines.find((x) => x.id === id); return p.cuts.find((c) => c.key === l.cuts[0]).slots.arrange; }", a)
+    f.check(one['v'] != 'centerAnchor' or not one['from'].startswith('pin'), 'the hidden pin does not decide the キメ cut: %r' % one)
+    await page.evaluate("() => window.__mv.dispatch({ t: 'pin.set', path: 'work:amount.motion', v: 0.4, by: 'user' }, { label: ['undo.pin', { field: '', scope: '' }] })")
+    await page.evaluate("() => window.__mv.select({ level: 'work' }, { from: 'header', open: true })")
+    await f.settle(3)
+    await open_section(f, 'other')
+    reattach = await page.evaluate("() => window.__mv.t('insp.reattach')")
+    orphan = '[data-mount="inspector"] .insp-orphan'
+    f.check(await page.locator(orphan).count() >= 1, 'the hidden pin is listed')
+    done4 = await page.evaluate(DONE)
+    await page.click(orphan + ' button:has-text("%s")' % reattach)
+    await f.until("""(id) => { const a = window.__mv, l = a.plan.lines.find((x) => x.id === id), d = a.plan.cuts.find((c) => c.key === l.cuts[0]).slots.arrange;
+      return d.v === 'centerAnchor' && d.from === 'pin:cut'; }""", '付け直す puts the pin on the キメ cut', a)
+    f.check(await page.evaluate(DONE) == done4 + 1, '付け直す is one undo entry')
+    f.check(await page.evaluate("(k) => !window.__mv.doc.pins['cut/' + k + ':arrange']", piece), 'the piece\'s pin moved')
+    f.check(await page.evaluate("() => !window.__mv.plan.warnings.some((w) => w.code === 'shadowed-pin')"), 'nothing is hidden any more')
+    # すべての固定を外す keeps the marks (a setting, not a look choice)
+    unpin = await page.evaluate("() => window.__mv.t('insp.unpinAll')")
+    await page.click('[data-mount="inspector"] .insp-other button:has-text("%s")' % unpin)
+    await f.until("() => !window.__mv.doc.pins['work:amount.motion']", 'すべての固定を外す removes the other pin')
+    st = await page.evaluate(KIME_STATE, a)
+    f.check(st['pin'] is True, 'すべての固定を外す keeps the キメ mark: %r' % st)
+    # 作品全体 › 見た目 › 詳しい設定 › キメの前を静かにする
+    await open_section(f, 'look')
+    await page.evaluate("""() => { const d = document.querySelector('[data-mount="inspector"] .isec[data-sec="look"] details.isec-more');
+      if (d) d.open = true; }""")
+    await f.settle(2)
+    crow = KIME_ROW % 'work/look/kime.calm'
+    cbox = crow + ' input[role="switch"]'
+    if f.check(await page.locator(cbox).count() == 1, 'the calm switch is under 詳しい設定'):
+        f.check(await page.is_checked(cbox), 'on by default')
+        cnote = await page.text_content(crow + ' .fr-note')
+        f.check(cnote == await page.evaluate("() => window.__mv.t('fld.kimeCalm.note')"), 'the switch says what it does')
+        done3 = await page.evaluate(DONE)
+        await page.click(crow + ' .w-toggle')
+        await f.until("() => { const p = window.__mv.doc.pins['work:kime.calm']; return !!p && p.v === false; }", 'off pins false')
+        await f.settle(3)
+        f.check(await page.evaluate(DONE) == done3 + 1, 'one undo entry')
+        f.check(not await page.is_checked(cbox), 'the switch shows off')
+        st = await page.evaluate(KIME_STATE, a)
+        f.check(st['calm'] == 0, 'no calm cut while it is off: %r' % st)
+        await page.click(crow + ' .w-toggle')
+        await f.until("() => !window.__mv.doc.pins['work:kime.calm']", 'on clears the pin')
+        await f.settle(3)
+        f.check(await page.is_checked(cbox), 'the switch shows on (自動)')
+        f.check((await page.evaluate(KIME_STATE, a))['calm'] > 0, 'the calm cuts come back')
+    # turning キメ off returns the line's cuts and removes the badge
+    await open_line(f, a)
+    await page.click(row + ' .w-toggle')
+    await f.until("(id) => !window.__mv.doc.pins['line/' + id + ':kime']", 'off clears the mark', a)
+    await f.settle(3)
+    st = await page.evaluate(KIME_STATE, a)
+    f.check(st['cuts'] == 2 and not st['kime'], 'the / splits the line again: %r' % st)
+    await f.undo_all(done0, doc0)
+
+
 # --- カメラ EXTREME (DESIGN_EXTREME §2.6, §3.5, §5.3) -----------------------------------------------------------------
 
 X_ROW = '[data-mount="inspector"] .frow[data-field="%s"]'
@@ -5271,6 +5441,8 @@ async def flow_ai_extreme(f, lang):
 
 # カメラ EXTREME (DESIGN_EXTREME §5.3).
 FLOWS += [('extreme', flow_extreme, False), ('extreme_keys', flow_extreme_keys, False), ('ai_extreme', flow_ai_extreme, False)]
+# キメ (PV22 P3, DESIGN_2_2 §3)
+FLOWS += [('kime', flow_kime, False)]
 
 
 async def run(browser, base, rel, lang, only, shots):
