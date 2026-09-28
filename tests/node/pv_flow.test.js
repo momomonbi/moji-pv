@@ -512,7 +512,7 @@ test('the framed shots\' sides are the engine\'s: driftOff sets the text right, 
 
 // The Plan's view of the rule: the cut's direction on each axis from its parts (directions), then its framed shot.
 function shotRule(p, doc, al) {
-  const out = { alt: [0, 0], same: [0, 0], copy: [0, 0], restart: 0, mirrored: 0, shots: 0 };
+  const out = { alt: [0, 0], same: [0, 0], copy: [0, 0], pinned: [0, 0], restart: 0, mirrored: 0, shots: 0 };
   const finals = [];
   const shown = new Map();
   for (const c of p.cuts) {
@@ -530,11 +530,16 @@ function shotRule(p, doc, al) {
       else if (own[sd.axis] !== 0) { out.same[1]++; if (own[sd.axis] === sd.s) out.same[0]++; }
       else if (FL.restartAt(doc.look.seed, part, c.key)) out.restart++;
       else {
-        let prev = 0;
-        for (let k = 1; k <= FL.LOOKBACK && !prev; k++) prev = finals.length >= k ? finals[finals.length - k][sd.axis] : 0;
+        let prev = 0, byPin = false;
+        for (let k = 1; k <= FL.LOOKBACK && !prev; k++) {
+          const f = finals.length >= k ? finals[finals.length - k] : null;
+          prev = f ? f[sd.axis] : 0;
+          byPin = !!prev && !!f['pin' + sd.axis];
+        }
         if (prev) { out.alt[1]++; if (sd.s === -prev) out.alt[0]++; }
+        if (byPin) { out.pinned[1]++; if (sd.s === -prev) out.pinned[0]++; }
       }
-      if (!own[sd.axis]) own[sd.axis] = sd.s;
+      if (!own[sd.axis]) { own[sd.axis] = sd.s; if (d.from !== 'auto') own['pin' + sd.axis] = true; }
     }
     finals.push(own);
     shown.set(c.key, d ? d.v : null);
@@ -543,14 +548,18 @@ function shotRule(p, doc, al) {
 }
 
 test('the framed shots alternate their side against the cuts before them, follow the rest of their cut, and an aligned copy its source', (t) => {
-  const sum = { alt: [0, 0], same: [0, 0], copy: [0, 0], restart: 0, mirrored: 0, shots: 0 };
+  const sum = { alt: [0, 0], same: [0, 0], copy: [0, 0], pinned: [0, 0], restart: 0, mirrored: 0, shots: 0 };
   let offMirrored = 0;
   for (const { doc } of corpus.corpus(6, ['16:9', '9:16', '1:1'])) {
-    for (const d of [gen1(doc), gen1(doc, {}, true)]) {
+    // (and with framed shots pinned on every third line: a pinned shot gives its cut the side the next ones turn from)
+    const lines = fresh(gen1(doc)).lines;
+    const pins = {};
+    lines.forEach((l, i) => { if (i % 3 === 0) pins['line/' + l.id + ':cam.shot'] = ON(i % 2 ? 'tiltHold' : 'driftOff~m'); });
+    for (const d of [gen1(doc), gen1(doc, {}, true), gen1(doc, pins)]) {
       const p = fresh(d);
       const al = CA.alignments({ ix: PINS.index(d.pins), doc: d }, p.cuts) || new Map();
       const r = shotRule(p, d, al);
-      for (const k of ['alt', 'same', 'copy']) { sum[k][0] += r[k][0]; sum[k][1] += r[k][1]; }
+      for (const k of ['alt', 'same', 'copy', 'pinned']) { sum[k][0] += r[k][0]; sum[k][1] += r[k][1]; }
       sum.restart += r.restart; sum.mirrored += r.mirrored; sum.shots += r.shots;
     }
     const off = fresh(gen1(doc, { 'work:pv.alternate': ON(false) }));
@@ -559,10 +568,11 @@ test('the framed shots alternate their side against the cuts before them, follow
   }
   const rate = (x) => x[0] / x[1];
   t.diagnostic('framed shots ' + sum.shots + ', mirrored ' + sum.mirrored + '; against the cuts before ' + sum.alt.join('/') + ', with the cut '
-    + sum.same.join('/') + ', aligned copies ' + sum.copy.join('/') + ', restarts ' + sum.restart);
+    + sum.same.join('/') + ', aligned copies ' + sum.copy.join('/') + ', after a pinned shot ' + sum.pinned.join('/') + ', restarts ' + sum.restart);
   assert.ok(sum.alt[1] >= 50 && rate(sum.alt) >= 0.9, 'alternation ' + sum.alt.join('/'));
   assert.ok(sum.same[1] >= 20 && rate(sum.same) >= 0.9, 'within the cut ' + sum.same.join('/'));
   assert.ok(sum.copy[1] >= 5 && rate(sum.copy) === 1, 'aligned copies ' + sum.copy.join('/'));
+  assert.ok(sum.pinned[1] >= 10 && rate(sum.pinned) >= 0.9, 'after a pinned framed shot ' + sum.pinned.join('/'));
   assert.ok(sum.mirrored > 50);
   assert.equal(offMirrored, 0, 'without the switch no framed shot is mirrored');
 });
@@ -647,14 +657,18 @@ test('rerolls: a first copy\'s reroll leaves the mirrors of its far repeats; a r
 // push-in after a pull-back); cuts with a marked word keep their push-in weight.
 test('push-ins and pull-backs alternate (≥ 10 points more often); marked words keep their push-in', (t) => {
   const measure = (extra) => {
-    const z = { inOut: 0, in: 0, outIn: 0, out: 0, emph: 0, push: 0 };
+    const z = { inOut: 0, in: 0, outIn: 0, out: 0, emph: 0, push: 0, emphIn: 0, pushIn: 0 };
     for (const { doc } of corpus.corpus(6, ['16:9', '9:16', '1:1'])) {
       const p = fresh(gen1(doc, extra));
       let prev = null;
       for (const c of p.cuts) {
         const d = c.slots['cam.shot'];
         const cls = d ? FL.zoomClass(d.v) : null;
-        if (c.line && c.feat.emph) { z.emph++; if (d && d.v === 'pushWord') z.push++; }
+        if (c.line && c.feat.emph) {
+          z.emph++;
+          if (d && d.v === 'pushWord') z.push++;
+          if (prev === 'in' && d && d.from === 'auto') { z.emphIn++; if (d.v === 'pushWord') z.pushIn++; }
+        }
         else if (c.line && d && d.from === 'auto') {
           if (prev === 'in') { z.in++; if (cls === 'out') z.inOut++; }
           else if (prev === 'out') { z.out++; if (cls === 'in') z.outIn++; }
@@ -668,10 +682,12 @@ test('push-ins and pull-backs alternate (≥ 10 points more often); marked words
   const pct = (a, b) => 100 * a / b;
   t.diagnostic('pull-back after a push-in ' + pct(on.inOut, on.in).toFixed(1) + ' / ' + pct(off.inOut, off.in).toFixed(1) + ' %, push-in after a pull-back '
     + pct(on.outIn, on.out).toFixed(1) + ' / ' + pct(off.outIn, off.out).toFixed(1) + ' %, pushWord on marked words ' + pct(on.push, on.emph).toFixed(1)
-    + ' / ' + pct(off.push, off.emph).toFixed(1) + ' %');
+    + ' / ' + pct(off.push, off.emph).toFixed(1) + ' % (right after a push-in ' + pct(on.pushIn, on.emphIn).toFixed(1) + ' / '
+    + pct(off.pushIn, off.emphIn).toFixed(1) + ' %)');
   assert.ok(on.in >= 300 && pct(on.inOut, on.in) - pct(off.inOut, off.in) >= 10, 'pull-backs after push-ins');
   assert.ok(on.out >= 100 && pct(on.outIn, on.out) - pct(off.outIn, off.out) >= 10, 'push-ins after pull-backs');
   assert.ok(on.emph >= 100 && Math.abs(pct(on.push, on.emph) - pct(off.push, off.emph)) <= 3, 'marked words');
+  assert.ok(on.emphIn >= 50 && pct(on.pushIn, on.emphIn) >= pct(off.pushIn, off.emphIn) - 4, 'a marked word right after a push-in');
   assert.equal(FL.zoomFactor(null, 'pullReveal'), 1);
   assert.equal(FL.zoomFactor('in', 'none'), 1);
   assert.ok(FL.zoomFactor('in', 'pullReveal') > 1 && FL.zoomFactor('in', 'settle') < 1 && FL.zoomFactor('out', 'pushWord') > 1);
