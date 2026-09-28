@@ -1,6 +1,6 @@
 <!doctype html><html lang="ja"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-AJQ6BBoW0Ncea2e1cXNVBDftrSmV3vZSF9kjSX/bqK4='; style-src 'sha256-CBzRvq4sWr3CF69hafDp1l8UkHnSy18JQMXGJJhPDYI=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-B28Fv5vzrZm9X2z6aLDdSGG1lPCW9X4SXQ5t3cFptP4='; style-src 'sha256-CBzRvq4sWr3CF69hafDp1l8UkHnSy18JQMXGJJhPDYI=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
 <title>文字PVメーカー</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -3344,7 +3344,8 @@ MV.def('core/lyrics', ['core/script'], (S) => {
   const ESCAPABLE = '/*|!#[\\';
   const KANA = /[\u3041-\u3096\u309d-\u309f\u30a1-\u30fa\u30fc-\u30ff\u31f0-\u31ff\uff66-\uff9d]/;
   const SPACE = /\s/;
-  const FIELD_KEYS = ['stamps', 'text', 'pieces', 'emph', 'impact', 'note'];
+  // 'words' (DESIGN_2_2 §6): the enhanced-LRC word tags of a row, kept as data ([[at, t], …]; absent without tags).
+  const FIELD_KEYS = ['stamps', 'text', 'pieces', 'emph', 'impact', 'note', 'words'];
 
   // ---- parseRow ------------------------------------------------------------------------------------------------
 
@@ -3363,16 +3364,40 @@ MV.def('core/lyrics', ['core/script'], (S) => {
       stamps.push(stampSeconds(m));
       rest = rest.slice(m[0].length);
     }
-    return makeRow('lyric', Object.assign(scanText(rest.replace(WORD_TAG, '')), { stamps, hint }));
+    const tags = stripTags(rest);
+    return makeRow('lyric', Object.assign(scanText(tags.text, tags.at.length ? tags : null), { stamps, hint }));
   }
 
+  // Enhanced-LRC word tags <mm:ss.xx> (DESIGN_2_2 §6): removed from the text as v2 did (the stripped text is exactly
+  // rest.replace(WORD_TAG, '')), with where each stood: at[k] = its index in the stripped text, t[k] = its seconds.
+  function stripTags(rest) {
+    const at = [], t = [];
+    let text = '', last = 0;
+    const re = new RegExp(WORD_TAG.source, 'g');
+    for (let m = re.exec(rest); m; m = re.exec(rest)) {
+      text += rest.slice(last, m.index);
+      last = m.index + m[0].length;
+      at.push(text.length);
+      t.push(tagSeconds(m[0]));
+    }
+    return { text: text + rest.slice(last), at, t };
+  }
+
+  function tagSeconds(tag) {
+    const m = /^<(\d{1,3}):(\d{1,2})(?:[.:](\d{1,3}))?>$/.exec(tag);
+    return Number(Number(m[1]) * 60 + Number(m[2]) + '.' + (m[3] || '0'));
+  }
+
+  // `words` is present only on a lyric row with at least one word tag (so the other rows keep their exact keys).
   function makeRow(kind, f) {
     const text = f.text || '';
-    return {
+    const row = {
       kind, stamps: f.stamps || [], text, pieces: f.pieces || null, emph: f.emph || [], impact: !!f.impact,
       note: f.note === undefined ? null : f.note, heading: f.heading === undefined ? null : f.heading,
       script: S.lineScript(text, f.hint), tag: f.tag || null, value: f.value === undefined ? null : f.value,
     };
+    if (f.words && f.words.length) row.words = f.words;
+    return row;
   }
 
   // '[mm:ss.xx]' parts → seconds; the fraction is read as decimal digits so 41.20 gives exactly 41.2.
@@ -3382,11 +3407,15 @@ MV.def('core/lyrics', ['core/script'], (S) => {
   }
 
   // Splits text into single UTF-16 units; `mark[i]` is true for an unescaped / * | ! (the only marks inside a line).
+  // tokAt[p] = the token that source index p starts (or belongs to), tokAt[rest.length] = the token count: where a
+  // word tag stood among the tokens.
   function tokenize(rest) {
-    const chars = [], mark = [];
+    const chars = [], mark = [], tokAt = new Int32Array(rest.length + 1);
     for (let i = 0; i < rest.length; i++) {
+      tokAt[i] = chars.length;
       const c = rest[i];
       if (c === '\\' && i + 1 < rest.length && ESCAPABLE.includes(rest[i + 1])) {
+        tokAt[i + 1] = chars.length;
         chars.push(rest[++i]);
         mark.push(false);
       } else {
@@ -3394,13 +3423,15 @@ MV.def('core/lyrics', ['core/script'], (S) => {
         mark.push(c === '/' || c === '*' || c === '|' || c === '!');
       }
     }
-    return { chars, mark };
+    tokAt[rest.length] = chars.length;
+    return { chars, mark, tokAt };
   }
 
   function isSpaceToken(tok, i) { return !tok.mark[i] && SPACE.test(tok.chars[i]); }
 
-  // Rules 5–9 of §4.9.1 on the text after the stamps.
-  function scanText(rest) {
+  // Rules 5–9 of §4.9.1 on the text after the stamps. tags = stripTags(…) when the row had word tags: each is placed
+  // on the output text through the token maps (before the text → 0, after it → the end, where the singing ends).
+  function scanText(rest, tags) {
     const tok = tokenize(rest);
     const bar = tok.mark.findIndex((m, i) => m && tok.chars[i] === '|');
     const end0 = bar < 0 ? tok.chars.length : bar;
@@ -3411,10 +3442,15 @@ MV.def('core/lyrics', ['core/script'], (S) => {
     let impact = false;
     if (hi > lo && tok.mark[hi - 1] && tok.chars[hi - 1] === '!') { impact = true; hi--; }
     const body = build(tok, lo, hi);
-    return Object.assign(trimAndSnap(body), { impact, note });
+    const words = tags ? tags.at.map((p, k) => {
+      const ti = tok.tokAt[p];
+      return [ti <= lo ? 0 : ti >= hi ? -1 : body.outAt[ti - lo], tags.t[k]];
+    }) : null;
+    return Object.assign(trimAndSnap(body, words), { impact, note });
   }
 
-  // Builds plain text, piece boundaries and emphasis ranges from tokens [lo, hi).
+  // Builds plain text, piece boundaries and emphasis ranges from tokens [lo, hi). outAt[i − lo] = the output length
+  // when token i is read (tokens a '/' consumes, the whitespace around it, included): where a word tag lands.
   function build(tok, lo, hi) {
     let stars = 0;
     for (let i = lo; i < hi; i++) if (tok.mark[i] && tok.chars[i] === '*') stars++;
@@ -3422,8 +3458,10 @@ MV.def('core/lyrics', ['core/script'], (S) => {
     const out = [];
     const cuts = [0];
     const emph = [];
+    const outAt = new Int32Array(Math.max(0, hi - lo) + 1);
     let open = -1, slashes = 0;
     for (let i = lo; i < hi; i++) {
+      outAt[i - lo] = out.length;
       const c = tok.chars[i];
       if (!tok.mark[i] || c === '!' || (c === '*' && starsLeft === 0)) { out.push(c); continue; }
       if (c === '*') {
@@ -3433,10 +3471,13 @@ MV.def('core/lyrics', ['core/script'], (S) => {
         continue;
       }
       slashes++;
+      const from = i;
       i = pieceBreak(tok, i, hi, out, cuts, emph);
+      for (let k = from + 1; k <= i; k++) outAt[k - lo] = out.length;
       if (open > out.length) open = out.length;
     }
-    return { text: out.join(''), cuts, emph, slashes };
+    outAt[Math.max(0, hi - lo)] = out.length;
+    return { text: out.join(''), cuts, emph, slashes, outAt };
   }
 
   // Rule 8 at one '/': whitespace directly around it collapses to one space kept at the end of the earlier piece.
@@ -3453,8 +3494,10 @@ MV.def('core/lyrics', ['core/script'], (S) => {
     return j;
   }
 
-  // Trims whitespace at both ends, shifts ranges, widens them to grapheme boundaries and drops empty pieces.
-  function trimAndSnap(body) {
+  // Trims whitespace at both ends, shifts ranges, widens them to grapheme boundaries and drops empty pieces. Word tags
+  // (rawWords [[out offset | −1 = end, t]]) are clipped to the text and snapped to a grapheme start (at === text.length:
+  // a tag after the last character, where the singing ends).
+  function trimAndSnap(body, rawWords) {
     const full = body.text;
     let a = 0, b = full.length;
     while (a < b && SPACE.test(full[a])) a++;
@@ -3477,7 +3520,9 @@ MV.def('core/lyrics', ['core/script'], (S) => {
       bounds.push(text.length);
       pieces = bounds.slice(1).map((y, k) => [bounds[k], y]);
     }
-    return { text, pieces, emph };
+    const words = rawWords && rawWords.length
+      ? rawWords.map(([x, t]) => [x < 0 ? text.length : S.snapToBoundary(offs, clip(x)), t]) : null;
+    return { text, pieces, emph, words };
   }
 
   // ---- sheet and lines -----------------------------------------------------------------------------------------
@@ -3540,12 +3585,19 @@ MV.def('core/lyrics', ['core/script'], (S) => {
     return null;
   }
 
+  // A row with word tags gives each of its lines `words` (the same array) and `wordsRef`: the time the tags are counted
+  // from (the row's first stamp, else its first tag), so every occurrence reads them relative to its own start.
   function makeLine(row, occ, stamp, pauseBefore, heading, lang) {
-    return {
+    const line = {
       id: occ === 0 ? row.id : row.id + '.' + occ, row: row.id, occ, index: -1,
       text: row.text, pieces: row.pieces, emph: row.emph, impact: row.impact, note: row.note, lang,
       stamp, pauseBefore, heading,
     };
+    if (row.words && row.words.length) {
+      line.words = row.words;
+      line.wordsRef = row.stamps.length ? row.stamps[0] : row.words[0][1];
+    }
+    return line;
   }
 
   // ---- renderRow -----------------------------------------------------------------------------------------------
@@ -3569,6 +3621,9 @@ MV.def('core/lyrics', ['core/script'], (S) => {
     return '[' + pad2(m) + ':' + pad2(Math.floor(rest / 1000)) + '.' + String(rest % 1000).padStart(3, '0') + ']';
   }
 
+  // A word tag '<mm:ss.xx>' (milliseconds when needed, like stampTag).
+  function tagText(seconds) { return '<' + stampTag(seconds).slice(1, -1) + '>'; }
+
   // Row text for the given fields (§4.9.2): stamps, then the text with marks inserted at their offsets, then '!' and
   // '|note'. Literal marks are escaped where they would be read as marks: / * | \ anywhere, a leading # or [, and a
   // final ! when impact is false. A single piece is written with a trailing '/', so it survives a round trip.
@@ -3577,7 +3632,7 @@ MV.def('core/lyrics', ['core/script'], (S) => {
     const stamps = f.stamps || [];
     const text = String(f.text || '');
     let out = stamps.map(stampTag).join('');
-    out += markedText(text, f.pieces || null, sortedRanges(f.emph), !!f.impact, stamps.length > 0);
+    out += markedText(text, f.pieces || null, sortedRanges(f.emph), !!f.impact, stamps.length > 0, f.words || null);
     if (Array.isArray(f.pieces) && f.pieces.length === 1 && text) out += '/';
     if (f.impact) out += '!';
     if (f.note !== null && f.note !== undefined && f.note !== '') out += '|' + String(f.note).replace(/\\/g, '\\\\');
@@ -3588,18 +3643,27 @@ MV.def('core/lyrics', ['core/script'], (S) => {
     return (list || []).map((r) => [r[0], r[1]]).sort((x, y) => x[0] - y[0] || x[1] - y[1]);
   }
 
-  function markedText(text, pieces, emph, impact, stamped) {
-    const opens = new Map(), closes = new Map(), cuts = new Set();
+  // Word tags are written at their offsets after the marks and before the character (a tag at the end before '!' and
+  // '|'); a tag outside the text goes to the nearer end.
+  function markedText(text, pieces, emph, impact, stamped, words) {
+    const opens = new Map(), closes = new Map(), cuts = new Set(), tags = new Map();
     for (const [a, b] of emph) {
       opens.set(a, (opens.get(a) || 0) + 1);
       closes.set(b, (closes.get(b) || 0) + 1);
     }
     if (Array.isArray(pieces)) for (let k = 1; k < pieces.length; k++) cuts.add(pieces[k][0]);
+    if (Array.isArray(words)) {
+      for (const w of words) {
+        const at = Math.min(Math.max(0, Math.trunc(Number(w[0])) || 0), text.length);
+        tags.set(at, (tags.get(at) || '') + tagText(w[1]));
+      }
+    }
     let out = '';
     for (let i = 0; i <= text.length; i++) {
       out += '*'.repeat(closes.get(i) || 0);
       if (cuts.has(i)) out += text[i - 1] === ' ' ? '/ ' : '/';
       out += '*'.repeat(opens.get(i) || 0);
+      if (tags.size) out += tags.get(i) || '';
       if (i < text.length) out += escapeChar(text, i, impact, stamped);
     }
     return out;
@@ -3614,9 +3678,17 @@ MV.def('core/lyrics', ['core/script'], (S) => {
   }
 
   // Renders `parsed` with `fields` merged over it; ok when parsing the result gives back exactly the merged fields.
+  // Word tags (DESIGN_2_2 §6) stay unless the text changes (then they are dropped, unless `fields` gives new ones), and
+  // move with the first stamp when it changes (shiftWords).
   function roundTrip(parsed, fields) {
     const merged = {};
     for (const k of FIELD_KEYS) merged[k] = fields && fields[k] !== undefined ? fields[k] : parsed[k];
+    if (!(fields && fields.words !== undefined)) {
+      if (merged.text !== parsed.text) merged.words = null;
+      else if (merged.words && (merged.stamps || []).length && (parsed.stamps || [])[0] !== merged.stamps[0]) {
+        merged.words = shiftWords(parsed, merged.stamps[0]);
+      }
+    }
     const src = renderRow(merged);
     const again = parseRow(src);
     const ok = (again.kind === 'lyric' || again.kind === 'blank') && sameFields(again, merged);
@@ -3629,7 +3701,21 @@ MV.def('core/lyrics', ['core/script'], (S) => {
       && samePairs(row.pieces, want.pieces || null)
       && samePairs(row.emph, sortedRanges(want.emph))
       && row.impact === !!want.impact
-      && row.note === (want.note === '' || want.note === undefined ? null : want.note);
+      && row.note === (want.note === '' || want.note === undefined ? null : want.note)
+      && samePairs(row.words && row.words.length ? row.words : null, want.words && want.words.length ? want.words : null);
+  }
+
+  // shiftWords(parsed, newFirstStamp) → the row's word tags moved by newFirstStamp − ref (ref = its first stamp, else
+  // its first tag), so they keep their place in the line when its start is rewritten (≡ › 時刻を歌詞に書き込む).
+  // null without tags; the tags as they are when newFirstStamp is not a time.
+  function shiftWords(parsed, newFirstStamp) {
+    const words = parsed && Array.isArray(parsed.words) && parsed.words.length ? parsed.words : null;
+    if (!words) return null;
+    if (typeof newFirstStamp !== 'number' || !Number.isFinite(newFirstStamp)) return words;
+    const ref = parsed.stamps && parsed.stamps.length ? parsed.stamps[0] : words[0][1];
+    const d = newFirstStamp - ref;
+    if (d === 0) return words;
+    return words.map(([at, t]) => [at, Math.max(0, Math.round((t + d) * 1000) / 1000)]);
   }
 
   function sameList(a, b) {
@@ -3674,7 +3760,10 @@ MV.def('core/lyrics', ['core/script'], (S) => {
   // True when a row's src is a meta row (rule 3), whitespace around it ignored.
   function isMetaRow(src) { return META_ROW.test(String(src).trim()); }
 
-  return { parseRow, parseSheet, linesOf, renderRow, roundTrip, lrcTag, PLAIN, SAMPLE_JA, SAMPLE_EN, META_ROW, isMetaRow };
+  return {
+    parseRow, parseSheet, linesOf, renderRow, roundTrip, lrcTag, PLAIN, SAMPLE_JA, SAMPLE_EN, META_ROW, isMetaRow,
+    shiftWords, FIELD_KEYS,
+  };
 });
 /* 文字PVメーカー v2 — original work. Stable row ids, offset maps and remapping of per-line data (DESIGN §4.10). */
 MV.def('core/reconcile', ['core/lyrics', 'core/script', 'core/paths'], (L, S, P) => {
@@ -4097,6 +4186,10 @@ MV.def('core/reconcile', ['core/lyrics', 'core/script', 'core/paths'], (L, S, P)
         value = remapSplit(value, ctx.tableOf(row), ctx.after.get(row).text.length);
         if (value === null) { changed = true; continue; }
       }
+      if (isEdited && isPins && at.off === null && !at.gap && key.endsWith(':sung.times')) {
+        value = remapSungTimes(value, ctx.tableOf(row), ctx.before.get(row).text, ctx.after.get(row).text.length);
+        if (value === null) { changed = true; continue; }
+      }
       if (to !== key || value !== map[key]) changed = true;
       moves.push({ key, to, off: at.off === null ? -1 : at.off, value });
     }
@@ -4132,6 +4225,37 @@ MV.def('core/reconcile', ['core/lyrics', 'core/script', 'core/paths'], (L, S, P)
     return Object.assign({}, pin, { v: out });
   }
 
+  // Maps a line's character times (DESIGN_2_2 §6: [[off, dt], …], strictly increasing offsets; a last pair at the text's
+  // length is where the singing ends) through the offset table: a pair whose character was deleted is dropped (its
+  // character is interpolated again), a pair that would no longer come after the one before is dropped, the end pair
+  // moves to the new end; null when no pair remains. A value that is not such a list is kept for the planner to refuse.
+  function remapSungTimes(pin, table, oldText, newLength) {
+    if (!pin || !Array.isArray(pin.v)) return pin;
+    const v = pin.v;
+    if (!v.every((x) => Array.isArray(x) && x.length === 2 && Number.isInteger(x[0]) && x[0] >= 0)) return pin;
+    const offs = S.graphemeOffsets(oldText);
+    const ends = new Map();
+    for (let k = 0; k + 1 < offs.length; k++) ends.set(offs[k], offs[k + 1]);
+    const last = table.length - 1;
+    const out = [];
+    for (const [off, dt] of v) {
+      let y;
+      if (off >= oldText.length) y = newLength;
+      else {
+        const e = ends.has(off) ? ends.get(off) : off + 1;
+        const a = table[Math.min(off, last)], b = table[Math.min(e, last)];
+        if (a === b) continue;                     // the character is gone
+        y = a;
+      }
+      if (out.length && y <= out[out.length - 1][0]) continue;
+      if (y === newLength && off < oldText.length) continue;
+      out.push([y, dt]);
+    }
+    if (out.length === 0) return null;
+    if (out.length === v.length && out.every((x, i) => x[0] === v[i][0])) return pin;
+    return Object.assign({}, pin, { v: out });
+  }
+
   function dropLocks(locks, ctx) {
     let out = locks;
     for (const id of Object.keys(locks)) {
@@ -4151,7 +4275,10 @@ MV.def('core/reconcile', ['core/lyrics', 'core/script', 'core/paths'], (L, S, P)
     return res;
   }
 
-  return { reconcile, offsetMap, remapKeyed, rowInfo, lcsPairs, splitRows, rowKey: (src) => describe(src).key };
+  return {
+    reconcile, offsetMap, remapKeyed, rowInfo, lcsPairs, splitRows, rowKey: (src) => describe(src).key, remapSungTimes,
+    offsetTable,
+  };
 });
 /* 文字PVメーカー v2 — original work. Streaming SHA-256 (FIPS 180-4) for content-addressed assets (DESIGN_2_1 §11.3.3). */
 MV.def('core/sha256', [], () => {
@@ -6767,7 +6894,7 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
     timing: ['snap', 'lead', 'tail', 'leadIn', 'outro', 'tapLatency'],
     song: ['name', 'sha1', 'seconds', 'bpm', 'offset', 'meter', 'bpmConfidence', 'digest', 'info'],
     digest: ['hz', 'loud'],
-    look: ['seed', 'moodSeed', 'aspect', 'backdrop'],
+    look: ['seed', 'moodSeed', 'aspect', 'backdrop', 'gen'],
     pin: ['v', 'by', 'sig'],
     lock: ['n'],
     filter: ['only', 'deny'],
@@ -6807,6 +6934,19 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
       output: { format: 'mp4', short: 1080, fps: 30, quality: 'high', audio: true, range: null, name: null,
         kit: Object.assign({}, KIT_DEFAULT) },
     };
+  }
+
+  // The generation of new documents (look.gen, PV22 / DESIGN_2_2 §0): a document made by newDoc() carries it, and the
+  // 文字PV conventions, typesetting and timing defaults of that generation apply to it unless its own settings say
+  // otherwise (planner/rules). defaultDoc() never carries it: normalize() builds from defaultDoc(), so anything added
+  // there would reach every opened project, and the tests and fixtures plan documents made from it.
+  const GEN = 1;
+
+  // newDoc() → the document of ≡ › 新しい作品, of the first run and of an emptied device: defaultDoc() with look.gen.
+  function newDoc() {
+    const doc = defaultDoc();
+    doc.look.gen = GEN;
+    return doc;
   }
 
   function defaultSide() {
@@ -6919,6 +7059,9 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
     if (!isUint32(look.moodSeed)) bad('look.moodSeed', 'must be a 32-bit unsigned integer');
     if (!ASPECTS.includes(look.aspect)) bad('look.aspect', 'must be one of ' + ASPECTS.join(' '));
     if (!BACKDROPS.includes(look.backdrop)) bad('look.backdrop', 'must be one of ' + BACKDROPS.join(' '));
+    if (look.gen !== undefined && !(Number.isInteger(look.gen) && look.gen >= 0 && look.gen <= 255)) {
+      bad('look.gen', 'must be an integer 0–255');
+    }
   }
 
   function checkPins(pins, bad) {
@@ -7304,8 +7447,8 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
 
   return {
     APP_VERSION, FORMAT, CURRENT_SCHEMA, DESIGN_SIZE, ASPECTS, LANGS, BACKDROPS, PIN_BY, FILTER_KINDS, SECTION_KINDS,
-    OUTPUT_CHOICES, KIT_KEYS, KIT_DEFAULT, ORDER,
-    defaultDoc, defaultSide, validate, songInfoProblems, normalize, normalizeSide, sanitizeSide, sanitizeAsks, touched,
+    OUTPUT_CHOICES, KIT_KEYS, KIT_DEFAULT, ORDER, GEN,
+    defaultDoc, newDoc, defaultSide, validate, songInfoProblems, normalize, normalizeSide, sanitizeSide, sanitizeAsks, touched,
     serialize,
   };
 });
@@ -7540,7 +7683,12 @@ MV.def('core/commands', ['core/doc', 'core/paths', 'core/pins', 'core/lyrics', '
     }
 
     // Slots that make sense only at one scope (§3.4.1–3.4.3), so they are never promoted or copied.
-    const LINE_ONLY = new Set(['start', 'end', 'split', 'lang', 'avoid']);
+    // 'sung.times' (DESIGN_2_2 §6): a line's character times, relative to its start.
+    const LINE_ONLY = new Set(['start', 'end', 'split', 'lang', 'avoid', 'sung.times']);
+    // Switches of the whole video only (DESIGN_2_2 §6: 「字の時間を歌に合わせる」).
+    const WORK_ONLY = new Set(['sung.real']);
+    // Switches of an area (work or line), never of a cut (DESIGN_2_2 §6: 歌ハメ, 歌った字に色をのせる).
+    const AREA_ONLY = new Set(['sung.hame', 'sung.fill']);
     const CUT_ONLY = new Set(['t0']);
     const TEXT_SLOTS = new Set(['orient', 'text.face', 'text.scale', 'text.ink', 'text.style']);
     // v2.1 (DESIGN_2_1 §2.3, §3.7): line slots that are area-level, never pinned at a cut; `avoid` is line-only. The
@@ -7552,10 +7700,15 @@ MV.def('core/commands', ['core/doc', 'core/paths', 'core/pins', 'core/lyrics', '
 
     // Refuses `cut/…:season`, `cut/…:avoid`, `cut/…:cam.extreme`, `cut/…:repeat.same` and `work:avoid` (payload).
     // 「くり返しの行をそろえる」 (DESIGN_2_1 §4.10) is a setting of the whole video or of a line, like the line season.
+    // 歌ハメ (DESIGN_2_2 §6): `sung.times` only at a line, `sung.real` only at the work, `sung.hame` / `sung.fill` never
+    // at a cut.
     function checkSlotScope(parsed) {
       need(!(parsed.scope.kind === 'cut' && (NOT_CUT.has(parsed.slot) || parsed.slot === 'repeat.same')),
         parsed.slot + ' cannot be pinned at cut scope');
       need(!(parsed.scope.kind === 'work' && parsed.slot === 'avoid'), 'avoid cannot be pinned at work scope');
+      need(!(parsed.slot === 'sung.times' && parsed.scope.kind !== 'line'), 'sung.times can be pinned only at line scope');
+      need(!(WORK_ONLY.has(parsed.slot) && parsed.scope.kind !== 'work'), parsed.slot + ' can be pinned only at work scope');
+      need(!(parsed.scope.kind === 'cut' && AREA_ONLY.has(parsed.slot)), parsed.slot + ' cannot be pinned at cut scope');
     }
 
     function pinPromote(doc, cmd) {
@@ -11213,9 +11366,10 @@ MV.def('engine/text/vert', ['core/script'], (S) => {
     return TABLE[cls] ? TABLE[cls].rot : 0;
   }
 
+  // MAX_TCY_DIGITS (additive, DESIGN_2_2 §6): a digit run this short is one tate-chu-yoko cell (planner/sung units).
   return {
     VCLS, CODE, TABLE, FACE_ADJUST, CORNER, CENTRED, ROTATED, MIRRORED,
-    classOf, classify, segment, longestLatinRun, offsetFor, rotOf,
+    classOf, classify, segment, longestLatinRun, offsetFor, rotOf, MAX_TCY_DIGITS,
   };
 });
 /* 文字PVメーカー v2 — original work. Run layout: horizontal lines and vertical columns, fitted to a box (DESIGN §4.15.4–6). */
@@ -13953,6 +14107,18 @@ MV.def('i18n/strings', [], () => ({
   'pkg.missing.media': ['写真・動画{n}件', '{n} photos or videos'],
   'pkg.missing.song': ['曲', 'the song'],
   'pkg.missing.and': ['と', ' and '],
+
+  // --- PV22 P1 (文字組み) ---
+
+  // --- PV22 P2 (文字PVの定石) ---
+
+  // --- PV22 P3 (キメ) ---
+
+  // --- PV22 P4 (モーフ・太さ) ---
+
+  // --- PV22 P5 (タイミング) ---
+
+  // --- PV22 P6 (歌ハメ) ---
 }));
 /* 文字PVメーカー v2 — original work. Translation function and formatters over the [ja, en] string table (DESIGN §4.24). */
 MV.def('i18n/t', [], () => {
@@ -16387,7 +16553,8 @@ MV.def('planner/encode', ['core/hash'], (H) => {
       if (tail !== '') parts.push(tail);
       parts.push(sep ? V[i][0] : V[i][1]);
     }
-    parts.push('},' + JSON.stringify({ t0: cut.t0, t1: cut.t1, text: cut.text }).slice(1));
+    // `sung` (DESIGN_2_2 §6) sits between slots and t0 in key order; JSON drops it where it is absent
+    parts.push('},' + JSON.stringify({ sung: cut.sung, t0: cut.t0, t1: cut.t1, text: cut.text }).slice(1));
     return parts;
   }
 
@@ -16418,6 +16585,7 @@ MV.def('planner/encode', ['core/hash'], (H) => {
     if (cut.rig !== undefined) put('rig', canon(cut.rig));
     put('role', t.role); put('seamIn', canon(cut.seamIn));
     put('slots', slotsParts(cut.slots, keys, 'full'));
+    if (cut.sung !== undefined) put('sung', canon(cut.sung));
     put('t0', canon(cut.t0)); put('t1', canon(cut.t1)); put('text', t.text);
     parts.push(pending + '}');
     return { fp, parts };
@@ -18918,9 +19086,632 @@ MV.def('planner/look', ['core/hash', 'core/color', 'core/num', 'core/schema', 'c
     moodWeight, moodFacts, autoMood, moodPool, palette, faces, gateAmounts, WORK_AT, THEME_DEFAULT_WEIGHT,
   };
 });
+/* 文字PVメーカー v2 — original work. The one table of new-work defaults: switches and strengths whose default depends on the document's generation (look.gen, DESIGN_2_2 §0). */
+MV.def('planner/rules', ['core/pins', 'planner/params'], (PINS, PA) => {
+  'use strict';
+
+  // A document made by core/doc newDoc() carries look.gen (D.GEN = 1); older documents, opened files and every
+  // fixture have none. Each row below says what its slot is when nothing pins it: `on` in a document of generation ≥ 1,
+  // `off` in an older one — or, for a row with a parent, whatever the parent resolves to (a member of a switch group
+  // follows the group's switch). A pin always wins, so 固定を外す returns a switch to the document's default, and
+  // turning a switch on in an older document is one work (or line) pin.
+  //
+  // Row fields: slot; parent (a row slot, or null); scopes (where a pin of the slot may live: 'work', 'line'); spec
+  // (the value's ParamSpec, core/schema); on, off (the defaults; null = automatic, decided elsewhere).
+  // Packages add their rows here (P1 typesetting, P2 conventions, P4 glyph motion, P5 timing, P6 歌ハメ).
+  const BOOL = Object.freeze({ type: 'bool' });
+  const STRENGTH = Object.freeze({ type: 'num', min: 0, max: 1, step: 0.05 });
+  const HEAD = Object.freeze({ type: 'enum', of: Object.freeze(['line', 'phrase', 'none']) });
+  const FX_MAX = Object.freeze({ type: 'int', min: 2, max: 8 });
+  const WORK = Object.freeze(['work']);
+  const WORK_LINE = Object.freeze(['work', 'line']);
+
+  function row(slot, parent, scopes, spec, on, off) {
+    return Object.freeze({ slot, parent, scopes, spec, on, off });
+  }
+
+  const ROWS = Object.freeze([
+    // P2 文字PVの定石: one group switch and its members (DESIGN_2_2 §2)
+    row('pv.rules', null, WORK, BOOL, true, false),
+    row('repeat.same', 'pv.rules', WORK_LINE, BOOL, true, false),
+    row('pv.kit', 'pv.rules', WORK, BOOL, true, false),
+    row('pv.alternate', 'pv.rules', WORK, BOOL, true, false),
+    row('pv.arc', 'pv.rules', WORK, BOOL, true, false),
+    row('pv.fxCap', 'pv.rules', WORK, BOOL, true, false),
+    row('pv.fxMax', null, WORK, FX_MAX, null, null),
+    // P1 文字組み (DESIGN_2_2 §1)
+    row('text.kana', null, WORK_LINE, STRENGTH, 0.7, 0),
+    row('text.jump', null, WORK_LINE, STRENGTH, 0.5, 0),
+    row('text.latin', null, WORK_LINE, STRENGTH, 0.5, 0),
+    row('text.head', null, WORK_LINE, HEAD, 'line', 'line'),
+    // P4 モーフ・太さ (DESIGN_2_2 §4)
+    row('morph.auto', null, WORK_LINE, BOOL, true, false),
+    row('weight.auto', null, WORK, BOOL, true, false),
+    // P6 歌ハメ (DESIGN_2_2 §6): 「字の時間を歌に合わせる」, and 歌ハメ itself, whose default (自動) planner/sung decides
+    // per line (lines with character times and the hook lines of a new work; off in an older one).
+    row('sung.real', null, WORK, BOOL, true, false),
+    row('sung.hame', null, WORK_LINE, BOOL, null, null),
+  ]);
+
+  const BY_SLOT = new Map(ROWS.map((r) => [r.slot, r]));
+  const SPECS = Object.freeze(Object.fromEntries(ROWS.map((r) => [r.slot, r.spec])));
+
+  function isRule(slot) { return BY_SLOT.has(slot); }
+  function rowOf(slot) { return BY_SLOT.get(slot) || null; }
+  function scopesOf(slot) { const r = BY_SLOT.get(slot); return r ? r.scopes : null; }
+
+  // gen(doc) → the document's generation: look.gen when it is an integer ≥ 0, else 0.
+  function gen(doc) {
+    const g = doc && doc.look ? doc.look.gen : undefined;
+    return Number.isInteger(g) && g >= 0 ? g : 0;
+  }
+
+  // The pin index of a document when the caller has none (planner ctx.ix is preferred: it is cached per document).
+  function indexOf(doc, ix) { return ix || PINS.index((doc && doc.pins) || {}); }
+
+  const accepts = new Map();
+  function acceptOf(slot) {
+    let a = accepts.get(slot);
+    if (!a) {
+      const spec = BY_SLOT.get(slot).spec;
+      // a cut pin never applies (refused by core/commands; a stray one in a hand-edited file is skipped)
+      const coerce = PA.acceptSpec(spec);
+      a = (v, rank) => (rank === 'pin:cut' ? { na: true } : coerce(v));
+      accepts.set(slot, a);
+    }
+    return a;
+  }
+
+  // pinAt(ix, slot, at) → the pin that applies at a place ({ lineId } for a line, nothing for the whole work), coerced by
+  // the row's spec: { v, from, by, at } | null. A line pin counts only where the row allows line scope.
+  function pinAt(ix, slot, at) {
+    const r = BY_SLOT.get(slot);
+    if (!r || !ix || !PA.pinned(ix, slot)) return null;
+    const lineId = at && at.lineId && r.scopes.includes('line') ? at.lineId : null;
+    return PA.resolvePin(ix, { cutKey: null, pinCutKey: null, lineId }, slot, acceptOf(slot), null);
+  }
+
+  // defaultValue(doc, ix, slot) → what the slot is at the whole work without its own pin: the parent's value, else
+  // `on` (generation ≥ 1) or `off`. undefined for a slot that is not in the table.
+  function defaultValue(doc, ix, slot) {
+    const r = BY_SLOT.get(slot);
+    if (!r) return undefined;
+    if (r.parent) return value(doc, ix, r.parent);
+    return gen(doc) >= 1 ? r.on : r.off;
+  }
+
+  // value(doc, ix, slot) → the slot at the whole work: its work pin (coerced), else defaultValue.
+  function value(doc, ix, slot) {
+    const r = BY_SLOT.get(slot);
+    if (!r) return undefined;
+    const pin = pinAt(indexOf(doc, ix), slot, null);
+    return pin ? pin.v : defaultValue(doc, ix, slot);
+  }
+
+  // valueAt(doc, ix, slot, lineId) → the slot at a line: its line pin (where allowed), else value(doc, ix, slot).
+  function valueAt(doc, ix, slot, lineId) {
+    const r = BY_SLOT.get(slot);
+    if (!r) return undefined;
+    const pin = lineId ? pinAt(indexOf(doc, ix), slot, { lineId }) : null;
+    return pin ? pin.v : value(doc, ix, slot);
+  }
+
+  // hasDefault(slot) → whether new and older documents differ for the slot (the inspector says 自動（オン）/自動（オフ）
+  // only for those).
+  function hasDefault(slot) {
+    const r = BY_SLOT.get(slot);
+    if (!r) return false;
+    return r.parent ? hasDefault(r.parent) : r.on !== r.off;
+  }
+
+  function sameValue(a, b) {
+    return typeof a === 'number' && typeof b === 'number' ? Math.abs(a - b) < 1e-9 : a === b;
+  }
+
+  return { ROWS, SPECS, isRule, rowOf, scopesOf, gen, defaultValue, value, valueAt, hasDefault, sameValue };
+});
+/* 文字PVメーカー v2 — original work. 歌ハメ: per-character sung timing of a line and the 歌ハメ switch (DESIGN_2_2 §6). */
+MV.def('planner/sung', ['core/script', 'core/num', 'core/motion', 'engine/text/vert', 'planner/params', 'planner/rules'],
+(S, N, MO, V, PA, RU) => {
+  'use strict';
+
+  // Constants (DESIGN_2_2 §6.4). The Phase C entries (voice end, snapping) stay off until a lab gate enables them.
+  const C = Object.freeze({
+    EST_SLACK: 1.1,        // estimated singing = morae / rate × 1.1
+    RATE_MIN: 2, RATE_MAX: 16,   // a line's own measured rate (morae / s) is clamped to this range
+    UNIT_MIN: 0.05,        // the sung end is at least 0.05 s per unit after the last anchored unit
+    ANCHOR_GAP: 0.02,      // a word anchor closer than this to the one before is dropped (pins are refused instead)
+    MIN_PIECE: 0.35, PIECE_EPS: 1e-6,   // = planner/segment MIN_PIECE: sung-derived piece boundaries keep every piece ≥ it
+    HOOK_EVERY: 3,         // a chorus run's lines at positions 0, 3, 6, … are hook lines
+    HAME_DUR_MIN: 0.06, HAME_DUR_MAX: 0.25,
+    LETTER_STEP: 0.06, LETTER_SHARE: 0.8,
+    PIN_MAX: 400, DT_MAX: 600, DT_GAP: 0.01,
+    // Phase C (off until the lab gate passes):
+    VOICE_END: false, SNAP_GAIN: 0, VOICE_UI: false,
+  });
+
+  // The entrances that read well one character at a time (歌ハメ restricts the arrive pool to them); English lines may
+  // also take the word-at-a-time pop and stamp. Layouts that move the text themselves (def.motion === 'own') are left
+  // out of a 歌ハメ cut's arrange pool.
+  const HAME_ARRIVE = Object.freeze(['typeOn', 'sliceReveal', 'inkRise', 'bloomOpen', 'zoomSettle', 'dropSnap',
+    'riseFromFlat', 'pixelStep']);
+  const HAME_ARRIVE_LATIN = Object.freeze(HAME_ARRIVE.concat(['wordPop', 'stampPress']));
+  const OPENERS = new Set(['「', '『', '（', '(', '“', '‘', '〈', '《', '【', '〔', '［', '[', '｛', '{', '"', "'"]);
+  const SRC = Object.freeze({ est: 0, voice: 1, copy: 2, lrc: 3, pin: 4 });
+  const SRC_NAMES = Object.freeze(['est', 'voice', 'copy', 'lrc', 'pin']);
+
+  const q3 = (x) => Math.round(x * 1000) / 1000;
+  const clamp = (x, lo, hi) => (x < lo ? lo : x > hi ? hi : x);
+
+  // The document's generation (look.gen, DESIGN_2_2 §0).
+  function gen(doc) { return RU.gen(doc); }
+
+  // A decision pfrom value set by a named rule ('rule:sung'); plain 'rule' (motion speed, P3) is not a tag.
+  function isRuleTag(x) { return typeof x === 'string' && x.startsWith('rule:'); }
+  function isRuleFrom(x) { return x === 'rule' || isRuleTag(x); }
+
+  // --- (a) sung units -----------------------------------------------------------------------------------------
+
+  // Two-generation memo, like planner/segment's.
+  let memoPrev = new Map(), memoCur = new Map();
+  function memo(key, make) {
+    let v = memoCur.get(key);
+    if (v === undefined) {
+      v = memoPrev.get(key);
+      if (v === undefined) v = make();
+      if (memoCur.size >= 2000) { memoPrev = memoCur; memoCur = new Map(); }
+      memoCur.set(key, v);
+    }
+    return v;
+  }
+
+  function isLetter(c) { return c === 'latin' || c === 'fullLatin'; }
+  function isWordJoiner(g) { return g === '\'' || g === '’' || g === '-'; }
+
+  // unitsOf(text, lang) → { at: Int32Array (unit start offsets, at[0] = 0), w: Float64Array (weights, morae ≥ 0.5),
+  // latin: Uint8Array (the unit is a Latin word), n }: what is sung as one beat and appears as one step. A Latin word is
+  // one unit (' ’ - inside it continue it); a run of ≤ MAX_TCY_DIGITS digits is one unit (one tate-chu-yoko cell), a
+  // longer run one unit per digit; an opening bracket or quote joins the unit after it; a grapheme with morae, or a han,
+  // starts a unit; anything else (small kana ゃ…, closing punctuation, spaces, symbols, emoji) joins the unit before it
+  // (before the first unit: the first). A text without any unit is one unit.
+  function unitsOf(text, lang) {
+    const t = String(text);
+    return memo(lang + '|' + t, () => makeUnits(t, lang));
+  }
+
+  function makeUnits(text, lang) {
+    const offs = S.graphemeOffsets(text);
+    const n = offs.length - 1;
+    const gs = new Array(n), cls = new Array(n);
+    for (let k = 0; k < n; k++) { gs[k] = text.slice(offs[k], offs[k + 1]); cls[k] = S.charClass(gs[k]); }
+    const starts = [], latin = [];
+    let inWord = false, open = -1;
+    const start = (k, word) => { starts.push(open >= 0 ? open : k); latin.push(word ? 1 : 0); open = -1; };
+    for (let k = 0; k < n; k++) {
+      const g = gs[k], c = cls[k];
+      if (isLetter(c)) {
+        if (!inWord) start(k, true);
+        inWord = true;
+        continue;
+      }
+      if (inWord && isWordJoiner(g) && k + 1 < n && isLetter(cls[k + 1])) continue;
+      inWord = false;
+      if (c === 'digit') {
+        let e = k;
+        while (e < n && cls[e] === 'digit') e++;
+        if (e - k <= V.MAX_TCY_DIGITS) start(k, false);
+        else for (let q = k; q < e; q++) start(q, false);
+        k = e - 1;
+        continue;
+      }
+      if (OPENERS.has(g)) { if (open < 0) open = k; continue; }
+      // a quote or bracket followed by a space was closing something: it stays with the unit before
+      if (c === 'space') { open = -1; continue; }
+      if (c === 'han' || S.morae(g, lang) > 0) start(k, false);
+    }
+    if (!starts.length && n > 0) { starts.push(0); latin.push(0); }
+    const m = starts.length;
+    const at = new Int32Array(m), w = new Float64Array(m), lat = Uint8Array.from(latin);
+    for (let u = 0; u < m; u++) at[u] = offs[starts[u]];
+    if (m) at[0] = 0;
+    for (let u = 0; u < m; u++) w[u] = Math.max(0.5, S.morae(text.slice(at[u], u + 1 < m ? at[u + 1] : text.length), lang));
+    return Object.freeze({ at, w, latin: lat, n: m, text });
+  }
+
+  // Graphemes that join the unit before them when a time is set at their offset (whitespace, closing punctuation):
+  // a time there belongs to the unit after them.
+  function joinsBack(g) {
+    const c = S.charClass(g);
+    return c === 'space' || ((c === 'punctJa' || c === 'punctLatin') && !OPENERS.has(g));
+  }
+
+  // unitAt(units, off) → the unit u with at[u] ≤ off < at[u + 1]; when the grapheme at off joins backward (a space or
+  // closing punctuation inside unit u) and u + 1 exists, u + 1.
+  function unitAt(units, off) {
+    const at = units.at;
+    let lo = 0, hi = at.length - 1;
+    if (hi < 0) return -1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (at[mid] <= off) lo = mid; else hi = mid - 1;
+    }
+    if (at[lo] !== off && lo + 1 < at.length) {
+      const text = units.text;
+      const cp = text.codePointAt(off);
+      if (cp !== undefined && joinsBack(String.fromCodePoint(cp))) return lo + 1;
+    }
+    return lo;
+  }
+
+  // --- the sung.times pin ---------------------------------------------------------------------------------------
+
+  // acceptSungTimes(text) → accept(v, rank) for `line/<id>:sung.times` (line pins only): 1–400 pairs [off, dt]; off an
+  // integer grapheme start of the text, or the text's length (where the singing ends; the last pair only); offsets
+  // strictly increasing; dt finite, 0 ≤ dt ≤ 600 and each ≥ the one before + 0.01.
+  function acceptSungTimes(text) {
+    const t = String(text);
+    const offs = S.graphemeOffsets(t);
+    const starts = new Set(offs);
+    return (v, rank) => {
+      if (rank !== 'pin:line') return { na: true };
+      if (!Array.isArray(v) || v.length < 1 || v.length > C.PIN_MAX) return { bad: true };
+      const out = [];
+      for (let i = 0; i < v.length; i++) {
+        const x = v[i];
+        if (!Array.isArray(x) || x.length !== 2) return { bad: true };
+        const [off, dt] = x;
+        if (!Number.isInteger(off) || off < 0 || off > t.length || !starts.has(off)) return { bad: true };
+        if (off === t.length && i !== v.length - 1) return { bad: true };
+        if (typeof dt !== 'number' || !Number.isFinite(dt) || dt < 0 || dt > C.DT_MAX) return { bad: true };
+        if (i > 0 && (off <= out[i - 1][0] || dt < out[i - 1][1] + C.DT_GAP - 1e-9)) return { bad: true };
+        out.push([off, dt]);
+      }
+      return { v: out };
+    };
+  }
+
+  // --- (b) anchors ----------------------------------------------------------------------------------------------
+
+  // A line's own anchors: [{ u, dt, src }] in unit order and endRel (seconds after the line's start, or undefined), from
+  // its validated pin, else (sourcesOK) its word tags. Anchors later than the line's span are not used; a word before
+  // the start, after the span or closer than ANCHOR_GAP to the one kept before it is dropped (counted). The first anchor
+  // on a unit wins.
+  function ownAnchors(units, pinV, line, span, sourcesOK) {
+    const list = [];
+    let endRel, dropped = 0;
+    const taken = new Set();
+    if (pinV) {
+      const len = units.text.length;
+      for (const [off, dt] of pinV) {
+        if (dt > span + 1e-9) continue;
+        if (off === len) { endRel = dt; continue; }
+        const u = unitAt(units, off);
+        if (u < 0 || taken.has(u)) continue;
+        taken.add(u);
+        list.push({ u, dt, src: SRC.pin });
+      }
+      return { list, endRel, dropped };
+    }
+    if (!sourcesOK || !Array.isArray(line.words) || !line.words.length) return { list, endRel, dropped };
+    const ref = typeof line.wordsRef === 'number' ? line.wordsRef : line.words[0][1];
+    const len = units.text.length;
+    let prev = null;
+    for (const [off, t] of line.words) {
+      const dt = q3(t - ref);
+      const u = off >= len ? -1 : unitAt(units, off);
+      // the time before the first anchor: the line's start (unit 0), which a later unit must also clear
+      const floor = prev !== null ? prev : u === 0 ? -Infinity : 0;
+      if (dt < 0 || dt > span + 1e-9 || dt < floor + C.ANCHOR_GAP - 1e-9) { dropped++; continue; }
+      if (off >= len) { endRel = dt; prev = dt; continue; }
+      if (u < 0 || taken.has(u) || endRel !== undefined) continue;
+      taken.add(u);
+      list.push({ u, dt, src: SRC.lrc });
+      prev = dt;
+    }
+    return { list, endRel, dropped };
+  }
+
+  // --- (c) filling a line ---------------------------------------------------------------------------------------
+
+  // fillLine({ units, anchors, endRel, span, rate, sourcesOK, anchoredStart }) → LineTiming (relative to the line's
+  // start; frozen): { at, t, end, src, by, explicit, anchored, sourcesOK }. Unit 0 starts with the line unless anchored.
+  // The sung end: the end anchor, else (with ≥ 2 anchors or the sources on) the last anchor plus the rest of the line's
+  // morae at its own measured rate (≥ 2 anchors) or the reading rate, × EST_SLACK, else the span (the v2 window, for a
+  // line timed only for the colour fill); at least UNIT_MIN per unit after the last anchor, never past the span.
+  // Unanchored units are interpolated by weight between their anchored neighbours (the end counts as one at unit n).
+  function fillLine(o) {
+    const units = o.units, n = units.n, w = units.w;
+    const T = new Float64Array(n + 1).fill(NaN);
+    const src = new Uint8Array(n);
+    let first = -1, last = 0;
+    for (const a of o.anchors) {
+      T[a.u] = a.dt;
+      src[a.u] = a.src;
+      if (first < 0) first = a.u;
+      if (a.u > last) last = a.u;
+    }
+    if (Number.isNaN(T[0])) T[0] = 0;
+    const count = o.anchors.length;
+    let rateLine = o.rate;
+    if (count >= 2 && T[last] > T[first]) {
+      let sw = 0;
+      for (let u = first; u < last; u++) sw += w[u];
+      rateLine = clamp(sw / (T[last] - T[first]), C.RATE_MIN, C.RATE_MAX);
+    }
+    const span = Math.max(0, o.span);
+    let E = o.endRel;
+    if (E === undefined) {
+      if (count >= 2 || o.sourcesOK) {
+        let rest = 0;
+        for (let u = last; u < n; u++) rest += w[u];
+        E = T[last] + (rest / rateLine) * C.EST_SLACK;
+      } else E = span;
+    }
+    E = Math.max(Math.min(E, span), Math.min(T[last] + C.UNIT_MIN * (n - last), span), T[last]);
+    T[n] = E;
+    // interpolation between fixed units (0, the anchors, n)
+    let i = 0;
+    for (let j = 1; j <= n; j++) {
+      if (j < n && Number.isNaN(T[j])) continue;
+      if (j - i > 1) {
+        let tot = 0;
+        for (let k = i; k < j; k++) tot += w[k];
+        let acc = 0;
+        for (let u = i + 1; u < j; u++) {
+          acc += w[u - 1];
+          T[u] = T[i] + (T[j] - T[i]) * (tot > 0 ? acc / tot : (u - i) / (j - i));
+        }
+      }
+      i = j;
+    }
+    const t = new Float64Array(n);
+    for (let u = 0; u < n; u++) t[u] = q3(T[u]);
+    let best = 0;
+    for (let u = 0; u < n; u++) if (src[u] > best) best = src[u];
+    return Object.freeze({
+      at: units.at, t, end: q3(E), src, by: SRC_NAMES[best], explicit: o.anchors.some((a) => a.src >= SRC.copy),
+      anchored: count, sourcesOK: !!o.sourcesOK, n, units,
+    });
+  }
+
+  // The sung time (relative to the line's start) of the unit containing text offset `off`.
+  function timeOf(ls, off) {
+    const u = unitAt(ls.units, off);
+    return u < 0 ? 0 : ls.t[u];
+  }
+
+  // Line timings, reused across plans for equal inputs (an unchanged line returns the same frozen object).
+  let fillPrev = new Map(), fillCur = new Map();
+  function filled(key, make) {
+    let v = fillCur.get(key);
+    if (v === undefined) {
+      v = fillPrev.get(key);
+      if (v === undefined) v = make();
+      if (fillCur.size >= 4000) { fillPrev = fillCur; fillCur = new Map(); }
+      fillCur.set(key, v);
+    }
+    return v;
+  }
+
+  // --- (d) prepare: plan stage 1b, after the lines are timed, before the cutter ---------------------------------
+
+  const LINE_AT = (lineId) => ({ cutKey: null, pinCutKey: null, lineId });
+  function acceptBool(v) { return typeof v === 'boolean' ? { v } : { bad: true }; }
+
+  // prepare(ctx, timed) → SungContext | null. null (the v2 plan, exactly) unless 「字の時間を歌に合わせる」 resolves on
+  // or a sung.times / sung.hame pin exists. ctx = { doc, ix, warn, timing, readRate }. Every timed line gets a timing
+  // when it has a sung.times pin, or 「字の時間を歌に合わせる」 is on, or its 歌ハメ pin resolves on; the others get null.
+  function prepare(ctx, timed) {
+    const { doc, ix } = ctx;
+    const real = RU.value(doc, ix, 'sung.real') === true;
+    const pinnedTimes = PA.pinned(ix, 'sung.times'), pinnedHame = PA.pinned(ix, 'sung.hame');
+    if (!real && !pinnedTimes && !pinnedHame) return null;
+    const g = gen(doc);
+    const rate = typeof ctx.readRate === 'number' && ctx.readRate > 0 ? ctx.readRate : 7;
+    const n = timed.length;
+    const own = new Array(n);
+    for (let i = 0; i < n; i++) {
+      const line = timed[i], next = timed[i + 1];
+      const spanEnd = next && next.t0 > line.t0 ? Math.min(line.t1, next.t0) : line.t1;
+      const at = LINE_AT(line.id);
+      const hp = pinnedHame ? PA.resolvePin(ix, at, 'sung.hame', acceptBool, ctx.warn) : null;
+      const linePin = hp && hp.from === 'pin:line' ? hp : null, workPin = hp && hp.from === 'pin:work' ? hp : null;
+      const kime = !!line.kime;
+      const hamePinOn = linePin ? linePin.v : kime ? false : workPin ? workPin.v : null;
+      const pin = pinnedTimes ? PA.resolvePin(ix, at, 'sung.times', acceptSungTimes(line.text), ctx.warn) : null;
+      const sourcesOK = real || hamePinOn === true;
+      const need = !!pin || real || hamePinOn === true;
+      const units = unitsOf(line.text, line.lang);
+      const span = Math.max(0, spanEnd - line.t0);
+      const anchors = need ? ownAnchors(units, pin ? pin.v : null, line, span, sourcesOK) : null;
+      if (anchors && anchors.dropped > 0) ctx.warn({ code: 'sung-words', line: line.id, detail: { n: anchors.dropped } });
+      own[i] = {
+        line, need, units, span, sourcesOK, pin, anchors, kime, hamePinOn,
+        hameFrom: linePin ? 'pin:line' : kime ? 'kime' : workPin ? 'pin:work' : 'auto',
+        best: anchors && anchors.list.length ? Math.max(...anchors.list.map((a) => a.src)) : 0,
+      };
+    }
+    // group sources: per lyric text, the occurrence with the best own explicit anchors (pin > word tags; ties: earliest)
+    const source = new Map();
+    for (let i = 0; i < n; i++) {
+      const o = own[i];
+      if (!o.need || o.best < SRC.lrc) continue;
+      const cur = source.get(o.line.text);
+      if (!cur || o.best > cur.best) source.set(o.line.text, o);
+    }
+    const lines = new Map(), meta = new Map();
+    const timingOf = (o, anchors, endRel, copyKey) => filled(JSON.stringify([o.line.text, o.line.lang, N.q6(o.span),
+      anchors.map((a) => [a.u, a.dt, a.src]), endRel === undefined ? null : endRel, o.sourcesOK, rate,
+      o.line.by && o.line.by.start !== 'auto', copyKey]), () => fillLine({ units: o.units, anchors, endRel, span: o.span,
+      rate, sourcesOK: o.sourcesOK, anchoredStart: !!(o.line.by && o.line.by.start !== 'auto') }));
+    // sources first (their sung end scales the copies)
+    const done = new Map();
+    for (const src of source.values()) done.set(src, timingOf(src, src.anchors.list, src.anchors.endRel, null));
+    for (let i = 0; i < n; i++) {
+      const o = own[i];
+      const line = o.line;
+      if (!o.need) { lines.set(line.id, null); continue; }
+      let ls = done.get(o);
+      if (!ls) {
+        const src = o.sourcesOK && !o.anchors.list.length ? source.get(line.text) : null;
+        if (src && src !== o) {
+          const srcLs = done.get(src);
+          const k = srcLs.end > 0 ? Math.min(1, o.span / srcLs.end) : 1;
+          const anchors = src.anchors.list.map((a) => ({ u: a.u, dt: q3(a.dt * k), src: SRC.copy }));
+          const endRel = src.anchors.endRel === undefined ? undefined : q3(src.anchors.endRel * k);
+          ls = timingOf(o, anchors, endRel, src.line.id + ':' + k);
+        } else ls = timingOf(o, o.anchors.list, o.anchors.endRel, null);
+      }
+      lines.set(line.id, ls);
+      meta.set(line.id, { hamePinOn: o.hamePinOn, kime: o.kime, hameFrom: o.hameFrom,
+        pinBy: o.pin && ls.by === 'pin' ? o.pin.by || null : null, dropped: o.anchors.dropped });
+    }
+    const hame = new Map();
+    const lead = ctx.timing ? ctx.timing.lead : 0.12;
+    return {
+      lines, meta, real, gen: g, hame, lead,
+      // → null, or { latin } for a lyric or focus cut of a 歌ハメ line (planner/cast; P4's モーフ rule reads it too)
+      hameAt(cut) {
+        if (!cut || !cut.line || (cut.role !== 'lyric' && cut.role !== 'focus')) return null;
+        const h = hame.get(cut.line);
+        return h && h.hame ? (cut.lang === 'en' ? HAME_LATIN : HAME_PLAIN) : null;
+      },
+      // what 歌ハメ adds to a cut's cast inputs ('' without it): the pool and the dur rule, which reads the lead
+      idOf(cut) {
+        const h = this.hameAt(cut);
+        return h ? 'h' + (h.latin ? 'l' : '') + ':' + lead : '';
+      },
+    };
+  }
+  const HAME_PLAIN = Object.freeze({ latin: false }), HAME_LATIN = Object.freeze({ latin: true });
+
+  // --- (d2) decideHame: plan stage 4b, after the features (and P2's ctx.pv), before casting ----------------------
+
+  // The song's hook lines (歌い出し and the chorus lines at run positions 0, 3, 6, …), decided per lyric text so every
+  // occurrence of a lyric gets the same answer; then each line's 歌ハメ: its pin, else off on a キメ line, else the work
+  // pin, else 自動 (a new work: on for lines with explicit character times — tier E — and, with the sources on, for
+  // hook lines — tier H). Parts: P2's (ctx.pv.partOf) when present, else runs of the real section kind of the cuts.
+  function decideHame(ctx, cuts, timed) {
+    const sung = ctx.sung;
+    if (!sung) return;
+    const hooks = new Set();
+    if (sung.real && sung.gen >= 1) {
+      const firstCut = new Map();
+      for (const c of cuts) {
+        if (!c.line || (c.role !== 'lyric' && c.role !== 'focus') || firstCut.has(c.line)) continue;
+        firstCut.set(c.line, c);
+      }
+      const lyricLines = timed.filter((l) => firstCut.has(l.id));
+      if (lyricLines.length) hooks.add(lyricLines[0].text);
+      let prevRun = null, pos = 0;
+      for (const l of lyricLines) {
+        const c = firstCut.get(l.id);
+        const part = partOf(ctx, c);
+        const run = part.kind === 'chorus' ? part.run : null;
+        if (run === null) { prevRun = null; continue; }
+        pos = run === prevRun ? pos + 1 : 0;
+        prevRun = run;
+        if (pos % C.HOOK_EVERY === 0) hooks.add(l.text);
+      }
+    }
+    for (const line of timed) {
+      const ls = sung.lines.get(line.id);
+      if (!ls) continue;
+      const m = sung.meta.get(line.id);
+      const tierE = ls.explicit;
+      const tierH = sung.real && hooks.has(line.text);
+      const auto = sung.gen >= 1 && !m.kime && (tierE || tierH);
+      const hame = m.hamePinOn !== null ? m.hamePinOn : auto;
+      const why = m.hameFrom !== 'auto' ? m.hameFrom : tierE && auto ? 'times' : tierH && auto ? 'hook' : 'off';
+      sung.hame.set(line.id, { hame, why });
+    }
+    sung.hooks = hooks;
+  }
+
+  // A cut's song part: P2's (kind and run) when its conventions are on, else the real section of its features (a run
+  // is a stretch of lines of one kind).
+  function partOf(ctx, c) {
+    if (ctx.pv && typeof ctx.pv.partOf === 'function') {
+      const p = ctx.pv.partOf(c);
+      return p ? { kind: p.kind || null, run: p.run !== undefined ? p.run : p.key } : { kind: null, run: null };
+    }
+    const kind = c.feat ? c.feat.section || null : null;
+    return { kind, run: kind };
+  }
+
+  // --- (e) the cut's share ------------------------------------------------------------------------------------
+
+  // sliceCut(ls, a, b, cutT0, cutT1, lineT0) → cut.sung { at, end, t } | null: the units starting inside the piece
+  // [a, b) of the line text, at = offsets in the cut's text, t = seconds after the cut's t0 (≥ 0), end = where the cut's
+  // singing ends (≤ its t1, after its last unit).
+  function sliceCut(ls, a, b, cutT0, cutT1, lineT0) {
+    if (!ls) return null;
+    const at = [], t = [];
+    for (let k = 0; k < ls.n; k++) {
+      const off = ls.at[k];
+      if (off < a || off >= b) continue;
+      at.push(off - a);
+      t.push(Math.max(0, q3(lineT0 + ls.t[k] - cutT0)));
+    }
+    if (!at.length) return null;
+    const last = t[t.length - 1];
+    const end = Math.max(q3(Math.min(lineT0 + ls.end, cutT1) - cutT0), q3(last + 0.02));
+    return Object.freeze({ at: Object.freeze(at), end, t: Object.freeze(t) });
+  }
+
+  // --- the Plan's views -----------------------------------------------------------------------------------------
+
+  // Whether a cast cut's entrance follows the singing (its order is 'sung').
+  function isSungCut(cut) {
+    const d = cut && cut.slots ? cut.slots.arrive : null;
+    return !!(d && d.p && d.p.order === 'sung');
+  }
+
+  // repT of a cut whose entrance follows sung times (DESIGN_2_2 §6.4 g): the last character lands on its sung time
+  // (or after its dur), then 10 % of the calm stretch before the exit, clamped to [a, b) like core/motion heroTime.
+  // arrive / depart = { dur, each } (null = instant); count = number of stagger units.
+  function heroSung(c, arrive, depart, count) {
+    const a = c.a, b = c.b, window = b - a;
+    const t = c.sung.t;
+    const dur = arrive ? Math.max(0, arrive.dur) : 0;
+    const A = Math.min(window, Math.max(dur, c.t0 + t[t.length - 1] - a));
+    const L = MO.fitMotion({ dur: depart ? depart.dur : 0, each: depart ? depart.each : 0, count, window,
+      share: MO.SHARE.depart }).total;
+    const x = a + A + 0.1 * Math.max(0, (b - L) - (a + A));
+    if (!(b > a)) return a;
+    if (x < a) return a;
+    if (x < b) return x;
+    const below = b - Math.max(Math.abs(b), 1) * Number.EPSILON;
+    return below >= a ? below : a;
+  }
+
+  // plan.sung (non-enumerable): Map<lineId, LineSung> for the inspector and the timeline, times absolute.
+  function summary(ctx, timed) {
+    const sung = ctx.sung;
+    if (!sung) return null;
+    const out = new Map();
+    for (const line of timed) {
+      const ls = sung.lines.get(line.id);
+      if (!ls) continue;
+      const m = sung.meta.get(line.id), h = sung.hame.get(line.id) || { hame: false, why: 'off' };
+      const t = new Float64Array(ls.n);
+      for (let u = 0; u < ls.n; u++) t[u] = N.q6(line.t0 + ls.t[u]);
+      out.set(line.id, Object.freeze({
+        at: ls.at, t, end: N.q6(line.t0 + ls.end), src: ls.src, by: ls.by, pinBy: m.pinBy, explicit: ls.explicit,
+        hame: h.hame, hameWhy: h.why, fill: false, dropped: m.dropped,
+      }));
+    }
+    return out;
+  }
+
+  return {
+    C, HAME_ARRIVE, HAME_ARRIVE_LATIN, OPENERS, SRC, SRC_NAMES, gen, isRuleTag, isRuleFrom, unitsOf, unitAt, acceptSungTimes,
+    ownAnchors, fillLine, timeOf, prepare, decideHame, sliceCut, isSungCut, heroSung, summary,
+  };
+});
 /* 文字PVメーカー v2 — original work. Casting: every cut slot in the FROZEN order, from pins, rules or the chooser (DESIGN §4.16.2, §3.4.3; DESIGN_2_1 §3.9, §4.9). */
 MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 'core/pins', 'core/paths', 'planner/choose',
-  'planner/params', 'planner/look', 'planner/camera'], (S, REG, R, N, PINS, P, CH, PA, LK, CAM) => {
+  'planner/params', 'planner/look', 'planner/camera', 'planner/sung'], (S, REG, R, N, PINS, P, CH, PA, LK, CAM, SU) => {
     'use strict';
 
     const LIST_KINDS = Object.freeze(['ornament', 'filter']);
@@ -19110,11 +19901,12 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       };
       const sub = req.poolId !== undefined ? req.poolId
         : (req.role || '') + '|' + (req.orient || '') + '|' + (req.script || '') + '|' + (ctx.aspect || '');
-      const full = poolEntry(ctx, req.kind, sub, req.role, req.orient, req.script, ctx.aspect, req.scope, cond);
+      const full = restricted(poolEntry(ctx, req.kind, sub, req.role, req.orient, req.script, ctx.aspect, req.scope, cond),
+        req.restrict);
       if (trace) trace.cond = cond;
       for (let stage = 0; stage < 3; stage++) {
-        const entry = stage < 2 ? full
-          : poolEntry(ctx, req.kind, (req.role || '') + '|||', req.role, undefined, undefined, undefined, req.scope, cond);
+        const entry = stage < 2 ? full : restricted(poolEntry(ctx, req.kind, (req.role || '') + '|||', req.role, undefined,
+          undefined, undefined, req.scope, cond), req.restrict);
         const keys = entry.keys;
         if (!keys.length) continue;
         ask.keys = keys;
@@ -19146,6 +19938,95 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       }
       if (trace) trace.stage = 'fallback';
       return { v: fb, from: 'fallback', stage: 'fallback' };
+    }
+
+    // A pool entry with a rule's restriction (req.restrict = { only: Set | null, except: Set | null }, DESIGN_2_2 §6:
+    // 歌ハメ keeps the entrances that show one character at a time and leaves out layouts that move the text), made once
+    // per entry and restriction. The chooser's seeds and history are unchanged.
+    const restrictedOf = new WeakMap();
+    function restricted(entry, r) {
+      if (!r) return entry;
+      let m = restrictedOf.get(entry);
+      if (!m) { m = new Map(); restrictedOf.set(entry, m); }
+      let out = m.get(r);
+      if (!out) {
+        out = { keys: entry.keys.filter((k) => (!r.only || r.only.has(k)) && (!r.except || !r.except.has(k))),
+          relaxed: entry.relaxed };
+        m.set(r, out);
+      }
+      return out;
+    }
+
+    // --- 歌ハメ (DESIGN_2_2 §6) ---------------------------------------------------------------------------------
+
+    const HAME_ONLY = Object.freeze({ only: new Set(SU.HAME_ARRIVE), except: null });
+    const HAME_ONLY_LATIN = Object.freeze({ only: new Set(SU.HAME_ARRIVE_LATIN), except: null });
+    // The layouts that move the text themselves (def.motion === 'own'), per registry.
+    const ownMotion = new WeakMap();
+    function ownMotionOf(registry) {
+      let r = ownMotion.get(registry);
+      if (!r) {
+        const keys = registry.keys('arrange').filter((k) => { const d = registry.get('arrange', k); return d && d.motion === 'own'; });
+        r = Object.freeze({ only: null, except: new Set(keys) });
+        ownMotion.set(registry, r);
+      }
+      return r;
+    }
+
+    // The part a 歌ハメ entrance takes when no entrance of the list can be used here (filters, avoid lists, season, role
+    // or traits removed them all): 打鍵 when it serves the cut and the filters allow it, else the kind's fallback.
+    // null when the list's pool is not empty.
+    function hameForce(st, kind, restrict) {
+      const { ctx, cut } = st;
+      const sub = poolIdOf(st);
+      const scope = kind === 'ornament' ? 'cut' : null;
+      if (restricted(poolEntry(ctx, kind, sub, cut.role, st.chosen.orient, cut.feat.script, ctx.aspect, scope, st.cond), restrict)
+        .keys.length) return null;
+      if (restricted(poolEntry(ctx, kind, (cut.role || '') + '|||', cut.role, undefined, undefined, undefined, scope, st.cond),
+        restrict).keys.length) return null;
+      const want = 'typeOn';
+      const ok = ctx.registry.has(kind, want) && 'v' in acceptPart(ctx, kind, cut.role)(want) &&
+        filterAllows(ctx.doc.filters, kind, want);
+      if (!st.natural) ctx.warn({ code: 'hame-empty', cut: cut.key, line: cut.line || undefined });
+      return ok ? want : ctx.registry.fallback(kind);
+    }
+
+    // The 歌ハメ rule on an entrance's parameters, the last step of decidePart (after the aligned copy, P2's flips and
+    // P3's キメ rules): each character comes in with its sung time (order 'sung') and lands on it (dur = 入りの早さ,
+    // clamped); a pinned order or dur stays. d.p and d.pfrom are copied (decisions may be shared or frozen).
+    function hameParams(st, kind, d) {
+      const { ctx } = st;
+      if (kind !== 'arrive' || !st.hame || !d.p || d.v === 'none' || d.v === ctx.registry.fallback(kind)) return d;
+      const pfrom = d.pfrom || null;
+      const pinnedAt = (name) => !!pfrom && typeof pfrom[name] === 'string' && pfrom[name].startsWith('pin');
+      const setOrder = 'order' in d.p && !pinnedAt('order') && !(d.p.order === 'sung' && pfrom && pfrom.order === RULE_SUNG);
+      const lead = N.clamp(ctx.timing ? ctx.timing.lead : 0.12, SU.C.HAME_DUR_MIN, SU.C.HAME_DUR_MAX);
+      const durSpec = 'dur' in d.p && !pinnedAt('dur') ? paramSpec(ctx.registry, kind, d.v, 'dur') : null;
+      const dur = durSpec ? S.coerce(durSpec, lead) : undefined;
+      const setDur = dur !== undefined && !(d.p.dur === dur && pfrom && pfrom.dur === RULE_SUNG);
+      if (!setOrder && !setDur) return d;
+      const p = Object.assign({}, d.p);
+      const pf = Object.assign({}, pfrom || {});
+      if (setOrder) { p.order = 'sung'; pf.order = RULE_SUNG; }
+      if (setDur) { p.dur = dur; pf.dur = RULE_SUNG; }
+      const out = { v: d.v, from: d.from };
+      if (d.by !== undefined) out.by = d.by;
+      out.p = p;
+      out.pfrom = sortedCopy(pf);
+      return out;
+    }
+    const RULE_SUNG = 'rule:sung';
+
+    function paramSpec(registry, kind, key, name) {
+      const list = registry.params(kind, key) || [];
+      for (const x of list) if (x.name === name) return x.spec;
+      return null;
+    }
+
+    function sortedCopy(o) {
+      const out = {};
+      for (const k of Object.keys(o).sort()) out[k] = o[k];
+      return out;
     }
 
     // --- history (recency and echo) -----------------------------------------------------------------------------
@@ -19507,11 +20388,13 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     // orientation, script, aspect and line conditions) whose fits does not give 0; a pinned or locked part where it
     // serves the cut's role and orientation (a pin wins over the pools there too); 'none' of a list slot. A rule's or a
     // fallback's value is left to the cut's own rules.
-    function alignedPart(st, kind, slot, list) {
+    // only (a Set, 歌ハメ's entrances): a source value outside it is not taken.
+    function alignedPart(st, kind, slot, list, only) {
       const ad = alignedDecision(st, slot);
       if (!ad || typeof ad.v !== 'string') return null;
       const { ctx, cut } = st;
       if (ad.v === 'none') return list && (ad.from === 'auto' || pinnedFrom(ad)) ? ad : null;
+      if (only && !only.has(ad.v)) return null;
       if (!ctx.registry.has(kind, ad.v)) return null;
       const scope = kind === 'ornament' ? 'cut' : null;
       const traits = ctx.registry.traits(kind, ad.v);
@@ -19540,6 +20423,9 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       for (const { name, shared } of ctx.registry.params(kind, d.v) || []) {
         if (!(name in d.p) || !(name in ad.p)) continue;
         const from = pfrom ? pfrom[name] : undefined;
+        // a value a named rule set (the cut's own or the source's, 'rule:sung') is neither copied nor dropped: the rule
+        // decides it for each cut (歌ハメ, DESIGN_2_2 §6)
+        if (SU.isRuleTag(from) || (ad.pfrom && SU.isRuleTag(ad.pfrom[name]))) continue;
         if (from !== undefined && from !== 'rule') continue;
         if (ctx.salts && fieldSalted(ctx, cut, P.slotParamPath(kind, idx, d.v, name, shared))) continue;
         (p || (p = Object.assign({}, d.p)))[name] = ad.p[name];
@@ -19591,6 +20477,8 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     function pinDecision(pin) { return { v: pin.v, from: pin.from, by: pin.by }; }
 
     // A part slot: pin (cut > line > work) → rule (forced value) → chooser; then its parameters.
+    // opts: { force, rule } (a forced value) or { restrict, rule } (the chooser's pool restricted by a rule: 歌ハメ,
+    // DESIGN_2_2 §6; an aligned source value outside `restrict.only` is not taken, and an empty list forces hameForce).
     function decidePart(st, kind, idx, opts) {
       const o = opts || {};
       const { ctx, cut, at } = st;
@@ -19600,7 +20488,8 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       const trace = tracing(st, slot);
       const pin = !PA.pinned(ctx.ix, slot) ? null : PA.resolvePin(ctx.ix, at, slot, o.force ? () => ({ na: true })
         : acceptPart(ctx, kind, cut.role, { none: list, scope: kind === 'ornament' ? 'cut' : null }), ctx.warn);
-      let d, ad = null;
+      const restrict = o.restrict || null;
+      let d, ad = null, forced = null;
       if (pin) {
         pinWarnings(ctx, kind, pin.v, pin, st.cond);
         d = pinDecision(pin);
@@ -19608,7 +20497,10 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       } else if (o.force) {
         d = { v: o.force, from: 'rule' };
         if (trace) Object.assign(shadow(st, kind, slot, seed, list, trace), { kind, stage: 'rule', rule: o.rule });
-      } else if (st.align && (ad = alignedPart(st, kind, slot, list)) !== null) {
+      } else if (restrict && restrict.only && (forced = hameForce(st, kind, restrict)) !== null) {
+        d = { v: forced, from: 'rule' };
+        if (trace) Object.assign(shadow(st, kind, slot, seed, list, trace), { kind, stage: 'rule', rule: o.rule || 'sung.hame' });
+      } else if (st.align && (ad = alignedPart(st, kind, slot, list, restrict ? restrict.only : null)) !== null) {
         d = { v: ad.v, from: 'auto' };
         if (trace) Object.assign(shadow(st, kind, slot, seed, list, trace), { kind, stage: 'auto', why: [alignWhy(st)] });
       } else {
@@ -19621,12 +20513,13 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
           kind, slot, path: 'cut/' + cut.key + ':' + slot, feat: cut.feat, role: cut.role, orient: st.chosen.orient,
           script: cut.feat.script, scope: kind === 'ornament' ? 'cut' : null, chosen: st.chosen, seed, recent, echo,
           list, cutKey: cut.key, trace, silent: st.natural, ref, poolId: poolIdOf(st), cond: st.cond,
-          avoid: AVOID_REPEAT.has(kind) && !st.natural ? avoidOf(st, slot) : null,
+          avoid: AVOID_REPEAT.has(kind) && !st.natural ? avoidOf(st, slot) : null, restrict,
         });
         d = { v: got.v, from: got.from };
         if (got.base && got.base !== got.v) st.base[slot] = got.base;
         if (got.ref && got.ref !== got.v) st.ref[slot] = got.ref;
         if (trace && got.rule) trace.rule = got.rule;
+        else if (trace && restrict && o.rule) trace.rule = o.rule;
       }
       if (d.v !== 'none' && !st.natural) {
         const def = ctx.registry.get(kind, d.v);
@@ -19640,6 +20533,8 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
         // layout that moves the text itself forces the same motions).
         const same = ad || (st.align && !pin ? alignedDecision(st, slot) : null);
         if (same && same.v === d.v) d = copyParams(st, kind, idx, d, same);
+        // 歌ハメ's order and dur, last (DESIGN_2_2 §6)
+        if (st.hame) d = hameParams(st, kind, d);
       }
       if (trace) trace.decision = d;
       setDecision(st, slot, d);
@@ -19829,12 +20724,14 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       const st = stateOf(ctx, cut, hist, natural);
       decideRepeat(st);
       decideOrient(st);
-      const arrange = decidePart(st, 'arrange', null);
+      // 歌ハメ (DESIGN_2_2 §6): no layout that moves the text itself, and an entrance that shows one character at a time
+      const arrange = decidePart(st, 'arrange', null, st.hame ? { restrict: ownMotionOf(ctx.registry), rule: 'sung.arrange' } : null);
       decideText(st);
       CAM.decideSpeed(st);
       const own = ctx.registry.get('arrange', arrange.v).motion === 'own';
       for (const kind of MOTION_KINDS) {
-        decidePart(st, kind, null, own ? { force: ctx.registry.fallback(kind), rule: 'motion-own' } : null);
+        decidePart(st, kind, null, own ? { force: ctx.registry.fallback(kind), rule: 'motion-own' }
+          : kind === 'arrive' && st.hame ? { restrict: st.hame.latin ? HAME_ONLY_LATIN : HAME_ONLY, rule: 'sung.hame' } : null);
       }
       decideList(st, 'ornament');
       decidePart(st, 'lens', null);
@@ -19851,6 +20748,7 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
         cond: lineCond(ctx, cut.line), decide: decideValue, shotSalted: false, curveSalted: false, heirCurve: null,
         align: ctx.align ? ctx.align.get(cut.key) || null : null, rerolled: false, aligned: alignedDecision, shotAligned: false,
         ahead: ctx.alignNear ? ctx.alignNear.ahead.get(cut.key) || null : null,
+        hame: ctx.sung ? ctx.sung.hameAt(cut) : null,
       };
       if (st.align && ctx.salts) st.rerolled = !!(ctx.salts['cut/' + cut.key] || (cut.line && ctx.salts['line/' + cut.line]));
       if (!natural && isSalted(ctx, cut)) {
@@ -20120,7 +21018,7 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
         cut: k.pins(k.cut, 'cut', cut.pinKey || cut.key), salts: k.salts(cut), lineId: cut.line, pinKey: cut.pinKey,
         role: cut.role, impact: !!cut.impact, featId: cut.featId, rows: hist.rowsRead(cut.feat.repeatOf),
         follows: hist.follows(cut.feat.repeatOf), echoed: echoed(ctx, cut), aligned: alignedId(ctx.align, cut),
-        ahead: alignedId(ctx.alignNear && ctx.alignNear.ahead, cut),
+        ahead: alignedId(ctx.alignNear && ctx.alignNear.ahead, cut), hame: ctx.sung ? ctx.sung.idOf(cut) : '',
       };
     }
 
@@ -20139,8 +21037,9 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     // follows: whether the previous cut sings the same line cut (a line sung twice in a row; planner/camera recencyOf);
     // echoed: whether a later cut sings this one again (its row keeps an heir).
     // aligned: the source's cast entry under 「くり返しの行をそろえる」, ahead: that of the next cut's source (alignedId).
+    // hame: what 歌ハメ adds (planner/sung idOf; '' without it).
     const INPUT_FIELDS = Object.freeze(['look', 'work', 'line', 'cut', 'salts', 'lineId', 'pinKey', 'role', 'impact', 'featId',
-      'follows', 'echoed', 'aligned', 'ahead']);
+      'follows', 'echoed', 'aligned', 'ahead', 'hame']);
     function sameInputs(a, b) {
       for (const f of INPUT_FIELDS) if (a[f] !== b[f]) return false;
       return sameRows(a.rows, b.rows);
@@ -20229,7 +21128,7 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
   });
 /* 文字PVメーカー v2 — original work. The cutter: lines → cut skeletons, special cuts, windows, pin reattachment (DESIGN §4.16.5). */
 MV.def('planner/segment', ['core/script', 'core/num', 'core/pins', 'core/rng', 'engine/text/breaker', 'planner/choose',
-  'planner/params'], (S, N, PINS, R, BR, CH, PA) => {
+  'planner/params', 'planner/sung'], (S, N, PINS, R, BR, CH, PA, SU) => {
   'use strict';
 
   const BASE = Object.freeze({ '16:9': 14, '21:9': 16, '4:3': 12, '1:1': 10, '4:5': 10, '3:4': 9, '9:16': 8 });
@@ -20423,6 +21322,9 @@ MV.def('planner/segment', ['core/script', 'core/num', 'core/pins', 'core/rng', '
   // pinned ones, snapped to the beat grid when timing.snap is on), t1. The inner boundaries lie inside
   // [t0, spanEnd): a line whose pinned end runs past the next line's start shares only the time before that start
   // among its pieces, and its last piece keeps the rest, so the cuts stay in time order (§3.12).
+  // A line with sung timing (planner/sung, DESIGN_2_2 §6; not one timed only for the colour fill) starts each piece
+  // when its first character is sung, between the pinned boundaries around it, keeping every piece of such a run
+  // ≥ MIN_PIECE (a run that cannot is shared by morae as before), and these boundaries are not snapped to the beat.
   function pieceTimes(ctx, line, starts, pinKeys, spanEnd) {
     const n = starts.length;
     const T = new Float64Array(n + 1);
@@ -20439,9 +21341,12 @@ MV.def('planner/segment', ['core/script', 'core/num', 'core/pins', 'core/rng', '
       if (pin) { T[i] = pin.v; pinned[i] = true; last = pin.v; }
     }
     const w = weightsOf(line.text, starts, line.lang);
+    const ls = n > 1 && ctx.sung ? ctx.sung.lines.get(line.id) : null;
+    const sungB = ls && (ls.sourcesOK || ls.anchored >= 2) ? new Uint8Array(n + 1) : null;
     let a = 0;
     for (let b = 1; b <= n; b++) {
       if (!pinned[b]) continue;
+      if (sungB && b - a > 1 && sungRun(line, ls, starts, T, a, b, sungB)) { a = b; continue; }
       let span = 0;
       for (let k = a; k < b; k++) span += w[k];
       let acc = 0;
@@ -20451,17 +21356,33 @@ MV.def('planner/segment', ['core/script', 'core/num', 'core/pins', 'core/rng', '
       }
       a = b;
     }
-    snapInner(ctx, T, pinned);
+    snapInner(ctx, T, pinned, sungB);
     T[n] = line.t1;
     return T;
   }
 
-  function snapInner(ctx, T, pinned) {
+  // The inner boundaries of the run (a, b) between two pinned ones from sung times: each at its piece's first sung
+  // character, kept ≥ MIN_PIECE (+ ε) after the one before and early enough for the rest of the run; false (nothing
+  // changed) when the run is too short for that.
+  function sungRun(line, ls, starts, T, a, b, sungB) {
+    const g = SU.C.MIN_PIECE + SU.C.PIECE_EPS;
+    if (T[b] - T[a] < g * (b - a)) return false;
+    for (let k = a + 1; k < b; k++) {
+      const want = line.t0 + SU.timeOf(ls, starts[k]);
+      const lo = T[k - 1] + g, hi = T[b] - g * (b - k);
+      T[k] = q6(want < lo ? lo : want > hi ? hi : want);
+      sungB[k] = 1;
+    }
+    return true;
+  }
+
+  // skip: boundaries that come from sung times (a sung time is more precise than the beat grid).
+  function snapInner(ctx, T, pinned, skip) {
     const g = ctx.grid;
     if (!g || ctx.timing.snap === 'off') return;
     const tol = Math.min(0.12, g.period / 4);
     for (let i = 1; i < T.length - 1; i++) {
-      if (pinned[i]) continue;
+      if (pinned[i] || (skip && skip[i])) continue;
       const s = g.snap(T[i], ctx.timing.snap, tol);
       if (s > T[i - 1] && s < T[i + 1]) T[i] = s;
     }
@@ -20525,17 +21446,24 @@ MV.def('planner/segment', ['core/script', 'core/num', 'core/pins', 'core/rng', '
     const att = attach(ctx, line, starts);
     for (const key of att.orphans) reportPins(ctx, 'orphan-pin', key, line.id);
     for (const key of att.shadowed) reportPins(ctx, 'shadowed-pin', key, line.id);
+    const ls = ctx.sung ? ctx.sung.lines.get(line.id) : null;
     const cuts = starts.map((a, i) => {
       const b = i + 1 < starts.length ? starts[i + 1] : text.length;
       const key = line.id + '~' + a;
       const focus = a === pieces.focus || fullyEmphasized(text, line.emph || [], a, b);
-      return {
+      const cut = {
         key, line: line.id, role: focus ? 'focus' : 'lyric', text: pieceText(text, a, b),
         emph: pieceEmph(line.emph || [], a, b), impact: !!line.impact && i === starts.length - 1,
         note: i === starts.length - 1 ? line.note || null : null,
         t0: q6(T[i]), t1: q6(T[i + 1]), lang: line.lang, off: [a, b], pinKey: att.map[key] || null,
         heading: line.heading || null, splitFrom: pieces.from,
       };
+      // 歌ハメ (DESIGN_2_2 §6): the sung units of this piece, when the line has sung timing
+      if (ls) {
+        const sung = SU.sliceCut(ls, a, b, cut.t0, cut.t1, line.t0);
+        if (sung) cut.sung = sung;
+      }
+      return cut;
     });
     checkLock(ctx, line, pieces, starts, att, cuts);
     return cuts;
@@ -21268,8 +22196,9 @@ MV.def('planner/tracks', ['core/rng', 'core/num', 'core/paths', 'planner/choose'
 /* 文字PVメーカー v2 — original work. plan(doc, { registry }) → Plan: the planner's stages in their FROZEN order (DESIGN §4.16.1–§4.16.2, §3.12; DESIGN_2_1 §2.7, §5.9.3, §11.2.6). */
 MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'core/timing', 'core/beats', 'core/motion',
   'core/doc', 'core/schema', 'core/script', 'core/media', 'core/shot', 'planner/choose', 'planner/params', 'planner/look',
-  'planner/segment', 'planner/features', 'planner/cast', 'planner/tracks', 'planner/camera', 'planner/encode', 'planner/extreme'],
-(H, N, PINS, LY, TM, B, MO, D, S, SC, MEDIA, SHOT, CH, PA, LK, SG, FE, CA, TR, CAM, EN, XT) => {
+  'planner/segment', 'planner/features', 'planner/cast', 'planner/tracks', 'planner/camera', 'planner/encode', 'planner/extreme',
+  'planner/sung'],
+(H, N, PINS, LY, TM, B, MO, D, S, SC, MEDIA, SHOT, CH, PA, LK, SG, FE, CA, TR, CAM, EN, XT, SU) => {
   'use strict';
 
   // v2: rigs, cut.rig, grounds[].zoomed, feat.sectionStart, media, the camera slots (DESIGN_2_1 §2.7, §11.2.6).
@@ -21341,7 +22270,8 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
       const t = solved.times[i];
       return Object.assign({}, line, { t0: t.t0, t1: t.t1, by: t.by });
     });
-    return { timed, duration: solved.duration, bpm, grid, beats: bpm ? { bpm, offset, meter } : null };
+    const readRate = TM.readRateOf({ readRate: ratePin ? ratePin.v : null, bpm });
+    return { timed, duration: solved.duration, bpm, grid, beats: bpm ? { bpm, offset, meter } : null, readRate };
   }
 
   // The time kept free for the title card before the first automatic line (§4.11 ctx.titleCard; SPEC §6: a title
@@ -21546,14 +22476,20 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
   // plan's fingerprint and parts; one that only moved in time (the same scene at other absolute times, as every
   // automatic line after an edited one) reuses the fingerprint and the printed decisions (planner/encode retimeCut).
   function planCut(ctx, c, shared, beats) {
-    const repT = N.q6(MO.heroTime({ a: c.a, b: c.b }, instantOf(ctx, 'arrive', c.slots.arrive),
-      instantOf(ctx, 'depart', c.slots.depart), unitCount(ctx, c)));
+    const arriveI = instantOf(ctx, 'arrive', c.slots.arrive), departI = instantOf(ctx, 'depart', c.slots.depart);
+    // 歌ハメ (DESIGN_2_2 §6): an entrance that follows sung times ends when the last character lands on its syllable.
+    const repT = N.q6(c.sung && arriveI && SU.isSungCut(c) ? SU.heroSung(c, arriveI, departI, unitCount(ctx, c))
+      : MO.heroTime({ a: c.a, b: c.b }, arriveI, departI, unitCount(ctx, c)));
     const out = {
       key: c.key, line: c.line, role: c.role, text: c.text, emph: c.emph, impact: c.impact, note: c.note,
       t0: c.t0, t1: c.t1, a: c.a, b: c.b, repT, lang: c.lang, feat: c.feat, fp: '', slots: c.slots,
       els: c.els, ground: c.ground, rig: c.rig, seamIn: c.seamIn,
     };
     if (c.pinKey && c.pinKey !== c.key) out.pinKey = c.pinKey;
+    // the cut's sung units (planner/sung sliceCut), only where the line has sung timing: printed and fingerprinted
+    // only where present, so every other cut keeps its bytes
+    const sungText = c.sung ? EN.canon(c.sung) : '';
+    if (c.sung) out.sung = c.sung;
     const slotKeys = Object.keys(c.slots).sort();
     const partSlots = slotKeys.filter((s) => s.indexOf('.') < 0 && s !== 'orient');
     const decisions = partSlots.map((s) => [slotKind(s), c.slots[s]]);
@@ -21569,7 +22505,7 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
     if (used) for (const id of used.ids) ctx.mediaUsed.add(id);
     const mine = mineText(ctx, used);
     // A cut whose cast was not reused is made of new objects: nothing to look up (its encoding is kept next time).
-    const key = ctx.encodings && c.castHit ? encodingKey(out, c.cast, shared, beat, level, mine) : null;
+    const key = ctx.encodings && c.castHit ? encodingKey(out, c.cast, shared, beat, level, mine) + sungText : null;
     const hit = key !== null ? ctx.encodings.get(key) : undefined;
     if (hit) {
       out.fp = hit.fp;
@@ -21582,6 +22518,7 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
     }
     const extra = [EN.objectCanon(c.els), N.q6(c.t0 - c.a), N.q6(c.b - c.a), shared.text, beat, level];
     if (mine) extra.push(mine);
+    if (sungText) extra.push(sungText);
     const enc = EN.encodeCut(out, slotKeys, extra);
     out.fp = enc.fp;
     if (key !== null) {
@@ -21780,7 +22717,7 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
       timing: Object.assign({}, TM.TIMING_DEFAULTS, doc.timing || {}), pools: new Map(), trace, casts: null,
       lockFree: CA.lockFreeIndex(doc.pins), media: mediaIndex(doc), mediaUsed: new Set(),
       castKeys: null, seams: null, encodings: null, fallbacks: null, lookAxis: null, lineConds: null, workCond: null,
-      shotMood: null, echoed: null, align: null, alignNear: null,
+      shotMood: null, echoed: null, align: null, alignNear: null, readRate: 7, sung: null,
     };
     // Traced runs (explain) and fresh runs neither read nor refresh the caches of re-planning.
     if (cached) beginFeatures();
@@ -21793,6 +22730,9 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
     const { timed, duration, grid } = timing;
     ctx.bpm = timing.bpm;
     ctx.grid = grid;
+    ctx.readRate = timing.readRate;
+    // 1b. sung timing of the lines (歌ハメ, DESIGN_2_2 §6): null (the v2 plan) without its switch or a sung.* pin
+    ctx.sung = SU.prepare(ctx, timed);
     const digest = doc.song && doc.song.digest;
     ctx.env = LK.envOf(digest);
     ctx.digestId = digest && typeof digest.loud === 'string' ? H.hashJSON(digest) : null;
@@ -21826,6 +22766,8 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
       cut.feat = got.feat;
       cut.featId = got.id;
     });
+    // 4b. which lines are 歌ハメ (planner/sung; nothing without sung timing)
+    SU.decideHame(ctx, cuts, timed);
 
     // 5. cast, in time order (a cut whose inputs did not change reuses its cast, planner/cast castCut)
     if (cached) {
@@ -21879,6 +22821,9 @@ MV.def('planner/plan', ['core/hash', 'core/num', 'core/pins', 'core/lyrics', 'co
     const castHits = cuts.reduce((n, c) => n + (c.castHit ? 1 : 0), 0);
     const reuse = Object.freeze({ cuts: cuts.length, casts: castHits });
     Object.defineProperty(plan, 'reuse', { value: reuse, enumerable: false });
+    // Each line's sung timing and 歌ハメ state (planner/sung summary; null without sung timing), for the inspector and
+    // the timeline; not part of the Plan.
+    Object.defineProperty(plan, 'sung', { value: SU.summary(ctx, timed), enumerable: false });
     return plan;
   }
 
@@ -23414,6 +24359,83 @@ MV.def('engine/scene/stagger', ['core/rng', 'core/script', 'core/schema'], (RNG,
     return rank;
   }
 
+  // --- sub-line sung timing (歌ハメ, DESIGN_2_2 §6) ---------------------------------------------------------------
+
+  // A 歌ハメ glyph lands on its sung time (0 s ahead): P5's 出そろい leaves sung-order cuts alone.
+  const SUNG_AHEAD = 0;
+  const LETTER_STEP = 0.06, LETTER_SHARE = 0.8;
+
+  // sungTimeAt(sung, off) → cut-local seconds of the sung unit that starts at or before text offset `off` (the first
+  // unit's time before it). sung = cut.sung { at, t, end }.
+  function sungTimeAt(sung, off) {
+    const at = sung.at;
+    if (!at.length) return 0;
+    let lo = 0, hi = at.length - 1;
+    if (off < at[0]) return sung.t[0];
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (at[mid] <= off) lo = mid; else hi = mid - 1;
+    }
+    return sung.t[lo];
+  }
+
+  function unitIndexAt(at, off) {
+    let lo = 0, hi = at.length - 1;
+    if (hi < 0 || off < at[0]) return 0;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (at[mid] <= off) lo = mid; else hi = mid - 1;
+    }
+    return lo;
+  }
+
+  function isLetterCls(c) { return c === 'latin' || c === 'fullLatin'; }
+
+  // sungTimes(env, target, unit) → Float64Array per glyph: when it is sung (cut-local seconds from t0), or null when the
+  // cut has no sung units (env.cut.sung). A glyph takes its sung unit's time (target.off = its offset in cut.text; a run
+  // that shows its own text, off < 0, is sung at 0). The k ≥ 2 letters of a Latin word spread over its start:
+  // letter i at t_u + (i / k) · min(0.8 · (t_next − t_u), 0.06 · k) (t_next = the cut's sung end after its last unit).
+  // For a motion unit other than 'glyph', every glyph of a word, line or run takes the earliest time in it.
+  function sungTimes(env, target, unit) {
+    const sung = env && env.cut ? env.cut.sung : null;
+    if (!sung || !sung.at || !sung.at.length || !target || !target.off) return null;
+    const n = glyphCount(target);
+    const out = new Float64Array(n);
+    const at = sung.at, t = sung.t, m = at.length;
+    // the glyphs of each unit that are letters (for the Latin spread): count per unit, then index in reading order
+    const unitOf = new Int32Array(n).fill(-1);
+    const letters = new Int32Array(m);
+    for (let j = 0; j < n; j++) {
+      const off = target.off[j];
+      if (off < 0) continue;
+      const u = unitIndexAt(at, off);
+      unitOf[j] = u;
+      if (isLetterCls(target.cls[j])) letters[u]++;
+    }
+    const seen = new Int32Array(m);
+    for (let j = 0; j < n; j++) {
+      const u = unitOf[j];
+      if (u < 0) { out[j] = 0; continue; }
+      const tu = t[u], k = letters[u];
+      if (k < 2) { out[j] = tu; continue; }
+      // a Latin word: its letters one after another; a glyph before them (an opening quote) with the first, one after
+      // them (a comma, a space) with the last
+      const next = u + 1 < m ? t[u + 1] : sung.end;
+      const step = Math.min(LETTER_SHARE * Math.max(0, next - tu), LETTER_STEP * k) / k;
+      let i;
+      if (isLetterCls(target.cls[j])) { i = Math.min(seen[u], k - 1); seen[u]++; } else i = Math.max(0, seen[u] - 1);
+      out[j] = tu + i * step;
+    }
+    if (unit !== undefined && unit !== 'glyph') {
+      const idx = unitIndex(target, unit);
+      const count = unitCountOf(idx);
+      const min = new Float64Array(count).fill(Infinity);
+      for (let j = 0; j < n; j++) if (out[j] < min[idx[j]]) min[idx[j]] = out[j];
+      for (let j = 0; j < n; j++) out[j] = min[idx[j]];
+    }
+    return out;
+  }
+
   // pivots(env, target, unit) → { px, py }: each glyph's offset from its own centre to its unit's centre (local du),
   // so rotation and scale can happen about the word, line or run. All zero for unit 'glyph'.
   function pivots(env, target, unit) {
@@ -23426,7 +24448,7 @@ MV.def('engine/scene/stagger', ['core/rng', 'core/script', 'core/schema'], (RNG,
     return { px, py };
   }
 
-  return { ORDERS, UNITS, StaggerError, unitIndex, ranksOf, sungFractions, staggerOf, pivots };
+  return { ORDERS, UNITS, StaggerError, unitIndex, ranksOf, sungFractions, staggerOf, pivots, SUNG_AHEAD, sungTimeAt, sungTimes };
 });
 /* 文字PVメーカー v2 — original work. Behaviours: the scheduler, the dwell envelope, time warps and the kit's motion adapters (DESIGN §4.17.4, §4.18.3; DESIGN_2_1 §3.10, §4.2). */
 MV.def('engine/scene/behave', ['core/num', 'core/curve', 'core/rng', 'core/motion', 'core/schema', 'engine/scene/stagger'],
@@ -23730,6 +24752,18 @@ MV.def('engine/scene/behave', ['core/num', 'core/curve', 'core/rng', 'core/motio
     if (order === 'sung') {
       const dur = Math.min(finite(p.dur) ? Math.max(0, p.dur) : 0, kind === 'arrive' ? span : share * span);
       const room = Math.max(0, (kind === 'arrive' ? span : share * span) - dur);
+      // 歌ハメ (DESIGN_2_2 §6): with the cut's sung units, glyph j starts dur before its sung time and lands on it
+      // (times.a is cut-local, −lead; a glyph with no room before that lands late). An exit keeps the v2 spread.
+      const st = kind === 'arrive' && env.cut && env.cut.sung ? STG.sungTimes(env, target, unit) : null;
+      if (st) {
+        const delay = new Float64Array(st.length);
+        let last = 0;
+        for (let j = 0; j < st.length; j++) {
+          delay[j] = Math.min(Math.max(0, st[j] - STG.SUNG_AHEAD - dur - times.a), room);
+          if (delay[j] > last) last = delay[j];
+        }
+        return { rank: R.rank, delay, dur, total: last + dur };
+      }
       const cutSpan = env.cut ? Math.max(0, env.cut.t1 - env.cut.t0) : 0;
       const delay = Float64Array.from(STG.sungFractions(env, target, unit));
       let last = 0;
@@ -25646,9 +26680,21 @@ MV.def('engine/scene/shot', ['core/num', 'core/curve', 'core/shot', 'core/script
     return cut && finite(cut.t1) && finite(cut.t0) ? Math.max(0, cut.t1 - cut.t0) : Math.max(0, env.times.b);
   }
 
+  // Where the cut's singing ends (cut-local): its sung units' end (歌ハメ, DESIGN_2_2 §6), else its span.
+  function sungEndOf(env) {
+    const s = env.cut ? env.cut.sung : null;
+    return s && finite(s.end) ? s.end : spanOf(env);
+  }
+
   // Cut-local sung start of glyph j's word; words' sung fractions are computed once per target and cached on a side table.
-  const sungCache = new WeakMap();
+  // With the cut's sung units (DESIGN_2_2 §6): the word's sung time, cached under its own table.
+  const sungCache = new WeakMap(), sungTimeCache = new WeakMap();
   function sungOf(env, target, j) {
+    if (env.cut && env.cut.sung) {
+      let st = sungTimeCache.get(target);
+      if (st === undefined) { st = STG.sungTimes(env, target, 'word'); sungTimeCache.set(target, st); }
+      if (st) return st[j];
+    }
     let frac = sungCache.get(target);
     if (!frac) { frac = STG.sungFractions(env, target, 'word'); sungCache.set(target, frac); }
     return frac[j] * spanOf(env);
@@ -25660,8 +26706,9 @@ MV.def('engine/scene/shot', ['core/num', 'core/curve', 'core/shot', 'core/script
   }
 
   // anchorTime(env, target, at, dt) → cut-local seconds (sung start = 0), dt added, clamped to [times.a, times.b].
+  // With the cut's sung units, 'mid' and 'end' (and 'emph' without an emphasis) read the singing's end instead of t1.
   function anchorTime(env, target, at, dt) {
-    const tm = env.times, span = spanOf(env);
+    const tm = env.times, span = sungEndOf(env);
     let t;
     if (finite(at)) t = tm.a + at * (tm.b - tm.a);
     else if (at === 'a' || at === 'rest' || at === 'out' || at === 'b') t = tm[at];
@@ -25756,9 +26803,18 @@ MV.def('engine/scene/shot', ['core/num', 'core/curve', 'core/shot', 'core/script
       for (let c = 0; c < k; c++) { times.push(total > 0 ? (acc / total) * span : (c / k) * span); acc += mor[c]; }
     } else {
       const unit = words.length > WORDS_MAX ? 'line' : 'word';
-      const frac = STG.sungFractions(env, target, unit);
       for (const u of unitsOf(target, unit)) groups.push(glyphs.filter((j) => target.unitOf[unit][j] === u));
-      times = groups.map((g) => frac[g[0]] * span);
+      const st = env.cut && env.cut.sung ? STG.sungTimes(env, target, unit) : null;
+      if (st) times = groups.map((g) => st[g[0]]);
+      else {
+        const frac = STG.sungFractions(env, target, unit);
+        times = groups.map((g) => frac[g[0]] * span);
+      }
+    }
+    // the chunks of one long word, with the cut's sung units: each at its first glyph's sung time (DESIGN_2_2 §6)
+    if (words.length === 1 && glyphs.length >= CHUNK_MIN && env.cut && env.cut.sung) {
+      const st = STG.sungTimes(env, target, 'glyph');
+      if (st) times = groups.map((g) => st[g[0]]);
     }
     const m = FLOOR * env.D.short;
     const n = groups.length;
@@ -25991,7 +27047,7 @@ MV.def('engine/scene/shot', ['core/num', 'core/curve', 'core/shot', 'core/script
   // (additive, DESIGN_EXTREME §1.4) the helpers the x-track (engine/scene/xshot) reuses, so this track is not changed:
   // readingUnits, unitsOf, emphRun, sungOf, leanOf, spanOf, textGlyphs, aimable, HOP_MAX.
   return { makeShot, aimBox, anchorTime, frame, poseAt, runShot, leanInto, bleedLimit, JUMP, FLOOR, SAFE,
-    readingUnits, unitsOf, emphRun, sungOf, leanOf, spanOf, textGlyphs, aimable, HOP_MAX };
+    readingUnits, unitsOf, emphRun, sungOf, leanOf, spanOf, textGlyphs, aimable, HOP_MAX, sungEndOf };
 });
 /* 文字PVメーカー v2 — original work. frameAt(plan, t) → FrameGraph, scene evaluation, cameras and rigs, closed-form time lookups (DESIGN §4.19; DESIGN_2_1 §4.4, §4.6). */
 MV.def('engine/scene/frame', ['core/num', 'core/hash', 'core/noise', 'core/mat', 'core/beats', 'core/curve', 'core/shot',
@@ -29959,13 +31015,17 @@ MV.def('engine/scene/build', ['core/hash', 'core/rng', 'core/schema', 'engine/sc
       ch: new Array(n), cls: new Array(n), em: new Float32Array(n), x: new Float32Array(n), y: new Float32Array(n),
       wx: new Float32Array(n), wy: new Float32Array(n), w: new Float32Array(n), h: new Float32Array(n),
       cx: new Float32Array(n), cy: new Float32Array(n), box: new Float32Array(n * 4), lang, arrived: null,
+      // additive (DESIGN_2_2 §6): each glyph's offset in cut.text, −1 for a run that shows its own text (a note, ♪)
+      off: new Int32Array(n),
     };
     const fx = focus.x + focus.w / 2, fy = focus.y + focus.h / 2;
     let wordBase = 0, lineBase = 0;
     runs.forEach((r, ri) => {
       let words = 0, lines = 0;
+      const own = r.spec && r.spec.text !== undefined && r.spec.text !== null;
       for (let i = r.from; i < r.to; i++) {
         const j = i - range.from, g = stores.glyph[table.payload[i]];
+        t.off[j] = own ? -1 : g.off;
         t.unitOf.word[j] = wordBase + g.word; t.unitOf.line[j] = lineBase + g.line; t.unitOf.run[j] = ri;
         words = Math.max(words, g.word + 1); lines = Math.max(lines, g.line + 1);
         t.emph[j] = g.emph ? 1 : 0; t.ch[j] = g.ch; t.cls[j] = g.cls; t.em[j] = g.em; t.w[j] = g.w; t.h[j] = g.h;
@@ -30887,6 +31947,13 @@ MV.def('parts/kit', ['core/num', 'core/noise', 'core/ease', 'core/curve', 'core/
     return out;
   }
 
+  // sungAt(env, off) → cut-local seconds when the character at text offset `off` is sung, from the cut's sung units
+  // (歌ハメ, DESIGN_2_2 §6), or null when the cut has none (a part then keeps its own estimate).
+  function sungAt(env, off) {
+    const s = env && env.cut ? env.cut.sung : null;
+    return s && s.at && s.at.length ? STG.sungTimeAt(s, off) : null;
+  }
+
   return {
     arrange: KINDS.arrange, arrive: KINDS.arrive, dwell: KINDS.dwell, depart: KINDS.depart, ground: KINDS.ground,
     ornament: KINDS.ornament, lens: KINDS.lens, filter: KINDS.filter, seam: KINDS.seam, theme: KINDS.theme, mood: KINDS.mood,
@@ -30894,7 +31961,7 @@ MV.def('parts/kit', ['core/num', 'core/noise', 'core/ease', 'core/curve', 'core/
     PH: BH.PH, ORDERS: SCH.ORDERS, EASES: E.EASES, ease, staggerOf: STG.staggerOf, pivots: STG.pivots,
     shape, math, color, pickOf, rangeOf, KitError,
     curve, warp, CURVES: CV.PRESET_KEYS, warped: BH.warped, aimBox, frameBox,
-    media, mediaParams, MEDIA: MEDIA_KIT, runKenBurns, depthCam,
+    media, mediaParams, MEDIA: MEDIA_KIT, runKenBurns, depthCam, sungAt,
   };
 });
 /* 文字PVメーカー v2 — original work. Materials runtime: recipes derived into parts, the effective registry and the fixed interpreters of layers, motion, oscillators and filter stacks (DESIGN_2_1 §3.12, §5.7–§5.9, §11.5.8–§11.5.9). */
@@ -41229,8 +42296,11 @@ MV.def('parts/ornament/mark', ['parts/kit'], (K) => {
       const g = sb.group({ layer: 'text', x, y, owner: env.owner });
       sb.shape({ parent: g, layer: 'text', owner: env.owner, fill: p.ink, alpha: 0.75 + 0.25 * p.amount,
         path: vertical ? K.shape.rect(0, 0, p.thick, len) : K.shape.rect(0, 0, len, p.thick) });
-      // the sweep lands as the emphasized word is sung (its share of the characters of the line's time), once the text is in
-      const sung = sungShare(env) * Math.max(0, (env.cut ? env.cut.t1 - env.cut.t0 : 0));
+      // the sweep lands as the emphasized word is sung (its sung time when the cut has sung units, else its share of the
+      // characters of the line's time), once the text is in
+      const em = env.cut && env.cut.emph;
+      const at = K.sungAt(env, Array.isArray(em) && em.length ? em[0][0] : 0);
+      const sung = at !== null ? at : sungShare(env) * Math.max(0, (env.cut ? env.cut.t1 - env.cut.t0 : 0));
       const s = K.math.clamp(Math.max(T.rest, sung) + p.delay, T.a, Math.max(T.a, T.b - 0.6));
       const w = windows(env, 0.35);
       behave(env, runSweep, [g], { axis: vertical ? 1 : 0, len, s, d: 0.32, o: Math.max(w.o, s + 0.32), od: w.od });
@@ -57992,6 +59062,7 @@ MV.def('ui/menus', ['ui/dom', 'ui/icons', 'ui/keys', 'export/subtitles', 'export
   }
 
   // 時刻を歌詞に書き込む (§3.5): one lyrics.set that bakes every effective start into LRC stamps and clears the start pins.
+  // A row's word tags are kept, shifted with its new first stamp (DESIGN_2_2 §6).
   function bakeTimes(app) {
     const L = MV.has('core/lyrics') ? MV.use('core/lyrics') : null;
     const plan = app.plan;
@@ -58006,7 +59077,9 @@ MV.def('ui/menus', ['ui/dom', 'ui/icons', 'ui/keys', 'export/subtitles', 'export
       const stamps = byRow.get(r.id);
       if (!stamps) return r.src;
       const parsed = L.parseRow(r.src);
-      return L.renderRow(Object.assign({}, parsed, { stamps: stamps.sort((x, y) => x - y) }));
+      const sorted = stamps.sort((x, y) => x - y);
+      // word tags (DESIGN_2_2 §6) keep their place in the line: they move with its first stamp
+      return L.renderRow(Object.assign({}, parsed, { stamps: sorted, words: L.shiftWords(parsed, sorted[0]) }));
     }).join('\n');
     const clears = Object.keys(app.doc.pins).filter((p) => /^line\/[^:]+:start$/.test(p)).map((path) => ({ t: 'pin.clear', path }));
     app.batch({ label: ['undo.bakeTimes', {}] }, clears.concat([{ t: 'lyrics.set', text }]));
@@ -62246,7 +63319,7 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
     }
 
     async function newWork() {
-      await loadFile({ doc: D.defaultDoc(), side: D.defaultSide() });
+      await loadFile({ doc: D.newDoc(), side: D.defaultSide() });
       app.toast(t('io.newDone'), { kind: 'info' });
     }
 
@@ -62812,7 +63885,7 @@ MV.def('ui/project_io', ['ui/dom', 'core/doc', 'core/migrate', 'core/media', 'i1
       saved = { id: null, text: null };
       used.clear();
       usedMedia.clear();
-      app.loadProject(D.defaultDoc(), D.defaultSide(), { quiet: true });
+      app.loadProject(D.newDoc(), D.defaultSide(), { quiet: true });
       pending.cancel();                                      // the empty work is stored at its first change, not now
       setState('idle');
       app.bus.emit('device', { cleared: true });             // the AssetStore forgets what it held (ui/media_io)
@@ -73593,7 +74666,7 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
     const lang = MV.LANG === 'en' ? 'en' : 'ja';
     // 激しいカメラを抑える starts as this device asks (prefers-reduced-motion, DESIGN_EXTREME §3.6)
     const view = V.createView({ storage: safeStorage('localStorage'), defaults: { calmCamera: dom.prefersReducedMotion() } });
-    const store = ST.createStore({ doc: D.defaultDoc(), side: D.defaultSide(), reduce: svc.reduce, now: () => Date.now() });
+    const store = ST.createStore({ doc: D.newDoc(), side: D.defaultSide(), reduce: svc.reduce, now: () => Date.now() });
     // The AssetStore (DESIGN_2_1 §11.3.6): bytes from ui/project_io's device store (IndexedDB, or this tab's memory),
     // metadata from every library entry this tab has seen. Ids name content, so an entry seen once stays right for the
     // try-on and undo documents that still hold it.
