@@ -1,0 +1,1613 @@
+diff --cc docs/AI_GUIDE.md
+index 254611f,0759168..0000000
+--- a/docs/AI_GUIDE.md
++++ b/docs/AI_GUIDE.md
+@@@ -156,7 -155,8 +156,8 @@@ AI に写真・動画を見てもらい
+  - 同意は、いま開いている作品についてだけ有効です。別の作品を開いたり、ページを読み込み直したりすると、もう一度たずねます。
+  - 音声はモノラルの WAV にして送ります。ふつうは 16 kHz（約7分まで）、長い曲は 12 kHz や 8 kHz（約14分まで）に下げて1回で送ります。それより長い曲は 16 kHz のままアップロードしてから使います。送る大きさと長さは、同意のカードに出ます。曲のファイル名は送りません。
+  - 送ってよい曲（自分の曲や、権利者の許可がある曲）だけに使ってください。公開されている歌詞と判断されると書き起こせません。そのときは歌詞を貼って「タイミングを合わせる」を使ってください。
+ -- 時刻は目安です。ずれていたら、詳細やタップ合わせで直してください。
+ +- 時刻は目安です。ずれていたら、詳細やタップ合わせで直してください。字の時間は、タイムラインの目盛りをドラッグするか「1字ずつタップ」で直せます。
++ - AIを使わない方法もあります: ② 曲 の「曲から下書き」は、曲の声の出だしから行の開始時刻を下書きします（曲は送りません。AIの「タイミングを合わせる」より粗く、はっきり区切って歌う曲向き）。下書きの画面にも、AIがオンなら「AIでタイミング（より正確）」が出ます。
+  - サービスBでは、曲の音声は送れません（「Google Gemini のときだけ使えます」）。
+  
+  ## 9. 結果の確かめ方と取り消し
+diff --cc docs/SPEC.md
+index e228027,1361e1d..0000000
+--- a/docs/SPEC.md
++++ b/docs/SPEC.md
+@@@ -57,18 -53,28 +57,39 @@@ and Filmora-ready output; how they are 
+  - Tap-sync: start from any line, Space/Enter marks the start, Backspace steps back one line, a second key marks a line's
+    end (optional). Works while the song plays.
+  - Manual edit of start / end in the inspector (number fields and dragging on the timeline).
+ -- LRC import; AI alignment (see 8).
+ +- **1字ずつタップ (v2.2)**: 行 › 時間 (or the command palette) plays the line in a loop, optionally a little slower or slow;
+ +  Space / Enter / the pad marks each character (区切り 1字) or word (言葉) as it is sung, E where the singing ends,
+ +  Backspace steps back, Esc finishes. The line starts at the first mark and its character times are kept (one undo
+ +  step); 「やめる」 writes nothing; at the loop's end playback stops with 決定 and もう一度. 字の時間を消す gives the
+ +  characters back to the estimate. Needs the loaded song.
+ +- **Character ticks on the timeline (v2.2)**: under each line (with room, or on the selected line) a tick marks when each
+ +  character is sung (bright: tapped or set by hand; gold: word tags or copied; faint: estimated) and a bracket the end of
+ +  the singing. On the selected line a tick can be dragged (it snaps to the playhead; Alt: no snap): the line's character
+ +  times are pinned as they are with that one moved, and an automatic start is pinned where it is, in one undo step
+ +  「字の時間」. A double-click (or Delete on a focused tick) gives that character back to the estimate. In the timeline's
+ +  list, Alt+←/→ move among the focused line's ticks, Ctrl+←/→ (Shift ×10) move the focused tick by a frame.
+ +- LRC import; AI alignment (see 8); AIで字の時間 (the words' times of a few lines, as their character times).
++ - The text comes in ahead of the voice by 入りの早さ (0.2 s in a new work; older works keep what they store). 入りの基準
++   says what that lead is measured to: the entrance's start (動き始め, the default) or its end (出そろい: the line is fully
++   in, and readable, that long before the voice; entrances shorten to 0.45 s at most; lines entered by a transition or a
++   new background, 見せ場 and キメ lines and lines revealed as sung keep their timing). A transition's window and the
++   windows of neighbouring lines adapt to any lead (DESIGN_2_2 §5.1).
++ - この行だけタップで打ち直す (詳細 › 行 › 時間, the timeline's line menu, ② 曲 with one line selected, the palette):
++   playback loops from 2 s before the line until it is marked (a seek or a pause ends the loop), one mark is taken, E
++   marks the end, and the session ends by itself after the line; one undo entry. 前後の行を動かさない (on by default) pins
++   the neighbouring automatic starts where they were, and the toast offers ほかの行の固定を外す; a paired start and end pin
++   moves together. A tapped start with no end drops an end pin that now comes less than 0.2 s after it (DESIGN_2_2 §5.3).
++ - 読み切れない速さの行を知らせる (on for new works, off for older works until switched on in 作品全体 › タイミング): a line
++   cut with too many morae per second of reading time (Japanese 12, English 11, Chinese 10), or less than 0.25 s to read
++   2 or more, is marked 「!」 in the lyric gutter, the 行 list and the timeline; 行 › 時間 explains it and offers 動きを速くする,
++   終わりを延ばす and この行だけタップで打ち直す; step ④ lists the lines. Lines squeezed between fixed times are marked too
++   (DESIGN_2_2 §5.4).
++ - 曲から下書き (② 曲 with a song; the palette's 曲から行の頭を下書き; no AI): drafts the start of every automatically timed
++   line from where the song's voice starts phrases, as a review in the step column — one row per line with 確か / たぶん /
++   自信なし, [▶] to listen, 当てて見る (the stage plays the draft), 固定・タップした行も下書きし直す; 適用 is one undo entry
++   of tapped starts; Esc discards. LRC, AI and locked starts stay. A draft, not a timing: on synthetic mixes about 8 in 10
++   line starts land within 0.15 s with a clear centred voice, about half with loud accompaniment or an off-centre voice,
++   fewer when the singing never pauses; fix the rest with この行だけタップで打ち直す, or use AI timing (DESIGN_2_2 §5.2).
+  
+  ## 5. Song (optional)
+  
+diff --cc src/core/tap.js
+index 10fa75c,2bba106..0000000
+--- a/src/core/tap.js
++++ b/src/core/tap.js
+@@@ -93,92 -109,32 +109,120 @@@ MV.def('core/tap', [], () => 
+      return marks.length ? { t: 'time.tap', marks } : null;
+    }
+  
+ +  // --- 1字ずつタップ: the sung units of one line (歌ハメ, DESIGN_2_2 §6) ------------------------------------------------
+ +
+ +  const UNIT_EVENTS = Object.freeze(['mark', 'end', 'back', 'pause', 'resume', 'restart', 'loopEnd']);
+ +  // A unit mark closer than this to the one before is not taken (a double press); it also keeps every stored time at
+ +  // least planner/sung's 0.01 s after the one before once rounded to the millisecond.
+ +  const UNIT_GAP = 0.04;
+ +
+ +  // UnitTapState = { units, cursor, times, end, paused, done, atLoopEnd, endOk }
+ +  //   units: [{ at, text }] (at = the unit's offset in the line text); cursor: the next unit to mark; times: marked times
+ +  //   per unit (null = not marked); end: where the singing ends (null = not marked); paused: playback is stopped (marks
+ +  //   are ignored); done: every unit and the end are marked; atLoopEnd: playback stopped at the loop's end (the take is
+ +  //   kept until 決定 or もう一度); endOk: whether the end may be marked (opts.end, default true).
+ +  function unitState(units, cursor, times, end, paused, atLoopEnd, endOk) {
+ +    return { units, cursor, times, end, paused, done: cursor === units.length && end !== null, atLoopEnd, endOk };
+ +  }
+ +
+ +  function unitNext(s, cursor, times, end, paused, atLoopEnd) {
+ +    return unitState(s.units, cursor, times, end, paused, atLoopEnd, s.endOk);
+ +  }
+ +
+ +  // unitStart(units, { end }) → a session over the units of one line, in text order.
+ +  function unitStart(units, opts) {
+ +    if (!Array.isArray(units)) throw new TapError('bad-units', 'unitStart needs a list of units');
+ +    const list = Object.freeze(units.map((u) => {
+ +      if (!u || !Number.isInteger(u.at) || u.at < 0) throw new TapError('bad-units', 'each unit needs an offset at');
+ +      return Object.freeze({ at: u.at, text: typeof u.text === 'string' ? u.text : '' });
+ +    }));
+ +    for (let i = 1; i < list.length; i++) {
+ +      if (list[i].at <= list[i - 1].at) throw new TapError('bad-units', 'unit offsets must increase');
+ +    }
+ +    return unitState(list, 0, Object.freeze(new Array(list.length).fill(null)), null, false, false,
+ +      !(opts && opts.end === false));
+ +  }
+ +
+ +  function lastMark(s) { return s.cursor > 0 ? s.times[s.cursor - 1] : -Infinity; }
+ +
+ +  // mark: the next unit (not paused, a unit left, at least UNIT_GAP after the last mark); a mark after the end takes
+ +  // the end back (the singing went on) · end: where the singing ends (at least one mark, UNIT_GAP after the last) · back:
+ +  // forget the end, else the last mark · restart: forget everything (もう一度) · loopEnd: playback stopped at the loop's
+ +  // end: paused, the take kept · pause / resume as tapReduce (resume leaves the loop's end). Returns the same state
+ +  // when nothing changes.
+ +  function unitReduce(s, ev) {
+ +    if (!ev || !UNIT_EVENTS.includes(ev.type)) throw new TapError('bad-event', 'unknown unit tap event ' + (ev && ev.type));
+ +    switch (ev.type) {
+ +      case 'mark': {
+ +        const t = timeOf(ev);
+ +        if (s.paused || s.cursor >= s.units.length || t < lastMark(s) + UNIT_GAP) return s;
+ +        const times = s.times.slice();
+ +        times[s.cursor] = t;
+ +        return unitNext(s, s.cursor + 1, Object.freeze(times), null, false, false);
+ +      }
+ +      case 'end': {
+ +        const t = timeOf(ev);
+ +        if (!s.endOk || s.paused || s.cursor === 0 || t < lastMark(s) + UNIT_GAP) return s;
+ +        return unitNext(s, s.cursor, s.times, t, false, false);
+ +      }
+ +      case 'back': {
+ +        if (s.end !== null) return unitNext(s, s.cursor, s.times, null, s.paused, s.atLoopEnd);
+ +        if (s.cursor === 0) return s;
+ +        const times = s.times.slice();
+ +        times[s.cursor - 1] = null;
+ +        return unitNext(s, s.cursor - 1, Object.freeze(times), null, s.paused, s.atLoopEnd);
+ +      }
+ +      case 'restart':
+ +        if (s.cursor === 0 && s.end === null && !s.atLoopEnd) return s;
+ +        return unitNext(s, 0, Object.freeze(new Array(s.units.length).fill(null)), null, s.paused, false);
+ +      case 'loopEnd':
+ +        return s.paused && s.atLoopEnd ? s : unitNext(s, s.cursor, s.times, s.end, true, true);
+ +      case 'pause':
+ +        return s.paused ? s : unitNext(s, s.cursor, s.times, s.end, true, s.atLoopEnd);
+ +      default:
+ +        return s.paused ? unitNext(s, s.cursor, s.times, s.end, false, false) : s;
+ +    }
+ +  }
+ +
+ +  const q3 = (x) => Math.round(x * 1000) / 1000;
+ +
+ +  // unitResult(s) → null (fewer than 2 marks) | { start, times: [[at, dt], …], end: dt | null }: the first mark is the
+ +  // line's start (unit 0 is always marked first), every time is relative to it, to the millisecond.
+ +  function unitResult(s) {
+ +    if (s.cursor < 2) return null;
+ +    const start = q3(s.times[0]);
+ +    const times = [];
+ +    for (let i = 0; i < s.cursor; i++) times.push([s.units[i].at, Math.max(0, q3(s.times[i] - start))]);
+ +    return { start, times, end: s.end !== null ? q3(s.end - start) : null };
+ +  }
+ +
+-   return { tapStart, tapReduce, tapCommand, TapError, EVENTS, MIN_GAP, UNIT_EVENTS, UNIT_GAP, unitStart, unitReduce, unitResult };
++   // stillPins(before, after, lineId, start) → [{ lineId, start }]: the start pins that keep the automatic lines where
++   // they were (「前後の行を動かさない」, PV22 S2). before / after: plan.lines of the document before the re-tap and of a
++   // trial with it (the same ids in the same order, else []). The automatic lines other than lineId that moved form
++   // runs; pinning the two ends of each run at their old starts puts the run back (between two anchors the automatic
++   // starts are linear in their weights, and the fills are linear maps), as long as the pin keeps the order with the
++   // new start (at least MIN_GAP from it). Callers repeat with a new trial until nothing is added (at most 3 rounds).
++   function stillPins(before, after, lineId, start) {
++     if (!Array.isArray(before) || !Array.isArray(after) || before.length !== after.length) return [];
++     if (before.some((l, k) => l.id !== after[k].id)) return [];
++     const target = before.findIndex((l) => l.id === lineId);
++     if (target < 0) return [];
++     const moved = before.map((l, k) => k !== target && l.by && l.by.start === 'auto' &&
++       Math.abs(after[k].t0 - l.t0) >= STILL_EPS);
++     const picks = [];
++     for (let k = 0; k < moved.length; k++) {
++       if (!moved[k]) continue;
++       let e = k;
++       while (e + 1 < moved.length && moved[e + 1]) e++;
++       for (const i of e === k ? [k] : [k, e]) {
++         const t0 = before[i].t0;
++         if (i < target ? t0 <= start - MIN_GAP : t0 >= start + MIN_GAP) picks.push({ lineId: before[i].id, start: t0 });
++       }
++       k = e;
++     }
++     return picks;
++   }
++ 
+ -  return { tapStart, tapReduce, tapCommand, done, stillPins, TapError, EVENTS, MIN_GAP, STILL_EPS };
+++  return { tapStart, tapReduce, tapCommand, done, stillPins, TapError, EVENTS, MIN_GAP, STILL_EPS, UNIT_EVENTS, UNIT_GAP,
+++    unitStart, unitReduce, unitResult };
+  });
+diff --cc src/core/types.js
+index 340a320,c2d9c84..0000000
+--- a/src/core/types.js
++++ b/src/core/types.js
+@@@ -286,7 -292,8 +300,9 @@@ MV.def('core/types', [], () => 
+     * @typedef {Object} Warning
+     * @property {'pin-bad-value'|'pin-not-applicable'|'pin-filtered'|'pin-off-season'|'orphan-pin'|'shadowed-pin'|
+     *   'lock-partial'|'pool-empty'|'time-order'|'time-compressed'|'title-skipped'|'overfull'|'font-fallback'|
+-    *   'piece-merged'|'sung-words'|'hame-empty'} code
+ -   *   'piece-merged'|'too-fast'} code   too-fast (読み切れない速さ, PV22 S4): UI-computed by ui/readcheck from
+ -   *                                     planner/readable, never in plan.warnings; detail { rate, units, legible, limit }
+++   *   'piece-merged'|'sung-words'|'hame-empty'|'too-fast'} code   too-fast (読み切れない速さ, PV22 S4): UI-computed by
+++   *                                     ui/readcheck from planner/readable, never in plan.warnings; detail { rate, units,
+++   *                                     legible, limit }
+     * @property {string} [path]
+     * @property {string} [line]
+     * @property {string} [cut]
+diff --cc src/planner/plan.js
+index 412d506,50295ff..0000000
+--- a/src/planner/plan.js
++++ b/src/planner/plan.js
+@@@ -281,20 -318,15 +320,21 @@@ MV.def('planner/plan', ['core/hash', 'c
+    // plan's fingerprint and parts; one that only moved in time (the same scene at other absolute times, as every
+    // automatic line after an edited one) reuses the fingerprint and the printed decisions (planner/encode retimeCut).
+    function planCut(ctx, c, shared, beats) {
+ -    const repT = N.q6(MO.heroTime({ a: c.a, b: c.b, ready: c.ready }, instantOf(ctx, 'arrive', c.slots.arrive),
+ -      instantOf(ctx, 'depart', c.slots.depart), unitCount(ctx, c)));
+ +    const arriveI = instantOf(ctx, 'arrive', c.slots.arrive), departI = instantOf(ctx, 'depart', c.slots.depart);
+ +    // 歌ハメ (DESIGN_2_2 §6): an entrance that follows sung times ends when the last character lands on its syllable.
+ +    const repT = N.q6(c.sung && arriveI && SU.isSungCut(c) ? SU.heroSung(c, arriveI, departI, unitCount(ctx, c))
+-       : MO.heroTime({ a: c.a, b: c.b }, arriveI, departI, unitCount(ctx, c)));
+++      : MO.heroTime({ a: c.a, b: c.b, ready: c.ready }, arriveI, departI, unitCount(ctx, c)));
+      const out = {
+        key: c.key, line: c.line, role: c.role, text: c.text, emph: c.emph, impact: c.impact, note: c.note,
+        t0: c.t0, t1: c.t1, a: c.a, b: c.b, repT, lang: c.lang, feat: c.feat, fp: '', slots: c.slots,
+        els: c.els, ground: c.ground, rig: c.rig, seamIn: c.seamIn,
+      };
+      if (c.pinKey && c.pinKey !== c.key) out.pinKey = c.pinKey;
++     if (c.ready !== undefined) out.ready = c.ready;
+ +    // the cut's sung units (planner/sung sliceCut), only where the line has sung timing: printed and fingerprinted
+ +    // only where present, so every other cut keeps its bytes
+ +    const sungText = c.sung ? EN.objectCanon(c.sung) : '';
+ +    if (c.sung) out.sung = c.sung;
+      const slotKeys = Object.keys(c.slots).sort();
+      const partSlots = slotKeys.filter((s) => s.indexOf('.') < 0 && s !== 'orient');
+      const decisions = partSlots.map((s) => [slotKind(s), c.slots[s]]);
+@@@ -323,7 -355,9 +363,10 @@@
+      }
+      const extra = [EN.objectCanon(c.els), N.q6(c.t0 - c.a), N.q6(c.b - c.a), shared.text, beat, level];
+      if (mine) extra.push(mine);
+ +    if (sungText) extra.push(sungText);
++     // 出そろい (PV22 T4): when the entrance must end, relative to t0 (only on cuts the pass opened; a cut whose window
++     // stays at its floor keeps t0 − a and b − a while its cap moves with the lead)
++     if (out.ready !== undefined) extra.push('r' + N.q6(out.t0 - out.ready));
+      const enc = EN.encodeCut(out, slotKeys, extra);
+      out.fp = enc.fp;
+      if (key !== null) {
+diff --cc src/ui/boot.js
+index 6cbf0d3,be0b6ae..0000000
+--- a/src/ui/boot.js
++++ b/src/ui/boot.js
+@@@ -801,10 -825,19 +825,25 @@@ MV.def('ui/boot', ['core/doc', 'core/st
+        const at = app.plan ? app.plan.lines.find((l) => l.t0 <= now && now < l.t1) : null;
+        return at ? at.id : null;
+      };
++     def('tap.line', (c, a) => {
++       const id = lineForTap(a);
++       return id ? app.tap.start({ only: id }) : false;
++     }, { enabled: () => hasLines() && !!lineForTap(null) });
++     // 曲から下書き (PV22 S1): the review of drafted line starts; Esc in it discards.
++     def('time.draft', () => app.draft.start(), { enabled: () => hasLines() && !!app.doc.song && view.state.mode !== 'tap' });
++     def('draft.cancel', () => app.draft.cancel());
++     def('tap.mark', (c, a) => app.tap.mark(a));
++     def('tap.end', (c, a) => app.tap.end(a));
++     def('tap.back', () => app.tap.back());
++     def('tap.seek', (c, a) => app.tap.seekBy(a));
++     def('tap.pause', () => app.tap.pause());
++     def('tap.finish', () => app.tap.finish());
+++    // 1字ずつタップ (歌ハメ, DESIGN_2_2 §6): the same line as この行だけ打ち直す (lineForTap); it needs the song (the
+++    // characters are tapped to the singing)
+ +    def('tap.units', (c, a) => {
+-       const id = lineForUnits(a);
+++      const id = lineForTap(a);
+ +      return id ? app.tap.startUnits(id, a || null) : false;
+-     }, { enabled: () => hasLines() && !!(app.songReady && app.songReady()) && !!lineForUnits(null) && !(app.tap && app.tap.active()) });
+++    }, { enabled: () => hasLines() && !!(app.songReady && app.songReady()) && !!lineForTap(null) && !(app.tap && app.tap.active()) });
+  
+      def('time.pinStart', () => {
+        const ids = selLines();
+@@@ -1163,9 -1197,8 +1203,10 @@@
+      app.io = projectIo.create(app);
+      app.io.begin();
+      app.media = mediaIo.mount(app);                                           // photos and videos (DESIGN_2_1 §11.7)
+ -    app.tap = tapUi.mount(app);
+ +    // the tap panel: line tapping (ui/tap) and 1字ずつタップ (ui/tap_units, 歌ハメ DESIGN_2_2 §6) behind one API
+ +    const tapUnits = MV.use('ui/tap_units');
+ +    app.tap = tapUnits.combine(tapUi.mount(app), tapUnits.mount(app));
++     app.draft = draftUi.mount(app);                                           // 曲から下書き (PV22 S1)
+      app.replan();
+      app.shell = shell.mount(app, document.getElementById('app'));
+      mountDetails(app);                                                        // WP8b views (UI part 2)
+diff --cc src/ui/fields.js
+index 5d1b254,5550264..0000000
+--- a/src/ui/fields.js
++++ b/src/ui/fields.js
+@@@ -364,11 -343,7 +371,11 @@@ MV.def('ui/fields', ['core/paths', 'cor
+            F({ path: 'start', scopes: LINE, widget: 'time', label: 'fld.start' }),
+            F({ path: 'end', scopes: LINE, widget: 'time', label: 'fld.end' }),
+            F({ derived: 'lineLength', scopes: LINE, widget: 'time', label: 'fld.duration', readOnly: true }),
+ +          // 字の時間 (歌ハメ, DESIGN_2_2 §6): how many steps and where their times come from; under it [1字ずつタップ] and,
+ +          // for a line with tapped times, [字の時間を消す] (the inspector's custom block sungTimes)
+ +          F({ key: 'sungTimes', derived: 'sungTimes', scopes: LINE, widget: 'text', label: 'fld.sungTimes', readOnly: true,
+ +            after: 'sungTimes' }),
+-         ]),
++         ], { custom: 'timeTools' }),       // PV22 S4 読み切れない速さ notes and fixes, S2 この行だけタップで打ち直す
+          sec('marks', true, [
+            F({ cmd: { t: 'lyrics.row', key: 'emph' }, scopes: LINE, widget: 'words', label: 'fld.emph' }),
+            F({ cmd: { t: 'lyrics.row', key: 'impact' }, scopes: LINE, widget: 'toggle', label: 'fld.impact' }),
+diff --cc src/ui/inspector.js
+index c92536e,6965a32..0000000
+--- a/src/ui/inspector.js
++++ b/src/ui/inspector.js
+@@@ -1,8 -1,8 +1,8 @@@
+  /* 文字PVメーカー v2 — original work. The inspector (詳細): crumbs, level header, sections from FIELDS, field rows, sub-pages (DESIGN §6.4.4–§6.4.9, §6.6; DESIGN_2_1 §6.5–§6.9). */
+  MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/part_browser', 'ui/selection', 'ui/looks',
+    'ui/output', 'i18n/t', 'core/paths', 'core/pins', 'core/shot', 'planner/areas', 'ui/shot_editor', 'ui/material_page',
+-   'ui/media_page', 'ui/media_widgets', 'ui/media_io', 'ui/extreme', 'planner/rules'],
+- (dom, I, F, W, PB, S, LK, OUT, T, P, PINS, SHOT, AREAS, KE, MP, MPG, MW, MI, XU, RU) => {
+ -  'ui/media_page', 'ui/media_widgets', 'ui/media_io', 'ui/extreme', 'ui/readcheck'],
+ -(dom, I, F, W, PB, S, LK, OUT, T, P, PINS, SHOT, AREAS, KE, MP, MPG, MW, MI, XU, RC) => {
+++  'ui/media_page', 'ui/media_widgets', 'ui/media_io', 'ui/extreme', 'planner/rules', 'ui/readcheck'],
+++(dom, I, F, W, PB, S, LK, OUT, T, P, PINS, SHOT, AREAS, KE, MP, MPG, MW, MI, XU, RU, RC) => {
+    'use strict';
+  
+    const { h } = dom;
+@@@ -18,7 -18,7 +18,8 @@@
+    const REF_KINDS = ['arrange', 'arrive', 'dwell', 'depart', 'ornament', 'ground', 'lens', 'filter', 'seam'];
+    const ELEMENTS = ['text', 'ornament', 'ground', 'lens', 'filter', 'seam'];
+    // Custom sections redrawn even while they hold focus (their buttons change state); focus is put back (§6.12).
+-   const REDRAW_FOCUSED = new Set(['looks', 'colorsReset', 'amountsReset', 'lockPartial', 'multi', 'media', 'sungTimes']);
+ -  const REDRAW_FOCUSED = new Set(['looks', 'colorsReset', 'amountsReset', 'lockPartial', 'multi', 'media', 'timeTools']);
+++  const REDRAW_FOCUSED = new Set(['looks', 'colorsReset', 'amountsReset', 'lockPartial', 'multi', 'media', 'sungTimes',
+++    'timeTools']);
+    // Part rows whose browser offers the 写真・動画 tab (DESIGN_2_1 §11.7.5): the kind's media part and its source param.
+    const MEDIA_TAB = Object.freeze({ ground: 'ground', ornament: 'frame', atmos: 'overlay' });
+  
+diff --cc src/ui/lyric_editor.js
+index b26c3c3,c936776..0000000
+--- a/src/ui/lyric_editor.js
++++ b/src/ui/lyric_editor.js
+@@@ -7,10 -8,6 +8,8 @@@ MV.def('ui/lyric_editor', ['ui/dom', 'u
+    const FOLLOW_PAUSE_MS = 3000;
+    const GUTTER_MARGIN_PX = 240;           // gutter entries are built for the visible rows plus this much above and below
+    const STAMP = /^\[\d{1,3}:\d{1,2}(?:[.:]\d{1,3})?\]/;
+ +  // An enhanced-LRC word tag inside a line (歌ハメ, DESIGN_2_2 §6): kept in the row, muted like a stamp.
+ +  const WORD_TAG = /^<\d{1,3}:\d{1,2}(?:[.:]\d{1,3})?>/;
+-   const WARN_CODES = new Set(['overfull', 'orphan-pin', 'shadowed-pin', 'lock-partial', 'pin-not-applicable', 'time-order',
+-     'sung-words', 'hame-empty']);
+    const TOKENS = ['tok-comment', 'tok-meta', 'tok-stamp', 'tok-cut', 'tok-emph', 'tok-emphText', 'tok-impact', 'tok-note'];
+  
+    // --- mark tinting (display only; the parser is core/lyrics) --------------------------------------------------
+diff --cc src/ui/steps.js
+index c6c9cde,5ee4520..0000000
+--- a/src/ui/steps.js
++++ b/src/ui/steps.js
+@@@ -74,15 -75,13 +75,15 @@@ MV.def('ui/steps', ['ui/dom', 'ui/icons
+          if (at < 3) app.goStep(STEPS[at + 1]);
+        });
+  
+ -      let shown = null;
+ +      // (the tap panel's root is the running mode's: line tapping or 1字ずつタップ)
+ +      let shown = null, shownRoot = null;
+        function showBody() {
+          const vs = app.view.state;
+-         const want = vs.mode === 'tap' ? tapPanel : bodies[vs.step];
++         const want = vs.mode === 'tap' ? tapPanel : vs.mode === 'draft' && draftPanel ? draftPanel : bodies[vs.step];
+ -        if (shown !== want) {
+ +        if (shown !== want || shownRoot !== want.root) {
+            dom.replace(bodyHost, want.root);
+            shown = want;
+ +          shownRoot = want.root;
+            if (want.onShow) want.onShow();
+          }
+          bodyHost.setAttribute('aria-labelledby', 'step-tab-' + vs.step);
+diff --cc src/ui/timeline.js
+index 6303e73,9c8a557..0000000
+--- a/src/ui/timeline.js
++++ b/src/ui/timeline.js
+@@@ -1,7 -1,7 +1,7 @@@
+ -/* 文字PVメーカー v2 — original work. Timeline drawer: beat / song / line / cut rows, drags that write time pins, zoom, snap, keyboard nudges, a11y proxies, area bands and key diamonds (DESIGN §6.4.13; DESIGN_2_1 §6.7, §6.8). */
+ +/* 文字PVメーカー v2 — original work. Timeline drawer: beat / song / line / cut rows, drags that write time pins, zoom, snap, keyboard nudges, a11y proxies, area bands, key diamonds and character ticks (DESIGN §6.4.13; DESIGN_2_1 §6.7, §6.8; DESIGN_2_2 §6). */
+  MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/t', 'core/paths', 'core/doc', 'planner/areas',
+-   'ui/extreme', 'ui/sung_ticks'],
+-   (dom, I, S, F, T, P, D, AREAS, XU, TK) => {
+ -  'ui/extreme', 'ui/readcheck'],
+ -  (dom, I, S, F, T, P, D, AREAS, XU, RC) => {
+++  'ui/extreme', 'ui/sung_ticks', 'ui/readcheck'],
+++  (dom, I, S, F, T, P, D, AREAS, XU, TK, RC) => {
+    'use strict';
+  
+    const { h } = dom;
+@@@ -232,11 -247,20 +247,24 @@@
+          g.fillStyle = on ? COLORS.sel : i % 2 ? COLORS.line2 : COLORS.line;
+          g.fillRect(x0, r[0] + 3, Math.max(1, x1 - x0 - 1), r[1] - r[0] - 6);
+          if (l.locked) hatch(x0, x1, r[0] + 3, r[1] - 3);
+ -        label((i + 1) + ' ' + l.text, Math.max(x0, 0) + 4, (r[0] + r[1]) / 2, x1 - Math.max(x0, 0) - (fast.has(l.id) ? 18 : 8));
+ +        // 歌ハメ (DESIGN_2_2 §6): the line's character times as ticks at the bottom of its bar; where a selected line
+ +        // shows its characters over them, its name stops before the first one
+ +        const ls = sungOf(l.id), picked = selLines.has(l.id), ticks = TK.shown(ls, l, xOf, picked);
+ +        const nameEnd = ticks ? Math.min(x1, TK.charsFrom(ls, l, xOf, picked)) : x1;
+-         label((i + 1) + ' ' + l.text, Math.max(x0, 0) + 4, (r[0] + r[1]) / 2, nameEnd - Math.max(x0, 0) - 8);
+++        label((i + 1) + ' ' + l.text, Math.max(x0, 0) + 4, (r[0] + r[1]) / 2, nameEnd - Math.max(x0, 0) - (fast.has(l.id) ? 18 : 8));
++         // 読み切れない速さ: a red bar along the bottom (a dark edge keeps it apart from a selected block) and 「!」 at its end
++         if (fast.has(l.id)) {
++           const w = Math.max(1, x1 - x0 - 1), y = r[1] - 3 - WARN_BAR_PX;
++           g.fillStyle = COLORS.bg;
++           g.fillRect(x0, y - 1, w, WARN_BAR_PX + 1);
++           g.fillStyle = COLORS.warn;
++           g.fillRect(x0, y, w, WARN_BAR_PX);
++           if (w >= 22 && fontCss) {
++             g.font = fontCss;
++             g.textBaseline = 'middle';
++             g.fillText('!', x0 + w - 8, (r[0] + r[1]) / 2);
++           }
++         }
+          const f = focus.band === null && focus.lineId === l.id && document.activeElement === proxy;
+          edge(x0, r[0], r[1], edgeKind(l.by && l.by.start), f && focus.edge === 'start');
+          edge(x1, r[0] + 4, r[1] - 4, edgeKind(l.by && l.by.end), f && focus.edge === 'end');
+@@@ -244,18 -267,18 +272,30 @@@
+        });
+      }
+  
+ +    // A line's sung timing (planner/sung summary, absolute times), or null.
+ +    function sungOf(id) {
+ +      const s = app.plan ? app.plan.sung : null;
+ +      return s ? s.get(id) || null : null;
+ +    }
+ +
+ +    // The lines whose ticks take the pointer: the selected ones (a cut's line when a cut is selected).
+ +    function selectedLines() {
+ +      const sel = S.validate(app.view.state.sel, app.plan);
+ +      return new Set(sel.level === 'line' ? sel.ids : [S.lineOfSel(sel)].filter(Boolean));
+ +    }
+ +
++     // 曲から下書き (PV22 S1): each proposed start as a tick on the line row, solid when checked, dashed when not.
++     function drawDraft(r) {
++       const marks = app.draft && app.draft.active() ? app.draft.marks() : [];
++       g.fillStyle = COLORS.draft;
++       for (const m of marks) {
++         const x = Math.round(xOf(m.t)) - DRAFT_PX / 2;
++         if (x < -DRAFT_PX || x > W + DRAFT_PX) continue;
++         if (m.on) { g.fillRect(x, r[0] + 1, DRAFT_PX, r[1] - r[0] - 2); continue; }
++         for (let y = r[0] + 1; y < r[1] - 1; y += 5) g.fillRect(x, y, DRAFT_PX, Math.min(3, r[1] - 1 - y));
++       }
++     }
++ 
+      function drawCuts(r, sel) {
+        const p = app.plan;
+        const selCuts = new Set(S.cutsOf(sel, p));
+@@@ -569,6 -551,28 +621,31 @@@
+        ]);
+      }
+  
++     // A line's menu (PV22 S2): この行だけタップで打ち直す, この行からタップで合わせる, and 開始の固定を外す while the start is
++     // pinned (not by a lock).
++     function lineMenu(line, at) {
++       if (!app.menus || !line) return;
++       const path = 'line/' + line.id + ':start';
++       const pin = app.doc.pins[path];
++       const items = [
++         { label: t('tl.lineMenu.retap'), disabled: !app.actions.has('tap.line'), run: () => app.actions.run('tap.line', { lineId: line.id, from: 'timeline' }) },
++         { label: t('tl.lineMenu.tapFrom'), run: () => { if (app.tap) app.tap.start({ from: line.id }); } },
+++        // 1字ずつタップ (歌ハメ, DESIGN_2_2 §6): this line's characters to the singing (needs the loaded song)
+++        { label: t('sung.tapUnits'), disabled: !(app.songReady && app.songReady()) || !!(app.tap && app.tap.active()),
+++          run: () => app.actions.run('tap.units', { lineId: line.id, from: 'timeline' }) },
++       ];
++       if (pin && pin.by !== 'lock' && !app.doc.locks[line.id]) {
++         items.push({ label: t('tl.lineMenu.unpinStart'), run: () => app.dispatch({ t: 'pin.clear', path }, { label: ['undo.unpin', {}] }) });
++       }
++       app.menus.context(at, items);
++     }
++ 
++     // The point under a line's block, for the keyboard's menu key.
++     function linePoint(line) {
++       const r = canvas.getBoundingClientRect(), rr = rows();
++       return { clientX: r.left + Math.min(W - 4, Math.max(0, xOf(line.t0)) + 8), clientY: r.top + (rr.line[0] + rr.line[1]) / 2 };
++     }
++ 
+      canvas.addEventListener('contextmenu', (ev) => {
+        const pt = localPoint(ev);
+        const hit = hitAt(pt.x, pt.y);
+@@@ -657,9 -660,7 +735,10 @@@
+        const parts = [t('tl.proxy', { n: i + 1, t0: T.fmtTime(l.t0), t1: T.fmtTime(l.t1) })];
+        if (l.locked) parts.push(t('state.locked'));
+        if (pins) parts.push(t('lyr.pinCount', { n: pins }));
+ +      // a focused character tick: 「きの時間 0:12.41」
+ +      const ls = focus.edge === 'tick' && focus.lineId === l.id ? sungOf(l.id) : null;
+ +      if (ls && focus.tick >= 0 && focus.tick < ls.t.length) parts.push(TK.label(t, ls, l, focus.tick));
++       if (tooFast().has(l.id)) parts.push(t('warn.too-fast'));
+        return parts.join(t('tl.proxySep'));
+      }
+  
+@@@ -728,17 -712,18 +807,19 @@@
+        }
+        const at = Math.max(0, lines.findIndex((l) => l.id === focus.lineId));
+        let handled = true;
+ +      const edgeNow = focus.edge === 'end' ? 'end' : 'start';        // a focused tick belongs to its line only
+        if (ev.key === 'ArrowUp' && at === 0 && list.length) {
+ -        focus = { lineId: focus.lineId, edge: focus.edge, band: list.length - 1 };
+ +        focus = { lineId: focus.lineId, edge: edgeNow, band: list.length - 1, tick: -1 };
+        } else if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+          const to = Math.max(0, Math.min(lines.length - 1, at + (ev.key === 'ArrowDown' ? 1 : -1)));
+ -        focus = { lineId: lines[to].id, edge: focus.edge, band: null };
+ +        focus = { lineId: lines[to].id, edge: edgeNow, band: null, tick: -1 };
+          app.select({ level: 'line', ids: [lines[to].id] }, { from: 'timeline' });
+        } else if (ev.key === 'ArrowLeft' || ev.key === 'ArrowRight') {
+ -        focus = { lineId: lines[at].id, edge: ev.key === 'ArrowLeft' ? 'start' : 'end', band: null };
+ +        focus = { lineId: lines[at].id, edge: ev.key === 'ArrowLeft' ? 'start' : 'end', band: null, tick: -1 };
+        } else if (ev.key === 'Enter') {
+          app.select({ level: 'line', ids: [lines[at].id] }, { from: 'timeline', open: true });
++       } else if (ev.key === 'ContextMenu' || (ev.key === 'F10' && ev.shiftKey)) {
++         lineMenu(lines[at], linePoint(lines[at]));
+        } else handled = false;
+        if (handled) { ev.preventDefault(); ev.stopPropagation(); renderProxy(); draw(); }
+      });
+diff --cc tests/browser/ui_flows.py
+index e641593,ab77f55..0000000
+--- a/tests/browser/ui_flows.py
++++ b/tests/browser/ui_flows.py
+@@@ -66,12 -66,9 +66,15 @@@ v2.1 editor-ready output (package H.3, 
+  v2.1 「くり返しの行をそろえる」 (DESIGN_2_1 §4.10):
+    repeat                     作品全体 › 見た目: the switch (off, its note, no 振り直し) pins the opt-in, the second サビ takes the
+                               first one's layouts, lenses and shots, a repeated cut's なぜ names its first copy, off clears it
++ PV22 P5 タイミング (DESIGN_2_2 §5):
++   enter                      a new work: 入りの早さ 0.2, 入りの基準 動き始め (作品全体 › タイミング); 出そろい = one undo entry
++                              named 入りの基準, the plan and the stage open the entrances; 元に戻す returns to 動き始め
+ +v2.2 歌ハメ (DESIGN_2_2 §6):
+ +  hame                       a new work: the opening line's 歌ハメ reads 自動（オン: 歌い出し・サビの行）; [オン] on another line
+ +                             (one undo entry, the preview changes as its characters come in); 作品全体's すべての行 / 自動 and
+ +                             字の時間を歌に合わせる; 1字ずつタップ with the song (←/→ do not seek, 少しゆっくり, Space × n, E, Esc:
+ +                             one undo entry with the start and the character times; やめる writes nothing; the loop's end
+ +                             stops and offers 決定 / もう一度)
+  It also asserts: no page errors and no CSP violations. The ja page runs every flow; the en page runs the first run.
+  The first run exports with the mouse and, in the keyboard flow, with Tab + Enter. Where H.264 encodes, the file's video
+  sample count is checked here (stsz or trun); the decoded-frame count of the same export path is WP6's check in
+@@@ -5279,323 -5276,414 +5282,731 @@@ async def flow_ai_extreme(f, lang)
+  FLOWS += [('extreme', flow_extreme, False), ('extreme_keys', flow_extreme_keys, False), ('ai_extreme', flow_ai_extreme, False)]
+  
+  
+ +# --- 歌ハメ (PV22 P6, DESIGN_2_2 §6) ------------------------------------------------------------------------------------
+ +
+ +# A line's 歌ハメ in the Plan, its first cut's entrance order and the cut's sung units.
+ +HAME_OF = """(id) => { const a = window.__mv, ls = a.plan.sung ? a.plan.sung.get(id) : null;
+ +  const c = a.plan.cuts.find((x) => x.line === id);
+ +  return { hame: !!(ls && ls.hame), why: ls ? ls.hameWhy : null, by: ls ? ls.by : null, n: ls ? ls.at.length : 0,
+ +    order: c && c.slots.arrive.p ? c.slots.arrive.p.order : null, key: c ? c.key : null, t0: c ? c.t0 : 0,
+ +    sung: c && c.sung ? { t: c.sung.t.slice(), end: c.sung.end } : null }; }"""
+ +# The unit session's state (ui/tap_units), or null.
+ +UNITS = """() => { const s = window.__mv.tap.units.session(); return s ? { lineId: s.lineId, cursor: s.state.cursor, end: s.state.end,
+ +  paused: s.state.paused, atLoopEnd: s.state.atLoopEnd, rate: window.__mv.player.rate, loop: s.loop,
+ +  chips: document.querySelectorAll('.step-tapu .tapu-chip').length, shown: !!document.querySelector('.step-body .step-tapu') } : null; }"""
+ +# The stage canvas as a data URL (two times of one entrance differ while its characters come in one by one).
+ +STAGE_PIXELS = "() => document.querySelector('.canvas-wrap canvas').toDataURL()"
+ +
+ +
+ +async def flow_hame(f, lang):
+ +    """歌ハメ (DESIGN_2_2 §6) in a new work: the first line's row reads 自動（オン: 歌い出し・サビの行）; 行 › 演出 › 歌ハメ [オン] on
+ +    another line makes its entrance follow the singing (one undo entry; the preview changes as the characters come in), and
+ +    its 歌った字に色をのせる (詳しい設定) pins the karaoke fill (one undo entry); 作品全体 › 見た目 › 歌ハメ すべての行 / 自動; 作品全体 › タイミング › 字の時間を歌に合わせる (自動 = on: off pins it, on clears it).
+ +    1字ずつタップ with the song: ←/→ do not seek, 少しゆっくり sets the player's rate, Space × n, E and Esc write the line's
+ +    start and its character times in one undo entry (字の時間 then reads タップ・手で合わせた時間) and restore the rate;
+ +    やめる writes nothing; at the loop's end playback stops and 決定 / もう一度 are offered, もう一度 starts again."""
+ +    page = f.page
+ +    done0, doc0 = await with_lyrics(f)
+ +    ids = await page.evaluate('() => window.__mv.plan.lines.map((l) => l.id)')
+ +    first = await page.evaluate(HAME_OF, ids[0])
+ +    if not f.check(first['hame'] and first['why'] == 'hook' and first['order'] == 'sung', 'the opening line is 歌ハメ by itself: %r' % first):
+ +        return
+ +    await page.evaluate("(id) => window.__mv.select({ level: 'line', ids: [id] }, { from: 'crumbs', open: true })", ids[0])
+ +    await f.settle(3)
+ +    row = ROW % 'sung.hame'
+ +    auto = await page.text_content(row + ' .fr-auto')
+ +    f.check(auto == await page.evaluate("() => window.__mv.t('sung.auto.hook')"), 'the row says what 自動 decided: %r' % auto)
+ +    f.check(await page.locator(row + ' [data-role="dice"]').count() == 0, 'a setting, not drawn: no 振り直し')
+ +    # another line: 歌ハメ [オン]
+ +    other = await page.evaluate(HAME_OF, ids[1])
+ +    f.check(not other['hame'] and other['why'] == 'off', 'the second line is not 歌ハメ: %r' % other)
+ +    await page.evaluate("(id) => window.__mv.select({ level: 'line', ids: [id] }, { from: 'crumbs', open: true })", ids[1])
+ +    await f.settle(3)
+ +    done1 = await page.evaluate(DONE)
+ +    await page.locator(row + ' .seg').nth(1).click()
+ +    await f.until("(id) => { const p = window.__mv.doc.pins['line/' + id + ':sung.hame']; return !!p && p.v === true; }", 'オン pins the line', ids[1])
+ +    await f.settle(3)
+ +    f.check(await page.evaluate(DONE) == done1 + 1, 'one undo entry')
+ +    on = await page.evaluate(HAME_OF, ids[1])
+ +    f.check(on['hame'] and on['why'] == 'pin:line' and on['order'] == 'sung' and on['sung'], 'the line comes in with the singing: %r' % on)
+ +    if on['sung'] and len(on['sung']['t']) > 2:
+ +        shots = []
+ +        for tt in (on['t0'] + on['sung']['t'][1] - 0.02, on['t0'] + on['sung']['end']):
+ +            await page.evaluate('(x) => window.__mv.seek(x)', tt)
+ +            await f.settle(4)
+ +            shots.append(await page.evaluate(STAGE_PIXELS))
+ +        f.check(shots[0] != shots[1], 'the preview changes while the characters come in')
+ +    await f.shot('hame-line')
+ +    # 歌った字に色をのせる (詳しい設定): on pins the line and its cuts carry the fill; one undo entry
+ +    await page.evaluate("""() => { for (const x of document.querySelectorAll('[data-mount="inspector"] .isec[data-sec="direction"] details.isec-more')) x.open = true; }""")
+ +    fill = ROW % 'sung.fill'
+ +    done_f = await page.evaluate(DONE)
+ +    await page.click(fill + ' .w-toggle')
+ +    await f.until("(id) => { const p = window.__mv.doc.pins['line/' + id + ':sung.fill']; return !!p && p.v === true; }", '歌った字に色をのせる pins the line', ids[1])
+ +    await f.settle(3)
+ +    f.check(await page.evaluate(DONE) == done_f + 1, 'the fill is one undo entry')
+ +    got = await page.evaluate("""(id) => { const a = window.__mv, c = a.plan.cuts.find((x) => x.line === id);
+ +      return { slot: c.slots['sung.fill'] || null, fill: a.plan.sung.get(id).fill }; }""", ids[1])
+ +    f.check(got['slot'] and got['slot']['v'] is True and got['fill'], 'the line\'s cuts carry the fill: %r' % got)
+ +    if on['sung'] and len(on['sung']['t']) > 2:
+ +        await page.evaluate('(x) => window.__mv.seek(x)', on['t0'] + on['sung']['t'][len(on['sung']['t']) // 2])
+ +        await f.settle(4)
+ +        await f.shot('hame-fill')
+ +    # 作品全体 › 見た目: すべての行, then 自動
+ +    await page.evaluate("() => window.__mv.select({ level: 'work' }, { from: 'header', open: true })")
+ +    await open_section(f, 'look')
+ +    await page.locator(row + ' .seg').nth(1).click()
+ +    await f.until("() => { const p = window.__mv.doc.pins['work:sung.hame']; return !!p && p.v === true; }", 'すべての行 pins the whole video')
+ +    await f.settle(3)
+ +    every = await page.evaluate("() => window.__mv.plan.lines.every((l) => { const s = window.__mv.plan.sung, x = s && s.get(l.id); return !!(x && x.hame); })")
+ +    f.check(every, 'every line is 歌ハメ')
+ +    await page.locator(row + ' .seg').nth(0).click()
+ +    await f.until("() => !window.__mv.doc.pins['work:sung.hame']", '自動 clears the pin')
+ +    # 作品全体 › タイミング › 字の時間を歌に合わせる (詳しい設定): on by default in a new work; off pins it; on clears it
+ +    await open_section(f, 'timing')
+ +    await page.evaluate("""() => { const d = [...document.querySelectorAll('[data-mount="inspector"] .isec[data-sec="timing"] details.isec-more')];
+ +      for (const x of d) x.open = true; }""")
+ +    real = ROW % 'sung.real'
+ +    box = real + ' input[role="switch"]'
+ +    f.check(await page.is_checked(box), '字の時間を歌に合わせる shows on (自動) in a new work')
+ +    await page.click(real + ' .w-toggle')
+ +    await f.until("() => { const p = window.__mv.doc.pins['work:sung.real']; return !!p && p.v === false; }", 'off pins it')
+ +    await f.settle(2)
+ +    f.check(await page.evaluate('() => { const s = window.__mv.plan.sung, l = s && s.get(window.__mv.plan.lines[0].id); return !!(l && l.hame); }') is False,
+ +            'without it the hook lines are not 歌ハメ')
+ +    await page.click(real + ' .w-toggle')
+ +    await f.until("() => !window.__mv.doc.pins['work:sung.real']", 'on clears the pin (自動)')
+ +    await f.undo_all(done0, doc0)
+ +
+ +    # 1字ずつタップ with the song
+ +    await page.evaluate(AI_WAV_JS)
+ +    ok = await page.evaluate("async () => { await window.__mv.loadSong(window.__wav(30, 'hame.wav')); return window.__mv.songReady(); }")
+ +    if not f.check(ok, 'the song is loaded'):
+ +        return
+ +    done2 = await page.evaluate(DONE)
+ +    lid = ids[2]
+ +    await page.evaluate("(id) => { const a = window.__mv; a.pause(); a.select({ level: 'line', ids: [id] }, { from: 'crumbs', open: true }); }", lid)
+ +    await f.settle(3)
+ +    btn = '[data-mount="inspector"] [data-custom="sungTimes"] [data-act="tap.units"]'
+ +    if not f.check(await page.locator(btn).count() == 1 and not await page.is_disabled(btn), '行 › 時間 offers 1字ずつタップ with the song'):
+ +        return
+ +    await page.click(btn)
+ +    if not await f.until("() => window.__mv.view.state.mode === 'tap' && window.__mv.view.state.playing", '1字ずつタップ plays the loop'):
+ +        return
+ +    u = await page.evaluate(UNITS)
+ +    f.check(u and u['shown'] and u['lineId'] == lid and u['chips'] > 2, 'the panel shows the line as steps: %r' % u)
+ +    await page.evaluate('() => window.__mv.shell.stage.focus()')
+ +    t_before = await page.evaluate(NOW)
+ +    await page.keyboard.press('ArrowRight')
+ +    t_after = await page.evaluate(NOW)
+ +    f.check(t_after - t_before < 1.5, '→ does not seek in 1字ずつタップ: %.2f → %.2f' % (t_before, t_after))
+ +    await page.click('.step-tapu .tapu-controls [data-v="0.75"]')
+ +    f.check(abs(await page.evaluate('() => window.__mv.player.rate') - 0.75) < 1e-9, '少しゆっくり plays at 0.75')
+ +    await page.evaluate('() => window.__mv.shell.stage.focus()')
+ +    await page.wait_for_timeout(900)
+ +    for _ in range(3):
+ +        await page.keyboard.press('Space')
+ +        await page.wait_for_timeout(220)
+ +    await page.keyboard.press('e')
+ +    u = await page.evaluate(UNITS)
+ +    f.check(u and u['cursor'] >= 2, 'the marks are taken: %r' % u)
+ +    await page.keyboard.press('Escape')
+ +    await f.until("() => window.__mv.view.state.mode === 'normal'", 'Esc finishes')
+ +    await f.settle(3)
+ +    r = await page.evaluate("""(id) => { const a = window.__mv, p = a.doc.pins;
+ +      return { times: p['line/' + id + ':sung.times'], start: p['line/' + id + ':start'], rate: a.player.rate,
+ +        entries: a.store.list().filter((e) => e.done).map((e) => e.label[0]) }; }""", lid)
+ +    f.check(r['times'] and r['times']['by'] == 'tap' and len(r['times']['v']) >= 2 and r['times']['v'][0] == [0, 0],
+ +            'the character times are pinned, relative to the first mark: %r' % r['times'])
+ +    f.check(r['start'] and r['start']['by'] == 'tap', 'the line starts at the first mark: %r' % r['start'])
+ +    f.check(r['entries'][-1] == 'undo.tapUnits' and len(r['entries']) == done2 + 1, 'one undo entry: %r' % r['entries'][done2:])
+ +    f.check(abs(r['rate'] - 1) < 1e-9, 'finishing restores the rate: %r' % r['rate'])
+ +    summary = await page.text_content('[data-mount="inspector"] .frow[data-slot="sungTimes"] .w-text-ro')
+ +    src = await page.evaluate("() => window.__mv.t('sung.src.pin')")
+ +    f.check(summary and src in summary, '字の時間 names the taps: %r' % summary)
+ +    f.check(await page.locator('[data-mount="inspector"] [data-custom="sungTimes"] [data-act="sung.clear"]').count() == 1, '字の時間を消す is offered')
+ +    await f.shot('hame-tapped')
+ +    # やめる writes nothing
+ +    done3 = await page.evaluate(DONE)
+ +    await page.click(btn)
+ +    await f.until("() => window.__mv.view.state.mode === 'tap'", 'a second session starts')
+ +    await page.evaluate('() => window.__mv.shell.stage.focus()')
+ +    await page.wait_for_timeout(300)
+ +    await page.keyboard.press('Space')
+ +    await page.wait_for_timeout(200)
+ +    await page.keyboard.press('Space')
+ +    await page.click('.step-tapu [data-act="tapu.cancel"]')
+ +    await f.until("() => window.__mv.view.state.mode === 'normal'", 'やめる ends the session')
+ +    f.check(await page.evaluate(DONE) == done3, 'やめる writes nothing')
+ +    # the loop's end: playback stops, 決定 / もう一度; もう一度 starts again
+ +    await page.click(btn)
+ +    await f.until("() => window.__mv.view.state.mode === 'tap' && window.__mv.view.state.playing", 'a third session plays')
+ +    await page.evaluate("() => { const s = window.__mv.tap.units.session(); window.__mv.seek(s.loop.b - 0.3); }")
+ +    await f.until("() => { const s = window.__mv.tap.units.session(); return !!s && s.state.atLoopEnd && !window.__mv.view.state.playing; }",
+ +                  'playback stops at the loop\'s end', timeout=6000)
+ +    strip = await page.evaluate("() => { const s = window.__mv.modeStrip(); return s ? s.actions.map((x) => x.label) : []; }")
+ +    retry = await page.evaluate("() => window.__mv.t('tapu.retry')")
+ +    f.check(retry in strip and not await page.is_hidden('.step-tapu [data-act="tapu.retry"]'), 'もう一度 is offered at the loop end: %r' % strip)
+ +    await page.click('.step-tapu [data-act="tapu.retry"]')
+ +    await f.until("() => window.__mv.view.state.playing", 'もう一度 plays the loop again')
+ +    u = await page.evaluate(UNITS)
+ +    f.check(u and u['cursor'] == 0 and not u['atLoopEnd'] and abs(await page.evaluate(NOW) - u['loop']['a']) < 1.0, 'from the loop\'s start: %r' % u)
+ +    await page.click('.step-tapu [data-act="tapu.cancel"]')
+ +    await f.until("() => window.__mv.view.state.mode === 'normal'", 'やめる ends it')
+ +    f.check(await page.evaluate(DONE) == done3, 'the loop end and もう一度 write nothing')
+ +    await f.undo_all(done0, doc0)
+ +
+ +
+ +# The drag target on the timeline: the first character tick of a line with room to move 0.22 s later (away from the
+ +# line's edges), with its CSS point and the timeline's px per second.
+ +TICK_TARGET = """(id) => { const a = window.__mv, tl = a.timeline, TK = MV.use('ui/sung_ticks');
+ +  const l = a.plan.lines.find((x) => x.id === id), ls = a.plan.sung.get(id), i = a.plan.lines.indexOf(l);
+ +  const r = document.querySelector('.tl-canvas').getBoundingClientRect(), rows = tl.rows(), end = TK.spanEndOf(a.plan.lines, i);
+ +  for (let u = 1; u < ls.t.length; u++) {
+ +    const b = TK.bounds(ls, l, u, end), x = tl.xOf(ls.t[u]);
+ +    if (b.hi - ls.t[u] >= 0.22 && x - tl.xOf(l.t0) > 12 && tl.xOf(l.t1) - x > 12 && x > 10 && x < r.width - 60) {
+ +      return { u, x: r.left + x, y: r.top + rows.line[1] - 6, t: ls.t[u], px: tl.xOf(ls.t[u] + 1) - x, n: ls.t.length };
+ +    }
+ +  }
+ +  return null; }"""
+ +# A line's unit times, sources and pins (歌ハメ ticks).
+ +TICK_STATE = """(id) => { const a = window.__mv, ls = a.plan.sung.get(id), p = a.doc.pins;
+ +  return { t: Array.from(ls.t), src: Array.from(ls.src), times: p['line/' + id + ':sung.times'] || null, start: p['line/' + id + ':start'] || null,
+ +    by: a.plan.lines.find((l) => l.id === id).by.start, last: (a.store.list().filter((e) => e.done).slice(-1)[0] || {}).label }; }"""
+ +
+ +
+ +async def flow_hame_ticks(f, lang):
+ +    """歌ハメ on the timeline (DESIGN_2_2 §6): the selected line shows its character ticks; dragging one 0.2 s pins the
+ +    line's character times and its automatic start, one undo entry 字の時間; a double-click gives it back to the estimate;
+ +    in the listbox Alt+→ focuses a tick (the page does not go back or forward), Ctrl+→ moves it by a frame and Delete
+ +    gives it back."""
+ +    page = f.page
+ +    done0, doc0 = await with_lyrics(f)
+ +    lid = (await page.evaluate('() => window.__mv.plan.lines.map((l) => l.id)'))[1]
+ +    await f.blur()
+ +    await page.keyboard.press('Shift+T')
+ +    if not await f.until('() => window.__mv.view.state.drawer', 'Shift+T opens the timeline drawer'):
+ +        return
+ +    await page.evaluate("""(id) => { const a = window.__mv, l = a.plan.lines.find((x) => x.id === id);
+ +      a.select({ level: 'line', ids: [id] }, { from: 'timeline' }); a.seek(l.t0 + 0.5); }""", lid)
+ +    await f.settle(3)
+ +    for _ in range(6):
+ +        await page.click('.timeline .tl-zoom button:last-child')
+ +    await page.evaluate("(id) => { const a = window.__mv, l = a.plan.lines.find((x) => x.id === id); a.seek(Math.max(0, l.t0 - 0.3)); }", lid)
+ +    await f.settle(3)
+ +    before = await page.evaluate(TICK_STATE, lid)
+ +    f.check(before['times'] is None and before['by'] == 'auto' and len(before['t']) > 3, 'an estimated line with an automatic start: %r' % before)
+ +    k = await page.evaluate(TICK_TARGET, lid)
+ +    if not f.check(k is not None, 'a tick to drag on the selected line'):
+ +        return
+ +    hit = await page.evaluate("(p) => { const r = document.querySelector('.tl-canvas').getBoundingClientRect(); return window.__mv.timeline.hitAt(p.x - r.left, p.y - r.top).tick; }", k)
+ +    f.check(hit == k['u'], 'the tick is hit: %r' % hit)
+ +    await f.shot('ticks')
+ +    done = await page.evaluate(DONE)
+ +    await page.mouse.move(k['x'], k['y'])
+ +    await page.mouse.down()
+ +    for i in range(1, 6):
+ +        await page.mouse.move(k['x'] + i * 0.2 * k['px'] / 5, k['y'])
+ +    await page.mouse.up()
+ +    await f.settle(3)
+ +    moved = await page.evaluate(TICK_STATE, lid)
+ +    f.check(moved['times'] and moved['times']['by'] == 'user' and len(moved['times']['v']) == k['n'], 'the drag pins the character times: %r' % moved['times'])
+ +    f.check(moved['start'] and moved['start']['by'] == 'user' and abs(moved['start']['v'] - (await page.evaluate("(id) => window.__mv.plan.lines.find((l) => l.id === id).t0", lid))) < 0.002,
+ +            'and the automatic start where it was: %r' % moved['start'])
+ +    f.check(abs(moved['t'][k['u']] - (k['t'] + 0.2)) < 0.03, 'the character moved 0.2 s: %.3f → %.3f' % (k['t'], moved['t'][k['u']]))
+ +    f.check(all(abs(moved['t'][u] - before['t'][u]) < 0.002 for u in range(len(before['t'])) if u != k['u']), 'the other characters stay')
+ +    f.check(await page.evaluate(DONE) == done + 1 and moved['last'] and moved['last'][0] == 'undo.tick', 'one undo entry 字の時間: %r' % moved['last'])
+ +    # a double-click gives it back to the estimate
+ +    x = await page.evaluate("(p) => { const tl = window.__mv.timeline; return document.querySelector('.tl-canvas').getBoundingClientRect().left + tl.xOf(p.t); }",
+ +                            {'t': moved['t'][k['u']]})
+ +    await page.mouse.dblclick(x, k['y'])
+ +    await f.settle(3)
+ +    back = await page.evaluate(TICK_STATE, lid)
+ +    f.check(back['times'] and len(back['times']['v']) == k['n'] - 1 and back['src'][k['u']] == 0,
+ +            'double-click: the character is estimated again: %r %r' % (back['times'], back['src']))
+ +    f.check(await page.evaluate(DONE) == done + 2, 'one more undo entry')
+ +    # the keyboard: ← (the start edge), Alt+→ the first tick, Ctrl+→ one frame later, Delete back to the estimate
+ +    url = page.url
+ +    await page.evaluate('() => window.__mv.timeline.focus()')
+ +    await page.keyboard.press('ArrowLeft')
+ +    await page.keyboard.press('Alt+ArrowRight')
+ +    await f.settle(2)
+ +    label = await page.evaluate("""(id) => { const a = window.__mv, TK = MV.use('ui/sung_ticks'), l = a.plan.lines.find((x) => x.id === id);
+ +      const o = document.getElementById(document.querySelector('.tl-proxy').getAttribute('aria-activedescendant'));
+ +      return { text: o ? o.textContent : '', want: TK.label(a.t, a.plan.sung.get(id), l, 1) }; }""", lid)
+ +    f.check(label['want'] in label['text'], 'Alt+→ focuses the first tick and the listbox names it: %r' % label)
+ +    await f.settle(2)
+ +    f.check(page.url == url, 'Alt+→ does not leave the page')
+ +    t1 = (await page.evaluate(TICK_STATE, lid))['t'][1]
+ +    await page.keyboard.press('Control+ArrowRight')
+ +    await f.settle(3)
+ +    nudged = await page.evaluate(TICK_STATE, lid)
+ +    fps = await page.evaluate('() => window.__mv.doc.output.fps || 30')
+ +    f.check(abs(nudged['t'][1] - (t1 + 1 / fps)) < 0.002 and nudged['src'][1] == 4, 'Ctrl+→ moves the tick by a frame: %.3f → %.3f' % (t1, nudged['t'][1]))
+ +    f.check(await page.evaluate(DONE) == done + 3, 'the nudge is one undo entry')
+ +    await page.keyboard.press('Delete')
+ +    await f.settle(3)
+ +    gone = await page.evaluate(TICK_STATE, lid)
+ +    f.check(gone['src'][1] == 0 and await page.evaluate(DONE) == done + 4, 'Delete gives the focused tick back to the estimate: %r' % gone['src'][:3])
+ +    await page.keyboard.press('ArrowRight')
+ +    await f.settle(2)
+ +    after = await page.evaluate("""(id) => { const a = window.__mv, TK = MV.use('ui/sung_ticks'), l = a.plan.lines.find((x) => x.id === id);
+ +      const o = document.getElementById(document.querySelector('.tl-proxy').getAttribute('aria-activedescendant'));
+ +      return { text: o ? o.textContent : '', tick: TK.label(a.t, a.plan.sung.get(id), l, 1) }; }""", lid)
+ +    f.check(after['tick'] not in after['text'], '→ goes back to the line\'s edges: %r' % after)
+ +    await f.undo_all(done0, doc0)
+ +
+ +
+ +async def flow_ai_words(f, lang):
+ +    """曲を使う › AIで字の時間 (歌ハメ, DESIGN_2_2 §6): for the selected line, the words' times come back as one review row
+ +    in 時間; applying it pins the line's character times and its automatic start by ai, one undo entry."""
+ +    page = f.page
+ +    done0, doc0 = await with_lyrics(f)
+ +    await page.evaluate(AI_WAV_JS)
+ +    ok = await page.evaluate("async () => { await window.__mv.loadSong(window.__wav(12, 'ai.wav')); return window.__mv.songReady(); }")
+ +    if not f.check(ok, 'the song is loaded'):
+ +        return
+ +    line = await page.evaluate("() => { const l = window.__mv.plan.lines[0]; return { id: l.id, t0: l.t0, text: l.text, by: l.by.start }; }")
+ +    mm = lambda x: '%d:%05.2f' % (int(x // 60), x % 60)
+ +    words = [w for w in ['窓を', 'あけて', '光を'] if w in line['text']]
+ +    answers = [{'note': '', 'lines': [{'i': 0, 'words': [{'text': w, 'start': mm(line['t0'] + 0.1 + k * 0.45)} for k, w in enumerate(words)]}]}]
+ +    await ai_route(f, answers)
+ +    await page.evaluate("(id) => window.__mv.select({ level: 'line', ids: [id] }, { from: 'crumbs' })", line['id'])
+ +    await ai_open(f)
+ +    await page.click('.ai-consent input[type="checkbox"]')
+ +    await f.until("() => !document.querySelector('[data-tool=\"words\"]').disabled", 'consent enables AIで字の時間')
+ +    await page.click('[data-tool="words"]')
+ +    if not await f.until("() => document.querySelectorAll('.ai-review .ai-row').length > 0", 'the review of the character times'):
+ +        return
+ +    ai_requests_ok(f, audio=True)
+ +    body = [s for s in f.ai_seen if s['method'] == 'POST'][0]['body']
+ +    prompt = body['contents'][0]['parts'][1]['text']
+ +    f.check(line['text'] in prompt and prompt.count('\n') == 1, 'only the selected line is sent: %r' % prompt)
+ +    heads = await page.evaluate("() => [...document.querySelectorAll('.ai-group-head')].map((e) => e.textContent)")
+ +    f.check(lang != 'ja' or heads == ['時間'], 'the row is in 時間: %r' % heads)
+ +    done = await page.evaluate(DONE)
+ +    await page.click('.ai-review-foot .btn.primary')
+ +    await f.until("(id) => { const p = window.__mv.doc.pins['line/' + id + ':sung.times']; return !!p && p.by === 'ai'; }", 'the character times are pinned by ai', line['id'])
+ +    await f.settle(3)
+ +    pins = await page.evaluate("(id) => { const p = window.__mv.doc.pins; return { times: p['line/' + id + ':sung.times'], start: p['line/' + id + ':start'] }; }", line['id'])
+ +    f.check(len(pins['times']['v']) == len(words), 'one pair per word: %r' % pins['times'])
+ +    f.check(line['by'] != 'auto' or (pins['start'] and pins['start']['by'] == 'ai'), 'the automatic start is pinned with them: %r' % pins['start'])
+ +    f.check(await page.evaluate(DONE) == done + 1, 'one undo entry')
+ +    await f.undo_all(done0, doc0)
+ +
+ +
+ +# 歌ハメ (DESIGN_2_2 §6).
+ +FLOWS += [('hame', flow_hame, False), ('hame_ticks', flow_hame_ticks, False), ('ai_words', flow_ai_words, False)]
+ +
+ +
++ # --- PV22 P5 タイミング (DESIGN_2_2 §5) ------------------------------------------------------------------------------------
++ 
++ ENTER_STATE = """() => { const a = window.__mv, seg = document.querySelector('[data-mount="inspector"] .frow[data-slot="timing.set.enter"]');
++   const lead = document.querySelector('[data-mount="inspector"] .frow[data-slot="timing.set.lead"] input');
++   return { lead: a.doc.timing.lead, enter: a.doc.timing.enter === undefined ? null : a.doc.timing.enter, gen: a.doc.look.gen,
++     shown: lead ? Number(lead.value) : null, checked: seg ? [...seg.querySelectorAll('.seg')].map((b) => b.getAttribute('aria-checked')) : null,
++     note: seg ? !!seg.querySelector('.fr-note') : null, opened: a.plan.cuts.filter((c) => c.ready !== undefined).length,
++     staged: a.engine.plan ? a.engine.plan.cuts.filter((c) => c.ready !== undefined).length : -1 }; }"""
++ 
++ 
++ async def flow_enter(f, lang):
++     """入りの基準 (T4): a new work shows 入りの早さ 0.2 and 入りの基準 動き始め under 作品全体 › タイミング; 出そろい is one
++     undo entry named 入りの基準, the plan and the stage open the entrances; 元に戻す returns to 動き始め."""
++     page = f.page
++     done0, doc0 = await with_lyrics(f)
++     await page.evaluate("() => { const a = window.__mv; a.openPanel('details'); a.select({ level: 'work' }, { from: 'crumbs', open: true }); }")
++     await f.settle(4)
++     await open_section(f, 'timing')
++     s = await page.evaluate(ENTER_STATE)
++     f.check(s['lead'] == 0.2 and s['enter'] is None and s['gen'] == 1, 'a new work: lead 0.2, no 入りの基準 stored, look.gen 1: %r' % s)
++     f.check(s['shown'] == 0.2, '入りの早さ shows 0.2: %r' % s['shown'])
++     f.check(s['checked'] == ['true', 'false'], '入りの基準 shows 動き始め: %r' % s['checked'])
++     f.check(s['note'] is True and s['opened'] == 0, 'the row has its note; nothing is opened: %r' % s)
++     await page.locator(ROW % 'timing.set.enter' + ' .seg').nth(1).click()
++     await f.until("() => window.__mv.doc.timing.enter === 'ready'", '出そろい is stored')
++     await f.until("() => window.__mv.engine.plan && window.__mv.engine.plan.cuts.some((c) => c.ready !== undefined)",
++                   'the stage plays the opened entrances')
++     await f.settle(2)
++     s = await page.evaluate(ENTER_STATE)
++     f.check(s['checked'] == ['false', 'true'] and s['opened'] > 0, '出そろい is chosen and entrances open: %r' % s)
++     await page.evaluate("(s) => document.querySelector(s).scrollIntoView({ block: 'center' })", ROW % 'timing.set.enter')
++     await f.shot('ready')
++     f.check(await page.evaluate(DONE) == done0 + 1, 'one undo entry')
++     label = await page.evaluate("() => { const e = window.__mv.store.list().filter((x) => x.done).pop(); return window.__mv.t(e.label[0], e.label[1]); }")
++     f.check(label == await page.evaluate("() => window.__mv.t('fld.enter')"), 'the entry is named by the field: %r' % label)
++     await page.evaluate("() => window.__mv.store.undo()")
++     await f.until("() => window.__mv.doc.timing.enter === undefined", '元に戻す removes 入りの基準')
++     await f.settle(2)
++     s = await page.evaluate(ENTER_STATE)
++     f.check(s['checked'] == ['true', 'false'] and s['opened'] == 0, '元に戻す returns to 動き始め: %r' % s)
++     f.check(await page.evaluate(DOC) == doc0, 'the document is as before')
++ 
++ 
++ FLOWS += [('enter', flow_enter, False)]
++ 
++ 
++ # 読み切れない速さ (S4): two automatic lines squeezed between LRC stamps 1.5 s apart (placeholder kana)
++ SQUEEZE = '\n'.join(['[00:10.00]あいう', 'さしすせそたちつてとな', 'はひふへほまみむめもや', '[00:11.50]らりるれろ'])
++ FAST_STATE = """() => { const a = window.__mv, ids = a.plan.lines.map((l) => l.id);
++   const gut = (id) => { const w = document.querySelector('.le-g[data-row="' + id + '"] .g-warn'); return w ? w.title : null; };
++   const list = [...document.querySelectorAll('.vl-row')].map((r) => { const w = r.querySelector('.g-warn'); return w ? w.title : null; });
++   const opt = (id) => { const o = document.getElementById('tl-opt-' + id); return o ? o.textContent : null; };
++   const note = document.querySelector('[data-mount="inspector"] [data-note="too-fast"]');
++   const check = document.querySelector('.step-export .check[data-code="too-fast"]');
++   return { ids, gutter: ids.map(gut), list, opts: ids.map(opt), note: note ? note.textContent : null,
++     fast: a.warnings().filter((w) => w.code === 'too-fast').map((w) => w.line), check: check ? check.textContent : null,
++     readCheck: a.doc.timing.readCheck === undefined ? null : a.doc.timing.readCheck }; }"""
++ 
++ 
++ async def flow_readcheck(f, lang):
++     """読み切れない速さ (S4): in a new work the two squeezed lines get 「!」 in the gutter with the rate, a titled 「!」 in the
++     行 list, the timeline's text, the 行 page note with [動きを速くする] (one undo entry), and one item in step ④ whose
++     [見る] selects the cut; the switch turns it all off. An opened older work gets no new marks, only the squeeze tooltip."""
++     page = f.page
++     done0, doc0 = await with_lyrics(f, SQUEEZE)
++     tf = await page.evaluate("() => window.__mv.t('warn.too-fast')")
++     await f.until("() => document.querySelectorAll('.le-g .g-warn').length >= 2", 'the gutter marks the fast lines')
++     s = await page.evaluate(FAST_STATE)
++     ids = s['ids']
++     f.check(s['fast'] == ids[1:3], 'lines 2 and 3 are too fast: %r' % s['fast'])
++     f.check(s['gutter'][0] is None and s['gutter'][3] is None, 'lines 1 and 4 have no mark: %r' % s['gutter'])
++     f.check(all(g and g.startswith(tf) and '（' in g for g in s['gutter'][1:3]) if lang == 'ja' else True,
++             'the gutter tooltip names the rate: %r' % s['gutter'])
++     # 作品全体 › 行: the 「!」 has the same text as its title
++     await page.evaluate("() => { const a = window.__mv; a.openPanel('details'); a.select({ level: 'work' }, { from: 'crumbs', open: true }); }")
++     await f.settle(3)
++     await open_section(f, 'lines')
++     await f.until("() => document.querySelectorAll('.vl-row').length === 4", 'the 行 list fills')
++     s = await page.evaluate(FAST_STATE)
++     f.check(s['list'][0] is None and all(x and x.startswith(tf) for x in s['list'][1:3]), 'the 行 list 「!」 has the text: %r' % s['list'])
++     # the timeline's listbox reads it
++     await page.evaluate("() => window.__mv.view.set({ drawer: true })")
++     await f.until("(id) => { const o = document.getElementById('tl-opt-' + id); return o && o.textContent.length > 0; }", 'the timeline options', ids[1])
++     s = await page.evaluate(FAST_STATE)
++     f.check(tf in (s['opts'][1] or '') and tf not in (s['opts'][0] or ''), 'the timeline label ends with the notice: %r' % s['opts'])
++     await f.shot('timeline')
++     # 行 › 時間: the note and [動きを速くする]
++     await page.evaluate("(id) => window.__mv.select({ level: 'line', ids: [id] }, { from: 'crumbs', open: true })", ids[1])
++     await f.until("() => !!document.querySelector('[data-mount=\"inspector\"] [data-note=\"too-fast\"]')", 'the 行 page note')
++     s = await page.evaluate(FAST_STATE)
++     before = s['note']
++     f.check(before and tf in before, 'the note: %r' % before)
++     await f.shot('note')
++     done1 = await page.evaluate(DONE)
++     await page.locator('[data-mount="inspector"] [data-fix="motion"]').click()
++     await f.until("(id) => !!window.__mv.doc.pins['line/' + id + ':arrive.dur']", 'the motion pins are set', ids[1])
++     await f.settle(3)
++     f.check(await page.evaluate(DONE) == done1 + 1, 'one undo entry for the quick fix')
++     label = await page.evaluate("() => { const e = window.__mv.store.list().filter((x) => x.done).pop(); return window.__mv.t(e.label[0], e.label[1]); }")
++     f.check(label == await page.evaluate("() => window.__mv.t('undo.readFix')"), 'the entry is 読みやすくする（動きを速く）: %r' % label)
++     s = await page.evaluate(FAST_STATE)
++     f.check(s['note'] != before, 'the note follows the new plan: %r → %r' % (before, s['note']))
++     await page.evaluate("() => window.__mv.store.undo()")
++     await f.settle(3)
++     # step ④: one item; [見る] selects the first fast cut
++     await page.evaluate("() => { const a = window.__mv; a.view.closePanel(); a.goStep('export'); }")
++     await f.until("() => !!document.querySelector('.step-export .check[data-code=\"too-fast\"]')", 'step ④ lists the lines')
++     s = await page.evaluate(FAST_STATE)
++     want = await page.evaluate("() => window.__mv.t('exp.pre.too-fast', { n: 2, list: window.__mv.t('exp.pre.too-fast.lines', { n: 2, list: '2' + window.__mv.t('list.sep') + '3' }) })")
++     f.check(s['check'] and want in s['check'], 'the item names lines 2 and 3: %r' % s['check'])
++     await f.shot('export')
++     await page.locator('.step-export .check[data-code="too-fast"] .check-actions button').click()
++     await f.settle(2)
++     sel = await page.evaluate("() => { const a = window.__mv, s = a.view.state.sel; return s.level === 'cut' ? a.plan.cuts.find((c) => c.key === s.key).line : (s.ids || [])[0]; }")
++     f.check(sel == ids[1], '[見る] selects the first fast line\'s cut: %r' % sel)
++     # the switch (作品全体 › タイミング) turns the notices off
++     await page.evaluate("() => { const a = window.__mv; a.goStep('lyrics'); a.select({ level: 'work' }, { from: 'crumbs', open: true }); }")
++     await f.settle(3)
++     await open_section(f, 'timing')
++     box = page.locator(ROW % 'timing.set.readCheck' + ' input')
++     f.check(await box.is_checked(), 'the switch shows on for a new work')
++     done2 = await page.evaluate(DONE)
++     await box.click()
++     await f.until("() => window.__mv.doc.timing.readCheck === false", 'the switch stores off')
++     await f.until("() => !document.querySelector('.le-g .g-warn')", 'the gutter marks go away')
++     s = await page.evaluate(FAST_STATE)
++     f.check(s['fast'] == [] and await page.evaluate(DONE) == done2 + 1, 'no notices, one undo entry: %r' % s['fast'])
++     await f.undo_all(done0, doc0)
++     # an older work (no generation, no switch): nothing new; the squeeze keeps its one 「!」 in the 行 list, with its text
++     await page.evaluate(IO_JS)
++     await page.evaluate("async () => { const a = window.__mv; await a.io.openFiles([window.__project(['あいうえおかきくけこ', 'さしすせそたちつてと', '[00:01.00]はひふへほ'], 'old.json')]); a.pause(); }")
++     await f.until("() => window.__mv.plan && window.__mv.plan.lines.length === 3 && window.__mv.doc.look.gen === undefined", 'the older work is open')
++     await page.evaluate("() => { const a = window.__mv; a.openPanel('details'); a.select({ level: 'work' }, { from: 'crumbs', open: true }); }")
++     await f.settle(3)
++     await open_section(f, 'lines')
++     await f.until("() => document.querySelectorAll('.vl-row').length === 3", 'the 行 list of the older work')
++     s = await page.evaluate(FAST_STATE)
++     squeezed = await page.evaluate("() => window.__mv.t('warn.time-compressed.n', { n: 2 })")
++     f.check(s['fast'] == [] and s['readCheck'] is None, 'no too-fast notices in an older work: %r' % s)
++     f.check(s['gutter'] == [None, None, None], 'the gutter shows no squeeze mark: %r' % s['gutter'])
++     f.check(s['list'] == [squeezed, None, None], 'the 行 list 「!」 has the squeeze text: %r' % s['list'])
++ 
++ 
++ FLOWS += [('readcheck', flow_readcheck, False)]
++ 
++ 
++ # この行だけ打ち直す (S2): six automatic lines (placeholder kana) over a 30 s song
++ RETAP_LYRICS = '\n'.join(['あいうえおかき', 'さしすせそたち', 'なにぬねのはひ', 'まみむめもやゆ', 'らりるれろわを', 'がぎぐげござじ'])
++ RETAP_STATE = """(id) => { const a = window.__mv, l = a.plan.lines.find((x) => x.id === id), p = a.doc.pins;
++   const pin = (k) => (p[k] ? [p[k].v, p[k].by] : null);
++   return { mode: a.view.state.mode, playing: a.view.state.playing, time: a.time(), t0: l.t0, t1: l.t1, by: l.by,
++     start: pin('line/' + id + ':start'), end: pin('line/' + id + ':end'),
++     title: (document.querySelector('.step-tap .step-title') || {}).textContent || null,
++     keep: !!document.querySelector('.step-tap .tap-keep:not([hidden]) input:checked'),
++     toasts: [...document.querySelectorAll('.toast-text')].map((x) => x.textContent) }; }"""
++ LAST_TEXT = "() => { const e = window.__mv.store.list().filter((x) => x.done).pop(); return window.__mv.t(e.label[0], e.label[1]); }"
++ 
++ 
++ async def flow_retap(f, lang):
++     """この行だけタップで打ち直す (S2): from 行 › 時間 the one-line mode plays 2 s before line 3; a seek ends the loop so the
++     line can be marked 5 s late; a second Space is refused; E finishes it 0.3 s later as one undo entry 「この行を打ち直す
++     （3行目）」 with the neighbours pinned (named in the toast; 「ほかの行の固定を外す」 is one more entry). A line with a
++     pinned start and end keeps its length when re-tapped without E (the session ends by itself). The timeline's line
++     menu offers the three items, by mouse and by the menu key."""
++     page = f.page
++     done0, doc0 = await with_lyrics(f, RETAP_LYRICS)
++     await page.evaluate(AI_WAV_JS)
++     ok = await page.evaluate("async () => { await window.__mv.loadSong(window.__wav(30, 'retap.wav')); return window.__mv.songReady(); }")
++     if not f.check(ok, 'the song is loaded'):
++         return
++     done0, doc0 = await page.evaluate(DONE), await page.evaluate(DOC)
++     ids = await page.evaluate('() => window.__mv.plan.lines.map((l) => l.id)')
++     old = await page.evaluate('() => window.__mv.plan.lines.map((l) => l.t0)')
++     s = await page.evaluate(RETAP_STATE, ids[2])
++     f.check(s['by']['start'] == 'auto', 'line 3 starts automatically: %r' % s['by'])
++     T = s['t0']
++     await page.evaluate("(id) => window.__mv.select({ level: 'line', ids: [id] }, { from: 'crumbs', open: true, seek: false })", ids[2])
++     btn = page.locator('[data-mount="inspector"] .insp-time-tools [data-act="tap.line"]')
++     await btn.wait_for(state='visible', timeout=3000)
++     await btn.click()
++     if not await f.until("() => window.__mv.view.state.mode === 'tap' && window.__mv.view.state.playing", 'the one-line mode plays'):
++         return
++     s = await page.evaluate(RETAP_STATE, ids[2])
++     f.check(abs(s['time'] - (T - 2)) < 0.6, 'playback starts 2 s before the line: %.2f vs %.2f' % (s['time'], T - 2))
++     f.check(s['title'] == await page.evaluate("() => window.__mv.t('tap.onlyTitle')") and s['keep'], 'the one-line head, 前後の行を動かさない on: %r' % s)
++     await f.shot('only')
++     await page.keyboard.press('ArrowRight')           # a seek by the user: the loop stops
++     await f.until('(x) => window.__mv.time() > x', 'the clock passes the line + 5 s', T + 5, timeout=9000)
++     await page.keyboard.press('Space')
++     await f.settle(2)
++     m = await page.evaluate("() => window.__mv.tap.update && (window.__mv.player.now() - (window.__mv.doc.timing.tapLatency || 0))")
++     await page.wait_for_timeout(300)
++     await page.keyboard.press('Space')                # refused: the line is marked
++     once = await page.evaluate("() => document.querySelector('.step-tap .tap-last').textContent")
++     f.check(once == await page.evaluate("() => window.__mv.t('tap.onlyDone')"), 'a second press is refused: %r' % once)
++     await page.wait_for_timeout(700)
++     await page.keyboard.press('e')
++     await f.until("() => window.__mv.view.state.mode === 'normal'", 'the session ends 0.3 s after E', timeout=2000)
++     await f.settle(3)
++     s = await page.evaluate(RETAP_STATE, ids[2])
++     f.check(s['start'] and s['start'][1] == 'tap' and abs(s['start'][0] - (T + 5)) < 0.8, 'line 3 starts about 5 s late by tap: %r' % s['start'])
++     f.check(s['end'] and s['end'][1] == 'tap' and s['end'][0] > s['start'][0], 'E pinned its end: %r' % s['end'])
++     f.check(await page.evaluate(DONE) == done0 + 1, 'exactly one undo entry')
++     label = await page.evaluate(LAST_TEXT)
++     f.check(label == await page.evaluate("() => window.__mv.t('undo.tapLine', { n: 3 })"), 'the entry: %r' % label)
++     helpers = await page.evaluate("""(ids) => ids.filter((id) => { const p = window.__mv.doc.pins['line/' + id + ':start']; return p && p.by === 'user'; })""", ids)
++     f.check(len(helpers) >= 1, 'neighbours are pinned: %r' % helpers)
++     kept = [h for h in helpers if abs(await page.evaluate("(id) => window.__mv.doc.pins['line/' + id + ':start'].v", h) - old[ids.index(h)]) < 1e-6]
++     f.check(kept == helpers, 'at their old starts: %r' % helpers)
++     toast = ' '.join(s['toasts'])
++     f.check(await page.evaluate("() => window.__mv.t('tap.lineDone', { n: 3 })") in toast and '固定しました' in toast if lang == 'ja' else True,
++             'the toast names the pinned lines: %r' % toast)
++     await f.shot('done')
++     unpin = page.locator('.toast .toast-act', has_text=await page.evaluate("() => window.__mv.t('tap.unpinHelpers')"))
++     await unpin.click()
++     await f.until("(ids) => ids.every((id) => !window.__mv.doc.pins['line/' + id + ':start'])", 'ほかの行の固定を外す removes them', helpers)
++     f.check(await page.evaluate(DONE) == done0 + 2, 'one more undo entry')
++     f.check(await page.evaluate(LAST_TEXT) == await page.evaluate("(n) => window.__mv.t('undo.unpinHelpers', { n })", len(helpers)), 'named with the count')
++     await page.evaluate("() => { window.__mv.store.undo(); window.__mv.store.undo(); }")
++     await f.settle(2)
++     f.check(await page.evaluate(DOC) == doc0, '元に戻す twice restores everything')
++ 
++     # a pinned start and end (what a drag on the timeline writes): re-tapped without E, the end moves with the start
++     await page.evaluate("""(id) => { const a = window.__mv, l = a.plan.lines.find((x) => x.id === id);
++       a.batch({ label: ['undo.time', {}] }, [{ t: 'pin.set', path: 'line/' + id + ':start', v: Math.round(l.t0 * 100) / 100, by: 'user' },
++         { t: 'pin.set', path: 'line/' + id + ':end', v: Math.round((l.t0 + 1.5) * 100) / 100, by: 'user' }]); }""", ids[3])
++     s4 = await page.evaluate(RETAP_STATE, ids[3])
++     await page.evaluate("(id) => window.__mv.actions.run('tap.line', { lineId: id })", ids[3])
++     await f.until("() => window.__mv.view.state.mode === 'tap' && window.__mv.view.state.playing", 'the palette command starts it')
++     await f.until('(x) => window.__mv.time() > x', 'the clock passes the old start + 0.8 s', s4['t0'] + 0.8, timeout=6000)
++     await page.keyboard.press('Space')
++     await f.until("() => window.__mv.view.state.mode === 'normal'", 'the session ends by itself after the line', timeout=8000)
++     await f.settle(3)
++     s = await page.evaluate(RETAP_STATE, ids[3])
++     delta = s['start'][0] - s4['start'][0] if s['start'] else None
++     f.check(delta is not None and abs((s['end'][0] - s['start'][0]) - (s4['end'][0] - s4['start'][0])) < 0.02,
++             'the end moved by the same delta (%r): %r → %r' % (delta, s4, s))
++     toast = ' '.join(s['toasts'])
++     f.check(await page.evaluate("() => window.__mv.t('tap.endShifted')") in toast, 'the toast says the end moved: %r' % toast)
++ 
++     # the timeline's line menu: three items (the start is pinned now), by mouse and by the menu key
++     await page.evaluate("() => window.__mv.view.set({ drawer: true })")
++     await f.settle(4)
++     pt = await page.evaluate("""(id) => { const a = window.__mv, tl = a.timeline, l = a.plan.lines.find((x) => x.id === id);
++       const r = document.querySelector('.tl-canvas').getBoundingClientRect(), rows = tl.rows();
++       return { x: r.left + (tl.xOf(l.t0) + tl.xOf(l.t1)) / 2, y: r.top + (rows.line[0] + rows.line[1]) / 2 }; }""", ids[3])
++     await page.mouse.click(pt['x'], pt['y'], button='right')
++     await f.settle(2)
++     items = await page.evaluate("() => [...document.querySelectorAll('.menu-item .menu-label')].map((x) => x.textContent)")
++     want = await page.evaluate("() => ['tl.lineMenu.retap', 'tl.lineMenu.tapFrom', 'tl.lineMenu.unpinStart'].map((k) => window.__mv.t(k))")
++     f.check(items == want, 'the line menu: %r' % items)
++     await f.shot('menu')
++     await page.keyboard.press('Escape')
++     await f.settle(2)
++     await page.focus('.tl-proxy')
++     await page.keyboard.press('Shift+F10')
++     await f.settle(2)
++     items = await page.evaluate("() => [...document.querySelectorAll('.menu-item .menu-label')].map((x) => x.textContent)")
++     f.check(items[:2] == want[:2], 'the menu key opens it too: %r' % items)
++     await page.keyboard.press('Escape')
++ 
++ 
++ FLOWS += [('retap', flow_retap, False)]
++ 
++ # 曲から下書き (S1): six automatic lines (placeholder kana) over a synthetic 30 s stereo song (tests/helpers/song_gen.js,
++ # evaluated in the page: its sung phrases are known), written as a 16-bit stereo WAV and loaded as the song.
++ DRAFT_LYRICS = '\n'.join(['あいうえおかきく', 'さしすせそたち', 'なにぬねのはひふへ', 'まみむめもや', 'らりるれろわをん', 'がぎぐげござじ'])
++ SONG_GEN_JS = (ROOT / 'tests' / 'helpers' / 'song_gen.js').read_text(encoding='utf-8')
++ DRAFT_SONG_JS = r"""async (o) => {
++   const g = window.__songGen.song({ seconds: o.seconds, seed: o.seed, rate: 22050 });
++   const [L, R] = g.channels, n = L.length, rate = 22050, buf = new ArrayBuffer(44 + n * 4), v = new DataView(buf);
++   const put = (at, x) => { for (let i = 0; i < x.length; i++) v.setUint8(at + i, x.charCodeAt(i)); };
++   put(0, 'RIFF'); v.setUint32(4, 36 + n * 4, true); put(8, 'WAVE'); put(12, 'fmt '); v.setUint32(16, 16, true);
++   v.setUint16(20, 1, true); v.setUint16(22, 2, true); v.setUint32(24, rate, true); v.setUint32(28, rate * 4, true);
++   v.setUint16(32, 4, true); v.setUint16(34, 16, true); put(36, 'data'); v.setUint32(40, n * 4, true);
++   let peak = 0;
++   for (let i = 0; i < n; i++) peak = Math.max(peak, Math.abs(L[i]), Math.abs(R[i]));
++   const k = peak > 0.98 ? 0.98 / peak : 1;
++   for (let i = 0; i < n; i++) { v.setInt16(44 + i * 4, Math.round(L[i] * k * 32767), true); v.setInt16(46 + i * 4, Math.round(R[i] * k * 32767), true); }
++   window.__draftPhrases = g.phrases.map((p) => p.start);
++   await window.__mv.loadSong(new File([buf], o.name, { type: 'audio/wav' }));
++   return window.__mv.songReady();
++ }"""
++ DRAFT_STATE = """() => { const a = window.__mv, v = a.doc.song && a.doc.song.voice;
++   return { mode: a.view.state.mode, phase: a.draft.phase(), rows: document.querySelectorAll('.step-draft .draft-row').length,
++     checked: document.querySelectorAll('.step-draft .draft-row input:checked').length, marks: a.draft.marks().length,
++     head: (document.querySelector('.step-draft .draft-head') || {}).textContent || null,
++     need: !!document.querySelector('.step-draft .note') && !document.querySelector('.step-draft .draft-rows'),
++     alt: a.shell.stage.hasAlt(), voice: !!v, phrases: !!(v && typeof v.phrases === 'string'),
++     strip: (document.querySelector('.mode-strip .strip-text, [data-kind] .strip-text') || {}).textContent || null,
++     toasts: [...document.querySelectorAll('.toast-text')].map((x) => x.textContent) }; }"""
++ 
++ 
++ async def flow_draft(f, lang):
++     """曲から下書き (S1): a song imported with this build carries its voice (doc.song.voice with the phrase stream), so
++     ② 曲's chip opens the review at once: rows with confidence marks, the stage trying the draft on, ticks on the
++     timeline. T and other shortcuts do nothing there; Esc records nothing. 適用 is one undo entry 「曲から下書き（n行）」
++     whose starts are pinned by tap, and 元に戻す restores the work. A work whose song has no voice record (an older
++     import) asks first; 「声を読んで下書き」 reads it as its own undo entry 「曲の声を読む」, then the review opens."""
++     page = f.page
++     await with_lyrics(f, DRAFT_LYRICS)
++     await page.evaluate(SONG_GEN_JS)
++     ok = await page.evaluate(DRAFT_SONG_JS, {'seconds': 30, 'seed': 2, 'name': 'draft.wav'})
++     if not f.check(ok, 'the song is loaded'):
++         return
++     s = await page.evaluate(DRAFT_STATE)
++     f.check(s['voice'] and s['phrases'], 'the import read the voice with its phrase stream: %r' % s)
++     done0, doc0 = await page.evaluate(DONE), await page.evaluate(DOC)
++     await page.evaluate("() => window.__mv.goStep('song')")
++     chip = page.locator('.step-song [data-act="time.draft"]')
++     await chip.wait_for(state='visible', timeout=3000)
++     f.check(await chip.get_attribute('title') == await page.evaluate("() => window.__mv.t('song.draftTip')"), 'the chip has its tooltip')
++     await chip.click()
++     if not await f.until("() => window.__mv.draft.phase() === 'review' && document.querySelectorAll('.step-draft .draft-row').length > 0",
++                          'the review opens with rows'):
++         return
++     await f.settle(3)
++     s = await page.evaluate(DRAFT_STATE)
++     f.check(s['mode'] == 'draft' and s['marks'] == s['rows'], 'draft mode, one tick per row: %r' % s)
++     f.check(await f.until('() => window.__mv.shell.stage.hasAlt()', 'the stage tries the draft on (after 150 ms)'), 'try-on')
++     strip = await page.evaluate("() => document.querySelector('.mode-strip .strip-text').textContent")
++     f.check(strip == await page.evaluate("() => window.__mv.t('draft.strip')"), 'the play bar says 下書きを試写中: %r' % strip)
++     f.check(s['checked'] >= 1, 'rows are checked by default: %r' % s)
++     await page.evaluate("() => window.__mv.view.set({ drawer: true })")
++     await f.settle(4)
++     await f.shot('review')
++     # the drafted rows sit on the song's sung phrases (a synthetic song: 30 s, known starts)
++     near = await page.evaluate("""() => { const ph = window.__draftPhrases, ms = window.__mv.draft.marks();
++       return ms.filter((m) => ph.some((p) => Math.abs(p - m.t) <= 0.15)).length; }""")
++     f.check(near >= 2, 'drafted starts on sung phrases: %d of %d' % (near, s['rows']))
++     # shortcuts other than the review's own do nothing; Esc discards and records nothing
++     await page.focus('.step-draft .step-title')
++     await page.keyboard.press('t')
++     await page.keyboard.press('r')
++     await f.settle(2)
++     s = await page.evaluate(DRAFT_STATE)
++     f.check(s['mode'] == 'draft', 'T does not start tap mode, R does nothing: %r' % s['mode'])
++     await page.keyboard.press('Escape')
++     await f.until("() => window.__mv.view.state.mode === 'normal'", 'Esc leaves the review')
++     await f.settle(2)
++     f.check(await page.evaluate(DONE) == done0 and await page.evaluate(DOC) == doc0, 'Esc recorded nothing')
++     f.check(not await page.evaluate('() => window.__mv.shell.stage.hasAlt()'), 'the try-on ended')
++     # the palette command opens it again; 適用: one undo entry, the starts pinned by tap
++     await page.evaluate("() => window.__mv.actions.run('time.draft')")
++     await f.until("() => window.__mv.draft.phase() === 'review'", 'the palette command opens the review')
++     rows = await page.evaluate("() => window.__mv.draft.marks().filter((m) => m.on).map((m) => [m.lineId, m.t])")
++     await page.locator('.step-draft [data-draft="apply"]').click()
++     await f.until("() => window.__mv.view.state.mode === 'normal'", 'the review closes')
++     await f.settle(3)
++     f.check(await page.evaluate(DONE) == done0 + 1, 'exactly one undo entry')
++     n = await page.evaluate("() => window.__mv.store.list().filter((x) => x.done).pop().label[1].n")
++     label = await page.evaluate(LAST_TEXT)
++     f.check(label == await page.evaluate("(n) => window.__mv.t('undo.draft', { n })", n) and n >= len(rows), 'the entry: %r (%r)' % (label, n))
++     pinned = await page.evaluate("""(rows) => rows.filter(([id, t]) => { const p = window.__mv.doc.pins['line/' + id + ':start'];
++       return p && p.by === 'tap' && Math.abs(p.v - t) < 1e-6; }).length""", rows)
++     f.check(pinned == len(rows), 'the checked starts are pinned by tap: %d of %d' % (pinned, len(rows)))
++     toast = ' '.join((await page.evaluate(DRAFT_STATE))['toasts'])
++     f.check(await page.evaluate("(n) => window.__mv.t('draft.done', { n })", n) in toast, 'the toast: %r' % toast)
++     await f.shot('applied')
++     await page.evaluate('() => window.__mv.store.undo()')
++     await f.settle(2)
++     f.check(await page.evaluate(DOC) == doc0, '元に戻す restores the starts')
++ 
++     # an older import: no voice record. 声を読んで下書き reads it (its own undo entry), then the review opens
++     await page.evaluate("() => { const a = window.__mv; a.dispatch({ t: 'song.voice', sha1: a.doc.song.sha1, voice: null }, { label: ['undo.songVoice', {}] }); a.store.seal(); }")
++     await f.settle(2)
++     done1 = await page.evaluate(DONE)
++     f.check(not (await page.evaluate(DRAFT_STATE))['voice'], 'the voice record is gone')
++     await page.evaluate("() => window.__mv.actions.run('time.draft')")
++     await f.until("() => window.__mv.draft.phase() === 'need'", 'the review asks to read the voice first')
++     read = page.locator('.step-draft button', has_text=await page.evaluate("() => window.__mv.t('draft.readVoice')"))
++     f.check(await read.count() == 1, 'the linked song offers 声を読んで下書き')
++     await f.shot('need')
++     await read.click()
++     if not await f.until("() => window.__mv.draft.phase() === 'review'", 'the voice is read, then the review opens', timeout=20000):
++         return
++     s = await page.evaluate(DRAFT_STATE)
++     f.check(s['voice'] and s['phrases'] and s['rows'] > 0, 'the voice record is back and rows are drafted: %r' % s)
++     f.check(await page.evaluate(DONE) == done1 + 1, 'reading the voice is one undo entry')
++     f.check(await page.evaluate(LAST_TEXT) == await page.evaluate("() => window.__mv.t('undo.songVoice')"), 'named 曲の声を読む')
++     await page.keyboard.press('Escape')
++     await f.until("() => window.__mv.view.state.mode === 'normal'", 'Esc leaves')
++     f.check(await page.evaluate(DONE) == done1 + 1, 'the read stays, the draft recorded nothing')
++ 
++     # no voice record and the song file not linked: 曲をつなぎ直す, or 音量だけで下書き (たぶん at best, [▶] disabled)
++     await page.evaluate("""() => { const a = window.__mv; a.dispatch({ t: 'song.voice', sha1: a.doc.song.sha1, voice: null },
++       { label: ['undo.songVoice', {}] }); a.store.seal(); a.setSongBuffer(null); }""")
++     await f.settle(2)
++     f.check(not await page.evaluate('() => window.__mv.songReady()'), 'the song is unlinked')
++     await page.evaluate("() => window.__mv.actions.run('time.draft')")
++     await f.until("() => window.__mv.draft.phase() === 'need'", 'the review asks for the voice')
++     texts = await page.evaluate("() => [...document.querySelectorAll('.step-draft .row-actions button')].map((b) => b.textContent)")
++     want = await page.evaluate("() => ['draft.relink', 'draft.loudOnly', 'draft.stop'].map((k) => window.__mv.t(k))")
++     f.check(texts == want, 'unlinked: 曲をつなぎ直す, 音量だけで下書き, やめる: %r' % texts)
++     await page.locator('.step-draft button', has_text=want[1]).click()
++     await f.until("() => window.__mv.draft.phase() === 'review'", 'the loudness draft opens')
++     s = await page.evaluate("""() => ({ rows: document.querySelectorAll('.step-draft .draft-row').length,
++       high: document.querySelectorAll('.step-draft .draft-row[data-conf="high"]').length,
++       play: [...document.querySelectorAll('.step-draft .draft-row .icon-btn')].every((b) => b.disabled) })""")
++     f.check(s['rows'] > 0 and s['high'] == 0 and s['play'], 'rows without 確か, [▶] disabled while unlinked: %r' % s)
++     await f.shot('loudness')
++     await page.keyboard.press('Escape')
++     await f.until("() => window.__mv.view.state.mode === 'normal'", 'Esc leaves the loudness draft')
++ 
++ 
++ FLOWS += [('draft', flow_draft, False)]
++ 
++ 
+  async def run(browser, base, rel, lang, only, shots):
+      failures, count = [], 0
+      for name, fn, clipboard in FLOWS:
+diff --cc tests/node/commands.test.js
+index 142a15f,e876acb..0000000
+--- a/tests/node/commands.test.js
++++ b/tests/node/commands.test.js
+@@@ -579,33 -609,20 +609,51 @@@ test('v2.1 output: formats kit and webm
+    assert.deepEqual(reduce(raw, { t: 'output.set', key: 'kit', v: kit }).output.kit, kit);
+  });
+  
+ +test('歌ハメ pins (DESIGN_2_2 §6): sung.times at a line only, sung.real at the work only, sung.hame never at a cut', () => {
+ +  const doc = fresh('basic');
+ +  const set = (path, v) => reduce(doc, { t: 'pin.set', path, v, by: 'user', sig: '始発の' });
+ +  for (const path of ['cut/r4~0:sung.hame', 'work:sung.times', 'cut/r4~0:sung.times', 'line/r4:sung.real', 'cut/r4~0:sung.real',
+ +    'cut/r4~0:sung.fill']) {
+ +    throwsCode(() => set(path, path.endsWith('times') ? [[0, 0], [1, 0.3]] : true), 'payload');
+ +  }
+ +  const ok = reduce(reduce(reduce(reduce(doc, { t: 'pin.set', path: 'line/r4:sung.times', v: [[0, 0], [1, 0.3]], by: 'tap' }),
+ +    { t: 'pin.set', path: 'work:sung.hame', v: true, by: 'user' }), { t: 'pin.set', path: 'work:sung.real', v: false, by: 'user' }),
+ +  { t: 'pin.set', path: 'line/r4:sung.hame', v: false, by: 'user' });
+ +  assert.deepEqual(ok.pins['line/r4:sung.times'], { v: [[0, 0], [1, 0.3]], by: 'tap' });
+ +  assert.equal(ok.pins['work:sung.hame'].v, true);
+ +  assert.equal(ok.pins['work:sung.real'].v, false);
+ +  // a line's character times never move to the whole work; 歌ハメ may, like the season
+ +  throwsCode(() => reduce(ok, { t: 'pin.promote', path: 'line/r4:sung.times', to: 'work' }), 'payload');
+ +  const promoted = reduce(ok, { t: 'pin.promote', path: 'line/r4:sung.hame', to: 'work' });
+ +  assert.equal(promoted.pins['work:sung.hame'].v, false);
+ +  assert.equal(promoted.pins['line/r4:sung.hame'], undefined);
+ +  // 固定を外す of the line clears its character times with its start and end
+ +  const cleared = reduce(ok, { t: 'pin.clearUnder', scope: 'line/r4' });
+ +  assert.equal(cleared.pins['line/r4:sung.times'], undefined);
+ +});
+ +
+ +test('歌ハメ: lyrics.set keeps a line\'s character times on their characters (reconcile remapSungTimes)', () => {
+ +  let doc = fresh('basic');
+ +  doc = reduce(doc, { t: 'pin.set', path: 'line/r4:sung.times', v: [[0, 0], [2, 0.5], [4, 0.9], [10, 1.8]], by: 'tap' });
+ +  const rows = doc.sheet.rows.map((r) => (r.id === 'r4' ? '新しい始発のホームに/白い息' : r.src));
+ +  const after = reduce(doc, { t: 'lyrics.set', text: rows.join('\n') });
+ +  assert.deepEqual(after.pins['line/r4:sung.times'].v, [[0, 0], [5, 0.5], [7, 0.9], [13, 1.8]], 'insert: pairs move, the end with it');
+ +});
+++
++ // PV22 S2 (DESIGN_2_2 §5): a tapped start with no end drops an end pin that now comes before start + MIN_LEN (0.2 s);
++ // a lock pin stays, and a mark with both start and end sets both.
++ test('time.tap: a stale end pin (before the new start + 0.2 s) is removed; lock pins and later ends stay', () => {
++   const base = fresh('basic');
++   const withEnd = (v, by) => Object.assign({}, base, { pins: Object.assign({}, base.pins, { 'line/r4:end': { v, by: by || 'user' } }) });
++   const tap = (doc, start, end) => reduce(doc, { t: 'time.tap', marks: [Object.assign({ lineId: 'r4', start }, end === undefined ? {} : { end })] });
++   assert.equal(tap(withEnd(10.5), 11).pins['line/r4:end'], undefined, 'an end before the start');
++   assert.deepEqual(tap(withEnd(12), 11).pins['line/r4:end'], { v: 12, by: 'user' }, 'a later end stays');
++   assert.equal(tap(withEnd(11.1), 11).pins['line/r4:end'], undefined, 'an end less than 0.2 s after the start');
++   assert.deepEqual(tap(withEnd(11.2), 11).pins['line/r4:end'], { v: 11.2, by: 'user' }, 'exactly 0.2 s after stays');
++   assert.deepEqual(tap(withEnd(10.5, 'lock'), 11).pins['line/r4:end'], { v: 10.5, by: 'lock' }, 'a lock pin stays');
++   const both = tap(withEnd(10.5), 11, 13);
++   assert.deepEqual([both.pins['line/r4:start'], both.pins['line/r4:end']], [{ v: 11, by: 'tap' }, { v: 13, by: 'tap' }]);
++   // other lines' end pins are not touched
++   const other = reduce(withEnd(10.5), { t: 'time.tap', marks: [{ lineId: 'r5', start: 11 }] });
++   assert.deepEqual(other.pins['line/r4:end'], { v: 10.5, by: 'user' });
++ });
+diff --cc tests/node/i18n.test.js
+index b87480b,dad9e41..0000000
+--- a/tests/node/i18n.test.js
++++ b/tests/node/i18n.test.js
+@@@ -21,7 -21,7 +21,7 @@@ const WHY_CODES = ['mood.tag', 'fit', '
+  // §3.13 codes, plus `part-error` (reported by the scene and the renderer, WP4a).
+  const WARN_CODES = ['pin-bad-value', 'pin-not-applicable', 'pin-filtered', 'pin-off-season', 'orphan-pin', 'shadowed-pin',
+    'lock-partial', 'pool-empty', 'time-order', 'time-compressed', 'title-skipped', 'overfull', 'font-fallback', 'piece-merged',
+-   'part-error', 'sung-words', 'hame-empty'];
+ -  'part-error', 'too-fast'];
+++  'part-error', 'sung-words', 'hame-empty', 'too-fast'];
+  // §4.22.1 codes; ai/providers.ERROR_CODES adds its own (e.g. `recitation`, WP7), read at test time so new ones are caught.
+  const AI_ERRORS = [...new Set(['no_key', 'auth', 'rate', 'model', 'server', 'bad_request', 'network', 'aborted', 'blocked',
+    'truncated', 'empty', 'bad_json', 'no_sdk', 'no_audio', 'upload', 'bad_provider', 'bad_edit'].concat(MV.use('ai/providers').ERROR_CODES))];
+diff --cc tests/node/tap.test.js
+index a2b8255,37bb8b9..0000000
+--- a/tests/node/tap.test.js
++++ b/tests/node/tap.test.js
+@@@ -105,96 -105,62 +105,156 @@@ test('a mark less than MIN_GAP after th
+    assert.notEqual(T.tapReduce(first, { type: 'mark', t: 0 }), first, 'nothing above the first mark of a session');
+  });
+  
+ +// --- 1字ずつタップ (歌ハメ, DESIGN_2_2 §6) -------------------------------------------------------------------------
+ +
+ +const UNITS = [{ at: 0, text: 'き' }, { at: 1, text: 'み' }, { at: 2, text: 'の' }, { at: 3, text: '声' }];
+ +
+ +function runUnits(events, opts) {
+ +  let s = T.unitStart(UNITS, opts);
+ +  for (const [type, t] of events) s = T.unitReduce(s, { type, t });
+ +  return s;
+ +}
+ +
+ +test('unit tap: marks in unit order, relative to the first mark; the end is optional', () => {
+ +  const s = T.unitStart(UNITS);
+ +  assert.deepEqual([s.cursor, s.end, s.paused, s.done, s.atLoopEnd], [0, null, false, false, false]);
+ +  assert.deepEqual(s.times, [null, null, null, null]);
+ +  const m = runUnits([['mark', 12], ['mark', 12.2], ['mark', 12.45]]);
+ +  assert.deepEqual(T.unitResult(m), { start: 12, times: [[0, 0], [1, 0.2], [2, 0.45]], end: null });
+ +  const e = T.unitReduce(m, { type: 'end', t: 13.1 });
+ +  assert.equal(e.end, 13.1);
+ +  assert.equal(e.done, false, 'a unit is left');
+ +  assert.deepEqual(T.unitResult(e).end, 1.1);
+ +  const all = runUnits([['mark', 1], ['mark', 1.3], ['mark', 1.6], ['mark', 2.0004], ['end', 2.5]]);
+ +  assert.equal(all.done, true, 'every unit and the end');
+ +  assert.deepEqual(T.unitResult(all), { start: 1, times: [[0, 0], [1, 0.3], [2, 0.6], [3, 1]], end: 1.5 }, 'to the millisecond');
+ +  assert.equal(T.unitReduce(all, { type: 'mark', t: 3 }), all, 'no unit left to mark');
+ +});
+ +
+ +test('unit tap: a mark closer than UNIT_GAP, and an end not after the last mark, are not taken', () => {
+ +  const s = runUnits([['mark', 5]]);
+ +  assert.equal(T.unitReduce(s, { type: 'mark', t: 5 }), s, 'the same time again');
+ +  assert.equal(T.unitReduce(s, { type: 'mark', t: 5 + T.UNIT_GAP - 0.005 }), s);
+ +  assert.notEqual(T.unitReduce(s, { type: 'mark', t: 5 + T.UNIT_GAP }), s, 'at the gap');
+ +  assert.equal(T.unitReduce(s, { type: 'end', t: 5 }), s, 'an end at the last mark');
+ +  const none = T.unitStart(UNITS);
+ +  assert.equal(T.unitReduce(none, { type: 'end', t: 3 }), none, 'no end before a mark');
+ +  const noEnd = runUnits([['mark', 1], ['mark', 2]], { end: false });
+ +  assert.equal(T.unitReduce(noEnd, { type: 'end', t: 3 }), noEnd, 'opts.end false: the end is not marked');
+ +});
+ +
+ +test('unit tap: a mark after the end takes the end back; back forgets the end, then the last mark', () => {
+ +  const s = runUnits([['mark', 1], ['mark', 1.5], ['end', 2]]);
+ +  const on = T.unitReduce(s, { type: 'mark', t: 2.4 });
+ +  assert.equal(on.end, null, 'the singing went on');
+ +  assert.deepEqual(T.unitResult(on).times.map((p) => p[1]), [0, 0.5, 1.4]);
+ +  const b1 = T.unitReduce(s, { type: 'back', t: 3 });
+ +  assert.deepEqual([b1.cursor, b1.end], [2, null], 'the end first');
+ +  const b2 = T.unitReduce(b1, { type: 'back', t: 3 });
+ +  assert.deepEqual([b2.cursor, b2.times], [1, [1, null, null, null]]);
+ +  const b3 = T.unitReduce(T.unitReduce(b2, { type: 'back', t: 3 }), { type: 'back', t: 3 });
+ +  assert.equal(b3.cursor, 0);
+ +  assert.equal(T.unitReduce(b3, { type: 'back', t: 3 }), b3, 'nothing to forget');
+ +  assert.equal(T.unitResult(b2), null, 'fewer than 2 marks: nothing to record');
+ +});
+ +
+ +test('unit tap: pause, the loop end and restart', () => {
+ +  const s = runUnits([['mark', 1], ['mark', 1.4]]);
+ +  const p = T.unitReduce(s, { type: 'pause', t: 2 });
+ +  assert.equal(p.paused, true);
+ +  assert.equal(T.unitReduce(p, { type: 'mark', t: 3 }), p, 'marks are ignored while paused');
+ +  assert.equal(T.unitReduce(p, { type: 'end', t: 3 }), p);
+ +  assert.equal(T.unitReduce(p, { type: 'pause', t: 3 }), p);
+ +  const r = T.unitReduce(p, { type: 'resume', t: 3 });
+ +  assert.equal(r.paused, false);
+ +  assert.equal(T.unitReduce(r, { type: 'resume', t: 3 }), r);
+ +  const le = T.unitReduce(s, { type: 'loopEnd', t: 4 });
+ +  assert.deepEqual([le.paused, le.atLoopEnd], [true, true]);
+ +  assert.deepEqual(T.unitResult(le), T.unitResult(s), 'the loop end keeps the take');
+ +  assert.equal(T.unitReduce(le, { type: 'loopEnd', t: 4 }), le);
+ +  const again = T.unitReduce(le, { type: 'restart', t: 4 });
+ +  assert.deepEqual([again.cursor, again.end, again.atLoopEnd], [0, null, false]);
+ +  assert.deepEqual(again.times, [null, null, null, null]);
+ +  assert.equal(again.paused, true, 'still stopped until playback starts again');
+ +  const played = T.unitReduce(le, { type: 'resume', t: 4 });
+ +  assert.deepEqual([played.paused, played.atLoopEnd], [false, false], 'playing again leaves the loop end');
+ +  const fresh = T.unitStart(UNITS);
+ +  assert.equal(T.unitReduce(fresh, { type: 'restart', t: 0 }), fresh);
+ +});
+ +
+ +test('unit tap: the reducer never mutates its input; bad units and events throw', () => {
+ +  const s = runUnits([['mark', 1]]);
+ +  Object.freeze(s);
+ +  const next = T.unitReduce(s, { type: 'mark', t: 2 });
+ +  assert.deepEqual(s.times, [1, null, null, null]);
+ +  assert.deepEqual(next.times, [1, 2, null, null]);
+ +  assert.ok(Object.isFrozen(s.times) && Object.isFrozen(s.units));
+ +  assert.deepEqual(T.unitResult(runUnits([['mark', -0.3], ['mark', 0.2]])).times, [[0, 0], [1, 0.2]], 'negative times clamp to 0');
+ +  throwsCode(() => T.unitReduce(s, { type: 'jump', t: 1 }), 'bad-event');
+ +  throwsCode(() => T.unitReduce(s, { type: 'mark' }), 'bad-event');
+ +  throwsCode(() => T.unitStart(null), 'bad-units');
+ +  throwsCode(() => T.unitStart([{ at: 1 }, { at: 1 }]), 'bad-units');
+ +  throwsCode(() => T.unitStart([{ at: -1 }]), 'bad-units');
+ +  assert.deepEqual(T.UNIT_EVENTS, ['mark', 'end', 'back', 'pause', 'resume', 'restart', 'loopEnd']);
+ +  assert.deepEqual(T.EVENTS, ['mark', 'end', 'back', 'pause', 'resume'], 'the line tap events are unchanged');
+ +});
+++
++ // --- PV22 S2: the one-line mode and the pins that keep the other lines still (DESIGN_2_2 §5) ---------------------------
++ 
++ test('one-line mode: one mark is taken; back re-arms the same line and stops there; the command has one mark', () => {
++   const s = T.tapStart(LINES, 'r5', { only: true });
++   assert.deepEqual([s.only, s.from, s.stop, s.next, T.done(s)], [true, 2, 3, 'r5', false]);
++   const marked = T.tapReduce(s, { type: 'mark', t: 20 });
++   assert.deepEqual([marked.next, marked.active, T.done(marked)], [null, 'r5', true]);
++   assert.equal(T.tapReduce(marked, { type: 'mark', t: 22 }), marked, 'a second mark does nothing');
++   const ended = T.tapReduce(marked, { type: 'end', t: 24 });
++   assert.deepEqual(T.tapCommand(ended), { t: 'time.tap', marks: [{ lineId: 'r5', start: 20, end: 24 }] });
++   const again = T.tapReduce(ended, { type: 'back', t: 25 });
++   assert.deepEqual([again.next, again.active, T.done(again), again.only, again.stop], ['r5', null, false, true, 3]);
++   assert.equal(T.tapCommand(again), null);
++   assert.equal(T.tapReduce(again, { type: 'back', t: 26 }), again, 'never above the line');
++   const redo = T.tapReduce(again, { type: 'mark', t: 21 });
++   assert.deepEqual(T.tapCommand(redo).marks, [{ lineId: 'r5', start: 21 }]);
++   // paused / resumed keep the mode
++   const paused = T.tapReduce(s, { type: 'pause', t: 1 });
++   assert.deepEqual([paused.only, paused.stop], [true, 3]);
++   assert.equal(T.tapReduce(paused, { type: 'mark', t: 2 }), paused);
++   // the normal mode runs to the end of the song as before
++   const normal = T.tapStart(LINES, 'r5');
++   assert.deepEqual([normal.only, normal.stop], [false, LINES.length]);
++   assert.equal(T.done(run('r7.1', [['mark', 50]])), true);
++   assert.equal(T.tapStart([], null, { only: true }).only, false, 'no lines: nothing to mark');
++ });
++ 
++ // plan.lines-like rows: ids, starts and how each start was set
++ function rows(spec) { return spec.map(([id, t0, by]) => ({ id, t0, by: { start: by || 'auto', end: 'auto' } })); }
++ 
++ test('stillPins: the ends of each run of moved automatic lines, pinned at their old starts', () => {
++   const before = rows([['a', 1], ['b', 2], ['c', 3], ['d', 4, 'pin'], ['e', 5], ['f', 6], ['g', 7]]);
++   // the target d moved to 4.5; b, c and e, f, g moved with it; a did not
++   const after = rows([['a', 1], ['b', 2.2], ['c', 3.3], ['d', 4.5, 'pin'], ['e', 5.4], ['f', 6.3], ['g', 7.1]]);
++   assert.deepEqual(T.stillPins(before, after, 'd', 4.5), [{ lineId: 'b', start: 2 }, { lineId: 'c', start: 3 },
++     { lineId: 'e', start: 5 }, { lineId: 'g', start: 7 }]);
++   // one moved line: pinned once
++   const one = rows([['a', 1], ['b', 2.3], ['c', 3], ['d', 4.5, 'pin'], ['e', 5], ['f', 6], ['g', 7]]);
++   assert.deepEqual(T.stillPins(before, one, 'd', 4.5), [{ lineId: 'b', start: 2 }]);
++   // moves under STILL_EPS are not moves; pins, LRC and the target itself are never candidates
++   const tiny = rows([['a', 1.004], ['b', 2], ['c', 3], ['d', 4.5, 'pin'], ['e', 5], ['f', 6], ['g', 7]]);
++   assert.deepEqual(T.stillPins(before, tiny, 'd', 4.5), []);
++   const fixed = rows([['a', 1, 'lrc'], ['b', 2, 'pin'], ['c', 3], ['d', 4, 'pin'], ['e', 5], ['f', 6], ['g', 7]]);
++   const shiftAll = rows([['a', 1.5, 'lrc'], ['b', 2.5, 'pin'], ['c', 3.5], ['d', 4.5, 'pin'], ['e', 5.5], ['f', 6.5], ['g', 7.5]]);
++   assert.deepEqual(T.stillPins(fixed, shiftAll, 'd', 4.5).map((x) => x.lineId), ['c', 'e', 'g']);
++ });
++ 
++ test('stillPins: a pin that would cross the new start is skipped; different line lists give nothing', () => {
++   const before = rows([['a', 1], ['b', 2], ['c', 3], ['d', 4], ['e', 5]]);
++   // c re-tapped at 4.6: d (old start 4) would come before it, so d is not pinned; e is
++   const after = rows([['a', 1], ['b', 2], ['c', 4.6], ['d', 5.0], ['e', 5.4]]);
++   assert.deepEqual(T.stillPins(before, after, 'c', 4.6), [{ lineId: 'e', start: 5 }]);
++   // b re-tapped earlier than a: a is not pinned
++   const early = rows([['a', 0.7], ['b', 0.8], ['c', 3], ['d', 4], ['e', 5]]);
++   assert.deepEqual(T.stillPins(before, early, 'b', 0.8), []);
++   assert.deepEqual(T.stillPins(before, after.slice(1), 'c', 4.6), []);
++   assert.deepEqual(T.stillPins(before, rows([['a', 1], ['x', 2], ['c', 3], ['d', 4], ['e', 5]]), 'c', 4.6), []);
++   assert.deepEqual(T.stillPins(before, after, 'zz', 4.6), []);
++ });
+diff --cc tests/node/ui_fields.test.js
+index df7cf73,a580045..0000000
+--- a/tests/node/ui_fields.test.js
++++ b/tests/node/ui_fields.test.js
+@@@ -1345,43 -1345,36 +1345,77 @@@ test('an enum with optKey labels its op
+    assert.equal(W.optionText(t, field.options.find((o) => o.v === 'back')), '後ろに下げる');
+  });
+  
+ +// 歌ハメ (PV22 P6, DESIGN_2_2 §6.4)
+ +test('歌ハメ rows: where they sit, their scopes and what writing them means', () => {
+ +  assert.deepEqual(F.slotScopes('sung.hame'), ['work', 'line']);
+ +  assert.deepEqual(F.slotScopes('sung.real'), ['work']);
+ +  assert.deepEqual(F.slotScopes('sung.times'), ['line']);
+ +  const line = { level: 'line', ids: ['r4'] };
+ +  const dir = fieldPaths(line, 'direction');
+ +  assert.equal(dir.indexOf('sung.hame'), dir.indexOf('arrive.order') + 1, '行 › 演出: right after 文字の出方');
+ +  assert.deepEqual(fieldPaths(line, 'time'), ['start', 'end', 'lineLength', 'sungTimes'], '行 › 時間: 字の時間 under 長さ');
+ +  assert.ok(fieldPaths({ level: 'line', ids: ['r4', 'r5'] }, 'direction').includes('sung.hame'), 'the several-lines page too');
+ +  const look = fieldPaths({ level: 'work' }, 'look');
+ +  assert.equal(look.indexOf('sung.hame'), look.indexOf('repeat.same') + 1, '作品全体 › 見た目: after くり返しの行をそろえる');
+ +  assert.ok(fieldPaths({ level: 'work' }, 'timing').includes('sung.real'));
+ +  const byId = (id) => F.FIELDS.find((f) => f.id === id);
+ +  const lineRow = byId('line/direction/sung.hame'), workRow = byId('work/look/sung.hame'), real = byId('work/timing/sung.real');
+ +  const times = byId('line/time/sungTimes');
+ +  assert.deepEqual(lineRow.options.map((o) => [o.v, o.label]), [[true, 'fld.hame.on'], [false, 'fld.hame.off']]);
+ +  assert.ok(lineRow.auto && lineRow.readEach && lineRow.noDice && lineRow.basic && lineRow.note === 'fld.hame.note');
+ +  assert.deepEqual(workRow.options.map((o) => [o.v, o.label]), [[true, 'fld.hame.all'], [false, 'fld.hame.none']]);
+ +  assert.ok(workRow.auto && workRow.noDice);
+ +  assert.ok(real.autoDefault && real.noDice && real.basic === false && real.widget === 'toggle' && real.note === 'fld.sungReal.note');
+ +  assert.ok(times.readOnly && times.derived === 'sungTimes' && times.after === 'sungTimes' && times.path === null);
+ +  for (const k of ['fld.hame', 'fld.hame.note', 'fld.hame.autoNote', 'fld.sungReal', 'fld.sungTimes', 'sung.tapUnits', 'sung.clear',
+ +    'sung.needSong', 'sung.summary']) assert.ok(STRINGS[k] && STRINGS[k][0] && STRINGS[k][1], k);
+ +});
+ +
+ +test('歌った字に色をのせる rows: after 歌ハメ on the line, several-lines and whole-video pages; a pin-only toggle', () => {
+ +  assert.deepEqual(F.slotScopes('sung.fill'), ['work', 'line']);
+ +  const dir = fieldPaths({ level: 'line', ids: ['r4'] }, 'direction');
+ +  assert.equal(dir.indexOf('sung.fill'), dir.indexOf('sung.hame') + 1, '行 › 演出: right after 歌ハメ');
+ +  assert.ok(fieldPaths({ level: 'line', ids: ['r4', 'r5'] }, 'direction').includes('sung.fill'), 'the several-lines page too');
+ +  const look = fieldPaths({ level: 'work' }, 'look');
+ +  assert.equal(look.indexOf('sung.fill'), look.indexOf('sung.hame') + 1, '作品全体 › 見た目: after 歌ハメ');
+ +  const byId = (id) => F.FIELDS.find((f) => f.id === id);
+ +  for (const row of [byId('line/direction/sung.fill'), byId('work/look/sung.fill')]) {
+ +    assert.ok(row.widget === 'toggle' && row.offClears && row.noDice && row.basic === false && row.note === 'fld.hameFill.note', row.id);
+ +  }
+ +  assert.ok(byId('line/direction/sung.fill').readEach);
+ +  for (const k of ['fld.hameFill', 'fld.hameFill.note']) assert.ok(STRINGS[k] && STRINGS[k][0] && STRINGS[k][1], k);
+ +});
+++
++ // PV22 T4 (DESIGN_2_2 §5): 入りの基準 under 入りの早さ, both with a note.
++ test('作品全体 › タイミング: 入りの早さ has a note, and 入りの基準 (a choice of two) follows it', () => {
++   const timing = F.sectionsFor({ level: 'work' }, PLAN, REG).find((s) => s.id === 'timing').fields;
++   const keys = timing.map((f) => f.path || f.key);
++   const lead = keys.indexOf('timing.set.lead');
++   assert.ok(lead >= 0);
++   assert.equal(keys[lead + 1], 'timing.set.enter');
++   assert.equal(timing[lead].note, 'fld.lead.note');
++   const enter = timing[lead + 1];
++   assert.equal(enter.widget, 'choice');
++   assert.deepEqual(enter.options.map((o) => o.v), ['start', 'ready']);
++   assert.deepEqual(enter.options.map((o) => o.label), ['fld.enter.start', 'fld.enter.ready']);
++   assert.equal(enter.label, 'fld.enter');
++   assert.equal(enter.note, 'fld.enter.note');
++ });
++ 
++ // PV22 S4 (DESIGN_2_2 §5): 読み切れない速さの行を知らせる after 入りの基準; the 行 page's 時間 section carries the notes and
++ // the quick fixes (custom timeTools).
++ test('作品全体 › タイミング: the 読み切れない速さ switch follows 入りの基準; 行 › 時間 has the timeTools section', () => {
++   const timing = F.sectionsFor({ level: 'work' }, PLAN, REG).find((s) => s.id === 'timing').fields;
++   const keys = timing.map((f) => f.path || f.key);
++   const enter = keys.indexOf('timing.set.enter');
++   assert.equal(keys[enter + 1], 'timing.set.readCheck');
++   const row = timing[enter + 1];
++   assert.equal(row.widget, 'toggle');
++   assert.equal(row.label, 'fld.readCheck');
++   assert.equal(row.note, 'fld.readCheck.note');
++   assert.deepEqual(row.scopes, ['work']);
++   const line = PLAN.lines[0];
++   const time = F.sectionsFor({ level: 'line', ids: [line.id] }, PLAN, REG).find((s) => s.id === 'time');
++   assert.equal(time.custom, 'timeTools');
++   assert.deepEqual(time.fields.map((f) => f.path || f.derived), ['start', 'end', 'lineLength']);
++ });
+diff --git a/src/ui/readcheck.js b/src/ui/readcheck.js
+index 0bb7096..d2817f7 100644
+--- a/src/ui/readcheck.js
++++ b/src/ui/readcheck.js
+@@ -2,13 +2,14 @@
+ MV.def('ui/readcheck', ['planner/readable', 'planner/rules'], (RD, RULES) => {
+   'use strict';
+ 
+-  // The warnings the lyric editor's gutter marks in every work (DESIGN §6.4.14); with the notices on it also marks the
+-  // too-fast lines and every line of a squeezed range.
+-  const BASE_CODES = Object.freeze(['overfull', 'orphan-pin', 'shadowed-pin', 'lock-partial', 'pin-not-applicable', 'time-order']);
++  // The warnings the lyric editor's gutter marks in every work (DESIGN §6.4.14; 歌ハメ's sung-words and hame-empty,
++  // DESIGN_2_2 §6); with the notices on it also marks the too-fast lines and every line of a squeezed range.
++  const BASE_CODES = Object.freeze(['overfull', 'orphan-pin', 'shadowed-pin', 'lock-partial', 'pin-not-applicable', 'time-order',
++    'sung-words', 'hame-empty']);
+   const NOTICE_CODES = Object.freeze(['too-fast', 'time-compressed', 'piece-merged']);
+   // A line's mark shows its most severe warning first.
+   const PRIORITY = Object.freeze(['time-order', 'overfull', 'lock-partial', 'orphan-pin', 'shadowed-pin', 'pin-not-applicable',
+-    'too-fast', 'time-compressed', 'piece-merged']);
++    'sung-words', 'hame-empty', 'too-fast', 'time-compressed', 'piece-merged']);
+ 
+   // On when the work says so (timing.readCheck, the switch), else for the new-work generation (look.gen, DESIGN_2_2 §0).
+   function enabled(doc) {
+diff --git a/tests/node/ui_readcheck.test.js b/tests/node/ui_readcheck.test.js
+index faf9abf..6d06567 100644
+--- a/tests/node/ui_readcheck.test.js
++++ b/tests/node/ui_readcheck.test.js
+@@ -64,7 +64,8 @@ test('expand: a squeezed range is marked on each of its lines; other warnings pa
+ 
+ test('gutterCodes: today\'s set for older works; with the notices the too-fast and squeeze marks too', () => {
+   const off = RC.gutterCodes(D.defaultDoc());
+-  assert.deepEqual([...off].sort(), ['lock-partial', 'orphan-pin', 'overfull', 'pin-not-applicable', 'shadowed-pin', 'time-order']);
++  assert.deepEqual([...off].sort(), ['hame-empty', 'lock-partial', 'orphan-pin', 'overfull', 'pin-not-applicable', 'shadowed-pin',
++    'sung-words', 'time-order']);
+   const on = RC.gutterCodes(D.newDoc());
+   for (const code of ['too-fast', 'time-compressed', 'piece-merged']) assert.ok(on.has(code), code);
+   assert.equal(on.size, off.size + 3);
