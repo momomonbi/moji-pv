@@ -1938,6 +1938,11 @@ MV.def('i18n/strings', [], () => ({
   'opt.depth.front': ['文字の前に出す', 'In front of the text'],
   'opt.depth.back': ['後ろに下げる', 'Push back'],
   'opt.depth.still': ['動かさない', 'Keep still'],
+
+  // interlude effects: the flow of the light motes (光の粒 › 流れ)
+  'opt.moteFlow.rise': ['立ちのぼる', 'Rise'],
+  'opt.moteFlow.float': ['漂う', 'Float'],
+  'opt.moteFlow.fall': ['舞い降りる', 'Fall'],
   'why.media.depth.ai': ['写真の内容からのAIのおすすめ', 'The AI\'s suggestion from the picture'],
   'why.media.depth.overlay': ['重ねる映像は文字の前に出します', 'Overlay footage goes in front of the text'],
   'why.media.depth.frame': ['写真の枠は演出と一緒に動かします', 'A photo frame moves with the animation'],

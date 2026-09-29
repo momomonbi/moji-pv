@@ -28,7 +28,7 @@ const F = MV.use('engine/scene/frame');
 const T = MV.use('engine/scene/table');
 const PLAN = MV.use('planner/plan');
 
-const MODULES = { arrange: ['core', 'columns', 'editorial', 'scatter', 'special'], dwell: ['calm', 'lively'] };
+const MODULES = { arrange: ['core', 'columns', 'editorial', 'interlude', 'scatter', 'special'], dwell: ['calm', 'lively'] };
 const OWN = Object.entries(MODULES).flatMap(([kind, files]) => files.flatMap((f) => MV.use('parts/' + kind + '/' + f)));
 const HOSTS = corpus.minimalFallbacks().filter((d) => d.kind !== 'arrange' && d.kind !== 'dwell');
 const REGISTRY = REG.createRegistry(OWN.concat(HOSTS));
@@ -52,7 +52,7 @@ function tableRows(heading) {
 test('every §5.1 composition and §5.3 hold is defined once, with the table’s labels, tags and fallback', () => {
   for (const [kind, heading] of [['arrange', '### 5.1 Compositions'], ['dwell', '### 5.3 Holds']]) {
     const rows = tableRows(heading);
-    assert.equal(rows.length, kind === 'arrange' ? 21 : 10, heading);
+    assert.equal(rows.length, kind === 'arrange' ? 24 : 10, heading);
     assert.deepEqual(REGISTRY.keys(kind), rows.map((r) => r.key).sort(), kind + ': exactly the table’s keys');
     for (const r of rows) {
       const def = REGISTRY.get(kind, r.key);
@@ -69,6 +69,8 @@ test('traits the planner relies on: special roles, vertical-only and horizontal-
   const roles = (key) => REGISTRY.traits('arrange', key).roles;
   assert.deepEqual(roles('titlePlate'), ['title']);
   assert.deepEqual(roles('breathMark'), ['interlude']);
+  assert.equal(REGISTRY.get('arrange', 'breathMark').pool, false, 'the breath mark is only pinned (the interlude effects replace it)');
+  assert.deepEqual(REGISTRY.pool('arrange', { role: 'interlude' }).slice().sort(), ['kineticShapes', 'lightMotes', 'soundHorizon']);
   assert.deepEqual(roles('creditFold'), ['outro']);
   for (const role of ['title', 'interlude', 'outro']) assert.ok(REGISTRY.pool('arrange', { role }).length > 0, role + ' has a composition');
   for (const key of ['pillarColumns', 'spineColumn']) assert.deepEqual(REGISTRY.traits('arrange', key).orient, ['v'], key);
@@ -177,6 +179,9 @@ function excess(b, plan, m) {
 
 const SAFE = 1080 * 0.05;                 // §4.17.5 D.safe: 5% of the short side
 const CROPPING = new Set(['edgeBleed', 'tickerMarquee']);   // pictures that cross the frame edge on purpose
+
+// The interlude-only compositions (the breath mark and the textless interlude effects) show no cut text.
+const interludeOnly = (k) => REGISTRY.traits('arrange', k).roles.every((x) => x === 'interlude');
 
 function roleOf(key) {
   const t = REGISTRY.traits('arrange', key);
@@ -305,7 +310,7 @@ test('no composition drops text: 80+ grapheme lines are set in full, one graphem
     const want = nonSpace(text);
     for (const key of REGISTRY.keys('arrange')) {
       const t = REGISTRY.traits('arrange', key);
-      if (key === 'breathMark') continue;                                   // shows its label, not the cut text
+      if (interludeOnly(key)) continue;                                     // a label or a textless effect, not the cut text
       for (const orient of t.orient) {
         if (orient === 'v' && /^[A-Za-z]/.test(text)) continue;
         const { scene } = sceneOf({ arrange: key, text, orient, role: roleOf(key) });
@@ -369,9 +374,9 @@ test('gridMosaic past its unit budget keeps one full-width glyph per cell', () =
 });
 
 test('the text is readable: typical lines are set at 3.5% of the short side or more (captions and credits excepted)', () => {
-  const small = new Set(['cornerNote', 'creditFold', 'breathMark', 'sidebarIndex', 'tickerMarquee', 'haloRing', 'hangingTags']);
+  const small = new Set(['cornerNote', 'creditFold', 'sidebarIndex', 'tickerMarquee', 'haloRing', 'hangingTags']);
   for (const key of REGISTRY.keys('arrange')) {
-    if (small.has(key)) continue;
+    if (small.has(key) || interludeOnly(key)) continue;
     const t = REGISTRY.traits('arrange', key);
     const role = t.roles.includes('lyric') ? 'lyric' : t.roles[0];
     for (const aspect of ['16:9', '9:16', '1:1']) {
@@ -405,7 +410,7 @@ test('confetti words never overlap, whatever the seed', () => {
   }
 });
 
-test('special cuts: the title plate shows the title and the artist, the breath mark its label, the credit both', () => {
+test('special cuts: the title plate shows the title and the artist, the breath mark its label, the credit both; the fallback draws nothing on a blank interlude', () => {
   const chars = (scene) => glyphBoxes(scene).map((b) => b.ch).join('');
   let r = sceneOf({ arrange: 'titlePlate', role: 'title', text: '夜明けのうた', note: 'サンプル' });
   assert.equal(chars(r.scene), '夜明けのうたサンプル');
@@ -418,12 +423,15 @@ test('special cuts: the title plate shows the title and the artist, the breath m
   assert.equal(breath('♪', 'サビ'), '♪');
   assert.equal(breath('間奏です', null), '間奏です', 'free text as written');
   const blank = sceneOf({ arrange: 'centerAnchor', role: 'interlude', text: '', note: 'Cメロ' });
-  assert.equal(chars(blank.scene), 'Cメロ', 'the fallback composition shows a blank special cut’s heading');
+  assert.equal(chars(blank.scene), '', 'the fallback composition draws nothing on a blank interlude (no ♪, no heading)');
+  assert.ok(Object.values(blank.scene.focus).every(Number.isFinite), 'with a finite focus');
+  const title = sceneOf({ arrange: 'centerAnchor', role: 'title', text: '', note: null });
+  assert.equal(chars(title.scene), '♪', 'a blank title card still shows ♪');
 });
 
 test('notes are shown small, once, by every composition that can show them', () => {
   for (const key of REGISTRY.keys('arrange')) {
-    if (key === 'breathMark') continue;
+    if (interludeOnly(key)) continue;
     const t = REGISTRY.traits('arrange', key);
     const role = t.roles.includes('lyric') ? 'lyric' : t.roles[0];
     const { scene } = sceneOf({ arrange: key, role, orient: t.orient.includes('h') ? 'h' : 'v', text: TEXTS[1], note: 'ひかりの方へ' });

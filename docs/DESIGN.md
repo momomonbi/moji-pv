@@ -2480,10 +2480,10 @@ Rules: no sentence concatenation; no UI text in code; the `en` page shows no Jap
 
 ## 5. Part catalog to build first (all names original; keys FROZEN once shipped)
 
-Counts: 18 compositions (+3 special), 22 entrances, 10 holds, 17 exits (+ fallbacks), 18 backgrounds, 22 decorations,
-10 cameras, 16 screen effects, 11 transitions, 16 themes, 8 moods. Tags use the vocabulary of §4.18.1. "(fb)" marks the
-kind's fallback. Files are suggestions for grouping (one file per family); any grouping is fine as long as each file only
-depends on `parts/kit`.
+Counts: 18 compositions (+3 special cards, +3 interlude effects), 22 entrances, 10 holds, 17 exits (+ fallbacks),
+18 backgrounds, 22 decorations, 10 cameras, 16 screen effects, 11 transitions, 16 themes, 8 moods. Tags use the
+vocabulary of §4.18.1. "(fb)" marks the kind's fallback. Files are suggestions for grouping (one file per family); any
+grouping is fine as long as each file only depends on `parts/kit`.
 
 ### 5.1 Compositions — `arrange` (`parts/arrange/*.js`)
 
@@ -2508,8 +2508,22 @@ depends on `parts/kit`.
 | `hangingTags` | 吊り札 | Hanging tags | playful organic | Words hang from the top edge on thin threads at staggered heights. |
 | `tiltedCard` | 傾いた札 | Tilted card | soft retro | Text on a slightly rotated paper card with a soft shadow. |
 | `titlePlate` (role title) | タイトル札 | Title plate | serious | Title large, artist small under a rule. |
-| `breathMark` (role interlude) | 間の印 | Breath mark | minimal slow | A small ♪ or the section heading, centred, slowly breathing. |
+| `lightMotes` (role interlude) | 光の粒 | Light motes | soft airy bright | Light motes and soft bokeh drift in two depth planes, glint on the beats and gather where the next line begins (no text). |
+| `soundHorizon` (role interlude) | 音の水平線 | Sound horizon | fast bold digital | A dotted horizon whose bars swell with the loudness while ripples spread on the beats; it folds back into dots for the next line (no text). |
+| `kineticShapes` (role interlude) | 図形の舞 | Kinetic shapes | minimal serious | Thin rings, lines and a square recombine on the downbeats, then fold into one line and a dot (no text). |
+| `breathMark` (role interlude, pin only) | 間の印 | Breath mark | minimal slow | A small ♪ or the section heading, centred, slowly breathing; since the interlude effects it is never picked automatically (`pool: false`). |
 | `creditFold` (role outro) | 終わりの札 | Credit fold | minimal | Title and artist as a quiet corner credit. |
+
+Interlude effects (`parts/arrange/interlude.js`). Every interlude cut draws one of `lightMotes`, `soundHorizon` and
+`kineticShapes`, picked by the mood's tags, the part's energy range and `fits` (a beat grid helps the horizon). They set
+no text at all: no ♪ and no heading. They are `cam: 'gentle'` (a glyph-free cut leaves the gentle shot inert) and have no
+`motion: 'own'`, so the lyric neighbours keep every entrance, exit and camera decision. They draw on the far and mid
+layers only (never near, which a text seam mixes) and fade themselves in over the entrance and out at the handover,
+when the next line is sung. Music follows the §2 rules and never fakes a tempo: with a song and a grid they react to
+the loudness and ripple, glint or recombine on the beats; with a song and no grid they follow the loudness's onsets;
+a bpm pin without a song gives beats but no loudness; with neither, the motion is slow and aperiodic. Tokens only, no
+full-frame fill, `'lighter'` only on a dark ground that is not the chroma key. When no interlude effect is left in the
+pool (document filters), the fallback composition draws nothing on a blank interlude.
 
 ### 5.2 Entrances — `arrive` (`parts/arrive/*.js`)
 
@@ -3187,8 +3201,8 @@ Header: cut text, 「カット k / n」, time range, [振り直す] (`salt.bump 
 [固定 n ▾]. Sections: 時間 (開始 `cut/<key>:t0` for inner boundaries; end = next cut's start) · 構図 (`arrange` + 「この部品の
 調整」 generated from its ParamSpecs + 位置 `el.text.nudge`, 大きさ `text.scale`) · 動き (`arrive`, `dwell`, `depart` with
 their shared and part params) · 切り替え (`seam` into this cut + 長さ `seam.dur`) · 要素 (chips 文字 · 装飾 n · 背景 · カメラ ·
-画面効果 n, [+ 装飾] [+ 効果]). Special cuts: title (`全体 › タイトル`), interlude (`全体 › 間奏（12行のあと）`, adds 表示する
-文字: なし / ♪ / 見出し / 自由入力 → `cut/gap/<id>:arrange@breathMark.label`), intro, outro.
+画面効果 n, [+ 装飾] [+ 効果]). Special cuts: title (`全体 › タイトル`), interlude (`全体 › 間奏（12行のあと）`, with 間の印 pinned it adds
+表示する文字: なし / ♪ / 見出し / 自由入力 → `cut/gap/<id>:arrange@breathMark.label`), intro, outro.
 
 #### 6.4.8 要素 (element) pages — available at work, line and cut scope
 

@@ -66,7 +66,8 @@ and Filmora-ready output; how they are built is in `docs/DESIGN_2_1.md`.
 
 - Design space independent of output resolution (short side = 1080 units). Aspects 16:9, 9:16, 1:1, 4:5, 4:3, 3:4, 21:9.
 - **Cuts**: each line becomes one or more cuts (split at `/` or natural phrase boundaries depending on time and density);
-  an emphasized/impact phrase may get its own cut; long gaps get an interlude cut; a title card when a title is set.
+  an emphasized/impact phrase may get its own cut; long gaps get an interlude cut with a textless effect picked to fit
+  the song (light motes, a sound horizon or kinetic shapes); a title card when a title is set.
 - **Composition** (where and how big the words sit): at least 16 original compositions — centered, stacked words,
   vertical columns (tategaki), big + small mix, off-axis / diagonal, corner caption, word scatter, oversized crop, split
   screen, ticker, grid, ring / arc, etc.

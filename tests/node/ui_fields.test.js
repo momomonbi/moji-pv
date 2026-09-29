@@ -1344,3 +1344,26 @@ test('an enum with optKey labels its options from its own key group (depth: back
   const W = MV.use('ui/widgets');
   assert.equal(W.optionText(t, field.options.find((o) => o.v === 'back')), '後ろに下げる');
 });
+
+// Interlude effects (DESIGN §5.1): the 表示する文字 row belongs to 間の印 alone. An interlude cut with an effect shows the
+// effect's own rows under 構図; pinning 間の印 brings the row back.
+test('an interlude cut shows 表示する文字 only when 間の印 is its composition', () => {
+  const reg = catalogRegistry();
+  const PL = MV.use('planner/plan');
+  const doc = corpus.corpus(1, ['16:9'], ['lrc'])[0].doc;
+  const sel = { level: 'cut', key: 'gap/ra' };
+  let plan = PL.plan(doc, { registry: reg });
+  const picked = plan.cuts.find((c) => c.key === 'gap/ra').slots.arrange.v;
+  assert.ok(['lightMotes', 'soundHorizon', 'kineticShapes'].includes(picked), picked);
+  let sections = F.sectionsFor(sel, plan, reg);
+  assert.ok(!sections.some((s) => s.id === 'gaplabel'), 'no 表示する文字 on an effect');
+  const layout = sections.find((s) => s.id === 'layout').fields.map((f) => f.path || f.key);
+  assert.ok(layout.some((p) => typeof p === 'string' && p.startsWith('arrange@' + picked + '.')), 'the effect’s own rows: ' + layout);
+  const pinned = Object.assign({}, doc, { pins: Object.assign({}, doc.pins, { 'cut/gap/ra:arrange': { v: 'breathMark', by: 'user' } }) });
+  plan = PL.plan(pinned, { registry: reg });
+  assert.equal(plan.cuts.find((c) => c.key === 'gap/ra').slots.arrange.v, 'breathMark');
+  sections = F.sectionsFor(sel, plan, reg);
+  const gap = sections.find((s) => s.id === 'gaplabel');
+  assert.ok(gap, 'a pinned 間の印 brings 表示する文字 back');
+  assert.deepEqual(gap.fields.map((f) => f.path), ['arrange@breathMark.label']);
+});

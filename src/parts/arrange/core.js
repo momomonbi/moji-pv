@@ -116,6 +116,10 @@ MV.def('parts/arrange/core', ['parts/kit'], (K) => {
   function centerBuild(env, p) {
     const { D, cut, sb, textStyle } = env;
     const root = rootOf(env, p);
+    if (cut.role === 'interlude' && !(cut.text || '').trim()) {       // no ♪ and no heading on an interlude
+      const u = 0.1 * D.short, box = { x: D.cx + root.shift.x - u, y: D.cy + root.shift.y - u, w: 2 * u, h: 2 * u };
+      return finish(env, root, [], box);
+    }
     const s = subjectOf(cut);
     const safe = safeBox(D);
     const v = env.orient === 'v';
@@ -384,6 +388,10 @@ MV.def('parts/arrange/core', ['parts/kit'], (K) => {
   function echoBuild(env, p) {
     const { D, cut, sb, textStyle } = env;
     const root = rootOf(env, p);
+    if (cut.role === 'interlude' && !(cut.text || '').trim()) {       // no ♪ and no heading on an interlude
+      const u = 0.1 * D.short, box = { x: D.cx + root.shift.x - u, y: D.cy + root.shift.y - u, w: 2 * u, h: 2 * u };
+      return finish(env, root, [], box);
+    }
     const s = subjectOf(cut);
     const safe = safeBox(D);
     const v = env.orient === 'v';

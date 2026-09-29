@@ -9146,3 +9146,84 @@ figures as before, every one with its margin (the thinnest: framing lens → `no
 window of the catalog); only the curve agreement of shared moving shots rises (catalog 0.830 → 0.865, synthetic
 0.859 → 0.904). It changes the camera curves of existing documents: 121 of the 240 plans of plan_hashes.json and one
 frame of frame_hashes.json; frame_hashes_v2.json and project_media.json are unchanged.
+
+## Interlude effects (─♪─ retired)
+
+**Owner's decisions.** The ─♪─ of every interlude (`breathMark`: a ♪ or the heading between two side rules) is
+retired from automatic picks, in every document, existing ones included. Its preferences were light motes and
+sparkle, motion that follows the music, and geometric motion graphics (large flowing text was not chosen). This is one
+focused change on main: no planner, engine, AI or camera code changed. The frozen v2 frames of the lrc interludes are
+rewritten on purpose (below).
+
+**What shipped** (`parts/arrange/interlude.js`, DESIGN §5.1). Three textless interlude compositions, each with its own
+family, `cam: 'gentle'`, no `motion`, `traits.cells [0, 80]`, roles interlude only:
+- `lightMotes` 光の粒 (soft airy bright; needs beats, level; params amount, flow 立ちのぼる/漂う/舞い降りる, speed): bokeh on
+  the far layer and motes with halos on the mid layer; they drift and renew unseen, glint on the music's events and
+  gather into the centre for the next line.
+- `soundHorizon` 音の水平線 (fast bold digital; needs beats, level; fits ×1.3 with a grid, ×0.6 without; params react,
+  ripples): a row of dots whose bars swell with the loudness (the edge bar 1.8 s late, so the sound travels outward),
+  flat ripples on the events, a glow that follows the level; it folds back into dots and retracts into the centre.
+- `kineticShapes` 図形の舞 (minimal serious; needs beats; fits ×1.1 / ×0.9; params every, thickness, dial): a ring, a
+  square, two lines, a dashed ring and a hero dot recombine through eight figures on the downbeats (every move lands on
+  the change), then close into one line and a dot.
+
+Music, per the no-fake-tempo rule: with a song and a grid, beats (glints ≥ 0.3 s apart, ripples ≥ 0.45 s, changes on
+1–2 bar downbeats); with a song and no grid, the loudness's onsets (plus fillers where the song gives none); a bpm pin
+without a song, beats (the horizon downbeats only) but no loudness; with neither, slow seeded uneven gaps (glints
+0.55–1.25 s, ripples 2–3 s, figure changes about every 2.4 s). A song is "there" when the level moves ≥ 0.03 inside
+the window; the level is followed (fast attack, slow release) and normalised to the window (p10…p97). A quiet passage of
+a song keeps 12 % of the bar motion, so the row never lies dead while the song plays.
+
+Every effect draws only on far and mid (a text seam mixes near), fades itself in over the entrance E and out from the
+handover h − 0.1 (h = the next line's sung start) to just before b, tokens only (black maps them to greys), `'lighter'`
+only on a dark ground that is not the key green. The seed forks env.rng by the cut's pos, dur and heading (all in its
+fingerprint), so two interludes of a song never share a layout; params never reach the seed.
+
+**Other changes.** `breathMark` gets `pool: false` (pins, the すべて tab and AI `base: 'breathMark'` recipes keep
+working). `centerAnchor` draws nothing on a blank interlude (reached only when document filters leave no effect, or
+through the part-error fallback); blank title and outro cards still show `cut.note || '♪'`. The 表示する文字 row
+(`sec.gaplabel`) shows only when every selected cut uses 間の印. `opt.moteFlow.*` strings. perf.py starts the lrc row at
+30 s so it crosses the first interlude (gap/ra 34.9–38.7 s) and its seams.
+
+The WP8b note on the interlude text field (§6.4.7, "Interlude text") and the WP5a1 lines on `breathMark`'s label,
+roles and the blank-cut fallback now apply only when 間の印 is pinned; the fallback on a blank interlude draws nothing.
+
+**An orphan label pin.** A document that pinned only `arrange@breathMark.label` (not the part) now gets an effect; the
+label pin stays in the file and shows as inactive (withPinnedParams). Pinning 間の印 again restores it.
+
+**Why no `motion: 'own'` and why `'gentle'`.** Measured over the 60 lrc corpus plans: `motion: 'own'` changes 22 lyric
+`depart` and 11 lyric `arrive` decisions (neighbour recency sees instantShow/instantHide), `cam: 'none'` 19 lyric
+`cam.shot` and 7 `cam.follow` decisions; `'gentle'` without `'own'` changes none. On a glyph-free cut the gentle shot is
+inert (no text to frame), and the arrive/depart parts build no behaviours, so they are harmless. Verified again here:
+the lrc golden document plans every lyric slot identically to main, with the camerawork on and off.
+
+**Pick shares** (motes / horizon / shapes, moodBias^1.5 × fits, without / with a grid): quietHush 49/5/46 · 43/9/48,
+dreamHaze 63/9/27 · 54/18/28, heartAche 53/11/36 · 44/19/37, silverReel 33/17/49 · 25/29/46, printColumn 28/19/52 ·
+21/31/48, popFizz 53/31/16 · 38/48/14, dashSprint 30/45/25 · 19/62/19, glitchFracture 19/45/36 · 12/61/27. Over the
+lrc corpus (20 seeds × 3 aspects, 120 interludes) plus v21: motes 53, shapes 45, horizon 23.
+
+**Goldens.** The registry version changes (three keys), so every plan hash and every golden's `registry` field moves.
+Frames: `update_golden --check` reported lrc 21–32 and 34–37 in both frame_hashes.json and frame_hashes_v2.json. Only
+21, 22, 34 and 35 (t 35.475, 37.125, 56.925, 58.575 s, the two interludes) changed content: comparing the ops of every
+lrc frame against main with the recorder's canvas and gradient ids renumbered per frame, 23–32, 36 and 37 are identical;
+they moved only because the ♪ sprite canvas is no longer made, so later sprites get other recorder ids. basic,
+vertical, long, media, repeat and extreme frames are unchanged. frame_hashes_v2.json was rewritten with
+`node tests/update_golden.js --v2` on the owner's decision (DESIGN_2_1 §9 row D§5.1); `--check` then matches ×6.
+
+**perf.py lrc row** (720p, this shared machine, headless Chromium): before (2–12 s, no interlude) p50 5.30 ms, p95
+21.30 ms; after (30–40 s, across gap/ra) p50 4.20 ms, p95 11.20 ms. An interlude frame costs about 600 drawing calls
+(motes), 260 (horizon) or 80 (shapes), at most 3 gradients.
+
+**Contact-sheet and real-frame review.** Real frames of lrc (no song) and v21 (song digest, 120 bpm), all four keys, on
+nightTram and sakuraFog, and the contact sheets at 16:9, 9:16, 1:1 and 21:9, black and chroma (cicadaNoon's green
+shifts), the vertical fold and the heaviest motes. Tuned after the first look: mote cores 0.3–0.8 % of the short side
+(were 0.22–0.57 %, near invisible at export size), halos 6× the core at α 0.5 / 0.3 light (were 5×, 0.35 / 0.22), 11
+bokeh per 16:9 frame (were 9), ripple lines 1.5–3.7 du (were 1.2–3), the 蝕 figure's dot 0.12 of the short side (0.17
+covered the ring), the hero dot's glow capped at 0.06 of the short side beyond the dot. A sweep of v21 at u 0.40–0.46
+in 0.005 steps shows even frame-to-frame differences (no flicker).
+
+**Accepted risks.** The gather and the fold aim at the centre, whatever the next line's composition (it still reads
+as clearing the stage). Two interludes of one song can pick the same part (the seed still varies layout, flow, figures
+and rhythm). A segment atmosphere (bokehDots, fireflyGlow) can double the motes, beatZoom the horizon; both stay in
+sync. The planned 入り/抜け and gentle shot of an interlude are inert. A transparent export on a dark theme draws
+`'lighter'` onto α 0 (as fireflyGlow does), and transparent_check.py never samples an interlude.

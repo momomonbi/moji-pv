@@ -912,7 +912,7 @@ frameBox(env, box, fill, ox, oy) → { zoom, x, y }
 | Value | Parts |
 |---|---|
 | `'none'` | edgeBleed, diptychSplit, tickerMarquee (`motion: 'own'`), gridMosaic |
-| `'gentle'` | confettiWords, haloRing, hangingTags, slantBand, titlePlate, breathMark, creditFold |
+| `'gentle'` | confettiWords, haloRing, hangingTags, slantBand, titlePlate, breathMark, creditFold, lightMotes, soundHorizon, kineticShapes (the interlude effects (D§5.1) are new keys with `cam: 'gentle'`) |
 | `'any'` (default) | all others |
 
 ### 3.12 `parts/mix` (new, L3; owned by package C, stub by A)
@@ -3126,11 +3126,13 @@ edits of §11.7. F keeps the ownership of `i18n/strings.js` from A, and adds the
 | §2.3, §3.4.3, §3.9, §3.12, §3.13, §4.19, §4.20, §4.22, §6.4 | カメラ EXTREME (§14): modules `planner/extreme` (L2), `engine/scene/xshot`, `engine/scene/cover`, `engine/render/xblur` (L3); the slot `cam.extreme` (line, work; refused at cut scope, not copied, promotable); x-refs of `cam.shot` (§14.2); plan `grounds[].x` and why codes; CamPose `gz`, `cover`; facade `xJumps`, `viewAt`/`renderFrame` `calm`, `FrameStats.blur`, samplePlan `xshot`; the `cameraX` answer schema; the widget `extreme` | owner (requested), lead |
 | §3.4.2, §3.9, §3.13, §4.16.2 | 「くり返しの行をそろえる」 (§4.10): the slot `repeat.same` (work, line; refused at a cut); a copy's decisions from its source in the FROZEN slot order; segments, grounds, seams and rigs of copies from their sources; why `repeat.same`, rule `repeat.same`; `ai.warn.repeatSame`; the cast inputs `aligned` and `ahead`; D§8.2 across copies. Only documents with the pin change | owner (decided) |
 | §4.7 (this design) | every `pullReveal` on a cut under 1.8 s takes `hushRushHush` (was: only those the echo gives); camera curves of existing documents change, no shot and no v2 part choice | owner (decided) |
+| D§5.1 (interlude effects) | every interlude cut of every document draws one of lightMotes, soundHorizon, kineticShapes instead of 間の印 (breathMark: pool false, pin only); the blank-interlude fallback draws nothing; interlude frames change (frame_hashes_v2 lrc 21, 22, 34, 35 rewritten with --v2); lyric cuts keep every decision | owner (decided) |
 
 Everything is additive or widened: no existing path, pin or command changes meaning. Documents without the new pins or
 materials produce the same part choices as v2. Their plan hashes differ only by the new default params and slots, and
 their frames differ only by automatic camerawork (goldens step (b)). Documents without media pins also keep every
-frame; their plan hashes change only through the registry version (goldens step (c)).
+frame; their plan hashes change only through the registry version (goldens step (c)). The one exception is the
+interlude effects (row D§5.1): interlude cuts draw the new effects, so their frames differ; lyric cuts are unchanged.
 
 ---
 
