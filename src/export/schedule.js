@@ -13,7 +13,8 @@ MV.def('export/schedule', ['core/script', 'core/doc', 'audio/wav', 'media/sample
   }
 
   const QUALITY_BPP = Object.freeze({ standard: 0.08, high: 0.12, max: 0.18 });   // bits per pixel per frame
-  const AUDIO_BITRATE = 192000;                     // AAC-LC
+  const AUDIO_BITRATE = 320000;                     // AAC-LC
+  const AUDIO_BITRATE_LOW = 192000;                 // AAC-LC where the encoder stops there (Windows' Media Foundation)
   const OPUS_BITRATE = 160000;                      // Opus in MP4, where the browser has no AAC encoder (DESIGN_2_1 §13.4)
   const AUDIO_CHUNK = 1024;                         // frames per AudioData
   const MUX_OVERHEAD = 1.02;                        // container bytes on top of the streams
@@ -520,7 +521,7 @@ MV.def('export/schedule', ['core/script', 'core/doc', 'audio/wav', 'media/sample
   }
 
   return {
-    ExportError, QUALITY_BPP, AUDIO_BITRATE, OPUS_BITRATE, AUDIO_CHUNK, MEMORY_CONFIRM_BYTES, FLASH_PARTS, FLASH_LIMIT, FLASH_SAFE_AMP,
+    ExportError, QUALITY_BPP, AUDIO_BITRATE, AUDIO_BITRATE_LOW, OPUS_BITRATE, AUDIO_CHUNK, MEMORY_CONFIRM_BYTES, FLASH_PARTS, FLASH_LIMIT, FLASH_SAFE_AMP,
     ALPHA_SHARE, WAV_RATE, KIT_README, KIT_SHORTS, FORMATS,
     frameCount, ts, frameDur, audioFrames, keyInterval, audioChunkCount, audioChunk, fillPlanar, mixMatrix,
     outputSize, bitrate, alphaBitrate, estimateBytes, estimateWebmBytes, estimatePngBytes, eta, pickAvc, pickVp9,

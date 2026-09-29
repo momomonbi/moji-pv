@@ -5178,8 +5178,8 @@ Every **?** line becomes a row of the manual checklist (§13.12).
 
 | Output | AAC encoder available | No AAC encoder (Chrome on Linux, Chromium builds) |
 |---|---|---|
-| MP4 (形式 MP4) | AAC-LC 192 kbps | **Opus in MP4** (160 kbps), with the preflight note `opus-audio` (B's item, §8.2) |
-| Kit: main MP4 | AAC-LC | **No audio track**, plus `<base>.wav` (PCM 16-bit, 48 kHz stereo, exactly `audioFrames(N, fps, 48000)` samples from `t0`), plus the kit note `kit-wav` |
+| MP4 (形式 MP4) | AAC-LC 320 kbps (192 kbps where the encoder stops there: Windows' Media Foundation) | **Opus in MP4** (160 kbps), with the preflight note `opus-audio` (B's item, §8.2) |
+| Kit: main MP4 | AAC-LC (as above) | **No audio track**, plus `<base>.wav` (PCM 16-bit, 48 kHz stereo, exactly `audioFrames(N, fps, 48000)` samples from `t0`), plus the kit note `kit-wav` |
 | Kit: `_bg.mp4`, `_green.mp4` | no audio (the main MP4 or the WAV carries the song) | same |
 | 透過WebM, kit `_overlay.webm` | Opus in WebM, the WebM standard (standalone: when 音声を入れる is on; overlay: never) | same |
 

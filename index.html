@@ -1,6 +1,6 @@
 <!doctype html><html lang="ja"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-FWM11w7DdWsoJLcZK15ZVmxrgTT/rLvGXqosllXby/Q='; style-src 'sha256-CBzRvq4sWr3CF69hafDp1l8UkHnSy18JQMXGJJhPDYI=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-2ecOFX96SS03sFcKCc6B4YuRxFrcpNzOljZCodkXGBg='; style-src 'sha256-CBzRvq4sWr3CF69hafDp1l8UkHnSy18JQMXGJJhPDYI=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
 <title>文字PVメーカー</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -49822,7 +49822,8 @@ MV.def('export/schedule', ['core/script', 'core/doc', 'audio/wav', 'media/sample
   }
 
   const QUALITY_BPP = Object.freeze({ standard: 0.08, high: 0.12, max: 0.18 });   // bits per pixel per frame
-  const AUDIO_BITRATE = 192000;                     // AAC-LC
+  const AUDIO_BITRATE = 320000;                     // AAC-LC
+  const AUDIO_BITRATE_LOW = 192000;                 // AAC-LC where the encoder stops there (Windows' Media Foundation)
   const OPUS_BITRATE = 160000;                      // Opus in MP4, where the browser has no AAC encoder (DESIGN_2_1 §13.4)
   const AUDIO_CHUNK = 1024;                         // frames per AudioData
   const MUX_OVERHEAD = 1.02;                        // container bytes on top of the streams
@@ -50329,7 +50330,7 @@ MV.def('export/schedule', ['core/script', 'core/doc', 'audio/wav', 'media/sample
   }
 
   return {
-    ExportError, QUALITY_BPP, AUDIO_BITRATE, OPUS_BITRATE, AUDIO_CHUNK, MEMORY_CONFIRM_BYTES, FLASH_PARTS, FLASH_LIMIT, FLASH_SAFE_AMP,
+    ExportError, QUALITY_BPP, AUDIO_BITRATE, AUDIO_BITRATE_LOW, OPUS_BITRATE, AUDIO_CHUNK, MEMORY_CONFIRM_BYTES, FLASH_PARTS, FLASH_LIMIT, FLASH_SAFE_AMP,
     ALPHA_SHARE, WAV_RATE, KIT_README, KIT_SHORTS, FORMATS,
     frameCount, ts, frameDur, audioFrames, keyInterval, audioChunkCount, audioChunk, fillPlanar, mixMatrix,
     outputSize, bitrate, alphaBitrate, estimateBytes, estimateWebmBytes, estimatePngBytes, eta, pickAvc, pickVp9,
@@ -52360,16 +52361,18 @@ MV.def('export/host/mp4', ['export/schedule', 'export/muxer'], (S, M) => {
   }
 
   // The first audio config that encodes, stereo at the song's rate (songs are decoded at 48 kHz, DECODE_RATE, which is
-  // also the Opus rate): AAC at 192 kbps, Opus at 160 kbps. null when none encodes (the MP4 is then silent). `list`
-  // overrides the order (the kit's MP4 tries AAC only, the WebM Opus only).
+  // also the Opus rate): AAC at 320 kbps, or at 192 kbps where the platform's AAC encoder stops there (the one behind
+  // Windows' Media Foundation takes at most 192 kbps), Opus at 160 kbps. null when none encodes (the MP4 is then
+  // silent). `list` overrides the order (the kit's MP4 tries AAC only, the WebM Opus only).
   async function audioConfig(codecs, buffer, list) {
     if (typeof AudioEncoder !== 'function') return null;
     for (const codec of list || audioCodecs(codecs)) {
-      const config = { codec, sampleRate: buffer.sampleRate, numberOfChannels: 2,
-        bitrate: codec === 'opus' ? S.OPUS_BITRATE : S.AUDIO_BITRATE };
-      try {
-        if ((await AudioEncoder.isConfigSupported(config)).supported) return config;
-      } catch (err) { /* a malformed or unknown codec string is simply unsupported */ }
+      for (const bitrate of codec === 'opus' ? [S.OPUS_BITRATE] : [S.AUDIO_BITRATE, S.AUDIO_BITRATE_LOW]) {
+        const config = { codec, sampleRate: buffer.sampleRate, numberOfChannels: 2, bitrate };
+        try {
+          if ((await AudioEncoder.isConfigSupported(config)).supported) return config;
+        } catch (err) { break; }     // a malformed or unknown codec string is simply unsupported, at any bitrate
+      }
     }
     return null;
   }

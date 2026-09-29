@@ -133,9 +133,9 @@ and Filmora-ready output; how they are built is in `docs/DESIGN_2_1.md`.
 
 ## 7. Output
 
-- MP4 (H.264 + AAC; Opus in MP4, with a note, where the browser has no AAC encoder) via WebCodecs + mp4-muxer;
-  24 / 30 / 60 fps; 720p–2160p; progress, cancel, time left. Streams to disk when the File System Access API is
-  available, otherwise builds in memory with a size warning.
+- MP4 (H.264 + AAC 320 kbps, or 192 kbps where the browser's AAC encoder stops there; Opus in MP4, with a note, where
+  the browser has no AAC encoder) via WebCodecs + mp4-muxer; 24 / 30 / 60 fps; 720p–2160p; progress, cancel, time
+  left. Streams to disk when the File System Access API is available, otherwise builds in memory with a size warning.
 - **Transparent video** (透過動画（WebM）, v2.1): VP9 with alpha (VP8 where VP9 cannot be encoded), for video editors.
 - **Filmora用 (v2.1)**: one choice of 形式 writes a set of files into one folder (a ZIP download without the File System
   Access API): the finished MP4 always, and optionally 文字と装飾だけ (transparent WebM, on by default), 背景だけ (MP4),
