@@ -196,23 +196,59 @@ test('no ♪ by default: every interlude of the lrc corpus and v21 draws one of 
   assert.deepEqual([...seen].sort(), KEYS, 'every effect is picked somewhere in the corpus');
 });
 
-test('with no effect left in the pool the fallback draws nothing on a blank interlude; a 間の印 pin still shows ♪', () => {
+test('with every effect denied the fallback draws nothing on a blank interlude; a 間の印 pin still shows ♪', () => {
   const base = corpus.project('lrc').doc;
-  for (const filters of [{ arrange: { only: ['centerAnchor'], deny: null } }, { arrange: { only: null, deny: KEYS.slice() } }]) {
-    const doc = Object.assign({}, base, { filters: Object.assign({}, base.filters, filters) });
-    const { plan, cuts } = interludeScenes(doc);
-    for (const { cut, scene } of cuts) {
-      assert.equal(cut.slots.arrange.v, 'centerAnchor', JSON.stringify(filters));
-      assertTextless(plan, cut, scene, 'fallback ' + cut.key);
-    }
+  const doc = Object.assign({}, base, { filters: Object.assign({}, base.filters, { arrange: { only: null, deny: KEYS.slice() } }) });
+  const { plan, cuts } = interludeScenes(doc);
+  assert.ok(cuts.length > 0);
+  for (const { cut, scene } of cuts) {
+    assert.equal(cut.slots.arrange.v, 'centerAnchor', cut.key);
+    assertTextless(plan, cut, scene, 'fallback ' + cut.key);
   }
   const pinned = Object.assign({}, base, { pins: Object.assign({}, base.pins, { 'cut/gap/ra:arrange': { v: 'breathMark', by: 'user' } }) });
-  const { cuts } = interludeScenes(pinned);
-  const ra = cuts.find((c) => c.cut.key === 'gap/ra');
+  const ra = interludeScenes(pinned).cuts.find((c) => c.cut.key === 'gap/ra');
   assert.equal(ra.cut.slots.arrange.v, 'breathMark');
   const t = ra.scene.target, chars = [];
   for (let j = 0; j < t.to - t.from; j++) chars.push(t.ch[j]);
   assert.ok(chars.join('').includes('♪') || chars.length > 0, 'the pinned breath mark draws its label');
+});
+
+// The 構図 page's 最小限 preset as documents saved it before the interlude effects (breathMark was pooled then).
+const SAVED_MINIMAL = ['breathMark', 'centerAnchor', 'cornerNote', 'creditFold', 'diptychSplit', 'pillarColumns', 'sidebarIndex'];
+
+test('saved filters: an only list naming 間の印 admits the effects, one naming no interlude part leaves interludes free', () => {
+  const base = corpus.project('lrc').doc;
+  const withArrange = (f, pins) => Object.assign({}, base, { filters: Object.assign({}, base.filters, { arrange: f }),
+    pins: Object.assign({}, base.pins, pins || {}) });
+  const codes = (plan) => plan.warnings.map((w) => w.code + '|' + (w.path || '')).sort();
+  const lyricOnly = SAVED_MINIMAL.filter((k) => k !== 'breathMark');
+  for (const only of [SAVED_MINIMAL, lyricOnly, ['centerAnchor']]) {
+    const f = { only: only.slice(), deny: null };
+    // the registry and the planner read the filter alike
+    assert.deepEqual(REGISTRY.pool('arrange', { role: 'interlude', filters: { arrange: f } }).slice().sort(), KEYS, only.join());
+    assert.deepEqual(REGISTRY.pool('arrange', { role: 'lyric', filters: { arrange: f } }).filter((k) => !only.includes(k)), [], only.join());
+    const free = PLAN.plan(withArrange({ only: null, deny: null }), { registry: REGISTRY });
+    const { plan, cuts } = interludeScenes(withArrange(f));
+    assert.ok(cuts.length > 0);
+    for (const { cut, scene } of cuts) {
+      assert.ok(KEYS.includes(cut.slots.arrange.v), only.join() + ' ' + cut.key + ': ' + cut.slots.arrange.v);
+      assertTextless(plan, cut, scene, cut.key);
+    }
+    for (const cut of plan.cuts.filter((c) => c.role === 'lyric' || c.role === 'focus')) {
+      assert.ok(only.includes(cut.slots.arrange.v), cut.key + ' keeps to the list: ' + cut.slots.arrange.v);
+    }
+    const added = codes(plan).filter((c) => !codes(free).includes(c));
+    assert.deepEqual(added.filter((c) => /arrange/.test(c) && /gap\//.test(c)), [], only.join() + ': no warning on an interlude');
+    // a pinned effect on an interlude is not reported as filtered either
+    const pinned = PLAN.plan(withArrange(f, { 'cut/gap/ra:arrange': { v: 'lightMotes', by: 'user' } }), { registry: REGISTRY });
+    assert.ok(!pinned.warnings.some((w) => w.code === 'pin-filtered'), only.join() + ': pin-filtered');
+  }
+  // a deny list is read as it is: denying two leaves the third
+  const two = interludeScenes(withArrange({ only: SAVED_MINIMAL.slice(), deny: ['lightMotes', 'soundHorizon'] }));
+  for (const { cut } of two.cuts) assert.equal(cut.slots.arrange.v, 'kineticShapes', cut.key);
+  // an only list that names effects keeps to them
+  const one = interludeScenes(withArrange({ only: ['centerAnchor', 'lightMotes'], deny: null }));
+  for (const { cut } of one.cuts) assert.equal(cut.slots.arrange.v, 'lightMotes', cut.key);
 });
 
 // --- 3. build matrix ----------------------------------------------------------------------------------------------------
@@ -273,6 +309,32 @@ test('each effect fades itself: nothing at a or just before b, drawing after the
   const rip = paintsOf(hz.scene).find((x) => x.layer === 'far').rec.data, last = rip.ev.length - 1;
   assert.ok(Math.abs(rip.ev[last] - (rip.h - 0.3)) < 1e-4 && rip.life[last] === Float32Array.of(0.45)[0], 'the handover ripple');
   assert.ok(rip.ev[last] + rip.life[last] < 12 - 0.05, 'the handover ripple is gone before the next line');
+});
+
+test('timing: with lead 0.5 and tail 1 the effect waits out the line before and is gone as the next cut opens', () => {
+  const smooth = (x) => { const u = Math.min(1, Math.max(0, x)); return u * u * (3 - 2 * u); };
+  const am = (d, t) => smooth((t - d.s0) / d.E) * (1 - smooth((t - d.hEnd) / d.endSpan));
+  for (const [lead, tail] of [[0.12, 0.25], [0.5, 0.25], [0.12, 1], [0.5, 1]]) {
+    for (const key of KEYS) {
+      const doc = JSON.parse(JSON.stringify(corpus.project('v21').doc));
+      doc.timing = Object.assign({}, doc.timing, { lead, tail });
+      doc.pins = Object.assign({}, doc.pins, { 'cut/gap/rc:arrange': { v: key, by: 'user' } });
+      const plan = PLAN.plan(doc, { registry: REGISTRY });
+      const i = plan.cuts.findIndex((c) => c.key === 'gap/rc');
+      const cut = plan.cuts[i], prev = plan.cuts[i - 1], next = plan.cuts[i + 1];
+      const text = createTextService({ measurer: fakeMeasurer(), faces: plan.look.faces });
+      const scene = BUILD.buildCut(cut, plan, { registry: REGISTRY, text, strict: true });
+      const d = dataOf(scene), where = key + ' lead ' + lead + ' tail ' + tail;
+      const prevEnd = prev.b - cut.t0, nextOpen = next.a - cut.t0;
+      assert.ok(Math.abs(prevEnd - tail) < 1e-6 && Math.abs(nextOpen - (cut.feat.dur - lead)) < 2e-3, where + ': the neighbours');
+      assert.ok(am(d, prevEnd) < 0.15 && am(d, nextOpen) < 0.15, where + ': ~0 at the ends ' + am(d, prevEnd).toFixed(3) + ' '
+        + am(d, nextOpen).toFixed(3));
+      assert.equal(draws(opsAt(plan, scene, prevEnd - 0.1).ops), 0, where + ': nothing while the line before is still there');
+      assert.equal(draws(opsAt(plan, scene, nextOpen + 0.1).ops), 0, where + ': nothing once the next cut is in');
+      assert.ok(draws(opsAt(plan, scene, 0.5 * (d.s0 + d.E + d.o)).ops) > 0, where + ': drawn in between');
+      if (lead === 0.12 && tail === 0.25) assert.ok(d.s0 === 0.15 && d.h === cut.feat.dur - 0.25, where + ': the defaults as before');
+    }
+  }
 });
 
 test('light motes: a grey-tinting accent gives way to a shift on a light ground; the key keeps only cores and glints; glints stay put', () => {
@@ -543,6 +605,50 @@ test('no song: no tempo is faked (uneven gaps), the effects still move, and a bp
   const body = Array.from(pin.ev).slice(1, -1);
   assert.ok(body.length >= 3);
   for (const t of body) assert.equal(Math.round((t + T0 - 0.1) / 0.5) % 4, 0, 'a downbeat: ' + t);
+});
+
+test('long interludes: every event stream is thinned to its cap, never cut short, and runs up to the lead-out', () => {
+  const tail = (xs, gap, o, where) => {
+    let most = 0;
+    for (let i = 1; i < xs.length; i++) most = Math.max(most, xs[i] - xs[i - 1]);
+    assert.ok(xs.length > 0, where + ': events');
+    assert.ok(o - xs[xs.length - 1] <= Math.max(2, most, gap) + 0.25, where + ': the last at ' + xs[xs.length - 1].toFixed(2)
+      + ', o ' + o.toFixed(2));
+  };
+  for (const dur of [60, 120]) {
+    for (const [bpm, env] of [[120, 'steps'], [180, 'steps'], [120, 'none'], [180, 'none'], [null, 'steps'], [null, 'none']]) {
+      const where = 'dur ' + dur + ' bpm ' + bpm + ' ' + env;
+      const period = bpm ? 60 / bpm : 0;
+      const mo = dataOf(sceneOf({ key: 'lightMotes', dur, bpm, env }).scene);
+      assert.ok(mo.ev.length <= 64, where + ': glints ' + mo.ev.length);
+      tail(Array.from(mo.ev), 0, mo.o, where + ' glints');
+      const hz = sceneOf({ key: 'soundHorizon', dur, bpm, env, params: { ripples: true } }).scene;
+      const far = paintsOf(hz).find((p) => p.layer === 'far').rec.data, mid = dataOf(hz);
+      const body = Array.from(far.ev).slice(1, -1);
+      assert.ok(body.length <= 46, where + ': ripples ' + body.length);
+      tail(body, 0, mid.o, where + ' ripples');
+      assert.ok(mid.bt.length <= 128, where + ': kicks');
+      if (mid.bt.length) tail(Array.from(mid.bt), 0, mid.o, where + ' kicks');
+      const sh = dataOf(sceneOf({ key: 'kineticShapes', dur, bpm, env, params: { every: 1 } }).scene);
+      assert.ok(sh.tc.length <= 24 && sh.ev.length <= 128, where + ': changes ' + sh.tc.length + ', beats ' + sh.ev.length);
+      tail(Array.from(sh.tc), 0, sh.o, where + ' changes');
+      if (bpm) {
+        tail(Array.from(sh.ev), sh.evGap, sh.o, where + ' beats');
+        // a thinned beat list keeps the downbeats: every kept beat is a downbeat, or every downbeat is kept
+        const idx = Array.from(sh.ev, (t) => Math.round((t + T0 - 0.1) / period));
+        const step = Math.round(sh.evGap / period);
+        assert.ok(step % 4 === 0 || 4 % step === 0, where + ': step ' + step);
+        assert.ok(idx.every((k) => k % step === 0), where + ': on the step');
+      }
+    }
+  }
+  // the dashed ring keeps turning after the last beat
+  const { plan, scene } = sceneOf({ key: 'kineticShapes', dur: 12, bpm: 120, env: 'steps', params: { every: 1 } });
+  const d = dataOf(scene), last = d.ev[d.ev.length - 1];
+  const turn = (t) => { const op = opsAt(plan, scene, t).ops.find((x) => x[1] === 'rotate'); return op ? op[2] : null; };
+  const t1 = last + 0.2, t2 = t1 + 0.1;
+  assert.ok(t2 < d.o + 0.3, 'still before the ring has closed');
+  assert.ok(turn(t1) !== null && turn(t2) !== null && turn(t2) > turn(t1), 'the ring turns on after the last beat');
 });
 
 // --- 8. fingerprint -----------------------------------------------------------------------------------------------------

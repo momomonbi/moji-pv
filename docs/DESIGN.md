@@ -1008,6 +1008,7 @@ Registry = {
   all(kind?) → def[]                         // sorted by (kind, key)
   pool(kind, { role, season, filters, orient, script, scope }) → string[]   // eligible for AUTO picks (filters, season gate, pool:false,
                                              // role, traits hard limits; `scope` 'cut'|'run' for ornaments; texture: true for the texture slot)
+  filterFor(kind, filters, role) → { only, deny } | null   // additive: the filter as pool reads it for a role (§5.1 interludes)
   fallback(kind) → key                       // the one def with fallback: true
   label(kind, key, lang) → string
 }
@@ -2516,18 +2517,27 @@ grouping is fine as long as each file only depends on `parts/kit`.
 
 Interlude effects (`parts/arrange/interlude.js`). Every interlude cut draws one of `lightMotes`, `soundHorizon` and
 `kineticShapes`, picked by the mood's tags, the part's energy range and `fits` (a beat grid helps the horizon). They set
-no text at all: no ♪ and no heading. They are `cam: 'gentle'` (a glyph-free cut leaves the gentle shot inert) and have no
-`motion: 'own'`, so the lyric neighbours keep every entrance, exit and camera decision. They draw on the far and mid
-layers only (never near, which a text seam mixes). They wait out the line before (their entrance starts 0.15 s into
-the cut), reach their climax (the gather, the fold, the handover glow) 0.25 s before the next line is sung, and are gone
-0.05 s before it, so they never draw under either line. Music follows the §2 rules and never fakes a tempo: with a song and a grid they react to
-the loudness and ripple, glint or recombine on the beats; with a song and no grid they follow the loudness's onsets;
-a bpm pin without a song gives beats but no loudness; with neither, the motion is slow and aperiodic. Tokens only, no
-full-frame fill, `'lighter'` only on a dark ground that is not the chroma key. Over the key everything that holds is
-solid (α ≥ 0.5), because soft low-alpha paint keys badly: the motes keep only their cores (larger, solid, fading by size)
-and glints, the horizon's bars are solid and its glow is gone, and the shapes draw solid lines with no dot glow and no
-dial; only the ripples and glints fade on their own short lives. When no interlude effect is left in the
-pool (document filters), the fallback composition draws nothing on a blank interlude.
+no text at all: no ♪ and no heading. They are `cam: 'gentle'` (a glyph-free cut leaves the gentle shot inert) and have
+no `motion: 'own'`, so the lyric neighbours keep every entrance, exit and camera decision. They draw on the far and mid
+layers only (never near, which a text seam mixes). They wait out the line before (their entrance starts 0.15 s into the
+cut, or 0.1 s before the line before is gone when 全体 › タイミング gives it a longer tail), reach their climax (the gather,
+the fold, the handover glow) 0.25 s before the next line is sung, or 0.13 s before its cut opens when a longer lead
+brings it in earlier, and are gone 0.05 s before the line (0.07 s after its cut opens), so they never draw under either
+line. Their music is what `needs` declares (§4.18: the beat grid and the loudness, both in the cut fingerprint, §3.12),
+and they never fake a tempo: with a song and a grid they react to the loudness and ripple, glint or recombine on the
+beats; with a song and no grid they follow the loudness's onsets; a bpm pin without a song gives beats but no loudness;
+with neither, the motion is slow and aperiodic. A long interlude (an instrumental break of a minute or two is one cut)
+thins its events to their caps, never stops them early: a larger beat step that keeps the downbeats, a wider gap between
+onsets or seeded events, more bars between figure changes. Tokens only, no full-frame fill, `'lighter'` only on a dark
+ground that is not the chroma key. Over the key everything that holds is solid (α ≥ 0.5), because soft low-alpha paint
+keys badly: the motes keep only their cores (larger, solid, fading by size) and glints, the horizon's bars are solid and
+its glow is gone, and the shapes draw solid lines with no dot glow and no dial; only the ripples and glints fade on
+their own short lives. Document filters (§3.8) never leave an interlude without an effect by accident
+(`registry.filterFor`, read alike by the pool, pin warnings and the alternatives): on an interlude cut an arrange `only`
+list that names `breathMark` (the 構図 page presets saved it with lyric compositions) also admits the three effects, and
+one that names no interlude part at all does not restrict interlude cuts (those lists were made for the lyrics). A
+`deny` list applies as it is; when it denies all three effects, the fallback composition draws nothing on a blank
+interlude.
 
 ### 5.2 Entrances — `arrive` (`parts/arrive/*.js`)
 

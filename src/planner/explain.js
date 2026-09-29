@@ -85,8 +85,9 @@ MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media
 
   // --- alternatives ---------------------------------------------------------------------------------------------
 
-  function filterMasks(filters, kind, key) {
-    const f = filters && filters[kind];
+  // With a registry and a role, the filter as it applies to that role (registry.filterFor, DESIGN §5.1).
+  function filterMasks(filters, kind, key, registry, role) {
+    const f = registry && role ? registry.filterFor(kind, filters, role) : filters && filters[kind];
     if (!f) return false;
     if (Array.isArray(f.only) && !f.only.includes(key)) return true;
     return Array.isArray(f.deny) && f.deny.includes(key);
@@ -98,7 +99,7 @@ MV.def('planner/explain', ['core/paths', 'core/pins', 'core/lyrics', 'core/media
     const def = registry.get(kind, key);
     const t = registry.traits(kind, key);
     const season = ctx.season || plan.look.season.v;
-    if (filterMasks(doc.filters, kind, key) || (ctx.deny && ctx.deny.includes(key))) return 'filter';
+    if (filterMasks(doc.filters, kind, key, registry, ctx.role) || (ctx.deny && ctx.deny.includes(key))) return 'filter';
     if (def.season && season !== 'any' && season !== def.season) return 'season';
     if (def.gate && !(LK.gateAmounts(plan.look.amounts, plan.look.backdrop, kind)[def.gate] > 0)) return 'gate';
     if (ctx.role && ROLE_GATED.has(kind) && !t.roles.includes(ctx.role)) return 'role';

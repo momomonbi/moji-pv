@@ -18,6 +18,8 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
   const BAR_BUCKETS = 8;             // … and of the horizon bars
   const MAX_GLINTS = 6;
   const MAX_RIPPLES = 6;
+  const MAX_EVENTS = 64;             // glint events of the motes (three stars each at most)
+  const MAX_RINGS = 46;              // ripple events of the horizon between its opening and its handover ring
 
   // Every interlude effect draws on far and mid only (never near, which a text seam mixes), fades itself in and out,
   // makes no text run, owns no motion (lyric neighbours keep their entrances and exits) and asks for a gentle shot,
@@ -25,15 +27,21 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
 
   // --- the shared scaffold: window, handover, palette, seed ---------------------------------------------------------
 
-  // The cut window (copied: env.times is refitted after the build), the entrance from s0 over E (s0 waits out the line
-  // before, whose cut runs to 0.25), the climax h 0.25 s before the next line is sung (the gather, the fold and the
-  // glow land there, and everything is gone 0.05 s before the line), the lead-out from o over Xo, and the centre C
-  // (paints skip the root shift, so it is added here).
+  // The cut window (copied: env.times is refitted after the build), the entrance from s0 over E, the climax h (the
+  // gather, the fold and the glow land there; everything is gone 0.3 s after h − 0.1), the lead-out from o over Xo, and
+  // the centre C (paints skip the root shift, so it is added here). Both ends follow 全体›タイミング, read from what the
+  // cut fingerprint holds: the line before stays for the tail after t0 (b − dur, 0.25 by default; to 0.01 s, as dur is
+  // rounded to ms), so s0 is 0.1 s before its end and never before 0.15; the next line's cut opens the lead before it is
+  // sung (−a, 0.12 by default; to the plan's µs), so h is 0.25 s before the line, or 0.13 s before that cut opens when
+  // it leads in earlier (the effect is gone 0.07 s after it opens). A seam that ends b early hides the tail: s0 then
+  // stays at 0.15. The defaults give exactly 0.15 and dur − 0.25.
   function frameOf(env, p) {
     const { D, feat, cut } = env, T = env.times;
-    const a = T.a, b = T.b, W = b - a, s = D.short, s0 = Math.max(a, 0.15);
+    const a = T.a, b = T.b, W = b - a, s = D.short;
     const dur = Number.isFinite(feat && feat.dur) ? feat.dur : b - 0.25;
-    const h = clamp(dur - 0.25, a + 0.5 * W, b - 0.35);
+    const lead = Math.round(-1e6 * a) / 1e6, tail = Math.round(100 * (b - dur)) / 100;
+    const s0 = Math.max(a, 0.15, tail - 0.1);
+    const h = clamp(dur - Math.max(0.25, lead + 0.13), a + 0.5 * W, b - 0.35);
     const E = Math.min(clamp(0.16 * W, 0.45, 0.8), 0.3 * W);
     const X = Math.min(clamp(0.22 * W, 0.6, 1), 0.35 * W);
     const o = Math.max(s0 + E, h - X);
@@ -87,21 +95,29 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
 
   // --- music: beats, loudness, aperiodic events ---------------------------------------------------------------------
 
-  // Beats in [lo, hi) at least minGap apart (every step-th beat of the bar count), with their downbeat flags; empty
-  // without a grid. At most 128.
-  function beatList(env, lo, hi, minGap) {
-    const g = env.grid, t = [], down = [];
+  // Beats in [lo, hi) at least minGap apart (every step-th beat of the bar count), with their downbeat flags and the
+  // time between them (gap); empty without a grid. At most `cap` (128): a long interlude is thinned, never cut short,
+  // to a larger step that still keeps every downbeat (a divisor or a multiple of the meter).
+  function beatList(env, lo, hi, minGap, cap) {
+    const g = env.grid, t = [], down = [], max = cap || 128;
+    let step = 1;
     if (g && hi > lo) {
-      const step = Math.max(1, Math.ceil(minGap / g.period - 1e-9));
-      const xs = g.beatsIn(lo, hi);
-      for (let i = 0; i < xs.length && t.length < 128; i++) {
-        const idx = g.beatAt(xs[i] + 1e-6).index;
-        if (((idx % step) + step) % step !== 0) continue;
+      step = Math.max(1, Math.ceil(minGap / g.period - 1e-9));
+      const xs = g.beatsIn(lo, hi), idx = xs.map((x) => g.beatAt(x + 1e-6).index);
+      const count = (k) => idx.reduce((n, i) => n + (((i % k) + k) % k === 0 ? 1 : 0), 0);
+      while (count(step) > max) {
+        const m = g.meter;
+        let next = step + 1;
+        while (m % next !== 0 && next % m !== 0) next++;
+        step = next;
+      }
+      for (let i = 0; i < xs.length; i++) {
+        if (((idx[i] % step) + step) % step !== 0) continue;
         t.push(xs[i]);
-        down.push(((idx % g.meter) + g.meter) % g.meter === 0 ? 1 : 0);
+        down.push(((idx[i] % g.meter) + g.meter) % g.meter === 0 ? 1 : 0);
       }
     }
-    return { t: Float32Array.from(t), down: Uint8Array.from(down) };
+    return { t: Float32Array.from(t), down: Uint8Array.from(down), gap: g ? step * g.period : 0 };
   }
 
   function percentile(sorted, q) {
@@ -177,11 +193,24 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     return out;
   }
 
-  // Events at seeded, uneven gaps in [g0, g1]: structure, never a tempo.
-  function aperiodic(r, s, e, g0, g1) {
-    const out = [];
-    for (let t = s + r.range(0, 0.4); t < e && out.length < 64; t += r.range(g0, g1)) out.push(t);
-    return out;
+  // The song's onsets in [lo, hi] with fillers, at most `cap`: a long interlude widens the gap and the filler span
+  // (×1.25 a round) rather than stopping early.
+  function onsetEvents(tr, lo, hi, g, span, cap) {
+    for (let k = 1; ; k *= 1.25) {
+      const out = withFillers(onsets(tr, lo, hi, g * k), lo, hi, span * k, g * k);
+      if (out.length <= cap) return out;
+    }
+  }
+
+  // Events at seeded, uneven gaps in [g0, g1]: structure, never a tempo. At most `cap`: when the window would hold more,
+  // the gaps widen (×1.25 a round) rather than the events stopping early.
+  function aperiodic(r, s, e, g0, g1, cap) {
+    for (let k = 1; ; k *= 1.25) {
+      const out = [];
+      let t = s + r.range(0, 0.4);
+      for (; t < e && out.length < cap; t += k * r.range(g0, g1)) out.push(t);
+      if (!(t < e)) return out;
+    }
   }
 
   function median(xs) {
@@ -469,21 +498,20 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     const re = r.fork('ev'), lo = fr.s0 + fr.E, hi = fr.o, grid = env.grid;
     let ev = [], per = [];
     if (tr.song && grid) {
-      const bl = beatList(env, lo, hi, 0.3);
+      const bl = beatList(env, lo, hi, 0.3, MAX_EVENTS);
       ev = Array.from(bl.t);
       per = ev.map((te, i) => Math.min(3, 1 + bl.down[i] + (sampleAt(tr.lv, tr.L0, te) > 0.65 ? 1 : 0)));
     } else if (tr.song) {
-      ev = withFillers(onsets(tr, lo, hi, 0.35), lo, hi, 1.6, 0.35).map((x) => x[0]);
+      ev = onsetEvents(tr, lo, hi, 0.35, 1.6, MAX_EVENTS).map((x) => x[0]);
       per = ev.map(() => 1);
     } else if (grid) {
-      const bl = beatList(env, lo, hi, 0.6);
+      const bl = beatList(env, lo, hi, 0.6, MAX_EVENTS);
       ev = Array.from(bl.t);
       per = ev.map((te, i) => 1 + bl.down[i]);
     } else {
-      ev = aperiodic(re, lo, hi, 0.55, 1.25);
+      ev = aperiodic(re, lo, hi, 0.55, 1.25, MAX_EVENTS);
       per = ev.map(() => 1);
     }
-    ev = ev.slice(0, 64);
     const m = ev.length;
     d.ev = Float32Array.from(ev);
     d.gm = new Int16Array(m * 3).fill(-1); d.gL = new Float32Array(m * 3); d.gT = new Float32Array(m * 3);
@@ -658,17 +686,17 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     let body = [], bl = { t: new Float32Array(0), down: new Uint8Array(0) };   // [time, str, major]; the beats the bars kick on
     if (tr.song && grid) {
       bl = beatList(env, lo, hi, 0.45);
-      body = Array.from(bl.t, (t, i) => [t, bl.down[i] ? 0.45 : 0.22, bl.down[i]]);
+      const rb = beatList(env, lo, hi, 0.45, MAX_RINGS);
+      body = Array.from(rb.t, (t, i) => [t, rb.down[i] ? 0.45 : 0.22, rb.down[i]]);
     } else if (tr.song) {
-      body = withFillers(onsets(tr, lo, hi, 0.6), lo, hi, 2.5, 0.6).map(([t, fill]) => [t, fill ? 0.2 : 0.22, 0]);
+      body = onsetEvents(tr, lo, hi, 0.6, 2.5, MAX_RINGS).map(([t, fill]) => [t, fill ? 0.2 : 0.22, 0]);
     } else if (grid) {
       const bar = grid.meter * grid.period;
-      const pin = beatList(env, lo, hi, bar < 1.2 ? 2 * bar : bar);
+      const pin = beatList(env, lo, hi, bar < 1.2 ? 2 * bar : bar, MAX_RINGS);
       body = Array.from(pin.t, (t) => [t, 0.45, 1]);
     } else {
-      body = aperiodic(re, fr.s0 + fr.E, fr.o, 2, 3).map((t) => [t, 0.22, 0]);
+      body = aperiodic(re, fr.s0 + fr.E, fr.o, 2, 3, MAX_RINGS).map((t) => [t, 0.22, 0]);
     }
-    body = body.slice(0, 46);
     const gaps = [];
     for (let i = 1; i < body.length; i++) gaps.push(body[i][0] - body[i - 1][0]);
     const Lr = body.length >= 2 ? clamp(2.4 * median(gaps), 1.2, 2.2) : 1.6;
@@ -898,8 +926,10 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     if (d.dashA > 0.004 && Q[DS] > 1) {
       let th = -0.2 * t;
       if (d.ev.length) {
+        // after the last beat's tick the ring turns on freely (it never freezes into the lead-out)
         const j = lastBeat(d.ev, t);
         th = j < 0 ? 0 : (TAU / 48) * (j + CUBIC_OUT(Math.min(1, (t - d.ev[j]) / 0.18)));
+        if (j === d.ev.length - 1 && t > d.ev[j] + 0.18) th += 0.2 * (t - d.ev[j] - 0.18);
       }
       g.globalAlpha = a0 * clamp(0.7 * d.dashA * Am);
       g.strokeStyle = q.rgba(d.dashInk, 1);
@@ -976,7 +1006,8 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
   }
 
   // Change times: downbeats every `every` bars (a bar count between 1.4 s and 4.2 s), or, without a grid, one about
-  // every 2.4 s, evenly spread with a little seeded play (structure, not a tempo). At most 24.
+  // every 2.4 s, evenly spread with a little seeded play (structure, not a tempo). At most 24: a long interlude
+  // doubles the bar count (or widens the spread) rather than stopping early.
   function changeTimes(env, fr, every, r) {
     const lo = fr.s0 + fr.E + 0.3, hi = fr.o - 0.2, g = env.grid, out = [];
     if (!(hi > lo)) return out;
@@ -984,11 +1015,10 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
       let m = every * g.meter;
       while (m * g.period < 1.4) m *= 2;
       while (m * g.period > 4.2 && m > 1) m = Math.ceil(m / 2);
-      const xs = g.beatsIn(lo, hi);
-      for (let i = 0; i < xs.length && out.length < 24; i++) {
-        const idx = g.beatAt(xs[i] + 1e-6).index;
-        if (((idx % m) + m) % m === 0) out.push(xs[i]);
-      }
+      const xs = g.beatsIn(lo, hi), idx = xs.map((x) => g.beatAt(x + 1e-6).index);
+      const count = (k) => idx.reduce((n, i) => n + (((i % k) + k) % k === 0 ? 1 : 0), 0);
+      while (count(m) > 24) m *= 2;
+      for (let i = 0; i < xs.length; i++) if (((idx[i] % m) + m) % m === 0) out.push(xs[i]);
       return out;
     }
     const span = hi - lo, n = Math.min(24, Math.max(0, Math.round(span / 2.4)));
@@ -1022,7 +1052,7 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     }
     for (let i = 0; i < tc.length; i++) flo[i] = vr.chance(0.4) ? 1 : 0;
     const w0 = s * 0.0028 * p.thickness;
-    const ev = beatList(env, fr.s0 + fr.E, fr.o, 1 / 3).t;
+    const beats = beatList(env, fr.s0 + fr.E, fr.o, 1 / 3), ev = beats.t;
     const hx = D.w / 2 - D.safe.l, hy = D.h / 2 - D.safe.t;
     // the farthest any stroke reaches from the centre (lines are clipped to the safe area as they are drawn; the sizes
     // breathe by 3 %, and the orbit's dot stays on its ring)
@@ -1036,7 +1066,7 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     if (p.dial) far = Math.max(far, 0.41 * s);
     far += w0;
     const fold = env.orient === 'v' ? Math.PI / 2 : 0;
-    const d = data(fr, { w0, tc: Float32Array.from(tc), seq, figs, flo, ev, fold, hx, hy, add: ink.add,
+    const d = data(fr, { w0, tc: Float32Array.from(tc), seq, figs, flo, ev, evGap: beats.gap, fold, hx, hy, add: ink.add,
       sx0: D.safe.l, sx1: D.w - D.safe.r, sy0: D.safe.t, sy1: D.h - D.safe.b,
       ringDir: rs.chance(0.5) ? 1 : -1, sqDir: rs.chance(0.5) ? 1 : -1, dashInk: ink.light ? 'accent' : ink.two,
       // over the key the faint strokes key badly: solid lines, no glow behind the dot and no dial

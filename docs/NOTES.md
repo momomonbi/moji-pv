@@ -9313,3 +9313,45 @@ reviewer's prescription with a change, noted below.
 
 Goldens: plan hashes unchanged; frames lrc 21, 22, 34 and 35 (both files) move again and were rewritten with `--v2`;
 `--check` matches ×6. Tests: interlude.test.js has 20 tests (was 15); each new check fails when its fix is reverted.
+
+### Interlude effects: review round 3
+
+- **Timing settings** (major). The effects assumed the default lead 0.12 and tail 0.25 (s0 0.15, h dur − 0.25): with
+  全体 › タイミング lead 0.5 they were at full strength when the next line's cut opened, with tail 1.0 while the line before
+  was still leaving. `frameOf` now reads both from what the cut fingerprint holds: lead = −a (to µs), tail = b − dur
+  (to 0.01 s, as feat.dur is rounded to ms); s0 = max(a, 0.15, tail − 0.1) and h = dur − max(0.25, lead + 0.13). The
+  reviewer's `s0 = max(a, (b − dur) − 0.1)` moved the lrc goldens: there b − dur is 0.250154 (dur rounding) and 0.16
+  (a seam ends b early, `endWithSeam`), so the tail is rounded and s0 never goes below 0.15 (a seam that shortens b
+  hides the tail; s0 then stays at 0.15, as before). With the defaults both are exactly as before. Test: v21 with lead
+  0.5 / tail 1 (and the other three pairs): the envelope is < 0.15 when the line before leaves and when the next cut
+  opens, nothing is drawn 0.1 s before the one and 0.1 s after the other.
+- **Long interludes truncated** (minor). Gap and intro interludes are never split, so a 30–120 s break is one cut, and
+  the caps cut the events short (beats at 128, glints at 64, ripples at 46, changes at 24; the dashed ring froze after
+  the last beat). They now thin instead: `beatList(…, cap)` raises its step to a divisor or a multiple of the meter
+  (so the downbeats stay) until the count fits; onsets and fillers widen their gap and span ×1.25 a round, seeded
+  events their gaps; `changeTimes` doubles the bar count while more than 24 would fit. The horizon's ripples are thinned
+  to 46 on their own list, while its bar kicks keep up to 128 beats. The dashed ring turns on freely (0.2 rad/s) once the
+  last beat's tick settles. Test: 60 and 120 s at 120 and 180 bpm, with and without a song, and with neither: every
+  stream ends within max(2 s, its widest gap) + 0.25 of o, and the caps hold. Goldens: unchanged (no golden interlude
+  reaches a cap).
+- **Saved filters left interludes empty** (major). The 構図 page presets saved `filters.arrange.only` lists with
+  breathMark and lyric compositions (最小限 always; the mood preset for dreamHaze, heartAche, printColumn, quietHush,
+  silverReel). With breathMark out of the pool such a list left the interlude pool empty: centerAnchor fallback,
+  nothing drawn. `registry.filterFor(kind, filters, role)` (additive) now reads an arrange filter for an interlude cut:
+  an only list naming breathMark also admits the pooled parts serving interludes (the three effects), and one naming
+  no interlude part does not restrict interludes; a deny list applies as it is. registry.pool, the planner's pin
+  warnings and fallback check (`filterAllows` with the cut's role), explain's alternatives and the part browser's
+  「使わない設定」 badge (the inspector passes the cut's role) all read it. Documents without filters plan exactly as before
+  (plan hashes unchanged). Tests: the saved 最小限 list, a list without breathMark and `['centerAnchor']` give effects on
+  every interlude with lyric cuts still on the list, no new warning and no pin-filtered on a pinned effect; denying two
+  leaves the third; denying all three draws nothing (the old `only: ['centerAnchor']` case now gets effects).
+- **Palette** (minor). `#構図 間の印` found nothing: the palette skipped every pool-false part. `palette.pinnable` keeps a
+  pool-false part unless it is the kind's fallback (instantShow, instantHide), a media part (photoPan, photoFrame,
+  textFill, mediaLayer) or a material; run-scope ornaments stay out as before. Test in ui_data.test.js.
+- **Docs.** DESIGN §5.1 no longer points music at §2 (the build chapter) but at `needs` (§4.18) and the fingerprint
+  (§3.12), and describes the timing, the thinning and the filter rule; §4.6 lists `filterFor`. DESIGN_2_1 §9 row D§5.1
+  and its exception sentence: lrc 21–32 and 34–37 have new hashes in both files, only 21, 22, 34 and 35 draw
+  differently; lyric cuts draw the same ops. frame.test.js names the one exception to "never these frames".
+- **Cost figures corrected.** The perf note above gave about 600 / 260 / 80 drawing calls. Measured per frame over the
+  window: lightMotes 508 mean, 676 max; soundHorizon 202 mean, 275 max; kineticShapes about 50 (about 190 with its dial,
+  which the auto pick turns on 2 : 1); at most 3 gradients.

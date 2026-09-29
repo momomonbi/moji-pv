@@ -417,10 +417,26 @@ MV.def('core/registry', ['core/schema', 'core/color', 'core/hash'], (S, C, H) =>
       if (!def || !def.blurb) return '';
       return (lang === 'en' ? def.blurb.en : def.blurb.ja) || '';
     }
+    // The document filter of `kind` as it applies to a cut of `role` ({ only, deny } or null). DESIGN §5.1: filters saved
+    // before the interlude effects (the 構図 page presets list 間の印 with lyric compositions) never leave an interlude
+    // cut without one. On an interlude cut an arrange `only` list that names a part serving it that auto picks skip
+    // (breathMark, pool false) also admits the pooled parts serving it, and one that names no part serving it does not
+    // restrict it; a deny list applies as it is.
+    function filterFor(kind, filters, role) {
+      const f = (filters && filters[kind]) || null;
+      if (!f || kind !== 'arrange' || role !== 'interlude' || !Array.isArray(f.only)) return f;
+      const serving = (defsOf.get(kind) || []).filter((def) => traitsOf(def).roles.includes(role));
+      if (!serving.some((def) => f.only.includes(def.key))) return Object.assign({}, f, { only: null });
+      const only = f.only.slice();
+      if (serving.some((def) => def.pool === false && f.only.includes(def.key))) {
+        for (const def of serving) if (def.pool !== false && !only.includes(def.key)) only.push(def.key);
+      }
+      return Object.assign({}, f, { only });
+    }
     // Keys eligible for AUTO picks, sorted. opts: { role, season, filters, orient, script, aspect, scope, texture, amounts }
     function pool(kind, opts) {
       const o = opts || {};
-      const f = o.filters && o.filters[kind];
+      const f = filterFor(kind, o.filters, o.role);
       const only = f && Array.isArray(f.only) ? f.only : null;
       const deny = f && Array.isArray(f.deny) ? f.deny : null;
       const out = [];
@@ -439,7 +455,7 @@ MV.def('core/registry', ['core/schema', 'core/color', 'core/hash'], (S, C, H) =>
     }
     return Object.freeze(Object.assign({
       version: src.version, problems: Object.freeze(src.problems.slice()),
-      get, has: (kind, key) => get(kind, key) !== null, keys, all, pool, fallback, label, blurb,
+      get, has: (kind, key) => get(kind, key) !== null, keys, all, pool, filterFor, fallback, label, blurb,
       params: (kind, key) => params.get(kind + '/' + key) || src.baseParams(kind, key) || null,
       traits: (kind, key) => { const d = get(kind, key); return d ? traitsOf(d) : null; },
     }, src.extras));

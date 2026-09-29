@@ -26,6 +26,17 @@ MV.def('ui/palette', ['ui/dom', 'ui/icons', 'ui/keys', 'ui/selection', 'i18n/str
     const LAST = new Set(['file.clearDevice']);
     const FIRST = ['media.import', 'media.library', 'media.relink'];
 
+    // Whether #kind lists a part to pin. Run-scope ornaments are the 空気 row's, not a pin here. Parts auto picks skip
+    // (pool false) stay listed when a pin alone makes them work, as 間の印 does since the interlude effects (DESIGN §5.1);
+    // not the kind's fallback (自動 gives it), a media part (it needs a picked photo or video) or a material.
+    function pinnable(reg, kind, key) {
+      const def = reg.get(kind, key);
+      if (!def || (kind === 'ornament' && def.scope === 'run')) return false;
+      if (def.pool !== false) return true;
+      const mine = typeof reg.mine === 'function' && reg.mine(kind).includes(key);
+      return def.fallback !== true && !(def.needs || []).includes('media') && !mine;
+    }
+
     // order(items, recent, query) → the palette's row order: settings and destructive commands last; then recent first;
     // with an empty query the starters next, in their order; the photo and video actions before other matches; ties by
     // label.
@@ -139,7 +150,7 @@ MV.def('ui/palette', ['ui/dom', 'ui/icons', 'ui/keys', 'ui/selection', 'i18n/str
           if (kw && !kindHay.includes(kw)) continue;
           for (const key of reg.keys(kind)) {
             const def = reg.get(kind, key);
-            if (def.pool === false || (kind === 'ornament' && def.scope === 'run')) continue;
+            if (!pinnable(reg, kind, key)) continue;
             if (pw && !norm([def.label.ja, def.label.en, key].join(' ')).includes(pw)) continue;
             out.push({ text: t('pal.pin', { kind: kindText, part: app.label(kind, key) }), run: () => pinPart(kind, key) });
             if (out.length >= LIMIT) return out;
@@ -270,5 +281,5 @@ MV.def('ui/palette', ['ui/dom', 'ui/icons', 'ui/keys', 'ui/selection', 'i18n/str
       return { open, close, isOpen: () => !box.hidden, items: () => items.map((x) => x.text) };
     }
 
-    return { mount, ALIASES, STARTERS, order };
+    return { mount, ALIASES, STARTERS, order, pinnable };
   });

@@ -102,6 +102,18 @@ test('palette: an empty query starts with the starters, settings and the languag
   for (const id of PAL.STARTERS) assert.ok(!id.startsWith('pref.'), id);
 });
 
+test('palette: #構図 still finds 間の印 (pool false, pin only); fallbacks, media parts and 空気 ornaments stay out', () => {
+  const reg = MV.use('parts/catalog').defaultRegistry();
+  assert.equal(reg.get('arrange', 'breathMark').pool, false);
+  for (const [kind, key] of [['arrange', 'breathMark'], ['arrange', 'lightMotes'], ['arrange', 'centerAnchor']]) {
+    assert.ok(PAL.pinnable(reg, kind, key), kind + '.' + key);
+  }
+  for (const [kind, key] of [['arrive', reg.fallback('arrive')], ['depart', reg.fallback('depart')], ['ground', 'photoPan'],
+    ['ornament', 'photoFrame'], ['ornament', 'textFill'], ['ornament', 'mediaLayer']]) {
+    assert.ok(!PAL.pinnable(reg, kind, key), kind + '.' + key);
+  }
+});
+
 test('the ? sheet: one row per command with all its keys, in every context (ux-13)', () => {
   for (const ctx of ['global', 'text', 'tap']) {
     const rows = DLG.keyRows(ctx, () => true);
