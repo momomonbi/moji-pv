@@ -2523,8 +2523,10 @@ the cut), reach their climax (the gather, the fold, the handover glow) 0.25 s be
 0.05 s before it, so they never draw under either line. Music follows the §2 rules and never fakes a tempo: with a song and a grid they react to
 the loudness and ripple, glint or recombine on the beats; with a song and no grid they follow the loudness's onsets;
 a bpm pin without a song gives beats but no loudness; with neither, the motion is slow and aperiodic. Tokens only, no
-full-frame fill, `'lighter'` only on a dark ground that is not the chroma key (over the key the motes keep only their
-cores and glints: soft low-alpha discs key badly). When no interlude effect is left in the
+full-frame fill, `'lighter'` only on a dark ground that is not the chroma key. Over the key everything that holds is
+solid (α ≥ 0.5), because soft low-alpha paint keys badly: the motes keep only their cores (larger, solid, fading by size)
+and glints, the horizon's bars are solid and its glow is gone, and the shapes draw solid lines with no dot glow and no
+dial; only the ripples and glints fade on their own short lives. When no interlude effect is left in the
 pool (document filters), the fallback composition draws nothing on a blank interlude.
 
 ### 5.2 Entrances — `arrive` (`parts/arrive/*.js`)

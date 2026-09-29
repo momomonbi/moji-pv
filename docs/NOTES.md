@@ -9270,3 +9270,46 @@ Goldens: plan hashes unchanged; frames lrc 21, 22, 34 and 35 (the two interludes
 rewritten with `--v2`; `--check` matches ×6. Tests: interlude.test.js gains the waits-and-leaves checks (nothing at
 0.14 s or at dur − 0.05), the handover ripple, the far ink, chroma, the glint cycle and the dot pulse (15 tests; each
 new check fails when its fix is reverted).
+
+### Interlude effects: visual QA round 2
+
+A second visual review (real frames of lrc and v21 on the default themes, nightTram, sakuraFog, chroma and black;
+contact sheets at every aspect; 24 fps strips) found one major issue and seven minor ones. All are fixed; two follow the
+reviewer's prescription with a change, noted below.
+
+- **The sunrise tipped off its horizon** (major). The ring's always-alive drift (`0.12 · spd · t` rad) is invisible on a
+  full ring but tipped the half ring of 日の出 off line A (18° at the end of a visit at p50, 66° at worst). The drift is
+  now `0.12 · spd · (t − s0) · clamp((share − 0.5) / 0.5)`: none on the half ring, half on 十字 (0.75), full on a full
+  ring; it is continuous through a change because the share is blended there. Test: both arc ends stay within 0.5° of
+  line A through every 日の出 visit (96 builds).
+- **Hollow glint stars** (minor). The star's two diamonds were wound in opposite directions, so under the nonzero rule
+  their crossing cancelled and left a w × w hole at the centre. Both now wind the same way (test: the two sub-paths'
+  signed areas share a sign). Re-rendered at 1920 px on nightTram (v21 39.01, 39.08): solid centres.
+- **Beacon glints** (minor). A glint's mote may not be one of the two events before (6.4 % of overlapping pairs reused
+  the previous event's mote). Still 12 tries, and a star that finds no mote is still left out.
+- **The beat vanished in quiet passages** (minor). The beat kick was a factor on a level-scaled height, so at lv 0 it
+  added 3–4 px. It is now added to the level: `H = hMin + hA · taper · (w · m · (0.2 + 0.8 lv) + kick)`, with
+  `kick = (0.22 | 0.15) · exp(−since / 0.12)` (downbeat | beat). The quiet floor is 20 % (was 12 %). The kick is kept
+  outside the bars' jitter w · m, unlike the reviewer's formula. With it inside, the centre bar rose only 0.035–0.15 hA
+  on a quiet beat (mostly under the asked 0.1 hA); outside it rises 0.11–0.12 hA on a beat and 0.17 on a downbeat.
+  The reach box (hMin + 1.3 hA) still covers 1 + 0.22.
+- **Chroma** (minor). Over the key, the motes draw their brighter half as one solid path, with cores 1.6× larger that
+  fade by size (from nothing at α 0.4 to the full core at 0.75) instead of by alpha. The horizon's bars are solid (α
+  = Am; the taper stays in the height, and only the growing edge bar fades in), its hairline is at 0.6, and its glow is
+  gone. Going beyond the reviewer's list, the shapes draw their lines at 0.8 (was 0.45), with no glow behind the dot and
+  no dial. At 960 px, the green-dominant blend pixels in v21 at 37.59 fell from 882 to 194 (motes) and from 10815 to
+  5968 (horizon). Test: in the hold, every fill and stroke over the key has α ≥ 0.5, except the ripples and glints,
+  which fade on their own.
+- **Slow mote entrance** (minor). The core alpha follows the rack focus e linearly (it was e²), and the rack spread is
+  0–0.3 E (was 0–0.45 E). Halfway through the entrance of a 3.5–4 s interlude the field is at 0.60–0.74 of its
+  level at the end of the entrance (was 0.42–0.52).
+- **Static holds** (minor). The square turns at 0.12 rad/s (was 0.05). The orbit's dot runs round its ring at
+  `0.25 · spd` rad/s (both ends of a blend turn by the same angle, so a change into or out of the orbit stays
+  continuous). The ring, square and dashed ring breathe by ±3 % over 5 s while a figure holds. The breath weight is 0
+  at a change, returns over 0.4 s and fades through the next blend, so it never jumps; a dot on the ring stays on it.
+  The shapes' reach includes the 3 %.
+- **A meter without a song** (minor). Without a song the bars are half as tall (hA × 0.5), their jitter is ±10 % (was
+  ±25 %), and their per-bar weights sit half as far apart (0.66–0.89, was 0.55–1). The row reads as a calm wave.
+
+Goldens: plan hashes unchanged; frames lrc 21, 22, 34 and 35 (both files) move again and were rewritten with `--v2`;
+`--check` matches ×6. Tests: interlude.test.js has 20 tests (was 15); each new check fails when its fix is reverted.

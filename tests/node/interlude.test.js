@@ -304,12 +304,62 @@ test('light motes: a grey-tinting accent gives way to a shift on a light ground;
             if (m < 0) continue;
             glints++;
             assert.equal(cyc(m, d.ev[i]), cyc(m, Math.min(d.ev[i] + d.gLife, d.o)), 'glint ' + i + ' renews mid-star');
+            // no beacon: a mote never glints in two events in a row (nor one apart)
+            for (let q = Math.max(0, (i - 2) * 3); q < i * 3; q++) assert.notEqual(d.gm[q], m, 'glint ' + i + ' repeats a mote');
           }
         }
       }
     }
   }
   assert.ok(glints > 100, 'glints ' + glints);
+});
+
+test('light motes: in a short interlude the field is well up halfway through the entrance, as the other effects are', () => {
+  for (const dur of [3.47, 4]) {
+    for (const pos of [0.2, 0.5, 0.8]) {
+      const { plan, scene } = sceneOf({ key: 'lightMotes', dur, env: 'steps', bpm: 120, pos });
+      const d = dataOf(scene), mean = (t) => { opsAt(plan, scene, t); return d.A.reduce((x, y) => x + y, 0) / d.n; };
+      assert.ok(Math.max(...d.st) <= 0.3 + 1e-6, 'the rack spread');
+      const ratio = mean(d.s0 + 0.5 * d.E) / mean(d.s0 + d.E);
+      assert.ok(ratio >= 0.55, 'dur ' + dur + ' pos ' + pos + ': ' + ratio.toFixed(2) + ' of the field halfway in');
+    }
+  }
+});
+
+// The sub-paths (moveTo … closePath) of the path each fill draws, as point lists.
+function filledPaths(ops) {
+  const out = [];
+  let path = [];
+  for (const op of ops) {
+    if (op[1] === 'beginPath') path = [];
+    else if (op[1] === 'moveTo') path.push([[op[2], op[3]]]);
+    else if (op[1] === 'lineTo' && path.length) path[path.length - 1].push([op[2], op[3]]);
+    else if (op[1] === 'arc' || op[1] === 'ellipse') path.push(null);
+    else if (op[1] === 'fill') out.push(path);
+  }
+  return out;
+}
+
+function signedArea(pts) {
+  let a = 0;
+  for (let i = 0; i < pts.length; i++) { const p = pts[i], q = pts[(i + 1) % pts.length]; a += p[0] * q[1] - q[0] * p[1]; }
+  return a / 2;
+}
+
+test('light motes: a glint star is two diamonds wound the same way (no hole where they cross)', () => {
+  const { plan, scene } = sceneOf({ key: 'lightMotes', dur: 12, env: 'steps', bpm: 120 });
+  const d = dataOf(scene);
+  let stars = 0;
+  for (let i = 0; i < d.ev.length && stars < 8; i++) {
+    if (d.gm[i * 3] < 0) continue;
+    for (const path of filledPaths(opsAt(plan, scene, d.ev[i] + 0.5 * d.gLife).ops)) {
+      if (path.length !== 2 || !path.every((sp) => sp && sp.length === 4)) continue;
+      const a1 = signedArea(path[0]), a2 = signedArea(path[1]);
+      assert.ok(Math.abs(a1) > 0 && Math.abs(a2) > 0 && Math.sign(a1) === Math.sign(a2), 'star windings ' + a1 + ' ' + a2);
+      stars++;
+    }
+  }
+  assert.ok(stars >= 4, 'stars ' + stars);
 });
 
 test('kinetic shapes: the beat ticks a small dot by up to 16 %, a large disc by far less, never in one frame', () => {
@@ -325,6 +375,67 @@ test('kinetic shapes: the beat ticks a small dot by up to 16 %, a large disc by 
   assert.ok(before > 0 && peak > before, 'the dot ticks');
   assert.ok(at - before < 0.5 * (peak - before), 'the rise takes more than a frame');
   assert.ok(peak / before < 1.17, 'at most 16 %');
+});
+
+test('kinetic shapes: the sunrise half ring stays seated on its horizon line through every visit', () => {
+  const NF = 21, RS = 3, AA = 14;
+  let visits = 0, samples = 0;
+  for (const dur of [6, 12]) {
+    for (const bpm of [120, null]) {
+      for (let k = 0; k < 24; k++) {
+        const { plan, scene } = sceneOf({ key: 'kineticShapes', dur, env: 'steps', bpm, pos: k / 24 });
+        const d = dataOf(scene), tc = Array.from(d.tc);
+        for (let v = 0; v < d.seq.length; v++) {
+          if (d.figs[v * NF + RS] !== 0.5) continue;
+          visits++;
+          const from = v === 0 ? d.s0 + d.E : tc[v - 1] + 0.05;
+          const prev = v > 0 ? tc[v - 1] : d.s0 + d.E;
+          const to = v < tc.length ? tc[v] - Math.min(0.7, 0.45 * (tc[v] - prev)) : d.o;
+          const line = d.figs[v * NF + AA];
+          for (let j = 0; j <= 4; j++) {
+            const t = from + ((to - from) * j) / 4;
+            const arcs = opsAt(plan, scene, t).ops.filter((op) => op[1] === 'arc' && Math.abs(op[6] - op[5] - Math.PI) < 0.01);
+            assert.equal(arcs.length, 1, 'one half ring at ' + t);
+            for (const end of [arcs[0][5], arcs[0][6]]) {
+              const off = Math.abs(((end - line) % Math.PI + 1.5 * Math.PI) % Math.PI - 0.5 * Math.PI);
+              assert.ok(off * 180 / Math.PI < 0.5, 'an arc end ' + (off * 180 / Math.PI).toFixed(2) + '° off the line at ' + t);
+            }
+            samples++;
+          }
+        }
+      }
+    }
+  }
+  assert.ok(visits >= 6 && samples >= 30, 'sunrise visits ' + visits);
+});
+
+test('kinetic shapes: the orbit’s dot runs round its ring, and nothing jumps at a change', () => {
+  const dotAt = (plan, scene, t) => {
+    const arcs = opsAt(plan, scene, t).ops.filter((op) => op[1] === 'arc' && op[5] === 0 && op[6] >= 6.28);
+    const a = arcs[arcs.length - 1];
+    return a ? [a[2], a[3], a[4]] : null;
+  };
+  let orbits = 0, changes = 0;
+  for (const bpm of [120, null]) {
+    for (let k = 0; k < 12; k++) {
+      const { plan, scene } = sceneOf({ key: 'kineticShapes', dur: 12, env: 'steps', bpm, pos: k / 12 });
+      const d = dataOf(scene), tc = Array.from(d.tc);
+      for (let v = 0; v < d.seq.length; v++) {
+        const from = v === 0 ? d.s0 + d.E : tc[v - 1] + 0.45, to = v < tc.length ? tc[v] - 0.75 : d.o;
+        if (d.seq[v] !== 0 || to - from < 0.5) continue;
+        const p0 = dotAt(plan, scene, from), p1 = dotAt(plan, scene, from + 0.5);
+        const r = d.s * 0.26, moved = Math.hypot(p1[0] - p0[0], p1[1] - p0[1]);
+        assert.ok(moved > 0.08 * r, 'the orbit dot moves ' + moved.toFixed(1) + ' in 0.5 s');
+        orbits++;
+      }
+      for (const c of tc) {
+        const a = dotAt(plan, scene, c - 0.002), b = dotAt(plan, scene, c + 0.002);
+        assert.ok(Math.hypot(b[0] - a[0], b[1] - a[1]) < 0.5 && Math.abs(b[2] - a[2]) < 0.5, 'the dot jumps at the change ' + c);
+        changes++;
+      }
+    }
+  }
+  assert.ok(orbits >= 2 && changes >= 20, 'orbits ' + orbits + ', changes ' + changes);
 });
 
 // --- 5. level -----------------------------------------------------------------------------------------------------------
@@ -379,6 +490,21 @@ test('beats: events sit on the grid, the horizon ≥ 0.45 s apart, glints ≥ 0.
       for (const t of sh.ev) assert.ok(onBeat(t, period) && t <= sh.o + 1e-6);
     }
   }
+  // the beat shows even where the song is quiet (the level is 0 in the first half of 'steps'): the centre bar rises
+  // by ≥ 0.1 hA just after every beat, a downbeat more
+  const { plan, scene } = sceneOf({ key: 'soundHorizon', dur: 12, env: 'steps', bpm: 120 });
+  const d = dataOf(scene);
+  const centre = (t) => { const m = opsAt(plan, scene, t).ops.find((op) => op[1] === 'moveTo' && Math.abs(op[2] - d.cx) < 0.01); return d.cy - m[3]; };
+  let quiet = 0;
+  for (let j = 0; j < d.bt.length; j++) {
+    const b = d.bt[j];
+    if (b < d.s0 + d.E + 0.3 || b > 5.5) continue;
+    assert.equal(d.lv[Math.round((b - d.L0) * 20)], 0, 'a quiet beat');
+    const rise = (centre(b + 0.03) - centre(b - 0.005)) / d.hA;
+    assert.ok(rise >= (d.bd[j] ? 0.15 : 0.1), 'the centre bar rises by ' + rise.toFixed(3) + ' hA on the beat at ' + b);
+    quiet++;
+  }
+  assert.ok(quiet >= 4, 'quiet beats ' + quiet);
 });
 
 // --- 7. no song ---------------------------------------------------------------------------------------------------------
@@ -399,6 +525,18 @@ test('no song: no tempo is faked (uneven gaps), the effects still move, and a bp
       const { ops, rec } = opsAt(plan, scene, 6);
       assert.ok(draws(ops) > 0, key + ' draws mid-window');
       assert.equal(rec.stats().nan, 0, key);
+    }
+  }
+  // without a song the row is a calm wave, not a meter: half as tall, and close from bar to bar
+  for (const env of ['flat', 'none']) {
+    const { plan, scene } = sceneOf({ key: 'soundHorizon', dur: 12, env, bpm: null });
+    const d = dataOf(scene), song = dataOf(sceneOf({ key: 'soundHorizon', dur: 12, env: 'steps', bpm: null }).scene);
+    assert.ok(Math.abs(d.hA / song.hA - 0.5) < 1e-9, env + ': half the amplitude');
+    for (const tl of [4, 6, 8]) {
+      opsAt(plan, scene, tl);
+      let jump = 0;
+      for (let k = 1; k <= d.nb; k++) jump = Math.max(jump, Math.abs(d.H[k] - d.H[k - 1]));
+      assert.ok(jump < 0.1 * d.hA, env + ': bar-to-bar ' + (jump / d.hA).toFixed(3) + ' hA at ' + tl);
     }
   }
   const pin = dataOf(sceneOf({ key: 'soundHorizon', dur: 30, env: 'none', bpm: 120 }).scene);
@@ -508,6 +646,54 @@ test('backdrops: black draws greys only, chroma no key green and no added light,
           if (backdrop === 'scene' && themeKey !== 'nightTram') assert.ok(!comps.includes('lighter'), where + ': added light on a light theme');
           if (comps.length) assert.equal(comps[comps.length - 1], 'source-over', where + ': ends on source-over');
         }
+      }
+    }
+  }
+});
+
+// The effective alpha of every fill and stroke in ops, with its path kind: 'ellipse' (a ripple ring), 'star' (a glint:
+// moveTo/lineTo only) or 'solid'; a gradient counts by its strongest stop.
+function inkAlphas(ops) {
+  const out = [], stops = new Map(), stack = [];
+  let st = { a: 1, fill: 1, stroke: 1 }, kind = 'solid';
+  const styleA = (v) => (stops.has(v) ? stops.get(v) : (rgbaOf(v) || [0, 0, 0, 1])[3]);
+  for (const op of ops) {
+    const name = op[1];
+    if (/\.addColorStop$/.test(name)) {
+      const id = name.slice(0, -'.addColorStop'.length), c = rgbaOf(op[3]);
+      stops.set(id, Math.max(stops.get(id) || 0, c ? c[3] : 1));
+    } else if (name === 'save') stack.push(Object.assign({}, st));
+    else if (name === 'restore') st = stack.pop() || st;
+    else if (name === 'set:globalAlpha') st.a = op[2];
+    else if (name === 'set:fillStyle') st.fill = styleA(op[2]);
+    else if (name === 'set:strokeStyle') st.stroke = styleA(op[2]);
+    else if (name === 'beginPath') kind = 'star';
+    else if (name === 'arc' || name === 'rect') kind = 'solid';
+    else if (name === 'ellipse') kind = 'ellipse';
+    else if (name === 'fill' || name === 'fillRect') out.push({ kind: name === 'fillRect' ? 'solid' : kind, a: st.a * st.fill });
+    else if (name === 'stroke') out.push({ kind: kind === 'star' ? 'solid' : kind, a: st.a * st.stroke });
+  }
+  return out;
+}
+
+test('chroma: in the hold every effect draws solid (α ≥ 0.5) over the key, bar the fading ripples and glints', () => {
+  const themes = MV.ids('parts/theme/').flatMap((id) => MV.use(id));
+  for (const themeKey of ['sumiWashi', 'nightTram', 'cicadaNoon']) {
+    const pal = LOOKS.palette(themes.find((t) => t.key === themeKey), PINS.index({}), 'chroma', () => {});
+    for (const key of KEYS) {
+      for (const bpm of [120, null]) {
+        const { plan, scene } = sceneOf({ key, dur: 12, env: 'steps', bpm, palette: pal, backdrop: 'chroma', params: key === 'kineticShapes' ? { dial: true } : {} });
+        const d = dataOf(scene);
+        let n = 0;
+        for (let k = 0; k < 8; k++) {
+          const tl = d.s0 + d.E + 0.3 + ((d.o - 0.1 - (d.s0 + d.E + 0.3)) * k) / 7;
+          for (const x of inkAlphas(opsAt(plan, scene, tl, null, { backdrop: 'chroma' }).ops)) {
+            if (x.kind !== 'solid' || x.a === 0) continue;
+            assert.ok(x.a >= 0.5 - 1e-6, key + ' ' + themeKey + ' bpm ' + bpm + ' t ' + tl.toFixed(2) + ': α ' + x.a);
+            n++;
+          }
+        }
+        assert.ok(n >= 6, key + ': draws ' + n);
       }
     }
   }

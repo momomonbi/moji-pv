@@ -230,7 +230,7 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
         life = lerp(d.lo[k], 1, gk) * (1 + 0.4 * gk);
       }
       const tw = 0.55 + 0.45 * Math.sin(TAU * d.fr[k] * t + d.ph[k]);
-      const a = clamp(tw * life * sus * e * e);
+      const a = clamp(tw * life * sus * e);
       d.X[k] = x; d.Y[k] = y; d.A[k] = a;
       d.HA[k] = clamp(tw * life * sus * (0.35 + 0.65 * e));
       d.HS[k] = 1 + 1.2 * (1 - e);
@@ -284,13 +284,46 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     g.globalAlpha = a0;
   }
 
-  // A four-point star: two crossed thin diamonds, the second 0.6 as long.
+  // A four-point star: two crossed thin diamonds, the second 0.6 as long, both wound the same way (under the nonzero
+  // rule opposite windings would cancel where they cross and leave a hole at the centre).
   function star(g, x, y, len, tilt) {
     const c = Math.cos(tilt), s = Math.sin(tilt), w = 0.08 * len, l2 = 0.6 * len;
     g.moveTo(x + c * len, y + s * len); g.lineTo(x - s * w, y + c * w); g.lineTo(x - c * len, y - s * len);
     g.lineTo(x + s * w, y - c * w); g.closePath();
-    g.moveTo(x - s * l2, y + c * l2); g.lineTo(x + c * w, y + s * w); g.lineTo(x + s * l2, y - c * l2);
-    g.lineTo(x - c * w, y - s * w); g.closePath();
+    g.moveTo(x - s * l2, y + c * l2); g.lineTo(x - c * w, y - s * w); g.lineTo(x + s * l2, y - c * l2);
+    g.lineTo(x + c * w, y + s * w); g.closePath();
+  }
+
+  // The cores in alpha steps, one path each.
+  function bucketCores(g, d, q, alpha) {
+    for (let bk = 1; bk <= MOTE_BUCKETS; bk++) {
+      let any = false;
+      for (let k = 0; k < d.n; k++) {
+        if (d.Bk[k] !== bk || d.rc[k] * q.scale < 0.5) continue;
+        if (!any) { g.beginPath(); any = true; }
+        g.moveTo(d.X[k] + d.rc[k], d.Y[k]);
+        g.arc(d.X[k], d.Y[k], d.rc[k], 0, TAU);
+      }
+      if (!any) continue;
+      g.globalAlpha = clamp(alpha * bk / MOTE_BUCKETS);
+      g.fill();
+    }
+  }
+
+  // Over the key a faint core blends into a dirty partial alpha: there the brighter motes draw as one solid path, and
+  // a mote fades by its size instead (from nothing at α 0.4 to its full core at 0.75).
+  function solidCores(g, d, q, alpha) {
+    let any = false;
+    for (let k = 0; k < d.n; k++) {
+      const r = d.rc[k] * smooth((d.A[k] - 0.4) / 0.35);
+      if (r * q.scale < 0.5) continue;
+      if (!any) { g.beginPath(); any = true; }
+      g.moveTo(d.X[k] + r, d.Y[k]);
+      g.arc(d.X[k], d.Y[k], r, 0, TAU);
+    }
+    if (!any) return;
+    g.globalAlpha = alpha;
+    g.fill();
   }
 
   // The mid plane: the handover glow, the motes' halos and cores, and the glints on the music's events.
@@ -315,18 +348,8 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     }
     g.globalCompositeOperation = 'source-over';
     g.fillStyle = q.rgba(d.core, 1);
-    for (let bk = 1; bk <= MOTE_BUCKETS; bk++) {
-      let any = false;
-      for (let k = 0; k < d.n; k++) {
-        if (d.Bk[k] !== bk || d.rc[k] * q.scale < 0.5) continue;
-        if (!any) { g.beginPath(); any = true; }
-        g.moveTo(d.X[k] + d.rc[k], d.Y[k]);
-        g.arc(d.X[k], d.Y[k], d.rc[k], 0, TAU);
-      }
-      if (!any) continue;
-      g.globalAlpha = a0 * clamp(d.coreA * Am * bk / MOTE_BUCKETS);
-      g.fill();
-    }
+    if (d.solid) solidCores(g, d, q, a0 * clamp(d.coreA * Am));
+    else bucketCores(g, d, q, a0 * d.coreA * Am);
     let shown = 0;
     for (let i = d.ev.length - 1; i >= 0 && shown < MAX_GLINTS; i--) {
       const tau = t - d.ev[i];
@@ -358,6 +381,12 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     if (bestC >= 12) return best;
     for (const tok of ['shiftA', 'shiftB']) { const c = tint(tok); if (c > bestC) { best = tok; bestC = c; } }
     return best;
+  }
+
+  // Whether mote c glints in one of the two events before event i.
+  function recent(gm, i, c) {
+    for (let q = Math.max(0, (i - 2) * 3); q < i * 3; q++) if (gm[q] === c) return true;
+    return false;
   }
 
   function flowSign(flow, r) {
@@ -414,16 +443,18 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     const rm = r.fork('mid');
     const col = (label, fn) => { const st = rm.fork(label), out = new Float32Array(n); for (let k = 0; k < n; k++) out[k] = fn(st); return out; };
     const u = col('u', (x) => x.next());
-    const rc = Float32Array.from(u, (v) => s * (0.003 + 0.005 * Math.pow(v, 1.5)));
+    const rc = Float32Array.from(u, (v) => s * (0.003 + 0.005 * Math.pow(v, 1.5)) * (ink.chroma ? 1.6 : 1));
     const vy = new Float32Array(n);
     const dirs = rm.fork('dir');
     for (let k = 0; k < n; k++) vy[k] = flowSign(p.flow, dirs) * s * (0.018 + 0.03 * u[k]) * speed;
     const d = Object.assign(base, {
       P: 'accent', n, rc, vy, px: col('px', (x) => x.range(0, base.AW)), py: col('py', (x) => x.range(0, base.AH)),
-      ph: col('ph', (x) => x.range(0, TAU)), fr: col('fr', (x) => x.range(0.25, 0.7)), st: col('st', (x) => x.range(0, 0.45)),
+      ph: col('ph', (x) => x.range(0, TAU)), fr: col('fr', (x) => x.range(0.25, 0.7)), st: col('st', (x) => x.range(0, 0.3)),
       psi: col('psi', (x) => x.range(0.2, 0.6)), life: col('life', (x) => x.range(5, 9)), sg: col('sg', (x) => x.next()),
       nx: rm.int(1, SEED_MAX), ny: rm.int(1, SEED_MAX), sk: rm.int(1, SEED_MAX), spin: rm.chance(0.5) ? 1 : -1,
+      // over the key: fewer, larger, solid cores (solidCores)
       core: ink.add ? 'ink' : 'accent', haloA: ink.chroma ? 0 : ink.light ? 0.3 : 0.5, coreA: ink.light ? 0.8 : 0.95,
+      solid: ink.chroma,
       glintA: ink.light ? 0.75 : 0.9, glowA: ink.chroma ? 0 : ink.add ? 0.45 : 0.25,
       X: new Float32Array(n), Y: new Float32Array(n), A: new Float32Array(n), HA: new Float32Array(n), HS: new Float32Array(n),
       Bk: new Uint8Array(n),
@@ -460,12 +491,13 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     const pick = re.fork('pick');
     for (let i = 0; i < m && n > 0; i++) {
       for (let j = 0; j < per[i]; j++) {
-        // a mote in view, alive through the whole glint (a renewal mid-glint would move the star across the frame); if
-        // none is found the star is left out
+        // a mote in view, alive through the whole glint (a renewal mid-glint would move the star across the frame), and
+        // not one of the two events before (it would blink like a beacon); if none is found the star is left out
         let k = -1;
         const te = ev[i], tz = Math.min(te + d.gLife, fr.o);
         for (let tries = 0; tries < 12 && k < 0; tries++) {
           const c = pick.int(0, n - 1), x = moteX(d, c, te), y = moteY(d, c, te);
+          if (recent(d.gm, i, c)) continue;
           if (moteLife(d, c, te) >= 0.3 && moteLife(d, c, te + d.gLife) >= 0.3 && cycleOf(d, c, te) === cycleOf(d, c, tz)
             && x > 0.04 * D.w && x < 0.96 * D.w && y > 0.04 * D.h && y < 0.96 * D.h) k = c;
         }
@@ -499,21 +531,25 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
   // --- soundHorizon ---------------------------------------------------------------------------------------------------
 
   // Bar k's alpha step and half height at t (the loudness travels outward: the edge bar shows it 1.8 s late; a real
-  // beat lifts the whole row at once, a downbeat more).
+  // beat lifts the whole row at once, a downbeat more: added to the level, and past the bars' own jitter, so a quiet
+  // passage still shows the beat).
+  // Without a song the row is a calm breathing wave, not a meter: smoother from bar to bar (and half as tall, hA).
   function placeBars(d, t, reach, outK) {
     const vis = reach * d.nb, full = Math.floor(vis), part = vis - full;
-    let kick = 1;
+    let kick = 0;
     if (d.bt.length) {
       const j = lastBeat(d.bt, t);
-      if (j >= 0) kick = 1 + (d.bd[j] ? 0.3 : 0.2) * Math.exp(-(t - d.bt[j]) / 0.12);
+      if (j >= 0) kick = (d.bd[j] ? 0.22 : 0.15) * Math.exp(-(t - d.bt[j]) / 0.12);
     }
+    const jag = d.song ? 0.25 : 0.1;
     for (let k = 0; k <= d.nb; k++) {
       const edge = k <= full ? 1 : k === full + 1 ? part : 0;
       if (edge <= 0) { d.Bk[k] = 0; continue; }
-      const m = 0.75 + 0.25 * (2 * noise1(d.nm, 0.35 * k + 0.5 * t) - 1);
-      const lv = d.song ? 0.12 + 0.88 * levelAt(d, t - k * d.pc / d.v) : levelAt(d, t - k * d.pc / d.v);   // a quiet passage still breathes
-      d.H[k] = d.hMin + d.hA * d.taper[k] * d.w[k] * m * lv * kick * (1 - outK);
-      d.Bk[k] = Math.max(1, Math.round((0.35 + 0.65 * d.taper[k]) * edge * BAR_BUCKETS));
+      const m = 0.75 + jag * (2 * noise1(d.nm, 0.35 * k + 0.5 * t) - 1);
+      const lv = d.song ? 0.2 + 0.8 * levelAt(d, t - k * d.pc / d.v) : levelAt(d, t - k * d.pc / d.v);   // a quiet passage still breathes
+      d.H[k] = d.hMin + d.hA * d.taper[k] * (d.w[k] * m * lv + kick) * (1 - outK);
+      // over the key every bar is solid (the taper stays in the height): only the growing edge bar fades in
+      d.Bk[k] = Math.max(1, Math.round((d.solid ? 1 : 0.35 + 0.65 * d.taper[k]) * edge * BAR_BUCKETS));
     }
   }
 
@@ -532,8 +568,8 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     const hl = d.hl * reach, line = Am * (1 - outK);
     if (line > 1 / 255 && hl * q.scale > 1) {
       const gr = g.createLinearGradient(d.cx - hl, 0, d.cx + hl, 0);
-      gr.addColorStop(0, q.rgba('ink', 0)); gr.addColorStop(0.2, q.rgba('ink', 0.28));
-      gr.addColorStop(0.8, q.rgba('ink', 0.28)); gr.addColorStop(1, q.rgba('ink', 0));
+      gr.addColorStop(0, q.rgba('ink', 0)); gr.addColorStop(0.2, q.rgba('ink', d.lineA));
+      gr.addColorStop(0.8, q.rgba('ink', d.lineA)); gr.addColorStop(1, q.rgba('ink', 0));
       g.globalAlpha = a0 * clamp(line);
       g.fillStyle = gr;
       g.fillRect(d.cx - hl, d.cy - 0.6, 2 * hl, 1.2);
@@ -565,18 +601,20 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     const Am = envelopeOf(d, t);
     if (Am < 1 / 255) return;
     const a0 = g.globalAlpha, lv = levelAt(d, t), glowK = glowOf(d, t);
-    const R = d.s * (0.06 + 0.07 * lv);
-    const gr = g.createRadialGradient(0, 0, 0, 0, 0, 1);
-    gr.addColorStop(0, q.rgba(d.P, 0.9)); gr.addColorStop(0.35, q.rgba(d.P, 0.35)); gr.addColorStop(1, q.rgba(d.P, 0));
-    if (d.add) g.globalCompositeOperation = 'lighter';
-    g.globalAlpha = a0 * clamp(d.glowA * (0.4 + 0.6 * lv) * (1 + 0.4 * glowK * d.lift) * Am);
-    g.save();
-    g.translate(d.cx, d.cy);
-    g.scale(R * 1.6, R);
-    g.fillStyle = gr;
-    g.fillRect(-1, -1, 2, 2);
-    g.restore();
-    g.globalCompositeOperation = 'source-over';
+    if (d.glowA > 0) {
+      const R = d.s * (0.06 + 0.07 * lv);
+      const gr = g.createRadialGradient(0, 0, 0, 0, 0, 1);
+      gr.addColorStop(0, q.rgba(d.P, 0.9)); gr.addColorStop(0.35, q.rgba(d.P, 0.35)); gr.addColorStop(1, q.rgba(d.P, 0));
+      if (d.add) g.globalCompositeOperation = 'lighter';
+      g.globalAlpha = a0 * clamp(d.glowA * (0.4 + 0.6 * lv) * (1 + 0.4 * glowK * d.lift) * Am);
+      g.save();
+      g.translate(d.cx, d.cy);
+      g.scale(R * 1.6, R);
+      g.fillStyle = gr;
+      g.fillRect(-1, -1, 2, 2);
+      g.restore();
+      g.globalCompositeOperation = 'source-over';
+    }
     if (d.ripples) {
       let shown = 0;
       for (let i = d.ev.length - 1; i >= 0 && shown < MAX_RIPPLES; i--) {
@@ -604,11 +642,13 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     const wide = D.w >= D.h;
     const Lh = Math.min(0.44 * D.w, D.w / 2 - D.safe.l - 0.01 * s);
     const pc = s * 0.0155 * (wide ? 1 : 0.85), nb = Math.floor(Lh / pc);
-    const hMin = 0.0022 * s, hA = s * (wide ? 0.1 : 0.12) * (0.35 + 0.65 * p.react);
+    const hMin = 0.0022 * s;
     const rm = r.fork('mid');
     const w = new Float32Array(nb + 1), taper = new Float32Array(nb + 1);
     for (let k = 0; k <= nb; k++) { w[k] = 0.55 + 0.45 * rm.next(); taper[k] = Math.pow(1 - (k / nb) * (k / nb), 0.9); }
     const tr = levelTrack(env, r, fr.a - 1.8);
+    const hA = s * (wide ? 0.1 : 0.12) * (0.35 + 0.65 * p.react) * (tr.song ? 1 : 0.5);
+    if (!tr.song) for (let k = 0; k <= nb; k++) w[k] = 0.775 + 0.5 * (w[k] - 0.775);   // a calm wave: bars closer in height
     const hl = Math.min(1.04 * Lh, D.w / 2 - D.safe.l);
 
     // ripple events: the opening and the handover always; beats with a song and a grid, onsets (with soft fillers)
@@ -647,11 +687,13 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     const P = 'accent', S = ink.light ? 'ink' : ink.two;
     const base = data(fr, { add: ink.add, P, S, song: tr.song, L0: tr.L0, lv: tr.lv, sw: tr.sw, n1: tr.n1, n2: tr.n2, ev });
     sb.paint({ layer: 'far', bleed: 0, animated: true, owner: env.owner, draw: rippleDraw,
-      data: Object.assign({}, base, { ripples: !!p.ripples, str, R, major, life, flat: wide ? 0.28 : 0.45, glowA: ink.add ? 0.3 : 0.14 }) });
+      data: Object.assign({}, base, { ripples: !!p.ripples, str, R, major, life, flat: wide ? 0.28 : 0.45,
+        glowA: ink.chroma ? 0 : ink.add ? 0.3 : 0.14 }) });
     const hTop = hMin + hA * (bl.t.length ? 1.3 : 1);
     const reach = { x: fr.cx - hl, y: fr.cy - hTop, w: 2 * hl, h: 2 * hTop };
     sb.paint({ layer: 'mid', bleed: 0, animated: true, owner: env.owner, draw: barsDraw,
-      data: Object.assign(base, { Lh, pc, nb, hMin, hA, w, taper, hl, v: Lh / 1.8, bw: 0.42 * pc, barA: ink.light ? 0.8 : 0.85,
+      data: Object.assign(base, { Lh, pc, nb, hMin, hA, w, taper, hl, v: Lh / 1.8, bw: 0.42 * pc,
+        barA: ink.chroma ? 1 : ink.light ? 0.8 : 0.85, solid: ink.chroma, lineA: ink.chroma ? 0.6 : 0.28,
         nm: rm.int(1, SEED_MAX), reach, bt: bl.t, bd: bl.down, H: new Float32Array(nb + 1), Bk: new Uint8Array(nb + 1) }) });
     return finish(env, fr, Lh, 2 * hA);
   }
@@ -724,21 +766,31 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
   // The shortest turn from a to b for a shape that looks the same every `period` radians.
   function turnTo(a, b, period) { return a + wrap(b - a + period / 2, 0, period) - period / 2; }
 
+  // The orbit (figure 0): its dot runs round the ring. Both ends of a blend turn by the same angle, so a change into
+  // or out of the orbit stays continuous.
+  function orbitX(d, i, o, th) { return d.seq[i] === 0 ? d.figs[o + RX] + Math.cos(th) * (d.figs[o + DX] - d.figs[o + RX]) - Math.sin(th) * (d.figs[o + DY] - d.figs[o + RY]) : d.figs[o + DX]; }
+  function orbitY(d, i, o, th) { return d.seq[i] === 0 ? d.figs[o + RY] + Math.sin(th) * (d.figs[o + DX] - d.figs[o + RX]) + Math.cos(th) * (d.figs[o + DY] - d.figs[o + RY]) : d.figs[o + DY]; }
+
   // The pose at t into d.Q: the visit before the change time, blended into the next one over the Tt before it (every
   // move lands on the change), with the entrance and the lead-out applied.
   function poseAt(d, t) {
     const Q = d.Q, F = d.figs, nc = d.tc.length;
     let i = 0;
     while (i < nc && d.tc[i] <= t) i++;
-    const A = i * NF;
+    const A = i * NF, th = d.ringDir * 0.25 * d.spd * (t - d.s0);
     for (let f = 0; f < NF; f++) Q[f] = F[A + f];
+    Q[DX] = orbitX(d, i, A, th); Q[DY] = orbitY(d, i, A, th);
+    // the hold's breath: 0 on a change, back over 0.4 s after it, gone again through the next blend
+    let hold = i > 0 ? CUBIC_IN_OUT(clamp((t - d.tc[i - 1]) / 0.4)) : 1;
     if (i < nc) {
       const prev = i > 0 ? d.tc[i - 1] : d.s0 + d.E, Tt = Math.min(0.7, 0.45 * (d.tc[i] - prev));
       const u = (t - (d.tc[i] - Tt)) / Tt;
       if (u > 0) {
         const e = EXPO_IN_OUT(clamp(u)), B = A + NF;
+        hold *= 1 - e;
         for (let f = 0; f < NF; f++) {
           let from = F[A + f], to = F[B + f];
+          if (f === DX) { from = Q[DX]; to = orbitX(d, i + 1, B, th); } else if (f === DY) { from = Q[DY]; to = orbitY(d, i + 1, B, th); }
           if (f === RA) to = turnTo(from, to, TAU);
           else if (f === QR) to = turnTo(from, to, TAU / 4) + (d.flo[i] ? TAU / 4 : 0);
           else if (f === AA || f === BA) to = turnTo(from, to, Math.PI);
@@ -752,9 +804,13 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
         }
       }
     }
-    // always alive
-    Q[RA] += d.ringDir * 0.12 * d.spd * t;
-    Q[QR] += d.sqDir * 0.05 * t;
+    // always alive: the ring drifts by the share it shows (a half ring, the sunrise, stays seated on its horizon line),
+    // the square turns, and the sizes breathe while a figure holds
+    Q[RA] += d.ringDir * 0.12 * d.spd * (t - d.s0) * clamp((Q[RS] - 0.5) / 0.5);
+    Q[QR] += d.sqDir * 0.12 * t;
+    const br = 1 + 0.03 * hold * Math.sin(TAU * t / 5);
+    Q[RR] *= br; Q[QS] *= br; Q[DS] *= br;
+    Q[DX] = Q[RX] + (Q[DX] - Q[RX]) * br; Q[DY] = Q[RY] + (Q[DY] - Q[RY]) * br;   // a dot on the ring stays on it
     // the entrance
     const s0 = d.s0, E = d.E;
     Q[DR] *= BACK_OUT(clamp((t - s0) / (0.35 * E)));
@@ -861,7 +917,7 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     // the two lines
     g.strokeStyle = q.rgba('ink', 1);
     g.lineWidth = 0.5 * w0;
-    g.globalAlpha = a0 * clamp(0.45 * Am);
+    g.globalAlpha = a0 * clamp(d.lineA * Am);
     g.beginPath();
     const la = segment(g, d, cx + Q[AX], cy + Q[AY], Q[AA], Q[AL]);
     const lb = segment(g, d, cx + Q[BX], cy + Q[BY], Q[BA], Q[BL]);
@@ -901,13 +957,15 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     }
     if (rd > 0.3) {
       const x = cx + Q[DX], y = cy + Q[DY], R = rd + Math.min(2 * rd, 0.06 * d.s);
-      const gr = g.createRadialGradient(x, y, rd * 0.6, x, y, R);
-      gr.addColorStop(0, q.rgba('accent', 1)); gr.addColorStop(1, q.rgba('accent', 0));
-      if (d.add) g.globalCompositeOperation = 'lighter';
-      g.globalAlpha = a0 * clamp(0.25 * Am);
-      g.fillStyle = gr;
-      g.fillRect(x - R, y - R, 2 * R, 2 * R);
-      g.globalCompositeOperation = 'source-over';
+      if (!d.chroma) {
+        const gr = g.createRadialGradient(x, y, rd * 0.6, x, y, R);
+        gr.addColorStop(0, q.rgba('accent', 1)); gr.addColorStop(1, q.rgba('accent', 0));
+        if (d.add) g.globalCompositeOperation = 'lighter';
+        g.globalAlpha = a0 * clamp(0.25 * Am);
+        g.fillStyle = gr;
+        g.fillRect(x - R, y - R, 2 * R, 2 * R);
+        g.globalCompositeOperation = 'source-over';
+      }
       g.globalAlpha = a0 * clamp(Am);
       g.fillStyle = q.rgba('accent', 1);
       g.beginPath();
@@ -966,12 +1024,14 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     const w0 = s * 0.0028 * p.thickness;
     const ev = beatList(env, fr.s0 + fr.E, fr.o, 1 / 3).t;
     const hx = D.w / 2 - D.safe.l, hy = D.h / 2 - D.safe.t;
-    // the farthest any stroke reaches from the centre (lines are clipped to the safe area as they are drawn)
+    // the farthest any stroke reaches from the centre (lines are clipped to the safe area as they are drawn; the sizes
+    // breathe by 3 %, and the orbit's dot stays on its ring)
     let far = 0;
     for (let i = 0; i < seq.length; i++) {
       const o = i * NF;
-      far = Math.max(far, Math.hypot(figs[o + RX], figs[o + RY]) + figs[o + RR], Math.hypot(figs[o + QX], figs[o + QY]) + figs[o + QS] * Math.SQRT1_2,
-        Math.hypot(figs[o + DX], figs[o + DY]) + figs[o + DR] * 1.2, figs[o + DS]);
+      far = Math.max(far, Math.hypot(figs[o + RX], figs[o + RY]) + 1.03 * figs[o + RR], Math.hypot(figs[o + QX], figs[o + QY]) + 1.03 * figs[o + QS] * Math.SQRT1_2,
+        Math.hypot(figs[o + DX], figs[o + DY]) + 0.03 * Math.hypot(figs[o + DX] - figs[o + RX], figs[o + DY] - figs[o + RY]) + figs[o + DR] * 1.2,
+        1.03 * figs[o + DS]);
     }
     if (p.dial) far = Math.max(far, 0.41 * s);
     far += w0;
@@ -979,11 +1039,13 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     const d = data(fr, { w0, tc: Float32Array.from(tc), seq, figs, flo, ev, fold, hx, hy, add: ink.add,
       sx0: D.safe.l, sx1: D.w - D.safe.r, sy0: D.safe.t, sy1: D.h - D.safe.b,
       ringDir: rs.chance(0.5) ? 1 : -1, sqDir: rs.chance(0.5) ? 1 : -1, dashInk: ink.light ? 'accent' : ink.two,
+      // over the key the faint strokes key badly: solid lines, no glow behind the dot and no dial
+      chroma: ink.chroma, lineA: ink.chroma ? 0.8 : 0.45,
       dash: Object.freeze([0.8 * w0, 3.2 * w0]), Q: new Float32Array(NF), U: new Float64Array(2), sqA: 0, dashA: 0 });
     const foldHalf = 0.4 * chordOf(d, fold);
     d.reach = { x: fr.cx - Math.max(far, fold === 0 ? foldHalf : 0), y: fr.cy - Math.max(far, fold ? foldHalf : 0) };
     d.reach.w = 2 * (fr.cx - d.reach.x); d.reach.h = 2 * (fr.cy - d.reach.y);
-    if (p.dial) {
+    if (p.dial && !ink.chroma) {
       sb.paint({ layer: 'far', bleed: 0, animated: true, owner: env.owner, draw: dialDraw,
         data: Object.assign({}, d, { dialA: ink.light ? 0.16 : 0.1 }) });
     }
