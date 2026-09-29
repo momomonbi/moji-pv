@@ -2522,11 +2522,13 @@ no `motion: 'own'`, so the lyric neighbours keep every entrance, exit and camera
 layers only (never near, which a text seam mixes). They wait out the line before (their entrance starts 0.15 s into the
 cut, or 0.1 s before the line before is gone when 全体 › タイミング gives it a longer tail), reach their climax (the gather,
 the fold, the handover glow) 0.25 s before the next line is sung, or 0.13 s before its cut opens when a longer lead
-brings it in earlier, and are gone 0.05 s before the line (0.07 s after its cut opens), so they never draw under either
-line. Their music is what `needs` declares (§4.18: the beat grid and the loudness, both in the cut fingerprint, §3.12),
-and they never fake a tempo: with a song and a grid they react to the loudness and ripple, glint or recombine on the
-beats; with a song and no grid they follow the loudness's onsets; a bpm pin without a song gives beats but no loudness;
-with neither, the motion is slow and aperiodic. A long interlude (an instrumental break of a minute or two is one cut)
+brings it in earlier, and are gone 0.05 s before the line (0.07 s after its cut opens), so they do not draw under
+either line. One case is not seen from inside the cut: a seam into the next line ends the interlude's window early and
+hides a longer tail, so the entrance then starts at 0.15 s as with the default tail. Their music is what `needs`
+declares (§4.18: the beat grid and the loudness, both in the cut fingerprint, §3.12), and they never fake a tempo:
+with a song and a grid they react to the loudness and ripple, glint or recombine on the beats; with a song and no grid
+they follow the loudness's onsets; a bpm pin without a song gives beats but no loudness; with neither, the motion is
+slow and aperiodic. A long interlude (an instrumental break of a minute or two is one cut)
 thins its events to their caps, never stops them early: a larger beat step that keeps the downbeats, a wider gap between
 onsets or seeded events, more bars between figure changes. Tokens only, no full-frame fill, `'lighter'` only on a dark
 ground that is not the chroma key. Over the key everything that holds is solid (α ≥ 0.5), because soft low-alpha paint

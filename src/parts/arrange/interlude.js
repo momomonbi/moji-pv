@@ -34,7 +34,9 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
   // rounded to ms), so s0 is 0.1 s before its end and never before 0.15; the next line's cut opens the lead before it is
   // sung (−a, 0.12 by default; to the plan's µs), so h is 0.25 s before the line, or 0.13 s before that cut opens when
   // it leads in earlier (the effect is gone 0.07 s after it opens). A seam that ends b early hides the tail: s0 then
-  // stays at 0.15. The defaults give exactly 0.15 and dur − 0.25.
+  // stays at 0.15. The entrance and the lead-out share what is left between s0 and h (at most 0.45 and 0.5 of it), so
+  // a long tail in a short interlude never squeezes the lead-out to a snap. The defaults give exactly 0.15 and
+  // dur − 0.25, and the spans of before.
   function frameOf(env, p) {
     const { D, feat, cut } = env, T = env.times;
     const a = T.a, b = T.b, W = b - a, s = D.short;
@@ -42,8 +44,9 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     const lead = Math.round(-1e6 * a) / 1e6, tail = Math.round(100 * (b - dur)) / 100;
     const s0 = Math.max(a, 0.15, tail - 0.1);
     const h = clamp(dur - Math.max(0.25, lead + 0.13), a + 0.5 * W, b - 0.35);
-    const E = Math.min(clamp(0.16 * W, 0.45, 0.8), 0.3 * W);
-    const X = Math.min(clamp(0.22 * W, 0.6, 1), 0.35 * W);
+    const span = Math.max(0.1, h - s0);   // a long tail in a short interlude still leaves the lead-out its share
+    const E = Math.min(clamp(0.16 * W, 0.45, 0.8), 0.3 * W, 0.45 * span);
+    const X = Math.min(clamp(0.22 * W, 0.6, 1), 0.35 * W, 0.5 * span);
     const o = Math.max(s0 + E, h - X);
     const motion = env.amounts && Number.isFinite(env.amounts.motion) ? env.amounts.motion : 0.5;
     return { a, b, W, s, s0, h, E, X, o, Xo: Math.max(0.05, h - o), hEnd: h - 0.1, endSpan: 0.3,

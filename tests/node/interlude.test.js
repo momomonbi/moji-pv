@@ -337,6 +337,21 @@ test('timing: with lead 0.5 and tail 1 the effect waits out the line before and 
   }
 });
 
+test('timing: a long tail in a short interlude leaves the lead-out its share (never a snap)', () => {
+  for (const key of KEYS) {
+    for (const [dur, tail] of [[2.9, 2], [3.5, 3], [1.6, 1.2]]) {
+      const plan = ilPlan({ key, dur, env: 'steps', bpm: 120 });
+      const cut = plan.cuts[0];
+      cut.b = cut.t0 + dur + tail;
+      plan.duration = cut.b + 1;
+      const d = dataOf(BUILD.buildCut(cut, plan, { registry: REGISTRY, text: TEXT, strict: true }));
+      const where = key + ' dur ' + dur + ' tail ' + tail;
+      assert.ok(d.Xo >= Math.min(0.3, 0.45 * (d.h - d.s0)) - 1e-9, where + ': lead-out ' + d.Xo.toFixed(3));
+      assert.ok(d.s0 + d.E <= d.o + 1e-9 && d.o < d.h, where + ': the entrance, then the lead-out, before the climax');
+    }
+  }
+});
+
 test('light motes: a grey-tinting accent gives way to a shift on a light ground; the key keeps only cores and glints; glints stay put', () => {
   const themes = MV.ids('parts/theme/').flatMap((id) => MV.use(id));
   const inkOn = (themeKey, backdrop) => {

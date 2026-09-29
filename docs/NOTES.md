@@ -9355,3 +9355,16 @@ Goldens: plan hashes unchanged; frames lrc 21, 22, 34 and 35 (both files) move a
 - **Cost figures corrected.** The perf note above gave about 600 / 260 / 80 drawing calls. Measured per frame over the
   window: lightMotes 508 mean, 676 max; soundHorizon 202 mean, 275 max; kineticShapes about 50 (about 190 with its dial,
   which the auto pick turns on 2 : 1); at most 3 gradients.
+
+### Interlude effects: verification of round 3
+
+- **Short interlude, long tail** (minor). With 全体 › タイミング tail 2 in a 2.9 s interlude, s0 (1.9) plus the full
+  entrance pushed o past h, and the lead-out snapped in 0.05 s. The entrance and the lead-out now share what is left
+  between s0 and h (at most 0.45 and 0.5 of it). Default timing keeps every span of before (goldens unchanged). Test:
+  dur 2.9 / tail 2, 3.5 / 3 and 1.6 / 1.2 give a lead-out of at least min(0.3, 0.45·(h − s0)).
+- **Known limits, kept.** A seam into the next line ends the interlude's window early and hides a longer tail from inside
+  the cut, so with a non-default tail the entrance can start while the line before is still leaving (s0 stays 0.15, as
+  with the default tail); seeing it would need a new fingerprint term from the planner. An intro interlude also waits
+  out a longer tail though no line comes before it. The 構図 filter page shows the raw filter: with a saved list that
+  names 間の印 the three effects look unticked there although every interlude uses them. All three only matter once the
+  timing or the filters have been changed by hand.
