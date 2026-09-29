@@ -2518,11 +2518,13 @@ Interlude effects (`parts/arrange/interlude.js`). Every interlude cut draws one 
 `kineticShapes`, picked by the mood's tags, the part's energy range and `fits` (a beat grid helps the horizon). They set
 no text at all: no ♪ and no heading. They are `cam: 'gentle'` (a glyph-free cut leaves the gentle shot inert) and have no
 `motion: 'own'`, so the lyric neighbours keep every entrance, exit and camera decision. They draw on the far and mid
-layers only (never near, which a text seam mixes) and fade themselves in over the entrance and out at the handover,
-when the next line is sung. Music follows the §2 rules and never fakes a tempo: with a song and a grid they react to
+layers only (never near, which a text seam mixes). They wait out the line before (their entrance starts 0.15 s into
+the cut), reach their climax (the gather, the fold, the handover glow) 0.25 s before the next line is sung, and are gone
+0.05 s before it, so they never draw under either line. Music follows the §2 rules and never fakes a tempo: with a song and a grid they react to
 the loudness and ripple, glint or recombine on the beats; with a song and no grid they follow the loudness's onsets;
 a bpm pin without a song gives beats but no loudness; with neither, the motion is slow and aperiodic. Tokens only, no
-full-frame fill, `'lighter'` only on a dark ground that is not the chroma key. When no interlude effect is left in the
+full-frame fill, `'lighter'` only on a dark ground that is not the chroma key (over the key the motes keep only their
+cores and glints: soft low-alpha discs key badly). When no interlude effect is left in the
 pool (document filters), the fallback composition draws nothing on a blank interlude.
 
 ### 5.2 Entrances — `arrive` (`parts/arrive/*.js`)

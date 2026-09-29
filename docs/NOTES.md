@@ -9227,3 +9227,46 @@ as clearing the stage). Two interludes of one song can pick the same part (the s
 and rhythm). A segment atmosphere (bokehDots, fireflyGlow) can double the motes, beatZoom the horizon; both stay in
 sync. The planned 入り/抜け and gentle shot of an interlude are inert. A transparent export on a dark theme draws
 `'lighter'` onto α 0 (as fireflyGlow does), and transparent_check.py never samples an interlude.
+
+### Interlude effects: visual QA round 1
+
+A visual review of real frames (lrc, v21; sodaFloat, nightTram, sakuraFog; black and chroma; every aspect) found four
+major issues and six minor ones. All are fixed except where noted.
+
+- **Handover** (major). The effects were still at 78 % when the next line was sung, so the gather cluster, the hero
+  dot and the retracted row sat inside the next line's glyphs. The climax h is now `clamp(dur − 0.25, a + W/2, b − 0.35)`
+  (was `clamp(dur, …, b − 0.1)`) and the fade-out a fixed 0.3 s from h − 0.1: 14 % left when the next cut's window
+  opens (dur − 0.12), nothing from dur − 0.05. Re-rendered at u 0.90–0.995 on both fixtures: nothing under 飛ばせ.
+- **Entrance** (major). The horizon grew across the departing line (the cut before runs to t0 + 0.25). Every effect
+  now enters from s0 = max(a, 0.15) (the shapes already did): the envelope, the horizon's reach, the motes' rack focus,
+  the opening ripple (s0 + 0.1), o ≥ s0 + E, and the event windows.
+- **Grey bokeh on light themes** (major). sodaFloat's accent #E83E62 tints its ground #DFF6F2 to a neutral grey at
+  15 %. The far ink is now the accent unless its 15 % tint over the ground has less than 12 of RGB spread (max − min);
+  then the more colourful of the accent, shiftA and shiftB. Over the seven light themes only sodaFloat switches (to
+  shiftA, an aqua disc). The reviewer's rule (highest HSL saturation) would also switch sakuraFog to its pale shiftB and
+  risoPink to a cream shiftB that barely shows (HSL saturation blows up near white), so the spread rule is used instead.
+  On a light ground the bokeh rim stop is α 0.55 (was 0.75), so the rim no longer darkens. The motes' cores, halos
+  and glow stay in the accent.
+- **Throbbing 蝕 disc** (major). The beat pulse is now `1 + 0.16 · min(1, 0.03 s / r) · min(1, since / 0.05) ·
+  exp(−since / 0.16)`: the full 16 % on dots up to 0.03 of the short side, about 4 % on the 0.12 disc, over a 0.05 s
+  rise. At 24 fps the disc's area now changes at most 4 % between frames (was +28 % in one frame on every beat).
+- **Handover ripple** (minor). It has its own 0.45 s life from h − 0.3 (was the shared 1.2–2.2 s from h − 0.08), so it
+  fills out to its radius and fades before the line.
+- **Glint teleports** (minor). A glint's mote must keep one life cycle from the event to min(event + life, o) and still
+  be ≥ 0.3 alive at the end; if 12 tries find none, that star is left out. The reviewer's probe over 540 builds: 0 of 8955
+  glints renew mid-star (was 193 of 9792); 45 stars (0.5 %) are left out.
+- **Bokeh clumps** (minor). Across: a golden-ratio walk with ±0.05 play (prefix-stable, so the amount still only adds
+  discs at the end); a place nearer than 1.2 (r1 + r2) to an earlier disc is tried again. The reviewer's probe over 100
+  seeds: ≥ 3 overlapping pairs 0 % (was 4 %); one half holding ≤ 1 disc 3 / 4 / 1 % at 16:9 / 9:16 / 1:1 (was 19 / 18 / 11 %).
+- **Thin row at 9:16** (minor). Tall frames: bar amplitude 0.12 of the short side (was 0.085), ripple flatness 0.45
+  (was 0.35).
+- **Beat response** (minor). With a song and a grid (real beats only), the whole row lifts by
+  `0.2 · exp(−since / 0.12)` on a beat, 0.3 on a downbeat (beats ≥ 0.45 s apart, as the ripples); the horizon's reach
+  box grows by 1.3 for it. On a light ground the body's ripples are 0.1 stronger (0.22 → 0.32, 0.45 → 0.55).
+- **Chroma** (minor). Over the key green the motes draw no bokeh, no halos and no handover glow; cores, glints and the
+  gather stay.
+
+Goldens: plan hashes unchanged; frames lrc 21, 22, 34 and 35 (the two interludes, both files) move again and were
+rewritten with `--v2`; `--check` matches ×6. Tests: interlude.test.js gains the waits-and-leaves checks (nothing at
+0.14 s or at dur − 0.05), the handover ripple, the far ink, chroma, the glint cycle and the dot pulse (15 tests; each
+new check fails when its fix is reverted).

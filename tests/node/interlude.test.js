@@ -261,9 +261,70 @@ test('each effect fades itself: nothing at a or just before b, drawing after the
         assert.equal(draws(opsAt(plan, scene, T_.b - 0.01).ops), 0, where + ': nothing at b − 0.01');
         assert.ok(draws(opsAt(plan, scene, d.a + d.E + 0.1).ops) > 0, where + ': drawn after the entrance');
         assert.ok(draws(opsAt(plan, scene, d.o - 0.05).ops) > 0, where + ': drawn before the lead-out');
+        // the line before runs to 0.25 and the next is sung at dur: the effect waits for the one and is gone before the other
+        assert.equal(draws(opsAt(plan, scene, 0.14).ops), 0, where + ': nothing over the line before');
+        assert.equal(draws(opsAt(plan, scene, dur - 0.05).ops), 0, where + ': nothing when the next line is sung');
+        assert.ok(Math.abs(d.h - (dur - 0.25)) < 1e-9, where + ': the climax 0.25 s before the next line');
       }
     }
   }
+  // the handover ripple fills out and fades on its own short life, before the next line
+  const hz = sceneOf({ key: 'soundHorizon', dur: 12, bpm: 120, env: 'steps', params: { ripples: true } });
+  const rip = paintsOf(hz.scene).find((x) => x.layer === 'far').rec.data, last = rip.ev.length - 1;
+  assert.ok(Math.abs(rip.ev[last] - (rip.h - 0.3)) < 1e-4 && rip.life[last] === Float32Array.of(0.45)[0], 'the handover ripple');
+  assert.ok(rip.ev[last] + rip.life[last] < 12 - 0.05, 'the handover ripple is gone before the next line');
+});
+
+test('light motes: a grey-tinting accent gives way to a shift on a light ground; the key keeps only cores and glints; glints stay put', () => {
+  const themes = MV.ids('parts/theme/').flatMap((id) => MV.use(id));
+  const inkOn = (themeKey, backdrop) => {
+    const pal = LOOKS.palette(themes.find((t) => t.key === themeKey), PINS.index({}), backdrop || 'scene', () => {});
+    const { scene } = sceneOf({ key: 'lightMotes', dur: 12, env: 'steps', bpm: 120, palette: pal, backdrop });
+    const far = paintsOf(scene).find((x) => x.layer === 'far');
+    return { far: far && far.rec.data, mid: dataOf(scene) };
+  };
+  assert.equal(inkOn('sodaFloat').far.P, 'shiftA', 'sodaFloat: the accent tints the ground grey');
+  assert.equal(inkOn('sodaFloat').mid.P, 'accent', 'the motes stay in the accent');
+  for (const key of ['sakuraFog', 'sumiWashi', 'nightTram']) assert.equal(inkOn(key).far.P, 'accent', key);
+  assert.equal(inkOn('sodaFloat').far.rim, 0.55, 'a light ground: a low rim');
+  const chroma = inkOn('cicadaNoon', 'chroma');
+  assert.equal(chroma.far, undefined, 'chroma: no bokeh');
+  assert.equal(chroma.mid.haloA, 0);
+  assert.equal(chroma.mid.glowA, 0);
+  // every glint's mote keeps its place (one life cycle) for as long as the star is drawn
+  let glints = 0;
+  for (const aspect of ['16:9', '9:16']) {
+    for (const bpm of [120, null]) {
+      for (let k = 0; k < 6; k++) {
+        const d = dataOf(sceneOf({ key: 'lightMotes', aspect, dur: 12, env: 'steps', bpm, pos: k / 6 }).scene);
+        const cyc = (m, t) => Math.floor((t - d.a) / d.life[m] + d.psi[m]);
+        for (let i = 0; i < d.ev.length; i++) {
+          for (let j = 0; j < 3; j++) {
+            const m = d.gm[i * 3 + j];
+            if (m < 0) continue;
+            glints++;
+            assert.equal(cyc(m, d.ev[i]), cyc(m, Math.min(d.ev[i] + d.gLife, d.o)), 'glint ' + i + ' renews mid-star');
+          }
+        }
+      }
+    }
+  }
+  assert.ok(glints > 100, 'glints ' + glints);
+});
+
+test('kinetic shapes: the beat ticks a small dot by up to 16 %, a large disc by far less, never in one frame', () => {
+  const { plan, scene } = sceneOf({ key: 'kineticShapes', dur: 12, env: 'steps', bpm: 120 });
+  const d = dataOf(scene);
+  const beat = Array.from(d.ev).find((t) => t > d.s0 + d.E + 0.5 && t < d.o - 0.5);
+  const radius = (t) => {
+    const { ops } = opsAt(plan, scene, t);
+    const arcs = ops.filter((op) => op[1] === 'arc' && op[6] - op[5] >= 6.28 && op[5] === 0);
+    return arcs.length ? arcs[arcs.length - 1][4] : 0;
+  };
+  const before = radius(beat - 0.001), at = radius(beat + 1 / 60), peak = Math.max(radius(beat + 0.05), radius(beat + 0.07));
+  assert.ok(before > 0 && peak > before, 'the dot ticks');
+  assert.ok(at - before < 0.5 * (peak - before), 'the rise takes more than a frame');
+  assert.ok(peak / before < 1.17, 'at most 16 %');
 });
 
 // --- 5. level -----------------------------------------------------------------------------------------------------------

@@ -25,34 +25,42 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
 
   // --- the shared scaffold: window, handover, palette, seed ---------------------------------------------------------
 
-  // The cut window (copied: env.times is refitted after the build), the handover h (the next line is sung there), the
-  // entrance E, the lead-out from o over Xo, and the centre C (paints skip the root shift, so it is added here).
+  // The cut window (copied: env.times is refitted after the build), the entrance from s0 over E (s0 waits out the line
+  // before, whose cut runs to 0.25), the climax h 0.25 s before the next line is sung (the gather, the fold and the
+  // glow land there, and everything is gone 0.05 s before the line), the lead-out from o over Xo, and the centre C
+  // (paints skip the root shift, so it is added here).
   function frameOf(env, p) {
     const { D, feat, cut } = env, T = env.times;
-    const a = T.a, b = T.b, W = b - a, s = D.short;
+    const a = T.a, b = T.b, W = b - a, s = D.short, s0 = Math.max(a, 0.15);
     const dur = Number.isFinite(feat && feat.dur) ? feat.dur : b - 0.25;
-    const h = clamp(dur, a + 0.5 * W, b - 0.1);
+    const h = clamp(dur - 0.25, a + 0.5 * W, b - 0.35);
     const E = Math.min(clamp(0.16 * W, 0.45, 0.8), 0.3 * W);
     const X = Math.min(clamp(0.22 * W, 0.6, 1), 0.35 * W);
-    const o = Math.max(a + E, h - X);
+    const o = Math.max(s0 + E, h - X);
     const motion = env.amounts && Number.isFinite(env.amounts.motion) ? env.amounts.motion : 0.5;
-    return { a, b, W, s, h, E, X, o, Xo: Math.max(0.05, h - o), hEnd: h - 0.1, endSpan: Math.max(0.15, b - 0.02 - (h - 0.1)),
+    return { a, b, W, s, s0, h, E, X, o, Xo: Math.max(0.05, h - o), hEnd: h - 0.1, endSpan: 0.3,
       lift: /サビ|chorus|hook/i.test((cut && cut.note) || '') ? 1.25 : 1, spd: 0.75 + 0.5 * motion,
       cx: D.cx + (p.offsetX || 0) * D.w, cy: D.cy + (p.offsetY || 0) * D.h };
   }
 
-  // In over E from a, out from h − 0.1 to just before b: nothing is drawn at a or at b (far and mid are not seam-mixed).
+  // In over E from s0, out over 0.3 s from h − 0.1: nothing is drawn before s0 or from 0.05 s before the next line on
+  // (far and mid are not seam-mixed).
   function envelopeOf(d, t) {
-    return smooth((t - d.a) / d.E) * (1 - smooth((t - d.hEnd) / d.endSpan));
+    return smooth((t - d.s0) / d.E) * (1 - smooth((t - d.hEnd) / d.endSpan));
   }
 
   // The lead-out (0 → 1 over [o, h]) and the handover glow (up just before h, gone 0.3 s after it).
   function outOf(d, t) { return smooth((t - d.o) / d.Xo); }
   function glowOf(d, t) { return smooth((t - (d.h - 0.45 * d.Xo)) / (0.4 * d.Xo)) * (1 - smooth((t - (d.h - 0.05)) / 0.3)); }
 
-  function lum(hex) {
+  function rgbOf(hex) {
     const n = parseInt(String(hex).slice(1, 7), 16);
-    return 0.3 * ((n >> 16) & 255) + 0.59 * ((n >> 8) & 255) + 0.11 * (n & 255);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  }
+
+  function lum(hex) {
+    const c = rgbOf(hex);
+    return 0.3 * c[0] + 0.59 * c[1] + 0.11 * c[2];
   }
 
   // Tokens only (the draw-time palette remaps them for the black backdrop); light adds up ('lighter') only on a dark
@@ -186,8 +194,10 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
 
   // Mote k free in the drift area at t: a slow sway, a drift along the flow, a little noise, and a new place each time
   // its life cycle renews (the jump happens while it is invisible, so the motes never loop).
+  function cycleOf(d, k, t) { return Math.floor((t - d.a) / d.life[k] + d.psi[k]); }
+
   function moteX(d, k, t) {
-    const c = Math.floor((t - d.a) / d.life[k] + d.psi[k]);
+    const c = cycleOf(d, k, t);
     const x = d.px[k] + d.sway * (1 - Math.cos(TAU * t / 37 + d.phw)) + d.wob * (2 * noise1(d.nx, 0.12 * t + 9.1 * k) - 1)
       + noise1(d.sk, c + 0.5 * k) * d.AW;
     return d.x0 + wrap(x, 0, d.AW);
@@ -208,7 +218,7 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     const sus = d.song ? 0.85 + 0.3 * swellAt(d, t) : 1;
     const late = t > d.o;
     for (let k = 0; k < d.n; k++) {
-      const e = smooth((t - d.a - d.st[k] * d.E) / (0.55 * d.E));
+      const e = smooth((t - d.s0 - d.st[k] * d.E) / (0.55 * d.E));
       let x, y, life;
       if (!late) {
         x = moteX(d, k, t); y = moteY(d, k, t); life = moteLife(d, k, t);
@@ -228,10 +238,11 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     }
   }
 
-  // Unit radial gradients: the bokeh disc with a brighter rim, and the soft halo.
-  function bokehGradient(g, q, ink) {
+  // Unit radial gradients: the bokeh disc with a brighter rim (on a light ground a rim only darkens, so it stays low),
+  // and the soft halo.
+  function bokehGradient(g, q, ink, rim) {
     const gr = g.createRadialGradient(0, 0, 0, 0, 0, 1);
-    gr.addColorStop(0, q.rgba(ink, 0.5)); gr.addColorStop(0.7, q.rgba(ink, 0.55)); gr.addColorStop(0.88, q.rgba(ink, 0.75));
+    gr.addColorStop(0, q.rgba(ink, 0.5)); gr.addColorStop(0.7, q.rgba(ink, 0.55)); gr.addColorStop(0.88, q.rgba(ink, rim));
     gr.addColorStop(1, q.rgba(ink, 0));
     return gr;
   }
@@ -257,7 +268,7 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     if (Am < 1 / 255) return;
     const a0 = g.globalAlpha, outK = outOf(d, t), fade = Am * (1 - outK);
     if (fade < 1 / 255) return;
-    const g0 = bokehGradient(g, q, d.P), g1 = d.S === d.P ? g0 : bokehGradient(g, q, d.S);
+    const g0 = bokehGradient(g, q, d.P, d.rim), g1 = d.S === d.P ? g0 : bokehGradient(g, q, d.S, d.rim);
     if (d.add) g.globalCompositeOperation = 'lighter';
     const drift = d.sway * (1 - Math.cos(TAU * t / 37 + d.phw));
     for (let k = 0; k < d.nb; k += q.draft ? 2 : 1) {
@@ -291,7 +302,7 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     const halo = haloGradient(g, q, d.P);
     if (d.add) g.globalCompositeOperation = 'lighter';
     const glowK = glowOf(d, t);
-    if (glowK > 0.004) {
+    if (glowK > 0.004 && d.glowA > 0) {
       g.globalAlpha = a0 * clamp(d.glowA * glowK * Am);
       disc(g, halo, d.cx, d.cy, d.s * (0.05 + 0.06 * glowK) * d.lift);
     }
@@ -334,6 +345,21 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     g.globalAlpha = a0;
   }
 
+  // The far ink on a light ground: the accent, unless its 15 % tint over the ground is nearly grey (a complementary
+  // accent, which reads as a stain, not as light); then the more colourful tint of the accent and the two shifts.
+  function farInkOf(pal) {
+    const gr = rgbOf(pal.ground);
+    const tint = (tok) => {
+      if (!/^#[0-9A-Fa-f]{6}$/.test(String(pal[tok]))) return -1;
+      const c = rgbOf(pal[tok]).map((v, i) => 0.85 * gr[i] + 0.15 * v);
+      return Math.max(c[0], c[1], c[2]) - Math.min(c[0], c[1], c[2]);
+    };
+    let best = 'accent', bestC = tint('accent');
+    if (bestC >= 12) return best;
+    for (const tok of ['shiftA', 'shiftB']) { const c = tint(tok); if (c > bestC) { best = tok; bestC = c; } }
+    return best;
+  }
+
   function flowSign(flow, r) {
     if (flow === 'rise') return -1;
     if (flow === 'fall') return 1;
@@ -345,7 +371,8 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     const fr = frameOf(env, p), ink = inksOf(env.pal), r = seedOf(env), s = fr.s;
     const k0 = Math.max(0.6, (D.w * D.h) / 2073600);
     const mx = 0.08 * D.w, my = 0.08 * D.h;
-    const P = 'accent', S = ink.light || ink.chroma ? 'accent' : ink.two;
+    const far = ink.light && !ink.chroma ? farInkOf(env.pal) : 'accent';
+    const P = far, S = ink.light || ink.chroma ? far : ink.two;
     const speed = p.speed * fr.spd;
     const tr = levelTrack(env, r, fr.a - 0.4);
     const base = data(fr, { x0: -mx, y0: -my, AW: D.w + 2 * mx, AH: D.h + 2 * my, add: ink.add, P, S,
@@ -358,22 +385,31 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     const fu = rf.fork('u'), fxy = rf.fork('xy'), fm = rf.fork('misc');
     const bx = new Float32Array(nb), by = new Float32Array(nb), br = new Float32Array(nb), bf = new Float32Array(nb);
     const bp = new Float32Array(nb), bvy = new Float32Array(nb), bi = new Uint8Array(nb);
+    // across: a golden-ratio walk with a little play (every prefix is spread out, so the discs never pile up on one
+    // side); a place too near an earlier disc, or (for most) over the centre, is tried again
+    const x0 = fxy.next();
     for (let k = 0; k < nb; k++) {
       const u = fu.next();
       br[k] = s * (0.045 + 0.055 * u * u);
       const avoid = fxy.next() < 0.6;
       for (let tries = 0; tries < 8; tries++) {
-        bx[k] = fxy.range(0, base.AW + 2 * br[k]); by[k] = fxy.range(0, base.AH + 2 * br[k]);
-        const ex = (base.x0 - br[k] + bx[k] - fr.cx) / (0.22 * D.w), ey = (base.y0 - br[k] + by[k] - fr.cy) / (0.2 * D.h);
-        if (!avoid || ex * ex + ey * ey >= 1) break;
+        bx[k] = fract(x0 + 0.6180339887 * k + fxy.range(-0.05, 0.05)) * (base.AW + 2 * br[k]); by[k] = fxy.range(0, base.AH + 2 * br[k]);
+        const X = base.x0 - br[k] + bx[k], Y = base.y0 - br[k] + by[k];
+        const ex = (X - fr.cx) / (0.22 * D.w), ey = (Y - fr.cy) / (0.2 * D.h);
+        let near = false;
+        for (let j = 0; j < k && !near; j++) near = Math.hypot(X - (base.x0 - br[j] + bx[j]), Y - (base.y0 - br[j] + by[j])) < 1.2 * (br[k] + br[j]);
+        if (!near && (!avoid || ex * ex + ey * ey >= 1)) break;
       }
       bf[k] = fm.range(0.05, 0.11); bp[k] = fm.range(0, TAU); bi[k] = k % 2;
       bvy[k] = flowSign(p.flow, fm) * s * (0.018 + 0.03 * fm.next()) * speed;
     }
-    sb.paint({ layer: 'far', bleed: 0, animated: true, owner: env.owner, draw: bokehDraw,
-      data: Object.assign({}, base, { nb, bx, by, br, bf, bp, bvy, bi, alpha: ink.light ? 0.15 : 0.22 }) });
+    // soft low-alpha discs key badly over the green: the key keeps only the motes' cores, glints and gather
+    if (!ink.chroma) {
+      sb.paint({ layer: 'far', bleed: 0, animated: true, owner: env.owner, draw: bokehDraw,
+        data: Object.assign({}, base, { nb, bx, by, br, bf, bp, bvy, bi, alpha: ink.light ? 0.15 : 0.22, rim: ink.light ? 0.55 : 0.75 }) });
+    }
 
-    // the mid plane: motes
+    // the mid plane: motes (their halos, cores and glow stay in the accent, whatever the far ink)
     const n = Math.min(90, Math.round(56 * k0 * p.amount));
     const rm = r.fork('mid');
     const col = (label, fn) => { const st = rm.fork(label), out = new Float32Array(n); for (let k = 0; k < n; k++) out[k] = fn(st); return out; };
@@ -383,12 +419,12 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     const dirs = rm.fork('dir');
     for (let k = 0; k < n; k++) vy[k] = flowSign(p.flow, dirs) * s * (0.018 + 0.03 * u[k]) * speed;
     const d = Object.assign(base, {
-      n, rc, vy, px: col('px', (x) => x.range(0, base.AW)), py: col('py', (x) => x.range(0, base.AH)),
+      P: 'accent', n, rc, vy, px: col('px', (x) => x.range(0, base.AW)), py: col('py', (x) => x.range(0, base.AH)),
       ph: col('ph', (x) => x.range(0, TAU)), fr: col('fr', (x) => x.range(0.25, 0.7)), st: col('st', (x) => x.range(0, 0.45)),
       psi: col('psi', (x) => x.range(0.2, 0.6)), life: col('life', (x) => x.range(5, 9)), sg: col('sg', (x) => x.next()),
       nx: rm.int(1, SEED_MAX), ny: rm.int(1, SEED_MAX), sk: rm.int(1, SEED_MAX), spin: rm.chance(0.5) ? 1 : -1,
-      core: ink.add ? 'ink' : 'accent', haloA: ink.light ? 0.3 : 0.5, coreA: ink.light ? 0.8 : 0.95, glintA: ink.light ? 0.75 : 0.9,
-      glowA: ink.add ? 0.45 : 0.25,
+      core: ink.add ? 'ink' : 'accent', haloA: ink.chroma ? 0 : ink.light ? 0.3 : 0.5, coreA: ink.light ? 0.8 : 0.95,
+      glintA: ink.light ? 0.75 : 0.9, glowA: ink.chroma ? 0 : ink.add ? 0.45 : 0.25,
       X: new Float32Array(n), Y: new Float32Array(n), A: new Float32Array(n), HA: new Float32Array(n), HS: new Float32Array(n),
       Bk: new Uint8Array(n),
     });
@@ -399,7 +435,7 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
 
     // glints on the music's events: beats with a song and a grid, the song's onsets without a grid, a bpm pin's beats
     // without a song, and seeded uneven gaps without either
-    const re = r.fork('ev'), lo = fr.a + fr.E, hi = fr.o, grid = env.grid;
+    const re = r.fork('ev'), lo = fr.s0 + fr.E, hi = fr.o, grid = env.grid;
     let ev = [], per = [];
     if (tr.song && grid) {
       const bl = beatList(env, lo, hi, 0.3);
@@ -424,11 +460,14 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     const pick = re.fork('pick');
     for (let i = 0; i < m && n > 0; i++) {
       for (let j = 0; j < per[i]; j++) {
-        let k = 0;
-        for (let tries = 0; tries < 12; tries++) {
-          k = pick.int(0, n - 1);
-          const x = moteX(d, k, ev[i]), y = moteY(d, k, ev[i]);
-          if (moteLife(d, k, ev[i]) >= 0.3 && x > 0.04 * D.w && x < 0.96 * D.w && y > 0.04 * D.h && y < 0.96 * D.h) break;
+        // a mote in view, alive through the whole glint (a renewal mid-glint would move the star across the frame); if
+        // none is found the star is left out
+        let k = -1;
+        const te = ev[i], tz = Math.min(te + d.gLife, fr.o);
+        for (let tries = 0; tries < 12 && k < 0; tries++) {
+          const c = pick.int(0, n - 1), x = moteX(d, c, te), y = moteY(d, c, te);
+          if (moteLife(d, c, te) >= 0.3 && moteLife(d, c, te + d.gLife) >= 0.3 && cycleOf(d, c, te) === cycleOf(d, c, tz)
+            && x > 0.04 * D.w && x < 0.96 * D.w && y > 0.04 * D.h && y < 0.96 * D.h) k = c;
         }
         d.gm[i * 3 + j] = k;
         d.gL[i * 3 + j] = s * (0.022 + 0.018 * pick.next()) * (j > 0 || (grid && per[i] > 1) ? 1.3 : 1);
@@ -459,21 +498,27 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
 
   // --- soundHorizon ---------------------------------------------------------------------------------------------------
 
-  // Bar k's alpha step and half height at t (the loudness travels outward: the edge bar shows it 1.8 s late).
+  // Bar k's alpha step and half height at t (the loudness travels outward: the edge bar shows it 1.8 s late; a real
+  // beat lifts the whole row at once, a downbeat more).
   function placeBars(d, t, reach, outK) {
     const vis = reach * d.nb, full = Math.floor(vis), part = vis - full;
+    let kick = 1;
+    if (d.bt.length) {
+      const j = lastBeat(d.bt, t);
+      if (j >= 0) kick = 1 + (d.bd[j] ? 0.3 : 0.2) * Math.exp(-(t - d.bt[j]) / 0.12);
+    }
     for (let k = 0; k <= d.nb; k++) {
       const edge = k <= full ? 1 : k === full + 1 ? part : 0;
       if (edge <= 0) { d.Bk[k] = 0; continue; }
       const m = 0.75 + 0.25 * (2 * noise1(d.nm, 0.35 * k + 0.5 * t) - 1);
       const lv = d.song ? 0.12 + 0.88 * levelAt(d, t - k * d.pc / d.v) : levelAt(d, t - k * d.pc / d.v);   // a quiet passage still breathes
-      d.H[k] = d.hMin + d.hA * d.taper[k] * d.w[k] * m * lv * (1 - outK);
+      d.H[k] = d.hMin + d.hA * d.taper[k] * d.w[k] * m * lv * kick * (1 - outK);
       d.Bk[k] = Math.max(1, Math.round((0.35 + 0.65 * d.taper[k]) * edge * BAR_BUCKETS));
     }
   }
 
   function reachOf(d, t) {
-    const inR = CUBIC_OUT(clamp((t - d.a - 0.05) / (0.9 * d.E)));
+    const inR = CUBIC_OUT(clamp((t - d.s0) / (0.9 * d.E)));
     const outR = 1 - CUBIC_IN(clamp((t - d.o - 0.35 * d.Xo) / (0.65 * d.Xo)));
     return Math.min(inR, outR);
   }
@@ -537,8 +582,8 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
       for (let i = d.ev.length - 1; i >= 0 && shown < MAX_RIPPLES; i--) {
         const tau = t - d.ev[i];
         if (tau < 0) continue;
-        if (tau >= d.Lr) continue;
-        const u = tau / d.Lr, rx = 0.02 * d.s + (d.R[i] - 0.02 * d.s) * CUBIC_OUT(u);
+        if (tau >= d.life[i]) continue;
+        const u = tau / d.life[i], rx = 0.02 * d.s + (d.R[i] - 0.02 * d.s) * CUBIC_OUT(u);
         const a = d.str[i] * Math.pow(1 - u, 1.5) * Am;
         shown++;
         if (a < 1 / 255) continue;
@@ -559,7 +604,7 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     const wide = D.w >= D.h;
     const Lh = Math.min(0.44 * D.w, D.w / 2 - D.safe.l - 0.01 * s);
     const pc = s * 0.0155 * (wide ? 1 : 0.85), nb = Math.floor(Lh / pc);
-    const hMin = 0.0022 * s, hA = s * (wide ? 0.1 : 0.085) * (0.35 + 0.65 * p.react);
+    const hMin = 0.0022 * s, hA = s * (wide ? 0.1 : 0.12) * (0.35 + 0.65 * p.react);
     const rm = r.fork('mid');
     const w = new Float32Array(nb + 1), taper = new Float32Array(nb + 1);
     for (let k = 0; k <= nb; k++) { w[k] = 0.55 + 0.45 * rm.next(); taper[k] = Math.pow(1 - (k / nb) * (k / nb), 0.9); }
@@ -568,41 +613,46 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
 
     // ripple events: the opening and the handover always; beats with a song and a grid, onsets (with soft fillers)
     // without a grid, a bpm pin's downbeats without a song, uneven seeded gaps without either
-    const re = r.fork('ev'), grid = env.grid, lo = fr.a + 0.5 * fr.E, hi = fr.o + 0.2 * fr.Xo;
+    const re = r.fork('ev'), grid = env.grid, lo = fr.s0 + 0.5 * fr.E, hi = fr.o + 0.2 * fr.Xo;
     const lvAt = (t) => levelAt(tr, t);
-    let body = [];                               // [time, str, major]
+    let body = [], bl = { t: new Float32Array(0), down: new Uint8Array(0) };   // [time, str, major]; the beats the bars kick on
     if (tr.song && grid) {
-      const bl = beatList(env, lo, hi, 0.45);
+      bl = beatList(env, lo, hi, 0.45);
       body = Array.from(bl.t, (t, i) => [t, bl.down[i] ? 0.45 : 0.22, bl.down[i]]);
     } else if (tr.song) {
       body = withFillers(onsets(tr, lo, hi, 0.6), lo, hi, 2.5, 0.6).map(([t, fill]) => [t, fill ? 0.2 : 0.22, 0]);
     } else if (grid) {
       const bar = grid.meter * grid.period;
-      const bl = beatList(env, lo, hi, bar < 1.2 ? 2 * bar : bar);
-      body = Array.from(bl.t, (t) => [t, 0.45, 1]);
+      const pin = beatList(env, lo, hi, bar < 1.2 ? 2 * bar : bar);
+      body = Array.from(pin.t, (t) => [t, 0.45, 1]);
     } else {
-      body = aperiodic(re, fr.a + fr.E, fr.o, 2, 3).map((t) => [t, 0.22, 0]);
+      body = aperiodic(re, fr.s0 + fr.E, fr.o, 2, 3).map((t) => [t, 0.22, 0]);
     }
     body = body.slice(0, 46);
     const gaps = [];
     for (let i = 1; i < body.length; i++) gaps.push(body[i][0] - body[i - 1][0]);
     const Lr = body.length >= 2 ? clamp(2.4 * median(gaps), 1.2, 2.2) : 1.6;
-    const all = [[fr.a + 0.15, 0.35, 1, 0]].concat(body.map((x) => [x[0], x[1], x[2], 0]), [[fr.h - 0.08, 0.55 * fr.lift, 1, 1]])
+    // the handover ripple has a short life of its own: it fills out and fades before the next line is sung
+    // (a thin ring barely reads on a light ground: the body's rings are 0.1 stronger there)
+    const up = ink.light ? 0.1 : 0;
+    const all = [[fr.s0 + 0.1, 0.35, 1, 0]].concat(body.map((x) => [x[0], x[1] + up, x[2], 0]), [[fr.h - 0.3, 0.55 * fr.lift, 1, 1]])
       .sort((x, y) => x[0] - y[0]);
     const Rof = (str) => (0.26 + 0.14 * str) * D.w * (wide ? 1 : 1.3);
     const ev = Float32Array.from(all, (x) => x[0]);
     const str = Float32Array.from(all, (x) => x[1] * (0.6 + 0.4 * lvAt(x[0])));
     const R = Float32Array.from(all, (x, i) => (x[3] ? 0.5 * D.w : Rof(str[i])));
+    const life = Float32Array.from(all, (x) => (x[3] ? 0.45 : Lr));
     const major = Uint8Array.from(all, (x) => x[2]);
 
     const P = 'accent', S = ink.light ? 'ink' : ink.two;
     const base = data(fr, { add: ink.add, P, S, song: tr.song, L0: tr.L0, lv: tr.lv, sw: tr.sw, n1: tr.n1, n2: tr.n2, ev });
     sb.paint({ layer: 'far', bleed: 0, animated: true, owner: env.owner, draw: rippleDraw,
-      data: Object.assign({}, base, { ripples: !!p.ripples, str, R, major, Lr, flat: wide ? 0.28 : 0.35, glowA: ink.add ? 0.3 : 0.14 }) });
-    const reach = { x: fr.cx - hl, y: fr.cy - hMin - hA, w: 2 * hl, h: 2 * (hMin + hA) };
+      data: Object.assign({}, base, { ripples: !!p.ripples, str, R, major, life, flat: wide ? 0.28 : 0.45, glowA: ink.add ? 0.3 : 0.14 }) });
+    const hTop = hMin + hA * (bl.t.length ? 1.3 : 1);
+    const reach = { x: fr.cx - hl, y: fr.cy - hTop, w: 2 * hl, h: 2 * hTop };
     sb.paint({ layer: 'mid', bleed: 0, animated: true, owner: env.owner, draw: barsDraw,
       data: Object.assign(base, { Lh, pc, nb, hMin, hA, w, taper, hl, v: Lh / 1.8, bw: 0.42 * pc, barA: ink.light ? 0.8 : 0.85,
-        nm: rm.int(1, SEED_MAX), reach, H: new Float32Array(nb + 1), Bk: new Uint8Array(nb + 1) }) });
+        nm: rm.int(1, SEED_MAX), reach, bt: bl.t, bd: bl.down, H: new Float32Array(nb + 1), Bk: new Uint8Array(nb + 1) }) });
     return finish(env, fr, Lh, 2 * hA);
   }
 
@@ -840,11 +890,14 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
       g.closePath();
       g.stroke();
     }
-    // the hero dot: it breathes, and pulses on the beats
+    // the hero dot: it breathes, and ticks on the beats (a small dot by 16 %, a large disc by less, over a 0.05 s rise)
     let rd = Q[DR] * (1 + 0.06 * Math.sin(TAU * 0.3 * t));
-    if (d.ev.length && t < d.o + 0.2) {
+    if (d.ev.length && t < d.o + 0.2 && Q[DR] > 0) {
       const j = lastBeat(d.ev, t);
-      if (j >= 0) rd *= 1 + 0.16 * Math.exp(-(t - d.ev[j]) / 0.16);
+      if (j >= 0) {
+        const since = t - d.ev[j];
+        rd *= 1 + 0.16 * Math.min(1, 0.03 * d.s / Q[DR]) * Math.min(1, since / 0.05) * Math.exp(-since / 0.16);
+      }
     }
     if (rd > 0.3) {
       const x = cx + Q[DX], y = cy + Q[DY], R = rd + Math.min(2 * rd, 0.06 * d.s);
@@ -867,7 +920,7 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
   // Change times: downbeats every `every` bars (a bar count between 1.4 s and 4.2 s), or, without a grid, one about
   // every 2.4 s, evenly spread with a little seeded play (structure, not a tempo). At most 24.
   function changeTimes(env, fr, every, r) {
-    const lo = fr.a + fr.E + 0.3, hi = fr.o - 0.2, g = env.grid, out = [];
+    const lo = fr.s0 + fr.E + 0.3, hi = fr.o - 0.2, g = env.grid, out = [];
     if (!(hi > lo)) return out;
     if (g) {
       let m = every * g.meter;
@@ -911,7 +964,7 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     }
     for (let i = 0; i < tc.length; i++) flo[i] = vr.chance(0.4) ? 1 : 0;
     const w0 = s * 0.0028 * p.thickness;
-    const ev = beatList(env, fr.a + fr.E, fr.o, 1 / 3).t;
+    const ev = beatList(env, fr.s0 + fr.E, fr.o, 1 / 3).t;
     const hx = D.w / 2 - D.safe.l, hy = D.h / 2 - D.safe.t;
     // the farthest any stroke reaches from the centre (lines are clipped to the safe area as they are drawn)
     let far = 0;
@@ -923,7 +976,7 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     if (p.dial) far = Math.max(far, 0.41 * s);
     far += w0;
     const fold = env.orient === 'v' ? Math.PI / 2 : 0;
-    const d = data(fr, { w0, tc: Float32Array.from(tc), seq, figs, flo, ev, fold, hx, hy, s0: Math.max(fr.a, 0.15), add: ink.add,
+    const d = data(fr, { w0, tc: Float32Array.from(tc), seq, figs, flo, ev, fold, hx, hy, add: ink.add,
       sx0: D.safe.l, sx1: D.w - D.safe.r, sy0: D.safe.t, sy1: D.h - D.safe.b,
       ringDir: rs.chance(0.5) ? 1 : -1, sqDir: rs.chance(0.5) ? 1 : -1, dashInk: ink.light ? 'accent' : ink.two,
       dash: Object.freeze([0.8 * w0, 3.2 * w0]), Q: new Float32Array(NF), U: new Float64Array(2), sqA: 0, dashA: 0 });
