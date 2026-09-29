@@ -152,16 +152,18 @@ MV.def('export/host/mp4', ['export/schedule', 'export/muxer'], (S, M) => {
   }
 
   // The first audio config that encodes, stereo at the song's rate (songs are decoded at 48 kHz, DECODE_RATE, which is
-  // also the Opus rate): AAC at 192 kbps, Opus at 160 kbps. null when none encodes (the MP4 is then silent). `list`
-  // overrides the order (the kit's MP4 tries AAC only, the WebM Opus only).
+  // also the Opus rate): AAC at 320 kbps, or at 192 kbps where the platform's AAC encoder stops there (the one behind
+  // Windows' Media Foundation takes at most 192 kbps), Opus at 160 kbps. null when none encodes (the MP4 is then
+  // silent). `list` overrides the order (the kit's MP4 tries AAC only, the WebM Opus only).
   async function audioConfig(codecs, buffer, list) {
     if (typeof AudioEncoder !== 'function') return null;
     for (const codec of list || audioCodecs(codecs)) {
-      const config = { codec, sampleRate: buffer.sampleRate, numberOfChannels: 2,
-        bitrate: codec === 'opus' ? S.OPUS_BITRATE : S.AUDIO_BITRATE };
-      try {
-        if ((await AudioEncoder.isConfigSupported(config)).supported) return config;
-      } catch (err) { /* a malformed or unknown codec string is simply unsupported */ }
+      for (const bitrate of codec === 'opus' ? [S.OPUS_BITRATE] : [S.AUDIO_BITRATE, S.AUDIO_BITRATE_LOW]) {
+        const config = { codec, sampleRate: buffer.sampleRate, numberOfChannels: 2, bitrate };
+        try {
+          if ((await AudioEncoder.isConfigSupported(config)).supported) return config;
+        } catch (err) { break; }     // a malformed or unknown codec string is simply unsupported, at any bitrate
+      }
     }
     return null;
   }

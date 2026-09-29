@@ -9368,3 +9368,14 @@ Goldens: plan hashes unchanged; frames lrc 21, 22, 34 and 35 (both files) move a
   out a longer tail though no line comes before it. The 構図 filter page shows the raw filter: with a saved list that
   names 間の印 the three effects look unticked there although every interlude uses them. All three only matter once the
   timing or the filters have been changed by hand.
+
+## Export: AAC at 320 kbps
+
+The owner asked for higher sound quality in the exported video (MP3 at 320 kbps was the first ask; AAC at 320 kbps was
+chosen instead: the same or better quality, and every player and editor reads AAC in MP4, while the browser cannot
+encode MP3). `schedule.AUDIO_BITRATE` is now 320000 (was 192000) and `AUDIO_BITRATE_LOW` is 192000. `audioConfig` asks
+for AAC at 320 kbps, then at 192 kbps, then Opus at 160 kbps: the AAC encoder behind Windows' Media Foundation takes at
+most 192 kbps, and a refusal at 320 must not drop the song to Opus (which some editors cannot read). A codec string that
+throws is not asked again at the lower rate. The kit's main MP4 uses the same `audioConfig`; Opus (the WebM and the
+no-AAC fallback) stays at 160 kbps. Size estimates count 320 kbps. Test: export_math (320, the 192 fallback with a stub
+encoder that stops there, the asking order). Goldens: unchanged (exports are not in them).

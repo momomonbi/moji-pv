@@ -135,7 +135,7 @@ test('bitrate, estimateBytes, estimatePngBytes and eta', () => {
   assert.equal(S.bitrate(3840, 2160, 60, 'max'), Math.round(3840 * 2160 * 60 * 0.18));
   throwsCode(() => S.bitrate(1, 1, 30, 'ultra'), 'quality');
   assert.equal(S.estimateBytes(10, 8e6, false), Math.ceil(10 * 1e6 * 1.02));
-  assert.equal(S.estimateBytes(10, 8e6, true), Math.ceil(((10 * (8e6 + 192000)) / 8) * 1.02));
+  assert.equal(S.estimateBytes(10, 8e6, true), Math.ceil(((10 * (8e6 + 320000)) / 8) * 1.02));
   assert.ok(S.estimatePngBytes(10, 100, 100, true) > S.estimatePngBytes(10, 100, 100, false));
   assert.equal(S.eta([], 10), null);
   approx(S.eta([{ i: 0, ms: 100 }], 10), 1);
@@ -336,14 +336,16 @@ test('preflight: Opus in MP4 is an info note; no-audio-codec only when neither A
   png.song = doc.song;
   assert.deepEqual(S.preflight(png, plan, opus), [], 'a PNG sequence has no sound');
   assert.equal(S.OPUS_BITRATE, 160000);
-  assert.equal(S.AUDIO_BITRATE, 192000);
+  assert.equal(S.AUDIO_BITRATE, 320000);
+  assert.equal(S.AUDIO_BITRATE_LOW, 192000);
 });
 
 // --- export/host/mp4 in Node: the audio codec order, the media wait (WebCodecs stubbed) ------------------------------
 
 const MP4 = MV.use('export/host/mp4');
 
-// Runs fn with a stub AudioEncoder (and VideoEncoder) whose isConfigSupported accepts only `codecs`; 'throw' codecs throw.
+// Runs fn with a stub AudioEncoder (and VideoEncoder) whose isConfigSupported accepts only `codecs` ('codec@bitrate': only
+// at that bitrate); 'throw' codecs throw.
 async function withEncoders(codecs, fn) {
   const saved = { a: globalThis.AudioEncoder, v: globalThis.VideoEncoder };
   const asked = [];
@@ -351,7 +353,7 @@ async function withEncoders(codecs, fn) {
     static async isConfigSupported(config) {
       asked.push(Object.assign({}, config));
       if (config.codec.startsWith('throw')) throw new TypeError('bad codec string');
-      return { supported: codecs.includes(config.codec), config };
+      return { supported: codecs.includes(config.codec) || codecs.includes(config.codec + '@' + config.bitrate), config };
     }
   };
   globalThis.VideoEncoder = class { static async isConfigSupported(config) { return { supported: config.codec.startsWith('avc1'), config }; } };
@@ -361,24 +363,30 @@ async function withEncoders(codecs, fn) {
   }
 }
 
-test('MP4 audio: AAC-LC at 192 kbps, else Opus at 160 kbps (48 kHz stereo), else none; codecs.audioList overrides', async () => {
+test('MP4 audio: AAC-LC at 320 kbps (192 where the encoder stops there), else Opus at 160 kbps (48 kHz stereo), else none; codecs.audioList overrides', async () => {
   const song = { sampleRate: 48000 };
   assert.deepEqual(MP4.AUDIO_CODECS, ['mp4a.40.2', 'opus']);
   await withEncoders(['mp4a.40.2', 'opus'], async () => {
-    assert.deepEqual(await MP4.audioConfig(null, song), { codec: 'mp4a.40.2', sampleRate: 48000, numberOfChannels: 2, bitrate: 192000 });
+    assert.deepEqual(await MP4.audioConfig(null, song), { codec: 'mp4a.40.2', sampleRate: 48000, numberOfChannels: 2, bitrate: 320000 });
     assert.equal((await MP4.probe({ w: 1280, h: 720, fps: 30 })).audioCodec, 'mp4a.40.2');
+  });
+  await withEncoders(['mp4a.40.2@192000', 'opus'], async (asked) => {
+    assert.deepEqual(await MP4.audioConfig(null, song), { codec: 'mp4a.40.2', sampleRate: 48000, numberOfChannels: 2, bitrate: 192000 },
+      'an AAC encoder that stops at 192 kbps (Windows): AAC at 192, not Opus');
+    assert.deepEqual(asked.map((c) => c.codec + '@' + c.bitrate), ['mp4a.40.2@320000', 'mp4a.40.2@192000']);
   });
   await withEncoders(['opus'], async (asked) => {
     assert.deepEqual(await MP4.audioConfig(null, song), { codec: 'opus', sampleRate: 48000, numberOfChannels: 2, bitrate: 160000 },
       'no AAC encoder (Chrome on Linux): Opus in MP4');
-    assert.deepEqual(asked.map((c) => c.codec), ['mp4a.40.2', 'opus'], 'AAC is tried first');
+    assert.deepEqual(asked.map((c) => c.codec + '@' + c.bitrate), ['mp4a.40.2@320000', 'mp4a.40.2@192000', 'opus@160000'],
+      'AAC is tried first, at both rates');
     const pr = await MP4.probe({ w: 1280, h: 720, fps: 30 });
     assert.deepEqual([pr.webcodecs, pr.audioCodec], [true, 'opus']);
   });
   await withEncoders(['mp4a.40.2', 'opus'], async (asked) => {
     const forced = await MP4.audioConfig({ audioList: ['throw.aac', 'bogus.aac', 'opus'] }, song);
     assert.equal(forced.codec, 'opus', 'the test override: an unknown or throwing codec is skipped');
-    assert.deepEqual(asked.map((c) => c.codec), ['throw.aac', 'bogus.aac', 'opus']);
+    assert.deepEqual(asked.map((c) => c.codec), ['throw.aac', 'bogus.aac', 'bogus.aac', 'opus'], 'a throwing codec is not asked again');
     assert.equal((await MP4.probe({ w: 1280, h: 720, fps: 30, codecs: { audioList: ['bogus.aac', 'opus'] } })).audioCodec, 'opus');
     assert.equal((await MP4.audioConfig({ audio: 'mp4a.40.2' }, song)).codec, 'mp4a.40.2', 'codecs.audio: that codec only');
   });
