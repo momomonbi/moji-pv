@@ -203,7 +203,7 @@ MV.def('parts/arrange/special', ['parts/kit'], (K) => {
     key: 'breathMark',
     label: L('間の印', 'Breath mark'),
     blurb: L('小さな♪か区間の見出しを中央に置き、ゆっくり呼吸させる', 'A small ♪ or the section heading, centred and slowly breathing'),
-    tags: ['minimal', 'slow'], family: 'mark', cam: 'gentle',
+    tags: ['minimal', 'slow'], family: 'mark', cam: 'gentle', pool: false,
     traits: { cells: [0, 80], roles: ['interlude'] },
     params: {
       label: { type: 'text', max: 40, label: L('表示する文字', 'Text shown'), auto: { value: 'heading' } },

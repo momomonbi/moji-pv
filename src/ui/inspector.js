@@ -904,7 +904,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       const media = MEDIA_TAB[kind] || (kind === 'ornament' && field.run) ? mediaTab(row, kind) : null;
       const pg = Object.assign(PB.pickerPage(app, {
         kind, path: row.path, label: labelOf(field), value: row.fs && row.fs.state !== 'mixed' ? row.fs.value : null,
-        allowNone: !!field.noneOk, texture: !!field.texture, run: kind === 'ornament' ? !!field.run : undefined, tryDoc,
+        role: ctx.cut ? ctx.cut.role : null, allowNone: !!field.noneOk, texture: !!field.texture, run: kind === 'ornament' ? !!field.run : undefined, tryDoc,
         alts: () => { const ex = app.svc.explain(doc(), plan(), row.path, { registry: app.reg }); return ex ? ex.alts : null; },
         onPick: (key) => {
           pop();

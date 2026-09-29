@@ -57,7 +57,7 @@ from playwright.async_api import async_playwright  # noqa: E402
 ROOT = Path(__file__).resolve().parents[2]
 
 TARGET_MS, HARD_MS = 10.0, 16.7
-START = {'basic': 2.0, 'vertical': 1.0, 'lrc': 2.0, 'long': 20.0}
+START = {'basic': 2.0, 'vertical': 1.0, 'lrc': 30.0, 'long': 20.0}
 BEHAVE_MS = 0.8          # DESIGN_2_1 §7.2: behave + solve p50 at 720p with camerawork and materials
 PARTICLES = 400          # D§7.4 draw budget, kept by env.mixShare (DESIGN_2_1 §5.9.4)
 DRAW_MEDIA_MS = 1.0      # DESIGN_2_1 §11.8.3: drawMedia p50 per call at 720p

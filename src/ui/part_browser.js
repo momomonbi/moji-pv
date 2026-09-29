@@ -203,6 +203,7 @@ MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output', 'ui/media_widgets'
   // pickerPage(app, o) → page { id, crumb, el, focus, move, pick, destroy, refresh }
   //   o: { kind (registry kind), slotKind (path kind), path (full slot path at the page scope), label, value, allowNone,
   //        texture, run, onPick(key | null), tryDoc(key) → doc | null, alts: () → [{ key, w, masked }] | null }
+  //   o.role: the cut's role, when the page is for cuts (an interlude reads the arrange filter otherwise, DESIGN §5.1).
   //   Additive (DESIGN_2_1 §6.5, §6.9): o.keys + o.info(key) → { text, blurb, tags } for tiles that are not registry
   //   parts (the shot presets); o.make → the マイ素材 tab and its inline 「AIで素材を作る」 form ({ scopeWord, blocked() →
   //   reason key | null, run({ description, use }) }); o.menuFor(key) → the context-menu items of a tile (materials);
@@ -436,7 +437,8 @@ MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output', 'ui/media_widgets'
         'aria-controls': 'pb-make-form', on: { click: () => toggleMake() } },
       h('span', { class: 'pb-thumb pb-autoicon', 'aria-hidden': 'true' }, I.icon('plus', { size: 26 })),
       h('span', { class: 'pb-name', text: t('pb.makeAi') })) : null;
-      const filter = listed ? null : app.doc.filters[o.kind] || null;
+      const filter = listed ? null
+        : o.role && reg.filterFor ? reg.filterFor(o.kind, app.doc.filters, o.role) : app.doc.filters[o.kind] || null;
       // Screen effects the backdrop mode leaves out (§4.19.4) are dimmed with a badge; the tooltip says why.
       const backdrop = o.kind === 'filter' ? OUT.effectiveBackdrop(app.doc) : 'scene';
       for (const key of all) {

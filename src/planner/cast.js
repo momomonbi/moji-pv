@@ -142,8 +142,9 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
       };
     }
 
-    function filterAllows(filters, kind, key) {
-      const f = filters && filters[kind];
+    // With a registry and the cut's role, the filter as it applies to that role (registry.filterFor, DESIGN §5.1).
+    function filterAllows(filters, kind, key, registry, role) {
+      const f = registry && role ? registry.filterFor(kind, filters, role) : filters && filters[kind];
       if (!f) return true;
       if (Array.isArray(f.only) && !f.only.includes(key)) return false;
       return !(Array.isArray(f.deny) && f.deny.includes(key));
@@ -155,10 +156,11 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
     }
 
     // Pins win over filters and the season gate, with a warning (§3.8). The season is the cut's effective season
-    // (cond, DESIGN_2_1 §4.9); a pinned part on the line's avoid list is used without a warning (pins still win).
-    function pinWarnings(ctx, kind, key, pin, cond) {
+    // (cond, DESIGN_2_1 §4.9); a pinned part on the line's avoid list is used without a warning (pins still win). The
+    // filter is read for the cut's role when one is given (an interlude reads its arrange filter as the pool does).
+    function pinWarnings(ctx, kind, key, pin, cond, role) {
       if (key === 'none' || typeof key !== 'string') return;
-      if (!filterAllows(ctx.doc.filters, kind, key)) ctx.warn({ code: 'pin-filtered', path: pin.at });
+      if (!filterAllows(ctx.doc.filters, kind, key, ctx.registry, role)) ctx.warn({ code: 'pin-filtered', path: pin.at });
       const def = ctx.registry.get(kind, key);
       const season = (cond || workCond(ctx)).season;
       if (def && def.season && season !== 'any' && def.season !== season) {
@@ -220,7 +222,7 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
         if (trace) trace.stage = 'none';
         return { v: 'none', from: 'rule', stage: 'none', rule: 'role' };
       }
-      const excluded = !filterAllows(ctx.doc.filters, req.kind, fb);
+      const excluded = !filterAllows(ctx.doc.filters, req.kind, fb, ctx.registry, req.role);
       if (!req.silent && (PER_CUT_ROLES.has(req.role) || excluded)) {
         ctx.warn({ code: 'pool-empty', path: req.path, cut: req.cutKey || undefined });
       }
@@ -682,7 +684,7 @@ MV.def('planner/cast', ['core/schema', 'core/registry', 'core/rng', 'core/num', 
         : acceptPart(ctx, kind, cut.role, { none: list, scope: kind === 'ornament' ? 'cut' : null }), ctx.warn);
       let d, ad = null;
       if (pin) {
-        pinWarnings(ctx, kind, pin.v, pin, st.cond);
+        pinWarnings(ctx, kind, pin.v, pin, st.cond, cut.role);
         d = pinDecision(pin);
         if (trace) Object.assign(shadow(st, kind, slot, seed, list, trace), { kind, stage: 'pin', pin });
       } else if (o.force) {

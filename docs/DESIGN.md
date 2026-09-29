@@ -1008,6 +1008,7 @@ Registry = {
   all(kind?) → def[]                         // sorted by (kind, key)
   pool(kind, { role, season, filters, orient, script, scope }) → string[]   // eligible for AUTO picks (filters, season gate, pool:false,
                                              // role, traits hard limits; `scope` 'cut'|'run' for ornaments; texture: true for the texture slot)
+  filterFor(kind, filters, role) → { only, deny } | null   // additive: the filter as pool reads it for a role (§5.1 interludes)
   fallback(kind) → key                       // the one def with fallback: true
   label(kind, key, lang) → string
 }
@@ -2480,10 +2481,10 @@ Rules: no sentence concatenation; no UI text in code; the `en` page shows no Jap
 
 ## 5. Part catalog to build first (all names original; keys FROZEN once shipped)
 
-Counts: 18 compositions (+3 special), 22 entrances, 10 holds, 17 exits (+ fallbacks), 18 backgrounds, 22 decorations,
-10 cameras, 16 screen effects, 11 transitions, 16 themes, 8 moods. Tags use the vocabulary of §4.18.1. "(fb)" marks the
-kind's fallback. Files are suggestions for grouping (one file per family); any grouping is fine as long as each file only
-depends on `parts/kit`.
+Counts: 18 compositions (+3 special cards, +3 interlude effects), 22 entrances, 10 holds, 17 exits (+ fallbacks),
+18 backgrounds, 22 decorations, 10 cameras, 16 screen effects, 11 transitions, 16 themes, 8 moods. Tags use the
+vocabulary of §4.18.1. "(fb)" marks the kind's fallback. Files are suggestions for grouping (one file per family); any
+grouping is fine as long as each file only depends on `parts/kit`.
 
 ### 5.1 Compositions — `arrange` (`parts/arrange/*.js`)
 
@@ -2508,8 +2509,37 @@ depends on `parts/kit`.
 | `hangingTags` | 吊り札 | Hanging tags | playful organic | Words hang from the top edge on thin threads at staggered heights. |
 | `tiltedCard` | 傾いた札 | Tilted card | soft retro | Text on a slightly rotated paper card with a soft shadow. |
 | `titlePlate` (role title) | タイトル札 | Title plate | serious | Title large, artist small under a rule. |
-| `breathMark` (role interlude) | 間の印 | Breath mark | minimal slow | A small ♪ or the section heading, centred, slowly breathing. |
+| `lightMotes` (role interlude) | 光の粒 | Light motes | soft airy bright | Light motes and soft bokeh drift in two depth planes, glint on the beats and gather where the next line begins (no text). |
+| `soundHorizon` (role interlude) | 音の水平線 | Sound horizon | fast bold digital | A dotted horizon whose bars swell with the loudness while ripples spread on the beats; it folds back into dots for the next line (no text). |
+| `kineticShapes` (role interlude) | 図形の舞 | Kinetic shapes | minimal serious | Thin rings, lines and a square recombine on the downbeats, then fold into one line and a dot (no text). |
+| `breathMark` (role interlude, pin only) | 間の印 | Breath mark | minimal slow | A small ♪ or the section heading, centred, slowly breathing; since the interlude effects it is never picked automatically (`pool: false`). |
 | `creditFold` (role outro) | 終わりの札 | Credit fold | minimal | Title and artist as a quiet corner credit. |
+
+Interlude effects (`parts/arrange/interlude.js`). Every interlude cut draws one of `lightMotes`, `soundHorizon` and
+`kineticShapes`, picked by the mood's tags, the part's energy range and `fits` (a beat grid helps the horizon). They set
+no text at all: no ♪ and no heading. They are `cam: 'gentle'` (a glyph-free cut leaves the gentle shot inert) and have
+no `motion: 'own'`, so the lyric neighbours keep every entrance, exit and camera decision. They draw on the far and mid
+layers only (never near, which a text seam mixes). They wait out the line before (their entrance starts 0.15 s into the
+cut, or 0.1 s before the line before is gone when 全体 › タイミング gives it a longer tail), reach their climax (the gather,
+the fold, the handover glow) 0.25 s before the next line is sung, or 0.13 s before its cut opens when a longer lead
+brings it in earlier, and are gone 0.05 s before the line (0.07 s after its cut opens), so they do not draw under
+either line. One case is not seen from inside the cut: a seam into the next line ends the interlude's window early and
+hides a longer tail, so the entrance then starts at 0.15 s as with the default tail. Their music is what `needs`
+declares (§4.18: the beat grid and the loudness, both in the cut fingerprint, §3.12), and they never fake a tempo:
+with a song and a grid they react to the loudness and ripple, glint or recombine on the beats; with a song and no grid
+they follow the loudness's onsets; a bpm pin without a song gives beats but no loudness; with neither, the motion is
+slow and aperiodic. A long interlude (an instrumental break of a minute or two is one cut)
+thins its events to their caps, never stops them early: a larger beat step that keeps the downbeats, a wider gap between
+onsets or seeded events, more bars between figure changes. Tokens only, no full-frame fill, `'lighter'` only on a dark
+ground that is not the chroma key. Over the key everything that holds is solid (α ≥ 0.5), because soft low-alpha paint
+keys badly: the motes keep only their cores (larger, solid, fading by size) and glints, the horizon's bars are solid and
+its glow is gone, and the shapes draw solid lines with no dot glow and no dial; only the ripples and glints fade on
+their own short lives. Document filters (§3.8) never leave an interlude without an effect by accident
+(`registry.filterFor`, read alike by the pool, pin warnings and the alternatives): on an interlude cut an arrange `only`
+list that names `breathMark` (the 構図 page presets saved it with lyric compositions) also admits the three effects, and
+one that names no interlude part at all does not restrict interlude cuts (those lists were made for the lyrics). A
+`deny` list applies as it is; when it denies all three effects, the fallback composition draws nothing on a blank
+interlude.
 
 ### 5.2 Entrances — `arrive` (`parts/arrive/*.js`)
 
@@ -3187,8 +3217,8 @@ Header: cut text, 「カット k / n」, time range, [振り直す] (`salt.bump 
 [固定 n ▾]. Sections: 時間 (開始 `cut/<key>:t0` for inner boundaries; end = next cut's start) · 構図 (`arrange` + 「この部品の
 調整」 generated from its ParamSpecs + 位置 `el.text.nudge`, 大きさ `text.scale`) · 動き (`arrive`, `dwell`, `depart` with
 their shared and part params) · 切り替え (`seam` into this cut + 長さ `seam.dur`) · 要素 (chips 文字 · 装飾 n · 背景 · カメラ ·
-画面効果 n, [+ 装飾] [+ 効果]). Special cuts: title (`全体 › タイトル`), interlude (`全体 › 間奏（12行のあと）`, adds 表示する
-文字: なし / ♪ / 見出し / 自由入力 → `cut/gap/<id>:arrange@breathMark.label`), intro, outro.
+画面効果 n, [+ 装飾] [+ 効果]). Special cuts: title (`全体 › タイトル`), interlude (`全体 › 間奏（12行のあと）`, with 間の印 pinned it adds
+表示する文字: なし / ♪ / 見出し / 自由入力 → `cut/gap/<id>:arrange@breathMark.label`), intro, outro.
 
 #### 6.4.8 要素 (element) pages — available at work, line and cut scope
 

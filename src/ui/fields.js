@@ -372,7 +372,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
         sec('gaplabel', true, [
           F({ path: 'arrange@breathMark.label', scopes: CUT, widget: 'text', label: 'fld.gapLabel', spec: { type: 'text', max: 40 },
             presets: [{ v: 'none', label: 'fld.gapLabel.none' }, { v: '♪', text: '♪' }, { v: 'heading', label: 'fld.gapLabel.heading' }],
-            when: isRole('interlude') }),
+            when: (ctx) => isRole('interlude')(ctx) && agreedKey(ctx, 'arrange') === 'breathMark' }),
         ]),
         sec('layout', true, [partField('arrange', 'kind.arrange'),
           F({ path: 'el.text.nudge', widget: 'number', label: 'fld.nudge', spec: SPEC.nudge }), textScaleField()]),
