@@ -76,7 +76,14 @@ MV.def('core/shot', ['core/num', 'core/curve'], (N, CV) => {
     driftOff: { tags: ['literary', 'airy', 'slow'], keys: [k('a', 'block', { fill: 0.5, ox: 0.18 }),
       k('b', 'block', { fill: 0.52, ox: 0.12, curve: 'linear' })] },
     wideHold: { tags: ['slow', 'airy', 'minimal'], keys: [k('a', 'frame', { zoom: 0.94 }), k('b', 'frame', { zoom: 0.98, curve: 'linear' })] },
+    // 追いかけて引く: each sung word in extreme close-up at the frame centre, followed as it is sung, then one quick pull
+    // out to the whole line just before the cut ends. Chosen by hand only (PICK_ONLY).
+    chaseReveal: { tags: ['bold', 'fast'], follow: 0.5, keys: [k('a', 'reading', { fill: 1.2, ox: 0, oy: 0 }),
+      k('b', 'reading', { dt: -0.3, fill: 1.2, ox: 0, oy: 0 }), k('b', 'block', { dt: -0.12, fill: 0.55, curve: 'dashStop' }),
+      k('b', 'block', { fill: 0.5, curve: 'linear' })] },
   };
+  // Presets the planner never picks on its own (they come from a pin: the inspector, the AI or a look).
+  const PICK_ONLY = Object.freeze(['chaseReveal']);
   const RIG_DATA = {
     slowSwell: { tags: ['slow', 'soft'], curve: 'softEnds', keys: [{ u: 0, zoom: 1 }, { u: 1, zoom: 1.08 }] },
     climbRise: { tags: ['bold'], curve: 'softEnds', keys: [{ u: 0, zoom: 1.02, y: 0.025 }, { u: 1, zoom: 1.06, y: -0.025 }] },
@@ -352,6 +359,7 @@ MV.def('core/shot', ['core/num', 'core/curve'], (N, CV) => {
     return [key, Object.assign({ tags: d.tags.slice() }, shot)];
   })));
   const SHOT_KEYS = Object.freeze(Object.keys(SHOTS));
+  const AUTO_SHOT_KEYS = Object.freeze(SHOT_KEYS.filter((key) => !PICK_ONLY.includes(key)));
   const RIGS = deepFreeze(Object.fromEntries(Object.keys(RIG_DATA).sort().map((key) => {
     const d = RIG_DATA[key];
     return [key, { tags: d.tags.slice(), curve: d.curve, keys: coerceRig({ keys: d.keys }).keys }];
@@ -711,7 +719,7 @@ MV.def('core/shot', ['core/num', 'core/curve'], (N, CV) => {
     SHOTS, SHOT_KEYS, RIGS, RIG_KEYS, MOVES, FOCI, TIMINGS, LIMITS,
     coerceShot, coerceRig, isCustom, expandShot, lastFraming, maxFill, expandRig, fromMove, usesBeats, label, rigLabel,
     // EXTREME (DESIGN_EXTREME §1)
-    XSHOTS, XSHOT_KEYS, XLIMITS, XMOVES, DIRS, MIRRORS, X_ANCHORS, X_AWAY, X_FILL_MID,
+    AUTO_SHOT_KEYS, XSHOTS, XSHOT_KEYS, XLIMITS, XMOVES, DIRS, MIRRORS, X_ANCHORS, X_AWAY, X_FILL_MID,
     isExtreme, xKeyOf, presetOf, limitsOf, fromXMove, xIntensity,
   };
 });

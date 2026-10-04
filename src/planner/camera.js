@@ -17,7 +17,7 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
 
     // --- §4.7 constants (FROZEN formulas; tuned after the visual QA of §7.5 step (b), NOTES "Step (b)") -----------
     const NONE = 'none';
-    const SHOT_POOL = Object.freeze(SHOT.SHOT_KEYS.concat([NONE]).sort());
+    const SHOT_POOL = Object.freeze(SHOT.AUTO_SHOT_KEYS.concat([NONE]).sort());
     const AMOUNT_OFF = 0.1;                         // A below this: no automatic shot
     const SHORT_CUT = 0.8;                          // seconds
     const SHORT_POOL = Object.freeze(['none', 'settle']);

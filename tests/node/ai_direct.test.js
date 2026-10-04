@@ -961,7 +961,7 @@ test('EXTREME: the normal camera and area requests stay byte-identical (system, 
   // sha256 prefixes of main 1c303e6 (before EXTREME): the camera and 'all' system texts, their schemas and the camera lists
   const SNAP = { camSys: { ja: 'c9dd9fd5eb88fa02', en: '6ea43b3d650bded8' }, camSchema: 'f4bbc247008f2623',
     allSys: { ja: '722c7877b8aa97d9', en: '77e804ef7882bf72' }, allSchema: 'a2437c69ad58deb7',
-    lists: { ja: 'c82d807a2ecb9df8', en: 'd3ef99984a750859' } };
+    lists: { ja: '26d32e48aa6cc195', en: '9ce8e8fa3d7cb2a2' } };   // lists: 追いかけて引く added, 言葉へ寄る blurb
   for (const lang of ['ja', 'en']) {
     const cam = camRequest(DOC, WORKREF, { uiLang: lang });
     assert.equal(sha(cam.system), SNAP.camSys[lang], lang + ': the camera system text');
