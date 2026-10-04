@@ -28,7 +28,7 @@ const { createTextService } = MV.use('engine/text/service');
 const { fakeMeasurer } = MV.use('engine/text/fake_measure');
 
 const REGISTRY = MV.use('parts/catalog').defaultRegistry();
-const KEYS = ['kineticShapes', 'lightMotes', 'neonWave', 'soundHorizon'];
+const KEYS = ['burstBloom', 'harmonicString', 'kineticShapes', 'lightMotes', 'neonWave', 'ringPulse', 'soundHorizon', 'tileRipple', 'warpField'];
 const TEXT = createTextService({ measurer: fakeMeasurer(), faces: null });
 const T0 = 10;
 const FULL = '1,1,1,1,1';                      // 表現の強さ at full: the event mechanics without the strength's thinning
@@ -142,7 +142,9 @@ test('the interlude pool is exactly the three effects; the breath mark stays pin
   const bm = REGISTRY.get('arrange', 'breathMark');
   assert.equal(bm.pool, false);
   assert.ok(REGISTRY.has('arrange', 'breathMark'));
-  const needs = { lightMotes: ['beats', 'level'], soundHorizon: ['beats', 'level'], kineticShapes: ['beats', 'level'], neonWave: ['beats', 'level'] };
+  const needs = { lightMotes: ['beats', 'level'], soundHorizon: ['beats', 'level'], kineticShapes: ['beats', 'level'], neonWave: ['beats', 'level'],
+    ringPulse: ['beats', 'level'], warpField: ['beats', 'level'], tileRipple: ['beats', 'level'], burstBloom: ['beats', 'level'],
+    harmonicString: ['beats', 'level'] };
   const families = new Set();
   const all = REGISTRY.keys('arrange');
   for (const key of KEYS) {
@@ -245,7 +247,7 @@ test('saved filters: an only list naming 間の印 admits the effects, one namin
     assert.ok(!pinned.warnings.some((w) => w.code === 'pin-filtered'), only.join() + ': pin-filtered');
   }
   // a deny list is read as it is: denying all but one leaves that one
-  const two = interludeScenes(withArrange({ only: SAVED_MINIMAL.slice(), deny: ['lightMotes', 'soundHorizon', 'neonWave'] }));
+  const two = interludeScenes(withArrange({ only: SAVED_MINIMAL.slice(), deny: KEYS.filter((k) => k !== 'kineticShapes') }));
   for (const { cut } of two.cuts) assert.equal(cut.slots.arrange.v, 'kineticShapes', cut.key);
   // an only list that names effects keeps to them
   const one = interludeScenes(withArrange({ only: ['centerAnchor', 'lightMotes'], deny: null }));

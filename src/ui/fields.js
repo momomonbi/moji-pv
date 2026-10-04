@@ -581,7 +581,8 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
     // paramFields(kind, idx, partKey, registry, { shared, part, section, scopes }) → generated FieldSpecs for the
     // parameters of a part (shared ones by `kind.param`, own ones by `kind@key.param`). partKey null → shared only.
     // Params kept for saved documents but no longer offered: the interlude effects' 表現の強さ (自動 follows the song).
-    const HIDDEN_PARAMS = new Set(['lightMotes', 'soundHorizon', 'kineticShapes', 'neonWave'].map((key) => 'arrange@' + key + '.shape'));
+    const HIDDEN_PARAMS = new Set(['lightMotes', 'soundHorizon', 'kineticShapes', 'neonWave', 'ringPulse', 'warpField', 'tileRipple',
+      'burstBloom', 'harmonicString'].map((key) => 'arrange@' + key + '.shape'));
 
     function paramFields(kind, idx, partKey, registry, o) {
       const opt = o || {};
