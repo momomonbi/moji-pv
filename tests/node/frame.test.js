@@ -236,8 +236,8 @@ test('golden frame hashes (tests/golden/frame_hashes.json) match the engine faca
 // DESIGN_2_1 §9: documents without the new pins differ from v2 only by the automatic camerawork. With the camerawork
 // pinned off, every corpus project renders the v2 frames exactly (frame_hashes_v2.json is frozen; update_golden.js
 // checks it before it writes anything). No registry check: a new part may change the registry, never these frames, with
-// two exceptions: the interlude effects (DESIGN_2_1 §9, row D§5.1) redrew the interlude cuts, and the music after the
-// last line became an interlude cut; the file was rewritten with --v2 for each.
+// three exceptions: the interlude effects (DESIGN_2_1 §9, row D§5.1) redrew the interlude cuts, the music after the
+// last line became an interlude cut, and 光の波形 joined the effects; the file was rewritten with --v2 for each.
 test('with the camerawork pinned off, every corpus project renders the v2 frames (tests/golden/frame_hashes_v2.json)', async () => {
   const v2 = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'golden', 'frame_hashes_v2.json'), 'utf8')).frames;
   const reg = MV.use('parts/catalog').defaultRegistry();

@@ -8,7 +8,7 @@ MV.def('ui/step_look', ['ui/dom', 'ui/icons', 'core/doc', 'ui/fields', 'i18n/t']
   const MAIN_ASPECTS = ['16:9', '9:16', '1:1'];
   // 間奏の演出: per interlude of the song, its effect (自動 or one of the three, pinned at that interlude's cut); its
   // name seeks there.
-  const IL_KEYS = ['lightMotes', 'soundHorizon', 'kineticShapes'];
+  const IL_KEYS = ['lightMotes', 'soundHorizon', 'kineticShapes', 'neonWave'];
 
   function mount(app) {
     const t = app.t;
