@@ -172,6 +172,32 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
 
   function swellAt(d, t) { return d.song ? sampleAt(d.sw, d.L0, t) : 0.5; }
 
+  // The song's spectrum bands (env.band, 0 the bass … 7 the treble) from L0 to b at 20 Hz, each through a fast-attack
+  // follower and normalised to the window (p10…p97) like the loudness, so every band moves; null when the song keeps no
+  // bands (an older song: the analyzers then fall back to the loudness and the beat).
+  const NB = 8;
+  function bandTracks(env, L0) {
+    if (typeof env.band !== 'function' || env.band(0, 0) === null) return null;
+    const T = env.times, n = Math.ceil((T.b - L0) * HZ) + 2;
+    const ia = Math.max(0, Math.ceil((T.a - L0) * HZ)), ib = Math.min(n - 1, Math.floor((T.b - L0) * HZ));
+    const out = [];
+    for (let k = 0; k < NB; k++) {
+      const f = new Float32Array(n);
+      for (let i = 0; i < n; i++) {
+        const raw = env.band(k, L0 + i / HZ) || 0;
+        f[i] = i ? f[i - 1] + (raw - f[i - 1]) * (raw > f[i - 1] ? 0.85 : 0.3) : raw;
+      }
+      const win = Array.from(f.subarray(ia, ib + 1)).sort((x, y) => x - y);
+      const lo = percentile(win, 0.1), hi = percentile(win, 0.97), tr = new Float32Array(n);
+      for (let i = 0; i < n; i++) tr[i] = Math.pow(clamp((f[i] - lo) / Math.max(hi - lo, 0.08)), 1.2);
+      out.push(tr);
+    }
+    return out;
+  }
+
+  // Band k (0…7) at t from the tracks above.
+  function bandOf(d, k, t) { return sampleAt(d.B[k], d.BL0, t); }
+
   // --- 表現の強さ: how much the effect does, over the interlude ------------------------------------------------------
 
   // The `shape` param: 'auto', or five strengths 0…1 at the start, ¼, ½, ¾ and the end of the interlude (from the
@@ -637,9 +663,16 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     for (let k = 0; k <= d.nb; k++) {
       const edge = k <= full ? 1 : k === full + 1 ? part : 0;
       if (edge <= 0) { d.Bk[k] = 0; continue; }
-      const m = 0.75 + jag * (2 * noise1(d.nm, 0.35 * k + 0.5 * t) - 1);
-      const lv = d.song ? 0.2 + 0.8 * levelAt(d, t - k * d.pc / d.v) : levelAt(d, t - k * d.pc / d.v);   // a quiet passage still breathes
-      d.H[k] = d.hMin + d.hA * gain * d.taper[k] * (d.w[k] * m * lv + kick) * (1 - outK);
+      if (d.B) {
+        // with the song's bands: the middle bars are the bass, the outer ones each band up to the treble at the ends
+        const v = bandOf(d, Math.min(NB - 1, Math.floor((k / (d.nb + 1)) * NB)), t);
+        const m = 0.9 + 0.1 * (2 * noise1(d.nm, 0.35 * k + 0.5 * t) - 1);
+        d.H[k] = d.hMin + d.hA * gain * (0.35 + 0.65 * d.taper[k]) * 1.25 * d.w[k] * m * (0.08 + 0.92 * v) * (1 - outK);
+      } else {
+        const m = 0.75 + jag * (2 * noise1(d.nm, 0.35 * k + 0.5 * t) - 1);
+        const lv = d.song ? 0.2 + 0.8 * levelAt(d, t - k * d.pc / d.v) : levelAt(d, t - k * d.pc / d.v);   // a quiet passage still breathes
+        d.H[k] = d.hMin + d.hA * gain * d.taper[k] * (d.w[k] * m * lv + kick) * (1 - outK);
+      }
       // over the key every bar is solid (the taper stays in the height): only the growing edge bar fades in
       d.Bk[k] = Math.max(1, Math.round((d.solid ? 1 : 0.35 + 0.65 * d.taper[k]) * edge * BAR_BUCKETS));
     }
@@ -740,6 +773,7 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     for (let k = 0; k <= nb; k++) { w[k] = 0.55 + 0.45 * rm.next(); taper[k] = Math.pow(1 - (k / nb) * (k / nb), 0.9); }
     const tr = levelTrack(env, r, fr.a - 1.8);
     const st = strengthTrack(env, fr, tr, p.shape);
+    const B = tr.song ? bandTracks(env, fr.a - 1.8) : null;
     const hA = s * (wide ? 0.1 : 0.12) * (0.35 + 0.65 * p.react) * (tr.song ? 1 : 0.5);
     if (!tr.song) for (let k = 0; k <= nb; k++) w[k] = 0.775 + 0.5 * (w[k] - 0.775);   // a calm wave: bars closer in height
     const hl = Math.min(1.04 * Lh, D.w / 2 - D.safe.l);
@@ -790,7 +824,8 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     sb.paint({ layer: 'mid', bleed: 0, animated: true, owner: env.owner, draw: barsDraw,
       data: Object.assign(base, { Lh, pc, nb, hMin, hA, w, taper, hl, v: Lh / 1.8, bw: 0.42 * pc,
         barA: ink.chroma ? 1 : ink.light ? 0.8 : 0.85, solid: ink.chroma, lineA: ink.chroma ? 0.6 : 0.28,
-        nm: rm.int(1, SEED_MAX), reach, bt: bl.t, bd: bl.down, H: new Float32Array(nb + 1), Bk: new Uint8Array(nb + 1) }) });
+        nm: rm.int(1, SEED_MAX), reach, bt: bl.t, bd: bl.down, B, BL0: fr.a - 1.8, H: new Float32Array(nb + 1),
+        Bk: new Uint8Array(nb + 1) }) });
     return finish(env, fr, Lh, 2 * hA);
   }
 
@@ -1217,10 +1252,18 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
       if (j >= 0) kick = (d.bd[j] ? 1 : 0.7) * Math.exp(-(t - d.bt[j]) / 0.22);
     }
     for (let k = 0; k < WAVE_BUMPS; k++) {
-      d.A[k] = k === 0 ? d.hA * gain * (0.25 + 0.25 * lv + 0.8 * kick)
-        : d.hA * gain * d.amp[k] * (0.15 + 0.85 * levelAt(d, t - 0.06 * k)) * (0.35 + 0.65 * noise1(d.nk + k, d.rate[k] * t));
+      // with the song's bands: the left bump is the bass, each next one the next band up, the last the highest two
+      if (d.B) {
+        const v = k === 0 ? Math.max(bandOf(d, 0, t), bandOf(d, 1, t)) : k === WAVE_BUMPS - 1
+          ? Math.max(bandOf(d, NB - 2, t), bandOf(d, NB - 1, t)) : bandOf(d, k + 1, t);
+        d.A[k] = d.hA * gain * (k === 0 ? 1.2 : d.amp[k] * 1.4) * (0.06 + 0.94 * v);
+      } else {
+        d.A[k] = k === 0 ? d.hA * gain * (0.25 + 0.25 * lv + 0.8 * kick)
+          : d.hA * gain * d.amp[k] * (0.15 + 0.85 * levelAt(d, t - 0.06 * k)) * (0.35 + 0.65 * noise1(d.nk + k, d.rate[k] * t));
+      }
     }
-    const crackle = d.jit * (0.35 + 0.65 * lv) * gain;
+    const fizz = d.B ? 0.5 * (bandOf(d, NB - 2, t) + bandOf(d, NB - 1, t)) : lv;
+    const crackle = d.jit * (0.35 + 0.65 * fizz) * gain;
     for (let i = 0; i < WAVE_N; i++) {
       const u = i / (WAVE_N - 1);
       let y = 0;
@@ -1304,6 +1347,7 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     const Lh = Math.min(0.44 * D.w, D.w / 2 - D.safe.l - 0.01 * s);
     const tr = levelTrack(env, r, fr.a - 1);
     const st = strengthTrack(env, fr, tr, p.shape);
+    const B = tr.song ? bandTracks(env, fr.a - 1) : null;
     const hA = s * (wide ? 0.34 : 0.26) * (0.35 + 0.65 * p.react) * (tr.song ? 1 : 0.8);
     const base = Math.min(fr.cy + (wide ? 0.14 : 0.1) * D.h, D.h - D.safe.b - 0.75 * hA);
     const rb = r.fork('bumps');
@@ -1325,7 +1369,7 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     const shared = data(fr, { add: ink.add, chroma: ink.chroma, P, song: tr.song, L0: tr.L0, lv: tr.lv, sw: tr.sw, n1: tr.n1,
       n2: tr.n2, I: st.I, W: st.W, IA: st.IA, s, x0: fr.cx - Lh, len: 2 * Lh, base, hA, depth: 0.9 * hA, uc, wd, amp, rate,
       jit: 0.02 * s, dot: 0.014 * s, nk: rb.int(1, SEED_MAX - 16), nj: rb.int(1, SEED_MAX - 2),
-      bt: kicks.bt, bd: kicks.bd, A: new Float32Array(WAVE_BUMPS), Y: new Float32Array(WAVE_N) });
+      bt: kicks.bt, bd: kicks.bd, B, BL0: fr.a - 1, A: new Float32Array(WAVE_BUMPS), Y: new Float32Array(WAVE_N) });
     if (p.reflect && !ink.chroma) {
       sb.paint({ layer: 'far', bleed: 0, animated: true, owner: env.owner, draw: reflectDraw, data: Object.assign({}, shared) });
     }
@@ -1380,6 +1424,12 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     const lv = levelAt(d, t), gain = gainOf(d, t), kick = kickAt(d, t, 0.2);
     for (let i = 0; i < RING_N; i++) {
       const m = Math.min(i, RING_N - i), b = 1 - Math.abs((2 * i) / RING_N - 1);   // b: 0 at the top, 1 at the bottom
+      if (d.B) {
+        // with the song's bands: the bottom is the bass, the top the treble, both sides alike
+        const v = bandOf(d, Math.min(NB - 1, Math.floor((1 - b) * NB)), t);
+        d.L[i] = d.hA * gain * (0.05 + 1.05 * v * (0.92 + 0.08 * noise1(d.nk + m, 3 * t)));
+        continue;
+      }
       const hi = levelAt(d, t - 0.04 * (1 - b)) * (0.35 + 0.65 * noise1(d.nk + m, (1.5 + 4 * (1 - b)) * t));
       const lo = 0.25 * lv + 0.9 * kick;
       d.L[i] = d.hA * gain * (0.05 + (1 - b * b) * hi + b * b * lo);
@@ -1416,12 +1466,13 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     const tr = levelTrack(env, r, fr.a - 1);
     const st = strengthTrack(env, fr, tr, p.shape);
     const kicks = kicksOf(env, fr, tr, st, r, 0.3);
+    const B = tr.song ? bandTracks(env, fr.a - 1) : null;
     const R0 = 0.16 * s, hA = 0.15 * s * (0.35 + 0.65 * p.react) * (tr.song ? 1 : 0.8);
     const P = 'accent', core = ink.light || ink.chroma ? P : 'ink';
     env.sb.paint({ layer: 'mid', bleed: 0, animated: true, owner: env.owner, draw: ringDraw,
       data: data(fr, { add: ink.add, chroma: ink.chroma, P, song: tr.song, L0: tr.L0, lv: tr.lv, sw: tr.sw, n1: tr.n1, n2: tr.n2,
         I: st.I, W: st.W, IA: st.IA, s, R0, hA, spin: (r.next() < 0.5 ? -1 : 1) * 0.15, nk: r.int(1, SEED_MAX - RING_N),
-        passes: passesOf(ink, s, P, core), bt: kicks.bt, bd: kicks.bd, L: new Float32Array(RING_N) }) });
+        passes: passesOf(ink, s, P, core), bt: kicks.bt, bd: kicks.bd, B, BL0: fr.a - 1, L: new Float32Array(RING_N) }) });
     const ext = 2 * (R0 * 1.12 + 1.3 * hA);
     return finish(env, fr, ext, ext);
   }

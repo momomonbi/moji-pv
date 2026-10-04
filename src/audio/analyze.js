@@ -21,6 +21,8 @@ MV.def('audio/analyze', ['audio/fft'], (fft) => {
   const FLUX_FLOOR = 10;           // spectral flux of a quiet noise floor: the smallest 99th percentile normalized to 1
   const MIN_ONSET = 0.1;           // a normalized 99th percentile below this means there are no onsets at all
   const DEFAULT_STEP = 1500;       // frames per yielded progress step (15 s of audio)
+  // Spectrum bands (Hz edges, bass → treble) whose loudness the song digest keeps for the analyzers of the interludes.
+  const BAND_EDGES = Object.freeze([30, 90, 180, 360, 720, 1440, 2880, 5760, 12000]);
 
   function inputError(message) {
     const e = new TypeError(message);
@@ -114,6 +116,14 @@ MV.def('audio/analyze', ['audio/fft'], (fft) => {
     const loud = new Float32Array(frames);
     const flux = new Float32Array(frames);
     const spectrum = createSpectrum();
+    const nb = BAND_EDGES.length - 1, binOf = (f) => Math.round((f * WIN) / sampleRate);
+    const blo = [], bhi = [];
+    for (let b = 0; b < nb; b++) {
+      const a = Math.min(spectrum.bins, Math.max(1, binOf(BAND_EDGES[b])));
+      blo.push(a);
+      bhi.push(Math.min(spectrum.bins, Math.max(a + 1, binOf(BAND_EDGES[b + 1]))));
+    }
+    const bands = Array.from({ length: nb }, () => new Float32Array(frames));
     let prev = new Float64Array(spectrum.bins);
     let cur = new Float64Array(spectrum.bins);
     spectrum.at(reader, Math.round((-1 * sampleRate) / HZ), prev);
@@ -123,15 +133,25 @@ MV.def('audio/analyze', ['audio/fft'], (fft) => {
       loud[k] = dbToUnit(meanSquare(reader, a, b));
       spectrum.at(reader, a, cur);
       flux[k] = fluxOf(prev, cur);
+      for (let b = 0; b < nb; b++) {
+        let sum = 0;
+        for (let i = blo[b]; i < bhi[b]; i++) sum += cur[i];
+        bands[b][k] = bhi[b] > blo[b] ? sum / (bhi[b] - blo[b]) : 0;
+      }
       const swap = prev; prev = cur; cur = swap;
       if ((k + 1) % step === 0 && k + 1 < frames) yield (0.9 * (k + 1)) / frames;
     }
     const strength = normalize(flux);
+    // each band scaled so its 99th percentile is 1: the bass and the treble move as much as one another
+    for (const band of bands) {
+      const ref = Math.max(percentile99(band), 1e-6);
+      for (let i = 0; i < band.length; i++) band[i] = Math.min(1, band[i] / ref);
+    }
     yield 0.9;
     const tempo = estimateTempo(strength, HZ);
     return {
       duration: n / sampleRate,
-      env: { hz: HZ, loud },
+      env: { hz: HZ, loud, bands },
       onset: { hz: HZ, strength },
       bpm: tempo.bpm,
       bpmConfidence: tempo.confidence,

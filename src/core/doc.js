@@ -43,7 +43,7 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
     row: ['id', 'src'],
     timing: ['snap', 'lead', 'tail', 'leadIn', 'outro', 'tapLatency'],
     song: ['name', 'sha1', 'seconds', 'bpm', 'offset', 'meter', 'bpmConfidence', 'digest', 'info'],
-    digest: ['hz', 'loud'],
+    digest: ['hz', 'loud', 'nb', 'bands'],
     look: ['seed', 'moodSeed', 'aspect', 'backdrop'],
     pin: ['v', 'by', 'sig'],
     lock: ['n'],
@@ -162,6 +162,8 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
     if (d !== null && (!isObject(d) || !isNumber(d.hz) || d.hz <= 0 || typeof d.loud !== 'string')) {
       bad('song.digest', 'must be { hz, loud: base64 } or null');
     }
+    if (isObject(d) && (d.bands !== undefined || d.nb !== undefined)
+      && (typeof d.bands !== 'string' || !Number.isInteger(d.nb) || d.nb < 1)) bad('song.digest.bands', 'must be base64 with nb ≥ 1');
     if (song.info !== null) for (const p of songInfoProblems(song.info)) bad('song.info' + p.where, p.what);
   }
 
