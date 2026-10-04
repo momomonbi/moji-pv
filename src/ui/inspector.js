@@ -562,6 +562,14 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
 
     // 文字の中に写真・動画 (DESIGN_2_1 §11.7.4): a picture pins the textFill part on the row's slot too; なし clears the
     // picture and the textFill pin this row made.
+    // Whether a wider scope (the cut's line, the whole video) puts textFill in `slot` where `path` is written.
+    function inheritedFill(path, slot) {
+      const sc = P.parse(path).scope, wider = [];
+      if (sc.kind === 'cut' && sc.lineId) wider.push('line/' + sc.lineId);
+      if (sc.kind !== 'work') wider.push('work');
+      return wider.some((w) => { const pin = doc().pins[w + ':' + slot]; return !!pin && pin.v === 'textFill'; });
+    }
+
     function textFillCmds(row, v) {
       const slot = 'ornament#' + row.field.textFill;
       const cmds = [];
@@ -571,6 +579,8 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
         if (v === '' || v === null) {
           cmds.push(...removablePaths([F.writePath(path, plan())]).map((x) => ({ t: 'pin.clear', path: x })));
           if (part && part.v === 'textFill' && part.by !== 'lock') cmds.push({ t: 'pin.clear', path: F.writePath(partPath, plan()) });
+          // set on the line or the whole video: なし here turns it off here only (this slot shows nothing here)
+          if (!(part && part.by === 'lock') && inheritedFill(path, slot)) cmds.push(pinCmd(partPath, 'none'));
         } else {
           if (!part || part.v !== 'textFill') cmds.push(pinCmd(partPath, 'textFill'));
           cmds.push(pinCmd(path, v));

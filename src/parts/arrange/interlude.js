@@ -1900,16 +1900,16 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     const gain = gainOf(d, t), a0 = g.globalAlpha, turn = d.spin * clockAt(d, t), R = d.R0 * (0.7 + 0.3 * reach);
     if (d.add) g.globalCompositeOperation = 'lighter';
     g.lineJoin = 'round';
-    polarAt(d, t - 0.18, d.E);
-    polarLoop(g, d, d.E, 1.15 * d.hA * gain, R * 1.06, 1, turn - 0.05);
+    polarAt(d, t - 0.18, d.pe);
+    polarLoop(g, d, d.pe, 1.15 * d.hA * gain, R * 1.06, 1, turn - 0.05);
     g.globalAlpha = a0 * clamp((d.chroma ? 1 : 0.35) * Am);
     g.strokeStyle = q.rgba(d.Q, 1);
     g.lineWidth = 0.003 * d.s;
     g.stroke();
-    const kick = polarAt(d, t, d.V), R1 = R * (1 + 0.12 * kick * gain);
-    polarLoop(g, d, d.V, d.hA * gain, R1, 1, turn);
+    const kick = polarAt(d, t, d.pv), R1 = R * (1 + 0.12 * kick * gain);
+    polarLoop(g, d, d.pv, d.hA * gain, R1, 1, turn);
     strokePasses(g, a0, Am, q, d.passes);
-    polarLoop(g, d, d.V, 0.45 * d.hA * gain, R1 * 0.95, -1, turn);
+    polarLoop(g, d, d.pv, 0.45 * d.hA * gain, R1 * 0.95, -1, turn);
     g.globalAlpha = a0 * clamp((d.chroma ? 1 : 0.5) * Am);
     g.strokeStyle = q.rgba(d.P, 1);
     g.lineWidth = 0.0022 * d.s;
@@ -1930,7 +1930,7 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
       data: data(fr, { add: ink.add, chroma: ink.chroma, P, Q: ink.chroma ? P : ink.two, song: tr.song, L0: tr.L0, lv: tr.lv,
         sw: tr.sw, n1: tr.n1, n2: tr.n2, I: st.I, W: st.W, IA: st.IA, s, R0, hA, spin: (r.next() < 0.5 ? -1 : 1) * 0.12,
         nk: r.int(1, SEED_MAX - POLAR_N), nj: r.int(1, SEED_MAX - POLAR_N), passes: passesOf(ink, s, P, core), bt: kicks.bt,
-        bd: kicks.bd, B, BL0: fr.a - 1, V: new Float32Array(POLAR_N), E: new Float32Array(POLAR_N) }) });
+        bd: kicks.bd, B, BL0: fr.a - 1, pv: new Float32Array(POLAR_N), pe: new Float32Array(POLAR_N) }) });
     const ext = 2 * (R0 * 1.25 + 1.4 * hA);
     return finish(env, fr, ext, ext);
   }
@@ -1953,7 +1953,7 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
   // keeps its highest point of the last 0.6 s and falls slowly, as on a studio meter.
   const BARS_N = 28;
 
-  function barsDraw(g, t, d, q) {
+  function columnsDraw(g, t, d, q) {
     const Am = envelopeOf(d, t), reach = reachOf(d, t);
     if (Am < 1 / 255 || !(reach > 0)) return;
     const gain = gainOf(d, t), a0 = g.globalAlpha, n = Math.max(1, Math.round(reach * BARS_N));
@@ -1996,7 +1996,7 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     g.globalAlpha = a0;
   }
 
-  function barsBuild(env, p) {
+  function columnsBuild(env, p) {
     const { D } = env;
     const fr = frameOf(env, p), ink = inksOf(env.pal), r = seedOf(env), s = fr.s, wide = D.w >= D.h;
     const tr = levelTrack(env, r, fr.a - 1);
@@ -2007,7 +2007,7 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     const hA = s * (wide ? 0.4 : 0.32) * (0.35 + 0.65 * p.react) * (tr.song ? 1 : 0.85);
     const base = Math.min(fr.cy + 0.45 * hA, D.h - D.safe.b - 0.2 * hA - 0.02 * s);
     const P = 'accent', core = ink.light || ink.chroma ? P : 'ink';
-    env.sb.paint({ layer: 'mid', bleed: 0, animated: true, owner: env.owner, draw: barsDraw,
+    env.sb.paint({ layer: 'mid', bleed: 0, animated: true, owner: env.owner, draw: columnsDraw,
       data: data(fr, { add: ink.add, chroma: ink.chroma, P, core, song: tr.song, L0: tr.L0, lv: tr.lv, sw: tr.sw, n1: tr.n1,
         n2: tr.n2, I: st.I, W: st.W, IA: st.IA, s, len, x0: fr.cx - len / 2, base, hA, nk: r.int(1, SEED_MAX - BARS_N),
         nj: r.int(1, SEED_MAX - BARS_N), bt: kicks.bt, bd: kicks.bd, B, BL0: fr.a - 1, V: new Float32Array(BARS_N),
@@ -2024,7 +2024,7 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     traits: { cells: [0, 80], roles: ['interlude'], energy: [0.35, 1] },
     fits: (f) => (f.beat ? 1.2 : 0.7),
     params: { react: REACT(0.55, 0.9), shape: SHAPE_PARAM },
-    build: barsBuild,
+    build: columnsBuild,
   });
 
   return [lightMotes, soundHorizon, kineticShapes, neonWave, ringPulse, warpField, tileRipple, burstBloom, harmonicString,
