@@ -1,6 +1,6 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-qi1r/RZSKdT7NepsxXC7v6X+YGo3LWfg8xBxKGG4klc='; style-src 'sha256-uhekdjVoF8p0oG5Jys9SuRatxu3plo9h2Wexn3/9z4g=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-l3/fCH2SEhgu0yvSNS4NFbt79A7UH75LTCBgwILP/h0='; style-src 'sha256-uhekdjVoF8p0oG5Jys9SuRatxu3plo9h2Wexn3/9z4g=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
 <title>Moji PV Maker</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -61763,6 +61763,9 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
 
     // paramFields(kind, idx, partKey, registry, { shared, part, section, scopes }) → generated FieldSpecs for the
     // parameters of a part (shared ones by `kind.param`, own ones by `kind@key.param`). partKey null → shared only.
+    // Params kept for saved documents but no longer offered: the interlude effects' 表現の強さ (自動 follows the song).
+    const HIDDEN_PARAMS = new Set(['lightMotes', 'soundHorizon', 'kineticShapes'].map((key) => 'arrange@' + key + '.shape'));
+
     function paramFields(kind, idx, partKey, registry, o) {
       const opt = o || {};
       const regKind = kind === 'atmos' ? 'ornament' : kind;
@@ -61776,6 +61779,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
       for (const p of list) {
         if (p.shared ? opt.shared === false : opt.part === false) continue;
         const slot = P.slotParamPath(kind, idx === undefined ? null : idx, p.shared ? null : partKey, p.name, p.shared);
+        if (HIDDEN_PARAMS.has(slot)) continue;
         out.push(Object.freeze({
           id: (opt.page || 'param') + '/' + (opt.section || 'param') + '/' + slot, key: slot, path: slot,
           scopes: opt.scopes || ALL, section: opt.section || null, page: opt.page || null, widget: widgetFor(p.spec),
@@ -62102,7 +62106,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
 
     return {
       WIDGETS, FIELDS, PAGES: PAGE_SECTIONS, FACE_ROLES, FACE_SCRIPTS, LIST_KINDS, SLOT_KINDS, COMMANDS_USED, SNAPS, SEASONS,
-      PARAM_LABEL, sectionsFor, contextOf, pageOf, paramFields, widgetFor, optionsFor, slotScopes, fieldPath, decisionsOf, freeIndex,
+      PARAM_LABEL, HIDDEN_PARAMS, sectionsFor, contextOf, pageOf, paramFields, widgetFor, optionsFor, slotScopes, fieldPath, decisionsOf, freeIndex,
       agreedKey, sharedNames, pathsFor, clearPathsFor, firstCutScope, pinnedSlots, withPinnedParams, writePath, writeScope,
       pinCmd, whyParts, whyRuleKey, areaLabel, areaTitle,
     };
@@ -68840,7 +68844,7 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
   const COLORS = { bg: '#101318', row: '#161a21', line: '#465063', line2: '#3b4252', sel: '#e2553b', cut: '#343b48',
     text: '#eceae5', muted: '#8e94a1', beat: 'rgba(242,239,232,0.18)', bar: 'rgba(242,239,232,0.45)', play: '#f2efe8',
     range: 'rgba(124,196,255,0.14)', focus: '#7cc4ff', wave: 'rgba(160,168,184,0.35)', section: 'rgba(240,182,77,0.16)',
-    highlight: '#f0b64d', mark: '#c9b27a', band: 'rgba(240,182,77,0.16)', band2: 'rgba(124,196,255,0.14)',
+    highlight: '#f0b64d', mark: '#c9b27a', interlude: 'rgba(167,139,250,0.35)', band: 'rgba(240,182,77,0.16)', band2: 'rgba(124,196,255,0.14)',
     bandOn: 'rgba(226,85,59,0.34)', key: '#f0b64d' };
   const KEY_PX = 5;                     // half the size of a key diamond ◆
 
@@ -69061,6 +69065,14 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
       const p = app.plan;
       const selLines = new Set(sel.level === 'line' ? sel.ids : [S.lineOfSel(sel)].filter(Boolean));
       const hl = highlighted(app.view.state.highlight);
+      // the interludes (間奏) between the lines: a block of their own, named 間奏1, 間奏2, …, a click selects one
+      p.cuts.filter((c) => c.role === 'interlude').forEach((c, i) => {
+        const x0 = xOf(c.t0), x1 = xOf(c.t1);
+        if (x1 < 0 || x0 > W) return;
+        g.fillStyle = sel.level === 'cut' && sel.key === c.key ? COLORS.sel : COLORS.interlude;
+        g.fillRect(x0, r[0] + 3, Math.max(1, x1 - x0 - 1), r[1] - r[0] - 6);
+        label(t('il.name', { n: i + 1 }), Math.max(x0, 0) + 4, (r[0] + r[1]) / 2, x1 - Math.max(x0, 0) - 8);
+      });
       p.lines.forEach((l, i) => {
         const x0 = xOf(l.t0), x1 = xOf(l.t1);
         if (x1 < 0 || x0 > W) return;
@@ -69188,7 +69200,9 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
           if (Math.abs(x - x1) <= EDGE_PX) return { row, line: l, edge: 'end' };
         }
         const l = p.lines.find((x2) => x >= xOf(x2.t0) && x < xOf(x2.t1));
-        return l ? { row, line: l, edge: null } : { row };
+        if (l) return { row, line: l, edge: null };
+        const gap = p.cuts.find((c) => c.role === 'interlude' && x >= xOf(c.t0) && x < xOf(c.t1));
+        return gap ? { row, cut: gap, line: null } : { row };
       }
       if (row === 'cut') {
         for (const c of p.cuts) {
@@ -69352,6 +69366,8 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
       if (hit.row === 'song' && hit.band) { selectBand(hit.band); return; }
       if (hit.row === 'line' && hit.line) {
         app.select({ level: 'line', ids: [hit.line.id] }, { from: 'timeline', open: true });
+      } else if (hit.row === 'line' && hit.cut) {
+        app.select({ level: 'cut', key: hit.cut.key }, { from: 'timeline', open: true });
       } else if (hit.row === 'cut' && hit.cut) {
         const sole = hit.line && hit.line.cuts.length === 1;
         app.select(sole ? { level: 'line', ids: [hit.line.id] } : { level: 'cut', key: hit.cut.key }, { from: 'timeline', open: true });
@@ -69532,6 +69548,7 @@ MV.def('ui/playbar', ['ui/dom', 'ui/icons', 'ui/looks', 'ui/selection', 'ui/time
   // in the time readout, 3 makes おまかせ icon-only (its name stays for screen readers), 4 tightens the spacing.
   const FIT_MAX = 4;
   const TIME_RE = /^\s*(?:(\d+):)?(\d+(?:\.\d*)?)\s*$/;
+  const IL_INK = 'rgba(167,139,250,0.45)'; // an interlude (間奏) on the lane: selectable, so it shows as a block of its own
   const CUT_TOP = 0.2;                 // the cut blocks fill the lane from 20 % to 80 % of its height; the area bands (DESIGN_2_1
   const CUT_BOTTOM = 0.8;              // §6.8) run in the strip above them
   const BAND_INK = Object.freeze(['rgba(240,182,77,0.55)', 'rgba(124,196,255,0.5)']);
@@ -69638,6 +69655,9 @@ MV.def('ui/playbar', ['ui/dom', 'ui/icons', 'ui/looks', 'ui/selection', 'ui/time
       const r = lane.getBoundingClientRect();
       const band = ev.clientY - r.top < r.height * CUT_TOP ? TL.bandAt(bands(), tt) : null;
       if (band) { app.select(S.areaSel(band.area), { from: 'timeline', open: true }); return; }
+      // an interlude (間奏) is selected on its own; elsewhere the line there (or the one before)
+      const gap = plan && plan.cuts.find((c) => c.role === 'interlude' && c.t0 <= tt && tt < c.t1);
+      if (gap) { app.select({ level: 'cut', key: gap.key }, { from: 'timeline', open: true }); return; }
       const line = plan && plan.lines.find((l) => l.t0 <= tt && tt < l.t1) || plan && plan.lines.slice().reverse().find((l) => l.t0 <= tt);
       if (line) app.select({ level: 'line', ids: [line.id] }, { from: 'timeline', open: true });
     });
@@ -69766,7 +69786,7 @@ MV.def('ui/playbar', ['ui/dom', 'ui/icons', 'ui/looks', 'ui/selection', 'ui/time
         const x0 = x(c.t0), x1 = Math.max(x0 + 1, x(c.t1) - dpr);
         const special = !c.line;
         const on = selCuts.has(c.key) || hl.has(c.line);
-        lctx.fillStyle = special ? 'rgba(255,255,255,0.10)' : on ? '#e2553b' : i % 2 ? '#3b4252' : '#465063';
+        lctx.fillStyle = on ? '#e2553b' : c.role === 'interlude' ? IL_INK : special ? 'rgba(255,255,255,0.10)' : i % 2 ? '#3b4252' : '#465063';
         lctx.fillRect(x0, top, x1 - x0, bottom - top);
         const line = c.line ? lineOf.get(c.line) : null;
         if (line && line.locked) hatch(x0, x1, top, bottom);

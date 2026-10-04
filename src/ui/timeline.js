@@ -15,7 +15,7 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
   const COLORS = { bg: '#101318', row: '#161a21', line: '#465063', line2: '#3b4252', sel: '#e2553b', cut: '#343b48',
     text: '#eceae5', muted: '#8e94a1', beat: 'rgba(242,239,232,0.18)', bar: 'rgba(242,239,232,0.45)', play: '#f2efe8',
     range: 'rgba(124,196,255,0.14)', focus: '#7cc4ff', wave: 'rgba(160,168,184,0.35)', section: 'rgba(240,182,77,0.16)',
-    highlight: '#f0b64d', mark: '#c9b27a', band: 'rgba(240,182,77,0.16)', band2: 'rgba(124,196,255,0.14)',
+    highlight: '#f0b64d', mark: '#c9b27a', interlude: 'rgba(167,139,250,0.35)', band: 'rgba(240,182,77,0.16)', band2: 'rgba(124,196,255,0.14)',
     bandOn: 'rgba(226,85,59,0.34)', key: '#f0b64d' };
   const KEY_PX = 5;                     // half the size of a key diamond ◆
 
@@ -236,6 +236,14 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
       const p = app.plan;
       const selLines = new Set(sel.level === 'line' ? sel.ids : [S.lineOfSel(sel)].filter(Boolean));
       const hl = highlighted(app.view.state.highlight);
+      // the interludes (間奏) between the lines: a block of their own, named 間奏1, 間奏2, …, a click selects one
+      p.cuts.filter((c) => c.role === 'interlude').forEach((c, i) => {
+        const x0 = xOf(c.t0), x1 = xOf(c.t1);
+        if (x1 < 0 || x0 > W) return;
+        g.fillStyle = sel.level === 'cut' && sel.key === c.key ? COLORS.sel : COLORS.interlude;
+        g.fillRect(x0, r[0] + 3, Math.max(1, x1 - x0 - 1), r[1] - r[0] - 6);
+        label(t('il.name', { n: i + 1 }), Math.max(x0, 0) + 4, (r[0] + r[1]) / 2, x1 - Math.max(x0, 0) - 8);
+      });
       p.lines.forEach((l, i) => {
         const x0 = xOf(l.t0), x1 = xOf(l.t1);
         if (x1 < 0 || x0 > W) return;
@@ -363,7 +371,9 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
           if (Math.abs(x - x1) <= EDGE_PX) return { row, line: l, edge: 'end' };
         }
         const l = p.lines.find((x2) => x >= xOf(x2.t0) && x < xOf(x2.t1));
-        return l ? { row, line: l, edge: null } : { row };
+        if (l) return { row, line: l, edge: null };
+        const gap = p.cuts.find((c) => c.role === 'interlude' && x >= xOf(c.t0) && x < xOf(c.t1));
+        return gap ? { row, cut: gap, line: null } : { row };
       }
       if (row === 'cut') {
         for (const c of p.cuts) {
@@ -527,6 +537,8 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
       if (hit.row === 'song' && hit.band) { selectBand(hit.band); return; }
       if (hit.row === 'line' && hit.line) {
         app.select({ level: 'line', ids: [hit.line.id] }, { from: 'timeline', open: true });
+      } else if (hit.row === 'line' && hit.cut) {
+        app.select({ level: 'cut', key: hit.cut.key }, { from: 'timeline', open: true });
       } else if (hit.row === 'cut' && hit.cut) {
         const sole = hit.line && hit.line.cuts.length === 1;
         app.select(sole ? { level: 'line', ids: [hit.line.id] } : { level: 'cut', key: hit.cut.key }, { from: 'timeline', open: true });
