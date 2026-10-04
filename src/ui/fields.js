@@ -20,7 +20,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
     const LINE = Object.freeze(['line']);
     const CUT = Object.freeze(['cut']);
     const WIDGETS = Object.freeze(['part', 'choice', 'number', 'time', 'color', 'font', 'toggle', 'words', 'cutpoints',
-      'text', 'slots', 'curve', 'shot', 'rig', 'partRefs', 'media', 'trim', 'crop', 'extreme']);
+      'text', 'slots', 'curve', 'graph', 'shot', 'rig', 'partRefs', 'media', 'trim', 'crop', 'extreme']);
     const FACE_ROLES = Object.freeze(['display', 'serif', 'body']);
     const FACE_SCRIPTS = Object.freeze(['ja', 'latin', 'ko', 'zhHant', 'zhHans']);
     const LIST_KINDS = Object.freeze(['ornament', 'filter']);
@@ -374,6 +374,10 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
             presets: [{ v: 'none', label: 'fld.gapLabel.none' }, { v: '♪', text: '♪' }, { v: 'heading', label: 'fld.gapLabel.heading' }],
             when: (ctx) => isRole('interlude')(ctx) && agreedKey(ctx, 'arrange') === 'breathMark' }),
         ]),
+        // 表現の強さ: how much the interlude effect does over its length (the graph widget; 自動 follows the song)
+        sec('ilshape', true, ['lightMotes', 'soundHorizon', 'kineticShapes'].map((key) => F({ path: 'arrange@' + key + '.shape',
+          scopes: CUT, widget: 'graph', label: 'fld.ilShape', spec: { type: 'text', max: 60 },
+          when: (ctx) => isRole('interlude')(ctx) && agreedKey(ctx, 'arrange') === key }))),
         sec('layout', true, [partField('arrange', 'kind.arrange'),
           F({ path: 'el.text.nudge', widget: 'number', label: 'fld.nudge', spec: SPEC.nudge }), textScaleField()]),
         sec('motion', true, [partField('arrive', 'kind.arrive'), partField('dwell', 'kind.dwell'), partField('depart', 'kind.depart'),

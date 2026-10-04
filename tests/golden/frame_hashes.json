@@ -1,7 +1,7 @@
 {
  "registry": {
   "kind": "catalog",
-  "version": "f371d6d4"
+  "version": "89c87bbf"
  },
  "measurer": "fake",
  "frames": {
@@ -111,8 +111,8 @@
    "277f4bdd",
    "80353062",
    "361b9be6",
-   "204cfdac",
-   "b7672d68",
+   "35f6798a",
+   "2fe12834",
    "97aa45ea",
    "b2abfd28",
    "80ffffa3",
@@ -124,8 +124,8 @@
    "798a2c4f",
    "3b2ff2fc",
    "3d56145a",
-   "79100e3b",
-   "a321c668",
+   "e7720798",
+   "f805c719",
    "e5ad9e02",
    "18c6062b",
    "ede4dfbd",

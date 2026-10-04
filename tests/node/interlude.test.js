@@ -31,6 +31,7 @@ const REGISTRY = MV.use('parts/catalog').defaultRegistry();
 const KEYS = ['kineticShapes', 'lightMotes', 'soundHorizon'];
 const TEXT = createTextService({ measurer: fakeMeasurer(), faces: null });
 const T0 = 10;
+const FULL = '1,1,1,1,1';                      // 表現の強さ at full: the event mechanics without the strength's thinning
 
 // --- one-cut plans ----------------------------------------------------------------------------------------------------
 
@@ -141,7 +142,7 @@ test('the interlude pool is exactly the three effects; the breath mark stays pin
   const bm = REGISTRY.get('arrange', 'breathMark');
   assert.equal(bm.pool, false);
   assert.ok(REGISTRY.has('arrange', 'breathMark'));
-  const needs = { lightMotes: ['beats', 'level'], soundHorizon: ['beats', 'level'], kineticShapes: ['beats'] };
+  const needs = { lightMotes: ['beats', 'level'], soundHorizon: ['beats', 'level'], kineticShapes: ['beats', 'level'] };
   const families = new Set();
   const all = REGISTRY.keys('arrange');
   for (const key of KEYS) {
@@ -495,7 +496,7 @@ test('kinetic shapes: the orbit’s dot runs round its ring, and nothing jumps a
   let orbits = 0, changes = 0;
   for (const bpm of [120, null]) {
     for (let k = 0; k < 12; k++) {
-      const { plan, scene } = sceneOf({ key: 'kineticShapes', dur: 12, env: 'steps', bpm, pos: k / 12 });
+      const { plan, scene } = sceneOf({ key: 'kineticShapes', dur: 12, env: 'steps', bpm, pos: k / 12, params: { shape: FULL } });
       const d = dataOf(scene), tc = Array.from(d.tc);
       for (let v = 0; v < d.seq.length; v++) {
         const from = v === 0 ? d.s0 + d.E : tc[v - 1] + 0.45, to = v < tc.length ? tc[v] - 0.75 : d.o;
@@ -506,7 +507,7 @@ test('kinetic shapes: the orbit’s dot runs round its ring, and nothing jumps a
         orbits++;
       }
       for (const c of tc) {
-        const a = dotAt(plan, scene, c - 0.002), b = dotAt(plan, scene, c + 0.002);
+        const a = dotAt(plan, scene, c - 0.0005), b = dotAt(plan, scene, c + 0.0005);
         assert.ok(Math.hypot(b[0] - a[0], b[1] - a[1]) < 0.5 && Math.abs(b[2] - a[2]) < 0.5, 'the dot jumps at the change ' + c);
         changes++;
       }
@@ -517,7 +518,7 @@ test('kinetic shapes: the orbit’s dot runs round its ring, and nothing jumps a
 
 // --- 5. level -----------------------------------------------------------------------------------------------------------
 
-test('loudness: the motes and the horizon follow the song; a steady level is no song; the shapes do not read it', () => {
+test('loudness: the motes and the horizon follow the song; a steady level is no song; the shapes follow it through the strength', () => {
   for (const key of ['lightMotes', 'soundHorizon']) {
     const up = sceneOf({ key, dur: 12, env: 'steps', bpm: null }), down = sceneOf({ key, dur: 12, env: 'stepsInv', bpm: null });
     const du = dataOf(up.scene), dd = dataOf(down.scene);
@@ -532,7 +533,10 @@ test('loudness: the motes and the horizon follow the song; a steady level is no 
   }
   const a = sceneOf({ key: 'kineticShapes', dur: 12, env: 'steps', bpm: 120 });
   const b = sceneOf({ key: 'kineticShapes', dur: 12, env: 'stepsInv', bpm: 120 });
-  for (const tl of [2, 6, 9]) assert.equal(frameHash(opsAt(a.plan, a.scene, tl).ops), frameHash(opsAt(b.plan, b.scene, tl).ops));
+  assert.ok([2, 6, 9].some((tl) => frameHash(opsAt(a.plan, a.scene, tl).ops) !== frameHash(opsAt(b.plan, b.scene, tl).ops)),
+    'the shapes move with the strength the song gives');
+  const fa = sceneOf({ key: 'kineticShapes', dur: 12, env: 'steps', bpm: 120, params: { shape: FULL } });
+  assert.notDeepEqual(Array.from(dataOf(fa.scene).I), Array.from(dataOf(a.scene).I), 'a drawn graph replaces the automatic strength');
 });
 
 // --- 6. beats -----------------------------------------------------------------------------------------------------------
@@ -548,17 +552,17 @@ test('beats: events sit on the grid, the horizon ≥ 0.45 s apart, glints ≥ 0.
   for (const bpm of [120, 240]) {
     const period = 60 / bpm;
     for (const dur of [12, 30]) {
-      const hz = dataOf(sceneOf({ key: 'soundHorizon', dur, env: 'steps', bpm }).scene);
+      const hz = dataOf(sceneOf({ key: 'soundHorizon', dur, env: 'steps', bpm, params: { shape: FULL } }).scene);
       const body = Array.from(hz.ev).filter((t, i) => i > 0 && i < hz.ev.length - 1);   // the opening and the handover aside
       assert.ok(body.length > 4, 'horizon events');
       for (const t of body) assert.ok(onBeat(t, period), 'horizon event on a beat: ' + t);
       assert.ok(minGap(body) >= 0.45 - 1e-6, 'horizon ≥ 0.45 s apart at ' + bpm + ' bpm: ' + minGap(body));
       assert.ok(body.every((t) => t <= hz.o + 0.2 * hz.Xo + 1e-6), 'horizon: nothing after o + 0.2 Xo');
-      const mo = dataOf(sceneOf({ key: 'lightMotes', dur, env: 'steps', bpm }).scene);
+      const mo = dataOf(sceneOf({ key: 'lightMotes', dur, env: 'steps', bpm, params: { shape: FULL } }).scene);
       assert.ok(mo.ev.length > 4);
       for (const t of mo.ev) assert.ok(onBeat(t, period) && t <= mo.o + 1e-6, 'glint on a beat before o: ' + t);
       assert.ok(minGap(Array.from(mo.ev)) >= 0.3 - 1e-6, 'glints ≥ 0.3 s apart');
-      const sh = dataOf(sceneOf({ key: 'kineticShapes', dur, env: 'steps', bpm, params: { every: 1 } }).scene);
+      const sh = dataOf(sceneOf({ key: 'kineticShapes', dur, env: 'steps', bpm, params: { every: 1, shape: FULL } }).scene);
       assert.ok(sh.tc.length >= 1, 'shape changes');
       for (const t of sh.tc) {
         const beat = Math.round((t + T0 - 0.1) / period);
@@ -569,7 +573,7 @@ test('beats: events sit on the grid, the horizon ≥ 0.45 s apart, glints ≥ 0.
   }
   // the beat shows even where the song is quiet (the level is 0 in the first half of 'steps'): the centre bar rises
   // by ≥ 0.1 hA just after every beat, a downbeat more
-  const { plan, scene } = sceneOf({ key: 'soundHorizon', dur: 12, env: 'steps', bpm: 120 });
+  const { plan, scene } = sceneOf({ key: 'soundHorizon', dur: 12, env: 'steps', bpm: 120, params: { shape: FULL } });
   const d = dataOf(scene);
   const centre = (t) => { const m = opsAt(plan, scene, t).ops.find((op) => op[1] === 'moveTo' && Math.abs(op[2] - d.cx) < 0.01); return d.cy - m[3]; };
   let quiet = 0;
@@ -634,17 +638,17 @@ test('long interludes: every event stream is thinned to its cap, never cut short
     for (const [bpm, env] of [[120, 'steps'], [180, 'steps'], [120, 'none'], [180, 'none'], [null, 'steps'], [null, 'none']]) {
       const where = 'dur ' + dur + ' bpm ' + bpm + ' ' + env;
       const period = bpm ? 60 / bpm : 0;
-      const mo = dataOf(sceneOf({ key: 'lightMotes', dur, bpm, env }).scene);
+      const mo = dataOf(sceneOf({ key: 'lightMotes', dur, bpm, env, params: { shape: FULL } }).scene);
       assert.ok(mo.ev.length <= 64, where + ': glints ' + mo.ev.length);
       tail(Array.from(mo.ev), 0, mo.o, where + ' glints');
-      const hz = sceneOf({ key: 'soundHorizon', dur, bpm, env, params: { ripples: true } }).scene;
+      const hz = sceneOf({ key: 'soundHorizon', dur, bpm, env, params: { ripples: true, shape: FULL } }).scene;
       const far = paintsOf(hz).find((p) => p.layer === 'far').rec.data, mid = dataOf(hz);
       const body = Array.from(far.ev).slice(1, -1);
       assert.ok(body.length <= 46, where + ': ripples ' + body.length);
       tail(body, 0, mid.o, where + ' ripples');
       assert.ok(mid.bt.length <= 128, where + ': kicks');
       if (mid.bt.length) tail(Array.from(mid.bt), 0, mid.o, where + ' kicks');
-      const sh = dataOf(sceneOf({ key: 'kineticShapes', dur, bpm, env, params: { every: 1 } }).scene);
+      const sh = dataOf(sceneOf({ key: 'kineticShapes', dur, bpm, env, params: { every: 1, shape: FULL } }).scene);
       assert.ok(sh.tc.length <= 24 && sh.ev.length <= 128, where + ': changes ' + sh.tc.length + ', beats ' + sh.ev.length);
       tail(Array.from(sh.tc), 0, sh.o, where + ' changes');
       if (bpm) {
@@ -668,7 +672,23 @@ test('long interludes: every event stream is thinned to its cap, never cut short
 
 // --- 8. fingerprint -----------------------------------------------------------------------------------------------------
 
-test('fingerprint: the beat grid moves every effect’s interlude fp, the loudness only the ones that read it', () => {
+test('表現の強さ: a drawn graph sets the strength, auto follows the song, a bad value reads as auto, calm thins the events', () => {
+  const at = (d, u) => d.I[Math.round((d.s0 + u * (d.h - d.s0) - d.IA) * 20)];
+  for (const key of KEYS) {
+    const drawn = dataOf(sceneOf({ key, dur: 12, env: 'none', bpm: 120, params: { shape: '0,0.25,1,0.25,0' } }).scene);
+    assert.ok(at(drawn, 0) < 0.02 && Math.abs(at(drawn, 0.25) - 0.25) < 0.05 && at(drawn, 0.5) > 0.98, key + ': the graph');
+    const bad = dataOf(sceneOf({ key, dur: 12, env: 'none', bpm: 120, params: { shape: '1,2,x' } }).scene);
+    const auto = dataOf(sceneOf({ key, dur: 12, env: 'none', bpm: 120 }).scene);
+    assert.deepEqual(Array.from(bad.I), Array.from(auto.I), key + ': a bad value reads as auto');
+    const loud = dataOf(sceneOf({ key, dur: 12, env: 'steps', bpm: 120 }).scene);      // quiet first half, loud second
+    assert.ok(at(loud, 0.85) > at(loud, 0.15) + 0.3, key + ': auto follows the song ' + at(loud, 0.15) + ' → ' + at(loud, 0.85));
+  }
+  const calm = dataOf(sceneOf({ key: 'lightMotes', dur: 12, env: 'none', bpm: 120, params: { shape: '0.2,0.2,0.2,0.2,0.2' } }).scene);
+  const busy = dataOf(sceneOf({ key: 'lightMotes', dur: 12, env: 'none', bpm: 120, params: { shape: FULL } }).scene);
+  assert.ok(calm.ev.length > 0 && calm.ev.length < busy.ev.length, 'a calm graph keeps fewer glints: ' + calm.ev.length + ' < ' + busy.ev.length);
+});
+
+test('fingerprint: the beat grid and the loudness move every effect’s interlude fp', () => {
   const fpOf = (key, edit) => {
     const doc = JSON.parse(JSON.stringify(corpus.project('v21').doc));
     doc.pins = Object.assign({}, doc.pins, { 'cut/gap/rc:arrange': { v: key, by: 'user' } });
@@ -682,8 +702,7 @@ test('fingerprint: the beat grid moves every effect’s interlude fp, the loudne
     const base = fpOf(key, () => {});
     assert.notEqual(fpOf(key, (d) => { d.song.offset += 0.13; }), base, key + ': offset');
     const digest = fpOf(key, (d) => { d.song.digest = Object.assign({}, d.song.digest, { loud: 'AAAA' + d.song.digest.loud.slice(4) }); });
-    if (key === 'kineticShapes') assert.equal(digest, base, key + ': the loudness is not read');
-    else assert.notEqual(digest, base, key + ': digest');
+    assert.notEqual(digest, base, key + ': digest (every effect reads the loudness, the shapes through the strength)');
   }
 });
 

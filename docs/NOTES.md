@@ -9379,3 +9379,17 @@ most 192 kbps, and a refusal at 320 must not drop the song to Opus (which some e
 throws is not asked again at the lower rate. The kit's main MP4 uses the same `audioConfig`; Opus (the WebM and the
 no-AAC fallback) stays at 160 kbps. Size estimates count 320 kbps. Test: export_math (320, the 192 fallback with a stub
 encoder that stops there, the asking order). Goldens: unchanged (exports are not in them).
+
+## Interlude effects: 表現の強さ (strength over time)
+
+The owner asked for interludes that change more on their own with the waveform and the tempo, and for a simple graph
+line to set how much happens (the algorithm deciding the rest). All three effects gain a `shape` param (text: 'auto' or
+five strengths 0–1 at the start, ¼, ½, ¾ and the end of the interlude) with a graph widget in the interlude's inspector
+(`ui/graph_widget`: presets 自動 / だんだん強く / 山型 / だんだん弱く / 静か / 全開, five points to drag or nudge with the
+arrow keys). `strengthTrack` builds the strength at 20 Hz and a motion clock from it; the motes show more or fewer of
+their points and drift on the clock, the horizon's row scales by 0.45–1.2, the shapes turn on the clock and pulse
+harder, and events are thinned where the strength is low. kineticShapes now also `needs: ['level']`. A text param keeps
+the core/schema type list (FROZEN) as it is; the AI never sets text params. Goldens: the registry version moved (a new
+param name), so every plan hash; the lrc interlude frames moved again (`--v2`). Tests: interlude.test.js (the graph,
+auto follows the song, a bad value reads as auto, calm thins the events; the event mechanics are checked at full
+strength).

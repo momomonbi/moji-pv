@@ -1,11 +1,11 @@
 {
  "registry": {
   "kind": "catalog",
-  "version": "f371d6d4"
+  "version": "89c87bbf"
  },
  "measurer": "fake",
  "media": "fake",
- "plan": "e281c5e9",
+ "plan": "65355c62",
  "frames": [
   "84744411",
   "d4353f8e",
