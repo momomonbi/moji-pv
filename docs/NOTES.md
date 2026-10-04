@@ -9393,3 +9393,10 @@ the core/schema type list (FROZEN) as it is; the AI never sets text params. Gold
 param name), so every plan hash; the lrc interlude frames moved again (`--v2`). Tests: interlude.test.js (the graph,
 auto follows the song, a bad value reads as auto, calm thins the events; the event mechanics are checked at full
 strength).
+
+## Interlude effects: the strength graph removed from the UI
+
+The owner found the change from the 表現の強さ graph too hard to see, so the graph is gone from the UI: the widget
+(`ui/graph_widget`), the interlude cut's section, 詳細 › 全体 › 間奏の動き and the graphs of ③ 見た目. The `shape` param stays
+in the three effects (自動 still follows the song; a saved pin still applies). ③ 見た目 keeps 間奏の演出: per interlude its
+effect (自動 or 光の粒 / 音の水平線 / 図形の舞, pinned at its cut).

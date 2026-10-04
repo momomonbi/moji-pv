@@ -1,6 +1,6 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-yljXEH6J8ZecmideXgAb45TKRmvdQ6zsf/S8Jfzb5qI='; style-src 'sha256-X6dX4h7mS0gPG9yl0Vm+36lXafvWhNtDXby0temwrbE=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-qi1r/RZSKdT7NepsxXC7v6X+YGo3LWfg8xBxKGG4klc='; style-src 'sha256-uhekdjVoF8p0oG5Jys9SuRatxu3plo9h2Wexn3/9z4g=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
 <title>Moji PV Maker</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -1097,13 +1097,6 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent);
 .cw-line .segmented { flex: 1 1 auto; min-width: 0; }
 .cw-val { flex: none; min-width: 38px; text-align: right; font: 11.5px var(--mono); color: var(--text-2); }
 .cw-note, .cw-hint { margin: 0; font-size: 11.5px; }
-.gw { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.gw-presets .chip-btn.on { border-color: var(--gold); color: var(--text); }
-.gw-plot { position: relative; height: 72px; border: 1px solid var(--line); border-radius: 7px; overflow: visible; }
-.gw-canvas { display: block; width: 100%; height: 100%; border-radius: 6px; touch-action: none; }
-.gw-handles { position: absolute; inset: 0; pointer-events: none; touch-action: none; }
-.gw-h { cursor: ns-resize; }
-.gw-note { margin: 0; font-size: 11.5px; }
 
 /* The shot, rig and 使わない部品 widgets. */
 .w-refsbox { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0; }
@@ -12432,8 +12425,7 @@ MV.def('i18n/strings', [], () => ({
   'sec.shift': ['時間', 'Time'],
   'sec.titletext': ['タイトル', 'Title'],
   'sec.gaplabel': ['表示する文字', 'Text shown'],
-  'sec.ilshape': ['表現の強さ', 'Strength over time'],
-  'sec.ilwork': ['間奏の動き', 'Interludes'],
+  'il.title': ['間奏の演出', 'Interlude effects'],
   'il.name': ['間奏{n}', 'Interlude {n}'],
   'il.none': ['この歌詞には間奏がありません', 'These lyrics have no interlude'],
   'sec.layout': ['構図', 'Layout'],
@@ -12533,19 +12525,6 @@ MV.def('i18n/strings', [], () => ({
   'fld.cutStart': ['開始', 'Start'],
   'fld.cutEnd': ['終わり（次のカットの開始）', 'End (next cut\'s start)'],
   'fld.gapLabel': ['表示する文字', 'Text shown'],
-  'fld.ilShape': ['表現の強さ', 'Strength over time'],
-  'fld.ilShapeAll': ['すべての間奏の強さ', 'Strength of every interlude'],
-  'graph.auto': ['自動', 'Auto'],
-  'graph.rise': ['だんだん強く', 'Build up'],
-  'graph.arc': ['山型', 'Rise and fall'],
-  'graph.fall': ['だんだん弱く', 'Wind down'],
-  'graph.calm': ['静か', 'Calm'],
-  'graph.full': ['全開', 'Full'],
-  'graph.point': ['{n}つ目の点（強さ {v}%）', 'Point {n} (strength {v}%)'],
-  'graph.autoNote': ['自動：曲の音量とテンポに合わせて決めます。点を動かすと、その形で強弱をつけます。',
-    'Auto: the song\'s loudness and tempo decide. Drag a point to shape it yourself.'],
-  'graph.drawnNote': ['左が間奏のはじめ、右が終わり。上ほど動きが多く速く、音量の揺れも少し加わります。',
-    'Left is the start of the interlude, right its end. Higher means more and faster motion; the song adds a little sway.'],
   'fld.gapLabel.none': ['なし', 'None'],
   'fld.gapLabel.heading': ['見出し', 'Heading'],
   'fld.nudge': ['位置', 'Position'],
@@ -55892,158 +55871,6 @@ MV.def('ui/extreme', ['ui/dom', 'core/pins', 'core/paths', 'core/shot', 'planner
 
     return { valueOf, scopesValue, linesOn, scopeOfPath, areaValue, notice, offChoice, setSwitch, pickShot, isXCut };
   });
-/* 文字PVメーカー v2 — original work. The graph widget (表現の強さ): five strengths over an interlude, drawn by dragging points, or 自動 (the song's loudness and tempo decide). */
-MV.def('ui/graph_widget', ['ui/dom'], (dom) => {
-  'use strict';
-
-  const { h } = dom;
-
-  // The value is 'auto' or five strengths 0…1 at the start, ¼, ½, ¾ and the end of the interlude ('0.2,0.5,0.9,0.6,0.3'),
-  // as parts/arrange/interlude reads it. The presets give a shape in one tap; dragging a point (or the arrow keys on
-  // it) draws your own; 自動 hands it back to the song.
-  const N = 5;
-  const PRESETS = Object.freeze([
-    { key: 'auto', v: 'auto' },
-    { key: 'rise', v: '0.15,0.35,0.55,0.8,1' },
-    { key: 'arc', v: '0.25,0.7,1,0.7,0.3' },
-    { key: 'fall', v: '1,0.8,0.55,0.35,0.15' },
-    { key: 'calm', v: '0.2,0.2,0.2,0.2,0.2' },
-    { key: 'full', v: '0.95,0.95,0.95,0.95,0.95' },
-  ]);
-  const AUTO_SHOWN = Object.freeze([0.35, 0.55, 0.7, 0.6, 0.4]);   // where the points wait while 自動 decides
-  const UNPIN = '\u0000auto';                                    // ui/widgets AUTO: 自動 clears the pin
-  const STEP = 0.05, STEP_BIG = 0.2;
-  const PAD = 10, PLOT_H = 72;
-
-  function clamp01(x) { return x < 0 ? 0 : x > 1 ? 1 : x; }
-
-  // valuesOf('0.2,0.5,…') → five numbers, or null for 'auto' and anything that is not five numbers.
-  function valuesOf(v) {
-    if (typeof v !== 'string') return null;
-    const xs = v.split(',');
-    if (xs.length !== N || xs.some((x) => !x.trim() || !Number.isFinite(Number(x)))) return null;
-    return xs.map((x) => clamp01(Number(x)));
-  }
-
-  function textOf(vals) { return vals.map((x) => String(Math.round(clamp01(x) * 100) / 100)).join(','); }
-
-  function make(field, env) {
-    const t = env.t;
-    const canvas = h('canvas', { class: 'gw-canvas', 'aria-hidden': 'true' });
-    const handleLayer = h('div', { class: 'gw-handles', role: 'group', 'aria-label': env.label });
-    const plot = h('div', { class: 'gw-plot' }, canvas, handleLayer);
-    const presets = PRESETS.map((p) => h('button', { class: 'chip-btn', type: 'button', 'data-key': p.key,
-      on: { click: () => { if (!st.readOnly) env.commit(p.v === 'auto' ? UNPIN : p.v); } } }, t('graph.' + p.key)));
-    const note = h('p', { class: 'note subtle gw-note' });
-    const el = h('div', { class: 'gw' }, h('div', { class: 'row-actions gw-presets' }, presets), plot, note);
-    const handles = [];
-    let st = { value: 'auto' }, cur = AUTO_SHOWN.slice(), auto = true, drag = null;
-
-    for (let i = 0; i < N; i++) {
-      const b = h('button', { class: 'cw-h gw-h', type: 'button', 'data-i': String(i) });
-      wire(b, i);
-      handles.push(b);
-      handleLayer.append(b);
-    }
-
-    function box() {
-      const r = canvas.getBoundingClientRect();
-      const W = Math.round(r.width) || 240, H = Math.round(r.height) || PLOT_H;
-      return { W, H, x: (i) => PAD + (i / (N - 1)) * (W - 2 * PAD), y: (v) => H - PAD - v * (H - 2 * PAD),
-        v: (py) => clamp01((H - PAD - py) / (H - 2 * PAD)), top: r.top };
-    }
-
-    function wire(b, i) {
-      b.addEventListener('pointerdown', (ev) => {
-        if (ev.button !== 0 || st.readOnly) return;
-        ev.preventDefault();
-        dom.focus(b);
-        drag = { g: env.gesture(), i };
-        b.setPointerCapture(ev.pointerId);
-      });
-      b.addEventListener('pointermove', (ev) => {
-        if (!drag) return;
-        const g = box();
-        cur[drag.i] = g.v(ev.clientY - g.top);
-        auto = false;
-        draw();
-        drag.g.set(textOf(cur));
-      });
-      const end = () => { if (drag) { drag.g.end(); drag = null; } };
-      b.addEventListener('pointerup', end);
-      b.addEventListener('pointercancel', end);
-      b.addEventListener('keydown', (ev) => {
-        if (ev.ctrlKey || ev.metaKey || ev.altKey || st.readOnly) return;
-        const step = ev.shiftKey ? STEP_BIG : STEP;
-        if (ev.key === 'ArrowUp' || ev.key === 'ArrowDown') {
-          cur[i] = clamp01(cur[i] + (ev.key === 'ArrowUp' ? step : -step));
-          auto = false;
-          draw();
-          env.commit(textOf(cur), { merge: true });
-        } else if (ev.key === 'ArrowLeft' || ev.key === 'ArrowRight') {
-          const j = i + (ev.key === 'ArrowLeft' ? -1 : 1);
-          if (j >= 0 && j < N) dom.focus(handles[j]);
-        } else return;
-        // the arrows belong to the point: they must not move the inspector's selection
-        ev.preventDefault();
-        ev.stopPropagation();
-      });
-    }
-
-    function draw() {
-      const g = box(), dpr = Math.min(2, window.devicePixelRatio || 1);
-      if (canvas.width !== Math.round(g.W * dpr)) canvas.width = Math.round(g.W * dpr);
-      if (canvas.height !== Math.round(g.H * dpr)) canvas.height = Math.round(g.H * dpr);
-      const c = canvas.getContext('2d');
-      c.setTransform(dpr, 0, 0, dpr, 0, 0);
-      c.clearRect(0, 0, g.W, g.H);
-      c.fillStyle = '#101318';
-      c.fillRect(0, 0, g.W, g.H);
-      c.strokeStyle = 'rgba(242,239,232,0.14)';
-      c.lineWidth = 1;
-      c.setLineDash([3, 3]);
-      for (const v of [0, 0.5, 1]) { c.beginPath(); c.moveTo(PAD, g.y(v)); c.lineTo(g.W - PAD, g.y(v)); c.stroke(); }
-      c.setLineDash(auto ? [5, 4] : []);
-      c.fillStyle = auto ? 'rgba(240,182,77,0.08)' : 'rgba(240,182,77,0.2)';
-      c.beginPath();
-      c.moveTo(g.x(0), g.y(0));
-      for (let i = 0; i < N; i++) c.lineTo(g.x(i), g.y(cur[i]));
-      c.lineTo(g.x(N - 1), g.y(0));
-      c.closePath();
-      c.fill();
-      c.strokeStyle = auto ? 'rgba(240,182,77,0.55)' : '#f0b64d';
-      c.lineWidth = 2;
-      c.beginPath();
-      for (let i = 0; i < N; i++) { if (i) c.lineTo(g.x(i), g.y(cur[i])); else c.moveTo(g.x(i), g.y(cur[i])); }
-      c.stroke();
-      c.setLineDash([]);
-      handles.forEach((b, i) => {
-        dom.setStyle(b, { left: g.x(i), top: g.y(cur[i]) });
-        b.setAttribute('aria-label', t('graph.point', { n: i + 1, v: Math.round(cur[i] * 100) }));
-        b.disabled = !!st.readOnly;
-      });
-    }
-
-    return {
-      el,
-      focus: () => dom.focus(handles[0]),
-      update(s) {
-        st = s || {};
-        if (drag) return;                                  // the drag owns the points until it ends
-        const vals = st.mixed ? null : valuesOf(st.value);
-        auto = !vals;
-        cur = vals ? vals.slice() : AUTO_SHOWN.slice();
-        const shown = st.mixed ? '' : (vals ? textOf(vals) : 'auto');
-        for (const b of presets) b.classList.toggle('on', PRESETS.find((p) => p.key === b.dataset.key).v === shown);
-        note.textContent = t(st.mixed ? 'state.mixed' : auto ? 'graph.autoNote' : 'graph.drawnNote');
-        // drawn after layout: the plot has no size until the row is in the panel
-        if (typeof requestAnimationFrame === 'function') requestAnimationFrame(draw); else draw();
-      },
-    };
-  }
-
-  return { make, valuesOf, textOf, PRESETS };
-});
 /* 文字PVメーカー v2 — original work. Original line icons drawn with createElementNS (24-unit grid, currentColor strokes). */
 MV.def('ui/icons', ['ui/dom'], (dom) => {
   'use strict';
@@ -61376,7 +61203,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
     const LINE = Object.freeze(['line']);
     const CUT = Object.freeze(['cut']);
     const WIDGETS = Object.freeze(['part', 'choice', 'number', 'time', 'color', 'font', 'toggle', 'words', 'cutpoints',
-      'text', 'slots', 'curve', 'graph', 'shot', 'rig', 'partRefs', 'media', 'trim', 'crop', 'extreme']);
+      'text', 'slots', 'curve', 'shot', 'rig', 'partRefs', 'media', 'trim', 'crop', 'extreme']);
     const FACE_ROLES = Object.freeze(['display', 'serif', 'body']);
     const FACE_SCRIPTS = Object.freeze(['ja', 'latin', 'ko', 'zhHant', 'zhHans']);
     const LIST_KINDS = Object.freeze(['ornament', 'filter']);
@@ -61629,7 +61456,6 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
       ];
     }
     const cutHasLine = (ctx) => !!(ctx.cut && ctx.cut.line);
-    const IL_SHAPES = ['lightMotes', 'soundHorizon', 'kineticShapes'].map((key) => 'arrange@' + key + '.shape');
 
     // --- pages ----------------------------------------------------------------------------------------------------
 
@@ -61648,10 +61474,6 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
           F({ path: REPEAT_SAME, scopes: WORK, widget: 'toggle', label: 'fld.repeatSame', spec: { type: 'bool' },
             note: 'fld.repeatSame.note', offClears: true, noDice: true }),
         ]),
-        // 間奏の強さ for every interlude of the work: one graph, written to the three interlude effects at once
-        sec('ilwork', true, [F({ path: IL_SHAPES[0], also: IL_SHAPES.slice(1), scopes: WORK, widget: 'graph',
-          label: 'fld.ilShapeAll', spec: { type: 'text', max: 60 } })],
-        { when: (ctx) => !!(ctx.plan && ctx.plan.cuts && ctx.plan.cuts.some((c) => c.role === 'interlude')) }),
         // 写真・動画 (DESIGN_2_1 §11.7.3): the library, open when it holds something.
         sec('media', (ctx) => ctx.mediaCount > 0, [], { custom: 'media' }),
         sec('colors', false, C.TOKENS.map((tok) => F({ path: 'color.' + tok, scopes: WORK, widget: 'color',
@@ -61735,10 +61557,6 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
             presets: [{ v: 'none', label: 'fld.gapLabel.none' }, { v: '♪', text: '♪' }, { v: 'heading', label: 'fld.gapLabel.heading' }],
             when: (ctx) => isRole('interlude')(ctx) && agreedKey(ctx, 'arrange') === 'breathMark' }),
         ]),
-        // 表現の強さ: how much the interlude effect does over its length (the graph widget; 自動 follows the song)
-        sec('ilshape', true, ['lightMotes', 'soundHorizon', 'kineticShapes'].map((key) => F({ path: 'arrange@' + key + '.shape',
-          scopes: CUT, widget: 'graph', label: 'fld.ilShape', spec: { type: 'text', max: 60 },
-          when: (ctx) => isRole('interlude')(ctx) && agreedKey(ctx, 'arrange') === key }))),
         sec('layout', true, [partField('arrange', 'kind.arrange'),
           F({ path: 'el.text.nudge', widget: 'number', label: 'fld.nudge', spec: SPEC.nudge }), textScaleField()]),
         sec('motion', true, [partField('arrive', 'kind.arrive'), partField('dwell', 'kind.dwell'), partField('depart', 'kind.depart'),
@@ -62062,15 +61880,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
       if (field.lineOf) return ctx.cut && ctx.cut.line ? ['line/' + ctx.cut.line + ':' + field.path] : [];
       if (field.firstCut && ctx.lineIds.length) return ctx.lineIds.map((id) => firstCutScope(ctx, id) + ':' + field.path);
       if (ctx.page === 'lines') return ctx.lineIds.map((id) => 'line/' + id + ':' + field.path);
-      if (!field.also) return [ctx.scope + ':' + field.path];
-      // `also`: more slots the same row writes at the same scope (間奏の強さ for every interlude effect at once); the
-      // slots of parts the plan uses come first, so the row shows the state of one that is in use
-      const used = (slot) => {
-        const part = partOfSlot(slot), cuts = ctx.plan && Array.isArray(ctx.plan.cuts) ? ctx.plan.cuts : [];
-        return !!part && cuts.some((c) => c.slots && c.slots[part.kind] && c.slots[part.kind].v === part.key);
-      };
-      const slots = [field.path].concat(field.also);
-      return slots.filter(used).concat(slots.filter((x) => !used(x))).map((p) => ctx.scope + ':' + p);
+      return [ctx.scope + ':' + field.path];
     }
 
     // clearPathsFor(field, ctx) → the paths × / Del may clear: pathsFor, plus (firstCut fields) the line-scope pin of
@@ -68241,17 +68051,16 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
   return { mount, radioKeys };
 });
 /* 文字PVメーカー v2 — original work. Step ③ 見た目: mood chips, theme swatches (hover = try-on), screen shape, 詳しく…, AI 3 looks (DESIGN §6.4.3). */
-MV.def('ui/step_look', ['ui/dom', 'ui/icons', 'core/doc', 'ui/graph_widget', 'ui/fields', 'i18n/t'], (dom, I, D, GW, F, T) => {
+MV.def('ui/step_look', ['ui/dom', 'ui/icons', 'core/doc', 'ui/fields', 'i18n/t'], (dom, I, D, F, T) => {
   'use strict';
 
   const { h } = dom;
   const THEMES_SHOWN = 12;
   const TRYON_MS = 250;
   const MAIN_ASPECTS = ['16:9', '9:16', '1:1'];
-  // 間奏の動き: one 表現の強さ graph per interlude of the song, written at that interlude's cut for the three interlude
-  // effects (what its own page in 詳細 writes); its name seeks there. A cut pin wins over the 全体 one (詳細 › 全体).
+  // 間奏の演出: per interlude of the song, its effect (自動 or one of the three, pinned at that interlude's cut); its
+  // name seeks there.
   const IL_KEYS = ['lightMotes', 'soundHorizon', 'kineticShapes'];
-  const IL_UNPIN = '\u0000auto';
 
   function mount(app) {
     const t = app.t;
@@ -68272,7 +68081,7 @@ MV.def('ui/step_look', ['ui/dom', 'ui/icons', 'core/doc', 'ui/graph_widget', 'ui
         h('div', { class: 'legend', text: t('look.autoMark') })),
       h('div', { class: 'field' }, h('div', { class: 'field-label', text: t('kind.theme') }), themes),
       h('div', { class: 'field' }, h('div', { class: 'field-label', text: t('look.shape') }), shapes),
-      h('div', { class: 'field', 'data-ctl': 'ilwork' }, h('div', { class: 'field-label', text: t('sec.ilwork') }), ilList),
+      h('div', { class: 'field', 'data-ctl': 'ilwork' }, h('div', { class: 'field-label', text: t('il.title') }), ilList),
       h('div', { class: 'row-actions' }, moreBtn, aiBtn),
       h('p', { class: 'note subtle', text: t('look.rule') }));
 
@@ -68370,28 +68179,10 @@ MV.def('ui/step_look', ['ui/dom', 'ui/icons', 'core/doc', 'ui/graph_widget', 'ui
     }
 
     // --- 間奏の動き ---
-    const ilPath = (key, k) => 'cut/' + key + ':arrange@' + k + '.shape';
     const fmt = (x) => T.fmtTime(x).replace(/\.\d+$/, '');
-
-    function ilCmds(key, v) {
-      const plan = app.plan;
-      return IL_KEYS.map((k) => {
-        if (v !== IL_UNPIN) return F.pinCmd(ilPath(key, k), v, plan, app.svc.pinSig);
-        const at = F.writePath(ilPath(key, k), plan);
-        return app.doc.pins[at] ? { t: 'pin.clear', path: at } : null;
-      }).filter(Boolean);
-    }
 
     function ilRow(key, n) {
       const name = t('il.name', { n });
-      const meta = (mergeKey) => Object.assign({ label: ['undo.pin', { field: t('fld.ilShape'), scope: name }] }, mergeKey ? { mergeKey } : {});
-      const commit = (v, m) => { const cmds = ilCmds(key, v); if (cmds.length) app.batch(m, cmds); };
-      const graph = GW.make({ path: ilPath(key, IL_KEYS[0]) }, { t, label: name,
-        commit: (v, o) => commit(v, meta(o && o.merge ? 'look:il:' + key : null)),
-        gesture: () => {
-          const g = app.store.gesture('gesture:look:il:' + key);
-          return { set: (v) => commit(v, meta('gesture:look:il:' + key)), end: () => g.end() };
-        } });
       const head = h('button', { class: 'link il-name', type: 'button' });
       head.addEventListener('click', () => { const c = app.plan && app.plan.cuts.find((x) => x.key === key); if (c) app.seek(c.t0); });
       // the effect of this interlude: 自動 or one of the three, pinned at its cut (a tap on the pinned one unpins it)
@@ -68403,7 +68194,7 @@ MV.def('ui/step_look', ['ui/dom', 'ui/icons', 'core/doc', 'ui/graph_widget', 'ui
         if (pin && pin.v === b.dataset.key) app.dispatch({ t: 'pin.clear', path: at }, { label });
         else app.dispatch(F.pinCmd(path, b.dataset.key, app.plan, app.svc.pinSig), { label });
       });
-      return { key, head, fx, graph, el: h('div', { class: 'il-row', 'data-cut': key }, head, fx, graph.el) };
+      return { key, head, fx, el: h('div', { class: 'il-row', 'data-cut': key }, head, fx) };
     }
 
     function renderInterludes() {
@@ -68427,9 +68218,6 @@ MV.def('ui/step_look', ['ui/dom', 'ui/icons', 'core/doc', 'ui/graph_widget', 'ui
           b.setAttribute('aria-pressed', String(pinned));
           b.textContent = app.label('arrange', b.dataset.key) + (on && !pinned ? ' ' + t('look.autoStar') : '');
         }
-        const own = IL_KEYS.map((k) => app.doc.pins[F.writePath(ilPath(r.key, k), plan)]).find(Boolean);
-        const all = IL_KEYS.map((k) => app.doc.pins['work:arrange@' + k + '.shape']).find(Boolean);
-        r.graph.update({ value: (own || all || { v: 'auto' }).v });
       });
     }
 
@@ -70793,9 +70581,9 @@ MV.def('ui/view', ['ui/layout', 'ui/selection'], (L, S) => {
 
   return { STEPS, PANELS, MODES, PREF_KEY, DEFAULT_PREFS, createView, readPrefs, isMuted };
 });
-/* 文字PVメーカー v2 — original work. Inspector widgets: part, choice, number, time, color, font, toggle, words, cutpoints, text, slots, curve, graph, shot, rig, partRefs, media, trim, crop, extreme (DESIGN §6.4.4; DESIGN_2_1 §6.5, §6.6, §11.7.4–§11.7.7; DESIGN_EXTREME §2.6). */
-MV.def('ui/widgets', ['ui/dom', 'ui/icons', 'i18n/t', 'core/color', 'ui/playbar', 'core/shot', 'ui/curve_widget', 'ui/media_widgets', 'ui/graph_widget'],
-  (dom, I, T, C, PB, SHOT, CW, MW, GW) => {
+/* 文字PVメーカー v2 — original work. Inspector widgets: part, choice, number, time, color, font, toggle, words, cutpoints, text, slots, curve, shot, rig, partRefs, media, trim, crop, extreme (DESIGN §6.4.4; DESIGN_2_1 §6.5, §6.6, §11.7.4–§11.7.7; DESIGN_EXTREME §2.6). */
+MV.def('ui/widgets', ['ui/dom', 'ui/icons', 'i18n/t', 'core/color', 'ui/playbar', 'core/shot', 'ui/curve_widget', 'ui/media_widgets'],
+  (dom, I, T, C, PB, SHOT, CW, MW) => {
   'use strict';
 
   const { h } = dom;
@@ -71530,7 +71318,7 @@ MV.def('ui/widgets', ['ui/dom', 'ui/icons', 'i18n/t', 'core/color', 'ui/playbar'
     };
   }
 
-  const MAKERS = { part, choice, number, time, color, font, toggle, words, cutpoints, text, slots, curve: CW.make, graph: GW.make, shot, rig, partRefs,
+  const MAKERS = { part, choice, number, time, color, font, toggle, words, cutpoints, text, slots, curve: CW.make, shot, rig, partRefs,
     media: MW.media, trim: MW.trim, crop: (field, env) => MW.crop(field, env, number), extreme };
 
   function make(field, env) {

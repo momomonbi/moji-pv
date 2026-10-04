@@ -20,7 +20,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
     const LINE = Object.freeze(['line']);
     const CUT = Object.freeze(['cut']);
     const WIDGETS = Object.freeze(['part', 'choice', 'number', 'time', 'color', 'font', 'toggle', 'words', 'cutpoints',
-      'text', 'slots', 'curve', 'graph', 'shot', 'rig', 'partRefs', 'media', 'trim', 'crop', 'extreme']);
+      'text', 'slots', 'curve', 'shot', 'rig', 'partRefs', 'media', 'trim', 'crop', 'extreme']);
     const FACE_ROLES = Object.freeze(['display', 'serif', 'body']);
     const FACE_SCRIPTS = Object.freeze(['ja', 'latin', 'ko', 'zhHant', 'zhHans']);
     const LIST_KINDS = Object.freeze(['ornament', 'filter']);
@@ -273,7 +273,6 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
       ];
     }
     const cutHasLine = (ctx) => !!(ctx.cut && ctx.cut.line);
-    const IL_SHAPES = ['lightMotes', 'soundHorizon', 'kineticShapes'].map((key) => 'arrange@' + key + '.shape');
 
     // --- pages ----------------------------------------------------------------------------------------------------
 
@@ -292,10 +291,6 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
           F({ path: REPEAT_SAME, scopes: WORK, widget: 'toggle', label: 'fld.repeatSame', spec: { type: 'bool' },
             note: 'fld.repeatSame.note', offClears: true, noDice: true }),
         ]),
-        // 間奏の強さ for every interlude of the work: one graph, written to the three interlude effects at once
-        sec('ilwork', true, [F({ path: IL_SHAPES[0], also: IL_SHAPES.slice(1), scopes: WORK, widget: 'graph',
-          label: 'fld.ilShapeAll', spec: { type: 'text', max: 60 } })],
-        { when: (ctx) => !!(ctx.plan && ctx.plan.cuts && ctx.plan.cuts.some((c) => c.role === 'interlude')) }),
         // 写真・動画 (DESIGN_2_1 §11.7.3): the library, open when it holds something.
         sec('media', (ctx) => ctx.mediaCount > 0, [], { custom: 'media' }),
         sec('colors', false, C.TOKENS.map((tok) => F({ path: 'color.' + tok, scopes: WORK, widget: 'color',
@@ -379,10 +374,6 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
             presets: [{ v: 'none', label: 'fld.gapLabel.none' }, { v: '♪', text: '♪' }, { v: 'heading', label: 'fld.gapLabel.heading' }],
             when: (ctx) => isRole('interlude')(ctx) && agreedKey(ctx, 'arrange') === 'breathMark' }),
         ]),
-        // 表現の強さ: how much the interlude effect does over its length (the graph widget; 自動 follows the song)
-        sec('ilshape', true, ['lightMotes', 'soundHorizon', 'kineticShapes'].map((key) => F({ path: 'arrange@' + key + '.shape',
-          scopes: CUT, widget: 'graph', label: 'fld.ilShape', spec: { type: 'text', max: 60 },
-          when: (ctx) => isRole('interlude')(ctx) && agreedKey(ctx, 'arrange') === key }))),
         sec('layout', true, [partField('arrange', 'kind.arrange'),
           F({ path: 'el.text.nudge', widget: 'number', label: 'fld.nudge', spec: SPEC.nudge }), textScaleField()]),
         sec('motion', true, [partField('arrive', 'kind.arrive'), partField('dwell', 'kind.dwell'), partField('depart', 'kind.depart'),
@@ -706,15 +697,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
       if (field.lineOf) return ctx.cut && ctx.cut.line ? ['line/' + ctx.cut.line + ':' + field.path] : [];
       if (field.firstCut && ctx.lineIds.length) return ctx.lineIds.map((id) => firstCutScope(ctx, id) + ':' + field.path);
       if (ctx.page === 'lines') return ctx.lineIds.map((id) => 'line/' + id + ':' + field.path);
-      if (!field.also) return [ctx.scope + ':' + field.path];
-      // `also`: more slots the same row writes at the same scope (間奏の強さ for every interlude effect at once); the
-      // slots of parts the plan uses come first, so the row shows the state of one that is in use
-      const used = (slot) => {
-        const part = partOfSlot(slot), cuts = ctx.plan && Array.isArray(ctx.plan.cuts) ? ctx.plan.cuts : [];
-        return !!part && cuts.some((c) => c.slots && c.slots[part.kind] && c.slots[part.kind].v === part.key);
-      };
-      const slots = [field.path].concat(field.also);
-      return slots.filter(used).concat(slots.filter((x) => !used(x))).map((p) => ctx.scope + ':' + p);
+      return [ctx.scope + ':' + field.path];
     }
 
     // clearPathsFor(field, ctx) → the paths × / Del may clear: pathsFor, plus (firstCut fields) the line-scope pin of

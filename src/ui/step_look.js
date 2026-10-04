@@ -1,15 +1,14 @@
 /* 文字PVメーカー v2 — original work. Step ③ 見た目: mood chips, theme swatches (hover = try-on), screen shape, 詳しく…, AI 3 looks (DESIGN §6.4.3). */
-MV.def('ui/step_look', ['ui/dom', 'ui/icons', 'core/doc', 'ui/graph_widget', 'ui/fields', 'i18n/t'], (dom, I, D, GW, F, T) => {
+MV.def('ui/step_look', ['ui/dom', 'ui/icons', 'core/doc', 'ui/fields', 'i18n/t'], (dom, I, D, F, T) => {
   'use strict';
 
   const { h } = dom;
   const THEMES_SHOWN = 12;
   const TRYON_MS = 250;
   const MAIN_ASPECTS = ['16:9', '9:16', '1:1'];
-  // 間奏の動き: one 表現の強さ graph per interlude of the song, written at that interlude's cut for the three interlude
-  // effects (what its own page in 詳細 writes); its name seeks there. A cut pin wins over the 全体 one (詳細 › 全体).
+  // 間奏の演出: per interlude of the song, its effect (自動 or one of the three, pinned at that interlude's cut); its
+  // name seeks there.
   const IL_KEYS = ['lightMotes', 'soundHorizon', 'kineticShapes'];
-  const IL_UNPIN = '\u0000auto';
 
   function mount(app) {
     const t = app.t;
@@ -30,7 +29,7 @@ MV.def('ui/step_look', ['ui/dom', 'ui/icons', 'core/doc', 'ui/graph_widget', 'ui
         h('div', { class: 'legend', text: t('look.autoMark') })),
       h('div', { class: 'field' }, h('div', { class: 'field-label', text: t('kind.theme') }), themes),
       h('div', { class: 'field' }, h('div', { class: 'field-label', text: t('look.shape') }), shapes),
-      h('div', { class: 'field', 'data-ctl': 'ilwork' }, h('div', { class: 'field-label', text: t('sec.ilwork') }), ilList),
+      h('div', { class: 'field', 'data-ctl': 'ilwork' }, h('div', { class: 'field-label', text: t('il.title') }), ilList),
       h('div', { class: 'row-actions' }, moreBtn, aiBtn),
       h('p', { class: 'note subtle', text: t('look.rule') }));
 
@@ -128,28 +127,10 @@ MV.def('ui/step_look', ['ui/dom', 'ui/icons', 'core/doc', 'ui/graph_widget', 'ui
     }
 
     // --- 間奏の動き ---
-    const ilPath = (key, k) => 'cut/' + key + ':arrange@' + k + '.shape';
     const fmt = (x) => T.fmtTime(x).replace(/\.\d+$/, '');
-
-    function ilCmds(key, v) {
-      const plan = app.plan;
-      return IL_KEYS.map((k) => {
-        if (v !== IL_UNPIN) return F.pinCmd(ilPath(key, k), v, plan, app.svc.pinSig);
-        const at = F.writePath(ilPath(key, k), plan);
-        return app.doc.pins[at] ? { t: 'pin.clear', path: at } : null;
-      }).filter(Boolean);
-    }
 
     function ilRow(key, n) {
       const name = t('il.name', { n });
-      const meta = (mergeKey) => Object.assign({ label: ['undo.pin', { field: t('fld.ilShape'), scope: name }] }, mergeKey ? { mergeKey } : {});
-      const commit = (v, m) => { const cmds = ilCmds(key, v); if (cmds.length) app.batch(m, cmds); };
-      const graph = GW.make({ path: ilPath(key, IL_KEYS[0]) }, { t, label: name,
-        commit: (v, o) => commit(v, meta(o && o.merge ? 'look:il:' + key : null)),
-        gesture: () => {
-          const g = app.store.gesture('gesture:look:il:' + key);
-          return { set: (v) => commit(v, meta('gesture:look:il:' + key)), end: () => g.end() };
-        } });
       const head = h('button', { class: 'link il-name', type: 'button' });
       head.addEventListener('click', () => { const c = app.plan && app.plan.cuts.find((x) => x.key === key); if (c) app.seek(c.t0); });
       // the effect of this interlude: 自動 or one of the three, pinned at its cut (a tap on the pinned one unpins it)
@@ -161,7 +142,7 @@ MV.def('ui/step_look', ['ui/dom', 'ui/icons', 'core/doc', 'ui/graph_widget', 'ui
         if (pin && pin.v === b.dataset.key) app.dispatch({ t: 'pin.clear', path: at }, { label });
         else app.dispatch(F.pinCmd(path, b.dataset.key, app.plan, app.svc.pinSig), { label });
       });
-      return { key, head, fx, graph, el: h('div', { class: 'il-row', 'data-cut': key }, head, fx, graph.el) };
+      return { key, head, fx, el: h('div', { class: 'il-row', 'data-cut': key }, head, fx) };
     }
 
     function renderInterludes() {
@@ -185,9 +166,6 @@ MV.def('ui/step_look', ['ui/dom', 'ui/icons', 'core/doc', 'ui/graph_widget', 'ui
           b.setAttribute('aria-pressed', String(pinned));
           b.textContent = app.label('arrange', b.dataset.key) + (on && !pinned ? ' ' + t('look.autoStar') : '');
         }
-        const own = IL_KEYS.map((k) => app.doc.pins[F.writePath(ilPath(r.key, k), plan)]).find(Boolean);
-        const all = IL_KEYS.map((k) => app.doc.pins['work:arrange@' + k + '.shape']).find(Boolean);
-        r.graph.update({ value: (own || all || { v: 'auto' }).v });
       });
     }
 
