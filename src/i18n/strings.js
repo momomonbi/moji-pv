@@ -1951,6 +1951,7 @@ MV.def('i18n/strings', [], () => ({
   'param.depth': ['動きと重なり', 'Motion and layering'],
   'opt.auto': ['おまかせ', 'Auto'],
   'opt.depth.auto': ['おまかせ', 'Auto'],
+  'opt.autoNow': ['おまかせ（いまは：{v}）', 'Auto (now: {v})'],
   'opt.depth.anim': ['演出と一緒に動かす', 'Move with the animation'],
   'opt.depth.front': ['文字の前に出す', 'In front of the text'],
   'opt.depth.back': ['後ろに下げる', 'Push back'],

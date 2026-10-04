@@ -102,8 +102,13 @@ MV.def('ui/widgets', ['ui/dom', 'ui/icons', 'i18n/t', 'core/color', 'ui/playbar'
         update(st) {
           current = st.auto && (field.auto || field.autoValue !== undefined) ? autoV : st.mixed ? null : st.value;
           let stop = -1;
+          // the 自動 option says what it chose now (動きと重なり: 「おまかせ（いまは：後ろに下げる）」)
+          const chosen = st.auto && field.autoValue !== undefined ? options.find((o) => o.v !== autoV && same(o.v, st.value)) : null;
           options.forEach((o, i) => {
             const on = !st.mixed && same(o.v, current);
+            if (field.autoValue !== undefined && o.v === autoV) {
+              buttons[i].textContent = chosen ? t('opt.autoNow', { v: optionText(t, chosen) }) : optionText(t, o);
+            }
             buttons[i].setAttribute('aria-checked', String(on));
             buttons[i].disabled = !!st.readOnly;
             if (on) stop = i;
