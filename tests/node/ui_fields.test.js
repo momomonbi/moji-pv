@@ -269,7 +269,9 @@ test('every registry param maps to a widget and a valid slot path', () => {
       const params = reg.params(def.kind, def.key);
       const idx = F.LIST_KINDS.includes(def.kind) ? 1 : null;
       const fields = F.paramFields(def.kind, idx, def.key, reg);
-      assert.equal(fields.length, params.length, name + ' ' + def.kind + '/' + def.key);
+      // params kept for saved documents but no longer offered (F.HIDDEN_PARAMS) have no row
+      const offered = params.filter((p) => !F.HIDDEN_PARAMS.has(def.kind + '@' + def.key + '.' + p.name));
+      assert.equal(fields.length, offered.length, name + ' ' + def.kind + '/' + def.key);
       for (const f of fields) {
         assert.ok(F.WIDGETS.includes(f.widget), name + ' ' + f.path + ': widget for ' + f.spec.type);
         assert.ok(F.slotScopes(f.path).length === 3, name + ' ' + f.path + ' is a cut slot');

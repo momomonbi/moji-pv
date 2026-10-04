@@ -580,6 +580,9 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
 
     // paramFields(kind, idx, partKey, registry, { shared, part, section, scopes }) → generated FieldSpecs for the
     // parameters of a part (shared ones by `kind.param`, own ones by `kind@key.param`). partKey null → shared only.
+    // Params kept for saved documents but no longer offered: the interlude effects' 表現の強さ (自動 follows the song).
+    const HIDDEN_PARAMS = new Set(['lightMotes', 'soundHorizon', 'kineticShapes'].map((key) => 'arrange@' + key + '.shape'));
+
     function paramFields(kind, idx, partKey, registry, o) {
       const opt = o || {};
       const regKind = kind === 'atmos' ? 'ornament' : kind;
@@ -593,6 +596,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
       for (const p of list) {
         if (p.shared ? opt.shared === false : opt.part === false) continue;
         const slot = P.slotParamPath(kind, idx === undefined ? null : idx, p.shared ? null : partKey, p.name, p.shared);
+        if (HIDDEN_PARAMS.has(slot)) continue;
         out.push(Object.freeze({
           id: (opt.page || 'param') + '/' + (opt.section || 'param') + '/' + slot, key: slot, path: slot,
           scopes: opt.scopes || ALL, section: opt.section || null, page: opt.page || null, widget: widgetFor(p.spec),
@@ -919,7 +923,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
 
     return {
       WIDGETS, FIELDS, PAGES: PAGE_SECTIONS, FACE_ROLES, FACE_SCRIPTS, LIST_KINDS, SLOT_KINDS, COMMANDS_USED, SNAPS, SEASONS,
-      PARAM_LABEL, sectionsFor, contextOf, pageOf, paramFields, widgetFor, optionsFor, slotScopes, fieldPath, decisionsOf, freeIndex,
+      PARAM_LABEL, HIDDEN_PARAMS, sectionsFor, contextOf, pageOf, paramFields, widgetFor, optionsFor, slotScopes, fieldPath, decisionsOf, freeIndex,
       agreedKey, sharedNames, pathsFor, clearPathsFor, firstCutScope, pinnedSlots, withPinnedParams, writePath, writeScope,
       pinCmd, whyParts, whyRuleKey, areaLabel, areaTitle,
     };

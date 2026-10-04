@@ -8,6 +8,7 @@ MV.def('ui/playbar', ['ui/dom', 'ui/icons', 'ui/looks', 'ui/selection', 'ui/time
   // in the time readout, 3 makes おまかせ icon-only (its name stays for screen readers), 4 tightens the spacing.
   const FIT_MAX = 4;
   const TIME_RE = /^\s*(?:(\d+):)?(\d+(?:\.\d*)?)\s*$/;
+  const IL_INK = 'rgba(167,139,250,0.45)'; // an interlude (間奏) on the lane: selectable, so it shows as a block of its own
   const CUT_TOP = 0.2;                 // the cut blocks fill the lane from 20 % to 80 % of its height; the area bands (DESIGN_2_1
   const CUT_BOTTOM = 0.8;              // §6.8) run in the strip above them
   const BAND_INK = Object.freeze(['rgba(240,182,77,0.55)', 'rgba(124,196,255,0.5)']);
@@ -114,6 +115,9 @@ MV.def('ui/playbar', ['ui/dom', 'ui/icons', 'ui/looks', 'ui/selection', 'ui/time
       const r = lane.getBoundingClientRect();
       const band = ev.clientY - r.top < r.height * CUT_TOP ? TL.bandAt(bands(), tt) : null;
       if (band) { app.select(S.areaSel(band.area), { from: 'timeline', open: true }); return; }
+      // an interlude (間奏) is selected on its own; elsewhere the line there (or the one before)
+      const gap = plan && plan.cuts.find((c) => c.role === 'interlude' && c.t0 <= tt && tt < c.t1);
+      if (gap) { app.select({ level: 'cut', key: gap.key }, { from: 'timeline', open: true }); return; }
       const line = plan && plan.lines.find((l) => l.t0 <= tt && tt < l.t1) || plan && plan.lines.slice().reverse().find((l) => l.t0 <= tt);
       if (line) app.select({ level: 'line', ids: [line.id] }, { from: 'timeline', open: true });
     });
@@ -242,7 +246,7 @@ MV.def('ui/playbar', ['ui/dom', 'ui/icons', 'ui/looks', 'ui/selection', 'ui/time
         const x0 = x(c.t0), x1 = Math.max(x0 + 1, x(c.t1) - dpr);
         const special = !c.line;
         const on = selCuts.has(c.key) || hl.has(c.line);
-        lctx.fillStyle = special ? 'rgba(255,255,255,0.10)' : on ? '#e2553b' : i % 2 ? '#3b4252' : '#465063';
+        lctx.fillStyle = on ? '#e2553b' : c.role === 'interlude' ? IL_INK : special ? 'rgba(255,255,255,0.10)' : i % 2 ? '#3b4252' : '#465063';
         lctx.fillRect(x0, top, x1 - x0, bottom - top);
         const line = c.line ? lineOf.get(c.line) : null;
         if (line && line.locked) hatch(x0, x1, top, bottom);
