@@ -193,7 +193,10 @@ MV.def('planner/areas', ['core/paths', 'core/lyrics', 'planner/features'], (P, L
       const keys = ix.cutsOfLine.get(cut.line) || [];
       label = ['area.cut', { n: lineNumber(ix, cut.line), k: keys.indexOf(key) + 1 }];
     } else if (key.startsWith('gap/')) {
-      label = ['crumb.gap', { n: lineNumber(ix, key.slice(4)) }];
+      const part = /~([2-9])$/.exec(key), base = part ? key.slice(0, -2) : key;
+      const n = lineNumber(ix, base.slice(4));
+      label = part ? ['crumb.gapPart', { n, k: Number(part[1]) }]
+        : ix.cutByKey.has(key + '~2') ? ['crumb.gapPart', { n, k: 1 }] : ['crumb.gap', { n }];
     } else label = ['crumb.' + key, {}];
     return makeArea(ix, { kind: 'cut', key }, 'cut', label, cut.line ? [cut.line] : [], cut.line ? [] : [key],
       [cut.t0, cut.t1], null);
@@ -280,5 +283,21 @@ MV.def('planner/areas', ['core/paths', 'core/lyrics', 'planner/features'], (P, L
       .sort((a, b) => a.t0 - b.t0 || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
   }
 
-  return { AREA_KINDS, keyOf, areasOf, resolve, inArea, ofLines, bands, sameRef };
+  // The interludes in time order (the intro and every gap; the parts of a split one share its number):
+  // Map<cutKey, { n, k, of }> (k: the part, from 1; of: how many parts it has).
+  function interludes(plan) {
+    const groups = new Map();
+    for (const c of plan && Array.isArray(plan.cuts) ? plan.cuts : []) {
+      if (c.role !== 'interlude') continue;
+      const base = c.key.replace(/~[2-9]$/, '');
+      if (!groups.has(base)) groups.set(base, []);
+      groups.get(base).push(c.key);
+    }
+    const out = new Map();
+    let n = 0;
+    for (const keys of groups.values()) { n++; keys.forEach((key, i) => out.set(key, { n, k: i + 1, of: keys.length })); }
+    return out;
+  }
+
+  return { AREA_KINDS, keyOf, areasOf, resolve, inArea, ofLines, bands, sameRef, interludes };
 });

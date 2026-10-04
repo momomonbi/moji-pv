@@ -1,5 +1,5 @@
 /* 文字PVメーカー v2 — original work. Step ③ 見た目: mood chips, theme swatches (hover = try-on), screen shape, 詳しく…, AI 3 looks (DESIGN §6.4.3). */
-MV.def('ui/step_look', ['ui/dom', 'ui/icons', 'core/doc', 'ui/fields', 'i18n/t'], (dom, I, D, F, T) => {
+MV.def('ui/step_look', ['ui/dom', 'ui/icons', 'core/doc', 'ui/fields', 'i18n/t', 'planner/areas'], (dom, I, D, F, T, AREAS) => {
   'use strict';
 
   const { h } = dom;
@@ -129,8 +129,10 @@ MV.def('ui/step_look', ['ui/dom', 'ui/icons', 'core/doc', 'ui/fields', 'i18n/t']
     // --- 間奏の動き ---
     const fmt = (x) => T.fmtTime(x).replace(/\.\d+$/, '');
 
-    function ilRow(key, n) {
-      const name = t('il.name', { n });
+    const ilName = (info) => (info.of > 1 ? t('il.namePart', { n: info.n, k: info.k }) : t('il.name', { n: info.n }));
+
+    function ilRow(key, info) {
+      const name = ilName(info);
       const head = h('button', { class: 'link il-name', type: 'button' });
       head.addEventListener('click', () => { const c = app.plan && app.plan.cuts.find((x) => x.key === key); if (c) app.seek(c.t0); });
       // the effect of this interlude: 自動 or one of the three, pinned at its cut (a tap on the pinned one unpins it)
@@ -142,7 +144,7 @@ MV.def('ui/step_look', ['ui/dom', 'ui/icons', 'core/doc', 'ui/fields', 'i18n/t']
         if (pin && pin.v === b.dataset.key) app.dispatch({ t: 'pin.clear', path: at }, { label });
         else app.dispatch(F.pinCmd(path, b.dataset.key, app.plan, app.svc.pinSig), { label });
       });
-      return { key, head, fx, el: h('div', { class: 'il-row', 'data-cut': key }, head, fx) };
+      return { key, info, head, fx, el: h('div', { class: 'il-row', 'data-cut': key }, head, fx) };
     }
 
     function renderInterludes() {
@@ -151,12 +153,13 @@ MV.def('ui/step_look', ['ui/dom', 'ui/icons', 'core/doc', 'ui/fields', 'i18n/t']
       const sig = cuts.map((c) => c.key).join('|');
       if (sig !== ilSig) {
         ilSig = sig;
-        ilRows = cuts.map((c, i) => ilRow(c.key, i + 1));
+        const names = AREAS.interludes(plan);
+        ilRows = cuts.map((c) => ilRow(c.key, names.get(c.key)));
         dom.replace(ilList, ilRows.length ? ilRows.map((r) => r.el) : [h('p', { class: 'note subtle', text: t('il.none') })]);
       }
       ilRows.forEach((r, i) => {
         const c = cuts[i];
-        r.head.textContent = t('il.name', { n: i + 1 }) + '　' + fmt(c.t0) + '–' + fmt(c.t1);
+        r.head.textContent = ilName(r.info) + '　' + fmt(c.t0) + '–' + fmt(c.t1);
         const pin = app.doc.pins[F.writePath('cut/' + r.key + ':arrange', plan)];
         const now = c.slots && c.slots.arrange ? c.slots.arrange.v : null;
         for (const b of r.fx.children) {

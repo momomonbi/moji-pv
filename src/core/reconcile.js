@@ -371,7 +371,8 @@ MV.def('core/reconcile', ['core/lyrics', 'core/script', 'core/paths'], (L, S, P)
     const cut = scope.slice(4);
     const m = LINE_CUT.exec(cut);
     if (m) return { line: m[1], off: Number(m[2]), gap: false };
-    if (cut.startsWith('gap/') && P.isLineId(cut.slice(4))) return { line: cut.slice(4), off: null, gap: true };
+    const g = /^gap\/([^~]+)(?:~[2-9])?$/.exec(cut);
+    if (g && P.isLineId(g[1])) return { line: g[1], off: null, gap: true };
     return null;
   }
 

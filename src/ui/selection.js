@@ -174,9 +174,12 @@ MV.def('ui/selection', ['core/paths', 'planner/areas'], (P, AREAS) => {
       return out;
     }
     if (SPECIAL_LABEL[key]) return [{ sel: cutSel(key), label: [SPECIAL_LABEL[key], {}] }];
-    const after = String(key).startsWith('gap/') ? ix.lineById.get(key.slice(4)) : null;
+    const part = /~([2-9])$/.exec(String(key)), base = part ? String(key).slice(0, -2) : String(key);
+    const after = base.startsWith('gap/') ? ix.lineById.get(base.slice(4)) : null;
     const n = after ? (after.index === undefined ? after.pos : after.index) + 1 : '?';
-    return cut || after ? [{ sel: cutSel(key), label: ['crumb.gap', { n }] }] : [];
+    const split = part || ix.cutByKey.has(key + '~2');
+    const label = split ? ['crumb.gapPart', { n, k: part ? Number(part[1]) : 1 }] : ['crumb.gap', { n }];
+    return cut || after ? [{ sel: cutSel(key), label }] : [];
   }
 
   function elCrumb(sel) {
