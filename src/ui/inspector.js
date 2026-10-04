@@ -58,7 +58,11 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       const args = {};
       for (const k of Object.keys(field.labelArgs || {})) args[k] = t(field.labelArgs[k]);
       if (field.labelText) args.name = field.labelText[t.lang] || field.labelText.ja || field.key;
-      return field.label ? t(field.label, args) : args.name || field.key;
+      const base = field.label ? t(field.label, args) : args.name || field.key;
+      // a pinned parameter of a part not shown here says whose it is: 音への反応（光の波形）
+      if (!field.pinnedOnly || !field.param || !field.param.key) return base;
+      const kind = field.param.kind === 'atmos' ? 'ornament' : field.param.kind;
+      return base + t('fld.ofPart', { part: app.label(kind, field.param.key) || field.param.key });
     }
 
     const listText = (items) => items.join(t('list.sep'));
@@ -527,7 +531,18 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       const meta = { label: ['undo.pin', { field: labelOf(field), scope: scopeLabel(ctx) }], where: { scope: ctx.scope, field: field.path } };
       if (o.mergeKey) meta.mergeKey = o.mergeKey;
       else if (o.merge) meta.mergeKey = 'field:' + row.path;
-      run(pathsOf(field, ctx).map((path) => pinCmd(path, value)), meta);
+      const paths = pathsOf(field, ctx);
+      const cmds = paths.map((path) => pinCmd(path, value));
+      // a setting of an interlude effect chosen automatically keeps that effect too: a later automatic pick (a split, a
+      // new song) would otherwise leave the setting unused (無効)
+      const prm = field.param;
+      if (prm && !prm.shared && prm.key && ctx.cut && ctx.cut.role === 'interlude' && !(row.fs && row.fs.state === 'inactive')) {
+        for (const path of paths) {
+          const part = path.slice(0, path.indexOf('@'));
+          if (path.indexOf('@') > 0 && !doc().pins[F.writePath(part, plan())]) cmds.push(pinCmd(part, prm.key));
+        }
+      }
+      run(cmds, meta);
       reportShadowed(row, ctx);
     }
 

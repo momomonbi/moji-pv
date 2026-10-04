@@ -232,16 +232,35 @@ MV.def('ai/direct', ['core/pins', 'core/paths', 'core/curve', 'core/shot', 'core
     + 'lyric (whip-in and spin-in happen before a line, whip-out and spin-out after it, jump and whip on hold follow the '
     + 'words). Lines marked cam=gentle take only pulse, shake or dutch; lines marked cam=none cannot move.';
 
+  // An interlude (間奏: the music between the lines, no words) as a cut area: its arrange is one of the interlude effects.
+  const SYSTEM_INTERLUDE = 'A line marked (interlude) is music without words: set its look with cuts[] (i 0, j 0). Its arrange '
+    + 'is one of the "Interlude effects" (never a lyric layout); pick one that fits the instruction and the music (bass / '
+    + 'beat / loudness). camera, lens, ground, atmos, ornaments and filters work as for lyrics.';
+  const SYSTEM_INTERLUDE_CAM = 'A line marked (interlude) is music without words: give it camerawork through cuts[] (i 0, j 0); '
+    + 'slow drifts and gentle pushes suit it, a strong move on a loud part.';
+
+  function isInterlude(cut) { return !!cut && cut.role === 'interlude'; }
+
+  // The interlude effects (arrange parts for interludes) as `key=name: blurb`, one per line.
+  function interludeText(registry, lang, doc) {
+    return registry.keys('arrange').filter((key) => {
+      const tr = registry.traits('arrange', key);
+      return !!tr && tr.roles.includes('interlude') && !isOff(doc, 'arrange', key);
+    }).map((key) => key + '=' + registry.label('arrange', key, lang) + ': ' + registry.blurb('arrange', key, lang)).join('\n');
+  }
+
   function outLang(lang) { return lang === 'en' ? 'English' : 'Japanese'; }
 
-  function systemText(mode, lang, media, extreme) {
+  function systemText(mode, lang, media, extreme, interlude) {
     const understood = 'If a brief is unclear or impossible, set understood=false for it and ask in "question".';
     const write = 'Write "summary" (one sentence) and "question" in ' + outLang(lang) + '.';
     if (mode === 'camera') {
       return SYSTEM.slice(0, 3).concat([SYSTEM_CURVES, SYSTEM_CAMERA, 'Locked lines keep their look.'],
-        extreme ? [SYSTEM_CAMERA_X, SYSTEM_CAMERA_XMODE] : [SYSTEM_CAMERA_MODE], [understood, write]).join('\n');
+        extreme ? [SYSTEM_CAMERA_X, SYSTEM_CAMERA_XMODE] : [SYSTEM_CAMERA_MODE], interlude ? [SYSTEM_INTERLUDE_CAM] : [],
+        [understood, write]).join('\n');
     }
-    return SYSTEM.concat([SYSTEM_CURVES, SYSTEM_CAMERA], SYSTEM_REST, media ? [SYSTEM_MEDIA] : [], [understood, write]).join('\n');
+    return SYSTEM.concat([SYSTEM_CURVES, SYSTEM_CAMERA], SYSTEM_REST, media ? [SYSTEM_MEDIA] : [], interlude ? [SYSTEM_INTERLUDE] : [],
+      [understood, write]).join('\n');
   }
 
   // The briefs that can be sent: at most 8, instructions flattened and cut to 300 characters, areas that still
@@ -390,7 +409,7 @@ MV.def('ai/direct', ['core/pins', 'core/paths', 'core/curve', 'core/shot', 'core
         return { j, key, text: cut ? cut.text : '' };
       });
       const text = line ? line.text : row.cut ? row.cut.text : '';
-      out.push(i + ': ' + text + ' · ' + lineState(ctx, row));
+      out.push(i + ': ' + (!line && isInterlude(row.cut) ? '(interlude) ' : '') + text + ' · ' + lineState(ctx, row));
       out.push('  cuts: ' + cuts.map((c) => c.j + ' ' + c.text).join(' / '));
       sent.push({ i, lineId: line ? line.id : null, n: line ? line.index + 1 : 0, text, locked: !!(line && line.locked), cuts });
     });
@@ -398,7 +417,7 @@ MV.def('ai/direct', ['core/pins', 'core/paths', 'core/curve', 'core/shot', 'core
     return { text: out.join('\n'), lines: sent };
   }
 
-  function listsText(ctx, anyWork) {
+  function listsText(ctx, anyWork, anyInterlude) {
     const { doc, registry, lang } = ctx;
     if (ctx.mode === 'camera') return 'Camera:\n' + (ctx.extreme ? CAT.cameraText(lang, { extreme: true }) : CAT.cameraText(lang));
     const parts = CAT.catalog(registry, doc, ['arrange', 'arrive', 'dwell', 'depart', 'ornament', 'ground', 'lens', 'filter', 'atmos'],
@@ -410,6 +429,7 @@ MV.def('ai/direct', ['core/pins', 'core/paths', 'core/curve', 'core/shot', 'core
     if (anyWork) out.push('', 'Themes:', CAT.themesText(registry, lang, doc), '', 'Moods: ' + CAT.moodsText(registry, lang));
     if (ctx.media.length) out.push('', RECIPE.mediaText(ctx.media));
     if (ctx.allowMaterials) out.push('', CAT.recipeText({ media: ctx.media.length > 0 }));
+    if (anyInterlude) out.push('', 'Interlude effects (arrange of an interlude only):', interludeText(registry, lang, doc));
     return out.join('\n');
   }
 
@@ -442,12 +462,13 @@ MV.def('ai/direct', ['core/pins', 'core/paths', 'core/curve', 'core/shot', 'core
         return b.text;
       });
       const anyWork = win.some((it) => it.area.kind === 'work');
-      const prompt = [LH.lookContext(doc, plan), '', texts.join('\n\n'), '', listsText(ctx, anyWork)].join('\n');
+      const anyInterlude = win.some((it) => it.area.kind === 'cut' && it.rows.some((r) => !r.line && isInterlude(r.cut)));
+      const prompt = [LH.lookContext(doc, plan), '', texts.join('\n\n'), '', listsText(ctx, anyWork, anyInterlude)].join('\n');
       const schema = directSchema({ mode, allowMaterials, media: media.length > 0, extreme });
       const sent = { window: k, windows: windows.length, mode, allowMaterials, uiLang: lang, media, briefs };
       if (extreme) sent.extreme = true;
       return {
-        system: systemText(mode, lang, media.length > 0, extreme), prompt, schema,
+        system: systemText(mode, lang, media.length > 0, extreme, anyInterlude), prompt, schema,
         effort: mode === 'camera' && !extreme ? 'low' : 'medium', sent,
       };
     });
@@ -677,7 +698,11 @@ MV.def('ai/direct', ['core/pins', 'core/paths', 'core/curve', 'core/shot', 'core
     const regKind = slot === 'atmos' ? 'ornament' : slot.replace(/#[0-9]$/, '');
     if (key.startsWith(MAT_PREFIX)) return materialRef(run, b, T, slot, key.slice(MAT_PREFIX.length), src);
     const def = run.registry.get(regKind, key);
-    const ok = slot === 'atmos' ? key === 'none' || (!!def && def.scope === 'run')
+    // an interlude's arrange is an interlude effect; a lyric layout never stands there (and the reverse)
+    const il = regKind === 'arrange' && T.scope === 'cut' && isInterlude(T.cut);
+    const roles = def ? (run.registry.traits(regKind, key) || { roles: [] }).roles : [];
+    const ok = il ? !!def && roles.includes('interlude')
+      : slot === 'atmos' ? key === 'none' || (!!def && def.scope === 'run')
       : !!def && CAT.servesLyrics(run.registry, regKind, key) && !(regKind === 'ornament' && def.scope === 'run');
     if (!ok) { run.warn(warnKind(T, slot === 'atmos' ? 'atmos' : regKind, key)); return null; }
     if (def && !CAT.inSeason(def, src.season)) { run.warn(seasonWarn(T, regKind, key)); return null; }
