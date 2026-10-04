@@ -10,7 +10,7 @@ MV.def('planner/segment', ['core/script', 'core/num', 'core/pins', 'core/rng', '
   const MIN_PIECE = 0.35;       // shorter pieces merge into the previous one
   const FOCUS_SHARE = 0.25, FOCUS_TIME = 1.2;
   const TITLE_ROOM = 1.5, TITLE_MIN = 0.8, TITLE_GAP = 0.2;
-  const INTRO_ROOM = 3, OUTRO_ROOM = 3, GAP_MIN = 2.8;
+  const INTRO_ROOM = 3, OUTRO_ROOM = 3, GAP_MIN = 2.8, CREDIT = 3;
   const SPECIAL_ROLES = new Set(['title', 'interlude', 'outro']);
 
   // Specs of the line- and cut-scope timing slots (§3.4.2, §3.4.3) and the v2.1 line slots season and avoid
@@ -400,9 +400,13 @@ MV.def('planner/segment', ['core/script', 'core/num', 'core/pins', 'core/rng', '
         cuts.push(special('gap/' + line.id, 'interlude', '', next.heading, line.t1, next.t0, next.lang));
       }
     });
+    // The music after the last line is an interlude too (its effects move with the song); a title or artist keeps its
+    // credit card for the last CREDIT seconds when the outro holds both.
     const last = lines[lines.length - 1];
     if (last && duration - last.t1 >= OUTRO_ROOM) {
-      cuts.push(special('outro', 'outro', meta.title || '', meta.artist, last.t1, duration, titleLang));
+      const credit = (meta.title || meta.artist) && duration - last.t1 >= OUTRO_ROOM + CREDIT ? duration - CREDIT : null;
+      cuts.push(special('gap/' + last.id, 'interlude', '', null, last.t1, credit === null ? duration : credit, last.lang));
+      if (credit !== null) cuts.push(special('outro', 'outro', meta.title || '', meta.artist, credit, duration, titleLang));
     }
     windows(cuts, ctx.timing);
     return cuts;

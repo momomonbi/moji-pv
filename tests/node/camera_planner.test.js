@@ -131,7 +131,8 @@ test('camerawork is deterministic: fresh, cached and copied documents give the s
 // conditions and the media rules): every part slot's value, parameters and source, each cut's window, the segments,
 // the transitions and the warnings, hashed. Documents without the new pins must keep every one of them (§4.7
 // "Stability"): the camera slots draw from streams of their own and change no part choice.
-const V2_CHOICES = { stub: 'dcc001fb', synthetic: '23fb8229' };
+// (Rewritten once on purpose: the music after the last line became an interlude cut, a credit card kept after it.)
+const V2_CHOICES = { stub: 'd8556349', synthetic: '85becc49' };
 const V2_SLOTS = /^(orient|arrange|arrive|dwell|depart|lens|text\.(face|scale|ink|style)|(ornament|filter)(\.count|#\d))$/;
 function v2Choices(plan) {
   return [plan.cuts.map((c) => [c.key, c.a, c.b, Object.keys(c.slots).filter((s) => V2_SLOTS.test(s)).sort()
