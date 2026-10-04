@@ -790,6 +790,46 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
       app.dispatch({ t: 'lyrics.set', text: src.join('\n') }, { label: [join ? 'undo.blockJoin' : 'undo.blockSplit', {}] });
       return true;
     }
+    // An interlude split where the music changes (cut/gap/<line>:parts, the times where parts 2… begin): the selected
+    // part splits at the playhead (1 s clear of its ends), or a part 2… joins the part before. The settings of the
+    // parts after it move with them (their keys gap/<line>~k shift by one); the new or joined part's own are dropped.
+    function selGap() {
+      const s = view.state.sel, p = app.plan;
+      return s.level === 'cut' && p ? p.cuts.find((c) => c.key === s.key && c.role === 'interlude' && c.key.startsWith('gap/')) : null;
+    }
+    function gapEdit(join) {
+      const cut = selGap();
+      if (!cut) return false;
+      const m = /~([2-9])$/.exec(cut.key), base = m ? cut.key.slice(0, -2) : cut.key, k = m ? Number(m[1]) : 1;
+      const path = 'cut/' + base + ':parts', pin = app.doc.pins[path];
+      const list = pin && Array.isArray(pin.v) ? pin.v.slice() : [];
+      const parts = app.plan.cuts.filter((c) => c.key === base || c.key.startsWith(base + '~')).length;
+      let next;
+      if (join) {
+        if (k === 1) return false;
+        next = list.filter((x) => Math.abs(x - cut.t0) > 0.005);
+      } else {
+        const at = Math.round(app.time() * 100) / 100;
+        if (!(at - cut.t0 >= 1 && cut.t1 - at >= 1) || parts >= 9) { app.toast(t('toast.gapSplitWhere')); return false; }
+        next = list.concat([at]).sort((a, b) => a - b);
+      }
+      const keyOf = (j) => (j === 1 ? base : base + '~' + j);
+      const pinsOf = (j) => Object.keys(app.doc.pins).filter((x) => x.startsWith('cut/' + keyOf(j) + ':'));
+      const cmds = [];
+      const move = (from, to) => pinsOf(from).forEach((x) => {
+        const v = app.doc.pins[x], slot = x.slice(x.indexOf(':'));
+        cmds.push({ t: 'pin.clear', path: x });
+        if (to) cmds.push({ t: 'pin.set', path: 'cut/' + keyOf(to) + slot, v: v.v, by: v.by, sig: typeof v.sig === 'string' ? v.sig : '' });
+      });
+      if (join) { move(k, null); for (let j = k + 1; j <= parts; j++) move(j, j - 1); }
+      else for (let j = parts; j > k; j--) move(j, j + 1);
+      cmds.push(next.length ? { t: 'pin.set', path, v: next, by: 'user', sig: app.svc.pinSig(app.plan, base) } : { t: 'pin.clear', path });
+      app.batch({ label: [join ? 'undo.gapJoin' : 'undo.gapSplit', {}] }, cmds);
+      app.select({ level: 'cut', key: join ? keyOf(k - 1) : cut.key }, { from: 'inspector', seek: false });
+      return true;
+    }
+    def('gap.split', () => gapEdit(false), { enabled: () => !!selGap() });
+    def('gap.join', () => gapEdit(true), { enabled: () => !!selGap() && /~[2-9]$/.test(selGap().key) });
     def('block.split', () => blockEdit(false), { enabled: () => selLines().length === 1 });
     def('block.join', () => blockEdit(true), { enabled: () => selLines().length === 1 });
     def('look.copy', () => {

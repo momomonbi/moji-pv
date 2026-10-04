@@ -608,8 +608,9 @@ MV.def('ai/direct', ['core/pins', 'core/paths', 'core/curve', 'core/shot', 'core
     if (line) return ['area.cut', { n, k: line.cuts.indexOf(cut ? cut.key : '') + 1 }];
     const key = cut ? cut.key : '';
     if (key.startsWith('gap/')) {
-      const before = run.lineById.get(key.slice(4));
-      return ['crumb.gap', { n: before ? before.index + 1 : 0 }];
+      const part = /~([2-9])$/.exec(key), before = run.lineById.get((part ? key.slice(0, -2) : key).slice(4));
+      const n = before ? before.index + 1 : 0;
+      return part ? ['crumb.gapPart', { n, k: Number(part[1]) }] : ['crumb.gap', { n }];
     }
     return ['crumb.' + key, {}];
   }

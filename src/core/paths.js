@@ -7,6 +7,7 @@ MV.def('core/paths', [], () => {
   const SPECIAL_CUTS = Object.freeze(['title', 'intro', 'outro']);
   const LINE_ID = /^r[0-9a-z]+(?:\.[1-9][0-9]*)?$/;
   const LINE_CUT = /^(r[0-9a-z]+(?:\.[1-9][0-9]*)?)~([0-9]+)$/;
+  const GAP_CUT = /^gap\/(r[0-9a-z]+(?:\.[1-9][0-9]*)?)(?:~([2-9]))?$/;   // an interlude, or its part 2…9
   const PART_SLOT = /^([a-z]+)(?:#([012]))?(?:@([a-z][A-Za-z0-9]{2,31}))?(?:\.([a-z][A-Za-z0-9]{0,31}))?$/;
   const EL_SLOT = /^el\.(text|ornament#[012])\.(nudge|fill|hide)$/;
   const NAME_SLOT = /^[a-z][A-Za-z0-9]{0,31}(?:\.[a-z][A-Za-z0-9]{0,31})*$/;
@@ -27,7 +28,7 @@ MV.def('core/paths', [], () => {
       const m = LINE_CUT.exec(cutKey);
       if (m) return m[1];
       if (SPECIAL_CUTS.includes(cutKey)) return null;
-      if (cutKey.startsWith('gap/') && isLineId(cutKey.slice(4))) return null;
+      if (GAP_CUT.test(cutKey)) return null;
     }
     return fail('bad-cut-key', cutKey);
   }

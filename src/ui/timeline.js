@@ -237,12 +237,15 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
       const selLines = new Set(sel.level === 'line' ? sel.ids : [S.lineOfSel(sel)].filter(Boolean));
       const hl = highlighted(app.view.state.highlight);
       // the interludes (間奏) between the lines: a block of their own, named 間奏1, 間奏2, …, a click selects one
-      p.cuts.filter((c) => c.role === 'interlude').forEach((c, i) => {
+      const names = AREAS.interludes(p);
+      p.cuts.filter((c) => c.role === 'interlude').forEach((c) => {
         const x0 = xOf(c.t0), x1 = xOf(c.t1);
         if (x1 < 0 || x0 > W) return;
         g.fillStyle = sel.level === 'cut' && sel.key === c.key ? COLORS.sel : COLORS.interlude;
         g.fillRect(x0, r[0] + 3, Math.max(1, x1 - x0 - 1), r[1] - r[0] - 6);
-        label(t('il.name', { n: i + 1 }), Math.max(x0, 0) + 4, (r[0] + r[1]) / 2, x1 - Math.max(x0, 0) - 8);
+        const info = names.get(c.key);
+        label(info.of > 1 ? t('il.namePart', { n: info.n, k: info.k }) : t('il.name', { n: info.n }), Math.max(x0, 0) + 4,
+          (r[0] + r[1]) / 2, x1 - Math.max(x0, 0) - 8);
       });
       p.lines.forEach((l, i) => {
         const x0 = xOf(l.t0), x1 = xOf(l.t1);

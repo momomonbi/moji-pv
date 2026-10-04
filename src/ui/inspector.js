@@ -1129,6 +1129,11 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
               () => app.actions.run(join ? 'block.join' : 'block.split')));
           }
         }
+        // an interlude: split it at the playhead where the music changes, or join a part to the one before
+        if (ctx.page === 'cut' && ctx.cut && ctx.cut.role === 'interlude' && ctx.cut.key.startsWith('gap/')) {
+          buttons.push(headButton('unfold', t('act.gapSplit'), () => app.actions.run('gap.split')));
+          if (/~[2-9]$/.test(ctx.cut.key)) buttons.push(headButton('fold', t('act.gapJoin'), () => app.actions.run('gap.join')));
+        }
         buttons.push(headButton('dice', t('act.reroll'), () => app.actions.run('look.reroll'), { disabled: lineLocked(ctx) }));
       }
       if (ctx.page !== 'lines') buttons.push(headButton('info', t('lh.why'), () => showWhy(lastRow || page.rows.find((r) => r.path), true)));

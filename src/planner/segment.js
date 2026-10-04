@@ -381,6 +381,24 @@ MV.def('planner/segment', ['core/script', 'core/num', 'core/pins', 'core/rng', '
     }
   }
 
+  // An interlude the user split where the music changes (cut/gap/<line>:parts, the song times where parts 2… begin,
+  // each kept PART_MIN from the ends and from one another): part 1 keeps the key gap/<line> and its settings, parts
+  // 2… are gap/<line>~2… with settings of their own. The heading of the next line goes to the last part.
+  const PART_MIN = 1, PARTS_MAX = 9;
+  function gapParts(ctx, key, note, t0, t1, lang) {
+    const accept = (v, rank) => (rank !== 'pin:cut' ? { na: true }
+      : Array.isArray(v) && v.every((x) => typeof x === 'number' && Number.isFinite(x)) ? { v } : { bad: true });
+    const pin = PA.resolvePin(ctx.ix, { pinCutKey: key, lineId: null, cutKey: key }, 'parts', accept, ctx.warn);
+    const at = [];
+    for (const x of (pin ? pin.v : []).slice().sort((a, b) => a - b)) {
+      const prev = at.length ? at[at.length - 1] : t0;
+      if (x - prev >= PART_MIN && t1 - x >= PART_MIN && at.length < PARTS_MAX - 1) at.push(x);
+    }
+    const bounds = [t0].concat(at, [t1]);
+    return at.concat([t1]).map((b, i) => special(i ? key + '~' + (i + 1) : key, 'interlude', '', i === at.length ? note : null,
+      bounds[i], b, lang));
+  }
+
   // cutAll(ctx, lines, meta, duration) → cut skeletons in time order.
   // lines: timed lines ({ …Line, t0, t1 }); ctx = { doc, ix, timing, aspect, amounts, pace, grid, warn, hint }.
   function cutAll(ctx, lines, meta, duration) {
@@ -397,7 +415,7 @@ MV.def('planner/segment', ['core/script', 'core/num', 'core/pins', 'core/rng', '
       cuts.push(...own);
       const next = lines[i + 1];
       if (next && next.t0 - line.t1 > Math.max(GAP_MIN, bars)) {
-        cuts.push(special('gap/' + line.id, 'interlude', '', next.heading, line.t1, next.t0, next.lang));
+        cuts.push(...gapParts(ctx, 'gap/' + line.id, next.heading, line.t1, next.t0, next.lang));
       }
     });
     // The music after the last line is an interlude too (its effects move with the song); a title or artist keeps its
@@ -405,7 +423,7 @@ MV.def('planner/segment', ['core/script', 'core/num', 'core/pins', 'core/rng', '
     const last = lines[lines.length - 1];
     if (last && duration - last.t1 >= OUTRO_ROOM) {
       const credit = (meta.title || meta.artist) && duration - last.t1 >= OUTRO_ROOM + CREDIT ? duration - CREDIT : null;
-      cuts.push(special('gap/' + last.id, 'interlude', '', null, last.t1, credit === null ? duration : credit, last.lang));
+      cuts.push(...gapParts(ctx, 'gap/' + last.id, null, last.t1, credit === null ? duration : credit, last.lang));
       if (credit !== null) cuts.push(special('outro', 'outro', meta.title || '', meta.artist, credit, duration, titleLang));
     }
     windows(cuts, ctx.timing);
