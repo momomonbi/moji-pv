@@ -187,7 +187,10 @@ test('bands: song sections, else headings, else blocks (≥ 2)', () => {
   const noHeads = C.reduce(noSong, { t: 'lyrics.set', text: noSong.sheet.rows.filter((r) => !r.src.startsWith('#')).map((r) => r.src).join('\n') });
   assert.deepEqual(A.bands(noHeads, planOf(noHeads)).map((b) => b.key), ['para:r4', 'para:r7', 'para:rb']);
   const oneBlock = C.reduce(noHeads, { t: 'lyrics.set', text: noHeads.sheet.rows.filter((r) => r.src !== '').map((r) => r.src).join('\n') });
-  assert.deepEqual(A.bands(oneBlock, planOf(oneBlock)), [], 'a single block is no band');
+  // without blank lines the interlude still starts a block of its own
+  const gapAt = planOf(oneBlock).cuts.find((c) => c.key.startsWith('gap/') && c.key !== 'gap/' + planOf(oneBlock).lines.slice(-1)[0].id);
+  const after = planOf(oneBlock).lines.find((l) => l.t0 >= gapAt.t1 - 1e-6);
+  assert.deepEqual(A.bands(oneBlock, planOf(oneBlock)).map((b) => b.key), ['para:r4', 'para:' + after.row], 'an interlude starts a block');
   const basic = corpus.project('basic').doc;
   assert.deepEqual(A.areasOf(basic, planOf(basic)).song, [], 'no analysis, no song areas');
 });

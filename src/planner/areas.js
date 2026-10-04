@@ -45,7 +45,7 @@ MV.def('planner/areas', ['core/paths', 'core/lyrics', 'planner/features'], (P, L
     }
     const ix = { rows, info, plan, lines, lineById, cutsOfLine, cutByKey, special, duration: isNumber(plan.duration) ? plan.duration : 0 };
     ix.sections = songSections(info, lines, special);
-    Object.assign(ix, rowGroups(rows, lines));
+    Object.assign(ix, rowGroups(rows, lines, cutByKey));
     memo.set(plan, ix);
     return ix;
   }
@@ -71,8 +71,11 @@ MV.def('planner/areas', ['core/paths', 'core/lyrics', 'planner/features'], (P, L
   }
 
   // Heading blocks (lines whose row lies after a '# heading' row and before the next heading row) and blank-line
-  // blocks (a new block starts at a line with pauseBefore > 0), both in sheet order, with every occurrence of a row.
-  function rowGroups(rows, lines) {
+  // blocks (a new block starts at a line with pauseBefore > 0, or after an interlude), both in sheet order, with every
+  // occurrence of a row.
+  function rowGroups(rows, lines, cutByKey) {
+    const afterGap = new Set();
+    for (let i = 1; i < lines.length; i++) if (cutByKey.has('gap/' + lines[i - 1].id)) afterGap.add(lines[i].row);
     const sheet = LY.parseSheet(rows);
     const headOfRow = new Map();
     const heads = [];
@@ -86,7 +89,7 @@ MV.def('planner/areas', ['core/paths', 'core/lyrics', 'planner/features'], (P, L
     const paraOfRow = new Map();
     const paras = [];
     for (const line of LY.linesOf(sheet).filter((l) => l.occ === 0)) {
-      if (!paras.length || line.pauseBefore > 0) paras.push({ rowId: line.row, n: paras.length + 1, lineIds: [] });
+      if (!paras.length || line.pauseBefore > 0 || afterGap.has(line.row)) paras.push({ rowId: line.row, n: paras.length + 1, lineIds: [] });
       paraOfRow.set(line.row, paras[paras.length - 1]);
     }
     for (const line of lines) {
