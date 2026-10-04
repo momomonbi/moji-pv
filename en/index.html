@@ -1,6 +1,6 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-IiNkm4NMgLfxcLyfji43qQ7Jk9hH/ZZ5ZkQfjMXOrQI='; style-src 'sha256-uhekdjVoF8p0oG5Jys9SuRatxu3plo9h2Wexn3/9z4g=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-TYPiFaDoehQZwnzW7mJZHRlQEiWugc18Ow8/vYC0jWo='; style-src 'sha256-uhekdjVoF8p0oG5Jys9SuRatxu3plo9h2Wexn3/9z4g=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
 <title>Moji PV Maker</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -74748,7 +74748,8 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       // なし on a source whose automatic value is none is 自動 (photoPan without a picture is the plain ground); when the
       // picture comes from the line or the whole video, なし turns that part off here (無地 for a background)
       if (field.widget === 'media' && v === '' && field.spec && field.spec.auto && field.spec.auto.value === '') {
-        const off = mediaOffCmds(row);
+        const m = field.media;
+        const off = m && m.slot ? pictureOffCmds(pathsOf(field, ctx), m.slot, m.key, m.kind) : [];
         if (off.length) run(off, { label: ['undo.unpinField', { field: labelOf(field) }], where: { scope: ctx.scope, field: field.path } });
         else unpin(row);
         return;
@@ -74799,18 +74800,28 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
     }
     function inheritedFill(path, slot) { return inheritedPart(path, slot, 'textFill'); }
 
-    // なし on a picture placed by a wider scope: the part is turned off where the row writes (a background becomes 無地,
-    // a decoration or overlay none) and the row's own picture pins go. [] when no wider scope places it.
-    function mediaOffCmds(row) {
-      const m = row.field.media;
-      if (!m || !m.slot) return [];
-      const cmds = [];
-      for (const path of pathsOf(row.field, page.ctx)) {
-        const partPath = P.scopeKey(path) + ':' + m.slot;
-        const part = doc().pins[F.writePath(partPath, plan())];
-        if ((part && part.by === 'lock') || !inheritedPart(path, m.slot, m.key)) continue;
-        cmds.push(...removablePaths([F.writePath(path, plan())]).map((x) => ({ t: 'pin.clear', path: x })));
-        cmds.push(pinCmd(partPath, m.kind === 'ground' ? 'flatFill' : 'none'));
+    // なし on a picture (the background photo, 文字の中に, a photo frame, an overlay): no cut under the row's scopes keeps
+    // it, wherever it was set. Under each scope (itself, the cuts of a line, every line and cut of the whole video) the
+    // pins that place the part and its picture settings go; then a background becomes 無地 at the scope, and a decoration
+    // or overlay that a wider scope (the line, the whole video) still places is turned off there. Lock pins stay.
+    function pictureOffCmds(paths, slot, key, kind) {
+      const pins = doc().pins, cmds = [], gone = new Set();
+      const prefix = slot + '@' + key + '.';
+      for (const path of paths) {
+        const scope = P.scopeKey(F.writePath(path, plan()));
+        for (const p of Object.keys(pins)) {
+          let under = false;
+          try { under = P.isUnder(p, scope); } catch (e) { under = false; }
+          const sl = p.slice(p.indexOf(':') + 1);
+          if (!under || gone.has(p) || pins[p].by === 'lock' || !((sl === slot && pins[p].v === key) || sl.startsWith(prefix))) continue;
+          gone.add(p);
+          cmds.push({ t: 'pin.clear', path: p });
+        }
+        const partPath = P.scopeKey(path) + ':' + slot;
+        const own = pins[F.writePath(partPath, plan())];
+        if (own && own.by === 'lock') continue;
+        if (kind === 'ground') cmds.push(pinCmd(partPath, 'flatFill'));
+        else if (inheritedPart(path, slot, key)) cmds.push(pinCmd(partPath, 'none'));
       }
       return cmds;
     }
@@ -74822,10 +74833,8 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
         const partPath = P.scopeKey(path) + ':' + slot;
         const part = doc().pins[F.writePath(partPath, plan())];
         if (v === '' || v === null) {
-          cmds.push(...removablePaths([F.writePath(path, plan())]).map((x) => ({ t: 'pin.clear', path: x })));
-          if (part && part.v === 'textFill' && part.by !== 'lock') cmds.push({ t: 'pin.clear', path: F.writePath(partPath, plan()) });
-          // set on the line or the whole video: なし here turns it off here only (this slot shows nothing here)
-          if (!(part && part.by === 'lock') && inheritedFill(path, slot)) cmds.push(pinCmd(partPath, 'none'));
+          // set here, on a cut below or on the line or the whole video: なし leaves no picture in the letters here
+          cmds.push(...pictureOffCmds([path], slot, 'textFill', 'ornament'));
         } else {
           if (!part || part.v !== 'textFill') cmds.push(pinCmd(partPath, 'textFill'));
           cmds.push(pinCmd(path, v));
