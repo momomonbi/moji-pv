@@ -197,7 +197,7 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     return G[i] + (G[i + 1] - G[i]) * (x - i);
   }
 
-  // The strength I at 20 Hz over the window and the motion clock W = ∫ (0.55 + 0.9·I) dt (drifts and turns run faster
+  // The strength I at 20 Hz over the window and the motion clock W = ∫ (0.4 + 1.2·I) dt (drifts and turns run faster
   // where the strength is high). Auto: with a song its swell, a little more for a quick tempo and a gentle build to the
   // climax; without one a slow arc. A drawn graph sets the level, and a song adds ±0.12 of its swell as texture.
   function strengthTrack(env, fr, tr, shape) {
@@ -208,10 +208,10 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
       const t = fr.a + i / HZ, u = clamp((t - fr.s0) / span), sw = tr.song ? sampleAt(tr.sw, tr.L0, t) : 0.5;
       let v;
       if (G) v = graphAt(G, u) + (tr.song ? 0.24 * (sw - 0.5) : 0);
-      else if (tr.song) v = 0.15 + 0.75 * sw + 0.1 * smooth(u) + 0.1 * (tempo - 0.5);
-      else v = 0.3 + 0.3 * Math.pow(Math.sin(Math.PI * u), 1.5) + 0.1 * (noise1(tr.n2, 0.2 * t + 17.3) - 0.5);
+      else if (tr.song) v = 0.05 + 0.9 * sw + 0.1 * smooth(u) + 0.15 * (tempo - 0.5);
+      else v = 0.2 + 0.6 * Math.pow(Math.sin(Math.PI * u), 1.2) + 0.15 * (noise1(tr.n2, 0.2 * t + 17.3) - 0.5);
       I[i] = clamp(v);
-      W[i] = i ? W[i - 1] + (0.55 + 0.45 * (I[i] + I[i - 1])) / HZ : fr.a;
+      W[i] = i ? W[i - 1] + (0.4 + 0.6 * (I[i] + I[i - 1])) / HZ : fr.a;
     }
     return { I, W, IA: fr.a, drawn: !!G };
   }
@@ -300,7 +300,7 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
   function placeMotes(d, t) {
     const sus = d.song ? 0.85 + 0.3 * swellAt(d, t) : 1;
     const late = t > d.o;
-    const shown = d.n * (0.35 + 0.65 * strengthAt(d, Math.min(t, d.o)));    // how many motes the strength shows
+    const shown = d.n * (0.2 + 0.8 * strengthAt(d, Math.min(t, d.o)));    // how many motes the strength shows
     for (let k = 0; k < d.n; k++) {
       const e = smooth((t - d.s0 - d.st[k] * d.E) / (0.55 * d.E));
       let x, y, life;
@@ -633,7 +633,7 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
       if (j >= 0) kick = (d.bd[j] ? 0.22 : 0.15) * Math.exp(-(t - d.bt[j]) / 0.12);
     }
     const jag = d.song ? 0.25 : 0.1;
-    const gain = 0.45 + 0.75 * strengthAt(d, t);              // the strength scales the whole row (at most 1.2)
+    const gain = 0.3 + 0.9 * strengthAt(d, t);                // the strength scales the whole row (at most 1.2)
     for (let k = 0; k <= d.nb; k++) {
       const edge = k <= full ? 1 : k === full + 1 ? part : 0;
       if (edge <= 0) { d.Bk[k] = 0; continue; }
@@ -1053,7 +1053,7 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
       const j = lastBeat(d.ev, t);
       if (j >= 0) {
         const since = t - d.ev[j];
-        rd *= 1 + (0.06 + 0.2 * strengthAt(d, t)) * Math.min(1, 0.03 * d.s / Q[DR]) * Math.min(1, since / 0.05) * Math.exp(-since / 0.16);
+        rd *= 1 + (0.04 + 0.3 * strengthAt(d, t)) * Math.min(1, 0.03 * d.s / Q[DR]) * Math.min(1, since / 0.05) * Math.exp(-since / 0.16);
       }
     }
     if (rd > 0.3) {

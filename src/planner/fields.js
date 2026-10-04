@@ -433,7 +433,12 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
     const cat = categoryOf(parsed);
     const ix = pinIndexOf(doc.pins);
     const perCut = cat !== 'look' && !(cat === 'line' && parsed.scope.kind === 'line');
-    const cuts = perCut ? cutsFor(plan, sel, parsed) : [];
+    let cuts = perCut ? cutsFor(plan, sel, parsed) : [];
+    // A part's parameter at work scope reads the cuts that use the part (the others have no such parameter).
+    if (cat === 'param' && parsed.part.key && parsed.scope.kind === 'work') {
+      const using = cuts.filter((c) => valueAt(plan, c, parsed, registry, ix) !== undefined);
+      if (using.length) cuts = using;
+    }
     const values = perCut ? cuts.map((c) => valueAt(plan, c, parsed, registry, ix)) : [valueAt(plan, null, parsed, registry, ix)];
     const sources = perCut ? cuts.map((c) => sourceAt(doc, plan, c, parsed, registry, ix))
       : [sourceAt(doc, plan, null, parsed, registry, ix)];

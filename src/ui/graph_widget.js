@@ -17,6 +17,7 @@ MV.def('ui/graph_widget', ['ui/dom'], (dom) => {
     { key: 'full', v: '0.95,0.95,0.95,0.95,0.95' },
   ]);
   const AUTO_SHOWN = Object.freeze([0.35, 0.55, 0.7, 0.6, 0.4]);   // where the points wait while 自動 decides
+  const UNPIN = '\u0000auto';                                    // ui/widgets AUTO: 自動 clears the pin
   const STEP = 0.05, STEP_BIG = 0.2;
   const PAD = 10, PLOT_H = 72;
 
@@ -38,7 +39,7 @@ MV.def('ui/graph_widget', ['ui/dom'], (dom) => {
     const handleLayer = h('div', { class: 'gw-handles', role: 'group', 'aria-label': env.label });
     const plot = h('div', { class: 'gw-plot' }, canvas, handleLayer);
     const presets = PRESETS.map((p) => h('button', { class: 'chip-btn', type: 'button', 'data-key': p.key,
-      on: { click: () => { if (!st.readOnly) env.commit(p.v); } } }, t('graph.' + p.key)));
+      on: { click: () => { if (!st.readOnly) env.commit(p.v === 'auto' ? UNPIN : p.v); } } }, t('graph.' + p.key)));
     const note = h('p', { class: 'note subtle gw-note' });
     const el = h('div', { class: 'gw' }, h('div', { class: 'row-actions gw-presets' }, presets), plot, note);
     const handles = [];

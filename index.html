@@ -1,6 +1,6 @@
 <!doctype html><html lang="ja"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-01yGkTzqNjWzgr/gxM5/l26t885pMPBvZs++nb34KAM='; style-src 'sha256-irm/4tY0K6bp0lr8oGaOjkpC31aZm7LYR8Z7pABOIhg=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-phfD2nwpvcgsQbjaWc03tUl4vnfOeaiHzuTpHBXShRs='; style-src 'sha256-irm/4tY0K6bp0lr8oGaOjkpC31aZm7LYR8Z7pABOIhg=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
 <title>文字PVメーカー</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -12429,6 +12429,7 @@ MV.def('i18n/strings', [], () => ({
   'sec.titletext': ['タイトル', 'Title'],
   'sec.gaplabel': ['表示する文字', 'Text shown'],
   'sec.ilshape': ['表現の強さ', 'Strength over time'],
+  'sec.ilwork': ['間奏の動き', 'Interludes'],
   'sec.layout': ['構図', 'Layout'],
   'sec.motion': ['動き', 'Motion'],
   'sec.seam': ['切り替え', 'Transition'],
@@ -12527,6 +12528,7 @@ MV.def('i18n/strings', [], () => ({
   'fld.cutEnd': ['終わり（次のカットの開始）', 'End (next cut\'s start)'],
   'fld.gapLabel': ['表示する文字', 'Text shown'],
   'fld.ilShape': ['表現の強さ', 'Strength over time'],
+  'fld.ilShapeAll': ['すべての間奏の強さ', 'Strength of every interlude'],
   'graph.auto': ['自動', 'Auto'],
   'graph.rise': ['だんだん強く', 'Build up'],
   'graph.arc': ['山型', 'Rise and fall'],
@@ -22392,7 +22394,12 @@ MV.def('planner/fields', ['core/paths', 'core/pins', 'core/registry', 'core/lyri
     const cat = categoryOf(parsed);
     const ix = pinIndexOf(doc.pins);
     const perCut = cat !== 'look' && !(cat === 'line' && parsed.scope.kind === 'line');
-    const cuts = perCut ? cutsFor(plan, sel, parsed) : [];
+    let cuts = perCut ? cutsFor(plan, sel, parsed) : [];
+    // A part's parameter at work scope reads the cuts that use the part (the others have no such parameter).
+    if (cat === 'param' && parsed.part.key && parsed.scope.kind === 'work') {
+      const using = cuts.filter((c) => valueAt(plan, c, parsed, registry, ix) !== undefined);
+      if (using.length) cuts = using;
+    }
     const values = perCut ? cuts.map((c) => valueAt(plan, c, parsed, registry, ix)) : [valueAt(plan, null, parsed, registry, ix)];
     const sources = perCut ? cuts.map((c) => sourceAt(doc, plan, c, parsed, registry, ix))
       : [sourceAt(doc, plan, null, parsed, registry, ix)];
@@ -34318,7 +34325,7 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     return G[i] + (G[i + 1] - G[i]) * (x - i);
   }
 
-  // The strength I at 20 Hz over the window and the motion clock W = ∫ (0.55 + 0.9·I) dt (drifts and turns run faster
+  // The strength I at 20 Hz over the window and the motion clock W = ∫ (0.4 + 1.2·I) dt (drifts and turns run faster
   // where the strength is high). Auto: with a song its swell, a little more for a quick tempo and a gentle build to the
   // climax; without one a slow arc. A drawn graph sets the level, and a song adds ±0.12 of its swell as texture.
   function strengthTrack(env, fr, tr, shape) {
@@ -34329,10 +34336,10 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
       const t = fr.a + i / HZ, u = clamp((t - fr.s0) / span), sw = tr.song ? sampleAt(tr.sw, tr.L0, t) : 0.5;
       let v;
       if (G) v = graphAt(G, u) + (tr.song ? 0.24 * (sw - 0.5) : 0);
-      else if (tr.song) v = 0.15 + 0.75 * sw + 0.1 * smooth(u) + 0.1 * (tempo - 0.5);
-      else v = 0.3 + 0.3 * Math.pow(Math.sin(Math.PI * u), 1.5) + 0.1 * (noise1(tr.n2, 0.2 * t + 17.3) - 0.5);
+      else if (tr.song) v = 0.05 + 0.9 * sw + 0.1 * smooth(u) + 0.15 * (tempo - 0.5);
+      else v = 0.2 + 0.6 * Math.pow(Math.sin(Math.PI * u), 1.2) + 0.15 * (noise1(tr.n2, 0.2 * t + 17.3) - 0.5);
       I[i] = clamp(v);
-      W[i] = i ? W[i - 1] + (0.55 + 0.45 * (I[i] + I[i - 1])) / HZ : fr.a;
+      W[i] = i ? W[i - 1] + (0.4 + 0.6 * (I[i] + I[i - 1])) / HZ : fr.a;
     }
     return { I, W, IA: fr.a, drawn: !!G };
   }
@@ -34421,7 +34428,7 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
   function placeMotes(d, t) {
     const sus = d.song ? 0.85 + 0.3 * swellAt(d, t) : 1;
     const late = t > d.o;
-    const shown = d.n * (0.35 + 0.65 * strengthAt(d, Math.min(t, d.o)));    // how many motes the strength shows
+    const shown = d.n * (0.2 + 0.8 * strengthAt(d, Math.min(t, d.o)));    // how many motes the strength shows
     for (let k = 0; k < d.n; k++) {
       const e = smooth((t - d.s0 - d.st[k] * d.E) / (0.55 * d.E));
       let x, y, life;
@@ -34754,7 +34761,7 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
       if (j >= 0) kick = (d.bd[j] ? 0.22 : 0.15) * Math.exp(-(t - d.bt[j]) / 0.12);
     }
     const jag = d.song ? 0.25 : 0.1;
-    const gain = 0.45 + 0.75 * strengthAt(d, t);              // the strength scales the whole row (at most 1.2)
+    const gain = 0.3 + 0.9 * strengthAt(d, t);                // the strength scales the whole row (at most 1.2)
     for (let k = 0; k <= d.nb; k++) {
       const edge = k <= full ? 1 : k === full + 1 ? part : 0;
       if (edge <= 0) { d.Bk[k] = 0; continue; }
@@ -35174,7 +35181,7 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
       const j = lastBeat(d.ev, t);
       if (j >= 0) {
         const since = t - d.ev[j];
-        rd *= 1 + (0.06 + 0.2 * strengthAt(d, t)) * Math.min(1, 0.03 * d.s / Q[DR]) * Math.min(1, since / 0.05) * Math.exp(-since / 0.16);
+        rd *= 1 + (0.04 + 0.3 * strengthAt(d, t)) * Math.min(1, 0.03 * d.s / Q[DR]) * Math.min(1, since / 0.05) * Math.exp(-since / 0.16);
       }
     }
     if (rd > 0.3) {
@@ -55897,6 +55904,7 @@ MV.def('ui/graph_widget', ['ui/dom'], (dom) => {
     { key: 'full', v: '0.95,0.95,0.95,0.95,0.95' },
   ]);
   const AUTO_SHOWN = Object.freeze([0.35, 0.55, 0.7, 0.6, 0.4]);   // where the points wait while 自動 decides
+  const UNPIN = '\u0000auto';                                    // ui/widgets AUTO: 自動 clears the pin
   const STEP = 0.05, STEP_BIG = 0.2;
   const PAD = 10, PLOT_H = 72;
 
@@ -55918,7 +55926,7 @@ MV.def('ui/graph_widget', ['ui/dom'], (dom) => {
     const handleLayer = h('div', { class: 'gw-handles', role: 'group', 'aria-label': env.label });
     const plot = h('div', { class: 'gw-plot' }, canvas, handleLayer);
     const presets = PRESETS.map((p) => h('button', { class: 'chip-btn', type: 'button', 'data-key': p.key,
-      on: { click: () => { if (!st.readOnly) env.commit(p.v); } } }, t('graph.' + p.key)));
+      on: { click: () => { if (!st.readOnly) env.commit(p.v === 'auto' ? UNPIN : p.v); } } }, t('graph.' + p.key)));
     const note = h('p', { class: 'note subtle gw-note' });
     const el = h('div', { class: 'gw' }, h('div', { class: 'row-actions gw-presets' }, presets), plot, note);
     const handles = [];
@@ -61614,6 +61622,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
       ];
     }
     const cutHasLine = (ctx) => !!(ctx.cut && ctx.cut.line);
+    const IL_SHAPES = ['lightMotes', 'soundHorizon', 'kineticShapes'].map((key) => 'arrange@' + key + '.shape');
 
     // --- pages ----------------------------------------------------------------------------------------------------
 
@@ -61632,6 +61641,10 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
           F({ path: REPEAT_SAME, scopes: WORK, widget: 'toggle', label: 'fld.repeatSame', spec: { type: 'bool' },
             note: 'fld.repeatSame.note', offClears: true, noDice: true }),
         ]),
+        // 間奏の強さ for every interlude of the work: one graph, written to the three interlude effects at once
+        sec('ilwork', true, [F({ path: IL_SHAPES[0], also: IL_SHAPES.slice(1), scopes: WORK, widget: 'graph',
+          label: 'fld.ilShapeAll', spec: { type: 'text', max: 60 } })],
+        { when: (ctx) => !!(ctx.plan && ctx.plan.cuts && ctx.plan.cuts.some((c) => c.role === 'interlude')) }),
         // 写真・動画 (DESIGN_2_1 §11.7.3): the library, open when it holds something.
         sec('media', (ctx) => ctx.mediaCount > 0, [], { custom: 'media' }),
         sec('colors', false, C.TOKENS.map((tok) => F({ path: 'color.' + tok, scopes: WORK, widget: 'color',
@@ -62042,7 +62055,15 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
       if (field.lineOf) return ctx.cut && ctx.cut.line ? ['line/' + ctx.cut.line + ':' + field.path] : [];
       if (field.firstCut && ctx.lineIds.length) return ctx.lineIds.map((id) => firstCutScope(ctx, id) + ':' + field.path);
       if (ctx.page === 'lines') return ctx.lineIds.map((id) => 'line/' + id + ':' + field.path);
-      return [ctx.scope + ':' + field.path];
+      if (!field.also) return [ctx.scope + ':' + field.path];
+      // `also`: more slots the same row writes at the same scope (間奏の強さ for every interlude effect at once); the
+      // slots of parts the plan uses come first, so the row shows the state of one that is in use
+      const used = (slot) => {
+        const part = partOfSlot(slot), cuts = ctx.plan && Array.isArray(ctx.plan.cuts) ? ctx.plan.cuts : [];
+        return !!part && cuts.some((c) => c.slots && c.slots[part.kind] && c.slots[part.kind].v === part.key);
+      };
+      const slots = [field.path].concat(field.also);
+      return slots.filter(used).concat(slots.filter((x) => !used(x))).map((p) => ctx.scope + ':' + p);
     }
 
     // clearPathsFor(field, ctx) → the paths × / Del may clear: pathsFor, plus (firstCut fields) the line-scope pin of
