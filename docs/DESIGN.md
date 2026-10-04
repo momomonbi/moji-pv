@@ -2518,11 +2518,15 @@ grouping is fine as long as each file only depends on `parts/kit`.
 | `tileRipple` (role interlude) | 光のタイル | Light tiles | digital playful minimal | A field of small squares where each beat drops a ripple of light that runs outward (a downbeat from the centre) (no text). |
 | `burstBloom` (role interlude) | 光の花火 | Light bursts | playful bold fast | Sparks burst like fireworks at seeded spots on the beat, spreading, falling a little and fading (no text). |
 | `harmonicString` (role interlude) | 光の弦 | Light string | airy minimal serious | One glowing closed curve breathes with the loudness and folds into its next figure each bar (no text). |
+| `ridgeLines` (role interlude) | 光の山脈 | Sound ridges | digital airy bold | The spectrum drawn as a line every 0.08 s, the older lines stacked behind and above like a range of ridges: bass in the middle, treble at the edges (no text). |
+| `polarWave` (role interlude) | 光の円波形 | Sound circle | bold digital playful | A closed line round the centre whose radius is the spectrum (bass at the bottom, treble at the top), with an inner mirror and a dimmer echo of 0.18 s before (no text). |
+| `peakBars` (role interlude) | 光の柱 | Light columns | bold fast digital | Columns from the bass on the left to the treble on the right, reflected on the floor, each with a peak mark that falls slowly (no text). |
 | `breathMark` (role interlude, pin only) | 間の印 | Breath mark | minimal slow | A small ♪ or the section heading, centred, slowly breathing; since the interlude effects it is never picked automatically (`pool: false`). |
 | `creditFold` (role outro) | 終わりの札 | Credit fold | minimal | Title and artist as a quiet corner credit. |
 
 Interlude effects (`parts/arrange/interlude.js`). Every interlude cut draws one of `lightMotes`, `soundHorizon`,
-`kineticShapes`, `neonWave`, `ringPulse`, `warpField`, `tileRipple`, `burstBloom` and `harmonicString`, picked by the mood's tags, the part's energy range and `fits` (a beat grid helps the horizon). They set
+`kineticShapes`, `neonWave`, `ringPulse`, `warpField`, `tileRipple`, `burstBloom`, `harmonicString`, `ridgeLines`, `polarWave`
+and `peakBars`, picked by the mood's tags, the part's energy range and `fits` (a beat grid helps the horizon). They set
 no text at all: no ♪ and no heading. They are `cam: 'gentle'` (a glyph-free cut leaves the gentle shot inert) and have
 no `motion: 'own'`, so the lyric neighbours keep every entrance, exit and camera decision. They draw on the far and mid
 layers only (never near, which a text seam mixes). They wait out the line before (their entrance starts 0.15 s into the

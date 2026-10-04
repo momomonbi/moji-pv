@@ -514,9 +514,17 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
           const pin = doc ? doc.pins[writePath(scope + ':ornament#' + i, plan)] : null;
           return !!pin && pin.v === 'textFill';
         };
+        // なし here over a picture of the line or the whole video pins that slot to none: the same slot takes a picture again
+        const wider = (scope.startsWith('cut/') && ctx.cut && ctx.cut.line ? ['line/' + ctx.cut.line] : [])
+          .concat(scope === 'work' ? [] : ['work']);
+        const turnedOff = (i) => {
+          const pin = doc ? doc.pins[writePath(scope + ':ornament#' + i, plan)] : null;
+          return !!pin && pin.v === 'none' && wider.some((w) => doc.pins[w + ':ornament#' + i] && doc.pins[w + ':ornament#' + i].v === 'textFill');
+        };
         let at = [0, 1, 2].find(pinnedFill);
         if (at === undefined) at = [0, 1, 2].find((i) => agreedKey(ctx, 'ornament#' + i) === 'textFill');
         ctx.textFillOn = at !== undefined;
+        if (at === undefined) at = [0, 1, 2].find(turnedOff);
         if (at === undefined) at = doc ? freeIndex(doc, plan, scope, 'ornament') : 0;
         ctx.textFillIdx = at === null ? null : at;
       }
@@ -587,7 +595,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
     // parameters of a part (shared ones by `kind.param`, own ones by `kind@key.param`). partKey null → shared only.
     // Params kept for saved documents but no longer offered: the interlude effects' 表現の強さ (自動 follows the song).
     const HIDDEN_PARAMS = new Set(['lightMotes', 'soundHorizon', 'kineticShapes', 'neonWave', 'ringPulse', 'warpField', 'tileRipple',
-      'burstBloom', 'harmonicString'].map((key) => 'arrange@' + key + '.shape'));
+      'burstBloom', 'harmonicString', 'ridgeLines', 'polarWave', 'peakBars'].map((key) => 'arrange@' + key + '.shape'));
 
     function paramFields(kind, idx, partKey, registry, o) {
       const opt = o || {};
