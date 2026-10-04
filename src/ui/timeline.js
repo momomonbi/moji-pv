@@ -120,6 +120,17 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
       return digest.data;
     }
 
+    // A small padlock (10 px wide) whose left edge is x, centred on y.
+    function padlock(x, y) {
+      g.save();
+      g.strokeStyle = COLORS.highlight;
+      g.fillStyle = COLORS.highlight;
+      g.lineWidth = 1.5;
+      g.beginPath(); g.arc(x + 5, y - 1.5, 2.8, Math.PI, 0); g.stroke();
+      g.fillRect(x + 1, y - 1.5, 8, 6.5);
+      g.restore();
+    }
+
     function hatch(x0, x1, y0, y1) {
       g.save();
       g.beginPath(); g.rect(x0, y0, x1 - x0, y1 - y0); g.clip();
@@ -231,8 +242,11 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
         const on = selLines.has(l.id) || hl.has(l.id);
         g.fillStyle = on ? COLORS.sel : i % 2 ? COLORS.line2 : COLORS.line;
         g.fillRect(x0, r[0] + 3, Math.max(1, x1 - x0 - 1), r[1] - r[0] - 6);
+        // a locked line: hatched, with a padlock before its label
+        const lx = Math.max(x0, 0) + 4, pad = l.locked && x1 - lx > 18 ? 13 : 0;
         if (l.locked) hatch(x0, x1, r[0] + 3, r[1] - 3);
-        label((i + 1) + ' ' + l.text, Math.max(x0, 0) + 4, (r[0] + r[1]) / 2, x1 - Math.max(x0, 0) - 8);
+        if (pad) padlock(lx, (r[0] + r[1]) / 2);
+        label((i + 1) + ' ' + l.text, lx + pad, (r[0] + r[1]) / 2, x1 - lx - 4 - pad);
         const f = focus.band === null && focus.lineId === l.id && document.activeElement === proxy;
         edge(x0, r[0], r[1], edgeKind(l.by && l.by.start), f && focus.edge === 'start');
         edge(x1, r[0] + 4, r[1] - 4, edgeKind(l.by && l.by.end), f && focus.edge === 'end');

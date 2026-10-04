@@ -306,7 +306,7 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent);
 .g-time.is-pinned { color: var(--text); font-weight: 700; }
 .g-time.is-lrc { color: #8fc8ff; }
 .g-badge { font-size: 8px; color: #8fc8ff; }
-.g-lock { color: var(--gold); font-weight: 700; }
+.g-lock { color: var(--gold); font-weight: 700; display: inline-flex; align-items: center; }
 .g-pins { color: #ffb3a3; }
 .g-warn { color: var(--error); font-weight: 800; }
 .g-heading { color: #7c8596; }
