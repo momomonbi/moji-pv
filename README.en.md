@@ -103,8 +103,9 @@ python3 tests/build_test.py           # tests of build.py
 ```
 
 Browser tests run with `PW_CHANNEL=chrome` (an installed Chrome) or `PW_EXECUTABLE=/path/to/chromium`. CI
-(`.github/workflows/ci.yml`) runs all of these in this order and checks that the committed index.html / en/index.html
-match the build. The pages carry a CSP that allows scripts by hash, so never edit index.html by hand: rebuild it with
+(`.github/workflows/ci.yml`) runs all of these but the browser tests in this order on every pull request and push to
+main (about 5 minutes), and checks that the committed index.html / en/index.html match the build. The browser tests
+(about 13 minutes) run only when started by hand: Actions → CI → Run workflow. The pages carry a CSP that allows scripts by hash, so never edit index.html by hand: rebuild it with
 `build.py`.
 
 Design: [docs/DESIGN.md](docs/DESIGN.md) · spec: [docs/SPEC.md](docs/SPEC.md) · work notes: [docs/NOTES.md](docs/NOTES.md) ·
