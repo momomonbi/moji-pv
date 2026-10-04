@@ -359,6 +359,8 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
         // An area selection (区画, DESIGN_2_1 §6.5) adds its section camera; its runs are split at the area's edges. With
         // it, カメラ EXTREME for the area (a line pin on every selected line, DESIGN_EXTREME §2.6).
         sec('rig', true, rigFields().concat(extremeFields({ scopes: LINE })), { when: hasArea }),
+        // 背景 for every selected line at once (a block: 無地 for words only, or another picture)
+        sec('ground', true, [partField('ground', 'kind.ground')]),
         sec('colortype', false, [textFaceField(), textInkField(), textStyleField(), textScaleField()]),
         sec('shift', true, [], { custom: 'shift' }),
       ],
