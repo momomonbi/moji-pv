@@ -1,6 +1,6 @@
 <!doctype html><html lang="ja"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-vrKHfK3kI9rA5+uDThlZQkE43+hkTAoFrbMG2K36NvY='; style-src 'sha256-uhekdjVoF8p0oG5Jys9SuRatxu3plo9h2Wexn3/9z4g=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-SAqi3xTiNfrWTcE6J9C8tahaJNBFE0/XOP34ATMnA3k='; style-src 'sha256-uhekdjVoF8p0oG5Jys9SuRatxu3plo9h2Wexn3/9z4g=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
 <title>文字PVメーカー</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -12342,6 +12342,8 @@ MV.def('i18n/strings', [], () => ({
   'toast.gapSplitWhere': ['分けたい所まで再生位置を動かしてください（間奏の端から1秒以上）', 'Move the playhead to where it should split (at least 1 s from either end)'],
   'toast.unpinned': ['選んだ範囲の固定を外しました', 'Unpinned everything in the selection'],
   'toast.lockedNoReroll': ['ロック中の行は振り直せません', 'Locked lines cannot be rerolled'],
+  'toast.diceSame': ['ここはほかの設定で決まっているので、サイコロでは変わりません', 'Other settings decide this, so the dice cannot change it'],
+  'toast.diceCount': ['数は選ばれている部品の数で決まります。減らすときは「種類」で「なし」を選んでください', 'The count follows the parts chosen. To lower it, set a Type to None'],
   'toast.keptAi': ['（AIで固定した{n}項目も）', ' (and {n} set by AI)'],
   'toast.keptAiOnly': ['AIで固定した{n}項目はそのままです', '{n} value set by AI was kept|{n} values set by AI were kept'],
   'diff.line': ['{n}行を振り直し', 'Line {n} rerolled'],
@@ -74236,6 +74238,11 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
   const DICE_WIDGETS = new Set(['part', 'number', 'choice', 'shot', 'curve']);
   // No [d] where a reroll changes nothing: fixed values, formulas (closeness, follow, motion speed) and the section
   // camera (its seed is the run's first cut, DESIGN_2_1 §4.6).
+  // A [d] press draws until the row visibly changes: at most DICE_TRIES draws, DICE_SAME identical ones in a row end
+  // it (a value the rules fix), and a number has to move by DICE_STEP of its automatic range.
+  const DICE_TRIES = 8;
+  const DICE_SAME = 5;
+  const DICE_STEP = 0.2;
   const NO_DICE = /^(mood|theme|season|texture|start|end|split|lang|t0|titleCard|bpm|beatOffset|readRate|length|color\.|amount\.|face\.|el\.|avoid|motion\.speed|cam\.zoom|cam\.follow|rig)/;
   const REF_KINDS = ['arrange', 'arrive', 'dwell', 'depart', 'ornament', 'ground', 'lens', 'filter', 'seam'];
   const ELEMENTS = ['text', 'ornament', 'ground', 'lens', 'filter', 'seam'];
@@ -74870,14 +74877,122 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
 
     function removablePaths(paths) { return paths.filter((p) => doc().pins[p] && doc().pins[p].by !== 'lock'); }
 
-    // [d]: on a pinned field unpin + reroll, one batch (§6.7). The pins go where × would clear them (row.clearPaths has
-    // the older key of §4.10.4); the salts stay keyed by the displayed cut, which is what the planner reads.
+    // [d]: on a pinned field unpin + reroll, one undo step (§6.7). The pins go where × would clear them (row.clearPaths
+    // has the older key of §4.10.4); the salts stay keyed by the displayed cut, which is what the planner reads.
+    // A press always changes what the row shows. A part slot whose draw comes back the same (a small pool) is drawn
+    // again, up to DICE_TRIES draws; one the draw would empty (its count falls back under it, as when an AI pick
+    // raised it) gets another part pinned instead. A number or a choice the automatic draw barely moves (the amounts
+    // it follows keep it in a narrow band) gets a clearly different value pinned. A count raised by the parts it
+    // holds, and a value with nothing else to take, say so.
+    let diceRuns = 0;
     function reroll(row) {
       const ctx = page.ctx;
       if (lineLocked(ctx)) { app.toast(t('toast.lockedNoReroll'), { kind: 'warn' }); return; }
-      const cmds = removablePaths(row.clearPaths).map((path) => ({ t: 'pin.clear', path }));
-      for (const path of pathsOf(row.field, ctx)) cmds.push({ t: 'salt.bump', key: path });
-      run(cmds, { label: ['undo.dice', { field: labelOf(row.field) }], where: { scope: ctx.scope, field: row.field.path } });
+      const field = row.field;
+      const part = field.widget === 'part';
+      const count = /\.count$/.test(field.path);
+      const meta = { label: ['undo.dice', { field: labelOf(field) }], where: { scope: ctx.scope, field: field.path },
+        mergeKey: 'dice:' + row.path + ':' + (++diceRuns) };
+      const bump = () => pathsOf(field, ctx).map((path) => ({ t: 'salt.bump', key: path }));
+      const pin = (v) => run(pathsOf(field, ctx).map((path) => pinCmd(path, v)), meta);
+      const before = shownOf(row, ctx);
+      run(removablePaths(row.clearPaths).map((path) => ({ t: 'pin.clear', path })).concat(bump()), meta);
+      let now = shownOf(row, ctx);
+      if (diceMoved(before, now, part)) return;
+      if (part) {
+        for (let i = 1; i < DICE_TRIES && !diceMoved(before, now, true) && !emptied(before, now); i++) {
+          run(bump(), meta);
+          now = shownOf(row, ctx);
+        }
+        if (diceMoved(before, now, true)) return;
+        const key = otherPart(row, ctx, before.vals);
+        if (key) { pin(key); return; }
+      } else if (!count) {
+        const v = otherValue(before.schema || now.schema, before.vals);
+        if (v !== undefined) { pin(v); return; }
+        for (let i = 1, same = 1; i < DICE_TRIES && sameShown(before, now) && same < DICE_SAME; i++) {
+          run(bump(), meta);
+          now = shownOf(row, ctx);
+          same = sameShown(before, now) ? same + 1 : 0;
+        }
+      }
+      if (sameShown(before, shownOf(row, ctx))) app.toast(t(count ? 'toast.diceCount' : 'toast.diceSame'), { kind: 'warn' });
+    }
+
+    // A value clearly different from the one shown (the first cut's): another entry of the pick list or the options,
+    // the other side of a switch, or a number at least DICE_STEP of the automatic range away, on the spec's step.
+    function otherValue(s, was) {
+      if (!s) return undefined;
+      const cur = was.find((v) => v !== '');
+      const draw = (n) => Math.floor((crypto.getRandomValues(new Uint32Array(1))[0] / 4294967296) * n);
+      const oneOf = (list) => {
+        const rest = [...new Set(list)].filter((v) => JSON.stringify(v) !== JSON.stringify(cur));
+        return rest.length ? rest[draw(rest.length)] : undefined;
+      };
+      if (s.type === 'bool') return typeof cur === 'boolean' ? !cur : undefined;
+      if (s.auto && Array.isArray(s.auto.pick)) return oneOf(s.auto.pick);
+      if (s.type === 'enum' && Array.isArray(s.of)) return oneOf(s.of);
+      if ((s.type !== 'num' && s.type !== 'int') || typeof cur !== 'number') return undefined;
+      const range = s.auto && Array.isArray(s.auto.range) ? s.auto.range : [s.min, s.max];
+      const lo = Math.max(range[0], s.min), hi = Math.min(range[1], s.max);
+      if (!(hi > lo)) return undefined;
+      const step = s.type === 'int' ? Math.max(1, s.step || 1) : s.step > 0 ? s.step : (hi - lo) / 100;
+      const values = [];
+      for (let v = lo; v <= hi + step / 2; v += step) {
+        const q = Number(v.toFixed(6));
+        if (Math.abs(q - cur) >= (hi - lo) * DICE_STEP) values.push(q);
+      }
+      return values.length ? values[draw(values.length)] : undefined;
+    }
+
+    // What a row shows on each of its cuts ('' where the slot is not drawn) and the schema of its value.
+    function shownOf(row, ctx) {
+      const slot = row.path.slice(row.path.indexOf(':') + 1);
+      const paths = ctx.cutKeys.length ? ctx.cutKeys.map((k) => 'cut/' + k + ':' + slot) : [row.path];
+      let list = null;
+      try { list = app.svc.fieldStates(doc(), plan(), ctx.sel, paths, { registry: app.reg }); } catch (e) { list = null; }
+      list = list || [];
+      const vals = list.map((fs) => (fs && fs.state !== 'inactive' && fs.value !== undefined && fs.value !== null ? fs.value : ''));
+      const fs = list.find((x) => x && x.schema);
+      return { vals, schema: fs ? fs.schema : null };
+    }
+
+    function sameShown(a, b) { return JSON.stringify(a.vals) === JSON.stringify(b.vals); }
+    const blank = (v) => v === '' || v === 'none';
+    function emptied(a, b) { return !a.vals.some(blank) && b.vals.some(blank); }
+
+    // Moved enough to see: a part slot shows another part (still a part where it showed one); a number moves by a
+    // fifth of its automatic range on some cut; anything else differs.
+    function diceMoved(a, b, part) {
+      if (sameShown(a, b)) return false;
+      if (part) return !emptied(a, b);
+      const s = a.schema || b.schema;
+      const range = s && s.auto && Array.isArray(s.auto.range) ? s.auto.range : s && typeof s.min === 'number' ? [s.min, s.max] : null;
+      if (!range || !(range[1] > range[0])) return true;
+      const need = (range[1] - range[0]) * DICE_STEP;
+      return a.vals.some((v, i) => typeof v !== 'number' || typeof b.vals[i] !== 'number' || Math.abs(b.vals[i] - v) >= need);
+    }
+
+    // Another part for a part row, drawn by the planner's weights among the parts it may use here (none of them the
+    // one shown before, nor one the other slots of the kind show on these cuts).
+    function otherPart(row, ctx, was) {
+      let ex = null;
+      try { ex = app.svc.explain(doc(), plan(), row.path, { registry: app.reg }); } catch (e) { ex = null; }
+      const m = /^(\w+)#(\d+)$/.exec(row.path.slice(row.path.indexOf(':') + 1));
+      const taken = new Set(was);
+      if (m) {
+        for (const k of ctx.cutKeys) {
+          const c = plan().cuts.find((x) => x.key === k);
+          for (let i = 0; c && i < 3; i++) if (String(i) !== m[2] && c.slots[m[1] + '#' + i]) taken.add(c.slots[m[1] + '#' + i].v);
+        }
+      }
+      const pool = (ex && ex.alts ? ex.alts : []).filter((a) => !a.masked && !taken.has(a.key) && !blank(a.key));
+      if (!pool.length) return null;
+      const weighted = pool.some((a) => a.w > 0) ? pool.filter((a) => a.w > 0) : pool;
+      const w = (a) => (a.w > 0 ? a.w : 1);
+      let x = (crypto.getRandomValues(new Uint32Array(1))[0] / 4294967296) * weighted.reduce((s, a) => s + w(a), 0);
+      for (const a of weighted) { x -= w(a); if (x < 0) return a.key; }
+      return weighted[weighted.length - 1].key;
     }
 
     function gestureFor(row) {

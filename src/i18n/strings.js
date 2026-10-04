@@ -472,6 +472,8 @@ MV.def('i18n/strings', [], () => ({
   'toast.gapSplitWhere': ['分けたい所まで再生位置を動かしてください（間奏の端から1秒以上）', 'Move the playhead to where it should split (at least 1 s from either end)'],
   'toast.unpinned': ['選んだ範囲の固定を外しました', 'Unpinned everything in the selection'],
   'toast.lockedNoReroll': ['ロック中の行は振り直せません', 'Locked lines cannot be rerolled'],
+  'toast.diceSame': ['ここはほかの設定で決まっているので、サイコロでは変わりません', 'Other settings decide this, so the dice cannot change it'],
+  'toast.diceCount': ['数は選ばれている部品の数で決まります。減らすときは「種類」で「なし」を選んでください', 'The count follows the parts chosen. To lower it, set a Type to None'],
   'toast.keptAi': ['（AIで固定した{n}項目も）', ' (and {n} set by AI)'],
   'toast.keptAiOnly': ['AIで固定した{n}項目はそのままです', '{n} value set by AI was kept|{n} values set by AI were kept'],
   'diff.line': ['{n}行を振り直し', 'Line {n} rerolled'],
