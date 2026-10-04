@@ -9,7 +9,7 @@ MV.def('ui/step_look', ['ui/dom', 'ui/icons', 'core/doc', 'ui/fields', 'i18n/t',
   // 間奏の演出: per interlude of the song, its effect (自動 or one of the three, pinned at that interlude's cut); its
   // name seeks there.
   const IL_KEYS = ['lightMotes', 'soundHorizon', 'kineticShapes', 'neonWave', 'ringPulse', 'warpField', 'tileRipple', 'burstBloom',
-    'harmonicString'];
+    'harmonicString', 'ridgeLines', 'polarWave', 'peakBars'];
 
   function mount(app) {
     const t = app.t;

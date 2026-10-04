@@ -1,4 +1,4 @@
-/* 文字PVメーカー v2 — original work. Interlude effects: light motes, sound horizon, kinetic shapes (textless compositions for interlude cuts). */
+/* 文字PVメーカー v2 — original work. Interlude effects: light motes, sound horizon, kinetic shapes, waveform analyzers (textless compositions for interlude cuts). */
 MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
   'use strict';
 
@@ -185,11 +185,11 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
       const f = new Float32Array(n);
       for (let i = 0; i < n; i++) {
         const raw = env.band(k, L0 + i / HZ) || 0;
-        f[i] = i ? f[i - 1] + (raw - f[i - 1]) * (raw > f[i - 1] ? 0.85 : 0.3) : raw;
+        f[i] = i ? f[i - 1] + (raw - f[i - 1]) * (raw > f[i - 1] ? 0.9 : 0.45) : raw;
       }
       const win = Array.from(f.subarray(ia, ib + 1)).sort((x, y) => x - y);
-      const lo = percentile(win, 0.1), hi = percentile(win, 0.97), tr = new Float32Array(n);
-      for (let i = 0; i < n; i++) tr[i] = Math.pow(clamp((f[i] - lo) / Math.max(hi - lo, 0.08)), 1.2);
+      const lo = percentile(win, 0.15), hi = percentile(win, 0.95), tr = new Float32Array(n);
+      for (let i = 0; i < n; i++) tr[i] = Math.pow(clamp((f[i] - lo) / Math.max(hi - lo, 0.08)), 1.7);
       out.push(tr);
     }
     return out;
@@ -1256,9 +1256,9 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
       if (d.B) {
         const v = k === 0 ? Math.max(bandOf(d, 0, t), bandOf(d, 1, t)) : k === WAVE_BUMPS - 1
           ? Math.max(bandOf(d, NB - 2, t), bandOf(d, NB - 1, t)) : bandOf(d, k + 1, t);
-        d.A[k] = d.hA * gain * (k === 0 ? 1.2 : d.amp[k] * 1.4) * (0.06 + 0.94 * v);
+        d.A[k] = d.hA * gain * ((k === 0 ? 1.5 : d.amp[k] * 1.8) * (0.03 + 0.97 * v) + (k === 0 ? 0.5 * kick : 0));
       } else {
-        d.A[k] = k === 0 ? d.hA * gain * (0.25 + 0.25 * lv + 0.8 * kick)
+        d.A[k] = k === 0 ? d.hA * gain * (0.2 + 0.3 * lv + 1.3 * kick)
           : d.hA * gain * d.amp[k] * (0.15 + 0.85 * levelAt(d, t - 0.06 * k)) * (0.35 + 0.65 * noise1(d.nk + k, d.rate[k] * t));
       }
     }
@@ -1269,7 +1269,7 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
       let y = 0;
       for (let k = 0; k < WAVE_BUMPS; k++) { const z = (u - d.uc[k]) / d.wd[k]; y += d.A[k] * Math.exp(-z * z); }
       y += crackle * ((noise1(d.nj, 40 * u + 11 * t) - 0.5) + 0.5 * (noise1(d.nj + 1, 97 * u - 17 * t) - 0.5));
-      d.Y[i] = y * smooth(u / 0.04) * smooth((1 - u) / 0.04);
+      d.Y[i] = d.cap * Math.tanh((y * smooth(u / 0.04) * smooth((1 - u) / 0.04)) / d.cap);
     }
   }
 
@@ -1348,8 +1348,9 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     const tr = levelTrack(env, r, fr.a - 1);
     const st = strengthTrack(env, fr, tr, p.shape);
     const B = tr.song ? bandTracks(env, fr.a - 1) : null;
-    const hA = s * (wide ? 0.34 : 0.26) * (0.35 + 0.65 * p.react) * (tr.song ? 1 : 0.8);
+    const hA = s * (wide ? 0.42 : 0.32) * (0.35 + 0.65 * p.react) * (tr.song ? 1 : 0.8);
     const base = Math.min(fr.cy + (wide ? 0.14 : 0.1) * D.h, D.h - D.safe.b - 0.75 * hA);
+    const cap = Math.max(0.2 * s, base - D.safe.t - 0.03 * s);         // the highest a peak goes (a soft ceiling)
     const rb = r.fork('bumps');
     const uc = new Float32Array(WAVE_BUMPS), wd = new Float32Array(WAVE_BUMPS), amp = new Float32Array(WAVE_BUMPS);
     const rate = new Float32Array(WAVE_BUMPS);
@@ -1367,7 +1368,7 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     const strokes = ink.chroma ? [[0.004 * s, 1, P]]
       : [[0.022 * s, ink.add ? 0.07 : 0.05, P], [0.008 * s, ink.add ? 0.3 : 0.25, P], [0.0026 * s, 1, core]];
     const shared = data(fr, { add: ink.add, chroma: ink.chroma, P, song: tr.song, L0: tr.L0, lv: tr.lv, sw: tr.sw, n1: tr.n1,
-      n2: tr.n2, I: st.I, W: st.W, IA: st.IA, s, x0: fr.cx - Lh, len: 2 * Lh, base, hA, depth: 0.9 * hA, uc, wd, amp, rate,
+      n2: tr.n2, I: st.I, W: st.W, IA: st.IA, s, x0: fr.cx - Lh, len: 2 * Lh, base, hA, cap, depth: 0.9 * hA, uc, wd, amp, rate,
       jit: 0.02 * s, dot: 0.014 * s, nk: rb.int(1, SEED_MAX - 16), nj: rb.int(1, SEED_MAX - 2),
       bt: kicks.bt, bd: kicks.bd, B, BL0: fr.a - 1, A: new Float32Array(WAVE_BUMPS), Y: new Float32Array(WAVE_N) });
     if (p.reflect && !ink.chroma) {
@@ -1467,7 +1468,7 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     const st = strengthTrack(env, fr, tr, p.shape);
     const kicks = kicksOf(env, fr, tr, st, r, 0.3);
     const B = tr.song ? bandTracks(env, fr.a - 1) : null;
-    const R0 = 0.16 * s, hA = 0.15 * s * (0.35 + 0.65 * p.react) * (tr.song ? 1 : 0.8);
+    const R0 = 0.16 * s, hA = 0.19 * s * (0.35 + 0.65 * p.react) * (tr.song ? 1 : 0.8);
     const P = 'accent', core = ink.light || ink.chroma ? P : 'ink';
     env.sb.paint({ layer: 'mid', bleed: 0, animated: true, owner: env.owner, draw: ringDraw,
       data: data(fr, { add: ink.add, chroma: ink.chroma, P, song: tr.song, L0: tr.L0, lv: tr.lv, sw: tr.sw, n1: tr.n1, n2: tr.n2,
@@ -1784,5 +1785,248 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     build: stringBuild,
   });
 
-  return [lightMotes, soundHorizon, kineticShapes, neonWave, ringPulse, warpField, tileRipple, burstBloom, harmonicString];
+  // --- the waveform analyzers below: the song's eight bands (bass … treble), or without a song the loudness, the kicks
+  // and a flicker, interpolated between neighbouring bands -----------------------------------------------------------
+
+  // The spectrum at u (0 = bass … 1 = treble) at t, 0…1.
+  function spectrumAt(d, u, t, i) {
+    if (d.B) {
+      const f = clamp(u) * (NB - 1), k = Math.min(NB - 2, Math.floor(f));
+      return lerp(bandOf(d, k, t), bandOf(d, k + 1, t), f - k);
+    }
+    const lo = (1 - u) * (1 - u), kick = kickAt(d, t, 0.22);
+    return clamp(levelAt(d, t - 0.05 * u) * (0.3 + 0.7 * noise1(d.nk + i, (1 + 4 * u) * t)) * (0.5 + 0.5 * u) + 1.1 * kick * lo);
+  }
+
+  // --- ridgeLines: 光の山脈 ------------------------------------------------------------------------------------------------
+
+  // The spectrum drawn as a line every 0.08 s; the older lines stand behind and above the newest, narrower and dimmer,
+  // like a mountain range going back: the bass rises in the middle, the treble toward both edges.
+  const RIDGE_L = 18, RIDGE_N = 64, RIDGE_DT = 0.08;
+
+  function ridgeAt(d, t, out) {
+    for (let i = 0; i < RIDGE_N; i++) {
+      const m = Math.abs((2 * i) / (RIDGE_N - 1) - 1), win = Math.pow(Math.max(0, 1 - m * m), 0.7);
+      const c = Math.min(i, RIDGE_N - 1 - i);
+      out[i] = win * (0.04 + 0.96 * spectrumAt(d, m, t, c)) * (0.85 + 0.3 * noise1(d.nj + c, 6 * t));
+    }
+  }
+
+  function ridgeDraw(g, t, d, q) {
+    const Am = envelopeOf(d, t), reach = reachOf(d, t);
+    if (Am < 1 / 255 || !(reach > 0)) return;
+    const gain = gainOf(d, t), a0 = g.globalAlpha, lines = Math.max(1, Math.round(reach * RIDGE_L));
+    if (d.add) g.globalCompositeOperation = 'lighter';
+    g.lineJoin = 'round';
+    g.lineCap = 'round';
+    for (let j = lines - 1; j >= 0; j--) {
+      ridgeAt(d, t - j * RIDGE_DT, d.H);
+      const depth = j / RIDGE_L, w = d.len * (1 - 0.35 * depth), x0 = d.cx - w / 2, y0 = d.base - d.gap * j * (1 - 0.25 * depth);
+      const hA = d.hA * gain * (1 - 0.4 * depth);
+      g.beginPath();
+      for (let i = 0; i < RIDGE_N; i++) {
+        const x = x0 + (w * i) / (RIDGE_N - 1), y = y0 - hA * d.H[i];
+        if (i) g.lineTo(x, y); else g.moveTo(x, y);
+      }
+      if (j === 0) { strokePasses(g, a0, Am, q, d.passes); continue; }
+      g.globalAlpha = a0 * clamp((d.chroma ? 1 : 0.85 * Math.pow(1 - depth, 1.4)) * Am);
+      g.strokeStyle = q.rgba(j % 3 === 0 ? d.P : d.Q, 1);
+      g.lineWidth = 0.003 * d.s;
+      g.stroke();
+    }
+    g.globalCompositeOperation = 'source-over';
+    g.globalAlpha = a0;
+  }
+
+  function ridgeBuild(env, p) {
+    const { D } = env;
+    const fr = frameOf(env, p), ink = inksOf(env.pal), r = seedOf(env), s = fr.s, wide = D.w >= D.h;
+    const tr = levelTrack(env, r, fr.a - 1);
+    const st = strengthTrack(env, fr, tr, p.shape);
+    const kicks = kicksOf(env, fr, tr, st, r, 0.3);
+    const B = tr.song ? bandTracks(env, fr.a - 1) : null;
+    const len = Math.min(0.62 * D.w, D.w - D.safe.l - D.safe.r - 0.04 * s);
+    const hA = s * (wide ? 0.3 : 0.24) * (0.35 + 0.65 * p.react) * (tr.song ? 1 : 0.85);
+    const gap = (wide ? 0.024 : 0.02) * s;
+    const base = Math.min(fr.cy + 0.4 * RIDGE_L * gap + 0.3 * hA, D.h - D.safe.b - 0.03 * s);
+    const P = 'accent', core = ink.light || ink.chroma ? P : 'ink';
+    env.sb.paint({ layer: 'mid', bleed: 0, animated: true, owner: env.owner, draw: ridgeDraw,
+      data: data(fr, { add: ink.add, chroma: ink.chroma, P, Q: ink.chroma ? P : ink.two, song: tr.song, L0: tr.L0, lv: tr.lv,
+        sw: tr.sw, n1: tr.n1, n2: tr.n2, I: st.I, W: st.W, IA: st.IA, s, len, base, gap, hA, nk: r.int(1, SEED_MAX - RIDGE_N),
+        nj: r.int(1, SEED_MAX - RIDGE_N), passes: passesOf(ink, s, P, core), bt: kicks.bt, bd: kicks.bd, B, BL0: fr.a - 1,
+        H: new Float32Array(RIDGE_N) }) });
+    return finish(env, fr, len, RIDGE_L * gap + hA);
+  }
+
+  const ridgeLines = K.arrange({
+    key: 'ridgeLines',
+    label: L('光の山脈', 'Sound ridges'),
+    blurb: L('音の形が一本の線になって奥へ流れ、山脈のように重なる（真ん中が低音、両端が高音）',
+      'The sound becomes a line that scrolls back into a range of ridges (bass in the middle, treble at the edges)'),
+    tags: ['digital', 'airy', 'bold'], family: 'ridge', cam: 'gentle', needs: ['beats', 'level'],
+    traits: { cells: [0, 80], roles: ['interlude'], energy: [0.2, 1] },
+    fits: (f) => (f.beat ? 1.2 : 0.7),
+    params: { react: REACT(0.55, 0.9), shape: SHAPE_PARAM },
+    build: ridgeBuild,
+  });
+
+  // --- polarWave: 光の円波形 -----------------------------------------------------------------------------------------------
+
+  // A closed line round the centre whose radius is the spectrum (the bottom the bass, the top the treble, both sides
+  // alike), with a thin mirror inside and the shape of 0.18 s ago as a wider, dimmer echo; it swells on the kick and turns
+  // slowly with the strength.
+  const POLAR_N = 120;
+
+  function polarAt(d, t, out) {
+    for (let i = 0; i < POLAR_N; i++) {
+      const c = Math.min(i, POLAR_N - i), m = Math.abs(Math.sin((Math.PI * i) / POLAR_N));   // 0 at the top, 1 at the bottom
+      out[i] = spectrumAt(d, 1 - m, t, c) * (0.88 + 0.24 * noise1(d.nj + c, 7 * t));
+    }
+    return kickAt(d, t, 0.2);
+  }
+
+  function polarLoop(g, d, V, k, R, sign, turn) {
+    g.beginPath();
+    for (let i = 0; i <= POLAR_N; i++) {
+      const j = i % POLAR_N, th = turn + (TAU * j) / POLAR_N - Math.PI / 2, r = Math.max(0, R + sign * k * V[j]);
+      const x = d.cx + Math.cos(th) * r, y = d.cy + Math.sin(th) * r;
+      if (i) g.lineTo(x, y); else g.moveTo(x, y);
+    }
+  }
+
+  function polarDraw(g, t, d, q) {
+    const Am = envelopeOf(d, t), reach = reachOf(d, t);
+    if (Am < 1 / 255 || !(reach > 0)) return;
+    const gain = gainOf(d, t), a0 = g.globalAlpha, turn = d.spin * clockAt(d, t), R = d.R0 * (0.7 + 0.3 * reach);
+    if (d.add) g.globalCompositeOperation = 'lighter';
+    g.lineJoin = 'round';
+    polarAt(d, t - 0.18, d.E);
+    polarLoop(g, d, d.E, 1.15 * d.hA * gain, R * 1.06, 1, turn - 0.05);
+    g.globalAlpha = a0 * clamp((d.chroma ? 1 : 0.35) * Am);
+    g.strokeStyle = q.rgba(d.Q, 1);
+    g.lineWidth = 0.003 * d.s;
+    g.stroke();
+    const kick = polarAt(d, t, d.V), R1 = R * (1 + 0.12 * kick * gain);
+    polarLoop(g, d, d.V, d.hA * gain, R1, 1, turn);
+    strokePasses(g, a0, Am, q, d.passes);
+    polarLoop(g, d, d.V, 0.45 * d.hA * gain, R1 * 0.95, -1, turn);
+    g.globalAlpha = a0 * clamp((d.chroma ? 1 : 0.5) * Am);
+    g.strokeStyle = q.rgba(d.P, 1);
+    g.lineWidth = 0.0022 * d.s;
+    g.stroke();
+    g.globalCompositeOperation = 'source-over';
+    g.globalAlpha = a0;
+  }
+
+  function polarBuild(env, p) {
+    const fr = frameOf(env, p), ink = inksOf(env.pal), r = seedOf(env), s = fr.s;
+    const tr = levelTrack(env, r, fr.a - 1);
+    const st = strengthTrack(env, fr, tr, p.shape);
+    const kicks = kicksOf(env, fr, tr, st, r, 0.3);
+    const B = tr.song ? bandTracks(env, fr.a - 1) : null;
+    const R0 = 0.17 * s, hA = 0.17 * s * (0.35 + 0.65 * p.react) * (tr.song ? 1 : 0.85);
+    const P = 'accent', core = ink.light || ink.chroma ? P : 'ink';
+    env.sb.paint({ layer: 'mid', bleed: 0, animated: true, owner: env.owner, draw: polarDraw,
+      data: data(fr, { add: ink.add, chroma: ink.chroma, P, Q: ink.chroma ? P : ink.two, song: tr.song, L0: tr.L0, lv: tr.lv,
+        sw: tr.sw, n1: tr.n1, n2: tr.n2, I: st.I, W: st.W, IA: st.IA, s, R0, hA, spin: (r.next() < 0.5 ? -1 : 1) * 0.12,
+        nk: r.int(1, SEED_MAX - POLAR_N), nj: r.int(1, SEED_MAX - POLAR_N), passes: passesOf(ink, s, P, core), bt: kicks.bt,
+        bd: kicks.bd, B, BL0: fr.a - 1, V: new Float32Array(POLAR_N), E: new Float32Array(POLAR_N) }) });
+    const ext = 2 * (R0 * 1.25 + 1.4 * hA);
+    return finish(env, fr, ext, ext);
+  }
+
+  const polarWave = K.arrange({
+    key: 'polarWave',
+    label: L('光の円波形', 'Sound circle'),
+    blurb: L('円い光の線が音の形に波打ち、少し遅れた残像が外側に重なる（下が低音、上が高音）',
+      'A circle of light ripples with the sound, its echo a moment behind (bass at the bottom, treble at the top)'),
+    tags: ['bold', 'digital', 'playful'], family: 'polar', cam: 'gentle', needs: ['beats', 'level'],
+    traits: { cells: [0, 80], roles: ['interlude'], energy: [0.3, 1] },
+    fits: (f) => (f.beat ? 1.2 : 0.7),
+    params: { react: REACT(0.6, 0.9), shape: SHAPE_PARAM },
+    build: polarBuild,
+  });
+
+  // --- peakBars: 光の柱 ----------------------------------------------------------------------------------------------------
+
+  // Columns of light from the bass on the left to the treble on the right, reflected on the floor; a mark over each
+  // keeps its highest point of the last 0.6 s and falls slowly, as on a studio meter.
+  const BARS_N = 28;
+
+  function barsDraw(g, t, d, q) {
+    const Am = envelopeOf(d, t), reach = reachOf(d, t);
+    if (Am < 1 / 255 || !(reach > 0)) return;
+    const gain = gainOf(d, t), a0 = g.globalAlpha, n = Math.max(1, Math.round(reach * BARS_N));
+    const step = d.len / BARS_N, bw = 0.62 * step, off = (step - bw) / 2;
+    for (let i = 0; i < n; i++) {
+      const u = i / (BARS_N - 1), fl = (0.85 + 0.3 * noise1(d.nj + i, 5 * t));
+      const v = clamp(spectrumAt(d, u, t, i) * fl);
+      let cap = v;
+      for (let j = 1; j <= 10; j++) cap = Math.max(cap, clamp(spectrumAt(d, u, t - 0.06 * j, i) * fl) - 0.07 * j);
+      d.V[i] = d.hA * gain * (0.03 + 0.97 * v);
+      d.C[i] = d.hA * gain * (0.03 + 0.97 * cap);
+    }
+    if (d.add) g.globalCompositeOperation = 'lighter';
+    const bars = (scale, down) => {
+      g.beginPath();
+      for (let i = 0; i < n; i++) {
+        const h = d.V[i] * scale, x = d.x0 + i * step + off;
+        g.rect(x, down ? d.base + 0.006 * d.s : d.base - h, bw, h);
+      }
+    };
+    g.fillStyle = q.rgba(d.P, 1);
+    if (!d.chroma) {
+      bars(0.4, true);
+      g.globalAlpha = a0 * clamp(0.16 * Am);
+      g.fill();
+      bars(1, false);
+      g.globalAlpha = a0 * clamp(0.12 * Am);
+      g.strokeStyle = q.rgba(d.P, 1);
+      g.lineWidth = 0.012 * d.s;
+      g.stroke();
+    } else bars(1, false);
+    g.globalAlpha = a0 * clamp((d.chroma ? 1 : 0.6) * Am);
+    g.fill();
+    g.beginPath();
+    for (let i = 0; i < n; i++) g.rect(d.x0 + i * step + off, d.base - d.C[i] - 0.016 * d.s, bw, 0.006 * d.s);
+    g.globalAlpha = a0 * clamp(Am);
+    g.fillStyle = q.rgba(d.core, 1);
+    g.fill();
+    g.globalCompositeOperation = 'source-over';
+    g.globalAlpha = a0;
+  }
+
+  function barsBuild(env, p) {
+    const { D } = env;
+    const fr = frameOf(env, p), ink = inksOf(env.pal), r = seedOf(env), s = fr.s, wide = D.w >= D.h;
+    const tr = levelTrack(env, r, fr.a - 1);
+    const st = strengthTrack(env, fr, tr, p.shape);
+    const kicks = kicksOf(env, fr, tr, st, r, 0.3);
+    const B = tr.song ? bandTracks(env, fr.a - 1) : null;
+    const len = Math.min(0.7 * D.w, D.w - D.safe.l - D.safe.r - 0.04 * s);
+    const hA = s * (wide ? 0.4 : 0.32) * (0.35 + 0.65 * p.react) * (tr.song ? 1 : 0.85);
+    const base = Math.min(fr.cy + 0.45 * hA, D.h - D.safe.b - 0.2 * hA - 0.02 * s);
+    const P = 'accent', core = ink.light || ink.chroma ? P : 'ink';
+    env.sb.paint({ layer: 'mid', bleed: 0, animated: true, owner: env.owner, draw: barsDraw,
+      data: data(fr, { add: ink.add, chroma: ink.chroma, P, core, song: tr.song, L0: tr.L0, lv: tr.lv, sw: tr.sw, n1: tr.n1,
+        n2: tr.n2, I: st.I, W: st.W, IA: st.IA, s, len, x0: fr.cx - len / 2, base, hA, nk: r.int(1, SEED_MAX - BARS_N),
+        nj: r.int(1, SEED_MAX - BARS_N), bt: kicks.bt, bd: kicks.bd, B, BL0: fr.a - 1, V: new Float32Array(BARS_N),
+        C: new Float32Array(BARS_N) }) });
+    return finish(env, Object.assign({}, fr, { cy: base - 0.5 * hA }), len, 1.4 * hA);
+  }
+
+  const peakBars = K.arrange({
+    key: 'peakBars',
+    label: L('光の柱', 'Light columns'),
+    blurb: L('左の低音から右の高音まで光の柱が並んで伸び縮みし、てっぺんの印がゆっくり落ちる',
+      'Columns of light from the bass on the left to the treble on the right, each with a peak mark that slowly falls'),
+    tags: ['bold', 'fast', 'digital'], family: 'bars', cam: 'gentle', needs: ['beats', 'level'],
+    traits: { cells: [0, 80], roles: ['interlude'], energy: [0.35, 1] },
+    fits: (f) => (f.beat ? 1.2 : 0.7),
+    params: { react: REACT(0.55, 0.9), shape: SHAPE_PARAM },
+    build: barsBuild,
+  });
+
+  return [lightMotes, soundHorizon, kineticShapes, neonWave, ringPulse, warpField, tileRipple, burstBloom, harmonicString,
+    ridgeLines, polarWave, peakBars];
 });

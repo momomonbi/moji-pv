@@ -587,7 +587,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
     // parameters of a part (shared ones by `kind.param`, own ones by `kind@key.param`). partKey null → shared only.
     // Params kept for saved documents but no longer offered: the interlude effects' 表現の強さ (自動 follows the song).
     const HIDDEN_PARAMS = new Set(['lightMotes', 'soundHorizon', 'kineticShapes', 'neonWave', 'ringPulse', 'warpField', 'tileRipple',
-      'burstBloom', 'harmonicString'].map((key) => 'arrange@' + key + '.shape'));
+      'burstBloom', 'harmonicString', 'ridgeLines', 'polarWave', 'peakBars'].map((key) => 'arrange@' + key + '.shape'));
 
     function paramFields(kind, idx, partKey, registry, o) {
       const opt = o || {};

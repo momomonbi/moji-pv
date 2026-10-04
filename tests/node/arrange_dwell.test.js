@@ -52,7 +52,7 @@ function tableRows(heading) {
 test('every §5.1 composition and §5.3 hold is defined once, with the table’s labels, tags and fallback', () => {
   for (const [kind, heading] of [['arrange', '### 5.1 Compositions'], ['dwell', '### 5.3 Holds']]) {
     const rows = tableRows(heading);
-    assert.equal(rows.length, kind === 'arrange' ? 30 : 10, heading);
+    assert.equal(rows.length, kind === 'arrange' ? 33 : 10, heading);
     assert.deepEqual(REGISTRY.keys(kind), rows.map((r) => r.key).sort(), kind + ': exactly the table’s keys');
     for (const r of rows) {
       const def = REGISTRY.get(kind, r.key);
@@ -70,7 +70,8 @@ test('traits the planner relies on: special roles, vertical-only and horizontal-
   assert.deepEqual(roles('titlePlate'), ['title']);
   assert.deepEqual(roles('breathMark'), ['interlude']);
   assert.equal(REGISTRY.get('arrange', 'breathMark').pool, false, 'the breath mark is only pinned (the interlude effects replace it)');
-  assert.deepEqual(REGISTRY.pool('arrange', { role: 'interlude' }).slice().sort(), ['burstBloom', 'harmonicString', 'kineticShapes', 'lightMotes', 'neonWave', 'ringPulse', 'soundHorizon', 'tileRipple', 'warpField']);
+  assert.deepEqual(REGISTRY.pool('arrange', { role: 'interlude' }).slice().sort(), ['burstBloom', 'harmonicString', 'kineticShapes', 'lightMotes', 'neonWave', 'peakBars', 'polarWave', 'ridgeLines', 'ringPulse',
+    'soundHorizon', 'tileRipple', 'warpField']);
   assert.deepEqual(roles('creditFold'), ['outro']);
   for (const role of ['title', 'interlude', 'outro']) assert.ok(REGISTRY.pool('arrange', { role }).length > 0, role + ' has a composition');
   for (const key of ['pillarColumns', 'spineColumn']) assert.deepEqual(REGISTRY.traits('arrange', key).orient, ['v'], key);
