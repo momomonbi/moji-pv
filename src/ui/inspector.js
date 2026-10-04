@@ -1121,6 +1121,13 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
           const locked = !!doc().locks[line.id];
           buttons.push(headButton('lock', locked ? t('act.unlock') : t('act.lock'), () => app.actions.run('lock.toggle'),
             { 'aria-pressed': String(locked), class: ['chip-btn', 'lh-btn', locked ? 'is-on' : ''] }));
+          // まとまり: the first line of a block joins it to the one before, any other line splits its block there
+          const rows = doc().sheet.rows, ri = rows.findIndex((r) => r.id === line.row);
+          if (ri > 0 && p.lines[0] && p.lines[0].id !== line.id) {
+            const join = rows[ri - 1].src.trim() === '';
+            buttons.push(headButton(join ? 'fold' : 'unfold', t(join ? 'act.blockJoin' : 'act.blockSplit'),
+              () => app.actions.run(join ? 'block.join' : 'block.split')));
+          }
         }
         buttons.push(headButton('dice', t('act.reroll'), () => app.actions.run('look.reroll'), { disabled: lineLocked(ctx) }));
       }

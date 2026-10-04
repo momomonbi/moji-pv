@@ -775,6 +775,23 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
     });
     def('look.details', () => app.select(S.WORK, { from: 'header', open: true }));
     def('lock.toggle', () => toggleLock(app, selLines()), { enabled: () => selLines().length > 0 });
+    // まとまり (blocks of lines between blank rows): split the selected line's block before it, or join it to the block
+    // before (the blank rows between them are removed; a timestamp-only row stays).
+    function blockEdit(join) {
+      const ids = selLines();
+      const line = ids.length === 1 && app.plan ? app.plan.lines.find((l) => l.id === ids[0]) : null;
+      const rows = app.doc.sheet.rows, i = line ? rows.findIndex((r) => r.id === line.row) : -1;
+      if (i <= 0) return false;
+      const src = rows.map((r) => r.src);
+      let j = i;
+      while (j > 0 && src[j - 1].trim() === '') j--;
+      if (join ? j === i : j < i) return false;
+      if (join) src.splice(j, i - j); else src.splice(i, 0, '');
+      app.dispatch({ t: 'lyrics.set', text: src.join('\n') }, { label: [join ? 'undo.blockJoin' : 'undo.blockSplit', {}] });
+      return true;
+    }
+    def('block.split', () => blockEdit(false), { enabled: () => selLines().length === 1 });
+    def('block.join', () => blockEdit(true), { enabled: () => selLines().length === 1 });
     def('look.copy', () => {
       const scope = S.scopeOf(view.state.sel, app.plan);
       if (scope === 'work') return false;

@@ -1,6 +1,6 @@
 <!doctype html><html lang="ja"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-l+4LF3QxZ4ddhigXfjGTtehl/N0B1S3Q2jE6fadnoRY='; style-src 'sha256-uhekdjVoF8p0oG5Jys9SuRatxu3plo9h2Wexn3/9z4g=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-GRuod+G31PCj8zIe0Jq0bXFcPZEM5Y6dbU++8WmogBo='; style-src 'sha256-uhekdjVoF8p0oG5Jys9SuRatxu3plo9h2Wexn3/9z4g=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
 <title>文字PVメーカー</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -11867,6 +11867,8 @@ MV.def('i18n/strings', [], () => ({
   'act.unpin': ['固定を外す', 'Unpin'],
   'act.reroll': ['振り直す', 'Reroll'],
   'act.lock': ['ロック', 'Lock'],
+  'act.blockSplit': ['ここでまとまりを分ける', 'Split the block here'],
+  'act.blockJoin': ['前のまとまりとつなげる', 'Join to the block before'],
   'act.unlock': ['ロックを外す', 'Unlock'],
   'act.promote': ['範囲を広げる', 'Widen scope'],
 
@@ -12356,6 +12358,8 @@ MV.def('i18n/strings', [], () => ({
   'cmd.look.copy': ['見た目をコピー', 'Copy look'],
   'cmd.look.paste': ['見た目を貼り付け', 'Paste look'],
   'cmd.lock.toggle': ['ロック / 解除', 'Lock / unlock'],
+  'cmd.block.split': ['ここでまとまりを分ける', 'Split the block here'],
+  'cmd.block.join': ['前のまとまりとつなげる', 'Join to the block before'],
   'cmd.tap.start': ['タップで合わせる', 'Tap to sync'],
   'cmd.tap.mark': ['次の行の開始', 'Mark the next start'],
   'cmd.tap.end': ['行の終わり', 'Mark the end'],
@@ -12861,6 +12865,8 @@ MV.def('i18n/strings', [], () => ({
   'undo.filter': ['使う{kind}', '{kind} to use'],
   'undo.lineText': ['行の歌詞', 'Line text'],
   'undo.reattach': ['固定の付け直し', 'Reattach pins'],
+  'undo.blockSplit': ['まとまりを分ける', 'Split a block'],
+  'undo.blockJoin': ['まとまりをつなげる', 'Join blocks'],
   'undo.shift': ['まとめてずらす（{n}行）', 'Shift ({n} line)|Shift ({n} lines)'],
   'undo.time': ['時間の変更', 'Change time'],
   'undo.unpinAi': ['AIの固定を外す', 'Remove AI pins'],
@@ -74410,6 +74416,13 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
           const locked = !!doc().locks[line.id];
           buttons.push(headButton('lock', locked ? t('act.unlock') : t('act.lock'), () => app.actions.run('lock.toggle'),
             { 'aria-pressed': String(locked), class: ['chip-btn', 'lh-btn', locked ? 'is-on' : ''] }));
+          // まとまり: the first line of a block joins it to the one before, any other line splits its block there
+          const rows = doc().sheet.rows, ri = rows.findIndex((r) => r.id === line.row);
+          if (ri > 0 && p.lines[0] && p.lines[0].id !== line.id) {
+            const join = rows[ri - 1].src.trim() === '';
+            buttons.push(headButton(join ? 'fold' : 'unfold', t(join ? 'act.blockJoin' : 'act.blockSplit'),
+              () => app.actions.run(join ? 'block.join' : 'block.split')));
+          }
         }
         buttons.push(headButton('dice', t('act.reroll'), () => app.actions.run('look.reroll'), { disabled: lineLocked(ctx) }));
       }
@@ -75776,6 +75789,23 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
     });
     def('look.details', () => app.select(S.WORK, { from: 'header', open: true }));
     def('lock.toggle', () => toggleLock(app, selLines()), { enabled: () => selLines().length > 0 });
+    // まとまり (blocks of lines between blank rows): split the selected line's block before it, or join it to the block
+    // before (the blank rows between them are removed; a timestamp-only row stays).
+    function blockEdit(join) {
+      const ids = selLines();
+      const line = ids.length === 1 && app.plan ? app.plan.lines.find((l) => l.id === ids[0]) : null;
+      const rows = app.doc.sheet.rows, i = line ? rows.findIndex((r) => r.id === line.row) : -1;
+      if (i <= 0) return false;
+      const src = rows.map((r) => r.src);
+      let j = i;
+      while (j > 0 && src[j - 1].trim() === '') j--;
+      if (join ? j === i : j < i) return false;
+      if (join) src.splice(j, i - j); else src.splice(i, 0, '');
+      app.dispatch({ t: 'lyrics.set', text: src.join('\n') }, { label: [join ? 'undo.blockJoin' : 'undo.blockSplit', {}] });
+      return true;
+    }
+    def('block.split', () => blockEdit(false), { enabled: () => selLines().length === 1 });
+    def('block.join', () => blockEdit(true), { enabled: () => selLines().length === 1 });
     def('look.copy', () => {
       const scope = S.scopeOf(view.state.sel, app.plan);
       if (scope === 'work') return false;
