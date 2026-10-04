@@ -46,7 +46,7 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
       bridge: Object.freeze({ leanTilt: 2, driftSide: 1, none: 1 }),
       intro: Object.freeze({ slowSwell: 2, none: 1 }),
       outro: Object.freeze({ pullAway: 4, none: 1 }),
-      interlude: Object.freeze({ driftSide: 2, none: 1 }),
+      interlude: Object.freeze({ driftSide: 2, slowSwell: 1 }),     // an interlude never stands still (nothing else moves)
       other: Object.freeze({ slowSwell: 1, climbRise: 1 }),
     });
     const LAST_CHORUS_AMP = 1.25, AMP_MAX = 1.3;

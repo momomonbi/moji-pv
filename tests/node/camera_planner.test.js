@@ -1115,7 +1115,7 @@ test('rig runs: every cut in one run; runs tile the video and follow sections, s
 test('rig choice: the section rows, the runner-up rule, the last chorus and rig.curve', () => {
   const ROWS = { chorus: ['climbRise', 'leanTilt', 'none', 'slowSwell'], prechorus: ['climbRise', 'slowSwell'],
     verse: ['driftSide', 'none', 'slowSwell'], bridge: ['driftSide', 'leanTilt', 'none'], intro: ['none', 'slowSwell'],
-    outro: ['none', 'pullAway'], interlude: ['driftSide', 'none'], other: ['climbRise', 'slowSwell'] };
+    outro: ['none', 'pullAway'], interlude: ['driftSide', 'none', 'slowSwell'], other: ['climbRise', 'slowSwell'] };
   let chorusEnds = 0;
   for (const src of [corpus.corpus(4, ['16:9'], ['basic']), corpus.projects(['v21'])]) {
     for (const x of src) {
