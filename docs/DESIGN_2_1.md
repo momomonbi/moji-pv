@@ -2463,7 +2463,7 @@ The en page shows no Japanese except the product name and user data, such as mat
 | `shot.<9 presets>` | the §4.5.1 table | the §4.5.1 table |
 | `shot.custom` | カスタム（キー{n}個） | Custom ({n} keys) |
 | `shot.blurb.settle` | 入りから少し寄って止まる | Eases in a little and settles |
-| `shot.blurb.pushWord` | 強調した言葉へ寄っていく | Pushes in on the emphasized word |
+| `shot.blurb.pushWord` | 強調した言葉（なければ最後の言葉）へ寄っていく | Pushes in on the emphasized word (or the last word) |
 | `shot.blurb.readAlong` | 歌う言葉を順に追う | Follows the words as they are sung |
 | `shot.blurb.snapZoom` | 歌い出しで一気に寄る | Snaps in at the sung start |
 | `shot.blurb.pullReveal` | 最初の語から引いて全体を見せる | Pulls back from the first word to show all |

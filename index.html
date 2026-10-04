@@ -1,6 +1,6 @@
 <!doctype html><html lang="ja"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-b7pW+glAsuj83Nx9J3SXXWuihw/CKIB29U8C81MMrw4='; style-src 'sha256-uhekdjVoF8p0oG5Jys9SuRatxu3plo9h2Wexn3/9z4g=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-RGRMpvcPePnfchwKaUkmoVF59gvnLcww2Z95c2RvPaA='; style-src 'sha256-uhekdjVoF8p0oG5Jys9SuRatxu3plo9h2Wexn3/9z4g=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
 <title>文字PVメーカー</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -4347,7 +4347,14 @@ MV.def('core/shot', ['core/num', 'core/curve'], (N, CV) => {
     driftOff: { tags: ['literary', 'airy', 'slow'], keys: [k('a', 'block', { fill: 0.5, ox: 0.18 }),
       k('b', 'block', { fill: 0.52, ox: 0.12, curve: 'linear' })] },
     wideHold: { tags: ['slow', 'airy', 'minimal'], keys: [k('a', 'frame', { zoom: 0.94 }), k('b', 'frame', { zoom: 0.98, curve: 'linear' })] },
+    // 追いかけて引く: each sung word in extreme close-up at the frame centre, followed as it is sung, then one quick pull
+    // out to the whole line just before the cut ends. Chosen by hand only (PICK_ONLY).
+    chaseReveal: { tags: ['bold', 'fast'], follow: 0.5, keys: [k('a', 'reading', { fill: 1.2, ox: 0, oy: 0 }),
+      k('b', 'reading', { dt: -0.3, fill: 1.2, ox: 0, oy: 0 }), k('b', 'block', { dt: -0.12, fill: 0.55, curve: 'dashStop' }),
+      k('b', 'block', { fill: 0.5, curve: 'linear' })] },
   };
+  // Presets the planner never picks on its own (they come from a pin: the inspector, the AI or a look).
+  const PICK_ONLY = Object.freeze(['chaseReveal']);
   const RIG_DATA = {
     slowSwell: { tags: ['slow', 'soft'], curve: 'softEnds', keys: [{ u: 0, zoom: 1 }, { u: 1, zoom: 1.08 }] },
     climbRise: { tags: ['bold'], curve: 'softEnds', keys: [{ u: 0, zoom: 1.02, y: 0.025 }, { u: 1, zoom: 1.06, y: -0.025 }] },
@@ -4623,6 +4630,7 @@ MV.def('core/shot', ['core/num', 'core/curve'], (N, CV) => {
     return [key, Object.assign({ tags: d.tags.slice() }, shot)];
   })));
   const SHOT_KEYS = Object.freeze(Object.keys(SHOTS));
+  const AUTO_SHOT_KEYS = Object.freeze(SHOT_KEYS.filter((key) => !PICK_ONLY.includes(key)));
   const RIGS = deepFreeze(Object.fromEntries(Object.keys(RIG_DATA).sort().map((key) => {
     const d = RIG_DATA[key];
     return [key, { tags: d.tags.slice(), curve: d.curve, keys: coerceRig({ keys: d.keys }).keys }];
@@ -4982,7 +4990,7 @@ MV.def('core/shot', ['core/num', 'core/curve'], (N, CV) => {
     SHOTS, SHOT_KEYS, RIGS, RIG_KEYS, MOVES, FOCI, TIMINGS, LIMITS,
     coerceShot, coerceRig, isCustom, expandShot, lastFraming, maxFill, expandRig, fromMove, usesBeats, label, rigLabel,
     // EXTREME (DESIGN_EXTREME §1)
-    XSHOTS, XSHOT_KEYS, XLIMITS, XMOVES, DIRS, MIRRORS, X_ANCHORS, X_AWAY, X_FILL_MID,
+    AUTO_SHOT_KEYS, XSHOTS, XSHOT_KEYS, XLIMITS, XMOVES, DIRS, MIRRORS, X_ANCHORS, X_AWAY, X_FILL_MID,
     isExtreme, xKeyOf, presetOf, limitsOf, fromXMove, xIntensity,
   };
 });
@@ -13180,6 +13188,7 @@ MV.def('i18n/strings', [], () => ({
   'shot.settle': ['寄って落ち着く', 'Settle in'],
   'shot.pushWord': ['言葉へ寄る', 'Push to the word'],
   'shot.readAlong': ['読みに合わせる', 'Read along'],
+  'shot.chaseReveal': ['追いかけて引く', 'Chase, then pull out'],
   'shot.snapZoom': ['一気に寄る', 'Snap zoom'],
   'shot.pullReveal': ['寄りから引く', 'Pull to reveal'],
   'shot.sweepAcross': ['横に流す', 'Sweep across'],
@@ -13188,8 +13197,9 @@ MV.def('i18n/strings', [], () => ({
   'shot.wideHold': ['引きで見せる', 'Wide hold'],
   'shot.custom': ['カスタム（キー{n}個）', 'Custom ({n} keys)'],
   'shot.blurb.settle': ['入りから少し寄って止まる', 'Eases in a little and settles'],
-  'shot.blurb.pushWord': ['強調した言葉へ寄っていく', 'Pushes in on the emphasized word'],
+  'shot.blurb.pushWord': ['強調した言葉（なければ最後の言葉）へ寄っていく', 'Pushes in on the emphasized word (or the last word)'],
   'shot.blurb.readAlong': ['歌う言葉を順に追う', 'Follows the words as they are sung'],
+  'shot.blurb.chaseReveal': ['超アップで歌う文字を追いかけ、最後に一瞬で引く', 'Follows the sung words in extreme close-up, then pulls out at the very end'],
   'shot.blurb.snapZoom': ['歌い出しで一気に寄る', 'Snaps in at the sung start'],
   'shot.blurb.pullReveal': ['最初の語から引いて全体を見せる', 'Pulls back from the first word to show all'],
   'shot.blurb.sweepAcross': ['最初の語から最後の語へ横に流す', 'Sweeps from the first word to the last'],
@@ -17212,7 +17222,7 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
 
     // --- §4.7 constants (FROZEN formulas; tuned after the visual QA of §7.5 step (b), NOTES "Step (b)") -----------
     const NONE = 'none';
-    const SHOT_POOL = Object.freeze(SHOT.SHOT_KEYS.concat([NONE]).sort());
+    const SHOT_POOL = Object.freeze(SHOT.AUTO_SHOT_KEYS.concat([NONE]).sort());
     const AMOUNT_OFF = 0.1;                         // A below this: no automatic shot
     const SHORT_CUT = 0.8;                          // seconds
     const SHORT_POOL = Object.freeze(['none', 'settle']);
@@ -25890,6 +25900,17 @@ MV.def('engine/scene/shot', ['core/num', 'core/curve', 'core/shot', 'core/script
     return track;
   }
 
+  // 言葉へ寄る on a line nobody marked: the camera holds the line while its words are sung, then pushes in on the last
+  // word as it starts (every word stays on-frame while it is sung); an emphasis, or a line of one word, keeps the shot.
+  function toLastWord(target, shot) {
+    if (emphRun(target) || unitsOf(target, 'word').length < 2) return shot;
+    const [k0, k1, k2] = shot.keys;
+    const hold = { at: 'word:-1', dt: 0, aim: 'block', fill: k0.fill + (k1.fill - k0.fill) * 0.25, roll: k1.roll, curve: k1.curve };
+    // centred (ox, oy 0): a word kept where it lay near the frame edge swung off-frame while the camera pushed in
+    const push = { at: 'word:-1', dt: 0.35, aim: 'last', fill: k1.fill, roll: k1.roll, ox: 0, oy: 0, curve: 'dashStop' };
+    return Object.assign({}, shot, { keys: [k0, hold, push, Object.assign({}, k2, { aim: 'last', ox: 0, oy: 0 })] });
+  }
+
   function pathUnitAt(path, t) { return path ? Math.max(0, unitAt(path.units.start, path.units.n, t)) : -1; }
   function boxAt(units, k) { return units && k >= 0 ? units.boxes[k] : null; }
 
@@ -25982,7 +26003,7 @@ MV.def('engine/scene/shot', ['core/num', 'core/curve', 'core/shot', 'core/script
     const shot = SHOT.expandShot(ref, { zoom: finite(dd.zoom) ? dd.zoom : 1, curve: dd.curve === null ? undefined : dd.curve,
       carry, follow: finite(dd.follow) ? dd.follow : null });
     if (!shot) return null;
-    const track = buildTrack(env, target, shot);
+    const track = buildTrack(env, target, ref === 'pushWord' ? toLastWord(target, shot) : shot);
     const behaviour = { phase: BH.PH.LENS, live: 'always', from: cam, to: cam + 1, t0: env.times.a, t1: env.times.b,
       run: runShot, track };
     return { behaviours: [behaviour], lean: shot.follow > 0 ? leanOf(env, cam, target, shot.follow) : null, track };

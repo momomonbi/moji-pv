@@ -379,6 +379,17 @@ MV.def('engine/scene/shot', ['core/num', 'core/curve', 'core/shot', 'core/script
     return track;
   }
 
+  // 言葉へ寄る on a line nobody marked: the camera holds the line while its words are sung, then pushes in on the last
+  // word as it starts (every word stays on-frame while it is sung); an emphasis, or a line of one word, keeps the shot.
+  function toLastWord(target, shot) {
+    if (emphRun(target) || unitsOf(target, 'word').length < 2) return shot;
+    const [k0, k1, k2] = shot.keys;
+    const hold = { at: 'word:-1', dt: 0, aim: 'block', fill: k0.fill + (k1.fill - k0.fill) * 0.25, roll: k1.roll, curve: k1.curve };
+    // centred (ox, oy 0): a word kept where it lay near the frame edge swung off-frame while the camera pushed in
+    const push = { at: 'word:-1', dt: 0.35, aim: 'last', fill: k1.fill, roll: k1.roll, ox: 0, oy: 0, curve: 'dashStop' };
+    return Object.assign({}, shot, { keys: [k0, hold, push, Object.assign({}, k2, { aim: 'last', ox: 0, oy: 0 })] });
+  }
+
   function pathUnitAt(path, t) { return path ? Math.max(0, unitAt(path.units.start, path.units.n, t)) : -1; }
   function boxAt(units, k) { return units && k >= 0 ? units.boxes[k] : null; }
 
@@ -471,7 +482,7 @@ MV.def('engine/scene/shot', ['core/num', 'core/curve', 'core/shot', 'core/script
     const shot = SHOT.expandShot(ref, { zoom: finite(dd.zoom) ? dd.zoom : 1, curve: dd.curve === null ? undefined : dd.curve,
       carry, follow: finite(dd.follow) ? dd.follow : null });
     if (!shot) return null;
-    const track = buildTrack(env, target, shot);
+    const track = buildTrack(env, target, ref === 'pushWord' ? toLastWord(target, shot) : shot);
     const behaviour = { phase: BH.PH.LENS, live: 'always', from: cam, to: cam + 1, t0: env.times.a, t1: env.times.b,
       run: runShot, track };
     return { behaviours: [behaviour], lean: shot.follow > 0 ? leanOf(env, cam, target, shot.follow) : null, track };

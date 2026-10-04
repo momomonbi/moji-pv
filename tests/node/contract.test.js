@@ -381,7 +381,7 @@ test('v2.1: every FROZEN export of DESIGN_2_1 §3.2–§3.8, §3.12 and §11.3.2
   assert.equal(CV.MAX_KNOTS, 8);
   assert.equal(CV.RAMP_W, 0.06);
   const SHOT = MV.use('core/shot');
-  assert.deepEqual([...SHOT.SHOT_KEYS], ['driftOff', 'pullReveal', 'pushWord', 'readAlong', 'settle', 'snapZoom', 'sweepAcross',
+  assert.deepEqual([...SHOT.SHOT_KEYS], ['chaseReveal', 'driftOff', 'pullReveal', 'pushWord', 'readAlong', 'settle', 'snapZoom', 'sweepAcross',
     'tiltHold', 'wideHold']);
   assert.deepEqual([...SHOT.RIG_KEYS], ['climbRise', 'driftSide', 'leanTilt', 'pullAway', 'slowSwell']);
   assert.deepEqual([...SHOT.MOVES], ['drift', 'follow', 'panDown', 'panLeft', 'panRight', 'panUp', 'pullOut', 'punch', 'pushIn', 'tilt']);
