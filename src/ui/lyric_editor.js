@@ -1,5 +1,5 @@
 /* 文字PVメーカー v2 — original work. Lyric editor: a controlled textarea over a tinted mirror layer, with a gutter of times, locks, pins and warnings. */
-MV.def('ui/lyric_editor', ['ui/dom', 'ui/selection', 'i18n/t', 'core/lyrics', 'planner/areas'], (dom, S, T, L, AREAS) => {
+MV.def('ui/lyric_editor', ['ui/dom', 'ui/icons', 'ui/selection', 'i18n/t', 'core/lyrics', 'planner/areas'], (dom, I, S, T, L, AREAS) => {
   'use strict';
 
   const { h } = dom;
@@ -380,7 +380,7 @@ MV.def('ui/lyric_editor', ['ui/dom', 'ui/selection', 'i18n/t', 'core/lyrics', 'p
         text: T.fmtTime(line.t0).slice(0, -1) + (by === 'pin' ? '′' : '') });
       entry.append(time);
       if (by === 'lrc') entry.append(h('span', { class: 'g-badge', text: 'LRC' }));
-      if (doc.locks[line.id]) entry.append(h('span', { class: 'g-lock', title: t('state.locked'), text: 'L' }));
+      if (doc.locks[line.id]) entry.append(h('span', { class: 'g-lock', title: t('state.locked') }, I.icon('lock', { size: 12 })));
       if (pins) entry.append(h('span', { class: 'g-pins', title: t('lyr.pinCount', { n: pins }), text: '●' + pins }));
       if (warn) entry.append(h('span', { class: 'g-warn', title: t('warn.' + warn), text: '!' }));
       const words = [T.fmtTime(line.t0), t('state.' + (by === 'pin' ? 'pinned' : by === 'lrc' ? 'mark' : 'auto'))];

@@ -1,6 +1,6 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-qHEumlvm9hcv09fl+TV/Y7MoOUmuea4KQqF/qujXqrM='; style-src 'sha256-irm/4tY0K6bp0lr8oGaOjkpC31aZm7LYR8Z7pABOIhg=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-pr8Jzm2yZVQLBCLqzahGGulOb2g0LfVbVXIoYcCsIww='; style-src 'sha256-YrZGjSkAD3epV8l3TUgNFGBQ+0lu7nxA1I3RaPiejFg=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
 <title>Moji PV Maker</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -309,7 +309,7 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent);
 .g-time.is-pinned { color: var(--text); font-weight: 700; }
 .g-time.is-lrc { color: #8fc8ff; }
 .g-badge { font-size: 8px; color: #8fc8ff; }
-.g-lock { color: var(--gold); font-weight: 700; }
+.g-lock { color: var(--gold); font-weight: 700; display: inline-flex; align-items: center; }
 .g-pins { color: #ffb3a3; }
 .g-warn { color: var(--error); font-weight: 800; }
 .g-heading { color: #7c8596; }
@@ -62500,7 +62500,7 @@ MV.def('ui/ai_board', ['ui/dom', 'ui/icons', 'planner/areas', 'ui/fields', 'ui/a
   return { rowsOf, stateOf, linesText, mount, STATES };
 });
 /* 文字PVメーカー v2 — original work. Lyric editor: a controlled textarea over a tinted mirror layer, with a gutter of times, locks, pins and warnings. */
-MV.def('ui/lyric_editor', ['ui/dom', 'ui/selection', 'i18n/t', 'core/lyrics', 'planner/areas'], (dom, S, T, L, AREAS) => {
+MV.def('ui/lyric_editor', ['ui/dom', 'ui/icons', 'ui/selection', 'i18n/t', 'core/lyrics', 'planner/areas'], (dom, I, S, T, L, AREAS) => {
   'use strict';
 
   const { h } = dom;
@@ -62881,7 +62881,7 @@ MV.def('ui/lyric_editor', ['ui/dom', 'ui/selection', 'i18n/t', 'core/lyrics', 'p
         text: T.fmtTime(line.t0).slice(0, -1) + (by === 'pin' ? '′' : '') });
       entry.append(time);
       if (by === 'lrc') entry.append(h('span', { class: 'g-badge', text: 'LRC' }));
-      if (doc.locks[line.id]) entry.append(h('span', { class: 'g-lock', title: t('state.locked'), text: 'L' }));
+      if (doc.locks[line.id]) entry.append(h('span', { class: 'g-lock', title: t('state.locked') }, I.icon('lock', { size: 12 })));
       if (pins) entry.append(h('span', { class: 'g-pins', title: t('lyr.pinCount', { n: pins }), text: '●' + pins }));
       if (warn) entry.append(h('span', { class: 'g-warn', title: t('warn.' + warn), text: '!' }));
       const words = [T.fmtTime(line.t0), t('state.' + (by === 'pin' ? 'pinned' : by === 'lrc' ? 'mark' : 'auto'))];
@@ -69078,6 +69078,17 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
       return digest.data;
     }
 
+    // A small padlock (10 px wide) whose left edge is x, centred on y.
+    function padlock(x, y) {
+      g.save();
+      g.strokeStyle = COLORS.highlight;
+      g.fillStyle = COLORS.highlight;
+      g.lineWidth = 1.5;
+      g.beginPath(); g.arc(x + 5, y - 1.5, 2.8, Math.PI, 0); g.stroke();
+      g.fillRect(x + 1, y - 1.5, 8, 6.5);
+      g.restore();
+    }
+
     function hatch(x0, x1, y0, y1) {
       g.save();
       g.beginPath(); g.rect(x0, y0, x1 - x0, y1 - y0); g.clip();
@@ -69189,8 +69200,11 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
         const on = selLines.has(l.id) || hl.has(l.id);
         g.fillStyle = on ? COLORS.sel : i % 2 ? COLORS.line2 : COLORS.line;
         g.fillRect(x0, r[0] + 3, Math.max(1, x1 - x0 - 1), r[1] - r[0] - 6);
+        // a locked line: hatched, with a padlock before its label
+        const lx = Math.max(x0, 0) + 4, pad = l.locked && x1 - lx > 18 ? 13 : 0;
         if (l.locked) hatch(x0, x1, r[0] + 3, r[1] - 3);
-        label((i + 1) + ' ' + l.text, Math.max(x0, 0) + 4, (r[0] + r[1]) / 2, x1 - Math.max(x0, 0) - 8);
+        if (pad) padlock(lx, (r[0] + r[1]) / 2);
+        label((i + 1) + ' ' + l.text, lx + pad, (r[0] + r[1]) / 2, x1 - lx - 4 - pad);
         const f = focus.band === null && focus.lineId === l.id && document.activeElement === proxy;
         edge(x0, r[0], r[1], edgeKind(l.by && l.by.start), f && focus.edge === 'start');
         edge(x1, r[0] + 4, r[1] - 4, edgeKind(l.by && l.by.end), f && focus.edge === 'end');
