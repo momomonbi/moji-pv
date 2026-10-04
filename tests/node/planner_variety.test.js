@@ -132,6 +132,8 @@ for (const { name: RN, reg: SYN, moods: MOODS } of REGISTRIES) {
         for (let i = 1; i < plan.cuts.length; i++) {
           const a = plan.cuts[i - 1].slots[slot], b = plan.cuts[i].slots[slot];
           if (!a || !b || b.from !== 'auto' || b.v === 'none') continue;
+          // an interlude cut has no text: its text motions (arrive, dwell, depart) are never seen
+          if (plan.cuts[i].role === 'interlude' && ['arrive', 'dwell', 'depart'].includes(slot)) continue;
           pairs++;
           if (a.v === b.v) same++;
         }

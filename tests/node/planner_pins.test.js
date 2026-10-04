@@ -229,23 +229,24 @@ test('filters and seasons: auto picks respect only/deny, the season gate and non
     }
     const p = plan(doc);
     const season = doc.pins['work:season'].v;
-    const ok = (kind, key) => {
-      const f = doc.filters[kind];
+    // the registry's view of the filter: an arrange 'only' that names no interlude arrange leaves interludes free
+    const ok = (kind, key, role) => {
+      const f = SYN.filterFor(kind, doc.filters, role);
       const def = SYN.get(kind, key);
       const inFilter = (!f.only || f.only.includes(key)) && (!f.deny || !f.deny.includes(key));
       const inSeason = !def.season || season === 'any' || def.season === season;
       return inFilter && inSeason;
     };
-    const check = (kind, d, where) => {
+    const check = (kind, d, where, role) => {
       if (!d || d.v === 'none') return;
-      if (d.from === 'auto') assert.ok(ok(kind, d.v), 'filter #' + i + ' ' + where + ' ' + kind + '=' + d.v);
+      if (d.from === 'auto') assert.ok(ok(kind, d.v, role), 'filter #' + i + ' ' + where + ' ' + kind + '=' + d.v);
       // a fallback is silent only on special cuts whose role no part serves; elsewhere it is reported
       if (d.from === 'fallback' && !/^(title|intro|outro|gap\/)/.test(where)) {
         assert.ok(p.warnings.some((w) => w.code === 'pool-empty' && w.cut === where), 'filter #' + i + ' ' + where + ' ' + kind);
       }
     };
     for (const c of p.cuts) {
-      for (const kind of ['arrange', 'arrive', 'dwell', 'depart', 'lens']) check(kind, c.slots[kind], c.key);
+      for (const kind of ['arrange', 'arrive', 'dwell', 'depart', 'lens']) check(kind, c.slots[kind], c.key, c.role);
       for (let j = 0; j < 3; j++) { check('ornament', c.slots['ornament#' + j], c.key); check('filter', c.slots['filter#' + j], c.key); }
     }
     for (const g of p.grounds) { check('ground', g.ground, g.key); check('ornament', g.atmos, g.key); }

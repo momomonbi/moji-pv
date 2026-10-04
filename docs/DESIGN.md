@@ -2512,11 +2512,12 @@ grouping is fine as long as each file only depends on `parts/kit`.
 | `lightMotes` (role interlude) | 光の粒 | Light motes | soft airy bright | Light motes and soft bokeh drift in two depth planes, glint on the beats and gather where the next line begins (no text). |
 | `soundHorizon` (role interlude) | 音の水平線 | Sound horizon | fast bold digital | A dotted horizon whose bars swell with the loudness while ripples spread on the beats; it folds back into dots for the next line (no text). |
 | `kineticShapes` (role interlude) | 図形の舞 | Kinetic shapes | minimal serious | Thin rings, lines and a square recombine on the downbeats, then fold into one line and a dot (no text). |
+| `neonWave` (role interlude) | 光の波形 | Neon waveform | bold digital fast | A glowing line across the lower frame, mirrored on the floor: its left bump leaps on the beat, the others follow the loudness and flicker finer to the right (no text). |
 | `breathMark` (role interlude, pin only) | 間の印 | Breath mark | minimal slow | A small ♪ or the section heading, centred, slowly breathing; since the interlude effects it is never picked automatically (`pool: false`). |
 | `creditFold` (role outro) | 終わりの札 | Credit fold | minimal | Title and artist as a quiet corner credit. |
 
-Interlude effects (`parts/arrange/interlude.js`). Every interlude cut draws one of `lightMotes`, `soundHorizon` and
-`kineticShapes`, picked by the mood's tags, the part's energy range and `fits` (a beat grid helps the horizon). They set
+Interlude effects (`parts/arrange/interlude.js`). Every interlude cut draws one of `lightMotes`, `soundHorizon`,
+`kineticShapes` and `neonWave`, picked by the mood's tags, the part's energy range and `fits` (a beat grid helps the horizon). They set
 no text at all: no ♪ and no heading. They are `cam: 'gentle'` (a glyph-free cut leaves the gentle shot inert) and have
 no `motion: 'own'`, so the lyric neighbours keep every entrance, exit and camera decision. They draw on the far and mid
 layers only (never near, which a text seam mixes). They wait out the line before (their entrance starts 0.15 s into the

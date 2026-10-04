@@ -74,7 +74,7 @@ test('scopes: line scopes plus special cuts; a cut area is exactly its cut; work
   assert.deepEqual(all.song[3].scopes, [], 'the analysed interlude starts after the gap cut does');
   assert.deepEqual(all.song[2].scopes, ['line/rb', 'line/rc', 'cut/' + gap.key], 'a special cut belongs by its t0');
   assert.deepEqual(all.song[2].cutKeys, p.cuts.filter((c) => c.line === 'rb' || c.line === 'rc' || c === gap).map((c) => c.key));
-  assert.deepEqual(all.song[4].scopes.slice(-1), ['cut/outro']);
+  assert.deepEqual(all.song[4].scopes.slice(-1), ['cut/gap/' + p.cuts.filter((c) => c.line).pop().line], 'the music after the last line is an interlude');
   const cut = A.resolve(doc, p, { kind: 'cut', key: 'rb~3' });
   assert.deepEqual([cut.scopes, cut.cutKeys, cut.lineIds, cut.label], [['cut/rb~3'], ['rb~3'], ['rb'], ['area.cut', { n: 5, k: 2 }]]);
   const work = A.resolve(doc, p, { kind: 'work' });

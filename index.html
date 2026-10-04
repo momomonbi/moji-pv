@@ -1,6 +1,6 @@
 <!doctype html><html lang="ja"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-RGRMpvcPePnfchwKaUkmoVF59gvnLcww2Z95c2RvPaA='; style-src 'sha256-uhekdjVoF8p0oG5Jys9SuRatxu3plo9h2Wexn3/9z4g=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-l+4LF3QxZ4ddhigXfjGTtehl/N0B1S3Q2jE6fadnoRY='; style-src 'sha256-uhekdjVoF8p0oG5Jys9SuRatxu3plo9h2Wexn3/9z4g=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
 <title>文字PVメーカー</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -20280,7 +20280,7 @@ MV.def('planner/segment', ['core/script', 'core/num', 'core/pins', 'core/rng', '
   const MIN_PIECE = 0.35;       // shorter pieces merge into the previous one
   const FOCUS_SHARE = 0.25, FOCUS_TIME = 1.2;
   const TITLE_ROOM = 1.5, TITLE_MIN = 0.8, TITLE_GAP = 0.2;
-  const INTRO_ROOM = 3, OUTRO_ROOM = 3, GAP_MIN = 2.8;
+  const INTRO_ROOM = 3, OUTRO_ROOM = 3, GAP_MIN = 2.8, CREDIT = 3;
   const SPECIAL_ROLES = new Set(['title', 'interlude', 'outro']);
 
   // Specs of the line- and cut-scope timing slots (§3.4.2, §3.4.3) and the v2.1 line slots season and avoid
@@ -20670,9 +20670,13 @@ MV.def('planner/segment', ['core/script', 'core/num', 'core/pins', 'core/rng', '
         cuts.push(special('gap/' + line.id, 'interlude', '', next.heading, line.t1, next.t0, next.lang));
       }
     });
+    // The music after the last line is an interlude too (its effects move with the song); a title or artist keeps its
+    // credit card for the last CREDIT seconds when the outro holds both.
     const last = lines[lines.length - 1];
     if (last && duration - last.t1 >= OUTRO_ROOM) {
-      cuts.push(special('outro', 'outro', meta.title || '', meta.artist, last.t1, duration, titleLang));
+      const credit = (meta.title || meta.artist) && duration - last.t1 >= OUTRO_ROOM + CREDIT ? duration - CREDIT : null;
+      cuts.push(special('gap/' + last.id, 'interlude', '', null, last.t1, credit === null ? duration : credit, last.lang));
+      if (credit !== null) cuts.push(special('outro', 'outro', meta.title || '', meta.artist, credit, duration, titleLang));
     }
     windows(cuts, ctx.timing);
     return cuts;
@@ -35309,7 +35313,166 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     build: shapesBuild,
   });
 
-  return [lightMotes, soundHorizon, kineticShapes];
+  // --- neonWave -------------------------------------------------------------------------------------------------------
+
+  // A glowing line across the lower frame, mirrored on a dark floor. Its bumps sit along it like a spectrum: the left
+  // one jumps on the beat (the kick), the next ones follow the loudness, the right ones flicker faster and smaller (a
+  // song keeps one loudness only, so the "bands" are the beat, the level and its flicker), and the whole line crackles,
+  // more where it is loud. The line grows from the left at the entrance and draws back at the lead-out.
+  const WAVE_N = 180;           // samples along the line
+  const WAVE_BUMPS = 7;
+
+  function placeWave(d, t) {
+    const lv = levelAt(d, t), gain = (0.3 + 0.9 * strengthAt(d, t)) * (1 - 0.7 * outOf(d, t));
+    let kick = 0;
+    if (d.bt.length) {
+      const j = lastBeat(d.bt, t);
+      if (j >= 0) kick = (d.bd[j] ? 1 : 0.7) * Math.exp(-(t - d.bt[j]) / 0.22);
+    }
+    for (let k = 0; k < WAVE_BUMPS; k++) {
+      d.A[k] = k === 0 ? d.hA * gain * (0.25 + 0.25 * lv + 0.8 * kick)
+        : d.hA * gain * d.amp[k] * (0.15 + 0.85 * levelAt(d, t - 0.06 * k)) * (0.35 + 0.65 * noise1(d.nk + k, d.rate[k] * t));
+    }
+    const crackle = d.jit * (0.35 + 0.65 * lv) * gain;
+    for (let i = 0; i < WAVE_N; i++) {
+      const u = i / (WAVE_N - 1);
+      let y = 0;
+      for (let k = 0; k < WAVE_BUMPS; k++) { const z = (u - d.uc[k]) / d.wd[k]; y += d.A[k] * Math.exp(-z * z); }
+      y += crackle * ((noise1(d.nj, 40 * u + 11 * t) - 0.5) + 0.5 * (noise1(d.nj + 1, 97 * u - 17 * t) - 0.5));
+      d.Y[i] = y * smooth(u / 0.04) * smooth((1 - u) / 0.04);
+    }
+  }
+
+  function wavePath(g, d, sign, n) {
+    g.beginPath();
+    for (let i = 0; i < n; i++) {
+      const x = d.x0 + (d.len * i) / (WAVE_N - 1), y = d.base - sign * d.Y[i];
+      if (i) g.lineTo(x, y); else g.moveTo(x, y);
+    }
+  }
+
+  function endLight(g, q, ink, x, y, r, a) {
+    const gr = g.createRadialGradient(x, y, 0, x, y, r);
+    gr.addColorStop(0, q.rgba(ink, a)); gr.addColorStop(1, q.rgba(ink, 0));
+    g.fillStyle = gr;
+    g.fillRect(x - r, y - r, 2 * r, 2 * r);
+  }
+
+  // The mid plane: the line in up to three strokes (a wide haze, a glow, a bright core) and a light at each end.
+  function waveDraw(g, t, d, q) {
+    const Am = envelopeOf(d, t), reach = reachOf(d, t);
+    if (Am < 1 / 255 || !(reach > 0)) return;
+    placeWave(d, t);
+    const n = Math.max(2, Math.round(reach * WAVE_N)), a0 = g.globalAlpha;
+    g.lineJoin = 'round';
+    g.lineCap = 'round';
+    if (d.add) g.globalCompositeOperation = 'lighter';
+    wavePath(g, d, 1, n);
+    for (const [w, a, ink] of d.strokes) {
+      g.globalAlpha = a0 * clamp(a * Am);
+      g.strokeStyle = q.rgba(ink, 1);
+      g.lineWidth = w;
+      g.stroke();
+    }
+    if (!d.chroma) {
+      g.globalAlpha = a0 * clamp(Am);
+      endLight(g, q, d.P, d.x0, d.base - d.Y[0], d.dot, 0.8);
+      endLight(g, q, d.P, d.x0 + (d.len * (n - 1)) / (WAVE_N - 1), d.base - d.Y[n - 1], d.dot, 0.8);
+    }
+    g.globalCompositeOperation = 'source-over';
+    g.globalAlpha = a0;
+  }
+
+  // The far plane: the reflection, a little flatter, fading down the floor, over a faint sheen of light.
+  function reflectDraw(g, t, d, q) {
+    const Am = envelopeOf(d, t), reach = reachOf(d, t);
+    if (Am < 1 / 255 || !(reach > 0)) return;
+    placeWave(d, t);
+    const n = Math.max(2, Math.round(reach * WAVE_N)), a0 = g.globalAlpha, w = (d.len * (n - 1)) / (WAVE_N - 1);
+    if (d.add) g.globalCompositeOperation = 'lighter';
+    const sheen = g.createLinearGradient(0, d.base, 0, d.base + d.depth);
+    sheen.addColorStop(0, q.rgba(d.P, 0.12)); sheen.addColorStop(1, q.rgba(d.P, 0));
+    g.globalAlpha = a0 * clamp(Am * (0.5 + 0.5 * levelAt(d, t)));
+    g.fillStyle = sheen;
+    g.fillRect(d.x0, d.base, w, d.depth);
+    const gr = g.createLinearGradient(0, d.base, 0, d.base + d.depth);
+    gr.addColorStop(0, q.rgba(d.P, 1)); gr.addColorStop(1, q.rgba(d.P, 0));
+    g.strokeStyle = gr;
+    g.lineJoin = 'round';
+    wavePath(g, d, -0.85, n);
+    g.globalAlpha = a0 * clamp(0.12 * Am);
+    g.lineWidth = 0.02 * d.s;
+    g.stroke();
+    g.globalAlpha = a0 * clamp(0.35 * Am);
+    g.lineWidth = 0.004 * d.s;
+    g.stroke();
+    g.globalCompositeOperation = 'source-over';
+    g.globalAlpha = a0;
+  }
+
+  function waveBuild(env, p) {
+    const { D, sb } = env;
+    const fr = frameOf(env, p), ink = inksOf(env.pal), r = seedOf(env), s = fr.s;
+    const wide = D.w >= D.h;
+    const Lh = Math.min(0.44 * D.w, D.w / 2 - D.safe.l - 0.01 * s);
+    const tr = levelTrack(env, r, fr.a - 1);
+    const st = strengthTrack(env, fr, tr, p.shape);
+    const hA = s * (wide ? 0.34 : 0.26) * (0.35 + 0.65 * p.react) * (tr.song ? 1 : 0.8);
+    const base = Math.min(fr.cy + (wide ? 0.14 : 0.1) * D.h, D.h - D.safe.b - 0.75 * hA);
+    const rb = r.fork('bumps');
+    const uc = new Float32Array(WAVE_BUMPS), wd = new Float32Array(WAVE_BUMPS), amp = new Float32Array(WAVE_BUMPS);
+    const rate = new Float32Array(WAVE_BUMPS);
+    uc[0] = 0.1 + rb.range(-0.02, 0.02); wd[0] = 0.012; amp[0] = 1;
+    for (let k = 1; k < WAVE_BUMPS; k++) {
+      uc[k] = 0.24 + (0.68 * (k - 1)) / (WAVE_BUMPS - 2) + rb.range(-0.025, 0.025);
+      wd[k] = 0.02 + 0.012 * rb.next();
+      amp[k] = (0.6 - 0.06 * k) * (0.7 + 0.6 * rb.next());
+      rate[k] = 1.2 + 0.9 * k + rb.range(0, 0.5);
+    }
+
+    // the kicks: the beats with a song and a grid, its onsets without a grid, a bpm pin's beats without a song, uneven
+    // seeded gaps without either; the strength thins them where it is low
+    const lo = fr.s0, hi = fr.h, grid = env.grid;
+    let kicks = [];
+    if (grid) {
+      const bl = beatList(env, lo, hi, 0.3);
+      kicks = Array.from(bl.t, (t, i) => [t, bl.down[i]]);
+    } else if (tr.song) kicks = onsetEvents(tr, lo, hi, 0.3, 2, 128).map(([t]) => [t, 1]);
+    else kicks = aperiodic(r.fork('kick'), fr.s0 + fr.E, fr.o, 0.9, 1.8, 128).map((t) => [t, 1]);
+    kicks = kicks.filter((x) => keeps(st, x[0], x[1]));
+
+    const P = 'accent', core = ink.light || ink.chroma ? P : 'ink';
+    const strokes = ink.chroma ? [[0.004 * s, 1, P]]
+      : [[0.022 * s, ink.add ? 0.07 : 0.05, P], [0.008 * s, ink.add ? 0.3 : 0.25, P], [0.0026 * s, 1, core]];
+    const shared = data(fr, { add: ink.add, chroma: ink.chroma, P, song: tr.song, L0: tr.L0, lv: tr.lv, sw: tr.sw, n1: tr.n1,
+      n2: tr.n2, I: st.I, W: st.W, IA: st.IA, s, x0: fr.cx - Lh, len: 2 * Lh, base, hA, depth: 0.9 * hA, uc, wd, amp, rate,
+      jit: 0.02 * s, dot: 0.014 * s, nk: rb.int(1, SEED_MAX - 16), nj: rb.int(1, SEED_MAX - 2),
+      bt: Float32Array.from(kicks, (x) => x[0]), bd: Uint8Array.from(kicks, (x) => x[1]),
+      A: new Float32Array(WAVE_BUMPS), Y: new Float32Array(WAVE_N) });
+    if (p.reflect && !ink.chroma) {
+      sb.paint({ layer: 'far', bleed: 0, animated: true, owner: env.owner, draw: reflectDraw, data: Object.assign({}, shared) });
+    }
+    sb.paint({ layer: 'mid', bleed: 0, animated: true, owner: env.owner, draw: waveDraw, data: Object.assign({}, shared, { strokes }) });
+    return finish(env, Object.assign({}, fr, { cy: base - 0.4 * hA }), 2 * Lh, 1.2 * hA);
+  }
+
+  const neonWave = K.arrange({
+    key: 'neonWave',
+    label: L('光の波形', 'Neon waveform'),
+    blurb: L('横に伸びる光の線が床に映り、左は拍で大きく跳ね、右ほど細かく震える',
+      'A glowing line mirrored on the floor: its left end leaps on the beat, the right flickers finer'),
+    tags: ['bold', 'digital', 'fast'], family: 'wave', cam: 'gentle', needs: ['beats', 'level'],
+    traits: { cells: [0, 80], roles: ['interlude'], energy: [0.3, 1] },
+    fits: (f) => (f.beat ? 1.2 : 0.7),
+    params: {
+      react: { type: 'num', min: 0, max: 1, step: 0.01, label: L('音への反応', 'Reaction'), auto: { range: [0.6, 0.9], follow: 'energy' } },
+      reflect: { type: 'bool', label: L('床の映り込み', 'Floor reflection'), auto: { pick: [true, false], weights: [5, 1] } },
+      shape: SHAPE_PARAM,
+    },
+    build: waveBuild,
+  });
+
+  return [lightMotes, soundHorizon, kineticShapes, neonWave];
 });
 /* 文字PVメーカー v2 — original work. Compositions that place words or glyphs one by one: confetti words, hanging tags, halo ring, grid mosaic. */
 MV.def('parts/arrange/scatter', ['parts/kit'], (K) => {
@@ -61785,7 +61948,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
     // paramFields(kind, idx, partKey, registry, { shared, part, section, scopes }) → generated FieldSpecs for the
     // parameters of a part (shared ones by `kind.param`, own ones by `kind@key.param`). partKey null → shared only.
     // Params kept for saved documents but no longer offered: the interlude effects' 表現の強さ (自動 follows the song).
-    const HIDDEN_PARAMS = new Set(['lightMotes', 'soundHorizon', 'kineticShapes'].map((key) => 'arrange@' + key + '.shape'));
+    const HIDDEN_PARAMS = new Set(['lightMotes', 'soundHorizon', 'kineticShapes', 'neonWave'].map((key) => 'arrange@' + key + '.shape'));
 
     function paramFields(kind, idx, partKey, registry, o) {
       const opt = o || {};
@@ -68085,7 +68248,7 @@ MV.def('ui/step_look', ['ui/dom', 'ui/icons', 'core/doc', 'ui/fields', 'i18n/t']
   const MAIN_ASPECTS = ['16:9', '9:16', '1:1'];
   // 間奏の演出: per interlude of the song, its effect (自動 or one of the three, pinned at that interlude's cut); its
   // name seeks there.
-  const IL_KEYS = ['lightMotes', 'soundHorizon', 'kineticShapes'];
+  const IL_KEYS = ['lightMotes', 'soundHorizon', 'kineticShapes', 'neonWave'];
 
   function mount(app) {
     const t = app.t;
