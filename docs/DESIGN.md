@@ -3637,9 +3637,9 @@ considers at most 8 recent impulses; `afterImage` re-renders the text at most 3 
 ## 8. Testing plan
 
 Node tests live in `tests/node/*.test.js` and run with `node --test tests/node` (Node 22, no npm packages).
-Browser tests live in `tests/browser/*.py` and use the launcher `dev/browser.py`. CI runs, in order:
-`python3 build.py --check`, the Node tests, `python3 build.py --lab`, `python3 build.py` (the committed pages must match),
-the browser tests and `python3 tests/build_test.py`.
+Browser tests live in `tests/browser/*.py` and use the launcher `dev/browser.py`. CI runs, in order, on every
+pull request and push to main: `python3 build.py --check`, the Node tests, `python3 build.py --lab`, `python3 build.py`
+(the committed pages must match) and `python3 tests/build_test.py`. The browser tests run only when CI is started by hand.
 
 ### 8.1 Test corpus (`tests/helpers/corpus.js`, WP0)
 

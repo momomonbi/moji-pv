@@ -87,7 +87,7 @@ python3 tests/build_test.py           # build.py の試験
 ```
 
 ブラウザの試験は `PW_CHANNEL=chrome`（インストール済みの Chrome）か `PW_EXECUTABLE=/path/to/chromium` で動きます。
-CI（`.github/workflows/ci.yml`）はこの順番で全部を実行し、コミットされた index.html / en/index.html がビルド結果と同じかも確かめます。
+CI（`.github/workflows/ci.yml`）は、プルリクエストと main へのプッシュのたびに、ブラウザの試験以外をこの順番で実行します（約5分）。コミットされた index.html / en/index.html がビルド結果と同じかも確かめます。ブラウザの試験（約13分）は、Actions → CI → Run workflow で手で始めたときだけ動きます。
 ページには CSP（スクリプトはハッシュで許可）が入っているので、index.html は手で直さず、必ず `build.py` で作り直してください。
 
 設計は [docs/DESIGN.md](docs/DESIGN.md)、仕様は [docs/SPEC.md](docs/SPEC.md)、作業の記録は [docs/NOTES.md](docs/NOTES.md) にあります。v2.1 の設計の追補は [docs/DESIGN_2_1.md](docs/DESIGN_2_1.md) です。
