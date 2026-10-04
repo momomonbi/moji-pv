@@ -626,6 +626,8 @@ MV.def('i18n/strings', [], () => ({
   'sec.gaplabel': ['表示する文字', 'Text shown'],
   'sec.ilshape': ['表現の強さ', 'Strength over time'],
   'sec.ilwork': ['間奏の動き', 'Interludes'],
+  'il.name': ['間奏{n}', 'Interlude {n}'],
+  'il.none': ['この歌詞には間奏がありません', 'These lyrics have no interlude'],
   'sec.layout': ['構図', 'Layout'],
   'sec.motion': ['動き', 'Motion'],
   'sec.seam': ['切り替え', 'Transition'],
