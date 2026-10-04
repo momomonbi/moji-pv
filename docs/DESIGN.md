@@ -2528,7 +2528,12 @@ hides a longer tail, so the entrance then starts at 0.15 s as with the default t
 declares (§4.18: the beat grid and the loudness, both in the cut fingerprint, §3.12), and they never fake a tempo:
 with a song and a grid they react to the loudness and ripple, glint or recombine on the beats; with a song and no grid
 they follow the loudness's onsets; a bpm pin without a song gives beats but no loudness; with neither, the motion is
-slow and aperiodic. A long interlude (an instrumental break of a minute or two is one cut)
+slow and aperiodic. 表現の強さ (the `shape` param of all three, a graph of five points in the interlude's inspector):
+自動 derives a strength over the interlude from the song's loudness swell (a little more for a quick tempo, a gentle
+build to the climax; without a song a slow arc); a drawn graph sets it, and a song adds ±0.12 of its swell. The
+strength scales what the effect does: how many motes show, how tall the horizon swells, how fast drifts and turns run (a
+motion clock), the beat pulse, and which events fire (downbeats from 0.1, the other beats from 0.42, a fourth glint
+above 0.85; the shapes hold every other figure longer below 0.25). A long interlude (an instrumental break of a minute or two is one cut)
 thins its events to their caps, never stops them early: a larger beat step that keeps the downbeats, a wider gap between
 onsets or seeded events, more bars between figure changes. Tokens only, no full-frame fill, `'lighter'` only on a dark
 ground that is not the chroma key. Over the key everything that holds is solid (α ≥ 0.5), because soft low-alpha paint

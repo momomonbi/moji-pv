@@ -172,6 +172,57 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
 
   function swellAt(d, t) { return d.song ? sampleAt(d.sw, d.L0, t) : 0.5; }
 
+  // --- 表現の強さ: how much the effect does, over the interlude ------------------------------------------------------
+
+  // The `shape` param: 'auto', or five strengths 0…1 at the start, ¼, ½, ¾ and the end of the interlude (from the
+  // entrance to the climax), as the 表現の強さ graph writes them ('0.2,0.5,0.9,0.6,0.3'). Anything else reads as auto.
+  const SHAPE_POINTS = 5;
+  const SHAPE_PARAM = Object.freeze({ type: 'text', max: 60, label: L('表現の強さ', 'Strength over time'), auto: { value: 'auto' } });
+
+  function shapeOf(v) {
+    if (typeof v !== 'string') return null;
+    const xs = v.split(',');
+    if (xs.length !== SHAPE_POINTS) return null;
+    const out = new Float32Array(SHAPE_POINTS);
+    for (let i = 0; i < SHAPE_POINTS; i++) {
+      const x = Number(xs[i]);
+      if (!xs[i].trim() || !Number.isFinite(x)) return null;
+      out[i] = clamp(x);
+    }
+    return out;
+  }
+
+  function graphAt(G, u) {
+    const x = clamp(u) * (SHAPE_POINTS - 1), i = Math.min(SHAPE_POINTS - 2, Math.floor(x));
+    return G[i] + (G[i + 1] - G[i]) * (x - i);
+  }
+
+  // The strength I at 20 Hz over the window and the motion clock W = ∫ (0.55 + 0.9·I) dt (drifts and turns run faster
+  // where the strength is high). Auto: with a song its swell, a little more for a quick tempo and a gentle build to the
+  // climax; without one a slow arc. A drawn graph sets the level, and a song adds ±0.12 of its swell as texture.
+  function strengthTrack(env, fr, tr, shape) {
+    const G = shapeOf(shape), n = Math.ceil((fr.b - fr.a) * HZ) + 2, span = Math.max(0.1, fr.h - fr.s0);
+    const tempo = env.grid ? clamp((env.grid.bpm - 60) / 120) : 0.5;
+    const I = new Float32Array(n), W = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const t = fr.a + i / HZ, u = clamp((t - fr.s0) / span), sw = tr.song ? sampleAt(tr.sw, tr.L0, t) : 0.5;
+      let v;
+      if (G) v = graphAt(G, u) + (tr.song ? 0.24 * (sw - 0.5) : 0);
+      else if (tr.song) v = 0.15 + 0.75 * sw + 0.1 * smooth(u) + 0.1 * (tempo - 0.5);
+      else v = 0.3 + 0.3 * Math.pow(Math.sin(Math.PI * u), 1.5) + 0.1 * (noise1(tr.n2, 0.2 * t + 17.3) - 0.5);
+      I[i] = clamp(v);
+      W[i] = i ? W[i - 1] + (0.55 + 0.45 * (I[i] + I[i - 1])) / HZ : fr.a;
+    }
+    return { I, W, IA: fr.a, drawn: !!G };
+  }
+
+  function strengthAt(d, t) { return sampleAt(d.I, d.IA, t); }
+  function clockAt(d, t) { return sampleAt(d.W, d.IA, t); }
+
+  // Whether an event at t is kept at the strength there: a downbeat (or the only kind there is) from 0.1, the other
+  // beats from 0.42, so a calm stretch keeps the bar's pulse and a strong one every beat.
+  function keeps(st, t, major) { return sampleAt(st.I, st.IA, t) >= (major ? 0.1 : 0.42); }
+
   // Rising edges of the normalised level in [lo, hi], at least g apart.
   function onsets(tr, lo, hi, g) {
     const out = [];
@@ -236,7 +287,7 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
   }
 
   function moteY(d, k, t) {
-    return d.y0 + wrap(d.py[k] + d.vy[k] * t + d.wobY * (2 * noise1(d.ny, 0.1 * t + 5.3 * k) - 1), 0, d.AH);
+    return d.y0 + wrap(d.py[k] + d.vy[k] * clockAt(d, t) + d.wobY * (2 * noise1(d.ny, 0.1 * t + 5.3 * k) - 1), 0, d.AH);
   }
 
   function moteLife(d, k, t) {
@@ -249,6 +300,7 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
   function placeMotes(d, t) {
     const sus = d.song ? 0.85 + 0.3 * swellAt(d, t) : 1;
     const late = t > d.o;
+    const shown = d.n * (0.35 + 0.65 * strengthAt(d, Math.min(t, d.o)));    // how many motes the strength shows
     for (let k = 0; k < d.n; k++) {
       const e = smooth((t - d.s0 - d.st[k] * d.E) / (0.55 * d.E));
       let x, y, life;
@@ -262,9 +314,10 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
         life = lerp(d.lo[k], 1, gk) * (1 + 0.4 * gk);
       }
       const tw = 0.55 + 0.45 * Math.sin(TAU * d.fr[k] * t + d.ph[k]);
-      const a = clamp(tw * life * sus * e);
+      const vis = smooth((shown - k) / 2);
+      const a = clamp(tw * life * sus * e * vis);
       d.X[k] = x; d.Y[k] = y; d.A[k] = a;
-      d.HA[k] = clamp(tw * life * sus * (0.35 + 0.65 * e));
+      d.HA[k] = clamp(tw * life * sus * vis * (0.35 + 0.65 * e));
       d.HS[k] = 1 + 1.2 * (1 - e);
       d.Bk[k] = Math.round(a * MOTE_BUCKETS);
     }
@@ -436,9 +489,10 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     const P = far, S = ink.light || ink.chroma ? far : ink.two;
     const speed = p.speed * fr.spd;
     const tr = levelTrack(env, r, fr.a - 0.4);
+    const st = strengthTrack(env, fr, tr, p.shape);
     const base = data(fr, { x0: -mx, y0: -my, AW: D.w + 2 * mx, AH: D.h + 2 * my, add: ink.add, P, S,
       sway: 0.02 * s * (37 / TAU), wob: 0.035 * s, wobY: 0.025 * s, phw: r.range(0, TAU),
-      song: tr.song, L0: tr.L0, lv: tr.lv, sw: tr.sw, n1: tr.n1, n2: tr.n2 });
+      song: tr.song, L0: tr.L0, lv: tr.lv, sw: tr.sw, n1: tr.n1, n2: tr.n2, I: st.I, W: st.W, IA: st.IA });
 
     // the far plane (a column per attribute, each from its own stream, so the amount only adds items at the end)
     const nb = Math.round(11 * k0 * (0.7 + 0.3 * p.amount));
@@ -499,22 +553,27 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     // glints on the music's events: beats with a song and a grid, the song's onsets without a grid, a bpm pin's beats
     // without a song, and seeded uneven gaps without either
     const re = r.fork('ev'), lo = fr.s0 + fr.E, hi = fr.o, grid = env.grid;
-    let ev = [], per = [];
+    let ev = [], per = [], major = [];
     if (tr.song && grid) {
       const bl = beatList(env, lo, hi, 0.3, MAX_EVENTS);
-      ev = Array.from(bl.t);
+      ev = Array.from(bl.t); major = Array.from(bl.down);
       per = ev.map((te, i) => Math.min(3, 1 + bl.down[i] + (sampleAt(tr.lv, tr.L0, te) > 0.65 ? 1 : 0)));
     } else if (tr.song) {
       ev = onsetEvents(tr, lo, hi, 0.35, 1.6, MAX_EVENTS).map((x) => x[0]);
-      per = ev.map(() => 1);
+      per = ev.map(() => 1); major = ev.map(() => 1);
     } else if (grid) {
       const bl = beatList(env, lo, hi, 0.6, MAX_EVENTS);
-      ev = Array.from(bl.t);
+      ev = Array.from(bl.t); major = Array.from(bl.down);
       per = ev.map((te, i) => 1 + bl.down[i]);
     } else {
       ev = aperiodic(re, lo, hi, 0.55, 1.25, MAX_EVENTS);
-      per = ev.map(() => 1);
+      per = ev.map(() => 1); major = ev.map(() => 1);
     }
+    // the strength thins them where it is low, and a strong moment adds a star (at most 3)
+    const kept = ev.map((te, i) => keeps(st, te, major[i]));
+    per = per.filter((_, i) => kept[i]);
+    ev = ev.filter((_, i) => kept[i]);
+    per = per.map((c, i) => Math.min(3, c + (strengthAt(st, ev[i]) > 0.85 ? 1 : 0)));
     const m = ev.length;
     d.ev = Float32Array.from(ev);
     d.gm = new Int16Array(m * 3).fill(-1); d.gL = new Float32Array(m * 3); d.gT = new Float32Array(m * 3);
@@ -555,6 +614,7 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
         auto: { pick: ['rise', 'float', 'fall'], weights: [3, 2, 1] } },
       speed: { type: 'num', min: 0.5, max: 2, step: 0.05, unit: 'x', label: L('漂う速さ', 'Drift speed'), ui: 'advanced',
         auto: { range: [0.85, 1.15], follow: 'tempo' } },
+      shape: SHAPE_PARAM,
     },
     build: motesBuild,
   });
@@ -573,12 +633,13 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
       if (j >= 0) kick = (d.bd[j] ? 0.22 : 0.15) * Math.exp(-(t - d.bt[j]) / 0.12);
     }
     const jag = d.song ? 0.25 : 0.1;
+    const gain = 0.45 + 0.75 * strengthAt(d, t);              // the strength scales the whole row (at most 1.2)
     for (let k = 0; k <= d.nb; k++) {
       const edge = k <= full ? 1 : k === full + 1 ? part : 0;
       if (edge <= 0) { d.Bk[k] = 0; continue; }
       const m = 0.75 + jag * (2 * noise1(d.nm, 0.35 * k + 0.5 * t) - 1);
       const lv = d.song ? 0.2 + 0.8 * levelAt(d, t - k * d.pc / d.v) : levelAt(d, t - k * d.pc / d.v);   // a quiet passage still breathes
-      d.H[k] = d.hMin + d.hA * d.taper[k] * (d.w[k] * m * lv + kick) * (1 - outK);
+      d.H[k] = d.hMin + d.hA * gain * d.taper[k] * (d.w[k] * m * lv + kick) * (1 - outK);
       // over the key every bar is solid (the taper stays in the height): only the growing edge bar fades in
       d.Bk[k] = Math.max(1, Math.round((d.solid ? 1 : 0.35 + 0.65 * d.taper[k]) * edge * BAR_BUCKETS));
     }
@@ -678,6 +739,7 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     const w = new Float32Array(nb + 1), taper = new Float32Array(nb + 1);
     for (let k = 0; k <= nb; k++) { w[k] = 0.55 + 0.45 * rm.next(); taper[k] = Math.pow(1 - (k / nb) * (k / nb), 0.9); }
     const tr = levelTrack(env, r, fr.a - 1.8);
+    const st = strengthTrack(env, fr, tr, p.shape);
     const hA = s * (wide ? 0.1 : 0.12) * (0.35 + 0.65 * p.react) * (tr.song ? 1 : 0.5);
     if (!tr.song) for (let k = 0; k <= nb; k++) w[k] = 0.775 + 0.5 * (w[k] - 0.775);   // a calm wave: bars closer in height
     const hl = Math.min(1.04 * Lh, D.w / 2 - D.safe.l);
@@ -700,6 +762,8 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     } else {
       body = aperiodic(re, fr.s0 + fr.E, fr.o, 2, 3, MAX_RINGS).map((t) => [t, 0.22, 0]);
     }
+    // the strength thins the ripples where it is low and makes them stronger where it is high
+    body = body.filter((x) => keeps(st, x[0], x[2])).map((x) => [x[0], x[1] * (0.7 + 0.6 * strengthAt(st, x[0])), x[2]]);
     const gaps = [];
     for (let i = 1; i < body.length; i++) gaps.push(body[i][0] - body[i - 1][0]);
     const Lr = body.length >= 2 ? clamp(2.4 * median(gaps), 1.2, 2.2) : 1.6;
@@ -716,11 +780,12 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     const major = Uint8Array.from(all, (x) => x[2]);
 
     const P = 'accent', S = ink.light ? 'ink' : ink.two;
-    const base = data(fr, { add: ink.add, P, S, song: tr.song, L0: tr.L0, lv: tr.lv, sw: tr.sw, n1: tr.n1, n2: tr.n2, ev });
+    const base = data(fr, { add: ink.add, P, S, song: tr.song, L0: tr.L0, lv: tr.lv, sw: tr.sw, n1: tr.n1, n2: tr.n2, ev,
+      I: st.I, W: st.W, IA: st.IA });
     sb.paint({ layer: 'far', bleed: 0, animated: true, owner: env.owner, draw: rippleDraw,
       data: Object.assign({}, base, { ripples: !!p.ripples, str, R, major, life, flat: wide ? 0.28 : 0.45,
         glowA: ink.chroma ? 0 : ink.add ? 0.3 : 0.14 }) });
-    const hTop = hMin + hA * (bl.t.length ? 1.3 : 1);
+    const hTop = hMin + 1.2 * hA * (bl.t.length ? 1.3 : 1);
     const reach = { x: fr.cx - hl, y: fr.cy - hTop, w: 2 * hl, h: 2 * hTop };
     sb.paint({ layer: 'mid', bleed: 0, animated: true, owner: env.owner, draw: barsDraw,
       data: Object.assign(base, { Lh, pc, nb, hMin, hA, w, taper, hl, v: Lh / 1.8, bw: 0.42 * pc,
@@ -740,6 +805,7 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     params: {
       react: { type: 'num', min: 0, max: 1, step: 0.01, label: L('音への反応', 'Reaction'), auto: { range: [0.55, 0.85], follow: 'energy' } },
       ripples: { type: 'bool', label: L('波紋', 'Ripples'), auto: { pick: [true, false], weights: [4, 1] } },
+      shape: SHAPE_PARAM,
     },
     build: horizonBuild,
   });
@@ -808,7 +874,8 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     const Q = d.Q, F = d.figs, nc = d.tc.length;
     let i = 0;
     while (i < nc && d.tc[i] <= t) i++;
-    const A = i * NF, th = d.ringDir * 0.25 * d.spd * (t - d.s0);
+    const c = clockAt(d, t) - d.c0;                             // the motion clock: faster where the strength is high
+    const A = i * NF, th = d.ringDir * 0.25 * d.spd * c;
     for (let f = 0; f < NF; f++) Q[f] = F[A + f];
     Q[DX] = orbitX(d, i, A, th); Q[DY] = orbitY(d, i, A, th);
     // the hold's breath: 0 on a change, back over 0.4 s after it, gone again through the next blend
@@ -837,8 +904,8 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     }
     // always alive: the ring drifts by the share it shows (a half ring, the sunrise, stays seated on its horizon line),
     // the square turns, and the sizes breathe while a figure holds
-    Q[RA] += d.ringDir * 0.12 * d.spd * (t - d.s0) * clamp((Q[RS] - 0.5) / 0.5);
-    Q[QR] += d.sqDir * 0.12 * t;
+    Q[RA] += d.ringDir * 0.12 * d.spd * c * clamp((Q[RS] - 0.5) / 0.5);
+    Q[QR] += d.sqDir * 0.12 * (c + d.s0);
     const br = 1 + 0.03 * hold * Math.sin(TAU * t / 5);
     Q[RR] *= br; Q[QS] *= br; Q[DS] *= br;
     Q[DX] = Q[RX] + (Q[DX] - Q[RX]) * br; Q[DY] = Q[RY] + (Q[DY] - Q[RY]) * br;   // a dot on the ring stays on it
@@ -979,13 +1046,14 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
       g.closePath();
       g.stroke();
     }
-    // the hero dot: it breathes, and ticks on the beats (a small dot by 16 %, a large disc by less, over a 0.05 s rise)
+    // the hero dot: it breathes, and ticks on the beats (a small dot by 6–26 % with the strength, a large disc by less,
+    // over a 0.05 s rise)
     let rd = Q[DR] * (1 + 0.06 * Math.sin(TAU * 0.3 * t));
     if (d.ev.length && t < d.o + 0.2 && Q[DR] > 0) {
       const j = lastBeat(d.ev, t);
       if (j >= 0) {
         const since = t - d.ev[j];
-        rd *= 1 + 0.16 * Math.min(1, 0.03 * d.s / Q[DR]) * Math.min(1, since / 0.05) * Math.exp(-since / 0.16);
+        rd *= 1 + (0.06 + 0.2 * strengthAt(d, t)) * Math.min(1, 0.03 * d.s / Q[DR]) * Math.min(1, since / 0.05) * Math.exp(-since / 0.16);
       }
     }
     if (rd > 0.3) {
@@ -1045,7 +1113,9 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     const { D, sb } = env;
     const fr = frameOf(env, p), ink = inksOf(env.pal), r = seedOf(env), s = fr.s;
     const rs = r.fork('seq');
-    const tc = changeTimes(env, fr, p.every, rs.fork('times'));
+    const st = strengthTrack(env, fr, levelTrack(env, r, fr.a - 0.4), p.shape);
+    // a calm stretch holds every other figure longer (the strength below 0.25 drops the change between)
+    const tc = changeTimes(env, fr, p.every, rs.fork('times')).filter((x, i) => i % 2 === 0 || strengthAt(st, x) >= 0.25);
     const seq = sequenceOf(rs.fork('walk'), tc.length + 1);
     const figs = new Float32Array(seq.length * NF), flo = new Uint8Array(tc.length);
     const vr = rs.fork('visit');
@@ -1070,6 +1140,7 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     far += w0;
     const fold = env.orient === 'v' ? Math.PI / 2 : 0;
     const d = data(fr, { w0, tc: Float32Array.from(tc), seq, figs, flo, ev, evGap: beats.gap, fold, hx, hy, add: ink.add,
+      I: st.I, W: st.W, IA: st.IA, c0: sampleAt(st.W, st.IA, fr.s0),
       sx0: D.safe.l, sx1: D.w - D.safe.r, sy0: D.safe.t, sy1: D.h - D.safe.b,
       ringDir: rs.chance(0.5) ? 1 : -1, sqDir: rs.chance(0.5) ? 1 : -1, dashInk: ink.light ? 'accent' : ink.two,
       // over the key the faint strokes key badly: solid lines, no glow behind the dot and no dial
@@ -1090,7 +1161,7 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     key: 'kineticShapes',
     label: L('図形の舞', 'Kinetic shapes'),
     blurb: L('細い円と線と四角が回り、伸び、小節ごとに組み替わる', 'Thin circles, lines and a square turn, extend and recombine bar by bar'),
-    tags: ['minimal', 'serious'], family: 'figure', cam: 'gentle', needs: ['beats'],
+    tags: ['minimal', 'serious'], family: 'figure', cam: 'gentle', needs: ['beats', 'level'],
     traits: { cells: [0, 80], roles: ['interlude'], energy: [0.15, 0.9] },
     fits: (f) => (f.beat ? 1.1 : 0.9),
     params: {
@@ -1098,6 +1169,7 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
       thickness: { type: 'num', min: 0.5, max: 2, step: 0.05, unit: 'x', label: L('線の太さ', 'Line weight'), ui: 'advanced',
         auto: { range: [0.9, 1.15] } },
       dial: { type: 'bool', label: L('奥の目盛り', 'Dial behind'), auto: { pick: [true, false], weights: [2, 1] } },
+      shape: SHAPE_PARAM,
     },
     build: shapesBuild,
   });
