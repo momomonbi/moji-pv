@@ -1356,7 +1356,7 @@ test('an interlude cut shows 表示する文字 only when 間の印 is its compo
   const sel = { level: 'cut', key: 'gap/ra' };
   let plan = PL.plan(doc, { registry: reg });
   const picked = plan.cuts.find((c) => c.key === 'gap/ra').slots.arrange.v;
-  assert.ok(['lightMotes', 'soundHorizon', 'kineticShapes'].includes(picked), picked);
+  assert.ok(reg.traits('arrange', picked).roles.includes('interlude') && picked !== 'breathMark', picked);
   let sections = F.sectionsFor(sel, plan, reg);
   assert.ok(!sections.some((s) => s.id === 'gaplabel'), 'no 表示する文字 on an effect');
   const layout = sections.find((s) => s.id === 'layout').fields.map((f) => f.path || f.key);

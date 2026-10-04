@@ -2513,11 +2513,16 @@ grouping is fine as long as each file only depends on `parts/kit`.
 | `soundHorizon` (role interlude) | 音の水平線 | Sound horizon | fast bold digital | A dotted horizon whose bars swell with the loudness while ripples spread on the beats; it folds back into dots for the next line (no text). |
 | `kineticShapes` (role interlude) | 図形の舞 | Kinetic shapes | minimal serious | Thin rings, lines and a square recombine on the downbeats, then fold into one line and a dot (no text). |
 | `neonWave` (role interlude) | 光の波形 | Neon waveform | bold digital fast | A glowing line across the lower frame, mirrored on the floor: its left bump leaps on the beat, the others follow the loudness and flicker finer to the right (no text). |
+| `ringPulse` (role interlude) | 光の輪 | Light ring | bold digital fast | Bars in a ring round the centre, mirrored: the lower ones leap on the beat, the upper ones flicker with the loudness; the ring swells on the kick and turns slowly (no text). |
+| `warpField` (role interlude) | 光のワープ | Light warp | fast bold digital | Streaks of light rush out from the centre, faster as the music swells and pushed on by each kick (no text). |
+| `tileRipple` (role interlude) | 光のタイル | Light tiles | digital playful minimal | A field of small squares where each beat drops a ripple of light that runs outward (a downbeat from the centre) (no text). |
+| `burstBloom` (role interlude) | 光の花火 | Light bursts | playful bold fast | Sparks burst like fireworks at seeded spots on the beat, spreading, falling a little and fading (no text). |
+| `harmonicString` (role interlude) | 光の弦 | Light string | airy minimal serious | One glowing closed curve breathes with the loudness and folds into its next figure each bar (no text). |
 | `breathMark` (role interlude, pin only) | 間の印 | Breath mark | minimal slow | A small ♪ or the section heading, centred, slowly breathing; since the interlude effects it is never picked automatically (`pool: false`). |
 | `creditFold` (role outro) | 終わりの札 | Credit fold | minimal | Title and artist as a quiet corner credit. |
 
 Interlude effects (`parts/arrange/interlude.js`). Every interlude cut draws one of `lightMotes`, `soundHorizon`,
-`kineticShapes` and `neonWave`, picked by the mood's tags, the part's energy range and `fits` (a beat grid helps the horizon). They set
+`kineticShapes`, `neonWave`, `ringPulse`, `warpField`, `tileRipple`, `burstBloom` and `harmonicString`, picked by the mood's tags, the part's energy range and `fits` (a beat grid helps the horizon). They set
 no text at all: no ♪ and no heading. They are `cam: 'gentle'` (a glyph-free cut leaves the gentle shot inert) and have
 no `motion: 'own'`, so the lyric neighbours keep every entrance, exit and camera decision. They draw on the far and mid
 layers only (never near, which a text seam mixes). They wait out the line before (their entrance starts 0.15 s into the

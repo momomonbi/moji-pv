@@ -1,6 +1,6 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-SoFxrOqi7U+FxaaGKQyaJXMAqnUHX7y9zbBKzRpAwrk='; style-src 'sha256-uhekdjVoF8p0oG5Jys9SuRatxu3plo9h2Wexn3/9z4g=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-y+RF7fmwDzftRMtAtGc334djiNBM7nbWe3XrjV/Ze6U='; style-src 'sha256-uhekdjVoF8p0oG5Jys9SuRatxu3plo9h2Wexn3/9z4g=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
 <title>Moji PV Maker</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -35370,6 +35370,32 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     build: shapesBuild,
   });
 
+  // --- shared by the effects below: kicks ----------------------------------------------------------------------------
+
+  // The kicks an effect jumps on: the beats with a grid (at least minGap apart), the song's onsets without one, uneven
+  // seeded gaps without either; the strength thins them where it is low. → { bt, bd } (times, downbeat flags).
+  function kicksOf(env, fr, tr, st, r, minGap) {
+    const lo = fr.s0, hi = fr.h;
+    let kicks;
+    if (env.grid) {
+      const bl = beatList(env, lo, hi, minGap);
+      kicks = Array.from(bl.t, (t, i) => [t, bl.down[i]]);
+    } else if (tr.song) kicks = onsetEvents(tr, lo, hi, minGap, 2, 128).map(([t]) => [t, 1]);
+    else kicks = aperiodic(r.fork('kick'), fr.s0 + fr.E, fr.o, 0.9, 1.8, 128).map((t) => [t, 1]);
+    kicks = kicks.filter((x) => keeps(st, x[0], x[1]));
+    return { bt: Float32Array.from(kicks, (x) => x[0]), bd: Uint8Array.from(kicks, (x) => x[1]) };
+  }
+
+  // The last kick's pulse at t: 1 on a downbeat (0.7 on another kick), decaying over `decay` seconds.
+  function kickAt(d, t, decay) {
+    if (!d.bt.length) return 0;
+    const j = lastBeat(d.bt, t);
+    return j < 0 ? 0 : (d.bd[j] ? 1 : 0.7) * Math.exp(-(t - d.bt[j]) / decay);
+  }
+
+  // How loud and how strong, with the lead-out folded in: the common gain of the effects below.
+  function gainOf(d, t) { return (0.3 + 0.9 * strengthAt(d, t)) * (1 - 0.7 * outOf(d, t)); }
+
   // --- neonWave -------------------------------------------------------------------------------------------------------
 
   // A glowing line across the lower frame, mirrored on a dark floor. Its bumps sit along it like a spectrum: the left
@@ -35487,16 +35513,7 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
       rate[k] = 1.2 + 0.9 * k + rb.range(0, 0.5);
     }
 
-    // the kicks: the beats with a song and a grid, its onsets without a grid, a bpm pin's beats without a song, uneven
-    // seeded gaps without either; the strength thins them where it is low
-    const lo = fr.s0, hi = fr.h, grid = env.grid;
-    let kicks = [];
-    if (grid) {
-      const bl = beatList(env, lo, hi, 0.3);
-      kicks = Array.from(bl.t, (t, i) => [t, bl.down[i]]);
-    } else if (tr.song) kicks = onsetEvents(tr, lo, hi, 0.3, 2, 128).map(([t]) => [t, 1]);
-    else kicks = aperiodic(r.fork('kick'), fr.s0 + fr.E, fr.o, 0.9, 1.8, 128).map((t) => [t, 1]);
-    kicks = kicks.filter((x) => keeps(st, x[0], x[1]));
+    const kicks = kicksOf(env, fr, tr, st, r, 0.3);
 
     const P = 'accent', core = ink.light || ink.chroma ? P : 'ink';
     const strokes = ink.chroma ? [[0.004 * s, 1, P]]
@@ -35504,8 +35521,7 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     const shared = data(fr, { add: ink.add, chroma: ink.chroma, P, song: tr.song, L0: tr.L0, lv: tr.lv, sw: tr.sw, n1: tr.n1,
       n2: tr.n2, I: st.I, W: st.W, IA: st.IA, s, x0: fr.cx - Lh, len: 2 * Lh, base, hA, depth: 0.9 * hA, uc, wd, amp, rate,
       jit: 0.02 * s, dot: 0.014 * s, nk: rb.int(1, SEED_MAX - 16), nj: rb.int(1, SEED_MAX - 2),
-      bt: Float32Array.from(kicks, (x) => x[0]), bd: Uint8Array.from(kicks, (x) => x[1]),
-      A: new Float32Array(WAVE_BUMPS), Y: new Float32Array(WAVE_N) });
+      bt: kicks.bt, bd: kicks.bd, A: new Float32Array(WAVE_BUMPS), Y: new Float32Array(WAVE_N) });
     if (p.reflect && !ink.chroma) {
       sb.paint({ layer: 'far', bleed: 0, animated: true, owner: env.owner, draw: reflectDraw, data: Object.assign({}, shared) });
     }
@@ -35529,7 +35545,391 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     build: waveBuild,
   });
 
-  return [lightMotes, soundHorizon, kineticShapes, neonWave];
+
+  // A react param and the strength graph, shared by the effects below.
+  const REACT = (lo, hi) => ({ type: 'num', min: 0, max: 1, step: 0.01, label: L('音への反応', 'Reaction'),
+    auto: { range: [lo, hi], follow: 'energy' } });
+  const ALPHA_BUCKETS = 8;
+
+  // Strokes the path once per pass: [width, alpha, ink] (the key gets one solid pass).
+  function strokePasses(g, a0, Am, q, passes) {
+    for (const [w, a, ink] of passes) {
+      g.globalAlpha = a0 * clamp(a * Am);
+      g.strokeStyle = q.rgba(ink, 1);
+      g.lineWidth = w;
+      g.stroke();
+    }
+  }
+
+  function passesOf(ink, s, P, core) {
+    return ink.chroma ? [[0.0035 * s, 1, P]]
+      : [[0.016 * s, ink.add ? 0.08 : 0.06, P], [0.006 * s, ink.add ? 0.32 : 0.26, P], [0.0022 * s, 1, core]];
+  }
+
+  // --- ringPulse: 光の輪 -------------------------------------------------------------------------------------------------
+
+  // A ring of bars around the centre, mirrored left and right: the bottom bars jump on the kick, the top ones flicker
+  // with the loudness, faster toward the top; the ring itself swells on the kick and turns slowly with the strength.
+  const RING_N = 96;
+
+  function placeRing(d, t) {
+    const lv = levelAt(d, t), gain = gainOf(d, t), kick = kickAt(d, t, 0.2);
+    for (let i = 0; i < RING_N; i++) {
+      const m = Math.min(i, RING_N - i), b = 1 - Math.abs((2 * i) / RING_N - 1);   // b: 0 at the top, 1 at the bottom
+      const hi = levelAt(d, t - 0.04 * (1 - b)) * (0.35 + 0.65 * noise1(d.nk + m, (1.5 + 4 * (1 - b)) * t));
+      const lo = 0.25 * lv + 0.9 * kick;
+      d.L[i] = d.hA * gain * (0.05 + (1 - b * b) * hi + b * b * lo);
+    }
+    return 1 + 0.12 * kick * gain;
+  }
+
+  function ringDraw(g, t, d, q) {
+    const Am = envelopeOf(d, t), reach = reachOf(d, t);
+    if (Am < 1 / 255 || !(reach > 0)) return;
+    const swell = placeRing(d, t), R = d.R0 * (0.85 + 0.15 * reach) * swell, turn = d.spin * clockAt(d, t);
+    const n = Math.max(2, Math.round(reach * RING_N)), a0 = g.globalAlpha;
+    if (d.add) g.globalCompositeOperation = 'lighter';
+    g.lineCap = 'round';
+    g.beginPath();
+    for (let i = 0; i < n; i++) {
+      const th = turn + (TAU * i) / RING_N - Math.PI / 2, c = Math.cos(th), sn = Math.sin(th);
+      g.moveTo(d.cx + c * R, d.cy + sn * R);
+      g.lineTo(d.cx + c * (R + d.L[i]), d.cy + sn * (R + d.L[i]));
+    }
+    strokePasses(g, a0, Am, q, d.passes);
+    g.beginPath();
+    g.arc(d.cx, d.cy, R * 0.9, 0, TAU);
+    g.globalAlpha = a0 * clamp((d.chroma ? 0.7 : 0.3) * Am);
+    g.strokeStyle = q.rgba(d.P, 1);
+    g.lineWidth = 0.002 * d.s;
+    g.stroke();
+    g.globalCompositeOperation = 'source-over';
+    g.globalAlpha = a0;
+  }
+
+  function ringBuild(env, p) {
+    const fr = frameOf(env, p), ink = inksOf(env.pal), r = seedOf(env), s = fr.s;
+    const tr = levelTrack(env, r, fr.a - 1);
+    const st = strengthTrack(env, fr, tr, p.shape);
+    const kicks = kicksOf(env, fr, tr, st, r, 0.3);
+    const R0 = 0.16 * s, hA = 0.15 * s * (0.35 + 0.65 * p.react) * (tr.song ? 1 : 0.8);
+    const P = 'accent', core = ink.light || ink.chroma ? P : 'ink';
+    env.sb.paint({ layer: 'mid', bleed: 0, animated: true, owner: env.owner, draw: ringDraw,
+      data: data(fr, { add: ink.add, chroma: ink.chroma, P, song: tr.song, L0: tr.L0, lv: tr.lv, sw: tr.sw, n1: tr.n1, n2: tr.n2,
+        I: st.I, W: st.W, IA: st.IA, s, R0, hA, spin: (r.next() < 0.5 ? -1 : 1) * 0.15, nk: r.int(1, SEED_MAX - RING_N),
+        passes: passesOf(ink, s, P, core), bt: kicks.bt, bd: kicks.bd, L: new Float32Array(RING_N) }) });
+    const ext = 2 * (R0 * 1.12 + 1.3 * hA);
+    return finish(env, fr, ext, ext);
+  }
+
+  const ringPulse = K.arrange({
+    key: 'ringPulse',
+    label: L('光の輪', 'Light ring'),
+    blurb: L('光の棒が輪になって並び、下は拍で、上は音の細かさで伸び縮みする', 'Bars in a ring: the lower ones leap on the beat, the upper ones flicker with the sound'),
+    tags: ['bold', 'digital', 'fast'], family: 'ring', cam: 'gentle', needs: ['beats', 'level'],
+    traits: { cells: [0, 80], roles: ['interlude'], energy: [0.35, 1] },
+    fits: (f) => (f.beat ? 1.2 : 0.7),
+    params: { react: REACT(0.6, 0.9), shape: SHAPE_PARAM },
+    build: ringBuild,
+  });
+
+  // --- warpField: 光のワープ ---------------------------------------------------------------------------------------------
+
+  // Streaks of light fly out from the centre; how fast follows the loudness (a kick gives a push), so a loud passage is
+  // a rush and a quiet one a slow drift. Each streak fades in at the centre and out at the edge.
+  const WARP_N = 120;
+
+  function warpDraw(g, t, d, q) {
+    const Am = envelopeOf(d, t), reach = reachOf(d, t);
+    if (Am < 1 / 255 || !(reach > 0)) return;
+    const z = sampleAt(d.Z, d.IA, t), lv = levelAt(d, t), a0 = g.globalAlpha, tail = 0.12 + 0.3 * lv;
+    if (d.add) g.globalCompositeOperation = 'lighter';
+    g.lineCap = 'round';
+    for (let bk = 1; bk <= ALPHA_BUCKETS; bk++) {
+      let any = false;
+      for (let k = 0; k < WARP_N; k++) {
+        const u = fract(d.ph[k] + d.rt[k] * z);
+        const a = Math.pow(Math.sin(Math.PI * u), 0.8) * reach;
+        if (Math.max(1, Math.ceil(a * ALPHA_BUCKETS)) !== bk || a < 0.02 || (d.chroma && (u < 0.15 || u > 0.9))) continue;
+        const r1 = d.Rm * u * u, r0 = r1 * (1 - tail);
+        if (!any) { g.beginPath(); any = true; }
+        g.moveTo(d.cx + d.c[k] * r0, d.cy + d.sn[k] * r0);
+        g.lineTo(d.cx + d.c[k] * r1, d.cy + d.sn[k] * r1);
+      }
+      if (!any) continue;
+      g.globalAlpha = a0 * clamp((d.chroma ? 1 : bk / ALPHA_BUCKETS) * Am);
+      g.strokeStyle = q.rgba(bk > 5 && !d.chroma ? d.core : d.P, 1);
+      g.lineWidth = d.s * 0.0012 * (0.8 + (1.6 * bk) / ALPHA_BUCKETS);
+      g.stroke();
+    }
+    g.globalCompositeOperation = 'source-over';
+    g.globalAlpha = a0;
+  }
+
+  function warpBuild(env, p) {
+    const { D } = env;
+    const fr = frameOf(env, p), ink = inksOf(env.pal), r = seedOf(env), s = fr.s;
+    const tr = levelTrack(env, r, fr.a - 1);
+    const st = strengthTrack(env, fr, tr, p.shape);
+    const kicks = kicksOf(env, fr, tr, st, r, 0.3);
+    // the travel clock: ∫ speed dt at 20 Hz, the speed from the loudness, a kick's push and the reaction
+    const n = Math.ceil((fr.b - fr.a) * HZ) + 2, Z = new Float32Array(n), kd = { bt: kicks.bt, bd: kicks.bd };
+    for (let i = 1; i < n; i++) {
+      const t = fr.a + i / HZ, lv = levelAt(tr, t);
+      Z[i] = Z[i - 1] + (0.08 + (0.25 + 0.75 * p.react) * (0.5 * lv + 0.45 * kickAt(kd, t, 0.25)) * (0.4 + 0.6 * strengthAt(st, t))) / HZ;
+    }
+    const rs = r.fork('stars'), c = new Float32Array(WARP_N), sn = new Float32Array(WARP_N);
+    const ph = new Float32Array(WARP_N), rt = new Float32Array(WARP_N);
+    for (let k = 0; k < WARP_N; k++) {
+      const th = rs.range(0, TAU);
+      c[k] = Math.cos(th); sn[k] = Math.sin(th); ph[k] = rs.next(); rt[k] = rs.range(0.7, 1.3);
+    }
+    const P = 'accent', core = ink.light || ink.chroma ? P : 'ink';
+    env.sb.paint({ layer: 'mid', bleed: 0, animated: true, owner: env.owner, draw: warpDraw,
+      data: data(fr, { add: ink.add, chroma: ink.chroma, P, core, song: tr.song, L0: tr.L0, lv: tr.lv, sw: tr.sw, n1: tr.n1, n2: tr.n2,
+        I: st.I, W: st.W, IA: st.IA, Z, s, Rm: 0.5 * Math.hypot(D.w, D.h), c, sn, ph, rt }) });
+    return finish(env, fr, 0.5 * s, 0.5 * s);
+  }
+
+  const warpField = K.arrange({
+    key: 'warpField',
+    label: L('光のワープ', 'Light warp'),
+    blurb: L('中心から光の筋が飛び出し、音が大きいほど速く流れる', 'Streaks of light rush out from the centre, faster as the music swells'),
+    tags: ['fast', 'bold', 'digital'], family: 'warp', cam: 'gentle', needs: ['beats', 'level'],
+    traits: { cells: [0, 80], roles: ['interlude'], energy: [0.45, 1] },
+    params: { react: REACT(0.55, 0.9), shape: SHAPE_PARAM },
+    build: warpBuild,
+  });
+
+  // --- tileRipple: 光のタイル --------------------------------------------------------------------------------------------
+
+  // A grid of small squares across the frame: every kick drops a ripple at a seeded cell (a downbeat at the centre) that
+  // runs outward, lighting and swelling the squares it passes; the loudness keeps a faint glow on all of them.
+  const TILE_MAX = 340, RIPPLE_LIFE = 1.6;
+
+  function tileDraw(g, t, d, q) {
+    const Am = envelopeOf(d, t), reach = reachOf(d, t);
+    if (Am < 1 / 255 || !(reach > 0)) return;
+    const lv = levelAt(d, t), gain = gainOf(d, t), a0 = g.globalAlpha;
+    const j1 = d.bt.length ? lastBeat(d.bt, t) : -1;
+    let j0 = j1;
+    while (j0 > 0 && t - d.bt[j0 - 1] < RIPPLE_LIFE && j1 - j0 < 5) j0--;
+    for (let i = 0; i < d.n; i++) {
+      let v = 0.08 + 0.22 * lv;
+      for (let j = Math.max(0, j0); j <= j1; j++) {
+        const tau = t - d.bt[j];
+        if (tau < 0 || tau > RIPPLE_LIFE) continue;
+        const dist = Math.hypot(d.gx[i] - d.ex[j], d.gy[i] - d.ey[j]), front = tau * d.speed;
+        v += (d.bd[j] ? 1 : 0.7) * Math.exp(-((dist - front) * (dist - front)) / d.ww) * (1 - tau / RIPPLE_LIFE);
+      }
+      d.V[i] = clamp(v * gain * reach);
+    }
+    for (let bk = 1; bk <= ALPHA_BUCKETS; bk++) {
+      let any = false;
+      for (let i = 0; i < d.n; i++) {
+        const v = d.V[i];
+        if (Math.max(1, Math.ceil(v * ALPHA_BUCKETS)) !== bk || (d.chroma && v < 0.3)) continue;
+        const sz = d.cell * (0.18 + 0.62 * v);
+        if (!any) { g.beginPath(); any = true; }
+        g.rect(d.gx[i] - sz / 2, d.gy[i] - sz / 2, sz, sz);
+      }
+      if (!any) continue;
+      g.globalAlpha = a0 * clamp((d.chroma ? 1 : 0.25 + (0.75 * bk) / ALPHA_BUCKETS) * Am);
+      g.fillStyle = q.rgba(bk > 5 && !d.chroma ? d.core : d.P, 1);
+      g.fill();
+    }
+    g.globalAlpha = a0;
+  }
+
+  function tileBuild(env, p) {
+    const { D } = env;
+    const fr = frameOf(env, p), ink = inksOf(env.pal), r = seedOf(env), s = fr.s;
+    const tr = levelTrack(env, r, fr.a - 1);
+    const st = strengthTrack(env, fr, tr, p.shape);
+    const kicks = kicksOf(env, fr, tr, st, r, 0.4);
+    const W = D.w - D.safe.l - D.safe.r, H = D.h - D.safe.t - D.safe.b;
+    let cell = s * (0.075 - 0.03 * p.density);
+    while (Math.floor(W / cell) * Math.floor(H / cell) > TILE_MAX) cell *= 1.08;
+    const cols = Math.max(1, Math.floor(W / cell)), rows = Math.max(1, Math.floor(H / cell)), n = cols * rows;
+    const gx = new Float32Array(n), gy = new Float32Array(n);
+    const x0 = fr.cx - (cols * cell) / 2 + cell / 2, y0 = fr.cy - (rows * cell) / 2 + cell / 2;
+    for (let i = 0; i < n; i++) { gx[i] = x0 + (i % cols) * cell; gy[i] = y0 + Math.floor(i / cols) * cell; }
+    const re = r.fork('ripples'), ex = new Float32Array(kicks.bt.length), ey = new Float32Array(kicks.bt.length);
+    for (let j = 0; j < ex.length; j++) {
+      const k = re.int(0, n - 1);
+      ex[j] = kicks.bd[j] ? fr.cx : gx[k];
+      ey[j] = kicks.bd[j] ? fr.cy : gy[k];
+    }
+    const P = 'accent', core = ink.light || ink.chroma ? P : 'ink';
+    env.sb.paint({ layer: 'mid', bleed: 0, animated: true, owner: env.owner, draw: tileDraw,
+      data: data(fr, { chroma: ink.chroma, P, core, song: tr.song, L0: tr.L0, lv: tr.lv, sw: tr.sw, n1: tr.n1, n2: tr.n2,
+        I: st.I, W: st.W, IA: st.IA, s, n, cell, gx, gy, ex, ey, bt: kicks.bt, bd: kicks.bd, speed: 0.55 * s,
+        ww: (0.09 * s) * (0.09 * s) * (0.5 + p.react), V: new Float32Array(n) }) });
+    return finish(env, fr, cols * cell, rows * cell);
+  }
+
+  const tileRipple = K.arrange({
+    key: 'tileRipple',
+    label: L('光のタイル', 'Light tiles'),
+    blurb: L('画面いっぱいの小さな四角に、拍ごとに光の波紋が広がる', 'A field of small squares where a ripple of light spreads on every beat'),
+    tags: ['digital', 'playful', 'minimal'], family: 'grid', cam: 'gentle', needs: ['beats', 'level'],
+    traits: { cells: [0, 80], roles: ['interlude'], energy: [0.25, 0.95] },
+    fits: (f) => (f.beat ? 1.2 : 0.6),
+    params: {
+      react: REACT(0.5, 0.85),
+      density: { type: 'num', min: 0, max: 1, step: 0.01, label: L('細かさ', 'Density'), auto: { range: [0.3, 0.8] } },
+      shape: SHAPE_PARAM,
+    },
+    build: tileBuild,
+  });
+
+  // --- burstBloom: 光の花火 ----------------------------------------------------------------------------------------------
+
+  // A burst of sparks on each kick at a seeded spot (a downbeat bigger), spreading, slowing, falling a little and fading.
+  const SPARKS = 26, BURST_LIFE = 1.5, BURSTS_LIVE = 5;
+
+  function sparkAt(d, j, k, tau) {
+    const v = d.R[j] * d.vk[k] * (1 - Math.exp(-tau / 0.32)), fall = d.grav * tau * tau;
+    const th = d.th0[j] + (TAU * k) / SPARKS;
+    return [d.ex[j] + Math.cos(th) * v, d.ey[j] + Math.sin(th) * v + fall];
+  }
+
+  function burstDraw(g, t, d, q) {
+    const Am = envelopeOf(d, t);
+    if (Am < 1 / 255 || !d.bt.length) return;
+    const j1 = lastBeat(d.bt, t), a0 = g.globalAlpha, gain = gainOf(d, t);
+    if (j1 < 0) return;
+    if (d.add) g.globalCompositeOperation = 'lighter';
+    g.lineCap = 'round';
+    for (let bk = 1; bk <= ALPHA_BUCKETS; bk++) {
+      let any = false;
+      for (let j = j1; j >= 0 && j > j1 - BURSTS_LIVE; j--) {
+        const tau = t - d.bt[j];
+        if (tau > BURST_LIFE) break;
+        const a = Math.pow(1 - tau / BURST_LIFE, 1.1) * Math.min(1, 0.5 + gain);
+        if (Math.max(1, Math.ceil(a * ALPHA_BUCKETS)) !== bk || a < 0.02 || (d.chroma && a < 0.15)) continue;
+        for (let k = 0; k < SPARKS; k++) {
+          const [x0, y0] = sparkAt(d, j, k, Math.max(0, tau - 0.14)), [x1, y1] = sparkAt(d, j, k, tau);
+          if (!any) { g.beginPath(); any = true; }
+          g.moveTo(x0, y0); g.lineTo(x1, y1);
+        }
+      }
+      if (!any) continue;
+      g.globalAlpha = a0 * clamp((d.chroma ? 1 : bk / ALPHA_BUCKETS) * Am);
+      g.strokeStyle = q.rgba(bk > 5 && !d.chroma ? d.core : d.P, 1);
+      g.lineWidth = d.s * 0.0045;
+      g.stroke();
+    }
+    g.globalCompositeOperation = 'source-over';
+    g.globalAlpha = a0;
+  }
+
+  function burstBuild(env, p) {
+    const { D } = env;
+    const fr = frameOf(env, p), ink = inksOf(env.pal), r = seedOf(env), s = fr.s;
+    const tr = levelTrack(env, r, fr.a - 1);
+    const st = strengthTrack(env, fr, tr, p.shape);
+    // the kicks, with an opening burst as the effect comes in and one before the lead-out
+    const kicks0 = kicksOf(env, fr, tr, st, r, 0.45);
+    const all = Array.from(kicks0.bt, (t, i) => [t, kicks0.bd[i]]).concat([[fr.s0 + 0.05, 1], [Math.max(fr.s0 + 0.3, fr.o - 0.4), 1]])
+      .sort((x, y) => x[0] - y[0]).filter((x, i, xs) => i === 0 || x[0] - xs[i - 1][0] >= 0.2);
+    // a gap longer than 1.1 s gets small bursts of its own, so the sky is never empty for long
+    const filled = [];
+    for (let i = 0; i < all.length; i++) {
+      if (i) {
+        const gap = all[i][0] - all[i - 1][0], k = Math.floor(gap / 1.1);
+        for (let j = 1; j <= k; j++) filled.push([all[i - 1][0] + (gap * j) / (k + 1), 0]);
+      }
+      filled.push(all[i]);
+    }
+    const kicks = { bt: Float32Array.from(filled, (x) => x[0]), bd: Uint8Array.from(filled, (x) => x[1]) };
+    const L0 = D.safe.l + 0.2 * s, R0 = D.w - D.safe.r - 0.2 * s, T0 = D.safe.t + 0.2 * s, B0 = D.h - D.safe.b - 0.3 * s;
+    const rb = r.fork('bursts'), m = kicks.bt.length;
+    const ex = new Float32Array(m), ey = new Float32Array(m), R = new Float32Array(m), th0 = new Float32Array(m);
+    for (let j = 0; j < m; j++) {
+      ex[j] = rb.range(Math.min(L0, fr.cx), Math.max(R0, fr.cx));
+      ey[j] = rb.range(Math.min(T0, fr.cy), Math.max(B0, fr.cy));
+      R[j] = s * (kicks.bd[j] ? 0.36 : 0.24) * (0.5 + 0.5 * p.react) * (0.6 + 0.4 * levelAt(tr, kicks.bt[j]));
+      th0[j] = rb.range(0, TAU);
+    }
+    const vk = new Float32Array(SPARKS);
+    for (let k = 0; k < SPARKS; k++) vk[k] = rb.range(0.7, 1.15);
+    const P = 'accent', core = ink.light || ink.chroma ? P : 'ink';
+    env.sb.paint({ layer: 'mid', bleed: 0, animated: true, owner: env.owner, draw: burstDraw,
+      data: data(fr, { add: ink.add, chroma: ink.chroma, P, core, song: tr.song, L0: tr.L0, lv: tr.lv, sw: tr.sw, n1: tr.n1, n2: tr.n2,
+        I: st.I, W: st.W, IA: st.IA, s, ex, ey, R, th0, vk, grav: 0.05 * s, bt: kicks.bt, bd: kicks.bd }) });
+    return finish(env, fr, 0.5 * s, 0.5 * s);
+  }
+
+  const burstBloom = K.arrange({
+    key: 'burstBloom',
+    label: L('光の花火', 'Light bursts'),
+    blurb: L('拍ごとに画面のあちこちで光が花火のようにはじける', 'Sparks burst like fireworks around the frame on the beat'),
+    tags: ['playful', 'bold', 'fast'], family: 'burst', cam: 'gentle', needs: ['beats', 'level'],
+    traits: { cells: [0, 80], roles: ['interlude'], energy: [0.4, 1] },
+    fits: (f) => (f.beat ? 1.3 : 0.6),
+    params: { react: REACT(0.55, 0.9), shape: SHAPE_PARAM },
+    build: burstBuild,
+  });
+
+  // --- harmonicString: 光の弦 --------------------------------------------------------------------------------------------
+
+  // One glowing closed curve (a Lissajous figure) at the centre that breathes with the loudness, turns with the strength
+  // and folds into its next figure on each downbeat (or each kick without a grid).
+  const STRING_N = 300;
+  const RATIOS = Object.freeze([[1, 2], [2, 3], [3, 4], [3, 5], [1, 3], [4, 5], [2, 5], [5, 6]]);
+
+  function stringDraw(g, t, d, q) {
+    const Am = envelopeOf(d, t), reach = reachOf(d, t);
+    if (Am < 1 / 255 || !(reach > 0)) return;
+    const lv = levelAt(d, t), gain = gainOf(d, t), kick = kickAt(d, t, 0.18), ph = 0.7 * clockAt(d, t);
+    let j = d.ch.length ? lastBeat(d.ch, t) : -1;
+    const m = j < 0 ? 1 : smooth((t - d.ch[j]) / 0.45);
+    const A = RATIOS[d.seq[Math.max(0, j) % d.seq.length]], B = RATIOS[d.seq[(Math.max(0, j) + (j < 0 ? 0 : 1)) % d.seq.length]];
+    const fa = j < 0 ? A[0] : lerp(A[0], B[0], m), fb = j < 0 ? A[1] : lerp(A[1], B[1], m);
+    const amp = (0.55 + 0.45 * reach) * (0.75 + 0.25 * lv * gain + 0.12 * kick);
+    const a0 = g.globalAlpha;
+    if (d.add) g.globalCompositeOperation = 'lighter';
+    g.lineJoin = 'round';
+    g.beginPath();
+    for (let i = 0; i <= STRING_N; i++) {
+      const u = (TAU * i) / STRING_N;
+      const x = d.cx + d.ax * amp * Math.sin(fa * u + ph), y = d.cy + d.ay * amp * Math.sin(fb * u);
+      if (i) g.lineTo(x, y); else g.moveTo(x, y);
+    }
+    strokePasses(g, a0, Am, q, d.passes);
+    g.globalCompositeOperation = 'source-over';
+    g.globalAlpha = a0;
+  }
+
+  function stringBuild(env, p) {
+    const fr = frameOf(env, p), ink = inksOf(env.pal), r = seedOf(env), s = fr.s;
+    const tr = levelTrack(env, r, fr.a - 1);
+    const st = strengthTrack(env, fr, tr, p.shape);
+    const kicks = kicksOf(env, fr, tr, st, r, 0.45);
+    const down = Array.from(kicks.bt).filter((t, i) => kicks.bd[i] || !env.grid);
+    const rs = r.fork('figures'), seq = Uint8Array.from(RATIOS.map((x, i) => i));
+    for (let i = seq.length - 1; i > 0; i--) { const k = rs.int(0, i); const x = seq[i]; seq[i] = seq[k]; seq[k] = x; }
+    const ax = 0.3 * s * (0.6 + 0.4 * p.react), ay = 0.3 * s * (0.6 + 0.4 * p.react);
+    const P = 'accent', core = ink.light || ink.chroma ? P : 'ink';
+    env.sb.paint({ layer: 'mid', bleed: 0, animated: true, owner: env.owner, draw: stringDraw,
+      data: data(fr, { add: ink.add, chroma: ink.chroma, P, song: tr.song, L0: tr.L0, lv: tr.lv, sw: tr.sw, n1: tr.n1, n2: tr.n2,
+        I: st.I, W: st.W, IA: st.IA, s, ax, ay, seq, ch: Float32Array.from(down), bt: kicks.bt, bd: kicks.bd,
+        passes: passesOf(ink, s, P, core) }) });
+    return finish(env, fr, 2.4 * ax, 2.4 * ay);
+  }
+
+  const harmonicString = K.arrange({
+    key: 'harmonicString',
+    label: L('光の弦', 'Light string'),
+    blurb: L('一本の光の曲線が音に合わせて息づき、小節ごとに別の形へ折り変わる', 'One glowing curve breathes with the sound and folds into a new figure each bar'),
+    tags: ['airy', 'minimal', 'serious'], family: 'string', cam: 'gentle', needs: ['beats', 'level'],
+    traits: { cells: [0, 80], roles: ['interlude'], energy: [0, 0.75] },
+    params: { react: REACT(0.45, 0.8), shape: SHAPE_PARAM },
+    build: stringBuild,
+  });
+
+  return [lightMotes, soundHorizon, kineticShapes, neonWave, ringPulse, warpField, tileRipple, burstBloom, harmonicString];
 });
 /* 文字PVメーカー v2 — original work. Compositions that place words or glyphs one by one: confetti words, hanging tags, halo ring, grid mosaic. */
 MV.def('parts/arrange/scatter', ['parts/kit'], (K) => {
@@ -62009,7 +62409,8 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
     // paramFields(kind, idx, partKey, registry, { shared, part, section, scopes }) → generated FieldSpecs for the
     // parameters of a part (shared ones by `kind.param`, own ones by `kind@key.param`). partKey null → shared only.
     // Params kept for saved documents but no longer offered: the interlude effects' 表現の強さ (自動 follows the song).
-    const HIDDEN_PARAMS = new Set(['lightMotes', 'soundHorizon', 'kineticShapes', 'neonWave'].map((key) => 'arrange@' + key + '.shape'));
+    const HIDDEN_PARAMS = new Set(['lightMotes', 'soundHorizon', 'kineticShapes', 'neonWave', 'ringPulse', 'warpField', 'tileRipple',
+      'burstBloom', 'harmonicString'].map((key) => 'arrange@' + key + '.shape'));
 
     function paramFields(kind, idx, partKey, registry, o) {
       const opt = o || {};
@@ -68309,7 +68710,8 @@ MV.def('ui/step_look', ['ui/dom', 'ui/icons', 'core/doc', 'ui/fields', 'i18n/t',
   const MAIN_ASPECTS = ['16:9', '9:16', '1:1'];
   // 間奏の演出: per interlude of the song, its effect (自動 or one of the three, pinned at that interlude's cut); its
   // name seeks there.
-  const IL_KEYS = ['lightMotes', 'soundHorizon', 'kineticShapes', 'neonWave'];
+  const IL_KEYS = ['lightMotes', 'soundHorizon', 'kineticShapes', 'neonWave', 'ringPulse', 'warpField', 'tileRipple', 'burstBloom',
+    'harmonicString'];
 
   function mount(app) {
     const t = app.t;
