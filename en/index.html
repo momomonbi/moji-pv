@@ -1,6 +1,6 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-ZO3O0bCLPkRKuUg5W94KQv+AOYqnuYLCjWtQmaVWNFg='; style-src 'sha256-uhekdjVoF8p0oG5Jys9SuRatxu3plo9h2Wexn3/9z4g=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-SoFxrOqi7U+FxaaGKQyaJXMAqnUHX7y9zbBKzRpAwrk='; style-src 'sha256-uhekdjVoF8p0oG5Jys9SuRatxu3plo9h2Wexn3/9z4g=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
 <title>Moji PV Maker</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -16704,7 +16704,7 @@ MV.def('planner/areas', ['core/paths', 'core/lyrics', 'planner/features'], (P, L
     }
     const ix = { rows, info, plan, lines, lineById, cutsOfLine, cutByKey, special, duration: isNumber(plan.duration) ? plan.duration : 0 };
     ix.sections = songSections(info, lines, special);
-    Object.assign(ix, rowGroups(rows, lines));
+    Object.assign(ix, rowGroups(rows, lines, cutByKey));
     memo.set(plan, ix);
     return ix;
   }
@@ -16730,8 +16730,11 @@ MV.def('planner/areas', ['core/paths', 'core/lyrics', 'planner/features'], (P, L
   }
 
   // Heading blocks (lines whose row lies after a '# heading' row and before the next heading row) and blank-line
-  // blocks (a new block starts at a line with pauseBefore > 0), both in sheet order, with every occurrence of a row.
-  function rowGroups(rows, lines) {
+  // blocks (a new block starts at a line with pauseBefore > 0, or after an interlude), both in sheet order, with every
+  // occurrence of a row.
+  function rowGroups(rows, lines, cutByKey) {
+    const afterGap = new Set();
+    for (let i = 1; i < lines.length; i++) if (cutByKey.has('gap/' + lines[i - 1].id)) afterGap.add(lines[i].row);
     const sheet = LY.parseSheet(rows);
     const headOfRow = new Map();
     const heads = [];
@@ -16745,7 +16748,7 @@ MV.def('planner/areas', ['core/paths', 'core/lyrics', 'planner/features'], (P, L
     const paraOfRow = new Map();
     const paras = [];
     for (const line of LY.linesOf(sheet).filter((l) => l.occ === 0)) {
-      if (!paras.length || line.pauseBefore > 0) paras.push({ rowId: line.row, n: paras.length + 1, lineIds: [] });
+      if (!paras.length || line.pauseBefore > 0 || afterGap.has(line.row)) paras.push({ rowId: line.row, n: paras.length + 1, lineIds: [] });
       paraOfRow.set(line.row, paras[paras.length - 1]);
     }
     for (const line of lines) {
@@ -74476,7 +74479,9 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
             { 'aria-pressed': String(locked), class: ['chip-btn', 'lh-btn', locked ? 'is-on' : ''] }));
           // まとまり: the first line of a block joins it to the one before, any other line splits its block there
           const rows = doc().sheet.rows, ri = rows.findIndex((r) => r.id === line.row);
-          if (ri > 0 && p.lines[0] && p.lines[0].id !== line.id) {
+          const li = p.lines.findIndex((l) => l.id === line.id);
+          const afterGap = li > 0 && p.cuts.some((c) => c.key === 'gap/' + p.lines[li - 1].id);   // an interlude starts a block
+          if (ri > 0 && li > 0 && !afterGap) {
             const join = rows[ri - 1].src.trim() === '';
             buttons.push(headButton(join ? 'fold' : 'unfold', t(join ? 'act.blockJoin' : 'act.blockSplit'),
               () => app.actions.run(join ? 'block.join' : 'block.split')));
