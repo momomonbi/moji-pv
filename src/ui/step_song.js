@@ -27,9 +27,34 @@ MV.def('ui/step_song', ['ui/dom', 'ui/icons', 'ui/header', 'ui/selection', 'i18n
       I.icon('tap'), h('span', { class: 'btn-main', text: t('song.tap') }), tapHint);
     const aiBtn = h('button', { class: 'chip-btn', type: 'button', 'data-act': 'ai.align', 'data-ctl': 'ai' },
       I.icon('ai', { size: 15 }), t('song.aiTiming'));
+    // タイミングを全体でずらす: every line moves by the same amount (AI timings that run a little late, say)
+    const shiftBtns = [-1, -0.1, 0.1, 1].map((d) => h('button', { class: 'btn small', type: 'button',
+      text: t('song.shiftBy', { d: (d < 0 ? '−' : '+') + Math.abs(d) }), on: { click: () => shiftAll(d) } }));
+    const shiftRow = h('div', { class: 'field', 'data-ctl': 'shift' },
+      h('label', { class: 'field-label', text: t('song.shiftAll') }),
+      h('div', { class: 'field-row' }, ...shiftBtns),
+      h('p', { class: 'note subtle', text: t('song.shiftHint') }));
     const root = h('div', { class: 'step step-song' },
       h('div', { class: 'step-head' }, h('h2', { class: 'step-title', text: t('song.title') })),
-      songBox, tempo, h('div', { class: 'snap-field' }, snapRow, snapWhy), tapBtn, aiBtn);
+      songBox, tempo, h('div', { class: 'snap-field' }, snapRow, snapWhy), tapBtn, aiBtn, shiftRow);
+
+    // The cut times pinned in seconds (a cut's start, an interlude's split points) move along with the lines.
+    function shiftAll(d) {
+      const p = app.plan;
+      if (!p || !p.lines.length) return;
+      const ids = p.lines.map((l) => l.id);
+      const delta = Math.max(d, -Math.min(...p.lines.map((l) => l.t0)));
+      if (Math.abs(delta) < 0.0005) return;
+      const base = Object.fromEntries(p.lines.map((l) => [l.id, { start: l.t0, end: l.t1 }]));
+      const cmds = [{ t: 'time.shift', lineIds: ids, delta, base }];
+      const move = (x) => Math.max(0, Math.round((x + delta) * 1000) / 1000);
+      for (const [path, pin] of Object.entries(app.doc.pins)) {
+        if (!path.startsWith('cut/') || !(path.endsWith(':t0') || path.endsWith(':parts')) || pin.by === 'lock') continue;
+        const v = Array.isArray(pin.v) ? pin.v.map(move) : typeof pin.v === 'number' ? move(pin.v) : null;
+        if (v !== null) cmds.push({ t: 'pin.set', path, v, by: pin.by, sig: typeof pin.sig === 'string' ? pin.sig : '' });
+      }
+      app.batch({ label: ['undo.shift', { n: ids.length }], mergeKey: 'shift:all' }, cmds);
+    }
 
     dom.on(root, 'click', '[data-act]', (ev, b) => app.actions.run(b.dataset.act, { from: 'song' }));
 
@@ -185,6 +210,7 @@ MV.def('ui/step_song', ['ui/dom', 'ui/icons', 'ui/header', 'ui/selection', 'i18n
       aiBtn.hidden = !app.view.state.prefs.ai;
       aiBtn.disabled = !app.doc.song;
       aiBtn.title = app.doc.song ? '' : t('song.aiNeedsSong');
+      for (const b of shiftBtns) b.disabled = !(app.plan && app.plan.lines.length);
     }
 
     app.bus.on('song', update);

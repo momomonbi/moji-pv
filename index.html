@@ -1,6 +1,6 @@
 <!doctype html><html lang="ja"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-TJ7/u1lAIvQydoO/wi6qdK3/VTjqTml7h2A6O5q9SfQ='; style-src 'sha256-uhekdjVoF8p0oG5Jys9SuRatxu3plo9h2Wexn3/9z4g=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-JGIjHbVoX349HKGKiOaQVvEifTW47d7TAfOXWZBDImg='; style-src 'sha256-uhekdjVoF8p0oG5Jys9SuRatxu3plo9h2Wexn3/9z4g=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
 <title>文字PVメーカー</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -12169,6 +12169,9 @@ MV.def('i18n/strings', [], () => ({
   'song.tapFrom': ['{n}行から・スペースで記録', 'From line {n} · Space marks'],
   'song.tapFromStart': ['1行目から・スペースで記録', 'From line 1 · Space marks'],
   'song.aiTiming': ['AIでタイミング', 'AI timing'],
+  'song.shiftAll': ['タイミングを全体でずらす', 'Shift all timings'],
+  'song.shiftBy': ['{d}秒', '{d} s'],
+  'song.shiftHint': ['全部の行を同じだけ早く（−）・遅く（＋）します', 'Moves every line earlier (−) or later (+)'],
   'song.aiNeedsSong': ['曲を読み込むと使えます', 'Load a song first'],
   'song.drop': ['曲を選ぶ（ここにドロップも可）', 'Choose a song (or drop it here)'],
   'song.formats': ['mp3・wav・m4a・ogg・flac', 'mp3 · wav · m4a · ogg · flac'],
@@ -12620,7 +12623,8 @@ MV.def('i18n/strings', [], () => ({
   'fld.none': ['なし', 'None'],
   'fld.more': ['{field}の操作', 'Options for {field}'],
   'fld.goOwner': ['固定元へ移動', 'Go to where it is pinned'],
-  'fld.inactiveWhy': ['部品が変わったため無効', 'Inactive because the part changed'],
+  'fld.inactiveWhy': ['構図などの部品が変わったので、今は使われていない設定です（× で消せます）', 'Not used: the part changed (× removes it)'],
+  'fld.ofPart': ['（{part}）', ' ({part})'],
   'fld.whyPrefix': ['なぜ: {why}', 'Why: {why}'],
   'fld.whyNone': ['自動の選択です', 'An automatic choice'],
 
@@ -48494,16 +48498,35 @@ MV.def('ai/direct', ['core/pins', 'core/paths', 'core/curve', 'core/shot', 'core
     + 'lyric (whip-in and spin-in happen before a line, whip-out and spin-out after it, jump and whip on hold follow the '
     + 'words). Lines marked cam=gentle take only pulse, shake or dutch; lines marked cam=none cannot move.';
 
+  // An interlude (間奏: the music between the lines, no words) as a cut area: its arrange is one of the interlude effects.
+  const SYSTEM_INTERLUDE = 'A line marked (interlude) is music without words: set its look with cuts[] (i 0, j 0). Its arrange '
+    + 'is one of the "Interlude effects" (never a lyric layout); pick one that fits the instruction and the music (bass / '
+    + 'beat / loudness). camera, lens, ground, atmos, ornaments and filters work as for lyrics.';
+  const SYSTEM_INTERLUDE_CAM = 'A line marked (interlude) is music without words: give it camerawork through cuts[] (i 0, j 0); '
+    + 'slow drifts and gentle pushes suit it, a strong move on a loud part.';
+
+  function isInterlude(cut) { return !!cut && cut.role === 'interlude'; }
+
+  // The interlude effects (arrange parts for interludes) as `key=name: blurb`, one per line.
+  function interludeText(registry, lang, doc) {
+    return registry.keys('arrange').filter((key) => {
+      const tr = registry.traits('arrange', key);
+      return !!tr && tr.roles.includes('interlude') && !isOff(doc, 'arrange', key);
+    }).map((key) => key + '=' + registry.label('arrange', key, lang) + ': ' + registry.blurb('arrange', key, lang)).join('\n');
+  }
+
   function outLang(lang) { return lang === 'en' ? 'English' : 'Japanese'; }
 
-  function systemText(mode, lang, media, extreme) {
+  function systemText(mode, lang, media, extreme, interlude) {
     const understood = 'If a brief is unclear or impossible, set understood=false for it and ask in "question".';
     const write = 'Write "summary" (one sentence) and "question" in ' + outLang(lang) + '.';
     if (mode === 'camera') {
       return SYSTEM.slice(0, 3).concat([SYSTEM_CURVES, SYSTEM_CAMERA, 'Locked lines keep their look.'],
-        extreme ? [SYSTEM_CAMERA_X, SYSTEM_CAMERA_XMODE] : [SYSTEM_CAMERA_MODE], [understood, write]).join('\n');
+        extreme ? [SYSTEM_CAMERA_X, SYSTEM_CAMERA_XMODE] : [SYSTEM_CAMERA_MODE], interlude ? [SYSTEM_INTERLUDE_CAM] : [],
+        [understood, write]).join('\n');
     }
-    return SYSTEM.concat([SYSTEM_CURVES, SYSTEM_CAMERA], SYSTEM_REST, media ? [SYSTEM_MEDIA] : [], [understood, write]).join('\n');
+    return SYSTEM.concat([SYSTEM_CURVES, SYSTEM_CAMERA], SYSTEM_REST, media ? [SYSTEM_MEDIA] : [], interlude ? [SYSTEM_INTERLUDE] : [],
+      [understood, write]).join('\n');
   }
 
   // The briefs that can be sent: at most 8, instructions flattened and cut to 300 characters, areas that still
@@ -48652,7 +48675,7 @@ MV.def('ai/direct', ['core/pins', 'core/paths', 'core/curve', 'core/shot', 'core
         return { j, key, text: cut ? cut.text : '' };
       });
       const text = line ? line.text : row.cut ? row.cut.text : '';
-      out.push(i + ': ' + text + ' · ' + lineState(ctx, row));
+      out.push(i + ': ' + (!line && isInterlude(row.cut) ? '(interlude) ' : '') + text + ' · ' + lineState(ctx, row));
       out.push('  cuts: ' + cuts.map((c) => c.j + ' ' + c.text).join(' / '));
       sent.push({ i, lineId: line ? line.id : null, n: line ? line.index + 1 : 0, text, locked: !!(line && line.locked), cuts });
     });
@@ -48660,7 +48683,7 @@ MV.def('ai/direct', ['core/pins', 'core/paths', 'core/curve', 'core/shot', 'core
     return { text: out.join('\n'), lines: sent };
   }
 
-  function listsText(ctx, anyWork) {
+  function listsText(ctx, anyWork, anyInterlude) {
     const { doc, registry, lang } = ctx;
     if (ctx.mode === 'camera') return 'Camera:\n' + (ctx.extreme ? CAT.cameraText(lang, { extreme: true }) : CAT.cameraText(lang));
     const parts = CAT.catalog(registry, doc, ['arrange', 'arrive', 'dwell', 'depart', 'ornament', 'ground', 'lens', 'filter', 'atmos'],
@@ -48672,6 +48695,7 @@ MV.def('ai/direct', ['core/pins', 'core/paths', 'core/curve', 'core/shot', 'core
     if (anyWork) out.push('', 'Themes:', CAT.themesText(registry, lang, doc), '', 'Moods: ' + CAT.moodsText(registry, lang));
     if (ctx.media.length) out.push('', RECIPE.mediaText(ctx.media));
     if (ctx.allowMaterials) out.push('', CAT.recipeText({ media: ctx.media.length > 0 }));
+    if (anyInterlude) out.push('', 'Interlude effects (arrange of an interlude only):', interludeText(registry, lang, doc));
     return out.join('\n');
   }
 
@@ -48704,12 +48728,13 @@ MV.def('ai/direct', ['core/pins', 'core/paths', 'core/curve', 'core/shot', 'core
         return b.text;
       });
       const anyWork = win.some((it) => it.area.kind === 'work');
-      const prompt = [LH.lookContext(doc, plan), '', texts.join('\n\n'), '', listsText(ctx, anyWork)].join('\n');
+      const anyInterlude = win.some((it) => it.area.kind === 'cut' && it.rows.some((r) => !r.line && isInterlude(r.cut)));
+      const prompt = [LH.lookContext(doc, plan), '', texts.join('\n\n'), '', listsText(ctx, anyWork, anyInterlude)].join('\n');
       const schema = directSchema({ mode, allowMaterials, media: media.length > 0, extreme });
       const sent = { window: k, windows: windows.length, mode, allowMaterials, uiLang: lang, media, briefs };
       if (extreme) sent.extreme = true;
       return {
-        system: systemText(mode, lang, media.length > 0, extreme), prompt, schema,
+        system: systemText(mode, lang, media.length > 0, extreme, anyInterlude), prompt, schema,
         effort: mode === 'camera' && !extreme ? 'low' : 'medium', sent,
       };
     });
@@ -48939,7 +48964,11 @@ MV.def('ai/direct', ['core/pins', 'core/paths', 'core/curve', 'core/shot', 'core
     const regKind = slot === 'atmos' ? 'ornament' : slot.replace(/#[0-9]$/, '');
     if (key.startsWith(MAT_PREFIX)) return materialRef(run, b, T, slot, key.slice(MAT_PREFIX.length), src);
     const def = run.registry.get(regKind, key);
-    const ok = slot === 'atmos' ? key === 'none' || (!!def && def.scope === 'run')
+    // an interlude's arrange is an interlude effect; a lyric layout never stands there (and the reverse)
+    const il = regKind === 'arrange' && T.scope === 'cut' && isInterlude(T.cut);
+    const roles = def ? (run.registry.traits(regKind, key) || { roles: [] }).roles : [];
+    const ok = il ? !!def && roles.includes('interlude')
+      : slot === 'atmos' ? key === 'none' || (!!def && def.scope === 'run')
       : !!def && CAT.servesLyrics(run.registry, regKind, key) && !(regKind === 'ornament' && def.scope === 'run');
     if (!ok) { run.warn(warnKind(T, slot === 'atmos' ? 'atmos' : regKind, key)); return null; }
     if (def && !CAT.inSeason(def, src.season)) { run.warn(seasonWarn(T, regKind, key)); return null; }
@@ -69100,9 +69129,34 @@ MV.def('ui/step_song', ['ui/dom', 'ui/icons', 'ui/header', 'ui/selection', 'i18n
       I.icon('tap'), h('span', { class: 'btn-main', text: t('song.tap') }), tapHint);
     const aiBtn = h('button', { class: 'chip-btn', type: 'button', 'data-act': 'ai.align', 'data-ctl': 'ai' },
       I.icon('ai', { size: 15 }), t('song.aiTiming'));
+    // タイミングを全体でずらす: every line moves by the same amount (AI timings that run a little late, say)
+    const shiftBtns = [-1, -0.1, 0.1, 1].map((d) => h('button', { class: 'btn small', type: 'button',
+      text: t('song.shiftBy', { d: (d < 0 ? '−' : '+') + Math.abs(d) }), on: { click: () => shiftAll(d) } }));
+    const shiftRow = h('div', { class: 'field', 'data-ctl': 'shift' },
+      h('label', { class: 'field-label', text: t('song.shiftAll') }),
+      h('div', { class: 'field-row' }, ...shiftBtns),
+      h('p', { class: 'note subtle', text: t('song.shiftHint') }));
     const root = h('div', { class: 'step step-song' },
       h('div', { class: 'step-head' }, h('h2', { class: 'step-title', text: t('song.title') })),
-      songBox, tempo, h('div', { class: 'snap-field' }, snapRow, snapWhy), tapBtn, aiBtn);
+      songBox, tempo, h('div', { class: 'snap-field' }, snapRow, snapWhy), tapBtn, aiBtn, shiftRow);
+
+    // The cut times pinned in seconds (a cut's start, an interlude's split points) move along with the lines.
+    function shiftAll(d) {
+      const p = app.plan;
+      if (!p || !p.lines.length) return;
+      const ids = p.lines.map((l) => l.id);
+      const delta = Math.max(d, -Math.min(...p.lines.map((l) => l.t0)));
+      if (Math.abs(delta) < 0.0005) return;
+      const base = Object.fromEntries(p.lines.map((l) => [l.id, { start: l.t0, end: l.t1 }]));
+      const cmds = [{ t: 'time.shift', lineIds: ids, delta, base }];
+      const move = (x) => Math.max(0, Math.round((x + delta) * 1000) / 1000);
+      for (const [path, pin] of Object.entries(app.doc.pins)) {
+        if (!path.startsWith('cut/') || !(path.endsWith(':t0') || path.endsWith(':parts')) || pin.by === 'lock') continue;
+        const v = Array.isArray(pin.v) ? pin.v.map(move) : typeof pin.v === 'number' ? move(pin.v) : null;
+        if (v !== null) cmds.push({ t: 'pin.set', path, v, by: pin.by, sig: typeof pin.sig === 'string' ? pin.sig : '' });
+      }
+      app.batch({ label: ['undo.shift', { n: ids.length }], mergeKey: 'shift:all' }, cmds);
+    }
 
     dom.on(root, 'click', '[data-act]', (ev, b) => app.actions.run(b.dataset.act, { from: 'song' }));
 
@@ -69258,6 +69312,7 @@ MV.def('ui/step_song', ['ui/dom', 'ui/icons', 'ui/header', 'ui/selection', 'i18n
       aiBtn.hidden = !app.view.state.prefs.ai;
       aiBtn.disabled = !app.doc.song;
       aiBtn.title = app.doc.song ? '' : t('song.aiNeedsSong');
+      for (const b of shiftBtns) b.disabled = !(app.plan && app.plan.lines.length);
     }
 
     app.bus.on('song', update);
@@ -73964,7 +74019,11 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       const args = {};
       for (const k of Object.keys(field.labelArgs || {})) args[k] = t(field.labelArgs[k]);
       if (field.labelText) args.name = field.labelText[t.lang] || field.labelText.ja || field.key;
-      return field.label ? t(field.label, args) : args.name || field.key;
+      const base = field.label ? t(field.label, args) : args.name || field.key;
+      // a pinned parameter of a part not shown here says whose it is: 音への反応（光の波形）
+      if (!field.pinnedOnly || !field.param || !field.param.key) return base;
+      const kind = field.param.kind === 'atmos' ? 'ornament' : field.param.kind;
+      return base + t('fld.ofPart', { part: app.label(kind, field.param.key) || field.param.key });
     }
 
     const listText = (items) => items.join(t('list.sep'));
@@ -74433,7 +74492,18 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       const meta = { label: ['undo.pin', { field: labelOf(field), scope: scopeLabel(ctx) }], where: { scope: ctx.scope, field: field.path } };
       if (o.mergeKey) meta.mergeKey = o.mergeKey;
       else if (o.merge) meta.mergeKey = 'field:' + row.path;
-      run(pathsOf(field, ctx).map((path) => pinCmd(path, value)), meta);
+      const paths = pathsOf(field, ctx);
+      const cmds = paths.map((path) => pinCmd(path, value));
+      // a setting of an interlude effect chosen automatically keeps that effect too: a later automatic pick (a split, a
+      // new song) would otherwise leave the setting unused (無効)
+      const prm = field.param;
+      if (prm && !prm.shared && prm.key && ctx.cut && ctx.cut.role === 'interlude' && !(row.fs && row.fs.state === 'inactive')) {
+        for (const path of paths) {
+          const part = path.slice(0, path.indexOf('@'));
+          if (path.indexOf('@') > 0 && !doc().pins[F.writePath(part, plan())]) cmds.push(pinCmd(part, prm.key));
+        }
+      }
+      run(cmds, meta);
       reportShadowed(row, ctx);
     }
 

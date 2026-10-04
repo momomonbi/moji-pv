@@ -469,6 +469,23 @@ test('cuts[k]: cut pins with the cut text as sig; the cut must still be there wi
   deepEqual(title.changes.map((x) => [x.path, x.cutSig, x.label[1].where]), [['cut/title:lens', '春を待つうた', ['crumb.title', {}]]]);
 });
 
+test('an interlude (間奏) as a cut area: it is marked, the interlude effects are listed, its arrange takes one of them', () => {
+  const key = PLAN.cuts.find((c) => c.role === 'interlude' && c.key.startsWith('gap/')).key;
+  const { req, changes, warnings } = direct(DOC, [{ kind: 'cut', key }], [ANSWER(0, { cuts: [CUT(0, 0, { arrange: 'neonWave' })] })]);
+  assert.match(req.prompt, /^0: \(interlude\) /m);
+  assert.match(req.prompt, /Interlude effects \(arrange of an interlude only\):\n(.+\n)*neonWave=光の波形: /);
+  assert.match(req.system, /\(interlude\) is music without words/);
+  assert.equal(byPath(changes)['cut/' + key + ':arrange'].to, 'neonWave');
+  assert.deepEqual(warnings, []);
+  // a lyric layout never stands on an interlude; an interlude effect never on a lyric line
+  const lyric = direct(DOC, [{ kind: 'cut', key }], [ANSWER(0, { cuts: [CUT(0, 0, { arrange: PLAN.cuts.find((c) => c.line).slots.arrange.v })] })]);
+  assert.equal(lyric.changes.length, 0);
+  assert.ok(hasWarn(lyric.warnings, 'ai.warn.lineUnknown'));
+  const line = direct(DOC, [CHORUS], [ANSWER(0, { all: ALL({ arrange: 'neonWave' }) })]);
+  assert.ok(!line.changes.some((c) => c.slot === 'arrange'));
+  assert.doesNotMatch(direct(DOC, [CHORUS], [ANSWER(0, {})]).req.prompt, /Interlude effects/);
+});
+
 test('work.*: the existing work kinds; checked for the whole video, unchecked in "outside" for an area', () => {
   const w = WORK({ theme: 'sumiWashi', amounts: Object.assign({}, KEEP_AMOUNTS, { camera: 0.2, motion: 0.3 }) });
   const area = direct(DOC, [CHORUS], [ANSWER(0, { work: w })]);
