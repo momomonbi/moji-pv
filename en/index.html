@@ -1,6 +1,6 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-y+RF7fmwDzftRMtAtGc334djiNBM7nbWe3XrjV/Ze6U='; style-src 'sha256-uhekdjVoF8p0oG5Jys9SuRatxu3plo9h2Wexn3/9z4g=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-43/4dvJEVfD+3dZBhnl2O36pUHNtCpjsX27yPESa144='; style-src 'sha256-uhekdjVoF8p0oG5Jys9SuRatxu3plo9h2Wexn3/9z4g=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
 <title>Moji PV Maker</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -6796,7 +6796,7 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
     row: ['id', 'src'],
     timing: ['snap', 'lead', 'tail', 'leadIn', 'outro', 'tapLatency'],
     song: ['name', 'sha1', 'seconds', 'bpm', 'offset', 'meter', 'bpmConfidence', 'digest', 'info'],
-    digest: ['hz', 'loud'],
+    digest: ['hz', 'loud', 'nb', 'bands'],
     look: ['seed', 'moodSeed', 'aspect', 'backdrop'],
     pin: ['v', 'by', 'sig'],
     lock: ['n'],
@@ -6915,6 +6915,8 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
     if (d !== null && (!isObject(d) || !isNumber(d.hz) || d.hz <= 0 || typeof d.loud !== 'string')) {
       bad('song.digest', 'must be { hz, loud: base64 } or null');
     }
+    if (isObject(d) && (d.bands !== undefined || d.nb !== undefined)
+      && (typeof d.bands !== 'string' || !Number.isInteger(d.nb) || d.nb < 1)) bad('song.digest.bands', 'must be base64 with nb ≥ 1');
     if (song.info !== null) for (const p of songInfoProblems(song.info)) bad('song.info' + p.where, p.what);
   }
 
@@ -9543,29 +9545,66 @@ MV.def('audio/digest', [], () => {
     return o === out.length ? out : out.subarray(0, o);
   }
 
-  // digest(analysis) → { hz: 20, loud: base64 }: the analysis envelope max-pooled to 20 Hz, as bytes 0..255.
-  function digest(analysis) {
-    const env = analysis.env;
-    const src = env.loud;
-    const count = Math.max(0, Math.ceil((src.length * HZ) / env.hz - 1e-9));
+  // A track max-pooled from its rate to 20 Hz, as bytes 0..255.
+  function pooled(src, hz) {
+    const count = Math.max(0, Math.ceil((src.length * HZ) / hz - 1e-9));
     const bytes = new Uint8Array(count);
     for (let j = 0; j < count; j++) {
-      const a = Math.floor((j * env.hz) / HZ + 1e-9);
-      const b = Math.min(src.length, Math.ceil(((j + 1) * env.hz) / HZ - 1e-9));
+      const a = Math.floor((j * hz) / HZ + 1e-9);
+      const b = Math.min(src.length, Math.ceil(((j + 1) * hz) / HZ - 1e-9));
       let m = 0;
       for (let i = a; i < b; i++) if (src[i] > m) m = src[i];
       bytes[j] = Math.round((m > 1 ? 1 : m) * 255);
     }
-    return { hz: HZ, loud: toBase64(bytes) };
+    return bytes;
   }
 
-  // envFromDigest(digest) → { hz, loud: Float32Array 0..1 }. This is what `plan.env` holds.
+  // digest(analysis) → { hz: 20, loud: base64, nb?, bands? }: the analysis envelope max-pooled to 20 Hz, as bytes
+  // 0..255, and the loudness of its nb spectrum bands (bass → treble) the same way, interleaved (sample j, band k at
+  // j·nb + k).
+  function digest(analysis) {
+    const env = analysis.env;
+    const out = { hz: HZ, loud: toBase64(pooled(env.loud, env.hz)) };
+    if (Array.isArray(env.bands) && env.bands.length) {
+      const per = env.bands.map((b) => pooled(b, env.hz)), nb = per.length, n = per[0].length;
+      const bytes = new Uint8Array(n * nb);
+      for (let j = 0; j < n; j++) for (let k = 0; k < nb; k++) bytes[j * nb + k] = per[k][j];
+      out.nb = nb;
+      out.bands = toBase64(bytes);
+    }
+    return out;
+  }
+
+  // envFromDigest(digest) → { hz, loud: Float32Array 0..1, nb?, bands? }. This is what `plan.env` holds. Bands that do
+  // not match the loudness in length are left out (an older digest has none).
   function envFromDigest(d) {
     if (!d || !(d.hz > 0) || typeof d.loud !== 'string') throw formatError('envFromDigest: expected { hz, loud: base64 }');
     const bytes = fromBase64(d.loud);
     const loud = new Float32Array(bytes.length);
     for (let i = 0; i < bytes.length; i++) loud[i] = bytes[i] / 255;
-    return { hz: d.hz, loud };
+    const out = { hz: d.hz, loud };
+    if (Number.isInteger(d.nb) && d.nb > 0 && typeof d.bands === 'string') {
+      const b = fromBase64(d.bands);
+      if (b.length === loud.length * d.nb) {
+        out.nb = d.nb;
+        out.bands = new Float32Array(b.length);
+        for (let i = 0; i < b.length; i++) out.bands[i] = b[i] / 255;
+      }
+    }
+    return out;
+  }
+
+  // band(env, k, t) → 0..1, the loudness of spectrum band k (0 the bass), as level reads the envelope; null when the
+  // envelope keeps no bands.
+  function band(env, k, t) {
+    if (!env || !env.bands) return null;
+    const nb = env.nb, n = env.loud.length, kk = Math.max(0, Math.min(nb - 1, k));
+    if (n === 0 || !(t >= 0) || t >= n / env.hz) return 0;
+    const u = t * env.hz - 0.5;
+    if (u <= 0) return env.bands[kk];
+    if (u >= n - 1) return env.bands[(n - 1) * nb + kk];
+    const i = Math.floor(u), a = env.bands[i * nb + kk];
+    return a + (env.bands[(i + 1) * nb + kk] - a) * (u - i);
   }
 
   // level(env, t) → 0..1. Sample i stands for the middle of its window, (i + 0.5) / hz; between samples the value is
@@ -9602,7 +9641,7 @@ MV.def('audio/digest', [], () => {
     };
   }
 
-  return { HZ, digest, envFromDigest, level, songRecord, toBase64, fromBase64 };
+  return { HZ, digest, envFromDigest, level, band, songRecord, toBase64, fromBase64 };
 });
 /* 文字PVメーカー v2 — original work. Radix-2 FFT: complex in-place transform and real-input magnitudes (DESIGN §4.13). */
 MV.def('audio/fft', [], () => {
@@ -9741,6 +9780,8 @@ MV.def('audio/analyze', ['audio/fft'], (fft) => {
   const FLUX_FLOOR = 10;           // spectral flux of a quiet noise floor: the smallest 99th percentile normalized to 1
   const MIN_ONSET = 0.1;           // a normalized 99th percentile below this means there are no onsets at all
   const DEFAULT_STEP = 1500;       // frames per yielded progress step (15 s of audio)
+  // Spectrum bands (Hz edges, bass → treble) whose loudness the song digest keeps for the analyzers of the interludes.
+  const BAND_EDGES = Object.freeze([30, 90, 180, 360, 720, 1440, 2880, 5760, 12000]);
 
   function inputError(message) {
     const e = new TypeError(message);
@@ -9834,6 +9875,14 @@ MV.def('audio/analyze', ['audio/fft'], (fft) => {
     const loud = new Float32Array(frames);
     const flux = new Float32Array(frames);
     const spectrum = createSpectrum();
+    const nb = BAND_EDGES.length - 1, binOf = (f) => Math.round((f * WIN) / sampleRate);
+    const blo = [], bhi = [];
+    for (let b = 0; b < nb; b++) {
+      const a = Math.min(spectrum.bins, Math.max(1, binOf(BAND_EDGES[b])));
+      blo.push(a);
+      bhi.push(Math.min(spectrum.bins, Math.max(a + 1, binOf(BAND_EDGES[b + 1]))));
+    }
+    const bands = Array.from({ length: nb }, () => new Float32Array(frames));
     let prev = new Float64Array(spectrum.bins);
     let cur = new Float64Array(spectrum.bins);
     spectrum.at(reader, Math.round((-1 * sampleRate) / HZ), prev);
@@ -9843,15 +9892,25 @@ MV.def('audio/analyze', ['audio/fft'], (fft) => {
       loud[k] = dbToUnit(meanSquare(reader, a, b));
       spectrum.at(reader, a, cur);
       flux[k] = fluxOf(prev, cur);
+      for (let b = 0; b < nb; b++) {
+        let sum = 0;
+        for (let i = blo[b]; i < bhi[b]; i++) sum += cur[i];
+        bands[b][k] = bhi[b] > blo[b] ? sum / (bhi[b] - blo[b]) : 0;
+      }
       const swap = prev; prev = cur; cur = swap;
       if ((k + 1) % step === 0 && k + 1 < frames) yield (0.9 * (k + 1)) / frames;
     }
     const strength = normalize(flux);
+    // each band scaled so its 99th percentile is 1: the bass and the treble move as much as one another
+    for (const band of bands) {
+      const ref = Math.max(percentile99(band), 1e-6);
+      for (let i = 0; i < band.length; i++) band[i] = Math.min(1, band[i] / ref);
+    }
     yield 0.9;
     const tempo = estimateTempo(strength, HZ);
     return {
       duration: n / sampleRate,
-      env: { hz: HZ, loud },
+      env: { hz: HZ, loud, bands },
       onset: { hz: HZ, strength },
       bpm: tempo.bpm,
       bpmConfidence: tempo.confidence,
@@ -12276,6 +12335,7 @@ MV.def('i18n/strings', [], () => ({
   'toast.close': ['閉じる', 'Close'],
   'toast.changed': ['{n}カットが変わりました', '{n} cut changed|{n} cuts changed'],
   'toast.lookCopied': ['見た目をコピーしました', 'Look copied'],
+  'song.bandsAdded': ['曲の音を細かく読み直しました（間奏の動きが低音・高音に合います）', 'Read the song again in detail: the interludes now follow its bass and treble'],
   'toast.gapSplitWhere': ['分けたい所まで再生位置を動かしてください（間奏の端から1秒以上）', 'Move the playhead to where it should split (at least 1 s from either end)'],
   'toast.unpinned': ['選んだ範囲の固定を外しました', 'Unpinned everything in the selection'],
   'toast.lockedNoReroll': ['ロック中の行は振り直せません', 'Locked lines cannot be rerolled'],
@@ -12874,6 +12934,7 @@ MV.def('i18n/strings', [], () => ({
   'undo.filter': ['使う{kind}', '{kind} to use'],
   'undo.lineText': ['行の歌詞', 'Line text'],
   'undo.reattach': ['固定の付け直し', 'Reattach pins'],
+  'undo.songBands': ['曲の音を細かく読み直す', 'Read the song\'s bands'],
   'undo.blockSplit': ['まとまりを分ける', 'Split a block'],
   'undo.blockJoin': ['まとまりをつなげる', 'Join blocks'],
   'undo.gapSplit': ['間奏を分ける', 'Split an interlude'],
@@ -18981,7 +19042,7 @@ MV.def('planner/look', ['core/hash', 'core/color', 'core/num', 'core/schema', 'c
   const envCache = new Map();
   function envOf(digest) {
     if (!digest || typeof digest.loud !== 'string' || !(digest.hz > 0)) return null;
-    const id = digest.hz + ':' + digest.loud;
+    const id = digest.hz + ':' + digest.loud + ':' + (digest.nb || 0) + ':' + (digest.bands || '');
     let env = envCache.get(id);
     if (env === undefined) {
       try { env = DG.envFromDigest(digest); } catch (e) { env = null; }
@@ -26285,6 +26346,12 @@ MV.def('engine/scene/frame', ['core/num', 'core/hash', 'core/noise', 'core/mat',
     return env ? DIG.level(env, t) : 0.5;
   }
 
+  // Loudness 0..1 of spectrum band k (0 the bass) at absolute time t; null when the song keeps no bands.
+  function bandAt(plan, k, t) {
+    const env = indexOf(plan).env;
+    return env ? DIG.band(env, k, t) : null;
+  }
+
   // floor(t·rate + 1e-6): stochastic looks change at a fixed rate, so every frame rate shows the same pattern.
   function tick(rate, t) { return Math.floor(t * rate + 1e-6); }
 
@@ -26591,7 +26658,7 @@ MV.def('engine/scene/frame', ['core/num', 'core/hash', 'core/noise', 'core/mat',
 
   return {
     IMPULSE_WINDOW, IMPULSE_TERMS, SHAKE_DU, PUNCH, FILTER_STAGES,
-    frameAt, currentCut, evaluate, cameraAt, viewMatrix, impulseAt, beatAt, gridAt, levelAt, tick, noiseAt,
+    frameAt, currentCut, evaluate, cameraAt, viewMatrix, impulseAt, beatAt, gridAt, levelAt, bandAt, tick, noiseAt,
     paletteFor, backdropFill, groundVisible, filterAllowed, segmentAt,
     rigAt, rigCamera, cutCamera, composeCamera, depthCam, DEPTH_ZOOM_MAX,
   };
@@ -30022,6 +30089,7 @@ MV.def('engine/scene/build', ['core/hash', 'core/rng', 'core/schema', 'engine/sc
       sb, text: svc.text, pal: svc.pal || plan.look.palette, faces: svc.faces || plan.look.faces,
       amounts: plan.look.amounts || {}, grid: F.gridAt(plan, origin),
       level: (tl) => F.levelAt(plan, origin + tl),
+      band: (k, tl) => F.bandAt(plan, k, origin + tl),
       envelope: (tl) => BH.envelopeWeight(tl, times.rest, times.out),
       hints: null, media, mixShare,
     };
@@ -34368,6 +34436,32 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
 
   function swellAt(d, t) { return d.song ? sampleAt(d.sw, d.L0, t) : 0.5; }
 
+  // The song's spectrum bands (env.band, 0 the bass … 7 the treble) from L0 to b at 20 Hz, each through a fast-attack
+  // follower and normalised to the window (p10…p97) like the loudness, so every band moves; null when the song keeps no
+  // bands (an older song: the analyzers then fall back to the loudness and the beat).
+  const NB = 8;
+  function bandTracks(env, L0) {
+    if (typeof env.band !== 'function' || env.band(0, 0) === null) return null;
+    const T = env.times, n = Math.ceil((T.b - L0) * HZ) + 2;
+    const ia = Math.max(0, Math.ceil((T.a - L0) * HZ)), ib = Math.min(n - 1, Math.floor((T.b - L0) * HZ));
+    const out = [];
+    for (let k = 0; k < NB; k++) {
+      const f = new Float32Array(n);
+      for (let i = 0; i < n; i++) {
+        const raw = env.band(k, L0 + i / HZ) || 0;
+        f[i] = i ? f[i - 1] + (raw - f[i - 1]) * (raw > f[i - 1] ? 0.85 : 0.3) : raw;
+      }
+      const win = Array.from(f.subarray(ia, ib + 1)).sort((x, y) => x - y);
+      const lo = percentile(win, 0.1), hi = percentile(win, 0.97), tr = new Float32Array(n);
+      for (let i = 0; i < n; i++) tr[i] = Math.pow(clamp((f[i] - lo) / Math.max(hi - lo, 0.08)), 1.2);
+      out.push(tr);
+    }
+    return out;
+  }
+
+  // Band k (0…7) at t from the tracks above.
+  function bandOf(d, k, t) { return sampleAt(d.B[k], d.BL0, t); }
+
   // --- 表現の強さ: how much the effect does, over the interlude ------------------------------------------------------
 
   // The `shape` param: 'auto', or five strengths 0…1 at the start, ¼, ½, ¾ and the end of the interlude (from the
@@ -34833,9 +34927,16 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     for (let k = 0; k <= d.nb; k++) {
       const edge = k <= full ? 1 : k === full + 1 ? part : 0;
       if (edge <= 0) { d.Bk[k] = 0; continue; }
-      const m = 0.75 + jag * (2 * noise1(d.nm, 0.35 * k + 0.5 * t) - 1);
-      const lv = d.song ? 0.2 + 0.8 * levelAt(d, t - k * d.pc / d.v) : levelAt(d, t - k * d.pc / d.v);   // a quiet passage still breathes
-      d.H[k] = d.hMin + d.hA * gain * d.taper[k] * (d.w[k] * m * lv + kick) * (1 - outK);
+      if (d.B) {
+        // with the song's bands: the middle bars are the bass, the outer ones each band up to the treble at the ends
+        const v = bandOf(d, Math.min(NB - 1, Math.floor((k / (d.nb + 1)) * NB)), t);
+        const m = 0.9 + 0.1 * (2 * noise1(d.nm, 0.35 * k + 0.5 * t) - 1);
+        d.H[k] = d.hMin + d.hA * gain * (0.35 + 0.65 * d.taper[k]) * 1.25 * d.w[k] * m * (0.08 + 0.92 * v) * (1 - outK);
+      } else {
+        const m = 0.75 + jag * (2 * noise1(d.nm, 0.35 * k + 0.5 * t) - 1);
+        const lv = d.song ? 0.2 + 0.8 * levelAt(d, t - k * d.pc / d.v) : levelAt(d, t - k * d.pc / d.v);   // a quiet passage still breathes
+        d.H[k] = d.hMin + d.hA * gain * d.taper[k] * (d.w[k] * m * lv + kick) * (1 - outK);
+      }
       // over the key every bar is solid (the taper stays in the height): only the growing edge bar fades in
       d.Bk[k] = Math.max(1, Math.round((d.solid ? 1 : 0.35 + 0.65 * d.taper[k]) * edge * BAR_BUCKETS));
     }
@@ -34936,6 +35037,7 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     for (let k = 0; k <= nb; k++) { w[k] = 0.55 + 0.45 * rm.next(); taper[k] = Math.pow(1 - (k / nb) * (k / nb), 0.9); }
     const tr = levelTrack(env, r, fr.a - 1.8);
     const st = strengthTrack(env, fr, tr, p.shape);
+    const B = tr.song ? bandTracks(env, fr.a - 1.8) : null;
     const hA = s * (wide ? 0.1 : 0.12) * (0.35 + 0.65 * p.react) * (tr.song ? 1 : 0.5);
     if (!tr.song) for (let k = 0; k <= nb; k++) w[k] = 0.775 + 0.5 * (w[k] - 0.775);   // a calm wave: bars closer in height
     const hl = Math.min(1.04 * Lh, D.w / 2 - D.safe.l);
@@ -34986,7 +35088,8 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     sb.paint({ layer: 'mid', bleed: 0, animated: true, owner: env.owner, draw: barsDraw,
       data: Object.assign(base, { Lh, pc, nb, hMin, hA, w, taper, hl, v: Lh / 1.8, bw: 0.42 * pc,
         barA: ink.chroma ? 1 : ink.light ? 0.8 : 0.85, solid: ink.chroma, lineA: ink.chroma ? 0.6 : 0.28,
-        nm: rm.int(1, SEED_MAX), reach, bt: bl.t, bd: bl.down, H: new Float32Array(nb + 1), Bk: new Uint8Array(nb + 1) }) });
+        nm: rm.int(1, SEED_MAX), reach, bt: bl.t, bd: bl.down, B, BL0: fr.a - 1.8, H: new Float32Array(nb + 1),
+        Bk: new Uint8Array(nb + 1) }) });
     return finish(env, fr, Lh, 2 * hA);
   }
 
@@ -35413,10 +35516,18 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
       if (j >= 0) kick = (d.bd[j] ? 1 : 0.7) * Math.exp(-(t - d.bt[j]) / 0.22);
     }
     for (let k = 0; k < WAVE_BUMPS; k++) {
-      d.A[k] = k === 0 ? d.hA * gain * (0.25 + 0.25 * lv + 0.8 * kick)
-        : d.hA * gain * d.amp[k] * (0.15 + 0.85 * levelAt(d, t - 0.06 * k)) * (0.35 + 0.65 * noise1(d.nk + k, d.rate[k] * t));
+      // with the song's bands: the left bump is the bass, each next one the next band up, the last the highest two
+      if (d.B) {
+        const v = k === 0 ? Math.max(bandOf(d, 0, t), bandOf(d, 1, t)) : k === WAVE_BUMPS - 1
+          ? Math.max(bandOf(d, NB - 2, t), bandOf(d, NB - 1, t)) : bandOf(d, k + 1, t);
+        d.A[k] = d.hA * gain * (k === 0 ? 1.2 : d.amp[k] * 1.4) * (0.06 + 0.94 * v);
+      } else {
+        d.A[k] = k === 0 ? d.hA * gain * (0.25 + 0.25 * lv + 0.8 * kick)
+          : d.hA * gain * d.amp[k] * (0.15 + 0.85 * levelAt(d, t - 0.06 * k)) * (0.35 + 0.65 * noise1(d.nk + k, d.rate[k] * t));
+      }
     }
-    const crackle = d.jit * (0.35 + 0.65 * lv) * gain;
+    const fizz = d.B ? 0.5 * (bandOf(d, NB - 2, t) + bandOf(d, NB - 1, t)) : lv;
+    const crackle = d.jit * (0.35 + 0.65 * fizz) * gain;
     for (let i = 0; i < WAVE_N; i++) {
       const u = i / (WAVE_N - 1);
       let y = 0;
@@ -35500,6 +35611,7 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     const Lh = Math.min(0.44 * D.w, D.w / 2 - D.safe.l - 0.01 * s);
     const tr = levelTrack(env, r, fr.a - 1);
     const st = strengthTrack(env, fr, tr, p.shape);
+    const B = tr.song ? bandTracks(env, fr.a - 1) : null;
     const hA = s * (wide ? 0.34 : 0.26) * (0.35 + 0.65 * p.react) * (tr.song ? 1 : 0.8);
     const base = Math.min(fr.cy + (wide ? 0.14 : 0.1) * D.h, D.h - D.safe.b - 0.75 * hA);
     const rb = r.fork('bumps');
@@ -35521,7 +35633,7 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     const shared = data(fr, { add: ink.add, chroma: ink.chroma, P, song: tr.song, L0: tr.L0, lv: tr.lv, sw: tr.sw, n1: tr.n1,
       n2: tr.n2, I: st.I, W: st.W, IA: st.IA, s, x0: fr.cx - Lh, len: 2 * Lh, base, hA, depth: 0.9 * hA, uc, wd, amp, rate,
       jit: 0.02 * s, dot: 0.014 * s, nk: rb.int(1, SEED_MAX - 16), nj: rb.int(1, SEED_MAX - 2),
-      bt: kicks.bt, bd: kicks.bd, A: new Float32Array(WAVE_BUMPS), Y: new Float32Array(WAVE_N) });
+      bt: kicks.bt, bd: kicks.bd, B, BL0: fr.a - 1, A: new Float32Array(WAVE_BUMPS), Y: new Float32Array(WAVE_N) });
     if (p.reflect && !ink.chroma) {
       sb.paint({ layer: 'far', bleed: 0, animated: true, owner: env.owner, draw: reflectDraw, data: Object.assign({}, shared) });
     }
@@ -35576,6 +35688,12 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     const lv = levelAt(d, t), gain = gainOf(d, t), kick = kickAt(d, t, 0.2);
     for (let i = 0; i < RING_N; i++) {
       const m = Math.min(i, RING_N - i), b = 1 - Math.abs((2 * i) / RING_N - 1);   // b: 0 at the top, 1 at the bottom
+      if (d.B) {
+        // with the song's bands: the bottom is the bass, the top the treble, both sides alike
+        const v = bandOf(d, Math.min(NB - 1, Math.floor((1 - b) * NB)), t);
+        d.L[i] = d.hA * gain * (0.05 + 1.05 * v * (0.92 + 0.08 * noise1(d.nk + m, 3 * t)));
+        continue;
+      }
       const hi = levelAt(d, t - 0.04 * (1 - b)) * (0.35 + 0.65 * noise1(d.nk + m, (1.5 + 4 * (1 - b)) * t));
       const lo = 0.25 * lv + 0.9 * kick;
       d.L[i] = d.hA * gain * (0.05 + (1 - b * b) * hi + b * b * lo);
@@ -35612,12 +35730,13 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     const tr = levelTrack(env, r, fr.a - 1);
     const st = strengthTrack(env, fr, tr, p.shape);
     const kicks = kicksOf(env, fr, tr, st, r, 0.3);
+    const B = tr.song ? bandTracks(env, fr.a - 1) : null;
     const R0 = 0.16 * s, hA = 0.15 * s * (0.35 + 0.65 * p.react) * (tr.song ? 1 : 0.8);
     const P = 'accent', core = ink.light || ink.chroma ? P : 'ink';
     env.sb.paint({ layer: 'mid', bleed: 0, animated: true, owner: env.owner, draw: ringDraw,
       data: data(fr, { add: ink.add, chroma: ink.chroma, P, song: tr.song, L0: tr.L0, lv: tr.lv, sw: tr.sw, n1: tr.n1, n2: tr.n2,
         I: st.I, W: st.W, IA: st.IA, s, R0, hA, spin: (r.next() < 0.5 ? -1 : 1) * 0.15, nk: r.int(1, SEED_MAX - RING_N),
-        passes: passesOf(ink, s, P, core), bt: kicks.bt, bd: kicks.bd, L: new Float32Array(RING_N) }) });
+        passes: passesOf(ink, s, P, core), bt: kicks.bt, bd: kicks.bd, B, BL0: fr.a - 1, L: new Float32Array(RING_N) }) });
     const ext = 2 * (R0 * 1.12 + 1.3 * hA);
     return finish(env, fr, ext, ext);
   }
@@ -75981,6 +76100,19 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
       idle();
     };
     const stillWanted = (sha1) => !!(app.doc.song && app.doc.song.sha1 === sha1 && app.bufferSha1 !== sha1);
+    // A song analysed before the spectrum bands were kept (no digest.bands) is read once more when its audio is back,
+    // so the analyzers of the interludes follow its bass and treble; the new analysis replaces the digest only.
+    const addBands = async (docSong, buffer) => {
+      if (!docSong || !docSong.digest || docSong.digest.bands) return;
+      try {
+        const analysis = await app.svc.songs.analyzeBuffer(buffer, {});
+        if (app.doc.song !== docSong) return;
+        const digest = MV.use('audio/digest').digest(analysis);
+        if (!digest.bands) return;
+        app.dispatch({ t: 'song.set', song: Object.assign({}, docSong, { digest }) }, { label: ['undo.songBands', {}] });
+        app.toast(t('song.bandsAdded'), { kind: 'ok' });
+      } catch (e) { /* the loudness alone stays */ }
+    };
     // Finds the song's audio by sha1 in IndexedDB; without it step ② asks to re-link it (§6.11).
     app.relinkSong = async (docSong) => {
       const songs = app.svc.songs;
@@ -75994,6 +76126,7 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
         if (decoded && stillWanted(sha1)) {
           app.setSongBuffer(decoded.buffer, sha1);
           app.peaks = peaksOf(decoded.buffer);
+          addBands(docSong, decoded.buffer);
         }
       } catch (e) { /* stays "missing" */ }
       if (linking === sha1) linking = null;
@@ -76027,6 +76160,7 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
         app.setSongBuffer(decoded.buffer, docSong.sha1);
         app.peaks = peaksOf(decoded.buffer);
         app.toast(t('song.relinked', { name: file.name }), { kind: 'ok' });
+        addBands(docSong, decoded.buffer);
       }
       idle();
       return linked;

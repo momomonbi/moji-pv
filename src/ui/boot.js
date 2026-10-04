@@ -497,6 +497,19 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
       idle();
     };
     const stillWanted = (sha1) => !!(app.doc.song && app.doc.song.sha1 === sha1 && app.bufferSha1 !== sha1);
+    // A song analysed before the spectrum bands were kept (no digest.bands) is read once more when its audio is back,
+    // so the analyzers of the interludes follow its bass and treble; the new analysis replaces the digest only.
+    const addBands = async (docSong, buffer) => {
+      if (!docSong || !docSong.digest || docSong.digest.bands) return;
+      try {
+        const analysis = await app.svc.songs.analyzeBuffer(buffer, {});
+        if (app.doc.song !== docSong) return;
+        const digest = MV.use('audio/digest').digest(analysis);
+        if (!digest.bands) return;
+        app.dispatch({ t: 'song.set', song: Object.assign({}, docSong, { digest }) }, { label: ['undo.songBands', {}] });
+        app.toast(t('song.bandsAdded'), { kind: 'ok' });
+      } catch (e) { /* the loudness alone stays */ }
+    };
     // Finds the song's audio by sha1 in IndexedDB; without it step ② asks to re-link it (§6.11).
     app.relinkSong = async (docSong) => {
       const songs = app.svc.songs;
@@ -510,6 +523,7 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
         if (decoded && stillWanted(sha1)) {
           app.setSongBuffer(decoded.buffer, sha1);
           app.peaks = peaksOf(decoded.buffer);
+          addBands(docSong, decoded.buffer);
         }
       } catch (e) { /* stays "missing" */ }
       if (linking === sha1) linking = null;
@@ -543,6 +557,7 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
         app.setSongBuffer(decoded.buffer, docSong.sha1);
         app.peaks = peaksOf(decoded.buffer);
         app.toast(t('song.relinked', { name: file.name }), { kind: 'ok' });
+        addBands(docSong, decoded.buffer);
       }
       idle();
       return linked;

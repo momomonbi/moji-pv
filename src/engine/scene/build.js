@@ -98,6 +98,7 @@ MV.def('engine/scene/build', ['core/hash', 'core/rng', 'core/schema', 'engine/sc
       sb, text: svc.text, pal: svc.pal || plan.look.palette, faces: svc.faces || plan.look.faces,
       amounts: plan.look.amounts || {}, grid: F.gridAt(plan, origin),
       level: (tl) => F.levelAt(plan, origin + tl),
+      band: (k, tl) => F.bandAt(plan, k, origin + tl),
       envelope: (tl) => BH.envelopeWeight(tl, times.rest, times.out),
       hints: null, media, mixShare,
     };

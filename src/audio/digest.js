@@ -53,29 +53,66 @@ MV.def('audio/digest', [], () => {
     return o === out.length ? out : out.subarray(0, o);
   }
 
-  // digest(analysis) → { hz: 20, loud: base64 }: the analysis envelope max-pooled to 20 Hz, as bytes 0..255.
-  function digest(analysis) {
-    const env = analysis.env;
-    const src = env.loud;
-    const count = Math.max(0, Math.ceil((src.length * HZ) / env.hz - 1e-9));
+  // A track max-pooled from its rate to 20 Hz, as bytes 0..255.
+  function pooled(src, hz) {
+    const count = Math.max(0, Math.ceil((src.length * HZ) / hz - 1e-9));
     const bytes = new Uint8Array(count);
     for (let j = 0; j < count; j++) {
-      const a = Math.floor((j * env.hz) / HZ + 1e-9);
-      const b = Math.min(src.length, Math.ceil(((j + 1) * env.hz) / HZ - 1e-9));
+      const a = Math.floor((j * hz) / HZ + 1e-9);
+      const b = Math.min(src.length, Math.ceil(((j + 1) * hz) / HZ - 1e-9));
       let m = 0;
       for (let i = a; i < b; i++) if (src[i] > m) m = src[i];
       bytes[j] = Math.round((m > 1 ? 1 : m) * 255);
     }
-    return { hz: HZ, loud: toBase64(bytes) };
+    return bytes;
   }
 
-  // envFromDigest(digest) → { hz, loud: Float32Array 0..1 }. This is what `plan.env` holds.
+  // digest(analysis) → { hz: 20, loud: base64, nb?, bands? }: the analysis envelope max-pooled to 20 Hz, as bytes
+  // 0..255, and the loudness of its nb spectrum bands (bass → treble) the same way, interleaved (sample j, band k at
+  // j·nb + k).
+  function digest(analysis) {
+    const env = analysis.env;
+    const out = { hz: HZ, loud: toBase64(pooled(env.loud, env.hz)) };
+    if (Array.isArray(env.bands) && env.bands.length) {
+      const per = env.bands.map((b) => pooled(b, env.hz)), nb = per.length, n = per[0].length;
+      const bytes = new Uint8Array(n * nb);
+      for (let j = 0; j < n; j++) for (let k = 0; k < nb; k++) bytes[j * nb + k] = per[k][j];
+      out.nb = nb;
+      out.bands = toBase64(bytes);
+    }
+    return out;
+  }
+
+  // envFromDigest(digest) → { hz, loud: Float32Array 0..1, nb?, bands? }. This is what `plan.env` holds. Bands that do
+  // not match the loudness in length are left out (an older digest has none).
   function envFromDigest(d) {
     if (!d || !(d.hz > 0) || typeof d.loud !== 'string') throw formatError('envFromDigest: expected { hz, loud: base64 }');
     const bytes = fromBase64(d.loud);
     const loud = new Float32Array(bytes.length);
     for (let i = 0; i < bytes.length; i++) loud[i] = bytes[i] / 255;
-    return { hz: d.hz, loud };
+    const out = { hz: d.hz, loud };
+    if (Number.isInteger(d.nb) && d.nb > 0 && typeof d.bands === 'string') {
+      const b = fromBase64(d.bands);
+      if (b.length === loud.length * d.nb) {
+        out.nb = d.nb;
+        out.bands = new Float32Array(b.length);
+        for (let i = 0; i < b.length; i++) out.bands[i] = b[i] / 255;
+      }
+    }
+    return out;
+  }
+
+  // band(env, k, t) → 0..1, the loudness of spectrum band k (0 the bass), as level reads the envelope; null when the
+  // envelope keeps no bands.
+  function band(env, k, t) {
+    if (!env || !env.bands) return null;
+    const nb = env.nb, n = env.loud.length, kk = Math.max(0, Math.min(nb - 1, k));
+    if (n === 0 || !(t >= 0) || t >= n / env.hz) return 0;
+    const u = t * env.hz - 0.5;
+    if (u <= 0) return env.bands[kk];
+    if (u >= n - 1) return env.bands[(n - 1) * nb + kk];
+    const i = Math.floor(u), a = env.bands[i * nb + kk];
+    return a + (env.bands[(i + 1) * nb + kk] - a) * (u - i);
   }
 
   // level(env, t) → 0..1. Sample i stands for the middle of its window, (i + 0.5) / hz; between samples the value is
@@ -112,5 +149,5 @@ MV.def('audio/digest', [], () => {
     };
   }
 
-  return { HZ, digest, envFromDigest, level, songRecord, toBase64, fromBase64 };
+  return { HZ, digest, envFromDigest, level, band, songRecord, toBase64, fromBase64 };
 });

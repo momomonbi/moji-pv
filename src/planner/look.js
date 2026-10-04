@@ -343,7 +343,7 @@ MV.def('planner/look', ['core/hash', 'core/color', 'core/num', 'core/schema', 'c
   const envCache = new Map();
   function envOf(digest) {
     if (!digest || typeof digest.loud !== 'string' || !(digest.hz > 0)) return null;
-    const id = digest.hz + ':' + digest.loud;
+    const id = digest.hz + ':' + digest.loud + ':' + (digest.nb || 0) + ':' + (digest.bands || '');
     let env = envCache.get(id);
     if (env === undefined) {
       try { env = DG.envFromDigest(digest); } catch (e) { env = null; }

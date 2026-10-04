@@ -171,6 +171,12 @@ MV.def('engine/scene/frame', ['core/num', 'core/hash', 'core/noise', 'core/mat',
     return env ? DIG.level(env, t) : 0.5;
   }
 
+  // Loudness 0..1 of spectrum band k (0 the bass) at absolute time t; null when the song keeps no bands.
+  function bandAt(plan, k, t) {
+    const env = indexOf(plan).env;
+    return env ? DIG.band(env, k, t) : null;
+  }
+
   // floor(t·rate + 1e-6): stochastic looks change at a fixed rate, so every frame rate shows the same pattern.
   function tick(rate, t) { return Math.floor(t * rate + 1e-6); }
 
@@ -477,7 +483,7 @@ MV.def('engine/scene/frame', ['core/num', 'core/hash', 'core/noise', 'core/mat',
 
   return {
     IMPULSE_WINDOW, IMPULSE_TERMS, SHAKE_DU, PUNCH, FILTER_STAGES,
-    frameAt, currentCut, evaluate, cameraAt, viewMatrix, impulseAt, beatAt, gridAt, levelAt, tick, noiseAt,
+    frameAt, currentCut, evaluate, cameraAt, viewMatrix, impulseAt, beatAt, gridAt, levelAt, bandAt, tick, noiseAt,
     paletteFor, backdropFill, groundVisible, filterAllowed, segmentAt,
     rigAt, rigCamera, cutCamera, composeCamera, depthCam, DEPTH_ZOOM_MAX,
   };
