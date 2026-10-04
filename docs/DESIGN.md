@@ -2528,7 +2528,7 @@ hides a longer tail, so the entrance then starts at 0.15 s as with the default t
 declares (§4.18: the beat grid and the loudness, both in the cut fingerprint, §3.12), and they never fake a tempo:
 with a song and a grid they react to the loudness and ripple, glint or recombine on the beats; with a song and no grid
 they follow the loudness's onsets; a bpm pin without a song gives beats but no loudness; with neither, the motion is
-slow and aperiodic. 表現の強さ (the `shape` param of all three, a graph of five points in the interlude's inspector):
+slow and aperiodic. 表現の強さ (the `shape` param of all three; no longer shown in the UI, kept for saved documents):
 自動 derives a strength over the interlude from the song's loudness swell (a little more for a quick tempo, a gentle
 build to the climax; without a song a slow arc); a drawn graph sets it, and a song adds ±0.12 of its swell. The
 strength scales what the effect does: how many motes show, how tall the horizon swells, how fast drifts and turns run (a

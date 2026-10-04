@@ -1,6 +1,6 @@
-/* 文字PVメーカー v2 — original work. Inspector widgets: part, choice, number, time, color, font, toggle, words, cutpoints, text, slots, curve, graph, shot, rig, partRefs, media, trim, crop, extreme (DESIGN §6.4.4; DESIGN_2_1 §6.5, §6.6, §11.7.4–§11.7.7; DESIGN_EXTREME §2.6). */
-MV.def('ui/widgets', ['ui/dom', 'ui/icons', 'i18n/t', 'core/color', 'ui/playbar', 'core/shot', 'ui/curve_widget', 'ui/media_widgets', 'ui/graph_widget'],
-  (dom, I, T, C, PB, SHOT, CW, MW, GW) => {
+/* 文字PVメーカー v2 — original work. Inspector widgets: part, choice, number, time, color, font, toggle, words, cutpoints, text, slots, curve, shot, rig, partRefs, media, trim, crop, extreme (DESIGN §6.4.4; DESIGN_2_1 §6.5, §6.6, §11.7.4–§11.7.7; DESIGN_EXTREME §2.6). */
+MV.def('ui/widgets', ['ui/dom', 'ui/icons', 'i18n/t', 'core/color', 'ui/playbar', 'core/shot', 'ui/curve_widget', 'ui/media_widgets'],
+  (dom, I, T, C, PB, SHOT, CW, MW) => {
   'use strict';
 
   const { h } = dom;
@@ -735,7 +735,7 @@ MV.def('ui/widgets', ['ui/dom', 'ui/icons', 'i18n/t', 'core/color', 'ui/playbar'
     };
   }
 
-  const MAKERS = { part, choice, number, time, color, font, toggle, words, cutpoints, text, slots, curve: CW.make, graph: GW.make, shot, rig, partRefs,
+  const MAKERS = { part, choice, number, time, color, font, toggle, words, cutpoints, text, slots, curve: CW.make, shot, rig, partRefs,
     media: MW.media, trim: MW.trim, crop: (field, env) => MW.crop(field, env, number), extreme };
 
   function make(field, env) {
