@@ -6,6 +6,7 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
 
   const { h } = dom;
   const EDGE_PX = 6;
+  const GAP_PART = /^gap\/.+~([2-9])$/;
   const SNAP_PX = 7;
   const DRAG_PX = 4;
   const ZOOM = 1.6;
@@ -246,6 +247,7 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
         const info = names.get(c.key);
         label(info.of > 1 ? t('il.namePart', { n: info.n, k: info.k }) : t('il.name', { n: info.n }), Math.max(x0, 0) + 4,
           (r[0] + r[1]) / 2, x1 - Math.max(x0, 0) - 8);
+        if (info.k > 1) edge(x0, r[0], r[1], 'pin', false);           // a part boundary: drag it left or right
       });
       p.lines.forEach((l, i) => {
         const x0 = xOf(l.t0), x1 = xOf(l.t1);
@@ -279,6 +281,7 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
         label((x ? t('shot.xBadge') : '') + (line ? line.index + 1 + '-' + k : t.label(S.crumbs({ level: 'cut', key: c.key }, p).slice(-1)[0].label)),
           x0 + 3, (r[0] + r[1]) / 2, x1 - x0 - 6, x ? COLORS.key : COLORS.muted);
         if (line && k > 1) edge(x0, r[0], r[1], app.doc.pins[F.writePath('cut/' + c.key + ':t0', p)] ? 'pin' : 'auto', false);
+        if (GAP_PART.test(c.key)) edge(x0, r[0], r[1], 'pin', false);
       });
       drawKeys(r);
     }
@@ -355,6 +358,11 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
       return 'ruler';
     }
 
+    // The start of an interlude part 2… (gap/<line>~k): the boundary set by 「再生位置で分ける」, draggable.
+    function partEdge(x) {
+      return app.plan.cuts.find((c) => GAP_PART.test(c.key) && Math.abs(x - xOf(c.t0)) <= EDGE_PX) || null;
+    }
+
     function hitAt(x, y) {
       const row = rowAt(y);
       const p = app.plan;
@@ -373,6 +381,8 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
           if (Math.abs(x - x0) <= EDGE_PX) return { row, line: l, edge: 'start' };
           if (Math.abs(x - x1) <= EDGE_PX) return { row, line: l, edge: 'end' };
         }
+        const part = partEdge(x);
+        if (part) return { row, cut: part, line: null, edge: 'part' };
         const l = p.lines.find((x2) => x >= xOf(x2.t0) && x < xOf(x2.t1));
         if (l) return { row, line: l, edge: null };
         const gap = p.cuts.find((c) => c.role === 'interlude' && x >= xOf(c.t0) && x < xOf(c.t1));
@@ -383,6 +393,8 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
           const line = c.line ? p.lines.find((l) => l.id === c.line) : null;
           if (line && line.cuts.indexOf(c.key) > 0 && Math.abs(x - xOf(c.t0)) <= EDGE_PX) return { row, cut: c, line, edge: 'inner' };
         }
+        const part = partEdge(x);
+        if (part) return { row, cut: part, line: null, edge: 'part' };
         const c = p.cuts.find((x2) => x >= xOf(x2.t0) && x < xOf(x2.t1));
         return c ? { row, cut: c, line: c.line ? p.lines.find((l) => l.id === c.line) : null } : { row };
       }
@@ -456,6 +468,22 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
         const i = hit.line.cuts.indexOf(hit.cut.key);
         const lo = cuts[i - 1].t0 + MIN_LEN, hi = hit.cut.t1 - MIN_LEN;
         pinTime('cut/' + hit.cut.key + ':t0', Math.max(lo, Math.min(hi, snapTime(tt, null, ev.altKey))));
+      } else if (hit.edge === 'part') {
+        // the boundary's entry in cut/gap/<line>:parts moves between the part before and the part's own end (1 s clear)
+        if (!press.part) {
+          const m = GAP_PART.exec(hit.cut.key), base = hit.cut.key.slice(0, -2), k = Number(m[1]);
+          const path = 'cut/' + base + ':parts', pin = app.doc.pins[path];
+          const list = pin && Array.isArray(pin.v) ? pin.v.slice().sort((a, b) => a - b) : [];
+          const prev = app.plan.cuts.find((c) => c.key === (k === 2 ? base : base + '~' + (k - 1)));
+          const i = list.findIndex((x) => Math.abs(x - hit.cut.t0) < 0.005);
+          if (!prev || i < 0) return;
+          press.part = { path, list, i, lo: prev.t0 + 1.001, hi: hit.cut.t1 - 1.001 };
+        }
+        const { path, list, i, lo, hi } = press.part;
+        if (hi < lo) return;
+        const next = list.slice();
+        next[i] = Math.round(Math.max(lo, Math.min(hi, snapTime(tt, null, ev.altKey))) * 1000) / 1000;
+        pinTime(path, next);
       }
     }
 
@@ -481,11 +509,12 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
         dragTo(pt, ev);
         return;
       }
-      const draggable = press.range || (press.hit.line && press.hit.row === 'line') || press.hit.edge === 'inner';
+      const draggable = press.range || (press.hit.line && press.hit.row === 'line') || press.hit.edge === 'inner' || press.hit.edge === 'part';
       if (!draggable) return;
       if (!press.moved) {
         press.moved = true;
-        startGesture(press.range ? 'range' : 'time', press.range ? 'range' : (press.hit.line ? press.hit.line.id : '') + (press.hit.edge || 'body'));
+        startGesture(press.range ? 'range' : 'time', press.range ? 'range'
+          : (press.hit.line ? press.hit.line.id : press.hit.cut ? press.hit.cut.key : '') + (press.hit.edge || 'body'));
       }
       dragTo(pt, ev);
     });
