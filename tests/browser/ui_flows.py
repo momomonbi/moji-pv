@@ -1405,11 +1405,16 @@ async def try_auto_and_reroll(f, info):
     await f.until("() => !window.__mv.shell.stage.hasAlt()", 'leaving the browser ends the try-on')
     await f.settle(3)
     done = await page.evaluate(DONE)
+    was = await page.evaluate("(k) => window.__mv.plan.cuts.find((x) => x.key === k).slots.arrive.v", info['key'])
     await page.click(ROW % 'arrive' + ' [data-role="dice"]')
-    await f.until('(p) => !window.__mv.doc.pins[p]', '[d] clears the pin where it is stored', stored)
+    await f.until("""(o) => { const a = window.__mv, pin = a.doc.pins[o.p];
+      return (!pin || pin.v !== o.was) && a.plan.cuts.find((x) => x.key === o.k).slots.arrive.v !== o.was; }""",
+                  '[d] clears the pin where it is stored and shows another 入り', {'p': stored, 'was': was, 'k': info['key']})
     s = await page.evaluate("""(k) => { const a = window.__mv;
-      return { from: a.plan.cuts.find((x) => x.key === k).slots.arrive.from, salts: a.doc.salts }; }""", info['key'])
-    f.check(s['from'] == 'auto' and s['salts'] == {'cut/%s:arrive' % info['key']: 1}, '[d] = unpin + reroll of the displayed cut: %r' % s)
+      return { arrive: a.plan.cuts.find((x) => x.key === k).slots.arrive, salts: a.doc.salts }; }""", info['key'])
+    key = 'cut/%s:arrive' % info['key']
+    f.check(list(s['salts']) == [key] and s['salts'][key] >= 1 and s['arrive']['v'] != was,
+            '[d] = unpin + reroll of the displayed cut until another 入り shows: %r' % s)
     f.check(await page.evaluate(DONE) == done + 1, '[d] is one undo entry')
 
 
@@ -5021,6 +5026,54 @@ async def flow_subtitles(f, lang):
     f.check(dl.suggested_filename == want['name'] and Path(await dl.path()).read_bytes() == raw, 'the download is the same file: %r' % dl.suggested_filename)
 
 
+async def flow_dice(f, lang):
+    """[d] always changes what its row shows (a line whose second screen effect an AI pick raised, as in a user's
+    project): 種類 shows another effect, still shown, as one undo entry; a number the amounts keep in a narrow band
+    jumps by at least a fifth of its automatic range; a choice takes another option; 数, fixed by the effects it
+    holds, says so instead of doing nothing."""
+    page = f.page
+    await with_lyrics(f)
+    line = await page.evaluate("""() => { const p = window.__mv.plan;
+      return p.lines.find((l) => l.cuts.length && p.cuts.find((c) => c.key === l.cuts[0]).role === 'lyric').id; }""")
+    await page.evaluate("""(id) => { const a = window.__mv;
+      a.batch({ label: ['undo.pin', { field: 'x', scope: 'y' }] }, [
+        { t: 'pin.set', path: 'work:amount.chroma', v: 0.45, by: 'ai' }, { t: 'pin.set', path: 'work:amount.glitch', v: 0.2, by: 'ai' },
+        { t: 'pin.set', path: 'line/' + id + ':filter#0', v: 'sliceGlitch', by: 'ai' },
+        { t: 'pin.set', path: 'line/' + id + ':filter#1', v: 'chromaSlip', by: 'ai' }]);
+      a.store.seal();
+      a.openPanel('details');
+      a.select({ level: 'el', scope: 'line/' + id, el: 'filter', idx: 1 }, { open: true }); }""", line)
+    await f.settle(3)
+    shown = """(id) => { const p = window.__mv.plan;
+      return p.cuts.filter((c) => c.line === id).map((c) => c.slots['filter#1'] ? { v: c.slots['filter#1'].v, p: c.slots['filter#1'].p } : null); }"""
+    dice = '[data-mount="inspector"] .frow[data-slot="%s"] [data-role="dice"]'
+    before = await page.evaluate(shown, line)
+    if not f.check(all(x and x['v'] == 'chromaSlip' for x in before), 'the AI pick shows on every cut: %r' % before):
+        return
+    done = await page.evaluate(DONE)
+    await page.click(dice % 'filter#1')
+    await f.settle(3)
+    after = await page.evaluate(shown, line)
+    f.check(all(x and x['v'] not in ('chromaSlip', 'sliceGlitch', 'none') for x in after),
+            '種類 [d] shows another effect, still shown: %r' % after)
+    f.check(await page.evaluate(DONE) == done + 1, '種類 [d] is one undo entry')
+    await page.evaluate("() => window.__mv.actions.run('edit.undo')")
+    await f.settle(3)
+    f.check(await page.evaluate(shown, line) == before, 'undo brings the AI pick back')
+    await page.click(dice % 'filter#1@chromaSlip.spread')
+    await f.settle(3)
+    spread = [x['p']['spread'] for x in await page.evaluate(shown, line)]
+    f.check(all(abs(v - b['p']['spread']) >= (16 - 5) * 0.2 - 1e-9 for v, b in zip(spread, before)),
+            'ずれ幅 [d] jumps by a fifth of its automatic range at least: %r → %r' % ([b['p']['spread'] for b in before], spread))
+    await page.click(dice % 'filter#1.when')
+    await f.settle(3)
+    when = [x['p']['when'] for x in await page.evaluate(shown, line)]
+    f.check(all(w != b['p']['when'] for w, b in zip(when, before)), '効くとき [d] takes another option: %r' % when)
+    await page.click(dice % 'filter.count')
+    await f.until("(k) => [...document.querySelectorAll('.toast-text')].some((x) => x.textContent === window.__mv.t(k))",
+                  '数 [d] says the effects it holds decide it', 'toast.diceCount')
+
+
 FLOWS = [('first_run', flow_first_run_mouse, True), ('first_run_keys', flow_first_run_keys, True), ('drill', flow_drill, False),
          ('pin', flow_pin, False), ('lock', flow_lock, False), ('history', flow_history, False), ('tools', flow_tools, False),
          ('keys', flow_keys, False), ('values', flow_values, False), ('ai_prep', flow_ai_prep, False),
@@ -5035,6 +5088,8 @@ FLOWS += [('curve', flow_curve, False), ('keyframes', flow_keyframes, False), ('
           ('materials', flow_materials, False), ('material_scope', flow_material_scope, False)]
 # 「くり返しの行をそろえる」 (DESIGN_2_1 §4.10)
 FLOWS += [('repeat', flow_repeat, False)]
+# [d] always changes what its row shows
+FLOWS += [('dice', flow_dice, False)]
 # v2.1 photos and videos (package G.4, DESIGN_2_1 §11.8.3).
 FLOWS += [('media', flow_media, True), ('library', flow_library, False), ('missing', flow_missing, False), ('package', flow_package, False),
           ('media_device', flow_media_device, False), ('media_song', flow_media_song, False)]
