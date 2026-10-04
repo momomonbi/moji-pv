@@ -1315,3 +1315,7 @@ details.ai-group > summary { cursor: pointer; list-style-position: inside; }
 .frow[data-field*="/cam.extreme.power"] .fr-top > :not(.fr-label):not(.grow) { display: none; }
 .ai-direct .ai-edit-row > [data-tool="direct"] { margin-left: auto; }
 .pb-tile.pb-in-group .pb-badge { font-size: 12px; font-weight: 800; }
+.il-list { display: flex; flex-direction: column; gap: 12px; }
+.il-name { align-self: flex-start; font-weight: 600; margin-bottom: 4px; }
+.il-row { display: flex; flex-direction: column; }
+.il-fx { margin-bottom: 6px; }
