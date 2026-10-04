@@ -273,6 +273,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
       ];
     }
     const cutHasLine = (ctx) => !!(ctx.cut && ctx.cut.line);
+    const IL_SHAPES = ['lightMotes', 'soundHorizon', 'kineticShapes'].map((key) => 'arrange@' + key + '.shape');
 
     // --- pages ----------------------------------------------------------------------------------------------------
 
@@ -291,6 +292,10 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
           F({ path: REPEAT_SAME, scopes: WORK, widget: 'toggle', label: 'fld.repeatSame', spec: { type: 'bool' },
             note: 'fld.repeatSame.note', offClears: true, noDice: true }),
         ]),
+        // 間奏の強さ for every interlude of the work: one graph, written to the three interlude effects at once
+        sec('ilwork', true, [F({ path: IL_SHAPES[0], also: IL_SHAPES.slice(1), scopes: WORK, widget: 'graph',
+          label: 'fld.ilShapeAll', spec: { type: 'text', max: 60 } })],
+        { when: (ctx) => !!(ctx.plan && ctx.plan.cuts && ctx.plan.cuts.some((c) => c.role === 'interlude')) }),
         // 写真・動画 (DESIGN_2_1 §11.7.3): the library, open when it holds something.
         sec('media', (ctx) => ctx.mediaCount > 0, [], { custom: 'media' }),
         sec('colors', false, C.TOKENS.map((tok) => F({ path: 'color.' + tok, scopes: WORK, widget: 'color',
@@ -701,7 +706,15 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
       if (field.lineOf) return ctx.cut && ctx.cut.line ? ['line/' + ctx.cut.line + ':' + field.path] : [];
       if (field.firstCut && ctx.lineIds.length) return ctx.lineIds.map((id) => firstCutScope(ctx, id) + ':' + field.path);
       if (ctx.page === 'lines') return ctx.lineIds.map((id) => 'line/' + id + ':' + field.path);
-      return [ctx.scope + ':' + field.path];
+      if (!field.also) return [ctx.scope + ':' + field.path];
+      // `also`: more slots the same row writes at the same scope (間奏の強さ for every interlude effect at once); the
+      // slots of parts the plan uses come first, so the row shows the state of one that is in use
+      const used = (slot) => {
+        const part = partOfSlot(slot), cuts = ctx.plan && Array.isArray(ctx.plan.cuts) ? ctx.plan.cuts : [];
+        return !!part && cuts.some((c) => c.slots && c.slots[part.kind] && c.slots[part.kind].v === part.key);
+      };
+      const slots = [field.path].concat(field.also);
+      return slots.filter(used).concat(slots.filter((x) => !used(x))).map((p) => ctx.scope + ':' + p);
     }
 
     // clearPathsFor(field, ctx) → the paths × / Del may clear: pathsFor, plus (firstCut fields) the line-scope pin of
