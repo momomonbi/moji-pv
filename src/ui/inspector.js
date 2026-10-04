@@ -523,8 +523,14 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       if (field.cmd) { commitCmd(field, v, ctx); return; }
       if (field.widget === 'extreme') { commitExtreme(row, v); return; }
       if (field.textFill !== undefined) { run(textFillCmds(row, v), { label: ['undo.pin', { field: labelOf(field), scope: scopeLabel(ctx) }] }); return; }
-      // なし on a source whose automatic value is none is 自動 (photoPan without a picture is the plain ground)
-      if (field.widget === 'media' && v === '' && field.spec && field.spec.auto && field.spec.auto.value === '') { unpin(row); return; }
+      // なし on a source whose automatic value is none is 自動 (photoPan without a picture is the plain ground); when the
+      // picture comes from the line or the whole video, なし turns that part off here (無地 for a background)
+      if (field.widget === 'media' && v === '' && field.spec && field.spec.auto && field.spec.auto.value === '') {
+        const off = mediaOffCmds(row);
+        if (off.length) run(off, { label: ['undo.unpinField', { field: labelOf(field) }], where: { scope: ctx.scope, field: field.path } });
+        else unpin(row);
+        return;
+      }
       const value = valueFor(field, v, row.fs);
       if (value === W.AUTO) { unpin(row); return; }
       const o = opts || {};
@@ -562,12 +568,29 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
 
     // 文字の中に写真・動画 (DESIGN_2_1 §11.7.4): a picture pins the textFill part on the row's slot too; なし clears the
     // picture and the textFill pin this row made.
-    // Whether a wider scope (the cut's line, the whole video) puts textFill in `slot` where `path` is written.
-    function inheritedFill(path, slot) {
+    // Whether a wider scope (the cut's line, the whole video) puts part `key` in `slot` where `path` is written.
+    function inheritedPart(path, slot, key) {
       const sc = P.parse(path).scope, wider = [];
       if (sc.kind === 'cut' && sc.lineId) wider.push('line/' + sc.lineId);
       if (sc.kind !== 'work') wider.push('work');
-      return wider.some((w) => { const pin = doc().pins[w + ':' + slot]; return !!pin && pin.v === 'textFill'; });
+      return wider.some((w) => { const pin = doc().pins[w + ':' + slot]; return !!pin && pin.v === key; });
+    }
+    function inheritedFill(path, slot) { return inheritedPart(path, slot, 'textFill'); }
+
+    // なし on a picture placed by a wider scope: the part is turned off where the row writes (a background becomes 無地,
+    // a decoration or overlay none) and the row's own picture pins go. [] when no wider scope places it.
+    function mediaOffCmds(row) {
+      const m = row.field.media;
+      if (!m || !m.slot) return [];
+      const cmds = [];
+      for (const path of pathsOf(row.field, page.ctx)) {
+        const partPath = P.scopeKey(path) + ':' + m.slot;
+        const part = doc().pins[F.writePath(partPath, plan())];
+        if ((part && part.by === 'lock') || !inheritedPart(path, m.slot, m.key)) continue;
+        cmds.push(...removablePaths([F.writePath(path, plan())]).map((x) => ({ t: 'pin.clear', path: x })));
+        cmds.push(pinCmd(partPath, m.kind === 'ground' ? 'flatFill' : 'none'));
+      }
+      return cmds;
     }
 
     function textFillCmds(row, v) {
