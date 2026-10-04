@@ -1241,8 +1241,11 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
         const scope = ctx.scope;
         const chips = [];
         const count = (kind) => { const d = F.decisionsOf(ctx, kind + '.count'); return d.length ? Math.max(...d.map((x) => x.v || 0)) : 0; };
+        // an interlude's camera is on its own page, and its words (none, or the ♪ of 間の印) are not an element of it
+        const il = !!(ctx.cut && ctx.cut.role === 'interlude');
         for (const el of ELEMENTS) {
           if (el === 'seam' && ctx.scopeKind !== 'cut') continue;
+          if (il && (el === 'lens' || (el === 'text' && F.agreedKey(ctx, 'arrange') !== 'breathMark'))) continue;
           const n = el === 'ornament' || el === 'filter' ? count(el) : null;
           chips.push(h('button', { class: 'chip', type: 'button', 'data-el': el,
             on: { click: () => app.select(Object.assign({ level: 'el', scope, el }, n !== null ? { idx: 0 } : {}), { from: 'crumbs' }) } },

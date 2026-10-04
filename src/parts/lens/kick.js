@@ -70,7 +70,7 @@ MV.def('parts/lens/kick', ['parts/kit'], (K) => {
     label: L('手持ち', 'Hand held'),
     blurb: L('手で持ったカメラのように、決まった揺れが小さく続く', 'Small seeded wandering, like a camera held by hand'),
     tags: ['organic'], family: 'shake',
-    traits: { energy: [0.2, 1] },
+    traits: { energy: [0.2, 1], roles: ['lyric', 'focus', 'title', 'interlude', 'outro'] },
     params: {
       sway: { type: 'num', min: 1, max: 60, step: 0.5, unit: 'du', label: L('揺れ幅', 'Sway'),
         auto: { range: [7, 16], follow: 'energy' } },
@@ -93,7 +93,7 @@ MV.def('parts/lens/kick', ['parts/kit'], (K) => {
     blurb: L('拍ごとに少し寄ってすぐ戻る', 'A small punch-in on every beat'),
     tags: ['fast', 'bold'], family: 'beat', needs: ['beats'], warp: false, shared: LOCKED_CURVE,
     fits: (f) => (f.beat ? 1.3 : 0),
-    traits: { energy: [0.35, 1], roles: ['lyric', 'focus', 'interlude'] },
+    traits: { energy: [0.35, 1], roles: ['lyric', 'focus', 'interlude', 'outro'] },
     params: {
       punch: { type: 'num', min: 0, max: 0.2, step: 0.005, unit: 'x', label: L('寄り', 'Punch'),
         auto: { range: [0.015, 0.06], follow: 'amount.camera' } },
@@ -118,7 +118,7 @@ MV.def('parts/lens/kick', ['parts/kit'], (K) => {
     label: L('衝撃', 'Impact kick'),
     blurb: L('歌い出しで鋭く寄り、画面が揺れて収まる', 'A sharp punch-in and a shake right at the sung start'),
     tags: ['hard', 'bold'], family: 'shake', warp: false, shared: LOCKED_CURVE,
-    traits: { energy: [0.35, 1], impact: true },
+    traits: { energy: [0.35, 1], impact: true, roles: ['lyric', 'focus', 'interlude', 'outro'] },
     fits: (f) => (f.impact ? 1 : 0.25),                   // mostly for `!` lines (×6 there); rare on plain ones
     params: {
       kick: { type: 'num', min: 0.02, max: 0.3, step: 0.005, unit: 'x', label: L('寄り', 'Kick'),

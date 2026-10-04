@@ -159,7 +159,7 @@ MV.def('parts/lens/glide', ['parts/kit'], (K) => {
     label: L('回り込み', 'Parallax orbit'),
     blurb: L('カメラが回り込むように動き、奥と手前の層がずれていく', 'The layers slide against each other as if the camera circles the words'),
     tags: ['airy'], family: 'orbit', frames: true, warp: false,
-    traits: { energy: [0.1, 0.85], roles: ['lyric', 'focus', 'title', 'outro'] },
+    traits: { energy: [0.1, 0.85], roles: ALL_ROLES },
     shared: moveCurve('sineInOut'),
     params: {
       radius: { type: 'num', min: 0.01, max: 0.15, step: 0.005, unit: 'frac', label: L('半径', 'Radius'),
@@ -182,7 +182,7 @@ MV.def('parts/lens/glide', ['parts/kit'], (K) => {
     label: L('傾き揺れ', 'Roll sway'),
     blurb: L('カメラがゆりかごのようにゆっくり左右へ傾く', 'The camera rocks gently from side to side like a cradle'),
     tags: ['soft', 'playful'], family: 'roll',
-    traits: { energy: [0, 0.8] },
+    traits: { energy: [0, 0.8], roles: ALL_ROLES },
     params: {
       angle: { type: 'num', min: 0.2, max: 6, step: 0.1, unit: 'deg', label: L('傾き', 'Angle'),
         auto: { range: [0.8, 2], follow: 'energy' } },

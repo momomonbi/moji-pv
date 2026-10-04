@@ -239,6 +239,8 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
 
     const isInnerCut = (ctx) => !!(ctx.cut && ctx.cut.line && P.cutOffset(ctx.cut.key) > 0);
     const isRole = (role) => (ctx) => !!(ctx.cut && ctx.cut.role === role);
+    // An interlude shows no words (but 間の印 shows its ♪): its page leaves out the rows about words.
+    const hasWords = (ctx) => !isRole('interlude')(ctx) || agreedKey(ctx, 'arrange') === 'breathMark';
 
     // v2.1 rows (DESIGN_2_1 §6.5): motion speed, camerawork and its closeness / curve / follow, the section camera.
     const speedField = () => F({ path: 'motion.speed', widget: 'number', label: 'fld.motionSpeed', spec: SPEC.speed, scale: 100 });
@@ -375,9 +377,12 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
             when: (ctx) => isRole('interlude')(ctx) && agreedKey(ctx, 'arrange') === 'breathMark' }),
         ]),
         sec('layout', true, [partField('arrange', 'kind.arrange'),
-          F({ path: 'el.text.nudge', widget: 'number', label: 'fld.nudge', spec: SPEC.nudge }), textScaleField()]),
+          F({ path: 'el.text.nudge', widget: 'number', label: 'fld.nudge', spec: SPEC.nudge, when: hasWords }),
+          Object.assign(textScaleField(), { when: hasWords })]),
+        // an interlude has no words to follow: its camera (shake and camerawork) sits on its own page
+        sec('ilcam', true, [partField('lens', 'fld.camShake'), shotField()], { when: isRole('interlude') }),
         sec('motion', true, [partField('arrive', 'kind.arrive'), partField('dwell', 'kind.dwell'), partField('depart', 'kind.depart'),
-          speedField()]),
+          speedField()], { when: hasWords }),
         sec('seam', true, [partField('seam', 'kind.seam')]),
         sec('elements', true, [], { custom: 'elements' }),
         sec('ai', false, [], { custom: 'ai', when: (ctx) => !!(ctx.cut && ctx.cut.line) }),

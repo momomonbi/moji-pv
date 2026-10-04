@@ -1,6 +1,6 @@
 <!doctype html><html lang="ja"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-JGIjHbVoX349HKGKiOaQVvEifTW47d7TAfOXWZBDImg='; style-src 'sha256-uhekdjVoF8p0oG5Jys9SuRatxu3plo9h2Wexn3/9z4g=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-JSEoTI8Dp2KYQOGuiyi3r6oFbuhB3ySbOjj9/srLZro='; style-src 'sha256-uhekdjVoF8p0oG5Jys9SuRatxu3plo9h2Wexn3/9z4g=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
 <title>文字PVメーカー</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -13439,6 +13439,8 @@ MV.def('i18n/strings', [], () => ({
   'ai.warn.repeatSame': ['くり返しの行は1回目にそろうので、2回目以降への変更{n}件は1回目の変更にまかせました',
     'Lines sung again follow their first copy, so {n} change to a later copy was left to the first copy\'s|Lines sung again follow their first copy, so {n} changes to later copies were left to the first copy\'s'],
   'sec.camwork': ['カメラワーク', 'Camerawork'],
+  'sec.ilcam': ['カメラ', 'Camera'],
+  'fld.camShake': ['揺れ・動き', 'Shake and motion'],
   'sec.camtexture': ['揺れ・質感', 'Shake and texture'],
   'sec.rig': ['区画のカメラ', 'Section camera'],
   'sec.materials': ['マイ素材', 'My materials'],
@@ -17355,7 +17357,7 @@ MV.def('planner/camera', ['core/hash', 'core/num', 'core/rng', 'core/schema', 'c
       bridge: Object.freeze({ leanTilt: 2, driftSide: 1, none: 1 }),
       intro: Object.freeze({ slowSwell: 2, none: 1 }),
       outro: Object.freeze({ pullAway: 4, none: 1 }),
-      interlude: Object.freeze({ driftSide: 2, none: 1 }),
+      interlude: Object.freeze({ driftSide: 2, slowSwell: 1 }),     // an interlude never stands still (nothing else moves)
       other: Object.freeze({ slowSwell: 1, climbRise: 1 }),
     });
     const LAST_CHORUS_AMP = 1.25, AMP_MAX = 1.3;
@@ -41846,7 +41848,7 @@ MV.def('parts/lens/glide', ['parts/kit'], (K) => {
     label: L('回り込み', 'Parallax orbit'),
     blurb: L('カメラが回り込むように動き、奥と手前の層がずれていく', 'The layers slide against each other as if the camera circles the words'),
     tags: ['airy'], family: 'orbit', frames: true, warp: false,
-    traits: { energy: [0.1, 0.85], roles: ['lyric', 'focus', 'title', 'outro'] },
+    traits: { energy: [0.1, 0.85], roles: ALL_ROLES },
     shared: moveCurve('sineInOut'),
     params: {
       radius: { type: 'num', min: 0.01, max: 0.15, step: 0.005, unit: 'frac', label: L('半径', 'Radius'),
@@ -41869,7 +41871,7 @@ MV.def('parts/lens/glide', ['parts/kit'], (K) => {
     label: L('傾き揺れ', 'Roll sway'),
     blurb: L('カメラがゆりかごのようにゆっくり左右へ傾く', 'The camera rocks gently from side to side like a cradle'),
     tags: ['soft', 'playful'], family: 'roll',
-    traits: { energy: [0, 0.8] },
+    traits: { energy: [0, 0.8], roles: ALL_ROLES },
     params: {
       angle: { type: 'num', min: 0.2, max: 6, step: 0.1, unit: 'deg', label: L('傾き', 'Angle'),
         auto: { range: [0.8, 2], follow: 'energy' } },
@@ -41955,7 +41957,7 @@ MV.def('parts/lens/kick', ['parts/kit'], (K) => {
     label: L('手持ち', 'Hand held'),
     blurb: L('手で持ったカメラのように、決まった揺れが小さく続く', 'Small seeded wandering, like a camera held by hand'),
     tags: ['organic'], family: 'shake',
-    traits: { energy: [0.2, 1] },
+    traits: { energy: [0.2, 1], roles: ['lyric', 'focus', 'title', 'interlude', 'outro'] },
     params: {
       sway: { type: 'num', min: 1, max: 60, step: 0.5, unit: 'du', label: L('揺れ幅', 'Sway'),
         auto: { range: [7, 16], follow: 'energy' } },
@@ -41978,7 +41980,7 @@ MV.def('parts/lens/kick', ['parts/kit'], (K) => {
     blurb: L('拍ごとに少し寄ってすぐ戻る', 'A small punch-in on every beat'),
     tags: ['fast', 'bold'], family: 'beat', needs: ['beats'], warp: false, shared: LOCKED_CURVE,
     fits: (f) => (f.beat ? 1.3 : 0),
-    traits: { energy: [0.35, 1], roles: ['lyric', 'focus', 'interlude'] },
+    traits: { energy: [0.35, 1], roles: ['lyric', 'focus', 'interlude', 'outro'] },
     params: {
       punch: { type: 'num', min: 0, max: 0.2, step: 0.005, unit: 'x', label: L('寄り', 'Punch'),
         auto: { range: [0.015, 0.06], follow: 'amount.camera' } },
@@ -42003,7 +42005,7 @@ MV.def('parts/lens/kick', ['parts/kit'], (K) => {
     label: L('衝撃', 'Impact kick'),
     blurb: L('歌い出しで鋭く寄り、画面が揺れて収まる', 'A sharp punch-in and a shake right at the sung start'),
     tags: ['hard', 'bold'], family: 'shake', warp: false, shared: LOCKED_CURVE,
-    traits: { energy: [0.35, 1], impact: true },
+    traits: { energy: [0.35, 1], impact: true, roles: ['lyric', 'focus', 'interlude', 'outro'] },
     fits: (f) => (f.impact ? 1 : 0.25),                   // mostly for `!` lines (×6 there); rare on plain ones
     params: {
       kick: { type: 'num', min: 0.02, max: 0.3, step: 0.005, unit: 'x', label: L('寄り', 'Kick'),
@@ -62215,6 +62217,8 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
 
     const isInnerCut = (ctx) => !!(ctx.cut && ctx.cut.line && P.cutOffset(ctx.cut.key) > 0);
     const isRole = (role) => (ctx) => !!(ctx.cut && ctx.cut.role === role);
+    // An interlude shows no words (but 間の印 shows its ♪): its page leaves out the rows about words.
+    const hasWords = (ctx) => !isRole('interlude')(ctx) || agreedKey(ctx, 'arrange') === 'breathMark';
 
     // v2.1 rows (DESIGN_2_1 §6.5): motion speed, camerawork and its closeness / curve / follow, the section camera.
     const speedField = () => F({ path: 'motion.speed', widget: 'number', label: 'fld.motionSpeed', spec: SPEC.speed, scale: 100 });
@@ -62351,9 +62355,12 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
             when: (ctx) => isRole('interlude')(ctx) && agreedKey(ctx, 'arrange') === 'breathMark' }),
         ]),
         sec('layout', true, [partField('arrange', 'kind.arrange'),
-          F({ path: 'el.text.nudge', widget: 'number', label: 'fld.nudge', spec: SPEC.nudge }), textScaleField()]),
+          F({ path: 'el.text.nudge', widget: 'number', label: 'fld.nudge', spec: SPEC.nudge, when: hasWords }),
+          Object.assign(textScaleField(), { when: hasWords })]),
+        // an interlude has no words to follow: its camera (shake and camerawork) sits on its own page
+        sec('ilcam', true, [partField('lens', 'fld.camShake'), shotField()], { when: isRole('interlude') }),
         sec('motion', true, [partField('arrive', 'kind.arrive'), partField('dwell', 'kind.dwell'), partField('depart', 'kind.depart'),
-          speedField()]),
+          speedField()], { when: hasWords }),
         sec('seam', true, [partField('seam', 'kind.seam')]),
         sec('elements', true, [], { custom: 'elements' }),
         sec('ai', false, [], { custom: 'ai', when: (ctx) => !!(ctx.cut && ctx.cut.line) }),
@@ -75202,8 +75209,11 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
         const scope = ctx.scope;
         const chips = [];
         const count = (kind) => { const d = F.decisionsOf(ctx, kind + '.count'); return d.length ? Math.max(...d.map((x) => x.v || 0)) : 0; };
+        // an interlude's camera is on its own page, and its words (none, or the ♪ of 間の印) are not an element of it
+        const il = !!(ctx.cut && ctx.cut.role === 'interlude');
         for (const el of ELEMENTS) {
           if (el === 'seam' && ctx.scopeKind !== 'cut') continue;
+          if (il && (el === 'lens' || (el === 'text' && F.agreedKey(ctx, 'arrange') !== 'breathMark'))) continue;
           const n = el === 'ornament' || el === 'filter' ? count(el) : null;
           chips.push(h('button', { class: 'chip', type: 'button', 'data-el': el,
             on: { click: () => app.select(Object.assign({ level: 'el', scope, el }, n !== null ? { idx: 0 } : {}), { from: 'crumbs' }) } },

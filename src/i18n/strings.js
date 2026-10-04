@@ -1569,6 +1569,8 @@ MV.def('i18n/strings', [], () => ({
   'ai.warn.repeatSame': ['くり返しの行は1回目にそろうので、2回目以降への変更{n}件は1回目の変更にまかせました',
     'Lines sung again follow their first copy, so {n} change to a later copy was left to the first copy\'s|Lines sung again follow their first copy, so {n} changes to later copies were left to the first copy\'s'],
   'sec.camwork': ['カメラワーク', 'Camerawork'],
+  'sec.ilcam': ['カメラ', 'Camera'],
+  'fld.camShake': ['揺れ・動き', 'Shake and motion'],
   'sec.camtexture': ['揺れ・質感', 'Shake and texture'],
   'sec.rig': ['区画のカメラ', 'Section camera'],
   'sec.materials': ['マイ素材', 'My materials'],

@@ -6,9 +6,9 @@
  "measurer": "fake",
  "docs": {
   "basic-all-presets@16:9": {
-   "plan": "b49f06bd",
+   "plan": "fde44f16",
    "frames": [
-    "3d4800f9",
+    "6850d38f",
     "a42bbdfa",
     "ac26812f",
     "caa9cb05",
@@ -51,9 +51,9 @@
    ]
   },
   "basic-chorus-0.5@9:16": {
-   "plan": "c69be9ef",
+   "plan": "fe510679",
    "frames": [
-    "39c59e05",
+    "f812c949",
     "a3b87a7a",
     "d735d616",
     "b1142291",
