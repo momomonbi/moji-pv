@@ -32,7 +32,7 @@ The Details panel has bookmarks for **Camera, Layout, Text, Background, Decorati
 
 Click the **Camera** track to open that cut’s camera settings. The bottom overview always shows the full song and playhead. Drag either viewport edge to zoom the detailed timeline, or its strip to pan it.
 
-Use **Large preview** in camera settings or its picker to play a larger sample in a popup. Pause, seek, loop or change speed; the default 0.5× speed makes the motion easier to follow.
+Open **Large preview** in camera settings or its picker to automatically play only the selected movement once, then stop. Pause, restart, seek or change speed; the default 0.5× speed makes the motion easier to follow. Turn on **Loop** when you want repeated playback.
 
 Turn on **Wireframe** in the preview to see the actual camera frame, path, zoom and rotation. These guides are excluded from exports. Added presets include ten lyric layouts, six interludes, ten cut-camera paths and six section-camera rigs.
 

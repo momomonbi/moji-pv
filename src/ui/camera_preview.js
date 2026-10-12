@@ -49,9 +49,9 @@ MV.def('ui/camera_preview', ['ui/dom', 'ui/icons', 'i18n/t', 'core/shot', 'engin
     const duration = sample.duration;
     const ratio = sample.design.w / sample.design.h;
     const width = Math.round(ratio >= 1 ? 960 : 960 * ratio), height = Math.round(ratio >= 1 ? 960 / ratio : 960);
-    const motion = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : null;
-    let playing = !(motion && motion.matches) && !document.hidden;
-    let time = playing ? 0 : FAC.sampleTime(sample, ref.kind), speed = 0.5, hasPlayed = playing;
+    // Opening this dialog is an explicit request to watch the selected movement once.
+    let playing = !document.hidden;
+    let time = 0, speed = 0.5;
     let frame = 0, lastTick = null, lastPaint = -Infinity, renderCount = 0, disposed = false, closeDialog = null;
     let offView = null, offDoc = null;
     let root = null, canvas = null, play = null, seek = null, readout = null, loop = null, guides = null, note = null;
@@ -101,13 +101,11 @@ MV.def('ui/camera_preview', ['ui/dom', 'ui/icons', 'i18n/t', 'core/shot', 'engin
     }
     function pause() { playing = false; cancelFrame(); updateControls(); }
     function visibility() { if (document.hidden) pause(); }
-    function reduced(ev) { if (ev.matches) { pause(); note.hidden = false; note.textContent = t('camera.sample.reduced'); } }
     function dispose() {
       if (disposed) return;
       disposed = true; playing = false; cancelFrame(); updateControls();
       document.removeEventListener('visibilitychange', visibility);
       window.removeEventListener('pagehide', close);
-      if (motion && motion.removeEventListener) motion.removeEventListener('change', reduced);
       if (offView) offView(); if (offDoc) offDoc();
       try { engine.dispose(); } catch (e) { /* cleanup still removes listeners and retires this session */ }
       if (sessions.get(app) === handle) sessions.delete(app);
@@ -123,21 +121,21 @@ MV.def('ui/camera_preview', ['ui/dom', 'ui/icons', 'i18n/t', 'core/shot', 'engin
         canvas = h('canvas', { class: 'camera-preview-canvas', width, height, role: 'img', 'aria-label': opt.name || nameOf(app, ref) });
         play = h('button', { class: 'btn primary camera-preview-play', type: 'button', 'data-autofocus': '1',
           on: { click: () => {
-            if (playing) pause(); else { if (!hasPlayed || time >= duration) time = 0; hasPlayed = true; playing = true;
+            if (playing) pause(); else { if (time >= duration) time = 0; playing = !document.hidden;
               note.hidden = true; lastTick = null; updateControls(); schedule(); }
           } } });
         const restart = h('button', { class: 'btn camera-preview-restart', type: 'button', text: t('camera.sample.restart'),
-          on: { click: () => { time = 0; lastTick = null; paint(); schedule(); } } });
+          on: { click: () => { time = 0; playing = !document.hidden; note.hidden = true; lastTick = null; paint(); schedule(); } } });
         seek = h('input', { class: 'camera-preview-seek', type: 'range', min: '0', max: String(duration), step: '0.001',
-          'aria-label': t('camera.sample.seek'), on: { input: () => { time = Math.max(0, Math.min(duration, Number(seek.value))); hasPlayed = true; lastTick = null; paint(); } } });
+          'aria-label': t('camera.sample.seek'), on: { input: () => { time = Math.max(0, Math.min(duration, Number(seek.value))); lastTick = null; paint(); } } });
         readout = h('output', { class: 'camera-preview-time' });
         const speedSelect = h('select', { class: 'select camera-preview-speed', 'aria-label': t('camera.sample.speed'),
           on: { change: () => { const v = Number(speedSelect.value); if (SPEEDS.includes(v)) speed = v; lastTick = null; } } },
         SPEEDS.map((v, i) => h('option', { value: String(v), selected: v === speed,
           text: t(['camera.sample.slowest', 'camera.sample.slow', 'camera.sample.normal'][i]) })));
-        loop = h('input', { class: 'camera-preview-loop', type: 'checkbox', checked: true });
+        loop = h('input', { class: 'camera-preview-loop', type: 'checkbox', checked: false });
         guides = h('input', { class: 'camera-preview-guides', type: 'checkbox', checked: true, on: { change: paint } });
-        note = h('p', { class: 'note subtle', hidden: !(motion && motion.matches), text: t('camera.sample.reduced') });
+        note = h('p', { class: 'note subtle', hidden: true });
         root = h('div', { class: 'camera-preview', 'data-preview-kind': ref.kind,
           'data-preview-key': typeof ref.key === 'string' ? ref.key : 'custom', 'data-duration': String(duration) },
         h('p', { class: 'camera-preview-caption', text: opt.blurb || blurbOf(app, ref) || t('camera.sample.note') }),
@@ -151,7 +149,6 @@ MV.def('ui/camera_preview', ['ui/dom', 'ui/icons', 'i18n/t', 'core/shot', 'engin
       handle.done.then(dispose, dispose);
       document.addEventListener('visibilitychange', visibility);
       window.addEventListener('pagehide', close);
-      if (motion && motion.addEventListener) motion.addEventListener('change', reduced);
       if (app.view && app.view.on) offView = app.view.on((changed) => {
         if (changed.some((k) => ['sel', 'panel', 'step', 'mode'].includes(k))) close();
       });

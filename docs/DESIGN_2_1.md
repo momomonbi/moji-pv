@@ -5998,9 +5998,12 @@ Additional section-camera presets:
 
 The camera sample dialog is separate from project playback. Camera, rig, lens and EXTREME fields and picker cards
 provide a large preview action without applying a preset. A disposable engine fork renders the actual sample plan
-from beginning to end, including the entire rig. Playback initially runs at half speed; quarter/normal speed,
-pause, restart, seeking, looping and stationary guides make short camera moves visible. Canvas backing matches
-the selected aspect and a bounded dialog fits desktop and narrow screens. Closing/Escape, replacing a dialog,
-owner destruction and hidden-tab changes cancel the animation and release the sample fork. Focus returns through
+from beginning to end, including the entire rig. Only the selected component moves; other camera and text-motion
+slots remain static. Opening a visible sample explicitly requests autoplay at half speed, including when the OS
+reduces incidental movement. It plays once and stops at the end; looping starts only when its checkbox is enabled.
+Quarter/normal speed, pause, restart, seeking and stationary guides make short camera moves visible. Restart begins
+a fresh pass. Canvas backing matches the selected aspect and a bounded dialog fits desktop and narrow screens.
+Closing/Escape, replacing a dialog and owner destruction cancel animation and release the sample fork. Hidden
+tabs pause playback without automatically resuming. Focus returns through
 the existing dialog manager. Picker preview actions are siblings of apply tiles; hover animation and delayed
 project try-on stop before opening a sample. Samples never pin parts, seek the song or modify export settings.

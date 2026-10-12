@@ -9625,3 +9625,16 @@ structure and frame counts and reflect the expanded layout catalog. Node regress
 geometry, fades, filters, camera paths, scopes, explanations and AI vocabulary. Statistical fixtures explicitly
 retain the original 33-layout calibration thresholds, while current-catalog dependency and specification checks
 remain on all 49 layouts. Original AI system/schema snapshots are unchanged; only preset vocabulary expands.
+
+## 2026-10-13 — Automatically play the selected camera sample once
+
+Opening a camera sample now automatically plays the selected component once at the existing half speed, then
+stops at the complete sample end. Repetition is off by default and can be explicitly enabled. The sample's
+static fallback parts keep other camera, text and effect movements out of the preview. Restart begins a fresh
+pass after automatic stopping. Explicitly opened samples also autoplay with OS reduced motion; hidden tabs
+still pause. Document, song playback, undo history and export settings remain untouched.
+
+Validation: five camera-sample and 19 translation Node cases, 23 build checks and all 229 module checks pass.
+Four Japanese/English desktop/375 px browser flows verify untouched one-pass autoplay and stable automatic
+stopping, replay, explicit looping, OS reduced-motion autoplay, selected-component rendering, portrait fit and
+modal cleanup. Independent review confirms generated-source parity, CSP hashes and preview isolation.

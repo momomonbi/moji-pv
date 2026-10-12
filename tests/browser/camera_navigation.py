@@ -472,7 +472,7 @@ async def popup(f, mobile=False):
     await page.evaluate(r"""()=>{const a=window.__mv,fork=a.engine.fork;
       a.engine.fork=function(...args){const e=fork.apply(this,args),thumb=e.thumb;
         e.thumb=function(ref,surface,opts){const result=thumb.call(this,ref,surface,opts);
-          if(surface.canvas.classList.contains('camera-preview-canvas')) window.__sampleStats={...result.drawn,time:opts.t};
+          if(surface.canvas.classList.contains('camera-preview-canvas')) window.__sampleStats={...result.drawn,time:opts.t,kind:ref.kind,key:ref.key};
           return result;};return e;};}""")
     await page.locator(TAB % 'camera').click()
     await f.settle(3)
@@ -486,11 +486,30 @@ async def popup(f, mobile=False):
         width:r.width,canvas:el.querySelector('canvas').getBoundingClientRect().width};}""")
     f.check(fit['inside'] and fit['canvas'] >= (250 if mobile else 480), 'large sample fits the viewport: %r' % fit)
     first = await popup_snapshot(page)
+    f.check(first['playing'] == 'true' and not await page.locator('.camera-preview-loop').is_checked(),
+            'opening a visible sample starts playback with repetition off')
     await page.wait_for_timeout(1100)
     second = await popup_snapshot(page)
     f.check(second['count'] >= first['count'] + 8 and second['time'] > first['time'] + .3 and first['png'] != second['png'],
             'large camera sample runs a visible continuous move instead of a thumbnail twitch')
     f.check(second['maximum'] >= 3 and second['speed'] == '0.5', 'sample exposes the full camera interval at a slower default speed')
+    f.check(await page.evaluate('() => window.__sampleStats.kind === "shot" && window.__sampleStats.key === "levelLanding"'),
+            'current shot preview renders the chosen shot component')
+    await f.until(r"""()=>{const el=document.querySelector('.camera-preview');return (
+      Number(el.dataset.sampleTime)>=Number(el.querySelector('.camera-preview-seek').max)-.02 &&
+      el.querySelector('.camera-preview-play').getAttribute('aria-pressed')==='false');}""",
+                  'default sample automatically stops after its first complete pass', timeout=8500)
+    ended = await popup_snapshot(page)
+    await page.wait_for_timeout(250)
+    held = await popup_snapshot(page)
+    f.check(held['time'] == ended['time'] and held['count'] == ended['count'] and held['png'] == ended['png'],
+            'completed default sample remains stopped without a hidden restart or renderer work')
+    await page.locator('.camera-preview-restart').click()
+    await f.settle(2)
+    replayed = await popup_snapshot(page)
+    f.check(replayed['playing'] == 'true' and replayed['time'] < .2 and not await page.locator('.camera-preview-loop').is_checked(),
+            'Restart after automatic stop begins a fresh one-pass playback')
+    await page.wait_for_timeout(650)
     await page.locator('.camera-preview-play').click()
     await f.settle(2)
     paused = await popup_snapshot(page)
@@ -507,7 +526,7 @@ async def popup(f, mobile=False):
     await page.locator('.camera-preview-restart').click()
     await f.settle(2)
     restarted = await popup_snapshot(page)
-    f.check(restarted['seek'] < .5, 'replay starts the full sample from the beginning')
+    f.check(restarted['seek'] < .5 and restarted['playing'] == 'true', 'replay starts the full sample from the beginning')
     if restarted['playing'] != 'true':
         await page.locator('.camera-preview-play').click()
         await f.settle(2)
@@ -523,7 +542,6 @@ async def popup(f, mobile=False):
     await f.settle(2)
     f.check((await popup_snapshot(page))['png'] != guides['png'], 'sample guide checkbox changes actual sample pixels')
     await f.shot('large_camera_sample')
-    await page.locator('.camera-preview-loop').uncheck()
     await page.locator('.camera-preview-restart').click()
     if (await popup_snapshot(page))['playing'] != 'true':
         await page.locator('.camera-preview-play').click()
@@ -535,30 +553,30 @@ async def popup(f, mobile=False):
     await page.locator('.camera-preview-restart').click()
     if (await popup_snapshot(page))['playing'] != 'true':
         await page.locator('.camera-preview-play').click()
+    looped_first = await popup_snapshot(page)
+    await page.wait_for_timeout(int((looped_first['maximum'] + .2) * 1000))
+    looped = await popup_snapshot(page)
+    f.check(looped['playing'] == 'true' and looped['time'] < .8 and looped['count'] > looped_first['count'] + 20,
+            'checking repetition explicitly allows another pass')
     f.check(await page.evaluate(DOC) == doc and await page.evaluate(DONE) == count and await page.evaluate(TIME) == time,
             'popup playback and controls leave project pins, undo history and song position unchanged')
     await popup_close(f, opener)
     if not mobile:
-        # The OS reduced-motion setting must show a readable representative still, with explicit full playback.
+        # Explicitly opening a sample requests autoplay even when the OS reduces other automatic movement.
         await page.emulate_media(reduced_motion='reduce')
         await page.locator(opener).click()
         await page.locator('.camera-preview').wait_for(state='visible')
         await f.settle(2)
         reduced = await popup_snapshot(page)
-        f.check(reduced['playing'] == 'false' and reduced['time'] > 0,
-                'reduced-motion sample opens paused on a representative camera frame')
+        f.check(reduced['playing'] == 'true' and reduced['time'] < .2 and not await page.locator('.camera-preview-loop').is_checked(),
+                'a reopened reduced-motion sample starts a fresh single pass automatically')
         await page.locator('.camera-preview-guides').uncheck()
-        f.check(await page.evaluate('() => window.__sampleStats.glyphs > 0'),
-                'paused reduced-motion frame draws real visible sample glyphs instead of a blank entrance')
-        reduced_count = (await popup_snapshot(page))['count']
-        await page.wait_for_timeout(200)
-        f.check((await popup_snapshot(page))['count'] == reduced_count, 'reduced-motion sample does not animate without explicit play')
-        await page.locator('.camera-preview-play').click()
-        await f.settle(2)
-        initial = await popup_snapshot(page)
-        f.check(initial['time'] < .2, 'first explicit play starts the entire sample from its beginning')
         await page.wait_for_timeout(650)
-        f.check((await popup_snapshot(page))['time'] > initial['time'] + .2, 'explicit play animates despite OS reduced-motion preference')
+        advanced = await popup_snapshot(page)
+        f.check(await page.evaluate('() => window.__sampleStats.glyphs > 0'),
+                'reduced-motion autoplay renders real sample glyphs')
+        f.check(advanced['time'] > reduced['time'] + .2 and advanced['count'] > reduced['count'] + 5,
+                'explicitly opened sample visibly animates despite OS reduced-motion preference')
         await popup_close(f, opener)
         await page.emulate_media(reduced_motion='no-preference')
     # Existing section and lens moves use the same large sample without changing their selected values.
@@ -573,6 +591,9 @@ async def popup(f, mobile=False):
         await page.wait_for_timeout(650)
         two = await popup_snapshot(page)
         f.check(one['png'] != two['png'], slot + ' large sample displays its real camera movement')
+        f.check(await page.evaluate('([kind,key]) => window.__sampleStats.kind === kind && window.__sampleStats.key === key',
+                                    [slot, 'floatingWave' if slot == 'rig' else 'slowPush']),
+                slot + ' preview renders the chosen component independently')
         await popup_close(f, opener, False)
     # Each picker tile has a separate preview action. Previewing EXTREME must not activate it or add a pin.
     await page.locator(SHOT).click()

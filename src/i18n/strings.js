@@ -2462,7 +2462,7 @@ MV.def('i18n/strings', [], () => ({
   'camera.sample.open': ["大きく試写", "Large preview"],
   'camera.sample.openNamed': ["{name}を大きく試写", "Preview {name} at a larger size"],
   'camera.sample.title': ["カメラの試写：{name}", "Camera preview: {name}"],
-  'camera.sample.note': ["サンプル文字で、動きの最初から最後まで確認できます。", "See the complete movement with sample text."],
+  'camera.sample.note': ["選んだ項目だけをサンプル文字で1回再生し、自動停止します。", "The selected movement plays once with sample text, then stops automatically."],
   'camera.sample.play': ["再生", "Play"],
   'camera.sample.pause': ["一時停止", "Pause"],
   'camera.sample.restart': ["最初から", "Restart"],
@@ -2476,6 +2476,5 @@ MV.def('i18n/strings', [], () => ({
   'camera.sample.rigHint': ["まとまり全体にわたるカメラの動きを試写します。", "Preview the camera movement across an entire section."],
   'camera.sample.rigList': ["動きの一覧から試す", "Browse camera movements"],
   'camera.sample.failed': ["このカメラの試写を表示できませんでした。別の動きをお試しください。", "This camera preview could not be displayed. Try another movement."],
-  'camera.sample.reduced': ["動きを減らす設定のため停止しています。再生ボタンやつまみで確認できます。", "Paused because reduced motion is enabled. Use Play or the slider to explore."],
   'camera.sample.time': ["{time} / {end}", "{time} / {end}"],
 }));

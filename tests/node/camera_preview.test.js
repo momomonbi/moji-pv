@@ -53,3 +53,41 @@ test('all camera sample aspects retain their exact design ratio and readable sam
     assert.equal(sample.cuts[0].text, 'Large camera sample');
   }
 });
+
+test('camera samples move only the selected component without another camera, text move or effect', () => {
+  const refs = [
+    ...SHOT.SHOT_KEYS.map((key) => ({ kind: 'shot', key })),
+    ...SHOT.XSHOT_KEYS.map((key) => ({ kind: 'xshot', key })),
+    ...SHOT.RIG_KEYS.map((key) => ({ kind: 'rig', key })),
+    { kind: 'lens', key: 'slowPush' },
+  ];
+  assert.ok(reg.get('lens', 'slowPush'), 'a moving lens is exercised');
+  for (const ref of refs) {
+    const sample = FAC.samplePlan(reg, ref, { text: 'Only the selected movement' });
+    const slots = sample.cuts[0].slots;
+    for (const kind of ['arrive', 'dwell', 'depart']) {
+      assert.equal(slots[kind].v, reg.fallback(kind));
+      assert.deepEqual(reg.get(kind, slots[kind].v).make(), [], ref.kind + '/' + ref.key + ': no ' + kind + ' motion');
+    }
+    if (ref.kind === 'lens') {
+      assert.equal(slots.lens.v, ref.key);
+      assert.ok(!slots['cam.shot']);
+      assert.ok(!sample.rigs);
+    } else {
+      assert.equal(slots.lens.v, reg.fallback('lens'));
+      assert.deepEqual(reg.get('lens', slots.lens.v).make(), [], 'no additional lens motion');
+      if (ref.kind === 'rig') {
+        assert.equal(sample.rigs[0].rig.v, ref.key);
+        assert.ok(!slots['cam.shot']);
+      } else {
+        assert.equal(slots['cam.shot'].v, ref.key);
+        assert.equal(sample.rigs[0].rig.v, 'none');
+      }
+    }
+    assert.equal(slots['ornament.count'].v, 0);
+    assert.equal(slots['filter.count'].v, 0);
+    assert.equal(sample.grounds[0].atmos.v, 'none');
+    assert.deepEqual(sample.impulses, []);
+    assert.deepEqual(sample.seams, []);
+  }
+});
