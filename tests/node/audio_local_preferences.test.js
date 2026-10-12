@@ -9,7 +9,7 @@ const D = api.use('core/doc'), C = api.use('core/commands'), M = api.use('core/m
 const OUT = api.use('ui/output'), S = api.use('export/schedule'), WAV = api.use('audio/wav');
 const P = api.use('ui/export_quality_preview');
 const READY = { webcodecs: true, codec: 'avc1.640028', vp9Codec: 'vp09.00.40.08', audioCodec: null,
-  audioBitrate: 192000, audioBitrateMode: 'constant', audioServerConfigured: false, localAudioAvailable: true,
+  audioBitrate: 192000, audioBitrateMode: 'constant', localAudioAvailable: true,
   songReady: true, fsAccess: true, dirAccess: true, fontsReady: true };
 function doc(format = 'mp4') {
   const d = D.defaultDoc();
@@ -20,7 +20,7 @@ function doc(format = 'mp4') {
 const plan = { duration: 10, design: { aspect: '16:9' }, cuts: [], lines: [], seams: [], grounds: [], rigs: [], warnings: [] };
 const codes = (items) => items.map((x) => x.code);
 
-test('new works default to built-in AAC while older missing/native/server choices remain unchanged on opening', () => {
+test('new works default to built-in AAC while older missing/native choices remain unchanged on opening', () => {
   assert.equal(D.defaultDoc().output.audioEncoding, 'local');
   assert.deepEqual(D.validate(D.defaultDoc()), []);
   const old = doc(); delete old.output.audioEncoding;
@@ -36,8 +36,8 @@ test('new works default to built-in AAC while older missing/native/server choice
   for (const name of corpus.ALL_PROJECTS) assert.equal(M.parseFile(corpus.projectText(name)).doc.output.audioEncoding, 'browser', name);
 });
 
-test('switching from an existing browser/server preference to built-in AAC is one undoable output edit', () => {
-  for (const mode of ['browser', 'server']) {
+test('switching from an existing browser preference to built-in AAC is one undoable output edit', () => {
+  for (const mode of ['browser']) {
     const original = doc(); original.output.audioEncoding = mode;
     const store = ST.createStore({ doc: original, reduce: C.reduce });
     store.dispatch({ t: 'output.set', key: 'audioEncoding', v: 'local' });
@@ -57,13 +57,11 @@ test('dedicated local audio is active only for enabled MP4/Filmora songs and has
   for (const format of D.OUTPUT_CHOICES.format) {
     const d = doc(format), active = format === 'mp4' || format === 'kit';
     assert.equal(OUT.usesLocalAudio(d), active);
-    assert.equal(OUT.usesDedicatedAudio(d), active);
-    assert.equal(OUT.usesAudioServer(d), false);
     assert.equal(OUT.usesLocalAudio({ ...d, song: null }), false);
     assert.equal(OUT.usesLocalAudio({ ...d, output: { ...d.output, audio: false } }), false);
   }
   const local = doc();
-  assert.ok(!codes(S.preflight(local, plan, READY)).includes('audio-server-config'), 'no URL or token is needed');
+  assert.ok(!S.preflight(local, plan, READY).some((item) => item.level === 'block'), 'no connection is required');
   assert.ok(!codes(S.preflight(local, plan, READY)).includes('no-audio-codec'), 'native audio availability does not restrict built-in AAC');
 });
 
@@ -153,7 +151,41 @@ test('local capacity follows the chosen export range rather than rejecting a lon
 
 test('switching audio processing never invalidates the silent encoded picture-comparison clips', () => {
   const d = doc(), sig = P.signature(d, plan);
-  for (const audioEncoding of ['browser', 'local', 'server']) assert.equal(P.signature({ ...d, output: { ...d.output, audioEncoding } }, plan), sig);
+  for (const audioEncoding of D.OUTPUT_CHOICES.audioEncoding) assert.equal(P.signature({ ...d, output: { ...d.output, audioEncoding } }, plan), sig);
+});
+
+for (const schema of [1, 2]) test('schema-' + schema + ' server projects reopen and resave with built-in AAC, preserving the work', () => {
+  const original = doc('kit');
+  Object.assign(original.output, { audioEncoding: 'server', range: { t0: 1, t1: 9 }, name: 'project',
+    kit: { overlay: false, bg: true, green: false, srt: true, lrc: true }, custom: { preserved: true } });
+  original.pins = { 'work:ground': { v: 'flat', by: 'user', sig: 'saved' } };
+  const side = D.defaultSide();
+  if (schema === 1) { delete original.materials; delete original.media; }
+  const file = { format: D.FORMAT, schema, doc: original, side }, before = JSON.stringify(file);
+  const opened = M.parseFile(before), expected = { ...original,
+    output: { ...original.output, audioEncoding: 'local' }, materials: { next: 1, list: [] }, media: { list: [] } };
+  assert.deepEqual(opened.doc, expected);
+  assert.deepEqual(opened.side, side);
+  assert.equal(JSON.stringify(file), before, 'opening never mutates the input project');
+  assert.equal(D.normalize(opened.doc), opened.doc, 'migration is applied only once');
+  const saved = D.serialize(opened), reopened = M.parseFile(saved);
+  assert.deepEqual(reopened, opened);
+  assert.equal(JSON.parse(saved).doc.output.audioEncoding, 'local');
+  assert.equal(S.usesLocalAudio(opened.doc), true);
+  assert.equal(OUT.audioInfo(opened.doc, READY).source, 'local');
+  assert.equal(S.preflight(opened.doc, plan, { ...READY, songReady: false }).find((x) => x.code === 'song-missing').level, 'block');
+});
+
+test('retired server choice is accepted only by project migration, never as a new output edit', () => {
+  assert.deepEqual(D.OUTPUT_CHOICES.audioEncoding, ['browser', 'local']);
+  const current = doc(), legacy = { ...current, output: { ...current.output, audioEncoding: 'server' } };
+  assert.ok(D.validate(legacy).some((problem) => problem.startsWith('output.audioEncoding:')));
+  assert.throws(() => C.reduce(current, { t: 'output.set', key: 'audioEncoding', v: 'server' }), { code: 'payload' });
+  const migrated = D.normalize(legacy);
+  assert.deepEqual(migrated.output, { ...legacy.output, audioEncoding: 'local' });
+  for (const key of Object.keys(legacy)) if (key !== 'output') assert.equal(migrated[key], legacy[key]);
+  assert.equal(migrated.output.kit, legacy.output.kit, 'unchanged nested settings remain shared');
+  assert.deepEqual(D.validate(migrated), []);
 });
 
 test('built-in AAC errors each retain a specific actionable message', () => {

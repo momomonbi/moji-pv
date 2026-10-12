@@ -188,8 +188,7 @@ MV.def('ui/output', ['export/schedule', 'engine/scene/frame'], (S, F) => {
   // H.264 encoder its own text (the MP4s of the set cannot be made here; no PNG sequence is offered).
   function checkKey(item) {
     if (item.code === 'no-h264' && item.params && item.params.format === 'kit') return 'exp.pre.kit-no-h264';
-    if (item.code === 'song-missing' && item.level === 'block') return item.params && item.params.audioSource === 'local'
-      ? 'exp.pre.audio-local-song-missing' : 'exp.pre.audio-server-song-missing';
+    if (item.code === 'song-missing' && item.level === 'block') return 'exp.pre.audio-local-song-missing';
     return 'exp.pre.' + item.code;
   }
 
@@ -311,11 +310,6 @@ MV.def('ui/output', ['export/schedule', 'engine/scene/frame'], (S, F) => {
     cancelled: 'err.exp.cancelled', sink: 'err.exp.sink', 'range-empty': 'exp.pre.range-empty',
     'no-webcodecs': 'exp.pre.no-webcodecs', 'no-codec': 'err.exp.codec', codec: 'err.exp.codec', 'no-plan': 'err.exp.noPlan',
     media: 'err.exp.media', 'no-vp9': 'exp.pre.no-vp9',
-    'audio-server-config': 'err.exp.audioServerConfig', 'audio-server-auth': 'err.exp.audioServerAuth',
-    'audio-server-network': 'err.exp.audioServerNetwork', 'audio-server-too-large': 'err.exp.audioServerTooLarge',
-    'audio-server-response': 'err.exp.audioServerResponse', 'audio-server-media': 'err.exp.audioServerMedia',
-    'audio-server-busy': 'err.exp.audioServerBusy', 'audio-server-timeout': 'err.exp.audioServerTimeout',
-    'audio-server-convert': 'err.exp.audioServerConvert',
     'audio-local-unavailable': 'err.exp.audioLocalUnavailable', 'audio-local-load': 'err.exp.audioLocalLoad',
     'audio-local-memory': 'err.exp.audioLocalMemory', 'audio-local-too-large': 'err.exp.audioLocalTooLarge',
     'audio-local-convert': 'err.exp.audioLocalConvert', 'audio-local-response': 'err.exp.audioLocalResponse',
@@ -367,7 +361,7 @@ MV.def('ui/output', ['export/schedule', 'engine/scene/frame'], (S, F) => {
     const format = st.format || p.format || 'mp4';
     const legacy = st.progressPhase || st.part || st.phase;
     const stage = PROCESS_STAGES.has(p.stage) ? p.stage : legacy === 'audioLocalLoading' ? 'audioLoading'
-      : legacy === 'audioLocal' || legacy === 'audioServer' ? 'audio' : legacy === 'files' || legacy === 'zip' ? legacy
+      : legacy === 'audioLocal' ? 'audio' : legacy === 'files' || legacy === 'zip' ? legacy
         : st.N > 0 ? 'video' : 'prepare';
     const png = format === 'png' || format === 'pngAlpha';
     const outputs = Array.isArray(p.outputs) ? p.outputs.filter((o) => o && typeof o === 'object') : [];
@@ -377,10 +371,9 @@ MV.def('ui/output', ['export/schedule', 'engine/scene/frame'], (S, F) => {
       : hints[0] === 'prefer-hardware' ? 'hardware' : hints[0] === 'prefer-software' ? 'software'
         : infos.some((a) => a.fallback) ? 'fallback' : 'browser';
     const codecs = [...new Set((outputs.length ? outputs.map((o) => o.codec) : [p.codec]).map(codecName).filter(Boolean))];
-    const source = p.audioSource === null ? 'none' : p.audioSource || (legacy === 'audioLocal' || legacy === 'audioLocalLoading' ? 'local'
-      : legacy === 'audioServer' ? 'server' : 'pending');
+    const source = p.audioSource === null ? 'none' : p.audioSource || (legacy === 'audioLocal' || legacy === 'audioLocalLoading' ? 'local' : 'pending');
     const routeSource = st.audioRoute || source;
-    const intermediateAudio = p.temporary && (routeSource === 'local' || routeSource === 'server');
+    const intermediateAudio = p.temporary && routeSource === 'local';
     // A ready original song without native AAC becomes the Filmora set's separate WAV. The host's explicit null
     // codec confirms that fallback during the video pass, before its files stage creates the WAV itself.
     const nativeWavFallback = format === 'kit' && routeSource === 'browser' && p.audioSource === null && p.audioCodec === null;
@@ -388,14 +381,14 @@ MV.def('ui/output', ['export/schedule', 'engine/scene/frame'], (S, F) => {
     const audio = png ? 'none' : intermediateAudio ? routeSource : nativeWavFallback ? 'wav'
       : source === 'none' || noNativeAudio ? 'none' : source;
     const detail = stage === 'video' && png ? 'images' : stage === 'video' && format === 'webmAlpha' ? 'transparent'
-      : stage === 'audio' && source === 'local' ? 'audioLocal' : stage === 'audio' && source === 'server' ? 'audioServer'
+      : stage === 'audio' && source === 'local' ? 'audioLocal'
         : stage === 'finalize' && p.backend === 'ffmpeg' ? 'validate' : stage === 'mux' && p.temporary ? 'muxTemporary' : stage;
     const route = png ? 'png' : format === 'webmAlpha' ? audio === 'none' ? 'webmSilent' : 'webm' : format === 'kit' ? 'kit'
-      : routeSource === 'local' ? 'local' : routeSource === 'server' ? 'server' : audio === 'none' ? 'silent' : 'mp4';
+      : routeSource === 'local' ? 'local' : audio === 'none' ? 'silent' : 'mp4';
     return { stage, format, gpu, audio, codec: codecs.join(' / '), audioCodec: codecName(p.audioCodec),
       stageKey: 'exp.process.stage.' + stage, detailKey: 'exp.process.detail.' + detail,
       routeKey: 'exp.process.route.' + route, gpuKey: 'exp.process.gpu.' + gpu,
-      audioKey: 'exp.process.audio.' + (['local', 'server', 'browser', 'wav', 'none'].includes(audio) ? audio : 'pending'),
+      audioKey: 'exp.process.audio.' + (['local', 'browser', 'wav', 'none'].includes(audio) ? audio : 'pending'),
       // 100% of submitted frames is not a completed file: encoder drain, audio conversion, container finalization
       // and saving have their own indeterminate stages. Never reuse a stale video percentage in those stages.
       indeterminate: stage !== 'video' || !(st.N > 0),
@@ -406,7 +399,7 @@ MV.def('ui/output', ['export/schedule', 'engine/scene/frame'], (S, F) => {
     FORMATS, MAIN_FORMATS, OTHER_FORMATS, BACKDROPS, KIT_KEYS, ERROR_KEYS, isAlpha, formatCmds, transparentOf, opaqueOf,
     backdropCmds, clearLabel, backdropChoices, backdropNote, effectiveBackdrop, consistent, skipOf, usedFilters, skippedFilters,
     checks, kitCmd, withFixes, fixLabel, checkKey, layersWhat, listText, summary, qualityOptions, audioInfo,
-    usesAudioServer: S.usesAudioServer, usesLocalAudio: S.usesLocalAudio, usesDedicatedAudio: S.usesDedicatedAudio, audioEnv: S.audioEnv,
+    usesLocalAudio: S.usesLocalAudio, audioEnv: S.audioEnv,
     kitLabel, kitAlways, shownChecks, hasSound, speedProfile, speedCmds,
     mergeFonts, errorKey, errorParams, processInfo, advanceProcess,
   };

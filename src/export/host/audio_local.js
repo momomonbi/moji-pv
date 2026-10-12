@@ -78,6 +78,10 @@ MV.def('export/host/audio_local', ['export/schedule', 'export/host/mp4', 'export
 
     async function exportVideo(opts) {
       const o = opts || {}, song = o.audio && o.doc.output.audio ? o.audio : null;
+      if (!song && S.usesLocalAudio(o.doc)) {
+        await o.sink.abort();
+        throw error('media');
+      }
       if (!song) return J.exportVideo(o);
       const started = performance.now(), temporary = SINK.createMemorySink({ name: 'video.mp4', type: 'video/mp4' });
       try {

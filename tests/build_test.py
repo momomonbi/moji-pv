@@ -19,7 +19,7 @@ REPO = Path(__file__).resolve().parents[1]
 BUILD = REPO / 'build.py'
 HEADER = '/* 文字PVメーカー v2 — original work. Test module. */\n'
 CSP_TAIL = ("https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' "
-            "https://generativelanguage.googleapis.com https://api.anthropic.com https:; img-src data: blob:; media-src blob:; "
+            "https://generativelanguage.googleapis.com https://api.anthropic.com https://momomonbi.github.io; img-src data: blob:; media-src blob:; "
             "worker-src blob:; base-uri 'none'; form-action 'none'")
 
 

@@ -222,11 +222,37 @@ test('cancellation during prepare or conversion saves no partial file and a subs
   });
 });
 
-test('audio-off or missing source skips runtime preparation and conversion', async () => {
-  for (const noSource of [false, true]) await withEncoders(async () => {
-    const events = [], result = await AL.exportVideo(exportArgs(docFor({ audio: noSource }), events, { audio: noSource ? null : song() }));
+test('audio-off or a work without a song skips runtime preparation and conversion', async () => {
+  for (const noSong of [false, true]) await withEncoders(async () => {
+    const doc = docFor({ audio: noSong });
+    if (noSong) doc.song = null;
+    const events = [], result = await AL.exportVideo(exportArgs(doc, events, { audio: noSong ? null : song() }));
     assert.equal(result.audio, false);
     assert.equal(events.some((x) => x.type === 'prepare' || x.type === 'convert'), false);
+  });
+});
+
+test('built-in MP4 and Filmora reject missing original PCM before rendering instead of exporting silent audio', async () => {
+  for (const format of ['mp4', 'kit']) await withEncoders(async (encoders) => {
+    const doc = docFor({ format, kit: { overlay: false, bg: false, green: false, srt: false, lrc: false } });
+    const events = [], sink = sinkFor('missing.mp4'), dir = { name: 'kit', aborted: false,
+      async file() { throw new Error('missing audio must fail before opening an output'); },
+      async close() {}, async abort() { this.aborted = true; } };
+    const args = exportArgs(doc, events, { audio: null, sink, audioLocal: runtime(events), dir });
+    await assert.rejects(format === 'mp4' ? AL.exportVideo(args) : KIT.exportKit(args), (e) => e.code === 'audio-local-media');
+    assert.equal(events.length, 0, 'no converter loading or rendered frame');
+    assert.equal(encoders.videos.length, 0, 'no video is encoded');
+    assert.equal(format === 'mp4' ? sink.aborted : dir.aborted, true);
+  });
+});
+
+test('Filmora validates original PCM rate before loading the converter or encoding video', async () => {
+  await withEncoders(async (encoders) => {
+    const doc = docFor({ format: 'kit', kit: { overlay: false, bg: false, green: false, srt: false, lrc: false } }), events = [];
+    await assert.rejects(KIT.exportKit(exportArgs(doc, events, {
+      audio: { ...song(), sampleRate: 44100 }, audioLocal: runtime(events) })), (e) => e.code === 'audio-local-media');
+    assert.equal(events.length, 0);
+    assert.equal(encoders.videos.length, 0);
   });
 });
 

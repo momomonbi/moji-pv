@@ -5,9 +5,10 @@ Uses the compiled app and its actual CSP, pinned core assets and dedicated worke
 the immutable video/PCM blobs handed to WORKERFS, then independently inspect actual output with native FFprobe.
 Verifies 320 kbps AAC target/actual audio, original sample range, unchanged H.264 packet hashes/timing, one video
 encode, no native AudioEncoder, MP4 and Filmora ZIP/folder, lazy first load and cached assets with a new worker per job.
+Old projects that selected the removed server method open as local AAC and export without a settings prompt or upload.
 Cancelling asset loading or the worker phase must leave no file/folder, terminate the worker, and permit another export.
 Requires ffmpeg/ffprobe, Playwright and the self-hosted vendor/ffmpeg assets. Native H.264 is required.
-Run: PW_EXECUTABLE=/usr/bin/chromium python3 tests/browser/audio_local.py [--flow settings|success|cache|cancel]
+Run: PW_EXECUTABLE=/usr/bin/chromium python3 tests/browser/audio_local.py [--flow settings|migration|success|cache|cancel]
 """
 import argparse
 import asyncio
@@ -28,7 +29,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'dev'))
 from browser import launch, new_page  # noqa: E402
 from ui_flows import FONT_HOSTS, LYRICS, RECORD, Flow, ensure_built, serve  # noqa: E402
-from audio_server import SONG, inspect_video  # noqa: E402  (shared generated original audio and independent FFprobe)
+from audio_fixture import SONG, inspect_video  # noqa: E402  (shared generated original audio and independent FFprobe)
 
 MODE = '[data-seg="audioEncoding"] [data-v="local"]'
 START = '[data-act="export.start"]'
@@ -175,7 +176,9 @@ async def flow_settings(f, network, folder):
     await setup(f, seconds=0.25)
     f.check(await page.evaluate('() => window.__mv.doc.output.audioEncoding') == 'local', 'new projects default to local AAC')
     f.check(await page.locator(MODE).get_attribute('aria-checked') == 'true', 'local AAC is selected without configuration')
-    f.check(not await page.locator('.audio-server-settings').is_visible(), 'local AAC requires no server settings')
+    f.check(await page.locator('.audio-server-settings').count() == 0, 'external server settings have been removed')
+    f.check(await page.locator('[data-seg="audioEncoding"] [data-v="server"]').count() == 0,
+            'the removed server method is absent from audio choices')
     f.check(not network.assets() and not network.posts(), 'opening local settings loads no core and sends no music')
     await page.locator('[data-act="quality-preview.start"]').click()
     await f.until('() => document.querySelector(".export-quality-preview").dataset.previewPhase === "done"', 'four silent native previews', timeout=60000)
@@ -186,6 +189,43 @@ async def flow_settings(f, network, folder):
             'silent preview URLs survive audio method changes')
     f.check(not network.assets() and not network.posts() and await page.evaluate('() => window.__workersCreated') == 0,
             'silent comparison neither loads AAC WASM nor uploads audio')
+
+
+async def flow_migration(f, network, folder):
+    page = f.page
+    await setup(f, seconds=1)
+    samples = await page.evaluate('() => [0, 1].map((c) => [...window.__mv.buffer.getChannelData(c).slice(48000, 48032)])')
+    restored = await page.evaluate(r"""async () => {
+      const a = window.__mv, D = MV.use('core/doc');
+      const legacy = JSON.parse(D.serialize({ doc: a.doc, side: a.store.side }));
+      legacy.doc.output.audioEncoding = 'server';
+      const expected = { sheet: legacy.doc.sheet, timing: legacy.doc.timing, pins: legacy.doc.pins,
+        quality: legacy.doc.output.quality, range: legacy.doc.output.range };
+      await a.io.openFiles([new File([JSON.stringify(legacy)], 'legacy-server.json', { type: 'application/json' })]);
+      a.goStep('export'); a.pause();
+      const saved = JSON.parse(D.serialize({ doc: a.doc, side: a.store.side }));
+      return { actual: { sheet: a.doc.sheet, timing: a.doc.timing, pins: a.doc.pins,
+          quality: a.doc.output.quality, range: a.doc.output.range }, expected,
+        encoding: a.doc.output.audioEncoding, savedEncoding: saved.doc.output.audioEncoding, song: a.songReady() };
+    }""")
+    f.check(restored['actual'] == restored['expected'], 'opening a legacy server project preserves lyrics, timings, pins and output settings')
+    f.check(restored['encoding'] == 'local' and restored['savedEncoding'] == 'local',
+            'legacy server mode becomes local AAC on open and on save')
+    f.check(restored['song'], 'legacy project retains its loaded original audio')
+    f.check(await page.locator(MODE).get_attribute('aria-checked') == 'true'
+            and await page.locator('.audio-server-settings, [data-seg="audioEncoding"] [data-v="server"]').count() == 0,
+            'migrated project selects local AAC without a server choice or settings')
+    await f.until('() => !!window.__mv.exportProbe()', 'migrated native encoder probed', timeout=15000)
+    state = await export(f)
+    f.check(state['phase'] == 'done' and state['result']['audioSource'] == 'local',
+            'a reopened server project exports through real local AAC without configuration')
+    if state['phase'] == 'done':
+        original, output = Path(folder) / 'migrated-original.mp4', Path(folder) / 'migrated-local.mp4'
+        original.write_bytes(base64.b64decode(await page.evaluate(BLOB, {'kind': 'video', 'index': 0})))
+        output.write_bytes(base64.b64decode(await page.evaluate(OUTPUT)))
+        pcm = base64.b64decode(await page.evaluate(BLOB, {'kind': 'audio', 'index': 0}))
+        validate(f, original, output, pcm, 1, samples)
+    f.check(not network.posts(), 'opening and exporting the legacy server project never uploads media')
 
 
 async def flow_success(f, network, folder):
@@ -307,7 +347,7 @@ async def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--root')
     ap.add_argument('--no-build', action='store_true')
-    ap.add_argument('--flow', choices=('settings', 'success', 'cache', 'cancel'))
+    ap.add_argument('--flow', choices=('settings', 'migration', 'success', 'cache', 'cancel'))
     args = ap.parse_args()
     if not shutil.which('ffprobe'):
         raise RuntimeError('FFprobe is required for independent real-WASM verification')
@@ -323,7 +363,7 @@ async def main():
                 browser = await launch(p)
                 try:
                     for rel, lang in (('index.html', 'ja'), ('en/index.html', 'en')):
-                        for name, run in (('settings', flow_settings), ('success', flow_success), ('cache', flow_cache), ('cancel', flow_cancel)):
+                        for name, run in (('settings', flow_settings), ('migration', flow_migration), ('success', flow_success), ('cache', flow_cache), ('cancel', flow_cancel)):
                             if args.flow and args.flow != name:
                                 continue
                             page, network = await open_test(browser, base, rel)

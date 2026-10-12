@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'dev'))
 from browser import launch, new_page  # noqa: E402
 from ui_flows import FONT_HOSTS, LYRICS, RECORD, ensure_built, serve  # noqa: E402
-from audio_server import SONG  # noqa: E402
+from audio_fixture import SONG  # noqa: E402
 
 START = '[data-act="export.start"]'
 INIT = RECORD + """

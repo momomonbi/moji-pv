@@ -36,7 +36,7 @@ test('legacy progress gets a useful stage without inventing an installed codec o
   assert.equal(OUT.processInfo({ phase: 'running', i: 0, N: 0 }).stage, 'prepare');
   assert.equal(OUT.processInfo(state({ audioSource: 'pending' })).stage, 'video', 'initial sparse boot metadata preserves old progress-only exporters');
   assert.equal(OUT.processInfo({ phase: 'running', part: 'audioLocalLoading' }).stage, 'audioLoading');
-  assert.equal(OUT.processInfo({ phase: 'running', part: 'audioServer' }).audio, 'server');
+  assert.equal(OUT.processInfo({ phase: 'running', part: 'audioLocal' }).audio, 'local');
   assert.equal(OUT.processInfo({ phase: 'running', part: 'zip', i: 1, N: 1 }).indeterminate, true);
 });
 
@@ -65,14 +65,13 @@ test('Filmora uses all installed outputs rather than hiding differences behind i
   assert.equal(p.routeKey, 'exp.process.route.kit');
 });
 
-test('local and server audio routes survive their silent intermediate video and captured outer format', () => {
-  for (const audioRoute of ['local', 'server']) {
-    const p = OUT.processInfo(state({ stage: 'mux', format: 'mp4', temporary: true,
-      audioSource: null, audioCodec: null, codec: 'avc1.640028', acceleration: installed('prefer-hardware') }, { audioRoute }));
-    assert.equal(p.audio, audioRoute); assert.equal(p.routeKey, 'exp.process.route.' + audioRoute);
-    assert.equal(p.detailKey, 'exp.process.detail.muxTemporary'); assert.equal(p.gpu, 'hardware');
-    assert.equal(p.indeterminate, true);
-  }
+test('local audio survives its silent intermediate video and captured outer format', () => {
+  const audioRoute = 'local';
+  const p = OUT.processInfo(state({ stage: 'mux', format: 'mp4', temporary: true,
+    audioSource: null, audioCodec: null, codec: 'avc1.640028', acceleration: installed('prefer-hardware') }, { audioRoute }));
+  assert.equal(p.audio, audioRoute); assert.equal(p.routeKey, 'exp.process.route.' + audioRoute);
+  assert.equal(p.detailKey, 'exp.process.detail.muxTemporary'); assert.equal(p.gpu, 'hardware');
+  assert.equal(p.indeterminate, true);
   const kit = OUT.processInfo(state({ stage: 'video', format: 'mp4', temporary: true, audioSource: null }, { format: 'kit', audioRoute: 'local' }));
   assert.equal(kit.format, 'kit'); assert.equal(kit.routeKey, 'exp.process.route.kit'); assert.equal(kit.audio, 'local');
 });
@@ -119,7 +118,7 @@ test('PNG has no video encoder, no audio path and no GPU preference inference fr
 
 test('all stage and mechanism strings exist in both languages and explicitly leave actual GPU use unknown', () => {
   const stages = ['prepare', 'video', 'audioLoading', 'audioPrepare', 'audio', 'finalize', 'mux', 'files', 'zip', 'save'];
-  const sources = ['local', 'server', 'browser', 'none', 'wav', 'pending'];
+  const sources = ['local', 'browser', 'none', 'wav', 'pending'];
   for (const lang of ['ja', 'en']) {
     const t = T.createT(lang, STRINGS, null, { strict: true });
     for (const stage of stages) for (const audioSource of sources) for (const format of ['mp4', 'kit', 'webmAlpha', 'png', 'pngAlpha']) {

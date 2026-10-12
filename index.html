@@ -1,6 +1,6 @@
 <!doctype html><html lang="ja"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-2lYRdar48Jjzpm+ss+TqyyvBEOHGhg3lhCxcYUHlqMk=' 'wasm-unsafe-eval'; style-src 'sha256-i8ak8L4NyJSTbaMIndFHzfYGwMNV2rjexwjDuy6g8bA=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://generativelanguage.googleapis.com https://api.anthropic.com https:; img-src data: blob:; media-src blob:; worker-src blob:; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-/mUxZLqX49OzUlH35gN7JBq04wnWED+TOGhta6FvhAg=' 'wasm-unsafe-eval'; style-src 'sha256-ZEajYlmeL7fg1a5xcjneTts1uVKFjqWEOMIMIosAx/E=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://generativelanguage.googleapis.com https://api.anthropic.com https://momomonbi.github.io; img-src data: blob:; media-src blob:; worker-src blob:; base-uri 'none'; form-action 'none'">
 <title>文字PVメーカー</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -403,8 +403,8 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent);
 .quality-preview-status, .quality-preview-range { font-size: 11.5px; line-height: 1.5; color: var(--text-2); }
 .quality-preview-clips { display: grid; gap: 12px; }
 .exp-settings [data-seg='audioEncoding'] .seg { min-width: 0; white-space: normal; height: auto; min-height: 42px; padding: 6px 8px; }
-.progress.is-indeterminate .progress-bar { animation: external-audio-progress 1.4s ease-in-out infinite alternate; }
-@keyframes external-audio-progress { from { transform: translateX(0); } to { transform: translateX(180%); } }
+.progress.is-indeterminate .progress-bar { animation: audio-conversion-progress 1.4s ease-in-out infinite alternate; }
+@keyframes audio-conversion-progress { from { transform: translateX(0); } to { transform: translateX(180%); } }
 @media (prefers-reduced-motion: reduce) { .progress.is-indeterminate .progress-bar { animation: none; } }
 .quality-preview-clip { display: grid; gap: 5px; min-width: 0; }
 .quality-preview-clip-title { font-size: 12px; font-weight: 700; }
@@ -6819,7 +6819,7 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
     'seam', 'theme']);
   const OUTPUT_CHOICES = Object.freeze({
     format: ['mp4', 'kit', 'webmAlpha', 'png', 'pngAlpha'], short: [720, 1080, 1440, 2160], fps: [24, 30, 60],
-    quality: ['light', 'standard', 'high', 'max'], acceleration: ['auto', 'cpu'], audioEncoding: ['browser', 'local', 'server'],
+    quality: ['light', 'standard', 'high', 'max'], acceleration: ['auto', 'cpu'], audioEncoding: ['browser', 'local'],
   });
   // output.kit: the optional files of the Filmora set (§13.3); the main MP4 is always written.
   const KIT_KEYS = Object.freeze(['overlay', 'bg', 'green', 'srt', 'lrc']);
@@ -7137,7 +7137,7 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
     return out;
   }
 
-  // Fills missing defaults; never changes a value that is present. Unchanged sub-objects are shared.
+  // Fills missing defaults and migrates retired settings. Unchanged sub-objects are shared.
   function normalize(doc) {
     if (!isObject(doc)) return defaultDoc();
     const base = defaultDoc();
@@ -7154,9 +7154,12 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
       else if (k === 'song' && isObject(v)) put(k, fillMissing(v, SONG_DEFAULTS));
       else if (k === 'materials' && isObject(v)) put(k, fillMissing(v, materialDefaults(v)));
       else if (k === 'pins' && isObject(v)) put(k, timerVisibilityPins(v));
-      // Saved works that predate the encoding choice keep native browser audio. New works explicitly start with
-      // 'local', and both an explicit browser choice and an external server choice survive opening unchanged.
-      else if (k === 'output' && isObject(v)) put(k, withKit(fillMissing(v, { ...base.output, audioEncoding: 'browser' })));
+      // Missing/native choices keep browser audio. The retired server choice uses the built-in AAC converter;
+      // migrate before validation so older schema-1/2 projects can open without a connection or credentials.
+      else if (k === 'output' && isObject(v)) {
+        const audio = v.audioEncoding === 'server' ? { ...v, audioEncoding: 'local' } : v;
+        put(k, withKit(fillMissing(audio, { ...base.output, audioEncoding: 'browser' })));
+      }
       else if (isObject(v) && isObject(base[k])) put(k, fillMissing(v, base[k]));
     }
     return out;
@@ -12362,21 +12365,12 @@ MV.def('i18n/strings', [], () => ({
     'Encodes the original song with an AAC 320 kbps target without setup. The first use downloads about 32 MB of conversion code. Your video and audio stay in this browser.'],
   'exp.audioEncoding.browserHelp': ['ブラウザ標準の音声処理を使用します。対応する音質はブラウザによって異なります。',
     'Uses the browser’s standard audio encoder. Available bitrate depends on the browser.'],
-  'exp.audioEncoding.server': ['外部サーバー（AAC 320kbps）', 'External server (AAC 320 kbps)'],
-  'exp.audioEncoding.help': ['外部サーバーでは元の曲をAAC 320kbpsの目標で処理し、動画に結合します。動画と音声を設定したサーバーへ送信します。',
-    'The external server encodes the original song with an AAC 320 kbps target and joins it to the video. Video and audio are sent to your configured server.'],
   'exp.audioEncoding.needsAudio': ['曲を読み込み、音声を入れると使えます', 'Load a song and enable sound to use this'],
-  'exp.audioQuality.server': ['音声：AAC {kbps}kbpsの目標（元の曲から外部サーバーで処理）', 'Audio: AAC {kbps} kbps target (processed from the original song on your server)'],
-  'exp.audioQuality.serverMeasured': ['音声：AAC {kbps}kbpsの目標・実測 {measured}kbps（外部サーバー）', 'Audio: AAC {kbps} kbps target; measured {measured} kbps (external server)'],
   'exp.audioQuality.local': ['音声：AAC {kbps}kbpsの目標（元の曲からブラウザ内で処理）', 'Audio: AAC {kbps} kbps target (processed from the original song in this browser)'],
   'exp.audioQuality.localMeasured': ['音声：AAC {kbps}kbpsの目標・実測 {measured}kbps（ブラウザ内）', 'Audio: AAC {kbps} kbps target; measured {measured} kbps (in this browser)'],
   'exp.localProgress.loading': ['音声変換機能を読み込み中', 'Loading the audio converter'],
   'exp.localProgress.transcoding': ['ブラウザ内でAAC 320kbpsへ変換中', 'Converting to AAC 320 kbps in this browser'],
   'exp.localProgress.wait': ['音声の変換と動画の結合が完了するまでお待ちください', 'Waiting for audio conversion and video joining'],
-  'exp.serverProgress.audioServer': ['外部サーバーで音声を変換中', 'Converting audio on the external server'],
-  'exp.serverProgress.wait': ['変換と動画の結合が完了するまでお待ちください', 'Waiting for audio conversion and video joining'],
-  'exp.pre.audio-server-config': ['外部変換には、公開したサーバーのHTTPS URLとアクセストークンを設定してください。', 'External conversion requires the HTTPS URL and access token of your deployed server.'],
-  'exp.pre.audio-server-song-missing': ['外部変換には元の曲ファイルが必要です。つなぎ直してください: {name}', 'External conversion needs the original song file. Relink it: {name}'],
   'exp.pre.audio-local-song-missing': ['変換には元の曲ファイルが必要です。つなぎ直してください: {name}', 'Conversion needs the original song file. Relink it: {name}'],
   'exp.pre.audio-local-unavailable': ['このブラウザでは内蔵の音声変換を使用できません。PCのChromeかEdgeで開くか、音声の処理をブラウザ標準に変更してください。',
     'The built-in audio converter is unavailable in this browser. Open the app in desktop Chrome or Edge, or choose standard browser audio.'],
@@ -12389,33 +12383,6 @@ MV.def('i18n/strings', [], () => ({
   'err.exp.audioLocalResponse': ['内蔵の音声変換で正しいMP4を作成できませんでした。', 'The built-in audio converter did not produce a valid MP4.'],
   'err.exp.audioLocalMedia': ['音声変換に必要な元の曲を読み取れませんでした。曲ファイルをつなぎ直してください。', 'Could not read the original song needed for audio conversion. Relink the song file.'],
   'err.exp.audioLocalBusy': ['音声変換が進行中です。完了してから再試行してください。', 'Audio conversion is already running. Wait for it to finish and retry.'],
-  'exp.server.url': ['サーバーURL', 'Server URL'],
-  'exp.server.token': ['アクセストークン', 'Access token'],
-  'exp.server.check': ['接続を確認', 'Check connection'],
-  'exp.server.checking': ['接続を確認中…', 'Checking connection…'],
-  'exp.server.storage': ['URLはこの端末に保存します。プロジェクトには入りません。', 'The URL is saved on this device, outside the project.'],
-  'exp.server.tokenStorage': ['トークンはこのタブだけに保存します。', 'The token is kept only for this tab.'],
-  'exp.server.tokenEmpty': ['変換にはアクセストークンが必要です。接続確認では認証しません。', 'Conversion requires an access token. Connection checks do not verify authentication.'],
-  'exp.server.urlEmpty': ['公開したサーバーのHTTPS URLを入力してください。', 'Enter the HTTPS URL of your deployed server.'],
-  'exp.server.ready': ['AAC 320 kbps対応サーバーに接続できました。認証は変換時に確認します。', 'Connected to an AAC 320 kbps server. Authentication is checked during conversion.'],
-  'exp.server.changed': ['設定が変わりました。もう一度接続を確認してください。', 'Settings changed. Check the connection again.'],
-  'exp.server.configError': ['HTTPS URLのみ指定できます。ユーザー情報・クエリ・#は入れないでください。', 'Use an HTTPS URL without embedded credentials, query parameters or fragments.'],
-  'exp.server.networkError': ['サーバーに接続できませんでした。URLとサーバーのCORS設定を確認してください。', 'Could not reach the server. Check its URL and CORS settings.'],
-  'exp.server.timeout': ['接続確認がタイムアウトしました。', 'The connection check timed out.'],
-  'exp.server.responseError': ['AAC 320 kbps対応サーバーとして確認できませんでした。', 'The server did not identify itself as a compatible AAC 320 kbps service.'],
-  'exp.server.error': ['接続を確認できませんでした。', 'The connection could not be checked.'],
-  'exp.server.urlNotSaved': ['URLを端末に保存できません。再読み込み後は再入力してください。', 'The URL could not be saved on this device. Enter it again after reloading.'],
-  'exp.server.tokenError': ['トークンは空白を含まない半角文字で入力してください。', 'Enter the token using ASCII characters without spaces.'],
-  'exp.server.tokenNotSaved': ['トークンをタブに保存できません。再読み込み後に再入力してください。', 'The token could not be saved for this tab. Enter it again after reloading.'],
-  'err.exp.audioServerConfig': ['外部変換には、サーバーのHTTPS URLとアクセストークンを設定してください。', 'Set the server HTTPS URL and access token for external conversion.'],
-  'err.exp.audioServerAuth': ['変換サーバーの認証に失敗しました。アクセストークンを確認してください。', 'The conversion server rejected authentication. Check the access token.'],
-  'err.exp.audioServerNetwork': ['変換サーバーと通信できませんでした。URL・接続・CORS設定を確認してください。', 'Could not communicate with the conversion server. Check its URL, connection and CORS settings.'],
-  'err.exp.audioServerTooLarge': ['動画と音声がサーバーの上限を超えています。範囲・サイズ・fpsを下げてください。', 'The video and audio exceed the server upload limit. Reduce the range, resolution or fps.'],
-  'err.exp.audioServerResponse': ['変換サーバーから正しいMP4を受け取れませんでした。', 'The conversion server did not return a valid MP4.'],
-  'err.exp.audioServerMedia': ['変換サーバーが動画や音声を読み取れませんでした。', 'The conversion server could not read the video or audio.'],
-  'err.exp.audioServerBusy': ['変換サーバーが混み合っています。少し待ってから再試行してください。', 'The conversion server is busy. Wait a moment and retry.'],
-  'err.exp.audioServerTimeout': ['外部変換がタイムアウトしました。短い範囲で試すか、サーバーの制限を確認してください。', 'External conversion timed out. Try a shorter range or check the server limits.'],
-  'err.exp.audioServerConvert': ['サーバーでAAC 320kbpsへの変換に失敗しました。', 'The server could not convert the audio to AAC with a 320 kbps target.'],
   'exp.preview.title': ['短い動画で画質を比較', 'Compare a short encoded clip'],
   'exp.preview.help': ['今の再生位置付近を最大3秒、選んだサイズ・fpsで全画質に書き出します。音声は入りません。',
     'Encode up to 3 seconds around the playhead in every quality at the selected size and fps. The clips are silent.'],
@@ -12497,8 +12464,6 @@ MV.def('i18n/strings', [], () => ({
     'Compressing the original song with the browser’s audio encoder.'],
   'exp.process.detail.audioLocal': ['ブラウザ内のFFmpegがCPUで元の曲をAAC 320kbps目標に変換します。映像は再圧縮せず組み込みます。',
     'In-browser FFmpeg uses the CPU to convert the original song to AAC with a 320 kbps target. Video is copied without re-encoding.'],
-  'exp.process.detail.audioServer': ['変換サーバーで元の曲をAACに変換し、映像を再圧縮せず組み込みます。サーバーのGPU使用状況は取得できません。',
-    'The conversion server converts the original song to AAC and copies the video without re-encoding. Server GPU usage is unavailable.'],
   'exp.process.detail.finalize': ['送信済みのフレームをエンコーダーが圧縮し終えるまで待っています。ファイルの保存はこの後です。',
     'Waiting for the encoders to finish compressing all submitted frames. The file is saved afterward.'],
   'exp.process.detail.validate': ['変換後の動画・音声の長さと形式を確認しています。確認後に保存します。',
@@ -12519,8 +12484,6 @@ MV.def('i18n/strings', [], () => ({
     'Canvas rendering → WebCodecs video compression → MP4 assembly → Save'],
   'exp.process.route.local': ['Canvasで描画 → 映像を圧縮 → CPUで元の曲をAACに変換・映像をコピー → MP4を保存',
     'Canvas rendering → Video compression → CPU AAC conversion and video copy → Save MP4'],
-  'exp.process.route.server': ['Canvasで描画 → 映像を圧縮 → サーバーで音声を変換・映像をコピー → MP4を保存',
-    'Canvas rendering → Video compression → Server audio conversion and video copy → Save MP4'],
   'exp.process.route.webm': ['音声をOpusに圧縮 → Canvasで描画 → 色・透明度を圧縮 → WebMを組み立て・保存',
     'Opus audio compression → Canvas rendering → Color and transparency compression → WebM assembly and save'],
   'exp.process.route.webmSilent': ['Canvasで描画 → 色・透明度を圧縮 → WebMを組み立て・保存',
@@ -12543,7 +12506,6 @@ MV.def('i18n/strings', [], () => ({
     'Actual GPU use and utilization are not exposed by the browser. The browser also manages GPU or CPU selection for Canvas rendering.'],
   'exp.process.audioLabel': ['音声の処理', 'Audio processing'],
   'exp.process.audio.local': ['CPU・ブラウザ内FFmpeg（AAC 320kbps目標）', 'CPU · in-browser FFmpeg (AAC, 320 kbps target)'],
-  'exp.process.audio.server': ['外部の変換サーバー（AAC）', 'External conversion server (AAC)'],
   'exp.process.audio.browser': ['ブラウザの音声エンコーダー{codec}', 'Browser audio encoder{codec}'],
   'exp.process.audio.wav': ['曲を別のWAVファイルとして保存', 'Save the song as a separate WAV file'],
   'exp.process.audio.none': ['音声なし', 'No audio'],
@@ -51481,27 +51443,18 @@ MV.def('export/schedule', ['core/script', 'core/doc', 'audio/wav', 'media/sample
     return Math.ceil(((duration * total) / 8) * MUX_OVERHEAD);
   }
 
-  // Only an opaque video's enabled song uses the configured audio server. The connection and credentials are
-  // device/session settings, never document fields; this mode does not affect transparent or silent exports.
-  function usesAudioServer(doc) {
-    const out = doc && doc.output;
-    return !!(out && out.audioEncoding === 'server' && (out.format === 'mp4' || out.format === 'kit') && out.audio && doc.song);
-  }
-
   function usesLocalAudio(doc) {
     const out = doc && doc.output;
     return !!(out && out.audioEncoding === 'local' && (out.format === 'mp4' || out.format === 'kit') && out.audio && doc.song);
   }
-
-  function usesDedicatedAudio(doc) { return usesLocalAudio(doc) || usesAudioServer(doc); }
 
   function audioEnv(doc, env) {
     const e = env || {};
     // A host may explicitly resolve its actual codec (including a legacy direct Filmora call using native audio).
     // Never make its written-file list assume AAC when that execution needs a WAV. UI estimates omit this marker.
     if (e.audioResolved === true) return e;
-    return usesDedicatedAudio(doc) ? Object.assign({}, e, { audioCodec: 'mp4a.40.2', audioBitrate: AUDIO_BITRATE,
-      audioBitrateMode: null, audioSource: usesLocalAudio(doc) ? 'local' : 'server' }) : e;
+    return usesLocalAudio(doc) ? Object.assign({}, e, { audioCodec: 'mp4a.40.2', audioBitrate: AUDIO_BITRATE,
+      audioBitrateMode: null, audioSource: 'local' }) : e;
   }
 
   function estimatePngBytes(frames, w, h, alpha) {
@@ -51847,7 +51800,7 @@ MV.def('export/schedule', ['core/script', 'core/doc', 'audio/wav', 'media/sample
     const size = outputSize(plan.design.aspect, out.short);
     const { w, h } = size;
     const withAudio = kind.video && out.audio && !!doc.song;
-    const serverAudio = usesAudioServer(doc), localAudio = usesLocalAudio(doc);
+    const localAudio = usesLocalAudio(doc);
     if (localAudio && e.localAudioAvailable === false) items.push({ code: 'audio-local-unavailable', level: 'block', params: {} });
     const frames = frameCount(Math.max(0, t1 - t0), out.fps);
     const pcmBytes = WAV.HEADER_BYTES + audioFrames(frames, out.fps, WAV_RATE) * 4;
@@ -51856,7 +51809,6 @@ MV.def('export/schedule', ['core/script', 'core/doc', 'audio/wav', 'media/sample
       // scenes may encode far below the bitrate target. The runtime enforces the actual video + WAV input limit.
       items.push({ code: 'audio-local-too-large', level: 'block', params: { bytes: pcmBytes, seconds: frames / out.fps } });
     }
-    if (serverAudio && e.audioServerConfigured === false) items.push({ code: 'audio-server-config', level: 'block', params: {} });
     if (!(t1 > t0)) items.push({ code: 'range-empty', level: 'block', params: {} });
     if (kind.video && !e.webcodecs) items.push({ code: 'no-webcodecs', level: 'block', params: {} });
     else {
@@ -51872,22 +51824,13 @@ MV.def('export/schedule', ['core/script', 'core/doc', 'audio/wav', 'media/sample
       else if (mp4 && e.audioCodec === 'opus') items.push({ code: 'opus-audio', level: 'info', params: {} });
       else if (kit && !kitAac(e)) items.push({ code: 'kit-wav', level: 'info', params: { name: kitBase(doc) } });
     }
-    if (withAudio && e.songReady === false) items.push({ code: 'song-missing', level: serverAudio || localAudio ? 'block' : 'warn',
+    if (withAudio && e.songReady === false) items.push({ code: 'song-missing', level: localAudio ? 'block' : 'warn',
       params: { name: doc.song.name, ...(localAudio ? { audioSource: 'local' } : {}) } });
     if (mp4 && doc.look.backdrop === 'clear') items.push({ code: 'clear-mp4', level: 'warn', params: {} });
     if (e.fontsReady === false) items.push({ code: 'fonts-loading', level: 'info', params: {} });
     const inMemory = kit ? !(e.dirAccess === undefined ? e.fsAccess : e.dirAccess) : !e.fsAccess;
-    if (inMemory || (serverAudio || localAudio) && e.songReady !== false) {
+    if (inMemory || localAudio && e.songReady !== false) {
       let bytes = inMemory ? memoryBytes(doc, plan, e, range, size, withAudio) : 0;
-      if (serverAudio && e.songReady !== false) {
-        const seconds = Math.max(0, range.t1 - range.t0), bits = bitrate(w, h, out.fps, out.quality);
-        // The external request holds a silent MP4 and a stereo PCM16 WAV, then receives the AAC MP4. These buffers
-        // are needed even when the finished output is written directly to disk. An in-memory output already counts
-        // the returned main movie (or its Filmora ZIP), so add it only for the direct-to-disk route.
-        bytes += estimateBytes(seconds, bits, false) + WAV.HEADER_BYTES
-          + audioFrames(frameCount(seconds, out.fps), out.fps, WAV_RATE) * 4;
-        if (!inMemory) bytes += estimateBytes(seconds, bits, true, AUDIO_BITRATE);
-      }
       if (localAudio && e.songReady !== false) {
         const movie = estimateBytes(Math.max(0, t1 - t0), bitrate(w, h, out.fps, out.quality), true, AUDIO_BITRATE);
         // WORKERFS references the input blobs. MEMFS keeps the converted movie and returning it creates another
@@ -51922,7 +51865,7 @@ MV.def('export/schedule', ['core/script', 'core/doc', 'audio/wav', 'media/sample
     FLASH_PARTS, FLASH_LIMIT, FLASH_SAFE_AMP,
     ALPHA_SHARE, WAV_RATE, KIT_README, KIT_SHORTS, FORMATS,
     frameCount, ts, frameDur, audioFrames, keyInterval, audioChunkCount, audioChunk, fillPlanar, mixMatrix,
-    usesAudioServer, usesLocalAudio, usesDedicatedAudio, audioEnv,
+    usesLocalAudio, audioEnv,
     outputSize, bitrate, alphaBitrate, estimateBytes, estimateWebmBytes, estimatePngBytes, eta, pickAvc, pickVp9,
     exportRange, backdropFor, renderScale, fileName, frameName, kitOptions, kitBase, kitFolder, kitFiles, layerDiffs,
     flashEvents, flashRate, extremeCuts, preflight,
@@ -54612,7 +54555,7 @@ MV.def('export/host/audio_runtime', ['export/schedule', 'export/host/mp4'], (S, 
 
   return { prepare, convert, support, LIMITS, MAX_INPUT_BYTES, MAX_SECONDS, CORE_BYTES, ASSETS, VERSION, baseURL };
 });
-/* 文字PVメーカー v2 — original work. Original PCM range and converted-MP4 validation shared by local and server AAC conversion. */
+/* 文字PVメーカー v2 — original work. Original PCM range and converted-MP4 validation for built-in AAC conversion. */
 MV.def('export/host/audio_source', ['export/schedule', 'export/host/mp4', 'audio/wav', 'media/isobmff'], (S, J, WAV, ISO) => {
   'use strict';
 
@@ -55136,6 +55079,10 @@ MV.def('export/host/audio_local', ['export/schedule', 'export/host/mp4', 'export
 
     async function exportVideo(opts) {
       const o = opts || {}, song = o.audio && o.doc.output.audio ? o.audio : null;
+      if (!song && S.usesLocalAudio(o.doc)) {
+        await o.sink.abort();
+        throw error('media');
+      }
       if (!song) return J.exportVideo(o);
       const started = performance.now(), temporary = SINK.createMemorySink({ name: 'video.mp4', type: 'video/mp4' });
       try {
@@ -55160,244 +55107,6 @@ MV.def('export/host/audio_local', ['export/schedule', 'export/host/mp4', 'export
 
     return { prepare, convert, exportVideo, TARGET, MAX_INPUT_BYTES, MAX_SECONDS };
   });
-/* 文字PVメーカー v2 — original work. External AAC: frozen silent MP4 + exact original PCM range → configured HTTPS service → original video with AAC 320 kbps. */
-MV.def('export/host/audio_server', ['export/schedule', 'export/host/mp4', 'export/host/sink', 'export/host/audio_source', 'media/isobmff'], (S, J, SINK, SOURCE, ISO) => {
-  'use strict';
-
-  const SERVICE = 'moji-pv-audio';
-  const VERSION = 1;
-  const TARGET = SOURCE.TARGET;
-  const MULTIPART_MARGIN = 64 * 1024;
-  const PREFIX_LIMIT = ISO.MAX_MOOV + 8192;
-
-  function error(code, detail) { return new S.ExportError('audio-server-' + code, 'external audio conversion ' + code, detail); }
-
-  // HTTPS only. No credentials, query or fragment can silently send a secret to a different place. A path prefix is
-  // allowed for services behind a reverse proxy. Tokens stay in request headers and never enter export metadata.
-  function validateConfig(input) {
-    const raw = input || {};
-    if (typeof raw.url !== 'string' || !raw.url.trim()) throw error('config');
-    let url;
-    try { url = new URL(raw.url.trim()); } catch (err) { throw error('config'); }
-    if (url.protocol !== 'https:' || url.username || url.password || url.href.includes('?') || url.href.includes('#')) throw error('config');
-    const token = raw.token === undefined ? '' : raw.token;
-    if (typeof token !== 'string' || (token && !/^[\x21-\x7e]{1,4096}$/.test(token))) throw error('config');
-    return { url: url.href.replace(/\/+$/, ''), token };
-  }
-
-  function httpError(status) {
-    const kind = status === 401 || status === 403 ? 'auth' : status === 413 ? 'too-large' : status === 422 ? 'media'
-      : status === 429 ? 'busy' : status === 504 ? 'timeout' : 'convert';
-    return error(kind, { status });
-  }
-
-  async function cancelBody(response) {
-    try { if (response && response.body) await response.body.cancel(); } catch (err) { /* already read or closed */ }
-  }
-
-  async function request(config, path, init, fetchImpl) {
-    const opts = Object.assign({ credentials: 'omit', redirect: 'error', referrerPolicy: 'no-referrer', cache: 'no-store' }, init);
-    J.checkAbort(opts.signal);
-    let response;
-    try { response = await (fetchImpl || globalThis.fetch)(config.url + path, opts); }
-    catch (err) {
-      J.checkAbort(opts.signal);
-      if (err && err.name === 'AbortError') throw new S.ExportError('cancelled', 'export cancelled');
-      // A fetch exception or server error may contain an endpoint, token or an internal path. Do not echo it.
-      throw error('network');
-    }
-    if ((opts.signal && opts.signal.aborted) || !response || !response.ok) {
-      await cancelBody(response);
-      J.checkAbort(opts.signal);
-      throw httpError(response ? response.status : 0);
-    }
-    return response;
-  }
-
-  // Health confirms reachability/protocol/limits; authentication is checked only when converting. No song or token is
-  // sent by this check, so opening settings does not disclose media to a configured service.
-  async function check(input, opts) {
-    const config = validateConfig(input), o = opts || {};
-    const response = await request(config, '/health', { signal: o.signal, headers: { Accept: 'application/json' } }, o.fetchImpl);
-    let value;
-    try { value = await response.json(); } catch (err) { J.checkAbort(o.signal); throw error('response'); }
-    J.checkAbort(o.signal);
-    if (!value || value.service !== SERVICE || value.version !== VERSION || value.targetBitrate !== TARGET
-      || !Number.isSafeInteger(value.maxUploadBytes) || value.maxUploadBytes <= MULTIPART_MARGIN) throw error('response');
-    return { service: SERVICE, version: VERSION, targetBitrate: TARGET, maxUploadBytes: value.maxUploadBytes, authChecked: false };
-  }
-
-  // Same trim, downmix and silence padding as the browser encoder. This is the source PCM, never audio decoded from a
-  // 192 kbps intermediate MP4. The range is N/fps (including the final rendered frame), not the unrounded UI duration.
-  function audioBlob(song, job, signal) { return SOURCE.audioBlob(song, job, signal, error); }
-
-  function headerNumber(headers, name) {
-    const raw = headers && headers.get(name);
-    return raw && /^\d+$/.test(raw) ? Number(raw) : null;
-  }
-
-  function resultInfo(response, frames) {
-    const headers = response.headers;
-    const type = headers && headers.get('Content-Type');
-    const target = headerNumber(headers, 'X-Audio-Bitrate-Target');
-    const count = headerNumber(headers, 'X-Video-Frames');
-    if (!type || type.split(';')[0].trim().toLowerCase() !== 'video/mp4' || target !== TARGET || count !== frames
-      || headers.get('X-Audio-Codec') !== 'aac') throw error('response');
-    const raw = headers.get('X-Audio-Bitrate-Measured');
-    const measured = raw ? Number(raw) : null;
-    if (raw && (!Number.isFinite(measured) || measured <= 0)) throw error('response');
-    return { audio: true, audioCodec: 'mp4a.40.2', audioBitrate: TARGET, audioBitrateMode: null, audioSource: 'server',
-      audioMeasuredBitrate: measured };
-  }
-
-  function prefixRange(parts, at, length) {
-    const out = new Uint8Array(length);
-    let from = 0, copied = 0;
-    for (const part of parts) {
-      const a = Math.max(0, at - from), b = Math.min(part.byteLength, at + length - from);
-      if (b > a) { out.set(part.subarray(a, b), copied); copied += b - a; }
-      from += part.byteLength;
-      if (copied === length) break;
-    }
-    return out;
-  }
-
-  // The service returns faststart MP4. Validate its bounded metadata prefix before committing any payload to a sink:
-  // a 200 response with correct headers but HTML, a silent file or missing frames cannot masquerade as AAC320 output.
-  // Only the moov/header prefix is copied; the potentially large mdat is streamed without an extra whole-file buffer.
-  async function validPrefix(parts, received, total, job) {
-    let at = 0, ftyp = false, moov = false;
-    while (at + 8 <= received) {
-      const head = prefixRange(parts, at, Math.min(16, received - at)), view = new DataView(head.buffer);
-      let size = view.getUint32(0), header = 8;
-      const type = String.fromCharCode(head[4], head[5], head[6], head[7]);
-      if (size === 1) {
-        if (head.length < 16) return false;
-        size = view.getUint32(8) * 0x100000000 + view.getUint32(12); header = 16;
-      } else if (size === 0) size = total - at;
-      if (!Number.isSafeInteger(size) || size < header || at + size > total) throw error('response');
-      if (at === 0 && type !== 'ftyp') throw error('response');
-      if (type === 'mdat') {
-        if (!ftyp || !moov || at + size !== total) throw error('response');
-        const prefix = prefixRange(parts, 0, at + header);
-        let movie;
-        try {
-          movie = await ISO.parse(async (offset, length) => prefix.subarray(offset, offset + length), total);
-        } catch (err) { throw error('response'); }
-        SOURCE.validateMovie(movie, job, error);
-        return true;
-      }
-      if (at + size > PREFIX_LIMIT || (type === 'ftyp' && size > 4096)) throw error('response');
-      if (at + size > received) return false;
-      if (type === 'ftyp') ftyp = true;
-      else if (type === 'moov') { if (moov) throw error('response'); moov = true; }
-      else if (type !== 'free' && type !== 'wide') throw error('response');
-      at += size;
-    }
-    return false;
-  }
-
-  async function intoSink(response, sink, signal, job) {
-    const expected = headerNumber(response.headers, 'Content-Length');
-    let bytes = 0, reader = null, validated = false;
-    let prefix = [];
-    try {
-      if (response.body && typeof response.body.getReader === 'function') {
-        reader = response.body.getReader();
-        while (true) {
-          J.checkAbort(signal);
-          const item = await reader.read();
-          J.checkAbort(signal);
-          if (item.done) break;
-          if (item.value && item.value.byteLength) {
-            bytes += item.value.byteLength;
-            if (!expected || bytes > expected) throw error('response');
-            if (!validated) {
-              prefix.push(item.value);
-              validated = await validPrefix(prefix, bytes, expected, job);
-              if (validated) { for (const part of prefix) await sink.write(part); prefix = []; }
-            } else await sink.write(item.value);
-          }
-        }
-      } else {
-        const blob = await response.blob();
-        J.checkAbort(signal);
-        bytes = blob.size;
-        const metadata = new Uint8Array(await blob.slice(0, PREFIX_LIMIT).arrayBuffer());
-        validated = bytes > 0 && await validPrefix([metadata], metadata.length, bytes, job);
-        if (validated) await sink.write(blob);
-      }
-      if (!validated || !bytes || (expected !== null && expected !== bytes)) throw error('response');
-      J.checkAbort(signal);
-      return await sink.close();
-    } catch (err) {
-      J.checkAbort(signal);
-      if (err instanceof S.ExportError) throw err;
-      throw error('network');
-    } finally {
-      if (reader) {
-        try { await reader.cancel(); } catch (err) { /* network is already closed */ }
-        try { reader.releaseLock(); } catch (err) { /* already released */ }
-      }
-    }
-  }
-
-  // Converts a completed silent MP4 without rendering or encoding its video again. On error/cancel no lower bitrate
-  // is substituted. The caller owns sink.abort(): standalone export aborts its file; a kit aborts the whole folder.
-  async function convert(opts) {
-    const o = opts || {}, config = validateConfig(o.audioServer);
-    if (!config.token) throw error('auth');
-    if (!(o.video instanceof Blob) || !o.video.size) throw error('media');
-    const range = SOURCE.rangeOf(o.job, o.audio, error);
-    J.reportProcess(o, { stage: 'audioPrepare', backend: 'server', audioSource: 'server', audioCodec: 'mp4a.40.2', videoCopy: true, temporary: false });
-    if (o.onProgress) o.onProgress({ phase: 'audioServer', i: 0, N: 0, eta: null });
-    const health = o.health || await check(config, { signal: o.signal, fetchImpl: o.fetchImpl });
-    if (o.video.size + range.bytes + MULTIPART_MARGIN > health.maxUploadBytes) throw error('too-large');
-    const pcm = await audioBlob(o.audio, o.job, o.signal);
-    const body = new FormData();
-    body.append('video', o.video, 'video.mp4');
-    body.append('audio', pcm, 'audio.wav');
-    body.append('frames', String(o.job.N));
-    body.append('fps', String(o.job.fps));
-    J.reportProcess(o, { stage: 'audio', backend: 'server' });
-    const response = await request(config, '/v1/convert', { method: 'POST', signal: o.signal, body,
-      headers: { Authorization: 'Bearer ' + config.token, Accept: 'video/mp4' } }, o.fetchImpl);
-    let info;
-    try { info = resultInfo(response, o.job.N); }
-    catch (err) { await cancelBody(response); throw err; }
-    J.reportProcess(o, { stage: 'save' });
-    const done = await intoSink(response, o.sink, o.signal, o.job);
-    return Object.assign({}, done, info);
-  }
-
-  // Standalone server-audio MP4: one silent browser encode, then upload the original exact PCM range. Inputs are
-  // captured by the export caller. No-song/audio-off exports use the normal local path without any server request.
-  async function exportVideo(opts) {
-    const o = opts || {}, song = o.audio && o.doc.output.audio ? o.audio : null;
-    if (!song) return J.exportVideo(o);
-    const started = performance.now(), temporary = SINK.createMemorySink({ name: 'video.mp4', type: 'video/mp4' });
-    try {
-      const config = validateConfig(o.audioServer);
-      if (!config.token) throw error('auth');
-      J.reportProcess(o, { stage: 'prepare', format: 'mp4', backend: 'server', audioSource: 'server' });
-      const health = await check(config, { signal: o.signal, fetchImpl: o.fetchImpl });
-      const local = await J.exportVideo(Object.assign({}, o, { audio: null, sink: temporary, temporary: true }));
-      const plan = o.engine.plan;
-      if (!plan) throw new S.ExportError('no-plan', 'the engine has no plan');
-      const range = S.exportRange(o.doc, plan);
-      const size = S.outputSize(plan.design.aspect, o.doc.output.short);
-      const done = await convert({ video: local.blob, audio: song, job: { t0: range.t0, N: local.frames, fps: o.doc.output.fps, w: size.w, h: size.h },
-        sink: o.sink, audioServer: config, health, signal: o.signal, onProgress: o.onProgress, onProcess: o.onProcess, fetchImpl: o.fetchImpl });
-      return Object.assign({}, local, done, { blob: done.blob, name: o.sink.name || S.fileName(o.doc, 'mp4'), ms: performance.now() - started });
-    } catch (err) {
-      await o.sink.abort();
-      await temporary.abort();
-      throw J.exportFailure(err, o.signal, null);
-    }
-  }
-
-  return { validateConfig, check, convert, exportVideo, audioBlob, TARGET, MULTIPART_MARGIN };
-});
 /* 文字PVメーカー v2 — original work. Transparent WebM export: engine fork → RGBA frames → two VP9 encoders (colour, alpha as luma) → export/webm with Opus → sink (DESIGN_2_1 §13.5). */
 MV.def('export/host/webm', ['export/schedule', 'export/webm', 'export/host/mp4'], (S, W, J) => {
   'use strict';
@@ -55624,7 +55333,7 @@ MV.def('export/host/webm', ['export/schedule', 'export/webm', 'export/host/mp4']
 });
 /* 文字PVメーカー v2 — original work. The Filmora kit: one pass over the timeline writes the main MP4, the transparent overlay, the background and green-screen MP4s, the song WAV, SRT, LRC and a README into a folder or one ZIP (DESIGN_2_1 §13.9). */
 MV.def('export/host/kit', ['export/schedule', 'export/subtitles', 'export/zip', 'export/host/mp4', 'export/host/webm',
-  'export/host/sink', 'export/host/audio_server', 'export/host/audio_local', 'audio/wav', 'core/commands', 'i18n/t', 'i18n/strings'], (S, SUB, Z, J, WH, SINK, AS, AL, WAV, C, T, STRINGS) => {
+  'export/host/sink', 'export/host/audio_local', 'export/host/audio_source', 'audio/wav', 'core/commands', 'i18n/t', 'i18n/strings'], (S, SUB, Z, J, WH, SINK, AL, SOURCE, WAV, C, T, STRINGS) => {
   'use strict';
 
   const KEY_COLOUR = '#00B140';         // the green screen's key colour (D§4.19.4 `chroma`)
@@ -55772,7 +55481,7 @@ MV.def('export/host/kit', ['export/schedule', 'export/subtitles', 'export/zip', 
   // --- exportKit -----------------------------------------------------------------------------------------------------
 
   // exportKit({ engine, doc, audio: AudioBuffer | null, dir: DirSink | null, signal, onProgress, assets?, canvas?, lib?,
-  //             codecs?, audioLocal?: true | Runtime, audioServer?: Config }) → { files: [{ name, kind, bytes }], ms, audio: 'aac' | 'wav' | 'none', frames, bytes, folder,
+  //             codecs?, audioLocal?: true | Runtime }) → { files: [{ name, kind, bytes }], ms, audio: 'aac' | 'wav' | 'none', frames, bytes, folder,
   //                            codec, overlayCodec, audioCodec, audioBitrate, audioBitrateMode, acceleration,
   //                            accelerationByOutput, name?, blob? }
   // audioBitrate is the configured AAC target, or the WAV's exact PCM bitrate; null when no song is written.
@@ -55781,8 +55490,8 @@ MV.def('export/host/kit', ['export/schedule', 'export/subtitles', 'export/zip', 
   // (the §13.5 transparent WebM, backdrop `clear`, no sound), the background MP4 (layers 'ground'), the green-screen MP4
   // (the document with backdrop `chroma`, quality max), then the song WAV (when the MP4 has no AAC), SRT (BOM, the
   // export range), LRC (song times) and README_Filmora.txt.
-  // A dedicated audio mode converts only the silent main MP4 from original PCM after this shared video pass; local
-  // runs in the browser, server uses the configured HTTPS service. Neither re-encodes video nor writes the fallback WAV.
+  // Built-in audio converts only the silent main MP4 from original PCM after this shared video pass. It runs in the
+  // browser, copies the encoded video and writes AAC in the main MP4 rather than a fallback WAV.
   // One pass over the timeline: two engine forks — eA (the document) and eG (backdrop chroma, only with the green
   // screen) — share one AssetStore (`assets.fork()`, when the caller passes its store; otherwise each fork makes its
   // own), so each source frame is decoded once. Per frame: await both forks' media frames, then render and encode main,
@@ -55823,17 +55532,15 @@ MV.def('export/host/kit', ['export/schedule', 'export/subtitles', 'export/zip', 
       }
       const { w, h, fps } = jobA;
       const bits = S.bitrate(w, h, fps, doc.output.quality);
-      const main = await J.videoConfig(o.codecs, jobA, bits);
       const song = o.audio && doc.output.audio && doc.song ? o.audio : null;
-      const server = song && o.audioServer ? AS.validateConfig(o.audioServer) : null;
-      const local = !!(song && !server && o.audioLocal);
-      const convertedAudio = !!(server || local);
-      if (server && !server.token) throw new S.ExportError('audio-server-auth', 'external audio conversion auth');
-      const health = server ? await AS.check(server, { signal: o.signal, fetchImpl: o.fetchImpl }) : null;
+      const local = !!(o.audioLocal && doc.output.audio && doc.song);
+      if (local) SOURCE.rangeOf(jobA, song, (code) => new S.ExportError('audio-local-' + code, 'local audio conversion ' + code));
+      const convertedAudio = local;
+      const main = await J.videoConfig(o.codecs, jobA, bits);
       const localRuntime = local ? await AL.prepare({ audioLocal: o.audioLocal, signal: o.signal, onProgress: say, onProcess: o.onProcess }) : null;
       const acfg = song && !convertedAudio ? await J.audioConfig(o.codecs, song, kitAudioList(o.codecs)) : null;
       const files = S.kitFiles(doc, jobA.plan, { audioResolved: true, audioCodec: convertedAudio ? 'mp4a.40.2' : acfg ? acfg.codec : null,
-        audioBitrate: convertedAudio ? AS.TARGET : acfg ? acfg.bitrate : null, songReady: !!song });
+        audioBitrate: convertedAudio ? AL.TARGET : acfg ? acfg.bitrate : null, songReady: !!song });
       const fileOf = (kind) => files.find((f) => f.kind === kind) || null;
       let overlay = null;
       if (kit.overlay) {
@@ -55891,8 +55598,7 @@ MV.def('export/host/kit', ['export/schedule', 'export/subtitles', 'export/zip', 
         const silent = written.get('main');
         const args = { video: silent.blob, audio: song, job: jobA, sink: await target.file(fileOf('main').name, 'main'),
           signal: o.signal, onProgress: say, onProcess: o.onProcess };
-        encodedAudio = local ? await AL.convert(Object.assign(args, { runtime: localRuntime }))
-          : await AS.convert(Object.assign(args, { audioServer: server, health, fetchImpl: o.fetchImpl }));
+        encodedAudio = await AL.convert(Object.assign(args, { runtime: localRuntime }));
         written.set('main', encodedAudio);
       }
 
@@ -58123,202 +57829,6 @@ MV.def('ui/ai_thinking', ['ui/dom'], (dom) => {
   }
 
   return { orb, mountHud, STAGES };
-});
-/* 文字PVメーカー v2 — original work. Device-local audio server URL and tab-only credentials; health checks run only on request. */
-MV.def('ui/audio_server_settings', ['ui/dom'], (dom) => {
-  'use strict';
-
-  const URL_KEY = 'mojipv.audioServer.url';
-  const TOKEN_KEY = 'mojipv.audioServer.token';
-  const settings = new WeakMap();
-  const ERROR_KEYS = Object.freeze({
-    'audio-server-config': 'exp.server.configError', 'audio-server-network': 'exp.server.networkError',
-    'audio-server-timeout': 'exp.server.timeout', 'audio-server-response': 'exp.server.responseError',
-  });
-
-  function storageOf(kind) {
-    try { return globalThis[kind] || null; } catch (err) { return null; }
-  }
-
-  function read(storage, key) {
-    try { return storage && storage.getItem(key) || ''; } catch (err) { return ''; }
-  }
-
-  function write(storage, key, value) {
-    if (!storage) return false;
-    try {
-      if (value) storage.setItem(key, value); else storage.removeItem(key);
-      return true;
-    } catch (err) { return false; }
-  }
-
-  // Invalid URLs stay in the current input so they can be corrected, but are never saved or used for a check.
-  function safeURL(value) {
-    try {
-      const url = new URL(value);
-      return url.protocol === 'https:' && !!url.hostname && !url.username && !url.password
-        && !value.includes('?') && !value.includes('#');
-    } catch (err) { return false; }
-  }
-
-  function dataOf(app, options) {
-    if (settings.has(app)) return settings.get(app);
-    const opts = options || {};
-    const local = opts.local === undefined ? storageOf('localStorage') : opts.local;
-    const session = opts.session === undefined ? storageOf('sessionStorage') : opts.session;
-    const savedURL = read(local, URL_KEY).trim();
-    const data = { local, session, url: safeURL(savedURL) ? savedURL : '', token: read(session, TOKEN_KEY).trim(),
-      revision: 0, urlStoreError: false, tokenStoreError: false, listeners: new Set() };
-    if (savedURL && !safeURL(savedURL)) write(local, URL_KEY, '');
-    settings.set(app, data);
-    return data;
-  }
-
-  function getConfig(app) {
-    const data = dataOf(app);
-    return { url: data.url, token: data.token };
-  }
-
-  // Injectable stores keep this controller testable without a browser or network. Secrets never enter app.doc.
-  function createController(app, options) {
-    const opts = options || {};
-    const data = dataOf(app, opts);
-    let state = { phase: 'idle', note: null, health: null };
-    let request = null, dead = false;
-
-    function emit(next) {
-      state = next;
-      if (!dead && opts.onChange) opts.onChange(state);
-    }
-
-    function cancel(note) {
-      if (request) { request.abort.abort(); request = null; }
-      emit({ phase: 'idle', note: note || 'exp.server.changed', health: null });
-    }
-
-    function changed() { cancel('exp.server.changed'); }
-    data.listeners.add(changed);
-
-    function setConfig(patch) {
-      if (dead) return false;
-      let modified = false;
-      for (const field of ['url', 'token']) {
-        if (!Object.prototype.hasOwnProperty.call(patch, field)) continue;
-        const value = typeof patch[field] === 'string' ? patch[field].trim() : '';
-        if (data[field] === value) continue;
-        data[field] = value;
-        if (field === 'url') data.urlStoreError = !write(data.local, URL_KEY, safeURL(value) ? value : '');
-        else data.tokenStoreError = !write(data.session, TOKEN_KEY, value);
-        modified = true;
-      }
-      if (!modified) return false;
-      data.revision += 1;
-      for (const listener of [...data.listeners]) listener();
-      if (app.bus && app.bus.emit) app.bus.emit('audio.server');
-      return true;
-    }
-
-    async function check() {
-      if (dead || request || app.exporting) return false;
-      const client = app.svc.exporter.audioServer;
-      let config;
-      const values = getConfig(app);
-      if (!safeURL(values.url)) { emit({ phase: 'error', note: 'exp.server.configError', health: null }); return false; }
-      try { config = client.validateConfig(values); }
-      catch (err) {
-        emit({ phase: 'error', note: err && err.code === 'audio-server-config' ? 'exp.server.tokenError'
-          : ERROR_KEYS[err && err.code] || 'exp.server.error', health: null });
-        return false;
-      }
-      const item = { abort: new AbortController(), revision: data.revision };
-      request = item;
-      emit({ phase: 'checking', note: 'exp.server.checking', health: null });
-      try {
-        const health = await client.check(config, { signal: item.abort.signal });
-        if (dead || request !== item || item.abort.signal.aborted || data.revision !== item.revision) return false;
-        request = null;
-        emit({ phase: 'ready', note: 'exp.server.ready', health });
-        return true;
-      } catch (err) {
-        if (dead || request !== item || item.abort.signal.aborted || data.revision !== item.revision) return false;
-        request = null;
-        emit({ phase: err && err.code === 'cancelled' ? 'idle' : 'error',
-          note: err && err.code === 'cancelled' ? 'exp.server.changed' : ERROR_KEYS[err && err.code] || 'exp.server.error', health: null });
-        return false;
-      }
-    }
-
-    function destroy() {
-      if (dead) return;
-      dead = true;
-      if (request) { request.abort.abort(); request = null; }
-      data.listeners.delete(changed);
-    }
-
-    return { get state() { return state; }, get busy() { return !!request; },
-      get persistence() { return { urlFailed: data.urlStoreError, tokenFailed: data.tokenStoreError }; },
-      getConfig: () => getConfig(app), setConfig, check, cancel, destroy };
-  }
-
-  function mount(app) {
-    const { h } = dom;
-    const t = app.t;
-    const url = h('input', { type: 'url', class: 'text-input', autocomplete: 'off', spellcheck: false,
-      'aria-label': t('exp.server.url'), 'data-audio-server': 'url' });
-    const token = h('input', { type: 'password', class: 'text-input', autocomplete: 'off', spellcheck: false,
-      'aria-label': t('exp.server.token'), 'data-audio-server': 'token' });
-    const check = h('button', { type: 'button', class: 'btn quiet', 'data-act': 'audio-server.check', text: t('exp.server.check') });
-    const status = h('p', { class: 'note audio-server-status', role: 'status', 'aria-live': 'polite' });
-    const emptyToken = h('p', { class: 'note subtle audio-server-token-empty', text: t('exp.server.tokenEmpty') });
-    const urlWarning = h('p', { class: 'note audio-server-storage-warning', hidden: true, text: t('exp.server.urlNotSaved') });
-    const tokenWarning = h('p', { class: 'note audio-server-storage-warning', hidden: true, text: t('exp.server.tokenNotSaved') });
-    const root = h('div', { class: 'audio-server-settings' },
-      h('label', { class: 'field' }, h('span', { class: 'field-label', text: t('exp.server.url') }), url,
-        h('span', { class: 'note subtle', text: t('exp.server.storage') }), urlWarning),
-      h('label', { class: 'field' }, h('span', { class: 'field-label', text: t('exp.server.token') }), token,
-        h('span', { class: 'note subtle', text: t('exp.server.tokenStorage') }), tokenWarning), emptyToken, check, status);
-    let controller = null;
-
-    function render() {
-      if (!controller) return;
-      const config = controller.getConfig();
-      const state = controller.state;
-      root.dataset.audioServerState = state.phase;
-      if (document.activeElement !== url) url.value = config.url;
-      if (document.activeElement !== token) token.value = config.token;
-      const busy = !!app.exporting;
-      url.disabled = token.disabled = busy;
-      check.disabled = busy || controller.busy || !safeURL(config.url);
-      emptyToken.hidden = !!config.token;
-      urlWarning.hidden = !controller.persistence.urlFailed;
-      tokenWarning.hidden = !controller.persistence.tokenFailed;
-      const note = !config.url ? 'exp.server.urlEmpty' : !safeURL(config.url) ? 'exp.server.configError' : state.note;
-      status.textContent = note ? t(note) : '';
-    }
-
-    controller = createController(app, { onChange: render });
-    url.addEventListener('input', () => controller.setConfig({ url: url.value }));
-    token.addEventListener('input', () => controller.setConfig({ token: token.value }));
-    url.addEventListener('change', render);
-    token.addEventListener('change', render);
-    check.addEventListener('click', () => { controller.check(); });
-    check.addEventListener('keydown', (ev) => {
-      if (!ev.ctrlKey && !ev.metaKey && !ev.altKey && [' ', 'Spacebar', 'Enter'].includes(ev.key)) ev.stopPropagation();
-    });
-    let exporting = !!app.exporting;
-    const offExport = app.bus && app.bus.on ? app.bus.on('export', () => {
-      const next = !!app.exporting;
-      if (next !== exporting) { exporting = next; render(); }
-    }) : null;
-    const offView = app.view && typeof app.view.on === 'function' ? app.view.on((changed, state) => {
-      if (changed.includes('step') && state.step !== 'export' && controller.busy) controller.cancel();
-    }) : null;
-    render();
-    return { root, controller, update() { if (root.hidden && controller.busy) controller.cancel(); else render(); },
-      destroy() { if (offExport) offExport(); if (offView) offView(); controller.destroy(); } };
-  }
-
-  return { URL_KEY, TOKEN_KEY, getConfig, createController, mount };
 });
 /* 文字PVメーカー v2 — original work. カメラ EXTREME in the editor: the switch's flow (the motion-sickness notice, the turn-off question), what is on where, and the notice before an EXTREME move is picked by hand (DESIGN_EXTREME §2.6, §3.5). */
 MV.def('ui/extreme', ['ui/dom', 'core/pins', 'core/paths', 'core/shot', 'planner/extreme', 'planner/areas'],
@@ -62120,8 +61630,7 @@ MV.def('ui/output', ['export/schedule', 'engine/scene/frame'], (S, F) => {
   // H.264 encoder its own text (the MP4s of the set cannot be made here; no PNG sequence is offered).
   function checkKey(item) {
     if (item.code === 'no-h264' && item.params && item.params.format === 'kit') return 'exp.pre.kit-no-h264';
-    if (item.code === 'song-missing' && item.level === 'block') return item.params && item.params.audioSource === 'local'
-      ? 'exp.pre.audio-local-song-missing' : 'exp.pre.audio-server-song-missing';
+    if (item.code === 'song-missing' && item.level === 'block') return 'exp.pre.audio-local-song-missing';
     return 'exp.pre.' + item.code;
   }
 
@@ -62243,11 +61752,6 @@ MV.def('ui/output', ['export/schedule', 'engine/scene/frame'], (S, F) => {
     cancelled: 'err.exp.cancelled', sink: 'err.exp.sink', 'range-empty': 'exp.pre.range-empty',
     'no-webcodecs': 'exp.pre.no-webcodecs', 'no-codec': 'err.exp.codec', codec: 'err.exp.codec', 'no-plan': 'err.exp.noPlan',
     media: 'err.exp.media', 'no-vp9': 'exp.pre.no-vp9',
-    'audio-server-config': 'err.exp.audioServerConfig', 'audio-server-auth': 'err.exp.audioServerAuth',
-    'audio-server-network': 'err.exp.audioServerNetwork', 'audio-server-too-large': 'err.exp.audioServerTooLarge',
-    'audio-server-response': 'err.exp.audioServerResponse', 'audio-server-media': 'err.exp.audioServerMedia',
-    'audio-server-busy': 'err.exp.audioServerBusy', 'audio-server-timeout': 'err.exp.audioServerTimeout',
-    'audio-server-convert': 'err.exp.audioServerConvert',
     'audio-local-unavailable': 'err.exp.audioLocalUnavailable', 'audio-local-load': 'err.exp.audioLocalLoad',
     'audio-local-memory': 'err.exp.audioLocalMemory', 'audio-local-too-large': 'err.exp.audioLocalTooLarge',
     'audio-local-convert': 'err.exp.audioLocalConvert', 'audio-local-response': 'err.exp.audioLocalResponse',
@@ -62299,7 +61803,7 @@ MV.def('ui/output', ['export/schedule', 'engine/scene/frame'], (S, F) => {
     const format = st.format || p.format || 'mp4';
     const legacy = st.progressPhase || st.part || st.phase;
     const stage = PROCESS_STAGES.has(p.stage) ? p.stage : legacy === 'audioLocalLoading' ? 'audioLoading'
-      : legacy === 'audioLocal' || legacy === 'audioServer' ? 'audio' : legacy === 'files' || legacy === 'zip' ? legacy
+      : legacy === 'audioLocal' ? 'audio' : legacy === 'files' || legacy === 'zip' ? legacy
         : st.N > 0 ? 'video' : 'prepare';
     const png = format === 'png' || format === 'pngAlpha';
     const outputs = Array.isArray(p.outputs) ? p.outputs.filter((o) => o && typeof o === 'object') : [];
@@ -62309,10 +61813,9 @@ MV.def('ui/output', ['export/schedule', 'engine/scene/frame'], (S, F) => {
       : hints[0] === 'prefer-hardware' ? 'hardware' : hints[0] === 'prefer-software' ? 'software'
         : infos.some((a) => a.fallback) ? 'fallback' : 'browser';
     const codecs = [...new Set((outputs.length ? outputs.map((o) => o.codec) : [p.codec]).map(codecName).filter(Boolean))];
-    const source = p.audioSource === null ? 'none' : p.audioSource || (legacy === 'audioLocal' || legacy === 'audioLocalLoading' ? 'local'
-      : legacy === 'audioServer' ? 'server' : 'pending');
+    const source = p.audioSource === null ? 'none' : p.audioSource || (legacy === 'audioLocal' || legacy === 'audioLocalLoading' ? 'local' : 'pending');
     const routeSource = st.audioRoute || source;
-    const intermediateAudio = p.temporary && (routeSource === 'local' || routeSource === 'server');
+    const intermediateAudio = p.temporary && routeSource === 'local';
     // A ready original song without native AAC becomes the Filmora set's separate WAV. The host's explicit null
     // codec confirms that fallback during the video pass, before its files stage creates the WAV itself.
     const nativeWavFallback = format === 'kit' && routeSource === 'browser' && p.audioSource === null && p.audioCodec === null;
@@ -62320,14 +61823,14 @@ MV.def('ui/output', ['export/schedule', 'engine/scene/frame'], (S, F) => {
     const audio = png ? 'none' : intermediateAudio ? routeSource : nativeWavFallback ? 'wav'
       : source === 'none' || noNativeAudio ? 'none' : source;
     const detail = stage === 'video' && png ? 'images' : stage === 'video' && format === 'webmAlpha' ? 'transparent'
-      : stage === 'audio' && source === 'local' ? 'audioLocal' : stage === 'audio' && source === 'server' ? 'audioServer'
+      : stage === 'audio' && source === 'local' ? 'audioLocal'
         : stage === 'finalize' && p.backend === 'ffmpeg' ? 'validate' : stage === 'mux' && p.temporary ? 'muxTemporary' : stage;
     const route = png ? 'png' : format === 'webmAlpha' ? audio === 'none' ? 'webmSilent' : 'webm' : format === 'kit' ? 'kit'
-      : routeSource === 'local' ? 'local' : routeSource === 'server' ? 'server' : audio === 'none' ? 'silent' : 'mp4';
+      : routeSource === 'local' ? 'local' : audio === 'none' ? 'silent' : 'mp4';
     return { stage, format, gpu, audio, codec: codecs.join(' / '), audioCodec: codecName(p.audioCodec),
       stageKey: 'exp.process.stage.' + stage, detailKey: 'exp.process.detail.' + detail,
       routeKey: 'exp.process.route.' + route, gpuKey: 'exp.process.gpu.' + gpu,
-      audioKey: 'exp.process.audio.' + (['local', 'server', 'browser', 'wav', 'none'].includes(audio) ? audio : 'pending'),
+      audioKey: 'exp.process.audio.' + (['local', 'browser', 'wav', 'none'].includes(audio) ? audio : 'pending'),
       // 100% of submitted frames is not a completed file: encoder drain, audio conversion, container finalization
       // and saving have their own indeterminate stages. Never reuse a stale video percentage in those stages.
       indeterminate: stage !== 'video' || !(st.N > 0),
@@ -62338,7 +61841,7 @@ MV.def('ui/output', ['export/schedule', 'engine/scene/frame'], (S, F) => {
     FORMATS, MAIN_FORMATS, OTHER_FORMATS, BACKDROPS, KIT_KEYS, ERROR_KEYS, isAlpha, formatCmds, transparentOf, opaqueOf,
     backdropCmds, clearLabel, backdropChoices, backdropNote, effectiveBackdrop, consistent, skipOf, usedFilters, skippedFilters,
     checks, kitCmd, withFixes, fixLabel, checkKey, layersWhat, listText, summary, qualityOptions, audioInfo,
-    usesAudioServer: S.usesAudioServer, usesLocalAudio: S.usesLocalAudio, usesDedicatedAudio: S.usesDedicatedAudio, audioEnv: S.audioEnv,
+    usesLocalAudio: S.usesLocalAudio, audioEnv: S.audioEnv,
     kitLabel, kitAlways, shownChecks, hasSound, speedProfile, speedCmds,
     mergeFonts, errorKey, errorParams, processInfo, advanceProcess,
   };
@@ -70774,8 +70277,8 @@ MV.def('ui/stage', ['ui/dom', 'ui/selection', 'ui/output', 'i18n/t', 'ui/shot_ed
   return { mount, lookAhead, LOOK_AHEAD };
 });
 /* 文字PVメーカー v2 — original work. Step ④ 書き出し: settings, the Filmora set's contents, preflight with jump links, progress, cancel, done (DESIGN §6.4.3, §4.21; DESIGN_2_1 §13.10). */
-MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 'ui/export_quality_preview', 'ui/audio_server_settings', 'export/schedule', 'i18n/t'],
-  (dom, I, OUT, HELP, PREVIEW, SERVER_SETTINGS, SCH, T) => {
+MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 'ui/export_quality_preview', 'export/schedule', 'i18n/t'],
+  (dom, I, OUT, HELP, PREVIEW, SCH, T) => {
   'use strict';
 
   const { h } = dom;
@@ -70839,8 +70342,7 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
     const qualityPreview = PREVIEW.mount(app);
     const audioEncoding = seg('audioEncoding', t('exp.audioEncoding'));
     const audioEncodingHint = h('p', { class: 'note subtle exp-note', 'data-note': 'audio-encoding' });
-    const serverSettings = SERVER_SETTINGS.mount(app);
-    const audioEncodingField = field(t('exp.audioEncoding'), [audioEncoding, audioEncodingHint, serverSettings.root], 'audioEncoding');
+    const audioEncodingField = field(t('exp.audioEncoding'), [audioEncoding, audioEncodingHint], 'audioEncoding');
     const audioQuality = h('p', { class: 'note subtle exp-note', 'data-note': 'audio-quality' });
     const audio = h('input', { type: 'checkbox', id: 'exp-audio' });
     const name = h('input', { class: 'text-input', type: 'text', 'aria-label': t('exp.name'), spellcheck: false });
@@ -70983,7 +70485,7 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
 
     function audioText(info) {
       if (info.state !== 'ready') return t('exp.audioQuality.' + info.state, { rate: Math.round((info.preferred || SCH.AUDIO_BITRATE) / 1000) });
-      if (info.source === 'server' || info.source === 'local') return t('exp.audioQuality.' + info.source
+      if (info.source === 'local') return t('exp.audioQuality.' + info.source
         + (Number.isFinite(info.measured) && info.measured > 0 ? 'Measured' : ''), { kbps: Math.round(info.bitrate / 1000),
           measured: Math.round((info.measured || 0) / 1000) });
       const codec = info.codec === 'mp4a.40.2' ? 'AAC' : info.codec === 'opus' ? 'Opus' : info.codec;
@@ -71134,12 +70636,10 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
       accelerationHint.dataset.selected = hint ? hint.selected : '';
       const audioEligible = o.format === 'mp4' || o.format === 'kit';
       audioEncodingField.hidden = !audioEligible;
-      fillSeg(audioEncoding, ['local', 'browser', 'server'], o.audioEncoding || 'browser', (v) => t('exp.audioEncoding.' + v),
+      fillSeg(audioEncoding, ['local', 'browser'], o.audioEncoding || 'browser', (v) => t('exp.audioEncoding.' + v),
         (v) => v !== 'browser' && (!o.audio || !app.doc.song) ? t('exp.audioEncoding.needsAudio') : '');
       audioEncodingHint.textContent = t(!o.audio || !app.doc.song ? 'exp.audioEncoding.needsAudio'
-        : o.audioEncoding === 'local' ? 'exp.audioEncoding.localHelp' : o.audioEncoding === 'server' ? 'exp.audioEncoding.help' : 'exp.audioEncoding.browserHelp');
-      serverSettings.root.hidden = !audioEligible || o.audioEncoding !== 'server';
-      serverSettings.update();
+        : o.audioEncoding === 'local' ? 'exp.audioEncoding.localHelp' : 'exp.audioEncoding.browserHelp');
       // 透明 makes the output transparent (透過動画, or 透過PNG from a PNG sequence); Filmora用 does not offer it
       // (ui/output.backdropChoices: the set would be lost on the way back).
       dom.replace(backdrop, OUT.backdropChoices(o.format, app.doc.look.backdrop).map((b) => h('option', {
@@ -71238,9 +70738,8 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
       const info = OUT.processInfo(st);
       const actualStage = st.process && st.process.stage;
       const phaseId = actualStage ? info.stage === 'audioLoading' ? 'audioLocalLoading'
-        : (info.stage === 'audio' || info.stage === 'audioPrepare') && info.audio === 'local' ? 'audioLocal'
-          : (info.stage === 'audio' || info.stage === 'audioPrepare') && info.audio === 'server' ? 'audioServer' : ''
-        : [st.progressPhase, st.part, st.phase].find((p) => p === 'audioServer' || p === 'audioLocal' || p === 'audioLocalLoading') || '';
+        : (info.stage === 'audio' || info.stage === 'audioPrepare') && info.audio === 'local' ? 'audioLocal' : ''
+        : [st.progressPhase, st.part, st.phase].find((p) => p === 'audioLocal' || p === 'audioLocalLoading') || '';
       const indeterminate = info.indeterminate;
       const fresh = !runView || !running.contains(runView.title);
       if (fresh) runView = runningView();
@@ -71251,7 +70750,7 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
       const pct = st.N ? Math.max(0, Math.min(100, Math.floor(st.i / st.N * 100))) : 0;
       const sz = st.w > 0 && st.h > 0 ? { w: st.w, h: st.h } : SCH.outputSize(app.doc.look.aspect, st.short || app.doc.output.short);
       v.title.textContent = t('exp.running', { h: Math.min(sz.w, sz.h), fps: st.fps || app.doc.output.fps });
-      const phase = phaseId === 'audioServer' ? t('exp.serverProgress.audioServer') : phaseId === 'audioLocalLoading'
+      const phase = phaseId === 'audioLocalLoading'
         ? t('exp.localProgress.loading') : phaseId === 'audioLocal' ? t('exp.localProgress.transcoding')
           : ['video', 'files', 'zip'].includes(st.part) && (!actualStage || st.part === info.stage)
             ? t('exp.kit.phase', { what: t('exp.kit.what.' + st.part) }) : '';
@@ -71284,7 +70783,7 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
         v.bar.setAttribute('aria-valuetext', [phase, stageText].filter(Boolean).join(' · '));
         dom.setStyle(v.fill, { width: '35%' });
         v.frames.textContent = ''; v.percent.textContent = '';
-        v.left.textContent = t(phaseId === 'audioServer' ? 'exp.serverProgress.wait' : phaseId ? 'exp.localProgress.wait' : 'exp.process.wait');
+        v.left.textContent = t(phaseId ? 'exp.localProgress.wait' : 'exp.process.wait');
         return;
       }
       const progress = t('exp.progress', { i: st.i, n: st.N, eta: clock(st.eta || 0) });
@@ -71300,7 +70799,7 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
     }
 
     function renderRunning(st) {
-      if (st.phase === 'running' || st.phase === 'audioServer' || st.phase === 'audioLocal' || st.phase === 'audioLocalLoading') { showRunning(st); return; }
+      if (st.phase === 'running' || st.phase === 'audioLocal' || st.phase === 'audioLocalLoading') { showRunning(st); return; }
       runView = null;
       if (st.phase === 'done') {
         const info = st.result.files ? kitDoneText(st.result)
@@ -71339,7 +70838,6 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
 
     app.bus.on('export', update);
     app.bus.on('song', update);
-    app.bus.on('audio.server', update);
     app.bus.on('fonts', () => { if (root.isConnected) update(); });
     app.bus.on('media', () => { if (root.isConnected) update(); });   // an asset found or lost on this device
     return { root, footer, update: () => update(), onShow };
@@ -78561,9 +78059,9 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
 MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom', 'ui/keys', 'ui/actions',
   'ui/selection', 'ui/looks', 'ui/view', 'ui/shell', 'ui/header', 'ui/tap', 'ui/project_io',
   'ui/inspector', 'ui/timeline', 'ui/palette', 'ui/menus', 'ui/dialogs', 'ui/ai_panel', 'ai/providers',
-  'ui/fields', 'ui/output', 'ui/media_io', 'ui/audio_server_settings'],
+  'ui/fields', 'ui/output', 'ui/media_io'],
 (D, ST, T, strings, dom, K, A, S, LK, V, shell, header, tapUi, projectIo, inspector, timeline, palette, menus, dialogs,
-  aiPanel, aiProviders, F, OUT, mediaIo, AUDIO_SERVER) => {
+  aiPanel, aiProviders, F, OUT, mediaIo) => {
   'use strict';
 
   const TYPING_REPLAN_MS = 120;         // typing never waits on the planner (§7.4)
@@ -78629,7 +78127,7 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
       sample: (lang) => (lang === 'en' ? lyrics.SAMPLE_EN : lyrics.SAMPLE_JA),
       // the exports of step ④: MP4, PNG sequences, 透過動画（WebM）and the Filmora set (DESIGN_2_1 §13.5, §13.9)
       exporter: { mp4: MV.use('export/host/mp4'), png: MV.use('export/host/png'), webm: MV.use('export/host/webm'),
-        kit: MV.use('export/host/kit'), audioServer: MV.use('export/host/audio_server'),
+        kit: MV.use('export/host/kit'),
         audioLocal: MV.use('export/host/audio_local'), audioRuntime: MV.use('export/host/audio_runtime'),
         sink: MV.use('export/host/sink'), schedule: MV.use('export/schedule') },
     };
@@ -78637,6 +78135,18 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
 
   function safeStorage(kind) {
     try { const s = window[kind]; s.getItem('mojipv.probe'); return s; } catch (e) { return null; }
+  }
+
+  // Retire the removed external-audio settings once at startup. Never read their values; either storage may be
+  // unavailable, and failing to remove one key must not prevent the remaining cleanup or normal app startup.
+  function retireAudioServerStorage(host) {
+    for (const kind of ['localStorage', 'sessionStorage']) {
+      let storage;
+      try { storage = host[kind]; } catch (e) { continue; }
+      for (const key of ['mojipv.audioServer.url', 'mojipv.audioServer.token']) {
+        try { if (storage) storage.removeItem(key); } catch (e) { /* best effort for restricted device storage */ }
+      }
+    }
   }
 
   function randomU32() {
@@ -79167,10 +78677,6 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
     app.exportChecks = () => {
       if (!app.plan || !app.plan.lines.length) return [{ code: 'no-lines', level: 'block', params: {} }];
       const pr = app.exportProbe() || {};
-      let serverConfigured = false;
-      if (OUT.usesAudioServer(app.doc)) {
-        try { serverConfigured = !!ex().audioServer.validateConfig(AUDIO_SERVER.getConfig(app)).token; } catch (e) { /* shown by preflight */ }
-      }
       // DESIGN_2_1 §13.10: the VP9 probe (透過動画 and the set's overlay), whether a folder can be written (the set; else
       // one ZIP) and the effective registry (which screen effects the set's layers leave out, layers-approx).
       // DESIGN_EXTREME §3.4: the hard cuts inside EXTREME shots (engine.xJumps) count with the flashes
@@ -79182,7 +78688,7 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
         audioBitrate: pr.audioBitrate, webmAudioCodec: pr.webmAudioCodec, webmAudioBitrate: pr.webmAudioBitrate,
         vp9Codec: pr.vp9Codec, fontsReady: fontsReady(),
         fsAccess: ex().sink.canStream(), dirAccess: ex().sink.canDirectory(), songReady: !app.doc.song || app.songReady(),
-        warnings: app.warnings(), registry: app.reg, jumps, audioServerConfigured: serverConfigured,
+        warnings: app.warnings(), registry: app.reg, jumps,
         localAudioAvailable: !OUT.usesLocalAudio(app.doc) || ex().audioRuntime.support().supported,
       }));
       // photos and videos (DESIGN_2_1 §11.7.8): an asset not on this device blocks, with [つなぎ直す]
@@ -79268,12 +78774,10 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
         source = app.engine.fork();
         source.setDoc(doc);
         const song = o.audio && app.songReady() ? app.buffer : null;
-        if (OUT.usesDedicatedAudio(doc) && !song) throw new (ex().schedule.ExportError)(
-          OUT.usesLocalAudio(doc) ? 'audio-local-media' : 'audio-server-media', 'original audio is not available');
-        const audioServer = song && OUT.usesAudioServer(doc)
-          ? ex().audioServer.validateConfig(AUDIO_SERVER.getConfig(app)) : null;
+        if (OUT.usesLocalAudio(doc) && !song) throw new (ex().schedule.ExportError)(
+          'audio-local-media', 'original audio is not available');
         const audioRoute = (o.format === 'png' || o.format === 'pngAlpha' || !song) ? 'none'
-          : OUT.usesLocalAudio(doc) ? 'local' : OUT.usesAudioServer(doc) ? 'server' : 'browser';
+          : OUT.usesLocalAudio(doc) ? 'local' : 'browser';
         // Dedicated audio first makes a silent intermediate MP4. Its current audioSource must not erase the whole
         // export's original-song conversion route from the explanation shown during that video pass.
         if (currentExport()) set(Object.assign({}, st, { audioRoute }));
@@ -79283,12 +78787,12 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
         if (o.format === 'kit') {
           // one pass writes every file of the set (export/host/kit); the preview's AssetStore is shared by its forks
           result = await ex().kit.exportKit(Object.assign(args, { audio: song, dir: target.dir, assets: app.assets,
-            audioServer, audioLocal: !!song && OUT.usesLocalAudio(doc) }));
+            audioLocal: !!song && OUT.usesLocalAudio(doc) }));
         } else if (o.format === 'webmAlpha') {
           result = await ex().webm.exportWebm(Object.assign(args, { audio: song, sink: target.sink }));
         } else if (o.format === 'mp4') {
-          const exporter = song && OUT.usesLocalAudio(doc) ? ex().audioLocal : audioServer ? ex().audioServer : ex().mp4;
-          result = await exporter.exportVideo(Object.assign(args, { audio: song, sink: target.sink, audioServer }));
+          const exporter = song && OUT.usesLocalAudio(doc) ? ex().audioLocal : ex().mp4;
+          result = await exporter.exportVideo(Object.assign(args, { audio: song, sink: target.sink }));
         } else {
           result = await ex().png.exportPngs(Object.assign(args, { sink: target.sink, alpha: o.format === 'pngAlpha' }));
         }
@@ -79801,6 +79305,7 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
   // ===============================================================================================================
 
   function start() {
+    retireAudioServerStorage(window);
     const svc = services();
     const app = createApp(svc);
     const params = new URLSearchParams(window.location.search);
@@ -79849,7 +79354,7 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
     return app;
   }
 
-  return { start, prepareDue, PREPARE_S, REPREPARE_S };
+  return { start, prepareDue, PREPARE_S, REPREPARE_S, retireAudioServerStorage };
 });
 MV.use('ui/boot').start();
 </script></body></html>

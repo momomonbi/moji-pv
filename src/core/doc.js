@@ -19,7 +19,7 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
     'seam', 'theme']);
   const OUTPUT_CHOICES = Object.freeze({
     format: ['mp4', 'kit', 'webmAlpha', 'png', 'pngAlpha'], short: [720, 1080, 1440, 2160], fps: [24, 30, 60],
-    quality: ['light', 'standard', 'high', 'max'], acceleration: ['auto', 'cpu'], audioEncoding: ['browser', 'local', 'server'],
+    quality: ['light', 'standard', 'high', 'max'], acceleration: ['auto', 'cpu'], audioEncoding: ['browser', 'local'],
   });
   // output.kit: the optional files of the Filmora set (§13.3); the main MP4 is always written.
   const KIT_KEYS = Object.freeze(['overlay', 'bg', 'green', 'srt', 'lrc']);
@@ -337,7 +337,7 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
     return out;
   }
 
-  // Fills missing defaults; never changes a value that is present. Unchanged sub-objects are shared.
+  // Fills missing defaults and migrates retired settings. Unchanged sub-objects are shared.
   function normalize(doc) {
     if (!isObject(doc)) return defaultDoc();
     const base = defaultDoc();
@@ -354,9 +354,12 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
       else if (k === 'song' && isObject(v)) put(k, fillMissing(v, SONG_DEFAULTS));
       else if (k === 'materials' && isObject(v)) put(k, fillMissing(v, materialDefaults(v)));
       else if (k === 'pins' && isObject(v)) put(k, timerVisibilityPins(v));
-      // Saved works that predate the encoding choice keep native browser audio. New works explicitly start with
-      // 'local', and both an explicit browser choice and an external server choice survive opening unchanged.
-      else if (k === 'output' && isObject(v)) put(k, withKit(fillMissing(v, { ...base.output, audioEncoding: 'browser' })));
+      // Missing/native choices keep browser audio. The retired server choice uses the built-in AAC converter;
+      // migrate before validation so older schema-1/2 projects can open without a connection or credentials.
+      else if (k === 'output' && isObject(v)) {
+        const audio = v.audioEncoding === 'server' ? { ...v, audioEncoding: 'local' } : v;
+        put(k, withKit(fillMissing(audio, { ...base.output, audioEncoding: 'browser' })));
+      }
       else if (isObject(v) && isObject(base[k])) put(k, fillMissing(v, base[k]));
     }
     return out;

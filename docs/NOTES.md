@@ -9463,30 +9463,10 @@ tests passing afterwards. Four existing worst-case build-time limits failed unde
 their unchanged full matrices in isolation. The six render golden files still match, all 23 build tests pass, and
 the Japanese and English standalone pages were rebuilt.
 
-## 2026-10-12 — External AAC 320 kbps conversion
+## 2026-10-12 — External AAC 320 kbps conversion (retired)
 
-Step ④ adds an optional external audio mode for MP4 and Filmora. A configured HTTPS server receives one silent
-H.264 MP4 and the original song's stereo PCM16 WAV, cut at the captured export start and trimmed/padded to the
-same number of samples as its video frames. FFmpeg encodes only the audio with an AAC 320 kbps target and copies
-the video packets. The result labels the target separately from the measured average; it does not promise CBR.
-The browser's AAC 192 kbps cap does not participate in this route. Conversion failures do not substitute lower
-quality or a silent result. A Filmora set transforms only the main MP4 and keeps its other outputs unchanged.
-
-Connection settings are outside project JSON: URL in device localStorage, token in tab sessionStorage. Health checks
-are manual and send no media; conversion requires a token and a relinked original song. UI progress is indeterminate
-while the external conversion runs. Estimates include intermediate video, PCM and returned video buffers. The CSP
-allows HTTPS connections to configured services; config rejects plaintext, embedded credentials, queries, fragments
-and redirects. Errors and result metadata do not include credentials or server error bodies.
-
-The deployable `server/audio` service has bounded uploads, explicit CORS origins, token authentication, concurrency
-and time limits, restricted FFmpeg input protocols, video packet probes and temporary-file cleanup. Host and Docker
-tests verify AAC conversion, sample timing, preserved video packets, authentication, upload limits, cancellation,
-timeouts and external-reference rejection. Client checks reject damaged MP4 responses before reporting success and
-cancel unread error bodies. The service response also cleans up when disconnect happens before the response body.
-
-The user chose to prepare the server bundle and connection settings before selecting a hosting provider. Backend
-hosting remains unconfigured; adding this code to GitHub Pages does not start an audio server. Deployment and
-connection instructions are in `server/audio/README.md`. The application and server tests are included in CI.
+An optional external AAC converter and connection settings were implemented before the setup-free browser route.
+The external feature and its deployable service were subsequently removed at the user's request; see the retirement entry below.
 
 ## 2026-10-12 — Setup-free in-browser AAC conversion
 
@@ -9588,3 +9568,22 @@ copying, WebM audio-first/color-alpha paths, PNG ZIPs, Filmora's four outputs, r
 restart, and cancellation during memory/disk close. They also check initial frame counts after converter loading,
 indeterminate finishing states, encoder cleanup and absence of CSP errors. All 227 module checks and six unchanged
 render golden files pass. The running-panel screenshots are inspected for readable labels and accurate current stages.
+
+## 2026-10-12 — Retire external audio conversion
+
+Removed the external AAC server client, connection controls, deployment bundle, backend tests and CI dependencies.
+MP4/Filmora retain built-in AAC 320 kbps conversion and the standard browser option. Schema-1/2 projects saved
+with the retired server setting normalize to local before validation; ordinary browser preferences and other
+project fields remain unchanged. Startup deletes only the known legacy URL/token keys from both storage scopes,
+without reading their values. Built-in conversion rejects missing original audio before encoding.
+
+The export process and GPU-preference display retain their local/native routes. CSP connections are restricted
+to self, the two existing AI hosts and the canonical Pages host for converter assets in downloaded pages. Current
+documentation describes browser-only exports. Shared native-test audio fixtures moved to a stdlib-only dev helper.
+
+Validation: 114 core/export and 49 UI/i18n Node regression cases pass, as do 23 build tests and 30 Japanese/English
+native-browser cases. Real legacy project open/export uses local AAC; independent FFprobe verifies original PCM,
+320 kbps targets and unchanged H.264 packets. MP4, Filmora ZIP/folder, native fallbacks, WebM/PNG, process and
+hardware-preference reporting, streamed saves, cancellation and restart pass without uploads or CSP violations.
+Independent compiled-page review verifies all script/style hashes and the restricted connection policy. All six
+render golden files match unchanged.

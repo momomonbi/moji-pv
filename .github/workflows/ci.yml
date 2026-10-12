@@ -14,24 +14,6 @@ permissions:
   contents: read
 
 jobs:
-  audio-server:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: Install audio server test dependencies
-        run: |
-          python3 -m pip install --quiet -r server/audio/requirements-test.txt
-          if ! command -v ffmpeg >/dev/null; then
-            sudo apt-get update
-            sudo apt-get install -y --no-install-recommends ffmpeg
-          fi
-      - name: External AAC conversion and service tests
-        run: python3 -m unittest discover -s server/audio/tests -v
-
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -102,7 +84,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install Playwright (Python; drives the runner's Google Chrome, no browser download)
-        run: python3 -m pip install --quiet -r tests/browser/requirements.txt -r server/audio/requirements-test.txt
+        run: python3 -m pip install --quiet -r tests/browser/requirements.txt
 
       - name: Google Chrome
         run: google-chrome --version

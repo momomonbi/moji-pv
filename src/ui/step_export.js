@@ -1,6 +1,6 @@
 /* 文字PVメーカー v2 — original work. Step ④ 書き出し: settings, the Filmora set's contents, preflight with jump links, progress, cancel, done (DESIGN §6.4.3, §4.21; DESIGN_2_1 §13.10). */
-MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 'ui/export_quality_preview', 'ui/audio_server_settings', 'export/schedule', 'i18n/t'],
-  (dom, I, OUT, HELP, PREVIEW, SERVER_SETTINGS, SCH, T) => {
+MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 'ui/export_quality_preview', 'export/schedule', 'i18n/t'],
+  (dom, I, OUT, HELP, PREVIEW, SCH, T) => {
   'use strict';
 
   const { h } = dom;
@@ -64,8 +64,7 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
     const qualityPreview = PREVIEW.mount(app);
     const audioEncoding = seg('audioEncoding', t('exp.audioEncoding'));
     const audioEncodingHint = h('p', { class: 'note subtle exp-note', 'data-note': 'audio-encoding' });
-    const serverSettings = SERVER_SETTINGS.mount(app);
-    const audioEncodingField = field(t('exp.audioEncoding'), [audioEncoding, audioEncodingHint, serverSettings.root], 'audioEncoding');
+    const audioEncodingField = field(t('exp.audioEncoding'), [audioEncoding, audioEncodingHint], 'audioEncoding');
     const audioQuality = h('p', { class: 'note subtle exp-note', 'data-note': 'audio-quality' });
     const audio = h('input', { type: 'checkbox', id: 'exp-audio' });
     const name = h('input', { class: 'text-input', type: 'text', 'aria-label': t('exp.name'), spellcheck: false });
@@ -208,7 +207,7 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
 
     function audioText(info) {
       if (info.state !== 'ready') return t('exp.audioQuality.' + info.state, { rate: Math.round((info.preferred || SCH.AUDIO_BITRATE) / 1000) });
-      if (info.source === 'server' || info.source === 'local') return t('exp.audioQuality.' + info.source
+      if (info.source === 'local') return t('exp.audioQuality.' + info.source
         + (Number.isFinite(info.measured) && info.measured > 0 ? 'Measured' : ''), { kbps: Math.round(info.bitrate / 1000),
           measured: Math.round((info.measured || 0) / 1000) });
       const codec = info.codec === 'mp4a.40.2' ? 'AAC' : info.codec === 'opus' ? 'Opus' : info.codec;
@@ -359,12 +358,10 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
       accelerationHint.dataset.selected = hint ? hint.selected : '';
       const audioEligible = o.format === 'mp4' || o.format === 'kit';
       audioEncodingField.hidden = !audioEligible;
-      fillSeg(audioEncoding, ['local', 'browser', 'server'], o.audioEncoding || 'browser', (v) => t('exp.audioEncoding.' + v),
+      fillSeg(audioEncoding, ['local', 'browser'], o.audioEncoding || 'browser', (v) => t('exp.audioEncoding.' + v),
         (v) => v !== 'browser' && (!o.audio || !app.doc.song) ? t('exp.audioEncoding.needsAudio') : '');
       audioEncodingHint.textContent = t(!o.audio || !app.doc.song ? 'exp.audioEncoding.needsAudio'
-        : o.audioEncoding === 'local' ? 'exp.audioEncoding.localHelp' : o.audioEncoding === 'server' ? 'exp.audioEncoding.help' : 'exp.audioEncoding.browserHelp');
-      serverSettings.root.hidden = !audioEligible || o.audioEncoding !== 'server';
-      serverSettings.update();
+        : o.audioEncoding === 'local' ? 'exp.audioEncoding.localHelp' : 'exp.audioEncoding.browserHelp');
       // 透明 makes the output transparent (透過動画, or 透過PNG from a PNG sequence); Filmora用 does not offer it
       // (ui/output.backdropChoices: the set would be lost on the way back).
       dom.replace(backdrop, OUT.backdropChoices(o.format, app.doc.look.backdrop).map((b) => h('option', {
@@ -463,9 +460,8 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
       const info = OUT.processInfo(st);
       const actualStage = st.process && st.process.stage;
       const phaseId = actualStage ? info.stage === 'audioLoading' ? 'audioLocalLoading'
-        : (info.stage === 'audio' || info.stage === 'audioPrepare') && info.audio === 'local' ? 'audioLocal'
-          : (info.stage === 'audio' || info.stage === 'audioPrepare') && info.audio === 'server' ? 'audioServer' : ''
-        : [st.progressPhase, st.part, st.phase].find((p) => p === 'audioServer' || p === 'audioLocal' || p === 'audioLocalLoading') || '';
+        : (info.stage === 'audio' || info.stage === 'audioPrepare') && info.audio === 'local' ? 'audioLocal' : ''
+        : [st.progressPhase, st.part, st.phase].find((p) => p === 'audioLocal' || p === 'audioLocalLoading') || '';
       const indeterminate = info.indeterminate;
       const fresh = !runView || !running.contains(runView.title);
       if (fresh) runView = runningView();
@@ -476,7 +472,7 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
       const pct = st.N ? Math.max(0, Math.min(100, Math.floor(st.i / st.N * 100))) : 0;
       const sz = st.w > 0 && st.h > 0 ? { w: st.w, h: st.h } : SCH.outputSize(app.doc.look.aspect, st.short || app.doc.output.short);
       v.title.textContent = t('exp.running', { h: Math.min(sz.w, sz.h), fps: st.fps || app.doc.output.fps });
-      const phase = phaseId === 'audioServer' ? t('exp.serverProgress.audioServer') : phaseId === 'audioLocalLoading'
+      const phase = phaseId === 'audioLocalLoading'
         ? t('exp.localProgress.loading') : phaseId === 'audioLocal' ? t('exp.localProgress.transcoding')
           : ['video', 'files', 'zip'].includes(st.part) && (!actualStage || st.part === info.stage)
             ? t('exp.kit.phase', { what: t('exp.kit.what.' + st.part) }) : '';
@@ -509,7 +505,7 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
         v.bar.setAttribute('aria-valuetext', [phase, stageText].filter(Boolean).join(' · '));
         dom.setStyle(v.fill, { width: '35%' });
         v.frames.textContent = ''; v.percent.textContent = '';
-        v.left.textContent = t(phaseId === 'audioServer' ? 'exp.serverProgress.wait' : phaseId ? 'exp.localProgress.wait' : 'exp.process.wait');
+        v.left.textContent = t(phaseId ? 'exp.localProgress.wait' : 'exp.process.wait');
         return;
       }
       const progress = t('exp.progress', { i: st.i, n: st.N, eta: clock(st.eta || 0) });
@@ -525,7 +521,7 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
     }
 
     function renderRunning(st) {
-      if (st.phase === 'running' || st.phase === 'audioServer' || st.phase === 'audioLocal' || st.phase === 'audioLocalLoading') { showRunning(st); return; }
+      if (st.phase === 'running' || st.phase === 'audioLocal' || st.phase === 'audioLocalLoading') { showRunning(st); return; }
       runView = null;
       if (st.phase === 'done') {
         const info = st.result.files ? kitDoneText(st.result)
@@ -564,7 +560,6 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
 
     app.bus.on('export', update);
     app.bus.on('song', update);
-    app.bus.on('audio.server', update);
     app.bus.on('fonts', () => { if (root.isConnected) update(); });
     app.bus.on('media', () => { if (root.isConnected) update(); });   // an asset found or lost on this device
     return { root, footer, update: () => update(), onShow };

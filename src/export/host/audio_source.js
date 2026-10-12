@@ -1,4 +1,4 @@
-/* 文字PVメーカー v2 — original work. Original PCM range and converted-MP4 validation shared by local and server AAC conversion. */
+/* 文字PVメーカー v2 — original work. Original PCM range and converted-MP4 validation for built-in AAC conversion. */
 MV.def('export/host/audio_source', ['export/schedule', 'export/host/mp4', 'audio/wav', 'media/isobmff'], (S, J, WAV, ISO) => {
   'use strict';
 

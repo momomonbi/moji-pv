@@ -2,9 +2,9 @@
 MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom', 'ui/keys', 'ui/actions',
   'ui/selection', 'ui/looks', 'ui/view', 'ui/shell', 'ui/header', 'ui/tap', 'ui/project_io',
   'ui/inspector', 'ui/timeline', 'ui/palette', 'ui/menus', 'ui/dialogs', 'ui/ai_panel', 'ai/providers',
-  'ui/fields', 'ui/output', 'ui/media_io', 'ui/audio_server_settings'],
+  'ui/fields', 'ui/output', 'ui/media_io'],
 (D, ST, T, strings, dom, K, A, S, LK, V, shell, header, tapUi, projectIo, inspector, timeline, palette, menus, dialogs,
-  aiPanel, aiProviders, F, OUT, mediaIo, AUDIO_SERVER) => {
+  aiPanel, aiProviders, F, OUT, mediaIo) => {
   'use strict';
 
   const TYPING_REPLAN_MS = 120;         // typing never waits on the planner (§7.4)
@@ -70,7 +70,7 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
       sample: (lang) => (lang === 'en' ? lyrics.SAMPLE_EN : lyrics.SAMPLE_JA),
       // the exports of step ④: MP4, PNG sequences, 透過動画（WebM）and the Filmora set (DESIGN_2_1 §13.5, §13.9)
       exporter: { mp4: MV.use('export/host/mp4'), png: MV.use('export/host/png'), webm: MV.use('export/host/webm'),
-        kit: MV.use('export/host/kit'), audioServer: MV.use('export/host/audio_server'),
+        kit: MV.use('export/host/kit'),
         audioLocal: MV.use('export/host/audio_local'), audioRuntime: MV.use('export/host/audio_runtime'),
         sink: MV.use('export/host/sink'), schedule: MV.use('export/schedule') },
     };
@@ -78,6 +78,18 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
 
   function safeStorage(kind) {
     try { const s = window[kind]; s.getItem('mojipv.probe'); return s; } catch (e) { return null; }
+  }
+
+  // Retire the removed external-audio settings once at startup. Never read their values; either storage may be
+  // unavailable, and failing to remove one key must not prevent the remaining cleanup or normal app startup.
+  function retireAudioServerStorage(host) {
+    for (const kind of ['localStorage', 'sessionStorage']) {
+      let storage;
+      try { storage = host[kind]; } catch (e) { continue; }
+      for (const key of ['mojipv.audioServer.url', 'mojipv.audioServer.token']) {
+        try { if (storage) storage.removeItem(key); } catch (e) { /* best effort for restricted device storage */ }
+      }
+    }
   }
 
   function randomU32() {
@@ -608,10 +620,6 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
     app.exportChecks = () => {
       if (!app.plan || !app.plan.lines.length) return [{ code: 'no-lines', level: 'block', params: {} }];
       const pr = app.exportProbe() || {};
-      let serverConfigured = false;
-      if (OUT.usesAudioServer(app.doc)) {
-        try { serverConfigured = !!ex().audioServer.validateConfig(AUDIO_SERVER.getConfig(app)).token; } catch (e) { /* shown by preflight */ }
-      }
       // DESIGN_2_1 §13.10: the VP9 probe (透過動画 and the set's overlay), whether a folder can be written (the set; else
       // one ZIP) and the effective registry (which screen effects the set's layers leave out, layers-approx).
       // DESIGN_EXTREME §3.4: the hard cuts inside EXTREME shots (engine.xJumps) count with the flashes
@@ -623,7 +631,7 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
         audioBitrate: pr.audioBitrate, webmAudioCodec: pr.webmAudioCodec, webmAudioBitrate: pr.webmAudioBitrate,
         vp9Codec: pr.vp9Codec, fontsReady: fontsReady(),
         fsAccess: ex().sink.canStream(), dirAccess: ex().sink.canDirectory(), songReady: !app.doc.song || app.songReady(),
-        warnings: app.warnings(), registry: app.reg, jumps, audioServerConfigured: serverConfigured,
+        warnings: app.warnings(), registry: app.reg, jumps,
         localAudioAvailable: !OUT.usesLocalAudio(app.doc) || ex().audioRuntime.support().supported,
       }));
       // photos and videos (DESIGN_2_1 §11.7.8): an asset not on this device blocks, with [つなぎ直す]
@@ -709,12 +717,10 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
         source = app.engine.fork();
         source.setDoc(doc);
         const song = o.audio && app.songReady() ? app.buffer : null;
-        if (OUT.usesDedicatedAudio(doc) && !song) throw new (ex().schedule.ExportError)(
-          OUT.usesLocalAudio(doc) ? 'audio-local-media' : 'audio-server-media', 'original audio is not available');
-        const audioServer = song && OUT.usesAudioServer(doc)
-          ? ex().audioServer.validateConfig(AUDIO_SERVER.getConfig(app)) : null;
+        if (OUT.usesLocalAudio(doc) && !song) throw new (ex().schedule.ExportError)(
+          'audio-local-media', 'original audio is not available');
         const audioRoute = (o.format === 'png' || o.format === 'pngAlpha' || !song) ? 'none'
-          : OUT.usesLocalAudio(doc) ? 'local' : OUT.usesAudioServer(doc) ? 'server' : 'browser';
+          : OUT.usesLocalAudio(doc) ? 'local' : 'browser';
         // Dedicated audio first makes a silent intermediate MP4. Its current audioSource must not erase the whole
         // export's original-song conversion route from the explanation shown during that video pass.
         if (currentExport()) set(Object.assign({}, st, { audioRoute }));
@@ -724,12 +730,12 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
         if (o.format === 'kit') {
           // one pass writes every file of the set (export/host/kit); the preview's AssetStore is shared by its forks
           result = await ex().kit.exportKit(Object.assign(args, { audio: song, dir: target.dir, assets: app.assets,
-            audioServer, audioLocal: !!song && OUT.usesLocalAudio(doc) }));
+            audioLocal: !!song && OUT.usesLocalAudio(doc) }));
         } else if (o.format === 'webmAlpha') {
           result = await ex().webm.exportWebm(Object.assign(args, { audio: song, sink: target.sink }));
         } else if (o.format === 'mp4') {
-          const exporter = song && OUT.usesLocalAudio(doc) ? ex().audioLocal : audioServer ? ex().audioServer : ex().mp4;
-          result = await exporter.exportVideo(Object.assign(args, { audio: song, sink: target.sink, audioServer }));
+          const exporter = song && OUT.usesLocalAudio(doc) ? ex().audioLocal : ex().mp4;
+          result = await exporter.exportVideo(Object.assign(args, { audio: song, sink: target.sink }));
         } else {
           result = await ex().png.exportPngs(Object.assign(args, { sink: target.sink, alpha: o.format === 'pngAlpha' }));
         }
@@ -1242,6 +1248,7 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
   // ===============================================================================================================
 
   function start() {
+    retireAudioServerStorage(window);
     const svc = services();
     const app = createApp(svc);
     const params = new URLSearchParams(window.location.search);
@@ -1290,5 +1297,5 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
     return app;
   }
 
-  return { start, prepareDue, PREPARE_S, REPREPARE_S };
+  return { start, prepareDue, PREPARE_S, REPREPARE_S, retireAudioServerStorage };
 });

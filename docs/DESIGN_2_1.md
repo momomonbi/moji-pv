@@ -69,8 +69,9 @@ they touch.
   Its `AUDIO_EXT` includes `.webm`, so a WebM video is routed to the song today.
 - **Step budgets.** Step ③ has 5 `[data-ctl]` controls (mood, theme, shape, 詳しく, AI) and step ④ has 5 (format,
   size, fps, backdrop, 詳しく). Neither can take a new control.
-- **CSP.** `script-src` hashes only (no `'wasm-unsafe-eval'`); `img-src data: blob:`; `media-src blob:`; `worker-src
-  'none'`; `connect-src` only for the two AI hosts.
+- **CSP.** `script-src` uses hashes plus `'wasm-unsafe-eval'` for the built-in converter; JavaScript `unsafe-eval`
+  remains disabled. `img-src data: blob:`; `media-src blob:`; `worker-src blob:`; `connect-src` allows self, the two
+  AI hosts and the canonical Pages host for converter assets.
 
 ---
 
@@ -285,12 +286,13 @@ hardware preference with automatic fallback) or `cpu` (software preference with 
 in older projects normalize to `auto`; validation still accepts those projects. Both are encoding preferences,
 not measurements of GPU utilisation or controls over the browser's internal thread count.
 
-`output.audioEncoding` is `local` in new projects, `browser` for the standard browser encoder, or `server` for external
-AAC 320 kbps conversion in MP4/Filmora. Older saved projects with no value normalize to `browser`; explicit saved
-values are preserved. Local and server modes use the original PCM range and one silent video encode, then copy
-the H.264 packets. Local uses a dedicated single-thread WASM worker, requires no server or credentials and uploads
-no media. Credentials for server mode are not project fields. Result metadata distinguishes configured target and
-measured average.
+`output.audioEncoding` is `local` in new projects or `browser` for the standard browser encoder. Older saved
+projects with no value normalize to `browser`; explicit browser settings are preserved. A retired `server` value
+normalizes to `local` before schema-1/2 validation. Local MP4/Filmora conversion requires original PCM, encodes one
+silent video, then copies its H.264 packets while encoding AAC with a 320 kbps target. It uses a dedicated
+single-thread WASM worker, requires no server or credentials and uploads no media. Missing original audio stops
+the conversion rather than producing a silent result. Result metadata distinguishes target and measured average.
+Startup removes only the obsolete audio-server URL/token keys from local/session storage, without reading them.
 
 The built-in converter is downloaded lazily from `vendor/ffmpeg/`, with pinned SHA-256 verification and optional
 CacheStorage reuse. Inputs are Blob-backed WORKERFS mounts; output is bounded MEMFS. Every conversion terminates
@@ -5922,14 +5924,13 @@ whitespace retains its previous visible behaviour. Reopening and saving the migr
 Host exporters accept an optional `onProcess(event)` callback independently of the existing `onProgress` frame
 contract. Process events describe preparation, video rendering/encoding, converter loading, audio preparation and
 conversion, encoder drain, container finalization, auxiliary files, ZIP packaging and saving. MP4, transparent WebM,
-PNG and Filmora describe their actual paths: WebM prepares Opus before its color/alpha streams; dedicated AAC modes
-encode one silent video, then convert original PCM and copy the video; Filmora shares a timeline pass across outputs.
+PNG and Filmora describe their actual paths: WebM prepares Opus before its color/alpha streams; built-in AAC
+conversion encodes one silent video, then converts original PCM and copies the video; Filmora shares a timeline pass across outputs.
 
 Installed video codec and acceleration preferences are emitted after encoder configuration, including startup
 fallback and the independent WebM alpha encoder. They describe accepted hardware/software/browser preferences,
 not actual GPU utilization. Canvas2D GPU use is also managed privately by the browser. The local FFmpeg converter
-reports CPU execution with one worker thread; external conversion runs on the configured server. No inferred GPU
-percentage or occupied CPU-core count is displayed.
+reports CPU execution with one worker thread. No inferred GPU percentage or occupied CPU-core count is displayed.
 
 The running UI uses a captured export snapshot and merges sparse process events into that run's state. It presents
 the current step, format-specific mechanism, installed codec/preferences and audio path. Frame submission progress

@@ -148,27 +148,18 @@ MV.def('export/schedule', ['core/script', 'core/doc', 'audio/wav', 'media/sample
     return Math.ceil(((duration * total) / 8) * MUX_OVERHEAD);
   }
 
-  // Only an opaque video's enabled song uses the configured audio server. The connection and credentials are
-  // device/session settings, never document fields; this mode does not affect transparent or silent exports.
-  function usesAudioServer(doc) {
-    const out = doc && doc.output;
-    return !!(out && out.audioEncoding === 'server' && (out.format === 'mp4' || out.format === 'kit') && out.audio && doc.song);
-  }
-
   function usesLocalAudio(doc) {
     const out = doc && doc.output;
     return !!(out && out.audioEncoding === 'local' && (out.format === 'mp4' || out.format === 'kit') && out.audio && doc.song);
   }
-
-  function usesDedicatedAudio(doc) { return usesLocalAudio(doc) || usesAudioServer(doc); }
 
   function audioEnv(doc, env) {
     const e = env || {};
     // A host may explicitly resolve its actual codec (including a legacy direct Filmora call using native audio).
     // Never make its written-file list assume AAC when that execution needs a WAV. UI estimates omit this marker.
     if (e.audioResolved === true) return e;
-    return usesDedicatedAudio(doc) ? Object.assign({}, e, { audioCodec: 'mp4a.40.2', audioBitrate: AUDIO_BITRATE,
-      audioBitrateMode: null, audioSource: usesLocalAudio(doc) ? 'local' : 'server' }) : e;
+    return usesLocalAudio(doc) ? Object.assign({}, e, { audioCodec: 'mp4a.40.2', audioBitrate: AUDIO_BITRATE,
+      audioBitrateMode: null, audioSource: 'local' }) : e;
   }
 
   function estimatePngBytes(frames, w, h, alpha) {
@@ -514,7 +505,7 @@ MV.def('export/schedule', ['core/script', 'core/doc', 'audio/wav', 'media/sample
     const size = outputSize(plan.design.aspect, out.short);
     const { w, h } = size;
     const withAudio = kind.video && out.audio && !!doc.song;
-    const serverAudio = usesAudioServer(doc), localAudio = usesLocalAudio(doc);
+    const localAudio = usesLocalAudio(doc);
     if (localAudio && e.localAudioAvailable === false) items.push({ code: 'audio-local-unavailable', level: 'block', params: {} });
     const frames = frameCount(Math.max(0, t1 - t0), out.fps);
     const pcmBytes = WAV.HEADER_BYTES + audioFrames(frames, out.fps, WAV_RATE) * 4;
@@ -523,7 +514,6 @@ MV.def('export/schedule', ['core/script', 'core/doc', 'audio/wav', 'media/sample
       // scenes may encode far below the bitrate target. The runtime enforces the actual video + WAV input limit.
       items.push({ code: 'audio-local-too-large', level: 'block', params: { bytes: pcmBytes, seconds: frames / out.fps } });
     }
-    if (serverAudio && e.audioServerConfigured === false) items.push({ code: 'audio-server-config', level: 'block', params: {} });
     if (!(t1 > t0)) items.push({ code: 'range-empty', level: 'block', params: {} });
     if (kind.video && !e.webcodecs) items.push({ code: 'no-webcodecs', level: 'block', params: {} });
     else {
@@ -539,22 +529,13 @@ MV.def('export/schedule', ['core/script', 'core/doc', 'audio/wav', 'media/sample
       else if (mp4 && e.audioCodec === 'opus') items.push({ code: 'opus-audio', level: 'info', params: {} });
       else if (kit && !kitAac(e)) items.push({ code: 'kit-wav', level: 'info', params: { name: kitBase(doc) } });
     }
-    if (withAudio && e.songReady === false) items.push({ code: 'song-missing', level: serverAudio || localAudio ? 'block' : 'warn',
+    if (withAudio && e.songReady === false) items.push({ code: 'song-missing', level: localAudio ? 'block' : 'warn',
       params: { name: doc.song.name, ...(localAudio ? { audioSource: 'local' } : {}) } });
     if (mp4 && doc.look.backdrop === 'clear') items.push({ code: 'clear-mp4', level: 'warn', params: {} });
     if (e.fontsReady === false) items.push({ code: 'fonts-loading', level: 'info', params: {} });
     const inMemory = kit ? !(e.dirAccess === undefined ? e.fsAccess : e.dirAccess) : !e.fsAccess;
-    if (inMemory || (serverAudio || localAudio) && e.songReady !== false) {
+    if (inMemory || localAudio && e.songReady !== false) {
       let bytes = inMemory ? memoryBytes(doc, plan, e, range, size, withAudio) : 0;
-      if (serverAudio && e.songReady !== false) {
-        const seconds = Math.max(0, range.t1 - range.t0), bits = bitrate(w, h, out.fps, out.quality);
-        // The external request holds a silent MP4 and a stereo PCM16 WAV, then receives the AAC MP4. These buffers
-        // are needed even when the finished output is written directly to disk. An in-memory output already counts
-        // the returned main movie (or its Filmora ZIP), so add it only for the direct-to-disk route.
-        bytes += estimateBytes(seconds, bits, false) + WAV.HEADER_BYTES
-          + audioFrames(frameCount(seconds, out.fps), out.fps, WAV_RATE) * 4;
-        if (!inMemory) bytes += estimateBytes(seconds, bits, true, AUDIO_BITRATE);
-      }
       if (localAudio && e.songReady !== false) {
         const movie = estimateBytes(Math.max(0, t1 - t0), bitrate(w, h, out.fps, out.quality), true, AUDIO_BITRATE);
         // WORKERFS references the input blobs. MEMFS keeps the converted movie and returning it creates another
@@ -589,7 +570,7 @@ MV.def('export/schedule', ['core/script', 'core/doc', 'audio/wav', 'media/sample
     FLASH_PARTS, FLASH_LIMIT, FLASH_SAFE_AMP,
     ALPHA_SHARE, WAV_RATE, KIT_README, KIT_SHORTS, FORMATS,
     frameCount, ts, frameDur, audioFrames, keyInterval, audioChunkCount, audioChunk, fillPlanar, mixMatrix,
-    usesAudioServer, usesLocalAudio, usesDedicatedAudio, audioEnv,
+    usesLocalAudio, audioEnv,
     outputSize, bitrate, alphaBitrate, estimateBytes, estimateWebmBytes, estimatePngBytes, eta, pickAvc, pickVp9,
     exportRange, backdropFor, renderScale, fileName, frameName, kitOptions, kitBase, kitFolder, kitFiles, layerDiffs,
     flashEvents, flashRate, extremeCuts, preflight,
