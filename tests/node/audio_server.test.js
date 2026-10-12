@@ -239,9 +239,11 @@ test('invalid response headers and non-success HTTP responses cancel the unread 
 
 test('standalone export renders/encodes once, never calls a browser AAC encoder, and returns only the converted blob', async () => {
   await withEncoders(async (encoders) => {
-    const doc = sampleDoc(), draws = [], log = [], sink = trackingSink('done.mp4');
+    const doc = sampleDoc(), draws = [], log = [], sink = trackingSink('done.mp4'), processes = [], progress = [];
     const result = await AS.exportVideo({ engine: engineFor(doc, draws), doc, audio: songBuffer(), sink, canvas: F.createRecorder().factory,
-      lib: mp4Lib(), audioServer: CONFIG, fetchImpl: serverFetch(log) });
+      lib: mp4Lib(), audioServer: CONFIG, fetchImpl: serverFetch(log), onProgress: (p) => progress.push(p),
+      onProcess: (p) => processes.push({ ...p, renders: draws.length, requests: log.length, sinkBytes: sink.bytes,
+        configured: encoders.video.some((e) => e.state === 'configured') }) });
     assert.equal(draws.length, 7);
     assert.equal(encoders.video.length, 1);
     assert.equal(encoders.audio, 0);
@@ -250,6 +252,42 @@ test('standalone export renders/encodes once, never calls a browser AAC encoder,
     assert.equal(await result.blob.text(), new TextDecoder().decode(converted));
     assert.equal(result.name, 'done.mp4');
     assert.equal(result.audioSource, 'server');
+    assert.deepEqual(progress.map((p) => p.phase || p.i), [1, 2, 3, 4, 5, 6, 7, 'audioServer'],
+      'mechanism notifications preserve the legacy frame and audio progress callback');
+    assert.deepEqual(processes.map((p) => p.stage), ['prepare', 'prepare', 'video', 'finalize', 'mux', 'save', 'audioPrepare', 'audio', 'save']);
+    const [health, prepare, video, flush, mux, temporarySave, pcm, audio, save] = processes;
+    assert.deepEqual([health.backend, health.requests, health.renders], ['server', 0, 0]);
+    assert.equal(prepare.temporary, true, 'the browser MP4 is the silent intermediary rather than the final saved file');
+    assert.equal(temporarySave.temporary, true, 'saving the silent intermediary must not imply that the final file is ready');
+    assert.deepEqual([video.renders, video.requests, video.configured], [0, 1, true]);
+    assert.deepEqual({ ...video.acceleration }, { requested: 'auto', selected: 'no-preference', fallback: true });
+    assert.deepEqual([flush.renders, mux.renders, pcm.renders, audio.renders, save.renders], [7, 7, 7, 7, 7]);
+    assert.deepEqual([pcm.backend, pcm.audioSource, pcm.videoCopy, pcm.temporary], ['server', 'server', true, false]);
+    assert.deepEqual([pcm.requests, audio.requests, save.requests], [1, 1, 2],
+      'server audio work starts before the one upload and saving starts after its response');
+    assert.equal(save.sinkBytes, 0);
+    assert.ok(encoders.video.every((e) => e.state === 'closed'));
+    assert.ok(encoders.frames.every((f) => f.closed));
+  });
+});
+
+test('cancelling at the reported server audio stage sends no media and never reports final saving', async () => {
+  await withEncoders(async (encoders) => {
+    const doc = sampleDoc(), draws = [], log = [], control = new AbortController(), sink = trackingSink('no.mp4'), processes = [];
+    await assert.rejects(AS.exportVideo({ engine: engineFor(doc, draws), doc, audio: songBuffer(), sink, signal: control.signal,
+      canvas: F.createRecorder().factory, lib: mp4Lib(), audioServer: CONFIG, fetchImpl: serverFetch(log),
+      onProcess(p) { processes.push(p); if (p.stage === 'audioPrepare') control.abort(); } }), (e) => e.code === 'cancelled');
+    assert.equal(draws.length, 7);
+    assert.equal(encoders.video.length, 1);
+    assert.equal(encoders.audio, 0);
+    assert.deepEqual(log.map((entry) => entry.url), ['https://audio.example.test/prefix/health'],
+      'the prepared silent video must not be uploaded after cancellation');
+    assert.equal(processes.at(-1).stage, 'audioPrepare');
+    assert.equal(processes.some((p) => p.stage === 'audio'), false);
+    assert.equal(processes.some((p) => p.stage === 'save' && !p.temporary), false);
+    assert.equal(sink.aborted, true);
+    assert.equal(sink.closed, false);
+    assert.equal(sink.bytes, 0);
     assert.ok(encoders.video.every((e) => e.state === 'closed'));
     assert.ok(encoders.frames.every((f) => f.closed));
   });

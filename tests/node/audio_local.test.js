@@ -109,8 +109,11 @@ function exportArgs(doc, events, extra) {
 
 test('standalone local export prepares first and renders/encodes the original video exactly once', async () => {
   await withEncoders(async (encoders) => {
-    const events = [], doc = docFor(), progress = [];
-    const result = await AL.exportVideo(exportArgs(doc, events, { onProgress: (p) => progress.push(p) }));
+    const events = [], doc = docFor(), progress = [], processes = [], sink = sinkFor('done.mp4');
+    const result = await AL.exportVideo(exportArgs(doc, events, { sink, onProgress: (p) => progress.push(p),
+      onProcess: (p) => processes.push({ ...p, renders: events.filter((x) => x.type === 'render').length,
+        converts: events.filter((x) => x.type === 'convert').length, sinkBytes: sink.bytes,
+        configured: encoders.videos.some((e) => e.state === 'configured') }) }));
     assert.equal(events[0].type, 'prepare');
     assert.equal(events.filter((x) => x.type === 'render').length, 7);
     assert.equal(events.filter((x) => x.type === 'convert').length, 1);
@@ -127,6 +130,23 @@ test('standalone local export prepares first and renders/encodes the original vi
     assert.deepEqual(new Uint8Array(await result.blob.arrayBuffer()), new Uint8Array(await movie().arrayBuffer()));
     assert.ok(progress.some((p) => p.phase === 'audioLocalLoading'));
     assert.ok(progress.some((p) => p.phase === 'audioLocal'));
+    assert.deepEqual(progress.map((p) => p.phase || p.i), ['audioLocalLoading', 1, 2, 3, 4, 5, 6, 7, 'audioLocal'],
+      'mechanism notifications neither advance frame progress nor add phases to the legacy callback');
+    const [loading, prepare, video, flush, mux, temporarySave, audioPrepare, audio, verify, save] = processes;
+    assert.deepEqual(processes.map((p) => p.stage), ['audioLoading', 'prepare', 'video', 'finalize', 'mux', 'save',
+      'audioPrepare', 'audio', 'finalize', 'save']);
+    assert.deepEqual([loading.renders, loading.converts, loading.configured], [0, 0, false]);
+    assert.equal(prepare.temporary, true, 'the first MP4 contains only temporary silent video');
+    assert.equal(temporarySave.temporary, true, 'saving the silent intermediary must not imply that the final file is ready');
+    assert.deepEqual([video.renders, video.converts, video.configured], [0, 0, true],
+      'video telemetry follows successful encoder configuration and precedes rendering');
+    assert.deepEqual({ ...video.acceleration }, { requested: 'auto', selected: 'no-preference', fallback: true },
+      'unsupported hardware preference reports the actual installed automatic route');
+    assert.deepEqual([flush.renders, mux.renders, audioPrepare.renders, audio.renders, verify.renders, save.renders], [7, 7, 7, 7, 7, 7]);
+    assert.deepEqual([audioPrepare.backend, audioPrepare.audioExecution, audioPrepare.audioThreads, audioPrepare.videoCopy, audioPrepare.temporary],
+      ['ffmpeg', 'cpu', 1, true, false], 'audio conversion reports its own CPU work and reuses the encoded video');
+    assert.deepEqual([audioPrepare.converts, audio.converts, verify.converts, save.converts], [0, 0, 1, 1]);
+    assert.equal(save.sinkBytes, 0, 'saving is reported immediately before the final output write');
     assert.ok(encoders.videos.every((e) => e.state === 'closed'));
     assert.ok(encoders.frames.every((f) => f.closed));
   });
@@ -143,11 +163,14 @@ test('a file sink never exposes the temporary silent MP4 blob for download', asy
 
 test('converter metadata is verified before writing: reject silent, corrupt, wrong-frame and wrong-rate output', async () => {
   for (const blob of [new Blob(['not an MP4']), movie(7, 30, false), movie(7, 30, true, true), movie(7, 60)]) {
-    const sink = sinkFor('bad.mp4');
+    const sink = sinkFor('bad.mp4'), processes = [];
     await assert.rejects(AL.convert({ video: new Blob(['silent']), audio: song(), job: { t0: .123, N: 7, fps: 30 }, sink,
-      runtime: runtime([], { convert: async () => ({ blob }) }) }), (e) => e.code === 'audio-local-response');
+      runtime: runtime([], { convert: async () => ({ blob }) }), onProcess: (p) => processes.push(p.stage) }),
+      (e) => e.code === 'audio-local-response');
     assert.equal(sink.bytes, 0);
     assert.equal(sink.closed, false);
+    assert.deepEqual(processes, ['audioPrepare', 'audio', 'finalize'],
+      'corrupt converter output can reach verification but must never advertise final saving');
   }
 });
 

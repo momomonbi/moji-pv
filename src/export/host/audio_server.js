@@ -187,6 +187,7 @@ MV.def('export/host/audio_server', ['export/schedule', 'export/host/mp4', 'expor
     if (!config.token) throw error('auth');
     if (!(o.video instanceof Blob) || !o.video.size) throw error('media');
     const range = SOURCE.rangeOf(o.job, o.audio, error);
+    J.reportProcess(o, { stage: 'audioPrepare', backend: 'server', audioSource: 'server', audioCodec: 'mp4a.40.2', videoCopy: true, temporary: false });
     if (o.onProgress) o.onProgress({ phase: 'audioServer', i: 0, N: 0, eta: null });
     const health = o.health || await check(config, { signal: o.signal, fetchImpl: o.fetchImpl });
     if (o.video.size + range.bytes + MULTIPART_MARGIN > health.maxUploadBytes) throw error('too-large');
@@ -196,11 +197,13 @@ MV.def('export/host/audio_server', ['export/schedule', 'export/host/mp4', 'expor
     body.append('audio', pcm, 'audio.wav');
     body.append('frames', String(o.job.N));
     body.append('fps', String(o.job.fps));
+    J.reportProcess(o, { stage: 'audio', backend: 'server' });
     const response = await request(config, '/v1/convert', { method: 'POST', signal: o.signal, body,
       headers: { Authorization: 'Bearer ' + config.token, Accept: 'video/mp4' } }, o.fetchImpl);
     let info;
     try { info = resultInfo(response, o.job.N); }
     catch (err) { await cancelBody(response); throw err; }
+    J.reportProcess(o, { stage: 'save' });
     const done = await intoSink(response, o.sink, o.signal, o.job);
     return Object.assign({}, done, info);
   }
@@ -214,14 +217,15 @@ MV.def('export/host/audio_server', ['export/schedule', 'export/host/mp4', 'expor
     try {
       const config = validateConfig(o.audioServer);
       if (!config.token) throw error('auth');
+      J.reportProcess(o, { stage: 'prepare', format: 'mp4', backend: 'server', audioSource: 'server' });
       const health = await check(config, { signal: o.signal, fetchImpl: o.fetchImpl });
-      const local = await J.exportVideo(Object.assign({}, o, { audio: null, sink: temporary }));
+      const local = await J.exportVideo(Object.assign({}, o, { audio: null, sink: temporary, temporary: true }));
       const plan = o.engine.plan;
       if (!plan) throw new S.ExportError('no-plan', 'the engine has no plan');
       const range = S.exportRange(o.doc, plan);
       const size = S.outputSize(plan.design.aspect, o.doc.output.short);
       const done = await convert({ video: local.blob, audio: song, job: { t0: range.t0, N: local.frames, fps: o.doc.output.fps, w: size.w, h: size.h },
-        sink: o.sink, audioServer: config, health, signal: o.signal, onProgress: o.onProgress, fetchImpl: o.fetchImpl });
+        sink: o.sink, audioServer: config, health, signal: o.signal, onProgress: o.onProgress, onProcess: o.onProcess, fetchImpl: o.fetchImpl });
       return Object.assign({}, local, done, { blob: done.blob, name: o.sink.name || S.fileName(o.doc, 'mp4'), ms: performance.now() - started });
     } catch (err) {
       await o.sink.abort();

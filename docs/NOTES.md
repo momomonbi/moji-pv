@@ -9560,3 +9560,31 @@ cases cover playback, pause, reverse seeks, visibility, motion and real PNG expo
 regenerated golden checks pass. Independent old/new review finds only 36 barcode frames changed out of 480, with
 444 byte-identical frames; all 240 plans retain their timing, part choices and unrelated parameters. Fourteen
 representative aspect/orientation cases preserve the barcode's original paths, world placement and opacity.
+
+## 2026-10-12 — Explain the active export process and encoder preferences
+
+The running export view now shows its current operation, format-specific processing route, installed video codecs,
+audio path and the hardware/software/browser preference accepted by each video encoder. Hardware preferences are
+reported after configuration and startup fallback, rather than from the settings probe. Actual GPU use/utilization
+and Canvas2D driver decisions are not exposed by browser APIs, so the panel says they cannot be measured. Local AAC
+conversion is identified as CPU-based FFmpeg; server conversion is identified as remote processing.
+
+Optional `onProcess` events are separate from the unchanged frame-progress callback. They cover preparation, converter
+loading, frame rendering/encoding, audio preparation/conversion, encoder drain, container assembly, auxiliary files,
+ZIP packaging and saving. Silent intermediate MP4s are distinguished from final audio/video output. Native MP4/WebM
+streamed-file exports report saving after container finalization and before the real file close; Filmora retains its
+shared timeline pass and per-output preferences. PNG uses image encoding and reports that no video encoder is used.
+
+The panel keeps the run's size, frame rate and original-song route even if settings change. Submission progress is
+explicitly separate from file completion, and later stages use indeterminate progress. Real stage transitions clear
+stale phase labels; video events carry the actual frame count so converter-download bytes cannot become a frame count.
+DOM elements are updated in place and announcements are limited. Session guards reject late callbacks after cancellation
+or restart. If an owned export resolves after cancellation during its file close, normal cancelled cleanup settles it
+to idle without starting a memory download. Existing file-sink behavior for already-committed disk files is preserved.
+
+Validation: 115 focused Node cases and 20 Japanese/English native-browser cases pass. Browser checks compare live
+preferences to actual native encoder configuration, exercise a startup fallback, local FFmpeg conversion and video
+copying, WebM audio-first/color-alpha paths, PNG ZIPs, Filmora's four outputs, real OPFS file saves, cancellation and
+restart, and cancellation during memory/disk close. They also check initial frame counts after converter loading,
+indeterminate finishing states, encoder cleanup and absence of CSP errors. All 227 module checks and six unchanged
+render golden files pass. The running-panel screenshots are inspected for readable labels and accurate current stages.

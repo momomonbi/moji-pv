@@ -332,12 +332,82 @@ MV.def('ui/output', ['export/schedule', 'engine/scene/frame'], (S, F) => {
     return { name: name || '—' };
   }
 
+  const PROCESS_STAGES = new Set(['prepare', 'video', 'audioLoading', 'audioPrepare', 'audio', 'finalize', 'mux', 'files', 'zip', 'save']);
+  const ACCELERATION_HINTS = new Set(['prefer-hardware', 'prefer-software', 'no-preference']);
+  function advanceProcess(state, event) {
+    const st = state || {}, p = event || {};
+    const next = Object.assign({}, st, { process: Object.assign({}, st.process, p) });
+    if (PROCESS_STAGES.has(p.stage) && (!st.process || p.stage !== st.process.stage)) {
+      // Legacy progress can count downloaded converter bytes, not video frames. A newly installed video encoder
+      // starts its own frame count and ETA; real stage transitions also retire the previous progress phase.
+      next.part = null;
+      if (p.stage === 'video') {
+        next.i = 0;
+        next.N = Number.isSafeInteger(p.frameCount) && p.frameCount > 0 ? p.frameCount : 0;
+        next.eta = null;
+      }
+    }
+    return next;
+  }
+  function codecName(codec) {
+    if (typeof codec !== 'string' || !codec) return '';
+    if (codec.startsWith('avc1')) return 'H.264';
+    if (codec.startsWith('vp09') || codec === 'vp9') return 'VP9';
+    if (codec === 'vp8') return 'VP8';
+    if (codec === 'mp4a.40.2') return 'AAC';
+    if (codec === 'opus') return 'Opus';
+    return codec === 'png' ? 'PNG' : codec === 'pcm-s16le' ? 'PCM' : codec;
+  }
+
+  // Running-export copy uses only this export's snapshot and the host's actual installed-output events. In
+  // particular, a successful support probe is not evidence that an encoder is using the GPU. Legacy callers that
+  // emit only frame progress still get useful stage text, without inventing installed codec / acceleration data.
+  function processInfo(state) {
+    const st = state || {}, p = st.process || {};
+    const format = st.format || p.format || 'mp4';
+    const legacy = st.progressPhase || st.part || st.phase;
+    const stage = PROCESS_STAGES.has(p.stage) ? p.stage : legacy === 'audioLocalLoading' ? 'audioLoading'
+      : legacy === 'audioLocal' || legacy === 'audioServer' ? 'audio' : legacy === 'files' || legacy === 'zip' ? legacy
+        : st.N > 0 ? 'video' : 'prepare';
+    const png = format === 'png' || format === 'pngAlpha';
+    const outputs = Array.isArray(p.outputs) ? p.outputs.filter((o) => o && typeof o === 'object') : [];
+    const infos = outputs.length ? outputs.map((o) => o.acceleration).filter(Boolean) : p.acceleration ? [p.acceleration] : [];
+    const hints = infos.flatMap((a) => [a.selected, a.alphaSelected].filter((h) => ACCELERATION_HINTS.has(h)));
+    const gpu = png ? 'not-video' : !hints.length ? 'pending' : new Set(hints).size > 1 ? 'mixed'
+      : hints[0] === 'prefer-hardware' ? 'hardware' : hints[0] === 'prefer-software' ? 'software'
+        : infos.some((a) => a.fallback) ? 'fallback' : 'browser';
+    const codecs = [...new Set((outputs.length ? outputs.map((o) => o.codec) : [p.codec]).map(codecName).filter(Boolean))];
+    const source = p.audioSource === null ? 'none' : p.audioSource || (legacy === 'audioLocal' || legacy === 'audioLocalLoading' ? 'local'
+      : legacy === 'audioServer' ? 'server' : 'pending');
+    const routeSource = st.audioRoute || source;
+    const intermediateAudio = p.temporary && (routeSource === 'local' || routeSource === 'server');
+    // A ready original song without native AAC becomes the Filmora set's separate WAV. The host's explicit null
+    // codec confirms that fallback during the video pass, before its files stage creates the WAV itself.
+    const nativeWavFallback = format === 'kit' && routeSource === 'browser' && p.audioSource === null && p.audioCodec === null;
+    const noNativeAudio = source === 'browser' && Object.prototype.hasOwnProperty.call(p, 'audioCodec') && !p.audioCodec;
+    const audio = png ? 'none' : intermediateAudio ? routeSource : nativeWavFallback ? 'wav'
+      : source === 'none' || noNativeAudio ? 'none' : source;
+    const detail = stage === 'video' && png ? 'images' : stage === 'video' && format === 'webmAlpha' ? 'transparent'
+      : stage === 'audio' && source === 'local' ? 'audioLocal' : stage === 'audio' && source === 'server' ? 'audioServer'
+        : stage === 'finalize' && p.backend === 'ffmpeg' ? 'validate' : stage === 'mux' && p.temporary ? 'muxTemporary' : stage;
+    const route = png ? 'png' : format === 'webmAlpha' ? audio === 'none' ? 'webmSilent' : 'webm' : format === 'kit' ? 'kit'
+      : routeSource === 'local' ? 'local' : routeSource === 'server' ? 'server' : audio === 'none' ? 'silent' : 'mp4';
+    return { stage, format, gpu, audio, codec: codecs.join(' / '), audioCodec: codecName(p.audioCodec),
+      stageKey: 'exp.process.stage.' + stage, detailKey: 'exp.process.detail.' + detail,
+      routeKey: 'exp.process.route.' + route, gpuKey: 'exp.process.gpu.' + gpu,
+      audioKey: 'exp.process.audio.' + (['local', 'server', 'browser', 'wav', 'none'].includes(audio) ? audio : 'pending'),
+      // 100% of submitted frames is not a completed file: encoder drain, audio conversion, container finalization
+      // and saving have their own indeterminate stages. Never reuse a stale video percentage in those stages.
+      indeterminate: stage !== 'video' || !(st.N > 0),
+      outputs: outputs.map((o) => ({ kind: o.kind, codec: codecName(o.codec), acceleration: o.acceleration })) };
+  }
+
   return {
     FORMATS, MAIN_FORMATS, OTHER_FORMATS, BACKDROPS, KIT_KEYS, ERROR_KEYS, isAlpha, formatCmds, transparentOf, opaqueOf,
     backdropCmds, clearLabel, backdropChoices, backdropNote, effectiveBackdrop, consistent, skipOf, usedFilters, skippedFilters,
     checks, kitCmd, withFixes, fixLabel, checkKey, layersWhat, listText, summary, qualityOptions, audioInfo,
     usesAudioServer: S.usesAudioServer, usesLocalAudio: S.usesLocalAudio, usesDedicatedAudio: S.usesDedicatedAudio, audioEnv: S.audioEnv,
     kitLabel, kitAlways, shownChecks, hasSound, speedProfile, speedCmds,
-    mergeFonts, errorKey, errorParams,
+    mergeFonts, errorKey, errorParams, processInfo, advanceProcess,
   };
 });

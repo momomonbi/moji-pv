@@ -5916,3 +5916,24 @@ Legacy `number` parameters stay valid for loading saved documents but are hidden
 render. An old blank-number pin migrates to `showTime: false` in the same scope, unless visibility was already pinned;
 the blank legacy key is then consumed. Sidebar whitespace blanks retain their previous hidden behaviour. Serial-mark
 whitespace retains its previous visible behaviour. Reopening and saving the migration is idempotent.
+
+## 16. Live export process information
+
+Host exporters accept an optional `onProcess(event)` callback independently of the existing `onProgress` frame
+contract. Process events describe preparation, video rendering/encoding, converter loading, audio preparation and
+conversion, encoder drain, container finalization, auxiliary files, ZIP packaging and saving. MP4, transparent WebM,
+PNG and Filmora describe their actual paths: WebM prepares Opus before its color/alpha streams; dedicated AAC modes
+encode one silent video, then convert original PCM and copy the video; Filmora shares a timeline pass across outputs.
+
+Installed video codec and acceleration preferences are emitted after encoder configuration, including startup
+fallback and the independent WebM alpha encoder. They describe accepted hardware/software/browser preferences,
+not actual GPU utilization. Canvas2D GPU use is also managed privately by the browser. The local FFmpeg converter
+reports CPU execution with one worker thread; external conversion runs on the configured server. No inferred GPU
+percentage or occupied CPU-core count is displayed.
+
+The running UI uses a captured export snapshot and merges sparse process events into that run's state. It presents
+the current step, format-specific mechanism, installed codec/preferences and audio path. Frame submission progress
+remains separate from file completion: drain, audio, packaging and saving use an indeterminate display. DOM nodes
+are retained across frame updates, stage changes update immediately and status announcements are rate-limited.
+Callbacks from cancelled or superseded runs cannot replace the active run's state. Process metadata is transient;
+it is not written into project documents.

@@ -36,6 +36,7 @@ MV.def('export/host/webm', ['export/schedule', 'export/webm', 'export/host/mp4']
   async function encodeSong(song, job, o) {
     const opts = o || {};
     const list = opts.codecs && Array.isArray(opts.codecs.webmAudio) ? opts.codecs.webmAudio : OPUS;
+    J.reportProcess(opts, { stage: 'audioPrepare', backend: 'webcodecs', audioSource: 'browser' });
     const config = await J.audioConfig(null, song, list);
     if (!config) return null;
     const packets = [];
@@ -49,6 +50,7 @@ MV.def('export/host/webm', ['export/schedule', 'export/webm', 'export/host/mp4']
     });
     try {
       encoder.configure(config);
+      J.reportProcess(opts, { stage: 'audio', backend: 'webcodecs', audioCodec: config.codec, audioSource: 'browser' });
       const feeder = J.createAudioFeeder(encoder, song, job, config.sampleRate);
       const end = S.ts(job.N, job.fps);
       for (let us = 0; us < end + AUDIO_SLICE_US; us += AUDIO_SLICE_US) {
@@ -67,7 +69,8 @@ MV.def('export/host/webm', ['export/schedule', 'export/webm', 'export/host/mp4']
   }
 
   // createAlphaOutput({ sink, job, config, audio }) → { frame(i, surface), flush(), end() → { bytes, blob?, stats },
-  // close(), failure }: one transparent WebM (DESIGN_2_1 §13.5). `config` is the VP9 (or VP8) encoder config of the
+  // close(), failure }: one transparent WebM (DESIGN_2_1 §13.5). end(onSave?) calls onSave after container finalization
+  // and before the sink closes. `config` is the VP9 (or VP8) encoder config of the
   // colour stream (vp9Config); the alpha stream uses the same codec at alphaBitrate. `audio` is encodeSong()'s result
   // (its packets are handed to the writer before any video) or null.
   //   frame(i, surface): one readback of the surface (straight RGBA), then the colour frame (RGBA, alpha discarded by the
@@ -120,6 +123,7 @@ MV.def('export/host/webm', ['export/schedule', 'export/webm', 'export/host/mp4']
     const keyEvery = S.keyInterval(job.fps);
     return {
       get failure() { return failure; },
+      get codec() { return colourConfig.codec; },
       get acceleration() {
         return Object.assign(J.accelerationOf(colourConfig), { alphaSelected: J.accelerationOf(alphaConfig).selected });
       },
@@ -144,11 +148,12 @@ MV.def('export/host/webm', ['export/schedule', 'export/webm', 'export/host/mp4']
         if (colours.length || alphas.length) throw new S.ExportError('encode', 'the colour and alpha streams have different lengths');
         if (frames !== job.N) throw new S.ExportError('encode', 'the encoders gave ' + frames + ' frames for ' + job.N);
       },
-      async end() {
+      async end(onSave) {
         if (failure) throw failure;
         J.closeQuietly(colour);
         J.closeQuietly(alpha);
         const stats = await writer.finish();
+        if (onSave) onSave();
         const done = await sink.close();
         return { bytes: done.bytes, blob: done.blob, stats };
       },
@@ -178,13 +183,16 @@ MV.def('export/host/webm', ['export/schedule', 'export/webm', 'export/host/mp4']
     }
     let job = null, out = null;
     try {
+      J.reportProcess(o, { stage: 'prepare', format: 'webmAlpha', backend: 'webcodecs' });
       job = await J.openJob({ engine: o.engine, doc: o.doc, format: 'webmAlpha', canvas: o.canvas });
       J.checkAbort(o.signal);
       const config = await J.vp9Config(o.codecs, job.w, job.h, job.fps, S.bitrate(job.w, job.h, job.fps, o.doc.output.quality), job.acceleration);
       if (!config) throw new S.ExportError('no-vp9', 'neither VP9 nor VP8 encodes ' + job.w + '×' + job.h + '@' + job.fps);
       const song = o.audio && o.doc.output.audio ? o.audio : null;
-      const audio = song ? await encodeSong(song, job, { codecs: o.codecs, signal: o.signal }) : null;
+      const audio = song ? await encodeSong(song, job, { codecs: o.codecs, signal: o.signal, onProcess: o.onProcess }) : null;
       out = createAlphaOutput({ sink, job, config, audio });
+      J.reportProcess(o, { stage: 'video', format: 'webmAlpha', backend: 'webcodecs', codec: out.codec, frameCount: job.N,
+        acceleration: out.acceleration, audioCodec: audio ? audio.config.codec : null, audioSource: audio ? 'browser' : null });
       const progress = J.createProgress(job.N, o.onProgress);
       for (let i = 0; i < job.N; i++) {
         J.checkAbort(o.signal);
@@ -194,9 +202,11 @@ MV.def('export/host/webm', ['export/schedule', 'export/webm', 'export/host/mp4']
         await out.frame(i, job.surface);
         progress.frame(i);
       }
+      J.reportProcess(o, { stage: 'finalize' });
       await out.flush();
       J.checkAbort(o.signal);
-      const done = await out.end();
+      J.reportProcess(o, { stage: 'mux' });
+      const done = await out.end(() => J.reportProcess(o, { stage: 'save' }));
       return { bytes: done.bytes, frames: job.N, ms: performance.now() - started, name: sink.name || S.fileName(o.doc, 'webm'),
         blob: done.blob, codec: config.codec, audio: !!audio, audioCodec: audio ? audio.config.codec : null,
         audioBitrate: audio ? audio.config.bitrate : null, audioBitrateMode: audio ? audio.config.bitrateMode || null : null,

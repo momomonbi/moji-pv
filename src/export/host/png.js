@@ -27,10 +27,13 @@ MV.def('export/host/png', ['export/schedule', 'export/zip', 'export/host/mp4'], 
     const inflight = [];
     let job = null;
     try {
+      const format = o.alpha ? 'pngAlpha' : 'png';
+      J.reportProcess(o, { stage: 'prepare', format, backend: 'canvas', codec: 'png', acceleration: null, audioCodec: null, audioSource: null });
       job = await J.openJob({ engine: o.engine, doc: o.doc, format: o.alpha ? 'pngAlpha' : 'png', canvas: o.canvas });
       const base = S.fileName(o.doc, 'zip').slice(0, -'.zip'.length);
       const zip = Z.createZip((bytes) => sink.write(bytes), { date: zipDate(new Date()) });
       const progress = J.createProgress(job.N, o.onProgress);
+      J.reportProcess(o, { stage: 'video', frameCount: job.N });
       let next = 0;
       const drainOne = async () => {
         const bytes = await inflight.shift();
@@ -49,7 +52,9 @@ MV.def('export/host/png', ['export/schedule', 'export/zip', 'export/host/mp4'], 
         J.checkAbort(o.signal);
         await drainOne();
       }
+      J.reportProcess(o, { stage: 'zip' });
       await zip.finish();
+      J.reportProcess(o, { stage: 'save' });
       const done = await sink.close();
       return { bytes: done.bytes, frames: job.N, ms: performance.now() - started, name: sink.name || S.fileName(o.doc, 'zip'),
         blob: done.blob };

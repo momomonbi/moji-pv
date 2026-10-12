@@ -78,6 +78,11 @@ Adjust the strength with **Digit animation**; set it to 0 for stationary digits.
 They follow pause, seek and export without resetting at each line. Turn **Show timer** off in the detail panel to
 hide them. Existing projects keep the same part keys; a previously blank number is migrated to a hidden timer.
 
+During export, the progress view explains the current operation and the selected format's route: frame rendering,
+video/audio encoding, container finalization and saving. It reports the installed hardware-preferred,
+CPU-preferred or automatic video encoder setting. Browsers do not expose actual GPU use or utilization; the built-in
+AAC converter runs on the CPU.
+
 For MP4, transparent video and the Filmora set, Chrome or Edge on a computer is recommended (they use WebCodecs).
 
 ## AI assist (optional)

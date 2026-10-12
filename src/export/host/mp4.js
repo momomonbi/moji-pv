@@ -12,6 +12,13 @@ MV.def('export/host/mp4', ['export/schedule', 'export/muxer'], (S, M) => {
 
   function checkAbort(signal) { if (signal && signal.aborted) throw cancelled(); }
 
+  // Mechanism changes have their own callback: preparing, flushing and writing do not complete another frame.
+  // In particular, acceleration is reported only after configureVideo installed an encoder (including fallback),
+  // and represents its accepted preference, never measured GPU utilisation.
+  function reportProcess(opts, event) {
+    if (opts && typeof opts.onProcess === 'function') opts.onProcess(event);
+  }
+
   // makeSurface(factory | null, w, h, alpha) → Surface { canvas, ctx, w, h }; OffscreenCanvas unless a factory is given.
   function makeSurface(factory, w, h, alpha) {
     if (factory) {
@@ -318,8 +325,9 @@ MV.def('export/host/mp4', ['export/schedule', 'export/muxer'], (S, M) => {
   // close(), failure }. The muxer writes to the sink (the stream target for a file, the in-memory target for a memory
   // sink); a key frame every 2·fps; frame i gets ts(i) and frameDur(i); with `acfg` the song is fed 0.5 s ahead of the
   // video in 1024-frame chunks, trimmed or padded to audioFrames(N). frame(i, source) encodes `source` (a canvas) as frame
-  // i and waits while the encoder queue is full; flush() waits for every chunk; end() finishes the file and closes the
-  // sink; close() closes the encoders (after a failure). An encoder or muxer error is kept in `failure` and thrown by
+  // i and waits while the encoder queue is full; flush() waits for every chunk; end(onSave?) finishes the container,
+  // calls onSave before the final sink write/close, then closes the sink; close() closes the encoders (after a failure).
+  // An encoder or muxer error is kept in `failure` and thrown by
   // the next call.
   function createMp4Output(o) {
     const job = o.job, sink = o.sink;
@@ -354,6 +362,7 @@ MV.def('export/host/mp4', ['export/schedule', 'export/muxer'], (S, M) => {
     const keyEvery = S.keyInterval(job.fps);
     return {
       get failure() { return failure; },
+      get codec() { return videoConfig.codec; },
       get acceleration() { return accelerationOf(videoConfig); },
       async frame(i, source) {
         if (failure) throw failure;
@@ -371,11 +380,12 @@ MV.def('export/host/mp4', ['export/schedule', 'export/muxer'], (S, M) => {
         }
         if (failure) throw failure;
       },
-      async end() {
+      async end(onSave) {
         if (failure) throw failure;
         closeQuietly(video);
         closeQuietly(audio);
         const buffer = await muxer.finish();
+        if (onSave) onSave();
         if (buffer) await sink.write(new Uint8Array(buffer), 0);
         return sink.close();
       },
@@ -417,12 +427,15 @@ MV.def('export/host/mp4', ['export/schedule', 'export/muxer'], (S, M) => {
     }
     let job = null, out = null;
     try {
+      reportProcess(o, { stage: 'prepare', format: 'mp4', backend: 'webcodecs', temporary: !!o.temporary });
       job = await openJob({ engine: o.engine, doc: o.doc, format: 'mp4', canvas: o.canvas });
       checkAbort(o.signal);
       const vcfg = await videoConfig(o.codecs, job, S.bitrate(job.w, job.h, job.fps, o.doc.output.quality));
       const song = o.audio && o.doc.output.audio ? o.audio : null;
       const acfg = song ? await audioConfig(o.codecs, song) : null;
       out = createMp4Output({ lib, sink, job, vcfg, acfg, song });
+      reportProcess(o, { stage: 'video', format: 'mp4', backend: 'webcodecs', codec: out.codec, frameCount: job.N,
+        acceleration: out.acceleration, audioCodec: acfg ? acfg.codec : null, audioSource: acfg ? 'browser' : null });
       const progress = createProgress(job.N, o.onProgress);
       for (let i = 0; i < job.N; i++) {
         checkAbort(o.signal);
@@ -432,9 +445,11 @@ MV.def('export/host/mp4', ['export/schedule', 'export/muxer'], (S, M) => {
         await out.frame(i, job.surface.canvas);
         progress.frame(i);
       }
+      reportProcess(o, { stage: 'finalize' });
       await out.flush();
       checkAbort(o.signal);
-      const done = await out.end();
+      reportProcess(o, { stage: 'mux' });
+      const done = await out.end(() => reportProcess(o, { stage: 'save', temporary: !!o.temporary }));
       return { bytes: done.bytes, frames: job.N, ms: performance.now() - started, name: sink.name || S.fileName(o.doc, 'mp4'),
         blob: done.blob, codec: vcfg.codec, audio: !!acfg, audioCodec: acfg ? acfg.codec : null, audioBitrate: acfg ? acfg.bitrate : null,
         audioBitrateMode: acfg ? acfg.bitrateMode || null : null, acceleration: out.acceleration };
@@ -480,6 +495,6 @@ MV.def('export/host/mp4', ['export/schedule', 'export/muxer'], (S, M) => {
 
   return {
     AUDIO_CODECS, exportVideo, probe, openJob, makeSurface, createProgress, checkAbort, audioConfig, videoConfig, vp9Config,
-    channelsOf, createAudioFeeder, createMp4Output, drain, closeQuietly, exportFailure, accelerationOf, videoVariant, configureVideo,
+    channelsOf, createAudioFeeder, createMp4Output, drain, closeQuietly, exportFailure, accelerationOf, videoVariant, configureVideo, reportProcess,
   };
 });

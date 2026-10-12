@@ -437,10 +437,22 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
         phase: h('div', { class: 'exp-phase', hidden: true }),         // the Filmora set: 動画 → 曲・字幕・説明 → ZIP (also said)
         fill: h('div', { class: 'progress-bar' }),
         frames: h('span'), percent: h('span'), left: h('div', { class: 'muted' }), part: undefined, progressPhase: undefined,
+        stage: h('strong', { 'data-export-stage': '' }), detail: h('p', { 'data-export-stage-detail': '' }),
+        gpu: h('dd', { 'data-export-gpu': '' }), audio: h('dd', { 'data-export-audio': '' }),
+        codec: h('dd', { 'data-export-codec': '' }), route: h('p', { class: 'exp-process-route', 'data-export-route': '' }),
+        caption: h('div', { class: 'exp-frame-caption', text: t('exp.process.frameCaption') }),
+        outputList: h('ul', { class: 'exp-process-outputs', hidden: true, 'data-export-outputs': '' }), process: undefined,
       };
       v.bar = h('div', { class: 'progress big', role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': '100',
         'aria-label': t('exp.progressLabel') }, v.fill);
-      dom.replace(running, v.title, v.phase, v.bar, h('div', { class: 'exp-nums' }, v.frames, v.percent), v.left,
+      const process = h('section', { class: 'exp-process', 'aria-label': t('exp.process.title') },
+        h('div', { class: 'exp-process-heading', text: t('exp.process.title') }), v.stage, v.detail,
+        h('dl', { class: 'exp-process-facts' },
+          h('dt', { text: t('exp.process.gpuLabel') }), v.gpu,
+          h('dt', { text: t('exp.process.codecLabel') }), v.codec,
+          h('dt', { text: t('exp.process.audioLabel') }), v.audio),
+        v.outputList, h('p', { class: 'note subtle', 'data-export-gpu-note': '', text: t('exp.process.gpuUnknown') }), v.route);
+      dom.replace(running, v.title, v.phase, v.caption, v.bar, h('div', { class: 'exp-nums' }, v.frames, v.percent), v.left, process,
         h('p', { class: 'note', text: t('exp.snapshot') }));
       dom.replace(footer, h('button', { class: 'btn wide', type: 'button', text: t('exp.cancel'), on: { click: () => app.actions.run('export.cancel') } }));
       return v;
@@ -448,19 +460,41 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
 
     function showRunning(st) {
       const now = performance.now();
-      const phaseId = [st.progressPhase, st.part, st.phase].find((p) => p === 'audioServer' || p === 'audioLocal' || p === 'audioLocalLoading') || '';
-      const indeterminate = !!phaseId;
+      const info = OUT.processInfo(st);
+      const actualStage = st.process && st.process.stage;
+      const phaseId = actualStage ? info.stage === 'audioLoading' ? 'audioLocalLoading'
+        : (info.stage === 'audio' || info.stage === 'audioPrepare') && info.audio === 'local' ? 'audioLocal'
+          : (info.stage === 'audio' || info.stage === 'audioPrepare') && info.audio === 'server' ? 'audioServer' : ''
+        : [st.progressPhase, st.part, st.phase].find((p) => p === 'audioServer' || p === 'audioLocal' || p === 'audioLocalLoading') || '';
+      const indeterminate = info.indeterminate;
       const fresh = !runView || !running.contains(runView.title);
       if (fresh) runView = runningView();
-      else if (st.part === runView.part && phaseId === runView.progressPhase && st.i < st.N && now - lastRun < RUN_UPDATE_MS) return;
+      else if (st.part === runView.part && phaseId === runView.progressPhase && st.process === runView.process
+        && st.i < st.N && now - lastRun < RUN_UPDATE_MS) return;
       lastRun = now;
       const v = runView;
-      const pct = st.N ? Math.floor(st.i / st.N * 100) : 0;
-      const sz = SCH.outputSize(app.doc.look.aspect, st.short || app.doc.output.short);
+      const pct = st.N ? Math.max(0, Math.min(100, Math.floor(st.i / st.N * 100))) : 0;
+      const sz = st.w > 0 && st.h > 0 ? { w: st.w, h: st.h } : SCH.outputSize(app.doc.look.aspect, st.short || app.doc.output.short);
       v.title.textContent = t('exp.running', { h: Math.min(sz.w, sz.h), fps: st.fps || app.doc.output.fps });
       const phase = phaseId === 'audioServer' ? t('exp.serverProgress.audioServer') : phaseId === 'audioLocalLoading'
         ? t('exp.localProgress.loading') : phaseId === 'audioLocal' ? t('exp.localProgress.transcoding')
-          : st.part ? t('exp.kit.phase', { what: t('exp.kit.what.' + st.part) }) : '';
+          : ['video', 'files', 'zip'].includes(st.part) && (!actualStage || st.part === info.stage)
+            ? t('exp.kit.phase', { what: t('exp.kit.what.' + st.part) }) : '';
+      const stageText = t('exp.process.current', { stage: t(info.stageKey) });
+      if (v.stage.dataset.exportStage !== info.stage) said.textContent = [phase, stageText].filter(Boolean).join(' · ');
+      v.stage.dataset.exportStage = info.stage; v.stage.textContent = stageText;
+      v.detail.textContent = t(info.detailKey);
+      v.gpu.dataset.status = info.gpu; v.gpu.textContent = t(info.gpuKey);
+      v.audio.dataset.source = info.audio; v.audio.textContent = t(info.audioKey, { codec: info.audioCodec ? ' (' + info.audioCodec + ')' : '' });
+      v.codec.textContent = info.codec || t('exp.process.codecPending'); v.route.textContent = t(info.routeKey);
+      if (v.process !== st.process) {
+        v.outputList.hidden = !info.outputs.length;
+        dom.replace(v.outputList, info.outputs.map((o) => h('li', { 'data-export-output': o.kind || '' },
+          [OUT.kitLabel(o.kind) ? t(OUT.kitLabel(o.kind)) : o.kind, o.codec,
+            o.acceleration ? t(OUT.processInfo({ process: { acceleration: o.acceleration } }).gpuKey) : '']
+            .filter(Boolean).join(' · '))));
+      }
+      v.process = st.process;
       if (st.part !== v.part || phaseId !== v.progressPhase) {
         v.part = st.part;
         v.progressPhase = phaseId;
@@ -468,13 +502,14 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
         if (phase) { v.phase.dataset.part = phaseId || st.part; v.phase.textContent = phase; said.textContent = phase; }
       }
       v.bar.classList.toggle('is-indeterminate', indeterminate);
-      v.frames.hidden = indeterminate; v.percent.hidden = indeterminate;
+      v.bar.setAttribute('aria-label', t(indeterminate ? 'exp.progressLabel' : 'exp.process.frameProgress'));
+      v.caption.hidden = indeterminate; v.frames.hidden = indeterminate; v.percent.hidden = indeterminate;
       if (indeterminate) {
         v.bar.removeAttribute('aria-valuenow');
-        v.bar.setAttribute('aria-valuetext', phase);
+        v.bar.setAttribute('aria-valuetext', [phase, stageText].filter(Boolean).join(' · '));
         dom.setStyle(v.fill, { width: '35%' });
         v.frames.textContent = ''; v.percent.textContent = '';
-        v.left.textContent = t(phaseId === 'audioServer' ? 'exp.serverProgress.wait' : 'exp.localProgress.wait');
+        v.left.textContent = t(phaseId === 'audioServer' ? 'exp.serverProgress.wait' : phaseId ? 'exp.localProgress.wait' : 'exp.process.wait');
         return;
       }
       const progress = t('exp.progress', { i: st.i, n: st.N, eta: clock(st.eta || 0) });

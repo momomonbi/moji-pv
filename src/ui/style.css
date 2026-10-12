@@ -374,6 +374,18 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent);
 .more[open] summary { margin-bottom: 4px; }
 .exp-note { margin-top: 6px; font-size: 12px; line-height: 1.5; }
 .exp-summary { font-size: 12px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.exp-frame-caption { margin: 10px 0 6px; font-size: 11.5px; line-height: 1.5; color: var(--text-2); }
+.exp-process { display: grid; gap: 9px; margin: 18px 0 12px; padding: 14px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--panel-2); font-size: 12px; line-height: 1.6; }
+.exp-process-heading { color: var(--text-2); font-size: 11.5px; font-weight: 700; }
+.exp-process > strong { color: var(--accent); font-size: 13px; }
+.exp-process p { margin: 0; }
+.exp-process-facts { display: grid; grid-template-columns: minmax(84px, auto) minmax(0, 1fr); gap: 5px 12px; margin: 2px 0; }
+.exp-process-facts dt { color: var(--text-2); }
+.exp-process-facts dd { margin: 0; overflow-wrap: anywhere; }
+.exp-process-route { padding-top: 9px; border-top: 1px solid var(--line); color: var(--text-2); font-size: 11.5px; }
+.exp-process-outputs { display: grid; gap: 5px; margin: 0; padding-left: 18px; font-size: 11.5px; color: var(--text-2); }
+.exp-process-outputs[hidden] { display: none; }
 .exp-settings .segmented.quality-options { display: grid; gap: 7px; }
 .exp-settings .seg.quality-option { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; height: auto;
   min-height: 78px; padding: 10px 12px; text-align: left; white-space: normal; border: 1px solid var(--line);

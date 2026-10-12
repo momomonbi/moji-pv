@@ -186,6 +186,7 @@ MV.def('export/host/kit', ['export/schedule', 'export/subtitles', 'export/zip', 
     const say = (p) => { if (o.onProgress) o.onProgress(p); };
     let temporaryMain = null;
     try {
+      J.reportProcess(o, { stage: 'prepare', format: 'kit', backend: 'webcodecs' });
       const jobA = await J.openJob({ engine: o.engine, doc, format: 'kit', canvas: o.canvas, assets: store });
       jobs.push(jobA);
       J.checkAbort(o.signal);
@@ -205,7 +206,7 @@ MV.def('export/host/kit', ['export/schedule', 'export/subtitles', 'export/zip', 
       const convertedAudio = !!(server || local);
       if (server && !server.token) throw new S.ExportError('audio-server-auth', 'external audio conversion auth');
       const health = server ? await AS.check(server, { signal: o.signal, fetchImpl: o.fetchImpl }) : null;
-      const localRuntime = local ? await AL.prepare({ audioLocal: o.audioLocal, signal: o.signal, onProgress: say }) : null;
+      const localRuntime = local ? await AL.prepare({ audioLocal: o.audioLocal, signal: o.signal, onProgress: say, onProcess: o.onProcess }) : null;
       const acfg = song && !convertedAudio ? await J.audioConfig(o.codecs, song, kitAudioList(o.codecs)) : null;
       const files = S.kitFiles(doc, jobA.plan, { audioResolved: true, audioCodec: convertedAudio ? 'mp4a.40.2' : acfg ? acfg.codec : null,
         audioBitrate: convertedAudio ? AS.TARGET : acfg ? acfg.bitrate : null, songReady: !!song });
@@ -238,6 +239,12 @@ MV.def('export/host/kit', ['export/schedule', 'export/subtitles', 'export/zip', 
           (sink) => J.createMp4Output({ lib, sink, job: jobG, vcfg: greenConfig, acfg: null, song: null }));
       }
 
+      J.reportProcess(o, { stage: 'video', format: 'kit', backend: 'webcodecs', codec: outputs[0].out.codec, frameCount: jobA.N,
+        acceleration: outputs[0].out.acceleration, audioCodec: acfg ? acfg.codec : null, audioSource: acfg ? 'browser' : null,
+        temporary: convertedAudio,
+        outputs: outputs.map((x) => ({ kind: x.kind, codec: x.out.codec, acceleration: x.out.acceleration,
+          temporary: convertedAudio && x.kind === 'main' })) });
+
       const progress = J.createProgress(jobA.N, (p) => say(Object.assign({ phase: 'video' }, p)));
       for (let i = 0; i < jobA.N; i++) {
         J.checkAbort(o.signal);
@@ -249,22 +256,25 @@ MV.def('export/host/kit', ['export/schedule', 'export/subtitles', 'export/zip', 
         }));
         progress.frame(i);
       }
+      J.reportProcess(o, { stage: 'finalize' });
       await Promise.all(outputs.map((x) => x.out.flush()));
       J.checkAbort(o.signal);
+      J.reportProcess(o, { stage: 'mux' });
       const written = new Map();
       for (const x of outputs) written.set(x.kind, await x.out.end());
       let encodedAudio = null;
       if (convertedAudio) {
         const silent = written.get('main');
         const args = { video: silent.blob, audio: song, job: jobA, sink: await target.file(fileOf('main').name, 'main'),
-          signal: o.signal, onProgress: say };
+          signal: o.signal, onProgress: say, onProcess: o.onProcess };
         encodedAudio = local ? await AL.convert(Object.assign(args, { runtime: localRuntime }))
           : await AS.convert(Object.assign(args, { audioServer: server, health, fetchImpl: o.fetchImpl }));
         written.set('main', encodedAudio);
       }
 
-      say({ i: jobA.N, N: jobA.N, eta: 0, phase: 'files' });
       const wav = fileOf('wav');
+      J.reportProcess(o, Object.assign({ stage: 'files' }, wav ? { audioSource: 'wav', audioCodec: 'pcm-s16le' } : {}));
+      say({ i: jobA.N, N: jobA.N, eta: 0, phase: 'files' });
       if (wav) written.set('wav', await writeWav(target, wav, song, jobA, o.signal));
       if (kit.srt) {
         const { t0, t1 } = jobA;
@@ -283,10 +293,12 @@ MV.def('export/host/kit', ['export/schedule', 'export/subtitles', 'export/zip', 
         accelerationByOutput: Object.fromEntries(outputs.map((x) => [x.kind, x.out.acceleration])) };
       if (convertedAudio) { result.audioSource = encodedAudio.audioSource; result.audioMeasuredBitrate = encodedAudio.audioMeasuredBitrate; }
       if (target.dir) {
+        J.reportProcess(o, { stage: 'save' });
         await target.dir.close();
         result.folder = target.dir.name;
         result.bytes = list.reduce((sum, f) => sum + f.bytes, 0);
       } else {
+        J.reportProcess(o, { stage: 'zip' });
         say({ i: jobA.N, N: jobA.N, eta: 0, phase: 'zip' });
         const zipped = await zipFiles(target, files.map((f) => ({ name: f.name, blob: written.get(f.kind).blob })), o.signal);
         result.name = zipped.name;

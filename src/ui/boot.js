@@ -690,10 +690,17 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
       // the size and frame rate of this export, for the done state and the guide (the settings may change meanwhile)
       const size = app.plan ? ex().schedule.outputSize(app.plan.design.aspect, o.short) : { w: 0, h: 0 };
       abort = new AbortController();
+      const controller = abort;
       app.pause();
-      set({ phase: 'running', i: 0, N: 0, eta: null, fps: o.fps, short: o.short, format: o.format, part: null, started: performance.now() });
+      set({ phase: 'running', i: 0, N: 0, eta: null, fps: o.fps, short: o.short, w: size.w, h: size.h,
+        format: o.format, part: null, started: performance.now(), process: { audioSource: 'pending' } });
       // the Filmora set reports its phase too: 'video' (every video, frame by frame), 'files', 'zip'
-      const onProgress = (p) => set(Object.assign({}, st, { i: p.i, N: p.N, eta: p.eta, part: p.phase || null }));
+      const currentSession = () => abort === controller && st.phase === 'running';
+      const currentExport = () => currentSession() && !controller.signal.aborted;
+      const onProgress = (p) => { if (currentExport()) set(Object.assign({}, st, { i: p.i, N: p.N, eta: p.eta, part: p.phase || null })); };
+      // Host events describe the path actually installed, including encoder fallback. They are independent of frame
+      // submission progress and never take their codec / processing preference from the asynchronous settings probe.
+      const onProcess = (p) => { if (currentExport()) set(OUT.advanceProcess(st, p)); };
       // The export renders the committed document: a fork planned from app.doc, whatever the preview shows (a try-on or
       // the compare view render another document on the preview engine).
       const doc = app.doc;
@@ -706,7 +713,13 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
           OUT.usesLocalAudio(doc) ? 'audio-local-media' : 'audio-server-media', 'original audio is not available');
         const audioServer = song && OUT.usesAudioServer(doc)
           ? ex().audioServer.validateConfig(AUDIO_SERVER.getConfig(app)) : null;
-        const args = { engine: source, doc, signal: abort.signal, onProgress };
+        const audioRoute = (o.format === 'png' || o.format === 'pngAlpha' || !song) ? 'none'
+          : OUT.usesLocalAudio(doc) ? 'local' : OUT.usesAudioServer(doc) ? 'server' : 'browser';
+        // Dedicated audio first makes a silent intermediate MP4. Its current audioSource must not erase the whole
+        // export's original-song conversion route from the explanation shown during that video pass.
+        if (currentExport()) set(Object.assign({}, st, { audioRoute }));
+        onProcess({ audioSource: audioRoute });
+        const args = { engine: source, doc, signal: abort.signal, onProgress, onProcess };
         let result;
         if (o.format === 'kit') {
           // one pass writes every file of the set (export/host/kit); the preview's AssetStore is shared by its forks
@@ -720,7 +733,11 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
         } else {
           result = await ex().png.exportPngs(Object.assign(args, { sink: target.sink, alpha: o.format === 'pngAlpha' }));
         }
-        if (result.blob) ex().sink.downloadBlob(result.blob, result.name || name);
+        if (!currentSession()) return;
+        // A browser file close can resolve after cancellation. The owned run still needs the normal cancelled
+        // cleanup / idle state, and must not start a memory download merely because the encoder returned a result.
+        if (controller.signal.aborted) throw new (ex().schedule.ExportError)('cancelled', 'export was cancelled');
+        if (result.blob) { onProcess({ stage: 'save' }); ex().sink.downloadBlob(result.blob, result.name || name); }
         // a set written into a folder has no single name (result.folder names the folder, result.parent the folder the
         // user picked, for the done state); a ZIP or a file has one
         if (o.format === 'kit' && target.dir && target.dir.parentName) result.parent = target.dir.parentName;
@@ -730,8 +747,9 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
         // Configuration or source checks can fail before a host exporter owns the target.
         // Sink abort is idempotent and also removes an empty folder created by the picker.
         try { if (target.sink) await target.sink.abort(); if (target.dir) await target.dir.abort(); } catch (cleanupError) { /* keep the original error */ }
+        if (!currentSession()) return;
         const code = e && e.code ? e.code : 'encode';
-        if (code === 'cancelled' || (abort && abort.signal.aborted)) { set({ phase: 'idle' }); app.toast(t('err.exp.cancelled')); }
+        if (code === 'cancelled' || controller.signal.aborted) { set({ phase: 'idle' }); app.toast(t('err.exp.cancelled')); }
         else {
           if (typeof console !== 'undefined') console.error(e);
           // the message may name the chosen format (no-webcodecs: 「このブラウザでは{format}を書き出せません」)
@@ -739,8 +757,8 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
         }
       } finally {
         if (source && typeof source.dispose === 'function') source.dispose();
+        if (abort === controller) abort = null;
       }
-      abort = null;
     };
     app.exportCancel = () => { if (abort) abort.abort(); };
   }

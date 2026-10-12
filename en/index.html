@@ -1,6 +1,6 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-rX1qOJ2X/Qv8v3/VENDO9Di8p8DpdJ1OFgUICkExFR8=' 'wasm-unsafe-eval'; style-src 'sha256-Fy49fNzr9l0lyo6ZAGAcOvPUSG1U7eiwF+9E4r2Twy0=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://generativelanguage.googleapis.com https://api.anthropic.com https:; img-src data: blob:; media-src blob:; worker-src blob:; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-Rc1Kd4+DBKA5WyUitRXwd+q5QjzANPsbvJIoH/9WqN0=' 'wasm-unsafe-eval'; style-src 'sha256-i8ak8L4NyJSTbaMIndFHzfYGwMNV2rjexwjDuy6g8bA=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://generativelanguage.googleapis.com https://api.anthropic.com https:; img-src data: blob:; media-src blob:; worker-src blob:; base-uri 'none'; form-action 'none'">
 <title>Moji PV Maker</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -377,6 +377,18 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent);
 .more[open] summary { margin-bottom: 4px; }
 .exp-note { margin-top: 6px; font-size: 12px; line-height: 1.5; }
 .exp-summary { font-size: 12px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.exp-frame-caption { margin: 10px 0 6px; font-size: 11.5px; line-height: 1.5; color: var(--text-2); }
+.exp-process { display: grid; gap: 9px; margin: 18px 0 12px; padding: 14px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--panel-2); font-size: 12px; line-height: 1.6; }
+.exp-process-heading { color: var(--text-2); font-size: 11.5px; font-weight: 700; }
+.exp-process > strong { color: var(--accent); font-size: 13px; }
+.exp-process p { margin: 0; }
+.exp-process-facts { display: grid; grid-template-columns: minmax(84px, auto) minmax(0, 1fr); gap: 5px 12px; margin: 2px 0; }
+.exp-process-facts dt { color: var(--text-2); }
+.exp-process-facts dd { margin: 0; overflow-wrap: anywhere; }
+.exp-process-route { padding-top: 9px; border-top: 1px solid var(--line); color: var(--text-2); font-size: 11.5px; }
+.exp-process-outputs { display: grid; gap: 5px; margin: 0; padding-left: 18px; font-size: 11.5px; color: var(--text-2); }
+.exp-process-outputs[hidden] { display: none; }
 .exp-settings .segmented.quality-options { display: grid; gap: 7px; }
 .exp-settings .seg.quality-option { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; height: auto;
   min-height: 78px; padding: 10px 12px; text-align: left; white-space: normal; border: 1px solid var(--line);
@@ -12457,6 +12469,91 @@ MV.def('i18n/strings', [], () => ({
   'exp.preparing': ['準備しています…', 'Preparing…'],
   'exp.progressLabel': ['書き出しの進み具合', 'Export progress'],
   'exp.progress': ['書き出し中 {i}/{n}（残り {eta}）', 'Exporting {i}/{n} ({eta} left)'],
+  'exp.process.title': ['書き出しの仕組み', 'How this export works'],
+  'exp.process.current': ['現在：{stage}', 'Now: {stage}'],
+  'exp.process.stage.prepare': ['素材とエンコーダーを準備', 'Preparing media and encoders'],
+  'exp.process.stage.video': ['フレームを描画・圧縮', 'Rendering and compressing frames'],
+  'exp.process.stage.audioLoading': ['音声変換機能を読み込み', 'Loading the audio converter'],
+  'exp.process.stage.audioPrepare': ['元の音声を準備', 'Preparing the original audio'],
+  'exp.process.stage.audio': ['音声を変換', 'Converting audio'],
+  'exp.process.stage.finalize': ['圧縮処理の完了を待機', 'Waiting for compression to finish'],
+  'exp.process.stage.mux': ['動画ファイルを組み立て', 'Assembling the video file'],
+  'exp.process.stage.files': ['曲・字幕・説明を作成', 'Creating audio, subtitles and instructions'],
+  'exp.process.stage.zip': ['ZIPにまとめる', 'Building the ZIP archive'],
+  'exp.process.stage.save': ['ファイルを保存', 'Saving the file'],
+  'exp.process.detail.prepare': ['曲・画像・書体をそろえ、この書き出しに使う処理を準備しています。',
+    'Preparing the song, images, typefaces and processing for this export.'],
+  'exp.process.detail.video': ['演奏時間に合わせてCanvas 2Dに1コマずつ描画し、WebCodecsで映像を圧縮しています。',
+    'Drawing each frame at its song time on Canvas 2D and compressing the video with WebCodecs.'],
+  'exp.process.detail.images': ['演奏時間に合わせて1コマずつ描画し、各コマをPNG画像にしています。動画エンコーダーは使いません。',
+    'Drawing each frame at its song time and creating a PNG image. No video encoder is used.'],
+  'exp.process.detail.transparent': ['各コマの色と透明度を別々に圧縮し、透明なWebM動画にしています。起動した映像形式は下に表示します。',
+    'Compressing each frame’s color and transparency separately for a transparent WebM video. The installed video format is shown below.'],
+  'exp.process.detail.audioLoading': ['ブラウザ内で使う音声変換機能を読み込んでいます。初回はダウンロードが必要です。',
+    'Loading the in-browser audio converter. Its first use requires a download.'],
+  'exp.process.detail.audioPrepare': ['選んだ範囲の元の曲を読み出し、音声変換に渡すデータを作っています。',
+    'Reading the selected range of the original song and preparing it for audio conversion.'],
+  'exp.process.detail.audio': ['ブラウザの音声エンコーダーで元の曲を圧縮しています。',
+    'Compressing the original song with the browser’s audio encoder.'],
+  'exp.process.detail.audioLocal': ['ブラウザ内のFFmpegがCPUで元の曲をAAC 320kbps目標に変換します。映像は再圧縮せず組み込みます。',
+    'In-browser FFmpeg uses the CPU to convert the original song to AAC with a 320 kbps target. Video is copied without re-encoding.'],
+  'exp.process.detail.audioServer': ['変換サーバーで元の曲をAACに変換し、映像を再圧縮せず組み込みます。サーバーのGPU使用状況は取得できません。',
+    'The conversion server converts the original song to AAC and copies the video without re-encoding. Server GPU usage is unavailable.'],
+  'exp.process.detail.finalize': ['送信済みのフレームをエンコーダーが圧縮し終えるまで待っています。ファイルの保存はこの後です。',
+    'Waiting for the encoders to finish compressing all submitted frames. The file is saved afterward.'],
+  'exp.process.detail.validate': ['変換後の動画・音声の長さと形式を確認しています。確認後に保存します。',
+    'Checking the converted video and audio duration and format before saving.'],
+  'exp.process.detail.mux': ['圧縮済みの映像と音声を、再生できる動画ファイルにまとめています。',
+    'Combining compressed video and audio into a playable video file.'],
+  'exp.process.detail.muxTemporary': ['圧縮済みの映像を一時MP4にまとめています。続いて元の曲を変換して組み込みます。',
+    'Assembling the compressed video into a temporary MP4. The original song is converted and added next.'],
+  'exp.process.detail.files': ['Filmora用の曲・字幕・説明ファイルを作成しています。',
+    'Creating the audio, subtitle and instruction files for Filmora.'],
+  'exp.process.detail.zip': ['作成したファイルをZIPにまとめています。保存が終わるまでお待ちください。',
+    'Packing the created files into a ZIP archive. Saving follows.'],
+  'exp.process.detail.save': ['保存先への書き込み、またはダウンロードの準備をしています。',
+    'Writing to the destination or preparing the download.'],
+  'exp.process.route.mp4': ['Canvasで描画 → WebCodecsで映像・音声を圧縮 → MP4を組み立て → 保存',
+    'Canvas rendering → WebCodecs video and audio compression → MP4 assembly → Save'],
+  'exp.process.route.silent': ['Canvasで描画 → WebCodecsで映像を圧縮 → MP4を組み立て → 保存',
+    'Canvas rendering → WebCodecs video compression → MP4 assembly → Save'],
+  'exp.process.route.local': ['Canvasで描画 → 映像を圧縮 → CPUで元の曲をAACに変換・映像をコピー → MP4を保存',
+    'Canvas rendering → Video compression → CPU AAC conversion and video copy → Save MP4'],
+  'exp.process.route.server': ['Canvasで描画 → 映像を圧縮 → サーバーで音声を変換・映像をコピー → MP4を保存',
+    'Canvas rendering → Video compression → Server audio conversion and video copy → Save MP4'],
+  'exp.process.route.webm': ['音声をOpusに圧縮 → Canvasで描画 → 色・透明度を圧縮 → WebMを組み立て・保存',
+    'Opus audio compression → Canvas rendering → Color and transparency compression → WebM assembly and save'],
+  'exp.process.route.webmSilent': ['Canvasで描画 → 色・透明度を圧縮 → WebMを組み立て・保存',
+    'Canvas rendering → Color and transparency compression → WebM assembly and save'],
+  'exp.process.route.png': ['Canvasで描画 → 各コマをPNGに変換 → PNG連番をZIPにまとめて保存',
+    'Canvas rendering → PNG image for each frame → Save the PNG sequence as a ZIP'],
+  'exp.process.route.kit': ['Canvasで描画 → セット内の動画を並行して圧縮 → 音声・字幕などを追加 → フォルダ／ZIPに保存',
+    'Canvas rendering → Compress the set’s videos together → Add audio, subtitles and other files → Save a folder or ZIP'],
+  'exp.process.gpuLabel': ['映像圧縮の設定', 'Video compression setting'],
+  'exp.process.gpu.hardware': ['ハードウェア優先でエンコーダーを起動済み', 'Encoder started with a hardware preference'],
+  'exp.process.gpu.software': ['CPU優先でエンコーダーを起動済み', 'Encoder started with a CPU preference'],
+  'exp.process.gpu.browser': ['ブラウザの自動選択で起動済み', 'Encoder started with browser selection'],
+  'exp.process.gpu.fallback': ['指定の優先設定を使えず、ブラウザの自動選択で起動済み',
+    'Requested preference unavailable; encoder started with browser selection'],
+  'exp.process.gpu.mixed': ['動画・色・透明度のエンコーダーで設定が異なります',
+    'Encoder preferences differ between videos, color or transparency'],
+  'exp.process.gpu.pending': ['エンコーダーの起動前です', 'Encoder has not started yet'],
+  'exp.process.gpu.not-video': ['PNG画像を作成（動画エンコーダーは使用しません）', 'Creating PNG images (no video encoder)'],
+  'exp.process.gpuUnknown': ['GPUの実使用・使用率はブラウザから取得できません。Canvas描画のGPU／CPU選択もブラウザが管理します。',
+    'Actual GPU use and utilization are not exposed by the browser. The browser also manages GPU or CPU selection for Canvas rendering.'],
+  'exp.process.audioLabel': ['音声の処理', 'Audio processing'],
+  'exp.process.audio.local': ['CPU・ブラウザ内FFmpeg（AAC 320kbps目標）', 'CPU · in-browser FFmpeg (AAC, 320 kbps target)'],
+  'exp.process.audio.server': ['外部の変換サーバー（AAC）', 'External conversion server (AAC)'],
+  'exp.process.audio.browser': ['ブラウザの音声エンコーダー{codec}', 'Browser audio encoder{codec}'],
+  'exp.process.audio.wav': ['曲を別のWAVファイルとして保存', 'Save the song as a separate WAV file'],
+  'exp.process.audio.none': ['音声なし', 'No audio'],
+  'exp.process.audio.pending': ['処理方法を準備中', 'Preparing the audio path'],
+  'exp.process.codecLabel': ['映像・画像の圧縮形式', 'Video / image encoding format'],
+  'exp.process.codecPending': ['起動前', 'Not started yet'],
+  'exp.process.frameProgress': ['フレームを描画・圧縮へ送信した進み具合', 'Frame rendering and submission progress'],
+  'exp.process.frameCaption': ['フレームの描画・圧縮への送信（この後に仕上げと保存）',
+    'Frames rendered and submitted for compression (finishing and saving follow)'],
+  'exp.process.wait': ['この処理の完了を待っています…', 'Waiting for this operation to finish…'],
   'exp.done': ['書き出しました', 'Export finished'],
   'exp.doneInfo': ['{name}・{size}・{frames}フレーム', '{name} · {size} · {frames} frames'],
   'exp.again': ['設定に戻る', 'Back to settings'],
@@ -53714,6 +53811,13 @@ MV.def('export/host/mp4', ['export/schedule', 'export/muxer'], (S, M) => {
 
   function checkAbort(signal) { if (signal && signal.aborted) throw cancelled(); }
 
+  // Mechanism changes have their own callback: preparing, flushing and writing do not complete another frame.
+  // In particular, acceleration is reported only after configureVideo installed an encoder (including fallback),
+  // and represents its accepted preference, never measured GPU utilisation.
+  function reportProcess(opts, event) {
+    if (opts && typeof opts.onProcess === 'function') opts.onProcess(event);
+  }
+
   // makeSurface(factory | null, w, h, alpha) → Surface { canvas, ctx, w, h }; OffscreenCanvas unless a factory is given.
   function makeSurface(factory, w, h, alpha) {
     if (factory) {
@@ -54020,8 +54124,9 @@ MV.def('export/host/mp4', ['export/schedule', 'export/muxer'], (S, M) => {
   // close(), failure }. The muxer writes to the sink (the stream target for a file, the in-memory target for a memory
   // sink); a key frame every 2·fps; frame i gets ts(i) and frameDur(i); with `acfg` the song is fed 0.5 s ahead of the
   // video in 1024-frame chunks, trimmed or padded to audioFrames(N). frame(i, source) encodes `source` (a canvas) as frame
-  // i and waits while the encoder queue is full; flush() waits for every chunk; end() finishes the file and closes the
-  // sink; close() closes the encoders (after a failure). An encoder or muxer error is kept in `failure` and thrown by
+  // i and waits while the encoder queue is full; flush() waits for every chunk; end(onSave?) finishes the container,
+  // calls onSave before the final sink write/close, then closes the sink; close() closes the encoders (after a failure).
+  // An encoder or muxer error is kept in `failure` and thrown by
   // the next call.
   function createMp4Output(o) {
     const job = o.job, sink = o.sink;
@@ -54056,6 +54161,7 @@ MV.def('export/host/mp4', ['export/schedule', 'export/muxer'], (S, M) => {
     const keyEvery = S.keyInterval(job.fps);
     return {
       get failure() { return failure; },
+      get codec() { return videoConfig.codec; },
       get acceleration() { return accelerationOf(videoConfig); },
       async frame(i, source) {
         if (failure) throw failure;
@@ -54073,11 +54179,12 @@ MV.def('export/host/mp4', ['export/schedule', 'export/muxer'], (S, M) => {
         }
         if (failure) throw failure;
       },
-      async end() {
+      async end(onSave) {
         if (failure) throw failure;
         closeQuietly(video);
         closeQuietly(audio);
         const buffer = await muxer.finish();
+        if (onSave) onSave();
         if (buffer) await sink.write(new Uint8Array(buffer), 0);
         return sink.close();
       },
@@ -54119,12 +54226,15 @@ MV.def('export/host/mp4', ['export/schedule', 'export/muxer'], (S, M) => {
     }
     let job = null, out = null;
     try {
+      reportProcess(o, { stage: 'prepare', format: 'mp4', backend: 'webcodecs', temporary: !!o.temporary });
       job = await openJob({ engine: o.engine, doc: o.doc, format: 'mp4', canvas: o.canvas });
       checkAbort(o.signal);
       const vcfg = await videoConfig(o.codecs, job, S.bitrate(job.w, job.h, job.fps, o.doc.output.quality));
       const song = o.audio && o.doc.output.audio ? o.audio : null;
       const acfg = song ? await audioConfig(o.codecs, song) : null;
       out = createMp4Output({ lib, sink, job, vcfg, acfg, song });
+      reportProcess(o, { stage: 'video', format: 'mp4', backend: 'webcodecs', codec: out.codec, frameCount: job.N,
+        acceleration: out.acceleration, audioCodec: acfg ? acfg.codec : null, audioSource: acfg ? 'browser' : null });
       const progress = createProgress(job.N, o.onProgress);
       for (let i = 0; i < job.N; i++) {
         checkAbort(o.signal);
@@ -54134,9 +54244,11 @@ MV.def('export/host/mp4', ['export/schedule', 'export/muxer'], (S, M) => {
         await out.frame(i, job.surface.canvas);
         progress.frame(i);
       }
+      reportProcess(o, { stage: 'finalize' });
       await out.flush();
       checkAbort(o.signal);
-      const done = await out.end();
+      reportProcess(o, { stage: 'mux' });
+      const done = await out.end(() => reportProcess(o, { stage: 'save', temporary: !!o.temporary }));
       return { bytes: done.bytes, frames: job.N, ms: performance.now() - started, name: sink.name || S.fileName(o.doc, 'mp4'),
         blob: done.blob, codec: vcfg.codec, audio: !!acfg, audioCodec: acfg ? acfg.codec : null, audioBitrate: acfg ? acfg.bitrate : null,
         audioBitrateMode: acfg ? acfg.bitrateMode || null : null, acceleration: out.acceleration };
@@ -54182,7 +54294,7 @@ MV.def('export/host/mp4', ['export/schedule', 'export/muxer'], (S, M) => {
 
   return {
     AUDIO_CODECS, exportVideo, probe, openJob, makeSurface, createProgress, checkAbort, audioConfig, videoConfig, vp9Config,
-    channelsOf, createAudioFeeder, createMp4Output, drain, closeQuietly, exportFailure, accelerationOf, videoVariant, configureVideo,
+    channelsOf, createAudioFeeder, createMp4Output, drain, closeQuietly, exportFailure, accelerationOf, videoVariant, configureVideo, reportProcess,
   };
 });
 /* 文字PVメーカー v2 — original work. Verified, self-hosted FFmpeg WASM in a disposable worker; original PCM → AAC320 without uploading media. */
@@ -54590,10 +54702,13 @@ MV.def('export/host/png', ['export/schedule', 'export/zip', 'export/host/mp4'], 
     const inflight = [];
     let job = null;
     try {
+      const format = o.alpha ? 'pngAlpha' : 'png';
+      J.reportProcess(o, { stage: 'prepare', format, backend: 'canvas', codec: 'png', acceleration: null, audioCodec: null, audioSource: null });
       job = await J.openJob({ engine: o.engine, doc: o.doc, format: o.alpha ? 'pngAlpha' : 'png', canvas: o.canvas });
       const base = S.fileName(o.doc, 'zip').slice(0, -'.zip'.length);
       const zip = Z.createZip((bytes) => sink.write(bytes), { date: zipDate(new Date()) });
       const progress = J.createProgress(job.N, o.onProgress);
+      J.reportProcess(o, { stage: 'video', frameCount: job.N });
       let next = 0;
       const drainOne = async () => {
         const bytes = await inflight.shift();
@@ -54612,7 +54727,9 @@ MV.def('export/host/png', ['export/schedule', 'export/zip', 'export/host/mp4'], 
         J.checkAbort(o.signal);
         await drainOne();
       }
+      J.reportProcess(o, { stage: 'zip' });
       await zip.finish();
+      J.reportProcess(o, { stage: 'save' });
       const done = await sink.close();
       return { bytes: done.bytes, frames: job.N, ms: performance.now() - started, name: sink.name || S.fileName(o.doc, 'zip'),
         blob: done.blob };
@@ -54968,6 +55085,7 @@ MV.def('export/host/audio_local', ['export/schedule', 'export/host/mp4', 'export
     async function prepare(opts) {
       const o = opts || {}, runtime = runtimeOf(o);
       J.checkAbort(o.signal);
+      J.reportProcess(o, { stage: 'audioLoading', backend: 'ffmpeg', audioSource: 'local', audioCodec: 'mp4a.40.2' });
       if (o.onProgress) o.onProgress({ phase: 'audioLocalLoading', i: 0, N: 0, eta: null });
       try {
         if (runtime.prepare) await runtime.prepare({ signal: o.signal, onProgress: o.onProgress });
@@ -54987,10 +55105,13 @@ MV.def('export/host/audio_local', ['export/schedule', 'export/host/mp4', 'export
       J.checkAbort(o.signal);
       if (!(o.video instanceof Blob) || !o.video.size) throw error('media');
       checkSize(o.video, o.audio, o.job);
+      J.reportProcess(o, { stage: 'audioPrepare', backend: 'ffmpeg', audioSource: 'local', audioCodec: 'mp4a.40.2',
+        audioExecution: 'cpu', audioThreads: 1, videoCopy: true, temporary: false });
       if (o.onProgress) o.onProgress({ phase: 'audioLocal', i: 0, N: 0, eta: null });
       const pcm = await SOURCE.audioBlob(o.audio, o.job, o.signal, error);
       let converted;
       try {
+        J.reportProcess(o, { stage: 'audio', backend: 'ffmpeg' });
         converted = await runtime.convert({ video: o.video, audio: pcm, frames: o.job.N, fps: o.job.fps,
           signal: o.signal, onProgress: o.onProgress });
       } catch (err) {
@@ -55002,8 +55123,10 @@ MV.def('export/host/audio_local', ['export/schedule', 'export/host/mp4', 'export
       if (!converted || !(converted.blob instanceof Blob) || !converted.blob.size) throw error('response');
       const measured = converted.measuredBitrate === undefined || converted.measuredBitrate === null ? null : converted.measuredBitrate;
       if (measured !== null && (!Number.isFinite(measured) || measured <= 0)) throw error('response');
+      J.reportProcess(o, { stage: 'finalize', backend: 'ffmpeg' });
       await SOURCE.validateBlob(converted.blob, o.job, o.signal, error);
       J.checkAbort(o.signal);
+      J.reportProcess(o, { stage: 'save' });
       await o.sink.write(converted.blob);
       J.checkAbort(o.signal);
       const done = await o.sink.close();
@@ -55023,10 +55146,10 @@ MV.def('export/host/audio_local', ['export/schedule', 'export/host/mp4', 'export
         if (!job.N) throw new S.ExportError('range-empty', 'nothing to export');
         checkSize(null, song, job);
         const runtime = await prepare(o);
-        const video = await J.exportVideo(Object.assign({}, o, { audio: null, sink: temporary }));
+        const video = await J.exportVideo(Object.assign({}, o, { audio: null, sink: temporary, temporary: true }));
         job.N = video.frames;
         const done = await convert({ video: video.blob, audio: song, job, sink: o.sink, runtime,
-          signal: o.signal, onProgress: o.onProgress });
+          signal: o.signal, onProgress: o.onProgress, onProcess: o.onProcess });
         return Object.assign({}, video, done, { blob: done.blob, name: o.sink.name || S.fileName(o.doc, 'mp4'), ms: performance.now() - started });
       } catch (err) {
         await o.sink.abort();
@@ -55226,6 +55349,7 @@ MV.def('export/host/audio_server', ['export/schedule', 'export/host/mp4', 'expor
     if (!config.token) throw error('auth');
     if (!(o.video instanceof Blob) || !o.video.size) throw error('media');
     const range = SOURCE.rangeOf(o.job, o.audio, error);
+    J.reportProcess(o, { stage: 'audioPrepare', backend: 'server', audioSource: 'server', audioCodec: 'mp4a.40.2', videoCopy: true, temporary: false });
     if (o.onProgress) o.onProgress({ phase: 'audioServer', i: 0, N: 0, eta: null });
     const health = o.health || await check(config, { signal: o.signal, fetchImpl: o.fetchImpl });
     if (o.video.size + range.bytes + MULTIPART_MARGIN > health.maxUploadBytes) throw error('too-large');
@@ -55235,11 +55359,13 @@ MV.def('export/host/audio_server', ['export/schedule', 'export/host/mp4', 'expor
     body.append('audio', pcm, 'audio.wav');
     body.append('frames', String(o.job.N));
     body.append('fps', String(o.job.fps));
+    J.reportProcess(o, { stage: 'audio', backend: 'server' });
     const response = await request(config, '/v1/convert', { method: 'POST', signal: o.signal, body,
       headers: { Authorization: 'Bearer ' + config.token, Accept: 'video/mp4' } }, o.fetchImpl);
     let info;
     try { info = resultInfo(response, o.job.N); }
     catch (err) { await cancelBody(response); throw err; }
+    J.reportProcess(o, { stage: 'save' });
     const done = await intoSink(response, o.sink, o.signal, o.job);
     return Object.assign({}, done, info);
   }
@@ -55253,14 +55379,15 @@ MV.def('export/host/audio_server', ['export/schedule', 'export/host/mp4', 'expor
     try {
       const config = validateConfig(o.audioServer);
       if (!config.token) throw error('auth');
+      J.reportProcess(o, { stage: 'prepare', format: 'mp4', backend: 'server', audioSource: 'server' });
       const health = await check(config, { signal: o.signal, fetchImpl: o.fetchImpl });
-      const local = await J.exportVideo(Object.assign({}, o, { audio: null, sink: temporary }));
+      const local = await J.exportVideo(Object.assign({}, o, { audio: null, sink: temporary, temporary: true }));
       const plan = o.engine.plan;
       if (!plan) throw new S.ExportError('no-plan', 'the engine has no plan');
       const range = S.exportRange(o.doc, plan);
       const size = S.outputSize(plan.design.aspect, o.doc.output.short);
       const done = await convert({ video: local.blob, audio: song, job: { t0: range.t0, N: local.frames, fps: o.doc.output.fps, w: size.w, h: size.h },
-        sink: o.sink, audioServer: config, health, signal: o.signal, onProgress: o.onProgress, fetchImpl: o.fetchImpl });
+        sink: o.sink, audioServer: config, health, signal: o.signal, onProgress: o.onProgress, onProcess: o.onProcess, fetchImpl: o.fetchImpl });
       return Object.assign({}, local, done, { blob: done.blob, name: o.sink.name || S.fileName(o.doc, 'mp4'), ms: performance.now() - started });
     } catch (err) {
       await o.sink.abort();
@@ -55309,6 +55436,7 @@ MV.def('export/host/webm', ['export/schedule', 'export/webm', 'export/host/mp4']
   async function encodeSong(song, job, o) {
     const opts = o || {};
     const list = opts.codecs && Array.isArray(opts.codecs.webmAudio) ? opts.codecs.webmAudio : OPUS;
+    J.reportProcess(opts, { stage: 'audioPrepare', backend: 'webcodecs', audioSource: 'browser' });
     const config = await J.audioConfig(null, song, list);
     if (!config) return null;
     const packets = [];
@@ -55322,6 +55450,7 @@ MV.def('export/host/webm', ['export/schedule', 'export/webm', 'export/host/mp4']
     });
     try {
       encoder.configure(config);
+      J.reportProcess(opts, { stage: 'audio', backend: 'webcodecs', audioCodec: config.codec, audioSource: 'browser' });
       const feeder = J.createAudioFeeder(encoder, song, job, config.sampleRate);
       const end = S.ts(job.N, job.fps);
       for (let us = 0; us < end + AUDIO_SLICE_US; us += AUDIO_SLICE_US) {
@@ -55340,7 +55469,8 @@ MV.def('export/host/webm', ['export/schedule', 'export/webm', 'export/host/mp4']
   }
 
   // createAlphaOutput({ sink, job, config, audio }) → { frame(i, surface), flush(), end() → { bytes, blob?, stats },
-  // close(), failure }: one transparent WebM (DESIGN_2_1 §13.5). `config` is the VP9 (or VP8) encoder config of the
+  // close(), failure }: one transparent WebM (DESIGN_2_1 §13.5). end(onSave?) calls onSave after container finalization
+  // and before the sink closes. `config` is the VP9 (or VP8) encoder config of the
   // colour stream (vp9Config); the alpha stream uses the same codec at alphaBitrate. `audio` is encodeSong()'s result
   // (its packets are handed to the writer before any video) or null.
   //   frame(i, surface): one readback of the surface (straight RGBA), then the colour frame (RGBA, alpha discarded by the
@@ -55393,6 +55523,7 @@ MV.def('export/host/webm', ['export/schedule', 'export/webm', 'export/host/mp4']
     const keyEvery = S.keyInterval(job.fps);
     return {
       get failure() { return failure; },
+      get codec() { return colourConfig.codec; },
       get acceleration() {
         return Object.assign(J.accelerationOf(colourConfig), { alphaSelected: J.accelerationOf(alphaConfig).selected });
       },
@@ -55417,11 +55548,12 @@ MV.def('export/host/webm', ['export/schedule', 'export/webm', 'export/host/mp4']
         if (colours.length || alphas.length) throw new S.ExportError('encode', 'the colour and alpha streams have different lengths');
         if (frames !== job.N) throw new S.ExportError('encode', 'the encoders gave ' + frames + ' frames for ' + job.N);
       },
-      async end() {
+      async end(onSave) {
         if (failure) throw failure;
         J.closeQuietly(colour);
         J.closeQuietly(alpha);
         const stats = await writer.finish();
+        if (onSave) onSave();
         const done = await sink.close();
         return { bytes: done.bytes, blob: done.blob, stats };
       },
@@ -55451,13 +55583,16 @@ MV.def('export/host/webm', ['export/schedule', 'export/webm', 'export/host/mp4']
     }
     let job = null, out = null;
     try {
+      J.reportProcess(o, { stage: 'prepare', format: 'webmAlpha', backend: 'webcodecs' });
       job = await J.openJob({ engine: o.engine, doc: o.doc, format: 'webmAlpha', canvas: o.canvas });
       J.checkAbort(o.signal);
       const config = await J.vp9Config(o.codecs, job.w, job.h, job.fps, S.bitrate(job.w, job.h, job.fps, o.doc.output.quality), job.acceleration);
       if (!config) throw new S.ExportError('no-vp9', 'neither VP9 nor VP8 encodes ' + job.w + '×' + job.h + '@' + job.fps);
       const song = o.audio && o.doc.output.audio ? o.audio : null;
-      const audio = song ? await encodeSong(song, job, { codecs: o.codecs, signal: o.signal }) : null;
+      const audio = song ? await encodeSong(song, job, { codecs: o.codecs, signal: o.signal, onProcess: o.onProcess }) : null;
       out = createAlphaOutput({ sink, job, config, audio });
+      J.reportProcess(o, { stage: 'video', format: 'webmAlpha', backend: 'webcodecs', codec: out.codec, frameCount: job.N,
+        acceleration: out.acceleration, audioCodec: audio ? audio.config.codec : null, audioSource: audio ? 'browser' : null });
       const progress = J.createProgress(job.N, o.onProgress);
       for (let i = 0; i < job.N; i++) {
         J.checkAbort(o.signal);
@@ -55467,9 +55602,11 @@ MV.def('export/host/webm', ['export/schedule', 'export/webm', 'export/host/mp4']
         await out.frame(i, job.surface);
         progress.frame(i);
       }
+      J.reportProcess(o, { stage: 'finalize' });
       await out.flush();
       J.checkAbort(o.signal);
-      const done = await out.end();
+      J.reportProcess(o, { stage: 'mux' });
+      const done = await out.end(() => J.reportProcess(o, { stage: 'save' }));
       return { bytes: done.bytes, frames: job.N, ms: performance.now() - started, name: sink.name || S.fileName(o.doc, 'webm'),
         blob: done.blob, codec: config.codec, audio: !!audio, audioCodec: audio ? audio.config.codec : null,
         audioBitrate: audio ? audio.config.bitrate : null, audioBitrateMode: audio ? audio.config.bitrateMode || null : null,
@@ -55673,6 +55810,7 @@ MV.def('export/host/kit', ['export/schedule', 'export/subtitles', 'export/zip', 
     const say = (p) => { if (o.onProgress) o.onProgress(p); };
     let temporaryMain = null;
     try {
+      J.reportProcess(o, { stage: 'prepare', format: 'kit', backend: 'webcodecs' });
       const jobA = await J.openJob({ engine: o.engine, doc, format: 'kit', canvas: o.canvas, assets: store });
       jobs.push(jobA);
       J.checkAbort(o.signal);
@@ -55692,7 +55830,7 @@ MV.def('export/host/kit', ['export/schedule', 'export/subtitles', 'export/zip', 
       const convertedAudio = !!(server || local);
       if (server && !server.token) throw new S.ExportError('audio-server-auth', 'external audio conversion auth');
       const health = server ? await AS.check(server, { signal: o.signal, fetchImpl: o.fetchImpl }) : null;
-      const localRuntime = local ? await AL.prepare({ audioLocal: o.audioLocal, signal: o.signal, onProgress: say }) : null;
+      const localRuntime = local ? await AL.prepare({ audioLocal: o.audioLocal, signal: o.signal, onProgress: say, onProcess: o.onProcess }) : null;
       const acfg = song && !convertedAudio ? await J.audioConfig(o.codecs, song, kitAudioList(o.codecs)) : null;
       const files = S.kitFiles(doc, jobA.plan, { audioResolved: true, audioCodec: convertedAudio ? 'mp4a.40.2' : acfg ? acfg.codec : null,
         audioBitrate: convertedAudio ? AS.TARGET : acfg ? acfg.bitrate : null, songReady: !!song });
@@ -55725,6 +55863,12 @@ MV.def('export/host/kit', ['export/schedule', 'export/subtitles', 'export/zip', 
           (sink) => J.createMp4Output({ lib, sink, job: jobG, vcfg: greenConfig, acfg: null, song: null }));
       }
 
+      J.reportProcess(o, { stage: 'video', format: 'kit', backend: 'webcodecs', codec: outputs[0].out.codec, frameCount: jobA.N,
+        acceleration: outputs[0].out.acceleration, audioCodec: acfg ? acfg.codec : null, audioSource: acfg ? 'browser' : null,
+        temporary: convertedAudio,
+        outputs: outputs.map((x) => ({ kind: x.kind, codec: x.out.codec, acceleration: x.out.acceleration,
+          temporary: convertedAudio && x.kind === 'main' })) });
+
       const progress = J.createProgress(jobA.N, (p) => say(Object.assign({ phase: 'video' }, p)));
       for (let i = 0; i < jobA.N; i++) {
         J.checkAbort(o.signal);
@@ -55736,22 +55880,25 @@ MV.def('export/host/kit', ['export/schedule', 'export/subtitles', 'export/zip', 
         }));
         progress.frame(i);
       }
+      J.reportProcess(o, { stage: 'finalize' });
       await Promise.all(outputs.map((x) => x.out.flush()));
       J.checkAbort(o.signal);
+      J.reportProcess(o, { stage: 'mux' });
       const written = new Map();
       for (const x of outputs) written.set(x.kind, await x.out.end());
       let encodedAudio = null;
       if (convertedAudio) {
         const silent = written.get('main');
         const args = { video: silent.blob, audio: song, job: jobA, sink: await target.file(fileOf('main').name, 'main'),
-          signal: o.signal, onProgress: say };
+          signal: o.signal, onProgress: say, onProcess: o.onProcess };
         encodedAudio = local ? await AL.convert(Object.assign(args, { runtime: localRuntime }))
           : await AS.convert(Object.assign(args, { audioServer: server, health, fetchImpl: o.fetchImpl }));
         written.set('main', encodedAudio);
       }
 
-      say({ i: jobA.N, N: jobA.N, eta: 0, phase: 'files' });
       const wav = fileOf('wav');
+      J.reportProcess(o, Object.assign({ stage: 'files' }, wav ? { audioSource: 'wav', audioCodec: 'pcm-s16le' } : {}));
+      say({ i: jobA.N, N: jobA.N, eta: 0, phase: 'files' });
       if (wav) written.set('wav', await writeWav(target, wav, song, jobA, o.signal));
       if (kit.srt) {
         const { t0, t1 } = jobA;
@@ -55770,10 +55917,12 @@ MV.def('export/host/kit', ['export/schedule', 'export/subtitles', 'export/zip', 
         accelerationByOutput: Object.fromEntries(outputs.map((x) => [x.kind, x.out.acceleration])) };
       if (convertedAudio) { result.audioSource = encodedAudio.audioSource; result.audioMeasuredBitrate = encodedAudio.audioMeasuredBitrate; }
       if (target.dir) {
+        J.reportProcess(o, { stage: 'save' });
         await target.dir.close();
         result.folder = target.dir.name;
         result.bytes = list.reduce((sum, f) => sum + f.bytes, 0);
       } else {
+        J.reportProcess(o, { stage: 'zip' });
         say({ i: jobA.N, N: jobA.N, eta: 0, phase: 'zip' });
         const zipped = await zipFiles(target, files.map((f) => ({ name: f.name, blob: written.get(f.kind).blob })), o.signal);
         result.name = zipped.name;
@@ -62115,13 +62264,83 @@ MV.def('ui/output', ['export/schedule', 'engine/scene/frame'], (S, F) => {
     return { name: name || '—' };
   }
 
+  const PROCESS_STAGES = new Set(['prepare', 'video', 'audioLoading', 'audioPrepare', 'audio', 'finalize', 'mux', 'files', 'zip', 'save']);
+  const ACCELERATION_HINTS = new Set(['prefer-hardware', 'prefer-software', 'no-preference']);
+  function advanceProcess(state, event) {
+    const st = state || {}, p = event || {};
+    const next = Object.assign({}, st, { process: Object.assign({}, st.process, p) });
+    if (PROCESS_STAGES.has(p.stage) && (!st.process || p.stage !== st.process.stage)) {
+      // Legacy progress can count downloaded converter bytes, not video frames. A newly installed video encoder
+      // starts its own frame count and ETA; real stage transitions also retire the previous progress phase.
+      next.part = null;
+      if (p.stage === 'video') {
+        next.i = 0;
+        next.N = Number.isSafeInteger(p.frameCount) && p.frameCount > 0 ? p.frameCount : 0;
+        next.eta = null;
+      }
+    }
+    return next;
+  }
+  function codecName(codec) {
+    if (typeof codec !== 'string' || !codec) return '';
+    if (codec.startsWith('avc1')) return 'H.264';
+    if (codec.startsWith('vp09') || codec === 'vp9') return 'VP9';
+    if (codec === 'vp8') return 'VP8';
+    if (codec === 'mp4a.40.2') return 'AAC';
+    if (codec === 'opus') return 'Opus';
+    return codec === 'png' ? 'PNG' : codec === 'pcm-s16le' ? 'PCM' : codec;
+  }
+
+  // Running-export copy uses only this export's snapshot and the host's actual installed-output events. In
+  // particular, a successful support probe is not evidence that an encoder is using the GPU. Legacy callers that
+  // emit only frame progress still get useful stage text, without inventing installed codec / acceleration data.
+  function processInfo(state) {
+    const st = state || {}, p = st.process || {};
+    const format = st.format || p.format || 'mp4';
+    const legacy = st.progressPhase || st.part || st.phase;
+    const stage = PROCESS_STAGES.has(p.stage) ? p.stage : legacy === 'audioLocalLoading' ? 'audioLoading'
+      : legacy === 'audioLocal' || legacy === 'audioServer' ? 'audio' : legacy === 'files' || legacy === 'zip' ? legacy
+        : st.N > 0 ? 'video' : 'prepare';
+    const png = format === 'png' || format === 'pngAlpha';
+    const outputs = Array.isArray(p.outputs) ? p.outputs.filter((o) => o && typeof o === 'object') : [];
+    const infos = outputs.length ? outputs.map((o) => o.acceleration).filter(Boolean) : p.acceleration ? [p.acceleration] : [];
+    const hints = infos.flatMap((a) => [a.selected, a.alphaSelected].filter((h) => ACCELERATION_HINTS.has(h)));
+    const gpu = png ? 'not-video' : !hints.length ? 'pending' : new Set(hints).size > 1 ? 'mixed'
+      : hints[0] === 'prefer-hardware' ? 'hardware' : hints[0] === 'prefer-software' ? 'software'
+        : infos.some((a) => a.fallback) ? 'fallback' : 'browser';
+    const codecs = [...new Set((outputs.length ? outputs.map((o) => o.codec) : [p.codec]).map(codecName).filter(Boolean))];
+    const source = p.audioSource === null ? 'none' : p.audioSource || (legacy === 'audioLocal' || legacy === 'audioLocalLoading' ? 'local'
+      : legacy === 'audioServer' ? 'server' : 'pending');
+    const routeSource = st.audioRoute || source;
+    const intermediateAudio = p.temporary && (routeSource === 'local' || routeSource === 'server');
+    // A ready original song without native AAC becomes the Filmora set's separate WAV. The host's explicit null
+    // codec confirms that fallback during the video pass, before its files stage creates the WAV itself.
+    const nativeWavFallback = format === 'kit' && routeSource === 'browser' && p.audioSource === null && p.audioCodec === null;
+    const noNativeAudio = source === 'browser' && Object.prototype.hasOwnProperty.call(p, 'audioCodec') && !p.audioCodec;
+    const audio = png ? 'none' : intermediateAudio ? routeSource : nativeWavFallback ? 'wav'
+      : source === 'none' || noNativeAudio ? 'none' : source;
+    const detail = stage === 'video' && png ? 'images' : stage === 'video' && format === 'webmAlpha' ? 'transparent'
+      : stage === 'audio' && source === 'local' ? 'audioLocal' : stage === 'audio' && source === 'server' ? 'audioServer'
+        : stage === 'finalize' && p.backend === 'ffmpeg' ? 'validate' : stage === 'mux' && p.temporary ? 'muxTemporary' : stage;
+    const route = png ? 'png' : format === 'webmAlpha' ? audio === 'none' ? 'webmSilent' : 'webm' : format === 'kit' ? 'kit'
+      : routeSource === 'local' ? 'local' : routeSource === 'server' ? 'server' : audio === 'none' ? 'silent' : 'mp4';
+    return { stage, format, gpu, audio, codec: codecs.join(' / '), audioCodec: codecName(p.audioCodec),
+      stageKey: 'exp.process.stage.' + stage, detailKey: 'exp.process.detail.' + detail,
+      routeKey: 'exp.process.route.' + route, gpuKey: 'exp.process.gpu.' + gpu,
+      audioKey: 'exp.process.audio.' + (['local', 'server', 'browser', 'wav', 'none'].includes(audio) ? audio : 'pending'),
+      // 100% of submitted frames is not a completed file: encoder drain, audio conversion, container finalization
+      // and saving have their own indeterminate stages. Never reuse a stale video percentage in those stages.
+      indeterminate: stage !== 'video' || !(st.N > 0),
+      outputs: outputs.map((o) => ({ kind: o.kind, codec: codecName(o.codec), acceleration: o.acceleration })) };
+  }
+
   return {
     FORMATS, MAIN_FORMATS, OTHER_FORMATS, BACKDROPS, KIT_KEYS, ERROR_KEYS, isAlpha, formatCmds, transparentOf, opaqueOf,
     backdropCmds, clearLabel, backdropChoices, backdropNote, effectiveBackdrop, consistent, skipOf, usedFilters, skippedFilters,
     checks, kitCmd, withFixes, fixLabel, checkKey, layersWhat, listText, summary, qualityOptions, audioInfo,
     usesAudioServer: S.usesAudioServer, usesLocalAudio: S.usesLocalAudio, usesDedicatedAudio: S.usesDedicatedAudio, audioEnv: S.audioEnv,
     kitLabel, kitAlways, shownChecks, hasSound, speedProfile, speedCmds,
-    mergeFonts, errorKey, errorParams,
+    mergeFonts, errorKey, errorParams, processInfo, advanceProcess,
   };
 });
 /* 文字PVメーカー v2 — original work. Short, real MP4 / transparent WebM encodes at every quality, independent of the editor's transport and history. */
@@ -70993,10 +71212,22 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
         phase: h('div', { class: 'exp-phase', hidden: true }),         // the Filmora set: 動画 → 曲・字幕・説明 → ZIP (also said)
         fill: h('div', { class: 'progress-bar' }),
         frames: h('span'), percent: h('span'), left: h('div', { class: 'muted' }), part: undefined, progressPhase: undefined,
+        stage: h('strong', { 'data-export-stage': '' }), detail: h('p', { 'data-export-stage-detail': '' }),
+        gpu: h('dd', { 'data-export-gpu': '' }), audio: h('dd', { 'data-export-audio': '' }),
+        codec: h('dd', { 'data-export-codec': '' }), route: h('p', { class: 'exp-process-route', 'data-export-route': '' }),
+        caption: h('div', { class: 'exp-frame-caption', text: t('exp.process.frameCaption') }),
+        outputList: h('ul', { class: 'exp-process-outputs', hidden: true, 'data-export-outputs': '' }), process: undefined,
       };
       v.bar = h('div', { class: 'progress big', role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': '100',
         'aria-label': t('exp.progressLabel') }, v.fill);
-      dom.replace(running, v.title, v.phase, v.bar, h('div', { class: 'exp-nums' }, v.frames, v.percent), v.left,
+      const process = h('section', { class: 'exp-process', 'aria-label': t('exp.process.title') },
+        h('div', { class: 'exp-process-heading', text: t('exp.process.title') }), v.stage, v.detail,
+        h('dl', { class: 'exp-process-facts' },
+          h('dt', { text: t('exp.process.gpuLabel') }), v.gpu,
+          h('dt', { text: t('exp.process.codecLabel') }), v.codec,
+          h('dt', { text: t('exp.process.audioLabel') }), v.audio),
+        v.outputList, h('p', { class: 'note subtle', 'data-export-gpu-note': '', text: t('exp.process.gpuUnknown') }), v.route);
+      dom.replace(running, v.title, v.phase, v.caption, v.bar, h('div', { class: 'exp-nums' }, v.frames, v.percent), v.left, process,
         h('p', { class: 'note', text: t('exp.snapshot') }));
       dom.replace(footer, h('button', { class: 'btn wide', type: 'button', text: t('exp.cancel'), on: { click: () => app.actions.run('export.cancel') } }));
       return v;
@@ -71004,19 +71235,41 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
 
     function showRunning(st) {
       const now = performance.now();
-      const phaseId = [st.progressPhase, st.part, st.phase].find((p) => p === 'audioServer' || p === 'audioLocal' || p === 'audioLocalLoading') || '';
-      const indeterminate = !!phaseId;
+      const info = OUT.processInfo(st);
+      const actualStage = st.process && st.process.stage;
+      const phaseId = actualStage ? info.stage === 'audioLoading' ? 'audioLocalLoading'
+        : (info.stage === 'audio' || info.stage === 'audioPrepare') && info.audio === 'local' ? 'audioLocal'
+          : (info.stage === 'audio' || info.stage === 'audioPrepare') && info.audio === 'server' ? 'audioServer' : ''
+        : [st.progressPhase, st.part, st.phase].find((p) => p === 'audioServer' || p === 'audioLocal' || p === 'audioLocalLoading') || '';
+      const indeterminate = info.indeterminate;
       const fresh = !runView || !running.contains(runView.title);
       if (fresh) runView = runningView();
-      else if (st.part === runView.part && phaseId === runView.progressPhase && st.i < st.N && now - lastRun < RUN_UPDATE_MS) return;
+      else if (st.part === runView.part && phaseId === runView.progressPhase && st.process === runView.process
+        && st.i < st.N && now - lastRun < RUN_UPDATE_MS) return;
       lastRun = now;
       const v = runView;
-      const pct = st.N ? Math.floor(st.i / st.N * 100) : 0;
-      const sz = SCH.outputSize(app.doc.look.aspect, st.short || app.doc.output.short);
+      const pct = st.N ? Math.max(0, Math.min(100, Math.floor(st.i / st.N * 100))) : 0;
+      const sz = st.w > 0 && st.h > 0 ? { w: st.w, h: st.h } : SCH.outputSize(app.doc.look.aspect, st.short || app.doc.output.short);
       v.title.textContent = t('exp.running', { h: Math.min(sz.w, sz.h), fps: st.fps || app.doc.output.fps });
       const phase = phaseId === 'audioServer' ? t('exp.serverProgress.audioServer') : phaseId === 'audioLocalLoading'
         ? t('exp.localProgress.loading') : phaseId === 'audioLocal' ? t('exp.localProgress.transcoding')
-          : st.part ? t('exp.kit.phase', { what: t('exp.kit.what.' + st.part) }) : '';
+          : ['video', 'files', 'zip'].includes(st.part) && (!actualStage || st.part === info.stage)
+            ? t('exp.kit.phase', { what: t('exp.kit.what.' + st.part) }) : '';
+      const stageText = t('exp.process.current', { stage: t(info.stageKey) });
+      if (v.stage.dataset.exportStage !== info.stage) said.textContent = [phase, stageText].filter(Boolean).join(' · ');
+      v.stage.dataset.exportStage = info.stage; v.stage.textContent = stageText;
+      v.detail.textContent = t(info.detailKey);
+      v.gpu.dataset.status = info.gpu; v.gpu.textContent = t(info.gpuKey);
+      v.audio.dataset.source = info.audio; v.audio.textContent = t(info.audioKey, { codec: info.audioCodec ? ' (' + info.audioCodec + ')' : '' });
+      v.codec.textContent = info.codec || t('exp.process.codecPending'); v.route.textContent = t(info.routeKey);
+      if (v.process !== st.process) {
+        v.outputList.hidden = !info.outputs.length;
+        dom.replace(v.outputList, info.outputs.map((o) => h('li', { 'data-export-output': o.kind || '' },
+          [OUT.kitLabel(o.kind) ? t(OUT.kitLabel(o.kind)) : o.kind, o.codec,
+            o.acceleration ? t(OUT.processInfo({ process: { acceleration: o.acceleration } }).gpuKey) : '']
+            .filter(Boolean).join(' · '))));
+      }
+      v.process = st.process;
       if (st.part !== v.part || phaseId !== v.progressPhase) {
         v.part = st.part;
         v.progressPhase = phaseId;
@@ -71024,13 +71277,14 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
         if (phase) { v.phase.dataset.part = phaseId || st.part; v.phase.textContent = phase; said.textContent = phase; }
       }
       v.bar.classList.toggle('is-indeterminate', indeterminate);
-      v.frames.hidden = indeterminate; v.percent.hidden = indeterminate;
+      v.bar.setAttribute('aria-label', t(indeterminate ? 'exp.progressLabel' : 'exp.process.frameProgress'));
+      v.caption.hidden = indeterminate; v.frames.hidden = indeterminate; v.percent.hidden = indeterminate;
       if (indeterminate) {
         v.bar.removeAttribute('aria-valuenow');
-        v.bar.setAttribute('aria-valuetext', phase);
+        v.bar.setAttribute('aria-valuetext', [phase, stageText].filter(Boolean).join(' · '));
         dom.setStyle(v.fill, { width: '35%' });
         v.frames.textContent = ''; v.percent.textContent = '';
-        v.left.textContent = t(phaseId === 'audioServer' ? 'exp.serverProgress.wait' : 'exp.localProgress.wait');
+        v.left.textContent = t(phaseId === 'audioServer' ? 'exp.serverProgress.wait' : phaseId ? 'exp.localProgress.wait' : 'exp.process.wait');
         return;
       }
       const progress = t('exp.progress', { i: st.i, n: st.N, eta: clock(st.eta || 0) });
@@ -78995,10 +79249,17 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
       // the size and frame rate of this export, for the done state and the guide (the settings may change meanwhile)
       const size = app.plan ? ex().schedule.outputSize(app.plan.design.aspect, o.short) : { w: 0, h: 0 };
       abort = new AbortController();
+      const controller = abort;
       app.pause();
-      set({ phase: 'running', i: 0, N: 0, eta: null, fps: o.fps, short: o.short, format: o.format, part: null, started: performance.now() });
+      set({ phase: 'running', i: 0, N: 0, eta: null, fps: o.fps, short: o.short, w: size.w, h: size.h,
+        format: o.format, part: null, started: performance.now(), process: { audioSource: 'pending' } });
       // the Filmora set reports its phase too: 'video' (every video, frame by frame), 'files', 'zip'
-      const onProgress = (p) => set(Object.assign({}, st, { i: p.i, N: p.N, eta: p.eta, part: p.phase || null }));
+      const currentSession = () => abort === controller && st.phase === 'running';
+      const currentExport = () => currentSession() && !controller.signal.aborted;
+      const onProgress = (p) => { if (currentExport()) set(Object.assign({}, st, { i: p.i, N: p.N, eta: p.eta, part: p.phase || null })); };
+      // Host events describe the path actually installed, including encoder fallback. They are independent of frame
+      // submission progress and never take their codec / processing preference from the asynchronous settings probe.
+      const onProcess = (p) => { if (currentExport()) set(OUT.advanceProcess(st, p)); };
       // The export renders the committed document: a fork planned from app.doc, whatever the preview shows (a try-on or
       // the compare view render another document on the preview engine).
       const doc = app.doc;
@@ -79011,7 +79272,13 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
           OUT.usesLocalAudio(doc) ? 'audio-local-media' : 'audio-server-media', 'original audio is not available');
         const audioServer = song && OUT.usesAudioServer(doc)
           ? ex().audioServer.validateConfig(AUDIO_SERVER.getConfig(app)) : null;
-        const args = { engine: source, doc, signal: abort.signal, onProgress };
+        const audioRoute = (o.format === 'png' || o.format === 'pngAlpha' || !song) ? 'none'
+          : OUT.usesLocalAudio(doc) ? 'local' : OUT.usesAudioServer(doc) ? 'server' : 'browser';
+        // Dedicated audio first makes a silent intermediate MP4. Its current audioSource must not erase the whole
+        // export's original-song conversion route from the explanation shown during that video pass.
+        if (currentExport()) set(Object.assign({}, st, { audioRoute }));
+        onProcess({ audioSource: audioRoute });
+        const args = { engine: source, doc, signal: abort.signal, onProgress, onProcess };
         let result;
         if (o.format === 'kit') {
           // one pass writes every file of the set (export/host/kit); the preview's AssetStore is shared by its forks
@@ -79025,7 +79292,11 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
         } else {
           result = await ex().png.exportPngs(Object.assign(args, { sink: target.sink, alpha: o.format === 'pngAlpha' }));
         }
-        if (result.blob) ex().sink.downloadBlob(result.blob, result.name || name);
+        if (!currentSession()) return;
+        // A browser file close can resolve after cancellation. The owned run still needs the normal cancelled
+        // cleanup / idle state, and must not start a memory download merely because the encoder returned a result.
+        if (controller.signal.aborted) throw new (ex().schedule.ExportError)('cancelled', 'export was cancelled');
+        if (result.blob) { onProcess({ stage: 'save' }); ex().sink.downloadBlob(result.blob, result.name || name); }
         // a set written into a folder has no single name (result.folder names the folder, result.parent the folder the
         // user picked, for the done state); a ZIP or a file has one
         if (o.format === 'kit' && target.dir && target.dir.parentName) result.parent = target.dir.parentName;
@@ -79035,8 +79306,9 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
         // Configuration or source checks can fail before a host exporter owns the target.
         // Sink abort is idempotent and also removes an empty folder created by the picker.
         try { if (target.sink) await target.sink.abort(); if (target.dir) await target.dir.abort(); } catch (cleanupError) { /* keep the original error */ }
+        if (!currentSession()) return;
         const code = e && e.code ? e.code : 'encode';
-        if (code === 'cancelled' || (abort && abort.signal.aborted)) { set({ phase: 'idle' }); app.toast(t('err.exp.cancelled')); }
+        if (code === 'cancelled' || controller.signal.aborted) { set({ phase: 'idle' }); app.toast(t('err.exp.cancelled')); }
         else {
           if (typeof console !== 'undefined') console.error(e);
           // the message may name the chosen format (no-webcodecs: 「このブラウザでは{format}を書き出せません」)
@@ -79044,8 +79316,8 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
         }
       } finally {
         if (source && typeof source.dispose === 'function') source.dispose();
+        if (abort === controller) abort = null;
       }
-      abort = null;
     };
     app.exportCancel = () => { if (abort) abort.abort(); };
   }
