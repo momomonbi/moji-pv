@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FFmpeg core 0.12.10 — licences and corresponding sources</title>
+<style>body{font:16px/1.6 system-ui,sans-serif;max-width:72rem;padding:1.5rem;margin:auto}table{border-collapse:collapse;width:100%}th,td{border:1px solid #bbb;padding:.35rem .6rem;text-align:left;overflow-wrap:anywhere}a{color:#0645ad}code{overflow-wrap:anywhere}main{overflow:auto}</style>
+<main><h1>FFmpeg core 0.12.10 — licences and corresponding sources</h1>
+<p>The optional browser AAC converter uses unmodified <strong>@ffmpeg/core 0.12.10</strong>.
+Its GPL-enabled FFmpeg WebAssembly program is distributed under <strong>GPL-2.0-or-later</strong>.
+The program runs in a separately loaded Worker. The application retains its existing MIT licence.</p>
+<p><a href="LICENSE.FFmpeg.txt">Full GPL version 2 licence</a> ·
+<a href="LICENSE.GPLv3.txt">GPL version 3</a> ·
+<a href="LICENSE.dependencies.txt">Linked-library and runtime notices</a> ·
+<a href="LICENSE.ffmpeg-wasm-MIT.txt">Upstream binding/build MIT notice</a></p>
+<p>The source archives below are supplied from the same location as the binaries. They contain
+FFmpeg, all linked libraries, Emscripten runtime sources, SDL2, and the original compilation
+and binding scripts. The upstream release is <code>v12.15</code>, commit
+<code>71aa99d37c02a7b4c435275ca9ef50e612f6efa1</code>.
+<a href="SOURCES.md">Detailed provenance and rebuild instructions</a> ·
+<a href="sources/manifest.json">Manifest</a> · <a href="sources/SHA256SUMS">SHA-256 checksums</a> ·
+<a href="sources/rebuild.py">Local-source build helper</a></p>
+<table><thead><tr><th>Component</th><th>Reference</th><th>Source download</th><th>Size</th></tr></thead><tbody>
+<tr><td>ffmpeg</td><td>n5.1.4</td><td><a href="sources/ffmpeg-4729204c17f7.tar.xz">4729204c17f7</a></td><td>9.36 MiB</td></tr>
+<tr><td>x264</td><td>4-cores</td><td><a href="sources/x264-33cac6b77d5b.tar.xz">33cac6b77d5b</a></td><td>0.66 MiB</td></tr>
+<tr><td>x265</td><td>3.4</td><td><a href="sources/x265-2bb5520e9596.tar.xz">2bb5520e9596</a></td><td>0.94 MiB</td></tr>
+<tr><td>vpx</td><td>v1.13.1</td><td><a href="sources/vpx-10b9492dcf05.tar.xz">10b9492dcf05</a></td><td>4.12 MiB</td></tr>
+<tr><td>lame</td><td>master</td><td><a href="sources/lame-2badea1974ae.tar.xz">2badea1974ae</a></td><td>0.98 MiB</td></tr>
+<tr><td>ogg</td><td>v1.3.4</td><td><a href="sources/ogg-bada45718453.tar.xz">bada45718453</a></td><td>0.21 MiB</td></tr>
+<tr><td>theora</td><td>v1.1.1</td><td><a href="sources/theora-7ffd8b2ecfc2.tar.xz">7ffd8b2ecfc2</a></td><td>0.66 MiB</td></tr>
+<tr><td>opus</td><td>v1.3.1</td><td><a href="sources/opus-e85ed7726db5.tar.xz">e85ed7726db5</a></td><td>0.53 MiB</td></tr>
+<tr><td>vorbis</td><td>v1.3.3</td><td><a href="sources/vorbis-779816404319.tar.xz">779816404319</a></td><td>0.88 MiB</td></tr>
+<tr><td>zlib</td><td>v1.2.11</td><td><a href="sources/zlib-cacf7f1d4e3d.tar.xz">cacf7f1d4e3d</a></td><td>0.45 MiB</td></tr>
+<tr><td>webp</td><td>v1.3.2</td><td><a href="sources/webp-ca332209cb55.tar.xz">ca332209cb55</a></td><td>2.00 MiB</td></tr>
+<tr><td>freetype</td><td>VER-2-10-4</td><td><a href="sources/freetype-6a2b3e4007e7.tar.xz">6a2b3e4007e7</a></td><td>1.35 MiB</td></tr>
+<tr><td>fribidi</td><td>v1.0.9</td><td><a href="sources/fribidi-f9e8e71a6fbf.tar.xz">f9e8e71a6fbf</a></td><td>0.82 MiB</td></tr>
+<tr><td>harfbuzz</td><td>5.2.0</td><td><a href="sources/harfbuzz-4a1d891c6317.tar.xz">4a1d891c6317</a></td><td>15.51 MiB</td></tr>
+<tr><td>ass</td><td>0.15.0</td><td><a href="sources/ass-d149636f502f.tar.xz">d149636f502f</a></td><td>0.19 MiB</td></tr>
+<tr><td>zimg</td><td>release-3.0.5</td><td><a href="sources/zimg-e5b0de6bebbc.tar.xz">e5b0de6bebbc</a></td><td>0.23 MiB</td></tr>
+<tr><td>emscripten</td><td>3.1.40</td><td><a href="sources/emscripten-5c27e79dd0a9.tar.xz">5c27e79dd0a9</a></td><td>19.64 MiB</td></tr>
+<tr><td>sdl2</td><td>release-2.24.2</td><td><a href="sources/sdl2-55b03c7493a7.tar.xz">55b03c7493a7</a></td><td>5.18 MiB</td></tr>
+<tr><td>ffmpeg-wasm</td><td>v12.15</td><td><a href="sources/ffmpeg-wasm-71aa99d37c02.tar.xz">71aa99d37c02</a></td><td>1.06 MiB</td></tr>
+<tr><td>zimg-googletest</td><td>703bd9caab50b139428cea1aaff9974ebee5742e</td><td><a href="sources/zimg-googletest-703bd9caab50.tar.xz">703bd9caab50</a></td><td>0.59 MiB</td></tr>
+<tr><td>emscripten-googletest</td><td>4fb7039fda3f6588c7ca9664176f8c9e0a023b4a</td><td><a href="sources/emscripten-googletest-4fb7039fda3f.tar.xz">4fb7039fda3f</a></td><td>0.58 MiB</td></tr>
+<tr><td>emscripten-posixtestsuite</td><td>869e266b090a8d44e51bb040904c942556b1e4ab</td><td><a href="sources/emscripten-posixtestsuite-869e266b090a.tar.xz">869e266b090a</a></td><td>0.41 MiB</td></tr>
+<tr><td>emscripten-wasi-test-suite</td><td>ac9371207fc61972a21d7d086074ca690a99d14d</td><td><a href="sources/emscripten-wasi-test-suite-ac9371207fc6.tar.xz">ac9371207fc6</a></td><td>0.48 MiB</td></tr>
+</tbody></table>
+<p>Download all source archives and metadata together with the build helper. With Python 3.12+,
+run <code>python3 rebuild.py --prepare /tmp/ffmpeg-core-rebuild</code>, then run <code>make prd</code>
+in that directory with Docker Buildx and Make installed. Compiler and OS build tools are obtained
+normally; the supplied FFmpeg and library source snapshots are used locally.</p></main></html>

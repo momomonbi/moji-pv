@@ -49,6 +49,9 @@ jobs:
       - name: Lint, layers and module order
         run: python3 build.py --check
 
+      - name: Verify distributed converter source archives
+        run: python3 vendor/ffmpeg/sources/rebuild.py
+
       - name: Node tests
         # The speed budgets (planner_determinism, mix, …) are measured on a CPU that no other test file shares: run side
         # by side, a re-plan measured 10–16 ms against the 10 ms budget; alone it measures 5–6 ms. So the files that time

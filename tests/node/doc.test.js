@@ -28,7 +28,7 @@ test('defaultDoc and defaultSide follow §4.4 and validate', () => {
   assert.equal(doc.song, null);
   assert.deepEqual(doc.look, { seed: 1, moodSeed: 1, aspect: '16:9', backdrop: 'scene' });
   assert.deepEqual([doc.pins, doc.salts, doc.locks, doc.filters], [{}, {}, {}, {}]);
-  assert.deepEqual(doc.output, { format: 'mp4', short: 1080, fps: 30, quality: 'high', acceleration: 'auto', audio: true, audioEncoding: 'browser', range: null, name: null,
+  assert.deepEqual(doc.output, { format: 'mp4', short: 1080, fps: 30, quality: 'high', acceleration: 'auto', audio: true, audioEncoding: 'local', range: null, name: null,
     kit: { overlay: true, bg: false, green: false, srt: true, lrc: false } });
   assert.deepEqual(doc.materials, { next: 1, list: [] });
   assert.deepEqual(doc.media, { list: [] });

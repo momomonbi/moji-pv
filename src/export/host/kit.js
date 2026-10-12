@@ -1,6 +1,6 @@
 /* 文字PVメーカー v2 — original work. The Filmora kit: one pass over the timeline writes the main MP4, the transparent overlay, the background and green-screen MP4s, the song WAV, SRT, LRC and a README into a folder or one ZIP (DESIGN_2_1 §13.9). */
 MV.def('export/host/kit', ['export/schedule', 'export/subtitles', 'export/zip', 'export/host/mp4', 'export/host/webm',
-  'export/host/sink', 'export/host/audio_server', 'audio/wav', 'core/commands', 'i18n/t', 'i18n/strings'], (S, SUB, Z, J, WH, SINK, AS, WAV, C, T, STRINGS) => {
+  'export/host/sink', 'export/host/audio_server', 'export/host/audio_local', 'audio/wav', 'core/commands', 'i18n/t', 'i18n/strings'], (S, SUB, Z, J, WH, SINK, AS, AL, WAV, C, T, STRINGS) => {
   'use strict';
 
   const KEY_COLOUR = '#00B140';         // the green screen's key colour (D§4.19.4 `chroma`)
@@ -148,7 +148,7 @@ MV.def('export/host/kit', ['export/schedule', 'export/subtitles', 'export/zip', 
   // --- exportKit -----------------------------------------------------------------------------------------------------
 
   // exportKit({ engine, doc, audio: AudioBuffer | null, dir: DirSink | null, signal, onProgress, assets?, canvas?, lib?,
-  //             codecs? }) → { files: [{ name, kind, bytes }], ms, audio: 'aac' | 'wav' | 'none', frames, bytes, folder,
+  //             codecs?, audioLocal?: true | Runtime, audioServer?: Config }) → { files: [{ name, kind, bytes }], ms, audio: 'aac' | 'wav' | 'none', frames, bytes, folder,
   //                            codec, overlayCodec, audioCodec, audioBitrate, audioBitrateMode, acceleration,
   //                            accelerationByOutput, name?, blob? }
   // audioBitrate is the configured AAC target, or the WAV's exact PCM bitrate; null when no song is written.
@@ -157,6 +157,8 @@ MV.def('export/host/kit', ['export/schedule', 'export/subtitles', 'export/zip', 
   // (the §13.5 transparent WebM, backdrop `clear`, no sound), the background MP4 (layers 'ground'), the green-screen MP4
   // (the document with backdrop `chroma`, quality max), then the song WAV (when the MP4 has no AAC), SRT (BOM, the
   // export range), LRC (song times) and README_Filmora.txt.
+  // A dedicated audio mode converts only the silent main MP4 from original PCM after this shared video pass; local
+  // runs in the browser, server uses the configured HTTPS service. Neither re-encodes video nor writes the fallback WAV.
   // One pass over the timeline: two engine forks — eA (the document) and eG (backdrop chroma, only with the green
   // screen) — share one AssetStore (`assets.fork()`, when the caller passes its store; otherwise each fork makes its
   // own), so each source frame is decoded once. Per frame: await both forks' media frames, then render and encode main,
@@ -199,11 +201,14 @@ MV.def('export/host/kit', ['export/schedule', 'export/subtitles', 'export/zip', 
       const main = await J.videoConfig(o.codecs, jobA, bits);
       const song = o.audio && doc.output.audio && doc.song ? o.audio : null;
       const server = song && o.audioServer ? AS.validateConfig(o.audioServer) : null;
+      const local = !!(song && !server && o.audioLocal);
+      const convertedAudio = !!(server || local);
       if (server && !server.token) throw new S.ExportError('audio-server-auth', 'external audio conversion auth');
       const health = server ? await AS.check(server, { signal: o.signal, fetchImpl: o.fetchImpl }) : null;
-      const acfg = song && !server ? await J.audioConfig(o.codecs, song, kitAudioList(o.codecs)) : null;
-      const files = S.kitFiles(doc, jobA.plan, { audioCodec: server ? 'mp4a.40.2' : acfg ? acfg.codec : null,
-        audioBitrate: server ? AS.TARGET : acfg ? acfg.bitrate : null, songReady: !!song });
+      const localRuntime = local ? await AL.prepare({ audioLocal: o.audioLocal, signal: o.signal, onProgress: say }) : null;
+      const acfg = song && !convertedAudio ? await J.audioConfig(o.codecs, song, kitAudioList(o.codecs)) : null;
+      const files = S.kitFiles(doc, jobA.plan, { audioResolved: true, audioCodec: convertedAudio ? 'mp4a.40.2' : acfg ? acfg.codec : null,
+        audioBitrate: convertedAudio ? AS.TARGET : acfg ? acfg.bitrate : null, songReady: !!song });
       const fileOf = (kind) => files.find((f) => f.kind === kind) || null;
       let overlay = null;
       if (kit.overlay) {
@@ -215,7 +220,7 @@ MV.def('export/host/kit', ['export/schedule', 'export/subtitles', 'export/zip', 
 
       // one output per video file: its job (engine fork), surface, render options and encoder
       const add = async (kind, job, surface, ropts, make) => {
-        const sink = server && kind === 'main'
+        const sink = convertedAudio && kind === 'main'
           ? (temporaryMain = SINK.createMemorySink({ name: 'video.mp4', type: 'video/mp4' })) : await target.file(fileOf(kind).name, kind);
         outputs.push({ kind, job, surface, ropts, out: make(sink) });
       };
@@ -248,12 +253,14 @@ MV.def('export/host/kit', ['export/schedule', 'export/subtitles', 'export/zip', 
       J.checkAbort(o.signal);
       const written = new Map();
       for (const x of outputs) written.set(x.kind, await x.out.end());
-      let serverAudio = null;
-      if (server) {
+      let encodedAudio = null;
+      if (convertedAudio) {
         const silent = written.get('main');
-        serverAudio = await AS.convert({ video: silent.blob, audio: song, job: jobA, sink: await target.file(fileOf('main').name, 'main'),
-          audioServer: server, health, signal: o.signal, onProgress: say, fetchImpl: o.fetchImpl });
-        written.set('main', serverAudio);
+        const args = { video: silent.blob, audio: song, job: jobA, sink: await target.file(fileOf('main').name, 'main'),
+          signal: o.signal, onProgress: say };
+        encodedAudio = local ? await AL.convert(Object.assign(args, { runtime: localRuntime }))
+          : await AS.convert(Object.assign(args, { audioServer: server, health, fetchImpl: o.fetchImpl }));
+        written.set('main', encodedAudio);
       }
 
       say({ i: jobA.N, N: jobA.N, eta: 0, phase: 'files' });
@@ -268,13 +275,13 @@ MV.def('export/host/kit', ['export/schedule', 'export/subtitles', 'export/zip', 
       J.checkAbort(o.signal);
 
       const list = files.map((f) => ({ name: f.name, kind: f.kind, bytes: written.get(f.kind).bytes }));
-      const result = { files: list, audio: server ? 'aac' : acfg ? 'aac' : wav ? 'wav' : 'none', frames: jobA.N, folder: target.folder,
-        codec: main.codec, overlayCodec: overlay ? overlay.codec : null, audioCodec: server ? serverAudio.audioCodec : acfg ? acfg.codec : wav ? 'pcm-s16le' : null,
-        audioBitrate: server ? serverAudio.audioBitrate : acfg ? acfg.bitrate : wav ? song.sampleRate * 2 * 16 : null,
-        audioBitrateMode: server ? null : acfg ? acfg.bitrateMode || null : wav ? 'constant' : null,
+      const result = { files: list, audio: convertedAudio ? 'aac' : acfg ? 'aac' : wav ? 'wav' : 'none', frames: jobA.N, folder: target.folder,
+        codec: main.codec, overlayCodec: overlay ? overlay.codec : null, audioCodec: convertedAudio ? encodedAudio.audioCodec : acfg ? acfg.codec : wav ? 'pcm-s16le' : null,
+        audioBitrate: convertedAudio ? encodedAudio.audioBitrate : acfg ? acfg.bitrate : wav ? song.sampleRate * 2 * 16 : null,
+        audioBitrateMode: convertedAudio ? null : acfg ? acfg.bitrateMode || null : wav ? 'constant' : null,
         acceleration: outputs[0].out.acceleration,
         accelerationByOutput: Object.fromEntries(outputs.map((x) => [x.kind, x.out.acceleration])) };
-      if (server) { result.audioSource = 'server'; result.audioMeasuredBitrate = serverAudio.audioMeasuredBitrate; }
+      if (convertedAudio) { result.audioSource = encodedAudio.audioSource; result.audioMeasuredBitrate = encodedAudio.audioMeasuredBitrate; }
       if (target.dir) {
         await target.dir.close();
         result.folder = target.dir.name;

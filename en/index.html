@@ -1,6 +1,6 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-RWH0cmdNChVhSNMjhPnsIOoi80jfc+ew9PGygkpwu3U='; style-src 'sha256-Fy49fNzr9l0lyo6ZAGAcOvPUSG1U7eiwF+9E4r2Twy0=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com https:; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-eB+0LYXXmFbBUovyBsVU5YCkFVBMP58dQuDjBjXvz2U=' 'wasm-unsafe-eval'; style-src 'sha256-Fy49fNzr9l0lyo6ZAGAcOvPUSG1U7eiwF+9E4r2Twy0=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://generativelanguage.googleapis.com https://api.anthropic.com https:; img-src data: blob:; media-src blob:; worker-src blob:; base-uri 'none'; form-action 'none'">
 <title>Moji PV Maker</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -1424,6 +1424,7 @@ new Anthropic({ apiKey, dangerouslyAllowBrowser: true });
   MV.has = (id) => defs.has(id);
 })(typeof globalThis !== 'undefined' ? globalThis : this);
 MV.DEV=false;MV.LANG='en';
+MV.ASSET_BASE='../vendor/ffmpeg/';
 /* 文字PVメーカー v2 — original work. Beat grid: closed-form beat / bar lookups and snapping (DESIGN §4.11). */
 MV.def('core/beats', [], () => {
   'use strict';
@@ -6806,7 +6807,7 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
     'seam', 'theme']);
   const OUTPUT_CHOICES = Object.freeze({
     format: ['mp4', 'kit', 'webmAlpha', 'png', 'pngAlpha'], short: [720, 1080, 1440, 2160], fps: [24, 30, 60],
-    quality: ['light', 'standard', 'high', 'max'], acceleration: ['auto', 'cpu'], audioEncoding: ['browser', 'server'],
+    quality: ['light', 'standard', 'high', 'max'], acceleration: ['auto', 'cpu'], audioEncoding: ['browser', 'local', 'server'],
   });
   // output.kit: the optional files of the Filmora set (§13.3); the main MP4 is always written.
   const KIT_KEYS = Object.freeze(['overlay', 'bg', 'green', 'srt', 'lrc']);
@@ -6868,7 +6869,7 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
       filters: {},
       materials: { next: 1, list: [] },
       media: { list: [] },
-      output: { format: 'mp4', short: 1080, fps: 30, quality: 'high', acceleration: 'auto', audio: true, audioEncoding: 'browser', range: null, name: null,
+      output: { format: 'mp4', short: 1080, fps: 30, quality: 'high', acceleration: 'auto', audio: true, audioEncoding: 'local', range: null, name: null,
         kit: Object.assign({}, KIT_DEFAULT) },
     };
   }
@@ -7140,7 +7141,9 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
       else if (k === 'sheet' && isObject(v)) put(k, fillMissing(v, sheetDefaults(doc)));
       else if (k === 'song' && isObject(v)) put(k, fillMissing(v, SONG_DEFAULTS));
       else if (k === 'materials' && isObject(v)) put(k, fillMissing(v, materialDefaults(v)));
-      else if (k === 'output' && isObject(v)) put(k, withKit(fillMissing(v, base.output)));
+      // Saved works that predate the encoding choice keep native browser audio. New works explicitly start with
+      // 'local', and both an explicit browser choice and an external server choice survive opening unchanged.
+      else if (k === 'output' && isObject(v)) put(k, withKit(fillMissing(v, { ...base.output, audioEncoding: 'browser' })));
       else if (isObject(v) && isObject(base[k])) put(k, fillMissing(v, base[k]));
     }
     return out;
@@ -12319,17 +12322,39 @@ MV.def('i18n/strings', [], () => ({
   'exp.audioQuality.missing': ['曲の音声を読み込むと、書き出す音質を確認できます。', 'Load the song audio to check its export setting.'],
   'exp.audioQuality.unavailable': ['このブラウザでは動画に音声を入れられません。', 'This browser cannot encode audio in the video.'],
   'exp.audioEncoding': ['音声の処理', 'Audio processing'],
-  'exp.audioEncoding.browser': ['ブラウザで処理', 'Process in browser'],
+  'exp.audioEncoding.browser': ['ブラウザ標準の音声処理', 'Standard browser audio'],
+  'exp.audioEncoding.local': ['ブラウザ内でAAC 320kbps', 'AAC 320 kbps in this browser'],
+  'exp.audioEncoding.localHelp': ['追加設定なしで、元の曲をAAC 320kbpsの目標で処理します。初回は変換機能（約32MB）を読み込みます。動画や音声は外部へ送信しません。',
+    'Encodes the original song with an AAC 320 kbps target without setup. The first use downloads about 32 MB of conversion code. Your video and audio stay in this browser.'],
+  'exp.audioEncoding.browserHelp': ['ブラウザ標準の音声処理を使用します。対応する音質はブラウザによって異なります。',
+    'Uses the browser’s standard audio encoder. Available bitrate depends on the browser.'],
   'exp.audioEncoding.server': ['外部サーバー（AAC 320kbps）', 'External server (AAC 320 kbps)'],
   'exp.audioEncoding.help': ['外部サーバーでは元の曲をAAC 320kbpsの目標で処理し、動画に結合します。動画と音声を設定したサーバーへ送信します。',
     'The external server encodes the original song with an AAC 320 kbps target and joins it to the video. Video and audio are sent to your configured server.'],
   'exp.audioEncoding.needsAudio': ['曲を読み込み、音声を入れると使えます', 'Load a song and enable sound to use this'],
   'exp.audioQuality.server': ['音声：AAC {kbps}kbpsの目標（元の曲から外部サーバーで処理）', 'Audio: AAC {kbps} kbps target (processed from the original song on your server)'],
   'exp.audioQuality.serverMeasured': ['音声：AAC {kbps}kbpsの目標・実測 {measured}kbps（外部サーバー）', 'Audio: AAC {kbps} kbps target; measured {measured} kbps (external server)'],
+  'exp.audioQuality.local': ['音声：AAC {kbps}kbpsの目標（元の曲からブラウザ内で処理）', 'Audio: AAC {kbps} kbps target (processed from the original song in this browser)'],
+  'exp.audioQuality.localMeasured': ['音声：AAC {kbps}kbpsの目標・実測 {measured}kbps（ブラウザ内）', 'Audio: AAC {kbps} kbps target; measured {measured} kbps (in this browser)'],
+  'exp.localProgress.loading': ['音声変換機能を読み込み中', 'Loading the audio converter'],
+  'exp.localProgress.transcoding': ['ブラウザ内でAAC 320kbpsへ変換中', 'Converting to AAC 320 kbps in this browser'],
+  'exp.localProgress.wait': ['音声の変換と動画の結合が完了するまでお待ちください', 'Waiting for audio conversion and video joining'],
   'exp.serverProgress.audioServer': ['外部サーバーで音声を変換中', 'Converting audio on the external server'],
   'exp.serverProgress.wait': ['変換と動画の結合が完了するまでお待ちください', 'Waiting for audio conversion and video joining'],
   'exp.pre.audio-server-config': ['外部変換には、公開したサーバーのHTTPS URLとアクセストークンを設定してください。', 'External conversion requires the HTTPS URL and access token of your deployed server.'],
   'exp.pre.audio-server-song-missing': ['外部変換には元の曲ファイルが必要です。つなぎ直してください: {name}', 'External conversion needs the original song file. Relink it: {name}'],
+  'exp.pre.audio-local-song-missing': ['変換には元の曲ファイルが必要です。つなぎ直してください: {name}', 'Conversion needs the original song file. Relink it: {name}'],
+  'exp.pre.audio-local-unavailable': ['このブラウザでは内蔵の音声変換を使用できません。PCのChromeかEdgeで開くか、音声の処理をブラウザ標準に変更してください。',
+    'The built-in audio converter is unavailable in this browser. Open the app in desktop Chrome or Edge, or choose standard browser audio.'],
+  'exp.pre.audio-local-too-large': ['選択した範囲がブラウザ内変換の長さ・音声容量の上限を超えています。範囲を短くしてください。', 'The selected range exceeds the built-in converter’s duration or audio size limit. Choose a shorter range.'],
+  'err.exp.audioLocalUnavailable': ['このブラウザでは内蔵の音声変換を使用できません。PCのChromeかEdgeで試してください。', 'The built-in audio converter is unavailable in this browser. Try desktop Chrome or Edge.'],
+  'err.exp.audioLocalLoad': ['音声変換機能を読み込めませんでした。インターネット接続を確認して再試行してください。', 'Could not load the audio converter. Check your Internet connection and retry.'],
+  'err.exp.audioLocalMemory': ['音声変換に必要なメモリが足りません。範囲・サイズ・fpsを下げて再試行してください。', 'There is not enough memory for audio conversion. Reduce the range, resolution or fps and retry.'],
+  'err.exp.audioLocalTooLarge': ['動画と音声がブラウザ内変換の容量上限を超えています。範囲・サイズ・fpsを下げてください。', 'The video and audio exceed the built-in converter’s size limit. Reduce the range, resolution or fps.'],
+  'err.exp.audioLocalConvert': ['ブラウザ内でAAC 320kbpsへの変換に失敗しました。', 'Could not convert the audio to AAC with a 320 kbps target in this browser.'],
+  'err.exp.audioLocalResponse': ['内蔵の音声変換で正しいMP4を作成できませんでした。', 'The built-in audio converter did not produce a valid MP4.'],
+  'err.exp.audioLocalMedia': ['音声変換に必要な元の曲を読み取れませんでした。曲ファイルをつなぎ直してください。', 'Could not read the original song needed for audio conversion. Relink the song file.'],
+  'err.exp.audioLocalBusy': ['音声変換が進行中です。完了してから再試行してください。', 'Audio conversion is already running. Wait for it to finish and retry.'],
   'exp.server.url': ['サーバーURL', 'Server URL'],
   'exp.server.token': ['アクセストークン', 'Access token'],
   'exp.server.check': ['接続を確認', 'Check connection'],
@@ -13064,6 +13089,8 @@ MV.def('i18n/strings', [], () => ({
   'about.fonts': ['書体は Google Fonts から読み込みます（SIL Open Font License ほか）。', 'Typefaces load from Google Fonts (SIL Open Font License and others).'],
   'about.licences': ['使っている部品のライセンス', 'Third-party licenses'],
   'about.muxer': ['MP4 の書き出し', 'MP4 export'],
+  'about.audioConverter': ['ブラウザ内のAAC音声変換', 'In-browser AAC audio conversion'],
+  'about.converterSources': ['変換機能のソースとライセンス', 'Converter sources and licenses'],
   'about.sdk': ['APIとの通信', 'API communication'],
   'about.bundled': ['APIとの通信の部品に含まれています', 'Included in the API communication package'],
 
@@ -51110,6 +51137,10 @@ MV.def('export/schedule', ['core/script', 'core/doc', 'audio/wav', 'media/sample
   const AUDIO_CHUNK = 1024;                         // frames per AudioData
   const MUX_OVERHEAD = 1.02;                        // container bytes on top of the streams
   const MEMORY_CONFIRM_BYTES = 1.5 * 1024 ** 3;     // an in-memory export above this asks for confirmation
+  const LOCAL_AUDIO_MAX_INPUT_BYTES = 256 * 1024 ** 2;
+  const LOCAL_AUDIO_MAX_OUTPUT_BYTES = 260 * 1024 ** 2;
+  const LOCAL_AUDIO_MAX_SECONDS = 3600;
+  const LOCAL_AUDIO_RUNTIME_BYTES = 64 * 1024 ** 2;  // converter code/heap allowance, beyond its input and output files
   const PNG_BYTES_PER_PIXEL = { rgb: 1.2, rgba: 1.6 };   // rough PNG size of rendered frames, for the memory warning
   // Transparent WebM: the alpha stream's bitrate as a share of the colour stream's. §13.5 said 25 %; measured, VP9 then
   // leaves ghost trails behind moving text by the end of a key-frame interval (α up to 98/255 where the frame is clear,
@@ -51240,10 +51271,20 @@ MV.def('export/schedule', ['core/script', 'core/doc', 'audio/wav', 'media/sample
     return !!(out && out.audioEncoding === 'server' && (out.format === 'mp4' || out.format === 'kit') && out.audio && doc.song);
   }
 
+  function usesLocalAudio(doc) {
+    const out = doc && doc.output;
+    return !!(out && out.audioEncoding === 'local' && (out.format === 'mp4' || out.format === 'kit') && out.audio && doc.song);
+  }
+
+  function usesDedicatedAudio(doc) { return usesLocalAudio(doc) || usesAudioServer(doc); }
+
   function audioEnv(doc, env) {
     const e = env || {};
-    return usesAudioServer(doc) ? Object.assign({}, e, { audioCodec: 'mp4a.40.2', audioBitrate: AUDIO_BITRATE,
-      audioBitrateMode: null, audioSource: 'server' }) : e;
+    // A host may explicitly resolve its actual codec (including a legacy direct Filmora call using native audio).
+    // Never make its written-file list assume AAC when that execution needs a WAV. UI estimates omit this marker.
+    if (e.audioResolved === true) return e;
+    return usesDedicatedAudio(doc) ? Object.assign({}, e, { audioCodec: 'mp4a.40.2', audioBitrate: AUDIO_BITRATE,
+      audioBitrateMode: null, audioSource: usesLocalAudio(doc) ? 'local' : 'server' }) : e;
   }
 
   function estimatePngBytes(frames, w, h, alpha) {
@@ -51589,7 +51630,15 @@ MV.def('export/schedule', ['core/script', 'core/doc', 'audio/wav', 'media/sample
     const size = outputSize(plan.design.aspect, out.short);
     const { w, h } = size;
     const withAudio = kind.video && out.audio && !!doc.song;
-    const serverAudio = usesAudioServer(doc);
+    const serverAudio = usesAudioServer(doc), localAudio = usesLocalAudio(doc);
+    if (localAudio && e.localAudioAvailable === false) items.push({ code: 'audio-local-unavailable', level: 'block', params: {} });
+    const frames = frameCount(Math.max(0, t1 - t0), out.fps);
+    const pcmBytes = WAV.HEADER_BYTES + audioFrames(frames, out.fps, WAV_RATE) * 4;
+    if (localAudio && e.songReady !== false && (frames / out.fps > LOCAL_AUDIO_MAX_SECONDS || pcmBytes > LOCAL_AUDIO_MAX_INPUT_BYTES)) {
+      // PCM length and rendered duration are exact. Estimated compressed video size must not reject a job: simple
+      // scenes may encode far below the bitrate target. The runtime enforces the actual video + WAV input limit.
+      items.push({ code: 'audio-local-too-large', level: 'block', params: { bytes: pcmBytes, seconds: frames / out.fps } });
+    }
     if (serverAudio && e.audioServerConfigured === false) items.push({ code: 'audio-server-config', level: 'block', params: {} });
     if (!(t1 > t0)) items.push({ code: 'range-empty', level: 'block', params: {} });
     if (kind.video && !e.webcodecs) items.push({ code: 'no-webcodecs', level: 'block', params: {} });
@@ -51606,11 +51655,12 @@ MV.def('export/schedule', ['core/script', 'core/doc', 'audio/wav', 'media/sample
       else if (mp4 && e.audioCodec === 'opus') items.push({ code: 'opus-audio', level: 'info', params: {} });
       else if (kit && !kitAac(e)) items.push({ code: 'kit-wav', level: 'info', params: { name: kitBase(doc) } });
     }
-    if (withAudio && e.songReady === false) items.push({ code: 'song-missing', level: serverAudio ? 'block' : 'warn', params: { name: doc.song.name } });
+    if (withAudio && e.songReady === false) items.push({ code: 'song-missing', level: serverAudio || localAudio ? 'block' : 'warn',
+      params: { name: doc.song.name, ...(localAudio ? { audioSource: 'local' } : {}) } });
     if (mp4 && doc.look.backdrop === 'clear') items.push({ code: 'clear-mp4', level: 'warn', params: {} });
     if (e.fontsReady === false) items.push({ code: 'fonts-loading', level: 'info', params: {} });
     const inMemory = kit ? !(e.dirAccess === undefined ? e.fsAccess : e.dirAccess) : !e.fsAccess;
-    if (inMemory || serverAudio && e.songReady !== false) {
+    if (inMemory || (serverAudio || localAudio) && e.songReady !== false) {
       let bytes = inMemory ? memoryBytes(doc, plan, e, range, size, withAudio) : 0;
       if (serverAudio && e.songReady !== false) {
         const seconds = Math.max(0, range.t1 - range.t0), bits = bitrate(w, h, out.fps, out.quality);
@@ -51620,6 +51670,13 @@ MV.def('export/schedule', ['core/script', 'core/doc', 'audio/wav', 'media/sample
         bytes += estimateBytes(seconds, bits, false) + WAV.HEADER_BYTES
           + audioFrames(frameCount(seconds, out.fps), out.fps, WAV_RATE) * 4;
         if (!inMemory) bytes += estimateBytes(seconds, bits, true, AUDIO_BITRATE);
+      }
+      if (localAudio && e.songReady !== false) {
+        const movie = estimateBytes(Math.max(0, t1 - t0), bitrate(w, h, out.fps, out.quality), true, AUDIO_BITRATE);
+        // WORKERFS references the input blobs. MEMFS keeps the converted movie and returning it creates another
+        // copy: count three movie buffers plus the exact PCM source and converter overhead, even for disk output.
+        // In-memory/ZIP estimates already include one finished movie, so add two there; auxiliary ZIP files remain.
+        bytes += movie * (inMemory ? 2 : 3) + pcmBytes + LOCAL_AUDIO_RUNTIME_BYTES;
       }
       items.push({ code: kit ? 'kit-memory' : 'memory', level: bytes > MEMORY_CONFIRM_BYTES ? 'confirm' : 'warn', params: { bytes } });
     }
@@ -51643,9 +51700,12 @@ MV.def('export/schedule', ['core/script', 'core/doc', 'audio/wav', 'media/sample
   }
 
   return {
-    ExportError, QUALITY_LEVELS, QUALITY_BPP, AUDIO_BITRATE, AUDIO_BITRATE_LOW, OPUS_BITRATE, OPUS_BITRATE_LOW, AUDIO_CHUNK, MEMORY_CONFIRM_BYTES, FLASH_PARTS, FLASH_LIMIT, FLASH_SAFE_AMP,
+    ExportError, QUALITY_LEVELS, QUALITY_BPP, AUDIO_BITRATE, AUDIO_BITRATE_LOW, OPUS_BITRATE, OPUS_BITRATE_LOW, AUDIO_CHUNK, MEMORY_CONFIRM_BYTES,
+    LOCAL_AUDIO_MAX_INPUT_BYTES, LOCAL_AUDIO_MAX_OUTPUT_BYTES, LOCAL_AUDIO_MAX_SECONDS, LOCAL_AUDIO_RUNTIME_BYTES,
+    FLASH_PARTS, FLASH_LIMIT, FLASH_SAFE_AMP,
     ALPHA_SHARE, WAV_RATE, KIT_README, KIT_SHORTS, FORMATS,
-    frameCount, ts, frameDur, audioFrames, keyInterval, audioChunkCount, audioChunk, fillPlanar, mixMatrix, usesAudioServer, audioEnv,
+    frameCount, ts, frameDur, audioFrames, keyInterval, audioChunkCount, audioChunk, fillPlanar, mixMatrix,
+    usesAudioServer, usesLocalAudio, usesDedicatedAudio, audioEnv,
     outputSize, bitrate, alphaBitrate, estimateBytes, estimateWebmBytes, estimatePngBytes, eta, pickAvc, pickVp9,
     exportRange, backdropFor, renderScale, fileName, frameName, kitOptions, kitBase, kitFolder, kitFiles, layerDiffs,
     flashEvents, flashRate, extremeCuts, preflight,
@@ -54005,6 +54065,382 @@ MV.def('export/host/mp4', ['export/schedule', 'export/muxer'], (S, M) => {
     channelsOf, createAudioFeeder, createMp4Output, drain, closeQuietly, exportFailure, accelerationOf, videoVariant, configureVideo,
   };
 });
+/* 文字PVメーカー v2 — original work. Verified, self-hosted FFmpeg WASM in a disposable worker; original PCM → AAC320 without uploading media. */
+MV.def('export/host/audio_runtime', ['export/schedule', 'export/host/mp4'], (S, J) => {
+  'use strict';
+
+  const VERSION = '0.12.10';
+  const MAX_INPUT_BYTES = 256 * 1024 * 1024, MAX_SECONDS = 3600;
+  const LIMITS = Object.freeze({ maxInputBytes: MAX_INPUT_BYTES, maxSeconds: MAX_SECONDS, maxOutputBytes: 260 * 1024 * 1024 });
+  const ASSETS = Object.freeze([
+    Object.freeze({ name: 'ffmpeg-core.js', bytes: 112059, hash: 'b266ab5b952555881dd6310663986994a182acb2b7ff25cf10a25f7a37ac2b21' }),
+    Object.freeze({ name: 'ffmpeg-core.wasm', bytes: 32232419, hash: '9f57947a5bd530d8f00c5b3f2cb2a3492faa7e5d823315342d6a8656d0a6b7b7' }),
+  ]);
+  const CORE_BYTES = ASSETS.reduce((n, a) => n + a.bytes, 0);
+  const CACHE_NAME = 'moji-pv-ffmpeg-core-' + VERSION;
+  const JOB_TIMEOUT = 30 * 60 * 1000;
+  let assets = null, loading = null, active = false;
+
+  function error(code) { return new S.ExportError('audio-local-' + code, 'local audio conversion ' + code); }
+  function cancelled() { return new S.ExportError('cancelled', 'export cancelled'); }
+  function support() {
+    const ok = typeof Worker === 'function' && typeof Blob === 'function' && typeof fetch === 'function'
+      && typeof URL === 'function' && typeof URL.createObjectURL === 'function'
+      && typeof WebAssembly === 'object' && typeof WebAssembly.compile === 'function'
+      && typeof crypto === 'object' && crypto.subtle && typeof crypto.subtle.digest === 'function';
+    return { supported: !!ok, reason: ok ? null : 'unavailable', maxInputBytes: MAX_INPUT_BYTES,
+      maxSeconds: MAX_SECONDS, coreBytes: CORE_BYTES, cached: !!assets };
+  }
+
+  function baseURL() {
+    const href = typeof location === 'object' && location.href ? location.href : 'https://momomonbi.github.io/moji-pv/';
+    if (new URL(href).protocol === 'file:') return 'https://momomonbi.github.io/moji-pv/vendor/ffmpeg/';
+    return new URL(MV.ASSET_BASE || 'vendor/ffmpeg/', href).href;
+  }
+
+  function progress(fn, phase, i, N) {
+    if (fn) fn({ phase, i, N, eta: null });
+  }
+
+  async function digest(bytes, signal) {
+    J.checkAbort(signal);
+    const value = await crypto.subtle.digest('SHA-256', bytes);
+    J.checkAbort(signal);
+    return Array.from(new Uint8Array(value), (v) => v.toString(16).padStart(2, '0')).join('');
+  }
+
+  async function verify(bytes, spec, signal) {
+    return bytes.byteLength === spec.bytes && await digest(bytes, signal) === spec.hash;
+  }
+
+  async function persistentCache() {
+    try { return typeof caches === 'object' && caches ? await caches.open(CACHE_NAME) : null; }
+    catch (err) { return null; } // Storage may be disabled; verified downloads still work.
+  }
+
+  async function readAsset(response, spec, signal, onChunk) {
+    if (!response || !response.ok) throw error('load');
+    const chunks = [], reader = response.body && response.body.getReader ? response.body.getReader() : null;
+    let total = 0;
+    try {
+      if (reader) {
+        while (true) {
+          J.checkAbort(signal);
+          const part = await reader.read();
+          J.checkAbort(signal);
+          if (part.done) break;
+          total += part.value.byteLength;
+          if (total > spec.bytes) throw error('load');
+          chunks.push(part.value); onChunk(part.value.byteLength);
+        }
+        const out = new Uint8Array(total);
+        let at = 0;
+        for (const chunk of chunks) { out.set(chunk, at); at += chunk.byteLength; }
+        return out.buffer;
+      }
+      const bytes = await response.arrayBuffer();
+      J.checkAbort(signal);
+      if (bytes.byteLength > spec.bytes) throw error('load');
+      onChunk(bytes.byteLength);
+      return bytes;
+    } finally {
+      if (reader) {
+        try { await reader.cancel(); } catch (err) { /* Closed or already aborted. */ }
+        reader.releaseLock();
+      }
+    }
+  }
+
+  async function loadAssets(signal, notify) {
+    const cache = await persistentCache(), base = baseURL(), values = [];
+    let received = 0;
+    notify({ phase: 'audioLocalLoading', i: 0, N: CORE_BYTES, eta: null });
+    for (const spec of ASSETS) {
+      J.checkAbort(signal);
+      const url = new URL(spec.name, base).href;
+      let bytes = null;
+      if (cache) {
+        try {
+          const hit = await cache.match(url);
+          if (hit) {
+            const value = await readAsset(hit, spec, signal, () => {});
+            if (await verify(value, spec, signal)) {
+              bytes = value; received += value.byteLength;
+              notify({ phase: 'audioLocalLoading', i: received, N: CORE_BYTES, eta: null });
+            } else await cache.delete(url);
+          }
+        } catch (err) {
+          J.checkAbort(signal);
+          try { await cache.delete(url); } catch (ignore) { /* Optional cache. */ }
+        } // Re-fetch stale/corrupt/unreadable cache entries.
+      }
+      if (!bytes) {
+        const response = await fetch(url, { signal, credentials: 'omit', redirect: 'error', referrerPolicy: 'no-referrer', cache: 'force-cache' });
+        bytes = await readAsset(response, spec, signal, (n) => {
+          received += n; notify({ phase: 'audioLocalLoading', i: received, N: CORE_BYTES, eta: null });
+        });
+        if (!await verify(bytes, spec, signal)) throw error('load');
+        if (cache) {
+          try { await cache.put(url, new Response(bytes, { headers: { 'Content-Type': spec.name.endsWith('.wasm') ? 'application/wasm' : 'text/javascript' } })); }
+          catch (err) { /* Storage limits do not prevent conversion. */ }
+        }
+      }
+      values.push(bytes);
+    }
+    J.checkAbort(signal);
+    // Fail before rendering if this browser/CSP cannot compile the core's WASM features.
+    await WebAssembly.compile(values[1]);
+    J.checkAbort(signal);
+    const js = new TextDecoder('utf-8', { fatal: true }).decode(values[0]);
+    return { js, wasm: values[1] };
+  }
+
+  function prepare(opts) {
+    const o = opts || {};
+    try { J.checkAbort(o.signal); } catch (err) { return Promise.reject(err); }
+    if (!support().supported) return Promise.reject(error('unavailable'));
+    if (assets) {
+      progress(o.onProgress, 'audioLocalLoading', CORE_BYTES, CORE_BYTES);
+      return Promise.resolve({ version: VERSION, bytes: CORE_BYTES, cached: true });
+    }
+    if (!loading) {
+      const task = { controller: new AbortController(), users: new Set(), last: null, promise: null };
+      loading = task;
+      task.promise = loadAssets(task.controller.signal, (p) => {
+        task.last = p;
+        for (const user of task.users) if (user.progress) user.progress(p);
+      }).then((value) => { J.checkAbort(task.controller.signal); assets = value; return value; })
+        .catch((err) => {
+          J.checkAbort(task.controller.signal);
+          if (err && err.code && err.code.startsWith('audio-local-')) throw err;
+          throw error(err instanceof RangeError ? 'memory' : 'load');
+        }).finally(() => { if (loading === task) loading = null; });
+    }
+    const task = loading;
+    return new Promise((resolve, reject) => {
+      const user = { progress: o.onProgress }, signal = o.signal;
+      let settled = false;
+      const finish = (err) => {
+        if (settled) return;
+        settled = true; task.users.delete(user);
+        if (signal) signal.removeEventListener('abort', abort);
+        if (err) reject(err); else resolve({ version: VERSION, bytes: CORE_BYTES, cached: true });
+      };
+      const abort = () => {
+        finish(cancelled());
+        if (!task.users.size) { task.controller.abort(); if (loading === task) loading = null; }
+      };
+      task.users.add(user);
+      if (signal) signal.addEventListener('abort', abort, { once: true });
+      if (task.last && user.progress) user.progress(task.last);
+      task.promise.then(() => finish(null), finish);
+      if (signal && signal.aborted) abort();
+    });
+  }
+
+  // This bridge and its controller are original MIT code. Only the separate, pinned FFmpeg core is GPL; source and
+  // licence notices are served beside the core. The worker receives immutable Blob references via WORKERFS.
+  function workerMain() {
+    let core = null, running = false, memoryIssue = false;
+    const sendError = (code) => self.postMessage({ kind: 'error', code });
+    self.onmessage = async (event) => {
+      const data = event.data || {};
+      try {
+        if (data.kind === 'init') {
+          if (core || running || typeof FileReaderSync !== 'function') { sendError('unavailable'); return; }
+          core = await createFFmpegCore({ wasmBinary: data.wasm });
+          core.setLogger(({ message }) => { if (/memory|allocation|enlarge|out of bounds/i.test(message)) memoryIssue = true; });
+          if (!core.FS.filesystems.WORKERFS) { sendError('unavailable'); return; }
+          self.postMessage({ kind: 'ready' }); return;
+        }
+        if (data.kind !== 'convert' || !core || running) { sendError('response'); return; }
+        running = true;
+        const FS = core.FS;
+        FS.mkdir('/input');
+        FS.mount(FS.filesystems.WORKERFS, { blobs: [
+          { name: 'video.mp4', data: data.video }, { name: 'audio.wav', data: data.audio },
+        ] }, '/input');
+        core.setProgress(({ progress }) => {
+          if (Number.isFinite(progress)) self.postMessage({ kind: 'progress', ratio: Math.max(0, Math.min(1, progress)) });
+        });
+        core.setTimeout(30 * 60 * 1000);
+        const duration = (data.frames / data.fps).toFixed(12);
+        const ret = core.exec('-hide_banner', '-loglevel', 'error', '-protocol_whitelist', 'file',
+          '-f', 'mov', '-enable_drefs', '0', '-use_absolute_path', '0', '-i', '/input/video.mp4',
+          '-protocol_whitelist', 'file', '-f', 'wav', '-i', '/input/audio.wav',
+          '-map', '0:v:0', '-map', '1:a:0', '-map_metadata', '-1', '-map_chapters', '-1',
+          '-c:v', 'copy', '-c:a', 'aac', '-b:a', '320k', '-ar', '48000', '-ac', '2',
+          '-af', 'apad=whole_dur=' + duration + ',atrim=duration=' + duration + ',asetpts=PTS-STARTPTS',
+          '-movflags', '+faststart', '-movie_timescale', '48000', '-use_editlist', '1', '-shortest', '/output.mp4');
+        if (ret !== 0) { sendError(memoryIssue ? 'memory' : 'convert'); return; }
+        const size = FS.stat('/output.mp4').size;
+        if (!Number.isSafeInteger(size) || size <= 0 || size > data.maxOutputBytes) { sendError('too-large'); return; }
+        core.reset();
+        // This pinned core's ffprobe wrapper does not update Module.ret (it remains -1 after reset). Require the
+        // generated JSON and exact stream metadata instead of treating that wrapper value as a process exit code.
+        core.ffprobe('-v', 'error', '-show_entries', 'stream=codec_type,codec_name,sample_rate,channels,start_time,duration,bit_rate,nb_frames',
+          '-of', 'json', '-o', '/result.json', '/output.mp4');
+        const info = JSON.parse(FS.readFile('/result.json', { encoding: 'utf8' }));
+        const streams = info.streams || [], video = streams.filter((s) => s.codec_type === 'video'), audio = streams.filter((s) => s.codec_type === 'audio');
+        const a = audio[0], v = video[0], seconds = data.frames / data.fps;
+        if (video.length !== 1 || audio.length !== 1 || v.codec_name !== 'h264' || Number(v.nb_frames) !== data.frames
+          || ![v.start_time, v.duration, a.start_time, a.duration].every((n) =>
+            (typeof n === 'number' || (typeof n === 'string' && n.trim() !== '')) && Number.isFinite(Number(n)))
+          || Math.abs(Number(v.start_time)) > .0001 || Math.abs(Number(v.duration) - seconds) > .002
+          || a.codec_name !== 'aac' || Number(a.sample_rate) !== 48000 || Number(a.channels) !== 2
+          || Math.abs(Number(a.start_time)) > .0001 || Math.abs(Number(a.duration) - seconds) > 1 / 48000) { sendError('response'); return; }
+        const rate = Number(a.bit_rate), bytes = FS.readFile('/output.mp4');
+        FS.unlink('/output.mp4'); FS.unlink('/result.json'); FS.unmount('/input'); FS.rmdir('/input');
+        self.postMessage({ kind: 'done', bytes: bytes.buffer, measuredBitrate: Number.isFinite(rate) && rate > 0 ? rate : null }, [bytes.buffer]);
+      } catch (err) {
+        const message = err && err.message ? err.message : '';
+        sendError(/memory|allocation|enlarge|out of bounds/i.test(message) || (err && err.name === 'RangeError') ? 'memory' : core ? 'convert' : 'load');
+      }
+    };
+  }
+
+  async function convert(opts) {
+    const o = opts || {};
+    J.checkAbort(o.signal);
+    if (!support().supported) throw error('unavailable');
+    if (active) throw error('busy');
+    if (!(o.video instanceof Blob) || !(o.audio instanceof Blob) || o.video.size <= 0 || o.audio.size <= 44
+      || !Number.isSafeInteger(o.frames) || o.frames <= 0 || ![24, 25, 30, 50, 60].includes(o.fps)
+      || o.frames > o.fps * MAX_SECONDS) throw error('media');
+    if (o.video.size + o.audio.size > MAX_INPUT_BYTES) throw error('too-large');
+    active = true;
+    let worker = null, url = null;
+    try {
+      await prepare(o);
+      J.checkAbort(o.signal);
+      url = URL.createObjectURL(new Blob([assets.js, '\n(', workerMain.toString(), ')();\n'], { type: 'text/javascript' }));
+      try { worker = new Worker(url); } catch (err) { throw error('load'); }
+      return await new Promise((resolve, reject) => {
+        let settled = false, ready = false;
+        const signal = o.signal;
+        const finish = (err, value) => {
+          if (settled) return;
+          settled = true; clearTimeout(timer);
+          if (signal) signal.removeEventListener('abort', abort);
+          worker.onmessage = null; worker.onerror = null; worker.onmessageerror = null;
+          if (err) reject(err); else resolve(value);
+        };
+        const abort = () => finish(cancelled());
+        const send = (data) => {
+          try { worker.postMessage(data); }
+          catch (err) { finish(error(err instanceof RangeError ? 'memory' : 'convert')); }
+        };
+        const timer = setTimeout(() => finish(error('convert')), JOB_TIMEOUT);
+        if (signal) signal.addEventListener('abort', abort, { once: true });
+        worker.onerror = (event) => {
+          if (event && event.preventDefault) event.preventDefault();
+          finish(error(ready ? 'convert' : 'load'));
+        };
+        worker.onmessageerror = () => finish(error('response'));
+        worker.onmessage = (event) => {
+          try {
+            if (settled) return;
+            const data = event.data || {};
+            if (signal && signal.aborted) { abort(); return; }
+            if (data.kind === 'ready' && !ready) {
+              ready = true; progress(o.onProgress, 'audioLocal', 0, o.frames);
+              if (settled || (signal && signal.aborted)) return;
+              send({ kind: 'convert', video: o.video, audio: o.audio, frames: o.frames, fps: o.fps, maxOutputBytes: LIMITS.maxOutputBytes });
+            } else if (data.kind === 'progress' && ready) {
+              if (Number.isFinite(data.ratio)) progress(o.onProgress, 'audioLocal', Math.round(Math.max(0, Math.min(1, data.ratio)) * o.frames), o.frames);
+            } else if (data.kind === 'done' && ready) {
+              if (!(data.bytes instanceof ArrayBuffer) || !data.bytes.byteLength || data.bytes.byteLength > LIMITS.maxOutputBytes
+                || (data.measuredBitrate !== null && (!Number.isFinite(data.measuredBitrate) || data.measuredBitrate <= 0))) { finish(error('response')); return; }
+              progress(o.onProgress, 'audioLocal', o.frames, o.frames);
+              if (settled || (signal && signal.aborted)) return;
+              finish(null, { blob: new Blob([data.bytes], { type: 'video/mp4' }), measuredBitrate: data.measuredBitrate });
+            } else if (data.kind === 'error') {
+              const code = ['unavailable', 'load', 'memory', 'too-large', 'convert', 'response'].includes(data.code) ? data.code : 'convert';
+              finish(error(code));
+            } else finish(error('response'));
+          } catch (err) { finish(error(err instanceof RangeError ? 'memory' : 'convert')); }
+        };
+        try {
+          progress(o.onProgress, 'audioLocalLoading', CORE_BYTES, CORE_BYTES);
+          if (settled || (signal && signal.aborted)) return;
+          send({ kind: 'init', wasm: assets.wasm });
+          if (signal && signal.aborted) abort();
+        } catch (err) { finish(error(err instanceof RangeError ? 'memory' : 'convert')); }
+      });
+    } catch (err) {
+      J.checkAbort(o.signal);
+      if (err && err.code) throw err;
+      throw error(err instanceof RangeError ? 'memory' : 'convert');
+    } finally {
+      if (worker) worker.terminate();
+      if (url) URL.revokeObjectURL(url);
+      active = false;
+    }
+  }
+
+  return { prepare, convert, support, LIMITS, MAX_INPUT_BYTES, MAX_SECONDS, CORE_BYTES, ASSETS, VERSION, baseURL };
+});
+/* 文字PVメーカー v2 — original work. Original PCM range and converted-MP4 validation shared by local and server AAC conversion. */
+MV.def('export/host/audio_source', ['export/schedule', 'export/host/mp4', 'audio/wav', 'media/isobmff'], (S, J, WAV, ISO) => {
+  'use strict';
+
+  const RATE = 48000;
+  const TARGET = 320000;
+  const WAV_BLOCK = 1 << 20;
+  const failure = (code) => new S.ExportError('audio-source-' + code, 'audio source ' + code);
+
+  function rangeOf(job, song, error = failure) {
+    if (!job || !Number.isSafeInteger(job.N) || job.N <= 0 || ![24, 30, 60].includes(job.fps)
+      || !Number.isFinite(job.t0) || job.t0 < 0 || !song || song.sampleRate !== RATE
+      || !Number.isSafeInteger(song.numberOfChannels) || song.numberOfChannels <= 0 || typeof song.getChannelData !== 'function') {
+      throw error('media');
+    }
+    const frames = S.audioFrames(job.N, job.fps, RATE);
+    if (!Number.isSafeInteger(frames) || frames * 4 + WAV.HEADER_BYTES > 0xffffffff) throw error('too-large');
+    return { frames, start: Math.round(job.t0 * RATE), bytes: WAV.HEADER_BYTES + frames * 4 };
+  }
+
+  // Exact N/fps, stereo, 48 kHz PCM16 from the original decoded song. Match the native encoder's downmix/trim/padding;
+  // never decode an already compressed export. Yield between bounded pieces so long songs remain cancellable.
+  async function audioBlob(song, job, signal, error = failure) {
+    const range = rangeOf(job, song, error), channels = J.channelsOf(song);
+    const parts = [WAV.pcm16Header(RATE, range.frames, 2)];
+    for (let from = 0; from < range.frames; from += WAV_BLOCK) {
+      J.checkAbort(signal);
+      parts.push(WAV.pcm16Data(channels, range.start + from, Math.min(WAV_BLOCK, range.frames - from), 2));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    J.checkAbort(signal);
+    return new Blob(parts, { type: 'audio/wav' });
+  }
+
+  function validateMovie(movie, job, error = failure) {
+    const videos = movie.tracks.filter((t) => t.kind === 'video'), audios = movie.tracks.filter((t) => t.kind === 'audio');
+    const video = videos[0];
+    if (!video || videos.length !== 1 || audios.length !== 1 || audios[0].fourcc !== 'mp4a'
+      || !['avc1', 'avc3'].includes(video.fourcc) || !video.table || video.table.n !== job.N
+      || Math.abs(video.table.duration - job.N / job.fps) > 2e-5
+      || (job.w && video.w !== job.w) || (job.h && video.h !== job.h)) throw error('response');
+    return movie;
+  }
+
+  // Blob slices read only the container headers/sample tables; mdat remains in its existing backing store.
+  async function validateBlob(blob, job, signal, error = failure) {
+    J.checkAbort(signal);
+    if (!(blob instanceof Blob) || blob.size < 24) throw error('response');
+    let movie;
+    try {
+      movie = await ISO.parse(async (offset, length) => {
+        J.checkAbort(signal);
+        return new Uint8Array(await blob.slice(offset, offset + length).arrayBuffer());
+      }, blob.size);
+    } catch (err) { J.checkAbort(signal); throw error('response'); }
+    J.checkAbort(signal);
+    return validateMovie(movie, job, error);
+  }
+
+  return { RATE, TARGET, rangeOf, audioBlob, validateMovie, validateBlob };
+});
 /* 文字PVメーカー v2 — original work. PNG sequence export: engine fork → PNG frames → store-only ZIP → sink (§4.21). */
 MV.def('export/host/png', ['export/schedule', 'export/zip', 'export/host/mp4'], (S, Z, J) => {
   'use strict';
@@ -54383,15 +54819,111 @@ MV.def('export/host/sink', ['export/schedule'], (S) => {
 
   return { createFileSink, createMemorySink, createDirSink, canStream, canDirectory, openSink, openDirectory, downloadBlob };
 });
+/* 文字PVメーカー v2 — original work. In-browser AAC 320 kbps from original PCM, with one native silent-video encode and lossless video remux. */
+MV.def('export/host/audio_local', ['export/schedule', 'export/host/mp4', 'export/host/sink', 'export/host/audio_source', 'export/host/audio_runtime'],
+  (S, J, SINK, SOURCE, RUNTIME) => {
+    'use strict';
+
+    const TARGET = SOURCE.TARGET;
+    const MAX_INPUT_BYTES = RUNTIME.MAX_INPUT_BYTES;
+    const MAX_SECONDS = RUNTIME.MAX_SECONDS;
+
+    function error(code) { return new S.ExportError('audio-local-' + code, 'local audio conversion ' + code); }
+
+    function runtimeOf(o) {
+      const runtime = o.runtime || (o.audioLocal && typeof o.audioLocal === 'object' ? o.audioLocal : RUNTIME);
+      if (!runtime || typeof runtime.convert !== 'function') throw error('unavailable');
+      return runtime;
+    }
+
+    function checkSize(video, audio, job) {
+      const range = SOURCE.rangeOf(job, audio, error);
+      if (job.N / job.fps > MAX_SECONDS || range.bytes > MAX_INPUT_BYTES
+        || (video && video.size + range.bytes > MAX_INPUT_BYTES)) throw error('too-large');
+      return range;
+    }
+
+    // Loading happens before the potentially expensive native video pass. The runtime caches its core assets; each
+    // conversion owns a worker whose memory is released on success, failure or cancellation.
+    async function prepare(opts) {
+      const o = opts || {}, runtime = runtimeOf(o);
+      J.checkAbort(o.signal);
+      if (o.onProgress) o.onProgress({ phase: 'audioLocalLoading', i: 0, N: 0, eta: null });
+      try {
+        if (runtime.prepare) await runtime.prepare({ signal: o.signal, onProgress: o.onProgress });
+      } catch (err) {
+        J.checkAbort(o.signal);
+        if (err instanceof S.ExportError) throw err;
+        throw error('load');
+      }
+      J.checkAbort(o.signal);
+      return runtime;
+    }
+
+    // Convert a completed silent MP4 and its matching original PCM. No native AudioEncoder and no server requests:
+    // FFmpeg's own MP4 edit lists retain AAC priming while `-c:v copy` retains every encoded video sample.
+    async function convert(opts) {
+      const o = opts || {}, runtime = runtimeOf(o);
+      J.checkAbort(o.signal);
+      if (!(o.video instanceof Blob) || !o.video.size) throw error('media');
+      checkSize(o.video, o.audio, o.job);
+      if (o.onProgress) o.onProgress({ phase: 'audioLocal', i: 0, N: 0, eta: null });
+      const pcm = await SOURCE.audioBlob(o.audio, o.job, o.signal, error);
+      let converted;
+      try {
+        converted = await runtime.convert({ video: o.video, audio: pcm, frames: o.job.N, fps: o.job.fps,
+          signal: o.signal, onProgress: o.onProgress });
+      } catch (err) {
+        J.checkAbort(o.signal);
+        if (err instanceof S.ExportError) throw err;
+        throw error('convert');
+      }
+      J.checkAbort(o.signal);
+      if (!converted || !(converted.blob instanceof Blob) || !converted.blob.size) throw error('response');
+      const measured = converted.measuredBitrate === undefined || converted.measuredBitrate === null ? null : converted.measuredBitrate;
+      if (measured !== null && (!Number.isFinite(measured) || measured <= 0)) throw error('response');
+      await SOURCE.validateBlob(converted.blob, o.job, o.signal, error);
+      J.checkAbort(o.signal);
+      await o.sink.write(converted.blob);
+      J.checkAbort(o.signal);
+      const done = await o.sink.close();
+      return Object.assign({}, done, { audio: true, audioCodec: 'mp4a.40.2', audioBitrate: TARGET,
+        audioBitrateMode: null, audioSource: 'local', audioMeasuredBitrate: measured });
+    }
+
+    async function exportVideo(opts) {
+      const o = opts || {}, song = o.audio && o.doc.output.audio ? o.audio : null;
+      if (!song) return J.exportVideo(o);
+      const started = performance.now(), temporary = SINK.createMemorySink({ name: 'video.mp4', type: 'video/mp4' });
+      try {
+        const plan = o.engine.plan;
+        if (!plan) throw new S.ExportError('no-plan', 'the engine has no plan');
+        const range = S.exportRange(o.doc, plan), size = S.outputSize(plan.design.aspect, o.doc.output.short);
+        const job = { t0: range.t0, N: S.frameCount(range.t1 - range.t0, o.doc.output.fps), fps: o.doc.output.fps, w: size.w, h: size.h };
+        if (!job.N) throw new S.ExportError('range-empty', 'nothing to export');
+        checkSize(null, song, job);
+        const runtime = await prepare(o);
+        const video = await J.exportVideo(Object.assign({}, o, { audio: null, sink: temporary }));
+        job.N = video.frames;
+        const done = await convert({ video: video.blob, audio: song, job, sink: o.sink, runtime,
+          signal: o.signal, onProgress: o.onProgress });
+        return Object.assign({}, video, done, { blob: done.blob, name: o.sink.name || S.fileName(o.doc, 'mp4'), ms: performance.now() - started });
+      } catch (err) {
+        await o.sink.abort();
+        await temporary.abort();
+        throw J.exportFailure(err, o.signal, null);
+      }
+    }
+
+    return { prepare, convert, exportVideo, TARGET, MAX_INPUT_BYTES, MAX_SECONDS };
+  });
 /* 文字PVメーカー v2 — original work. External AAC: frozen silent MP4 + exact original PCM range → configured HTTPS service → original video with AAC 320 kbps. */
-MV.def('export/host/audio_server', ['export/schedule', 'export/host/mp4', 'export/host/sink', 'audio/wav', 'media/isobmff'], (S, J, SINK, WAV, ISO) => {
+MV.def('export/host/audio_server', ['export/schedule', 'export/host/mp4', 'export/host/sink', 'export/host/audio_source', 'media/isobmff'], (S, J, SINK, SOURCE, ISO) => {
   'use strict';
 
   const SERVICE = 'moji-pv-audio';
   const VERSION = 1;
-  const TARGET = 320000;
-  const RATE = 48000;
-  const WAV_BLOCK = 1 << 20;          // 4 MB of stereo PCM16 per block; never copy the whole song at once
+  const TARGET = SOURCE.TARGET;
   const MULTIPART_MARGIN = 64 * 1024;
   const PREFIX_LIMIT = ISO.MAX_MOOV + 8192;
 
@@ -54452,30 +54984,9 @@ MV.def('export/host/audio_server', ['export/schedule', 'export/host/mp4', 'expor
     return { service: SERVICE, version: VERSION, targetBitrate: TARGET, maxUploadBytes: value.maxUploadBytes, authChecked: false };
   }
 
-  function rangeOf(job, song) {
-    if (!job || !Number.isSafeInteger(job.N) || job.N <= 0 || ![24, 30, 60].includes(job.fps)
-      || !Number.isFinite(job.t0) || job.t0 < 0 || !song || song.sampleRate !== RATE
-      || !Number.isSafeInteger(song.numberOfChannels) || song.numberOfChannels <= 0 || typeof song.getChannelData !== 'function') {
-      throw error('media');
-    }
-    const frames = S.audioFrames(job.N, job.fps, RATE);
-    if (!Number.isSafeInteger(frames) || frames * 4 + WAV.HEADER_BYTES > 0xffffffff) throw error('too-large');
-    return { frames, start: Math.round(job.t0 * RATE), bytes: WAV.HEADER_BYTES + frames * 4 };
-  }
-
   // Same trim, downmix and silence padding as the browser encoder. This is the source PCM, never audio decoded from a
   // 192 kbps intermediate MP4. The range is N/fps (including the final rendered frame), not the unrounded UI duration.
-  async function audioBlob(song, job, signal) {
-    const range = rangeOf(job, song), channels = J.channelsOf(song);
-    const parts = [WAV.pcm16Header(RATE, range.frames, 2)];
-    for (let from = 0; from < range.frames; from += WAV_BLOCK) {
-      J.checkAbort(signal);
-      parts.push(WAV.pcm16Data(channels, range.start + from, Math.min(WAV_BLOCK, range.frames - from), 2));
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    }
-    J.checkAbort(signal);
-    return new Blob(parts, { type: 'audio/wav' });
-  }
+  function audioBlob(song, job, signal) { return SOURCE.audioBlob(song, job, signal, error); }
 
   function headerNumber(headers, name) {
     const raw = headers && headers.get(name);
@@ -54530,12 +55041,7 @@ MV.def('export/host/audio_server', ['export/schedule', 'export/host/mp4', 'expor
         try {
           movie = await ISO.parse(async (offset, length) => prefix.subarray(offset, offset + length), total);
         } catch (err) { throw error('response'); }
-        const videos = movie.tracks.filter((t) => t.kind === 'video'), audios = movie.tracks.filter((t) => t.kind === 'audio');
-        const video = videos[0];
-        if (!video || videos.length !== 1 || audios.length !== 1 || audios[0].fourcc !== 'mp4a'
-          || !['avc1', 'avc3'].includes(video.fourcc) || !video.table || video.table.n !== job.N
-          || Math.abs(video.table.duration - job.N / job.fps) > 2e-5
-          || (job.w && video.w !== job.w) || (job.h && video.h !== job.h)) throw error('response');
+        SOURCE.validateMovie(movie, job, error);
         return true;
       }
       if (at + size > PREFIX_LIMIT || (type === 'ftyp' && size > 4096)) throw error('response');
@@ -54599,7 +55105,7 @@ MV.def('export/host/audio_server', ['export/schedule', 'export/host/mp4', 'expor
     const o = opts || {}, config = validateConfig(o.audioServer);
     if (!config.token) throw error('auth');
     if (!(o.video instanceof Blob) || !o.video.size) throw error('media');
-    const range = rangeOf(o.job, o.audio);
+    const range = SOURCE.rangeOf(o.job, o.audio, error);
     if (o.onProgress) o.onProgress({ phase: 'audioServer', i: 0, N: 0, eta: null });
     const health = o.health || await check(config, { signal: o.signal, fetchImpl: o.fetchImpl });
     if (o.video.size + range.bytes + MULTIPART_MARGIN > health.maxUploadBytes) throw error('too-large');
@@ -54861,7 +55367,7 @@ MV.def('export/host/webm', ['export/schedule', 'export/webm', 'export/host/mp4']
 });
 /* 文字PVメーカー v2 — original work. The Filmora kit: one pass over the timeline writes the main MP4, the transparent overlay, the background and green-screen MP4s, the song WAV, SRT, LRC and a README into a folder or one ZIP (DESIGN_2_1 §13.9). */
 MV.def('export/host/kit', ['export/schedule', 'export/subtitles', 'export/zip', 'export/host/mp4', 'export/host/webm',
-  'export/host/sink', 'export/host/audio_server', 'audio/wav', 'core/commands', 'i18n/t', 'i18n/strings'], (S, SUB, Z, J, WH, SINK, AS, WAV, C, T, STRINGS) => {
+  'export/host/sink', 'export/host/audio_server', 'export/host/audio_local', 'audio/wav', 'core/commands', 'i18n/t', 'i18n/strings'], (S, SUB, Z, J, WH, SINK, AS, AL, WAV, C, T, STRINGS) => {
   'use strict';
 
   const KEY_COLOUR = '#00B140';         // the green screen's key colour (D§4.19.4 `chroma`)
@@ -55009,7 +55515,7 @@ MV.def('export/host/kit', ['export/schedule', 'export/subtitles', 'export/zip', 
   // --- exportKit -----------------------------------------------------------------------------------------------------
 
   // exportKit({ engine, doc, audio: AudioBuffer | null, dir: DirSink | null, signal, onProgress, assets?, canvas?, lib?,
-  //             codecs? }) → { files: [{ name, kind, bytes }], ms, audio: 'aac' | 'wav' | 'none', frames, bytes, folder,
+  //             codecs?, audioLocal?: true | Runtime, audioServer?: Config }) → { files: [{ name, kind, bytes }], ms, audio: 'aac' | 'wav' | 'none', frames, bytes, folder,
   //                            codec, overlayCodec, audioCodec, audioBitrate, audioBitrateMode, acceleration,
   //                            accelerationByOutput, name?, blob? }
   // audioBitrate is the configured AAC target, or the WAV's exact PCM bitrate; null when no song is written.
@@ -55018,6 +55524,8 @@ MV.def('export/host/kit', ['export/schedule', 'export/subtitles', 'export/zip', 
   // (the §13.5 transparent WebM, backdrop `clear`, no sound), the background MP4 (layers 'ground'), the green-screen MP4
   // (the document with backdrop `chroma`, quality max), then the song WAV (when the MP4 has no AAC), SRT (BOM, the
   // export range), LRC (song times) and README_Filmora.txt.
+  // A dedicated audio mode converts only the silent main MP4 from original PCM after this shared video pass; local
+  // runs in the browser, server uses the configured HTTPS service. Neither re-encodes video nor writes the fallback WAV.
   // One pass over the timeline: two engine forks — eA (the document) and eG (backdrop chroma, only with the green
   // screen) — share one AssetStore (`assets.fork()`, when the caller passes its store; otherwise each fork makes its
   // own), so each source frame is decoded once. Per frame: await both forks' media frames, then render and encode main,
@@ -55060,11 +55568,14 @@ MV.def('export/host/kit', ['export/schedule', 'export/subtitles', 'export/zip', 
       const main = await J.videoConfig(o.codecs, jobA, bits);
       const song = o.audio && doc.output.audio && doc.song ? o.audio : null;
       const server = song && o.audioServer ? AS.validateConfig(o.audioServer) : null;
+      const local = !!(song && !server && o.audioLocal);
+      const convertedAudio = !!(server || local);
       if (server && !server.token) throw new S.ExportError('audio-server-auth', 'external audio conversion auth');
       const health = server ? await AS.check(server, { signal: o.signal, fetchImpl: o.fetchImpl }) : null;
-      const acfg = song && !server ? await J.audioConfig(o.codecs, song, kitAudioList(o.codecs)) : null;
-      const files = S.kitFiles(doc, jobA.plan, { audioCodec: server ? 'mp4a.40.2' : acfg ? acfg.codec : null,
-        audioBitrate: server ? AS.TARGET : acfg ? acfg.bitrate : null, songReady: !!song });
+      const localRuntime = local ? await AL.prepare({ audioLocal: o.audioLocal, signal: o.signal, onProgress: say }) : null;
+      const acfg = song && !convertedAudio ? await J.audioConfig(o.codecs, song, kitAudioList(o.codecs)) : null;
+      const files = S.kitFiles(doc, jobA.plan, { audioResolved: true, audioCodec: convertedAudio ? 'mp4a.40.2' : acfg ? acfg.codec : null,
+        audioBitrate: convertedAudio ? AS.TARGET : acfg ? acfg.bitrate : null, songReady: !!song });
       const fileOf = (kind) => files.find((f) => f.kind === kind) || null;
       let overlay = null;
       if (kit.overlay) {
@@ -55076,7 +55587,7 @@ MV.def('export/host/kit', ['export/schedule', 'export/subtitles', 'export/zip', 
 
       // one output per video file: its job (engine fork), surface, render options and encoder
       const add = async (kind, job, surface, ropts, make) => {
-        const sink = server && kind === 'main'
+        const sink = convertedAudio && kind === 'main'
           ? (temporaryMain = SINK.createMemorySink({ name: 'video.mp4', type: 'video/mp4' })) : await target.file(fileOf(kind).name, kind);
         outputs.push({ kind, job, surface, ropts, out: make(sink) });
       };
@@ -55109,12 +55620,14 @@ MV.def('export/host/kit', ['export/schedule', 'export/subtitles', 'export/zip', 
       J.checkAbort(o.signal);
       const written = new Map();
       for (const x of outputs) written.set(x.kind, await x.out.end());
-      let serverAudio = null;
-      if (server) {
+      let encodedAudio = null;
+      if (convertedAudio) {
         const silent = written.get('main');
-        serverAudio = await AS.convert({ video: silent.blob, audio: song, job: jobA, sink: await target.file(fileOf('main').name, 'main'),
-          audioServer: server, health, signal: o.signal, onProgress: say, fetchImpl: o.fetchImpl });
-        written.set('main', serverAudio);
+        const args = { video: silent.blob, audio: song, job: jobA, sink: await target.file(fileOf('main').name, 'main'),
+          signal: o.signal, onProgress: say };
+        encodedAudio = local ? await AL.convert(Object.assign(args, { runtime: localRuntime }))
+          : await AS.convert(Object.assign(args, { audioServer: server, health, fetchImpl: o.fetchImpl }));
+        written.set('main', encodedAudio);
       }
 
       say({ i: jobA.N, N: jobA.N, eta: 0, phase: 'files' });
@@ -55129,13 +55642,13 @@ MV.def('export/host/kit', ['export/schedule', 'export/subtitles', 'export/zip', 
       J.checkAbort(o.signal);
 
       const list = files.map((f) => ({ name: f.name, kind: f.kind, bytes: written.get(f.kind).bytes }));
-      const result = { files: list, audio: server ? 'aac' : acfg ? 'aac' : wav ? 'wav' : 'none', frames: jobA.N, folder: target.folder,
-        codec: main.codec, overlayCodec: overlay ? overlay.codec : null, audioCodec: server ? serverAudio.audioCodec : acfg ? acfg.codec : wav ? 'pcm-s16le' : null,
-        audioBitrate: server ? serverAudio.audioBitrate : acfg ? acfg.bitrate : wav ? song.sampleRate * 2 * 16 : null,
-        audioBitrateMode: server ? null : acfg ? acfg.bitrateMode || null : wav ? 'constant' : null,
+      const result = { files: list, audio: convertedAudio ? 'aac' : acfg ? 'aac' : wav ? 'wav' : 'none', frames: jobA.N, folder: target.folder,
+        codec: main.codec, overlayCodec: overlay ? overlay.codec : null, audioCodec: convertedAudio ? encodedAudio.audioCodec : acfg ? acfg.codec : wav ? 'pcm-s16le' : null,
+        audioBitrate: convertedAudio ? encodedAudio.audioBitrate : acfg ? acfg.bitrate : wav ? song.sampleRate * 2 * 16 : null,
+        audioBitrateMode: convertedAudio ? null : acfg ? acfg.bitrateMode || null : wav ? 'constant' : null,
         acceleration: outputs[0].out.acceleration,
         accelerationByOutput: Object.fromEntries(outputs.map((x) => [x.kind, x.out.acceleration])) };
-      if (server) { result.audioSource = 'server'; result.audioMeasuredBitrate = serverAudio.audioMeasuredBitrate; }
+      if (convertedAudio) { result.audioSource = encodedAudio.audioSource; result.audioMeasuredBitrate = encodedAudio.audioMeasuredBitrate; }
       if (target.dir) {
         await target.dir.close();
         result.folder = target.dir.name;
@@ -58653,6 +59166,9 @@ MV.def('ui/dialogs', ['ui/dom', 'ui/icons', 'ui/keys', 'core/doc'], (dom, I, K, 
     { name: '@stablelib/base64 1.0.1', what: 'about.bundled',
       text: 'This software is licensed under the MIT license:\n\nCopyright (C) 2016 Dmitry Chestnykh\n\n' + MIT_BODY },
     { name: 'fast-sha256 1.3.0', what: 'about.bundled', text: UNLICENSE },
+    { name: '@ffmpeg/core 0.12.10 / FFmpeg 5.1.4', what: 'about.audioConverter',
+      text: "FFmpeg WebAssembly core (@ffmpeg/core 0.12.10)\n\nCopyright (c) FFmpeg contributors and the contributors of its linked libraries.\nDistributed under the GNU General Public License, version 2 or (at your option)\nany later version (GPL-2.0-or-later). The npm package includes GPL-enabled FFmpeg,\nlibx264 and libx265. This text applies to ffmpeg-core.js and ffmpeg-core.wasm,\nnot to the independently licensed application source.\n\nThe upstream ffmpeg.wasm JavaScript binding/build sources have an MIT notice;\nsee LICENSE.ffmpeg-wasm-MIT.txt. Additional component notices and complete source\narchives are supplied beside this file in LICENSE.dependencies.txt and SOURCES.md.\n\nThe full GPL version 2 text follows, unchanged from FFmpeg n5.1.4 COPYING.GPLv2.\n\n                    GNU GENERAL PUBLIC LICENSE\n                       Version 2, June 1991\n\n Copyright (C) 1989, 1991 Free Software Foundation, Inc.,\n 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA\n Everyone is permitted to copy and distribute verbatim copies\n of this license document, but changing it is not allowed.\n\n                            Preamble\n\n  The licenses for most software are designed to take away your\nfreedom to share and change it.  By contrast, the GNU General Public\nLicense is intended to guarantee your freedom to share and change free\nsoftware--to make sure the software is free for all its users.  This\nGeneral Public License applies to most of the Free Software\nFoundation's software and to any other program whose authors commit to\nusing it.  (Some other Free Software Foundation software is covered by\nthe GNU Lesser General Public License instead.)  You can apply it to\nyour programs, too.\n\n  When we speak of free software, we are referring to freedom, not\nprice.  Our General Public Licenses are designed to make sure that you\nhave the freedom to distribute copies of free software (and charge for\nthis service if you wish), that you receive source code or can get it\nif you want it, that you can change the software or use pieces of it\nin new free programs; and that you know you can do these things.\n\n  To protect your rights, we need to make restrictions that forbid\nanyone to deny you these rights or to ask you to surrender the rights.\nThese restrictions translate to certain responsibilities for you if you\ndistribute copies of the software, or if you modify it.\n\n  For example, if you distribute copies of such a program, whether\ngratis or for a fee, you must give the recipients all the rights that\nyou have.  You must make sure that they, too, receive or can get the\nsource code.  And you must show them these terms so they know their\nrights.\n\n  We protect your rights with two steps: (1) copyright the software, and\n(2) offer you this license which gives you legal permission to copy,\ndistribute and/or modify the software.\n\n  Also, for each author's protection and ours, we want to make certain\nthat everyone understands that there is no warranty for this free\nsoftware.  If the software is modified by someone else and passed on, we\nwant its recipients to know that what they have is not the original, so\nthat any problems introduced by others will not reflect on the original\nauthors' reputations.\n\n  Finally, any free program is threatened constantly by software\npatents.  We wish to avoid the danger that redistributors of a free\nprogram will individually obtain patent licenses, in effect making the\nprogram proprietary.  To prevent this, we have made it clear that any\npatent must be licensed for everyone's free use or not licensed at all.\n\n  The precise terms and conditions for copying, distribution and\nmodification follow.\n\n                    GNU GENERAL PUBLIC LICENSE\n   TERMS AND CONDITIONS FOR COPYING, DISTRIBUTION AND MODIFICATION\n\n  0. This License applies to any program or other work which contains\na notice placed by the copyright holder saying it may be distributed\nunder the terms of this General Public License.  The \"Program\", below,\nrefers to any such program or work, and a \"work based on the Program\"\nmeans either the Program or any derivative work under copyright law:\nthat is to say, a work containing the Program or a portion of it,\neither verbatim or with modifications and/or translated into another\nlanguage.  (Hereinafter, translation is included without limitation in\nthe term \"modification\".)  Each licensee is addressed as \"you\".\n\nActivities other than copying, distribution and modification are not\ncovered by this License; they are outside its scope.  The act of\nrunning the Program is not restricted, and the output from the Program\nis covered only if its contents constitute a work based on the\nProgram (independent of having been made by running the Program).\nWhether that is true depends on what the Program does.\n\n  1. You may copy and distribute verbatim copies of the Program's\nsource code as you receive it, in any medium, provided that you\nconspicuously and appropriately publish on each copy an appropriate\ncopyright notice and disclaimer of warranty; keep intact all the\nnotices that refer to this License and to the absence of any warranty;\nand give any other recipients of the Program a copy of this License\nalong with the Program.\n\nYou may charge a fee for the physical act of transferring a copy, and\nyou may at your option offer warranty protection in exchange for a fee.\n\n  2. You may modify your copy or copies of the Program or any portion\nof it, thus forming a work based on the Program, and copy and\ndistribute such modifications or work under the terms of Section 1\nabove, provided that you also meet all of these conditions:\n\n    a) You must cause the modified files to carry prominent notices\n    stating that you changed the files and the date of any change.\n\n    b) You must cause any work that you distribute or publish, that in\n    whole or in part contains or is derived from the Program or any\n    part thereof, to be licensed as a whole at no charge to all third\n    parties under the terms of this License.\n\n    c) If the modified program normally reads commands interactively\n    when run, you must cause it, when started running for such\n    interactive use in the most ordinary way, to print or display an\n    announcement including an appropriate copyright notice and a\n    notice that there is no warranty (or else, saying that you provide\n    a warranty) and that users may redistribute the program under\n    these conditions, and telling the user how to view a copy of this\n    License.  (Exception: if the Program itself is interactive but\n    does not normally print such an announcement, your work based on\n    the Program is not required to print an announcement.)\n\nThese requirements apply to the modified work as a whole.  If\nidentifiable sections of that work are not derived from the Program,\nand can be reasonably considered independent and separate works in\nthemselves, then this License, and its terms, do not apply to those\nsections when you distribute them as separate works.  But when you\ndistribute the same sections as part of a whole which is a work based\non the Program, the distribution of the whole must be on the terms of\nthis License, whose permissions for other licensees extend to the\nentire whole, and thus to each and every part regardless of who wrote it.\n\nThus, it is not the intent of this section to claim rights or contest\nyour rights to work written entirely by you; rather, the intent is to\nexercise the right to control the distribution of derivative or\ncollective works based on the Program.\n\nIn addition, mere aggregation of another work not based on the Program\nwith the Program (or with a work based on the Program) on a volume of\na storage or distribution medium does not bring the other work under\nthe scope of this License.\n\n  3. You may copy and distribute the Program (or a work based on it,\nunder Section 2) in object code or executable form under the terms of\nSections 1 and 2 above provided that you also do one of the following:\n\n    a) Accompany it with the complete corresponding machine-readable\n    source code, which must be distributed under the terms of Sections\n    1 and 2 above on a medium customarily used for software interchange; or,\n\n    b) Accompany it with a written offer, valid for at least three\n    years, to give any third party, for a charge no more than your\n    cost of physically performing source distribution, a complete\n    machine-readable copy of the corresponding source code, to be\n    distributed under the terms of Sections 1 and 2 above on a medium\n    customarily used for software interchange; or,\n\n    c) Accompany it with the information you received as to the offer\n    to distribute corresponding source code.  (This alternative is\n    allowed only for noncommercial distribution and only if you\n    received the program in object code or executable form with such\n    an offer, in accord with Subsection b above.)\n\nThe source code for a work means the preferred form of the work for\nmaking modifications to it.  For an executable work, complete source\ncode means all the source code for all modules it contains, plus any\nassociated interface definition files, plus the scripts used to\ncontrol compilation and installation of the executable.  However, as a\nspecial exception, the source code distributed need not include\nanything that is normally distributed (in either source or binary\nform) with the major components (compiler, kernel, and so on) of the\noperating system on which the executable runs, unless that component\nitself accompanies the executable.\n\nIf distribution of executable or object code is made by offering\naccess to copy from a designated place, then offering equivalent\naccess to copy the source code from the same place counts as\ndistribution of the source code, even though third parties are not\ncompelled to copy the source along with the object code.\n\n  4. You may not copy, modify, sublicense, or distribute the Program\nexcept as expressly provided under this License.  Any attempt\notherwise to copy, modify, sublicense or distribute the Program is\nvoid, and will automatically terminate your rights under this License.\nHowever, parties who have received copies, or rights, from you under\nthis License will not have their licenses terminated so long as such\nparties remain in full compliance.\n\n  5. You are not required to accept this License, since you have not\nsigned it.  However, nothing else grants you permission to modify or\ndistribute the Program or its derivative works.  These actions are\nprohibited by law if you do not accept this License.  Therefore, by\nmodifying or distributing the Program (or any work based on the\nProgram), you indicate your acceptance of this License to do so, and\nall its terms and conditions for copying, distributing or modifying\nthe Program or works based on it.\n\n  6. Each time you redistribute the Program (or any work based on the\nProgram), the recipient automatically receives a license from the\noriginal licensor to copy, distribute or modify the Program subject to\nthese terms and conditions.  You may not impose any further\nrestrictions on the recipients' exercise of the rights granted herein.\nYou are not responsible for enforcing compliance by third parties to\nthis License.\n\n  7. If, as a consequence of a court judgment or allegation of patent\ninfringement or for any other reason (not limited to patent issues),\nconditions are imposed on you (whether by court order, agreement or\notherwise) that contradict the conditions of this License, they do not\nexcuse you from the conditions of this License.  If you cannot\ndistribute so as to satisfy simultaneously your obligations under this\nLicense and any other pertinent obligations, then as a consequence you\nmay not distribute the Program at all.  For example, if a patent\nlicense would not permit royalty-free redistribution of the Program by\nall those who receive copies directly or indirectly through you, then\nthe only way you could satisfy both it and this License would be to\nrefrain entirely from distribution of the Program.\n\nIf any portion of this section is held invalid or unenforceable under\nany particular circumstance, the balance of the section is intended to\napply and the section as a whole is intended to apply in other\ncircumstances.\n\nIt is not the purpose of this section to induce you to infringe any\npatents or other property right claims or to contest validity of any\nsuch claims; this section has the sole purpose of protecting the\nintegrity of the free software distribution system, which is\nimplemented by public license practices.  Many people have made\ngenerous contributions to the wide range of software distributed\nthrough that system in reliance on consistent application of that\nsystem; it is up to the author/donor to decide if he or she is willing\nto distribute software through any other system and a licensee cannot\nimpose that choice.\n\nThis section is intended to make thoroughly clear what is believed to\nbe a consequence of the rest of this License.\n\n  8. If the distribution and/or use of the Program is restricted in\ncertain countries either by patents or by copyrighted interfaces, the\noriginal copyright holder who places the Program under this License\nmay add an explicit geographical distribution limitation excluding\nthose countries, so that distribution is permitted only in or among\ncountries not thus excluded.  In such case, this License incorporates\nthe limitation as if written in the body of this License.\n\n  9. The Free Software Foundation may publish revised and/or new versions\nof the General Public License from time to time.  Such new versions will\nbe similar in spirit to the present version, but may differ in detail to\naddress new problems or concerns.\n\nEach version is given a distinguishing version number.  If the Program\nspecifies a version number of this License which applies to it and \"any\nlater version\", you have the option of following the terms and conditions\neither of that version or of any later version published by the Free\nSoftware Foundation.  If the Program does not specify a version number of\nthis License, you may choose any version ever published by the Free Software\nFoundation.\n\n  10. If you wish to incorporate parts of the Program into other free\nprograms whose distribution conditions are different, write to the author\nto ask for permission.  For software which is copyrighted by the Free\nSoftware Foundation, write to the Free Software Foundation; we sometimes\nmake exceptions for this.  Our decision will be guided by the two goals\nof preserving the free status of all derivatives of our free software and\nof promoting the sharing and reuse of software generally.\n\n                            NO WARRANTY\n\n  11. BECAUSE THE PROGRAM IS LICENSED FREE OF CHARGE, THERE IS NO WARRANTY\nFOR THE PROGRAM, TO THE EXTENT PERMITTED BY APPLICABLE LAW.  EXCEPT WHEN\nOTHERWISE STATED IN WRITING THE COPYRIGHT HOLDERS AND/OR OTHER PARTIES\nPROVIDE THE PROGRAM \"AS IS\" WITHOUT WARRANTY OF ANY KIND, EITHER EXPRESSED\nOR IMPLIED, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF\nMERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE.  THE ENTIRE RISK AS\nTO THE QUALITY AND PERFORMANCE OF THE PROGRAM IS WITH YOU.  SHOULD THE\nPROGRAM PROVE DEFECTIVE, YOU ASSUME THE COST OF ALL NECESSARY SERVICING,\nREPAIR OR CORRECTION.\n\n  12. IN NO EVENT UNLESS REQUIRED BY APPLICABLE LAW OR AGREED TO IN WRITING\nWILL ANY COPYRIGHT HOLDER, OR ANY OTHER PARTY WHO MAY MODIFY AND/OR\nREDISTRIBUTE THE PROGRAM AS PERMITTED ABOVE, BE LIABLE TO YOU FOR DAMAGES,\nINCLUDING ANY GENERAL, SPECIAL, INCIDENTAL OR CONSEQUENTIAL DAMAGES ARISING\nOUT OF THE USE OR INABILITY TO USE THE PROGRAM (INCLUDING BUT NOT LIMITED\nTO LOSS OF DATA OR DATA BEING RENDERED INACCURATE OR LOSSES SUSTAINED BY\nYOU OR THIRD PARTIES OR A FAILURE OF THE PROGRAM TO OPERATE WITH ANY OTHER\nPROGRAMS), EVEN IF SUCH HOLDER OR OTHER PARTY HAS BEEN ADVISED OF THE\nPOSSIBILITY OF SUCH DAMAGES.\n\n                     END OF TERMS AND CONDITIONS\n\n            How to Apply These Terms to Your New Programs\n\n  If you develop a new program, and you want it to be of the greatest\npossible use to the public, the best way to achieve this is to make it\nfree software which everyone can redistribute and change under these terms.\n\n  To do so, attach the following notices to the program.  It is safest\nto attach them to the start of each source file to most effectively\nconvey the exclusion of warranty; and each file should have at least\nthe \"copyright\" line and a pointer to where the full notice is found.\n\n    <one line to give the program's name and a brief idea of what it does.>\n    Copyright (C) <year>  <name of author>\n\n    This program is free software; you can redistribute it and/or modify\n    it under the terms of the GNU General Public License as published by\n    the Free Software Foundation; either version 2 of the License, or\n    (at your option) any later version.\n\n    This program is distributed in the hope that it will be useful,\n    but WITHOUT ANY WARRANTY; without even the implied warranty of\n    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the\n    GNU General Public License for more details.\n\n    You should have received a copy of the GNU General Public License along\n    with this program; if not, write to the Free Software Foundation, Inc.,\n    51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.\n\nAlso add information on how to contact you by electronic and paper mail.\n\nIf the program is interactive, make it output a short notice like this\nwhen it starts in an interactive mode:\n\n    Gnomovision version 69, Copyright (C) year name of author\n    Gnomovision comes with ABSOLUTELY NO WARRANTY; for details type `show w'.\n    This is free software, and you are welcome to redistribute it\n    under certain conditions; type `show c' for details.\n\nThe hypothetical commands `show w' and `show c' should show the appropriate\nparts of the General Public License.  Of course, the commands you use may\nbe called something other than `show w' and `show c'; they could even be\nmouse-clicks or menu items--whatever suits your program.\n\nYou should also get your employer (if you work as a programmer) or your\nschool, if any, to sign a \"copyright disclaimer\" for the program, if\nnecessary.  Here is a sample; alter the names:\n\n  Yoyodyne, Inc., hereby disclaims all copyright interest in the program\n  `Gnomovision' (which makes passes at compilers) written by James Hacker.\n\n  <signature of Ty Coon>, 1 April 1989\n  Ty Coon, President of Vice\n\nThis General Public License does not permit incorporating your program into\nproprietary programs.  If your program is a subroutine library, you may\nconsider it more useful to permit linking proprietary applications with the\nlibrary.  If this is what you want to do, use the GNU Lesser General\nPublic License instead of this License.\n",
+      source: 'https://momomonbi.github.io/moji-pv/vendor/ffmpeg/SOURCES.html' },
   ];
   const KEY_GROUPS = [['global', 'keys.global'], ['text', 'keys.text'], ['tap', 'keys.tap']];
 
@@ -58744,7 +59260,9 @@ MV.def('ui/dialogs', ['ui/dom', 'ui/icons', 'ui/keys', 'core/doc'], (dom, I, K, 
           h('h3', { class: 'dlg-sub', text: t('about.licences') }),
           // Node.append does not flatten arrays (an array became the text "[object HTMLDetailsElement],…"): spread it.
           ...LICENCES.map((l) => h('details', { class: 'dlg-licence' }, h('summary', {}, h('strong', { text: l.name }), ' — ', t(l.what)),
-            h('pre', { class: 'dlg-pre', text: l.text }))));
+            h('pre', { class: 'dlg-pre', text: l.text }),
+            ...(l.source ? [h('p', {}, h('a', { href: l.source, target: '_blank', rel: 'noopener noreferrer',
+              text: t('about.converterSources') }))] : []))));
       }, { title: t('about.title'), wide: true });
     }
 
@@ -61333,7 +61851,8 @@ MV.def('ui/output', ['export/schedule', 'engine/scene/frame'], (S, F) => {
   // H.264 encoder its own text (the MP4s of the set cannot be made here; no PNG sequence is offered).
   function checkKey(item) {
     if (item.code === 'no-h264' && item.params && item.params.format === 'kit') return 'exp.pre.kit-no-h264';
-    if (item.code === 'song-missing' && item.level === 'block') return 'exp.pre.audio-server-song-missing';
+    if (item.code === 'song-missing' && item.level === 'block') return item.params && item.params.audioSource === 'local'
+      ? 'exp.pre.audio-local-song-missing' : 'exp.pre.audio-server-song-missing';
     return 'exp.pre.' + item.code;
   }
 
@@ -61460,6 +61979,10 @@ MV.def('ui/output', ['export/schedule', 'engine/scene/frame'], (S, F) => {
     'audio-server-response': 'err.exp.audioServerResponse', 'audio-server-media': 'err.exp.audioServerMedia',
     'audio-server-busy': 'err.exp.audioServerBusy', 'audio-server-timeout': 'err.exp.audioServerTimeout',
     'audio-server-convert': 'err.exp.audioServerConvert',
+    'audio-local-unavailable': 'err.exp.audioLocalUnavailable', 'audio-local-load': 'err.exp.audioLocalLoad',
+    'audio-local-memory': 'err.exp.audioLocalMemory', 'audio-local-too-large': 'err.exp.audioLocalTooLarge',
+    'audio-local-convert': 'err.exp.audioLocalConvert', 'audio-local-response': 'err.exp.audioLocalResponse',
+    'audio-local-busy': 'err.exp.audioLocalBusy', 'audio-local-media': 'err.exp.audioLocalMedia',
   });
   function errorKey(code) { return ERROR_KEYS[code] || 'err.exp.encode'; }
 
@@ -61476,7 +61999,7 @@ MV.def('ui/output', ['export/schedule', 'engine/scene/frame'], (S, F) => {
     FORMATS, MAIN_FORMATS, OTHER_FORMATS, BACKDROPS, KIT_KEYS, ERROR_KEYS, isAlpha, formatCmds, transparentOf, opaqueOf,
     backdropCmds, clearLabel, backdropChoices, backdropNote, effectiveBackdrop, consistent, skipOf, usedFilters, skippedFilters,
     checks, kitCmd, withFixes, fixLabel, checkKey, layersWhat, listText, summary, qualityOptions, audioInfo,
-    usesAudioServer: S.usesAudioServer, audioEnv: S.audioEnv,
+    usesAudioServer: S.usesAudioServer, usesLocalAudio: S.usesLocalAudio, usesDedicatedAudio: S.usesDedicatedAudio, audioEnv: S.audioEnv,
     kitLabel, kitAlways, shownChecks, hasSound, speedProfile, speedCmds,
     mergeFonts, errorKey, errorParams,
   };
@@ -70118,8 +70641,8 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
 
     function audioText(info) {
       if (info.state !== 'ready') return t('exp.audioQuality.' + info.state, { rate: Math.round((info.preferred || SCH.AUDIO_BITRATE) / 1000) });
-      if (info.source === 'server') return t(Number.isFinite(info.measured) && info.measured > 0
-        ? 'exp.audioQuality.serverMeasured' : 'exp.audioQuality.server', { kbps: Math.round(info.bitrate / 1000),
+      if (info.source === 'server' || info.source === 'local') return t('exp.audioQuality.' + info.source
+        + (Number.isFinite(info.measured) && info.measured > 0 ? 'Measured' : ''), { kbps: Math.round(info.bitrate / 1000),
           measured: Math.round((info.measured || 0) / 1000) });
       const codec = info.codec === 'mp4a.40.2' ? 'AAC' : info.codec === 'opus' ? 'Opus' : info.codec;
       const label = t('exp.audioQuality.ready', { codec, rate: Math.round(info.bitrate / 1000),
@@ -70269,9 +70792,10 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
       accelerationHint.dataset.selected = hint ? hint.selected : '';
       const audioEligible = o.format === 'mp4' || o.format === 'kit';
       audioEncodingField.hidden = !audioEligible;
-      fillSeg(audioEncoding, ['browser', 'server'], o.audioEncoding || 'browser', (v) => t('exp.audioEncoding.' + v),
-        (v) => v === 'server' && (!o.audio || !app.doc.song) ? t('exp.audioEncoding.needsAudio') : '');
-      audioEncodingHint.textContent = t(!o.audio || !app.doc.song ? 'exp.audioEncoding.needsAudio' : 'exp.audioEncoding.help');
+      fillSeg(audioEncoding, ['local', 'browser', 'server'], o.audioEncoding || 'browser', (v) => t('exp.audioEncoding.' + v),
+        (v) => v !== 'browser' && (!o.audio || !app.doc.song) ? t('exp.audioEncoding.needsAudio') : '');
+      audioEncodingHint.textContent = t(!o.audio || !app.doc.song ? 'exp.audioEncoding.needsAudio'
+        : o.audioEncoding === 'local' ? 'exp.audioEncoding.localHelp' : o.audioEncoding === 'server' ? 'exp.audioEncoding.help' : 'exp.audioEncoding.browserHelp');
       serverSettings.root.hidden = !audioEligible || o.audioEncoding !== 'server';
       serverSettings.update();
       // 透明 makes the output transparent (透過動画, or 透過PNG from a PNG sequence); Filmora用 does not offer it
@@ -70357,30 +70881,33 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
 
     function showRunning(st) {
       const now = performance.now();
-      const external = st.phase === 'audioServer' || st.part === 'audioServer' || st.progressPhase === 'audioServer';
+      const phaseId = [st.progressPhase, st.part, st.phase].find((p) => p === 'audioServer' || p === 'audioLocal' || p === 'audioLocalLoading') || '';
+      const indeterminate = !!phaseId;
       const fresh = !runView || !running.contains(runView.title);
       if (fresh) runView = runningView();
-      else if (st.part === runView.part && external === runView.progressPhase && st.i < st.N && now - lastRun < RUN_UPDATE_MS) return;
+      else if (st.part === runView.part && phaseId === runView.progressPhase && st.i < st.N && now - lastRun < RUN_UPDATE_MS) return;
       lastRun = now;
       const v = runView;
       const pct = st.N ? Math.floor(st.i / st.N * 100) : 0;
       const sz = SCH.outputSize(app.doc.look.aspect, st.short || app.doc.output.short);
       v.title.textContent = t('exp.running', { h: Math.min(sz.w, sz.h), fps: st.fps || app.doc.output.fps });
-      const phase = external ? t('exp.serverProgress.audioServer') : st.part ? t('exp.kit.phase', { what: t('exp.kit.what.' + st.part) }) : '';
-      if (st.part !== v.part || external !== v.progressPhase) {
+      const phase = phaseId === 'audioServer' ? t('exp.serverProgress.audioServer') : phaseId === 'audioLocalLoading'
+        ? t('exp.localProgress.loading') : phaseId === 'audioLocal' ? t('exp.localProgress.transcoding')
+          : st.part ? t('exp.kit.phase', { what: t('exp.kit.what.' + st.part) }) : '';
+      if (st.part !== v.part || phaseId !== v.progressPhase) {
         v.part = st.part;
-        v.progressPhase = external;
+        v.progressPhase = phaseId;
         v.phase.hidden = !phase;
-        if (phase) { v.phase.dataset.part = external ? 'audioServer' : st.part; v.phase.textContent = phase; said.textContent = phase; }
+        if (phase) { v.phase.dataset.part = phaseId || st.part; v.phase.textContent = phase; said.textContent = phase; }
       }
-      v.bar.classList.toggle('is-indeterminate', external);
-      v.frames.hidden = external; v.percent.hidden = external;
-      if (external) {
+      v.bar.classList.toggle('is-indeterminate', indeterminate);
+      v.frames.hidden = indeterminate; v.percent.hidden = indeterminate;
+      if (indeterminate) {
         v.bar.removeAttribute('aria-valuenow');
         v.bar.setAttribute('aria-valuetext', phase);
         dom.setStyle(v.fill, { width: '35%' });
         v.frames.textContent = ''; v.percent.textContent = '';
-        v.left.textContent = t('exp.serverProgress.wait');
+        v.left.textContent = t(phaseId === 'audioServer' ? 'exp.serverProgress.wait' : 'exp.localProgress.wait');
         return;
       }
       const progress = t('exp.progress', { i: st.i, n: st.N, eta: clock(st.eta || 0) });
@@ -70396,7 +70923,7 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
     }
 
     function renderRunning(st) {
-      if (st.phase === 'running' || st.phase === 'audioServer') { showRunning(st); return; }
+      if (st.phase === 'running' || st.phase === 'audioServer' || st.phase === 'audioLocal' || st.phase === 'audioLocalLoading') { showRunning(st); return; }
       runView = null;
       if (st.phase === 'done') {
         const info = st.result.files ? kitDoneText(st.result)
@@ -77726,6 +78253,7 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
       // the exports of step ④: MP4, PNG sequences, 透過動画（WebM）and the Filmora set (DESIGN_2_1 §13.5, §13.9)
       exporter: { mp4: MV.use('export/host/mp4'), png: MV.use('export/host/png'), webm: MV.use('export/host/webm'),
         kit: MV.use('export/host/kit'), audioServer: MV.use('export/host/audio_server'),
+        audioLocal: MV.use('export/host/audio_local'), audioRuntime: MV.use('export/host/audio_runtime'),
         sink: MV.use('export/host/sink'), schedule: MV.use('export/schedule') },
     };
   }
@@ -78278,6 +78806,7 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
         vp9Codec: pr.vp9Codec, fontsReady: fontsReady(),
         fsAccess: ex().sink.canStream(), dirAccess: ex().sink.canDirectory(), songReady: !app.doc.song || app.songReady(),
         warnings: app.warnings(), registry: app.reg, jumps, audioServerConfigured: serverConfigured,
+        localAudioAvailable: !OUT.usesLocalAudio(app.doc) || ex().audioRuntime.support().supported,
       }));
       // photos and videos (DESIGN_2_1 §11.7.8): an asset not on this device blocks, with [つなぎ直す]
       const media = app.media ? app.media.preflight() : [];
@@ -78355,18 +78884,20 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
         source = app.engine.fork();
         source.setDoc(doc);
         const song = o.audio && app.songReady() ? app.buffer : null;
-        if (OUT.usesAudioServer(doc) && !song) throw new (ex().schedule.ExportError)('audio-server-media', 'original audio is not available');
+        if (OUT.usesDedicatedAudio(doc) && !song) throw new (ex().schedule.ExportError)(
+          OUT.usesLocalAudio(doc) ? 'audio-local-media' : 'audio-server-media', 'original audio is not available');
         const audioServer = song && OUT.usesAudioServer(doc)
           ? ex().audioServer.validateConfig(AUDIO_SERVER.getConfig(app)) : null;
         const args = { engine: source, doc, signal: abort.signal, onProgress };
         let result;
         if (o.format === 'kit') {
           // one pass writes every file of the set (export/host/kit); the preview's AssetStore is shared by its forks
-          result = await ex().kit.exportKit(Object.assign(args, { audio: song, dir: target.dir, assets: app.assets, audioServer }));
+          result = await ex().kit.exportKit(Object.assign(args, { audio: song, dir: target.dir, assets: app.assets,
+            audioServer, audioLocal: !!song && OUT.usesLocalAudio(doc) }));
         } else if (o.format === 'webmAlpha') {
           result = await ex().webm.exportWebm(Object.assign(args, { audio: song, sink: target.sink }));
         } else if (o.format === 'mp4') {
-          const exporter = audioServer ? ex().audioServer : ex().mp4;
+          const exporter = song && OUT.usesLocalAudio(doc) ? ex().audioLocal : audioServer ? ex().audioServer : ex().mp4;
           result = await exporter.exportVideo(Object.assign(args, { audio: song, sink: target.sink, audioServer }));
         } else {
           result = await ex().png.exportPngs(Object.assign(args, { sink: target.sink, alpha: o.format === 'pngAlpha' }));

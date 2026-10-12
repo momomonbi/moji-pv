@@ -71,6 +71,7 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
       // the exports of step ④: MP4, PNG sequences, 透過動画（WebM）and the Filmora set (DESIGN_2_1 §13.5, §13.9)
       exporter: { mp4: MV.use('export/host/mp4'), png: MV.use('export/host/png'), webm: MV.use('export/host/webm'),
         kit: MV.use('export/host/kit'), audioServer: MV.use('export/host/audio_server'),
+        audioLocal: MV.use('export/host/audio_local'), audioRuntime: MV.use('export/host/audio_runtime'),
         sink: MV.use('export/host/sink'), schedule: MV.use('export/schedule') },
     };
   }
@@ -623,6 +624,7 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
         vp9Codec: pr.vp9Codec, fontsReady: fontsReady(),
         fsAccess: ex().sink.canStream(), dirAccess: ex().sink.canDirectory(), songReady: !app.doc.song || app.songReady(),
         warnings: app.warnings(), registry: app.reg, jumps, audioServerConfigured: serverConfigured,
+        localAudioAvailable: !OUT.usesLocalAudio(app.doc) || ex().audioRuntime.support().supported,
       }));
       // photos and videos (DESIGN_2_1 §11.7.8): an asset not on this device blocks, with [つなぎ直す]
       const media = app.media ? app.media.preflight() : [];
@@ -700,18 +702,20 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
         source = app.engine.fork();
         source.setDoc(doc);
         const song = o.audio && app.songReady() ? app.buffer : null;
-        if (OUT.usesAudioServer(doc) && !song) throw new (ex().schedule.ExportError)('audio-server-media', 'original audio is not available');
+        if (OUT.usesDedicatedAudio(doc) && !song) throw new (ex().schedule.ExportError)(
+          OUT.usesLocalAudio(doc) ? 'audio-local-media' : 'audio-server-media', 'original audio is not available');
         const audioServer = song && OUT.usesAudioServer(doc)
           ? ex().audioServer.validateConfig(AUDIO_SERVER.getConfig(app)) : null;
         const args = { engine: source, doc, signal: abort.signal, onProgress };
         let result;
         if (o.format === 'kit') {
           // one pass writes every file of the set (export/host/kit); the preview's AssetStore is shared by its forks
-          result = await ex().kit.exportKit(Object.assign(args, { audio: song, dir: target.dir, assets: app.assets, audioServer }));
+          result = await ex().kit.exportKit(Object.assign(args, { audio: song, dir: target.dir, assets: app.assets,
+            audioServer, audioLocal: !!song && OUT.usesLocalAudio(doc) }));
         } else if (o.format === 'webmAlpha') {
           result = await ex().webm.exportWebm(Object.assign(args, { audio: song, sink: target.sink }));
         } else if (o.format === 'mp4') {
-          const exporter = audioServer ? ex().audioServer : ex().mp4;
+          const exporter = song && OUT.usesLocalAudio(doc) ? ex().audioLocal : audioServer ? ex().audioServer : ex().mp4;
           result = await exporter.exportVideo(Object.assign(args, { audio: song, sink: target.sink, audioServer }));
         } else {
           result = await ex().png.exportPngs(Object.assign(args, { sink: target.sink, alpha: o.format === 'pngAlpha' }));

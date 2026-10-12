@@ -19,7 +19,7 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
     'seam', 'theme']);
   const OUTPUT_CHOICES = Object.freeze({
     format: ['mp4', 'kit', 'webmAlpha', 'png', 'pngAlpha'], short: [720, 1080, 1440, 2160], fps: [24, 30, 60],
-    quality: ['light', 'standard', 'high', 'max'], acceleration: ['auto', 'cpu'], audioEncoding: ['browser', 'server'],
+    quality: ['light', 'standard', 'high', 'max'], acceleration: ['auto', 'cpu'], audioEncoding: ['browser', 'local', 'server'],
   });
   // output.kit: the optional files of the Filmora set (§13.3); the main MP4 is always written.
   const KIT_KEYS = Object.freeze(['overlay', 'bg', 'green', 'srt', 'lrc']);
@@ -81,7 +81,7 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
       filters: {},
       materials: { next: 1, list: [] },
       media: { list: [] },
-      output: { format: 'mp4', short: 1080, fps: 30, quality: 'high', acceleration: 'auto', audio: true, audioEncoding: 'browser', range: null, name: null,
+      output: { format: 'mp4', short: 1080, fps: 30, quality: 'high', acceleration: 'auto', audio: true, audioEncoding: 'local', range: null, name: null,
         kit: Object.assign({}, KIT_DEFAULT) },
     };
   }
@@ -353,7 +353,9 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
       else if (k === 'sheet' && isObject(v)) put(k, fillMissing(v, sheetDefaults(doc)));
       else if (k === 'song' && isObject(v)) put(k, fillMissing(v, SONG_DEFAULTS));
       else if (k === 'materials' && isObject(v)) put(k, fillMissing(v, materialDefaults(v)));
-      else if (k === 'output' && isObject(v)) put(k, withKit(fillMissing(v, base.output)));
+      // Saved works that predate the encoding choice keep native browser audio. New works explicitly start with
+      // 'local', and both an explicit browser choice and an external server choice survive opening unchanged.
+      else if (k === 'output' && isObject(v)) put(k, withKit(fillMissing(v, { ...base.output, audioEncoding: 'browser' })));
       else if (isObject(v) && isObject(base[k])) put(k, fillMissing(v, base[k]));
     }
     return out;

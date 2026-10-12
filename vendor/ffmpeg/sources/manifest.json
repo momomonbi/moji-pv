@@ -1,0 +1,263 @@
+{
+  "schema": 1,
+  "package": {
+    "name": "@ffmpeg/core",
+    "version": "0.12.10",
+    "license": "GPL-2.0-or-later",
+    "tarball": "https://registry.npmjs.org/@ffmpeg/core/-/core-0.12.10.tgz",
+    "npmIntegrity": "sha512-dzNplnn2Nxle2c2i2rrDhqcB19q9cglCkWnoMTDN9Q9l3PvdjZWd1HfSPjCNWc/p8Q3CT+Es9fWOR0UhAeYQZA==",
+    "sourceTag": "v12.15",
+    "sourceCommit": "71aa99d37c02a7b4c435275ca9ef50e612f6efa1"
+  },
+  "binaries": [
+    {
+      "file": "ffmpeg-core.js",
+      "sha256": "b266ab5b952555881dd6310663986994a182acb2b7ff25cf10a25f7a37ac2b21",
+      "bytes": 112059
+    },
+    {
+      "file": "ffmpeg-core.wasm",
+      "sha256": "9f57947a5bd530d8f00c5b3f2cb2a3492faa7e5d823315342d6a8656d0a6b7b7",
+      "bytes": 32232419
+    }
+  ],
+  "build": {
+    "ffmpeg": "n5.1.4",
+    "emscripten": "3.1.40",
+    "upstreamCommand": "make prd",
+    "flags": "-O3 -msimd128; FFMPEG_ST=yes; no pthreads; enable-gpl",
+    "sourceAcquisition": "All compiler runtime, FFmpeg, linked-library, binding and build-script source snapshots are supplied locally; system compiler executables and OS build tools are obtained normally."
+  },
+  "sources": [
+    {
+      "name": "ffmpeg",
+      "repo": "FFmpeg/FFmpeg",
+      "ref": "n5.1.4",
+      "commit": "4729204c17f756e186d622060088371d10b34f7e",
+      "date": "2023-11-10T00:32:27+01:00",
+      "archive": "ffmpeg-4729204c17f7.tar.xz",
+      "sha256": "5b408aa005ffe175662da0b516c57b9ff098fdc8d2433e0424dde14df2a7d3a2",
+      "bytes": 9819744
+    },
+    {
+      "name": "x264",
+      "repo": "ffmpegwasm/x264",
+      "ref": "4-cores",
+      "commit": "33cac6b77d5b9259c552156013a817ab23119612",
+      "date": "2022-08-22T09:45:45+08:00",
+      "archive": "x264-33cac6b77d5b.tar.xz",
+      "sha256": "3b0478919e675a705f4853de56fa912a4d6733d985ee7e925bbd3bc20f5f2f8d",
+      "bytes": 688156
+    },
+    {
+      "name": "x265",
+      "repo": "ffmpegwasm/x265",
+      "ref": "3.4",
+      "commit": "2bb5520e9596f361bf0ed81b3b8da0d7fd999069",
+      "date": "2020-05-29T23:09:35+05:30",
+      "archive": "x265-2bb5520e9596.tar.xz",
+      "sha256": "afccc580cf2446ae1eece92af18916852e94993eebdb24c03b538f903ad28e03",
+      "bytes": 987612
+    },
+    {
+      "name": "vpx",
+      "repo": "ffmpegwasm/libvpx",
+      "ref": "v1.13.1",
+      "commit": "10b9492dcf05b652e2e4b370e205bd605d421972",
+      "date": "2023-09-29T15:06:14-07:00",
+      "archive": "vpx-10b9492dcf05.tar.xz",
+      "sha256": "a12c8b3a298eec274aa0fd3e426bb437741e6359ef17fb708e1378a0565e43af",
+      "bytes": 4317328
+    },
+    {
+      "name": "lame",
+      "repo": "ffmpegwasm/lame",
+      "ref": "master",
+      "commit": "2badea1974ae36cb8312afe99cff1e6b3b5decee",
+      "date": "2020-10-29T11:19:54+08:00",
+      "archive": "lame-2badea1974ae.tar.xz",
+      "sha256": "bb433f216ec9ae5efad5ffa839e3a7db7354c43947f6186285b45c705445d053",
+      "bytes": 1029364
+    },
+    {
+      "name": "ogg",
+      "repo": "ffmpegwasm/Ogg",
+      "ref": "v1.3.4",
+      "commit": "bada45718453ac27b56773ae663f7e65112f6a6e",
+      "date": "2019-08-30T16:05:52-07:00",
+      "archive": "ogg-bada45718453.tar.xz",
+      "sha256": "0af2301865737ae1138248efb55427441a6ec7d4f227d5d22aaed7aeb44d454a",
+      "bytes": 222068
+    },
+    {
+      "name": "theora",
+      "repo": "ffmpegwasm/theora",
+      "ref": "v1.1.1",
+      "commit": "7ffd8b2ecfc2d93ae5e16028e7528e609266bfbf",
+      "date": "2009-10-01T18:00:57Z",
+      "archive": "theora-7ffd8b2ecfc2.tar.xz",
+      "sha256": "c758bb17e2337ffd4b2a810a9e0c97987d461091026c5fffae017ca3b6f0712f",
+      "bytes": 694420
+    },
+    {
+      "name": "opus",
+      "repo": "ffmpegwasm/opus",
+      "ref": "v1.3.1",
+      "commit": "e85ed7726db5d677c9c0677298ea0cb9c65bdd23",
+      "date": "2019-04-12T16:26:57-04:00",
+      "archive": "opus-e85ed7726db5.tar.xz",
+      "sha256": "936c8ae7c93a194c457b4fd02508d8c4acc58b338a1498b57552fcc8bcda2c92",
+      "bytes": 560900
+    },
+    {
+      "name": "vorbis",
+      "repo": "ffmpegwasm/vorbis",
+      "ref": "v1.3.3",
+      "commit": "7798164043197d7e33f02de4353ce2aa5b248225",
+      "date": "2012-02-03T22:20:36Z",
+      "archive": "vorbis-779816404319.tar.xz",
+      "sha256": "59108e8c25b0a1f6e7f8ecb45a1d6e56bc931bf54ca8fcb5a91b5ca3c374be1c",
+      "bytes": 917716
+    },
+    {
+      "name": "zlib",
+      "repo": "ffmpegwasm/zlib",
+      "ref": "v1.2.11",
+      "commit": "cacf7f1d4e3d44d871b605da3b647f07d718623f",
+      "date": "2017-01-15T09:29:40-08:00",
+      "archive": "zlib-cacf7f1d4e3d.tar.xz",
+      "sha256": "5bc9d616a6bbf89f452c49ba1948f6dea29b4783e4429e74776454b583ba93f8",
+      "bytes": 472260
+    },
+    {
+      "name": "webp",
+      "repo": "ffmpegwasm/libwebp",
+      "ref": "v1.3.2",
+      "commit": "ca332209cb5567c9b249c86788cb2dbf8847e760",
+      "date": "2023-09-13T15:11:07-07:00",
+      "archive": "webp-ca332209cb55.tar.xz",
+      "sha256": "8ffe886349ddbf55c77bc65bf3910217a0a93c41bb88e9bbc04c9db68367d97d",
+      "bytes": 2095732
+    },
+    {
+      "name": "freetype",
+      "repo": "ffmpegwasm/freetype2",
+      "ref": "VER-2-10-4",
+      "commit": "6a2b3e4007e794bfc6c91030d0ed987f925164a8",
+      "date": "2020-10-20T07:13:33+02:00",
+      "archive": "freetype-6a2b3e4007e7.tar.xz",
+      "sha256": "fa9a1cb9e2ea3da82e4895cdabbcf8fd844850a085bc94093fef0625b972180e",
+      "bytes": 1417684
+    },
+    {
+      "name": "fribidi",
+      "repo": "fribidi/fribidi",
+      "ref": "v1.0.9",
+      "commit": "f9e8e71a6fbf4a4619481284c9f484d10e559995",
+      "date": "2020-03-02T18:04:18+02:00",
+      "archive": "fribidi-f9e8e71a6fbf.tar.xz",
+      "sha256": "04254aaa9406067bd5719f6739e30bea670ca362563108ef3c9330f29965d0c9",
+      "bytes": 859456
+    },
+    {
+      "name": "harfbuzz",
+      "repo": "harfbuzz/harfbuzz",
+      "ref": "5.2.0",
+      "commit": "4a1d891c6317d2c83e5f3c2607ec5f5ccedffcde",
+      "date": "2022-09-17T03:19:29+02:00",
+      "archive": "harfbuzz-4a1d891c6317.tar.xz",
+      "sha256": "4dc600456a22d652a0f3f580893ce20759ab3b5174f43fc92ad45cfa337d7039",
+      "bytes": 16260672
+    },
+    {
+      "name": "ass",
+      "repo": "libass/libass",
+      "ref": "0.15.0",
+      "commit": "d149636f502f5774ae1a8fb4c554b122674393b2",
+      "date": "2020-10-27T06:08:29+02:00",
+      "archive": "ass-d149636f502f.tar.xz",
+      "sha256": "d3de1f893b57a05856e95e3542837ad519e0b09f6cb0c133f7ddb7922cc81fd9",
+      "bytes": 198316
+    },
+    {
+      "name": "zimg",
+      "repo": "sekrit-twc/zimg",
+      "ref": "release-3.0.5",
+      "commit": "e5b0de6bebbcbc66732ed5afaafef6b2c7dfef87",
+      "date": "2023-06-30T10:55:27-07:00",
+      "archive": "zimg-e5b0de6bebbc.tar.xz",
+      "sha256": "bdccb7c4649b7fac793dfabf43c32effc4a33c5a8fa95c5285b8a54591e27831",
+      "bytes": 244004
+    },
+    {
+      "name": "emscripten",
+      "repo": "emscripten-core/emscripten",
+      "ref": "3.1.40",
+      "commit": "5c27e79dd0a9c4e27ef2326841698cdd4f6b5784",
+      "date": "2023-05-26T16:36:13-07:00",
+      "archive": "emscripten-5c27e79dd0a9.tar.xz",
+      "sha256": "abc503c0845f4546da398b4adff03dd5dca69cd321edc8571662b53b318241e6",
+      "bytes": 20596688
+    },
+    {
+      "name": "sdl2",
+      "repo": "libsdl-org/SDL",
+      "ref": "release-2.24.2",
+      "commit": "55b03c7493a7abed33cf803d1380a40fa8af903f",
+      "date": "2022-11-01T05:47:12-07:00",
+      "archive": "sdl2-55b03c7493a7.tar.xz",
+      "sha256": "234a59447415d53d2ff69785d0884d74e5a00175399c04df1357674b42116236",
+      "bytes": 5436808
+    },
+    {
+      "name": "ffmpeg-wasm",
+      "repo": "ffmpegwasm/ffmpeg.wasm",
+      "ref": "v12.15",
+      "commit": "71aa99d37c02a7b4c435275ca9ef50e612f6efa1",
+      "date": "2025-01-07T11:12:48+01:00",
+      "archive": "ffmpeg-wasm-71aa99d37c02.tar.xz",
+      "sha256": "def5a1f74227b0e10df2542f289affdf04fe13cef8406c68c08a04511ae81de0",
+      "bytes": 1114240
+    },
+    {
+      "name": "zimg-googletest",
+      "repo": "google/googletest",
+      "ref": "703bd9caab50b139428cea1aaff9974ebee5742e",
+      "commit": "703bd9caab50b139428cea1aaff9974ebee5742e",
+      "date": "2019-10-03T10:52:15-04:00",
+      "archive": "zimg-googletest-703bd9caab50.tar.xz",
+      "sha256": "8c0761e30aa7db8239eec06e0b080570c2c893adace106768d6dca9cca98c01f",
+      "bytes": 619744
+    },
+    {
+      "name": "emscripten-googletest",
+      "repo": "google/googletest",
+      "ref": "4fb7039fda3f6588c7ca9664176f8c9e0a023b4a",
+      "commit": "4fb7039fda3f6588c7ca9664176f8c9e0a023b4a",
+      "date": "2023-01-30T13:45:46-08:00",
+      "archive": "emscripten-googletest-4fb7039fda3f.tar.xz",
+      "sha256": "907f6e6e3ff34d8b1eee3c4cced003f6a6eef07c816841480911dd9bf62bb164",
+      "bytes": 610596
+    },
+    {
+      "name": "emscripten-posixtestsuite",
+      "repo": "emscripten-core/posixtestsuite",
+      "ref": "869e266b090a8d44e51bb040904c942556b1e4ab",
+      "commit": "869e266b090a8d44e51bb040904c942556b1e4ab",
+      "date": "2021-08-17T13:41:21-07:00",
+      "archive": "emscripten-posixtestsuite-869e266b090a.tar.xz",
+      "sha256": "fac9863f1b2d7af74ba56df00837b4f937379dd903bfcbf9a1422711087815bf",
+      "bytes": 434576
+    },
+    {
+      "name": "emscripten-wasi-test-suite",
+      "repo": "khronosproject/wasi-test-suite",
+      "ref": "ac9371207fc61972a21d7d086074ca690a99d14d",
+      "commit": "ac9371207fc61972a21d7d086074ca690a99d14d",
+      "date": "2021-06-27T20:36:19+08:00",
+      "archive": "emscripten-wasi-test-suite-ac9371207fc6.tar.xz",
+      "sha256": "f420283a4d40a7c62c888e888ec4751f9bcaf1aa0fc9ef14d91fee3ae72bdd4d",
+      "bytes": 505908
+    }
+  ]
+}

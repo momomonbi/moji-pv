@@ -18,9 +18,9 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 BUILD = REPO / 'build.py'
 HEADER = '/* 文字PVメーカー v2 — original work. Test module. */\n'
-CSP_TAIL = ("https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src "
+CSP_TAIL = ("https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' "
             "https://generativelanguage.googleapis.com https://api.anthropic.com https:; img-src data: blob:; media-src blob:; "
-            "worker-src 'none'; base-uri 'none'; form-action 'none'")
+            "worker-src blob:; base-uri 'none'; form-action 'none'")
 
 
 def run_build(root, *args):
@@ -39,7 +39,7 @@ def as_parsed(raw):
 
 
 def expected_csp(scripts, styles):
-    return ("default-src 'none'; script-src " + ' '.join(sha(as_parsed(s)) for s in scripts) + '; style-src ' +
+    return ("default-src 'none'; script-src " + ' '.join(sha(as_parsed(s)) for s in scripts) + " 'wasm-unsafe-eval'; style-src " +
             sha(as_parsed(styles[0])) + ' ' + CSP_TAIL)
 
 
@@ -54,7 +54,9 @@ class Tree:
     def __init__(self, full=False, files=None):
         self.tmp = Path(tempfile.mkdtemp(prefix='mv-build-'))
         self.root = self.tmp / 'tree'
-        shutil.copytree(REPO / 'vendor', self.root / 'vendor')
+        # Corresponding-source archives are distributed beside the WASM, but the page builder never reads them.
+        # Avoid copying those large archives into every lint-test fixture.
+        shutil.copytree(REPO / 'vendor', self.root / 'vendor', ignore=shutil.ignore_patterns('sources'))
         if full:
             shutil.copytree(REPO / 'src', self.root / 'src')
         else:
@@ -130,6 +132,9 @@ class FullBuild(unittest.TestCase):
         self.assertTrue(app_ja.startswith(kernel + "\nMV.DEV=false;MV.LANG='ja';\n"))
         self.assertTrue(app_en.startswith(kernel + "\nMV.DEV=false;MV.LANG='en';\n"))
         self.assertTrue(app_lab.startswith(kernel + "\nMV.DEV=true;MV.LANG='ja';\n"))
+        self.assertIn("\nMV.ASSET_BASE='vendor/ffmpeg/';\n", app_ja)
+        self.assertIn("\nMV.ASSET_BASE='../vendor/ffmpeg/';\n", app_en)
+        self.assertIn("\nMV.ASSET_BASE='../../vendor/ffmpeg/';\n", app_lab)
         self.assertTrue(app_ja.endswith("MV.use('ui/boot').start();\n"))
         self.assertTrue(app_lab.endswith("MV.use('ui/lab').start();\n"))
 

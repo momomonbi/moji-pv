@@ -285,9 +285,20 @@ hardware preference with automatic fallback) or `cpu` (software preference with 
 in older projects normalize to `auto`; validation still accepts those projects. Both are encoding preferences,
 not measurements of GPU utilisation or controls over the browser's internal thread count.
 
-`output.audioEncoding` is `browser` by default, or `server` for external AAC 320 kbps conversion in MP4/Filmora.
-The external mode uses the original PCM range and one silent video encode; its server copies the H.264 packets.
-Credentials are not project fields. Server response metadata distinguishes configured target and measured average.
+`output.audioEncoding` is `local` in new projects, `browser` for the standard browser encoder, or `server` for external
+AAC 320 kbps conversion in MP4/Filmora. Older saved projects with no value normalize to `browser`; explicit saved
+values are preserved. Local and server modes use the original PCM range and one silent video encode, then copy
+the H.264 packets. Local uses a dedicated single-thread WASM worker, requires no server or credentials and uploads
+no media. Credentials for server mode are not project fields. Result metadata distinguishes configured target and
+measured average.
+
+The built-in converter is downloaded lazily from `vendor/ffmpeg/`, with pinned SHA-256 verification and optional
+CacheStorage reuse. Inputs are Blob-backed WORKERFS mounts; output is bounded MEMFS. Every conversion terminates
+its worker on completion, failure or cancellation to release the WASM heap. The output keeps FFmpeg's AAC priming
+edit list and 48 kHz movie timescale. Exact duration/audio size limits can block preflight; predicted video size
+alone cannot. Actual video+PCM is limited to 256 MiB and output to 260 MiB. Memory estimates include temporary
+video, PCM, output copies and runtime assets. The shipped worker adds `worker-src blob:` and `wasm-unsafe-eval`
+to the CSP, while remote scripts and JavaScript `unsafe-eval` remain disabled.
 
 **`side.asks`** = `{ [areaKey]: { text, at } }`:
 - These are board drafts (§6.3). They are not undoable.

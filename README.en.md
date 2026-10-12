@@ -55,6 +55,18 @@ the beat.
 
 Sizes 720p to 2160p, 24 / 30 / 60 fps; screen shapes 16:9, 9:16, 1:1 and more.
 
+New projects use **AAC 320 kbps in this browser** for MP4 and Filmora exports. Press Export to encode the original
+song with a 320 kbps target and join it to the video without recompressing the video. No server, account, URL or token
+setup is needed. The first use downloads about 32 MB of conversion code. Your video and audio stay in the browser.
+The result shows the target and the measured average bitrate separately. Saved projects keep their existing audio
+setting; choose **Audio processing → AAC 320 kbps in this browser** once for an older project.
+
+The built-in converter needs additional memory. It supports up to one hour and 256 MiB of actual video plus PCM audio
+input. Reduce the range, resolution or fps if the limit is exceeded or memory is insufficient. **Standard browser audio**
+keeps the previous route and reports a lower supported bitrate when the platform caps AAC at 192 kbps.
+The optional external server route is also available for MP4 and Filmora; it uploads video and audio only to your
+configured server. Deployment and connection instructions: [server/audio/README.md](server/audio/README.md).
+
 **Background modes**: Normal / Green screen / Black (white text) / Transparent (transparent video or PNG alpha).
 To lay the lyrics over other footage, Transparent video (WebM) is recommended; PNG sequences suit After Effects and
 similar.
@@ -85,13 +97,14 @@ More in [docs/AI_GUIDE.md](docs/AI_GUIDE.md).
 
 ## Privacy
 
-Lyrics, songs, photos, videos and exports are all processed inside your browser; nothing is uploaded to a server of
-ours.
-The only outside connections are the typefaces (Google Fonts) and, when you use AI assist, the AI service.
+Normal lyric, song, photo, video and export processing happens inside your browser. Outside connections load fonts
+(Google Fonts) and the built-in audio converter, contact the AI service when AI assist is used, and upload video and
+audio to your configured server only when you choose external audio conversion.
 
 ## Development
 
-Python 3.11 and Node 22, no npm or pip packages (the browser tests use Playwright).
+Normal builds and Node tests use Python 3.11 and Node 22. Browser tests use Playwright; audio server tests also use
+`server/audio/requirements-test.txt` and FFmpeg. The distributed WASM files in `vendor/ffmpeg/` are reused by normal builds.
 
 ```
 python3 build.py --check              # lint, layer rules and module order; writes nothing

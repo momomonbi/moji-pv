@@ -1,12 +1,10 @@
 /* 文字PVメーカー v2 — original work. External AAC: frozen silent MP4 + exact original PCM range → configured HTTPS service → original video with AAC 320 kbps. */
-MV.def('export/host/audio_server', ['export/schedule', 'export/host/mp4', 'export/host/sink', 'audio/wav', 'media/isobmff'], (S, J, SINK, WAV, ISO) => {
+MV.def('export/host/audio_server', ['export/schedule', 'export/host/mp4', 'export/host/sink', 'export/host/audio_source', 'media/isobmff'], (S, J, SINK, SOURCE, ISO) => {
   'use strict';
 
   const SERVICE = 'moji-pv-audio';
   const VERSION = 1;
-  const TARGET = 320000;
-  const RATE = 48000;
-  const WAV_BLOCK = 1 << 20;          // 4 MB of stereo PCM16 per block; never copy the whole song at once
+  const TARGET = SOURCE.TARGET;
   const MULTIPART_MARGIN = 64 * 1024;
   const PREFIX_LIMIT = ISO.MAX_MOOV + 8192;
 
@@ -67,30 +65,9 @@ MV.def('export/host/audio_server', ['export/schedule', 'export/host/mp4', 'expor
     return { service: SERVICE, version: VERSION, targetBitrate: TARGET, maxUploadBytes: value.maxUploadBytes, authChecked: false };
   }
 
-  function rangeOf(job, song) {
-    if (!job || !Number.isSafeInteger(job.N) || job.N <= 0 || ![24, 30, 60].includes(job.fps)
-      || !Number.isFinite(job.t0) || job.t0 < 0 || !song || song.sampleRate !== RATE
-      || !Number.isSafeInteger(song.numberOfChannels) || song.numberOfChannels <= 0 || typeof song.getChannelData !== 'function') {
-      throw error('media');
-    }
-    const frames = S.audioFrames(job.N, job.fps, RATE);
-    if (!Number.isSafeInteger(frames) || frames * 4 + WAV.HEADER_BYTES > 0xffffffff) throw error('too-large');
-    return { frames, start: Math.round(job.t0 * RATE), bytes: WAV.HEADER_BYTES + frames * 4 };
-  }
-
   // Same trim, downmix and silence padding as the browser encoder. This is the source PCM, never audio decoded from a
   // 192 kbps intermediate MP4. The range is N/fps (including the final rendered frame), not the unrounded UI duration.
-  async function audioBlob(song, job, signal) {
-    const range = rangeOf(job, song), channels = J.channelsOf(song);
-    const parts = [WAV.pcm16Header(RATE, range.frames, 2)];
-    for (let from = 0; from < range.frames; from += WAV_BLOCK) {
-      J.checkAbort(signal);
-      parts.push(WAV.pcm16Data(channels, range.start + from, Math.min(WAV_BLOCK, range.frames - from), 2));
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    }
-    J.checkAbort(signal);
-    return new Blob(parts, { type: 'audio/wav' });
-  }
+  function audioBlob(song, job, signal) { return SOURCE.audioBlob(song, job, signal, error); }
 
   function headerNumber(headers, name) {
     const raw = headers && headers.get(name);
@@ -145,12 +122,7 @@ MV.def('export/host/audio_server', ['export/schedule', 'export/host/mp4', 'expor
         try {
           movie = await ISO.parse(async (offset, length) => prefix.subarray(offset, offset + length), total);
         } catch (err) { throw error('response'); }
-        const videos = movie.tracks.filter((t) => t.kind === 'video'), audios = movie.tracks.filter((t) => t.kind === 'audio');
-        const video = videos[0];
-        if (!video || videos.length !== 1 || audios.length !== 1 || audios[0].fourcc !== 'mp4a'
-          || !['avc1', 'avc3'].includes(video.fourcc) || !video.table || video.table.n !== job.N
-          || Math.abs(video.table.duration - job.N / job.fps) > 2e-5
-          || (job.w && video.w !== job.w) || (job.h && video.h !== job.h)) throw error('response');
+        SOURCE.validateMovie(movie, job, error);
         return true;
       }
       if (at + size > PREFIX_LIMIT || (type === 'ftyp' && size > 4096)) throw error('response');
@@ -214,7 +186,7 @@ MV.def('export/host/audio_server', ['export/schedule', 'export/host/mp4', 'expor
     const o = opts || {}, config = validateConfig(o.audioServer);
     if (!config.token) throw error('auth');
     if (!(o.video instanceof Blob) || !o.video.size) throw error('media');
-    const range = rangeOf(o.job, o.audio);
+    const range = SOURCE.rangeOf(o.job, o.audio, error);
     if (o.onProgress) o.onProgress({ phase: 'audioServer', i: 0, N: 0, eta: null });
     const health = o.health || await check(config, { signal: o.signal, fetchImpl: o.fetchImpl });
     if (o.video.size + range.bytes + MULTIPART_MARGIN > health.maxUploadBytes) throw error('too-large');

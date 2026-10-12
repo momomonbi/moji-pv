@@ -17,7 +17,8 @@ function sampleDoc(output) {
   doc.sheet = { next: 5, rows: [
     { id: 'r1', src: '[ti:夜明け/のうた]' }, { id: 'r2', src: '一行目の歌詞' }, { id: 'r3', src: '二行目!' }, { id: 'r4', src: 'three' },
   ] };
-  Object.assign(doc.output, output || {});
+  // These fixtures exercise the native encoder/fallback rules. Dedicated local AAC is covered separately.
+  Object.assign(doc.output, { audioEncoding: 'browser' }, output || {});
   return doc;
 }
 

@@ -9487,3 +9487,34 @@ cancel unread error bodies. The service response also cleans up when disconnect 
 The user chose to prepare the server bundle and connection settings before selecting a hosting provider. Backend
 hosting remains unconfigured; adding this code to GitHub Pages does not start an audio server. Deployment and
 connection instructions are in `server/audio/README.md`. The application and server tests are included in CI.
+
+## 2026-10-12 — Setup-free in-browser AAC conversion
+
+New projects use `output.audioEncoding: local` for MP4 and Filmora audio. Existing explicit browser/server settings
+remain intact, and older projects without the property normalize to the standard browser route. Local exports load
+the pinned single-thread FFmpeg core only when Export is pressed, encode the original 48 kHz stereo PCM with an
+AAC 320 kbps target, and copy the native H.264 packets. No server connection settings or media uploads are needed.
+Targets and measured audio averages are labelled separately; the native browser encoder remains an option.
+
+The original PCM range and converted-MP4 validator are shared with server mode. WORKERFS references immutable input
+Blobs without whole-file MEMFS copies. Output retains AAC priming through edit lists and a 48 kHz movie timescale.
+Every conversion releases its worker on completion, error or cancellation; verified assets can be reused from memory
+and optional CacheStorage. Actual inputs are limited to 256 MiB, output to 260 MiB and duration to one hour. Preflight
+uses exact duration/PCM limits and includes output copies/runtime memory; a video bitrate estimate alone cannot reject
+an export. Already resolved host codecs control the Filmora file list, preserving native WAV fallback for old callers.
+
+The generated page supplies its relative asset path and permits Blob workers plus WASM compilation in the CSP.
+Remote scripts and JavaScript unsafe evaluation remain disabled. Unmodified core binaries, GPL/dependency licences,
+23 pinned corresponding-source archives and rebuild controls are distributed together under `vendor/ffmpeg/`;
+source archives are not downloaded during conversion. CI verifies their checksums. The About dialog includes the
+core licence and source link.
+
+Integration checks found and fixed a Filmora option-name mismatch, cleanup after Worker messaging/output-allocation
+exceptions, and a false failure caused by the pinned core's ffprobe wrapper retaining `Module.ret = -1` despite valid
+JSON. The runtime now validates the actual probe artifact, codec, frame count, start times and durations instead.
+
+Validation covers 1,937 Node cases across the full matrix and targeted rechecks, all six unchanged render golden
+files and 23 build tests. Eight Japanese/English browser cases exercise actual AAC conversion, preserved H.264 packet
+hashes, zero starts and matching durations, original PCM range, lazy/cache loading, no uploads and cancellation.
+The final generated pages also pass the native MP4/Filmora success flows in both languages. The full regression run
+identified two notice consistency gaps; adding the matching GPL notice and vendor-root licence fixed those checks.

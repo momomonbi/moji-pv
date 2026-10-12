@@ -208,8 +208,8 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
 
     function audioText(info) {
       if (info.state !== 'ready') return t('exp.audioQuality.' + info.state, { rate: Math.round((info.preferred || SCH.AUDIO_BITRATE) / 1000) });
-      if (info.source === 'server') return t(Number.isFinite(info.measured) && info.measured > 0
-        ? 'exp.audioQuality.serverMeasured' : 'exp.audioQuality.server', { kbps: Math.round(info.bitrate / 1000),
+      if (info.source === 'server' || info.source === 'local') return t('exp.audioQuality.' + info.source
+        + (Number.isFinite(info.measured) && info.measured > 0 ? 'Measured' : ''), { kbps: Math.round(info.bitrate / 1000),
           measured: Math.round((info.measured || 0) / 1000) });
       const codec = info.codec === 'mp4a.40.2' ? 'AAC' : info.codec === 'opus' ? 'Opus' : info.codec;
       const label = t('exp.audioQuality.ready', { codec, rate: Math.round(info.bitrate / 1000),
@@ -359,9 +359,10 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
       accelerationHint.dataset.selected = hint ? hint.selected : '';
       const audioEligible = o.format === 'mp4' || o.format === 'kit';
       audioEncodingField.hidden = !audioEligible;
-      fillSeg(audioEncoding, ['browser', 'server'], o.audioEncoding || 'browser', (v) => t('exp.audioEncoding.' + v),
-        (v) => v === 'server' && (!o.audio || !app.doc.song) ? t('exp.audioEncoding.needsAudio') : '');
-      audioEncodingHint.textContent = t(!o.audio || !app.doc.song ? 'exp.audioEncoding.needsAudio' : 'exp.audioEncoding.help');
+      fillSeg(audioEncoding, ['local', 'browser', 'server'], o.audioEncoding || 'browser', (v) => t('exp.audioEncoding.' + v),
+        (v) => v !== 'browser' && (!o.audio || !app.doc.song) ? t('exp.audioEncoding.needsAudio') : '');
+      audioEncodingHint.textContent = t(!o.audio || !app.doc.song ? 'exp.audioEncoding.needsAudio'
+        : o.audioEncoding === 'local' ? 'exp.audioEncoding.localHelp' : o.audioEncoding === 'server' ? 'exp.audioEncoding.help' : 'exp.audioEncoding.browserHelp');
       serverSettings.root.hidden = !audioEligible || o.audioEncoding !== 'server';
       serverSettings.update();
       // 透明 makes the output transparent (透過動画, or 透過PNG from a PNG sequence); Filmora用 does not offer it
@@ -447,30 +448,33 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
 
     function showRunning(st) {
       const now = performance.now();
-      const external = st.phase === 'audioServer' || st.part === 'audioServer' || st.progressPhase === 'audioServer';
+      const phaseId = [st.progressPhase, st.part, st.phase].find((p) => p === 'audioServer' || p === 'audioLocal' || p === 'audioLocalLoading') || '';
+      const indeterminate = !!phaseId;
       const fresh = !runView || !running.contains(runView.title);
       if (fresh) runView = runningView();
-      else if (st.part === runView.part && external === runView.progressPhase && st.i < st.N && now - lastRun < RUN_UPDATE_MS) return;
+      else if (st.part === runView.part && phaseId === runView.progressPhase && st.i < st.N && now - lastRun < RUN_UPDATE_MS) return;
       lastRun = now;
       const v = runView;
       const pct = st.N ? Math.floor(st.i / st.N * 100) : 0;
       const sz = SCH.outputSize(app.doc.look.aspect, st.short || app.doc.output.short);
       v.title.textContent = t('exp.running', { h: Math.min(sz.w, sz.h), fps: st.fps || app.doc.output.fps });
-      const phase = external ? t('exp.serverProgress.audioServer') : st.part ? t('exp.kit.phase', { what: t('exp.kit.what.' + st.part) }) : '';
-      if (st.part !== v.part || external !== v.progressPhase) {
+      const phase = phaseId === 'audioServer' ? t('exp.serverProgress.audioServer') : phaseId === 'audioLocalLoading'
+        ? t('exp.localProgress.loading') : phaseId === 'audioLocal' ? t('exp.localProgress.transcoding')
+          : st.part ? t('exp.kit.phase', { what: t('exp.kit.what.' + st.part) }) : '';
+      if (st.part !== v.part || phaseId !== v.progressPhase) {
         v.part = st.part;
-        v.progressPhase = external;
+        v.progressPhase = phaseId;
         v.phase.hidden = !phase;
-        if (phase) { v.phase.dataset.part = external ? 'audioServer' : st.part; v.phase.textContent = phase; said.textContent = phase; }
+        if (phase) { v.phase.dataset.part = phaseId || st.part; v.phase.textContent = phase; said.textContent = phase; }
       }
-      v.bar.classList.toggle('is-indeterminate', external);
-      v.frames.hidden = external; v.percent.hidden = external;
-      if (external) {
+      v.bar.classList.toggle('is-indeterminate', indeterminate);
+      v.frames.hidden = indeterminate; v.percent.hidden = indeterminate;
+      if (indeterminate) {
         v.bar.removeAttribute('aria-valuenow');
         v.bar.setAttribute('aria-valuetext', phase);
         dom.setStyle(v.fill, { width: '35%' });
         v.frames.textContent = ''; v.percent.textContent = '';
-        v.left.textContent = t('exp.serverProgress.wait');
+        v.left.textContent = t(phaseId === 'audioServer' ? 'exp.serverProgress.wait' : 'exp.localProgress.wait');
         return;
       }
       const progress = t('exp.progress', { i: st.i, n: st.N, eta: clock(st.eta || 0) });
@@ -486,7 +490,7 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
     }
 
     function renderRunning(st) {
-      if (st.phase === 'running' || st.phase === 'audioServer') { showRunning(st); return; }
+      if (st.phase === 'running' || st.phase === 'audioServer' || st.phase === 'audioLocal' || st.phase === 'audioLocalLoading') { showRunning(st); return; }
       runView = null;
       if (st.phase === 'done') {
         const info = st.result.files ? kitDoneText(st.result)

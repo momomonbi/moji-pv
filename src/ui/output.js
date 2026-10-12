@@ -188,7 +188,8 @@ MV.def('ui/output', ['export/schedule', 'engine/scene/frame'], (S, F) => {
   // H.264 encoder its own text (the MP4s of the set cannot be made here; no PNG sequence is offered).
   function checkKey(item) {
     if (item.code === 'no-h264' && item.params && item.params.format === 'kit') return 'exp.pre.kit-no-h264';
-    if (item.code === 'song-missing' && item.level === 'block') return 'exp.pre.audio-server-song-missing';
+    if (item.code === 'song-missing' && item.level === 'block') return item.params && item.params.audioSource === 'local'
+      ? 'exp.pre.audio-local-song-missing' : 'exp.pre.audio-server-song-missing';
     return 'exp.pre.' + item.code;
   }
 
@@ -315,6 +316,10 @@ MV.def('ui/output', ['export/schedule', 'engine/scene/frame'], (S, F) => {
     'audio-server-response': 'err.exp.audioServerResponse', 'audio-server-media': 'err.exp.audioServerMedia',
     'audio-server-busy': 'err.exp.audioServerBusy', 'audio-server-timeout': 'err.exp.audioServerTimeout',
     'audio-server-convert': 'err.exp.audioServerConvert',
+    'audio-local-unavailable': 'err.exp.audioLocalUnavailable', 'audio-local-load': 'err.exp.audioLocalLoad',
+    'audio-local-memory': 'err.exp.audioLocalMemory', 'audio-local-too-large': 'err.exp.audioLocalTooLarge',
+    'audio-local-convert': 'err.exp.audioLocalConvert', 'audio-local-response': 'err.exp.audioLocalResponse',
+    'audio-local-busy': 'err.exp.audioLocalBusy', 'audio-local-media': 'err.exp.audioLocalMedia',
   });
   function errorKey(code) { return ERROR_KEYS[code] || 'err.exp.encode'; }
 
@@ -331,7 +336,7 @@ MV.def('ui/output', ['export/schedule', 'engine/scene/frame'], (S, F) => {
     FORMATS, MAIN_FORMATS, OTHER_FORMATS, BACKDROPS, KIT_KEYS, ERROR_KEYS, isAlpha, formatCmds, transparentOf, opaqueOf,
     backdropCmds, clearLabel, backdropChoices, backdropNote, effectiveBackdrop, consistent, skipOf, usedFilters, skippedFilters,
     checks, kitCmd, withFixes, fixLabel, checkKey, layersWhat, listText, summary, qualityOptions, audioInfo,
-    usesAudioServer: S.usesAudioServer, audioEnv: S.audioEnv,
+    usesAudioServer: S.usesAudioServer, usesLocalAudio: S.usesLocalAudio, usesDedicatedAudio: S.usesDedicatedAudio, audioEnv: S.audioEnv,
     kitLabel, kitAlways, shownChecks, hasSound, speedProfile, speedCmds,
     mergeFonts, errorKey, errorParams,
   };

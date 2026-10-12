@@ -24,7 +24,7 @@ function sampleDoc(output) {
     { id: 'r1', src: '[ti:夜明け]' }, { id: 'r2', src: '[00:00.10]一行目の歌詞' }, { id: 'r3', src: '[00:00.20]two' }, { id: 'r4', src: 'three' },
   ] };
   doc.song = { name: 's.mp3', sha1: 'x', seconds: 30, bpm: null, offset: 0, meter: 4, bpmConfidence: null, digest: null, info: null };
-  Object.assign(doc.output, { short: 720, fps: FPS, quality: 'standard', range: { t0: 0.1, t1: 0.1 + 7 / FPS } }, output || {});
+  Object.assign(doc.output, { short: 720, fps: FPS, quality: 'standard', audioEncoding: 'browser', range: { t0: 0.1, t1: 0.1 + 7 / FPS } }, output || {});
   return doc;
 }
 

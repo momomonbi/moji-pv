@@ -21,9 +21,9 @@ from pathlib import Path
 HEADER = '/* 文字PVメーカー v2 — original work.'
 VENDOR_FILES = ('mp4-muxer.min.js', 'ai-sdk.min.js')
 PART_KINDS = ('arrange', 'arrive', 'dwell', 'depart', 'ground', 'ornament', 'lens', 'filter', 'seam', 'theme', 'mood')
-CSP = ("default-src 'none'; script-src {scripts}; style-src {style} https://fonts.googleapis.com; "
-       "font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com "
-       "https://api.anthropic.com https:; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; "
+CSP = ("default-src 'none'; script-src {scripts} 'wasm-unsafe-eval'; style-src {style} https://fonts.googleapis.com; "
+       "font-src https://fonts.gstatic.com; connect-src 'self' https://generativelanguage.googleapis.com "
+       "https://api.anthropic.com https:; img-src data: blob:; media-src blob:; worker-src blob:; base-uri 'none'; "
        "form-action 'none'")
 PAGE = ('<!doctype html><html lang="{lang}"><head><meta charset="utf-8">\n'
         '<meta name="viewport" content="width=device-width,initial-scale=1">\n'
@@ -838,8 +838,9 @@ def sha256(text):
     return "'sha256-" + base64.b64encode(hashlib.sha256(text.encode('utf-8')).digest()).decode('ascii') + "'"
 
 
-def app_script(kernel, modules, order, lang, dev, boot):
+def app_script(kernel, modules, order, lang, dev, boot, asset_base='vendor/ffmpeg/'):
     parts = [kernel.rstrip('\n'), "MV.DEV=%s;MV.LANG='%s';" % ('true' if dev else 'false', lang)]
+    parts.append("MV.ASSET_BASE='%s';" % asset_base)
     parts += [modules[mid].text.rstrip('\n') for mid in order]
     parts.append("MV.use('%s').start();" % boot)
     return '\n'.join(parts) + '\n'
@@ -886,7 +887,8 @@ def build_pages(root, kernel, modules, order, css, lab, problems):
         if boot not in modules:
             problems.add(root / 'src' / (boot + '.js'), 1, 'boot: module %s is required for %s' % (boot, rel))
             continue
-        app = app_script(kernel, modules, order, lang, dev, boot)
+        asset_base = '../' * (len(Path(rel).parts) - 1) + 'vendor/ffmpeg/'
+        app = app_script(kernel, modules, order, lang, dev, boot, asset_base)
         what = inline_hazard(SCRIPT_HAZARD, app)
         if what:
             problems.add(root / 'src', 1, 'inline: app script contains ' + what)
