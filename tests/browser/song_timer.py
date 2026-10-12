@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""文字PVメーカー v2 — original work. Real song-clock timers in legacy numbered parts, JA/EN.
+"""文字PVメーカー v2 — original work. Real song-clock timers in legacy numbered parts and barcodes, JA/EN.
 
 Uses actual compiled pages, native Canvas drawing and real PNG sequence exports. A single LRC lyric cut crosses
 59.8→60.2 seconds (00:59.80→01:00.20); paused/seeking/rewound frames must agree with the absolute song clock and exported frame pixels.
-Old saved sidebarIndex/serialMark keys and number pins are retained. Hidden/none decorations draw no timer.
+Old saved sidebarIndex/serialMark keys and number pins are retained. Barcode labels also follow the live song time.
+Hidden/none decorations draw no timer.
 Run: PW_EXECUTABLE=/usr/bin/chromium python3 tests/browser/song_timer.py --no-build
 """
 import argparse
@@ -32,10 +33,12 @@ SETUP = r"""([text, kind, aspect, orient]) => {
     'work:orient': orient, 'work:arrive': fb('arrive'), 'work:dwell': fb('dwell'), 'work:depart': fb('depart'),
     'work:lens': fb('lens'), 'work:seam': fb('seam'), 'work:cam.shot': 'none', 'work:rig': 'none',
     'work:filter.count': 0, 'work:atmos': 'none', 'work:texture': 'none', 'work:amount.shake': 0, 'work:amount.flash': 0,
-    'work:text.style': 'plain', 'work:ornament.count': kind === 'serialMark' ? 1 : 0,
-    'work:arrange@sidebarIndex.number': '42', 'work:arrange@sidebarIndex.side': 'left',
-    'work:ornament#0': kind === 'serialMark' ? kind : 'none', 'work:ornament#0@serialMark.number': '42',
+    'work:text.style': 'plain', 'work:ornament.count': kind === 'sidebarIndex' ? 0 : 1,
+    ...(kind === 'barCode' ? {} : { 'work:arrange@sidebarIndex.number': '42', 'work:ornament#0@serialMark.number': '42' }),
+    'work:arrange@sidebarIndex.side': 'left',
+    'work:ornament#0': kind === 'sidebarIndex' ? 'none' : kind,
     'work:ornament#0@serialMark.place': 'bottomRight', 'work:ornament#0@serialMark.rule': false,
+    ...(kind === 'barCode' ? { 'work:ornament#0@barCode.react': 0 } : {}),
     ['line/' + a.plan.lines[0].id + ':end']: 62,
   };
   a.batch({}, [ ...Object.entries(pins).map(([path, v]) => ({ t: 'pin.set', path, v, by: 'user' })),
@@ -52,7 +55,7 @@ SETUP = r"""([text, kind, aspect, orient]) => {
   return { keys: [left.map((c) => c.key), right.map((c) => c.key)],
     kind: left[0] && left[0].slots[kind === 'sidebarIndex' ? 'arrange' : 'ornament#0'].v,
     span: left[0] && [left[0].t0, left[0].t1],
-    number: a.doc.pins['work:' + (kind === 'sidebarIndex' ? 'arrange@sidebarIndex.number' : 'ornament#0@serialMark.number')].v };
+    number: kind === 'barCode' ? null : a.doc.pins['work:' + (kind === 'sidebarIndex' ? 'arrange@sidebarIndex.number' : 'ornament#0@serialMark.number')].v };
 }"""
 
 INSTRUMENT = r"""() => {
@@ -117,7 +120,8 @@ async def flow(f, kind, aspect, orient, shots):
     setup = await page.evaluate(SETUP, [LYRICS, kind, aspect, orient])
     f.check(setup['keys'][0] == setup['keys'][1] and len(setup['keys'][0]) == 1, '59.8 and 60.2 belong to the same actual lyric cut')
     f.check(setup['span'][0] <= 59 and setup['span'][1] >= 61, 'test lyric remains in its hold window across all clock samples: %r' % setup['span'])
-    f.check(setup['kind'] == kind and setup['number'] == '42', 'old saved part key and number pin survive reload')
+    f.check(setup['kind'] == kind and (setup['number'] is None if kind == 'barCode' else setup['number'] == '42'),
+            'saved part key and any legacy number pin survive reload')
     await page.evaluate(INSTRUMENT)
     await page.evaluate('async () => { await window.__mv.engine.prepare(59, 61, { export: true }); }')
     frames = {}
@@ -205,12 +209,16 @@ async def flow(f, kind, aspect, orient, shots):
                 animation.append(image.convert('RGB').resize((960, 540), Image.Resampling.LANCZOS))
         animation[0].save(shots / 'timer_rollover.gif', save_all=True, append_images=animation[1:],
                           duration=[30, 30, 40] * 10, loop=0, disposal=2)
-    # Keep the legacy key while hiding it through the existing control. Empty numbers also remain the opt-out.
+    # Keep the part key while hiding it through the existing control. Legacy empty numbers remain the opt-out.
     await page.evaluate('() => window.__mv.exportReset()')
     hide = 'work:el.text.hide' if kind == 'sidebarIndex' else 'work:el.ornament#0.hide'
-    number = 'work:arrange@sidebarIndex.number' if kind == 'sidebarIndex' else 'work:ornament#0@serialMark.number'
-    show = 'work:arrange@sidebarIndex.showTime' if kind == 'sidebarIndex' else 'work:ornament#0@serialMark.showTime'
-    for path, value in ((hide, True), (number, ''), (number, '   ')):
+    prefix = 'work:arrange@sidebarIndex' if kind == 'sidebarIndex' else 'work:ornament#0@' + kind
+    number = None if kind == 'barCode' else prefix + '.number'
+    show = prefix + '.showTime'
+    visibility_checks = [(hide, True)]
+    if number:
+        visibility_checks += [(number, ''), (number, '   ')]
+    for path, value in visibility_checks:
         await page.evaluate(r"""([path, value, hide, show]) => {
           const a = window.__mv; a.batch({}, [{ t: 'pin.clear', path: hide }, { t: 'pin.clear', path: show }, { t: 'pin.set', path, v: value, by: 'user' }]);
           if (typeof value === 'string') { const file = MV.use('core/migrate').parseFile(MV.use('core/doc').serialize({ doc: a.doc, side: a.store.side }));
@@ -219,9 +227,9 @@ async def flow(f, kind, aspect, orient, shots):
         result = await page.evaluate(FRAME, 60.2)
         expected = path == number and value == '   ' and kind == 'serialMark'
         f.check(bool(result['timers']) == expected, 'old visibility intent is retained (serial whitespace was a visible 00 label)')
-    await page.evaluate("([show, number]) => window.__mv.batch({}, [{ t: 'pin.set', path: show, v: true, by: 'user' }, { t: 'pin.set', path: number, v: '42', by: 'user' }])", [show, number])
+    await page.evaluate("([show, number, hide]) => window.__mv.batch({}, [{ t: 'pin.clear', path: hide }, { t: 'pin.set', path: show, v: true, by: 'user' }, ...(number ? [{ t: 'pin.set', path: number, v: '42', by: 'user' }] : [])])", [show, number, hide])
     f.check(len((await page.evaluate(FRAME, 60.2))['timers']) == 1, 'the current visibility switch restores the timer')
-    motion = 'work:arrange@sidebarIndex.motion' if kind == 'sidebarIndex' else 'work:ornament#0@serialMark.motion'
+    motion = prefix + '.motion'
     await page.evaluate("(path) => window.__mv.dispatch({ t: 'pin.set', path, v: 0, by: 'user' })", motion)
     still = {}
     for time in (59.123, 59.129, 59.131, 60.203, 60.209):
@@ -231,12 +239,12 @@ async def flow(f, kind, aspect, orient, shots):
     await page.evaluate("(path) => window.__mv.dispatch({ t: 'pin.clear', path })", motion)
     await page.evaluate("(path) => window.__mv.dispatch({ t: 'pin.set', path, v: false, by: 'user' })", show)
     f.check(not (await page.evaluate(FRAME, 60.2))['timers'], 'the current visibility switch hides the timer')
-    if kind == 'serialMark':
+    if kind != 'sidebarIndex':
         await page.evaluate("(path) => window.__mv.dispatch({ t: 'pin.set', path, v: true, by: 'user' })", show)
         f.check(len((await page.evaluate(FRAME, 60.2))['timers']) == 1, 'timer is visible before testing none')
-        await page.evaluate(r"""() => { const a = window.__mv;
-          a.batch({}, [{ t: 'pin.set', path: 'work:ornament#0@serialMark.number', v: '42', by: 'user' },
-            { t: 'pin.set', path: 'work:ornament#0', v: 'none', by: 'user' }]); }""")
+        await page.evaluate(r"""(number) => { const a = window.__mv;
+          a.batch({}, [...(number ? [{ t: 'pin.set', path: number, v: '42', by: 'user' }] : []),
+            { t: 'pin.set', path: 'work:ornament#0', v: 'none', by: 'user' }]); }""", number)
         result = await page.evaluate(FRAME, 60.2)
         f.check(not result['timers'], 'none decoration draws no timer')
 
@@ -246,7 +254,7 @@ async def main():
     ap.add_argument('--root')
     ap.add_argument('--no-build', action='store_true')
     ap.add_argument('--shots', type=Path)
-    ap.add_argument('--kind', choices=('sidebarIndex', 'serialMark'))
+    ap.add_argument('--kind', choices=('sidebarIndex', 'serialMark', 'barCode'))
     args = ap.parse_args()
     if args.shots:
         args.shots.mkdir(parents=True, exist_ok=True)
@@ -260,7 +268,7 @@ async def main():
             browser = await launch(p)
             try:
                 for rel, lang in (('index.html', 'ja'), ('en/index.html', 'en')):
-                    for kind, aspect, orient in (('sidebarIndex', '16:9', 'h'), ('sidebarIndex', '9:16', 'v'), ('serialMark', '16:9', 'h')):
+                    for kind, aspect, orient in (('sidebarIndex', '16:9', 'h'), ('sidebarIndex', '9:16', 'v'), ('serialMark', '16:9', 'h'), ('barCode', '16:9', 'h')):
                         if args.kind and kind != args.kind:
                             continue
                         page = await open_page(browser, 'http://127.0.0.1:%d/' % server.server_address[1], rel)

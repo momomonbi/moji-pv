@@ -337,20 +337,20 @@ function ownShapes(scene, el) {
   return out;
 }
 
-test('barCode prints the cut\'s start time; its bars follow the loudness; neonHaze breathes with the loudness', () => {
+test('barCode updates the playback time; its bars follow the loudness; neonHaze breathes with the loudness', () => {
   const bar = def('ornament', 'barCode');
   const pts = (list) => list.map((s) => Array.from(s.path.pts));
   const parts = (plan) => {
-    const shapes = ownShapes(sceneOf(plan, bar), 'ornament#0');
-    return { bars: pts(shapes.filter((s) => s.stroke === null)), digits: pts(shapes.filter((s) => s.stroke !== null)) };
+    const scene = sceneOf(plan, bar), shapes = ownShapes(scene, 'ornament#0');
+    return { bars: pts(shapes.filter((s) => s.stroke === null)), timer: scene.stores.paint.find((p) => p.data && p.data.kind === 'timer') };
   };
-  // react 0: the bars stand still, so only the printed time can tell two builds apart
+  // A reused cut keeps exactly the same bars and timer geometry; its live clock is supplied for each frame.
   const still = sample('ornament', 'barCode', { params: { react: 0 } });
   const base = parts(still), later = parts(withCutTimes(still, ['t0', 't1', 'a', 'b'], 61.5));
-  assert.equal(base.digits.length, 1, 'one stroked shape: the digits');
+  assert.ok(base.timer && base.timer.animated, 'one live bounded timer');
   assert.deepEqual(later.bars, base.bars, 'the same bars');
-  assert.notDeepEqual(later.digits, base.digits, 'a cut starting 61.5 s later prints another time');
-  assert.deepEqual(parts(withCutTimes(still, ['a'], -0.3)).digits, base.digits, 'the time is the sung start, not the window');
+  assert.deepEqual(later.timer.data, base.timer.data, 'the scene stores no cut-start timestamp');
+  assert.deepEqual(parts(withCutTimes(still, ['a'], -0.3)).timer.data, base.timer.data, 'the window does not change clock geometry');
   const t = [0.5];
   const hash = (plan) => frameHashes(plan, sceneOf(plan, bar), t).get(0.5);
   assert.equal(hash(withLevel(still, 0.05)), hash(still), 'react 0: loudness changes nothing');

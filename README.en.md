@@ -73,6 +73,7 @@ similar.
 
 **Sidebar timer** and **Playback timer** show the current playback time as `01:23.45` (minutes, seconds and hundredths)
 in place of lyric numbers, with flip, bounce and trailing-digit animation when the digits change.
+The time below **Bar code** also updates as a live playback timer.
 Adjust the strength with **Digit animation**; set it to 0 for stationary digits.
 They follow pause, seek and export without resetting at each line. Turn **Show timer** off in the detail panel to
 hide them. Existing projects keep the same part keys; a previously blank number is migrated to a hidden timer.

@@ -1,27 +1,27 @@
 {
  "registry": {
   "kind": "catalog",
-  "version": "dbcc84e2"
+  "version": "10e096f7"
  },
  "measurer": "fake",
  "docs": {
   "basic-all-presets@16:9": {
-   "plan": "43fc41f7",
+   "plan": "f3154de0",
    "frames": [
     "6850d38f",
     "2da2050a",
     "ac26812f",
     "caa9cb05",
-    "85473987",
+    "4bd25060",
     "152fed43",
-    "ad268dad",
+    "afb3ea37",
     "e7ad66ee",
     "a9756b34",
     "d586cd74",
     "3fd76e6a",
     "ee9aa58c",
     "e1445697",
-    "3ce78649",
+    "800d70db",
     "1aab4331",
     "b4492763",
     "599ac4ab",
@@ -51,22 +51,22 @@
    ]
   },
   "basic-chorus-0.5@9:16": {
-   "plan": "fce9dbb9",
+   "plan": "8160e7d3",
    "frames": [
     "f812c949",
     "eb68011a",
     "d735d616",
     "b1142291",
-    "2a2b77bc",
+    "9fcd115c",
     "6b6440c1",
-    "655c926d",
+    "5d112dfe",
     "ab02f504",
     "1eea1a0a",
     "4f01b02b",
     "dc1a106e",
     "45a0ec92",
     "b0c26c3d",
-    "2c5e4217",
+    "423102e0",
     "958fd257",
     "04acc894",
     "0dc0c784",

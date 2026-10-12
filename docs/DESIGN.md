@@ -2669,7 +2669,7 @@ interlude.
 | `inkSplat` | 墨はね | Ink splat | cut | organic hard | | A few ink splashes near the text. |
 | `tapeStrip` | テープ | Tape strip | cut | playful retro | | Translucent tape pieces at the text block's corners. |
 | `sunBurst` | 放射線 | Sun burst | cut | bright bold | | Thin rays radiating from behind the text. |
-| `barCode` | バーコード | Bar code | cut | digital serious | | A small barcode with the line's start time printed under it. |
+| `barCode` | バーコード | Bar code | cut | digital serious | | A small barcode with an animated mm:ss.hh playback timer below it. |
 | `hankoSeal` | 印 | Hanko seal | cut | literary serious | | A red square seal stamped near the text. |
 | `crossHair` | 照準 | Cross hair | cut | digital hard | | Register marks and a cross hair at the text centre. |
 | `ripplePath` | 波線 | Wave line | cut | playful organic | | A wavy underline that ripples. |

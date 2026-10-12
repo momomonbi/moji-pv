@@ -5899,7 +5899,8 @@ used to hold still).
 
 The saved part keys `sidebarIndex` and `serialMark` now denote Sidebar timer / 袖書き時計 and Playback timer /
 演奏時計. They display absolute song time as `mm:ss.hh` with at least two minute digits, two second digits and
-hundredths; minute counts continue past 59. Editor line IDs and the barcode's cut timestamp are unchanged.
+hundredths; minute counts continue past 59. The `barCode` ornament also uses the same live timer below its bars,
+replacing its fixed cut-start timestamp. Editor line IDs are unchanged.
 
 `parts/timecode`, shared through `parts/kit`, formats and paints vector digits. `showTime` controls visibility and
 `motion` controls digit animation from 0 (stationary) to 1 (the automatic default). Changed digits flip, bounce and

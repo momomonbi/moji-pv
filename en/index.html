@@ -1,6 +1,6 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-JiCmrcelLSA1M7EHvcq1duHFGtcapsPRAuQhkPwfxCw=' 'wasm-unsafe-eval'; style-src 'sha256-Fy49fNzr9l0lyo6ZAGAcOvPUSG1U7eiwF+9E4r2Twy0=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://generativelanguage.googleapis.com https://api.anthropic.com https:; img-src data: blob:; media-src blob:; worker-src blob:; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-rX1qOJ2X/Qv8v3/VENDO9Di8p8DpdJ1OFgUICkExFR8=' 'wasm-unsafe-eval'; style-src 'sha256-Fy49fNzr9l0lyo6ZAGAcOvPUSG1U7eiwF+9E4r2Twy0=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://generativelanguage.googleapis.com https://api.anthropic.com https:; img-src data: blob:; media-src blob:; worker-src blob:; base-uri 'none'; form-action 'none'">
 <title>Moji PV Maker</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -42918,38 +42918,6 @@ MV.def('parts/ornament/digital', ['parts/kit'], (K) => {
 
   function entrance(env) { return Math.max(env.times.a, env.times.rest - 0.25); }
 
-  // --- a small stroke font for numbers (monospace, 2 × 4 units per character, 3 units apart) ----------------------------
-
-  const STROKES = Object.freeze({
-    0: [[0, 0, 2, 0, 2, 4, 0, 4, 0, 0], [1.6, 0.6, 0.4, 3.4]],
-    1: [[0.4, 0.8, 1, 0, 1, 4], [0.3, 4, 1.7, 4]],
-    2: [[0, 0, 2, 0, 2, 2, 0, 2, 0, 4, 2, 4]],
-    3: [[0, 0, 2, 0, 2, 4, 0, 4], [0.7, 2, 2, 2]],
-    4: [[0, 0, 0, 2, 2, 2], [2, 0, 2, 4]],
-    5: [[2, 0, 0, 0, 0, 2, 2, 2, 2, 4, 0, 4]],
-    6: [[2, 0, 0, 0, 0, 4, 2, 4, 2, 2, 0, 2]],
-    7: [[0, 0, 2, 0, 2, 4]],
-    8: [[0, 0, 2, 0, 2, 4, 0, 4, 0, 0], [0, 2, 2, 2]],
-    9: [[2, 2, 0, 2, 0, 0, 2, 0, 2, 4, 0, 4]],
-    ':': [[1, 0.9, 1, 1.3], [1, 2.7, 1, 3.1]],
-    '.': [[1, 3.6, 1, 4]],
-    '-': [[0.3, 2, 1.7, 2]],
-  });
-  const ADVANCE = 3;
-
-  // The strokes of `text` (unknown characters leave a gap) with its top-left at (x, y), `size` du tall.
-  function numberPath(text, x, y, size) {
-    const u = size / 4, cmds = [];
-    for (let c = 0; c < text.length; c++) {
-      for (const line of STROKES[text[c]] || []) {
-        for (let k = 0; k < line.length; k += 2) cmds.push([k ? 'L' : 'M', x + (c * ADVANCE + line[k]) * u, y + line[k + 1] * u]);
-      }
-    }
-    return K.shape.path(cmds.length ? cmds : [['M', x, y]]);
-  }
-
-  function numberWidth(text, size) { return ((text.length * ADVANCE - 1) * size) / 4; }
-
   // --- behaviours (module level, pure in t, allocation-free) --------------------------------------------------------------
 
   // Node k scales along one axis (0 = x, 1 = y) from 0 to 1 over [s[k], s[k] + d], in eight steps when `steps`,
@@ -43033,21 +43001,15 @@ MV.def('parts/ornament/digital', ['parts/kit'], (K) => {
 
   // --- barCode ----------------------------------------------------------------------------------------------------------
 
-  // m:ss.cc (or h:mm:ss.cc) of a time in seconds.
-  function timecode(sec) {
-    const cs = Math.max(0, Math.round(sec * 100));
-    const pad = (n) => (n < 10 ? '0' : '') + n;
-    const s = Math.floor(cs / 100) % 60, m = Math.floor(cs / 6000) % 60, h = Math.floor(cs / 360000);
-    return (h ? h + ':' + pad(m) : pad(m)) + ':' + pad(s) + '.' + pad(cs % 100);
-  }
-
   const barCode = K.ornament({
     key: 'barCode', scope: 'cut', follow: 'text',
     label: { ja: 'バーコード', en: 'Bar code' },
-    blurb: { ja: '小さなバーコードに、このカットの歌い出しの時刻', en: "A small barcode with the cut's start time printed under it" },
+    blurb: { ja: '音に反応するバーコードの下で、現在の演奏時間を更新する', en: 'A barcode that reacts to the music, with the current playback time underneath' },
     tags: ['digital', 'serious'], needs: ['level'],
     traits: { roles: LYRIC_ROLES },
     params: {
+      showTime: { type: 'bool', label: { ja: '時計を表示', en: 'Show timer' }, auto: { value: true } },
+      motion: { type: 'num', min: 0, max: 1, step: 0.01, label: { ja: '数字の切り替え', en: 'Digit animation' }, auto: { value: 1 } },
       bars: { type: 'int', min: 8, max: 64, label: { ja: '本数', en: 'Bars' }, auto: { range: [22, 32] } },
       height: { type: 'num', min: 20, max: 200, step: 1, unit: 'du', label: { ja: '高さ', en: 'Height' }, auto: { range: [72, 100] } },
       react: { type: 'num', min: 0, max: 1, step: 0.01, label: { ja: '音への反応', en: 'Reaction' }, auto: { range: [0.15, 0.35] } },
@@ -43061,9 +43023,10 @@ MV.def('parts/ornament/digital', ['parts/kit'], (K) => {
         widths.push(u * rng.pick([1, 1, 2, 3])); gaps.push(u * rng.pick([1, 1, 2]));
         w += widths[k] + (k < p.bars - 1 ? gaps[k] : 0);
       }
-      // the cut's sung start: the plan's cut carries no line start (it equals the line's start on the line's first cut)
-      const stamp = timecode(env.cut ? env.cut.t0 : 0);
-      w = Math.max(w, numberWidth(stamp, digits));
+      // Preserve the bar block's placement and height. Reserve a fixed clock width once, never rebuild it
+      // for a changed minute count, and leave it reserved when the caption or its animation is switched off.
+      const showTime = K.timecode.visible(p), clockTop = digits * .2, clockHeight = digits * 1.4;
+      w = Math.max(w, K.timecode.width(K.timecode.RESERVE, digits, .1) + digits * .34);
       const h = p.height + digits * 1.6, at = besideText(env, f, w, h, 0.03 * D.short);
       const g = sb.group({ layer: 'text', x: at.x, y: at.y + p.height, owner: env.owner });
       const bars = [], weight = [];
@@ -43072,8 +43035,8 @@ MV.def('parts/ornament/digital', ['parts/kit'], (K) => {
           x, alpha: 0.85 }));
         weight.push(rng.range(0.3, 1));
       }
-      sb.shape({ parent: g, layer: 'text', owner: env.owner, path: numberPath(stamp, 0, digits * 0.45, digits), stroke: p.ink,
-        width: Math.max(1.2, digits * 0.1), cap: 'square', alpha: 0.9 });
+      if (showTime) K.timecode.paint(env, { parent: g, box: { x: 0, y: clockTop, w, h: clockHeight },
+        size: digits, weight: .1, motion: p.motion, ink: p.ink, alpha: .9 });
       const T = env.times, levels = new Float32Array(Math.ceil((T.b - T.a) * LEVEL_HZ) + 2);
       for (let i = 0; i < levels.length; i++) levels[i] = env.level(T.a + i / LEVEL_HZ);
       behave(env, runBars, bars, { a: T.a, levels, react: p.react * (0.5 + 0.5 * p.amount), weight: Float32Array.from(weight) });

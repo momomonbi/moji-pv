@@ -9545,3 +9545,18 @@ are identical. Of 480 golden frames, 416 remain byte-identical, 49 intentionally
 repeat-fixture hashes only change because recorder canvas/gradient allocation IDs move; consistent ID renaming makes
 their drawing operations identical. Six native-browser cases and 108 transformed Canvas cases pass. The browser
 test dependency file includes Pillow for decoded PNG comparisons and optional animation samples.
+
+## 2026-10-12 — Fix the barcode's stopped time display
+
+The barcode's label still used a cut-start timestamp baked into a shape, so its time did not advance during playback.
+It now uses the same absolute-time vector painter as the other clocks, displaying `mm:ss.hh` with digit animation.
+`showTime` hides only its clock and `motion` adjusts the digit changes. A reserved label box keeps the barcode's
+placement independent of clock visibility, animation strength and minute rollovers. Existing bar geometry, placement,
+random pattern and loudness response remain intact. The duplicate static timestamp formatter and stroke font are
+removed now that all three time displays use the shared clock.
+
+Validation: 55 focused Node cases pass, including five new barcode regressions; eight Japanese/English native-browser
+cases cover playback, pause, reverse seeks, visibility, motion and real PNG export parity. Module checks and all six
+regenerated golden checks pass. Independent old/new review finds only 36 barcode frames changed out of 480, with
+444 byte-identical frames; all 240 plans retain their timing, part choices and unrelated parameters. Fourteen
+representative aspect/orientation cases preserve the barcode's original paths, world placement and opacity.
