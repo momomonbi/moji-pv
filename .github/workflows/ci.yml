@@ -102,7 +102,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install Playwright (Python; drives the runner's Google Chrome, no browser download)
-        run: python3 -m pip install --quiet playwright -r server/audio/requirements-test.txt
+        run: python3 -m pip install --quiet -r tests/browser/requirements.txt -r server/audio/requirements-test.txt
 
       - name: Google Chrome
         run: google-chrome --version

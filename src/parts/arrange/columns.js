@@ -320,25 +320,26 @@ MV.def('parts/arrange/columns', ['parts/kit'], (K) => {
     const v = env.orient === 'v';
     const left = p.side === 'left';
     const em = D.short * 0.07 * textStyle.scale;
-    const number = String(p.number || '').trim();
-    // The number is big, but never wider than a third of the frame.
-    const numEm = Math.min(D.short * p.size * textStyle.scale, (safe.w * 0.34) / (0.62 * Math.max(2, number.length)));
+    const timer = K.timecode.visible(p), weight = .14;
+    // Reserve a stable timer column; higher minute counts fit inside it rather than moving the lyric at a rollover.
+    const numEm = Math.min(D.short * p.size * textStyle.scale, (safe.w * .34) / K.timecode.width(K.timecode.RESERVE, 1, weight));
+    const timerW = timer ? K.timecode.width(K.timecode.RESERVE, numEm, weight) : 0, timerH = numEm * (1 + weight);
     const runs = [];
     const lines = [];
     if (v) {
       const colW = Math.min(safe.w * 0.4, em * 1.6 * 3);
       const colX = left ? safe.x : safe.x + safe.w - colW;
-      const top = safe.y + (number ? numEm * 1.25 : 0);
+      const top = safe.y + (timer ? timerH + em * .35 : 0);
       const main = sb.text(Object.assign({ parent: root.node, orient: 'v', size: em * 1.3,
         box: { x: colX, y: top, w: colW, h: safe.y + safe.h - top }, leading: 1.6, align: 'start', valign: left ? 'end' : 'start',
         maxLines: 3, breakAt: 'phrase', fit: 'shrink' }, part(s, [0, s.str.length])));
       runs.push(main);
       const mb = localBounds(sb, main.node, root);
-      if (number) {
-        const nw = Math.max(mb.w, numEm * 2.4);
-        const nb = { x: left ? safe.x : safe.x + safe.w - nw, y: safe.y, w: nw, h: numEm * 1.1 };
-        runs.push(numberRun(env, root, number, numEm, nb, left ? 'start' : 'end'));
-        const y = safe.y + numEm * 1.12;
+      if (timer) {
+        const nw = Math.max(mb.w, timerW);
+        const nb = { x: left ? safe.x : safe.x + safe.w - nw, y: safe.y, w: nw, h: timerH };
+        lines.push(K.timecode.paint(env, { parent: root.node, box: nb, size: numEm, weight, motion: p.motion, align: left ? 'start' : 'end' }));
+        const y = safe.y + timerH + em * .12;
         lines.push(hairline(env, root, left ? safe.x : mb.x + mb.w - Math.max(mb.w, em * 2), y,
           left ? safe.x + Math.max(mb.w, em * 2) : mb.x + mb.w, y, em));
       }
@@ -348,7 +349,7 @@ MV.def('parts/arrange/columns', ['parts/kit'], (K) => {
     } else {
       // The column takes at most a third of a wide frame, half of a square one, and more of a tall one.
       const share = D.h > D.w ? 0.6 : D.h >= D.w * 0.99 ? 0.5 : 0.34;
-      const numW = Math.max(number.length, 1) * numEm * 0.62;
+      const numW = timerW;
       const gap = em * 0.7;
       const room = safe.w - numW - gap * 2;
       const colW = Math.min(clamp(text.cells(s.str) * em * 0.6, em * 7, em * 9.5), safe.w * share, room);
@@ -361,10 +362,11 @@ MV.def('parts/arrange/columns', ['parts/kit'], (K) => {
         breakAt: 'phrase', fit: 'shrink' }, part(s, [0, s.str.length])));
       runs.push(main);
       const mb = localBounds(sb, main.node, root);
-      if (number) {
-        const nx = left ? safe.x : Math.max(safe.x, hairX - gap - numW * 1.3);
-        const ny = clamp(mb.y - numEm * 0.12, safe.y, safe.y + safe.h - numEm * 1.1);
-        runs.push(numberRun(env, root, number, numEm, { x: nx, y: ny, w: hairX - gap - nx, h: numEm * 1.1 }, 'end'));
+      if (timer) {
+        const nx = left ? safe.x : Math.max(safe.x, hairX - gap - numW);
+        const ny = clamp(mb.y - numEm * .12, safe.y, safe.y + safe.h - timerH);
+        lines.push(K.timecode.paint(env, { parent: root.node, box: { x: nx, y: ny, w: hairX - gap - nx, h: timerH },
+          size: numEm, weight, motion: p.motion, align: 'end' }));
       }
       lines.push(hairline(env, root, hairX, mb.y, hairX, mb.y + Math.max(mb.h, numEm * 0.85), em));
       if (s.note) {
@@ -374,32 +376,22 @@ MV.def('parts/arrange/columns', ['parts/kit'], (K) => {
       }
     }
     fadeWithText(env, lines);
-    // Decorations avoid the whole block: the column, the big number, the rule and the note (with the column alone as
-    // the focus, a bar code ran across the number and a tape strip over the rule).
+    // Decorations avoid the whole block: the lyric column, timer, rule and note.
     return finish(env, root, runs, sb.bounds(root.node));
-  }
-
-  function numberRun(env, root, number, numEm, box, align) {
-    return env.sb.text({ parent: root.node, text: number, orient: 'h', face: 'display', size: numEm, ink: 'accent', style: 'plain',
-      box, align, valign: 'start', maxLines: 1, breakAt: 'none', fit: 'shrink', tracking: -0.02 });
   }
 
   const sidebarIndex = K.arrange({
     key: 'sidebarIndex',
-    label: L('袖書き', 'Sidebar index'),
-    blurb: L('画面の端に細い段組、その横に大きな番号', 'A narrow column at one edge with a big index number beside the text'),
+    label: L('袖書き時計', 'Sidebar timer'),
+    blurb: L('画面の端の歌詞に、演奏中の時間を添える', 'A narrow lyric column with the current playback time beside it'),
     tags: ['serious', 'minimal'], family: 'edge',
     traits: { cells: [2, 40] },
     params: {
       side: { type: 'enum', of: ['left', 'right'], label: L('寄せる側', 'Side'), auto: { pick: ['left', 'right'], weights: [3, 2] } },
-      number: { type: 'text', max: 4, label: L('番号', 'Number'),
-        auto: {
-          fn: (f) => {
-            const n = Math.round(Math.min(0.99, Math.max(0, f.pos || 0)) * 100);
-            return n < 10 ? '0' + n : String(n);
-          },
-          why: L('曲の中の位置（%）を二桁の番号にする', 'The position in the song, as a two-digit percentage') } },
-      size: { type: 'num', min: 0.08, max: 0.4, step: 0.005, unit: 'frac', label: L('番号の大きさ', 'Number size'),
+      showTime: { type: 'bool', label: L('時計を表示', 'Show timer'), auto: { value: true } },
+      motion: { type: 'num', min: 0, max: 1, step: 0.01, label: L('数字の切り替え', 'Digit animation'), auto: { value: 1 } },
+      number: { type: 'text', max: 4, ai: false, label: L('旧表示', 'Legacy display'), auto: { value: '0:00' } },
+      size: { type: 'num', min: 0.08, max: 0.4, step: 0.005, unit: 'frac', label: L('時計の大きさ', 'Timer size'),
         auto: { range: [0.2, 0.32], follow: 'energy' } },
     },
     build: sidebarBuild,

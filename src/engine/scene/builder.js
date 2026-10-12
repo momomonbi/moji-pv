@@ -362,10 +362,12 @@ MV.def('engine/scene/builder', ['core/num', 'core/mat', 'core/script', 'core/med
 
     function paint(o) {
       if (!o || typeof o.draw !== 'function') throw new BuildError('bad-paint', 'sb.paint needs a draw(g, t, data, q) function');
+      if (o.box !== undefined && !isBoxLike(o.box)) throw new BuildError('bad-paint', 'sb.paint box needs finite x, y, w, h with nonnegative size');
       const rec = { draw: o.draw, data: o.data === undefined ? null : o.data, bleed: finite(o.bleed) ? o.bleed : 0.15,
-        animated: o.animated !== false };
-      const i = node(T.TYPE.paint, { layer: o.layer, owner: o.owner }, stores.paint.length, 0);
+        animated: o.animated !== false, ...(o.box ? { box: Object.freeze({ x: o.box.x, y: o.box.y, w: o.box.w, h: o.box.h }) } : {}) };
+      const i = node(T.TYPE.paint, o, stores.paint.length, o.box ? T.FLAG.pickable : 0);
       stores.paint.push(rec);
+      T.setBase(table, i, poseOf(o));
       return i;
     }
 
@@ -501,7 +503,9 @@ MV.def('engine/scene/builder', ['core/num', 'core/mat', 'core/script', 'core/med
         return true;
       }
       if (type === T.TYPE.paint) {
-        out[0] = 0; out[1] = 0; out[2] = D.w; out[3] = D.h;
+        const b = stores.paint[table.payload[j]].box;
+        out[0] = b ? b.x : 0; out[1] = b ? b.y : 0;
+        out[2] = b ? b.x + b.w : D.w; out[3] = b ? b.y + b.h : D.h;
         return true;
       }
       return false;

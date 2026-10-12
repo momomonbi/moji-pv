@@ -1,11 +1,11 @@
 {
  "registry": {
   "kind": "catalog",
-  "version": "0a2ec441"
+  "version": "dbcc84e2"
  },
  "measurer": "fake",
  "media": "fake",
- "plan": "2f890db9",
+ "plan": "52adf2f2",
  "frames": [
   "63deb859",
   "5c3bb2b5",
@@ -26,11 +26,11 @@
   "a400ecb6",
   "3abc971a",
   "da94337b",
-  "fb38ee31",
-  "28238876",
-  "ee9562ef",
-  "402df197",
-  "b6d7d2f5",
+  "40a590f7",
+  "b94c94eb",
+  "8562d542",
+  "b95468eb",
+  "57e2e300",
   "5716de0a",
   "2988bf56",
   "8d68cab1",

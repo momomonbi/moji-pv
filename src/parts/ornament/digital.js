@@ -88,11 +88,6 @@ MV.def('parts/ornament/digital', ['parts/kit'], (K) => {
     for (let j = 0; j < b.nodes.length; j++) P.rot[b.nodes[j]] += b.turn * k;
   }
 
-  // Node k is hidden until s + k·step (a typewriter for characters).
-  function runTypeOn(P, t, b) {
-    for (let k = 0; k < b.nodes.length; k++) if (t < b.s + k * b.step) P.alpha[b.nodes[k]] *= 0;
-  }
-
   // Bars shrink toward their base when the song is quiet: height × (1 − react · (1 − level) · weight[k]).
   function runBars(P, t, b) {
     const x = K.math.clamp((t - b.a) * LEVEL_HZ, 0, b.levels.length - 1);
@@ -249,26 +244,45 @@ MV.def('parts/ornament/digital', ['parts/kit'], (K) => {
 
   // --- serialMark -------------------------------------------------------------------------------------------------------
 
-  // The characters the stroke font can draw (a pinned number may hold anything); '00' when nothing is left.
-  function drawable(text) { return String(text).replace(/[^0-9:.-]/g, '') || '00'; }
+  // Choose an actual free band around the lyric, rather than clamping a label back into an occupied text block.
+  // Long minute counts shrink inside the reserved timer box; the placement does not change on a second rollover.
+  function timerPlace(env, f, p, weight) {
+    const D = env.D, m = D.safe, left = /Left$/.test(p.place), top = /^top/.test(p.place);
+    const x1 = D.w - m.r, y1 = D.h - m.b;
+    const bands = {
+      top: { x: m.l, y: m.t, w: x1 - m.l, h: Math.max(0, f.y - p.gap - m.t) },
+      bottom: { x: m.l, y: Math.max(m.t, f.y1 + p.gap), w: x1 - m.l, h: Math.max(0, y1 - f.y1 - p.gap) },
+      left: { x: m.l, y: m.t, w: Math.max(0, f.x - p.gap - m.l), h: y1 - m.t },
+      right: { x: Math.max(m.l, f.x1 + p.gap), y: m.t, w: Math.max(0, x1 - f.x1 - p.gap), h: y1 - m.t },
+    };
+    const order = [top ? 'top' : 'bottom', top ? 'bottom' : 'top', left ? 'left' : 'right', left ? 'right' : 'left'];
+    const units = K.timecode.width(K.timecode.RESERVE, 1, weight) + (p.rule ? 2.3 : 0);
+    let best = null;
+    for (const side of order) {
+      const band = bands[side], size = Math.min(p.size, band.w / units, band.h / (1 + weight));
+      if (size < 10 || (best && size <= best.size)) continue;
+      const w = units * size, h = size * (1 + weight);
+      const x = side === 'left' ? band.x + band.w - w : side === 'right' ? band.x
+        : K.math.clamp(left ? f.x : f.x1 - w, band.x, band.x + band.w - w);
+      const y = side === 'top' ? band.y + band.h - h : side === 'bottom' ? band.y
+        : K.math.clamp(f.cy - h / 2, band.y, band.y + band.h - h);
+      best = { x, y, w, h, size };
+      if (size === p.size) break;
+    }
+    return best;
+  }
 
   const serialMark = K.ornament({
     key: 'serialMark', scope: 'cut', follow: 'text',
-    label: { ja: '通し番号', en: 'Serial mark' },
-    blurb: { ja: '行の番号を小さな等幅数字で添える', en: 'The line number in small monospace digits' },
+    label: { ja: '演奏時計', en: 'Playback timer' },
+    blurb: { ja: '文字のそばで、現在の演奏時間を更新する', en: 'The current playback time, updated beside the lyric' },
     tags: ['minimal', 'digital'],
     traits: { roles: LYRIC_ROLES },
     params: {
-      // A decoration may not read the cut's line id or absolute time (the fingerprint covers neither), so, as for the
-      // sidebar composition's number, the auto is the line's place in the song; pin the row number to show it exactly.
-      number: { type: 'text', max: 8, label: { ja: '番号', en: 'Number' },
-        auto: {
-          fn: (f) => {
-            const n = Math.round(Math.min(0.99, Math.max(0, f.pos || 0)) * 100);
-            return n < 10 ? '0' + n : String(n);
-          },
-          why: { ja: '曲の中の位置（%）を二桁の番号にする', en: 'The position in the song, as a two-digit percentage' } } },
-      size: { type: 'num', min: 10, max: 80, step: 1, unit: 'du', label: { ja: '文字の高さ', en: 'Digit height' }, auto: { range: [30, 40] } },
+      showTime: { type: 'bool', label: { ja: '時計を表示', en: 'Show timer' }, auto: { value: true } },
+      motion: { type: 'num', min: 0, max: 1, step: 0.01, label: { ja: '数字の切り替え', en: 'Digit animation' }, auto: { value: 1 } },
+      number: { type: 'text', max: 8, ai: false, label: { ja: '旧表示', en: 'Legacy display' }, auto: { value: '0:00' } },
+      size: { type: 'num', min: 10, max: 80, step: 1, unit: 'du', label: { ja: '時計の大きさ', en: 'Timer size' }, auto: { range: [30, 40] } },
       place: { type: 'enum', of: ['topLeft', 'topRight', 'bottomLeft', 'bottomRight'], label: { ja: '位置', en: 'Place' },
         auto: { pick: ['topLeft', 'bottomRight', 'topRight', 'bottomLeft'], weights: [3, 2, 1, 1] } },
       rule: { type: 'bool', label: { ja: '線を添える', en: 'Rule' }, auto: { pick: [true, false], weights: [2, 1] } },
@@ -276,27 +290,19 @@ MV.def('parts/ornament/digital', ['parts/kit'], (K) => {
     },
     build(env, p) {
       const { sb, D } = env;
-      const f = focusOf(env), m = D.safe, text = drawable(p.number), size = p.size;
+      if (!K.timecode.visible(p)) return;
+      const f = focusOf(env), weight = .075, at = timerPlace(env, f, p, weight);
+      if (!at) return;
+      const size = at.size;
       const ruleLen = p.rule ? size * 1.8 : 0, lead = p.rule ? ruleLen + size * 0.5 : 0;
-      const w = lead + numberWidth(text, size);
-      let top = /^top/.test(p.place);
-      if (top && f.y - p.gap - size < m.t) top = false;
-      if (!top && f.y1 + p.gap + size > D.h - m.b) top = true;
-      const x = K.math.clamp(/Left$/.test(p.place) ? f.x : f.x1 - w, m.l, Math.max(m.l, D.w - m.r - w));
-      const y = K.math.clamp(top ? f.y - p.gap - size : f.y1 + p.gap, m.t, Math.max(m.t, D.h - m.b - size));
       const alpha = 0.6 + 0.4 * p.amount, width = Math.max(1.2, size * 0.1), s = entrance(env);
-      const g = sb.group({ layer: 'text', x, y, owner: env.owner });
-      const chars = [];
+      const g = sb.group({ layer: 'text', x: at.x, y: at.y, owner: env.owner });
       if (p.rule) {
         const rule = sb.group({ parent: g, layer: 'text', x: 0, y: size / 2, owner: env.owner });
         sb.shape({ parent: rule, layer: 'text', owner: env.owner, path: K.shape.line(0, 0, ruleLen, 0), stroke: p.ink, width, alpha });
         behave(env, runGrow, [rule], { axis: new Uint8Array(1), s: Float32Array.of(s), d: 0.3, steps: false, o: env.times.b, od: 1 });
       }
-      for (let c = 0; c < text.length; c++) {
-        chars.push(sb.shape({ parent: g, layer: 'text', owner: env.owner, path: numberPath(text[c], lead + (c * ADVANCE * size) / 4, 0, size),
-          stroke: p.ink, width, cap: 'square', alpha }));
-      }
-      behave(env, runTypeOn, chars, { s: s + 0.15, step: 0.07 });
+      K.timecode.paint(env, { parent: g, box: { x: lead, y: 0, w: at.w - lead, h: at.h }, size, weight, motion: p.motion, ink: p.ink, alpha });
     },
   });
 

@@ -406,21 +406,24 @@ test('hankoSeal carves a kanji of the emphasis, else the last kanji, else the fi
   assert.equal(sealGlyph('paper planes', []), 'P');
 });
 
-function serialChars(params, pos) {
+function serialTimer(params, pos) {
   const plan = sample('ornament', 'serialMark', { params });
   if (pos !== undefined) plan.cuts[0].feat.pos = pos;
   const scene = sceneOf(plan, def('ornament', 'serialMark'));
-  return scene.behaviours.find((b) => b.run.name === 'runTypeOn').nodes.length;
+  return scene.stores.paint.find((p) => p.data && p.data.kind === 'timer');
 }
 
-test('serialMark: the auto number is the line\'s place in the song (two digits); a pinned number is drawn as given', () => {
+test('serialMark keeps its saved key but replaces automatic and pinned numbers with a live playback timer', () => {
   const spec = REGISTRY.params('ornament', 'serialMark').find((x) => x.name === 'number').spec;
-  assert.equal(spec.auto.fn({ pos: 0.07 }), '07');
-  assert.equal(spec.auto.fn({ pos: 0.999 }), '99');
-  assert.equal(serialChars(undefined), 2);
-  assert.equal(serialChars({ number: '100' }), 3);
-  assert.equal(serialChars({ number: '07-2' }), 4);
-  assert.equal(serialChars({ number: 'No.7' }), 2, 'what the stroke font cannot draw is left out');
+  assert.equal(spec.auto.value, '0:00');
+  assert.equal(spec.ai, false);
+  const auto = serialTimer(undefined, 0.07);
+  assert.ok(auto && auto.animated);
+  assert.deepEqual(serialTimer(undefined, 0.999).data, auto.data, 'song position does not change the timer layout');
+  for (const number of ['100', '07-2', 'No.7']) {
+    assert.deepEqual(serialTimer({ number }).data, auto.data, 'legacy display is ignored: ' + number);
+  }
+  assert.equal(serialTimer({ showTime: false }), undefined, 'the explicit timer toggle hides it');
 });
 
 // DESIGN_2_1 §11.5.7: the image is an asset of the plan's media (a v2 text value such as 'asset:test' is no id), and the

@@ -1,6 +1,6 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-eB+0LYXXmFbBUovyBsVU5YCkFVBMP58dQuDjBjXvz2U=' 'wasm-unsafe-eval'; style-src 'sha256-Fy49fNzr9l0lyo6ZAGAcOvPUSG1U7eiwF+9E4r2Twy0=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://generativelanguage.googleapis.com https://api.anthropic.com https:; img-src data: blob:; media-src blob:; worker-src blob:; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-JiCmrcelLSA1M7EHvcq1duHFGtcapsPRAuQhkPwfxCw=' 'wasm-unsafe-eval'; style-src 'sha256-Fy49fNzr9l0lyo6ZAGAcOvPUSG1U7eiwF+9E4r2Twy0=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://generativelanguage.googleapis.com https://api.anthropic.com https:; img-src data: blob:; media-src blob:; worker-src blob:; base-uri 'none'; form-action 'none'">
 <title>Moji PV Maker</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -7141,10 +7141,32 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
       else if (k === 'sheet' && isObject(v)) put(k, fillMissing(v, sheetDefaults(doc)));
       else if (k === 'song' && isObject(v)) put(k, fillMissing(v, SONG_DEFAULTS));
       else if (k === 'materials' && isObject(v)) put(k, fillMissing(v, materialDefaults(v)));
+      else if (k === 'pins' && isObject(v)) put(k, timerVisibilityPins(v));
       // Saved works that predate the encoding choice keep native browser audio. New works explicitly start with
       // 'local', and both an explicit browser choice and an external server choice survive opening unchanged.
       else if (k === 'output' && isObject(v)) put(k, withKit(fillMissing(v, { ...base.output, audioEncoding: 'browser' })));
       else if (isObject(v) && isObject(base[k])) put(k, fillMissing(v, base[k]));
+    }
+    return out;
+  }
+
+  // A blank legacy scene number meant "hide it". Consume that intent once, so unpinning the new switch works later.
+  function timerVisibilityPins(pins) {
+    let out = pins;
+    for (const path of Object.keys(pins)) {
+      const pin = pins[path];
+      if (!isObject(pin) || typeof pin.v !== 'string') continue;
+      let parsed;
+      try { parsed = paths.parse(path); } catch (err) { continue; }
+      const part = parsed.part;
+      if (!part || part.param !== 'number' || !(
+        part.kind === 'arrange' && part.idx === null && part.key === 'sidebarIndex' && pin.v.trim() === ''
+        || part.kind === 'ornament' && part.idx !== null && part.key === 'serialMark' && pin.v === '')) continue;
+      const slot = paths.slotParamPath(part.kind, part.idx, part.key, 'showTime', false);
+      const timerPath = paths.format({ scope: parsed.scope, slot });
+      if (out === pins) out = { ...pins };
+      if (!Object.prototype.hasOwnProperty.call(pins, timerPath)) out[timerPath] = { ...pin, v: false };
+      delete out[path];
     }
     return out;
   }
@@ -24779,10 +24801,12 @@ MV.def('engine/scene/builder', ['core/num', 'core/mat', 'core/script', 'core/med
 
     function paint(o) {
       if (!o || typeof o.draw !== 'function') throw new BuildError('bad-paint', 'sb.paint needs a draw(g, t, data, q) function');
+      if (o.box !== undefined && !isBoxLike(o.box)) throw new BuildError('bad-paint', 'sb.paint box needs finite x, y, w, h with nonnegative size');
       const rec = { draw: o.draw, data: o.data === undefined ? null : o.data, bleed: finite(o.bleed) ? o.bleed : 0.15,
-        animated: o.animated !== false };
-      const i = node(T.TYPE.paint, { layer: o.layer, owner: o.owner }, stores.paint.length, 0);
+        animated: o.animated !== false, ...(o.box ? { box: Object.freeze({ x: o.box.x, y: o.box.y, w: o.box.w, h: o.box.h }) } : {}) };
+      const i = node(T.TYPE.paint, o, stores.paint.length, o.box ? T.FLAG.pickable : 0);
       stores.paint.push(rec);
+      T.setBase(table, i, poseOf(o));
       return i;
     }
 
@@ -24918,7 +24942,9 @@ MV.def('engine/scene/builder', ['core/num', 'core/mat', 'core/script', 'core/med
         return true;
       }
       if (type === T.TYPE.paint) {
-        out[0] = 0; out[1] = 0; out[2] = D.w; out[3] = D.h;
+        const b = stores.paint[table.payload[j]].box;
+        out[0] = b ? b.x : 0; out[1] = b ? b.y : 0;
+        out[2] = b ? b.x + b.w : D.w; out[3] = b ? b.y + b.h : D.h;
         return true;
       }
       return false;
@@ -27330,6 +27356,11 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
 
   function hasLayer(scene, L) { return nodesByLayer(scene)[L].length > 0; }
 
+  // Animated paints must remain live even when their containing layer asks for a static raster.
+  function hasAnimatedPaint(scene, L) {
+    return nodesByLayer(scene)[L].some((i) => scene.table.type[i] === TYPE.paint && scene.stores.paint[scene.table.payload[i]].animated);
+  }
+
   // Whether a layer of the scene holds a media node (never baked into a static raster, DESIGN_2_1 §11.5.10).
   const mediaLayers = new WeakMap();
   function mediaFlags(scene) {
@@ -27431,6 +27462,10 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
         }
         dc.font = null;
         dc.counts.paints++;
+        if (rec.box) {
+          const b = rec.box;
+          pickNode(dc, scene, i, VW, cutIndex, b.x, b.y, b.x + b.w, b.y + b.h);
+        }
       } else if (type === TYPE.particles) {
         const rec = stores.particles[t.payload[i]];
         dc.counts.particles += SH.drawParticles(g, rec, M, alpha, tl, inkOf(pal, rec.ink), dc.sprites, dc.face);
@@ -27480,7 +27515,7 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
     return n;
   }
 
-  return { createDrawContext, resetCounts, drawLayer, warmLayer, drawGlyph, hasLayer, hasMedia, hasStill, nodesByLayer, inkOf,
+  return { createDrawContext, resetCounts, drawLayer, warmLayer, drawGlyph, hasLayer, hasAnimatedPaint, hasMedia, hasStill, nodesByLayer, inkOf,
     secondInk, shaded, cssOf, clipReveal, minScaleOf, inkClip, INK_CLIP, glyphCover, poseCover, inkEm, STYLE_GLOW, GLOW_LEVEL };
 });
 /* 文字PVメーカー v2 — original work. Post stack: the FxContext, texture tiles, blurs and the ordered screen-effect passes (DESIGN §4.18.11, §4.19.2). */
@@ -28140,16 +28175,18 @@ MV.def('engine/render/record', ['core/hash', 'core/rng', 'core/noise', 'core/col
 
   function setMatrix(g, M) { g.setTransform(M[0], M[1], M[2], M[3], M[4], M[5]); }
 
-  // drawScene(g, scene, { scale = 1, cam = null, W, H, pal, backdrop = 'scene', tl = 0, draft = false }) draws an
+  // drawScene(g, scene, { scale = 1, cam = null, W, H, pal, backdrop = 'scene', t, tl = 0, draft = false }) draws an
   // evaluated scene (frame.evaluate) through any Ctx2D: every visible node in LAYERS order with the camera view per
   // layer. It is the simple, complete reference the Node tests use; the Canvas2D renderer (sprites, reveal clips, glow,
-  // post) is engine/render/renderer. Returns the number of nodes drawn.
+  // post) is engine/render/renderer. `t` is the absolute playback clock; supply it when a cached scene is reused for
+  // another cut. Independent scenes default to their build origin plus `tl`. Returns the number of nodes drawn.
   function drawScene(g, scene, opts) {
     const o = opts || {};
     if (!o.pal) throw new TypeError('drawScene needs opts.pal (the plan palette)');
     const table = scene.table;
     const pal = F.paletteFor(o.pal, o.backdrop || 'scene');
-    const q = { draft: !!o.draft, scale: o.scale || 1, pal, rgba: (ink, a) => C.rgba(inkOf(pal, ink), a),
+    const q = { draft: !!o.draft, scale: o.scale || 1, time: Number.isFinite(o.t) ? o.t : (scene.t0 || 0) + (o.tl || 0),
+      pal, rgba: (ink, a) => C.rgba(inkOf(pal, ink), a),
       tile: o.tile || (() => null) };
     let drawn = 0;
     for (let L = 0; L < T.LAYERS.length; L++) {
@@ -29444,7 +29481,7 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
     const picks = PK.createPickList();
     const statics = new Map();                     // static layers: scene → [raster per layer] (LRU)
     const errors = [];
-    const q = { draft: false, scale: 1, pal: null,                       // the paints' helpers (§4.17.3)
+    const q = { draft: false, scale: 1, pal: null, time: 0,              // the paints' helpers (§4.17.3)
       rgba: (ink, a) => C.rgba(DR.inkOf(q.pal, ink), a), tile: (name, seed) => tiles.tile(name, seed) };
     dc.q = q;
 
@@ -29678,7 +29715,7 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
     }
 
     function drawIsolated(g, it, Lk, spec) {
-      if (spec.cache === 'static' && !spec.mask && !spec.filter && !DR.hasMedia(it.scene, Lk)) {
+      if (spec.cache === 'static' && !spec.mask && !spec.filter && !DR.hasMedia(it.scene, Lk) && !DR.hasAnimatedPaint(it.scene, Lk)) {
         const r = staticRaster(it.scene, Lk, it);
         if (r) {
           const V = view(it.cam, Lk);
@@ -29982,6 +30019,9 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
       dc.probe = !exporting && ro.probe ? ro.probe : null;
       dc.meter = ro.meter && typeof ro.meter === 'object' ? ro.meter : null;
       q.draft = quality === 'draft' || (!exporting && level >= 2);
+      // A paint's callback t stays scene-local. q.time is the exact absolute timeline time of this frame; it does
+      // not depend on scene-cache origins, camera speed curves or the earlier pose drawn by a textAt ghost pass.
+      q.time = t;
       q.scale = dc.scale; q.pal = pal;
       lastLook.t = t; lastLook.scale = dc.scale; lastLook.backdrop = backdrop; lastLook.calm = evalOpts.calm;
       lastLook.glyphPath = dc.glyphPath; lastLook.probe = dc.probe;
@@ -30673,10 +30713,129 @@ MV.def('engine/scene/build', ['core/hash', 'core/rng', 'core/schema', 'engine/sc
 
   return { SAFE, designEnv, slotSeed, buildCut, buildGround, fallbackSlots };
 });
+/* 文字PVメーカー v2 — original work. Pure playback-time formatting and bounded vector timers, exposed to parts through parts/kit. */
+MV.def('parts/timecode', [], () => {
+  'use strict';
+
+  const ADVANCE = 3;
+  const RESERVE = '000:00.00';
+  const STROKES = Object.freeze({
+    '0': [[0, 0, 2, 0, 2, 4, 0, 4, 0, 0]],
+    '1': [[0, 1, 1, 0, 1, 4], [0, 4, 2, 4]],
+    '2': [[0, 0, 2, 0, 2, 2, 0, 2, 0, 4, 2, 4]],
+    '3': [[0, 0, 2, 0, 2, 4, 0, 4], [0, 2, 2, 2]],
+    '4': [[0, 0, 0, 2, 2, 2], [2, 0, 2, 4]],
+    '5': [[2, 0, 0, 0, 0, 2, 2, 2, 2, 4, 0, 4]],
+    '6': [[2, 0, 0, 0, 0, 4, 2, 4, 2, 2, 0, 2]],
+    '7': [[0, 0, 2, 0, 1, 4]],
+    '8': [[0, 0, 2, 0, 2, 4, 0, 4, 0, 0], [0, 2, 2, 2]],
+    '9': [[2, 2, 0, 2, 0, 0, 2, 0, 2, 4, 0, 4]],
+    ':': [[1, .9, 1, 1.3], [1, 2.7, 1, 3.1]],
+    '.': [[1, 3.6, 1, 4]],
+  });
+
+  function format(time) {
+    const raw = Number.isFinite(time) ? Math.min(Number.MAX_SAFE_INTEGER, Math.max(0, time)) : 0;
+    // Correct multiplication noise at an exact hundredth without rounding a genuinely earlier frame up.
+    // Split whole seconds first so a long duration does not overflow a safe integer when multiplied by 100.
+    let seconds = Math.floor(raw), hundredths = Math.floor((raw - seconds) * 100 + Math.min(1e-7, raw * Number.EPSILON * 400));
+    if (hundredths === 100) { seconds++; hundredths = 0; }
+    const pad = (n) => (n < 10 ? '0' : '') + n;
+    return pad(Math.floor(seconds / 60)) + ':' + pad(seconds % 60) + '.' + pad(hundredths);
+  }
+
+  function width(text, size, weight = .1) { return (((String(text).length * ADVANCE - 1) / 4) + weight) * size; }
+
+  function visible(params) { return !params || params.showTime !== false; }
+
+  // Each numeral rolls only when its own place changes: hundredths, tenths, seconds, tens of seconds, minutes …
+  // Its phase is reconstructed from the absolute timeline, with no remembered last frame or animation clock.
+  function digitState(time, index, text) {
+    const value = text || format(time), ch = value[index];
+    if (ch === ':' || ch === '.') return { ch, previous: null, progress: 1 };
+    const colon = value.indexOf(':'), dot = value.indexOf('.');
+    const period = index < colon ? 60 * Math.pow(10, colon - index - 1)
+      : index < dot ? Math.pow(10, dot - index - 1) : Math.pow(10, value.length - index - 1) / 100;
+    const raw = Number.isFinite(time) ? Math.min(Number.MAX_SAFE_INTEGER, Math.max(0, time)) : 0;
+    const tick = Math.floor((raw + Math.min(1e-9, raw * Number.EPSILON * 4)) / period);
+    const duration = Math.min(period * .65, .28), elapsed = Math.max(0, raw - tick * period);
+    const progress = Math.min(1, elapsed / duration);
+    const before = tick > 0 && progress < 1 ? format((tick - 1) * period) : '';
+    const previous = before[before.length - value.length + index];
+    return { ch, previous: previous && previous !== ch ? previous : null, progress };
+  }
+
+  function digitPath(g, ch, cx, cy, unit, sx = 1, sy = 1, rot = 0) {
+    const cos = Math.cos(rot), sin = Math.sin(rot);
+    for (const line of STROKES[ch] || []) for (let k = 0; k < line.length; k += 2) {
+      const dx = (line[k] - 1) * unit * sx, dy = (line[k + 1] - 2) * unit * sy;
+      const x = cx + dx * cos - dy * sin, y = cy + dx * sin + dy * cos;
+      if (k) g.lineTo(x, y); else g.moveTo(x, y);
+    }
+  }
+
+  // Displayed time comes exclusively from q.time, the actual frame time:
+  // reused scenes, speed curves, backward seeks and post-effect ghost passes cannot reset or warp this timer.
+  // The owning part fades the node in the scene table, so drawing and hit testing share the same visibility.
+  function draw(g, t, data, q) {
+    const alpha = data.alpha;
+    if (alpha <= 0) return;
+    const text = format(q.time), box = data.box;
+    const units = (text.length * ADVANCE - 1) / 4;
+    const motion = Number.isFinite(data.motion) ? Math.min(1, Math.max(0, data.motion)) : 0;
+    const size = Math.min(data.size, box.w / (units + data.weight + motion * .34), box.h / (1 + data.weight + motion * .34));
+    if (!(size > 0)) return;
+    const stroke = size * data.weight, pad = stroke / 2, inkWidth = units * size;
+    const x = data.align === 'end' ? box.x + box.w - inkWidth - pad : data.align === 'center'
+      ? box.x + (box.w - inkWidth) / 2 : box.x + pad;
+    const y = box.y + (box.h - size) / 2;
+    g.globalAlpha *= alpha;
+    g.strokeStyle = q.rgba(data.ink, 1);
+    g.lineWidth = stroke;
+    g.lineCap = 'round'; g.lineJoin = 'round';
+    const u = size / 4;
+    if (motion) {
+      g.save(); g.beginPath(); g.rect(box.x, box.y, box.w, box.h); g.clip();
+      const mainAlpha = g.globalAlpha;
+      for (let c = 0; c < text.length; c++) {
+        const digit = digitState(q.time, c, text), p = digit.progress;
+        if (!digit.previous) continue;
+        g.globalAlpha = mainAlpha * motion * .22 * (1 - p) * (1 - p);
+        g.beginPath();
+        digitPath(g, digit.previous, x + (c * ADVANCE + 1) * u, y + size / 2 + size * (.14 + p * .25),
+          u, 1, .82 - p * .18, motion * .12 * (1 - p));
+        g.stroke();
+      }
+      g.globalAlpha = mainAlpha;
+    }
+    g.beginPath();
+    for (let c = 0; c < text.length; c++) {
+      const digit = motion ? digitState(q.time, c, text) : null;
+      const p = digit && digit.previous ? digit.progress : 1;
+      const flip = (1 - p) * motion, bounce = Math.sin(p * Math.PI * 2) * (1 - p) * motion;
+      digitPath(g, text[c], x + (c * ADVANCE + 1) * u, y + size / 2 - size * .14 * bounce,
+        u, 1 + flip * .08, 1 - flip * .42, bounce * .18);
+    }
+    g.stroke();
+    if (motion) g.restore();
+  }
+
+  function paint(env, opts) {
+    const o = opts || {}, box = o.box;
+    if (!box || !(box.w > 0 && box.h > 0)) return null;
+    const pin = env.cut && env.cut.els && env.cut.els[env.owner];
+    const data = { kind: 'timer', box: { x: box.x, y: box.y, w: box.w, h: box.h }, size: o.size,
+      ink: pin && pin.fill || o.ink || 'accent', align: o.align || 'start', alpha: o.alpha === undefined ? 1 : o.alpha,
+      weight: o.weight === undefined ? .1 : o.weight, motion: o.motion === undefined ? 1 : o.motion };
+    return env.sb.paint({ parent: o.parent, layer: 'text', owner: env.owner, box: data.box, bleed: 0, animated: true, draw, data });
+  }
+
+  return { format, width, visible, digitState, draw, paint, RESERVE };
+});
 /* 文字PVメーカー v2 — original work. The part kit: definition helpers, motion builders and helpers for part authors (DESIGN §4.18.3; DESIGN_2_1 §3.11, §11.5.6). */
 MV.def('parts/kit', ['core/num', 'core/noise', 'core/ease', 'core/curve', 'core/color', 'core/schema', 'core/registry',
-  'core/media', 'engine/scene/behave', 'engine/scene/stagger', 'engine/scene/builder', 'engine/scene/shot', 'engine/scene/frame'],
-(N, NZ, E, CV, C, SCH, REG, MEDIA, BH, STG, B, SHOT, F) => {
+  'core/media', 'engine/scene/behave', 'engine/scene/stagger', 'engine/scene/builder', 'engine/scene/shot', 'engine/scene/frame', 'parts/timecode'],
+(N, NZ, E, CV, C, SCH, REG, MEDIA, BH, STG, B, SHOT, F, TIMECODE) => {
   'use strict';
 
   // Parts depend on this module only. The helpers stamp `kind`, fill defaults and check the essentials; they never
@@ -31271,7 +31430,7 @@ MV.def('parts/kit', ['core/num', 'core/noise', 'core/ease', 'core/curve', 'core/
     ornament: KINDS.ornament, lens: KINDS.lens, filter: KINDS.filter, seam: KINDS.seam, theme: KINDS.theme, mood: KINDS.mood,
     variant, mirror, moves, perGlyph, perGlyphHold,
     PH: BH.PH, ORDERS: SCH.ORDERS, EASES: E.EASES, ease, staggerOf: STG.staggerOf, pivots: STG.pivots,
-    shape, math, color, pickOf, rangeOf, KitError,
+    shape, math, color, pickOf, rangeOf, KitError, timecode: TIMECODE,
     curve, warp, CURVES: CV.PRESET_KEYS, warped: BH.warped, aimBox, frameBox,
     media, mediaParams, MEDIA: MEDIA_KIT, runKenBurns, depthCam,
   };
@@ -33097,25 +33256,26 @@ MV.def('parts/arrange/columns', ['parts/kit'], (K) => {
     const v = env.orient === 'v';
     const left = p.side === 'left';
     const em = D.short * 0.07 * textStyle.scale;
-    const number = String(p.number || '').trim();
-    // The number is big, but never wider than a third of the frame.
-    const numEm = Math.min(D.short * p.size * textStyle.scale, (safe.w * 0.34) / (0.62 * Math.max(2, number.length)));
+    const timer = K.timecode.visible(p), weight = .14;
+    // Reserve a stable timer column; higher minute counts fit inside it rather than moving the lyric at a rollover.
+    const numEm = Math.min(D.short * p.size * textStyle.scale, (safe.w * .34) / K.timecode.width(K.timecode.RESERVE, 1, weight));
+    const timerW = timer ? K.timecode.width(K.timecode.RESERVE, numEm, weight) : 0, timerH = numEm * (1 + weight);
     const runs = [];
     const lines = [];
     if (v) {
       const colW = Math.min(safe.w * 0.4, em * 1.6 * 3);
       const colX = left ? safe.x : safe.x + safe.w - colW;
-      const top = safe.y + (number ? numEm * 1.25 : 0);
+      const top = safe.y + (timer ? timerH + em * .35 : 0);
       const main = sb.text(Object.assign({ parent: root.node, orient: 'v', size: em * 1.3,
         box: { x: colX, y: top, w: colW, h: safe.y + safe.h - top }, leading: 1.6, align: 'start', valign: left ? 'end' : 'start',
         maxLines: 3, breakAt: 'phrase', fit: 'shrink' }, part(s, [0, s.str.length])));
       runs.push(main);
       const mb = localBounds(sb, main.node, root);
-      if (number) {
-        const nw = Math.max(mb.w, numEm * 2.4);
-        const nb = { x: left ? safe.x : safe.x + safe.w - nw, y: safe.y, w: nw, h: numEm * 1.1 };
-        runs.push(numberRun(env, root, number, numEm, nb, left ? 'start' : 'end'));
-        const y = safe.y + numEm * 1.12;
+      if (timer) {
+        const nw = Math.max(mb.w, timerW);
+        const nb = { x: left ? safe.x : safe.x + safe.w - nw, y: safe.y, w: nw, h: timerH };
+        lines.push(K.timecode.paint(env, { parent: root.node, box: nb, size: numEm, weight, motion: p.motion, align: left ? 'start' : 'end' }));
+        const y = safe.y + timerH + em * .12;
         lines.push(hairline(env, root, left ? safe.x : mb.x + mb.w - Math.max(mb.w, em * 2), y,
           left ? safe.x + Math.max(mb.w, em * 2) : mb.x + mb.w, y, em));
       }
@@ -33125,7 +33285,7 @@ MV.def('parts/arrange/columns', ['parts/kit'], (K) => {
     } else {
       // The column takes at most a third of a wide frame, half of a square one, and more of a tall one.
       const share = D.h > D.w ? 0.6 : D.h >= D.w * 0.99 ? 0.5 : 0.34;
-      const numW = Math.max(number.length, 1) * numEm * 0.62;
+      const numW = timerW;
       const gap = em * 0.7;
       const room = safe.w - numW - gap * 2;
       const colW = Math.min(clamp(text.cells(s.str) * em * 0.6, em * 7, em * 9.5), safe.w * share, room);
@@ -33138,10 +33298,11 @@ MV.def('parts/arrange/columns', ['parts/kit'], (K) => {
         breakAt: 'phrase', fit: 'shrink' }, part(s, [0, s.str.length])));
       runs.push(main);
       const mb = localBounds(sb, main.node, root);
-      if (number) {
-        const nx = left ? safe.x : Math.max(safe.x, hairX - gap - numW * 1.3);
-        const ny = clamp(mb.y - numEm * 0.12, safe.y, safe.y + safe.h - numEm * 1.1);
-        runs.push(numberRun(env, root, number, numEm, { x: nx, y: ny, w: hairX - gap - nx, h: numEm * 1.1 }, 'end'));
+      if (timer) {
+        const nx = left ? safe.x : Math.max(safe.x, hairX - gap - numW);
+        const ny = clamp(mb.y - numEm * .12, safe.y, safe.y + safe.h - timerH);
+        lines.push(K.timecode.paint(env, { parent: root.node, box: { x: nx, y: ny, w: hairX - gap - nx, h: timerH },
+          size: numEm, weight, motion: p.motion, align: 'end' }));
       }
       lines.push(hairline(env, root, hairX, mb.y, hairX, mb.y + Math.max(mb.h, numEm * 0.85), em));
       if (s.note) {
@@ -33151,32 +33312,22 @@ MV.def('parts/arrange/columns', ['parts/kit'], (K) => {
       }
     }
     fadeWithText(env, lines);
-    // Decorations avoid the whole block: the column, the big number, the rule and the note (with the column alone as
-    // the focus, a bar code ran across the number and a tape strip over the rule).
+    // Decorations avoid the whole block: the lyric column, timer, rule and note.
     return finish(env, root, runs, sb.bounds(root.node));
-  }
-
-  function numberRun(env, root, number, numEm, box, align) {
-    return env.sb.text({ parent: root.node, text: number, orient: 'h', face: 'display', size: numEm, ink: 'accent', style: 'plain',
-      box, align, valign: 'start', maxLines: 1, breakAt: 'none', fit: 'shrink', tracking: -0.02 });
   }
 
   const sidebarIndex = K.arrange({
     key: 'sidebarIndex',
-    label: L('袖書き', 'Sidebar index'),
-    blurb: L('画面の端に細い段組、その横に大きな番号', 'A narrow column at one edge with a big index number beside the text'),
+    label: L('袖書き時計', 'Sidebar timer'),
+    blurb: L('画面の端の歌詞に、演奏中の時間を添える', 'A narrow lyric column with the current playback time beside it'),
     tags: ['serious', 'minimal'], family: 'edge',
     traits: { cells: [2, 40] },
     params: {
       side: { type: 'enum', of: ['left', 'right'], label: L('寄せる側', 'Side'), auto: { pick: ['left', 'right'], weights: [3, 2] } },
-      number: { type: 'text', max: 4, label: L('番号', 'Number'),
-        auto: {
-          fn: (f) => {
-            const n = Math.round(Math.min(0.99, Math.max(0, f.pos || 0)) * 100);
-            return n < 10 ? '0' + n : String(n);
-          },
-          why: L('曲の中の位置（%）を二桁の番号にする', 'The position in the song, as a two-digit percentage') } },
-      size: { type: 'num', min: 0.08, max: 0.4, step: 0.005, unit: 'frac', label: L('番号の大きさ', 'Number size'),
+      showTime: { type: 'bool', label: L('時計を表示', 'Show timer'), auto: { value: true } },
+      motion: { type: 'num', min: 0, max: 1, step: 0.01, label: L('数字の切り替え', 'Digit animation'), auto: { value: 1 } },
+      number: { type: 'text', max: 4, ai: false, label: L('旧表示', 'Legacy display'), auto: { value: '0:00' } },
+      size: { type: 'num', min: 0.08, max: 0.4, step: 0.005, unit: 'frac', label: L('時計の大きさ', 'Timer size'),
         auto: { range: [0.2, 0.32], follow: 'energy' } },
     },
     build: sidebarBuild,
@@ -42818,11 +42969,6 @@ MV.def('parts/ornament/digital', ['parts/kit'], (K) => {
     for (let j = 0; j < b.nodes.length; j++) P.rot[b.nodes[j]] += b.turn * k;
   }
 
-  // Node k is hidden until s + k·step (a typewriter for characters).
-  function runTypeOn(P, t, b) {
-    for (let k = 0; k < b.nodes.length; k++) if (t < b.s + k * b.step) P.alpha[b.nodes[k]] *= 0;
-  }
-
   // Bars shrink toward their base when the song is quiet: height × (1 − react · (1 − level) · weight[k]).
   function runBars(P, t, b) {
     const x = K.math.clamp((t - b.a) * LEVEL_HZ, 0, b.levels.length - 1);
@@ -42979,26 +43125,45 @@ MV.def('parts/ornament/digital', ['parts/kit'], (K) => {
 
   // --- serialMark -------------------------------------------------------------------------------------------------------
 
-  // The characters the stroke font can draw (a pinned number may hold anything); '00' when nothing is left.
-  function drawable(text) { return String(text).replace(/[^0-9:.-]/g, '') || '00'; }
+  // Choose an actual free band around the lyric, rather than clamping a label back into an occupied text block.
+  // Long minute counts shrink inside the reserved timer box; the placement does not change on a second rollover.
+  function timerPlace(env, f, p, weight) {
+    const D = env.D, m = D.safe, left = /Left$/.test(p.place), top = /^top/.test(p.place);
+    const x1 = D.w - m.r, y1 = D.h - m.b;
+    const bands = {
+      top: { x: m.l, y: m.t, w: x1 - m.l, h: Math.max(0, f.y - p.gap - m.t) },
+      bottom: { x: m.l, y: Math.max(m.t, f.y1 + p.gap), w: x1 - m.l, h: Math.max(0, y1 - f.y1 - p.gap) },
+      left: { x: m.l, y: m.t, w: Math.max(0, f.x - p.gap - m.l), h: y1 - m.t },
+      right: { x: Math.max(m.l, f.x1 + p.gap), y: m.t, w: Math.max(0, x1 - f.x1 - p.gap), h: y1 - m.t },
+    };
+    const order = [top ? 'top' : 'bottom', top ? 'bottom' : 'top', left ? 'left' : 'right', left ? 'right' : 'left'];
+    const units = K.timecode.width(K.timecode.RESERVE, 1, weight) + (p.rule ? 2.3 : 0);
+    let best = null;
+    for (const side of order) {
+      const band = bands[side], size = Math.min(p.size, band.w / units, band.h / (1 + weight));
+      if (size < 10 || (best && size <= best.size)) continue;
+      const w = units * size, h = size * (1 + weight);
+      const x = side === 'left' ? band.x + band.w - w : side === 'right' ? band.x
+        : K.math.clamp(left ? f.x : f.x1 - w, band.x, band.x + band.w - w);
+      const y = side === 'top' ? band.y + band.h - h : side === 'bottom' ? band.y
+        : K.math.clamp(f.cy - h / 2, band.y, band.y + band.h - h);
+      best = { x, y, w, h, size };
+      if (size === p.size) break;
+    }
+    return best;
+  }
 
   const serialMark = K.ornament({
     key: 'serialMark', scope: 'cut', follow: 'text',
-    label: { ja: '通し番号', en: 'Serial mark' },
-    blurb: { ja: '行の番号を小さな等幅数字で添える', en: 'The line number in small monospace digits' },
+    label: { ja: '演奏時計', en: 'Playback timer' },
+    blurb: { ja: '文字のそばで、現在の演奏時間を更新する', en: 'The current playback time, updated beside the lyric' },
     tags: ['minimal', 'digital'],
     traits: { roles: LYRIC_ROLES },
     params: {
-      // A decoration may not read the cut's line id or absolute time (the fingerprint covers neither), so, as for the
-      // sidebar composition's number, the auto is the line's place in the song; pin the row number to show it exactly.
-      number: { type: 'text', max: 8, label: { ja: '番号', en: 'Number' },
-        auto: {
-          fn: (f) => {
-            const n = Math.round(Math.min(0.99, Math.max(0, f.pos || 0)) * 100);
-            return n < 10 ? '0' + n : String(n);
-          },
-          why: { ja: '曲の中の位置（%）を二桁の番号にする', en: 'The position in the song, as a two-digit percentage' } } },
-      size: { type: 'num', min: 10, max: 80, step: 1, unit: 'du', label: { ja: '文字の高さ', en: 'Digit height' }, auto: { range: [30, 40] } },
+      showTime: { type: 'bool', label: { ja: '時計を表示', en: 'Show timer' }, auto: { value: true } },
+      motion: { type: 'num', min: 0, max: 1, step: 0.01, label: { ja: '数字の切り替え', en: 'Digit animation' }, auto: { value: 1 } },
+      number: { type: 'text', max: 8, ai: false, label: { ja: '旧表示', en: 'Legacy display' }, auto: { value: '0:00' } },
+      size: { type: 'num', min: 10, max: 80, step: 1, unit: 'du', label: { ja: '時計の大きさ', en: 'Timer size' }, auto: { range: [30, 40] } },
       place: { type: 'enum', of: ['topLeft', 'topRight', 'bottomLeft', 'bottomRight'], label: { ja: '位置', en: 'Place' },
         auto: { pick: ['topLeft', 'bottomRight', 'topRight', 'bottomLeft'], weights: [3, 2, 1, 1] } },
       rule: { type: 'bool', label: { ja: '線を添える', en: 'Rule' }, auto: { pick: [true, false], weights: [2, 1] } },
@@ -43006,27 +43171,19 @@ MV.def('parts/ornament/digital', ['parts/kit'], (K) => {
     },
     build(env, p) {
       const { sb, D } = env;
-      const f = focusOf(env), m = D.safe, text = drawable(p.number), size = p.size;
+      if (!K.timecode.visible(p)) return;
+      const f = focusOf(env), weight = .075, at = timerPlace(env, f, p, weight);
+      if (!at) return;
+      const size = at.size;
       const ruleLen = p.rule ? size * 1.8 : 0, lead = p.rule ? ruleLen + size * 0.5 : 0;
-      const w = lead + numberWidth(text, size);
-      let top = /^top/.test(p.place);
-      if (top && f.y - p.gap - size < m.t) top = false;
-      if (!top && f.y1 + p.gap + size > D.h - m.b) top = true;
-      const x = K.math.clamp(/Left$/.test(p.place) ? f.x : f.x1 - w, m.l, Math.max(m.l, D.w - m.r - w));
-      const y = K.math.clamp(top ? f.y - p.gap - size : f.y1 + p.gap, m.t, Math.max(m.t, D.h - m.b - size));
       const alpha = 0.6 + 0.4 * p.amount, width = Math.max(1.2, size * 0.1), s = entrance(env);
-      const g = sb.group({ layer: 'text', x, y, owner: env.owner });
-      const chars = [];
+      const g = sb.group({ layer: 'text', x: at.x, y: at.y, owner: env.owner });
       if (p.rule) {
         const rule = sb.group({ parent: g, layer: 'text', x: 0, y: size / 2, owner: env.owner });
         sb.shape({ parent: rule, layer: 'text', owner: env.owner, path: K.shape.line(0, 0, ruleLen, 0), stroke: p.ink, width, alpha });
         behave(env, runGrow, [rule], { axis: new Uint8Array(1), s: Float32Array.of(s), d: 0.3, steps: false, o: env.times.b, od: 1 });
       }
-      for (let c = 0; c < text.length; c++) {
-        chars.push(sb.shape({ parent: g, layer: 'text', owner: env.owner, path: numberPath(text[c], lead + (c * ADVANCE * size) / 4, 0, size),
-          stroke: p.ink, width, cap: 'square', alpha }));
-      }
-      behave(env, runTypeOn, chars, { s: s + 0.15, step: 0.07 });
+      K.timecode.paint(env, { parent: g, box: { x: lead, y: 0, w: at.w - lead, h: at.h }, size, weight, motion: p.motion, ink: p.ink, alpha });
     },
   });
 
@@ -64560,9 +64717,12 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
 
     // paramFields(kind, idx, partKey, registry, { shared, part, section, scopes }) → generated FieldSpecs for the
     // parameters of a part (shared ones by `kind.param`, own ones by `kind@key.param`). partKey null → shared only.
+    // Scene number values stay readable in saved works; timer visibility replaces their editable text field.
+    const LEGACY_TIMER_NUMBERS = new Set(['arrange@sidebarIndex.number', 'ornament@serialMark.number',
+      ...[0, 1, 2].map((i) => 'ornament#' + i + '@serialMark.number')]);
     // Params kept for saved documents but no longer offered: the interlude effects' 表現の強さ (自動 follows the song).
     const HIDDEN_PARAMS = new Set(['lightMotes', 'soundHorizon', 'kineticShapes', 'neonWave', 'ringPulse', 'warpField', 'tileRipple',
-      'burstBloom', 'harmonicString', 'ridgeLines', 'polarWave', 'peakBars'].map((key) => 'arrange@' + key + '.shape'));
+      'burstBloom', 'harmonicString', 'ridgeLines', 'polarWave', 'peakBars'].map((key) => 'arrange@' + key + '.shape').concat([...LEGACY_TIMER_NUMBERS]));
 
     function paramFields(kind, idx, partKey, registry, o) {
       const opt = o || {};
@@ -64747,7 +64907,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
       for (const path of Object.keys(pins || {})) {
         const i = path.indexOf(':');
         const slot = path.slice(i + 1);
-        if (want.has(path.slice(0, i)) && slot.includes('@') && slot.includes('.')) out.add(slot);
+        if (want.has(path.slice(0, i)) && slot.includes('@') && slot.includes('.') && !LEGACY_TIMER_NUMBERS.has(slot)) out.add(slot);
       }
       return out;
     }
@@ -64797,7 +64957,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
           while (at < s.fields.length && s.fields[at].param && s.fields[at].param.kind === f.kind && s.fields[at].param.idx === idx) at++;
           for (const slot of [...(set || [])].sort()) {
             const part = partOfSlot(slot);
-            if (shown.has(slot) || !matches(part, f.kind, idx)) continue;
+            if (shown.has(slot) || LEGACY_TIMER_NUMBERS.has(slot) || !matches(part, f.kind, idx)) continue;
             const where = { section: s.id, page: ctx.page, scopes: f.scopes, flags: f.firstCut ? { firstCut: true } : {} };
             s.fields.splice(at++, 0, pinnedParamField(part, slot, where, ctx.registry));
             shown.add(slot);
@@ -64806,7 +64966,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
         for (const want of s.params || []) {
           for (const slot of [...(pinned.page || [])].sort()) {
             const part = partOfSlot(slot);
-            if (shown.has(slot) || !matches(part, want.kind, null)) continue;
+            if (shown.has(slot) || LEGACY_TIMER_NUMBERS.has(slot) || !matches(part, want.kind, null)) continue;
             const where = { section: s.id, page: ctx.page, scopes: ALL, flags: { group: want.kind } };
             s.fields.push(pinnedParamField(part, slot, where, ctx.registry));
             shown.add(slot);

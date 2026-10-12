@@ -71,6 +71,12 @@ configured server. Deployment and connection instructions: [server/audio/README.
 To lay the lyrics over other footage, Transparent video (WebM) is recommended; PNG sequences suit After Effects and
 similar.
 
+**Sidebar timer** and **Playback timer** show the current playback time as `01:23.45` (minutes, seconds and hundredths)
+in place of lyric numbers, with flip, bounce and trailing-digit animation when the digits change.
+Adjust the strength with **Digit animation**; set it to 0 for stationary digits.
+They follow pause, seek and export without resetting at each line. Turn **Show timer** off in the detail panel to
+hide them. Existing projects keep the same part keys; a previously blank number is migrated to a hidden timer.
+
 For MP4, transparent video and the Filmora set, Chrome or Edge on a computer is recommended (they use WebCodecs).
 
 ## AI assist (optional)
@@ -103,7 +109,8 @@ audio to your configured server only when you choose external audio conversion.
 
 ## Development
 
-Normal builds and Node tests use Python 3.11 and Node 22. Browser tests use Playwright; audio server tests also use
+Normal builds and Node tests use Python 3.11 and Node 22. Browser tests use Playwright and Pillow from
+`tests/browser/requirements.txt`; audio server tests also use
 `server/audio/requirements-test.txt` and FFmpeg. The distributed WASM files in `vendor/ffmpeg/` are reused by normal builds.
 
 ```

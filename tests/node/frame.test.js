@@ -55,12 +55,12 @@ function drawFrame(g, plan, scenes, t, scale) {
   for (const c of fg.cuts) { F.evaluate(scenes.cuts[c.i], c.tl); cam = F.cameraAt(scenes.cuts[c.i], plan, t); }
   for (const e of fg.grounds) {
     F.evaluate(scenes.grounds[e.i], e.tl);
-    R.drawScene(g, scenes.grounds[e.i], { scale, cam, W, H: Hh, pal: plan.look.palette, tl: e.tl });
+    R.drawScene(g, scenes.grounds[e.i], { scale, cam, W, H: Hh, pal: plan.look.palette, t, tl: e.tl });
   }
   for (const c of fg.cuts) {
     const sc = scenes.cuts[c.i];
     F.evaluate(sc, c.tl);
-    R.drawScene(g, sc, { scale, cam: F.cameraAt(sc, plan, t), W, H: Hh, pal: plan.look.palette, tl: c.tl });
+    R.drawScene(g, sc, { scale, cam: F.cameraAt(sc, plan, t), W, H: Hh, pal: plan.look.palette, t, tl: c.tl });
   }
   return fg;
 }

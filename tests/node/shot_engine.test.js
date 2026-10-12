@@ -12,6 +12,7 @@ const SHOT = MV.use('core/shot');
 const MAT = MV.use('core/mat');
 const FAC = MV.use('engine/facade');
 const BUILD = MV.use('engine/scene/build');
+const T = MV.use('engine/scene/table');
 const F = MV.use('engine/scene/frame');
 const SS = MV.use('engine/scene/shot');
 const STG = MV.use('engine/scene/stagger');
@@ -212,37 +213,46 @@ test('snapZoom and pushWord on a line without emphasis keep every word on-frame 
   }
 });
 
-// An arrange may lay out text of its own beside the lyric (sidebarIndex's index number, a side note). Word, line and
-// glyph aims pick the lyric only: in step (b) of the goldens pushWord and snapZoom aimed at the number '03' as the
-// last word, and the lyric left the frame (NOTES "Step (b): automatic camerawork").
-test("aims never pick an arrange's own text (sidebarIndex's number): word, line and glyph aims stay on the lyric", () => {
-  const plan = FAC.samplePlan(REG, { kind: 'arrange', key: 'sidebarIndex', params: { number: '03', side: 'right', size: 0.3 } },
+// The sidebar's timer belongs to the composition, while word, line and glyph aims follow the sung lyric.
+test('sidebar timer is included in block focus but never becomes a word, line or glyph camera aim', () => {
+  const plan = FAC.samplePlan(REG, { kind: 'arrange', key: 'sidebarIndex', params: { showTime: true, side: 'right', size: 0.3 } },
     { text: TEXTS.three, aspect: '16:9' });
   const cut = plan.cuts[0];
   const svc = { registry: REG, text: createTextService({ measurer: fakeMeasurer(), faces: plan.look.faces }), strict: true };
-  const t = BUILD.buildCut(cut, plan, svc).target;
+  const scene = BUILD.buildCut(cut, plan, svc), t = scene.target;
+  const timerIndex = scene.stores.paint.findIndex((p) => p.data && p.data.kind === 'timer');
+  assert.ok(timerIndex >= 0, 'the composition contains an animated timer paint');
+  const timer = scene.stores.paint[timerIndex];
+  assert.equal(timer.animated, true);
+  const timerNode = scene.table.type.findIndex((type, i) => type === T.TYPE.paint && scene.table.payload[i] === timerIndex);
+  const world = T.restWorld(scene.table).m.subarray(timerNode * 6, timerNode * 6 + 6);
+  const tb = timer.box, corners = new Float32Array(8);
+  MAT.quad(corners, world, tb.x, tb.y, tb.x + tb.w, tb.y + tb.h);
+  const timerCentre = MAT.apply(world, tb.x + tb.w / 2, tb.y + tb.h / 2, new Float32Array(2));
   const env = { D: plan.design };
   const lyric = (j) => !!t.runs[t.unitOf.run[j]].spec.span;
   const n = t.to - t.from;
-  const number = [], words = [];
+  const extras = [], words = [];
   for (let j = 0; j < n; j++) {
     if (t.cls[j] === 'space') continue;
-    if (lyric(j)) words.push(j); else number.push(j);
+    if (lyric(j)) words.push(j); else extras.push(j);
   }
-  assert.deepEqual(number.map((j) => t.ch[j]), ['0', '3'], 'the index number is a run of its own');
+  assert.deepEqual(extras, [], 'timer digits are absent from the lyric’s text units');
+  const holds = (b, x, y) => x >= b.x - 1e-4 && x <= b.x + b.w + 1e-4 && y >= b.y - 1e-4 && y <= b.y + b.h + 1e-4;
   const inside = (b, j) => { const cx = (t.box[j * 4] + t.box[j * 4 + 2]) / 2, cy = (t.box[j * 4 + 1] + t.box[j * 4 + 3]) / 2;
     return cx >= b.x && cx <= b.x + b.w && cy >= b.y && cy <= b.y + b.h; };
   for (const aim of ['first', 'last', 'emph', 'word:-1', 'word:40', 'line:-1', 'line:8', 'glyph:-1', 'glyph:80']) {
     const b = SS.aimBox(env, t, aim);
     assert.ok(words.some((j) => inside(b, j)), aim + ' holds lyric glyphs');
-    assert.ok(!number.some((j) => inside(b, j)), aim + ' leaves the number out');
+    assert.ok(!holds(b, timerCentre[0], timerCentre[1]), aim + ' leaves the timer out');
   }
   const lastWord = t.unitOf.word[words[words.length - 1]];
   const want = words.filter((j) => t.unitOf.word[j] === lastWord);
   const box = SS.aimBox(env, t, 'last');
   assert.ok(want.every((j) => inside(box, j)), 'last = the lyric\'s last word');
-  // The block aim keeps the arrange's focus (the whole composition, number included).
-  assert.deepEqual(SS.aimBox(env, t, 'block'), { x: t.focus.x, y: t.focus.y, w: t.focus.w, h: t.focus.h });
+  const block = SS.aimBox(env, t, 'block');
+  assert.deepEqual(block, { x: t.focus.x, y: t.focus.y, w: t.focus.w, h: t.focus.h });
+  for (let i = 0; i < corners.length; i += 2) assert.ok(holds(block, corners[i], corners[i + 1]), 'block focus includes the timer');
 });
 
 // echoStack lays the line out again in fading copies (runs with the main line's span); its focus is the main line.

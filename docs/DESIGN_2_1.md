@@ -5894,3 +5894,24 @@ used to hold still).
 - On `cam: 'gentle'` layouts dutchSwing tilts at most 10°, so it is the mildest EXTREME preset there (still about 1.7×
   the strongest normal shot).
 - No EXTREME chip per area on the 区画ごと board (owner default, §14.1 item 8).
+
+## 15. Playback timers
+
+The saved part keys `sidebarIndex` and `serialMark` now denote Sidebar timer / 袖書き時計 and Playback timer /
+演奏時計. They display absolute song time as `mm:ss.hh` with at least two minute digits, two second digits and
+hundredths; minute counts continue past 59. Editor line IDs and the barcode's cut timestamp are unchanged.
+
+`parts/timecode`, shared through `parts/kit`, formats and paints vector digits. `showTime` controls visibility and
+`motion` controls digit animation from 0 (stationary) to 1 (the automatic default). Changed digits flip, bounce and
+leave a faint previous-digit trail; separators stay still. Each place's phase derives from absolute `q.time`, so
+pause, reverse seeks, arbitrary frame order, speed curves and range exports agree. No wall clock or prior-frame
+state participates. The current numeral is always the primary stroke, and animated ink clips to its reserved box.
+
+Bounded animated paint nodes inherit parent transforms and their owning part's fade exactly once. Their boxes take
+part in focus and picking without becoming lyric glyphs, word anchors or camera targets. Animated layers bypass
+static raster caching. The production and recorder renderers both pass the actual global frame time.
+
+Legacy `number` parameters stay valid for loading saved documents but are hidden from parameter controls and never
+render. An old blank-number pin migrates to `showTime: false` in the same scope, unless visibility was already pinned;
+the blank legacy key is then consumed. Sidebar whitespace blanks retain their previous hidden behaviour. Serial-mark
+whitespace retains its previous visible behaviour. Reopening and saving the migration is idempotent.

@@ -473,6 +473,11 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
 
   function hasLayer(scene, L) { return nodesByLayer(scene)[L].length > 0; }
 
+  // Animated paints must remain live even when their containing layer asks for a static raster.
+  function hasAnimatedPaint(scene, L) {
+    return nodesByLayer(scene)[L].some((i) => scene.table.type[i] === TYPE.paint && scene.stores.paint[scene.table.payload[i]].animated);
+  }
+
   // Whether a layer of the scene holds a media node (never baked into a static raster, DESIGN_2_1 §11.5.10).
   const mediaLayers = new WeakMap();
   function mediaFlags(scene) {
@@ -574,6 +579,10 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
         }
         dc.font = null;
         dc.counts.paints++;
+        if (rec.box) {
+          const b = rec.box;
+          pickNode(dc, scene, i, VW, cutIndex, b.x, b.y, b.x + b.w, b.y + b.h);
+        }
       } else if (type === TYPE.particles) {
         const rec = stores.particles[t.payload[i]];
         dc.counts.particles += SH.drawParticles(g, rec, M, alpha, tl, inkOf(pal, rec.ink), dc.sprites, dc.face);
@@ -623,6 +632,6 @@ MV.def('engine/render/draw', ['core/color', 'core/mat', 'engine/scene/table', 'e
     return n;
   }
 
-  return { createDrawContext, resetCounts, drawLayer, warmLayer, drawGlyph, hasLayer, hasMedia, hasStill, nodesByLayer, inkOf,
+  return { createDrawContext, resetCounts, drawLayer, warmLayer, drawGlyph, hasLayer, hasAnimatedPaint, hasMedia, hasStill, nodesByLayer, inkOf,
     secondInk, shaded, cssOf, clipReveal, minScaleOf, inkClip, INK_CLIP, glyphCover, poseCover, inkEm, STYLE_GLOW, GLOW_LEVEL };
 });

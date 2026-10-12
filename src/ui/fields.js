@@ -595,9 +595,12 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
 
     // paramFields(kind, idx, partKey, registry, { shared, part, section, scopes }) → generated FieldSpecs for the
     // parameters of a part (shared ones by `kind.param`, own ones by `kind@key.param`). partKey null → shared only.
+    // Scene number values stay readable in saved works; timer visibility replaces their editable text field.
+    const LEGACY_TIMER_NUMBERS = new Set(['arrange@sidebarIndex.number', 'ornament@serialMark.number',
+      ...[0, 1, 2].map((i) => 'ornament#' + i + '@serialMark.number')]);
     // Params kept for saved documents but no longer offered: the interlude effects' 表現の強さ (自動 follows the song).
     const HIDDEN_PARAMS = new Set(['lightMotes', 'soundHorizon', 'kineticShapes', 'neonWave', 'ringPulse', 'warpField', 'tileRipple',
-      'burstBloom', 'harmonicString', 'ridgeLines', 'polarWave', 'peakBars'].map((key) => 'arrange@' + key + '.shape'));
+      'burstBloom', 'harmonicString', 'ridgeLines', 'polarWave', 'peakBars'].map((key) => 'arrange@' + key + '.shape').concat([...LEGACY_TIMER_NUMBERS]));
 
     function paramFields(kind, idx, partKey, registry, o) {
       const opt = o || {};
@@ -782,7 +785,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
       for (const path of Object.keys(pins || {})) {
         const i = path.indexOf(':');
         const slot = path.slice(i + 1);
-        if (want.has(path.slice(0, i)) && slot.includes('@') && slot.includes('.')) out.add(slot);
+        if (want.has(path.slice(0, i)) && slot.includes('@') && slot.includes('.') && !LEGACY_TIMER_NUMBERS.has(slot)) out.add(slot);
       }
       return out;
     }
@@ -832,7 +835,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
           while (at < s.fields.length && s.fields[at].param && s.fields[at].param.kind === f.kind && s.fields[at].param.idx === idx) at++;
           for (const slot of [...(set || [])].sort()) {
             const part = partOfSlot(slot);
-            if (shown.has(slot) || !matches(part, f.kind, idx)) continue;
+            if (shown.has(slot) || LEGACY_TIMER_NUMBERS.has(slot) || !matches(part, f.kind, idx)) continue;
             const where = { section: s.id, page: ctx.page, scopes: f.scopes, flags: f.firstCut ? { firstCut: true } : {} };
             s.fields.splice(at++, 0, pinnedParamField(part, slot, where, ctx.registry));
             shown.add(slot);
@@ -841,7 +844,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
         for (const want of s.params || []) {
           for (const slot of [...(pinned.page || [])].sort()) {
             const part = partOfSlot(slot);
-            if (shown.has(slot) || !matches(part, want.kind, null)) continue;
+            if (shown.has(slot) || LEGACY_TIMER_NUMBERS.has(slot) || !matches(part, want.kind, null)) continue;
             const where = { section: s.id, page: ctx.page, scopes: ALL, flags: { group: want.kind } };
             s.fields.push(pinnedParamField(part, slot, where, ctx.registry));
             shown.add(slot);

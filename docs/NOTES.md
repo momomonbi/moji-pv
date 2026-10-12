@@ -9518,3 +9518,30 @@ files and 23 build tests. Eight Japanese/English browser cases exercise actual A
 hashes, zero starts and matching durations, original PCM range, lazy/cache loading, no uploads and cancellation.
 The final generated pages also pass the native MP4/Filmora success flows in both languages. The full regression run
 identified two notice consistency gaps; adding the matching GPL notice and vendor-root licence fixed those checks.
+
+## 2026-10-12 — Animated playback timers instead of lyric numbers
+
+The `sidebarIndex` arrangement and `serialMark` ornament retain their saved keys and now show the current song time
+as `mm:ss.hh`, including hundredths and cumulative minutes. Changed digits flip, bounce and leave a faint old-digit
+trail by default. The adjustable motion control includes a stationary value of zero; the visibility switch hides the
+clock. Editor line IDs and literal numbers in lyrics are unchanged. Old blank-number pins migrate to hidden clocks
+in their original scope, while nonblank legacy values never replace playback time.
+
+One bounded vector painter receives the actual global frame time from both renderers. It inherits the parent's pose,
+keeps camera/lyric anchors separate from the clock box, participates in selection and bypasses static layer caching.
+Absolute-time animation is independent of frame order, cut reuse, camera speed curves and ghost-effect pose time;
+range exports keep song time rather than starting at zero. Clock placement reserves space beside the lyric and clips
+animated strokes to that space. Audit found and fixed reference-renderer clock omission, double fade, invisible pick
+areas and the legacy sidebar whitespace-blank migration.
+
+Validation includes native Canvas checks of transformed/clipped clocks, minute and hundredth rollovers, alpha
+inheritance and repeatable reverse seeks. Japanese/English browser cases verify main-preview playback, pause, seeks,
+motion controls, saved visibility and real PNG range exports against the same direct-rendered frames. Render goldens
+are deliberately updated for the replaced number parts and their new registry parameters.
+
+The final full Node matrix passes 1,960/1,960 cases, all 23 build tests pass and all six regenerated golden checks
+match. A separate before/after review covers 240 plans and 18,616 cuts: timing, part choices and unrelated parameters
+are identical. Of 480 golden frames, 416 remain byte-identical, 49 intentionally replace numbers with clocks and 15
+repeat-fixture hashes only change because recorder canvas/gradient allocation IDs move; consistent ID renaming makes
+their drawing operations identical. Six native-browser cases and 108 transformed Canvas cases pass. The browser
+test dependency file includes Pillow for decoded PNG comparisons and optional animation samples.

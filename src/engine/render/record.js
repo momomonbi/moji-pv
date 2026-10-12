@@ -235,16 +235,18 @@ MV.def('engine/render/record', ['core/hash', 'core/rng', 'core/noise', 'core/col
 
   function setMatrix(g, M) { g.setTransform(M[0], M[1], M[2], M[3], M[4], M[5]); }
 
-  // drawScene(g, scene, { scale = 1, cam = null, W, H, pal, backdrop = 'scene', tl = 0, draft = false }) draws an
+  // drawScene(g, scene, { scale = 1, cam = null, W, H, pal, backdrop = 'scene', t, tl = 0, draft = false }) draws an
   // evaluated scene (frame.evaluate) through any Ctx2D: every visible node in LAYERS order with the camera view per
   // layer. It is the simple, complete reference the Node tests use; the Canvas2D renderer (sprites, reveal clips, glow,
-  // post) is engine/render/renderer. Returns the number of nodes drawn.
+  // post) is engine/render/renderer. `t` is the absolute playback clock; supply it when a cached scene is reused for
+  // another cut. Independent scenes default to their build origin plus `tl`. Returns the number of nodes drawn.
   function drawScene(g, scene, opts) {
     const o = opts || {};
     if (!o.pal) throw new TypeError('drawScene needs opts.pal (the plan palette)');
     const table = scene.table;
     const pal = F.paletteFor(o.pal, o.backdrop || 'scene');
-    const q = { draft: !!o.draft, scale: o.scale || 1, pal, rgba: (ink, a) => C.rgba(inkOf(pal, ink), a),
+    const q = { draft: !!o.draft, scale: o.scale || 1, time: Number.isFinite(o.t) ? o.t : (scene.t0 || 0) + (o.tl || 0),
+      pal, rgba: (ink, a) => C.rgba(inkOf(pal, ink), a),
       tile: o.tile || (() => null) };
     let drawn = 0;
     for (let L = 0; L < T.LAYERS.length; L++) {

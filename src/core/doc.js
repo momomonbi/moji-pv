@@ -353,10 +353,32 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
       else if (k === 'sheet' && isObject(v)) put(k, fillMissing(v, sheetDefaults(doc)));
       else if (k === 'song' && isObject(v)) put(k, fillMissing(v, SONG_DEFAULTS));
       else if (k === 'materials' && isObject(v)) put(k, fillMissing(v, materialDefaults(v)));
+      else if (k === 'pins' && isObject(v)) put(k, timerVisibilityPins(v));
       // Saved works that predate the encoding choice keep native browser audio. New works explicitly start with
       // 'local', and both an explicit browser choice and an external server choice survive opening unchanged.
       else if (k === 'output' && isObject(v)) put(k, withKit(fillMissing(v, { ...base.output, audioEncoding: 'browser' })));
       else if (isObject(v) && isObject(base[k])) put(k, fillMissing(v, base[k]));
+    }
+    return out;
+  }
+
+  // A blank legacy scene number meant "hide it". Consume that intent once, so unpinning the new switch works later.
+  function timerVisibilityPins(pins) {
+    let out = pins;
+    for (const path of Object.keys(pins)) {
+      const pin = pins[path];
+      if (!isObject(pin) || typeof pin.v !== 'string') continue;
+      let parsed;
+      try { parsed = paths.parse(path); } catch (err) { continue; }
+      const part = parsed.part;
+      if (!part || part.param !== 'number' || !(
+        part.kind === 'arrange' && part.idx === null && part.key === 'sidebarIndex' && pin.v.trim() === ''
+        || part.kind === 'ornament' && part.idx !== null && part.key === 'serialMark' && pin.v === '')) continue;
+      const slot = paths.slotParamPath(part.kind, part.idx, part.key, 'showTime', false);
+      const timerPath = paths.format({ scope: parsed.scope, slot });
+      if (out === pins) out = { ...pins };
+      if (!Object.prototype.hasOwnProperty.call(pins, timerPath)) out[timerPath] = { ...pin, v: false };
+      delete out[path];
     }
     return out;
   }

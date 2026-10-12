@@ -104,7 +104,7 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
     const picks = PK.createPickList();
     const statics = new Map();                     // static layers: scene → [raster per layer] (LRU)
     const errors = [];
-    const q = { draft: false, scale: 1, pal: null,                       // the paints' helpers (§4.17.3)
+    const q = { draft: false, scale: 1, pal: null, time: 0,              // the paints' helpers (§4.17.3)
       rgba: (ink, a) => C.rgba(DR.inkOf(q.pal, ink), a), tile: (name, seed) => tiles.tile(name, seed) };
     dc.q = q;
 
@@ -338,7 +338,7 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
     }
 
     function drawIsolated(g, it, Lk, spec) {
-      if (spec.cache === 'static' && !spec.mask && !spec.filter && !DR.hasMedia(it.scene, Lk)) {
+      if (spec.cache === 'static' && !spec.mask && !spec.filter && !DR.hasMedia(it.scene, Lk) && !DR.hasAnimatedPaint(it.scene, Lk)) {
         const r = staticRaster(it.scene, Lk, it);
         if (r) {
           const V = view(it.cam, Lk);
@@ -642,6 +642,9 @@ MV.def('engine/render/renderer', ['core/hash', 'core/color', 'core/num', 'core/m
       dc.probe = !exporting && ro.probe ? ro.probe : null;
       dc.meter = ro.meter && typeof ro.meter === 'object' ? ro.meter : null;
       q.draft = quality === 'draft' || (!exporting && level >= 2);
+      // A paint's callback t stays scene-local. q.time is the exact absolute timeline time of this frame; it does
+      // not depend on scene-cache origins, camera speed curves or the earlier pose drawn by a textAt ghost pass.
+      q.time = t;
       q.scale = dc.scale; q.pal = pal;
       lastLook.t = t; lastLook.scale = dc.scale; lastLook.backdrop = backdrop; lastLook.calm = evalOpts.calm;
       lastLook.glyphPath = dc.glyphPath; lastLook.probe = dc.probe;

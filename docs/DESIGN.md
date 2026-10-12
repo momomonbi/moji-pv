@@ -252,7 +252,7 @@ page. Nothing else may be attached to `MV` except by `ui/boot.js` (it sets `MV.a
 | L0 | `core/*` | L0 |
 | L1 | `i18n/*`, `engine/text/*`, `audio/*` (not `audio/host`) | L0, L1 (same directory or `core`) — `engine/text` may not use `audio`, and vice versa |
 | L2 | `planner/*` | L0, L1 (`engine/text/*` only for metric-free functions: `breaker`, `vert` classes, `faces.resolveFaces`) |
-| L3 | `engine/scene/*`, `engine/render/*`, `parts/kit` | L0, L1, L2 **types only** (no planner functions) |
+| L3 | `engine/scene/*`, `engine/render/*`, `parts/kit`, `parts/mix`, `parts/timecode` | L0, L1, L2 **types only** (no planner functions) |
 | L4 | `parts/<kind>/*` | **only `parts/kit`** |
 | L4 | `parts/catalog` | `core/registry`, and it reads part modules with `MV.ids('parts/')` |
 | L5 | `engine/facade`, `export/*` (not host), `ai/*` | L0–L4 |
@@ -1634,7 +1634,8 @@ sb.text(RunSpec & { parent? }) → RunHandle { node, spec }          // glyph no
                                                                     // cut's glyphs are one contiguous range [from, to)
 sb.shape({ parent?, layer, path: ShapeSpec, fill?: ink, stroke?: ink, width = 2, dash?, cap = 'butt', alpha = 1,
            x = 0, y = 0, rot = 0, sx = 1, sy = 1, owner? }) → node
-sb.paint({ layer, bleed = 0.15, animated = true, data, draw: (g, t, data, q) => void, owner? }) → node
+sb.paint({ parent?, layer, bleed = 0.15, animated = true, data, draw: (g, t, data, q) => void, owner?, box?,
+           x = 0, y = 0, rot = 0, sx = 1, sy = 1, alpha = 1 }) → node
 sb.image({ parent?, layer, asset, fit: 'cover' | 'contain', x, y, w, h, owner? }) → node
 sb.particles({ layer, n, sprite: ShapeSpec | 'glyph:<char>', ink, field: ParticleField, owner? }) → node
 sb.behave(behaviour) ; sb.bounds(node) → Box (du; valid after commit) ; sb.freeAround(box) → Box[] ; sb.layer(name, patch)
@@ -1646,7 +1647,10 @@ ParticleField = { area: Box, vx, vy, sway, swayHz, spin, size: [lo, hi], life: [
 
 `paint.draw(g, t, data, q)`: `g` is the Ctx2D subset (§4.19.8) already transformed so that 1 unit = 1 du, origin at the
 frame's top-left (plus `bleed` margin). `t` = seconds since the segment start (ground, atmos) or cut-local time
-(ornaments). `q = { draft, scale, pal, rgba(inkOrHex, a), tile(name, seed) }`. MUST be a pure function of `(t, data, q)`;
+(ornaments). `q = { draft, scale, pal, time, rgba(inkOrHex, a), tile(name, seed) }`, where `time` is the absolute
+playback time of the rendered frame in seconds. It remains current during cached scenes, camera speed curves and
+ghost-pose passes. A bounded paint's optional `box` supplies geometry and picking; parent and pose place it inside
+the composition. Animated paints stay live even in layers requesting a static raster. MUST be a pure function of `(t, data, q)`;
 MUST NOT use `ctx.filter`. `draft` may only lower sampling density and is always false in export.
 
 #### 4.17.4 Behaviours and stagger (FROZEN)
@@ -2510,7 +2514,7 @@ grouping is fine as long as each file only depends on `parts/kit`.
 | `tickerMarquee` | 流れ帯 | Ticker marquee | fast digital | One line on a strip scrolling across the frame (`motion: 'own'`). |
 | `gridMosaic` | 升目 | Grid mosaic | literary retro | Glyphs in a strict grid of square cells, like manuscript paper. |
 | `haloRing` | 円環 | Halo ring | airy playful | Glyphs placed along a circle or arc around the centre, upright or tangent. |
-| `sidebarIndex` | 袖書き | Sidebar index | serious minimal | A narrow column at one edge with a big line number beside the text. |
+| `sidebarIndex` | 袖書き時計 | Sidebar timer | serious minimal | A narrow column with the current mm:ss.hh playback time and animated digit changes. |
 | `echoStack` | 反響 | Echo stack | wet dark | The line repeated 3–5 times, stacked with fading opacity and small offsets. |
 | `spineColumn` | 背骨 | Spine column | literary slow | One tall vertical column in the centre; the note runs horizontally across it (orient v). |
 | `magazineHead` | 誌面 | Magazine head | literary bold | A headline and a smaller sub-line under a rule, left aligned like an editorial page. |
@@ -2669,7 +2673,7 @@ interlude.
 | `hankoSeal` | 印 | Hanko seal | cut | literary serious | | A red square seal stamped near the text. |
 | `crossHair` | 照準 | Cross hair | cut | digital hard | | Register marks and a cross hair at the text centre. |
 | `ripplePath` | 波線 | Wave line | cut | playful organic | | A wavy underline that ripples. |
-| `serialMark` | 通し番号 | Serial mark | cut | minimal digital | | The line number in small monospace digits. |
+| `serialMark` | 演奏時計 | Playback timer | cut | minimal digital | | The current mm:ss.hh playback time in animated monospace digits. |
 | `underSweep` | 下線 | Under sweep | cut | bold minimal | | An accent underline sweeps under the emphasized word. |
 | `sparkSpray` | 火花 | Spark spray | cut | bright fast | | Small sparks spray on beats and impacts. |
 | `rainLines` | 雨線 | Rain lines | run | wet dark | | Slanted rain streaks across the frame. |
