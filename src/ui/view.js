@@ -15,6 +15,7 @@ MV.def('ui/view', ['ui/layout', 'ui/selection'], (L, S) => {
     reduceFlash: false,       // 点滅を抑える (preview only)
     calmCamera: false,        // 激しいカメラを抑える (preview only, DESIGN_EXTREME §3.6; first run: the OS reduced-motion setting)
     safeArea: false,          // 安全枠
+    cameraWireframe: false,   // カメラの範囲と軌道 (preview overlay only; never part of the document/export)
     ai: true,                 // AIを使う
     quality: 'auto',          // プレビューの画質 auto | smooth | sharp
     muted: false,

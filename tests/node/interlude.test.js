@@ -1,4 +1,4 @@
-/* 文字PVメーカー v2 — original work. Tests: the interlude effects (parts/arrange/interlude) — light motes, sound horizon, kinetic shapes (DESIGN §5.1). */
+/* 文字PVメーカー v2 — original work. Tests: all eighteen textless interlude effects (parts/arrange/interlude, DESIGN §5.1). */
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -28,8 +28,8 @@ const { createTextService } = MV.use('engine/text/service');
 const { fakeMeasurer } = MV.use('engine/text/fake_measure');
 
 const REGISTRY = MV.use('parts/catalog').defaultRegistry();
-const KEYS = ['burstBloom', 'harmonicString', 'kineticShapes', 'lightMotes', 'neonWave', 'peakBars', 'polarWave', 'ridgeLines', 'ringPulse',
-  'soundHorizon', 'tileRipple', 'warpField'];
+const KEYS = ['burstBloom', 'constellationMesh', 'harmonicString', 'kineticShapes', 'lightMotes', 'neonWave', 'orbitMoons', 'paperDrift',
+  'peakBars', 'polarWave', 'prismFan', 'ribbonWeave', 'ridgeLines', 'ringPulse', 'shutterBloom', 'soundHorizon', 'tileRipple', 'warpField'];
 const TEXT = createTextService({ measurer: fakeMeasurer(), faces: null });
 const T0 = 10;
 const FULL = '1,1,1,1,1';                      // 表現の強さ at full: the event mechanics without the strength's thinning
@@ -138,14 +138,11 @@ function frameHash(ops) {
 
 // --- 1. registry --------------------------------------------------------------------------------------------------------
 
-test('the interlude pool is exactly the three effects; the breath mark stays pinnable (pool false)', () => {
+test('the interlude pool contains all eighteen effects; the breath mark stays pinnable (pool false)', () => {
   assert.deepEqual(REGISTRY.pool('arrange', { role: 'interlude' }).slice().sort(), KEYS);
   const bm = REGISTRY.get('arrange', 'breathMark');
   assert.equal(bm.pool, false);
   assert.ok(REGISTRY.has('arrange', 'breathMark'));
-  const needs = { lightMotes: ['beats', 'level'], soundHorizon: ['beats', 'level'], kineticShapes: ['beats', 'level'], neonWave: ['beats', 'level'],
-    ringPulse: ['beats', 'level'], warpField: ['beats', 'level'], tileRipple: ['beats', 'level'], burstBloom: ['beats', 'level'],
-    harmonicString: ['beats', 'level'], ridgeLines: ['beats', 'level'], polarWave: ['beats', 'level'], peakBars: ['beats', 'level'] };
   const families = new Set();
   const all = REGISTRY.keys('arrange');
   for (const key of KEYS) {
@@ -154,7 +151,7 @@ test('the interlude pool is exactly the three effects; the breath mark stays pin
     assert.deepEqual(t.cells, [0, 80], key);
     assert.equal(d.cam, 'gentle', key);
     assert.equal(d.motion, undefined, key + ' owns no motion (lyric neighbours keep theirs)');
-    assert.deepEqual(d.needs.slice().sort(), needs[key], key);
+    assert.deepEqual(d.needs.slice().sort(), ['beats', 'level'], key);
     assert.ok(!families.has(d.family) && d.family !== 'mark', key + ' has a family of its own');
     families.add(d.family);
     assert.ok(all.indexOf(key) > all.indexOf('breathMark') || key > 'breathMark', key + ' sorts after breathMark');

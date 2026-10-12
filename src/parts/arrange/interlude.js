@@ -2027,6 +2027,166 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     build: columnsBuild,
   });
 
+  // --- graphic interludes: distinct silhouettes with the same musical envelope and handover ---------------------------
+
+  // The six scenes below share music, not geometry. Their seeded positions never read slider values; every frame is
+  // a pure function of local time, so reverse seeking and export render exactly the same shape. No glyphs, near layer,
+  // gradients or unbounded event arrays are introduced.
+  function graphicData(env, p) {
+    const fr = frameOf(env, p), ink = inksOf(env.pal), r = seedOf(env), tr = levelTrack(env, r, fr.a - 1);
+    const st = strengthTrack(env, fr, tr, p.shape), kicks = kicksOf(env, fr, tr, st, r, 0.4);
+    return data(fr, { chroma: ink.chroma, song: tr.song, L0: tr.L0, lv: tr.lv, sw: tr.sw, n1: tr.n1, n2: tr.n2,
+      I: st.I, W: st.W, IA: st.IA, bt: kicks.bt, bd: kicks.bd, react: p.react,
+      radius: Math.min(env.D.w - env.D.safe.l - env.D.safe.r, env.D.h - env.D.safe.t - env.D.safe.b) * 0.39,
+      phase: r.range(0, TAU), spin: r.next() < 0.5 ? -1 : 1 });
+  }
+
+  function graphicState(g, t, d, q) {
+    const A = envelopeOf(d, t);
+    if (A < 1 / 255) return null;
+    g.globalAlpha *= A;
+    g.strokeStyle = q.rgba('accent', 1);
+    g.fillStyle = q.rgba('accent', 1);
+    g.lineWidth = Math.max(1.5, d.s * 0.003);
+    g.lineCap = 'round'; g.lineJoin = 'round';
+    return { phase: d.phase + 0.32 * d.spin * clockAt(d, t),
+      pulse: d.react * (0.5 * levelAt(d, t) + 0.25 * kickAt(d, t, 0.3)),
+      R: d.radius * (0.86 + 0.08 * strengthAt(d, t)) * (1 - 0.25 * outOf(d, t)) };
+  }
+
+  function fanDraw(g, t, d, q) {
+    const s = graphicState(g, t, d, q);
+    if (!s) return;
+    const pivotY = d.cy + s.R * 0.65, opening = 0.85 + 0.16 * Math.sin(s.phase) + 0.2 * s.pulse;
+    for (let i = 0; i < 13; i++) {
+      const a = -Math.PI / 2 + (i / 12 - 0.5) * opening * 2, reach = s.R * (1.1 + 0.1 * Math.sin(s.phase + i));
+      const x = d.cx + Math.cos(a) * reach, y = pivotY + Math.sin(a) * reach;
+      g.beginPath(); g.moveTo(d.cx, pivotY); g.lineTo(x, y); g.stroke();
+      g.beginPath(); g.arc(x, y, d.s * 0.0045 * (1 + s.pulse), 0, TAU); g.fill();
+    }
+  }
+
+  function moonsDraw(g, t, d, q) {
+    const s = graphicState(g, t, d, q);
+    if (!s) return;
+    for (let i = 0; i < 4; i++) {
+      const r = s.R * (0.3 + 0.2 * i), angle = s.phase * (0.75 + i * 0.17) + i * 1.7;
+      g.beginPath(); g.ellipse(d.cx, d.cy, r, r * 0.5, i * 0.3, 0, TAU); g.stroke();
+      const x0 = r * Math.cos(angle), y0 = r * 0.5 * Math.sin(angle), c = Math.cos(i * 0.3), z = Math.sin(i * 0.3);
+      g.beginPath(); g.arc(d.cx + x0 * c - y0 * z, d.cy + x0 * z + y0 * c,
+        d.s * (0.011 + i * 0.003) * (1 + s.pulse * 0.4), 0, TAU); g.fill();
+    }
+    g.fillStyle = q.rgba('ink', 1);
+    g.beginPath(); g.arc(d.cx, d.cy, d.s * 0.025, 0, TAU); g.fill();
+  }
+
+  function weaveDraw(g, t, d, q) {
+    const s = graphicState(g, t, d, q);
+    if (!s) return;
+    for (let j = 0; j < 5; j++) {
+      const offset = (j - 2) * s.R * 0.19;
+      g.strokeStyle = q.rgba(j % 2 ? 'ink' : 'accent', 1);
+      g.beginPath();
+      for (let i = 0; i <= 64; i++) {
+        const u = i / 64, x = d.cx + s.R * (2 * u - 1),
+          y = d.cy + offset + Math.sin(u * TAU * 1.4 + s.phase + j * 0.8) * s.R * (0.13 + s.pulse * 0.14);
+        if (i) g.lineTo(x, y); else g.moveTo(x, y);
+      }
+      g.stroke();
+    }
+  }
+
+  function shutterDraw(g, t, d, q) {
+    const s = graphicState(g, t, d, q);
+    if (!s) return;
+    const inner = s.R * (0.17 + 0.1 * s.pulse + 0.06 * Math.sin(s.phase));
+    for (let i = 0; i < 8; i++) {
+      const a = s.phase * 0.45 + i * TAU / 8, b = a + TAU / 8 * 0.72;
+      g.beginPath(); g.moveTo(d.cx + Math.cos(a) * inner, d.cy + Math.sin(a) * inner);
+      g.lineTo(d.cx + Math.cos(a + 0.32) * s.R, d.cy + Math.sin(a + 0.32) * s.R);
+      g.lineTo(d.cx + Math.cos(b + 0.32) * s.R * 0.83, d.cy + Math.sin(b + 0.32) * s.R * 0.83);
+      g.lineTo(d.cx + Math.cos(b) * inner, d.cy + Math.sin(b) * inner); g.closePath();
+      if (i % 2) { g.fillStyle = q.rgba('ground2', 1); g.fill(); }
+      g.stroke();
+    }
+  }
+
+  function constellationDraw(g, t, d, q) {
+    const s = graphicState(g, t, d, q);
+    if (!s) return;
+    const position = (i) => [d.cx + d.px[i] * s.R + Math.sin(s.phase + i * 1.7) * s.R * 0.035,
+      d.cy + d.py[i] * s.R + Math.cos(s.phase * 0.73 + i) * s.R * 0.035];
+    g.beginPath();
+    for (let i = 0; i < d.edges.length; i += 2) {
+      const a = position(d.edges[i]), b = position(d.edges[i + 1]);
+      g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]);
+    }
+    g.stroke();
+    for (let i = 0; i < d.px.length; i++) {
+      const [x, y] = position(i), radius = d.s * 0.006 * (1 + 0.5 * Math.sin(s.phase * 2 + i) + s.pulse);
+      g.beginPath(); g.arc(x, y, radius, 0, TAU); g.fill();
+    }
+  }
+
+  function paperDraw(g, t, d, q) {
+    const s = graphicState(g, t, d, q);
+    if (!s) return;
+    for (let i = 0; i < 9; i++) {
+      const x = d.cx + d.px[i] * s.R + Math.sin(s.phase + i) * s.R * 0.08,
+        y = d.cy + d.py[i] * s.R + Math.cos(s.phase * 0.8 + i * 1.4) * s.R * 0.08,
+        w = d.s * 0.035 * (1 + 0.35 * s.pulse), h = w * (0.85 + 0.35 * Math.sin(s.phase + i));
+      g.save(); g.translate(x, y); g.rotate(s.phase * 0.5 + i * 0.8);
+      g.fillStyle = q.rgba(i % 2 ? 'ground2' : 'accent', 1);
+      g.beginPath(); g.moveTo(-w, -h); g.lineTo(w, -h * 0.35); g.lineTo(w * 0.6, h); g.lineTo(-w * 0.7, h * 0.6);
+      g.closePath(); g.fill(); g.stroke();
+      g.beginPath(); g.moveTo(-w, -h); g.lineTo(w * 0.6, h); g.stroke(); g.restore();
+    }
+  }
+
+  function graphicBuild(draw, points) {
+    return function build(env, p) {
+      const d = graphicData(env, p), r = seedOf(env).fork('geometry');
+      if (points) {
+        d.px = Float32Array.from({ length: points }, () => r.range(-0.67, 0.67));
+        d.py = Float32Array.from({ length: points }, () => r.range(-0.67, 0.67));
+        const edges = [];
+        for (let i = 0; i < points; i++) {
+          const nearest = Array.from({ length: points }, (_, j) => j).filter((j) => j !== i)
+            .sort((a, b) => Math.hypot(d.px[a] - d.px[i], d.py[a] - d.py[i]) - Math.hypot(d.px[b] - d.px[i], d.py[b] - d.py[i]));
+          for (const j of nearest.slice(0, 2)) if (i < j) edges.push(i, j);
+        }
+        d.edges = Uint8Array.from(edges);
+      }
+      env.sb.paint({ layer: 'mid', bleed: 0, animated: true, owner: env.owner, draw, data: d });
+      return finish(env, d, 2 * d.radius, 2 * d.radius);
+    };
+  }
+
+  const graphic = (key, ja, en, jaBlurb, enBlurb, tags, family, energy, draw, points) => K.arrange({
+    key, label: L(ja, en), blurb: L(jaBlurb, enBlurb), tags, family, cam: 'gentle', needs: ['beats', 'level'],
+    traits: { cells: [0, 80], roles: ['interlude'], energy },
+    params: { react: REACT(0.4, 0.8), shape: SHAPE_PARAM }, build: graphicBuild(draw, points),
+  });
+
+  const prismFan = graphic('prismFan', 'プリズムの扇', 'Prism fan',
+    '扇状の光の線が音に合わせて開き、先端の粒がゆっくり揺れる',
+    'A fan of light opens with the music while its dotted tips sway', ['bold', 'digital'], 'fan', [0.25, 1], fanDraw);
+  const orbitMoons = graphic('orbitMoons', 'めぐる小さな月', 'Orbiting moons',
+    '四つの楕円軌道を小さな月が巡り、音の強さでふくらむ',
+    'Small moons travel four elliptical orbits and swell with the sound', ['airy', 'serious'], 'moons', [0, 0.8], moonsDraw);
+  const ribbonWeave = graphic('ribbonWeave', '揺れる光の織物', 'Ribbon weave',
+    '五本の光のリボンが位相をずらしてうねり、重なりを変える',
+    'Five offset ribbons undulate and change their woven overlaps', ['soft', 'airy'], 'weave', [0, 0.75], weaveDraw);
+  const shutterBloom = graphic('shutterBloom', 'ひらく絞り', 'Shutter bloom',
+    '八枚の羽根がゆっくり回り、音に合わせて中心の隙間を開く',
+    'Eight rotating blades open their central aperture with the music', ['digital', 'bold'], 'shutter', [0.2, 1], shutterDraw);
+  const constellationMesh = graphic('constellationMesh', 'ほどける星座', 'Constellation mesh',
+    '細い線で結ばれた星の位置が少しずつ漂い、音で瞬く',
+    'Connected stars drift gently and shimmer with the sound', ['airy', 'minimal'], 'constellation', [0, 0.7], constellationDraw, 16);
+  const paperDrift = graphic('paperDrift', '浮かぶ折り紙', 'Floating paper',
+    '折り目のある小さな紙片が回りながらふわふわ浮かぶ',
+    'Small folded paper shapes turn and float in a gentle current', ['organic', 'playful'], 'paper', [0, 0.75], paperDraw, 9);
+
   return [lightMotes, soundHorizon, kineticShapes, neonWave, ringPulse, warpField, tileRipple, burstBloom, harmonicString,
-    ridgeLines, polarWave, peakBars];
+    ridgeLines, polarWave, peakBars, prismFan, orbitMoons, ribbonWeave, shutterBloom, constellationMesh, paperDrift];
 });

@@ -33,11 +33,21 @@ MV.def('ui/playbar', ['ui/dom', 'ui/icons', 'ui/looks', 'ui/selection', 'ui/time
   function mount(app, stageEl) {
     const t = app.t;
     const lane = h('canvas', { class: 'lane-canvas' });
-    const laneBox = h('div', { class: 'lane', role: 'slider', tabindex: '0', 'aria-label': t('play.lane'), title: t('play.lane'), 'aria-valuemin': '0' }, lane);
+    const windowStart = h('button', { class: 'lane-window-handle lane-window-start', type: 'button', role: 'slider',
+      'aria-label': t('tl.windowStart'), title: t('tl.windowStartTip'), 'aria-valuemin': '0' });
+    const windowEnd = h('button', { class: 'lane-window-handle lane-window-end', type: 'button', role: 'slider',
+      'aria-label': t('tl.windowEnd'), title: t('tl.windowEndTip'), 'aria-valuemin': '0' });
+    const windowPan = h('button', { class: 'lane-window-pan', type: 'button', role: 'slider', title: t('tl.windowPanTip'), 'aria-label': t('tl.windowPan') },
+      h('span', { text: t('tl.window') }));
+    const viewport = h('div', { class: 'lane-viewport' }, windowPan, windowStart, windowEnd);
+    // A separate seek slider leaves the navigator's three controls visible to assistive technology.
+    const laneBox = h('div', { class: 'lane' }, h('div', { class: 'lane-seek', role: 'slider', tabindex: '0',
+      'aria-label': t('play.lane'), title: t('play.lane'), 'aria-valuemin': '0' }, lane), viewport);
+    const seekSlider = laneBox.querySelector('.lane-seek');
     const stripText = h('span', { class: 'strip-text', role: 'status' });
     const stripActs = h('span', { class: 'strip-acts' });
     const strip = h('div', { class: 'mode-strip', hidden: true }, stripText, stripActs);
-    const laneRow = h('div', { class: 'lane-row' }, laneBox, strip);
+    const laneRow = h('div', { class: 'lane-row' }, laneBox);
 
     // 最初に戻る (⏮, the Home key's seek.edge): the way back to 0:00 a beginner can see, next to 再生
     const startBtn = h('button', { class: 'pbtn to-start', type: 'button', 'data-ctl': 'toStart' });
@@ -52,12 +62,12 @@ MV.def('ui/playbar', ['ui/dom', 'ui/icons', 'ui/looks', 'ui/selection', 'ui/time
     const muteBtn = h('button', { class: 'pbtn', type: 'button', 'data-act': 'audio.mute' });
     const tlBtn = h('button', { class: 'pbtn', type: 'button', 'data-act': 'timeline.toggle', 'aria-pressed': 'false',
       title: t('cmd.timeline.toggle') + ' (Shift+T)', 'aria-label': t('cmd.timeline.toggle') }, I.icon('timeline'));
+    const historyGroup = h('div', { class: 'ctl-group hist' }, prevBtn, histBtn, nextBtn);
+    const controlTools = h('div', { class: 'ctl-group ctl-tools' }, muteBtn, tlBtn);
     const controls = h('div', { class: 'controls', role: 'toolbar', 'aria-label': t('play.toolbar') },
       h('div', { class: 'ctl-group' }, startBtn, playBtn, timeBtn, timeInput),
       h('span', { class: 'grow' }),
-      h('div', { class: 'ctl-group hist' }, prevBtn, histBtn, nextBtn),
-      omakase,
-      h('div', { class: 'ctl-group' }, muteBtn, tlBtn));
+      historyGroup, omakase, strip, controlTools);
     stageEl.append(laneRow, controls);
 
     const lctx = lane.getContext('2d');
@@ -67,6 +77,8 @@ MV.def('ui/playbar', ['ui/dom', 'ui/icons', 'ui/looks', 'ui/selection', 'ui/time
     let timeChars = 0;
     let flashTimer = 0;
     let flashing = null;
+    let stripState = null;
+    let stripKey = '';
 
     dom.on(controls, 'click', '[data-act]', (ev, b) => app.actions.run(b.dataset.act, { from: 'playbar' }));
     startBtn.addEventListener('click', () => app.actions.run('seek.edge', { to: 'start', from: 'playbar' }));
@@ -101,14 +113,19 @@ MV.def('ui/playbar', ['ui/dom', 'ui/icons', 'ui/looks', 'ui/selection', 'ui/time
       return Math.max(0, Math.min(d, (ev.clientX - r.left) / Math.max(1, r.width) * d));
     }
     let scrubbing = false;
+    let scrubPointer = null;
     laneBox.addEventListener('pointerdown', (ev) => {
-      if (ev.button !== 0) return;
+      if (ev.button !== 0 || scrubbing) return;
       scrubbing = true;
+      scrubPointer = ev.pointerId;
       laneBox.setPointerCapture(ev.pointerId);
       app.seek(timeAt(ev));
     });
-    laneBox.addEventListener('pointermove', (ev) => { if (scrubbing) app.seek(timeAt(ev)); });
-    laneBox.addEventListener('pointerup', () => { scrubbing = false; });
+    laneBox.addEventListener('pointermove', (ev) => { if (scrubbing && ev.pointerId === scrubPointer) app.seek(timeAt(ev)); });
+    const endScrub = (ev) => { if (ev && scrubPointer !== null && ev.pointerId !== scrubPointer) return; scrubbing = false; scrubPointer = null; };
+    laneBox.addEventListener('pointerup', endScrub);
+    laneBox.addEventListener('pointercancel', endScrub);
+    laneBox.addEventListener('lostpointercapture', endScrub);
     laneBox.addEventListener('dblclick', (ev) => {
       const tt = timeAt(ev);
       const plan = app.plan;
@@ -126,6 +143,104 @@ MV.def('ui/playbar', ['ui/dom', 'ui/icons', 'ui/looks', 'ui/selection', 'ui/time
       const plan = app.plan;
       return plan && plan.duration > 0 ? plan.duration : 1;
     }
+
+    // The outlined window is the detailed timeline's current view. Handles resize it; its lower strip pans it.
+    let windowPress = null;
+    function currentWindow() { return app.timeline ? app.timeline.view() : { t0: 0, span: duration() }; }
+    function updateViewport() {
+      const d = duration(), w = currentWindow(), end = w.t0 + w.span;
+      const geometry = TL.navigatorGeometry(d, w, Math.max(1, lane.getBoundingClientRect().width));
+      viewport.hidden = !app.plan || !app.plan.cuts.length;
+      dom.setStyle(viewport, { left: w.t0 / d * 100 + '%', width: w.span / d * 100 + '%' });
+      viewport.dataset.zoomed = String(w.span < d - 0.001);
+      viewport.dataset.narrow = String(geometry.narrow);
+      dom.setStyle(windowStart, { left: geometry.start, right: 'auto' });
+      dom.setStyle(windowEnd, { left: geometry.end, right: 'auto' });
+      dom.setStyle(windowPan, { left: geometry.pan.left, width: geometry.pan.width, right: 'auto' });
+      windowStart.setAttribute('aria-valuemax', String(Math.max(0, end - Math.min(2, d))));
+      windowStart.setAttribute('aria-valuenow', String(w.t0));
+      windowStart.setAttribute('aria-valuetext', T.fmtTime(w.t0));
+      windowEnd.setAttribute('aria-valuemin', String(Math.min(d, w.t0 + Math.min(2, d))));
+      windowEnd.setAttribute('aria-valuemax', String(d));
+      windowEnd.setAttribute('aria-valuenow', String(end));
+      windowEnd.setAttribute('aria-valuetext', T.fmtTime(end));
+      windowPan.setAttribute('aria-label', t('tl.windowRange', { t0: T.fmtTime(w.t0), t1: T.fmtTime(end) }));
+      windowPan.setAttribute('aria-valuemin', '0');
+      windowPan.setAttribute('aria-valuemax', String(Math.max(0, d - w.span)));
+      windowPan.setAttribute('aria-valuenow', String(w.t0));
+      windowPan.setAttribute('aria-valuetext', T.fmtTime(w.t0));
+    }
+    function applyWindow(next, open) {
+      if (!app.timeline) return;
+      const w = currentWindow();
+      app.timeline.setWindow(next, { open: !!open && (Math.abs(w.t0 - next.t0) > 0.000001 || Math.abs(w.span - next.span) > 0.000001) });
+      updateViewport();
+    }
+    function endWindow(cancelled) {
+      const p = windowPress;
+      if (!p) return;
+      windowPress = null;
+      if (cancelled) applyWindow(p.initial, false);
+      if (app.timeline) app.timeline.setWindowInteraction(false);
+      if (p.control.hasPointerCapture(p.pointer)) p.control.releasePointerCapture(p.pointer);
+      viewport.classList.remove('is-dragging');
+    }
+    function windowControl(control, kind) {
+      control.addEventListener('pointerdown', (ev) => {
+        if (ev.button !== 0 || !app.timeline || windowPress) return;
+        ev.preventDefault(); ev.stopPropagation();
+        control.focus({ preventScroll: true });
+        windowPress = { control, kind, pointer: ev.pointerId, x: ev.clientX, initial: currentWindow(), moved: false };
+        app.timeline.setWindowInteraction(true);
+        control.setPointerCapture(ev.pointerId);
+      });
+      control.addEventListener('pointermove', (ev) => {
+        const p = windowPress;
+        if (!p || p.pointer !== ev.pointerId) return;
+        ev.stopPropagation();
+        if (!p.moved && Math.abs(ev.clientX - p.x) < 4) return;
+        p.moved = true;
+        viewport.classList.add('is-dragging');
+        const delta = (ev.clientX - p.x) / Math.max(1, lane.getBoundingClientRect().width) * duration();
+        applyWindow(TL.moveWindow(duration(), p.initial, kind, delta), true);
+      });
+      control.addEventListener('pointerup', (ev) => {
+        const p = windowPress;
+        if (!p || p.pointer !== ev.pointerId) return;
+        ev.stopPropagation();
+        if (kind === 'pan' && !p.moved) app.seek(timeAt(ev));
+        endWindow(false);
+      });
+      control.addEventListener('pointercancel', (ev) => { ev.stopPropagation(); if (windowPress && windowPress.pointer === ev.pointerId) endWindow(true); });
+      control.addEventListener('lostpointercapture', () => endWindow(true));
+      control.addEventListener('dblclick', (ev) => { ev.stopPropagation(); applyWindow({ t0: 0, span: duration() }, true); });
+      control.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Escape' && windowPress) { endWindow(true); ev.preventDefault(); ev.stopPropagation(); return; }
+        if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+        if (ev.key === ' ' || ev.key === 'Enter') { ev.preventDefault(); ev.stopPropagation(); return; }
+        const w = currentWindow(), d = duration(), step = Math.max(0.1, d / 100) * (ev.shiftKey ? 10 : 1);
+        let delta;
+        if (ev.key === 'ArrowLeft' || ev.key === 'ArrowDown') delta = -step;
+        else if (ev.key === 'ArrowRight' || ev.key === 'ArrowUp') delta = step;
+        else if (ev.key === 'Home') delta = -d;
+        else if (ev.key === 'End') delta = d;
+        else return;
+        applyWindow(TL.moveWindow(d, w, kind, delta), true);
+        ev.preventDefault(); ev.stopPropagation();
+      });
+    }
+    windowControl(windowStart, 'start');
+    windowControl(windowEnd, 'end');
+    windowControl(windowPan, 'pan');
+    seekSlider.addEventListener('keydown', (ev) => {
+      if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+      let value;
+      if (ev.key === 'Home') value = 0;
+      else if (ev.key === 'End') value = duration();
+      else if (['ArrowLeft', 'ArrowDown', 'ArrowRight', 'ArrowUp'].includes(ev.key)) value = app.time() + (ev.key === 'ArrowLeft' || ev.key === 'ArrowDown' ? -1 : 1) * (ev.shiftKey ? 10 : 1);
+      else return;
+      app.seek(value); ev.preventDefault(); ev.stopPropagation();
+    });
 
     function layout(res) {
       const st = res.rects.stage;
@@ -146,14 +261,20 @@ MV.def('ui/playbar', ['ui/dom', 'ui/icons', 'ui/looks', 'ui/selection', 'ui/time
     // width changed (its rect, shown buttons, texts).
     function fit() {
       const key = [sizeKey, histBtn.hidden, histBtn.textContent, muteBtn.hidden,
-        omakase.querySelector('.omakase-key').textContent, timeBtn.textContent.length].join('|');
+        omakase.querySelector('.omakase-key').textContent, timeBtn.textContent.length, stripKey, !!stripState].join('|');
       if (key === fitKey) return;
       fitKey = key;
       let level = 0;
+      controls.dataset.modeCompact = 'false';
       controls.dataset.fit = '0';
       while (level < FIT_MAX && controls.scrollWidth > controls.clientWidth + 0.5) {
         level += 1;
         controls.dataset.fit = String(level);
+      }
+      // On narrow screens, keep the mode's actions and transport usable before showing secondary controls.
+      if (stripState && controls.scrollWidth > controls.clientWidth + 0.5) {
+        controls.dataset.modeCompact = 'true';
+        if (controlTools.contains(document.activeElement) || document.activeElement === startBtn) dom.focus(playBtn);
       }
     }
 
@@ -206,6 +327,7 @@ MV.def('ui/playbar', ['ui/dom', 'ui/icons', 'ui/looks', 'ui/selection', 'ui/time
     }
 
     function drawLane() {
+      updateViewport();
       const W = lane.width, H = lane.height;
       const dpr = W / Math.max(1, lane.clientWidth || W);
       const plan = app.plan;
@@ -257,9 +379,9 @@ MV.def('ui/playbar', ['ui/dom', 'ui/icons', 'ui/looks', 'ui/selection', 'ui/time
       lctx.fillRect(Math.round(tp - dpr), 0, Math.max(2, Math.round(2 * dpr)), H);
       lctx.beginPath();
       lctx.moveTo(tp - 5 * dpr, 0); lctx.lineTo(tp + 5 * dpr, 0); lctx.lineTo(tp, 6 * dpr); lctx.closePath(); lctx.fill();
-      laneBox.setAttribute('aria-valuemax', String(Math.round(d * 100) / 100));
-      laneBox.setAttribute('aria-valuenow', String(Math.round(app.time() * 100) / 100));
-      laneBox.setAttribute('aria-valuetext', T.fmtTime(app.time()));
+      seekSlider.setAttribute('aria-valuemax', String(Math.round(d * 100) / 100));
+      seekSlider.setAttribute('aria-valuenow', String(Math.round(app.time() * 100) / 100));
+      seekSlider.setAttribute('aria-valuetext', T.fmtTime(app.time()));
     }
 
     // --- controls ----------------------------------------------------------------------------------------------
@@ -326,14 +448,32 @@ MV.def('ui/playbar', ['ui/dom', 'ui/icons', 'ui/looks', 'ui/selection', 'ui/time
     // --- mode strip (tap / try-on) and flashed messages --------------------------------------------------------
 
     function updateStrip() {
-      const st = flashing || (app.modeStrip ? app.modeStrip() : null);
+      const st = (app.modeStrip ? app.modeStrip() : null) || flashing;
+      stripState = st;
       strip.hidden = !st;
-      laneBox.hidden = !!st;
-      if (!st) return;
-      stripText.textContent = st.text;
-      dom.replace(stripActs, (st.actions || []).map((a) => h('button', { class: 'btn small', type: 'button',
-        on: { click: a.run } }, a.label)));
+      laneBox.hidden = false;
+      historyGroup.hidden = !!st;
+      omakase.hidden = !!st;
+      controls.dataset.modeActive = String(!!st);
+      if (st && (historyGroup.contains(document.activeElement) || document.activeElement === omakase)) dom.focus(playBtn);
+      if (!st) {
+        if (strip.contains(document.activeElement)) dom.focus(playBtn);
+        stripKey = '';
+        fit();
+        return;
+      }
+      if (stripText.textContent !== st.text) stripText.textContent = st.text;
+      stripText.title = st.text;
+      const key = JSON.stringify([st.kind || 'mode', st.text, (st.actions || []).map((a) => a.label)]);
+      if (key !== stripKey) {
+        const hadFocus = stripActs.contains(document.activeElement);
+        dom.replace(stripActs, (st.actions || []).map((a, i) => h('button', { class: 'btn small', type: 'button',
+          on: { click: () => { const action = stripState && stripState.actions && stripState.actions[i]; if (action) action.run(); } } }, a.label)));
+        if (hadFocus) dom.focus(stripActs.querySelector('button') || playBtn);
+      }
+      stripKey = key;
       strip.dataset.kind = st.kind || 'mode';
+      fit();
     }
 
     function flash(text, ms) {
@@ -346,7 +486,8 @@ MV.def('ui/playbar', ['ui/dom', 'ui/icons', 'ui/looks', 'ui/selection', 'ui/time
     function onTime() { updateTime(); updatePlay(); drawLane(); }
 
     app.bus.on('time', onTime);
-    app.bus.on('plan', () => { drawLane(); updateControls(); });
+    app.bus.on('timeline.window', updateViewport);
+    app.bus.on('plan', () => { if (windowPress) endWindow(true); endScrub(); drawLane(); updateControls(); });
     app.bus.on('side', updateControls);
     app.bus.on('focus', updateControls);
     app.view.on((changed) => {

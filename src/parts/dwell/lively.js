@@ -7,7 +7,8 @@ MV.def('parts/dwell/lively', ['parts/kit'], (K) => {
   const FLICKER_MAX_HZ = 12;      // dips stay smooth (no single-frame pops) and gentle for the eyes
   // Compositions whose words sit on a fixed decoration: the beat pulse (a block scale) is not paired with them (see
   // parts/dwell/calm).
-  const BOUND = new Set(['gridMosaic', 'hangingTags', 'tiltedCard', 'slantBand', 'titlePlate', 'magazineHead']);
+  const BOUND = new Set(['gridMosaic', 'hangingTags', 'tiltedCard', 'slantBand', 'titlePlate', 'magazineHead',
+    'windowVerse', 'quoteVerse', 'glassLayers', 'wovenStrips', 'pennantLine', 'marginRail', 'focusBadge']);
 
   // K.perGlyphHold with more context in the params its function sees (see parts/dwell/calm): the hold window, the
   // reading axis, the scene's seed (for closed-form noise), the text block's half size and a typical glyph size.

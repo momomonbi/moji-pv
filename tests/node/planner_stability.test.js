@@ -4,6 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { load } = require('../helpers/load.js');
 const corpus = require('../helpers/corpus.js');
+const { originalLayouts } = require('../helpers/camera_baseline.js');
 
 const MV = load();
 const REG = MV.use('core/registry');
@@ -236,19 +237,57 @@ for (const [RN, SYN] of REGISTRIES) {
     assert.ok(over <= cases * bound.share, over + ' of ' + cases + ' rerolls changed more than 3 other cuts');
   });
 
-  test(RN + ': a line reroll changes only that line and the cuts right after it; the look stays', () => {
+  // The numerical scope bound was calibrated on the original layout pool. Fixed panels constrain the following
+  // holds; adding more panels changes their natural picks and can carry those picks to an echoed line much later.
+  // Keep the original bound and verify the current catalog's actual dependency scope separately below.
+  test(RN + ': a line reroll stays within the calibrated four-other-cut bound; the look stays', () => {
+    const registry = RN === 'catalog' ? originalLayouts(MV, SYN) : SYN;
     for (const { name, doc } of corpus.corpus(1)) {
-      const a = PL.run(doc, SYN, null);
+      const a = PL.run(doc, registry, null);
       for (const line of a.lines.filter((l, i) => i % 12 === 0)) {
         const rolled = JSON.parse(JSON.stringify(doc));
         rolled.salts = Object.assign({}, rolled.salts, { ['line/' + line.id]: 1 });
-        const b = PL.run(rolled, SYN, null);
+        const b = PL.run(rolled, registry, null);
         const others = compare(a, b, line.id).changed;
         assert.ok(others.length <= 4, name + ' line ' + line.id + ': ' + others.join(' '));
         assert.equal(b.look.mood.v, a.look.mood.v);
         assert.equal(b.look.theme.v, a.look.theme.v);
       }
     }
+  });
+
+  test(RN + ': current-catalog line rerolls reach only history windows, echoes or replacement seams, keeping unrelated cuts and the look', (t) => {
+    let cases = 0, changed = 0;
+    for (const { name, doc } of corpus.corpus(1)) {
+      const a = PL.run(doc, SYN, null), indexes = new Map(a.cuts.map((c, i) => [c.key, i]));
+      for (const line of a.lines.filter((l, i) => i % 12 === 0)) {
+        const rolled = JSON.parse(JSON.stringify(doc));
+        rolled.salts = Object.assign({}, rolled.salts, { ['line/' + line.id]: 1 });
+        const b = PL.run(rolled, SYN, null), moved = new Set(compare(a, b, null).changed);
+        const own = new Set(a.cuts.filter((c) => c.line === line.id).map((c) => indexes.get(c.key)));
+        const nearOwn = (i) => own.has(i) || [1, 2, 3, 4].some((n) => own.has(i - n));
+        assert.deepEqual(b.cuts.map((c) => [c.key, c.line, c.t0, c.t1]), a.cuts.map((c) => [c.key, c.line, c.t0, c.t1]));
+        assert.deepEqual(b.look, a.look);
+        for (const c of b.cuts) {
+          if (!moved.has(c.key) || c.line === line.id) continue;
+          const i = indexes.get(c.key), echo = indexes.get(c.feat.repeatOf);
+          const recent = [1, 2, 3, 4].some((n) => i >= n && moved.has(b.cuts[i - n].key));
+          // A transition on the line's boundary can replace the preceding cut's exit (or a following entrance).
+          // Permit only that exact motion field, and only when its replacement flag actually changed.
+          const differences = SLOTS.filter((slot) => valueOf(a.cuts[i], slot) !== valueOf(c, slot));
+          const replaced = (plan, motion) => plan.seams.some((s) => (motion === 'depart' ? s.a : s.b) === c.key
+            && SYN.get('seam', s.slot.v).replaces && SYN.get('seam', s.slot.v).replaces[motion]);
+          const seamRelay = differences.every((slot) => ['arrive', 'depart'].includes(slot)
+            && replaced(a, slot) !== replaced(b, slot));
+          assert.ok(nearOwn(i) || recent || echo !== undefined && nearOwn(echo) || seamRelay,
+            name + ' line ' + line.id + ': unrelated ' + c.key + ' (' + differences.join(',') + ')');
+          changed++;
+        }
+        cases++;
+      }
+    }
+    t.diagnostic(cases + ' rerolls / ' + changed + ' changed cuts checked against their actual dependency edges');
+    assert.ok(cases > 0 && changed > 0, 'the dependency assertions must inspect changed cuts');
   });
 
   // A slot salt changes that slot's stream only (§3.7). Its new value becomes the cut's reference pick, which the next

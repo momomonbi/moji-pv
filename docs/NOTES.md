@@ -9587,3 +9587,41 @@ native-browser cases. Real legacy project open/export uses local AAC; independen
 hardware-preference reporting, streamed saves, cancellation and restart pass without uploads or CSP violations.
 Independent compiled-page review verifies all script/style hashes and the restricted connection policy. All six
 render golden files match unchanged.
+
+## 2026-10-12 — Camera navigation, visual guides and larger sample playback
+
+Added ten lyric compositions and six textless interlude effects, bringing arrangements to 49. New panel/frame
+layouts keep the letters attached to their decoration by excluding incompatible block holds. The expanded automatic
+layout pool supplies more variety. Added ten ordinary cut-camera paths and six section rigs as hand/AI presets,
+while keeping existing automatic camera weights. Existing pinned presets retain their rendering.
+
+Sticky inspector bookmarks jump to camera, layout, text, background, decoration, effects, timing and media. They
+retain the exact cut/line/area editing scope, expand the target and focus it; deferred focus cannot override a later
+selection or closed panel. Multi-line pages expose their camera, decoration and effect controls directly.
+
+A camera timeline row displays names, direction cues, section rigs and fitted keys; clicking jumps to the correct
+cut's settings. The bottom overview remains full-song and retains its waveform, blocks and playhead through zoom,
+try-on, compare, tap and notifications. Edge handles resize the detailed view and a strip pans it. Long songs and
+two-second windows retain separate, on-screen controls through vertically separated narrow-window hit targets.
+Cancel/Escape/lost capture restores the window. Keyboard adjustment and temporary follow suspension are supported.
+
+A preview-only wireframe shows actual composed camera footprints, trajectories, zoom and rotation. It uses the
+renderer matrix and real camera evaluation, including lens, rig, impulses, EXTREME and calm mode. Paths cache per
+plan/cut/gap and restore current-time evaluation. Guides are absent from project documents and export renderers.
+
+Camera fields and picker cards provide a large sample dialog. It renders the complete actual sample at half speed
+with pause, restart, seek, quarter/normal speed, looping and stationary guides. The canvas follows the project
+aspect; current camera parameters and real common rig amplitude are captured. A disposable engine fork leaves
+project playback, document and undo history untouched. Reduced-motion users get a visible paused still and can
+play from the beginning. Hidden pages pause; every modal exit disposes animation, listeners and the fork. Camera
+picker apply/preview controls are native sibling buttons with appropriate group semantics and keyboard navigation.
+
+Validation: 18 distinct Japanese/English native-browser flows cover desktop/375 px/portrait navigation, camera
+tracks, actual 180/3600-second overview targets, mode visibility, sample playback and disposal, preset/rig selection
+and export isolation. Wireframe ON/OFF gives identical PNG pixels and all six actual H.264 encoder input frames;
+lossy decoded differences remain small. Independent review compares 650 existing pinned plan/render frames against
+HEAD with exact parity. All 23 build checks and all six refreshed golden files pass. Golden changes retain fixture
+structure and frame counts and reflect the expanded layout catalog. Node regressions cover the full catalog's
+geometry, fades, filters, camera paths, scopes, explanations and AI vocabulary. Statistical fixtures explicitly
+retain the original 33-layout calibration thresholds, while current-catalog dependency and specification checks
+remain on all 49 layouts. Original AI system/schema snapshots are unchanged; only preset vocabulary expands.

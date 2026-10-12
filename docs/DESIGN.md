@@ -2535,10 +2535,26 @@ grouping is fine as long as each file only depends on `parts/kit`.
 | `peakBars` (role interlude) | 光の柱 | Light columns | bold fast digital | Columns from the bass on the left to the treble on the right, reflected on the floor, each with a peak mark that falls slowly (no text). |
 | `breathMark` (role interlude, pin only) | 間の印 | Breath mark | minimal slow | A small ♪ or the section heading, centred, slowly breathing; since the interlude effects it is never picked automatically (`pool: false`). |
 | `creditFold` (role outro) | 終わりの札 | Credit fold | minimal | Title and artist as a quiet corner credit. |
+| `windowVerse` | 窓の余白 | Open window | minimal serious | An open window frames the lyric with generous surrounding space. |
+| `quoteVerse` | 引用の余白 | Quotation space | literary soft | A quotation-style lyric with corner marks and quiet whitespace. |
+| `archPhrase` | 言葉のアーチ | Phrase arch | airy playful | The words form a readable arch above an open lower frame. |
+| `orbitCaption` | 月とキャプション | Moon caption | airy minimal | A circular moon motif balances a caption to one side. |
+| `glassLayers` | 重なるガラス | Layered glass | digital soft | Overlapping translucent panes hold the lyric. |
+| `splitHorizon` | 向かい合う余白 | Distant halves | serious slow | Two distant groups face one another across the horizon. |
+| `wovenStrips` | 織り重なる帯 | Woven strips | retro playful | Layered paper strips weave beneath the words. |
+| `pennantLine` | 言葉の旗 | Lyric pennant | bold retro | The lyric sits inside a graphic pennant. |
+| `marginRail` | 余白のレール | Margin rail | minimal literary | Fine margin rules lead the eye along the lyric. |
+| `focusBadge` | 円いエンブレム | Lyric emblem | serious retro | A circular emblem and fine radial ticks surround the lyric. |
+| `prismFan` (role interlude) | プリズムの扇 | Prism fan | bold digital | Colored prisms open into a fan (no text). |
+| `orbitMoons` (role interlude) | めぐる小さな月 | Orbiting moons | airy serious | Small moons orbit in balanced layers (no text). |
+| `ribbonWeave` (role interlude) | 揺れる光の織物 | Ribbon weave | soft airy | Light ribbons weave and float with the music (no text). |
+| `shutterBloom` (role interlude) | ひらく絞り | Shutter bloom | digital bold | An aperture opens and closes in a radial bloom (no text). |
+| `constellationMesh` (role interlude) | ほどける星座 | Constellation mesh | airy minimal | A constellation mesh loosens into drifting stars (no text). |
+| `paperDrift` (role interlude) | 浮かぶ折り紙 | Floating paper | organic playful | Folded paper floats through the frame (no text). |
 
 Interlude effects (`parts/arrange/interlude.js`). Every interlude cut draws one of `lightMotes`, `soundHorizon`,
 `kineticShapes`, `neonWave`, `ringPulse`, `warpField`, `tileRipple`, `burstBloom`, `harmonicString`, `ridgeLines`, `polarWave`
-and `peakBars`, picked by the mood's tags, the part's energy range and `fits` (a beat grid helps the horizon). They set
+`peakBars`, `prismFan`, `orbitMoons`, `ribbonWeave`, `shutterBloom`, `constellationMesh` and `paperDrift`, picked by the mood's tags, the part's energy range and `fits` (a beat grid helps the horizon). They set
 no text at all: no ♪ and no heading. They are `cam: 'gentle'` (a glyph-free cut leaves the gentle shot inert) and have
 no `motion: 'own'`, so the lyric neighbours keep every entrance, exit and camera decision. They draw on the far and mid
 layers only (never near, which a text seam mixes). They wait out the line before (their entrance starts 0.15 s into the
@@ -2550,7 +2566,7 @@ hides a longer tail, so the entrance then starts at 0.15 s as with the default t
 declares (§4.18: the beat grid and the loudness, both in the cut fingerprint, §3.12), and they never fake a tempo:
 with a song and a grid they react to the loudness and ripple, glint or recombine on the beats; with a song and no grid
 they follow the loudness's onsets; a bpm pin without a song gives beats but no loudness; with neither, the motion is
-slow and aperiodic. 表現の強さ (the `shape` param of all three; no longer shown in the UI, kept for saved documents):
+slow and aperiodic. 表現の強さ (the `shape` param of the interlude effects; no longer shown in the UI, kept for saved documents):
 自動 derives a strength over the interlude from the song's loudness swell (a little more for a quick tempo, a gentle
 build to the climax; without a song a slow arc); a drawn graph sets it, and a song adds ±0.12 of its swell. The
 strength scales what the effect does: how many motes show, how tall the horizon swells, how fast drifts and turns run (a
@@ -2814,8 +2830,8 @@ Width layouts: **wide** ≥ 1360 (step 320, detail 352), **standard** 1200–135
 below, vertical page scroll only, a one-time note recommends ≥ 1024 px). Rail = 48 px.
 
 Height tiers by inner height: **tall** ≥ 860 and **normal** 740–859 (header 48, stage padding 16, gap 12, play bar 88 =
-lane 40 + 8 + controls 40, timeline drawer +144); **short** < 740 (header 44, padding 12, gap 8, play bar 74 = lane 32 + 6
-+ controls 36, drawer +112). Below 600 px of height the stage keeps a minimum of 360 px and the page scrolls vertically.
+lane 40 + 8 + controls 40, timeline drawer +178); **short** < 740 (header 44, padding 12, gap 8, play bar 74 = lane 32 + 6
++ controls 36, drawer +148). Below 600 px of height the stage keeps a minimum of 360 px and the page scrolls vertically.
 
 ```
 left   = compact ? 320 : (rail ? 48 : stepWidth)
@@ -2835,18 +2851,18 @@ Measured table (16:9 unless noted; the layout test asserts these ±1 px):
 
 | Viewport | Layout / tier | Nothing open | 詳細 open (step column kept) | 詳細 open + rail (auto-fold) | Timeline drawer | 9:16, nothing open |
 |---|---|---|---|---|---|---|
-| 1920×1080 | wide / tall | 1568×882 | 1216×684 | 1488×837 | 1344×756 | 506×900 |
-| **1440×900** | wide / tall | **1088×612** | 736×414 | **1008×567** | 1024×576 | 405×720 |
-| 1440×789 | wide / normal | 1082×609 | 736×414 | 1008×567 | 826×465 | 342×609 |
-| 1366×768 | wide / normal | 1014×570 | 662×372 | 934×525 | 789×444 | 330×588 |
-| **1280×800** | standard / normal | **952×535** | 640×360 | **888×499** | 846×476 | 348×620 |
-| 1280×720 | standard / short | 960×540 | 648×364 | 896×504 | 814×458 | 320×570 |
-| 1280×689 | standard / short | 958×539 | 648×364 | 896×504 | 759×427 | 303×539 |
-| 1200×700 | standard / short | 880×495 | 568×319 | 816×459 | 778×438 | 309×550 |
+| 1920×1080 | wide / tall | 1568×882 | 1216×684 | 1488×837 | 1283×722 | 506×900 |
+| **1440×900** | wide / tall | **1088×612** | 736×414 | **1008×567** | 963×542 | 405×720 |
+| 1440×789 | wide / normal | 1082×609 | 736×414 | 1008×567 | 766×431 | 342×609 |
+| 1366×768 | wide / normal | 1014×570 | 662×372 | 934×525 | 728×410 | 330×588 |
+| **1280×800** | standard / normal | **952×535** | 640×360 | **888×499** | 785×442 | 348×620 |
+| 1280×720 | standard / short | 960×540 | 648×364 | 896×504 | 750×422 | 320×570 |
+| 1280×689 | standard / short | 958×539 | 648×364 | 896×504 | 695×391 | 303×539 |
+| 1200×700 | standard / short | 880×495 | 568×319 | 816×459 | 714×402 | 309×550 |
 | **1024×768** | compact / normal | **672×378** | 672×378 (same column) | — | 672×378 | 330×588 |
-| 1024×640 | compact / short | 680×382 | 680×382 | — | 672×378 | 275×490 |
+| 1024×640 | compact / short | 680×382 | 680×382 | — | 608×342 | 275×490 |
 
-With the drawer and 詳細 both open on the rail: 1280×800 → 846×476, 1440×900 → 1008×567.
+With the drawer and 詳細 both open on the rail: 1280×800 → 785×442, 1440×900 → 963×542.
 
 ### 6.3 Wireframes (final; generated from the formula at 12 px per column and 20 px per row)
 
@@ -2991,7 +3007,7 @@ W3  1280x800  top level: step 3 active, nothing selected  (preview 952x535)
 |  [ Next: 4 Export -> ] ||[>] 0:12.40 / 3:42.00      [<] 3/7 [>]  [* New look]  [vol] [TL]             ||
 +------------------------++-----------------------------------------------------------------------------++
 
-W4  1280x800  cut 12-2 selected on the preview: step column auto-folded to its rail, Details open, timeline drawer open  (preview 846x476)
+W4  1280x800  cut 12-2 selected on the preview: step column auto-folded to its rail, Details open, timeline drawer open  (preview 785x442)
 +--------------------------------------------------------------------------------------------------------+
 | [#] Moji PV Maker | Yoake no uta  (autosaved)                      [Undo] [Redo]  [*Details*] [AI] [=] |
 +---+----------------------------------------------------------------------------+-----------------------+
@@ -3164,7 +3180,7 @@ Tap mode (T): the play-bar lane becomes the mode strip, the step column shows:
 ▶/⏸ · time readout (click to type a time) · lane (scrub; shows cut blocks, pinned edges solid, auto edges dashed, locked
 lines hatched, waveform behind) · ◀ · `n/m` · ▶ (look history; the counter is hidden while there is ≤ 1 entry; `●/m` when
 modified, §3.7; clicking `n/m` opens 作品全体 › 試した見た目) · **おまかせ** · 音 (mute; only with a song) · タイムライン
-(drawer). During tap mode or try-on, the lane row becomes the **mode strip** (「案Bを試写中 [この案にする] [やめる]」,
+(drawer). During tap mode or try-on, the transport controls replace look history and shuffle with the **mode strip**, keeping the full-song lane visible (「案Bを試写中 [この案にする] [やめる]」,
 「タップ中 12/40 [1行戻る] [終わる]」); nothing shifts.
 
 #### 6.4.3 Steps (step column; each body ≤ 5 controls; footer = 次へ and « fold)
@@ -3329,11 +3345,16 @@ announced by the polite live region. Toasts stack at most 2 and expire after 6 s
 #### 6.4.13 Timeline (lane and drawer)
 
 Lane (always): cut blocks, playhead, waveform (with a song), section bands; click = seek; double-click = select the line;
-drag = scrub. Drawer (Shift+T): rows 拍 (beats/bars) · 曲 (waveform + AI section bands + highlight marks) · 行 · カット;
+drag = scrub. The lane always uses the full song duration, including when the drawer is zoomed. A thin viewport outline
+with left/right handles resizes the drawer window; its bottom strip pans the window, while a click without dragging
+still seeks. Escape, pointer cancellation and lost capture restore the original window. Handles and the strip
+support keyboard adjustment. Drawer (Shift+T): rows 拍 (beats/bars) · 曲 (waveform + AI section bands + highlight marks) · 行 · カット · カメラ;
 ruler; toolbar [拍に合わせる] [BPM] [ズーム − 全体 +] [追いかける]. Drag a line body = move (pins start and end); drag an
 edge = trim; drag an inner cut boundary = `cut/<key>:t0`; Alt during the drag = no snapping; Shift+I / Shift+O or Shift-drag
 on the ruler = export range band. Keyboard: Ctrl+←/→ nudges the focused edge 1 frame (Shift ×10). A11y: each row has a
-DOM listbox proxy (「12行, 0:42.10 から 0:45.80, ロック, 固定2件」).
+DOM listbox proxy (「12行, 0:42.10 から 0:45.80, ロック, 固定2件」). The camera row shows shot names, movement
+directions, section rig bands and fitted keys for the selected cut. Clicking it selects that exact cut and jumps
+to its camera settings without editing any camera values.
 
 #### 6.4.14 Lyric editor (step ①)
 

@@ -60,6 +60,72 @@ function steps(lo, hi, n) { return Array.from({ length: n + 1 }, (_, k) => lo + 
 
 function boxCentre(b, W, H) { return [b.x + b.w / 2 - W / 2, b.y + b.h / 2 - H / 2]; }
 
+const EXTRA_SHOTS = ['breathingRoom', 'floatingArc', 'diagonalGlide', 'swayBack', 'focusAndReturn', 'riseIntoView',
+  'pushHoldRelease', 'frameToWords', 'passingFocus', 'levelLanding'];
+const EXTRA_RIGS = ['breathCycle', 'floatingWave', 'diagonalDrift', 'orbitArc', 'swayLevel', 'surgeSettle'];
+
+test('additional shots have distinct moving paths in landscape, portrait and square, with continuous landings', () => {
+  for (const aspect of ['16:9', '9:16', '1:1']) {
+    const paths = new Set();
+    for (const key of EXTRA_SHOTS) {
+      const { scene, W, H } = shotScene({ shot: key, text: TEXTS.en, aspect, zoom: 1, follow: 0 });
+      const tr = scene.shot;
+      const poses = steps(tr.a, tr.b, 32).map((t) => poseAt(scene, t));
+      const normalized = poses.map((p) => [p.x / W, p.y / H, p.zoom, p.roll]);
+      assert.ok(normalized[0].some((v, i) => normalized.some((p) => Math.abs(p[i] - v) > 0.005)), aspect + ' ' + key + ' moves');
+      const path = JSON.stringify(normalized.map((p) => p.map((v) => Math.round(v * 1e5))));
+      assert.ok(!paths.has(path), aspect + ' ' + key + ' has its own path');
+      paths.add(path);
+      for (const p of poses) {
+        for (const name of ['x', 'y', 'zoom', 'roll']) assert.ok(Number.isFinite(p[name]), key + ' ' + name);
+        assert.ok(p.zoom >= 0.9 && p.zoom <= 3, key + ' zoom');
+        assert.ok(Math.abs(p.x) <= SS.bleedLimit(W, p.zoom) + 1e-8, key + ' x bleed');
+        assert.ok(Math.abs(p.y) <= SS.bleedLimit(H, p.zoom) + 1e-8, key + ' y bleed');
+        assert.ok(Math.abs(p.roll) <= SHOT.LIMITS.roll[1] * N.DEG, key + ' roll');
+      }
+      for (const k of tr.keys.slice(1, -1)) {
+        const a = poseAt(scene, k.t - 1e-6), b = poseAt(scene, k.t + 1e-6);
+        for (const name of ['x', 'y', 'zoom', 'roll']) approx(a[name], b[name], 1e-4, key + ' landing ' + name);
+      }
+    }
+  }
+});
+
+test('pushHoldRelease holds the actual camera steady between the push and the release', () => {
+  const { scene } = shotScene({ shot: 'pushHoldRelease', text: TEXTS.en, zoom: 1, follow: 0 });
+  const tr = scene.shot;
+  const first = poseAt(scene, tr.t[1]), last = poseAt(scene, tr.t[2]);
+  assert.deepEqual(first, last);
+  for (const t of steps(tr.t[1], tr.t[2], 16)) assert.deepEqual(poseAt(scene, t), first);
+  assert.ok(first.zoom > poseAt(scene, tr.a).zoom + 0.1, 'push remains visible after framing clamps');
+  assert.ok(first.zoom > poseAt(scene, tr.b).zoom + 0.1, 'release remains visible after framing clamps');
+});
+
+test('additional section rigs move continuously within the section-camera limits, including maximum amplitude', () => {
+  for (const aspect of ['16:9', '9:16']) {
+    const paths = new Set();
+    for (const key of EXTRA_RIGS) {
+      const { plan, W, H } = shotScene({ shot: 'none', aspect });
+      plan.rigs = [{ t0: 0, t1: 12, blend: null, rig: { v: key, p: { amp: 1.3 } }, curve: { v: SHOT.RIGS[key].curve } }];
+      const poses = steps(0, 12, 120).map((t) => F.rigAt(plan, t, {}));
+      const normalized = poses.map((p) => [p.x / W, p.y / H, p.zoom, p.roll]);
+      assert.ok(normalized[0].some((v, i) => normalized.some((p) => Math.abs(p[i] - v) > 0.005)), aspect + ' ' + key + ' moves');
+      const path = JSON.stringify(normalized.map((p) => p.map((v) => Math.round(v * 1e5))));
+      assert.ok(!paths.has(path), key + ': unique actual path');
+      paths.add(path);
+      for (const p of poses) {
+        assert.ok(p.zoom >= 0.95 && p.zoom <= 1.15, key + ' zoom');
+        assert.ok(Math.abs(p.x) <= 0.05 * W && Math.abs(p.y) <= 0.05 * H, key + ' position');
+        assert.ok(Math.abs(p.roll) <= 4 * N.DEG, key + ' roll');
+      }
+      for (const k of SHOT.RIGS[key].keys.slice(1, -1)) {
+        const a = F.rigAt(plan, 12 * k.u - 1e-6, {}), b = F.rigAt(plan, 12 * k.u + 1e-6, {});
+        for (const name of ['x', 'y', 'zoom', 'roll']) approx(a[name], b[name], 1e-4, key + ' turn ' + name);
+      }
+    }
+  }
+});
+
 test('engine/scene/shot exports the §3.10 interface; kit exports the §3.11 helpers', () => {
   for (const name of ['makeShot', 'aimBox', 'anchorTime', 'frame', 'poseAt', 'runShot', 'leanInto']) {
     assert.equal(typeof SS[name], 'function', 'shot.' + name);

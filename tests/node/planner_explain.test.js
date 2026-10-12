@@ -12,6 +12,7 @@ const R = MV.use('core/rng');
 const PL = MV.use('planner/plan');
 const EX = MV.use('planner/explain');
 const CH = MV.use('planner/choose');
+const SHOT = MV.use('core/shot');
 
 // --- a synthetic registry: the stub parts plus many generated parts per kind (varied tags, traits, seasons, scopes),
 // so the chooser has real choices before the catalog exists. Test data only. -------------------------------------
@@ -353,7 +354,8 @@ test('explain() gives the Plan\'s value and source for 500 random paths of the v
     }
     for (const w of e.why) assert.ok(NEW_WHY.has(w.code), path + ': why code ' + w.code);
     if (slot === 'cam.shot' || slot === 'rig') {
-      assert.equal(e.alts.length, slot === 'rig' ? 6 : 10, path + ' alternatives');
+      const keys = slot === 'rig' ? SHOT.RIG_KEYS : SHOT.AUTO_SHOT_KEYS;
+      assert.deepEqual(e.alts.map((a) => a.key).sort(), keys.concat(['none']).sort(), path + ' alternatives');
       for (let k = 1; k < e.alts.length; k++) assert.ok(e.alts[k - 1].w >= e.alts[k].w, path + ' sorted');
     }
     seen.add(slot + '@' + scope);

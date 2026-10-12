@@ -28,6 +28,14 @@ Click the preview or a lyric line and the **Details** column shows that part. Yo
 - **Look history ◀ ▶** — the ◀ ▶ buttons in the play bar step through the looks you have tried.
 - Every change can be undone, and your work is autosaved in the browser.
 
+The Details panel has bookmarks for **Camera, Layout, Text, Background, Decorations, Effects, Timing and Photos/videos**. Jump to a setting while keeping the selected line, cut or section.
+
+Click the **Camera** track to open that cut’s camera settings. The bottom overview always shows the full song and playhead. Drag either viewport edge to zoom the detailed timeline, or its strip to pan it.
+
+Use **Large preview** in camera settings or its picker to play a larger sample in a popup. Pause, seek, loop or change speed; the default 0.5× speed makes the motion easier to follow.
+
+Turn on **Wireframe** in the preview to see the actual camera frame, path, zoom and rotation. These guides are excluded from exports. Added presets include ten lyric layouts, six interludes, ten cut-camera paths and six section-camera rigs.
+
 **Camera EXTREME** — switch on **Camera EXTREME** under whole video › Energy for intense camerawork: crash zooms, whips,
 spins, shakes on the beat and more (Strong / Very strong / Maximum; also per section or line, and from the **EXTREME**
 chip next to **Let AI do the camerawork**). With **Repeat lines the same way** on too, a second chorus plays the same

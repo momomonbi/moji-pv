@@ -1,5 +1,5 @@
 /* 文字PVメーカー v2 — original work. Part browser: tile pages with try-on, filter pages ("use only these"), thumbnails via engine.thumb, マイ素材, the 写真・動画 tab, tile groups (DESIGN §6.4.12; DESIGN_2_1 §6.9, §11.7.5; DESIGN_EXTREME §2.6). */
-MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output', 'ui/media_widgets', 'ui/media_io', 'core/shot'], (dom, I, OUT, MW, MI, SHOT) => {
+MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output', 'ui/media_widgets', 'ui/media_io', 'core/shot', 'ui/camera_preview'], (dom, I, OUT, MW, MI, SHOT, CP) => {
   'use strict';
 
   const { h } = dom;
@@ -171,9 +171,11 @@ MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output', 'ui/media_widgets'
   // Grid navigation: the tiles in rows by their offsetTop. With tile groups (a heading starts a new row) ↑ ↓ go to the
   // nearest tile of the row above or below.
   function moveFocus(grid, dx, dy) {
-    const tiles = [...grid.querySelectorAll('.pb-tile:not([hidden])')];
+    const tiles = [...grid.querySelectorAll('.pb-tile:not([hidden])')].filter((x) => !x.closest('[hidden]'));
     if (!tiles.length) return;
-    const at = Math.max(0, tiles.indexOf(document.activeElement));
+    const focused = document.activeElement;
+    const card = focused && focused.closest ? focused.closest('.pb-camera-item') : null;
+    const at = Math.max(0, tiles.indexOf(card ? card.querySelector('.pb-tile') : focused));
     const cols = Math.max(1, tiles.filter((x) => x.offsetTop === tiles[0].offsetTop).length);
     let to = Math.max(0, Math.min(tiles.length - 1, at + dx + dy * cols));
     if (dy && grid.querySelector('.pb-group')) {
@@ -221,6 +223,7 @@ MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output', 'ui/media_widgets'
     const reg = app.reg;
     const thumbs = app.thumbs;
     const listed = Array.isArray(o.keys);
+    const cameraGrid = CP.KINDS.includes(o.kind);
     let tab = o.kind === 'theme' || o.kind === 'mood' || (listed && !o.alts) ? 'all' : 'rec';
     let query = '';
     let tag = null;
@@ -229,6 +232,8 @@ MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output', 'ui/media_widgets'
     let alts = null;                          // { plan, keys | null }: the おすすめ order explain() gave for that plan
     let altsJob = null;
     let destroyed = false;
+    let cameraPreview = null;
+    const cameraItems = new Map();
     let tiles = new Map();                    // part key → its tile (the 自動 / なし tiles lead the grid)
     let leading = [];
     let emptyNote = null;
@@ -237,7 +242,7 @@ MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output', 'ui/media_widgets'
     const search = h('input', { class: 'text-input pb-search', type: 'search', placeholder: t('pb.search'), 'aria-label': t('pb.search'),
       spellcheck: false });
     const tags = h('div', { class: 'chips pb-tags', role: 'group', 'aria-label': t('pb.tags') });
-    const grid = h('div', { class: 'pb-grid', role: 'listbox', 'aria-label': o.label });
+    const grid = h('div', { class: 'pb-grid', role: cameraGrid ? 'group' : 'listbox', 'aria-label': o.label });
     const el = h('div', { class: 'pb-page' }, tabs, search, tags, grid);
 
     const all = listed ? o.keys.slice() : keysFor(reg, o.kind, o).filter((k) => !isDerivedMedia(reg, k));
@@ -319,15 +324,34 @@ MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output', 'ui/media_widgets'
       const current = key !== null && isCurrent(key);
       const el2 = h('button', {
         class: ['pb-tile', current ? 'is-current' : '', extra && extra.dim ? 'is-dim' : '', extra && extra.group ? 'pb-in-group' : ''],
-        type: 'button', role: 'option', 'aria-selected': String(current), 'data-key': key === null ? '' : key,
+        type: 'button', role: cameraGrid ? null : 'option', 'aria-selected': cameraGrid ? null : String(current),
+        'aria-pressed': cameraGrid ? String(current) : null, 'data-key': key === null ? '' : key,
         title: extra && extra.blurb ? extra.blurb : label, 'aria-describedby': extra && extra.describedBy ? extra.describedBy : null,
         'data-group': extra && extra.group ? extra.group : null,
       }, canvas, h('span', { class: 'pb-name', text: label }),
       extra && extra.badge ? h('span', { class: 'pb-badge', text: extra.badge }) : null,
       current ? h('span', { class: 'pb-cur' }, I.icon('check', { size: 14 })) : null);
       if (key === null) el2.classList.add('pb-auto');
+      if (CP.supports(kindOf(key), key)) {
+        const preview = h('button', { class: 'chip-btn pb-camera-preview', type: 'button',
+          'data-preview-kind': kindOf(key), 'data-preview-key': key,
+          'aria-haspopup': 'dialog',
+          'aria-label': t('camera.sample.openNamed', { name: label }),
+          on: { click: (ev) => {
+            ev.stopPropagation();
+            stopTry(); if (stopAnim) { stopAnim(); stopAnim = null; }
+            if (cameraPreview) cameraPreview.close();
+            cameraPreview = CP.open(app, o.previewRef ? o.previewRef(key) : { kind: kindOf(key), key }, { name: label, blurb: extra && extra.blurb });
+            const active = cameraPreview;
+            if (active) active.done.then(() => { if (cameraPreview === active) cameraPreview = null; });
+          }, focusin: () => { stopTry(); if (stopAnim) { stopAnim(); stopAnim = null; } },
+          pointerover: () => { stopTry(); if (stopAnim) { stopAnim(); stopAnim = null; } } },
+        }, I.icon('play', { size: 12 }), t('camera.sample.open'));
+        cameraItems.set(el2, h('div', { class: 'pb-camera-item', role: 'presentation' }, el2, preview));
+      }
       return el2;
     }
+    const holderOf = (tileEl) => cameraItems.get(tileEl) || tileEl;
 
     // A tile's thumbnail is drawn the first time the tile shows (hidden tiles cost nothing).
     let drawn = new Set();
@@ -426,6 +450,7 @@ MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output', 'ui/media_widgets'
     // Every tile of the page, for the document and plan as they are now.
     function build() {
       buildMedia();
+      cameraItems.clear();
       leading = [tile(null, o.allowNone ? t('pb.none') : t('pb.auto'), { blurb: t('pb.autoTip') })];
       tiles = new Map();
       drawn = new Set();
@@ -482,15 +507,15 @@ MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output', 'ui/media_widgets'
       const shownGroups = tab === 'all' || tab === 'rec' ? groupEls.map((x) => ({ head: x.head, keys: x.g.keys.filter(matches) }))
         .filter((x) => x.keys.length) : [];
       const groupKeys = [].concat(...shownGroups.map((x) => x.keys));
-      const want = leading.concat(tab === 'mine' && makeTile ? [makeTile] : [], keys.map((k) => tiles.get(k)),
-        ...shownGroups.map((x) => [x.head].concat(x.keys.map((k) => tiles.get(k)))));
+      const want = leading.map(holderOf).concat(tab === 'mine' && makeTile ? [makeTile] : [], keys.map((k) => holderOf(tiles.get(k))),
+        ...shownGroups.map((x) => [x.head].concat(x.keys.map((k) => holderOf(tiles.get(k))))));
       if (!keys.length && !groupKeys.length && !pending()) want.push(emptyNote);
       const now = grid.children;
       if (want.length !== now.length || want.some((n, i) => now[i] !== n)) {
         const focused = grid.contains(document.activeElement) ? document.activeElement : null;
         dom.replace(grid, want);
         // A focused tile that stays keeps the focus; one that leaves hands it to 自動に戻す (never to the page).
-        if (focused && document.activeElement !== focused) dom.focus(want.includes(focused) ? focused : leading[0]);
+        if (focused && document.activeElement !== focused) dom.focus(want.some((n) => n === focused || n.contains(focused)) ? focused : leading[0]);
       }
       for (const key of keys.concat(groupKeys)) drawThumb(key, tiles.get(key));
     }
@@ -504,6 +529,7 @@ MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output', 'ui/media_widgets'
     // --- try-on, picking, context menu -------------------------------------------------------------------------
 
     function tryKey(key) {
+      if (cameraPreview || app.dialogs && app.dialogs.isOpen()) return;
       clearTimeout(tryTimer);
       tryTimer = setTimeout(() => {
         const doc = key === undefined ? null : o.tryDoc(key);
@@ -534,6 +560,7 @@ MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output', 'ui/media_widgets'
     dom.on(grid, 'focusin', '.pb-media', (ev, el2) => tryMedia(el2));
     dom.on(grid, 'click', PICKABLE, (ev, el2) => { stopTry(); o.onPick(keyOfTile(el2)); });
     dom.on(grid, 'pointerover', PICKABLE, (ev, el2) => {
+      if (cameraPreview || app.dialogs && app.dialogs.isOpen()) return;
       tryKey(keyOfTile(el2));
       if (stopAnim) stopAnim();
       const canvas = el2.querySelector('canvas');
@@ -585,7 +612,7 @@ MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output', 'ui/media_widgets'
         if (at) { stopTry(); o.onPick(keyOfTile(at)); return true; }
         return false;
       },
-      destroy() { destroyed = true; cancelAlts(); stopTry(); if (stopAnim) stopAnim(); },
+      destroy() { destroyed = true; if (cameraPreview) cameraPreview.close(); cancelAlts(); stopTry(); if (stopAnim) stopAnim(); },
       // A new plan (undo, a filter change …): the tiles are built again, and the focused one keeps the focus.
       refresh() {
         const at = focusedTile();

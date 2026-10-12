@@ -1,7 +1,7 @@
-/* 文字PVメーカー v2 — original work. Timeline drawer: beat / song / line / cut rows, drags that write time pins, zoom, snap, keyboard nudges, a11y proxies, area bands and key diamonds (DESIGN §6.4.13; DESIGN_2_1 §6.7, §6.8). */
-MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/t', 'core/paths', 'core/doc', 'planner/areas',
+/* 文字PVメーカー v2 — original work. Timeline drawer: beat / song / line / cut / camera rows, time-pin drags, shared overview zoom, snap, keyboard nudges, area bands and key diamonds (DESIGN §6.4.13; DESIGN_2_1 §6.7, §6.8). */
+MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/t', 'core/paths', 'core/doc', 'core/shot', 'planner/areas',
   'ui/extreme'],
-  (dom, I, S, F, T, P, D, AREAS, XU) => {
+  (dom, I, S, F, T, P, D, SHOT, AREAS, XU) => {
   'use strict';
 
   const { h } = dom;
@@ -59,6 +59,64 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
   // highlighted(hl) → the set of line ids view.highlight names (one id, or an area's list).
   function highlighted(hl) { return new Set(Array.isArray(hl) ? hl : hl ? [hl] : []); }
 
+  // One window is shared by the detailed tracks and the full-song navigator. Even a short song has a usable window.
+  function windowBounds(d, next) {
+    d = Number.isFinite(d) && d > 0 ? d : 1;
+    const requested = next && Number.isFinite(next.span) ? next.span : 0;
+    const span = requested > 0 ? Math.max(Math.min(MIN_SPAN, d), Math.min(requested, d)) : d;
+    const at = next && Number.isFinite(next.t0) ? next.t0 : 0;
+    return { t0: Math.max(0, Math.min(at, d - span)), span };
+  }
+
+  function moveWindow(d, initial, kind, delta) {
+    d = Number.isFinite(d) && d > 0 ? d : 1;
+    const w = windowBounds(d, initial), end = w.t0 + w.span, min = Math.min(MIN_SPAN, d);
+    delta = Number.isFinite(delta) ? delta : 0;
+    if (kind === 'start') {
+      const t0 = Math.max(0, Math.min(end - min, w.t0 + delta));
+      return windowBounds(d, { t0, span: end - t0 });
+    }
+    if (kind === 'end') {
+      const t1 = Math.min(d, Math.max(w.t0 + min, end + delta));
+      return windowBounds(d, { t0: w.t0, span: t1 - w.t0 });
+    }
+    return windowBounds(d, { t0: w.t0 + delta, span: w.span });
+  }
+
+  // The outline keeps the true song scale. Controls retain usable hit areas even for a two-second view of an hour.
+  function navigatorGeometry(d, next, width) {
+    d = Number.isFinite(d) && d > 0 ? d : 1;
+    width = Number.isFinite(width) && width > 0 ? width : 1;
+    const w = windowBounds(d, next), left = w.t0 / d * width, span = w.span / d * width;
+    const handle = Math.min(12, width), panWidth = Math.min(width, Math.max(40, span - 24));
+    const bound = (x, size) => Math.max(0, Math.min(x, width - size));
+    return { left, width: span, narrow: span < 64,
+      start: bound(left - handle / 2, handle) - left,
+      end: bound(left + span - handle / 2, handle) - left,
+      pan: { left: bound(left + span / 2 - panWidth / 2, panWidth) - left, width: panWidth } };
+  }
+
+  function trackRows(height) {
+    const body = Math.max(40, height - RULER_PX);
+    const beat = Math.round(body * 0.08), song = Math.round(body * 0.17), line = Math.round(body * 0.27), cut = Math.round(body * 0.21);
+    return { beat: [0, beat], song: [beat, beat + song], line: [beat + song, beat + song + line],
+      cut: [beat + song + line, beat + song + line + cut], camera: [beat + song + line + cut, body], ruler: [body, height] };
+  }
+
+  // A small direction hint describes the preset itself; the selected shot's dots use its fitted engine times below.
+  function shotMotion(ref) {
+    const expanded = SHOT.expandShot(ref);
+    const keys = expanded && expanded.keys;
+    if (!keys || keys.length < 2) return '·';
+    const a = keys[0], b = keys[keys.length - 1];
+    const dx = (b.ox || 0) - (a.ox || 0), dy = (b.oy || 0) - (a.oy || 0);
+    if (Math.max(Math.abs(dx), Math.abs(dy)) > 0.015) return Math.abs(dx) >= Math.abs(dy) ? (dx > 0 ? '→' : '←') : (dy > 0 ? '↓' : '↑');
+    const dz = (b.fill || b.zoom || 1) - (a.fill || a.zoom || 1);
+    if (Math.abs(dz) > 0.02) return dz > 0 ? '＋' : '−';
+    if (Math.abs((b.roll || 0) - (a.roll || 0)) > 0.5) return '↻';
+    return keys.some((k) => k.aim === 'reading') ? '↔' : '·';
+  }
+
   function mount(app, host) {
     const t = app.t;
     const snapBtn = h('button', { class: 'chip-btn tl-btn', type: 'button', 'aria-pressed': 'false' }, t('song.snap'));
@@ -71,7 +129,9 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
       snapBtn, bpmBtn, h('span', { class: 'tl-zoom' }, zoomOut, fit, zoomIn), h('span', { class: 'grow' }), followBtn);
     const canvas = h('canvas', { class: 'tl-canvas', 'aria-hidden': 'true' });
     const proxy = h('div', { class: 'sr-only tl-proxy', role: 'listbox', tabindex: '0', 'aria-label': t('tl.lines') });
-    const area = h('div', { class: 'tl-area' }, canvas, proxy);
+    const cameraProxy = h('div', { class: 'sr-only tl-camera-proxy', role: 'listbox', tabindex: '0', 'aria-label': t('tl.camera') });
+    const cameraLabel = h('span', { class: 'tl-camera-label', text: t('tl.camera'), title: t('tl.cameraTip') });
+    const area = h('div', { class: 'tl-area' }, canvas, proxy, cameraProxy, cameraLabel);
     const root = h('div', { class: 'timeline' }, bar, area);
     dom.replace(host, root);
 
@@ -81,24 +141,21 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
     let press = null;
     let focus = { lineId: null, edge: 'start', band: null }; // the edge Ctrl+←/→ nudges
     let digest = { key: null, data: null };
+    let cameraFocus = null;
+    let announcedWindow = null;
+    let windowInteraction = false;
 
     // --- geometry -----------------------------------------------------------------------------------------------
 
     const duration = () => (app.plan && app.plan.duration > 0 ? app.plan.duration : 1);
     function win() {
-      const d = duration();
-      const span = view.span > 0 ? Math.min(view.span, d) : d;
-      const t0 = Math.max(0, Math.min(view.t0, d - span));
-      return { t0, span };
+      return windowBounds(duration(), view);
     }
     const xOf = (tt) => { const w = win(); return (tt - w.t0) / w.span * W; };
     const tOf = (x) => { const w = win(); return w.t0 + x / Math.max(1, W) * w.span; };
 
     function rows() {
-      const body = Math.max(40, H - RULER_PX);
-      const beat = Math.round(body * 0.12), song = Math.round(body * 0.28), line = Math.round(body * 0.32);
-      return { beat: [0, beat], song: [beat, beat + song], line: [beat + song, beat + song + line], cut: [beat + song + line, body],
-        ruler: [body, H] };
+      return trackRows(H);
     }
 
     function layout() {
@@ -109,6 +166,7 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
       canvas.width = Math.round(W * dpr);
       canvas.height = Math.round(H * dpr);
       dom.setStyle(canvas, { width: W, height: H });
+      dom.setStyle(cameraLabel, { top: rows().camera[0] + 1 });
       draw();
     }
 
@@ -286,6 +344,41 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
       drawKeys(r);
     }
 
+    function drawCameras(r, sel) {
+      const p = app.plan;
+      const selected = new Set(S.cutsOf(sel, p));
+      const top = r[0] + 8, mid = (top + r[1]) / 2 - 1;
+      const trackKey = sel.level === 'cut' ? sel.key : selected.size === 1 ? Array.from(selected)[0] : null;
+      // Rigs run across several cuts, so their thin upper band reveals where the section camera changes.
+      for (const rig of p.rigs || []) {
+        if (!rig.rig || rig.rig.v === 'none') continue;
+        const x0 = xOf(rig.t0), x1 = xOf(rig.t1);
+        if (x1 < 0 || x0 > W) continue;
+        g.fillStyle = 'rgba(124,196,255,0.28)';
+        g.fillRect(x0, r[0] + 1, Math.max(1, x1 - x0 - 1), 6);
+        if (x1 - x0 > 150) label(t.label(SHOT.rigLabel(rig.rig.v)), Math.max(54, x0 + 4), r[0] + 4, x1 - Math.max(54, x0) - 8, COLORS.focus);
+      }
+      for (const c of p.cuts) {
+        const x0 = xOf(c.t0), x1 = xOf(c.t1);
+        if (x1 < 0 || x0 > W) continue;
+        const ref = c.slots && c.slots['cam.shot'] ? c.slots['cam.shot'].v : 'none';
+        const on = selected.has(c.key);
+        g.fillStyle = on ? 'rgba(124,196,255,0.3)' : 'rgba(124,196,255,0.1)';
+        g.fillRect(x0, top, Math.max(1, x1 - x0 - 1), r[1] - top - 2);
+        label(shotMotion(ref) + ' ' + t.label(SHOT.label(ref)), Math.max(x0, 0) + 4, mid, x1 - Math.max(x0, 0) - 8, on ? COLORS.focus : COLORS.text);
+        if (c.key !== trackKey || !app.engine || !app.engine.shotTrack) continue;
+        const track = app.engine.shotTrack(c.key);
+        if (!track || !track.keys.length) continue;
+        // Only the selected track is resolved: scrolling a long song never builds every scene just to draw a lane.
+        const y = r[1] - 4;
+        g.strokeStyle = COLORS.focus;
+        g.lineWidth = 1;
+        g.beginPath(); g.moveTo(Math.max(0, x0), y); g.lineTo(Math.min(W, x1), y); g.stroke();
+        g.fillStyle = COLORS.key;
+        for (const key of track.keys) { g.beginPath(); g.arc(xOf(key.t), y, 2, 0, Math.PI * 2); g.fill(); }
+      }
+    }
+
     // ◆ at the key times of the shot being edited (the keyframe page is open, DESIGN_2_1 §6.7).
     function keyMarks() {
       const edit = app.shotEdit;
@@ -325,12 +418,13 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
     }
 
     function draw() {
+      announceWindow();
       if (!W || host.hidden) return;
       g.setTransform(dpr, 0, 0, dpr, 0, 0);
       g.fillStyle = COLORS.bg;
       g.fillRect(0, 0, W, H);
       const r = rows();
-      for (const k of ['beat', 'song', 'line', 'cut']) {
+      for (const k of ['beat', 'song', 'line', 'cut', 'camera']) {
         g.fillStyle = COLORS.row;
         g.fillRect(0, r[k][0] + 1, W, r[k][1] - r[k][0] - 2);
       }
@@ -342,6 +436,7 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
         const sel = S.validate(app.view.state.sel, app.plan);
         drawLines(r.line, sel);
         drawCuts(r.cut, sel);
+        drawCameras(r.camera, sel);
       } else label(t('tl.empty'), 8, (r.line[0] + r.cut[1]) / 2, W - 16, COLORS.muted);
       drawRuler(r.ruler);
       const x = xOf(app.time());
@@ -354,7 +449,7 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
 
     function rowAt(y) {
       const r = rows();
-      for (const k of ['beat', 'song', 'line', 'cut', 'ruler']) if (y >= r[k][0] && y < r[k][1]) return k;
+      for (const k of ['beat', 'song', 'line', 'cut', 'camera', 'ruler']) if (y >= r[k][0] && y < r[k][1]) return k;
       return 'ruler';
     }
 
@@ -374,6 +469,10 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
       if (row === 'song') {
         const band = bandAt(bands(), tOf(x));
         return band ? { row, band } : { row };
+      }
+      if (row === 'camera') {
+        const c = p.cuts.find((cut) => x >= xOf(cut.t0) && x < xOf(cut.t1));
+        return c ? { row, cut: c, line: c.line ? p.lines.find((l) => l.id === c.line) : null } : { row };
       }
       if (row === 'line') {
         for (const l of p.lines) {
@@ -499,7 +598,8 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
       const pt = localPoint(ev);
       if (!press) {
         const hit = hitAt(pt.x, pt.y);
-        canvas.style.cursor = hit.edge ? 'ew-resize' : hit.line && hit.row === 'line' ? 'grab' : 'default';
+        canvas.style.cursor = hit.edge ? 'ew-resize' : hit.line && hit.row === 'line' ? 'grab' : hit.row === 'camera' && hit.cut ? 'pointer' : 'default';
+        canvas.title = hit.row === 'camera' && hit.cut ? t('tl.cameraOpen', { shot: t.label(SHOT.label(hit.cut.slots && hit.cut.slots['cam.shot'] ? hit.cut.slots['cam.shot'].v : 'none')) }) : '';
         return;
       }
       if (!press.moved && Math.abs(pt.x - press.x) < DRAG_PX) return;
@@ -567,6 +667,7 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
     function clickAt(p) {
       const hit = p.hit;
       if (hit.row === 'song' && hit.band) { selectBand(hit.band); return; }
+      if (hit.row === 'camera' && hit.cut) { openCamera(hit.cut.key); return; }
       if (hit.row === 'line' && hit.line) {
         app.select({ level: 'line', ids: [hit.line.id] }, { from: 'timeline', open: true });
       } else if (hit.row === 'line' && hit.cut) {
@@ -593,6 +694,32 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
       const d = duration();
       view.span = view.span > 0 ? Math.max(Math.min(MIN_SPAN, d), Math.min(view.span, d)) : 0;
       view.t0 = Math.max(0, Math.min(view.t0, d - (view.span || d)));
+      announceWindow();
+    }
+
+    function announceWindow() {
+      const w = win();
+      if (announcedWindow && announcedWindow.t0 === w.t0 && announcedWindow.span === w.span) return;
+      announcedWindow = w;
+      app.bus.emit('timeline.window', w);
+    }
+
+    function setWindow(next, opts) {
+      const w = windowBounds(duration(), next);
+      view = { t0: w.t0, span: w.span >= duration() ? 0 : w.span };
+      if (opts && opts.open && !app.view.state.drawer) app.view.set({ drawer: true });
+      draw();
+      return win();
+    }
+
+    function openCamera(key) {
+      const selection = { level: 'cut', key };
+      cameraFocus = key;
+      if (app.inspector && app.inspector.jumpTo) app.inspector.jumpTo('camera', selection);
+      else {
+        app.select(selection, { from: 'timeline', open: true });
+        if (app.inspector) requestAnimationFrame(() => app.inspector.openSection('camera'));
+      }
     }
 
     function zoomAround(center, factor) {
@@ -631,7 +758,7 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
 
     // Follow: keep the playhead in the window while playing.
     function follow(tt) {
-      if (!app.view.state.prefs.follow || !(view.span > 0)) return;
+      if (windowInteraction || !app.view.state.prefs.follow || !(view.span > 0)) return;
       const w = win();
       if (tt < w.t0 || tt > w.t0 + w.span * 0.92) { view.t0 = tt - w.span * 0.1; clampView(); }
     }
@@ -661,6 +788,14 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
         'aria-selected': String(focus.band === null && focus.lineId === l.id), text: proxyLabel(l, i) }))));
       if (focus.band !== null && list[focus.band]) proxy.setAttribute('aria-activedescendant', 'tl-band-' + focus.band);
       else if (focus.lineId) proxy.setAttribute('aria-activedescendant', 'tl-opt-' + focus.lineId);
+      const cuts = app.plan ? app.plan.cuts : [];
+      if (!cuts.some((c) => c.key === cameraFocus)) cameraFocus = cuts.length ? cuts[0].key : null;
+      dom.replace(cameraProxy, cuts.map((c, i) => h('div', { role: 'option', id: 'tl-cam-' + i,
+        'aria-selected': String(c.key === cameraFocus), text: t('tl.cameraProxy', { n: i + 1, t0: T.fmtTime(c.t0), t1: T.fmtTime(c.t1),
+          shot: t.label(SHOT.label(c.slots && c.slots['cam.shot'] ? c.slots['cam.shot'].v : 'none')) }) })));
+      const cameraIndex = cuts.findIndex((c) => c.key === cameraFocus);
+      if (cameraIndex >= 0) cameraProxy.setAttribute('aria-activedescendant', 'tl-cam-' + cameraIndex);
+      else cameraProxy.removeAttribute('aria-activedescendant');
     }
 
     proxy.addEventListener('focus', () => {
@@ -673,6 +808,20 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
       draw();
     });
     proxy.addEventListener('blur', () => draw());
+    cameraProxy.addEventListener('focus', () => { renderProxy(); draw(); });
+    cameraProxy.addEventListener('keydown', (ev) => {
+      if (ev.ctrlKey || ev.metaKey || ev.altKey || !app.plan || !app.plan.cuts.length) return;
+      const cuts = app.plan.cuts, at = Math.max(0, cuts.findIndex((c) => c.key === cameraFocus));
+      let next = at;
+      if (ev.key === 'ArrowLeft' || ev.key === 'ArrowUp') next = Math.max(0, at - 1);
+      else if (ev.key === 'ArrowRight' || ev.key === 'ArrowDown') next = Math.min(cuts.length - 1, at + 1);
+      else if (ev.key === 'Home') next = 0;
+      else if (ev.key === 'End') next = cuts.length - 1;
+      else if (ev.key === 'Enter' || ev.key === ' ') openCamera(cuts[at].key);
+      else return;
+      cameraFocus = cuts[next].key;
+      ev.preventDefault(); ev.stopPropagation(); renderProxy(); draw();
+    });
     proxy.addEventListener('keydown', (ev) => {
       if (ev.ctrlKey || ev.metaKey || ev.altKey) return;         // Ctrl+←/→ is the timeline.nudge action
       const lines = app.plan ? app.plan.lines : [];
@@ -728,7 +877,7 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
 
     const redraw = dom.createBatcher(() => draw());
     app.bus.on('time', (tt) => { if (!host.hidden) { follow(tt); redraw('time'); } });
-    app.bus.on('plan', () => { clampView(); if (!host.hidden) { renderProxy(); redraw('plan'); } });
+    app.bus.on('plan', () => { clampView(); renderProxy(); if (!host.hidden) redraw('plan'); });
     app.bus.on('shotEdit', () => { if (!host.hidden) redraw('keys'); });
     app.bus.on('layout', () => { if (!host.hidden) requestAnimationFrame(layout); });
     app.view.on((changed) => {
@@ -736,8 +885,9 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
       if (changed.some((k) => k === 'sel' || k === 'highlight' || k === 'prefs')) redraw('view');
     });
 
-    return { draw, layout, view: () => win(), focus: () => dom.focus(proxy), hitAt, xOf, tOf, rows };
+    return { draw, layout, view: () => win(), setWindow, setWindowInteraction: (active) => { windowInteraction = !!active; },
+      focus: () => dom.focus(proxy), hitAt, xOf, tOf, rows };
   }
 
-  return { mount, songMarks, edgeKind, bandAt, highlighted };
+  return { mount, songMarks, edgeKind, bandAt, highlighted, windowBounds, moveWindow, navigatorGeometry, trackRows, shotMotion };
 });

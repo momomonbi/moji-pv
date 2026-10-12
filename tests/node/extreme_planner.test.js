@@ -7,6 +7,7 @@ const path = require('node:path');
 const { load } = require('../helpers/load.js');
 const corpus = require('../helpers/corpus.js');
 const XD = require('../helpers/extreme_docs.js');
+const { originalLayouts } = require('../helpers/camera_baseline.js');
 
 const MV = load();
 const SHOT = MV.use('core/shot');
@@ -16,6 +17,7 @@ const XT = MV.use('planner/extreme');
 const EX = MV.use('planner/explain');
 const F = MV.use('planner/fields');
 const CAT = MV.use('parts/catalog').defaultRegistry();
+const CALIBRATED_CAT = originalLayouts(MV, CAT);
 
 const clone = (x) => JSON.parse(JSON.stringify(x));
 const ON = { 'work:cam.extreme': { v: 1, by: 'user' } };
@@ -234,10 +236,11 @@ test('mirror: ⇆ presets only; a whipPan right after a whipPan of the same sect
 });
 
 test('rerolls: a cut\'s shot die rerolls its EXTREME pick; it reaches few other cuts, and never the repeats of a first copy', () => {
+  // The .85/.97 sampling floors were calibrated over the original layout mix; structural EXTREME tests use CAT.
   let tried = 0, changed = 0, runs = 0, local = 0, far = 0;
   for (const { name, doc } of corpus.corpus(2)) {
     const d0 = withPins(doc, ON);
-    const base = run(d0);
+    const base = run(d0, CALIBRATED_CAT);
     const idx = new Map(base.cuts.map((c, i) => [c.key, i]));
     const xs = base.cuts.filter(xOf);
     for (let k = 0; k < xs.length; k += Math.max(1, Math.floor(xs.length / 5))) {
@@ -245,7 +248,7 @@ test('rerolls: a cut\'s shot die rerolls its EXTREME pick; it reaches few other 
       tried++;
       let moved = false;
       for (let bump = 1; bump <= 3; bump++) {
-        const p = run(Object.assign({}, d0, { salts: { ['cut/' + cut.key + ':cam.shot']: bump } }));
+        const p = run(Object.assign({}, d0, { salts: { ['cut/' + cut.key + ':cam.shot']: bump } }), CALIBRATED_CAT);
         let others = 0;
         for (const c of p.cuts) {
           const b = base.cuts[idx.get(c.key)];
@@ -312,6 +315,13 @@ test('grounds[i].x marks exactly the segments on screen while an EXTREME cut is;
 test('an EXTREME cut\'s fingerprint follows the beat grid; a normal one does not (plan.js reads beats for every shot that uses them)', () => {
   // the song's meter moves no line (the lines snap to beats) but changes the grid the scenes read (bars)
   const doc = withPins(corpus.project('basic').doc, ON);
+  // An expanded automatic layout pool need not leave a beat-free normal cut in this song. Choose an explicit
+  // control line whose camera and other parts do not read the grid, while every other line keeps the EXTREME switch.
+  const controlLine = run(doc).cuts.find((c) => c.role === 'lyric').line;
+  for (const [slot, v] of Object.entries({ 'cam.extreme': 0, 'cam.shot': 'settle', arrange: 'centerAnchor',
+    arrive: 'none', dwell: 'none', depart: 'none', lens: 'none', 'ornament.count': 0, 'filter.count': 0 })) {
+    doc.pins['line/' + controlLine + ':' + slot] = { v, by: 'user' };
+  }
   const a = run(doc);
   const moved = clone(doc);
   moved.song.meter = 3;
@@ -324,6 +334,10 @@ test('an EXTREME cut\'s fingerprint follows the beat grid; a normal one does not
     if (xOf(c)) { x++; assert.notEqual(c.fp, o.fp, c.key + ': the grid is in an EXTREME cut\'s fingerprint'); } else if (c.fp === o.fp) kept++;
   });
   assert.ok(x >= 5 && kept >= 1, x + ' EXTREME cuts, ' + kept + ' others kept their fingerprint');
+  for (const c of a.cuts.filter((c) => c.line === controlLine)) {
+    assert.equal(c.slots['cam.shot'].v, 'settle');
+    assert.equal(c.fp, b.cuts.find((o) => o.key === c.key).fp, c.key + ': the explicit normal control keeps its fingerprint');
+  }
   assert.equal(SHOT.usesBeats('settle'), false);
   assert.equal(SHOT.usesBeats('whipPan~m'), true);
   // without a song there is no grid (plan.beats null) and no beat term: the EXTREME scenes run on 0.5 s steps from

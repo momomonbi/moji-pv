@@ -9,8 +9,8 @@ MV.def('ui/layout', ['core/doc'], (D) => {
     standard: Object.freeze({ step: 296, detail: 312 }),
   });
   // Height tiers: tall and normal share the roomy metrics; short is tighter (§6.2).
-  const ROOMY = Object.freeze({ header: 48, pad: 16, gap: 12, lane: 40, laneGap: 8, controls: 40, drawer: 144 });
-  const TIGHT = Object.freeze({ header: 44, pad: 12, gap: 8, lane: 32, laneGap: 6, controls: 36, drawer: 112 });
+  const ROOMY = Object.freeze({ header: 48, pad: 16, gap: 12, lane: 40, laneGap: 8, controls: 40, drawer: 178 });
+  const TIGHT = Object.freeze({ header: 44, pad: 12, gap: 8, lane: 32, laneGap: 6, controls: 36, drawer: 148 });
   const MIN_PAGE_H = 600;                        // below this the page scrolls and the preview keeps MIN_PREVIEW_H
   const MIN_PREVIEW_H = 360;
   const STACKED_STAGE_SHARE = 0.7;               // stacked: the stage takes at most 70vh

@@ -1358,3 +1358,82 @@ details.ai-group > summary { cursor: pointer; list-style-position: inside; }
 .il-name { align-self: flex-start; font-weight: 600; margin-bottom: 4px; }
 .il-row { display: flex; flex-direction: column; }
 .il-fx { margin-bottom: 6px; }
+
+/* Inspector quick navigation. */
+/* Always within reach while the inspector's settings scroll. */
+.insp-tabs {
+  position: sticky; top: -12px; z-index: 4; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 3px; margin: -12px -14px 10px; padding: 8px 10px; border-bottom: 1px solid var(--line-2);
+  background: var(--panel); box-shadow: 0 4px 10px rgba(0, 0, 0, 0.12);
+}
+.insp-tab {
+  min-width: 0; min-height: 31px; padding: 4px 5px; border: 1px solid var(--line-2); border-radius: 6px 6px 2px 2px;
+  background: var(--panel-2); color: var(--text-2); font: 700 11.5px var(--font); white-space: nowrap;
+}
+.insp-tab:hover { color: var(--text); background: var(--panel-3); }
+.insp-tab[aria-current="true"] { border-color: var(--focus); background: rgba(124, 196, 255, 0.12); color: var(--focus); }
+.insp-tab:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.insp-tab[data-jump="scope"] { color: var(--muted); }
+.insp-body .isec { scroll-margin-top: 120px; }
+.insp-body .frow { scroll-margin-top: 120px; }
+.cam-wireframe-btn { align-self: flex-start; }
+
+/* Camera wireframe preview. */
+/* Preview-only camera navigation control; the overlay is never part of exported frames. */
+.camera-wireframe-toggle { position: absolute; right: 10px; top: 10px; z-index: 3; padding: 6px 10px; font-size: 12px; background: rgba(16, 21, 27, 0.88); border-color: rgba(113, 230, 209, 0.5); color: var(--text-2); box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25); }
+.camera-wireframe-toggle[aria-pressed="true"] { color: #71e6d1; border-color: #71e6d1; background: rgba(16, 42, 42, 0.95); }
+.camera-wireframe-toggle:disabled { opacity: 0.45; }
+
+/* Camera timeline and full-song window. */
+/* Camera track and a light viewport on the unchanged full-song overview. */
+.tl-camera-label { position: absolute; left: 2px; padding: 0 4px; border-radius: 3px; background: #182535; color: #b7dcf7; font-size: 9px; line-height: 11px; pointer-events: none; }
+.lane-seek { position: absolute; inset: 0; touch-action: none; }
+.lane-seek:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.lane-viewport { position: absolute; top: 0; bottom: 0; box-sizing: border-box; border: 1px solid rgba(124,196,255,0.6); border-radius: 3px; pointer-events: none; }
+.lane-window-pan { position: absolute; bottom: 0; left: 12px; right: 12px; height: 8px; min-width: 0; padding: 0; border: 0; background: rgba(124,196,255,0.2); color: #b7dcf7; font-size: 8px; line-height: 8px; overflow: hidden; white-space: nowrap; cursor: grab; pointer-events: auto; touch-action: none; }
+.lane-window-handle { position: absolute; bottom: 0; width: 12px; height: 24px; padding: 0; border: 1px solid #7cc4ff; border-radius: 3px; background: #243f57; color: #b7dcf7; cursor: ew-resize; pointer-events: auto; touch-action: none; }
+.lane-window-start { left: -1px; }
+.lane-window-end { right: -1px; }
+.lane-window-handle::after { content: ''; position: absolute; top: 5px; bottom: 5px; left: 3px; right: 3px; border-left: 1px solid currentColor; border-right: 1px solid currentColor; }
+.lane-window-handle:hover, .lane-window-pan:hover { background: #365875; }
+.lane-window-handle:focus-visible, .lane-window-pan:focus-visible { outline: 2px solid #f0b64d; outline-offset: -2px; }
+.lane-viewport.is-dragging { border-color: #b7dcf7; }
+.lane-viewport.is-dragging .lane-window-pan { cursor: grabbing; }
+
+/* Overview navigator and active-mode controls. */
+/* Tiny true-scale windows keep all three navigator controls separately graspable. */
+.lane-viewport[data-narrow="true"] .lane-window-start { top: 0; bottom: auto; height: 12px; }
+.lane-viewport[data-narrow="true"] .lane-window-end { top: auto; bottom: 0; height: 12px; }
+.lane-viewport[data-narrow="true"] .lane-window-pan { top: 50%; bottom: auto; transform: translateY(-50%); }
+.lane-viewport[data-narrow="true"] .lane-window-handle::after { top: 2px; bottom: 2px; }
+/* Mode messages/actions replace history and shuffle below the always-visible overview. */
+.controls .mode-strip { height: 32px; max-height: 100%; min-width: 0; box-sizing: border-box; padding: 0 8px; gap: 6px; font-size: 11px; }
+.controls .strip-text { min-width: 0; }
+.controls .strip-acts { flex: none; gap: 4px; }
+.controls .mode-strip .btn.small { padding: 0 7px; font-size: 11px; white-space: nowrap; }
+.controls[data-mode-active="true"] > .grow { display: none; }
+.controls[data-mode-compact="true"] .to-start, .controls[data-mode-compact="true"] .ctl-tools { display: none; }
+
+/* Large camera sample playback. */
+/* Large camera samples keep playback controls visible and render the project's real aspect ratio. */
+.dlg.camera-preview-dialog { width: min(1040px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); }
+.camera-preview { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.camera-preview-screen { display: flex; justify-content: center; align-items: center; min-height: 150px; background: #090b10; border-radius: 10px; overflow: hidden; }
+.camera-preview-canvas { display: block; width: auto; height: auto; max-width: 100%; max-height: min(55dvh, 600px); }
+.camera-preview-caption { margin: 0; color: var(--text-2); font-size: 13px; }
+.camera-preview-transport { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.camera-preview-seek { width: 100%; min-width: 0; accent-color: var(--focus); }
+.camera-preview-time { margin-left: auto; font: 12px var(--mono); color: var(--text-2); }
+.camera-preview-options { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; font-size: 12px; }
+.camera-preview-options label { display: inline-flex; align-items: center; gap: 6px; }
+.camera-preview-speed { width: auto; max-width: 100%; }
+.camera-preview-field { align-self: flex-start; }
+.pb-camera-item { display: flex; flex-direction: column; min-width: 0; gap: 3px; }
+.pb-camera-item > .pb-tile { width: 100%; flex: 1 1 auto; box-sizing: border-box; }
+.pb-camera-preview { width: 100%; min-height: 28px; justify-content: center; font-size: 11.5px; }
+@media (max-width: 480px) {
+  .camera-preview-dialog .dlg-body { padding: 10px 12px 12px; }
+  .camera-preview-dialog .dlg-head { padding-left: 12px; }
+  .camera-preview-canvas { max-height: 42dvh; }
+  .camera-preview-options { gap: 8px; }
+}

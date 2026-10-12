@@ -9,16 +9,16 @@ const L = MV.use('ui/layout');
 
 // DESIGN §6.2 measured table: viewport → [layout, tier, nothing open, 詳細 open (column kept), 詳細 + rail, drawer, 9:16].
 const TABLE = [
-  [1920, 1080, 'wide', 'tall', [1568, 882], [1216, 684], [1488, 837], [1344, 756], [506, 900]],
-  [1440, 900, 'wide', 'tall', [1088, 612], [736, 414], [1008, 567], [1024, 576], [405, 720]],
-  [1440, 789, 'wide', 'normal', [1082, 609], [736, 414], [1008, 567], [826, 465], [342, 609]],
-  [1366, 768, 'wide', 'normal', [1014, 570], [662, 372], [934, 525], [789, 444], [330, 588]],
-  [1280, 800, 'standard', 'normal', [952, 535], [640, 360], [888, 499], [846, 476], [348, 620]],
-  [1280, 720, 'standard', 'short', [960, 540], [648, 364], [896, 504], [814, 458], [320, 570]],
-  [1280, 689, 'standard', 'short', [958, 539], [648, 364], [896, 504], [759, 427], [303, 539]],
-  [1200, 700, 'standard', 'short', [880, 495], [568, 319], [816, 459], [778, 438], [309, 550]],
+  [1920, 1080, 'wide', 'tall', [1568, 882], [1216, 684], [1488, 837], [1283, 722], [506, 900]],
+  [1440, 900, 'wide', 'tall', [1088, 612], [736, 414], [1008, 567], [963, 542], [405, 720]],
+  [1440, 789, 'wide', 'normal', [1082, 609], [736, 414], [1008, 567], [766, 431], [342, 609]],
+  [1366, 768, 'wide', 'normal', [1014, 570], [662, 372], [934, 525], [728, 410], [330, 588]],
+  [1280, 800, 'standard', 'normal', [952, 535], [640, 360], [888, 499], [785, 442], [348, 620]],
+  [1280, 720, 'standard', 'short', [960, 540], [648, 364], [896, 504], [750, 422], [320, 570]],
+  [1280, 689, 'standard', 'short', [958, 539], [648, 364], [896, 504], [695, 391], [303, 539]],
+  [1200, 700, 'standard', 'short', [880, 495], [568, 319], [816, 459], [714, 402], [309, 550]],
   [1024, 768, 'compact', 'normal', [672, 378], [672, 378], null, [672, 378], [330, 588]],
-  [1024, 640, 'compact', 'short', [680, 382], [680, 382], null, [672, 378], [275, 490]],
+  [1024, 640, 'compact', 'short', [680, 382], [680, 382], null, [608, 342], [275, 490]],
 ];
 
 function size(res) { return [res.canvas.w, res.canvas.h]; }
@@ -45,8 +45,8 @@ test('computeLayout reproduces the §6.2 table (±1 px)', () => {
 
 test('the drawer and 詳細 together on the rail (§6.2 footnote)', () => {
   const both = { panel: 'details', rail: true, drawer: true, aspect: '16:9' };
-  near(size(L.computeLayout({ w: 1280, h: 800 }, both)), [846, 476], '1280×800');
-  near(size(L.computeLayout({ w: 1440, h: 900 }, both)), [1008, 567], '1440×900');
+  near(size(L.computeLayout({ w: 1280, h: 800 }, both)), [785, 442], '1280×800');
+  near(size(L.computeLayout({ w: 1440, h: 900 }, both)), [963, 542], '1440×900');
 });
 
 test('the canvas is exact to the aspect and centred in the preview area', () => {
@@ -113,16 +113,16 @@ test('selection alone never reflows: geometry depends only on panel, rail, drawe
   assert.deepEqual(a.rects, b.rects, '詳細 and AI share one column');
 });
 
-test('tiers and metrics: tall/normal use 48/16/12/88 (+144), short 44/12/8/74 (+112)', () => {
+test('tiers and metrics: tall/normal use 48/16/12/88 (+178), short 44/12/8/74 (+148)', () => {
   assert.equal(L.tierOf(860), 'tall');
   assert.equal(L.tierOf(859), 'normal');
   assert.equal(L.tierOf(740), 'normal');
   assert.equal(L.tierOf(739), 'short');
   assert.deepEqual(['wide', 'standard', 'compact', 'stacked'], [1360, 1200, 1024, 1023].map(L.layoutOf));
   const roomy = L.metricsOf('normal');
-  assert.deepEqual([roomy.header, roomy.pad, roomy.gap, roomy.playbar, roomy.drawer], [48, 16, 12, 88, 144]);
+  assert.deepEqual([roomy.header, roomy.pad, roomy.gap, roomy.playbar, roomy.drawer], [48, 16, 12, 88, 178]);
   const tight = L.metricsOf('short');
-  assert.deepEqual([tight.header, tight.pad, tight.gap, tight.playbar, tight.drawer], [44, 12, 8, 74, 112]);
+  assert.deepEqual([tight.header, tight.pad, tight.gap, tight.playbar, tight.drawer], [44, 12, 8, 74, 148]);
   const res = L.computeLayout({ w: 1440, h: 900 }, { aspect: '16:9' });
   assert.equal(res.rects.lane.h, 40);
   assert.equal(res.rects.controls.y - (res.rects.lane.y + res.rects.lane.h), 8);

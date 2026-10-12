@@ -81,15 +81,59 @@ MV.def('core/shot', ['core/num', 'core/curve'], (N, CV) => {
     chaseReveal: { tags: ['bold', 'fast'], follow: 0.5, keys: [k('a', 'reading', { fill: 1.2, ox: 0, oy: 0 }),
       k('b', 'reading', { dt: -0.3, fill: 1.2, ox: 0, oy: 0 }), k('b', 'block', { dt: -0.12, fill: 0.55, curve: 'dashStop' }),
       k('b', 'block', { fill: 0.5, curve: 'linear' })] },
+    // Additional hand-picked paths. Multi-key returns and pauses use normalized times so their phases stay ordered
+    // even on short cuts; softEnds at each landing keeps the reversal or hold smooth. Frame aims also work in gaps.
+    breathingRoom: { tags: ['soft', 'slow', 'minimal'], follow: 0.1, keys: [k('a', 'block', { fill: 0.58 }),
+      k(0.5, 'block', { fill: 0.78, curve: 'softEnds' }), k('b', 'block', { fill: 0.58, curve: 'softEnds' })] },
+    floatingArc: { tags: ['airy', 'soft', 'slow'], follow: 0.1, keys: [k('a', 'block', { fill: 0.64, oy: 0.07 }),
+      k(0.5, 'block', { fill: 0.64, oy: -0.06, curve: 'softEnds' }),
+      k('b', 'block', { fill: 0.64, oy: 0.03, curve: 'softEnds' })] },
+    diagonalGlide: { tags: ['airy', 'serious'], keys: [k('a', 'frame', { zoom: 1.12, ox: -0.055, oy: 0.045 }),
+      k('b', 'frame', { zoom: 1.12, ox: 0.055, oy: -0.045, curve: 'softEnds' })] },
+    swayBack: { tags: ['playful', 'soft'], follow: 0.1, keys: [k('a', 'block', { fill: 0.64, ox: -0.075, roll: -2.5 }),
+      k(0.55, 'block', { fill: 0.64, ox: 0.075, roll: 2.5, curve: 'softEnds' }),
+      k('b', 'block', { fill: 0.64, ox: 0, curve: 'softEnds' })] },
+    focusAndReturn: { tags: ['bold', 'serious'], keys: [k('a', 'block', { fill: 0.58 }),
+      k(0.5, 'emph', { fill: 0.84, ox: 0, oy: 0, curve: 'softEnds' }),
+      k('b', 'block', { fill: 0.58, curve: 'softEnds' })] },
+    riseIntoView: { tags: ['airy', 'literary'], follow: 0.1, keys: [k('a', 'frame', { zoom: 1.04, oy: 0.045 }),
+      k(0.4, 'block', { fill: 0.83, oy: 0, curve: 'softEnds' }),
+      k('b', 'block', { fill: 0.75, oy: -0.025, curve: 'softEnds' })] },
+    pushHoldRelease: { tags: ['bold', 'slow'], keys: [k('a', 'block', { fill: 0.52 }),
+      k(0.3, 'block', { fill: 0.8, curve: 'softEnds' }), k(0.7, 'block', { fill: 0.8, curve: 'linear' }),
+      k('b', 'block', { fill: 0.56, curve: 'softEnds' })] },
+    frameToWords: { tags: ['literary', 'minimal'], follow: 0.1, keys: [k('a', 'frame', { zoom: 1.02 }),
+      k(0.5, 'block', { fill: 0.84, ox: 0, oy: 0, curve: 'softEnds' }),
+      k('b', 'frame', { zoom: 1.02, curve: 'softEnds' })] },
+    passingFocus: { tags: ['playful', 'bold'], keys: [k('a', 'block', { fill: 0.62, ox: 0.11 }),
+      k(0.45, 'emph', { fill: 0.78, ox: 0, oy: 0, curve: 'softEnds' }),
+      k('b', 'block', { fill: 0.62, ox: -0.08, curve: 'softEnds' })] },
+    levelLanding: { tags: ['bold', 'serious'], keys: [k('a', 'frame', { zoom: 1.12, roll: -8 }),
+      k(0.35, 'block', { fill: 0.67, curve: 'softEnds' }),
+      k('b', 'frame', { zoom: 1.04, curve: 'softEnds' })] },
   };
   // Presets the planner never picks on its own (they come from a pin: the inspector, the AI or a look).
-  const PICK_ONLY = Object.freeze(['chaseReveal']);
+  const PICK_ONLY = Object.freeze(['chaseReveal', 'breathingRoom', 'floatingArc', 'diagonalGlide', 'swayBack',
+    'focusAndReturn', 'riseIntoView', 'pushHoldRelease', 'frameToWords', 'passingFocus', 'levelLanding']);
   const RIG_DATA = {
     slowSwell: { tags: ['slow', 'soft'], curve: 'softEnds', keys: [{ u: 0, zoom: 1 }, { u: 1, zoom: 1.08 }] },
     climbRise: { tags: ['bold'], curve: 'softEnds', keys: [{ u: 0, zoom: 1.02, y: 0.025 }, { u: 1, zoom: 1.06, y: -0.025 }] },
     pullAway: { tags: ['airy', 'slow'], curve: 'fadeBrake', keys: [{ u: 0, zoom: 1.1 }, { u: 1, zoom: 1 }] },
     leanTilt: { tags: ['playful'], curve: 'softEnds', keys: [{ u: 0, zoom: 1.02, roll: 0 }, { u: 1, zoom: 1.04, roll: 2.5 }] },
     driftSide: { tags: ['airy'], curve: 'linear', keys: [{ u: 0, zoom: 1.03, x: -0.02 }, { u: 1, zoom: 1.03, x: 0.02 }] },
+    // Selectable section paths; the automatic section-weight table continues to use its existing five presets.
+    breathCycle: { tags: ['soft', 'slow'], curve: 'softEnds', keys: [{ u: 0 }, { u: 0.5, zoom: 1.08 }, { u: 1 }] },
+    floatingWave: { tags: ['airy', 'soft'], curve: 'softEnds', keys: [{ u: 0, zoom: 1.025, y: 0.025 },
+      { u: 0.33, zoom: 1.025, y: -0.025 }, { u: 0.67, zoom: 1.025, y: 0.025 }, { u: 1, zoom: 1.025 }] },
+    diagonalDrift: { tags: ['airy', 'serious'], curve: 'softEnds', keys: [{ u: 0, zoom: 1.03, x: -0.025, y: 0.02 },
+      { u: 1, zoom: 1.03, x: 0.025, y: -0.02 }] },
+    orbitArc: { tags: ['airy', 'playful'], curve: 'softEnds', keys: [{ u: 0, zoom: 1.035, x: -0.024, roll: -1 },
+      { u: 0.33, zoom: 1.035, y: -0.024 }, { u: 0.67, zoom: 1.035, x: 0.024, roll: 1 },
+      { u: 1, zoom: 1.035, y: 0.012 }] },
+    swayLevel: { tags: ['playful', 'soft'], curve: 'softEnds', keys: [{ u: 0, zoom: 1.025, x: -0.012, roll: -2 },
+      { u: 0.5, zoom: 1.025, x: 0.012, roll: 2 }, { u: 1, zoom: 1.025 }] },
+    surgeSettle: { tags: ['bold', 'slow'], curve: 'softEnds', keys: [{ u: 0 }, { u: 0.38, zoom: 1.11 },
+      { u: 0.65, zoom: 1.06 }, { u: 1, zoom: 1.02 }] },
   };
 
   // --- keys --------------------------------------------------------------------------------------------------------

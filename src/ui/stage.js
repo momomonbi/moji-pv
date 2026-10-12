@@ -1,5 +1,5 @@
 /* 文字PVメーカー v2 — original work. The stage: canvas host, DPR sizing, render loop, overlay, drill clicks, direct manipulation, try-on, compare, the keyframe markers (DESIGN_2_1 §6.7), photos and videos: the drop target, the crop overlay, decoding ahead, missing pictures and the trim peek (§11.7.1, §11.7.6–§11.7.8). */
-MV.def('ui/stage', ['ui/dom', 'ui/selection', 'ui/output', 'i18n/t', 'ui/shot_editor', 'core/media'], (dom, S, OUT, T, KE, MEDIA) => {
+MV.def('ui/stage', ['ui/dom', 'ui/selection', 'ui/output', 'i18n/t', 'ui/shot_editor', 'core/media', 'ui/camera_wireframe'], (dom, S, OUT, T, KE, MEDIA, WIRE) => {
   'use strict';
 
   const { h } = dom;
@@ -43,7 +43,10 @@ MV.def('ui/stage', ['ui/dom', 'ui/selection', 'ui/output', 'i18n/t', 'ui/shot_ed
     const wrap = h('div', { class: 'canvas-wrap', tabindex: '0', role: 'img', 'aria-label': t('empty.preview') },
       main, overlay, badge, lightBadge, mediaBadge, dropBox);
     const said = h('div', { class: 'sr-only', role: 'status', 'aria-live': 'polite' });
-    const area = h('div', { class: 'preview-area' }, wrap, said);
+    const wireButton = h('button', { type: 'button', class: 'btn camera-wireframe-toggle',
+      'data-camera-wireframe': 'toggle', 'aria-pressed': 'false', title: t('camera.wireframeHint'),
+      text: t('camera.wireframe'), on: { click: () => toggleCameraWireframe() } });
+    const area = h('div', { class: 'preview-area' }, wrap, said, wireButton);
     const drawer = h('div', { class: 'drawer-mount', 'data-mount': 'timeline', hidden: true },
       h('div', { class: 'placeholder small' }, h('p', { text: t('drawer.soon') })));
     stageEl.append(area, drawer);
@@ -66,6 +69,8 @@ MV.def('ui/stage', ['ui/dom', 'ui/selection', 'ui/output', 'i18n/t', 'ui/shot_ed
     let lastProvisional = false;
     let crop = null;                       // { target, drag, wheel } while 切り抜き › 画面で調整 is on (§11.7.6)
     let peekAt = null;                     // { id, m } while a trim handle is dragged (§11.7.7)
+    const wireCache = {};
+    let wireData = null;                  // the latest preview overlay's evaluated camera (never read by exports)
 
     // --- sizing ----------------------------------------------------------------------------------------------
 
@@ -163,7 +168,7 @@ MV.def('ui/stage', ['ui/dom', 'ui/selection', 'ui/output', 'i18n/t', 'ui/shot_ed
         adaptBacking(sharp ? 0 : levelOf(stats));
         mediaAfter(stats, tNow);
       }
-      drawOverlay(plan);
+      drawOverlay(plan, tNow);
       if (!peekAt) drawMediaNotes(plan, tNow);
       scheduleLabel(plan, tNow);
       if (app.view.state.playing) frame = requestAnimationFrame(tick);
@@ -224,15 +229,31 @@ MV.def('ui/stage', ['ui/dom', 'ui/selection', 'ui/output', 'i18n/t', 'ui/shot_ed
       octx.stroke();
     }
 
-    function drawOverlay(plan) {
+    function drawOverlay(plan, tNow) {
       const k = plan && plan.design ? overlay.width / plan.design.w : 1;
       octx.setTransform(1, 0, 0, 1, 0, 0);
       octx.clearRect(0, 0, overlay.width, overlay.height);
+      wireData = null;
+      const wireOn = !!app.view.state.prefs.cameraWireframe;
+      wireButton.setAttribute('aria-pressed', String(wireOn));
+      wireButton.disabled = !plan || !plan.lines || !plan.lines.length;
+      overlay.dataset.cameraWireframe = wireOn ? 'on' : 'off';
       if (!plan || !plan.design) return;
       const dpr = overlay.width / Math.max(1, css.w);
       if (app.view.state.prefs.safeArea) drawSafeArea(plan, k, dpr);
       const all = drawnBoxes();
       if (crop && !alt && !peekAt) { drawCrop(plan, k, dpr); return; }
+      if (wireOn && !peekAt && plan.lines && plan.lines.length) {
+        wireData = WIRE.snapshot(app.engine, plan, tNow, app.view.state.prefs.calmCamera, wireCache);
+        if (wireData) {
+          const v = wireData.current.view;
+          WIRE.draw(octx, wireData, { scale: k, dpr, width: overlay.width, height: overlay.height, boxes: all,
+            label: t('camera.wireframeMap'), status: t('camera.wireframeStatus', {
+              zoom: v.zoom.toFixed(2), roll: (v.roll * 180 / Math.PI).toFixed(1),
+              x: Math.round(v.x / plan.design.w * 100), y: Math.round(v.y / plan.design.h * 100),
+            }) });
+        }
+      }
       if (alt) { drawHighlight(all, null, k, dpr); return; }
       const { sel, cuts, boxes } = quadsFor(plan, all);
       drawHighlight(all, cuts, k, dpr);
@@ -864,6 +885,11 @@ MV.def('ui/stage', ['ui/dom', 'ui/selection', 'ui/output', 'i18n/t', 'ui/shot_ed
       else if (wrap.requestFullscreen) wrap.requestFullscreen();
     }
 
+    function toggleCameraWireframe() {
+      app.view.setPref('cameraWireframe', !app.view.state.prefs.cameraWireframe);
+      return app.view.state.prefs.cameraWireframe;
+    }
+
     app.view.on((changed) => {
       // プレビューの画質 takes effect at once: the backing is laid out again (not only after the next resize).
       if (changed.includes('prefs') && app.view.state.prefs.quality !== quality) {
@@ -876,6 +902,8 @@ MV.def('ui/stage', ['ui/dom', 'ui/selection', 'ui/output', 'i18n/t', 'ui/shot_ed
     });
     app.bus.on('plan', () => { if (!alt) invalidate(); });
     app.bus.on('shotEdit', () => invalidate());
+    // Loaded faces can change text framing under the same plan. Rebuild its camera path with those real metrics.
+    app.bus.on('fonts', () => { wireCache.plan = null; if (app.view.state.prefs.cameraWireframe) invalidate(); });
 
     // A new selection or the tap mode ends the crop overlay, and so does a new plan in which its element no longer shows
     // its picture (an undo, another part: the target's alive()), before a key could pin a crop nothing shows.
@@ -888,6 +916,8 @@ MV.def('ui/stage', ['ui/dom', 'ui/selection', 'ui/output', 'i18n/t', 'ui/shot_ed
       layout, invalidate, setAlt, fullscreen, focus: () => dom.focus(wrap), element: wrap,
       isDirty: () => dirty, hasAlt: () => !!alt, steppedDown: () => steppedDown,
       crop: setCrop, cropKey: () => (crop ? crop.target.key : null), peek, peeking: () => !!peekAt, marks,
+      toggleCameraWireframe, cameraWireframe: () => !!app.view.state.prefs.cameraWireframe,
+      cameraWireframeData: () => wireData,
     };
   }
 

@@ -24,7 +24,8 @@ MV.def('parts/dwell/calm', ['parts/kit'], (K) => {
   // Block holds move only the glyphs. Compositions that set the words on or in a fixed decoration (grid cells, tag
   // cards, a card, a band, a rule right under the line) would lose that picture, so the planner does not pair them
   // (fits = 0 while that composition is chosen; a pin still can).
-  const BOUND = new Set(['gridMosaic', 'hangingTags', 'tiltedCard', 'slantBand', 'titlePlate', 'magazineHead']);
+  const BOUND = new Set(['gridMosaic', 'hangingTags', 'tiltedCard', 'slantBand', 'titlePlate', 'magazineHead',
+    'windowVerse', 'quoteVerse', 'glassLayers', 'wovenStrips', 'pennantLine', 'marginRail', 'focusBadge']);
   function freeBlock(f, chosen) { return chosen && BOUND.has(chosen.arrange) ? 0 : 1; }
 
   // --- stillHold (fallback) --------------------------------------------------------------------------------------

@@ -35,6 +35,39 @@ test('presets: the §4.5.1 and §4.6 tables in canonical form, with tags', () =>
   assert.deepEqual(SHOT.RIGS.driftSide, { tags: ['airy'], curve: 'linear', keys: [{ u: 0, x: -0.02, zoom: 1.03 }, { u: 1, x: 0.02, zoom: 1.03 }] });
 });
 
+test('additional camera choices remain selectable without changing automatic shot choices', () => {
+  const added = ['breathingRoom', 'floatingArc', 'diagonalGlide', 'swayBack', 'focusAndReturn', 'riseIntoView',
+    'pushHoldRelease', 'frameToWords', 'passingFocus', 'levelLanding'];
+  assert.equal(SHOT.SHOT_KEYS.length, 20);
+  assert.deepEqual(SHOT.AUTO_SHOT_KEYS, ['driftOff', 'pullReveal', 'pushWord', 'readAlong', 'settle', 'snapZoom',
+    'sweepAcross', 'tiltHold', 'wideHold']);
+  for (const key of added) {
+    assert.equal(SHOT.coerceShot(key), key);
+    assert.equal(SHOT.presetOf(key), SHOT.SHOTS[key]);
+    assert.equal(MV.use('core/schema').coerce({ type: 'shot' }, key), key);
+    assert.ok(SHOT.expandShot(key, { zoom: 0.8, follow: 0.25 }));
+  }
+});
+
+test('every section preset is canonical, ordered, bounded, immutable and distinct', () => {
+  assert.equal(SHOT.RIG_KEYS.length, 11);
+  const paths = new Set();
+  for (const key of SHOT.RIG_KEYS) {
+    const p = SHOT.RIGS[key];
+    assert.equal(SHOT.coerceRig(key), key);
+    assert.equal(MV.use('core/schema').coerce({ type: 'rig' }, key), key);
+    assert.deepEqual(SHOT.coerceRig({ keys: p.keys }), { keys: p.keys });
+    assert.ok(Object.isFrozen(p) && Object.isFrozen(p.keys) && p.keys.every(Object.isFrozen), key);
+    assert.ok(p.tags.every((tag) => MV.use('core/schema').TAGS.includes(tag)), key);
+    assert.equal(p.keys[0].u, 0, key);
+    assert.equal(p.keys.at(-1).u, 1, key);
+    assert.ok(p.keys.slice(1).every((k, i) => k.u > p.keys[i].u), key + ': no collapsed phases');
+    const path = JSON.stringify(p.keys);
+    assert.ok(!paths.has(path), key + ': no path aliases');
+    paths.add(path);
+  }
+});
+
 test('coerceShot: canonical keys (defaults omitted, sorted, q3, frozen), clamped ranges, ox kept at 0', () => {
   const v = SHOT.coerceShot({ follow: 0.2, keys: [
     { at: 'a', aim: 'block', fill: 0.6, dt: 0, roll: 0, zoom: 1.1, px: 0.2 },

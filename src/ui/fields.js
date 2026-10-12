@@ -9,7 +9,8 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
     // Fields that edit the document through a command instead of a pin have `path: null` and `cmd: { t, key }`;
     // read-only derived values have `path: null` and `derived`. Additive fields: `page`, `kind`/`idx` (part widgets),
     // `spec` (the ParamSpec the widget follows), `options` (choices), `scale` (display factor), `auto` (the choice
-    // offers 自動 = unpin), `labelArgs` (label params that are themselves string keys), `labelText` ({ ja, en } of a
+    // offers 自動 = unpin), `labelArgs` (label params that are themselves string keys), `labelValues` (literal numeric
+    // params such as a slot index), `labelText` ({ ja, en } of a
     // generated part parameter; its `label` is 'fld.param' = '{name}'), `param` (generated part parameters),
     // `firstCut` (the line page's 切り替え: written at the line's first cut, §6.4.6), `pinnedOnly` (a pinned parameter
     // of a part that is no longer chosen, shown as 無効), `note` (a string key shown under the row), `offClears` (a toggle
@@ -194,6 +195,16 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
       return out;
     }
 
+    // Selection bookmarks edit every chosen line, never the first line alone. Explicit slot rows avoid the element
+    // page's single selected index while retaining the same part, hide and parameter widgets and pin semantics.
+    function multiListFields(kind) {
+      return [F({ path: kind + '.count', widget: 'number', label: 'fld.count', spec: SPEC.count })]
+        .concat([0, 1, 2].flatMap((i) => listFields(kind, i).map((f) => Object.assign({}, f, {
+          when: null,
+          ...(f.widget === 'part' ? { label: 'crumb.' + kind, labelValues: { k: i + 1 } } : {}),
+        }))));
+    }
+
     // Face rows only for scripts in use (ja and latin always).
     const faceWhen = (script) => (ctx) => script === 'ja' || script === 'latin' || ctx.scripts.has(script);
     const faceFields = [];
@@ -355,13 +366,15 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
       ],
       lines: [
         sec('multi', true, [], { custom: 'multi' }),
-        sec('direction', true, directionFields()),
+        sec('direction', true, directionFields({ camera: true })),
         // An area selection (区画, DESIGN_2_1 §6.5) adds its section camera; its runs are split at the area's edges. With
         // it, カメラ EXTREME for the area (a line pin on every selected line, DESIGN_EXTREME §2.6).
         sec('rig', true, rigFields().concat(extremeFields({ scopes: LINE })), { when: hasArea }),
         // 背景 for every selected line at once (a block: 無地 for words only, or another picture)
         sec('ground', true, [partField('ground', 'kind.ground')]),
         sec('colortype', false, [textFaceField(), textInkField(), textStyleField(), textScaleField()]),
+        sec('multiornament', false, multiListFields('ornament')),
+        sec('multifilter', false, multiListFields('filter')),
         sec('shift', true, [], { custom: 'shift' }),
       ],
       cut: [
@@ -396,6 +409,8 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
           F({ path: 'el.text.hide', widget: 'toggle', label: 'fld.hide' }),
           sharedField('arrive', 'order', 'fld.order'), sharedField('arrive', 'each', 'fld.each')].concat(textMediaFields())),
         sec('tune', false, [], { params: [{ kind: 'arrange' }, { kind: 'arrive' }, { kind: 'dwell' }, { kind: 'depart' }] }),
+        // The bookmark opens the picker directly; its parameters stay in their original tuning section above.
+        sec('layout', false, [partField('arrange', 'kind.arrange', { expandParams: false })]),
       ],
       'el.ornament': [
         sec('list', true, [F({ path: 'ornament.count', widget: 'number', label: 'fld.count', spec: SPEC.count }),
@@ -431,7 +446,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
 
     // 行 › 演出 (§6.4.6; DESIGN_2_1 §6.5): 緩急 after 入り and 抜け (the curve widget), 動きの速さ, カメラワーク; advanced:
     // 出方の緩急, この行の季節, この行で使わない部品.
-    function directionFields() {
+    function directionFields(extra) {
       return [
         partField('arrange', 'kind.arrange'),
         partField('arrive', 'kind.arrive'),
@@ -441,6 +456,13 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
         partField('dwell', 'kind.dwell'), sharedField('dwell', 'amount', 'fld.amount'),
         partField('depart', 'kind.depart'), sharedField('depart', 'dur', 'fld.dur'), sharedField('depart', 'ease', 'fld.speedCurve'),
         speedField(), shotField(),
+        ...(extra && extra.camera ? [
+          F({ path: 'cam.zoom', widget: 'number', label: 'fld.camZoom', spec: SPEC.camZoom, scale: 100 }),
+          F({ path: 'cam.curve', widget: 'curve', label: 'fld.camCurve', spec: SPEC.curve }),
+          F({ path: 'cam.follow', widget: 'number', label: 'fld.camFollow', spec: SPEC.follow, scale: 100, basic: false }),
+          partField('lens', 'fld.lensMove'),
+          ...rigFields().map((f) => Object.assign({}, f, { when: (ctx) => !ctx.area })),
+        ] : []),
         // §6.4.6: the transition into the line's first cut (a line-scope seam pin would change every cut boundary).
         partField('seam', 'fld.seamIntoLine', { firstCut: true }),
         orientField(),
@@ -645,7 +667,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
       const out = [];
       for (const f of fields) {
         out.push(f);
-        if (f.widget !== 'part' || !SLOT_KINDS.includes(f.kind)) continue;
+        if (f.widget !== 'part' || f.expandParams === false || !SLOT_KINDS.includes(f.kind)) continue;
         const idx = f.idx === undefined ? null : f.idx;
         const key = agreedKey(f.firstCut ? Object.assign({}, ctx, { cuts: firstCuts(ctx) }) : ctx, f.path);
         // a part with a photo or video param gets the media rows (ui/media_widgets: source, depth, crop, video rows)

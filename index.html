@@ -1,6 +1,6 @@
 <!doctype html><html lang="ja"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-/mUxZLqX49OzUlH35gN7JBq04wnWED+TOGhta6FvhAg=' 'wasm-unsafe-eval'; style-src 'sha256-ZEajYlmeL7fg1a5xcjneTts1uVKFjqWEOMIMIosAx/E=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://generativelanguage.googleapis.com https://api.anthropic.com https://momomonbi.github.io; img-src data: blob:; media-src blob:; worker-src blob:; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-9XTP2Q9sh4Au/4prT1nDodDhRkTcPqOxBNoLeXk65gY=' 'wasm-unsafe-eval'; style-src 'sha256-HY8hkmzwHOpHUoa6OMoyoj9OJOsJZz4S59Tzm2haHMU=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://generativelanguage.googleapis.com https://api.anthropic.com https://momomonbi.github.io; img-src data: blob:; media-src blob:; worker-src blob:; base-uri 'none'; form-action 'none'">
 <title>文字PVメーカー</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -1361,6 +1361,85 @@ details.ai-group > summary { cursor: pointer; list-style-position: inside; }
 .il-name { align-self: flex-start; font-weight: 600; margin-bottom: 4px; }
 .il-row { display: flex; flex-direction: column; }
 .il-fx { margin-bottom: 6px; }
+
+/* Inspector quick navigation. */
+/* Always within reach while the inspector's settings scroll. */
+.insp-tabs {
+  position: sticky; top: -12px; z-index: 4; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 3px; margin: -12px -14px 10px; padding: 8px 10px; border-bottom: 1px solid var(--line-2);
+  background: var(--panel); box-shadow: 0 4px 10px rgba(0, 0, 0, 0.12);
+}
+.insp-tab {
+  min-width: 0; min-height: 31px; padding: 4px 5px; border: 1px solid var(--line-2); border-radius: 6px 6px 2px 2px;
+  background: var(--panel-2); color: var(--text-2); font: 700 11.5px var(--font); white-space: nowrap;
+}
+.insp-tab:hover { color: var(--text); background: var(--panel-3); }
+.insp-tab[aria-current="true"] { border-color: var(--focus); background: rgba(124, 196, 255, 0.12); color: var(--focus); }
+.insp-tab:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.insp-tab[data-jump="scope"] { color: var(--muted); }
+.insp-body .isec { scroll-margin-top: 120px; }
+.insp-body .frow { scroll-margin-top: 120px; }
+.cam-wireframe-btn { align-self: flex-start; }
+
+/* Camera wireframe preview. */
+/* Preview-only camera navigation control; the overlay is never part of exported frames. */
+.camera-wireframe-toggle { position: absolute; right: 10px; top: 10px; z-index: 3; padding: 6px 10px; font-size: 12px; background: rgba(16, 21, 27, 0.88); border-color: rgba(113, 230, 209, 0.5); color: var(--text-2); box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25); }
+.camera-wireframe-toggle[aria-pressed="true"] { color: #71e6d1; border-color: #71e6d1; background: rgba(16, 42, 42, 0.95); }
+.camera-wireframe-toggle:disabled { opacity: 0.45; }
+
+/* Camera timeline and full-song window. */
+/* Camera track and a light viewport on the unchanged full-song overview. */
+.tl-camera-label { position: absolute; left: 2px; padding: 0 4px; border-radius: 3px; background: #182535; color: #b7dcf7; font-size: 9px; line-height: 11px; pointer-events: none; }
+.lane-seek { position: absolute; inset: 0; touch-action: none; }
+.lane-seek:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.lane-viewport { position: absolute; top: 0; bottom: 0; box-sizing: border-box; border: 1px solid rgba(124,196,255,0.6); border-radius: 3px; pointer-events: none; }
+.lane-window-pan { position: absolute; bottom: 0; left: 12px; right: 12px; height: 8px; min-width: 0; padding: 0; border: 0; background: rgba(124,196,255,0.2); color: #b7dcf7; font-size: 8px; line-height: 8px; overflow: hidden; white-space: nowrap; cursor: grab; pointer-events: auto; touch-action: none; }
+.lane-window-handle { position: absolute; bottom: 0; width: 12px; height: 24px; padding: 0; border: 1px solid #7cc4ff; border-radius: 3px; background: #243f57; color: #b7dcf7; cursor: ew-resize; pointer-events: auto; touch-action: none; }
+.lane-window-start { left: -1px; }
+.lane-window-end { right: -1px; }
+.lane-window-handle::after { content: ''; position: absolute; top: 5px; bottom: 5px; left: 3px; right: 3px; border-left: 1px solid currentColor; border-right: 1px solid currentColor; }
+.lane-window-handle:hover, .lane-window-pan:hover { background: #365875; }
+.lane-window-handle:focus-visible, .lane-window-pan:focus-visible { outline: 2px solid #f0b64d; outline-offset: -2px; }
+.lane-viewport.is-dragging { border-color: #b7dcf7; }
+.lane-viewport.is-dragging .lane-window-pan { cursor: grabbing; }
+
+/* Overview navigator and active-mode controls. */
+/* Tiny true-scale windows keep all three navigator controls separately graspable. */
+.lane-viewport[data-narrow="true"] .lane-window-start { top: 0; bottom: auto; height: 12px; }
+.lane-viewport[data-narrow="true"] .lane-window-end { top: auto; bottom: 0; height: 12px; }
+.lane-viewport[data-narrow="true"] .lane-window-pan { top: 50%; bottom: auto; transform: translateY(-50%); }
+.lane-viewport[data-narrow="true"] .lane-window-handle::after { top: 2px; bottom: 2px; }
+/* Mode messages/actions replace history and shuffle below the always-visible overview. */
+.controls .mode-strip { height: 32px; max-height: 100%; min-width: 0; box-sizing: border-box; padding: 0 8px; gap: 6px; font-size: 11px; }
+.controls .strip-text { min-width: 0; }
+.controls .strip-acts { flex: none; gap: 4px; }
+.controls .mode-strip .btn.small { padding: 0 7px; font-size: 11px; white-space: nowrap; }
+.controls[data-mode-active="true"] > .grow { display: none; }
+.controls[data-mode-compact="true"] .to-start, .controls[data-mode-compact="true"] .ctl-tools { display: none; }
+
+/* Large camera sample playback. */
+/* Large camera samples keep playback controls visible and render the project's real aspect ratio. */
+.dlg.camera-preview-dialog { width: min(1040px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); }
+.camera-preview { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.camera-preview-screen { display: flex; justify-content: center; align-items: center; min-height: 150px; background: #090b10; border-radius: 10px; overflow: hidden; }
+.camera-preview-canvas { display: block; width: auto; height: auto; max-width: 100%; max-height: min(55dvh, 600px); }
+.camera-preview-caption { margin: 0; color: var(--text-2); font-size: 13px; }
+.camera-preview-transport { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.camera-preview-seek { width: 100%; min-width: 0; accent-color: var(--focus); }
+.camera-preview-time { margin-left: auto; font: 12px var(--mono); color: var(--text-2); }
+.camera-preview-options { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; font-size: 12px; }
+.camera-preview-options label { display: inline-flex; align-items: center; gap: 6px; }
+.camera-preview-speed { width: auto; max-width: 100%; }
+.camera-preview-field { align-self: flex-start; }
+.pb-camera-item { display: flex; flex-direction: column; min-width: 0; gap: 3px; }
+.pb-camera-item > .pb-tile { width: 100%; flex: 1 1 auto; box-sizing: border-box; }
+.pb-camera-preview { width: 100%; min-height: 28px; justify-content: center; font-size: 11.5px; }
+@media (max-width: 480px) {
+  .camera-preview-dialog .dlg-body { padding: 10px 12px 12px; }
+  .camera-preview-dialog .dlg-head { padding-left: 12px; }
+  .camera-preview-canvas { max-height: 42dvh; }
+  .camera-preview-options { gap: 8px; }
+}
 </style></head>
 <body><div id="app"></div>
 <script>"use strict";var Mp4Muxer=(()=>{var we=Object.defineProperty,at=Object.getOwnPropertyDescriptor,nt=Object.getOwnPropertyNames,ot=Object.prototype.hasOwnProperty,ht=(e,t)=>{for(var s in t)we(e,s,{get:t[s],enumerable:!0})},lt=(e,t,s,r)=>{if(t&&typeof t=="object"||typeof t=="function")for(let a of nt(t))!ot.call(e,a)&&a!==s&&we(e,a,{get:()=>t[a],enumerable:!(r=at(t,a))||r.enumerable});return e},ft=e=>lt(we({},"__esModule",{value:!0}),e),ve=(e,t,s)=>{if(!t.has(e))throw TypeError("Cannot "+s)},i=(e,t,s)=>(ve(e,t,"read from private field"),s?s.call(e):t.get(e)),d=(e,t,s)=>{if(t.has(e))throw TypeError("Cannot add the same private member more than once");t instanceof WeakSet?t.add(e):t.set(e,s)},C=(e,t,s,r)=>(ve(e,t,"write to private field"),r?r.call(e,s):t.set(e,s),s),ut=(e,t,s,r)=>({set _(a){C(e,t,a,s)},get _(){return i(e,t,r)}}),m=(e,t,s)=>(ve(e,t,"access private method"),s),Re={};ht(Re,{ArrayBufferTarget:()=>qe,FileSystemWritableFileStreamTarget:()=>Xe,Muxer:()=>vi,StreamTarget:()=>Te});var p=new Uint8Array(8),z=new DataView(p.buffer),y=e=>[(e%256+256)%256],c=e=>(z.setUint16(0,e,!1),[p[0],p[1]]),dt=e=>(z.setInt16(0,e,!1),[p[0],p[1]]),Pe=e=>(z.setUint32(0,e,!1),[p[1],p[2],p[3]]),n=e=>(z.setUint32(0,e,!1),[p[0],p[1],p[2],p[3]]),mt=e=>(z.setInt32(0,e,!1),[p[0],p[1],p[2],p[3]]),x=e=>(z.setUint32(0,Math.floor(e/2**32),!1),z.setUint32(4,e,!1),[p[0],p[1],p[2],p[3],p[4],p[5],p[6],p[7]]),ge=e=>(z.setInt16(0,2**8*e,!1),[p[0],p[1]]),A=e=>(z.setInt32(0,2**16*e,!1),[p[0],p[1],p[2],p[3]]),ye=e=>(z.setInt32(0,2**30*e,!1),[p[0],p[1],p[2],p[3]]),E=(e,t=!1)=>{let s=Array(e.length).fill(null).map((r,a)=>e.charCodeAt(a));return t&&s.push(0),s},se=e=>e&&e[e.length-1],Ce=e=>{let t;for(let s of e)(!t||s.presentationTimestamp>t.presentationTimestamp)&&(t=s);return t},O=(e,t,s=!0)=>{let r=e*t;return s?Math.round(r):r},Le=e=>{let t=e*(Math.PI/180),s=Math.cos(t),r=Math.sin(t);return[s,r,0,-r,s,0,0,0,1]},Ve=Le(0),je=e=>[A(e[0]),A(e[1]),ye(e[2]),A(e[3]),A(e[4]),ye(e[5]),A(e[6]),A(e[7]),ye(e[8])],X=e=>!e||typeof e!="object"?e:Array.isArray(e)?e.map(X):Object.fromEntries(Object.entries(e).map(([t,s])=>[t,X(s)])),V=e=>e>=0&&e<2**32,v=(e,t,s)=>({type:e,contents:t&&new Uint8Array(t.flat(10)),children:s}),w=(e,t,s,r,a)=>v(e,[y(t),Pe(s),r??[]],a),pt=e=>{let t=512;return e.fragmented?v("ftyp",[E("iso5"),n(t),E("iso5"),E("iso6"),E("mp41")]):v("ftyp",[E("isom"),n(t),E("isom"),e.holdsAvc?E("avc1"):[],E("mp41")])},Se=e=>({type:"mdat",largeSize:e}),ct=e=>({type:"free",size:e}),re=(e,t,s=!1)=>v("moov",null,[wt(t,e),...e.map(r=>vt(r,t)),s?Gt(e):null]),wt=(e,t)=>{let s=O(Math.max(0,...t.filter(l=>l.samples.length>0).map(l=>{const u=Ce(l.samples);return u.presentationTimestamp+u.duration})),Ae),r=Math.max(...t.map(l=>l.id))+1,a=!V(e)||!V(s),o=a?x:n;return w("mvhd",+a,0,[o(e),o(e),n(Ae),o(s),A(1),ge(1),Array(10).fill(0),je(Ve),Array(24).fill(0),n(r)])},vt=(e,t)=>v("trak",null,[gt(e,t),yt(e,t)]),gt=(e,t)=>{let s=Ce(e.samples),r=O(s?s.presentationTimestamp+s.duration:0,Ae),a=!V(t)||!V(r),o=a?x:n,l;return e.info.type==="video"?l=typeof e.info.rotation=="number"?Le(e.info.rotation):e.info.rotation:l=Ve,w("tkhd",+a,3,[o(t),o(t),n(e.id),n(0),o(r),Array(8).fill(0),c(0),c(0),ge(e.info.type==="audio"?1:0),c(0),je(l),A(e.info.type==="video"?e.info.width:0),A(e.info.type==="video"?e.info.height:0)])},yt=(e,t)=>v("mdia",null,[Ct(e,t),St(e.info.type==="video"?"vide":"soun"),Tt(e)]),Ct=(e,t)=>{let s=Ce(e.samples),r=O(s?s.presentationTimestamp+s.duration:0,e.timescale),a=!V(t)||!V(r),o=a?x:n;return w("mdhd",+a,0,[o(t),o(t),n(e.timescale),o(r),c(21956),c(0)])},St=e=>w("hdlr",0,0,[E("mhlr"),E(e),n(0),n(0),n(0),E("mp4-muxer-hdlr",!0)]),Tt=e=>v("minf",null,[e.info.type==="video"?bt():_t(),kt(),At(e)]),bt=()=>w("vmhd",0,1,[c(0),c(0),c(0),c(0)]),_t=()=>w("smhd",0,0,[c(0),c(0)]),kt=()=>v("dinf",null,[Et()]),Et=()=>w("dref",0,0,[n(1)],[zt()]),zt=()=>w("url ",0,1),At=e=>{const t=e.compositionTimeOffsetTable.length>1||e.compositionTimeOffsetTable.some(s=>s.sampleCompositionTimeOffset!==0);return v("stbl",null,[Ot(e),Vt(e),jt(e),$t(e),Ht(e),qt(e),t?Xt(e):null])},Ot=e=>w("stsd",0,0,[n(1)],[e.info.type==="video"?Mt(ri[e.info.codec],e):Rt(ni[e.info.codec],e)]),Mt=(e,t)=>v(e,[Array(6).fill(0),c(1),c(0),c(0),Array(12).fill(0),c(t.info.width),c(t.info.height),n(4718592),n(4718592),n(0),c(1),Array(32).fill(0),c(24),dt(65535)],[ai[t.info.codec](t),t.info.decoderConfig.colorSpace?Ut(t):null]),Bt={bt709:1,bt470bg:5,smpte170m:6},It={bt709:1,smpte170m:6,"iec61966-2-1":13},Dt={rgb:0,bt709:1,bt470bg:5,smpte170m:6},Ut=e=>v("colr",[E("nclx"),c(Bt[e.info.decoderConfig.colorSpace.primaries]),c(It[e.info.decoderConfig.colorSpace.transfer]),c(Dt[e.info.decoderConfig.colorSpace.matrix]),y((e.info.decoderConfig.colorSpace.fullRange?1:0)<<7)]),xt=e=>e.info.decoderConfig&&v("avcC",[...new Uint8Array(e.info.decoderConfig.description)]),Wt=e=>e.info.decoderConfig&&v("hvcC",[...new Uint8Array(e.info.decoderConfig.description)]),Ft=e=>{if(!e.info.decoderConfig)return null;let t=e.info.decoderConfig;if(!t.colorSpace)throw new Error("'colorSpace' is required in the decoder config for VP9.");let s=t.codec.split("."),r=Number(s[1]),a=Number(s[2]),u=(Number(s[3])<<4)+(0<<1)+Number(t.colorSpace.fullRange);return w("vpcC",1,0,[y(r),y(a),y(u),y(2),y(2),y(2),c(0)])},Nt=()=>{let s=(1<<7)+1;return v("av1C",[s,0,0,0])},Rt=(e,t)=>v(e,[Array(6).fill(0),c(1),c(0),c(0),n(0),c(t.info.numberOfChannels),c(16),c(0),c(0),A(t.info.sampleRate)],[oi[t.info.codec](t)]),Pt=e=>{let t=new Uint8Array(e.info.decoderConfig.description);return w("esds",0,0,[n(58753152),y(32+t.byteLength),c(1),y(0),n(75530368),y(18+t.byteLength),y(64),y(21),Pe(0),n(130071),n(130071),n(92307584),y(t.byteLength),...t,n(109084800),y(1),y(2)])},Lt=e=>{let t=3840,s=0;const r=e.info.decoderConfig?.description;if(r){if(r.byteLength<18)throw new TypeError("Invalid decoder description provided for Opus; must be at least 18 bytes long.");const a=ArrayBuffer.isView(r)?new DataView(r.buffer,r.byteOffset,r.byteLength):new DataView(r);t=a.getUint16(10,!0),s=a.getInt16(14,!0)}return v("dOps",[y(0),y(e.info.numberOfChannels),c(t),n(e.info.sampleRate),ge(s),y(0)])},Vt=e=>w("stts",0,0,[n(e.timeToSampleTable.length),e.timeToSampleTable.map(t=>[n(t.sampleCount),n(t.sampleDelta)])]),jt=e=>{if(e.samples.every(s=>s.type==="key"))return null;let t=[...e.samples.entries()].filter(([,s])=>s.type==="key");return w("stss",0,0,[n(t.length),t.map(([s])=>n(s+1))])},$t=e=>w("stsc",0,0,[n(e.compactlyCodedChunkTable.length),e.compactlyCodedChunkTable.map(t=>[n(t.firstChunk),n(t.samplesPerChunk),n(1)])]),Ht=e=>w("stsz",0,0,[n(0),n(e.samples.length),e.samples.map(t=>n(t.size))]),qt=e=>e.finalizedChunks.length>0&&se(e.finalizedChunks).offset>=2**32?w("co64",0,0,[n(e.finalizedChunks.length),e.finalizedChunks.map(t=>x(t.offset))]):w("stco",0,0,[n(e.finalizedChunks.length),e.finalizedChunks.map(t=>n(t.offset))]),Xt=e=>w("ctts",0,0,[n(e.compositionTimeOffsetTable.length),e.compositionTimeOffsetTable.map(t=>[n(t.sampleCount),n(t.sampleCompositionTimeOffset)])]),Gt=e=>v("mvex",null,e.map(Zt)),Zt=e=>w("trex",0,0,[n(e.id),n(1),n(0),n(0),n(0)]),$e=(e,t)=>v("moof",null,[Kt(e),...t.map(Qt)]),Kt=e=>w("mfhd",0,0,[n(e)]),He=e=>{let t=0,s=0,r=0,a=0,o=e.type==="delta";return s|=+o,o?t|=1:t|=2,t<<24|s<<16|r<<8|a},Qt=e=>v("traf",null,[Jt(e),Yt(e),ei(e)]),Jt=e=>{let t=0;t|=8,t|=16,t|=32,t|=131072;let s=e.currentChunk.samples[1]??e.currentChunk.samples[0],r={duration:s.timescaleUnitsToNextSample,size:s.size,flags:He(s)};return w("tfhd",0,t,[n(e.id),n(r.duration),n(r.size),n(r.flags)])},Yt=e=>w("tfdt",1,0,[x(O(e.currentChunk.startTimestamp,e.timescale))]),ei=e=>{let t=e.currentChunk.samples.map(D=>D.timescaleUnitsToNextSample),s=e.currentChunk.samples.map(D=>D.size),r=e.currentChunk.samples.map(He),a=e.currentChunk.samples.map(D=>O(D.presentationTimestamp-D.decodeTimestamp,e.timescale)),o=new Set(t),l=new Set(s),u=new Set(r),g=new Set(a),b=u.size===2&&r[0]!==r[1],U=o.size>1,ie=l.size>1,st=!b&&u.size>1,rt=g.size>1||[...g].some(D=>D!==0),L=0;return L|=1,L|=4*+b,L|=256*+U,L|=512*+ie,L|=1024*+st,L|=2048*+rt,w("trun",1,L,[n(e.currentChunk.samples.length),n(e.currentChunk.offset-e.currentChunk.moofOffset||0),b?n(r[0]):[],e.currentChunk.samples.map((D,ce)=>[U?n(t[ce]):[],ie?n(s[ce]):[],st?n(r[ce]):[],rt?mt(a[ce]):[]])])},ti=e=>v("mfra",null,[...e.map(ii),si()]),ii=(e,t)=>w("tfra",1,0,[n(e.id),n(63),n(e.finalizedChunks.length),e.finalizedChunks.map(r=>[x(O(r.startTimestamp,e.timescale)),x(r.moofOffset),n(t+1),n(1),n(1)])]),si=()=>w("mfro",0,0,[n(0)]),ri={avc:"avc1",hevc:"hvc1",vp9:"vp09",av1:"av01"},ai={avc:xt,hevc:Wt,vp9:Ft,av1:Nt},ni={aac:"mp4a",opus:"Opus"},oi={aac:Pt,opus:Lt},hi=Symbol("isTarget"),ae=class{},qe=class extends ae{constructor(){super(...arguments),this.buffer=null}},Te=class extends ae{constructor(e){if(super(),this.options=e,typeof e!="object")throw new TypeError("StreamTarget requires an options object to be passed to its constructor.");if(e.onData){if(typeof e.onData!="function")throw new TypeError("options.onData, when provided, must be a function.");if(e.onData.length<2)throw new TypeError("options.onData, when provided, must be a function that takes in at least two arguments (data and position). Ignoring the position argument, which specifies the byte offset at which the data is to be written, can lead to broken outputs.")}if(e.chunked!==void 0&&typeof e.chunked!="boolean")throw new TypeError("options.chunked, when provided, must be a boolean.");if(e.chunkSize!==void 0&&(!Number.isInteger(e.chunkSize)||e.chunkSize<1024))throw new TypeError("options.chunkSize, when provided, must be an integer and not smaller than 1024.")}},Xe=class extends ae{constructor(e,t){if(super(),this.stream=e,this.options=t,!(e instanceof FileSystemWritableFileStream))throw new TypeError("FileSystemWritableFileStreamTarget requires a FileSystemWritableFileStream instance.");if(t!==void 0&&typeof t!="object")throw new TypeError("FileSystemWritableFileStreamTarget's options, when provided, must be an object.");if(t&&t.chunkSize!==void 0&&(!Number.isInteger(t.chunkSize)||t.chunkSize<=0))throw new TypeError("options.chunkSize, when provided, must be a positive integer")}},W,j,Ge=class{constructor(){this.pos=0,d(this,W,new Uint8Array(8)),d(this,j,new DataView(i(this,W).buffer)),this.offsets=new WeakMap}seek(e){this.pos=e}writeU32(e){i(this,j).setUint32(0,e,!1),this.write(i(this,W).subarray(0,4))}writeU64(e){i(this,j).setUint32(0,Math.floor(e/2**32),!1),i(this,j).setUint32(4,e,!1),this.write(i(this,W).subarray(0,8))}writeAscii(e){for(let t=0;t<e.length;t++)i(this,j).setUint8(t%8,e.charCodeAt(t)),t%8===7&&this.write(i(this,W));e.length%8!==0&&this.write(i(this,W).subarray(0,e.length%8))}writeBox(e){if(this.offsets.set(e,this.pos),e.contents&&!e.children)this.writeBoxHeader(e,e.size??e.contents.byteLength+8),this.write(e.contents);else{let t=this.pos;if(this.writeBoxHeader(e,0),e.contents&&this.write(e.contents),e.children)for(let a of e.children)a&&this.writeBox(a);let s=this.pos,r=e.size??s-t;this.seek(t),this.writeBoxHeader(e,r),this.seek(s)}}writeBoxHeader(e,t){this.writeU32(e.largeSize?1:t),this.writeAscii(e.type),e.largeSize&&this.writeU64(t)}measureBoxHeader(e){return 8+(e.largeSize?8:0)}patchBox(e){let t=this.pos;this.seek(this.offsets.get(e)),this.writeBox(e),this.seek(t)}measureBox(e){if(e.contents&&!e.children)return this.measureBoxHeader(e)+e.contents.byteLength;{let t=this.measureBoxHeader(e);if(e.contents&&(t+=e.contents.byteLength),e.children)for(let s of e.children)s&&(t+=this.measureBox(s));return t}}};W=new WeakMap,j=new WeakMap;var ne,F,G,Z,oe,be,li=class extends Ge{constructor(e){super(),d(this,oe),d(this,ne,void 0),d(this,F,new ArrayBuffer(2**16)),d(this,G,new Uint8Array(i(this,F))),d(this,Z,0),C(this,ne,e)}write(e){m(this,oe,be).call(this,this.pos+e.byteLength),i(this,G).set(e,this.pos),this.pos+=e.byteLength,C(this,Z,Math.max(i(this,Z),this.pos))}finalize(){m(this,oe,be).call(this,this.pos),i(this,ne).buffer=i(this,F).slice(0,Math.max(i(this,Z),this.pos))}};ne=new WeakMap,F=new WeakMap,G=new WeakMap,Z=new WeakMap,oe=new WeakSet,be=function(e){let t=i(this,F).byteLength;for(;t<e;)t*=2;if(t===i(this,F).byteLength)return;let s=new ArrayBuffer(t),r=new Uint8Array(s);r.set(i(this,G),0),C(this,F,s),C(this,G,r)};var fi=2**24,ui=2,K,N,Q,B,_,he,_e,ke,Ze,Ee,Ke,J,le,ze=class extends Ge{constructor(e){super(),d(this,he),d(this,ke),d(this,Ee),d(this,J),d(this,K,void 0),d(this,N,[]),d(this,Q,void 0),d(this,B,void 0),d(this,_,[]),C(this,K,e),C(this,Q,e.options?.chunked??!1),C(this,B,e.options?.chunkSize??fi)}write(e){i(this,N).push({data:e.slice(),start:this.pos}),this.pos+=e.byteLength}flush(){if(i(this,N).length===0)return;let e=[],t=[...i(this,N)].sort((s,r)=>s.start-r.start);e.push({start:t[0].start,size:t[0].data.byteLength});for(let s=1;s<t.length;s++){let r=e[e.length-1],a=t[s];a.start<=r.start+r.size?r.size=Math.max(r.size,a.start+a.data.byteLength-r.start):e.push({start:a.start,size:a.data.byteLength})}for(let s of e){s.data=new Uint8Array(s.size);for(let r of i(this,N))s.start<=r.start&&r.start<s.start+s.size&&s.data.set(r.data,r.start-s.start);i(this,Q)?(m(this,he,_e).call(this,s.data,s.start),m(this,J,le).call(this)):i(this,K).options.onData?.(s.data,s.start)}i(this,N).length=0}finalize(){i(this,Q)&&m(this,J,le).call(this,!0)}};K=new WeakMap,N=new WeakMap,Q=new WeakMap,B=new WeakMap,_=new WeakMap,he=new WeakSet,_e=function(e,t){let s=i(this,_).findIndex(u=>u.start<=t&&t<u.start+i(this,B));s===-1&&(s=m(this,Ee,Ke).call(this,t));let r=i(this,_)[s],a=t-r.start,o=e.subarray(0,Math.min(i(this,B)-a,e.byteLength));r.data.set(o,a);let l={start:a,end:a+o.byteLength};if(m(this,ke,Ze).call(this,r,l),r.written[0].start===0&&r.written[0].end===i(this,B)&&(r.shouldFlush=!0),i(this,_).length>ui){for(let u=0;u<i(this,_).length-1;u++)i(this,_)[u].shouldFlush=!0;m(this,J,le).call(this)}o.byteLength<e.byteLength&&m(this,he,_e).call(this,e.subarray(o.byteLength),t+o.byteLength)},ke=new WeakSet,Ze=function(e,t){let s=0,r=e.written.length-1,a=-1;for(;s<=r;){let o=Math.floor(s+(r-s+1)/2);e.written[o].start<=t.start?(s=o+1,a=o):r=o-1}for(e.written.splice(a+1,0,t),(a===-1||e.written[a].end<t.start)&&a++;a<e.written.length-1&&e.written[a].end>=e.written[a+1].start;)e.written[a].end=Math.max(e.written[a].end,e.written[a+1].end),e.written.splice(a+1,1)},Ee=new WeakSet,Ke=function(e){let s={start:Math.floor(e/i(this,B))*i(this,B),data:new Uint8Array(i(this,B)),written:[],shouldFlush:!1};return i(this,_).push(s),i(this,_).sort((r,a)=>r.start-a.start),i(this,_).indexOf(s)},J=new WeakSet,le=function(e=!1){for(let t=0;t<i(this,_).length;t++){let s=i(this,_)[t];if(!(!s.shouldFlush&&!e)){for(let r of s.written)i(this,K).options.onData?.(s.data.subarray(r.start,r.end),s.start+r.start);i(this,_).splice(t--,1)}}};var di=class extends ze{constructor(e){super(new Te({onData:(t,s)=>e.stream.write({type:"write",data:t,position:s}),chunked:!0,chunkSize:e.options?.chunkSize}))}},Ae=1e3,mi=["avc","hevc","vp9","av1"],pi=["aac","opus"],ci=2082844800,wi=["strict","offset","cross-track-offset"],h,f,fe,k,T,S,$,H,Oe,R,P,Y,Me,Qe,Be,Je,Ie,Ye,De,et,Ue,tt,ue,xe,M,I,We,it,ee,de,me,Fe,q,te,pe,Ne,vi=class{constructor(e){if(d(this,Me),d(this,Be),d(this,Ie),d(this,De),d(this,Ue),d(this,ue),d(this,M),d(this,We),d(this,ee),d(this,me),d(this,q),d(this,pe),d(this,h,void 0),d(this,f,void 0),d(this,fe,void 0),d(this,k,void 0),d(this,T,null),d(this,S,null),d(this,$,Math.floor(Date.now()/1e3)+ci),d(this,H,[]),d(this,Oe,1),d(this,R,[]),d(this,P,[]),d(this,Y,!1),m(this,Me,Qe).call(this,e),e.video=X(e.video),e.audio=X(e.audio),e.fastStart=X(e.fastStart),this.target=e.target,C(this,h,{firstTimestampBehavior:"strict",...e}),e.target instanceof qe)C(this,f,new li(e.target));else if(e.target instanceof Te)C(this,f,new ze(e.target));else if(e.target instanceof Xe)C(this,f,new di(e.target));else throw new Error(`Invalid target: ${e.target}`);m(this,De,et).call(this),m(this,Be,Je).call(this)}addVideoChunk(e,t,s,r){if(!(e instanceof EncodedVideoChunk))throw new TypeError("addVideoChunk's first argument (sample) must be of type EncodedVideoChunk.");if(t&&typeof t!="object")throw new TypeError("addVideoChunk's second argument (meta), when provided, must be an object.");if(s!==void 0&&(!Number.isFinite(s)||s<0))throw new TypeError("addVideoChunk's third argument (timestamp), when provided, must be a non-negative real number.");if(r!==void 0&&!Number.isFinite(r))throw new TypeError("addVideoChunk's fourth argument (compositionTimeOffset), when provided, must be a real number.");let a=new Uint8Array(e.byteLength);e.copyTo(a),this.addVideoChunkRaw(a,e.type,s??e.timestamp,e.duration,t,r)}addVideoChunkRaw(e,t,s,r,a,o){if(!(e instanceof Uint8Array))throw new TypeError("addVideoChunkRaw's first argument (data) must be an instance of Uint8Array.");if(t!=="key"&&t!=="delta")throw new TypeError("addVideoChunkRaw's second argument (type) must be either 'key' or 'delta'.");if(!Number.isFinite(s)||s<0)throw new TypeError("addVideoChunkRaw's third argument (timestamp) must be a non-negative real number.");if(!Number.isFinite(r)||r<0)throw new TypeError("addVideoChunkRaw's fourth argument (duration) must be a non-negative real number.");if(a&&typeof a!="object")throw new TypeError("addVideoChunkRaw's fifth argument (meta), when provided, must be an object.");if(o!==void 0&&!Number.isFinite(o))throw new TypeError("addVideoChunkRaw's sixth argument (compositionTimeOffset), when provided, must be a real number.");if(m(this,pe,Ne).call(this),!i(this,h).video)throw new Error("No video track declared.");if(typeof i(this,h).fastStart=="object"&&i(this,T).samples.length===i(this,h).fastStart.expectedVideoChunks)throw new Error(`Cannot add more video chunks than specified in 'fastStart' (${i(this,h).fastStart.expectedVideoChunks}).`);let l=m(this,ue,xe).call(this,i(this,T),e,t,s,r,a,o);if(i(this,h).fastStart==="fragmented"&&i(this,S)){for(;i(this,P).length>0&&i(this,P)[0].decodeTimestamp<=l.decodeTimestamp;){let u=i(this,P).shift();m(this,M,I).call(this,i(this,S),u)}l.decodeTimestamp<=i(this,S).lastDecodeTimestamp?m(this,M,I).call(this,i(this,T),l):i(this,R).push(l)}else m(this,M,I).call(this,i(this,T),l)}addAudioChunk(e,t,s){if(!(e instanceof EncodedAudioChunk))throw new TypeError("addAudioChunk's first argument (sample) must be of type EncodedAudioChunk.");if(t&&typeof t!="object")throw new TypeError("addAudioChunk's second argument (meta), when provided, must be an object.");if(s!==void 0&&(!Number.isFinite(s)||s<0))throw new TypeError("addAudioChunk's third argument (timestamp), when provided, must be a non-negative real number.");let r=new Uint8Array(e.byteLength);e.copyTo(r),this.addAudioChunkRaw(r,e.type,s??e.timestamp,e.duration,t)}addAudioChunkRaw(e,t,s,r,a){if(!(e instanceof Uint8Array))throw new TypeError("addAudioChunkRaw's first argument (data) must be an instance of Uint8Array.");if(t!=="key"&&t!=="delta")throw new TypeError("addAudioChunkRaw's second argument (type) must be either 'key' or 'delta'.");if(!Number.isFinite(s)||s<0)throw new TypeError("addAudioChunkRaw's third argument (timestamp) must be a non-negative real number.");if(!Number.isFinite(r)||r<0)throw new TypeError("addAudioChunkRaw's fourth argument (duration) must be a non-negative real number.");if(a&&typeof a!="object")throw new TypeError("addAudioChunkRaw's fifth argument (meta), when provided, must be an object.");if(m(this,pe,Ne).call(this),!i(this,h).audio)throw new Error("No audio track declared.");if(typeof i(this,h).fastStart=="object"&&i(this,S).samples.length===i(this,h).fastStart.expectedAudioChunks)throw new Error(`Cannot add more audio chunks than specified in 'fastStart' (${i(this,h).fastStart.expectedAudioChunks}).`);let o=m(this,ue,xe).call(this,i(this,S),e,t,s,r,a);if(i(this,h).fastStart==="fragmented"&&i(this,T)){for(;i(this,R).length>0&&i(this,R)[0].decodeTimestamp<=o.decodeTimestamp;){let l=i(this,R).shift();m(this,M,I).call(this,i(this,T),l)}o.decodeTimestamp<=i(this,T).lastDecodeTimestamp?m(this,M,I).call(this,i(this,S),o):i(this,P).push(o)}else m(this,M,I).call(this,i(this,S),o)}finalize(){if(i(this,Y))throw new Error("Cannot finalize a muxer more than once.");if(i(this,h).fastStart==="fragmented"){for(let t of i(this,R))m(this,M,I).call(this,i(this,T),t);for(let t of i(this,P))m(this,M,I).call(this,i(this,S),t);m(this,me,Fe).call(this,!1)}else i(this,T)&&m(this,ee,de).call(this,i(this,T)),i(this,S)&&m(this,ee,de).call(this,i(this,S));let e=[i(this,T),i(this,S)].filter(Boolean);if(i(this,h).fastStart==="in-memory"){let t;for(let r=0;r<2;r++){let a=re(e,i(this,$)),o=i(this,f).measureBox(a);t=i(this,f).measureBox(i(this,k));let l=i(this,f).pos+o+t;for(let u of i(this,H)){u.offset=l;for(let{data:g}of u.samples)l+=g.byteLength,t+=g.byteLength}if(l<2**32)break;t>=2**32&&(i(this,k).largeSize=!0)}let s=re(e,i(this,$));i(this,f).writeBox(s),i(this,k).size=t,i(this,f).writeBox(i(this,k));for(let r of i(this,H))for(let a of r.samples)i(this,f).write(a.data),a.data=null}else if(i(this,h).fastStart==="fragmented"){let t=i(this,f).pos,s=ti(e);i(this,f).writeBox(s);let r=i(this,f).pos-t;i(this,f).seek(i(this,f).pos-4),i(this,f).writeU32(r)}else{let t=i(this,f).offsets.get(i(this,k)),s=i(this,f).pos-t;i(this,k).size=s,i(this,k).largeSize=s>=2**32,i(this,f).patchBox(i(this,k));let r=re(e,i(this,$));if(typeof i(this,h).fastStart=="object"){i(this,f).seek(i(this,fe)),i(this,f).writeBox(r);let a=t-i(this,f).pos;i(this,f).writeBox(ct(a))}else i(this,f).writeBox(r)}m(this,q,te).call(this),i(this,f).finalize(),C(this,Y,!0)}};return h=new WeakMap,f=new WeakMap,fe=new WeakMap,k=new WeakMap,T=new WeakMap,S=new WeakMap,$=new WeakMap,H=new WeakMap,Oe=new WeakMap,R=new WeakMap,P=new WeakMap,Y=new WeakMap,Me=new WeakSet,Qe=function(e){if(typeof e!="object")throw new TypeError("The muxer requires an options object to be passed to its constructor.");if(!(e.target instanceof ae))throw new TypeError("The target must be provided and an instance of Target.");if(e.video){if(!mi.includes(e.video.codec))throw new TypeError(`Unsupported video codec: ${e.video.codec}`);if(!Number.isInteger(e.video.width)||e.video.width<=0)throw new TypeError(`Invalid video width: ${e.video.width}. Must be a positive integer.`);if(!Number.isInteger(e.video.height)||e.video.height<=0)throw new TypeError(`Invalid video height: ${e.video.height}. Must be a positive integer.`);const t=e.video.rotation;if(typeof t=="number"&&![0,90,180,270].includes(t))throw new TypeError(`Invalid video rotation: ${t}. Has to be 0, 90, 180 or 270.`);if(Array.isArray(t)&&(t.length!==9||t.some(s=>typeof s!="number")))throw new TypeError(`Invalid video transformation matrix: ${t.join()}`);if(e.video.frameRate!==void 0&&(!Number.isInteger(e.video.frameRate)||e.video.frameRate<=0))throw new TypeError(`Invalid video frame rate: ${e.video.frameRate}. Must be a positive integer.`)}if(e.audio){if(!pi.includes(e.audio.codec))throw new TypeError(`Unsupported audio codec: ${e.audio.codec}`);if(!Number.isInteger(e.audio.numberOfChannels)||e.audio.numberOfChannels<=0)throw new TypeError(`Invalid number of audio channels: ${e.audio.numberOfChannels}. Must be a positive integer.`);if(!Number.isInteger(e.audio.sampleRate)||e.audio.sampleRate<=0)throw new TypeError(`Invalid audio sample rate: ${e.audio.sampleRate}. Must be a positive integer.`)}if(e.firstTimestampBehavior&&!wi.includes(e.firstTimestampBehavior))throw new TypeError(`Invalid first timestamp behavior: ${e.firstTimestampBehavior}`);if(typeof e.fastStart=="object"){if(e.video){if(e.fastStart.expectedVideoChunks===void 0)throw new TypeError("'fastStart' is an object but is missing property 'expectedVideoChunks'.");if(!Number.isInteger(e.fastStart.expectedVideoChunks)||e.fastStart.expectedVideoChunks<0)throw new TypeError("'expectedVideoChunks' must be a non-negative integer.")}if(e.audio){if(e.fastStart.expectedAudioChunks===void 0)throw new TypeError("'fastStart' is an object but is missing property 'expectedAudioChunks'.");if(!Number.isInteger(e.fastStart.expectedAudioChunks)||e.fastStart.expectedAudioChunks<0)throw new TypeError("'expectedAudioChunks' must be a non-negative integer.")}}else if(![!1,"in-memory","fragmented"].includes(e.fastStart))throw new TypeError("'fastStart' option must be false, 'in-memory', 'fragmented' or an object.");if(e.minFragmentDuration!==void 0&&(!Number.isFinite(e.minFragmentDuration)||e.minFragmentDuration<0))throw new TypeError("'minFragmentDuration' must be a non-negative number.")},Be=new WeakSet,Je=function(){if(i(this,f).writeBox(pt({holdsAvc:i(this,h).video?.codec==="avc",fragmented:i(this,h).fastStart==="fragmented"})),C(this,fe,i(this,f).pos),i(this,h).fastStart==="in-memory")C(this,k,Se(!1));else if(i(this,h).fastStart!=="fragmented"){if(typeof i(this,h).fastStart=="object"){let e=m(this,Ie,Ye).call(this);i(this,f).seek(i(this,f).pos+e)}C(this,k,Se(!0)),i(this,f).writeBox(i(this,k))}m(this,q,te).call(this)},Ie=new WeakSet,Ye=function(){if(typeof i(this,h).fastStart!="object")return;let e=0,t=[i(this,h).fastStart.expectedVideoChunks,i(this,h).fastStart.expectedAudioChunks];for(let s of t)s&&(e+=8*Math.ceil(.6666666666666666*s),e+=4*s,e+=12*Math.ceil(.6666666666666666*s),e+=4*s,e+=8*s);return e+=4096,e},De=new WeakSet,et=function(){if(i(this,h).video&&C(this,T,{id:1,info:{type:"video",codec:i(this,h).video.codec,width:i(this,h).video.width,height:i(this,h).video.height,rotation:i(this,h).video.rotation??0,decoderConfig:null},timescale:i(this,h).video.frameRate??57600,samples:[],finalizedChunks:[],currentChunk:null,firstDecodeTimestamp:void 0,lastDecodeTimestamp:-1,timeToSampleTable:[],compositionTimeOffsetTable:[],lastTimescaleUnits:null,lastSample:null,compactlyCodedChunkTable:[]}),i(this,h).audio&&(C(this,S,{id:i(this,h).video?2:1,info:{type:"audio",codec:i(this,h).audio.codec,numberOfChannels:i(this,h).audio.numberOfChannels,sampleRate:i(this,h).audio.sampleRate,decoderConfig:null},timescale:i(this,h).audio.sampleRate,samples:[],finalizedChunks:[],currentChunk:null,firstDecodeTimestamp:void 0,lastDecodeTimestamp:-1,timeToSampleTable:[],compositionTimeOffsetTable:[],lastTimescaleUnits:null,lastSample:null,compactlyCodedChunkTable:[]}),i(this,h).audio.codec==="aac")){let e=m(this,Ue,tt).call(this,2,i(this,h).audio.sampleRate,i(this,h).audio.numberOfChannels);i(this,S).info.decoderConfig={codec:i(this,h).audio.codec,description:e,numberOfChannels:i(this,h).audio.numberOfChannels,sampleRate:i(this,h).audio.sampleRate}}},Ue=new WeakSet,tt=function(e,t,s){let a=[96e3,88200,64e3,48e3,44100,32e3,24e3,22050,16e3,12e3,11025,8e3,7350].indexOf(t),o=s,l="";l+=e.toString(2).padStart(5,"0"),l+=a.toString(2).padStart(4,"0"),a===15&&(l+=t.toString(2).padStart(24,"0")),l+=o.toString(2).padStart(4,"0");let u=Math.ceil(l.length/8)*8;l=l.padEnd(u,"0");let g=new Uint8Array(l.length/8);for(let b=0;b<l.length;b+=8)g[b/8]=parseInt(l.slice(b,b+8),2);return g},ue=new WeakSet,xe=function(e,t,s,r,a,o,l){let u=r/1e6,g=(r-(l??0))/1e6,b=a/1e6,U=m(this,We,it).call(this,u,g,e);return u=U.presentationTimestamp,g=U.decodeTimestamp,o?.decoderConfig&&(e.info.decoderConfig===null?e.info.decoderConfig=o.decoderConfig:Object.assign(e.info.decoderConfig,o.decoderConfig)),{presentationTimestamp:u,decodeTimestamp:g,duration:b,data:t,size:t.byteLength,type:s,timescaleUnitsToNextSample:O(b,e.timescale)}},M=new WeakSet,I=function(e,t){i(this,h).fastStart!=="fragmented"&&e.samples.push(t);const s=O(t.presentationTimestamp-t.decodeTimestamp,e.timescale);if(e.lastTimescaleUnits!==null){let a=O(t.decodeTimestamp,e.timescale,!1),o=Math.round(a-e.lastTimescaleUnits);if(e.lastTimescaleUnits+=o,e.lastSample.timescaleUnitsToNextSample=o,i(this,h).fastStart!=="fragmented"){let l=se(e.timeToSampleTable);l.sampleCount===1?(l.sampleDelta=o,l.sampleCount++):l.sampleDelta===o?l.sampleCount++:(l.sampleCount--,e.timeToSampleTable.push({sampleCount:2,sampleDelta:o}));const u=se(e.compositionTimeOffsetTable);u.sampleCompositionTimeOffset===s?u.sampleCount++:e.compositionTimeOffsetTable.push({sampleCount:1,sampleCompositionTimeOffset:s})}}else e.lastTimescaleUnits=0,i(this,h).fastStart!=="fragmented"&&(e.timeToSampleTable.push({sampleCount:1,sampleDelta:O(t.duration,e.timescale)}),e.compositionTimeOffsetTable.push({sampleCount:1,sampleCompositionTimeOffset:s}));e.lastSample=t;let r=!1;if(!e.currentChunk)r=!0;else{let a=t.presentationTimestamp-e.currentChunk.startTimestamp;if(i(this,h).fastStart==="fragmented"){let o=i(this,T)??i(this,S);const l=i(this,h).minFragmentDuration??1;e===o&&t.type==="key"&&a>=l&&(r=!0,m(this,me,Fe).call(this))}else r=a>=.5}r&&(e.currentChunk&&m(this,ee,de).call(this,e),e.currentChunk={startTimestamp:t.presentationTimestamp,samples:[]}),e.currentChunk.samples.push(t)},We=new WeakSet,it=function(e,t,s){const r=i(this,h).firstTimestampBehavior==="strict",a=s.lastDecodeTimestamp===-1;if(r&&a&&t!==0)throw new Error(`The first chunk for your media track must have a timestamp of 0 (received DTS=${t}).Non-zero first timestamps are often caused by directly piping frames or audio data from a MediaStreamTrack into the encoder. Their timestamps are typically relative to the age of thedocument, which is probably what you want.
@@ -4401,15 +4480,59 @@ MV.def('core/shot', ['core/num', 'core/curve'], (N, CV) => {
     chaseReveal: { tags: ['bold', 'fast'], follow: 0.5, keys: [k('a', 'reading', { fill: 1.2, ox: 0, oy: 0 }),
       k('b', 'reading', { dt: -0.3, fill: 1.2, ox: 0, oy: 0 }), k('b', 'block', { dt: -0.12, fill: 0.55, curve: 'dashStop' }),
       k('b', 'block', { fill: 0.5, curve: 'linear' })] },
+    // Additional hand-picked paths. Multi-key returns and pauses use normalized times so their phases stay ordered
+    // even on short cuts; softEnds at each landing keeps the reversal or hold smooth. Frame aims also work in gaps.
+    breathingRoom: { tags: ['soft', 'slow', 'minimal'], follow: 0.1, keys: [k('a', 'block', { fill: 0.58 }),
+      k(0.5, 'block', { fill: 0.78, curve: 'softEnds' }), k('b', 'block', { fill: 0.58, curve: 'softEnds' })] },
+    floatingArc: { tags: ['airy', 'soft', 'slow'], follow: 0.1, keys: [k('a', 'block', { fill: 0.64, oy: 0.07 }),
+      k(0.5, 'block', { fill: 0.64, oy: -0.06, curve: 'softEnds' }),
+      k('b', 'block', { fill: 0.64, oy: 0.03, curve: 'softEnds' })] },
+    diagonalGlide: { tags: ['airy', 'serious'], keys: [k('a', 'frame', { zoom: 1.12, ox: -0.055, oy: 0.045 }),
+      k('b', 'frame', { zoom: 1.12, ox: 0.055, oy: -0.045, curve: 'softEnds' })] },
+    swayBack: { tags: ['playful', 'soft'], follow: 0.1, keys: [k('a', 'block', { fill: 0.64, ox: -0.075, roll: -2.5 }),
+      k(0.55, 'block', { fill: 0.64, ox: 0.075, roll: 2.5, curve: 'softEnds' }),
+      k('b', 'block', { fill: 0.64, ox: 0, curve: 'softEnds' })] },
+    focusAndReturn: { tags: ['bold', 'serious'], keys: [k('a', 'block', { fill: 0.58 }),
+      k(0.5, 'emph', { fill: 0.84, ox: 0, oy: 0, curve: 'softEnds' }),
+      k('b', 'block', { fill: 0.58, curve: 'softEnds' })] },
+    riseIntoView: { tags: ['airy', 'literary'], follow: 0.1, keys: [k('a', 'frame', { zoom: 1.04, oy: 0.045 }),
+      k(0.4, 'block', { fill: 0.83, oy: 0, curve: 'softEnds' }),
+      k('b', 'block', { fill: 0.75, oy: -0.025, curve: 'softEnds' })] },
+    pushHoldRelease: { tags: ['bold', 'slow'], keys: [k('a', 'block', { fill: 0.52 }),
+      k(0.3, 'block', { fill: 0.8, curve: 'softEnds' }), k(0.7, 'block', { fill: 0.8, curve: 'linear' }),
+      k('b', 'block', { fill: 0.56, curve: 'softEnds' })] },
+    frameToWords: { tags: ['literary', 'minimal'], follow: 0.1, keys: [k('a', 'frame', { zoom: 1.02 }),
+      k(0.5, 'block', { fill: 0.84, ox: 0, oy: 0, curve: 'softEnds' }),
+      k('b', 'frame', { zoom: 1.02, curve: 'softEnds' })] },
+    passingFocus: { tags: ['playful', 'bold'], keys: [k('a', 'block', { fill: 0.62, ox: 0.11 }),
+      k(0.45, 'emph', { fill: 0.78, ox: 0, oy: 0, curve: 'softEnds' }),
+      k('b', 'block', { fill: 0.62, ox: -0.08, curve: 'softEnds' })] },
+    levelLanding: { tags: ['bold', 'serious'], keys: [k('a', 'frame', { zoom: 1.12, roll: -8 }),
+      k(0.35, 'block', { fill: 0.67, curve: 'softEnds' }),
+      k('b', 'frame', { zoom: 1.04, curve: 'softEnds' })] },
   };
   // Presets the planner never picks on its own (they come from a pin: the inspector, the AI or a look).
-  const PICK_ONLY = Object.freeze(['chaseReveal']);
+  const PICK_ONLY = Object.freeze(['chaseReveal', 'breathingRoom', 'floatingArc', 'diagonalGlide', 'swayBack',
+    'focusAndReturn', 'riseIntoView', 'pushHoldRelease', 'frameToWords', 'passingFocus', 'levelLanding']);
   const RIG_DATA = {
     slowSwell: { tags: ['slow', 'soft'], curve: 'softEnds', keys: [{ u: 0, zoom: 1 }, { u: 1, zoom: 1.08 }] },
     climbRise: { tags: ['bold'], curve: 'softEnds', keys: [{ u: 0, zoom: 1.02, y: 0.025 }, { u: 1, zoom: 1.06, y: -0.025 }] },
     pullAway: { tags: ['airy', 'slow'], curve: 'fadeBrake', keys: [{ u: 0, zoom: 1.1 }, { u: 1, zoom: 1 }] },
     leanTilt: { tags: ['playful'], curve: 'softEnds', keys: [{ u: 0, zoom: 1.02, roll: 0 }, { u: 1, zoom: 1.04, roll: 2.5 }] },
     driftSide: { tags: ['airy'], curve: 'linear', keys: [{ u: 0, zoom: 1.03, x: -0.02 }, { u: 1, zoom: 1.03, x: 0.02 }] },
+    // Selectable section paths; the automatic section-weight table continues to use its existing five presets.
+    breathCycle: { tags: ['soft', 'slow'], curve: 'softEnds', keys: [{ u: 0 }, { u: 0.5, zoom: 1.08 }, { u: 1 }] },
+    floatingWave: { tags: ['airy', 'soft'], curve: 'softEnds', keys: [{ u: 0, zoom: 1.025, y: 0.025 },
+      { u: 0.33, zoom: 1.025, y: -0.025 }, { u: 0.67, zoom: 1.025, y: 0.025 }, { u: 1, zoom: 1.025 }] },
+    diagonalDrift: { tags: ['airy', 'serious'], curve: 'softEnds', keys: [{ u: 0, zoom: 1.03, x: -0.025, y: 0.02 },
+      { u: 1, zoom: 1.03, x: 0.025, y: -0.02 }] },
+    orbitArc: { tags: ['airy', 'playful'], curve: 'softEnds', keys: [{ u: 0, zoom: 1.035, x: -0.024, roll: -1 },
+      { u: 0.33, zoom: 1.035, y: -0.024 }, { u: 0.67, zoom: 1.035, x: 0.024, roll: 1 },
+      { u: 1, zoom: 1.035, y: 0.012 }] },
+    swayLevel: { tags: ['playful', 'soft'], curve: 'softEnds', keys: [{ u: 0, zoom: 1.025, x: -0.012, roll: -2 },
+      { u: 0.5, zoom: 1.025, x: 0.012, roll: 2 }, { u: 1, zoom: 1.025 }] },
+    surgeSettle: { tags: ['bold', 'slow'], curve: 'softEnds', keys: [{ u: 0 }, { u: 0.38, zoom: 1.11 },
+      { u: 0.65, zoom: 1.06 }, { u: 1, zoom: 1.02 }] },
   };
 
   // --- keys --------------------------------------------------------------------------------------------------------
@@ -14343,6 +14466,86 @@ MV.def('i18n/strings', [], () => ({
   'pkg.missing.media': ['写真・動画{n}件', '{n} photos or videos'],
   'pkg.missing.song': ['曲', 'the song'],
   'pkg.missing.and': ['と', ' and '],
+  // Camera presets and inspector navigation.
+  'shot.breathingRoom': ["ゆっくり寄って戻る", "Breathe in and out"],
+  'shot.blurb.breathingRoom': ["文字全体へゆっくり寄り、同じ広さへ戻る", "Gently pushes in on the whole line, then returns to its opening size"],
+  'shot.floatingArc': ["ふわりと上下", "Floating arc"],
+  'shot.blurb.floatingArc': ["文字の大きさを保ったまま、上へ浮いてゆっくり戻る", "Keeps the words at the same size as they float upward and ease back"],
+  'shot.diagonalGlide': ["斜めに流れる", "Diagonal glide"],
+  'shot.blurb.diagonalGlide': ["少し寄った画面を、斜め方向へ滑らかに流す", "Glides diagonally across a slightly enlarged frame"],
+  'shot.swayBack': ["横揺れして正面へ", "Sway, then center"],
+  'shot.blurb.swayBack': ["文字を左右へ軽く傾けて揺らし、最後に正面へ戻す", "Sways the line from side to side with a light tilt, then settles at center"],
+  'shot.focusAndReturn': ["強調へ寄って戻る", "Focus and return"],
+  'shot.blurb.focusAndReturn': ["途中で強調した言葉へ寄り、最後に文字全体へ戻る", "Moves in on the emphasized words midway through, then returns to the whole line"],
+  'shot.riseIntoView': ["下から浮かび上がる", "Rise into view"],
+  'shot.blurb.riseIntoView': ["全体画面から文字へ寄りながら、下からふわりと浮かび上がる", "Rises gently from below as the full frame moves in toward the words"],
+  'shot.pushHoldRelease': ["寄る・止まる・引く", "Push, hold, release"],
+  'shot.blurb.pushHoldRelease': ["文字へ寄ってしばらく静止し、終わりにゆっくり引く", "Pushes in, holds the words still, then slowly pulls back at the end"],
+  'shot.frameToWords': ["全景から文字へ往復", "Frame to words and back"],
+  'shot.blurb.frameToWords': ["全体画面から文字へ滑らかに寄り、最後に全体画面へ戻る", "Moves smoothly from the whole frame into the words and back to the full frame"],
+  'shot.passingFocus': ["流れながら強調へ", "Passing focus"],
+  'shot.blurb.passingFocus': ["横へ流れる途中で強調へ寄り、そのまま反対側へ抜ける", "Glides sideways through a closer view of the emphasized words and out to the other side"],
+  'shot.levelLanding': ["傾きから正面へ着地", "Level landing"],
+  'shot.blurb.levelLanding': ["傾いた全体画面から正面の文字へ着地し、ゆっくり引く", "Levels a tilted full frame onto the words, then gently pulls back"],
+  'rig.breathCycle': ["寄って戻る呼吸", "Breathing cycle"],
+  'rig.floatingWave': ["ふわふわ上下", "Floating wave"],
+  'rig.diagonalDrift': ["斜めに漂う", "Diagonal drift"],
+  'rig.orbitArc': ["ゆるい回り込み", "Gentle arc"],
+  'rig.swayLevel': ["揺れて正面へ", "Sway and level"],
+  'rig.surgeSettle': ["盛り上がって落ち着く", "Surge and settle"],
+  // Camera presets and inspector navigation.
+  'insp.jump.nav': ["設定のしおり", "Settings bookmarks"],
+  'insp.jump.camera': ["カメラ", "Camera"],
+  'insp.jump.layout': ["構図", "Layout"],
+  'insp.jump.text': ["文字", "Text"],
+  'insp.jump.background': ["背景", "Background"],
+  'insp.jump.ornament': ["装飾", "Decorations"],
+  'insp.jump.effects': ["効果", "Effects"],
+  'insp.jump.timing': ["タイミング", "Timing"],
+  'insp.jump.media': ["写真・動画", "Media"],
+  'insp.jump.scope': ["対象に戻る", "Back to scope"],
+  'sec.multiornament': ["選択中の装飾", "Decorations for selection"],
+  'sec.multifilter': ["選択中の効果", "Effects for selection"],
+  // Camera wireframe preview.
+  'camera.wireframe': ["ワイヤーフレーム", "Wireframe"],
+  'camera.wireframeHint': ["カメラの範囲・軌道・拡大率・回転をプレビューに表示します。書き出しには入りません。", "Show the camera frame, path, zoom and rotation in the preview. Exports do not include these guides."],
+  'camera.wireframeMap': ["現在の範囲（橙）・軌道（緑）", "Frame (orange) · path (green)"],
+  'camera.wireframeStatus': ["ズーム ×{zoom} · 回転 {roll}° · X {x}% Y {y}%", "Zoom ×{zoom} · roll {roll}° · X {x}% Y {y}%"],
+  'pref.cameraWireframe': ["カメラのワイヤーフレーム（プレビュー）", "Camera wireframe (preview)"],
+  'cmd.pref.cameraWireframe': ["カメラのワイヤーフレーム（プレビュー）", "Camera wireframe (preview)"],
+  // Camera timeline and full-song zoom window.
+  'tl.camera': ["カメラ", "Camera"],
+  'tl.cameraTip': ["カメラの動き。上の細い帯は区画のカメラ、点は選択したカメラのキーフレームです。", "Camera motion. The thin upper band is the section camera; dots mark the selected shot’s keyframes."],
+  'tl.cameraOpen': ["{shot} — クリックでカメラ設定へ", "{shot} — click to open camera settings"],
+  'tl.cameraProxy': ["カメラ{n}、{t0}から{t1}、{shot}", "Camera {n}, {t0} to {t1}, {shot}"],
+  'tl.window': ["表示範囲", "Visible range"],
+  'tl.windowStart': ["表示範囲の始まり", "Visible range start"],
+  'tl.windowEnd': ["表示範囲の終わり", "Visible range end"],
+  'tl.windowPan': ["表示範囲を移動", "Move visible range"],
+  'tl.windowStartTip': ["端をドラッグしてタイムラインを拡大・縮小。矢印キーでも調整できます。", "Drag the edge to zoom the timeline. Arrow keys also adjust it."],
+  'tl.windowEndTip': ["端をドラッグしてタイムラインを拡大・縮小。矢印キーでも調整できます。", "Drag the edge to zoom the timeline. Arrow keys also adjust it."],
+  'tl.windowPanTip': ["範囲枠の帯をドラッグして表示範囲を移動。クリックは再生位置へ移動、ダブルクリックは全体表示。", "Drag the viewport strip to move the visible range. Click to seek; double-click to fit the whole song."],
+  'tl.windowRange': ["表示範囲 {t0}〜{t1}。左右キーで移動", "Visible range {t0} to {t1}. Use left or right arrows to move it"],
+  // Large camera sample playback.
+  'camera.sample.open': ["大きく試写", "Large preview"],
+  'camera.sample.openNamed': ["{name}を大きく試写", "Preview {name} at a larger size"],
+  'camera.sample.title': ["カメラの試写：{name}", "Camera preview: {name}"],
+  'camera.sample.note': ["サンプル文字で、動きの最初から最後まで確認できます。", "See the complete movement with sample text."],
+  'camera.sample.play': ["再生", "Play"],
+  'camera.sample.pause': ["一時停止", "Pause"],
+  'camera.sample.restart': ["最初から", "Restart"],
+  'camera.sample.seek': ["試写の再生位置", "Preview playback position"],
+  'camera.sample.speed': ["再生速度", "Playback speed"],
+  'camera.sample.slowest': ["0.25倍（じっくり）", "0.25× (very slow)"],
+  'camera.sample.slow': ["0.5倍（ゆっくり）", "0.5× (slow)"],
+  'camera.sample.normal': ["1倍", "1×"],
+  'camera.sample.loop': ["繰り返す", "Loop"],
+  'camera.sample.guides': ["位置の目印", "Position guides"],
+  'camera.sample.rigHint': ["まとまり全体にわたるカメラの動きを試写します。", "Preview the camera movement across an entire section."],
+  'camera.sample.rigList': ["動きの一覧から試す", "Browse camera movements"],
+  'camera.sample.failed': ["このカメラの試写を表示できませんでした。別の動きをお試しください。", "This camera preview could not be displayed. Try another movement."],
+  'camera.sample.reduced': ["動きを減らす設定のため停止しています。再生ボタンやつまみで確認できます。", "Paused because reduced motion is enabled. Use Play or the slider to explore."],
+  'camera.sample.time': ["{time} / {end}", "{time} / {end}"],
 }));
 /* 文字PVメーカー v2 — original work. Translation function and formatters over the [ja, en] string table (DESIGN §4.24). */
 MV.def('i18n/t', [], () => {
@@ -36693,8 +36896,168 @@ MV.def('parts/arrange/interlude', ['parts/kit'], (K) => {
     build: columnsBuild,
   });
 
+  // --- graphic interludes: distinct silhouettes with the same musical envelope and handover ---------------------------
+
+  // The six scenes below share music, not geometry. Their seeded positions never read slider values; every frame is
+  // a pure function of local time, so reverse seeking and export render exactly the same shape. No glyphs, near layer,
+  // gradients or unbounded event arrays are introduced.
+  function graphicData(env, p) {
+    const fr = frameOf(env, p), ink = inksOf(env.pal), r = seedOf(env), tr = levelTrack(env, r, fr.a - 1);
+    const st = strengthTrack(env, fr, tr, p.shape), kicks = kicksOf(env, fr, tr, st, r, 0.4);
+    return data(fr, { chroma: ink.chroma, song: tr.song, L0: tr.L0, lv: tr.lv, sw: tr.sw, n1: tr.n1, n2: tr.n2,
+      I: st.I, W: st.W, IA: st.IA, bt: kicks.bt, bd: kicks.bd, react: p.react,
+      radius: Math.min(env.D.w - env.D.safe.l - env.D.safe.r, env.D.h - env.D.safe.t - env.D.safe.b) * 0.39,
+      phase: r.range(0, TAU), spin: r.next() < 0.5 ? -1 : 1 });
+  }
+
+  function graphicState(g, t, d, q) {
+    const A = envelopeOf(d, t);
+    if (A < 1 / 255) return null;
+    g.globalAlpha *= A;
+    g.strokeStyle = q.rgba('accent', 1);
+    g.fillStyle = q.rgba('accent', 1);
+    g.lineWidth = Math.max(1.5, d.s * 0.003);
+    g.lineCap = 'round'; g.lineJoin = 'round';
+    return { phase: d.phase + 0.32 * d.spin * clockAt(d, t),
+      pulse: d.react * (0.5 * levelAt(d, t) + 0.25 * kickAt(d, t, 0.3)),
+      R: d.radius * (0.86 + 0.08 * strengthAt(d, t)) * (1 - 0.25 * outOf(d, t)) };
+  }
+
+  function fanDraw(g, t, d, q) {
+    const s = graphicState(g, t, d, q);
+    if (!s) return;
+    const pivotY = d.cy + s.R * 0.65, opening = 0.85 + 0.16 * Math.sin(s.phase) + 0.2 * s.pulse;
+    for (let i = 0; i < 13; i++) {
+      const a = -Math.PI / 2 + (i / 12 - 0.5) * opening * 2, reach = s.R * (1.1 + 0.1 * Math.sin(s.phase + i));
+      const x = d.cx + Math.cos(a) * reach, y = pivotY + Math.sin(a) * reach;
+      g.beginPath(); g.moveTo(d.cx, pivotY); g.lineTo(x, y); g.stroke();
+      g.beginPath(); g.arc(x, y, d.s * 0.0045 * (1 + s.pulse), 0, TAU); g.fill();
+    }
+  }
+
+  function moonsDraw(g, t, d, q) {
+    const s = graphicState(g, t, d, q);
+    if (!s) return;
+    for (let i = 0; i < 4; i++) {
+      const r = s.R * (0.3 + 0.2 * i), angle = s.phase * (0.75 + i * 0.17) + i * 1.7;
+      g.beginPath(); g.ellipse(d.cx, d.cy, r, r * 0.5, i * 0.3, 0, TAU); g.stroke();
+      const x0 = r * Math.cos(angle), y0 = r * 0.5 * Math.sin(angle), c = Math.cos(i * 0.3), z = Math.sin(i * 0.3);
+      g.beginPath(); g.arc(d.cx + x0 * c - y0 * z, d.cy + x0 * z + y0 * c,
+        d.s * (0.011 + i * 0.003) * (1 + s.pulse * 0.4), 0, TAU); g.fill();
+    }
+    g.fillStyle = q.rgba('ink', 1);
+    g.beginPath(); g.arc(d.cx, d.cy, d.s * 0.025, 0, TAU); g.fill();
+  }
+
+  function weaveDraw(g, t, d, q) {
+    const s = graphicState(g, t, d, q);
+    if (!s) return;
+    for (let j = 0; j < 5; j++) {
+      const offset = (j - 2) * s.R * 0.19;
+      g.strokeStyle = q.rgba(j % 2 ? 'ink' : 'accent', 1);
+      g.beginPath();
+      for (let i = 0; i <= 64; i++) {
+        const u = i / 64, x = d.cx + s.R * (2 * u - 1),
+          y = d.cy + offset + Math.sin(u * TAU * 1.4 + s.phase + j * 0.8) * s.R * (0.13 + s.pulse * 0.14);
+        if (i) g.lineTo(x, y); else g.moveTo(x, y);
+      }
+      g.stroke();
+    }
+  }
+
+  function shutterDraw(g, t, d, q) {
+    const s = graphicState(g, t, d, q);
+    if (!s) return;
+    const inner = s.R * (0.17 + 0.1 * s.pulse + 0.06 * Math.sin(s.phase));
+    for (let i = 0; i < 8; i++) {
+      const a = s.phase * 0.45 + i * TAU / 8, b = a + TAU / 8 * 0.72;
+      g.beginPath(); g.moveTo(d.cx + Math.cos(a) * inner, d.cy + Math.sin(a) * inner);
+      g.lineTo(d.cx + Math.cos(a + 0.32) * s.R, d.cy + Math.sin(a + 0.32) * s.R);
+      g.lineTo(d.cx + Math.cos(b + 0.32) * s.R * 0.83, d.cy + Math.sin(b + 0.32) * s.R * 0.83);
+      g.lineTo(d.cx + Math.cos(b) * inner, d.cy + Math.sin(b) * inner); g.closePath();
+      if (i % 2) { g.fillStyle = q.rgba('ground2', 1); g.fill(); }
+      g.stroke();
+    }
+  }
+
+  function constellationDraw(g, t, d, q) {
+    const s = graphicState(g, t, d, q);
+    if (!s) return;
+    const position = (i) => [d.cx + d.px[i] * s.R + Math.sin(s.phase + i * 1.7) * s.R * 0.035,
+      d.cy + d.py[i] * s.R + Math.cos(s.phase * 0.73 + i) * s.R * 0.035];
+    g.beginPath();
+    for (let i = 0; i < d.edges.length; i += 2) {
+      const a = position(d.edges[i]), b = position(d.edges[i + 1]);
+      g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]);
+    }
+    g.stroke();
+    for (let i = 0; i < d.px.length; i++) {
+      const [x, y] = position(i), radius = d.s * 0.006 * (1 + 0.5 * Math.sin(s.phase * 2 + i) + s.pulse);
+      g.beginPath(); g.arc(x, y, radius, 0, TAU); g.fill();
+    }
+  }
+
+  function paperDraw(g, t, d, q) {
+    const s = graphicState(g, t, d, q);
+    if (!s) return;
+    for (let i = 0; i < 9; i++) {
+      const x = d.cx + d.px[i] * s.R + Math.sin(s.phase + i) * s.R * 0.08,
+        y = d.cy + d.py[i] * s.R + Math.cos(s.phase * 0.8 + i * 1.4) * s.R * 0.08,
+        w = d.s * 0.035 * (1 + 0.35 * s.pulse), h = w * (0.85 + 0.35 * Math.sin(s.phase + i));
+      g.save(); g.translate(x, y); g.rotate(s.phase * 0.5 + i * 0.8);
+      g.fillStyle = q.rgba(i % 2 ? 'ground2' : 'accent', 1);
+      g.beginPath(); g.moveTo(-w, -h); g.lineTo(w, -h * 0.35); g.lineTo(w * 0.6, h); g.lineTo(-w * 0.7, h * 0.6);
+      g.closePath(); g.fill(); g.stroke();
+      g.beginPath(); g.moveTo(-w, -h); g.lineTo(w * 0.6, h); g.stroke(); g.restore();
+    }
+  }
+
+  function graphicBuild(draw, points) {
+    return function build(env, p) {
+      const d = graphicData(env, p), r = seedOf(env).fork('geometry');
+      if (points) {
+        d.px = Float32Array.from({ length: points }, () => r.range(-0.67, 0.67));
+        d.py = Float32Array.from({ length: points }, () => r.range(-0.67, 0.67));
+        const edges = [];
+        for (let i = 0; i < points; i++) {
+          const nearest = Array.from({ length: points }, (_, j) => j).filter((j) => j !== i)
+            .sort((a, b) => Math.hypot(d.px[a] - d.px[i], d.py[a] - d.py[i]) - Math.hypot(d.px[b] - d.px[i], d.py[b] - d.py[i]));
+          for (const j of nearest.slice(0, 2)) if (i < j) edges.push(i, j);
+        }
+        d.edges = Uint8Array.from(edges);
+      }
+      env.sb.paint({ layer: 'mid', bleed: 0, animated: true, owner: env.owner, draw, data: d });
+      return finish(env, d, 2 * d.radius, 2 * d.radius);
+    };
+  }
+
+  const graphic = (key, ja, en, jaBlurb, enBlurb, tags, family, energy, draw, points) => K.arrange({
+    key, label: L(ja, en), blurb: L(jaBlurb, enBlurb), tags, family, cam: 'gentle', needs: ['beats', 'level'],
+    traits: { cells: [0, 80], roles: ['interlude'], energy },
+    params: { react: REACT(0.4, 0.8), shape: SHAPE_PARAM }, build: graphicBuild(draw, points),
+  });
+
+  const prismFan = graphic('prismFan', 'プリズムの扇', 'Prism fan',
+    '扇状の光の線が音に合わせて開き、先端の粒がゆっくり揺れる',
+    'A fan of light opens with the music while its dotted tips sway', ['bold', 'digital'], 'fan', [0.25, 1], fanDraw);
+  const orbitMoons = graphic('orbitMoons', 'めぐる小さな月', 'Orbiting moons',
+    '四つの楕円軌道を小さな月が巡り、音の強さでふくらむ',
+    'Small moons travel four elliptical orbits and swell with the sound', ['airy', 'serious'], 'moons', [0, 0.8], moonsDraw);
+  const ribbonWeave = graphic('ribbonWeave', '揺れる光の織物', 'Ribbon weave',
+    '五本の光のリボンが位相をずらしてうねり、重なりを変える',
+    'Five offset ribbons undulate and change their woven overlaps', ['soft', 'airy'], 'weave', [0, 0.75], weaveDraw);
+  const shutterBloom = graphic('shutterBloom', 'ひらく絞り', 'Shutter bloom',
+    '八枚の羽根がゆっくり回り、音に合わせて中心の隙間を開く',
+    'Eight rotating blades open their central aperture with the music', ['digital', 'bold'], 'shutter', [0.2, 1], shutterDraw);
+  const constellationMesh = graphic('constellationMesh', 'ほどける星座', 'Constellation mesh',
+    '細い線で結ばれた星の位置が少しずつ漂い、音で瞬く',
+    'Connected stars drift gently and shimmer with the sound', ['airy', 'minimal'], 'constellation', [0, 0.7], constellationDraw, 16);
+  const paperDrift = graphic('paperDrift', '浮かぶ折り紙', 'Floating paper',
+    '折り目のある小さな紙片が回りながらふわふわ浮かぶ',
+    'Small folded paper shapes turn and float in a gentle current', ['organic', 'playful'], 'paper', [0, 0.75], paperDraw, 9);
+
   return [lightMotes, soundHorizon, kineticShapes, neonWave, ringPulse, warpField, tileRipple, burstBloom, harmonicString,
-    ridgeLines, polarWave, peakBars];
+    ridgeLines, polarWave, peakBars, prismFan, orbitMoons, ribbonWeave, shutterBloom, constellationMesh, paperDrift];
 });
 /* 文字PVメーカー v2 — original work. Compositions that place words or glyphs one by one: confetti words, hanging tags, halo ring, grid mosaic. */
 MV.def('parts/arrange/scatter', ['parts/kit'], (K) => {
@@ -37769,6 +38132,266 @@ MV.def('parts/arrange/special', ['parts/kit'], (K) => {
   });
 
   return [titlePlate, breathMark, creditFold];
+});
+/* 文字PVメーカー v2 — original work. Lyric compositions: windows, quotation, arches, panels and graphic page layouts. */
+MV.def('parts/arrange/storybook', ['parts/kit'], (K) => {
+  'use strict';
+
+  const { smooth, TAU } = K.math;
+  const L = (ja, en) => ({ ja, en });
+
+  function frame(env, p) {
+    const { D, sb, cut } = env;
+    const str = (cut.text || '').trim() ? cut.text : (cut.note || '♪');
+    const own = !!(cut.text || '').trim(), note = own ? cut.note : null;
+    const safe = { x: D.safe.l, y: D.safe.t, w: D.w - D.safe.l - D.safe.r,
+      h: D.h - D.safe.t - D.safe.b - (note ? 0.085 * D.short : 0) };
+    return { str, own, note, safe, v: env.orient === 'v',
+      root: sb.group({ x: (p.offsetX || 0) * D.w, y: (p.offsetY || 0) * D.h }), runs: [], marks: [] };
+  }
+
+  function part(f, r) { return f.own ? { span: r } : { text: f.str.slice(r[0], r[1]) }; }
+  function inset(b, x, y) { return { x: b.x + b.w * x, y: b.y + b.h * y, w: b.w * (1 - 2 * x), h: b.h * (1 - 2 * y) }; }
+
+  // All sizes fit their actual text box. Phrase balancing never splits a Latin word, emoji or surrogate pair.
+  function run(env, f, box, range, options) {
+    const r = range || [0, f.str.length], str = f.str.slice(r[0], r[1]);
+    const v = f.v, pitch = v ? 1.5 : 1.3, along = v ? box.h : box.w, cross = v ? box.w : box.h;
+    let best = { em: 0, n: 1 };
+    for (let n = 1; n <= 3; n++) {
+      const pieces = n === 1 ? [[0, str.length]] : env.text.columns(str, n, env.cut.lang);
+      if (pieces.length < n) break;
+      const cells = pieces.map(([a, b]) => Math.max(1, env.text.cells(str.slice(a, b))));
+      const em = Math.min(env.D.short * 0.19, along / Math.max(...cells), cross / ((n - 1) * pitch + 1.25));
+      if (em > best.em * 1.12) best = { em, n };
+    }
+    const r0 = env.sb.text(Object.assign({ parent: f.root, orient: v ? 'v' : 'h', box,
+      size: Math.max(0.1, best.em * env.textStyle.scale), leading: pitch, maxLines: best.n,
+      breakAt: 'phrase', fit: 'shrink', align: 'center', valign: 'center' }, part(f, r), options || {}));
+    f.runs.push(r0);
+    return r0;
+  }
+
+  function line(env, f, x0, y0, x1, y1, ink, width) {
+    f.marks.push(env.sb.shape({ parent: f.root, layer: 'mid', stroke: ink || 'accent',
+      width: width || Math.max(1.5, env.D.short * 0.003), path: K.shape.line(x0, y0, x1, y1) }));
+  }
+
+  function shape(env, f, path, stroke, fill, width) {
+    f.marks.push(env.sb.shape({ parent: f.root, layer: 'mid', path, stroke: stroke || null, fill: fill || null,
+      width: width || env.D.short * 0.003 }));
+  }
+
+  // Graphic panels are paints so a text fill override changes the letters without recolouring their paper.
+  function panelDraw(g, t, d, q) {
+    g.fillStyle = q.rgba(d.ink, d.alpha);
+    g.fillRect(d.x, d.y, d.w, d.h);
+  }
+
+  function panel(env, f, box, ink, alpha) {
+    f.marks.push(env.sb.paint({ parent: f.root, layer: 'mid', animated: true, bleed: 0, draw: panelDraw,
+      data: Object.assign({ ink: ink || 'ground2', alpha: alpha === undefined ? 1 : alpha }, box) }));
+  }
+
+  function fadeMarks(P, t, b) {
+    const T = b.times;
+    const a = T.rest > T.a ? smooth((t - T.a) / (T.rest - T.a)) : +(t >= T.a);
+    const z = T.b > T.out ? smooth((T.b - t) / (T.b - T.out)) : +(t < T.b);
+    for (const n of b.nodes) P.alpha[n] *= Math.min(a, z);
+  }
+
+  function finish(env, f) {
+    const { D, sb } = env;
+    if (f.note) {
+      f.runs.push(sb.text({ parent: f.root, text: f.note, orient: 'h', face: 'body', style: 'plain', size: D.short * 0.035,
+        box: { x: D.safe.l, y: D.h - D.safe.b - D.short * 0.055, w: D.w - D.safe.l - D.safe.r, h: D.short * 0.05 },
+        align: 'center', valign: 'center', maxLines: 1, breakAt: 'none', fit: 'shrink' }));
+    }
+    if (f.marks.length) sb.behave({ phase: K.PH.ORNAMENT, live: 'always', from: Math.min(...f.marks),
+      to: Math.max(...f.marks) + 1, t0: env.times.a, t1: env.times.b, run: fadeMarks,
+      times: env.times, nodes: Int32Array.from(f.marks) });
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const r of f.runs) {
+      const b = sb.bounds(r.node);
+      x0 = Math.min(x0, b.x); y0 = Math.min(y0, b.y); x1 = Math.max(x1, b.x + b.w); y1 = Math.max(y1, b.y + b.h);
+    }
+    const focus = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+    return { runs: f.runs, focus, free: sb.freeAround(focus) };
+  }
+
+  function pieces(env, f, n) {
+    const spans = env.text.columns(f.str, n, env.cut.lang);
+    return spans.length ? spans : [[0, f.str.length]];
+  }
+
+  function windowBuild(env, p) {
+    const f = frame(env, p), b = inset(f.safe, 0.1, 0.17), leg = env.D.short * p.opening;
+    for (const [x, y, sx, sy] of [[b.x, b.y, 1, 1], [b.x + b.w, b.y, -1, 1],
+      [b.x, b.y + b.h, 1, -1], [b.x + b.w, b.y + b.h, -1, -1]]) {
+      line(env, f, x, y, x + sx * Math.min(leg, b.w * 0.25), y);
+      line(env, f, x, y, x, y + sy * Math.min(leg, b.h * 0.25));
+    }
+    run(env, f, inset(b, 0.09, 0.16));
+    return finish(env, f);
+  }
+
+  function quoteBuild(env, p) {
+    const f = frame(env, p), b = inset(f.safe, 0.17, 0.25), s = env.D.short * p.mark;
+    run(env, f, b);
+    // Two paired open quotation bars: ornamental marks, never part of the lyric or camera target.
+    for (let i = 0; i < 2; i++) {
+      const x = b.x - s * (0.6 + i * 0.45), y = b.y - s * 0.25;
+      line(env, f, x, y + s, x, y, 'accent', s * 0.17);
+      const u = b.x + b.w + s * (0.6 + i * 0.45), v = b.y + b.h + s * 0.25;
+      line(env, f, u, v - s, u, v, 'accent', s * 0.17);
+    }
+    return finish(env, f);
+  }
+
+  function archBuild(env, p) {
+    const f = frame(env, p), b = inset(f.safe, 0.05, 0.2), rs = pieces(env, f, 3), n = rs.length;
+    // Phrase blocks follow a shallow arch, reading left-to-right or top-to-bottom; they never rotate the glyphs.
+    for (let i = 0; i < n; i++) {
+      const u = n > 1 ? i / (n - 1) : 0.5, bend = p.bend * Math.sin(Math.PI * u);
+      const box = f.v ? { x: b.x + b.w * (0.1 + bend), y: b.y + b.h * i / n,
+        w: b.w * 0.55, h: b.h / n * 0.88 }
+        : { x: b.x + b.w * i / n, y: b.y + b.h * (0.24 - bend), w: b.w / n * 0.9, h: b.h * 0.58 };
+      run(env, f, box, rs[i]);
+    }
+    return finish(env, f);
+  }
+
+  function orbitBuild(env, p) {
+    const f = frame(env, p), b = f.safe, r = Math.min(b.w, b.h) * p.orbit;
+    const cx = b.x + b.w * 0.73, cy = b.y + b.h * 0.25;
+    shape(env, f, K.shape.ellipse(cx, cy, r, r), 'accent');
+    shape(env, f, K.shape.ellipse(cx + r * 0.72, cy - r * 0.7, r * 0.11, r * 0.11), null, 'accent');
+    run(env, f, { x: b.x + b.w * 0.05, y: b.y + b.h * 0.46, w: b.w * 0.8, h: b.h * 0.36 }, null,
+      { align: f.v ? 'center' : 'start' });
+    return finish(env, f);
+  }
+
+  function glassBuild(env, p) {
+    const f = frame(env, p), b = inset(f.safe, 0.15, 0.22), d = env.D.short * p.depth;
+    panel(env, f, { x: b.x + d, y: b.y - d, w: b.w, h: b.h }, 'accent', 0.18);
+    panel(env, f, { x: b.x - d, y: b.y + d, w: b.w, h: b.h }, 'muted', 0.12);
+    panel(env, f, b);
+    run(env, f, inset(b, 0.09, 0.15), null, { align: f.v ? 'center' : 'start' });
+    return finish(env, f);
+  }
+
+  function horizonBuild(env, p) {
+    const f = frame(env, p), b = f.safe, rs = pieces(env, f, 2), n = rs.length;
+    const gap = p.gap;
+    for (let i = 0; i < n; i++) {
+      const start = i ? 0.5 + gap / 2 : 0.1, reach = n === 1 ? 0.8 : 0.4 - gap / 2;
+      const box = f.v ? { x: b.x + b.w * (n === 1 ? 0.1 : i ? 0.1 : 0.5 + gap / 2), y: b.y + b.h * 0.08,
+        w: b.w * reach, h: b.h * 0.84 }
+        : { x: b.x + b.w * 0.08, y: b.y + b.h * start, w: b.w * 0.84, h: b.h * reach };
+      run(env, f, box, rs[i], { align: i ? 'end' : 'start', valign: i ? 'end' : 'start' });
+    }
+    if (f.v) line(env, f, b.x + b.w * 0.5, b.y + b.h * 0.18, b.x + b.w * 0.5, b.y + b.h * 0.82, 'muted');
+    else line(env, f, b.x + b.w * 0.18, b.y + b.h * 0.5, b.x + b.w * 0.82, b.y + b.h * 0.5, 'muted');
+    return finish(env, f);
+  }
+
+  function stripsBuild(env, p) {
+    const f = frame(env, p), b = inset(f.safe, 0.08, 0.14), rs = pieces(env, f, p.strips), n = rs.length;
+    for (let i = 0; i < n; i++) {
+      const edge = i % 2 ? 0.13 : 0;
+      const box = f.v ? { x: b.x + b.w * (n - 1 - i) / n, y: b.y + edge * b.h, w: b.w / n * 0.88, h: b.h * 0.86 }
+        : { x: b.x + edge * b.w, y: b.y + b.h * i / n, w: b.w * 0.86, h: b.h / n * 0.88 };
+      panel(env, f, box, i % 2 ? 'ground2' : 'accent', i % 2 ? 1 : 0.17);
+      run(env, f, inset(box, 0.05, 0.08), rs[i], { align: i % 2 ? 'end' : 'start' });
+    }
+    return finish(env, f);
+  }
+
+  function pennantBuild(env, p) {
+    const f = frame(env, p), b = inset(f.safe, 0.1, 0.24), tip = Math.min(b.w, b.h) * p.tip;
+    // A pointed banner ends inside the safe area and leaves an inset rectangular area for the full text.
+    const path = f.v ? [b.x, b.y, b.x + b.w, b.y, b.x + b.w, b.y + b.h - tip,
+      b.x + b.w / 2, b.y + b.h, b.x, b.y + b.h - tip]
+      : [b.x, b.y, b.x + b.w - tip, b.y, b.x + b.w, b.y + b.h / 2,
+        b.x + b.w - tip, b.y + b.h, b.x, b.y + b.h];
+    shape(env, f, K.shape.poly(path, true), 'accent', 'ground2');
+    run(env, f, f.v ? { x: b.x + b.w * 0.1, y: b.y + b.h * 0.06, w: b.w * 0.8, h: b.h - tip - b.h * 0.12 }
+      : { x: b.x + b.w * 0.06, y: b.y + b.h * 0.1, w: b.w - tip - b.w * 0.12, h: b.h * 0.8 });
+    return finish(env, f);
+  }
+
+  function railBuild(env, p) {
+    const f = frame(env, p), b = inset(f.safe, 0.06, 0.14), rail = Math.min(b.w, b.h) * p.rail;
+    if (f.v) {
+      line(env, f, b.x, b.y, b.x + b.w, b.y, 'accent', rail * 0.18);
+      line(env, f, b.x, b.y + rail * 0.35, b.x + b.w * 0.55, b.y + rail * 0.35, 'muted');
+      run(env, f, { x: b.x, y: b.y + rail, w: b.w, h: b.h - rail }, null, { align: 'start', valign: 'start' });
+    } else {
+      line(env, f, b.x, b.y, b.x, b.y + b.h, 'accent', rail * 0.18);
+      line(env, f, b.x + rail * 0.35, b.y, b.x + rail * 0.35, b.y + b.h * 0.55, 'muted');
+      run(env, f, { x: b.x + rail, y: b.y, w: b.w - rail, h: b.h }, null, { align: 'start', valign: 'center' });
+    }
+    return finish(env, f);
+  }
+
+  function badgeBuild(env, p) {
+    const f = frame(env, p), b = f.safe, r = Math.min(b.w, b.h) * 0.37, cx = b.x + b.w / 2, cy = b.y + b.h / 2;
+    shape(env, f, K.shape.ellipse(cx, cy, r, r), 'accent', 'ground2');
+    const steps = 24;
+    for (let i = 0; i < steps; i++) {
+      const a = TAU * i / steps, r0 = r + env.D.short * 0.008, r1 = r0 + env.D.short * p.ticks;
+      line(env, f, cx + Math.cos(a) * r0, cy + Math.sin(a) * r0, cx + Math.cos(a) * r1, cy + Math.sin(a) * r1,
+        i % 3 ? 'muted' : 'accent', env.D.short * 0.002);
+    }
+    run(env, f, { x: cx - r * 0.67, y: cy - r * 0.67, w: r * 1.34, h: r * 1.34 });
+    return finish(env, f);
+  }
+
+  const num = (ja, en, min, max, lo, hi) => ({ type: 'num', min, max, step: 0.005,
+    unit: 'frac', label: L(ja, en), auto: { range: [lo, hi] } });
+
+  return [
+    K.arrange({ key: 'windowVerse', label: L('窓の余白', 'Open window'),
+      blurb: L('四隅の開いた枠で歌詞を囲み、窓越しのように余白を残す', 'The lyric inside four open corners, framed with generous breathing room'),
+      tags: ['minimal', 'serious'], family: 'window', cam: 'gentle',
+      params: { opening: num('枠の長さ', 'Corner length', 0.04, 0.16, 0.07, 0.11) }, build: windowBuild }),
+    K.arrange({ key: 'quoteVerse', label: L('引用の余白', 'Quotation space'),
+      blurb: L('大きな引用符の間に歌詞を置き、ひとつの言葉として見せる', 'The lyric between oversized quotation marks, as one remembered statement'),
+      tags: ['literary', 'soft'], family: 'quotation', cam: 'gentle',
+      params: { mark: num('引用符の大きさ', 'Quotation size', 0.035, 0.1, 0.05, 0.075) }, build: quoteBuild }),
+    K.arrange({ key: 'archPhrase', label: L('言葉のアーチ', 'Phrase arch'),
+      blurb: L('読み順を保った短い句を、なだらかな弧に沿って並べる', 'Balanced phrases follow a shallow arch while keeping their reading order'),
+      tags: ['airy', 'playful'], family: 'arch', traits: { cells: [5, 32] },
+      params: { bend: num('弧の深さ', 'Arch depth', 0.08, 0.22, 0.12, 0.18) }, build: archBuild }),
+    K.arrange({ key: 'orbitCaption', label: L('月とキャプション', 'Moon caption'),
+      blurb: L('右上の月のような円と、左下に寄せた歌詞で画面に余韻を作る', 'A moonlike circle above a lower caption creates an asymmetrical pause'),
+      tags: ['airy', 'minimal'], family: 'orbitCaption', cam: 'gentle',
+      params: { orbit: num('月の大きさ', 'Moon radius', 0.06, 0.17, 0.1, 0.14) }, build: orbitBuild }),
+    K.arrange({ key: 'glassLayers', label: L('重なるガラス', 'Layered glass'),
+      blurb: L('ずらした半透明の面を重ね、手前の面に歌詞を整える', 'Offset translucent panes sit behind a clean lyric panel'),
+      tags: ['digital', 'soft'], family: 'glass', cam: 'gentle',
+      params: { depth: num('面のずれ', 'Pane offset', 0.01, 0.055, 0.025, 0.04) }, build: glassBuild }),
+    K.arrange({ key: 'splitHorizon', label: L('向かい合う余白', 'Distant halves'),
+      blurb: L('二つの句を離れた端に置き、細い線と広い余白でつなぐ', 'Two phrases face across a broad pause divided by a fine horizon'),
+      tags: ['serious', 'slow'], family: 'horizon', cam: 'gentle', traits: { cells: [5, 36] },
+      params: { gap: num('句の間の余白', 'Phrase separation', 0.12, 0.36, 0.2, 0.28) }, build: horizonBuild }),
+    K.arrange({ key: 'wovenStrips', label: L('織り重なる帯', 'Woven strips'),
+      blurb: L('短い句を左右にずらした帯へ載せ、織物のように積み重ねる', 'Short phrases stack on offset strips like a woven page'),
+      tags: ['retro', 'playful'], family: 'woven', cam: 'gentle', traits: { cells: [6, 36] },
+      params: { strips: { type: 'int', min: 2, max: 4, label: L('帯の数', 'Strip count'), auto: { range: [2, 3] } } }, build: stripsBuild }),
+    K.arrange({ key: 'pennantLine', label: L('言葉の旗', 'Lyric pennant'),
+      blurb: L('先端のとがった旗の中に歌詞を収め、輪郭で印象を作る', 'The complete lyric inside a pointed pennant with a crisp outline'),
+      tags: ['bold', 'retro'], family: 'pennant', cam: 'gentle',
+      params: { tip: num('旗の先端', 'Pennant point', 0.08, 0.3, 0.13, 0.23) }, build: pennantBuild }),
+    K.arrange({ key: 'marginRail', label: L('余白のレール', 'Margin rail'),
+      blurb: L('二本の長さの違う罫線の横に、歌詞をゆったり揃える', 'The lyric aligned beside two unequal rules with generous page margins'),
+      tags: ['minimal', 'literary'], family: 'rail',
+      params: { rail: num('罫線との間', 'Rail spacing', 0.05, 0.18, 0.08, 0.12) }, build: railBuild }),
+    K.arrange({ key: 'focusBadge', label: L('円いエンブレム', 'Lyric emblem'),
+      blurb: L('目盛りに囲まれた円の中心へ歌詞を収め、ひとつの紋章にする', 'The lyric inside a circular emblem surrounded by fine radial ticks'),
+      tags: ['serious', 'retro'], family: 'badge', cam: 'gentle', traits: { cells: [1, 26] },
+      params: { ticks: num('目盛りの長さ', 'Tick length', 0.005, 0.035, 0.012, 0.022) }, build: badgeBuild }),
+  ];
 });
 /* 文字PVメーカー v2 — original work. Digital entrances (type on, strobe in, pixel step, glitch in) and the strobe-out mirror. */
 MV.def('parts/arrive/digital', ['parts/kit'], (K) => {
@@ -39406,7 +40029,8 @@ MV.def('parts/dwell/calm', ['parts/kit'], (K) => {
   // Block holds move only the glyphs. Compositions that set the words on or in a fixed decoration (grid cells, tag
   // cards, a card, a band, a rule right under the line) would lose that picture, so the planner does not pair them
   // (fits = 0 while that composition is chosen; a pin still can).
-  const BOUND = new Set(['gridMosaic', 'hangingTags', 'tiltedCard', 'slantBand', 'titlePlate', 'magazineHead']);
+  const BOUND = new Set(['gridMosaic', 'hangingTags', 'tiltedCard', 'slantBand', 'titlePlate', 'magazineHead',
+    'windowVerse', 'quoteVerse', 'glassLayers', 'wovenStrips', 'pennantLine', 'marginRail', 'focusBadge']);
   function freeBlock(f, chosen) { return chosen && BOUND.has(chosen.arrange) ? 0 : 1; }
 
   // --- stillHold (fallback) --------------------------------------------------------------------------------------
@@ -39535,7 +40159,8 @@ MV.def('parts/dwell/lively', ['parts/kit'], (K) => {
   const FLICKER_MAX_HZ = 12;      // dips stay smooth (no single-frame pops) and gentle for the eyes
   // Compositions whose words sit on a fixed decoration: the beat pulse (a block scale) is not paired with them (see
   // parts/dwell/calm).
-  const BOUND = new Set(['gridMosaic', 'hangingTags', 'tiltedCard', 'slantBand', 'titlePlate', 'magazineHead']);
+  const BOUND = new Set(['gridMosaic', 'hangingTags', 'tiltedCard', 'slantBand', 'titlePlate', 'magazineHead',
+    'windowVerse', 'quoteVerse', 'glassLayers', 'wovenStrips', 'pennantLine', 'marginRail', 'focusBadge']);
 
   // K.perGlyphHold with more context in the params its function sees (see parts/dwell/calm): the hold window, the
   // reading axis, the scene's seed (for closed-form noise), the text block's half size and a typical glyph size.
@@ -57594,6 +58219,191 @@ MV.def('media/host/store', ['core/media', 'media/samples', 'media/host/session',
 
   return { createMediaStore, blurLevel, STILL_BUDGET, SESSION_PIXELS, BLUR_LEVELS, NEAR_BAKED };
 });
+/* 文字PVメーカー v2 — original work. Preview-only camera wireframe: exact text camera matrices and a bounded overview. */
+MV.def('ui/camera_wireframe', ['core/mat', 'core/num', 'engine/scene/frame'], (MAT, N, F) => {
+  'use strict';
+
+  const SAMPLES = 48;
+  const MAX_BOXES = 96;
+  const INK = '#71e6d1';
+  const CURRENT = '#ffbd76';
+  const DIM = 'rgba(113,230,209,0.28)';
+
+  // viewAt already includes the lens, shot, area rig and absolute-time shake/punch. Use the renderer's own matrix
+  // helper at text-layer parallax 1, rather than approximating its motion from raw shot keys.
+  function geometry(design, view) {
+    const v = view || {};
+    if (!design || !(design.w > 0 && design.h > 0) ||
+      ![v.x, v.y, v.zoom, v.roll].every(Number.isFinite) || !(v.zoom > 0)) return null;
+    const matrix = F.viewMatrix(new Float32Array(6),
+      { x: v.x, y: v.y, zoom: v.zoom, roll: v.roll, shakeX: 0, shakeY: 0 }, 1, design.w, design.h);
+    const inverse = MAT.invert(new Float32Array(6), matrix);
+    if (!inverse) return null;
+    const frame = Array.from(MAT.quad(new Float32Array(8), inverse, 0, 0, design.w, design.h));
+    const world = Array.from(MAT.quad(new Float32Array(8), matrix, 0, 0, design.w, design.h));
+    const centre = Array.from(MAT.apply(inverse, design.w / 2, design.h / 2, new Float32Array(2)));
+    return { matrix: Array.from(matrix), frame, world, centre, view: { x: v.x, y: v.y, zoom: v.zoom, roll: v.roll } };
+  }
+
+  function windowAt(plan, t) {
+    const fg = F.frameAt(plan, t), i = F.currentCut(plan, t, fg);
+    if (i >= 0) {
+      const cut = plan.cuts[i];
+      return { a: cut.a, b: cut.b, cut: cut.key, i };
+    }
+    const iGround = F.segmentAt(plan, t), ground = (plan.grounds || [])[iGround];
+    return { a: ground ? ground.t0 : 0, b: ground ? ground.t1 : plan.duration, cut: null, i: -1 };
+  }
+
+  function makePath(engine, plan, window, calm) {
+    const a = Math.max(0, window.a), b = Math.max(a, Math.min(plan.duration, window.b));
+    const span = b - a, epsilon = Math.min(1e-5, span / 1000);
+    const track = window.cut && typeof engine.shotTrack === 'function' ? engine.shotTrack(window.cut) : null;
+    const keys = track ? track.keys.filter((k) => k.t >= a && k.t <= b) : [];
+    const jumps = typeof engine.xJumps === 'function' ? engine.xJumps(a, b) : [];
+    // A normal track can also contain deliberate same-time jumps. Area rigs without a blend and hard cut boundaries
+    // are separated in the overview: a dashed line across such a gap would invent camera travel that never occurs.
+    for (let i = 1; i < keys.length; i++) if (keys[i].t === keys[i - 1].t) jumps.push(keys[i].t);
+    for (const rig of plan.rigs || []) if (!rig.blend && rig.t0 > a && rig.t0 < b) jumps.push(rig.t0);
+    for (const cut of plan.cuts || []) if (cut.a > a && cut.a < b) jumps.push(cut.a);
+    for (const seam of plan.seams || []) if (seam.at > a && seam.at < b) jumps.push(seam.at);
+    const times = Array.from({ length: SAMPLES + 1 }, (_, i) => a + span * i / SAMPLES);
+    for (const k of keys) times.push(Math.min(b - epsilon, Math.max(a, k.t)));
+    for (const t of jumps) if (t > a && t < b) times.push(t - epsilon, t);
+    times[times.indexOf(b)] = Math.max(a, b - epsilon); // b itself belongs to the next cut, not this path.
+    times.sort((x, y) => x - y);
+    const unique = times.filter((t, i) => !i || t !== times[i - 1]);
+    const opts = calm ? { calm: true } : undefined;
+    const bounds = { x0: 0, y0: 0, x1: plan.design.w, y1: plan.design.h };
+    const points = unique.map((t, i) => {
+      const g = geometry(plan.design, engine.viewAt(t, opts));
+      if (g) for (let j = 0; j < 8; j += 2) {
+        bounds.x0 = Math.min(bounds.x0, g.frame[j]); bounds.x1 = Math.max(bounds.x1, g.frame[j]);
+        bounds.y0 = Math.min(bounds.y0, g.frame[j + 1]); bounds.y1 = Math.max(bounds.y1, g.frame[j + 1]);
+      }
+      return g && { t, x: g.centre[0], y: g.centre[1],
+        break: !!i && jumps.some((j) => unique[i - 1] < j && t >= j) };
+    }).filter(Boolean);
+    const markers = keys.map((k, i) => {
+      const t = Math.min(b - epsilon, Math.max(a, k.t));
+      const g = geometry(plan.design, engine.viewAt(t, opts));
+      return g && { t, i, x: g.centre[0], y: g.centre[1] };
+    }).filter(Boolean);
+    return { points, markers, a, b, bounds };
+  }
+
+  // The cache stores one cut/gap only, by immutable plan identity and preview calm setting. A seek immediately gets
+  // its real current pose; path samples are reused while playing that interval. Restore the current scene evaluation
+  // after sampling so subsequent preview interactions do not observe the final future sample's live pose.
+  function snapshot(engine, plan, t, calm, cache) {
+    if (!engine || !plan || !plan.design || typeof engine.viewAt !== 'function') return null;
+    const window = windowAt(plan, t), c = cache || {};
+    if (c.plan !== plan || c.cut !== window.cut || c.a !== window.a || c.b !== window.b || c.calm !== !!calm) {
+      c.path = makePath(engine, plan, window, !!calm);
+      c.plan = plan; c.cut = window.cut; c.a = window.a; c.b = window.b; c.calm = !!calm;
+    }
+    const current = geometry(plan.design, engine.viewAt(t, calm ? { calm: true } : undefined));
+    return current && { current, path: c.path, window, time: t, design: plan.design };
+  }
+
+  function quad(g, q, map) {
+    g.beginPath();
+    for (let i = 0; i < 8; i += 2) {
+      const p = map(q[i], q[i + 1]);
+      if (!i) g.moveTo(p[0], p[1]); else g.lineTo(p[0], p[1]);
+    }
+    g.closePath();
+    g.stroke();
+  }
+
+  function overviewBounds(data) {
+    const { w, h } = data.design;
+    const bounds = data.path.bounds;
+    let x0 = bounds ? bounds.x0 : 0, y0 = bounds ? bounds.y0 : 0,
+      x1 = bounds ? bounds.x1 : w, y1 = bounds ? bounds.y1 : h;
+    const point = (x, y) => { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); };
+    for (const p of data.path.points) point(p.x, p.y);
+    for (let i = 0; i < 8; i += 2) point(data.current.frame[i], data.current.frame[i + 1]);
+    return { x0, y0, w: Math.max(1, x1 - x0), h: Math.max(1, y1 - y0) };
+  }
+
+  function draw(g, data, opts) {
+    if (!data) return;
+    const o = opts || {}, k = o.scale || 1, dpr = o.dpr || 1, width = o.width, height = o.height;
+    const { w: W, h: H } = data.design, v = data.current.view;
+    const screen = (x, y) => [x * k, y * k];
+    g.save();
+    g.lineWidth = 1.2 * dpr;
+    g.strokeStyle = DIM;
+    const m = data.current.matrix;
+    g.beginPath();
+    for (let i = 0; i <= 4; i++) {
+      for (const [x0, y0, x1, y1] of [[W * i / 4, 0, W * i / 4, H], [0, H * i / 4, W, H * i / 4]]) {
+        g.moveTo((m[0] * x0 + m[2] * y0 + m[4]) * k, (m[1] * x0 + m[3] * y0 + m[5]) * k);
+        g.lineTo((m[0] * x1 + m[2] * y1 + m[4]) * k, (m[1] * x1 + m[3] * y1 + m[5]) * k);
+      }
+    }
+    g.stroke();
+    g.strokeStyle = INK;
+    quad(g, data.current.world, screen);
+    g.strokeStyle = 'rgba(255,189,118,0.7)';
+    for (const box of (o.boxes || []).slice(0, MAX_BOXES)) if (box.quad && box.quad.length === 8) quad(g, box.quad, screen);
+    g.strokeStyle = CURRENT;
+    g.strokeRect(4 * dpr, 4 * dpr, Math.max(0, width - 8 * dpr), Math.max(0, height - 8 * dpr));
+    g.beginPath();
+    g.moveTo(width / 2 - 9 * dpr, height / 2); g.lineTo(width / 2 + 9 * dpr, height / 2);
+    g.moveTo(width / 2, height / 2 - 9 * dpr); g.lineTo(width / 2, height / 2 + 9 * dpr); g.stroke();
+
+    // One inset for every aspect: its world scale stays uniform (rotation remains meaningful), and actual off-frame
+    // camera footprints are included. The drawing is clipped, so tiny / extreme views cannot cover the editor.
+    const margin = 9 * dpr, mapW = Math.min(218 * dpr, width - 2 * margin), mapH = Math.min(148 * dpr, height * 0.42);
+    if (mapW >= 110 * dpr && mapH >= 72 * dpr) {
+      const x = width - mapW - margin, y = height - mapH - margin, pad = 10 * dpr, head = 27 * dpr;
+      g.fillStyle = 'rgba(12,18,23,0.88)'; g.fillRect(x, y, mapW, mapH);
+      g.strokeStyle = 'rgba(113,230,209,0.6)'; g.strokeRect(x, y, mapW, mapH);
+      g.fillStyle = '#e9eef1'; g.font = 11 * dpr + 'px system-ui, sans-serif';
+      g.textAlign = 'left'; g.textBaseline = 'middle';
+      g.fillText(o.label || '', x + pad, y + 13 * dpr, mapW - 2 * pad);
+      g.save(); g.beginPath(); g.rect(x + pad, y + head, mapW - 2 * pad, mapH - head - pad); g.clip();
+      const bounds = overviewBounds(data);
+      const s = Math.min((mapW - 2 * pad) / bounds.w, (mapH - head - pad) / bounds.h);
+      const ox = x + (mapW - bounds.w * s) / 2, oy = y + head + (mapH - head - pad - bounds.h * s) / 2;
+      const map = (wx, wy) => [ox + (wx - bounds.x0) * s, oy + (wy - bounds.y0) * s];
+      g.strokeStyle = 'rgba(233,238,241,0.45)'; quad(g, [0, 0, W, 0, W, H, 0, H], map);
+      g.setLineDash([3 * dpr, 3 * dpr]); g.strokeStyle = INK; g.beginPath();
+      data.path.points.forEach((p, i) => { const [px, py] = map(p.x, p.y); if (!i || p.break) g.moveTo(px, py); else g.lineTo(px, py); });
+      g.stroke(); g.setLineDash([]);
+      for (const p of data.path.markers) {
+        const [px, py] = map(p.x, p.y); g.fillStyle = INK; g.beginPath(); g.arc(px, py, 2.5 * dpr, 0, 2 * Math.PI); g.fill();
+      }
+      g.strokeStyle = CURRENT; g.lineWidth = 1.6 * dpr; quad(g, data.current.frame, map);
+      const centre = map(data.current.centre[0], data.current.centre[1]);
+      g.fillStyle = CURRENT; g.beginPath(); g.arc(centre[0], centre[1], 3 * dpr, 0, 2 * Math.PI); g.fill();
+      // The last observed direction is taken from a nearby actual sample, not from a preset's nominal pan direction.
+      const before = data.path.points.filter((p) => p.t < data.time - 0.025).pop();
+      if (before && !data.path.points.some((p) => p.break && p.t > before.t && p.t <= data.time)) {
+        const p = map(before.x, before.y), dx = centre[0] - p[0], dy = centre[1] - p[1], len = Math.hypot(dx, dy);
+        if (len > 0.2 * dpr) {
+          const nx = dx / len, ny = dy / len, ex = centre[0] + nx * 12 * dpr, ey = centre[1] + ny * 12 * dpr;
+          g.beginPath(); g.moveTo(centre[0], centre[1]); g.lineTo(ex, ey);
+          g.moveTo(ex - nx * 4 * dpr - ny * 3 * dpr, ey - ny * 4 * dpr + nx * 3 * dpr);
+          g.lineTo(ex, ey); g.lineTo(ex - nx * 4 * dpr + ny * 3 * dpr, ey - ny * 4 * dpr - nx * 3 * dpr); g.stroke();
+        }
+      }
+      g.restore();
+    }
+    const status = o.status || ('×' + v.zoom.toFixed(2) + ' / ' + (v.roll / N.DEG).toFixed(1) + '°');
+    const labelW = Math.min(width - 2 * margin, 330 * dpr);
+    if (labelW > 20 * dpr) {
+      g.fillStyle = 'rgba(12,18,23,0.88)'; g.fillRect(margin, margin, labelW, 24 * dpr);
+      g.fillStyle = CURRENT; g.font = 11 * dpr + 'px system-ui, sans-serif'; g.textAlign = 'left'; g.textBaseline = 'middle';
+      g.fillText(status, margin + 7 * dpr, margin + 12 * dpr, labelW - 14 * dpr);
+    }
+    g.restore();
+  }
+
+  return { geometry, windowAt, snapshot, overviewBounds, draw, SAMPLES, MAX_BOXES };
+});
 /* 文字PVメーカー v2 — original work. DOM helpers: element builder (text only via textContent), delegated events, CSSOM styles, focus, frame batching. */
 MV.def('ui/dom', [], () => {
   'use strict';
@@ -58063,6 +58873,171 @@ MV.def('ui/icons', ['ui/dom'], (dom) => {
   }
 
   return { icon, names: () => Object.keys(ICONS) };
+});
+/* 文字PVメーカー v2 — original work. Isolated, full-cycle camera samples in a large playback dialog. */
+MV.def('ui/camera_preview', ['ui/dom', 'ui/icons', 'i18n/t', 'core/shot', 'engine/facade'], (dom, I, T, SHOT, FAC) => {
+  'use strict';
+  const { h } = dom;
+  const KINDS = Object.freeze(['shot', 'xshot', 'rig', 'lens']);
+  const SPEEDS = Object.freeze([0.25, 0.5, 1]);
+  const sessions = new WeakMap();
+
+  function supports(kind, key) { return KINDS.includes(kind) && key !== null && key !== undefined; }
+  function normalize(ref) {
+    return ref.kind === 'shot' && SHOT.isExtreme(ref.key) ? Object.assign({}, ref, { kind: 'xshot' }) : Object.assign({}, ref);
+  }
+  function advance(time, delta, duration, speed, loop) {
+    const end = Math.max(0, duration), next = Math.max(0, time) + Math.max(0, delta) * speed;
+    if (!end) return { time: 0, ended: true };
+    if (next < end) return { time: next, ended: false };
+    return loop ? { time: next % end, ended: false } : { time: end, ended: true };
+  }
+  function nameOf(app, ref) {
+    if (ref.kind === 'rig') return app.t.label(SHOT.rigLabel(ref.key));
+    if (ref.kind === 'shot' || ref.kind === 'xshot') {
+      const base = app.t.label(SHOT.label(ref.key)), x = SHOT.xKeyOf(ref.key);
+      return x && x.m ? app.t('shot.mirroredOf', { name: base }) : base;
+    }
+    return app.label(ref.kind, ref.key);
+  }
+  function blurbOf(app, ref) {
+    if (ref.kind === 'rig') return app.t('camera.sample.rigHint');
+    if (ref.kind === 'shot' || ref.kind === 'xshot') {
+      const x = SHOT.xKeyOf(ref.key), key = x ? x.key : ref.key;
+      return typeof key === 'string' && app.t.has('shot.blurb.' + key) ? app.t('shot.blurb.' + key) : '';
+    }
+    const def = app.reg.get(ref.kind, ref.key);
+    return def && def.blurb ? def.blurb[app.t.lang] || def.blurb.ja || '' : '';
+  }
+
+  // open(app, ref, {name, blurb}) → {close, done, state}. The engine's thumbnail renderer and sample plan are separate
+  // from the main scene, picks, song clock and document. Both normal closure and native Escape release the fork.
+  function open(app, ref0, options) {
+    if (!ref0 || !supports(ref0.kind, ref0.key) || !app.dialogs || !app.engine) return null;
+    const old = sessions.get(app);
+    if (old) old.close();
+    const ref = normalize(ref0), opt = options || {}, t = app.t;
+    const theme = app.plan && app.plan.look ? app.plan.look.theme.v : null;
+    const sampleOptions = { text: t('pb.sampleText'), textB: t('pb.sampleTextB'), theme, aspect: app.doc.look.aspect };
+    let sample = null, engine = null;
+    try { sample = FAC.samplePlan(app.reg, ref, sampleOptions); engine = app.engine.fork(); }
+    catch (e) { if (app.toast) app.toast(t('camera.sample.failed')); return null; }
+    const duration = sample.duration;
+    const ratio = sample.design.w / sample.design.h;
+    const width = Math.round(ratio >= 1 ? 960 : 960 * ratio), height = Math.round(ratio >= 1 ? 960 / ratio : 960);
+    const motion = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : null;
+    let playing = !(motion && motion.matches) && !document.hidden;
+    let time = playing ? 0 : FAC.sampleTime(sample, ref.kind), speed = 0.5, hasPlayed = playing;
+    let frame = 0, lastTick = null, lastPaint = -Infinity, renderCount = 0, disposed = false, closeDialog = null;
+    let offView = null, offDoc = null;
+    let root = null, canvas = null, play = null, seek = null, readout = null, loop = null, guides = null, note = null;
+
+    function updateControls() {
+      if (!root) return;
+      play.textContent = t(playing ? 'camera.sample.pause' : 'camera.sample.play');
+      play.setAttribute('aria-pressed', String(playing));
+      seek.value = String(time);
+      seek.setAttribute('aria-valuetext', T.fmtTime(time));
+      readout.textContent = t('camera.sample.time', { time: T.fmtTime(time), end: T.fmtTime(duration) });
+      root.dataset.sampleTime = String(time);
+      root.dataset.renderCount = String(renderCount);
+      root.dataset.playing = String(playing);
+    }
+    function paint() {
+      if (disposed || !canvas || !canvas.isConnected) return;
+      try {
+        const g = canvas.getContext('2d');
+        engine.thumb(ref, { canvas, ctx: g, w: width, h: height }, Object.assign({}, sampleOptions, { t: time }));
+        if (guides.checked) {
+          g.save(); g.setTransform(1, 0, 0, 1, 0, 0);
+          g.strokeStyle = 'rgba(124,196,255,0.28)'; g.lineWidth = 1;
+          g.setLineDash([6, 8]); g.beginPath();
+          for (const p of [0.25, 0.5, 0.75]) { g.moveTo(width * p, 0); g.lineTo(width * p, height); g.moveTo(0, height * p); g.lineTo(width, height * p); }
+          g.stroke(); g.restore();
+        }
+        renderCount++;
+      } catch (e) {
+        playing = false;
+        note.hidden = false; note.textContent = t('camera.sample.failed');
+      }
+      updateControls();
+    }
+    function cancelFrame() { if (frame) cancelAnimationFrame(frame); frame = 0; lastTick = null; }
+    function schedule() { if (!disposed && playing && !document.hidden && !frame) frame = requestAnimationFrame(tick); }
+    function tick(now) {
+      frame = 0;
+      if (disposed || !root || !root.isConnected || document.hidden || !playing) return;
+      const delta = lastTick === null ? 0 : (now - lastTick) / 1000;
+      lastTick = now;
+      const next = advance(time, delta, duration, speed, loop.checked);
+      time = next.time;
+      if (next.ended) playing = false;
+      if (now - lastPaint >= 1000 / 30 || !playing) { paint(); lastPaint = now; }
+      schedule();
+    }
+    function pause() { playing = false; cancelFrame(); updateControls(); }
+    function visibility() { if (document.hidden) pause(); }
+    function reduced(ev) { if (ev.matches) { pause(); note.hidden = false; note.textContent = t('camera.sample.reduced'); } }
+    function dispose() {
+      if (disposed) return;
+      disposed = true; playing = false; cancelFrame(); updateControls();
+      document.removeEventListener('visibilitychange', visibility);
+      window.removeEventListener('pagehide', close);
+      if (motion && motion.removeEventListener) motion.removeEventListener('change', reduced);
+      if (offView) offView(); if (offDoc) offDoc();
+      try { engine.dispose(); } catch (e) { /* cleanup still removes listeners and retires this session */ }
+      if (sessions.get(app) === handle) sessions.delete(app);
+    }
+    function close() { dispose(); if (closeDialog) closeDialog(); }
+    const handle = { close, done: null,
+      state: () => ({ time, duration, speed, playing, renderCount, disposed, framePending: !!frame, kind: ref.kind, key: ref.key }) };
+    sessions.set(app, handle);
+    try {
+      handle.done = app.dialogs.open((body, done) => {
+        closeDialog = done;
+        body.closest('dialog').classList.add('camera-preview-dialog');
+        canvas = h('canvas', { class: 'camera-preview-canvas', width, height, role: 'img', 'aria-label': opt.name || nameOf(app, ref) });
+        play = h('button', { class: 'btn primary camera-preview-play', type: 'button', 'data-autofocus': '1',
+          on: { click: () => {
+            if (playing) pause(); else { if (!hasPlayed || time >= duration) time = 0; hasPlayed = true; playing = true;
+              note.hidden = true; lastTick = null; updateControls(); schedule(); }
+          } } });
+        const restart = h('button', { class: 'btn camera-preview-restart', type: 'button', text: t('camera.sample.restart'),
+          on: { click: () => { time = 0; lastTick = null; paint(); schedule(); } } });
+        seek = h('input', { class: 'camera-preview-seek', type: 'range', min: '0', max: String(duration), step: '0.001',
+          'aria-label': t('camera.sample.seek'), on: { input: () => { time = Math.max(0, Math.min(duration, Number(seek.value))); hasPlayed = true; lastTick = null; paint(); } } });
+        readout = h('output', { class: 'camera-preview-time' });
+        const speedSelect = h('select', { class: 'select camera-preview-speed', 'aria-label': t('camera.sample.speed'),
+          on: { change: () => { const v = Number(speedSelect.value); if (SPEEDS.includes(v)) speed = v; lastTick = null; } } },
+        SPEEDS.map((v, i) => h('option', { value: String(v), selected: v === speed,
+          text: t(['camera.sample.slowest', 'camera.sample.slow', 'camera.sample.normal'][i]) })));
+        loop = h('input', { class: 'camera-preview-loop', type: 'checkbox', checked: true });
+        guides = h('input', { class: 'camera-preview-guides', type: 'checkbox', checked: true, on: { change: paint } });
+        note = h('p', { class: 'note subtle', hidden: !(motion && motion.matches), text: t('camera.sample.reduced') });
+        root = h('div', { class: 'camera-preview', 'data-preview-kind': ref.kind,
+          'data-preview-key': typeof ref.key === 'string' ? ref.key : 'custom', 'data-duration': String(duration) },
+        h('p', { class: 'camera-preview-caption', text: opt.blurb || blurbOf(app, ref) || t('camera.sample.note') }),
+        h('div', { class: 'camera-preview-screen' }, canvas),
+        h('div', { class: 'camera-preview-transport' }, play, restart, readout), seek,
+        h('div', { class: 'camera-preview-options' }, h('label', {}, t('camera.sample.speed'), speedSelect),
+          h('label', {}, loop, t('camera.sample.loop')), h('label', {}, guides, t('camera.sample.guides'))), note);
+        body.appendChild(root);
+        updateControls();
+      }, { title: t('camera.sample.title', { name: opt.name || nameOf(app, ref) }), wide: true });
+      handle.done.then(dispose, dispose);
+      document.addEventListener('visibilitychange', visibility);
+      window.addEventListener('pagehide', close);
+      if (motion && motion.addEventListener) motion.addEventListener('change', reduced);
+      if (app.view && app.view.on) offView = app.view.on((changed) => {
+        if (changed.some((k) => ['sel', 'panel', 'step', 'mode'].includes(k))) close();
+      });
+      if (app.store && app.store.on) offDoc = app.store.on('doc', close);
+      paint(); schedule();
+      return handle;
+    } catch (e) { close(); return null; }
+  }
+
+  return { KINDS, SPEEDS, supports, normalize, advance, nameOf, blurbOf, open };
 });
 /* 文字PVメーカー v2 — original work. The curve widget (緩急): presets, eases, the かんたん ramp and custom Bézier / speed-step curves on a small canvas (DESIGN_2_1 §6.6). */
 MV.def('ui/curve_widget', ['ui/dom', 'ui/icons', 'core/curve', 'core/ease'], (dom, I, CV, E) => {
@@ -60456,8 +61431,8 @@ MV.def('ui/layout', ['core/doc'], (D) => {
     standard: Object.freeze({ step: 296, detail: 312 }),
   });
   // Height tiers: tall and normal share the roomy metrics; short is tighter (§6.2).
-  const ROOMY = Object.freeze({ header: 48, pad: 16, gap: 12, lane: 40, laneGap: 8, controls: 40, drawer: 144 });
-  const TIGHT = Object.freeze({ header: 44, pad: 12, gap: 8, lane: 32, laneGap: 6, controls: 36, drawer: 112 });
+  const ROOMY = Object.freeze({ header: 48, pad: 16, gap: 12, lane: 40, laneGap: 8, controls: 40, drawer: 178 });
+  const TIGHT = Object.freeze({ header: 44, pad: 12, gap: 8, lane: 32, laneGap: 6, controls: 36, drawer: 148 });
   const MIN_PAGE_H = 600;                        // below this the page scrolls and the preview keeps MIN_PREVIEW_H
   const MIN_PREVIEW_H = 360;
   const STACKED_STAGE_SHARE = 0.7;               // stacked: the stage takes at most 70vh
@@ -61334,7 +62309,7 @@ MV.def('ui/menus', ['ui/dom', 'ui/icons', 'ui/keys', 'export/subtitles', 'export
       a('lyrics.bakeTimes'),
       { sep: true }, { heading: t('menu.edit') }, a('edit.undo'), a('edit.redo'), a('edit.history'), a('palette.open'),
       { sep: true }, { heading: t('menu.view') }, c('pref.safeArea'), { label: t('menu.quality'), sub: () => quality },
-      c('pref.reduceFlash'), c('pref.calmCamera'), c('view.foldSteps'), c('pref.autoFold'), c('pref.seekOnSelect'), c('pref.follow'),
+      c('pref.reduceFlash'), c('pref.calmCamera'), c('pref.cameraWireframe'), c('view.foldSteps'), c('pref.autoFold'), c('pref.seekOnSelect'), c('pref.follow'),
       { sep: true }, { heading: t('menu.settings') }, c('pref.singleKeys'), c('pref.autoplay'), c('pref.ai'), a('file.clearDevice'),
       { sep: true }, { heading: t('menu.help') }, a('help.keys'), a('help.syntax'), a('help.about'),
       { sep: true }, { heading: t('menu.lang') }, a('app.lang'),
@@ -61396,7 +62371,7 @@ MV.def('ui/menus', ['ui/dom', 'ui/icons', 'ui/keys', 'export/subtitles', 'export
     const def = (id, run, extra) => {
       if (!app.actions.has(id)) app.actions.defineAction(Object.assign({ id, label: 'cmd.' + id, run }, extra || {}));
     };
-    for (const pref of ['safeArea', 'reduceFlash', 'calmCamera', 'seekOnSelect', 'follow']) {
+    for (const pref of ['safeArea', 'reduceFlash', 'calmCamera', 'cameraWireframe', 'seekOnSelect', 'follow']) {
       def('pref.' + pref, () => view.setPref(pref, !view.state.prefs[pref]), { checked: () => !!view.state.prefs[pref] });
     }
     def('view.quality', (c, a) => view.setPref('quality', a && a.q ? a.q : 'auto'), { checked: () => view.state.prefs.quality !== 'auto' });
@@ -63816,7 +64791,8 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
     // Fields that edit the document through a command instead of a pin have `path: null` and `cmd: { t, key }`;
     // read-only derived values have `path: null` and `derived`. Additive fields: `page`, `kind`/`idx` (part widgets),
     // `spec` (the ParamSpec the widget follows), `options` (choices), `scale` (display factor), `auto` (the choice
-    // offers 自動 = unpin), `labelArgs` (label params that are themselves string keys), `labelText` ({ ja, en } of a
+    // offers 自動 = unpin), `labelArgs` (label params that are themselves string keys), `labelValues` (literal numeric
+    // params such as a slot index), `labelText` ({ ja, en } of a
     // generated part parameter; its `label` is 'fld.param' = '{name}'), `param` (generated part parameters),
     // `firstCut` (the line page's 切り替え: written at the line's first cut, §6.4.6), `pinnedOnly` (a pinned parameter
     // of a part that is no longer chosen, shown as 無効), `note` (a string key shown under the row), `offClears` (a toggle
@@ -64001,6 +64977,16 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
       return out;
     }
 
+    // Selection bookmarks edit every chosen line, never the first line alone. Explicit slot rows avoid the element
+    // page's single selected index while retaining the same part, hide and parameter widgets and pin semantics.
+    function multiListFields(kind) {
+      return [F({ path: kind + '.count', widget: 'number', label: 'fld.count', spec: SPEC.count })]
+        .concat([0, 1, 2].flatMap((i) => listFields(kind, i).map((f) => Object.assign({}, f, {
+          when: null,
+          ...(f.widget === 'part' ? { label: 'crumb.' + kind, labelValues: { k: i + 1 } } : {}),
+        }))));
+    }
+
     // Face rows only for scripts in use (ja and latin always).
     const faceWhen = (script) => (ctx) => script === 'ja' || script === 'latin' || ctx.scripts.has(script);
     const faceFields = [];
@@ -64162,13 +65148,15 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
       ],
       lines: [
         sec('multi', true, [], { custom: 'multi' }),
-        sec('direction', true, directionFields()),
+        sec('direction', true, directionFields({ camera: true })),
         // An area selection (区画, DESIGN_2_1 §6.5) adds its section camera; its runs are split at the area's edges. With
         // it, カメラ EXTREME for the area (a line pin on every selected line, DESIGN_EXTREME §2.6).
         sec('rig', true, rigFields().concat(extremeFields({ scopes: LINE })), { when: hasArea }),
         // 背景 for every selected line at once (a block: 無地 for words only, or another picture)
         sec('ground', true, [partField('ground', 'kind.ground')]),
         sec('colortype', false, [textFaceField(), textInkField(), textStyleField(), textScaleField()]),
+        sec('multiornament', false, multiListFields('ornament')),
+        sec('multifilter', false, multiListFields('filter')),
         sec('shift', true, [], { custom: 'shift' }),
       ],
       cut: [
@@ -64203,6 +65191,8 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
           F({ path: 'el.text.hide', widget: 'toggle', label: 'fld.hide' }),
           sharedField('arrive', 'order', 'fld.order'), sharedField('arrive', 'each', 'fld.each')].concat(textMediaFields())),
         sec('tune', false, [], { params: [{ kind: 'arrange' }, { kind: 'arrive' }, { kind: 'dwell' }, { kind: 'depart' }] }),
+        // The bookmark opens the picker directly; its parameters stay in their original tuning section above.
+        sec('layout', false, [partField('arrange', 'kind.arrange', { expandParams: false })]),
       ],
       'el.ornament': [
         sec('list', true, [F({ path: 'ornament.count', widget: 'number', label: 'fld.count', spec: SPEC.count }),
@@ -64238,7 +65228,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
 
     // 行 › 演出 (§6.4.6; DESIGN_2_1 §6.5): 緩急 after 入り and 抜け (the curve widget), 動きの速さ, カメラワーク; advanced:
     // 出方の緩急, この行の季節, この行で使わない部品.
-    function directionFields() {
+    function directionFields(extra) {
       return [
         partField('arrange', 'kind.arrange'),
         partField('arrive', 'kind.arrive'),
@@ -64248,6 +65238,13 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
         partField('dwell', 'kind.dwell'), sharedField('dwell', 'amount', 'fld.amount'),
         partField('depart', 'kind.depart'), sharedField('depart', 'dur', 'fld.dur'), sharedField('depart', 'ease', 'fld.speedCurve'),
         speedField(), shotField(),
+        ...(extra && extra.camera ? [
+          F({ path: 'cam.zoom', widget: 'number', label: 'fld.camZoom', spec: SPEC.camZoom, scale: 100 }),
+          F({ path: 'cam.curve', widget: 'curve', label: 'fld.camCurve', spec: SPEC.curve }),
+          F({ path: 'cam.follow', widget: 'number', label: 'fld.camFollow', spec: SPEC.follow, scale: 100, basic: false }),
+          partField('lens', 'fld.lensMove'),
+          ...rigFields().map((f) => Object.assign({}, f, { when: (ctx) => !ctx.area })),
+        ] : []),
         // §6.4.6: the transition into the line's first cut (a line-scope seam pin would change every cut boundary).
         partField('seam', 'fld.seamIntoLine', { firstCut: true }),
         orientField(),
@@ -64452,7 +65449,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
       const out = [];
       for (const f of fields) {
         out.push(f);
-        if (f.widget !== 'part' || !SLOT_KINDS.includes(f.kind)) continue;
+        if (f.widget !== 'part' || f.expandParams === false || !SLOT_KINDS.includes(f.kind)) continue;
         const idx = f.idx === undefined ? null : f.idx;
         const key = agreedKey(f.firstCut ? Object.assign({}, ctx, { cuts: firstCuts(ctx) }) : ctx, f.path);
         // a part with a photo or video param gets the media rows (ui/media_widgets: source, depth, crop, video rows)
@@ -64962,6 +65959,55 @@ MV.def('ui/ai_board', ['ui/dom', 'ui/icons', 'planner/areas', 'ui/fields', 'ui/a
   }
 
   return { rowsOf, stateOf, linesText, mount, STATES };
+});
+/* 文字PVメーカー v2 — original work. Scope-preserving inspector bookmarks. */
+MV.def('ui/inspector_nav', ['ui/selection'], (S) => {
+  'use strict';
+
+  const KEYS = Object.freeze(['camera', 'layout', 'text', 'background', 'ornament', 'effects', 'timing', 'media', 'scope']);
+
+  // Keep a selected cut's exact pin scope, including a line with only one cut. Walking up via Selection.up would
+  // deliberately collapse that cut to its line; a settings bookmark must not broaden the edit instead.
+  function parent(sel) {
+    if (sel.level !== 'el') return sel;
+    if (sel.scope === 'work') return S.WORK;
+    if (sel.scope.startsWith('line/')) return { level: 'line', ids: [sel.scope.slice(5)] };
+    return { level: 'cut', key: sel.scope.slice(4) };
+  }
+
+  function target(key, selection, plan, doc) {
+    if (!KEYS.includes(key)) return null;
+    const current = S.validate(selection, plan, doc), base = parent(current);
+    const multi = base.level === 'line' && (base.ids.length > 1 || !!base.area);
+    const scope = current.level === 'el' ? current.scope : base.level === 'cut' ? 'cut/' + base.key
+      : base.level === 'line' ? 'line/' + base.ids[0] : 'work';
+    const element = (el) => ({ level: 'el', scope, el,
+      ...(['ornament', 'filter'].includes(el) ? { idx: current.level === 'el' && current.el === el ? current.idx || 0 : 0 } : {}) });
+    const out = (sel, section, slot) => ({ sel, section, slot });
+    if (key === 'scope') return out(base, null, null);
+    // The media library is project-wide. Other tabs keep using the bookmark's original selection after visiting it.
+    if (key === 'media') return out(S.WORK, 'media', null);
+    if (key === 'camera') return multi ? out(base, 'direction', 'cam.shot') : out(element('lens'), 'camwork', 'cam.shot');
+    if (key === 'layout') {
+      if (base.level === 'line') return out(base, 'direction', 'arrange');
+      if (base.level === 'cut') return out(element('text'), 'layout', 'arrange');
+      return out(element('text'), 'layout', 'arrange');
+    }
+    if (key === 'text') return multi ? out(base, 'colortype', 'text.face') : out(element('text'), 'text', 'text.face');
+    if (key === 'background') return multi ? out(base, 'ground', 'ground') : out(element('ground'), 'ground', 'ground');
+    if (key === 'ornament') return multi ? out(base, 'multiornament', 'ornament.count') : out(element('ornament'), 'list', 'ornament.count');
+    if (key === 'effects') return multi ? out(base, 'multifilter', 'filter.count') : out(element('filter'), 'list', 'filter.count');
+    if (key === 'timing') {
+      // A sole cut has no independent cut-start setting: its line owns that same start/end interval.
+      const sole = base.level === 'cut' && plan && plan.lines && plan.lines.find((l) => l.cuts.length === 1 && l.cuts[0] === base.key);
+      if (sole) return out({ level: 'line', ids: [sole.id] }, 'time', 'start');
+      return out(base, multi ? 'shift' : base.level === 'work' ? 'timing' : 'time',
+        multi ? null : base.level === 'work' ? 'readRate' : base.level === 'line' ? 'start' : null);
+    }
+    return null;
+  }
+
+  return { KEYS, parent, target };
 });
 /* 文字PVメーカー v2 — original work. Lyric editor: a controlled textarea over a tinted mirror layer, with a gutter of times, locks, pins and warnings. */
 MV.def('ui/lyric_editor', ['ui/dom', 'ui/icons', 'ui/selection', 'i18n/t', 'core/lyrics', 'planner/areas'], (dom, I, S, T, L, AREAS) => {
@@ -68190,7 +69236,7 @@ MV.def('ui/media_page', ['ui/dom', 'ui/icons', 'i18n/t', 'core/media', 'ui/media
   return { factsText, placeText, libraryRows, assetPage, pickerPage, openMenu };
 });
 /* 文字PVメーカー v2 — original work. Part browser: tile pages with try-on, filter pages ("use only these"), thumbnails via engine.thumb, マイ素材, the 写真・動画 tab, tile groups (DESIGN §6.4.12; DESIGN_2_1 §6.9, §11.7.5; DESIGN_EXTREME §2.6). */
-MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output', 'ui/media_widgets', 'ui/media_io', 'core/shot'], (dom, I, OUT, MW, MI, SHOT) => {
+MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output', 'ui/media_widgets', 'ui/media_io', 'core/shot', 'ui/camera_preview'], (dom, I, OUT, MW, MI, SHOT, CP) => {
   'use strict';
 
   const { h } = dom;
@@ -68362,9 +69408,11 @@ MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output', 'ui/media_widgets'
   // Grid navigation: the tiles in rows by their offsetTop. With tile groups (a heading starts a new row) ↑ ↓ go to the
   // nearest tile of the row above or below.
   function moveFocus(grid, dx, dy) {
-    const tiles = [...grid.querySelectorAll('.pb-tile:not([hidden])')];
+    const tiles = [...grid.querySelectorAll('.pb-tile:not([hidden])')].filter((x) => !x.closest('[hidden]'));
     if (!tiles.length) return;
-    const at = Math.max(0, tiles.indexOf(document.activeElement));
+    const focused = document.activeElement;
+    const card = focused && focused.closest ? focused.closest('.pb-camera-item') : null;
+    const at = Math.max(0, tiles.indexOf(card ? card.querySelector('.pb-tile') : focused));
     const cols = Math.max(1, tiles.filter((x) => x.offsetTop === tiles[0].offsetTop).length);
     let to = Math.max(0, Math.min(tiles.length - 1, at + dx + dy * cols));
     if (dy && grid.querySelector('.pb-group')) {
@@ -68412,6 +69460,7 @@ MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output', 'ui/media_widgets'
     const reg = app.reg;
     const thumbs = app.thumbs;
     const listed = Array.isArray(o.keys);
+    const cameraGrid = CP.KINDS.includes(o.kind);
     let tab = o.kind === 'theme' || o.kind === 'mood' || (listed && !o.alts) ? 'all' : 'rec';
     let query = '';
     let tag = null;
@@ -68420,6 +69469,8 @@ MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output', 'ui/media_widgets'
     let alts = null;                          // { plan, keys | null }: the おすすめ order explain() gave for that plan
     let altsJob = null;
     let destroyed = false;
+    let cameraPreview = null;
+    const cameraItems = new Map();
     let tiles = new Map();                    // part key → its tile (the 自動 / なし tiles lead the grid)
     let leading = [];
     let emptyNote = null;
@@ -68428,7 +69479,7 @@ MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output', 'ui/media_widgets'
     const search = h('input', { class: 'text-input pb-search', type: 'search', placeholder: t('pb.search'), 'aria-label': t('pb.search'),
       spellcheck: false });
     const tags = h('div', { class: 'chips pb-tags', role: 'group', 'aria-label': t('pb.tags') });
-    const grid = h('div', { class: 'pb-grid', role: 'listbox', 'aria-label': o.label });
+    const grid = h('div', { class: 'pb-grid', role: cameraGrid ? 'group' : 'listbox', 'aria-label': o.label });
     const el = h('div', { class: 'pb-page' }, tabs, search, tags, grid);
 
     const all = listed ? o.keys.slice() : keysFor(reg, o.kind, o).filter((k) => !isDerivedMedia(reg, k));
@@ -68510,15 +69561,34 @@ MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output', 'ui/media_widgets'
       const current = key !== null && isCurrent(key);
       const el2 = h('button', {
         class: ['pb-tile', current ? 'is-current' : '', extra && extra.dim ? 'is-dim' : '', extra && extra.group ? 'pb-in-group' : ''],
-        type: 'button', role: 'option', 'aria-selected': String(current), 'data-key': key === null ? '' : key,
+        type: 'button', role: cameraGrid ? null : 'option', 'aria-selected': cameraGrid ? null : String(current),
+        'aria-pressed': cameraGrid ? String(current) : null, 'data-key': key === null ? '' : key,
         title: extra && extra.blurb ? extra.blurb : label, 'aria-describedby': extra && extra.describedBy ? extra.describedBy : null,
         'data-group': extra && extra.group ? extra.group : null,
       }, canvas, h('span', { class: 'pb-name', text: label }),
       extra && extra.badge ? h('span', { class: 'pb-badge', text: extra.badge }) : null,
       current ? h('span', { class: 'pb-cur' }, I.icon('check', { size: 14 })) : null);
       if (key === null) el2.classList.add('pb-auto');
+      if (CP.supports(kindOf(key), key)) {
+        const preview = h('button', { class: 'chip-btn pb-camera-preview', type: 'button',
+          'data-preview-kind': kindOf(key), 'data-preview-key': key,
+          'aria-haspopup': 'dialog',
+          'aria-label': t('camera.sample.openNamed', { name: label }),
+          on: { click: (ev) => {
+            ev.stopPropagation();
+            stopTry(); if (stopAnim) { stopAnim(); stopAnim = null; }
+            if (cameraPreview) cameraPreview.close();
+            cameraPreview = CP.open(app, o.previewRef ? o.previewRef(key) : { kind: kindOf(key), key }, { name: label, blurb: extra && extra.blurb });
+            const active = cameraPreview;
+            if (active) active.done.then(() => { if (cameraPreview === active) cameraPreview = null; });
+          }, focusin: () => { stopTry(); if (stopAnim) { stopAnim(); stopAnim = null; } },
+          pointerover: () => { stopTry(); if (stopAnim) { stopAnim(); stopAnim = null; } } },
+        }, I.icon('play', { size: 12 }), t('camera.sample.open'));
+        cameraItems.set(el2, h('div', { class: 'pb-camera-item', role: 'presentation' }, el2, preview));
+      }
       return el2;
     }
+    const holderOf = (tileEl) => cameraItems.get(tileEl) || tileEl;
 
     // A tile's thumbnail is drawn the first time the tile shows (hidden tiles cost nothing).
     let drawn = new Set();
@@ -68617,6 +69687,7 @@ MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output', 'ui/media_widgets'
     // Every tile of the page, for the document and plan as they are now.
     function build() {
       buildMedia();
+      cameraItems.clear();
       leading = [tile(null, o.allowNone ? t('pb.none') : t('pb.auto'), { blurb: t('pb.autoTip') })];
       tiles = new Map();
       drawn = new Set();
@@ -68673,15 +69744,15 @@ MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output', 'ui/media_widgets'
       const shownGroups = tab === 'all' || tab === 'rec' ? groupEls.map((x) => ({ head: x.head, keys: x.g.keys.filter(matches) }))
         .filter((x) => x.keys.length) : [];
       const groupKeys = [].concat(...shownGroups.map((x) => x.keys));
-      const want = leading.concat(tab === 'mine' && makeTile ? [makeTile] : [], keys.map((k) => tiles.get(k)),
-        ...shownGroups.map((x) => [x.head].concat(x.keys.map((k) => tiles.get(k)))));
+      const want = leading.map(holderOf).concat(tab === 'mine' && makeTile ? [makeTile] : [], keys.map((k) => holderOf(tiles.get(k))),
+        ...shownGroups.map((x) => [x.head].concat(x.keys.map((k) => holderOf(tiles.get(k))))));
       if (!keys.length && !groupKeys.length && !pending()) want.push(emptyNote);
       const now = grid.children;
       if (want.length !== now.length || want.some((n, i) => now[i] !== n)) {
         const focused = grid.contains(document.activeElement) ? document.activeElement : null;
         dom.replace(grid, want);
         // A focused tile that stays keeps the focus; one that leaves hands it to 自動に戻す (never to the page).
-        if (focused && document.activeElement !== focused) dom.focus(want.includes(focused) ? focused : leading[0]);
+        if (focused && document.activeElement !== focused) dom.focus(want.some((n) => n === focused || n.contains(focused)) ? focused : leading[0]);
       }
       for (const key of keys.concat(groupKeys)) drawThumb(key, tiles.get(key));
     }
@@ -68695,6 +69766,7 @@ MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output', 'ui/media_widgets'
     // --- try-on, picking, context menu -------------------------------------------------------------------------
 
     function tryKey(key) {
+      if (cameraPreview || app.dialogs && app.dialogs.isOpen()) return;
       clearTimeout(tryTimer);
       tryTimer = setTimeout(() => {
         const doc = key === undefined ? null : o.tryDoc(key);
@@ -68725,6 +69797,7 @@ MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output', 'ui/media_widgets'
     dom.on(grid, 'focusin', '.pb-media', (ev, el2) => tryMedia(el2));
     dom.on(grid, 'click', PICKABLE, (ev, el2) => { stopTry(); o.onPick(keyOfTile(el2)); });
     dom.on(grid, 'pointerover', PICKABLE, (ev, el2) => {
+      if (cameraPreview || app.dialogs && app.dialogs.isOpen()) return;
       tryKey(keyOfTile(el2));
       if (stopAnim) stopAnim();
       const canvas = el2.querySelector('canvas');
@@ -68776,7 +69849,7 @@ MV.def('ui/part_browser', ['ui/dom', 'ui/icons', 'ui/output', 'ui/media_widgets'
         if (at) { stopTry(); o.onPick(keyOfTile(at)); return true; }
         return false;
       },
-      destroy() { destroyed = true; cancelAlts(); stopTry(); if (stopAnim) stopAnim(); },
+      destroy() { destroyed = true; if (cameraPreview) cameraPreview.close(); cancelAlts(); stopTry(); if (stopAnim) stopAnim(); },
       // A new plan (undo, a filter change …): the tiles are built again, and the focused one keeps the focus.
       refresh() {
         const at = focusedTile();
@@ -69372,7 +70445,7 @@ MV.def('ui/shot_editor', ['ui/dom', 'ui/icons', 'core/shot', 'core/curve', 'ui/c
     };
   });
 /* 文字PVメーカー v2 — original work. The stage: canvas host, DPR sizing, render loop, overlay, drill clicks, direct manipulation, try-on, compare, the keyframe markers (DESIGN_2_1 §6.7), photos and videos: the drop target, the crop overlay, decoding ahead, missing pictures and the trim peek (§11.7.1, §11.7.6–§11.7.8). */
-MV.def('ui/stage', ['ui/dom', 'ui/selection', 'ui/output', 'i18n/t', 'ui/shot_editor', 'core/media'], (dom, S, OUT, T, KE, MEDIA) => {
+MV.def('ui/stage', ['ui/dom', 'ui/selection', 'ui/output', 'i18n/t', 'ui/shot_editor', 'core/media', 'ui/camera_wireframe'], (dom, S, OUT, T, KE, MEDIA, WIRE) => {
   'use strict';
 
   const { h } = dom;
@@ -69416,7 +70489,10 @@ MV.def('ui/stage', ['ui/dom', 'ui/selection', 'ui/output', 'i18n/t', 'ui/shot_ed
     const wrap = h('div', { class: 'canvas-wrap', tabindex: '0', role: 'img', 'aria-label': t('empty.preview') },
       main, overlay, badge, lightBadge, mediaBadge, dropBox);
     const said = h('div', { class: 'sr-only', role: 'status', 'aria-live': 'polite' });
-    const area = h('div', { class: 'preview-area' }, wrap, said);
+    const wireButton = h('button', { type: 'button', class: 'btn camera-wireframe-toggle',
+      'data-camera-wireframe': 'toggle', 'aria-pressed': 'false', title: t('camera.wireframeHint'),
+      text: t('camera.wireframe'), on: { click: () => toggleCameraWireframe() } });
+    const area = h('div', { class: 'preview-area' }, wrap, said, wireButton);
     const drawer = h('div', { class: 'drawer-mount', 'data-mount': 'timeline', hidden: true },
       h('div', { class: 'placeholder small' }, h('p', { text: t('drawer.soon') })));
     stageEl.append(area, drawer);
@@ -69439,6 +70515,8 @@ MV.def('ui/stage', ['ui/dom', 'ui/selection', 'ui/output', 'i18n/t', 'ui/shot_ed
     let lastProvisional = false;
     let crop = null;                       // { target, drag, wheel } while 切り抜き › 画面で調整 is on (§11.7.6)
     let peekAt = null;                     // { id, m } while a trim handle is dragged (§11.7.7)
+    const wireCache = {};
+    let wireData = null;                  // the latest preview overlay's evaluated camera (never read by exports)
 
     // --- sizing ----------------------------------------------------------------------------------------------
 
@@ -69536,7 +70614,7 @@ MV.def('ui/stage', ['ui/dom', 'ui/selection', 'ui/output', 'i18n/t', 'ui/shot_ed
         adaptBacking(sharp ? 0 : levelOf(stats));
         mediaAfter(stats, tNow);
       }
-      drawOverlay(plan);
+      drawOverlay(plan, tNow);
       if (!peekAt) drawMediaNotes(plan, tNow);
       scheduleLabel(plan, tNow);
       if (app.view.state.playing) frame = requestAnimationFrame(tick);
@@ -69597,15 +70675,31 @@ MV.def('ui/stage', ['ui/dom', 'ui/selection', 'ui/output', 'i18n/t', 'ui/shot_ed
       octx.stroke();
     }
 
-    function drawOverlay(plan) {
+    function drawOverlay(plan, tNow) {
       const k = plan && plan.design ? overlay.width / plan.design.w : 1;
       octx.setTransform(1, 0, 0, 1, 0, 0);
       octx.clearRect(0, 0, overlay.width, overlay.height);
+      wireData = null;
+      const wireOn = !!app.view.state.prefs.cameraWireframe;
+      wireButton.setAttribute('aria-pressed', String(wireOn));
+      wireButton.disabled = !plan || !plan.lines || !plan.lines.length;
+      overlay.dataset.cameraWireframe = wireOn ? 'on' : 'off';
       if (!plan || !plan.design) return;
       const dpr = overlay.width / Math.max(1, css.w);
       if (app.view.state.prefs.safeArea) drawSafeArea(plan, k, dpr);
       const all = drawnBoxes();
       if (crop && !alt && !peekAt) { drawCrop(plan, k, dpr); return; }
+      if (wireOn && !peekAt && plan.lines && plan.lines.length) {
+        wireData = WIRE.snapshot(app.engine, plan, tNow, app.view.state.prefs.calmCamera, wireCache);
+        if (wireData) {
+          const v = wireData.current.view;
+          WIRE.draw(octx, wireData, { scale: k, dpr, width: overlay.width, height: overlay.height, boxes: all,
+            label: t('camera.wireframeMap'), status: t('camera.wireframeStatus', {
+              zoom: v.zoom.toFixed(2), roll: (v.roll * 180 / Math.PI).toFixed(1),
+              x: Math.round(v.x / plan.design.w * 100), y: Math.round(v.y / plan.design.h * 100),
+            }) });
+        }
+      }
       if (alt) { drawHighlight(all, null, k, dpr); return; }
       const { sel, cuts, boxes } = quadsFor(plan, all);
       drawHighlight(all, cuts, k, dpr);
@@ -70237,6 +71331,11 @@ MV.def('ui/stage', ['ui/dom', 'ui/selection', 'ui/output', 'i18n/t', 'ui/shot_ed
       else if (wrap.requestFullscreen) wrap.requestFullscreen();
     }
 
+    function toggleCameraWireframe() {
+      app.view.setPref('cameraWireframe', !app.view.state.prefs.cameraWireframe);
+      return app.view.state.prefs.cameraWireframe;
+    }
+
     app.view.on((changed) => {
       // プレビューの画質 takes effect at once: the backing is laid out again (not only after the next resize).
       if (changed.includes('prefs') && app.view.state.prefs.quality !== quality) {
@@ -70249,6 +71348,8 @@ MV.def('ui/stage', ['ui/dom', 'ui/selection', 'ui/output', 'i18n/t', 'ui/shot_ed
     });
     app.bus.on('plan', () => { if (!alt) invalidate(); });
     app.bus.on('shotEdit', () => invalidate());
+    // Loaded faces can change text framing under the same plan. Rebuild its camera path with those real metrics.
+    app.bus.on('fonts', () => { wireCache.plan = null; if (app.view.state.prefs.cameraWireframe) invalidate(); });
 
     // A new selection or the tap mode ends the crop overlay, and so does a new plan in which its element no longer shows
     // its picture (an undo, another part: the target's alive()), before a key could pin a crop nothing shows.
@@ -70261,6 +71362,8 @@ MV.def('ui/stage', ['ui/dom', 'ui/selection', 'ui/output', 'i18n/t', 'ui/shot_ed
       layout, invalidate, setAlt, fullscreen, focus: () => dom.focus(wrap), element: wrap,
       isDirty: () => dirty, hasAlt: () => !!alt, steppedDown: () => steppedDown,
       crop: setCrop, cropKey: () => (crop ? crop.target.key : null), peek, peeking: () => !!peekAt, marks,
+      toggleCameraWireframe, cameraWireframe: () => !!app.view.state.prefs.cameraWireframe,
+      cameraWireframeData: () => wireData,
     };
   }
 
@@ -71290,10 +72393,10 @@ MV.def('ui/tap', ['ui/dom', 'ui/icons', 'ui/keys', 'ui/selection', 'i18n/t'], (d
 
   return { mount, PREROLL };
 });
-/* 文字PVメーカー v2 — original work. Timeline drawer: beat / song / line / cut rows, drags that write time pins, zoom, snap, keyboard nudges, a11y proxies, area bands and key diamonds (DESIGN §6.4.13; DESIGN_2_1 §6.7, §6.8). */
-MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/t', 'core/paths', 'core/doc', 'planner/areas',
+/* 文字PVメーカー v2 — original work. Timeline drawer: beat / song / line / cut / camera rows, time-pin drags, shared overview zoom, snap, keyboard nudges, area bands and key diamonds (DESIGN §6.4.13; DESIGN_2_1 §6.7, §6.8). */
+MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/t', 'core/paths', 'core/doc', 'core/shot', 'planner/areas',
   'ui/extreme'],
-  (dom, I, S, F, T, P, D, AREAS, XU) => {
+  (dom, I, S, F, T, P, D, SHOT, AREAS, XU) => {
   'use strict';
 
   const { h } = dom;
@@ -71351,6 +72454,64 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
   // highlighted(hl) → the set of line ids view.highlight names (one id, or an area's list).
   function highlighted(hl) { return new Set(Array.isArray(hl) ? hl : hl ? [hl] : []); }
 
+  // One window is shared by the detailed tracks and the full-song navigator. Even a short song has a usable window.
+  function windowBounds(d, next) {
+    d = Number.isFinite(d) && d > 0 ? d : 1;
+    const requested = next && Number.isFinite(next.span) ? next.span : 0;
+    const span = requested > 0 ? Math.max(Math.min(MIN_SPAN, d), Math.min(requested, d)) : d;
+    const at = next && Number.isFinite(next.t0) ? next.t0 : 0;
+    return { t0: Math.max(0, Math.min(at, d - span)), span };
+  }
+
+  function moveWindow(d, initial, kind, delta) {
+    d = Number.isFinite(d) && d > 0 ? d : 1;
+    const w = windowBounds(d, initial), end = w.t0 + w.span, min = Math.min(MIN_SPAN, d);
+    delta = Number.isFinite(delta) ? delta : 0;
+    if (kind === 'start') {
+      const t0 = Math.max(0, Math.min(end - min, w.t0 + delta));
+      return windowBounds(d, { t0, span: end - t0 });
+    }
+    if (kind === 'end') {
+      const t1 = Math.min(d, Math.max(w.t0 + min, end + delta));
+      return windowBounds(d, { t0: w.t0, span: t1 - w.t0 });
+    }
+    return windowBounds(d, { t0: w.t0 + delta, span: w.span });
+  }
+
+  // The outline keeps the true song scale. Controls retain usable hit areas even for a two-second view of an hour.
+  function navigatorGeometry(d, next, width) {
+    d = Number.isFinite(d) && d > 0 ? d : 1;
+    width = Number.isFinite(width) && width > 0 ? width : 1;
+    const w = windowBounds(d, next), left = w.t0 / d * width, span = w.span / d * width;
+    const handle = Math.min(12, width), panWidth = Math.min(width, Math.max(40, span - 24));
+    const bound = (x, size) => Math.max(0, Math.min(x, width - size));
+    return { left, width: span, narrow: span < 64,
+      start: bound(left - handle / 2, handle) - left,
+      end: bound(left + span - handle / 2, handle) - left,
+      pan: { left: bound(left + span / 2 - panWidth / 2, panWidth) - left, width: panWidth } };
+  }
+
+  function trackRows(height) {
+    const body = Math.max(40, height - RULER_PX);
+    const beat = Math.round(body * 0.08), song = Math.round(body * 0.17), line = Math.round(body * 0.27), cut = Math.round(body * 0.21);
+    return { beat: [0, beat], song: [beat, beat + song], line: [beat + song, beat + song + line],
+      cut: [beat + song + line, beat + song + line + cut], camera: [beat + song + line + cut, body], ruler: [body, height] };
+  }
+
+  // A small direction hint describes the preset itself; the selected shot's dots use its fitted engine times below.
+  function shotMotion(ref) {
+    const expanded = SHOT.expandShot(ref);
+    const keys = expanded && expanded.keys;
+    if (!keys || keys.length < 2) return '·';
+    const a = keys[0], b = keys[keys.length - 1];
+    const dx = (b.ox || 0) - (a.ox || 0), dy = (b.oy || 0) - (a.oy || 0);
+    if (Math.max(Math.abs(dx), Math.abs(dy)) > 0.015) return Math.abs(dx) >= Math.abs(dy) ? (dx > 0 ? '→' : '←') : (dy > 0 ? '↓' : '↑');
+    const dz = (b.fill || b.zoom || 1) - (a.fill || a.zoom || 1);
+    if (Math.abs(dz) > 0.02) return dz > 0 ? '＋' : '−';
+    if (Math.abs((b.roll || 0) - (a.roll || 0)) > 0.5) return '↻';
+    return keys.some((k) => k.aim === 'reading') ? '↔' : '·';
+  }
+
   function mount(app, host) {
     const t = app.t;
     const snapBtn = h('button', { class: 'chip-btn tl-btn', type: 'button', 'aria-pressed': 'false' }, t('song.snap'));
@@ -71363,7 +72524,9 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
       snapBtn, bpmBtn, h('span', { class: 'tl-zoom' }, zoomOut, fit, zoomIn), h('span', { class: 'grow' }), followBtn);
     const canvas = h('canvas', { class: 'tl-canvas', 'aria-hidden': 'true' });
     const proxy = h('div', { class: 'sr-only tl-proxy', role: 'listbox', tabindex: '0', 'aria-label': t('tl.lines') });
-    const area = h('div', { class: 'tl-area' }, canvas, proxy);
+    const cameraProxy = h('div', { class: 'sr-only tl-camera-proxy', role: 'listbox', tabindex: '0', 'aria-label': t('tl.camera') });
+    const cameraLabel = h('span', { class: 'tl-camera-label', text: t('tl.camera'), title: t('tl.cameraTip') });
+    const area = h('div', { class: 'tl-area' }, canvas, proxy, cameraProxy, cameraLabel);
     const root = h('div', { class: 'timeline' }, bar, area);
     dom.replace(host, root);
 
@@ -71373,24 +72536,21 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
     let press = null;
     let focus = { lineId: null, edge: 'start', band: null }; // the edge Ctrl+←/→ nudges
     let digest = { key: null, data: null };
+    let cameraFocus = null;
+    let announcedWindow = null;
+    let windowInteraction = false;
 
     // --- geometry -----------------------------------------------------------------------------------------------
 
     const duration = () => (app.plan && app.plan.duration > 0 ? app.plan.duration : 1);
     function win() {
-      const d = duration();
-      const span = view.span > 0 ? Math.min(view.span, d) : d;
-      const t0 = Math.max(0, Math.min(view.t0, d - span));
-      return { t0, span };
+      return windowBounds(duration(), view);
     }
     const xOf = (tt) => { const w = win(); return (tt - w.t0) / w.span * W; };
     const tOf = (x) => { const w = win(); return w.t0 + x / Math.max(1, W) * w.span; };
 
     function rows() {
-      const body = Math.max(40, H - RULER_PX);
-      const beat = Math.round(body * 0.12), song = Math.round(body * 0.28), line = Math.round(body * 0.32);
-      return { beat: [0, beat], song: [beat, beat + song], line: [beat + song, beat + song + line], cut: [beat + song + line, body],
-        ruler: [body, H] };
+      return trackRows(H);
     }
 
     function layout() {
@@ -71401,6 +72561,7 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
       canvas.width = Math.round(W * dpr);
       canvas.height = Math.round(H * dpr);
       dom.setStyle(canvas, { width: W, height: H });
+      dom.setStyle(cameraLabel, { top: rows().camera[0] + 1 });
       draw();
     }
 
@@ -71578,6 +72739,41 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
       drawKeys(r);
     }
 
+    function drawCameras(r, sel) {
+      const p = app.plan;
+      const selected = new Set(S.cutsOf(sel, p));
+      const top = r[0] + 8, mid = (top + r[1]) / 2 - 1;
+      const trackKey = sel.level === 'cut' ? sel.key : selected.size === 1 ? Array.from(selected)[0] : null;
+      // Rigs run across several cuts, so their thin upper band reveals where the section camera changes.
+      for (const rig of p.rigs || []) {
+        if (!rig.rig || rig.rig.v === 'none') continue;
+        const x0 = xOf(rig.t0), x1 = xOf(rig.t1);
+        if (x1 < 0 || x0 > W) continue;
+        g.fillStyle = 'rgba(124,196,255,0.28)';
+        g.fillRect(x0, r[0] + 1, Math.max(1, x1 - x0 - 1), 6);
+        if (x1 - x0 > 150) label(t.label(SHOT.rigLabel(rig.rig.v)), Math.max(54, x0 + 4), r[0] + 4, x1 - Math.max(54, x0) - 8, COLORS.focus);
+      }
+      for (const c of p.cuts) {
+        const x0 = xOf(c.t0), x1 = xOf(c.t1);
+        if (x1 < 0 || x0 > W) continue;
+        const ref = c.slots && c.slots['cam.shot'] ? c.slots['cam.shot'].v : 'none';
+        const on = selected.has(c.key);
+        g.fillStyle = on ? 'rgba(124,196,255,0.3)' : 'rgba(124,196,255,0.1)';
+        g.fillRect(x0, top, Math.max(1, x1 - x0 - 1), r[1] - top - 2);
+        label(shotMotion(ref) + ' ' + t.label(SHOT.label(ref)), Math.max(x0, 0) + 4, mid, x1 - Math.max(x0, 0) - 8, on ? COLORS.focus : COLORS.text);
+        if (c.key !== trackKey || !app.engine || !app.engine.shotTrack) continue;
+        const track = app.engine.shotTrack(c.key);
+        if (!track || !track.keys.length) continue;
+        // Only the selected track is resolved: scrolling a long song never builds every scene just to draw a lane.
+        const y = r[1] - 4;
+        g.strokeStyle = COLORS.focus;
+        g.lineWidth = 1;
+        g.beginPath(); g.moveTo(Math.max(0, x0), y); g.lineTo(Math.min(W, x1), y); g.stroke();
+        g.fillStyle = COLORS.key;
+        for (const key of track.keys) { g.beginPath(); g.arc(xOf(key.t), y, 2, 0, Math.PI * 2); g.fill(); }
+      }
+    }
+
     // ◆ at the key times of the shot being edited (the keyframe page is open, DESIGN_2_1 §6.7).
     function keyMarks() {
       const edit = app.shotEdit;
@@ -71617,12 +72813,13 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
     }
 
     function draw() {
+      announceWindow();
       if (!W || host.hidden) return;
       g.setTransform(dpr, 0, 0, dpr, 0, 0);
       g.fillStyle = COLORS.bg;
       g.fillRect(0, 0, W, H);
       const r = rows();
-      for (const k of ['beat', 'song', 'line', 'cut']) {
+      for (const k of ['beat', 'song', 'line', 'cut', 'camera']) {
         g.fillStyle = COLORS.row;
         g.fillRect(0, r[k][0] + 1, W, r[k][1] - r[k][0] - 2);
       }
@@ -71634,6 +72831,7 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
         const sel = S.validate(app.view.state.sel, app.plan);
         drawLines(r.line, sel);
         drawCuts(r.cut, sel);
+        drawCameras(r.camera, sel);
       } else label(t('tl.empty'), 8, (r.line[0] + r.cut[1]) / 2, W - 16, COLORS.muted);
       drawRuler(r.ruler);
       const x = xOf(app.time());
@@ -71646,7 +72844,7 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
 
     function rowAt(y) {
       const r = rows();
-      for (const k of ['beat', 'song', 'line', 'cut', 'ruler']) if (y >= r[k][0] && y < r[k][1]) return k;
+      for (const k of ['beat', 'song', 'line', 'cut', 'camera', 'ruler']) if (y >= r[k][0] && y < r[k][1]) return k;
       return 'ruler';
     }
 
@@ -71666,6 +72864,10 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
       if (row === 'song') {
         const band = bandAt(bands(), tOf(x));
         return band ? { row, band } : { row };
+      }
+      if (row === 'camera') {
+        const c = p.cuts.find((cut) => x >= xOf(cut.t0) && x < xOf(cut.t1));
+        return c ? { row, cut: c, line: c.line ? p.lines.find((l) => l.id === c.line) : null } : { row };
       }
       if (row === 'line') {
         for (const l of p.lines) {
@@ -71791,7 +72993,8 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
       const pt = localPoint(ev);
       if (!press) {
         const hit = hitAt(pt.x, pt.y);
-        canvas.style.cursor = hit.edge ? 'ew-resize' : hit.line && hit.row === 'line' ? 'grab' : 'default';
+        canvas.style.cursor = hit.edge ? 'ew-resize' : hit.line && hit.row === 'line' ? 'grab' : hit.row === 'camera' && hit.cut ? 'pointer' : 'default';
+        canvas.title = hit.row === 'camera' && hit.cut ? t('tl.cameraOpen', { shot: t.label(SHOT.label(hit.cut.slots && hit.cut.slots['cam.shot'] ? hit.cut.slots['cam.shot'].v : 'none')) }) : '';
         return;
       }
       if (!press.moved && Math.abs(pt.x - press.x) < DRAG_PX) return;
@@ -71859,6 +73062,7 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
     function clickAt(p) {
       const hit = p.hit;
       if (hit.row === 'song' && hit.band) { selectBand(hit.band); return; }
+      if (hit.row === 'camera' && hit.cut) { openCamera(hit.cut.key); return; }
       if (hit.row === 'line' && hit.line) {
         app.select({ level: 'line', ids: [hit.line.id] }, { from: 'timeline', open: true });
       } else if (hit.row === 'line' && hit.cut) {
@@ -71885,6 +73089,32 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
       const d = duration();
       view.span = view.span > 0 ? Math.max(Math.min(MIN_SPAN, d), Math.min(view.span, d)) : 0;
       view.t0 = Math.max(0, Math.min(view.t0, d - (view.span || d)));
+      announceWindow();
+    }
+
+    function announceWindow() {
+      const w = win();
+      if (announcedWindow && announcedWindow.t0 === w.t0 && announcedWindow.span === w.span) return;
+      announcedWindow = w;
+      app.bus.emit('timeline.window', w);
+    }
+
+    function setWindow(next, opts) {
+      const w = windowBounds(duration(), next);
+      view = { t0: w.t0, span: w.span >= duration() ? 0 : w.span };
+      if (opts && opts.open && !app.view.state.drawer) app.view.set({ drawer: true });
+      draw();
+      return win();
+    }
+
+    function openCamera(key) {
+      const selection = { level: 'cut', key };
+      cameraFocus = key;
+      if (app.inspector && app.inspector.jumpTo) app.inspector.jumpTo('camera', selection);
+      else {
+        app.select(selection, { from: 'timeline', open: true });
+        if (app.inspector) requestAnimationFrame(() => app.inspector.openSection('camera'));
+      }
     }
 
     function zoomAround(center, factor) {
@@ -71923,7 +73153,7 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
 
     // Follow: keep the playhead in the window while playing.
     function follow(tt) {
-      if (!app.view.state.prefs.follow || !(view.span > 0)) return;
+      if (windowInteraction || !app.view.state.prefs.follow || !(view.span > 0)) return;
       const w = win();
       if (tt < w.t0 || tt > w.t0 + w.span * 0.92) { view.t0 = tt - w.span * 0.1; clampView(); }
     }
@@ -71953,6 +73183,14 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
         'aria-selected': String(focus.band === null && focus.lineId === l.id), text: proxyLabel(l, i) }))));
       if (focus.band !== null && list[focus.band]) proxy.setAttribute('aria-activedescendant', 'tl-band-' + focus.band);
       else if (focus.lineId) proxy.setAttribute('aria-activedescendant', 'tl-opt-' + focus.lineId);
+      const cuts = app.plan ? app.plan.cuts : [];
+      if (!cuts.some((c) => c.key === cameraFocus)) cameraFocus = cuts.length ? cuts[0].key : null;
+      dom.replace(cameraProxy, cuts.map((c, i) => h('div', { role: 'option', id: 'tl-cam-' + i,
+        'aria-selected': String(c.key === cameraFocus), text: t('tl.cameraProxy', { n: i + 1, t0: T.fmtTime(c.t0), t1: T.fmtTime(c.t1),
+          shot: t.label(SHOT.label(c.slots && c.slots['cam.shot'] ? c.slots['cam.shot'].v : 'none')) }) })));
+      const cameraIndex = cuts.findIndex((c) => c.key === cameraFocus);
+      if (cameraIndex >= 0) cameraProxy.setAttribute('aria-activedescendant', 'tl-cam-' + cameraIndex);
+      else cameraProxy.removeAttribute('aria-activedescendant');
     }
 
     proxy.addEventListener('focus', () => {
@@ -71965,6 +73203,20 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
       draw();
     });
     proxy.addEventListener('blur', () => draw());
+    cameraProxy.addEventListener('focus', () => { renderProxy(); draw(); });
+    cameraProxy.addEventListener('keydown', (ev) => {
+      if (ev.ctrlKey || ev.metaKey || ev.altKey || !app.plan || !app.plan.cuts.length) return;
+      const cuts = app.plan.cuts, at = Math.max(0, cuts.findIndex((c) => c.key === cameraFocus));
+      let next = at;
+      if (ev.key === 'ArrowLeft' || ev.key === 'ArrowUp') next = Math.max(0, at - 1);
+      else if (ev.key === 'ArrowRight' || ev.key === 'ArrowDown') next = Math.min(cuts.length - 1, at + 1);
+      else if (ev.key === 'Home') next = 0;
+      else if (ev.key === 'End') next = cuts.length - 1;
+      else if (ev.key === 'Enter' || ev.key === ' ') openCamera(cuts[at].key);
+      else return;
+      cameraFocus = cuts[next].key;
+      ev.preventDefault(); ev.stopPropagation(); renderProxy(); draw();
+    });
     proxy.addEventListener('keydown', (ev) => {
       if (ev.ctrlKey || ev.metaKey || ev.altKey) return;         // Ctrl+←/→ is the timeline.nudge action
       const lines = app.plan ? app.plan.lines : [];
@@ -72020,7 +73272,7 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
 
     const redraw = dom.createBatcher(() => draw());
     app.bus.on('time', (tt) => { if (!host.hidden) { follow(tt); redraw('time'); } });
-    app.bus.on('plan', () => { clampView(); if (!host.hidden) { renderProxy(); redraw('plan'); } });
+    app.bus.on('plan', () => { clampView(); renderProxy(); if (!host.hidden) redraw('plan'); });
     app.bus.on('shotEdit', () => { if (!host.hidden) redraw('keys'); });
     app.bus.on('layout', () => { if (!host.hidden) requestAnimationFrame(layout); });
     app.view.on((changed) => {
@@ -72028,10 +73280,11 @@ MV.def('ui/timeline', ['ui/dom', 'ui/icons', 'ui/selection', 'ui/fields', 'i18n/
       if (changed.some((k) => k === 'sel' || k === 'highlight' || k === 'prefs')) redraw('view');
     });
 
-    return { draw, layout, view: () => win(), focus: () => dom.focus(proxy), hitAt, xOf, tOf, rows };
+    return { draw, layout, view: () => win(), setWindow, setWindowInteraction: (active) => { windowInteraction = !!active; },
+      focus: () => dom.focus(proxy), hitAt, xOf, tOf, rows };
   }
 
-  return { mount, songMarks, edgeKind, bandAt, highlighted };
+  return { mount, songMarks, edgeKind, bandAt, highlighted, windowBounds, moveWindow, navigatorGeometry, trackRows, shotMotion };
 });
 /* 文字PVメーカー v2 — original work. Play bar: transport, time readout, lane with the area bands, look history, おまかせ, mute, drawer toggle, mode strip (DESIGN §6.4.2; DESIGN_2_1 §6.8). */
 MV.def('ui/playbar', ['ui/dom', 'ui/icons', 'ui/looks', 'ui/selection', 'ui/timeline', 'planner/areas', 'i18n/t'],
@@ -72068,11 +73321,21 @@ MV.def('ui/playbar', ['ui/dom', 'ui/icons', 'ui/looks', 'ui/selection', 'ui/time
   function mount(app, stageEl) {
     const t = app.t;
     const lane = h('canvas', { class: 'lane-canvas' });
-    const laneBox = h('div', { class: 'lane', role: 'slider', tabindex: '0', 'aria-label': t('play.lane'), title: t('play.lane'), 'aria-valuemin': '0' }, lane);
+    const windowStart = h('button', { class: 'lane-window-handle lane-window-start', type: 'button', role: 'slider',
+      'aria-label': t('tl.windowStart'), title: t('tl.windowStartTip'), 'aria-valuemin': '0' });
+    const windowEnd = h('button', { class: 'lane-window-handle lane-window-end', type: 'button', role: 'slider',
+      'aria-label': t('tl.windowEnd'), title: t('tl.windowEndTip'), 'aria-valuemin': '0' });
+    const windowPan = h('button', { class: 'lane-window-pan', type: 'button', role: 'slider', title: t('tl.windowPanTip'), 'aria-label': t('tl.windowPan') },
+      h('span', { text: t('tl.window') }));
+    const viewport = h('div', { class: 'lane-viewport' }, windowPan, windowStart, windowEnd);
+    // A separate seek slider leaves the navigator's three controls visible to assistive technology.
+    const laneBox = h('div', { class: 'lane' }, h('div', { class: 'lane-seek', role: 'slider', tabindex: '0',
+      'aria-label': t('play.lane'), title: t('play.lane'), 'aria-valuemin': '0' }, lane), viewport);
+    const seekSlider = laneBox.querySelector('.lane-seek');
     const stripText = h('span', { class: 'strip-text', role: 'status' });
     const stripActs = h('span', { class: 'strip-acts' });
     const strip = h('div', { class: 'mode-strip', hidden: true }, stripText, stripActs);
-    const laneRow = h('div', { class: 'lane-row' }, laneBox, strip);
+    const laneRow = h('div', { class: 'lane-row' }, laneBox);
 
     // 最初に戻る (⏮, the Home key's seek.edge): the way back to 0:00 a beginner can see, next to 再生
     const startBtn = h('button', { class: 'pbtn to-start', type: 'button', 'data-ctl': 'toStart' });
@@ -72087,12 +73350,12 @@ MV.def('ui/playbar', ['ui/dom', 'ui/icons', 'ui/looks', 'ui/selection', 'ui/time
     const muteBtn = h('button', { class: 'pbtn', type: 'button', 'data-act': 'audio.mute' });
     const tlBtn = h('button', { class: 'pbtn', type: 'button', 'data-act': 'timeline.toggle', 'aria-pressed': 'false',
       title: t('cmd.timeline.toggle') + ' (Shift+T)', 'aria-label': t('cmd.timeline.toggle') }, I.icon('timeline'));
+    const historyGroup = h('div', { class: 'ctl-group hist' }, prevBtn, histBtn, nextBtn);
+    const controlTools = h('div', { class: 'ctl-group ctl-tools' }, muteBtn, tlBtn);
     const controls = h('div', { class: 'controls', role: 'toolbar', 'aria-label': t('play.toolbar') },
       h('div', { class: 'ctl-group' }, startBtn, playBtn, timeBtn, timeInput),
       h('span', { class: 'grow' }),
-      h('div', { class: 'ctl-group hist' }, prevBtn, histBtn, nextBtn),
-      omakase,
-      h('div', { class: 'ctl-group' }, muteBtn, tlBtn));
+      historyGroup, omakase, strip, controlTools);
     stageEl.append(laneRow, controls);
 
     const lctx = lane.getContext('2d');
@@ -72102,6 +73365,8 @@ MV.def('ui/playbar', ['ui/dom', 'ui/icons', 'ui/looks', 'ui/selection', 'ui/time
     let timeChars = 0;
     let flashTimer = 0;
     let flashing = null;
+    let stripState = null;
+    let stripKey = '';
 
     dom.on(controls, 'click', '[data-act]', (ev, b) => app.actions.run(b.dataset.act, { from: 'playbar' }));
     startBtn.addEventListener('click', () => app.actions.run('seek.edge', { to: 'start', from: 'playbar' }));
@@ -72136,14 +73401,19 @@ MV.def('ui/playbar', ['ui/dom', 'ui/icons', 'ui/looks', 'ui/selection', 'ui/time
       return Math.max(0, Math.min(d, (ev.clientX - r.left) / Math.max(1, r.width) * d));
     }
     let scrubbing = false;
+    let scrubPointer = null;
     laneBox.addEventListener('pointerdown', (ev) => {
-      if (ev.button !== 0) return;
+      if (ev.button !== 0 || scrubbing) return;
       scrubbing = true;
+      scrubPointer = ev.pointerId;
       laneBox.setPointerCapture(ev.pointerId);
       app.seek(timeAt(ev));
     });
-    laneBox.addEventListener('pointermove', (ev) => { if (scrubbing) app.seek(timeAt(ev)); });
-    laneBox.addEventListener('pointerup', () => { scrubbing = false; });
+    laneBox.addEventListener('pointermove', (ev) => { if (scrubbing && ev.pointerId === scrubPointer) app.seek(timeAt(ev)); });
+    const endScrub = (ev) => { if (ev && scrubPointer !== null && ev.pointerId !== scrubPointer) return; scrubbing = false; scrubPointer = null; };
+    laneBox.addEventListener('pointerup', endScrub);
+    laneBox.addEventListener('pointercancel', endScrub);
+    laneBox.addEventListener('lostpointercapture', endScrub);
     laneBox.addEventListener('dblclick', (ev) => {
       const tt = timeAt(ev);
       const plan = app.plan;
@@ -72161,6 +73431,104 @@ MV.def('ui/playbar', ['ui/dom', 'ui/icons', 'ui/looks', 'ui/selection', 'ui/time
       const plan = app.plan;
       return plan && plan.duration > 0 ? plan.duration : 1;
     }
+
+    // The outlined window is the detailed timeline's current view. Handles resize it; its lower strip pans it.
+    let windowPress = null;
+    function currentWindow() { return app.timeline ? app.timeline.view() : { t0: 0, span: duration() }; }
+    function updateViewport() {
+      const d = duration(), w = currentWindow(), end = w.t0 + w.span;
+      const geometry = TL.navigatorGeometry(d, w, Math.max(1, lane.getBoundingClientRect().width));
+      viewport.hidden = !app.plan || !app.plan.cuts.length;
+      dom.setStyle(viewport, { left: w.t0 / d * 100 + '%', width: w.span / d * 100 + '%' });
+      viewport.dataset.zoomed = String(w.span < d - 0.001);
+      viewport.dataset.narrow = String(geometry.narrow);
+      dom.setStyle(windowStart, { left: geometry.start, right: 'auto' });
+      dom.setStyle(windowEnd, { left: geometry.end, right: 'auto' });
+      dom.setStyle(windowPan, { left: geometry.pan.left, width: geometry.pan.width, right: 'auto' });
+      windowStart.setAttribute('aria-valuemax', String(Math.max(0, end - Math.min(2, d))));
+      windowStart.setAttribute('aria-valuenow', String(w.t0));
+      windowStart.setAttribute('aria-valuetext', T.fmtTime(w.t0));
+      windowEnd.setAttribute('aria-valuemin', String(Math.min(d, w.t0 + Math.min(2, d))));
+      windowEnd.setAttribute('aria-valuemax', String(d));
+      windowEnd.setAttribute('aria-valuenow', String(end));
+      windowEnd.setAttribute('aria-valuetext', T.fmtTime(end));
+      windowPan.setAttribute('aria-label', t('tl.windowRange', { t0: T.fmtTime(w.t0), t1: T.fmtTime(end) }));
+      windowPan.setAttribute('aria-valuemin', '0');
+      windowPan.setAttribute('aria-valuemax', String(Math.max(0, d - w.span)));
+      windowPan.setAttribute('aria-valuenow', String(w.t0));
+      windowPan.setAttribute('aria-valuetext', T.fmtTime(w.t0));
+    }
+    function applyWindow(next, open) {
+      if (!app.timeline) return;
+      const w = currentWindow();
+      app.timeline.setWindow(next, { open: !!open && (Math.abs(w.t0 - next.t0) > 0.000001 || Math.abs(w.span - next.span) > 0.000001) });
+      updateViewport();
+    }
+    function endWindow(cancelled) {
+      const p = windowPress;
+      if (!p) return;
+      windowPress = null;
+      if (cancelled) applyWindow(p.initial, false);
+      if (app.timeline) app.timeline.setWindowInteraction(false);
+      if (p.control.hasPointerCapture(p.pointer)) p.control.releasePointerCapture(p.pointer);
+      viewport.classList.remove('is-dragging');
+    }
+    function windowControl(control, kind) {
+      control.addEventListener('pointerdown', (ev) => {
+        if (ev.button !== 0 || !app.timeline || windowPress) return;
+        ev.preventDefault(); ev.stopPropagation();
+        control.focus({ preventScroll: true });
+        windowPress = { control, kind, pointer: ev.pointerId, x: ev.clientX, initial: currentWindow(), moved: false };
+        app.timeline.setWindowInteraction(true);
+        control.setPointerCapture(ev.pointerId);
+      });
+      control.addEventListener('pointermove', (ev) => {
+        const p = windowPress;
+        if (!p || p.pointer !== ev.pointerId) return;
+        ev.stopPropagation();
+        if (!p.moved && Math.abs(ev.clientX - p.x) < 4) return;
+        p.moved = true;
+        viewport.classList.add('is-dragging');
+        const delta = (ev.clientX - p.x) / Math.max(1, lane.getBoundingClientRect().width) * duration();
+        applyWindow(TL.moveWindow(duration(), p.initial, kind, delta), true);
+      });
+      control.addEventListener('pointerup', (ev) => {
+        const p = windowPress;
+        if (!p || p.pointer !== ev.pointerId) return;
+        ev.stopPropagation();
+        if (kind === 'pan' && !p.moved) app.seek(timeAt(ev));
+        endWindow(false);
+      });
+      control.addEventListener('pointercancel', (ev) => { ev.stopPropagation(); if (windowPress && windowPress.pointer === ev.pointerId) endWindow(true); });
+      control.addEventListener('lostpointercapture', () => endWindow(true));
+      control.addEventListener('dblclick', (ev) => { ev.stopPropagation(); applyWindow({ t0: 0, span: duration() }, true); });
+      control.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Escape' && windowPress) { endWindow(true); ev.preventDefault(); ev.stopPropagation(); return; }
+        if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+        if (ev.key === ' ' || ev.key === 'Enter') { ev.preventDefault(); ev.stopPropagation(); return; }
+        const w = currentWindow(), d = duration(), step = Math.max(0.1, d / 100) * (ev.shiftKey ? 10 : 1);
+        let delta;
+        if (ev.key === 'ArrowLeft' || ev.key === 'ArrowDown') delta = -step;
+        else if (ev.key === 'ArrowRight' || ev.key === 'ArrowUp') delta = step;
+        else if (ev.key === 'Home') delta = -d;
+        else if (ev.key === 'End') delta = d;
+        else return;
+        applyWindow(TL.moveWindow(d, w, kind, delta), true);
+        ev.preventDefault(); ev.stopPropagation();
+      });
+    }
+    windowControl(windowStart, 'start');
+    windowControl(windowEnd, 'end');
+    windowControl(windowPan, 'pan');
+    seekSlider.addEventListener('keydown', (ev) => {
+      if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+      let value;
+      if (ev.key === 'Home') value = 0;
+      else if (ev.key === 'End') value = duration();
+      else if (['ArrowLeft', 'ArrowDown', 'ArrowRight', 'ArrowUp'].includes(ev.key)) value = app.time() + (ev.key === 'ArrowLeft' || ev.key === 'ArrowDown' ? -1 : 1) * (ev.shiftKey ? 10 : 1);
+      else return;
+      app.seek(value); ev.preventDefault(); ev.stopPropagation();
+    });
 
     function layout(res) {
       const st = res.rects.stage;
@@ -72181,14 +73549,20 @@ MV.def('ui/playbar', ['ui/dom', 'ui/icons', 'ui/looks', 'ui/selection', 'ui/time
     // width changed (its rect, shown buttons, texts).
     function fit() {
       const key = [sizeKey, histBtn.hidden, histBtn.textContent, muteBtn.hidden,
-        omakase.querySelector('.omakase-key').textContent, timeBtn.textContent.length].join('|');
+        omakase.querySelector('.omakase-key').textContent, timeBtn.textContent.length, stripKey, !!stripState].join('|');
       if (key === fitKey) return;
       fitKey = key;
       let level = 0;
+      controls.dataset.modeCompact = 'false';
       controls.dataset.fit = '0';
       while (level < FIT_MAX && controls.scrollWidth > controls.clientWidth + 0.5) {
         level += 1;
         controls.dataset.fit = String(level);
+      }
+      // On narrow screens, keep the mode's actions and transport usable before showing secondary controls.
+      if (stripState && controls.scrollWidth > controls.clientWidth + 0.5) {
+        controls.dataset.modeCompact = 'true';
+        if (controlTools.contains(document.activeElement) || document.activeElement === startBtn) dom.focus(playBtn);
       }
     }
 
@@ -72241,6 +73615,7 @@ MV.def('ui/playbar', ['ui/dom', 'ui/icons', 'ui/looks', 'ui/selection', 'ui/time
     }
 
     function drawLane() {
+      updateViewport();
       const W = lane.width, H = lane.height;
       const dpr = W / Math.max(1, lane.clientWidth || W);
       const plan = app.plan;
@@ -72292,9 +73667,9 @@ MV.def('ui/playbar', ['ui/dom', 'ui/icons', 'ui/looks', 'ui/selection', 'ui/time
       lctx.fillRect(Math.round(tp - dpr), 0, Math.max(2, Math.round(2 * dpr)), H);
       lctx.beginPath();
       lctx.moveTo(tp - 5 * dpr, 0); lctx.lineTo(tp + 5 * dpr, 0); lctx.lineTo(tp, 6 * dpr); lctx.closePath(); lctx.fill();
-      laneBox.setAttribute('aria-valuemax', String(Math.round(d * 100) / 100));
-      laneBox.setAttribute('aria-valuenow', String(Math.round(app.time() * 100) / 100));
-      laneBox.setAttribute('aria-valuetext', T.fmtTime(app.time()));
+      seekSlider.setAttribute('aria-valuemax', String(Math.round(d * 100) / 100));
+      seekSlider.setAttribute('aria-valuenow', String(Math.round(app.time() * 100) / 100));
+      seekSlider.setAttribute('aria-valuetext', T.fmtTime(app.time()));
     }
 
     // --- controls ----------------------------------------------------------------------------------------------
@@ -72361,14 +73736,32 @@ MV.def('ui/playbar', ['ui/dom', 'ui/icons', 'ui/looks', 'ui/selection', 'ui/time
     // --- mode strip (tap / try-on) and flashed messages --------------------------------------------------------
 
     function updateStrip() {
-      const st = flashing || (app.modeStrip ? app.modeStrip() : null);
+      const st = (app.modeStrip ? app.modeStrip() : null) || flashing;
+      stripState = st;
       strip.hidden = !st;
-      laneBox.hidden = !!st;
-      if (!st) return;
-      stripText.textContent = st.text;
-      dom.replace(stripActs, (st.actions || []).map((a) => h('button', { class: 'btn small', type: 'button',
-        on: { click: a.run } }, a.label)));
+      laneBox.hidden = false;
+      historyGroup.hidden = !!st;
+      omakase.hidden = !!st;
+      controls.dataset.modeActive = String(!!st);
+      if (st && (historyGroup.contains(document.activeElement) || document.activeElement === omakase)) dom.focus(playBtn);
+      if (!st) {
+        if (strip.contains(document.activeElement)) dom.focus(playBtn);
+        stripKey = '';
+        fit();
+        return;
+      }
+      if (stripText.textContent !== st.text) stripText.textContent = st.text;
+      stripText.title = st.text;
+      const key = JSON.stringify([st.kind || 'mode', st.text, (st.actions || []).map((a) => a.label)]);
+      if (key !== stripKey) {
+        const hadFocus = stripActs.contains(document.activeElement);
+        dom.replace(stripActs, (st.actions || []).map((a, i) => h('button', { class: 'btn small', type: 'button',
+          on: { click: () => { const action = stripState && stripState.actions && stripState.actions[i]; if (action) action.run(); } } }, a.label)));
+        if (hadFocus) dom.focus(stripActs.querySelector('button') || playBtn);
+      }
+      stripKey = key;
       strip.dataset.kind = st.kind || 'mode';
+      fit();
     }
 
     function flash(text, ms) {
@@ -72381,7 +73774,8 @@ MV.def('ui/playbar', ['ui/dom', 'ui/icons', 'ui/looks', 'ui/selection', 'ui/time
     function onTime() { updateTime(); updatePlay(); drawLane(); }
 
     app.bus.on('time', onTime);
-    app.bus.on('plan', () => { drawLane(); updateControls(); });
+    app.bus.on('timeline.window', updateViewport);
+    app.bus.on('plan', () => { if (windowPress) endWindow(true); endScrub(); drawLane(); updateControls(); });
     app.bus.on('side', updateControls);
     app.bus.on('focus', updateControls);
     app.view.on((changed) => {
@@ -73536,6 +74930,7 @@ MV.def('ui/view', ['ui/layout', 'ui/selection'], (L, S) => {
     reduceFlash: false,       // 点滅を抑える (preview only)
     calmCamera: false,        // 激しいカメラを抑える (preview only, DESIGN_EXTREME §3.6; first run: the OS reduced-motion setting)
     safeArea: false,          // 安全枠
+    cameraWireframe: false,   // カメラの範囲と軌道 (preview overlay only; never part of the document/export)
     ai: true,                 // AIを使う
     quality: 'auto',          // プレビューの画質 auto | smooth | sharp
     muted: false,
@@ -76159,8 +77554,8 @@ MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/a
 /* 文字PVメーカー v2 — original work. The inspector (詳細): crumbs, level header, sections from FIELDS, field rows, sub-pages (DESIGN §6.4.4–§6.4.9, §6.6; DESIGN_2_1 §6.5–§6.9). */
 MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/part_browser', 'ui/selection', 'ui/looks',
   'ui/output', 'i18n/t', 'core/paths', 'core/pins', 'core/shot', 'planner/areas', 'ui/shot_editor', 'ui/material_page',
-  'ui/media_page', 'ui/media_widgets', 'ui/media_io', 'ui/extreme'],
-(dom, I, F, W, PB, S, LK, OUT, T, P, PINS, SHOT, AREAS, KE, MP, MPG, MW, MI, XU) => {
+  'ui/media_page', 'ui/media_widgets', 'ui/media_io', 'ui/extreme', 'ui/inspector_nav', 'ui/camera_preview'],
+(dom, I, F, W, PB, S, LK, OUT, T, P, PINS, SHOT, AREAS, KE, MP, MPG, MW, MI, XU, NAV, CP) => {
   'use strict';
 
   const { h } = dom;
@@ -76190,11 +77585,12 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
   function mount(app, host) {
     const t = app.t;
     app.thumbs = app.thumbs || PB.createThumbs(app);
+    const tabsEl = h('nav', { class: 'insp-tabs', 'aria-label': t('insp.jump.nav') });
     const crumbsEl = h('nav', { class: 'crumbs insp-crumbs', 'aria-label': t('panel.crumbs') });
     const headEl = h('div', { class: 'level-head' });
     const bodyEl = h('div', { class: 'insp-body' });
     const subEl = h('div', { class: 'insp-sub', hidden: true });
-    dom.replace(host, crumbsEl, headEl, bodyEl, subEl);
+    dom.replace(host, tabsEl, crumbsEl, headEl, bodyEl, subEl);
 
     const stack = [];                       // sub-pages: part browser, filter pages (§6.4.4 item 4)
     const openState = new Map();            // page kind → Map(section id → open)
@@ -76202,6 +77598,33 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
     let headSig = null;
     let lastRow = null;                     // the most recently focused field (for [なぜ])
     let dirty = true;
+    let navOrigin = null;                   // all bookmarks keep the original work / line / area / cut scope
+    let activeTab = null;
+    let navigating = false;
+    let jumpSerial = 0;                     // only the latest jump may move focus after layout completes
+
+    const tabButtons = NAV.KEYS.map((key) => h('button', {
+      class: 'insp-tab', type: 'button', 'data-jump': key, 'aria-label': t('insp.jump.' + key),
+      title: t('insp.jump.' + key), on: { click: () => jumpTo(key) },
+    }, t('insp.jump.' + key)));
+    tabsEl.append(...tabButtons);
+    tabsEl.addEventListener('keydown', (ev) => {
+      const at = tabButtons.indexOf(ev.target);
+      if (at < 0 || !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(ev.key)) return;
+      ev.preventDefault(); ev.stopPropagation();
+      const step = ev.key === 'ArrowUp' ? -3 : ev.key === 'ArrowDown' ? 3 : ev.key === 'ArrowLeft' ? -1 : 1;
+      const next = ev.key === 'Home' ? 0 : ev.key === 'End' ? tabButtons.length - 1 : (at + step + tabButtons.length) % tabButtons.length;
+      dom.focus(tabButtons[next]);
+    });
+
+    function refreshTabs() {
+      const sel = S.validate(app.view.state.sel, plan(), doc());
+      const elKey = sel.level === 'el' ? { lens: 'camera', text: 'text', ground: 'background', ornament: 'ornament', filter: 'effects' }[sel.el] : null;
+      for (const button of tabButtons) {
+        const on = button.dataset.jump === (activeTab || elKey);
+        if (on) button.setAttribute('aria-current', 'true'); else button.removeAttribute('aria-current');
+      }
+    }
 
     // --- small helpers -----------------------------------------------------------------------------------------
 
@@ -76218,7 +77641,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
     // A field's label: its string key with labelArgs (keys) resolved; generated part parameters ('fld.param' =
     // '{name}') take their name from the registry's { ja, en } label.
     function labelOf(field) {
-      const args = {};
+      const args = Object.assign({}, field.labelValues);
       for (const k of Object.keys(field.labelArgs || {})) args[k] = t(field.labelArgs[k]);
       if (field.labelText) args.name = field.labelText[t.lang] || field.labelText.ja || field.key;
       const base = field.label ? t(field.label, args) : args.name || field.key;
@@ -76978,9 +78401,18 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
         slot: (action, i) => slotAction(field.kind, action, i),
       };
       const widget = W.make(field, env);
+      const cameraKind = field.path === 'cam.shot' ? 'shot' : field.path === 'rig' ? 'rig' : field.path === 'lens' ? 'lens' : null;
+      const preview = cameraKind ? h('button', { class: 'chip-btn camera-preview-field', type: 'button', disabled: true,
+        'data-preview-slot': field.path, 'aria-haspopup': 'dialog', on: { click: () => {
+          const ref = cameraRef(row, cameraKind);
+          if (ref) CP.open(app, ref);
+        } } }, I.icon('play', { size: 12 }), t('camera.sample.open')) : null;
+      const browseRigs = cameraKind === 'rig' ? h('button', { class: 'chip-btn camera-rig-list', type: 'button',
+        on: { click: () => openRigs(row) } }, t('camera.sample.rigList')) : null;
       const el = h('div', { class: 'frow', 'data-widget': field.widget, 'data-slot': field.path || field.key, 'data-field': field.id },
-        h('div', { class: 'fr-top' }, lab, tag, h('span', { class: 'grow' }), info, dice, x, more), widget.el, note, why);
-      Object.assign(row, { el, tag, dice, x, more, why, widget, lab });
+        h('div', { class: 'fr-top' }, lab, tag, h('span', { class: 'grow' }), info, dice, x, more), widget.el,
+        cameraKind ? h('div', { class: 'row-actions' }, preview, browseRigs) : null, note, why);
+      Object.assign(row, { el, tag, dice, x, more, why, widget, lab, preview, cameraKind });
       // Del / Backspace unpin the focused field (§6.8): the row publishes the paths it may clear while it has focus;
       // ui/boot's pin.clearField removes the ones that hold a pin (never a lock pin).
       el.addEventListener('focusin', () => {
@@ -77045,6 +78477,11 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       row.fs = fs;
       const st = stateOf(row, fs, ctx);
       row.widget.update(st);
+      if (row.preview) {
+        const ref = cameraRef(row, row.cameraKind);
+        row.preview.disabled = !ref;
+        if (ref) row.preview.setAttribute('aria-label', t('camera.sample.openNamed', { name: CP.nameOf(app, ref) }));
+      }
       if (!row.path) { row.tag.hidden = true; return; }
       const shown = tagState(row);
       const state = shown ? shown.state : 'auto';
@@ -77293,6 +78730,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       push(Object.assign(PB.pickerPage(app, {
         kind: 'shot', path: row.path, label: labelOf(field), value, tryDoc: (key) => tryDoc(key === null ? null : xOwn(key)),
         keys: ['none'].concat(SHOT.SHOT_KEYS), info,
+        previewRef: (key) => ({ kind: 'shot', key: xOwn(key) }),
         isCurrent: (k) => k === value || (!!xNow && xNow.key === k),
         groups: [{ id: 'extreme', label: t('shot.group.extreme'), note: t('shot.group.extremeNote'), keys: SHOT.XSHOT_KEYS.slice(), kind: 'xshot',
           badge: (k) => t('shot.xBadge') + (xNow && xNow.key === k && xNow.m ? ' ' + t('shot.mirrored') : '') }],
@@ -77301,6 +78739,46 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
           const v = xOwn(key);
           XU.pickShot(app, paths, v).then((ok) => { if (ok && stack.length && stack[stack.length - 1].id === 'pick:' + row.path) { pop(); commit(row, v); } });
         },
+      }), { returnTo: () => { const r = findRow(field.path); if (r) r.widget.focus(); } }));
+    }
+
+    function cameraRef(row, kind) {
+      if (!row.fs || row.fs.state === 'mixed' || !CP.supports(kind, row.fs.value)) return null;
+      const params = {};
+      if (kind === 'shot') {
+        for (const [slot, name] of [['cam.zoom', 'zoom'], ['cam.curve', 'curve'], ['cam.follow', 'follow'], ['cam.extreme', 'extreme']]) {
+          const values = F.decisionsOf(page.ctx, slot).map((d) => d.v);
+          if (values.length && values.every((v) => JSON.stringify(v) === JSON.stringify(values[0]))) params[name] = values[0];
+        }
+      } else if (kind === 'lens') {
+        const values = F.decisionsOf(page.ctx, 'lens').map((d) => d.p).filter(Boolean);
+        if (values.length && values.every((v) => JSON.stringify(v) === JSON.stringify(values[0]))) Object.assign(params, values[0]);
+      } else if (kind === 'rig') {
+        const curve = findRow('rig.curve');
+        if (curve && curve.fs && curve.fs.state !== 'mixed') params.curve = curve.fs.value;
+        const amps = page.ctx.cuts.map((c) => plan().rigs && plan().rigs[c.rig])
+          .map((r) => r && r.rig && r.rig.p && r.rig.p.amp).filter(Number.isFinite);
+        if (amps.length && amps.every((v) => v === amps[0])) params.amp = amps[0];
+      }
+      return { kind, key: row.fs.value, params };
+    }
+
+    function openRigs(row) {
+      const field = row.field, paths = pathsOf(field, page.ctx);
+      const tryDoc = (key) => {
+        let d = doc();
+        const cmds = key === null ? removablePaths(row.clearPaths).map((path) => ({ t: 'pin.clear', path }))
+          : paths.map((path) => pinCmd(path, key));
+        try { for (const cmd of cmds) d = app.reduce(d, cmd); } catch (e) { return null; }
+        return d;
+      };
+      push(Object.assign(PB.pickerPage(app, {
+        kind: 'rig', path: row.path, label: labelOf(field),
+        value: row.fs && row.fs.state !== 'mixed' && typeof row.fs.value === 'string' ? row.fs.value : null,
+        keys: ['none'].concat(SHOT.RIG_KEYS),
+        info: (key) => ({ text: t.label(SHOT.rigLabel(key)), blurb: t('camera.sample.rigHint'),
+          tags: SHOT.RIGS[key] ? SHOT.RIGS[key].tags.slice() : [] }), tryDoc,
+        onPick: (key) => { pop(); if (key === null) unpin(row); else commit(row, key); },
       }), { returnTo: () => { const r = findRow(field.path); if (r) r.widget.focus(); } }));
     }
 
@@ -77605,7 +79083,14 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       },
       // 要素 › カメラ: [キーフレームを編集…] (DESIGN_2_1 §6.7).
       camKeys(ctx) {
-        return h('button', { class: 'chip-btn', type: 'button', on: { click: () => openKeys(ctx) } }, t('fld.camKeys'));
+        const keys = h('button', { class: 'chip-btn', type: 'button', on: { click: () => openKeys(ctx) } }, t('fld.camKeys'));
+        const wireframe = h('button', { class: 'chip-btn cam-wireframe-btn', type: 'button',
+          title: t('camera.wireframeHint'), 'aria-pressed': String(!!app.view.state.prefs.cameraWireframe),
+          on: { click: () => {
+            app.view.setPref('cameraWireframe', !app.view.state.prefs.cameraWireframe);
+            wireframe.setAttribute('aria-pressed', String(!!app.view.state.prefs.cameraWireframe));
+          } } }, t('camera.wireframe'));
+        return h('div', { class: 'row-actions' }, keys, wireframe);
       },
       // 区画のカメラ: the rig run this page's cut belongs to (「サビ1（5行）で続くカメラ」), from plan.rigs.
       rigRun(ctx) {
@@ -77983,6 +79468,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       // Pinned parameters of parts that are no longer chosen stay listed (無効), never hidden (§3.4).
       const sections = F.withPinnedParams(F.sectionsFor(sel, plan(), app.reg, doc()), ctx, F.pinnedSlots(ctx, doc().pins));
       const sig = JSON.stringify(sel) + '|' + sections.map((s) => s.id + ':' + s.fields.map((f) => f.id).join(',')).join(';');
+      refreshTabs();
       renderCrumbs();
       renderHead(ctx);
       if (!page || page.sig !== sig) build(ctx, sections, sig);
@@ -77996,8 +79482,9 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
     app.bus.on('side', () => soon('side'));
     app.view.on((changed, state) => {
       // Sub-pages live inside 詳細: closing it, or switching the column to AI, closes them (and ends their try-on).
-      if (changed.includes('panel') && state.panel !== 'details') { clearStack(); forgetFocus(); }
+      if (changed.includes('panel') && state.panel !== 'details') { jumpSerial++; clearStack(); forgetFocus(); }
       if (changed.includes('sel')) {
+        if (!navigating) { jumpSerial++; navOrigin = null; activeTab = null; }
         const inside = host.contains(document.activeElement);
         forgetFocus();
         clearStack();
@@ -78039,6 +79526,48 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       }));
     }
 
+    // A bookmark resolves its edit scope before changing pages. In particular an area remains all its selected
+    // lines, and visiting the project media library does not forget the cut that the other bookmarks were editing.
+    function jumpTo(key, selection) {
+      if (app.view.state.aiReview) return false;
+      const origin = selection ? S.validate(selection, plan(), doc())
+        : S.validate(navOrigin || app.view.state.sel, plan(), doc());
+      const target = NAV.target(key, origin, plan(), doc());
+      if (!target) return false;
+      const serial = ++jumpSerial;
+      navOrigin = origin;
+      activeTab = key === 'scope' ? null : key;
+      navigating = true;
+      try {
+        clearStack();
+        app.openPanel('details', 'inspector');
+        app.select(target.sel, { from: 'inspector', seek: false });
+        if (target.section) setSectionOpen({ page: F.pageOf(target.sel, plan()) }, target.section, true);
+        if (page) page.sig = null;
+        render();
+      } finally { navigating = false; }
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        if (serial !== jumpSerial || app.view.state.panel !== 'details' || !visible() ||
+          !S.equal(app.view.state.sel, target.sel)) return;
+        render();
+        const section = target.section ? [...bodyEl.querySelectorAll('[data-sec]')].find((el) => el.dataset.sec === target.section) : null;
+        const row = target.slot ? findRow(target.slot) : null;
+        if (row) {
+          const more = row.el.closest('details');
+          if (more) more.open = true;
+        }
+        const el = row ? row.el : section || headEl;
+        const scroller = host.closest('.panel-body');
+        if (scroller) {
+          const top = scroller.getBoundingClientRect().top + tabsEl.getBoundingClientRect().height + 8;
+          scroller.scrollTop += el.getBoundingClientRect().top - top;
+        }
+        if (row && row.widget.focus) row.widget.focus();
+        else dom.focus(section ? section.querySelector('.isec-head') : headEl.querySelector('.lh-title') || headEl.querySelector('button'));
+      }));
+      return true;
+    }
+
     render();
     // A library change (another tab's import, the device store's answers) redraws the page and the asset page; the crop
     // overlay's state shows on its button.
@@ -78046,7 +79575,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
     app.bus.on('crop', () => soon('crop'));
 
     return {
-      render, push, pop, clearStack, openFilter, openSection, showWhy: () => showWhy(lastRow, true), flashField, openAsset,
+      render, push, pop, clearStack, openFilter, openSection, jumpTo, showWhy: () => showWhy(lastRow, true), flashField, openAsset,
       rows: () => (page ? page.rows.map((r) => ({ id: r.field.id, path: r.path, paths: r.paths.slice(), state: r.fs ? r.fs.state : null,
         unpin: !!r.x && !r.x.hidden, why: r.why.hidden ? null : r.why.textContent })) : []),
       stackSize: () => stack.length,

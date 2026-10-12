@@ -28,7 +28,7 @@ const F = MV.use('engine/scene/frame');
 const T = MV.use('engine/scene/table');
 const PLAN = MV.use('planner/plan');
 
-const MODULES = { arrange: ['core', 'columns', 'editorial', 'interlude', 'scatter', 'special'], dwell: ['calm', 'lively'] };
+const MODULES = { arrange: ['core', 'columns', 'editorial', 'interlude', 'scatter', 'special', 'storybook'], dwell: ['calm', 'lively'] };
 const OWN = Object.entries(MODULES).flatMap(([kind, files]) => files.flatMap((f) => MV.use('parts/' + kind + '/' + f)));
 const HOSTS = corpus.minimalFallbacks().filter((d) => d.kind !== 'arrange' && d.kind !== 'dwell');
 const REGISTRY = REG.createRegistry(OWN.concat(HOSTS));
@@ -52,7 +52,7 @@ function tableRows(heading) {
 test('every §5.1 composition and §5.3 hold is defined once, with the table’s labels, tags and fallback', () => {
   for (const [kind, heading] of [['arrange', '### 5.1 Compositions'], ['dwell', '### 5.3 Holds']]) {
     const rows = tableRows(heading);
-    assert.equal(rows.length, kind === 'arrange' ? 33 : 10, heading);
+    assert.equal(rows.length, kind === 'arrange' ? 49 : 10, heading);
     assert.deepEqual(REGISTRY.keys(kind), rows.map((r) => r.key).sort(), kind + ': exactly the table’s keys');
     for (const r of rows) {
       const def = REGISTRY.get(kind, r.key);
@@ -70,8 +70,8 @@ test('traits the planner relies on: special roles, vertical-only and horizontal-
   assert.deepEqual(roles('titlePlate'), ['title']);
   assert.deepEqual(roles('breathMark'), ['interlude']);
   assert.equal(REGISTRY.get('arrange', 'breathMark').pool, false, 'the breath mark is only pinned (the interlude effects replace it)');
-  assert.deepEqual(REGISTRY.pool('arrange', { role: 'interlude' }).slice().sort(), ['burstBloom', 'harmonicString', 'kineticShapes', 'lightMotes', 'neonWave', 'peakBars', 'polarWave', 'ridgeLines', 'ringPulse',
-    'soundHorizon', 'tileRipple', 'warpField']);
+  assert.deepEqual(REGISTRY.pool('arrange', { role: 'interlude' }).slice().sort(), ['burstBloom', 'constellationMesh', 'harmonicString', 'kineticShapes', 'lightMotes', 'neonWave', 'orbitMoons', 'paperDrift',
+    'peakBars', 'polarWave', 'prismFan', 'ribbonWeave', 'ridgeLines', 'ringPulse', 'shutterBloom', 'soundHorizon', 'tileRipple', 'warpField']);
   assert.deepEqual(roles('creditFold'), ['outro']);
   for (const role of ['title', 'interlude', 'outro']) assert.ok(REGISTRY.pool('arrange', { role }).length > 0, role + ' has a composition');
   for (const key of ['pillarColumns', 'spineColumn']) assert.deepEqual(REGISTRY.traits('arrange', key).orient, ['v'], key);
@@ -608,7 +608,8 @@ test('block holds move the text as one piece about its centre; still hold makes 
 // Block holds move only the glyphs: over a composition that sets its words on a fixed decoration (grid cells, tag
 // cards, a card, a band, a rule under the line) the words would slide off it, so the planner never pairs them.
 test('block holds are not paired with compositions whose words sit on a fixed decoration', () => {
-  const bound = ['gridMosaic', 'hangingTags', 'tiltedCard', 'slantBand', 'titlePlate', 'magazineHead'];
+  const bound = ['gridMosaic', 'hangingTags', 'tiltedCard', 'slantBand', 'titlePlate', 'magazineHead',
+    'windowVerse', 'quoteVerse', 'glassLayers', 'wovenStrips', 'pennantLine', 'marginRail', 'focusBadge'];
   const block = ['breathePulse', 'slowDrift', 'swaySwing', 'creepTrack', 'thumpSwell'];
   const f = { beat: 0.5, energy: 0.5 };
   for (const key of block) {

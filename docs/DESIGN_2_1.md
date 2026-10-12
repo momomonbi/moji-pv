@@ -5938,3 +5938,69 @@ remains separate from file completion: drain, audio, packaging and saving use an
 are retained across frame updates, stage changes update immediately and status announcements are rate-limited.
 Callbacks from cancelled or superseded runs cannot replace the active run's state. Process metadata is transient;
 it is not written into project documents.
+
+## 17. Camera workbench and composition presets
+
+The arrange catalog has 49 entries after adding ten lyric compositions and six textless interludes. Existing pinned
+builds retain their rendering; automatic layout pools expand deliberately. Panel/frame compositions exclude block
+drift and scale holds so their glyphs stay attached to the decoration. New interludes use the established musical
+envelope and disappear before the next lyric. Ordinary cut-camera presets expand from ten to twenty and rigs from
+five to eleven. New camera presets are available to hand selection, previews, AI and saved pins; the original
+automatic camera candidate weights remain unchanged.
+
+The inspector's sticky bookmarks resolve a target from the original selection, clear subpages, expand the target
+section, then scroll and focus it. Work, exact cut, single line and multi-line/area scopes are preserved. Media is
+project-wide, but visiting its library does not forget the bookmark's editing scope. Deferred focus is guarded
+against later jumps, selection changes and closed panels. Multi-line pages expose camera, decoration and effect
+controls without narrowing the selection to one line.
+
+The detailed timeline has a camera row above the unchanged full-duration overview. It shows shot labels and
+directions, section rigs and fitted key markers for the selected cut; clicking jumps directly to that cut's
+camera settings. The overview's thin window and edge handles resize or pan only the detailed timeline. Normal
+click/scrub still uses full duration. Cancel/Escape/lost capture restores the window; follow is suspended only
+during a window gesture. Narrow windows split the start knob, pan target and end knob vertically; knob hit areas
+remain on-screen and the pan target is at least 40 px without changing the true-scale outline. Tap, try-on, compare
+and notifications use a bounded mode strip in the controls instead of replacing the full-song lane. Keyboard controls and bounded two-second windows share the same window normalization.
+The drawer reserves 178 px in tall/normal layouts and 148 px in short layouts; a closed drawer's geometry is unchanged.
+
+`cameraWireframe` is a device preview preference, initially false. Stage and camera-detail controls plus the View
+menu toggle a separate preview canvas. It shows a world grid, picked boxes and a minimap with the inverse actual
+camera footprint, sampled trajectory and fitted keys. Geometry comes from the renderer view matrix and real
+`engine.viewAt`, including lens, shot, rig, impulses, EXTREME and calm mode. Paths cache per immutable plan/cut/gap
+and calm setting; fonts invalidate them. Future samples restore the current evaluation. Jump samples break paths
+at real EXTREME discontinuities. Guides are never passed to export renderers or stored in project documents.
+
+Additional cut-camera presets:
+
+| Key | ja | en |
+|---|---|---|
+| `breathingRoom` | ゆっくり寄って戻る | Breathe in and out |
+| `floatingArc` | ふわりと上下 | Floating arc |
+| `diagonalGlide` | 斜めに流れる | Diagonal glide |
+| `swayBack` | 横揺れして正面へ | Sway, then center |
+| `focusAndReturn` | 強調へ寄って戻る | Focus and return |
+| `riseIntoView` | 下から浮かび上がる | Rise into view |
+| `pushHoldRelease` | 寄る・止まる・引く | Push, hold, release |
+| `frameToWords` | 全景から文字へ往復 | Frame to words and back |
+| `passingFocus` | 流れながら強調へ | Passing focus |
+| `levelLanding` | 傾きから正面へ着地 | Level landing |
+
+Additional section-camera presets:
+
+| Key | ja | en |
+|---|---|---|
+| `breathCycle` | 寄って戻る呼吸 | Breathing cycle |
+| `floatingWave` | ふわふわ上下 | Floating wave |
+| `diagonalDrift` | 斜めに漂う | Diagonal drift |
+| `orbitArc` | ゆるい回り込み | Gentle arc |
+| `swayLevel` | 揺れて正面へ | Sway and level |
+| `surgeSettle` | 盛り上がって落ち着く | Surge and settle |
+
+The camera sample dialog is separate from project playback. Camera, rig, lens and EXTREME fields and picker cards
+provide a large preview action without applying a preset. A disposable engine fork renders the actual sample plan
+from beginning to end, including the entire rig. Playback initially runs at half speed; quarter/normal speed,
+pause, restart, seeking, looping and stationary guides make short camera moves visible. Canvas backing matches
+the selected aspect and a bounded dialog fits desktop and narrow screens. Closing/Escape, replacing a dialog,
+owner destruction and hidden-tab changes cancel the animation and release the sample fork. Focus returns through
+the existing dialog manager. Picker preview actions are siblings of apply tiles; hover animation and delayed
+project try-on stop before opening a sample. Samples never pin parts, seek the song or modify export settings.

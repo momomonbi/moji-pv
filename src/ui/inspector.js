@@ -1,8 +1,8 @@
 /* 文字PVメーカー v2 — original work. The inspector (詳細): crumbs, level header, sections from FIELDS, field rows, sub-pages (DESIGN §6.4.4–§6.4.9, §6.6; DESIGN_2_1 §6.5–§6.9). */
 MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/part_browser', 'ui/selection', 'ui/looks',
   'ui/output', 'i18n/t', 'core/paths', 'core/pins', 'core/shot', 'planner/areas', 'ui/shot_editor', 'ui/material_page',
-  'ui/media_page', 'ui/media_widgets', 'ui/media_io', 'ui/extreme'],
-(dom, I, F, W, PB, S, LK, OUT, T, P, PINS, SHOT, AREAS, KE, MP, MPG, MW, MI, XU) => {
+  'ui/media_page', 'ui/media_widgets', 'ui/media_io', 'ui/extreme', 'ui/inspector_nav', 'ui/camera_preview'],
+(dom, I, F, W, PB, S, LK, OUT, T, P, PINS, SHOT, AREAS, KE, MP, MPG, MW, MI, XU, NAV, CP) => {
   'use strict';
 
   const { h } = dom;
@@ -32,11 +32,12 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
   function mount(app, host) {
     const t = app.t;
     app.thumbs = app.thumbs || PB.createThumbs(app);
+    const tabsEl = h('nav', { class: 'insp-tabs', 'aria-label': t('insp.jump.nav') });
     const crumbsEl = h('nav', { class: 'crumbs insp-crumbs', 'aria-label': t('panel.crumbs') });
     const headEl = h('div', { class: 'level-head' });
     const bodyEl = h('div', { class: 'insp-body' });
     const subEl = h('div', { class: 'insp-sub', hidden: true });
-    dom.replace(host, crumbsEl, headEl, bodyEl, subEl);
+    dom.replace(host, tabsEl, crumbsEl, headEl, bodyEl, subEl);
 
     const stack = [];                       // sub-pages: part browser, filter pages (§6.4.4 item 4)
     const openState = new Map();            // page kind → Map(section id → open)
@@ -44,6 +45,33 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
     let headSig = null;
     let lastRow = null;                     // the most recently focused field (for [なぜ])
     let dirty = true;
+    let navOrigin = null;                   // all bookmarks keep the original work / line / area / cut scope
+    let activeTab = null;
+    let navigating = false;
+    let jumpSerial = 0;                     // only the latest jump may move focus after layout completes
+
+    const tabButtons = NAV.KEYS.map((key) => h('button', {
+      class: 'insp-tab', type: 'button', 'data-jump': key, 'aria-label': t('insp.jump.' + key),
+      title: t('insp.jump.' + key), on: { click: () => jumpTo(key) },
+    }, t('insp.jump.' + key)));
+    tabsEl.append(...tabButtons);
+    tabsEl.addEventListener('keydown', (ev) => {
+      const at = tabButtons.indexOf(ev.target);
+      if (at < 0 || !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(ev.key)) return;
+      ev.preventDefault(); ev.stopPropagation();
+      const step = ev.key === 'ArrowUp' ? -3 : ev.key === 'ArrowDown' ? 3 : ev.key === 'ArrowLeft' ? -1 : 1;
+      const next = ev.key === 'Home' ? 0 : ev.key === 'End' ? tabButtons.length - 1 : (at + step + tabButtons.length) % tabButtons.length;
+      dom.focus(tabButtons[next]);
+    });
+
+    function refreshTabs() {
+      const sel = S.validate(app.view.state.sel, plan(), doc());
+      const elKey = sel.level === 'el' ? { lens: 'camera', text: 'text', ground: 'background', ornament: 'ornament', filter: 'effects' }[sel.el] : null;
+      for (const button of tabButtons) {
+        const on = button.dataset.jump === (activeTab || elKey);
+        if (on) button.setAttribute('aria-current', 'true'); else button.removeAttribute('aria-current');
+      }
+    }
 
     // --- small helpers -----------------------------------------------------------------------------------------
 
@@ -60,7 +88,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
     // A field's label: its string key with labelArgs (keys) resolved; generated part parameters ('fld.param' =
     // '{name}') take their name from the registry's { ja, en } label.
     function labelOf(field) {
-      const args = {};
+      const args = Object.assign({}, field.labelValues);
       for (const k of Object.keys(field.labelArgs || {})) args[k] = t(field.labelArgs[k]);
       if (field.labelText) args.name = field.labelText[t.lang] || field.labelText.ja || field.key;
       const base = field.label ? t(field.label, args) : args.name || field.key;
@@ -820,9 +848,18 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
         slot: (action, i) => slotAction(field.kind, action, i),
       };
       const widget = W.make(field, env);
+      const cameraKind = field.path === 'cam.shot' ? 'shot' : field.path === 'rig' ? 'rig' : field.path === 'lens' ? 'lens' : null;
+      const preview = cameraKind ? h('button', { class: 'chip-btn camera-preview-field', type: 'button', disabled: true,
+        'data-preview-slot': field.path, 'aria-haspopup': 'dialog', on: { click: () => {
+          const ref = cameraRef(row, cameraKind);
+          if (ref) CP.open(app, ref);
+        } } }, I.icon('play', { size: 12 }), t('camera.sample.open')) : null;
+      const browseRigs = cameraKind === 'rig' ? h('button', { class: 'chip-btn camera-rig-list', type: 'button',
+        on: { click: () => openRigs(row) } }, t('camera.sample.rigList')) : null;
       const el = h('div', { class: 'frow', 'data-widget': field.widget, 'data-slot': field.path || field.key, 'data-field': field.id },
-        h('div', { class: 'fr-top' }, lab, tag, h('span', { class: 'grow' }), info, dice, x, more), widget.el, note, why);
-      Object.assign(row, { el, tag, dice, x, more, why, widget, lab });
+        h('div', { class: 'fr-top' }, lab, tag, h('span', { class: 'grow' }), info, dice, x, more), widget.el,
+        cameraKind ? h('div', { class: 'row-actions' }, preview, browseRigs) : null, note, why);
+      Object.assign(row, { el, tag, dice, x, more, why, widget, lab, preview, cameraKind });
       // Del / Backspace unpin the focused field (§6.8): the row publishes the paths it may clear while it has focus;
       // ui/boot's pin.clearField removes the ones that hold a pin (never a lock pin).
       el.addEventListener('focusin', () => {
@@ -887,6 +924,11 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       row.fs = fs;
       const st = stateOf(row, fs, ctx);
       row.widget.update(st);
+      if (row.preview) {
+        const ref = cameraRef(row, row.cameraKind);
+        row.preview.disabled = !ref;
+        if (ref) row.preview.setAttribute('aria-label', t('camera.sample.openNamed', { name: CP.nameOf(app, ref) }));
+      }
       if (!row.path) { row.tag.hidden = true; return; }
       const shown = tagState(row);
       const state = shown ? shown.state : 'auto';
@@ -1135,6 +1177,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       push(Object.assign(PB.pickerPage(app, {
         kind: 'shot', path: row.path, label: labelOf(field), value, tryDoc: (key) => tryDoc(key === null ? null : xOwn(key)),
         keys: ['none'].concat(SHOT.SHOT_KEYS), info,
+        previewRef: (key) => ({ kind: 'shot', key: xOwn(key) }),
         isCurrent: (k) => k === value || (!!xNow && xNow.key === k),
         groups: [{ id: 'extreme', label: t('shot.group.extreme'), note: t('shot.group.extremeNote'), keys: SHOT.XSHOT_KEYS.slice(), kind: 'xshot',
           badge: (k) => t('shot.xBadge') + (xNow && xNow.key === k && xNow.m ? ' ' + t('shot.mirrored') : '') }],
@@ -1143,6 +1186,46 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
           const v = xOwn(key);
           XU.pickShot(app, paths, v).then((ok) => { if (ok && stack.length && stack[stack.length - 1].id === 'pick:' + row.path) { pop(); commit(row, v); } });
         },
+      }), { returnTo: () => { const r = findRow(field.path); if (r) r.widget.focus(); } }));
+    }
+
+    function cameraRef(row, kind) {
+      if (!row.fs || row.fs.state === 'mixed' || !CP.supports(kind, row.fs.value)) return null;
+      const params = {};
+      if (kind === 'shot') {
+        for (const [slot, name] of [['cam.zoom', 'zoom'], ['cam.curve', 'curve'], ['cam.follow', 'follow'], ['cam.extreme', 'extreme']]) {
+          const values = F.decisionsOf(page.ctx, slot).map((d) => d.v);
+          if (values.length && values.every((v) => JSON.stringify(v) === JSON.stringify(values[0]))) params[name] = values[0];
+        }
+      } else if (kind === 'lens') {
+        const values = F.decisionsOf(page.ctx, 'lens').map((d) => d.p).filter(Boolean);
+        if (values.length && values.every((v) => JSON.stringify(v) === JSON.stringify(values[0]))) Object.assign(params, values[0]);
+      } else if (kind === 'rig') {
+        const curve = findRow('rig.curve');
+        if (curve && curve.fs && curve.fs.state !== 'mixed') params.curve = curve.fs.value;
+        const amps = page.ctx.cuts.map((c) => plan().rigs && plan().rigs[c.rig])
+          .map((r) => r && r.rig && r.rig.p && r.rig.p.amp).filter(Number.isFinite);
+        if (amps.length && amps.every((v) => v === amps[0])) params.amp = amps[0];
+      }
+      return { kind, key: row.fs.value, params };
+    }
+
+    function openRigs(row) {
+      const field = row.field, paths = pathsOf(field, page.ctx);
+      const tryDoc = (key) => {
+        let d = doc();
+        const cmds = key === null ? removablePaths(row.clearPaths).map((path) => ({ t: 'pin.clear', path }))
+          : paths.map((path) => pinCmd(path, key));
+        try { for (const cmd of cmds) d = app.reduce(d, cmd); } catch (e) { return null; }
+        return d;
+      };
+      push(Object.assign(PB.pickerPage(app, {
+        kind: 'rig', path: row.path, label: labelOf(field),
+        value: row.fs && row.fs.state !== 'mixed' && typeof row.fs.value === 'string' ? row.fs.value : null,
+        keys: ['none'].concat(SHOT.RIG_KEYS),
+        info: (key) => ({ text: t.label(SHOT.rigLabel(key)), blurb: t('camera.sample.rigHint'),
+          tags: SHOT.RIGS[key] ? SHOT.RIGS[key].tags.slice() : [] }), tryDoc,
+        onPick: (key) => { pop(); if (key === null) unpin(row); else commit(row, key); },
       }), { returnTo: () => { const r = findRow(field.path); if (r) r.widget.focus(); } }));
     }
 
@@ -1447,7 +1530,14 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       },
       // 要素 › カメラ: [キーフレームを編集…] (DESIGN_2_1 §6.7).
       camKeys(ctx) {
-        return h('button', { class: 'chip-btn', type: 'button', on: { click: () => openKeys(ctx) } }, t('fld.camKeys'));
+        const keys = h('button', { class: 'chip-btn', type: 'button', on: { click: () => openKeys(ctx) } }, t('fld.camKeys'));
+        const wireframe = h('button', { class: 'chip-btn cam-wireframe-btn', type: 'button',
+          title: t('camera.wireframeHint'), 'aria-pressed': String(!!app.view.state.prefs.cameraWireframe),
+          on: { click: () => {
+            app.view.setPref('cameraWireframe', !app.view.state.prefs.cameraWireframe);
+            wireframe.setAttribute('aria-pressed', String(!!app.view.state.prefs.cameraWireframe));
+          } } }, t('camera.wireframe'));
+        return h('div', { class: 'row-actions' }, keys, wireframe);
       },
       // 区画のカメラ: the rig run this page's cut belongs to (「サビ1（5行）で続くカメラ」), from plan.rigs.
       rigRun(ctx) {
@@ -1825,6 +1915,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       // Pinned parameters of parts that are no longer chosen stay listed (無効), never hidden (§3.4).
       const sections = F.withPinnedParams(F.sectionsFor(sel, plan(), app.reg, doc()), ctx, F.pinnedSlots(ctx, doc().pins));
       const sig = JSON.stringify(sel) + '|' + sections.map((s) => s.id + ':' + s.fields.map((f) => f.id).join(',')).join(';');
+      refreshTabs();
       renderCrumbs();
       renderHead(ctx);
       if (!page || page.sig !== sig) build(ctx, sections, sig);
@@ -1838,8 +1929,9 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
     app.bus.on('side', () => soon('side'));
     app.view.on((changed, state) => {
       // Sub-pages live inside 詳細: closing it, or switching the column to AI, closes them (and ends their try-on).
-      if (changed.includes('panel') && state.panel !== 'details') { clearStack(); forgetFocus(); }
+      if (changed.includes('panel') && state.panel !== 'details') { jumpSerial++; clearStack(); forgetFocus(); }
       if (changed.includes('sel')) {
+        if (!navigating) { jumpSerial++; navOrigin = null; activeTab = null; }
         const inside = host.contains(document.activeElement);
         forgetFocus();
         clearStack();
@@ -1881,6 +1973,48 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       }));
     }
 
+    // A bookmark resolves its edit scope before changing pages. In particular an area remains all its selected
+    // lines, and visiting the project media library does not forget the cut that the other bookmarks were editing.
+    function jumpTo(key, selection) {
+      if (app.view.state.aiReview) return false;
+      const origin = selection ? S.validate(selection, plan(), doc())
+        : S.validate(navOrigin || app.view.state.sel, plan(), doc());
+      const target = NAV.target(key, origin, plan(), doc());
+      if (!target) return false;
+      const serial = ++jumpSerial;
+      navOrigin = origin;
+      activeTab = key === 'scope' ? null : key;
+      navigating = true;
+      try {
+        clearStack();
+        app.openPanel('details', 'inspector');
+        app.select(target.sel, { from: 'inspector', seek: false });
+        if (target.section) setSectionOpen({ page: F.pageOf(target.sel, plan()) }, target.section, true);
+        if (page) page.sig = null;
+        render();
+      } finally { navigating = false; }
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        if (serial !== jumpSerial || app.view.state.panel !== 'details' || !visible() ||
+          !S.equal(app.view.state.sel, target.sel)) return;
+        render();
+        const section = target.section ? [...bodyEl.querySelectorAll('[data-sec]')].find((el) => el.dataset.sec === target.section) : null;
+        const row = target.slot ? findRow(target.slot) : null;
+        if (row) {
+          const more = row.el.closest('details');
+          if (more) more.open = true;
+        }
+        const el = row ? row.el : section || headEl;
+        const scroller = host.closest('.panel-body');
+        if (scroller) {
+          const top = scroller.getBoundingClientRect().top + tabsEl.getBoundingClientRect().height + 8;
+          scroller.scrollTop += el.getBoundingClientRect().top - top;
+        }
+        if (row && row.widget.focus) row.widget.focus();
+        else dom.focus(section ? section.querySelector('.isec-head') : headEl.querySelector('.lh-title') || headEl.querySelector('button'));
+      }));
+      return true;
+    }
+
     render();
     // A library change (another tab's import, the device store's answers) redraws the page and the asset page; the crop
     // overlay's state shows on its button.
@@ -1888,7 +2022,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
     app.bus.on('crop', () => soon('crop'));
 
     return {
-      render, push, pop, clearStack, openFilter, openSection, showWhy: () => showWhy(lastRow, true), flashField, openAsset,
+      render, push, pop, clearStack, openFilter, openSection, jumpTo, showWhy: () => showWhy(lastRow, true), flashField, openAsset,
       rows: () => (page ? page.rows.map((r) => ({ id: r.field.id, path: r.path, paths: r.paths.slice(), state: r.fs ? r.fs.state : null,
         unpin: !!r.x && !r.x.hidden, why: r.why.hidden ? null : r.why.textContent })) : []),
       stackSize: () => stack.length,

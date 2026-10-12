@@ -4,6 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { load } = require('../helpers/load.js');
 const corpus = require('../helpers/corpus.js');
+const { originalLayouts } = require('../helpers/camera_baseline.js');
 
 const MV = load();
 const REG = MV.use('core/registry');
@@ -91,6 +92,8 @@ function withCameraMeta(reg) {
   }));
 }
 const CAT = withCameraMeta(MV.use('parts/catalog').defaultRegistry());
+// Fixed sampling for calibrated statistical floors; rules, formulas, pins and caches still use the expanded CAT.
+const CALIBRATED_CAT = originalLayouts(REG, CAT);
 // The synthetic parts with four framing lenses, two arranges without camerawork and two gentle ones.
 const SYN = REG.createRegistry(synthRegistry().all().map((d) => {
   if (d.kind === 'lens' && /0[0-3]$/.test(d.key)) return Object.assign({}, d, { frames: true });
@@ -174,6 +177,35 @@ test('amount.camera 0 gives no shot and no rig; below 0.15 no rig; pins still ap
   }
 });
 
+test('all additional camera presets survive user and AI pins, including with automatic camera turned off', () => {
+  const shots = ['breathingRoom', 'floatingArc', 'diagonalGlide', 'swayBack', 'focusAndReturn', 'riseIntoView',
+    'pushHoldRelease', 'frameToWords', 'passingFocus', 'levelLanding'];
+  const rigs = ['breathCycle', 'floatingWave', 'diagonalDrift', 'orbitArc', 'swayLevel', 'surgeSettle'];
+  for (const aspect of ['16:9', '9:16']) {
+    const source = corpus.corpus(1, [aspect], ['basic'])[0].doc;
+    for (let i = 0; i < shots.length; i++) {
+      const doc = clone(source), by = i % 2 ? 'ai' : 'user', shot = shots[i], rig = rigs[i % rigs.length];
+      doc.pins['work:amount.camera'] = { v: 0, by: 'user' };
+      doc.pins['work:cam.shot'] = { v: shot, by };
+      doc.pins['work:rig'] = { v: rig, by };
+      const p = PL.run(doc, CAT, null);
+      assert.ok(p.cuts.length && p.rigs.length, aspect);
+      for (const c of p.cuts) {
+        assert.equal(c.slots['cam.shot'].v, shot, aspect + ' ' + shot);
+        assert.equal(c.slots['cam.shot'].from, 'pin:work');
+        assert.equal(c.slots['cam.shot'].by, by);
+      }
+      for (const r of p.rigs) {
+        assert.equal(r.rig.v, rig, aspect + ' ' + rig);
+        assert.equal(r.rig.from, 'pin:work');
+        assert.equal(r.rig.by, by);
+        assert.ok(r.rig.p.amp > 0, 'manual section camera remains visible');
+      }
+      assert.deepEqual(p.warnings, [], aspect + ' ' + shot + '/' + rig);
+    }
+  }
+});
+
 test('rules: layouts without camerawork, gentle layouts, short cuts and the roles keep to their pools', () => {
   let none = 0, gentle = 0, short = 0, roles = 0;
   for (const [rn, reg] of [['catalog', CAT], ['synthetic', SYN]]) {
@@ -206,7 +238,8 @@ test('rules: layouts without camerawork, gentle layouts, short cuts and the role
 
 test('cam.zoom, cam.curve and cam.follow follow their formulas (§4.7)', (t) => {
   let n = 0, pulls = 0, calm = 0, explained = 0;
-  for (const { doc } of corpus.corpus(2)) {
+  // Three seeds retain short calm pull coverage as the expanded layout pool changes the eligible camera mix.
+  for (const { doc } of corpus.corpus(3)) {
     const p = PL.run(doc, CAT, null);
     const A = p.look.amounts.camera, M = p.look.amounts.motion;
     const mood = CAT.get('mood', p.look.mood.v);
@@ -326,8 +359,8 @@ test('motion.speed divides the unpinned durations and staggers of arrive and dep
 // repeats alone reaches 75–77 % at most with margin, and only a decision over each group of copies at once, knowing
 // every copy's lens, goes further (NOTES). Over every repeated cut, short and special cuts included, 61 % / 61 % share
 // their shot (53 % / 51 % before). So the ≥ 80 % is asserted where the lenses agree.
-test('impact cuts favour snapZoom; framing lenses favour no shot; repeated lines echo their shot', (t) => {
-  for (const [rn, reg] of [['catalog', CAT], ['synthetic', SYN]]) {
+test('calibrated original layouts: impact cuts favour snapZoom; framing lenses favour no shot; repeats echo their shot', (t) => {
+  for (const [rn, reg] of [['original catalog', CALIBRATED_CAT], ['synthetic', SYN]]) {
     const st = { imp: 0, impSnap: 0, other: 0, otherSnap: 0, fr: 0, frNone: 0, nfr: 0, nfrNone: 0, rep: 0, repSame: 0, ctl: 0, ctlSame: 0,
       open: 0, openSame: 0, seen: 0, seenSame: 0 };
     const frames = (c) => !!reg.get('lens', c.slots.lens.v).frames;
