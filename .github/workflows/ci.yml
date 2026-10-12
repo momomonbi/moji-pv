@@ -37,7 +37,7 @@ jobs:
         # themselves run one at a time first, then every other file runs side by side.
         run: |
           timed=()
-          for n in planner_determinism mix reconcile script media_engine timing; do
+          for n in planner_determinism mix reconcile script media_engine timing conformance; do
             timed+=("tests/node/$n.test.js")
           done
           rest=()

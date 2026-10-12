@@ -279,7 +279,11 @@ keys are shown in serialize order.
 **`doc.media`** = `{ list }`: the asset library (§11.2.1–§11.2.2). It holds metadata only; the bytes are in IndexedDB
 and in the `.mojipv` package (§12). There are at most 200 entries, and the ids are content hashes.
 
-**`output`** gains the formats `kit` and `webmAlpha` and the object `output.kit` (§13.3).
+**`output`** gains the formats `kit` and `webmAlpha` and the object `output.kit` (§13.3). Export quality also accepts
+`light` (0.04 bits/pixel/frame, half Standard's video target). `output.acceleration` accepts `auto` (the default;
+hardware preference with automatic fallback) or `cpu` (software preference with automatic fallback). Missing values
+in older projects normalize to `auto`; validation still accepts those projects. Both are encoding preferences,
+not measurements of GPU utilisation or controls over the browser's internal thread count.
 
 **`side.asks`** = `{ [areaKey]: { text, at } }`:
 - These are board drafts (§6.3). They are not undoable.
@@ -5178,10 +5182,15 @@ Every **?** line becomes a row of the manual checklist (§13.12).
 
 | Output | AAC encoder available | No AAC encoder (Chrome on Linux, Chromium builds) |
 |---|---|---|
-| MP4 (形式 MP4) | AAC-LC 320 kbps (192 kbps where the encoder stops there: Windows' Media Foundation) | **Opus in MP4** (160 kbps), with the preflight note `opus-audio` (B's item, §8.2) |
+| MP4 (形式 MP4) | AAC-LC 320 kbps (192 kbps where the encoder stops there: Windows' Media Foundation) | **Opus in MP4** (320 kbps, 160 kbps compatibility fallback), with the preflight note `opus-audio` (B's item, §8.2) |
 | Kit: main MP4 | AAC-LC (as above) | **No audio track**, plus `<base>.wav` (PCM 16-bit, 48 kHz stereo, exactly `audioFrames(N, fps, 48000)` samples from `t0`), plus the kit note `kit-wav` |
 | Kit: `_bg.mp4`, `_green.mp4` | no audio (the main MP4 or the WAV carries the song) | same |
 | 透過WebM, kit `_overlay.webm` | Opus in WebM, the WebM standard (standalone: when 音声を入れる is on; overlay: never) | same |
+
+At each target, prefer a supported `bitrateMode: 'constant'`, then the browser's default mode before lowering the
+rate. Only label the mode constant when the support response retains it. `probe` and export results expose the
+selected bitrate and mode; WebM has a separate Opus audio probe. Step ④ displays the setting and any rate fallback
+before export and again in the result. The target is distinct from a finished variable-rate file's measured average.
 
 - The WAV writer is `audio/wav.encodePcm16(channels, rate, start, frames) → Uint8Array` (additive; package H). It mixes
   down with the D§4.21 down-mix and writes a RIFF header. The down-mix (`mixMatrix`, `fillPlanar`) lives in `audio/wav`,
@@ -5214,7 +5223,7 @@ Every **?** line becomes a row of the manual checklist (§13.12).
    - `BlockAdditions/BlockMore(BlockAddID 1)/BlockAdditional` = the A frame;
    - `ReferenceBlock` when C is not a key frame.
    - Spontaneous extra key frames in one encoder are harmless: the forced ones align.
-7. **Audio** (standalone, when the song is on): `AudioEncoder` Opus, 48 kHz, 2 channels, 160 kbps, in 1024-frame chunks
+7. **Audio** (standalone, when the song is on): `AudioEncoder` Opus, 48 kHz, 2 channels, 320 kbps (160 kbps fallback), in 1024-frame chunks
    covering `[t0, t1)`, trimmed or padded to `audioFrames(N)` (the D§4.21 rules), as `SimpleBlock`s on track 2.
 
 **The writer** `export/webm.createWebm({ write, w, h, fps, video: { codec: 'V_VP9' | 'V_VP8', alpha: true },

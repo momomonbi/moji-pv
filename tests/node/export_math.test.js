@@ -136,6 +136,7 @@ test('bitrate, estimateBytes, estimatePngBytes and eta', () => {
   throwsCode(() => S.bitrate(1, 1, 30, 'ultra'), 'quality');
   assert.equal(S.estimateBytes(10, 8e6, false), Math.ceil(10 * 1e6 * 1.02));
   assert.equal(S.estimateBytes(10, 8e6, true), Math.ceil(((10 * (8e6 + 320000)) / 8) * 1.02));
+  assert.equal(S.estimateBytes(10, 8e6, true, 192000), Math.ceil(((10 * (8e6 + 192000)) / 8) * 1.02), 'supported AAC fallback rate');
   assert.ok(S.estimatePngBytes(10, 100, 100, true) > S.estimatePngBytes(10, 100, 100, false));
   assert.equal(S.eta([], 10), null);
   approx(S.eta([{ i: 0, ms: 100 }], 10), 1);
@@ -335,7 +336,8 @@ test('preflight: Opus in MP4 is an info note; no-audio-codec only when neither A
   const png = sampleDoc({ format: 'png' });
   png.song = doc.song;
   assert.deepEqual(S.preflight(png, plan, opus), [], 'a PNG sequence has no sound');
-  assert.equal(S.OPUS_BITRATE, 160000);
+  assert.equal(S.OPUS_BITRATE, 320000);
+  assert.equal(S.OPUS_BITRATE_LOW, 160000);
   assert.equal(S.AUDIO_BITRATE, 320000);
   assert.equal(S.AUDIO_BITRATE_LOW, 192000);
 });
@@ -346,14 +348,15 @@ const MP4 = MV.use('export/host/mp4');
 
 // Runs fn with a stub AudioEncoder (and VideoEncoder) whose isConfigSupported accepts only `codecs` ('codec@bitrate': only
 // at that bitrate); 'throw' codecs throw.
-async function withEncoders(codecs, fn) {
+async function withEncoders(codecs, fn, normalize) {
   const saved = { a: globalThis.AudioEncoder, v: globalThis.VideoEncoder };
   const asked = [];
   globalThis.AudioEncoder = class {
     static async isConfigSupported(config) {
       asked.push(Object.assign({}, config));
       if (config.codec.startsWith('throw')) throw new TypeError('bad codec string');
-      return { supported: codecs.includes(config.codec) || codecs.includes(config.codec + '@' + config.bitrate), config };
+      return { supported: codecs.includes(config.codec) || codecs.includes(config.codec + '@' + config.bitrate),
+        config: normalize ? normalize(config) : config };
     }
   };
   globalThis.VideoEncoder = class { static async isConfigSupported(config) { return { supported: config.codec.startsWith('avc1'), config }; } };
@@ -363,25 +366,28 @@ async function withEncoders(codecs, fn) {
   }
 }
 
-test('MP4 audio: AAC-LC at 320 kbps (192 where the encoder stops there), else Opus at 160 kbps (48 kHz stereo), else none; codecs.audioList overrides', async () => {
+test('MP4 audio: AAC-LC and Opus prefer 320 kbps (192 / 160 compatibility fallbacks), else none; codecs.audioList overrides', async () => {
   const song = { sampleRate: 48000 };
   assert.deepEqual(MP4.AUDIO_CODECS, ['mp4a.40.2', 'opus']);
   await withEncoders(['mp4a.40.2', 'opus'], async () => {
-    assert.deepEqual(await MP4.audioConfig(null, song), { codec: 'mp4a.40.2', sampleRate: 48000, numberOfChannels: 2, bitrate: 320000 });
-    assert.equal((await MP4.probe({ w: 1280, h: 720, fps: 30 })).audioCodec, 'mp4a.40.2');
+    assert.deepEqual(await MP4.audioConfig(null, song), { codec: 'mp4a.40.2', sampleRate: 48000, numberOfChannels: 2, bitrate: 320000, bitrateMode: 'constant' });
+    const pr = await MP4.probe({ w: 1280, h: 720, fps: 30 });
+    assert.deepEqual([pr.audioCodec, pr.audioBitrate, pr.webmAudioCodec, pr.webmAudioBitrate], ['mp4a.40.2', 320000, 'opus', 320000]);
+    assert.deepEqual([pr.audioBitrateMode, pr.webmAudioBitrateMode], ['constant', 'constant']);
   });
   await withEncoders(['mp4a.40.2@192000', 'opus'], async (asked) => {
-    assert.deepEqual(await MP4.audioConfig(null, song), { codec: 'mp4a.40.2', sampleRate: 48000, numberOfChannels: 2, bitrate: 192000 },
+    assert.deepEqual(await MP4.audioConfig(null, song), { codec: 'mp4a.40.2', sampleRate: 48000, numberOfChannels: 2, bitrate: 192000, bitrateMode: 'constant' },
       'an AAC encoder that stops at 192 kbps (Windows): AAC at 192, not Opus');
-    assert.deepEqual(asked.map((c) => c.codec + '@' + c.bitrate), ['mp4a.40.2@320000', 'mp4a.40.2@192000']);
+    assert.deepEqual(asked.map((c) => [c.codec, c.bitrate, c.bitrateMode || null]),
+      [['mp4a.40.2', 320000, 'constant'], ['mp4a.40.2', 320000, null], ['mp4a.40.2', 192000, 'constant']]);
   });
   await withEncoders(['opus'], async (asked) => {
-    assert.deepEqual(await MP4.audioConfig(null, song), { codec: 'opus', sampleRate: 48000, numberOfChannels: 2, bitrate: 160000 },
+    assert.deepEqual(await MP4.audioConfig(null, song), { codec: 'opus', sampleRate: 48000, numberOfChannels: 2, bitrate: 320000, bitrateMode: 'constant' },
       'no AAC encoder (Chrome on Linux): Opus in MP4');
-    assert.deepEqual(asked.map((c) => c.codec + '@' + c.bitrate), ['mp4a.40.2@320000', 'mp4a.40.2@192000', 'opus@160000'],
+    assert.deepEqual(asked.map((c) => c.codec + '@' + c.bitrate), ['mp4a.40.2@320000', 'mp4a.40.2@320000', 'mp4a.40.2@192000', 'mp4a.40.2@192000', 'opus@320000'],
       'AAC is tried first, at both rates');
     const pr = await MP4.probe({ w: 1280, h: 720, fps: 30 });
-    assert.deepEqual([pr.webcodecs, pr.audioCodec], [true, 'opus']);
+    assert.deepEqual([pr.webcodecs, pr.audioCodec, pr.audioBitrate], [true, 'opus', 320000]);
   });
   await withEncoders(['mp4a.40.2', 'opus'], async (asked) => {
     const forced = await MP4.audioConfig({ audioList: ['throw.aac', 'bogus.aac', 'opus'] }, song);
@@ -394,6 +400,64 @@ test('MP4 audio: AAC-LC at 320 kbps (192 where the encoder stops there), else Op
     assert.equal(await MP4.audioConfig(null, song), null, 'neither encodes: the MP4 is silent');
     assert.equal((await MP4.probe({ w: 1280, h: 720, fps: 30 })).audioCodec, null);
   });
+});
+
+test('audio selection: supported lower targets are disclosed; Opus 160 is used only when 320 is unavailable', async () => {
+  const song = { sampleRate: 48000 };
+  await withEncoders(['opus@160000'], async (asked) => {
+    const c = await MP4.audioConfig(null, song, ['opus']);
+    assert.equal(c.bitrate, 160000);
+    assert.deepEqual(asked.map((x) => [x.bitrate, x.bitrateMode || null]), [[320000, 'constant'], [320000, null], [160000, 'constant']]);
+  });
+  await withEncoders(['mp4a.40.2', 'opus'], async () => {
+    const c = await MP4.audioConfig(null, song);
+    assert.equal(c.bitrate, 192000, 'use the browser-reported supported rate instead of the request');
+    const p = await MP4.probe({ w: 1280, h: 720, fps: 30 });
+    assert.deepEqual([p.audioCodec, p.audioBitrate, p.webmAudioCodec, p.webmAudioBitrate], ['mp4a.40.2', 192000, 'opus', 320000]);
+  }, (c) => Object.assign({}, c, c.codec === 'mp4a.40.2' ? { bitrate: 192000 } : {}));
+  await withEncoders(['mp4a.40.2'], async () => {
+    const p = await MP4.probe({ w: 1280, h: 720, fps: 30 });
+    assert.deepEqual([p.audioCodec, p.audioBitrate, p.webmAudioCodec, p.webmAudioBitrate], ['mp4a.40.2', 320000, null, null],
+      'AAC support alone does not promise audio in WebM');
+  });
+});
+
+test('audio selection: preserve stereo and song rate, skip malformed support replies, and retry lower rates after known-codec exceptions', async () => {
+  const song = { sampleRate: 48000 };
+  for (const bad of [{ codec: 'opus' }, { sampleRate: 44100 }, { numberOfChannels: 1 }, { bitrate: NaN }, { bitrate: 0 }, { bitrate: -1 }]) {
+    await withEncoders(['mp4a.40.2', 'opus'], async () => {
+      const c = await MP4.audioConfig(null, song);
+      assert.deepEqual([c.codec, c.sampleRate, c.numberOfChannels, c.bitrate], ['opus', 48000, 2, 320000], JSON.stringify(bad));
+    }, (c) => Object.assign({}, c, c.codec === 'mp4a.40.2' ? bad : {}));
+  }
+  await withEncoders(['mp4a.40.2'], async (asked) => {
+    assert.equal((await MP4.audioConfig(null, song)).bitrate, 192000);
+    assert.deepEqual(asked.map((c) => c.bitrate), [320000, 320000, 192000]);
+  }, (c) => {
+    if (c.bitrate === 320000) throw Object.assign(new Error('unsupported rate'), { name: 'NotSupportedError' });
+    return c;
+  });
+  await withEncoders(['mp4a.40.2'], async () => {
+    assert.equal((await MP4.audioConfig(null, song)).bitrate, 320000, 'a missing bitrate is still an explicit configured target');
+  }, (c) => ({ codec: c.codec, sampleRate: c.sampleRate, numberOfChannels: c.numberOfChannels }));
+});
+
+test('audio selection: unsupported or ignored CBR falls back at the same 320 target before lowering the bitrate', async () => {
+  const song = { sampleRate: 48000 };
+  for (const reject of ['throw', 'ignored', 'variable']) {
+    await withEncoders(['mp4a.40.2'], async (asked) => {
+      const c = await MP4.audioConfig(null, song);
+      assert.equal(c.bitrate, 320000, reject + ': preserve the preferred target');
+      assert.notEqual(c.bitrateMode, 'constant', reject + ': do not promise CBR');
+      assert.deepEqual(asked.map((x) => [x.bitrate, x.bitrateMode || null]), [[320000, 'constant'], [320000, null]]);
+    }, (c) => {
+      if (c.bitrateMode === 'constant' && reject === 'throw') throw new TypeError('constant unsupported');
+      const out = Object.assign({}, c);
+      if (reject === 'ignored') delete out.bitrateMode;
+      else out.bitrateMode = 'variable';
+      return out;
+    });
+  }
 });
 
 test('export jobs await engine.mediaReady(t) before each frame; a store failure stops with ExportError(media) naming the asset', async () => {
@@ -700,8 +764,9 @@ test('transparent WebM sizes: the alpha stream at ALPHA_SHARE of the colour bitr
   assert.equal(S.alphaBitrate(3317760), 3317760);
   const bits = S.bitrate(1920, 1080, 30, 'high');
   assert.equal(S.estimateWebmBytes(10, bits, false), Math.ceil(((10 * (bits + S.alphaBitrate(bits))) / 8) * 1.02));
-  assert.equal(S.estimateWebmBytes(10, bits, true) - S.estimateWebmBytes(10, bits, false), Math.ceil(((10 * (2 * bits + 160000)) / 8) * 1.02)
-    - Math.ceil(((10 * 2 * bits) / 8) * 1.02), 'Opus at 160 kbps');
+  assert.equal(S.estimateWebmBytes(10, bits, true) - S.estimateWebmBytes(10, bits, false), Math.ceil(((10 * (2 * bits + 320000)) / 8) * 1.02)
+    - Math.ceil(((10 * 2 * bits) / 8) * 1.02), 'Opus at 320 kbps');
+  assert.equal(S.estimateWebmBytes(10, bits, true, 160000), Math.ceil(((10 * (2 * bits + 160000)) / 8) * 1.02), 'supported Opus fallback rate');
   assert.equal(S.estimateWebmBytes(0, bits, true), 0);
 });
 
@@ -717,6 +782,8 @@ test('kitFiles: the §13.9 names and order, the WAV only without AAC, estimates 
     ['README_Filmora.txt', 'readme']]);
   const bits = S.bitrate(1920, 1080, 30, 'high');
   assert.equal(aac[0].est, S.estimateBytes(4, bits, true), 'the main MP4 carries AAC');
+  assert.equal(S.kitFiles(doc, plan, { audioCodec: 'mp4a.40.2', audioBitrate: 192000 })[0].est, S.estimateBytes(4, bits, true, 192000),
+    'the kit estimate uses the supported AAC target');
   assert.equal(aac[1].est, S.estimateWebmBytes(4, bits, false), 'the overlay is silent');
   assert.ok(aac[2].est > 3 && aac[2].est < 400, 'SRT: a few cues');
   doc.output.kit = { overlay: true, bg: true, green: true, srt: true, lrc: true };
@@ -802,6 +869,22 @@ test('preflight: 透過動画（WebM） — no-vp9 blocks, Opus is its sound, me
   const clear = withSong(sampleDoc({ format: 'webmAlpha' }));
   clear.look.backdrop = 'clear';
   assert.deepEqual(codes(S.preflight(clear, plan, KIT_READY)), [], 'no clear-mp4');
+});
+
+test('preflight: memory uses the selected audio target and WebM audio support separately from MP4', () => {
+  const doc = withSong(sampleDoc({ format: 'mp4', short: 720, fps: 30, range: { t0: 1, t1: 5 } }));
+  const plan = samplePlan(doc), bits = S.bitrate(1280, 720, 30, 'high');
+  const base = Object.assign({}, KIT_READY, { fsAccess: false, audioCodec: 'mp4a.40.2', audioBitrate: 192000,
+    webmAudioCodec: 'opus', webmAudioBitrate: 160000 });
+  const memory = (env) => S.preflight(doc, plan, env).find((x) => x.code === 'memory').params.bytes;
+  assert.equal(memory(base), S.estimateBytes(4, bits, true, 192000));
+  assert.equal(memory(Object.assign({}, base, { audioCodec: null })), S.estimateBytes(4, bits, false));
+  doc.output.format = 'webmAlpha';
+  assert.equal(memory(base), S.estimateWebmBytes(4, bits, true, 160000), 'WebM uses its Opus target, not the AAC rate');
+  const noOpus = Object.assign({}, base, { webmAudioCodec: null, webmAudioBitrate: null });
+  assert.ok(codes(S.preflight(doc, plan, noOpus)).includes('no-audio-codec'), 'AAC alone does not give WebM audio');
+  assert.equal(memory(noOpus), S.estimateWebmBytes(4, bits, false));
+  assert.equal(memory(Object.assign({}, base, { songReady: false })), S.estimateWebmBytes(4, bits, false), 'an unavailable song is not counted');
 });
 
 test('layerDiffs and layers-approx: world seams and screen effects where background under overlay is not the full render', () => {

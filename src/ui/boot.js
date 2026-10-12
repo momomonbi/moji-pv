@@ -582,17 +582,22 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
       const format = app.doc.output.format;
       return format === 'kit' ? S.kitFolder(app.doc) : S.fileName(app.doc, S.FORMATS[format].ext);
     };
-    // WebCodecs support for the current size (async; cached per w×h×fps, then the step re-renders).
+    // WebCodecs support for the current size and processing preference (async, then the step re-renders).
     app.exportProbe = () => {
       if (!app.plan) return null;
       const o = app.doc.output;
       const { w, h } = ex().schedule.outputSize(app.plan.design.aspect, o.short);
-      const key = w + 'x' + h + '@' + o.fps;
+      const acceleration = o.acceleration || 'auto';
+      const key = w + 'x' + h + '@' + o.fps + ':' + acceleration;
       if (probed.key !== key) {
         probed = { key, value: null };
-        ex().mp4.probe({ w, h, fps: o.fps }).then((value) => {
+        ex().mp4.probe({ w, h, fps: o.fps, acceleration }).then((value) => {
           if (probed.key === key) { probed.value = value; app.bus.emit('export', st); }
-        }).catch(() => { probed.value = { webcodecs: false, codec: null, audioCodec: null, anyCodec: false, vp9Codec: null }; });
+        }).catch(() => {
+          if (probed.key === key) { probed.value = { webcodecs: false, codec: null, audioCodec: null, audioBitrate: null,
+            audioBitrateMode: null, webmAudioCodec: null, webmAudioBitrate: null, webmAudioBitrateMode: null,
+            anyCodec: false, vp9Codec: null }; app.bus.emit('export', st); }
+        });
       }
       return probed.value;
     };
@@ -609,6 +614,7 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
       try { jumps = typeof app.engine.xJumps === 'function' ? app.engine.xJumps(range.t0, range.t1) : []; } catch (e) { jumps = []; }
       const items = ex().schedule.preflight(app.doc, app.plan, {
         webcodecs: typeof VideoEncoder === 'function', codec: pr.codec, audioCodec: pr.audioCodec, anyCodec: pr.anyCodec,
+        audioBitrate: pr.audioBitrate, webmAudioCodec: pr.webmAudioCodec, webmAudioBitrate: pr.webmAudioBitrate,
         vp9Codec: pr.vp9Codec, fontsReady: fontsReady(),
         fsAccess: ex().sink.canStream(), dirAccess: ex().sink.canDirectory(), songReady: !app.doc.song || app.songReady(),
         warnings: app.warnings(), registry: app.reg, jumps,

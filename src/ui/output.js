@@ -31,6 +31,19 @@ MV.def('ui/output', ['export/schedule', 'engine/scene/frame'], (S, F) => {
     return cmds;
   }
 
+  // Fewer pixels and frames reduce rendering work. Keep an already smaller / slower choice, and retain sound,
+  // range, compression quality and the Filmora set. A user choice is one undo entry at the caller.
+  function speedProfile(doc) {
+    return { short: Math.min(doc.output.short, doc.output.format === 'kit' ? 1080 : 720),
+      fps: Math.min(doc.output.fps, 30) };
+  }
+
+  function speedCmds(doc) {
+    const profile = speedProfile(doc);
+    return Object.keys(profile).filter((key) => profile[key] !== doc.output[key])
+      .map((key) => ({ t: 'output.set', key, v: profile[key] }));
+  }
+
   // transparentOf(format) → the format the backdrop 透明 leads to: 透過PNG from a PNG sequence (frames stay frames, as the
   // way back gives PNG連番 again), else 透過動画（WebM）, the primary transparent path (from MP4 and Filmora用).
   function transparentOf(format) { return format === 'png' || format === 'pngAlpha' ? 'pngAlpha' : 'webmAlpha'; }
@@ -210,12 +223,44 @@ MV.def('ui/output', ['export/schedule', 'engine/scene/frame'], (S, F) => {
     const { t0, t1 } = S.exportRange(doc, plan);
     const seconds = Math.max(0, t1 - t0);
     const { w, h } = S.outputSize(plan.design.aspect, o.short);
-    const song = !!(o.audio && doc.song);
+    const codec = o.format === 'webmAlpha' ? e.webmAudioCodec : e.audioCodec;
+    const song = !!(o.audio && doc.song) && e.songReady !== false && codec !== null;
     let bytes;
-    if (o.format === 'mp4') bytes = S.estimateBytes(seconds, S.bitrate(w, h, o.fps, o.quality), song);
-    else if (o.format === 'webmAlpha') bytes = S.estimateWebmBytes(seconds, S.bitrate(w, h, o.fps, o.quality), song);
+    if (o.format === 'mp4') bytes = S.estimateBytes(seconds, S.bitrate(w, h, o.fps, o.quality), song, e.audioBitrate);
+    else if (o.format === 'webmAlpha') bytes = S.estimateWebmBytes(seconds, S.bitrate(w, h, o.fps, o.quality), song, e.webmAudioBitrate);
     else bytes = S.estimatePngBytes(S.frameCount(seconds, o.fps), w, h, o.format === 'pngAlpha');
     return { key: 'exp.summary', params: { w, h, fps: o.fps, seconds, bytes, where: e.fsAccess ? 'disk' : 'memory' } };
+  }
+
+  // All estimates use the same range, size, fps and sound as the selected output. PNG is lossless and has
+  // no bitrate-based quality levels; kit estimates include its auxiliary files, not just the main video.
+  function qualityOptions(doc, plan, env) {
+    const rows = S.QUALITY_LEVELS.map((quality) => {
+      const sample = Object.assign({}, doc, { output: Object.assign({}, doc.output, { quality }) });
+      const total = summary(sample, plan, env);
+      return { quality, bytes: total.params.bytes };
+    });
+    const base = rows.find((row) => row.quality === 'standard').bytes;
+    for (const row of rows) row.ratio = base > 0 ? row.bytes / base : 1;
+    return { lossless: doc.output.format === 'png' || doc.output.format === 'pngAlpha', rows };
+  }
+
+  // The probed encoder setting (a target bitrate, not a measurement of the finished file). Unknown support shows
+  // the preferred rate until the probe completes; format-specific probes keep MP4 AAC and WebM Opus separate.
+  function audioInfo(doc, env) {
+    const e = env || {}, o = doc.output;
+    if (!hasSound(o.format)) return { state: 'image' };
+    if (!o.audio) return { state: 'off' };
+    if (!doc.song) return { state: 'no-song' };
+    if (e.songReady === false) return { state: 'missing' };
+    const webm = o.format === 'webmAlpha';
+    const codec = webm ? e.webmAudioCodec : e.audioCodec;
+    const bitrate = webm ? e.webmAudioBitrate : e.audioBitrate;
+    if (o.format === 'kit' && codec !== undefined && codec !== 'mp4a.40.2') return { state: 'wav' };
+    if (codec === null) return { state: 'unavailable' };
+    if (codec === undefined || !(bitrate > 0)) return { state: 'checking', preferred: S.AUDIO_BITRATE };
+    const mode = webm ? e.webmAudioBitrateMode : e.audioBitrateMode;
+    return { state: 'ready', codec, bitrate, mode: mode || null, preferred: S.AUDIO_BITRATE, fallback: bitrate < S.AUDIO_BITRATE };
   }
 
   // kitLabel(kind) → the key that names a file of the set (step ④'s done list, the guide), or null (none for a kind
@@ -279,7 +324,8 @@ MV.def('ui/output', ['export/schedule', 'engine/scene/frame'], (S, F) => {
   return {
     FORMATS, MAIN_FORMATS, OTHER_FORMATS, BACKDROPS, KIT_KEYS, ERROR_KEYS, isAlpha, formatCmds, transparentOf, opaqueOf,
     backdropCmds, clearLabel, backdropChoices, backdropNote, effectiveBackdrop, consistent, skipOf, usedFilters, skippedFilters,
-    checks, kitCmd, withFixes, fixLabel, checkKey, layersWhat, listText, summary, kitLabel, kitAlways, shownChecks, hasSound,
+    checks, kitCmd, withFixes, fixLabel, checkKey, layersWhat, listText, summary, qualityOptions, audioInfo,
+    kitLabel, kitAlways, shownChecks, hasSound, speedProfile, speedCmds,
     mergeFonts, errorKey, errorParams,
   };
 });

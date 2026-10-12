@@ -225,7 +225,8 @@ test('UI keys built at run time exist for every value they can take', () => {
   each('lang.', D.LANGS.filter((l) => l !== 'auto'));
   each('exp.fmt.', MV.use('ui/output').FORMATS.concat(['other', 'otherLabel']));
   each('exp.bg.', D.BACKDROPS);
-  each('exp.q.', ['standard', 'high', 'max']);
+  each('exp.q.', MV.use('export/schedule').QUALITY_LEVELS);
+  each('exp.acceleration.', D.OUTPUT_CHOICES.acceleration);
   each('exp.range.', ['all', 'sel', 'io']);
   each('hdr.save.', ['saving', 'saved', 'failed', 'quota']);
   each('crumb.', ['work', 'line', 'lines', 'cut', 'title', 'intro', 'outro', 'gap', 'ornament', 'filter']);

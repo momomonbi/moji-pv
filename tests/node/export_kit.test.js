@@ -84,7 +84,7 @@ function installCodecs(o) {
   }
   class AudioData { constructor(init) { Object.assign(this, init); } close() {} }
   class AudioEncoder {
-    static async isConfigSupported(config) { return { supported: o.audio(config.codec), config }; }
+    static async isConfigSupported(config) { return { supported: o.audio(config.codec, config), config: o.audioConfig ? o.audioConfig(config) : config }; }
     constructor(init) { this.init = init; this.n = 0; this.encodeQueueSize = 0; this.state = 'unconfigured'; log.audio.push(this); this.inputs = []; }
     configure(config) { this.config = config; this.state = 'configured'; }
     encode(data) {
@@ -232,7 +232,9 @@ test('exportWebm: colour + alpha-as-luma frames, paired into one BlockGroup each
       canvas: canvasFactory(), onProgress: (p) => progress.push(p.i) });
     const N = 7;
     assert.equal(res.frames, N);
-    deepEqual([res.codec, res.audio, res.audioCodec, res.name], ['vp09.00.31.08', true, 'opus', '夜明け.webm']);
+    deepEqual([res.codec, res.audio, res.audioCodec, res.audioBitrate, res.name], ['vp09.00.31.08', true, 'opus', 320000, '夜明け.webm']);
+    assert.equal(c.audio[0].config.bitrate, res.audioBitrate, 'reported target is the one configured in the encoder');
+    assert.equal(res.audioBitrateMode, 'constant');
     deepEqual(progress, [1, 2, 3, 4, 5, 6, 7]);
     // the encoders: colour (RGBA, the readback) and alpha (I420, Y = alpha, U = V = 128, full range)
     const [colour, alpha] = c.video;
@@ -285,7 +287,7 @@ test('exportWebm: VP8 where VP9 does not encode; no audio track without a song o
   const doc = sampleDoc({ format: 'webmAlpha', audio: true });
   await withCodecs({ video: (codec) => codec === 'vp8' }, async (c) => {
     const res = await WH.exportWebm({ engine: fakeEngine(doc, []), doc, audio: null, sink: SINK.createMemorySink(), canvas: canvasFactory() });
-    deepEqual([res.codec, res.audio, res.audioCodec], ['vp8', false, null]);
+    deepEqual([res.codec, res.audio, res.audioCodec, res.audioBitrate, res.audioBitrateMode], ['vp8', false, null, null, null]);
     const movie = await demux(await blobBytes(res.blob));
     deepEqual(movie.tracks.map((t) => [t.kind, t.codec]), [['video', 'vp8']]);
     assert.equal(c.audio.length, 0);
@@ -672,7 +674,9 @@ test('exportKit: one pass — per frame both forks\' media, then main, overlay, 
       ['avc1.640028', S.bitrate(1280, 720, FPS, 'max')]]);
     assert.ok(c.video.every((e) => e.inputs.length === N && e.inputs.every((x, i) => x.timestamp === S.ts(i, FPS) && x.key === (i === 0))));
     assert.equal(c.audio.length, 0, 'no AAC encoder: the kit never falls back to Opus in MP4');
-    deepEqual([result.audio, result.frames, result.codec, result.overlayCodec, result.folder], ['wav', N, 'avc1.640028', 'vp09.00.31.08', '夜明け_filmora']);
+    deepEqual([result.audio, result.audioCodec, result.audioBitrate, result.frames, result.codec, result.overlayCodec, result.folder],
+      ['wav', 'pcm-s16le', 1536000, N, 'avc1.640028', 'vp09.00.31.08', '夜明け_filmora']);
+    assert.equal(result.audioBitrateMode, 'constant');
     // the ZIP (no folder): every file of kitFiles, in its order
     const base = '夜明け';
     const names = [base + '.mp4', base + '_overlay.webm', base + '_bg.mp4', base + '_green.mp4', base + '.srt', base + '.lrc', base + '.wav', 'README_Filmora.txt'];
@@ -715,6 +719,9 @@ test('exportKit: AAC in the main MP4 where it encodes (no WAV); no song, no soun
     const { result } = await kitRun(kitDoc({ bg: false, green: false, lrc: false }));
     deepEqual(result.files.map((f) => f.kind), ['main', 'overlay', 'srt', 'readme']);
     assert.equal(result.audio, 'aac');
+    deepEqual([result.audioCodec, result.audioBitrate], ['mp4a.40.2', 320000]);
+    assert.equal(result.audioBitrateMode, 'constant');
+    assert.equal(result.audioBitrate, c.audio[0].config.bitrate);
     deepEqual(c.audio.map((e) => e.config.codec), ['mp4a.40.2']);
     const main = JSON.parse(new TextDecoder().decode((await unzip(result.blob)).get('夜明け.mp4')));
     deepEqual(main.audio, { codec: 'aac', numberOfChannels: 2, sampleRate: 48000 });
@@ -723,6 +730,7 @@ test('exportKit: AAC in the main MP4 where it encodes (no WAV); no song, no soun
   await withCodecs({ audio: () => true }, async (c) => {
     const { result } = await kitRun(kitDoc({ overlay: false, green: false }), { audio: null });
     deepEqual([result.audio, result.files.map((f) => f.kind)], ['none', ['main', 'bg', 'srt', 'lrc', 'readme']]);
+    deepEqual([result.audioCodec, result.audioBitrate, result.audioBitrateMode], [null, null, null]);
     assert.equal(c.audio.length, 0);
     assert.equal(c.video.length, 2, 'main and background only');
   });
@@ -736,6 +744,50 @@ test('exportKit: AAC in the main MP4 where it encodes (no WAV); no song, no soun
     assert.ok(log.filter((x) => x[0] === 'fork').every((x) => x[2] === null), 'no store given: the forks make their own');
     deepEqual(result.files.map((f) => f.kind), ['main', 'overlay', 'bg', 'srt', 'lrc', 'readme']);
   });
+});
+
+test('MP4 and Filmora results disclose AAC 192 fallback and browser-normalized targets; silent results have no bitrate', async () => {
+  for (const normalized of [false, true]) {
+    await withCodecs({
+      audio: (codec, cfg) => codec === 'mp4a.40.2' && (normalized || cfg.bitrate === 192000),
+      audioConfig: normalized ? (cfg) => Object.assign({}, cfg, { bitrate: 192000 }) : null,
+    }, async (c) => {
+      const doc = sampleDoc({ format: 'mp4' });
+      const result = await J.exportVideo({ engine: fakeEngine(doc, []), doc, audio: toneBuffer(2, 48000),
+        sink: SINK.createMemorySink(), canvas: canvasFactory(), lib: fakeMp4Lib() });
+      deepEqual([result.audio, result.audioCodec, result.audioBitrate], [true, 'mp4a.40.2', 192000]);
+      assert.equal(result.audioBitrateMode, 'constant');
+      assert.equal(c.audio[0].config.bitrate, result.audioBitrate);
+      const kit = await kitRun(kitDoc({ overlay: false, bg: false, green: false, srt: false, lrc: false }));
+      deepEqual([kit.result.audio, kit.result.audioCodec, kit.result.audioBitrate], ['aac', 'mp4a.40.2', 192000]);
+      assert.equal(kit.result.audioBitrateMode, 'constant');
+      assert.equal(c.audio[1].config.bitrate, kit.result.audioBitrate);
+    });
+  }
+  await withCodecs({ audio: () => false }, async () => {
+    const doc = sampleDoc({ format: 'mp4' });
+    const result = await J.exportVideo({ engine: fakeEngine(doc, []), doc, audio: toneBuffer(2, 48000),
+      sink: SINK.createMemorySink(), canvas: canvasFactory(), lib: fakeMp4Lib() });
+    deepEqual([result.audio, result.audioCodec, result.audioBitrate, result.audioBitrateMode], [false, null, null, null]);
+  });
+});
+
+test('MP4 and transparent WebM configure Opus 320 by default, retain 160 compatibility fallback, and report the chosen target', async () => {
+  for (const bitrate of [320000, 160000]) {
+    await withCodecs({ audio: (codec, cfg) => codec === 'opus' && cfg.bitrate === bitrate }, async (c) => {
+      const doc = sampleDoc({ format: 'mp4', short: 180 });
+      const mp4 = await J.exportVideo({ engine: fakeEngine(doc, []), doc, audio: toneBuffer(2, 48000),
+        sink: SINK.createMemorySink(), canvas: canvasFactory(), lib: fakeMp4Lib() });
+      deepEqual([mp4.audio, mp4.audioCodec, mp4.audioBitrate], [true, 'opus', bitrate]);
+      assert.equal(mp4.audioBitrateMode, 'constant');
+      const webmDoc = sampleDoc({ format: 'webmAlpha', short: 180 });
+      const webm = await WH.exportWebm({ engine: fakeEngine(webmDoc, []), doc: webmDoc, audio: toneBuffer(2, 48000),
+        sink: SINK.createMemorySink(), canvas: canvasFactory() });
+      deepEqual([webm.audio, webm.audioCodec, webm.audioBitrate], [true, 'opus', bitrate]);
+      assert.equal(webm.audioBitrateMode, 'constant');
+      deepEqual(c.audio.map((x) => x.config.bitrate), [bitrate, bitrate]);
+    });
+  }
 });
 
 test('exportKit into a folder: one file sink each; cancel, a missing VP9 or a store failure remove the folder', async () => {

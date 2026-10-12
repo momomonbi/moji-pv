@@ -398,3 +398,52 @@ test('the set\'s contents list the files it adds by itself, so its rows add up t
   }
   assert.deepEqual(OUT.kitAlways(kitDoc(), PLAN, { audioCodec: null, songReady: false }), ['readme'], 'no song, no WAV');
 });
+
+test('quality comparison estimates the chosen range and negotiated audio for every level without editing the document', () => {
+  const doc = docWith('mp4', 'scene');
+  doc.output = Object.assign({}, doc.output, { short: 1080, fps: 30, range: { t0: 2, t1: 7 }, audio: true });
+  doc.song = { sha1: 'song', name: 'song.wav', seconds: 20 };
+  const before = JSON.stringify(doc), plan = { duration: 20, design: { aspect: '16:9' }, lines: [], cuts: [] };
+  const env = { audioCodec: 'mp4a.40.2', audioBitrate: 192000, songReady: true };
+  const result = OUT.qualityOptions(doc, plan, env);
+  assert.equal(result.lossless, false);
+  assert.deepEqual(result.rows.map((q) => q.quality), ['light', 'standard', 'high', 'max']);
+  for (const row of result.rows) {
+    assert.equal(row.bytes, S.estimateBytes(5, S.bitrate(1920, 1080, 30, row.quality), true, 192000));
+    assert.equal(row.ratio, row.bytes / result.rows[1].bytes);
+  }
+  assert.ok(result.rows[3].bytes > result.rows[2].bytes && result.rows[2].bytes > result.rows[1].bytes &&
+    result.rows[1].bytes > result.rows[0].bytes);
+  assert.ok(result.rows[0].ratio > 0.5 && result.rows[0].ratio < 1, 'the audio stays unchanged in the lighter preset');
+  assert.equal(result.rows[1].ratio, 1, 'the low / standard preset remains the comparison baseline');
+  assert.ok(result.rows[2].ratio < 1.5, 'the unchanged audio is included in the ratio');
+  const missing = OUT.qualityOptions(doc, plan, Object.assign({}, env, { audioCodec: null }));
+  assert.ok(missing.rows[0].bytes < result.rows[0].bytes, 'an unavailable encoder does not inflate the estimate');
+  for (const format of ['png', 'pngAlpha']) {
+    const png = OUT.qualityOptions(Object.assign({}, doc, { output: Object.assign({}, doc.output, { format }) }), plan, env);
+    assert.equal(png.lossless, true);
+    assert.equal(new Set(png.rows.map((q) => q.bytes)).size, 1);
+  }
+  const webm = Object.assign({}, doc, { output: Object.assign({}, doc.output, { format: 'webmAlpha' }) });
+  assert.equal(OUT.qualityOptions(webm, plan, { webmAudioCodec: 'opus', webmAudioBitrate: 320000 }).rows[0].bytes,
+    S.estimateWebmBytes(5, S.bitrate(1920, 1080, 30, 'light'), true, 320000));
+  assert.equal(JSON.stringify(doc), before, 'comparison only reads settings');
+});
+
+test('audio quality distinguishes preferred 320, platform fallback, Opus, PNG and uncompressed kit sound', () => {
+  const doc = docWith('mp4', 'scene');
+  doc.song = { name: 'song.wav', seconds: 20 };
+  doc.output.audio = true;
+  assert.equal(OUT.audioInfo(doc, {}).state, 'checking');
+  assert.equal(OUT.audioInfo(doc, {}).preferred, 320000);
+  const chosen = OUT.audioInfo(doc, { audioCodec: 'mp4a.40.2', audioBitrate: 192000, audioBitrateMode: 'constant' });
+  assert.equal(chosen.bitrate, 192000); assert.equal(chosen.fallback, true); assert.equal(chosen.mode, 'constant');
+  assert.equal(OUT.audioInfo(doc, { audioCodec: 'opus', audioBitrate: 320000 }).fallback, false);
+  assert.equal(OUT.audioInfo(doc, { audioCodec: null }).state, 'unavailable');
+  const kit = Object.assign({}, doc, { output: Object.assign({}, doc.output, { format: 'kit' }) });
+  assert.equal(OUT.audioInfo(kit, { audioCodec: 'opus' }).state, 'wav');
+  const png = Object.assign({}, doc, { output: Object.assign({}, doc.output, { format: 'png' }) });
+  assert.equal(OUT.audioInfo(png, {}).state, 'image');
+  assert.equal(OUT.audioInfo(Object.assign({}, doc, { song: null }), {}).state, 'no-song');
+  assert.equal(OUT.audioInfo(doc, { songReady: false }).state, 'missing');
+});

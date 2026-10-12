@@ -1,6 +1,6 @@
 <!doctype html><html lang="ja"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-SAqi3xTiNfrWTcE6J9C8tahaJNBFE0/XOP34ATMnA3k='; style-src 'sha256-uhekdjVoF8p0oG5Jys9SuRatxu3plo9h2Wexn3/9z4g=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-kdh+z6i89JeYI0aV+tdaTtzHu/Yxszx08FTKtqcQZKQ='; style-src 'sha256-Yi2ZF9kQXDQ2Io/WQdpdb9LAPiokDGDD/emqrGLxFPc=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
 <title>文字PVメーカー</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -377,6 +377,36 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent);
 .more[open] summary { margin-bottom: 4px; }
 .exp-note { margin-top: 6px; font-size: 12px; line-height: 1.5; }
 .exp-summary { font-size: 12px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.exp-settings .segmented.quality-options { display: grid; gap: 7px; }
+.exp-settings .seg.quality-option { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; height: auto;
+  min-height: 78px; padding: 10px 12px; text-align: left; white-space: normal; border: 1px solid var(--line);
+  border-radius: 8px; background: var(--panel-2); }
+.quality-option[aria-checked="true"] { border-color: var(--accent) !important; background: var(--accent-soft) !important; }
+.quality-option-title { font-size: 13px; font-weight: 800; }
+.quality-option-size { font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.quality-option-ratio { grid-column: 2; font-size: 11px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.quality-option-description { grid-column: 1 / -1; font-size: 11.5px; font-weight: 400; line-height: 1.5; color: var(--text-2); }
+.export-quality-preview { display: grid; gap: 9px; padding-top: 10px; }
+.quality-preview-actions, .quality-preview-transport { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.quality-preview-status, .quality-preview-range { font-size: 11.5px; line-height: 1.5; color: var(--text-2); }
+.quality-preview-clips { display: grid; gap: 12px; }
+.quality-preview-clip { display: grid; gap: 5px; min-width: 0; }
+.quality-preview-clip-title { font-size: 12px; font-weight: 700; }
+.quality-preview-clip video { display: block; width: 100%; max-height: 270px; object-fit: contain; background: #080a0c; border-radius: 6px; }
+.quality-preview-clip.is-alpha video { background-color: #20242b;
+  background-image: conic-gradient(#343b46 25%, transparent 0 50%, #343b46 0 75%, transparent 0);
+  background-size: 20px 20px; }
+.quality-preview-transport input[type="range"] { width: 100%; }
+.quality-preview-dialog { width: min(1200px, calc(100vw - 40px)); max-height: calc(100vh - 40px); padding: 20px;
+  color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
+.quality-preview-dialog::backdrop { background: rgba(0, 0, 0, 0.7); }
+.quality-preview-dialog-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.quality-preview-dialog .quality-preview-clips { grid-template-columns: repeat(var(--quality-count, 4), minmax(0, 1fr)); }
+.quality-preview-dialog .quality-preview-clip video { max-height: 65vh; }
+.quality-preview-dialog .quality-preview-transport { margin: 12px 0; }
+@media (max-width: 760px) {
+  .quality-preview-dialog .quality-preview-clips { grid-template-columns: 1fr; }
+}
 .checks { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
 .check { display: flex; align-items: flex-start; gap: 7px; font-size: 12px; line-height: 1.55; color: var(--text-2); }
 .check .icon { margin-top: 2px; }
@@ -6772,7 +6802,7 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
     'seam', 'theme']);
   const OUTPUT_CHOICES = Object.freeze({
     format: ['mp4', 'kit', 'webmAlpha', 'png', 'pngAlpha'], short: [720, 1080, 1440, 2160], fps: [24, 30, 60],
-    quality: ['standard', 'high', 'max'],
+    quality: ['light', 'standard', 'high', 'max'], acceleration: ['auto', 'cpu'],
   });
   // output.kit: the optional files of the Filmora set (§13.3); the main MP4 is always written.
   const KIT_KEYS = Object.freeze(['overlay', 'bg', 'green', 'srt', 'lrc']);
@@ -6801,7 +6831,7 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
     pin: ['v', 'by', 'sig'],
     lock: ['n'],
     filter: ['only', 'deny'],
-    output: ['format', 'short', 'fps', 'quality', 'audio', 'range', 'name', 'kit'],
+    output: ['format', 'short', 'fps', 'quality', 'acceleration', 'audio', 'range', 'name', 'kit'],
     range: ['t0', 't1'],
     kit: KIT_KEYS,
     materials: ['next', 'list'],
@@ -6834,7 +6864,7 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
       filters: {},
       materials: { next: 1, list: [] },
       media: { list: [] },
-      output: { format: 'mp4', short: 1080, fps: 30, quality: 'high', audio: true, range: null, name: null,
+      output: { format: 'mp4', short: 1080, fps: 30, quality: 'high', acceleration: 'auto', audio: true, range: null, name: null,
         kit: Object.assign({}, KIT_DEFAULT) },
     };
   }
@@ -7060,6 +7090,7 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
   function checkOutput(output, bad) {
     if (!isObject(output)) { bad('output', 'must be an object'); return; }
     for (const k of Object.keys(OUTPUT_CHOICES)) {
+      if (k === 'acceleration' && output[k] === undefined) continue; // Older projects default to GPU preference.
       if (!OUTPUT_CHOICES[k].includes(output[k])) bad('output.' + k, 'must be one of ' + OUTPUT_CHOICES[k].join(' '));
     }
     if (typeof output.audio !== 'boolean') bad('output.audio', 'must be a boolean');
@@ -7781,7 +7812,7 @@ MV.def('core/commands', ['core/doc', 'core/paths', 'core/pins', 'core/lyrics', '
     // ---- settings sections: timing, song, output ------------------------------------------------------------------
 
     const TIMING_KEYS = ['snap', 'lead', 'tail', 'leadIn', 'outro', 'tapLatency'];
-    const OUTPUT_KEYS = ['format', 'short', 'fps', 'quality', 'audio', 'range', 'name', 'kit'];
+    const OUTPUT_KEYS = ['format', 'short', 'fps', 'quality', 'acceleration', 'audio', 'range', 'name', 'kit'];
 
     // Sets doc[section][key] = v, validated by core/doc (problems under that section refuse the command).
     function setSetting(doc, section, key, v) {
@@ -12170,6 +12201,20 @@ MV.def('i18n/strings', [], () => ({
   'song.tapFromStart': ['1行目から・スペースで記録', 'From line 1 · Space marks'],
   'song.aiTiming': ['AIでタイミング', 'AI timing'],
   'song.shiftAll': ['タイミングを全体でずらす', 'Shift all timings'],
+  'song.shiftTitle': ['タイミングをずらす', 'Shift timings'],
+  'song.shiftTarget': ['対象', 'Target'],
+  'song.shiftTarget.all': ['全体', 'All lines'],
+  'song.shiftTarget.area': ['選択区画', 'Selected section'],
+  'song.shiftTarget.selection': ['選択中', 'Current selection'],
+  'song.shiftArea': ['区画', 'Section'],
+  'song.shiftNone': ['行・カットを選択してください', 'Select a line or cut'],
+  'song.shiftNoArea': ['区画がありません。歌詞の見出しや空行で区画を作れます', 'No sections yet. Add lyric headings or blank lines to create sections'],
+  'song.shiftLines': ['{name}（{n}行）', '{name} ({n} lines)'],
+  'song.shiftHintSelected': ['対象だけを早く（−）・遅く（＋）します。他の行は現在の時刻に固定します。行の順番や0秒を超える移動は制限されます', 'Moves only the target earlier (−) or later (+), holding other lines at their current times and keeping line order at or after zero'],
+  'song.shiftHintCut': ['選択カットの開始境界をずらします。他の行は現在の時刻に固定し、前後のカットにはみ出さない範囲で調整します', 'Shifts the selected cut’s start boundary within its neighboring cuts, holding other lines at their current times'],
+  'song.shiftLocked': ['固定されたタイミングがあるため、この対象はずらせません', 'This target has locked timings'],
+  'song.shiftBoundary': ['前後の境界に達しています', 'The timing has reached a neighboring boundary'],
+  'song.shiftPartial': ['{d}秒ずらしました（境界まで）', 'Shifted by {d} s (up to the boundary)'],
   'song.shiftBy': ['{d}秒', '{d} s'],
   'song.shiftHint': ['全部の行を同じだけ早く（−）・遅く（＋）します', 'Moves every line earlier (−) or later (+)'],
   'song.aiNeedsSong': ['曲を読み込むと使えます', 'Load a song first'],
@@ -12222,7 +12267,7 @@ MV.def('i18n/strings', [], () => ({
   'exp.size': ['大きさ', 'Size'],
   'exp.fps': ['なめらかさ', 'Smoothness'],
   'exp.backdrop': ['背景', 'Background'],
-  'exp.more': ['詳しく（範囲・画質・音声・ファイル名）', 'More (range, quality, audio, file name)'],
+  'exp.more': ['詳しく（範囲・音声・ファイル名）', 'More (range, audio, file name)'],
   'exp.range': ['範囲', 'Range'],
   'exp.quality': ['画質', 'Quality'],
   'exp.audio': ['音声を入れる', 'Include audio'],
@@ -12238,9 +12283,78 @@ MV.def('i18n/strings', [], () => ({
   'exp.range.all': ['全体', 'All'],
   'exp.range.sel': ['選んだ行', 'Selected lines'],
   'exp.range.io': ['I–O 範囲', 'I–O range'],
+  'exp.q.light': ['軽量', 'Light'],
   'exp.q.standard': ['標準', 'Standard'],
   'exp.q.high': ['高', 'High'],
   'exp.q.max': ['最高', 'Max'],
+  'exp.qualityCompare': ['画質・容量を比べる', 'Compare quality and file size'],
+  'exp.qualitySize': ['約 {size}', 'About {size}'],
+  'exp.qualityRatio': ['標準の{ratio}倍', '{ratio}× Standard'],
+  'exp.qualityDescription.light': ['確認用の小さな容量。映像の目標ビットレートは標準の半分で、細い文字や動きの多い場面はにじみやすくなります。',
+    'Small files for review. Half the Standard video bitrate; fine lettering and busy scenes can blur.'],
+  'exp.qualityDescription.standard': ['容量を抑える。動きの多い背景や細い文字は輪郭がにじむことがあります。',
+    'Smaller files. Busy backgrounds and fine lettering may soften.'],
+  'exp.qualityDescription.high': ['おすすめ。文字や動きの見やすさと容量のバランス。',
+    'Recommended. A balance of clear text, motion and file size.'],
+  'exp.qualityDescription.max': ['粒子や細部の多い映像向け。圧縮のにじみを抑え、容量は大きくなります。',
+    'For particles and intricate scenes. Less compression blur, with larger files.'],
+  'exp.qualityHelp': ['選んだ範囲・サイズ・fps・音声での容量目安です。動きや背景によって、実容量や見え方は変わります。',
+    'Estimates use the selected range, size, fps and audio. Actual size and visible compression depend on the scene.'],
+  'exp.qualityLossless': ['PNGは圧縮による画質劣化がありません。画質を変えても見た目・容量は変わらず、サイズ・fps・範囲で容量が変わります。',
+    'PNG is lossless. These quality levels do not change its image or size; resolution, fps and duration do.'],
+  'exp.audioQuality.ready': ['音声：{codec}・{rate} kbps（{mode}）', 'Audio: {codec} · {rate} kbps ({mode})'],
+  'exp.audioQuality.constant': ['固定ビットレート', 'constant bitrate'],
+  'exp.audioQuality.target': ['目標ビットレート', 'target bitrate'],
+  'exp.audioQuality.fallback': ['このブラウザでは{rate} kbpsに対応していないため、対応する音質を使います。',
+    'This browser cannot encode at {rate} kbps, so a supported rate is used.'],
+  'exp.audioQuality.checking': ['音声：{rate} kbpsを優先（対応状況を確認中）', 'Audio: prefer {rate} kbps (checking support)'],
+  'exp.audioQuality.wav': ['音声：WAVを別ファイルで保存（無圧縮）', 'Audio: separate WAV file (uncompressed)'],
+  'exp.audioQuality.image': ['PNG画像には音声が入りません。', 'PNG images do not contain audio.'],
+  'exp.audioQuality.off': ['音声なし（「音声を入れる」で変更できます）', 'No audio (change Include audio to enable it)'],
+  'exp.audioQuality.no-song': ['曲を読み込むと、音声も320 kbpsを優先して書き出します。', 'Load a song to export audio, preferring 320 kbps.'],
+  'exp.audioQuality.missing': ['曲の音声を読み込むと、書き出す音質を確認できます。', 'Load the song audio to check its export setting.'],
+  'exp.audioQuality.unavailable': ['このブラウザでは動画に音声を入れられません。', 'This browser cannot encode audio in the video.'],
+  'exp.preview.title': ['短い動画で画質を比較', 'Compare a short encoded clip'],
+  'exp.preview.help': ['今の再生位置付近を最大3秒、選んだサイズ・fpsで全画質に書き出します。音声は入りません。',
+    'Encode up to 3 seconds around the playhead in every quality at the selected size and fps. The clips are silent.'],
+  'exp.preview.start': ['3秒分を比較する', 'Compare a 3-second clip'],
+  'exp.preview.cancel': ['中止', 'Cancel'],
+  'exp.preview.play': ['すべてを同時に再生', 'Play all qualities'],
+  'exp.preview.pause': ['一時停止', 'Pause'],
+  'exp.preview.seek': ['比較動画の再生位置', 'Comparison playback position'],
+  'exp.preview.working': ['{quality}を作成中… {percent}%', 'Encoding {quality}… {percent}%'],
+  'exp.preview.stopping': ['中止しています…', 'Stopping…'],
+  'exp.preview.clip': ['{from}–{to} · {w}×{h} · {fps} fps', '{from}–{to} · {w}×{h} · {fps} fps'],
+  'exp.preview.actual': ['この短い動画の実容量：{size}', 'Actual clip size: {size}'],
+  'exp.preview.unavailable': ['画質の比較動画はMP4・Filmora用・透過動画（WebM）で利用できます。',
+    'Encoded comparisons are available for MP4, Filmora and transparent WebM.'],
+  'exp.preview.empty': ['歌詞と書き出し範囲を設定すると比較できます。', 'Add lyrics and select a nonempty export range to compare.'],
+  'exp.preview.error': ['比較動画を作成できませんでした。{reason}', 'The comparison could not be encoded. {reason}'],
+  'exp.preview.cancelled': ['比較を中止しました。', 'Comparison cancelled.'],
+  'exp.preview.stale': ['設定や内容が変わったため、もう一度比較してください。', 'Settings or content changed. Encode a new comparison.'],
+  'exp.preview.ready': ['同じ場面をすべての画質で比較できます。動画を全画面にすると細部を確認しやすくなります。',
+    'Compare the same scene at every quality. Use fullscreen to inspect fine details.'],
+  'exp.speedPreset': ['速さ優先のサイズ・fpsにする', 'Use a faster size and fps'],
+  'exp.speedHint': ['速さ優先は{p}p・{fps}fps。サイズやfpsを下げると描画量が減ります。画質は主に容量に影響します。音質は変えません。',
+    'Faster settings: {p}p at {fps} fps. Lower resolution or fps means less rendering; quality mainly changes file size. Audio quality stays the same.'],
+  'exp.acceleration': ['動画圧縮の処理', 'Video encoding'],
+  'exp.acceleration.auto': ['GPU優先・自動', 'Prefer GPU · Auto'],
+  'exp.acceleration.cpu': ['CPU優先', 'Prefer CPU'],
+  'exp.acceleration.checking': ['処理方式を確認中。', 'Checking encoding support.'],
+  'exp.acceleration.hardware': ['GPU優先で設定します（実際の使用はブラウザが判断）。', 'Hardware preference accepted; the browser decides actual GPU use.'],
+  'exp.acceleration.software': ['CPU優先で設定します。', 'Software encoding preferred.'],
+  'exp.acceleration.fallback': ['GPU優先に対応していないため、ブラウザの自動処理を使います。', 'Hardware preference is unavailable; using browser automatic encoding.'],
+  'exp.acceleration.browser': ['ブラウザの自動処理を使います。', 'Using browser automatic encoding.'],
+  'exp.acceleration.help': ['この環境は論理CPU {n}コア。圧縮に使うコア数はブラウザが管理します。',
+    'This environment reports {n} logical CPU cores. The browser manages encoding threads.'],
+  'exp.preview.codecNote': ['このサイズ・fpsの動画を、このブラウザでは作成できません。サイズやfpsを下げてください。',
+    'This browser cannot encode video at this size and fps. Choose a smaller size or lower fps.'],
+  'exp.preview.busy': ['書き出しが終わってから比較できます。', 'Comparison is available after the current export finishes.'],
+  'exp.preview.alphaNote': ['透明な部分は市松模様で表示します。', 'Transparent areas show a checkerboard.'],
+  'exp.preview.playbackUnsupported': ['このブラウザでは比較動画を再生できません。別のブラウザでお試しください。',
+    'This browser cannot play the comparison clips. Try another browser.'],
+  'exp.preview.expand': ['大きく並べて見る', 'Compare side by side'],
+  'exp.preview.close': ['閉じる', 'Close'],
   'exp.summary': ['{w}×{h}・{fps}fps・{dur}・約 {size}・{where}', '{w}×{h} · {fps} fps · {dur} · about {size} · {where}'],
   'exp.toDisk': ['ディスクに直接', 'straight to disk'],
   'exp.toMemory': ['メモリ上で作成', 'built in memory'],
@@ -13973,7 +14087,7 @@ MV.def('i18n/strings', [], () => ({
     'To use the background only, place "{bg}" on a lower track at 0:00 and put your own titles or footage above it.'],
   'exp.fmt.otherLabel': ['その他の形式', 'Other formats'],
   'exp.bg.clearWebm': ['透明（透過動画）', 'Transparent (video)'],
-  'exp.moreKit': ['詳しく（範囲・画質・音声・ファイル名・セットの中身）', 'More (range, quality, audio, file name, files in the set)'],
+  'exp.moreKit': ['詳しく（範囲・音声・ファイル名・セットの中身）', 'More (range, audio, file name, files in the set)'],
   'exp.pre.makeWebm': ['透過動画にする', 'Use transparent video'],
   'exp.pre.noOverlay': ['「文字と装飾だけ」を入れない', 'Leave out "Words and decorations only"'],
   'exp.kit.always': ['いつも入ります', 'always included'],
@@ -50944,10 +51058,12 @@ MV.def('export/schedule', ['core/script', 'core/doc', 'audio/wav', 'media/sample
     }
   }
 
-  const QUALITY_BPP = Object.freeze({ standard: 0.08, high: 0.12, max: 0.18 });   // bits per pixel per frame
-  const AUDIO_BITRATE = 320000;                     // AAC-LC
+  const QUALITY_LEVELS = Object.freeze(['light', 'standard', 'high', 'max']);
+  const QUALITY_BPP = Object.freeze({ light: 0.04, standard: 0.08, high: 0.12, max: 0.18 });   // bits per pixel per frame
+  const AUDIO_BITRATE = 320000;                     // preferred audio target (AAC-LC and Opus)
   const AUDIO_BITRATE_LOW = 192000;                 // AAC-LC where the encoder stops there (Windows' Media Foundation)
-  const OPUS_BITRATE = 160000;                      // Opus in MP4, where the browser has no AAC encoder (DESIGN_2_1 §13.4)
+  const OPUS_BITRATE = AUDIO_BITRATE;               // WebM and the MP4 fallback also prefer 320 kbps
+  const OPUS_BITRATE_LOW = 160000;                  // compatibility fallback when 320 kbps is unavailable
   const AUDIO_CHUNK = 1024;                         // frames per AudioData
   const MUX_OVERHEAD = 1.02;                        // container bytes on top of the streams
   const MEMORY_CONFIRM_BYTES = 1.5 * 1024 ** 3;     // an in-memory export above this asks for confirmation
@@ -51058,17 +51174,19 @@ MV.def('export/schedule', ['core/script', 'core/doc', 'audio/wav', 'media/sample
     return Math.round(w * h * fps * bpp);
   }
 
-  function estimateBytes(duration, bits, audio) {
-    const total = bits + (audio ? AUDIO_BITRATE : 0);
+  function audioBits(bits, fallback) { return Number.isFinite(bits) && bits >= 0 ? bits : fallback; }
+
+  function estimateBytes(duration, bits, audio, audioBitrate) {
+    const total = bits + (audio ? audioBits(audioBitrate, AUDIO_BITRATE) : 0);
     return Math.ceil(((duration * total) / 8) * MUX_OVERHEAD);
   }
 
   // alphaBitrate(bits) → the transparent WebM's alpha stream bitrate: ALPHA_SHARE of the colour stream's (§13.5).
   function alphaBitrate(bits) { return Math.round(bits * ALPHA_SHARE); }
 
-  // estimateWebmBytes(duration, bits, audio) → a transparent WebM: the colour and the alpha streams, Opus when `audio`.
-  function estimateWebmBytes(duration, bits, audio) {
-    const total = bits + alphaBitrate(bits) + (audio ? OPUS_BITRATE : 0);
+  // estimateWebmBytes(duration, bits, audio, audioBitrate?) → colour and alpha streams, plus the selected Opus target.
+  function estimateWebmBytes(duration, bits, audio, audioBitrate) {
+    const total = bits + alphaBitrate(bits) + (audio ? audioBits(audioBitrate, OPUS_BITRATE) : 0);
     return Math.ceil(((duration * total) / 8) * MUX_OVERHEAD);
   }
 
@@ -51206,7 +51324,7 @@ MV.def('export/schedule', ['core/script', 'core/doc', 'audio/wav', 'media/sample
     const bits = bitrate(w, h, out.fps, out.quality);
     const song = !!(out.audio && doc.song) && e.songReady !== false;
     const aac = song && kitAac(e);
-    const files = [{ name: base + '.mp4', kind: 'main', est: estimateBytes(dur, bits, aac) }];
+    const files = [{ name: base + '.mp4', kind: 'main', est: estimateBytes(dur, bits, aac, e.audioBitrate) }];
     if (kit.overlay) files.push({ name: base + '_overlay.webm', kind: 'overlay', est: estimateWebmBytes(dur, bits, false) });
     if (kit.bg) files.push({ name: base + '_bg.mp4', kind: 'bg', est: estimateBytes(dur, bits, false) });
     if (kit.green) files.push({ name: base + '_green.mp4', kind: 'green', est: estimateBytes(dur, bitrate(w, h, out.fps, 'max'), false) });
@@ -51374,15 +51492,19 @@ MV.def('export/schedule', ['core/script', 'core/doc', 'audio/wav', 'media/sample
     const dur = Math.max(0, range.t1 - range.t0);
     const bits = () => bitrate(size.w, size.h, out.fps, out.quality);
     if (out.format === 'kit') return kitFiles(doc, plan, env).reduce((sum, f) => sum + f.est, 0);
-    if (out.format === 'mp4') return estimateBytes(dur, bits(), withAudio);
-    if (out.format === 'webmAlpha') return estimateWebmBytes(dur, bits(), withAudio);
+    if (out.format === 'mp4') return estimateBytes(dur, bits(), withAudio && env.audioCodec !== null && env.songReady !== false, env.audioBitrate);
+    if (out.format === 'webmAlpha') {
+      const codec = env.webmAudioCodec === undefined ? env.audioCodec : env.webmAudioCodec;
+      return estimateWebmBytes(dur, bits(), withAudio && codec !== null && env.songReady !== false, env.webmAudioBitrate);
+    }
     return estimatePngBytes(frameCount(dur, out.fps), size.w, size.h, out.format === 'pngAlpha');
   }
 
   // preflight(doc, plan, env) → [{ code, level: 'block'|'confirm'|'warn'|'info', params, jump?, fix? }] (§4.21;
   // DESIGN_2_1 §13.10). env = {
   //   webcodecs, codec (first supported AVC string, null = none, undefined = not checked), audioCodec (the MP4 audio codec,
-  //   probe().audioCodec: 'mp4a.40.2' | 'opus' | null = none | undefined = not checked), anyCodec (false: no H.264
+  //   probe().audioCodec: 'mp4a.40.2' | 'opus' | null = none | undefined = not checked), audioBitrate (selected MP4
+  //   audio target), webmAudioCodec / webmAudioBitrate (the separate Opus support probe), anyCodec (false: no H.264
   //   encoder at any size; undefined: not checked), vp9Codec (probe().vp9Codec: the first VP9 or VP8 string that encodes,
   //   null = none, undefined = not checked), fontsReady, fsAccess (a file can be written: showSaveFilePicker),
   //   dirAccess (a folder can be written, for the kit: showDirectoryPicker; default fsAccess), songReady (decoded audio
@@ -51421,7 +51543,8 @@ MV.def('export/schedule', ['core/script', 'core/doc', 'audio/wav', 'media/sample
     // DESIGN_2_1 §13.4. MP4: AAC, else Opus in MP4 with a note (some editors cannot read it), else no sound. WebM: Opus
     // (no sound only when no audio codec encodes at all). The kit: AAC, else the song as a WAV file next to the MP4.
     if (withAudio && e.webcodecs && e.songReady !== false) {
-      if ((mp4 || webm) && e.audioCodec === null) items.push({ code: 'no-audio-codec', level: 'warn', params: {} });
+      const audioCodec = webm && e.webmAudioCodec !== undefined ? e.webmAudioCodec : e.audioCodec;
+      if ((mp4 || webm) && audioCodec === null) items.push({ code: 'no-audio-codec', level: 'warn', params: {} });
       else if (mp4 && e.audioCodec === 'opus') items.push({ code: 'opus-audio', level: 'info', params: {} });
       else if (kit && !kitAac(e)) items.push({ code: 'kit-wav', level: 'info', params: { name: kitBase(doc) } });
     }
@@ -51453,7 +51576,7 @@ MV.def('export/schedule', ['core/script', 'core/doc', 'audio/wav', 'media/sample
   }
 
   return {
-    ExportError, QUALITY_BPP, AUDIO_BITRATE, AUDIO_BITRATE_LOW, OPUS_BITRATE, AUDIO_CHUNK, MEMORY_CONFIRM_BYTES, FLASH_PARTS, FLASH_LIMIT, FLASH_SAFE_AMP,
+    ExportError, QUALITY_LEVELS, QUALITY_BPP, AUDIO_BITRATE, AUDIO_BITRATE_LOW, OPUS_BITRATE, OPUS_BITRATE_LOW, AUDIO_CHUNK, MEMORY_CONFIRM_BYTES, FLASH_PARTS, FLASH_LIMIT, FLASH_SAFE_AMP,
     ALPHA_SHARE, WAV_RATE, KIT_README, KIT_SHORTS, FORMATS,
     frameCount, ts, frameDur, audioFrames, keyInterval, audioChunkCount, audioChunk, fillPlanar, mixMatrix,
     outputSize, bitrate, alphaBitrate, estimateBytes, estimateWebmBytes, estimatePngBytes, eta, pickAvc, pickVp9,
@@ -53395,7 +53518,7 @@ MV.def('export/host/mp4', ['export/schedule', 'export/muxer'], (S, M) => {
       const surface = makeSurface(canvas || null, w, h, ropts.backdrop === 'clear');
       await e.prepare(t0, t1, { export: true });
       return {
-        engine: e, plan, t0, t1, fps, N, w, h, surface, ropts,
+        engine: e, plan, t0, t1, fps, N, w, h, surface, ropts, acceleration: accelerationMode(doc.output.acceleration),
         async ready(i, signal) {
           if (typeof e.mediaReady !== 'function') return;
           try {
@@ -53436,16 +53559,93 @@ MV.def('export/host/mp4', ['export/schedule', 'export/muxer'], (S, M) => {
 
   // --- encoders ----------------------------------------------------------------------------------------------------
 
-  // The first config of `list` that VideoEncoder supports, else null. A malformed or unknown codec string is simply
-  // unsupported.
-  async function firstVideoConfig(list, configOf) {
-    for (const codec of list) {
-      const config = configOf(codec);
-      try {
-        if ((await VideoEncoder.isConfigSupported(config)).supported) return config;
-      } catch (err) { /* unsupported */ }
+  // WebCodecs chooses the device and native thread count. A supported hardware preference is a configuration hint,
+  // not evidence of GPU utilisation. Keep the accepted preference with its same-codec automatic fallback outside the
+  // dictionary sent to the browser, so older implementations can ignore the hint without a false GPU claim.
+  const VIDEO_CHOICES = new WeakMap();
+  const VIDEO_INFO = new WeakMap();
+
+  function accelerationMode(value) { return value === 'cpu' || value === 'gpu' ? value : 'auto'; }
+
+  function accelerationOf(config) {
+    const info = config && VIDEO_INFO.get(config);
+    return info ? Object.assign({}, info) : { requested: 'auto', selected: config && config.hardwareAcceleration || 'no-preference', fallback: false };
+  }
+
+  async function supportedVideoConfig(base, hint) {
+    const asked = Object.assign({}, base, { hardwareAcceleration: hint });
+    try {
+      const support = await VideoEncoder.isConfigSupported(asked);
+      if (!support || !support.supported) return null;
+      // Unknown dictionary members are silently dropped. An ignored GPU/CPU preference must not be advertised.
+      if (hint !== 'no-preference' && (!support.config || support.config.hardwareAcceleration !== hint)) return null;
+      const accepted = Object.assign({}, asked, support.config || {});
+      if (accepted.codec !== base.codec || accepted.width !== base.width || accepted.height !== base.height
+        || accepted.framerate !== base.framerate || accepted.hardwareAcceleration !== hint
+        || !Number.isFinite(accepted.bitrate) || accepted.bitrate <= 0) return null;
+      return accepted;
+    } catch (err) { return null; }
+  }
+
+  // Try the preferred device across the codec list before reverting to the browser's automatic route. Retain one
+  // supported fallback of the SAME codec: a muxer has already chosen its codec when configure() is called.
+  async function firstVideoConfig(list, configOf, acceleration) {
+    const requested = accelerationMode(acceleration);
+    const preferred = requested === 'cpu' ? 'prefer-software' : 'prefer-hardware';
+    for (const hint of [preferred, 'no-preference']) for (const codec of list) {
+      const base = configOf(codec);
+      const config = await supportedVideoConfig(base, hint);
+      if (!config) continue;
+      const choices = [config];
+      VIDEO_INFO.set(config, { requested, selected: hint, fallback: hint !== preferred });
+      if (hint !== 'no-preference') {
+        const fallback = await supportedVideoConfig(base, 'no-preference');
+        if (fallback) {
+          VIDEO_INFO.set(fallback, { requested, selected: 'no-preference', fallback: true });
+          choices.push(fallback);
+        }
+      }
+      VIDEO_CHOICES.set(config, choices);
+      return config;
     }
     return null;
+  }
+
+  // The alpha stream has the colour stream's codec/device choices with its own bitrate. Never mutate a config shared
+  // by multiple kit outputs; a failed GPU configure() in one output must not change the others' request.
+  function videoVariant(config, patch) {
+    const choices = (VIDEO_CHOICES.get(config) || [config]).map((c) => {
+      const next = Object.assign({}, c, patch);
+      VIDEO_INFO.set(next, accelerationOf(c));
+      return next;
+    });
+    VIDEO_CHOICES.set(choices[0], choices);
+    return choices[0];
+  }
+
+  // Some platforms accept a preference in isConfigSupported(), then reject it at configure(). Retry before feeding
+  // any frame, on a fresh encoder, and report the configuration actually installed. Errors from an abandoned encoder
+  // cannot poison its replacement. Once frames have been submitted, failures follow the normal abort path.
+  function configureVideo(config, init) {
+    let last = null;
+    for (const choice of VIDEO_CHOICES.get(config) || [config]) {
+      let live = true, configuring = true, setupError = null;
+      const encoder = new VideoEncoder({
+        output: (chunk, meta) => { if (live) init.output(chunk, meta); },
+        error: (err) => { if (live) { if (configuring) setupError = err; else init.error(err); } },
+      });
+      try {
+        encoder.configure(choice);
+        configuring = false;
+        if (setupError) throw setupError;
+        return { encoder, config: choice };
+      } catch (err) {
+        live = false;
+        closeQuietly(encoder);
+        last = err;
+      }
+    }
+    throw last;
   }
 
   function encoderConfig(codec, w, h, fps, bits) {
@@ -53454,10 +53654,11 @@ MV.def('export/host/mp4', ['export/schedule', 'export/muxer'], (S, M) => {
     return config;
   }
 
-  // The first supported video config: the AVC list of pickAvc(), or `codecs.video` (tests, other codecs).
-  async function videoConfig(codecs, job, bits) {
+  // The first supported video config: the AVC list of pickAvc(), or `codecs.video` (tests, other codecs). `acceleration`
+  // is 'auto' (prefer hardware, then automatic) or 'cpu' (prefer software, then automatic); the job's setting by default.
+  async function videoConfig(codecs, job, bits, acceleration = job.acceleration) {
     const list = codecs && codecs.video ? [codecs.video] : S.pickAvc(job.w, job.h, job.fps);
-    const config = await firstVideoConfig(list, (codec) => encoderConfig(codec, job.w, job.h, job.fps, bits));
+    const config = await firstVideoConfig(list, (codec) => encoderConfig(codec, job.w, job.h, job.fps, bits), acceleration);
     if (!config) throw new S.ExportError('no-codec', 'no supported video codec for ' + job.w + '×' + job.h + '@' + job.fps, list);
     return config;
   }
@@ -53468,9 +53669,9 @@ MV.def('export/host/mp4', ['export/schedule', 'export/muxer'], (S, M) => {
     return codecs && Array.isArray(codecs.webm) ? codecs.webm : S.pickVp9(w, h, fps);
   }
 
-  // vp9Config(codecs, w, h, fps, bits) → the first supported VP9 (else VP8) encoder config at `bits`, or null.
-  function vp9Config(codecs, w, h, fps, bits) {
-    return firstVideoConfig(vp9Codecs(codecs, w, h, fps), (codec) => encoderConfig(codec, w, h, fps, bits));
+  // vp9Config(codecs, w, h, fps, bits, acceleration?) → the first supported VP9 (else VP8) config, or null.
+  function vp9Config(codecs, w, h, fps, bits, acceleration) {
+    return firstVideoConfig(vp9Codecs(codecs, w, h, fps), (codec) => encoderConfig(codec, w, h, fps, bits), acceleration);
   }
 
   // The audio codecs tried in order (DESIGN_2_1 §13.4): AAC-LC, then Opus in MP4 where the browser has no AAC encoder
@@ -53485,16 +53686,36 @@ MV.def('export/host/mp4', ['export/schedule', 'export/muxer'], (S, M) => {
 
   // The first audio config that encodes, stereo at the song's rate (songs are decoded at 48 kHz, DECODE_RATE, which is
   // also the Opus rate): AAC at 320 kbps, or at 192 kbps where the platform's AAC encoder stops there (the one behind
-  // Windows' Media Foundation takes at most 192 kbps), Opus at 160 kbps. null when none encodes (the MP4 is then
-  // silent). `list` overrides the order (the kit's MP4 tries AAC only, the WebM Opus only).
+  // Windows' Media Foundation takes at most 192 kbps), Opus at 320 kbps (160 as a compatibility fallback). null when
+  // none encodes (the MP4 is then silent). Prefer constant bitrate at each target, else the browser's default mode at that target, before
+  // lowering the bitrate. `list` overrides the order (the kit's MP4 tries AAC only, the WebM Opus only).
   async function audioConfig(codecs, buffer, list) {
     if (typeof AudioEncoder !== 'function') return null;
     for (const codec of list || audioCodecs(codecs)) {
-      for (const bitrate of codec === 'opus' ? [S.OPUS_BITRATE] : [S.AUDIO_BITRATE, S.AUDIO_BITRATE_LOW]) {
-        const config = { codec, sampleRate: buffer.sampleRate, numberOfChannels: 2, bitrate };
-        try {
-          if ((await AudioEncoder.isConfigSupported(config)).supported) return config;
-        } catch (err) { break; }     // a malformed or unknown codec string is simply unsupported, at any bitrate
+      const known = codec === 'mp4a.40.2' || codec === 'opus';
+      for (const bitrate of codec === 'opus' ? [S.OPUS_BITRATE, S.OPUS_BITRATE_LOW] : [S.AUDIO_BITRATE, S.AUDIO_BITRATE_LOW]) {
+        let invalidCodec = false;
+        for (const mode of known ? ['constant', null] : [null]) {
+          const config = { codec, sampleRate: buffer.sampleRate, numberOfChannels: 2, bitrate };
+          if (mode) config.bitrateMode = mode;
+          try {
+            const support = await AudioEncoder.isConfigSupported(config);
+            if (!support || !support.supported) continue;
+            // Older browsers ignore unknown dictionary members. Only advertise CBR when the recognized config
+            // confirms it; otherwise try the default mode at this target, so an ignored mode never silences a song.
+            if (mode && (!support.config || support.config.bitrateMode !== mode)) continue;
+            // Use a browser-reported lower target in both the probe and export. The feeder cannot change rate/channels.
+            const accepted = Object.assign({}, config, support.config || {});
+            if (accepted.codec !== codec || accepted.sampleRate !== config.sampleRate || accepted.numberOfChannels !== 2
+              || !Number.isFinite(accepted.bitrate) || accepted.bitrate <= 0) continue;
+            return accepted;
+          } catch (err) {
+            // Some implementations throw for an unsupported mode/rate. Known codecs still get their fallback;
+            // a malformed custom codec string (test override) is unsupported at every rate.
+            if (!known) { invalidCodec = true; break; }
+          }
+        }
+        if (invalidCodec) break;
       }
     }
     return null;
@@ -53564,13 +53785,14 @@ MV.def('export/host/mp4', ['export/schedule', 'export/muxer'], (S, M) => {
       w: job.w, h: job.h, fps: job.fps, codec: M.muxCodec(o.vcfg.codec),
       audio: o.acfg ? { rate: o.acfg.sampleRate, channels: 2, codec: M.muxCodec(o.acfg.codec) } : null,
     });
-    const video = new VideoEncoder({
-      output: (chunk, meta) => { try { muxer.video(chunk, meta); } catch (err) { fail(err); } },
-      error: (err) => fail(new S.ExportError('encode', 'video encoding failed: ' + err.message, err)),
-    });
-    let audio = null, feeder = null;
+    let video = null, videoConfig = null, audio = null, feeder = null;
     try {
-      video.configure(o.vcfg);
+      const configured = configureVideo(o.vcfg, {
+        output: (chunk, meta) => { try { muxer.video(chunk, meta); } catch (err) { fail(err); } },
+        error: (err) => fail(new S.ExportError('encode', 'video encoding failed: ' + err.message, err)),
+      });
+      video = configured.encoder;
+      videoConfig = configured.config;
       if (o.acfg) {
         audio = new AudioEncoder({
           output: (chunk, meta) => { try { muxer.audio(chunk, meta); } catch (err) { fail(err); } },
@@ -53587,6 +53809,7 @@ MV.def('export/host/mp4', ['export/schedule', 'export/muxer'], (S, M) => {
     const keyEvery = S.keyInterval(job.fps);
     return {
       get failure() { return failure; },
+      get acceleration() { return accelerationOf(videoConfig); },
       async frame(i, source) {
         if (failure) throw failure;
         const frame = new VideoFrame(source, { timestamp: S.ts(i, job.fps), duration: S.frameDur(i, job.fps) });
@@ -53630,7 +53853,10 @@ MV.def('export/host/mp4', ['export/schedule', 'export/muxer'], (S, M) => {
   // --- exportVideo ---------------------------------------------------------------------------------------------------
 
   // exportVideo({ engine, doc, audio: AudioBuffer | null, sink, signal, onProgress, canvas?, lib?, codecs? }) → Result
-  // Result = { bytes, frames, ms, name, blob? (memory sink), codec, audio: boolean, audioCodec: string | null }. Steps as
+  // Result = { bytes, frames, ms, name, blob? (memory sink), codec, audio: boolean, audioCodec: string | null,
+  //            audioBitrate: number | null (configured target, not a measured average),
+  //            audioBitrateMode: 'constant' | 'variable' | null (unknown),
+  //            acceleration: { requested, selected, fallback } (installed encoder preference, not GPU utilisation) }. Steps as
   // FROZEN in §4.21: fork, prepare, N = frameCount, AVC from pickAvc with a key frame every 2·fps, frame i at t0 + i/fps
   // with ts(i)/frameDur(i) after its media frames are ready, queue ≤ 6, AAC (else Opus) in 1024-frame chunks. Cancel
   // (signal) or any failure closes the encoders and aborts the sink, so no partial file is left; the error is an
@@ -53665,7 +53891,8 @@ MV.def('export/host/mp4', ['export/schedule', 'export/muxer'], (S, M) => {
       checkAbort(o.signal);
       const done = await out.end();
       return { bytes: done.bytes, frames: job.N, ms: performance.now() - started, name: sink.name || S.fileName(o.doc, 'mp4'),
-        blob: done.blob, codec: vcfg.codec, audio: !!acfg, audioCodec: acfg ? acfg.codec : null };
+        blob: done.blob, codec: vcfg.codec, audio: !!acfg, audioCodec: acfg ? acfg.codec : null, audioBitrate: acfg ? acfg.bitrate : null,
+        audioBitrateMode: acfg ? acfg.bitrateMode || null : null, acceleration: out.acceleration };
     } catch (err) {
       if (out) out.close();
       await sink.abort();
@@ -53675,29 +53902,40 @@ MV.def('export/host/mp4', ['export/schedule', 'export/muxer'], (S, M) => {
     }
   }
 
-  async function firstAvc(w, h, fps) {
-    const config = await firstVideoConfig(S.pickAvc(w, h, fps), (c) => encoderConfig(c, w, h, fps, S.bitrate(w, h, fps, 'high')));
-    return config ? config.codec : null;
+  function firstAvc(w, h, fps, acceleration) {
+    return firstVideoConfig(S.pickAvc(w, h, fps), (c) => encoderConfig(c, w, h, fps, S.bitrate(w, h, fps, 'high')), acceleration);
   }
 
-  // probe({ w, h, fps, rate, codecs? }) → { webcodecs, codec, audioCodec, anyCodec, vp9Codec } for the pre-flight. codec:
+  // probe({ w, h, fps, rate, codecs? }) → { webcodecs, codec, audioCodec, audioBitrate, audioBitrateMode, webmAudioCodec,
+  //                                      webmAudioBitrate, webmAudioBitrateMode, anyCodec, vp9Codec,
+  //                                      acceleration, webmAcceleration } for the pre-flight. codec:
   // the first AVC string this size and frame rate encode with, else null. anyCodec: whether H.264 encodes at all (checked
   // at 640×360@30 when this size fails), so the pre-flight can tell "choose a smaller size" from "this browser has no
   // H.264 encoder". audioCodec: 'mp4a.40.2' | 'opus' | null, the codec the MP4 audio would use (`codecs` as in
   // exportVideo). vp9Codec: the first VP9 (else VP8) string a transparent WebM of this size encodes with, else null
-  // (DESIGN_2_1 §13.10).
-  async function probe({ w, h, fps, rate = 48000, codecs = null }) {
-    if (typeof VideoEncoder !== 'function') return { webcodecs: false, codec: null, audioCodec: null, anyCodec: false, vp9Codec: null };
-    const codec = await firstAvc(w, h, fps);
-    const anyCodec = codec !== null || (await firstAvc(640, 360, 30)) !== null;
+  // (DESIGN_2_1 §13.10). WebM probes Opus separately: a working AAC encoder does not imply Opus is available.
+  // Both audio bitrates are configured targets, not measured averages. `acceleration` chooses the video preference
+  // consistently with export; each returned acceleration object reports a supported hint, not actual GPU activity.
+  async function probe({ w, h, fps, rate = 48000, codecs = null, acceleration = 'auto' }) {
+    if (typeof VideoEncoder !== 'function') return { webcodecs: false, codec: null, audioCodec: null, audioBitrate: null, audioBitrateMode: null,
+      webmAudioCodec: null, webmAudioBitrate: null, webmAudioBitrateMode: null, anyCodec: false, vp9Codec: null,
+      acceleration: null, webmAcceleration: null };
+    const vcfg = await firstAvc(w, h, fps, acceleration);
+    const codec = vcfg ? vcfg.codec : null;
+    const anyCodec = codec !== null || (await firstAvc(640, 360, 30, acceleration)) !== null;
     const a = await audioConfig(codecs, { sampleRate: rate });
-    const v = await vp9Config(codecs, w, h, fps, S.bitrate(w, h, fps, 'high'));
-    return { webcodecs: true, codec, audioCodec: a ? a.codec : null, anyCodec, vp9Codec: v ? v.codec : null };
+    const webmList = codecs && Array.isArray(codecs.webmAudio) ? codecs.webmAudio : ['opus'];
+    const wa = await audioConfig(null, { sampleRate: rate }, webmList);
+    const v = await vp9Config(codecs, w, h, fps, S.bitrate(w, h, fps, 'high'), acceleration);
+    return { webcodecs: true, codec, audioCodec: a ? a.codec : null, audioBitrate: a ? a.bitrate : null,
+      audioBitrateMode: a ? a.bitrateMode || null : null, webmAudioCodec: wa ? wa.codec : null, webmAudioBitrate: wa ? wa.bitrate : null,
+      webmAudioBitrateMode: wa ? wa.bitrateMode || null : null, anyCodec, vp9Codec: v ? v.codec : null,
+      acceleration: vcfg ? accelerationOf(vcfg) : null, webmAcceleration: v ? accelerationOf(v) : null };
   }
 
   return {
     AUDIO_CODECS, exportVideo, probe, openJob, makeSurface, createProgress, checkAbort, audioConfig, videoConfig, vp9Config,
-    channelsOf, createAudioFeeder, createMp4Output, drain, closeQuietly, exportFailure,
+    channelsOf, createAudioFeeder, createMp4Output, drain, closeQuietly, exportFailure, accelerationOf, videoVariant, configureVideo,
   };
 });
 /* 文字PVメーカー v2 — original work. PNG sequence export: engine fork → PNG frames → store-only ZIP → sink (§4.21). */
@@ -54109,7 +54347,7 @@ MV.def('export/host/webm', ['export/schedule', 'export/webm', 'export/host/mp4']
   }
 
   // encodeSong(song, job, { codecs, signal }) → { config, description, packets: [{ data, ts }] } | null: the whole export
-  // range of the song as Opus (48 kHz stereo, 160 kbps), made BEFORE the video (NOTES ## v2.1-H.1: the Tracks element,
+  // range of the song as Opus (48 kHz stereo, 320 kbps preferred), made BEFORE the video (NOTES ## v2.1-H.1: the Tracks element,
   // and with it the OpusHead, is written when the WebM is created; audio that lags behind makes the writer hold video
   // clusters in memory). Exactly audioFrames(N) samples from t0, in 1024-frame chunks (the MP4's feeder). null when no
   // Opus encoder exists. `codecs.webmAudio` (tests) replaces the codec list.
@@ -54177,15 +54415,18 @@ MV.def('export/host/webm', ['export/schedule', 'export/webm', 'export/host/mp4']
         frames++;
       }
     }
-    const encoder = (queue, what) => new VideoEncoder({
+    const init = (queue, what) => ({
       output: (chunk) => { queue.push(chunk); try { pair(); } catch (err) { fail(err); } },
       error: (err) => fail(new S.ExportError('encode', what + ' encoding failed: ' + err.message, err)),
     });
-    const colour = encoder(colours, 'colour');
-    const alpha = encoder(alphas, 'alpha');
+    let colour = null, alpha = null, colourConfig = null, alphaConfig = null;
     try {
-      colour.configure(config);
-      alpha.configure(Object.assign({}, config, { bitrate: S.alphaBitrate(config.bitrate) }));
+      const c = J.configureVideo(config, init(colours, 'colour'));
+      colour = c.encoder;
+      colourConfig = c.config;
+      const a = J.configureVideo(J.videoVariant(config, { bitrate: S.alphaBitrate(config.bitrate) }), init(alphas, 'alpha'));
+      alpha = a.encoder;
+      alphaConfig = a.config;
     } catch (err) {
       J.closeQuietly(colour);
       J.closeQuietly(alpha);
@@ -54197,6 +54438,9 @@ MV.def('export/host/webm', ['export/schedule', 'export/webm', 'export/host/mp4']
     const keyEvery = S.keyInterval(job.fps);
     return {
       get failure() { return failure; },
+      get acceleration() {
+        return Object.assign(J.accelerationOf(colourConfig), { alphaSelected: J.accelerationOf(alphaConfig).selected });
+      },
       async frame(i, surface) {
         if (failure) throw failure;
         const px = surface.ctx.getImageData(0, 0, w, h).data;
@@ -54234,7 +54478,9 @@ MV.def('export/host/webm', ['export/schedule', 'export/webm', 'export/host/mp4']
   }
 
   // exportWebm({ engine, doc, audio: AudioBuffer | null, sink, signal, onProgress, canvas?, codecs? }) → Result
-  // Result = { bytes, frames, ms, name, blob? (memory sink), codec, audio: boolean, audioCodec: 'opus' | null }: 透過動画
+  // Result = { bytes, frames, ms, name, blob? (memory sink), codec, audio: boolean, audioCodec: 'opus' | null,
+  //            audioBitrate: number | null (configured target), audioBitrateMode: 'constant' | 'variable' | null,
+  //            acceleration: { requested, selected, fallback, alphaSelected } }: 透過動画
   // (WebM, VP9 alpha; DESIGN_2_1 §13.5). The frames render with the backdrop `clear`; the song (when 音声を入れる is on)
   // is Opus in WebM, encoded first. Each frame waits for its media frames (engine.mediaReady; a store failure is
   // ExportError('media')). Cancel or any failure closes the encoders and aborts the sink. Errors: 'no-webcodecs',
@@ -54252,7 +54498,7 @@ MV.def('export/host/webm', ['export/schedule', 'export/webm', 'export/host/mp4']
     try {
       job = await J.openJob({ engine: o.engine, doc: o.doc, format: 'webmAlpha', canvas: o.canvas });
       J.checkAbort(o.signal);
-      const config = await J.vp9Config(o.codecs, job.w, job.h, job.fps, S.bitrate(job.w, job.h, job.fps, o.doc.output.quality));
+      const config = await J.vp9Config(o.codecs, job.w, job.h, job.fps, S.bitrate(job.w, job.h, job.fps, o.doc.output.quality), job.acceleration);
       if (!config) throw new S.ExportError('no-vp9', 'neither VP9 nor VP8 encodes ' + job.w + '×' + job.h + '@' + job.fps);
       const song = o.audio && o.doc.output.audio ? o.audio : null;
       const audio = song ? await encodeSong(song, job, { codecs: o.codecs, signal: o.signal }) : null;
@@ -54270,7 +54516,9 @@ MV.def('export/host/webm', ['export/schedule', 'export/webm', 'export/host/mp4']
       J.checkAbort(o.signal);
       const done = await out.end();
       return { bytes: done.bytes, frames: job.N, ms: performance.now() - started, name: sink.name || S.fileName(o.doc, 'webm'),
-        blob: done.blob, codec: config.codec, audio: !!audio, audioCodec: audio ? audio.config.codec : null };
+        blob: done.blob, codec: config.codec, audio: !!audio, audioCodec: audio ? audio.config.codec : null,
+        audioBitrate: audio ? audio.config.bitrate : null, audioBitrateMode: audio ? audio.config.bitrateMode || null : null,
+        acceleration: out.acceleration };
     } catch (err) {
       if (out) out.close();
       await sink.abort();
@@ -54433,7 +54681,9 @@ MV.def('export/host/kit', ['export/schedule', 'export/subtitles', 'export/zip', 
 
   // exportKit({ engine, doc, audio: AudioBuffer | null, dir: DirSink | null, signal, onProgress, assets?, canvas?, lib?,
   //             codecs? }) → { files: [{ name, kind, bytes }], ms, audio: 'aac' | 'wav' | 'none', frames, bytes, folder,
-  //                            codec, overlayCodec, name?, blob? }
+  //                            codec, overlayCodec, audioCodec, audioBitrate, audioBitrateMode, acceleration,
+  //                            accelerationByOutput, name?, blob? }
+  // audioBitrate is the configured AAC target, or the WAV's exact PCM bitrate; null when no song is written.
   // The Filmora kit (DESIGN_2_1 §13.9). Files and names are export/schedule.kitFiles (§13.9's table, in its order):
   // the main MP4 (H.264 at CFR with a key frame every 2·fps, AAC where the browser encodes it), the overlay WebM
   // (the §13.5 transparent WebM, backdrop `clear`, no sound), the background MP4 (layers 'ground'), the green-screen MP4
@@ -54442,7 +54692,9 @@ MV.def('export/host/kit', ['export/schedule', 'export/subtitles', 'export/zip', 
   // One pass over the timeline: two engine forks — eA (the document) and eG (backdrop chroma, only with the green
   // screen) — share one AssetStore (`assets.fork()`, when the caller passes its store; otherwise each fork makes its
   // own), so each source frame is decoded once. Per frame: await both forks' media frames, then render and encode main,
-  // overlay, background, green, each with its own encoder and queue limit, all at ts(i) / frameDur(i).
+  // overlay, background, green, each with its own encoder and queue limit, all at ts(i) / frameDur(i). Rendering stays
+  // serial; each output snapshots its own surface before it first awaits. Its encoder and sink can then work while
+  // the next output is drawn. The per-frame barrier waits for every output before mediaReady or rendering frame i+1.
   // `dir` (openDirectory / createDirSink) receives one file sink per file; without it (null) every file is a memory sink
   // and the result is one ZIP '<base>_filmora.zip' (`blob`, `name`: the caller downloads it). Progress: { i, N, eta,
   // phase } once per frame (phase 'video'), then phase 'files' (WAV, subtitles, README) and 'zip'. Cancel or any failure
@@ -54478,11 +54730,11 @@ MV.def('export/host/kit', ['export/schedule', 'export/subtitles', 'export/zip', 
       const main = await J.videoConfig(o.codecs, jobA, bits);
       const song = o.audio && doc.output.audio && doc.song ? o.audio : null;
       const acfg = song ? await J.audioConfig(o.codecs, song, kitAudioList(o.codecs)) : null;
-      const files = S.kitFiles(doc, jobA.plan, { audioCodec: acfg ? acfg.codec : null, songReady: !!song });
+      const files = S.kitFiles(doc, jobA.plan, { audioCodec: acfg ? acfg.codec : null, audioBitrate: acfg ? acfg.bitrate : null, songReady: !!song });
       const fileOf = (kind) => files.find((f) => f.kind === kind) || null;
       let overlay = null;
       if (kit.overlay) {
-        overlay = await J.vp9Config(o.codecs, w, h, fps, bits);
+        overlay = await J.vp9Config(o.codecs, w, h, fps, bits, doc.output.acceleration);
         if (!overlay) throw new S.ExportError('no-vp9', 'neither VP9 nor VP8 encodes ' + w + '×' + h + '@' + fps);
       }
       const greenConfig = jobG ? await J.videoConfig(o.codecs, jobG, S.bitrate(w, h, fps, 'max')) : null;
@@ -54512,13 +54764,13 @@ MV.def('export/host/kit', ['export/schedule', 'export/subtitles', 'export/zip', 
         J.checkAbort(o.signal);
         for (const x of outputs) if (x.out.failure) throw x.out.failure;
         for (const job of jobs) await job.ready(i, o.signal);
-        for (const x of outputs) {
+        await Promise.all(outputs.map(async (x) => {
           x.job.render(i, x.surface, x.ropts);
           await x.out.frame(i, x.kind === 'overlay' ? x.surface : x.surface.canvas);
-        }
+        }));
         progress.frame(i);
       }
-      for (const x of outputs) await x.out.flush();
+      await Promise.all(outputs.map((x) => x.out.flush()));
       J.checkAbort(o.signal);
       const written = new Map();
       for (const x of outputs) written.set(x.kind, await x.out.end());
@@ -54536,7 +54788,11 @@ MV.def('export/host/kit', ['export/schedule', 'export/subtitles', 'export/zip', 
 
       const list = files.map((f) => ({ name: f.name, kind: f.kind, bytes: written.get(f.kind).bytes }));
       const result = { files: list, audio: acfg ? 'aac' : wav ? 'wav' : 'none', frames: jobA.N, folder: target.folder,
-        codec: main.codec, overlayCodec: overlay ? overlay.codec : null };
+        codec: main.codec, overlayCodec: overlay ? overlay.codec : null, audioCodec: acfg ? acfg.codec : wav ? 'pcm-s16le' : null,
+        audioBitrate: acfg ? acfg.bitrate : wav ? song.sampleRate * 2 * 16 : null,
+        audioBitrateMode: acfg ? acfg.bitrateMode || null : wav ? 'constant' : null,
+        acceleration: outputs[0].out.acceleration,
+        accelerationByOutput: Object.fromEntries(outputs.map((x) => [x.kind, x.out.acceleration])) };
       if (target.dir) {
         await target.dir.close();
         result.folder = target.dir.name;
@@ -60380,6 +60636,19 @@ MV.def('ui/output', ['export/schedule', 'engine/scene/frame'], (S, F) => {
     return cmds;
   }
 
+  // Fewer pixels and frames reduce rendering work. Keep an already smaller / slower choice, and retain sound,
+  // range, compression quality and the Filmora set. A user choice is one undo entry at the caller.
+  function speedProfile(doc) {
+    return { short: Math.min(doc.output.short, doc.output.format === 'kit' ? 1080 : 720),
+      fps: Math.min(doc.output.fps, 30) };
+  }
+
+  function speedCmds(doc) {
+    const profile = speedProfile(doc);
+    return Object.keys(profile).filter((key) => profile[key] !== doc.output[key])
+      .map((key) => ({ t: 'output.set', key, v: profile[key] }));
+  }
+
   // transparentOf(format) → the format the backdrop 透明 leads to: 透過PNG from a PNG sequence (frames stay frames, as the
   // way back gives PNG連番 again), else 透過動画（WebM）, the primary transparent path (from MP4 and Filmora用).
   function transparentOf(format) { return format === 'png' || format === 'pngAlpha' ? 'pngAlpha' : 'webmAlpha'; }
@@ -60559,12 +60828,44 @@ MV.def('ui/output', ['export/schedule', 'engine/scene/frame'], (S, F) => {
     const { t0, t1 } = S.exportRange(doc, plan);
     const seconds = Math.max(0, t1 - t0);
     const { w, h } = S.outputSize(plan.design.aspect, o.short);
-    const song = !!(o.audio && doc.song);
+    const codec = o.format === 'webmAlpha' ? e.webmAudioCodec : e.audioCodec;
+    const song = !!(o.audio && doc.song) && e.songReady !== false && codec !== null;
     let bytes;
-    if (o.format === 'mp4') bytes = S.estimateBytes(seconds, S.bitrate(w, h, o.fps, o.quality), song);
-    else if (o.format === 'webmAlpha') bytes = S.estimateWebmBytes(seconds, S.bitrate(w, h, o.fps, o.quality), song);
+    if (o.format === 'mp4') bytes = S.estimateBytes(seconds, S.bitrate(w, h, o.fps, o.quality), song, e.audioBitrate);
+    else if (o.format === 'webmAlpha') bytes = S.estimateWebmBytes(seconds, S.bitrate(w, h, o.fps, o.quality), song, e.webmAudioBitrate);
     else bytes = S.estimatePngBytes(S.frameCount(seconds, o.fps), w, h, o.format === 'pngAlpha');
     return { key: 'exp.summary', params: { w, h, fps: o.fps, seconds, bytes, where: e.fsAccess ? 'disk' : 'memory' } };
+  }
+
+  // All estimates use the same range, size, fps and sound as the selected output. PNG is lossless and has
+  // no bitrate-based quality levels; kit estimates include its auxiliary files, not just the main video.
+  function qualityOptions(doc, plan, env) {
+    const rows = S.QUALITY_LEVELS.map((quality) => {
+      const sample = Object.assign({}, doc, { output: Object.assign({}, doc.output, { quality }) });
+      const total = summary(sample, plan, env);
+      return { quality, bytes: total.params.bytes };
+    });
+    const base = rows.find((row) => row.quality === 'standard').bytes;
+    for (const row of rows) row.ratio = base > 0 ? row.bytes / base : 1;
+    return { lossless: doc.output.format === 'png' || doc.output.format === 'pngAlpha', rows };
+  }
+
+  // The probed encoder setting (a target bitrate, not a measurement of the finished file). Unknown support shows
+  // the preferred rate until the probe completes; format-specific probes keep MP4 AAC and WebM Opus separate.
+  function audioInfo(doc, env) {
+    const e = env || {}, o = doc.output;
+    if (!hasSound(o.format)) return { state: 'image' };
+    if (!o.audio) return { state: 'off' };
+    if (!doc.song) return { state: 'no-song' };
+    if (e.songReady === false) return { state: 'missing' };
+    const webm = o.format === 'webmAlpha';
+    const codec = webm ? e.webmAudioCodec : e.audioCodec;
+    const bitrate = webm ? e.webmAudioBitrate : e.audioBitrate;
+    if (o.format === 'kit' && codec !== undefined && codec !== 'mp4a.40.2') return { state: 'wav' };
+    if (codec === null) return { state: 'unavailable' };
+    if (codec === undefined || !(bitrate > 0)) return { state: 'checking', preferred: S.AUDIO_BITRATE };
+    const mode = webm ? e.webmAudioBitrateMode : e.audioBitrateMode;
+    return { state: 'ready', codec, bitrate, mode: mode || null, preferred: S.AUDIO_BITRATE, fallback: bitrate < S.AUDIO_BITRATE };
   }
 
   // kitLabel(kind) → the key that names a file of the set (step ④'s done list, the guide), or null (none for a kind
@@ -60628,9 +60929,379 @@ MV.def('ui/output', ['export/schedule', 'engine/scene/frame'], (S, F) => {
   return {
     FORMATS, MAIN_FORMATS, OTHER_FORMATS, BACKDROPS, KIT_KEYS, ERROR_KEYS, isAlpha, formatCmds, transparentOf, opaqueOf,
     backdropCmds, clearLabel, backdropChoices, backdropNote, effectiveBackdrop, consistent, skipOf, usedFilters, skippedFilters,
-    checks, kitCmd, withFixes, fixLabel, checkKey, layersWhat, listText, summary, kitLabel, kitAlways, shownChecks, hasSound,
+    checks, kitCmd, withFixes, fixLabel, checkKey, layersWhat, listText, summary, qualityOptions, audioInfo,
+    kitLabel, kitAlways, shownChecks, hasSound, speedProfile, speedCmds,
     mergeFonts, errorKey, errorParams,
   };
+});
+/* 文字PVメーカー v2 — original work. Short, real MP4 / transparent WebM encodes at every quality, independent of the editor's transport and history. */
+MV.def('ui/export_quality_preview', ['ui/dom', 'ui/output', 'export/schedule', 'i18n/t'], (dom, OUT, S, T) => {
+  'use strict';
+
+  const QUALITIES = S.QUALITY_LEVELS;
+  const SECONDS = 3;
+
+  // Starting near the end still compares a full three seconds when the selected range permits it.
+  function previewRange(doc, plan, time) {
+    if (!plan || !Number.isFinite(plan.duration)) return null;
+    const range = S.exportRange(doc, plan);
+    if (!(range.t1 > range.t0)) return null;
+    const span = Math.min(SECONDS, range.t1 - range.t0);
+    const at = Number.isFinite(time) ? time : range.t0;
+    const t0 = Math.min(Math.max(range.t0, at), range.t1 - span);
+    return { t0, t1: Math.min(range.t1, t0 + span) };
+  }
+
+  // Sound, file names, kit extras and the selected quality do not change the silent comparison videos.
+  function signature(doc, plan) {
+    if (!doc) return null;
+    const o = doc.output;
+    const output = { format: o.format, short: o.short, fps: o.fps, range: o.range, acceleration: o.acceleration || 'auto' };
+    return JSON.stringify([Object.assign({}, doc, { output }), plan ? plan.duration : null]);
+  }
+
+  function createController(app, options) {
+    const opts = options || {};
+    const urls = opts.urls || globalThis.URL;
+    let state = { phase: 'idle', clips: [] };
+    let active = null, epoch = 0, dead = false;
+    let knownDoc = null, knownPlan = null, cachedKey = null, key = null;
+    let lastExport = null;
+    const off = [];
+
+    function currentKey() {
+      if (knownDoc !== app.doc || knownPlan !== app.plan) {
+        knownDoc = app.doc;
+        knownPlan = app.plan;
+        cachedKey = signature(knownDoc, knownPlan);
+      }
+      return cachedKey;
+    }
+
+    function emit(next) {
+      state = next;
+      if (!dead && opts.onChange) opts.onChange(state);
+    }
+
+    function revoke(clips) {
+      for (const clip of clips) urls.revokeObjectURL(clip.url);
+    }
+
+    function clearResults() {
+      revoke(state.clips);
+      state = Object.assign({}, state, { clips: [] });
+    }
+
+    function availability() {
+      const format = app.doc.output.format;
+      if (format !== 'mp4' && format !== 'kit' && format !== 'webmAlpha') return 'exp.preview.unavailable';
+      if (!app.plan || !app.plan.lines || !app.plan.lines.length || !previewRange(app.doc, app.plan, 0)) return 'exp.preview.empty';
+      const exportState = app.exportState ? app.exportState() : null;
+      if (app.exporting || (exportState && exportState.phase === 'running')) return 'exp.preview.busy';
+      if (state.note === 'exp.preview.playbackUnsupported') return state.note;
+      const env = app.env ? app.env() : null;
+      if (env && !env.webcodecs) return 'exp.preview.codecNote';
+      const probe = app.exportProbe ? app.exportProbe() : null;
+      if (probe && (format === 'webmAlpha' ? probe.vp9Codec === null : probe.codec === null)) return 'exp.preview.codecNote';
+      return null;
+    }
+
+    function cancel(note) {
+      epoch += 1;
+      clearResults();
+      if (active) {
+        active.note = note || 'exp.preview.cancelled';
+        active.abort.abort();
+        revoke(active.clips);
+        active.clips = [];
+        emit(Object.assign({}, state, { phase: 'cancelling', note: active.note }));
+      } else emit({ phase: 'idle', clips: [], note: note || 'exp.preview.cancelled' });
+    }
+
+    function update(force) {
+      if (dead) return;
+      const next = currentKey();
+      if (key !== next || force === true) {
+        const hadPreview = !!active || !!state.clips.length || state.note === 'exp.preview.playbackUnsupported';
+        key = next;
+        if (hadPreview) cancel('exp.preview.stale');
+      }
+      const why = availability();
+      if (why === 'exp.preview.busy' && (active || state.clips.length)) cancel('exp.preview.busy');
+      else {
+        if (why !== 'exp.preview.busy' && state.note === 'exp.preview.busy') {
+          state = Object.assign({}, state, { note: null });
+          if (active && active.note === 'exp.preview.busy') active.note = null;
+        }
+        if (opts.onChange) opts.onChange(state);
+      }
+    }
+
+    // The main export reports every frame. Hidden comparisons only need its busy transitions or a new codec probe.
+    function exportChanged(payload) {
+      const st = app.exportState ? app.exportState() : payload;
+      const phase = st ? st.phase : null;
+      const busy = !!app.exporting || phase === 'running';
+      const probe = app.exportProbe ? app.exportProbe() : null;
+      const stamp = probe ? JSON.stringify([probe.webcodecs, probe.codec, probe.vp9Codec]) : null;
+      if (busy && lastExport && lastExport.busy && phase === lastExport.phase && stamp === lastExport.probe && currentKey() === key) return;
+      lastExport = { phase, busy, probe: stamp };
+      update();
+    }
+
+    async function start() {
+      update();
+      if (dead || active || availability()) return false;
+      clearResults();
+      const doc = app.doc;
+      const alpha = doc.output.format === 'webmAlpha';
+      const format = alpha ? 'webmAlpha' : 'mp4';
+      const mime = alpha ? 'video/webm' : 'video/mp4';
+      const range = previewRange(doc, app.plan, app.view && app.view.state.time);
+      const { w, h } = S.outputSize(app.plan.design.aspect, doc.output.short);
+      const session = { abort: new AbortController(), epoch: ++epoch, clips: [], source: null, note: null, key: currentKey() };
+      active = session;
+      const same = () => !dead && active === session && epoch === session.epoch && currentKey() === session.key && !availability();
+      const stopped = () => new S.ExportError('cancelled', 'quality comparison cancelled');
+      const frameState = { phase: 'running', clips: [], range, seconds: range.t1 - range.t0, w, h, fps: doc.output.fps,
+        quality: QUALITIES[0], percent: 0, format, alpha, mime };
+      emit(frameState);
+      try {
+        // A try-on may be on the main engine. Plan the committed document only on this owned fork.
+        session.source = app.engine.fork();
+        session.source.setDoc(doc);
+        const ex = app.svc.exporter;
+        for (const quality of QUALITIES) {
+          if (!same()) throw stopped();
+          const previewDoc = Object.assign({}, doc, { output: Object.assign({}, doc.output,
+            { format, audio: false, quality, range: Object.assign({}, range) }) });
+          emit(Object.assign({}, frameState, { quality, percent: 0 }));
+          const sink = ex.sink.createMemorySink({ name: 'quality-' + quality + (alpha ? '.webm' : '.mp4'), type: mime });
+          const encode = alpha ? ex.webm.exportWebm : ex.mp4.exportVideo;
+          const result = await encode({ engine: session.source, doc: previewDoc, audio: null,
+            sink, signal: session.abort.signal, onProgress: (p) => {
+              if (!same()) { session.abort.abort(); return; }
+              emit(Object.assign({}, frameState, { quality, percent: p.N > 0 ? Math.round(100 * p.i / p.N) : 0 }));
+            } });
+          if (!same()) throw stopped();
+          if (!result.blob) throw new S.ExportError('encode', 'quality comparison returned no video');
+          session.clips.push({ quality, bytes: result.bytes, codec: result.codec, format, mime, alpha,
+            url: urls.createObjectURL(result.blob) });
+        }
+        if (!same()) throw stopped();
+        const clips = session.clips;
+        session.clips = [];
+        emit(Object.assign({}, frameState, { phase: 'done', clips, note: 'exp.preview.ready' }));
+        return true;
+      } catch (err) {
+        revoke(session.clips);
+        session.clips = [];
+        if (!dead && active === session) {
+          const cancelled = session.abort.signal.aborted || (err && err.code === 'cancelled') || !same();
+          emit({ phase: cancelled ? 'idle' : 'error', clips: [], note: cancelled
+            ? session.note || 'exp.preview.stale' : 'exp.preview.error', error: cancelled ? null : err });
+        }
+        return false;
+      } finally {
+        if (session.source) session.source.dispose();
+        if (active === session) {
+          active = null;
+          if (!dead && state.phase === 'cancelling') emit({ phase: 'idle', clips: [], note: session.note });
+          else if (!dead && opts.onChange) opts.onChange(state);
+        }
+      }
+    }
+
+    function destroy() {
+      if (dead) return;
+      dead = true;
+      epoch += 1;
+      if (active) {
+        active.abort.abort();
+        revoke(active.clips);
+        active.clips = [];
+      }
+      clearResults();
+      for (const unsubscribe of off) if (typeof unsubscribe === 'function') unsubscribe();
+    }
+
+    key = currentKey();
+    if (app.bus && app.bus.on) {
+      off.push(app.bus.on('plan', (e) => update(!!e && e.kind === 'load')));
+      off.push(app.bus.on('export', exportChanged));
+      off.push(app.bus.on('device', () => update(true)));
+    }
+    // Also catch debounced text edits immediately, before the next plan is ready.
+    if (app.store && app.store.on) off.push(app.store.on('doc', (e) => update(!!e && e.kind === 'load')));
+    return { get state() { return state; }, get busy() { return !!active; }, availability, start, cancel, update, destroy,
+      playbackUnavailable: () => cancel('exp.preview.playbackUnsupported') };
+  }
+
+  function mount(app) {
+    const { h } = dom;
+    const t = app.t;
+    const start = h('button', { type: 'button', class: 'btn', 'data-act': 'quality-preview.start', text: t('exp.preview.start') });
+    const stop = h('button', { type: 'button', class: 'btn quiet', 'data-act': 'quality-preview.cancel', hidden: true,
+      text: t('exp.preview.cancel') });
+    const status = h('p', { class: 'note quality-preview-status', role: 'status', 'aria-live': 'polite' });
+    const rangeLabel = h('p', { class: 'note subtle quality-preview-range', hidden: true });
+    const alphaNote = h('p', { class: 'note subtle quality-preview-alpha', hidden: true, text: t('exp.preview.alphaNote') });
+    const cards = h('div', { class: 'quality-preview-clips', hidden: true });
+    const play = h('button', { type: 'button', class: 'btn quiet', 'data-act': 'quality-preview.play', text: t('exp.preview.play') });
+    const seek = h('input', { type: 'range', min: 0, max: SECONDS, step: 0.01, value: 0,
+      'data-quality-preview-seek': '', 'aria-label': t('exp.preview.seek') });
+    const transport = h('div', { class: 'quality-preview-transport', hidden: true }, play, seek);
+    const deck = h('div', { class: 'quality-preview-deck' }, rangeLabel, alphaNote, transport, cards);
+    const expand = h('button', { type: 'button', class: 'btn quiet', hidden: true,
+      'data-act': 'quality-preview.expand', text: t('exp.preview.expand') });
+    const close = h('button', { type: 'button', class: 'btn quiet', 'data-act': 'quality-preview.close',
+      text: t('exp.preview.close') });
+    const dialogBody = h('div', { class: 'quality-preview-dialog-body' });
+    const dialog = h('dialog', { class: 'quality-preview-dialog', 'aria-label': t('exp.preview.title') },
+      h('div', { class: 'quality-preview-dialog-head' }, h('h3', { text: t('exp.preview.title') }), close), dialogBody);
+    const root = h('section', { class: 'export-quality-preview', 'aria-label': t('exp.preview.title') },
+      h('h3', { class: 'field-label', text: t('exp.preview.title') }),
+      h('p', { class: 'note subtle', text: t('exp.preview.help') }),
+      h('div', { class: 'quality-preview-actions' }, start, stop, expand), status, deck, dialog);
+    let controller = null, shown = null, videos = [], playing = false, seeking = false;
+
+    function pause() {
+      for (const video of videos) video.pause();
+      playing = false;
+      play.textContent = t('exp.preview.play');
+    }
+
+    function closeExpanded(restoreFocus) {
+      const wasOpen = dialog.open;
+      pause();
+      if (wasOpen) dialog.close();
+      if (deck.parentNode !== root) root.insertBefore(deck, dialog);
+      if (restoreFocus && wasOpen && root.isConnected && !expand.hidden) dom.focus(expand);
+    }
+
+    function unload() {
+      closeExpanded(false);
+      for (const video of videos) { video.removeAttribute('src'); video.load(); }
+      videos = [];
+      dom.clear(cards);
+      shown = null;
+    }
+
+    function seekAll(time, source) {
+      if (seeking) return;
+      seeking = true;
+      for (const video of videos) if (video !== source && Number.isFinite(video.duration)) {
+        if (Math.abs(video.currentTime - time) > 0.04) video.currentTime = Math.min(time, video.duration);
+      }
+      seek.value = String(time);
+      seeking = false;
+    }
+
+    function render(state) {
+      if (!controller) return;
+      const busy = controller.busy;
+      const why = controller.availability();
+      root.dataset.previewPhase = state.phase;
+      root.dataset.qualityCount = dialog.dataset.qualityCount = String(state.clips.length);
+      dom.setStyle(root, { '--quality-count': Math.max(1, state.clips.length) });
+      dom.setStyle(dialog, { '--quality-count': Math.max(1, state.clips.length) });
+      start.disabled = busy || !!why;
+      stop.hidden = !busy;
+      stop.disabled = state.phase === 'cancelling';
+      if (state.clips !== shown) {
+        unload();
+        shown = state.clips;
+        if (state.clips.length) {
+          seek.max = String(state.seconds);
+          seek.value = '0';
+          dom.replace(cards, state.clips.map((clip) => {
+            const video = h('video', { controls: true, muted: true, playsinline: true, preload: 'metadata', src: clip.url,
+              'aria-label': t('exp.q.' + clip.quality) });
+            video.muted = true;
+            video.addEventListener('loadedmetadata', () => {
+              const time = Number(seek.value);
+              if (time > 0 && Number.isFinite(video.duration)) video.currentTime = Math.min(time, video.duration);
+            });
+            video.addEventListener('seeking', () => seekAll(video.currentTime, video));
+            video.addEventListener('ended', pause);
+            video.addEventListener('error', () => {
+              if (videos.includes(video) && video.error) controller.playbackUnavailable();
+            });
+            videos.push(video);
+            return h('div', { class: ['quality-preview-clip', clip.alpha ? 'is-alpha' : null], 'data-preview-quality': clip.quality },
+              h('h4', { class: 'quality-preview-clip-title', text: t('exp.q.' + clip.quality) }), video,
+              h('p', { class: 'note subtle', text: t('exp.preview.actual', { size: T.fmtBytes(clip.bytes) }) }));
+          }));
+        }
+      }
+      cards.hidden = !state.clips.length;
+      transport.hidden = !state.clips.length;
+      expand.hidden = !state.clips.length || typeof dialog.showModal !== 'function';
+      alphaNote.hidden = !state.clips.length || !state.alpha;
+      rangeLabel.hidden = !state.range;
+      if (state.range) rangeLabel.textContent = t('exp.preview.clip', { from: T.fmtTime(state.range.t0), to: T.fmtTime(state.range.t1),
+        w: state.w, h: state.h, fps: state.fps });
+      if (state.phase === 'running') status.textContent = t('exp.preview.working', {
+        quality: t('exp.q.' + state.quality), percent: state.percent });
+      else if (state.phase === 'cancelling') status.textContent = t('exp.preview.stopping');
+      else if (state.error) status.textContent = t('exp.preview.error', { reason: t(OUT.errorKey(state.error.code),
+        Object.assign({ format: t('exp.fmtIn.' + (state.format || app.doc.output.format)) }, OUT.errorParams(state.error))) });
+      else status.textContent = why ? t(why) : state.note ? t(state.note) : '';
+    }
+
+    controller = createController(app, { onChange: render });
+    // Native button, range and video keys belong to this comparison, not the editor's global playback shortcuts.
+    root.addEventListener('keydown', (ev) => {
+      if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+      if ([' ', 'Spacebar', 'Enter', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(ev.key)
+        || ev.key === 'Escape' && dialog.open) {
+        ev.stopPropagation();
+      }
+    });
+    expand.addEventListener('click', () => {
+      if (!videos.length || typeof dialog.showModal !== 'function') return;
+      pause();
+      dialogBody.appendChild(deck);
+      try { dialog.showModal(); } catch (err) { closeExpanded(false); }
+    });
+    close.addEventListener('click', () => closeExpanded(true));
+    dialog.addEventListener('cancel', (ev) => { ev.preventDefault(); closeExpanded(true); });
+    dialog.addEventListener('close', () => {
+      if (!dialog.open && deck.parentNode !== root) closeExpanded(false);
+    });
+    start.addEventListener('click', () => { controller.start(); });
+    stop.addEventListener('click', () => { pause(); controller.cancel(); });
+    seek.addEventListener('input', () => seekAll(Number(seek.value), null));
+    play.addEventListener('click', async () => {
+      if (playing) { pause(); return; }
+      const at = Number(seek.value);
+      const position = videos.some((video) => video.ended) || at >= Number(seek.max) - 0.0001 ? 0 : at;
+      seekAll(position, null);
+      const current = videos.slice();
+      try {
+        await Promise.all(current.map((video) => video.play()));
+        if (current.length && current[0] === videos[0]) {
+          playing = true;
+          play.textContent = t('exp.preview.pause');
+        } else for (const video of current) video.pause();
+      } catch (err) { for (const video of current) video.pause(); pause(); }
+    });
+    // Follow the first comparison's clock; keep the other silent videos close after buffering or loop seeking.
+    cards.addEventListener('timeupdate', () => {
+      if (playing && videos[0]) seekAll(videos[0].currentTime, videos[0]);
+    }, true);
+    const offView = app.view && typeof app.view.on === 'function' ? app.view.on((changed, state) => {
+      if (changed.includes('step') && state.step !== 'export') {
+        closeExpanded(false);
+        if (controller.busy) controller.cancel();
+      }
+    }) : null;
+    render(controller.state);
+    return { root, controller, update: () => controller.update(), cancel: () => controller.cancel(),
+      destroy() { if (offView) offView(); unload(); controller.destroy(); } };
+  }
+
+  return { QUALITIES, SECONDS, previewRange, signature, createController, mount };
 });
 /* 文字PVメーカー v2 — original work. 「Filmoraで使うには」: a help sheet with the numbered steps of the Filmora set's README, the uses of its other files and the files themselves, with the real names and settings (DESIGN_2_1 §13.9, §13.10). */
 MV.def('ui/filmora_help', ['ui/dom', 'ui/output', 'export/schedule', 'export/host/kit'], (dom, OUT, S, KIT) => {
@@ -68691,7 +69362,8 @@ MV.def('ui/stage', ['ui/dom', 'ui/selection', 'ui/output', 'i18n/t', 'ui/shot_ed
   return { mount, lookAhead, LOOK_AHEAD };
 });
 /* 文字PVメーカー v2 — original work. Step ④ 書き出し: settings, the Filmora set's contents, preflight with jump links, progress, cancel, done (DESIGN §6.4.3, §4.21; DESIGN_2_1 §13.10). */
-MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 'export/schedule', 'i18n/t'], (dom, I, OUT, HELP, SCH, T) => {
+MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 'ui/export_quality_preview', 'export/schedule', 'i18n/t'],
+  (dom, I, OUT, HELP, PREVIEW, SCH, T) => {
   'use strict';
 
   const { h } = dom;
@@ -68700,7 +69372,7 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
   // The button of a pre-flight item that jumps (default 見る): a missing photo or video says つなぎ直す and opens the
   // library, where its row has [つなぎ直す] (DESIGN_2_1 §11.7.8).
   const JUMP_LABEL = { 'media-missing': 'media.relink' };
-  const QUALITIES = ['standard', 'high', 'max'];
+  const QUALITIES = SCH.QUALITY_LEVELS;
   const PROGRESS_ANNOUNCE_MS = 5000;
   const RUN_UPDATE_MS = 100;            // the running view is redrawn at most this often (a new phase at once)
   const RADIO_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End']);
@@ -68741,9 +69413,19 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
     const format = h('div', { class: 'segmented fmt-seg', 'data-seg': 'format' }, formatPair, otherFormat);
     const size = h('select', { class: 'select', 'aria-label': t('exp.size') });
     const fps = seg('fps', t('exp.fps'));
+    const speedPreset = h('button', { type: 'button', class: 'btn quiet', 'data-act': 'export.speed', text: t('exp.speedPreset') });
+    const speedHint = h('p', { class: 'note subtle exp-note', 'data-note': 'export-speed' });
+    const acceleration = seg('acceleration', t('exp.acceleration'));
+    const accelerationHint = h('p', { class: 'note subtle exp-note', 'data-note': 'acceleration' });
+    const accelerationField = field(t('exp.acceleration'), [acceleration, accelerationHint], 'acceleration');
     const backdrop = h('select', { class: 'select', 'aria-label': t('exp.backdrop') });
     const range = seg('range', t('exp.range'));
     const quality = seg('quality', t('exp.quality'));
+    quality.classList.add('quality-options');
+    const qualityHelp = h('p', { class: 'note subtle exp-note', 'data-note': 'quality-estimate', text: t('exp.qualityHelp') });
+    const losslessNote = h('p', { class: 'note subtle exp-note', 'data-note': 'quality-lossless', hidden: true, text: t('exp.qualityLossless') });
+    const qualityPreview = PREVIEW.mount(app);
+    const audioQuality = h('p', { class: 'note subtle exp-note', 'data-note': 'audio-quality' });
     const audio = h('input', { type: 'checkbox', id: 'exp-audio' });
     const name = h('input', { class: 'text-input', type: 'text', 'aria-label': t('exp.name'), spellcheck: false });
     // 詳しく for Filmora用: the set's contents, then the guide (§13.10). The main MP4 is always in the set.
@@ -68767,7 +69449,7 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
     const kitBox = h('div', { class: 'kit-box', hidden: true }, kitSet, howTo);
     const moreLabel = h('summary', { text: t('exp.more') });
     const more = h('details', { class: 'more', 'data-ctl': 'more' }, moreLabel,
-      row(t('exp.range'), range), row(t('exp.quality'), quality),
+      row(t('exp.range'), range),
       h('label', { class: 'check-row', htmlFor: 'exp-audio' }, audio, h('span', { text: t('exp.audio') })),
       row(t('exp.name'), name), kitBox);
     const summary = h('div', { class: 'exp-summary' });
@@ -68781,8 +69463,11 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
     const alphaNote = h('p', { class: 'note subtle exp-note', 'data-note': 'alpha', text: t('exp.alphaNote2') });
     const chromaNote = h('p', { class: 'note subtle exp-note', 'data-note': 'chroma', hidden: true, text: t('exp.chromaNote') });
     const settings = h('div', { class: 'exp-settings' },
-      field(t('exp.format'), format, 'format'), field(t('exp.size'), size, 'size'), field(t('exp.fps'), fps, 'fps'),
-      field(t('exp.backdrop'), [backdrop, alphaNote, chromaNote], 'backdrop'), more, summary, folderHint, checks);
+      field(t('exp.format'), format, 'format'), field(t('exp.size'), size, 'size'),
+      field(t('exp.fps'), [fps, speedPreset, speedHint], 'fps'), accelerationField,
+      field(t('exp.backdrop'), [backdrop, alphaNote, chromaNote], 'backdrop'),
+      field(t('exp.qualityCompare'), [quality, qualityHelp, losslessNote, qualityPreview.root], 'quality'),
+      audioQuality, more, summary, folderHint, checks);
     const running = h('div', { class: 'exp-running', hidden: true });
     // Said to screen readers: the Filmora set's phase and the end of an export (the progress bar says the numbers).
     const said = h('div', { class: 'sr-only exp-said', role: 'status', 'aria-live': 'polite' });
@@ -68810,10 +69495,12 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
       if (which === 'format') setFormat(v);
       else if (which === 'fps') setOut('fps', Number(v));
       else if (which === 'quality') setOut('quality', v);
+      else if (which === 'acceleration') setOut('acceleration', v);
       else if (which === 'range') chooseRange(v);
     });
     otherFormat.addEventListener('change', () => { if (otherFormat.value) setFormat(otherFormat.value); });
     size.addEventListener('change', () => setOut('short', Number(size.value)));
+    speedPreset.addEventListener('click', () => app.batch({ label: ['undo.output', {}] }, OUT.speedCmds(app.doc)));
     backdrop.addEventListener('change', () => app.batch({ label: ['undo.backdrop', {}] }, OUT.backdropCmds(app.doc, backdrop.value)));
     audio.addEventListener('change', () => setOut('audio', audio.checked));
     name.addEventListener('change', () => setOut('name', name.value.trim() || null));
@@ -68872,7 +69559,65 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
     // What the Filmora set holds depends on the audio codec the browser has (AAC, else a WAV file) and the song.
     function kitEnv() {
       const probe = app.exportProbe ? app.exportProbe() || {} : {};
-      return { audioCodec: probe.audioCodec, songReady: !!app.doc.song && app.songReady() };
+      return { audioCodec: probe.audioCodec, audioBitrate: probe.audioBitrate, audioBitrateMode: probe.audioBitrateMode,
+        webmAudioCodec: probe.webmAudioCodec, webmAudioBitrate: probe.webmAudioBitrate, webmAudioBitrateMode: probe.webmAudioBitrateMode,
+        songReady: !!app.doc.song && app.songReady() };
+    }
+
+    function audioText(info) {
+      if (info.state !== 'ready') return t('exp.audioQuality.' + info.state, { rate: Math.round((info.preferred || SCH.AUDIO_BITRATE) / 1000) });
+      const codec = info.codec === 'mp4a.40.2' ? 'AAC' : info.codec === 'opus' ? 'Opus' : info.codec;
+      const label = t('exp.audioQuality.ready', { codec, rate: Math.round(info.bitrate / 1000),
+        mode: t(info.mode === 'constant' ? 'exp.audioQuality.constant' : 'exp.audioQuality.target') });
+      return info.fallback ? label + ' ' + t('exp.audioQuality.fallback', { rate: Math.round(info.preferred / 1000) }) : label;
+    }
+
+    function renderQuality() {
+      const comparison = OUT.qualityOptions(app.doc, planOf(), kitEnv());
+      quality.hidden = comparison.lossless;
+      qualityHelp.hidden = comparison.lossless;
+      losslessNote.hidden = !comparison.lossless;
+      qualityPreview.root.hidden = comparison.lossless;
+      let buttons = [...quality.querySelectorAll('[data-v]')];
+      if (buttons.length !== QUALITIES.length) {
+        buttons = QUALITIES.map((v) => h('button', { class: 'seg quality-option', type: 'button', role: 'radio', 'data-v': v },
+          h('span', { class: 'quality-option-title' }), h('span', { class: 'quality-option-size', 'data-quality-bytes': '' }),
+          h('span', { class: 'quality-option-ratio', 'data-quality-ratio': '' }),
+          h('span', { class: 'quality-option-description', 'data-quality-description': '' })));
+        dom.replace(quality, buttons);
+      }
+      comparison.rows.forEach((q, i) => {
+        const button = buttons[i], on = q.quality === app.doc.output.quality;
+        button.setAttribute('aria-checked', String(on)); button.tabIndex = on ? 0 : -1;
+        button.querySelector('.quality-option-title').textContent = t('exp.q.' + q.quality);
+        const bytes = button.querySelector('[data-quality-bytes]');
+        bytes.dataset.qualityBytes = String(q.bytes); bytes.textContent = t('exp.qualitySize', { size: T.fmtBytes(q.bytes) });
+        button.querySelector('[data-quality-ratio]').textContent = t('exp.qualityRatio', { ratio: q.ratio.toFixed(2) });
+        button.querySelector('[data-quality-description]').textContent = t('exp.qualityDescription.' + q.quality);
+      });
+      const audioInfo = OUT.audioInfo(app.doc, kitEnv());
+      audioQuality.textContent = audioText(audioInfo);
+      audioQuality.dataset.audioRate = String(audioInfo.bitrate || audioInfo.preferred || '');
+      qualityPreview.update();
+    }
+
+    function doneAudio(result) {
+      if (!result.audioCodec || !(result.audioBitrate > 0)) return null;
+      return h('p', { class: 'note subtle', 'data-note': 'audio-written', text: result.audioCodec === 'pcm-s16le'
+        ? t('exp.audioQuality.wav') : audioText({ state: 'ready', codec: result.audioCodec, bitrate: result.audioBitrate,
+          mode: result.audioBitrateMode, preferred: SCH.AUDIO_BITRATE, fallback: result.audioBitrate < SCH.AUDIO_BITRATE }) });
+    }
+
+    function accelerationText(info) {
+      if (!info) return t('exp.acceleration.checking');
+      return t(info.selected === 'prefer-hardware' ? 'exp.acceleration.hardware'
+        : info.selected === 'prefer-software' ? 'exp.acceleration.software'
+          : info.fallback ? 'exp.acceleration.fallback' : 'exp.acceleration.browser');
+    }
+
+    function doneAcceleration(result) {
+      return result.acceleration ? h('p', { class: 'note subtle', 'data-note': 'acceleration-written',
+        text: accelerationText(result.acceleration) }) : null;
     }
 
     // The range the export renders: output.range clamped to the video (export/schedule.exportRange), or null.
@@ -68956,6 +69701,16 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
         return h('option', { value: String(s), selected: s === o.short, text: t('exp.sizeOpt', { p: s, w: sz.w, h: sz.h }) });
       }));
       fillSeg(fps, FPS, o.fps, (v) => String(v));
+      const speed = OUT.speedProfile(app.doc);
+      speedPreset.disabled = !OUT.speedCmds(app.doc).length;
+      speedHint.textContent = t('exp.speedHint', { p: speed.short, fps: speed.fps });
+      accelerationField.hidden = !SCH.FORMATS[o.format].video;
+      fillSeg(acceleration, ['auto', 'cpu'], o.acceleration || 'auto', (v) => t('exp.acceleration.' + v));
+      const probe = app.exportProbe ? app.exportProbe() : null;
+      const hint = probe && (o.format === 'webmAlpha' ? probe.webmAcceleration : probe.acceleration);
+      accelerationHint.textContent = accelerationText(hint) + ' ' + t('exp.acceleration.help', {
+        n: Math.max(1, Math.floor(navigator.hardwareConcurrency || 1)) });
+      accelerationHint.dataset.selected = hint ? hint.selected : '';
       // 透明 makes the output transparent (透過動画, or 透過PNG from a PNG sequence); Filmora用 does not offer it
       // (ui/output.backdropChoices: the set would be lost on the way back).
       dom.replace(backdrop, OUT.backdropChoices(o.format, app.doc.look.backdrop).map((b) => h('option', {
@@ -68966,7 +69721,7 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
       chromaNote.hidden = note !== 'exp.chromaNote';
       const r = o.range ? rangeOf() || o.range : null;
       fillSeg(range, ['all', 'sel', 'io'], r ? 'io' : 'all', (v) => (v === 'io' && r ? clock(r.t0) + '–' + clock(r.t1) : t('exp.range.' + v)));
-      fillSeg(quality, QUALITIES, o.quality, (v) => t('exp.q.' + v));
+      renderQuality();
       audio.checked = !!o.audio;
       audio.disabled = !OUT.hasSound(o.format) || !app.doc.song;
       if (document.activeElement !== name) name.value = o.name || '';
@@ -69004,6 +69759,7 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
       return h('div', { class: 'exp-done' }, I.icon('check', { size: 28 }),
         h('div', { class: 'exp-title', text: t('exp.done') }),
         h('div', { class: 'muted', text: kitDoneText(r) }),
+        doneAudio(r), doneAcceleration(r),
         h('ul', { class: 'kit-done-files', 'aria-label': t('exp.kit.files') }, r.files.map((f) => h('li', { 'data-kind': f.kind },
           h('span', { class: 'kit-file-name', text: f.name }),
           h('span', { class: 'kit-file-meta', text: [OUT.kitLabel(f.kind) ? t(OUT.kitLabel(f.kind)) : '', T.fmtBytes(f.bytes)].filter(Boolean)
@@ -69071,7 +69827,7 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
         const info = st.result.files ? kitDoneText(st.result)
           : t('exp.doneInfo', { name: st.result.name, size: T.fmtBytes(st.result.bytes), frames: st.result.frames });
         dom.replace(running, st.result.files ? kitDone(st) : h('div', { class: 'exp-done' }, I.icon('check', { size: 28 }),
-          h('div', { class: 'exp-title', text: t('exp.done') }), h('div', { class: 'muted', text: info })));
+          h('div', { class: 'exp-title', text: t('exp.done') }), h('div', { class: 'muted', text: info }), doneAudio(st.result), doneAcceleration(st.result)));
         said.textContent = t('exp.done') + ' ' + info;
         dom.replace(footer, h('button', { class: 'btn wide', type: 'button', text: t('exp.again'), on: { click: () => app.exportReset() } }));
       } else if (st.phase === 'error') {
@@ -69363,364 +70119,6 @@ MV.def('ui/step_lyrics', ['ui/dom', 'ui/icons', 'ui/lyric_editor', 'i18n/t'], (d
 
   return { mount };
 });
-/* 文字PVメーカー v2 — original work. Step ② 曲（任意）: song row or drop zone, tempo, snap to beats, tap-sync entry, AI timing (DESIGN §6.4.3, §6.11). */
-MV.def('ui/step_song', ['ui/dom', 'ui/icons', 'ui/header', 'ui/selection', 'i18n/t'], (dom, I, header, S, T) => {
-  'use strict';
-
-  const { h } = dom;
-  const BPM_MIN = 40;
-  const BPM_MAX = 240;
-
-  function mount(app) {
-    const t = app.t;
-    const songBox = h('div', { class: 'song-box', 'data-ctl': 'song' });
-    const bpmInput = h('input', { class: 'num-input', type: 'number', min: BPM_MIN, max: BPM_MAX, step: '0.1',
-      'aria-label': t('song.tempo'), inputmode: 'decimal' });
-    const bpmTag = h('span', { class: 'state-tag' });
-    const bpmMenu = h('button', { class: 'icon-btn small', type: 'button', 'aria-label': t('song.tempoMenu'), title: t('song.tempoMenu') },
-      I.icon('more', { size: 16 }));
-    const tempo = h('div', { class: 'field', 'data-ctl': 'tempo' },
-      h('label', { class: 'field-label', text: t('song.tempo') }),
-      h('div', { class: 'field-row' }, bpmInput, h('span', { class: 'unit', text: 'BPM' }), bpmTag, h('span', { class: 'grow' }), bpmMenu));
-    const snap = h('input', { type: 'checkbox', id: 'snap-beats' });
-    const snapRow = h('label', { class: 'check-row', htmlFor: 'snap-beats', 'data-ctl': 'snap' }, snap,
-      h('span', { text: t('song.snap') }));
-    // Why 拍に合わせる is off, shown under it (not only as a tooltip) while there is no tempo.
-    const snapWhy = h('p', { class: 'note subtle snap-why', id: 'snap-why', hidden: true, text: t('song.snapNeedsBpm') });
-    const tapHint = h('span', { class: 'btn-hint' });
-    const tapBtn = h('button', { class: 'btn wide tall', type: 'button', 'data-act': 'tap.start', 'data-ctl': 'tap' },
-      I.icon('tap'), h('span', { class: 'btn-main', text: t('song.tap') }), tapHint);
-    const aiBtn = h('button', { class: 'chip-btn', type: 'button', 'data-act': 'ai.align', 'data-ctl': 'ai' },
-      I.icon('ai', { size: 15 }), t('song.aiTiming'));
-    // タイミングを全体でずらす: every line moves by the same amount (AI timings that run a little late, say)
-    const shiftBtns = [-1, -0.1, 0.1, 1].map((d) => h('button', { class: 'btn small', type: 'button',
-      text: t('song.shiftBy', { d: (d < 0 ? '−' : '+') + Math.abs(d) }), on: { click: () => shiftAll(d) } }));
-    const shiftRow = h('div', { class: 'field', 'data-ctl': 'shift' },
-      h('label', { class: 'field-label', text: t('song.shiftAll') }),
-      h('div', { class: 'field-row' }, ...shiftBtns),
-      h('p', { class: 'note subtle', text: t('song.shiftHint') }));
-    const root = h('div', { class: 'step step-song' },
-      h('div', { class: 'step-head' }, h('h2', { class: 'step-title', text: t('song.title') })),
-      songBox, tempo, h('div', { class: 'snap-field' }, snapRow, snapWhy), tapBtn, aiBtn, shiftRow);
-
-    // The cut times pinned in seconds (a cut's start, an interlude's split points) move along with the lines.
-    function shiftAll(d) {
-      const p = app.plan;
-      if (!p || !p.lines.length) return;
-      const ids = p.lines.map((l) => l.id);
-      const delta = Math.max(d, -Math.min(...p.lines.map((l) => l.t0)));
-      if (Math.abs(delta) < 0.0005) return;
-      const base = Object.fromEntries(p.lines.map((l) => [l.id, { start: l.t0, end: l.t1 }]));
-      const cmds = [{ t: 'time.shift', lineIds: ids, delta, base }];
-      const move = (x) => Math.max(0, Math.round((x + delta) * 1000) / 1000);
-      for (const [path, pin] of Object.entries(app.doc.pins)) {
-        if (!path.startsWith('cut/') || !(path.endsWith(':t0') || path.endsWith(':parts')) || pin.by === 'lock') continue;
-        const v = Array.isArray(pin.v) ? pin.v.map(move) : typeof pin.v === 'number' ? move(pin.v) : null;
-        if (v !== null) cmds.push({ t: 'pin.set', path, v, by: pin.by, sig: typeof pin.sig === 'string' ? pin.sig : '' });
-      }
-      app.batch({ label: ['undo.shift', { n: ids.length }], mergeKey: 'shift:all' }, cmds);
-    }
-
-    dom.on(root, 'click', '[data-act]', (ev, b) => app.actions.run(b.dataset.act, { from: 'song' }));
-
-    function bpmPath() { return 'work:bpm'; }
-    function autoBpm() {
-      const song = app.doc.song;
-      return song && song.bpm ? song.bpm : null;
-    }
-
-    bpmInput.addEventListener('change', () => {
-      const raw = bpmInput.value.trim();
-      if (raw === '') { app.dispatch({ t: 'pin.clear', path: bpmPath() }, { label: ['undo.tempo', {}] }); return; }
-      const v = Math.max(BPM_MIN, Math.min(BPM_MAX, Number(raw)));
-      if (!Number.isFinite(v)) return;
-      app.dispatch({ t: 'pin.set', path: bpmPath(), v: Math.round(v * 10) / 10, by: 'user' }, { label: ['undo.tempo', {}] });
-    });
-    bpmMenu.addEventListener('click', () => {
-      const cur = currentBpm();
-      header.popover(app, bpmMenu, (box, close) => {
-        box.classList.add('menu');
-        const item = (label, fn, disabled) => h('button', { class: 'menu-item', type: 'button', role: 'menuitem', disabled: !!disabled,
-          on: { click: () => { close(); fn(); } } }, h('span', { class: 'menu-check' }), h('span', { class: 'menu-label', text: label }));
-        const setBpm = (v) => app.dispatch({ t: 'pin.set', path: bpmPath(), v: Math.round(v * 10) / 10, by: 'user' }, { label: ['undo.tempo', {}] });
-        box.append(
-          item(t('song.double'), () => setBpm(Math.min(BPM_MAX, cur * 2)), !cur || cur * 2 > BPM_MAX),
-          item(t('song.half'), () => setBpm(Math.max(BPM_MIN, cur / 2)), !cur || cur / 2 < BPM_MIN),
-          item(t('song.tempoAuto'), () => app.dispatch({ t: 'pin.clear', path: bpmPath() }, { label: ['undo.tempo', {}] }),
-            !app.doc.pins[bpmPath()]));
-      });
-    });
-    snap.addEventListener('change', () => {
-      app.dispatch({ t: 'timing.set', key: 'snap', v: snap.checked ? 'beat' : 'off' }, { label: ['undo.snap', {}] });
-    });
-
-    function currentBpm() {
-      const pin = app.doc.pins[bpmPath()];
-      return pin ? pin.v : autoBpm();
-    }
-
-    // The loading row is built once per file and then only updated: progress arrives every few milliseconds, and a
-    // rebuilt [中止] would lose a click that lands between two updates.
-    let loadingRow = null;                 // { name, row, progress, bar, text }
-    function showProgress(st) {
-      const pct = Math.round((st.progress || 0) * 100);
-      const label = t('song.analyzing', { pct });
-      if (!loadingRow || loadingRow.name !== st.name || !songBox.contains(loadingRow.row)) {
-        const bar = h('div', { class: 'progress-bar' });
-        const progress = h('div', { class: 'progress', role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': '100' }, bar);
-        const text = h('div', { class: 'muted small' });
-        const row = h('div', { class: 'song-row busy' }, I.icon('music'),
-          h('div', { class: 'song-meta' }, h('div', { class: 'song-name', text: st.name || '' }), progress, text),
-          app.cancelSong ? h('button', { class: 'btn small song-cancel', type: 'button', title: t('song.cancelTip'),
-            text: t('song.cancel'), on: { click: () => app.cancelSong() } }) : null);
-        loadingRow = { name: st.name, row, progress, bar, text };
-        dom.replace(songBox, row);
-      }
-      dom.setStyle(loadingRow.bar, { width: pct + '%' });
-      loadingRow.progress.setAttribute('aria-valuenow', String(pct));
-      loadingRow.progress.setAttribute('aria-label', label);
-      loadingRow.text.textContent = label;
-    }
-
-    function renderSongBox() {
-      const song = app.doc.song;
-      const st = app.songState ? app.songState() : { state: song ? 'ready' : 'none' };
-      if (st.state === 'decoding') {
-        showProgress(st);
-        return;
-      }
-      loadingRow = null;
-      if (st.state === 'unsupported') {
-        dom.replace(songBox, h('div', { class: 'inline-error', role: 'alert' }, I.icon('warn'), h('span', { text: t('err.song.unsupported') })));
-        return;
-      }
-      // The message on its own line (it names the file and the formats that work), the button under it, and the
-      // reminder that a song is optional stays below the box (§6.11).
-      if (st.state === 'error') {
-        const key = 'err.song.' + (st.code || 'decode');
-        const params = { name: st.name || '' };
-        dom.replace(songBox, h('div', { class: 'inline-error stacked', role: 'alert' },
-          h('div', { class: 'inline-error-text' }, I.icon('warn'), h('span', { text: t.has(key) ? t(key, params) : t('err.song.decode', params) })),
-          h('button', { class: 'btn small', type: 'button', text: t('song.pickOther'),
-            on: { click: () => (st.relink ? app.pickRelink() : app.pickSong()) } })),
-        app.doc.song ? null : h('p', { class: 'note', text: t('song.none') }));
-        return;
-      }
-      if (!song) {
-        dom.replace(songBox,
-          h('button', { class: 'drop-zone', type: 'button', on: { click: () => app.pickSong() } },
-            I.icon('music', { size: 26 }), h('span', { class: 'drop-main', text: t('song.drop') }),
-            h('span', { class: 'drop-sub', text: t('song.formats') })),
-          h('p', { class: 'note', text: t('song.none') }));
-        return;
-      }
-      const missing = st.state === 'missing';
-      const linking = st.state === 'linking';
-      const menu = h('button', { class: 'icon-btn small', type: 'button', 'aria-label': t('song.menu'), title: t('song.menu') }, I.icon('more', { size: 16 }));
-      menu.addEventListener('click', () => header.popover(app, menu, (box, close) => {
-        box.classList.add('menu');
-        box.append(
-          h('button', { class: 'menu-item', type: 'button', role: 'menuitem', on: { click: () => { close(); app.pickSong(); } } },
-            h('span', { class: 'menu-check' }), h('span', { class: 'menu-label', text: t('song.replace') })),
-          h('button', { class: 'menu-item', type: 'button', role: 'menuitem', on: { click: () => { close(); app.clearSong(); } } },
-            h('span', { class: 'menu-check' }), h('span', { class: 'menu-label', text: t('song.remove') })));
-      }));
-      const wave = h('canvas', { class: 'song-wave', width: 560, height: 56 });
-      drawWave(wave, song);
-      dom.replace(songBox,
-        h('div', { class: 'song-row' }, I.icon('music'),
-          h('div', { class: 'song-meta' }, h('div', { class: 'song-name', text: song.name }),
-            h('div', { class: 'muted small', text: T.fmtTime(song.seconds).replace(/\.\d+$/, '') })), menu),
-        wave,
-        linking ? h('div', { class: 'muted small', role: 'status', text: t('song.linking') }) : null,
-        // §6.11: the picker re-links the project's own song (same sha1, or the same length after asking).
-        missing ? h('div', { class: 'inline-error', role: 'alert' }, I.icon('warn'),
-          h('span', { text: t('song.relink', { name: song.name, dur: T.fmtTime(song.seconds).replace(/\.\d+$/, '') }) }),
-          h('button', { class: 'btn small', type: 'button', text: t('song.pick'), on: { click: () => app.pickRelink() } })) : null);
-    }
-
-    function drawWave(cv, song) {
-      const g = cv.getContext('2d');
-      const d = song.digest && typeof song.digest.loud === 'string' ? song.digest.loud : '';
-      let bytes = null;
-      try { bytes = Uint8Array.from(atob(d), (c) => c.charCodeAt(0)); } catch (e) { bytes = null; }
-      g.clearRect(0, 0, cv.width, cv.height);
-      if (!bytes || !bytes.length) return;
-      g.fillStyle = '#7c8699';
-      for (let x = 0; x < cv.width; x += 3) {
-        const v = bytes[Math.min(bytes.length - 1, Math.floor(x / cv.width * bytes.length))] / 255;
-        const a = v * cv.height * 0.45;
-        g.fillRect(x, cv.height / 2 - a, 2, 2 * a);
-      }
-    }
-
-    function update() {
-      renderSongBox();
-      const pin = app.doc.pins[bpmPath()];
-      const auto = autoBpm();
-      if (document.activeElement !== bpmInput) bpmInput.value = pin ? String(pin.v) : auto ? String(Math.round(auto * 10) / 10) : '';
-      bpmInput.placeholder = auto ? '' : t('song.tempoNone');
-      bpmTag.textContent = pin ? t('state.pinned') : auto ? t('state.auto') : '';
-      bpmTag.dataset.state = pin ? 'pinned' : 'auto';
-      snap.checked = app.doc.timing.snap !== 'off';
-      snap.disabled = !currentBpm();
-      snapRow.title = snap.disabled ? t('song.snapNeedsBpm') : '';
-      snapWhy.hidden = !snap.disabled;
-      if (snap.disabled) snap.setAttribute('aria-describedby', 'snap-why'); else snap.removeAttribute('aria-describedby');
-      const sel = S.validate(app.view.state.sel, app.plan);
-      const line = S.lineOfSel(sel);
-      const info = line && app.plan ? app.plan.lines.find((l) => l.id === line) : null;
-      tapHint.textContent = info ? t('song.tapFrom', { n: info.index + 1 }) : t('song.tapFromStart');
-      tapBtn.disabled = !(app.plan && app.plan.lines.length);
-      aiBtn.hidden = !app.view.state.prefs.ai;
-      aiBtn.disabled = !app.doc.song;
-      aiBtn.title = app.doc.song ? '' : t('song.aiNeedsSong');
-      for (const b of shiftBtns) b.disabled = !(app.plan && app.plan.lines.length);
-    }
-
-    app.bus.on('song', update);
-    // Undo / redo / open change the song, the tempo pin or the snap setting without a 'song' event.
-    const touchesSong = (x) => !!x && (x.song || x.timing || (x.pins instanceof Set && x.pins.has(bpmPath())));
-    app.bus.on('plan', (e) => { if (e && touchesSong(e.touched)) update(); });
-    app.view.on((changed) => { if (changed.includes('sel') || changed.includes('prefs')) update(); });
-    update();
-    return { root, update: () => update() };
-  }
-
-  return { mount };
-});
-/* 文字PVメーカー v2 — original work. The step column: four tabs, the step body host, footer (次へ, « fold), toast slot, and the rail. */
-MV.def('ui/steps', ['ui/dom', 'ui/icons', 'ui/step_lyrics', 'ui/step_song', 'ui/step_look', 'ui/step_export'],
-  (dom, I, lyrics, song, look, exporter) => {
-    'use strict';
-
-    const { h } = dom;
-    const STEPS = ['lyrics', 'song', 'look', 'export'];
-    const MODULES = { lyrics, song, look, export: exporter };
-    const NUMBERS = ['1', '2', '3', '4'];
-
-    // Work-scope pins that choose the look (§3.4.1, §3.4.3 at work scope). The timing slots of step ② and the title card
-    // (bpm, beatOffset, readRate, length, titleCard) are not look choices.
-    const LOOK_PIN = /^work:(mood|theme|season|color\.|face\.|text\.|amount\.|texture|arrange|arrive|dwell|depart|ground|atmos|ornament|lens|filter|seam|orient|el\.)/;
-
-    // Step status dots (§6.4.3): ① a lyric line exists; ② a song is loaded (optional); ③ after the first おまかせ or
-    // look pin; ④ progress while exporting.
-    function statusOf(app, step) {
-      const plan = app.plan;
-      if (step === 'lyrics') return plan && plan.lines.length ? 'done' : 'todo';
-      if (step === 'song') return app.doc.song ? 'done' : 'optional';
-      if (step === 'look') {
-        const looks = app.store.side && app.store.side.looks;
-        const list = looks && Array.isArray(looks.list) ? looks.list : [];
-        const tried = list.some((e) => e && Array.isArray(e.label) && e.label[0] !== 'look.first');
-        return tried || Object.keys(app.doc.pins).some((p) => LOOK_PIN.test(p)) ? 'done' : 'todo';
-      }
-      return app.exporting ? 'busy' : 'todo';
-    }
-
-    function mount(app, railEl) {
-      const t = app.t;
-      const bodies = {};
-      for (const step of STEPS) bodies[step] = MODULES[step].mount(app);
-      const tapPanel = app.tap;
-
-      const tabs = STEPS.map((step, i) => h('button', {
-        class: 'step-tab', type: 'button', role: 'tab', id: 'step-tab-' + step, 'data-step': step,
-        'aria-controls': 'step-body', title: t('step.' + step),
-      }, h('span', { class: 'step-num', 'aria-hidden': 'true', text: NUMBERS[i] }),
-      h('span', { class: 'step-name', text: t('step.short.' + step) }),
-      h('span', { class: 'step-dot', 'aria-hidden': 'true' })));
-      const tabList = h('div', { class: 'step-tabs', role: 'tablist', 'aria-label': t('steps.region') }, tabs);
-      const bodyHost = h('div', { class: 'step-body', id: 'step-body', role: 'tabpanel' });
-      const toastHost = h('div', { class: 'toast-slot' });
-      const fold = h('button', { class: 'icon-btn', type: 'button', 'aria-label': t('steps.fold'), title: t('steps.fold') },
-        I.icon('fold'));
-      const next = h('button', { class: 'btn next-btn', type: 'button' });
-      const footerExtra = h('div', { class: 'footer-main' });
-      const footer = h('div', { class: 'step-footer' }, fold, footerExtra);
-      const root = h('div', { class: 'stepcol' }, tabList, bodyHost, toastHost, footer);
-
-      // Rail (48 px): step numbers and the expand button.
-      const railTabs = STEPS.map((step, i) => h('button', {
-        class: 'rail-step', type: 'button', 'data-step': step, title: t('step.' + step), 'aria-label': t('step.' + step),
-      }, h('span', { text: NUMBERS[i] }), h('span', { class: 'step-dot', 'aria-hidden': 'true' })));
-      const expand = h('button', { class: 'rail-step rail-expand', type: 'button', title: t('steps.unfold'), 'aria-label': t('steps.unfold') },
-        I.icon('unfold'));
-      railEl.append(...railTabs, h('span', { class: 'grow' }), expand);
-
-      dom.on(tabList, 'click', '[data-step]', (ev, el) => app.goStep(el.dataset.step));
-      tabList.addEventListener('keydown', (ev) => {
-        if (ev.key !== 'ArrowRight' && ev.key !== 'ArrowLeft' && ev.key !== 'Home' && ev.key !== 'End') return;
-        const at = STEPS.indexOf(app.view.state.step);
-        const to = ev.key === 'Home' ? 0 : ev.key === 'End' ? 3 : (at + (ev.key === 'ArrowRight' ? 1 : 3)) % 4;
-        app.goStep(STEPS[to]);
-        dom.focus(tabs[to]);
-        ev.preventDefault();
-      });
-      dom.on(railEl, 'click', '[data-step]', (ev, el) => { app.view.setRail(false); app.goStep(el.dataset.step); });
-      expand.addEventListener('click', () => app.view.setRail(false));
-      fold.addEventListener('click', () => app.view.setRail(true));
-      next.addEventListener('click', () => {
-        const at = STEPS.indexOf(app.view.state.step);
-        if (at < 3) app.goStep(STEPS[at + 1]);
-      });
-
-      let shown = null;
-      function showBody() {
-        const vs = app.view.state;
-        const want = vs.mode === 'tap' ? tapPanel : bodies[vs.step];
-        if (shown !== want) {
-          dom.replace(bodyHost, want.root);
-          shown = want;
-          if (want.onShow) want.onShow();
-        }
-        bodyHost.setAttribute('aria-labelledby', 'step-tab-' + vs.step);
-        const at = STEPS.indexOf(vs.step);
-        const extra = vs.mode !== 'tap' && bodies[vs.step].footer ? bodies[vs.step].footer : null;
-        if (extra) dom.replace(footerExtra, extra);
-        else if (vs.mode === 'tap') dom.clear(footerExtra);
-        else {
-          // ② without a song: 「曲なしで次へ」 (§6.11 — the song is optional).
-          const label = vs.step === 'song' && !app.doc.song ? t('step.nextNoSong') : t('step.next', { step: t('step.' + STEPS[at + 1]) });
-          next.textContent = '';
-          next.append(h('span', { text: label }), I.icon('next', { size: 16 }));
-          dom.replace(footerExtra, next);
-        }
-      }
-
-      function updateTabs() {
-        const cur = app.view.state.step;
-        STEPS.forEach((step, i) => {
-          const st = statusOf(app, step);
-          for (const el of [tabs[i], railTabs[i]]) {
-            el.dataset.status = st;
-            el.setAttribute(el === tabs[i] ? 'aria-selected' : 'aria-current', el === tabs[i] ? String(step === cur) : step === cur ? 'step' : 'false');
-          }
-          tabs[i].tabIndex = step === cur ? 0 : -1;
-        });
-      }
-
-      function update() {
-        updateTabs();
-        showBody();
-      }
-
-      app.view.on((changed) => {
-        if (changed.includes('step') || changed.includes('mode')) update();
-      });
-      app.bus.on('plan', () => { updateTabs(); for (const s of STEPS) bodies[s].update('plan'); if (app.view.state.step === 'song') showBody(); });
-      app.bus.on('side', updateTabs);
-      app.bus.on('export', updateTabs);
-      update();
-
-      return {
-        root, toastHost, bodies,
-        setRailMode(on) { root.classList.toggle('is-railed', on); },
-      };
-    }
-
-    return { mount, STEPS, statusOf, LOOK_PIN };
-  });
 /* 文字PVメーカー v2 — original work. Tap mode: Space/Enter, the tap button or a press on the preview marks line starts while the song plays; one time.tap on finish (DESIGN §4.11, §6.4.15). */
 MV.def('ui/tap', ['ui/dom', 'ui/icons', 'ui/keys', 'ui/selection', 'i18n/t'], (dom, I, K, S, T) => {
   'use strict';
@@ -71310,6 +71708,564 @@ MV.def('ui/palette', ['ui/dom', 'ui/icons', 'ui/keys', 'ui/selection', 'i18n/str
     }
 
     return { mount, ALIASES, STARTERS, order, pinnable };
+  });
+/* 文字PVメーカー v2 — original work. Song-step timing targets and atomic nudges. */
+MV.def('ui/timing_targets', ['ui/selection', 'planner/areas', 'core/paths'], (S, A, P) => {
+  'use strict';
+
+  const GAP = 0.1, PIECE = 0.351, PART = 1.001;
+  const round = (x) => Math.round(x * 1000000) / 1000000;
+  const locked = (doc, path) => !!(doc.pins[path] && doc.pins[path].by === 'lock');
+
+  function areas(doc, plan, keep) {
+    if (!plan) return [];
+    const all = A.areasOf(doc, plan);
+    const list = all.song.concat(all.heads, all.paras).filter((a) => a.lineIds.length);
+    // An audio section may temporarily have no members after its lyrics are nudged out of the analysis span.
+    // Its captured target remains selectable until the section itself or its original lyrics are removed.
+    if (keep && !list.some((a) => a.key === keep.key) && A.resolve(doc, plan, keep.ref)
+      && keep.lineIds.some((id) => plan.lines.some((l) => l.id === id))) list.push(keep);
+    return list;
+  }
+
+  function selected(doc, plan, sel) {
+    const s = S.validate(sel, plan, doc);
+    if (s.level === 'cut' || s.level === 'el' && s.scope.startsWith('cut/')) {
+      const key = s.level === 'cut' ? s.key : s.scope.slice(4);
+      const cut = plan.cuts.find((c) => c.key === key);
+      return cut ? { kind: 'cut', key, lineIds: [], label: A.resolve(doc, plan, { kind: 'cut', key }).label } : null;
+    }
+    const ids = s.level === 'line' ? s.ids : s.level === 'el' && s.scope.startsWith('line/') ? [s.scope.slice(5)] : [];
+    if (!ids.length) return null;
+    const area = A.resolve(doc, plan, { kind: 'lines', ids });
+    return area ? { kind: 'lines', lineIds: area.lineIds.slice(), label: area.label } : null;
+  }
+
+  function resolve(doc, plan, mode, sel, area) {
+    if (!plan || !plan.lines.length) return null;
+    if (mode === 'all') return { kind: 'all', lineIds: plan.lines.map((l) => l.id), label: ['area.work', {}] };
+    if (mode === 'selection') return selected(doc, plan, sel);
+    if (!area) return null;
+    // Keep an explicitly chosen section's members while nudging it across a song-section boundary.
+    const known = new Set(plan.lines.map((l) => l.id));
+    const ids = area.lineIds.filter((id) => known.has(id));
+    return ids.length ? { kind: 'lines', lineIds: ids, label: area.label } : null;
+  }
+
+  function pin(path, v, old, sig) {
+    const c = { t: 'pin.set', path, v, by: old ? old.by : 'user' };
+    if (path.startsWith('cut/')) c.sig = old && typeof old.sig === 'string' ? old.sig : sig || '';
+    return c;
+  }
+
+  // Freezing only currently automatic times keeps neighbouring lyrics in place. Existing time pins retain their
+  // provenance (including AI/tap/lock); this is part of the same undo entry as the selected move.
+  function holdLines(doc, plan, exclude) {
+    const out = [];
+    for (const l of plan.lines) if (!exclude.has(l.id)) {
+      for (const [slot, v] of [['start', l.t0], ['end', l.t1]]) {
+        const path = 'line/' + l.id + ':' + slot;
+        if (!doc.pins[path]) out.push(pin(path, v));
+      }
+    }
+    return out;
+  }
+
+  function lineMove(doc, plan, target, d) {
+    const ids = new Set(target.lineIds), whole = target.kind === 'all';
+    const members = plan.lines.filter((l) => ids.has(l.id));
+    if (!members.length) return { cmds: [], delta: 0, reason: 'none' };
+    if (members.some((l) => locked(doc, 'line/' + l.id + ':start') || locked(doc, 'line/' + l.id + ':end'))) {
+      return { cmds: [], delta: 0, reason: 'locked' };
+    }
+    let lo = -Math.min(...members.map((l) => l.t0)), hi = Infinity;
+    if (!whole) for (let i = 0; i < plan.lines.length; i++) {
+      const l = plan.lines[i];
+      if (!ids.has(l.id)) continue;
+      lo = Math.max(lo, i * GAP - l.t0);
+      const prev = plan.lines[i - 1], next = plan.lines[i + 1];
+      if (prev && !ids.has(prev.id)) lo = Math.max(lo, prev.t0 + GAP - l.t0);
+      if (next && !ids.has(next.id)) hi = Math.min(hi, next.t0 - GAP - l.t0);
+    }
+    const movingPins = [];
+    for (const [path, value] of Object.entries(doc.pins)) {
+      if (!path.startsWith('cut/') || !(path.endsWith(':t0') || path.endsWith(':parts'))) continue;
+      const key = path.slice(4, path.lastIndexOf(':'));
+      let mine = whole;
+      if (!mine) {
+        const line = P.lineOfCut(key);
+        if (line) mine = ids.has(line);
+        else if (key.startsWith('gap/')) {
+          const after = key.slice(4).replace(/~[2-9]$/, '');
+          const at = plan.lines.findIndex((l) => l.id === after);
+          mine = at >= 0 && ids.has(after) && at + 1 < plan.lines.length && ids.has(plan.lines[at + 1].id);
+        }
+      }
+      if (!mine) continue;
+      if (value.by === 'lock') return { cmds: [], delta: 0, reason: 'locked' };
+      const values = Array.isArray(value.v) && value.v.every(Number.isFinite) ? value.v
+        : Number.isFinite(value.v) ? [value.v] : [];
+      if (values.length) { lo = Math.max(lo, -Math.min(...values)); movingPins.push([path, value]); }
+    }
+    const delta = round(Math.max(lo, Math.min(hi, d)));
+    if (Math.abs(delta) < 0.0000005 || lo > hi) return { cmds: [], delta: 0, reason: 'boundary' };
+    const base = Object.fromEntries(members.map((l) => [l.id, { start: l.t0, end: l.t1 }]));
+    const cmds = whole ? [] : holdLines(doc, plan, ids);
+    cmds.push({ t: 'time.shift', lineIds: members.map((l) => l.id), delta, base });
+    for (const [path, value] of movingPins) {
+      const v = Array.isArray(value.v) ? value.v.map((x) => round(x + delta)) : round(value.v + delta);
+      cmds.push(pin(path, v, value));
+    }
+    return { cmds, delta, reason: null };
+  }
+
+  function cutMove(doc, plan, target, d) {
+    const cut = plan.cuts.find((c) => c.key === target.key);
+    if (!cut) return { cmds: [], delta: 0, reason: 'none' };
+    const cmds = holdLines(doc, plan, new Set());
+    if (cut.line) {
+      const line = plan.lines.find((l) => l.id === cut.line);
+      const cuts = plan.cuts.filter((c) => c.line === cut.line), at = cuts.findIndex((c) => c.key === cut.key);
+      const prev = cuts[at - 1], nextLine = plan.lines[plan.lines.indexOf(line) + 1];
+      const path = at ? 'cut/' + (cut.pinKey || cut.key) + ':t0' : 'line/' + cut.line + ':start';
+      if (locked(doc, path)) return { cmds: [], delta: 0, reason: 'locked' };
+      let lo = prev ? prev.t0 + PIECE : 0;
+      if (!at) {
+        const i = plan.lines.indexOf(line), before = plan.lines[i - 1];
+        lo = Math.max(lo, i * GAP, before ? before.t0 + GAP : 0);
+      }
+      const hi = Math.min(cut.t1 - (cuts.length > 1 ? PIECE : 0.2), nextLine ? nextLine.t0 - (at ? PIECE : GAP) : Infinity);
+      const next = round(Math.max(lo, Math.min(hi, cut.t0 + d))), delta = round(next - cut.t0);
+      if (hi < lo || Math.abs(delta) < 0.0000005) return { cmds: [], delta: 0, reason: 'boundary' };
+      // Freeze the split and the other inner boundaries so moving one cut does not redistribute every sibling.
+      const splitPath = 'line/' + cut.line + ':split';
+      if (!doc.pins[splitPath]) cmds.push(pin(splitPath, cuts.map((c) => P.cutOffset(c.key))));
+      for (const sibling of cuts.slice(1)) if (sibling.key !== cut.key) {
+        const p = 'cut/' + (sibling.pinKey || sibling.key) + ':t0';
+        if (!doc.pins[p]) cmds.push(pin(p, sibling.t0, null, sibling.text));
+      }
+      cmds.push(pin(path, next, doc.pins[path], cut.text));
+      return { cmds, delta, reason: null };
+    }
+    const m = /^(gap\/r[0-9a-z]+(?:\.[1-9][0-9]*)?)(?:~([2-9]))?$/.exec(cut.key);
+    if (!m || !m[2]) return { cmds: [], delta: 0, reason: 'boundary' };
+    const parts = plan.cuts.filter((c) => c.key === m[1] || c.key.startsWith(m[1] + '~'));
+    const at = parts.findIndex((c) => c.key === cut.key), path = 'cut/' + m[1] + ':parts';
+    if (locked(doc, path)) return { cmds: [], delta: 0, reason: 'locked' };
+    const lo = parts[at - 1].t0 + PART, hi = cut.t1 - PART;
+    const next = round(Math.max(lo, Math.min(hi, cut.t0 + d))), delta = round(next - cut.t0);
+    if (hi < lo || Math.abs(delta) < 0.0000005) return { cmds: [], delta: 0, reason: 'boundary' };
+    const values = parts.slice(1).map((c) => c.key === cut.key ? next : c.t0);
+    cmds.push(pin(path, values, doc.pins[path], ''));
+    return { cmds, delta, reason: null };
+  }
+
+  function shift(doc, plan, target, delta) {
+    if (!target || !Number.isFinite(delta) || !delta) return { cmds: [], delta: 0, reason: 'none' };
+    return target.kind === 'cut' ? cutMove(doc, plan, target, delta) : lineMove(doc, plan, target, delta);
+  }
+
+  return { areas, selected, resolve, shift };
+});
+/* 文字PVメーカー v2 — original work. Step ② 曲（任意）: song row or drop zone, tempo, snap to beats, tap-sync entry, AI timing (DESIGN §6.4.3, §6.11). */
+MV.def('ui/step_song', ['ui/dom', 'ui/icons', 'ui/header', 'ui/selection', 'ui/timing_targets', 'i18n/t'], (dom, I, header, S, TT, T) => {
+  'use strict';
+
+  const { h } = dom;
+  const BPM_MIN = 40;
+  const BPM_MAX = 240;
+
+  function mount(app) {
+    const t = app.t;
+    const songBox = h('div', { class: 'song-box', 'data-ctl': 'song' });
+    const bpmInput = h('input', { class: 'num-input', type: 'number', min: BPM_MIN, max: BPM_MAX, step: '0.1',
+      'aria-label': t('song.tempo'), inputmode: 'decimal' });
+    const bpmTag = h('span', { class: 'state-tag' });
+    const bpmMenu = h('button', { class: 'icon-btn small', type: 'button', 'aria-label': t('song.tempoMenu'), title: t('song.tempoMenu') },
+      I.icon('more', { size: 16 }));
+    const tempo = h('div', { class: 'field', 'data-ctl': 'tempo' },
+      h('label', { class: 'field-label', text: t('song.tempo') }),
+      h('div', { class: 'field-row' }, bpmInput, h('span', { class: 'unit', text: 'BPM' }), bpmTag, h('span', { class: 'grow' }), bpmMenu));
+    const snap = h('input', { type: 'checkbox', id: 'snap-beats' });
+    const snapRow = h('label', { class: 'check-row', htmlFor: 'snap-beats', 'data-ctl': 'snap' }, snap,
+      h('span', { text: t('song.snap') }));
+    // Why 拍に合わせる is off, shown under it (not only as a tooltip) while there is no tempo.
+    const snapWhy = h('p', { class: 'note subtle snap-why', id: 'snap-why', hidden: true, text: t('song.snapNeedsBpm') });
+    const tapHint = h('span', { class: 'btn-hint' });
+    const tapBtn = h('button', { class: 'btn wide tall', type: 'button', 'data-act': 'tap.start', 'data-ctl': 'tap' },
+      I.icon('tap'), h('span', { class: 'btn-main', text: t('song.tap') }), tapHint);
+    const aiBtn = h('button', { class: 'chip-btn', type: 'button', 'data-act': 'ai.align', 'data-ctl': 'ai' },
+      I.icon('ai', { size: 15 }), t('song.aiTiming'));
+    // The target is local UI state: choosing it never edits the project or adds an undo entry.
+    let shiftMode = 'all', shiftArea = null, shiftSelKey = '';
+    const shiftTarget = h('select', { class: 'select', 'data-ctl': 'shift-target', 'aria-label': t('song.shiftTarget') },
+      ['all', 'area', 'selection'].map((v) => h('option', { value: v, text: t('song.shiftTarget.' + v) })));
+    const shiftAreaPicker = h('select', { class: 'select', 'data-ctl': 'shift-area', 'aria-label': t('song.shiftArea'), hidden: true });
+    const shiftStatus = h('p', { class: 'note', role: 'status', 'data-ctl': 'shift-status' });
+    const shiftHint = h('p', { class: 'note subtle' });
+    const shiftBtns = [-1, -0.1, 0.1, 1].map((d) => h('button', { class: 'btn small', type: 'button',
+      'data-shift': String(d), text: t('song.shiftBy', { d: (d < 0 ? '−' : '+') + Math.abs(d) }), on: { click: () => shiftBy(d) } }));
+    const shiftRow = h('div', { class: 'field', 'data-ctl': 'shift' },
+      h('label', { class: 'field-label', text: t('song.shiftTitle') }),
+      h('div', { class: 'field-row' }, h('span', { class: 'field-label inline', text: t('song.shiftTarget') }), shiftTarget),
+      shiftAreaPicker, shiftStatus,
+      h('div', { class: 'field-row' }, ...shiftBtns),
+      shiftHint);
+    const root = h('div', { class: 'step step-song' },
+      h('div', { class: 'step-head' }, h('h2', { class: 'step-title', text: t('song.title') })),
+      songBox, tempo, h('div', { class: 'snap-field' }, snapRow, snapWhy), tapBtn, aiBtn, shiftRow);
+
+    function timingTarget() { return TT.resolve(app.doc, app.plan, shiftMode, app.view.state.sel, shiftArea); }
+
+    function shiftBy(d) {
+      const target = timingTarget(), result = TT.shift(app.doc, app.plan, target, d);
+      if (!result.cmds.length) return;
+      app.batch({ label: [target.kind === 'cut' ? 'undo.time' : 'undo.shift', { n: target.lineIds.length }],
+        mergeKey: 'shift:' + (target.kind === 'cut' ? target.key : target.lineIds.join(',')) }, result.cmds);
+      if (Math.abs(result.delta - d) > 0.000001) app.toast(t('song.shiftPartial', { d: (result.delta < 0 ? '−' : '+') + Math.abs(result.delta) }));
+    }
+
+    shiftTarget.addEventListener('change', () => { shiftMode = shiftTarget.value; shiftSelKey = ''; updateShift(); });
+    shiftAreaPicker.addEventListener('change', () => {
+      shiftArea = TT.areas(app.doc, app.plan).find((a) => a.key === shiftAreaPicker.value) || null;
+      updateShift();
+    });
+
+    function updateShift() {
+      const list = TT.areas(app.doc, app.plan, shiftArea), sel = S.validate(app.view.state.sel, app.plan, app.doc);
+      const selKey = JSON.stringify(sel.level === 'line' ? { level: 'line', ids: sel.ids } : sel);
+      if (shiftMode === 'area' && selKey !== shiftSelKey) {
+        const keys = sel.level === 'line' && sel.area ? [sel.area] : [];
+        const ids = sel.level === 'line' ? sel.ids : S.lineOfSel(sel) ? [S.lineOfSel(sel)] : [];
+        const wanted = keys.length ? list.find((a) => JSON.stringify(a.ref) === JSON.stringify(keys[0]))
+          : list.find((a) => ids.length && ids.every((id) => a.lineIds.includes(id)));
+        if (wanted) shiftArea = wanted;
+      }
+      shiftSelKey = selKey;
+      if (!shiftArea || !list.some((a) => a.key === shiftArea.key)) shiftArea = list[0] || null;
+      const optsKey = JSON.stringify(list.map((a) => [a.key, a.label]));
+      if (shiftAreaPicker.dataset.options !== optsKey) {
+        dom.replace(shiftAreaPicker, list.map((a) => h('option', { value: a.key, text: t(a.label[0], a.label[1]) })));
+        shiftAreaPicker.dataset.options = optsKey;
+      }
+      shiftAreaPicker.hidden = shiftMode !== 'area';
+      shiftAreaPicker.disabled = !list.length;
+      if (shiftArea) shiftAreaPicker.value = shiftArea.key;
+      const target = timingTarget();
+      shiftStatus.textContent = target ? target.kind === 'cut' ? t(target.label[0], target.label[1])
+        : t('song.shiftLines', { name: t(target.label[0], target.label[1]), n: target.lineIds.length })
+        : t(shiftMode === 'area' ? 'song.shiftNoArea' : 'song.shiftNone');
+      shiftHint.textContent = t(target && target.kind === 'cut' ? 'song.shiftHintCut'
+        : shiftMode === 'all' ? 'song.shiftHint' : 'song.shiftHintSelected');
+      for (const b of shiftBtns) {
+        const result = TT.shift(app.doc, app.plan, target, Number(b.dataset.shift));
+        b.disabled = !result.cmds.length;
+        b.title = result.reason === 'locked' ? t('song.shiftLocked') : result.reason === 'boundary' ? t('song.shiftBoundary') : '';
+      }
+    }
+
+    dom.on(root, 'click', '[data-act]', (ev, b) => app.actions.run(b.dataset.act, { from: 'song' }));
+
+    function bpmPath() { return 'work:bpm'; }
+    function autoBpm() {
+      const song = app.doc.song;
+      return song && song.bpm ? song.bpm : null;
+    }
+
+    bpmInput.addEventListener('change', () => {
+      const raw = bpmInput.value.trim();
+      if (raw === '') { app.dispatch({ t: 'pin.clear', path: bpmPath() }, { label: ['undo.tempo', {}] }); return; }
+      const v = Math.max(BPM_MIN, Math.min(BPM_MAX, Number(raw)));
+      if (!Number.isFinite(v)) return;
+      app.dispatch({ t: 'pin.set', path: bpmPath(), v: Math.round(v * 10) / 10, by: 'user' }, { label: ['undo.tempo', {}] });
+    });
+    bpmMenu.addEventListener('click', () => {
+      const cur = currentBpm();
+      header.popover(app, bpmMenu, (box, close) => {
+        box.classList.add('menu');
+        const item = (label, fn, disabled) => h('button', { class: 'menu-item', type: 'button', role: 'menuitem', disabled: !!disabled,
+          on: { click: () => { close(); fn(); } } }, h('span', { class: 'menu-check' }), h('span', { class: 'menu-label', text: label }));
+        const setBpm = (v) => app.dispatch({ t: 'pin.set', path: bpmPath(), v: Math.round(v * 10) / 10, by: 'user' }, { label: ['undo.tempo', {}] });
+        box.append(
+          item(t('song.double'), () => setBpm(Math.min(BPM_MAX, cur * 2)), !cur || cur * 2 > BPM_MAX),
+          item(t('song.half'), () => setBpm(Math.max(BPM_MIN, cur / 2)), !cur || cur / 2 < BPM_MIN),
+          item(t('song.tempoAuto'), () => app.dispatch({ t: 'pin.clear', path: bpmPath() }, { label: ['undo.tempo', {}] }),
+            !app.doc.pins[bpmPath()]));
+      });
+    });
+    snap.addEventListener('change', () => {
+      app.dispatch({ t: 'timing.set', key: 'snap', v: snap.checked ? 'beat' : 'off' }, { label: ['undo.snap', {}] });
+    });
+
+    function currentBpm() {
+      const pin = app.doc.pins[bpmPath()];
+      return pin ? pin.v : autoBpm();
+    }
+
+    // The loading row is built once per file and then only updated: progress arrives every few milliseconds, and a
+    // rebuilt [中止] would lose a click that lands between two updates.
+    let loadingRow = null;                 // { name, row, progress, bar, text }
+    function showProgress(st) {
+      const pct = Math.round((st.progress || 0) * 100);
+      const label = t('song.analyzing', { pct });
+      if (!loadingRow || loadingRow.name !== st.name || !songBox.contains(loadingRow.row)) {
+        const bar = h('div', { class: 'progress-bar' });
+        const progress = h('div', { class: 'progress', role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': '100' }, bar);
+        const text = h('div', { class: 'muted small' });
+        const row = h('div', { class: 'song-row busy' }, I.icon('music'),
+          h('div', { class: 'song-meta' }, h('div', { class: 'song-name', text: st.name || '' }), progress, text),
+          app.cancelSong ? h('button', { class: 'btn small song-cancel', type: 'button', title: t('song.cancelTip'),
+            text: t('song.cancel'), on: { click: () => app.cancelSong() } }) : null);
+        loadingRow = { name: st.name, row, progress, bar, text };
+        dom.replace(songBox, row);
+      }
+      dom.setStyle(loadingRow.bar, { width: pct + '%' });
+      loadingRow.progress.setAttribute('aria-valuenow', String(pct));
+      loadingRow.progress.setAttribute('aria-label', label);
+      loadingRow.text.textContent = label;
+    }
+
+    function renderSongBox() {
+      const song = app.doc.song;
+      const st = app.songState ? app.songState() : { state: song ? 'ready' : 'none' };
+      if (st.state === 'decoding') {
+        showProgress(st);
+        return;
+      }
+      loadingRow = null;
+      if (st.state === 'unsupported') {
+        dom.replace(songBox, h('div', { class: 'inline-error', role: 'alert' }, I.icon('warn'), h('span', { text: t('err.song.unsupported') })));
+        return;
+      }
+      // The message on its own line (it names the file and the formats that work), the button under it, and the
+      // reminder that a song is optional stays below the box (§6.11).
+      if (st.state === 'error') {
+        const key = 'err.song.' + (st.code || 'decode');
+        const params = { name: st.name || '' };
+        dom.replace(songBox, h('div', { class: 'inline-error stacked', role: 'alert' },
+          h('div', { class: 'inline-error-text' }, I.icon('warn'), h('span', { text: t.has(key) ? t(key, params) : t('err.song.decode', params) })),
+          h('button', { class: 'btn small', type: 'button', text: t('song.pickOther'),
+            on: { click: () => (st.relink ? app.pickRelink() : app.pickSong()) } })),
+        app.doc.song ? null : h('p', { class: 'note', text: t('song.none') }));
+        return;
+      }
+      if (!song) {
+        dom.replace(songBox,
+          h('button', { class: 'drop-zone', type: 'button', on: { click: () => app.pickSong() } },
+            I.icon('music', { size: 26 }), h('span', { class: 'drop-main', text: t('song.drop') }),
+            h('span', { class: 'drop-sub', text: t('song.formats') })),
+          h('p', { class: 'note', text: t('song.none') }));
+        return;
+      }
+      const missing = st.state === 'missing';
+      const linking = st.state === 'linking';
+      const menu = h('button', { class: 'icon-btn small', type: 'button', 'aria-label': t('song.menu'), title: t('song.menu') }, I.icon('more', { size: 16 }));
+      menu.addEventListener('click', () => header.popover(app, menu, (box, close) => {
+        box.classList.add('menu');
+        box.append(
+          h('button', { class: 'menu-item', type: 'button', role: 'menuitem', on: { click: () => { close(); app.pickSong(); } } },
+            h('span', { class: 'menu-check' }), h('span', { class: 'menu-label', text: t('song.replace') })),
+          h('button', { class: 'menu-item', type: 'button', role: 'menuitem', on: { click: () => { close(); app.clearSong(); } } },
+            h('span', { class: 'menu-check' }), h('span', { class: 'menu-label', text: t('song.remove') })));
+      }));
+      const wave = h('canvas', { class: 'song-wave', width: 560, height: 56 });
+      drawWave(wave, song);
+      dom.replace(songBox,
+        h('div', { class: 'song-row' }, I.icon('music'),
+          h('div', { class: 'song-meta' }, h('div', { class: 'song-name', text: song.name }),
+            h('div', { class: 'muted small', text: T.fmtTime(song.seconds).replace(/\.\d+$/, '') })), menu),
+        wave,
+        linking ? h('div', { class: 'muted small', role: 'status', text: t('song.linking') }) : null,
+        // §6.11: the picker re-links the project's own song (same sha1, or the same length after asking).
+        missing ? h('div', { class: 'inline-error', role: 'alert' }, I.icon('warn'),
+          h('span', { text: t('song.relink', { name: song.name, dur: T.fmtTime(song.seconds).replace(/\.\d+$/, '') }) }),
+          h('button', { class: 'btn small', type: 'button', text: t('song.pick'), on: { click: () => app.pickRelink() } })) : null);
+    }
+
+    function drawWave(cv, song) {
+      const g = cv.getContext('2d');
+      const d = song.digest && typeof song.digest.loud === 'string' ? song.digest.loud : '';
+      let bytes = null;
+      try { bytes = Uint8Array.from(atob(d), (c) => c.charCodeAt(0)); } catch (e) { bytes = null; }
+      g.clearRect(0, 0, cv.width, cv.height);
+      if (!bytes || !bytes.length) return;
+      g.fillStyle = '#7c8699';
+      for (let x = 0; x < cv.width; x += 3) {
+        const v = bytes[Math.min(bytes.length - 1, Math.floor(x / cv.width * bytes.length))] / 255;
+        const a = v * cv.height * 0.45;
+        g.fillRect(x, cv.height / 2 - a, 2, 2 * a);
+      }
+    }
+
+    function update() {
+      renderSongBox();
+      const pin = app.doc.pins[bpmPath()];
+      const auto = autoBpm();
+      if (document.activeElement !== bpmInput) bpmInput.value = pin ? String(pin.v) : auto ? String(Math.round(auto * 10) / 10) : '';
+      bpmInput.placeholder = auto ? '' : t('song.tempoNone');
+      bpmTag.textContent = pin ? t('state.pinned') : auto ? t('state.auto') : '';
+      bpmTag.dataset.state = pin ? 'pinned' : 'auto';
+      snap.checked = app.doc.timing.snap !== 'off';
+      snap.disabled = !currentBpm();
+      snapRow.title = snap.disabled ? t('song.snapNeedsBpm') : '';
+      snapWhy.hidden = !snap.disabled;
+      if (snap.disabled) snap.setAttribute('aria-describedby', 'snap-why'); else snap.removeAttribute('aria-describedby');
+      const sel = S.validate(app.view.state.sel, app.plan);
+      const line = S.lineOfSel(sel);
+      const info = line && app.plan ? app.plan.lines.find((l) => l.id === line) : null;
+      tapHint.textContent = info ? t('song.tapFrom', { n: info.index + 1 }) : t('song.tapFromStart');
+      tapBtn.disabled = !(app.plan && app.plan.lines.length);
+      aiBtn.hidden = !app.view.state.prefs.ai;
+      aiBtn.disabled = !app.doc.song;
+      aiBtn.title = app.doc.song ? '' : t('song.aiNeedsSong');
+      updateShift();
+    }
+
+    app.bus.on('song', update);
+    // Undo / redo / open change the song, the tempo pin or the snap setting without a 'song' event.
+    const touchesSong = (x) => !!x && (x.song || x.timing || (x.pins instanceof Set && x.pins.has(bpmPath())));
+    app.bus.on('plan', (e) => {
+      if (e && e.kind === 'load') { shiftArea = null; shiftSelKey = ''; }
+      if (e && touchesSong(e.touched)) update(); else updateShift();
+    });
+    app.view.on((changed) => { if (changed.includes('sel') || changed.includes('prefs')) update(); });
+    update();
+    return { root, update: () => update() };
+  }
+
+  return { mount };
+});
+/* 文字PVメーカー v2 — original work. The step column: four tabs, the step body host, footer (次へ, « fold), toast slot, and the rail. */
+MV.def('ui/steps', ['ui/dom', 'ui/icons', 'ui/step_lyrics', 'ui/step_song', 'ui/step_look', 'ui/step_export'],
+  (dom, I, lyrics, song, look, exporter) => {
+    'use strict';
+
+    const { h } = dom;
+    const STEPS = ['lyrics', 'song', 'look', 'export'];
+    const MODULES = { lyrics, song, look, export: exporter };
+    const NUMBERS = ['1', '2', '3', '4'];
+
+    // Work-scope pins that choose the look (§3.4.1, §3.4.3 at work scope). The timing slots of step ② and the title card
+    // (bpm, beatOffset, readRate, length, titleCard) are not look choices.
+    const LOOK_PIN = /^work:(mood|theme|season|color\.|face\.|text\.|amount\.|texture|arrange|arrive|dwell|depart|ground|atmos|ornament|lens|filter|seam|orient|el\.)/;
+
+    // Step status dots (§6.4.3): ① a lyric line exists; ② a song is loaded (optional); ③ after the first おまかせ or
+    // look pin; ④ progress while exporting.
+    function statusOf(app, step) {
+      const plan = app.plan;
+      if (step === 'lyrics') return plan && plan.lines.length ? 'done' : 'todo';
+      if (step === 'song') return app.doc.song ? 'done' : 'optional';
+      if (step === 'look') {
+        const looks = app.store.side && app.store.side.looks;
+        const list = looks && Array.isArray(looks.list) ? looks.list : [];
+        const tried = list.some((e) => e && Array.isArray(e.label) && e.label[0] !== 'look.first');
+        return tried || Object.keys(app.doc.pins).some((p) => LOOK_PIN.test(p)) ? 'done' : 'todo';
+      }
+      return app.exporting ? 'busy' : 'todo';
+    }
+
+    function mount(app, railEl) {
+      const t = app.t;
+      const bodies = {};
+      for (const step of STEPS) bodies[step] = MODULES[step].mount(app);
+      const tapPanel = app.tap;
+
+      const tabs = STEPS.map((step, i) => h('button', {
+        class: 'step-tab', type: 'button', role: 'tab', id: 'step-tab-' + step, 'data-step': step,
+        'aria-controls': 'step-body', title: t('step.' + step),
+      }, h('span', { class: 'step-num', 'aria-hidden': 'true', text: NUMBERS[i] }),
+      h('span', { class: 'step-name', text: t('step.short.' + step) }),
+      h('span', { class: 'step-dot', 'aria-hidden': 'true' })));
+      const tabList = h('div', { class: 'step-tabs', role: 'tablist', 'aria-label': t('steps.region') }, tabs);
+      const bodyHost = h('div', { class: 'step-body', id: 'step-body', role: 'tabpanel' });
+      const toastHost = h('div', { class: 'toast-slot' });
+      const fold = h('button', { class: 'icon-btn', type: 'button', 'aria-label': t('steps.fold'), title: t('steps.fold') },
+        I.icon('fold'));
+      const next = h('button', { class: 'btn next-btn', type: 'button' });
+      const footerExtra = h('div', { class: 'footer-main' });
+      const footer = h('div', { class: 'step-footer' }, fold, footerExtra);
+      const root = h('div', { class: 'stepcol' }, tabList, bodyHost, toastHost, footer);
+
+      // Rail (48 px): step numbers and the expand button.
+      const railTabs = STEPS.map((step, i) => h('button', {
+        class: 'rail-step', type: 'button', 'data-step': step, title: t('step.' + step), 'aria-label': t('step.' + step),
+      }, h('span', { text: NUMBERS[i] }), h('span', { class: 'step-dot', 'aria-hidden': 'true' })));
+      const expand = h('button', { class: 'rail-step rail-expand', type: 'button', title: t('steps.unfold'), 'aria-label': t('steps.unfold') },
+        I.icon('unfold'));
+      railEl.append(...railTabs, h('span', { class: 'grow' }), expand);
+
+      dom.on(tabList, 'click', '[data-step]', (ev, el) => app.goStep(el.dataset.step));
+      tabList.addEventListener('keydown', (ev) => {
+        if (ev.key !== 'ArrowRight' && ev.key !== 'ArrowLeft' && ev.key !== 'Home' && ev.key !== 'End') return;
+        const at = STEPS.indexOf(app.view.state.step);
+        const to = ev.key === 'Home' ? 0 : ev.key === 'End' ? 3 : (at + (ev.key === 'ArrowRight' ? 1 : 3)) % 4;
+        app.goStep(STEPS[to]);
+        dom.focus(tabs[to]);
+        ev.preventDefault();
+      });
+      dom.on(railEl, 'click', '[data-step]', (ev, el) => { app.view.setRail(false); app.goStep(el.dataset.step); });
+      expand.addEventListener('click', () => app.view.setRail(false));
+      fold.addEventListener('click', () => app.view.setRail(true));
+      next.addEventListener('click', () => {
+        const at = STEPS.indexOf(app.view.state.step);
+        if (at < 3) app.goStep(STEPS[at + 1]);
+      });
+
+      let shown = null;
+      function showBody() {
+        const vs = app.view.state;
+        const want = vs.mode === 'tap' ? tapPanel : bodies[vs.step];
+        if (shown !== want) {
+          dom.replace(bodyHost, want.root);
+          shown = want;
+          if (want.onShow) want.onShow();
+        }
+        bodyHost.setAttribute('aria-labelledby', 'step-tab-' + vs.step);
+        const at = STEPS.indexOf(vs.step);
+        const extra = vs.mode !== 'tap' && bodies[vs.step].footer ? bodies[vs.step].footer : null;
+        if (extra) dom.replace(footerExtra, extra);
+        else if (vs.mode === 'tap') dom.clear(footerExtra);
+        else {
+          // ② without a song: 「曲なしで次へ」 (§6.11 — the song is optional).
+          const label = vs.step === 'song' && !app.doc.song ? t('step.nextNoSong') : t('step.next', { step: t('step.' + STEPS[at + 1]) });
+          next.textContent = '';
+          next.append(h('span', { text: label }), I.icon('next', { size: 16 }));
+          dom.replace(footerExtra, next);
+        }
+      }
+
+      function updateTabs() {
+        const cur = app.view.state.step;
+        STEPS.forEach((step, i) => {
+          const st = statusOf(app, step);
+          for (const el of [tabs[i], railTabs[i]]) {
+            el.dataset.status = st;
+            el.setAttribute(el === tabs[i] ? 'aria-selected' : 'aria-current', el === tabs[i] ? String(step === cur) : step === cur ? 'step' : 'false');
+          }
+          tabs[i].tabIndex = step === cur ? 0 : -1;
+        });
+      }
+
+      function update() {
+        updateTabs();
+        showBody();
+      }
+
+      app.view.on((changed) => {
+        if (changed.includes('step') || changed.includes('mode')) update();
+      });
+      app.bus.on('plan', () => { updateTabs(); for (const s of STEPS) bodies[s].update('plan'); if (app.view.state.step === 'song') showBody(); });
+      app.bus.on('side', updateTabs);
+      app.bus.on('export', updateTabs);
+      update();
+
+      return {
+        root, toastHost, bodies,
+        setRailMode(on) { root.classList.toggle('is-railed', on); },
+      };
+    }
+
+    return { mount, STEPS, statusOf, LOOK_PIN };
   });
 /* 文字PVメーカー v2 — original work. Toasts: never over the preview; host follows the layout; ≤ 2 stacked, 6 s; polite live region (DESIGN §6.4.11). */
 MV.def('ui/toasts', ['ui/dom', 'ui/icons'], (dom, I) => {
@@ -76705,17 +77661,22 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
       const format = app.doc.output.format;
       return format === 'kit' ? S.kitFolder(app.doc) : S.fileName(app.doc, S.FORMATS[format].ext);
     };
-    // WebCodecs support for the current size (async; cached per w×h×fps, then the step re-renders).
+    // WebCodecs support for the current size and processing preference (async, then the step re-renders).
     app.exportProbe = () => {
       if (!app.plan) return null;
       const o = app.doc.output;
       const { w, h } = ex().schedule.outputSize(app.plan.design.aspect, o.short);
-      const key = w + 'x' + h + '@' + o.fps;
+      const acceleration = o.acceleration || 'auto';
+      const key = w + 'x' + h + '@' + o.fps + ':' + acceleration;
       if (probed.key !== key) {
         probed = { key, value: null };
-        ex().mp4.probe({ w, h, fps: o.fps }).then((value) => {
+        ex().mp4.probe({ w, h, fps: o.fps, acceleration }).then((value) => {
           if (probed.key === key) { probed.value = value; app.bus.emit('export', st); }
-        }).catch(() => { probed.value = { webcodecs: false, codec: null, audioCodec: null, anyCodec: false, vp9Codec: null }; });
+        }).catch(() => {
+          if (probed.key === key) { probed.value = { webcodecs: false, codec: null, audioCodec: null, audioBitrate: null,
+            audioBitrateMode: null, webmAudioCodec: null, webmAudioBitrate: null, webmAudioBitrateMode: null,
+            anyCodec: false, vp9Codec: null }; app.bus.emit('export', st); }
+        });
       }
       return probed.value;
     };
@@ -76732,6 +77693,7 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
       try { jumps = typeof app.engine.xJumps === 'function' ? app.engine.xJumps(range.t0, range.t1) : []; } catch (e) { jumps = []; }
       const items = ex().schedule.preflight(app.doc, app.plan, {
         webcodecs: typeof VideoEncoder === 'function', codec: pr.codec, audioCodec: pr.audioCodec, anyCodec: pr.anyCodec,
+        audioBitrate: pr.audioBitrate, webmAudioCodec: pr.webmAudioCodec, webmAudioBitrate: pr.webmAudioBitrate,
         vp9Codec: pr.vp9Codec, fontsReady: fontsReady(),
         fsAccess: ex().sink.canStream(), dirAccess: ex().sink.canDirectory(), songReady: !app.doc.song || app.songReady(),
         warnings: app.warnings(), registry: app.reg, jumps,

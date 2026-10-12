@@ -149,7 +149,9 @@ MV.def('export/host/kit', ['export/schedule', 'export/subtitles', 'export/zip', 
 
   // exportKit({ engine, doc, audio: AudioBuffer | null, dir: DirSink | null, signal, onProgress, assets?, canvas?, lib?,
   //             codecs? }) → { files: [{ name, kind, bytes }], ms, audio: 'aac' | 'wav' | 'none', frames, bytes, folder,
-  //                            codec, overlayCodec, name?, blob? }
+  //                            codec, overlayCodec, audioCodec, audioBitrate, audioBitrateMode, acceleration,
+  //                            accelerationByOutput, name?, blob? }
+  // audioBitrate is the configured AAC target, or the WAV's exact PCM bitrate; null when no song is written.
   // The Filmora kit (DESIGN_2_1 §13.9). Files and names are export/schedule.kitFiles (§13.9's table, in its order):
   // the main MP4 (H.264 at CFR with a key frame every 2·fps, AAC where the browser encodes it), the overlay WebM
   // (the §13.5 transparent WebM, backdrop `clear`, no sound), the background MP4 (layers 'ground'), the green-screen MP4
@@ -158,7 +160,9 @@ MV.def('export/host/kit', ['export/schedule', 'export/subtitles', 'export/zip', 
   // One pass over the timeline: two engine forks — eA (the document) and eG (backdrop chroma, only with the green
   // screen) — share one AssetStore (`assets.fork()`, when the caller passes its store; otherwise each fork makes its
   // own), so each source frame is decoded once. Per frame: await both forks' media frames, then render and encode main,
-  // overlay, background, green, each with its own encoder and queue limit, all at ts(i) / frameDur(i).
+  // overlay, background, green, each with its own encoder and queue limit, all at ts(i) / frameDur(i). Rendering stays
+  // serial; each output snapshots its own surface before it first awaits. Its encoder and sink can then work while
+  // the next output is drawn. The per-frame barrier waits for every output before mediaReady or rendering frame i+1.
   // `dir` (openDirectory / createDirSink) receives one file sink per file; without it (null) every file is a memory sink
   // and the result is one ZIP '<base>_filmora.zip' (`blob`, `name`: the caller downloads it). Progress: { i, N, eta,
   // phase } once per frame (phase 'video'), then phase 'files' (WAV, subtitles, README) and 'zip'. Cancel or any failure
@@ -194,11 +198,11 @@ MV.def('export/host/kit', ['export/schedule', 'export/subtitles', 'export/zip', 
       const main = await J.videoConfig(o.codecs, jobA, bits);
       const song = o.audio && doc.output.audio && doc.song ? o.audio : null;
       const acfg = song ? await J.audioConfig(o.codecs, song, kitAudioList(o.codecs)) : null;
-      const files = S.kitFiles(doc, jobA.plan, { audioCodec: acfg ? acfg.codec : null, songReady: !!song });
+      const files = S.kitFiles(doc, jobA.plan, { audioCodec: acfg ? acfg.codec : null, audioBitrate: acfg ? acfg.bitrate : null, songReady: !!song });
       const fileOf = (kind) => files.find((f) => f.kind === kind) || null;
       let overlay = null;
       if (kit.overlay) {
-        overlay = await J.vp9Config(o.codecs, w, h, fps, bits);
+        overlay = await J.vp9Config(o.codecs, w, h, fps, bits, doc.output.acceleration);
         if (!overlay) throw new S.ExportError('no-vp9', 'neither VP9 nor VP8 encodes ' + w + '×' + h + '@' + fps);
       }
       const greenConfig = jobG ? await J.videoConfig(o.codecs, jobG, S.bitrate(w, h, fps, 'max')) : null;
@@ -228,13 +232,13 @@ MV.def('export/host/kit', ['export/schedule', 'export/subtitles', 'export/zip', 
         J.checkAbort(o.signal);
         for (const x of outputs) if (x.out.failure) throw x.out.failure;
         for (const job of jobs) await job.ready(i, o.signal);
-        for (const x of outputs) {
+        await Promise.all(outputs.map(async (x) => {
           x.job.render(i, x.surface, x.ropts);
           await x.out.frame(i, x.kind === 'overlay' ? x.surface : x.surface.canvas);
-        }
+        }));
         progress.frame(i);
       }
-      for (const x of outputs) await x.out.flush();
+      await Promise.all(outputs.map((x) => x.out.flush()));
       J.checkAbort(o.signal);
       const written = new Map();
       for (const x of outputs) written.set(x.kind, await x.out.end());
@@ -252,7 +256,11 @@ MV.def('export/host/kit', ['export/schedule', 'export/subtitles', 'export/zip', 
 
       const list = files.map((f) => ({ name: f.name, kind: f.kind, bytes: written.get(f.kind).bytes }));
       const result = { files: list, audio: acfg ? 'aac' : wav ? 'wav' : 'none', frames: jobA.N, folder: target.folder,
-        codec: main.codec, overlayCodec: overlay ? overlay.codec : null };
+        codec: main.codec, overlayCodec: overlay ? overlay.codec : null, audioCodec: acfg ? acfg.codec : wav ? 'pcm-s16le' : null,
+        audioBitrate: acfg ? acfg.bitrate : wav ? song.sampleRate * 2 * 16 : null,
+        audioBitrateMode: acfg ? acfg.bitrateMode || null : wav ? 'constant' : null,
+        acceleration: outputs[0].out.acceleration,
+        accelerationByOutput: Object.fromEntries(outputs.map((x) => [x.kind, x.out.acceleration])) };
       if (target.dir) {
         await target.dir.close();
         result.folder = target.dir.name;

@@ -63,7 +63,7 @@ MV.def('export/host/mp4', ['export/schedule', 'export/muxer'], (S, M) => {
       const surface = makeSurface(canvas || null, w, h, ropts.backdrop === 'clear');
       await e.prepare(t0, t1, { export: true });
       return {
-        engine: e, plan, t0, t1, fps, N, w, h, surface, ropts,
+        engine: e, plan, t0, t1, fps, N, w, h, surface, ropts, acceleration: accelerationMode(doc.output.acceleration),
         async ready(i, signal) {
           if (typeof e.mediaReady !== 'function') return;
           try {
@@ -104,16 +104,93 @@ MV.def('export/host/mp4', ['export/schedule', 'export/muxer'], (S, M) => {
 
   // --- encoders ----------------------------------------------------------------------------------------------------
 
-  // The first config of `list` that VideoEncoder supports, else null. A malformed or unknown codec string is simply
-  // unsupported.
-  async function firstVideoConfig(list, configOf) {
-    for (const codec of list) {
-      const config = configOf(codec);
-      try {
-        if ((await VideoEncoder.isConfigSupported(config)).supported) return config;
-      } catch (err) { /* unsupported */ }
+  // WebCodecs chooses the device and native thread count. A supported hardware preference is a configuration hint,
+  // not evidence of GPU utilisation. Keep the accepted preference with its same-codec automatic fallback outside the
+  // dictionary sent to the browser, so older implementations can ignore the hint without a false GPU claim.
+  const VIDEO_CHOICES = new WeakMap();
+  const VIDEO_INFO = new WeakMap();
+
+  function accelerationMode(value) { return value === 'cpu' || value === 'gpu' ? value : 'auto'; }
+
+  function accelerationOf(config) {
+    const info = config && VIDEO_INFO.get(config);
+    return info ? Object.assign({}, info) : { requested: 'auto', selected: config && config.hardwareAcceleration || 'no-preference', fallback: false };
+  }
+
+  async function supportedVideoConfig(base, hint) {
+    const asked = Object.assign({}, base, { hardwareAcceleration: hint });
+    try {
+      const support = await VideoEncoder.isConfigSupported(asked);
+      if (!support || !support.supported) return null;
+      // Unknown dictionary members are silently dropped. An ignored GPU/CPU preference must not be advertised.
+      if (hint !== 'no-preference' && (!support.config || support.config.hardwareAcceleration !== hint)) return null;
+      const accepted = Object.assign({}, asked, support.config || {});
+      if (accepted.codec !== base.codec || accepted.width !== base.width || accepted.height !== base.height
+        || accepted.framerate !== base.framerate || accepted.hardwareAcceleration !== hint
+        || !Number.isFinite(accepted.bitrate) || accepted.bitrate <= 0) return null;
+      return accepted;
+    } catch (err) { return null; }
+  }
+
+  // Try the preferred device across the codec list before reverting to the browser's automatic route. Retain one
+  // supported fallback of the SAME codec: a muxer has already chosen its codec when configure() is called.
+  async function firstVideoConfig(list, configOf, acceleration) {
+    const requested = accelerationMode(acceleration);
+    const preferred = requested === 'cpu' ? 'prefer-software' : 'prefer-hardware';
+    for (const hint of [preferred, 'no-preference']) for (const codec of list) {
+      const base = configOf(codec);
+      const config = await supportedVideoConfig(base, hint);
+      if (!config) continue;
+      const choices = [config];
+      VIDEO_INFO.set(config, { requested, selected: hint, fallback: hint !== preferred });
+      if (hint !== 'no-preference') {
+        const fallback = await supportedVideoConfig(base, 'no-preference');
+        if (fallback) {
+          VIDEO_INFO.set(fallback, { requested, selected: 'no-preference', fallback: true });
+          choices.push(fallback);
+        }
+      }
+      VIDEO_CHOICES.set(config, choices);
+      return config;
     }
     return null;
+  }
+
+  // The alpha stream has the colour stream's codec/device choices with its own bitrate. Never mutate a config shared
+  // by multiple kit outputs; a failed GPU configure() in one output must not change the others' request.
+  function videoVariant(config, patch) {
+    const choices = (VIDEO_CHOICES.get(config) || [config]).map((c) => {
+      const next = Object.assign({}, c, patch);
+      VIDEO_INFO.set(next, accelerationOf(c));
+      return next;
+    });
+    VIDEO_CHOICES.set(choices[0], choices);
+    return choices[0];
+  }
+
+  // Some platforms accept a preference in isConfigSupported(), then reject it at configure(). Retry before feeding
+  // any frame, on a fresh encoder, and report the configuration actually installed. Errors from an abandoned encoder
+  // cannot poison its replacement. Once frames have been submitted, failures follow the normal abort path.
+  function configureVideo(config, init) {
+    let last = null;
+    for (const choice of VIDEO_CHOICES.get(config) || [config]) {
+      let live = true, configuring = true, setupError = null;
+      const encoder = new VideoEncoder({
+        output: (chunk, meta) => { if (live) init.output(chunk, meta); },
+        error: (err) => { if (live) { if (configuring) setupError = err; else init.error(err); } },
+      });
+      try {
+        encoder.configure(choice);
+        configuring = false;
+        if (setupError) throw setupError;
+        return { encoder, config: choice };
+      } catch (err) {
+        live = false;
+        closeQuietly(encoder);
+        last = err;
+      }
+    }
+    throw last;
   }
 
   function encoderConfig(codec, w, h, fps, bits) {
@@ -122,10 +199,11 @@ MV.def('export/host/mp4', ['export/schedule', 'export/muxer'], (S, M) => {
     return config;
   }
 
-  // The first supported video config: the AVC list of pickAvc(), or `codecs.video` (tests, other codecs).
-  async function videoConfig(codecs, job, bits) {
+  // The first supported video config: the AVC list of pickAvc(), or `codecs.video` (tests, other codecs). `acceleration`
+  // is 'auto' (prefer hardware, then automatic) or 'cpu' (prefer software, then automatic); the job's setting by default.
+  async function videoConfig(codecs, job, bits, acceleration = job.acceleration) {
     const list = codecs && codecs.video ? [codecs.video] : S.pickAvc(job.w, job.h, job.fps);
-    const config = await firstVideoConfig(list, (codec) => encoderConfig(codec, job.w, job.h, job.fps, bits));
+    const config = await firstVideoConfig(list, (codec) => encoderConfig(codec, job.w, job.h, job.fps, bits), acceleration);
     if (!config) throw new S.ExportError('no-codec', 'no supported video codec for ' + job.w + '×' + job.h + '@' + job.fps, list);
     return config;
   }
@@ -136,9 +214,9 @@ MV.def('export/host/mp4', ['export/schedule', 'export/muxer'], (S, M) => {
     return codecs && Array.isArray(codecs.webm) ? codecs.webm : S.pickVp9(w, h, fps);
   }
 
-  // vp9Config(codecs, w, h, fps, bits) → the first supported VP9 (else VP8) encoder config at `bits`, or null.
-  function vp9Config(codecs, w, h, fps, bits) {
-    return firstVideoConfig(vp9Codecs(codecs, w, h, fps), (codec) => encoderConfig(codec, w, h, fps, bits));
+  // vp9Config(codecs, w, h, fps, bits, acceleration?) → the first supported VP9 (else VP8) config, or null.
+  function vp9Config(codecs, w, h, fps, bits, acceleration) {
+    return firstVideoConfig(vp9Codecs(codecs, w, h, fps), (codec) => encoderConfig(codec, w, h, fps, bits), acceleration);
   }
 
   // The audio codecs tried in order (DESIGN_2_1 §13.4): AAC-LC, then Opus in MP4 where the browser has no AAC encoder
@@ -153,16 +231,36 @@ MV.def('export/host/mp4', ['export/schedule', 'export/muxer'], (S, M) => {
 
   // The first audio config that encodes, stereo at the song's rate (songs are decoded at 48 kHz, DECODE_RATE, which is
   // also the Opus rate): AAC at 320 kbps, or at 192 kbps where the platform's AAC encoder stops there (the one behind
-  // Windows' Media Foundation takes at most 192 kbps), Opus at 160 kbps. null when none encodes (the MP4 is then
-  // silent). `list` overrides the order (the kit's MP4 tries AAC only, the WebM Opus only).
+  // Windows' Media Foundation takes at most 192 kbps), Opus at 320 kbps (160 as a compatibility fallback). null when
+  // none encodes (the MP4 is then silent). Prefer constant bitrate at each target, else the browser's default mode at that target, before
+  // lowering the bitrate. `list` overrides the order (the kit's MP4 tries AAC only, the WebM Opus only).
   async function audioConfig(codecs, buffer, list) {
     if (typeof AudioEncoder !== 'function') return null;
     for (const codec of list || audioCodecs(codecs)) {
-      for (const bitrate of codec === 'opus' ? [S.OPUS_BITRATE] : [S.AUDIO_BITRATE, S.AUDIO_BITRATE_LOW]) {
-        const config = { codec, sampleRate: buffer.sampleRate, numberOfChannels: 2, bitrate };
-        try {
-          if ((await AudioEncoder.isConfigSupported(config)).supported) return config;
-        } catch (err) { break; }     // a malformed or unknown codec string is simply unsupported, at any bitrate
+      const known = codec === 'mp4a.40.2' || codec === 'opus';
+      for (const bitrate of codec === 'opus' ? [S.OPUS_BITRATE, S.OPUS_BITRATE_LOW] : [S.AUDIO_BITRATE, S.AUDIO_BITRATE_LOW]) {
+        let invalidCodec = false;
+        for (const mode of known ? ['constant', null] : [null]) {
+          const config = { codec, sampleRate: buffer.sampleRate, numberOfChannels: 2, bitrate };
+          if (mode) config.bitrateMode = mode;
+          try {
+            const support = await AudioEncoder.isConfigSupported(config);
+            if (!support || !support.supported) continue;
+            // Older browsers ignore unknown dictionary members. Only advertise CBR when the recognized config
+            // confirms it; otherwise try the default mode at this target, so an ignored mode never silences a song.
+            if (mode && (!support.config || support.config.bitrateMode !== mode)) continue;
+            // Use a browser-reported lower target in both the probe and export. The feeder cannot change rate/channels.
+            const accepted = Object.assign({}, config, support.config || {});
+            if (accepted.codec !== codec || accepted.sampleRate !== config.sampleRate || accepted.numberOfChannels !== 2
+              || !Number.isFinite(accepted.bitrate) || accepted.bitrate <= 0) continue;
+            return accepted;
+          } catch (err) {
+            // Some implementations throw for an unsupported mode/rate. Known codecs still get their fallback;
+            // a malformed custom codec string (test override) is unsupported at every rate.
+            if (!known) { invalidCodec = true; break; }
+          }
+        }
+        if (invalidCodec) break;
       }
     }
     return null;
@@ -232,13 +330,14 @@ MV.def('export/host/mp4', ['export/schedule', 'export/muxer'], (S, M) => {
       w: job.w, h: job.h, fps: job.fps, codec: M.muxCodec(o.vcfg.codec),
       audio: o.acfg ? { rate: o.acfg.sampleRate, channels: 2, codec: M.muxCodec(o.acfg.codec) } : null,
     });
-    const video = new VideoEncoder({
-      output: (chunk, meta) => { try { muxer.video(chunk, meta); } catch (err) { fail(err); } },
-      error: (err) => fail(new S.ExportError('encode', 'video encoding failed: ' + err.message, err)),
-    });
-    let audio = null, feeder = null;
+    let video = null, videoConfig = null, audio = null, feeder = null;
     try {
-      video.configure(o.vcfg);
+      const configured = configureVideo(o.vcfg, {
+        output: (chunk, meta) => { try { muxer.video(chunk, meta); } catch (err) { fail(err); } },
+        error: (err) => fail(new S.ExportError('encode', 'video encoding failed: ' + err.message, err)),
+      });
+      video = configured.encoder;
+      videoConfig = configured.config;
       if (o.acfg) {
         audio = new AudioEncoder({
           output: (chunk, meta) => { try { muxer.audio(chunk, meta); } catch (err) { fail(err); } },
@@ -255,6 +354,7 @@ MV.def('export/host/mp4', ['export/schedule', 'export/muxer'], (S, M) => {
     const keyEvery = S.keyInterval(job.fps);
     return {
       get failure() { return failure; },
+      get acceleration() { return accelerationOf(videoConfig); },
       async frame(i, source) {
         if (failure) throw failure;
         const frame = new VideoFrame(source, { timestamp: S.ts(i, job.fps), duration: S.frameDur(i, job.fps) });
@@ -298,7 +398,10 @@ MV.def('export/host/mp4', ['export/schedule', 'export/muxer'], (S, M) => {
   // --- exportVideo ---------------------------------------------------------------------------------------------------
 
   // exportVideo({ engine, doc, audio: AudioBuffer | null, sink, signal, onProgress, canvas?, lib?, codecs? }) → Result
-  // Result = { bytes, frames, ms, name, blob? (memory sink), codec, audio: boolean, audioCodec: string | null }. Steps as
+  // Result = { bytes, frames, ms, name, blob? (memory sink), codec, audio: boolean, audioCodec: string | null,
+  //            audioBitrate: number | null (configured target, not a measured average),
+  //            audioBitrateMode: 'constant' | 'variable' | null (unknown),
+  //            acceleration: { requested, selected, fallback } (installed encoder preference, not GPU utilisation) }. Steps as
   // FROZEN in §4.21: fork, prepare, N = frameCount, AVC from pickAvc with a key frame every 2·fps, frame i at t0 + i/fps
   // with ts(i)/frameDur(i) after its media frames are ready, queue ≤ 6, AAC (else Opus) in 1024-frame chunks. Cancel
   // (signal) or any failure closes the encoders and aborts the sink, so no partial file is left; the error is an
@@ -333,7 +436,8 @@ MV.def('export/host/mp4', ['export/schedule', 'export/muxer'], (S, M) => {
       checkAbort(o.signal);
       const done = await out.end();
       return { bytes: done.bytes, frames: job.N, ms: performance.now() - started, name: sink.name || S.fileName(o.doc, 'mp4'),
-        blob: done.blob, codec: vcfg.codec, audio: !!acfg, audioCodec: acfg ? acfg.codec : null };
+        blob: done.blob, codec: vcfg.codec, audio: !!acfg, audioCodec: acfg ? acfg.codec : null, audioBitrate: acfg ? acfg.bitrate : null,
+        audioBitrateMode: acfg ? acfg.bitrateMode || null : null, acceleration: out.acceleration };
     } catch (err) {
       if (out) out.close();
       await sink.abort();
@@ -343,28 +447,39 @@ MV.def('export/host/mp4', ['export/schedule', 'export/muxer'], (S, M) => {
     }
   }
 
-  async function firstAvc(w, h, fps) {
-    const config = await firstVideoConfig(S.pickAvc(w, h, fps), (c) => encoderConfig(c, w, h, fps, S.bitrate(w, h, fps, 'high')));
-    return config ? config.codec : null;
+  function firstAvc(w, h, fps, acceleration) {
+    return firstVideoConfig(S.pickAvc(w, h, fps), (c) => encoderConfig(c, w, h, fps, S.bitrate(w, h, fps, 'high')), acceleration);
   }
 
-  // probe({ w, h, fps, rate, codecs? }) → { webcodecs, codec, audioCodec, anyCodec, vp9Codec } for the pre-flight. codec:
+  // probe({ w, h, fps, rate, codecs? }) → { webcodecs, codec, audioCodec, audioBitrate, audioBitrateMode, webmAudioCodec,
+  //                                      webmAudioBitrate, webmAudioBitrateMode, anyCodec, vp9Codec,
+  //                                      acceleration, webmAcceleration } for the pre-flight. codec:
   // the first AVC string this size and frame rate encode with, else null. anyCodec: whether H.264 encodes at all (checked
   // at 640×360@30 when this size fails), so the pre-flight can tell "choose a smaller size" from "this browser has no
   // H.264 encoder". audioCodec: 'mp4a.40.2' | 'opus' | null, the codec the MP4 audio would use (`codecs` as in
   // exportVideo). vp9Codec: the first VP9 (else VP8) string a transparent WebM of this size encodes with, else null
-  // (DESIGN_2_1 §13.10).
-  async function probe({ w, h, fps, rate = 48000, codecs = null }) {
-    if (typeof VideoEncoder !== 'function') return { webcodecs: false, codec: null, audioCodec: null, anyCodec: false, vp9Codec: null };
-    const codec = await firstAvc(w, h, fps);
-    const anyCodec = codec !== null || (await firstAvc(640, 360, 30)) !== null;
+  // (DESIGN_2_1 §13.10). WebM probes Opus separately: a working AAC encoder does not imply Opus is available.
+  // Both audio bitrates are configured targets, not measured averages. `acceleration` chooses the video preference
+  // consistently with export; each returned acceleration object reports a supported hint, not actual GPU activity.
+  async function probe({ w, h, fps, rate = 48000, codecs = null, acceleration = 'auto' }) {
+    if (typeof VideoEncoder !== 'function') return { webcodecs: false, codec: null, audioCodec: null, audioBitrate: null, audioBitrateMode: null,
+      webmAudioCodec: null, webmAudioBitrate: null, webmAudioBitrateMode: null, anyCodec: false, vp9Codec: null,
+      acceleration: null, webmAcceleration: null };
+    const vcfg = await firstAvc(w, h, fps, acceleration);
+    const codec = vcfg ? vcfg.codec : null;
+    const anyCodec = codec !== null || (await firstAvc(640, 360, 30, acceleration)) !== null;
     const a = await audioConfig(codecs, { sampleRate: rate });
-    const v = await vp9Config(codecs, w, h, fps, S.bitrate(w, h, fps, 'high'));
-    return { webcodecs: true, codec, audioCodec: a ? a.codec : null, anyCodec, vp9Codec: v ? v.codec : null };
+    const webmList = codecs && Array.isArray(codecs.webmAudio) ? codecs.webmAudio : ['opus'];
+    const wa = await audioConfig(null, { sampleRate: rate }, webmList);
+    const v = await vp9Config(codecs, w, h, fps, S.bitrate(w, h, fps, 'high'), acceleration);
+    return { webcodecs: true, codec, audioCodec: a ? a.codec : null, audioBitrate: a ? a.bitrate : null,
+      audioBitrateMode: a ? a.bitrateMode || null : null, webmAudioCodec: wa ? wa.codec : null, webmAudioBitrate: wa ? wa.bitrate : null,
+      webmAudioBitrateMode: wa ? wa.bitrateMode || null : null, anyCodec, vp9Codec: v ? v.codec : null,
+      acceleration: vcfg ? accelerationOf(vcfg) : null, webmAcceleration: v ? accelerationOf(v) : null };
   }
 
   return {
     AUDIO_CODECS, exportVideo, probe, openJob, makeSurface, createProgress, checkAbort, audioConfig, videoConfig, vp9Config,
-    channelsOf, createAudioFeeder, createMp4Output, drain, closeQuietly, exportFailure,
+    channelsOf, createAudioFeeder, createMp4Output, drain, closeQuietly, exportFailure, accelerationOf, videoVariant, configureVideo,
   };
 });

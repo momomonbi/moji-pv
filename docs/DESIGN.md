@@ -420,7 +420,8 @@ A project file and the autosave record are the same JSON. `doc` is undoable; `si
 - `doc.filters`: "use only these parts". Per kind (`arrange arrive dwell depart ground ornament lens filter seam theme`):
   `only` (allow-list or `null`) and `deny` (block-list or `null`). Applies to auto picks only; pins win (with a warning).
 - `doc.output`: export settings: `format` `mp4|png|pngAlpha`, `short` `720|1080|1440|2160` (short side in px), `fps`
-  `24|30|60`, `quality` `standard|high|max`, `audio` bool, `range` `{t0,t1}` or `null`, `name` file name or `null`.
+  `24|30|60`, `quality` `light|standard|high|max`, `acceleration` `auto|cpu` (missing means `auto`), `audio` bool,
+  `range` `{t0,t1}` or `null`, `name` file name or `null`.
 - `side.looks`: the look history (§3.7). `side.aiLog`: applied AI runs for selective revert (§4.22.5).
 
 ### 3.3 Ids and scopes (FROZEN)
@@ -2297,7 +2298,7 @@ ts(i, fps) = Math.round(i * 1e6 / fps)                     // µs timestamp of f
 frameDur(i, fps) = ts(i + 1, fps) - ts(i, fps)             // never a constant round(1e6 / fps)
 audioFrames(N, fps, rate) = Math.round(N * rate / fps)     // the audio track is trimmed or zero-padded to exactly this many samples
 outputSize(aspect, short) → { w, h }                       // short side = short, long side = round to the nearest even number
-bitrate(w, h, fps, quality) → bits/s                       // 0.08 / 0.12 / 0.18 bits per pixel per frame for standard / high / max
+bitrate(w, h, fps, quality) → bits/s                       // 0.04 / 0.08 / 0.12 / 0.18 bits per pixel per frame for light / standard / high / max
 estimateBytes(duration, bitrate, audio) → number
 eta(samples: [{ i, ms }], remaining) → seconds             // EMA (α = 0.1) of per-frame time
 pickAvc(w, h, fps) → ['avc1.640028' (≤ 1920×1080×30), 'avc1.64002A' (1080p60), 'avc1.640032' (1440p), 'avc1.640033' (2160p30), 'avc1.640034' (2160p60),
@@ -3162,7 +3163,7 @@ modified, §3.7; clicking `n/m` opens 作品全体 › 試した見た目) · **
 | ① 歌詞 Lyrics | lyric editor (§6.4.14) · 記法 (inline help, not a popup) · 開く (.txt/.lrc/.json) · AIで整える (AI panel → 下ごしらえ) · footer 次へ |
 | ② 曲 Song (任意) | song row (… menu: 差し替える / 外す) or drop zone · テンポ (BPM field; auto from analysis, typing pins `work:bpm`; ×2 ÷2 in its menu) · 拍に合わせる (`timing.set snap`) · タップで合わせる (tap mode from the selected line) · AIでタイミング (AI panel) |
 | ③ 見た目 Look | 雰囲気 chips (click pins `work:mood`; the auto one is marked ＊; clicking the pinned chip unpins) · テーマ swatches (12 + もっと見る; pins `work:theme`; hover = try-on) · 画面の形 (`look.set aspect`) · 詳しく… (詳細 at 作品全体) · AIに3案 (AI panel) — plus one line of help: 「おまかせで雰囲気・配色・動きがまとめて変わります。ここで選んだものは固定されます。」 |
-| ④ 書き出し Export | 形式 (MP4 / PNG連番 / 透過PNG) · 大きさ (720p–2160p with real px) · なめらかさ (24/30/60) · 背景 (`look.set backdrop`; 透明 only for PNG) · 書き出す; 詳しく (inline): 範囲 (全体 / 選んだ行 / I–O 範囲), 画質, 音声を入れる, ファイル名; preflight list (§4.21) with jump links |
+| ④ 書き出し Export | 形式 (MP4 / Filmora用 / 透過動画 / PNG連番 / 透過PNG) · 大きさ (720p–2160p with real px) · なめらかさ (24/30/60) · 背景 (`look.set backdrop`) · 画質 (three live size estimates and short encoded comparison); 音声の設定表示; 書き出す; 詳しく (inline): 範囲 (全体 / 選んだ行 / I–O 範囲), 音声を入れる, ファイル名; preflight list (§4.21) with jump links |
 
 Step status dots: ① done when there is a lyric line; ② optional (done when a song is loaded); ③ done after the first
 おまかせ or pin; ④ shows progress while exporting.

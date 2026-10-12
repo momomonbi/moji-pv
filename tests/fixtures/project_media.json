@@ -269,6 +269,7 @@
    "short": 1080,
    "fps": 30,
    "quality": "high",
+   "acceleration": "auto",
    "audio": true,
    "range": null,
    "name": null,

@@ -1,5 +1,6 @@
 /* 文字PVメーカー v2 — original work. Step ④ 書き出し: settings, the Filmora set's contents, preflight with jump links, progress, cancel, done (DESIGN §6.4.3, §4.21; DESIGN_2_1 §13.10). */
-MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 'export/schedule', 'i18n/t'], (dom, I, OUT, HELP, SCH, T) => {
+MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 'ui/export_quality_preview', 'export/schedule', 'i18n/t'],
+  (dom, I, OUT, HELP, PREVIEW, SCH, T) => {
   'use strict';
 
   const { h } = dom;
@@ -8,7 +9,7 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
   // The button of a pre-flight item that jumps (default 見る): a missing photo or video says つなぎ直す and opens the
   // library, where its row has [つなぎ直す] (DESIGN_2_1 §11.7.8).
   const JUMP_LABEL = { 'media-missing': 'media.relink' };
-  const QUALITIES = ['standard', 'high', 'max'];
+  const QUALITIES = SCH.QUALITY_LEVELS;
   const PROGRESS_ANNOUNCE_MS = 5000;
   const RUN_UPDATE_MS = 100;            // the running view is redrawn at most this often (a new phase at once)
   const RADIO_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End']);
@@ -49,9 +50,19 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
     const format = h('div', { class: 'segmented fmt-seg', 'data-seg': 'format' }, formatPair, otherFormat);
     const size = h('select', { class: 'select', 'aria-label': t('exp.size') });
     const fps = seg('fps', t('exp.fps'));
+    const speedPreset = h('button', { type: 'button', class: 'btn quiet', 'data-act': 'export.speed', text: t('exp.speedPreset') });
+    const speedHint = h('p', { class: 'note subtle exp-note', 'data-note': 'export-speed' });
+    const acceleration = seg('acceleration', t('exp.acceleration'));
+    const accelerationHint = h('p', { class: 'note subtle exp-note', 'data-note': 'acceleration' });
+    const accelerationField = field(t('exp.acceleration'), [acceleration, accelerationHint], 'acceleration');
     const backdrop = h('select', { class: 'select', 'aria-label': t('exp.backdrop') });
     const range = seg('range', t('exp.range'));
     const quality = seg('quality', t('exp.quality'));
+    quality.classList.add('quality-options');
+    const qualityHelp = h('p', { class: 'note subtle exp-note', 'data-note': 'quality-estimate', text: t('exp.qualityHelp') });
+    const losslessNote = h('p', { class: 'note subtle exp-note', 'data-note': 'quality-lossless', hidden: true, text: t('exp.qualityLossless') });
+    const qualityPreview = PREVIEW.mount(app);
+    const audioQuality = h('p', { class: 'note subtle exp-note', 'data-note': 'audio-quality' });
     const audio = h('input', { type: 'checkbox', id: 'exp-audio' });
     const name = h('input', { class: 'text-input', type: 'text', 'aria-label': t('exp.name'), spellcheck: false });
     // 詳しく for Filmora用: the set's contents, then the guide (§13.10). The main MP4 is always in the set.
@@ -75,7 +86,7 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
     const kitBox = h('div', { class: 'kit-box', hidden: true }, kitSet, howTo);
     const moreLabel = h('summary', { text: t('exp.more') });
     const more = h('details', { class: 'more', 'data-ctl': 'more' }, moreLabel,
-      row(t('exp.range'), range), row(t('exp.quality'), quality),
+      row(t('exp.range'), range),
       h('label', { class: 'check-row', htmlFor: 'exp-audio' }, audio, h('span', { text: t('exp.audio') })),
       row(t('exp.name'), name), kitBox);
     const summary = h('div', { class: 'exp-summary' });
@@ -89,8 +100,11 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
     const alphaNote = h('p', { class: 'note subtle exp-note', 'data-note': 'alpha', text: t('exp.alphaNote2') });
     const chromaNote = h('p', { class: 'note subtle exp-note', 'data-note': 'chroma', hidden: true, text: t('exp.chromaNote') });
     const settings = h('div', { class: 'exp-settings' },
-      field(t('exp.format'), format, 'format'), field(t('exp.size'), size, 'size'), field(t('exp.fps'), fps, 'fps'),
-      field(t('exp.backdrop'), [backdrop, alphaNote, chromaNote], 'backdrop'), more, summary, folderHint, checks);
+      field(t('exp.format'), format, 'format'), field(t('exp.size'), size, 'size'),
+      field(t('exp.fps'), [fps, speedPreset, speedHint], 'fps'), accelerationField,
+      field(t('exp.backdrop'), [backdrop, alphaNote, chromaNote], 'backdrop'),
+      field(t('exp.qualityCompare'), [quality, qualityHelp, losslessNote, qualityPreview.root], 'quality'),
+      audioQuality, more, summary, folderHint, checks);
     const running = h('div', { class: 'exp-running', hidden: true });
     // Said to screen readers: the Filmora set's phase and the end of an export (the progress bar says the numbers).
     const said = h('div', { class: 'sr-only exp-said', role: 'status', 'aria-live': 'polite' });
@@ -118,10 +132,12 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
       if (which === 'format') setFormat(v);
       else if (which === 'fps') setOut('fps', Number(v));
       else if (which === 'quality') setOut('quality', v);
+      else if (which === 'acceleration') setOut('acceleration', v);
       else if (which === 'range') chooseRange(v);
     });
     otherFormat.addEventListener('change', () => { if (otherFormat.value) setFormat(otherFormat.value); });
     size.addEventListener('change', () => setOut('short', Number(size.value)));
+    speedPreset.addEventListener('click', () => app.batch({ label: ['undo.output', {}] }, OUT.speedCmds(app.doc)));
     backdrop.addEventListener('change', () => app.batch({ label: ['undo.backdrop', {}] }, OUT.backdropCmds(app.doc, backdrop.value)));
     audio.addEventListener('change', () => setOut('audio', audio.checked));
     name.addEventListener('change', () => setOut('name', name.value.trim() || null));
@@ -180,7 +196,65 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
     // What the Filmora set holds depends on the audio codec the browser has (AAC, else a WAV file) and the song.
     function kitEnv() {
       const probe = app.exportProbe ? app.exportProbe() || {} : {};
-      return { audioCodec: probe.audioCodec, songReady: !!app.doc.song && app.songReady() };
+      return { audioCodec: probe.audioCodec, audioBitrate: probe.audioBitrate, audioBitrateMode: probe.audioBitrateMode,
+        webmAudioCodec: probe.webmAudioCodec, webmAudioBitrate: probe.webmAudioBitrate, webmAudioBitrateMode: probe.webmAudioBitrateMode,
+        songReady: !!app.doc.song && app.songReady() };
+    }
+
+    function audioText(info) {
+      if (info.state !== 'ready') return t('exp.audioQuality.' + info.state, { rate: Math.round((info.preferred || SCH.AUDIO_BITRATE) / 1000) });
+      const codec = info.codec === 'mp4a.40.2' ? 'AAC' : info.codec === 'opus' ? 'Opus' : info.codec;
+      const label = t('exp.audioQuality.ready', { codec, rate: Math.round(info.bitrate / 1000),
+        mode: t(info.mode === 'constant' ? 'exp.audioQuality.constant' : 'exp.audioQuality.target') });
+      return info.fallback ? label + ' ' + t('exp.audioQuality.fallback', { rate: Math.round(info.preferred / 1000) }) : label;
+    }
+
+    function renderQuality() {
+      const comparison = OUT.qualityOptions(app.doc, planOf(), kitEnv());
+      quality.hidden = comparison.lossless;
+      qualityHelp.hidden = comparison.lossless;
+      losslessNote.hidden = !comparison.lossless;
+      qualityPreview.root.hidden = comparison.lossless;
+      let buttons = [...quality.querySelectorAll('[data-v]')];
+      if (buttons.length !== QUALITIES.length) {
+        buttons = QUALITIES.map((v) => h('button', { class: 'seg quality-option', type: 'button', role: 'radio', 'data-v': v },
+          h('span', { class: 'quality-option-title' }), h('span', { class: 'quality-option-size', 'data-quality-bytes': '' }),
+          h('span', { class: 'quality-option-ratio', 'data-quality-ratio': '' }),
+          h('span', { class: 'quality-option-description', 'data-quality-description': '' })));
+        dom.replace(quality, buttons);
+      }
+      comparison.rows.forEach((q, i) => {
+        const button = buttons[i], on = q.quality === app.doc.output.quality;
+        button.setAttribute('aria-checked', String(on)); button.tabIndex = on ? 0 : -1;
+        button.querySelector('.quality-option-title').textContent = t('exp.q.' + q.quality);
+        const bytes = button.querySelector('[data-quality-bytes]');
+        bytes.dataset.qualityBytes = String(q.bytes); bytes.textContent = t('exp.qualitySize', { size: T.fmtBytes(q.bytes) });
+        button.querySelector('[data-quality-ratio]').textContent = t('exp.qualityRatio', { ratio: q.ratio.toFixed(2) });
+        button.querySelector('[data-quality-description]').textContent = t('exp.qualityDescription.' + q.quality);
+      });
+      const audioInfo = OUT.audioInfo(app.doc, kitEnv());
+      audioQuality.textContent = audioText(audioInfo);
+      audioQuality.dataset.audioRate = String(audioInfo.bitrate || audioInfo.preferred || '');
+      qualityPreview.update();
+    }
+
+    function doneAudio(result) {
+      if (!result.audioCodec || !(result.audioBitrate > 0)) return null;
+      return h('p', { class: 'note subtle', 'data-note': 'audio-written', text: result.audioCodec === 'pcm-s16le'
+        ? t('exp.audioQuality.wav') : audioText({ state: 'ready', codec: result.audioCodec, bitrate: result.audioBitrate,
+          mode: result.audioBitrateMode, preferred: SCH.AUDIO_BITRATE, fallback: result.audioBitrate < SCH.AUDIO_BITRATE }) });
+    }
+
+    function accelerationText(info) {
+      if (!info) return t('exp.acceleration.checking');
+      return t(info.selected === 'prefer-hardware' ? 'exp.acceleration.hardware'
+        : info.selected === 'prefer-software' ? 'exp.acceleration.software'
+          : info.fallback ? 'exp.acceleration.fallback' : 'exp.acceleration.browser');
+    }
+
+    function doneAcceleration(result) {
+      return result.acceleration ? h('p', { class: 'note subtle', 'data-note': 'acceleration-written',
+        text: accelerationText(result.acceleration) }) : null;
     }
 
     // The range the export renders: output.range clamped to the video (export/schedule.exportRange), or null.
@@ -264,6 +338,16 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
         return h('option', { value: String(s), selected: s === o.short, text: t('exp.sizeOpt', { p: s, w: sz.w, h: sz.h }) });
       }));
       fillSeg(fps, FPS, o.fps, (v) => String(v));
+      const speed = OUT.speedProfile(app.doc);
+      speedPreset.disabled = !OUT.speedCmds(app.doc).length;
+      speedHint.textContent = t('exp.speedHint', { p: speed.short, fps: speed.fps });
+      accelerationField.hidden = !SCH.FORMATS[o.format].video;
+      fillSeg(acceleration, ['auto', 'cpu'], o.acceleration || 'auto', (v) => t('exp.acceleration.' + v));
+      const probe = app.exportProbe ? app.exportProbe() : null;
+      const hint = probe && (o.format === 'webmAlpha' ? probe.webmAcceleration : probe.acceleration);
+      accelerationHint.textContent = accelerationText(hint) + ' ' + t('exp.acceleration.help', {
+        n: Math.max(1, Math.floor(navigator.hardwareConcurrency || 1)) });
+      accelerationHint.dataset.selected = hint ? hint.selected : '';
       // 透明 makes the output transparent (透過動画, or 透過PNG from a PNG sequence); Filmora用 does not offer it
       // (ui/output.backdropChoices: the set would be lost on the way back).
       dom.replace(backdrop, OUT.backdropChoices(o.format, app.doc.look.backdrop).map((b) => h('option', {
@@ -274,7 +358,7 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
       chromaNote.hidden = note !== 'exp.chromaNote';
       const r = o.range ? rangeOf() || o.range : null;
       fillSeg(range, ['all', 'sel', 'io'], r ? 'io' : 'all', (v) => (v === 'io' && r ? clock(r.t0) + '–' + clock(r.t1) : t('exp.range.' + v)));
-      fillSeg(quality, QUALITIES, o.quality, (v) => t('exp.q.' + v));
+      renderQuality();
       audio.checked = !!o.audio;
       audio.disabled = !OUT.hasSound(o.format) || !app.doc.song;
       if (document.activeElement !== name) name.value = o.name || '';
@@ -312,6 +396,7 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
       return h('div', { class: 'exp-done' }, I.icon('check', { size: 28 }),
         h('div', { class: 'exp-title', text: t('exp.done') }),
         h('div', { class: 'muted', text: kitDoneText(r) }),
+        doneAudio(r), doneAcceleration(r),
         h('ul', { class: 'kit-done-files', 'aria-label': t('exp.kit.files') }, r.files.map((f) => h('li', { 'data-kind': f.kind },
           h('span', { class: 'kit-file-name', text: f.name }),
           h('span', { class: 'kit-file-meta', text: [OUT.kitLabel(f.kind) ? t(OUT.kitLabel(f.kind)) : '', T.fmtBytes(f.bytes)].filter(Boolean)
@@ -379,7 +464,7 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
         const info = st.result.files ? kitDoneText(st.result)
           : t('exp.doneInfo', { name: st.result.name, size: T.fmtBytes(st.result.bytes), frames: st.result.frames });
         dom.replace(running, st.result.files ? kitDone(st) : h('div', { class: 'exp-done' }, I.icon('check', { size: 28 }),
-          h('div', { class: 'exp-title', text: t('exp.done') }), h('div', { class: 'muted', text: info })));
+          h('div', { class: 'exp-title', text: t('exp.done') }), h('div', { class: 'muted', text: info }), doneAudio(st.result), doneAcceleration(st.result)));
         said.textContent = t('exp.done') + ' ' + info;
         dom.replace(footer, h('button', { class: 'btn wide', type: 'button', text: t('exp.again'), on: { click: () => app.exportReset() } }));
       } else if (st.phase === 'error') {

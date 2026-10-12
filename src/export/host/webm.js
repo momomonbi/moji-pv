@@ -29,7 +29,7 @@ MV.def('export/host/webm', ['export/schedule', 'export/webm', 'export/host/mp4']
   }
 
   // encodeSong(song, job, { codecs, signal }) → { config, description, packets: [{ data, ts }] } | null: the whole export
-  // range of the song as Opus (48 kHz stereo, 160 kbps), made BEFORE the video (NOTES ## v2.1-H.1: the Tracks element,
+  // range of the song as Opus (48 kHz stereo, 320 kbps preferred), made BEFORE the video (NOTES ## v2.1-H.1: the Tracks element,
   // and with it the OpusHead, is written when the WebM is created; audio that lags behind makes the writer hold video
   // clusters in memory). Exactly audioFrames(N) samples from t0, in 1024-frame chunks (the MP4's feeder). null when no
   // Opus encoder exists. `codecs.webmAudio` (tests) replaces the codec list.
@@ -97,15 +97,18 @@ MV.def('export/host/webm', ['export/schedule', 'export/webm', 'export/host/mp4']
         frames++;
       }
     }
-    const encoder = (queue, what) => new VideoEncoder({
+    const init = (queue, what) => ({
       output: (chunk) => { queue.push(chunk); try { pair(); } catch (err) { fail(err); } },
       error: (err) => fail(new S.ExportError('encode', what + ' encoding failed: ' + err.message, err)),
     });
-    const colour = encoder(colours, 'colour');
-    const alpha = encoder(alphas, 'alpha');
+    let colour = null, alpha = null, colourConfig = null, alphaConfig = null;
     try {
-      colour.configure(config);
-      alpha.configure(Object.assign({}, config, { bitrate: S.alphaBitrate(config.bitrate) }));
+      const c = J.configureVideo(config, init(colours, 'colour'));
+      colour = c.encoder;
+      colourConfig = c.config;
+      const a = J.configureVideo(J.videoVariant(config, { bitrate: S.alphaBitrate(config.bitrate) }), init(alphas, 'alpha'));
+      alpha = a.encoder;
+      alphaConfig = a.config;
     } catch (err) {
       J.closeQuietly(colour);
       J.closeQuietly(alpha);
@@ -117,6 +120,9 @@ MV.def('export/host/webm', ['export/schedule', 'export/webm', 'export/host/mp4']
     const keyEvery = S.keyInterval(job.fps);
     return {
       get failure() { return failure; },
+      get acceleration() {
+        return Object.assign(J.accelerationOf(colourConfig), { alphaSelected: J.accelerationOf(alphaConfig).selected });
+      },
       async frame(i, surface) {
         if (failure) throw failure;
         const px = surface.ctx.getImageData(0, 0, w, h).data;
@@ -154,7 +160,9 @@ MV.def('export/host/webm', ['export/schedule', 'export/webm', 'export/host/mp4']
   }
 
   // exportWebm({ engine, doc, audio: AudioBuffer | null, sink, signal, onProgress, canvas?, codecs? }) → Result
-  // Result = { bytes, frames, ms, name, blob? (memory sink), codec, audio: boolean, audioCodec: 'opus' | null }: 透過動画
+  // Result = { bytes, frames, ms, name, blob? (memory sink), codec, audio: boolean, audioCodec: 'opus' | null,
+  //            audioBitrate: number | null (configured target), audioBitrateMode: 'constant' | 'variable' | null,
+  //            acceleration: { requested, selected, fallback, alphaSelected } }: 透過動画
   // (WebM, VP9 alpha; DESIGN_2_1 §13.5). The frames render with the backdrop `clear`; the song (when 音声を入れる is on)
   // is Opus in WebM, encoded first. Each frame waits for its media frames (engine.mediaReady; a store failure is
   // ExportError('media')). Cancel or any failure closes the encoders and aborts the sink. Errors: 'no-webcodecs',
@@ -172,7 +180,7 @@ MV.def('export/host/webm', ['export/schedule', 'export/webm', 'export/host/mp4']
     try {
       job = await J.openJob({ engine: o.engine, doc: o.doc, format: 'webmAlpha', canvas: o.canvas });
       J.checkAbort(o.signal);
-      const config = await J.vp9Config(o.codecs, job.w, job.h, job.fps, S.bitrate(job.w, job.h, job.fps, o.doc.output.quality));
+      const config = await J.vp9Config(o.codecs, job.w, job.h, job.fps, S.bitrate(job.w, job.h, job.fps, o.doc.output.quality), job.acceleration);
       if (!config) throw new S.ExportError('no-vp9', 'neither VP9 nor VP8 encodes ' + job.w + '×' + job.h + '@' + job.fps);
       const song = o.audio && o.doc.output.audio ? o.audio : null;
       const audio = song ? await encodeSong(song, job, { codecs: o.codecs, signal: o.signal }) : null;
@@ -190,7 +198,9 @@ MV.def('export/host/webm', ['export/schedule', 'export/webm', 'export/host/mp4']
       J.checkAbort(o.signal);
       const done = await out.end();
       return { bytes: done.bytes, frames: job.N, ms: performance.now() - started, name: sink.name || S.fileName(o.doc, 'webm'),
-        blob: done.blob, codec: config.codec, audio: !!audio, audioCodec: audio ? audio.config.codec : null };
+        blob: done.blob, codec: config.codec, audio: !!audio, audioCodec: audio ? audio.config.codec : null,
+        audioBitrate: audio ? audio.config.bitrate : null, audioBitrateMode: audio ? audio.config.bitrateMode || null : null,
+        acceleration: out.acceleration };
     } catch (err) {
       if (out) out.close();
       await sink.abort();

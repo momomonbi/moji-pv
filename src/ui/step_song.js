@@ -1,5 +1,5 @@
 /* 文字PVメーカー v2 — original work. Step ② 曲（任意）: song row or drop zone, tempo, snap to beats, tap-sync entry, AI timing (DESIGN §6.4.3, §6.11). */
-MV.def('ui/step_song', ['ui/dom', 'ui/icons', 'ui/header', 'ui/selection', 'i18n/t'], (dom, I, header, S, T) => {
+MV.def('ui/step_song', ['ui/dom', 'ui/icons', 'ui/header', 'ui/selection', 'ui/timing_targets', 'i18n/t'], (dom, I, header, S, TT, T) => {
   'use strict';
 
   const { h } = dom;
@@ -27,33 +27,72 @@ MV.def('ui/step_song', ['ui/dom', 'ui/icons', 'ui/header', 'ui/selection', 'i18n
       I.icon('tap'), h('span', { class: 'btn-main', text: t('song.tap') }), tapHint);
     const aiBtn = h('button', { class: 'chip-btn', type: 'button', 'data-act': 'ai.align', 'data-ctl': 'ai' },
       I.icon('ai', { size: 15 }), t('song.aiTiming'));
-    // タイミングを全体でずらす: every line moves by the same amount (AI timings that run a little late, say)
+    // The target is local UI state: choosing it never edits the project or adds an undo entry.
+    let shiftMode = 'all', shiftArea = null, shiftSelKey = '';
+    const shiftTarget = h('select', { class: 'select', 'data-ctl': 'shift-target', 'aria-label': t('song.shiftTarget') },
+      ['all', 'area', 'selection'].map((v) => h('option', { value: v, text: t('song.shiftTarget.' + v) })));
+    const shiftAreaPicker = h('select', { class: 'select', 'data-ctl': 'shift-area', 'aria-label': t('song.shiftArea'), hidden: true });
+    const shiftStatus = h('p', { class: 'note', role: 'status', 'data-ctl': 'shift-status' });
+    const shiftHint = h('p', { class: 'note subtle' });
     const shiftBtns = [-1, -0.1, 0.1, 1].map((d) => h('button', { class: 'btn small', type: 'button',
-      text: t('song.shiftBy', { d: (d < 0 ? '−' : '+') + Math.abs(d) }), on: { click: () => shiftAll(d) } }));
+      'data-shift': String(d), text: t('song.shiftBy', { d: (d < 0 ? '−' : '+') + Math.abs(d) }), on: { click: () => shiftBy(d) } }));
     const shiftRow = h('div', { class: 'field', 'data-ctl': 'shift' },
-      h('label', { class: 'field-label', text: t('song.shiftAll') }),
+      h('label', { class: 'field-label', text: t('song.shiftTitle') }),
+      h('div', { class: 'field-row' }, h('span', { class: 'field-label inline', text: t('song.shiftTarget') }), shiftTarget),
+      shiftAreaPicker, shiftStatus,
       h('div', { class: 'field-row' }, ...shiftBtns),
-      h('p', { class: 'note subtle', text: t('song.shiftHint') }));
+      shiftHint);
     const root = h('div', { class: 'step step-song' },
       h('div', { class: 'step-head' }, h('h2', { class: 'step-title', text: t('song.title') })),
       songBox, tempo, h('div', { class: 'snap-field' }, snapRow, snapWhy), tapBtn, aiBtn, shiftRow);
 
-    // The cut times pinned in seconds (a cut's start, an interlude's split points) move along with the lines.
-    function shiftAll(d) {
-      const p = app.plan;
-      if (!p || !p.lines.length) return;
-      const ids = p.lines.map((l) => l.id);
-      const delta = Math.max(d, -Math.min(...p.lines.map((l) => l.t0)));
-      if (Math.abs(delta) < 0.0005) return;
-      const base = Object.fromEntries(p.lines.map((l) => [l.id, { start: l.t0, end: l.t1 }]));
-      const cmds = [{ t: 'time.shift', lineIds: ids, delta, base }];
-      const move = (x) => Math.max(0, Math.round((x + delta) * 1000) / 1000);
-      for (const [path, pin] of Object.entries(app.doc.pins)) {
-        if (!path.startsWith('cut/') || !(path.endsWith(':t0') || path.endsWith(':parts')) || pin.by === 'lock') continue;
-        const v = Array.isArray(pin.v) ? pin.v.map(move) : typeof pin.v === 'number' ? move(pin.v) : null;
-        if (v !== null) cmds.push({ t: 'pin.set', path, v, by: pin.by, sig: typeof pin.sig === 'string' ? pin.sig : '' });
+    function timingTarget() { return TT.resolve(app.doc, app.plan, shiftMode, app.view.state.sel, shiftArea); }
+
+    function shiftBy(d) {
+      const target = timingTarget(), result = TT.shift(app.doc, app.plan, target, d);
+      if (!result.cmds.length) return;
+      app.batch({ label: [target.kind === 'cut' ? 'undo.time' : 'undo.shift', { n: target.lineIds.length }],
+        mergeKey: 'shift:' + (target.kind === 'cut' ? target.key : target.lineIds.join(',')) }, result.cmds);
+      if (Math.abs(result.delta - d) > 0.000001) app.toast(t('song.shiftPartial', { d: (result.delta < 0 ? '−' : '+') + Math.abs(result.delta) }));
+    }
+
+    shiftTarget.addEventListener('change', () => { shiftMode = shiftTarget.value; shiftSelKey = ''; updateShift(); });
+    shiftAreaPicker.addEventListener('change', () => {
+      shiftArea = TT.areas(app.doc, app.plan).find((a) => a.key === shiftAreaPicker.value) || null;
+      updateShift();
+    });
+
+    function updateShift() {
+      const list = TT.areas(app.doc, app.plan, shiftArea), sel = S.validate(app.view.state.sel, app.plan, app.doc);
+      const selKey = JSON.stringify(sel.level === 'line' ? { level: 'line', ids: sel.ids } : sel);
+      if (shiftMode === 'area' && selKey !== shiftSelKey) {
+        const keys = sel.level === 'line' && sel.area ? [sel.area] : [];
+        const ids = sel.level === 'line' ? sel.ids : S.lineOfSel(sel) ? [S.lineOfSel(sel)] : [];
+        const wanted = keys.length ? list.find((a) => JSON.stringify(a.ref) === JSON.stringify(keys[0]))
+          : list.find((a) => ids.length && ids.every((id) => a.lineIds.includes(id)));
+        if (wanted) shiftArea = wanted;
       }
-      app.batch({ label: ['undo.shift', { n: ids.length }], mergeKey: 'shift:all' }, cmds);
+      shiftSelKey = selKey;
+      if (!shiftArea || !list.some((a) => a.key === shiftArea.key)) shiftArea = list[0] || null;
+      const optsKey = JSON.stringify(list.map((a) => [a.key, a.label]));
+      if (shiftAreaPicker.dataset.options !== optsKey) {
+        dom.replace(shiftAreaPicker, list.map((a) => h('option', { value: a.key, text: t(a.label[0], a.label[1]) })));
+        shiftAreaPicker.dataset.options = optsKey;
+      }
+      shiftAreaPicker.hidden = shiftMode !== 'area';
+      shiftAreaPicker.disabled = !list.length;
+      if (shiftArea) shiftAreaPicker.value = shiftArea.key;
+      const target = timingTarget();
+      shiftStatus.textContent = target ? target.kind === 'cut' ? t(target.label[0], target.label[1])
+        : t('song.shiftLines', { name: t(target.label[0], target.label[1]), n: target.lineIds.length })
+        : t(shiftMode === 'area' ? 'song.shiftNoArea' : 'song.shiftNone');
+      shiftHint.textContent = t(target && target.kind === 'cut' ? 'song.shiftHintCut'
+        : shiftMode === 'all' ? 'song.shiftHint' : 'song.shiftHintSelected');
+      for (const b of shiftBtns) {
+        const result = TT.shift(app.doc, app.plan, target, Number(b.dataset.shift));
+        b.disabled = !result.cmds.length;
+        b.title = result.reason === 'locked' ? t('song.shiftLocked') : result.reason === 'boundary' ? t('song.shiftBoundary') : '';
+      }
     }
 
     dom.on(root, 'click', '[data-act]', (ev, b) => app.actions.run(b.dataset.act, { from: 'song' }));
@@ -210,13 +249,16 @@ MV.def('ui/step_song', ['ui/dom', 'ui/icons', 'ui/header', 'ui/selection', 'i18n
       aiBtn.hidden = !app.view.state.prefs.ai;
       aiBtn.disabled = !app.doc.song;
       aiBtn.title = app.doc.song ? '' : t('song.aiNeedsSong');
-      for (const b of shiftBtns) b.disabled = !(app.plan && app.plan.lines.length);
+      updateShift();
     }
 
     app.bus.on('song', update);
     // Undo / redo / open change the song, the tempo pin or the snap setting without a 'song' event.
     const touchesSong = (x) => !!x && (x.song || x.timing || (x.pins instanceof Set && x.pins.has(bpmPath())));
-    app.bus.on('plan', (e) => { if (e && touchesSong(e.touched)) update(); });
+    app.bus.on('plan', (e) => {
+      if (e && e.kind === 'load') { shiftArea = null; shiftSelKey = ''; }
+      if (e && touchesSong(e.touched)) update(); else updateShift();
+    });
     app.view.on((changed) => { if (changed.includes('sel') || changed.includes('prefs')) update(); });
     update();
     return { root, update: () => update() };

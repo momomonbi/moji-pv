@@ -9400,3 +9400,65 @@ The owner found the change from the 表現の強さ graph too hard to see, so th
 (`ui/graph_widget`), the interlude cut's section, 詳細 › 全体 › 間奏の動き and the graphs of ③ 見た目. The `shape` param stays
 in the three effects (自動 still follows the song; a saved pin still applies). ③ 見た目 keeps 間奏の演出: per interlude its
 effect (自動 or 光の粒 / 音の水平線 / 図形の舞, pinned at its cut).
+
+## Export audio targets and quality comparisons
+
+AAC already preferred 320 kbps, but its 192 kbps platform fallback was invisible and Opus still used 160 kbps.
+Both codecs now prefer 320 kbps, requesting supported constant bitrate before trying the default mode at that
+target; AAC 192 and Opus 160 remain compatibility fallbacks. Browser-returned configurations are checked before
+use, and only a retained constant mode is advertised as constant. MP4 and WebM have separate audio probes.
+Selected codec, bitrate and mode are shown before export and in the result; estimates use the selected rate.
+Filmora's no-AAC path keeps its silent main MP4 plus uncompressed PCM WAV. Variable-rate targets are not labeled
+as measurements of the finished file's average bitrate.
+
+Step ④ brings the quality choices out of More. Each includes an estimated size for the current format,
+range, resolution, fps, sound and kit contents, a ratio against Standard, and a description of visible compression.
+PNG explicitly remains lossless with no bitrate-quality effect. These are estimates, since scene complexity affects
+encoded sizes and visibility of artifacts.
+
+`ui/export_quality_preview` produces up to three seconds around the playhead using the real MP4 or transparent
+WebM exporter at each quality and the selected resolution/fps. Comparisons are silent and remain in memory. A
+committed-document fork protects the project, undo history, main transport and temporary try-ons. Common playback
+and seeking align the clips, with native fullscreen and an enlarged side-by-side view for detail inspection.
+Changing the selected quality retains all clips; changing content, resolution, fps, format or range cancels
+and invalidates them. Leaving the step pauses playback and cancels unfinished encoding. URLs, sources and modal
+state are disposed on invalidation, cancellation, project replacement or teardown. Transparent clips use a checkerboard.
+
+Regression suites cover negotiated fallback rates and modes, encoder configuration/result agreement, live estimates,
+lossless PNG, short-range planning, cancellation and stale-result cleanup. Browser tests exercise actual encoded
+video frames, synchronized comparison, committed scene rendering during try-ons, transparency and native CBR audio.
+
+## 2026-10-12 — Lighter export, processing preferences and local timing shifts
+
+The `light` preset uses 0.04 bits/pixel/frame, half Standard's video target, while preserving the audio target.
+One shared four-level list drives the document, estimates and real silent quality comparisons. Ratios still use
+Standard as their baseline; PNG remains lossless and Filmora's green screen keeps maximum compression quality.
+
+The explicit faster-settings button lowers the short side to 720p (Filmora: 1080p) and fps to 30, retaining choices
+already below those limits. It preserves audio, compression quality, format, range and set contents in one undo.
+Resolution and fps reduce rendering work; lowering bitrate alone is not a promise of a faster render.
+
+`output.acceleration` is `auto` by default (prefer hardware, then automatic fallback) or `cpu` (prefer software,
+then automatic fallback). Older projects without it remain valid and normalize to `auto`. MP4, transparent WebM
+and Filmora outputs negotiate the preference per codec, with a same-codec fallback if configure rejects an accepted
+hint. Probes and results record the accepted preference, not measured GPU utilisation. WebCodecs manages internal
+thread counts; the UI reports logical CPU availability without a non-functional core-allocation control.
+
+Filmora submits each independent output before waiting for all its encoder queues at the same frame barrier.
+Rendering and media readiness remain ordered, canvas snapshots are taken before reuse, and queue limits and
+cancellation cleanup remain bounded. Native encoded video/audio/subtitle payloads match the sequential baseline.
+An encoder-heavy fixture improved in the local comparison; a rendering-heavy fixture did not. Speed is not guaranteed.
+
+Step ② can shift all lines, a song/lyric section, or the current line/cut selection by ±1 / ±0.1 seconds. Line targets
+retain their lengths and internal spacing, clamp at zero and neighbouring start order, and move their unlocked
+absolute cut boundaries together. A cut target adjusts its start boundary within neighbouring cuts. Unselected
+auto timings are pinned at their current values to prevent planner redistribution, without replacing existing
+AI, tap or locked pins. Those anchors and the shift share one undo entry; locked target timings are left unchanged.
+
+Validation: 30 JA/EN browser cases cover real four-quality comparison/audio, timing targets, preference controls and
+native MP4/WebM encoding/decoding with hardware-unavailable and startup-quota fallbacks. A cold JA planning timeout
+did not recur in the isolated settings rerun. The full 1,860-test Node run found two integration issues (canonical
+fixtures missing the new default and two non-US spellings); both were corrected, with 18 schema and 85 related UI
+tests passing afterwards. Four existing worst-case build-time limits failed under the parallel load, then passed
+their unchanged full matrices in isolation. The six render golden files still match, all 23 build tests pass, and
+the Japanese and English standalone pages were rebuilt.

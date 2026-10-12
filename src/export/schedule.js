@@ -12,10 +12,12 @@ MV.def('export/schedule', ['core/script', 'core/doc', 'audio/wav', 'media/sample
     }
   }
 
-  const QUALITY_BPP = Object.freeze({ standard: 0.08, high: 0.12, max: 0.18 });   // bits per pixel per frame
-  const AUDIO_BITRATE = 320000;                     // AAC-LC
+  const QUALITY_LEVELS = Object.freeze(['light', 'standard', 'high', 'max']);
+  const QUALITY_BPP = Object.freeze({ light: 0.04, standard: 0.08, high: 0.12, max: 0.18 });   // bits per pixel per frame
+  const AUDIO_BITRATE = 320000;                     // preferred audio target (AAC-LC and Opus)
   const AUDIO_BITRATE_LOW = 192000;                 // AAC-LC where the encoder stops there (Windows' Media Foundation)
-  const OPUS_BITRATE = 160000;                      // Opus in MP4, where the browser has no AAC encoder (DESIGN_2_1 §13.4)
+  const OPUS_BITRATE = AUDIO_BITRATE;               // WebM and the MP4 fallback also prefer 320 kbps
+  const OPUS_BITRATE_LOW = 160000;                  // compatibility fallback when 320 kbps is unavailable
   const AUDIO_CHUNK = 1024;                         // frames per AudioData
   const MUX_OVERHEAD = 1.02;                        // container bytes on top of the streams
   const MEMORY_CONFIRM_BYTES = 1.5 * 1024 ** 3;     // an in-memory export above this asks for confirmation
@@ -126,17 +128,19 @@ MV.def('export/schedule', ['core/script', 'core/doc', 'audio/wav', 'media/sample
     return Math.round(w * h * fps * bpp);
   }
 
-  function estimateBytes(duration, bits, audio) {
-    const total = bits + (audio ? AUDIO_BITRATE : 0);
+  function audioBits(bits, fallback) { return Number.isFinite(bits) && bits >= 0 ? bits : fallback; }
+
+  function estimateBytes(duration, bits, audio, audioBitrate) {
+    const total = bits + (audio ? audioBits(audioBitrate, AUDIO_BITRATE) : 0);
     return Math.ceil(((duration * total) / 8) * MUX_OVERHEAD);
   }
 
   // alphaBitrate(bits) → the transparent WebM's alpha stream bitrate: ALPHA_SHARE of the colour stream's (§13.5).
   function alphaBitrate(bits) { return Math.round(bits * ALPHA_SHARE); }
 
-  // estimateWebmBytes(duration, bits, audio) → a transparent WebM: the colour and the alpha streams, Opus when `audio`.
-  function estimateWebmBytes(duration, bits, audio) {
-    const total = bits + alphaBitrate(bits) + (audio ? OPUS_BITRATE : 0);
+  // estimateWebmBytes(duration, bits, audio, audioBitrate?) → colour and alpha streams, plus the selected Opus target.
+  function estimateWebmBytes(duration, bits, audio, audioBitrate) {
+    const total = bits + alphaBitrate(bits) + (audio ? audioBits(audioBitrate, OPUS_BITRATE) : 0);
     return Math.ceil(((duration * total) / 8) * MUX_OVERHEAD);
   }
 
@@ -274,7 +278,7 @@ MV.def('export/schedule', ['core/script', 'core/doc', 'audio/wav', 'media/sample
     const bits = bitrate(w, h, out.fps, out.quality);
     const song = !!(out.audio && doc.song) && e.songReady !== false;
     const aac = song && kitAac(e);
-    const files = [{ name: base + '.mp4', kind: 'main', est: estimateBytes(dur, bits, aac) }];
+    const files = [{ name: base + '.mp4', kind: 'main', est: estimateBytes(dur, bits, aac, e.audioBitrate) }];
     if (kit.overlay) files.push({ name: base + '_overlay.webm', kind: 'overlay', est: estimateWebmBytes(dur, bits, false) });
     if (kit.bg) files.push({ name: base + '_bg.mp4', kind: 'bg', est: estimateBytes(dur, bits, false) });
     if (kit.green) files.push({ name: base + '_green.mp4', kind: 'green', est: estimateBytes(dur, bitrate(w, h, out.fps, 'max'), false) });
@@ -442,15 +446,19 @@ MV.def('export/schedule', ['core/script', 'core/doc', 'audio/wav', 'media/sample
     const dur = Math.max(0, range.t1 - range.t0);
     const bits = () => bitrate(size.w, size.h, out.fps, out.quality);
     if (out.format === 'kit') return kitFiles(doc, plan, env).reduce((sum, f) => sum + f.est, 0);
-    if (out.format === 'mp4') return estimateBytes(dur, bits(), withAudio);
-    if (out.format === 'webmAlpha') return estimateWebmBytes(dur, bits(), withAudio);
+    if (out.format === 'mp4') return estimateBytes(dur, bits(), withAudio && env.audioCodec !== null && env.songReady !== false, env.audioBitrate);
+    if (out.format === 'webmAlpha') {
+      const codec = env.webmAudioCodec === undefined ? env.audioCodec : env.webmAudioCodec;
+      return estimateWebmBytes(dur, bits(), withAudio && codec !== null && env.songReady !== false, env.webmAudioBitrate);
+    }
     return estimatePngBytes(frameCount(dur, out.fps), size.w, size.h, out.format === 'pngAlpha');
   }
 
   // preflight(doc, plan, env) → [{ code, level: 'block'|'confirm'|'warn'|'info', params, jump?, fix? }] (§4.21;
   // DESIGN_2_1 §13.10). env = {
   //   webcodecs, codec (first supported AVC string, null = none, undefined = not checked), audioCodec (the MP4 audio codec,
-  //   probe().audioCodec: 'mp4a.40.2' | 'opus' | null = none | undefined = not checked), anyCodec (false: no H.264
+  //   probe().audioCodec: 'mp4a.40.2' | 'opus' | null = none | undefined = not checked), audioBitrate (selected MP4
+  //   audio target), webmAudioCodec / webmAudioBitrate (the separate Opus support probe), anyCodec (false: no H.264
   //   encoder at any size; undefined: not checked), vp9Codec (probe().vp9Codec: the first VP9 or VP8 string that encodes,
   //   null = none, undefined = not checked), fontsReady, fsAccess (a file can be written: showSaveFilePicker),
   //   dirAccess (a folder can be written, for the kit: showDirectoryPicker; default fsAccess), songReady (decoded audio
@@ -489,7 +497,8 @@ MV.def('export/schedule', ['core/script', 'core/doc', 'audio/wav', 'media/sample
     // DESIGN_2_1 §13.4. MP4: AAC, else Opus in MP4 with a note (some editors cannot read it), else no sound. WebM: Opus
     // (no sound only when no audio codec encodes at all). The kit: AAC, else the song as a WAV file next to the MP4.
     if (withAudio && e.webcodecs && e.songReady !== false) {
-      if ((mp4 || webm) && e.audioCodec === null) items.push({ code: 'no-audio-codec', level: 'warn', params: {} });
+      const audioCodec = webm && e.webmAudioCodec !== undefined ? e.webmAudioCodec : e.audioCodec;
+      if ((mp4 || webm) && audioCodec === null) items.push({ code: 'no-audio-codec', level: 'warn', params: {} });
       else if (mp4 && e.audioCodec === 'opus') items.push({ code: 'opus-audio', level: 'info', params: {} });
       else if (kit && !kitAac(e)) items.push({ code: 'kit-wav', level: 'info', params: { name: kitBase(doc) } });
     }
@@ -521,7 +530,7 @@ MV.def('export/schedule', ['core/script', 'core/doc', 'audio/wav', 'media/sample
   }
 
   return {
-    ExportError, QUALITY_BPP, AUDIO_BITRATE, AUDIO_BITRATE_LOW, OPUS_BITRATE, AUDIO_CHUNK, MEMORY_CONFIRM_BYTES, FLASH_PARTS, FLASH_LIMIT, FLASH_SAFE_AMP,
+    ExportError, QUALITY_LEVELS, QUALITY_BPP, AUDIO_BITRATE, AUDIO_BITRATE_LOW, OPUS_BITRATE, OPUS_BITRATE_LOW, AUDIO_CHUNK, MEMORY_CONFIRM_BYTES, FLASH_PARTS, FLASH_LIMIT, FLASH_SAFE_AMP,
     ALPHA_SHARE, WAV_RATE, KIT_README, KIT_SHORTS, FORMATS,
     frameCount, ts, frameDur, audioFrames, keyInterval, audioChunkCount, audioChunk, fillPlanar, mixMatrix,
     outputSize, bitrate, alphaBitrate, estimateBytes, estimateWebmBytes, estimatePngBytes, eta, pickAvc, pickVp9,
