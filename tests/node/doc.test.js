@@ -28,7 +28,7 @@ test('defaultDoc and defaultSide follow §4.4 and validate', () => {
   assert.equal(doc.song, null);
   assert.deepEqual(doc.look, { seed: 1, moodSeed: 1, aspect: '16:9', backdrop: 'scene' });
   assert.deepEqual([doc.pins, doc.salts, doc.locks, doc.filters], [{}, {}, {}, {}]);
-  assert.deepEqual(doc.output, { format: 'mp4', short: 1080, fps: 30, quality: 'high', acceleration: 'auto', audio: true, range: null, name: null,
+  assert.deepEqual(doc.output, { format: 'mp4', short: 1080, fps: 30, quality: 'high', acceleration: 'auto', audio: true, audioEncoding: 'browser', range: null, name: null,
     kit: { overlay: true, bg: false, green: false, srt: true, lrc: false } });
   assert.deepEqual(doc.materials, { next: 1, list: [] });
   assert.deepEqual(doc.media, { list: [] });
@@ -208,7 +208,7 @@ test('serialize: round trip, §3.1 key order, sorted maps, unknown keys kept', (
     'materials', 'media', 'output', 'zeta', 'alpha']);
   assert.deepEqual(Object.keys(file.doc.pins), ['line/r1:arrange', 'work:theme']);
   assert.deepEqual(Object.keys(file.doc.pins['work:theme']), ['v', 'by']);
-  assert.deepEqual(Object.keys(file.doc.output), ['format', 'short', 'fps', 'quality', 'acceleration', 'audio', 'range', 'name', 'kit']);
+  assert.deepEqual(Object.keys(file.doc.output), ['format', 'short', 'fps', 'quality', 'acceleration', 'audio', 'audioEncoding', 'range', 'name', 'kit']);
   assert.deepEqual(Object.keys(file.doc.output.kit), ['overlay', 'bg', 'green', 'srt', 'lrc']);
   assert.deepEqual(Object.keys(file.doc.output.range), ['t0', 't1']);
   assert.deepEqual(file.side, D.defaultSide());

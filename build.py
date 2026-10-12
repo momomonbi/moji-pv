@@ -23,7 +23,7 @@ VENDOR_FILES = ('mp4-muxer.min.js', 'ai-sdk.min.js')
 PART_KINDS = ('arrange', 'arrive', 'dwell', 'depart', 'ground', 'ornament', 'lens', 'filter', 'seam', 'theme', 'mood')
 CSP = ("default-src 'none'; script-src {scripts}; style-src {style} https://fonts.googleapis.com; "
        "font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com "
-       "https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; "
+       "https://api.anthropic.com https:; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; "
        "form-action 'none'")
 PAGE = ('<!doctype html><html lang="{lang}"><head><meta charset="utf-8">\n'
         '<meta name="viewport" content="width=device-width,initial-scale=1">\n'

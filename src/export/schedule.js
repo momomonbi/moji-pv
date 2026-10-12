@@ -144,6 +144,19 @@ MV.def('export/schedule', ['core/script', 'core/doc', 'audio/wav', 'media/sample
     return Math.ceil(((duration * total) / 8) * MUX_OVERHEAD);
   }
 
+  // Only an opaque video's enabled song uses the configured audio server. The connection and credentials are
+  // device/session settings, never document fields; this mode does not affect transparent or silent exports.
+  function usesAudioServer(doc) {
+    const out = doc && doc.output;
+    return !!(out && out.audioEncoding === 'server' && (out.format === 'mp4' || out.format === 'kit') && out.audio && doc.song);
+  }
+
+  function audioEnv(doc, env) {
+    const e = env || {};
+    return usesAudioServer(doc) ? Object.assign({}, e, { audioCodec: 'mp4a.40.2', audioBitrate: AUDIO_BITRATE,
+      audioBitrateMode: null, audioSource: 'server' }) : e;
+  }
+
   function estimatePngBytes(frames, w, h, alpha) {
     return Math.ceil(frames * w * h * (alpha ? PNG_BYTES_PER_PIXEL.rgba : PNG_BYTES_PER_PIXEL.rgb));
   }
@@ -267,7 +280,7 @@ MV.def('export/schedule', ['core/script', 'core/doc', 'audio/wav', 'media/sample
   // 'mp4a.40.2') and output.audio is on with a song that is loaded (env.songReady is not false). The WAV's size is exact
   // (audioFrames(N) frames at 48 kHz); the videos follow the bitrates (the green screen always at quality max, §13.6).
   function kitFiles(doc, plan, env) {
-    const e = env || {};
+    const e = audioEnv(doc, env);
     const out = doc.output;
     const kit = kitOptions(out);
     const base = kitBase(doc);
@@ -473,7 +486,7 @@ MV.def('export/schedule', ['core/script', 'core/doc', 'audio/wav', 'media/sample
   //              (kit-wav); kit-fps, kit-size, layers-approx (background and overlay both on), kit-memory for the set
   //   png, pngAlpha  no encoder
   function preflight(doc, plan, env) {
-    const e = env || {};
+    const e = audioEnv(doc, env);
     const out = doc.output;
     const items = [];
     const format = out.format;
@@ -487,6 +500,8 @@ MV.def('export/schedule', ['core/script', 'core/doc', 'audio/wav', 'media/sample
     const size = outputSize(plan.design.aspect, out.short);
     const { w, h } = size;
     const withAudio = kind.video && out.audio && !!doc.song;
+    const serverAudio = usesAudioServer(doc);
+    if (serverAudio && e.audioServerConfigured === false) items.push({ code: 'audio-server-config', level: 'block', params: {} });
     if (!(t1 > t0)) items.push({ code: 'range-empty', level: 'block', params: {} });
     if (kind.video && !e.webcodecs) items.push({ code: 'no-webcodecs', level: 'block', params: {} });
     else {
@@ -502,12 +517,21 @@ MV.def('export/schedule', ['core/script', 'core/doc', 'audio/wav', 'media/sample
       else if (mp4 && e.audioCodec === 'opus') items.push({ code: 'opus-audio', level: 'info', params: {} });
       else if (kit && !kitAac(e)) items.push({ code: 'kit-wav', level: 'info', params: { name: kitBase(doc) } });
     }
-    if (withAudio && e.songReady === false) items.push({ code: 'song-missing', level: 'warn', params: { name: doc.song.name } });
+    if (withAudio && e.songReady === false) items.push({ code: 'song-missing', level: serverAudio ? 'block' : 'warn', params: { name: doc.song.name } });
     if (mp4 && doc.look.backdrop === 'clear') items.push({ code: 'clear-mp4', level: 'warn', params: {} });
     if (e.fontsReady === false) items.push({ code: 'fonts-loading', level: 'info', params: {} });
     const inMemory = kit ? !(e.dirAccess === undefined ? e.fsAccess : e.dirAccess) : !e.fsAccess;
-    if (inMemory) {
-      const bytes = memoryBytes(doc, plan, e, range, size, withAudio);
+    if (inMemory || serverAudio && e.songReady !== false) {
+      let bytes = inMemory ? memoryBytes(doc, plan, e, range, size, withAudio) : 0;
+      if (serverAudio && e.songReady !== false) {
+        const seconds = Math.max(0, range.t1 - range.t0), bits = bitrate(w, h, out.fps, out.quality);
+        // The external request holds a silent MP4 and a stereo PCM16 WAV, then receives the AAC MP4. These buffers
+        // are needed even when the finished output is written directly to disk. An in-memory output already counts
+        // the returned main movie (or its Filmora ZIP), so add it only for the direct-to-disk route.
+        bytes += estimateBytes(seconds, bits, false) + WAV.HEADER_BYTES
+          + audioFrames(frameCount(seconds, out.fps), out.fps, WAV_RATE) * 4;
+        if (!inMemory) bytes += estimateBytes(seconds, bits, true, AUDIO_BITRATE);
+      }
       items.push({ code: kit ? 'kit-memory' : 'memory', level: bytes > MEMORY_CONFIRM_BYTES ? 'confirm' : 'warn', params: { bytes } });
     }
     if (kit) {
@@ -532,7 +556,7 @@ MV.def('export/schedule', ['core/script', 'core/doc', 'audio/wav', 'media/sample
   return {
     ExportError, QUALITY_LEVELS, QUALITY_BPP, AUDIO_BITRATE, AUDIO_BITRATE_LOW, OPUS_BITRATE, OPUS_BITRATE_LOW, AUDIO_CHUNK, MEMORY_CONFIRM_BYTES, FLASH_PARTS, FLASH_LIMIT, FLASH_SAFE_AMP,
     ALPHA_SHARE, WAV_RATE, KIT_README, KIT_SHORTS, FORMATS,
-    frameCount, ts, frameDur, audioFrames, keyInterval, audioChunkCount, audioChunk, fillPlanar, mixMatrix,
+    frameCount, ts, frameDur, audioFrames, keyInterval, audioChunkCount, audioChunk, fillPlanar, mixMatrix, usesAudioServer, audioEnv,
     outputSize, bitrate, alphaBitrate, estimateBytes, estimateWebmBytes, estimatePngBytes, eta, pickAvc, pickVp9,
     exportRange, backdropFor, renderScale, fileName, frameName, kitOptions, kitBase, kitFolder, kitFiles, layerDiffs,
     flashEvents, flashRate, extremeCuts, preflight,

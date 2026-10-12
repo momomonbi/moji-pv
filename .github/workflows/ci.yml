@@ -14,6 +14,24 @@ permissions:
   contents: read
 
 jobs:
+  audio-server:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install audio server test dependencies
+        run: |
+          python3 -m pip install --quiet -r server/audio/requirements-test.txt
+          if ! command -v ffmpeg >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends ffmpeg
+          fi
+      - name: External AAC conversion and service tests
+        run: python3 -m unittest discover -s server/audio/tests -v
+
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -81,7 +99,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install Playwright (Python; drives the runner's Google Chrome, no browser download)
-        run: python3 -m pip install --quiet playwright
+        run: python3 -m pip install --quiet playwright -r server/audio/requirements-test.txt
 
       - name: Google Chrome
         run: google-chrome --version
@@ -92,7 +110,7 @@ jobs:
         # nothing at all. The tests fail fast with one message when no font draws Japanese (dev/browser.py).
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends fonts-noto-cjk fonts-noto-color-emoji
+          sudo apt-get install -y --no-install-recommends fonts-noto-cjk fonts-noto-color-emoji ffmpeg
           fc-cache -f
           fc-list :lang=ja family | sort -u | head -n 5
 

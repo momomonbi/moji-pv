@@ -188,6 +188,7 @@ MV.def('ui/output', ['export/schedule', 'engine/scene/frame'], (S, F) => {
   // H.264 encoder its own text (the MP4s of the set cannot be made here; no PNG sequence is offered).
   function checkKey(item) {
     if (item.code === 'no-h264' && item.params && item.params.format === 'kit') return 'exp.pre.kit-no-h264';
+    if (item.code === 'song-missing' && item.level === 'block') return 'exp.pre.audio-server-song-missing';
     return 'exp.pre.' + item.code;
   }
 
@@ -213,10 +214,10 @@ MV.def('ui/output', ['export/schedule', 'engine/scene/frame'], (S, F) => {
   //   Filmora用  exp.kit.summary { n: files, bytes: Σ kitFiles estimates, where: 'folder' | 'zip' } (§13.10)
   //   others     exp.summary { w, h, fps, seconds, bytes, where: 'disk' | 'memory' }
   function summary(doc, plan, env) {
-    const e = env || {};
+    const e = S.audioEnv(doc, env);
     const o = doc.output;
     if (o.format === 'kit') {
-      const files = S.kitFiles(doc, plan, { audioCodec: e.audioCodec, songReady: e.songReady });
+      const files = S.kitFiles(doc, plan, e);
       return { key: 'exp.kit.summary', params: { n: files.length, bytes: files.reduce((sum, f) => sum + f.est, 0),
         where: e.dirAccess ? 'folder' : 'zip' } };
     }
@@ -248,7 +249,7 @@ MV.def('ui/output', ['export/schedule', 'engine/scene/frame'], (S, F) => {
   // The probed encoder setting (a target bitrate, not a measurement of the finished file). Unknown support shows
   // the preferred rate until the probe completes; format-specific probes keep MP4 AAC and WebM Opus separate.
   function audioInfo(doc, env) {
-    const e = env || {}, o = doc.output;
+    const e = S.audioEnv(doc, env), o = doc.output;
     if (!hasSound(o.format)) return { state: 'image' };
     if (!o.audio) return { state: 'off' };
     if (!doc.song) return { state: 'no-song' };
@@ -260,7 +261,8 @@ MV.def('ui/output', ['export/schedule', 'engine/scene/frame'], (S, F) => {
     if (codec === null) return { state: 'unavailable' };
     if (codec === undefined || !(bitrate > 0)) return { state: 'checking', preferred: S.AUDIO_BITRATE };
     const mode = webm ? e.webmAudioBitrateMode : e.audioBitrateMode;
-    return { state: 'ready', codec, bitrate, mode: mode || null, preferred: S.AUDIO_BITRATE, fallback: bitrate < S.AUDIO_BITRATE };
+    return { state: 'ready', codec, bitrate, mode: mode || null, preferred: S.AUDIO_BITRATE, fallback: bitrate < S.AUDIO_BITRATE,
+      ...(e.audioSource ? { source: e.audioSource } : {}) };
   }
 
   // kitLabel(kind) → the key that names a file of the set (step ④'s done list, the guide), or null (none for a kind
@@ -271,8 +273,7 @@ MV.def('ui/output', ['export/schedule', 'engine/scene/frame'], (S, F) => {
   // the song's WAV where the browser cannot put the song into the MP4, and the README. 詳しく lists them under the
   // checkboxes, so its rows add up to the summary line's count. env = { audioCodec, songReady } as for kitFiles.
   function kitAlways(doc, plan, env) {
-    const e = env || {};
-    return S.kitFiles(doc, plan, { audioCodec: e.audioCodec, songReady: e.songReady }).map((f) => f.kind)
+    return S.kitFiles(doc, plan, S.audioEnv(doc, env)).map((f) => f.kind)
       .filter((kind) => kind === 'wav' || kind === 'readme');
   }
 
@@ -309,6 +310,11 @@ MV.def('ui/output', ['export/schedule', 'engine/scene/frame'], (S, F) => {
     cancelled: 'err.exp.cancelled', sink: 'err.exp.sink', 'range-empty': 'exp.pre.range-empty',
     'no-webcodecs': 'exp.pre.no-webcodecs', 'no-codec': 'err.exp.codec', codec: 'err.exp.codec', 'no-plan': 'err.exp.noPlan',
     media: 'err.exp.media', 'no-vp9': 'exp.pre.no-vp9',
+    'audio-server-config': 'err.exp.audioServerConfig', 'audio-server-auth': 'err.exp.audioServerAuth',
+    'audio-server-network': 'err.exp.audioServerNetwork', 'audio-server-too-large': 'err.exp.audioServerTooLarge',
+    'audio-server-response': 'err.exp.audioServerResponse', 'audio-server-media': 'err.exp.audioServerMedia',
+    'audio-server-busy': 'err.exp.audioServerBusy', 'audio-server-timeout': 'err.exp.audioServerTimeout',
+    'audio-server-convert': 'err.exp.audioServerConvert',
   });
   function errorKey(code) { return ERROR_KEYS[code] || 'err.exp.encode'; }
 
@@ -325,6 +331,7 @@ MV.def('ui/output', ['export/schedule', 'engine/scene/frame'], (S, F) => {
     FORMATS, MAIN_FORMATS, OTHER_FORMATS, BACKDROPS, KIT_KEYS, ERROR_KEYS, isAlpha, formatCmds, transparentOf, opaqueOf,
     backdropCmds, clearLabel, backdropChoices, backdropNote, effectiveBackdrop, consistent, skipOf, usedFilters, skippedFilters,
     checks, kitCmd, withFixes, fixLabel, checkKey, layersWhat, listText, summary, qualityOptions, audioInfo,
+    usesAudioServer: S.usesAudioServer, audioEnv: S.audioEnv,
     kitLabel, kitAlways, shownChecks, hasSound, speedProfile, speedCmds,
     mergeFonts, errorKey, errorParams,
   };

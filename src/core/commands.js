@@ -438,7 +438,7 @@ MV.def('core/commands', ['core/doc', 'core/paths', 'core/pins', 'core/lyrics', '
     // ---- settings sections: timing, song, output ------------------------------------------------------------------
 
     const TIMING_KEYS = ['snap', 'lead', 'tail', 'leadIn', 'outro', 'tapLatency'];
-    const OUTPUT_KEYS = ['format', 'short', 'fps', 'quality', 'acceleration', 'audio', 'range', 'name', 'kit'];
+    const OUTPUT_KEYS = ['format', 'short', 'fps', 'quality', 'acceleration', 'audio', 'audioEncoding', 'range', 'name', 'kit'];
 
     // Sets doc[section][key] = v, validated by core/doc (problems under that section refuse the command).
     function setSetting(doc, section, key, v) {

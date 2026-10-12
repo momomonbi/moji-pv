@@ -285,6 +285,10 @@ hardware preference with automatic fallback) or `cpu` (software preference with 
 in older projects normalize to `auto`; validation still accepts those projects. Both are encoding preferences,
 not measurements of GPU utilisation or controls over the browser's internal thread count.
 
+`output.audioEncoding` is `browser` by default, or `server` for external AAC 320 kbps conversion in MP4/Filmora.
+The external mode uses the original PCM range and one silent video encode; its server copies the H.264 packets.
+Credentials are not project fields. Server response metadata distinguishes configured target and measured average.
+
 **`side.asks`** = `{ [areaKey]: { text, at } }`:
 - These are board drafts (§6.3). They are not undoable.
 - Caps: 40 entries, `text` ≤ 120 characters.

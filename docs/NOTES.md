@@ -9462,3 +9462,28 @@ fixtures missing the new default and two non-US spellings); both were corrected,
 tests passing afterwards. Four existing worst-case build-time limits failed under the parallel load, then passed
 their unchanged full matrices in isolation. The six render golden files still match, all 23 build tests pass, and
 the Japanese and English standalone pages were rebuilt.
+
+## 2026-10-12 — External AAC 320 kbps conversion
+
+Step ④ adds an optional external audio mode for MP4 and Filmora. A configured HTTPS server receives one silent
+H.264 MP4 and the original song's stereo PCM16 WAV, cut at the captured export start and trimmed/padded to the
+same number of samples as its video frames. FFmpeg encodes only the audio with an AAC 320 kbps target and copies
+the video packets. The result labels the target separately from the measured average; it does not promise CBR.
+The browser's AAC 192 kbps cap does not participate in this route. Conversion failures do not substitute lower
+quality or a silent result. A Filmora set transforms only the main MP4 and keeps its other outputs unchanged.
+
+Connection settings are outside project JSON: URL in device localStorage, token in tab sessionStorage. Health checks
+are manual and send no media; conversion requires a token and a relinked original song. UI progress is indeterminate
+while the external conversion runs. Estimates include intermediate video, PCM and returned video buffers. The CSP
+allows HTTPS connections to configured services; config rejects plaintext, embedded credentials, queries, fragments
+and redirects. Errors and result metadata do not include credentials or server error bodies.
+
+The deployable `server/audio` service has bounded uploads, explicit CORS origins, token authentication, concurrency
+and time limits, restricted FFmpeg input protocols, video packet probes and temporary-file cleanup. Host and Docker
+tests verify AAC conversion, sample timing, preserved video packets, authentication, upload limits, cancellation,
+timeouts and external-reference rejection. Client checks reject damaged MP4 responses before reporting success and
+cancel unread error bodies. The service response also cleans up when disconnect happens before the response body.
+
+The user chose to prepare the server bundle and connection settings before selecting a hosting provider. Backend
+hosting remains unconfigured; adding this code to GitHub Pages does not start an audio server. Deployment and
+connection instructions are in `server/audio/README.md`. The application and server tests are included in CI.

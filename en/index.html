@@ -1,6 +1,6 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-fyMmLh72WhaSDMc6tzQWiGXDhpo7qKl+u3MK0P6UUjI='; style-src 'sha256-Yi2ZF9kQXDQ2Io/WQdpdb9LAPiokDGDD/emqrGLxFPc=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-RWH0cmdNChVhSNMjhPnsIOoi80jfc+ew9PGygkpwu3U='; style-src 'sha256-Fy49fNzr9l0lyo6ZAGAcOvPUSG1U7eiwF+9E4r2Twy0=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com https://api.anthropic.com https:; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'">
 <title>Moji PV Maker</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -390,6 +390,10 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent);
 .quality-preview-actions, .quality-preview-transport { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .quality-preview-status, .quality-preview-range { font-size: 11.5px; line-height: 1.5; color: var(--text-2); }
 .quality-preview-clips { display: grid; gap: 12px; }
+.exp-settings [data-seg='audioEncoding'] .seg { min-width: 0; white-space: normal; height: auto; min-height: 42px; padding: 6px 8px; }
+.progress.is-indeterminate .progress-bar { animation: external-audio-progress 1.4s ease-in-out infinite alternate; }
+@keyframes external-audio-progress { from { transform: translateX(0); } to { transform: translateX(180%); } }
+@media (prefers-reduced-motion: reduce) { .progress.is-indeterminate .progress-bar { animation: none; } }
 .quality-preview-clip { display: grid; gap: 5px; min-width: 0; }
 .quality-preview-clip-title { font-size: 12px; font-weight: 700; }
 .quality-preview-clip video { display: block; width: 100%; max-height: 270px; object-fit: contain; background: #080a0c; border-radius: 6px; }
@@ -6802,7 +6806,7 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
     'seam', 'theme']);
   const OUTPUT_CHOICES = Object.freeze({
     format: ['mp4', 'kit', 'webmAlpha', 'png', 'pngAlpha'], short: [720, 1080, 1440, 2160], fps: [24, 30, 60],
-    quality: ['light', 'standard', 'high', 'max'], acceleration: ['auto', 'cpu'],
+    quality: ['light', 'standard', 'high', 'max'], acceleration: ['auto', 'cpu'], audioEncoding: ['browser', 'server'],
   });
   // output.kit: the optional files of the Filmora set (§13.3); the main MP4 is always written.
   const KIT_KEYS = Object.freeze(['overlay', 'bg', 'green', 'srt', 'lrc']);
@@ -6831,7 +6835,7 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
     pin: ['v', 'by', 'sig'],
     lock: ['n'],
     filter: ['only', 'deny'],
-    output: ['format', 'short', 'fps', 'quality', 'acceleration', 'audio', 'range', 'name', 'kit'],
+    output: ['format', 'short', 'fps', 'quality', 'acceleration', 'audio', 'audioEncoding', 'range', 'name', 'kit'],
     range: ['t0', 't1'],
     kit: KIT_KEYS,
     materials: ['next', 'list'],
@@ -6864,7 +6868,7 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
       filters: {},
       materials: { next: 1, list: [] },
       media: { list: [] },
-      output: { format: 'mp4', short: 1080, fps: 30, quality: 'high', acceleration: 'auto', audio: true, range: null, name: null,
+      output: { format: 'mp4', short: 1080, fps: 30, quality: 'high', acceleration: 'auto', audio: true, audioEncoding: 'browser', range: null, name: null,
         kit: Object.assign({}, KIT_DEFAULT) },
     };
   }
@@ -7090,7 +7094,7 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
   function checkOutput(output, bad) {
     if (!isObject(output)) { bad('output', 'must be an object'); return; }
     for (const k of Object.keys(OUTPUT_CHOICES)) {
-      if (k === 'acceleration' && output[k] === undefined) continue; // Older projects default to GPU preference.
+      if ((k === 'acceleration' || k === 'audioEncoding') && output[k] === undefined) continue; // Older projects keep local audio and GPU preference.
       if (!OUTPUT_CHOICES[k].includes(output[k])) bad('output.' + k, 'must be one of ' + OUTPUT_CHOICES[k].join(' '));
     }
     if (typeof output.audio !== 'boolean') bad('output.audio', 'must be a boolean');
@@ -7812,7 +7816,7 @@ MV.def('core/commands', ['core/doc', 'core/paths', 'core/pins', 'core/lyrics', '
     // ---- settings sections: timing, song, output ------------------------------------------------------------------
 
     const TIMING_KEYS = ['snap', 'lead', 'tail', 'leadIn', 'outro', 'tapLatency'];
-    const OUTPUT_KEYS = ['format', 'short', 'fps', 'quality', 'acceleration', 'audio', 'range', 'name', 'kit'];
+    const OUTPUT_KEYS = ['format', 'short', 'fps', 'quality', 'acceleration', 'audio', 'audioEncoding', 'range', 'name', 'kit'];
 
     // Sets doc[section][key] = v, validated by core/doc (problems under that section refuse the command).
     function setSetting(doc, section, key, v) {
@@ -12314,6 +12318,45 @@ MV.def('i18n/strings', [], () => ({
   'exp.audioQuality.no-song': ['曲を読み込むと、音声も320 kbpsを優先して書き出します。', 'Load a song to export audio, preferring 320 kbps.'],
   'exp.audioQuality.missing': ['曲の音声を読み込むと、書き出す音質を確認できます。', 'Load the song audio to check its export setting.'],
   'exp.audioQuality.unavailable': ['このブラウザでは動画に音声を入れられません。', 'This browser cannot encode audio in the video.'],
+  'exp.audioEncoding': ['音声の処理', 'Audio processing'],
+  'exp.audioEncoding.browser': ['ブラウザで処理', 'Process in browser'],
+  'exp.audioEncoding.server': ['外部サーバー（AAC 320kbps）', 'External server (AAC 320 kbps)'],
+  'exp.audioEncoding.help': ['外部サーバーでは元の曲をAAC 320kbpsの目標で処理し、動画に結合します。動画と音声を設定したサーバーへ送信します。',
+    'The external server encodes the original song with an AAC 320 kbps target and joins it to the video. Video and audio are sent to your configured server.'],
+  'exp.audioEncoding.needsAudio': ['曲を読み込み、音声を入れると使えます', 'Load a song and enable sound to use this'],
+  'exp.audioQuality.server': ['音声：AAC {kbps}kbpsの目標（元の曲から外部サーバーで処理）', 'Audio: AAC {kbps} kbps target (processed from the original song on your server)'],
+  'exp.audioQuality.serverMeasured': ['音声：AAC {kbps}kbpsの目標・実測 {measured}kbps（外部サーバー）', 'Audio: AAC {kbps} kbps target; measured {measured} kbps (external server)'],
+  'exp.serverProgress.audioServer': ['外部サーバーで音声を変換中', 'Converting audio on the external server'],
+  'exp.serverProgress.wait': ['変換と動画の結合が完了するまでお待ちください', 'Waiting for audio conversion and video joining'],
+  'exp.pre.audio-server-config': ['外部変換には、公開したサーバーのHTTPS URLとアクセストークンを設定してください。', 'External conversion requires the HTTPS URL and access token of your deployed server.'],
+  'exp.pre.audio-server-song-missing': ['外部変換には元の曲ファイルが必要です。つなぎ直してください: {name}', 'External conversion needs the original song file. Relink it: {name}'],
+  'exp.server.url': ['サーバーURL', 'Server URL'],
+  'exp.server.token': ['アクセストークン', 'Access token'],
+  'exp.server.check': ['接続を確認', 'Check connection'],
+  'exp.server.checking': ['接続を確認中…', 'Checking connection…'],
+  'exp.server.storage': ['URLはこの端末に保存します。プロジェクトには入りません。', 'The URL is saved on this device, outside the project.'],
+  'exp.server.tokenStorage': ['トークンはこのタブだけに保存します。', 'The token is kept only for this tab.'],
+  'exp.server.tokenEmpty': ['変換にはアクセストークンが必要です。接続確認では認証しません。', 'Conversion requires an access token. Connection checks do not verify authentication.'],
+  'exp.server.urlEmpty': ['公開したサーバーのHTTPS URLを入力してください。', 'Enter the HTTPS URL of your deployed server.'],
+  'exp.server.ready': ['AAC 320 kbps対応サーバーに接続できました。認証は変換時に確認します。', 'Connected to an AAC 320 kbps server. Authentication is checked during conversion.'],
+  'exp.server.changed': ['設定が変わりました。もう一度接続を確認してください。', 'Settings changed. Check the connection again.'],
+  'exp.server.configError': ['HTTPS URLのみ指定できます。ユーザー情報・クエリ・#は入れないでください。', 'Use an HTTPS URL without embedded credentials, query parameters or fragments.'],
+  'exp.server.networkError': ['サーバーに接続できませんでした。URLとサーバーのCORS設定を確認してください。', 'Could not reach the server. Check its URL and CORS settings.'],
+  'exp.server.timeout': ['接続確認がタイムアウトしました。', 'The connection check timed out.'],
+  'exp.server.responseError': ['AAC 320 kbps対応サーバーとして確認できませんでした。', 'The server did not identify itself as a compatible AAC 320 kbps service.'],
+  'exp.server.error': ['接続を確認できませんでした。', 'The connection could not be checked.'],
+  'exp.server.urlNotSaved': ['URLを端末に保存できません。再読み込み後は再入力してください。', 'The URL could not be saved on this device. Enter it again after reloading.'],
+  'exp.server.tokenError': ['トークンは空白を含まない半角文字で入力してください。', 'Enter the token using ASCII characters without spaces.'],
+  'exp.server.tokenNotSaved': ['トークンをタブに保存できません。再読み込み後に再入力してください。', 'The token could not be saved for this tab. Enter it again after reloading.'],
+  'err.exp.audioServerConfig': ['外部変換には、サーバーのHTTPS URLとアクセストークンを設定してください。', 'Set the server HTTPS URL and access token for external conversion.'],
+  'err.exp.audioServerAuth': ['変換サーバーの認証に失敗しました。アクセストークンを確認してください。', 'The conversion server rejected authentication. Check the access token.'],
+  'err.exp.audioServerNetwork': ['変換サーバーと通信できませんでした。URL・接続・CORS設定を確認してください。', 'Could not communicate with the conversion server. Check its URL, connection and CORS settings.'],
+  'err.exp.audioServerTooLarge': ['動画と音声がサーバーの上限を超えています。範囲・サイズ・fpsを下げてください。', 'The video and audio exceed the server upload limit. Reduce the range, resolution or fps.'],
+  'err.exp.audioServerResponse': ['変換サーバーから正しいMP4を受け取れませんでした。', 'The conversion server did not return a valid MP4.'],
+  'err.exp.audioServerMedia': ['変換サーバーが動画や音声を読み取れませんでした。', 'The conversion server could not read the video or audio.'],
+  'err.exp.audioServerBusy': ['変換サーバーが混み合っています。少し待ってから再試行してください。', 'The conversion server is busy. Wait a moment and retry.'],
+  'err.exp.audioServerTimeout': ['外部変換がタイムアウトしました。短い範囲で試すか、サーバーの制限を確認してください。', 'External conversion timed out. Try a shorter range or check the server limits.'],
+  'err.exp.audioServerConvert': ['サーバーでAAC 320kbpsへの変換に失敗しました。', 'The server could not convert the audio to AAC with a 320 kbps target.'],
   'exp.preview.title': ['短い動画で画質を比較', 'Compare a short encoded clip'],
   'exp.preview.help': ['今の再生位置付近を最大3秒、選んだサイズ・fpsで全画質に書き出します。音声は入りません。',
     'Encode up to 3 seconds around the playhead in every quality at the selected size and fps. The clips are silent.'],
@@ -51190,6 +51233,19 @@ MV.def('export/schedule', ['core/script', 'core/doc', 'audio/wav', 'media/sample
     return Math.ceil(((duration * total) / 8) * MUX_OVERHEAD);
   }
 
+  // Only an opaque video's enabled song uses the configured audio server. The connection and credentials are
+  // device/session settings, never document fields; this mode does not affect transparent or silent exports.
+  function usesAudioServer(doc) {
+    const out = doc && doc.output;
+    return !!(out && out.audioEncoding === 'server' && (out.format === 'mp4' || out.format === 'kit') && out.audio && doc.song);
+  }
+
+  function audioEnv(doc, env) {
+    const e = env || {};
+    return usesAudioServer(doc) ? Object.assign({}, e, { audioCodec: 'mp4a.40.2', audioBitrate: AUDIO_BITRATE,
+      audioBitrateMode: null, audioSource: 'server' }) : e;
+  }
+
   function estimatePngBytes(frames, w, h, alpha) {
     return Math.ceil(frames * w * h * (alpha ? PNG_BYTES_PER_PIXEL.rgba : PNG_BYTES_PER_PIXEL.rgb));
   }
@@ -51313,7 +51369,7 @@ MV.def('export/schedule', ['core/script', 'core/doc', 'audio/wav', 'media/sample
   // 'mp4a.40.2') and output.audio is on with a song that is loaded (env.songReady is not false). The WAV's size is exact
   // (audioFrames(N) frames at 48 kHz); the videos follow the bitrates (the green screen always at quality max, §13.6).
   function kitFiles(doc, plan, env) {
-    const e = env || {};
+    const e = audioEnv(doc, env);
     const out = doc.output;
     const kit = kitOptions(out);
     const base = kitBase(doc);
@@ -51519,7 +51575,7 @@ MV.def('export/schedule', ['core/script', 'core/doc', 'audio/wav', 'media/sample
   //              (kit-wav); kit-fps, kit-size, layers-approx (background and overlay both on), kit-memory for the set
   //   png, pngAlpha  no encoder
   function preflight(doc, plan, env) {
-    const e = env || {};
+    const e = audioEnv(doc, env);
     const out = doc.output;
     const items = [];
     const format = out.format;
@@ -51533,6 +51589,8 @@ MV.def('export/schedule', ['core/script', 'core/doc', 'audio/wav', 'media/sample
     const size = outputSize(plan.design.aspect, out.short);
     const { w, h } = size;
     const withAudio = kind.video && out.audio && !!doc.song;
+    const serverAudio = usesAudioServer(doc);
+    if (serverAudio && e.audioServerConfigured === false) items.push({ code: 'audio-server-config', level: 'block', params: {} });
     if (!(t1 > t0)) items.push({ code: 'range-empty', level: 'block', params: {} });
     if (kind.video && !e.webcodecs) items.push({ code: 'no-webcodecs', level: 'block', params: {} });
     else {
@@ -51548,12 +51606,21 @@ MV.def('export/schedule', ['core/script', 'core/doc', 'audio/wav', 'media/sample
       else if (mp4 && e.audioCodec === 'opus') items.push({ code: 'opus-audio', level: 'info', params: {} });
       else if (kit && !kitAac(e)) items.push({ code: 'kit-wav', level: 'info', params: { name: kitBase(doc) } });
     }
-    if (withAudio && e.songReady === false) items.push({ code: 'song-missing', level: 'warn', params: { name: doc.song.name } });
+    if (withAudio && e.songReady === false) items.push({ code: 'song-missing', level: serverAudio ? 'block' : 'warn', params: { name: doc.song.name } });
     if (mp4 && doc.look.backdrop === 'clear') items.push({ code: 'clear-mp4', level: 'warn', params: {} });
     if (e.fontsReady === false) items.push({ code: 'fonts-loading', level: 'info', params: {} });
     const inMemory = kit ? !(e.dirAccess === undefined ? e.fsAccess : e.dirAccess) : !e.fsAccess;
-    if (inMemory) {
-      const bytes = memoryBytes(doc, plan, e, range, size, withAudio);
+    if (inMemory || serverAudio && e.songReady !== false) {
+      let bytes = inMemory ? memoryBytes(doc, plan, e, range, size, withAudio) : 0;
+      if (serverAudio && e.songReady !== false) {
+        const seconds = Math.max(0, range.t1 - range.t0), bits = bitrate(w, h, out.fps, out.quality);
+        // The external request holds a silent MP4 and a stereo PCM16 WAV, then receives the AAC MP4. These buffers
+        // are needed even when the finished output is written directly to disk. An in-memory output already counts
+        // the returned main movie (or its Filmora ZIP), so add it only for the direct-to-disk route.
+        bytes += estimateBytes(seconds, bits, false) + WAV.HEADER_BYTES
+          + audioFrames(frameCount(seconds, out.fps), out.fps, WAV_RATE) * 4;
+        if (!inMemory) bytes += estimateBytes(seconds, bits, true, AUDIO_BITRATE);
+      }
       items.push({ code: kit ? 'kit-memory' : 'memory', level: bytes > MEMORY_CONFIRM_BYTES ? 'confirm' : 'warn', params: { bytes } });
     }
     if (kit) {
@@ -51578,7 +51645,7 @@ MV.def('export/schedule', ['core/script', 'core/doc', 'audio/wav', 'media/sample
   return {
     ExportError, QUALITY_LEVELS, QUALITY_BPP, AUDIO_BITRATE, AUDIO_BITRATE_LOW, OPUS_BITRATE, OPUS_BITRATE_LOW, AUDIO_CHUNK, MEMORY_CONFIRM_BYTES, FLASH_PARTS, FLASH_LIMIT, FLASH_SAFE_AMP,
     ALPHA_SHARE, WAV_RATE, KIT_README, KIT_SHORTS, FORMATS,
-    frameCount, ts, frameDur, audioFrames, keyInterval, audioChunkCount, audioChunk, fillPlanar, mixMatrix,
+    frameCount, ts, frameDur, audioFrames, keyInterval, audioChunkCount, audioChunk, fillPlanar, mixMatrix, usesAudioServer, audioEnv,
     outputSize, bitrate, alphaBitrate, estimateBytes, estimateWebmBytes, estimatePngBytes, eta, pickAvc, pickVp9,
     exportRange, backdropFor, renderScale, fileName, frameName, kitOptions, kitBase, kitFolder, kitFiles, layerDiffs,
     flashEvents, flashRate, extremeCuts, preflight,
@@ -54316,6 +54383,268 @@ MV.def('export/host/sink', ['export/schedule'], (S) => {
 
   return { createFileSink, createMemorySink, createDirSink, canStream, canDirectory, openSink, openDirectory, downloadBlob };
 });
+/* 文字PVメーカー v2 — original work. External AAC: frozen silent MP4 + exact original PCM range → configured HTTPS service → original video with AAC 320 kbps. */
+MV.def('export/host/audio_server', ['export/schedule', 'export/host/mp4', 'export/host/sink', 'audio/wav', 'media/isobmff'], (S, J, SINK, WAV, ISO) => {
+  'use strict';
+
+  const SERVICE = 'moji-pv-audio';
+  const VERSION = 1;
+  const TARGET = 320000;
+  const RATE = 48000;
+  const WAV_BLOCK = 1 << 20;          // 4 MB of stereo PCM16 per block; never copy the whole song at once
+  const MULTIPART_MARGIN = 64 * 1024;
+  const PREFIX_LIMIT = ISO.MAX_MOOV + 8192;
+
+  function error(code, detail) { return new S.ExportError('audio-server-' + code, 'external audio conversion ' + code, detail); }
+
+  // HTTPS only. No credentials, query or fragment can silently send a secret to a different place. A path prefix is
+  // allowed for services behind a reverse proxy. Tokens stay in request headers and never enter export metadata.
+  function validateConfig(input) {
+    const raw = input || {};
+    if (typeof raw.url !== 'string' || !raw.url.trim()) throw error('config');
+    let url;
+    try { url = new URL(raw.url.trim()); } catch (err) { throw error('config'); }
+    if (url.protocol !== 'https:' || url.username || url.password || url.href.includes('?') || url.href.includes('#')) throw error('config');
+    const token = raw.token === undefined ? '' : raw.token;
+    if (typeof token !== 'string' || (token && !/^[\x21-\x7e]{1,4096}$/.test(token))) throw error('config');
+    return { url: url.href.replace(/\/+$/, ''), token };
+  }
+
+  function httpError(status) {
+    const kind = status === 401 || status === 403 ? 'auth' : status === 413 ? 'too-large' : status === 422 ? 'media'
+      : status === 429 ? 'busy' : status === 504 ? 'timeout' : 'convert';
+    return error(kind, { status });
+  }
+
+  async function cancelBody(response) {
+    try { if (response && response.body) await response.body.cancel(); } catch (err) { /* already read or closed */ }
+  }
+
+  async function request(config, path, init, fetchImpl) {
+    const opts = Object.assign({ credentials: 'omit', redirect: 'error', referrerPolicy: 'no-referrer', cache: 'no-store' }, init);
+    J.checkAbort(opts.signal);
+    let response;
+    try { response = await (fetchImpl || globalThis.fetch)(config.url + path, opts); }
+    catch (err) {
+      J.checkAbort(opts.signal);
+      if (err && err.name === 'AbortError') throw new S.ExportError('cancelled', 'export cancelled');
+      // A fetch exception or server error may contain an endpoint, token or an internal path. Do not echo it.
+      throw error('network');
+    }
+    if ((opts.signal && opts.signal.aborted) || !response || !response.ok) {
+      await cancelBody(response);
+      J.checkAbort(opts.signal);
+      throw httpError(response ? response.status : 0);
+    }
+    return response;
+  }
+
+  // Health confirms reachability/protocol/limits; authentication is checked only when converting. No song or token is
+  // sent by this check, so opening settings does not disclose media to a configured service.
+  async function check(input, opts) {
+    const config = validateConfig(input), o = opts || {};
+    const response = await request(config, '/health', { signal: o.signal, headers: { Accept: 'application/json' } }, o.fetchImpl);
+    let value;
+    try { value = await response.json(); } catch (err) { J.checkAbort(o.signal); throw error('response'); }
+    J.checkAbort(o.signal);
+    if (!value || value.service !== SERVICE || value.version !== VERSION || value.targetBitrate !== TARGET
+      || !Number.isSafeInteger(value.maxUploadBytes) || value.maxUploadBytes <= MULTIPART_MARGIN) throw error('response');
+    return { service: SERVICE, version: VERSION, targetBitrate: TARGET, maxUploadBytes: value.maxUploadBytes, authChecked: false };
+  }
+
+  function rangeOf(job, song) {
+    if (!job || !Number.isSafeInteger(job.N) || job.N <= 0 || ![24, 30, 60].includes(job.fps)
+      || !Number.isFinite(job.t0) || job.t0 < 0 || !song || song.sampleRate !== RATE
+      || !Number.isSafeInteger(song.numberOfChannels) || song.numberOfChannels <= 0 || typeof song.getChannelData !== 'function') {
+      throw error('media');
+    }
+    const frames = S.audioFrames(job.N, job.fps, RATE);
+    if (!Number.isSafeInteger(frames) || frames * 4 + WAV.HEADER_BYTES > 0xffffffff) throw error('too-large');
+    return { frames, start: Math.round(job.t0 * RATE), bytes: WAV.HEADER_BYTES + frames * 4 };
+  }
+
+  // Same trim, downmix and silence padding as the browser encoder. This is the source PCM, never audio decoded from a
+  // 192 kbps intermediate MP4. The range is N/fps (including the final rendered frame), not the unrounded UI duration.
+  async function audioBlob(song, job, signal) {
+    const range = rangeOf(job, song), channels = J.channelsOf(song);
+    const parts = [WAV.pcm16Header(RATE, range.frames, 2)];
+    for (let from = 0; from < range.frames; from += WAV_BLOCK) {
+      J.checkAbort(signal);
+      parts.push(WAV.pcm16Data(channels, range.start + from, Math.min(WAV_BLOCK, range.frames - from), 2));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    J.checkAbort(signal);
+    return new Blob(parts, { type: 'audio/wav' });
+  }
+
+  function headerNumber(headers, name) {
+    const raw = headers && headers.get(name);
+    return raw && /^\d+$/.test(raw) ? Number(raw) : null;
+  }
+
+  function resultInfo(response, frames) {
+    const headers = response.headers;
+    const type = headers && headers.get('Content-Type');
+    const target = headerNumber(headers, 'X-Audio-Bitrate-Target');
+    const count = headerNumber(headers, 'X-Video-Frames');
+    if (!type || type.split(';')[0].trim().toLowerCase() !== 'video/mp4' || target !== TARGET || count !== frames
+      || headers.get('X-Audio-Codec') !== 'aac') throw error('response');
+    const raw = headers.get('X-Audio-Bitrate-Measured');
+    const measured = raw ? Number(raw) : null;
+    if (raw && (!Number.isFinite(measured) || measured <= 0)) throw error('response');
+    return { audio: true, audioCodec: 'mp4a.40.2', audioBitrate: TARGET, audioBitrateMode: null, audioSource: 'server',
+      audioMeasuredBitrate: measured };
+  }
+
+  function prefixRange(parts, at, length) {
+    const out = new Uint8Array(length);
+    let from = 0, copied = 0;
+    for (const part of parts) {
+      const a = Math.max(0, at - from), b = Math.min(part.byteLength, at + length - from);
+      if (b > a) { out.set(part.subarray(a, b), copied); copied += b - a; }
+      from += part.byteLength;
+      if (copied === length) break;
+    }
+    return out;
+  }
+
+  // The service returns faststart MP4. Validate its bounded metadata prefix before committing any payload to a sink:
+  // a 200 response with correct headers but HTML, a silent file or missing frames cannot masquerade as AAC320 output.
+  // Only the moov/header prefix is copied; the potentially large mdat is streamed without an extra whole-file buffer.
+  async function validPrefix(parts, received, total, job) {
+    let at = 0, ftyp = false, moov = false;
+    while (at + 8 <= received) {
+      const head = prefixRange(parts, at, Math.min(16, received - at)), view = new DataView(head.buffer);
+      let size = view.getUint32(0), header = 8;
+      const type = String.fromCharCode(head[4], head[5], head[6], head[7]);
+      if (size === 1) {
+        if (head.length < 16) return false;
+        size = view.getUint32(8) * 0x100000000 + view.getUint32(12); header = 16;
+      } else if (size === 0) size = total - at;
+      if (!Number.isSafeInteger(size) || size < header || at + size > total) throw error('response');
+      if (at === 0 && type !== 'ftyp') throw error('response');
+      if (type === 'mdat') {
+        if (!ftyp || !moov || at + size !== total) throw error('response');
+        const prefix = prefixRange(parts, 0, at + header);
+        let movie;
+        try {
+          movie = await ISO.parse(async (offset, length) => prefix.subarray(offset, offset + length), total);
+        } catch (err) { throw error('response'); }
+        const videos = movie.tracks.filter((t) => t.kind === 'video'), audios = movie.tracks.filter((t) => t.kind === 'audio');
+        const video = videos[0];
+        if (!video || videos.length !== 1 || audios.length !== 1 || audios[0].fourcc !== 'mp4a'
+          || !['avc1', 'avc3'].includes(video.fourcc) || !video.table || video.table.n !== job.N
+          || Math.abs(video.table.duration - job.N / job.fps) > 2e-5
+          || (job.w && video.w !== job.w) || (job.h && video.h !== job.h)) throw error('response');
+        return true;
+      }
+      if (at + size > PREFIX_LIMIT || (type === 'ftyp' && size > 4096)) throw error('response');
+      if (at + size > received) return false;
+      if (type === 'ftyp') ftyp = true;
+      else if (type === 'moov') { if (moov) throw error('response'); moov = true; }
+      else if (type !== 'free' && type !== 'wide') throw error('response');
+      at += size;
+    }
+    return false;
+  }
+
+  async function intoSink(response, sink, signal, job) {
+    const expected = headerNumber(response.headers, 'Content-Length');
+    let bytes = 0, reader = null, validated = false;
+    let prefix = [];
+    try {
+      if (response.body && typeof response.body.getReader === 'function') {
+        reader = response.body.getReader();
+        while (true) {
+          J.checkAbort(signal);
+          const item = await reader.read();
+          J.checkAbort(signal);
+          if (item.done) break;
+          if (item.value && item.value.byteLength) {
+            bytes += item.value.byteLength;
+            if (!expected || bytes > expected) throw error('response');
+            if (!validated) {
+              prefix.push(item.value);
+              validated = await validPrefix(prefix, bytes, expected, job);
+              if (validated) { for (const part of prefix) await sink.write(part); prefix = []; }
+            } else await sink.write(item.value);
+          }
+        }
+      } else {
+        const blob = await response.blob();
+        J.checkAbort(signal);
+        bytes = blob.size;
+        const metadata = new Uint8Array(await blob.slice(0, PREFIX_LIMIT).arrayBuffer());
+        validated = bytes > 0 && await validPrefix([metadata], metadata.length, bytes, job);
+        if (validated) await sink.write(blob);
+      }
+      if (!validated || !bytes || (expected !== null && expected !== bytes)) throw error('response');
+      J.checkAbort(signal);
+      return await sink.close();
+    } catch (err) {
+      J.checkAbort(signal);
+      if (err instanceof S.ExportError) throw err;
+      throw error('network');
+    } finally {
+      if (reader) {
+        try { await reader.cancel(); } catch (err) { /* network is already closed */ }
+        try { reader.releaseLock(); } catch (err) { /* already released */ }
+      }
+    }
+  }
+
+  // Converts a completed silent MP4 without rendering or encoding its video again. On error/cancel no lower bitrate
+  // is substituted. The caller owns sink.abort(): standalone export aborts its file; a kit aborts the whole folder.
+  async function convert(opts) {
+    const o = opts || {}, config = validateConfig(o.audioServer);
+    if (!config.token) throw error('auth');
+    if (!(o.video instanceof Blob) || !o.video.size) throw error('media');
+    const range = rangeOf(o.job, o.audio);
+    if (o.onProgress) o.onProgress({ phase: 'audioServer', i: 0, N: 0, eta: null });
+    const health = o.health || await check(config, { signal: o.signal, fetchImpl: o.fetchImpl });
+    if (o.video.size + range.bytes + MULTIPART_MARGIN > health.maxUploadBytes) throw error('too-large');
+    const pcm = await audioBlob(o.audio, o.job, o.signal);
+    const body = new FormData();
+    body.append('video', o.video, 'video.mp4');
+    body.append('audio', pcm, 'audio.wav');
+    body.append('frames', String(o.job.N));
+    body.append('fps', String(o.job.fps));
+    const response = await request(config, '/v1/convert', { method: 'POST', signal: o.signal, body,
+      headers: { Authorization: 'Bearer ' + config.token, Accept: 'video/mp4' } }, o.fetchImpl);
+    let info;
+    try { info = resultInfo(response, o.job.N); }
+    catch (err) { await cancelBody(response); throw err; }
+    const done = await intoSink(response, o.sink, o.signal, o.job);
+    return Object.assign({}, done, info);
+  }
+
+  // Standalone server-audio MP4: one silent browser encode, then upload the original exact PCM range. Inputs are
+  // captured by the export caller. No-song/audio-off exports use the normal local path without any server request.
+  async function exportVideo(opts) {
+    const o = opts || {}, song = o.audio && o.doc.output.audio ? o.audio : null;
+    if (!song) return J.exportVideo(o);
+    const started = performance.now(), temporary = SINK.createMemorySink({ name: 'video.mp4', type: 'video/mp4' });
+    try {
+      const config = validateConfig(o.audioServer);
+      if (!config.token) throw error('auth');
+      const health = await check(config, { signal: o.signal, fetchImpl: o.fetchImpl });
+      const local = await J.exportVideo(Object.assign({}, o, { audio: null, sink: temporary }));
+      const plan = o.engine.plan;
+      if (!plan) throw new S.ExportError('no-plan', 'the engine has no plan');
+      const range = S.exportRange(o.doc, plan);
+      const size = S.outputSize(plan.design.aspect, o.doc.output.short);
+      const done = await convert({ video: local.blob, audio: song, job: { t0: range.t0, N: local.frames, fps: o.doc.output.fps, w: size.w, h: size.h },
+        sink: o.sink, audioServer: config, health, signal: o.signal, onProgress: o.onProgress, fetchImpl: o.fetchImpl });
+      return Object.assign({}, local, done, { blob: done.blob, name: o.sink.name || S.fileName(o.doc, 'mp4'), ms: performance.now() - started });
+    } catch (err) {
+      await o.sink.abort();
+      await temporary.abort();
+      throw J.exportFailure(err, o.signal, null);
+    }
+  }
+
+  return { validateConfig, check, convert, exportVideo, audioBlob, TARGET, MULTIPART_MARGIN };
+});
 /* 文字PVメーカー v2 — original work. Transparent WebM export: engine fork → RGBA frames → two VP9 encoders (colour, alpha as luma) → export/webm with Opus → sink (DESIGN_2_1 §13.5). */
 MV.def('export/host/webm', ['export/schedule', 'export/webm', 'export/host/mp4'], (S, W, J) => {
   'use strict';
@@ -54532,7 +54861,7 @@ MV.def('export/host/webm', ['export/schedule', 'export/webm', 'export/host/mp4']
 });
 /* 文字PVメーカー v2 — original work. The Filmora kit: one pass over the timeline writes the main MP4, the transparent overlay, the background and green-screen MP4s, the song WAV, SRT, LRC and a README into a folder or one ZIP (DESIGN_2_1 §13.9). */
 MV.def('export/host/kit', ['export/schedule', 'export/subtitles', 'export/zip', 'export/host/mp4', 'export/host/webm',
-  'export/host/sink', 'audio/wav', 'core/commands', 'i18n/t', 'i18n/strings'], (S, SUB, Z, J, WH, SINK, WAV, C, T, STRINGS) => {
+  'export/host/sink', 'export/host/audio_server', 'audio/wav', 'core/commands', 'i18n/t', 'i18n/strings'], (S, SUB, Z, J, WH, SINK, AS, WAV, C, T, STRINGS) => {
   'use strict';
 
   const KEY_COLOUR = '#00B140';         // the green screen's key colour (D§4.19.4 `chroma`)
@@ -54714,6 +55043,7 @@ MV.def('export/host/kit', ['export/schedule', 'export/subtitles', 'export/zip', 
     const jobs = [];
     const outputs = [];
     const say = (p) => { if (o.onProgress) o.onProgress(p); };
+    let temporaryMain = null;
     try {
       const jobA = await J.openJob({ engine: o.engine, doc, format: 'kit', canvas: o.canvas, assets: store });
       jobs.push(jobA);
@@ -54729,8 +55059,12 @@ MV.def('export/host/kit', ['export/schedule', 'export/subtitles', 'export/zip', 
       const bits = S.bitrate(w, h, fps, doc.output.quality);
       const main = await J.videoConfig(o.codecs, jobA, bits);
       const song = o.audio && doc.output.audio && doc.song ? o.audio : null;
-      const acfg = song ? await J.audioConfig(o.codecs, song, kitAudioList(o.codecs)) : null;
-      const files = S.kitFiles(doc, jobA.plan, { audioCodec: acfg ? acfg.codec : null, audioBitrate: acfg ? acfg.bitrate : null, songReady: !!song });
+      const server = song && o.audioServer ? AS.validateConfig(o.audioServer) : null;
+      if (server && !server.token) throw new S.ExportError('audio-server-auth', 'external audio conversion auth');
+      const health = server ? await AS.check(server, { signal: o.signal, fetchImpl: o.fetchImpl }) : null;
+      const acfg = song && !server ? await J.audioConfig(o.codecs, song, kitAudioList(o.codecs)) : null;
+      const files = S.kitFiles(doc, jobA.plan, { audioCodec: server ? 'mp4a.40.2' : acfg ? acfg.codec : null,
+        audioBitrate: server ? AS.TARGET : acfg ? acfg.bitrate : null, songReady: !!song });
       const fileOf = (kind) => files.find((f) => f.kind === kind) || null;
       let overlay = null;
       if (kit.overlay) {
@@ -54742,7 +55076,8 @@ MV.def('export/host/kit', ['export/schedule', 'export/subtitles', 'export/zip', 
 
       // one output per video file: its job (engine fork), surface, render options and encoder
       const add = async (kind, job, surface, ropts, make) => {
-        const sink = await target.file(fileOf(kind).name, kind);
+        const sink = server && kind === 'main'
+          ? (temporaryMain = SINK.createMemorySink({ name: 'video.mp4', type: 'video/mp4' })) : await target.file(fileOf(kind).name, kind);
         outputs.push({ kind, job, surface, ropts, out: make(sink) });
       };
       await add('main', jobA, jobA.surface, jobA.ropts, (sink) => J.createMp4Output({ lib, sink, job: jobA, vcfg: main, acfg, song }));
@@ -54774,6 +55109,13 @@ MV.def('export/host/kit', ['export/schedule', 'export/subtitles', 'export/zip', 
       J.checkAbort(o.signal);
       const written = new Map();
       for (const x of outputs) written.set(x.kind, await x.out.end());
+      let serverAudio = null;
+      if (server) {
+        const silent = written.get('main');
+        serverAudio = await AS.convert({ video: silent.blob, audio: song, job: jobA, sink: await target.file(fileOf('main').name, 'main'),
+          audioServer: server, health, signal: o.signal, onProgress: say, fetchImpl: o.fetchImpl });
+        written.set('main', serverAudio);
+      }
 
       say({ i: jobA.N, N: jobA.N, eta: 0, phase: 'files' });
       const wav = fileOf('wav');
@@ -54787,12 +55129,13 @@ MV.def('export/host/kit', ['export/schedule', 'export/subtitles', 'export/zip', 
       J.checkAbort(o.signal);
 
       const list = files.map((f) => ({ name: f.name, kind: f.kind, bytes: written.get(f.kind).bytes }));
-      const result = { files: list, audio: acfg ? 'aac' : wav ? 'wav' : 'none', frames: jobA.N, folder: target.folder,
-        codec: main.codec, overlayCodec: overlay ? overlay.codec : null, audioCodec: acfg ? acfg.codec : wav ? 'pcm-s16le' : null,
-        audioBitrate: acfg ? acfg.bitrate : wav ? song.sampleRate * 2 * 16 : null,
-        audioBitrateMode: acfg ? acfg.bitrateMode || null : wav ? 'constant' : null,
+      const result = { files: list, audio: server ? 'aac' : acfg ? 'aac' : wav ? 'wav' : 'none', frames: jobA.N, folder: target.folder,
+        codec: main.codec, overlayCodec: overlay ? overlay.codec : null, audioCodec: server ? serverAudio.audioCodec : acfg ? acfg.codec : wav ? 'pcm-s16le' : null,
+        audioBitrate: server ? serverAudio.audioBitrate : acfg ? acfg.bitrate : wav ? song.sampleRate * 2 * 16 : null,
+        audioBitrateMode: server ? null : acfg ? acfg.bitrateMode || null : wav ? 'constant' : null,
         acceleration: outputs[0].out.acceleration,
         accelerationByOutput: Object.fromEntries(outputs.map((x) => [x.kind, x.out.acceleration])) };
+      if (server) { result.audioSource = 'server'; result.audioMeasuredBitrate = serverAudio.audioMeasuredBitrate; }
       if (target.dir) {
         await target.dir.close();
         result.folder = target.dir.name;
@@ -54809,6 +55152,7 @@ MV.def('export/host/kit', ['export/schedule', 'export/subtitles', 'export/zip', 
     } catch (err) {
       for (const x of outputs) x.out.close();
       await target.abort();
+      if (temporaryMain) await temporaryMain.abort();
       const failure = outputs.map((x) => x.out.failure).find(Boolean);
       throw J.exportFailure(err, o.signal, failure);
     } finally {
@@ -56997,6 +57341,202 @@ MV.def('ui/ai_thinking', ['ui/dom'], (dom) => {
   }
 
   return { orb, mountHud, STAGES };
+});
+/* 文字PVメーカー v2 — original work. Device-local audio server URL and tab-only credentials; health checks run only on request. */
+MV.def('ui/audio_server_settings', ['ui/dom'], (dom) => {
+  'use strict';
+
+  const URL_KEY = 'mojipv.audioServer.url';
+  const TOKEN_KEY = 'mojipv.audioServer.token';
+  const settings = new WeakMap();
+  const ERROR_KEYS = Object.freeze({
+    'audio-server-config': 'exp.server.configError', 'audio-server-network': 'exp.server.networkError',
+    'audio-server-timeout': 'exp.server.timeout', 'audio-server-response': 'exp.server.responseError',
+  });
+
+  function storageOf(kind) {
+    try { return globalThis[kind] || null; } catch (err) { return null; }
+  }
+
+  function read(storage, key) {
+    try { return storage && storage.getItem(key) || ''; } catch (err) { return ''; }
+  }
+
+  function write(storage, key, value) {
+    if (!storage) return false;
+    try {
+      if (value) storage.setItem(key, value); else storage.removeItem(key);
+      return true;
+    } catch (err) { return false; }
+  }
+
+  // Invalid URLs stay in the current input so they can be corrected, but are never saved or used for a check.
+  function safeURL(value) {
+    try {
+      const url = new URL(value);
+      return url.protocol === 'https:' && !!url.hostname && !url.username && !url.password
+        && !value.includes('?') && !value.includes('#');
+    } catch (err) { return false; }
+  }
+
+  function dataOf(app, options) {
+    if (settings.has(app)) return settings.get(app);
+    const opts = options || {};
+    const local = opts.local === undefined ? storageOf('localStorage') : opts.local;
+    const session = opts.session === undefined ? storageOf('sessionStorage') : opts.session;
+    const savedURL = read(local, URL_KEY).trim();
+    const data = { local, session, url: safeURL(savedURL) ? savedURL : '', token: read(session, TOKEN_KEY).trim(),
+      revision: 0, urlStoreError: false, tokenStoreError: false, listeners: new Set() };
+    if (savedURL && !safeURL(savedURL)) write(local, URL_KEY, '');
+    settings.set(app, data);
+    return data;
+  }
+
+  function getConfig(app) {
+    const data = dataOf(app);
+    return { url: data.url, token: data.token };
+  }
+
+  // Injectable stores keep this controller testable without a browser or network. Secrets never enter app.doc.
+  function createController(app, options) {
+    const opts = options || {};
+    const data = dataOf(app, opts);
+    let state = { phase: 'idle', note: null, health: null };
+    let request = null, dead = false;
+
+    function emit(next) {
+      state = next;
+      if (!dead && opts.onChange) opts.onChange(state);
+    }
+
+    function cancel(note) {
+      if (request) { request.abort.abort(); request = null; }
+      emit({ phase: 'idle', note: note || 'exp.server.changed', health: null });
+    }
+
+    function changed() { cancel('exp.server.changed'); }
+    data.listeners.add(changed);
+
+    function setConfig(patch) {
+      if (dead) return false;
+      let modified = false;
+      for (const field of ['url', 'token']) {
+        if (!Object.prototype.hasOwnProperty.call(patch, field)) continue;
+        const value = typeof patch[field] === 'string' ? patch[field].trim() : '';
+        if (data[field] === value) continue;
+        data[field] = value;
+        if (field === 'url') data.urlStoreError = !write(data.local, URL_KEY, safeURL(value) ? value : '');
+        else data.tokenStoreError = !write(data.session, TOKEN_KEY, value);
+        modified = true;
+      }
+      if (!modified) return false;
+      data.revision += 1;
+      for (const listener of [...data.listeners]) listener();
+      if (app.bus && app.bus.emit) app.bus.emit('audio.server');
+      return true;
+    }
+
+    async function check() {
+      if (dead || request || app.exporting) return false;
+      const client = app.svc.exporter.audioServer;
+      let config;
+      const values = getConfig(app);
+      if (!safeURL(values.url)) { emit({ phase: 'error', note: 'exp.server.configError', health: null }); return false; }
+      try { config = client.validateConfig(values); }
+      catch (err) {
+        emit({ phase: 'error', note: err && err.code === 'audio-server-config' ? 'exp.server.tokenError'
+          : ERROR_KEYS[err && err.code] || 'exp.server.error', health: null });
+        return false;
+      }
+      const item = { abort: new AbortController(), revision: data.revision };
+      request = item;
+      emit({ phase: 'checking', note: 'exp.server.checking', health: null });
+      try {
+        const health = await client.check(config, { signal: item.abort.signal });
+        if (dead || request !== item || item.abort.signal.aborted || data.revision !== item.revision) return false;
+        request = null;
+        emit({ phase: 'ready', note: 'exp.server.ready', health });
+        return true;
+      } catch (err) {
+        if (dead || request !== item || item.abort.signal.aborted || data.revision !== item.revision) return false;
+        request = null;
+        emit({ phase: err && err.code === 'cancelled' ? 'idle' : 'error',
+          note: err && err.code === 'cancelled' ? 'exp.server.changed' : ERROR_KEYS[err && err.code] || 'exp.server.error', health: null });
+        return false;
+      }
+    }
+
+    function destroy() {
+      if (dead) return;
+      dead = true;
+      if (request) { request.abort.abort(); request = null; }
+      data.listeners.delete(changed);
+    }
+
+    return { get state() { return state; }, get busy() { return !!request; },
+      get persistence() { return { urlFailed: data.urlStoreError, tokenFailed: data.tokenStoreError }; },
+      getConfig: () => getConfig(app), setConfig, check, cancel, destroy };
+  }
+
+  function mount(app) {
+    const { h } = dom;
+    const t = app.t;
+    const url = h('input', { type: 'url', class: 'text-input', autocomplete: 'off', spellcheck: false,
+      'aria-label': t('exp.server.url'), 'data-audio-server': 'url' });
+    const token = h('input', { type: 'password', class: 'text-input', autocomplete: 'off', spellcheck: false,
+      'aria-label': t('exp.server.token'), 'data-audio-server': 'token' });
+    const check = h('button', { type: 'button', class: 'btn quiet', 'data-act': 'audio-server.check', text: t('exp.server.check') });
+    const status = h('p', { class: 'note audio-server-status', role: 'status', 'aria-live': 'polite' });
+    const emptyToken = h('p', { class: 'note subtle audio-server-token-empty', text: t('exp.server.tokenEmpty') });
+    const urlWarning = h('p', { class: 'note audio-server-storage-warning', hidden: true, text: t('exp.server.urlNotSaved') });
+    const tokenWarning = h('p', { class: 'note audio-server-storage-warning', hidden: true, text: t('exp.server.tokenNotSaved') });
+    const root = h('div', { class: 'audio-server-settings' },
+      h('label', { class: 'field' }, h('span', { class: 'field-label', text: t('exp.server.url') }), url,
+        h('span', { class: 'note subtle', text: t('exp.server.storage') }), urlWarning),
+      h('label', { class: 'field' }, h('span', { class: 'field-label', text: t('exp.server.token') }), token,
+        h('span', { class: 'note subtle', text: t('exp.server.tokenStorage') }), tokenWarning), emptyToken, check, status);
+    let controller = null;
+
+    function render() {
+      if (!controller) return;
+      const config = controller.getConfig();
+      const state = controller.state;
+      root.dataset.audioServerState = state.phase;
+      if (document.activeElement !== url) url.value = config.url;
+      if (document.activeElement !== token) token.value = config.token;
+      const busy = !!app.exporting;
+      url.disabled = token.disabled = busy;
+      check.disabled = busy || controller.busy || !safeURL(config.url);
+      emptyToken.hidden = !!config.token;
+      urlWarning.hidden = !controller.persistence.urlFailed;
+      tokenWarning.hidden = !controller.persistence.tokenFailed;
+      const note = !config.url ? 'exp.server.urlEmpty' : !safeURL(config.url) ? 'exp.server.configError' : state.note;
+      status.textContent = note ? t(note) : '';
+    }
+
+    controller = createController(app, { onChange: render });
+    url.addEventListener('input', () => controller.setConfig({ url: url.value }));
+    token.addEventListener('input', () => controller.setConfig({ token: token.value }));
+    url.addEventListener('change', render);
+    token.addEventListener('change', render);
+    check.addEventListener('click', () => { controller.check(); });
+    check.addEventListener('keydown', (ev) => {
+      if (!ev.ctrlKey && !ev.metaKey && !ev.altKey && [' ', 'Spacebar', 'Enter'].includes(ev.key)) ev.stopPropagation();
+    });
+    let exporting = !!app.exporting;
+    const offExport = app.bus && app.bus.on ? app.bus.on('export', () => {
+      const next = !!app.exporting;
+      if (next !== exporting) { exporting = next; render(); }
+    }) : null;
+    const offView = app.view && typeof app.view.on === 'function' ? app.view.on((changed, state) => {
+      if (changed.includes('step') && state.step !== 'export' && controller.busy) controller.cancel();
+    }) : null;
+    render();
+    return { root, controller, update() { if (root.hidden && controller.busy) controller.cancel(); else render(); },
+      destroy() { if (offExport) offExport(); if (offView) offView(); controller.destroy(); } };
+  }
+
+  return { URL_KEY, TOKEN_KEY, getConfig, createController, mount };
 });
 /* 文字PVメーカー v2 — original work. カメラ EXTREME in the editor: the switch's flow (the motion-sickness notice, the turn-off question), what is on where, and the notice before an EXTREME move is picked by hand (DESIGN_EXTREME §2.6, §3.5). */
 MV.def('ui/extreme', ['ui/dom', 'core/pins', 'core/paths', 'core/shot', 'planner/extreme', 'planner/areas'],
@@ -60793,6 +61333,7 @@ MV.def('ui/output', ['export/schedule', 'engine/scene/frame'], (S, F) => {
   // H.264 encoder its own text (the MP4s of the set cannot be made here; no PNG sequence is offered).
   function checkKey(item) {
     if (item.code === 'no-h264' && item.params && item.params.format === 'kit') return 'exp.pre.kit-no-h264';
+    if (item.code === 'song-missing' && item.level === 'block') return 'exp.pre.audio-server-song-missing';
     return 'exp.pre.' + item.code;
   }
 
@@ -60818,10 +61359,10 @@ MV.def('ui/output', ['export/schedule', 'engine/scene/frame'], (S, F) => {
   //   Filmora用  exp.kit.summary { n: files, bytes: Σ kitFiles estimates, where: 'folder' | 'zip' } (§13.10)
   //   others     exp.summary { w, h, fps, seconds, bytes, where: 'disk' | 'memory' }
   function summary(doc, plan, env) {
-    const e = env || {};
+    const e = S.audioEnv(doc, env);
     const o = doc.output;
     if (o.format === 'kit') {
-      const files = S.kitFiles(doc, plan, { audioCodec: e.audioCodec, songReady: e.songReady });
+      const files = S.kitFiles(doc, plan, e);
       return { key: 'exp.kit.summary', params: { n: files.length, bytes: files.reduce((sum, f) => sum + f.est, 0),
         where: e.dirAccess ? 'folder' : 'zip' } };
     }
@@ -60853,7 +61394,7 @@ MV.def('ui/output', ['export/schedule', 'engine/scene/frame'], (S, F) => {
   // The probed encoder setting (a target bitrate, not a measurement of the finished file). Unknown support shows
   // the preferred rate until the probe completes; format-specific probes keep MP4 AAC and WebM Opus separate.
   function audioInfo(doc, env) {
-    const e = env || {}, o = doc.output;
+    const e = S.audioEnv(doc, env), o = doc.output;
     if (!hasSound(o.format)) return { state: 'image' };
     if (!o.audio) return { state: 'off' };
     if (!doc.song) return { state: 'no-song' };
@@ -60865,7 +61406,8 @@ MV.def('ui/output', ['export/schedule', 'engine/scene/frame'], (S, F) => {
     if (codec === null) return { state: 'unavailable' };
     if (codec === undefined || !(bitrate > 0)) return { state: 'checking', preferred: S.AUDIO_BITRATE };
     const mode = webm ? e.webmAudioBitrateMode : e.audioBitrateMode;
-    return { state: 'ready', codec, bitrate, mode: mode || null, preferred: S.AUDIO_BITRATE, fallback: bitrate < S.AUDIO_BITRATE };
+    return { state: 'ready', codec, bitrate, mode: mode || null, preferred: S.AUDIO_BITRATE, fallback: bitrate < S.AUDIO_BITRATE,
+      ...(e.audioSource ? { source: e.audioSource } : {}) };
   }
 
   // kitLabel(kind) → the key that names a file of the set (step ④'s done list, the guide), or null (none for a kind
@@ -60876,8 +61418,7 @@ MV.def('ui/output', ['export/schedule', 'engine/scene/frame'], (S, F) => {
   // the song's WAV where the browser cannot put the song into the MP4, and the README. 詳しく lists them under the
   // checkboxes, so its rows add up to the summary line's count. env = { audioCodec, songReady } as for kitFiles.
   function kitAlways(doc, plan, env) {
-    const e = env || {};
-    return S.kitFiles(doc, plan, { audioCodec: e.audioCodec, songReady: e.songReady }).map((f) => f.kind)
+    return S.kitFiles(doc, plan, S.audioEnv(doc, env)).map((f) => f.kind)
       .filter((kind) => kind === 'wav' || kind === 'readme');
   }
 
@@ -60914,6 +61455,11 @@ MV.def('ui/output', ['export/schedule', 'engine/scene/frame'], (S, F) => {
     cancelled: 'err.exp.cancelled', sink: 'err.exp.sink', 'range-empty': 'exp.pre.range-empty',
     'no-webcodecs': 'exp.pre.no-webcodecs', 'no-codec': 'err.exp.codec', codec: 'err.exp.codec', 'no-plan': 'err.exp.noPlan',
     media: 'err.exp.media', 'no-vp9': 'exp.pre.no-vp9',
+    'audio-server-config': 'err.exp.audioServerConfig', 'audio-server-auth': 'err.exp.audioServerAuth',
+    'audio-server-network': 'err.exp.audioServerNetwork', 'audio-server-too-large': 'err.exp.audioServerTooLarge',
+    'audio-server-response': 'err.exp.audioServerResponse', 'audio-server-media': 'err.exp.audioServerMedia',
+    'audio-server-busy': 'err.exp.audioServerBusy', 'audio-server-timeout': 'err.exp.audioServerTimeout',
+    'audio-server-convert': 'err.exp.audioServerConvert',
   });
   function errorKey(code) { return ERROR_KEYS[code] || 'err.exp.encode'; }
 
@@ -60930,6 +61476,7 @@ MV.def('ui/output', ['export/schedule', 'engine/scene/frame'], (S, F) => {
     FORMATS, MAIN_FORMATS, OTHER_FORMATS, BACKDROPS, KIT_KEYS, ERROR_KEYS, isAlpha, formatCmds, transparentOf, opaqueOf,
     backdropCmds, clearLabel, backdropChoices, backdropNote, effectiveBackdrop, consistent, skipOf, usedFilters, skippedFilters,
     checks, kitCmd, withFixes, fixLabel, checkKey, layersWhat, listText, summary, qualityOptions, audioInfo,
+    usesAudioServer: S.usesAudioServer, audioEnv: S.audioEnv,
     kitLabel, kitAlways, shownChecks, hasSound, speedProfile, speedCmds,
     mergeFonts, errorKey, errorParams,
   };
@@ -69362,8 +69909,8 @@ MV.def('ui/stage', ['ui/dom', 'ui/selection', 'ui/output', 'i18n/t', 'ui/shot_ed
   return { mount, lookAhead, LOOK_AHEAD };
 });
 /* 文字PVメーカー v2 — original work. Step ④ 書き出し: settings, the Filmora set's contents, preflight with jump links, progress, cancel, done (DESIGN §6.4.3, §4.21; DESIGN_2_1 §13.10). */
-MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 'ui/export_quality_preview', 'export/schedule', 'i18n/t'],
-  (dom, I, OUT, HELP, PREVIEW, SCH, T) => {
+MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 'ui/export_quality_preview', 'ui/audio_server_settings', 'export/schedule', 'i18n/t'],
+  (dom, I, OUT, HELP, PREVIEW, SERVER_SETTINGS, SCH, T) => {
   'use strict';
 
   const { h } = dom;
@@ -69425,6 +69972,10 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
     const qualityHelp = h('p', { class: 'note subtle exp-note', 'data-note': 'quality-estimate', text: t('exp.qualityHelp') });
     const losslessNote = h('p', { class: 'note subtle exp-note', 'data-note': 'quality-lossless', hidden: true, text: t('exp.qualityLossless') });
     const qualityPreview = PREVIEW.mount(app);
+    const audioEncoding = seg('audioEncoding', t('exp.audioEncoding'));
+    const audioEncodingHint = h('p', { class: 'note subtle exp-note', 'data-note': 'audio-encoding' });
+    const serverSettings = SERVER_SETTINGS.mount(app);
+    const audioEncodingField = field(t('exp.audioEncoding'), [audioEncoding, audioEncodingHint, serverSettings.root], 'audioEncoding');
     const audioQuality = h('p', { class: 'note subtle exp-note', 'data-note': 'audio-quality' });
     const audio = h('input', { type: 'checkbox', id: 'exp-audio' });
     const name = h('input', { class: 'text-input', type: 'text', 'aria-label': t('exp.name'), spellcheck: false });
@@ -69467,7 +70018,7 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
       field(t('exp.fps'), [fps, speedPreset, speedHint], 'fps'), accelerationField,
       field(t('exp.backdrop'), [backdrop, alphaNote, chromaNote], 'backdrop'),
       field(t('exp.qualityCompare'), [quality, qualityHelp, losslessNote, qualityPreview.root], 'quality'),
-      audioQuality, more, summary, folderHint, checks);
+      audioEncodingField, audioQuality, more, summary, folderHint, checks);
     const running = h('div', { class: 'exp-running', hidden: true });
     // Said to screen readers: the Filmora set's phase and the end of an export (the progress bar says the numbers).
     const said = h('div', { class: 'sr-only exp-said', role: 'status', 'aria-live': 'polite' });
@@ -69496,6 +70047,7 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
       else if (which === 'fps') setOut('fps', Number(v));
       else if (which === 'quality') setOut('quality', v);
       else if (which === 'acceleration') setOut('acceleration', v);
+      else if (which === 'audioEncoding') setOut('audioEncoding', v);
       else if (which === 'range') chooseRange(v);
     });
     otherFormat.addEventListener('change', () => { if (otherFormat.value) setFormat(otherFormat.value); });
@@ -69537,7 +70089,7 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
         if (why) b.title = why; else b.removeAttribute('title');
         const text = label(v);
         if (b.textContent !== text) b.textContent = text;
-        if (on) stop = i;
+        if (on && !why) stop = i;
       });
       const first = stop >= 0 ? stop : buttons.findIndex((b) => !b.disabled);
       buttons.forEach((b, i) => { b.tabIndex = i === first ? 0 : -1; });
@@ -69559,13 +70111,16 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
     // What the Filmora set holds depends on the audio codec the browser has (AAC, else a WAV file) and the song.
     function kitEnv() {
       const probe = app.exportProbe ? app.exportProbe() || {} : {};
-      return { audioCodec: probe.audioCodec, audioBitrate: probe.audioBitrate, audioBitrateMode: probe.audioBitrateMode,
+      return OUT.audioEnv(app.doc, { audioCodec: probe.audioCodec, audioBitrate: probe.audioBitrate, audioBitrateMode: probe.audioBitrateMode,
         webmAudioCodec: probe.webmAudioCodec, webmAudioBitrate: probe.webmAudioBitrate, webmAudioBitrateMode: probe.webmAudioBitrateMode,
-        songReady: !!app.doc.song && app.songReady() };
+        songReady: !!app.doc.song && app.songReady() });
     }
 
     function audioText(info) {
       if (info.state !== 'ready') return t('exp.audioQuality.' + info.state, { rate: Math.round((info.preferred || SCH.AUDIO_BITRATE) / 1000) });
+      if (info.source === 'server') return t(Number.isFinite(info.measured) && info.measured > 0
+        ? 'exp.audioQuality.serverMeasured' : 'exp.audioQuality.server', { kbps: Math.round(info.bitrate / 1000),
+          measured: Math.round((info.measured || 0) / 1000) });
       const codec = info.codec === 'mp4a.40.2' ? 'AAC' : info.codec === 'opus' ? 'Opus' : info.codec;
       const label = t('exp.audioQuality.ready', { codec, rate: Math.round(info.bitrate / 1000),
         mode: t(info.mode === 'constant' ? 'exp.audioQuality.constant' : 'exp.audioQuality.target') });
@@ -69605,7 +70160,8 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
       if (!result.audioCodec || !(result.audioBitrate > 0)) return null;
       return h('p', { class: 'note subtle', 'data-note': 'audio-written', text: result.audioCodec === 'pcm-s16le'
         ? t('exp.audioQuality.wav') : audioText({ state: 'ready', codec: result.audioCodec, bitrate: result.audioBitrate,
-          mode: result.audioBitrateMode, preferred: SCH.AUDIO_BITRATE, fallback: result.audioBitrate < SCH.AUDIO_BITRATE }) });
+          mode: result.audioBitrateMode, source: result.audioSource, measured: result.audioMeasuredBitrate,
+          preferred: SCH.AUDIO_BITRATE, fallback: result.audioBitrate < SCH.AUDIO_BITRATE }) });
     }
 
     function accelerationText(info) {
@@ -69711,6 +70267,13 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
       accelerationHint.textContent = accelerationText(hint) + ' ' + t('exp.acceleration.help', {
         n: Math.max(1, Math.floor(navigator.hardwareConcurrency || 1)) });
       accelerationHint.dataset.selected = hint ? hint.selected : '';
+      const audioEligible = o.format === 'mp4' || o.format === 'kit';
+      audioEncodingField.hidden = !audioEligible;
+      fillSeg(audioEncoding, ['browser', 'server'], o.audioEncoding || 'browser', (v) => t('exp.audioEncoding.' + v),
+        (v) => v === 'server' && (!o.audio || !app.doc.song) ? t('exp.audioEncoding.needsAudio') : '');
+      audioEncodingHint.textContent = t(!o.audio || !app.doc.song ? 'exp.audioEncoding.needsAudio' : 'exp.audioEncoding.help');
+      serverSettings.root.hidden = !audioEligible || o.audioEncoding !== 'server';
+      serverSettings.update();
       // 透明 makes the output transparent (透過動画, or 透過PNG from a PNG sequence); Filmora用 does not offer it
       // (ui/output.backdropChoices: the set would be lost on the way back).
       dom.replace(backdrop, OUT.backdropChoices(o.format, app.doc.look.backdrop).map((b) => h('option', {
@@ -69782,7 +70345,7 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
         title: h('div', { class: 'exp-title' }),
         phase: h('div', { class: 'exp-phase', hidden: true }),         // the Filmora set: 動画 → 曲・字幕・説明 → ZIP (also said)
         fill: h('div', { class: 'progress-bar' }),
-        frames: h('span'), percent: h('span'), left: h('div', { class: 'muted' }), part: undefined,
+        frames: h('span'), percent: h('span'), left: h('div', { class: 'muted' }), part: undefined, progressPhase: undefined,
       };
       v.bar = h('div', { class: 'progress big', role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': '100',
         'aria-label': t('exp.progressLabel') }, v.fill);
@@ -69794,19 +70357,31 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
 
     function showRunning(st) {
       const now = performance.now();
+      const external = st.phase === 'audioServer' || st.part === 'audioServer' || st.progressPhase === 'audioServer';
       const fresh = !runView || !running.contains(runView.title);
       if (fresh) runView = runningView();
-      else if (st.part === runView.part && st.i < st.N && now - lastRun < RUN_UPDATE_MS) return;
+      else if (st.part === runView.part && external === runView.progressPhase && st.i < st.N && now - lastRun < RUN_UPDATE_MS) return;
       lastRun = now;
       const v = runView;
       const pct = st.N ? Math.floor(st.i / st.N * 100) : 0;
       const sz = SCH.outputSize(app.doc.look.aspect, st.short || app.doc.output.short);
       v.title.textContent = t('exp.running', { h: Math.min(sz.w, sz.h), fps: st.fps || app.doc.output.fps });
-      const phase = st.part ? t('exp.kit.phase', { what: t('exp.kit.what.' + st.part) }) : '';
-      if (st.part !== v.part) {
+      const phase = external ? t('exp.serverProgress.audioServer') : st.part ? t('exp.kit.phase', { what: t('exp.kit.what.' + st.part) }) : '';
+      if (st.part !== v.part || external !== v.progressPhase) {
         v.part = st.part;
-        v.phase.hidden = !st.part;
-        if (st.part) { v.phase.dataset.part = st.part; v.phase.textContent = phase; said.textContent = phase; }
+        v.progressPhase = external;
+        v.phase.hidden = !phase;
+        if (phase) { v.phase.dataset.part = external ? 'audioServer' : st.part; v.phase.textContent = phase; said.textContent = phase; }
+      }
+      v.bar.classList.toggle('is-indeterminate', external);
+      v.frames.hidden = external; v.percent.hidden = external;
+      if (external) {
+        v.bar.removeAttribute('aria-valuenow');
+        v.bar.setAttribute('aria-valuetext', phase);
+        dom.setStyle(v.fill, { width: '35%' });
+        v.frames.textContent = ''; v.percent.textContent = '';
+        v.left.textContent = t('exp.serverProgress.wait');
+        return;
       }
       const progress = t('exp.progress', { i: st.i, n: st.N, eta: clock(st.eta || 0) });
       v.bar.setAttribute('aria-valuenow', String(pct));
@@ -69821,7 +70396,7 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
     }
 
     function renderRunning(st) {
-      if (st.phase === 'running') { showRunning(st); return; }
+      if (st.phase === 'running' || st.phase === 'audioServer') { showRunning(st); return; }
       runView = null;
       if (st.phase === 'done') {
         const info = st.result.files ? kitDoneText(st.result)
@@ -69860,6 +70435,7 @@ MV.def('ui/step_export', ['ui/dom', 'ui/icons', 'ui/output', 'ui/filmora_help', 
 
     app.bus.on('export', update);
     app.bus.on('song', update);
+    app.bus.on('audio.server', update);
     app.bus.on('fonts', () => { if (root.isConnected) update(); });
     app.bus.on('media', () => { if (root.isConnected) update(); });   // an asset found or lost on this device
     return { root, footer, update: () => update(), onShow };
@@ -77081,9 +77657,9 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
 MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom', 'ui/keys', 'ui/actions',
   'ui/selection', 'ui/looks', 'ui/view', 'ui/shell', 'ui/header', 'ui/tap', 'ui/project_io',
   'ui/inspector', 'ui/timeline', 'ui/palette', 'ui/menus', 'ui/dialogs', 'ui/ai_panel', 'ai/providers',
-  'ui/fields', 'ui/output', 'ui/media_io'],   // WP8b views, WP8c AI panel, INT-UI output rules, v2.1 photos and videos
+  'ui/fields', 'ui/output', 'ui/media_io', 'ui/audio_server_settings'],
 (D, ST, T, strings, dom, K, A, S, LK, V, shell, header, tapUi, projectIo, inspector, timeline, palette, menus, dialogs,
-  aiPanel, aiProviders, F, OUT, mediaIo) => {
+  aiPanel, aiProviders, F, OUT, mediaIo, AUDIO_SERVER) => {
   'use strict';
 
   const TYPING_REPLAN_MS = 120;         // typing never waits on the planner (§7.4)
@@ -77149,7 +77725,8 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
       sample: (lang) => (lang === 'en' ? lyrics.SAMPLE_EN : lyrics.SAMPLE_JA),
       // the exports of step ④: MP4, PNG sequences, 透過動画（WebM）and the Filmora set (DESIGN_2_1 §13.5, §13.9)
       exporter: { mp4: MV.use('export/host/mp4'), png: MV.use('export/host/png'), webm: MV.use('export/host/webm'),
-        kit: MV.use('export/host/kit'), sink: MV.use('export/host/sink'), schedule: MV.use('export/schedule') },
+        kit: MV.use('export/host/kit'), audioServer: MV.use('export/host/audio_server'),
+        sink: MV.use('export/host/sink'), schedule: MV.use('export/schedule') },
     };
   }
 
@@ -77685,19 +78262,23 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
     app.exportChecks = () => {
       if (!app.plan || !app.plan.lines.length) return [{ code: 'no-lines', level: 'block', params: {} }];
       const pr = app.exportProbe() || {};
+      let serverConfigured = false;
+      if (OUT.usesAudioServer(app.doc)) {
+        try { serverConfigured = !!ex().audioServer.validateConfig(AUDIO_SERVER.getConfig(app)).token; } catch (e) { /* shown by preflight */ }
+      }
       // DESIGN_2_1 §13.10: the VP9 probe (透過動画 and the set's overlay), whether a folder can be written (the set; else
       // one ZIP) and the effective registry (which screen effects the set's layers leave out, layers-approx).
       // DESIGN_EXTREME §3.4: the hard cuts inside EXTREME shots (engine.xJumps) count with the flashes
       const range = ex().schedule.exportRange(app.doc, app.plan);
       let jumps = [];
       try { jumps = typeof app.engine.xJumps === 'function' ? app.engine.xJumps(range.t0, range.t1) : []; } catch (e) { jumps = []; }
-      const items = ex().schedule.preflight(app.doc, app.plan, {
+      const items = ex().schedule.preflight(app.doc, app.plan, OUT.audioEnv(app.doc, {
         webcodecs: typeof VideoEncoder === 'function', codec: pr.codec, audioCodec: pr.audioCodec, anyCodec: pr.anyCodec,
         audioBitrate: pr.audioBitrate, webmAudioCodec: pr.webmAudioCodec, webmAudioBitrate: pr.webmAudioBitrate,
         vp9Codec: pr.vp9Codec, fontsReady: fontsReady(),
         fsAccess: ex().sink.canStream(), dirAccess: ex().sink.canDirectory(), songReady: !app.doc.song || app.songReady(),
-        warnings: app.warnings(), registry: app.reg, jumps,
-      });
+        warnings: app.warnings(), registry: app.reg, jumps, audioServerConfigured: serverConfigured,
+      }));
       // photos and videos (DESIGN_2_1 §11.7.8): an asset not on this device blocks, with [つなぎ直す]
       const media = app.media ? app.media.preflight() : [];
       return OUT.mergeFonts(OUT.withFixes(items, app.doc).concat(OUT.checks(app.doc, app.plan, app.reg), media));
@@ -77774,15 +78355,19 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
         source = app.engine.fork();
         source.setDoc(doc);
         const song = o.audio && app.songReady() ? app.buffer : null;
+        if (OUT.usesAudioServer(doc) && !song) throw new (ex().schedule.ExportError)('audio-server-media', 'original audio is not available');
+        const audioServer = song && OUT.usesAudioServer(doc)
+          ? ex().audioServer.validateConfig(AUDIO_SERVER.getConfig(app)) : null;
         const args = { engine: source, doc, signal: abort.signal, onProgress };
         let result;
         if (o.format === 'kit') {
           // one pass writes every file of the set (export/host/kit); the preview's AssetStore is shared by its forks
-          result = await ex().kit.exportKit(Object.assign(args, { audio: song, dir: target.dir, assets: app.assets }));
+          result = await ex().kit.exportKit(Object.assign(args, { audio: song, dir: target.dir, assets: app.assets, audioServer }));
         } else if (o.format === 'webmAlpha') {
           result = await ex().webm.exportWebm(Object.assign(args, { audio: song, sink: target.sink }));
         } else if (o.format === 'mp4') {
-          result = await ex().mp4.exportVideo(Object.assign(args, { audio: song, sink: target.sink }));
+          const exporter = audioServer ? ex().audioServer : ex().mp4;
+          result = await exporter.exportVideo(Object.assign(args, { audio: song, sink: target.sink, audioServer }));
         } else {
           result = await ex().png.exportPngs(Object.assign(args, { sink: target.sink, alpha: o.format === 'pngAlpha' }));
         }
@@ -77793,6 +78378,9 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
         set({ phase: 'done', result: o.format === 'kit' ? result : Object.assign({ name }, result), format: o.format,
           w: size.w, h: size.h, fps: o.fps });
       } catch (e) {
+        // Configuration or source checks can fail before a host exporter owns the target.
+        // Sink abort is idempotent and also removes an empty folder created by the picker.
+        try { if (target.sink) await target.sink.abort(); if (target.dir) await target.dir.abort(); } catch (cleanupError) { /* keep the original error */ }
         const code = e && e.code ? e.code : 'encode';
         if (code === 'cancelled' || (abort && abort.signal.aborted)) { set({ phase: 'idle' }); app.toast(t('err.exp.cancelled')); }
         else {

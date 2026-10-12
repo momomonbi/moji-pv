@@ -410,6 +410,7 @@
    "quality": "high",
    "acceleration": "auto",
    "audio": true,
+   "audioEncoding": "browser",
    "range": null,
    "name": null,
    "kit": {

@@ -1,6 +1,6 @@
 /* 文字PVメーカー v2 — original work. The Filmora kit: one pass over the timeline writes the main MP4, the transparent overlay, the background and green-screen MP4s, the song WAV, SRT, LRC and a README into a folder or one ZIP (DESIGN_2_1 §13.9). */
 MV.def('export/host/kit', ['export/schedule', 'export/subtitles', 'export/zip', 'export/host/mp4', 'export/host/webm',
-  'export/host/sink', 'audio/wav', 'core/commands', 'i18n/t', 'i18n/strings'], (S, SUB, Z, J, WH, SINK, WAV, C, T, STRINGS) => {
+  'export/host/sink', 'export/host/audio_server', 'audio/wav', 'core/commands', 'i18n/t', 'i18n/strings'], (S, SUB, Z, J, WH, SINK, AS, WAV, C, T, STRINGS) => {
   'use strict';
 
   const KEY_COLOUR = '#00B140';         // the green screen's key colour (D§4.19.4 `chroma`)
@@ -182,6 +182,7 @@ MV.def('export/host/kit', ['export/schedule', 'export/subtitles', 'export/zip', 
     const jobs = [];
     const outputs = [];
     const say = (p) => { if (o.onProgress) o.onProgress(p); };
+    let temporaryMain = null;
     try {
       const jobA = await J.openJob({ engine: o.engine, doc, format: 'kit', canvas: o.canvas, assets: store });
       jobs.push(jobA);
@@ -197,8 +198,12 @@ MV.def('export/host/kit', ['export/schedule', 'export/subtitles', 'export/zip', 
       const bits = S.bitrate(w, h, fps, doc.output.quality);
       const main = await J.videoConfig(o.codecs, jobA, bits);
       const song = o.audio && doc.output.audio && doc.song ? o.audio : null;
-      const acfg = song ? await J.audioConfig(o.codecs, song, kitAudioList(o.codecs)) : null;
-      const files = S.kitFiles(doc, jobA.plan, { audioCodec: acfg ? acfg.codec : null, audioBitrate: acfg ? acfg.bitrate : null, songReady: !!song });
+      const server = song && o.audioServer ? AS.validateConfig(o.audioServer) : null;
+      if (server && !server.token) throw new S.ExportError('audio-server-auth', 'external audio conversion auth');
+      const health = server ? await AS.check(server, { signal: o.signal, fetchImpl: o.fetchImpl }) : null;
+      const acfg = song && !server ? await J.audioConfig(o.codecs, song, kitAudioList(o.codecs)) : null;
+      const files = S.kitFiles(doc, jobA.plan, { audioCodec: server ? 'mp4a.40.2' : acfg ? acfg.codec : null,
+        audioBitrate: server ? AS.TARGET : acfg ? acfg.bitrate : null, songReady: !!song });
       const fileOf = (kind) => files.find((f) => f.kind === kind) || null;
       let overlay = null;
       if (kit.overlay) {
@@ -210,7 +215,8 @@ MV.def('export/host/kit', ['export/schedule', 'export/subtitles', 'export/zip', 
 
       // one output per video file: its job (engine fork), surface, render options and encoder
       const add = async (kind, job, surface, ropts, make) => {
-        const sink = await target.file(fileOf(kind).name, kind);
+        const sink = server && kind === 'main'
+          ? (temporaryMain = SINK.createMemorySink({ name: 'video.mp4', type: 'video/mp4' })) : await target.file(fileOf(kind).name, kind);
         outputs.push({ kind, job, surface, ropts, out: make(sink) });
       };
       await add('main', jobA, jobA.surface, jobA.ropts, (sink) => J.createMp4Output({ lib, sink, job: jobA, vcfg: main, acfg, song }));
@@ -242,6 +248,13 @@ MV.def('export/host/kit', ['export/schedule', 'export/subtitles', 'export/zip', 
       J.checkAbort(o.signal);
       const written = new Map();
       for (const x of outputs) written.set(x.kind, await x.out.end());
+      let serverAudio = null;
+      if (server) {
+        const silent = written.get('main');
+        serverAudio = await AS.convert({ video: silent.blob, audio: song, job: jobA, sink: await target.file(fileOf('main').name, 'main'),
+          audioServer: server, health, signal: o.signal, onProgress: say, fetchImpl: o.fetchImpl });
+        written.set('main', serverAudio);
+      }
 
       say({ i: jobA.N, N: jobA.N, eta: 0, phase: 'files' });
       const wav = fileOf('wav');
@@ -255,12 +268,13 @@ MV.def('export/host/kit', ['export/schedule', 'export/subtitles', 'export/zip', 
       J.checkAbort(o.signal);
 
       const list = files.map((f) => ({ name: f.name, kind: f.kind, bytes: written.get(f.kind).bytes }));
-      const result = { files: list, audio: acfg ? 'aac' : wav ? 'wav' : 'none', frames: jobA.N, folder: target.folder,
-        codec: main.codec, overlayCodec: overlay ? overlay.codec : null, audioCodec: acfg ? acfg.codec : wav ? 'pcm-s16le' : null,
-        audioBitrate: acfg ? acfg.bitrate : wav ? song.sampleRate * 2 * 16 : null,
-        audioBitrateMode: acfg ? acfg.bitrateMode || null : wav ? 'constant' : null,
+      const result = { files: list, audio: server ? 'aac' : acfg ? 'aac' : wav ? 'wav' : 'none', frames: jobA.N, folder: target.folder,
+        codec: main.codec, overlayCodec: overlay ? overlay.codec : null, audioCodec: server ? serverAudio.audioCodec : acfg ? acfg.codec : wav ? 'pcm-s16le' : null,
+        audioBitrate: server ? serverAudio.audioBitrate : acfg ? acfg.bitrate : wav ? song.sampleRate * 2 * 16 : null,
+        audioBitrateMode: server ? null : acfg ? acfg.bitrateMode || null : wav ? 'constant' : null,
         acceleration: outputs[0].out.acceleration,
         accelerationByOutput: Object.fromEntries(outputs.map((x) => [x.kind, x.out.acceleration])) };
+      if (server) { result.audioSource = 'server'; result.audioMeasuredBitrate = serverAudio.audioMeasuredBitrate; }
       if (target.dir) {
         await target.dir.close();
         result.folder = target.dir.name;
@@ -277,6 +291,7 @@ MV.def('export/host/kit', ['export/schedule', 'export/subtitles', 'export/zip', 
     } catch (err) {
       for (const x of outputs) x.out.close();
       await target.abort();
+      if (temporaryMain) await temporaryMain.abort();
       const failure = outputs.map((x) => x.out.failure).find(Boolean);
       throw J.exportFailure(err, o.signal, failure);
     } finally {

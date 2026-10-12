@@ -313,8 +313,10 @@ python3 build.py --lab      # also writes tests/www/lab.html (MV.DEV=true; boots
    (`en/index.html`: `lang="en"`, `<title>Moji PV Maker</title>`, `MV.LANG='en'`.)
 5. CSP (one line, FROZEN): `default-src 'none'; script-src 'sha256-A' 'sha256-B' 'sha256-C'; style-src 'sha256-S'
    https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://generativelanguage.googleapis.com
-   https://<API host of the second AI service>; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'`.
-   Hashes are base64 SHA-256 of each inline element's exact text. (`worker-src` changes to `blob:` only when a Worker ships.)
+   https://<API host of the second AI service> https:; img-src data: blob:; media-src blob:; worker-src 'none'; base-uri 'none'; form-action 'none'`.
+   Hashes are base64 SHA-256 of each inline element's exact text. HTTPS connections allow the explicitly configured
+   external audio server; URL validation rejects plaintext URLs, embedded credentials, query strings and fragments.
+   (`worker-src` changes to `blob:` only when a Worker ships.)
 6. Output is byte-identical for identical inputs (no timestamps; stable ordering; `\n` line endings; UTF-8).
 7. The UI MUST set styles only via CSSOM (`el.style.prop = …`, `el.classList`), which the CSP allows.
 
@@ -421,7 +423,9 @@ A project file and the autosave record are the same JSON. `doc` is undoable; `si
   `only` (allow-list or `null`) and `deny` (block-list or `null`). Applies to auto picks only; pins win (with a warning).
 - `doc.output`: export settings: `format` `mp4|png|pngAlpha`, `short` `720|1080|1440|2160` (short side in px), `fps`
   `24|30|60`, `quality` `light|standard|high|max`, `acceleration` `auto|cpu` (missing means `auto`), `audio` bool,
-  `range` `{t0,t1}` or `null`, `name` file name or `null`.
+  `range` `{t0,t1}` or `null`, `name` file name or `null`. `audioEncoding` is `browser|server` (missing means `browser`);
+  server mode applies to enabled MP4/Filmora audio and requires the original song. Its HTTPS URL and token are
+  device/tab settings outside project JSON.
 - `side.looks`: the look history (§3.7). `side.aiLog`: applied AI runs for selective revert (§4.22.5).
 
 ### 3.3 Ids and scopes (FROZEN)

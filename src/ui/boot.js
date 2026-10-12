@@ -2,9 +2,9 @@
 MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom', 'ui/keys', 'ui/actions',
   'ui/selection', 'ui/looks', 'ui/view', 'ui/shell', 'ui/header', 'ui/tap', 'ui/project_io',
   'ui/inspector', 'ui/timeline', 'ui/palette', 'ui/menus', 'ui/dialogs', 'ui/ai_panel', 'ai/providers',
-  'ui/fields', 'ui/output', 'ui/media_io'],   // WP8b views, WP8c AI panel, INT-UI output rules, v2.1 photos and videos
+  'ui/fields', 'ui/output', 'ui/media_io', 'ui/audio_server_settings'],
 (D, ST, T, strings, dom, K, A, S, LK, V, shell, header, tapUi, projectIo, inspector, timeline, palette, menus, dialogs,
-  aiPanel, aiProviders, F, OUT, mediaIo) => {
+  aiPanel, aiProviders, F, OUT, mediaIo, AUDIO_SERVER) => {
   'use strict';
 
   const TYPING_REPLAN_MS = 120;         // typing never waits on the planner (§7.4)
@@ -70,7 +70,8 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
       sample: (lang) => (lang === 'en' ? lyrics.SAMPLE_EN : lyrics.SAMPLE_JA),
       // the exports of step ④: MP4, PNG sequences, 透過動画（WebM）and the Filmora set (DESIGN_2_1 §13.5, §13.9)
       exporter: { mp4: MV.use('export/host/mp4'), png: MV.use('export/host/png'), webm: MV.use('export/host/webm'),
-        kit: MV.use('export/host/kit'), sink: MV.use('export/host/sink'), schedule: MV.use('export/schedule') },
+        kit: MV.use('export/host/kit'), audioServer: MV.use('export/host/audio_server'),
+        sink: MV.use('export/host/sink'), schedule: MV.use('export/schedule') },
     };
   }
 
@@ -606,19 +607,23 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
     app.exportChecks = () => {
       if (!app.plan || !app.plan.lines.length) return [{ code: 'no-lines', level: 'block', params: {} }];
       const pr = app.exportProbe() || {};
+      let serverConfigured = false;
+      if (OUT.usesAudioServer(app.doc)) {
+        try { serverConfigured = !!ex().audioServer.validateConfig(AUDIO_SERVER.getConfig(app)).token; } catch (e) { /* shown by preflight */ }
+      }
       // DESIGN_2_1 §13.10: the VP9 probe (透過動画 and the set's overlay), whether a folder can be written (the set; else
       // one ZIP) and the effective registry (which screen effects the set's layers leave out, layers-approx).
       // DESIGN_EXTREME §3.4: the hard cuts inside EXTREME shots (engine.xJumps) count with the flashes
       const range = ex().schedule.exportRange(app.doc, app.plan);
       let jumps = [];
       try { jumps = typeof app.engine.xJumps === 'function' ? app.engine.xJumps(range.t0, range.t1) : []; } catch (e) { jumps = []; }
-      const items = ex().schedule.preflight(app.doc, app.plan, {
+      const items = ex().schedule.preflight(app.doc, app.plan, OUT.audioEnv(app.doc, {
         webcodecs: typeof VideoEncoder === 'function', codec: pr.codec, audioCodec: pr.audioCodec, anyCodec: pr.anyCodec,
         audioBitrate: pr.audioBitrate, webmAudioCodec: pr.webmAudioCodec, webmAudioBitrate: pr.webmAudioBitrate,
         vp9Codec: pr.vp9Codec, fontsReady: fontsReady(),
         fsAccess: ex().sink.canStream(), dirAccess: ex().sink.canDirectory(), songReady: !app.doc.song || app.songReady(),
-        warnings: app.warnings(), registry: app.reg, jumps,
-      });
+        warnings: app.warnings(), registry: app.reg, jumps, audioServerConfigured: serverConfigured,
+      }));
       // photos and videos (DESIGN_2_1 §11.7.8): an asset not on this device blocks, with [つなぎ直す]
       const media = app.media ? app.media.preflight() : [];
       return OUT.mergeFonts(OUT.withFixes(items, app.doc).concat(OUT.checks(app.doc, app.plan, app.reg), media));
@@ -695,15 +700,19 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
         source = app.engine.fork();
         source.setDoc(doc);
         const song = o.audio && app.songReady() ? app.buffer : null;
+        if (OUT.usesAudioServer(doc) && !song) throw new (ex().schedule.ExportError)('audio-server-media', 'original audio is not available');
+        const audioServer = song && OUT.usesAudioServer(doc)
+          ? ex().audioServer.validateConfig(AUDIO_SERVER.getConfig(app)) : null;
         const args = { engine: source, doc, signal: abort.signal, onProgress };
         let result;
         if (o.format === 'kit') {
           // one pass writes every file of the set (export/host/kit); the preview's AssetStore is shared by its forks
-          result = await ex().kit.exportKit(Object.assign(args, { audio: song, dir: target.dir, assets: app.assets }));
+          result = await ex().kit.exportKit(Object.assign(args, { audio: song, dir: target.dir, assets: app.assets, audioServer }));
         } else if (o.format === 'webmAlpha') {
           result = await ex().webm.exportWebm(Object.assign(args, { audio: song, sink: target.sink }));
         } else if (o.format === 'mp4') {
-          result = await ex().mp4.exportVideo(Object.assign(args, { audio: song, sink: target.sink }));
+          const exporter = audioServer ? ex().audioServer : ex().mp4;
+          result = await exporter.exportVideo(Object.assign(args, { audio: song, sink: target.sink, audioServer }));
         } else {
           result = await ex().png.exportPngs(Object.assign(args, { sink: target.sink, alpha: o.format === 'pngAlpha' }));
         }
@@ -714,6 +723,9 @@ MV.def('ui/boot', ['core/doc', 'core/store', 'i18n/t', 'i18n/strings', 'ui/dom',
         set({ phase: 'done', result: o.format === 'kit' ? result : Object.assign({ name }, result), format: o.format,
           w: size.w, h: size.h, fps: o.fps });
       } catch (e) {
+        // Configuration or source checks can fail before a host exporter owns the target.
+        // Sink abort is idempotent and also removes an empty folder created by the picker.
+        try { if (target.sink) await target.sink.abort(); if (target.dir) await target.dir.abort(); } catch (cleanupError) { /* keep the original error */ }
         const code = e && e.code ? e.code : 'encode';
         if (code === 'cancelled' || (abort && abort.signal.aborted)) { set({ phase: 'idle' }); app.toast(t('err.exp.cancelled')); }
         else {

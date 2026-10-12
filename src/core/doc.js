@@ -19,7 +19,7 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
     'seam', 'theme']);
   const OUTPUT_CHOICES = Object.freeze({
     format: ['mp4', 'kit', 'webmAlpha', 'png', 'pngAlpha'], short: [720, 1080, 1440, 2160], fps: [24, 30, 60],
-    quality: ['light', 'standard', 'high', 'max'], acceleration: ['auto', 'cpu'],
+    quality: ['light', 'standard', 'high', 'max'], acceleration: ['auto', 'cpu'], audioEncoding: ['browser', 'server'],
   });
   // output.kit: the optional files of the Filmora set (§13.3); the main MP4 is always written.
   const KIT_KEYS = Object.freeze(['overlay', 'bg', 'green', 'srt', 'lrc']);
@@ -48,7 +48,7 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
     pin: ['v', 'by', 'sig'],
     lock: ['n'],
     filter: ['only', 'deny'],
-    output: ['format', 'short', 'fps', 'quality', 'acceleration', 'audio', 'range', 'name', 'kit'],
+    output: ['format', 'short', 'fps', 'quality', 'acceleration', 'audio', 'audioEncoding', 'range', 'name', 'kit'],
     range: ['t0', 't1'],
     kit: KIT_KEYS,
     materials: ['next', 'list'],
@@ -81,7 +81,7 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
       filters: {},
       materials: { next: 1, list: [] },
       media: { list: [] },
-      output: { format: 'mp4', short: 1080, fps: 30, quality: 'high', acceleration: 'auto', audio: true, range: null, name: null,
+      output: { format: 'mp4', short: 1080, fps: 30, quality: 'high', acceleration: 'auto', audio: true, audioEncoding: 'browser', range: null, name: null,
         kit: Object.assign({}, KIT_DEFAULT) },
     };
   }
@@ -307,7 +307,7 @@ MV.def('core/doc', ['core/paths', 'core/hash', 'core/recipe', 'core/media'], (pa
   function checkOutput(output, bad) {
     if (!isObject(output)) { bad('output', 'must be an object'); return; }
     for (const k of Object.keys(OUTPUT_CHOICES)) {
-      if (k === 'acceleration' && output[k] === undefined) continue; // Older projects default to GPU preference.
+      if ((k === 'acceleration' || k === 'audioEncoding') && output[k] === undefined) continue; // Older projects keep local audio and GPU preference.
       if (!OUTPUT_CHOICES[k].includes(output[k])) bad('output.' + k, 'must be one of ' + OUTPUT_CHOICES[k].join(' '));
     }
     if (typeof output.audio !== 'boolean') bad('output.audio', 'must be a boolean');
