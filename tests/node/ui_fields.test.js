@@ -292,10 +292,10 @@ function fieldPaths(sel, sectionId, plan = PLAN) {
 test('sectionsFor: 作品全体 has its §6.4.5 sections with 見た目 and 強さ open', () => {
   const sections = F.sectionsFor({ level: 'work' }, PLAN, REG);
   // 写真・動画 (DESIGN_2_1 §11.7.3) follows 見た目; it opens once the library holds something.
-  assert.deepEqual(sections.map((s) => s.id), ['look', 'media', 'colors', 'type', 'energy', 'parts', 'title', 'timing', 'lines', 'looks',
+  assert.deepEqual(sections.map((s) => s.id), ['cinematic', 'look', 'media', 'colors', 'type', 'energy', 'parts', 'title', 'timing', 'lines', 'looks',
     'defaults', 'other']);
   assert.deepEqual(sections.filter((s) => s.open).map((s) => s.id), ['look', 'energy']);
-  assert.deepEqual(sections[0].label, ['sec.look', {}]);
+  assert.deepEqual(sections.find((s) => s.id === 'look').label, ['sec.look', {}]);
   const type = fieldPaths({ level: 'work' }, 'type');
   assert.ok(type.includes('face.display.ja') && type.includes('face.body.latin'));
   assert.ok(!type.includes('face.display.ko'), 'scripts not in use are hidden');
@@ -308,7 +308,7 @@ test('sectionsFor: 作品全体 has its §6.4.5 sections with 見た目 and 強�
 
 test('sectionsFor: 行 page lists time, marks and direction, with shared params once and part params when the cuts agree', () => {
   const sel = { level: 'line', ids: ['r4'] };
-  assert.deepEqual(sectionIds(sel), ['time', 'marks', 'direction', 'colortype', 'cuts', 'elements', 'ai']);
+  assert.deepEqual(sectionIds(sel), ['cinematic', 'time', 'marks', 'direction', 'colortype', 'cuts', 'elements', 'ai']);
   const dir = fieldPaths(sel, 'direction');
   for (const p of ['arrange', 'arrive', 'arrive.dur', 'arrive.ease', 'arrive.order', 'arrive.each', 'dwell', 'dwell.amount', 'depart',
     'seam']) assert.ok(dir.includes(p), p);
@@ -361,8 +361,8 @@ test('sectionsFor: 要素 pages follow the element and the list index', () => {
 
 test('sectionsFor: several lines, no plan, and ids unique within a page', () => {
   assert.deepEqual(sectionIds({ level: 'line', ids: ['r4', 'r5'] }),
-    ['multi', 'direction', 'ground', 'colortype', 'multiornament', 'multifilter', 'shift']);
-  assert.deepEqual(sectionIds({ level: 'work' }, null).slice(0, 3), ['look', 'media', 'colors'], 'works before there are lyrics');
+    ['cinematic', 'multi', 'direction', 'ground', 'colortype', 'multiornament', 'multifilter', 'shift']);
+  assert.deepEqual(sectionIds({ level: 'work' }, null).slice(0, 4), ['cinematic', 'look', 'media', 'colors'], 'works before there are lyrics');
   const sels = [{ level: 'work' }, { level: 'line', ids: ['r4'] }, { level: 'cut', key: 'r4~0' },
     { level: 'el', scope: 'cut/r4~0', el: 'text' }, { level: 'el', scope: 'work', el: 'filter', idx: 2 }];
   for (const sel of sels) {

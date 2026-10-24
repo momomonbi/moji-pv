@@ -3,6 +3,7 @@ MV.def('ui/camera_preview', ['ui/dom', 'ui/icons', 'i18n/t', 'core/shot', 'engin
   'use strict';
   const { h } = dom;
   const KINDS = Object.freeze(['shot', 'xshot', 'rig', 'lens']);
+  const CINEMATIC_KEYS = Object.freeze(['universeJourney', 'singularityBurst', 'windMeadow', 'fluidClouds', 'wavePuddle']);
   const SPEEDS = Object.freeze([0.25, 0.5, 1]);
   const sessions = new WeakMap();
 
@@ -37,21 +38,26 @@ MV.def('ui/camera_preview', ['ui/dom', 'ui/icons', 'i18n/t', 'core/shot', 'engin
   // open(app, ref, {name, blurb}) → {close, done, state}. The engine's thumbnail renderer and sample plan are separate
   // from the main scene, picks, song clock and document. Both normal closure and native Escape release the fork.
   function open(app, ref0, options) {
-    if (!ref0 || !supports(ref0.kind, ref0.key) || !app.dialogs || !app.engine) return null;
+    const cinematic = ref0 && ref0.kind === 'ornament' && CINEMATIC_KEYS.includes(ref0.key);
+    if (!ref0 || (!cinematic && !supports(ref0.kind, ref0.key)) || !app.dialogs || !app.engine) return null;
     const old = sessions.get(app);
     if (old) old.close();
     const ref = normalize(ref0), opt = options || {}, t = app.t;
+    const sampleDuration = cinematic ? Math.max(2, Math.min(30, Number.isFinite(opt.duration) ? opt.duration : 8)) : null;
+    if (cinematic) ref.params = Object.assign({}, ref.params, { clock: 'section', start: 0, duration: sampleDuration });
+    const failureKey = cinematic ? 'cinematic.previewFailed' : 'camera.sample.failed';
     const theme = app.plan && app.plan.look ? app.plan.look.theme.v : null;
     const sampleOptions = { text: t('pb.sampleText'), textB: t('pb.sampleTextB'), theme, aspect: app.doc.look.aspect };
+    if (cinematic) sampleOptions.sampleDuration = sampleDuration;
     let sample = null, engine = null;
     try { sample = FAC.samplePlan(app.reg, ref, sampleOptions); engine = app.engine.fork(); }
-    catch (e) { if (app.toast) app.toast(t('camera.sample.failed')); return null; }
+    catch (e) { if (app.toast) app.toast(t(failureKey)); return null; }
     const duration = sample.duration;
     const ratio = sample.design.w / sample.design.h;
     const width = Math.round(ratio >= 1 ? 960 : 960 * ratio), height = Math.round(ratio >= 1 ? 960 / ratio : 960);
     // Opening this dialog is an explicit request to watch the selected movement once.
     let playing = !document.hidden;
-    let time = 0, speed = 0.5;
+    let time = 0, speed = cinematic ? 1 : 0.5;
     let frame = 0, lastTick = null, lastPaint = -Infinity, renderCount = 0, disposed = false, closeDialog = null;
     let offView = null, offDoc = null;
     let root = null, canvas = null, play = null, seek = null, readout = null, loop = null, guides = null, note = null;
@@ -82,7 +88,7 @@ MV.def('ui/camera_preview', ['ui/dom', 'ui/icons', 'i18n/t', 'core/shot', 'engin
         renderCount++;
       } catch (e) {
         playing = false;
-        note.hidden = false; note.textContent = t('camera.sample.failed');
+        note.hidden = false; note.textContent = t(failureKey);
       }
       updateControls();
     }
@@ -134,7 +140,7 @@ MV.def('ui/camera_preview', ['ui/dom', 'ui/icons', 'i18n/t', 'core/shot', 'engin
         SPEEDS.map((v, i) => h('option', { value: String(v), selected: v === speed,
           text: t(['camera.sample.slowest', 'camera.sample.slow', 'camera.sample.normal'][i]) })));
         loop = h('input', { class: 'camera-preview-loop', type: 'checkbox', checked: false });
-        guides = h('input', { class: 'camera-preview-guides', type: 'checkbox', checked: true, on: { change: paint } });
+        guides = h('input', { class: 'camera-preview-guides', type: 'checkbox', checked: !cinematic, on: { change: paint } });
         note = h('p', { class: 'note subtle', hidden: true });
         root = h('div', { class: 'camera-preview', 'data-preview-kind': ref.kind,
           'data-preview-key': typeof ref.key === 'string' ? ref.key : 'custom', 'data-duration': String(duration) },
@@ -145,7 +151,7 @@ MV.def('ui/camera_preview', ['ui/dom', 'ui/icons', 'i18n/t', 'core/shot', 'engin
           h('label', {}, loop, t('camera.sample.loop')), h('label', {}, guides, t('camera.sample.guides'))), note);
         body.appendChild(root);
         updateControls();
-      }, { title: t('camera.sample.title', { name: opt.name || nameOf(app, ref) }), wide: true });
+      }, { title: t(cinematic ? 'cinematic.previewTitle' : 'camera.sample.title', { name: opt.name || nameOf(app, ref) }), wide: true });
       handle.done.then(dispose, dispose);
       document.addEventListener('visibilitychange', visibility);
       window.addEventListener('pagehide', close);
@@ -158,5 +164,5 @@ MV.def('ui/camera_preview', ['ui/dom', 'ui/icons', 'i18n/t', 'core/shot', 'engin
     } catch (e) { close(); return null; }
   }
 
-  return { KINDS, SPEEDS, supports, normalize, advance, nameOf, blurbOf, open };
+  return { KINDS, CINEMATIC_KEYS, SPEEDS, supports, normalize, advance, nameOf, blurbOf, open };
 });

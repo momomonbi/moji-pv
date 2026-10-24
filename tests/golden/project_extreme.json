@@ -1,12 +1,12 @@
 {
  "registry": {
   "kind": "catalog",
-  "version": "f488ca4f"
+  "version": "829fdcdc"
  },
  "measurer": "fake",
  "docs": {
   "basic-all-presets@16:9": {
-   "plan": "4e1fa205",
+   "plan": "8f890af6",
    "frames": [
     "6850d38f",
     "2da2050a",
@@ -51,7 +51,7 @@
    ]
   },
   "basic-chorus-0.5@9:16": {
-   "plan": "471dd995",
+   "plan": "bf98e9af",
    "frames": [
     "f812c949",
     "eb68011a",

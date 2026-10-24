@@ -34,6 +34,8 @@ Click the **Camera** track to open that cut’s camera settings. The bottom over
 
 Open **Large preview** in camera settings or its picker to automatically play only the selected movement once, then stop. Pause, restart, seek or change speed; the default 0.5× speed makes the motion easier to follow. Turn on **Loop** when you want repeated playback.
 
+The **Cinematic** bookmark adds a cosmic web-to-star journey, collapse and Big Bang, wind-swept plants, drifting clouds, or rain and water reflections. Apply an overlay to the whole video, a section, line or cut, then adjust its start, duration, strength and placement behind or in front of lyrics. Preview plays only the selected effect once. One cinematic overlay occupies each range and can be combined with existing photos, footage and camera movement.
+
 Turn on **Wireframe** in the preview to see the actual camera frame, path, zoom and rotation. These guides are excluded from exports. Added presets include ten lyric layouts, six interludes, ten cut-camera paths and six section-camera rigs.
 
 **Camera EXTREME** — switch on **Camera EXTREME** under whole video › Energy for intense camerawork: crash zooms, whips,

@@ -9638,3 +9638,36 @@ Validation: five camera-sample and 19 translation Node cases, 23 build checks an
 Four Japanese/English desktop/375 px browser flows verify untouched one-pass autoplay and stable automatic
 stopping, replay, explicit looping, OS reduced-motion autoplay, selected-component rendering, portrait fit and
 modal cleanup. Independent review confirms generated-source parity, CSP hashes and preview isolation.
+
+## 2026-10-24 — Bring the supplied visual studies into timed cinematic overlays
+
+Adapted five supplied HTML studies into native manual-use cinematic ornaments: a cosmic web/galaxy/star journey,
+the singularity's collapse and Big Bang, wind-swept meadow plants with day/night/snow, drifting fluid-like clouds,
+and rain with reflective water. Source geometry, phase thresholds, wind profiles, noise, scattering and Fresnel
+reflection formulas inform the ports. Transparent layers preserve the existing illustration and can sit behind
+or in front of lyrics. Fixed pattern seeds and time-driven analytical motion replace accumulated GPU particles,
+fluid/grass simulation and wave history. This gives bounded drawing costs and direct backward/forward seeking;
+the standalone pages' GPU load modes, HUDs, interactive controls and full landscapes are not embedded.
+
+A Cinematic inspector bookmark applies one overlay to the current work, section, line or exact cut in one undo
+step. Scoped timing uses the selected range's real song start and duration; parameters remain editable in place.
+The same atmosphere slot is used, with an explicit replacement note for an existing overlay and scoped removal.
+Whole-song clocks and fixed defaults preserve phase through background-segment changes. The new parts remain
+outside the automatic pools, preserving existing automatic choices.
+
+The isolated large preview renders only the chosen effect, resets its timing to an eight-second sample, autoplays
+at normal speed and stops once. Its sample duration is included in thumbnail-plan cache keys and passed through
+to the facade; camera previews retain their existing speed, controls and sample duration.
+
+Validation: the full Node regression run and final focused checks pass, including the new parts, frame clocks,
+scope-preserving application, parameter inheritance, duration normalization and preview caches. All 234 module
+checks and 23 build checks pass. Native Japanese/English desktop/mobile flows cover exact line/cut selection,
+continuous areas including their interludes, sparse selections, matching-section selections, single-step undo,
+uniform parameter display, owned values under narrower overrides, and atomic rejection of invalid timing.
+Twenty native effect/aspect cases verify random-access frames, background changes, cached-origin reuse and alpha;
+all fifteen real exported PNG frames exactly match same-backend direct renders. Actual small previews are reviewed
+for visible cosmic filaments, accretion rings, grass, cloud detail and reflected rain ripples.
+
+The catalog addition changes its version and derived plan fingerprints. Before refreshing five golden files,
+all twelve frame arrays (480 hashes) were verified unchanged. Only five catalog-version fields and 244 plan-hash
+fields changed; fixture names, order, frame counts and the frozen v2 file are unchanged.

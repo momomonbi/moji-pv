@@ -2,7 +2,7 @@
 MV.def('ui/inspector_nav', ['ui/selection'], (S) => {
   'use strict';
 
-  const KEYS = Object.freeze(['camera', 'layout', 'text', 'background', 'ornament', 'effects', 'timing', 'media', 'scope']);
+  const KEYS = Object.freeze(['camera', 'cinematic', 'layout', 'text', 'background', 'ornament', 'effects', 'timing', 'media', 'scope']);
 
   // Keep a selected cut's exact pin scope, including a line with only one cut. Walking up via Selection.up would
   // deliberately collapse that cut to its line; a settings bookmark must not broaden the edit instead.
@@ -25,6 +25,7 @@ MV.def('ui/inspector_nav', ['ui/selection'], (S) => {
     if (key === 'scope') return out(base, null, null);
     // The media library is project-wide. Other tabs keep using the bookmark's original selection after visiting it.
     if (key === 'media') return out(S.WORK, 'media', null);
+    if (key === 'cinematic') return out(base, 'cinematic', null);
     if (key === 'camera') return multi ? out(base, 'direction', 'cam.shot') : out(element('lens'), 'camwork', 'cam.shot');
     if (key === 'layout') {
       if (base.level === 'line') return out(base, 'direction', 'arrange');

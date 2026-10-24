@@ -1437,3 +1437,11 @@ details.ai-group > summary { cursor: pointer; list-style-position: inside; }
   .camera-preview-canvas { max-height: 42dvh; }
   .camera-preview-options { gap: 8px; }
 }
+.cinematic-cards { display: grid; gap: 8px; margin: 10px 0; }
+.cinematic-card { display: flex; align-items: stretch; gap: 8px; border: 1px solid var(--line); border-radius: 8px; padding: 6px; }
+.cinematic-card.is-on { border-color: var(--accent); }
+.cinematic-apply { flex: 1; min-width: 0; text-align: left; padding: 6px; background: transparent; border: 0; color: inherit; cursor: pointer; }
+.cinematic-apply strong, .cinematic-apply span { display: block; }
+.cinematic-apply span { margin-top: 4px; }
+.cinematic-preview { align-self: center; flex-shrink: 0; }
+.cinematic-range { font-variant-numeric: tabular-nums; }

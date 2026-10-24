@@ -1,8 +1,8 @@
 /* 文字PVメーカー v2 — original work. The inspector (詳細): crumbs, level header, sections from FIELDS, field rows, sub-pages (DESIGN §6.4.4–§6.4.9, §6.6; DESIGN_2_1 §6.5–§6.9). */
 MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/part_browser', 'ui/selection', 'ui/looks',
   'ui/output', 'i18n/t', 'core/paths', 'core/pins', 'core/shot', 'planner/areas', 'ui/shot_editor', 'ui/material_page',
-  'ui/media_page', 'ui/media_widgets', 'ui/media_io', 'ui/extreme', 'ui/inspector_nav', 'ui/camera_preview'],
-(dom, I, F, W, PB, S, LK, OUT, T, P, PINS, SHOT, AREAS, KE, MP, MPG, MW, MI, XU, NAV, CP) => {
+  'ui/media_page', 'ui/media_widgets', 'ui/media_io', 'ui/extreme', 'ui/inspector_nav', 'ui/camera_preview', 'ui/cinematic'],
+(dom, I, F, W, PB, S, LK, OUT, T, P, PINS, SHOT, AREAS, KE, MP, MPG, MW, MI, XU, NAV, CP, CIN) => {
   'use strict';
 
   const { h } = dom;
@@ -23,7 +23,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
   const REF_KINDS = ['arrange', 'arrive', 'dwell', 'depart', 'ornament', 'ground', 'lens', 'filter', 'seam'];
   const ELEMENTS = ['text', 'ornament', 'ground', 'lens', 'filter', 'seam'];
   // Custom sections redrawn even while they hold focus (their buttons change state); focus is put back (§6.12).
-  const REDRAW_FOCUSED = new Set(['looks', 'colorsReset', 'amountsReset', 'lockPartial', 'multi', 'media']);
+  const REDRAW_FOCUSED = new Set(['looks', 'colorsReset', 'amountsReset', 'lockPartial', 'multi', 'media', 'cinematic']);
   // Part rows whose browser offers the 写真・動画 tab (DESIGN_2_1 §11.7.5): the kind's media part and its source param.
   const MEDIA_TAB = Object.freeze({ ground: 'ground', ornament: 'frame', atmos: 'overlay' });
 
@@ -132,7 +132,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
     function statesFor(rows, ctx) {
       const withPath = rows.filter((r) => r.path);
       if (!withPath.length) return new Map();
-      const readPaths = (r) => (r.field.firstCut && r.paths.length > 1 ? r.paths : [r.path]);
+      const readPaths = (r) => ((r.field.firstCut || r.field.cinematic) && r.paths.length > 1 ? r.paths : [r.path]);
       // a trim row also reads its out handle (clipOut), kept in row.fsOut
       const all = [...new Set(withPath.flatMap(readPaths).concat(withPath.filter((r) => r.outPath).map((r) => r.outPath)))];
       let list = null;
@@ -141,17 +141,29 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       }
       const byPath = new Map();
       all.forEach((p, i) => byPath.set(p, list && list[i] ? list[i] : { path: p, value: null, state: 'auto', pinnedAt: null, by: null }));
+      for (const row of withPath) {
+        const param = row.field.param;
+        if (!param || param.kind !== 'atmos') continue;
+        const key = param.key || F.cinematicKey(ctx, doc());
+        if (!CIN.isEffect(app.reg, key)) continue;
+        for (const path of readPaths(row)) byPath.set(path, CIN.ownedParamState(doc(), plan(), app.reg, path, key, param.name, byPath.get(path)));
+      }
       const out = new Map();
       for (const r of withPath) {
-        out.set(r.path, mergeStates(readPaths(r).map((p) => byPath.get(p))));
+        out.set(r.path, mergeStates(readPaths(r).map((p) => byPath.get(p)), r.field.cinematic ? r.paths : null));
         if (r.outPath) r.fsOut = byPath.get(r.outPath) || null;
       }
       return out;
     }
 
-    function mergeStates(list) {
+    function mergeStates(list, cinematicPaths) {
       const a = list[0];
-      const same = (x) => x.state === a.state && x.pinnedAt === a.pinnedAt && JSON.stringify(x.value) === JSON.stringify(a.value);
+      // A cinematic area owns both lyric-line and interlude-cut pins. Equal authored values are one setting even
+      // when their local owner kinds differ; retain the representative owner so clearing the row still works.
+      const same = (x) => x.state === a.state && (x.pinnedAt === a.pinnedAt
+        || (cinematicPaths && cinematicPaths.includes(a.pinAt) && cinematicPaths.includes(x.pinAt)))
+        && (!cinematicPaths || x.by === a.by)
+        && JSON.stringify(x.value) === JSON.stringify(a.value);
       return list.every(same) ? a : Object.assign({}, a, { state: 'mixed', value: null, pinnedAt: null, by: null });
     }
 
@@ -572,7 +584,19 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       if (o.mergeKey) meta.mergeKey = o.mergeKey;
       else if (o.merge) meta.mergeKey = 'field:' + row.path;
       const paths = pathsOf(field, ctx);
-      const cmds = paths.map((path) => pinCmd(path, value));
+      const fillRange = field.param && field.param.kind === 'atmos' && CIN.isEffect(app.reg, field.param.key)
+        && field.param.name === 'duration' && value === 0;
+      const songClock = field.param && field.param.kind === 'atmos' && CIN.isEffect(app.reg, field.param.key)
+        && field.param.name === 'clock' && value === 'song';
+      const cmds = songClock ? CIN.songClockCommands(doc(), plan(), app.reg, ctx.sel, field.param.key, app.svc.pinSig)
+        : fillRange ? CIN.fillDurationCommands(doc(), plan(), app.reg, ctx.sel, field.param.key, app.svc.pinSig)
+        : paths.map((path) => pinCmd(path, value));
+      if ((fillRange || songClock) && !cmds.length) {
+        if (row.fs && row.widget.scrub && Number.isFinite(row.fs.value)) row.widget.scrub.preview(row.fs.value);
+        else if (row.fs) row.widget.update(stateOf(row, row.fs, ctx));
+        if (app.toast) app.toast(t('cinematic.emptyRange'));
+        return;
+      }
       // a setting of an interlude effect chosen automatically keeps that effect too: a later automatic pick (a split, a
       // new song) would otherwise leave the setting unused (無効)
       const prm = field.param;
@@ -583,6 +607,11 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
         }
       }
       run(cmds, meta);
+      if (fillRange && row.widget.scrub) {
+        const durations = cmds.filter((cmd) => cmd.path && cmd.path.endsWith('.duration')).map((cmd) => cmd.v);
+        const shown = durations.length && durations.every((n) => n === durations[0]) ? durations[0] : !cmds.length && row.fs ? row.fs.value : null;
+        if (Number.isFinite(shown)) row.widget.scrub.preview(shown);
+      }
       reportShadowed(row, ctx);
     }
 
@@ -1460,6 +1489,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
     }
 
     const CUSTOM = {
+      cinematic(ctx) { return CIN.panel(app, ctx); },
       parts() {
         return h('div', { class: 'insp-list' }, PB.FILTER_KINDS.map((kind) => {
           const c = PB.counts(app, kind);
@@ -1873,6 +1903,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
         if (active && !REDRAW_FOCUSED.has(c.id)) continue;
         // 試した見た目 is redrawn even with focus inside (the current tile moves); focus returns to the same entry.
         const keep = active && active.closest('[data-n]') ? { n: active.closest('[data-n]').dataset.n, cls: active.className.split(' ')[0] } : null;
+        const cinematicKey = active && active.getAttribute('data-cinematic-apply');
         const scroll = c.el.querySelector('.vl') ? c.el.querySelector('.vl').scrollTop : 0;
         page.rows = page.rows.filter((r) => !c.el.contains(r.el));
         const el = customOf(c.id, ctx);
@@ -1880,7 +1911,8 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
         const vl = c.el.querySelector('.vl');
         if (vl && scroll) { vl.scrollTop = scroll; vl.dispatchEvent(new Event('scroll')); }
         const row = active && active.closest('[data-id]') ? active.closest('[data-id]').dataset.id : null;
-        if (keep) dom.focus(c.el.querySelector('[data-n="' + keep.n + '"] .' + keep.cls) || c.el.querySelector('[data-n="' + keep.n + '"] button'));
+        if (cinematicKey) dom.focus(c.el.querySelector('[data-cinematic-apply="' + cinematicKey + '"]'));
+        else if (keep) dom.focus(c.el.querySelector('[data-n="' + keep.n + '"] .' + keep.cls) || c.el.querySelector('[data-n="' + keep.n + '"] button'));
         else if (row !== null) {
           // a library row keeps the focus (or the first row takes it when it went away)
           const again = c.el.querySelector('[data-id="' + row + '"]') || c.el.querySelector('[role="option"]');

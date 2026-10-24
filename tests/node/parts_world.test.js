@@ -70,6 +70,11 @@ const MEDIA_ORNAMENTS = MEDIA_PARTS.split('\n').filter((l) => l.startsWith('| `'
   const [scope, follow] = c[2].split(', ');
   return { key: /`(\w+)`/.exec(c[0])[1], ja, en, scope: scope.split(' ')[0], follow };
 });
+const CINEMATIC_PARTS = DESIGN_2_1.slice(DESIGN_2_1.indexOf('\n## 18. Timed cinematic overlays'));
+const CINEMATIC_ORNAMENTS = CINEMATIC_PARTS.split('\n').filter((l) => l.startsWith('| `')).map((l) => {
+  const c = cells(l), [ja, en] = c[1].split(' / '), [scope, follow] = c[2].split(', ');
+  return { key: /`(\w+)`/.exec(c[0])[1], ja, en, scope, follow };
+});
 
 function def(kind, key) { return REGISTRY.get(kind, key); }
 
@@ -139,11 +144,18 @@ test('§5.5 backgrounds: every key, label, tag and season of the table, and noth
 test('§5.6 decorations: every key, label, scope, tag and season of the table, and nothing else', () => {
   assert.equal(ORNAMENTS.length, 22);
   assert.equal(MEDIA_ORNAMENTS.length, 3);
-  assert.deepEqual(REGISTRY.keys('ornament'), ORNAMENTS.concat(MEDIA_ORNAMENTS).map((r) => r.key).sort());
+  assert.equal(CINEMATIC_ORNAMENTS.length, 5);
+  assert.deepEqual(REGISTRY.keys('ornament'), ORNAMENTS.concat(MEDIA_ORNAMENTS, CINEMATIC_ORNAMENTS).map((r) => r.key).sort());
   for (const row of MEDIA_ORNAMENTS) {
     const d = def('ornament', row.key);
     assert.deepEqual([d.label, d.scope, d.follow, d.tags, d.season, d.fallback, d.pool, d.needs],
       [{ ja: row.ja, en: row.en }, row.scope, row.follow, ['soft'], null, false, false, ['media']], row.key + ' (DESIGN_2_1 §11.5.7)');
+  }
+  for (const row of CINEMATIC_ORNAMENTS) {
+    const d = def('ornament', row.key);
+    assert.deepEqual([d.label, d.scope, d.follow, d.family, d.fallback, d.pool],
+      [{ ja: row.ja, en: row.en }, row.scope, row.follow, 'cinematic', false, false], row.key + ' (DESIGN_2_1 §18)');
+    assert.ok(!REGISTRY.pool('ornament', { scope: 'run' }).includes(row.key), row.key + ': explicit selection only');
   }
   for (const row of ORNAMENTS) {
     const d = def('ornament', row.key);
@@ -272,7 +284,9 @@ function coverage(plan, scene, t0) {
 
 test('long segments: what drifts stays spread over the frame at 60 s and 300 s (§1.3.4, §7.1.4)', () => {
   // Every count param at its maximum, so a half of the frame holds enough items for the counts to mean something.
-  for (const d of DEFS.filter((x) => x.kind === 'ground' || x.scope === 'run')) {
+  // Cinematic one-pass sequences deliberately converge to a star or expand into a burst. Their finite windows and
+  // phases are checked by cinematic_effects.py; the established drifters retain their original spread contract.
+  for (const d of DEFS.filter((x) => (x.kind === 'ground' || x.scope === 'run') && x.family !== 'cinematic')) {
     const params = {};
     for (const { name, spec } of REGISTRY.params(d.kind, d.key)) if (spec.type === 'int' && !spec.shared) params[name] = spec.max;
     for (const aspect of ['16:9', '9:16']) {

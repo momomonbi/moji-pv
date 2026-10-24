@@ -1,6 +1,6 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-XbHWQiKDMTS2D6fN21e8rQHE782tnfuo+Uc5ZN4Bo+o=' 'wasm-unsafe-eval'; style-src 'sha256-HY8hkmzwHOpHUoa6OMoyoj9OJOsJZz4S59Tzm2haHMU=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://generativelanguage.googleapis.com https://api.anthropic.com https://momomonbi.github.io; img-src data: blob:; media-src blob:; worker-src blob:; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-n6R8aHiIAHhW14f5N0fuq6vf/vZyi2z71oUSec+YibY=' 'sha256-yv7ViM7S5JyokJ7kaseYttsr7xnnEqa6HI2fV4NZc0c=' 'sha256-IKbsTNS6RbvOx6I0SjTRTJu8hpDV1zgD/0eJqLTdnfc=' 'wasm-unsafe-eval'; style-src 'sha256-724opEwQliKQFmqx9jXt7+L7P9DY9d/5HdyyRyC2Dlc=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://generativelanguage.googleapis.com https://api.anthropic.com https://momomonbi.github.io; img-src data: blob:; media-src blob:; worker-src blob:; base-uri 'none'; form-action 'none'">
 <title>Moji PV Maker</title><style>/* 文字PVメーカー v2 — original work. The UI stylesheet: a calm dark theme, Japanese-first type, visible focus (inlined and hashed by build.py). */
 
 :root {
@@ -1440,6 +1440,14 @@ details.ai-group > summary { cursor: pointer; list-style-position: inside; }
   .camera-preview-canvas { max-height: 42dvh; }
   .camera-preview-options { gap: 8px; }
 }
+.cinematic-cards { display: grid; gap: 8px; margin: 10px 0; }
+.cinematic-card { display: flex; align-items: stretch; gap: 8px; border: 1px solid var(--line); border-radius: 8px; padding: 6px; }
+.cinematic-card.is-on { border-color: var(--accent); }
+.cinematic-apply { flex: 1; min-width: 0; text-align: left; padding: 6px; background: transparent; border: 0; color: inherit; cursor: pointer; }
+.cinematic-apply strong, .cinematic-apply span { display: block; }
+.cinematic-apply span { margin-top: 4px; }
+.cinematic-preview { align-self: center; flex-shrink: 0; }
+.cinematic-range { font-variant-numeric: tabular-nums; }
 </style></head>
 <body><div id="app"></div>
 <script>"use strict";var Mp4Muxer=(()=>{var we=Object.defineProperty,at=Object.getOwnPropertyDescriptor,nt=Object.getOwnPropertyNames,ot=Object.prototype.hasOwnProperty,ht=(e,t)=>{for(var s in t)we(e,s,{get:t[s],enumerable:!0})},lt=(e,t,s,r)=>{if(t&&typeof t=="object"||typeof t=="function")for(let a of nt(t))!ot.call(e,a)&&a!==s&&we(e,a,{get:()=>t[a],enumerable:!(r=at(t,a))||r.enumerable});return e},ft=e=>lt(we({},"__esModule",{value:!0}),e),ve=(e,t,s)=>{if(!t.has(e))throw TypeError("Cannot "+s)},i=(e,t,s)=>(ve(e,t,"read from private field"),s?s.call(e):t.get(e)),d=(e,t,s)=>{if(t.has(e))throw TypeError("Cannot add the same private member more than once");t instanceof WeakSet?t.add(e):t.set(e,s)},C=(e,t,s,r)=>(ve(e,t,"write to private field"),r?r.call(e,s):t.set(e,s),s),ut=(e,t,s,r)=>({set _(a){C(e,t,a,s)},get _(){return i(e,t,r)}}),m=(e,t,s)=>(ve(e,t,"access private method"),s),Re={};ht(Re,{ArrayBufferTarget:()=>qe,FileSystemWritableFileStreamTarget:()=>Xe,Muxer:()=>vi,StreamTarget:()=>Te});var p=new Uint8Array(8),z=new DataView(p.buffer),y=e=>[(e%256+256)%256],c=e=>(z.setUint16(0,e,!1),[p[0],p[1]]),dt=e=>(z.setInt16(0,e,!1),[p[0],p[1]]),Pe=e=>(z.setUint32(0,e,!1),[p[1],p[2],p[3]]),n=e=>(z.setUint32(0,e,!1),[p[0],p[1],p[2],p[3]]),mt=e=>(z.setInt32(0,e,!1),[p[0],p[1],p[2],p[3]]),x=e=>(z.setUint32(0,Math.floor(e/2**32),!1),z.setUint32(4,e,!1),[p[0],p[1],p[2],p[3],p[4],p[5],p[6],p[7]]),ge=e=>(z.setInt16(0,2**8*e,!1),[p[0],p[1]]),A=e=>(z.setInt32(0,2**16*e,!1),[p[0],p[1],p[2],p[3]]),ye=e=>(z.setInt32(0,2**30*e,!1),[p[0],p[1],p[2],p[3]]),E=(e,t=!1)=>{let s=Array(e.length).fill(null).map((r,a)=>e.charCodeAt(a));return t&&s.push(0),s},se=e=>e&&e[e.length-1],Ce=e=>{let t;for(let s of e)(!t||s.presentationTimestamp>t.presentationTimestamp)&&(t=s);return t},O=(e,t,s=!0)=>{let r=e*t;return s?Math.round(r):r},Le=e=>{let t=e*(Math.PI/180),s=Math.cos(t),r=Math.sin(t);return[s,r,0,-r,s,0,0,0,1]},Ve=Le(0),je=e=>[A(e[0]),A(e[1]),ye(e[2]),A(e[3]),A(e[4]),ye(e[5]),A(e[6]),A(e[7]),ye(e[8])],X=e=>!e||typeof e!="object"?e:Array.isArray(e)?e.map(X):Object.fromEntries(Object.entries(e).map(([t,s])=>[t,X(s)])),V=e=>e>=0&&e<2**32,v=(e,t,s)=>({type:e,contents:t&&new Uint8Array(t.flat(10)),children:s}),w=(e,t,s,r,a)=>v(e,[y(t),Pe(s),r??[]],a),pt=e=>{let t=512;return e.fragmented?v("ftyp",[E("iso5"),n(t),E("iso5"),E("iso6"),E("mp41")]):v("ftyp",[E("isom"),n(t),E("isom"),e.holdsAvc?E("avc1"):[],E("mp41")])},Se=e=>({type:"mdat",largeSize:e}),ct=e=>({type:"free",size:e}),re=(e,t,s=!1)=>v("moov",null,[wt(t,e),...e.map(r=>vt(r,t)),s?Gt(e):null]),wt=(e,t)=>{let s=O(Math.max(0,...t.filter(l=>l.samples.length>0).map(l=>{const u=Ce(l.samples);return u.presentationTimestamp+u.duration})),Ae),r=Math.max(...t.map(l=>l.id))+1,a=!V(e)||!V(s),o=a?x:n;return w("mvhd",+a,0,[o(e),o(e),n(Ae),o(s),A(1),ge(1),Array(10).fill(0),je(Ve),Array(24).fill(0),n(r)])},vt=(e,t)=>v("trak",null,[gt(e,t),yt(e,t)]),gt=(e,t)=>{let s=Ce(e.samples),r=O(s?s.presentationTimestamp+s.duration:0,Ae),a=!V(t)||!V(r),o=a?x:n,l;return e.info.type==="video"?l=typeof e.info.rotation=="number"?Le(e.info.rotation):e.info.rotation:l=Ve,w("tkhd",+a,3,[o(t),o(t),n(e.id),n(0),o(r),Array(8).fill(0),c(0),c(0),ge(e.info.type==="audio"?1:0),c(0),je(l),A(e.info.type==="video"?e.info.width:0),A(e.info.type==="video"?e.info.height:0)])},yt=(e,t)=>v("mdia",null,[Ct(e,t),St(e.info.type==="video"?"vide":"soun"),Tt(e)]),Ct=(e,t)=>{let s=Ce(e.samples),r=O(s?s.presentationTimestamp+s.duration:0,e.timescale),a=!V(t)||!V(r),o=a?x:n;return w("mdhd",+a,0,[o(t),o(t),n(e.timescale),o(r),c(21956),c(0)])},St=e=>w("hdlr",0,0,[E("mhlr"),E(e),n(0),n(0),n(0),E("mp4-muxer-hdlr",!0)]),Tt=e=>v("minf",null,[e.info.type==="video"?bt():_t(),kt(),At(e)]),bt=()=>w("vmhd",0,1,[c(0),c(0),c(0),c(0)]),_t=()=>w("smhd",0,0,[c(0),c(0)]),kt=()=>v("dinf",null,[Et()]),Et=()=>w("dref",0,0,[n(1)],[zt()]),zt=()=>w("url ",0,1),At=e=>{const t=e.compositionTimeOffsetTable.length>1||e.compositionTimeOffsetTable.some(s=>s.sampleCompositionTimeOffset!==0);return v("stbl",null,[Ot(e),Vt(e),jt(e),$t(e),Ht(e),qt(e),t?Xt(e):null])},Ot=e=>w("stsd",0,0,[n(1)],[e.info.type==="video"?Mt(ri[e.info.codec],e):Rt(ni[e.info.codec],e)]),Mt=(e,t)=>v(e,[Array(6).fill(0),c(1),c(0),c(0),Array(12).fill(0),c(t.info.width),c(t.info.height),n(4718592),n(4718592),n(0),c(1),Array(32).fill(0),c(24),dt(65535)],[ai[t.info.codec](t),t.info.decoderConfig.colorSpace?Ut(t):null]),Bt={bt709:1,bt470bg:5,smpte170m:6},It={bt709:1,smpte170m:6,"iec61966-2-1":13},Dt={rgb:0,bt709:1,bt470bg:5,smpte170m:6},Ut=e=>v("colr",[E("nclx"),c(Bt[e.info.decoderConfig.colorSpace.primaries]),c(It[e.info.decoderConfig.colorSpace.transfer]),c(Dt[e.info.decoderConfig.colorSpace.matrix]),y((e.info.decoderConfig.colorSpace.fullRange?1:0)<<7)]),xt=e=>e.info.decoderConfig&&v("avcC",[...new Uint8Array(e.info.decoderConfig.description)]),Wt=e=>e.info.decoderConfig&&v("hvcC",[...new Uint8Array(e.info.decoderConfig.description)]),Ft=e=>{if(!e.info.decoderConfig)return null;let t=e.info.decoderConfig;if(!t.colorSpace)throw new Error("'colorSpace' is required in the decoder config for VP9.");let s=t.codec.split("."),r=Number(s[1]),a=Number(s[2]),u=(Number(s[3])<<4)+(0<<1)+Number(t.colorSpace.fullRange);return w("vpcC",1,0,[y(r),y(a),y(u),y(2),y(2),y(2),c(0)])},Nt=()=>{let s=(1<<7)+1;return v("av1C",[s,0,0,0])},Rt=(e,t)=>v(e,[Array(6).fill(0),c(1),c(0),c(0),n(0),c(t.info.numberOfChannels),c(16),c(0),c(0),A(t.info.sampleRate)],[oi[t.info.codec](t)]),Pt=e=>{let t=new Uint8Array(e.info.decoderConfig.description);return w("esds",0,0,[n(58753152),y(32+t.byteLength),c(1),y(0),n(75530368),y(18+t.byteLength),y(64),y(21),Pe(0),n(130071),n(130071),n(92307584),y(t.byteLength),...t,n(109084800),y(1),y(2)])},Lt=e=>{let t=3840,s=0;const r=e.info.decoderConfig?.description;if(r){if(r.byteLength<18)throw new TypeError("Invalid decoder description provided for Opus; must be at least 18 bytes long.");const a=ArrayBuffer.isView(r)?new DataView(r.buffer,r.byteOffset,r.byteLength):new DataView(r);t=a.getUint16(10,!0),s=a.getInt16(14,!0)}return v("dOps",[y(0),y(e.info.numberOfChannels),c(t),n(e.info.sampleRate),ge(s),y(0)])},Vt=e=>w("stts",0,0,[n(e.timeToSampleTable.length),e.timeToSampleTable.map(t=>[n(t.sampleCount),n(t.sampleDelta)])]),jt=e=>{if(e.samples.every(s=>s.type==="key"))return null;let t=[...e.samples.entries()].filter(([,s])=>s.type==="key");return w("stss",0,0,[n(t.length),t.map(([s])=>n(s+1))])},$t=e=>w("stsc",0,0,[n(e.compactlyCodedChunkTable.length),e.compactlyCodedChunkTable.map(t=>[n(t.firstChunk),n(t.samplesPerChunk),n(1)])]),Ht=e=>w("stsz",0,0,[n(0),n(e.samples.length),e.samples.map(t=>n(t.size))]),qt=e=>e.finalizedChunks.length>0&&se(e.finalizedChunks).offset>=2**32?w("co64",0,0,[n(e.finalizedChunks.length),e.finalizedChunks.map(t=>x(t.offset))]):w("stco",0,0,[n(e.finalizedChunks.length),e.finalizedChunks.map(t=>n(t.offset))]),Xt=e=>w("ctts",0,0,[n(e.compositionTimeOffsetTable.length),e.compositionTimeOffsetTable.map(t=>[n(t.sampleCount),n(t.sampleCompositionTimeOffset)])]),Gt=e=>v("mvex",null,e.map(Zt)),Zt=e=>w("trex",0,0,[n(e.id),n(1),n(0),n(0),n(0)]),$e=(e,t)=>v("moof",null,[Kt(e),...t.map(Qt)]),Kt=e=>w("mfhd",0,0,[n(e)]),He=e=>{let t=0,s=0,r=0,a=0,o=e.type==="delta";return s|=+o,o?t|=1:t|=2,t<<24|s<<16|r<<8|a},Qt=e=>v("traf",null,[Jt(e),Yt(e),ei(e)]),Jt=e=>{let t=0;t|=8,t|=16,t|=32,t|=131072;let s=e.currentChunk.samples[1]??e.currentChunk.samples[0],r={duration:s.timescaleUnitsToNextSample,size:s.size,flags:He(s)};return w("tfhd",0,t,[n(e.id),n(r.duration),n(r.size),n(r.flags)])},Yt=e=>w("tfdt",1,0,[x(O(e.currentChunk.startTimestamp,e.timescale))]),ei=e=>{let t=e.currentChunk.samples.map(D=>D.timescaleUnitsToNextSample),s=e.currentChunk.samples.map(D=>D.size),r=e.currentChunk.samples.map(He),a=e.currentChunk.samples.map(D=>O(D.presentationTimestamp-D.decodeTimestamp,e.timescale)),o=new Set(t),l=new Set(s),u=new Set(r),g=new Set(a),b=u.size===2&&r[0]!==r[1],U=o.size>1,ie=l.size>1,st=!b&&u.size>1,rt=g.size>1||[...g].some(D=>D!==0),L=0;return L|=1,L|=4*+b,L|=256*+U,L|=512*+ie,L|=1024*+st,L|=2048*+rt,w("trun",1,L,[n(e.currentChunk.samples.length),n(e.currentChunk.offset-e.currentChunk.moofOffset||0),b?n(r[0]):[],e.currentChunk.samples.map((D,ce)=>[U?n(t[ce]):[],ie?n(s[ce]):[],st?n(r[ce]):[],rt?mt(a[ce]):[]])])},ti=e=>v("mfra",null,[...e.map(ii),si()]),ii=(e,t)=>w("tfra",1,0,[n(e.id),n(63),n(e.finalizedChunks.length),e.finalizedChunks.map(r=>[x(O(r.startTimestamp,e.timescale)),x(r.moofOffset),n(t+1),n(1),n(1)])]),si=()=>w("mfro",0,0,[n(0)]),ri={avc:"avc1",hevc:"hvc1",vp9:"vp09",av1:"av01"},ai={avc:xt,hevc:Wt,vp9:Ft,av1:Nt},ni={aac:"mp4a",opus:"Opus"},oi={aac:Pt,opus:Lt},hi=Symbol("isTarget"),ae=class{},qe=class extends ae{constructor(){super(...arguments),this.buffer=null}},Te=class extends ae{constructor(e){if(super(),this.options=e,typeof e!="object")throw new TypeError("StreamTarget requires an options object to be passed to its constructor.");if(e.onData){if(typeof e.onData!="function")throw new TypeError("options.onData, when provided, must be a function.");if(e.onData.length<2)throw new TypeError("options.onData, when provided, must be a function that takes in at least two arguments (data and position). Ignoring the position argument, which specifies the byte offset at which the data is to be written, can lead to broken outputs.")}if(e.chunked!==void 0&&typeof e.chunked!="boolean")throw new TypeError("options.chunked, when provided, must be a boolean.");if(e.chunkSize!==void 0&&(!Number.isInteger(e.chunkSize)||e.chunkSize<1024))throw new TypeError("options.chunkSize, when provided, must be an integer and not smaller than 1024.")}},Xe=class extends ae{constructor(e,t){if(super(),this.stream=e,this.options=t,!(e instanceof FileSystemWritableFileStream))throw new TypeError("FileSystemWritableFileStreamTarget requires a FileSystemWritableFileStream instance.");if(t!==void 0&&typeof t!="object")throw new TypeError("FileSystemWritableFileStreamTarget's options, when provided, must be an object.");if(t&&t.chunkSize!==void 0&&(!Number.isInteger(t.chunkSize)||t.chunkSize<=0))throw new TypeError("options.chunkSize, when provided, must be a positive integer")}},W,j,Ge=class{constructor(){this.pos=0,d(this,W,new Uint8Array(8)),d(this,j,new DataView(i(this,W).buffer)),this.offsets=new WeakMap}seek(e){this.pos=e}writeU32(e){i(this,j).setUint32(0,e,!1),this.write(i(this,W).subarray(0,4))}writeU64(e){i(this,j).setUint32(0,Math.floor(e/2**32),!1),i(this,j).setUint32(4,e,!1),this.write(i(this,W).subarray(0,8))}writeAscii(e){for(let t=0;t<e.length;t++)i(this,j).setUint8(t%8,e.charCodeAt(t)),t%8===7&&this.write(i(this,W));e.length%8!==0&&this.write(i(this,W).subarray(0,e.length%8))}writeBox(e){if(this.offsets.set(e,this.pos),e.contents&&!e.children)this.writeBoxHeader(e,e.size??e.contents.byteLength+8),this.write(e.contents);else{let t=this.pos;if(this.writeBoxHeader(e,0),e.contents&&this.write(e.contents),e.children)for(let a of e.children)a&&this.writeBox(a);let s=this.pos,r=e.size??s-t;this.seek(t),this.writeBoxHeader(e,r),this.seek(s)}}writeBoxHeader(e,t){this.writeU32(e.largeSize?1:t),this.writeAscii(e.type),e.largeSize&&this.writeU64(t)}measureBoxHeader(e){return 8+(e.largeSize?8:0)}patchBox(e){let t=this.pos;this.seek(this.offsets.get(e)),this.writeBox(e),this.seek(t)}measureBox(e){if(e.contents&&!e.children)return this.measureBoxHeader(e)+e.contents.byteLength;{let t=this.measureBoxHeader(e);if(e.contents&&(t+=e.contents.byteLength),e.children)for(let s of e.children)s&&(t+=this.measureBox(s));return t}}};W=new WeakMap,j=new WeakMap;var ne,F,G,Z,oe,be,li=class extends Ge{constructor(e){super(),d(this,oe),d(this,ne,void 0),d(this,F,new ArrayBuffer(2**16)),d(this,G,new Uint8Array(i(this,F))),d(this,Z,0),C(this,ne,e)}write(e){m(this,oe,be).call(this,this.pos+e.byteLength),i(this,G).set(e,this.pos),this.pos+=e.byteLength,C(this,Z,Math.max(i(this,Z),this.pos))}finalize(){m(this,oe,be).call(this,this.pos),i(this,ne).buffer=i(this,F).slice(0,Math.max(i(this,Z),this.pos))}};ne=new WeakMap,F=new WeakMap,G=new WeakMap,Z=new WeakMap,oe=new WeakSet,be=function(e){let t=i(this,F).byteLength;for(;t<e;)t*=2;if(t===i(this,F).byteLength)return;let s=new ArrayBuffer(t),r=new Uint8Array(s);r.set(i(this,G),0),C(this,F,s),C(this,G,r)};var fi=2**24,ui=2,K,N,Q,B,_,he,_e,ke,Ze,Ee,Ke,J,le,ze=class extends Ge{constructor(e){super(),d(this,he),d(this,ke),d(this,Ee),d(this,J),d(this,K,void 0),d(this,N,[]),d(this,Q,void 0),d(this,B,void 0),d(this,_,[]),C(this,K,e),C(this,Q,e.options?.chunked??!1),C(this,B,e.options?.chunkSize??fi)}write(e){i(this,N).push({data:e.slice(),start:this.pos}),this.pos+=e.byteLength}flush(){if(i(this,N).length===0)return;let e=[],t=[...i(this,N)].sort((s,r)=>s.start-r.start);e.push({start:t[0].start,size:t[0].data.byteLength});for(let s=1;s<t.length;s++){let r=e[e.length-1],a=t[s];a.start<=r.start+r.size?r.size=Math.max(r.size,a.start+a.data.byteLength-r.start):e.push({start:a.start,size:a.data.byteLength})}for(let s of e){s.data=new Uint8Array(s.size);for(let r of i(this,N))s.start<=r.start&&r.start<s.start+s.size&&s.data.set(r.data,r.start-s.start);i(this,Q)?(m(this,he,_e).call(this,s.data,s.start),m(this,J,le).call(this)):i(this,K).options.onData?.(s.data,s.start)}i(this,N).length=0}finalize(){i(this,Q)&&m(this,J,le).call(this,!0)}};K=new WeakMap,N=new WeakMap,Q=new WeakMap,B=new WeakMap,_=new WeakMap,he=new WeakSet,_e=function(e,t){let s=i(this,_).findIndex(u=>u.start<=t&&t<u.start+i(this,B));s===-1&&(s=m(this,Ee,Ke).call(this,t));let r=i(this,_)[s],a=t-r.start,o=e.subarray(0,Math.min(i(this,B)-a,e.byteLength));r.data.set(o,a);let l={start:a,end:a+o.byteLength};if(m(this,ke,Ze).call(this,r,l),r.written[0].start===0&&r.written[0].end===i(this,B)&&(r.shouldFlush=!0),i(this,_).length>ui){for(let u=0;u<i(this,_).length-1;u++)i(this,_)[u].shouldFlush=!0;m(this,J,le).call(this)}o.byteLength<e.byteLength&&m(this,he,_e).call(this,e.subarray(o.byteLength),t+o.byteLength)},ke=new WeakSet,Ze=function(e,t){let s=0,r=e.written.length-1,a=-1;for(;s<=r;){let o=Math.floor(s+(r-s+1)/2);e.written[o].start<=t.start?(s=o+1,a=o):r=o-1}for(e.written.splice(a+1,0,t),(a===-1||e.written[a].end<t.start)&&a++;a<e.written.length-1&&e.written[a].end>=e.written[a+1].start;)e.written[a].end=Math.max(e.written[a].end,e.written[a+1].end),e.written.splice(a+1,1)},Ee=new WeakSet,Ke=function(e){let s={start:Math.floor(e/i(this,B))*i(this,B),data:new Uint8Array(i(this,B)),written:[],shouldFlush:!1};return i(this,_).push(s),i(this,_).sort((r,a)=>r.start-a.start),i(this,_).indexOf(s)},J=new WeakSet,le=function(e=!1){for(let t=0;t<i(this,_).length;t++){let s=i(this,_)[t];if(!(!s.shouldFlush&&!e)){for(let r of s.written)i(this,K).options.onData?.(s.data.subarray(r.start,r.end),s.start+r.start);i(this,_).splice(t--,1)}}};var di=class extends ze{constructor(e){super(new Te({onData:(t,s)=>e.stream.write({type:"write",data:t,position:s}),chunked:!0,chunkSize:e.options?.chunkSize}))}},Ae=1e3,mi=["avc","hevc","vp9","av1"],pi=["aac","opus"],ci=2082844800,wi=["strict","offset","cross-track-offset"],h,f,fe,k,T,S,$,H,Oe,R,P,Y,Me,Qe,Be,Je,Ie,Ye,De,et,Ue,tt,ue,xe,M,I,We,it,ee,de,me,Fe,q,te,pe,Ne,vi=class{constructor(e){if(d(this,Me),d(this,Be),d(this,Ie),d(this,De),d(this,Ue),d(this,ue),d(this,M),d(this,We),d(this,ee),d(this,me),d(this,q),d(this,pe),d(this,h,void 0),d(this,f,void 0),d(this,fe,void 0),d(this,k,void 0),d(this,T,null),d(this,S,null),d(this,$,Math.floor(Date.now()/1e3)+ci),d(this,H,[]),d(this,Oe,1),d(this,R,[]),d(this,P,[]),d(this,Y,!1),m(this,Me,Qe).call(this,e),e.video=X(e.video),e.audio=X(e.audio),e.fastStart=X(e.fastStart),this.target=e.target,C(this,h,{firstTimestampBehavior:"strict",...e}),e.target instanceof qe)C(this,f,new li(e.target));else if(e.target instanceof Te)C(this,f,new ze(e.target));else if(e.target instanceof Xe)C(this,f,new di(e.target));else throw new Error(`Invalid target: ${e.target}`);m(this,De,et).call(this),m(this,Be,Je).call(this)}addVideoChunk(e,t,s,r){if(!(e instanceof EncodedVideoChunk))throw new TypeError("addVideoChunk's first argument (sample) must be of type EncodedVideoChunk.");if(t&&typeof t!="object")throw new TypeError("addVideoChunk's second argument (meta), when provided, must be an object.");if(s!==void 0&&(!Number.isFinite(s)||s<0))throw new TypeError("addVideoChunk's third argument (timestamp), when provided, must be a non-negative real number.");if(r!==void 0&&!Number.isFinite(r))throw new TypeError("addVideoChunk's fourth argument (compositionTimeOffset), when provided, must be a real number.");let a=new Uint8Array(e.byteLength);e.copyTo(a),this.addVideoChunkRaw(a,e.type,s??e.timestamp,e.duration,t,r)}addVideoChunkRaw(e,t,s,r,a,o){if(!(e instanceof Uint8Array))throw new TypeError("addVideoChunkRaw's first argument (data) must be an instance of Uint8Array.");if(t!=="key"&&t!=="delta")throw new TypeError("addVideoChunkRaw's second argument (type) must be either 'key' or 'delta'.");if(!Number.isFinite(s)||s<0)throw new TypeError("addVideoChunkRaw's third argument (timestamp) must be a non-negative real number.");if(!Number.isFinite(r)||r<0)throw new TypeError("addVideoChunkRaw's fourth argument (duration) must be a non-negative real number.");if(a&&typeof a!="object")throw new TypeError("addVideoChunkRaw's fifth argument (meta), when provided, must be an object.");if(o!==void 0&&!Number.isFinite(o))throw new TypeError("addVideoChunkRaw's sixth argument (compositionTimeOffset), when provided, must be a real number.");if(m(this,pe,Ne).call(this),!i(this,h).video)throw new Error("No video track declared.");if(typeof i(this,h).fastStart=="object"&&i(this,T).samples.length===i(this,h).fastStart.expectedVideoChunks)throw new Error(`Cannot add more video chunks than specified in 'fastStart' (${i(this,h).fastStart.expectedVideoChunks}).`);let l=m(this,ue,xe).call(this,i(this,T),e,t,s,r,a,o);if(i(this,h).fastStart==="fragmented"&&i(this,S)){for(;i(this,P).length>0&&i(this,P)[0].decodeTimestamp<=l.decodeTimestamp;){let u=i(this,P).shift();m(this,M,I).call(this,i(this,S),u)}l.decodeTimestamp<=i(this,S).lastDecodeTimestamp?m(this,M,I).call(this,i(this,T),l):i(this,R).push(l)}else m(this,M,I).call(this,i(this,T),l)}addAudioChunk(e,t,s){if(!(e instanceof EncodedAudioChunk))throw new TypeError("addAudioChunk's first argument (sample) must be of type EncodedAudioChunk.");if(t&&typeof t!="object")throw new TypeError("addAudioChunk's second argument (meta), when provided, must be an object.");if(s!==void 0&&(!Number.isFinite(s)||s<0))throw new TypeError("addAudioChunk's third argument (timestamp), when provided, must be a non-negative real number.");let r=new Uint8Array(e.byteLength);e.copyTo(r),this.addAudioChunkRaw(r,e.type,s??e.timestamp,e.duration,t)}addAudioChunkRaw(e,t,s,r,a){if(!(e instanceof Uint8Array))throw new TypeError("addAudioChunkRaw's first argument (data) must be an instance of Uint8Array.");if(t!=="key"&&t!=="delta")throw new TypeError("addAudioChunkRaw's second argument (type) must be either 'key' or 'delta'.");if(!Number.isFinite(s)||s<0)throw new TypeError("addAudioChunkRaw's third argument (timestamp) must be a non-negative real number.");if(!Number.isFinite(r)||r<0)throw new TypeError("addAudioChunkRaw's fourth argument (duration) must be a non-negative real number.");if(a&&typeof a!="object")throw new TypeError("addAudioChunkRaw's fifth argument (meta), when provided, must be an object.");if(m(this,pe,Ne).call(this),!i(this,h).audio)throw new Error("No audio track declared.");if(typeof i(this,h).fastStart=="object"&&i(this,S).samples.length===i(this,h).fastStart.expectedAudioChunks)throw new Error(`Cannot add more audio chunks than specified in 'fastStart' (${i(this,h).fastStart.expectedAudioChunks}).`);let o=m(this,ue,xe).call(this,i(this,S),e,t,s,r,a);if(i(this,h).fastStart==="fragmented"&&i(this,T)){for(;i(this,R).length>0&&i(this,R)[0].decodeTimestamp<=o.decodeTimestamp;){let l=i(this,R).shift();m(this,M,I).call(this,i(this,T),l)}o.decodeTimestamp<=i(this,T).lastDecodeTimestamp?m(this,M,I).call(this,i(this,S),o):i(this,P).push(o)}else m(this,M,I).call(this,i(this,S),o)}finalize(){if(i(this,Y))throw new Error("Cannot finalize a muxer more than once.");if(i(this,h).fastStart==="fragmented"){for(let t of i(this,R))m(this,M,I).call(this,i(this,T),t);for(let t of i(this,P))m(this,M,I).call(this,i(this,S),t);m(this,me,Fe).call(this,!1)}else i(this,T)&&m(this,ee,de).call(this,i(this,T)),i(this,S)&&m(this,ee,de).call(this,i(this,S));let e=[i(this,T),i(this,S)].filter(Boolean);if(i(this,h).fastStart==="in-memory"){let t;for(let r=0;r<2;r++){let a=re(e,i(this,$)),o=i(this,f).measureBox(a);t=i(this,f).measureBox(i(this,k));let l=i(this,f).pos+o+t;for(let u of i(this,H)){u.offset=l;for(let{data:g}of u.samples)l+=g.byteLength,t+=g.byteLength}if(l<2**32)break;t>=2**32&&(i(this,k).largeSize=!0)}let s=re(e,i(this,$));i(this,f).writeBox(s),i(this,k).size=t,i(this,f).writeBox(i(this,k));for(let r of i(this,H))for(let a of r.samples)i(this,f).write(a.data),a.data=null}else if(i(this,h).fastStart==="fragmented"){let t=i(this,f).pos,s=ti(e);i(this,f).writeBox(s);let r=i(this,f).pos-t;i(this,f).seek(i(this,f).pos-4),i(this,f).writeU32(r)}else{let t=i(this,f).offsets.get(i(this,k)),s=i(this,f).pos-t;i(this,k).size=s,i(this,k).largeSize=s>=2**32,i(this,f).patchBox(i(this,k));let r=re(e,i(this,$));if(typeof i(this,h).fastStart=="object"){i(this,f).seek(i(this,fe)),i(this,f).writeBox(r);let a=t-i(this,f).pos;i(this,f).writeBox(ct(a))}else i(this,f).writeBox(r)}m(this,q,te).call(this),i(this,f).finalize(),C(this,Y,!0)}};return h=new WeakMap,f=new WeakMap,fe=new WeakMap,k=new WeakMap,T=new WeakMap,S=new WeakMap,$=new WeakMap,H=new WeakMap,Oe=new WeakMap,R=new WeakMap,P=new WeakMap,Y=new WeakMap,Me=new WeakSet,Qe=function(e){if(typeof e!="object")throw new TypeError("The muxer requires an options object to be passed to its constructor.");if(!(e.target instanceof ae))throw new TypeError("The target must be provided and an instance of Target.");if(e.video){if(!mi.includes(e.video.codec))throw new TypeError(`Unsupported video codec: ${e.video.codec}`);if(!Number.isInteger(e.video.width)||e.video.width<=0)throw new TypeError(`Invalid video width: ${e.video.width}. Must be a positive integer.`);if(!Number.isInteger(e.video.height)||e.video.height<=0)throw new TypeError(`Invalid video height: ${e.video.height}. Must be a positive integer.`);const t=e.video.rotation;if(typeof t=="number"&&![0,90,180,270].includes(t))throw new TypeError(`Invalid video rotation: ${t}. Has to be 0, 90, 180 or 270.`);if(Array.isArray(t)&&(t.length!==9||t.some(s=>typeof s!="number")))throw new TypeError(`Invalid video transformation matrix: ${t.join()}`);if(e.video.frameRate!==void 0&&(!Number.isInteger(e.video.frameRate)||e.video.frameRate<=0))throw new TypeError(`Invalid video frame rate: ${e.video.frameRate}. Must be a positive integer.`)}if(e.audio){if(!pi.includes(e.audio.codec))throw new TypeError(`Unsupported audio codec: ${e.audio.codec}`);if(!Number.isInteger(e.audio.numberOfChannels)||e.audio.numberOfChannels<=0)throw new TypeError(`Invalid number of audio channels: ${e.audio.numberOfChannels}. Must be a positive integer.`);if(!Number.isInteger(e.audio.sampleRate)||e.audio.sampleRate<=0)throw new TypeError(`Invalid audio sample rate: ${e.audio.sampleRate}. Must be a positive integer.`)}if(e.firstTimestampBehavior&&!wi.includes(e.firstTimestampBehavior))throw new TypeError(`Invalid first timestamp behavior: ${e.firstTimestampBehavior}`);if(typeof e.fastStart=="object"){if(e.video){if(e.fastStart.expectedVideoChunks===void 0)throw new TypeError("'fastStart' is an object but is missing property 'expectedVideoChunks'.");if(!Number.isInteger(e.fastStart.expectedVideoChunks)||e.fastStart.expectedVideoChunks<0)throw new TypeError("'expectedVideoChunks' must be a non-negative integer.")}if(e.audio){if(e.fastStart.expectedAudioChunks===void 0)throw new TypeError("'fastStart' is an object but is missing property 'expectedAudioChunks'.");if(!Number.isInteger(e.fastStart.expectedAudioChunks)||e.fastStart.expectedAudioChunks<0)throw new TypeError("'expectedAudioChunks' must be a non-negative integer.")}}else if(![!1,"in-memory","fragmented"].includes(e.fastStart))throw new TypeError("'fastStart' option must be false, 'in-memory', 'fragmented' or an object.");if(e.minFragmentDuration!==void 0&&(!Number.isFinite(e.minFragmentDuration)||e.minFragmentDuration<0))throw new TypeError("'minFragmentDuration' must be a non-negative number.")},Be=new WeakSet,Je=function(){if(i(this,f).writeBox(pt({holdsAvc:i(this,h).video?.codec==="avc",fragmented:i(this,h).fastStart==="fragmented"})),C(this,fe,i(this,f).pos),i(this,h).fastStart==="in-memory")C(this,k,Se(!1));else if(i(this,h).fastStart!=="fragmented"){if(typeof i(this,h).fastStart=="object"){let e=m(this,Ie,Ye).call(this);i(this,f).seek(i(this,f).pos+e)}C(this,k,Se(!0)),i(this,f).writeBox(i(this,k))}m(this,q,te).call(this)},Ie=new WeakSet,Ye=function(){if(typeof i(this,h).fastStart!="object")return;let e=0,t=[i(this,h).fastStart.expectedVideoChunks,i(this,h).fastStart.expectedAudioChunks];for(let s of t)s&&(e+=8*Math.ceil(.6666666666666666*s),e+=4*s,e+=12*Math.ceil(.6666666666666666*s),e+=4*s,e+=8*s);return e+=4096,e},De=new WeakSet,et=function(){if(i(this,h).video&&C(this,T,{id:1,info:{type:"video",codec:i(this,h).video.codec,width:i(this,h).video.width,height:i(this,h).video.height,rotation:i(this,h).video.rotation??0,decoderConfig:null},timescale:i(this,h).video.frameRate??57600,samples:[],finalizedChunks:[],currentChunk:null,firstDecodeTimestamp:void 0,lastDecodeTimestamp:-1,timeToSampleTable:[],compositionTimeOffsetTable:[],lastTimescaleUnits:null,lastSample:null,compactlyCodedChunkTable:[]}),i(this,h).audio&&(C(this,S,{id:i(this,h).video?2:1,info:{type:"audio",codec:i(this,h).audio.codec,numberOfChannels:i(this,h).audio.numberOfChannels,sampleRate:i(this,h).audio.sampleRate,decoderConfig:null},timescale:i(this,h).audio.sampleRate,samples:[],finalizedChunks:[],currentChunk:null,firstDecodeTimestamp:void 0,lastDecodeTimestamp:-1,timeToSampleTable:[],compositionTimeOffsetTable:[],lastTimescaleUnits:null,lastSample:null,compactlyCodedChunkTable:[]}),i(this,h).audio.codec==="aac")){let e=m(this,Ue,tt).call(this,2,i(this,h).audio.sampleRate,i(this,h).audio.numberOfChannels);i(this,S).info.decoderConfig={codec:i(this,h).audio.codec,description:e,numberOfChannels:i(this,h).audio.numberOfChannels,sampleRate:i(this,h).audio.sampleRate}}},Ue=new WeakSet,tt=function(e,t,s){let a=[96e3,88200,64e3,48e3,44100,32e3,24e3,22050,16e3,12e3,11025,8e3,7350].indexOf(t),o=s,l="";l+=e.toString(2).padStart(5,"0"),l+=a.toString(2).padStart(4,"0"),a===15&&(l+=t.toString(2).padStart(24,"0")),l+=o.toString(2).padStart(4,"0");let u=Math.ceil(l.length/8)*8;l=l.padEnd(u,"0");let g=new Uint8Array(l.length/8);for(let b=0;b<l.length;b+=8)g[b/8]=parseInt(l.slice(b,b+8),2);return g},ue=new WeakSet,xe=function(e,t,s,r,a,o,l){let u=r/1e6,g=(r-(l??0))/1e6,b=a/1e6,U=m(this,We,it).call(this,u,g,e);return u=U.presentationTimestamp,g=U.decodeTimestamp,o?.decoderConfig&&(e.info.decoderConfig===null?e.info.decoderConfig=o.decoderConfig:Object.assign(e.info.decoderConfig,o.decoderConfig)),{presentationTimestamp:u,decodeTimestamp:g,duration:b,data:t,size:t.byteLength,type:s,timescaleUnitsToNextSample:O(b,e.timescale)}},M=new WeakSet,I=function(e,t){i(this,h).fastStart!=="fragmented"&&e.samples.push(t);const s=O(t.presentationTimestamp-t.decodeTimestamp,e.timescale);if(e.lastTimescaleUnits!==null){let a=O(t.decodeTimestamp,e.timescale,!1),o=Math.round(a-e.lastTimescaleUnits);if(e.lastTimescaleUnits+=o,e.lastSample.timescaleUnitsToNextSample=o,i(this,h).fastStart!=="fragmented"){let l=se(e.timeToSampleTable);l.sampleCount===1?(l.sampleDelta=o,l.sampleCount++):l.sampleDelta===o?l.sampleCount++:(l.sampleCount--,e.timeToSampleTable.push({sampleCount:2,sampleDelta:o}));const u=se(e.compositionTimeOffsetTable);u.sampleCompositionTimeOffset===s?u.sampleCount++:e.compositionTimeOffsetTable.push({sampleCount:1,sampleCompositionTimeOffset:s})}}else e.lastTimescaleUnits=0,i(this,h).fastStart!=="fragmented"&&(e.timeToSampleTable.push({sampleCount:1,sampleDelta:O(t.duration,e.timescale)}),e.compositionTimeOffsetTable.push({sampleCount:1,sampleCompositionTimeOffset:s}));e.lastSample=t;let r=!1;if(!e.currentChunk)r=!0;else{let a=t.presentationTimestamp-e.currentChunk.startTimestamp;if(i(this,h).fastStart==="fragmented"){let o=i(this,T)??i(this,S);const l=i(this,h).minFragmentDuration??1;e===o&&t.type==="key"&&a>=l&&(r=!0,m(this,me,Fe).call(this))}else r=a>=.5}r&&(e.currentChunk&&m(this,ee,de).call(this,e),e.currentChunk={startTimestamp:t.presentationTimestamp,samples:[]}),e.currentChunk.samples.push(t)},We=new WeakSet,it=function(e,t,s){const r=i(this,h).firstTimestampBehavior==="strict",a=s.lastDecodeTimestamp===-1;if(r&&a&&t!==0)throw new Error(`The first chunk for your media track must have a timestamp of 0 (received DTS=${t}).Non-zero first timestamps are often caused by directly piping frames or audio data from a MediaStreamTrack into the encoder. Their timestamps are typically relative to the age of thedocument, which is probably what you want.
@@ -14545,6 +14553,37 @@ MV.def('i18n/strings', [], () => ({
   'camera.sample.rigList': ["動きの一覧から試す", "Browse camera movements"],
   'camera.sample.failed': ["このカメラの試写を表示できませんでした。別の動きをお試しください。", "This camera preview could not be displayed. Try another movement."],
   'camera.sample.time': ["{time} / {end}", "{time} / {end}"],
+
+  // Timed cinematic overlays adapted from the supplied visual studies.
+  'insp.jump.cinematic': ['演出', 'Cinematic'],
+  'sec.cinematic': ['演出', 'Cinematic'],
+  'cinematic.note': ['選んだ範囲に演出を重ねます。開始・長さ・強さや、歌詞との重なりを調整できます。',
+    'Add a cinematic overlay to the selected range. Adjust its start, duration, strength and layering with lyrics.'],
+  'cinematic.range': ['使う範囲：{start} – {end}', 'Selected range: {start} – {end}'],
+  'cinematic.current': ['現在：{name}', 'Current: {name}'],
+  'cinematic.mixed': ['範囲内で異なる演出が選ばれています', 'Different overlays are selected within this range'],
+  'cinematic.none': ['演出なし', 'No cinematic overlay'],
+  'cinematic.apply': ['{name}を使う', 'Use {name}'],
+  'cinematic.preview': ['{name}を試写', 'Preview {name}'],
+  'cinematic.remove': ['この範囲の演出を消す', 'Remove the overlay from this range'],
+  'cinematic.replace': ['現在の「{name}」を置き換えます', 'Replaces the current overlay: {name}'],
+  'cinematic.undoApply': ['演出：{name}', 'Cinematic: {name}'],
+  'cinematic.undoRemove': ['演出を消す', 'Remove cinematic overlay'],
+  'cinematic.emptyRange': ['開始位置が選択範囲の外です。開始位置を範囲内に戻してください。',
+    'The start is outside the selected range. Move it inside the range.'],
+  'cinematic.previewTitle': ['演出の試写：{name}', 'Cinematic preview: {name}'],
+  'cinematic.previewFailed': ['この演出の試写を表示できませんでした。別の演出をお試しください。',
+    'This cinematic preview could not be displayed. Try another effect.'],
+  'opt.cinematicClock.section': ['範囲の先頭から', 'From the section start'],
+  'opt.cinematicClock.song': ['曲の先頭から', 'From the song start'],
+  'opt.cinematicPlacement.behind': ['歌詞の後ろ', 'Behind the lyrics'],
+  'opt.cinematicPlacement.front': ['歌詞の手前', 'In front of the lyrics'],
+  'opt.cinematicMeadowMode.day': ['昼', 'Day'],
+  'opt.cinematicMeadowMode.night': ['夜', 'Night'],
+  'opt.cinematicMeadowMode.snow': ['雪', 'Snow'],
+  'opt.cinematicCloudMode.sunset': ['夕暮れ', 'Sunset'],
+  'opt.cinematicCloudMode.day': ['昼', 'Day'],
+  'opt.cinematicCloudMode.night': ['夜', 'Night'],
 }));
 /* 文字PVメーカー v2 — original work. Translation function and formatters over the [ja, en] string table (DESIGN §4.24). */
 MV.def('i18n/t', [], () => {
@@ -23808,6 +23847,79 @@ MV.def('engine/scene/cache', [], () => {
 
   return { MAX, createSceneCache };
 });
+/* 文字PVメーカー v2 — original work. Pure clocks and shared controls for seekable cinematic overlays. */
+MV.def('engine/scene/cinematic', ['core/num', 'core/rng', 'core/color'], (N, RNG, C) => {
+  'use strict';
+
+  const LABEL = (ja, en) => ({ ja, en });
+  const KEY_GREEN = '#00B140';
+  const MAX_TIME = 86400;
+  const params = Object.freeze({
+    start: { type: 'num', min: 0, max: MAX_TIME, step: 0.01, unit: 's',
+      label: LABEL('始める位置', 'Start position'), auto: { value: 0 } },
+    duration: { type: 'num', min: 0, max: MAX_TIME, step: 0.01, unit: 's',
+      label: LABEL('長さ（0で範囲いっぱい）', 'Duration (0 fills the range)'), auto: { value: 0 } },
+    fade: { type: 'num', min: 0, max: 5, step: 0.01, unit: 's',
+      label: LABEL('前後のフェード', 'Fade in and out'), auto: { value: 0.45 } },
+    clock: { type: 'enum', of: ['section', 'song'], optKey: 'cinematicClock',
+      label: LABEL('時間の基準', 'Time reference'), auto: { value: 'section' }, ui: 'advanced' },
+    seed: { type: 'int', min: 1, max: 2147483646,
+      label: LABEL('模様の番号', 'Pattern number'), auto: { value: 741 }, ui: 'advanced' },
+    placement: { type: 'enum', of: ['behind', 'front'], optKey: 'cinematicPlacement',
+      label: LABEL('歌詞との重なり', 'Layering with lyrics'), auto: { value: 'behind' } },
+  });
+
+  function finite(v, fallback) { return Number.isFinite(v) ? v : fallback; }
+
+  // The geometry is shared across split scenes. In song-clock mode only the renderer's q.time drives the window;
+  // no scene origin or mutable clock is captured in a cached paint record.
+  function setup(env, values) {
+    const p = values || {}, D = env.D || {}, times = env.times || {};
+    const w = Math.max(1, finite(D.w, 1920)), h = Math.max(1, finite(D.h, 1080));
+    const start = N.clamp(finite(p.start, 0), 0, MAX_TIME);
+    const span = Math.max(0, finite(times.b, 0) - finite(times.a, 0));
+    const requested = N.clamp(finite(p.duration, 0), 0, MAX_TIME);
+    const clock = p.clock === 'song' ? 'song' : 'section';
+    const duration = requested > 0 ? requested : Math.max(0, span - (clock === 'section' ? start : 0));
+    return { w, h, short: Math.max(1, finite(D.short, Math.min(w, h))), start, duration,
+      fade: Math.min(N.clamp(finite(p.fade, 0.45), 0, 5), duration / 2),
+      clock,
+      seed: Math.round(N.clamp(finite(p.seed, 741), 1, 2147483646)),
+      amount: N.clamp(finite(p.amount, 1)), layer: p.placement === 'front' ? 'near' : 'far' };
+  }
+
+  function frame(localTime, data, q) {
+    const now = data.clock === 'song' ? q && q.time : localTime;
+    const duration = data.duration;
+    if (!Number.isFinite(now) || !(duration > 0)) return { active: false, time: 0, u: 0, alpha: 0 };
+    const elapsed = now - data.start, time = N.clamp(elapsed, 0, duration), u = time / duration;
+    if (!(data.amount > 0) || elapsed < 0 || elapsed >= duration) return { active: false, time, u, alpha: 0 };
+    const fade = data.fade;
+    const envelope = fade > 0 ? N.smooth(time / fade) * N.smooth((duration - time) / fade) : 1;
+    const alpha = data.amount * envelope;
+    return { active: alpha > 0, time, u, alpha };
+  }
+
+  function random(seed) { return RNG.gen(finite(seed, 741)); }
+
+  function grey(hex) {
+    const L = C.luminance(hex), v = L <= 0.0031308 ? 12.92 * L : 1.055 * Math.pow(L, 1 / 2.4) - 0.055;
+    return C.toHex({ r: v * 255, g: v * 255, b: v * 255 });
+  }
+
+  // A source effect's own swatches receive the same black/white treatment as theme colours. On a keyed frame,
+  // near-key greens become neutral instead of disappearing or being mixed with the key behind the overlay.
+  function color(palette, ink) {
+    const pal = palette || {}, resolved = pal[ink] || ink;
+    const hex = C.isHex(resolved) ? resolved.toUpperCase() : C.isHex(pal.accent) ? pal.accent.toUpperCase() : '#FFFFFF';
+    const black = String(pal.ground).toUpperCase() === '#000000' && String(pal.ink).toUpperCase() === '#FFFFFF'
+      && String(pal.accent).toUpperCase() === '#FFFFFF';
+    const chroma = String(pal.ground).toUpperCase() === KEY_GREEN;
+    return black || (chroma && C.hueDistance(hex, KEY_GREEN) < 40) ? grey(hex) : hex;
+  }
+
+  return { params, setup, frame, random, color };
+});
 /* 文字PVメーカー v2 — original work. Ground coverage limiter: the view of a ground-scene layer under an EXTREME camera, limited so the painted rectangle always covers the frame (DESIGN_EXTREME §1.5). */
 MV.def('engine/scene/cover', ['core/mat'], (MAT) => {
   'use strict';
@@ -31095,8 +31207,9 @@ MV.def('parts/timecode', [], () => {
 });
 /* 文字PVメーカー v2 — original work. The part kit: definition helpers, motion builders and helpers for part authors (DESIGN §4.18.3; DESIGN_2_1 §3.11, §11.5.6). */
 MV.def('parts/kit', ['core/num', 'core/noise', 'core/ease', 'core/curve', 'core/color', 'core/schema', 'core/registry',
-  'core/media', 'engine/scene/behave', 'engine/scene/stagger', 'engine/scene/builder', 'engine/scene/shot', 'engine/scene/frame', 'parts/timecode'],
-(N, NZ, E, CV, C, SCH, REG, MEDIA, BH, STG, B, SHOT, F, TIMECODE) => {
+  'core/media', 'engine/scene/behave', 'engine/scene/stagger', 'engine/scene/builder', 'engine/scene/shot', 'engine/scene/frame', 'parts/timecode',
+  'engine/scene/cinematic'],
+(N, NZ, E, CV, C, SCH, REG, MEDIA, BH, STG, B, SHOT, F, TIMECODE, CINEMATIC) => {
   'use strict';
 
   // Parts depend on this module only. The helpers stamp `kind`, fill defaults and check the essentials; they never
@@ -31691,7 +31804,7 @@ MV.def('parts/kit', ['core/num', 'core/noise', 'core/ease', 'core/curve', 'core/
     ornament: KINDS.ornament, lens: KINDS.lens, filter: KINDS.filter, seam: KINDS.seam, theme: KINDS.theme, mood: KINDS.mood,
     variant, mirror, moves, perGlyph, perGlyphHold,
     PH: BH.PH, ORDERS: SCH.ORDERS, EASES: E.EASES, ease, staggerOf: STG.staggerOf, pivots: STG.pivots,
-    shape, math, color, pickOf, rangeOf, KitError, timecode: TIMECODE,
+    shape, math, color, pickOf, rangeOf, KitError, timecode: TIMECODE, cinematic: CINEMATIC,
     curve, warp, CURVES: CV.PRESET_KEYS, warped: BH.warped, aimBox, frameBox,
     media, mediaParams, MEDIA: MEDIA_KIT, runKenBurns, depthCam,
   };
@@ -43562,6 +43675,319 @@ MV.def('parts/ornament/atmos', ['parts/kit'], (K) => {
 
   return [rainLines, bokehDots];
 });
+/* 文字PVメーカー v2 — original work. Source-derived cinematic effects from the user's my-universe.html and singularity-bigbang.html.
+ * The source's curved cosmic web, four-arm orbital fields, camera journey, 110-second evolution and analytic
+ * eruption are evaluated at the requested song time. Canvas representatives replace the millions of GPU particles;
+ * there is no feedback buffer, accumulated simulation, opaque sky or second animation clock. */
+MV.def('parts/ornament/cosmic', ['parts/kit'], (K) => {
+  'use strict';
+  const C = K.cinematic, TAU = Math.PI * 2, TAN = Math.tan(0.78 / 2);
+  const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+  const mix = (a, b, u) => a + (b - a) * u;
+  const smooth = (a, b, x) => { const u = clamp((x - a) / (b - a)); return u * u * (3 - 2 * u); };
+  const L = (ja, en) => ({ ja, en });
+
+  // Same integer permutation as both source particle shaders (uint overflow is intentional).
+  function hash(n) {
+    n = ((n >>> 0) ^ 61) ^ (n >>> 16); n = Math.imul(n, 9); n ^= n >>> 4;
+    n = Math.imul(n, 0x27d4eb2d); n ^= n >>> 15;
+    return (n >>> 0) / 4294967295;
+  }
+  function direction(k) {
+    const z = hash(k + 13) * 2 - 1, a = hash(k + 17) * TAU, r = Math.sqrt(Math.max(0, 1 - z * z));
+    return [r * Math.cos(a), z, r * Math.sin(a)];
+  }
+  function norm(v) { const r = Math.hypot(...v) || 1; return v.map((x) => x / r); }
+  function cross(a, b) { return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; }
+  function dot(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+  function camera(target, distance, yaw, pitch, d) {
+    const eye = [target[0] + Math.sin(yaw) * Math.cos(pitch) * distance,
+      target[1] + Math.sin(pitch) * distance, target[2] + Math.cos(yaw) * Math.cos(pitch) * distance];
+    const forward = norm(target.map((v, i) => v - eye[i])), right = norm(cross(forward, [0, 1, 0]));
+    return { eye, forward, right, up: cross(right, forward), scale: d.h / (2 * TAN) * d.size };
+  }
+  function project(p, cam, d) {
+    const v = p.map((x, i) => x - cam.eye[i]), z = dot(v, cam.forward);
+    if (!(z > 0.08)) return null;
+    const x = d.w / 2 + dot(v, cam.right) * cam.scale / z, y = d.h / 2 - dot(v, cam.up) * cam.scale / z;
+    if (x < -d.w * 0.2 || x > d.w * 1.2 || y < -d.h * 0.2 || y > d.h * 1.2) return null;
+    return { x, y, z, scale: cam.scale / z };
+  }
+  function calm(x, y, d) {
+    const r = Math.hypot((x - d.w / 2) / (d.w * 0.42), (y - d.h / 2) / (d.h * 0.3));
+    return 0.42 + 0.58 * smooth(0.2, 1.2, r);
+  }
+  function pixels(q, value) { return value / (Number.isFinite(q.scale) && q.scale > 0 ? q.scale : 1); }
+  function point(g, p, cam, d, q, color, alpha, size) {
+    if (!(alpha > 0.001)) return;
+    const s = project(p, cam, d);
+    if (!s) return;
+    // A representative core must survive a small preview. The source's millions of subpixel points accumulated
+    // their energy; bounded Canvas representatives need a real pixel footprint rather than vanishing at 320 px.
+    const radius = clamp(size * Math.sqrt(s.scale * 0.05), Math.max(d.short * 0.0015, pixels(q, 0.7)),
+      Math.max(d.short * 0.0045, pixels(q, 1.6)));
+    const bucket = Math.ceil(clamp(alpha) * calm(s.x, s.y, d) * 12);
+    if (bucket > 0) d.points.push({ x: s.x, y: s.y, radius, color, bucket });
+  }
+  // A path per colour/opacity group keeps the bounded source representatives inexpensive at export resolution.
+  function flushPoints(g, d, q) {
+    const groups = new Map();
+    for (const p of d.points) {
+      const key = p.color + ':' + p.bucket;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(p);
+    }
+    for (const group of groups.values()) {
+      g.globalAlpha = d.paintAlpha * group[0].bucket / 12;
+      g.fillStyle = q.rgba(group[0].color, 1); g.beginPath();
+      for (const p of group) { g.moveTo(p.x + p.radius, p.y); g.arc(p.x, p.y, p.radius, 0, TAU); }
+      g.fill();
+    }
+  }
+  function glow(g, x, y, radius, color, alpha, q) {
+    if (!(radius > 0 && alpha > 0)) return;
+    const grad = g.createRadialGradient(x, y, 0, x, y, radius);
+    grad.addColorStop(0, q.rgba(color, alpha)); grad.addColorStop(0.28, q.rgba(color, alpha * 0.25));
+    grad.addColorStop(1, q.rgba(color, 0));
+    g.fillStyle = grad; g.beginPath(); g.arc(x, y, radius, 0, TAU); g.fill();
+  }
+
+  // Source CPU graph: 84 nodes on intertwined sheets and each node's three closest neighbours. Curved filaments
+  // leave the original wide voids; they do not become a uniformly filled starfield.
+  function web(seed) {
+    let state = seed | 0;
+    const rand = () => { state = (Math.imul(state, 1664525) + 1013904223) | 0; return (state >>> 0) / 4294967296; };
+    const nodes = [[0, 0, 0, 15]], edges = [], known = new Set();
+    for (let i = 1; i < 84; i++) {
+      const a = rand() * TAU, r = 320 + Math.sqrt(rand()) * 900;
+      nodes.push([Math.cos(a) * r, (rand() - 0.5) * 680 + Math.sin(a * 2.3) * 240, Math.sin(a) * r, 7 + rand() * 16]);
+    }
+    const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+    for (let i = 0; i < nodes.length; i++) {
+      const near = nodes.map((n, j) => ({ j, r: i === j ? Infinity : dist(nodes[i], n) })).sort((a, b) => a.r - b.r);
+      for (let k = 0; k < 3; k++) {
+        const j = near[k].j, key = Math.min(i, j) + ':' + Math.max(i, j);
+        if (known.has(key)) continue;
+        known.add(key);
+        const a = nodes[i], b = nodes[j], length = dist(a, b), curve = [(rand() - 0.5) * length * 0.32,
+          (rand() - 0.5) * length * 0.35, (rand() - 0.5) * length * 0.32];
+        edges.push({ a: a.slice(0, 3), b: a.slice(0, 3).map((v, n) => mix(v, b[n], 0.34) + curve[n]),
+          c: a.slice(0, 3).map((v, n) => mix(v, b[n], 0.68) + curve[n]), d: b.slice(0, 3), phase: rand() * 8 });
+      }
+    }
+    return { nodes, edges };
+  }
+  function bezier(e, u) {
+    const v = 1 - u;
+    return e.a.map((x, n) => v * v * v * x + 3 * v * v * u * e.b[n] + 3 * v * u * u * e.c[n] + u * u * u * e.d[n]);
+  }
+  function journeyScale(u) {
+    // Same 90-second camera itinerary as my-universe's tourScale, fitted to the selected effect window.
+    const t = clamp(u) * 90;
+    if (t < 8) return 0.08;
+    if (t < 28) return mix(0.08, 0.55, smooth(8, 28, t));
+    if (t < 41) return 0.55;
+    if (t < 60) return mix(0.55, 1, smooth(41, 60, t));
+    return t < 72 ? 1 : mix(1, 0.08, smooth(72, 90, t));
+  }
+  function webDraw(g, cam, d, q, scale, time, stride) {
+    const alpha = 1 - smooth(0.36, 0.58, scale);
+    if (!(alpha > 0)) return;
+    const step = q.draft ? 3 : 1;
+    for (let k = 0; k < d.graph.edges.length; k += step) {
+      const e = d.graph.edges[k], pts = [e.a, e.b, e.c, e.d].map((p) => project(p, cam, d));
+      if (pts.some((p) => !p)) continue;
+      g.globalAlpha = d.paintAlpha * alpha * 0.52 * calm((pts[0].x + pts[3].x) / 2, (pts[0].y + pts[3].y) / 2, d);
+      g.strokeStyle = q.rgba(d.colors[k % 3], 1); g.lineWidth = Math.max(pixels(q, 0.9), d.short * 0.0011);
+      g.beginPath(); g.moveTo(pts[0].x, pts[0].y);
+      g.bezierCurveTo(pts[1].x, pts[1].y, pts[2].x, pts[2].y, pts[3].x, pts[3].y); g.stroke();
+    }
+    for (let i = 0; i < Math.floor(d.count * 0.45); i += stride) {
+      const id = i + d.seed, u = (hash(id + 29) + time * 0.012 * (0.4 + hash(id + 8))) % 1;
+      const e = d.graph.edges[Math.floor(hash(id + 48) * (d.graph.edges.length - 1))];
+      const p = bezier(e, u), bead = Math.pow(0.5 + 0.5 * Math.sin(u * 37 + e.phase), 8);
+      point(g, p, cam, d, q, d.colors[i % 3], alpha * (0.45 + bead * 0.5), 1.3 + bead);
+    }
+    g.globalAlpha = d.paintAlpha;
+    for (let k = 0; k < d.graph.nodes.length; k++) {
+      const n = d.graph.nodes[k];
+      const s = project(n, cam, d);
+      if (s && k % 11 === 0) glow(g, s.x, s.y, clamp(n[3] * s.scale * 2, 2, d.short * 0.035), d.colors[3], alpha * 0.5, q);
+      point(g, n, cam, d, q, d.colors[3], alpha * 0.7, 2);
+    }
+  }
+  function galaxyDraw(g, cam, d, q, scale, time, stride) {
+    const alpha = 1 - smooth(0.70, 0.91, scale);
+    if (!(alpha > 0)) return;
+    const incoming = smooth(0.10, 0.38, scale);
+    for (let i = 0; i < Math.floor(d.count * 0.55); i += stride) {
+      const id = i + 51737 + d.seed, h = hash(id * 19 + 3), h2 = hash(id * 19 + 8);
+      const r = 0.10 + Math.pow(hash(id + 41), 0.65) * 13.4;
+      const a = Math.floor(hash(id + 42) * 4) * Math.PI / 2 + r * 0.55
+        + (hash(id + 43) - 0.5) * (0.24 + r * 0.08) + time * 0.25 / Math.sqrt(r + 0.4);
+      let p = [Math.cos(a) * r, (hash(id + 44) + hash(id + 45) - 1) * (0.05 + r * 0.045), Math.sin(a) * r];
+      if (h > 0.91) p = direction(id + 33).map((v) => v * Math.pow(hash(id + 46), 0.9) * 4);
+      const hot = 1 - smooth(0.1, 4, r);
+      point(g, p, cam, d, q, d.colors[hot > 0.6 ? 4 : i % 3], alpha * incoming * (0.45 + h * 0.4), 0.8 + h2);
+    }
+    const core = project([0, 0, 0], cam, d);
+    if (core) {
+      g.globalAlpha = d.paintAlpha * calm(core.x, core.y, d);
+      glow(g, core.x, core.y, clamp(3 * core.scale, d.short * 0.015, d.short * 0.25), d.colors[4], alpha * incoming * 0.6, q);
+    }
+  }
+  function starDraw(g, cam, d, q, scale, time) {
+    const presence = smooth(0.66, 0.90, scale), p = project([5, 0.25, 2.5], cam, d);
+    if (!(presence > 0 && p)) return;
+    const r = clamp(1.8 * p.scale, 1, d.short * 0.5), a = d.paintAlpha * presence * 0.65;
+    g.globalAlpha = a;
+    glow(g, p.x, p.y, r * 1.65, d.colors[4], 0.46, q);
+    const grad = g.createRadialGradient(p.x - r * 0.2, p.y - r * 0.24, r * 0.05, p.x, p.y, r);
+    grad.addColorStop(0, q.rgba(d.colors[5], 0.95)); grad.addColorStop(0.72, q.rgba(d.colors[4], 0.85));
+    grad.addColorStop(1, q.rgba(d.colors[6], 0.72));
+    g.fillStyle = grad; g.beginPath(); g.arc(p.x, p.y, r, 0, TAU); g.fill();
+    // Source photospheric convection channels and the three magnetic arches, reconstructed analytically.
+    for (let k = 0; k < (q.draft ? 28 : 72); k++) {
+      const a0 = hash(k + d.seed) * TAU + time * 0.018, rr = Math.sqrt(hash(k + d.seed + 7)) * r * 0.94;
+      g.globalAlpha = a * 0.2;
+      g.fillStyle = q.rgba(k % 3 ? d.colors[6] : d.colors[5], 1);
+      g.beginPath(); g.ellipse(p.x + Math.cos(a0) * rr, p.y + Math.sin(a0) * rr, r * 0.06, r * 0.025, a0, 0, TAU); g.fill();
+    }
+    for (let k = 0; k < 3; k++) {
+      const a0 = k * 2.3 + time * 0.018, x = p.x + Math.cos(a0) * r * 0.84, y = p.y + Math.sin(a0) * r * 0.84;
+      g.globalAlpha = a * (0.48 + 0.16 * Math.sin(time * 0.46 + k * 2.3));
+      g.strokeStyle = q.rgba(d.colors[4], 1); g.lineWidth = Math.max(1, r * 0.022);
+      g.beginPath(); g.ellipse(x, y, r * (0.43 + k * 0.07), r * 0.23, a0, -Math.PI, 0); g.stroke();
+    }
+  }
+  function universeDraw(g, t, d, q) {
+    const frame = C.frame(t, d, q);
+    if (!frame.active) return;
+    const scale = journeyScale(frame.u) * d.travel, time = frame.u * 90;
+    const local = smooth(0.56, 0.93, scale), target = [5 * local, 0.25 * local, 2.5 * local];
+    const distance = scale < 0.55 ? Math.exp(mix(Math.log(2400), Math.log(35), smooth(0, 0.55, scale)))
+      : Math.exp(mix(Math.log(35), Math.log(7.8), smooth(0.55, 1, scale)));
+    const cam = camera(target, distance, 0.25 + time * 0.008 * (1 - smooth(0.6, 1, scale)),
+      mix(0.35, 0.18, smooth(0.7, 1, scale)), d);
+    g.save();
+    // paintAlpha is local to this callback: copying avoids mutations to the cached scene's geometry.
+    const drawData = Object.assign({}, d, { paintAlpha: g.globalAlpha * frame.alpha, points: [] });
+    const stride = q.draft ? 3 : 1;
+    webDraw(g, cam, drawData, q, scale, time, stride);
+    galaxyDraw(g, cam, drawData, q, scale, time, stride);
+    flushPoints(g, drawData, q);
+    starDraw(g, cam, drawData, q, scale, time);
+    g.restore();
+  }
+
+  // Exact source evolution thresholds (cosmic seconds): seed 0–12, feast 12–46, compression 46–78,
+  // critical 78–84, eruption 84–92, new universe 92–110. No recurring flash is introduced.
+  function evolution(age) {
+    const growth = smooth(10, 46, age), collapse = smooth(46, 84, age), bang = age >= 84 ? age - 84 : -1;
+    const radius = age >= 84 ? 0 : age < 12 ? 0.07 + 0.11 * smooth(0, 12, age)
+      : age < 46 ? 0.18 + 2.62 * smooth(12, 46, age) : 2.782 * Math.pow(1 - smooth(46, 84, age), 2.4) + 0.018;
+    return { growth, collapse, bang, radius };
+  }
+  function singularityDraw(g, t, d, q) {
+    const frame = C.frame(t, d, q);
+    if (!frame.active) return;
+    const age = frame.u * 110, s = evolution(age), pull = s.bang >= 0 ? 1 + smooth(0, 20, s.bang) * 2.8 : 1;
+    const cam = camera([0, 0, 0], 32 * pull, 0.08 + age * 0.0014, 0.38, d);
+    const dd = Object.assign({}, d, { paintAlpha: g.globalAlpha * frame.alpha, points: [] });
+    g.save();
+    const stride = q.draft ? 3 : 1;
+    for (let i = 0; i < d.count; i += stride) {
+      const k = i + Math.floor(d.seed * 19733), rnd = hash(k * 11 + 1);
+      let p, brightness = 0.6;
+      if (s.bang >= 0) {
+        const direction0 = direction(k * 19), a = Math.atan2(direction0[2], direction0[0]);
+        const band = Math.sin(a * 7 + direction0[1] * 13);
+        const speed = (3.5 + Math.pow(hash(k + 71), 0.55) * 13) * (0.75 + 0.25 * band * band);
+        const filaments = 0.4 + 0.6 * Math.pow(Math.abs(Math.sin(a * 5 + direction0[1] * 8)), 0.4);
+        direction0[1] *= 0.65 + hash(k + 8) * 0.7;
+        const dir = norm(direction0), expansion = (1 - Math.exp(-s.bang * 0.04)) / 0.04;
+        const curl = cross(dir, [0.3, 1, 0.2]), wiggle = Math.sin(s.bang * 0.8 + rnd * 6) * Math.min(s.bang, 2) * 0.28;
+        p = dir.map((v, n) => v * (0.025 + speed * expansion * filaments) + curl[n] * wiggle);
+        brightness = 0.95 - 0.45 * smooth(3, 26, s.bang);
+      } else {
+        const infall = smooth(12, 83, age);
+        const rawR = 0.35 + Math.pow(hash(k * 11 + 2), 0.57) * 14, r = rawR * mix(1, 0.15, infall);
+        const a = Math.floor(hash(k * 11 + 3) * 4) * Math.PI / 2 + rawR * 0.43
+          + (hash(k * 11 + 4) - 0.5) * (0.15 + rawR * 0.09) + age * 0.025 * (1 + 4 / (r + 0.8));
+        const y = (hash(k * 11 + 5) + hash(k * 11 + 6) - 1) * (0.06 + rawR * 0.045) * (1 - infall * 0.7);
+        p = [Math.cos(a) * r, y, Math.sin(a) * r];
+        if (rnd < smooth(18, 83.5, age)) {
+          p = direction(k).map((v) => v * s.radius * (0.15 + hash(k + 32) * 0.5));
+          brightness *= 0.18;
+        }
+      }
+      point(g, p, cam, dd, q, d.colors[s.bang >= 0 ? i % 4 : i % 3], brightness, 1 + rnd * 0.6);
+    }
+    flushPoints(g, dd, q);
+    const center = project([0, 0, 0], cam, d);
+    if (center && s.bang < 0) {
+      const r = s.radius * center.scale * 1.6;
+      g.globalAlpha = dd.paintAlpha;
+      // The annular glow leaves the source image visible through the black-hole centre.
+      const halo = Math.max(d.short * 0.025, r * 2.4);
+      g.save(); g.translate(center.x, center.y); g.rotate(-0.12); g.scale(2.1, 0.58);
+      const grad = g.createRadialGradient(0, 0, 0, 0, 0, halo);
+      grad.addColorStop(0, q.rgba(d.colors[3], 0)); grad.addColorStop(0.23, q.rgba(d.colors[3], 0));
+      grad.addColorStop(0.4, q.rgba(d.colors[4], 0.52)); grad.addColorStop(0.65, q.rgba(d.colors[3], 0.18));
+      grad.addColorStop(1, q.rgba(d.colors[3], 0));
+      g.fillStyle = grad; g.beginPath(); g.arc(0, 0, halo, 0, TAU); g.fill(); g.restore();
+      // Source's rotating accretion filaments surround an open central shadow. No opaque disc obscures a photo.
+      for (let band = 0; band < (q.draft ? 3 : 7); band++) {
+        const rr = Math.max(d.short * 0.004, r * (1.25 + band * 0.19));
+        g.globalAlpha = dd.paintAlpha * (0.62 + s.collapse * 0.12) / (1 + band * 0.13);
+        g.strokeStyle = q.rgba(d.colors[3 + (band % 2)], 1); g.lineWidth = Math.max(pixels(q, 1.05), d.short * 0.0018);
+        g.beginPath(); g.ellipse(center.x, center.y, rr * 2.1, rr * 0.58, -0.12, age * 0.035 + band, age * 0.035 + band + Math.PI * 1.7); g.stroke();
+      }
+    } else if (center) {
+      const shock = smooth(0, 2.8, s.bang), ring = d.short * 0.7 * shock;
+      g.globalAlpha = dd.paintAlpha * (1 - smooth(1, 9, s.bang)) * 0.68;
+      g.strokeStyle = q.rgba(d.colors[4], 1); g.lineWidth = Math.max(pixels(q, 1.2), d.short * 0.004 * (1 - shock * 0.5));
+      g.beginPath(); g.ellipse(center.x, center.y, ring, ring * 0.63, -0.12, 0, TAU); g.stroke();
+      glow(g, center.x, center.y, d.short * (0.025 + shock * 0.26), d.colors[4], (1 - shock) * 0.45, q);
+    }
+    g.restore();
+  }
+
+  const density = { type: 'int', min: 64, max: 1200, label: L('光の密度', 'Light density'), auto: { value: 600 } };
+  const size = { type: 'num', min: 0.35, max: 1.5, step: 0.05, label: L('広がり', 'Spread'), auto: { value: 1 } };
+  function colors(env, p, values) {
+    const tint = C.color(env.pal, p.color);
+    return values.map((v) => C.color(env.pal, K.color.mix(v, tint, 0.12)));
+  }
+  const universeJourney = K.ornament({
+    key: 'universeJourney', scope: 'run', follow: 'own', pool: false, family: 'cinematic',
+    label: L('宇宙の網から星へ', 'Cosmic web to a star'),
+    blurb: L('光の網目から銀河の渦へ進み、一つの星へ近づいて戻る', 'Travel through a curved cosmic web into a spiral galaxy and approach one star, then return'),
+    tags: ['airy', 'digital'],
+    params: Object.assign({}, C.params, { density, size,
+      color: { type: 'ink', label: L('光の色味', 'Light tint'), auto: { value: '#9FD9DB' } },
+      travel: { type: 'num', min: 0, max: 1, step: 0.05, label: L('近づく距離', 'Journey depth'), auto: { value: 1 } } }),
+    build(env, p) {
+      const data = Object.assign(C.setup(env, p), { count: p.density, size: p.size, travel: p.travel,
+        graph: web(p.seed), colors: colors(env, p, ['#61CFFF', '#B084FF', '#87FFE2', '#DBD4FF', '#FFA842', '#FFE5A2', '#E12B09']) });
+      env.sb.paint({ layer: data.layer, bleed: 0, animated: true, owner: env.owner, draw: universeDraw, data });
+    },
+  });
+  const singularityBurst = K.ornament({
+    key: 'singularityBurst', scope: 'run', follow: 'own', pool: false, family: 'cinematic',
+    label: L('収縮とビッグバン', 'Collapse and Big Bang'),
+    blurb: L('星が渦を描いて集まり、臨界で収縮して新しい宇宙へ広がる', 'Stars spiral inward, compress at the critical point and erupt into a new universe'),
+    tags: ['bold', 'digital'],
+    params: Object.assign({}, C.params, { density, size,
+      color: { type: 'ink', label: L('星の色味', 'Star tint'), auto: { value: '#A4C8FF' } } }),
+    build(env, p) {
+      const data = Object.assign(C.setup(env, p), { count: p.density, size: p.size,
+        colors: colors(env, p, ['#7AA6FF', '#D6DAFF', '#B985F3', '#FF9B48', '#FFF0B8']) });
+      env.sb.paint({ layer: data.layer, bleed: 0, animated: true, owner: env.owner, draw: singularityDraw, data });
+    },
+  });
+  return [universeJourney, singularityBurst];
+});
 /* 文字PVメーカー v2 — original work. Instrument-like decorations: dot matrix, bar code, cross hair, serial mark (DESIGN §5.6). */
 MV.def('parts/ornament/digital', ['parts/kit'], (K) => {
   'use strict';
@@ -44639,6 +45065,183 @@ MV.def('parts/ornament/mark', ['parts/kit'], (K) => {
 
   return [hankoSeal, inkSplat, underSweep, ripplePath, sunBurst, sparkSpray];
 });
+/* 文字PVメーカー v2 — original work. Timeline-driven meadow elements adapted from the supplied wind-meadow.html. */
+MV.def('parts/ornament/meadow', ['parts/kit'], (K) => {
+  'use strict';
+
+  const C = K.cinematic, TAU = K.math.TAU;
+  const PALETTES = Object.freeze({
+    day: { grass: ['#6C8B37', '#8FA247', '#B4A656', '#536D2C'], bark: '#56423A',
+      leaves: ['#D1A637', '#D9802A', '#8E9A39', '#B65428'], plume: '#F1E6CB', sheen: '#FFF3CC', mote: '#E4D7AA' },
+    night: { grass: ['#2F4144', '#3B4C48', '#4D5651', '#243337'], bark: '#1C2132',
+      leaves: ['#4C503F', '#5B4B3B', '#3C4B41', '#533D35'], plume: '#DDD7C1', sheen: '#D9E2FF', mote: '#E2F29B' },
+    snow: { grass: ['#80745D', '#93866B', '#6F6858', '#625A49'], bark: '#20232D',
+      leaves: ['#20232D', '#20232D', '#20232D', '#20232D'], plume: '#D1CCC0', sheen: '#E6ECF8', mote: '#EEF2FA' },
+  });
+
+  // The source's wsProf height law and 0.28 turbulence share. Its stateful L1/L2 fluid grids become a frozen,
+  // spatially advected wave field here, so a seek does not need to replay thousands of earlier physics steps.
+  function windAt(x, height, phase, time, d) {
+    const y = Math.max(0.02, height);
+    const profile = y >= 0.6 ? Math.pow(y * 0.5, 0.14285714) : 0.841982444 * Math.exp(y / 0.6 - 1);
+    const travel = time * (0.45 + Math.abs(d.wind) * 0.16);
+    const gust = Math.sin(x * 7.1 - travel + phase) * 0.66 + Math.sin(x * 13.3 - travel * 0.618034 + phase * 0.7) * 0.34;
+    const turbulence = Math.sin(x * 23.7 - travel * 1.37 + phase) * 0.70710678
+      + Math.cos(x * 14.6 - travel * 0.83 + phase * 0.60181502) * 0.29289322;
+    return d.wind * profile * (1 + d.gust * gust) * (1 + 0.28 * turbulence);
+  }
+
+  // Original grass geometry: the third-points of a six-node centreline determine its two cubic controls; widths
+  // at the root and controls use the original 0.72 / 1.1 / 0.75 profile and converge to a pointed blade tip.
+  function blade(g, b, time, d, X, Y) {
+    const air = windAt(b.x / d.w, b.length / d.short * 3, b.phase, time, d);
+    const load = d.mode === 'snow' ? b.rest * 0.5 + 0.35 : b.rest;
+    const bend = K.math.clamp(load + Math.atan(air * 0.12) * d.sway, -1.4, 1.4);
+    X[0] = b.x; Y[0] = b.y;
+    for (let k = 1; k < 6; k++) {
+      const u = (k - 0.5) / 5, angle = bend * (0.22 + 0.78 * u);
+      X[k] = X[k - 1] + Math.sin(angle) * b.length / 5;
+      Y[k] = Y[k - 1] - Math.cos(angle) * b.length / 5;
+    }
+    const ax = X[1] + (X[2] - X[1]) * 0.667, ay = Y[1] + (Y[2] - Y[1]) * 0.667;
+    const bx = X[3] + (X[4] - X[3]) * 0.333, by = Y[3] + (Y[4] - Y[3]) * 0.333;
+    const x0 = X[0], y0 = Y[0], x3 = X[5], y3 = Y[5];
+    const c1x = (-5 * x0 + 18 * ax - 9 * bx + 2 * x3) / 6, c1y = (-5 * y0 + 18 * ay - 9 * by + 2 * y3) / 6;
+    const c2x = (2 * x0 - 9 * ax + 18 * bx - 5 * x3) / 6, c2y = (2 * y0 - 9 * ay + 18 * by - 5 * y3) / 6;
+    const nx = b.width * 0.5 * Math.cos(bend * 0.65), ny = b.width * 0.5 * Math.sin(bend * 0.65);
+    g.beginPath(); g.moveTo(x0 + nx * 0.72, y0 + ny * 0.72);
+    g.bezierCurveTo(c1x + nx * 1.1, c1y + ny * 1.1, c2x + nx * 0.75, c2y + ny * 0.75, x3, y3);
+    g.bezierCurveTo(c2x - nx * 0.75, c2y - ny * 0.75, c1x - nx * 1.1, c1y - ny * 1.1, x0 - nx * 0.72, y0 - ny * 0.72);
+    g.closePath(); g.fillStyle = d.colors.grass[b.color]; g.fill();
+    if (b.reed) {
+      g.strokeStyle = d.colors.plume; g.lineWidth = Math.max(0.8, b.width * 0.45);
+      g.beginPath(); g.moveTo(x3, y3); g.lineTo(x3 + Math.sin(bend) * b.length * 0.14, y3 - Math.cos(bend) * b.length * 0.14); g.stroke();
+      for (let j = 0; j < 7; j++) {
+        const u = j / 7, x = x3 + Math.sin(bend) * b.length * 0.14 * u;
+        const y = y3 - Math.cos(bend) * b.length * 0.14 * u, spread = Math.sin(Math.PI * u) * b.length * 0.036;
+        g.beginPath(); g.moveTo(x - Math.cos(bend) * spread, y - Math.sin(bend) * spread);
+        g.lineTo(x, y - b.length * 0.012); g.lineTo(x + Math.cos(bend) * spread, y + Math.sin(bend) * spread); g.stroke();
+      }
+    } else if (b.highlight) {
+      g.strokeStyle = d.colors.sheen; g.lineWidth = Math.max(0.55, b.width * 0.11);
+      g.beginPath(); g.moveTo(ax, ay); g.bezierCurveTo(c1x, c1y, c2x, c2y, x3, y3); g.stroke();
+    }
+  }
+
+  // The source's leafShape quadratic outline, placed on pre-generated margin branches instead of a stateful tree.
+  function leaf(g, x, y, angle, length) {
+    const dx = Math.cos(angle), dy = Math.sin(angle), px = -dy, py = dx, wide = length * 0.36;
+    const bx = x - dx * length * 0.1, by = y - dy * length * 0.1;
+    const mx = x + dx * length * 0.42, my = y + dy * length * 0.42;
+    g.beginPath(); g.moveTo(bx, by);
+    g.quadraticCurveTo(mx + px * wide, my + py * wide, x + dx * length, y + dy * length);
+    g.quadraticCurveTo(mx - px * wide, my - py * wide, bx, by); g.fill();
+  }
+
+  function trees(g, time, d, alpha) {
+    for (const b of d.branches) {
+      const sway = windAt(b.x / d.w, 1.4, b.phase, time, d) * d.sway * d.short * 0.0017;
+      const tx = b.x + b.dx + sway, ty = b.y - b.length;
+      g.globalAlpha = alpha * 0.76; g.strokeStyle = d.colors.bark; g.lineWidth = b.width;
+      g.beginPath(); g.moveTo(b.x, b.y); g.quadraticCurveTo(b.x + b.dx * 0.3 + sway * 0.2, b.y - b.length * 0.62, tx, ty); g.stroke();
+      if (d.mode === 'snow') {
+        g.strokeStyle = d.colors.sheen; g.lineWidth = Math.max(0.8, b.width * 0.35); g.stroke();
+      } else {
+        g.fillStyle = d.colors.leaves[b.color];
+        leaf(g, tx, ty, b.angle + sway / d.short * 5, b.leaf);
+        leaf(g, b.x + b.dx * 0.68 + sway * 0.55, b.y - b.length * 0.75, -b.angle, b.leaf * 0.85);
+      }
+    }
+  }
+
+  function air(g, time, d, alpha, draft) {
+    const n = draft ? Math.ceil(d.motes.length / 2) : d.motes.length;
+    for (let k = 0; k < n; k++) {
+      const b = d.motes[k], snow = d.mode === 'snow', night = d.mode === 'night';
+      const speed = snow ? 0.028 + b.pace * 0.025 : -0.006 - b.pace * 0.008;
+      const y = K.math.wrap(b.y + time * speed, -0.04, 1.04) * d.h;
+      const x = K.math.wrap(b.x + time * d.wind * 0.0014 + Math.sin(time * 0.37 + b.phase) * 0.025, -0.05, 1.05) * d.w;
+      const e = Math.hypot((x - d.w * 0.5) / (d.w * 0.36), (y - d.h * 0.48) / (d.h * 0.3));
+      const clear = 0.14 + 0.86 * K.math.smooth(e - 0.25);
+      const light = night ? 0.2 + 0.8 * Math.pow(0.5 + 0.5 * Math.sin(time * 1.7 + b.phase), 3) : 0.6;
+      g.globalAlpha = alpha * clear * light;
+      g.fillStyle = d.colors.mote;
+      g.beginPath(); g.ellipse(x, y, b.size * (snow ? 1 : 1.8), b.size * (snow ? 1 : 0.45), b.phase + time * 0.17, 0, TAU); g.fill();
+      if (night) {
+        g.globalAlpha = alpha * clear * light * 0.12;
+        g.beginPath(); g.arc(x, y, b.size * 4, 0, TAU); g.fill();
+      }
+    }
+  }
+
+  function draw(g, t, d, q) {
+    const f = C.frame(t, d, q);
+    if (!f.active) return;
+    const a = g.globalAlpha * f.alpha * (d.layer === 'near' ? 0.54 : 0.9);
+    const time = f.time * d.speed, X = new Float64Array(6), Y = new Float64Array(6);
+    g.save();
+    trees(g, time, d, a);
+    const step = q.draft ? 3 : 1;
+    for (let k = 0; k < d.blades.length; k += step) {
+      const b = d.blades[k];
+      g.globalAlpha = a * (0.42 + b.depth * 0.4);
+      blade(g, b, time, d, X, Y);
+    }
+    air(g, time, d, a, q.draft);
+    g.restore();
+  }
+
+  const windMeadow = K.ornament({
+    key: 'windMeadow', scope: 'run', follow: 'own', pool: false, family: 'cinematic',
+    label: { ja: '風・揺・草木', en: 'Wind and meadow' },
+    blurb: { ja: '草木が風になびき、昼の種・夜の光・雪が歌詞の周囲を漂う', en: 'Wind bends the meadow while seeds, night lights or snow drift around the lyrics' },
+    tags: ['organic', 'soft'],
+    params: Object.assign({}, C.params, {
+      mode: { type: 'enum', of: ['day', 'night', 'snow'], optKey: 'cinematicMeadowMode',
+        label: { ja: '景色', en: 'Scene' }, auto: { value: 'day' } },
+      wind: { type: 'num', min: -14, max: 14, step: 0.1, label: { ja: '風の強さ・向き', en: 'Wind strength and direction' }, auto: { value: 4.5 } },
+      gust: { type: 'num', min: 0, max: 1, step: 0.01, label: { ja: '突風', en: 'Gusts' }, auto: { value: 0.5 } },
+      sway: { type: 'num', min: 0, max: 2, step: 0.05, label: { ja: '草木の揺れ', en: 'Plant sway' }, auto: { value: 1 } },
+      density: { type: 'int', min: 60, max: 600, label: { ja: '草の密度', en: 'Grass density' }, auto: { value: 360 } },
+      height: { type: 'num', min: 0.08, max: 0.38, step: 0.01, label: { ja: '草丈', en: 'Grass height' }, auto: { value: 0.2 } },
+      speed: { type: 'num', min: 0, max: 3, step: 0.05, label: { ja: '動きの速さ', en: 'Motion speed' }, auto: { value: 1 } },
+      color: { type: 'ink', label: { ja: '色味', en: 'Tint color' }, auto: { value: 'accent' } },
+      tint: { type: 'num', min: 0, max: 1, step: 0.01, label: { ja: '色味の強さ', en: 'Tint amount' }, auto: { value: 0 } },
+    }),
+    build(env, p) {
+      const d = Object.assign(C.setup(env, p), { mode: p.mode, wind: p.wind, gust: p.gust, sway: p.sway, speed: p.speed });
+      const random = C.random(d.seed), source = PALETTES[p.mode] || PALETTES.day;
+      const tint = C.color(env.pal, p.color);
+      const color = (ink) => C.color(env.pal, p.tint > 0 ? K.color.mix(ink, tint, p.tint) : ink);
+      d.colors = {};
+      for (const name of Object.keys(source)) d.colors[name] = Array.isArray(source[name]) ? source[name].map(color) : color(source[name]);
+      d.blades = [];
+      for (let k = 0; k < p.density; k++) {
+        const depth = Math.sqrt(random()), length = d.short * p.height * (0.18 + depth * 0.82) * (0.75 + random() * 0.5);
+        d.blades.push({ x: (random() * 1.1 - 0.05) * d.w, y: d.h * (0.83 + depth * 0.22), length,
+          width: d.short * (0.001 + depth * 0.0023) * (0.7 + random() * 0.6), phase: random() * TAU,
+          rest: (random() - 0.5) * 0.32, color: k % 4, depth, reed: k % 23 === 0,
+          highlight: k % 9 === 0 });
+      }
+      d.blades.sort((a, b) => a.depth - b.depth);
+      d.branches = [];
+      for (let side = 0; side < 2; side++) for (let k = 0; k < 13; k++) {
+        const u = k / 13, sideDir = side ? -1 : 1, height = d.short * (0.19 + random() * 0.25);
+        d.branches.push({ x: d.w * (side ? 0.985 : 0.015), y: d.h * (1.01 - u * 0.19),
+          dx: sideDir * height * (0.08 + random() * 0.22), length: height * (0.3 + u * 0.65),
+          width: d.short * (0.0007 + (1 - u) * 0.0013), angle: sideDir * (-0.65 + random() * 0.8),
+          phase: random() * TAU, leaf: d.short * (0.012 + random() * 0.018), color: k % 4 });
+      }
+      d.motes = [];
+      const count = p.mode === 'snow' ? 90 : p.mode === 'night' ? 36 : 24;
+      for (let k = 0; k < count; k++) d.motes.push({ x: random(), y: random(), phase: random() * TAU,
+        pace: random(), size: d.short * (0.001 + random() * 0.0017) });
+      env.sb.paint({ layer: d.layer, owner: env.owner, bleed: 0, animated: true, data: d, draw });
+    },
+  });
+
+  return [windMeadow];
+});
 /* 文字PVメーカー v2 — original work. The user's photos and videos near the words: photo frame, inside the text, overlay footage (DESIGN_2_1 §11.5.7, §11.9). */
 MV.def('parts/ornament/media', ['parts/kit'], (K) => {
   'use strict';
@@ -45290,6 +45893,257 @@ MV.def('parts/ornament/season', ['parts/kit'], (K) => {
   });
 
   return [petalFall, leafFall, fireflyGlow, fireworkBloom, snowDust];
+});
+/* 文字PVメーカー v2 — original work. Timed weather overlays adapted from the supplied realistic-clouds.html and realistic-puddle.html. */
+MV.def('parts/ornament/weather', ['parts/kit'], (K) => {
+  'use strict';
+  const C = K.cinematic, TAU = K.math.TAU;
+  const clamp = (v, a = 0, b = 1) => Math.max(a, Math.min(b, v));
+  const smooth = (v) => { const x = clamp(v); return x * x * (3 - 2 * x); };
+  const L = (ja, en) => ({ ja, en });
+
+  // The original files' seeded coherent-noise permutation and quintic interpolation. Evaluating advection directly
+  // replaces the original fluid solver's accumulated state: seeking to a frame never needs its preceding frames.
+  class CoherentNoise {
+    constructor(seed) {
+      const a = Uint8Array.from({ length: 256 }, (_, i) => i);
+      let state = seed | 0;
+      const random = () => { state ^= state << 13; state ^= state >>> 17; state ^= state << 5; return (state >>> 0) / 4294967296; };
+      this.p = new Uint8Array(512);
+      for (let i = 255; i > 0; i--) { const j = Math.floor(random() * (i + 1)), tmp = a[i]; a[i] = a[j]; a[j] = tmp; }
+      for (let i = 0; i < 512; i++) this.p[i] = a[i & 255];
+    }
+    noise(x, y, z = 0) {
+      const p = this.p, ix = Math.floor(x), iy = Math.floor(y), iz = Math.floor(z);
+      const X = ix & 255, Y = iy & 255, Z = iz & 255; x -= ix; y -= iy; z -= iz;
+      const fade = (t) => t * t * t * (t * (t * 6 - 15) + 10), mix = (a, b, t) => a + (b - a) * t;
+      const grad = (h, xx, yy, zz) => {
+        h &= 15; const u = h < 8 ? xx : yy, v = h < 4 ? yy : h === 12 || h === 14 ? xx : zz;
+        return ((h & 1) ? -u : u) + ((h & 2) ? -v : v);
+      };
+      const u = fade(x), v = fade(y), w = fade(z), A = p[X] + Y, B = p[X + 1] + Y;
+      const AA = p[A] + Z, AB = p[A + 1] + Z, BA = p[B] + Z, BB = p[B + 1] + Z;
+      return mix(mix(mix(grad(p[AA], x, y, z), grad(p[BA], x - 1, y, z), u),
+        mix(grad(p[AB], x, y - 1, z), grad(p[BB], x - 1, y - 1, z), u), v),
+      mix(mix(grad(p[AA + 1], x, y, z - 1), grad(p[BA + 1], x - 1, y, z - 1), u),
+        mix(grad(p[AB + 1], x, y - 1, z - 1), grad(p[BB + 1], x - 1, y - 1, z - 1), u), v), w);
+    }
+    fbm(x, y, z = 0, octaves = 4) {
+      let sum = 0, a = 0.5, norm = 0;
+      for (let i = 0; i < octaves; i++) {
+        sum += this.noise(x, y, z) * a; norm += a; x = x * 2.03 + 11.7; y = y * 2.01 + 7.3; z = z * 2.02 + 3.1; a *= 0.5;
+      }
+      return sum / norm;
+    }
+  }
+
+  function quietCenter(d, x, y) {
+    const distance = Math.hypot((x - d.w * 0.5) / (d.w * 0.36), (y - d.h * 0.48) / (d.h * 0.25));
+    return (d.layer === 'near' ? 0.18 : 0.42) + (d.layer === 'near' ? 0.82 : 0.58) * smooth(distance - 0.25);
+  }
+
+  function rgbHex(r, g, b) {
+    return '#' + [r, g, b].map((n) => Math.round(clamp(n, 0, 255)).toString(16).padStart(2, '0')).join('');
+  }
+
+  // CloudAtmosphere's original fourth-power height envelope, fBm macro density and warm/cool silver scattering.
+  // Soft overlapping volume cells keep the host's Canvas 2D and alpha exports; no opaque sky is painted.
+  function cloudDraw(g, t, d, q) {
+    const f = C.frame(t, d, q);
+    if (!f.active || d.density <= 0) return;
+    const nx = q.draft ? 22 : 36, ny = q.draft ? 13 : 22, cw = d.w / nx, ch = d.h / ny;
+    const drift = f.time * d.wind * 0.007, night = d.mode === 'night', warm = d.mode === 'sunset';
+    const sunY = warm ? 0.56 : night ? 0.27 : 0.38, aspect = d.w / d.h;
+    const alpha0 = g.globalAlpha;
+    // Four scattering shades are shared by every volume cell, so dense clouds keep the paint gradient budget.
+    const gradients = d.colors.map((color) => {
+      const gradient = g.createRadialGradient(0, 0, 0, 0, 0, 1);
+      gradient.addColorStop(0, q.rgba(color, 0.36)); gradient.addColorStop(0.38, q.rgba(color, 0.27));
+      gradient.addColorStop(1, q.rgba(color, 0)); return gradient;
+    });
+    for (let j = -1; j <= ny; j++) for (let i = -1; i <= nx; i++) {
+      const xn = (i + 0.5) / nx, yn = (j + 0.5) / ny;
+      const px = xn * 3.1 - drift, py = yn * 3.2 + Math.sin(drift * 0.7) * 0.08;
+      const envelope = Math.exp(-Math.pow((yn - d.altitude) / d.thickness, 4));
+      const macro = clamp((d.noise.fbm(px, py, 9 + f.time * 0.012) + 0.16) * 3, 0, 1.5) * envelope;
+      const density = Math.max(0, macro * d.density * 1.7 - (night ? 0.08 : 0));
+      if (density < 0.025) continue;
+      const detail = d.noise.fbm(px * 5 + 4, py * 5 + 7, f.time * 0.04, 3);
+      const rho = Math.max(0, density - 0.14 + detail * 0.5), extinction = Math.exp(-rho * 0.84 * 2.4);
+      const direct = Math.exp(-Math.max(0, density + d.noise.noise(px + 0.3, py - 0.25, 9)) * 0.42 * 3);
+      const lx = (0.7 - xn) * aspect, ly = sunY - yn, cosine = 0.45 / Math.sqrt(lx * lx + ly * ly + 0.2025), scatter = 0.62;
+      const phase = (1 - scatter * scatter) / Math.pow(1 + scatter * scatter - 2 * scatter * cosine, 1.5);
+      const multi = 0.09 + 0.16 * (1 - Math.exp(-rho * 2));
+      const silver = direct * (0.48 + phase * 0.17) * (1 + Math.pow(Math.max(0, 1 - density), 2) * 1.4);
+      const r = night ? multi * 0.12 + silver * 0.47 : multi * 0.55 + silver * (warm ? 1.9 : 1.5);
+      const gg = night ? multi * 0.18 + silver * 0.58 : multi * 0.63 + silver * (warm ? 1.1 : 1.45);
+      const b = night ? multi * 0.3 + silver * 0.8 : multi * 0.92 + silver * (warm ? 0.63 : 1.5);
+      const x = xn * d.w + detail * cw * 0.28, y = yn * d.h;
+      const gradient = gradients[clamp(Math.floor((r + gg + b) * 1.5), 0, 3)];
+      g.save(); g.translate(x, y); g.scale(cw * (1.25 + density * 0.55), ch * (1.05 + density * 0.4));
+      g.globalAlpha = alpha0 * f.alpha * (1 - extinction) * quietCenter(d, x, y); g.fillStyle = gradient;
+      g.fillRect(-1, -1, 2, 2); g.restore();
+    }
+    g.globalAlpha = alpha0;
+  }
+
+  const fluidClouds = K.ornament({
+    key: 'fluidClouds', scope: 'run', follow: 'own', pool: false, family: 'cinematic',
+    label: L('雲の余韻', 'Fluid clouds'),
+    blurb: L('夕焼け・昼・夜の雲が風に流れ、光が雲の縁ににじむ', 'Wind carries sunset, daylight or night clouds with softly lit silver edges'),
+    tags: ['soft', 'airy'],
+    params: Object.assign({}, C.params, {
+      mode: { type: 'enum', of: ['sunset', 'day', 'night'], optKey: 'cinematicCloudMode', label: L('空の光', 'Sky light'), auto: { value: 'sunset' } },
+      density: { type: 'num', min: 0, max: 1.5, step: 0.01, label: L('雲の厚み', 'Cloud density'), auto: { value: 0.72 } },
+      wind: { type: 'num', min: 0, max: 14, step: 0.1, label: L('風の速さ', 'Wind speed'), auto: { value: 4.5 } },
+      altitude: { type: 'num', min: 0.05, max: 0.9, step: 0.01, unit: 'frac', label: L('雲の高さ', 'Cloud height'), auto: { value: 0.34 } },
+      thickness: { type: 'num', min: 0.1, max: 0.5, step: 0.01, unit: 'frac', label: L('雲の広がり', 'Cloud spread'), auto: { value: 0.25 }, ui: 'advanced' },
+      color: { type: 'ink', label: L('光の色', 'Light color'), auto: { value: 'accent' } },
+    }),
+    build(env, p) {
+      const data = Object.assign(C.setup(env, p), { noise: new CoherentNoise(p.seed), mode: p.mode, density: p.density,
+        wind: p.wind, altitude: p.altitude, thickness: p.thickness, tint: C.color(env.pal, p.color) });
+      const night = p.mode === 'night', warm = p.mode === 'sunset';
+      const tone = (v) => Math.pow(1 - Math.exp(-Math.max(0, v) * (night ? 0.9 : 1.35)), 1 / 2.2) * 255;
+      data.colors = Array.from({ length: 4 }, (_, i) => {
+        const silver = 0.08 + i * 0.28, multi = 0.18;
+        const r = night ? multi * 0.12 + silver * 0.47 : multi * 0.55 + silver * (warm ? 1.9 : 1.5);
+        const g = night ? multi * 0.18 + silver * 0.58 : multi * 0.63 + silver * (warm ? 1.1 : 1.45);
+        const b = night ? multi * 0.3 + silver * 0.8 : multi * 0.92 + silver * (warm ? 0.63 : 1.5);
+        return C.color(env.pal, K.color.mix(rgbHex(tone(r), tone(g), tone(b)), data.tint, 0.12));
+      });
+      env.sb.paint({ layer: data.layer, bleed: 0, animated: true, owner: env.owner, data, draw: cloudDraw });
+    },
+  });
+
+  // PuddleSurface's rough elliptical shore, the same 0.02037 Fresnel base and mirrored world-light projection.
+  // Closed-form damped concentric waves replace its finite-difference height history and random rain injection.
+  // This overlay reflects its own small city-light field, preserving any user illustration beneath it.
+  function shoreline(g, d) {
+    g.beginPath();
+    for (let i = 0; i < d.shore.length; i += 2) {
+      const x = d.cx + d.shore[i] * d.rx, y = d.cy + d.shore[i + 1] * d.ry;
+      if (i) g.lineTo(x, y); else g.moveTo(x, y);
+    }
+    g.closePath();
+  }
+
+  function reflectionDraw(g, time, d, q, alpha) {
+    const focal = d.h * 0.92, horizon = d.h * 0.49;
+    const density = q.draft ? 8 : 15;
+    const minimumStroke = 0.85 / Math.max(0.05, q.scale || 1), glows = new Map();
+    for (const light of d.lights) if (!glows.has(light.color)) {
+      const glow = g.createRadialGradient(0, 0, 0, 0, 0, 1);
+      glow.addColorStop(0, q.rgba(light.color, 0.65)); glow.addColorStop(0.35, q.rgba(light.color, 0.18));
+      glow.addColorStop(1, q.rgba(light.color, 0)); glows.set(light.color, glow);
+    }
+    for (const light of d.lights) {
+      const scale = focal / light.z, sourceX = d.w * 0.53 + light.x * scale, sourceY = horizon + (0.26 + light.y) * scale;
+      // Preserve the source camera's mirror projection, fitting its original .565–.995H water box to this overlay.
+      const x = d.cx + (sourceX / d.w - 0.5) / 0.475 * d.rx;
+      const y = d.cy - d.ry + (sourceY / d.h - 0.565) / 0.43 * d.ry * 2;
+      const view = (sourceY - horizon) / focal, facing = view / Math.sqrt(1 + view * view);
+      const fresnel = 0.02037 + 0.97963 * Math.pow(1 - clamp(facing), 5);
+      const span = (30 + light.y * 17) * d.h / 1080, width = Math.max(d.w / 650, scale * light.width * 1.35);
+      g.save(); g.translate(x, y); g.scale(width * 5, span * 1.25);
+      g.globalAlpha = alpha * d.reflection * fresnel * 0.3; g.fillStyle = glows.get(light.color); g.fillRect(-1, -1, 2, 2); g.restore();
+      for (let j = 0; j < density; j++) {
+        const v = (j + 0.5) / density, yy = y + (v - 0.5) * span;
+        const wave = Math.sin(time * 1.7 + yy * 0.063 + light.phase) + Math.sin(time * -1.1 + yy * 0.019 + x * 0.004) * 0.6;
+        const dx = wave * (1 + d.wind * 0.2) * d.w / 350;
+        const brightness = Math.pow(1 - Math.abs(v * 2 - 1), 0.6) * fresnel;
+        g.globalAlpha = alpha * d.reflection * brightness;
+        g.strokeStyle = q.rgba(light.color, 1); g.lineWidth = Math.max(minimumStroke, 1.5, span / density * 0.7);
+        g.beginPath(); g.moveTo(x + dx - width * (0.7 + wave * 0.15), yy);
+        g.lineTo(x + dx + width * (0.7 + wave * 0.15), yy); g.stroke();
+      }
+    }
+  }
+
+  function puddleDraw(g, t, d, q) {
+    const f = C.frame(t, d, q);
+    if (!f.active) return;
+    const alpha0 = g.globalAlpha;
+    g.globalCompositeOperation = 'source-over'; g.lineCap = 'round'; g.lineJoin = 'round';
+    g.save(); shoreline(g, d); g.clip();
+    const water = g.createLinearGradient(0, d.cy - d.ry, 0, d.cy + d.ry);
+    water.addColorStop(0, q.rgba(d.water, 0.18)); water.addColorStop(0.6, q.rgba(d.water, 0.48)); water.addColorStop(1, q.rgba(d.water, 0.22));
+    g.globalAlpha = alpha0 * f.alpha; g.fillStyle = water; g.fillRect(d.cx - d.rx, d.cy - d.ry, d.rx * 2, d.ry * 2);
+    reflectionDraw(g, f.time, d, q, alpha0 * f.alpha);
+    g.strokeStyle = q.rgba(d.ripple, 1);
+    const count = q.draft ? Math.ceil(d.drops.length / 2) : d.drops.length;
+    for (let i = 0; i < count; i++) {
+      const drop = d.drops[i], progress = K.math.wrap(f.time + drop.phase, 0, drop.life) / drop.life;
+      const x = d.cx + drop.x * d.rx, y = d.cy + drop.y * d.ry;
+      const r = Math.max(0.1, progress * drop.radius), opacity = Math.pow(1 - progress, 1.35) * d.rain;
+      if (opacity < 0.003) continue;
+      for (let ring = 0; ring < 3; ring++) {
+        g.globalAlpha = alpha0 * f.alpha * opacity * (0.9 / (ring + 1));
+        g.lineWidth = Math.max(1.5, d.short / 720, 0.85 / Math.max(0.05, q.scale || 1));
+        g.beginPath(); g.ellipse(x, y, r * (1 - ring * 0.16), r * (0.22 - ring * 0.025), 0, 0, TAU); g.stroke();
+      }
+    }
+    g.restore();
+    // The source's two-depth slanted rain streaks, kept quiet around the words.
+    const drops = Math.round(d.rain * (q.draft ? 26 : 56));
+    g.strokeStyle = q.rgba(d.ripple, 1); g.lineWidth = Math.max(1.15, d.short / 1000, 0.6 / Math.max(0.05, q.scale || 1));
+    for (let k = 0; k < drops; k++) {
+      const x = K.math.wrap(k * 97.13 / 1080 * d.short + f.time * (11 + d.wind * 3), 0, d.w);
+      const y = K.math.wrap(k * 137.71 / 1080 * d.short + f.time * (260 + (k % 2) * 300), 0, d.h);
+      g.globalAlpha = alpha0 * f.alpha * 0.2 * quietCenter(d, x, y);
+      g.beginPath(); g.moveTo(x, y); g.lineTo(x + (1 + d.wind * 0.2) * d.short / 650, y + d.short * (k % 2 ? 0.012 : 0.005)); g.stroke();
+    }
+    g.globalAlpha = alpha0;
+  }
+
+  const wavePuddle = K.ornament({
+    key: 'wavePuddle', scope: 'run', follow: 'own', pool: false, family: 'cinematic',
+    label: L('雨の記憶', 'Rain and reflections'),
+    blurb: L('水たまりに雨の輪が重なり、街の光がゆっくり揺れる', 'Rain rings overlap in a puddle as reflected city lights gently shimmer'),
+    tags: ['wet', 'soft', 'dark'],
+    params: Object.assign({}, C.params, {
+      rain: { type: 'num', min: 0, max: 1, step: 0.01, label: L('雨量', 'Rain amount'), auto: { value: 0.55 } },
+      wind: { type: 'num', min: 0, max: 14, step: 0.1, label: L('風の速さ', 'Wind speed'), auto: { value: 2 } },
+      reflection: { type: 'num', min: 0, max: 1, step: 0.01, label: L('光の映り込み', 'Light reflection'), auto: { value: 0.75 } },
+      spread: { type: 'num', min: 0.3, max: 1, step: 0.01, unit: 'frac', label: L('水面の広がり', 'Water spread'), auto: { value: 0.94 } },
+      height: { type: 'num', min: 0.1, max: 0.45, step: 0.01, unit: 'frac', label: L('水面の高さ', 'Water height'), auto: { value: 0.34 }, ui: 'advanced' },
+      color: { type: 'ink', label: L('水と雨の色', 'Water and rain color'), auto: { value: 'shiftA' } },
+    }),
+    build(env, p) {
+      const data = Object.assign(C.setup(env, p), { rain: p.rain, wind: p.wind, reflection: p.reflection });
+      const random = C.random(p.seed + 163), noise = new CoherentNoise(p.seed + 163);
+      data.rx = data.w * 0.5 * p.spread; data.ry = data.h * p.height * 0.5;
+      data.cx = data.w * 0.5; data.cy = data.h * (1 - p.height * 0.5 - 0.015);
+      data.water = C.color(env.pal, K.color.mix('#152536', C.color(env.pal, p.color), 0.2));
+      data.ripple = C.color(env.pal, K.color.mix('#BBD0E2', C.color(env.pal, p.color), 0.18));
+      data.shore = new Float32Array(192);
+      for (let i = 0; i < 96; i++) {
+        const a = i / 96 * TAU, x = Math.cos(a), y = Math.sin(a);
+        const rough = 0.085 * noise.fbm(x * 3, y * 3, 2, 4) + 0.055 * Math.sin(a * 5 + 1) + 0.035 * Math.sin(a * 9);
+        data.shore[i * 2] = x * (1 + rough); data.shore[i * 2 + 1] = y * (1 + rough);
+      }
+      data.lights = [];
+      for (let n = 0; n < 12; n++) for (const side of [-1, 1]) {
+        data.lights.push({ x: side * 3.55, y: 3.5 + (n % 3) * 0.35, z: 8 + n * n * 1.1 + n * 2.9 + (side > 0 ? 3.2 : 0),
+          width: 0.045, color: C.color(env.pal, side < 0 ? '#FFC16A' : '#E2DFAC'), phase: random() * TAU });
+      }
+      const stops = [4.8, 8.5, 13, 19, 27, 38, 53, 74, 103, 145];
+      for (let n = 0; n < stops.length - 1; n++) for (const side of [-1, 1]) {
+        if (side > 0 && n % 3 !== 0) continue;
+        data.lights.push({ x: side * 4.2, y: 1.55, z: (stops[n] + stops[n + 1]) * 0.5,
+          width: 0.22, color: C.color(env.pal, side < 0 ? '#FFCD69' : '#74DAE7'), phase: random() * TAU });
+      }
+      data.drops = [];
+      for (let i = 0; i < 52; i++) {
+        const a = random() * TAU, r = Math.sqrt(random()) * 0.84;
+        data.drops.push({ x: Math.cos(a) * r, y: Math.sin(a) * r, phase: random() * 4,
+          life: 1.3 + random() * 2.8, radius: data.short * (0.025 + random() * 0.038) });
+      }
+      env.sb.paint({ layer: data.layer, bleed: 0, animated: true, owner: env.owner, data, draw: puddleDraw });
+    },
+  });
+
+  return [fluidClouds, wavePuddle];
 });
 /* 文字PVメーカー v2 — original work. World transitions with a jolt: zoom through, glitch swap and a white flash. */
 MV.def('parts/seam/burst', ['parts/kit'], (K) => {
@@ -51148,7 +52002,9 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
     const isSeam = kind === 'seam' && def;
     const textB = typeof o.textB === 'string' && o.textB.trim() ? o.textB.trim() : SAMPLE_TEXT_B;
     const texts = isSeam ? [text, textB] : [text];
-    const span = isSeam ? 1.5 : SAMPLE.t1 - SAMPLE.t0;
+    const cinematicSpan = kind === 'ornament' && def && def.family === 'cinematic' && Number.isFinite(o.sampleDuration)
+      ? Math.max(2, Math.min(30, o.sampleDuration)) : null;
+    const span = isSeam ? 1.5 : cinematicSpan || SAMPLE.t1 - SAMPLE.t0;
     const textScale = Number.isFinite(o.textScale) && o.textScale > 0 ? o.textScale : 1;
     const cuts = texts.map((tx, n) => sampleCut(registry, { def, kind, key, params, orient, role, tx, n, seed, look, mood, theme,
       textScale, t0: SAMPLE.t0 + n * span, t1: SAMPLE.t0 + (n + 1) * span, last: n === texts.length - 1 }));
@@ -51835,12 +52691,12 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
       const theme = to.theme || (plan ? plan.look.theme.v : null);
       const aspect = to.aspect || (plan ? plan.design.aspect : '16:9');
       const id = H.hashJSON({ kind: ref.kind, key: ref.key, params: ref.params || null, text: to.text || null,
-        textB: ref.kind === 'seam' ? to.textB || null : null, theme, aspect });
+        textB: ref.kind === 'seam' ? to.textB || null : null, theme, aspect, sampleDuration: to.sampleDuration || null });
       let entry = thumbs.plans.get(id);
       if (entry) thumbs.plans.delete(id);
       if (entry && entry.fontKey !== measurer.key) entry = null;       // faces arrived since: lay the text out again
       if (!entry) {
-        const sp = samplePlan(registry, ref, { text: to.text, textB: to.textB, theme, aspect });
+        const sp = samplePlan(registry, ref, { text: to.text, textB: to.textB, theme, aspect, sampleDuration: to.sampleDuration });
         const svc = { registry, text: textService().withFaces(sp.look.faces), assets, pal: sp.look.palette, faces: sp.look.faces,
           strict: !!o.strict, provisional: false, media: sp.media || null };
         const scenes = { cut: [], ground: [] };
@@ -58878,6 +59734,7 @@ MV.def('ui/camera_preview', ['ui/dom', 'ui/icons', 'i18n/t', 'core/shot', 'engin
   'use strict';
   const { h } = dom;
   const KINDS = Object.freeze(['shot', 'xshot', 'rig', 'lens']);
+  const CINEMATIC_KEYS = Object.freeze(['universeJourney', 'singularityBurst', 'windMeadow', 'fluidClouds', 'wavePuddle']);
   const SPEEDS = Object.freeze([0.25, 0.5, 1]);
   const sessions = new WeakMap();
 
@@ -58912,21 +59769,26 @@ MV.def('ui/camera_preview', ['ui/dom', 'ui/icons', 'i18n/t', 'core/shot', 'engin
   // open(app, ref, {name, blurb}) → {close, done, state}. The engine's thumbnail renderer and sample plan are separate
   // from the main scene, picks, song clock and document. Both normal closure and native Escape release the fork.
   function open(app, ref0, options) {
-    if (!ref0 || !supports(ref0.kind, ref0.key) || !app.dialogs || !app.engine) return null;
+    const cinematic = ref0 && ref0.kind === 'ornament' && CINEMATIC_KEYS.includes(ref0.key);
+    if (!ref0 || (!cinematic && !supports(ref0.kind, ref0.key)) || !app.dialogs || !app.engine) return null;
     const old = sessions.get(app);
     if (old) old.close();
     const ref = normalize(ref0), opt = options || {}, t = app.t;
+    const sampleDuration = cinematic ? Math.max(2, Math.min(30, Number.isFinite(opt.duration) ? opt.duration : 8)) : null;
+    if (cinematic) ref.params = Object.assign({}, ref.params, { clock: 'section', start: 0, duration: sampleDuration });
+    const failureKey = cinematic ? 'cinematic.previewFailed' : 'camera.sample.failed';
     const theme = app.plan && app.plan.look ? app.plan.look.theme.v : null;
     const sampleOptions = { text: t('pb.sampleText'), textB: t('pb.sampleTextB'), theme, aspect: app.doc.look.aspect };
+    if (cinematic) sampleOptions.sampleDuration = sampleDuration;
     let sample = null, engine = null;
     try { sample = FAC.samplePlan(app.reg, ref, sampleOptions); engine = app.engine.fork(); }
-    catch (e) { if (app.toast) app.toast(t('camera.sample.failed')); return null; }
+    catch (e) { if (app.toast) app.toast(t(failureKey)); return null; }
     const duration = sample.duration;
     const ratio = sample.design.w / sample.design.h;
     const width = Math.round(ratio >= 1 ? 960 : 960 * ratio), height = Math.round(ratio >= 1 ? 960 / ratio : 960);
     // Opening this dialog is an explicit request to watch the selected movement once.
     let playing = !document.hidden;
-    let time = 0, speed = 0.5;
+    let time = 0, speed = cinematic ? 1 : 0.5;
     let frame = 0, lastTick = null, lastPaint = -Infinity, renderCount = 0, disposed = false, closeDialog = null;
     let offView = null, offDoc = null;
     let root = null, canvas = null, play = null, seek = null, readout = null, loop = null, guides = null, note = null;
@@ -58957,7 +59819,7 @@ MV.def('ui/camera_preview', ['ui/dom', 'ui/icons', 'i18n/t', 'core/shot', 'engin
         renderCount++;
       } catch (e) {
         playing = false;
-        note.hidden = false; note.textContent = t('camera.sample.failed');
+        note.hidden = false; note.textContent = t(failureKey);
       }
       updateControls();
     }
@@ -59009,7 +59871,7 @@ MV.def('ui/camera_preview', ['ui/dom', 'ui/icons', 'i18n/t', 'core/shot', 'engin
         SPEEDS.map((v, i) => h('option', { value: String(v), selected: v === speed,
           text: t(['camera.sample.slowest', 'camera.sample.slow', 'camera.sample.normal'][i]) })));
         loop = h('input', { class: 'camera-preview-loop', type: 'checkbox', checked: false });
-        guides = h('input', { class: 'camera-preview-guides', type: 'checkbox', checked: true, on: { change: paint } });
+        guides = h('input', { class: 'camera-preview-guides', type: 'checkbox', checked: !cinematic, on: { change: paint } });
         note = h('p', { class: 'note subtle', hidden: true });
         root = h('div', { class: 'camera-preview', 'data-preview-kind': ref.kind,
           'data-preview-key': typeof ref.key === 'string' ? ref.key : 'custom', 'data-duration': String(duration) },
@@ -59020,7 +59882,7 @@ MV.def('ui/camera_preview', ['ui/dom', 'ui/icons', 'i18n/t', 'core/shot', 'engin
           h('label', {}, loop, t('camera.sample.loop')), h('label', {}, guides, t('camera.sample.guides'))), note);
         body.appendChild(root);
         updateControls();
-      }, { title: t('camera.sample.title', { name: opt.name || nameOf(app, ref) }), wide: true });
+      }, { title: t(cinematic ? 'cinematic.previewTitle' : 'camera.sample.title', { name: opt.name || nameOf(app, ref) }), wide: true });
       handle.done.then(dispose, dispose);
       document.addEventListener('visibilitychange', visibility);
       window.addEventListener('pagehide', close);
@@ -59033,7 +59895,7 @@ MV.def('ui/camera_preview', ['ui/dom', 'ui/icons', 'i18n/t', 'core/shot', 'engin
     } catch (e) { close(); return null; }
   }
 
-  return { KINDS, SPEEDS, supports, normalize, advance, nameOf, blurbOf, open };
+  return { KINDS, CINEMATIC_KEYS, SPEEDS, supports, normalize, advance, nameOf, blurbOf, open };
 });
 /* 文字PVメーカー v2 — original work. The curve widget (緩急): presets, eases, the かんたん ramp and custom Bézier / speed-step curves on a small canvas (DESIGN_2_1 §6.6). */
 MV.def('ui/curve_widget', ['ui/dom', 'ui/icons', 'core/curve', 'core/ease'], (dom, I, CV, E) => {
@@ -64778,8 +65640,8 @@ MV.def('ui/ai_controller', ['ai/providers', 'ai/prep', 'ai/looks', 'ai/song', 'a
   });
 /* 文字PVメーカー v2 — original work. Inspector field catalogue: FieldSpecs per page and section, and sectionsFor (DESIGN §6.4.4–§6.4.9, §4.23). */
 MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color', 'core/ease', 'core/doc', 'ui/selection',
-  'core/curve', 'core/shot', 'core/media', 'ui/media_widgets', 'planner/extreme'],
-  (P, R, SC, C, E, D, S, CV, SHOT, MEDIA, MW, XT) => {
+  'core/curve', 'core/shot', 'core/media', 'ui/media_widgets', 'planner/extreme', 'planner/areas'],
+  (P, R, SC, C, E, D, S, CV, SHOT, MEDIA, MW, XT, AREAS) => {
     'use strict';
 
     // A FieldSpec (§4.23) is one row of the inspector: { id, path, scopes, el?, section, widget, label, hint?, basic,
@@ -65069,6 +65931,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
 
     const PAGES = {
       work: [
+        sec('cinematic', false, [], { custom: 'cinematic', customTop: true }),
         sec('look', true, [
           partField('mood', 'kind.mood', { scopes: WORK }),
           partField('theme', 'kind.theme', { scopes: WORK }),
@@ -65123,6 +65986,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
         sec('materials', false, [], { custom: 'materials', when: (ctx) => ctx.materials > 0 }),
       ],
       line: [
+        sec('cinematic', false, [], { custom: 'cinematic', customTop: true }),
         sec('time', true, [
           F({ path: 'start', scopes: LINE, widget: 'time', label: 'fld.start' }),
           F({ path: 'end', scopes: LINE, widget: 'time', label: 'fld.end' }),
@@ -65143,6 +66007,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
         sec('ai', false, [], { custom: 'ai' }),
       ],
       lines: [
+        sec('cinematic', false, [], { custom: 'cinematic', customTop: true }),
         sec('multi', true, [], { custom: 'multi' }),
         sec('direction', true, directionFields({ camera: true })),
         // An area selection (区画, DESIGN_2_1 §6.5) adds its section camera; its runs are split at the area's edges. With
@@ -65156,6 +66021,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
         sec('shift', true, [], { custom: 'shift' }),
       ],
       cut: [
+        sec('cinematic', false, [], { custom: 'cinematic', customTop: true }),
         sec('time', true, [
           F({ path: 't0', scopes: CUT, widget: 'time', label: 'fld.cutStart', when: isInnerCut }),
           F({ derived: 'cutEnd', scopes: CUT, widget: 'time', label: 'fld.cutEnd', readOnly: true, when: (ctx) => !!ctx.cut }),
@@ -65309,6 +66175,14 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
         materials: mats, mediaCount: doc && doc.media && Array.isArray(doc.media.list) ? doc.media.list.length : 0,
         textFillIdx: null, textFillOn: false,
       };
+      const cinematicArea = ctx.area && doc ? AREAS.resolve(doc, plan, ctx.area) : null;
+      // Cinematic overlays fill the area's displayed time range, including interludes inside a heading/paragraph.
+      // Other controls retain the area's original lyric membership and the global Areas contract is unchanged.
+      const continuousArea = cinematicArea && ['head', 'para', 'song'].includes(cinematicArea.kind);
+      const cinematicGaps = continuousArea ? cutsAll.filter((c) => (c.role === 'interlude' || c.key.startsWith('gap/'))
+        && c.t0 >= cinematicArea.t0 - 0.000001 && c.t1 <= cinematicArea.t1 + 0.000001).map((c) => 'cut/' + c.key) : [];
+      ctx.cinematicScopes = cinematicArea ? [...new Set(cinematicArea.scopes.concat(cinematicGaps))] : null;
+      ctx.cinematicRange = cinematicArea ? [cinematicArea.t0, cinematicArea.t1] : null;
       if (page === 'el.text') {
         // the slot 文字の中に写真・動画 manages: the one pinned to textFill at the page's scope (a line or cut that picks
         // another decoration there does not hide it), else the first that shows textFill, else the first free one (§5.5)
@@ -65391,6 +66265,24 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
       if (!list.length) return null;
       const v = list[0].v;
       return list.every((d) => d.v === v) && typeof v === 'string' && v !== 'none' ? v : null;
+    }
+
+    // Keep editing an explicitly chosen scope effect when a narrower lyric/cut has its own overlay override.
+    function cinematicKey(ctx, doc) {
+      const scopes = ctx.sel.level === 'cut' ? ['cut/' + ctx.sel.key] : ctx.cinematicScopes
+        || (ctx.page === 'lines' ? ctx.lineIds.map((id) => 'line/' + id) : [ctx.scope]);
+      const keys = scopes.map((scope) => doc && doc.pins && doc.pins[writePath(scope + ':atmos', ctx.plan)])
+        .map((pin) => pin && pin.v);
+      const own = keys.length && keys[0] && keys.every((key) => key === keys[0]) ? keys[0] : null;
+      const def = own && ctx.registry && ctx.registry.get('ornament', own);
+      return def && def.family === 'cinematic' ? own : agreedKey(cinematicContext(ctx), 'atmos');
+    }
+
+    function cinematicContext(ctx) {
+      if (!ctx.cinematicScopes || !ctx.plan) return ctx;
+      const keys = new Set(ctx.cutKeys);
+      for (const scope of ctx.cinematicScopes) if (scope.startsWith('cut/')) keys.add(scope.slice(4));
+      return Object.assign({}, ctx, { cutKeys: [...keys], cuts: ctx.plan.cuts.filter((c) => keys.has(c.key)) });
     }
 
     // paramFields(kind, idx, partKey, registry, { shared, part, section, scopes }) → generated FieldSpecs for the
@@ -65481,6 +66373,13 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
       const out = [];
       for (const { s, fields } of sections) {
         const all = expand(s, fields, ctx, pageSlots);
+        if (s.id === 'cinematic') {
+          const key = cinematicKey(ctx, doc), def = key && registry && registry.get('ornament', key);
+          if (def && def.family === 'cinematic') {
+            all.push(...paramFields('atmos', null, key, registry, { section: s.id, page: ctx.page })
+              .map((f) => Object.assign({}, f, { cinematic: true })));
+          }
+        }
         const video = all.filter((f) => f.video);
         // 空気（粒子） that shows a photo or video layer reads 重ねる映像 (DESIGN_2_1 §11.7.3 use 重ねる映像)
         const overlay = s.id === 'atmos' && agreedKey(ctx, 'atmos') === 'mediaLayer';
@@ -65516,6 +66415,8 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
     // page; the first cut of the line(s) for firstCut fields; the cut's line for lineOf fields.
     function pathsFor(field, ctx) {
       if (!field.path) return [];
+      if (field.cinematic && ctx.sel.level === 'cut') return ['cut/' + ctx.sel.key + ':' + field.path];
+      if (field.cinematic && ctx.cinematicScopes) return ctx.cinematicScopes.map((scope) => scope + ':' + field.path);
       // a line's own setting shown on its cut's page (カメラ EXTREME's 「この行」)
       if (field.lineOf) return ctx.cut && ctx.cut.line ? ['line/' + ctx.cut.line + ':' + field.path] : [];
       if (field.firstCut && ctx.lineIds.length) return ctx.lineIds.map((id) => firstCutScope(ctx, id) + ':' + field.path);
@@ -65743,7 +66644,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
     return {
       WIDGETS, FIELDS, PAGES: PAGE_SECTIONS, FACE_ROLES, FACE_SCRIPTS, LIST_KINDS, SLOT_KINDS, COMMANDS_USED, SNAPS, SEASONS,
       PARAM_LABEL, HIDDEN_PARAMS, sectionsFor, contextOf, pageOf, paramFields, widgetFor, optionsFor, slotScopes, fieldPath, decisionsOf, freeIndex,
-      agreedKey, sharedNames, pathsFor, clearPathsFor, firstCutScope, pinnedSlots, withPinnedParams, writePath, writeScope,
+      agreedKey, cinematicKey, cinematicContext, sharedNames, pathsFor, clearPathsFor, firstCutScope, pinnedSlots, withPinnedParams, writePath, writeScope,
       pinCmd, whyParts, whyRuleKey, areaLabel, areaTitle,
     };
   });
@@ -65956,11 +66857,193 @@ MV.def('ui/ai_board', ['ui/dom', 'ui/icons', 'planner/areas', 'ui/fields', 'ui/a
 
   return { rowsOf, stateOf, linesText, mount, STATES };
 });
+/* 文字PVメーカー v2 — original work. Timed cinematic overlays, applied at the exact selected scope. */
+MV.def('ui/cinematic', ['ui/dom', 'ui/fields', 'ui/selection', 'ui/camera_preview', 'i18n/t', 'planner/fields', 'core/schema'], (dom, F, S, CP, T, PF, SC) => {
+  'use strict';
+  const { h } = dom;
+  const KEYS = Object.freeze(['universeJourney', 'singularityBurst', 'windMeadow', 'fluidClouds', 'wavePuddle']);
+  const SAMPLE_DURATION = 8;
+
+  function isEffect(registry, key) {
+    const def = registry && registry.get('ornament', key);
+    return KEYS.includes(key) && !!def && def.scope === 'run';
+  }
+
+  function parent(sel) {
+    if (!sel || sel.level !== 'el') return sel;
+    if (sel.scope === 'work') return S.WORK;
+    return sel.scope.startsWith('line/') ? { level: 'line', ids: [sel.scope.slice(5)] }
+      : { level: 'cut', key: sel.scope.slice(4) };
+  }
+
+  // The same scopes drive application and the generated parameter rows, including a song area's interludes.
+  function selectionInfo(doc, plan, registry, selection) {
+    const base = parent(selection || S.WORK), sel = S.validate(base, plan, doc);
+    const ctx = F.contextOf(sel, plan, registry, doc);
+    const valid = JSON.stringify(base) === JSON.stringify(sel);
+    const scopes = sel.level === 'cut' ? ['cut/' + sel.key]
+      : ctx.cinematicScopes || F.pathsFor({ path: 'atmos' }, ctx).map((p) => p.slice(0, -6));
+    let t0 = 0, t1 = Number.isFinite(plan && plan.duration) ? plan.duration : 0;
+    if (ctx.scopeKind !== 'work' && ctx.cuts.length) {
+      t0 = Math.min(...ctx.cuts.map((c) => c.t0));
+      t1 = Math.max(...ctx.cuts.map((c) => c.t1));
+    }
+    if (ctx.cinematicRange) { t0 = ctx.cinematicRange[0]; t1 = ctx.cinematicRange[1]; }
+    return { selection: sel, ctx, scopes, t0, t1, valid };
+  }
+
+  function applyCommands(doc, plan, registry, selection, key, pinSig) {
+    if (!isEffect(registry, key)) return [];
+    const info = selectionInfo(doc, plan, registry, selection);
+    if (!info.valid || !(info.t1 > info.t0)) return [];
+    const values = [
+      ['atmos', key], ['atmos.amount', 0.65],
+      ['atmos@' + key + '.clock', 'song'], ['atmos@' + key + '.start', info.t0],
+      ['atmos@' + key + '.duration', Math.round((info.t1 - info.t0) * 1000000) / 1000000],
+      ['atmos@' + key + '.seed', 741],
+    ];
+    return info.scopes.flatMap((scope) => values.map(([slot, v]) => F.pinCmd(scope + ':' + slot, v, plan, pinSig)));
+  }
+
+  function removeCommands(doc, plan, registry, selection, pinSig) {
+    const info = selectionInfo(doc, plan, registry, selection);
+    return info.valid ? info.scopes.map((scope) => F.pinCmd(scope + ':atmos', 'none', plan, pinSig)) : [];
+  }
+
+  function ownedParam(doc, plan, registry, path, key, name) {
+    if (!isEffect(registry, key)) return null;
+    const stored = F.writePath(path, plan), pin = doc && doc.pins && doc.pins[stored];
+    const param = registry.params('ornament', key).find((p) => p.name === name);
+    if (!pin || !param) return null;
+    const value = SC.coerce(param.spec, pin.v);
+    return value === undefined ? null : { path: stored, pin, value };
+  }
+
+  function paramValue(doc, plan, registry, scope, key, name) {
+    const path = scope + ':atmos@' + key + '.' + name;
+    const own = ownedParam(doc, plan, registry, path, key, name);
+    return own ? own.value : PF.fieldState(doc, plan, null, path, { registry }).value;
+  }
+
+  // Effective first-cut values may contain narrower overrides. A scope's own control must show its own authored
+  // setting, including shared strength, while inactive settings retain their existing inactive explanation.
+  function ownedParamState(doc, plan, registry, path, key, name, state) {
+    const own = ownedParam(doc, plan, registry, path, key, name);
+    if (!own) return state;
+    const kind = path.startsWith('cut/') ? 'cut' : path.startsWith('line/') ? 'line' : 'work';
+    return Object.assign({}, state, { value: own.value, by: own.pin.by, pinnedAt: kind, pinAt: own.path,
+      state: state && state.state === 'inactive' ? 'inactive' : own.pin.by === 'lock' ? 'locked' : own.pin.by === 'ai' ? 'ai' : 'pinned' });
+  }
+
+  function previewParams(doc, plan, registry, selection, key) {
+    const info = selectionInfo(doc, plan, registry, selection);
+    const decisions = F.decisionsOf(F.cinematicContext(info.ctx), 'atmos');
+    const current = decisions.find((d) => d && d.v === key);
+    const params = Object.assign({}, current && current.p);
+    for (const param of registry.params('ornament', key) || []) {
+      const slot = param.shared ? 'atmos.' + param.name : 'atmos@' + key + '.' + param.name;
+      const values = info.scopes.map((scope) => ownedParam(doc, plan, registry, scope + ':' + slot, key, param.name));
+      if (values.length && values.every((v) => v && JSON.stringify(v.value) === JSON.stringify(values[0].value))) params[param.name] = values[0].value;
+    }
+    return params;
+  }
+
+  // A song-clock effect cannot infer the selected range from one background scene. Resolve "fill range" before
+  // saving the edit, so every split scene receives the same explicit interval instead of its own segment length.
+  function fillDurationCommands(doc, plan, registry, selection, key, pinSig) {
+    if (!isEffect(registry, key)) return [];
+    const info = selectionInfo(doc, plan, registry, selection);
+    if (!info.valid) return [];
+    const cmds = [];
+    for (const scope of info.scopes) {
+      const slot = 'atmos@' + key + '.';
+      const read = (name) => paramValue(doc, plan, registry, scope, key, name);
+      const clock = read('clock');
+      let duration = 0;
+      if (clock === 'song') {
+        const start = read('start');
+        const left = info.t1 - (Number.isFinite(start) ? start : info.t0);
+        // No remaining range: reject the edit as one transaction, retaining the explicit inactive interval.
+        if (!(left > 0)) return [];
+        duration = Math.max(0.01, Math.round(left * 1000000) / 1000000);
+      }
+      cmds.push(F.pinCmd(scope + ':' + slot + 'duration', duration, plan, pinSig));
+    }
+    return cmds;
+  }
+
+  // The legacy atmosphere picker starts with a section clock and automatic length. Changing its reference to the
+  // song must resolve that automatic length in the same edit; an already explicit duration is kept as authored.
+  function songClockCommands(doc, plan, registry, selection, key, pinSig) {
+    if (!isEffect(registry, key)) return [];
+    const info = selectionInfo(doc, plan, registry, selection);
+    if (!info.valid) return [];
+    const cmds = [];
+    for (const scope of info.scopes) {
+      const slot = 'atmos@' + key + '.';
+      const read = (name) => paramValue(doc, plan, registry, scope, key, name);
+      cmds.push(F.pinCmd(scope + ':' + slot + 'clock', 'song', plan, pinSig));
+      if (read('duration') === 0) {
+        const start = read('start');
+        const left = info.t1 - (Number.isFinite(start) ? start : info.t0);
+        if (!(left > 0)) return [];
+        const duration = Math.max(0.01, Math.round(left * 1000000) / 1000000);
+        cmds.push(F.pinCmd(scope + ':' + slot + 'duration', duration, plan, pinSig));
+      }
+    }
+    return cmds;
+  }
+
+  function previewRef(key, params) {
+    return { kind: 'ornament', key, params: Object.assign({}, params, { clock: 'section', start: 0, duration: SAMPLE_DURATION }) };
+  }
+
+  function panel(app, ctx) {
+    const t = app.t, info = selectionInfo(app.doc, app.plan, app.reg, ctx.sel);
+    const decisions = F.decisionsOf(F.cinematicContext(ctx), 'atmos');
+    const chosen = decisions.length && decisions.every((d) => d.v === decisions[0].v) ? decisions[0].v : null;
+    const selected = F.cinematicKey(ctx, app.doc);
+    const name = chosen && chosen !== 'none' ? app.label('ornament', chosen) : chosen === 'none' ? t('cinematic.none') : t('cinematic.mixed');
+    const run = (cmds, label) => {
+      // A stale inspector callback must never broaden a selection that has disappeared during a re-plan.
+      if (!cmds.length || JSON.stringify(app.view.state.sel) !== JSON.stringify(ctx.sel)) return;
+      app.batch({ label }, cmds);
+    };
+    const currentParams = (key) => previewParams(app.doc, app.plan, app.reg, ctx.sel, key);
+    const labelOf = (key) => app.label('ornament', key);
+    const cards = KEYS.filter((key) => isEffect(app.reg, key)).map((key) => {
+      const def = app.reg.get('ornament', key), label = labelOf(key), on = key === selected;
+      return h('div', { class: ['cinematic-card', on ? 'is-on' : ''] },
+        h('button', { class: 'cinematic-apply', type: 'button', 'data-cinematic-apply': key, 'aria-pressed': String(on),
+          'aria-label': t('cinematic.apply', { name: label }),
+          on: { click: () => run(applyCommands(app.doc, app.plan, app.reg, ctx.sel, key, app.svc.pinSig), ['cinematic.undoApply', { name: label }]) } },
+        h('strong', { text: label }), h('span', { class: 'note subtle', text: def.blurb && (def.blurb[t.lang] || def.blurb.ja) || '' })),
+        h('button', { class: 'btn small cinematic-preview', type: 'button', 'data-cinematic-preview': key,
+          'aria-label': t('cinematic.preview', { name: label }), on: { click: () => {
+            if (JSON.stringify(app.view.state.sel) !== JSON.stringify(ctx.sel)) return;
+            CP.open(app, previewRef(key, currentParams(key)), { duration: SAMPLE_DURATION, name: label });
+          } } }, t('camera.sample.open')));
+    });
+    return h('div', { class: 'cinematic-panel', 'data-cinematic-scope': info.scopes.join(' ') },
+      h('p', { class: 'note subtle', text: t('cinematic.note') }),
+      h('p', { class: 'cinematic-range', text: t('cinematic.range', { start: T.fmtTime(info.t0), end: T.fmtTime(info.t1) }) }),
+      h('p', { class: 'note', text: t('cinematic.current', { name }) }),
+      chosen && chosen !== 'none' && !isEffect(app.reg, chosen)
+        ? h('p', { class: 'note subtle', text: t('cinematic.replace', { name }) }) : null,
+      h('div', { class: 'cinematic-cards', role: 'group', 'aria-label': t('sec.cinematic') }, cards),
+      h('div', { class: 'row-actions' }, h('button', { class: 'btn small', type: 'button', 'data-cinematic-remove': '1',
+        disabled: chosen === 'none', on: { click: () => run(removeCommands(app.doc, app.plan, app.reg, ctx.sel, app.svc.pinSig), ['cinematic.undoRemove', {}]) } },
+      t('cinematic.remove'))));
+  }
+
+  return { KEYS, SAMPLE_DURATION, isEffect, parent, selectionInfo, applyCommands, removeCommands, ownedParamState,
+    paramValue, previewParams, fillDurationCommands, songClockCommands, previewRef, panel };
+});
 /* 文字PVメーカー v2 — original work. Scope-preserving inspector bookmarks. */
 MV.def('ui/inspector_nav', ['ui/selection'], (S) => {
   'use strict';
 
-  const KEYS = Object.freeze(['camera', 'layout', 'text', 'background', 'ornament', 'effects', 'timing', 'media', 'scope']);
+  const KEYS = Object.freeze(['camera', 'cinematic', 'layout', 'text', 'background', 'ornament', 'effects', 'timing', 'media', 'scope']);
 
   // Keep a selected cut's exact pin scope, including a line with only one cut. Walking up via Selection.up would
   // deliberately collapse that cut to its line; a settings bookmark must not broaden the edit instead.
@@ -65983,6 +67066,7 @@ MV.def('ui/inspector_nav', ['ui/selection'], (S) => {
     if (key === 'scope') return out(base, null, null);
     // The media library is project-wide. Other tabs keep using the bookmark's original selection after visiting it.
     if (key === 'media') return out(S.WORK, 'media', null);
+    if (key === 'cinematic') return out(base, 'cinematic', null);
     if (key === 'camera') return multi ? out(base, 'direction', 'cam.shot') : out(element('lens'), 'camwork', 'cam.shot');
     if (key === 'layout') {
       if (base.level === 'line') return out(base, 'direction', 'arrange');
@@ -77550,8 +78634,8 @@ MV.def('ui/ai_panel', ['ui/dom', 'ui/icons', 'ai/providers', 'ai/changes', 'ui/a
 /* 文字PVメーカー v2 — original work. The inspector (詳細): crumbs, level header, sections from FIELDS, field rows, sub-pages (DESIGN §6.4.4–§6.4.9, §6.6; DESIGN_2_1 §6.5–§6.9). */
 MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/part_browser', 'ui/selection', 'ui/looks',
   'ui/output', 'i18n/t', 'core/paths', 'core/pins', 'core/shot', 'planner/areas', 'ui/shot_editor', 'ui/material_page',
-  'ui/media_page', 'ui/media_widgets', 'ui/media_io', 'ui/extreme', 'ui/inspector_nav', 'ui/camera_preview'],
-(dom, I, F, W, PB, S, LK, OUT, T, P, PINS, SHOT, AREAS, KE, MP, MPG, MW, MI, XU, NAV, CP) => {
+  'ui/media_page', 'ui/media_widgets', 'ui/media_io', 'ui/extreme', 'ui/inspector_nav', 'ui/camera_preview', 'ui/cinematic'],
+(dom, I, F, W, PB, S, LK, OUT, T, P, PINS, SHOT, AREAS, KE, MP, MPG, MW, MI, XU, NAV, CP, CIN) => {
   'use strict';
 
   const { h } = dom;
@@ -77572,7 +78656,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
   const REF_KINDS = ['arrange', 'arrive', 'dwell', 'depart', 'ornament', 'ground', 'lens', 'filter', 'seam'];
   const ELEMENTS = ['text', 'ornament', 'ground', 'lens', 'filter', 'seam'];
   // Custom sections redrawn even while they hold focus (their buttons change state); focus is put back (§6.12).
-  const REDRAW_FOCUSED = new Set(['looks', 'colorsReset', 'amountsReset', 'lockPartial', 'multi', 'media']);
+  const REDRAW_FOCUSED = new Set(['looks', 'colorsReset', 'amountsReset', 'lockPartial', 'multi', 'media', 'cinematic']);
   // Part rows whose browser offers the 写真・動画 tab (DESIGN_2_1 §11.7.5): the kind's media part and its source param.
   const MEDIA_TAB = Object.freeze({ ground: 'ground', ornament: 'frame', atmos: 'overlay' });
 
@@ -77681,7 +78765,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
     function statesFor(rows, ctx) {
       const withPath = rows.filter((r) => r.path);
       if (!withPath.length) return new Map();
-      const readPaths = (r) => (r.field.firstCut && r.paths.length > 1 ? r.paths : [r.path]);
+      const readPaths = (r) => ((r.field.firstCut || r.field.cinematic) && r.paths.length > 1 ? r.paths : [r.path]);
       // a trim row also reads its out handle (clipOut), kept in row.fsOut
       const all = [...new Set(withPath.flatMap(readPaths).concat(withPath.filter((r) => r.outPath).map((r) => r.outPath)))];
       let list = null;
@@ -77690,17 +78774,29 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       }
       const byPath = new Map();
       all.forEach((p, i) => byPath.set(p, list && list[i] ? list[i] : { path: p, value: null, state: 'auto', pinnedAt: null, by: null }));
+      for (const row of withPath) {
+        const param = row.field.param;
+        if (!param || param.kind !== 'atmos') continue;
+        const key = param.key || F.cinematicKey(ctx, doc());
+        if (!CIN.isEffect(app.reg, key)) continue;
+        for (const path of readPaths(row)) byPath.set(path, CIN.ownedParamState(doc(), plan(), app.reg, path, key, param.name, byPath.get(path)));
+      }
       const out = new Map();
       for (const r of withPath) {
-        out.set(r.path, mergeStates(readPaths(r).map((p) => byPath.get(p))));
+        out.set(r.path, mergeStates(readPaths(r).map((p) => byPath.get(p)), r.field.cinematic ? r.paths : null));
         if (r.outPath) r.fsOut = byPath.get(r.outPath) || null;
       }
       return out;
     }
 
-    function mergeStates(list) {
+    function mergeStates(list, cinematicPaths) {
       const a = list[0];
-      const same = (x) => x.state === a.state && x.pinnedAt === a.pinnedAt && JSON.stringify(x.value) === JSON.stringify(a.value);
+      // A cinematic area owns both lyric-line and interlude-cut pins. Equal authored values are one setting even
+      // when their local owner kinds differ; retain the representative owner so clearing the row still works.
+      const same = (x) => x.state === a.state && (x.pinnedAt === a.pinnedAt
+        || (cinematicPaths && cinematicPaths.includes(a.pinAt) && cinematicPaths.includes(x.pinAt)))
+        && (!cinematicPaths || x.by === a.by)
+        && JSON.stringify(x.value) === JSON.stringify(a.value);
       return list.every(same) ? a : Object.assign({}, a, { state: 'mixed', value: null, pinnedAt: null, by: null });
     }
 
@@ -78121,7 +79217,19 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
       if (o.mergeKey) meta.mergeKey = o.mergeKey;
       else if (o.merge) meta.mergeKey = 'field:' + row.path;
       const paths = pathsOf(field, ctx);
-      const cmds = paths.map((path) => pinCmd(path, value));
+      const fillRange = field.param && field.param.kind === 'atmos' && CIN.isEffect(app.reg, field.param.key)
+        && field.param.name === 'duration' && value === 0;
+      const songClock = field.param && field.param.kind === 'atmos' && CIN.isEffect(app.reg, field.param.key)
+        && field.param.name === 'clock' && value === 'song';
+      const cmds = songClock ? CIN.songClockCommands(doc(), plan(), app.reg, ctx.sel, field.param.key, app.svc.pinSig)
+        : fillRange ? CIN.fillDurationCommands(doc(), plan(), app.reg, ctx.sel, field.param.key, app.svc.pinSig)
+        : paths.map((path) => pinCmd(path, value));
+      if ((fillRange || songClock) && !cmds.length) {
+        if (row.fs && row.widget.scrub && Number.isFinite(row.fs.value)) row.widget.scrub.preview(row.fs.value);
+        else if (row.fs) row.widget.update(stateOf(row, row.fs, ctx));
+        if (app.toast) app.toast(t('cinematic.emptyRange'));
+        return;
+      }
       // a setting of an interlude effect chosen automatically keeps that effect too: a later automatic pick (a split, a
       // new song) would otherwise leave the setting unused (無効)
       const prm = field.param;
@@ -78132,6 +79240,11 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
         }
       }
       run(cmds, meta);
+      if (fillRange && row.widget.scrub) {
+        const durations = cmds.filter((cmd) => cmd.path && cmd.path.endsWith('.duration')).map((cmd) => cmd.v);
+        const shown = durations.length && durations.every((n) => n === durations[0]) ? durations[0] : !cmds.length && row.fs ? row.fs.value : null;
+        if (Number.isFinite(shown)) row.widget.scrub.preview(shown);
+      }
       reportShadowed(row, ctx);
     }
 
@@ -79009,6 +80122,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
     }
 
     const CUSTOM = {
+      cinematic(ctx) { return CIN.panel(app, ctx); },
       parts() {
         return h('div', { class: 'insp-list' }, PB.FILTER_KINDS.map((kind) => {
           const c = PB.counts(app, kind);
@@ -79422,6 +80536,7 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
         if (active && !REDRAW_FOCUSED.has(c.id)) continue;
         // 試した見た目 is redrawn even with focus inside (the current tile moves); focus returns to the same entry.
         const keep = active && active.closest('[data-n]') ? { n: active.closest('[data-n]').dataset.n, cls: active.className.split(' ')[0] } : null;
+        const cinematicKey = active && active.getAttribute('data-cinematic-apply');
         const scroll = c.el.querySelector('.vl') ? c.el.querySelector('.vl').scrollTop : 0;
         page.rows = page.rows.filter((r) => !c.el.contains(r.el));
         const el = customOf(c.id, ctx);
@@ -79429,7 +80544,8 @@ MV.def('ui/inspector', ['ui/dom', 'ui/icons', 'ui/fields', 'ui/widgets', 'ui/par
         const vl = c.el.querySelector('.vl');
         if (vl && scroll) { vl.scrollTop = scroll; vl.dispatchEvent(new Event('scroll')); }
         const row = active && active.closest('[data-id]') ? active.closest('[data-id]').dataset.id : null;
-        if (keep) dom.focus(c.el.querySelector('[data-n="' + keep.n + '"] .' + keep.cls) || c.el.querySelector('[data-n="' + keep.n + '"] button'));
+        if (cinematicKey) dom.focus(c.el.querySelector('[data-cinematic-apply="' + cinematicKey + '"]'));
+        else if (keep) dom.focus(c.el.querySelector('[data-n="' + keep.n + '"] .' + keep.cls) || c.el.querySelector('[data-n="' + keep.n + '"] button'));
         else if (row !== null) {
           // a library row keeps the focus (or the first row takes it when it went away)
           const again = c.el.querySelector('[data-id="' + row + '"]') || c.el.querySelector('[role="option"]');

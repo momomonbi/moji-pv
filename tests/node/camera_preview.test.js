@@ -91,3 +91,38 @@ test('camera samples move only the selected component without another camera, te
     assert.deepEqual(sample.seams, []);
   }
 });
+
+test('cinematic samples reach the late sequence with only the selected overlay', () => {
+  for (const key of CP.CINEMATIC_KEYS) {
+    const ref = { kind: 'ornament', key, params: { clock: 'section', start: 0, duration: 8 } };
+    const sample = FAC.samplePlan(reg, ref, { sampleDuration: 8 });
+    near(sample.cuts[0].t1 - sample.cuts[0].t0, 8);
+    assert.ok(sample.duration > 8, 'the ending is reachable');
+    assert.equal(sample.grounds[0].atmos.v, key);
+    assert.equal(sample.cuts[0].slots['ornament.count'].v, 0);
+    assert.equal(sample.cuts[0].slots['filter.count'].v, 0);
+    assert.equal(sample.cuts[0].slots.lens.v, reg.fallback('lens'));
+    assert.deepEqual(sample.impulses, []);
+    assert.deepEqual(sample.seams, []);
+  }
+  const ref = { kind: 'ornament', key: 'universeJourney' };
+  near(FAC.samplePlan(reg, ref, { sampleDuration: 1 }).cuts[0].t1 - FAC.SAMPLE.t0, 2);
+  near(FAC.samplePlan(reg, ref, { sampleDuration: 99 }).cuts[0].t1 - FAC.SAMPLE.t0, 30);
+  const camera = { kind: 'shot', key: SHOT.SHOT_KEYS[0] };
+  assert.deepEqual(FAC.samplePlan(reg, camera, { sampleDuration: 8 }), FAC.samplePlan(reg, camera, {}));
+});
+
+test('cinematic thumbnail plans forward and separately cache their sample durations', () => {
+  const rec = MV.use('engine/render/record').createRecorder();
+  const engine = FAC.createEngine({ registry: reg, canvas: rec.factory,
+    measurer: MV.use('engine/text/fake_measure').fakeMeasurer(), fonts: null, assets: null, strict: true });
+  const made = rec.factory.create(320, 180, { alpha: true });
+  const surface = { canvas: made.canvas, ctx: made.ctx, w: 320, h: 180 };
+  const ref = { kind: 'ornament', key: 'universeJourney', params: { clock: 'section', duration: 8 } };
+  try {
+    const draw = (sampleDuration) => engine.thumb(ref, surface, { text: 'An entire cinematic journey', sampleDuration, t: 6.5 });
+    assert.ok(draw(8).drawn.glyphs > 0, 'the long sample is still showing its lyric');
+    assert.equal(draw(4).drawn.glyphs, 0, 'a shorter sample has a separate, ended scene');
+    assert.ok(draw(8).drawn.glyphs > 0, 'returning to the cached long sample retains its full duration');
+  } finally { engine.dispose(); }
+});

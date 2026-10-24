@@ -6007,3 +6007,39 @@ Closing/Escape, replacing a dialog and owner destruction cancel animation and re
 tabs pause playback without automatically resuming. Focus returns through
 the existing dialog manager. Picker preview actions are siblings of apply tiles; hover animation and delayed
 project try-on stop before opening a sample. Samples never pin parts, seek the song or modify export settings.
+
+## 18. Timed cinematic overlays
+
+The supplied standalone HTML studies are adapted as native, transparent ornaments. They can be combined with
+existing images, lyrics and camera movement. They are selected explicitly, with `pool: false`, rather than added
+to automatic ornament choices. Their labels, scopes and follow rules are:
+
+| Key | ja / en | Scope, follow |
+|---|---|---|
+| `universeJourney` | 宇宙の網から星へ / Cosmic web to a star | run, own |
+| `singularityBurst` | 収縮とビッグバン / Collapse and Big Bang | run, own |
+| `windMeadow` | 風・揺・草木 / Wind and meadow | run, own |
+| `fluidClouds` | 雲の余韻 / Fluid clouds | run, own |
+| `wavePuddle` | 雨の記憶 / Rain and reflections | run, own |
+
+The **Cinematic / 演出** inspector bookmark preserves the current work, section, line or exact cut selection.
+Applying an overlay stores its atmosphere choice and timing in one undo step. The existing atmosphere slot holds
+one overlay at a time; the current overlay is named before replacement. Removing it writes an explicit `none`
+at the same scope. Detailed parameters remain editable in the cinematic section.
+
+Dedicated application uses the song clock, the selected range's start and its duration. Fixed pattern seeds and
+fixed parameter defaults keep an overlay coherent when a background segment changes. The draw helper reads
+the renderer's absolute `q.time`, independently of a reused scene's local clock. Outside its window, or at zero
+strength, the part draws nothing. Section-relative timing remains available. Fades soften both boundaries;
+the parts do not create animation loops, global timers, input handlers or network requests.
+
+The large preview isolates one selected overlay on sample lyrics, plays an eight-second sequence once at normal
+speed and stops automatically. It leaves project playback, pins and history untouched. Preview timing is local
+to the sample; it cannot accidentally inherit a late song timestamp. The same native drawing is used for previews
+and export, including transparent output. The sample duration is part of the thumbnail-plan cache key.
+
+Source adaptations retain the cosmic web/galaxy/star geometry, the singularity's staged 110-second evolution,
+wind height/bending profiles, cloud density/noise palettes, and rain/water-reflection structure. Stateful fluid,
+particle and grass simulations become bounded analytical functions of time so backward seeks and offline frame
+exports reproduce the same state without replaying earlier frames. The standalone pages' HUDs, interactive
+controls and million-particle GPU load modes are not embedded in the editor. There is no new GPU backend.

@@ -1,7 +1,8 @@
 /* 文字PVメーカー v2 — original work. The part kit: definition helpers, motion builders and helpers for part authors (DESIGN §4.18.3; DESIGN_2_1 §3.11, §11.5.6). */
 MV.def('parts/kit', ['core/num', 'core/noise', 'core/ease', 'core/curve', 'core/color', 'core/schema', 'core/registry',
-  'core/media', 'engine/scene/behave', 'engine/scene/stagger', 'engine/scene/builder', 'engine/scene/shot', 'engine/scene/frame', 'parts/timecode'],
-(N, NZ, E, CV, C, SCH, REG, MEDIA, BH, STG, B, SHOT, F, TIMECODE) => {
+  'core/media', 'engine/scene/behave', 'engine/scene/stagger', 'engine/scene/builder', 'engine/scene/shot', 'engine/scene/frame', 'parts/timecode',
+  'engine/scene/cinematic'],
+(N, NZ, E, CV, C, SCH, REG, MEDIA, BH, STG, B, SHOT, F, TIMECODE, CINEMATIC) => {
   'use strict';
 
   // Parts depend on this module only. The helpers stamp `kind`, fill defaults and check the essentials; they never
@@ -596,7 +597,7 @@ MV.def('parts/kit', ['core/num', 'core/noise', 'core/ease', 'core/curve', 'core/
     ornament: KINDS.ornament, lens: KINDS.lens, filter: KINDS.filter, seam: KINDS.seam, theme: KINDS.theme, mood: KINDS.mood,
     variant, mirror, moves, perGlyph, perGlyphHold,
     PH: BH.PH, ORDERS: SCH.ORDERS, EASES: E.EASES, ease, staggerOf: STG.staggerOf, pivots: STG.pivots,
-    shape, math, color, pickOf, rangeOf, KitError, timecode: TIMECODE,
+    shape, math, color, pickOf, rangeOf, KitError, timecode: TIMECODE, cinematic: CINEMATIC,
     curve, warp, CURVES: CV.PRESET_KEYS, warped: BH.warped, aimBox, frameBox,
     media, mediaParams, MEDIA: MEDIA_KIT, runKenBurns, depthCam,
   };

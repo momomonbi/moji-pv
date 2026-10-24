@@ -1,7 +1,7 @@
 /* 文字PVメーカー v2 — original work. Inspector field catalogue: FieldSpecs per page and section, and sectionsFor (DESIGN §6.4.4–§6.4.9, §4.23). */
 MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color', 'core/ease', 'core/doc', 'ui/selection',
-  'core/curve', 'core/shot', 'core/media', 'ui/media_widgets', 'planner/extreme'],
-  (P, R, SC, C, E, D, S, CV, SHOT, MEDIA, MW, XT) => {
+  'core/curve', 'core/shot', 'core/media', 'ui/media_widgets', 'planner/extreme', 'planner/areas'],
+  (P, R, SC, C, E, D, S, CV, SHOT, MEDIA, MW, XT, AREAS) => {
     'use strict';
 
     // A FieldSpec (§4.23) is one row of the inspector: { id, path, scopes, el?, section, widget, label, hint?, basic,
@@ -291,6 +291,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
 
     const PAGES = {
       work: [
+        sec('cinematic', false, [], { custom: 'cinematic', customTop: true }),
         sec('look', true, [
           partField('mood', 'kind.mood', { scopes: WORK }),
           partField('theme', 'kind.theme', { scopes: WORK }),
@@ -345,6 +346,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
         sec('materials', false, [], { custom: 'materials', when: (ctx) => ctx.materials > 0 }),
       ],
       line: [
+        sec('cinematic', false, [], { custom: 'cinematic', customTop: true }),
         sec('time', true, [
           F({ path: 'start', scopes: LINE, widget: 'time', label: 'fld.start' }),
           F({ path: 'end', scopes: LINE, widget: 'time', label: 'fld.end' }),
@@ -365,6 +367,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
         sec('ai', false, [], { custom: 'ai' }),
       ],
       lines: [
+        sec('cinematic', false, [], { custom: 'cinematic', customTop: true }),
         sec('multi', true, [], { custom: 'multi' }),
         sec('direction', true, directionFields({ camera: true })),
         // An area selection (区画, DESIGN_2_1 §6.5) adds its section camera; its runs are split at the area's edges. With
@@ -378,6 +381,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
         sec('shift', true, [], { custom: 'shift' }),
       ],
       cut: [
+        sec('cinematic', false, [], { custom: 'cinematic', customTop: true }),
         sec('time', true, [
           F({ path: 't0', scopes: CUT, widget: 'time', label: 'fld.cutStart', when: isInnerCut }),
           F({ derived: 'cutEnd', scopes: CUT, widget: 'time', label: 'fld.cutEnd', readOnly: true, when: (ctx) => !!ctx.cut }),
@@ -531,6 +535,14 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
         materials: mats, mediaCount: doc && doc.media && Array.isArray(doc.media.list) ? doc.media.list.length : 0,
         textFillIdx: null, textFillOn: false,
       };
+      const cinematicArea = ctx.area && doc ? AREAS.resolve(doc, plan, ctx.area) : null;
+      // Cinematic overlays fill the area's displayed time range, including interludes inside a heading/paragraph.
+      // Other controls retain the area's original lyric membership and the global Areas contract is unchanged.
+      const continuousArea = cinematicArea && ['head', 'para', 'song'].includes(cinematicArea.kind);
+      const cinematicGaps = continuousArea ? cutsAll.filter((c) => (c.role === 'interlude' || c.key.startsWith('gap/'))
+        && c.t0 >= cinematicArea.t0 - 0.000001 && c.t1 <= cinematicArea.t1 + 0.000001).map((c) => 'cut/' + c.key) : [];
+      ctx.cinematicScopes = cinematicArea ? [...new Set(cinematicArea.scopes.concat(cinematicGaps))] : null;
+      ctx.cinematicRange = cinematicArea ? [cinematicArea.t0, cinematicArea.t1] : null;
       if (page === 'el.text') {
         // the slot 文字の中に写真・動画 manages: the one pinned to textFill at the page's scope (a line or cut that picks
         // another decoration there does not hide it), else the first that shows textFill, else the first free one (§5.5)
@@ -613,6 +625,24 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
       if (!list.length) return null;
       const v = list[0].v;
       return list.every((d) => d.v === v) && typeof v === 'string' && v !== 'none' ? v : null;
+    }
+
+    // Keep editing an explicitly chosen scope effect when a narrower lyric/cut has its own overlay override.
+    function cinematicKey(ctx, doc) {
+      const scopes = ctx.sel.level === 'cut' ? ['cut/' + ctx.sel.key] : ctx.cinematicScopes
+        || (ctx.page === 'lines' ? ctx.lineIds.map((id) => 'line/' + id) : [ctx.scope]);
+      const keys = scopes.map((scope) => doc && doc.pins && doc.pins[writePath(scope + ':atmos', ctx.plan)])
+        .map((pin) => pin && pin.v);
+      const own = keys.length && keys[0] && keys.every((key) => key === keys[0]) ? keys[0] : null;
+      const def = own && ctx.registry && ctx.registry.get('ornament', own);
+      return def && def.family === 'cinematic' ? own : agreedKey(cinematicContext(ctx), 'atmos');
+    }
+
+    function cinematicContext(ctx) {
+      if (!ctx.cinematicScopes || !ctx.plan) return ctx;
+      const keys = new Set(ctx.cutKeys);
+      for (const scope of ctx.cinematicScopes) if (scope.startsWith('cut/')) keys.add(scope.slice(4));
+      return Object.assign({}, ctx, { cutKeys: [...keys], cuts: ctx.plan.cuts.filter((c) => keys.has(c.key)) });
     }
 
     // paramFields(kind, idx, partKey, registry, { shared, part, section, scopes }) → generated FieldSpecs for the
@@ -703,6 +733,13 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
       const out = [];
       for (const { s, fields } of sections) {
         const all = expand(s, fields, ctx, pageSlots);
+        if (s.id === 'cinematic') {
+          const key = cinematicKey(ctx, doc), def = key && registry && registry.get('ornament', key);
+          if (def && def.family === 'cinematic') {
+            all.push(...paramFields('atmos', null, key, registry, { section: s.id, page: ctx.page })
+              .map((f) => Object.assign({}, f, { cinematic: true })));
+          }
+        }
         const video = all.filter((f) => f.video);
         // 空気（粒子） that shows a photo or video layer reads 重ねる映像 (DESIGN_2_1 §11.7.3 use 重ねる映像)
         const overlay = s.id === 'atmos' && agreedKey(ctx, 'atmos') === 'mediaLayer';
@@ -738,6 +775,8 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
     // page; the first cut of the line(s) for firstCut fields; the cut's line for lineOf fields.
     function pathsFor(field, ctx) {
       if (!field.path) return [];
+      if (field.cinematic && ctx.sel.level === 'cut') return ['cut/' + ctx.sel.key + ':' + field.path];
+      if (field.cinematic && ctx.cinematicScopes) return ctx.cinematicScopes.map((scope) => scope + ':' + field.path);
       // a line's own setting shown on its cut's page (カメラ EXTREME's 「この行」)
       if (field.lineOf) return ctx.cut && ctx.cut.line ? ['line/' + ctx.cut.line + ':' + field.path] : [];
       if (field.firstCut && ctx.lineIds.length) return ctx.lineIds.map((id) => firstCutScope(ctx, id) + ':' + field.path);
@@ -965,7 +1004,7 @@ MV.def('ui/fields', ['core/paths', 'core/registry', 'core/schema', 'core/color',
     return {
       WIDGETS, FIELDS, PAGES: PAGE_SECTIONS, FACE_ROLES, FACE_SCRIPTS, LIST_KINDS, SLOT_KINDS, COMMANDS_USED, SNAPS, SEASONS,
       PARAM_LABEL, HIDDEN_PARAMS, sectionsFor, contextOf, pageOf, paramFields, widgetFor, optionsFor, slotScopes, fieldPath, decisionsOf, freeIndex,
-      agreedKey, sharedNames, pathsFor, clearPathsFor, firstCutScope, pinnedSlots, withPinnedParams, writePath, writeScope,
+      agreedKey, cinematicKey, cinematicContext, sharedNames, pathsFor, clearPathsFor, firstCutScope, pinnedSlots, withPinnedParams, writePath, writeScope,
       pinCmd, whyParts, whyRuleKey, areaLabel, areaTitle,
     };
   });

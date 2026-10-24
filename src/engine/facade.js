@@ -107,7 +107,9 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
     const isSeam = kind === 'seam' && def;
     const textB = typeof o.textB === 'string' && o.textB.trim() ? o.textB.trim() : SAMPLE_TEXT_B;
     const texts = isSeam ? [text, textB] : [text];
-    const span = isSeam ? 1.5 : SAMPLE.t1 - SAMPLE.t0;
+    const cinematicSpan = kind === 'ornament' && def && def.family === 'cinematic' && Number.isFinite(o.sampleDuration)
+      ? Math.max(2, Math.min(30, o.sampleDuration)) : null;
+    const span = isSeam ? 1.5 : cinematicSpan || SAMPLE.t1 - SAMPLE.t0;
     const textScale = Number.isFinite(o.textScale) && o.textScale > 0 ? o.textScale : 1;
     const cuts = texts.map((tx, n) => sampleCut(registry, { def, kind, key, params, orient, role, tx, n, seed, look, mood, theme,
       textScale, t0: SAMPLE.t0 + n * span, t1: SAMPLE.t0 + (n + 1) * span, last: n === texts.length - 1 }));
@@ -794,12 +796,12 @@ MV.def('engine/facade', ['core/hash', 'core/rng', 'core/schema', 'core/script', 
       const theme = to.theme || (plan ? plan.look.theme.v : null);
       const aspect = to.aspect || (plan ? plan.design.aspect : '16:9');
       const id = H.hashJSON({ kind: ref.kind, key: ref.key, params: ref.params || null, text: to.text || null,
-        textB: ref.kind === 'seam' ? to.textB || null : null, theme, aspect });
+        textB: ref.kind === 'seam' ? to.textB || null : null, theme, aspect, sampleDuration: to.sampleDuration || null });
       let entry = thumbs.plans.get(id);
       if (entry) thumbs.plans.delete(id);
       if (entry && entry.fontKey !== measurer.key) entry = null;       // faces arrived since: lay the text out again
       if (!entry) {
-        const sp = samplePlan(registry, ref, { text: to.text, textB: to.textB, theme, aspect });
+        const sp = samplePlan(registry, ref, { text: to.text, textB: to.textB, theme, aspect, sampleDuration: to.sampleDuration });
         const svc = { registry, text: textService().withFaces(sp.look.faces), assets, pal: sp.look.palette, faces: sp.look.faces,
           strict: !!o.strict, provisional: false, media: sp.media || null };
         const scenes = { cut: [], ground: [] };
